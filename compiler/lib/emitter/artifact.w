@@ -48,6 +48,7 @@
   ccall_needed = {}
   used_runtime_fns = {}
   max_ascope_slots = 0
+  uses_g_ast_store = false
   # Verbatim `ll <<~IR` bodies, concatenated: their `@name(` call targets are
   # invisible to the instruction scan below (see embedded_ir_calls?).
   embedded_ir_text = StringBuffer(256)
@@ -64,14 +65,59 @@
       while ii < instrs.size()
         inst = instrs[ii]
         op = wire_kind(inst)
+        if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop || op == :load_global || op == :load_class
+          ii += 1
+          next
+        if op == :call_direct_i64
+          iname = wire_get(inst, :name)
+          if iname != nil
+            used_runtime_fns[iname] = true
+            if iname == "w_node_field_store"
+              used_runtime_fns["w_ast_freeze_if_array"] = true
+              iargs = wire_get(inst, :args)
+              if wire_sequence_size(iargs) >= 2 && wire_sequence_get(iargs, 1)[0] != "%"
+                uses_g_ast_store = true
+            elsif iname == "w_node_field_load"
+              iargs = wire_get(inst, :args)
+              if wire_sequence_size(iargs) >= 2 && wire_sequence_get(iargs, 1)[0] != "%"
+                uses_g_ast_store = true
+            if !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
+              ccall_needed[iname] = wire_sequence_size(wire_get(inst, :args))
+          ii += 1
+          next
+        if op == :call_direct_void
+          iname = wire_get(inst, :name)
+          if iname != nil
+            used_runtime_fns[iname] = true
+          ii += 1
+          next
+        if op == :call_loc_set_col
+          used_runtime_fns["__w_loc_set_col"] = true
+          ii += 1
+          next
+        if op == :string_i64
+          used_runtime_fns["w_string"] = true
+          ii += 1
+          next
+        if op == :symbol_i64
+          used_runtime_fns["w_string"] = true
+          used_runtime_fns["w_str_to_sym"] = true
+          ii += 1
+          next
+        if op == :free_value
+          used_runtime_fns["w_value_free"] = true
+          ii += 1
+          next
+        if op == :slab_alloc_init
+          uses_g_ast_store = true
+          used_runtime_fns["w_node_alloc"] = true
+          used_runtime_fns["w_ast_freeze_if_array"] = true
+          ii += 1
+          next
         if op in (:typed_array_get_inline :typed_array_set_inline :typed_array_compound_op_inline :typed_array_load_u64 :typed_array_store_u64)
           ascope = wire_get(inst, :ascope)
           if ascope != nil && ascope + 1 > max_ascope_slots
             max_ascope_slots = ascope + 1
-        elsif op == :call_direct_i64
-          iname = wire_get(inst, :name)
-          if iname != nil && !known_fns.has_key?(iname) && !ccall_needed.has_key?(iname)
-            ccall_needed[iname] = wire_sequence_size(wire_get(inst, :args))
         elsif op == :call_num_to_f64 && !ccall_needed.has_key?("__w_num_to_f64_fast")
           ccall_needed["__w_num_to_f64_fast"] = 1
         fns = runtime_fns_for_inst(inst, mod[:string_wvalues])
@@ -574,7 +620,10 @@
   if slab_info != nil && slab_info[:slab_entries].size() > 0
     used_runtime_fns["w_slab_init_static"] = true
 
-  decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns, embedded_ir_text.to_s()) + seam_decls.to_s()
+  embedded_ir_str = embedded_ir_text.to_s()
+  if !uses_g_ast_store && embedded_ir_str != "" && embedded_ir_str.index("@g_ast_store") != nil
+    uses_g_ast_store = true
+  decls_out = filter_runtime_decls(declare_runtime(), used_runtime_fns, embedded_ir_str) + seam_decls.to_s()
   if used_runtime_fns["__w_int_temp_release"] == true
     decls_out = decls_out + "declare void @w_int_temp_release(i64, i64, i64, i64, i64) nounwind\n" + int_temp_release_helper_ir() + "\n"
   if used_runtime_fns["__w_int_alias_seal"] == true
@@ -630,7 +679,7 @@
   # fast paths / node field access). Plain programs emit neither the externs
   # nor any init call — the runtime arena is lazy (offset 0 reserved on first
   # growth inside w_node_alloc).
-  if fn_out.to_s().index("@g_ast_store") != nil
+  if uses_g_ast_store
     # WAstStore begins with its exact-width node arena; declaring the symbol
     # prefix type keeps the hot GEPs compact while the runtime owns the rest.
     decls_out = "@g_ast_store = external global { ptr, i32, i32 }\n\n" + decls_out
@@ -865,8 +914,28 @@
     llvm_used_out = emit_stacktrace_llvm_used(call_site_out.index("@__w_ic_site") != nil)
 
   attr_groups_out = emit_function_attr_groups(attr_groups)
+  tbaa_out = tbaa_metadata_defs()
+  novec_out = novec_loop_md_defs()
+  ewscope_out = ewscope_md_defs()
+  ascope_out = alias_scope_md_defs(max_ascope_slots)
+  globals_str = globals_out.to_s()
+  fn_str = fn_out.to_s()
 
-  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out + tbaa_metadata_defs() + novec_loop_md_defs() + ewscope_md_defs() + alias_scope_md_defs(max_ascope_slots)
+  final_out = StringBuffer(header.size() + decls_out.size() + globals_str.size() + strings_out.size() + fn_str.size() + fn_meta_out.size() + call_site_out.size() + llvm_used_out.size() + attr_groups_out.size() + tbaa_out.size() + novec_out.size() + ewscope_out.size() + ascope_out.size() + 64)
+  final_out << header
+  final_out << decls_out
+  final_out << globals_str
+  final_out << strings_out
+  final_out << fn_str
+  final_out << fn_meta_out
+  final_out << call_site_out
+  final_out << llvm_used_out
+  final_out << attr_groups_out
+  final_out << tbaa_out
+  final_out << novec_out
+  final_out << ewscope_out
+  final_out << ascope_out
+  final_out.to_s()
 
 # -- Emit a single function --
 
@@ -1016,10 +1085,15 @@
     return emit_embedded_asm_function(f)
   out = StringBuffer(4096)
   ret_ty = f[:return_type]
-  attr_text = function_attr_text(frame_pointers, host_fn_attrs, preserve_debug_frames)
+  base_attr_text = function_attr_text(frame_pointers, host_fn_attrs, preserve_debug_frames)
+  if attr_groups != nil
+    function_attr_group_id(attr_groups, base_attr_text)
+  attr_text = base_attr_text
   # `Tungsten.noinline!` bodies get their own attribute group.
   if f[:noinline] == true
     attr_text = attr_text + " noinline"
+  elsif f[:is_toplevel] == true && f[:blocks] != nil && f[:blocks].size() > 2000
+    attr_text = attr_text + " noinline optnone"
   attr_id = nil
   if attr_groups != nil
     attr_id = function_attr_group_id(attr_groups, attr_text)

@@ -34,14 +34,13 @@ use sha256
 
 # Decode a hex string into a fresh i64[] of byte values.
 -> btc_hex_to_bytes(hex)
-  cs = hex.bytes.to_a
-  n = cs.size / 2
+  n = (hex.size / 2) ## i64
   out = i64[n + 1]
   i = 0 ## i64
   while i < n
-    hi = btc_hex_nibble(cs[i * 2])
-    lo = btc_hex_nibble(cs[i * 2 + 1])
-    out[i] = hi * 16 + lo
+    hi = btc_hex_nibble(hex.byte_at(i * 2))
+    lo = btc_hex_nibble(hex.byte_at(i * 2 + 1))
+    out[i] = (hi << 4) | lo
     i += 1
   out
 

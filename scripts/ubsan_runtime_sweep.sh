@@ -66,10 +66,6 @@ if [[ -n "$homebrew_prefix" && -f "$homebrew_prefix/include/zstd.h" ]]; then
 else
   srcs+=(slab_zstd_stub.c)
 fi
-onig_cflags=()
-if [[ -n "$homebrew_prefix" && -f "$homebrew_prefix/include/oniguruma.h" ]]; then
-  onig_cflags=("-I$homebrew_prefix/include" -DTUNGSTEN_ONIG)
-fi
 
 echo "==> Compiling sanitized runtime archive ($OPT -fsanitize=undefined)"
 objs=()
@@ -77,7 +73,7 @@ for src in "${srcs[@]}"; do
   obj="$OUT/obj/${src%.*}.o"
   flags=("${SAN_CFLAGS[@]}")
   [[ "$src" == *.m ]] && flags+=(-x objective-c)
-  if ! "$CC" "${flags[@]}" "${onig_cflags[@]}" "${zstd_cflags[@]}" \
+  if ! "$CC" "${flags[@]}" "${zstd_cflags[@]}" \
        -c "$ROOT/runtime/$src" -o "$obj" 2> "$OUT/log/cc-${src%.*}.err"; then
     echo "FAIL compile $src (see $OUT/log/cc-${src%.*}.err)" >&2
     exit 1

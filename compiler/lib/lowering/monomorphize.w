@@ -289,20 +289,25 @@
 # Collect stackable candidates in this scope. Skips anything inside a loop or
 # block body (alloca-in-loop would grow the stack). Does not descend into nested
 # method/fn definitions — those are separate scopes.
--> collect_ta_candidates(node, in_loop, out, nested_scopes)
+-> collect_ta_candidates(node, in_loop, out, nested_scopes, skip_core = false)
   if node == nil
     return nil
   if type(node) == "Array"
     i = 0
     while i < node.size()
-      collect_ta_candidates(node[i], in_loop, out, nested_scopes)
+      collect_ta_candidates(node[i], in_loop, out, nested_scopes, skip_core)
       i += 1
     return nil
   if !is_ast_node?(node)
     return nil
   k = ast_kind(node)
+  if k in (:int :string :symbol :bool :nil_val :float :var :ivar :cvar :gvar :self_ref :class_ref :break :next :param)
+    return nil
   if k == :method_def || k == :fn_def
-    nested_scopes.push(ast_get(node, :body))
+    if !(skip_core && definition_from_core?(node))
+      nested_scopes.push(ast_get(node, :body))
+    return nil
+  if skip_core && k in (:class_def :module_def :trait_def) && definition_from_core?(node)
     return nil
   if !in_loop && is_stackable_ta_assign?(node)
     out.push({var: node.target.name, node: node.value})
@@ -316,7 +321,7 @@
     ci_loop = child_loop
     if is_ast_node?(c) && ast_kind(c) == :block
       ci_loop = true
-    collect_ta_candidates(c, ci_loop, out, nested_scopes)
+    collect_ta_candidates(c, ci_loop, out, nested_scopes, skip_core)
     j += 1
   nil
 
@@ -370,6 +375,8 @@
         i += 1
     return nil
   k = ast_kind(node)
+  if k in (:int :string :symbol :bool :nil_val :float :ivar :cvar :gvar :self_ref :class_ref :break :next :param)
+    return nil
   # A nested definition opens its own scope and cannot see this frame's locals.
   if k == :method_def || k == :fn_def
     return nil
@@ -428,14 +435,14 @@
   nil
 
 # Entry: process a scope's statement list, then recurse into nested fn bodies.
--> mark_stackable_typed_arrays(scope_body)
+-> mark_stackable_typed_arrays(scope_body, skip_core = false)
   if scope_body == nil
     return nil
   if type(scope_body) != "Array"
     return nil
   cands = []
   nested_scopes = []
-  collect_ta_candidates(scope_body, false, cands, nested_scopes)
+  collect_ta_candidates(scope_body, false, cands, nested_scopes, skip_core)
   ci = 0
   while ci < cands.size()
     c = cands[ci]
@@ -444,7 +451,7 @@
     ci += 1
   si = 0
   while si < nested_scopes.size()
-    mark_stackable_typed_arrays(nested_scopes[si])
+    mark_stackable_typed_arrays(nested_scopes[si], false)
     si += 1
   nil
 

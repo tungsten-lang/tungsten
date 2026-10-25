@@ -191,9 +191,10 @@ thresh["str_build"] = 2200000000
   capture("command -v [c] 2>/dev/null").strip().size() > 0
 
 -> have_file(path)
-  capture("test -f \"[path]\" && echo yes").strip() == "yes"
+  file?(path)
 
 -> is_exe(path)
+  return false if !file?(path)
   capture("test -s \"[path]\" -a -x \"[path]\" && echo yes").strip() == "yes"
 
 # ---- output parsing -------------------------------------------------------
@@ -407,7 +408,8 @@ CAL_MAX = 4000000000
 # Read a bench_baseline.txt (name<TAB>ops_per_sec per line) into a map.
 -> read_baseline(path)
   m = {}
-  raw = capture("cat \"[path]\" 2>/dev/null")
+  return m if !file?(path)
+  raw = read_file(path)
   lines = raw.split("\n")
   i = 0
   while i < lines.size()
@@ -472,10 +474,11 @@ BLOCK = "█"
 
 # Peer ratio column (Tungsten ÷ peer) or blank when the peer is absent/fails.
 # Width 7 fits compiled peers (1.23×); Python ratios run to hundreds× — pass 9.
+# Note: "·" and "×" are 2-byte UTF-8 sequences for 1 display column, so pad to w + 1 bytes.
 -> ratio_col(r, peer_rate, w = 7)
   if peer_rate <= 0
-    return rj("·", w)
-  rj(fmt_x((r * 100) / peer_rate), w)
+    return rj("·", w + 1)
+  rj(fmt_x((r * 100) / peer_rate), w + 1)
 
 << ""
 << "  " + ORANGE + BOLD + "⚡ TUNGSTEN PRIMITIVE BASELINE" + RESET + "   " + DIM + "v" + version + RESET
@@ -537,7 +540,7 @@ while ci < cats.size()
             if peer[p] == true
               line = line + GREY + ratio_col(r, bench_peer(p, "c", "c", runs)) + ratio_col(r, bench_peer(p, "rs", "rs", runs)) + ratio_col(r, bench_peer(p, "go", "go", runs)) + ratio_col(r, bench_peer(p, "zig", "zig", runs)) + ratio_col(r, bench_peer(p, "odin", "odin", runs)) + ratio_col(r, bench_peer(p, "py", "py", runs), 9) + RESET
             else
-              line = line + GREY + rj("·", 7) + rj("·", 7) + rj("·", 7) + rj("·", 7) + rj("·", 7) + rj("·", 9) + RESET
+              line = line + GREY + rj("·", 8) + rj("·", 8) + rj("·", 8) + rj("·", 8) + rj("·", 8) + rj("·", 10) + RESET
           elsif have_base
             b = base[p]
             if b != nil && b > 0
@@ -547,9 +550,9 @@ while ci < cats.size()
                 dcol = GREEN
               elsif dx <= 98
                 dcol = REDC
-              line = line + GREY + rj(fmt_rate(b), 10) + RESET + dcol + rj(fmt_x(dx), 8) + RESET
+              line = line + GREY + rj(fmt_rate(b), 10) + RESET + dcol + rj(fmt_x(dx), 9) + RESET
             else
-              line = line + GREY + rj("·", 10) + rj("new", 8) + RESET
+              line = line + GREY + rj("·", 11) + rj("new", 8) + RESET
           line = line + "  " + ORANGE + bar_for(r, BARW) + RESET + "  " + DIM + desc[p] + RESET
           # The floor is a clean-machine codegen gate; --compare compiles 8 peer
           # binaries mid-run and depresses the numbers, so skip the check there.

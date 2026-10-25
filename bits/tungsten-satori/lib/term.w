@@ -12,10 +12,10 @@ HASH_MOD = 1000000007
 
 -> str_hash(s)
   h = 7
-  cs = s.chars
+  n = s.size
   i = 0
-  while i < cs.size
-    h = (h * 31 + cs[i].ord) % HASH_MOD
+  while i < n
+    h = (h * 31 + s.byte_at(i)) % HASH_MOD
     i += 1
   h
 
@@ -25,13 +25,21 @@ HASH_MOD = 1000000007
   -> new(@tag, @name, @args)
     if @tag == :v
       @key = "'" + @name
-    elsif @args.size == 0
-      @key = @name
     else
-      parts = []
-      @args.each -> (a)
-        parts.push(a.key)
-      @key = @name + "(" + parts.join(",") + ")"
+      n = @args.size
+      if n == 0
+        @key = @name
+      elsif n == 1
+        @key = @name + "(" + @args[0].key + ")"
+      elsif n == 2
+        @key = @name + "(" + @args[0].key + "," + @args[1].key + ")"
+      else
+        parts = []
+        i = 0
+        while i < n
+          parts.push(@args[i].key)
+          i += 1
+        @key = @name + "(" + parts.join(",") + ")"
     @h = str_hash(@key)
 
   -> var?
@@ -50,7 +58,7 @@ HASH_MOD = 1000000007
     ty_show(self)
 
 -> ty_eq(a, b)
-  a.h == b.h && a.key == b.key
+  a == b || (a.h == b.h && a.key == b.key)
 
 -> ty_var(n)
   KTy.new(:v, n, [])
@@ -69,20 +77,26 @@ HASH_MOD = 1000000007
     i -= 1
   t
 
+TY_BOOL_SINGLETON = KTy.new(:c, "bool", [])
+TY_NAT_SINGLETON = KTy.new(:c, "nat", [])
+TY_INT_SINGLETON = KTy.new(:c, "int", [])
+TY_RAT_SINGLETON = KTy.new(:c, "rat", [])
+TY_REAL_SINGLETON = KTy.new(:c, "real", [])
+
 -> ty_bool
-  KTy.new(:c, "bool", [])
+  TY_BOOL_SINGLETON
 
 -> ty_nat
-  KTy.new(:c, "nat", [])
+  TY_NAT_SINGLETON
 
 -> ty_int
-  KTy.new(:c, "int", [])
+  TY_INT_SINGLETON
 
 -> ty_rat
-  KTy.new(:c, "rat", [])
+  TY_RAT_SINGLETON
 
 -> ty_real
-  KTy.new(:c, "real", [])
+  TY_REAL_SINGLETON
 
 -> ty_show(t)
   if t.tag == :v
@@ -263,6 +277,8 @@ LIT_CACHE = {}
   KTm.new(:lam, hint, ty, nil, body, 0, nil)
 
 -> tm_eq(a, b)
+  if a == b
+    return true
   if a.h != b.h || a.tag != b.tag
     return false
   case a.tag
@@ -277,7 +293,12 @@ LIT_CACHE = {}
   when :bnd
     a.idx == b.idx
   else
-    ty_eq(a.ty, b.ty) && lit_key(a.val) == lit_key(b.val)
+    ty_eq(a.ty, b.ty) && lit_val_eq(a.val, b.val)
+
+-> lit_val_eq(va, vb)
+  if va.class_name == "Array"
+    return vb.class_name == "Array" && va[0] == vb[0] && va[1] == vb[1]
+  vb.class_name != "Array" && va == vb
 
 -> type_of(t)
   case t.tag
@@ -308,12 +329,17 @@ LIT_CACHE = {}
 
 -> mk_apps(f, xs)
   t = f
-  xs.each -> (x)
-    t = mk_app(t, x)
+  n = xs.size
+  i = 0
+  while i < n
+    t = mk_app(t, xs[i])
+    i += 1
   t
 
 # Replace free variable v (name + type) by bound index `depth` throughout t.
 -> tm_abstract(t, v, depth)
+  if t.cl
+    return t
   case t.tag
   when :var
     if t.name == v.name && ty_eq(t.ty, v.ty)
@@ -322,12 +348,12 @@ LIT_CACHE = {}
   when :app
     a = tm_abstract(t.a, v, depth)
     b = tm_abstract(t.b, v, depth)
-    if a.h == t.a.h && b.h == t.b.h && tm_eq(a, t.a) && tm_eq(b, t.b)
+    if a == t.a && b == t.b
       return t
     mk_app_raw(a, b)
   when :lam
     b = tm_abstract(t.b, v, depth + 1)
-    if b.h == t.b.h && tm_eq(b, t.b)
+    if b == t.b
       return t
     mk_lam_raw(t.name, t.ty, b)
   else
@@ -335,15 +361,24 @@ LIT_CACHE = {}
 
 # Replace bound index `depth` by the (locally closed) term u.
 -> tm_instantiate(t, u, depth)
+  if t.mx <= depth
+    return t
   case t.tag
   when :bnd
     if t.idx == depth
       return u
     t
   when :app
-    mk_app_raw(tm_instantiate(t.a, u, depth), tm_instantiate(t.b, u, depth))
+    a = tm_instantiate(t.a, u, depth)
+    b = tm_instantiate(t.b, u, depth)
+    if a == t.a && b == t.b
+      return t
+    mk_app_raw(a, b)
   when :lam
-    mk_lam_raw(t.name, t.ty, tm_instantiate(t.b, u, depth + 1))
+    b = tm_instantiate(t.b, u, depth + 1)
+    if b == t.b
+      return t
+    mk_lam_raw(t.name, t.ty, b)
   else
     t
 
@@ -365,6 +400,8 @@ LIT_CACHE = {}
   tm_instantiate(t.a.b, t.b, 0)
 
 -> tm_free_in?(v, t)
+  if t.cl
+    return false
   case t.tag
   when :var
     t.name == v.name && ty_eq(t.ty, v.ty)
@@ -376,6 +413,8 @@ LIT_CACHE = {}
     false
 
 -> tm_name_free?(name, t)
+  if t.cl
+    return false
   case t.tag
   when :var
     t.name == name
@@ -387,6 +426,8 @@ LIT_CACHE = {}
     false
 
 -> tm_frees_into(t, acc, seen)
+  if t.cl
+    return acc
   case t.tag
   when :var
     k = t.name + ":" + t.ty.key
@@ -422,11 +463,15 @@ LIT_CACHE = {}
 -> fresh_name(base, terms)
   name = base
   k = 0
+  n = terms.size
   while true
     clash = false
-    terms.each -> (u)
-      if !clash && tm_name_free?(name, u)
+    i = 0
+    while i < n
+      if tm_name_free?(name, terms[i])
         clash = true
+        break
+      i += 1
     if !clash
       return name
     k += 1
@@ -443,6 +488,8 @@ LIT_CACHE = {}
 
 # Simultaneous substitution of free variables. m: key "name:tykey" -> term.
 -> tm_subst(t, m)
+  if t.cl
+    return t
   case t.tag
   when :var
     k = t.name + ":" + t.ty.key
@@ -450,9 +497,16 @@ LIT_CACHE = {}
       return m[k]
     t
   when :app
-    mk_app_raw(tm_subst(t.a, m), tm_subst(t.b, m))
+    a = tm_subst(t.a, m)
+    b = tm_subst(t.b, m)
+    if a == t.a && b == t.b
+      return t
+    mk_app_raw(a, b)
   when :lam
-    mk_lam_raw(t.name, t.ty, tm_subst(t.b, m))
+    b = tm_subst(t.b, m)
+    if b == t.b
+      return t
+    mk_lam_raw(t.name, t.ty, b)
   else
     t
 
@@ -479,15 +533,35 @@ LIT_CACHE = {}
 
 # Strip an application spine: f a1 ... an -> [f, [a1..an]]
 -> strip_app(t)
+  if t.tag != :app
+    return [t, []]
+  t1 = t.a
+  if t1.tag != :app
+    return [t1, [t.b]]
+  t2 = t1.a
+  if t2.tag != :app
+    return [t2, [t1.b, t.b]]
+  t3 = t2.a
+  if t3.tag != :app
+    return [t3, [t2.b, t1.b, t.b]]
   args = []
   while t.tag == :app
-    args.unshift(t.b)
+    args.push(t.b)
     t = t.a
+  lo = 0
+  hi = args.size - 1
+  while lo < hi
+    tmp = args[lo]
+    args[lo] = args[hi]
+    args[hi] = tmp
+    lo += 1
+    hi -= 1
   [t, args]
 
 -> head_const?(t, name)
-  h = strip_app(t)[0]
-  h.tag == :const && h.name == name
+  while t.tag == :app
+    t = t.a
+  t.tag == :const && t.name == name
 
 -> is_const?(t, name)
   t.tag == :const && t.name == name
@@ -506,15 +580,7 @@ LIT_CACHE = {}
     nil
 
 -> lam_count_bound(t, depth)
-  case t.tag
-  when :bnd
-    t.idx >= depth
-  when :app
-    lam_count_bound(t.a, depth) || lam_count_bound(t.b, depth)
-  when :lam
-    lam_count_bound(t.b, depth + 1)
-  else
-    false
+  t.mx > depth
 
 # True when t has no loose bound variables.
 -> tm_closed_bound?(t)

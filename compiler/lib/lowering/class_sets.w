@@ -686,6 +686,8 @@
     return fact == nil ? class_set_unknown() : fact
   if kind == :self_ref && ctx[:class_name] != nil
     return class_set_compatible(ctx[:class_name], true)
+  if kind == :regex && normal_source_instance_class?(ctx[:mod], "Regex")
+    return class_set_exact_one("Regex")
   if kind == :assign
     rhs = class_set_eval_expr(ctx, node.value, env)
     target = node.target

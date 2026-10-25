@@ -1792,6 +1792,20 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       return lower_regex_match(ctx, Tungsten:AST:RegexMatch.new(node.left, node.right))
     if ast_kind(node.right) == :regex
       return lower_regex_match(ctx, Tungsten:AST:RegexMatch.new(node.right, node.left))
+    return lower_expression(ctx, Tungsten:AST:Call.new(node.left, "=~", [node.right], nil))
+
+  if op == :NMATCH
+    m_expr = nil
+    if ast_kind(node.left) == :regex
+      m_expr = Tungsten:AST:RegexMatch.new(node.left, node.right)
+    elsif ast_kind(node.right) == :regex
+      m_expr = Tungsten:AST:RegexMatch.new(node.right, node.left)
+    else
+      m_expr = Tungsten:AST:Call.new(node.left, "=~", [node.right], nil)
+    return lower_expression(ctx, Tungsten:AST:Not.new(m_expr))
+
+  if op == :TRIPLE_EQ
+    return lower_expression(ctx, Tungsten:AST:Call.new(node.left, "===", [node.right], nil))
 
   # Sentinel fast path: `x == nil|true|false` / `x != nil|true|false`
   # → inline icmp against the sentinel bit value. W_NIL=0, W_FALSE=1,
@@ -1835,9 +1849,11 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       slit = node.right
       sother = node.left
     if slit != nil
-      lit_tv = lower_expression(ctx, slit)
-      lit_reg = "" + lit_tv[:value]
-      if lit_tv[:type] == :i64 && lit_reg.starts_with?("u0x")
+      s_val = slit.value.to_s()
+      s_len = utf8_byte_length(s_val)
+      if s_len <= 5 || (s_len <= 61 && ctx[:mod][:no_static_slab] != true)
+        lit_tv = lower_expression(ctx, slit)
+        lit_reg = ensure_i64_value(wfn, lit_tv)
         other_val = lower_expression(ctx, sother)
         other_reg = ensure_i64_value(wfn, other_val)
         sv = next_temp(wfn)
@@ -3471,10 +3487,84 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
         i += 1
       return typed_value(:i1, acc)
 
+  wfn = ctx[:func]
+  no_slab = ctx[:mod][:no_static_slab] == true
+  all_fast_str = true
+  all_i48_int = true
+  i = 0
+  while i < elements.size()
+    el = elements[i]
+    if el == nil || !is_ast_node?(el)
+      all_fast_str = false
+      all_i48_int = false
+      break
+    ek = ast_kind(el)
+    if ek in (:string :symbol)
+      all_i48_int = false
+      elen = utf8_byte_length(el.value.to_s())
+      if elen > 61 || (elen > 5 && no_slab)
+        all_fast_str = false
+    elsif ek == :int
+      all_fast_str = false
+      ev = el.value
+      if ev > 140737488355327 || ev < -140737488355328
+        all_i48_int = false
+    else
+      all_fast_str = false
+      all_i48_int = false
+      break
+    i += 1
+
+  if all_i48_int
+    lhs_tv = lower_expression(ctx, lhs_node)
+    lhs_reg = ensure_i64_value(wfn, lhs_tv)
+    acc = nil
+    i = 0
+    while i < elements.size()
+      c_raw = elements[i].value.to_i()
+      nanboxed = (c_raw & 281474976710655) | -1688849860263936
+      cmp = next_temp(wfn)
+      emit_wire_icmp_i64(wfn, lhs_reg, "eq", nanboxed.to_s(), cmp)
+      if acc == nil
+        acc = cmp
+      else
+        merged = next_temp(wfn)
+        emit_wire_or_i1(wfn, acc, cmp, merged)
+        acc = merged
+      i += 1
+    return typed_value(:i1, acc)
+
+  if all_fast_str
+    lhs_tv = lower_expression(ctx, lhs_node)
+    lhs_reg = ensure_i64_value(wfn, lhs_tv)
+    acc = nil
+    i = 0
+    while i < elements.size()
+      lit_tv = lower_expression(ctx, elements[i])
+      lit_reg = ensure_i64_value(wfn, lit_tv)
+      sv = next_temp(wfn)
+      emit_wire_call_direct_i64(wfn, nil, [lhs_reg, lit_reg], nil, nil, "__w_streq_fast", nil, nil, sv)
+      cmp = next_temp(wfn)
+      emit_wire_icmp_i64(wfn, sv, "eq", w_true.to_s(), cmp)
+      if acc == nil
+        acc = cmp
+      else
+        merged = next_temp(wfn)
+        emit_wire_or_i1(wfn, acc, cmp, merged)
+        acc = merged
+      i += 1
+    return typed_value(:i1, acc)
+
   # Build the OR chain bottom-up: a == e0 || a == e1 || a == e2 ...
-  # Note: the LHS is duplicated structurally at each arm. A following
-  # peephole will detect the homogeneous chain and hoist the
-  # LHS to a single temp before the dispatch.
+  if lhs_node != nil && is_ast_node?(lhs_node) && ast_kind(lhs_node) != :var
+    lhs_var = "__in_lhs." + next_label(wfn, "in")
+    lhs_ptr = ensure_var_slot(wfn, lhs_var)
+    lhs_tv = lower_expression(ctx, lhs_node)
+    lhs_reg = ensure_i64_value(wfn, lhs_tv)
+    emit_wire_store_i64(wfn, lhs_ptr, lhs_reg)
+    if lhs_type != nil && lhs_type != :float && !is_machine_float_type(lhs_type) && !is_machine_int_type(lhs_type)
+      ctx[:var_types][lhs_var] = lhs_type
+    lhs_node = Tungsten:AST:Var.new(lhs_var)
   chain = Tungsten:AST:BinaryOp.new(lhs_node, :EQ, elements[0])
   i = 1
   while i < elements.size()

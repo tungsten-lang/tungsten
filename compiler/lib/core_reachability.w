@@ -86,7 +86,11 @@
 
 -> core_reachability_direct_target(inst)
   op = wire_kind(inst)
-  if op in (:call_direct_i64 :call_direct_i128 :call_direct_void :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :fn_addr_i64)
+  if op == :call_direct_i64 || op == :call_direct_void
+    return wire_get(inst, :name)
+  if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :call_method_i64 || op == :string_i64 || op == :symbol_i64 || op == :call_loc_set_col || op == :load_global || op == :load_class || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop || op == :alloca_i64 || op == :free_value
+    return nil
+  if op in (:call_direct_i128 :call_direct_ptr :call_direct_i64_ptr1 :call_direct_void_ptr1 :fn_addr_i64)
     return wire_get(inst, :name)
   if op in (:closure_new :memo_call0_i64 :memo_call1_i64 :memo_call2_i64)
     return wire_get(inst, :fn_name)

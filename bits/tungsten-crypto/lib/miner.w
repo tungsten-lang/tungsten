@@ -156,6 +156,19 @@ use bitcoin
   # comparing this one word rejects all but a vanishing fraction.
   top = target[0] ## i64
   iv7 = 0x5be0cd19 ## i64
+  j0 = job[0] ## i64
+  j1 = job[1] ## i64
+  j2 = job[2] ## i64
+  j3 = job[3] ## i64
+  j4 = job[4] ## i64
+  j5 = job[5] ## i64
+  j6 = job[6] ## i64
+  j7 = job[7] ## i64
+  j = 0
+  while j < 8
+    work[j] = job[8 + j]
+    st2[j] = sha256_iv_word(j)
+    j += 1
   nonce = start ## i64
   last = start + count ## i64
   while nonce < last
@@ -169,22 +182,25 @@ use bitcoin
       s1 = sha256_ssig1(w1[j - 2])
       w1[j] = (w1[j - 16] + s0 + w1[j - 7] + s1) & 0xFFFFFFFF
       j += 1
-    j = 0
-    while j < 8
-      st1[j] = job[j]
-      work[j] = job[8 + j]
-      j += 1
+    st1[0] = j0
+    st1[1] = j1
+    st1[2] = j2
+    st1[3] = j3
+    st1[4] = j4
+    st1[5] = j5
+    st1[6] = j6
+    st1[7] = j7
     sha256_compress_resume(st1, work, w1, k, 3)
     # --- second hash of the 32-byte digest ---
-    j = 0
-    while j < 8
-      w2[j] = st1[j]
-      j += 1
+    w2[0] = st1[0]
+    w2[1] = st1[1]
+    w2[2] = st1[2]
+    w2[3] = st1[3]
+    w2[4] = st1[4]
+    w2[5] = st1[5]
+    w2[6] = st1[6]
+    w2[7] = st1[7]
     sha256_expand(w2)
-    j = 0
-    while j < 8
-      st2[j] = sha256_iv_word(j)
-      j += 1
     # Reject on H7 alone: it is the top of the value once byte-swapped,
     # and it is available three rounds early.
     h7 = sha256_h7_only(st2, w2, k, 0, iv7)

@@ -19,11 +19,18 @@
 B58_CHARSET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 -> b58_charval(c) (i64) i64
-  i = 0 ## i64
-  while i < 58
-    if B58_CHARSET.bytes[i] == c
-      return i
-    i += 1
+  if c >= 49 && c <= 57
+    return c - 49
+  if c >= 65 && c <= 72
+    return c - 56
+  if c >= 74 && c <= 78
+    return c - 57
+  if c >= 80 && c <= 90
+    return c - 58
+  if c >= 97 && c <= 107
+    return c - 64
+  if c >= 109 && c <= 122
+    return c - 65
   -1
 
 # Decode a Base58Check string into its 25-byte payload. Returns a hash with
@@ -33,15 +40,14 @@ B58_CHARSET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 -> b58check_decode(addr, k)
   if addr == nil || addr.size < 26 || addr.size > 36
     return nil
-  cs = addr.bytes.to_a
-  n = addr.size
+  n = addr.size ## i64
   # Big-endian accumulator: buf[0] is the most significant byte. 32 bytes is
   # seven more than any valid payload, so a genuine overflow (buf[0..6]
   # nonzero) can only mean the address is not a 25-byte-payload address.
   buf = i64[32]
   i = 0 ## i64
   while i < n
-    v = b58_charval(cs[i])
+    v = b58_charval(addr.byte_at(i))
     if v < 0
       return nil
     carry = v ## i64
@@ -64,7 +70,7 @@ B58_CHARSET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
   # match so "1<addr>" and "<addr>" cannot both decode to the same payload.
   zeros = 0 ## i64
   i = 0
-  while i < n && cs[i] == 49
+  while i < n && addr.byte_at(i) == 49
     zeros += 1
     i += 1
   lead = 0 ## i64

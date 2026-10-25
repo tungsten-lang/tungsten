@@ -199,7 +199,7 @@ typedef uint64_t WValue;
 #define W_SUBTAG_INSTANCE    4   /* user-defined class instance (WObject) */
 #define W_SUBTAG_HASH        5
 #define W_SUBTAG_CLOSURE     6
-#define W_SUBTAG_REGEX       7
+/* slot 7 free (was REGEX; moved to pure-Tungsten core/regex.w) */
 #define W_SUBTAG_RANGE       8
 #define W_SUBTAG_SMALL_ARRAY 9   /* own subtag, no type byte */
 #define W_SUBTAG_SOCKET      0xA /* claimed Array's former slot */
@@ -207,7 +207,7 @@ typedef uint64_t WValue;
 #define W_SUBTAG_STRBUF      0xB /* claimed BigInt's former slot */
 #define W_SUBTAG_CLASS       0xC
 #define W_SUBTAG_UUID        0xD
-#define W_SUBTAG_REGEX_MATCH 0xE
+/* slot 0xE free (was REGEX_MATCH; moved to pure-Tungsten core/regex.w) */
 #define W_SUBTAG_DOMAIN      0xF /* heap-overflow domain types */
 
 /* ---- Domain heap type discriminators (for W_SUBTAG_DOMAIN overflow objects) ---- */
@@ -557,8 +557,6 @@ static inline int w_is_array(WValue v)     { return (v & W_TAG_MASK) == W_TAG_AR
 static inline int w_is_socket(WValue v)    { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_SOCKET; }
 static inline int w_is_hash(WValue v)      { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_HASH; }
 static inline int w_is_closure(WValue v)   { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_CLOSURE; }
-static inline int w_is_regex(WValue v)     { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_REGEX; }
-static inline int w_is_regex_match(WValue v) { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_REGEX_MATCH; }
 static inline int w_is_instance(WValue v)  { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_INSTANCE; }
 static inline int w_is_class(WValue v)     { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_CLASS; }
 static inline int w_is_range(WValue v)     { return w_is_obj(v) && w_subtag(v) == W_SUBTAG_RANGE; }
@@ -675,10 +673,25 @@ static inline WValue w_box_symbol_from_str(WValue str) {
 static inline WValue w_box_inline_str(const void *data, size_t len) {
     uint64_t v = W_TAG_STRINGSYM | ((uint64_t)len << 1);
     const uint8_t *bytes = (const uint8_t *)data;
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    uint64_t payload = 0;
+    if (len >= 4) {
+        uint32_t w;
+        memcpy(&w, bytes, 4);
+        payload = (uint64_t)w;
+        if (len == 5) payload |= ((uint64_t)bytes[4]) << 32;
+    } else if (len > 0) {
+        payload = (uint64_t)bytes[0];
+        if (len >= 2) payload |= ((uint64_t)bytes[1]) << 8;
+        if (len == 3) payload |= ((uint64_t)bytes[2]) << 16;
+    }
+    return v | (payload << 4);
+#else
     for (size_t i = 0; i < len; i++) {
         v |= ((uint64_t)bytes[i]) << (4 + 8 * i);
     }
     return v;
+#endif
 }
 
 /* High bit of each of the five possible inline payload bytes (bits
@@ -1243,10 +1256,19 @@ static inline size_t w_inline_str_len(WValue v) {
    NUL-terminates. Returns length. */
 static inline size_t w_inline_str_extract(WValue v, char *buf) {
     size_t len = w_inline_str_len(v);
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    uint64_t raw = v >> 4;
+    uint32_t lo = (uint32_t)raw;
+    uint16_t hi = (uint16_t)(raw >> 32);
+    memcpy(buf, &lo, 4);
+    memcpy(buf + 4, &hi, 2);
+    buf[len] = '\0';
+#else
     for (size_t i = 0; i < len; i++) {
         buf[i] = (char)((v >> (4 + 8 * i)) & 0xFF);
     }
     buf[len] = '\0';
+#endif
     return len;
 }
 

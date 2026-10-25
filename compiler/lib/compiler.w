@@ -34,22 +34,24 @@ use target
 
   if rename_map.keys().size() > 0
     global_rename = build_memo_global_rename(mod, rename_map)
-    rewrite_references(mod, rename_map, global_rename)
+    wire_postprocess_linear(mod, rename_map, global_rename, false, mod[:incremental_core_cache_hit] == true)
     rewrite_known_name_maps(mod, rename_map)
+    if mod[:incremental_core_cache_hit] != true
+      i = 0
+      while i < mod[:functions].size()
+        func = mod[:functions][i]
+        replacement = rename_map_get(rename_map, func[:name])
+        if replacement != nil
+          func[:name] = replacement
+          func[:llvm_internal] = true
+        i += 1
+  if mod[:incremental_core_cache_hit] != true
     i = 0
     while i < mod[:functions].size()
       func = mod[:functions][i]
-      replacement = rename_map_get(rename_map, func[:name])
-      if replacement != nil
-        func[:name] = replacement
-        func[:llvm_internal] = true
+      if func[:incremental_core_candidate] == true
+        func[:incremental_core_hash_source_name] = func[:name]
       i += 1
-  i = 0
-  while i < mod[:functions].size()
-    func = mod[:functions][i]
-    if func[:incremental_core_candidate] == true
-      func[:incremental_core_hash_source_name] = func[:name]
-    i += 1
   mod[:incremental_core_cache_name_map] = rename_map
   nil
 

@@ -56,6 +56,8 @@
     false
 
 + KEval
+  ro :k, :fuel, :deep, :symbolic, :fresh, :memo, :defcache
+
   -> new(@k, deep = false, symbolic = false)
     @fuel = 200000000
     @deep = deep
@@ -63,6 +65,8 @@
     @fresh = 0
     @memo = {}
     @defcache = {}
+    @tt = nil
+    @ff = nil
 
   -> tick
     @fuel -= 1
@@ -145,9 +149,13 @@
   -> memo_app(t)
     bucket = @memo[t.h]
     if bucket != nil
-      bucket.each -> (pr)
+      nb = bucket.size
+      bi = 0
+      while bi < nb
+        pr = bucket[bi]
         if tm_eq(pr[0], t)
           return pr[1]
+        bi += 1
     else
       bucket = []
       @memo[t.h] = bucket
@@ -186,13 +194,17 @@
     if h.tag == :const
       return ev_const_app(h, args, env)
     f = ev(h, env)
-    args.each -> (a)
-      f = apply1(f, ev(a, env))
+    n = args.size
+    i = 0
+    while i < n
+      f = apply1(f, ev(args[i], env))
+      i += 1
     f
 
   -> apply_vals(f, vals, from)
     i = from
-    while i < vals.size
+    n = vals.size
+    while i < n
       f = apply1(f, vals[i])
       i += 1
     f
@@ -210,8 +222,12 @@
     sp = strip_app(f)
     if sp[0].tag == :const && sp[1].size < reduction_arity(sp[0].name)
       vals = []
-      sp[1].each -> (a)
-        vals.push(a)
+      sp1 = sp[1]
+      nsp = sp1.size
+      i = 0
+      while i < nsp
+        vals.push(sp1[i])
+        i += 1
       vals.push(x)
       return ev_const_vals(sp[0], vals)
     mk_app_raw(f, reify(x))
@@ -257,25 +273,33 @@
       return neutral(h, [ev(args[0], env)])
     if @k.defs.has_key?(name)
       f = eval_const(h)
-      args.each -> (a)
-        f = apply1(f, ev(a, env))
+      i = 0
+      while i < n
+        f = apply1(f, ev(args[i], env))
+        i += 1
       return f
     vals = []
-    args.each -> (a)
-      vals.push(ev(a, env))
+    i = 0
+    while i < n
+      vals.push(ev(args[i], env))
+      i += 1
     ev_const_vals(h, vals)
 
   -> apply_terms(f, args, from, env)
     i = from
-    while i < args.size
+    n = args.size
+    while i < n
       f = apply1(f, ev(args[i], env))
       i += 1
     f
 
   -> neutral(h, vals)
     t = h
-    vals.each -> (v)
-      t = mk_app_raw(t, reify(v))
+    n = vals.size
+    i = 0
+    while i < n
+      t = mk_app_raw(t, reify(vals[i]))
+      i += 1
     t
 
   -> conn_and(h, l, r)
@@ -568,7 +592,7 @@
 
   -> decide_eq(a, b)
     if a.tag == :lit && b.tag == :lit
-      return bool_val(lit_key(a.val) == lit_key(b.val))
+      return bool_val(lit_val_eq(a.val, b.val))
     if (true?(a) || false?(a)) && (true?(b) || false?(b))
       return bool_val(a.name == b.name)
     if ctor_app?(a) && ctor_app?(b)

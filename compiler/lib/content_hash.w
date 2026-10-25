@@ -212,28 +212,33 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   buf << canonical_op_code(op, op_codes).to_s()
 
   # Register temp output
-  if wire_get(inst, :temp) != nil
-    norm_temp(wire_get(inst, :temp), temp_map)
-
-  encode_codegen_metadata(inst, buf, temp_map, mod)
+  t = wire_get(inst, :temp)
+  if t != nil
+    norm_temp(t, temp_map)
 
   if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
+    if op == :call_direct_i64
+      encode_codegen_meta_field(:arg_types, wire_get(inst, :arg_types), buf, temp_map, mod)
+    encode_codegen_meta_field(:call_conv, wire_get(inst, :call_conv), buf, temp_map, mod)
     callee = wire_get(inst, :name)
 
     if callee == self_name
       buf << "@R"
-    elsif fn_hash_get(fn_hashes, callee) != nil
-      buf << "@"
-      buf << fn_hash_get(fn_hashes, callee)
     else
-      buf << "@"
-      buf << callee
+      ch = fn_hash_get(fn_hashes, callee)
+      if ch != nil
+        buf << "@"
+        buf << ch
+      else
+        buf << "@"
+        buf << callee
 
     args = wire_get(inst, :args)
 
     if args != nil
       ai = 0
-      while ai < wire_sequence_size(args)
+      n_args = wire_sequence_size(args)
+      while ai < n_args
         encode_val(buf, wire_sequence_get(args, ai), temp_map)
         ai += 1
 
@@ -241,26 +246,31 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     return nil
 
   if op == :call_method_i64
+    encode_codegen_meta_field(:scalar_source_argc1, wire_get(inst, :scalar_source_argc1), buf, temp_map, mod)
+    encode_codegen_meta_field(:scalar_source_argc2, wire_get(inst, :scalar_source_argc2), buf, temp_map, mod)
     encode_val(buf, wire_get(inst, :receiver), temp_map)
     encode_val(buf, wire_get(inst, :method_name_val), temp_map)
     args = wire_get(inst, :args)
 
     if args != nil
       ai = 0
-      while ai < wire_sequence_size(args)
+      n_args = wire_sequence_size(args)
+      while ai < n_args
         encode_val(buf, wire_sequence_get(args, ai), temp_map)
         ai += 1
 
     # Devirtualized target: two otherwise-identical bodies whose call sites
     # devirtualize to DIFFERENT methods must not content-collapse.
-    if wire_get(inst, :devirt_fn) != nil
+    devirt_fn = wire_get(inst, :devirt_fn)
+    if devirt_fn != nil
       buf << "dv:"
-      buf << wire_get(inst, :devirt_fn)
+      buf << devirt_fn
       buf << ":"
       buf << wire_get(inst, :devirt_class)
-    if wire_get(inst, :construct_fn) != nil
+    construct_fn = wire_get(inst, :construct_fn)
+    if construct_fn != nil
       buf << "ctor:"
-      buf << wire_get(inst, :construct_fn)
+      buf << construct_fn
       buf << ":"
       buf << wire_get(inst, :construct_class)
       if wire_get(inst, :construct_recycle) == true
@@ -270,10 +280,13 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     return nil
 
   if op == :closure_new
+    encode_codegen_meta_field(:block_arity, wire_get(inst, :block_arity), buf, temp_map, mod)
+    encode_codegen_meta_field(:captures_ptr, wire_get(inst, :captures_ptr), buf, temp_map, mod)
     callee = wire_get(inst, :fn_name)
-    if fn_hash_get(fn_hashes, callee) != nil
+    ch = fn_hash_get(fn_hashes, callee)
+    if ch != nil
       buf << "@"
-      buf << fn_hash_get(fn_hashes, callee)
+      buf << ch
     else
       buf << "@"
       buf << callee
@@ -323,7 +336,8 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     incoming = wire_get(inst, :incoming)
     if incoming != nil
       i = 0
-      while i < wire_sequence_size(incoming)
+      n_inc = wire_sequence_size(incoming)
+      while i < n_inc
         encode_val(buf, wire_sequence_get(incoming, i), temp_map)
         idx = label_map[wire_sequence_get(incoming, i + 1)]
 
@@ -341,10 +355,16 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     buf << ";"
     return nil
 
-  if op in (:store_i64 :store_ptr)
+  if op == :store_i64
     encode_val(buf, wire_get(inst, :value), temp_map)
     buf << "p"
     buf << wire_get(inst, :ptr)
+    buf << ";"
+    return nil
+
+  if op == :store_ptr
+    encode_codegen_meta_field(:dest, wire_get(inst, :dest), buf, temp_map, mod)
+    encode_val(buf, wire_get(inst, :value), temp_map)
     buf << ";"
     return nil
 
@@ -378,12 +398,14 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     return nil
 
   if op == :load_global
+    encode_codegen_meta_field(:type, wire_get(inst, :type), buf, temp_map, mod)
     buf << "N"
     buf << wire_get(inst, :name)
     buf << ";"
     return nil
 
   if op == :store_global
+    encode_codegen_meta_field(:type, wire_get(inst, :type), buf, temp_map, mod)
     encode_val(buf, wire_get(inst, :value), temp_map)
     buf << "N"
     buf << wire_get(inst, :name)
@@ -395,6 +417,8 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     buf << wire_get(inst, :class_name)
     buf << ";"
     return nil
+
+  encode_codegen_metadata(inst, buf, temp_map, mod)
 
   # Generic: encode known operand fields
   if wire_get(inst, :value) != nil
@@ -671,7 +695,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
 # release builds also remove location hooks and remember each live string-id
 # reference for later in-place remapping. The remap is finalized after Core
 # reachability, so that analysis observes the same string table as before.
--> wire_postprocess_linear(mod, rename_map, global_rename = nil, release_mode = false)
+-> wire_postprocess_linear(mod, rename_map, global_rename = nil, release_mode = false, skip_frozen_core = false)
   live = nil
   inst_refs = nil
   case_refs = nil
@@ -690,6 +714,9 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
+    if skip_frozen_core && func[:incremental_core_frozen] == true
+      fi += 1
+      next
     bi = 0
     while bi < func[:blocks].size()
       block = func[:blocks][bi]
@@ -938,11 +965,19 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
         info[:method_fn_name] = replacement
       si += 1
 
--> json_quote(value)
+-> json_needs_escape?(text)
+  text.index("\\") != nil || text.index("\"") != nil || text.index("\n") != nil || text.index("\r") != nil || text.index("\t") != nil
+
+-> append_json_quoted(out, value)
   if value == nil
-    return "null"
+    out << "null"
+    return nil
   text = value.to_s()
-  out = StringBuffer(text.size() + 8)
+  if !json_needs_escape?(text)
+    out << "\""
+    out << text
+    out << "\""
+    return nil
   out << "\""
   chars = text.chars()
   i = 0
@@ -963,6 +998,16 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       out << ch
     i += 1
   out << "\""
+  nil
+
+-> json_quote(value)
+  if value == nil
+    return "null"
+  text = value.to_s()
+  if !json_needs_escape?(text)
+    return "\"" + text + "\""
+  out = StringBuffer(text.size() + 8)
+  append_json_quoted(out, text)
   out.to_s()
 
 -> compact_symbol_for_hash(full_hash, used_symbols, min_prefix)
@@ -1077,15 +1122,15 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
 
 -> append_original_json(out, info)
   out << "{\"symbol\":"
-  out << json_quote(info[:symbol])
+  append_json_quoted(out, info[:symbol])
   out << ",\"class\":"
-  out << json_quote(info[:class])
+  append_json_quoted(out, info[:class])
   out << ",\"method\":"
-  out << json_quote(info[:method])
+  append_json_quoted(out, info[:method])
   out << ",\"kind\":"
-  out << json_quote(info[:kind])
+  append_json_quoted(out, info[:kind])
   out << ",\"file\":"
-  out << json_quote(info[:file])
+  append_json_quoted(out, info[:file])
   out << ",\"line\":"
   if info[:line] == nil
     out << "null"
@@ -1104,7 +1149,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   out << prefix_hex.to_s()
   out << ",\n"
   out << "  \"source\": "
-  out << json_quote(mod[:source_path])
+  append_json_quoted(out, mod[:source_path])
   out << ",\n"
   out << "  \"hashes\": {\n"
 
@@ -1114,9 +1159,9 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   while hi < hkeys.size()
     h = hkeys[hi]
     out << "    "
-    out << json_quote(h)
+    append_json_quoted(out, h)
     out << ": {\"symbol\": "
-    out << json_quote(hash_symbol_get(hash_symbols, h))
+    append_json_quoted(out, hash_symbol_get(hash_symbols, h))
     out << ", \"originals\": \["
 
     group = hash_group_get(hash_groups, h).sort()
@@ -1368,36 +1413,45 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   # Topo sort (leaf functions first)
   processed = {}
   order = []
-  remaining = hash_functions.size()
-  while remaining > 0
+  pending = []
+  fi = 0
+  while fi < hash_functions.size()
+    pending.push(fi)
+    fi += 1
+  while pending.size() > 0
     progress = false
-    fi = 0
-    while fi < hash_functions.size()
+    next_pending = []
+    pi = 0
+    while pi < pending.size()
+      fi = pending[pi]
       fname = hash_functions[fi][:name]
-      if processed[fname] != true
-        edges = calls_to[fname]
-        all_done = true
-        if edges != nil
-          ei = 0
-          while ei < edges.size()
-            if processed[edges[ei]] != true
-              all_done = false
-            ei += 1
-        if all_done
-          order.push(fi)
-          processed[fname] = true
-          remaining = remaining - 1
-          progress = true
-      fi += 1
+      edges = calls_to[fname]
+      all_done = true
+      if edges != nil
+        ei = 0
+        while ei < edges.size()
+          if processed[edges[ei]] != true
+            all_done = false
+            break
+          ei += 1
+      if all_done
+        order.push(fi)
+        processed[fname] = true
+        progress = true
+      else
+        next_pending.push(fi)
+      pi += 1
     if !progress
       # Cycle: process remaining with __CYCLE__ sentinel
-      fi = 0
-      while fi < hash_functions.size()
-        if processed[hash_functions[fi][:name]] != true
-          order.push(fi)
-          processed[hash_functions[fi][:name]] = true
-          remaining = remaining - 1
-        fi += 1
+      pi = 0
+      while pi < next_pending.size()
+        fi = next_pending[pi]
+        order.push(fi)
+        processed[hash_functions[fi][:name]] = true
+        pi += 1
+      pending = []
+    else
+      pending = next_pending
 
   # Hash each function in topo order
   oi = 0
@@ -1451,6 +1505,12 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   show_dupes = env("SHOW_ME_THE_DUPES") != nil
 
   # Build rename map for duplicates
+  fn_by_name = {}
+  ffi = 0
+  while ffi < functions.size()
+    fobj = functions[ffi]
+    fn_by_name[fobj[:name]] = {source: fobj[:name], func: fobj}
+    ffi += 1
   rename_map = {}
   dedup_count = 0
   gkeys = hash_groups.keys()
@@ -1480,17 +1540,23 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
             ffi += 1
           ci += 1
       # Map all others to canonical
-      ci = 0
-      while ci < group.size()
-        candidate_content = fn_content_get(fn_contents, group[ci])
-        canonical_content_value = fn_content_get(fn_contents, canonical)
-        candidate_func = function_by_exact_name(functions, group[ci])
-        canonical_func = function_by_exact_name(functions, canonical)
-        same_abi = candidate_func != nil && canonical_func != nil && function_physical_abi(candidate_func) == function_physical_abi(canonical_func)
-        if group[ci] != canonical && same_abi && candidate_content != nil && canonical_content_value != nil && candidate_content == canonical_content_value
-          rename_map_put(rename_map, group[ci], canonical)
-          dedup_count = dedup_count + 1
-        ci += 1
+      canonical_content_value = fn_content_get(fn_contents, canonical)
+      centry = fn_by_name[canonical]
+      canonical_func = (centry != nil && exact_string_key?(centry[:source], canonical)) ? centry[:func] : function_by_exact_name(functions, canonical)
+      canonical_abi = canonical_func != nil ? function_physical_abi(canonical_func) : nil
+      if canonical_func != nil && canonical_content_value != nil
+        ci = 0
+        while ci < group.size()
+          gname = group[ci]
+          if gname != canonical
+            candidate_content = fn_content_get(fn_contents, gname)
+            if candidate_content != nil && candidate_content == canonical_content_value
+              fentry = fn_by_name[gname]
+              candidate_func = (fentry != nil && exact_string_key?(fentry[:source], gname)) ? fentry[:func] : function_by_exact_name(functions, gname)
+              if candidate_func != nil && function_physical_abi(candidate_func) == canonical_abi
+                rename_map_put(rename_map, gname, canonical)
+                dedup_count = dedup_count + 1
+          ci += 1
     gi += 1
   if env("TUNGSTEN_LINEAR_WIRE_POSTPROCESS") != "0"
     apply_content_symbols_linear(mod, functions, rename_map, fn_hashes, hash_groups, fn_info_by_name, release_mode)

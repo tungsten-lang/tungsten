@@ -17,15 +17,31 @@
 #   2  connectivity placement           (recipe documented with its seed)
 
 -> ffsc_parse_i64(text) (String) i64
-  cut = text.size() - 7 ## i64
+  if text == nil
+    return 0
+  n = text.size() ## i64
+  i = 0 ## i64
+  while i < n
+    b = text.byte_at(i) ## i64
+    if b != 32 && b != 9 && b != 13 && b != 10
+      break
+    i += 1
+  sign = 1 ## i64
+  if i < n
+    b = text.byte_at(i) ## i64
+    if b == 45
+      sign = 0 - 1
+      i += 1
+    elsif b == 43
+      i += 1
   value = 0 ## i64
-  if cut > 0
-    high = text.slice(0, cut).to_i() ## i64
-    low = text.slice(cut, 7).to_i() ## i64
-    value = high * 10000000 + low
-  if cut <= 0
-    value = text.to_i()
-  value
+  while i < n
+    b = text.byte_at(i) ## i64
+    if b < 48 || b > 57
+      break
+    value = value * 10 + (b - 48)
+    i += 1
+  value * sign
 
 -> ffsc_load(path, us, vs, ws, cap) (String i64[] i64[] i64[] i64) i64
   content = read_file(path)

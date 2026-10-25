@@ -11,10 +11,19 @@ SK_MODULE   = 2
 SK_FUNCTION = 12
 SK_TRAIT    = 11
 
-# -- Project index --
+# -- Project index & single-entry parse/lines caches --
 # Maps file paths to their parsed AST and extracted definitions.
 
 project_index = {}
+parse_cache = {}
+
+-> text_lines(text)
+  if parse_cache[:lines_text] == text && parse_cache[:lines] != nil
+    return parse_cache[:lines]
+  lines = text.split("\n")
+  parse_cache[:lines_text] = text
+  parse_cache[:lines] = lines
+  lines
 
 -> index_file(path, text)
   ast = parse_source(text, path)
@@ -54,16 +63,18 @@ project_index = {}
 -> dirname(path)
   idx = path.size - 1
   while idx >= 0
-    if path.chars[idx] == "/"
+    if path.byte_at(idx) == 47
       return path.slice(0, idx)
     idx -= 1
   "."
 
 -> index_dependencies(text, from_file)
   # Scan for use statements and index those files
-  lines = text.split("\n")
-  lines ->
-    stripped = line.strip
+  lines = text_lines(text)
+  i = 0
+  n = lines.size
+  while i < n
+    stripped = lines[i].strip
     if stripped.starts_with?("use ")
       use_path = stripped.slice(4, stripped.size - 4).strip
       resolved = resolve_use_path(use_path, from_file)
@@ -71,6 +82,7 @@ project_index = {}
         dep_text = read_file(resolved)
         index_file(resolved, dep_text)
         index_dependencies(dep_text, resolved)
+    i += 1
 
 # -- Parse source safely --
 
@@ -82,12 +94,23 @@ project_index = {}
   # already guard `if ast == nil`). diagnose() does its own raising parse to
   # capture the error. (The old single-arg `Parser(tokens)` left every ivar nil
   # and crashed in sync_current.)
+  if parse_cache[:text] == text && parse_cache[:file] == filename && parse_cache[:ast] != nil
+    return parse_cache[:ast]
+  entry = project_index[filename]
+  if entry != nil && entry[:text] == text && entry[:ast] != nil
+    parse_cache[:text] = text
+    parse_cache[:file] = filename
+    parse_cache[:ast] = entry[:ast]
+    return entry[:ast]
   result = nil
   begin
     lexer = Lexer.new(text, filename)
     token_count = lexer.tokenize()
     parser = Parser.new(token_count, lexer.packed_tokens, text, lexer.values, lexer.line_at, lexer.col_at, lexer.file).set_chars(lexer.chars)
     result = parser.parse().expressions
+    parse_cache[:text] = text
+    parse_cache[:file] = filename
+    parse_cache[:ast] = result
   rescue err
     result = nil
   result
@@ -96,7 +119,11 @@ project_index = {}
 
 -> collect_defs(nodes, defs)
   return nil if type(nodes) != "Array"
-  nodes -> collect_def(node, defs)
+  i = 0
+  n = nodes.size
+  while i < n
+    collect_def(nodes[i], defs)
+    i += 1
 
 -> collect_def(node, defs)
   return nil if !is_ast_node?(node)
@@ -107,7 +134,8 @@ project_index = {}
     defs.push(node)
   elsif n == :class_def || n == :module_def
     defs.push(node)
-    collect_defs(ast_get(node, :body), defs) if ast_get(node, :body) != nil
+    body = ast_get(node, :body)
+    collect_defs(body, defs) if body != nil
 
 # -- Symbol extraction (LSP documentSymbol) --
 
@@ -121,7 +149,11 @@ project_index = {}
 
 -> collect_symbols(nodes, symbols)
   return nil if type(nodes) != "Array"
-  nodes -> collect_symbol(node, symbols)
+  i = 0
+  n = nodes.size
+  while i < n
+    collect_symbol(nodes[i], symbols)
+    i += 1
 
 -> collect_symbol(node, symbols)
   return nil if !is_ast_node?(node)
@@ -132,7 +164,8 @@ project_index = {}
     name = ast_get(node, :name)
     line = node_line(node)
     symbols.push(lsp_symbol(name, SK_METHOD, line, 0, name.size))
-    collect_symbols(ast_get(node, :body), symbols) if ast_get(node, :body) != nil
+    body = ast_get(node, :body)
+    collect_symbols(body, symbols) if body != nil
 
   elsif n == :fn_def
     name = ast_get(node, :name)
@@ -143,28 +176,39 @@ project_index = {}
     name = ast_get(node, :name)
     line = node_line(node)
     symbols.push(lsp_symbol(name, SK_CLASS, line, 0, name.size))
-    collect_symbols(ast_get(node, :body), symbols) if ast_get(node, :body) != nil
+    body = ast_get(node, :body)
+    collect_symbols(body, symbols) if body != nil
 
   elsif n == :module_def
     name = ast_get(node, :name)
     line = node_line(node)
     symbols.push(lsp_symbol(name, SK_MODULE, line, 0, name.size))
-    collect_symbols(ast_get(node, :body), symbols) if ast_get(node, :body) != nil
+    body = ast_get(node, :body)
+    collect_symbols(body, symbols) if body != nil
 
 # -- Workspace symbols (LSP workspace/symbol) --
 
 -> workspace_symbols(query)
   results = []
   paths = project_index.keys
-  paths ->
+  pi = 0
+  pn = paths.size
+  while pi < pn
+    path = paths[pi]
     entry = project_index[path]
     if entry != nil && entry[:defs] != nil
-      entry[:defs] ->
+      defs = entry[:defs]
+      di = 0
+      dn = defs.size
+      while di < dn
+        defn = defs[di]
         name = ast_get(defn, :name)
         if query == "" || name.include?(query)
           line = node_line(defn)
           kind = def_kind(defn)
           results.push(lsp_workspace_symbol(name, kind, path, line))
+        di += 1
+    pi += 1
   results
 
 -> def_kind(node)
@@ -218,14 +262,23 @@ project_index = {}
   path = uri_to_path(uri)
   if path != nil
     paths = project_index.keys
-    paths ->
+    pi = 0
+    pn = paths.size
+    while pi < pn
+      dep_path = paths[pi]
       if dep_path != path
         entry = project_index[dep_path]
         if entry != nil && entry[:defs] != nil
-          entry[:defs] ->
+          defs = entry[:defs]
+          di = 0
+          dn = defs.size
+          while di < dn
+            defn = defs[di]
             if ast_get(defn, :name) == word
               def_line = node_line(defn)
               return {"uri": "file://" + dep_path, "line": def_line, "col": 0, "end_col": word.size}
+            di += 1
+      pi += 1
   nil
 
 # -- Find references (LSP textDocument/references) --
@@ -235,25 +288,28 @@ project_index = {}
   return [] if word == nil
 
   refs = []
+  wlen = word.size
 
   # Search current file line by line
-  lines = text.split("\n")
+  lines = text_lines(text)
   li = 0
-  while li < lines.size
+  ln_count = lines.size
+  while li < ln_count
     ln = lines[li]
+    ln_size = ln.size
     ci = 0
-    while ci < ln.size
+    while ci < ln_size
       idx = ln.index(word, ci)
       if idx == nil
-        ci = ln.size
+        ci = ln_size
       else
         # Check it's a word boundary
-        before_ok = idx == 0 || !is_word_char?(ln.chars[idx - 1])
-        after_idx = idx + word.size
-        after_ok = after_idx >= ln.size || !is_word_char?(ln.chars[after_idx])
+        before_ok = idx == 0 || !is_word_byte?(ln.byte_at(idx - 1))
+        after_idx = idx + wlen
+        after_ok = after_idx >= ln_size || !is_word_byte?(ln.byte_at(after_idx))
         if before_ok && after_ok
-          refs.push({"uri": uri, "line": li, "col": idx, "end_col": idx + word.size})
-        ci = idx + word.size
+          refs.push({"uri": uri, "line": li, "col": idx, "end_col": after_idx})
+        ci = after_idx
     li += 1
   refs
 
@@ -261,7 +317,7 @@ project_index = {}
 
 -> signature_help(text, line, col, uri)
   # Walk backwards from cursor to find the function name before (
-  ln = text.split("\n")
+  ln = text_lines(text)
   return nil if line >= ln.size
 
   the_line = ln[line]
@@ -269,16 +325,17 @@ project_index = {}
 
   # Find the opening ( before cursor
   paren_pos = col - 1
+  paren_pos = the_line.size - 1 if paren_pos >= the_line.size
   depth = 0
   while paren_pos >= 0
-    ch = the_line.chars[paren_pos]
-    if ch == ")"
+    b = the_line.byte_at(paren_pos)
+    if b == 41
       depth += 1
-    elsif ch == "("
+    elsif b == 40
       if depth == 0
         name_end = paren_pos
         name_start = name_end - 1
-        while name_start >= 0 && is_word_char?(the_line.chars[name_start])
+        while name_start >= 0 && is_word_byte?(the_line.byte_at(name_start))
           name_start -= 1
         name_start += 1
         if name_start < name_end
@@ -295,22 +352,28 @@ project_index = {}
 -> format_signature_help(node)
   label = "-> " + ast_get(node, :name)
   param_labels = []
+  param_objs = []
   params = ast_get(node, :params)
   if params != nil && params.size > 0
     label = label + "("
-    params ->
+    pi = 0
+    pn = params.size
+    while pi < pn
+      p = params[pi]
       pname = nil
       if is_ast_node?(p)
         pname = ast_get(p, :name).to_s
       else
         pname = p.to_s
       param_labels.push(pname)
+      param_objs.push({"label": pname})
+      pi += 1
     label = label + param_labels.join(", ") + ")"
 
   {
     "signatures": [{
       "label": label,
-      "parameters": param_labels.map ->(name) {"label": name}
+      "parameters": param_objs
     }],
     "activeSignature": 0,
     "activeParameter": 0
@@ -329,20 +392,32 @@ project_index = {}
 
   # Add from indexed dependencies
   paths = project_index.keys
-  paths ->
+  pi = 0
+  pn = paths.size
+  while pi < pn
+    path = paths[pi]
     entry = project_index[path]
     if entry != nil && entry[:defs] != nil
-      entry[:defs] ->
+      defs = entry[:defs]
+      di = 0
+      dn = defs.size
+      while di < dn
+        defn = defs[di]
         name = ast_get(defn, :name)
         if seen[name] == nil
           seen[name] = true
           kind = completion_kind(defn)
           items.push({"label": name, "kind": kind})
+        di += 1
+    pi += 1
   items
 
 -> add_completions(nodes, items, seen)
   return nil if type(nodes) != "Array"
-  nodes ->
+  i = 0
+  cnt = nodes.size
+  while i < cnt
+    node = nodes[i]
     if is_ast_node?(node)
       n = ast_kind(node)
       if n == :method_def || n == :fn_def
@@ -356,7 +431,9 @@ project_index = {}
         if seen[name] == nil
           seen[name] = true
           items.push({"label": name, "kind": 7})  # 7 = Class
-        add_completions(ast_get(node, :body), items, seen) if ast_get(node, :body) != nil
+        body = ast_get(node, :body)
+        add_completions(body, items, seen) if body != nil
+    i += 1
 
 -> completion_kind(node)
   n = ast_kind(node)
@@ -370,11 +447,15 @@ project_index = {}
   params = ast_get(node, :params)
   return nil if params == nil || params.size == 0
   names = []
-  params ->
+  pi = 0
+  pn = params.size
+  while pi < pn
+    p = params[pi]
     if is_ast_node?(p)
       names.push(ast_get(p, :name).to_s)
     else
       names.push(p.to_s)
+    pi += 1
   "(" + names.join(", ") + ")"
 
 # -- Diagnostics (LSP textDocument/publishDiagnostics) --
@@ -427,22 +508,18 @@ project_index = {}
 
   # Build human-centric code frame and agent-centric payload if text is available
   if text != nil
-    lines = text.split("\n")
+    lines = text_lines(text)
     if line0 < lines.size
       src_line = lines[line0]
       caret_pad = ""
       k = 0
       while k < char0 && k < src_line.size
-        caret_pad += (src_line.chars[k] == "\t" ? "\t" : " ")
+        caret_pad += (src_line.byte_at(k) == 9 ? "\t" : " ")
         k += 1
       caret_len = span
       caret_len = src_line.size - char0 if char0 + caret_len > src_line.size
       caret_len = 1 if caret_len < 1
-      carets = ""
-      cidx = 0
-      while cidx < caret_len
-        carets += "^"
-        cidx += 1
+      carets = "^" * caret_len
 
       line_num_str = (line0 + 1).to_s
       code_frame = line_num_str + " | " + src_line + "\n" + (" " * line_num_str.size) + " | " + caret_pad + carets
@@ -470,24 +547,38 @@ project_index = {}
 
   # Then dependencies
   paths = project_index.keys
-  paths ->
+  pi = 0
+  pn = paths.size
+  while pi < pn
+    path = paths[pi]
     entry = project_index[path]
     if entry != nil && entry[:defs] != nil
-      entry[:defs] ->
+      defs = entry[:defs]
+      di = 0
+      dn = defs.size
+      while di < dn
+        defn = defs[di]
         return defn if ast_get(defn, :name) == name
+        di += 1
+    pi += 1
   nil
 
 -> find_def_node(nodes, name)
   return nil if type(nodes) != "Array"
-  nodes ->
+  i = 0
+  cnt = nodes.size
+  while i < cnt
+    node = nodes[i]
     if is_ast_node?(node)
       n = ast_kind(node)
       if (n == :method_def || n == :fn_def) && ast_get(node, :name) == name
         return node
       if n == :class_def || n == :module_def
-        if ast_get(node, :body) != nil
-          result = find_def_node(ast_get(node, :body), name)
+        body = ast_get(node, :body)
+        if body != nil
+          result = find_def_node(body, name)
           return result if result != nil
+    i += 1
   nil
 
 -> format_signature(node)
@@ -498,7 +589,9 @@ project_index = {}
   if params != nil && params.size > 0
     out << "("
     pi = 0
-    params ->
+    pn = params.size
+    while pi < pn
+      p = params[pi]
       out << ", " if pi > 0
       if is_ast_node?(p)
         out << ast_get(p, :name).to_s
@@ -537,26 +630,32 @@ project_index = {}
   nil
 
 -> word_at_line(text, line, col)
-  lines = text.split("\n")
+  lines = text_lines(text)
   return nil if line >= lines.size
   word_at(lines[line], col)
 
 -> word_at(line, col)
-  chars = line.chars
-  return nil if col >= chars.size
+  len = line.size
+  return nil if col >= len
   left = col
 
-  while left > 0 && is_word_char?(chars[left - 1])
+  while left > 0 && is_word_byte?(line.byte_at(left - 1))
     left -= 1
 
   right = col
 
-  while right < chars.size && is_word_char?(chars[right])
+  while right < len && is_word_byte?(line.byte_at(right))
     right += 1
 
   return nil if left == right
 
   line.slice(left, right - left)
+
+-> is_word_byte?(b)
+  return true if b >= 97 && b <= 122
+  return true if b >= 65 && b <= 90
+  return true if b >= 48 && b <= 57
+  b == 95 || b == 63 || b == 33
 
 -> is_word_char?(ch)
   return true if ch >= "a" && ch <= "z"

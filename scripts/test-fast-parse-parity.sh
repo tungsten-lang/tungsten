@@ -72,8 +72,6 @@ ENV_MANIFEST="$ROOT/build/cache/$(sed -n '2p' "$MANIFEST")"
 if [ -f "$ENV_MANIFEST" ]; then
   export TUNGSTEN_ZSTD_CFLAGS="$(sed -n '2p' "$ENV_MANIFEST")"
   export TUNGSTEN_ZSTD_LDFLAGS="$(sed -n '3p' "$ENV_MANIFEST")"
-  export TUNGSTEN_ONIG_CFLAGS="$(sed -n '4p' "$ENV_MANIFEST")"
-  export TUNGSTEN_ONIG_LDFLAGS="$(sed -n '5p' "$ENV_MANIFEST")"
 fi
 
 # ── 3. Environment (mirrors bin/commands/bootstrap.sh) ──────────

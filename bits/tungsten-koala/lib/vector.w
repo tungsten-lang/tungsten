@@ -50,61 +50,124 @@
     if @values.size == other.size
       a = @values
       b = other.to_a
+      n = a.size
       acc = []
       i = 0
-      a.each -> (x)
-        acc.push(f.call(x, b[i]))
+      while i < n
+        acc.push(f.call(a[i], b[i]))
         i += 1
       out = Vector.new(acc)
     out
 
   -> add(other)
-    f = -> (x, y) x + y
-    self.zip_with(other, f)
+    out = nil
+    a = @values
+    if a.size == other.size
+      b = other.to_a
+      n = a.size
+      acc = []
+      i = 0
+      while i < n
+        acc.push(a[i] + b[i])
+        i += 1
+      out = Vector.new(acc)
+    out
 
   -> sub(other)
-    f = -> (x, y) x - y
-    self.zip_with(other, f)
+    out = nil
+    a = @values
+    if a.size == other.size
+      b = other.to_a
+      n = a.size
+      acc = []
+      i = 0
+      while i < n
+        acc.push(a[i] - b[i])
+        i += 1
+      out = Vector.new(acc)
+    out
 
   # Elementwise (Hadamard) product.
   -> mul(other)
-    f = -> (x, y) x * y
-    self.zip_with(other, f)
+    out = nil
+    a = @values
+    if a.size == other.size
+      b = other.to_a
+      n = a.size
+      acc = []
+      i = 0
+      while i < n
+        acc.push(a[i] * b[i])
+        i += 1
+      out = Vector.new(acc)
+    out
 
   # Elementwise division (always float).
   -> div(other)
-    f = -> (x, y) x.to_f / y.to_f
-    self.zip_with(other, f)
+    out = nil
+    a = @values
+    if a.size == other.size
+      b = other.to_a
+      n = a.size
+      acc = []
+      i = 0
+      while i < n
+        acc.push(a[i].to_f / b[i].to_f)
+        i += 1
+      out = Vector.new(acc)
+    out
 
   # Multiply every element by scalar k.
   -> scale(k)
     vals = @values
+    n = vals.size
     acc = []
-    vals.each -> (v)
-      acc.push(v * k)
+    i = 0
+    while i < n
+      acc.push(vals[i] * k)
+      i += 1
     Vector.new(acc)
 
   # --- Products, norms, geometry ---
 
   # Dot product; nil when sizes differ.
   -> dot(other)
-    p = self.mul(other)
     out = nil
-    out = Stats.sum(p.to_a) if p != nil
+    a = @values
+    if a.size == other.size
+      b = other.to_a
+      n = a.size
+      total = 0
+      i = 0
+      while i < n
+        total += a[i] * b[i]
+        i += 1
+      out = total
     out
 
   # Euclidean (L2) norm.
   -> norm
-    Math.sqrt(self.dot(self))
+    vals = @values
+    n = vals.size
+    total = 0
+    i = 0
+    while i < n
+      v = vals[i]
+      total += v * v
+      i += 1
+    Math.sqrt(total)
 
   # L1 (Manhattan) norm, as a float.
   -> norm_l1
     vals = @values
+    n = vals.size
     total = 0.to_f
-    vals.each -> (v)
-      x = v.to_f
+    i = 0
+    while i < n
+      x = vals[i].to_f
       x = 0.to_f - x if x < 0
       total += x
+      i += 1
     total
 
   # Unit-length copy; nil for the zero vector.
@@ -116,9 +179,18 @@
 
   # Euclidean distance; nil when sizes differ.
   -> distance(other)
-    d = self.sub(other)
     out = nil
-    out = d.norm if d != nil
+    a = @values
+    if a.size == other.size
+      b = other.to_a
+      n = a.size
+      total = 0
+      i = 0
+      while i < n
+        d = a[i] - b[i]
+        total += d * d
+        i += 1
+      out = Math.sqrt(total)
     out
 
   # Cosine similarity; nil when sizes differ or either vector is zero.
@@ -133,9 +205,14 @@
 
   -> zero?
     vals = @values
+    n = vals.size
     all = true
-    vals.each -> (v)
-      all = false if v != 0
+    i = 0
+    while i < n
+      if vals[i] != 0
+        all = false
+        break
+      i += 1
     all
 
   # --- Conversion ---

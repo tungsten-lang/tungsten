@@ -25,15 +25,19 @@
 
   -> new(rows_a)
     ents = []
-    nc = 0
-    nr = 0
-    rows_a.each -> (r)
-      nc = r.size if nr == 0
-      row = []
-      nc.times -> (j)
-        row.push(r[j])
-      ents.push(row)
-      nr += 1
+    nr = rows_a.size
+    if nr > 0
+      nc = rows_a[0].size
+      i = 0
+      while i < nr
+        r = rows_a[i]
+        row = []
+        j = 0
+        while j < nc
+          row.push(r[j])
+          j += 1
+        ents.push(row)
+        i += 1
     @entries = ents
 
   # --- Factories ---
@@ -41,11 +45,15 @@
   # nr×nc matrix filled with v.
   -> .fill(nr, nc, v)
     rows = []
-    nr.times -> (i)
+    i = 0
+    while i < nr
       row = []
-      nc.times -> (j)
+      j = 0
+      while j < nc
         row.push(v)
+        j += 1
       rows.push(row)
+      i += 1
     Matrix.new(rows)
 
   -> .zeros(nr, nc = nr)
@@ -56,28 +64,36 @@
 
   -> .identity(n)
     rows = []
-    n.times -> (i)
+    i = 0
+    while i < n
       row = []
-      n.times -> (j)
+      j = 0
+      while j < n
         if i == j
           row.push(1)
         else
           row.push(0)
+        j += 1
       rows.push(row)
+      i += 1
     Matrix.new(rows)
 
   # Square matrix with `values` on the diagonal.
   -> .diagonal(values)
     n = values.size
     rows = []
-    n.times -> (i)
+    i = 0
+    while i < n
       row = []
-      n.times -> (j)
+      j = 0
+      while j < n
         if i == j
           row.push(values[i])
         else
           row.push(0)
+        j += 1
       rows.push(row)
+      i += 1
     Matrix.new(rows)
 
   # Numeric rank-2 Core Tensor -> this compatibility Matrix. Tensor owns its
@@ -135,9 +151,12 @@
     out = nil
     if i >= 0 && i < @entries.size
       r = @entries[i]
+      n = r.size
       vals = []
-      r.each -> (v)
-        vals.push(v)
+      j = 0
+      while j < n
+        vals.push(r[j])
+        j += 1
       out = Vector.new(vals)
     out
 
@@ -146,9 +165,12 @@
     out = nil
     if j >= 0 && j < self.col_count
       ents = @entries
+      nr = ents.size
       vals = []
-      ents.each -> (r)
-        vals.push(r[j])
+      i = 0
+      while i < nr
+        vals.push(ents[i][j])
+        i += 1
       out = Vector.new(vals)
     out
 
@@ -173,9 +195,20 @@
   -> to_tensor
     out = nil
     ok = true
-    @entries.each -> (row)
-      row.each -> (value)
-        ok = false if value == nil
+    ents = @entries
+    nr = ents.size
+    i = 0
+    while i < nr
+      row = ents[i]
+      nc = row.size
+      j = 0
+      while j < nc
+        if row[j] == nil
+          ok = false
+          break
+        j += 1
+      break if !ok
+      i += 1
     if ok
       out = Tensor.from_rows(@entries, Tensor.f64)
     out
@@ -188,14 +221,17 @@
     if self.row_count == other.row_count && self.col_count == other.col_count
       a = @entries
       b = other.to_a
+      nr = a.size
+      nc = self.col_count
       rows = []
       i = 0
-      a.each -> (r)
+      while i < nr
+        r = a[i]
         br = b[i]
         row = []
         j = 0
-        r.each -> (v)
-          row.push(f.call(v, br[j]))
+        while j < nc
+          row.push(f.call(r[j], br[j]))
           j += 1
         rows.push(row)
         i += 1
@@ -203,27 +239,88 @@
     out
 
   -> add(other)
-    f = -> (x, y) x + y
-    self.zip_with(other, f)
+    out = nil
+    if self.row_count == other.row_count && self.col_count == other.col_count
+      a = @entries
+      b = other.to_a
+      nr = a.size
+      nc = self.col_count
+      rows = []
+      i = 0
+      while i < nr
+        r = a[i]
+        br = b[i]
+        row = []
+        j = 0
+        while j < nc
+          row.push(r[j] + br[j])
+          j += 1
+        rows.push(row)
+        i += 1
+      out = Matrix.new(rows)
+    out
 
   -> sub(other)
-    f = -> (x, y) x - y
-    self.zip_with(other, f)
+    out = nil
+    if self.row_count == other.row_count && self.col_count == other.col_count
+      a = @entries
+      b = other.to_a
+      nr = a.size
+      nc = self.col_count
+      rows = []
+      i = 0
+      while i < nr
+        r = a[i]
+        br = b[i]
+        row = []
+        j = 0
+        while j < nc
+          row.push(r[j] - br[j])
+          j += 1
+        rows.push(row)
+        i += 1
+      out = Matrix.new(rows)
+    out
 
   # Elementwise (Hadamard) product — NOT matrix multiplication.
   -> mul(other)
-    f = -> (x, y) x * y
-    self.zip_with(other, f)
+    out = nil
+    if self.row_count == other.row_count && self.col_count == other.col_count
+      a = @entries
+      b = other.to_a
+      nr = a.size
+      nc = self.col_count
+      rows = []
+      i = 0
+      while i < nr
+        r = a[i]
+        br = b[i]
+        row = []
+        j = 0
+        while j < nc
+          row.push(r[j] * br[j])
+          j += 1
+        rows.push(row)
+        i += 1
+      out = Matrix.new(rows)
+    out
 
   # Multiply every entry by scalar k.
   -> scale(k)
     ents = @entries
+    nr = ents.size
+    nc = self.col_count
     rows = []
-    ents.each -> (r)
+    i = 0
+    while i < nr
+      r = ents[i]
       row = []
-      r.each -> (v)
-        row.push(v * k)
+      j = 0
+      while j < nc
+        row.push(r[j] * k)
+        j += 1
       rows.push(row)
+      i += 1
     Matrix.new(rows)
 
   # --- Matrix products ---
@@ -236,17 +333,36 @@
     if self.col_count == other.row_count
       a = @entries
       b = other.to_a
+      nr = a.size
       inner = self.col_count
       bc = other.col_count
+      bt = []
+      j = 0
+      while j < bc
+        col = []
+        k = 0
+        while k < inner
+          col.push(b[k][j])
+          k += 1
+        bt.push(col)
+        j += 1
       rows = []
-      a.each -> (ar)
+      i = 0
+      while i < nr
+        ar = a[i]
         row = []
-        bc.times -> (j)
+        j = 0
+        while j < bc
+          bj = bt[j]
           total = 0
-          inner.times -> (k)
-            total += ar[k] * b[k][j]
+          k = 0
+          while k < inner
+            total += ar[k] * bj[k]
+            k += 1
           row.push(total)
+          j += 1
         rows.push(row)
+        i += 1
       out = Matrix.new(rows)
     out
 
@@ -269,14 +385,19 @@
     if self.col_count == v.size
       a = @entries
       b = v.to_a
+      nr = a.size
+      nc = self.col_count
       vals = []
-      a.each -> (r)
+      i = 0
+      while i < nr
+        r = a[i]
         total = 0
         j = 0
-        r.each -> (x)
-          total += x * b[j]
+        while j < nc
+          total += r[j] * b[j]
           j += 1
         vals.push(total)
+        i += 1
       out = Vector.new(vals)
     out
 
@@ -287,11 +408,15 @@
     nc = self.col_count
     ents = @entries
     rows = []
-    nc.times -> (j)
+    j = 0
+    while j < nc
       row = []
-      nr.times -> (i)
+      i = 0
+      while i < nr
         row.push(ents[i][j])
+        i += 1
       rows.push(row)
+      j += 1
     Matrix.new(rows)
 
   # Sum of the diagonal; nil unless square.
@@ -299,10 +424,11 @@
     out = nil
     if self.square?
       ents = @entries
+      nr = ents.size
       total = 0
       i = 0
-      ents.each -> (r)
-        total += r[i]
+      while i < nr
+        total += ents[i][i]
         i += 1
       out = total
     out
@@ -310,10 +436,18 @@
   # Frobenius norm.
   -> norm
     ents = @entries
+    nr = ents.size
+    nc = self.col_count
     total = 0
-    ents.each -> (r)
-      r.each -> (v)
+    i = 0
+    while i < nr
+      r = ents[i]
+      j = 0
+      while j < nc
+        v = r[j]
         total += v * v
+        j += 1
+      i += 1
     Math.sqrt(total)
 
   # --- Linear algebra (see linalg.w) ---

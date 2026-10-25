@@ -68,4 +68,7 @@ commands = {
 -> version
   Version:STRING
 
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!
+
 run(argv())

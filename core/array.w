@@ -72,6 +72,11 @@
       return true
     false
 
+  -> clear
+    $start = 0
+    $size = 0
+    self
+
   # Indexing stays behind Array's ebits-aware storage boundary. That preserves
   # shifted starts, borrowed views, bool decoding, signed packed integers,
   # floats, and polymorphic WValues while the branch/query logic lives here.
@@ -422,6 +427,51 @@
 
   -> to_f32
     ccall("w_array_to_f32", self)
+
+  -> data
+    ccall("w_int", $slots ## i64)
+
+  -> raw_ptr
+    eb = ($ebits ## i64) & 0xFF
+    if eb >= 128
+      eb -= 256
+    abs_bits = eb
+    if eb == -116 || eb == 116
+      abs_bits = 16
+    elsif eb == -108 || eb == -109 || eb == 108
+      abs_bits = 8
+    elsif eb == -104
+      abs_bits = 4
+    elsif eb == 33
+      abs_bits = 32
+    elsif eb == 65 || eb == 66
+      abs_bits = 64
+    elsif eb < 0
+      abs_bits = 0 - eb
+    st = $start ## i64
+    off = abs_bits == 4 ? (st / 2) : (st * (abs_bits / 8))
+    ccall("w_int", (($slots ## i64) + off) ## i64)
+
+  -> fill(value)
+    ccall("w_array_fill", self, value)
+
+  -> slice_view(start, length)
+    ccall("w_array_view", self, start, length)
+
+  -> cross(other)
+    ccall("w_array_cross_float", self, other)
+
+  -> scale(scalar)
+    ccall("w_array_scale_float", self, scalar)
+
+  -> scale!(scalar)
+    ccall("w_array_scale_float_bang", self, scalar)
+
+  -> matvec_i8(x, rows, cols)
+    ccall("w_array_matvec_i8", self, x, rows, cols)
+
+  -> matmul_i8(rhs, m, k, n)
+    ccall("w_array_matmul_i8", self, rhs, m, k, n)
 
   # Arithmetic mean: Σxᵢ / n. Quantity elements fold from the first
   # element (there is no reverse-operand dispatch for 0 + quantity);

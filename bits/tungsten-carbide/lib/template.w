@@ -102,50 +102,115 @@
   # lexically malformed template.
   -> .tokenize(source)
     tokens = []
-    rest = source
+    n = source.size
+    cursor = 0
     failed = false
     done = false
     while !done
-      pos = rest.index("{{")
-      if pos == nil
-        if rest.size > 0
-          tokens.push({kind: :text, value: rest})
+      pos = -1
+      i = cursor
+      while i + 1 < n
+        if source.byte_at(i) == 123 && source.byte_at(i + 1) == 123
+          pos = i
+          i = n
+        else
+          i = i + 1
+      if pos < 0
+        if cursor < n
+          if cursor == 0
+            tokens.push({kind: :text, value: source})
+          else
+            tokens.push({kind: :text, value: source.slice(cursor, n - cursor)})
         done = true
       else
-        if pos > 0
-          tokens.push({kind: :text, value: rest.slice(0, pos)})
-        tag = rest.slice(pos, rest.size - pos)
-        if tag.starts_with?("{{{")
-          close = tag.index("}}}")
-          if close == nil
+        if pos > cursor
+          tokens.push({kind: :text, value: source.slice(cursor, pos - cursor)})
+        if pos + 2 < n && source.byte_at(pos + 2) == 123
+          close = -1
+          j = pos + 3
+          while j + 2 < n
+            if source.byte_at(j) == 125 && source.byte_at(j + 1) == 125 && source.byte_at(j + 2) == 125
+              close = j
+              j = n
+            else
+              j = j + 1
+          if close < 0
             failed = true
             done = true
           else
-            name = tag.slice(3, close - 3).strip
-            if name == ""
+            s0 = pos + 3
+            s1 = close
+            while s0 < s1 && source.byte_at(s0) <= 32
+              s0 = s0 + 1
+            while s1 > s0 && source.byte_at(s1 - 1) <= 32
+              s1 = s1 - 1
+            if s0 == s1
               failed = true
               done = true
             else
-              tokens.push({kind: :var, name: name, raw: true})
-              rest = tag.slice(close + 3, tag.size - close - 3)
+              name = source.slice(s0, s1 - s0)
+              tokens.push(Template.make_var_tok(name, true))
+              cursor = close + 3
         else
-          close = tag.index("}}")
-          if close == nil
+          close = -1
+          j = pos + 2
+          while j + 1 < n
+            if source.byte_at(j) == 125 && source.byte_at(j + 1) == 125
+              close = j
+              j = n
+            else
+              j = j + 1
+          if close < 0
             failed = true
             done = true
           else
-            inner = tag.slice(2, close - 2).strip
+            s0 = pos + 2
+            s1 = close
+            while s0 < s1 && source.byte_at(s0) <= 32
+              s0 = s0 + 1
+            while s1 > s0 && source.byte_at(s1 - 1) <= 32
+              s1 = s1 - 1
+            inner = ""
+            if s1 > s0
+              inner = source.slice(s0, s1 - s0)
             tok = Template.classify(inner)
             if tok == nil
               failed = true
               done = true
             else
               tokens.push(tok)
-              rest = tag.slice(close + 2, tag.size - close - 2)
+              cursor = close + 2
     result = tokens
     if failed
       result = nil
     result
+
+  -> .make_name_node(base_kind, name)
+    if name == "this"
+      if base_kind == :open_if
+        {kind: :open_if, node_kind: :if_this, sym: nil}
+      else
+        {kind: :open_each, node_kind: :each_this, sym: nil}
+    elsif name.starts_with?("this.")
+      sym = name.slice(5, name.size - 5).to_sym
+      if base_kind == :open_if
+        {kind: :open_if, node_kind: :if_field, sym: sym}
+      else
+        {kind: :open_each, node_kind: :each_field, sym: sym}
+    else
+      sym = name.to_sym
+      if base_kind == :open_if
+        {kind: :open_if, node_kind: :if, sym: sym}
+      else
+        {kind: :open_each, node_kind: :each, sym: sym}
+
+  -> .make_var_tok(name, raw)
+    if name == "this"
+      {kind: :var_this, raw: raw}
+    elsif name.starts_with?("this.")
+      {kind: :var_field, sym: name.slice(5, name.size - 5).to_sym, raw: raw}
+    else
+      {kind: :var, sym: name.to_sym, raw: raw}
 
   # One stripped tag body -> token hash, or nil for an empty/unknown tag.
   -> .classify(inner)
@@ -157,11 +222,11 @@
     elsif inner.starts_with?("#if ")
       name = inner.slice(4, inner.size - 4).strip
       if name != ""
-        tok = {kind: :open_if, name: name}
+        tok = Template.make_name_node(:open_if, name)
     elsif inner.starts_with?("#each ")
       name = inner.slice(6, inner.size - 6).strip
       if name != ""
-        tok = {kind: :open_each, name: name}
+        tok = Template.make_name_node(:open_each, name)
     elsif inner.starts_with?(">")
       name = inner.slice(1, inner.size - 1).strip
       if name != ""
@@ -169,13 +234,13 @@
     elsif inner.starts_with?("#") || inner.starts_with?("/")
       tok = nil
     elsif inner != ""
-      tok = {kind: :var, name: inner, raw: false}
+      tok = Template.make_var_tok(inner, false)
     tok
 
   # Token list -> node tree (children arrays), or nil on unclosed /
   # mismatched blocks.
   -> .parse(tokens)
-    root = {kind: :root, name: "", children: []}
+    root = {kind: :root, children: []}
     stack = [root]
     failed = false
     i = 0
@@ -183,21 +248,19 @@
       tok = tokens[i]
       top = stack[stack.size - 1]
       kind = tok[:kind]
-      if kind == :open_if
-        node = {kind: :if, name: tok[:name], children: []}
-        top[:children].push(node)
-        stack.push(node)
-      elsif kind == :open_each
-        node = {kind: :each, name: tok[:name], children: []}
+      if kind == :open_if || kind == :open_each
+        node = {kind: tok[:node_kind], sym: tok[:sym], children: []}
         top[:children].push(node)
         stack.push(node)
       elsif kind == :close_if
-        if stack.size < 2 || top[:kind] != :if
+        tk = top[:kind]
+        if stack.size < 2 || (tk != :if && tk != :if_field && tk != :if_this)
           failed = true
         else
           stack.pop
       elsif kind == :close_each
-        if stack.size < 2 || top[:kind] != :each
+        tk = top[:kind]
+        if stack.size < 2 || (tk != :each && tk != :each_field && tk != :each_this)
           failed = true
         else
           stack.pop
@@ -213,24 +276,31 @@
 
   # HTML-escape & < > " ' (byte-wise scan; UTF-8 bytes pass through).
   -> .escape_html(s)
-    out = []
-    i = 0
+    if !s.include?("&") && !s.include?("<") && !s.include?(">") && !s.include?("\"") && !s.include?("'")
+      return s
     n = s.size
+    out = []
+    run_start = 0
+    i = 0
     while i < n
-      c = s.slice(i, 1)
-      if c == "&"
-        out.push("&amp;")
-      elsif c == "<"
-        out.push("&lt;")
-      elsif c == ">"
-        out.push("&gt;")
-      elsif c == "\""
-        out.push("&quot;")
-      elsif c == "'"
-        out.push("&#39;")
-      else
-        out.push(c)
+      b = s.byte_at(i)
+      if b == 38 || b == 60 || b == 62 || b == 34 || b == 39
+        if i > run_start
+          out.push(s.slice(run_start, i - run_start))
+        if b == 38
+          out.push("&amp;")
+        elsif b == 60
+          out.push("&lt;")
+        elsif b == 62
+          out.push("&gt;")
+        elsif b == 34
+          out.push("&quot;")
+        else
+          out.push("&#39;")
+        run_start = i + 1
       i = i + 1
+    if n > run_start
+      out.push(s.slice(run_start, n - run_start))
     out.join("")
 
   # --- rendering ---
@@ -238,42 +308,77 @@
   # Render with a symbol-keyed params hash. Reusable: one compiled
   # Template renders any number of times with different params.
   -> render(params = {})
-    render_nodes(@nodes, params, nil, 0)
+    out = []
+    render_into(@nodes, params, nil, 0, out)
+    out.join("")
 
   # depth bounds partial-include nesting so a self-/mutually-recursive
   # partial bottoms out at 50 levels instead of hanging the render.
-  -> render_nodes(nodes, params, this_val, depth)
-    out = []
+  -> render_into(nodes, params, this_val, depth, out)
+    n = nodes.size
     i = 0
-    while i < nodes.size
+    while i < n
       node = nodes[i]
       kind = node[:kind]
       if kind == :text
         out.push(node[:value])
       elsif kind == :var
-        v = resolve_value(node[:name], params, this_val)
-        s = stringify(v)
-        if node[:raw]
-          out.push(s)
-        else
-          out.push(Template.escape_html(s))
+        v = params[node[:sym]]
+        if v != nil
+          s = v.to_s
+          if node[:raw]
+            out.push(s)
+          else
+            out.push(Template.escape_html(s))
+      elsif kind == :var_field
+        if type(this_val) == "Hash"
+          v = this_val[node[:sym]]
+          if v != nil
+            s = v.to_s
+            if node[:raw]
+              out.push(s)
+            else
+              out.push(Template.escape_html(s))
+      elsif kind == :var_this
+        if this_val != nil
+          s = this_val.to_s
+          if node[:raw]
+            out.push(s)
+          else
+            out.push(Template.escape_html(s))
       elsif kind == :if
-        v = resolve_value(node[:name], params, this_val)
+        v = params[node[:sym]]
         if v != nil && v != false
-          out.push(render_nodes(node[:children], params, this_val, depth))
-      elsif kind == :each
-        v = resolve_value(node[:name], params, this_val)
+          render_into(node[:children], params, this_val, depth, out)
+      elsif kind == :if_field
+        if type(this_val) == "Hash"
+          v = this_val[node[:sym]]
+          if v != nil && v != false
+            render_into(node[:children], params, this_val, depth, out)
+      elsif kind == :if_this
+        if this_val != nil && this_val != false
+          render_into(node[:children], params, this_val, depth, out)
+      elsif kind == :each || kind == :each_field || kind == :each_this
+        v = nil
+        if kind == :each
+          v = params[node[:sym]]
+        elsif kind == :each_field
+          if type(this_val) == "Hash"
+            v = this_val[node[:sym]]
+        else
+          v = this_val
         if type(v) == "Array"
+          children = node[:children]
+          vn = v.size
           j = 0
-          while j < v.size
-            out.push(render_nodes(node[:children], params, v[j], depth))
+          while j < vn
+            render_into(children, params, v[j], depth, out)
             j = j + 1
       elsif kind == :partial
         pt = Template.partial(node[:name])
         if pt != nil && depth < 50
-          out.push(render_nodes(pt.nodes, params, this_val, depth + 1))
+          render_into(pt.nodes, params, this_val, depth + 1, out)
       i = i + 1
-    out.join("")
 
   # this / this.field / params name -> value (nil when absent).
   -> resolve_value(name, params, this_val)

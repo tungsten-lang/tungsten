@@ -44,22 +44,6 @@ static inline void w_heap_string_set_meta(WString *s, uint32_t len, int ascii) {
     s->len_flags = len | (ascii ? W_STRING_ASCII_FLAG : 0);
 }
 
-/* ---- Regex heap object (subtag 0x7) ---- */
-typedef struct {
-    char *pattern;
-    char *options;
-    void *compiled;
-    WValue name_to_group; /* compiled once; immutable and shared by matches */
-} WRegex;
-
-/* Immutable snapshot returned by Regex#match_data (subtag 0xE). */
-typedef struct {
-    WValue subject;       /* backing UTF-8 string for lazy Slice captures */
-    WValue groups;        /* group 0 followed by numbered captures */
-    WValue offsets;       /* nil or [codepoint_begin, codepoint_end] */
-    WValue name_to_group; /* borrowed immutable Regex name map */
-} WRegexMatch;
-
 /* Mutable append — declared in runtime.c */
 WValue w_str_append(WValue str, WValue suffix);
 
@@ -189,6 +173,7 @@ WValue  w_wire_sequence_set(WValue sequence, int64_t index, WValue value);
 int64_t w_wire_store_reset(int64_t reserved);
 int64_t w_wire_store_mark(void);
 WValue  w_wire_clone(WValue wire);
+WValue  w_wire_temp_operands(WValue wire);
 
 typedef struct WAstSparseRecord {
     int64_t  sym;
@@ -574,13 +559,10 @@ WValue w_str_to_sym(WValue v);
 WValue w_string_from_bits(WValue bits);
 WValue w_bigint_from_bits(WValue bits);
 WValue w_bigint_from_dec_str(WValue str);
-WValue w_regex_new(WValue pattern_val, WValue options_val);
-WValue w_regex_match(WValue regex_val, WValue subject_val);
-WValue w_regex_match_data(WValue regex_val, WValue subject_val);
-WValue w_regex_capture(WValue index_val);
 
 /* ---- Char boxing (requires lookup table) ---- */
 WValue w_box_char(uint32_t codepoint);
+WValue w_char_new(WValue v);
 
 /* ---- Decimal constructors ---- */
 WValue w_decimal(int64_t sig, int scale);
@@ -589,6 +571,9 @@ WValue w_decimal_sub(WValue a, WValue b);
 WValue w_decimal_mul(WValue a, WValue b);
 WValue w_decimal_div(WValue a, WValue b);
 WValue w_decimal_round(WValue value, WValue digits);
+int64_t w_prime_test_i64(int64_t n);
+int64_t w_prime_test_i64_12k(int64_t n);
+int64_t w_prime_test_i64_30k(int64_t n);
 
 /* ---- Currency constructors (0xFFFD subtype 01) ---- */
 WValue w_currency(int symbol_id, int64_t sig, int scale);
@@ -641,7 +626,6 @@ _Static_assert(sizeof(WUUIDBytes) == 16, "WUUIDBytes payload size");
 WValue w_uuid_from_hex(const char *hex);
 WValue w_uuid_parse(WValue text);
 WValue w_uuid_byte(WValue uuid, WValue index);
-WValue w_uuid_bytes(WValue uuid);
 WValue w_uuid_to_s(WValue uuid);
 WValue w_uuid_namespace_nil(void);
 WValue w_uuid_namespace_dns(void);
@@ -695,7 +679,6 @@ WValue w_color(int32_t r, int32_t g, int32_t b, int32_t a);
 WValue w_date(int year, int month, int day, int hour, int min, int sec, int tz);
 WValue w_date_new_w(WValue year, WValue month, WValue day, WValue hour,
                     WValue min, WValue sec, WValue tz);
-WValue w_date_from_ordinal(WValue year, WValue day_of_year);
 WValue w_date_today(void);
 WValue w_ipv4(int32_t a, int32_t b, int32_t c, int32_t d, int cidr);
 WValue w_ipv4_parse(WValue str_v);
@@ -1059,16 +1042,12 @@ int64_t w_string_byte_length(int64_t str_wval) __attribute__((pure));
 int64_t w_string_is_ascii(int64_t str_wval) __attribute__((pure));
 WValue w_string_normalize(WValue recv, int64_t form);
 int64_t w_string_grapheme_next(int64_t str_wval, int64_t byte_pos) __attribute__((pure));
-int64_t w_is_native_regex(int64_t v) __attribute__((pure));
-WValue w_regex_scan(WValue regex_val, WValue subject_val);
 WValue w_class_by_name(WValue name);
 int64_t w_string_first_byte(WValue value);
 void w_str_data(WValue v, char buf[6], const char **out, size_t *len);
 WValue w_algebra_rewrite_source(WValue source);
 WValue w_string_from_codepoint(WValue cp_v);
 WValue w_string_from_codes(WValue arr_v, WValue start_v, WValue len_v);
-WValue w_regex_scan_char(WValue subj, WValue start_v, WValue n_v, WValue ch_v);
-WValue w_regex_scan_flag(WValue subj, WValue start_v, WValue n_v, WValue flag_v);
 WValue w_string_from_byte(WValue b_v);
 
 /* ---- I/O ---- */

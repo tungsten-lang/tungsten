@@ -52,7 +52,7 @@ check("is_a Body", values.is_a?(Tungsten:AST:Body), false)
 check("is_a Array name", values.is_a?("Array"), true)
 check("is_a Body name", values.is_a?("Tungsten:AST:Body"), false)
 
-fields = ccall("w_value_fields", values)
+fields = Value.fields(values)
 check("inspector names body subtype", fields.include?("body"), true)
 
 check("empty size", empty.size, 0)

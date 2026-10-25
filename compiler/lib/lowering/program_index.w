@@ -18,7 +18,7 @@
     return nil
 
   kind = ast_kind(value)
-  if kind in (:int :string :symbol :bool :nil_val :float :ivar :cvar :gvar :self_ref :break :next :param)
+  if kind in (:int :string :symbol :bool :nil_val :float :ivar :cvar :gvar :self_ref :break :next)
     return nil
   if kind in (:var :class_ref)
     name = value.name

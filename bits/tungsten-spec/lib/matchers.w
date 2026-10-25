@@ -7,12 +7,15 @@
 # header), so the lambda-table style of the original design is off-limits.
 
 # Structural equality helper: compiled Array == is identity-based, so fall
-# back to comparing to_s renderings (same approach as the argon specs).
+# back to comparing to_s renderings for collections (same approach as the
+# argon specs).
 -> spec_values_equal(actual, expected)
   if actual == expected
     return true
   if actual != nil && expected != nil
-    return actual.to_s == expected.to_s
+    ta = type(actual)
+    if ta == "Array" || ta == "Hash"
+      return ta == type(expected) && actual.to_s == expected.to_s
   false
 
 # --- Equality ---
@@ -46,9 +49,6 @@
 
 # --- Truthiness / nil ---
 
--> be_nil
-  BeNilMatcher.new
-
 + BeNilMatcher
   -> new
 
@@ -61,8 +61,10 @@
   -> negated_failure_message(actual)
     "expected a value, got nil"
 
--> be_true
-  BeTrueMatcher.new
+$spec_be_nil_matcher = BeNilMatcher.new
+
+-> be_nil
+  $spec_be_nil_matcher
 
 + BeTrueMatcher
   -> new
@@ -76,8 +78,10 @@
   -> negated_failure_message(actual)
     "expected anything but true"
 
--> be_false
-  BeFalseMatcher.new
+$spec_be_true_matcher = BeTrueMatcher.new
+
+-> be_true
+  $spec_be_true_matcher
 
 + BeFalseMatcher
   -> new
@@ -91,8 +95,10 @@
   -> negated_failure_message(actual)
     "expected anything but false"
 
--> be_truthy
-  BeTruthyMatcher.new
+$spec_be_false_matcher = BeFalseMatcher.new
+
+-> be_false
+  $spec_be_false_matcher
 
 + BeTruthyMatcher
   -> new
@@ -106,8 +112,10 @@
   -> negated_failure_message(actual)
     "expected [actual] to be falsy"
 
--> be_falsy
-  BeFalsyMatcher.new
+$spec_be_truthy_matcher = BeTruthyMatcher.new
+
+-> be_truthy
+  $spec_be_truthy_matcher
 
 + BeFalsyMatcher
   -> new
@@ -121,8 +129,10 @@
   -> negated_failure_message(actual)
     "expected [actual] to be truthy"
 
--> be_empty
-  BeEmptyMatcher.new
+$spec_be_falsy_matcher = BeFalsyMatcher.new
+
+-> be_falsy
+  $spec_be_falsy_matcher
 
 + BeEmptyMatcher
   -> new
@@ -135,6 +145,11 @@
 
   -> negated_failure_message(actual)
     "expected [actual] not to be empty"
+
+$spec_be_empty_matcher = BeEmptyMatcher.new
+
+-> be_empty
+  $spec_be_empty_matcher
 
 # --- Type ---
 

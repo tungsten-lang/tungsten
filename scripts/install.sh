@@ -54,7 +54,7 @@ say "building the self-hosted compiler (stage 1 = stage 2 byte-identity is check
 # full `tungsten build` pipeline. Run from TUNGSTEN_HOME: the chained build
 # is cwd-sensitive — from inside a directory with a Bitfile it builds that
 # project, not the compiler.
-( cd "$TUNGSTEN_HOME" && bin/tungsten bootstrap )
+( cd "$TUNGSTEN_HOME" && bin/tungsten bootstrap --release --native )
 
 # --- link --------------------------------------------------------------------
 mkdir -p "$TUNGSTEN_BIN"

@@ -12,10 +12,15 @@
   -> new(@values)
 
   -> .zeros(n)
-    Contraction.new((0...n).map -> ~0.0)
+    Contraction.fill(n, ~0.0)
 
   -> .fill(n, v)
-    Contraction.new((0...n).map -> v)
+    out = []
+    i = 0
+    while i < n
+      out.push(v)
+      i += 1
+    Contraction.new(out)
 
   # Relaxed posture: every pair at its joint's current angle with no
   # co-contraction is not known without sensors, so rest is the midpoint.
@@ -25,7 +30,12 @@
   # Measured contraction from a sensor frame.
   -> .measured(frame)
     n = frame.muscle_count
-    Contraction.new((0...n).map -> frame.c(item))
+    out = []
+    i = 0
+    while i < n
+      out.push(frame.c(i))
+      i += 1
+    Contraction.new(out)
 
   -> size
     @values.size
@@ -37,23 +47,59 @@
     @values[i] = v
 
   -> copy
-    Contraction.new(@values.map -> item)
+    out = []
+    vs = @values
+    n = vs.size
+    i = 0
+    while i < n
+      out.push(vs[i])
+      i += 1
+    Contraction.new(out)
 
   -> +(other)
+    vs = @values
     o = other.values
-    Contraction.new((0...@values.size).map -> @values[item] + o[item])
+    n = vs.size
+    out = []
+    i = 0
+    while i < n
+      out.push(vs[i] + o[i])
+      i += 1
+    Contraction.new(out)
 
   -> -(other)
+    vs = @values
     o = other.values
-    Contraction.new((0...@values.size).map -> @values[item] - o[item])
+    n = vs.size
+    out = []
+    i = 0
+    while i < n
+      out.push(vs[i] - o[i])
+      i += 1
+    Contraction.new(out)
 
   -> scale(s)
-    Contraction.new(@values.map -> item * s)
+    vs = @values
+    n = vs.size
+    out = []
+    i = 0
+    while i < n
+      out.push(vs[i] * s)
+      i += 1
+    Contraction.new(out)
 
   # Componentwise a + (b - a) * t.
   -> lerp(other, t)
+    vs = @values
     o = other.values
-    Contraction.new((0...@values.size).map -> @values[item] + (o[item] - @values[item]) * t)
+    n = vs.size
+    out = []
+    i = 0
+    while i < n
+      vi = vs[i]
+      out.push(vi + (o[i] - vi) * t)
+      i += 1
+    Contraction.new(out)
 
   # Set joint `joint` to angle q with co-contraction `stiff` (0 = none; 0.2
   # means each muscle is commanded 0.1 shorter than the posture needs).
@@ -87,20 +133,38 @@
   -> new(@values)
 
   -> .zeros(n)
-    Rate.new((0...n).map -> ~0.0)
+    out = []
+    i = 0
+    while i < n
+      out.push(~0.0)
+      i += 1
+    Rate.new(out)
 
   -> .between(from, to, seconds)
     f = from.values
     t = to.values
     inv = ~1.0 / seconds
-    Rate.new((0...f.size).map -> inv * (t[item] - f[item]))
+    n = f.size
+    out = []
+    i = 0
+    while i < n
+      out.push(inv * (t[i] - f[i]))
+      i += 1
+    Rate.new(out)
 
   -> [](i)
     @values[i]
 
   # Displacement after `seconds` at this rate.
   -> over(seconds)
-    Contraction.new(@values.map -> item * seconds)
+    vs = @values
+    n = vs.size
+    out = []
+    i = 0
+    while i < n
+      out.push(vs[i] * seconds)
+      i += 1
+    Contraction.new(out)
 
 # A posture: joint angles plus stiffness, turned into a Contraction on demand.
 # Only joints named here are written; the rest of the base vector is kept.
@@ -150,17 +214,28 @@
     c = base.copy
     q = g.reference_posture
     n = body.size
-    touched = (0...n).map -> false
-    stiff = (0...n).map -> ~0.0
+    touched = []
+    stiff = []
+    k = 0
+    while k < n
+      touched.push(false)
+      stiff.push(~0.0)
+      k += 1
+    nj = @joints.size
     i = 0
-    while i < @joints.size
+    while i < nj
       j = g.joint(@joints[i])
       if j != nil
         q[j] = @angles[i]
         s = @stiff[i]
-        g.crossing(j).each ->(m)
+        cr = g.crossing(j)
+        nc = cr.size
+        ci = 0
+        while ci < nc
+          m = cr[ci]
           touched[m] = true
           stiff[m] = s if s > stiff[m]
+          ci += 1
       i += 1
     m = 0
     while m < n

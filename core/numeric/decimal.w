@@ -1,16 +1,36 @@
 + Decimal < Real
   # Exact scalar operations backed by the packed/heap Decimal runtime.
   -> abs
+    self < 0 ? -self : self
+
   -> to_f
+    ccall("w_num_to_float", self)
+
   -> to_i
+    self.to_f().to_i()
+
   -> to_d
+    self
+
   -> to_s
     ccall("w_to_s", self)
+
   -> floor
+    self.to_f().floor()
+
   -> ceil
+    self.to_f().ceil()
+
   -> round(digits = 0)
+    if digits == nil || digits <= 0
+      return self.to_f().round()
+    ccall("w_decimal_round", self, digits)
+
   -> sqrt
+    Math.sqrt(self.to_f())
+
   -> sq
+    self * self
 
   # Decimal constructors and arithmetic already canonicalize the significand
   # and scale, so normalization is receiver identity.

@@ -43,7 +43,7 @@ in Tungsten:Flame
     out.push(self.bg(width, h))
     out.push(self.title_text(title, width))
     out.push("<g id=\"frames\">")
-    out.push(self.emit_children(root, 0, total, plot_w, margin, max_d, frame_h, top))
+    self.emit_children_into(out, root, 0, total, plot_w, margin, max_d, frame_h, top)
     out.push("</g>")
     out.push("<text id=\"details\" x=\"" + margin.to_s() + "\" y=\"" + (h - 9).to_s() + "\"> </text>")
     out.push("<text id=\"info\" x=\"" + (width - margin).to_s() + "\" y=\"" + (h - 9).to_s() + "\" text-anchor=\"end\" font-size=\"12px\" fill=\"#666\">" + total.to_s() + " samples</text>")
@@ -81,16 +81,20 @@ in Tungsten:Flame
 
   -> .emit_children(node, x_start, total, plot_w, margin, max_d, frame_h, top)
     parts = []
+    self.emit_children_into(parts, node, x_start, total, plot_w, margin, max_d, frame_h, top)
+    parts.join("")
+
+  -> .emit_children_into(out, node, x_start, total, plot_w, margin, max_d, frame_h, top)
     kids = self.sort_children(node[:children])
     cur = x_start
     i = 0
-    while i < kids.size()
+    n = kids.size()
+    while i < n
       child = kids[i]
-      parts.push(self.emit_frame(child, cur, total, plot_w, margin, max_d, frame_h, top))
-      parts.push(self.emit_children(child, cur, total, plot_w, margin, max_d, frame_h, top))
+      out.push(self.emit_frame(child, cur, total, plot_w, margin, max_d, frame_h, top))
+      self.emit_children_into(out, child, cur, total, plot_w, margin, max_d, frame_h, top)
       cur = cur + child[:count]
       i = i + 1
-    parts.join("")
 
   -> .emit_frame(node, x_start, total, plot_w, margin, max_d, frame_h, top)
     name = node[:name]
@@ -112,7 +116,8 @@ in Tungsten:Flame
     label = self.fit_label(name, pw)
     txt = ""
     if label != ""
-      txt = "<text x=\"" + (px + 3).to_s() + "\" y=\"" + (y + frame_h - 5).to_s() + "\" font-size=\"12px\">" + self.xml_escape(label) + "</text>"
+      label_esc = label == name ? esc : self.xml_escape(label)
+      txt = "<text x=\"" + (px + 3).to_s() + "\" y=\"" + (y + frame_h - 5).to_s() + "\" font-size=\"12px\">" + label_esc + "</text>"
     g + rect + txt + "</g>"
 
   # ---- Formatting helpers ----
@@ -155,9 +160,9 @@ in Tungsten:Flame
   -> .name_hash(name)
     h = 2166136261
     i = 0
-    while i < name.size()
-      ch = name.slice(i, 1)
-      h = (h * 31 + ch.ord) % 2147483629
+    n = name.size()
+    while i < n
+      h = (h * 31 + name.byte_at(i)) % 2147483629
       i = i + 1
     h
 

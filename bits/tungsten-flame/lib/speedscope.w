@@ -14,57 +14,48 @@ in Tungsten:Flame
     counts = self.dedupe_counts(folded_text)
     stacks = counts.keys().sort()
 
-    # Frame table: each unique frame once, indexed in first-seen order
-    # across the sorted stacks (deterministic).
-    frame_names = []
+    # Frame table + samples (index arrays, root→leaf) + parallel weights + total
+    # in a single pass across the sorted stacks.
+    frames_json = []
     frame_index = {}
-    si = 0
-    while si < stacks.size()
-      frames = stacks[si].split(";")
-      fi = 0
-      while fi < frames.size()
-        f = frames[fi]
-        if !frame_index.has_key?(f)
-          frame_index[f] = frame_names.size()
-          frame_names.push(f)
-        fi = fi + 1
-      si = si + 1
-
-    # Samples (index arrays, root→leaf) + parallel weights + total.
     samples = []
     weights = []
     total = 0
     si = 0
-    while si < stacks.size()
+    n_stacks = stacks.size()
+    while si < n_stacks
       stack = stacks[si]
       frames = stack.split(";")
       idxs = []
       fi = 0
-      while fi < frames.size()
-        idxs.push(frame_index[frames[fi]].to_s())
+      n_frames = frames.size()
+      while fi < n_frames
+        f = frames[fi]
+        if frame_index.has_key?(f)
+          idx_s = frame_index[f]
+        else
+          idx_s = frames_json.size().to_s()
+          frame_index[f] = idx_s
+          frames_json.push("{\"name\":\"" + self.json_escape(f) + "\"}")
+        idxs.push(idx_s)
         fi = fi + 1
+      c = counts[stack]
       samples.push("\[" + idxs.join(",") + "\]")
-      weights.push(counts[stack].to_s())
-      total = total + counts[stack]
+      weights.push(c.to_s())
+      total = total + c
       si = si + 1
 
-    # Frame table JSON objects.
-    frames_json = []
-    fi = 0
-    while fi < frame_names.size()
-      frames_json.push("{\"name\":\"" + self.json_escape(frame_names[fi]) + "\"}")
-      fi = fi + 1
-
+    esc_name = self.json_escape(profile_name)
     out = []
     out.push("{")
     out.push("\"$schema\":\"https://www.speedscope.app/file-format-schema.json\",")
     out.push("\"exporter\":\"tungsten-flame\",")
-    out.push("\"name\":\"" + self.json_escape(profile_name) + "\",")
+    out.push("\"name\":\"" + esc_name + "\",")
     out.push("\"activeProfileIndex\":0,")
     out.push("\"shared\":{\"frames\":\[" + frames_json.join(",") + "\]},")
     out.push("\"profiles\":\[{")
     out.push("\"type\":\"sampled\",")
-    out.push("\"name\":\"" + self.json_escape(profile_name) + "\",")
+    out.push("\"name\":\"" + esc_name + "\",")
     out.push("\"unit\":\"none\",")
     out.push("\"startValue\":0,")
     out.push("\"endValue\":" + total.to_s() + ",")

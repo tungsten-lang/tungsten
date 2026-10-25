@@ -46,9 +46,11 @@ COMMANDS
     bootstrap            Fresh-clone build via the C VM (bash; no Ruby). Runs
                          doctor, builds stage 0/runtime/stage 1, then hands
                          those artifacts to the full build pipeline.
-    build                Full self-host: stage 1 + stage 2 (byte-identical IR),
-                         install, bits. Reuses a matching bootstrap handoff
-                         rather than rebuilding runtime and stage 1.
+    build                Full self-host: stage 1 + stage 2 (byte-identical IR).
+                         On --release, also builds bit entry points; --install
+                         ticks VERSION and installs to TUNGSTEN_HOME.
+    install              Install the last verified --release --native build and
+                         its bits to TUNGSTEN_HOME, ticking VERSION.
     release [VERSION]    Run the root gate, tag, and push a native GitHub
                          release matrix.
     gpu-bench            Emit, compile, dispatch, verify, and time the baseline
@@ -68,14 +70,14 @@ COMMANDS
                          per-code off/warning/error severity overrides.
     explain CODE         Explain a stable compiler/runtime error code
     bit ...              The Bit package manager (install, new, search, ...)
-    ai / symbolicate / forge / flame
+    ai / symbolicate / forge / flame / profile
                          Additional tools
 
     doctor, bootstrap, and release are pure bash (bin/commands/*.sh).
     Doctor and bootstrap work on a fresh clone; bootstrap chains
     into the full `tungsten build` pipeline. compile, run, console, start,
-    new, fmt, forge, flame, bit, ai, and symbolicate use the compiled CLI
-    when present. `build` is driven by the Tungsten orchestrator
+    new, fmt, forge, flame, profile, bit, ai, and symbolicate use the compiled
+    CLI when present. `build` is driven by the Tungsten orchestrator
     (bin/commands/build.w) and requires an existing compiler.
 
     The REPL is started with `tungsten console` or the `wit` binary — not

@@ -252,9 +252,6 @@
   out << declare_fn("w_string", wv, "ptr")
   out << declare_fn("w_string_content_equal", wv, wv2)
   out << declare_fn("w_str_to_sym", wv, wv)
-  out << declare_fn("w_regex_new", wv, wv2)
-  out << declare_fn("w_regex_match", wv, wv2)
-  out << declare_fn("w_regex_capture", wv, wv)
   # w_float's body (w_box_double) has a NaN-normalization branch — not worth
   # hand-inlining (miscompile risk on the encoding) and it isn't called via
   # @w_float in practice (float boxing lowers inline). Drop the dead alwaysinline.
@@ -275,7 +272,6 @@
   out << declare_fn("w_duration_ns", wv, "i64")
   out << declare_fn("w_duration_months_ms", wv, narrow_runtime_param_types("w_duration_months_ms").join(", "))
   out << declare_fn("w_date", wv, narrow_runtime_param_types("w_date").join(", "))
-  out << declare_fn("w_date_from_ordinal", wv, wv2)
   out << declare_fn("w_ipv4", wv, narrow_runtime_param_types("w_ipv4").join(", "))
   out << declare_fn("w_uuid_from_hex", wv, "ptr")
   out << declare_fn("w_ipv6_from_string", wv, "ptr, i32")
@@ -284,6 +280,7 @@
   out << declare_fn("w_rational_numerator", wv, wv)
   out << declare_fn("w_rational_denominator", wv, wv)
   out << declare_fn("w_box_char", wv, "i32")
+  out << declare_fn("w_char_new", wv, wv)
   out << declare_fn("w_color", wv, narrow_runtime_param_types("w_color").join(", "))
   out << declare_fn("w_register_unit", "void", "i32, ptr")
   out << declare_fn("w_register_unit_wv", "void", i32_wv)
@@ -569,6 +566,7 @@
   out << declare_fn("w_wire_store_reset", "i64", "i64")
   out << declare_fn("w_wire_store_mark", "i64", "")
   out << declare_fn("w_wire_clone", wv, wv)
+  out << declare_fn("w_wire_temp_operands", wv, wv)
   out << declare_fn("w_wire_sequence_from_array", wv, wv)
   out << declare_fn_attrs("w_wire_sequence_size", "i64", wv,
                           "nounwind willreturn memory(read)")
@@ -618,6 +616,9 @@
   out << declare_fn("w_thread_spawn", wv, wv)
   out << declare_fn("w_thread_spawn_slots", wv, wv)
   out << declare_fn("w_thread_join", wv, wv)
+  out << declare_fn("w_thread_join_timeout", wv, wv2)
+  out << declare_fn("w_thread_alive", wv, wv)
+  out << declare_fn("w_thread_kill", wv, wv)
 
   # Channels
   out << declare_fn("w_mutex_new", wv, "")
@@ -1152,21 +1153,30 @@
   out.to_s()
 
 -> streq_fast_helper_ir()
-  out = StringBuffer(700)
+  out = StringBuffer(900)
   out << "define private i64 @__w_streq_fast(i64 %x, i64 %lit) alwaysinline nounwind {\n"
   out << "entry:\n"
-  out << "  %eqb = icmp eq i64 %x, %lit\n"
+  out << "  %litm = and i64 %lit, 14\n"
+  out << "  %is_slab = icmp eq i64 %litm, 12\n"
+  out << "  %mask = select i1 %is_slab, i64 -16911433729, i64 -1\n"
+  out << "  %xm = and i64 %x, %mask\n"
+  out << "  %eqb = icmp eq i64 %xm, %lit\n"
   out << "  br i1 %eqb, label %t, label %c\n"
   out << "t:\n"
   out << "  ret i64 2\n"
   out << "c:\n"
   out << "  %hi = lshr i64 %x, 48\n"
   out << "  %iss = icmp eq i64 %hi, 65529\n"
-  out << "  %md = lshr i64 %x, 1\n"
-  out << "  %md3 = and i64 %md, 7\n"
-  out << "  %nh = icmp ule i64 %md3, 5\n"
-  out << "  %canon = and i1 %iss, %nh\n"
-  out << "  br i1 %canon, label %f, label %s\n"
+  out << "  br i1 %iss, label %str_ne, label %non_str\n"
+  out << "str_ne:\n"
+  out << "  %xmode = and i64 %x, 14\n"
+  out << "  %xheap = icmp eq i64 %xmode, 14\n"
+  out << "  %need_slow = and i1 %is_slab, %xheap\n"
+  out << "  br i1 %need_slow, label %s, label %f\n"
+  out << "non_str:\n"
+  out << "  %xm16 = add i64 %x, -16\n"
+  out << "  %isobj = icmp ult i64 %xm16, 281474976710640\n"
+  out << "  br i1 %isobj, label %s, label %f\n"
   out << "f:\n"
   out << "  ret i64 1\n"
   out << "s:\n"
@@ -1224,15 +1234,19 @@
   out.to_s()
 
 # String byte length under a :string type fact. The pure SSO leaf only
-# extracts the mode bits. The wrapper is read-only for every storage mode:
-# its fallback reads slab/heap headers or a rope's existing total_len and
-# never flattens the rope.
+# extracts the mode bits (or cached slab length in bits 28..33). The wrapper
+# is read-only for every storage mode: its fallback reads slab/heap headers
+# or a rope's existing total_len and never flattens the rope.
 -> string_size_fast_helper_ir()
-  out = StringBuffer(700)
+  out = StringBuffer(900)
   out << "define private i64 @__w_sso_size(i64 %str) alwaysinline nounwind willreturn memory(none) speculatable {\n"
   out << "entry:\n"
   out << "  %mode.raw = lshr i64 %str, 1\n"
-  out << "  %len = and i64 %mode.raw, 7\n"
+  out << "  %mode = and i64 %mode.raw, 7\n"
+  out << "  %is.slab = icmp eq i64 %mode, 6\n"
+  out << "  %slab.raw = lshr i64 %str, 28\n"
+  out << "  %slab.len = and i64 %slab.raw, 63\n"
+  out << "  %len = select i1 %is.slab, i64 %slab.len, i64 %mode\n"
   out << "  ret i64 %len\n"
   out << "}\n"
   out << "define private i64 @__w_string_byte_length_fast(i64 %str) alwaysinline nounwind willreturn memory(read) {\n"
@@ -1242,7 +1256,13 @@
   out << "  %mode.raw = lshr i64 %str, 1\n"
   out << "  %mode = and i64 %mode.raw, 7\n"
   out << "  %is.inline = icmp ule i64 %mode, 5\n"
-  out << "  %is.sso = and i1 %is.stringy, %is.inline\n"
+  out << "  %is.slab = icmp eq i64 %mode, 6\n"
+  out << "  %slab.raw = lshr i64 %str, 28\n"
+  out << "  %slab.len = and i64 %slab.raw, 63\n"
+  out << "  %slab.cached = icmp ne i64 %slab.len, 0\n"
+  out << "  %is.slab.fast = and i1 %is.slab, %slab.cached\n"
+  out << "  %is.fast.mode = or i1 %is.inline, %is.slab.fast\n"
+  out << "  %is.sso = and i1 %is.stringy, %is.fast.mode\n"
   out << "  br i1 %is.sso, label %fast, label %slow, !prof !31411\n"
   out << "fast:\n"
   out << "  %fv = call i64 @__w_sso_size(i64 %str)\n"
@@ -1261,7 +1281,7 @@
 #   anything else -> w_eq. One inline side alone is NOT enough: the other
 #   side could be a short rope with equal content, which only w_eq resolves.
 -> streq2_fast_helper_ir()
-  out = StringBuffer(760)
+  out = StringBuffer(900)
   out << "define private i64 @__w_streq2_fast(i64 %a, i64 %b) alwaysinline nounwind {\n"
   out << "entry:\n"
   out << "  %eqb = icmp eq i64 %a, %b\n"
@@ -1271,20 +1291,24 @@
   out << "c:\n"
   out << "  %ha = lshr i64 %a, 48\n"
   out << "  %sa = icmp eq i64 %ha, 65529\n"
-  out << "  %ma = lshr i64 %a, 1\n"
-  out << "  %ma3 = and i64 %ma, 7\n"
-  out << "  %na = icmp ule i64 %ma3, 5\n"
+  out << "  %ma = and i64 %a, 14\n"
+  out << "  %na = icmp ne i64 %ma, 14\n"
   out << "  %ca = and i1 %sa, %na\n"
   out << "  %hb = lshr i64 %b, 48\n"
   out << "  %sb = icmp eq i64 %hb, 65529\n"
-  out << "  %mb = lshr i64 %b, 1\n"
-  out << "  %mb3 = and i64 %mb, 7\n"
-  out << "  %nb = icmp ule i64 %mb3, 5\n"
+  out << "  %mb = and i64 %b, 14\n"
+  out << "  %nb = icmp ne i64 %mb, 14\n"
   out << "  %cb = and i1 %sb, %nb\n"
   out << "  %canon = and i1 %ca, %cb\n"
-  out << "  br i1 %canon, label %f, label %s\n"
-  out << "f:\n"
-  out << "  ret i64 1\n"
+  out << "  br i1 %canon, label %ck_slab, label %s\n"
+  out << "ck_slab:\n"
+  out << "  %aslab = icmp eq i64 %ma, 12\n"
+  out << "  %xab = xor i64 %a, %b\n"
+  out << "  %xabm = and i64 %xab, -16911433729\n"
+  out << "  %seq = icmp eq i64 %xabm, 0\n"
+  out << "  %m6eq = and i1 %aslab, %seq\n"
+  out << "  %r = select i1 %m6eq, i64 2, i64 1\n"
+  out << "  ret i64 %r\n"
   out << "s:\n"
   out << "  %sv = call i64 @w_eq(i64 %a, i64 %b)\n"
   out << "  ret i64 %sv\n"

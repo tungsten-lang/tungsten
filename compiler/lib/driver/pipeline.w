@@ -236,16 +236,14 @@
 -> incremental_abs_path(p)
   if p.starts_with?("/")
     return p
-  pwd = capture("pwd -P 2>/dev/null").strip()
+  pwd = driver_cwd()
   if pwd == ""
     return p
   pwd + "/" + p
 
 -> incremental_cache_slot(file_path, out_path, identity)
   dir = compiler_cache_dir()
-  if dir == nil
-    return nil
-  if system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
+  if !ensure_driver_dir(dir)
     return nil
   # Hash ABSOLUTE paths AND the full identity into the slot name: verbatim
   # paths overflowed NAME_MAX on deep trees (every store failed "File name
@@ -342,12 +340,10 @@
     return nil
   base = incremental_identity("", "")
   cache_dir = compiler_cache_dir()
-  if base == nil || cache_dir == nil
-    return nil
-  if system("mkdir -p " + dev_runtime_shell_quote(cache_dir)) != true
+  if base == nil || !ensure_driver_dir(cache_dir)
     return nil
 
-  flags = [onig_cflags(), onig_ldflags(), tls_cflags(), tls_ldflags(),
+  flags = [tls_cflags(), tls_ldflags(),
            http2_ldflags(), mimalloc_link_flags()]
   if needs_zstd
     flags.push(zstd_cflags())
@@ -371,11 +367,9 @@
 
 -> link_artifact_cache_store(slot, out_path)
   nonce = clock.to_s()
-  tmp = slot + ".tmp." + nonce
-  if system("cp -p " + dev_runtime_shell_quote(out_path) + " " + dev_runtime_shell_quote(tmp)) != true
-    return nil
-  if system("mv -f " + dev_runtime_shell_quote(tmp) + " " + dev_runtime_shell_quote(slot)) != true
-    system("rm -f " + dev_runtime_shell_quote(tmp))
+  q_tmp = dev_runtime_shell_quote(slot + ".tmp." + nonce)
+  if system("cp -p " + dev_runtime_shell_quote(out_path) + " " + q_tmp + " && mv -f " + q_tmp + " " + dev_runtime_shell_quote(slot)) != true
+    system("rm -f " + q_tmp)
   nil
 
 # Valid cached slot for this identity? Reads the manifest and revalidates
@@ -467,20 +461,15 @@
   # publication: a reader sees either the old pair or the new pair.
   nonce = clock.to_s()
   q_slot_bin = dev_runtime_shell_quote(slot + ".bin")
-  tmp = slot + ".bin.tmp." + nonce
-  if system("cp -p " + dev_runtime_shell_quote(out_path) + " " + dev_runtime_shell_quote(tmp)) != true
-    return nil
-  if system("mv -f " + dev_runtime_shell_quote(tmp) + " " + q_slot_bin) != true
-    system("rm -f " + dev_runtime_shell_quote(tmp))
-    return nil
-  if file?(sidemap_path)
-    system("cp -p " + dev_runtime_shell_quote(sidemap_path) + " " + dev_runtime_shell_quote(slot + ".sidemap"))
-  else
-    system("rm -f " + dev_runtime_shell_quote(slot + ".sidemap"))
+  q_tmp = dev_runtime_shell_quote(slot + ".bin.tmp." + nonce)
+  q_slot_side = dev_runtime_shell_quote(slot + ".sidemap")
   mtmp = slot + ".manifest.tmp." + nonce
+  q_mtmp = dev_runtime_shell_quote(mtmp)
+  q_manifest = dev_runtime_shell_quote(slot + ".manifest")
   write_file(mtmp, parts.join("\n") + "\n")
-  if system("mv -f " + dev_runtime_shell_quote(mtmp) + " " + dev_runtime_shell_quote(slot + ".manifest")) != true
-    system("rm -f " + dev_runtime_shell_quote(mtmp))
+  side_cmd = file?(sidemap_path) ? ("cp -p " + dev_runtime_shell_quote(sidemap_path) + " " + q_slot_side) : ("rm -f " + q_slot_side)
+  if system("cp -p " + dev_runtime_shell_quote(out_path) + " " + q_tmp + " && mv -f " + q_tmp + " " + q_slot_bin + " && " + side_cmd + " && mv -f " + q_mtmp + " " + q_manifest) != true
+    system("rm -f " + q_tmp + " " + q_mtmp)
   nil
 
 -> compile_one(file_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only_arg = false, quiet = false)

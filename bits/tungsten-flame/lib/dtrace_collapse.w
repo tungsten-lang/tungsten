@@ -77,12 +77,13 @@ in Tungsten:Flame
     Tungsten:Flame:Folded.all_digits?(s)
 
   -> .all_hex?(s)
-    if s.size() == 0
+    n = s.size()
+    if n == 0
       return false
     i = 0
-    while i < s.size()
-      c = s.slice(i, 1)
-      if !"0123456789abcdefABCDEF".include?(c)
+    while i < n
+      b = s.byte_at(i)
+      if !((b >= 48 && b <= 57) || (b >= 97 && b <= 102) || (b >= 65 && b <= 70))
         return false
       i = i + 1
     true

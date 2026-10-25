@@ -1,14 +1,14 @@
-## u64: n, steps
+## u64: n, steps, k
 fn collatz_steps(n)
-  steps = 0
+  k = cttz(n)
+  n = n >> k
+  steps = k
 
-  while n != 1
-    if n % 2 == 0
-      n = n / 2
-    else
-      n = 3 * n + 1
-
-    steps += 1
+  while n > 1
+    n = 3 * n + 1
+    k = cttz(n)
+    n = n >> k
+    steps += 1 + k
   return steps
 
 fn main

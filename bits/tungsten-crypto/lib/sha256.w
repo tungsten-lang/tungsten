@@ -118,16 +118,16 @@
 
 # Small sigma (message schedule) and big sigma (round function) mixers.
 -> sha256_ssig0(x) (i64) i64
-  rotr32(x, 7) ^ rotr32(x, 18) ^ (x >> 3)
+  ((x >> 7) | ((x & 0x7F) << 25)) ^ ((x >> 18) | ((x & 0x3FFFF) << 14)) ^ (x >> 3)
 
 -> sha256_ssig1(x) (i64) i64
-  rotr32(x, 17) ^ rotr32(x, 19) ^ (x >> 10)
+  ((x >> 17) | ((x & 0x1FFFF) << 15)) ^ ((x >> 19) | ((x & 0x7FFFF) << 13)) ^ (x >> 10)
 
 -> sha256_bsig0(x) (i64) i64
-  rotr32(x, 2) ^ rotr32(x, 13) ^ rotr32(x, 22)
+  ((x >> 2) | ((x & 0x3) << 30)) ^ ((x >> 13) | ((x & 0x1FFF) << 19)) ^ ((x >> 22) | ((x & 0x3FFFFF) << 10))
 
 -> sha256_bsig1(x) (i64) i64
-  rotr32(x, 6) ^ rotr32(x, 11) ^ rotr32(x, 25)
+  ((x >> 6) | ((x & 0x3F) << 26)) ^ ((x >> 11) | ((x & 0x7FF) << 21)) ^ ((x >> 25) | ((x & 0x1FFFFFF) << 7))
 
 # ---- message schedule -----------------------------------------------------
 
@@ -343,12 +343,11 @@
 
 # SHA-256 of a Tungsten string's bytes. Returns the 8-word digest.
 -> sha256_string_words(s, k)
-  bs = s.bytes.to_a
-  n = bs.size ## i64
+  n = s.size ## i64
   buf = i64[n + 1]
   i = 0 ## i64
   while i < n
-    buf[i] = bs[i]
+    buf[i] = s.byte_at(i)
     i += 1
   sha256_bytes(buf, n, k)
 

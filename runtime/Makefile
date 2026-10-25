@@ -2,11 +2,6 @@ CLANG = clang
 HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null)
 ZSTD_CFLAGS = $(shell pkg-config --cflags libzstd 2>/dev/null || { test -n "$(HOMEBREW_PREFIX)" && test -f "$(HOMEBREW_PREFIX)/include/zstd.h" && printf '%s\n' '-I$(HOMEBREW_PREFIX)/include'; })
 ZSTD_LDFLAGS = $(shell pkg-config --libs libzstd 2>/dev/null || { if test -n "$(HOMEBREW_PREFIX)" && { test -f "$(HOMEBREW_PREFIX)/lib/libzstd.dylib" || test -f "$(HOMEBREW_PREFIX)/lib/libzstd.a"; }; then printf '%s\n' '-L$(HOMEBREW_PREFIX)/lib -lzstd'; else printf '%s\n' '-lzstd'; fi; })
-ONIG_CFLAGS = $(shell pkg-config --cflags oniguruma 2>/dev/null || { test -n "$(HOMEBREW_PREFIX)" && test -f "$(HOMEBREW_PREFIX)/include/oniguruma.h" && printf '%s\n' '-I$(HOMEBREW_PREFIX)/include'; })
-ONIG_LDFLAGS = $(shell pkg-config --libs oniguruma 2>/dev/null || { test -n "$(HOMEBREW_PREFIX)" && { test -f "$(HOMEBREW_PREFIX)/lib/libonig.dylib" || test -f "$(HOMEBREW_PREFIX)/lib/libonig.a"; } && printf '%s\n' '-L$(HOMEBREW_PREFIX)/lib -lonig'; })
-ifneq ($(strip $(ONIG_CFLAGS)),)
-  ONIG_CFLAGS += -DTUNGSTEN_ONIG
-endif
 BENCH_FLAGS = -O3 -mcpu=native
 
 # GC removed — using malloc/calloc directly
@@ -67,8 +62,8 @@ endif
 QUARTZ_SRC = quartz.c
 RUNTIME_SRCS = runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c unicode_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(QUARTZ_SRC)
 RUNTIME_DEPS = runtime.c terminal_input.c ssmr_witness.c runtime.h wvalue.h ast_schema_generated.h event_loop.h $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(QUARTZ_SRC) quartz.h
-RUNTIME_CFLAGS = $(WARN_FLAGS) $(GC_CFLAGS) $(TLS_CFLAGS) $(ONIG_CFLAGS)
-RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(ONIG_LDFLAGS) $(PLATFORM_LDFLAGS)
+RUNTIME_CFLAGS = $(WARN_FLAGS) $(GC_CFLAGS) $(TLS_CFLAGS)
+RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(PLATFORM_LDFLAGS)
 
 # Usage: make compile SRC=path/to/file.ll
 # Produces an executable next to the .ll file

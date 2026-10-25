@@ -24,9 +24,37 @@ in Tungsten:Flame
   # name ascending.
   -> .rank(text)
     parsed = self.parse_folded(text)
-    map = parsed[:map]
-    selfc = self.self_from_map(map)
-    incl = self.inclusive_from_map(map)
+    self.rank_from_map(parsed[:map])
+
+  -> .rank_from_map(map)
+    selfc = {}
+    incl = {}
+    keys = map.keys()
+    i = 0
+    n = keys.size()
+    while i < n
+      stack = keys[i]
+      count = map[stack]
+      frames = stack.split(";")
+      fsize = frames.size()
+      if fsize > 0
+        seen = {}
+        fi = 0
+        while fi < fsize
+          f = Tungsten:Flame:Folded.normalize_frame(frames[fi])
+          if fi == fsize - 1
+            if selfc.has_key?(f)
+              selfc[f] = selfc[f] + count
+            else
+              selfc[f] = count
+          if !seen.has_key?(f)
+            seen[f] = true
+            if incl.has_key?(f)
+              incl[f] = incl[f] + count
+            else
+              incl[f] = count
+          fi = fi + 1
+      i = i + 1
     frames = incl.keys()
     rows = []
     i = 0
@@ -60,7 +88,7 @@ in Tungsten:Flame
     out.push("")
     out.push("  " + bold + "  TOTAL    SELF  FUNCTION" + reset)
 
-    rows = self.rank(text)
+    rows = self.rank_from_map(parsed[:map])
     limit = top_n
     if limit > rows.size()
       limit = rows.size()

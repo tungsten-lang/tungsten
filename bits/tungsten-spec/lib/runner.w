@@ -53,12 +53,12 @@ $spec_quiet = env("TUNGSTEN_SPEC_QUIET") == "1"
   nil
 
 -> spec_indent
-  s = ""
-  i = 0
-  while i < $spec_depth
-    s = s + "  "
-    i += 1
-  s
+  d = $spec_depth
+  return "" if d <= 0
+  return "  " if d == 1
+  return "    " if d == 2
+  return "      " if d == 3
+  "  " * d
 
 # Depth mutators — a `$global` statement directly after a dedent misparses
 # (parser bug: `$name` binds as a view-field postfix), so callers use these

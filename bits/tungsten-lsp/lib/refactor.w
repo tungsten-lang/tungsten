@@ -7,9 +7,31 @@
   {"start": {"line": line, "character": first}, "end": {"line": line, "character": last}}
 
 -> refactor_tokens(text)
+  if text.size() > 32 && parse_cache[:tokens_text] == text && parse_cache[:tokens] != nil
+    return parse_cache[:tokens]
   lexer = Lexer.new(text, "refactor.w")
   count = lexer.tokenize()
   chars = lexer.chars
+  rows = []
+  if chars.size() == text.size()
+    line_at = lexer.line_at
+    col_at = lexer.col_at
+    packed_tokens = lexer.packed_tokens
+    values = lexer.values
+    i = 0
+    while i < count
+      packed = packed_tokens[i]
+      kind = parser_tok_type(packed)
+      if !(kind in (T_SP T_NEWLINE T_INDENT T_DEDENT T_EOF))
+        off = parser_tok_off(packed)
+        length = parser_tok_len(packed)
+        rows.push({kind: kind, value: values[i], off: off, length: length,
+          line: line_at[off] - 1, col: col_at[off] - 1, end_col: col_at[off + length] - 1})
+      i += 1
+    if text.size() > 32
+      parse_cache[:tokens_text] = text
+      parse_cache[:tokens] = rows
+    return rows
   columns = []
   column = 0
   ci = 0
@@ -22,7 +44,6 @@
       column += ch.ord() > 65535 ? 2 : 1
     ci += 1
   columns.push(column)
-  rows = []
   i = 0
   while i < count
     packed = lexer.packed_tokens[i]
@@ -85,13 +106,14 @@
       return {error: "The new name must be one valid Tungsten identifier"}
   defs = []
   collect_defs(ast, defs)
+  total_lines = text_lines(text).size()
   di = 0
   while di < defs.size()
     defn = defs[di]
     if ast_kind(defn) in (:fn_def :method_def)
       start_line = node_line(defn)
       start_col = defn.col - 1
-      end_line = text.split("\n").size()
+      end_line = total_lines
       ti = 0
       while ti < tokens.size()
         token = tokens[ti]
@@ -165,7 +187,7 @@
     i += 1
   seen = {}
   actions = []
-  lines = text.split("\n")
+  lines = text_lines(text)
   i = 0
   while i < lines.size()
     line = lines[i]

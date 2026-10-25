@@ -8,19 +8,34 @@
 # tells a future incremental compiler when a lowered Core partition is safe to
 # reuse and why it fell back when it is not.
 
--> core_source_path?(path)
+core_source_root_memo = {}
+
+-> core_relative_source_path(path)
   if path == nil
-    return false
+    return nil
   if path.starts_with?("core/")
-    return true
+    return path
   if path.byte_at(0) != 47
-    return false
+    return nil
   root = env("TUNGSTEN_ROOT")
-  if root != nil
+  if root != nil && root != ""
     prefix = root + "/core/"
     if path.starts_with?(prefix)
-      return true
-  false
+      return path.slice(root.size() + 1, path.size() - root.size() - 1)
+  idx = path.index("/core/")
+  while idx != nil
+    candidate = path.slice(0, idx)
+    known = core_source_root_memo[candidate]
+    if known == nil
+      known = file?(candidate + "/core/tungsten.w") == true
+      core_source_root_memo[candidate] = known
+    if known == true
+      return path.slice(idx + 1, path.size() - idx - 1)
+    idx = path.index("/core/", idx + 5)
+  nil
+
+-> core_source_path?(path)
+  core_relative_source_path(path) != nil
 
 -> stable_core_partition_expressions(expressions)
   core = []

@@ -47,8 +47,11 @@
   -> .parse(header)
     result = {}
     if header != nil && !header.empty?
-      header.split(";").each -> (segment)
-        pair = segment.strip
+      segments = header.split(";")
+      i = 0
+      n = segments.size
+      while i < n
+        pair = segments[i].strip
         if !pair.empty?
           eq = pair.index("=")
           if eq == nil
@@ -58,13 +61,14 @@
             value = pair.slice(eq + 1, pair.size - eq - 1).strip
             if !name.empty? && !result.key?(name)
               result[name] = self.unquote(value)
+        i += 1
     result
 
   # Strip one surrounding pair of double-quotes, if present; otherwise
   # return the value unchanged.
   -> .unquote(value)
     n = value.size
-    if n >= 2 && value.slice(0, 1) == "\"" && value.slice(n - 1, 1) == "\""
+    if n >= 2 && value.byte_at(0) == 34 && value.byte_at(n - 1) == 34
       value.slice(1, n - 2)
     else
       value

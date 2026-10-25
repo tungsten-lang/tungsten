@@ -178,12 +178,33 @@
       if args.size() != 2
         raise "__w_sleep expects one duration"
       return ccall("__w_sleep", args[1])
+    when "w_thread_join"
+      if args.size() != 2
+        raise "w_thread_join expects one receiver"
+      if interpreted_thread?(args[1])
+        return args[1][:ivars]["@__thread_result"]
+      return ccall("w_thread_join", args[1])
+    when "w_thread_join_timeout"
+      if args.size() != 3
+        raise "w_thread_join_timeout expects one receiver and timeout"
+      if interpreted_thread?(args[1])
+        return true
+      ms_raw = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      return ccall_rawargs("w_thread_join_timeout", args[1], ms_raw)
     when "w_thread_alive"
       if args.size() != 2
         raise "w_thread_alive expects one receiver"
       if interpreted_thread?(args[1])
         return args[1][:ivars]["@__thread_alive"]
       return ccall("w_thread_alive", args[1])
+    when "w_thread_kill"
+      if args.size() != 2
+        raise "w_thread_kill expects one receiver"
+      if interpreted_thread?(args[1])
+        args[1][:ivars]["@__thread_alive"] = false
+        args[1][:ivars]["@__thread_killed"] = true
+        return nil
+      return ccall("w_thread_kill", args[1])
     when "__w_file_mmap"
       if args.size() != 2
         raise "__w_file_mmap expects one argument"
@@ -274,6 +295,10 @@
       if args.size() != 2
         raise "w_num_to_float expects one numeric argument"
       return ccall("w_num_to_float", args[1])
+    when "w_decimal_round"
+      if args.size() != 3
+        raise "w_decimal_round expects two arguments"
+      return ccall("w_decimal_round", args[1], args[2])
     when "w_small_array_new"
       # Narrow fixture/constructor bridge for exercising runtime-backed
       # SmallArray source methods under eval mode. Convert the public WValue
@@ -423,14 +448,6 @@
         raise "w_string_normalize expects a receiver and a form"
       nf = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
       return ccall("w_string_normalize", args[1], nf)
-    when "w_regex_scan"
-      if args.size() != 3
-        raise "w_regex_scan expects a regex and a subject"
-      return ccall("w_regex_scan", args[1], args[2])
-    when "w_regex_new"
-      if args.size() != 3
-        raise "w_regex_new expects a pattern and options"
-      return ccall("w_regex_new", args[1], args[2])
     when "w_class_by_name"
       if args.size() != 2
         raise "w_class_by_name expects one argument"
@@ -444,14 +461,6 @@
       if ik != nil
         return ik
       return nil
-    when "w_regex_scan_char"
-      if args.size() != 5
-        raise "w_regex_scan_char expects subject, start, length, and codepoint"
-      return ccall("w_regex_scan_char", args[1], args[2], args[3], args[4])
-    when "w_regex_scan_flag"
-      if args.size() != 5
-        raise "w_regex_scan_flag expects subject, start, length, and flag"
-      return ccall("w_regex_scan_flag", args[1], args[2], args[3], args[4])
     when "w_string_from_codes"
       if args.size() != 4
         raise "w_string_from_codes expects codes, start, and length"
@@ -611,10 +620,6 @@
       if args.size() != 2
         raise "w_date_parse expects one string"
       return ccall("w_date_parse", args[1])
-    when "w_date_from_ordinal"
-      if args.size() != 3
-        raise "w_date_from_ordinal expects a year and day-of-year"
-      return ccall("w_date_from_ordinal", args[1], args[2])
     when "w_date_new_w"
       if args.size() != 8
         raise "w_date_new_w expects seven fields"
@@ -624,6 +629,8 @@
       if args.size() != 1
         raise "w_date_today expects no arguments"
       return ccall("w_date_today")
+    when "w_char_new"
+      return ccall("w_char_new", args[1])
     when "w_ipv4_parse"
       return ccall("w_ipv4_parse", args[1])
     when "w_ipv4_from_octets"
@@ -740,8 +747,6 @@
       return ccall("w_uuid_v8", args[1])
     when "w_uuid_byte"
       return ccall("w_uuid_byte", args[1], args[2])
-    when "w_uuid_bytes"
-      return ccall("w_uuid_bytes", args[1])
     when "w_uuid_to_s"
       return ccall("w_uuid_to_s", args[1])
 
@@ -844,6 +849,20 @@
       return ccall("w_array_wolfsort", args[1])
     when "w_array_ipnsort"
       return ccall("w_array_ipnsort", args[1])
+    when "w_array_fill"
+      return ccall("w_array_fill", args[1], args[2])
+    when "w_array_view"
+      return ccall("w_array_view", args[1], args[2], args[3])
+    when "w_array_cross_float"
+      return ccall("w_array_cross_float", args[1], args[2])
+    when "w_array_scale_float"
+      return ccall("w_array_scale_float", args[1], args[2])
+    when "w_array_scale_float_bang"
+      return ccall("w_array_scale_float_bang", args[1], args[2])
+    when "w_array_matvec_i8"
+      return ccall("w_array_matvec_i8", args[1], args[2], args[3], args[4])
+    when "w_array_matmul_i8"
+      return ccall("w_array_matmul_i8", args[1], args[2], args[3], args[4], args[5])
 
     # -- Array#to_f64 / #to_f32 (core/array.w; %f64[…]/%f32[…] desugar) --
     when "w_array_to_f64"
@@ -934,14 +953,25 @@
         raise "w_string_grapheme_next expects a receiver and a byte offset"
       gp = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
       return ccall("w_int", ccall_nobox("w_string_grapheme_next", args[1], gp))
-    when "w_is_native_regex"
-      if args.size() != 2
-        raise "w_is_native_regex expects one argument"
-      return ccall("w_int", ccall_nobox("w_is_native_regex", args[1]))
     when "w_string_first_byte"
       if args.size() != 2
         raise "w_string_first_byte expects one argument"
       return ccall("w_int", ccall_nobox("w_string_first_byte", args[1]))
+    when "w_prime_test_i64"
+      if args.size() != 2
+        raise "w_prime_test_i64 expects one argument"
+      pr_n = ccall_nobox("w_numeric_to_i64", args[1]) ## i64
+      return ccall("w_int", ccall_nobox("w_prime_test_i64", pr_n))
+    when "w_prime_test_i64_12k"
+      if args.size() != 2
+        raise "w_prime_test_i64_12k expects one argument"
+      pr_n = ccall_nobox("w_numeric_to_i64", args[1]) ## i64
+      return ccall("w_int", ccall_nobox("w_prime_test_i64_12k", pr_n))
+    when "w_prime_test_i64_30k"
+      if args.size() != 2
+        raise "w_prime_test_i64_30k expects one argument"
+      pr_n = ccall_nobox("w_numeric_to_i64", args[1]) ## i64
+      return ccall("w_int", ccall_nobox("w_prime_test_i64_30k", pr_n))
     when "__w_bit_ctpop_u32"
       if args.size() != 2
         raise "__w_bit_ctpop_u32 expects one argument"

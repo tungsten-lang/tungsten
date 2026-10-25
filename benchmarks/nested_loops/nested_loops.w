@@ -1,4 +1,4 @@
-## i32 i, j, k
+## u64: count, i, j, k
 fn nested_loops
   count = 0
   with i in 0...1000, j in 0...1000, k in 0...1000

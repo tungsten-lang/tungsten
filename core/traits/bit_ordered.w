@@ -22,7 +22,7 @@
 #   - Color (component channels — bit order ≠ perceptual order)
 #   - UUID  (random — bit order is meaningless)
 trait BitOrdered
-  with BitEqual
+  is BitEqual
 
   -> <=>(other)
     if self.class == other.class

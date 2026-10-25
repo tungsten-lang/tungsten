@@ -35,6 +35,11 @@ in Tungsten:Slim
   ro :attributes
   ro :text
   ro :inline_output
+  ro :is_void
+
+  # Self-closing tags that don't need a closing tag
+  VOID_TAGS = ["area", "base", "br", "col", "embed", "hr", "img",
+               "input", "link", "meta", "param", "source", "track", "wbr"]
 
   -> new(tag:, id: nil, classes: [], attributes: {}, text: nil, inline_output: nil, line: 0)
     @children = []
@@ -45,13 +50,10 @@ in Tungsten:Slim
     @attributes = attributes
     @text = text
     @inline_output = inline_output
-
-  # Self-closing tags that don't need a closing tag
-  VOID_TAGS = [:area, :base, :br, :col, :embed, :hr, :img,
-               :input, :link, :meta, :param, :source, :track, :wbr]
+    @is_void = VOID_TAGS.include?(tag)
 
   -> void?
-    VOID_TAGS.include?(@tag.to_sym)
+    @is_void
 
 # Plain text node
 + Text < Tungsten:Slim:Node

@@ -31,14 +31,13 @@
     v = v - 0x100000000
   v
 
-# String → fresh ByteArray (String#bytes is already byte-indexed; copy so
-# callers can mutate/concat freely).
+# String → fresh ByteArray (copy so callers can mutate/concat freely).
 -> pgw_str_to_bytes(s)
-  bs = s.bytes.to_a
-  out = u8[bs.size]
+  n = s.size
+  out = u8[n]
   i = 0
-  while i < bs.size
-    out[i] = bs[i]
+  while i < n
+    out[i] = s.byte_at(i)
     i += 1
   out
 
@@ -48,25 +47,46 @@
   x
 
 -> pgw_concat(a, b)
-  out = u8[a.size + b.size]
+  na = a.size
+  nb = b.size
+  out = u8[na + nb]
   i = 0
-  while i < a.size
+  while i + 8 <= na
+    array_store_u64(out, i, array_load_u64(a, i))
+    i += 8
+  while i < na
     out[i] = a[i]
     i += 1
   j = 0
-  while j < b.size
-    out[a.size + j] = b[j]
+  while j + 8 <= nb
+    array_store_u64(out, na + j, array_load_u64(b, j))
+    j += 8
+  while j < nb
+    out[na + j] = b[j]
     j += 1
   out
 
 -> pgw_bytes_str(b)
   ccall("w_string_from_byte_array", b)
 
+-> pgw_slice_str(b, off, ln)
+  return "" if ln <= 0
+  cell = u8[ln + 1]
+  i = 0
+  while i + 8 <= ln
+    array_store_u64(cell, i, array_load_u64(b, off + i))
+    i += 8
+  while i < ln
+    cell[i] = b[off + i]
+    i += 1
+  ccall("w_string_take_byte_array", cell, ln)
+
 # Poly int array → u8[]
 -> pgw_pack(vals)
-  buf = u8[vals.size]
+  n = vals.size
+  buf = u8[n]
   i = 0
-  while i < vals.size
+  while i < n
     buf[i] = vals[i]
     i += 1
   buf
@@ -85,10 +105,10 @@
 
 # Raw string bytes, no terminator.
 -> pgw_w_raw(out, s)
-  bs = s.bytes.to_a
+  n = s.size
   i = 0
-  while i < bs.size
-    out.push(bs[i])
+  while i < n
+    out.push(s.byte_at(i))
     i += 1
 
 # NUL-terminated cstring.
@@ -97,21 +117,44 @@
   out.push(0)
 
 -> pgw_w_bytes(out, b)
+  n = b.size
   i = 0
-  while i < b.size
+  while i < n
     out.push(b[i])
     i += 1
 
 # Frame a typed message: type byte + i32 length (len includes itself) + payload.
 -> pgw_frame(ty, payload)
-  msg = []
-  msg.push(ty)
-  pgw_w_i32(msg, payload.size + 4)
+  plen = payload.size
+  fl = plen + 4
+  buf = u8[plen + 5]
+  buf[0] = ty
+  buf[1] = (fl >> 24) & 0xFF
+  buf[2] = (fl >> 16) & 0xFF
+  buf[3] = (fl >> 8) & 0xFF
+  buf[4] = fl & 0xFF
   i = 0
-  while i < payload.size
-    msg.push(payload[i])
+  while i < plen
+    buf[5 + i] = payload[i]
     i += 1
-  pgw_pack(msg)
+  buf
+
+# Build a 'Q' simple-query frame directly in one u8[] allocation.
+-> pgw_query_frame(sql)
+  slen = sql.size
+  fl = slen + 5
+  buf = u8[slen + 6]
+  buf[0] = 81
+  buf[1] = (fl >> 24) & 0xFF
+  buf[2] = (fl >> 16) & 0xFF
+  buf[3] = (fl >> 8) & 0xFF
+  buf[4] = fl & 0xFF
+  i = 0
+  while i < slen
+    buf[5 + i] = sql.byte_at(i)
+    i += 1
+  buf[5 + slen] = 0
+  buf
 
 # Parse a NUL-terminated string at off; returns [string, next_off].
 # `limit` bounds the scan — with a pooled read buffer the array is larger
@@ -120,12 +163,7 @@
   end_ = off
   while end_ < limit && b[end_] != 0
     end_ += 1
-  cell = u8[end_ - off]
-  i = off
-  while i < end_
-    cell[i - off] = b[i]
-    i += 1
-  [pgw_bytes_str(cell), end_ + 1]
+  [pgw_slice_str(b, off, end_ - off), end_ + 1]
 
 # ---------- auth helpers ----------
 # HMAC / PBKDF2 / SCRAM live in core: Crypto:HMAC, Crypto:PBKDF2,
@@ -384,13 +422,8 @@
       if ln < 0
         row.push(nil)
       else
-        cell = u8[ln]
-        i = 0
-        while i < ln
-          cell[i] = b[off + i]
-          i += 1
+        row.push(pgw_slice_str(b, off, ln))
         off += ln
-        row.push(pgw_bytes_str(cell))
       c += 1
     row
 
@@ -448,7 +481,7 @@
   # result set is returned (command_tag reflects the last statement).
   -> exec(sql)
     self.guard_open()
-    @sock.write_bytes(pgw_frame(81, self.cstr_payload(sql)))
+    @sock.write_bytes(pgw_query_frame(sql))
     self.consume_results()
 
   # Extended protocol: Parse/Bind/Execute/Sync, unnamed statement/portal,
@@ -464,17 +497,21 @@
     pgw_w_str(bnd, "")
     pgw_w_str(bnd, "")
     pgw_w_i16(bnd, 0)
-    pgw_w_i16(bnd, params.size)
-    params -> (prm)
+    pcount = params.size
+    pgw_w_i16(bnd, pcount)
+    pi = 0
+    while pi < pcount
+      prm = params[pi]
       if prm == nil
         pgw_w_i32(bnd, 0 - 1)
       else
-        pb = prm.bytes.to_a
-        pgw_w_i32(bnd, pb.size)
+        plen = prm.size
+        pgw_w_i32(bnd, plen)
         i = 0
-        while i < pb.size
-          bnd.push(pb[i])
+        while i < plen
+          bnd.push(prm.byte_at(i))
           i += 1
+      pi += 1
     pgw_w_i16(bnd, 0)
     bind_msg = pgw_frame(66, bnd)                # 'B'
     ex = []
@@ -489,7 +526,7 @@
   # COPY FROM STDIN sub-protocol.
   -> copy_start(sql)
     self.guard_open()
-    @sock.write_bytes(pgw_frame(81, self.cstr_payload(sql)))
+    @sock.write_bytes(pgw_query_frame(sql))
     err = ""
     while true
       t = self.read_msg()
@@ -533,7 +570,7 @@
   # (chessbot's merge script) avoid re-allocating the multi-KB payload/frame
   # arrays on every execution (no tracing GC — per-call framing leaks).
   -> build_query_frame(sql)
-    pgw_pack(pgw_frame(81, self.cstr_payload(sql)))
+    pgw_query_frame(sql)
 
   -> exec_frame(fu8)
     self.guard_open()

@@ -63,11 +63,6 @@ static void type_table_mutation_after_method_lock_fn(void) {
     w_method_tables_lock_safe();
     (void)w_class_new("TooLateAfterDoors", W_NIL);
 }
-#ifndef TUNGSTEN_ONIG
-static void unsupported_named_regex_fn(void) {
-    (void)w_regex_new(w_string("(?<word>a)"), w_string(""));
-}
-#endif
 #ifndef NDEBUG
 static void ast_bad_field_fn(void) {
     w_node_arena_reset();
@@ -124,60 +119,6 @@ int main() {
         assert(!w_truthy(v));
         printf("  nil: OK\n");
     }
-
-    /* Regex capture storage is dynamically sized and RegexMatch snapshots it
-     * before a later match can replace the thread-local capture state. */
-    {
-        WValue rx = w_regex_new(
-            w_string("(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)"), w_string(""));
-        assert(w_regex_match(rx, w_string("abcdefghijk")) == W_TRUE);
-        assert(strcmp(str_val(w_regex_capture(w_int(10))), "j") == 0);
-        assert(strcmp(str_val(w_regex_capture(w_int(11))), "k") == 0);
-        assert(w_regex_match(rx, w_string("no match")) == W_FALSE);
-        assert(w_regex_capture(w_int(1)) == W_NIL);
-
-        WValue structured = w_regex_match_data(
-            w_regex_new(w_string("(é)(猫)?()"), w_string("")), w_string("xé"));
-        assert(w_is_regex_match(structured));
-        assert(strcmp(str_val(__w_type(structured)), "RegexMatch") == 0);
-        WRegexMatch *raw_match = (WRegexMatch *)w_as_ptr(structured);
-        assert(w_is_slice(w_as_array(raw_match->groups)->slots[0]));
-        assert(w_is_slice(w_as_array(raw_match->groups)->slots[1]));
-        assert(w_is_slice(w_as_array(raw_match->offsets)->slots[1]));
-        WValue group = w_int(1);
-        assert(strcmp(str_val(w_method_call_fast(
-            structured, w_string("[]"), &group, 1)), "é") == 0);
-        assert(!w_is_slice(w_as_array(raw_match->groups)->slots[1]));
-        WValue span = w_method_call_fast(
-            structured, w_string("offset"), &group, 1);
-        assert(w_as_int(w_array_get(span, w_int(0))) == 1);
-        assert(w_as_int(w_array_get(span, w_int(1))) == 2);
-        assert(strcmp(str_val(w_to_s(structured)), "é") == 0);
-        printf("  regex dynamic captures: OK\n");
-    }
-
-#ifdef TUNGSTEN_ONIG
-    {
-        WValue rx = w_regex_new(
-            w_string("(?<word>é)(?<tail>猫)?"), w_string(""));
-        WValue structured = w_regex_match_data(rx, w_string("xé"));
-        assert(((WRegexMatch *)w_as_ptr(structured))->name_to_group ==
-               ((WRegex *)w_as_ptr(rx))->name_to_group);
-        WValue word = w_string("word");
-        WValue tail = w_symbol("tail");
-        assert(strcmp(str_val(w_method_call_fast(
-            structured, w_string("[]"), &word, 1)), "é") == 0);
-        assert(w_method_call_fast(
-            structured, w_string("offset"), &tail, 1) == W_NIL);
-        WValue names = w_method_call_fast(
-            structured, w_string("names"), NULL, 0);
-        assert(w_array_size(names) == 2);
-        printf("  regex named captures: OK\n");
-    }
-#else
-    assert(expect_crash(unsupported_named_regex_fn));
-    printf("  regex named capture fallback rejection: OK\n");
-#endif
 
     /* Test false */
     {

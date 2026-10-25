@@ -422,18 +422,19 @@ TUNGSTEN_W = ROOT + "/" + compiler_dir_name + "/tungsten.w"
 if array_contains?(args, "--help") || array_contains?(args, "-h")
   << "Usage: tungsten build \[options]"
   << ""
-  << "Bootstrap the self-hosted Tungsten compiler and build bit entry points."
+  << "Bootstrap the self-hosted Tungsten compiler and (on --release) build bit entry points."
   << "Default bootstrap: implementations/c (the C bytecode VM)."
   << "Inside a bit, build its Bitfile executables into bin/ without bootstrapping."
   << "Executable profile: \"release\" selects an optimized default; --debug overrides it."
   << ""
   << "Options:"
-  << "  -1          Build and install only the stage-1 compiler"
+  << "  -1          Build only the stage-1 compiler (never installed)"
   << "  -2          Reuse the existing stage-1 binary and build stage 2"
   << "  --force     Ignore cached stage binaries and rebuild"
   << "  --pgo       Build the compiler with profile-guided optimization"
-  << "  --no-bits   Skip compiling bit entry points (implied by -0, -1, and -2)"
-  << "  --release   -O3, full LTO, no dev checks, reduced runtime metadata"
+  << "  --no-bits   Skip compiling bit entry points on --release builds"
+  << "  --release   -O3, full LTO, no dev checks, reduced runtime metadata, and build bits"
+  << "  --install   Build (--release --native + bits), tick VERSION, and install to TUNGSTEN_HOME"
   << "  --debug     Include debug symbols, safety checks, and runtime metadata"
   << "  --no-debug  Omit debug symbols and development checks (release default)"
   << "  --cpu CPU   Target CPU (v1/v2/v3/v4/native aliases accepted)"
@@ -573,6 +574,8 @@ stage2_only = array_contains?(args, "-2")
 pgo_build = array_contains?(args, "--pgo")
 force_build = array_contains?(args, "--force")
 skip_bits_requested = array_contains?(args, "--no-bits")
+install_requested = array_contains?(args, "--install")
+install_only = array_contains?(args, "--install-only")
 
 # -0 (Spinel stage0) only makes sense in Spinel mode. Auto-promote.
 if stage0_only
@@ -661,6 +664,24 @@ if target_sysroot != "" && target_triple == ""
 if stage0_only && (portable_mode || target_triple != "")
   eputs("-0 cannot emit release artifacts; build at least stage 1")
   exit(1)
+
+if install_requested
+  if debug_requested
+    eputs("--install requires an optimized release build and cannot be combined with --debug")
+    exit(1)
+  if skip_bits_requested
+    eputs("--install requires building bit entry points and cannot be combined with --no-bits")
+    exit(1)
+  if stage0_only || stage1_only || stage2_only
+    eputs("--install requires a full stage-1/stage-2 verified build")
+    exit(1)
+  if portable_mode || target_triple != ""
+    eputs("--install installs a host-native compiler and cannot be combined with --portable or --target")
+    exit(1)
+  if cpu_name != nil && normalize_cpu(cpu_name) != "native" && normalize_cpu(cpu_name) != configured_cpu()
+    eputs("--install requires a host-native CPU (cannot be combined with --cpu " + cpu_name + ")")
+    exit(1)
+  release_mode = true
 
 debug_enabled = debug_requested || (!no_debug_requested && !release_mode && !portable_mode)
 lto_flag = release_mode ? "-flto=full" : "-flto=thin"
@@ -785,7 +806,6 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
   common.push("/usr/local/share/pkgconfig")
   common.push("/usr/include")
   common.push("/usr/include/zstd.h")
-  common.push("/usr/include/oniguruma.h")
   common.push("/usr/lib")
   common.push("/usr/lib/pkgconfig")
   common.push("/usr/share/pkgconfig")
@@ -827,39 +847,6 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
 -> cached_probe_write(name, fingerprint, value_lines)
   path = BUILD_CACHE_DIR + "/system-deps-" + name + ".txt"
   atomic_write(fingerprint + "\n" + value_lines.join("\n") + "\n", path)
-
-# onig probe: value lines are [cflags, libs] (space-joined)
--> probe_onig
-  markers = []
-  brew = build_homebrew_prefix("")
-  if brew != ""
-    markers.push(brew + "/include/oniguruma.h")
-    markers.push(brew + "/lib/libonig.dylib")
-    markers.push(brew + "/lib/libonig.a")
-  fp = marker_fingerprint(markers)
-  cached = cached_probe_read("onig", fp)
-  if cached != nil && cached.size >= 2
-    return cached
-  cflags = split_ws(capture("pkg-config --cflags oniguruma 2>/dev/null"))
-  libs = split_ws(capture("pkg-config --libs oniguruma 2>/dev/null"))
-  if cflags.size == 0 && brew != "" && regular_file?(brew + "/include/oniguruma.h")
-    cflags = []
-    cflags.push("-I" + brew + "/include")
-  if libs.size == 0
-    if brew != "" && (regular_file?(brew + "/lib/libonig.dylib") || regular_file?(brew + "/lib/libonig.a"))
-      libs = []
-      libs.push("-L" + brew + "/lib")
-      libs.push("-lonig")
-    elsif cflags.size > 0
-      libs = []
-      libs.push("-lonig")
-  if cflags.size > 0
-    cflags.push("-DTUNGSTEN_ONIG")
-  value = []
-  value.push(cflags.join(" "))
-  value.push(libs.join(" "))
-  cached_probe_write("onig", fp, value)
-  value
 
 -> probe_zstd
   markers = []
@@ -916,6 +903,158 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
   cached_probe_write("openssl_prefix", fp, value)
   prefix
 
+# ── System install helpers (tungsten install / build --install) ─
+
+BUILD_PROFILE_PATH = BUILD_CACHE_DIR + "/compiler-build.profile"
+
+-> version_day_revision(ver_raw, today)
+  if ver_raw == nil
+    return -1
+  ver = ver_raw.strip
+  if ver == today
+    return 0
+  prefix = today + "."
+  if !ver.starts_with?(prefix)
+    return -1
+  suffix = ver.slice(prefix.size, ver.size - prefix.size).strip
+  if suffix == ""
+    return -1
+  i = 0
+  while i < suffix.size
+    c = suffix.slice(i, 1)
+    if c < "0" || c > "9"
+      return -1
+    i = i + 1
+  suffix.to_i
+
+-> next_release_version(root_ver, home_ver, today)
+  rev_root = version_day_revision(root_ver, today)
+  rev_home = version_day_revision(home_ver, today)
+  max_rev = rev_root > rev_home ? rev_root : rev_home
+  if max_rev < 0
+    return today
+  today + "." + (max_rev + 1).to_s
+
+-> profile_field(text, key)
+  if text == nil
+    return ""
+  prefix = key + "="
+  lines = text.split("\n")
+  i = 0
+  while i < lines.size
+    line = lines[i].strip
+    if line.starts_with?(prefix)
+      return line.slice(prefix.size, line.size - prefix.size)
+    i = i + 1
+  ""
+
+-> verify_last_build_installable
+  if !executable?(COMPILER_BIN)
+    eputs(RED + "tungsten install: no compiler at " + COMPILER_BIN + " — run `bin/tungsten build --release --native` or `bin/tungsten build --install`" + RESET)
+    exit(1)
+  profile_text = read_file(BUILD_PROFILE_PATH)
+  if profile_text == nil
+    eputs(RED + "tungsten install: no build profile for " + COMPILER_BIN + " — run `bin/tungsten build --release --native` first, or `bin/tungsten build --install`" + RESET)
+    exit(1)
+  recorded_sha = profile_field(profile_text, "compiler_sha256")
+  installable = profile_field(profile_text, "installable")
+  verified = profile_field(profile_text, "verified")
+  if recorded_sha != file_sha(COMPILER_BIN)
+    eputs(RED + "tungsten install: " + COMPILER_BIN + " does not match the last recorded build — run `bin/tungsten build --release --native` first, or `bin/tungsten build --install`" + RESET)
+    exit(1)
+  if verified != "1"
+    eputs(RED + "tungsten install: last compiler build failed stage 1 == stage 2 verification and cannot be installed" + RESET)
+    exit(1)
+  if installable != "1"
+    eputs(RED + "tungsten install: last build at " + COMPILER_BIN + " is a dev build (not --release --native with bits) — run `bin/tungsten build --release --native` first, or `bin/tungsten build --install`" + RESET)
+    exit(1)
+  true
+
+-> install_to_system_location
+  verify_last_build_installable()
+  home_dir = env_or_empty("HOME").strip
+  if home_dir == ""
+    home_dir = ROOT
+  tungsten_home = env_or_empty("TUNGSTEN_HOME").strip
+  if tungsten_home == ""
+    tungsten_home = home_dir + "/.tungsten"
+  tungsten_bin = env_or_empty("TUNGSTEN_BIN").strip
+  if tungsten_bin == ""
+    tungsten_bin = home_dir + "/.local/bin"
+
+  today = capture("date +%Y.%m.%d").strip
+  root_ver = read_file(ROOT + "/VERSION")
+  home_ver = read_file(tungsten_home + "/VERSION")
+  new_version = next_release_version(root_ver, home_ver, today)
+  if !atomic_write(new_version + "\n", ROOT + "/VERSION")
+    die("tungsten install: failed to update " + ROOT + "/VERSION")
+
+  wc_src = ROOT + "/bin/tungsten.w"
+  wc_out = ROOT + "/bin/tungsten.wc"
+  if regular_file?(wc_src)
+    wc_cmd = "cd " + shq(ROOT) + " && BIT_HOME=" + shq(ROOT + "/bits") + " TUNGSTEN_ROOT=" + shq(ROOT) + " " + shq(COMPILER_BIN) + " compile " + shq(wc_src) + " --out " + shq(wc_out) + " --no-lto >/dev/null 2>&1"
+    if sh_ok(wc_cmd) && IS_DARWIN
+      sh_ok("codesign --force -s - " + shq(wc_out) + " >/dev/null 2>&1")
+
+  << ""
+  << BOLD + "==> Install: system toolchain" + RESET
+  if File.expand_path(tungsten_home) != ROOT
+    make_dirs(tungsten_home)
+    make_dirs(tungsten_home + "/build/cache")
+    make_dirs(tungsten_home + "/bits")
+    atomic_copy(ROOT + "/VERSION", tungsten_home + "/VERSION")
+    if regular_file?(ROOT + "/Bitfile")
+      atomic_copy(ROOT + "/Bitfile", tungsten_home + "/Bitfile")
+    sync_dirs = ["bin", "compiler", "core", "data", "doc", "languages", "runtime"]
+    si = 0
+    while si < sync_dirs.size
+      d = sync_dirs[si]
+      si = si + 1
+      if file_directory?(ROOT + "/" + d)
+        if !sh_ok("rsync -a --delete --exclude '.DS_Store' --exclude '*.dSYM' " + shq(ROOT + "/" + d + "/") + " " + shq(tungsten_home + "/" + d + "/"))
+          die("tungsten install: failed to sync " + d + " to " + tungsten_home)
+    if file_directory?(ROOT + "/build/cache/compiler-images")
+      make_dirs(tungsten_home + "/build/cache/compiler-images")
+      sh_ok("rsync -a --delete --exclude '.DS_Store' --exclude '*.dSYM' " + shq(ROOT + "/build/cache/compiler-images/") + " " + shq(tungsten_home + "/build/cache/compiler-images/"))
+    if regular_file?(BUILD_CACHE_DIR + "/runtime-current.manifest")
+      atomic_copy(BUILD_CACHE_DIR + "/runtime-current.manifest", tungsten_home + "/build/cache/runtime-current.manifest")
+      manifest_text = read_file(BUILD_CACHE_DIR + "/runtime-current.manifest")
+      if manifest_text != nil
+        mlines = manifest_text.split("\n")
+        mi = 0
+        while mi < mlines.size
+          mfile = mlines[mi].strip
+          mi = mi + 1
+          if mfile != "" && regular_file?(BUILD_CACHE_DIR + "/" + mfile)
+            atomic_copy(BUILD_CACHE_DIR + "/" + mfile, tungsten_home + "/build/cache/" + mfile)
+    bundled_bits = capture("find " + shq(ROOT + "/bits") + " -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort").split("\n")
+    bi = 0
+    while bi < bundled_bits.size
+      bp = bundled_bits[bi].strip
+      bi = bi + 1
+      if bp != ""
+        bname = basename_of(bp)
+        make_dirs(tungsten_home + "/bits/" + bname)
+        sh_ok("rsync -a --delete --exclude 'build/cache' --exclude '.DS_Store' --exclude '*.dSYM' " + shq(bp + "/") + " " + shq(tungsten_home + "/bits/" + bname + "/"))
+    if IS_DARWIN
+      sh_ok("codesign --force -s - " + shq(tungsten_home + "/bin/tungsten-compiler") + " >/dev/null 2>&1")
+
+  make_dirs(tungsten_bin)
+  sh_ok("ln -sf " + shq(tungsten_home + "/bin/tungsten") + " " + shq(tungsten_bin + "/tungsten"))
+  if regular_file?(tungsten_home + "/bin/wit")
+    sh_ok("ln -sf " + shq(tungsten_home + "/bin/wit") + " " + shq(tungsten_bin + "/wit"))
+  << "    " + GREEN + "version" + RESET + "   " + new_version
+  << "    " + GREEN + "home" + RESET + "      " + tungsten_home
+  << "    " + GREEN + "linked" + RESET + "    " + tungsten_bin + "/tungsten -> " + tungsten_home + "/bin/tungsten"
+  if regular_file?(tungsten_home + "/bin/wit")
+    << "    " + GREEN + "linked" + RESET + "    " + tungsten_bin + "/wit -> " + tungsten_home + "/bin/wit"
+  true
+
+if install_only
+  install_to_system_location()
+  << ""
+  exit(0)
+
 # ── Runtime archive ─────────────────────────────────────────────
 
 << ""
@@ -960,10 +1099,6 @@ if http2_enabled && regular_file?(nghttp2_prefix + "/include/nghttp2/nghttp2.h")
   http2_libs.push("-lnghttp2")
 if http2_flags.size > 0
   runtime_srcs.push("http2.c")
-
-onig_value = probe_onig()
-onig_cflags = split_ws(onig_value[0])
-onig_libs = split_ws(onig_value[1])
 
 zstd_value = probe_zstd()
 zstd_cflags = split_ws(zstd_value[0])
@@ -1010,7 +1145,7 @@ cc_flags = profile_cflags + []
 cc_flags.push("-pthread")
 cc_flags = cc_flags + march_flags + fast_clang_flags
 cc_flags.push("-c")
-cc_flags = cc_flags + tls_flags + http2_flags + onig_cflags + zstd_cflags
+cc_flags = cc_flags + tls_flags + http2_flags + zstd_cflags
 runtime_objc_flags = profile_cflags + march_flags + fast_clang_flags
 runtime_objc_flags.push("-c")
 runtime_objc_flags.push("-x")
@@ -1064,7 +1199,7 @@ runtime_handoff_ready = handoff_runtime != "" && regular_file?(handoff_runtime)
 if runtime_handoff_ready
   runtime_archive = handoff_runtime
 
-runtime_env_contents = "runtime-env-v1\n" + zstd_cflags.join(" ") + "\n" + zstd_libs.join(" ") + "\n" + onig_cflags.join(" ") + "\n" + onig_libs.join(" ") + "\n" + (IS_DARWIN ? "Darwin" : (IS_LINUX ? "Linux" : "")) + "\n" + runtime_cc + "\n" + runtime_ar + "\n" + runtime_ranlib + "\n"
+runtime_env_contents = "runtime-env-v1\n" + zstd_cflags.join(" ") + "\n" + zstd_libs.join(" ") + "\n\n\n" + (IS_DARWIN ? "Darwin" : (IS_LINUX ? "Linux" : "")) + "\n" + runtime_cc + "\n" + runtime_ar + "\n" + runtime_ranlib + "\n"
 runtime_env_manifest = BUILD_CACHE_DIR + "/runtime-env-" + Digest.sha256(runtime_env_contents) + ".env"
 runtime_current_manifest = BUILD_CACHE_DIR + "/runtime-current.manifest"
 
@@ -1125,10 +1260,6 @@ probe_keys.push("TUNGSTEN_ZSTD_CFLAGS")
 probe_vals.push(zstd_cflags.join(" "))
 probe_keys.push("TUNGSTEN_ZSTD_LDFLAGS")
 probe_vals.push(zstd_libs.join(" "))
-probe_keys.push("TUNGSTEN_ONIG_CFLAGS")
-probe_vals.push(onig_cflags.join(" "))
-probe_keys.push("TUNGSTEN_ONIG_LDFLAGS")
-probe_vals.push(onig_libs.join(" "))
 probe_keys.push("TUNGSTEN_HTTP2_LDFLAGS")
 probe_vals.push(http2_libs.join(" "))
 probe_keys.push("TUNGSTEN_OS")
@@ -1450,7 +1581,11 @@ if bootstrap_compiler_clang_opt == ""
 CWD = capture("pwd -P").strip
 bit_root_found = find_bit_root(CWD)
 bit_only = bit_root_found != nil && bit_root_found != ROOT
-skip_bits = skip_bits_requested || (!bit_only && (stage0_only || stage1_only || stage2_only))
+if install_requested && bit_only
+  die("tungsten build --install must be run from the Tungsten repository root")
+skip_bits = skip_bits_requested || (!bit_only && (!release_mode || stage0_only || stage1_only || stage2_only))
+host_native_cpu = host_cpu_name == "native" || (cpu_name == nil && host_cpu_name == configured_cpu())
+installable_build = !bit_only && release_mode && !debug_enabled && host_native_cpu && target_triple == "" && !portable_mode && !stage0_only && !stage1_only && !stage2_only && !skip_bits
 
 # ── install_compiler (content-addressed signed cache) ───────────
 
@@ -1493,7 +1628,8 @@ skip_bits = skip_bits_requested || (!bit_only && (stage0_only || stage1_only || 
   restore_optional_file(signed_sidemap_cache, installed_sidemap)
   if announce
     suffix = label == "" ? "" : " " + DIM + "(" + label + ")" + RESET
-    << "    " + GREEN + "installed" + RESET + " " + COMPILER_BIN + suffix
+    mode_note = installable_build ? " " + DIM + "(installable)" + RESET : " " + DIM + "(dev — not installable)" + RESET
+    << "    " + GREEN + "staged" + RESET + "    " + COMPILER_BIN + suffix + mode_note
   true
 
 # ── Stage 0: C VM build key + build ─────────────────────────────
@@ -1706,6 +1842,8 @@ compiler_source_paths.push("languages/tungsten/lexers")
 compiler_source_paths.push("data/unit_names.txt")
 compiler_source_paths.push("data/units.tsv")
 
+stage_verified = false
+
 if !bit_only
   stage1 = build_scratch_dir + "/tungsten.wc"
   stage2 = build_scratch_dir + "/tungsten-self-hosted.wc"
@@ -1810,7 +1948,6 @@ if !bit_only
       << "    " + GREEN + "built " + RESET + " stage1 " + DIM + aligned_ms(t1 - stage1_started) + RESET
 
     if stage1_only
-      install_compiler(stage1, "C VM stage 1 only", true)
       t2 = t1
     else
       << ""
@@ -1861,6 +1998,7 @@ if !bit_only
       << ""
       verify_started = clock_ms()
       verified = same_file_content?(stage1_ll, stage2_ll)
+      stage_verified = verified
       verify_elapsed = clock_ms() - verify_started
       if verified
         << "    " + GREEN + "VERIFIED" + RESET + " " + DIM + "stage 1 .ll == stage 2 .ll (" + ms(verify_elapsed) + ")" + RESET
@@ -1966,12 +2104,13 @@ if !bit_only
       t1 = clock_ms()
       t2 = t1
       if stage1_only
-        install_compiler(stage1, "Spinel stage 1 only", true)
+        t2 = t1
       else
         << ""
         << BOLD + "==> Verify: stage 1 .ll == stage 2 .ll" + RESET
         verify_started = clock_ms()
         verified = same_file_content?(stage1_ll, stage2_ll)
+        stage_verified = verified
         verify_elapsed = clock_ms() - verify_started
         if verified
           << "    " + GREEN + "VERIFIED" + RESET + " " + DIM + "stage 1 .ll == stage 2 .ll (" + ms(verify_elapsed) + ")" + RESET
@@ -2042,7 +2181,6 @@ if !bit_only
       << BOLD + "==> Skipping Stage 1" + RESET + " " + DIM + "(reusing " + stage1 + ")" + RESET
 
     if stage1_only
-      install_compiler(stage1, "stage 1 only", true)
       t2 = t1
     else
       stage2_input_paths = []
@@ -2078,6 +2216,7 @@ if !bit_only
 
       verify_started = clock_ms()
       verified = same_file_content?(stage1_ll, stage2_ll)
+      stage_verified = verified
       verify_elapsed = clock_ms() - verify_started
       if verified
         << "    " + GREEN + "VERIFIED" + RESET + " " + DIM + "stage 1 .ll == stage 2 .ll (" + ms(verify_elapsed) + ")" + RESET
@@ -2212,7 +2351,7 @@ if !stage0_only && !bit_only
     kind = image_kinds[ii]
     ii = ii + 1
     image_log = "/tmp/tungsten-build-image-" + kind + ".log"
-    image_cmd = "cd " + shq(ROOT) + " && TUNGSTEN_ROOT=" + shq(ROOT) + " " + toolchain_env_prefix + shq(COMPILER_BIN) + " build-image " + kind + " > " + shq(image_log) + " 2>&1"
+    image_cmd = "cd " + shq(ROOT) + " && TUNGSTEN_ROOT=" + shq(ROOT) + " " + probe_env_prefix + "TUNGSTEN_CLANG_OPT=" + shq(bootstrap_compiler_clang_opt) + " " + shq(COMPILER_BIN) + " build-image " + kind + " > " + shq(image_log) + " 2>&1"
     t_image = clock_ms()
     if sh_ok(image_cmd)
       << "    " + GREEN + "built" + RESET + "   build/cache/compiler-images/tungsten-" + kind + " " + DIM + ms(clock_ms() - t_image) + RESET
@@ -2243,7 +2382,7 @@ if tls_flags.size > 0
   link_libs.push("-L" + openssl_prefix + "/lib")
   link_libs.push("-lssl")
   link_libs.push("-lcrypto")
-link_libs = link_libs + http2_libs + onig_libs
+link_libs = link_libs + http2_libs
 
 runtime_dep_shas = []
 i = 0
@@ -2278,8 +2417,9 @@ make_dirs(bit_cache_dir)
   Digest.sha256(buf.to_s).slice(0, 16)
 
 -> compile_bit(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix)
+  t_bit = clock_ms()
   bit_name = basename_of(this_bit_root)
-  build_env = toolchain_prefix + "BIT_HOME=" + shq(ROOT + "/bits") + " TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " "
+  build_env = probe_env_prefix + toolchain_prefix + "TUNGSTEN_ROOT=" + shq(ROOT) + " BIT_HOME=" + shq(ROOT + "/bits") + " TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " "
   includes = bitfile_includes(this_bit_root)
   if includes.size > 0
     build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(includes.join(":")) + " "
@@ -2301,7 +2441,7 @@ make_dirs(bit_cache_dir)
     << "    " + DIM + "skip" + RESET + "    " + bit_name + " " + DIM + "(" + suffix + ")" + RESET
     return false
   sh_ok("chmod 755 " + shq(out_bin))
-  << "    " + GREEN + "built" + RESET + "   " + project_relative_path(out_bin)
+  << "    " + GREEN + "built" + RESET + "   " + project_relative_path(out_bin) + " " + DIM + ms(clock_ms() - t_bit) + RESET
   true
 
 -> bit_short_name(bit_path)
@@ -2314,6 +2454,7 @@ make_dirs(bit_cache_dir)
 t5 = clock_ms()
 bits_built = 0
 bits_skipped = 0
+bits_failed = 0
 
 if skip_bits
   << BOLD + "==> Bits: skipped" + RESET
@@ -2377,8 +2518,17 @@ else
           bits_built = bits_built + 1
         else
           bits_skipped = bits_skipped + 1
+          bits_failed = bits_failed + 1
 
 t6 = clock_ms()
+
+if !bit_only && !stage0_only && !stage1_only && executable?(COMPILER_BIN)
+  is_installable = installable_build && stage_verified && bits_failed == 0
+  profile_text = "tungsten-compiler-build-v1\ncompiler_sha256=" + file_sha(COMPILER_BIN) + "\ninstallable=" + (is_installable ? "1" : "0") + "\nverified=" + (stage_verified ? "1" : "0") + "\nrelease=" + (release_mode ? "1" : "0") + "\ncpu=" + host_cpu_name + "\ndebug=" + (debug_enabled ? "1" : "0") + "\npgo=" + (pgo_build ? "1" : "0") + "\n"
+  atomic_write(profile_text, BUILD_PROFILE_PATH)
+
+if install_requested
+  install_to_system_location()
 
 if handoff_path != ""
   sh_ok("rm -f " + shq(handoff_path))

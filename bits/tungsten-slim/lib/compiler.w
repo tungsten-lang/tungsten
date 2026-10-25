@@ -7,34 +7,45 @@
 in Tungsten:Slim
 
 + Compiler
+  ro :pretty
+  ro :indent_level
+  ro :locals
+  ro :output
+
   -> new(pretty: true)
     @pretty = pretty
     @indent_level = 0
+    @locals = nil
+    @output = nil
 
   # Compile a Root node tree into an HTML string
   -> compile(root, locals = {})
     @locals = locals
     @output = StringBuffer()
 
-    root.children.each -> (node)
-      compile_node(node)
+    children = root.children
+    n = children.size
+    i = 0
+    while i < n
+      compile_node(children[i])
+      i = i + 1
 
     @output.to_s
 
   # Dispatch to the appropriate compile method for each node type
   -> compile_node(node)
-    if node.is_a?(Tungsten:Slim:Doctype)
-      compile_doctype(node)
-    elsif node.is_a?(Tungsten:Slim:Element)
+    if node.is_a?(Tungsten:Slim:Element)
       compile_element(node)
     elsif node.is_a?(Tungsten:Slim:Text)
       compile_text(node)
-    elsif node.is_a?(Tungsten:Slim:Code)
-      compile_code(node)
     elsif node.is_a?(Tungsten:Slim:Output)
       compile_output(node)
+    elsif node.is_a?(Tungsten:Slim:Code)
+      compile_code(node)
     elsif node.is_a?(Tungsten:Slim:Comment)
       compile_comment(node)
+    elsif node.is_a?(Tungsten:Slim:Doctype)
+      compile_doctype(node)
     elsif node.is_a?(Tungsten:Slim:TableRow)
       compile_table_row(node)
     else
@@ -50,32 +61,45 @@ in Tungsten:Slim
     tag = node.tag
     attr_str = Tungsten:Slim:Helpers.element_attributes(node)
     opening = if attr_str.empty?
-      "<[tag]>"
+      "<" + tag + ">"
     else
-      "<[tag] [attr_str]>"
+      "<" + tag + " " + attr_str + ">"
 
     if node.void?
       # Self-closing tags
-      void_tag = if attr_str.empty?
-        "<[tag]>"
-      else
-        "<[tag] [attr_str]>"
-      write_line(void_tag)
+      write_line(opening)
 
     elsif node.text
       # Inline text: <tag>text</tag> on one line
       text = interpolate(node.text)
-      write_line("[opening][text]</[tag]>")
+      if @pretty
+        @output << Tungsten:Slim:Helpers.indent(@indent_level)
+      @output << opening
+      @output << text
+      @output << "</"
+      @output << tag
+      @output << (if @pretty then ">\n" else ">")
 
     elsif node.inline_output
       # Inline output: <tag>#{expression}</tag>
       value = evaluate(node.inline_output)
       escaped = Tungsten:Slim:Helpers.escape_html(value.to_s)
-      write_line("[opening][escaped]</[tag]>")
+      if @pretty
+        @output << Tungsten:Slim:Helpers.indent(@indent_level)
+      @output << opening
+      @output << escaped
+      @output << "</"
+      @output << tag
+      @output << (if @pretty then ">\n" else ">")
 
     elsif node.leaf?
       # Empty element: <tag></tag>
-      write_line("[opening]</[tag]>")
+      if @pretty
+        @output << Tungsten:Slim:Helpers.indent(@indent_level)
+      @output << opening
+      @output << "</"
+      @output << tag
+      @output << (if @pretty then ">\n" else ">")
 
     elsif tag == "table" && node.children.any?(-> (c) c.is_a?(Tungsten:Slim:TableRow))
       # Table with table row children — auto-wrap in thead/tbody
@@ -85,10 +109,18 @@ in Tungsten:Slim
       # Element with children — indent and recurse
       write_line(opening)
       @indent_level = @indent_level + 1
-      node.children.each -> (child)
-        compile_node(child)
+      children = node.children
+      n = children.size
+      i = 0
+      while i < n
+        compile_node(children[i])
+        i = i + 1
       @indent_level = @indent_level - 1
-      write_line("</[tag]>")
+      if @pretty
+        @output << Tungsten:Slim:Helpers.indent(@indent_level)
+      @output << "</"
+      @output << tag
+      @output << (if @pretty then ">\n" else ">")
 
   # Compile a plain text node
   -> compile_text(node)
@@ -124,46 +156,80 @@ in Tungsten:Slim
     write_line(opening)
     @indent_level = @indent_level + 1
 
-    header_rows = node.children.select(-> (c) c.is_a?(Tungsten:Slim:TableRow) && c.header)
-    body_rows   = node.children.select(-> (c) c.is_a?(Tungsten:Slim:TableRow) && !c.header)
-    other       = node.children.reject(-> (c) c.is_a?(Tungsten:Slim:TableRow))
+    header_rows = []
+    body_rows   = []
+    other       = []
+    children = node.children
+    n = children.size
+    i = 0
+    while i < n
+      c = children[i]
+      if c.is_a?(Tungsten:Slim:TableRow)
+        if c.header
+          header_rows.push(c)
+        else
+          body_rows.push(c)
+      else
+        other.push(c)
+      i = i + 1
 
     # Compile non-table-row children first
-    other.each -> (child)
-      compile_node(child)
+    i = 0
+    while i < other.size
+      compile_node(other[i])
+      i = i + 1
 
     # Thead
-    if header_rows.any?
+    if !header_rows.empty?
       write_line("<thead>")
       @indent_level = @indent_level + 1
-      header_rows.each -> (row)
-        compile_table_row(row)
+      i = 0
+      while i < header_rows.size
+        compile_table_row(header_rows[i])
+        i = i + 1
       @indent_level = @indent_level - 1
       write_line("</thead>")
 
     # Tbody
-    if body_rows.any?
+    if !body_rows.empty?
       write_line("<tbody>")
       @indent_level = @indent_level + 1
-      body_rows.each -> (row)
-        compile_table_row(row)
+      i = 0
+      while i < body_rows.size
+        compile_table_row(body_rows[i])
+        i = i + 1
       @indent_level = @indent_level - 1
       write_line("</tbody>")
 
     @indent_level = @indent_level - 1
-    write_line("</[tag]>")
+    write_line("</" + tag + ">")
 
   # Compile a table row node into <tr><th>...</th></tr> or <tr><td>...</td></tr>
   -> compile_table_row(node)
-    cell_tag = if node.header then "th" else "td"
-    cells_html = node.cells.map(-> (cell) "<[cell_tag]>[interpolate(cell)]</[cell_tag]>").join("")
-    write_line("<tr>[cells_html]</tr>")
+    open_cell = if node.header then "<th>" else "<td>"
+    close_cell = if node.header then "</th>" else "</td>"
+    if @pretty
+      @output << Tungsten:Slim:Helpers.indent(@indent_level)
+    @output << "<tr>"
+    cells = node.cells
+    n = cells.size
+    i = 0
+    while i < n
+      @output << open_cell
+      @output << interpolate(cells[i])
+      @output << close_cell
+      i = i + 1
+    @output << (if @pretty then "</tr>\n" else "</tr>")
 
   # Compile an HTML comment
   -> compile_comment(node)
     if node.text
-      write_line("<!-- [node.text] -->")
-    elsif node.children.any?
+      if @pretty
+        @output << Tungsten:Slim:Helpers.indent(@indent_level)
+      @output << "<!-- "
+      @output << node.text
+      @output << (if @pretty then " -->\n" else " -->")
+    elsif !node.children.empty?
       write_line("<!--")
       @indent_level = @indent_level + 1
       node.children.each -> (child)
@@ -230,9 +296,11 @@ in Tungsten:Slim
 
   # Interpolate [expression] references in text strings
   -> interpolate(text)
+    start = text.index("\[")
+    if start == nil
+      return text
     out = ""
     rest = text
-    start = rest.index("\[")
     while start != nil
       out = out + rest.slice(0, start)
       tail = rest.slice(start + 1, rest.size - start - 1)
@@ -249,7 +317,8 @@ in Tungsten:Slim
   -> evaluate(expression)
     expr = expression.strip
     key = expr
-    key = expr.slice(1, expr.size - 1) if expr.starts_with?("@")
+    if expr.size > 0 && expr.byte_at(0) == 64
+      key = expr.slice(1, expr.size - 1)
     symbol_key = key.to_sym
     if @locals.key?(symbol_key)
       return @locals[symbol_key]

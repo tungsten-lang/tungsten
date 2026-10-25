@@ -48,6 +48,8 @@
       ctor_class = resolve_exact_source_class_name(ctx[:mod], ctx[:class_name], ctor_recv.name)
       if ctor_class != nil && source_constructor_returns_exact_class?(ctx[:mod], ctor_class)
         return {class_name: ctor_class, certainty: :exact, stable: true}
+  if kind == :regex && normal_source_instance_class?(ctx[:mod], "Regex")
+    return {class_name: "Regex", certainty: :exact, stable: true}
   nil
 
 # Resolve the exact implementation ordinary runtime lookup would select for a
@@ -126,7 +128,7 @@
     if recv_type == :Instant
       cname = "Instant"
       entry = {shape: :top_tag, tag: "-2251799813685248", mask: "-281474976710656"}
-    elsif recv_type == :Char
+    elsif recv_type == :Char || recv_type == :codepoint
       cname = "Char"
       entry = {shape: :top_tag, tag: "-914793674309632", mask: "-70368744177664"}
     elsif recv_type == :Rational
@@ -1597,6 +1599,13 @@
     receiver_reg = ensure_i64_value(wfn, receiver_val)
     temp = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_int_to_s", nil, nil, temp)
+    return typed_value(:i64, temp)
+
+  if recv_node != nil && node.block == nil && (node.args == nil || node.args.size() == 0) && method_name == "to_s" && (recv_type == :float || recv_type == :f64)
+    receiver_val = lower_expression(ctx, recv_node)
+    receiver_reg = ensure_i64_value(wfn, receiver_val)
+    temp = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [receiver_reg], nil, nil, "w_to_s", nil, nil, temp)
     return typed_value(:i64, temp)
 
   # String byte length: mirror the :array size route — raw i64 result so a

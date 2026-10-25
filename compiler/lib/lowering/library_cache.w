@@ -42,24 +42,29 @@ incremental_library_cache_state = {
     return ""
   if value == nil
     return "n;"
+  if value == true
+    return "b1;"
+  if value == false
+    return "b0;"
   t = type(value)
-  if t == "Boolean"
-    return value == true ? "b1;" : "b0;"
+  if t == "String"
+    return "s" + core_abi_field(value)
+  if t == "Symbol"
+    return "y" + core_abi_field(value)
   if t == "Int"
     return "i" + core_abi_field(value)
   if t == "BigInt"
     return "z" + core_abi_field(value)
   if t == "Float" || t == "Decimal"
     return "f" + core_abi_field(value)
-  if t == "String"
-    return "s" + core_abi_field(value)
-  if t == "Symbol"
-    return "y" + core_abi_field(value)
   if t == "Array"
-    out = StringBuffer(32 + value.size() * 12)
-    out << "a" + core_abi_field(value.size())
+    v_sz = value.size()
+    if v_sz == 0
+      return "a1:0;"
+    out = StringBuffer(32 + v_sz * 12)
+    out << "a" + core_abi_field(v_sz)
     i = 0
-    while i < value.size()
+    while i < v_sz
       item = incremental_library_cache_canonical_value(value[i], state, depth + 1)
       if state[:ok] != true
         return ""
@@ -67,12 +72,16 @@ incremental_library_cache_state = {
       i += 1
     return out.to_s()
   if t == "Hash"
+    v_sz = value.size()
+    if v_sz == 0
+      return "h1:0;"
     pairs = []
     keys = value.keys()
     i = 0
     while i < keys.size()
-      key_text = incremental_library_cache_canonical_value(keys[i], state, depth + 1)
-      value_text = incremental_library_cache_canonical_value(value[keys[i]], state, depth + 1)
+      k = keys[i]
+      key_text = incremental_library_cache_canonical_value(k, state, depth + 1)
+      value_text = incremental_library_cache_canonical_value(value[k], state, depth + 1)
       if state[:ok] != true
         return ""
       pairs.push(core_abi_field(key_text) + core_abi_field(value_text))
@@ -246,7 +255,7 @@ incremental_library_cache_state = {
   if !is_ast_node?(value)
     return true
   kind = ast_kind(value)
-  if kind in (:block :go)
+  if kind in (:block :go :call :hash_literal :array :if :while :until :case :begin :rescue_expr :for :with :parallel_with)
     return false
   if kind in (:fn_def :method_def :gpu_kernel_def)
     return true
@@ -275,7 +284,9 @@ incremental_library_cache_state = {
     i = 0
     while i < body.size()
       child = body[i]
-      if is_ast_node?(child) && ast_kind(child) in (:fn_def :method_def :gpu_kernel_def)
+      if is_ast_node?(child) && ast_kind(child) in (:fn_def :method_def :gpu_kernel_def :view_decl :field_decl :layout_def)
+        nil
+      elsif is_ast_node?(child) && ast_kind(child) == :call && (ast_get(child, :name) == "ro" || ast_get(child, :name) == "rw")
         nil
       elsif !incremental_library_cache_nondef_safe?(child)
         return false
@@ -363,13 +374,42 @@ incremental_library_cache_state = {
     return incremental_library_cache_set_bypass(mod, partition[:reason])
   paths = partition[:paths]
   prefix_count = partition[:prefix_count]
-  if prefix_count < expressions.size() && ast_kind(expressions[prefix_count - 1]) == :compound_assign && ast_kind(expressions[prefix_count]) == :compound_assign
-    return incremental_library_cache_set_bypass(mod, "a lowering fusion can cross the library boundary")
   i = 0
+  bad_index = -1
   while i < prefix_count
     if !incremental_library_cache_expression_safe?(expressions[i], mod)
+      bad_index = i
+      i = prefix_count
+    else
+      i += 1
+  if bad_index >= 0
+    first_idx = {}
+    i = 0
+    while i < prefix_count
+      p = ast_get(expressions[i], :source_path)
+      if first_idx[p] == nil
+        first_idx[p] = i
+      i += 1
+    trimmed = bad_index
+    j = bad_index
+    while j < prefix_count
+      p = ast_get(expressions[j], :source_path)
+      fi = first_idx[p]
+      if fi < trimmed
+        trimmed = fi
+        j = trimmed
+      else
+        j += 1
+    if trimmed <= 0
       return incremental_library_cache_set_bypass(mod, "library startup can create uncached functions")
-    i += 1
+    prefix_count = trimmed
+    paths = {}
+    i = 0
+    while i < prefix_count
+      paths[ast_get(expressions[i], :source_path)] = true
+      i += 1
+  if prefix_count < expressions.size() && ast_kind(expressions[prefix_count - 1]) == :compound_assign && ast_kind(expressions[prefix_count]) == :compound_assign
+    return incremental_library_cache_set_bypass(mod, "a lowering fusion can cross the library boundary")
 
   specs = mod[:generic_specialization_order]
   if specs != nil

@@ -43,6 +43,9 @@ fn apply_folded_pipeline(text, fl_root, fl_grep, fl_prune, fl_subtree, fl_collap
     out = Tungsten:Flame:FlameThreshold.collapse(out, Tungsten:Flame:FlameThreshold.parse_pct_x10(fl_threshold))
   out
 
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!
+
 # ---- Read and parse the manpage ----
 # Prefer TUNGSTEN_ROOT (set by the CLI); __DIR__ is not always populated
 # for compile-to-binary entry points.

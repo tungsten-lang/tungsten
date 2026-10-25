@@ -21,20 +21,20 @@ use canvas
   # P(n/d)·d^deg as an exact integer (deg = highest power present). The common
   # d^deg scale cancels in the y-mapping, so only ratios matter.
   -> .eval_scaled(coeffs, n, d, deg)
-    result = 0
-    k = 0
-    while k < coeffs.size()
-      term = coeffs[k]
-      i = 0
-      while i < k
-        term = term * n
-        i += 1
-      i = 0
-      while i < deg - k
-        term = term * d
-        i += 1
-      result = result + term
-      k += 1
+    sz = coeffs.size()
+    if sz == 0
+      return 0
+    k = sz - 1
+    result = coeffs[k]
+    d_pow = 1
+    while k > 0
+      k -= 1
+      d_pow = d_pow * d
+      result = result * n + coeffs[k] * d_pow
+    rem = deg - (sz - 1)
+    while rem > 0
+      result = result * d
+      rem -= 1
     result
 
   # Format a value scaled by 10 (tenths) as a one-decimal signed string.
@@ -181,6 +181,11 @@ use canvas
     # Blank line, then each row: 2-space indent + a left y-label gutter (which
     # sits off the plot) + the plot cells.
     out = "\n"
+    tick0 = tick_cols[0]
+    tick1 = tick_cols[1]
+    curve_cells = curvec.cells
+    canvas_cells = canvas.cells
+    cell_idx = 0
     row = 0
     while row < rows
       ylab = ""
@@ -193,19 +198,21 @@ use canvas
       out = out + indent + dim + (" " * (gut - ylab.size())) + ylab + reset + " "
       col = 0
       while col < cols
+        cv = curve_cells[cell_idx]
         if row == axis_row
-          if tick_cols.include?(col)
+          if col == tick0 || col == tick1
             out = out + dim + "+" + reset
           else
             out = out + dim + "-" + reset
-        elsif !curvec.cell_empty?(col, row)
+        elsif cv != 0
           # Bright curve from the curve-only layer, so the cell shows just the
           # function's dot(s) — not the fill dither that also lands in it.
-          out = out + white + curvec.cell_char(col, row) + reset
-        elsif fill && !canvas.cell_empty?(col, row)
-          out = out + dim + canvas.cell_char(col, row) + reset
+          out = out + white + DRAWILLE_BRAILLE_GLYPHS[cv] + reset
+        elsif fill && canvas_cells[cell_idx] != 0
+          out = out + dim + DRAWILLE_BRAILLE_GLYPHS[canvas_cells[cell_idx]] + reset
         else
           out = out + " "
+        cell_idx += 1
         col += 1
       out = out + "\n"
       row += 1

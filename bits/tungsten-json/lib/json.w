@@ -41,171 +41,282 @@
 
 use core/json
 
-in Tungsten
-
 + JSON
-  -> .parse(s)
-    n = s.size
-    tokens = i32[n]
-    # A lowering fix (compiler/lib/lowering.w) makes ccall_nobox
-    # results survive local-variable stores without being NaN-box
-    # re-tagged. We use that here to capture the classifier's
-    # return value (the offset count) and reuse the source ptr/len
-    # locals — patterns that were unsafe before that fix landed.
+  -> .parse(s_in)
+    s = s_in ## String
+    view = ccall("w_string_bytes_view", s) ## u8[]
+    n = view.size ## i64
+    pbox = [0]
+    if n < 128
+      return parse_fast_value_b(s, view, n, 0, pbox)
+    tokens = i32[n + 1]
     src_ptr = ccall_nobox("w_string_byte_ptr", s)
     src_len = ccall_nobox("w_string_byte_length", s)
     out_ptr = ccall_nobox("w_array_data_ptr", tokens)
     n_off = ccall_nobox("w_json_simd_classify", src_ptr, src_len, out_ptr)
-    state = {idx: 0, n_off: n_off, pos: 0, tokens: tokens, chars: s.chars}
-    walk_simd_value(s, state)
+    st = i64[3]
+    st[0] = 0
+    st[1] = n_off
+    st[2] = 0
+    walk_simd_value(s, view, n, tokens, st, pbox)
 
-  -> .walk_simd_value(s, state)
-    idx = state[:idx]
-    n_off = state[:n_off]
-    chars = state[:chars]
+  -> .parse_fast_value_b(s_in, view_in, n_in, pos_in, pbox)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    pos = skip_ws_b(view, n, pos_in) ## i64
+    if pos >= n
+      raise "JSON.parse: unexpected end of input"
+    b = view[pos]
+    if b == 34
+      return parse_string_b(s, view, n, pos, pbox)
+    if b == 123
+      return parse_fast_object_b(s, view, n, pos, pbox)
+    if b == 91
+      return parse_fast_array_b(s, view, n, pos, pbox)
+    parse_scalar_b(s, view, n, pos, pbox)
 
-    # Fast path: if there's a structural token ahead, peek its char.
-    # `{`, `[`, `"` are value-starters → descend / parse string.
-    # `,`, `:`, `}`, `]` mean the value is a scalar between the
-    # current pos and that structural — fall through to skip_ws +
-    # parse_number / keyword.
-    if idx < n_off
-      tokens = state[:tokens]
-      next_struct = tokens[idx]
-      if next_struct < chars.size
-        ch = chars[next_struct]
-        if ch == "{"
-          state[:idx] = idx + 1
-          state[:pos] = next_struct + 1
-          return walk_simd_object(s, state)
-        if ch == "\["
-          state[:idx] = idx + 1
-          state[:pos] = next_struct + 1
-          return walk_simd_array(s, state)
-        if ch == "\""
-          state[:idx] = idx + 1
-          result = parse_string_chars(chars, next_struct)
-          state[:pos] = result[1]
-          return result[0]
+  -> .parse_fast_object_b(s_in, view_in, n_in, pos_in, pbox)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    pos = (pos_in + 1) ## i64
+    result = {}
+    pos = skip_ws_b(view, n, pos) ## i64
+    if pos >= n
+      raise "JSON.parse: unterminated object"
+    if view[pos] == 125
+      pbox[0] = pos + 1
+      return result
+    while true
+      pos = skip_ws_b(view, n, pos) ## i64
+      if pos >= n || view[pos] != 34
+        raise "JSON.parse: expected a string key in object at byte " + pos.to_s
+      key = parse_string_b(s, view, n, pos, pbox)
+      pos = pbox[0] ## i64
+      pos = skip_ws_b(view, n, pos) ## i64
+      if pos >= n || view[pos] != 58
+        raise "JSON.parse: expected ':' in object at byte " + pos.to_s
+      pos += 1
+      val = parse_fast_value_b(s, view, n, pos, pbox)
+      result[key] = val
+      pos = pbox[0] ## i64
+      pos = skip_ws_b(view, n, pos) ## i64
+      if pos >= n
+        raise "JSON.parse: unterminated object"
+      if view[pos] == 125
+        pbox[0] = pos + 1
+        return result
+      if view[pos] != 44
+        raise "JSON.parse: expected ',' or '}' in object at byte " + pos.to_s
+      pos += 1
+    result
 
-    # Scalar (number / keyword) fallback. Skip whitespace from the
-    # current source position. We can't use offset jumps here
-    # because scalars don't generate structural tokens.
-    pos = skip_ws_chars(chars, state[:pos])
-    if pos >= chars.size
-      return nil
-    ch = chars[pos]
-    if ch == "t"
-      state[:pos] = pos + 4
+  -> .parse_fast_array_b(s_in, view_in, n_in, pos_in, pbox)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    pos = (pos_in + 1) ## i64
+    result = []
+    pos = skip_ws_b(view, n, pos) ## i64
+    if pos >= n
+      raise "JSON.parse: unterminated array"
+    if view[pos] == 93
+      pbox[0] = pos + 1
+      return result
+    while true
+      val = parse_fast_value_b(s, view, n, pos, pbox)
+      result.push(val)
+      pos = pbox[0] ## i64
+      pos = skip_ws_b(view, n, pos) ## i64
+      if pos >= n
+        raise "JSON.parse: unterminated array"
+      if view[pos] == 93
+        pbox[0] = pos + 1
+        return result
+      if view[pos] != 44
+        raise "JSON.parse: expected ',' or ']' in array at byte " + pos.to_s
+      pos += 1
+    result
+
+  -> .parse_scalar_b(s_in, view_in, n_in, pos_in, pbox)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    pos = pos_in ## i64
+    while pos < n
+      b = view[pos]
+      break if b != 32 && b != 9 && b != 10 && b != 13
+      pos += 1
+    if pos >= n
+      raise "JSON.parse: unexpected end of input"
+    b = view[pos]
+    if b == 116
+      pbox[0] = pos + 4
       return true
-    if ch == "f"
-      state[:pos] = pos + 5
+    if b == 102
+      pbox[0] = pos + 5
       return false
-    if ch == "n"
-      state[:pos] = pos + 4
+    if b == 110
+      pbox[0] = pos + 4
       return nil
-    # Number
-    result = parse_number_chars(s, chars, pos)
-    state[:pos] = result[1]
-    return result[0]
+    start = pos
+    neg = false
+    if b == 45
+      neg = true
+      pos += 1
+    first_digit = pos
+    int_val = 0 ## i64
+    while pos < n
+      d = view[pos]
+      break if d < 48 || d > 57
+      int_val = int_val * 10 + (d - 48)
+      pos += 1
+    if pos == first_digit
+      raise "JSON.parse: unexpected byte at " + start.to_s
+    is_float = false
+    if pos < n && view[pos] == 46
+      is_float = true
+      pos += 1
+      while pos < n && view[pos] >= 48 && view[pos] <= 57
+        pos += 1
+    if pos < n && (view[pos] == 101 || view[pos] == 69)
+      is_float = true
+      pos += 1
+      if pos < n && (view[pos] == 43 || view[pos] == 45)
+        pos += 1
+      exp_digit = pos
+      while pos < n && view[pos] >= 48 && view[pos] <= 57
+        pos += 1
+      if pos == exp_digit
+        raise "JSON.parse: malformed exponent at byte " + start.to_s
+    pbox[0] = pos
+    if is_float
+      return s.slice(start, pos - start).to_f
+    if pos - first_digit <= 18
+      return neg ? 0 - int_val : int_val
+    s.slice(start, pos - start).to_i
 
-  -> .walk_simd_object(s, state)
-    # Caller has consumed `{` and set idx/pos past it.
-    chars = state[:chars]
-    tokens = state[:tokens]
+  -> .walk_simd_value(s_in, view_in, n_in, tokens_in, st_in, pbox)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    tokens = tokens_in ## i32[]
+    st = st_in ## i64[]
+    idx = st[0] ## i64
+    n_off = st[1] ## i64
+
+    if idx < n_off
+      next_struct = tokens[idx] ## i64
+      if next_struct < n
+        b = view[next_struct]
+        if b == 34
+          st[0] = idx + 1
+          val = parse_string_b(s, view, n, next_struct, pbox)
+          st[2] = pbox[0] ## i64
+          return val
+        if b == 123
+          st[0] = idx + 1
+          st[2] = next_struct + 1
+          return walk_simd_object(s, view, n, tokens, st, pbox)
+        if b == 91
+          st[0] = idx + 1
+          st[2] = next_struct + 1
+          return walk_simd_array(s, view, n, tokens, st, pbox)
+
+    val = parse_scalar_b(s, view, n, st[2], pbox)
+    st[2] = pbox[0] ## i64
+    val
+
+  -> .walk_simd_object(s_in, view_in, n_in, tokens_in, st_in, pbox)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    tokens = tokens_in ## i32[]
+    st = st_in ## i64[]
     result = {}
 
-    # Check for empty object: next non-whitespace from pos must be `}`.
-    # Can't just check the next token — for nested structures, the next
-    # token could be a `}` from an OUTER object's content (e.g., parsing
-    # the inner `{}` of `{"a":{}}` — after consuming inner `{`, pos is
-    # past it, and the next non-ws char IS `}`).
-    idx = state[:idx]
-    n_off = state[:n_off]
-    nxt = skip_ws_chars(chars, state[:pos])
-    if nxt < chars.size && chars[nxt] == "}"
-      # Find the `}` token (must be at position `nxt`) and consume it.
-      if idx < n_off && tokens[idx] == nxt
-        state[:idx] = idx + 1
-      state[:pos] = nxt + 1
-      return result
+    idx = st[0] ## i64
+    n_off = st[1] ## i64
+    if idx < n_off
+      first_pos = tokens[idx] ## i64
+      if first_pos < n && view[first_pos] == 125
+        st[0] = idx + 1
+        st[2] = first_pos + 1
+        return result
 
     while true
-      # Key: must be a string. The next structural token should be
-      # the opening `"` of the key. walk_simd_value handles the
-      # string parse and advances state.
-      key = walk_simd_value(s, state)
+      idx = st[0] ## i64
+      if idx >= n_off
+        break
+      key_pos = tokens[idx] ## i64
+      st[0] = idx + 1
+      key = parse_string_b(s, view, n, key_pos, pbox)
 
-      # Colon: next structural should be `:`.
-      colon_idx = state[:idx]
-      if colon_idx < state[:n_off]
-        colon_pos = tokens[colon_idx]
-        if colon_pos < chars.size && chars[colon_pos] == ":"
-          state[:idx] = colon_idx + 1
-          state[:pos] = colon_pos + 1
+      colon_idx = st[0] ## i64
+      if colon_idx < n_off
+        colon_pos = tokens[colon_idx] ## i64
+        st[0] = colon_idx + 1
+        st[2] = colon_pos + 1
 
-      # Value: recursive walk advances state past the value's
-      # structural tokens (and pos past any trailing scalar).
-      val = walk_simd_value(s, state)
+      val = walk_simd_value(s, view, n, tokens, st, pbox)
       result[key] = val
 
-      # Separator: `,` to continue, `}` to close.
-      sep_idx = state[:idx]
-      if sep_idx >= state[:n_off]
+      sep_idx = st[0] ## i64
+      if sep_idx >= n_off
         break
-      sep_pos = tokens[sep_idx]
-      if sep_pos >= chars.size
+      sep_pos = tokens[sep_idx] ## i64
+      if sep_pos >= n
         break
-      sep_ch = chars[sep_pos]
-      if sep_ch == "}"
-        state[:idx] = sep_idx + 1
-        state[:pos] = sep_pos + 1
+      sep_b = view[sep_pos]
+      if sep_b == 125
+        st[0] = sep_idx + 1
+        st[2] = sep_pos + 1
         return result
-      if sep_ch == ","
-        state[:idx] = sep_idx + 1
-        state[:pos] = sep_pos + 1
+      if sep_b == 44
+        st[0] = sep_idx + 1
+        st[2] = sep_pos + 1
       else
         break
     result
 
-  -> .walk_simd_array(s, state)
-    # Caller has consumed `[` and set idx/pos past it.
-    chars = state[:chars]
-    tokens = state[:tokens]
+  -> .walk_simd_array(s_in, view_in, n_in, tokens_in, st_in, pbox)
+    s = s_in ## String
+    view = view_in ## u8[]
+    n = n_in ## i64
+    tokens = tokens_in ## i32[]
+    st = st_in ## i64[]
     result = []
 
-    # Check for empty array: next non-whitespace from pos must be `]`.
-    # (Same reasoning as walk_simd_object — the next token alone isn't
-    # sufficient because scalars don't generate tokens, so `[3]` would
-    # otherwise be misread as empty when the next token is the closing
-    # `]` and the `3` content is between pos and that `]`.)
-    idx = state[:idx]
-    n_off = state[:n_off]
-    nxt = skip_ws_chars(chars, state[:pos])
-    if nxt < chars.size && chars[nxt] == "\]"
-      if idx < n_off && tokens[idx] == nxt
-        state[:idx] = idx + 1
-      state[:pos] = nxt + 1
-      return result
+    idx = st[0] ## i64
+    n_off = st[1] ## i64
+    if idx < n_off
+      first_pos = tokens[idx] ## i64
+      if first_pos < n && view[first_pos] == 93
+        nxt = skip_ws_b(view, n, st[2]) ## i64
+        if nxt == first_pos
+          st[0] = idx + 1
+          st[2] = first_pos + 1
+          return result
 
     while true
-      val = walk_simd_value(s, state)
+      val = walk_simd_value(s, view, n, tokens, st, pbox)
       result.push(val)
 
-      sep_idx = state[:idx]
-      if sep_idx >= state[:n_off]
+      sep_idx = st[0] ## i64
+      if sep_idx >= n_off
         break
-      sep_pos = tokens[sep_idx]
-      if sep_pos >= chars.size
+      sep_pos = tokens[sep_idx] ## i64
+      if sep_pos >= n
         break
-      sep_ch = chars[sep_pos]
-      if sep_ch == "\]"
-        state[:idx] = sep_idx + 1
-        state[:pos] = sep_pos + 1
+      sep_b = view[sep_pos]
+      if sep_b == 93
+        st[0] = sep_idx + 1
+        st[2] = sep_pos + 1
         return result
-      if sep_ch == ","
-        state[:idx] = sep_idx + 1
-        state[:pos] = sep_pos + 1
+      if sep_b == 44
+        st[0] = sep_idx + 1
+        st[2] = sep_pos + 1
       else
         break
     result

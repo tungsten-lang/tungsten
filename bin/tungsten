@@ -186,6 +186,26 @@ case "$1" in
     fi
     exec "$BUILD_BIN" "$@"
     ;;
+  install)
+    shift
+    if [ ! -x "$COMPILER" ]; then
+      echo "tungsten install: no compiler at bin/tungsten-compiler — run bin/tungsten build --install first" >&2
+      exit 1
+    fi
+    BUILD_W="$ROOT/bin/commands/build.w"
+    BUILD_BIN="$ROOT/bin/commands/build"
+    if [ ! -x "$BUILD_BIN" ] || [ "$BUILD_W" -nt "$BUILD_BIN" ] || [ "$COMPILER" -nt "$BUILD_BIN" ]; then
+      BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
+        "$COMPILER" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto >/dev/null 2>&1 || {
+        echo "tungsten install: failed to compile bin/commands/build.w" >&2
+        exit 1
+      }
+      case "$(uname -s)" in
+        Darwin) codesign --force -s - "$BUILD_BIN" >/dev/null 2>&1 || true ;;
+      esac
+    fi
+    exec "$BUILD_BIN" --install-only "$@"
+    ;;
   # bench: Tungsten primitive-op velocity baseline (bin/commands/bench.w).
   # `--suite` switches to the cross-language algorithm suite (bench-suite.w).
   # Options are translated to env vars because `tungsten run` consumes leading

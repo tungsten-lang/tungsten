@@ -44,7 +44,7 @@ when "doctor"  then ARGV.shift; load File.join(COMMANDS_DIR, "doctor.rb")
 when "ai"      then ARGV.shift; load File.join(COMMANDS_DIR, "ai.rb")
 when "symbolicate" then ARGV.shift; load File.join(COMMANDS_DIR, "symbolicate.rb")
 when "forge" then ARGV.shift; load File.join(COMMANDS_DIR, "forge.rb")
-when "flame", "fire" then ARGV.shift; load File.join(COMMANDS_DIR, "flame.rb")
+when "flame", "fire", "profile" then ARGV.shift; load File.join(COMMANDS_DIR, "flame.rb")
 when "console"
   warn "tungsten console is self-hosted — run bin/tungsten bootstrap first, then bin/tungsten console"
   exit 1

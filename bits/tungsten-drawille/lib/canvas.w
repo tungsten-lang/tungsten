@@ -22,6 +22,9 @@ DRAWILLE_BRAILLE_GLYPHS = "\u2800\u2801\u2802\u2803\u2804\u2805\u2806\u2807\u280
 + Canvas
   ro :cols
   ro :rows
+  ro :cells
+  ro :pw
+  ro :ph
 
   -> new(cols, rows)
     # Terminal plots should never allocate an accidental unbounded bitmap.
@@ -32,55 +35,40 @@ DRAWILLE_BRAILLE_GLYPHS = "\u2800\u2801\u2802\u2803\u2804\u2805\u2806\u2807\u280
     @rows = 1 if @rows < 1
     @cols = 240 if @cols > 240
     @rows = 100 if @rows > 100
-    @cells = []
-    n = @cols * @rows
-    i = 0
-    while i < n
-      @cells.push(0)
-      i += 1
+    @pw = @cols * 2
+    @ph = @rows * 4
+    @cells = Array.new(@cols * @rows, 0)
 
   -> clear
+    n = @cells.size()
     i = 0
-    while i < @cells.size()
+    while i < n
       @cells[i] = 0
       i += 1
     self
 
   -> pixel_width
-    @cols * 2
+    @pw
 
   -> pixel_height
-    @rows * 4
+    @ph
 
   # Braille dot bit for a sub-cell position (dx in 0..1, dy in 0..3).
   -> dot_bit(dx, dy)
-    if dy == 0
-      if dx == 0
-        return 1
-      return 8
-    if dy == 1
-      if dx == 0
-        return 2
-      return 16
-    if dy == 2
-      if dx == 0
-        return 4
-      return 32
-    if dx == 0
-      return 64
-    128
+    if dy < 3
+      return 1 << (dy + dx * 3)
+    64 << dx
 
   # Turn on the pixel at (px, py). Out-of-bounds pixels are ignored so a
   # caller can sample past the edges without bounds-checking every point.
   -> set(px, py)
-    if px < 0 || py < 0
+    if px < 0 || py < 0 || px >= @pw || py >= @ph
       return self
-    if px >= pixel_width() || py >= pixel_height()
-      return self
-    col = px / 2
-    row = py / 4
-    idx = row * @cols + col
-    @cells[idx] = @cells[idx] | dot_bit(px % 2, py % 4)
+    idx = (py >> 2) * @cols + (px >> 1)
+    dy = py & 3
+    dx = px & 1
+    bit = dy < 3 ? (1 << (dy + dx * 3)) : (64 << dx)
+    @cells[idx] = @cells[idx] | bit
     self
 
   # Cohen-Sutherland clipping keeps Bresenham work proportional to the
@@ -88,16 +76,16 @@ DRAWILLE_BRAILLE_GLYPHS = "\u2800\u2801\u2802\u2803\u2804\u2805\u2806\u2807\u280
   -> outcode(x, y)
     code = 0
     code = code | 1 if x < 0
-    code = code | 2 if x >= pixel_width()
+    code = code | 2 if x >= @pw
     code = code | 4 if y < 0
-    code = code | 8 if y >= pixel_height()
+    code = code | 8 if y >= @ph
     code
 
   -> clip_line(x0, y0, x1, y1)
     xmin = 0
     ymin = 0
-    xmax = pixel_width() - 1
-    ymax = pixel_height() - 1
+    xmax = @pw - 1
+    ymax = @ph - 1
     c0 = outcode(x0, y0)
     c1 = outcode(x1, y1)
     attempts = 0
@@ -138,47 +126,54 @@ DRAWILLE_BRAILLE_GLYPHS = "\u2800\u2801\u2802\u2803\u2804\u2805\u2806\u2807\u280
   # pixel along the segment so a vector arrow stays connected at any slope.
   # Integer-only; out-of-bounds pixels fall through `set`'s bounds check.
   -> line(x0, y0, x1, y1)
-    clipped = clip_line(x0, y0, x1, y1)
-    return self if clipped.size() == 0
-    x0 = clipped[0]
-    y0 = clipped[1]
-    x1 = clipped[2]
-    y1 = clipped[3]
+    pw = @pw
+    ph = @ph
+    if x0 < 0 || x0 >= pw || y0 < 0 || y0 >= ph || x1 < 0 || x1 >= pw || y1 < 0 || y1 >= ph
+      clipped = clip_line(x0, y0, x1, y1)
+      return self if clipped.size() == 0
+      x0 = clipped[0]
+      y0 = clipped[1]
+      x1 = clipped[2]
+      y1 = clipped[3]
     dx = x1 - x0
     if dx < 0
       dx = 0 - dx
     dy = y1 - y0
     if dy < 0
       dy = 0 - dy
-    sx = -1
-    if x0 < x1
-      sx = 1
-    sy = -1
-    if y0 < y1
-      sy = 1
+    sx = x0 < x1 ? 1 : -1
+    sy = y0 < y1 ? 1 : -1
     err = dx - dy
+    neg_dy = 0 - dy
     x = x0
     y = y0
-    done = false
-    while !done
-      set(x, y)
-      if x == x1 && y == y1
-        done = true
-      else
-        e2 = err * 2
-        if e2 > 0 - dy
-          err = err - dy
-          x = x + sx
-        if e2 < dx
-          err = err + dx
-          y = y + sy
+    cols = @cols
+    cells = @cells
+    while true
+      idx = (y >> 2) * cols + (x >> 1)
+      sub_y = y & 3
+      sub_x = x & 1
+      bit = sub_y < 3 ? (1 << (sub_y + sub_x * 3)) : (64 << sub_x)
+      cells[idx] = cells[idx] | bit
+      break if x == x1 && y == y1
+      e2 = err * 2
+      if e2 > neg_dy
+        err = err - dy
+        x = x + sx
+      if e2 < dx
+        err = err + dx
+        y = y + sy
     self
 
   -> polyline(points)
-    return self if points.size() < 2
+    n = points.size()
+    return self if n < 2
+    prev = points[0]
     i = 1
-    while i < points.size()
-      line(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1])
+    while i < n
+      cur = points[i]
+      line(prev[0], prev[1], cur[0], cur[1])
+      prev = cur
       i += 1
     self
 
@@ -218,15 +213,21 @@ DRAWILLE_BRAILLE_GLYPHS = "\u2800\u2801\u2802\u2803\u2804\u2805\u2806\u2807\u280
 
   -> to_s
     out = ""
+    rows = @rows
+    cols = @cols
+    cells = @cells
+    idx = 0
     row = 0
-    while row < @rows
+    while row < rows
       col = 0
-      while col < @cols
-        if cell_empty?(col, row)
+      while col < cols
+        v = cells[idx]
+        if v == 0
           out += " "
         else
-          out += cell_char(col, row)
+          out += DRAWILLE_BRAILLE_GLYPHS[v]
+        idx += 1
         col += 1
-      out += "\n" if row + 1 < @rows
+      out += "\n" if row + 1 < rows
       row += 1
     out

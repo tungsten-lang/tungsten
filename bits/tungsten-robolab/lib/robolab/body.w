@@ -102,18 +102,31 @@
   # mask(["l_", "r_hip"]). A prefix of "" selects everything.
   -> mask(prefixes)
     out = []
-    # TODO: named block params work around a compiler bug: inside a method,
-    # a nested implicit-`item` block binds `item` to the OUTER block's
-    # element (lowering/blocks.w free-var capture), so the prefix test saw
-    # the Muscle and raised "expected string or symbol".
-    @muscles.each ->(m)
+    nm = @muscles.size
+    np = prefixes.size
+    i = 0
+    while i < nm
+      m = @muscles[i]
+      mname = m.name
       hit = false
-      prefixes.each ->(prefix) hit = true if m.name.starts_with?(prefix)
-      out.push(m.index) if hit
+      j = 0
+      while j < np && !hit
+        if mname.starts_with?(prefixes[j])
+          hit = true
+        j += 1
+      if hit
+        out.push(m.index)
+      i += 1
     out
 
   -> all
-    (0...@muscles.size).map -> item
+    out = []
+    n = @muscles.size
+    i = 0
+    while i < n
+      out.push(i)
+      i += 1
+    out
 
 # Geometry: muscle length as a function of posture, for bodies whose muscles
 # wrap across several joints (the MyoSuite models: 80-290 muscles, many of
@@ -209,12 +222,12 @@
     ub = ~0.0 if ub < ~0.0
     ua = s - 1 if ua > s - 1
     ub = s - 1 if ub > s - 1
-    ia = 0
-    while ia + 1 < s - 1 && ia + 1 <= ua
-      ia += 1
-    ib = 0
-    while ib + 1 < s - 1 && ib + 1 <= ub
-      ib += 1
+    ia = ua.to_i
+    ia = s - 2 if ia > s - 2
+    ia = 0 if ia < 0
+    ib = ub.to_i
+    ib = s - 2 if ib > s - 2
+    ib = 0 if ib < 0
     ta = ua - ia
     tb = ub - ib
     v00 = grid[ia * s + ib]
@@ -257,7 +270,13 @@
     @qref[j]
 
   -> reference_posture
-    @qref.map -> item
+    out = []
+    n = @qref.size
+    i = 0
+    while i < n
+      out.push(@qref[i])
+      i += 1
+    out
 
   -> crossing(j)
     @crossing[j]
@@ -275,21 +294,33 @@
     u = (q - lo) / (hi - lo) * (k - 1)
     return row[0] if u <= ~0.0
     return row[k - 1] if u >= k - 1
-    a = 0
-    while a + 1 < k - 1 && a + 1 <= u
-      a += 1
+    a = u.to_i
+    a = k - 2 if a > k - 2
     t = u - a
     row[a] + (row[a + 1] - row[a]) * t
 
   -> length(i, q)
     total = @lref[i]
+    spans_i = @spans[i]
+    ns = spans_i.size
     slot = 0
-    while slot < @spans[i].size
-      j = @spans[i][slot]
-      total += table_length(i, slot, q[j]) - table_length(i, slot, @qref[j])
+    while slot < ns
+      j = spans_i[slot]
+      qj = q[j]
+      qr = @qref[j]
+      if qj != qr
+        total += table_length(i, slot, qj) - table_length(i, slot, qr)
       slot += 1
-    @pairs[i].each ->(e)
-      total += pair_residual(e, q[e[0]], q[e[1]]) - pair_residual(e, @qref[e[0]], @qref[e[1]])
+    pairs_i = @pairs[i]
+    np = pairs_i.size
+    pi = 0
+    while pi < np
+      e = pairs_i[pi]
+      e0 = e[0]
+      e1 = e[1]
+      if q[e0] != @qref[e0] || q[e1] != @qref[e1]
+        total += pair_residual(e, q[e0], q[e1]) - pair_residual(e, @qref[e0], @qref[e1])
+      pi += 1
     total
 
   -> contraction(i, q)

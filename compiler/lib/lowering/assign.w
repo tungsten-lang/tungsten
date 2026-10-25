@@ -713,6 +713,11 @@
       if ctx[:local_assignment_counts] != nil && ctx[:local_assignment_counts][name] == 1 && ctx[:straight_line_local_assignments] != nil && ctx[:straight_line_local_assignments][name] == true && source_constructor_returns_exact_class?(ctx[:mod], ctor_cls)
         stable = true
       fact = {class_name: ctor_cls, certainty: :exact, stable: stable}
+  elsif node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :regex && normal_source_instance_class?(ctx[:mod], "Regex")
+    stable = false
+    if ctx[:local_assignment_counts] != nil && ctx[:local_assignment_counts][name] == 1 && ctx[:straight_line_local_assignments] != nil && ctx[:straight_line_local_assignments][name] == true
+      stable = true
+    fact = {class_name: "Regex", certainty: :exact, stable: stable}
   elsif node.value != nil && is_ast_node?(node.value) && ast_kind(node.value) == :var
     source_fact = ctx[:local_class_facts][node.value.name]
     if source_fact != nil

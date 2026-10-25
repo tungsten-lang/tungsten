@@ -5,12 +5,12 @@
 # Builds:
 #   1. implementations/c (stage-0 C VM)
 #   2. a runtime archive for linking
-#   3. stage-1 compiler via the C VM → bin/tungsten-compiler
-#   4. bin/tungsten.wc (Argon CLI) when possible
+#   3. stage-1 compiler via the C VM (cached; never installed)
+#   4. bin/commands/build.w via stage 1, then execs it for stage 2 + verify
 #
 # Afterwards this compiles the Tungsten build orchestrator
 # (bin/commands/build.w) with the stage-1 compiler just built and execs
-# it for the stage1+stage2 fixed-point + bits pipeline, so one bootstrap
+# it for the stage1+stage2 fixed-point pipeline, so one bootstrap
 # ends with the full self-host pipeline. No Ruby anywhere.
 set -euo pipefail
 
@@ -63,10 +63,10 @@ Usage: tungsten bootstrap [options]
   1. Run doctor (toolchain check)
   2. Build implementations/c (stage 0)
   3. Build a runtime archive
-  4. Compile stage 1 → bin/tungsten-compiler
-  5. Compile bin/tungsten.w → bin/tungsten.wc
-  6. Compile bin/commands/build.w and exec it — the full `tungsten build`
-     pipeline (stage1 + stage2 identity, bits). No Ruby anywhere.
+  4. Compile stage 1 (intermediate only; never installed)
+  5. Compile bin/commands/build.w with stage 1 and exec it — the full
+     `tungsten build` pipeline (stage1 + stage2 identity, stage 2 compiler).
+     No Ruby anywhere.
 
 Options:
   --force          Ignore cached bootstrap artifacts
@@ -344,25 +344,6 @@ else
   zstd_libs=""
 fi
 
-if [ -n "${TUNGSTEN_ONIG_CFLAGS+x}" ]; then
-  onig_cflags="$TUNGSTEN_ONIG_CFLAGS"
-else
-  onig_cflags="$(pkg-config --cflags oniguruma 2>/dev/null || true)"
-  if [ -z "$onig_cflags" ] && [ -n "$homebrew_prefix" ] && [ -f "$homebrew_prefix/include/oniguruma.h" ]; then
-    onig_cflags="-I$homebrew_prefix/include"
-  fi
-  if [ -n "$onig_cflags" ]; then onig_cflags="$onig_cflags -DTUNGSTEN_ONIG"; fi
-fi
-if [ -n "${TUNGSTEN_ONIG_LDFLAGS+x}" ]; then
-  onig_libs="$TUNGSTEN_ONIG_LDFLAGS"
-else
-  onig_libs="$(pkg-config --libs oniguruma 2>/dev/null || true)"
-  if [ -z "$onig_libs" ] && [ -n "$homebrew_prefix" ] && \
-     { [ -f "$homebrew_prefix/lib/libonig.dylib" ] || [ -f "$homebrew_prefix/lib/libonig.a" ]; }; then
-    onig_libs="-L$homebrew_prefix/lib -lonig"
-  fi
-fi
-
 tls_flags=""
 http2_flags=""
 http2_libs=""
@@ -401,7 +382,7 @@ for m in $EXTRA_RUNTIME_SRCS; do RUNTIME_SRCS+=("$m"); done
 
 if [ "$RELEASE" -eq 1 ]; then PROFILE_OPT=-O3; else PROFILE_OPT=-O1; fi
 if [ "$DEBUG_ENABLED" -eq 1 ]; then DEBUG_CFLAG=-g; else DEBUG_CFLAG=-DNDEBUG; fi
-cflags=("$PROFILE_OPT" "$DEBUG_CFLAG" -pthread "${HOST_CPU_FLAGS[@]}" $tls_flags $http2_flags $onig_cflags $zstd_cflags)
+cflags=("$PROFILE_OPT" "$DEBUG_CFLAG" -pthread "${HOST_CPU_FLAGS[@]}" $tls_flags $http2_flags $zstd_cflags)
 if [ "$UNAME_S" = Linux ]; then cflags+=(-D_DEFAULT_SOURCE); fi
 runtime_objc_flags=("$PROFILE_OPT" "$DEBUG_CFLAG" "${HOST_CPU_FLAGS[@]}" -c -x objective-c)
 
@@ -484,8 +465,6 @@ export TUNGSTEN_C_FAST_PARSE="${TUNGSTEN_C_FAST_PARSE:-1}"
 
 export TUNGSTEN_ZSTD_CFLAGS="$zstd_cflags"
 export TUNGSTEN_ZSTD_LDFLAGS="$zstd_libs"
-export TUNGSTEN_ONIG_CFLAGS="$onig_cflags"
-export TUNGSTEN_ONIG_LDFLAGS="$onig_libs"
 export TUNGSTEN_HTTP2_LDFLAGS="$http2_libs"
 export TUNGSTEN_CC="${TUNGSTEN_CC:-$BOOTSTRAP_CC}"
 export TUNGSTEN_AR="${TUNGSTEN_AR:-$BOOTSTRAP_AR}"
@@ -497,7 +476,6 @@ stage1_identity="$({
     "bootstrap-stage-content-v3" \
     "$TUNGSTEN_CLANG_OPT" "$TUNGSTEN_C_FAST_PARSE" \
     "$TUNGSTEN_ZSTD_CFLAGS" "$TUNGSTEN_ZSTD_LDFLAGS" \
-    "${TUNGSTEN_ONIG_CFLAGS:-}" "${TUNGSTEN_ONIG_LDFLAGS:-}" \
     "${TUNGSTEN_MARCH_ARGS:-}" "$TUNGSTEN_OS" \
     "$TOOLCHAIN_ENV_ID" \
     "$(tool_identity "$TUNGSTEN_CC")" "$(tool_identity "$TUNGSTEN_AR")" \
@@ -567,124 +545,22 @@ else
   ok "built" "$STAGE1"
 fi
 
-expected_compiler_digest="$(sha256_file "$STAGE1")"
-expected_compiler_sidemap="missing:sidemap"
-if [ -f "$STAGE1.sidemap" ]; then expected_compiler_sidemap="$(sha256_file "$STAGE1.sidemap")"; fi
-current_compiler_digest=""
-if [ -x "$COMPILER_BIN" ]; then current_compiler_digest="$(sha256_file "$COMPILER_BIN")"; fi
-current_compiler_sidemap="missing:sidemap"
-if [ -f "$COMPILER_BIN.sidemap" ]; then current_compiler_sidemap="$(sha256_file "$COMPILER_BIN.sidemap")"; fi
-
-if [ "$current_compiler_digest" = "$expected_compiler_digest" ] \
-   && [ "$current_compiler_sidemap" = "$expected_compiler_sidemap" ]; then
-  ok "CACHED" "$COMPILER_BIN (identity ${stage1_identity:0:16})"
-else
-  # ── 5. Install compiler ─────────────────────────────────────────
-  step "Install bin/tungsten-compiler"
-  tmp_bin="$COMPILER_BIN.tmp-$$"
-  cp "$STAGE1" "$tmp_bin"
-  chmod 755 "$tmp_bin"
-  mv "$tmp_bin" "$COMPILER_BIN"
-  if [ -f "$STAGE1.sidemap" ]; then
-    tmp_sidemap="$COMPILER_BIN.sidemap.tmp-$$"
-    cp "$STAGE1.sidemap" "$tmp_sidemap"
-    mv "$tmp_sidemap" "$COMPILER_BIN.sidemap"
-  else
-    rm -f "$COMPILER_BIN.sidemap"
-  fi
-  ok "installed" "$COMPILER_BIN"
-fi
-
-# Release artifacts are emitted by the runnable host compiler after bootstrap;
-# a cross-target compiler is never executed as the next bootstrap stage.
-artifact_target="$TARGET_TRIPLE"
-artifact_cpus=()
-artifact_release="$RELEASE"
-if [ "$PORTABLE" -eq 1 ]; then
-  artifact_release=1
-  if [ -z "$artifact_target" ]; then
-    case "$UNAME_S" in
-      Darwin) artifact_target=x86_64-apple-macos ;;
-      *) artifact_target=x86_64-unknown-linux-gnu ;;
-    esac
-  fi
-  case "$artifact_target" in
-    x86_64-*|x86_64_*) ;;
-    *) die "--portable is the x86-64 release set; target must be an x86_64 triple" ;;
-  esac
-  artifact_cpus=(x86-64-v2 x86-64-v3)
-elif [ -n "$artifact_target" ]; then
-  if [ -n "$CPU_ARG" ]; then
-    artifact_cpus=("$(normalize_cpu "$CPU_ARG")")
-  else
-    artifact_cpus=("")
-  fi
-fi
-
-if [ "${#artifact_cpus[@]}" -gt 0 ]; then
-  step "Release artifacts"
-  for artifact_cpu in "${artifact_cpus[@]}"; do
-    cpu_label="${artifact_cpu:-default}"
-    target_label="$(printf '%s' "$artifact_target" | tr -c 'A-Za-z0-9_.+-' '_')"
-    artifact_dir="$ROOT/build/releases/$target_label/$cpu_label"
-    artifact_bin="$artifact_dir/tungsten-compiler"
-    mkdir -p "$artifact_dir"
-    artifact_flags=(--target "$artifact_target")
-    if [ -n "$artifact_cpu" ]; then artifact_flags+=(--cpu "$artifact_cpu"); fi
-    if [ -n "$TARGET_SYSROOT" ]; then artifact_flags+=(--sysroot "$TARGET_SYSROOT"); fi
-    if [ "$artifact_release" -eq 1 ]; then artifact_flags+=(--release); fi
-    if [ "$artifact_release" -eq 1 ]; then artifact_opt=-O3; else artifact_opt=-O0; fi
-    if [ "$DEBUG_ENABLED" -eq 1 ]; then
-      artifact_flags+=(--debug)
-      artifact_opt="$artifact_opt -g"
-    else
-      artifact_flags+=(--no-debug)
-    fi
-    TUNGSTEN_MARCH_ARGS="" TUNGSTEN_CLANG_OPT="$artifact_opt" \
-      "$COMPILER_BIN" compile "$COMPILER_W" --out "$artifact_bin" \
-      "${artifact_flags[@]}" || die "failed to build $artifact_target/$cpu_label"
-    case "$artifact_target" in
-      *apple*) codesign --force -s - "$artifact_bin" >/dev/null 2>&1 || die "failed to ad-hoc sign $artifact_target/$cpu_label" ;;
-    esac
-    ok "built" "${artifact_bin#$ROOT/}"
-  done
-fi
-
-# ── 6. Tungsten CLI (Argon) ─────────────────────────────────────
-step "CLI: bin/tungsten.wc"
-WC="$ROOT/bin/tungsten.w"
-WC_OUT="$ROOT/bin/tungsten.wc"
-if [ -f "$WC" ]; then
-  if [ "$FORCE" -eq 0 ] && [ -x "$WC_OUT" ] && [ ! "$WC" -nt "$WC_OUT" ] \
-     && [ ! "$COMPILER_BIN" -nt "$WC_OUT" ]; then
-    ok "CACHED" "$WC_OUT"
-  elif BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
-      "$COMPILER_BIN" compile "$WC" --out "$WC_OUT" --no-lto \
-      >/tmp/tungsten-bootstrap-cli.log 2>&1; then
-    if [ "$UNAME_S" = Darwin ]; then
-      codesign --force -s - "$WC_OUT" >/dev/null 2>&1 || true
-    fi
-    ok "built" "$WC_OUT"
-  else
-    printf '    %sskipped%s CLI (see /tmp/tungsten-bootstrap-cli.log)\n' "$dim" "$reset"
-  fi
-fi
-
 printf '\n%sStage-1 bootstrap complete.%s\n' "$bold" "$reset"
-printf '  compiler: %s\n' "$COMPILER_BIN"
+printf '  stage1: %s\n' "$STAGE1"
 
-# ── 7. Build orchestrator + full self-host build ────────────────
-# bootstrap includes `tungsten build`: compile the Tungsten build
+# ── 5. Build orchestrator + full self-host build ────────────────
+# bootstrap chains into `tungsten build`: compile the Tungsten build
 # orchestrator (bin/commands/build.w) with the stage-1 compiler just
-# built, then exec it for the stage1+stage2 fixed-point + bits pipeline.
+# built (stage 1 is never installed to bin/tungsten-compiler), then exec
+# it for the stage1+stage2 fixed-point pipeline.
 BUILD_W="$ROOT/bin/commands/build.w"
 BUILD_BIN="$ROOT/bin/commands/build"
 step "Build orchestrator: bin/commands/build"
-if [ -x "$BUILD_BIN" ] && [ ! "$BUILD_W" -nt "$BUILD_BIN" ] && [ ! "$COMPILER_BIN" -nt "$BUILD_BIN" ]; then
+if [ -x "$BUILD_BIN" ] && [ ! "$BUILD_W" -nt "$BUILD_BIN" ] && [ ! "$STAGE1" -nt "$BUILD_BIN" ]; then
   ok "CACHED" "${BUILD_BIN#$ROOT/}"
 else
   BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
-    "$COMPILER_BIN" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto \
+    "$STAGE1" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto \
     >/tmp/tungsten-bootstrap-buildw.log 2>&1 \
     || die "failed to compile bin/commands/build.w (see /tmp/tungsten-bootstrap-buildw.log)"
   if [ "$UNAME_S" = Darwin ]; then

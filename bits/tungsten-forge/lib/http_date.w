@@ -207,26 +207,31 @@
   # (asctime pads a single-digit day with a second space).
   -> .tokens(s)
     out = []
-    s.split(" ").each -> (t)
+    parts = s.split(" ")
+    i = 0
+    n = parts.size
+    while i < n
+      t = parts[i]
       out.push(t) unless t.empty?
+      i += 1
     out
 
   -> .ends_with?(s, suffix)
-    n = s.size
-    m = suffix.size
-    return false if n < m
-    s.slice(n - m, m) == suffix
+    s.ends_with?(suffix)
 
   # A run of one-or-more ASCII digits as a non-negative Integer, or nil for
   # empty / non-digit text (String#to_i would silently yield 0).
   -> .to_int(s)
     return nil if s == nil || s.empty?
+    val = 0
     i = 0
     n = s.size
     while i < n
-      return nil if "0123456789".index(s.slice(i, 1)) == nil
+      b = s.byte_at(i)
+      return nil if b < 48 || b > 57
+      val = val * 10 + (b - 48)
       i += 1
-    s.to_i
+    val
 
   -> .pad2(n)
     return "0" + n.to_s if n < 10

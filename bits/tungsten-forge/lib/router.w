@@ -64,11 +64,22 @@
 
   -> resolve(method, path)
     normalized = self.normalize(path)
-    found = nil
-    @routes.each -> (route)
-      if found == nil && (route.method == method || route.method == :ANY)
-        found = route.match(normalized)
-    found
+    req_segments = nil
+    i = 0
+    n = @routes.size
+    while i < n
+      route = @routes[i]
+      if route.method == method || route.method == :ANY
+        if route.static_only
+          if route.path == normalized
+            return RouteMatch.new(route, {})
+        else
+          if req_segments == nil
+            req_segments = RoutePattern.split_segments(normalized)
+          found = route.match_segments(req_segments)
+          return found if found != nil
+      i += 1
+    nil
 
   -> add_route(method, path, handler)
     pattern = RoutePattern.new(method, self.normalize(path), handler)
@@ -77,7 +88,7 @@
   -> normalize(path)
     # Downcase and strip trailing slash
     result = path.downcase
-    if result.size > 1 && result.ends_with?("/")
+    if result.size > 1 && result.byte_at(result.size - 1) == 47
       result = result.slice(0, result.size - 1)
     result
 
@@ -85,15 +96,17 @@
 
   -> mount(prefix, router)
     normalized_prefix = self.normalize(prefix)
-    # Capture self: inside an Enumerable block the interpreter binds
-    # `self` to the current element, not the enclosing receiver.
-    target = self
-    router.routes.each -> (route)
-      target.add_route(
+    routes = router.routes
+    i = 0
+    n = routes.size
+    while i < n
+      route = routes[i]
+      self.add_route(
         route.method,
         normalized_prefix + route.path,
         route.handler
       )
+      i += 1
 
   # --- Route pattern matching ---
 
@@ -103,9 +116,22 @@
   ro :handler
   ro :segments
   ro :wildcard
+  ro :param_names
+  ro :static_only
+
+  -> .split_segments(path)
+    parts = path.split("/")
+    out = []
+    i = 0
+    n = parts.size
+    while i < n
+      s = parts[i]
+      out.push(s) unless s.empty?
+      i += 1
+    out
 
   -> new(@method, @path, @handler)
-    raw = @path.split("/").reject -> (s) s.empty?
+    raw = RoutePattern.split_segments(@path)
     # A trailing "*name" (or bare "*") segment is a wildcard splat: it
     # matches one or more remaining path segments — captured, joined by
     # "/", under :name (or :splat for a bare "*"). Splats are how a
@@ -113,7 +139,7 @@
     # Only the LAST segment is treated as a splat; a "*" earlier in the
     # pattern is matched literally.
     @wildcard = nil
-    if raw.size > 0 && raw[raw.size - 1].starts_with?("*")
+    if raw.size > 0 && raw[raw.size - 1].byte_at(0) == 42
       star = raw[raw.size - 1]
       name = star.slice(1, star.size - 1)
       name = "splat" if name.empty?
@@ -122,43 +148,51 @@
     else
       @segments = raw
 
-  # No early returns here: the self-hosted interpreter mis-executes an
-  # early `return` from a method that also contains block closures
-  # ("expected string or symbol" dispatch crash on a later call).
+    @param_names = []
+    has_dyn = @wildcard != nil
+    i = 0
+    n = @segments.size
+    while i < n
+      seg = @segments[i]
+      if seg.size > 0 && seg.byte_at(0) == 58
+        @param_names.push(seg.slice(1, seg.size - 1).to_sym)
+        has_dyn = true
+      else
+        @param_names.push(nil)
+      i += 1
+    @static_only = !has_dyn
+
   -> match(request_path)
-    request_segments = request_path.split("/").reject -> (s) s.empty?
-    result = nil
+    if @static_only
+      if request_path == @path
+        return RouteMatch.new(self, {})
+      return nil
+    self.match_segments(RoutePattern.split_segments(request_path))
+
+  -> match_segments(request_segments)
     fixed = @segments.size
-
-    # A plain route needs an exact segment count; a splat route needs the
-    # fixed prefix plus at least one segment for the splat to capture.
-    size_ok = false
+    req_len = request_segments.size
     if @wildcard == nil
-      size_ok = request_segments.size == fixed
+      return nil if req_len != fixed
     else
-      size_ok = request_segments.size > fixed
+      return nil if req_len <= fixed
 
-    if size_ok
-      params = {}
-      matched = true
+    params = {}
+    i = 0
+    while i < fixed
+      pname = @param_names[i]
+      req_segment = request_segments[i]
+      if pname != nil
+        params[pname] = req_segment
+      elsif @segments[i] != req_segment
+        return nil
+      i += 1
 
-      @segments.each_with_index -> (segment, i)
-        if matched
-          req_segment = request_segments[i]
-          if segment.starts_with?(":")
-            # Dynamic segment :name
-            params[segment.slice(1, segment.size - 1).to_sym] = req_segment
-          elsif segment != req_segment
-            matched = false
+    if @wildcard != nil
+      rest = request_segments.slice(fixed, req_len - fixed)
+      params[@wildcard] = rest.join("/")
 
-      if matched && @wildcard != nil
-        rest = request_segments.slice(fixed, request_segments.size - fixed)
-        params[@wildcard] = rest.join("/")
-
-      if matched
-        result = RouteMatch.new(self, params)
-
-    result
+    RouteMatch.new(self, params)
 
 + RouteMatch
   ro :route

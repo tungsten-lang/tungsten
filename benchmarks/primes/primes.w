@@ -68,16 +68,17 @@ SMALL_PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]
   BASES.all? -> (base)
     mr_pass?(n, d, s, base)
 
+## u64: n, limit, i
 -> fast_prime?(n) (i64) bool
   return false if n < 2
-  return true  if n == 2 || n == 3
-  return false if (n % 2 == 0) || (n % 3 == 0)
+  return true  if n == 2 || n == 3 || n == 5
+  return false if (n % 2 == 0) || (n % 3 == 0) || (n % 5 == 0)
 
   limit = n.sqrt.to_i
-  i = 5
+  i = 7
   while i <= limit
-    return false if (n % i == 0) || (n % (i + 2) == 0)
-    i += 6
+    return false if (n % i == 0) || (n % (i + 4) == 0) || (n % (i + 6) == 0) || (n % (i + 10) == 0) || (n % (i + 12) == 0) || (n % (i + 16) == 0) || (n % (i + 22) == 0) || (n % (i + 24) == 0)
+    i += 30
 
   return true
 

@@ -1154,7 +1154,7 @@ use lowering/definitions
   # small-array rvalue reads routed through small_array_get_inline, lowering/ops.w)
   # vectorizing element loops — a promoted 128-elem fill+sum is ~5x faster than
   # the heap form. Always on.
-  mark_stackable_typed_arrays(ast.expressions)
+  mark_stackable_typed_arrays(ast.expressions, mod[:incremental_core_cache_hit] == true)
 
   # Bind an unchanged imported-library prefix to the exact warmed Core and
   # whole-program ABI/type-fact context. The raw functions remain in the

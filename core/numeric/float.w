@@ -13,6 +13,12 @@
   -> to_f
     self
 
+  -> to_i
+    ccall("w_int", ccall_nobox("w_numeric_to_i64", self))
+
+  -> to_s
+    ccall("w_to_s", self)
+
   # Float WValues store the IEEE-754 word plus 2^48. Work on the unbiased
   # magnitude so signed zero, infinities, and every NaN payload retain the
   # runtime handlers' exact semantics.

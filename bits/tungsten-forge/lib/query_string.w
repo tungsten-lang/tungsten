@@ -39,7 +39,11 @@
   -> .parse(text)
     result = {}
     if text != nil && !text.empty?
-      text.split("&").each -> (pair)
+      pairs = text.split("&")
+      i = 0
+      n = pairs.size
+      while i < n
+        pair = pairs[i]
         if !pair.empty?
           eq = pair.index("=")
           if eq == nil
@@ -48,35 +52,49 @@
             key = pair.slice(0, eq)
             value = pair.slice(eq + 1, pair.size - eq - 1)
             result[self.decode(key)] = self.decode(value)
+        i += 1
     result
 
   # Percent- and plus-decode a single query component.
   -> .decode(component)
+    return "" if component == nil
+    n = component.size
+    return component if n == 0
+    return component if component.index("+") == nil && component.index("%") == nil
     out = ""
-    if component != nil
-      n = component.size
-      i = 0
-      while i < n
-        ch = component.slice(i, 1)
-        if ch == "+"
-          out = out + " "
-          i += 1
-        elsif ch == "%" && i + 2 < n
-          hi = self.nibble(component.slice(i + 1, 1))
-          lo = self.nibble(component.slice(i + 2, 1))
-          if hi != nil && lo != nil
-            out = out + (hi * 16 + lo).chr
-            i += 3
-          else
-            out = out + ch
-            i += 1
+    run_start = 0
+    i = 0
+    while i < n
+      b = component.byte_at(i)
+      if b == 43
+        if i > run_start
+          out = out + component.slice(run_start, i - run_start)
+        out = out + " "
+        i += 1
+        run_start = i
+      elsif b == 37 && i + 2 < n
+        hi = self.nibble_byte(component.byte_at(i + 1))
+        lo = self.nibble_byte(component.byte_at(i + 2))
+        if hi >= 0 && lo >= 0
+          if i > run_start
+            out = out + component.slice(run_start, i - run_start)
+          out = out + (hi * 16 + lo).chr
+          i += 3
+          run_start = i
         else
-          out = out + ch
           i += 1
+      else
+        i += 1
+    if run_start < n
+      out = out + component.slice(run_start, n - run_start)
     out
 
-  # Hex digit -> value 0..15, or nil if `ch` is not a hex digit. `index`
-  # returns nil on a miss in both engines, which is exactly the validity
-  # test a bare `to_i(16)` cannot give (it silently yields 0 for "z").
+  -> .nibble_byte(b)
+    return b - 48 if b >= 48 && b <= 57
+    return b - 87 if b >= 97 && b <= 102
+    return b - 55 if b >= 65 && b <= 70
+    0 - 1
+
+  # Hex digit -> value 0..15, or nil if `ch` is not a hex digit.
   -> .nibble(ch)
     "0123456789abcdef".index(ch.downcase)

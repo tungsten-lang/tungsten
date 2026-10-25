@@ -47,10 +47,14 @@
   -> .parse(header)
     result = []
     if header != nil && !header.empty?
-      header.split(",").each -> (raw)
-        part = raw.strip
+      parts = header.split(",")
+      i = 0
+      n = parts.size
+      while i < n
+        part = parts[i].strip
         if !part.empty?
           result.push(self.parse_entry(part))
+        i += 1
     result
 
   # Parse one range entry ("text/html;q=0.9;level=1") into { value:, q: }.
@@ -63,13 +67,17 @@
     if semi != nil
       value = entry.slice(0, semi)
       rest = entry.slice(semi + 1, entry.size - semi - 1)
-      rest.split(";").each -> (param)
-        p = param.strip
+      params = rest.split(";")
+      i = 0
+      n = params.size
+      while i < n
+        p = params[i].strip
         eq = p.index("=")
         if eq != nil
           name = p.slice(0, eq).strip.downcase
           if name == "q"
             q = self.clamp_q(p.slice(eq + 1, p.size - eq - 1).strip.to_f)
+        i += 1
     {value: value.strip.downcase, q: q}
 
   # Clamp a parsed weight into 0.0..1.0.
@@ -144,10 +152,12 @@
   -> .resolved_q(entries, value, kind)
     best_spec = 0
     best_q = 0.0
+    v = value.downcase
     i = 0
-    while i < entries.size
+    n = entries.size
+    while i < n
       entry = entries[i]
-      spec = self.specificity(entry[:value], value, kind)
+      spec = self.specificity_downcased(entry[:value], v, kind)
       if spec > best_spec
         best_spec = spec
         best_q = entry[:q]
@@ -159,7 +169,9 @@
   # Match specificity of `range` against `value` for `kind`; 0 = no match,
   # higher = more specific. `range` is already lowercased by parse.
   -> .specificity(range, value, kind)
-    v = value.downcase
+    self.specificity_downcased(range, value.downcase, kind)
+
+  -> .specificity_downcased(range, v, kind)
     if kind == :media
       self.media_specificity(range, v)
     elsif kind == :lang

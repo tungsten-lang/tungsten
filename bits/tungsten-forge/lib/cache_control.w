@@ -64,7 +64,11 @@
     if header != nil
       s = header.strip
       if !s.empty?
-        self.split_directives(s).each -> (part)
+        parts = self.split_directives(s)
+        i = 0
+        n = parts.size
+        while i < n
+          part = parts[i]
           eq = part.index("=")
           if eq == nil
             name = part.downcase
@@ -74,6 +78,7 @@
             value = part.slice(eq + 1, part.size - eq - 1).strip
             if !name.empty? && !directives.key?(name)
               directives[name] = self.unquote(value)
+          i += 1
     self.new(directives)
 
   # --- Generic access ---
@@ -174,54 +179,63 @@
 
   -> digits?(s)
     return false if s.empty?
-    ok = true
     i = 0
     n = s.size
     while i < n
-      ok = false unless "0123456789".include?(s.slice(i, 1))
+      b = s.byte_at(i)
+      return false if b < 48 || b > 57
       i += 1
-    ok
+    true
 
   -> field_list(name)
     v = @directives[name]
     return [] if v == nil || v == true
     out = []
-    v.split(",").each -> (f)
-      t = f.strip
+    parts = v.split(",")
+    i = 0
+    n = parts.size
+    while i < n
+      t = parts[i].strip
       out.push(t) unless t.empty?
+      i += 1
     out
 
   # Split a header on the commas that separate directives, honouring
   # quotes: a comma inside a quoted-string's DQUOTEs is kept literally.
   # Returns trimmed, non-empty tokens.
   -> .split_directives(s)
-    parts = []
-    buf = ""
+    out = []
+    if s.index("\"") == nil
+      parts = s.split(",")
+      i = 0
+      n = parts.size
+      while i < n
+        t = parts[i].strip
+        out.push(t) unless t.empty?
+        i += 1
+      return out
     in_quote = false
+    start = 0
     i = 0
     n = s.size
     while i < n
-      ch = s.slice(i, 1)
-      if ch == "\""
-        buf = buf + ch
+      b = s.byte_at(i)
+      if b == 34
         in_quote = !in_quote
-      elsif ch == "," && !in_quote
-        parts.push(buf)
-        buf = ""
-      else
-        buf = buf + ch
+      elsif b == 44 && !in_quote
+        t = s.slice(start, i - start).strip
+        out.push(t) unless t.empty?
+        start = i + 1
       i += 1
-    parts.push(buf)
-    out = []
-    parts.each -> (p)
-      t = p.strip
+    if start <= n
+      t = s.slice(start, n - start).strip
       out.push(t) unless t.empty?
     out
 
   # Strip one surrounding pair of double-quotes, if present.
   -> .unquote(value)
     n = value.size
-    if n >= 2 && value.slice(0, 1) == "\"" && value.slice(n - 1, 1) == "\""
+    if n >= 2 && value.byte_at(0) == 34 && value.byte_at(n - 1) == 34
       value.slice(1, n - 2)
     else
       value

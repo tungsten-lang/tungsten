@@ -63,12 +63,18 @@ fn tok_in_ranges(cp, table)
   false
 
 fn tok_is_letter(cp)
+  if cp < 128
+    return (cp >= 97 && cp <= 122) || (cp >= 65 && cp <= 90)
   tok_in_ranges(cp, TOK_CAT_L)
 
 fn tok_is_mark(cp)
+  if cp < 0x300
+    return false
   tok_in_ranges(cp, TOK_CAT_M)
 
 fn tok_is_number(cp)
+  if cp < 128
+    return cp >= 48 && cp <= 57
   tok_in_ranges(cp, TOK_CAT_N)
 
 # Onig \s: ASCII whitespace + NEL/NBSP + Unicode space separators.
@@ -240,10 +246,11 @@ fn tok_is_crlf(cp)
   # single-codepoint strings, ready for BPE merging.
   -> bytes_to_chars(s)
     out = []
-    bytes = s.bytes.to_a
+    b2u = @byte_to_uchar
+    n = s.size()
     i = 0
-    while i < bytes.size()
-      out.push(@byte_to_uchar[bytes[i]])
+    while i < n
+      out.push(b2u[s.byte_at(i)])
       i = i + 1
     out
 
@@ -259,11 +266,26 @@ fn tok_is_crlf(cp)
     n = chars.size()
     return chars if n < 2
 
+    mr = @merge_rank
     # Fast path: 2-char chunk. One possible merge to check.
     if n == 2
       key = chars[0] + " " + chars[1]
-      if @merge_rank[key] != nil
+      if mr[key] != nil
         return [chars[0] + chars[1]]
+      return chars
+
+    # First pass directly on chars: avoid allocating parts/out if no merge applies.
+    best_rank = 1000000000
+    best_idx = -1
+    i = 0
+    while i + 1 < n
+      key = chars[i] + " " + chars[i + 1]
+      r = mr[key]
+      if r != nil && r < best_rank
+        best_rank = r
+        best_idx = i
+      i = i + 1
+    if best_idx == -1
       return chars
 
     parts = []
@@ -271,12 +293,13 @@ fn tok_is_crlf(cp)
     while i < n
       parts.push(chars[i])
       i = i + 1
+    parts[best_idx] = parts[best_idx] + parts[best_idx + 1]
+    parts[best_idx + 1] = nil
 
     loop
       best_rank = 1000000000
       best_idx = -1
       best_next_idx = -1
-      best_merged = nil
 
       i = 0
       while i < n && parts[i] == nil
@@ -285,26 +308,28 @@ fn tok_is_crlf(cp)
 
       j = i + 1
       while j < n
-        if parts[j] != nil
-          key = parts[i] + " " + parts[j]
-          r = @merge_rank[key]
+        pj = parts[j]
+        if pj != nil
+          pi = parts[i]
+          key = pi + " " + pj
+          r = mr[key]
           if r != nil && r < best_rank
             best_rank = r
             best_idx = i
             best_next_idx = j
-            best_merged = parts[i] + parts[j]
           i = j
         j = j + 1
 
       break if best_idx == -1
 
-      parts[best_idx] = best_merged
+      parts[best_idx] = parts[best_idx] + parts[best_next_idx]
       parts[best_next_idx] = nil
 
     out = []
     i = 0
     while i < n
-      out.push(parts[i]) if parts[i] != nil
+      p = parts[i]
+      out.push(p) if p != nil
       i = i + 1
     out
 
@@ -316,17 +341,48 @@ fn tok_is_crlf(cp)
     out = []
     # tokenizer.json declares an NFC normalizer ahead of the pretokenizer.
     chunks = pretokenize(text.nfc)
+    n_chunks = chunks.size()
+    b2u = @byte_to_uchar
+    tid = @token_id
+    mr = @merge_rank
     i = 0
-    while i < chunks.size()
-      chars = bytes_to_chars(chunks[i])
-      pieces = bpe(chars)
-      j = 0
-      while j < pieces.size()
-        id = @token_id[pieces[j]]
+    while i < n_chunks
+      chunk = chunks[i]
+      clen = chunk.size()
+      if clen == 1
+        piece = b2u[chunk.byte_at(0)]
+        id = tid[piece]
         if id == nil
-          raise "Tokenizer.encode: unknown piece '" + pieces[j] + "' from chunk '" + chunks[i] + "'"
+          raise "Tokenizer.encode: unknown piece '" + piece + "' from chunk '" + chunk + "'"
         out.push(id)
-        j = j + 1
+      elsif clen == 2
+        c0 = b2u[chunk.byte_at(0)]
+        c1 = b2u[chunk.byte_at(1)]
+        if mr[c0 + " " + c1] != nil
+          merged = c0 + c1
+          id = tid[merged]
+          if id == nil
+            raise "Tokenizer.encode: unknown piece '" + merged + "' from chunk '" + chunk + "'"
+          out.push(id)
+        else
+          id0 = tid[c0]
+          id1 = tid[c1]
+          if id0 == nil || id1 == nil
+            raise "Tokenizer.encode: unknown piece from chunk '" + chunk + "'"
+          out.push(id0)
+          out.push(id1)
+      else
+        chars = bytes_to_chars(chunk)
+        pieces = bpe(chars)
+        np = pieces.size()
+        j = 0
+        while j < np
+          p = pieces[j]
+          id = tid[p]
+          if id == nil
+            raise "Tokenizer.encode: unknown piece '" + p + "' from chunk '" + chunk + "'"
+          out.push(id)
+          j = j + 1
       i = i + 1
     out
 
@@ -342,25 +398,24 @@ fn tok_is_crlf(cp)
   # backtracking reduces to "match through the LAST newline run inside the
   # whitespace run", r6's to "all but the final space before a word".
   -> pretokenize(text)
-    bytes = text.bytes.to_a
-    nb = bytes.size()
+    nb = text.size()
     cps = []
     offs = []
     i = 0
     while i < nb
-      b = bytes[i]
+      b = text.byte_at(i)
       offs.push(i)
       if b < 0x80
         cps.push(b)
         i = i + 1
       elsif b < 0xE0 && i + 1 < nb
-        cps.push(((b & 0x1F) << 6) | (bytes[i + 1] & 0x3F))
+        cps.push(((b & 0x1F) << 6) | (text.byte_at(i + 1) & 0x3F))
         i = i + 2
       elsif b < 0xF0 && i + 2 < nb
-        cps.push(((b & 0x0F) << 12) | ((bytes[i + 1] & 0x3F) << 6) | (bytes[i + 2] & 0x3F))
+        cps.push(((b & 0x0F) << 12) | ((text.byte_at(i + 1) & 0x3F) << 6) | (text.byte_at(i + 2) & 0x3F))
         i = i + 3
       elsif i + 3 < nb
-        cps.push(((b & 0x07) << 18) | ((bytes[i + 1] & 0x3F) << 12) | ((bytes[i + 2] & 0x3F) << 6) | (bytes[i + 3] & 0x3F))
+        cps.push(((b & 0x07) << 18) | ((text.byte_at(i + 1) & 0x3F) << 12) | ((text.byte_at(i + 2) & 0x3F) << 6) | (text.byte_at(i + 3) & 0x3F))
         i = i + 4
       else
         cps.push(b)
@@ -426,12 +481,7 @@ fn tok_is_crlf(cp)
           e = q            # r7: single whitespace before non-ws
       if e < 0
         e = p + 1          # unclassifiable cp: emit alone (matches r4 shape)
-      sb = StringBuffer(offs[e] - offs[p])
-      j = offs[p]
-      while j < offs[e]
-        sb << byte_to_str(bytes[j])
-        j = j + 1
-      chunks.push(sb.to_s)
+      chunks.push(text.slice(offs[p], offs[e] - offs[p]))
       p = e
     chunks
 
@@ -439,48 +489,60 @@ fn tok_is_crlf(cp)
   #   raw bytes → first UTF-8 decode → "GPT-2 utf8 bytes" (each codepoint
   #   < 256, representing one byte of the GPT-2 utf8 form) → second UTF-8
   #   decode → GPT-2 codepoints → cp_to_byte → original input bytes.
-  # Each output byte is emitted as a one-byte string via byte_to_str; the
-  # concatenation reconstructs the original (UTF-8) input verbatim, so
-  # multi-byte chars like ´í´ round-trip cleanly.
   -> decode(ids)
-    raw_sb = StringBuffer(256)
+    n_ids = ids.size()
+    if n_ids == 0
+      return ""
+    raw_sb = StringBuffer(n_ids * 4)
+    toks = @tokens
     i = 0
-    while i < ids.size()
-      raw_sb << @tokens[ids[i]]
+    while i < n_ids
+      raw_sb << toks[ids[i]]
       i = i + 1
     raw = raw_sb.to_s
-    bytes = raw.bytes.to_a
+    n = raw.size()
+    if n == 0
+      return ""
 
     # First decode: raw UTF-8 → array of "GPT-2 utf8 bytes"
     g_bytes = []
     i = 0
-    n = bytes.size()
     while i < n
-      b = bytes[i]
+      b = raw.byte_at(i)
       if b < 128
         g_bytes.push(b)
         i = i + 1
       else
-        b2 = bytes[i + 1]
+        b2 = raw.byte_at(i + 1)
         g_bytes.push(((b & 0x1F) << 6) | (b2 & 0x3F))
         i = i + 2
 
     # Second decode: GPT-2 utf8 bytes → GPT-2 codepoints → cp_to_byte → output bytes
-    out = StringBuffer(g_bytes.size())
+    gn = g_bytes.size()
+    out_bytes = []
+    cp2b = @cp_to_byte
     i = 0
-    n = g_bytes.size()
-    while i < n
+    while i < gn
       b = g_bytes[i]
       if b < 128
-        orig = @cp_to_byte[b]
+        orig = cp2b[b]
         if orig != nil
-          out << byte_to_str(orig)
+          out_bytes.push(orig)
         i = i + 1
       else
         b2 = g_bytes[i + 1]
         cp = ((b & 0x1F) << 6) | (b2 & 0x3F)
-        orig = @cp_to_byte[cp]
+        orig = cp2b[cp]
         if orig != nil
-          out << byte_to_str(orig)
+          out_bytes.push(orig)
         i = i + 2
-    out.to_s
+    m = out_bytes.size()
+    if m == 0
+      return ""
+    cell = u8[m + 1]
+    k = 0
+    while k < m
+      cell[k] = out_bytes[k]
+      k = k + 1
+    cell[m] = 0
+    ccall("w_string_take_byte_array", cell, m)

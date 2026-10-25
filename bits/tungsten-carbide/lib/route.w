@@ -23,12 +23,14 @@
   ro :name
   ro :constraints
   ro :segments
+  ro :static_only
 
   # options: {name:, constraints:} — explicit hash, not kwargs (kwargs
   # diverge between engines and break interp constructor dispatch).
   -> new(@method, @path, @controller, @action, options = {})
     @name = options[:name]
     @constraints = options[:constraints] || {}
+    @static_only = true
     @segments = parse_segments(@path)
 
   # Check if this route matches a given request
@@ -37,46 +39,89 @@
 
     match_path?(request.path)
 
+  -> split_path_segments(path)
+    out = []
+    n = path.size
+    i = 0
+    while i < n
+      while i < n && path.byte_at(i) == 47
+        i += 1
+      if i < n
+        start = i
+        while i < n && path.byte_at(i) != 47
+          i += 1
+        out.push(path.slice(start, i - start))
+    out
+
   # Extract named parameters from a matched path
   -> extract_params(request_path)
+    if @static_only
+      {}
+    else
+      extract_params_from_parts(split_path_segments(request_path))
+
+  -> extract_params_from_parts(request_parts)
     params = {}
-    request_parts = request_path.split("/").reject -> (s) s.empty?
-
-    @segments.each_with_index -> (segment, i)
-      if segment[:type] == :param || segment[:type] == :glob
-        params[segment[:name]] = request_parts[i]
-
+    if !@static_only
+      segs = @segments
+      n = segs.size
+      i = 0
+      while i < n
+        segment = segs[i]
+        st = segment[:type]
+        if st == :param || st == :glob
+          params[segment[:name]] = request_parts[i]
+        i += 1
     params
 
   # No early returns: the self-hosted interpreter mis-executes an early
   # `return` from a method that also contains block closures
   # ("expected string or symbol" dispatch crash on a later call).
   -> match_path?(request_path)
-    request_parts = request_path.split("/").reject -> (s) s.empty?
-    matched = request_parts.size == @segments.size
+    if @static_only && request_path == @path
+      true
+    else
+      match_parts?(split_path_segments(request_path))
 
+  -> match_parts?(request_parts)
+    segs = @segments
+    n = segs.size
+    matched = request_parts.size == n
     if matched
-      me   = self
       cons = @constraints
-      @segments.each_with_index -> (segment, i)
+      i = 0
+      while i < n && matched
+        segment = segs[i]
+        part = request_parts[i]
         if segment[:type] == :literal
-          if segment[:value] != request_parts[i]
+          if segment[:value] != part
             matched = false
         else
           c = cons[segment[:name]]
-          if c != nil && !me.constraint_pass?(c, request_parts[i])
+          if c != nil && !constraint_pass?(c, part)
             matched = false
+        i += 1
     matched
 
   -> parse_segments(path)
-    parts = path.split("/").reject -> (s) s.empty?
-    parts.map -> (part)
-      if part.starts_with?(":")
-        {type: :param, name: part.slice(1, part.size - 1).to_sym}
-      elsif part.starts_with?("*")
-        {type: :glob, name: part.slice(1, part.size - 1).to_sym}
+    parts = split_path_segments(path)
+    out = []
+    static = true
+    n = parts.size
+    i = 0
+    while i < n
+      part = parts[i]
+      if part.size > 0 && part.byte_at(0) == 58
+        static = false
+        out.push({type: :param, name: part.slice(1, part.size - 1).to_sym})
+      elsif part.size > 0 && part.byte_at(0) == 42
+        static = false
+        out.push({type: :glob, name: part.slice(1, part.size - 1).to_sym})
       else
-        {type: :literal, value: part}
+        out.push({type: :literal, value: part})
+      i += 1
+    @static_only = static
+    out
 
   # --- Param constraints ----------------------------------------------
   #
@@ -114,16 +159,52 @@
     pass
 
   -> digits_only?(s)
-    s.size > 0 && s.chars.all? -> (c) c >= "0" && c <= "9"
+    n = s.size
+    if n == 0
+      return false
+    i = 0
+    while i < n
+      b = s.byte_at(i)
+      if b < 48 || b > 57
+        return false
+      i += 1
+    true
 
   -> alpha_only?(s)
-    s.size > 0 && s.chars.all? -> (c) (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+    n = s.size
+    if n == 0
+      return false
+    i = 0
+    while i < n
+      b = s.byte_at(i)
+      if !((b >= 97 && b <= 122) || (b >= 65 && b <= 90))
+        return false
+      i += 1
+    true
 
   -> alnum_only?(s)
-    s.size > 0 && s.chars.all? -> (c) (c >= "0" && c <= "9") || (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+    n = s.size
+    if n == 0
+      return false
+    i = 0
+    while i < n
+      b = s.byte_at(i)
+      if !((b >= 48 && b <= 57) || (b >= 97 && b <= 122) || (b >= 65 && b <= 90))
+        return false
+      i += 1
+    true
 
   -> slug_only?(s)
-    s.size > 0 && s.chars.all? -> (c) (c >= "0" && c <= "9") || (c >= "a" && c <= "z") || c == "-"
+    n = s.size
+    if n == 0
+      return false
+    i = 0
+    while i < n
+      b = s.byte_at(i)
+      if !((b >= 48 && b <= 57) || (b >= 97 && b <= 122) || b == 45)
+        return false
+      i += 1
+    true
 
 
 # Route::Set — holds all routes; resolves and dispatches requests.
@@ -148,7 +229,11 @@
     if route != nil
       parts = []
       ok = true
-      route.segments.each -> (segment)
+      segs = route.segments
+      n = segs.size
+      i = 0
+      while i < n && ok
+        segment = segs[i]
         if segment[:type] == :literal
           parts.push(segment[:value])
         else
@@ -157,6 +242,7 @@
             ok = false
           else
             parts.push(value.to_s)
+        i += 1
       if ok
         result = "/" + parts.join("/")
     result
@@ -185,13 +271,28 @@
   # match exposing .params and .handler (handler.call(request) -> Response).
   -> resolve(method, path)
     found = nil
-    @routes.each -> (route)
-      if found == nil && (route.method == method || route.method == :ANY)
-        if route.match_path?(path)
+    request_parts = nil
+    rs = @routes
+    n = rs.size
+    i = 0
+    while i < n && found == nil
+      route = rs[i]
+      rm = route.method
+      if rm == method || rm == :ANY
+        if route.static_only && path == route.path
           found = route
+        else
+          if request_parts == nil
+            request_parts = route.split_path_segments(path)
+          if route.match_parts?(request_parts)
+            found = route
+      i += 1
     result = nil
     if found != nil
-      result = Route:Match.new(found, found.extract_params(path))
+      params = {}
+      if !found.static_only
+        params = found.extract_params_from_parts(request_parts)
+      result = Route:Match.new(found, params)
     result
 
   # Pure request -> response dispatch (no sockets): mirrors what the

@@ -41,36 +41,90 @@
   ro :nout
   -> new(@nin, @nout, @k, @d, @w, @b)
     @len = (@k - 1) * @d + 1
-    @hist = (0...(@len * @nin)).map -> ~0.0
+    n_hist = @len * @nin
+    hist = []
+    i = 0
+    while i < n_hist
+      hist.push(~0.0)
+      i += 1
+    @hist = hist
     @pos = 0
     @primed = false
 
   -> step(x)
+    nin = @nin
+    nout = @nout
+    len = @len
+    hist = @hist
+    w = @w
+    b = @b
     if !@primed
       s = 0
-      while s < @len
+      while s < len
+        base = s * nin
         i = 0
-        while i < @nin
-          @hist[s * @nin + i] = x[i]
+        while i < nin
+          hist[base + i] = x[i]
           i += 1
         s += 1
       @primed = true
-    @pos = (@pos + 1) % @len
+    pos = (@pos + 1) % len
+    @pos = pos
+    pos_base = pos * nin
     i = 0
-    while i < @nin
-      @hist[@pos * @nin + i] = x[i]
+    while i < nin
+      hist[pos_base + i] = x[i]
       i += 1
     y = []
+    k = @k
+    if k == 1
+      w_off = 0
+      o = 0
+      while o < nout
+        acc = b[o]
+        i = 0
+        while i < nin
+          acc = acc + w[w_off + i] * hist[pos_base + i]
+          i += 1
+        w_off += nin
+        y.push(acc)
+        o += 1
+      return y
+    if k == 3
+      d = @d
+      s0 = ((pos - 2 * d + len) % len) * nin
+      s1 = ((pos - d + len) % len) * nin
+      s2 = pos_base
+      w_off = 0
+      o = 0
+      while o < nout
+        acc = b[o]
+        i = 0
+        while i < nin
+          acc = acc + w[w_off] * hist[s0 + i] + w[w_off + 1] * hist[s1 + i] + w[w_off + 2] * hist[s2 + i]
+          w_off += 3
+          i += 1
+        y.push(acc)
+        o += 1
+      return y
+    d = @d
+    slots = []
+    j = 0
+    while j < k
+      slot = (pos - (k - 1 - j) * d + len) % len
+      slots.push(slot * nin)
+      j += 1
+    w_off = 0
     o = 0
-    while o < @nout
-      acc = @b[o]
+    while o < nout
+      acc = b[o]
       i = 0
-      while i < @nin
+      while i < nin
         j = 0
-        while j < @k
-          slot = (@pos - (@k - 1 - j) * @d + @len) % @len
-          acc = acc + @w[(o * @nin + i) * @k + j] * @hist[slot * @nin + i]
+        while j < k
+          acc = acc + w[w_off + j] * hist[slots[j] + i]
           j += 1
+        w_off += k
         i += 1
       y.push(acc)
       o += 1
@@ -82,7 +136,14 @@
   -> new(@body, params, @outputs)
     @params = params
     @joints = @body.joints
-    @nin = 2 * @joints.size + 7
+    pos_indices = []
+    nj = @joints.size
+    ji = 0
+    while ji < nj
+      pos_indices.push(@body.pos_index(@joints[ji]))
+      ji += 1
+    @pos_indices = pos_indices
+    @nin = 2 * nj + 7
     hidden = setting("tcn_hidden", ~8.0).to_i
     kern = setting("tcn_kernel", ~3.0).to_i
     nl = setting("tcn_layers", ~3.0).to_i
@@ -130,8 +191,16 @@
 
   -> features(f)
     x = []
-    @joints.each ->(j) x.push(f.c(@body.pos_index(j)))
-    @joints.each ->(j) x.push(f.cdot(@body.pos_index(j)))
+    pis = @pos_indices
+    nj = pis.size
+    j = 0
+    while j < nj
+      x.push(f.c(pis[j]))
+      j += 1
+    j = 0
+    while j < nj
+      x.push(f.cdot(pis[j]))
+      j += 1
     x.push(f.get("l_foot_contact"))
     x.push(f.get("r_foot_contact"))
     x.push(f.at("com_pos", 2))
@@ -139,29 +208,44 @@
     x.push(f.at("com_vel", 2))
     x.push(f.torso_pitch)
     x.push(f.torso_pitch_rate)
+    mu = @mu
+    sd = @sd
+    nin = @nin
     i = 0
-    while i < @nin
-      x[i] = (x[i] - @mu[i]) / @sd[i]
+    while i < nin
+      x[i] = (x[i] - mu[i]) / sd[i]
       i += 1
     x
 
   # One tick: normalised inputs through the layers and the head; returns the
   # clamped offsets (one per output muscle).
   -> step(x)
-    h = @layers[0].step(x).map -> Math.tanh(item)
+    h = @layers[0].step(x)
+    nh = h.size
+    i = 0
+    while i < nh
+      h[i] = Math.tanh(h[i])
+      i += 1
+    nl = @layers.size
     l = 1
-    while l < @layers.size
+    while l < nl
       z = @layers[l].step(h)
       i = 0
-      while i < h.size
+      while i < nh
         h[i] = h[i] + Math.tanh(z[i])
         i += 1
       l += 1
     y = @head.step(h)
+    ny = y.size
+    mx = @max
+    mn = ~0.0 - mx
     i = 0
-    while i < y.size
-      y[i] = @max if y[i] > @max
-      y[i] = ~0.0 - @max if y[i] < ~0.0 - @max
+    while i < ny
+      yi = y[i]
+      if yi > mx
+        y[i] = mx
+      elsif yi < mn
+        y[i] = mn
       i += 1
     y
 

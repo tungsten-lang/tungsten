@@ -466,22 +466,10 @@
   typed_value(:i64, temp)
 
 -> lower_regex(ctx, node)
-  wfn = ctx[:func]
-  pattern_tv = lower_string(ctx, Tungsten:AST:String.new(node.pattern))
-  options_tv = lower_string(ctx, Tungsten:AST:String.new(node.options))
-  pattern_reg = ensure_i64_value(wfn, pattern_tv)
-  options_reg = ensure_i64_value(wfn, options_tv)
-  temp = next_temp(wfn)
-  emit_wire_call_direct_i64(wfn, nil, [pattern_reg, options_reg], nil, nil, "w_regex_new", nil, nil, temp)
-  typed_value(:i64, temp)
+  lower_expression(ctx, Tungsten:AST:Call.new(Tungsten:AST:ClassRef.new("Regex"), "literal", [Tungsten:AST:String.new(node.pattern), Tungsten:AST:String.new(node.options)], nil))
 
 -> lower_regex_capture(ctx, node)
-  wfn = ctx[:func]
-  index_tv = lower_int(ctx, Tungsten:AST:Int.new(ast_get(node, :index)))
-  index_reg = ensure_i64_value(wfn, index_tv)
-  temp = next_temp(wfn)
-  emit_wire_call_direct_i64(wfn, nil, [index_reg], nil, nil, "w_regex_capture", nil, nil, temp)
-  typed_value(:i64, temp)
+  lower_expression(ctx, Tungsten:AST:Call.new(Tungsten:AST:ClassRef.new("Regex"), "capture", [Tungsten:AST:Int.new(ast_get(node, :index))], nil))
 
 -> lower_range(ctx, node)
   wfn = ctx[:func]
@@ -1190,14 +1178,7 @@
   typed_value(:i64, temp)
 
 -> lower_regex_match(ctx, node)
-  wfn = ctx[:func]
-  regex_tv = lower_expression(ctx, node.regex)
-  subject_tv = lower_expression(ctx, node.subject)
-  regex_reg = ensure_i64_value(wfn, regex_tv)
-  subject_reg = ensure_i64_value(wfn, subject_tv)
-  temp = next_temp(wfn)
-  emit_wire_call_direct_i64(wfn, nil, [regex_reg, subject_reg], nil, nil, "w_regex_match", nil, nil, temp)
-  typed_value(:i64, temp)
+  lower_expression(ctx, Tungsten:AST:Call.new(node.regex, "=~", [node.subject], nil))
 
 
 

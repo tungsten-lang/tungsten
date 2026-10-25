@@ -61,19 +61,27 @@ incremental_core_cache_state = {
   true
 
 # Keep the cache key independent of loader/autoload traversal order. Use an
-# explicit lexical insertion sort here: the generic Core Array#sort may select
-# different native algorithms across compiler modes, while this closure is
-# small (tens of files) and key construction is not a hot O(n log n) problem.
+# explicit lexical Shellsort here: the generic Core Array#sort may select
+# different native algorithms across compiler modes, while this is called on
+# both small file closures and multi-thousand-row library definition/hash sets.
 -> incremental_core_cache_sort_strings(values)
-  i = 1
-  while i < values.size()
-    current = values[i]
-    j = i
-    while j > 0 && current < values[j - 1]
-      values[j] = values[j - 1]
-      j -= 1
-    values[j] = current
-    i += 1
+  n = values.size()
+  if n <= 1
+    return values
+  gaps = [1750, 701, 301, 132, 57, 23, 10, 4, 1]
+  gi = 0
+  while gi < 9
+    gap = gaps[gi]
+    i = gap
+    while i < n
+      current = values[i]
+      j = i
+      while j >= gap && current < values[j - gap]
+        values[j] = values[j - gap]
+        j -= gap
+      values[j] = current
+      i += 1
+    gi += 1
   values
 
 -> incremental_core_cache_contracts(expressions)
@@ -117,7 +125,8 @@ incremental_core_cache_state = {
     if type(entry) != "Array" || entry.size() != 2
       return nil
     path = entry[0]
-    if core_source_path?(path)
+    rel_path = core_relative_source_path(path)
+    if rel_path != nil
       mtime = entry[1]
       stat = file_stat_data(path, true)
       if stat == nil || stat.size() < 13
@@ -133,7 +142,7 @@ incremental_core_cache_state = {
       digest = incremental_core_cache_file_digest(path, mtime, ctime, size)
       if digest == nil
         return nil
-      rows.push(core_abi_field(path) + core_abi_field(mtime) + core_abi_field(ctime) + core_abi_field(size) + core_abi_field(digest))
+      rows.push(core_abi_field(rel_path) + core_abi_field(mtime) + core_abi_field(ctime) + core_abi_field(size) + core_abi_field(digest))
     i += 1
   if rows.size() == 0
     return nil
@@ -503,14 +512,18 @@ incremental_core_cache_state = {
 -> incremental_core_cache_canonicalize_strings(mod)
   if mod[:incremental_core_cache_key] == nil
     return nil
-  text_by_id = incremental_core_cache_string_text_by_id(mod)
   # The library snapshot records its boundary before Core strings are sorted
   # into their canonical prefix. Preserve the boundary by content through the
   # reorder/dedup step, then publish its new prefix count below.
-  library_texts = {}
   library_boundary = mod[:incremental_library_cache_string_count]
   if library_boundary == nil
     library_boundary = 0
+  if mod[:incremental_core_cache_hit] == true && mod[:incremental_core_cache_entry] != nil
+    mod[:incremental_core_string_count] = mod[:incremental_core_cache_entry][:strings].size()
+    if library_boundary > mod[:strings].size()
+      mod[:incremental_library_cache_string_count] = mod[:strings].size()
+    return nil
+  library_texts = {}
   i = 0
   while i < library_boundary && i < mod[:strings].size()
     library_texts[mod[:strings][i][:text]] = true
@@ -522,6 +535,7 @@ incremental_core_cache_state = {
     while i < boundary[:string_texts].size()
       core_texts[boundary[:string_texts][i]] = true
       i += 1
+  text_by_id = incremental_core_cache_string_text_by_id(mod)
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
@@ -553,23 +567,29 @@ incremental_core_cache_state = {
     i += 1
 
   remap = {}
+  needs_remap = false
   i = 0
   while i < mod[:strings].size()
     old = mod[:strings][i]
-    remap[old[:id]] = by_text[old[:text]]
+    old_id = old[:id]
+    new_id = by_text[old[:text]]
+    remap[old_id] = new_id
+    if old_id != new_id
+      needs_remap = true
     i += 1
-  fi = 0
-  while fi < mod[:functions].size()
-    func = mod[:functions][fi]
-    bi = 0
-    while bi < func[:blocks].size()
-      instrs = func[:blocks][bi][:instructions]
-      ii = 0
-      while ii < instrs.size()
-        incremental_core_cache_rewrite_inst_strings(instrs[ii], remap)
-        ii += 1
-      bi += 1
-    fi += 1
+  if needs_remap
+    fi = 0
+    while fi < mod[:functions].size()
+      func = mod[:functions][fi]
+      bi = 0
+      while bi < func[:blocks].size()
+        instrs = func[:blocks][bi][:instructions]
+        ii = 0
+        while ii < instrs.size()
+          incremental_core_cache_rewrite_inst_strings(instrs[ii], remap)
+          ii += 1
+        bi += 1
+      fi += 1
 
   mod[:strings] = new_strings
   mod[:string_ids_by_text] = by_text

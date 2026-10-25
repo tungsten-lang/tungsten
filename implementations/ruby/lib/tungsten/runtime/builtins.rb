@@ -1203,6 +1203,16 @@ module Tungsten
           Tungsten::Key.from_legacy(args[0])
         end
 
+        interpreter.define_builtin("popcount") do |_recv, args, _block|
+          w = args[0].to_i & 0xffffffffffffffff
+          w.to_s(2).count("1")
+        end
+
+        interpreter.define_builtin("cttz") do |_recv, args, _block|
+          w = args[0].to_i & 0xffffffffffffffff
+          w.zero? ? 64 : (w & -w).bit_length - 1
+        end
+
         # ---- Sandbox gating ----
         # When the interpreter is constructed with sandbox: true, dangerous
         # builtins are replaced with stubs (returning nil/false) or blocks
@@ -1301,6 +1311,7 @@ module Tungsten
           when Tungsten::CharValue then recv.bytes
           when Tungsten::IP6 then recv.bytes
           when Tungsten::MAC then recv.bytes
+          when Tungsten::UUID then recv.bytes
           when String then Tungsten::ByteArray.new(recv.bytes)
           when Symbol then Tungsten::ByteArray.new(recv.to_s.bytes)
           else raise Tungsten::Error, "'bytes' is not available on #{interpreter.send(:tungsten_class_name, recv)}"

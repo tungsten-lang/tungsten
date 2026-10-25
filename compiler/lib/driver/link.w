@@ -4,7 +4,12 @@
   if cached != nil && cached != ""
     os = cached
   else
-    os = capture("uname -s").strip()
+    memo = driver_probe_memo[:os]
+    if memo != nil
+      os = memo
+    else
+      os = capture("uname -s").strip()
+      driver_probe_memo[:os] = os
 
   if os == "Darwin"
     return "event_kqueue.c"
@@ -143,13 +148,14 @@
   # --release / --lto; the default is a target-matched object runtime
   # archive (fatter binary, ~0.1s link vs ~5s recompiling the C runtime).
   doing_lto = (release_mode || explicit_lto) && !no_lto
+  full_runtime_lto = (explicit_lto || (release_mode && compiler_image_runtime_profile)) && !no_lto
   # Fast native-archive link (default): reuse the cached runtime objects
   # rather than recompiling the ~28k-line runtime every build. runtime.o's weak
   # companion stubs keep the gated ssmr/lexchar/metal/blas adds below valid.
   # Configs the shared archive can't represent (cross-target and zstd) fall
   # through to the from-source path. Frame-pointer mode is part of the archive
   # flags and identity, so debug builds can reuse it without losing backtraces.
-  if runtime_objs == nil && !doing_lto && cross_target == "" && !needs_zstd
+  if runtime_objs == nil && !full_runtime_lto && cross_target == "" && !needs_zstd
     runtime_objs = dev_runtime_archive(verbose)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
   if clang_opt == nil || clang_opt == ""
@@ -174,6 +180,8 @@
     if verbose
       << fmt_elapsed(phase_elapsed(link_started_at)) + " clang (link cache)"
     return true
+  if runtime_objs == nil && full_runtime_lto && cross_target == "" && !needs_zstd
+    runtime_objs = dev_runtime_lto_objects(compiler_image_runtime_profile, verbose)
 
   # Parallel codegen — OPT-IN via TUNGSTEN_PARALLEL_CODEGEN=1. -O3 on one
   # big module is single-threaded and ~90% of a large build's wall; with
@@ -189,7 +197,7 @@
   # doesn't need it; PGO must not mix brew instrumentation with Apple's
   # profile runtime).
   parallel_objs = nil
-  if clang_opt == "-O3" && cross_target == "" && !doing_lto && !frame_pointers && env("TUNGSTEN_PARALLEL_CODEGEN") == "1"
+  if clang_opt == "-O3" && cross_target == "" && !full_runtime_lto && !frame_pointers && env("TUNGSTEN_PARALLEL_CODEGEN") == "1"
     parallel_objs = parallel_codegen_objects(ll_path, verbose)
 
   clang_cmd = StringBuffer(0)
@@ -206,7 +214,7 @@
     clang_cmd << " "
   clang_cmd << " -fmerge-all-constants "
 
-  if doing_lto
+  if full_runtime_lto
     clang_cmd << (release_mode ? "-flto=full " : "-flto ")
 
   if frame_pointers
@@ -258,11 +266,6 @@
     if dynamic_exports_needed
       clang_cmd << "-rdynamic "
 
-  ocf = onig_cflags
-  if ocf != ""
-    clang_cmd << ocf
-    clang_cmd << " "
-
   tcf = tls_cflags
   if tcf != ""
     clang_cmd << tcf
@@ -281,11 +284,66 @@
   # the native archive compiles nothing, and clang warns on the unused -I.
   runtime_dir = resolve_runtime_dir
   target_os = detect_target()[:os]
-  compiles_c = runtime_objs == nil || prime_needed || lexchars_needed || unicode_needed || sci_io_needed || wtensor_needed || quartz_needed || media_needed || extra_c_includes.size() > 0
-  if target_os == "macos" && (blas_needed || sparse_needed || bridges_needed)
-    compiles_c = true
-  if target_os == "linux" && blas_needed
-    compiles_c = true
+  gated_dir = runtime_dir
+  companion_reqs = []
+  if prime_needed
+    companion_reqs.push(["ssmr_witness.c", ""])
+  if lexchars_needed
+    companion_reqs.push(["lexchar_tables.c", ""])
+  if unicode_needed
+    companion_reqs.push(["unicode_tables.c", ""])
+  if target_os == "macos"
+    if blas_needed
+      companion_reqs.push(["blas_bridge.c", ""])
+    if sparse_needed
+      companion_reqs.push(["sparse_bridge.c", ""])
+    if mlx_needed
+      mlx_inc = mlx_cflags()
+      if mlx_inc == ""
+        raise "this program uses MLX (w_mlx_* / bf16 conversion) but mlx-c is not installed — brew install mlx mlx-c"
+      companion_reqs.push(["mlx_bridge.c", mlx_inc])
+    if bridges_needed
+      companion_reqs.push(["metal.m", ""])
+      companion_reqs.push(["graphics.m", ""])
+      companion_reqs.push(["hid_bridge.m", ""])
+  if quartz_needed
+    companion_reqs.push(["quartz.c", ""])
+  if media_needed
+    companion_reqs.push(["media/media.c", ""])
+    if target_os == "macos"
+      companion_reqs.push(["media/media_avf.m", ""])
+  if sci_io_needed
+    companion_reqs.push(["sci_io_native.c", ""])
+  if wtensor_needed
+    companion_reqs.push(["tensor_bridge.c", ""])
+  if target_os == "linux"
+    if blas_needed
+      companion_reqs.push(["openblas_bridge.c", ""])
+  if cuda_needed
+    cuda_needed = cuda_needed
+
+  companion_cmd = StringBuffer(0)
+  companion_compiles_c = false
+  ci = 0
+  while ci < companion_reqs.size()
+    req = companion_reqs[ci]
+    rel_src = req[0]
+    req_cflags = req[1]
+    cached_obj = dev_runtime_companion_object(rel_src, false, req_cflags)
+    if cached_obj != nil
+      companion_cmd << dev_runtime_shell_quote(cached_obj)
+      companion_cmd << " "
+    else
+      companion_compiles_c = true
+      companion_cmd << gated_dir
+      companion_cmd << rel_src
+      companion_cmd << " "
+      if req_cflags != ""
+        companion_cmd << req_cflags
+        companion_cmd << " "
+    ci += 1
+
+  compiles_c = runtime_objs == nil || companion_compiles_c || extra_c_includes.size() > 0
   if compiles_c
     clang_cmd << "-I"
     clang_cmd << runtime_dir
@@ -316,78 +374,7 @@
       clang_cmd << zstd_runtime_source()
       clang_cmd << " "
 
-  # Gated companions apply on BOTH runtime paths (sources above, or a cached
-  # archive via runtime_objs). They MUST be passed as explicit sources here:
-  # runtime.o carries weak stand-ins for all of them, and a weak definition
-  # satisfies the linker, so it never pulls the strong archive member — an
-  # archive can not override a weak symbol. (Learned the hard way: stage 2
-  # could not lex its own source.)
-  gated_dir = resolve_runtime_dir
-  if prime_needed
-    clang_cmd << gated_dir
-    clang_cmd << "ssmr_witness.c "
-  if lexchars_needed
-    clang_cmd << gated_dir
-    clang_cmd << "lexchar_tables.c "
-  if unicode_needed
-    clang_cmd << gated_dir
-    clang_cmd << "unicode_tables.c "
-  if detect_target()[:os] == "macos"
-    if blas_needed
-      clang_cmd << gated_dir
-      clang_cmd << "blas_bridge.c "
-    if sparse_needed
-      clang_cmd << gated_dir
-      clang_cmd << "sparse_bridge.c "
-    if mlx_needed
-      mlx_inc = mlx_cflags()
-      if mlx_inc == ""
-        raise "this program uses MLX (w_mlx_* / bf16 conversion) but mlx-c is not installed — brew install mlx mlx-c"
-      clang_cmd << gated_dir
-      clang_cmd << "mlx_bridge.c "
-      clang_cmd << mlx_inc
-      clang_cmd << " "
-    if bridges_needed
-      clang_cmd << gated_dir
-      clang_cmd << "metal.m "
-      clang_cmd << gated_dir
-      clang_cmd << "graphics.m "
-      clang_cmd << gated_dir
-      clang_cmd << "hid_bridge.m "
-  # Canvas drawing bridge: the real CoreGraphics/CoreText code on macOS, and
-  # on every other target the same file compiles to stubs that raise "Canvas
-  # needs macOS" — a clear runtime error instead of an undefined symbol.
-  if quartz_needed
-    clang_cmd << gated_dir
-    clang_cmd << "quartz.c "
-  # Media bridge: media.c everywhere (VideoToolbox encoder and segments on
-  # macOS, "media needs macOS" stubs elsewhere), media_avf.m (AVAssetWriter
-  # mux, AVAssetReader probes) on macOS only.
-  if media_needed
-    clang_cmd << gated_dir
-    clang_cmd << "media/media.c "
-    if detect_target()[:os] == "macos"
-      clang_cmd << gated_dir
-      clang_cmd << "media/media_avf.m "
-  # Pure-C sci I/O (no system HDF5/NetCDF/Arrow) — all platforms.
-  if sci_io_needed
-    clang_cmd << gated_dir
-    clang_cmd << "sci_io_native.c "
-  if wtensor_needed
-    clang_cmd << gated_dir
-    clang_cmd << "tensor_bridge.c "
-  if detect_target()[:os] == "linux"
-    if blas_needed
-      # Portable CBLAS (OpenBLAS). Requires libopenblas-dev (or equivalent).
-      clang_cmd << gated_dir
-      clang_cmd << "openblas_bridge.c "
-  # CUDA host bridge: only when IR needs it and nvcc is available.
-  # Linking .cu is done via a separate nvcc step when TUNGSTEN_CUDA=1.
-  if cuda_needed
-    # Named launch still uses weak stubs unless the user links
-    # runtime/cuda_bridge.cu via nvcc (see doc/scientific-computing/cuda.md).
-    # Device availability reports 0 without the bridge — that is intentional.
-    cuda_needed = cuda_needed
+  clang_cmd << companion_cmd.to_s()
 
   includes = extra_c_includes
 
@@ -404,11 +391,6 @@
     if zlf != ""
       clang_cmd << " "
       clang_cmd << zlf
-
-  olf = onig_ldflags
-  if olf != ""
-    clang_cmd << " "
-    clang_cmd << olf
 
   h2lf = http2_ldflags
   if h2lf != ""
@@ -476,6 +458,17 @@
 -> dev_runtime_shell_quote(text)
   "'" + text.gsub("'", "'\\''") + "'"
 
+-> ensure_driver_dir(dir)
+  if dir == nil || dir == ""
+    return false
+  key = "dir:" + dir
+  if driver_probe_memo[key] == true
+    return true
+  if system("mkdir -p " + dev_runtime_shell_quote(dir)) != true
+    return false
+  driver_probe_memo[key] = true
+  true
+
 # One selected content-addressed cache for runtime archives, loader artifacts,
 # and incremental binaries. An explicit override wins. Otherwise a project
 # checkout owns its build/cache; installed compilers fall back to their
@@ -486,7 +479,7 @@
   if override != nil && override != ""
     return override
   if file?("Bitfile")
-    cwd = capture("pwd -P 2>/dev/null").strip()
+    cwd = driver_cwd()
     if cwd != ""
       return cwd + "/build/cache"
   root = env("TUNGSTEN_ROOT")
@@ -787,7 +780,7 @@
   if cc_identity == nil || ar_identity == nil
     return nil
   cache_dir = compiler_cache_dir()
-  if cache_dir == nil || system("mkdir -p " + dev_runtime_shell_quote(cache_dir)) != true
+  if cache_dir == nil
     return nil
   compile_flags = profile_opt_flag() + " " + debug_compile_flag() + " " + march_flags()
   if frame_pointers
@@ -805,19 +798,20 @@
 
   # Freshness: reuse the cached archive iff it is newer than every base source.
   bases = dev_runtime_base_files(ev, generated_thresholds, tls_source)
+  archive_mtime = file_mtime_ns(archive)
+  if archive_mtime != nil
+    fresh = true
+    bi = 0
+    while bi < bases.size() && fresh
+      bm = file_mtime_ns(runtime_root + "/" + bases[bi])
+      if bm == nil || archive_mtime <= bm
+        fresh = false
+      bi += 1
+    if fresh
+      return archive
 
-  fresh = StringBuffer(0)
-  fresh << "test -e "
-  fresh << dev_runtime_shell_quote(archive)
-  bi = 0
-  while bi < bases.size()
-    fresh << " && test "
-    fresh << dev_runtime_shell_quote(archive)
-    fresh << " -nt "
-    fresh << dev_runtime_shell_quote(runtime_root + "/" + bases[bi])
-    bi += 1
-  if file?(archive) && system(fresh.to_s()) == true
-    return archive
+  if !ensure_driver_dir(cache_dir)
+    return nil
 
   if verbose
     << "Building native runtime archive (one-time)..."
@@ -867,6 +861,188 @@
     return nil
   archive
 
+-> dev_runtime_lto_objects_path(cache_dir, runtime_root, cc_identity, compile_flags, event_source, generated_thresholds, tls_source)
+  config = StringBuffer(0)
+  config << "dev-runtime-lto-v1\n"
+  config << runtime_root
+  config << "\ncc="
+  config << cc_identity
+  config << "\nflags="
+  config << compile_flags
+  config << "\n"
+  config << event_source
+  config << "\nthresholds="
+  config << generated_thresholds
+  config << "\ntls="
+  config << tls_source
+  config << "\n"
+  dev_runtime_append_env(config, "SDKROOT")
+  dev_runtime_append_env(config, "MACOSX_DEPLOYMENT_TARGET")
+  dev_runtime_append_env(config, "CPATH")
+  dev_runtime_append_env(config, "C_INCLUDE_PATH")
+  dev_runtime_append_env(config, "CPLUS_INCLUDE_PATH")
+  dev_runtime_append_env(config, "LIBRARY_PATH")
+  dev_runtime_append_env(config, "PKG_CONFIG_PATH")
+  dev_runtime_append_env(config, "PKG_CONFIG_LIBDIR")
+  cache_dir + "/runtime-lto-" + wyhash64_hex_string(config.to_s())
+
+-> dev_runtime_lto_objects(compiler_image_runtime_profile = false, verbose = false)
+  clang_opt = env("TUNGSTEN_CLANG_OPT")
+  if clang_opt != nil && clang_opt.index("-fprofile") != nil
+    return nil
+  runtime_dir = resolve_runtime_dir
+  ev = runtime_event_source
+  runtime_kind = runtime_identity()
+  runtime_root = dev_runtime_source_identity(runtime_dir, runtime_kind)
+  cc_command = host_c_compiler()
+  cc_identity = dev_runtime_cc_identity(cc_command, runtime_kind)
+  if cc_identity == nil
+    return nil
+  cache_dir = compiler_cache_dir()
+  if cache_dir == nil
+    return nil
+  opt_flag = (clang_opt != nil && clang_opt != "") ? clang_opt : profile_opt_flag()
+  compile_flags = opt_flag + " " + debug_compile_flag() + " " + march_flags() + " -fmerge-all-constants"
+  compile_flags += release_mode ? " -flto=full" : " -flto"
+  if frame_pointers
+    compile_flags += " -fno-omit-frame-pointer"
+  if compiler_image_runtime_profile
+    compile_flags += " -DTUNGSTEN_RUNTIME_COMPILER_IMAGE=1"
+  if detect_target()[:os] == "macos"
+    compile_flags += " -fveclib=Darwin_libsystem_m"
+  tcf = tls_cflags
+  if tcf != ""
+    compile_flags += " " + tcf
+  thresholds_path = runtime_root + "/generated/bigint_thresholds.h"
+  generated_thresholds = file?(thresholds_path) ? "present" : "absent"
+  tls_source = tls_runtime_source()
+  bundle_dir = dev_runtime_lto_objects_path(cache_dir, runtime_root, cc_identity, compile_flags, ev, generated_thresholds, tls_source)
+  ready_mtime = file_mtime_ns(bundle_dir + "/.ready")
+  bases = dev_runtime_base_files(ev, generated_thresholds, tls_source)
+  if ready_mtime != nil
+    fresh = true
+    bi = 0
+    while bi < bases.size() && fresh
+      bm = file_mtime_ns(runtime_root + "/" + bases[bi])
+      if bm == nil || ready_mtime <= bm
+        fresh = false
+      bi += 1
+    if fresh
+      return bundle_dir + "/*.o"
+
+  if !ensure_driver_dir(cache_dir)
+    return nil
+
+  if verbose
+    << "Building LTO runtime objects (one-time)..."
+
+  event_source_arg = dev_runtime_shell_quote(runtime_root + "/" + ev)
+  if ev == "event_*.c"
+    event_source_arg = dev_runtime_shell_quote(runtime_root + "/event_") + "*.c"
+
+  cc = StringBuffer(0)
+  cc << "build_dir="
+  cc << dev_runtime_shell_quote(bundle_dir + ".build.")
+  cc << "$$; old_dir="
+  cc << dev_runtime_shell_quote(bundle_dir + ".old.")
+  cc << "$$; rm -rf \"$build_dir\" \"$old_dir\" && mkdir -p \"$build_dir\" && cd \"$build_dir\" && "
+  cc << cc_command
+  cc << " "
+  cc << compile_flags
+  cc << " -I"
+  cc << dev_runtime_shell_quote(runtime_root)
+  cc << " -c "
+  cc << dev_runtime_shell_quote(runtime_root + "/runtime.c")
+  cc << " "
+  cc << dev_runtime_shell_quote(runtime_root + "/terminal_input.c")
+  cc << " "
+  cc << event_source_arg
+  cc << " "
+  cc << dev_runtime_shell_quote(runtime_root + "/aks.c")
+  cc << " "
+  cc << dev_runtime_shell_quote(runtime_root + "/" + tls_source)
+  cc << " && touch .ready && (mv -f "
+  cc << dev_runtime_shell_quote(bundle_dir)
+  cc << " \"$old_dir\" 2>/dev/null || true) && mv -f \"$build_dir\" "
+  cc << dev_runtime_shell_quote(bundle_dir)
+  cc << "; status=$?; rm -rf \"$build_dir\" \"$old_dir\"; exit $status"
+  if system(cc.to_s()) != true
+    return nil
+  bundle_dir + "/*.o"
+
+-> dev_runtime_companion_object(rel_source, doing_lto, extra_cflags = "")
+  if cross_target != ""
+    return nil
+  clang_opt = env("TUNGSTEN_CLANG_OPT")
+  if clang_opt != nil && clang_opt.index("-fprofile") != nil
+    return nil
+  runtime_dir = resolve_runtime_dir
+  runtime_kind = runtime_identity()
+  runtime_root = dev_runtime_source_identity(runtime_dir, runtime_kind)
+  cc_command = host_c_compiler()
+  cc_identity = dev_runtime_cc_identity(cc_command, runtime_kind)
+  if cc_identity == nil
+    return nil
+  cache_dir = compiler_cache_dir()
+  if cache_dir == nil
+    return nil
+  opt_flag = (clang_opt != nil && clang_opt != "") ? clang_opt : profile_opt_flag()
+  compile_flags = opt_flag + " " + debug_compile_flag() + " " + march_flags() + " -fmerge-all-constants"
+  if doing_lto
+    compile_flags += release_mode ? " -flto=full" : " -flto"
+  if frame_pointers
+    compile_flags += " -fno-omit-frame-pointer"
+  if detect_target()[:os] == "macos"
+    compile_flags += " -fveclib=Darwin_libsystem_m"
+  tcf = tls_cflags
+  if tcf != ""
+    compile_flags += " " + tcf
+  if extra_cflags != ""
+    compile_flags += " " + extra_cflags
+  config = StringBuffer(256)
+  config << "companion-obj-v1\n"
+  config << runtime_root
+  config << "\nsrc="
+  config << rel_source
+  config << "\ncc="
+  config << cc_identity
+  config << "\nflags="
+  config << compile_flags
+  config << "\n"
+  dev_runtime_append_env(config, "SDKROOT")
+  dev_runtime_append_env(config, "MACOSX_DEPLOYMENT_TARGET")
+  dev_runtime_append_env(config, "CPATH")
+  dev_runtime_append_env(config, "C_INCLUDE_PATH")
+  dev_runtime_append_env(config, "CPLUS_INCLUDE_PATH")
+  safe_name = rel_source.gsub("/", "_").gsub(".", "_")
+  obj_path = cache_dir + "/companion-" + safe_name + "-" + wyhash64_hex_string(config.to_s()) + ".o"
+  src_path = runtime_root + "/" + rel_source
+  obj_mtime = file_mtime_ns(obj_path)
+  if obj_mtime != nil
+    src_mtime = file_mtime_ns(src_path)
+    hdr1 = file_mtime_ns(runtime_root + "/runtime.h")
+    hdr2 = file_mtime_ns(runtime_root + "/wvalue.h")
+    hdr3 = file_mtime_ns(runtime_root + "/ssmr_witness.h")
+    if src_mtime != nil && obj_mtime > src_mtime && (hdr1 == nil || obj_mtime > hdr1) && (hdr2 == nil || obj_mtime > hdr2) && (hdr3 == nil || obj_mtime > hdr3)
+      extra_ok = true
+      if rel_source == "quartz.c"
+        qh = file_mtime_ns(runtime_root + "/quartz.h")
+        if qh != nil && obj_mtime <= qh
+          extra_ok = false
+      elsif rel_source.starts_with?("media/")
+        mh = file_mtime_ns(runtime_root + "/media/media.h")
+        if mh != nil && obj_mtime <= mh
+          extra_ok = false
+      if extra_ok
+        return obj_path
+  if !ensure_driver_dir(cache_dir)
+    return nil
+  tmp_obj = dev_runtime_shell_quote(obj_path + ".tmp.") + "$$"
+  cmd = cc_command + " " + compile_flags + " -I" + dev_runtime_shell_quote(runtime_root) + " -c " + dev_runtime_shell_quote(src_path) + " -o " + tmp_obj + " && mv -f " + tmp_obj + " " + dev_runtime_shell_quote(obj_path) + "; status=$?; rm -f " + tmp_obj + "; exit $status"
+  if system(cmd) != true
+    return nil
+  obj_path
+
 -> compile_runtime_objs(tmp_dir, needs_zstd = false, verbose = false)
   # Compile the shared runtime once into a private object bundle. Do not put
   # these objects in an archive: Apple clang emits a mixture of LTO bitcode
@@ -897,11 +1073,6 @@
     if zcf != ""
       cc << zcf
       cc << " "
-
-  ocf = onig_cflags
-  if ocf != ""
-    cc << ocf
-    cc << " "
 
   tcf = tls_cflags
   if tcf != ""

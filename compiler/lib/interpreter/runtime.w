@@ -77,7 +77,7 @@
   # See [[project_const_ref_node_kind]] for the parser-level fix that
   # would eliminate this backstop.
   -> seed_primitive_class_stubs
-    names = ["Integer", "Int", "Float", "String", "Boolean", "Bool", "Nil", "Array", "Hash", "Symbol", "Range", "Regex", "Class"]
+    names = ["Integer", "Int", "Float", "String", "Boolean", "Bool", "Nil", "Array", "Hash", "Symbol", "Range", "Class"]
     i = 0
     while i < names.size()
       name = names[i]
@@ -422,7 +422,7 @@
     if t == :char
       return ast_get(node, :value)
     if t == :codepoint
-      return ast_get(node, :value)
+      return ccall("w_char_new", ast_get(node, :value))
     if t == :wvalue
       return ast_get(node, :value)
     if t == :float
@@ -478,6 +478,16 @@
     if t == :cidr6
       # "2001:db8::/32" → w_ipv6_parse (splits the "/prefix" internally)
       return ccall("w_ipv6_parse", "" + ast_get(node, :value).to_s())
+    if t == :regex
+      try_autoload_class("Regex")
+      return dispatch_method(@classes["Regex"], "literal", [ast_get(node, :pattern), ast_get(node, :options)], nil, env)
+    if t == :regex_capture
+      try_autoload_class("Regex")
+      return dispatch_method(@classes["Regex"], "capture", [ast_get(node, :index)], nil, env)
+    if t == :regex_match
+      rx = evaluate(ast_get(node, :regex), env)
+      subj = evaluate(ast_get(node, :subject), env)
+      return dispatch_method(rx, "=~", [subj], nil, env)
     if t == :string
       return ast_get(node, :value)
     if t == :bool

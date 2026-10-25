@@ -461,6 +461,26 @@
         return comparison > 0 if op == :GT
         return comparison >= 0
 
+    if op == :MATCH
+      if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
+        return dispatch_method(left, "=~", [right], nil, nil)
+      if type(right) == "Hash" && right.has_key?(:rt) && right[:rt] == :object
+        return dispatch_method(right, "=~", [left], nil, nil)
+      return dispatch_method(left, "=~", [right], nil, nil)
+
+    if op == :NMATCH
+      res = nil
+      if type(left) == "Hash" && left.has_key?(:rt) && left[:rt] == :object
+        res = dispatch_method(left, "=~", [right], nil, nil)
+      elsif type(right) == "Hash" && right.has_key?(:rt) && right[:rt] == :object
+        res = dispatch_method(right, "=~", [left], nil, nil)
+      else
+        res = dispatch_method(left, "=~", [right], nil, nil)
+      return !truthy?(res)
+
+    if op == :TRIPLE_EQ
+      return dispatch_method(left, "===", [right], nil, nil)
+
     # Object operands dispatch their own operator method (a + b -> a.+(b)),
     # mirroring the compiled operator-overload path and the `·` arm below —
     # covers the hypercomplex tower, Vec/Mat, etc. Arithmetic/bitwise here and
@@ -924,7 +944,11 @@
       arm = arms[i]
       pat_node = ast_get(arm, :pattern)
       pattern = evaluate(pat_node, env)
-      matched = pattern == subject
+      matched = false
+      if type(pattern) == "Hash" && pattern.has_key?(:rt) && pattern[:rt] == :object && pattern[:w_class][:name] == "Regex"
+        matched = truthy?(dispatch_method(pattern, "=~", [subject], nil, env))
+      else
+        matched = pattern == subject
       if !matched && type(pattern) == "Hash" && pattern.has_key?(:rt) && pattern[:rt] == :range
         # Compiled lowering rewrites `when 3..9` to bound checks, not `==`.
         from = pattern[:from]

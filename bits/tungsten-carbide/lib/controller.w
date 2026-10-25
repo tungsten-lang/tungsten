@@ -59,20 +59,24 @@
   # early `return`: an early return from a closure-bearing method corrupts
   # the self-hosted interpreter (same flag-style flow as route.w/model.w).
   -> dispatch(action)
-    me = self
     halted = nil
-    before_actions.each -> (f)
-      if halted == nil
-        halted = f.call(me)
-    response = nil
+    bef = before_actions
+    bn = bef.size
+    bi = 0
+    while bi < bn && halted == nil
+      halted = bef[bi].call(self)
+      bi += 1
     if halted != nil
-      response = halted
-    else
-      response = action.call(me)
-      after_actions.each -> (g)
-        replacement = g.call(me, response)
-        if replacement != nil
-          response = replacement
+      return halted
+    response = action.call(self)
+    aft = after_actions
+    an = aft.size
+    ai = 0
+    while ai < an
+      replacement = aft[ai].call(self, response)
+      if replacement != nil
+        response = replacement
+      ai += 1
     response
 
   # --- Param access ---

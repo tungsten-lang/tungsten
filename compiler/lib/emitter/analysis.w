@@ -594,7 +594,10 @@ function_emit_cache_state = {
 
 # Return the runtime function names that an instruction will reference when rendered.
 -> runtime_fns_for_inst(inst, string_wvs = nil)
-  case wire_kind(inst)
+  op = wire_kind(inst)
+  if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop || op == :load_global || op == :load_class
+    return nil
+  case op
   when :call_direct_i64, :call_direct_i128, :call_direct_void, :call_direct_ptr
     # w_node_field_store renders as inline slab IR when the offset is a
     # literal, and that IR calls the array-freeze helper directly — the

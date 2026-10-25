@@ -207,6 +207,8 @@ enum {
   TC_OP_IS_MACHINE_INT_TYPE,
   TC_OP_IS_MACHINE_INT128_TYPE,
   TC_OP_IS_MACHINE_INT64_TYPE,
+  TC_OP_STRING_FIRST_BYTE,
+  TC_OP_WIRE_TEMP_OPERANDS,
 };
 
 typedef struct {
@@ -795,6 +797,7 @@ typedef struct {
   // string allocation, and a full function-table scan on every node.
   TcFunction **ctor_fn_for_const;
   uint8_t *ctor_is_slab;
+  uint8_t *const_is_builtin;
   // Implicit-self method dispatch IC: for each name_id, cache the last
   // resolved (class_name pointer, TcFunction*). Class names are interned
   // C strings so pointer equality is sufficient. Hit rate is near 100%

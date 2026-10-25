@@ -160,6 +160,15 @@
 # when the compiler is invoked outside bin/tungsten build.
 
 driver_homebrew_prefix_memo = {}
+driver_probe_memo = {}
+
+-> driver_cwd
+  cached = driver_probe_memo[:cwd]
+  if cached != nil
+    return cached
+  pwd = capture("pwd -P 2>/dev/null").strip()
+  driver_probe_memo[:cwd] = pwd
+  pwd
 
 -> driver_homebrew_prefix(formula)
   key = formula == "" ? :root : formula.to_sym()
@@ -192,13 +201,16 @@ driver_homebrew_prefix_memo = {}
   cached = env("TUNGSTEN_ZSTD_CFLAGS")
   if cached != nil
     return cached
+  memo = driver_probe_memo[:zstd_cflags]
+  if memo != nil
+    return memo
   flags = capture("pkg-config --cflags libzstd 2>/dev/null").strip()
-  if flags != ""
-    return flags
-  brew = driver_homebrew_prefix("")
-  if brew != "" && file?(brew + "/include/zstd.h")
-    return "-I" + brew + "/include"
-  ""
+  if flags == ""
+    brew = driver_homebrew_prefix("")
+    if brew != "" && file?(brew + "/include/zstd.h")
+      flags = "-I" + brew + "/include"
+  driver_probe_memo[:zstd_cflags] = flags
+  flags
 
 -> zstd_ldflags
   if cross_target != ""
@@ -207,45 +219,18 @@ driver_homebrew_prefix_memo = {}
   cached = env("TUNGSTEN_ZSTD_LDFLAGS")
   if cached != nil
     return cached
+  memo = driver_probe_memo[:zstd_ldflags]
+  if memo != nil
+    return memo
   flags = capture("pkg-config --libs libzstd 2>/dev/null").strip()
-  if flags != ""
-    return flags
-  brew = driver_homebrew_prefix("")
-  if brew != "" && (file?(brew + "/lib/libzstd.dylib") || file?(brew + "/lib/libzstd.a"))
-    return "-L" + brew + "/lib -lzstd"
-  "-lzstd"
-
--> onig_cflags
-  if cross_target != ""
-    cross_flags = env("TUNGSTEN_CROSS_ONIG_CFLAGS")
-    return cross_flags == nil ? "" : cross_flags
-  cached = env("TUNGSTEN_ONIG_CFLAGS")
-  if cached != nil
-    return cached
-  flags = capture("pkg-config --cflags oniguruma 2>/dev/null").strip()
-  if flags != ""
-    return flags + " -DTUNGSTEN_ONIG"
-  brew = driver_homebrew_prefix("")
-  if brew != "" && file?(brew + "/include/oniguruma.h")
-    return "-I" + brew + "/include -DTUNGSTEN_ONIG"
-  ""
-
--> onig_ldflags
-  if cross_target != ""
-    cross_flags = env("TUNGSTEN_CROSS_ONIG_LDFLAGS")
-    return cross_flags == nil ? "" : cross_flags
-  cached = env("TUNGSTEN_ONIG_LDFLAGS")
-  if cached != nil
-    return cached
-  flags = capture("pkg-config --libs oniguruma 2>/dev/null").strip()
-  if flags != ""
-    return flags
-  if onig_cflags != ""
+  if flags == ""
     brew = driver_homebrew_prefix("")
-    if brew != "" && (file?(brew + "/lib/libonig.dylib") || file?(brew + "/lib/libonig.a"))
-      return "-L" + brew + "/lib -lonig"
-    return "-lonig"
-  ""
+    if brew != "" && (file?(brew + "/lib/libzstd.dylib") || file?(brew + "/lib/libzstd.a"))
+      flags = "-L" + brew + "/lib -lzstd"
+    else
+      flags = "-lzstd"
+  driver_probe_memo[:zstd_ldflags] = flags
+  flags
 
 -> tls_requested?
   env("TLS") != nil || env("TUNGSTEN_TLS") != nil

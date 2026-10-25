@@ -65,9 +65,19 @@ in Tungsten:Flame
     frame = name
     plus_idx = frame.rindex(" + ")
     if plus_idx != nil
-      rest = frame.slice(plus_idx + 3, frame.size())
-      if rest.size() > 0 && rest.to_i().to_s() == rest
-        frame = frame.slice(0, plus_idx)
+      rstart = plus_idx + 3
+      rend = frame.size()
+      rlen = rend - rstart
+      if rlen > 0
+        b0 = frame.byte_at(rstart)
+        valid = b0 >= 48 && b0 <= 57 && (rlen == 1 || b0 != 48)
+        k = rstart + 1
+        while k < rend && valid
+          bk = frame.byte_at(k)
+          valid = bk >= 48 && bk <= 57
+          k = k + 1
+        if valid
+          frame = frame.slice(0, plus_idx)
     backtick = frame.rindex("`")
     if backtick != nil
       frame = frame.slice(backtick + 1, frame.size())
@@ -97,18 +107,10 @@ in Tungsten:Flame
   # Tungsten top-level code lowers directly into `main`.
   -> .infra_leaf?(name)
     f = self.normalize_frame(name)
-    infra_exact = ["start", "thread_start", "_ctx_start", "g_body_entry"]
-    infra_prefix = ["dyld", "_dyld", "_pthread", "Thread_", "DispatchQueue"]
-    j = 0
-    while j < infra_exact.size()
-      if name == infra_exact[j] || f == infra_exact[j]
-        return true
-      j = j + 1
-    j = 0
-    while j < infra_prefix.size()
-      if name.starts_with?(infra_prefix[j]) || f.starts_with?(infra_prefix[j])
-        return true
-      j = j + 1
+    if name == "start" || f == "start" || name == "thread_start" || f == "thread_start" || name == "_ctx_start" || f == "_ctx_start" || name == "g_body_entry" || f == "g_body_entry"
+      return true
+    if name.starts_with?("dyld") || f.starts_with?("dyld") || name.starts_with?("_dyld") || f.starts_with?("_dyld") || name.starts_with?("_pthread") || f.starts_with?("_pthread") || name.starts_with?("Thread_") || f.starts_with?("Thread_") || name.starts_with?("DispatchQueue") || f.starts_with?("DispatchQueue")
+      return true
     false
 
   # Self (leaf-only) counts from a { stack => count } map. When `normalize`
@@ -117,11 +119,12 @@ in Tungsten:Flame
     selfc = {}
     keys = map.keys()
     i = 0
-    while i < keys.size()
+    n = keys.size()
+    while i < n
       stack = keys[i]
       count = map[stack]
-      frames = stack.split(";")
-      leaf = frames.last()
+      semi = stack.rindex(";")
+      leaf = semi != nil ? stack.slice(semi + 1, stack.size() - semi - 1) : stack
       if normalize
         leaf = self.normalize_frame(leaf)
       if selfc.has_key?(leaf)
@@ -250,12 +253,13 @@ in Tungsten:Flame
 
   # True when `s` is a non-empty run of ASCII decimal digits.
   -> .all_digits?(s)
-    if s.size() == 0
+    n = s.size()
+    if n == 0
       return false
     i = 0
-    while i < s.size()
-      c = s.slice(i, 1)
-      if c < "0" || c > "9"
+    while i < n
+      b = s.byte_at(i)
+      if b < 48 || b > 57
         return false
       i = i + 1
     true

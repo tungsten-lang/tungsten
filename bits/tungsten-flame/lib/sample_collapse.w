@@ -93,8 +93,8 @@ in Tungsten:Flame
     i = 0
     n = line.size()
     while i < n
-      c = line.slice(i, 1)
-      if c == " " || c == "+" || c == "!" || c == "*"
+      b = line.byte_at(i)
+      if b == 32 || b == 43 || b == 33 || b == 42
         i = i + 1
       else
         break
@@ -123,10 +123,10 @@ in Tungsten:Flame
   # by a digit (so demangled "operator+ (in ...)" style names aren't cut).
   -> .offset_index(s)
     idx = s.index(" + ")
-    if idx == nil
+    if idx == nil || idx + 3 >= s.size()
       return nil
-    nextc = s.slice(idx + 3, 1)
-    if self.is_digit?(nextc)
+    b = s.byte_at(idx + 3)
+    if b >= 48 && b <= 57
       return idx
     nil
 
@@ -155,4 +155,7 @@ in Tungsten:Flame
     Tungsten:Flame:Folded.all_digits?(s)
 
   -> .is_digit?(ch)
-    ch.size() == 1 && ch >= "0" && ch <= "9"
+    if ch.size() != 1
+      return false
+    b = ch.byte_at(0)
+    b >= 48 && b <= 57

@@ -397,12 +397,14 @@
     @sup_skip_to = @pos
 
   -> materialize_regex(raw, off)
+    chars = raw.chars()
+    n = chars.size()
     pattern = StringBuffer(raw.size())
     escaped = false
     in_class = false
     i = 1
-    while i < raw.size()
-      ch = raw[i]
+    while i < n
+      ch = chars[i]
       if escaped
         pattern << "\\"
         pattern << ch
@@ -416,8 +418,12 @@
         in_class = false
         pattern << ch
       elsif ch == "/" && !in_class
-        opts = raw.slice(i + 1, raw.size() - i - 1)
-        emit_at(:REGEX, [pattern.to_s(), opts], off)
+        opts = StringBuffer(4)
+        j = i + 1
+        while j < n
+          opts << chars[j]
+          j += 1
+        emit_at(:REGEX, [pattern.to_s(), opts.to_s()], off)
         return nil
       else
         pattern << ch
@@ -596,8 +602,15 @@
         when 9768 then emit_id(69, :BLOCK_CALL, "&(")
         when 15405 then emit_id(72, :PRINT_OP, "<-")
         when 15393 then emit_id(73, :RAISE_OP, "<!")
-        when 15742 then emit_id(107, :MATCH, "=~")
+        when 15742
+          @regex_capture_scope = true
+          emit_id(107, :MATCH, "=~")
         when 8574 then emit_id(150, :NMATCH, "!~")
+        when 9342 then emit_id(46, :REGEX_CAPTURE, "1000000")
+        when 9254 then emit_id(46, :REGEX_CAPTURE, "0")
+        when 9312 then emit_id(46, :REGEX_CAPTURE, "1000001")
+        when 9255 then emit_id(46, :REGEX_CAPTURE, "1000002")
+        when 9259 then emit_id(46, :REGEX_CAPTURE, "1000003")
         when 11584 then emit_id(1, :ID, "-@")
         when 11072 then emit_id(1, :ID, "+@")
         when 15422 then emit_id(155, :SWAP, "<>")
@@ -766,9 +779,20 @@
       elsif raw == "<!"
         emit_id(73, :RAISE_OP, raw)
       elsif raw == "=~"
+        @regex_capture_scope = true
         emit_id(107, :MATCH, raw)
       elsif raw == "!~"
         emit_id(150, :NMATCH, raw)
+      elsif raw == "$~"
+        emit_id(46, :REGEX_CAPTURE, "1000000")
+      elsif raw == "$&"
+        emit_id(46, :REGEX_CAPTURE, "0")
+      elsif raw == "$`"
+        emit_id(46, :REGEX_CAPTURE, "1000001")
+      elsif raw == "$'"
+        emit_id(46, :REGEX_CAPTURE, "1000002")
+      elsif raw == "$+"
+        emit_id(46, :REGEX_CAPTURE, "1000003")
       elsif raw == "-@"
         # Unary-minus method-name marker (`-> -@`). Emitted as T_ID so
         # expect_method_name treats it as a normal identifier.
@@ -825,6 +849,7 @@
     elsif raw == "..."
       emit_id(61, :DOTDOTDOT, raw)
     elsif raw == "==="
+      @regex_capture_scope = true
       emit_id(151, :TRIPLE_EQ, raw)
     elsif raw == "<=>"
       emit_id(106, :SPACESHIP, raw)

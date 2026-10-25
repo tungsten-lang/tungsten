@@ -28,7 +28,15 @@
   -> <<(value) (string) string_buffer
 
   -> to_s string
-  -> length i64
+  -> length
+    n = $length ## i64
+    mask = 0xFFFFFFFFFFFF ## i64
+    payload = (n & mask) ## i64
+    roundtrip = ((payload << 16) >> 16) ## i64
+    if roundtrip != n
+      return ccall("w_int", n)
+    tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+    return wvalue_from_bits((tag | payload) ## i64)
   # Keep the signed header raw and construct the exact immediate-Integer word
   # for the overwhelmingly common i48 range. Sign-extending its low 48 bits
   # provides a one-compare exact range test; corrupt/native headers outside
@@ -42,9 +50,18 @@
       return ccall("w_int", n)
     tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
     return wvalue_from_bits((tag | payload) ## i64)
-  -> byte_size i64
+  -> byte_size
+    n = $length ## i64
+    mask = 0xFFFFFFFFFFFF ## i64
+    payload = (n & mask) ## i64
+    roundtrip = ((payload << 16) >> 16) ## i64
+    if roundtrip != n
+      return ccall("w_int", n)
+    tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+    return wvalue_from_bits((tag | payload) ## i64)
   -> [](index)
   -> clear
   -> empty?
+    ($length ## i64) == 0
   -> include?(value)
   -> starts_with?(prefix)

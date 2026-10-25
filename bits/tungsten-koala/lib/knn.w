@@ -46,6 +46,9 @@
   ro :k   # neighbour count
   ro :weight_kind   # :uniform or :distance
   ro :classes       # first-seen label order
+  ro :fitted
+  ro :train_rows
+  ro :train_labels
 
   -> new(k = 5, weight_kind = :uniform)
     @k = k
@@ -137,29 +140,41 @@
       width = rows[0].size if ok
       ok = width > 0 if ok
     if ok
-      rows.each -> (row)
-        ok = false if type(row) != "Array"
-        if type(row) == "Array"
-          ok = false if row.size != width
-          row.each -> (value)
-            kind = type(value)
-            ok = false if kind != "Int" && kind != "Float"
+      nr = rows.size
+      i = 0
+      while i < nr
+        row = rows[i]
+        if type(row) != "Array" || row.size != width
+          ok = false
+          break
+        j = 0
+        while j < width
+          kind = type(row[j])
+          if kind != "Int" && kind != "Float"
+            ok = false
+            break
+          j += 1
+        break if !ok
+        i += 1
     ok
 
   # Squared Euclidean distance between two equal-width rows (float).
   -> .sq_dist(a, b)
     total = 0.to_f
     n = a.size
-    n.times -> (i)
+    i = 0
+    while i < n
       d = a[i].to_f - b[i].to_f
       total += d * d
+      i += 1
     total
 
   -> .class_index(classes, label)
     out = -1
+    n = classes.size
     i = 0
-    classes.each -> (candidate)
-      out = i if candidate == label
+    while i < n
+      out = i if classes[i] == label
       i += 1
     out
 
@@ -168,22 +183,26 @@
   # after distances are computed; strict improvement preserves index-order ties.
   -> neighbors(row)
     trows = @train_rows
+    n = trows.size
     limit = @k
-    limit = trows.size if trows.size < @k
+    limit = n if n < limit
     dists = []
-    trows.each -> (tr)
-      dists.push(KNNClassifier.sq_dist(row, tr))
     used = []
-    trows.each -> (tr)
+    i = 0
+    while i < n
+      dists.push(KNNClassifier.sq_dist(row, trows[i]))
       used.push(false)
+      i += 1
     chosen = []
     picked_d = []
-    limit.times -> (c)
+    c = 0
+    while c < limit
       best = -1
       bestv = 0.to_f
       i = 0
-      dists.each -> (d)
+      while i < n
         if !used[i]
+          d = dists[i]
           if best == -1 || d < bestv
             best = i
             bestv = d
@@ -191,6 +210,7 @@
       used[best] = true
       chosen.push(best)
       picked_d.push(bestv)
+      c += 1
     { indices: chosen, distances: picked_d }
 
   # One query's weighted vote and normalized class probabilities.
@@ -198,37 +218,54 @@
     near = self.neighbors(row)
     chosen = near[:indices]
     dists = near[:distances]
+    n_chosen = chosen.size
+    wkind = @weight_kind
     zero_only = false
-    if @weight_kind == :distance
-      dists.each -> (d)
-        zero_only = true if d == 0.to_f
+    if wkind == :distance
+      i = 0
+      while i < n_chosen
+        if dists[i] == 0.to_f
+          zero_only = true
+          break
+        i += 1
+    cls = @classes
+    n_cls = cls.size
     scores = []
-    @classes.each -> (label)
+    ci = 0
+    while ci < n_cls
       scores.push(0.to_f)
+      ci += 1
+    tlabels = @train_labels
     tie_order = []
     i = 0
-    chosen.each -> (idx)
+    while i < n_chosen
       d = dists[i]
-      active = true
-      active = false if zero_only && d != 0.to_f
-      if active
-        class_i = KNNClassifier.class_index(@classes, @train_labels[idx])
+      if !zero_only || d == 0.to_f
+        class_i = KNNClassifier.class_index(cls, tlabels[chosen[i]])
         tie_order.push(class_i) if !tie_order.include?(class_i)
         weight = 1.to_f
-        if @weight_kind == :distance && !zero_only
+        if wkind == :distance && !zero_only
           weight = 1.to_f / Math.sqrt(d)
         scores[class_i] += weight
       i += 1
     total = 0.to_f
-    scores.each -> (score)
-      total += score
+    ci = 0
+    while ci < n_cls
+      total += scores[ci]
+      ci += 1
     probabilities = []
-    scores.each -> (score)
-      probabilities.push(score / total)
+    ci = 0
+    while ci < n_cls
+      probabilities.push(scores[ci] / total)
+      ci += 1
     best = tie_order[0]
-    tie_order.each -> (class_i)
+    ntie = tie_order.size
+    ti = 1
+    while ti < ntie
+      class_i = tie_order[ti]
       best = class_i if scores[class_i] > scores[best]
-    { label: @classes[best], probabilities: probabilities }
+      ti += 1
+    { label: cls[best], probabilities: probabilities }
 
   # Predicted label for a single feature row.
   -> predict_one(row)
@@ -242,13 +279,20 @@
     out = nil
     if rows != nil && KNNClassifier.numeric_rows?(rows, true)
       nf = @train_rows[0].size
+      nr = rows.size
       ok = true
-      rows.each -> (r)
-        ok = false if r.size != nf
+      i = 0
+      while i < nr
+        if rows[i].size != nf
+          ok = false
+          break
+        i += 1
       if ok
         preds = []
-        rows.each -> (r)
-          preds.push(self.predict_one(r))
+        i = 0
+        while i < nr
+          preds.push(self.predict_one(rows[i]))
+          i += 1
         out = preds
     out
 
@@ -261,20 +305,27 @@
     out = nil
     if rows != nil && KNNClassifier.numeric_rows?(rows, true)
       nf = @train_rows[0].size
+      nr = rows.size
       ok = true
-      rows.each -> (row)
-        ok = false if row.size != nf
+      i = 0
+      while i < nr
+        if rows[i].size != nf
+          ok = false
+          break
+        i += 1
       class_i = -1
       class_i = KNNClassifier.class_index(@classes, label) if label != nil
       ok = false if label != nil && class_i == -1
       if ok
         probabilities = []
-        rows.each -> (row)
-          p = self.vote(row)[:probabilities]
+        i = 0
+        while i < nr
+          p = self.vote(rows[i])[:probabilities]
           if label == nil
             probabilities.push(p)
           else
             probabilities.push(p[class_i])
+          i += 1
         out = probabilities
     out
 

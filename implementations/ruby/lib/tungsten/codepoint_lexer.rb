@@ -1165,13 +1165,27 @@ module Tungsten
         @pos = after_hashes + spaces
         @col += 2 + spaces
         hint_start = @pos
-        # A "=" ends the hint: "x ## i64 = 0" is a typed assignment — the
-        # initializer lexes normally (mirrors the self-hosted lexer's rule).
-        # Only for trailing ascriptions: a line-initial `##` is a standalone
-        # hint/comment line and scans to EOL, so prose containing `=` never
-        # strands live tokens.
+        # Inside brackets, `=` and the structural followers `]` `)` `,`
+        # `;` `:` `?` end the hint, so `[0 ## big, 0 ## big]` and
+        # `foo(x ## i64)` keep their closing delimiters; a bracketed `T[4]`
+        # stays one hint (mirrors Lexer and compiler/lib/lexer/fast64.w).
         bol = @line_start
-        advance until eof? || newline_byte?(byte) || (byte == 0x3D && !bol)
+        th_brk = 0
+        until eof? || newline_byte?(byte)
+          b = byte
+          if b == 0x5B
+            th_brk += 1
+          elsif b == 0x5D
+            break if th_brk.zero? && @bracket_depth.positive?
+
+            th_brk -= 1
+          elsif b == 0x3D && !bol
+            break
+          elsif @bracket_depth.positive? && (b == 0x29 || b == 0x2C || b == 0x3B || b == 0x3A || b == 0x3F)
+            break
+          end
+          advance
+        end
         hint = slice(hint_start).strip
         return set_token(:TYPE_HINT, hint, @row, start_col) unless hint.empty?
       end

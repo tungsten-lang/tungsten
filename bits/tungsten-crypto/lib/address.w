@@ -20,7 +20,7 @@ BECH32M_CONST = 0x2bc830a3
 -> bech32_charval(c) (i64) i64
   i = 0 ## i64
   while i < 32
-    if BECH32_CHARSET.bytes[i] == c
+    if BECH32_CHARSET.byte_at(i) == c
       return i
     i += 1
   -1
@@ -33,33 +33,29 @@ BECH32M_CONST = 0x2bc830a3
   while i < n
     top = chk >> 25
     chk = ((chk & 0x1ffffff) << 5) ^ values[i]
-    b = 0 ## i64
-    while b < 5
-      if ((top >> b) & 1) != 0
-        if b == 0
-          chk = chk ^ 0x3b6a57b2
-        elsif b == 1
-          chk = chk ^ 0x26508e6d
-        elsif b == 2
-          chk = chk ^ 0x1ea119fa
-        elsif b == 3
-          chk = chk ^ 0x3d4233dd
-        else
-          chk = chk ^ 0x2a1462b3
-      b += 1
+    if (top & 1) != 0
+      chk = chk ^ 0x3b6a57b2
+    if (top & 2) != 0
+      chk = chk ^ 0x26508e6d
+    if (top & 4) != 0
+      chk = chk ^ 0x1ea119fa
+    if (top & 8) != 0
+      chk = chk ^ 0x3d4233dd
+    if (top & 16) != 0
+      chk = chk ^ 0x2a1462b3
     i += 1
   chk
 
 # The human-readable part contributes its high bits, a separator, then its
 # low bits — BIP173's hrp_expand.
 -> bech32_hrp_expand(hrp)
-  n = hrp.size
+  n = hrp.size ## i64
   out = i64[n * 2 + 1]
-  bs = hrp.bytes.to_a
   i = 0 ## i64
   while i < n
-    out[i] = bs[i] >> 5
-    out[n + 1 + i] = bs[i] & 31
+    b = hrp.byte_at(i)
+    out[i] = b >> 5
+    out[n + 1 + i] = b & 31
     i += 1
   out[n] = 0
   out
@@ -80,7 +76,7 @@ BECH32M_CONST = 0x2bc830a3
   sep = -1
   i = a.size - 1
   while i >= 0
-    if a.slice(i, 1) == "1"
+    if a.byte_at(i) == 49
       sep = i
       i = -1
     else
@@ -90,12 +86,11 @@ BECH32M_CONST = 0x2bc830a3
   hrp = a.slice(0, sep)
   dpart = a.slice(sep + 1, a.size - sep - 1)
   # Decode the data characters into 5-bit values.
-  dn = dpart.size
+  dn = dpart.size ## i64
   data = i64[dn]
-  dbytes = dpart.bytes.to_a
-  i = 0
+  i = 0 ## i64
   while i < dn
-    v = bech32_charval(dbytes[i])
+    v = bech32_charval(dpart.byte_at(i))
     if v < 0
       return nil
     data[i] = v

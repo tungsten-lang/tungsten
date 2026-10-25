@@ -392,7 +392,7 @@ if (opts.flag?("help") || opts.flag?("h")) && command == nil
   opts.help!
 
 # Developer option: force the Ruby tree-walking interpreter.
-if opts.flag?("ruby") && command != "flame" && command != "fire"
+if opts.flag?("ruby") && command != "flame" && command != "fire" && command != "profile"
   exec_ruby_driver()
 
 case command
@@ -438,6 +438,9 @@ when "build"
   # --ruby / --spinel are developer options handled inside build.w.
   run_command_w_status("bin/commands/build.w", tool_argv_after_command("build"))
 
+when "install"
+  run_command_w_status("bin/commands/build.w", ["--install-only"] + tool_argv_after_command("install"))
+
 when "fmt"
   run_command_w("bin/commands/fmt.w", tool_argv_after_command("fmt"))
 
@@ -471,7 +474,7 @@ when "symbolicate"
 when "forge"
   run_command_w("bin/commands/forge.w", tool_argv_after_command("forge"))
 
-when "flame", "fire"
+when "flame", "fire", "profile"
   run_bit_binary("tungsten-flame", "flame", tool_argv_after_command(command))
 
 when "console"

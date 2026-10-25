@@ -35,10 +35,12 @@ RUNTIME_CLASS_CONTRACTS = {
   },
   "Atomic" => {
     path: "core/atomic.w",
-    table: "w_ic_atomic_table",
+    table: nil,
+    retired_table: "w_ic_atomic_table",
     dispatch_key: "0x01",
-    native_ic: %w[add cas get set],
-    source_fallback: %w[compare_exchange decrement exchange fetch_add fetch_sub increment load store]
+    native_ic: [],
+    autoload_guard: "atomic_source_method_unresolved",
+    source_fallback: %w[add cas compare_exchange decrement exchange fetch_add fetch_sub get increment load set store]
   },
   "Socket" => {
     path: "core/socket.w",
@@ -48,18 +50,23 @@ RUNTIME_CLASS_CONTRACTS = {
   },
   "Thread" => {
     path: "core/thread.w",
-    table: "w_ic_thread_table",
+    table: nil,
+    retired_table: "w_ic_thread_table",
     dispatch_key: "0x81",
-    native_ic: %w[join kill],
+    native_ic: [],
     native_declaration: %w[new],
-    source_fallback: %w[alive?]
+    autoload_guard: "thread_source_method_unresolved",
+    source_fallback: %w[alive? join kill]
   },
   "Channel" => {
     path: "core/channel.w",
-    table: "w_ic_channel_table",
+    table: nil,
+    retired_table: "w_ic_channel_table",
     dispatch_key: "0x84",
-    native_ic: %w[close send],
-    source_fallback: %w[each receive receive_result recv try_receive try_receive_result try_send]
+    native_ic: [],
+    autoload_guard: "channel_source_method_unresolved",
+    autoload_methods: %w[close receive receive_result recv send try_receive try_receive_result try_send],
+    source_fallback: %w[close each receive receive_result recv send try_receive try_receive_result try_send]
   },
   "BigArray" => {
     path: "core/big_array.w",
@@ -79,24 +86,27 @@ RUNTIME_CLASS_CONTRACTS = {
   },
   "IPv4" => {
     path: "core/ipv4.w",
-    table: "w_ic_ipv4_table",
+    table: nil,
+    retired_table: "w_ic_ipv4_table",
     dispatch_key: "0xE5",
-    native_ic: %w[inspect],
-    source_fallback: %w[[] a b broadcast broadcast? c cidr? contains? d global? include? link_local? loopback? mask multicast? netmask network octet octets prefix private? reserved? to_i to_s unspecified? with_prefix]
+    native_ic: [],
+    source_fallback: %w[[] a b broadcast broadcast? c cidr? contains? d global? include? inspect link_local? loopback? mask multicast? netmask network octet octets prefix private? reserved? to_i to_s unspecified? with_prefix]
   },
   "IPv6" => {
     path: "core/ipv6.w",
-    table: "w_ic_ipv6_table",
+    table: nil,
+    retired_table: "w_ic_ipv6_table",
     dispatch_key: "0x86",
-    native_ic: %w[inspect],
-    source_fallback: %w[[] byte bytes cidr? contains? global? include? link_local? loopback? multicast? network prefix private? to_s unique_local? unspecified? with_prefix]
+    native_ic: [],
+    source_fallback: %w[[] byte bytes cidr? contains? global? include? inspect link_local? loopback? multicast? network prefix private? to_s unique_local? unspecified? with_prefix]
   },
   "MAC" => {
     path: "core/mac.w",
-    table: "w_ic_mac_table",
+    table: nil,
+    retired_table: "w_ic_mac_table",
     dispatch_key: "0x85",
-    native_ic: %w[inspect],
-    source_fallback: %w[[] broadcast? byte bytes local? multicast? to_s unicast? universal?]
+    native_ic: [],
+    source_fallback: %w[[] broadcast? byte bytes inspect local? multicast? to_s unicast? universal?]
   },
   "Hash" => {
     path: "core/hash.w",
@@ -104,42 +114,49 @@ RUNTIME_CLASS_CONTRACTS = {
     dispatch_key: "0x05",
     native_ic: %w[[] []= delete each get has_key? keys merge! set values],
     native_only: %w[[] []= delete each get has_key? keys set values],
-    source_fallback: %w[__enumerable_each __enumerable_iteration_mode __enumerable_yields_pair? each_pair fetch include? invert key? merge size transform_keys transform_values update]
+    source_fallback: %w[__enumerable_each __enumerable_iteration_mode __enumerable_yields_pair? dup each_pair fetch freeze frozen? include? invert key? merge size transform_keys transform_values update]
   },
   "StringBuffer" => {
     path: "core/string_buffer.w",
     table: "w_ic_strbuf_table",
     dispatch_key: "0x0B",
-    native_ic: %w[<< [] append byte_size clear empty? include? length size starts_with? to_s],
+    native_ic: %w[<< [] append clear include? starts_with? to_s],
     native_declaration: %w[new],
-    source_fallback: []
+    source_fallback: %w[byte_size empty? length size]
   },
   "Regex" => {
     path: "core/regex.w",
-    table: "w_ic_regex_table",
-    dispatch_key: "0x07",
-    native_ic: %w[=== =~ match? match_data to_s],
-    native_only: %w[=== =~ to_s],
-    dual_dispatch: %w[match? match_data],
+    table: nil,
+    retired_table: "w_ic_regex_table",
+    dispatch_key: nil,
+    native_ic: [],
     source_fallback: %w[
-      advance at_end? at_word_boundary? build_offsets build_result build_skip class_escape_char
-      class_match? clex collect_first compile_alt compile_node compile_opt
-      compile_plus compile_rep compile_star compute_prefilter consume_at?
-      decode_subject emit find_saved find_saved_from lazy? literal_prefix lone_flag_class make_saved match
-      match_data_from
-      match? match_data new nullable? parse_alt parse_atom parse_brace parse_class
-      parse_escape parse_group parse_int parse_pattern parse_repeat parse_seq peek
-      pf_advance pf_bm_search pf_set_match run set_match? set_split
-      single_consuming? source span_str valid_group_name? word_lex?
+      === =~ advance_cp ascii_only? ast_length_bounds at_end? at_word_boundary?
+      branch_can_start_with? build_offsets build_result can_upgrade_rep_nb? cat_match?
+      class_match? class_match_slow? clex clex_cp collect_first collect_second_ascii compile_alt compile_node compile_opt compile_plus compile_rep compile_star
+      compile_subroutines compute_prefilter consume_at? decode_subject downcase_cp
+      downcase_lex_cp emit eval_lookbehind find_required_lit find_saved find_saved_from
+      fold_pair_cp gsub hex_val intern_ref_name lazy_int literal_prefix make_class_ast
+      make_lit_node make_saved match match? match_backref match_data match_data_from
+      match_exact? match_special new new_ast normalize_prop_name nullable? options parse_alt parse_atom
+      parse_brace parse_bracketed_ref parse_class parse_escape parse_escape_cp parse_group
+      parse_hex_fixed parse_int parse_pattern parse_repeat parse_seq parse_u_braced_cps
+      parse_unicode_property peek_cp push_class_single read_prop_spec resolve_group_ref
+      resolve_prop_cat_mask resolve_prop_cp_ranges run run_assert_cap scan_all set_match?
+      set_split single_consuming? skip_ext slice_pattern_cps span_str split sub to_s
+      upcase_cp word_lex?
     ]
   },
   "RegexMatch" => {
     path: "core/regex.w",
-    table: "w_ic_regex_match_table",
-    native_ic: %w[[] begin_offset captures end_offset match named_captures named_offsets names offset size to_a to_s],
+    table: nil,
+    retired_table: "w_ic_regex_match_table",
+    dispatch_key: nil,
+    native_ic: [],
     native_declaration: %w[new],
-    dual_dispatch: %w[[] begin_offset captures end_offset match named_captures named_offsets names offset size to_a to_s],
-    source_fallback: %w[[] begin_offset captures end_offset group_index match named_captures named_offsets names offset size to_a to_s]
+    autoload_guard: "regex_match_source_method_unresolved",
+    autoload_methods: %w[match_data named_captures named_offsets post_match pre_match string to_regex],
+    source_fallback: %w[[] begin_offset captures end_offset group_index match named_captures named_offsets names offset post_match pre_match size span_str string to_a to_s]
   },
   "BigInt" => {
     path: "core/numeric/big_int.w",
@@ -147,41 +164,43 @@ RUNTIME_CLASS_CONTRACTS = {
     retired_table: "w_ic_bigint_table",
     dispatch_key: "0x02",
     native_ic: [],
-    source_fallback: %w[% & * + - / << >> ^ abs abs! even? gcd isqrt lcm neg! negative? next odd? positive? prev prime? succ to_f to_i to_s zero? |]
+    source_fallback: %w[% & * + - / << >> ^ abs abs! binomial bit_count bit_length bit_set? cdiv cdivmod choose clrbit cmod cmpabs combit congruent? divexact divisible? divisible_by? divmod double_factorial even? factorial fdiv fdivmod fib fib2 fmod gcd gcdext hamdist hamming_distance invmod iroot iroot_rem isqrt isqrt_rem jacobi kronecker lcm lucas lucas2 modpow multifactorial neg! negative? next next_prime nextprime odd? perfect_power? perfect_square? popcount positive? powmod prev prev_prime prevprime prime? primorial remove_factor scan0 scan1 setbit size_in_base sizeinbase succ tdiv tdivmod tmod to_bytes to_f to_i to_s trailing_zeros tstbit zero? |]
   },
   "Float" => {
     path: "core/numeric/float.w",
-    table: "w_ic_float_table",
+    table: nil,
+    retired_table: "w_ic_float_table",
     dispatch_key: "0xFF",
-    native_ic: %w[sqrt to_i to_s],
-    native_only: %w[to_i to_s],
-    dual_dispatch: %w[sqrt],
+    native_ic: [],
     autoload_guard: "float_source_method_unresolved",
-    source_fallback: %w[abs ceil finite? floor infinite? nan? round sq sqrt to_f truncate]
+    source_fallback: %w[abs ceil finite? floor infinite? nan? round sq sqrt to_f to_i to_s truncate]
   },
   "Decimal" => {
     path: "core/numeric/decimal.w",
-    table: "w_ic_decimal_table",
+    table: nil,
+    retired_table: "w_ic_decimal_table",
     dispatch_key: "0xFD",
-    native_ic: %w[abs ceil floor round sq sqrt to_d to_f to_i],
+    native_ic: [],
     autoload_guard: "decimal_source_method_unresolved",
-    source_fallback: %w[arccos arccosh arcsin arcsinh arctan arctanh cos cosh inv normalize reciprocal sin sinh tan tanh to_s]
+    source_fallback: %w[abs arccos arccosh arcsin arcsinh arctan arctanh ceil cos cosh floor inv normalize reciprocal round sin sinh sq sqrt tan tanh to_d to_f to_i to_s]
   },
   "Date" => {
     path: "core/date.w",
-    table: "w_ic_date_table",
+    table: nil,
+    retired_table: "w_ic_date_table",
     dispatch_key: "0xE4",
-    native_ic: %w[inspect strftime to_s],
-    native_only: %w[inspect],
+    native_ic: [],
     source_fallback: %w[
-      asctime century ctime cwday cweek cwyear day day_abbr day_name day_of_month
-      day_of_quarter day_of_week day_of_year days_in_month days_in_year decade
-      decade_abbr first_of_century first_of_decade first_of_millenium
-      first_of_millennium first_of_month first_of_quarter first_of_week
-      first_of_year hour jd last_of_century last_of_decade last_of_millenium
-      last_of_millennium last_of_month last_of_quarter last_of_week last_of_year
-      leap? leap_year? millenium millennium minute month month_abbr month_name
-      quarter quarter_abbr second tz wday week yday year year_with_quarter
+      __strftime_num asctime century ctime cwday cweek cwyear day day_abbr
+      day_name day_of_month day_of_quarter day_of_week day_of_year days_in_month
+      days_in_year decade decade_abbr first_of_century first_of_decade
+      first_of_millenium first_of_millennium first_of_month first_of_quarter
+      first_of_week first_of_year hour inspect jd last_of_century last_of_decade
+      last_of_millenium last_of_millennium last_of_month last_of_quarter
+      last_of_week last_of_year leap? leap_year? millenium millennium minute
+      month month_abbr month_name quarter quarter_abbr require_calendar second
+      strftime to_s tz unresolved? wday week wvalue_bits yday year
+      year_with_quarter
     ]
   },
   "String" => {
@@ -189,13 +208,13 @@ RUNTIME_CLASS_CONTRACTS = {
     table: "w_ic_string_table",
     dispatch_key: "0xF9",
     native_ic: %w[
-      [] << =~ append codes concat ends_with? gsub include? index lchs
-      length ltrim match? ord prepend repeat replace rindex rtrim size slice split
-      starts_with? strip to_d to_f to_i to_sym valid_utf8?
+      [] << =~ append codes concat gsub include? index lchs
+      length ltrim match? prepend repeat replace rindex rtrim size slice split
+      strip to_d to_f to_i to_sym valid_utf8?
     ],
     native_only: %w[
-      [] << =~ append codes concat ends_with? gsub include? index lchs
-      ltrim match? ord prepend repeat replace rindex rtrim slice split starts_with?
+      [] << =~ append codes concat gsub include? index lchs
+      ltrim match? prepend repeat replace rindex rtrim slice split
       strip to_d to_f to_i to_sym valid_utf8?
     ],
     dual_dispatch: %w[length size],
@@ -205,10 +224,11 @@ RUNTIME_CLASS_CONTRACTS = {
       blank? byte_at bytes camelize canonically_equivalent? capitalize
       center characters chars codepoints constantize contains? dasherize
       delete downcase each_byte each_character each_codepoint
-      each_grapheme each_line empty? graphemes humanize includes? length
-      levenshtein lines ljust lowercase lpad nfc nfd nfkc nfkd normalize
-      parameterize reverse rjust rpad scan size snakecase squeeze swapcase
-      to_regex to_s tr transliterate underscore upcase uppercase
+      each_grapheme each_line empty? ends_with? graphemes humanize includes?
+      length levenshtein lines ljust lowercase lpad nfc nfd nfkc nfkd
+      normalize ord parameterize reverse rjust rpad scan size snakecase
+      squeeze starts_with? swapcase to_regex to_s tr transliterate underscore
+      upcase uppercase
     ]
   },
   "Array" => {
@@ -216,26 +236,26 @@ RUNTIME_CLASS_CONTRACTS = {
     table: "w_ic_array_table",
     dispatch_key: "0x0A",
     native_ic: %w[
-      [] []= all? any? clear cos count cross data dot each exp fastsum fill
-      find_index get has? include? index last_index log matmul_i8 matvec_i8 max
-      min none? pop push raw_ptr replace_byte! scale scale! set shift sin slice
-      slice_view sort sqrt stable_sort sum sumsq tan unshift view
+      [] []= all? any? cos count dot each exp fastsum
+      find_index get has? include? index last_index log max
+      min none? pop push replace_byte! set shift sin slice
+      sort sqrt stable_sort sum sumsq tan unshift view
     ],
     native_only: %w[
-      [] []= all? any? clear cos count cross data dot exp fastsum fill find_index
-      get has? include? index last_index log matmul_i8 matvec_i8 max min none? pop
-      push raw_ptr replace_byte! scale scale! set shift sin slice slice_view sqrt
+      [] []= all? any? cos count dot exp fastsum find_index
+      get has? include? index last_index log max min none? pop
+      push replace_byte! set shift sin slice sqrt
       sum sumsq tan unshift view
     ],
     dual_dispatch: %w[each sort stable_sort],
     autoload_guard: "array_source_method_unresolved",
-    autoload_methods: %w[compact copy delete_at drop dup flatten join minmax reverse take uniq],
+    autoload_methods: %w[clear compact copy delete_at drop dup flatten join minmax reverse take uniq],
     source_fallback: %w[
-      __enumerable_append_to __enumerable_iteration_mode __mergesort_copy
-      __replace_elements cap chunk_while compact concat copy csort delete_at drop
-      dup each empty? first flatten ipnsort join last mean median mergesort! minmax
-      norm normalize pythagorean reverse rotate rotate! shuffle shuffle! size
-      skasort sort sort! stable_sort stdev take to_a to_f32 to_f64 transpose
+      __enumerable_append_to __enumerable_iteration_mode __flatten_into __mergesort_copy
+      __replace_elements cap chunk_while clear compact concat copy cross csort data delete_at drop
+      dup each empty? fill first flatten ipnsort join last matmul_i8 matvec_i8 mean median mergesort! minmax
+      norm normalize pythagorean raw_ptr reverse rotate rotate! scale scale! shuffle shuffle! size
+      skasort slice_view sort sort! stable_sort stdev take to_a to_f32 to_f64 transpose
       tsort uniq variance wolfsort
     ]
   },
@@ -245,21 +265,35 @@ RUNTIME_CLASS_CONTRACTS = {
     native_ic: [],
     abstract_declaration: %w[+ prime? prime_12k? prime_30k? to_s],
     source_fallback: %w[
-      bit_length digits divisible_by? each_digit even? factor factorial primorial four?
-      gcd invmod isqrt lcm legendre modpow next odd? pow prev succ three? to_f
-      two?
+      binomial bit_count bit_length bit_set? cdiv cdivmod choose clrbit cmod
+      cmpabs combit congruent? digits divexact divisible? divisible_by? divmod
+      double_factorial each_digit even? factor factorial fdiv fdivmod fib fib2
+      fmod four? gcd gcdext hamdist hamming_distance invmod iroot iroot_rem
+      isqrt isqrt_rem jacobi kronecker lcm legendre lucas lucas2 modpow
+      multifactorial next next_prime nextprime odd? perfect_power?
+      perfect_square? popcount pow powmod prev prev_prime prevprime primorial
+      remove_factor scan0 scan1 setbit size_in_base sizeinbase succ tdiv tdivmod
+      tetrate three? tmod to_bytes to_f trailing_zeros tstbit two?
     ]
   },
   "Int" => {
     path: "core/numeric/int.w",
     table: "w_ic_int_table",
     dispatch_key: "0xFA",
-    native_ic: %w[abs each isqrt prime? prime_12k? prime_30k? sqrt times to_d to_f],
-    native_only: %w[abs each prime? prime_12k? prime_30k? sqrt times to_d to_f],
-    dual_dispatch: %w[isqrt],
+    native_ic: %w[each times to_d],
+    native_only: %w[each times to_d],
     source_fallback: %w[
-      bit_length chr digits even? factor factorial primorial gcd invmod isqrt lcm legendre
-      modpow negative? next odd? positive? pow prev sq succ to_i to_s zero?
+      abs binomial bit_count bit_length bit_set? cdiv cdivmod choose chr clrbit
+      cmod cmpabs combit congruent? digits divexact divisible? divisible_by?
+      divmod double_factorial even? factor factorial fdiv fdivmod fib fib2 fmod
+      gcd gcdext hamdist hamming_distance invmod iroot iroot_rem isqrt
+      isqrt_rem kronecker lcm legendre lucas lucas2 modpow multifactorial
+      negative? next next_prime nextprime odd? perfect_power? perfect_square?
+      popcount positive? pow powmod prev prev_prime prevprime prime?
+      prime_12k? prime_30k? primorial
+      remove_factor scan0 scan1 setbit size_in_base sizeinbase sq sqrt succ
+      tdiv tdivmod tetrate tmod to_bytes to_f to_i to_s trailing_zeros tstbit
+      zero?
     ]
   }
 }.freeze

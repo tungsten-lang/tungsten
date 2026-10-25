@@ -43,15 +43,17 @@
   spec_clear_failure
   err = nil
   begin
-    spec_run_hooks($spec_before_each)
+    if $spec_before_each.size > 0
+      spec_run_hooks($spec_before_each)
     &()
   rescue e
     err = e
-  begin
-    spec_run_hooks($spec_after_each)
-  rescue e2
-    if err == nil
-      err = e2
+  if $spec_after_each.size > 0
+    begin
+      spec_run_hooks($spec_after_each)
+    rescue e2
+      if err == nil
+        err = e2
   fail_msg = $spec_current_failure
   if fail_msg == nil
     fail_msg = err

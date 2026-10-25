@@ -136,8 +136,122 @@ ok = check("dot-stops-at-newline", m("a.b", "a\nb"), nil) && ok
 ok = check("greedy-dot", m("<.*>", "<a><b>"), ["<a><b>"]) && ok
 ok = check("lazy-dot", m("<.*?>", "<a><b>"), ["<a>"]) && ok
 
+# ── ascii_only? predicate ───────────────────────────────────────────────
+ok = check("ascii-only-plain", /hello_[0-9]+/.ascii_only?(), true) && ok
+ok = check("ascii-only-escapes", /\a\e\f\v\x41\cA/.ascii_only?(), true) && ok
+ok = check("ascii-only-prop-ascii", /\p{ASCII}+/.ascii_only?(), true) && ok
+ok = check("ascii-only-prop-basic-latin", /\p{In_Basic_Latin}+/.ascii_only?(), true) && ok
+ok = check("ascii-only-false-lit", /héllo/.ascii_only?(), false) && ok
+ok = check("ascii-only-false-u", /\u03B1/.ascii_only?(), false) && ok
+ok = check("ascii-only-false-prop", /\p{Lu}+/.ascii_only?(), false) && ok
+ok = check("ascii-only-false-R", /\R/.ascii_only?(), false) && ok
+
+# ── character escapes (\a \e \f \v \0 \xNN \uNNNN \u{...} \cX \h \H \R \X)
+s_aefv = 7.chr() + 27.chr() + 12.chr() + 11.chr()
+ok = check("esc-bel-esc-ff-vt", Regex.new("\\a\\e\\f\\v").match(s_aefv), [s_aefv]) && ok
+s_oct = "a\0b" + 7.chr() + "c"
+md_oct = Regex.new("a\\0b\\07c").match_data(s_oct)
+ok = check("esc-octal-nul", md_oct.offset(0), [0, 5]) && ok
+ok = check("esc-hex-xNN", m("\\x41\\x62\\x{3b1}", "Abα"), ["Abα"]) && ok
+ok = check("esc-uNNNN", m("\\u03b1\\u03b2", "αβ"), ["αβ"]) && ok
+ok = check("esc-u-braced-multi", m("\\u{61 62 63}", "xabcy"), ["abc"]) && ok
+s_ctrl = 1.chr() + 1.chr() + 127.chr() + 2.chr()
+ok = check("esc-ctrl", Regex.new("\\cA\\ca\\c?\\C-b").match(s_ctrl), [s_ctrl]) && ok
+ok = check("esc-hex-class-h", m("\\h+", "zzdeadBEEF09zz"), ["deadBEEF09"]) && ok
+ok = check("esc-hex-class-H", m("\\H+", "dead!@#BEEF"), ["!@#"]) && ok
+ok = check("esc-R-crlf", m("a\\Rb", "a\r\nb"), ["a\r\nb"]) && ok
+ok = check("esc-R-lf", m("a\\Rb", "a\nb"), ["a\nb"]) && ok
+ok = check("esc-X-combining", m("\\X", "e\u0301x"), ["e\u0301"]) && ok
+
+# ── Unicode properties \p{...} and \P{...} (Categories, Scripts, Blocks) ──
+ok = check("prop-Lu", m("\\p{Lu}+", "abcDEFghi"), ["DEF"]) && ok
+ok = check("prop-Ll", m("\\p{Ll}+", "ABCdefGHI"), ["def"]) && ok
+ok = check("prop-Nd", m("\\p{Nd}+", "abc123def"), ["123"]) && ok
+ok = check("prop-Sc", m("\\p{Sc}+", "price €£$10"), ["€£$"]) && ok
+ok = check("prop-Sm", m("\\p{Sm}+", "a + b = c"), ["+"]) && ok
+ok = check("prop-P", m("\\p{P}+", "hello, world!"), [","]) && ok
+ok = check("prop-Emoji", m("\\p{Emoji}+", "hi 😀🚀!"), ["😀🚀"]) && ok
+ok = check("prop-neg-P", m("\\P{Nd}+", "123abc456"), ["abc"]) && ok
+ok = check("prop-caret-neg", m("\\p{^Nd}+", "123abc456"), ["abc"]) && ok
+ok = check("prop-Script-Greek", m("\\p{Greek}+", "abcαβγΩdef"), ["αβγΩ"]) && ok
+ok = check("prop-Script-Han", m("\\p{Han}+", "abc漢字def"), ["漢字"]) && ok
+ok = check("prop-Script-Hiragana", m("\\p{Hiragana}+", "abcひらがなdef"), ["ひらがな"]) && ok
+ok = check("prop-Script-Cyrillic", m("\\p{Cyrillic}+", "abcПриветdef"), ["Привет"]) && ok
+ok = check("prop-Block-Currency", m("\\p{In_Currency_Symbols}+", "x€y"), ["€"]) && ok
+ok = check("prop-Block-Math", m("\\p{In_Mathematical_Operators}+", "x∀∃∈y"), ["∀∃∈"]) && ok
+ok = check("prop-in-char-class", m("\[\\p{Greek}\\d]+", "aα1β2b"), ["α1β2"]) && ok
+
+# ── Anchors \A \z \Z \G and Keep \K ─────────────────────────────────────
+ok = check("anchor-A-z", Regex.new("\\Aabc\\z", "m").match("abc"), ["abc"]) && ok
+ok = check("anchor-A-z-multiline-fail", Regex.new("\\Aabc\\z", "m").match("x\nabc\ny"), nil) && ok
+ok = check("anchor-Z-trailing-nl", m("\\Aabc\\Z", "abc\n"), ["abc"]) && ok
+ok = check("anchor-Z-two-nl-fail", m("\\Aabc\\Z", "abc\n\n"), nil) && ok
+ok = check("anchor-G-scan", "1122 33".scan(/\G\d\d/), ["11", "22"]) && ok
+md_keep = Regex.new("foo\\Kbar").match_data("foobar!")
+ok = check("keep-K-match", md_keep[0], "bar") && ok
+ok = check("keep-K-offset-pre-post", [md_keep.offset(0), md_keep.pre_match(), md_keep.post_match()], [[3, 6], "foo", "!"]) && ok
+
+# ── Backreferences \1..\9, \k<name>, and Subexpression Calls \g<name> ───
+ok = check("backref-numbered", m("(\\w+)-\\1", "ha-ha"), ["ha-ha", "ha"]) && ok
+ok = check("backref-numbered-nomatch", m("(\\w+)-\\1", "ha-ho"), nil) && ok
+ok = check("backref-icase", Regex.new("(\[a-z]+)-\\1", "i").match("Ha-hA"), ["Ha-hA", "Ha"]) && ok
+ok = check("backref-named", m("(?<tag>\\w+)<\\k<tag>>", "div<div>"), ["div<div>", "div"]) && ok
+ok = check("subcall-named", m("(?<d>\\d+)-\\g<d>", "12-345"), ["12-345", "345"]) && ok
+ok = check("subcall-recursive-group", m("\\A(?<p>\\(\\g<p>*\\))\\z", "((())())"), ["((())())", "((())())"]) && ok
+ok = check("subcall-recursive-unbalanced", m("\\A(?<p>\\(\\g<p>*\\))\\z", "((())"), nil) && ok
+ok = check("subcall-g0-recursive", m("a\\g<0>?b", "aaabbb"), ["aaabbb"]) && ok
+
+# ── Free-spacing mode /x ────────────────────────────────────────────────
+rx_x = Regex.new("(?<year> \\d{4} ) - # year part\n  (?<month> \\d{2} ) # month part", "x")
+ok = check("extended-x-multiline", rx_x.match("2026-10"), ["2026-10", "2026", "10"]) && ok
+ok = check("extended-x-literal", (/hello \s+ world # comment/x).match("hello   world"), ["hello   world"]) && ok
+ok = check("extended-x-escaped-space-hash", (/a\ b\#c # comment/x).match("a b#c"), ["a b#c"]) && ok
+ok = check("extended-x-char-class-space", (/[a b#]+/x).match("a b#"), ["a b#"]) && ok
+
+# ── Lookaround Assertions (?=...) (?!...) (?<=...) (?<!...) ─────────────
+ok = check("lookahead-pos", m("\\w+(?=:)", "foo:bar"), ["foo"]) && ok
+ok = check("lookahead-pos-capture", m("(?=(\\w+))\\w", "hello"), ["h", "hello"]) && ok
+ok = check("lookahead-neg-backtrack", m("\\d+(?!px)", "10px 20em"), ["1"]) && ok
+ok = check("lookahead-neg-possessive", m("\\d++(?!px)", "10px 20em"), ["20"]) && ok
+ok = check("lookahead-neg-word", m("\\bfoo(?!bar)\\w*", "foobar foobaz"), ["foobaz"]) && ok
+ok = check("lookbehind-pos-fixed", m("(?<=\\$)\\d+", "EUR10 $250"), ["250"]) && ok
+ok = check("lookbehind-pos-alt-len", m("(?<=foo|foobar)\\d+", "foobar42"), ["42"]) && ok
+ok = check("lookbehind-pos-varlen", m("(?<=\\w+:)\\d+", "id:987"), ["987"]) && ok
+ok = check("lookbehind-pos-capture", m("(?<=(\\w+):)\\d+", "key:42"), ["42", "key"]) && ok
+ok = check("lookbehind-neg-fixed", m("(?<!\\$)\\b\\d+", "$10 25"), ["25"]) && ok
+ok = check("lookbehind-neg-start", m("(?<!a)b", "b"), ["b"]) && ok
+ok = check("lookbehind-neg-fail", m("(?<!a)b", "ab"), nil) && ok
+ok = check("lookaround-combined", m("(?<=<)\\w+(?=>)", "x <tag> y"), ["tag"]) && ok
+
+# ── Atomic Grouping (?>...) and Possessive Quantifiers *+ ++ ?+ {m,n}+ ──
+ok = check("atomic-group-no-backtrack", m("(?>a+)a", "aaa"), nil) && ok
+ok = check("atomic-group-match", m("(?>a+)b", "aaab"), ["aaab"]) && ok
+ok = check("atomic-alt-first-wins", m("(?>a|ab)c", "abc"), nil) && ok
+ok = check("atomic-alt-longer-first", m("(?>ab|a)c", "abc"), ["abc"]) && ok
+ok = check("possessive-plus-fail", m("a++a", "aaa"), nil) && ok
+ok = check("possessive-plus-match", m("a++b", "aaab"), ["aaab"]) && ok
+ok = check("possessive-star-fail", m("\\d*+1", "1231"), nil) && ok
+ok = check("possessive-group-plus", m("(ab)++ab", "ababab"), nil) && ok
+ok = check("possessive-qmark-fail", m("a?+a", "a"), nil) && ok
+ok = check("possessive-brace-fail", m("a{1,3}+a", "aaa"), nil) && ok
+
+# ── Inline Comments (?#...) and Scoped/Inline Flags (?imx-imx:...) ──────
+ok = check("inline-comment", m("foo(?# ignore this )bar", "foobar"), ["foobar"]) && ok
+ok = check("inline-flag-i", m("(?i)hello", "HeLLo"), ["HeLLo"]) && ok
+ok = check("scoped-flag-i", m("(?i:foo)bar", "FOObar"), ["FOObar"]) && ok
+ok = check("scoped-flag-i-outer-cs", m("(?i:foo)bar", "FOOBAR"), nil) && ok
+ok = check("scoped-flag-neg-i", Regex.new("foo(?-i:bar)", "i").match("FOObar"), ["FOObar"]) && ok
+ok = check("scoped-flag-neg-i-fail", Regex.new("foo(?-i:bar)", "i").match("FOOBAR"), nil) && ok
+
+# ── String#scan Fast Path (scan_all) and Regex#sub / #gsub / #split ─────
+ok = check("scan-1-group", "a1 b22 c333".scan(/([a-z])\d+/), [["a"], ["b"], ["c"]]) && ok
+ok = check("scan-2-groups", "a1 b22".scan(/([a-z])(\d+)/), [["a", "1"], ["b", "22"]]) && ok
+ok = check("regex-sub", (/\d+/).sub("a1b22c333", "#"), "a#b22c333") && ok
+ok = check("regex-gsub", (/\d+/).gsub("a1b22c333", "#"), "a#b#c#") && ok
+ok = check("regex-split", (/\s*,\s*/).split("a, b , c,  d"), ["a", "b", "c", "d"]) && ok
+
 if ok
-  << "regex_features: all 68 checks passed"
+  << "regex_features: all 153 checks passed"
 else
   << "regex_features: FAILURES (see above)"
   exit 1

@@ -95,14 +95,12 @@ static void test_frozen_lookup_returns_static_slab_entry(void) {
 static void test_builtin_dispatch_after_freeze(void) {
     printf("\nTest 2: Builtin dispatch still matches frozen slab names\n");
 
-    WValue arr = w_array_new_empty();
-    w_array_push(arr, w_int(10));
-    w_array_push(arr, w_int(20));
+    WValue str = w_string("hello world");
 
     WValue method_name = w_string("length");
-    WValue result = w_method_call_fast(arr, method_name, NULL, 0);
+    WValue result = w_method_call_fast(str, method_name, NULL, 0);
 
-    ASSERT(w_eq(result, w_int(2)) == W_TRUE, "Array#length dispatch succeeds after freeze");
+    ASSERT(w_eq(result, w_int(11)) == W_TRUE, "String#length dispatch succeeds after freeze");
 }
 
 static void test_string_and_symbol_share_slab_index(void) {
@@ -127,10 +125,15 @@ static void test_duplicate_slab_strings_hash_by_content(void) {
     WValue second = w_box_slab_str(5);
     ASSERT(first != second, "duplicate slab entries have distinct identities");
     ASSERT(w_eq(first, second) == W_FALSE, "duplicate slab entries remain distinct under ==");
+    WValue hash_name = w_string("hash");
+    ASSERT(w_eq(w_method_call_fast(first, hash_name, NULL, 0),
+                w_method_call_fast(second, hash_name, NULL, 0)) == W_TRUE,
+           "duplicate slab entries hash identically by content");
 
+    WValue alias = w_box_slab_str_len(4, 10);
     WValue hash = w_hash_new();
     w_hash_set(hash, first, w_int(7));
-    ASSERT(w_eq(w_hash_get(hash, second), w_int(7)) == W_TRUE, "hash lookup matches duplicate slab string content");
+    ASSERT(w_eq(w_hash_get(hash, alias), w_int(7)) == W_TRUE, "hash lookup matches slab alias with cached length");
 }
 
 int main(void) {

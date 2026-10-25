@@ -60,9 +60,10 @@
   # positional_defs: array of { name:, key:, required:, variadic: } from the SYNOPSIS
 
   -> new(@manpage)
-    @name = extract_name(manpage)
-    @option_defs = parse_manpage(manpage)
-    @positional_defs = parse_synopsis_positionals(manpage)
+    lines = manpage.split("\n")
+    @name = extract_name_lines(lines)
+    @option_defs = parse_manpage_lines(lines)
+    @positional_defs = parse_synopsis_positionals_lines(lines)
 
   # Parse argv against the extracted option definitions.
   # Returns an Argon:Result.
@@ -74,12 +75,18 @@
     rest = []
     saw_dashdash = false
     i = 0
+    n = argv.size()
 
-    while i < argv.size
+    while i < n
       arg = argv[i]
 
       if saw_dashdash
         rest.push(arg)
+        i = i + 1
+        next
+
+      if !arg.starts_with?("-")
+        positional.push(arg)
         i = i + 1
         next
 
@@ -88,69 +95,73 @@
         i = i + 1
         next
 
-      if arg.starts_with?("--no-")
-        raw = arg.slice(2, arg.size)
-        # An option literally named "--no-cache" wins over reading the token as
-        # a negation — including when it was abbreviated ("--no-cac"), so the
-        # lookup goes through the abbreviation resolver, not an exact match.
-        defn = resolve_long(raw)
-        if !defn || defn[:negatable]
-          # The negated form abbreviates too ("--no-col" for "--\[no-]color"):
-          # resolve the name after "--no-" and record under the canonical key.
-          negated = resolve_long(arg.slice(5, arg.size))
-          if negated != nil
-            key = negated[:key]
-          else
-            key = replace_all(arg.slice(5, arg.size), "-", "_")
-          flags[key] = false
-          i = i + 1
-          next
-
       if arg.starts_with?("--")
+        if arg.starts_with?("--no-")
+          raw = arg.slice(2, arg.size)
+          # An option literally named "--no-cache" wins over reading the token as
+          # a negation — including when it was abbreviated ("--no-cac"), so the
+          # lookup goes through the abbreviation resolver, not an exact match.
+          defn = resolve_long(raw)
+          if !defn || defn[:negatable]
+            # The negated form abbreviates too ("--no-col" for "--\[no-]color"):
+            # resolve the name after "--no-" and record under the canonical key.
+            after_no = arg.slice(5, arg.size)
+            negated = resolve_long(after_no)
+            if negated != nil
+              key = negated[:key]
+            else
+              key = replace_all(after_no, "-", "_")
+            flags[key] = false
+            i = i + 1
+            next
+
         raw = arg.slice(2, arg.size)
 
         # --key=value form
         eq = raw.index("=")
         if eq
           namepart = raw.slice(0, eq)
-          key = replace_all(namepart, "-", "_")
           # An unambiguous abbreviation ("--conf=x") resolves to the canonical key.
           resolved = resolve_long(namepart)
           if resolved != nil
             key = resolved[:key]
+          else
+            key = replace_all(namepart, "-", "_")
+            resolved = find_by_key(key)
           val = raw.slice(eq + 1, raw.size)
-          store_option(options, key, cast_option(key, val))
+          store_option_def(options, resolved, key, cast_option_def(resolved, val))
           i = i + 1
           next
 
-        key = replace_all(raw, "-", "_")
         defn = resolve_long(raw)
         # An unambiguous abbreviation ("--verb" for "--verbose") records under
         # the resolved option's canonical key, so the shortened form is
         # invisible downstream (flag?/get/occurrences all see "verbose").
         if defn != nil
           key = defn[:key]
+        else
+          key = replace_all(raw, "-", "_")
 
         if defn && defn[:takes_value]
-          if i + 1 < argv.size()
+          if i + 1 < n
             # Array options: consume all following non-flag args
             if defn[:array]
               i = i + 1
               vals = []
-              while i < argv.size() && value_like_token?(argv[i])
+              while i < n && value_like_token?(argv[i])
                 vals.push(cast(argv[i]))
                 i = i + 1
-              store_option(options, key, vals)
+              store_option_def(options, defn, key, vals)
             elsif defn[:optional_value]
               next_arg = argv[i + 1]
               if value_like_token?(next_arg)
-                store_option(options, key, cast_option(key, next_arg))
+                store_option_def(options, defn, key, cast_option_def(defn, next_arg))
                 i = i + 2
               else
                 options[key] = true
                 i = i + 1
             else
-              store_option(options, key, cast_option(key, argv[i + 1]))
+              store_option_def(options, defn, key, cast_option_def(defn, argv[i + 1]))
               i = i + 2
           else
             options[key] = true
@@ -170,82 +181,31 @@
         i = i + 1
         next
 
-      # Short-flag bundle: "-abc" == "-a -b -c" (getopt bundling). Letters
-      # are processed left to right. A value-taking letter consumes the REST
-      # of the bundle as its value ("-ovalue" == "-o value", "-o5" == "-o 5");
-      # if nothing follows it in the bundle, the next argv token is the value.
-      # An unrecognized letter is recorded as a set flag — the same lenient
-      # path as an unknown single short flag. (Negative numbers are handled
-      # above, so a leading digit never reaches here.)
-      if arg.starts_with?("-") && !arg.starts_with?("--") && arg.size() > 2
-        chars = arg.slice(1, arg.size())
-        ci = 0
-        i = i + 1
-        while ci < chars.size()
-          letter = chars.slice(ci, 1)
-          defn = find_short(letter)
-          if defn && defn[:takes_value]
-            key = defn[:key]
-            remainder = chars.slice(ci + 1, chars.size())
-            if remainder.size() > 0
-              if defn[:array]
-                store_option(options, key, [cast(remainder)])
-              else
-                store_option(options, key, cast_option(key, remainder))
-              ci = chars.size()
-            else
-              if defn[:array]
-                vals = []
-                while i < argv.size() && value_like_token?(argv[i])
-                  vals.push(cast(argv[i]))
-                  i = i + 1
-                store_option(options, key, vals)
-              elsif defn[:optional_value]
-                if i < argv.size() && value_like_token?(argv[i])
-                  store_option(options, key, cast_option(key, argv[i]))
-                  i = i + 1
-                else
-                  options[key] = true
-              else
-                if i < argv.size()
-                  store_option(options, key, cast_option(key, argv[i]))
-                  i = i + 1
-                else
-                  options[key] = true
-              ci = chars.size()
-          elsif defn
-            mark_flag(flags, counts, defn[:key])
-            ci = ci + 1
-          else
-            mark_flag(flags, counts, letter)
-            ci = ci + 1
-        next
-
-      if arg.starts_with?("-") && arg.size() == 2
+      if arg.size() == 2
         short = arg.slice(1, 2)
         defn = find_short(short)
 
         if defn
           key = defn[:key]
           if defn[:takes_value]
-            if i + 1 < argv.size()
+            if i + 1 < n
               if defn[:array]
                 i = i + 1
                 vals = []
-                while i < argv.size() && value_like_token?(argv[i])
+                while i < n && value_like_token?(argv[i])
                   vals.push(cast(argv[i]))
                   i = i + 1
-                store_option(options, key, vals)
+                store_option_def(options, defn, key, vals)
               elsif defn[:optional_value]
                 next_arg = argv[i + 1]
                 if value_like_token?(next_arg)
-                  store_option(options, key, cast_option(key, next_arg))
+                  store_option_def(options, defn, key, cast_option_def(defn, next_arg))
                   i = i + 2
                 else
                   options[key] = true
                   i = i + 1
               else
-                store_option(options, key, cast_option(key, argv[i + 1]))
+                store_option_def(options, defn, key, cast_option_def(defn, argv[i + 1]))
                 i = i + 2
             else
               options[key] = true
@@ -257,6 +217,57 @@
           # Unknown short flag — treat as flag using the letter as key
           mark_flag(flags, counts, short)
           i = i + 1
+        next
+
+      # Short-flag bundle: "-abc" == "-a -b -c" (getopt bundling). Letters
+      # are processed left to right. A value-taking letter consumes the REST
+      # of the bundle as its value ("-ovalue" == "-o value", "-o5" == "-o 5");
+      # if nothing follows it in the bundle, the next argv token is the value.
+      # An unrecognized letter is recorded as a set flag — the same lenient
+      # path as an unknown single short flag. (Negative numbers are handled
+      # above, so a leading digit never reaches here.)
+      if arg.size() > 2
+        chars = arg.slice(1, arg.size())
+        ci = 0
+        i = i + 1
+        while ci < chars.size()
+          letter = chars.slice(ci, 1)
+          defn = find_short(letter)
+          if defn && defn[:takes_value]
+            key = defn[:key]
+            remainder = chars.slice(ci + 1, chars.size())
+            if remainder.size() > 0
+              if defn[:array]
+                store_option_def(options, defn, key, [cast(remainder)])
+              else
+                store_option_def(options, defn, key, cast_option_def(defn, remainder))
+              ci = chars.size()
+            else
+              if defn[:array]
+                vals = []
+                while i < n && value_like_token?(argv[i])
+                  vals.push(cast(argv[i]))
+                  i = i + 1
+                store_option_def(options, defn, key, vals)
+              elsif defn[:optional_value]
+                if i < n && value_like_token?(argv[i])
+                  store_option_def(options, defn, key, cast_option_def(defn, argv[i]))
+                  i = i + 1
+                else
+                  options[key] = true
+              else
+                if i < n
+                  store_option_def(options, defn, key, cast_option_def(defn, argv[i]))
+                  i = i + 1
+                else
+                  options[key] = true
+              ci = chars.size()
+          elsif defn
+            mark_flag(flags, counts, defn[:key])
+            ci = ci + 1
+          else
+            mark_flag(flags, counts, letter)
+            ci = ci + 1
         next
 
       positional.push(arg)
@@ -278,7 +289,9 @@
 
   # Store an option value, appending to arrays for repeated array/list options
   -> store_option(options, key, val)
-    defn = find_by_key(key)
+    store_option_def(options, find_by_key(key), key, val)
+
+  -> store_option_def(options, defn, key, val)
     if defn && (defn[:array] || defn[:list])
       existing = options[key]
       if existing
@@ -432,12 +445,15 @@
   # Replace every occurrence of `from` in `s` with `to`.
   # (Pure Tungsten so Argon also runs under the interpreter, which has no gsub.)
   -> replace_all(s, from, to)
+    idx = s.index(from)
+    if idx == nil
+      return s
     out = ""
     rest = s
-    idx = rest.index(from)
+    fsize = from.size()
     while idx
       out = out + rest.slice(0, idx) + to
-      rest = rest.slice(idx + from.size(), rest.size())
+      rest = rest.slice(idx + fsize, rest.size())
       idx = rest.index(from)
     out + rest
 
@@ -446,23 +462,24 @@
     if stripped.size() == 0
       return nil
 
-    if stripped.starts_with?("#")
+    if stripped.byte_at(0) == 35
       while stripped.starts_with?("#")
         stripped = stripped.slice(1, stripped.size()).strip()
       if stripped.size() > 0
         return stripped
       return nil
 
-    if line == stripped && stripped == stripped.upcase() && has_heading_text?(stripped)
+    if line == stripped && has_heading_text?(stripped) && stripped == stripped.upcase()
       return stripped
 
     nil
 
   -> has_heading_text?(text)
     i = 0
-    while i < text.size()
-      ch = text[i]
-      if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9")
+    n = text.size()
+    while i < n
+      ch = text.byte_at(i)
+      if (ch >= 65 && ch <= 90) || (ch >= 48 && ch <= 57) || (ch >= 97 && ch <= 122)
         return true
       i = i + 1
     false
@@ -520,8 +537,10 @@
     refs
 
   -> referenced_sections(text)
+    referenced_sections_lines(text.split("\n"))
+
+  -> referenced_sections_lines(lines)
     refs = {}
-    lines = text.split("\n")
     in_synopsis = false
     i = 0
 
@@ -550,7 +569,9 @@
   # the first non-empty usage line under the SYNOPSIS heading (the canonical
   # form). Returns [] when there is no SYNOPSIS.
   -> parse_synopsis_positionals(text)
-    lines = text.split("\n")
+    parse_synopsis_positionals_lines(text.split("\n"))
+
+  -> parse_synopsis_positionals_lines(lines)
     in_synopsis = false
     usage = nil
     i = 0
@@ -731,7 +752,12 @@
     if val == nil
       return nil
     s = val.to_s()
-    if s.size() == 0
+    n = s.size()
+    if n == 0
+      return s
+    # Quick first-char check: if neither '-' nor '0'..'9' nor '.', cannot be a number
+    b0 = s.byte_at(0)
+    if b0 != 45 && b0 != 46 && (b0 < 48 || b0 > 57)
       return s
     # Check for decimal: digits with exactly one dot
     dot = s.index(".")
@@ -741,31 +767,31 @@
       ok = true
       dots = 0
       start = 0
-      if s.starts_with?("-")
+      if b0 == 45
         start = 1
       i = start
-      while i < s.size()
-        c = s[i]
-        if c == "."
+      while i < n
+        c = s.byte_at(i)
+        if c == 46
           dots = dots + 1
-        elsif c < "0" || c > "9"
+        elsif c < 48 || c > 57
           ok = false
           break
         i = i + 1
-      if ok && dots == 1 && s.size() > start + 1
+      if ok && dots == 1 && n > start + 1
         return s.to_f()
       return s
     # Check for integer: all digits, optionally with leading -
     ok = true
     start = 0
-    if s.starts_with?("-")
+    if b0 == 45
       start = 1
-    if s.size() <= start
+    if n <= start
       return s
     i = start
-    while i < s.size()
-      c = s[i]
-      if c < "0" || c > "9"
+    while i < n
+      c = s.byte_at(i)
+      if c < 48 || c > 57
         ok = false
         break
       i = i + 1
@@ -880,7 +906,9 @@
 
   # Cast a parsed value based on its option_def
   -> cast_option(key, val)
-    defn = find_by_key(key)
+    cast_option_def(find_by_key(key), val)
+
+  -> cast_option_def(defn, val)
     if defn && defn[:array]
       if val.is_a?(Array)
         casted = []
@@ -925,22 +953,24 @@
   # short flag. Following getopt, "-5" is only an option when "5" is itself a
   # defined short flag; otherwise the leading-digit token is a value/positional.
   -> negative_number_token?(arg)
-    if !arg.starts_with?("-")
-      return false
     if arg.size() < 2
       return false
-    c = arg.slice(1, 1)
-    if c >= "0" && c <= "9"
-      if find_short(c)
+    if arg.byte_at(0) != 45
+      return false
+    b1 = arg.byte_at(1)
+    if b1 >= 48 && b1 <= 57
+      if find_short(arg.slice(1, 1))
         return false
       return true
     false
 
   -> find_by_key(key)
     i = 0
-    while i < @option_defs.size()
-      if @option_defs[i][:key] == key
-        return @option_defs[i]
+    n = @option_defs.size()
+    while i < n
+      d = @option_defs[i]
+      if d[:key] == key
+        return d
       i = i + 1
     nil
 
@@ -957,7 +987,8 @@
 
   -> find_short(letter)
     i = 0
-    while i < @option_defs.size()
+    n = @option_defs.size()
+    while i < n
       d = @option_defs[i]
       if d[:short] == letter
         return d
@@ -966,13 +997,12 @@
 
   -> find_long(name)
     i = 0
-    while i < @option_defs.size()
+    n = @option_defs.size()
+    while i < n
       d = @option_defs[i]
       long = d[:long]
       if long
-        # Strip --\[no-] prefix for matching
-        clean = replace_all(long, "\[no-]", "")
-        if clean == name || long == name
+        if d[:clean_long] == name || long == name
           return d
       i = i + 1
     nil
@@ -1002,17 +1032,17 @@
     i = 0
     while i < @option_defs.size()
       d = @option_defs[i]
-      long = d[:long]
-      if long
-        clean = replace_all(long, "\[no-]", "")
-        if clean != name && clean.starts_with?(name)
-          out.push(d)
+      clean = d[:clean_long]
+      if clean != nil && clean != name && clean.starts_with?(name)
+        out.push(d)
       i = i + 1
     out
 
   -> extract_name(text)
+    extract_name_lines(text.split("\n"))
+
+  -> extract_name_lines(lines)
     # Look for NAME section: "    name -- description"
-    lines = text.split("\n")
     i = 0
     while i < lines.size()
       heading = section_heading(lines[i])
@@ -1034,9 +1064,11 @@
   #   --\[no-]color
   #   -e, --eval EXPRESSION
   -> parse_manpage(text)
+    parse_manpage_lines(text.split("\n"))
+
+  -> parse_manpage_lines(lines)
     defs = []
-    lines = text.split("\n")
-    refs = referenced_sections(text)
+    refs = referenced_sections_lines(lines)
     in_options = false
     i = 0
 
@@ -1131,6 +1163,7 @@
             if defn[:list]
               defn[:takes_value] = true
             defs.push(defn)
+            i = j - 1
 
       i = i + 1
 
@@ -1222,7 +1255,10 @@
       value_name = array_value_name(line)
 
     if key
-      return { short: short, long: long, key: key, takes_value: takes_value, optional_value: optional_value, negatable: negatable, array: array, value_name: value_name }
+      clean_long = nil
+      if long != nil
+        clean_long = replace_all(long, "\[no-]", "")
+      return { short: short, long: long, clean_long: clean_long, key: key, takes_value: takes_value, optional_value: optional_value, negatable: negatable, array: array, value_name: value_name }
     nil
 
 
@@ -1269,19 +1305,17 @@
     val = @options[key]
     if val
       return val
-    env_val = env_value(key)
-    if env_val != nil
-      return env_val
+    d = @parser.find_by_key(key)
+    if d != nil
+      env_name = d[:env]
+      if env_name != nil
+        raw = @parser.env_lookup(env_name)
+        if raw != nil
+          return @parser.cast(raw)
     if default != nil
       return default
-    # Look up manpage default
-    defs = @parser.option_defs
-    i = 0
-    while i < defs.size()
-      d = defs[i]
-      if d[:key] == key
-        return d[:default]
-      i = i + 1
+    if d != nil
+      return d[:default]
     nil
 
   # The casted value of an option's "(env: VAR)" fallback variable, or nil when
@@ -1405,20 +1439,22 @@
   -> errors
     errs = []
     defs = @parser.option_defs
+    ndefs = defs.size()
     i = 0
-    while i < defs.size()
+    while i < ndefs
       d = defs[i]
       key = d[:key]
+      opt_val = @options[key]
 
-      if d[:required] && !provided?(key)
+      if d[:required] && opt_val == nil && !@flags.has_key?(key)
         errs.push("missing required option: " + option_label(d))
 
-      if d[:takes_value] && !d[:optional_value] && @options[key] == true
+      if d[:takes_value] && !d[:optional_value] && opt_val == true
         errs.push("missing value for option: " + option_label(d))
 
       choices = d[:choices]
-      if choices != nil && @options.has_key?(key) && @options[key] != true
-        bad = first_invalid_choice(@options[key], choices)
+      if choices != nil && opt_val != nil && opt_val != true
+        bad = first_invalid_choice(opt_val, choices)
         if bad != nil
           errs.push("invalid value for " + option_label(d) + ": " + bad.to_s() + " (expected one of: " + join_list(choices) + ")")
 
@@ -1429,9 +1465,9 @@
     # (sorted) order. Declaring the conflict on either option suffices — the
     # check is symmetric, so "-v (conflicts with: quiet)" also rules out
     # supplying --quiet together with -v even if --quiet declares nothing.
-    reported = {}
+    reported = nil
     c = 0
-    while c < defs.size()
+    while c < ndefs
       d = defs[c]
       conflicts = d[:conflicts]
       if conflicts != nil && provided?(d[:key])
@@ -1441,6 +1477,8 @@
           od = @parser.find_option(other)
           if od != nil && provided?(od[:key])
             pair = conflict_pair_label(d, od)
+            if reported == nil
+              reported = {}
             if !reported.has_key?(pair)
               reported[pair] = true
               errs.push("mutually exclusive options: " + pair)
@@ -1478,7 +1516,9 @@
     names = []
     collect_unknown(@flags, names)
     collect_unknown(@options, names)
-    names.sort()
+    if names.size() > 1
+      return names.sort()
+    names
 
   # ---- Validation helpers ----
 

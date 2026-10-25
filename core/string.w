@@ -54,6 +54,15 @@
   # w_int exactly. The current result is u32-sized, but the full signed-i48
   # check keeps this source body correct if String storage grows later.
   -> size
+    sv = $value ## i64
+    if ((sv >> 48) & 0xFFFF) == 0xFFF9
+      sm = (sv >> 1) & 7
+      if sm <= 5
+        return wvalue_from_bits((-1_688_849_860_263_936 | sm) ## i64)
+      if sm == 6
+        sc = (sv >> 28) & 63
+        if sc != 0
+          return wvalue_from_bits((-1_688_849_860_263_936 | sc) ## i64)
     n = ccall_nobox("w_string_byte_length", self) ## i64
     if n >= -140_737_488_355_328 && n <= 140_737_488_355_327
       tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
@@ -64,12 +73,158 @@
   # Keep both aliases independently dispatchable. Forwarding length to size
   # would add another public method lookup to this leaf operation.
   -> length
+    sv = $value ## i64
+    if ((sv >> 48) & 0xFFFF) == 0xFFF9
+      sm = (sv >> 1) & 7
+      if sm <= 5
+        return wvalue_from_bits((-1_688_849_860_263_936 | sm) ## i64)
+      if sm == 6
+        sc = (sv >> 28) & 63
+        if sc != 0
+          return wvalue_from_bits((-1_688_849_860_263_936 | sc) ## i64)
     n = ccall_nobox("w_string_byte_length", self) ## i64
     if n >= -140_737_488_355_328 && n <= 140_737_488_355_327
       tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
       mask = 0xFFFFFFFFFFFF ## i64
       return wvalue_from_bits((tag | (n & mask)) ## i64)
     ccall("w_int", n)
+
+  -> ord
+    ord_v = ($value & -2) ## i64
+    ord_mode = (ord_v >> 1) & 7
+    if ord_mode == 0
+      return 0
+    tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+    if ord_mode <= 5
+      ord_b0 = (ord_v >> 4) & 0xFF
+      ord_cp = ord_b0
+      if ord_b0 >= 128
+        if ord_b0 < 224
+          ord_cp = (ord_b0 & 31) << 6
+          if ord_mode > 1
+            ord_cp = ord_cp | (((ord_v >> 12) & 0xFF) & 63)
+        elsif ord_b0 < 240
+          ord_cp = (ord_b0 & 15) << 12
+          if ord_mode > 1
+            ord_cp = ord_cp | ((((ord_v >> 12) & 0xFF) & 63) << 6)
+            if ord_mode > 2
+              ord_cp = ord_cp | (((ord_v >> 20) & 0xFF) & 63)
+        else
+          ord_cp = (ord_b0 & 7) << 18
+          if ord_mode > 1
+            ord_cp = ord_cp | ((((ord_v >> 12) & 0xFF) & 63) << 12)
+            if ord_mode > 2
+              ord_cp = ord_cp | ((((ord_v >> 20) & 0xFF) & 63) << 6)
+              if ord_mode > 3
+                ord_cp = ord_cp | (((ord_v >> 28) & 0xFF) & 63)
+      return wvalue_from_bits((tag | ord_cp) ## i64)
+    ord_n = ccall_nobox("w_string_byte_length", self) ## i64
+    if ord_n == 0
+      return 0
+    ord_p = ccall_nobox("w_string_data_ptr", self) ## i64
+    ord_b0 = raw_load_u8(ord_p, 0) ## i64
+    ord_cp = ord_b0
+    if ord_b0 >= 128
+      if ord_b0 < 224
+        ord_cp = (ord_b0 & 31) << 6
+        if ord_n > 1
+          ord_cp = ord_cp | ((raw_load_u8(ord_p, 1) ## i64) & 63)
+      elsif ord_b0 < 240
+        ord_cp = (ord_b0 & 15) << 12
+        if ord_n > 1
+          ord_cp = ord_cp | (((raw_load_u8(ord_p, 1) ## i64) & 63) << 6)
+          if ord_n > 2
+            ord_cp = ord_cp | ((raw_load_u8(ord_p, 2) ## i64) & 63)
+      else
+        ord_cp = (ord_b0 & 7) << 18
+        if ord_n > 1
+          ord_cp = ord_cp | (((raw_load_u8(ord_p, 1) ## i64) & 63) << 12)
+          if ord_n > 2
+            ord_cp = ord_cp | (((raw_load_u8(ord_p, 2) ## i64) & 63) << 6)
+            if ord_n > 3
+              ord_cp = ord_cp | ((raw_load_u8(ord_p, 3) ## i64) & 63)
+    wvalue_from_bits((tag | ord_cp) ## i64)
+
+  -> starts_with?(prefix)
+    if ((prefix$value >> 48) & 0xFFFF) != 0xFFF9
+      prefix = prefix.to_s
+    sw_v = ($value & -2) ## i64
+    sw_pv = (prefix$value & -2) ## i64
+    sw_pmode = (sw_pv >> 1) & 7
+    if sw_pmode == 0
+      return true
+    sw_mode = (sw_v >> 1) & 7
+    if sw_mode <= 5
+      if sw_pmode > sw_mode
+        return false
+      sw_mask = (1 << (8 * sw_pmode)) - 1
+      return (((sw_v ^ sw_pv) >> 4) & sw_mask) == 0
+    sw_n = ccall_nobox("w_string_byte_length", self) ## i64
+    if sw_pmode <= 5
+      if sw_pmode > sw_n
+        return false
+      sw_p = ccall_nobox("w_string_data_ptr", self) ## i64
+      sw_i = 0 ## i64
+      while sw_i < sw_pmode
+        if (raw_load_u8(sw_p, sw_i) ## i64) != ((sw_pv >> (4 + 8 * sw_i)) & 0xFF)
+          return false
+        sw_i = sw_i + 1
+      return true
+    sw_pn = ccall_nobox("w_string_byte_length", prefix) ## i64
+    if sw_pn > sw_n
+      return false
+    sw_p = ccall_nobox("w_string_data_ptr", self) ## i64
+    sw_pp = ccall_nobox("w_string_data_ptr", prefix) ## i64
+    sw_i = 0 ## i64
+    while sw_i + 3 < sw_pn
+      if raw_load_u8(sw_p, sw_i) != raw_load_u8(sw_pp, sw_i) || raw_load_u8(sw_p, sw_i + 1) != raw_load_u8(sw_pp, sw_i + 1) || raw_load_u8(sw_p, sw_i + 2) != raw_load_u8(sw_pp, sw_i + 2) || raw_load_u8(sw_p, sw_i + 3) != raw_load_u8(sw_pp, sw_i + 3)
+        return false
+      sw_i = sw_i + 4
+    while sw_i < sw_pn
+      if raw_load_u8(sw_p, sw_i) != raw_load_u8(sw_pp, sw_i)
+        return false
+      sw_i = sw_i + 1
+    true
+
+  -> ends_with?(suffix)
+    if ((suffix$value >> 48) & 0xFFFF) != 0xFFF9
+      suffix = suffix.to_s
+    ew_v = ($value & -2) ## i64
+    ew_sv = (suffix$value & -2) ## i64
+    ew_smode = (ew_sv >> 1) & 7
+    if ew_smode == 0
+      return true
+    ew_mode = (ew_v >> 1) & 7
+    if ew_mode <= 5
+      if ew_smode > ew_mode
+        return false
+      ew_mask = (1 << (8 * ew_smode)) - 1
+      ew_sh = 4 + 8 * (ew_mode - ew_smode)
+      return (((ew_v >> ew_sh) ^ (ew_sv >> 4)) & ew_mask) == 0
+    ew_n = ccall_nobox("w_string_byte_length", self) ## i64
+    if ew_smode <= 5
+      if ew_smode > ew_n
+        return false
+      ew_p = ccall_nobox("w_string_data_ptr", self) ## i64
+      ew_off = ew_n - ew_smode
+      ew_i = 0
+      while ew_i < ew_smode
+        if (raw_load_u8(ew_p, ew_off + ew_i) ## i64) != ((ew_sv >> (4 + 8 * ew_i)) & 0xFF)
+          return false
+        ew_i += 1
+      return true
+    ew_sn = ccall_nobox("w_string_byte_length", suffix) ## i64
+    if ew_sn > ew_n
+      return false
+    ew_p = ccall_nobox("w_string_data_ptr", self) ## i64
+    ew_sp = ccall_nobox("w_string_data_ptr", suffix) ## i64
+    ew_off = ew_n - ew_sn
+    ew_i = 0
+    while ew_i < ew_sn
+      if raw_load_u8(ew_p, ew_off + ew_i) != raw_load_u8(ew_sp, ew_i)
+        return false
+      ew_i += 1
+    true
 
   # ASCII case transforms, ported from the former runtime IC handlers.
   # Inline-mode receivers (modes 0..5: length in bits 1..3, byte i at bits
@@ -671,10 +826,11 @@
   # advance one code point. The body dispatches dynamically so this file
   # never autoloads the regex engine itself.
   -> scan(pattern)
-    if ccall_nobox("w_is_native_regex", pattern) == 1
-      return ccall("w_regex_scan", pattern, self)
+    pat_t = type(pattern)
+    if pat_t == "Regex"
+      return (pattern ## Regex).scan_all(self)
     out = []
-    if type(pattern) == "String"
+    if pat_t == "String"
       sc_len = pattern.size
       if sc_len == 0
         return out
@@ -1016,8 +1172,8 @@
     include?(sub)
 
   # Compile a Regex that matches this string LITERALLY (metacharacters
-  # escaped), through the native engine constructor — no source-regex
-  # autoload from this file.
+  # escaped). Resolves Regex dynamically so this file does not trigger an
+  # unconditional Regex autoload.
   -> to_regex
     rx_out = StringBuffer(size * 2)
     self.each_character -> (c)
@@ -1025,7 +1181,7 @@
       if rx_o == 94 || rx_o == 36 || rx_o == 46 || rx_o == 124 || rx_o == 63 || rx_o == 42 || rx_o == 43 || rx_o == 40 || rx_o == 41 || rx_o == 91 || rx_o == 93 || rx_o == 123 || rx_o == 125 || rx_o == 92
         rx_out << "\\"
       rx_out << c
-    ccall("w_regex_new", rx_out.to_s, "")
+    ccall("w_class_by_name", "Regex").new(rx_out.to_s)
 
   # Resolve a registered class by name ("Array".constantize.new). Only
   # classes compiled into the running binary can resolve — an AOT program

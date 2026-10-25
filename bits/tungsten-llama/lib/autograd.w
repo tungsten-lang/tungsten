@@ -32,10 +32,11 @@
 
 -> ag_full(shape, v)
   out = Tensor.zeros(shape)
-  n = Tensor.elem_count(shape)
+  obuf = out.buffer
+  n = out.size
   fi = 0
   while fi < n
-    out.set(Tensor.unravel(fi, shape), v)
+    obuf[fi] = v
     fi = fi + 1
   out
 
@@ -45,40 +46,70 @@
 # Elementwise scalar multiply (core `scale` is broken for :cpu tensors).
 -> ag_scale(t, s)
   out = Tensor.zeros(t.shape)
+  obuf = out.buffer
   n = t.size
-  fi = 0
-  while fi < n
-    c = Tensor.unravel(fi, t.shape)
-    out.set(c, t.at(c) * s)
-    fi = fi + 1
+  if t.contiguous?
+    tbuf = t.buffer
+    off = t.offset
+    fi = 0
+    while fi < n
+      obuf[fi] = tbuf[off + fi] * s
+      fi = fi + 1
+  else
+    fi = 0
+    while fi < n
+      c = Tensor.unravel(fi, t.shape)
+      obuf[fi] = t.at(c) * s
+      fi = fi + 1
   out
 
 # relu(t) elementwise (core `relu` is broken for :cpu tensors).
 -> ag_relu(t)
   out = Tensor.zeros(t.shape)
+  obuf = out.buffer
   n = t.size
   z = 0.to_f
-  fi = 0
-  while fi < n
-    c = Tensor.unravel(fi, t.shape)
-    v = t.at(c)
-    if v > z
-      out.set(c, v)
-    fi = fi + 1
+  if t.contiguous?
+    tbuf = t.buffer
+    off = t.offset
+    fi = 0
+    while fi < n
+      v = tbuf[off + fi]
+      if v > z
+        obuf[fi] = v
+      fi = fi + 1
+  else
+    fi = 0
+    while fi < n
+      c = Tensor.unravel(fi, t.shape)
+      v = t.at(c)
+      if v > z
+        obuf[fi] = v
+      fi = fi + 1
   out
 
 # 1.0 where t > 0 else 0.0 — the relu derivative mask.
 -> ag_relu_mask(t)
   out = Tensor.zeros(t.shape)
+  obuf = out.buffer
   n = t.size
   z = 0.to_f
   one = 1.to_f
-  fi = 0
-  while fi < n
-    c = Tensor.unravel(fi, t.shape)
-    if t.at(c) > z
-      out.set(c, one)
-    fi = fi + 1
+  if t.contiguous?
+    tbuf = t.buffer
+    off = t.offset
+    fi = 0
+    while fi < n
+      if tbuf[off + fi] > z
+        obuf[fi] = one
+      fi = fi + 1
+  else
+    fi = 0
+    while fi < n
+      c = Tensor.unravel(fi, t.shape)
+      if t.at(c) > z
+        obuf[fi] = one
+      fi = fi + 1
   out
 
 # Sum a [B, O] tensor over axis 0 -> [O] (bias-gradient reduction).
@@ -86,15 +117,29 @@
   b = t.shape[0]
   o = t.shape[1]
   out = Tensor.zeros([o])
-  j = 0
-  while j < o
-    acc = 0.to_f
-    i = 0
-    while i < b
-      acc = acc + t.at([i, j])
-      i = i + 1
-    out.set([j], acc)
-    j = j + 1
+  obuf = out.buffer
+  if t.contiguous?
+    tbuf = t.buffer
+    off = t.offset
+    j = 0
+    while j < o
+      acc = 0.to_f
+      i = 0
+      while i < b
+        acc = acc + tbuf[off + i * o + j]
+        i = i + 1
+      obuf[j] = acc
+      j = j + 1
+  else
+    j = 0
+    while j < o
+      acc = 0.to_f
+      i = 0
+      while i < b
+        acc = acc + t.at([i, j])
+        i = i + 1
+      obuf[j] = acc
+      j = j + 1
   out
 
 # ---- the tape node --------------------------------------------------------
@@ -116,7 +161,7 @@
     @seen = false
 
   -> item
-    @val.at([0])
+    @val.buffer[@val.offset]
 
   # Reset gradient + topo marker (used between optimizer steps).
   -> clear
@@ -135,8 +180,10 @@
 
   # Accumulate a contribution into this node's grad (same shape as val).
   -> add_grad(g)
-    self.ensure_grad
-    @grad = @grad.add(g)
+    if @grad == nil
+      @grad = g
+    else
+      @grad = @grad.add(g)
     self
 
   # Post-order DFS: parents before self, so the reversed order has every
@@ -188,15 +235,15 @@
       a.add_grad(gout.mul(ag_relu_mask(a.val)))
     elsif @op == :sum
       a = @parents[0]
-      a.add_grad(ag_full(a.val.shape, gout.at([0])))
+      a.add_grad(ag_full(a.val.shape, gout.buffer[gout.offset]))
     elsif @op == :mean
       a = @parents[0]
       nn = a.val.size.to_f
-      a.add_grad(ag_full(a.val.shape, gout.at([0]) / nn))
+      a.add_grad(ag_full(a.val.shape, gout.buffer[gout.offset] / nn))
     elsif @op == :mse
       a = @parents[0]
       nn = a.val.size.to_f
-      factor = gout.at([0]) * 2.to_f / nn
+      factor = gout.buffer[gout.offset] * 2.to_f / nn
       a.add_grad(ag_scale(@aux, factor))
     self
 
@@ -232,14 +279,14 @@
 -> v_sum(a)
   s = a.val.sum
   out = Tensor.zeros([1])
-  out.set([0], s)
+  out.buffer[0] = s
   Var.new(out, :sum, [a], nil)
 
 # Mean-all -> scalar ([1] tensor).
 -> v_mean(a)
   m = a.val.mean
   out = Tensor.zeros([1])
-  out.set([0], m)
+  out.buffer[0] = m
   Var.new(out, :mean, [a], nil)
 
 # Mean-squared-error loss against a constant target Tensor -> scalar ([1]).
@@ -249,7 +296,7 @@
   sq = diff.mul(diff)
   m = sq.sum / pred.val.size.to_f
   out = Tensor.zeros([1])
-  out.set([0], m)
+  out.buffer[0] = m
   Var.new(out, :mse, [pred], diff)
 
 # ---- deterministic PRNG (seeded, reproducible init) -----------------------
@@ -278,11 +325,11 @@
   rw :b
   -> new(in_dim, out_dim, rng, scale)
     wt = Tensor.zeros([in_dim, out_dim])
+    wbuf = wt.buffer
     n = in_dim * out_dim
     i = 0
     while i < n
-      c = Tensor.unravel(i, [in_dim, out_dim])
-      wt.set(c, rng.next_sym * scale)
+      wbuf[i] = rng.next_sym * scale
       i = i + 1
     bt = Tensor.zeros([out_dim])
     @w = v_leaf(wt)

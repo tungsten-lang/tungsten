@@ -52,11 +52,20 @@
   # Entries of m as fresh float rows (working copy for elimination).
   -> .float_rows(m)
     rows = []
-    m.to_a.each -> (r)
-      row = []
-      r.each -> (v)
-        row.push(v.to_f)
-      rows.push(row)
+    a = m.to_a
+    nr = a.size
+    if nr > 0
+      nc = a[0].size
+      i = 0
+      while i < nr
+        r = a[i]
+        row = []
+        j = 0
+        while j < nc
+          row.push(r[j].to_f)
+          j += 1
+        rows.push(row)
+        i += 1
     rows
 
   # Determinant; nil unless square. 0 when singular.
@@ -67,17 +76,20 @@
       a = LinAlg.float_rows(m)
       detv = 1.to_f
       singular = false
-      n.times -> (k)
+      k = 0
+      while k < n
         if !singular
           # partial pivot: largest |a[t][k]| for t >= k
           best = -1
           bestv = 0.to_f
-          n.times -> (t)
-            if t >= k
-              av = LinAlg.fabs(a[t][k])
-              if av > bestv
-                bestv = av
-                best = t
+          t = k
+          while t < n
+            av = a[t][k]
+            av = 0.to_f - av if av < 0.to_f
+            if av > bestv
+              bestv = av
+              best = t
+            t += 1
           if best == -1 || bestv == 0
             singular = true
           else
@@ -86,13 +98,19 @@
               a[k] = a[best]
               a[best] = tmp
               detv = 0.to_f - detv
-            piv = a[k][k]
+            ak = a[k]
+            piv = ak[k]
             detv = detv * piv
-            n.times -> (r)
-              if r > k
-                factor = a[r][k] / piv
-                n.times -> (c)
-                  a[r][c] = a[r][c] - factor * a[k][c] if c >= k
+            r = k + 1
+            while r < n
+              ar = a[r]
+              factor = ar[k] / piv
+              c = k
+              while c < n
+                ar[c] = ar[c] - factor * ak[c]
+                c += 1
+              r += 1
+        k += 1
       out = 0.to_f
       out = detv if !singular
     out
@@ -101,16 +119,19 @@
   # Returns the reduced rows, or nil if the left n×n block is singular.
   -> .reduce_rows(a, n, m)
     ok = true
-    n.times -> (k)
+    k = 0
+    while k < n
       if ok
         best = -1
         bestv = 0.to_f
-        n.times -> (t)
-          if t >= k
-            av = LinAlg.fabs(a[t][k])
-            if av > bestv
-              bestv = av
-              best = t
+        t = k
+        while t < n
+          av = a[t][k]
+          av = 0.to_f - av if av < 0.to_f
+          if av > bestv
+            bestv = av
+            best = t
+          t += 1
         if best == -1 || bestv == 0
           ok = false
         else
@@ -118,14 +139,23 @@
             tmp = a[k]
             a[k] = a[best]
             a[best] = tmp
-          piv = a[k][k]
-          m.times -> (c)
-            a[k][c] = a[k][c] / piv
-          n.times -> (r)
+          ak = a[k]
+          piv = ak[k]
+          c = 0
+          while c < m
+            ak[c] = ak[c] / piv
+            c += 1
+          r = 0
+          while r < n
             if r != k
-              factor = a[r][k]
-              m.times -> (c)
-                a[r][c] = a[r][c] - factor * a[k][c]
+              ar = a[r]
+              factor = ar[k]
+              c = 0
+              while c < m
+                ar[c] = ar[c] - factor * ak[c]
+                c += 1
+            r += 1
+      k += 1
     out = nil
     out = a if ok
     out
@@ -139,14 +169,16 @@
       n = m.row_count
       a = LinAlg.float_rows(m)
       i = 0
-      a.each -> (row)
-        row.push(bvals[i].to_f)
+      while i < n
+        a[i].push(bvals[i].to_f)
         i += 1
       red = LinAlg.reduce_rows(a, n, n + 1)
       if red != nil
         vals = []
-        red.each -> (row)
-          vals.push(row[n])
+        i = 0
+        while i < n
+          vals.push(red[i][n])
+          i += 1
         out = Vector.new(vals)
     out
 
@@ -158,21 +190,29 @@
       n = m.row_count
       a = LinAlg.float_rows(m)
       i = 0
-      a.each -> (row)
-        n.times -> (j)
+      while i < n
+        row = a[i]
+        j = 0
+        while j < n
           if i == j
             row.push(1.to_f)
           else
             row.push(0.to_f)
+          j += 1
         i += 1
       red = LinAlg.reduce_rows(a, n, 2 * n)
       if red != nil
         rows = []
-        red.each -> (row)
+        i = 0
+        while i < n
+          row = red[i]
           rr = []
-          n.times -> (j)
+          j = 0
+          while j < n
             rr.push(row[n + j])
+            j += 1
           rows.push(rr)
+          i += 1
         out = Matrix.new(rows)
     out
 
@@ -203,19 +243,28 @@
     tol = LinAlg.rank_tol
     # column norms BEFORE any reflection — the yardstick for rank
     norms = []
-    nc.times -> (j)
+    j = 0
+    while j < nc
       s = 0.to_f
-      nr.times -> (i)
-        s += a[i][j] * a[i][j]
+      i = 0
+      while i < nr
+        v_ij = a[i][j]
+        s += v_ij * v_ij
+        i += 1
       norms.push(Math.sqrt(s))
+      j += 1
     vs = []
     ok = true
-    nc.times -> (k)
+    k = 0
+    while k < nc
       if ok
         # norm of the sub-column a[k..][k] still to be annihilated
         s = 0.to_f
-        nr.times -> (i)
-          s += a[i][k] * a[i][k] if i >= k
+        i = k
+        while i < nr
+          aik = a[i][k]
+          s += aik * aik
+          i += 1
         nrm = Math.sqrt(s)
         if nrm <= norms[k] * tol
           ok = false
@@ -225,28 +274,41 @@
           alpha = 0.to_f - nrm
           alpha = nrm if a[k][k] < 0
           v = []
-          nr.times -> (i)
-            if i < k
-              v.push(0.to_f)
-            else
-              v.push(a[i][k])
+          i = 0
+          while i < k
+            v.push(0.to_f)
+            i += 1
+          while i < nr
+            v.push(a[i][k])
+            i += 1
           v[k] = v[k] - alpha
           vtv = 0.to_f
-          nr.times -> (i)
-            vtv += v[i] * v[i] if i >= k
+          i = k
+          while i < nr
+            vi = v[i]
+            vtv += vi * vi
+            i += 1
           if vtv > 0
-            width.times -> (j)
-              if j > k
-                d = 0.to_f
-                nr.times -> (i)
-                  d += v[i] * a[i][j] if i >= k
-                f = (d + d) / vtv
-                nr.times -> (i)
-                  a[i][j] = a[i][j] - f * v[i] if i >= k
+            j = k + 1
+            while j < width
+              d = 0.to_f
+              i = k
+              while i < nr
+                d += v[i] * a[i][j]
+                i += 1
+              f = (d + d) / vtv
+              i = k
+              while i < nr
+                a[i][j] = a[i][j] - f * v[i]
+                i += 1
+              j += 1
           a[k][k] = alpha
-          nr.times -> (i)
-            a[i][k] = 0.to_f if i > k
+          i = k + 1
+          while i < nr
+            a[i][k] = 0.to_f
+            i += 1
           vs.push(v)
+      k += 1
     out = nil
     out = vs if ok
     out
@@ -270,37 +332,57 @@
         # Q = H(0) H(1) ... H(nc-1) applied to the first nc identity
         # columns — replay the reflectors in REVERSE order.
         qrows = []
-        nr.times -> (i)
+        i = 0
+        while i < nr
           row = []
-          nc.times -> (j)
+          j = 0
+          while j < nc
             if i == j
               row.push(1.to_f)
             else
               row.push(0.to_f)
+            j += 1
           qrows.push(row)
-        nc.times -> (t)
+          i += 1
+        t = 0
+        while t < nc
           k = nc - 1 - t
           v = vs[k]
           vtv = 0.to_f
-          nr.times -> (i)
-            vtv += v[i] * v[i]
+          i = k
+          while i < nr
+            vi = v[i]
+            vtv += vi * vi
+            i += 1
           if vtv > 0
-            nc.times -> (j)
+            j = 0
+            while j < nc
               d = 0.to_f
-              nr.times -> (i)
+              i = k
+              while i < nr
                 d += v[i] * qrows[i][j]
+                i += 1
               f = (d + d) / vtv
-              nr.times -> (i)
+              i = k
+              while i < nr
                 qrows[i][j] = qrows[i][j] - f * v[i]
+                i += 1
+              j += 1
+          t += 1
         rrows = []
-        nc.times -> (i)
+        i = 0
+        while i < nc
+          ai = a[i]
           row = []
-          nc.times -> (j)
+          j = 0
+          while j < nc
             if j < i
               row.push(0.to_f)
             else
-              row.push(a[i][j])
+              row.push(ai[j])
+            j += 1
           rrows.push(row)
+          i += 1
         out = { q: Matrix.new(qrows), r: Matrix.new(rrows) }
     out
 
@@ -321,21 +403,28 @@
     if nr > 0 && nc > 0 && nr >= nc && nr == bvals.size
       rows = LinAlg.float_rows(a)
       i = 0
-      rows.each -> (row)
-        row.push(bvals[i].to_f)
+      while i < nr
+        rows[i].push(bvals[i].to_f)
         i += 1
       # width nc + 1: the augmented column comes back as (Q^T b)
       vs = LinAlg.householder(rows, nr, nc, nc + 1)
       if vs != nil
         vals = []
-        nc.times -> (t)
+        t = 0
+        while t < nc
           vals.push(0.to_f)
+          t += 1
         # back substitution through the upper-triangular R
-        nc.times -> (t)
+        t = 0
+        while t < nc
           k = nc - 1 - t
-          s = rows[k][nc]
-          nc.times -> (j)
-            s = s - rows[k][j] * vals[j] if j > k
-          vals[k] = s / rows[k][k]
+          rk = rows[k]
+          s = rk[nc]
+          j = k + 1
+          while j < nc
+            s = s - rk[j] * vals[j]
+            j += 1
+          vals[k] = s / rk[k]
+          t += 1
         out = Vector.new(vals)
     out

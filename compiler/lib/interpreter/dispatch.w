@@ -106,18 +106,6 @@
         return {rt: :object, w_class: recv, ivars: {"@__thread_result" => result, "@__thread_alive" => false, "@__thread_killed" => false}}
       return instantiate(recv, args, env)
 
-    # Thread.new runs synchronously in the tree walker. Retained native
-    # join/kill declarations therefore need a small fake-handle equivalent.
-    if interpreted_thread?(recv)
-      if name == "join"
-        if args.size() > 0
-          return true
-        return recv[:ivars]["@__thread_result"]
-      if name == "kill"
-        recv[:ivars]["@__thread_alive"] = false
-        recv[:ivars]["@__thread_killed"] = true
-        return nil
-
     # Method on object
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object
       m = lookup_method(recv[:w_class], name, args.size(), block != nil, args)
@@ -158,17 +146,6 @@
     if type(recv) in ("String" "Symbol") && name == "is_a?" && args.size() == 1
       return is_a_class?(recv, args[0])
 
-    # Native-engine regex objects (String#to_regex under the tree walker;
-    # compiled regex literals never reach here) have no source class — the
-    # source Regex engine's methods read ivars a native object lacks. Route
-    # the match surface straight through the native engine.
-    if type(recv) == "Regex" && ccall_nobox("w_is_native_regex", recv) == 1
-      if name in ("match?" "===" "=~") && args.size() == 1
-        return ccall("w_regex_match", recv, args[0])
-      if name == "scan" && args.size() == 1
-        return ccall("w_regex_scan", recv, args[0])
-      raise "native regex supports match?/===/=~/scan under the interpreter (got [name])"
-
     # Primitive values can be extended by core classes (Array, String, etc.).
     # Give those class methods first refusal before falling back to boot
     # builtins so traits such as Enumerable participate for primitive arrays.
@@ -177,7 +154,7 @@
     # String methods are also Symbol#to_s/#empty?/#size/#length. The tree walker
     # ordinarily distinguishes host Symbols from Strings; route these shared
     # methods through String instead of the legacy Symbol scaffold.
-    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length" "ascii?" "blank?" "byte_at" "bytes" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "nfc" "nfd" "nfkc" "nfkd" "normalize" "graphemes" "each_grapheme" "scan" "to_regex" "constantize")
+    if type(recv) == "Symbol" && name in ("to_s" "empty?" "size" "length" "ord" "starts_with?" "ends_with?" "ascii?" "blank?" "byte_at" "bytes" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "nfc" "nfd" "nfkc" "nfkd" "normalize" "graphemes" "each_grapheme" "scan" "to_regex" "constantize")
       try_autoload_class("String")
       primitive_class = @classes["String"]
     else
@@ -247,28 +224,16 @@
             return recv
           if name == "to_s" && args.size() == 0
             return ccall("w_strbuf_to_s", recv)
-          if name in ("length" "byte_size" "\[]" "[]" "clear" "empty?" "include?" "starts_with?")
+          if name in ("\[]" "[]" "clear" "include?" "starts_with?")
             native_name = name == "\[]" ? "[]" : "" + name
             return ccall("w_method_call", recv, native_name, args)
           m = nil
-      # Decimal's bodyless conversion/rounding declarations are native IC
-      # methods. Several names are also generic interpreter builtins (`to_i`,
-      # `floor`, ...), whose host-oriented behavior stringifies or coerces the
-      # receiver and is not Decimal's exact runtime contract. Delegate these
-      # declarations before the generic bodyless fallthrough so the tree
-      # walker and compiled engine use the same handlers.
-      if m != nil && primitive_class[:name] == "Decimal"
-        method_body = m[:body]
-        if (method_body == nil || method_body.size() == 0) && name in ("abs" "to_f" "to_i" "to_d" "floor" "ceil" "round" "sqrt" "sq")
-          return ccall("w_method_call", recv, "" + name, args)
       # A bodyless `-> name` on a runtime-backed receiver is a native/
       # abstract DECLARATION, never a nil-returning empty body — the
       # compiled engine dispatches these to the runtime's handlers. Fall
       # through to the builtin/runtime delegation below instead of
       # "executing" nothing. This generalizes the former Mmap/Thread
-      # special cases and covers every all-facade core class (Decimal's
-      # floor/round declarations were being run as empty bodies, which
-      # crashed evaluating their `digits = scale` default). data_field
+      # special cases and covers every all-facade core class. data_field
       # accessors are exempt: they are handled by the dedicated branch
       # underneath.
       if m != nil && m[:data_field] != true
@@ -304,20 +269,14 @@
         native_name = name == "\[]" ? "[]" : "" + name
         return ccall("w_method_call", recv, native_name, args)
 
-      # The other synchronization selectors intentionally retain their native
-      # IC rows; route them there after giving the four source leaves priority.
-      if primitive_class[:name] == "Atomic" && name in ("cas" "get" "set" "add")
-        return ccall("w_method_call", recv, "" + name, args)
-      if primitive_class[:name] == "Channel" && name in ("send" "close")
-        return ccall("w_method_call", recv, "" + name, args)
-      if primitive_class[:name] == "Thread" && name in ("join" "kill")
-        return ccall("w_method_call", recv, "" + name, args)
       # String#lchs is a native lexer primitive rather than a Core source
       # method. Keep the tree walker on the same WValue-preserving runtime
       # path as compiled code so compiler-facing storage specs exercise both
       # engines.
       if primitive_class[:name] == "String" && name == "lchs"
         return ccall("w_method_call", recv, "lchs", args)
+      if primitive_class[:name] == "String" && name in ("=~" "match?") && args.size() == 1
+        return dispatch_method(args[0], "=~", [recv], nil, env)
 
     # Range methods
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :range
@@ -430,13 +389,6 @@
           arr.push(i)
           i = i + 1
         return dispatch_method(arr, name, args, block, env)
-
-    # Date formatting: `d.strftime(fmt)` and its core alias `d.to_s(fmt)`
-    # are runtime-backed (w_ic_date_to_s) — the core/date.w declarations are
-    # bodiless. Checked before the generic builtins: builtin to_s ignores
-    # its arguments, which would drop the format string.
-    if args.size() == 1 && name in ("strftime" "to_s") && w_type_name(recv) == "Date"
-      return ccall("w_method_call", recv, "" + name, args)
 
     # Builtins
     if is_builtin?(name)
@@ -622,7 +574,7 @@
   -> native_data_field_writable?(w_class, name)
     if w_class == nil
       return false
-    w_class[:name] == "BigInt" && name == "size"
+    (w_class[:name] == "BigInt" && name == "size") || (w_class[:name] == "Array" && name in ("start" "size"))
 
   -> native_data_field_declared?(w_class, name)
     w_class != nil && w_class[:data_fields] != nil && w_class[:data_fields].has_key?(name)

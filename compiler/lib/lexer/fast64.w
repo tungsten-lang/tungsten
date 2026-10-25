@@ -1139,6 +1139,14 @@
           while pos < count && (lc[pos] & 0x20) != 0
             pos++
           tokens[tc] = t_id | (((pos - start) & 0xFFF) << 26) | (start << 2)
+        elsif pos + 1 < count
+          c2 = (lc[pos + 1] >> 18) & cp_mask
+          if c2 == :-~ || c2 == :-& || c2 == :-+ || c2 == 96 || c2 == 39
+            pos += 2
+            tokens[tc] = t_op | (2 << 26) | (start << 2)
+          else
+            tokens[tc] = t_op | (1 << 26) | (pos << 2)
+            pos++
         else
           tokens[tc] = t_op | (1 << 26) | (pos << 2)
           pos++

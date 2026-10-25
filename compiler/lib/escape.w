@@ -3,60 +3,73 @@
 # Stores results in mod[:fn_escs] keyed by function name.
 
 # Known impure operations (I/O, syscalls, mutation)
+-> init_escape_impure_calls_map()
+  m = {}
+  names = [
+    "w_puts", "w_print", "w_write_file", "w_read_file",
+    "w_system", "w_exit", "w_raise", "w_env",
+    "w_goroutine_spawn", "w_thread_spawn", "w_thread_spawn_slots", "w_flush", "w_read_bytes", "w_read_line_stdin",
+    "w_slab_freeze_safe",
+    "__w_print", "__w_read_file", "__w_read_file_bytes", "__w_write_file", "__w_system",
+    "__w_capture", "__w_exit", "__w_env", "__w_file_mtime_ns",
+    "__w_file_exists", "__w_cache_read", "__w_cache_write",
+    "__w_clock", "__w_clock_ms", "__w_sleep_ms",
+    "w_metal_device_default", "w_metal_buffer_new", "w_metal_buffer_length",
+    "w_metal_buffer_write_f32", "w_metal_buffer_write_i32", "w_metal_buffer_write_f16",
+    "w_metal_buffer_read_f32", "w_metal_buffer_read_i32", "w_metal_buffer_read_f16",
+    "w_metal_compile_source", "w_metal_compile_source_opts", "w_metal_library_from_file", "w_metal_pipeline_for", "w_metal_queue_new",
+    "w_metal_dispatch1", "w_metal_dispatch_n", "w_metal_dispatch_groups",
+    "w_metal_batch_begin", "w_metal_batch_commit", "w_metal_batch_commit_ms",
+    "w_metal_batch_commit_async", "w_metal_command_buffer_wait",
+    "w_metal_batch_begin_concurrent", "w_metal_batch_barrier",
+    "w_metal_set_threadgroup_memory",
+    "w_metal_pipeline_for_with_int_constants",
+    "w_metal_binary_archive_new",
+    "w_metal_batch_barrier_resources",
+    "w_metal_buffer_write_from_mmap", "w_metal_fp8_e4m3_gather_rows", "w_q8_split_blocks", "w_q8_dequant_row"
+  ]
+  i = 0
+  while i < names.size()
+    m[names[i]] = true
+    i += 1
+  m
+
+escape_impure_calls_map = init_escape_impure_calls_map()
+
 -> is_impure_call(name)
-  if name in ("w_puts" "w_print" "w_write_file" "w_read_file")
-    return true
-  if name in ("w_system" "w_exit" "w_raise" "w_env")
-    return true
-  if name in ("w_goroutine_spawn" "w_thread_spawn" "w_thread_spawn_slots" "w_flush" "w_read_bytes" "w_read_line_stdin")
-    return true
-  if name == "w_slab_freeze_safe"
-    return true
-  if name in ("__w_print" "__w_read_file" "__w_read_file_bytes" "__w_write_file" "__w_system")
-    return true
-  if name in ("__w_capture" "__w_exit" "__w_env" "__w_file_mtime_ns")
-    return true
-  if name in ("__w_file_exists" "__w_cache_read" "__w_cache_write")
-    return true
-  if name in ("__w_clock" "__w_clock_ms" "__w_sleep_ms")
-    return true
-  # Metal bridge — every w_metal_* call either allocates a retained
-  # Obj-C object or mutates GPU-visible buffer state, so none of them
-  # can be cached. Treat the whole namespace as impure.
-  if name in ("w_metal_device_default" "w_metal_buffer_new" "w_metal_buffer_length")
-    return true
-  if name in ("w_metal_buffer_write_f32" "w_metal_buffer_write_i32" "w_metal_buffer_write_f16")
-    return true
-  if name in ("w_metal_buffer_read_f32" "w_metal_buffer_read_i32" "w_metal_buffer_read_f16")
-    return true
-  if name in ("w_metal_compile_source" "w_metal_compile_source_opts" "w_metal_library_from_file" "w_metal_pipeline_for" "w_metal_queue_new")
-    return true
-  if name in ("w_metal_dispatch1" "w_metal_dispatch_n" "w_metal_dispatch_groups")
-    return true
-  if name in ("w_metal_batch_begin" "w_metal_batch_commit" "w_metal_batch_commit_ms")
-    return true
-  if name in ("w_metal_batch_commit_async" "w_metal_command_buffer_wait")
-    return true
-  if name in ("w_metal_batch_begin_concurrent" "w_metal_batch_barrier")
-    return true
-  if name == "w_metal_set_threadgroup_memory"
-    return true
-  if name == "w_metal_pipeline_for_with_int_constants"
-    return true
-  if name == "w_metal_binary_archive_new"
-    return true
-  if name == "w_metal_batch_barrier_resources"
-    return true
-  if name in ("w_metal_buffer_write_from_mmap" "w_metal_fp8_e4m3_gather_rows" "w_q8_split_blocks" "w_q8_dequant_row")
-    return true
-  return false
+  escape_impure_calls_map[name] == true
 
 # Builtins whose ARGUMENTS never escape into the result or globals. Most
 # are read-only; the w_str_concat_free_* variants additionally RELEASE an
 # operand (a side effect), so this list must never be used to justify
 # dead-call elimination, reordering, or CSE — only escape marking.
+-> init_escape_pure_builtins_map()
+  m = {}
+  names = [
+    "__w_add_fast", "__w_sub_fast", "__w_mul_fast", "__w_div_fast", "__w_mod_fast",
+    "__w_shl_fast", "__w_shr_fast", "__w_band_fast", "__w_bor_fast", "__w_bxor_fast",
+    "w_bigint_shr", "w_bigint_shl", "w_bigint_add", "w_bigint_sub", "w_bigint_div", "w_bigint_mod", "w_bigint_mul_builtin_exact",
+    "w_add", "w_sub", "w_mul", "w_div", "w_mod",
+    "w_eq", "w_neq", "w_eq_lit", "w_neq_lit", "w_lt", "w_gt", "w_lte", "w_gte",
+    "__w_eq_fast", "__w_neq_fast", "__w_eq_lit_fast", "__w_neq_lit_fast",
+    "__w_lt_fast", "__w_gt_fast", "__w_lte_fast", "__w_gte_fast",
+    "__w_streq_fast", "__w_streq2_fast",
+    "w_bit_and", "w_bit_or", "w_bit_xor", "w_bit_shl", "w_bit_shr",
+    "w_negate", "w_not", "w_to_s", "w_int_to_s", "w_to_i", "w_to_f",
+    "w_string", "w_str_to_sym", "w_str_concat", "w_str_concat_free_rhs", "w_str_concat_free_lhs",
+    "w_str_length", "w_string_byte_length", "__w_type", "w_hash_new", "w_array_new",
+    "w_box_int_checked", "w_wire_sequence_from_array"
+  ]
+  i = 0
+  while i < names.size()
+    m[names[i]] = true
+    i += 1
+  m
+
+escape_pure_builtins_map = init_escape_pure_builtins_map()
+
 -> is_pure_builtin(name)
-  name in ("__w_add_fast" "__w_sub_fast" "__w_mul_fast" "__w_div_fast" "__w_mod_fast" "__w_shl_fast" "__w_shr_fast" "__w_band_fast" "__w_bor_fast" "__w_bxor_fast" "w_bigint_shr" "w_bigint_shl" "w_bigint_add" "w_bigint_sub" "w_bigint_div" "w_bigint_mod" "w_bigint_mul_builtin_exact" "w_add" "w_sub" "w_mul" "w_div" "w_mod" "w_eq" "w_neq" "w_eq_lit" "w_neq_lit" "w_lt" "w_gt" "w_lte" "w_gte" "__w_eq_fast" "__w_neq_fast" "__w_eq_lit_fast" "__w_neq_lit_fast" "__w_lt_fast" "__w_gt_fast" "__w_lte_fast" "__w_gte_fast" "w_bit_and" "w_bit_or" "w_bit_xor" "w_bit_shl" "w_bit_shr" "w_negate" "w_not" "w_to_s" "w_int_to_s" "w_to_i" "w_to_f" "w_string" "w_str_to_sym" "w_str_concat" "w_str_concat_free_rhs" "w_str_concat_free_lhs" "w_str_length" "w_string_byte_length" "__w_type" "w_hash_new" "w_array_new" "w_box_int_checked" "w_wire_sequence_from_array")
+  escape_pure_builtins_map[name] == true
 
 # Param index for a WIRE value: a parameter register itself, or a temp the
 # forward derivation walk below traced back to one. nil when unrelated.
@@ -138,8 +151,19 @@ escape_derive_fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
 
 # Concat variants that RELEASE or take ownership of an operand: an argument
 # handed to one of these is consumed, never merely read.
+-> init_escape_consuming_builtins_map()
+  m = {}
+  names = ["w_str_concat_free_lhs", "w_str_concat_free_rhs", "w_str_concat_own", "w_str_concat_i64", "w_i64_concat_str", "w_str_concat_int_wv", "w_int_wv_concat_str"]
+  i = 0
+  while i < names.size()
+    m[names[i]] = true
+    i += 1
+  m
+
+escape_consuming_builtins_map = init_escape_consuming_builtins_map()
+
 -> is_consuming_builtin(name)
-  name in ("w_str_concat_free_lhs" "w_str_concat_free_rhs" "w_str_concat_own" "w_str_concat_i64" "w_i64_concat_str" "w_str_concat_int_wv" "w_int_wv_concat_str")
+  escape_consuming_builtins_map[name] == true
 
 # Analyze one function: which parameters escape (stored somewhere that
 # outlives the call, or returned) and whether the function is pure.
@@ -193,31 +217,7 @@ escape_derive_fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
       inst = instrs[ii]
       op = wire_kind(inst)
 
-      if op == :phi_ssa
-        incoming = wire_get(inst, :incoming)
-        if incoming != nil
-          pi = 0
-          while pi < wire_sequence_size(incoming)
-            src = escape_param_source(wire_sequence_get(incoming, pi), temp_from_param, param_idx)
-            if src != nil
-              temp_from_param[wire_get(inst, :temp)] = src
-            pi += 2
-
-      elsif op == :phi_i64
-        src = escape_param_source(wire_get(inst, :a_value), temp_from_param, param_idx)
-        if src == nil
-          src = escape_param_source(wire_get(inst, :b_value), temp_from_param, param_idx)
-        if src != nil
-          temp_from_param[wire_get(inst, :temp)] = src
-
-      elsif op == :select_i64
-        src = escape_param_source(wire_get(inst, :then_val), temp_from_param, param_idx)
-        if src == nil
-          src = escape_param_source(wire_get(inst, :else_val), temp_from_param, param_idx)
-        if src != nil
-          temp_from_param[wire_get(inst, :temp)] = src
-
-      elsif op in (:call_direct_i64 :call_direct_void)
+      if op == :call_direct_i64 || op == :call_direct_void
         call_name = wire_get(inst, :name)
         args = wire_get(inst, :args)
         kept = container_store_first_kept(call_name)
@@ -284,6 +284,20 @@ escape_derive_fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
           if is_impure_call(call_name)
             has_side_effects = true
 
+      elsif op == :load_i64 || op == :load_ptr
+        src = escape_param_source(wire_get(inst, :ptr), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op == :store_i64 || op == :store_ptr || op == :view_store_field || op == :store_memo_ptr || op == :slab_node_set_idx
+        escape_mark_value(wire_get(inst, :value), true, state)
+
+      elsif op == :br || op == :cond_br || op == :call_loc_set_col || op == :scope_push || op == :scope_pop || op == :alloca_i64 || op == :ret_void || op == :ret_i32 || op == :unreachable || op == :load_global || op == :load_class || op == :free_value
+        ignored = nil
+
+      elsif op == :ret_i64
+        escape_mark_value(wire_get(inst, :value), false, state)
+
       elsif op == :call_method_i64
         has_side_effects = true
         escape_mark_args(wire_get(inst, :args), true, state)
@@ -303,18 +317,58 @@ escape_derive_fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
           param_kind_stored[:string][src] = true if mname == nil || !container_reader_method?(:string, mname)
           param_kind_stored[:hash][src] = true if mname == nil || !container_reader_method?(:hash, mname)
 
-      elsif op in (:string_i64 :symbol_i64)
+      elsif op == :string_i64 || op == :symbol_i64
         if wire_get(inst, :temp) != nil && strings != nil
           name_texts[wire_get(inst, :temp)] = strings[wire_get(inst, :string_id)]
 
-      elsif op == :ret_i64
-        escape_mark_value(wire_get(inst, :value), false, state)
+      elsif op == :truthy_inline || op == :nanbox_bool || op == :not_i1 || op == :zext_i1_i64
+        src = escape_param_source(wire_get(inst, :value), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op == :nanbox_int
+        src = escape_param_source(wire_get(inst, :raw), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op == :nanunbox_int
+        src = escape_param_source(wire_get(inst, :boxed), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op in (:icmp_i64 :add_i64 :sub_i64 :mul_i64 :sdiv_i64 :srem_i64 :and_i64 :or_i64 :xor_i64 :shl_i64 :ashr_i64 :lshr_i64 :and_i1 :or_i1)
+        src = escape_param_source(wire_get(inst, :lhs), temp_from_param, param_idx)
+        if src == nil
+          src = escape_param_source(wire_get(inst, :rhs), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op == :phi_ssa
+        incoming = wire_get(inst, :incoming)
+        if incoming != nil
+          pi = 0
+          while pi < wire_sequence_size(incoming)
+            src = escape_param_source(wire_sequence_get(incoming, pi), temp_from_param, param_idx)
+            if src != nil
+              temp_from_param[wire_get(inst, :temp)] = src
+            pi += 2
+
+      elsif op == :phi_i64
+        src = escape_param_source(wire_get(inst, :a_value), temp_from_param, param_idx)
+        if src == nil
+          src = escape_param_source(wire_get(inst, :b_value), temp_from_param, param_idx)
+        if src != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
+      elsif op == :select_i64
+        src = escape_param_source(wire_get(inst, :then_val), temp_from_param, param_idx)
+        if src == nil
+          src = escape_param_source(wire_get(inst, :else_val), temp_from_param, param_idx)
+        if src != nil
+          temp_from_param[wire_get(inst, :temp)] = src
 
       elsif op in (:ivar_set :ivar_set_idx :store_global :store_cvar :class_store)
         has_side_effects = true
-        escape_mark_value(wire_get(inst, :value), true, state)
-
-      elsif op in (:store_ptr :store_i64 :view_store_field :store_memo_ptr :slab_node_set_idx)
         escape_mark_value(wire_get(inst, :value), true, state)
 
       elsif op in (:small_array_set_inline :typed_array_set_inline :typed_array_compound_op_inline)
@@ -359,36 +413,6 @@ escape_derive_fields = [:value, :boxed, :raw, :arr, :base, :ptr, :lhs, :rhs]
       elsif op == :class_new
         has_side_effects = true
         escape_mark_value(wire_get(inst, :super_reg), true, state)
-
-      elsif op in (:br :cond_br :scope_push :scope_pop :alloca_i64 :ret_void :ret_i32 :unreachable :load_global :load_class :free_value)
-        ignored = nil
-
-      elsif op in (:load_i64 :load_ptr)
-        src = escape_param_source(wire_get(inst, :ptr), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
-
-      elsif op in (:truthy_inline :nanbox_bool :not_i1 :zext_i1_i64)
-        src = escape_param_source(wire_get(inst, :value), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
-
-      elsif op == :nanbox_int
-        src = escape_param_source(wire_get(inst, :raw), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
-
-      elsif op == :nanunbox_int
-        src = escape_param_source(wire_get(inst, :boxed), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
-
-      elsif op in (:icmp_i64 :add_i64 :sub_i64 :mul_i64 :sdiv_i64 :srem_i64 :and_i64 :or_i64 :xor_i64 :shl_i64 :ashr_i64 :lshr_i64 :and_i1 :or_i1)
-        src = escape_param_source(wire_get(inst, :lhs), temp_from_param, param_idx)
-        if src == nil
-          src = escape_param_source(wire_get(inst, :rhs), temp_from_param, param_idx)
-        if src != nil && wire_get(inst, :temp) != nil
-          temp_from_param[wire_get(inst, :temp)] = src
 
       else
         # Catch-all for every other instruction shape. Any op that carries

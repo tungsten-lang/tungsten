@@ -129,7 +129,7 @@
   # (instances virtual-dispatch identically in both engines; classes
   # do not).
   -> .table_of(klass)
-    klass.new({}).table
+    klass.new(:__table_probe__).table
 
   # --- Query interface: Model.create(Post, attrs), Model.find(Post, 3) ---
 
@@ -139,23 +139,36 @@
     record
 
   -> .all(klass)
+    rows = Model.rows(Model.table_of(klass))
     out = []
-    Model.rows(Model.table_of(klass)).each -> (row)
-      out.push(row)
+    n = rows.size
+    i = 0
+    while i < n
+      out.push(rows[i])
+      i += 1
     out
 
   -> .find(klass, id)
-    found = nil
-    Model.rows(Model.table_of(klass)).each -> (row)
-      if found == nil && row.id == id
-        found = row
-    found
+    rows = Model.rows(Model.table_of(klass))
+    n = rows.size
+    i = 0
+    while i < n
+      row = rows[i]
+      if row.id == id
+        return row
+      i += 1
+    nil
 
   -> .where(klass, conditions = {})
+    rows = Model.rows(Model.table_of(klass))
     out = []
-    Model.rows(Model.table_of(klass)).each -> (row)
+    n = rows.size
+    i = 0
+    while i < n
+      row = rows[i]
       if row.matches_conditions?(conditions)
         out.push(row)
+      i += 1
     out
 
   -> .count(klass)
@@ -253,8 +266,11 @@
   # in row order.
   -> .pluck(rows, key)
     out = []
-    rows.each -> (row)
-      out.push(row.get(key))
+    n = rows.size
+    i = 0
+    while i < n
+      out.push(rows[i].get(key))
+      i += 1
     out
 
   # --- Associations (Rails-style belongs_to / has_many / has_one) ---
@@ -371,20 +387,24 @@
 
   -> new(attrs = {})
     @attributes = {}
-    own = @attributes
-    seed = attrs
-    if seed == nil
-      seed = {}
-    seed.each -> (k, v)
-      own[k] = v
-    @errors    = []
-    @id        = nil
-    @persisted = false
-    # Dirty-tracking baselines (see the Dirty tracking section). A brand-new
-    # record's clean baseline is empty, so every seeded attribute reads as a
-    # change from nil until the first save snapshots the current state.
-    @saved_attributes = {}
-    @previous_changes = {}
+    if attrs != nil && attrs != :__table_probe__
+      own = @attributes
+      attrs.each -> (k, v)
+        own[k] = v
+      @errors    = []
+      @id        = nil
+      @persisted = false
+      # Dirty-tracking baselines (see the Dirty tracking section). A brand-new
+      # record's clean baseline is empty, so every seeded attribute reads as a
+      # change from nil until the first save snapshots the current state.
+      @saved_attributes = {}
+      @previous_changes = {}
+    else
+      @errors    = []
+      @id        = nil
+      @persisted = false
+      @saved_attributes = {}
+      @previous_changes = {}
 
   # Override in concrete models — the store key for this class.
   -> table
@@ -407,16 +427,19 @@
   # or self.) don't resolve — an explicit local alias works identically
   # in both engines (verified by probe).
   -> valid?
-    me = self
     run_hooks(before_validation)
     collected = []
-    validations.each -> (v)
-      msg = me.validation_error(v)
+    vals = validations
+    n = vals.size
+    i = 0
+    while i < n
+      msg = validation_error(vals[i])
       if msg != nil
         collected.push(msg)
+      i += 1
     @errors = collected
     run_hooks(after_validation)
-    @errors.empty?
+    collected.empty?
 
   # One descriptor -> nil or an error message string.
   #
@@ -556,20 +579,22 @@
   # no early return (a bare return from a closure-bearing method corrupts the
   # interpreter).
   -> run_guard(callbacks)
-    me = self
-    ok = true
-    callbacks.each -> (cb)
-      if ok
-        if cb.call(me) == false
-          ok = false
-    ok
+    n = callbacks.size
+    i = 0
+    while i < n
+      if callbacks[i].call(self) == false
+        return false
+      i += 1
+    true
 
   # Run a side-effect (after-style / validation) callback array. Return values
   # are ignored — these hooks observe or mutate, they do not halt.
   -> run_hooks(callbacks)
-    me = self
-    callbacks.each -> (cb)
-      cb.call(me)
+    n = callbacks.size
+    i = 0
+    while i < n
+      callbacks[i].call(self)
+      i += 1
     nil
 
   # --- Persistence lifecycle ---
@@ -592,8 +617,9 @@
       if timestamps?
         apply_timestamps(created)
       if !@persisted
-        @id = Model.allocate_id(table)
-        Model.rows(table).push(self)
+        tbl = table
+        @id = Model.allocate_id(tbl)
+        Model.rows(tbl).push(self)
         @persisted = true
       result = true
       # Go clean BEFORE the after-callbacks so they observe Rails-consistent
@@ -625,10 +651,16 @@
     if run_guard(before_destroy)
       kept = []
       my_id = @id
-      Model.rows(table).each -> (row)
+      tbl = table
+      rows = Model.rows(tbl)
+      n = rows.size
+      i = 0
+      while i < n
+        row = rows[i]
         if row.id != my_id
           kept.push(row)
-      Model.replace_rows(table, kept)
+        i += 1
+      Model.replace_rows(tbl, kept)
       @persisted = false
       result = true
       run_hooks(after_destroy)
@@ -754,7 +786,12 @@
 
   # Any unsaved change since the last clean state?
   -> changed?
-    !changes.empty?
+    base = @saved_attributes
+    dirty = false
+    @attributes.each -> (k, v)
+      if !dirty && base[k] != v
+        dirty = true
+    dirty
 
   # Names of the changed attributes, in attribute order.
   -> changed
@@ -772,11 +809,7 @@
 
   # Has this specific attribute changed since the last clean state?
   -> attribute_changed?(name)
-    found = false
-    changes.each -> (k, pair)
-      if k == name
-        found = true
-    found
+    @attributes[name] != @saved_attributes[name]
 
   # The attribute's value as of the last clean state (its pre-change value when
   # dirty; the current value when unchanged). nil when never set/saved.
@@ -789,11 +822,7 @@
 
   # Did this attribute change on the most recent successful save?
   -> attribute_previously_changed?(name)
-    found = false
-    @previous_changes.each -> (k, pair)
-      if k == name
-        found = true
-    found
+    @previous_changes.has_key?(name)
 
   # Discard every unsaved change, reverting attributes to the clean baseline.
   # Returns self.

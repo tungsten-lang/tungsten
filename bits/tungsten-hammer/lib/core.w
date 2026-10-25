@@ -97,15 +97,24 @@
   # against 5, not 99. Matched case-insensitively via downcase, mirroring the
   # line-anchored header_value / response_length_at_raw scans.
   -> .content_length(buf, header_end) (string i64) i64
-    target = "\r\ncontent-length:"
-    pos = buf.downcase.index(target)
-    if pos == nil || pos >= header_end
+    length = ccall_nobox("w_string_byte_length", buf) ## i64
+    data = ccall_nobox("w_string_byte_ptr", buf) ## i64
+    cap = header_end < length ? header_end : length
+    pos = raw_find_ci(data, 0, cap, "\r\ncontent-length:")
+    if pos < 0
       return 0
-    value_start = pos + target.size
-    line_end = buf.index("\n", value_start)
-    if line_end == nil || line_end > header_end
-      line_end = header_end
-    buf.slice(value_start, line_end - value_start).strip().to_i
+    v = pos + 17 ## i64
+    while v < cap
+      b = raw_load_u8(data, v) ## i64
+      break if b != 32 && b != 9
+      v += 1
+    n = 0 ## i64
+    while v < cap
+      d = raw_load_u8(data, v) ## i64
+      break if d < 48 || d > 57
+      n = n * 10 + (d - 48)
+      v += 1
+    n
 
   -> .response_length(buf) (string) i64
     response_length_at(buf, 0)
@@ -132,6 +141,7 @@
     if header_end < 0
       return 0
 
+    te = -1 ## i64
     p = start
     while p < header_end
       c = raw_load_u8(data, p)
@@ -162,6 +172,10 @@
               total_len = header_end - start + 4 + n ## i64
               return total_len if length - start >= total_len
               return 0
+      elsif c in (:-T :-t)
+        if te < 0 && header_end - p >= 18
+          if raw_ci_eq(data, p, "transfer-encoding:") == 1
+            te = p
       loop
         break if p >= header_end
         break if raw_load_u8(data, p) == :-\n
@@ -173,10 +187,9 @@
     # carries exactly one of the two, so we only pay for this scan when
     # Content-Length is absent. Chunked framing sums the chunk sizes through the
     # terminating zero-length chunk; an incomplete body returns 0 (read more).
-    te = raw_find_ci(data, start, header_end, "transfer-encoding:")
     if te >= 0
       value_line_end = raw_line_end(data, te, header_end)
-      if raw_find_ci(data, te, value_line_end, "chunked") >= 0
+      if raw_find_ci(data, te + 18, value_line_end, "chunked") >= 0
         chunk_end = chunked_length_raw(data, length, header_end + 4)
         return chunk_end - start if chunk_end > 0
         return 0
@@ -202,10 +215,28 @@
   # Case-insensitive search for lit within data[from, to); index or -1.
   -> .raw_find_ci(data, from, to, lit) (i64 i64 i64 string) i64
     lit_len = ccall_nobox("w_string_byte_length", lit) ## i64
+    if lit_len <= 0
+      return from
+    lit_ptr = ccall_nobox("w_string_byte_ptr", lit) ## i64
+    b0 = raw_load_u8(lit_ptr, 0) ## i64
     limit = to - lit_len ## i64
     p = from ## i64
     while p <= limit
-      return p if raw_ci_eq(data, p, lit) == 1
+      c0 = raw_load_u8(data, p) ## i64
+      if c0 >= :-A && c0 <= :-Z
+        c0 = c0 + 32
+      if c0 == b0
+        match = 1 ## i64
+        i = 1 ## i64
+        while i < lit_len
+          b = raw_load_u8(data, p + i) ## i64
+          if b >= :-A && b <= :-Z
+            b = b + 32
+          if b != raw_load_u8(lit_ptr, i)
+            match = 0
+            break
+          i += 1
+        return p if match == 1
       p += 1
     -1
 
@@ -346,20 +377,22 @@
   # with no floating-point sqrt.
   -> .isqrt(n) (i64) i64
     return 0 if n <= 0
-    x = n ## i64
-    y = (x + 1) / 2 ## i64
-    while y < x
-      x = y
-      y = (x + n / x) / 2
-    x
+    return 1 if n < 4
+    n.isqrt
 
   # Population variance: the mean squared deviation Σ(xᵢ−μ)²/N, computed exactly
   # as (N·Σx² − (Σx)²)/N² and truncated. 0 for an empty sample.
   -> .stat_variance(samples)
     n = samples.size
     return 0 if n == 0
-    sum = stat_sum(samples) ## i64
-    sq = stat_sum_squares(samples) ## i64
+    sum = 0 ## i64
+    sq = 0 ## i64
+    i = 0 ## i64
+    while i < n
+      v = samples[i] ## i64
+      sum += v
+      sq += v * v
+      i += 1
     (n * sq - sum * sum) / (n * n)
 
   # Sample variance (Bessel's correction): Σ(xᵢ−μ)²/(N−1), computed as
@@ -368,8 +401,14 @@
   -> .stat_variance_sample(samples)
     n = samples.size
     return 0 if n < 2
-    sum = stat_sum(samples) ## i64
-    sq = stat_sum_squares(samples) ## i64
+    sum = 0 ## i64
+    sq = 0 ## i64
+    i = 0 ## i64
+    while i < n
+      v = samples[i] ## i64
+      sum += v
+      sq += v * v
+      i += 1
     (n * sq - sum * sum) / (n * (n - 1))
 
   # Population standard deviation: floor(√population-variance), integer-valued.
@@ -439,18 +478,27 @@
   # the next space or CR. Returns 0 for anything not beginning with "HTTP/" or
   # with no space after the version — the caller treats 0 as "not a response".
   -> .status_code(response) (string) i64
-    return 0 if !response.starts_with?("HTTP/")
-    sp = response.index(" ")
-    return 0 if sp == nil
-    code_start = sp + 1
-    code_end = response.index(" ", code_start)
-    cr = response.index("\r", code_start)
-    if cr != nil && (code_end == nil || cr < code_end)
-      code_end = cr
-    if code_end == nil
-      code_end = response.size
-    return 0 if code_end <= code_start
-    response.slice(code_start, code_end - code_start).to_i
+    len = ccall_nobox("w_string_byte_length", response) ## i64
+    return 0 if len < 9
+    data = ccall_nobox("w_string_byte_ptr", response) ## i64
+    return 0 if raw_load_u32(data, 0) != 0x50545448
+    return 0 if raw_load_u8(data, 4) != 47
+    p = 5 ## i64
+    while p < len && raw_load_u8(data, p) != 32
+      p += 1
+    p += 1
+    return 0 if p >= len
+    code = 0 ## i64
+    seen = 0 ## i64
+    while p < len
+      b = raw_load_u8(data, p) ## i64
+      break if b == 32 || b == 13 || b == 10
+      return 0 if b < 48 || b > 57
+      code = code * 10 + (b - 48)
+      seen += 1
+      p += 1
+    return 0 if seen == 0
+    code
 
   # Class digit of a status code: 1xx->1, 2xx->2, ... 5xx->5. Codes outside the
   # valid 100..599 range (including the 0 that status_code returns on failure)
@@ -476,36 +524,19 @@
     status_ok(status_code(response))
 
   # ---- HTTP header field lookup ----
-  # Beyond framing and status, a benchmark inspects individual response
-  # headers: to honor a "Connection: close" the server sends back, to record
-  # the "Server" it hit, or to note "Content-Encoding: gzip". content_length
-  # above is the specialized, hot-path form of exactly this lookup; header_value
-  # is the general one — the pure-Tungsten analogue any `use hammer/core`
-  # consumer can reach for. It reads a raw response the same way status_code
-  # does, so the two compose over one framed response.
-  #
-  # A header field (RFC 7230 §3.2) is `field-name ":" OWS field-value OWS`, one
-  # per CRLF-delimited line within the header section that ends at the blank
-  # line (CRLFCRLF). header_value returns the (whitespace-trimmed) value of the
-  # first field named `name`, matched case-insensitively per the spec. The
-  # match is anchored to the start of a header line — the search key is
-  # "CRLF + name + colon" — so a name is never found inside another header's
-  # value (a lookup of "Type" does not match "Content-Type:") nor inside the
-  # message body (bounded to the header section). Returns nil when the header
-  # is absent; a present header with an empty value (e.g. "X-Foo:") returns the
-  # empty string, so nil and "" are distinguishable by the caller.
   -> .header_value(response, name) (string string)
+    len = ccall_nobox("w_string_byte_length", response) ## i64
+    data = ccall_nobox("w_string_byte_ptr", response) ## i64
     he = response.index("\r\n\r\n")
     if he == nil
-      section_end = response.size
+      section_end = len
     else
       section_end = he + 2
-    lower = response.downcase
     target = ("\r\n" + name + ":").downcase
-    pos = lower.index(target)
-    return nil if pos == nil
-    return nil if pos >= section_end
-    value_start = pos + target.size
+    tlen = ccall_nobox("w_string_byte_length", target) ## i64
+    pos = raw_find_ci(data, 0, section_end + 2, target)
+    return nil if pos < 0 || pos >= section_end
+    value_start = pos + tlen
     line_end = response.index("\r\n", value_start)
     if line_end == nil || line_end > section_end
       line_end = section_end

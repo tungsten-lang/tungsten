@@ -3,35 +3,53 @@
   # Drop nils.
   -> .clean(values)
     out = []
-    values.each -> (v)
+    n = values.size
+    i = 0
+    while i < n
+      v = values[i]
       out.push(v) if v != nil
+      i += 1
     out
 
   # Stable insertion sort — avoids engine-specific Array#sort gaps.
   -> .sorted(values)
     out = []
-    values.each -> (v)
-      inserted = false
-      next_out = []
-      out.each -> (u)
-        if !inserted && v < u
-          next_out.push(v)
-          inserted = true
-        next_out.push(u)
-      next_out.push(v) if !inserted
-      out = next_out
+    n = values.size
+    i = 0
+    while i < n
+      v = values[i]
+      out.push(v)
+      j = i
+      while j > 0 && v < out[j - 1]
+        out[j] = out[j - 1]
+        j -= 1
+      out[j] = v
+      i += 1
     out
 
   -> .sum(values)
     total = 0
-    self.clean(values).each -> (v)
-      total += v
+    n = values.size
+    i = 0
+    while i < n
+      v = values[i]
+      total += v if v != nil
+      i += 1
     total
 
   -> .mean(values)
-    clean = self.clean(values)
-    return nil if clean.size == 0
-    self.sum(clean).to_f / clean.size.to_f
+    total = 0
+    cnt = 0
+    n = values.size
+    i = 0
+    while i < n
+      v = values[i]
+      if v != nil
+        total += v
+        cnt += 1
+      i += 1
+    return nil if cnt == 0
+    total.to_f / cnt.to_f
 
   -> .median(values)
     s = self.sorted(self.clean(values))

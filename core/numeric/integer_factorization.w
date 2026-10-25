@@ -49,6 +49,10 @@
     remaining = extract_factor(remaining, 2)
     remaining = extract_factor(remaining, 3)
 
+    if remaining > 1000 && remaining.prime?
+      @factors.push(PrimePower.new(remaining, 1))
+      return self
+
     # Every prime greater than three is 6k +/- 1. Trial division is exact and
     # is deliberately sufficient for the algebra program's discriminant,
     # whose support is {2, 3, 13}. A later Pollard-rho implementation can live
@@ -72,6 +76,9 @@
       remaining = remaining / prime
       exponent += 1
     @factors.push(PrimePower.new(prime, exponent))
+    if remaining > 1000 && remaining.prime?
+      @factors.push(PrimePower.new(remaining, 1))
+      return 1
     remaining
 
   ro :number, :sign

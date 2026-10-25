@@ -158,27 +158,6 @@ def zstd_flags
   [cflags, libs]
 end
 
-def onig_flags
-  cflags = `pkg-config --cflags oniguruma 2>/dev/null`.split
-  libs = `pkg-config --libs oniguruma 2>/dev/null`.split
-
-  brew_prefix = Tungsten::SystemDependencies.brew_prefix
-  if cflags.empty? && brew_prefix && File.exist?(File.join(brew_prefix, "include/oniguruma.h"))
-    cflags = ["-I#{brew_prefix}/include"]
-  end
-
-  if libs.empty?
-    if brew_prefix && (File.exist?(File.join(brew_prefix, "lib/libonig.dylib")) || File.exist?(File.join(brew_prefix, "lib/libonig.a")))
-      libs = ["-L#{brew_prefix}/lib", "-lonig"]
-    elsif cflags.any?
-      libs = ["-lonig"]
-    end
-  end
-
-  cflags << "-DTUNGSTEN_ONIG" if cflags.any?
-  [cflags, libs]
-end
-
 def ir_needs_zstd_runtime?(ir)
   ir.include?("@w_slab_init_static_zstd(") || ir.include?("@w_zstd_compress_llvm_escaped(")
 end
@@ -764,8 +743,7 @@ when ".w"
       $stdout = old_stdout
     end
 
-    onig_cflags, onig_libs = onig_flags
-    clang_flags = CLANG_FLAGS + EXTRA_FLAGS + onig_cflags + ["-I#{RUNTIME_DIR}"] + extra_clang_flags
+    clang_flags = CLANG_FLAGS + EXTRA_FLAGS + ["-I#{RUNTIME_DIR}"] + extra_clang_flags
     clang_sources = [RUNTIME_C, TERMINAL_INPUT_C, *EVENT_SRCS, *EXTRA_SRCS, *extra_c_includes]
     if ir_needs_apple_bridges?(ir)
       clang_flags += METAL_FRAMEWORK_FLAGS
@@ -782,7 +760,7 @@ when ".w"
     clang_sources << LEXCHAR_TABLES_C if ir_needs_lexchars?(ir) && File.exist?(LEXCHAR_TABLES_C)
     # (no else: runtime.c's weak bridge stubs stand in when the .m files are
     # not linked — same mechanism as the fast path in compiler/tungsten.w)
-    link_flags = onig_libs + extra_link_flags
+    link_flags = extra_link_flags
     if ir_needs_zstd_runtime?(ir)
       zstd_cflags, zstd_libs = zstd_flags
       clang_flags += zstd_cflags + zstd_libs

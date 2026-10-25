@@ -330,16 +330,14 @@ use seeds/rect
         vmask = ffr_factor_mask(m * p) ## i64
         wmask = ffr_factor_mask(n * p) ## i64
         current = 0 ## i64
+        row_uvw = i64[3]
         i = 0 ## i64
         while i < rank
-          parts = lines[i + line_base].split(" ")
-          valid = 1 ## i64
-          if parts.size() < field_base + 3
-            valid = 0
+          valid = ffw_parse_scheme_row(lines[i + line_base], field_base, row_uvw) ## i64
           if valid == 1
-            u = ffw_parse_decimal_i64(parts[field_base]) ## i64
-            v = ffw_parse_decimal_i64(parts[field_base + 1]) ## i64
-            w = ffw_parse_decimal_i64(parts[field_base + 2]) ## i64
+            u = row_uvw[0] ## i64
+            v = row_uvw[1] ## i64
+            w = row_uvw[2] ## i64
             if u <= 0 || (u & umask) != u
               valid = 0
             if v <= 0 || (v & vmask) != v

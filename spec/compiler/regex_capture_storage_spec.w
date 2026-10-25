@@ -40,5 +40,20 @@ check("regex.match_data.to_a", match_data.to_a(), ["é", "é", nil, ""])
 check("regex.match_data.to_s", match_data.to_s(), "é")
 check("regex.match_data.unknown_name", match_data["missing"], nil)
 check("regex.match_data.unknown_symbol", match_data[:missing], nil)
+check("regex.match_data.pre_match", match_data.pre_match(), "x")
+check("regex.match_data.post_match", match_data.post_match(), "")
+check("regex.match_data.string", match_data.string(), "xé")
+
+# === sets $~, $&, $`, $', $+, $1..$N and Regex.last_match
+triple_matched = /(?<a>\w+)-(?<b>\d+)/ === "id: foo-42!"
+check("regex.triple_eq.bool", triple_matched, true)
+check("regex.triple_eq.last_match_whole", $~[0], "foo-42")
+check("regex.triple_eq.last_match_named", $~[:a], "foo")
+check("regex.triple_eq.ampersand", $&, "foo-42")
+check("regex.triple_eq.pre_match", $`, "id: ")
+check("regex.triple_eq.post_match", $', "!")
+check("regex.triple_eq.last_paren_match", $+, "42")
+check("regex.triple_eq.class_last_match", Regex.last_match(2), "42")
+check("regex.triple_eq.nmatch", ("foo-42" !~ /xyz/), true)
 
 << "regex capture storage: all green"

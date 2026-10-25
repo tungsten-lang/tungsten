@@ -28,7 +28,7 @@ WRATB_MAGIC_SIZE = 6
 
 # Shared read-only accessors consumed by WratChecker#check_stream.
 + WratProofScanner
-  ro :format, :version, :kind, :id, :lits, :hints, :records
+  ro :format, :version, :kind, :id, :lits, :hints, :records, :size
 
   -> bytesize
     @size
@@ -40,13 +40,17 @@ WRATB_MAGIC_SIZE = 6
 
   -> count_record
     @records += 1
-    @literal_tokens += @lits.size
-    @hint_tokens += @hints.size
-    @peak_record_literals = @lits.size if @lits.size > @peak_record_literals
-    @peak_record_hints = @hints.size if @hints.size > @peak_record_hints
+    lsize = @lits.size
+    hsize = @hints.size
+    @literal_tokens += lsize
+    @hint_tokens += hsize
+    @peak_record_literals = lsize if lsize > @peak_record_literals
+    @peak_record_hints = hsize if hsize > @peak_record_hints
 
 # Text WRAT/LRAT/DRAT scanner over a byte-indexed source.
 + WratTextProof < WratProofScanner
+  ro :bytes, :pos, :line, :line_start, :line_end, :cursor
+
   -> new(@bytes)
     @size = @bytes.size
     @pos = 0
@@ -68,11 +72,17 @@ WRATB_MAGIC_SIZE = 6
     self.detect_format
 
   -> whitespace?(b)
-    b == 32 || b == 9 || b == 11 || b == 12 || b == 13
+    b == 32 || (b >= 9 && b <= 13 && b != 10)
 
   -> skip_space
-    while @cursor < @line_end && self.whitespace?(@bytes[@cursor])
-      @cursor += 1
+    bytes = @bytes
+    c = @cursor
+    le = @line_end
+    while c < le
+      b = bytes[c]
+      break unless b == 32 || (b >= 9 && b <= 13 && b != 10)
+      c += 1
+    @cursor = c
 
   -> at_line_end?
     self.skip_space
@@ -84,19 +94,30 @@ WRATB_MAGIC_SIZE = 6
   # Advance to the next nonblank, non-comment line.  Comments are recognized
   # only when `c` is the first non-whitespace byte, matching DIMACS/WRAT.
   -> find_data_line
+    bytes = @bytes
+    sz = @size
+    pos = @pos
+    line = @line
     found = false
-    while @pos < @size && !found
-      @line_start = @pos
-      @line_end = @pos
-      while @line_end < @size && @bytes[@line_end] != 10
-        @line_end += 1
-      @pos = @line_end < @size ? @line_end + 1 : @line_end
-      @line += 1
+    while pos < sz && !found
+      ls = pos
+      le = pos
+      while le < sz && bytes[le] != 10
+        le += 1
+      pos = le < sz ? le + 1 : le
+      line += 1
 
-      i = @line_start
-      while i < @line_end && self.whitespace?(@bytes[i])
+      i = ls
+      while i < le
+        b = bytes[i]
+        break unless b == 32 || (b >= 9 && b <= 13 && b != 10)
         i += 1
-      found = i < @line_end && @bytes[i] != 99
+      found = i < le && bytes[i] != 99
+      if found || pos >= sz
+        @line_start = ls
+        @line_end = le
+    @pos = pos
+    @line = line
     found
 
   -> byte_word?(at, a, b, c, d)
@@ -104,28 +125,41 @@ WRATB_MAGIC_SIZE = 6
     room && @bytes[at] == a && @bytes[at + 1] == b && @bytes[at + 2] == c && @bytes[at + 3] == d
 
   -> read_integer
-    self.skip_space
-    self.fail_parse("expected an integer") if @cursor >= @line_end
+    bytes = @bytes
+    c = @cursor
+    le = @line_end
+    while c < le
+      b = bytes[c]
+      break unless b == 32 || (b >= 9 && b <= 13 && b != 10)
+      c += 1
+    if c >= le
+      @cursor = c
+      self.fail_parse("expected an integer")
 
     sign = 1
-    b = @bytes[@cursor]
+    b = bytes[c]
     if b == 45 || b == 43
       sign = -1 if b == 45
-      @cursor += 1
-    self.fail_parse("sign is not followed by digits") if @cursor >= @line_end
+      c += 1
+    if c >= le
+      @cursor = c
+      self.fail_parse("sign is not followed by digits")
 
     value = 0
     digits = 0
-    while @cursor < @line_end
-      b = @bytes[@cursor]
+    while c < le
+      b = bytes[c]
       break unless b >= 48 && b <= 57
       value = value * 10 + b - 48
       digits += 1
-      @cursor += 1
+      c += 1
+    @cursor = c
     self.fail_parse("expected decimal digits") if digits == 0
-    if @cursor < @line_end && !self.whitespace?(@bytes[@cursor])
-      self.fail_parse("invalid byte after integer")
-    sign * value
+    if c < le
+      b = bytes[c]
+      unless b == 32 || (b >= 9 && b <= 13 && b != 10)
+        self.fail_parse("invalid byte after integer")
+    sign < 0 ? 0 - value : value
 
   -> deletion_marker?
     self.skip_space
@@ -236,14 +270,13 @@ WRATB_MAGIC_SIZE = 6
 
 # Packed WRATB scanner.  It shares the same per-record surface as text.
 + WratBinaryProof < WratProofScanner
+  ro :bytes, :pos, :next_id, :ended
+
   -> new(@bytes)
     @size = @bytes.size
     self.fail_binary("truncated header") if @size < WRATB_MAGIC_SIZE
-    expected = [87, 82, 65, 84, 66, 1]
-    i = 0
-    while i < expected.size
-      self.fail_binary("bad magic or unsupported version") if @bytes[i] != expected[i]
-      i += 1
+    if @bytes[0] != 87 || @bytes[1] != 82 || @bytes[2] != 65 || @bytes[3] != 84 || @bytes[4] != 66 || @bytes[5] != 1
+      self.fail_binary("bad magic or unsupported version")
 
     @pos = WRATB_MAGIC_SIZE
     @next_id = self.read_uvarint
@@ -265,21 +298,29 @@ WRATB_MAGIC_SIZE = 6
     raise "packed proof byte [@pos || 0]: [message]"
 
   -> read_uvarint
+    bytes = @bytes
+    pos = @pos
+    sz = @size
     value = 0
     shift = 0
     more = true
     while more
-      self.fail_binary("truncated varint") if @pos >= @size
-      byte = @bytes[@pos]
-      @pos += 1
+      if pos >= sz
+        @pos = pos
+        self.fail_binary("truncated varint")
+      byte = bytes[pos]
+      pos += 1
       value = value | ((byte & 127) << shift)
       more = (byte & 128) != 0
       shift += 7
-      self.fail_binary("varint exceeds 63 bits") if shift > 63 && more
+      if shift > 63 && more
+        @pos = pos
+        self.fail_binary("varint exceeds 63 bits")
+    @pos = pos
     value
 
   -> zigzag_decode(value)
-    value % 2 == 0 ? value / 2 : 0 - ((value + 1) / 2)
+    (value & 1) == 0 ? (value >> 1) : 0 - ((value + 1) >> 1)
 
   -> read_literal_list(out)
     done = false

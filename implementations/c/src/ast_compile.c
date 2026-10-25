@@ -193,7 +193,7 @@ static int compile_var(TcAstValue node, TcChunk *chunk, TcError *err) {
   }
   static const char *zero_arg_calls[] = {
       "clock", "resolve_runtime_dir", "runtime_event_source", "extra_c_includes",
-      "zstd_cflags", "zstd_ldflags", "onig_cflags", "onig_ldflags"};
+      "zstd_cflags", "zstd_ldflags"};
   for (size_t i = 0; i < sizeof(zero_arg_calls) / sizeof(zero_arg_calls[0]); i++) {
     size_t len = strlen(zero_arg_calls[i]);
     if (name->as.string.len == len && memcmp(name->as.string.bytes, zero_arg_calls[i], len) == 0) {
@@ -1377,6 +1377,8 @@ static int compile_call(TcAstValue node, TcChunk *chunk, TcError *err) {
     else if (argc == 4 && ast_string_unquoted_eq(target, "w_wire_sequence_set")) ccall_op = TC_OP_WIRE_SEQ_SET;
     else if (argc == 2 && ast_string_unquoted_eq(target, "w_wire_sequence_from_array")) ccall_op = TC_OP_WIRE_SEQ_FROM_ARR;
     else if (argc == 3 && ast_string_unquoted_eq(target, "w_content_temp_norm")) ccall_op = TC_OP_NORM_TEMP;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_string_first_byte")) ccall_op = TC_OP_STRING_FIRST_BYTE;
+    else if (argc == 2 && ast_string_unquoted_eq(target, "w_wire_temp_operands")) ccall_op = TC_OP_WIRE_TEMP_OPERANDS;
     if (ccall_op != 0) {
       for (size_t i = 1; i < argc; i++) {
         if (!compile_expr(args->as.array->items[i], chunk, err)) return 0;

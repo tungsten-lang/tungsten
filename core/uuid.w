@@ -83,7 +83,25 @@
     return $bytes[raw_index]
 
   -> bytes
-    ccall("w_uuid_bytes", self)
+    out = ByteArray.new(16)
+    i = 0
+    while i < 16
+      out[i] = $bytes[i]
+      i += 1
+    out
 
   -> to_s
-    ccall("w_uuid_to_s", self)
+    hex = "0123456789abcdef"
+    buf = StringBuffer(36)
+    i = 0
+    while i < 16
+      if i == 4 || i == 6 || i == 8 || i == 10
+        buf << "-"
+      b = $bytes[i]
+      buf << hex[b >> 4]
+      buf << hex[b & 0xF]
+      i += 1
+    buf.to_s()
+
+  -> inspect
+    self.to_s()

@@ -240,9 +240,10 @@ section["linalg_matmul"] = "h"
   capture("command -v [c] 2>/dev/null").strip().size() > 0
 
 -> have_file(path)
-  capture("test -f \"[path]\" && echo yes").strip() == "yes"
+  file?(path)
 
 -> is_exe(path)
+  return false if !file?(path)
   capture("test -s \"[path]\" -a -x \"[path]\" && echo yes").strip() == "yes"
 
 -> src_path(bench, lang)
@@ -712,7 +713,7 @@ while pi < peers.size()
       bar = make_bar(barnum, 100)
       label = "vs " + disp[l]
       line = "  " + col[l] + BOLD + lj(label, 12) + RESET
-      line = line + WHITE + rj(fmt_x(geo_x100), 7) + RESET + "  " + col[l] + bar + RESET
+      line = line + WHITE + rj(fmt_x(geo_x100), 8) + RESET + "  " + col[l] + bar + RESET
       line = line + "  " + verdict
       << line
   pi = pi + 1

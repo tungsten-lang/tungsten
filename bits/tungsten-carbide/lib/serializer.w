@@ -41,14 +41,21 @@
       out = Serializer.encode_string(value.to_s)
     elsif t == "Array"
       parts = []
-      value.each -> (item)
-        parts.push(Serializer.encode(item))
+      n = value.size
+      i = 0
+      while i < n
+        parts.push(Serializer.encode(value[i]))
+        i += 1
       out = "\[" + parts.join(",") + "\]"
     elsif t == "Hash"
       parts = []
       keys = value.keys
-      keys.each -> (k)
+      n = keys.size
+      i = 0
+      while i < n
+        k = keys[i]
         parts.push(Serializer.encode_string(k.to_s) + ":" + Serializer.encode(value[k]))
+        i += 1
       out = "{" + parts.join(",") + "}"
     else
       out = Serializer.encode_string(value.to_s)
@@ -58,30 +65,33 @@
   # the escape set matches the per-character loop exactly.
   -> .encode_string(s)
     raw = s.to_s
-    result = ""
     if !raw.include?("\"") && !raw.include?("\\") && !raw.include?("\n") && !raw.include?("\r") && !raw.include?("\t")
-      result = "\"" + raw + "\""
-    else
-      out = "\""
-      chars = raw.chars
-      i = 0
-      while i < chars.size
-        ch = chars[i]
-        if ch == "\""
-          out = out + "\\\""
-        elsif ch == "\\"
-          out = out + "\\\\"
-        elsif ch == "\n"
-          out = out + "\\n"
-        elsif ch == "\r"
-          out = out + "\\r"
-        elsif ch == "\t"
-          out = out + "\\t"
+      return "\"" + raw + "\""
+    n = raw.size
+    parts = ["\""]
+    run_start = 0
+    i = 0
+    while i < n
+      b = raw.byte_at(i)
+      if b == 34 || b == 92 || b == 10 || b == 13 || b == 9
+        if i > run_start
+          parts.push(raw.slice(run_start, i - run_start))
+        if b == 34
+          parts.push("\\\"")
+        elsif b == 92
+          parts.push("\\\\")
+        elsif b == 10
+          parts.push("\\n")
+        elsif b == 13
+          parts.push("\\r")
         else
-          out = out + ch
-        i += 1
-      result = out + "\""
-    result
+          parts.push("\\t")
+        run_start = i + 1
+      i += 1
+    if n > run_start
+      parts.push(raw.slice(run_start, n - run_start))
+    parts.push("\"")
+    parts.join("")
 
   # --- Payload shaping ---
   #
@@ -143,6 +153,9 @@
   #   Serializer.collection(posts, {only: [:id], root: "posts", meta: {total: 2}})
   -> .collection(models, options = {})
     rows = []
-    models.each -> (m)
-      rows.push(Serializer.shape(m.to_h, options))
+    n = models.size
+    i = 0
+    while i < n
+      rows.push(Serializer.shape(models[i].to_h, options))
+      i += 1
     Serializer.encode(Serializer.envelope(rows, options))

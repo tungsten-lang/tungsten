@@ -75,11 +75,13 @@
   # to pass to Model.create/update.
   -> permit(keys)
     out = {}
-    src = @to_h
-    list = keys
-    if list == nil
-      list = []
-    list.each -> (k)
-      if src.has_key?(k)
-        out[k] = src[k]
+    if keys != nil
+      src = @to_h
+      n = keys.size
+      i = 0
+      while i < n
+        k = keys[i]
+        if src.has_key?(k)
+          out[k] = src[k]
+        i += 1
     out

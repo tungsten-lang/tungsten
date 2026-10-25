@@ -55,6 +55,35 @@
             }
             NEXT();
           }
+          if (!chunk->const_is_builtin || !chunk->const_is_builtin[name_id]) {
+            int self_slot = find_self_slot(chunk);
+            if (self_slot >= 0 && tc_kind(vm.locals[self_slot]) == TC_VAL_OBJECT && tc_as_object(vm.locals[self_slot])) {
+              TcValue self = vm.locals[self_slot];
+              const char *cn = tc_as_object(self)->class_name;
+              size_t cn_len = tc_as_object(self)->class_name_len;
+              TcFunction *fn = NULL;
+              if (chunk->method_ic_class &&
+                  chunk->method_ic_class[name_id] == cn &&
+                  chunk->method_ic_class_len[name_id] == cn_len) {
+                fn = chunk->method_ic_fn[name_id];
+              } else {
+                fn = tc_chunk_find_method(chunk, cn, cn_len, name, name_len);
+                if (fn && chunk->method_ic_class) {
+                  chunk->method_ic_class[name_id] = cn;
+                  chunk->method_ic_class_len[name_id] = cn_len;
+                  chunk->method_ic_fn[name_id] = fn;
+                }
+              }
+              if (fn && fn->overloaded) fn = tc_select_overload(chunk, fn, args, argc);
+              if (fn) {
+                if (!vm_call_function(&vm, fn, args, argc, self, 1,
+                                      tc_box_nil(), 0, err)) {
+                  goto cleanup_fail;
+                }
+                NEXT();
+              }
+            }
+          }
         } else {
           if (w_is_node(receiver)) {
             if (argc == 0) {
@@ -215,7 +244,8 @@
          * their numeric value already is the raw bit pattern requested by
          * wvalue_bits. This bridge is required by the self-hosted LexChar
          * helpers; compiled stages lower the same call to a no-op bit view. */
-        if (!has_receiver && name_len == 11 &&
+        if (!has_receiver) {
+        if (name_len == 11 &&
             memcmp(name, "wvalue_bits", 11) == 0 && argc == 1 &&
             value_is_int(args[0])) {
           TcValue out = args[0];
@@ -224,7 +254,7 @@
           CNEXT();
         }
 
-        if (!has_receiver && name == NAME_ARGV) {
+        if (name == NAME_ARGV) {
           FREE_ARGS();
           if (!push(&vm, tc_box_array(vm.argv), err)) {
             goto cleanup_fail;
@@ -237,7 +267,7 @@
         // this through the :slab_alloc_init emit op which generates
         // inline LLVM IR; the C VM stage 0 handles it here so ast.w
         // constructors using slab_alloc_init self-host through stage 0.
-        if (!has_receiver && name_len == 15 && memcmp(name, "slab_alloc_init", 15) == 0 && argc >= 2) {
+        if (name_len == 15 && memcmp(name, "slab_alloc_init", 15) == 0 && argc >= 2) {
           int64_t kind = value_is_int(args[0]) ? value_as_int(args[0]) : 0;
           int64_t sc   = value_is_int(args[1]) ? value_as_int(args[1]) : 0;
           WValue node = w_node_alloc(kind, sc);
@@ -256,9 +286,7 @@
         // interpretation, so ast.w can drop the hash-side fallback
         // entirely. Other ccall_nobox targets (json SIMD helpers, etc.)
         // aren't reachable from the bootstrap chain — they return nil.
-        if (!has_receiver &&
-            ((name_len == 11 && memcmp(name, "ccall_nobox", 11) == 0) ||
-             (name_len == 13 && memcmp(name, "ccall_rawargs", 13) == 0))) {
+        if (name == NAME_CCALL_NOBOX || name == NAME_CCALL_RAWARGS) {
           TcValue result = tc_box_nil();
           if (argc >= 1 && tc_kind(args[0]) == TC_VAL_STRING) {
             const char *fn = tc_str_bytes_only(args[0]);
@@ -609,6 +637,12 @@
                             : (int64_t)(unsigned char)tc_str_bytes_only(args[1])[0];
               }
               result = int_value(first);
+            } else if (fn_len == 20 &&
+                       memcmp(fn, "w_wire_temp_operands", 20) == 0 && argc == 2) {
+              if (!tc_wire_temp_operands(args[1], &result, err)) {
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
             } else if (fn_len == sizeof("__w_bit_ctpop_u32") - 1 &&
                        memcmp(fn, "__w_bit_ctpop_u32", sizeof("__w_bit_ctpop_u32") - 1) == 0 &&
                        argc == 2) {
@@ -1363,6 +1397,7 @@
             }
           }
         }
+        } else {
         // Reordered hot path: name == NAME_BRACKETS dominates stage-1
         // CALL dispatches (60%). Hoisting these blocks before the SIZE
         // matcher saves ~14M misses/run on BRACKETS calls.
@@ -2347,6 +2382,7 @@
               }
             }
           }
+        }
         }
 
         /* Entry-program closed-world declarations are compile-time contracts.

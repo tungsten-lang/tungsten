@@ -5655,12 +5655,13 @@ module Tungsten
       when "w_date_parse"
         runtime_error("w_date_parse expects one string", node: node) unless args.size == 2
         Date.parse(args[1].to_s)
-      when "w_date_from_ordinal"
-        runtime_error("w_date_from_ordinal expects a year and day-of-year", node: node) unless args.size == 3
-        Date.ordinal(args[1], args[2])
       when "w_date_today"
         runtime_error("w_date_today expects no arguments", node: node) unless args.size == 1
         Date.today
+      when "w_num_to_float"
+        args[1].to_f
+      when "w_decimal_round"
+        args[1].round(args[2])
       when "w_bigint_gcd"
         args[1].gcd(args[2])
       when "w_bigint_lcm"

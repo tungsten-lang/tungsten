@@ -380,14 +380,15 @@
   if !is_ast_node?(node)
     return nil
   t = ast_kind(node)
-  if t in (:fastmath_block :strictmath_block :overflow_block)
-    free_scan_list(node[:body], free_bound_copy(bound), records)
-    return nil
-
   if t == :var
     if bound[node.name] != true
       rec = ensure_promote_record(records, node.name)
       rec[:has_escape] = true
+    return nil
+  if t == :int || t == :string || t == :symbol || t == :nil_lit || t == :bool || t == :ivar || t == :gvar || t == :cvar || t == :class_ref || t == :self_ref || t == :float || t == :char || t == :return_nil
+    return nil
+  if t in (:fastmath_block :strictmath_block :overflow_block)
+    free_scan_list(node[:body], free_bound_copy(bound), records)
     return nil
 
   case t
@@ -2206,6 +2207,8 @@
       sv_s = sv.to_s()
       if candidates[sv_s] != nil
         mod[:param_infer_bailed][sv_s] = true
+    return nil
+  if k in (:int :string :bool :nil_val :float :ivar :cvar :gvar :self_ref :class_ref :break :next :param)
     return nil
   # Nested def: fresh scope, params unknown (they shadow any outer name).
   if k in (:fn_def :method_def)

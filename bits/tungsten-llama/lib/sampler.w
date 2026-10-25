@@ -77,37 +77,47 @@ fn xorshift64(state)
       i = i + 1
     n_vocab - 1
 
-  # Top-K sampling: pull the K highest scaled logits via repeated
-  # argmax-and-mask, then softmax those K and sample. K * n_vocab CPU
-  # work — ~150 ms at K=40, n=152K. Fine for the demo.
+  # Top-K sampling: pull the K highest scaled logits in a single O(n_vocab)
+  # pass, then softmax those K and sample.
   -> sample_top_k(logits_buf, n_vocab)
     inv_t = ~1.0 / @temperature
-    scaled = []
-    i = 0
-    while i < n_vocab
-      scaled.push(metal_buffer_read_f32(logits_buf, i) * inv_t)
-      i = i + 1
+    k = @top_k
     selected_idx = []
     selected_val = []
-    pick = 0
-    while pick < @top_k
-      best_v = ~-1000000000.0
-      best_i = -1
-      i = 0
-      while i < n_vocab
-        if scaled[i] > best_v
-          best_v = scaled[i]
-          best_i = i
-        i = i + 1
-      selected_idx.push(best_i)
-      selected_val.push(best_v)
-      scaled[best_i] = ~-1000000000.0
-      pick = pick + 1
-    # Softmax over the top-K: max is selected_val[0] since we picked best first.
+    min_val = ~1000000000.0
+    min_pos = 0
+    i = 0
+    while i < k
+      v = metal_buffer_read_f32(logits_buf, i) * inv_t
+      selected_idx.push(i)
+      selected_val.push(v)
+      if v < min_val
+        min_val = v
+        min_pos = i
+      i = i + 1
+    while i < n_vocab
+      v = metal_buffer_read_f32(logits_buf, i) * inv_t
+      if v > min_val
+        selected_idx[min_pos] = i
+        selected_val[min_pos] = v
+        min_val = v
+        j = 0
+        while j < k
+          vj = selected_val[j]
+          if vj < min_val
+            min_val = vj
+            min_pos = j
+          j = j + 1
+      i = i + 1
     max_v = selected_val[0]
+    i = 1
+    while i < k
+      if selected_val[i] > max_v
+        max_v = selected_val[i]
+      i = i + 1
     sum_e = ~0.0
     i = 0
-    while i < @top_k
+    while i < k
       e = Math.exp(selected_val[i] - max_v)
       selected_val[i] = e
       sum_e = sum_e + e
@@ -115,12 +125,12 @@ fn xorshift64(state)
     threshold = next_uniform() * sum_e
     cumulative = ~0.0
     i = 0
-    while i < @top_k
+    while i < k
       cumulative = cumulative + selected_val[i]
       if cumulative > threshold
         return selected_idx[i]
       i = i + 1
-    selected_idx[@top_k - 1]
+    selected_idx[k - 1]
 
   -> argmax(logits_buf, n_vocab)
     best = 0

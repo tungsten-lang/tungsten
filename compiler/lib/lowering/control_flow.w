@@ -1665,6 +1665,8 @@
     return false
 
   ntype = ast_kind(node)
+  if ntype == :var || ntype == :int || ntype == :string || ntype == :symbol || ntype == :nil_lit || ntype == :bool || ntype == :ivar || ntype == :gvar || ntype == :cvar || ntype == :class_ref || ntype == :self_ref || ntype == :float || ntype == :char
+    return false
   case ntype
   when :call
     if has_nonlocal_block_return_in_node(node.receiver, in_block)

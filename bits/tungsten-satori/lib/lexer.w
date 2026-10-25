@@ -18,16 +18,30 @@
   ro :indent, :toks, :line
   -> new(@indent, @toks, @line)
 
--> sat_keywords
-  ["opaque", "def", "theorem", "lemma", "example", "axiom", "inductive", "structure", "import",
+SAT_KEYWORDS_LIST = ["opaque", "def", "theorem", "lemma", "example", "axiom", "inductive", "structure", "import",
    "fun", "λ", "if", "then", "else", "by", "have", "show", "calc", "let", "in",
    "instance", "notation", "variable", "open", "section", "end", "where", "at", "using", "with", "from", "match"]
 
--> sat_symbols
-  ["<;>", "⊢", ":=", "=>", "->", "<->", "<=", ">=", "!=", "/\\", "\\/", "::", "++", "..",
+SAT_SYMBOLS_LIST = ["<;>", "⊢", ":=", "=>", "->", "<->", "<=", ">=", "!=", "/\\", "\\/", "::", "++", "..",
    "→", "↔", "∧", "∨", "¬", "≠", "≤", "≥", "∀", "∃", "∈", "∉", "⊆", "∣", "×", "⟨", "⟩",
    "←", "·", "∘", "∑", "∏", "∪", "∩", "⁻¹", "√", "|",
    "(", ")", "\[", "\]", "{", "}", ",", ":", ";", "+", "-", "*", "/", "%", "^", "<", ">", "=", "!", "_", "@", "#", "."]
+
+-> build_sat_symbol_chars
+  out = []
+  i = 0
+  while i < SAT_SYMBOLS_LIST.size
+    out.push(SAT_SYMBOLS_LIST[i].chars)
+    i += 1
+  out
+
+SAT_SYMBOL_CHARS = build_sat_symbol_chars()
+
+-> sat_keywords
+  SAT_KEYWORDS_LIST
+
+-> sat_symbols
+  SAT_SYMBOLS_LIST
 
 -> ident_start?(c)
   o = c.ord
@@ -102,25 +116,32 @@
       i = j
     else
       matched = nil
-      syms.each -> (s)
-        if matched == nil
-          sc = s.chars
-          if i + sc.size <= n
-            ok = true
-            k = 0
-            while ok && k < sc.size
-              if chars[i + k] != sc[k]
-                ok = false
-              k += 1
-            if ok
-              matched = s
+      matched_len = 0
+      nsyms = syms.size
+      si = 0
+      while si < nsyms
+        sc = SAT_SYMBOL_CHARS[si]
+        sclen = sc.size
+        if i + sclen <= n
+          ok = true
+          k = 0
+          while k < sclen
+            if chars[i + k] != sc[k]
+              ok = false
+              break
+            k += 1
+          if ok
+            matched = syms[si]
+            matched_len = sclen
+            break
+        si += 1
       if matched == nil
         raise "lexer: unexpected character '" + c + "' at line " + lineno.to_s
       if matched == "λ"
         toks.push(Tok.new(:kw, "fun", lineno, i))
       else
         toks.push(Tok.new(:sym, normalize_sym(matched), lineno, i))
-      i += matched.chars.size
+      i += matched_len
   [indent, toks]
 
 -> normalize_sym(s)

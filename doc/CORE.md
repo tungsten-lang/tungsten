@@ -289,7 +289,7 @@ summary from the source header, and a link to the source.
 | `Token` | `+ Token` | — | [`core/token.w`](../core/token.w) |
 | `Tuple` | `+ Tuple` | Tuple — a heterogeneous, fixed, dynamically-indexable value grouping. | [`core/tuple.w`](../core/tuple.w) |
 | `UUID` | `+ UUID` | — | [`core/uuid.w`](../core/uuid.w) |
-| `Value` | `+ Value` | — | [`core/value.w`](../core/value.w) |
+| `Value` | `+ Value` | Value — raw WValue bit-level inspection and scene rendering. | [`core/value.w`](../core/value.w) |
 | `URL` | `+ URL` | URL — strict absolute-URL parsing and canonical reconstruction. | [`core/url.w`](../core/url.w) |
 | `Vector` | — | — | [`core/vector.w`](../core/vector.w) |
 | `PrimeSieve` | `+ PrimeSieve` | — | [`core/prime_sieve.w`](../core/prime_sieve.w) |

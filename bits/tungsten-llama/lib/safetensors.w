@@ -32,12 +32,14 @@ fn safetensors_byte_to_str(b)
     @data_offset = 8 + hl
 
     # Pull header bytes into a string and parse as JSON
-    sb = StringBuffer(hl)
+    cell = u8[hl + 1]
     i = 0
     while i < hl
-      sb << safetensors_byte_to_str(@mmap.byte_at(8 + i))
+      cell[i] = @mmap.byte_at(8 + i)
       i = i + 1
-    parsed = JSON.parse(sb.to_s)
+    cell[hl] = 0
+    header_str = ccall("w_string_take_byte_array", cell, hl)
+    parsed = JSON.parse(header_str)
 
     @tensors = {}
     keys = parsed.keys

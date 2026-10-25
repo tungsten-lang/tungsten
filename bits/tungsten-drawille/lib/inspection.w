@@ -7,35 +7,38 @@
 
 use scene
 
+DRAWILLE_FAMILIES = ["ProjectiveSpace", "Vec2", "Vec3", "Vec4", "Vector"]
+
+DRAWILLE_SUPPORTED_CLASSES = [
+  "PolynomialRing", "Polynomial",
+  "Curve", "AffineChart", "EllipticCurve", "HyperellipticCurve",
+  "ProjectiveSpace", "ProjectivePoint",
+  "NumberFieldElement", "SimpleExtensionElement", "AlgebraicRealRoot",
+  "Differential",
+  "QExpansion", "FieldQExpansion", "ClassicalModularForm",
+  "WeightTwoHeckeEigenpacket", "RationalWeightTwoNewform",
+  "FormalPowerSeries", "FormalLaurentSeries", "FormalPuiseuxSeries",
+  "TaylorJet", "ThetaQuadraticForm",
+  "TensorField", "HorizonSet", "ReggeWheelerPotential", "BraneBulkChord",
+  "WarpedConeSurface",
+  "Vec2", "Vec3", "Vec4", "Vector", "Array"
+]
+
 + DrawilleInspection
   -> .class_family(name)
     # Native generic specializations include a `$...` suffix (for example
     # ProjectiveSpace$ℚ_2 and Vec3$f64); the interpreter erases it.  Normalize
     # only the families this renderer explicitly supports.
-    families = ["ProjectiveSpace", "Vec2", "Vec3", "Vec4", "Vector"]
     i = 0
-    while i < families.size()
-      family = families[i]
+    n = DRAWILLE_FAMILIES.size()
+    while i < n
+      family = DRAWILLE_FAMILIES[i]
       return family if name == family || name.starts_with?(family + "$")
       i += 1
     name
 
   -> .supported_class?(name)
-    supported = [
-      "PolynomialRing", "Polynomial",
-      "Curve", "AffineChart", "EllipticCurve", "HyperellipticCurve",
-      "ProjectiveSpace", "ProjectivePoint",
-      "NumberFieldElement", "SimpleExtensionElement", "AlgebraicRealRoot",
-      "Differential",
-      "QExpansion", "FieldQExpansion", "ClassicalModularForm",
-      "WeightTwoHeckeEigenpacket", "RationalWeightTwoNewform",
-      "FormalPowerSeries", "FormalLaurentSeries", "FormalPuiseuxSeries",
-      "TaylorJet", "ThetaQuadraticForm",
-      "TensorField", "HorizonSet", "ReggeWheelerPotential", "BraneBulkChord",
-      "WarpedConeSurface",
-      "Vec2", "Vec3", "Vec4", "Vector", "Array"
-    ]
-    supported.include?(class_family(name))
+    DRAWILLE_SUPPORTED_CLASSES.include?(class_family(name))
 
   -> .renderable?(value)
     value.class_name != "Nil" && supported_class?(value.class_name)
@@ -185,18 +188,28 @@ use scene
     box = scene.bounds(true)
     viewport = DrawilleViewport.new(canvas, box[0], box[1], box[2], box[3])
     zero = viewport.py(~0.0)
-    previous = nil
-    points.each -> (point)
-      pixel = viewport.point(point[0], point[1])
-      low = pixel[1] < zero ? pixel[1] : zero
-      high = pixel[1] > zero ? pixel[1] : zero
+    has_prev = false
+    prev_px = 0
+    prev_py = 0
+    n = points.size()
+    i = 0
+    while i < n
+      point = points[i]
+      px = viewport.px(point[0])
+      py_pt = viewport.py(point[1])
+      low = py_pt < zero ? py_pt : zero
+      high = py_pt > zero ? py_pt : zero
       py = low
       while py <= high
-        canvas.set(pixel[0], py) if (pixel[0] + py).even?()
+        canvas.set(px, py) if ((px + py) & 1) == 0
         py += 1
-      if previous != nil
-        canvas.line(previous[0], previous[1], pixel[0], pixel[1])
-      previous = pixel
+      if has_prev
+        canvas.line(prev_px, prev_py, px, py_pt)
+      else
+        has_prev = true
+      prev_px = px
+      prev_py = py_pt
+      i += 1
     DrawilleScene.canvas_text(canvas, viewport, axes)
 
   -> .render_vector(value, cols, rows)
@@ -326,18 +339,66 @@ use scene
 
   -> .polynomial_value(terms, coordinates, fixed_index = nil)
     total = ~0.0
-    terms.each -> (term)
+    nt = terms.size()
+    ti = 0
+    while ti < nt
+      term = terms[ti]
       value = term[0]
+      exps = term[1]
+      ne = exps.size()
       source = 0
       exponent_index = 0
-      while exponent_index < term[1].size()
-        coordinate = ~1.0
+      while exponent_index < ne
+        exp = exps[exponent_index]
         if fixed_index == nil || exponent_index != fixed_index
           coordinate = coordinates[source]
           source += 1
-        value *= DrawilleNumbers.integer_power(coordinate, term[1][exponent_index])
+          if exp != 0
+            value *= DrawilleNumbers.integer_power(coordinate, exp)
         exponent_index += 1
       total += value
+      ti += 1
+    total
+
+  -> .polynomial_value_2d(terms, x, y, fixed_index)
+    total = ~0.0
+    nt = terms.size()
+    ti = 0
+    while ti < nt
+      term = terms[ti]
+      value = term[0]
+      exps = term[1]
+      ne = exps.size()
+      source = 0
+      exponent_index = 0
+      while exponent_index < ne
+        exp = exps[exponent_index]
+        if fixed_index == nil || exponent_index != fixed_index
+          coordinate = source == 0 ? x : y
+          source += 1
+          if exp != 0
+            value *= DrawilleNumbers.integer_power(coordinate, exp)
+        exponent_index += 1
+      total += value
+      ti += 1
+    total
+
+  -> .polynomial_value_3d(terms, x, y, z)
+    total = ~0.0
+    nt = terms.size()
+    ti = 0
+    while ti < nt
+      term = terms[ti]
+      value = term[0]
+      exps = term[1]
+      e0 = exps[0]
+      e1 = exps[1]
+      e2 = exps[2]
+      value *= DrawilleNumbers.integer_power(x, e0) if e0 != 0
+      value *= DrawilleNumbers.integer_power(y, e1) if e1 != 0
+      value *= DrawilleNumbers.integer_power(z, e2) if e2 != 0
+      total += value
+      ti += 1
     total
 
   -> .polynomial_detail(polynomial)
@@ -415,39 +476,62 @@ use scene
     rows = DrawilleNumbers.bounded_rows(rows)
     canvas = Canvas.new(cols, rows)
     viewport = DrawilleViewport.new(canvas, ~-4.0, ~4.0, ~-4.0, ~4.0)
+    pw = canvas.pixel_width()
+    ph = canvas.pixel_height()
+    dx_step = ~8.0 / (pw - 1).to_f()
+    dy_step = ~8.0 / (ph - 1).to_f()
+    neg_dy_step = ~0.0 - dy_step
     values = []
     py = 0
-    while py < canvas.pixel_height()
+    while py < ph
+      y = ~4.0 - dy_step * py.to_f()
       current_row = []
       px = 0
-      while px < canvas.pixel_width()
-        x = ~-4.0 + ~8.0 * px.to_f() / (canvas.pixel_width() - 1).to_f()
-        y = ~4.0 - ~8.0 * py.to_f() / (canvas.pixel_height() - 1).to_f()
-        value = polynomial_value(terms, [x, y], fixed_index)
+      while px < pw
+        x = ~-4.0 + dx_step * px.to_f()
+        value = polynomial_value_2d(terms, x, y, fixed_index)
         current_row.push(value)
         px += 1
       values.push(current_row)
       py += 1
     py = 0
-    while py < canvas.pixel_height()
+    while py < ph
+      row_vals = values[py]
+      prev_row = py > 0 ? values[py - 1] : nil
+      next_row = py + 1 < ph ? values[py + 1] : nil
+      y = ~4.0 - dy_step * py.to_f()
       px = 0
-      while px < canvas.pixel_width()
-        x = ~-4.0 + ~8.0 * px.to_f() / (canvas.pixel_width() - 1).to_f()
-        y = ~4.0 - ~8.0 * py.to_f() / (canvas.pixel_height() - 1).to_f()
-        value = values[py][px]
+      while px < pw
+        value = row_vals[px]
         mark = value == ~0.0
-        mark = true if px > 0 && sign_change?(values[py][px - 1], value)
-        mark = true if py > 0 && sign_change?(values[py - 1][px], value)
-        if !mark && px > 0 && px + 1 < canvas.pixel_width()
-          mark = polynomial_zero_near_axis?(
-            terms, [x, y], fixed_index, 0,
-            ~8.0 / (canvas.pixel_width() - 1).to_f(),
-            values[py][px - 1], value, values[py][px + 1])
-        if !mark && py > 0 && py + 1 < canvas.pixel_height()
-          mark = polynomial_zero_near_axis?(
-            terms, [x, y], fixed_index, 1,
-            ~-8.0 / (canvas.pixel_height() - 1).to_f(),
-            values[py - 1][px], value, values[py + 1][px])
+        mark = true if !mark && px > 0 && sign_change?(row_vals[px - 1], value)
+        mark = true if !mark && py > 0 && sign_change?(prev_row[px], value)
+        if !mark && px > 0 && px + 1 < pw
+          offset = quadratic_valley_offset(row_vals[px - 1], value, row_vals[px + 1])
+          if offset != nil && offset != false
+            x = ~-4.0 + dx_step * px.to_f()
+            actual = absolute_number(polynomial_value_2d(terms, x + offset * dx_step, y, fixed_index))
+            if !actual.nan?() && !actual.infinite?()
+              left = absolute_number(row_vals[px - 1])
+              center = absolute_number(value)
+              right = absolute_number(row_vals[px + 1])
+              maximum = left
+              maximum = center if center > maximum
+              maximum = right if right > maximum
+              mark = actual <= maximum * ~0.02 + ~0.000000000001
+        if !mark && py > 0 && py + 1 < ph
+          offset = quadratic_valley_offset(prev_row[px], value, next_row[px])
+          if offset != nil && offset != false
+            x = ~-4.0 + dx_step * px.to_f()
+            actual = absolute_number(polynomial_value_2d(terms, x, y + offset * neg_dy_step, fixed_index))
+            if !actual.nan?() && !actual.infinite?()
+              left = absolute_number(prev_row[px])
+              center = absolute_number(value)
+              right = absolute_number(next_row[px])
+              maximum = left
+              maximum = center if center > maximum
+              maximum = right if right > maximum
+              mark = actual <= maximum * ~0.02 + ~0.000000000001
         canvas.set(px, py) if mark
         px += 1
       py += 1
@@ -457,19 +541,21 @@ use scene
     scene = DrawilleScene.new()
     slices = 7
     grid = 25
+    z_step = ~6.0 / (slices - 1).to_f()
+    xy_step = ~6.0 / (grid - 1).to_f()
     values = []
     zi = 0
     while zi < slices
-      z = ~-3.0 + ~6.0 * zi.to_f() / (slices - 1).to_f()
+      z = ~-3.0 + z_step * zi.to_f()
       slice_values = []
       yi = 0
       while yi < grid
-        y = ~-3.0 + ~6.0 * yi.to_f() / (grid - 1).to_f()
+        y = ~-3.0 + xy_step * yi.to_f()
         current_row = []
         xi = 0
         while xi < grid
-          x = ~-3.0 + ~6.0 * xi.to_f() / (grid - 1).to_f()
-          value = polynomial_value(terms, [x, y, z])
+          x = ~-3.0 + xy_step * xi.to_f()
+          value = polynomial_value_3d(terms, x, y, z)
           current_row.push(value)
           xi += 1
         slice_values.push(current_row)
@@ -479,30 +565,42 @@ use scene
 
     zi = 0
     while zi < slices
-      z = ~-3.0 + ~6.0 * zi.to_f() / (slices - 1).to_f()
+      z = ~-3.0 + z_step * zi.to_f()
+      slice_cur = values[zi]
+      slice_prev = zi > 0 ? values[zi - 1] : nil
+      slice_next = zi + 1 < slices ? values[zi + 1] : nil
       yi = 0
       while yi < grid
-        y = ~-3.0 + ~6.0 * yi.to_f() / (grid - 1).to_f()
+        y = ~-3.0 + xy_step * yi.to_f()
+        row_cur = slice_cur[yi]
+        row_prev = yi > 0 ? slice_cur[yi - 1] : nil
+        row_next = yi + 1 < grid ? slice_cur[yi + 1] : nil
         xi = 0
         while xi < grid
-          x = ~-3.0 + ~6.0 * xi.to_f() / (grid - 1).to_f()
-          value = values[zi][yi][xi]
+          value = row_cur[xi]
           mark = value == ~0.0
-          mark = true if xi > 0 && sign_change?(values[zi][yi][xi - 1], value)
-          mark = true if yi > 0 && sign_change?(values[zi][yi - 1][xi], value)
-          mark = true if zi > 0 && sign_change?(values[zi - 1][yi][xi], value)
+          mark = true if !mark && xi > 0 && sign_change?(row_cur[xi - 1], value)
+          mark = true if !mark && yi > 0 && sign_change?(row_prev[xi], value)
+          mark = true if !mark && zi > 0 && sign_change?(slice_prev[yi][xi], value)
+          x = ~-3.0 + xy_step * xi.to_f()
           if !mark && xi > 0 && xi + 1 < grid
-            mark = polynomial_zero_near_axis?(
-              terms, [x, y, z], nil, 0, ~6.0 / (grid - 1).to_f(),
-              values[zi][yi][xi - 1], value, values[zi][yi][xi + 1])
+            offset = quadratic_valley_offset(row_cur[xi - 1], value, row_cur[xi + 1])
+            if offset != nil && offset != false
+              mark = polynomial_zero_near_axis?(
+                terms, [x, y, z], nil, 0, xy_step,
+                row_cur[xi - 1], value, row_cur[xi + 1])
           if !mark && yi > 0 && yi + 1 < grid
-            mark = polynomial_zero_near_axis?(
-              terms, [x, y, z], nil, 1, ~6.0 / (grid - 1).to_f(),
-              values[zi][yi - 1][xi], value, values[zi][yi + 1][xi])
+            offset = quadratic_valley_offset(row_prev[xi], value, row_next[xi])
+            if offset != nil && offset != false
+              mark = polynomial_zero_near_axis?(
+                terms, [x, y, z], nil, 1, xy_step,
+                row_prev[xi], value, row_next[xi])
           if !mark && zi > 0 && zi + 1 < slices
-            mark = polynomial_zero_near_axis?(
-              terms, [x, y, z], nil, 2, ~6.0 / (slices - 1).to_f(),
-              values[zi - 1][yi][xi], value, values[zi + 1][yi][xi])
+            offset = quadratic_valley_offset(slice_prev[yi][xi], value, slice_next[yi][xi])
+            if offset != nil && offset != false
+              mark = polynomial_zero_near_axis?(
+                terms, [x, y, z], nil, 2, z_step,
+                slice_prev[yi][xi], value, slice_next[yi][xi])
           if mark
             point = DrawilleProjection3D.project(x, y, z)
             scene.point(point[0], point[1])

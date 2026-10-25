@@ -190,7 +190,10 @@ static TcRuntimeHash *cvar_table = NULL;
   X(LOWERING_ANALYSIS_SET, "lowering_analysis=") \
   X(FREEZE,         "freeze")         \
   X(FROZEN_Q,       "frozen?")        \
-  X(LLVM_SAFE_NAME, "llvm_safe_name")
+  X(LLVM_SAFE_NAME, "llvm_safe_name") \
+  X(CCALL,          "ccall")          \
+  X(CCALL_NOBOX,    "ccall_nobox")    \
+  X(CCALL_RAWARGS,  "ccall_rawargs")
 
 #define X(c_name, str) static const char *NAME_##c_name = NULL;
 BUILTIN_NAMES
@@ -198,6 +201,7 @@ BUILTIN_NAMES
 
 static TcValue SYM_NODE = W_NIL;
 static TcValue SYM_VALUE = W_NIL;
+static TcValue SYM_TEMP = W_NIL;
 static TcValue SYM_INDEX = W_NIL;
 static TcValue SYM_LOWERING_ANALYSIS = W_NIL;
 static TcValue SYM_IVAR_OFFSETS = W_NIL;
@@ -284,6 +288,7 @@ static int intern_builtin_names(TcError *err) {
 #undef X
   if (!intern_sym_const("node", 4, &SYM_NODE) ||
       !intern_sym_const("value", 5, &SYM_VALUE) ||
+      !intern_sym_const("temp", 4, &SYM_TEMP) ||
       !intern_sym_const("index", 5, &SYM_INDEX) ||
       !intern_sym_const("lowering_analysis", 17, &SYM_LOWERING_ANALYSIS) ||
       !intern_sym_const("ivar_offsets", 12, &SYM_IVAR_OFFSETS) ||
@@ -1140,6 +1145,12 @@ static int concat_values(TcValue a, TcValue b, TcValue *out, TcError *err) {
   int b_direct = (kb == TC_VAL_STRING || kb == TC_VAL_SYMBOL);
   if (a_direct && b_direct) {
     size_t la = tc_str_len(a), lb = tc_str_len(b);
+    if (la == 0 && kb == TC_VAL_STRING) { *out = b; return 1; }
+    if (lb == 0 && ka == TC_VAL_STRING) { *out = a; return 1; }
+    if (la + lb <= 1) {
+      const char *src = la ? tc_str_bytes_only(a) : (lb ? tc_str_bytes_only(b) : "");
+      return make_string_value(src, la + lb, out, err);
+    }
     char *joined = heap_string_alloc(la + lb, err);
     if (!joined) return 0;
     if (la > 0) memcpy(joined, tc_str_bytes_only(a), la);
@@ -1455,6 +1466,10 @@ static int string_slice_value(TcValue receiver, TcValue start_value, TcValue len
     return 1;
   }
   if (start + len > (int64_t)tc_str_len(receiver)) len = (int64_t)tc_str_len(receiver) - start;
+  if (start == 0 && (size_t)len == tc_str_len(receiver)) {
+    *out = receiver;
+    return 1;
+  }
   return make_string_value(tc_str_bytes_only(receiver) + start, (size_t)len, out, err);
 }
 
@@ -1467,6 +1482,10 @@ static int string_strip_value(TcValue receiver, TcValue *out, TcError *err) {
   size_t end = tc_str_len(receiver);
   while (start < end && isspace((unsigned char)tc_str_bytes_only(receiver)[start])) start++;
   while (end > start && isspace((unsigned char)tc_str_bytes_only(receiver)[end - 1])) end--;
+  if (start == 0 && end == tc_str_len(receiver)) {
+    *out = receiver;
+    return 1;
+  }
   return make_string_value(tc_str_bytes_only(receiver) + start, end - start, out, err);
 }
 
@@ -1916,6 +1935,11 @@ static int string_split_value(TcValue receiver, TcValue sep, TcValue *out, TcErr
   }
   TcRuntimeArray *array = runtime_array_new(count, err);
   if (!array) return 0;
+  if (tc_str_len(sep) > 0 && count == 1) {
+    array->slots[0] = receiver;
+    *out = tc_box_array(array);
+    return 1;
+  }
   size_t part = 0;
   size_t start = 0;
   if (tc_str_len(sep) == 0) {
@@ -2247,6 +2271,55 @@ TC_ALWAYS_INLINE TcValue tc_packed_node_set(WValue node, TcValue sym, TcValue va
   if (sym == SYM_IVAR_OFFSETS)      return w_ast_ivar_offsets_set(node, value);
   if (sym == SYM_IVAR_COUNT)        return w_ast_ivar_count_set(node, value);
   return w_ast_sparse_set(node, (int64_t)sym, value);
+}
+
+TC_ALWAYS_INLINE int tc_is_percent_temp_str(TcValue v) {
+  return tc_kind(v) == TC_VAL_STRING && tc_str_len(v) > 0 && tc_str_bytes_only(v)[0] == '%';
+}
+
+static TcRuntimeArray *g_wire_temp_operands_arr = NULL;
+
+static int tc_wire_temp_operands(TcValue wire, TcValue *out, TcError *err) {
+  if (!g_wire_temp_operands_arr) {
+    g_wire_temp_operands_arr = runtime_array_new(32, err);
+    if (!g_wire_temp_operands_arr) return 0;
+  }
+  TcRuntimeArray *arr = g_wire_temp_operands_arr;
+  arr->size = 0;
+
+  int64_t count = w_wire_field_count(wire);
+  for (int64_t fi = 0; fi < count; fi++) {
+    TcValue sym = w_wire_field_symbol_at(wire, fi);
+    TcValue value = w_wire_field_value_at(wire, fi);
+    if (sym == SYM_TEMP || value == W_NIL) continue;
+    if (w_is_wire_sequence(value)) {
+      int64_t seq_count = w_wire_sequence_size(value);
+      for (int64_t si = 0; si < seq_count; si++) {
+        TcValue item = w_wire_sequence_get(value, si);
+        if (tc_is_percent_temp_str(item)) {
+          if (!runtime_array_ensure_cap(arr, (size_t)arr->size + 1, err)) return 0;
+          arr->slots[arr->size++] = item;
+        } else if (tc_kind(item) == TC_VAL_HASH && tc_as_hash(item)) {
+          TcValue iv = hash_get_value(tc_as_hash(item), SYM_VALUE);
+          if (tc_is_percent_temp_str(iv)) {
+            if (!runtime_array_ensure_cap(arr, (size_t)arr->size + 1, err)) return 0;
+            arr->slots[arr->size++] = iv;
+          }
+        } else if (tc_kind(item) == TC_VAL_ARRAY) {
+          *out = W_NIL;
+          return 1;
+        }
+      }
+    } else if (tc_is_percent_temp_str(value)) {
+      if (!runtime_array_ensure_cap(arr, (size_t)arr->size + 1, err)) return 0;
+      arr->slots[arr->size++] = value;
+    } else if (tc_kind(value) == TC_VAL_ARRAY || tc_kind(value) == TC_VAL_HASH) {
+      *out = W_NIL;
+      return 1;
+    }
+  }
+  *out = tc_box_array(arr);
+  return 1;
 }
 
 TC_ALWAYS_INLINE TcValue tc_ast_kind(TcValue node) {
@@ -2980,6 +3053,8 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
     [TC_OP_IS_MACHINE_INT_TYPE]   = &&L_IS_MACHINE_INT_TYPE,
     [TC_OP_IS_MACHINE_INT128_TYPE]= &&L_IS_MACHINE_INT128_TYPE,
     [TC_OP_IS_MACHINE_INT64_TYPE] = &&L_IS_MACHINE_INT64_TYPE,
+    [TC_OP_STRING_FIRST_BYTE]     = &&L_STRING_FIRST_BYTE,
+    [TC_OP_WIRE_TEMP_OPERANDS]    = &&L_WIRE_TEMP_OPERANDS,
   };
 
   size_t op_ip = 0;
@@ -3667,6 +3742,22 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
                  tos == SYM_I128 || tos == SYM_RAW_I128 ||
                  tos == SYM_U128 || tos == SYM_RAW_U128);
         vm.stack[vm.sp - 1] = (tos = r ? W_TRUE : W_FALSE);
+        NEXT_FAST();
+      }
+      L_STRING_FIRST_BYTE: {
+        int64_t first = -2;
+        if (tc_kind(tos) == TC_VAL_STRING) {
+          first = tc_str_len(tos) == 0
+                      ? -1
+                      : (int64_t)(unsigned char)tc_str_bytes_only(tos)[0];
+        }
+        vm.stack[vm.sp - 1] = (tos = int_value(first));
+        NEXT_FAST();
+      }
+      L_WIRE_TEMP_OPERANDS: {
+        TcValue out = W_NIL;
+        if (!tc_wire_temp_operands(tos, &out, err)) goto cleanup_fail;
+        vm.stack[vm.sp - 1] = (tos = out);
         NEXT_FAST();
       }
       L_IVAR_GET: {

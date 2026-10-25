@@ -28,14 +28,16 @@ use proof
 use stream
 
 + WratChecker
+  ro :nvars, :track_content_keys, :assign, :trail, :qhead
+  ro :clits, :alive, :cid, :wa, :wb, :watch_ready
+  ro :slot_by_id, :slot_of, :ids, :next_id, :units, :empty_live, :watch, :key_slots
+  ro :live_clauses, :live_literals, :peak_live_clauses, :peak_live_literals
+  ro :check_verified, :check_reason, :check_done, :check_count
+
   -> new(@nvars, @track_content_keys = true)
-    @assign = []      # index by variable: 0 unassigned, 1 true, -1 false
+    @assign = Array.new(@nvars + 1, 0) # index by variable: 0 unassigned, 1 true, -1 false
     @trail = []
     @qhead = 0
-    i = 0
-    while i <= @nvars
-      @assign.push(0)
-      i += 1
 
     # Clause storage, one slot per added clause (live or dead).
     @clits = []       # slot -> Array of literals
@@ -45,8 +47,9 @@ use stream
     @wb = []          # slot -> second watched literal (0 if unit/empty)
     @watch_ready = false
 
-    @slot_of = {}     # proof id -> slot
-    @ids = []         # insertion order of ids (live filter via @slot_of/@alive)
+    @slot_by_id = [-1] # dense proof id -> slot (-1 when unused)
+    @slot_of = {}      # sparse proof id -> slot fallback
+    @ids = []          # insertion order of ids (live filter via slot/@alive)
     @next_id = 1
 
     @units = []       # slots of clauses stored as single-literal
@@ -73,23 +76,29 @@ use stream
   # ---- assignment helpers -------------------------------------------------
 
   -> value(lit)
-    v = @assign[lit.abs]
+    v = @assign[lit > 0 ? lit : 0 - lit]
     lit > 0 ? v : 0 - v
 
   -> assign_lit(lit)
-    @assign[lit.abs] = lit > 0 ? 1 : -1
+    if lit > 0
+      @assign[lit] = 1
+    else
+      @assign[0 - lit] = -1
     @trail.push(lit)
 
   -> undo_all
+    trail = @trail
+    assign = @assign
     i = 0
-    while i < @trail.size
-      lit = @trail[i]
-      @assign[lit.abs] = 0
+    n = trail.size
+    while i < n
+      lit = trail[i]
+      assign[lit > 0 ? lit : 0 - lit] = 0
       i += 1
     # Tungsten intentionally has no tracing collector in this runtime.  A new
     # trail Array per proof step therefore remains resident until exit; reuse
     # the buffer across the complete replay.
-    @trail.pop while @trail.size > 0
+    trail.pop while trail.size > 0
     @qhead = 0
 
   # ---- clause database ----------------------------------------------------
@@ -105,34 +114,45 @@ use stream
       first = lits[0]
       second = 0
       j = 1
-      while j < lits.size && second == 0
-        second = lits[j] if lits[j] != first
+      n = lits.size
+      while j < n && second == 0
+        lj = lits[j]
+        second = lj if lj != first
         j += 1
       if second == 0
         @units.push(slot)
       else
         @wa[slot] = first
         @wb[slot] = second
-        @watch[first + @nvars].push(slot)
-        @watch[second + @nvars].push(slot)
+        nvars = @nvars
+        @watch[first + nvars].push(slot)
+        @watch[second + nvars].push(slot)
 
   -> prepare_watches
     return nil if @watch_ready
     @watch = []
     i = 0
-    while i <= 2 * @nvars
+    limit = 2 * @nvars
+    while i <= limit
       @watch.push([])
       i += 1
-    @wa = []
-    @wb = []
+    nslots = @clits.size
+    @wa = Array.new(nslots, 0)
+    @wb = Array.new(nslots, 0)
     @units = []
     slot = 0
-    while slot < @clits.size
-      @wa.push(0)
-      @wb.push(0)
+    while slot < nslots
       self.index_watches(slot, @clits[slot]) if @alive[slot] == 1
       slot += 1
     @watch_ready = true
+
+  -> slot_for_id(cid)
+    if cid > 0 && cid < @slot_by_id.size
+      @slot_by_id[cid]
+    elsif @slot_of.has_key?(cid)
+      @slot_of[cid]
+    else
+      -1
 
   -> add_clause(lits, id)
     cid = id > 0 ? id : @next_id
@@ -141,7 +161,17 @@ use stream
     @clits.push(lits)
     @alive.push(1)
     @cid.push(cid)
-    @slot_of[cid] = slot
+    sby = @slot_by_id
+    if cid == sby.size
+      sby.push(slot)
+    elsif cid > 0 && cid < sby.size
+      sby[cid] = slot
+    elsif cid > 0 && cid <= sby.size + 1024
+      while sby.size < cid
+        sby.push(-1)
+      sby.push(slot)
+    else
+      @slot_of[cid] = slot
     @ids.push(cid)
 
     @live_clauses += 1
@@ -175,13 +205,10 @@ use stream
     # Watch lists and @units drop dead slots lazily during traversal.
 
   -> delete_id(cid)
-    if @slot_of.has_key?(cid)
-      slot = @slot_of[cid]
-      if @alive[slot] == 1
-        self.kill_slot(slot)
-        true
-      else
-        false
+    slot = self.slot_for_id(cid)
+    if slot >= 0 && @alive[slot] == 1
+      self.kill_slot(slot)
+      true
     else
       false
 
@@ -208,18 +235,15 @@ use stream
   -> live_ids
     out = []
     @ids.each -> (cid)
-      slot = @slot_of[cid]
-      out.push(cid) if @alive[slot] == 1
+      slot = self.slot_for_id(cid)
+      out.push(cid) if slot >= 0 && @alive[slot] == 1
     out
 
   # Look up a live clause by proof id (hinted path); nil when absent.  Empty
   # live clauses remain distinguishable as [] without a second Hash lookup.
   -> lits_for_id(cid)
-    if @slot_of.has_key?(cid)
-      slot = @slot_of[cid]
-      @alive[slot] == 1 ? @clits[slot] : nil
-    else
-      nil
+    slot = self.slot_for_id(cid)
+    slot >= 0 && @alive[slot] == 1 ? @clits[slot] : nil
 
   # ---- propagation --------------------------------------------------------
 
@@ -228,53 +252,76 @@ use stream
   -> propagate
     self.prepare_watches
     conflict = @empty_live > 0
+    assign = @assign
+    trail = @trail
+    alive = @alive
+    clits = @clits
+    wa = @wa
+    wb = @wb
+    watch = @watch
+    nvars = @nvars
+    units = @units
 
     # Live unit clauses fire first: nothing watches them.
     ui = 0
-    while ui < @units.size && !conflict
-      slot = @units[ui]
-      if @alive[slot] == 1
-        l = @clits[slot][0]
-        v = self.value(l)
+    usize = units.size
+    while ui < usize && !conflict
+      slot = units[ui]
+      if alive[slot] == 1
+        l = clits[slot][0]
+        v = l > 0 ? assign[l] : 0 - assign[0 - l]
         if v < 0
           conflict = true
         elsif v == 0
-          self.assign_lit(l)
+          if l > 0
+            assign[l] = 1
+          else
+            assign[0 - l] = -1
+          trail.push(l)
       ui += 1
 
-    while @qhead < @trail.size && !conflict
-      lit = @trail[@qhead]
+    while @qhead < trail.size && !conflict
+      lit = trail[@qhead]
       @qhead += 1
-      bucket = @watch[(0 - lit) + @nvars]
+      neg_lit = 0 - lit
+      bucket = watch[neg_lit + nvars]
       i = 0
       while i < bucket.size && !conflict
         slot = bucket[i]
-        if @alive[slot] == 0
+        if alive[slot] == 0
           bucket[i] = bucket[bucket.size - 1]
           bucket.pop
         else
-          # Normalise: @wb[slot] is the watch being falsified.
-          if @wa[slot] == 0 - lit
-            @wa[slot] = @wb[slot]
-            @wb[slot] = 0 - lit
-          other = @wa[slot]
-          if self.value(other) > 0
+          # Normalise: wb[slot] is the watch being falsified.
+          if wa[slot] == neg_lit
+            wa[slot] = wb[slot]
+            wb[slot] = neg_lit
+          other = wa[slot]
+          other_v = other > 0 ? assign[other] : 0 - assign[0 - other]
+          if other_v > 0
             i += 1
           else
-            lits = @clits[slot]
+            lits = clits[slot]
             found = 0
             j = 0
-            while j < lits.size && found == 0
+            lsize = lits.size
+            while j < lsize && found == 0
               cand = lits[j]
-              found = cand if cand != other && cand != (0 - lit) && self.value(cand) >= 0
+              if cand != other && cand != neg_lit
+                cand_v = cand > 0 ? assign[cand] : 0 - assign[0 - cand]
+                found = cand if cand_v >= 0
               j += 1
             if found != 0
-              @wb[slot] = found
-              @watch[found + @nvars].push(slot)
+              wb[slot] = found
+              watch[found + nvars].push(slot)
               bucket[i] = bucket[bucket.size - 1]
               bucket.pop
-            elsif self.value(other) == 0
-              self.assign_lit(other)
+            elsif other_v == 0
+              if other > 0
+                assign[other] = 1
+              else
+                assign[0 - other] = -1
+              trail.push(other)
               i += 1
             else
               conflict = true
@@ -285,10 +332,18 @@ use stream
     conflict = false
     ok = true
     hi = 0
-    while hi < hints.size
+    hsize = hints.size
+    assign = @assign
+    trail = @trail
+    sby = @slot_by_id
+    sbysize = sby.size
+    alive = @alive
+    clits = @clits
+    while hi < hsize
       cid = hints[hi]
       if ok && !conflict
-        lits = self.lits_for_id(cid)
+        slot = (cid > 0 && cid < sbysize) ? sby[cid] : self.slot_for_id(cid)
+        lits = (slot >= 0 && alive[slot] == 1) ? clits[slot] : nil
         if lits == nil
           ok = false
         else
@@ -299,11 +354,13 @@ use stream
           unassigned = 0
           unit = 0
           li = 0
-          while li < lits.size
+          lsize = lits.size
+          while li < lsize
             l = lits[li]
-            var = l < 0 ? 0 - l : l
-            v = @assign[var]
-            v = 0 - v if l < 0
+            if l > 0
+              v = assign[l]
+            else
+              v = 0 - assign[0 - l]
             if v > 0
               sat = true
             elsif v == 0
@@ -313,7 +370,11 @@ use stream
           if unassigned == 0 && !sat
             conflict = true
           elsif unassigned == 1 && !sat
-            self.assign_lit(unit)
+            if unit > 0
+              assign[unit] = 1
+            else
+              assign[0 - unit] = -1
+            trail.push(unit)
           else
             # A hint that is satisfied or still ambiguous is not a valid
             # step in a propagation chain.
@@ -327,16 +388,25 @@ use stream
   # contradictory at assumption time (which counts as a conflict).
   -> assume_negation(lits)
     conflict = false
+    assign = @assign
+    trail = @trail
     i = 0
-    while i < lits.size
+    n = lits.size
+    while i < n
       l = lits[i]
-      var = l < 0 ? 0 - l : l
-      v = @assign[var]
-      v = 0 - v if l < 0
+      if l > 0
+        v = assign[l]
+      else
+        v = 0 - assign[0 - l]
       if v > 0
         conflict = true      # clause is already satisfied by an assumption
       elsif v == 0
-        self.assign_lit(0 - l)
+        neg_l = 0 - l
+        if neg_l > 0
+          assign[neg_l] = 1
+        else
+          assign[0 - neg_l] = -1
+        trail.push(neg_l)
       i += 1
     conflict
 
@@ -361,7 +431,7 @@ use stream
       ok = true
       self.live_ids.each -> (cid)
         if ok
-          other = @clits[@slot_of[cid]]
+          other = @clits[self.slot_for_id(cid)]
           if other.include?(0 - pivot)
             resolvent = []
             lits.each -> (l)

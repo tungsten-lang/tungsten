@@ -5088,49 +5088,45 @@ fn __bigint_isqrt_u128(lo, hi, shift) (i64 i64 i64) i64
       ret i64 %root
   IR
 
-# Montgomery multiplication modulo an odd machine-word modulus. The reduction
-# keeps the low-limb carry explicit so it remains exact when the modulus has its
-# high bit set and the conceptual 128-bit sum overflows by one bit.
--> __bigint_mont_mul_u64(a, b, modulus, neg_inverse) (u64 u64 u64 u64) u64
+# Montgomery multiplication modulo an odd machine-word modulus (subtract-form
+# REDC: inverse * modulus == 1 mod 2^64, so multiplier * modulus shares the
+# exact low 64 bits of a * b and the reduction is borrow-only).
+-> __bigint_mont_mul_u64(a, b, modulus, inverse) (u64 u64 u64 u64) u64
   product_low = a * b ## u64
   product_high = mulhi(a, b) ## u64
-  multiplier = product_low * neg_inverse ## u64
-  correction_low = multiplier * modulus ## u64
+  multiplier = product_low * inverse ## u64
   correction_high = mulhi(multiplier, modulus) ## u64
+  if product_high < correction_high
+    return product_high - correction_high + modulus ## u64
+  product_high - correction_high ## u64
 
-  # The Montgomery multiplier makes product_low + correction_low congruent to
-  # zero modulo 2^64. It therefore carries exactly when product_low is nonzero.
-  carry = (product_low != 0 ? 1 : 0) ## u64
-  wide_reduced = (product_high ## u128) + (correction_high ## u128) ## u128
-  wide_reduced = wide_reduced + (carry ## u128) ## u128
-  reduced = wide_reduced ## u64
-  if (wide_reduced >> 64) != 0
-    return reduced - modulus ## u64
-  if reduced >= modulus
-    return reduced - modulus ## u64
-  reduced
-
-# One strong Miller-Rabin witness in Montgomery form. The caller supplies the
-# shared per-candidate setup and a base smaller than the normalized one-limb
-# BigInt magnitude.
--> __bigint_prime_mr_base_u64(modulus, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, base) (u64 u64 u64 u64 u64 u64 i64 u64) i64
-  x = one_m ## u64
-  power = __bigint_mont_mul_u64(base, r2, modulus, neg_inverse) ## u64
-  e = exponent ## u64
+# One strong Miller-Rabin witness in Montgomery form with a pre-converted
+# Montgomery base `bm = base * R mod modulus`.
+-> __bigint_prime_mr_pow_u64(modulus, inverse, one_m, minus_one_m, exponent, shifts, bm) (u64 u64 u64 u64 u64 i64 u64) i64
+  x = bm ## u64
+  power = bm ## u64
+  e = exponent >> 1 ## u64
   while e != 0
+    power = __bigint_mont_mul_u64(power, power, modulus, inverse) ## u64
     if (e & 1) != 0
-      x = __bigint_mont_mul_u64(x, power, modulus, neg_inverse) ## u64
-    power = __bigint_mont_mul_u64(power, power, modulus, neg_inverse) ## u64
+      x = __bigint_mont_mul_u64(x, power, modulus, inverse) ## u64
     e = e >> 1 ## u64
   if x == one_m || x == minus_one_m
     return 1 ## i64
   r = 1 ## i64
   while r < shifts
-    x = __bigint_mont_mul_u64(x, x, modulus, neg_inverse) ## u64
+    x = __bigint_mont_mul_u64(x, x, modulus, inverse) ## u64
     if x == minus_one_m
       return 1 ## i64
     r += 1
   0 ## i64
+
+# One strong Miller-Rabin witness in Montgomery form. The caller supplies the
+# shared per-candidate setup and a base smaller than the normalized one-limb
+# BigInt magnitude.
+-> __bigint_prime_mr_base_u64(modulus, inverse, one_m, r2, minus_one_m, exponent, shifts, base) (u64 u64 u64 u64 u64 u64 i64 u64) i64
+  bm = __bigint_mont_mul_u64(base, r2, modulus, inverse) ## u64
+  __bigint_prime_mr_pow_u64(modulus, inverse, one_m, minus_one_m, exponent, shifts, bm)
 
 # Exact deterministic primality for normalized positive one-limb BigInts. Such
 # values are at least 2^47, so after the small-factor screen the all-u64
@@ -5190,33 +5186,51 @@ fn __bigint_isqrt_u128(lo, hi, shift) (i64 i64 i64) i64
     return 1 ## i64
   if value % 37 == 0
     return 0 ## i64
+  if value == 41
+    return 1 ## i64
+  if value % 41 == 0
+    return 0 ## i64
+  if value == 43
+    return 1 ## i64
+  if value % 43 == 0
+    return 0 ## i64
+  if value == 47
+    return 1 ## i64
+  if value % 47 == 0
+    return 0 ## i64
+  if value == 53
+    return 1 ## i64
+  if value % 53 == 0
+    return 0 ## i64
 
-  inverse = value ## u64
+  inverse = (3 * value) ^ 2 ## u64
   inverse = inverse * (2 - value * inverse) ## u64
   inverse = inverse * (2 - value * inverse) ## u64
   inverse = inverse * (2 - value * inverse) ## u64
   inverse = inverse * (2 - value * inverse) ## u64
-  inverse = inverse * (2 - value * inverse) ## u64
-  neg_inverse = 0 - inverse ## u64
   one_m = (0 - value ## u64) % value ## u64
-  r2 = (((one_m ## u128) * (one_m ## u128)) % (value ## u128)) ## u64
   minus_one_m = value - one_m ## u64
   shifts = ccall_nobox("__w_bit_cttz_u64", value - 1 ## u64) ## i64
   exponent = (value - 1 ## u64) >> shifts ## u64
 
-  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 2 ## u64) == 0
+  # Test witness 2 using 2*R mod value directly, avoiding the 128-bit % for r2
+  # on >99.999% of composite inputs.
+  two_m = one_m >= minus_one_m ? one_m - minus_one_m : one_m + one_m ## u64
+  if __bigint_prime_mr_pow_u64(value, inverse, one_m, minus_one_m, exponent, shifts, two_m) == 0
     return 0 ## i64
-  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 325 ## u64) == 0
+
+  r2 = (((one_m ## u128) * (one_m ## u128)) % (value ## u128)) ## u64
+  if __bigint_prime_mr_base_u64(value, inverse, one_m, r2, minus_one_m, exponent, shifts, 325 ## u64) == 0
     return 0 ## i64
-  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 9375 ## u64) == 0
+  if __bigint_prime_mr_base_u64(value, inverse, one_m, r2, minus_one_m, exponent, shifts, 9375 ## u64) == 0
     return 0 ## i64
-  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 28178 ## u64) == 0
+  if __bigint_prime_mr_base_u64(value, inverse, one_m, r2, minus_one_m, exponent, shifts, 28178 ## u64) == 0
     return 0 ## i64
-  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 450775 ## u64) == 0
+  if __bigint_prime_mr_base_u64(value, inverse, one_m, r2, minus_one_m, exponent, shifts, 450775 ## u64) == 0
     return 0 ## i64
-  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 9780504 ## u64) == 0
+  if __bigint_prime_mr_base_u64(value, inverse, one_m, r2, minus_one_m, exponent, shifts, 9780504 ## u64) == 0
     return 0 ## i64
-  if __bigint_prime_mr_base_u64(value, neg_inverse, one_m, r2, minus_one_m, exponent, shifts, 1795265022 ## u64) == 0
+  if __bigint_prime_mr_base_u64(value, inverse, one_m, r2, minus_one_m, exponent, shifts, 1795265022 ## u64) == 0
     return 0 ## i64
   1 ## i64
 
@@ -6868,6 +6882,12 @@ fn __bigint_shr_positive_funnel(rp, sp, n, k) (i64 i64 i64 i64) i64
     ccall("w_bigint_lucnum2_ui", self)
 
   -> bit_length
+    n = $size ## i64
+    if (($value >> 47) & 1) == 1
+      n = 0 - n
+    if n > 0
+      bits = (n - 1) * 64 + (64 - ccall_nobox("__w_bit_ctlz_u64", $limbs[n - 1] ## u64)) ## i64
+      return wvalue_from_bits((-1688849860263936 | bits) ## i64)
     ccall("w_bigint_bit_length", self)
 
   -> sizeinbase(base = 10)

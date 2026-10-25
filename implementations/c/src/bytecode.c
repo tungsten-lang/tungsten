@@ -40,6 +40,7 @@ void tc_chunk_free(TcChunk *chunk) {
   free(chunk->fn_for_const);
   free(chunk->ctor_fn_for_const);
   free(chunk->ctor_is_slab);
+  free(chunk->const_is_builtin);
   free(chunk->method_ic_class);
   free(chunk->method_ic_class_len);
   free(chunk->method_ic_fn);
@@ -801,6 +802,7 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
     chunk->fn_for_const = (TcFunction **)calloc(chunk->const_count, sizeof(TcFunction *));
     chunk->ctor_fn_for_const = (TcFunction **)calloc(chunk->const_count, sizeof(TcFunction *));
     chunk->ctor_is_slab = (uint8_t *)calloc(chunk->const_count, sizeof(uint8_t));
+    chunk->const_is_builtin = (uint8_t *)calloc(chunk->const_count, sizeof(uint8_t));
     for (size_t i = 0; i < chunk->const_count; i++) {
       TcValue v = chunk->consts[i];
       // Call names are TC_VAL_SYMBOL post-emit_call_op refactor.
@@ -809,6 +811,7 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
       const char *call_name = tc_str_bytes_only(v);
       size_t call_name_len = tc_str_len(v);
       if (call_name_len > 4 && memcmp(call_name + call_name_len - 4, ".new", 4) == 0) {
+        if (chunk->const_is_builtin) chunk->const_is_builtin[i] = 1;
         size_t class_len = call_name_len - 4;
         if (chunk->ctor_fn_for_const) {
           chunk->ctor_fn_for_const[i] = tc_chunk_find_method(
@@ -821,7 +824,10 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
         continue;
       }
       if (!chunk->fn_for_const) continue;
-      if (is_receiverless_builtin(call_name, call_name_len)) continue;
+      if (is_receiverless_builtin(call_name, call_name_len)) {
+        if (chunk->const_is_builtin) chunk->const_is_builtin[i] = 1;
+        continue;
+      }
       // Linear walk over functions is O(NxM); only happens once per
       // chunk, so it's fine. Breaking out of the inner loop on first
       // match is the only reason this is even tolerable.
@@ -1164,6 +1170,8 @@ static const char *op_name(uint8_t op) {
     case TC_OP_IS_MACHINE_INT_TYPE: return "IS_MACHINE_INT_TYPE";
     case TC_OP_IS_MACHINE_INT128_TYPE: return "IS_MACHINE_INT128_TYPE";
     case TC_OP_IS_MACHINE_INT64_TYPE: return "IS_MACHINE_INT64_TYPE";
+    case TC_OP_STRING_FIRST_BYTE: return "STRING_FIRST_BYTE";
+    case TC_OP_WIRE_TEMP_OPERANDS: return "WIRE_TEMP_OPERANDS";
     default: return "?";
   }
 }

@@ -415,9 +415,11 @@
     when T_DOT_LSHIFT then :DOT_LSHIFT
     when T_DOT_RSHIFT then :DOT_RSHIFT
     when T_EQ then :EQ
+    when T_TRIPLE_EQ then :TRIPLE_EQ
     when T_NEQ then :NEQ
     when T_APPROX then :APPROX
     when T_MATCH then :MATCH
+    when T_NMATCH then :NMATCH
     when T_LT then :LT
     when T_GT then :GT
     when T_LTE then :LTE
@@ -1674,7 +1676,7 @@
     parse_equality_from(parse_bitwise_or())
 
   -> parse_equality_from(left)
-    while @current_type in (T_EQ T_NEQ T_MATCH T_APPROX)
+    while @current_type in (T_EQ T_TRIPLE_EQ T_NEQ T_MATCH T_NMATCH T_APPROX)
       op = advance_op_sym()
       right = parse_bitwise_or()
       left = Tungsten:AST:BinaryOp.new(left, op, right)

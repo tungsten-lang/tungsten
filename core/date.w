@@ -53,9 +53,23 @@
   # Numbered day of the year (`YYYY-DDD` / Date.ordinal) in proleptic
   # Gregorian. Historical skips and extras belong on Date.in.
   -> .ordinal(year, number)
-    if !number.is_a?(Int)
+    if !year.is_a?(Int) || !number.is_a?(Int)
       raise "Date.ordinal expects an integer ordinal day"
-    ccall("w_date_from_ordinal", year, number)
+    if year < -1024 || year > 3071
+      raise "Date year must be between -1024 and 3071"
+    leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    max_day = leap ? 366 : 365
+    if number < 1 || number > max_day
+      raise "Date ordinal day is outside the requested year"
+    m = 1
+    rem = number
+    while m <= 12
+      dim = m == 2 ? (leap ? 29 : 28) : (31 - ((0xA50 >> m) & 1))
+      if rem <= dim
+        return Date.new(year, m, rem)
+      rem -= dim
+      m += 1
+    raise "Date ordinal day is outside the requested year"
 
   # ISO week date: Monday=1, Sunday=7; week 1 contains January 4.
   -> .commercial(year, week, day)
@@ -461,9 +475,13 @@
     mm = (m + 12 * a - 3) ## i64
     (d + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045) ## i64
 
-  -> to_s
+  -> to_s(format = nil)
+    if format != nil
+      return self.strftime(format)
+    ccall("w_to_s", self)
 
-  alias_method :to_s/1, :strftime/1
+  -> inspect
+    self.to_s()
 
   # Formats _date_ according to the directives in the given format string
   #
@@ -556,4 +574,173 @@
   #     %GW%V        # 2007W47    Week date, reduced accuracy, specific week (basic)
   #     %G-W%V       # 2007-W47   Week date, reduced accuracy, specific week (extended)
   #
-  -> strftime/1
+  -> strftime(format)
+    fmt = "" + format
+    n = fmt.size()
+    out = ""
+    i = 0
+    while i < n
+      if fmt.byte_at(i) != 37
+        start = i
+        while i < n && fmt.byte_at(i) != 37
+          i += 1
+        out = out + fmt.slice(start, i - start)
+      else
+        i += 1
+        if i >= n
+          out = out + "%"
+          break
+        pad_mode = 0
+        upcase_flag = false
+        colons = 0
+        while i < n
+          b = fmt.byte_at(i)
+          if b == 45
+            pad_mode = 1
+            i += 1
+          elsif b == 95
+            pad_mode = 2
+            i += 1
+          elsif b == 48
+            pad_mode = 3
+            i += 1
+          elsif b == 94 || b == 35
+            upcase_flag = true
+            i += 1
+          elsif b == 58
+            colons += 1
+            i += 1
+          else
+            break
+        width = 0
+        while i < n && fmt.byte_at(i) >= 48 && fmt.byte_at(i) <= 57
+          width = width * 10 + (fmt.byte_at(i) - 48)
+          i += 1
+        if i < n && (fmt.byte_at(i) == 69 || fmt.byte_at(i) == 79)
+          i += 1
+        if i >= n
+          break
+        spec = fmt.slice(i, 1)
+        i += 1
+        if spec == "Y"
+          out = out + self.__strftime_num(year, 4, 3, pad_mode, width)
+        elsif spec == "C"
+          out = out + self.__strftime_num(century / 100, 2, 3, pad_mode, width)
+        elsif spec == "y"
+          out = out + self.__strftime_num(((year % 100) + 100) % 100, 2, 3, pad_mode, width)
+        elsif spec == "m"
+          out = out + self.__strftime_num(month, 2, 3, pad_mode, width)
+        elsif spec == "B"
+          mo = month
+          ms = (mo >= 1 && mo <= 12) ? MONTH_NAMES[mo - 1] : "January"
+          out = out + (upcase_flag ? ms.upcase() : ms)
+        elsif spec == "b" || spec == "h"
+          mo = month
+          ms = (mo >= 1 && mo <= 12) ? MONTHS[mo - 1] : "Jan"
+          out = out + (upcase_flag ? ms.upcase() : ms)
+        elsif spec == "d"
+          out = out + self.__strftime_num(day, 2, 3, pad_mode, width)
+        elsif spec == "e"
+          out = out + self.__strftime_num(day, 2, 2, pad_mode, width)
+        elsif spec == "j"
+          out = out + self.__strftime_num(yday, 3, 3, pad_mode, width)
+        elsif spec == "A"
+          ds = DAY_NAMES[wday]
+          out = out + (upcase_flag ? ds.upcase() : ds)
+        elsif spec == "a"
+          ds = DAYS[wday]
+          out = out + (upcase_flag ? ds.upcase() : ds)
+        elsif spec == "u"
+          out = out + cwday.to_s()
+        elsif spec == "w"
+          out = out + wday.to_s()
+        elsif spec == "G"
+          out = out + self.__strftime_num(cwyear, 4, 3, pad_mode, width)
+        elsif spec == "g"
+          out = out + self.__strftime_num(((cwyear % 100) + 100) % 100, 2, 3, pad_mode, width)
+        elsif spec == "V"
+          out = out + self.__strftime_num(cweek, 2, 3, pad_mode, width)
+        elsif spec == "U"
+          out = out + self.__strftime_num((yday + 6 - wday) / 7, 2, 3, pad_mode, width)
+        elsif spec == "W"
+          out = out + self.__strftime_num((yday + 7 - cwday) / 7, 2, 3, pad_mode, width)
+        elsif spec == "H"
+          out = out + self.__strftime_num(hour, 2, 3, pad_mode, width)
+        elsif spec == "k"
+          out = out + self.__strftime_num(hour, 2, 2, pad_mode, width)
+        elsif spec == "I"
+          h12 = hour % 12
+          if h12 == 0
+            h12 = 12
+          out = out + self.__strftime_num(h12, 2, 3, pad_mode, width)
+        elsif spec == "l"
+          h12 = hour % 12
+          if h12 == 0
+            h12 = 12
+          out = out + self.__strftime_num(h12, 2, 2, pad_mode, width)
+        elsif spec == "M"
+          out = out + self.__strftime_num(minute, 2, 3, pad_mode, width)
+        elsif spec == "S"
+          out = out + self.__strftime_num(second, 2, 3, pad_mode, width)
+        elsif spec == "L"
+          out = out + "000"
+        elsif spec == "N"
+          out = out + "000000000"
+        elsif spec == "p"
+          out = out + (hour < 12 ? "AM" : "PM")
+        elsif spec == "P"
+          out = out + (hour < 12 ? "am" : "pm")
+        elsif spec == "z"
+          t = tz
+          sign = t < 0 ? "-" : "+"
+          at = t < 0 ? (0 - t) : t
+          zh = self.__strftime_num(at / 60, 2, 3, 0, 0)
+          zm = self.__strftime_num(at % 60, 2, 3, 0, 0)
+          if colons == 1
+            out = out + sign + zh + ":" + zm
+          elsif colons >= 2
+            out = out + sign + zh + ":" + zm + ":00"
+          else
+            out = out + sign + zh + zm
+        elsif spec == "Z"
+          out = out + (tz == 0 ? "UTC" : self.strftime("%:z"))
+        elsif spec == "n"
+          out = out + "\n"
+        elsif spec == "t"
+          out = out + "\t"
+        elsif spec == "%"
+          out = out + "%"
+        elsif spec == "D" || spec == "x"
+          out = out + self.strftime("%m/%d/%y")
+        elsif spec == "F"
+          out = out + self.strftime("%Y-%m-%d")
+        elsif spec == "T" || spec == "X"
+          out = out + self.strftime("%H:%M:%S")
+        elsif spec == "R"
+          out = out + self.strftime("%H:%M")
+        elsif spec == "r"
+          out = out + self.strftime("%I:%M:%S %p")
+        elsif spec == "v"
+          out = out + self.strftime("%e-%b-%Y")
+        elsif spec == "c"
+          out = out + self.strftime("%a %b %e %H:%M:%S %Y")
+        else
+          out = out + "%" + spec
+    out
+
+  -> __strftime_num(val, def_width, def_pad, pad_mode, width)
+    eff_pad = pad_mode == 0 ? def_pad : pad_mode
+    eff_w = width > 0 ? width : def_width
+    if eff_pad == 1
+      return val.to_s()
+    if eff_pad == 3
+      neg = val < 0
+      mag = neg ? (0 - val) : val
+      s = mag.to_s()
+      while s.size() < eff_w
+        s = "0" + s
+      return neg ? ("-" + s) : s
+    s = val.to_s()
+    while s.size() < eff_w
+      s = " " + s
+    s

@@ -737,14 +737,172 @@ INSP_RESULT_VALUE_LIMIT = 240
         @scrub_anchor = 0
       elsif @scrub_anchor == 0
         @scrub_anchor = scrub_day_of(text)
-      # w_date_scrub takes raw int64 unit/delta. Untyped parameters are boxed
-      # WValues, whose tag bits read as an enormous shift and trip the range
-      # guard in date_add_days, so unbox explicitly at the ccall boundary.
-      unit = mag ## i64
-      steps = delta ## i64
-      anchor = @scrub_anchor ## i64
-      rep = ccall("w_date_scrub", "" + text, unit, steps, anchor)
+      rep = scrub_date_literal("" + text, mag, delta, @scrub_anchor)
     src.slice(0, start) + rep + src.slice(start + flen, src.size() - (start + flen))
+
+  -> scrub_leap?(y)
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+
+  -> scrub_days_in_month(y, m)
+    if m == 2
+      return scrub_leap?(y) ? 29 : 28
+    31 - ((0xA50 >> m) & 1)
+
+  -> scrub_ordinal_len(y)
+    scrub_leap?(y) ? 366 : 365
+
+  -> insp_pad3(n)
+    if n < 10
+      return "00" + n.to_s()
+    if n < 100
+      return "0" + n.to_s()
+    n.to_s()
+
+  -> insp_pad4(n)
+    if n < 0
+      mag = 0 - n
+      if mag < 10
+        return "-00" + mag.to_s()
+      if mag < 100
+        return "-0" + mag.to_s()
+      return "-" + mag.to_s()
+    if n < 10
+      return "000" + n.to_s()
+    if n < 100
+      return "00" + n.to_s()
+    if n < 1000
+      return "0" + n.to_s()
+    n.to_s()
+
+  -> scrub_date_literal(s, unit, delta, anchor_day)
+    y = 0
+    mo = 1
+    d = 1
+    hh = 0
+    mi = 0
+    ss = 0
+    has_t = s.include?("T")
+    dashes = 0
+    colons = 0
+    i = 0
+    while i < s.size()
+      b = s.byte_at(i)
+      if b == 45
+        dashes += 1
+      elsif b == 58
+        colons += 1
+      i += 1
+    shape = 0
+    if has_t
+      shape = 1
+      t_idx = s.index("T")
+      dparts = s.slice(0, t_idx).split("-")
+      tparts = s.slice(t_idx + 1, s.size() - t_idx - 1).split(":")
+      y = dparts[0].to_i()
+      mo = dparts[1].to_i()
+      d = dparts[2].to_i()
+      hh = tparts[0].to_i()
+      mi = tparts.size() > 1 ? tparts[1].to_i() : 0
+      ss = tparts.size() > 2 ? tparts[2].to_i() : 0
+    elsif colons >= 1 && dashes == 0
+      shape = 3
+      tparts = s.split(":")
+      hh = tparts[0].to_i()
+      mi = tparts.size() > 1 ? tparts[1].to_i() : 0
+      ss = tparts.size() > 2 ? tparts[2].to_i() : 0
+    elsif dashes == 1 && !has_t && colons == 0
+      dparts = s.split("-")
+      if dparts[1].size() == 3
+        shape = 4
+        y = dparts[0].to_i()
+        d = dparts[1].to_i()
+      else
+        shape = 2
+        y = dparts[0].to_i()
+        mo = dparts[1].to_i()
+    else
+      shape = 0
+      dparts = s.split("-")
+      y = dparts[0].to_i()
+      mo = dparts[1].to_i()
+      d = dparts[2].to_i()
+
+    if shape == 3
+      add = unit == 4 ? delta * 3600 : delta * 60
+      total = (((hh * 3600 + mi * 60 + ss + add) % 86400) + 86400) % 86400
+      hh = total / 3600
+      mi = (total / 60) % 60
+      ss = total % 60
+    elsif shape == 4
+      n = d
+      if unit == 2
+        y += delta
+      elsif unit == 1
+        n += delta * 30
+      else
+        n += delta
+      guard = 0
+      while n > scrub_ordinal_len(y) && guard < 8
+        n -= scrub_ordinal_len(y)
+        y += 1
+        guard += 1
+      while n < 1 && guard < 16
+        y -= 1
+        n += scrub_ordinal_len(y)
+        guard += 1
+      if n < 1
+        n = 1
+      olen = scrub_ordinal_len(y)
+      if n > olen
+        n = olen
+      d = n
+    else
+      eff = unit
+      if shape == 2 && eff == 0
+        eff = 1
+      want = (anchor_day > 0 && anchor_day <= 31) ? anchor_day : d
+      if eff == 2
+        y += delta
+        d = want
+        dim = scrub_days_in_month(y, mo)
+        if d > dim
+          d = dim
+      elsif eff == 1
+        tot = y * 12 + (mo - 1) + delta
+        y = tot / 12
+        mo = tot % 12
+        if mo < 0
+          mo += 12
+          y -= 1
+        mo += 1
+        d = want
+        dim = scrub_days_in_month(y, mo)
+        if d > dim
+          d = dim
+      else
+        d += delta
+        while d > scrub_days_in_month(y, mo)
+          d -= scrub_days_in_month(y, mo)
+          mo += 1
+          if mo > 12
+            mo = 1
+            y += 1
+        while d < 1
+          mo -= 1
+          if mo < 1
+            mo = 12
+            y -= 1
+          d += scrub_days_in_month(y, mo)
+
+    if shape == 1
+      return insp_pad4(y) + "-" + insp_pad2(mo) + "-" + insp_pad2(d) + "T" + insp_pad2(hh) + ":" + insp_pad2(mi) + ":" + insp_pad2(ss)
+    if shape == 3
+      return insp_pad2(hh) + ":" + insp_pad2(mi) + ":" + insp_pad2(ss)
+    if shape == 4
+      return insp_pad4(y) + "-" + insp_pad3(d)
+    if shape == 2
+      return insp_pad4(y) + "-" + insp_pad2(mo)
+    insp_pad4(y) + "-" + insp_pad2(mo) + "-" + insp_pad2(d)
 
   # Day-of-month of a YYYY-MM-DD[Thh:mm:ss] scrub field; 0 for the other
   # date shapes (month, time, ordinal), which have no day to anchor.
@@ -911,9 +1069,9 @@ INSP_RESULT_VALUE_LIMIT = 240
     if tn == "Date"
       inspect_date_scene(v)
     if tn == "Color"
-      ins_block(ccall("w_color_scene", v))
+      ins_block(Value.color_scene(v))
     if tn == "IPv4"
-      ins_block(ccall("w_ip4_scene", v))
+      ins_block(Value.ip4_scene(v))
     if tn == "Quantity"
       inspect_quantity_metadata(v)
     insp_breakdown(v)
@@ -1404,16 +1562,15 @@ INSP_RESULT_VALUE_LIMIT = 240
     insp_rstrip(line)
 
   # Universal WValue breakdown panel for any value: u0x header + grouped hex +
-  # grouped binary + the per-tag field rows (decoded in C by w_value_fields to
-  # avoid i64 sign issues on the high bits).
+  # grouped binary + the per-tag field rows (decoded in Value.fields).
   -> insp_breakdown(v)
-    hex16 = ccall("w_value_hex16", v)
-    bin64 = ccall("w_value_bin64", v)
+    hex16 = Value.hex16(v)
+    bin64 = Value.bin64(v)
     # Fold the raw u0x form into the hex row (in parens after the grouped
     # nibbles) instead of a standalone header line above it.
     ins(insp_hline("hex", insp_group(hex16, 4) + " (u0x" + hex16 + ")"))
     ins(insp_hline("binary", insp_group(bin64, 16)))
-    ins_block(ccall("w_value_fields", v))
+    ins_block(Value.fields(v))
 
   # result label: dates show their iso form, everything else its normal print.
   -> insp_value_label(v, tn)

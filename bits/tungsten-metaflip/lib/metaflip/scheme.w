@@ -485,6 +485,9 @@
   # A literal Integer shift boxes high-bit masks into retained BigInts. These
   # are raw parity words, including bit 63, so keep both operands fixed-width.
   one = 1 ## i64
+  umask = (one << uw) - 1 ## i64
+  vmask = (one << vw) - 1 ## i64
+  wmask = (one << ww) - 1 ## i64
 
   # Exact inputs leave the slab zero, but rejected external candidates do not.
   # Clear on every entry so the same buffer is valid after either outcome.
@@ -498,24 +501,24 @@
     slot = term ## i64
     if liveo >= 0
       slot = st[liveo + term]
-    u = st[uo + slot] ## i64
-    v = st[vo + slot] ## i64
-    w = st[wo + slot] ## i64
-    ai = 0 ## i64
-    while ai < uw
-      if ((u >> ai) & 1) != 0
-        bi = 0 ## i64
-        while bi < vw
-          if ((v >> bi) & 1) != 0
-            base = (ai * vw + bi) * ww ## i64
-            ci = 0 ## i64
-            while ci < ww
-              if ((w >> ci) & 1) != 0
-                cell = base + ci ## i64
-                parity[cell / 64] = parity[cell / 64] ^ (one << (cell % 64))
-              ci += 1
-          bi += 1
-      ai += 1
+    ubits = st[uo + slot] & umask ## i64
+    vm = st[vo + slot] & vmask ## i64
+    wm = st[wo + slot] & wmask ## i64
+    if wm != 0 && vm != 0
+      while ubits != 0
+        ai = cttz(ubits) ## i64
+        ubits = ubits & (ubits - 1)
+        ai_base = ai * vw ## i64
+        vbits = vm ## i64
+        while vbits != 0
+          bi = cttz(vbits) ## i64
+          vbits = vbits & (vbits - 1)
+          base = (ai_base + bi) * ww ## i64
+          word_idx = base >> 6 ## i64
+          bit_off = base & 63 ## i64
+          parity[word_idx] = parity[word_idx] ^ (wm << bit_off)
+          if bit_off + ww > 64
+            parity[word_idx + 1] = parity[word_idx + 1] ^ (wm >> (64 - bit_off))
     term += 1
 
   row = 0 ## i64
@@ -528,7 +531,7 @@
         bi = inner * p + column
         ci = row * p + column
         cell = (ai * vw + bi) * ww + ci
-        parity[cell / 64] = parity[cell / 64] ^ (one << (cell % 64))
+        parity[cell >> 6] = parity[cell >> 6] ^ (one << (cell & 63))
         column += 1
       inner += 1
     row += 1
@@ -537,12 +540,10 @@
   while word < words
     value = parity[word] ## i64
     if value != 0
-      bit = 0 ## i64
-      while bit < 64
-        cell = word * 64 + bit
-        if cell < cells && ((value >> bit) & 1) != 0
-          return cell + 1
-        bit += 1
+      bit = cttz(value) ## i64
+      cell = (word << 6) + bit ## i64
+      if cell < cells
+        return cell + 1
     word += 1
   0
 
@@ -782,19 +783,35 @@
 
 # ---- initialization/import/export ----------------------------------------
 
-# String#to_i boxes values above the immediate-integer range.  Keeping both
-# at-most-seven-digit chunks and their recombination in declared i64 locals
-# avoids the boxed/raw store bug for 7x7 masks with bit 48 set.
+# String#to_i boxes values above the immediate-integer range. Scanning ASCII
+# decimal bytes directly into an i64 local avoids substring allocations and
+# the boxed/raw store bug for 7x7 masks with bit 48 set.
 -> ffw_parse_decimal_i64(text) (String) i64
-  cut = text.size() - 7 ## i64
+  if text == nil
+    return 0
+  n = text.size() ## i64
+  i = 0 ## i64
+  while i < n
+    b = text.byte_at(i) ## i64
+    if b != 32 && b != 9 && b != 13 && b != 10
+      break
+    i += 1
+  sign = 1 ## i64
+  if i < n
+    b = text.byte_at(i) ## i64
+    if b == 45
+      sign = 0 - 1
+      i += 1
+    elsif b == 43
+      i += 1
   value = 0 ## i64
-  if cut > 0
-    high = text.slice(0, cut).to_i() ## i64
-    low = text.slice(cut, 7).to_i() ## i64
-    value = high * 10000000 + low
-  if cut <= 0
-    value = text.to_i()
-  value
+  while i < n
+    b = text.byte_at(i) ## i64
+    if b < 48 || b > 57
+      break
+    value = value * 10 + (b - 48)
+    i += 1
+  value * sign
 
 -> ffw_init_naive_cap(st, n, capacity, seed, dslack, cycles, workq, wanderq) (i64[] i64 i64 i64 i64 i64 i64 i64) i64
   ok = ffw_prepare(st, n, capacity, seed, dslack, cycles, workq, wanderq) ## i64
@@ -876,6 +893,49 @@
   cap = ffw_default_capacity(n) ## i64
   ffw_init_terms_cap(st, us, vs, ws, rank, n, cap, seed, dslack, cycles, workq, wanderq)
 
+-> ffw_parse_scheme_row(line, field_base, out_uvw) (String i64 i64[]) i64
+  len = line.size() ## i64
+  pos = 0 ## i64
+  if field_base == 1
+    while pos < len && line.byte_at(pos) != 32
+      pos += 1
+    if pos >= len
+      return 0
+    pos += 1
+  k = 0 ## i64
+  while k < 3
+    if k > 0
+      if pos >= len || line.byte_at(pos) != 32
+        return 0
+      pos += 1
+    tok_start = pos ## i64
+    while pos < len && line.byte_at(pos) != 32
+      pos += 1
+    idx = tok_start ## i64
+    while idx < pos
+      b = line.byte_at(idx) ## i64
+      if b != 32 && b != 9 && b != 13 && b != 10
+        break
+      idx += 1
+    sign = 1 ## i64
+    if idx < pos
+      b = line.byte_at(idx) ## i64
+      if b == 45
+        sign = 0 - 1
+        idx += 1
+      elsif b == 43
+        idx += 1
+    val = 0 ## i64
+    while idx < pos
+      b = line.byte_at(idx) ## i64
+      if b < 48 || b > 57
+        break
+      val = val * 10 + (b - 48)
+      idx += 1
+    out_uvw[k] = val * sign
+    k += 1
+  1
+
 -> ffw_load_scheme_cap(st, path, n, capacity, seed, dslack, cycles, workq, wanderq) (i64[] String i64 i64 i64 i64 i64 i64 i64) i64
   result = 0 - 1 ## i64
   content = read_file(path)
@@ -913,16 +973,14 @@
       if ok == 1
         factor_mask = (1 << (n * n)) - 1 ## i64
         current = 0 ## i64
+        row_uvw = i64[3]
         i = 0 ## i64
         while i < rank
-          parts = lines[i + line_base].split(" ")
-          valid_term = 1 ## i64
-          if parts.size() < field_base + 3
-            valid_term = 0
+          valid_term = ffw_parse_scheme_row(lines[i + line_base], field_base, row_uvw) ## i64
           if valid_term == 1
-            u = ffw_parse_decimal_i64(parts[field_base]) ## i64
-            v = ffw_parse_decimal_i64(parts[field_base + 1]) ## i64
-            w = ffw_parse_decimal_i64(parts[field_base + 2]) ## i64
+            u = row_uvw[0] ## i64
+            v = row_uvw[1] ## i64
+            w = row_uvw[2] ## i64
             if u <= 0
               valid_term = 0
             if v <= 0
@@ -1454,31 +1512,34 @@
         bu = ui ^ uj
         bv = vj
         bw = wi
+      old_bits = ffw_popcount(ui) + ffw_popcount(vi) + ffw_popcount(wi) ## i64
+      old_bits += ffw_popcount(uj) + ffw_popcount(vj) + ffw_popcount(wj)
+      new_bits = ffw_popcount(au) + ffw_popcount(av) + ffw_popcount(aw) ## i64
+      new_bits += ffw_popcount(bu) + ffw_popcount(bv) + ffw_popcount(bw)
+      density_ok = 0 ## i64
+      if mode == 0 && new_bits <= old_bits + st[17]
+        density_ok = 1
       pressure_data = 0 ## i64
       pressure_plan = 0 ## i64
       # Rectangular worker states are fixed-size flat arrays. Decode their
       # stable data pointer and axis plan once per legal proposal, then reuse
       # both before and after the in-place trial move.
-      if mode == 0 && st[3] > 49
+      if density_ok == 1 && st[3] > 49
         pressure_data = ccall_nobox("w_array_data_ptr", st)
         pressure_plan = ffw_pressure_plan_raw(pressure_data)
       old_pressure = 0 ## i64
-      # Wander acceptance is density/band-only. Computing four hash-chain
-      # pressure scans there consumed time without influencing the decision.
-      if mode == 0
+      # Wander acceptance is density/band-only, and work proposals that already
+      # exceed the density budget cannot use pressure unless rank drops.
+      if density_ok == 1
         if st[3] > 49
           old_pressure = ffw_pressure_batch_raw(pressure_data, pressure_plan, ui, vi, wi, uj, vj, wj, 2)
         if st[3] <= 49
           old_pressure = ffw_pressure_pair_balanced(st, ui, vi, wi, uj, vj, wj)
-      old_bits = ffw_popcount(ui) + ffw_popcount(vi) + ffw_popcount(wi) ## i64
-      old_bits += ffw_popcount(uj) + ffw_popcount(vj) + ffw_popcount(wj)
       rank = rank_before ## i64
       rank = ffw_remove_known_slot(st, first, rank)
       rank = ffw_remove_known_slot(st, second, rank)
       rank = ffw_toggle(st, au, av, aw, rank)
       rank = ffw_toggle(st, bu, bv, bw, rank)
-      new_bits = ffw_popcount(au) + ffw_popcount(av) + ffw_popcount(aw) ## i64
-      new_bits += ffw_popcount(bu) + ffw_popcount(bv) + ffw_popcount(bw)
       accept = 0 ## i64
       if rank < rank_before
         accept = 1
@@ -1487,7 +1548,7 @@
           # Density is substantially cheaper than a second pair of pressure
           # scans. A proposal that already exceeds the density budget cannot
           # be accepted, so reject it before traversing the mutated chains.
-          if new_bits <= old_bits + st[17]
+          if density_ok == 1
             ceiling = pressure_ceiling ## i64
             if ceiling < 0
               ceiling = 0
@@ -1608,32 +1669,35 @@
         bu = ui ^ uj
         bv = vj
         bw = wi
+      old_bits = ffw_popcount(ui) + ffw_popcount(vi) + ffw_popcount(wi) ## i64
+      old_bits += ffw_popcount(uj) + ffw_popcount(vj) + ffw_popcount(wj)
+      new_bits = ffw_popcount(au) + ffw_popcount(av) + ffw_popcount(aw) ## i64
+      new_bits += ffw_popcount(bu) + ffw_popcount(bv) + ffw_popcount(bw)
+      density_ok = 0 ## i64
+      if mode == 0 && new_bits <= old_bits + st[17]
+        density_ok = 1
       pressure_data = 0 ## i64
       pressure_plan = 0 ## i64
-      if mode == 0 && st[3] > 49
+      if density_ok == 1 && st[3] > 49
         pressure_data = ccall_nobox("w_array_data_ptr", st)
         pressure_plan = ffw_pressure_plan_raw(pressure_data)
       old_pressure = 0 ## i64
-      if mode == 0
+      if density_ok == 1
         if st[3] > 49
           old_pressure = ffw_pressure_batch_raw(pressure_data, pressure_plan, ui, vi, wi, uj, vj, wj, 2)
         if st[3] <= 49
           old_pressure = ffw_pressure_pair_balanced(st, ui, vi, wi, uj, vj, wj)
-      old_bits = ffw_popcount(ui) + ffw_popcount(vi) + ffw_popcount(wi) ## i64
-      old_bits += ffw_popcount(uj) + ffw_popcount(vj) + ffw_popcount(wj)
       rank = rank_before ## i64
       rank = ffw_remove_known_slot(st, first, rank)
       rank = ffw_remove_known_slot(st, second, rank)
       rank = ffw_toggle(st, au, av, aw, rank)
       rank = ffw_toggle(st, bu, bv, bw, rank)
-      new_bits = ffw_popcount(au) + ffw_popcount(av) + ffw_popcount(aw) ## i64
-      new_bits += ffw_popcount(bu) + ffw_popcount(bv) + ffw_popcount(bw)
       accept = 0 ## i64
       if rank < rank_before
         accept = 1
       if rank == rank_before
         if mode == 0
-          if new_bits <= old_bits + st[17]
+          if density_ok == 1
             ceiling = pressure_ceiling ## i64
             if ceiling < 0
               ceiling = 0

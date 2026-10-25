@@ -217,14 +217,28 @@
   # track's muscles (others keep their start value).
   -> goal_from(body, start, mask)
     goal = start.copy
+    nm = mask.size
     if @goal_kind == :rate
       d = @goal.over(@duration)
-      mask.each -> goal[item] = start[item] + d[item]
+      i = 0
+      while i < nm
+        m = mask[i]
+        goal[m] = start[m] + d[m]
+        i += 1
     elsif @goal_kind == :to
-      mask.each -> goal[item] = @goal[item]
+      g = @goal
+      i = 0
+      while i < nm
+        m = mask[i]
+        goal[m] = g[m]
+        i += 1
     elsif @goal_kind == :pose
       posed = @goal.apply(body, start)
-      mask.each -> goal[item] = posed[item]
+      i = 0
+      while i < nm
+        m = mask[i]
+        goal[m] = posed[m]
+        i += 1
     goal
 
 # Movement: an ordered list of chunks, optionally looping (a gait cycle).

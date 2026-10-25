@@ -77,11 +77,22 @@
     @v1 = nil
     return self if ch.staggered? || ch.duration <= ~0.0 || ch.knot?
     if came_via && @cmd_vel != nil
-      @v0 = @cmd_vel.map -> item
+      cv = @cmd_vel
+      v0 = []
+      i = 0
+      while i < n
+        v0.push(cv[i])
+        i += 1
+      @v0 = v0
       @hermite = true
     if ch.via?
       nxt = next_index(ch)
-      @v1 = (0...n).map -> ~0.0
+      v1 = []
+      i = 0
+      while i < n
+        v1.push(~0.0)
+        i += 1
+      @v1 = v1
       if nxt >= 0
         nc = @movement[nxt]
         p2 = nc.goal_from(ctl.body, @goal, @mask)
@@ -89,8 +100,13 @@
         t2 = ch.duration if t2 <= ~0.0
         span = ch.duration + t2
         st = @start
-        v1 = @v1
-        @mask.each ->(m) v1[m] = (p2[m] - st[m]) / span
+        msk = @mask
+        nm = msk.size
+        k = 0
+        while k < nm
+          m = msk[k]
+          v1[m] = (p2[m] - st[m]) / span
+          k += 1
       @hermite = true
     self
 
@@ -108,7 +124,14 @@
       @kv0 = prev.knot_vel
       @ka0 = prev.knot_acc
     elsif @quintic && prev != nil && prev.via? && @cmd_vel != nil
-      @kv0 = @cmd_vel.map -> item
+      cv = @cmd_vel
+      n = cv.size
+      kv0 = []
+      i = 0
+      while i < n
+        kv0.push(cv[i])
+        i += 1
+      @kv0 = kv0
     self
 
   -> next_index(ch)
@@ -163,7 +186,13 @@
       v = ch.knot_vel if @quintic
       cmd = ctl.command
       gl = @goal
-      @mask.each -> cmd[item] = gl[item]
+      msk = @mask
+      nm = msk.size
+      k = 0
+      while k < nm
+        m = msk[k]
+        cmd[m] = gl[m]
+        k += 1
       advance(ctl, frame)
       return self if @finished
       @t0 = t_key
@@ -187,8 +216,14 @@
     cmd = ctl.command
     st = @start
     gl = @goal
+    msk = @mask
+    nm = msk.size
     if ch.staggered?
-      @mask.each ->(m) cmd[m] = st[m] + (gl[m] - st[m]) * ch.progress(m, e)
+      k = 0
+      while k < nm
+        m = msk[k]
+        cmd[m] = st[m] + (gl[m] - st[m]) * ch.progress(m, e)
+        k += 1
     elsif @hermite
       hermite_step(cmd, st, gl, e, ch.duration)
     elsif @quintic
@@ -196,13 +231,24 @@
     else
       p = ~1.0
       p = Easing.apply(ch.easing, e / ch.duration) if ch.duration > ~0.0
-      @mask.each -> cmd[item] = st[item] + (gl[item] - st[item]) * p
+      k = 0
+      while k < nm
+        m = msk[k]
+        cmd[m] = st[m] + (gl[m] - st[m]) * p
+        k += 1
     track_velocity(cmd, ctl.dt)
     drv = ch.drive_values
     if drv != nil
-      @mask.each -> ctl.add_drive(item, drv[item])
+      k = 0
+      while k < nm
+        m = msk[k]
+        ctl.add_drive(m, drv[m])
+        k += 1
     g = ch.gain_value
-    @mask.each -> ctl.set_gain(item, g)
+    k = 0
+    while k < nm
+      ctl.set_gain(msk[k], g)
+      k += 1
     apply_correction(ctl, frame, ch)
     return self if @finished
     fired = false
@@ -226,12 +272,17 @@
     h11 = s3 - s2
     v0 = @v0
     v1 = @v1
-    @mask.each ->(m)
+    msk = @mask
+    nm = msk.size
+    k = 0
+    while k < nm
+      m = msk[k]
       a = ~0.0
       a = v0[m] if v0 != nil
       b = ~0.0
       b = v1[m] if v1 != nil
       cmd[m] = h00 * st[m] + h10 * big_t * a + h01 * gl[m] + h11 * big_t * b
+      k += 1
     self
 
   # Quintic Hermite from start (the previous knot's velocity and
@@ -244,53 +295,91 @@
     b = Quintic.basis(Easing.clamp01(e / big_t))
     tv = big_t
     ta = big_t * big_t
+    tb0 = tv * b[0]
+    tb1 = ta * b[1]
+    tb2 = ta * b[2]
+    tb3 = tv * b[3]
     v0 = @kv0
     a0 = @ka0
     v1 = ch.knot_vel
     a1 = ch.knot_acc
-    @mask.each ->(m)
+    msk = @mask
+    nm = msk.size
+    k = 0
+    while k < nm
+      m = msk[k]
       d = ~0.0
-      d = d + tv * b[0] * v0[m] if v0 != nil
-      d = d + ta * b[1] * a0[m] if a0 != nil
-      d = d + ta * b[2] * a1[m] if a1 != nil
-      d = d + tv * b[3] * v1[m] if v1 != nil
+      d = d + tb0 * v0[m] if v0 != nil
+      d = d + tb1 * a0[m] if a0 != nil
+      d = d + tb2 * a1[m] if a1 != nil
+      d = d + tb3 * v1[m] if v1 != nil
       cmd[m] = st[m] + (gl[m] - st[m]) * p + d
+      k += 1
     self
 
   # Command velocity per muscle (feeds the next chunk's starting velocity).
   -> track_velocity(cmd, dt)
     if @prev_cmd == nil
       n = cmd.size
-      @prev_cmd = (0...n).map -> cmd[item]
-      @cmd_vel = (0...n).map -> ~0.0
+      pc = []
+      cv = []
+      i = 0
+      while i < n
+        pc.push(cmd[i])
+        cv.push(~0.0)
+        i += 1
+      @prev_cmd = pc
+      @cmd_vel = cv
       return self
     pc = @prev_cmd
     cv = @cmd_vel
-    @mask.each ->(m)
+    msk = @mask
+    nm = msk.size
+    k = 0
+    while k < nm
+      m = msk[k]
       cv[m] = (cmd[m] - pc[m]) / dt
       pc[m] = cmd[m]
+      k += 1
     self
 
   # Spring-smoothed corrections: the chunk's correction function proposes
   # contraction offsets; the spring eases toward them (and back to zero when
   # the chunk has none), so corrections never step.
   -> apply_correction(ctl, frame, ch)
+    callback = ch.correction
+    if @spring == nil && callback == nil
+      return self
     n = ctl.body.size
     if @spring == nil
       @spring = SpringVector.new(n, ch.spring_time, ~1.0)
-      @corr = (0...n).map -> ~0.0
+      corr = []
+      i = 0
+      while i < n
+        corr.push(~0.0)
+        i += 1
+      @corr = corr
     tgt = @corr
     i = 0
     while i < n
       tgt[i] = ~0.0
       i += 1
-    callback = ch.correction
+    msk = @mask
+    nm = msk.size
     if callback != nil
       off = callback.call(frame, ctl)
       if off != nil
-        @mask.each -> tgt[item] = off[item]
+        k = 0
+        while k < nm
+          m = msk[k]
+          tgt[m] = off[m]
+          k += 1
     v = @spring.step(tgt, ctl.dt)
-    @mask.each -> ctl.add_offset(item, v[item])
+    k = 0
+    while k < nm
+      m = msk[k]
+      ctl.add_offset(m, v[m])
+      k += 1
     self
 
 + Controller
@@ -565,15 +654,24 @@
   # (moment arm times peak force).
   -> split_torque(g, j, q, tau, scale)
     denom = ~0.0
-    g.crossing(j).each ->(m)
+    cr = g.crossing(j)
+    nc = cr.size
+    i = 0
+    while i < nc
+      m = cr[i]
       if @ff_on[m]
         arm = ~0.0 - g.moment_arm(m, j, q) * g.force(m)
         denom += arm * arm if arm * tau > ~0.0
+      i += 1
     if denom > ~0.0
-      g.crossing(j).each ->(m)
+      factor = scale * tau / denom
+      i = 0
+      while i < nc
+        m = cr[i]
         if @ff_on[m]
           arm = ~0.0 - g.moment_arm(m, j, q) * g.force(m)
-          @drive[m] = @drive[m] + scale * tau * arm / denom if arm * tau > ~0.0
+          @drive[m] = @drive[m] + factor * arm if arm * tau > ~0.0
+        i += 1
     self
 
   # Reciprocal inhibition (opt-in; off unless set): while a muscle is driven
@@ -591,7 +689,11 @@
   -> apply_reciprocal(acts)
     k = @recip_k
     drv = @drive
-    @recip.each ->(pr)
+    rc = @recip
+    nr = rc.size
+    i = 0
+    while i < nr
+      pr = rc[i]
       a = pr[0]
       b = pr[1]
       sa = ~1.0 - k * drv[b]
@@ -600,10 +702,17 @@
       sb = ~0.0 if sb < ~0.0
       acts[a] = acts[a] * sa if sa < ~1.0
       acts[b] = acts[b] * sb if sb < ~1.0
+      i += 1
     acts
 
   -> track(name)
-    @tracks.each -> return item if item.name == name
+    ts = @tracks
+    nt = ts.size
+    i = 0
+    while i < nt
+      tr = ts[i]
+      return tr if tr.name == name
+      i += 1
     raise "no track [name]"
 
   -> emit(cmd)
@@ -636,7 +745,17 @@
     @target
 
   -> label
-    parts = @tracks.map -> item.name + ":" + item.chunk_name
+    ts = @tracks
+    nt = ts.size
+    if nt == 1
+      tr = ts[0]
+      return tr.name + ":" + tr.chunk_name
+    parts = []
+    i = 0
+    while i < nt
+      tr = ts[i]
+      parts.push(tr.name + ":" + tr.chunk_name)
+      i += 1
     parts.join("|")
 
   -> tick(frame)
@@ -655,12 +774,18 @@
       @offset[i] = ~0.0
       i += 1
     @skill.before(frame, self)
-    @tracks.each -> item.update(self, frame)
+    ts = @tracks
+    nt = ts.size
+    ti = 0
+    while ti < nt
+      ts[ti].update(self, frame)
+      ti += 1
     @skill.after(frame, self)
     apply_feedforward(frame) if @ff_gain != ~0.0
     apply_torque_feedforward(frame) if @ff_tau != nil
-    acts = (0...n).map -> ~0.0
+    acts = []
     ref = @reflex.referencing?
+    integ = @reflex.integrating?
     vmax = Reflex.vref_max
     i = 0
     while i < n
@@ -673,8 +798,9 @@
         tdot = ~0.0 - vmax if tdot < ~0.0 - vmax
       @target[i] = tg
       drv = @drive[i]
-      drv = drv + @reflex.integral(i, tg, frame.c(i), @dt) if @reflex.integrating?
-      acts[i] = @reflex.activation(i, tg, frame.c(i), frame.cdot(i), drv, @gain[i], tdot)
+      fc = frame.c(i)
+      drv = drv + @reflex.integral(i, tg, fc, @dt) if integ
+      acts.push(@reflex.activation(i, tg, fc, frame.cdot(i), drv, @gain[i], tdot))
       i += 1
     @target_known = true
     apply_reciprocal(acts) if @recip != nil

@@ -50,7 +50,6 @@
   m[:EQ]        = "__w_eq_fast"
   m[:NEQ]       = "__w_neq_fast"
   m[:APPROX]    = "w_approx_eq"
-  m[:MATCH]     = "w_regex_match"
   m[:LT]        = "__w_lt_fast"
   m[:GT]        = "__w_gt_fast"
   m[:LTE]       = "__w_lte_fast"
@@ -71,7 +70,6 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
     "Mutex"         => 0x82 # 0x80 | W_TYPE_MUTEX
     "Hash"          => 0x05
     "Closure"       => 0x06
-    "Regex"         => 0x07
     "Range"         => 0x08
     "Array"         => 0x0A
     "StringBuffer"  => 0x0B # promoted to W_SUBTAG_STRBUF
@@ -394,7 +392,6 @@ builtin_runtime_classes = ["Socket", "Response", "TLS", "StringBuffer", "Standar
   m["w_carr_scale_f64"] = true
   m["w_crypto_aes_gcm_seal"] = true
   m["w_crypto_aes_gcm_open"] = true
-  m["w_uuid_bytes"] = true
   m["w_uuid_v1"] = true
   m["w_uuid_v2"] = true
   m["w_uuid_v4"] = true
@@ -431,6 +428,8 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
     return false
 
   t = ast_kind(node)
+  if t == :var || t == :int || t == :string || t == :symbol || t == :nil_lit || t == :bool || t == :ivar || t == :gvar || t == :cvar || t == :class_ref || t == :self_ref || t == :float || t == :char
+    return false
   if t in (:fastmath_block :strictmath_block :overflow_block)
     return fn_body_calls_impure_ccall?(node[:body])
 

@@ -784,6 +784,7 @@ loader_parse_cache_state = {
     # heap Decimal crosses an untyped boundary. Its primitive conversions and
     # rounding methods remain native IC rows and do not need this trigger.
     @decimal_source_method_unresolved = defined["Decimal"] != true && registry["Decimal"] != nil && @autoload_loaded["Decimal"] != true
+    @regex_match_source_method_unresolved = defined["RegexMatch"] != true && registry["RegexMatch"] != nil && @autoload_loaded["RegexMatch"] != true
     # BigInt#to_i is likewise source-defined identity and a heap BigInt can
     # cross a parameter/native boundary without a literal in this AST.
     @bigint_to_i_unresolved = defined["BigInt"] != true && registry["BigInt"] != nil && @autoload_loaded["BigInt"] != true
@@ -1094,7 +1095,7 @@ loader_parse_cache_state = {
       # while omitting any name makes a value crossing an erased/native
       # boundary fail only in compiled dispatch. String and Symbol share the
       # 0xF9 registration, so the same trigger covers both representations.
-      if @string_source_method_unresolved && call_name in ("to_s" "empty?" "size" "length" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "ljust" "rjust" "center" "delete" "squeeze" "tr" "ascii?" "blank?" "byte_at" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "__bytes_array" "nfc" "nfd" "nfkc" "nfkd" "normalize" "canonically_equivalent?" "each_grapheme" "graphemes" "scan" "astralize" "__astral_cp" "camelize" "underscore" "snakecase" "dasherize" "humanize" "transliterate" "__translit_fold" "parameterize" "lowercase" "uppercase" "includes?" "to_regex" "constantize" "[]=")
+      if @string_source_method_unresolved && call_name in ("to_s" "empty?" "size" "length" "ord" "starts_with?" "ends_with?" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "ljust" "rjust" "center" "delete" "squeeze" "tr" "ascii?" "blank?" "byte_at" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "__bytes_array" "nfc" "nfd" "nfkc" "nfkd" "normalize" "canonically_equivalent?" "each_grapheme" "graphemes" "scan" "astralize" "__astral_cp" "camelize" "underscore" "snakecase" "dasherize" "humanize" "transliterate" "__translit_fold" "parameterize" "lowercase" "uppercase" "includes?" "to_regex" "constantize" "[]=")
         consider_autoload_name("String", defined, registry, seen, pending)
         @string_source_method_unresolved = false
       # Lowering synthesizes a per-element call for these Symbol-to-proc forms
@@ -1106,30 +1107,34 @@ loader_parse_cache_state = {
           consider_autoload_name("String", defined, registry, seen, pending)
           @string_source_method_unresolved = false
 
-      if @atomic_source_method_unresolved && call_name in ("increment" "decrement")
+      if @atomic_source_method_unresolved && call_name in ("increment" "decrement" "cas" "get" "set" "add" "load" "store" "exchange" "compare_exchange" "fetch_add" "fetch_sub")
         consider_autoload_name("Atomic", defined, registry, seen, pending)
         @atomic_source_method_unresolved = false
-      if @channel_source_method_unresolved && call_name == "recv"
+      if @channel_source_method_unresolved && call_name in ("recv" "send" "close" "receive" "try_send" "try_receive" "receive_result" "try_receive_result")
         consider_autoload_name("Channel", defined, registry, seen, pending)
         @channel_source_method_unresolved = false
-      if @thread_source_method_unresolved && call_name == "alive?"
+      if @thread_source_method_unresolved && call_name in ("alive?" "join" "kill")
         consider_autoload_name("Thread", defined, registry, seen, pending)
         @thread_source_method_unresolved = false
 
       # These methods are source-defined after removal of their runtime ICs.
       # Arrays can arrive through argv, a parameter, or a native factory, so
       # no receiver-shape test can soundly cover every use.
-      if @array_source_method_unresolved && call_name in ("join" "compact" "dup" "take" "drop" "reverse" "uniq" "minmax" "copy" "delete_at" "flatten")
+      if @array_source_method_unresolved && call_name in ("clear" "join" "compact" "dup" "take" "drop" "reverse" "uniq" "minmax" "copy" "delete_at" "flatten")
         consider_autoload_name("Array", defined, registry, seen, pending)
         @array_source_method_unresolved = false
 
-      if @float_source_method_unresolved && call_name in ("to_f" "abs" "nan?" "infinite?" "finite?" "sqrt" "ceil" "floor" "round" "sq" "truncate")
+      if @float_source_method_unresolved && call_name in ("to_f" "to_i" "to_s" "abs" "nan?" "infinite?" "finite?" "sqrt" "ceil" "floor" "round" "sq" "truncate")
         consider_autoload_name("Float", defined, registry, seen, pending)
         @float_source_method_unresolved = false
 
-      if @decimal_source_method_unresolved && call_receiver != nil && call_name in ("to_s" "normalize" "reciprocal" "inv" "sin" "cos" "tan" "arcsin" "arccos" "arctan" "sinh" "cosh" "tanh" "arcsinh" "arccosh" "arctanh")
+      if @decimal_source_method_unresolved && call_receiver != nil && call_name in ("abs" "ceil" "floor" "round" "sq" "sqrt" "to_d" "to_f" "to_i" "to_s" "normalize" "reciprocal" "inv" "sin" "cos" "tan" "arcsin" "arccos" "arctan" "sinh" "cosh" "tanh" "arcsinh" "arccosh" "arctanh")
         consider_autoload_name("Decimal", defined, registry, seen, pending)
         @decimal_source_method_unresolved = false
+
+      if @regex_match_source_method_unresolved && call_receiver != nil && call_name in ("match_data" "named_captures" "named_offsets" "post_match" "pre_match" "string" "to_regex")
+        consider_autoload_name("RegexMatch", defined, registry, seen, pending)
+        @regex_match_source_method_unresolved = false
 
       if @mmap_size_unresolved && call_name == "size"
         consider_autoload_name("Mmap", defined, registry, seen, pending)
@@ -1148,7 +1153,7 @@ loader_parse_cache_state = {
       # on it would autoload Integer/BigInt into every block-using program
       # (including the compiler itself, which broke stage identity).
       bitwise_op_send = call_receiver != nil && call_name in ("&" "|" "^" "/" "%")
-      if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "primorial" "digits" "isqrt" "bit_length" "popcount" "bit_count" "to_s" "to_f" "abs" "prime?" "+" "-" "*")
+      if bitwise_op_send || call_name in ("to_i" "prev" "succ" "next" "zero?" "even?" "odd?" "negative?" "positive?" "sq" "sqrt" "gcd" "lcm" "chr" "pow" "modpow" "factorial" "primorial" "digits" "isqrt" "bit_length" "popcount" "bit_count" "to_s" "to_f" "abs" "prime?" "prime_12k?" "prime_30k?" "+" "-" "*")
         consider_autoload_name("Int", defined, registry, seen, pending)
         if call_name == "to_i" && @bigint_to_i_unresolved
           consider_autoload_name("BigInt", defined, registry, seen, pending)
@@ -1206,10 +1211,10 @@ loader_parse_cache_state = {
     # class name; their accessors now require the source-defined type class.
     if t == :ip6 || t == :cidr6
       consider_autoload_name("IPv6", defined, registry, seen, pending)
-    # Date and Datetime literals share the packed Date runtime type. Their
+    # Date, Datetime, and Time literals share the packed Date runtime type. Their
     # native accessors now live in core/date.w, so literal-only programs must
     # register Date's 0xE4 type class even when they never name Date directly.
-    if t == :date || t == :datetime
+    if t == :date || t == :datetime || t == :time
       consider_autoload_name("Date", defined, registry, seen, pending)
     # Rational literals are packed values whose accessors and conversions
     # live in core/numeric/rational.w.
@@ -1220,6 +1225,10 @@ loader_parse_cache_state = {
     # class before public dispatch.
     if t == :uuid
       consider_autoload_name("UUID", defined, registry, seen, pending)
+    if t == :codepoint
+      consider_autoload_name("Char", defined, registry, seen, pending)
+    if t == :regex || t == :regex_capture
+      consider_autoload_name("RegexMatch", defined, registry, seen, pending)
     # A range literal `(a..b)` references no class name, but its numeric
     # machinery — and the elementwise methods (`sq`, `cube`, …) the fused
     # pipeline's closed-form recognizer resolves by AST — lives on Number.
@@ -1339,8 +1348,7 @@ loader_parse_cache_state = {
 
   # Native runtime entry points whose WValue result has source-defined methods.
   # This is intentionally a return-type map, not a prefix match: helpers such
-  # as w_ipv6_in_cidr returns Bool, while w_date_scrub
-  # returns String, and must not autoload the address/Date classes.
+  # as w_ipv6_in_cidr returns Bool and must not autoload the address/Date classes.
   -> native_ccall_result_class(name)
     if name in ("w_date" "w_date_parse")
       return "Date"
@@ -1352,11 +1360,13 @@ loader_parse_cache_state = {
       return "MAC"
     if name in ("w_uuid_from_hex" "w_uuid_parse")
       return "UUID"
+    if name in ("w_box_char" "w_char_new")
+      return "Char"
     if name == "w_strbuf_new"
       return "StringBuffer"
     if name == "w_atomic_new"
       return "Atomic"
-    if name == "w_chan_new"
+    if name in ("w_chan_new" "w_chan_new_unbounded")
       return "Channel"
     if name == "w_mutex_new"
       return "Mutex"

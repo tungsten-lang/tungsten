@@ -296,7 +296,7 @@ wire_block_record_fields = [:label, :instructions]
   # These methods either invoke an arbitrary name or make the method-table
   # contents observable. A reachability slice must retain the full table when
   # any live body uses one of them.
-  if method_name in ("respond_to?" "send" "__send__" "method" "methods" "instance_method" "instance_methods" "public_instance_method" "public_instance_methods" "private_instance_methods" "protected_instance_methods" "method_defined?" "private_method?" "protected_method?" "public_method?" "singleton_methods")
+  if method_name in ("respond_to?" "__send__" "method" "methods" "instance_method" "instance_methods" "public_instance_method" "public_instance_methods" "private_instance_methods" "protected_instance_methods" "method_defined?" "private_method?" "protected_method?" "public_method?" "singleton_methods")
     f[:reflective_method_access] = true
   nil
 

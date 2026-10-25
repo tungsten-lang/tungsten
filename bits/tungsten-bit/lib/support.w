@@ -279,14 +279,17 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   else
     0
 
--> semver_parts(version)
+-> semver_raw_parts(version)
   s = version.to_s.strip()
   if s.starts_with?("v")
     s = s.slice(1, s.size() - 1)
   dash = s.index("-")
   if dash != nil
     s = s.slice(0, dash)
-  parts = s.split(".")
+  s.split(".")
+
+-> semver_parts(version)
+  parts = semver_raw_parts(version)
   [semver_part(parts, 0), semver_part(parts, 1), semver_part(parts, 2)]
 
 -> prerelease?(version)
@@ -297,25 +300,36 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   req.include?(".alpha") || req.include?(".beta") || req.include?(".rc") || req.include?("-alpha") || req.include?("-beta") || req.include?("-rc")
 
 -> semver_compare(left, right)
-  a = semver_parts(left)
-  b = semver_parts(right)
-  i = 0
-  while i < 3
-    if a[i] < b[i]
-      return -1
-    if a[i] > b[i]
-      return 1
-    i += 1
+  if left == right
+    return 0
+  pa = semver_raw_parts(left)
+  pb = semver_raw_parts(right)
+  a0 = semver_part(pa, 0)
+  b0 = semver_part(pb, 0)
+  if a0 != b0
+    return a0 < b0 ? -1 : 1
+  a1 = semver_part(pa, 1)
+  b1 = semver_part(pb, 1)
+  if a1 != b1
+    return a1 < b1 ? -1 : 1
+  a2 = semver_part(pa, 2)
+  b2 = semver_part(pb, 2)
+  if a2 != b2
+    return a2 < b2 ? -1 : 1
 
-  a_rank = prerelease_rank(prerelease_note(left))
-  b_rank = prerelease_rank(prerelease_note(right))
+  a_note = prerelease_note(left)
+  b_note = prerelease_note(right)
+  if a_note == b_note
+    return 0
+  a_rank = prerelease_rank(a_note)
+  b_rank = prerelease_rank(b_note)
   if a_rank < b_rank
     return -1
   if a_rank > b_rank
     return 1
 
-  a_num = prerelease_number(prerelease_note(left))
-  b_num = prerelease_number(prerelease_note(right))
+  a_num = prerelease_number(a_note)
+  b_num = prerelease_number(b_note)
   if a_num < b_num
     return -1
   if a_num > b_num
@@ -323,16 +337,11 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   0
 
 -> semver_upper_for_pessimistic(requirement)
-  parts = requirement.to_s.strip().split(".")
-  nums = semver_parts(requirement)
+  parts = semver_raw_parts(requirement)
   if parts.size() >= 3
-    nums[1] = nums[1] + 1
-    nums[2] = 0
+    semver_part(parts, 0).to_s + "." + (semver_part(parts, 1) + 1).to_s + ".0"
   else
-    nums[0] = nums[0] + 1
-    nums[1] = 0
-    nums[2] = 0
-  nums[0].to_s + "." + nums[1].to_s + "." + nums[2].to_s
+    (semver_part(parts, 0) + 1).to_s + ".0.0"
 
 -> version_satisfies_single?(version, requirement)
   req = requirement.to_s.strip()
@@ -341,8 +350,10 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 
   if req.starts_with?("~>")
     floor = req.slice(2, req.size() - 2).strip()
+    if semver_compare(version, floor) < 0
+      return false
     ceiling = semver_upper_for_pessimistic(floor)
-    return semver_compare(version, floor) >= 0 && semver_compare(version, ceiling) < 0
+    return semver_compare(version, ceiling) < 0
 
   if req.starts_with?(">=")
     floor = req.slice(2, req.size() - 2).strip()
@@ -370,6 +381,8 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   req = requirement.to_s.strip()
   if req == ""
     return true
+  if !req.include?(",")
+    return version_satisfies_single?(version, req)
 
   parts = req.split(",")
   i = 0
@@ -563,7 +576,11 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   versions.join(", ")
 
 -> lock_quote(value)
-  "\"" + value.to_s.replace("\"", "\\\"") + "\""
+  s = value.to_s
+  if s.include?("\"")
+    "\"" + s.replace("\"", "\\\"") + "\""
+  else
+    "\"" + s + "\""
 
 -> config_value(path, key)
   if !File.exists?(path)
@@ -697,10 +714,18 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   (bit.signature != nil && bit.signature != "") || (bit.public_key != nil && bit.public_key != "")
 
 -> compact_one_line(text)
-  text.to_s.replace("\n", "\\n")
+  s = text.to_s
+  if s.include?("\n")
+    s.replace("\n", "\\n")
+  else
+    s
 
 -> expand_one_line(text)
-  text.to_s.replace("\\n", "\n")
+  s = text.to_s
+  if s.include?("\\n")
+    s.replace("\\n", "\n")
+  else
+    s
 
 + BitDependency
   ro :name
@@ -796,8 +821,11 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     bitfile = Bitfile.new()
     bitfile.set_path(path)
     lines = content.split("\n")
-    lines.each -> (line)
-      bitfile.apply_line(line)
+    i = 0
+    n = lines.size()
+    while i < n
+      bitfile.apply_line(lines[i])
+      i += 1
     bitfile.infer_name_from_path()
     bitfile
 
@@ -830,17 +858,44 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     groups
 
   -> quoted(line)
+    n = line.size()
     i = 0
-    quote = ""
-    value = ""
-    while i < line.size()
+    quote_b = 0
+    start = 0
+    while i < n
+      b = line.byte_at(i)
+      if b == 34 || b == 39
+        quote_b = b
+        start = i + 1
+        i += 1
+        break
+      i += 1
+    if quote_b == 0
+      return nil
+
+    # Fast path: scan for closing quote without escapes
+    j = start
+    has_escape = false
+    while j < n
+      b = line.byte_at(j)
+      if b == quote_b
+        return line.slice(start, j - start)
+      if b == 92
+        has_escape = true
+        break
+      j += 1
+
+    if !has_escape
+      return nil
+
+    quote = quote_b == 34 ? "\"" : "'"
+    value = line.slice(start, j - start)
+    i = j
+    while i < n
       c = line.slice(i, 1)
-      if quote == ""
-        if c == "\"" || c == "'"
-          quote = c
-      elsif c == quote
+      if c == quote
         return value
-      elsif c == "\\" && i + 1 < line.size()
+      elsif c == "\\" && i + 1 < n
         following = line.slice(i + 1, 1)
         if following == quote || following == "\\"
           value = value + following
@@ -865,20 +920,28 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 
   -> option_tail(line, name)
     marker = name + ":"
-    quote = ""
+    if !line.include?(marker)
+      return nil
+    mlen = marker.size()
+    m0 = marker.byte_at(0)
+    n = line.size()
+    quote_b = 0
     i = 0
-    while i < line.size()
-      c = line.slice(i, 1)
-      if quote != ""
-        if c == "\\"
+    while i < n
+      b = line.byte_at(i)
+      if quote_b != 0
+        if b == 92
           i += 1
-        elsif c == quote
-          quote = ""
-      elsif c == "\"" || c == "'"
-        quote = c
-      elsif line.slice(i, marker.size()) == marker
-        if i == 0 || line.slice(i - 1, 1) == "," || line.slice(i - 1, 1) == " " || line.slice(i - 1, 1) == "\t"
-          return line.slice(i + marker.size(), line.size() - i - marker.size()).strip()
+        elsif b == quote_b
+          quote_b = 0
+      elsif b == 34 || b == 39
+        quote_b = b
+      elsif b == m0 && i + mlen <= n && line.slice(i, mlen) == marker
+        if i == 0
+          return line.slice(i + mlen, n - i - mlen).strip()
+        prev = line.byte_at(i - 1)
+        if prev == 44 || prev == 32 || prev == 9
+          return line.slice(i + mlen, n - i - mlen).strip()
       i += 1
     nil
 
@@ -899,19 +962,25 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     tail.strip()
 
   -> strip_comment(line)
-    quote = ""
+    if !line.include?("#")
+      return line
+    n = line.size()
+    quote_b = 0
     i = 0
-    while i < line.size()
-      c = line.slice(i, 1)
-      if quote != ""
-        if c == "\\"
+    while i < n
+      b = line.byte_at(i)
+      if quote_b != 0
+        if b == 92
           i += 1
-        elsif c == quote
-          quote = ""
-      elsif c == "\"" || c == "'"
-        quote = c
-      elsif c == "#"
-        if i == 0 || line.slice(i - 1, 1) == " " || line.slice(i - 1, 1) == "\t"
+        elsif b == quote_b
+          quote_b = 0
+      elsif b == 34 || b == 39
+        quote_b = b
+      elsif b == 35
+        if i == 0
+          return line.slice(0, i)
+        prev = line.byte_at(i - 1)
+        if prev == 32 || prev == 9
           return line.slice(0, i)
       i += 1
     line
@@ -1021,15 +1090,20 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
           dep_options[:trusted] = true
         if option_bool(line, "local")
           dep_options[:local] = true
-        if option_value(line, "cooldown") != nil
-          dep_options[:cooldown] = option_value(line, "cooldown")
+        cooldown_val = option_value(line, "cooldown")
+        if cooldown_val != nil
+          dep_options[:cooldown] = cooldown_val
         @dependencies.push(BitDependency.new(dep_name, dep_version, dep_options, dep_path))
 
   -> find_dependency(name)
     needle = name.to_s
-    @dependencies.each -> (dep)
+    i = 0
+    n = @dependencies.size()
+    while i < n
+      dep = @dependencies[i]
       if dep.name == needle
         return dep
+      i += 1
     nil
 
 + Lockfile
@@ -1048,13 +1122,17 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 
   -> .parse(content)
     lockfile = Lockfile.new([])
-    content.split("\n").each -> (line)
-      stripped = line.strip()
+    parser = Bitfile.new("unknown", "0.0.0", "", "", DEFAULT_REGISTRY)
+    lines = content.split("\n")
+    li = 0
+    ln = lines.size()
+    while li < ln
+      stripped = lines[li].strip()
+      li += 1
       if stripped == "" || stripped.starts_with?("#")
         next
 
       if stripped.starts_with?("bit ") || stripped.starts_with?("dependency ")
-        parser = Bitfile.new()
         dep_name = parser.quoted(stripped)
         dep_version = parser.second_quoted(stripped)
         dep_path = parser.option_value(stripped, "path")
@@ -1077,7 +1155,9 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
         if dep_summary == nil
           dep_summary = ""
         if dep_name != nil
-          lockfile.dependencies.push(BitDependency.new(dep_name, dep_version, {source: dep_source}, dep_path, dep_summary, dep_sha256, expand_one_line(dep_signature || ""), expand_one_line(dep_public_key || ""), dep_security_status, dep_security_risk, dep_release_type, dep_published_at))
+          sig_str = dep_signature == nil ? "" : expand_one_line(dep_signature)
+          pk_str = dep_public_key == nil ? "" : expand_one_line(dep_public_key)
+          lockfile.dependencies.push(BitDependency.new(dep_name, dep_version, {source: dep_source}, dep_path, dep_summary, dep_sha256, sig_str, pk_str, dep_security_status, dep_security_risk, dep_release_type, dep_published_at))
       else
         parts = stripped.split(" ")
         if parts.size() >= 2
@@ -1086,7 +1166,10 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 
   -> .generate(resolution)
     lines = []
-    resolution.each -> (bit)
+    i = 0
+    n = resolution.size()
+    while i < n
+      bit = resolution[i]
       line = "bit " + lock_quote(bit.name) + ", " + lock_quote(bit.version) + ", source: " + lock_quote(bit.source)
       if bit.path != nil
         line = line + ", path: " + lock_quote(bit.path)
@@ -1107,13 +1190,18 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       if bit.published_at != nil && bit.published_at != ""
         line = line + ", published_at: " + lock_quote(bit.published_at)
       lines.push(line)
+      i += 1
     lines.join("\n")
 
   -> find_dependency(name)
     needle = name.to_s
-    @dependencies.each -> (dep)
+    i = 0
+    n = @dependencies.size()
+    while i < n
+      dep = @dependencies[i]
       if dep.name == needle
         return dep
+      i += 1
     nil
 
 + Resolver

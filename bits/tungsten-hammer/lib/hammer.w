@@ -7,6 +7,9 @@
 use argon
 use core
 
+Tungsten.PROTECT_THE_CORE!
+Tungsten.LOCK_THE_DOORS!
+
 manpage = read_file(__DIR__ + "/../man/hammer.1.wd")
 cli = Argon.new(manpage)
 opts = cli.parse(ARGV)

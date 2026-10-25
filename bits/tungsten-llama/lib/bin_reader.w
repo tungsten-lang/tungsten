@@ -23,11 +23,12 @@ in Tungsten:Llama
   -> length
     @data.bytesize
 
+  -> size
+    @data.size
+
   # Byte at absolute offset.
   -> byte_at(pos)
-    if @bytes == nil
-      @bytes = @data.bytes.to_a
-    @bytes[pos]
+    @data.byte_at(pos)
 
   # Expose the byte array for fast bulk access (e.g. quant dequant inner loops).
   -> bytes_array
@@ -73,20 +74,23 @@ in Tungsten:Llama
     b
 
   -> read_u16
-    b0 = read_u8
-    b1 = read_u8
-    b0 | (b1 << 8)
+    s = @src
+    p = @pos
+    @pos = p + 2
+    s.byte_at(p) | (s.byte_at(p + 1) << 8)
 
   -> read_u32
-    b0 = read_u8
-    b1 = read_u8
-    b2 = read_u8
-    b3 = read_u8
-    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+    s = @src
+    p = @pos
+    @pos = p + 4
+    s.byte_at(p) | (s.byte_at(p + 1) << 8) | (s.byte_at(p + 2) << 16) | (s.byte_at(p + 3) << 24)
 
   -> read_u64
-    lo = read_u32
-    hi = read_u32
+    s = @src
+    p = @pos
+    @pos = p + 8
+    lo = s.byte_at(p) | (s.byte_at(p + 1) << 8) | (s.byte_at(p + 2) << 16) | (s.byte_at(p + 3) << 24)
+    hi = s.byte_at(p + 4) | (s.byte_at(p + 5) << 8) | (s.byte_at(p + 6) << 16) | (s.byte_at(p + 7) << 24)
     lo | (hi << 32)
 
   # -- Signed --
@@ -140,29 +144,26 @@ in Tungsten:Llama
       i += 1
     out
 
-  # Read `n` bytes as a UTF-8 string. Uses StringBuffer so the
-  # concatenation is amortized. Same byte-by-byte loop as
-  # read_gguf_string but with caller-supplied length.
+  # Read `n` bytes as a UTF-8 string.
   -> read_string(n)
-    buf = StringBuffer(n)
+    if n <= 0
+      return ""
+    s = @src
+    p = @pos
+    @pos = p + n
+    cell = u8[n + 1]
     i = 0
     while i < n
-      buf << read_u8.chr()
+      cell[i] = s.byte_at(p + i)
       i = i + 1
-    buf.to_s()
+    cell[n] = 0
+    ccall("w_string_take_byte_array", cell, n)
 
   # Read a GGUF-framed UTF-8 string: u64 length + raw bytes.
-  # Built byte-by-byte so it works over any byte source that exposes
-  # byte_at(i) (in particular, Mmap — String slicing isn't available
-  # there). One-time cost at metadata parse + tokenizer load.
+  # Built over any byte source that exposes byte_at(i).
   -> read_gguf_string
     len = read_u64
-    buf = StringBuffer(len)
-    i = 0
-    while i < len
-      buf << read_u8.chr()
-      i = i + 1
-    buf.to_s()
+    read_string(len)
 
   # Read one GGUF metadata value of the given type tag. Recurses for
   # array values. Lives on BinReader so the recursive call dispatches

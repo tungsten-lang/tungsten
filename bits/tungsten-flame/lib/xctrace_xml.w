@@ -119,30 +119,23 @@ in Tungsten:Flame
     capture("echo $PPID").strip()
 
   -> .hex_to_int(s)
-    if !s.starts_with?("0x") || s.size() > 14
+    sz = s.size()
+    if !s.starts_with?("0x") || sz > 14
       return 0
     n = 0
     i = 2
-    while i < s.size()
-      c = s.slice(i, 1)
-      d = nil
-      if c >= "0" && c <= "9"
-        d = c.to_i()
-      elsif c == "a" || c == "A"
-        d = 10
-      elsif c == "b" || c == "B"
-        d = 11
-      elsif c == "c" || c == "C"
-        d = 12
-      elsif c == "d" || c == "D"
-        d = 13
-      elsif c == "e" || c == "E"
-        d = 14
-      elsif c == "f" || c == "F"
-        d = 15
-      if d == nil
+    while i < sz
+      b = s.byte_at(i)
+      d = -1
+      if b >= 48 && b <= 57
+        d = b - 48
+      elsif b >= 97 && b <= 102
+        d = b - 87
+      elsif b >= 65 && b <= 70
+        d = b - 55
+      if d < 0
         return 0
-      n = n * 16 + d
+      n = (n << 4) + d
       i = i + 1
     n
 

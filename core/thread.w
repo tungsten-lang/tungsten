@@ -25,8 +25,12 @@
 
   # Block until the thread finishes; returns the value the block produced.
   -> join
+    ccall("w_thread_join", self)
+
   # Block up to `ms` milliseconds; true if it finished, false if still running.
   -> join(ms)
+    ms_raw = ccall_nobox("w_numeric_to_i64", ms) ## i64
+    ccall_rawargs("w_thread_join_timeout", self, ms_raw)
 
   # Is the thread still running?
   -> alive?
@@ -34,3 +38,4 @@
 
   # Request cancellation of the thread.
   -> kill
+    ccall("w_thread_kill", self)

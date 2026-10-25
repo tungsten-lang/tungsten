@@ -30,13 +30,13 @@
 
   # Compatibility spellings retained for existing callers.
   -> get
-    load()
+    ccall("w_atomic_get", self)
 
   -> set(value)
-    store(value)
+    ccall("w_atomic_set", self, value)
 
   -> cas(expected, desired)
-    compare_exchange(expected, desired)
+    ccall("w_atomic_cas", self, expected, desired)
 
   -> add(delta)
-    fetch_add(delta)
+    ccall("w_atomic_add", self, delta)

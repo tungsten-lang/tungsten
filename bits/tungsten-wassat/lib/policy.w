@@ -22,9 +22,10 @@
 -> wassat_decimal_in_range(flag, token, minimum, maximum)
   raise "[flag] requires a non-negative decimal integer, got '[token]'" unless wassat_unsigned_decimal?(token)
   value = 0
+  n = token.size
   i = 0
-  while i < token.size
-    digit = "0123456789".index(token.slice(i, 1))
+  while i < n
+    digit = token.byte_at(i) - 48
     if value > (maximum - digit) / 10
       raise "[flag] needs [minimum]..[maximum], got '[token]'"
     value = value * 10 + digit
@@ -191,7 +192,7 @@ WASSAT_CONGRUENCE_DEFAULT = true
 # scout's completed lucky/SLS allocations remain resident while the raw race
 # runs. A continuation is still one arena and must not be counted twice.
 -> wassat_cdcl_arena_bytes(formula)
-  25165824 + 24 * formula["flat_nlits"] + 96 * formula["flat_ncl"]
+  25165824 + 24 * formula["flat_nlits"] + 160 * formula["flat_ncl"] + 640 * formula["nvars"]
 
 -> wassat_preprocess_arena_bytes(formula)
   # A live preprocessor retains roughly six 2*ncl clause tables, three
@@ -216,10 +217,12 @@ WASSAT_CONGRUENCE_DEFAULT = true
   # These gates add optional resident arenas. Unknown capacity fails closed;
   # the baseline serial/raw solver remains available without them.
   return false if memory <= 0
+  budget = memory / 3
+  budget = 2684354560 if budget > 2684354560
   estimated = wassat_cdcl_arena_bytes(formula) * cdcl_arenas
   estimated += wassat_sls_arena_bytes(formula) * sls_arenas
   estimated += wassat_preprocess_arena_bytes(formula) * preprocess_arenas
-  estimated <= memory / 3
+  estimated <= budget
 
 # Metaflip-style frozen-core / exact-fringe repair.  These are internal
 # resource limits, not tuning options: the arm inspects the walk it actually
@@ -571,7 +574,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # 2k-conflict scout, while uuf250 reaches the miss and is faster through
     # the serial prepared kernel. Smaller uuf200 still benefits from the wide
     # race, so both variable and clause floors are intentional.
-    @nvars >= 225 && @nclauses >= 1000 && @nclauses <= 5000 && @ternary * 4 >= @nclauses * 3
+    @nvars >= 225 && @nvars <= 260 && @nclauses >= 900 && @nclauses <= 1200 && @ternary * 4 >= @nclauses * 3
 
   -> use_vmtf(raw)
     raw
@@ -621,7 +624,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # the exact 14,354-conflict raw-arm winner and cuts 3.40s to 2.06s; ntil34
     # and ntil35 save 2.5s and 2.1s of otherwise discarded scout work.
     return env("WASSAT_LUCKY") != "0" if env("WASSAT_LUCKY") != nil
-    !self.short_dense_ternary_scout?
+    !self.short_dense_ternary_scout? && @nclauses < 5000000
 
   # Ternary count, for sizing the congruence pass's scratch tables.
   -> ternary_count
@@ -973,8 +976,9 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # renderings. Unknown memory (zero) leaves the CPU-only decision intact.
     memory = System.physical_memory_bytes ## i64
     if memory > 0
-      per_arm = 25165824 + 24 * @nliterals + 96 * @nclauses
+      per_arm = 25165824 + 24 * @nliterals + 160 * @nclauses + 640 * @nvars
       budget = memory / 3
+      budget = 2684354560 if budget > 2684354560
       while arms > 1 && per_arm * arms > budget
         arms -= 1
     arms
@@ -986,7 +990,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # on uuf100/uuf250-scale random kernels. Keep rollout to the small random
     # class where it wins; select it from shape rather than exposing a knob.
     random3 = @nvars >= 20 && @nvars <= 64 && @nclauses >= 80 && @ternary * 4 >= @nclauses * 3
-    choice_binary = @nvars >= 20 && @nvars <= 512 && @nclauses >= 100 && @binary * 2 >= @nclauses && @max_clause >= 4
+    choice_binary = @nvars >= 20 && @nvars <= 512 && @nclauses >= 100 && @nclauses <= 25000 && @binary * 2 >= @nclauses && @max_clause >= 4 && @max_clause <= 48
     return 16 if random3 || choice_binary
     0
 
@@ -1013,6 +1017,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # behind the same shape gate: globally forcing 128 cancels the fast exact
     # XOR arm on mod2 instances.
     return 128 if raw && self.short_dense_ternary_scout?
+    return 256 if raw && @nvars >= 50 && @nvars <= 150 && @nclauses >= 200 && @nclauses <= 750 && @ternary * 4 >= @nclauses * 3
     # Bound discarded work on million-clause raw kernels.  The ordinary
     # 2,000-conflict scout costs ~3.2s on schooltt and is not continued.
     # A 128-conflict experiment was faster there, but was too aggressive:

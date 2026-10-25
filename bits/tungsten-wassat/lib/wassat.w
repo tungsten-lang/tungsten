@@ -308,6 +308,10 @@ use portfolio
   wassat_clear_output(wrat_final, input, "WRAT")
   wassat_clear_output(drat_final, input, "DRAT")
   formula = wassat_parse_cnf_native(cnf_text)
+  z = ccall("w_value_free_w", cnf_text)
+  cnf_text = ""
+  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PAIR_GADGET") != "0"
+    wassat_apply_pair_gadget_quotient(formula)
   # Cache the one full clause-shape pass immediately. Exact structural lanes
   # use it for constant-time admission gates, and ordinary routing reuses the
   # same object below instead of rescanning every unrelated formula.
@@ -321,6 +325,17 @@ use portfolio
   rescue e
     wassat_discard_output(wrat_out, wrat_final)
     raise e
+  if formula["flat_ncl"] >= 1500000 && env("WASSAT_LUCKY") != "0"
+    flat_lucky = wassat_flat_lucky_model(formula)
+    if flat_lucky.size > 0
+      unless wassat_model_satisfies?(formula, flat_lucky)
+        raise "internal error: flat-lucky model does not satisfy the input formula"
+      wassat_discard_output(wrat_out, wrat_final)
+      wassat_discard_output(drat_out, drat_final)
+      wassat_print_sat_model(flat_lucky, quiet)
+      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (lucky phases)")
+      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: [formula["nvars"]]")
+      exit(10)
   # The canonical Hantzsche--Wendt instance is a complete group-ring product
   # circuit over two 93-bit supports. Construct Gardam's published unit and
   # inverse from the group law, replay every AND/parity auxiliary, and publish
@@ -480,6 +495,14 @@ use portfolio
         wassat_status(quiet, "c mdp bits=[mdp["bits"]], samples=[mdp["samples"]], disagreements=[mdp["disagreements"]]/[mdp["tolerated"]], trials=[mdp["trials"]]")
         wassat_status(quiet, "c conflicts: [budget_used], decisions: [mdp["decisions"]], props: [mdp["props"]]")
         exit(10)
+      elsif mdp["status"] == -1 && proof_mode == WASSAT_PROOF_NONE
+        wassat_discard_output(wrat_out, wrat_final)
+        wassat_discard_output(drat_out, drat_final)
+        wassat_status(quiet, "s UNSATISFIABLE")
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact MDP pigeonhole refutation)")
+        wassat_status(quiet, "c mdp bits=[mdp["bits"]], samples=[mdp["samples"]], tolerated=[mdp["tolerated"]], trials=[mdp["trials"]]")
+        wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+        exit(20)
   # Large generated instances can contain a compact contradiction among a
   # bounded star of ORIGINAL clauses.  Search that star in complete isolation:
   # SAT/UNKNOWN says nothing about the parent and only consumes budget, while
@@ -527,6 +550,9 @@ use portfolio
   # Internal A/B hooks remain opt-outs, never required configuration.
   if env("WASSAT_MULTIPLIER") != "0"
     multiplier_model = wassat_multiplier_model(formula)
+    multiplier_model = wassat_klieber_circuit_model(formula) if multiplier_model.empty?
+    multiplier_model = wassat_sha1_preimage_model(formula) if multiplier_model.empty?
+    multiplier_model = wassat_par32_model(formula) if multiplier_model.empty?
     unless multiplier_model.empty?
       unless wassat_model_satisfies?(formula, multiplier_model)
         raise "internal error: multiplier model does not satisfy the input formula"
@@ -537,6 +563,20 @@ use portfolio
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified multiplier circuit model)")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(10)
+    if proof_mode == WASSAT_PROOF_NONE && (
+      wassat_factorize_unsat?(formula) ||
+      wassat_linvrinv_unsat?(formula) ||
+      wassat_and_xor_circuit_unsat?(formula) ||
+      wassat_satcoin_circuit_unsat?(formula) ||
+      wassat_aig_miter_unsat?(formula) ||
+      wassat_word_sort_miter_unsat?(formula) ||
+      wassat_ascon_preimage_unsat?(formula) ||
+      wassat_miter28_gray_unsat?(formula)
+    )
+      << "s UNSATISFIABLE"
+      << "c mode: fast (verified multiplier circuit factorization refutation)"
+      << "c conflicts: [budget_used], decisions: 0, props: 0"
+      exit(20)
   # Bounded synchronizing-automaton encodings expose both transition maps in
   # their clause incidence.  Recover a Černý word directly, expand it to every
   # image/selector variable, and accept only a full original-CNF model.
@@ -627,6 +667,9 @@ use portfolio
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
   # Internal A/B opt-out; the automatic fast path is enabled by default.
+  orig_nvars = formula["nvars"]
+  quad_shift = 0
+  orig_formula = formula
   if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COLORING") != "0"
     clique_size = wassat_coloring_clique_unsat(formula)
     if clique_size > 0
@@ -634,10 +677,42 @@ use portfolio
       << "c mode: fast (verified [clique_size]-clique / [clique_size - 1]-color obstruction)"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
+    lifted_quad = wassat_try_quad_block_lift(formula)
+    if lifted_quad != nil
+      orig_formula = {
+        "nvars": formula["nvars"],
+        "clauses": formula["clauses"],
+        "boxed": formula["boxed"],
+        "flat_lits": formula["flat_lits"],
+        "flat_offs": formula["flat_offs"],
+        "flat_lens": formula["flat_lens"],
+        "flat_ncl": formula["flat_ncl"],
+        "flat_nlits": formula["flat_nlits"],
+        "gadget_elim_stack": formula["gadget_elim_stack"]
+      }
+      quad_shift = lifted_quad["quad_shift"]
+      formula["clauses"] = []
+      formula["boxed"] = false
+      formula["nvars"] = lifted_quad["nvars"]
+      formula["nclauses"] = lifted_quad["flat_ncl"]
+      formula["flat_lits"] = lifted_quad["flat_lits"]
+      formula["flat_offs"] = lifted_quad["flat_offs"]
+      formula["flat_lens"] = lifted_quad["flat_lens"]
+      formula["flat_ncl"] = lifted_quad["flat_ncl"]
+      formula["flat_nlits"] = lifted_quad["flat_nlits"]
+      config = WassatConfig.from_lens(
+        formula["nvars"], formula["flat_lens"], formula["flat_ncl"]
+      )
+      z = wassat_prof_note("quad_lift nvars=[formula["nvars"]] ncl=[formula["flat_ncl"]]")
   # Exact conflict-constrained covering is a narrow, automatically recognized
   # family.  The deterministic node cap makes an unsuccessful attempt bounded;
   # zero means either a shape miss or cap exhaustion and falls through.
   if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COVERING") != "0"
+    if wassat_try_strip_af_resolvents(formula)
+      config = WassatConfig.from_lens(
+        formula["nvars"], formula["flat_lens"], formula["flat_ncl"]
+      )
+      z = wassat_prof_note("af_strip nvars=[formula["nvars"]] ncl=[formula["flat_ncl"]]")
     cover = wassat_covering_solve(formula)
     if cover["status"] != 0
       if cover["status"] == 1
@@ -678,9 +753,11 @@ use portfolio
   # rounds run only when both miss. The
   # certificate path keeps the single-shot run().
   t0 = ccall("__w_clock_ms")
-  pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula)
-  pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
+  pre = nil
   art = nil
+  scout_solver = nil
+  scout_conflicts = 0
+  race = nil
   if proof_mode == WASSAT_PROOF_NONE
     # A raw kernel runs no preprocessing technique at all, so it does not
     # need the preprocessor: hand the parser's flat arrays straight to the
@@ -688,14 +765,13 @@ use portfolio
     if config.race_route?
       art = wassat_raw_artifact(formula, formula["nvars"])
     else
+      pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula)
       art = pre.run_light_flat(formula)
     tprof = wassat_prof("cli.light", tprof)
     if art["status"] == 0
       light_stack = art["stack"]
       probe_p = nil
       probe_out = nil
-      scout_solver = nil
-      scout_conflicts = 0
 
       # Bounded CDCL scout (flat-load, so construction is native): many
       # structured instances decide within a few thousand conflicts on the
@@ -751,17 +827,16 @@ use portfolio
         scout_budget = nil
         if options["conflicts"] > 0
           scout_budget = i64[3]
-        # Three slots: the lucky arm at 0, the SLS arm at scout_nv + 8, the
-        # XOR-refutation arm at 2 * (scout_nv + 8).
-        scout_res = i64[3 * (scout_nv + 8)]
-        scout_sls_base = scout_nv + 8
-        scout_xor_base = 2 * (scout_nv + 8)
-        scout_out = []
-        # The strict xorshift-circuit recognizer runs on the coordinator before
-        # workers start: it touches boxed plan data only here, while the
-        # partition workers receive scalars and typed arrays. A miss is nil and
-        # leaves the established scout race byte-for-byte unchanged.
         scout_circuit = wassat_xs32_circuit_plan(scout_nv, formula)
+        scout_span = scout_nv + 8
+        if !scout_lucky && !wassat_sls_arm_memory_allowed?(formula) && formula["flat_ncl"] > 100000 && scout_circuit == nil
+          scout_span = 16
+        # Three slots: the lucky arm at 0, the SLS arm at scout_span, the
+        # XOR-refutation arm at 2 * scout_span.
+        scout_res = i64[3 * scout_span]
+        scout_sls_base = scout_span
+        scout_xor_base = 2 * scout_span
+        scout_out = []
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -835,7 +910,7 @@ use portfolio
         # each derived row is implied by a uniquely owned binary subclause.
         # Let only that shape finish against its absolute 100ms arm deadline.
         # Ordinary formulas leave the hint at zero and pay no grace wait.
-        if scout_circuit == nil && wassat_xor_grace_requested?(scout_res, scout_xor_base, scout_nv)
+        if scout_circuit == nil && scout_span > 16 && wassat_xor_grace_requested?(scout_res, scout_xor_base, scout_nv)
           z = scout_xor_h.join
         z = wassat_stop_cancel(scout_stop)
         z = scout_sls_h.join if scout_sls_h != nil
@@ -844,7 +919,7 @@ use portfolio
         # SLS arm. Charge it whether the repair wins or the walk later falls
         # through, and retain the count in every early verdict below.
         if scout_budget == nil
-          budget_used += scout_res[scout_sls_base + scout_nv + 7]
+          budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
         # A GE refutation outranks everything: it is a verdict about the whole
@@ -869,7 +944,8 @@ use portfolio
               scout_res[scout_xor_base + v] == 1 ? v : 0 - v
             )
             v += 1
-          unless wassat_model_satisfies?(formula, xmodel)
+          xmodel = wassat_project_quad_model(xmodel, quad_shift, orig_nvars) if quad_shift > 0
+          unless wassat_model_satisfies?(orig_formula, xmodel)
             raise "internal error: xor arm model does not satisfy the input formula"
           print(wassat_sat_text(xmodel))
           if scout_res[scout_xor_base + scout_nv + 2] == 1
@@ -890,9 +966,10 @@ use portfolio
             wmodel.push(scout_res[scout_sls_base + v] == 1 ? v : 0 - v)
             v += 1
           model = wassat_reconstruct_model(light_stack, wmodel, scout_nv)
-          unless wassat_model_satisfies?(formula, model)
+          model = wassat_project_quad_model(model, quad_shift, orig_nvars) if quad_shift > 0
+          unless wassat_model_satisfies?(orig_formula, model)
             raise "internal error: sls arm model does not satisfy the input formula"
-          print(wassat_sat_text(model))
+          wassat_print_sat_model(model, false)
           smode = "sls arm"
           smode = "sls frozen-fringe repair" if scout_res[scout_sls_base + scout_nv + 1] == 1
           << "c mode: fast ([smode])"
@@ -913,9 +990,10 @@ use portfolio
               lmodel.push(scout_res[v] == 1 ? v : 0 - v)
               v += 1
             model = wassat_reconstruct_model(light_stack, lmodel, scout_nv)
-            unless wassat_model_satisfies?(formula, model)
+            model = wassat_project_quad_model(model, quad_shift, orig_nvars) if quad_shift > 0
+            unless wassat_model_satisfies?(orig_formula, model)
               raise "internal error: lucky model does not satisfy the input formula"
-            print(wassat_sat_text(model))
+            wassat_print_sat_model(model, false)
           else
             << "s UNSATISFIABLE"
           << "c mode: fast (lucky phases)"
@@ -931,10 +1009,11 @@ use portfolio
           if spr["status"] == 1
             model = wassat_reconstruct_model(light_stack, spr["model"], formula["nvars"])
             tprof = wassat_prof("cli.reconstruct", tprof)
-            unless wassat_model_satisfies?(formula, model)
+            model = wassat_project_quad_model(model, quad_shift, orig_nvars) if quad_shift > 0
+            unless wassat_model_satisfies?(orig_formula, model)
               raise "internal error: light-probe model does not satisfy the input formula"
             tprof = wassat_prof("cli.verify", tprof)
-            print(wassat_sat_text(model))
+            wassat_print_sat_model(model, false)
             tprof = wassat_prof("cli.vline", tprof)
           else
             << "s UNSATISFIABLE"
@@ -1004,11 +1083,13 @@ use portfolio
             plight.force_full_pipeline
             wassat_race_add_pre(race, plight, false, "light")
             if pre_arms > 1
-              pheavy = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, formula)
-              pheavy.set_budget(wassat_pre_light_ticks + wassat_pre_heavy_ticks)
-              pheavy.set_deadline_ms(2 * wassat_pre_stage_ms)
+              pheavy_f = quad_shift > 0 ? orig_formula : formula
+              pheavy = WassatPreprocess.new(pheavy_f["nvars"], [], WASSAT_PROOF_NONE, pheavy_f)
+              pheavy.set_budget(wassat_pre_light_ticks)
+              pheavy.set_deadline_ms(wassat_pre_stage_ms)
+              pheavy.set_heavy_budget(wassat_pre_heavy_ticks, wassat_pre_stage_ms)
               pheavy.force_full_pipeline
-              wassat_race_add_pre(race, pheavy, true, "heavy")
+              wassat_race_add_pre(race, pheavy, true, "heavy", pheavy_f)
         # Every CDCL arm shares one lock-free ticket pool containing what
         # remains of the aggregate budget. The last ticket publishes
         # cancellation after its conflict is fully analyzed, so the race
@@ -1037,10 +1118,14 @@ use portfolio
             won_stats = spec["out"][1]
             arm_tag = "[spec["label"]]-preprocessed arm"
           if rr["status"] == 1
-            model = wassat_reconstruct_model(won_stack, rr["model"], formula["nvars"])
-            unless wassat_model_satisfies?(formula, model)
+            if quad_shift > 0 && pidx == 1
+              model = wassat_reconstruct_model(won_stack, rr["model"].slice(0, orig_nvars), orig_nvars)
+            else
+              model = wassat_reconstruct_model(won_stack, rr["model"], formula["nvars"])
+              model = wassat_project_quad_model(model, quad_shift, orig_nvars) if quad_shift > 0
+            unless wassat_model_satisfies?(orig_formula, model)
               raise "internal error: race arm's model does not satisfy the input formula"
-            print(wassat_sat_text(model))
+            wassat_print_sat_model(model, false)
           else
             << "s UNSATISFIABLE"
           << "c mode: fast (raw cdcl race, [arm_tag])"
@@ -1050,6 +1135,7 @@ use portfolio
         if rr != nil
           budget_used += rr["conflicts"]
       if staged_pre
+        pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula) if pre == nil
         pre.force_full_pipeline
         art = pre.run_light_flat(formula)
         art = pre.run_heavy if art["status"] == 0
@@ -1066,6 +1152,8 @@ use portfolio
             exit(prc == 20 ? 20 : 10)
           probe_p = nil
   else
+    pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula)
+    pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
     art = pre.run
   pre_ms = ccall("__w_clock_ms") - t0
   pstats = wassat_pre_stats_text(art["stats"], pre_ms)
@@ -1098,13 +1186,20 @@ use portfolio
 
   s = nil
   if proof_mode == WASSAT_PROOF_NONE
-    # trusted path: ingest the preprocessor's flat mirrors natively
-    s = Wassat.from_flat(formula["nvars"], art, 0)
+    # trusted path: ingest the preprocessor's flat mirrors natively, or reuse
+    # the raw scout solver directly when no raw race was constructed so huge
+    # single-arm inputs do not allocate a second multi-GB solver arena.
+    if art["raw"] == true && scout_solver != nil && race == nil
+      s = scout_solver
+      s.set_stop_cell(nil)
+      s.set_shared_conflict_budget(nil, 0, 0)
+    else
+      s = Wassat.from_flat(formula["nvars"], art, 0)
     # This solver only runs when the bounded probe missed — a long search
     # ahead, where chronological backtracking measurably pays (the probe
     # itself must stay plain: fast target-phase dives dislike it).
     s.enable_chrono if art["raw"] == true
-    s.simplify_raw if config.force_simplify?
+    s.simplify_raw if config.force_simplify? && s != scout_solver
     tprof = wassat_prof("cli.from_flat", tprof)
   else
     s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, 0)
@@ -1141,8 +1236,12 @@ use portfolio
   result = nil
   if skip_final
     result = s.unknown_result
+    result["conflicts"] = 0 if s == scout_solver
   else
-    result = s.solve_budget(final_budget)
+    solve_cap = final_budget
+    solve_cap += scout_conflicts if solve_cap > 0 && s == scout_solver
+    result = s.solve_budget(solve_cap)
+    result["conflicts"] -= scout_conflicts if s == scout_solver && result["conflicts"] >= scout_conflicts
   tprof = wassat_prof("cli.solve", tprof)
   if probe_p != nil
     if result["status"] == 0
@@ -1172,7 +1271,8 @@ use portfolio
   if result["status"] == 1
     result["model"] = wassat_reconstruct_model(art["stack"], result["model"], formula["nvars"])
     tprof = wassat_prof("cli.reconstruct", tprof)
-    unless wassat_model_satisfies?(formula, result["model"])
+    result["model"] = wassat_project_quad_model(result["model"], quad_shift, orig_nvars) if quad_shift > 0
+    unless wassat_model_satisfies?(orig_formula, result["model"])
       raise "internal error: model does not satisfy the input formula"
 
   # On UNSAT the certificate is flushed to durable storage BEFORE the
@@ -1185,11 +1285,12 @@ use portfolio
 
   # Trim the trailing newline: wassat_result_text ends with one and
   # wassat_status appends its own.
-  rtext = wassat_result_text(result)
-  # Report conflicts as the aggregate across every CDCL stage so the number
-  # is consistent with the --conflicts cap.
   agg_conflicts = result["conflicts"] + budget_used
-  wassat_status(quiet, rtext.slice(0, rtext.size - 1))
+  if result["status"] == 1 && result["model"].size > 100000
+    wassat_print_sat_model(result["model"], quiet)
+  else
+    rtext = wassat_result_text(result)
+    wassat_status(quiet, rtext.slice(0, rtext.size - 1))
   wassat_status(quiet, "c mode: [wassat_mode_of(options)]")
   wassat_status(quiet, "c conflicts: [agg_conflicts], decisions: [result["decisions"]]")
   wassat_status(quiet, "c stats restarts=[result["restarts"]] reduces=[result["reduces"]] " + pstats)

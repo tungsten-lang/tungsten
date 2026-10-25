@@ -130,10 +130,6 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       @fcs = i64[@ncl + 2]
       @fcl = i64[@ncl + 2]
     @och = i64[2 * nv + 4]
-    i = 0
-    while i < 2 * nv + 4
-      @och[i] = -1
-      i += 1
     @ocn = i64[total + 2]
     @ocv = i64[total + 2]
 
@@ -150,19 +146,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
           @fla[pos] = l
           pos += 1
         ci += 1
-    ci = 0
-    while ci < @ncl
-      o = @fcs[ci]
-      n = @fcl[ci]
-      j = 0
-      while j < n
-        l = @fla[o + j]
-        li = l > 0 ? 2 * l : 2 * (0 - l) + 1
-        @ocn[o + j] = @och[li]
-        @ocv[o + j] = ci
-        @och[li] = o + j
-        j += 1
-      ci += 1
+    wassat_sls_build_occ(@fla, @fcs, @fcl, @och, @ocn, @ocv, @ncl, nv)
 
     @asg = i64[nv + 1]           # 0 false, 1 true (see bool[] note above)
     @satc = i64[@ncl + 2]
@@ -284,70 +268,18 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   # hold the assignment to start from -- `solve` seeds it randomly,
   # `walk_from_phase` seeds it from CDCL's saved phases.
   -> run_from_assignment(max_flips, rng)
-    # clause states, unsat list, weights
-    ucount = 0
-    ci = 0
-    while ci < @ncl
-      @wght[ci] = 1
-      st = @fcs[ci]
-      n = @fcl[ci]
-      sc = 0
-      cv = 0
-      j = 0
-      while j < n
-        l = @fla[st + j]
-        lv = l > 0 ? @asg[l] : 1 - @asg[0 - l]
-        if lv == 1
-          sc += 1
-          cv = l.abs
-        j += 1
-      @satc[ci] = sc
-      @crit[ci] = cv
-      if sc == 0
-        @ulist[ucount] = ci
-        @upos[ci] = ucount
-        ucount += 1
-      else
-        @upos[ci] = 0 - 1
-      ci += 1
-
-    # initial scores from the definition
-    ci = 0
-    while ci < @ncl
-      if @satc[ci] == 0
-        st = @fcs[ci]
-        n = @fcl[ci]
-        j = 0
-        while j < n
-          @score[@fla[st + j].abs] += 1
-          j += 1
-      elsif @satc[ci] == 1
-        @score[@crit[ci]] -= 1
-      ci += 1
-
-    # seed the goodvar stack with positive-score variables
-    gsize = 0
-    v = 1
-    while v <= @nvars
-      if @score[v] > 0
-        @gstk[gsize] = v
-        gsize += 1
-        @gin[v] = 1
-      v += 1
-
     @st[0] = @nvars
     @st[1] = @ncl
-    @st[2] = ucount
-    @st[3] = gsize
     @st[4] = 0
     @st[5] = max_flips
     @st[6] = rng
-    @st[7] = ucount
     @st[8] = @ncl               # total weight (all start at 1)
     @st[9] = 0
     @st[10] = 0
     @st[11] = 0
     @st[12] = 0
+    wassat_sls_init_state(@fla, @fcs, @fcl, @asg, @satc, @crit, @wght,
+                          @ulist, @upos, @score, @gstk, @gin, @st)
     wassat_sls_run(@fla, @fcs, @fcl, @och, @ocn, @ocv, @asg, @satc, @crit,
                    @wght, @score, @ccf, @lastf, @ulist, @upos, @gstk, @gin,
                    @bag, @wtr, @st, @stop, @plateau)
@@ -553,6 +485,90 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   pm[3] = pos
   0
 
+-> wassat_sls_build_occ(fla, fcs, fcl, och, ocn, ocv, ncl, nv) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+  i = 0
+  limit = (nv << 1) + 4 ## i64
+  while i < limit
+    och[i] = 0 - 1
+    i += 1
+  ci = 0
+  while ci < ncl
+    o = fcs[ci]
+    n = fcl[ci]
+    j = 0
+    while j < n
+      l = fla[o + j]
+      li = 0 ## i64
+      if l > 0
+        li = l << 1
+      else
+        li = ((0 - l) << 1) + 1
+      ocn[o + j] = och[li]
+      ocv[o + j] = ci
+      och[li] = o + j
+      j += 1
+    ci += 1
+  0
+
+-> wassat_sls_init_state(fla, fcs, fcl, asg, satc, crit, wght, ulist, upos, score, gstk, gin, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
+  nv = st[0]
+  ncl = st[1]
+  ucount = 0
+  ci = 0
+  while ci < ncl
+    wght[ci] = 1
+    stx = fcs[ci]
+    n = fcl[ci]
+    sc = 0
+    cv = 0 ## i64
+    j = 0
+    while j < n
+      l = fla[stx + j]
+      uvar = l < 0 ? 0 - l : l ## i64
+      lv = l > 0 ? asg[uvar] : 1 - asg[uvar]
+      if lv == 1
+        sc += 1
+        cv = cv ^ uvar
+      j += 1
+    satc[ci] = sc
+    crit[ci] = cv
+    if sc == 0
+      ulist[ucount] = ci
+      upos[ci] = ucount
+      ucount += 1
+    else
+      upos[ci] = 0 - 1
+    ci += 1
+
+  ci = 0
+  while ci < ncl
+    sc = satc[ci]
+    if sc == 0
+      stx = fcs[ci]
+      n = fcl[ci]
+      j = 0
+      while j < n
+        l = fla[stx + j]
+        uvar = l < 0 ? 0 - l : l
+        score[uvar] = score[uvar] + 1
+        j += 1
+    elsif sc == 1
+      score[crit[ci]] = score[crit[ci]] - 1
+    ci += 1
+
+  gsize = 0
+  v = 1
+  while v <= nv
+    if score[v] > 0
+      gstk[gsize] = v
+      gsize += 1
+      gin[v] = 1
+    v += 1
+  st[2] = ucount
+  st[3] = gsize
+  st[7] = ucount
+  0
+
 -> wassat_sls_run(fla, fcs, fcl, och, ocn, ocv, asg, satc, crit, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   nv = st[0]
   ncl = st[1]
@@ -560,11 +576,11 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   gsize = st[3]
   step = st[4]
   maxflips = st[5]
-  rng = st[6]
+  rng = st[6] ## i64
   best = st[7]
   wtotal = st[8]
   found = 0
-  wcap = ncl * WASSAT_SLS_WEIGHT_CAP_MULT
+  wcap = ncl * WASSAT_SLS_WEIGHT_CAP_MULT ## i64
   # Best-assignment snapshot, kissat walk.c's `update_best`. The search is
   # not monotone -- clause weighting deliberately climbs out of minima --
   # so the assignment the budget happens to end on is routinely worse than
@@ -702,24 +718,30 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       n = fcl[ci]
       flip = 0
       bestscore = 0
-      j = 0
-      while j < n
-        uvar = fla[stx + j]
+      if ((r >> 16) & 15) == 0 && step > 200000
+        uvar = fla[stx + ((r >> 20) % n)]
         if uvar < 0
           uvar = 0 - uvar
-        better = 0
-        if flip == 0
-          better = 1
-        else
-          if score[uvar] > bestscore
+        flip = uvar
+      else
+        j = 0
+        while j < n
+          uvar = fla[stx + j]
+          if uvar < 0
+            uvar = 0 - uvar
+          better = 0
+          if flip == 0
             better = 1
           else
-            if score[uvar] == bestscore && lastf[uvar] < lastf[flip]
+            if score[uvar] > bestscore
               better = 1
-        if better == 1
-          bestscore = score[uvar]
-          flip = uvar
-        j += 1
+            else
+              if score[uvar] == bestscore && lastf[uvar] < lastf[flip]
+                better = 1
+          if better == 1
+            bestscore = score[uvar]
+            flip = uvar
+          j += 1
 
     # ---- flip -------------------------------------------------------------
     v = flip
@@ -740,7 +762,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         wovf = 1
 
     # clauses gaining a true literal: occurrences of v's now-true literal
-    li = 0
+    li = 0 ## i64
     if nowtrue == 1
       li = v << 1
     else
@@ -784,6 +806,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
             gstk[gsize] = x
             gsize += 1
             gin[x] = 1
+        crit[ci] = crit[ci] ^ v
       w = ocn[w]
 
     # clauses losing a true literal: occurrences of v's now-false literal
@@ -799,6 +822,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       if old == 1
         # newly unsatisfied: every member gains a make bonus, the flipped
         # variable additionally stops being the breaker
+        crit[ci] = 0
         ulist[ucount] = ci
         upos[ci] = ucount
         ucount += 1
@@ -819,31 +843,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
           j += 1
         score[v] = score[v] + wght[ci]
       else
+        x = crit[ci] ^ v ## i64
+        crit[ci] = x
         if old == 2
-          # find the surviving true literal; it becomes the breaker
-          stx = fcs[ci]
-          n = fcl[ci]
-          x = 0
-          j = 0
-          while j < n
-            l2 = fla[stx + j]
-            uvar = l2
-            if l2 < 0
-              uvar = 0 - l2
-            if uvar != v
-              lv = 0
-              if l2 > 0
-                lv = asg[uvar]
-              else
-                lv = 1 - asg[uvar]
-              if lv == 1
-                x = uvar
-                j = n
-              else
-                j += 1
-            else
-              j += 1
-          crit[ci] = x
           score[x] = score[x] - wght[ci]
       w = ocn[w]
 

@@ -97,7 +97,7 @@ WASSAT_PRE_SUBST_CHECK_EVERY = 256
 # eliminated with the complete definition-aware resolvent basis described in
 # `try_eliminate_and2`.  The candidate cap bounds scratch memory at about
 # 3.2MB (four i64 words per candidate).
-WASSAT_PRE_AND2_CANDIDATE_CAP = 100000
+WASSAT_PRE_AND2_CANDIDATE_CAP = 250000
 WASSAT_PRE_AND2_BASE_SCAN_CAP = 256
 WASSAT_PRE_AND2_SIDE_SCAN_CAP = 4096
 WASSAT_PRE_AND2_PAIR_CAP = 4096
@@ -188,6 +188,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @ticks = 0
     @tick_budget = 0             # 0 = derived from formula size in `run`
     @deadline_ms = 0             # 0 = no wall-clock stop (see set_deadline_ms)
+    @heavy_ticks = 0
+    @heavy_stage_ms = 0
     @stop_cell = nil             # shared portfolio cancellation flag
     @probe_cap = WASSAT_PRE_PROBE_CAP
     # Clauses the substitution rewrite has walked, across every variable and
@@ -358,6 +360,16 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @lits[ci] = c
     c
 
+  -> copy_clause_lits(ci)
+    st = @fcs[ci]
+    n = @fcl[ci]
+    c = []
+    j = 0
+    while j < n
+      c.push(@fla[st + j])
+      j += 1
+    c
+
   # Both proof dialects at once (CLI requested --proof and --drat together).
   -> enable_dual_emission
     @emit_wrat = true
@@ -391,6 +403,11 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @deadline_ms = ms <= 0 ? 0 : ccall("__w_clock_ms") + ms
     0
 
+  -> set_heavy_budget(heavy_ticks, stage_ms)
+    @heavy_ticks = heavy_ticks
+    @heavy_stage_ms = stage_ms
+    0
+
   # A portfolio answer makes a losing rendering disposable.  The same shared
   # cell already stops every search arm; preprocessing checks it at its
   # bounded technique/chunk boundaries so the coordinator's join is not held
@@ -414,14 +431,16 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     l > 0 ? 2 * l : 2 * (0 - l) + 1
 
   -> value(l)
-    a = @passign[l.abs]
+    a = @passign[l >= 0 ? l : 0 - l]
     l > 0 ? a : 0 - a
 
   -> signature_of(arr)
     s = 0
     i = 0
     while i < arr.size
-      s = s | (1 << (arr[i].abs & 63))
+      l = arr[i]
+      av = l >= 0 ? l : 0 - l
+      s = s | ((1 ## i64) << (av & 63))
       i += 1
     s
 
@@ -519,16 +538,18 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @next_gid += 1
     @fsig[ci] = self.signature_of(arr)
     t = 0
+    n = arr.size
     i = 0
-    while i < arr.size
-      j = 0
-      while j < arr.size
-        t = 1 if arr[i] == 0 - arr[j]
+    while i < n
+      nl = 0 - arr[i]
+      j = i + 1
+      while j < n
+        t = 1 if arr[j] == nl
         j += 1
       i += 1
     @ftaut[ci] = t
     i = 0
-    while i < arr.size
+    while i < n
       l = arr[i]
       @fla[@fasize] = l
       @fasize += 1
@@ -542,23 +563,62 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       i += 1
     ci
 
+  # Store a tautology-free, deduplicated resolvent slice directly from a typed
+  # buffer when @lazy_lits is active and no proof stream is enabled.
+  -> store_from_buf(buf, start, n)
+    self.grow_meta
+    self.grow_arena(n)
+    self.grow_occ(n)
+    ci = @ncl
+    @ncl += 1
+    @lits.push(nil)
+    @fcs[ci] = @fasize
+    @fcl[ci] = n
+    @falive[ci] = 1
+    @fpgid[ci] = @next_gid
+    @next_gid += 1
+    @ftaut[ci] = 0
+    sig = 0 ## i64
+    i = 0
+    while i < n
+      l = buf[start + i]
+      @fla[@fasize] = l
+      @fasize += 1
+      av = l >= 0 ? l : 0 - l
+      sig = sig | ((1 ## i64) << (av & 63))
+      li = (av << 1) + (l < 0 ? 1 : 0)
+      slot = @osize
+      @osize += 1
+      @on[slot] = @oh[li]
+      @ov[slot] = ci
+      @oh[li] = slot
+      @ocount[li] = @ocount[li] + 1
+      i += 1
+    @fsig[ci] = sig
+    ci
+
   # Delete one clause from the logical database, with its proof line.
   -> delete_clause(ci)
     if @falive[ci] == 1
       @falive[ci] = 0
-      self.plog_delete([@fpgid[ci]], [self.lits_of(ci)])
+      if @emit_wrat || @emit_drat
+        self.plog_delete([@fpgid[ci]], [self.lits_of(ci)])
     0
 
   # Delete a batch with one WRAT line (and per-clause DRAT lines).
   -> delete_batch(cis)
-    ids = []
-    lls = []
-    cis.each -> (ci)
-      if @falive[ci] == 1
+    if @emit_wrat || @emit_drat
+      ids = []
+      lls = []
+      cis.each -> (ci)
+        if @falive[ci] == 1
+          @falive[ci] = 0
+          ids.push(@fpgid[ci])
+          lls.push(self.lits_of(ci))
+      self.plog_delete(ids, lls) unless ids.empty?
+    else
+      cis.each -> (ci)
         @falive[ci] = 0
-        ids.push(@fpgid[ci])
-        lls.push(self.lits_of(ci))
-    self.plog_delete(ids, lls) unless ids.empty?
     0
 
   # ---- root propagation with reasons ---------------------------------------
@@ -602,13 +662,14 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     ti = from_ts
     while ti < @ftsize
       l = @ftrail[ti]
-      rci = @preason[l.abs]
+      av = l >= 0 ? l : 0 - l
+      rci = @preason[av]
       if rci >= 0 && @fcl[rci] > 1
-        chain = self.conflict_chain(rci, l.abs)
+        chain = @emit_wrat ? self.conflict_chain(rci, av) : []
         gid = @next_gid
         self.plog_add(gid, [l], chain)
         nci = self.store([l])
-        @preason[l.abs] = nci
+        @preason[av] = nci
       ti += 1
     0
 
@@ -623,10 +684,13 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     work = [confl_ci]
     wi = 0
     while wi < work.size
-      arr = self.lits_of(work[wi])
+      wci = work[wi]
+      st = @fcs[wci]
+      len = @fcl[wci]
       i = 0
-      while i < arr.size
-        v = arr[i].abs
+      while i < len
+        l = @fla[st + i]
+        v = l >= 0 ? l : 0 - l
         if v != skip_var && @seen[v] == 0 && @preason[v] >= 0
           @seen[v] = 1
           stamp_list.push(v)
@@ -658,7 +722,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 
   # The formula is refuted at the root: log the empty clause and stop.
   -> refute(confl_ci)
-    self.plog_add(@next_gid, [], self.conflict_chain(confl_ci, 0))
+    self.plog_add(@next_gid, [], @emit_wrat ? self.conflict_chain(confl_ci, 0) : [])
     @next_gid += 1
     @status = -1
     0
@@ -954,10 +1018,88 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       node += 1
     tsub = wassat_prof("pre.subst.group", tsub)
 
+    before = @vars_substituted
     groups.each -> (key, members)
       if @status == 0 && members.size > 1 && self.within_budget
-        self.substitute_class(adj, comp, members)
+        if @proof_mode == WASSAT_PROOF_NONE && @lazy_lits
+          self.collect_subst_class(members)
+        else
+          self.substitute_class(adj, comp, members)
+    if @proof_mode == WASSAT_PROOF_NONE && @lazy_lits && @status == 0 && @vars_substituted > before
+      self.rewrite_all_subst_flat
     tsub = wassat_prof("pre.subst.rewrite", tsub)
+    0
+
+  -> collect_subst_class(members)
+    stampv = {}
+    contradiction_var = 0
+    lits_of = []
+    members.each -> (m)
+      v = m / 2
+      l = m % 2 == 0 ? v : 0 - v
+      lits_of.push(l)
+      if stampv.has_key?(v)
+        contradiction_var = v
+      else
+        stampv[v] = true
+    if contradiction_var > 0
+      @status = -1
+      return 0
+    rep = 0
+    lits_of.each -> (l)
+      av = l >= 0 ? l : 0 - l
+      rep = l if rep == 0 && @frozen[av] == 1
+    if rep == 0
+      best = 0
+      lits_of.each -> (l)
+        av = l >= 0 ? l : 0 - l
+        bav = best >= 0 ? best : 0 - best
+        best = l if best == 0 || av < bav
+      rep = best
+    already = false
+    lits_of.each -> (l)
+      av = l >= 0 ? l : 0 - l
+      already = true if @replit[av] != 0
+    return 0 if already
+    lits_of.each -> (y)
+      if y != rep && @status == 0
+        yv = y >= 0 ? y : 0 - y
+        if @frozen[yv] == 0
+          r_for_y = yv == y ? rep : 0 - rep
+          @replit[yv] = r_for_y
+          @gone[yv] = 2
+          @stack.push({ "kind": "subst", "var": yv, "rep": r_for_y })
+          @vars_substituted += 1
+    0
+
+  -> rewrite_all_subst_flat
+    ci = 0
+    while ci < @ncl
+      @lits[ci] = nil
+      ci += 1
+    units = i64[@ncl + 2]
+    pm = i64[8]
+    pm[0] = @ncl
+    pm[1] = @nvars
+    wassat_pre_subst_rewrite_flat(@fla, @fcs, @fcl, @falive, @ftaut, @fsig,
+                                  @oh, @on, @ov, @ocount, @passign, @replit,
+                                  units, pm)
+    @osize = pm[2]
+    @ticks += pm[3]
+    nunits = pm[4]
+    u = 0
+    while u < nunits && @status == 0
+      nci = units[u]
+      if @falive[nci] == 1 && @fcl[nci] == 1
+        l = @fla[@fcs[nci]]
+        lv = self.value(l)
+        if lv < 0
+          self.refute(nci)
+        elsif lv == 0
+          self.assign(l, nci)
+          confl = self.propagate_root
+          self.refute(confl) if confl >= 0
+      u += 1
     0
 
   # Substitute one nontrivial SCC. members are lit_indexes.
@@ -1023,16 +1165,16 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
         else
           r_for_y = yv == y ? rep : 0 - rep    # rep literal seen from +yv
           # (-yv | r_for_y): path from +yv to r_for_y
-          pf = self.implication_path(adj, comp, yv, r_for_y)
+          pf = @emit_wrat ? self.implication_path(adj, comp, yv, r_for_y) : []
           gf = @next_gid
-          self.plog_add(gf, [0 - yv, r_for_y], self.path_gids(pf))
+          self.plog_add(gf, [0 - yv, r_for_y], @emit_wrat ? self.path_gids(pf) : [])
           cf = self.store([0 - yv, r_for_y])
           binid_fwd[yv] = @fpgid[cf]
           # (yv | -r_for_y): path from -yv to -r_for_y, which holds because
           # r_for_y => yv around the cycle.
-          pb = self.implication_path(adj, comp, 0 - yv, 0 - r_for_y)
+          pb = @emit_wrat ? self.implication_path(adj, comp, 0 - yv, 0 - r_for_y) : []
           gb = @next_gid
-          self.plog_add(gb, [yv, 0 - r_for_y], self.path_gids(pb))
+          self.plog_add(gb, [yv, 0 - r_for_y], @emit_wrat ? self.path_gids(pb) : [])
           cb = self.store([yv, 0 - r_for_y])
           binid_back[yv] = @fpgid[cb]
           @helper_mark[cf] = true
@@ -1102,40 +1244,35 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
         eligible = @falive[ci] == 1 && !@helper_mark.has_key?(ci)
         if eligible
           sat_root = false
+          st = @fcs[ci]
+          len = @fcl[ci]
           si = 0
-          while si < @fcl[ci]
-            sat_root = true if self.value(@fla[@fcs[ci] + si]) > 0
+          while si < len
+            sat_root = true if self.value(@fla[st + si]) > 0
             si += 1
           eligible = !sat_root
         if eligible
-          arr = self.lits_of(ci)
-          @ticks += arr.size
-          mapped = []
+          st = @fcs[ci]
+          len = @fcl[ci]
+          @ticks += len
+          uniq = []
           hints = []
           used_fwd = false
           used_back = false
-          i = 0
-          while i < arr.size
-            l = arr[i]
-            if l == yv
-              mapped.push(r)
-              # cite each equivalence binary once: a duplicated literal would
-              # replay an already-satisfied hint and break the chain
-              hints.push(gid_fwd) unless used_fwd
-              used_fwd = true
-            elsif l == 0 - yv
-              mapped.push(0 - r)
-              hints.push(gid_back) unless used_back
-              used_back = true
-            else
-              mapped.push(l)
-            i += 1
-          # dedupe and tautology-check the mapped clause
-          uniq = []
           t = false
           i = 0
-          while i < mapped.size
-            l = mapped[i]
+          while i < len
+            l = @fla[st + i]
+            if l == yv
+              l = r
+              if @emit_wrat && !used_fwd
+                hints.push(gid_fwd)
+                used_fwd = true
+            elsif l == 0 - yv
+              l = 0 - r
+              if @emit_wrat && !used_back
+                hints.push(gid_back)
+                used_back = true
             dup = false
             j = 0
             while j < uniq.size
@@ -1147,7 +1284,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           if t
             self.delete_clause(ci)
           else
-            hints.push(@fpgid[ci])
+            hints.push(@fpgid[ci]) if @emit_wrat
             gid = @next_gid
             self.plog_add(gid, uniq, hints)
             nci = self.store(uniq)
@@ -1174,10 +1311,26 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   # (subsumer, candidate, flip literal). The boxed side re-verifies each
   # survivor exactly and owns all proof emission. One pass per call; the
   # driver iterates while passes keep earning their keep.
+  -> within_subsumption_budget(tick_cap, deadline_cap)
+    return false unless self.within_budget
+    return false if deadline_cap > 0 && ccall("__w_clock_ms") >= deadline_cap
+    tick_cap == 0 || @ticks < tick_cap
+
   -> run_subsumption
+    tick_cap = 0
+    if @tick_budget > 0 && @ncl_in > 20000
+      rem = @tick_budget - @ticks
+      rem = 0 if rem < 0
+      tick_cap = @ticks + rem / 2
+    deadline_cap = 0
+    if @deadline_ms > 0 && @ncl_in > 20000
+      now = ccall("__w_clock_ms")
+      rem_ms = @deadline_ms - now
+      rem_ms = 0 if rem_ms < 0
+      deadline_cap = now + rem_ms / 2
     progress = false
     next_ci = 0
-    while next_ci < @ncl && self.within_budget && @status == 0
+    while next_ci < @ncl && self.within_subsumption_budget(tick_cap, deadline_cap) && @status == 0
       base = @lgen + 1
       snapshot = @ncl
       @subscan_pm[0] = base
@@ -1328,7 +1481,13 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     pm[1] = cap
     pm[2] = WASSAT_PRE_AND2_BASE_SCAN_CAP
     pm[3] = WASSAT_PRE_AND2_SIDE_SCAN_CAP
-    pm[6] = WASSAT_PRE_AND2_FIND_TICK_CAP
+    find_cap = WASSAT_PRE_AND2_FIND_TICK_CAP
+    if @tick_budget > 0
+      rem = @tick_budget - @ticks
+      rem = 0 if rem < 0
+      half = rem / 2
+      find_cap = half if half > 0 && half < find_cap
+    pm[6] = find_cap
     wassat_pre_find_and2(@fla, @fcs, @fcl, @falive, @ftaut, @oh, @on, @ov,
                          @passign, @gone, @frozen, cands, pm)
     @and2_candidates = pm[4]
@@ -1379,33 +1538,47 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     units = []
     off = 0
     i = 0
-    while i < count
-      n = @bve_out[off]
-      aci = @bve_out[off + 1]
-      bci = @bve_out[off + 2]
-      res = []
-      j = 0
-      while j < n
-        res.push(@bve_out[off + 3 + j])
-        j += 1
-      gid = @next_gid
-      self.plog_add(gid, res, [@fpgid[aci], @fpgid[bci]])
-      nci = self.store(res)
-      if res.size == 1
-        units.push(nci)
-      off += 3 + n
-      i += 1
+    if !@emit_wrat && !@emit_drat && @lazy_lits
+      while i < count
+        n = @bve_out[off]
+        nci = self.store_from_buf(@bve_out, off + 3, n)
+        units.push(nci) if n == 1
+        off += 3 + n
+        i += 1
+    else
+      while i < count
+        n = @bve_out[off]
+        aci = @bve_out[off + 1]
+        bci = @bve_out[off + 2]
+        res = []
+        j = 0
+        while j < n
+          res.push(@bve_out[off + 3 + j])
+          j += 1
+        gid = @next_gid
+        self.plog_add(gid, res, [@fpgid[aci], @fpgid[bci]])
+        nci = self.store(res)
+        if res.size == 1
+          units.push(nci)
+        off += 3 + n
+        i += 1
 
     @stack.push({ "kind": "bve_var", "pivot": v })
     pos.each -> (ci)
       @stack.push({ "kind": "bve", "pivot": v,
-                    "lits": self.lits_of(ci).dup })
-    parents = []
-    pos.each -> (ci)
-      parents.push(ci)
-    neg.each -> (ci)
-      parents.push(ci)
-    self.delete_batch(parents)
+                    "lits": self.copy_clause_lits(ci) })
+    if @emit_wrat || @emit_drat
+      parents = []
+      pos.each -> (ci)
+        parents.push(ci)
+      neg.each -> (ci)
+        parents.push(ci)
+      self.delete_batch(parents)
+    else
+      pos.each -> (ci)
+        @falive[ci] = 0
+      neg.each -> (ci)
+        @falive[ci] = 0
     @gone[v] = 1
     @vars_eliminated += 1
     @and2_eliminated += 1
@@ -1452,31 +1625,45 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     neg = self.live_occ(2 * v + 1)
     off = 0
     i = 0
-    while i < count
-      n = @bve_out[off]
-      aci = @bve_out[off + 1]
-      bci = @bve_out[off + 2]
-      res = []
-      j = 0
-      while j < n
-        res.push(@bve_out[off + 3 + j])
-        j += 1
-      gid = @next_gid
-      self.plog_add(gid, res, [@fpgid[aci], @fpgid[bci]])
-      nci = self.store(res)
-      if res.size == 1
-        units.push(nci)
-      off += 3 + n
-      i += 1
+    if !@emit_wrat && !@emit_drat && @lazy_lits
+      while i < count
+        n = @bve_out[off]
+        nci = self.store_from_buf(@bve_out, off + 3, n)
+        units.push(nci) if n == 1
+        off += 3 + n
+        i += 1
+    else
+      while i < count
+        n = @bve_out[off]
+        aci = @bve_out[off + 1]
+        bci = @bve_out[off + 2]
+        res = []
+        j = 0
+        while j < n
+          res.push(@bve_out[off + 3 + j])
+          j += 1
+        gid = @next_gid
+        self.plog_add(gid, res, [@fpgid[aci], @fpgid[bci]])
+        nci = self.store(res)
+        if res.size == 1
+          units.push(nci)
+        off += 3 + n
+        i += 1
     @stack.push({ "kind": "bve_var", "pivot": v })
     pos.each -> (ci)
-      @stack.push({ "kind": "bve", "pivot": v, "lits": self.lits_of(ci).dup })
-    parents = []
-    pos.each -> (ci)
-      parents.push(ci)
-    neg.each -> (ci)
-      parents.push(ci)
-    self.delete_batch(parents)
+      @stack.push({ "kind": "bve", "pivot": v, "lits": self.copy_clause_lits(ci) })
+    if @emit_wrat || @emit_drat
+      parents = []
+      pos.each -> (ci)
+        parents.push(ci)
+      neg.each -> (ci)
+        parents.push(ci)
+      self.delete_batch(parents)
+    else
+      pos.each -> (ci)
+        @falive[ci] = 0
+      neg.each -> (ci)
+        @falive[ci] = 0
     @gone[v] = 1
     @vars_eliminated += 1
     units.each -> (nci)
@@ -1567,6 +1754,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     self.artifact
 
   -> run_heavy
+    @tick_budget = @ticks + @heavy_ticks if @heavy_ticks > 0
+    self.set_deadline_ms(@heavy_stage_ms) if @heavy_stage_ms > 0
     tp = wassat_prof_clock
     self.heavy_rounds
     tp = wassat_prof("pre.heavy_rounds", tp)
@@ -1677,11 +1866,12 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
         if @ftaut[ci] == 1
           doomed.push(ci)
         else
-          arr = self.lits_of(ci)
+          st = @fcs[ci]
+          len = @fcl[ci]
           sat = false
           i = 0
-          while i < arr.size
-            sat = true if self.value(arr[i]) > 0
+          while i < len
+            sat = true if self.value(@fla[st + i]) > 0
             i += 1
           doomed.push(ci) if sat
       ci += 1
@@ -1705,15 +1895,17 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     # lazy clauses here would undo the lazy-truth win — twice per run.
     # Proof callers construct the logical clause database from this mirror;
     # its entries must stay aligned with gids even above the lazy threshold.
-    want_boxed = @proof_mode != WASSAT_PROOF_NONE || !@lazy_lits || @ncl <= 50000
+    skip_boxed = @stop_cell != nil && @proof_mode == WASSAT_PROOF_NONE && @lazy_lits
+    want_boxed = !skip_boxed && (@proof_mode != WASSAT_PROOF_NONE || !@lazy_lits || @ncl <= 50000)
     clauses = []
     gids = []
-    ci = 0
-    while ci < @ncl
-      if @falive[ci] == 1
-        clauses.push(self.lits_of(ci)) if want_boxed
-        gids.push(@fpgid[ci])
-      ci += 1
+    unless skip_boxed
+      ci = 0
+      while ci < @ncl
+        if @falive[ci] == 1
+          clauses.push(self.lits_of(ci)) if want_boxed
+          gids.push(@fpgid[ci])
+        ci += 1
     { "nvars": @nvars, "clauses": clauses, "gids": gids,
       "raw": @raw_kernel,
       "next_gid": @next_gid, "status": @status, "config": @config,
@@ -1779,7 +1971,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     p = tr[qhead]
     qhead += 1
     neg = 0 - p
-    li = 0
+    li = 0 ## i64
     if neg > 0
       li = neg << 1
     else
@@ -1894,12 +2086,12 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           b += 1
         a += 1
       # stamp literals, find rarest bucket
-      best_li = -1
+      best_li = -1 ## i64
       best_cnt = 0
       j = 0
       while j < slen
         l = fla[stx + j]
-        li = 0
+        li = 0 ## i64
         if l > 0
           li = l << 1
         else
@@ -1962,7 +2154,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
               j = 0
               while j < n
                 l2 = fla[dstx + j]
-                lidx = 0
+                lidx = 0 ## i64
                 if l2 > 0
                   lidx = l2 << 1
                 else
@@ -2139,15 +2331,17 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   side1 = pm[2]
   side2 = pm[3]
   paircap = pm[4]
-  outcap = pm[5]
+  outcap = pm[5] ## i64
   gen = pm[9]
   occcap = pm[10]
-  hashcap = pm[12]
+  hashcap = pm[12] ## i64
   # The caller passes logical bounds for experiments, but these native loops
   # also defend the actual reusable allocations.  Packed output and
   # hash/header slots are separate resources and are clamped independently.
-  outcap = WASSAT_PRE_BVE_OUT_CAPACITY if outcap > WASSAT_PRE_BVE_OUT_CAPACITY
-  hashcap = WASSAT_PRE_BVE_HASH_CAPACITY if hashcap > WASSAT_PRE_BVE_HASH_CAPACITY
+  max_outcap = WASSAT_PRE_BVE_OUT_CAPACITY ## i64
+  max_hashcap = WASSAT_PRE_BVE_HASH_CAPACITY ## i64
+  outcap = max_outcap if outcap > max_outcap
+  hashcap = max_hashcap if hashcap > max_hashcap
   pm[6] = 0
   pm[7] = 0
   ticks = 0
@@ -2427,10 +2621,12 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   v = pm[0]
   margin = pm[1]
   prodcap = pm[2]
-  outcap = pm[3]
-  hashcap = pm[6]
-  outcap = WASSAT_PRE_BVE_OUT_CAPACITY if outcap > WASSAT_PRE_BVE_OUT_CAPACITY
-  hashcap = WASSAT_PRE_BVE_HASH_CAPACITY if hashcap > WASSAT_PRE_BVE_HASH_CAPACITY
+  outcap = pm[3] ## i64
+  hashcap = pm[6] ## i64
+  max_outcap = WASSAT_PRE_BVE_OUT_CAPACITY ## i64
+  max_hashcap = WASSAT_PRE_BVE_HASH_CAPACITY ## i64
+  outcap = max_outcap if outcap > max_outcap
+  hashcap = max_hashcap if hashcap > max_hashcap
   gen = lgen0
   ticks = 0
   pm[4] = 0
@@ -2603,6 +2799,95 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       pm[8] = gen
       0
 
+-> wassat_pre_subst_rewrite_flat(fla, fcs, fcl, falive, ftaut, fsig, och, ocn, ocv, ocount, passign, replit, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
+  ncl = pm[0]
+  nv = pm[1]
+  ticks = 0
+  nunits = 0
+  ci = 0
+  while ci < ncl
+    if falive[ci] == 1 && ftaut[ci] == 0
+      st = fcs[ci]
+      len = fcl[ci]
+      sat_root = 0
+      has_subst = 0
+      i = 0
+      while i < len
+        l = fla[st + i]
+        av = l < 0 ? 0 - l : l
+        pa = passign[av]
+        if (l > 0 && pa > 0) || (l < 0 && pa < 0)
+          sat_root = 1
+        if replit[av] != 0
+          has_subst = 1
+        i += 1
+      if sat_root == 0 && has_subst == 1
+        ticks += len
+        w = 0
+        taut = 0
+        sig = 0 ## i64
+        i = 0
+        while i < len
+          l = fla[st + i]
+          av = l < 0 ? 0 - l : l
+          rl = replit[av]
+          if rl != 0
+            l = l > 0 ? rl : 0 - rl
+          dup = 0
+          j = 0
+          while j < w
+            prev = fla[st + j]
+            if prev == l
+              dup = 1
+            elsif prev == 0 - l
+              taut = 1
+            j += 1
+          if dup == 0
+            fla[st + w] = l
+            wav = l < 0 ? 0 - l : l
+            sig = sig | ((1 ## i64) << (wav & 63))
+            w += 1
+          i += 1
+        if taut == 1
+          falive[ci] = 0
+          ftaut[ci] = 1
+        else
+          fcl[ci] = w
+          fsig[ci] = sig
+          if w == 1
+            units[nunits] = ci
+            nunits += 1
+    ci += 1
+  li = 0
+  limit = 2 * nv + 2
+  while li < limit
+    och[li] = 0 - 1
+    ocount[li] = 0
+    li += 1
+  osize = 0
+  ci = 0
+  while ci < ncl
+    if falive[ci] == 1 && ftaut[ci] == 0
+      st = fcs[ci]
+      len = fcl[ci]
+      j = 0
+      while j < len
+        l = fla[st + j]
+        av = l < 0 ? 0 - l : l
+        lidx = av << 1
+        lidx = lidx + 1 if l < 0
+        ocn[osize] = och[lidx]
+        ocv[osize] = ci
+        och[lidx] = osize
+        ocount[lidx] = ocount[lidx] + 1
+        osize += 1
+        j += 1
+    ci += 1
+  pm[2] = osize
+  pm[3] = ticks
+  pm[4] = nunits
+  0
+
 # Native mirror intake from the parser's flat arrays: copy the literal
 # arena, compute per-clause tautology marks and 64-bit signatures, build
 # the intrusive occurrence lists, and assign sequential proof ids —
@@ -2620,7 +2905,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     fcl[k] = n
     falive[k] = 1
     fpgid[k] = k + 1
-    sig = 0
+    sig = 0 ## i64
     t = 0
     j = 0
     while j < n
@@ -2684,10 +2969,11 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   { "nvars": nvars, "clauses": [], "gids": [], "raw": true,
     "config": WassatConfig.from_lens(nvars, parse["flat_lens"], ncl),
     "next_gid": ncl + 1, "status": 0,
-    "stack": [], "gone": i64[nvars + 2],
+    "stack": [], "gone": nvars >= 10000000 ? empty : i64[nvars + 2],
     "fla": parse["flat_lits"], "fcs": parse["flat_offs"],
     "fcl": parse["flat_lens"], "falive": empty,
     "ftaut": empty, "fpgid": empty, "fncl": ncl, "fsynth": true,
+    "formula_ref": parse,
     "wrat": [], "drat": [],
     "stats": { "probes": 0, "probes_failed": 0,
                "vars_substituted": 0,
@@ -2757,6 +3043,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 # stack is walked backwards, with every BVE pivot first defaulted to false
 # so the flip rule starts from the pushed side's negation.
 -> wassat_reconstruct_model(stack, model, nvars)
+  return model if stack.empty? && model.size == nvars && nvars >= 100000
   sign = i64[nvars + 1]
   i = 0
   while i < model.size

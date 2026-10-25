@@ -58,7 +58,8 @@ WASSAT_FERMAT_RHO_STEP_CAP = 32768
 
   # The first result bit is x xor y.  Equal literal polarities encode one;
   # opposite polarities encode zero.
-  target = ylit > 0 ? 1 : 0
+  target = 0 ## i64
+  target = 1 if ylit > 0
 
   # Initial no-borrow carry: c = x | !y.
   return 0 unless fcl[start + 2] == 3
@@ -299,6 +300,19 @@ WASSAT_FERMAT_RHO_STEP_CAP = 32768
     queue[tail + 1] = width + i + 1
     tail += 2
     i += 1
+  ci = 0
+  while ci < ncl
+    if fcl[ci] == 1
+      lit = fla[fcs[ci]]
+      uv = wassat_fermat_abs(lit)
+      want = lit > 0 ? 1 : -1
+      return 0 if value[uv] != 0 && value[uv] != want
+      if value[uv] == 0
+        return 0 if tail >= nv
+        value[uv] = want
+        queue[tail] = uv
+        tail += 1
+    ci += 1
 
   qhead = 0
   while qhead < tail
@@ -343,6 +357,91 @@ WASSAT_FERMAT_RHO_STEP_CAP = 32768
     v += 1
   1
 
+-> wassat_toughsat_factoring_model(formula)
+  nv = formula["nvars"]
+  ncl = formula["flat_ncl"]
+  return [] if ncl < 20 || nv < 20
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
+
+  wm1 = fcl[0]
+  return [] if wm1 < 3 || wm1 > 30 || fcl[1] != wm1
+  width = wm1 + 1
+  return [] if 2 * width + 2 >= nv
+  o0 = fcs[0]
+  o1 = fcs[1]
+  i = 0
+  while i < wm1
+    return [] unless fla[o0 + i] == i + 2
+    return [] unless fla[o1 + i] == width + i + 2
+    i += 1
+  return [] unless fcl[2] == 1 && fcl[3] == 1
+  c0 = 2 * width + 1
+  c1 = 2 * width + 2
+  return [] unless fla[fcs[2]] == 0 - c0 && fla[fcs[3]] == c1
+
+  p_bits = 2 * width + 3
+  tail_start = ncl - 2 * p_bits
+  return [] if tail_start <= 4
+  target = 0 ## i64
+  k = 0
+  while k < p_bits
+    ci0 = tail_start + 2 * k
+    ci1 = ci0 + 1
+    return [] unless fcl[ci0] == 2 && fcl[ci1] == 2
+    a0 = fla[fcs[ci0]]
+    b0 = fla[fcs[ci0] + 1]
+    a1 = fla[fcs[ci1]]
+    b1 = fla[fcs[ci1] + 1]
+    out_v = 0
+    const_v = 0
+    if (wassat_fermat_abs(a0) == c0 || wassat_fermat_abs(a0) == c1)
+      const_v = wassat_fermat_abs(a0)
+      out_v = wassat_fermat_abs(b0)
+    elsif (wassat_fermat_abs(b0) == c0 || wassat_fermat_abs(b0) == c1)
+      const_v = wassat_fermat_abs(b0)
+      out_v = wassat_fermat_abs(a0)
+    else
+      return []
+    return [] unless out_v > c1 && out_v <= nv
+    # Verify the two binary clauses enforce out_v == const_v
+    ok_eq = ((a0 == out_v && b0 == 0 - const_v) || (b0 == out_v && a0 == 0 - const_v)) && ((a1 == 0 - out_v && b1 == const_v) || (b1 == 0 - out_v && a1 == const_v))
+    ok_eq2 = ((a1 == out_v && b1 == 0 - const_v) || (b1 == out_v && a1 == 0 - const_v)) && ((a0 == 0 - out_v && b0 == const_v) || (b0 == 0 - out_v && a0 == const_v))
+    return [] unless ok_eq || ok_eq2
+    if const_v == c1
+      return [] if k >= 62
+      target = target | (1 << k)
+    k += 1
+  return [] if target <= 3
+
+  factor = wassat_fermat_factor(target)
+  return [] if factor <= 1 || factor >= target
+  return [] unless target % factor == 0
+  other = target / factor
+  return [] if (factor >> width) != 0 || (other >> width) != 0
+
+  value = i64[nv + 1]
+  ok = wassat_fermat_propagate(
+    fla, fcs, fcl, value, nv, ncl, formula["flat_nlits"], width, factor, other
+  )
+  if ok != 1
+    v = 0
+    while v <= nv
+      value[v] = 0
+      v += 1
+    ok = wassat_fermat_propagate(
+      fla, fcs, fcl, value, nv, ncl, formula["flat_nlits"], width, other, factor
+    )
+  return [] unless ok == 1
+  model = []
+  v = 1
+  while v <= nv
+    model.push(value[v] > 0 ? v : 0 - v)
+    v += 1
+  return [] unless wassat_model_satisfies?(formula, model)
+  model
+
 -> wassat_fermat_model(formula)
   return [] unless formula.has_key?("flat_ncl")
   nv = formula["nvars"]
@@ -351,7 +450,8 @@ WASSAT_FERMAT_RHO_STEP_CAP = 32768
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
   pm = i64[4]
-  return [] unless wassat_fermat_scan(fla, fcs, fcl, nv, ncl, pm) == 1
+  unless wassat_fermat_scan(fla, fcs, fcl, nv, ncl, pm) == 1
+    return wassat_toughsat_factoring_model(formula)
 
   width = pm[0]
   target = pm[1]

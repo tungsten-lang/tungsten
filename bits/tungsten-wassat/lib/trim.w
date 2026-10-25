@@ -23,13 +23,23 @@
   raise "invalid [label] token '[token]'" unless wassat_literal_token?(token)
   sign = 1
   start = 0
-  first = token.slice(0, 1)
-  if first == "-" || first == "+"
-    sign = -1 if first == "-"
+  b0 = token.byte_at(0)
+  if b0 == 45 || b0 == 43
+    sign = -1 if b0 == 45
     start = 1
-  digits = token.slice(start, token.size - start)
-  magnitude = wassat_decimal_in_range(label, digits, allow_zero ? 0 : 1, 2000000000)
-  sign * magnitude
+  n = token.size
+  value = 0
+  i = start
+  while i < n
+    digit = token.byte_at(i) - 48
+    if value > (2000000000 - digit) / 10
+      raise "[label] needs [allow_zero ? 0 : 1]..2000000000, got '[token]'"
+    value = value * 10 + digit
+    i += 1
+  min_val = allow_zero ? 0 : 1
+  unless value >= min_val && value <= 2000000000
+    raise "[label] needs [min_val]..2000000000, got [value]"
+  sign * value
 
 -> wassat_trim_parse_line(line)
   toks = wassat_tokenize(line)

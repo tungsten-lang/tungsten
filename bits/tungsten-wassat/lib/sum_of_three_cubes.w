@@ -123,7 +123,7 @@ WASSAT_SUM3_ANCHOR_BITS = 8
   return 0 unless output_base + 2 * width - 1 == carry_base
   return 0 unless carry_base + width - 1 == nv
 
-  target = 0
+  target = 0 ## i64
   bit = 0
   while bit < width
     return 0 unless wassat_sum3_clause1?(

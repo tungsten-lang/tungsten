@@ -512,9 +512,13 @@ WASSAT_ARM_SLS = 2             # local search, models only
   repair.set_phases(best_assign)
   previous_conflicts = 0
   round = 0
-  while round < WASSAT_SLS_REPAIR_ROUNDS
+  while round < WASSAT_SLS_REPAIR_ROUNDS && miss["core_rounds"] < 128
     return miss if wassat_stop_requested?(stop)
-    allowance = wassat_sls_repair_round_conflicts(round)
+    eff_round = round
+    core_step = miss["core_rounds"] / 16
+    eff_round = core_step if core_step > eff_round
+    eff_round = WASSAT_SLS_REPAIR_ROUNDS - 1 if eff_round >= WASSAT_SLS_REPAIR_ROUNDS
+    allowance = wassat_sls_repair_round_conflicts(eff_round)
     internal_left = WASSAT_SLS_REPAIR_MAX_CONFLICTS - miss["conflicts"]
     return miss if internal_left <= 0
     allowance = internal_left if allowance > internal_left
@@ -559,7 +563,8 @@ WASSAT_ARM_SLS = 2             # local search, models only
       miss["relaxed"] += added
       miss["core_rounds"] += 1
       return miss if miss["relaxed"] > WASSAT_SLS_REPAIR_MAX_FRINGE
-    round += 1
+    else
+      round += 1
   miss
 
 # One bounded/resumable SLS slice. The first call constructs from the ALREADY
@@ -595,17 +600,24 @@ WASSAT_ARM_SLS = 2             # local search, models only
   else
     r = s.continue_solve(prefix_target, seed)
 
-  if !r["sat"] && !wassat_stop_requested?(stop) && repair_allowed && res[base + nv + 2] == 0 && r["flips"] >= WASSAT_SLS_REPAIR_PREFIX_FLIPS
-    res[base + nv + 2] = 1
-    rr = wassat_sls_frozen_repair(
-      formula, art, r["best_bits"], r["best_assign"], r["best_unsat"],
-      stop, repair_conflict_cap, budget_state, budget_limit, budget_slot
-    )
-    res[base + nv + 7] += rr["conflicts"]
-    if rr["sat"]
-      r["sat"] = true
-      r["model"] = rr["model"]
-      res[base + nv + 1] = 1
+  while !r["sat"] && !wassat_stop_requested?(stop) && repair_allowed && res[base + nv + 2] == 0 && r["flips"] >= WASSAT_SLS_REPAIR_PREFIX_FLIPS
+    if r["best_unsat"] <= WASSAT_SLS_REPAIR_MAX_UNSAT
+      res[base + nv + 2] = 1
+      rr = wassat_sls_frozen_repair(
+        formula, art, r["best_bits"], r["best_assign"], r["best_unsat"],
+        stop, repair_conflict_cap, budget_state, budget_limit, budget_slot
+      )
+      res[base + nv + 7] += rr["conflicts"]
+      if rr["sat"]
+        r["sat"] = true
+        r["model"] = rr["model"]
+        res[base + nv + 1] = 1
+    elsif r["flips"] < target_flips && !r["retired"]
+      next_target = r["flips"] + 1000000
+      next_target = target_flips if next_target > target_flips
+      r = s.continue_solve(next_target, seed)
+    else
+      break
 
   # In an unbounded race the first slice may have paused only to attempt the
   # prefix repair. Resume straight through to its requested ceiling. Bounded
@@ -1264,6 +1276,36 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   return false unless res.size > base + nv + 3
   ccall("__w_arr_load_acq", res, base + nv + 3) == 1
 
+-> wassat_xor_precheck(fla, fcs, fcl, ncl, st) (i64[] i64[] i64[] i64 i64[]) i64
+  n_3_24 = 0 ## i64
+  n_pos2 = 0 ## i64
+  n_neg2 = 0 ## i64
+  n_mix2 = 0 ## i64
+  ci = 0 ## i64
+  while ci < ncl
+    k = fcl[ci] ## i64
+    if k >= 3 && k <= 24
+      n_3_24 += 1
+    elsif k == 2
+      co = fcs[ci] ## i64
+      a = fla[co] ## i64
+      b = fla[co + 1] ## i64
+      if a > 0 && b > 0
+        n_pos2 += 1
+      elsif a < 0 && b < 0
+        n_neg2 += 1
+      else
+        n_mix2 += 1
+    ci += 1
+  st[0] = n_3_24
+  st[1] = n_pos2
+  st[2] = n_neg2
+  st[3] = n_mix2
+  return 1 if n_3_24 >= 3
+  return 1 if n_pos2 > 0 && n_neg2 > 0
+  return 1 if n_mix2 >= 2
+  0
+
 -> wassat_xor_arm_body(nv, formula, res, base, stop, metrics = nil,
                        circuit_plan = nil, deadline_ms = 0)
   if circuit_plan != nil
@@ -1278,6 +1320,14 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   ncl = formula["flat_ncl"]
   # Grouping hashes every clause; bound the work since this is a side arm.
   return 0 if ncl > 100000 || ncl < 4
+  pre_st = i64[4]
+  if wassat_xor_precheck(fla, fcs, fcl, ncl, pre_st) == 0
+    if metrics != nil
+      metrics[0] = 0
+      metrics[1] = 1
+      metrics[2] = 0 if metrics.size > 2
+      metrics[3] = 0 if metrics.size > 3
+    return 0
   gvars = {}
   gpats = {}
   gpar = {}
@@ -1383,7 +1433,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   dense = {}
   dense_vars = []
   gi = 0
-  while gi < gkeys.size && accepted.size < 4096
+  while gi < gkeys.size && accepted.size < 8192
     return 0 if (gi & 63) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
     key = gkeys[gi]
     gi += 1
@@ -1412,8 +1462,9 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     metrics[1] = nw
     metrics[2] = accepted.size if metrics.size > 2
     metrics[3] = near_rows if metrics.size > 3
-  if near_rows >= WASSAT_XOR_GRACE_NEAR_ROWS && res.size > base + nv + 3
+  if (near_rows >= WASSAT_XOR_GRACE_NEAR_ROWS || accepted.size >= 1024) && res.size > base + nv + 3
     z = ccall("__w_arr_store_rel", res, base + nv + 3, 1)
+    deadline_ms += 400 if accepted.size >= 1024 && deadline_ms > 0
   pivots = []
   nrows = 0
   refuted = false
@@ -1472,11 +1523,57 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
         refuted = true if rhs == 1
       else
         pivots.push([row, rhs, pw, pb])
+  if !refuted && accepted.size >= 64
+    ci = 0
+    while ci < ncl && !refuted
+      return 0 if (ci & 1023) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
+      if fcl[ci] == 1
+        l = fla[fcs[ci]]
+        v = l < 0 ? 0 - l : l
+        d = dense[v]
+        if d != nil
+          nrows += 1
+          row = i64[nw]
+          row[d >> 6] = 1 << (d & 63)
+          rhs = l > 0 ? 1 : 0
+          pi = 0
+          while pi < pivots.size
+            return 0 if (pi & 63) == 0 && wassat_xor_should_stop?(stop, deadline_ms)
+            pv = pivots[pi]
+            prow = pv[0]
+            pw = pv[2]
+            pb = pv[3]
+            if ((row[pw] >> pb) & 1) == 1
+              w = 0
+              while w < nw
+                row[w] = row[w] ^ prow[w]
+                w += 1
+              rhs = rhs ^ pv[1]
+            pi += 1
+          pw = 0 - 1
+          pb = 0
+          w = 0
+          while w < nw && pw < 0
+            if row[w] != 0
+              pw = w
+              b = 0
+              while b < 64
+                if ((row[w] >> b) & 1) == 1
+                  pb = b
+                  b = 64
+                else
+                  b += 1
+            w += 1
+          if pw < 0
+            refuted = true if rhs == 1
+          else
+            pivots.push([row, rhs, pw, pb])
+      ci += 1
   if refuted
     res[base] = 0 - 1
     res[base + nv + 4] = nrows
     won = wassat_stop_publish(stop, 0 - 1)
-  elsif dense.size > 0 && dense.size <= 4096 && formula.has_key?("nvars") && formula["nvars"] == nv && res.size >= base + nv + 8
+  elsif dense.size > 0 && dense.size <= 8192 && formula.has_key?("nvars") && formula["nvars"] == nv && res.size >= base + nv + 8
     # Rows are reduced against every EARLIER pivot before insertion, so a row
     # can depend only on free variables and LATER pivots. Reverse insertion
     # order is therefore a valid back-substitution order.
@@ -1515,6 +1612,13 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     while v <= nv
       sign[v] = 0 - 1
       v += 1
+    ci = 0
+    while ci < ncl
+      if fcl[ci] == 1
+        l = fla[fcs[ci]]
+        v = l < 0 ? 0 - l : l
+        sign[v] = l > 0 ? 1 : 0 - 1 if v >= 1 && v <= nv
+      ci += 1
     verify = i64[2]
     verify[1] = ncl
     mask = 0
@@ -1588,8 +1692,14 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     s.set_shared_conflict_budget(budget_state, budget_limit, budget_slot)
   s.simplify_raw if simplify
   t0 = ccall("__w_clock_ms")
-  slice = cap < 512 ? cap : 512
-  spr = s.solve_budget(slice)
+  spr = nil
+  if raw && art["fncl"] >= 5000000 && env("WASSAT_LUCKY") != "0"
+    s.enable_lucky_once
+    lr = s.lucky_probe
+    spr = s.result_for(lr) if lr != 0
+  if spr == nil
+    slice = cap < 512 ? cap : 512
+    spr = s.solve_budget(slice)
   # The wall-clock cap bounds a miss on kernels whose conflicts are expensive,
   # but it makes the outcome depend on machine load: on bmc-ibm-10 the scout
   # decides at 1,733 conflicts when quiet and falls off a cliff to a full
@@ -1639,6 +1749,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   # used by A/B measurements, so an automatic arm must not silently widen it;
   # WASSAT_OTFS_SPECIALISTS remains the explicit override for specialist A/B.
   return 0 if env("WASSAT_ARMS") != nil && env("WASSAT_OTFS_SPECIALISTS") == nil
+  return 0 if matrix_threads > 4 && env("WASSAT_OTFS_SPECIALISTS") == nil
   # Count every worker already planned by the coordinator. Preprocessing, SLS
   # and a scout continuation are registered after race construction, but they
   # still consume cores once the race starts.
@@ -1842,6 +1953,9 @@ WASSAT_TEL_STRIDE = 8
   if grp == 3
     cfgs[b + 1] = 1
     cfgs[b + 2] = 4242 + a * 104729
+  if grp >= 4
+    cfgs[b + 1] = 1
+    cfgs[b + 2] = 90001 + a * 15485863
   cfgs[b + 3] = grp % 2
   cfgs[b + 4] = 0
   cfgs[b + 4] = 1 if a % 4 == 1
@@ -1899,6 +2013,7 @@ WASSAT_TEL_STRIDE = 8
       s.disable_vmtf
     else
       s.enable_vmtf
+  s.enable_target_stable_only if cfgs[b + 1] == 0
   s.reseed_phases(cfgs[b + 2]) if cfgs[b + 1] == 1
   s.set_positive_phases if cfgs[b + 1] == 2
   s.enable_chrono if cfgs[b + 3] == 1
@@ -1936,9 +2051,10 @@ WASSAT_TEL_STRIDE = 8
 # be implied by a reduced one and installing it could refute a satisfiable
 # formula. Every rendering is a different formula and carries exactly one
 # arm, so a ring would be unsound AND useless.
--> wassat_race_add_pre(race, pre, heavy, label)
+-> wassat_race_add_pre(race, pre, heavy, label, pre_formula = nil)
   raise "race capacity exceeded" if race["threads"] + race["pre"].size >= race["cap"]
-  race["pre"].push({ "pre": pre, "heavy": heavy, "label": label, "out": [] })
+  pf = pre_formula == nil ? race["formula"] : pre_formula
+  race["pre"].push({ "pre": pre, "heavy": heavy, "label": label, "out": [], "formula": pf })
   0
 
 # A preprocessing arm: ONE thread that renders the formula and then solves
@@ -1970,12 +2086,14 @@ WASSAT_TEL_STRIDE = 8
                        tel, tbase, round, budget_state = nil,
                        budget_limit = 0, budget_slot = 0)
   t0 = ccall("__w_clock_ms")
+  pnv = formula["nvars"]
   if round > 0
     # Nothing to resume: this arm refuted during rendering, or won with the
     # late lucky dives, or its rendering never produced a solver.
     return 0 if out.size < 3
     sr = out[2]
     sr.solve_shared_budget(res, base, budget)
+    res[base + nv + 4] = res[base + pnv + 4] if pnv < nv
     sr.export_telemetry(tel, tbase)
     tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
     return 0
@@ -1997,13 +2115,18 @@ WASSAT_TEL_STRIDE = 8
   # rendering. Across 154 measured races it produced no answer and only added
   # startup/memory pressure, while the early lucky arm already covers the
   # original formula. Go directly from the prepared rendering to useful CDCL.
-  s = Wassat.from_flat(nv, rendered, 0)
+  s = Wassat.from_flat(pnv, rendered, 0)
+  if heavy
+    s.enable_chrono
+    s.enable_shrink
+    s.enable_target_stable_only
   s.enable_fixed_caps
   s.set_stop_cell(stop)
   if budget_state != nil
     s.set_shared_conflict_budget(budget_state, budget_limit, budget_slot)
   out.push(s)
   s.solve_shared_budget(res, base, budget)
+  res[base + nv + 4] = res[base + pnv + 4] if pnv < nv
   s.export_telemetry(tel, tbase)
   tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
   0
@@ -2292,6 +2415,7 @@ WASSAT_AXIS_SLOTS = 10
       if live[threads + p] == 1
         spec = pre[p]
         pp = spec["pre"]
+        pformula = spec["formula"]
         heavy = spec["heavy"]
         out = spec["out"]
         base = (threads + p) * (nv + 8)
@@ -2300,7 +2424,7 @@ WASSAT_AXIS_SLOTS = 10
         pre_round = round
         pre_slot = threads + p + 1
         handles.push(Thread.new -> wassat_pre_arm_body(
-          pp, formula, nv, res, base, heavy, stop, out, pre_slice, tel,
+          pp, pformula, nv, res, base, heavy, stop, out, pre_slice, tel,
           tbase, pre_round, conflict_budget, budget, pre_slot
         ))
       p += 1

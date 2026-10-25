@@ -20,9 +20,9 @@
 WASSAT_COVER_MAX_VARS = 2048
 WASSAT_COVER_MAX_ROWS = 20000
 WASSAT_COVER_MAX_EDGES = 200000
-WASSAT_COVER_MAX_ROW = 64
+WASSAT_COVER_MAX_ROW = 160
 WASSAT_COVER_MAX_LITS = 500000
-WASSAT_COVER_NODE_CAP = 64000
+WASSAT_COVER_NODE_CAP = 200000
 
 # Trail entries share one typed array:
 #   1..nvars                         variable assignment changed
@@ -138,13 +138,15 @@ WASSAT_COVER_NODE_CAP = 64000
 # residual-cover score is cheap on the sparse occurrence lists and reduced the
 # SCPC reference search from roughly 51k to 23k nodes.
 -> wassat_cover_score(v, covered, counts,
-                      occ_off, occ_rows) (i64 i8[] i64[] i64[] i64[]) i64
+                      occ_off, occ_rows, max_row) (i64 i8[] i64[] i64[] i64[] i64) i64
   score = 0
+  num = 64 ## i64
+  num = 1024 if max_row > 64
   p = occ_off[v]
   stop = occ_off[v + 1]
   while p < stop
     r = occ_rows[p]
-    score += 64 / counts[r] if covered[r] == 0 && counts[r] > 0
+    score += num / counts[r] if covered[r] == 0 && counts[r] > 0
     p += 1
   score
 
@@ -204,7 +206,7 @@ WASSAT_COVER_NODE_CAP = 64000
   while p < stop
     v = row_lits[p]
     if status[v] == 0
-      score = wassat_cover_score(v, covered, counts, occ_off, occ_rows)
+      score = wassat_cover_score(v, covered, counts, occ_off, occ_rows, max_row)
       at = ncand
       while at > 0 && scores[base + at - 1] < score
         candidates[base + at] = candidates[base + at - 1]
@@ -419,6 +421,7 @@ WASSAT_COVER_NODE_CAP = 64000
       return miss
     ci += 1
   return miss if nrows == 0 || nedges == 0
+  return miss if nvars >= 350 && nedges >= nvars * 20
 
   row_lits = i64[nlits]
   row_off = i64[nrows + 1]
@@ -482,3 +485,163 @@ WASSAT_COVER_NODE_CAP = 64000
 
 -> wassat_covering_solve(formula, node_cap = WASSAT_COVER_NODE_CAP)
   wassat_covering_solve_limit(formula, node_cap, 1)
+
+# Strip redundant 1-step resolvent mixed clauses [-v, b_1, ..., b_m] from
+# stable-extension / Argumentation Framework encodings where both the binary
+# attack clause [-v, -a] and the positive defence clause [a, b_1, ..., b_m]
+# are already present in the formula.
+-> wassat_try_strip_af_resolvents(formula)
+  return false unless formula.has_key?("flat_ncl")
+  nv = formula["nvars"]
+  ncl = formula["flat_ncl"]
+  return false if nv < 32 || nv > 2048 || ncl <= nv * 3 || ncl > 250000
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
+  n_pos = 0
+  n_bin_neg = 0
+  n_mixed = 0
+  ci = 0
+  while ci < ncl
+    off = fcs[ci]
+    n = fcl[ci]
+    return false if n < 1
+    if n == 2 && fla[off] < 0 && fla[off + 1] < 0
+      n_bin_neg += 1
+    else
+      neg_cnt = 0
+      j = 0
+      while j < n
+        neg_cnt += 1 if fla[off + j] < 0
+        j += 1
+      if neg_cnt == 0
+        n_pos += 1
+      elsif neg_cnt == 1 && n >= 2
+        n_mixed += 1
+      else
+        return false
+    ci += 1
+  return false unless n_pos == nv && n_bin_neg >= nv && n_mixed >= nv
+
+  stride = nv + 1
+  bin_adj = i8[stride * stride]
+  pos_ci = i64[nv + 1]
+  pos_tail_len = i64[nv + 1]
+  pos_tail_sum = i64[nv + 1]
+  head = i64[1024]
+  next_a = i64[nv + 1]
+  ci = 0
+  while ci < ncl
+    off = fcs[ci]
+    n = fcl[ci]
+    if n == 2 && fla[off] < 0 && fla[off + 1] < 0
+      u = 0 - fla[off]
+      v = 0 - fla[off + 1]
+      if u >= 1 && u <= nv && v >= 1 && v <= nv
+        bin_adj[u * stride + v] = 1
+        bin_adj[v * stride + u] = 1
+    else
+      neg_cnt = 0
+      j = 0
+      while j < n
+        neg_cnt += 1 if fla[off + j] < 0
+        j += 1
+      if neg_cnt == 0
+        a = fla[off]
+        return false if a < 1 || a > nv || pos_ci[a] != 0
+        pos_ci[a] = ci + 1
+        pos_tail_len[a] = n - 1
+        tsum = 0
+        j = 1
+        while j < n
+          tsum += fla[off + j]
+          j += 1
+        pos_tail_sum[a] = tsum
+        b = tsum & 1023
+        next_a[a] = head[b]
+        head[b] = a
+    ci += 1
+
+  drop = i8[ncl]
+  seen = i64[nv + 1]
+  stamp = 0
+  ndropped = 0
+  ci = 0
+  while ci < ncl
+    off = fcs[ci]
+    n = fcl[ci]
+    if !(n == 2 && fla[off] < 0 && fla[off + 1] < 0)
+      neg_lit = 0
+      neg_cnt = 0
+      msum = 0
+      stamp += 1
+      j = 0
+      while j < n
+        lit = fla[off + j]
+        if lit < 0
+          neg_lit = lit
+          neg_cnt += 1
+        else
+          msum += lit
+          seen[lit] = stamp if lit >= 1 && lit <= nv
+        j += 1
+      if neg_cnt == 1
+        v = 0 - neg_lit
+        m = n - 1
+        a = head[msum & 1023]
+        matched = false
+        while a > 0 && !matched
+          if pos_tail_len[a] == m && pos_tail_sum[a] == msum && bin_adj[v * stride + a] == 1 && seen[a] != stamp && seen[v] != stamp
+            pci = pos_ci[a] - 1
+            poff = fcs[pci]
+            plen = fcl[pci]
+            all_in = true
+            k = 1
+            while k < plen
+              p = fla[poff + k]
+              if p < 1 || p > nv || seen[p] != stamp
+                all_in = false
+                break
+              k += 1
+            matched = true if all_in
+          a = next_a[a]
+        if matched
+          drop[ci] = 1
+          ndropped += 1
+    ci += 1
+  return false if ndropped == 0
+
+  new_ncl = ncl - ndropped
+  new_offs = i64[new_ncl]
+  new_lens = i64[new_ncl]
+  new_nlits = 0
+  ci = 0
+  while ci < ncl
+    new_nlits += fcl[ci] if drop[ci] == 0
+    ci += 1
+  new_lits = i64[new_nlits]
+  wi = 0
+  wp = 0
+  ci = 0
+  while ci < ncl
+    if drop[ci] == 0
+      off = fcs[ci]
+      n = fcl[ci]
+      new_offs[wi] = wp
+      new_lens[wi] = n
+      j = 0
+      while j < n
+        new_lits[wp] = fla[off + j]
+        wp += 1
+        j += 1
+      wi += 1
+    ci += 1
+  formula["clauses"] = []
+  formula["boxed"] = false
+  formula["nclauses"] = new_ncl
+  formula["flat_lits"] = new_lits
+  formula["flat_offs"] = new_offs
+  formula["flat_lens"] = new_lens
+  formula["flat_ncl"] = new_ncl
+  formula["flat_nlits"] = new_nlits
+  true

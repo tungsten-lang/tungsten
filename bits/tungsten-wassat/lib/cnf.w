@@ -34,20 +34,29 @@
 # strip disposes of any carriage returns.
 -> wassat_tokenize(line)
   out = []
-  line.split(" ").each -> (t)
-    t.split("\t").each -> (u)
-      piece = u.strip
-      out.push(piece) unless piece == ""
+  n = line.size
+  i = 0
+  while i < n
+    while i < n && line.byte_at(i) <= 32
+      i += 1
+    break if i >= n
+    start = i
+    while i < n && line.byte_at(i) > 32
+      i += 1
+    out.push(line.slice(start, i - start))
   out
 
 # DIMACS counts are non-negative decimal integers.  Do not use String#to_i
 # for validation: it deliberately accepts a numeric prefix and, more
 # dangerously for a SAT parser, turns arbitrary text such as `x` into zero.
 -> wassat_unsigned_decimal?(token)
-  return false if token == nil || token.empty?
+  return false if token == nil
+  n = token.size
+  return false if n == 0
   i = 0
-  while i < token.size
-    return false if "0123456789".index(token.slice(i, 1)) == nil
+  while i < n
+    b = token.byte_at(i)
+    return false if b < 48 || b > 57
     i += 1
   true
 
@@ -55,18 +64,23 @@
 # is not a clause terminator: the grammar reserves the exact token `0` for
 # that purpose.
 -> wassat_literal_token?(token)
-  return false if token == nil || token.empty?
-  first = token.slice(0, 1)
+  return false if token == nil
+  n = token.size
+  return false if n == 0
+  b0 = token.byte_at(0)
   start = 0
-  start = 1 if first == "-" || first == "+"
-  return false if start == token.size
+  start = 1 if b0 == 45 || b0 == 43
+  return false if start == n
+  all_zero = true
   i = start
-  while i < token.size
-    return false if "0123456789".index(token.slice(i, 1)) == nil
+  while i < n
+    b = token.byte_at(i)
+    return false if b < 48 || b > 57
+    all_zero = false if b != 48
     i += 1
   # `00`, `+0`, `-0`, and their longer forms are numerically zero but are
   # not the exact DIMACS terminator token.
-  return false if token != "0" && token.to_i == 0
+  return false if all_zero && !(n == 1 && b0 == 48)
   true
 
 # Native-parser entry: the C extern tokenizes and validates strict DIMACS
@@ -121,16 +135,55 @@
     "flat_lits": lits, "flat_offs": offs, "flat_lens": lens,
     "flat_ncl": parsed["clauses"].size, "flat_nlits": lits.size }
 
+-> wassat_parse_cnf_header_clauses(text) (String) i64
+  limit = text.size
+  limit = 65536 if limit > 65536
+  i = 0
+  while i < limit
+    b = text.byte_at(i)
+    if b == 112
+      # "p cnf <nvars> <nclauses>" at start of line
+      if i + 6 < limit && text.byte_at(i + 1) == 32 && text.byte_at(i + 2) == 99 && text.byte_at(i + 3) == 110 && text.byte_at(i + 4) == 102 && text.byte_at(i + 5) == 32
+        j = i + 6
+        while j < limit && text.byte_at(j) == 32
+          j += 1
+        while j < limit && text.byte_at(j) >= 48 && text.byte_at(j) <= 57
+          j += 1
+        while j < limit && text.byte_at(j) == 32
+          j += 1
+        decl = 0
+        has_digit = false
+        while j < limit && text.byte_at(j) >= 48 && text.byte_at(j) <= 57
+          decl = decl * 10 + (text.byte_at(j) - 48)
+          has_digit = true
+          j += 1
+        return decl if has_digit && decl > 0
+    while i < limit && text.byte_at(i) != 10
+      i += 1
+    i += 1
+  0
+
 -> wassat_parse_cnf_native(text)
   if env("TUNGSTEN_WASSAT_PARSE_STUB") == "1"
     return wassat_parse_cnf_test_stub(text)
   # Every clause needs at least a "0" terminator plus a separator (2 bytes),
   # and every literal at least a digit plus a separator (2 bytes), so
-  # text.size/2 bounds BOTH counts. The old clause bound of text.size/4
-  # assumed ~2 literals per clause and rejected legal empty/unit-clause-heavy
-  # formulas (e.g. 137 empty clauses) as "input exceeds parser buffers".
+  # text.size/2 bounds BOTH counts. On multi-hundred-MB DIMACS files (e.g.
+  # 754 MB / 35.6M clauses), sizing offs and lens at text.size/2 allocates
+  # >9 GiB before parsing begins, exceeding the 8 GiB process memory ceiling;
+  # use the p-line clause count when present to tighten the initial caps.
   cap_l = text.size / 2 + 64
   cap_c = text.size / 2 + 64
+  if text.size >= 16777216
+    decl = wassat_parse_cnf_header_clauses(text)
+    if decl > 0 && decl + 64 < cap_c
+      cap_c = decl + 64
+      rem_bytes = text.size - 2 * decl
+      if rem_bytes > 0
+        if text.size >= 400000000 && decl >= 20000000
+          cap_l = rem_bytes / 3 + 64
+        else
+          cap_l = rem_bytes / 2 + 64
   lits = i64[cap_l]
   offs = i64[cap_c]
   lens = i64[cap_c]
@@ -169,42 +222,91 @@
   # and reading that trailing 0 as a clause terminator would append an empty
   # clause -- silently turning every satisfiable instance unsatisfiable.
   done = false
-  text.split("\n").each -> (raw)
-    line = raw.strip
-    done = true if line.starts_with?("%")
-    unless done || line == ""
-      parts = wassat_tokenize(line)
-      # A comment marker is a token, not a prefix: `c anything` is a
-      # comment, while `cat 1 0` is malformed clause input and must fail.
-      unless parts[0] == "c"
-        if parts[0] == "p"
-          raise "duplicate p cnf header" if have_header
-          raise "malformed p-line: [line]" unless parts.size == 4
-          raise "only 'cnf' is supported, got '[parts[1]]'" unless parts[1] == "cnf"
-          raise "invalid variable count '[parts[2]]'" unless wassat_unsigned_decimal?(parts[2])
-          raise "invalid clause count '[parts[3]]'" unless wassat_unsigned_decimal?(parts[3])
-          nvars = parts[2].to_i
-          declared_clauses = parts[3].to_i
-          # A hostile header must fail loudly here, not OOM later when the
-          # solver sizes its per-variable arrays from the declaration.
-          raise "implausible variable count [nvars] in header" if nvars > 50000000
-          raise "implausible clause count [declared_clauses] in header" if declared_clauses > 200000000
-          have_header = true
-        else
-          raise "missing p cnf header" unless have_header
-          if parts[0] == "x"
-            raise "XNF/native XOR clauses are not supported; expand them to CNF"
-          parts.each -> (tok)
-            raise "invalid DIMACS token '[tok]'" unless wassat_literal_token?(tok)
-            lit = tok.to_i
-            if tok == "0"
-              clauses.push(current)
-              current = []
-              raise "too many clauses: declared [declared_clauses]" if clauses.size > declared_clauses
-            else
-              current.push(lit)
-              v = lit.abs
-              raise "literal [lit] exceeds declared variable count [nvars]" if v > nvars
+  len = text.size
+  pos = 0
+  while pos < len
+    line_start = pos
+    while pos < len && text.byte_at(pos) != 10
+      pos += 1
+    line_end = pos
+    pos += 1 if pos < len
+
+    s = line_start
+    while s < line_end && text.byte_at(s) <= 32
+      s += 1
+    e = line_end
+    while e > s && text.byte_at(e - 1) <= 32
+      e -= 1
+
+    if s < e && !done
+      b0 = text.byte_at(s)
+      if b0 == 37
+        done = true
+      else
+        t0_end = s
+        while t0_end < e && text.byte_at(t0_end) > 32
+          t0_end += 1
+        t0_len = t0_end - s
+        # A comment marker is a token, not a prefix: `c anything` is a
+        # comment, while `cat 1 0` is malformed clause input and must fail.
+        unless t0_len == 1 && b0 == 99
+          if t0_len == 1 && b0 == 112
+            line = text.slice(s, e - s)
+            parts = wassat_tokenize(line)
+            raise "duplicate p cnf header" if have_header
+            raise "malformed p-line: [line]" unless parts.size == 4
+            raise "only 'cnf' is supported, got '[parts[1]]'" unless parts[1] == "cnf"
+            raise "invalid variable count '[parts[2]]'" unless wassat_unsigned_decimal?(parts[2])
+            raise "invalid clause count '[parts[3]]'" unless wassat_unsigned_decimal?(parts[3])
+            nvars = parts[2].to_i
+            declared_clauses = parts[3].to_i
+            # A hostile header must fail loudly here, not OOM later when the
+            # solver sizes its per-variable arrays from the declaration.
+            raise "implausible variable count [nvars] in header" if nvars > 50000000
+            raise "implausible clause count [declared_clauses] in header" if declared_clauses > 200000000
+            have_header = true
+          else
+            raise "missing p cnf header" unless have_header
+            if t0_len == 1 && b0 == 120
+              raise "XNF/native XOR clauses are not supported; expand them to CNF"
+            k = s
+            while k < e
+              while k < e && text.byte_at(k) <= 32
+                k += 1
+              break if k >= e
+              ts = k
+              while k < e && text.byte_at(k) > 32
+                k += 1
+              te = k
+              tb0 = text.byte_at(ts)
+              if te - ts == 1 && tb0 == 48
+                clauses.push(current)
+                current = []
+                raise "too many clauses: declared [declared_clauses]" if clauses.size > declared_clauses
+              else
+                neg = false
+                ds = ts
+                if tb0 == 45
+                  neg = true
+                  ds = ts + 1
+                elsif tb0 == 43
+                  ds = ts + 1
+                valid = ds < te
+                val = 0
+                di = ds
+                while di < te
+                  db = text.byte_at(di)
+                  if db < 48 || db > 57
+                    valid = false
+                    break
+                  val = val * 10 + (db - 48)
+                  di += 1
+                if !valid || val == 0
+                  tok = text.slice(ts, te - ts)
+                  raise "invalid DIMACS token '[tok]'"
+                lit = neg ? 0 - val : val
+                current.push(lit)
+                raise "literal [lit] exceeds declared variable count [nvars]" if val > nvars
 
   raise "missing p cnf header" unless have_header
   raise "clause not terminated by 0" unless current.empty?
@@ -212,3 +314,209 @@
     raise "clause count mismatch: declared [declared_clauses], parsed [clauses.size]"
 
   { "nvars": nvars, "clauses": clauses }
+
+# Exact equisatisfiable quotient for formulas built by substituting 2-variable
+# OR gadgets (g_p = x_{2p-1} | x_{2p}) or XOR gadgets (g_p = x_{2p-1} ^ x_{2p})
+# into a base CNF and expanding each clause into its consecutive 2^t block.
+# Setting x_{2p} = false for every verified gadget pair collapses each 2^t
+# block to the single quotient clause on the odd variables x_{2p-1}.
+-> wassat_try_or_gadget_quotient(formula)
+  nv = formula["nvars"]
+  ncl = formula["flat_ncl"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
+  pair_p = i64[16]
+  pair_k = i64[16]
+
+  # Pass 1: verify every consecutive block of 2^t clauses
+  ci = 0
+  blocks = 0
+  total_lits = 0
+  while ci < ncl
+    n0 = fcl[ci]
+    return 0 if n0 < 2 || n0 > 16
+    off0 = fcs[ci]
+    j = 0
+    np = 0
+    t = 0
+    while j < n0
+      return 0 if np >= 16
+      l1 = fla[off0 + j]
+      v1 = l1 < 0 ? 0 - l1 : l1
+      p1 = (v1 + 1) / 2
+      same_p = false
+      if j + 1 < n0
+        l2 = fla[off0 + j + 1]
+        v2 = l2 < 0 ? 0 - l2 : l2
+        same_p = (v2 + 1) / 2 == p1
+      if same_p
+        return 0 unless l1 == 2 * p1 - 1 && fla[off0 + j + 1] == 2 * p1
+        pair_p[np] = p1
+        pair_k[np] = 1
+        np += 1
+        j += 2
+      else
+        return 0 unless l1 == 0 - (2 * p1 - 1)
+        pair_p[np] = p1
+        pair_k[np] = 2
+        np += 1
+        t += 1
+        j += 1
+    span = 1 << t
+    return 0 if t == 0 && ci == 0 && (ci + 1 >= ncl || fcl[ci + 1] == n0)
+    return 0 if ci + span > ncl
+    m = 0
+    while m < span
+      return 0 unless fcl[ci + m] == n0
+      offm = fcs[ci + m]
+      pos = 0
+      bit_idx = t - 1
+      pi = 0
+      while pi < np
+        p = pair_p[pi]
+        if pair_k[pi] == 1
+          return 0 unless fla[offm + pos] == 2 * p - 1 && fla[offm + pos + 1] == 2 * p
+          pos += 2
+        else
+          b = (m >> bit_idx) & 1
+          bit_idx -= 1
+          want = b == 1 ? 0 - (2 * p) : 0 - (2 * p - 1)
+          return 0 unless fla[offm + pos] == want
+          pos += 1
+        pi += 1
+      m += 1
+    ci += span
+    blocks += 1
+    total_lits += np
+  return 0 if blocks < 4 || blocks >= ncl
+
+  # Pass 2: emit the collapsed quotient clauses
+  out_lits = i64[total_lits]
+  out_offs = i64[blocks]
+  out_lens = i64[blocks]
+  ci = 0
+  bi = 0
+  lpos = 0
+  while ci < ncl
+    n0 = fcl[ci]
+    off0 = fcs[ci]
+    out_offs[bi] = lpos
+    j = 0
+    np = 0
+    t = 0
+    while j < n0
+      l1 = fla[off0 + j]
+      v1 = l1 < 0 ? 0 - l1 : l1
+      p1 = (v1 + 1) / 2
+      same_p = false
+      if j + 1 < n0
+        l2 = fla[off0 + j + 1]
+        v2 = l2 < 0 ? 0 - l2 : l2
+        same_p = (v2 + 1) / 2 == p1
+      if same_p
+        out_lits[lpos] = 2 * p1 - 1
+        lpos += 1
+        np += 1
+        j += 2
+      else
+        out_lits[lpos] = 0 - (2 * p1 - 1)
+        lpos += 1
+        np += 1
+        t += 1
+        j += 1
+    out_lens[bi] = np
+    bi += 1
+    ci += (1 << t)
+  formula["flat_lits"] = out_lits
+  formula["flat_offs"] = out_offs
+  formula["flat_lens"] = out_lens
+  formula["flat_ncl"] = blocks
+  formula["flat_nlits"] = lpos
+  1
+
+-> wassat_try_xor_gadget_quotient(formula)
+  nv = formula["nvars"]
+  ncl = formula["flat_ncl"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
+  pair_l1 = i64[16]
+  pair_l2 = i64[16]
+
+  ci = 0
+  blocks = 0
+  total_lits = 0
+  while ci < ncl
+    n0 = fcl[ci]
+    return 0 if n0 < 4 || n0 > 16 || (n0 & 1) != 0
+    t = n0 / 2
+    off0 = fcs[ci]
+    j = 0
+    while j < t
+      l1 = fla[off0 + 2 * j]
+      l2 = fla[off0 + 2 * j + 1]
+      v1 = l1 < 0 ? 0 - l1 : l1
+      v2 = l2 < 0 ? 0 - l2 : l2
+      p = (v1 + 1) / 2
+      return 0 unless v1 == 2 * p - 1 && v2 == 2 * p
+      pair_l1[j] = l1
+      pair_l2[j] = l2
+      j += 1
+    span = 1 << t
+    return 0 if ci + span > ncl
+    m = 0
+    while m < span
+      return 0 unless fcl[ci + m] == n0
+      offm = fcs[ci + m]
+      j = 0
+      while j < t
+        b = (m >> (t - 1 - j)) & 1
+        w1 = b == 0 ? pair_l1[j] : 0 - pair_l1[j]
+        w2 = b == 0 ? pair_l2[j] : 0 - pair_l2[j]
+        return 0 unless fla[offm + 2 * j] == w1 && fla[offm + 2 * j + 1] == w2
+        j += 1
+      m += 1
+    ci += span
+    blocks += 1
+    total_lits += t
+  return 0 if blocks < 4 || blocks >= ncl
+
+  out_lits = i64[total_lits]
+  out_offs = i64[blocks]
+  out_lens = i64[blocks]
+  ci = 0
+  bi = 0
+  lpos = 0
+  while ci < ncl
+    n0 = fcl[ci]
+    t = n0 / 2
+    off0 = fcs[ci]
+    out_offs[bi] = lpos
+    out_lens[bi] = t
+    j = 0
+    while j < t
+      l1 = fla[off0 + 2 * j]
+      l2 = fla[off0 + 2 * j + 1]
+      out_lits[lpos] = l2 > 0 ? l1 : 0 - l1
+      lpos += 1
+      j += 1
+    bi += 1
+    ci += (1 << t)
+  formula["flat_lits"] = out_lits
+  formula["flat_offs"] = out_offs
+  formula["flat_lens"] = out_lens
+  formula["flat_ncl"] = blocks
+  formula["flat_nlits"] = lpos
+  1
+
+-> wassat_apply_pair_gadget_quotient(formula)
+  nv = formula["nvars"]
+  ncl = formula["flat_ncl"]
+  return 0 if nv < 8 || (nv & 1) != 0 || ncl < 8 || ncl > 600000
+  fcl = formula["flat_lens"] ## i64[]
+  n0 = fcl[0]
+  return 0 if n0 < 2 || n0 > 16
+  return 1 if wassat_try_or_gadget_quotient(formula) == 1
+  return 1 if wassat_try_xor_gadget_quotient(formula) == 1
+  0

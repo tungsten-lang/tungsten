@@ -213,7 +213,7 @@ WASSAT_EDGE_NODE_CAP = 1000000
           d += 1
 
         if compatible == 1
-          mark = 0
+          mark = 0 ## i64
           d = 0
           while d < degree
             g = placement_groups[v * WASSAT_EDGE_MAX_DEGREE + d]

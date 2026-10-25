@@ -508,7 +508,7 @@ WASSAT_HW_KEY_RADIX = 128
   while ci < WASSAT_HW_NCLAUSES
     width = lens[ci]
     return -1 if width < 1 || width > 4
-    count = 1 << (width - 1)
+    count = 1 << (width - 1) ## i64
     return -1 if ci + count > WASSAT_HW_NCLAUSES
     base = i64[4]
     first = offs[ci]
@@ -529,7 +529,7 @@ WASSAT_HW_KEY_RADIX = 128
     while row < count
       return -1 unless lens[ci + row] == width
       off = offs[ci + row]
-      mask = 0
+      mask = 0 ## i64
       parity = 0
       j = 0
       while j < width

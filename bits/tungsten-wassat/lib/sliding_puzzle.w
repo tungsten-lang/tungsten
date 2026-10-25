@@ -79,7 +79,7 @@ WASSAT_PUZZLE_COMPLETION_CONFLICTS = 20000
     return false unless delta % 5 == 0
     return false unless seen[word] == 0
     seen[word] = 1
-    value = 0
+    value = 0 ## i64
     bit = 0
     while bit < WASSAT_PUZZLE_SIDE
       ci = clause_base + helper_index * 6 + bit

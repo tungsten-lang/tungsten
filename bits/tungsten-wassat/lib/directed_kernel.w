@@ -42,33 +42,45 @@ WASSAT_DIRECTED_DENSE_SINGLE_SCC_MIN_AVG_IN = 32
 # ordered grammar. state[0] receives the attack count and state[1] the maximum
 # indegree.
 -> wassat_directed_recognize(lits, offs, lens, ncl, nv,
-                             row_off, row_len, state) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[]) i64
+                             row_off, row_len, self_attack, state) (i64[] i64[] i64[] i64 i64 i64[] i64[] i8[] i64[]) i64
   ci = 0
   v = 1
   attacks = 0
   max_in = 0
+  first_edges = i64[nv + 1]
   while v <= nv
     first_edge = ci
+    first_edges[v] = first_edge
     nin = 0
-    while ci < ncl && lens[ci] == 2 && lits[offs[ci]] == 0 - v
-      a = lits[offs[ci] + 1]
-      return 0 if a >= 0
-      a = 0 - a
-      return 0 if a < 1 || a > nv
-      nin += 1
-      attacks += 1
-      return 0 if attacks > WASSAT_DIRECTED_MAX_ATTACKS
-      ci += 1
+    while ci < ncl && ((lens[ci] == 2 && lits[offs[ci]] == 0 - v) || (lens[ci] == 1 && lits[offs[ci]] == 0 - v))
+      if lens[ci] == 1
+        return 0 if self_attack[v] != 0
+        self_attack[v] = 1
+        attacks += 1
+        return 0 if attacks > WASSAT_DIRECTED_MAX_ATTACKS
+        ci += 1
+      else
+        a = lits[offs[ci] + 1]
+        return 0 if a >= 0
+        a = 0 - a
+        return 0 if a < 1 || a > nv
+        nin += 1
+        attacks += 1
+        return 0 if attacks > WASSAT_DIRECTED_MAX_ATTACKS
+        ci += 1
     return 0 if ci >= ncl
     poff = offs[ci]
     plen = lens[ci]
     return 0 unless plen == nin + 1
     return 0 unless lits[poff] == v
     j = 0
+    ei = first_edge
     while j < nin
+      ei += 1 if lens[ei] == 1
       a = lits[poff + j + 1]
       return 0 if a < 1 || a > nv
-      return 0 unless a == 0 - lits[offs[first_edge + j] + 1]
+      return 0 unless a == 0 - lits[offs[ei] + 1]
+      ei += 1
       j += 1
     row_off[v] = poff + 1
     row_len[v] = nin
@@ -215,8 +227,8 @@ WASSAT_DIRECTED_DENSE_SINGLE_SCC_MIN_AVG_IN = 32
 # Build one conditioned SCC as conflict-cover arrays and count solutions only
 # far enough to distinguish UNSAT, UNIQUE, and MULTI.
 # kind: -2 resource rejection, -1 UNSAT, 0 cap/unsafe, 1 UNIQUE, 2 MULTI.
--> wassat_directed_local(c, lits, row_off, row_len, comp, comp_off,
-                         comp_vars, global_assign, local_of, node_cap) (i64 i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64)
+-> wassat_directed_local(c, lits, row_off, row_len, self_attack, comp, comp_off,
+                         comp_vars, global_assign, local_of, node_cap) (i64 i64[] i64[] i64[] i8[] i64[] i64[] i64[] i8[] i64[] i64)
   begin_at = comp_off[c]
   stop_at = comp_off[c + 1]
   k = stop_at - begin_at
@@ -242,6 +254,9 @@ WASSAT_DIRECTED_DENSE_SINGLE_SCC_MIN_AVG_IN = 32
     lv = local_of[v]
     row_satisfied = false
     width = 1
+    if self_attack[v] != 0
+      degree[lv] += 2
+      nedges += 1
     j = 0
     while j < row_len[v]
       a = lits[row_off[v] + j]
@@ -324,6 +339,11 @@ WASSAT_DIRECTED_DENSE_SINGLE_SCC_MIN_AVG_IN = 32
         j += 1
       rows_len[ri] = lp - row_start
       ri += 1
+    if self_attack[v] != 0
+      adj[adj_cursor[lv]] = lv
+      adj_cursor[lv] += 1
+      adj[adj_cursor[lv]] = lv
+      adj_cursor[lv] += 1
     j = 0
     while j < row_len[v]
       a = lits[row_off[v] + j]
@@ -380,9 +400,10 @@ WASSAT_DIRECTED_DENSE_SINGLE_SCC_MIN_AVG_IN = 32
   lens = formula["flat_lens"] ## i64[]
   row_off = i64[nv + 1]
   row_len = i64[nv + 1]
+  self_attack = i8[nv + 1]
   scan_state = i64[4]
   return miss if wassat_directed_recognize(
-    lits, offs, lens, ncl, nv, row_off, row_len, scan_state
+    lits, offs, lens, ncl, nv, row_off, row_len, self_attack, scan_state
   ) == 0
   nattacks = scan_state[0]
 
@@ -423,6 +444,12 @@ WASSAT_DIRECTED_DENSE_SINGLE_SCC_MIN_AVG_IN = 32
     comp, nv, ncomp, comp_size, comp_off, comp_cursor, comp_vars
   )
   return miss if max_component > WASSAT_DIRECTED_MAX_COMPONENT_VARS
+  if (ncomp == 1 ? max_component >= 350 : max_component >= 650) && nattacks >= nv * 20
+    return {
+      "recognized": true, "status": 0, "model": [],
+      "components": ncomp, "checked": 0, "unique": 0,
+      "multi": 0, "nodes": 0, "forced": 0
+    }
 
   comp_state = i8[ncomp + 1]
   global_assign = i8[nv + 1]
@@ -444,7 +471,7 @@ WASSAT_DIRECTED_DENSE_SINGLE_SCC_MIN_AVG_IN = 32
         allowance = WASSAT_DIRECTED_COMPONENT_NODE_CAP
         allowance = remaining if remaining < allowance
         local = wassat_directed_local(
-          c, lits, row_off, row_len, comp, comp_off, comp_vars,
+          c, lits, row_off, row_len, self_attack, comp, comp_off, comp_vars,
           global_assign, local_of, allowance
         )
         checked += 1

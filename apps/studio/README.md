@@ -35,7 +35,9 @@ under the machine's heavy-job lock and memory guard. Use `--max-frames 400` to k
   `sr`, and authored offsets are milliseconds or frames. Every instant is held in flicks (1/705,600,000 s, exact
   for 24, 23.976, 25, 29.97, 30, 50, 59.94 fps and every common audio rate), so an anchor can add milliseconds and
   frames. Cuts snap with one rule, `frame = floor((flicks + FPF/2) / FPF)` (`Flicks.to_frame`). Timecode is a
-  label on the frame index.
+  label on the frame index. A cut with `"snap": "ceil"` uses the legacy Python renderers' rule instead (a shot starts
+  on the first frame at or after its instant, and its item-local event times count from that frame), so a migrated
+  episode keeps its shot boundaries frame for frame (Profiles in Philosophy: The Upanishadic Sages).
 - **Source vs resolved.** The episode file holds narration lines (gap, `nudge_ms`, `ripple`), shots anchored to a
   line edge or a phrase in it, the start, or another shot's start or end (`at: {ref, edge, phrase, ms, frames}` or
   `{shot, edge, ms, frames}`), cues and markers. Lines and shots resolve lazily, so either may anchor on the other.
@@ -62,7 +64,7 @@ vignette, grain (count, base, mid, optional `blur_var`), jitter, shakes and a ca
 | Kind | Params |
 | --- | --- |
 | `still` | a panel under a camera move from the style's table: zoom moves `{amp: [base, per s, max], focus_k, reverse}` or travelling moves `{z: [z0, z1], x/y: {base: center\|focus\|weight, span: [s0, per s] \| edge: fraction, dir}}`; `fx` (rain, fog, snow, dust/embers, flicker, shake); a `wipe` to a second image at a phrase; a `matte` (the letterbox colour and its overlay elements); timed overlays |
-| `clip` | a still plus `clip`: frame-sequence `parts` (each `{src, first, count}`) joined by `xf`-frame crossfades, played at `speed: [min, max]` to fill the item (+ `add_ms`) from a phrase `at`, with `blend`, a `zoom` curve, a `pre` pull from the still, or a `hold` push on the last frame |
+| `clip` | a still plus `clip`: frame-sequence `parts` (each `{src, first, count}`) joined by `xf`-frame crossfades, played at `speed: [min, max]` to fill the item (+ `add_ms`) from a phrase `at`, with `blend` (or, unblended, `nearest`: the nearest source frame rather than the one at or before), a `zoom` curve, a `pre` pull from the still, or a `hold` push on the last frame |
 | `group` | panes, each `{src, pane: [x, y, w, h], at (phrase), lead_ms, fade_ms, zoom, focus, frame: pane\|picture (+ x), shade: {rows, to}, elements}`, plus a matte |
 | `frames` | a pre-rendered frame sequence (`in` offset) |
 | `program` | a Tungsten program's frames (below) |

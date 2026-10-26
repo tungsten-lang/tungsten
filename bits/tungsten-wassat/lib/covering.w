@@ -358,6 +358,256 @@ WASSAT_COVER_NODE_CAP = 200000
     "unsafe_free": meta[6] == 1
   }
 
+fn wassat_cover_pop64(x) (i64) i64
+  ccall_nobox("__w_bit_ctpop_u64", x) ## i64
+
+fn wassat_cover_ctz64(x) (i64) i64
+  ccall_nobox("__w_bit_cttz_u64", x) ## i64
+
+fn wassat_af_bitset_dfs(dom, out_att, conf, und_stack, need_stack, in_stack,
+                        cand_stack, score_stack, sol_in, meta, depth) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  meta[0] += 1
+  if meta[0] > meta[1]
+    meta[2] = 1
+    return 0 ## i64
+  full32 = 4294967295 ## i64
+  one = 1 ## i64
+  four = 4 ## i64
+  five = 5 ## i64
+  t31 = 31 ## i64
+  base16 = depth << four
+  tz = 0 ## i64
+  v = 0 ## i64
+  v16 = 0 ## i64
+  c = 0 ## i64
+  k = 0 ## i64
+  u = 0 ## i64
+  x = 0 ## i64
+  utz = 0 ## i64
+  uw = 0 ## i64
+  ub = 0 ## i64
+  u16 = 0 ## i64
+  cbase = 0 ## i64
+  ncand = 0 ## i64
+  bv16 = 0 ## i64
+  m = 0 ## i64
+  out_c = 0 ## i64
+  conf_c = 0 ## i64
+  sc = 0 ## i64
+  at = 0 ## i64
+  next16 = 0 ## i64
+  ci = 0 ## i64
+  child = 0 ## i64
+  rem_c = 0 ## i64
+  while true
+    changed = false
+    best_v = -1 ## i64
+    best_cnt = 999999 ## i64
+    i = 0 ## i64
+    while i < 16 && !changed
+      mask = need_stack[base16 + i]
+      while mask != 0 && !changed
+        tz = wassat_cover_ctz64(mask)
+        v = (i << five) + tz
+        mask = mask & (mask - one)
+        v16 = v << four
+        c = 0 ## i64
+        k = 0 ## i64
+        while k < 16
+          c += wassat_cover_pop64(und_stack[base16 + k] & dom[v16 + k])
+          k += one
+        return -1 ## i64 if c == 0
+        if c == 1
+          u = -1 ## i64
+          k = 0 ## i64
+          while k < 16 && u < 0
+            x = und_stack[base16 + k] & dom[v16 + k]
+            if x != 0
+              utz = wassat_cover_ctz64(x)
+              u = (k << five) + utz
+            k += one
+          return -1 ## i64 if u < 0
+          uw = u >> five
+          ub = one << (u & t31)
+          in_stack[base16 + uw] = in_stack[base16 + uw] | ub
+          und_stack[base16 + uw] = und_stack[base16 + uw] & (ub ^ full32)
+          need_stack[base16 + uw] = need_stack[base16 + uw] & (ub ^ full32)
+          u16 = u << four
+          k = 0 ## i64
+          while k < 16
+            und_stack[base16 + k] = und_stack[base16 + k] & (conf[u16 + k] ^ full32)
+            need_stack[base16 + k] = need_stack[base16 + k] & (out_att[u16 + k] ^ full32)
+            k += one
+          changed = true
+          meta[3] += 1
+        elsif c < best_cnt
+          best_cnt = c
+          best_v = v
+      i += one
+    if !changed
+      any_need = false
+      k = 0 ## i64
+      while k < 16
+        if need_stack[base16 + k] != 0
+          any_need = true
+          k = 16 ## i64
+        else
+          k += one
+      unless any_need
+        k = 0 ## i64
+        while k < 16
+          sol_in[k] = in_stack[base16 + k]
+          k += one
+        return 1 ## i64
+      return -1 ## i64 if best_v < 0
+      cbase = depth * (160 ## i64)
+      ncand = 0 ## i64
+      bv16 = best_v << four
+      i = 0 ## i64
+      while i < 16
+        m = dom[bv16 + i] & und_stack[base16 + i]
+        while m != 0
+          utz = wassat_cover_ctz64(m)
+          u = (i << five) + utz
+          m = m & (m - one)
+          u16 = u << four
+          out_c = 0 ## i64
+          conf_c = 0 ## i64
+          k = 0 ## i64
+          while k < 16
+            out_c += wassat_cover_pop64(need_stack[base16 + k] & out_att[u16 + k])
+            conf_c += wassat_cover_pop64(und_stack[base16 + k] & conf[u16 + k])
+            k += one
+          sc = (out_c << four) + conf_c
+          at = ncand
+          while at > 0 && score_stack[cbase + at - one] < sc
+            cand_stack[cbase + at] = cand_stack[cbase + at - one]
+            score_stack[cbase + at] = score_stack[cbase + at - one]
+            at -= one
+          cand_stack[cbase + at] = u
+          score_stack[cbase + at] = sc
+          ncand += one
+        i += one
+      next16 = (depth + one) << four
+      ci = 0 ## i64
+      while ci < ncand
+        u = cand_stack[cbase + ci]
+        u16 = u << four
+        uw = u >> five
+        ub = one << (u & t31)
+        k = 0 ## i64
+        while k < 16
+          in_stack[next16 + k] = in_stack[base16 + k]
+          und_stack[next16 + k] = und_stack[base16 + k] & (conf[u16 + k] ^ full32)
+          need_stack[next16 + k] = need_stack[base16 + k] & (out_att[u16 + k] ^ full32)
+          k += one
+        in_stack[next16 + uw] = in_stack[next16 + uw] | ub
+        und_stack[next16 + uw] = und_stack[next16 + uw] & (ub ^ full32)
+        need_stack[next16 + uw] = need_stack[next16 + uw] & (ub ^ full32)
+        child = wassat_af_bitset_dfs(
+          dom, out_att, conf, und_stack, need_stack, in_stack,
+          cand_stack, score_stack, sol_in, meta, depth + one
+        )
+        return 1 ## i64 if child == 1
+        return 0 ## i64 if child == 0
+        und_stack[base16 + uw] = und_stack[base16 + uw] & (ub ^ full32)
+        rem_c = 0 ## i64
+        k = 0 ## i64
+        while k < 16
+          rem_c += wassat_cover_pop64(und_stack[base16 + k] & dom[bv16 + k])
+          k += one
+        ci = ncand if rem_c <= 1
+        ci += one
+      rem_c = 0 ## i64
+      k = 0 ## i64
+      while k < 16
+        rem_c += wassat_cover_pop64(und_stack[base16 + k] & dom[bv16 + k])
+        k += one
+      return -1 ## i64 if rem_c == 0
+  -1 ## i64
+
+-> wassat_af_bitset_solve(fla, fcs, fcl, ncl, nvars, node_cap) (i64[] i64[] i64[] i64 i64 i64)
+  full32 = 4294967295 ## i64
+  one = 1 ## i64
+  in_att = i64[512 * 16]
+  out_att = i64[512 * 16]
+  conf = i64[512 * 16]
+  dom = i64[512 * 16]
+  self_att = i8[512]
+  pos_seen = i8[512]
+  ci = 0
+  while ci < ncl
+    off = fcs[ci]
+    n = fcl[ci]
+    if n >= 3
+      v = fla[off] - 1
+      if v < 0 || v >= nvars || pos_seen[v] != 0
+        return {"recognized": false, "status": 0, "model": [], "nodes": 0, "forced": 0, "solutions": 0, "unique": false, "multi": false, "unsafe_free": false}
+      pos_seen[v] = 1
+      v16 = v << 4
+      dom[v16 + (v >> 5)] = dom[v16 + (v >> 5)] | (one << (v & 31))
+      j = 1
+      while j < n
+        a = fla[off + j] - 1
+        in_att[v16 + (a >> 5)] = in_att[v16 + (a >> 5)] | (one << (a & 31))
+        out_att[(a << 4) + (v >> 5)] = out_att[(a << 4) + (v >> 5)] | (one << (v & 31))
+        dom[v16 + (a >> 5)] = dom[v16 + (a >> 5)] | (one << (a & 31))
+        j += 1
+    else
+      u = (0 - fla[off]) - 1
+      v = (0 - fla[off + 1]) - 1
+      if u == v
+        self_att[u] = 1
+      else
+        conf[(u << 4) + (v >> 5)] = conf[(u << 4) + (v >> 5)] | (one << (v & 31))
+        conf[(v << 4) + (u >> 5)] = conf[(v << 4) + (u >> 5)] | (one << (u & 31))
+    ci += 1
+  v = 0
+  while v < nvars
+    v16 = v << 4
+    k = 0
+    while k < 16
+      conf[v16 + k] = conf[v16 + k] | in_att[v16 + k] | out_att[v16 + k]
+      k += 1
+    vw = v >> 5
+    vb = one << (v & 31)
+    if (conf[v16 + vw] & vb) != 0
+      self_att[v] = 1
+      conf[v16 + vw] = conf[v16 + vw] & (vb ^ full32)
+      dom[v16 + vw] = dom[v16 + vw] & (vb ^ full32)
+    v += 1
+  und_stack = i64[514 * 16]
+  need_stack = i64[514 * 16]
+  in_stack = i64[514 * 16]
+  cand_stack = i64[514 * 160]
+  score_stack = i64[514 * 160]
+  sol_in = i64[16]
+  meta = i64[4]
+  meta[1] = node_cap
+  v = 0
+  while v < nvars
+    vw = v >> 5
+    vb = one << (v & 31)
+    need_stack[vw] = need_stack[vw] | vb
+    und_stack[vw] = und_stack[vw] | vb if self_att[v] == 0
+    v += 1
+  rc = wassat_af_bitset_dfs(
+    dom, out_att, conf, und_stack, need_stack, in_stack,
+    cand_stack, score_stack, sol_in, meta, 0
+  )
+  model = []
+  if rc == 1
+    v = 0
+    while v < nvars
+      bit = (sol_in[v >> 5] >> (v & 31)) & 1
+      model.push(bit == 1 ? (v + 1) : (0 - (v + 1)))
+      v += 1
+  {
+    "recognized": true, "status": rc, "model": model,
+    "nodes": meta[0], "forced": meta[3], "solutions": rc == 1 ? 1 : 0,
+    "unique": false, "multi": false, "unsafe_free": false
+  }
+
 # Recognize and solve with an explicit solution limit.  Keeping the public
 # one-model wrapper separate avoids imposing enumeration semantics on ordinary
 # callers.  The returned status follows Wassat's convention: 1 SAT, -1 UNSAT,
@@ -421,7 +671,10 @@ WASSAT_COVER_NODE_CAP = 200000
       return miss
     ci += 1
   return miss if nrows == 0 || nedges == 0
-  return miss if nvars >= 350 && nedges >= nvars * 20
+  if nvars >= 350 && nedges >= nvars * 20
+    if nvars <= 512 && nrows == nvars && solution_limit == 1
+      return wassat_af_bitset_solve(fla, fcs, fcl, ncl, nvars, 600000)
+    return miss
 
   row_lits = i64[nlits]
   row_off = i64[nrows + 1]

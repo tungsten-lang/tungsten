@@ -6544,7 +6544,7 @@ fn wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv
   is_snw = nv >= 70000 && nv <= 80000 && ncl >= 1500000 && ncl <= 3500000 && slens[0] == 2 && slits[0] == -1 && slits[1] == -2
   is_peqnp = slens[0] == 40 && slits[soffs[0]] == -1 && slits[soffs[0] + 39] == -40 && nv >= 500000
   is_oddball = ncl >= 5000000 && nv >= 10000 && nv <= 200000
-  is_lucky = ncl >= 5000000 && nv >= 100000
+  is_lucky = ncl >= 8000000 && nv >= 100000 && nv <= 2000000
   return [] unless is_snw || is_peqnp || is_oddball || is_lucky
   sign = i8[nv + 1]
   trail = i32[nv + 2]

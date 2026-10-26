@@ -98,6 +98,12 @@
       else
         run_start = i
         i += 1
+        if sep_b == 44
+          while i + 4 <= n
+            if view[i] > 44 && view[i + 1] > 44 && view[i + 2] > 44 && view[i + 3] > 44
+              i += 4
+            else
+              break
         while i < n
           b2 = view[i]
           if b2 == sep_b || b2 == 10 || b2 == 13 || b2 == 34
@@ -171,6 +177,77 @@
     nil
 
   -> .parse(source, separator = ",")
+    if type(source) == "String" && separator != nil && separator.size == 1 && separator != "\r" && separator != "\n" && separator != "\""
+      s = source ## String
+      if !s.include?("\"")
+        view = ccall("w_string_bytes_view", s) ## u8[]
+        n = view.size ## i64
+        if n == 0
+          return []
+        ptr = ccall_nobox("w_u8_live_data_ptr", view) ## i64
+        sep_b = 44 ## i64
+        if separator != ","
+          sep_view = ccall("w_string_bytes_view", separator ## String) ## u8[]
+          sep_b = sep_view[0] ## i64
+        rows = []
+        row = []
+        cols = 0 ## i64
+        col_i = 0 ## i64
+        field_start = 0 ## i64
+        touched = false
+        i = 0 ## i64
+        while i < n
+          if sep_b == 44
+            while i + 4 <= n
+              if raw_load_u8(ptr, i) > 44 && raw_load_u8(ptr, i + 1) > 44 && raw_load_u8(ptr, i + 2) > 44 && raw_load_u8(ptr, i + 3) > 44
+                i += 4
+              else
+                break
+          while i < n
+            b = raw_load_u8(ptr, i) ## i64
+            if b == sep_b || b == 10 || b == 13
+              break
+            i += 1
+          if i >= n
+            break
+          b = raw_load_u8(ptr, i) ## i64
+          val = s.slice(field_start, i - field_start)
+          if col_i < cols
+            row[col_i] = val
+          else
+            row.push(val)
+          col_i += 1
+          if b == sep_b
+            touched = true
+            i += 1
+          else
+            if col_i < cols
+              row = row.take(col_i)
+            elsif cols == 0
+              cols = col_i
+            rows.push(row)
+            col_i = 0
+            touched = false
+            if b == 13 && i + 1 < n && raw_load_u8(ptr, i + 1) == 10
+              i += 2
+            else
+              i += 1
+            if i < n && cols > 0
+              row = Array.new(cols)
+            else
+              row = []
+          field_start = i
+        if field_start < n || touched || col_i > 0
+          val = s.slice(field_start, n - field_start)
+          if col_i < cols
+            row[col_i] = val
+          else
+            row.push(val)
+          col_i += 1
+          if col_i < cols
+            row = row.take(col_i)
+          rows.push(row)
+        return rows
     rows = []
     CSV.each_row(source, separator) -> (row)
       rows.push(row)

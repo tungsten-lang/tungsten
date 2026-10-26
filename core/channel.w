@@ -170,7 +170,7 @@
     ccall("w_chan_recv", self)
 
   -> recv
-    receive()
+    ccall("w_chan_recv", self)
 
   -> receive_result
     raw = ccall("w_chan_recv_result", self)
@@ -190,9 +190,9 @@
 
   -> each(&)
     while true
-      result = receive_result()
-      return self if result.closed?()
-      &(result.value())
+      raw = ccall("w_chan_recv_result", self)
+      return self if !raw[1]
+      &(raw[0])
 
   -> close
     ccall("w_chan_close", self)

@@ -489,8 +489,7 @@ use portfolio
           raise "internal error: MDP model does not satisfy the input formula"
         wassat_discard_output(wrat_out, wrat_final)
         wassat_discard_output(drat_out, drat_final)
-        mtext = wassat_sat_text(mdp["model"])
-        wassat_status(quiet, mtext.slice(0, mtext.size - 1))
+        wassat_print_sat_model(mdp["model"], quiet)
         wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified MDP model)")
         wassat_status(quiet, "c mdp bits=[mdp["bits"]], samples=[mdp["samples"]], disagreements=[mdp["disagreements"]]/[mdp["tolerated"]], trials=[mdp["trials"]]")
         wassat_status(quiet, "c conflicts: [budget_used], decisions: [mdp["decisions"]], props: [mdp["props"]]")

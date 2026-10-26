@@ -763,6 +763,11 @@
       decls_out = decls_out + "declare i64 @w_eq(i64, i64) nounwind\n"
     decls_out = decls_out + streq2_fast_helper_ir() + "\n"
 
+  if ccall_needed.has_key?("__w_switch_canonical_fast")
+    if decls_out.index("@w_switch_canonical(") == nil
+      decls_out = decls_out + "declare i64 @w_switch_canonical(i64) nounwind\n"
+    decls_out = decls_out + switch_canonical_fast_helper_ir() + "\n"
+
   # Typed String#[]: the private wrapper guards the memory(none) SSO leaf;
   # only its slab/heap/rope fallback calls the conservatively-declared runtime
   # entry. Never transfer the leaf's attributes to w_string_idx_raw itself.
@@ -897,7 +902,7 @@
       # memory(read) lets LICM hoist/CSE `arr.size` out of loops. These come only
       # through the auto-declare path (no declare_fn entry), so tag them here.
       tail_attrs = "nounwind"
-      if iname in ("w_big_array_size" "w_small_array_size")
+      if iname in ("w_big_array_size" "w_small_array_size" "w_node_kind_sym" "w_wire_kind_sym")
         tail_attrs = "nounwind willreturn memory(read)"
       decls_out = decls_out + "declare i64 @" + iname + "(" + params.join(", ") + ") " + tail_attrs + "\n"
       declared_names[iname] = true

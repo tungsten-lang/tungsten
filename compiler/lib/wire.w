@@ -13,9 +13,9 @@ use wire_constructors
   wire_schema_kind_id(op)
 
 -> wire_kind(instruction)
-  id = ccall_nobox("w_wire_kind_extern", instruction)
-  if id != 0
-    return wire_schema_kind_symbol(id)
+  sym = ccall_rawargs("w_wire_kind_sym", instruction, wire_kind_symbols)
+  if sym != nil
+    return sym
   instruction[:op]
 
 -> wire_get(instruction, field)
@@ -507,6 +507,19 @@ wire_block_record_fields = [:label, :instructions]
         elbl = wire_get(inst, :else_label)
         if elbl != nil && redirect[elbl] != nil
           wire_set(inst, :else_label, redirect[elbl])
+      elsif op == :switch_i64
+        dlbl = wire_get(inst, :default_label)
+        if dlbl != nil && redirect[dlbl] != nil
+          wire_set(inst, :default_label, redirect[dlbl])
+        cases = wire_get(inst, :cases)
+        if cases != nil
+          ci = 0
+          while ci < wire_sequence_size(cases)
+            c = wire_sequence_get(cases, ci)
+            clbl = c[:label]
+            if clbl != nil && redirect[clbl] != nil
+              c[:label] = redirect[clbl]
+            ci += 1
       elsif op == :phi_ssa
         # Phi incoming labels
         incoming = wire_get(inst, :incoming)
@@ -523,7 +536,7 @@ wire_block_record_fields = [:label, :instructions]
   new_blocks = []
   bi = 0
   while bi < blocks.size()
-    if blocks[bi][:instructions].size() > 0
+    if blocks[bi][:instructions].size() > 0 || redirect[blocks[bi][:label]] == nil
       new_blocks.push(blocks[bi])
     bi += 1
   f[:blocks] = new_blocks
@@ -938,7 +951,7 @@ wire_block_record_fields = [:label, :instructions]
         wire_set(result, :cond, rep)
         return result
     return inst
-  if op == :ret_i64 || op == :icmp_ne_zero || op == :not_i1 || op == :nanbox_bool || op == :truthy_inline || op == :free_value || op == :ptr_to_i64 || op == :i64_to_ptr
+  if op == :ret_i64 || op == :switch_i64 || op == :icmp_ne_zero || op == :not_i1 || op == :nanbox_bool || op == :truthy_inline || op == :free_value || op == :ptr_to_i64 || op == :i64_to_ptr
     val = wire_get(inst, :value)
     if val != nil
       rep = subst[val]

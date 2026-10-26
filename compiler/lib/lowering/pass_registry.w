@@ -419,6 +419,7 @@
 
 -> materialize_bindings(ctx)
   wfn = ctx[:func]
+  terminated = block_terminated(wfn)
   bindings = ctx[:bindings]
   names = bindings.keys()
   preserved = {}
@@ -446,13 +447,14 @@
         elsif is_machine_float_type(ctx[:var_types][name])
           slot_type = float_slot_type(ctx[:var_types][name])
         ptr = ensure_var_slot(wfn, name, slot_type)
-        if is_raw_int_storage_type(ctx[:var_types][name])
-          # Binding may already be raw (from ## i64 param unboxing) — store directly
-          emit_wire_dynamic_2(wfn, machine_store_op(ctx[:var_types][name]), :ptr, ptr, :value, reg)
-        elsif is_machine_float_type(ctx[:var_types][name])
-          emit_wire_dynamic_2(wfn, float_store_op(ctx[:var_types][name]), :ptr, ptr, :value, reg)
-        else
-          emit_wire_store_i64(wfn, ptr, reg)
+        if !terminated
+          if is_raw_int_storage_type(ctx[:var_types][name])
+            # Binding may already be raw (from ## i64 param unboxing) — store directly
+            emit_wire_dynamic_2(wfn, machine_store_op(ctx[:var_types][name]), :ptr, ptr, :value, reg)
+          elsif is_machine_float_type(ctx[:var_types][name])
+            emit_wire_dynamic_2(wfn, float_store_op(ctx[:var_types][name]), :ptr, ptr, :value, reg)
+          else
+            emit_wire_store_i64(wfn, ptr, reg)
     i += 1
   ctx[:bindings] = preserved
 
@@ -509,6 +511,10 @@
     mod[:host_cache_consts] = {}
   cached = mod[:host_cache_consts][name]
   return cached if cached != nil
+  fast_v = ccall_nobox("w_host_cache_bytes_extern", name)
+  if fast_v != nil && fast_v > 0
+    mod[:host_cache_consts][name] = fast_v
+    return fast_v
   cmd = "sysctl -n hw.perflevel0.l1dcachesize 2>/dev/null || sysctl -n hw.l1dcachesize 2>/dev/null || getconf LEVEL1_DCACHE_SIZE 2>/dev/null"
   fallback = 131072
   if name == "l2_cache_bytes"

@@ -2,10 +2,13 @@
 # reviewable while preserving one render_instruction entry point.
 
 -> render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false, volatile_slots = false)
+  rendered = render_runtime_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots)
+  if rendered != nil
+    return rendered
   rendered = render_numeric_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots)
   if rendered != nil
     return rendered
-  render_runtime_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots)
+  "; UNKNOWN WIRE OP: " + wire_kind(inst).to_s()
 
 # Append common fixed-shape instructions straight into the function buffer.
 # Complex instructions retain the ordinary renderer below; this fast path is
@@ -36,7 +39,7 @@
   out << wire_get(inst, :rhs)
   true
 
--> append_instruction_direct(out, inst, phi_label_redirects = nil)
+-> append_instruction_direct(out, inst, phi_label_redirects = nil, string_wvs = nil, used_ptr_ids = nil)
   op = wire_kind(inst)
 
   # `case` lowers to equality checks, not a jump table. Keep the direct
@@ -100,11 +103,103 @@
     elsif wire_get(inst, :prof) == :unlikely
       out << ", !prof !31412"
     true
+  when :call_loc_set_col
+    if used_ptr_ids == nil
+      return false
+    fid = wire_get(inst, :file_str_id)
+    used_ptr_ids[fid] = true
+    tp = wire_get(inst, :temp_ptr)
+    out << tp
+    out << " = getelementptr inbounds \["
+    out << wire_get(inst, :file_byte_len).to_s()
+    out << " x i8], ptr @.str."
+    out << fid.to_s()
+    out << ", i32 0, i32 0\n  call void @__w_loc_set_col(ptr "
+    out << tp
+    out << ", i32 "
+    out << wire_get(inst, :line).to_s()
+    out << ", i32 "
+    out << wire_get(inst, :col).to_s()
+    out << ")"
+    true
   when :truthy_inline
     out << wire_get(inst, :temp)
     out << " = icmp ugt i64 "
     out << wire_get(inst, :value)
     out << ", 1"
+    true
+  when :phi_ssa
+    incoming = wire_get(inst, :incoming)
+    out << wire_get(inst, :temp)
+    out << " = phi i64 "
+    ii = 0
+    n_inc = wire_sequence_size(incoming)
+    while ii < n_inc
+      if ii > 0
+        out << ", "
+      label = redirect_phi_label(wire_sequence_get(incoming, ii + 1), phi_label_redirects)
+      out << "\[ "
+      out << wire_sequence_get(incoming, ii)
+      out << ", %"
+      out << label
+      out << " ]"
+      ii += 2
+    true
+  when :string_i64
+    sid = wire_get(inst, :string_id)
+    swv = nil
+    if string_wvs != nil
+      swv = string_wvs[sid]
+    if swv != nil
+      out << wire_get(inst, :temp)
+      out << " = or i64 0, "
+      out << llvm_wvalue_literal(swv)
+      return true
+    if used_ptr_ids == nil
+      return false
+    used_ptr_ids[sid] = true
+    tp = wire_get(inst, :temp_ptr)
+    out << tp
+    out << " = getelementptr inbounds \["
+    out << wire_get(inst, :byte_len).to_s()
+    out << " x i8], ptr @.str."
+    out << sid.to_s()
+    out << ", i32 0, i32 0\n  "
+    out << wire_get(inst, :temp)
+    out << " = call i64 @w_string(ptr "
+    out << tp
+    out << ")"
+    true
+  when :symbol_i64
+    sid = wire_get(inst, :string_id)
+    swv = nil
+    if string_wvs != nil
+      swv = string_wvs[sid]
+    if swv != nil
+      out << wire_get(inst, :temp)
+      out << " = or i64 "
+      out << llvm_wvalue_literal(swv)
+      out << ", 1"
+      return true
+    if used_ptr_ids == nil
+      return false
+    used_ptr_ids[sid] = true
+    tp = wire_get(inst, :temp_ptr)
+    t = wire_get(inst, :temp)
+    out << tp
+    out << " = getelementptr inbounds \["
+    out << wire_get(inst, :byte_len).to_s()
+    out << " x i8], ptr @.str."
+    out << sid.to_s()
+    out << ", i32 0, i32 0\n  "
+    out << t
+    out << ".s = call i64 @w_string(ptr "
+    out << tp
+    out << ")\n  "
+    out << t
+    out << " = call i64 @w_str_to_sym(i64 "
+    out << t
+    out << ".s)"
     true
   when :gep_array
     out << wire_get(inst, :temp)

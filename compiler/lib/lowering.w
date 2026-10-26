@@ -417,6 +417,7 @@ use lowering/definitions
         # op that consumed the call result (w_int + w_add per index expression
         # in the flip-graph walkers).
         pmap = {}
+        populate_definition_var_types(m, pmap, mod)
         pts2 = m.param_types
         m_params = m.params
         if pts2 != nil && m_params != nil
@@ -1057,8 +1058,10 @@ use lowering/definitions
   # populate_definition_var_types when each body is lowered below.
   collect_param_type_observations(mod, ast.expressions, core_expressions, mod[:core_top_level_static_types])
   if core_expressions != nil
+    infer_return_types_fixed_point(mod, user_inferable)
     preregister_top_level_raw_abis(mod, user_expressions)
   else
+    infer_return_types_fixed_point(mod, inferable_methods)
     preregister_top_level_raw_abis(mod, ast.expressions)
 
   # ARGV use is discovered by the combined runtime-use walk below. Build the
@@ -1070,6 +1073,8 @@ use lowering/definitions
   mod[:functions].push(main_fn)
 
   var_types = {}
+  main_assign_counts = local_assignment_counts(ast.expressions)
+  main_raw_cands = raw_int_candidate_map(ast.expressions, var_types, mod)
   ctx = {
     mod: mod,
     func: main_fn,
@@ -1078,10 +1083,10 @@ use lowering/definitions
     source_path: source_path,
     bindings: {},
     unboxed_vars: {},
-    local_assignment_counts: local_assignment_counts(ast.expressions),
+    local_assignment_counts: main_assign_counts,
     straight_line_local_assignments: straight_line_local_assignments(ast.expressions),
-    raw_int_candidates: raw_int_candidate_map(ast.expressions, var_types, mod),
-    mut_accumulators: mut_accumulator_candidates(ast.expressions),
+    raw_int_candidates: main_raw_cands,
+    mut_accumulators: mut_accumulator_candidates(ast.expressions, main_raw_cands, var_types, main_assign_counts),
     method_name: nil,
     is_class_method: false,
     is_block: false,

@@ -23,9 +23,19 @@ use core/integer
     Rational.new(value, 1)
 
   -> numerator
+    if (($value >> 45) & 0x7FFFF) == 0x7FFF2
+      rn = (($value >> 20) & 0x1FFFFFF) ## i64
+      if (rn & 0x1000000) != 0
+        rn -= 0x2000000
+      tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+      return wvalue_from_bits((tag | (rn & 0xFFFFFFFFFFFF)) ## i64)
     ccall("w_rational_numerator", self)
 
   -> denominator
+    if (($value >> 45) & 0x7FFFF) == 0x7FFF2
+      rd = ($value & 0xFFFFF) ## i64
+      tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+      return wvalue_from_bits((tag | rd) ## i64)
     ccall("w_rational_denominator", self)
 
   -> to_r

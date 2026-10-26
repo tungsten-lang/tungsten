@@ -345,7 +345,7 @@
   last_t = ast_kind(last)
   # If last is a statement (return, puts, while, etc.), lower as statement — no result to store
   # (:begin left OFF this list 2026-07-22: begin/rescue is a value expression)
-  if last_t in (:return :puts :print :raise :while :method_def :fn_def :class_def)
+  if last_t in (:return :break :next :recase :puts :print :raise :while :method_def :fn_def :class_def :multi_assign :on_guard :go :with)
     lower_statement(ctx, last)
   elsif result_machine_type != nil
     # Lower under the destination type from the outset. Calling the generic
@@ -1953,10 +1953,56 @@
   k
 
 -> case_switch_simple_body?(body)
-  if body == nil || body.size() != 1
+  if body == nil || body.size() == 0 || body.size() > 8
     return false
-  t = ast_kind(body[0])
-  t != :if && t != :while && t != :with && t != :parallel_with && t != :case && t != :case_value && t != :begin && t != :method_def && t != :fn_def && t != :class_def
+  i = 0
+  while i < body.size()
+    t = ast_kind(body[i])
+    if t in (:while :with :parallel_with :case :case_value :begin :method_def :fn_def :class_def)
+      return false
+    i += 1
+  true
+
+-> case_switch_stmt_equiv?(a, b)
+  if licm_expr_equiv?(a, b)
+    return true
+  if a == nil || b == nil || !is_ast_node?(a) || !is_ast_node?(b)
+    return false
+  ka = ast_kind(a)
+  kb = ast_kind(b)
+  if ka != kb
+    return false
+  case ka
+  when :nil_lit, :break, :next
+    return true
+  when :return, :raise
+    return case_switch_stmt_equiv?(a.value, b.value)
+  when :assign
+    return case_switch_stmt_equiv?(a.target, b.target) && case_switch_stmt_equiv?(a.value, b.value)
+  when :compound_assign
+    return a.op == b.op && case_switch_stmt_equiv?(a.target, b.target) && case_switch_stmt_equiv?(a.value, b.value)
+  when :binary_op, :and, :or
+    return (ka != :binary_op || a.op == b.op) && case_switch_stmt_equiv?(a.left, b.left) && case_switch_stmt_equiv?(a.right, b.right)
+  when :unary_op, :not
+    return (ka == :not || a.op == b.op) && case_switch_stmt_equiv?(a.operand, b.operand)
+  when :if
+    if (a.elsif_clauses != nil && a.elsif_clauses.size() > 0) || (b.elsif_clauses != nil && b.elsif_clauses.size() > 0)
+      return false
+    return case_switch_stmt_equiv?(a.condition, b.condition) && case_switch_body_equiv?(a.then_body, b.then_body) && case_switch_body_equiv?(a.else_body, b.else_body)
+  else
+    false
+
+-> case_switch_body_equiv?(b1, b2)
+  if b1 == nil && b2 == nil
+    return true
+  if b1 == nil || b2 == nil || b1.size() != b2.size()
+    return false
+  i = 0
+  while i < b1.size()
+    if !case_switch_stmt_equiv?(b1[i], b2[i])
+      return false
+    i += 1
+  true
 
 # True when every arm pattern is an integer (or char) literal. Used
 # to relax the case-switch gate the same way case_switch_interned_kind
@@ -2106,7 +2152,14 @@
 
   i = 0
   while i < cases.size()
-    cases[i][:label] = next_label(wfn, "case.arm")
+    shared_label = nil
+    if i > 0 && case_switch_body_equiv?(cases[i][:arm].body, cases[i - 1][:arm].body)
+      shared_label = cases[i - 1][:label]
+    if shared_label != nil
+      cases[i][:label] = shared_label
+      cases[i][:shared_body] = true
+    else
+      cases[i][:label] = next_label(wfn, "case.arm")
     i += 1
 
   # is_symbol tells the emitter whether to OR in the `| 1` symbol
@@ -2120,14 +2173,15 @@
   i = 0
   while i < cases.size()
     c = cases[i]
-    start_block(wfn, c[:label])
-    body = c[:arm].body
-    if body != nil && body.size() > 0
-      lower_if_expr_body(ctx, wfn, body, result_ptr)
-    materialize_bindings(ctx)
-    if !block_terminated(wfn)
-      emit_wire_br(wfn, end_label, nil, nil)
-      end_reachable = true
+    if c[:shared_body] != true
+      start_block(wfn, c[:label])
+      body = c[:arm].body
+      if body != nil && body.size() > 0
+        lower_if_expr_body(ctx, wfn, body, result_ptr)
+      materialize_bindings(ctx)
+      if !block_terminated(wfn)
+        emit_wire_br(wfn, end_label, nil, nil)
+        end_reachable = true
     i += 1
 
   start_block(wfn, default_label)
@@ -2243,7 +2297,7 @@
   last = body[body.size() - 1]
   last_t = ast_kind(last)
   # (:begin left OFF this list 2026-07-22: begin/rescue is a value expression)
-  if last_t in (:return :puts :print :raise :while :method_def :fn_def :class_def)
+  if last_t in (:return :break :next :recase :puts :print :raise :while :method_def :fn_def :class_def :multi_assign :on_guard :go :with)
     lower_statement(ctx, last)
     return typed_value(:i64, w_nil.to_s())
   lower_expression(ctx, last)

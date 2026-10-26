@@ -10,6 +10,7 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/cache"
 export TUNGSTEN_CACHE_DIR="$TMP/cache"
 export TUNGSTEN_INCREMENTAL=0
+export TUNGSTEN_CORE_LOWER_CACHE=0
 export TUNGSTEN_FRONTEND_DISK_CACHE=0
 export TUNGSTEN_FUNCTION_EMIT_CACHE=0
 
@@ -41,8 +42,8 @@ if grep -q "function emit workers" "$TMP/release-1.log"; then
   exit 1
 fi
 
-# Debug builds deliberately stay serial and retain physical backtrace frames,
-# even when parallel emission is requested.
+# Debug builds use parallel function emission too while retaining physical
+# backtrace frames and bit-identical .ll / .sidemap output.
 for mode in serial requested; do
   parallel=0
   if [[ "$mode" == requested ]]; then
@@ -57,10 +58,11 @@ for mode in serial requested; do
 done
 cmp "$TMP/debug-serial.ll" "$TMP/debug-requested.ll"
 cmp "$TMP/debug-serial.sidemap" "$TMP/debug-requested.sidemap"
-if grep -q "function emit workers" "$TMP/debug-requested.log"; then
-  echo "debug build unexpectedly used parallel function emission" >&2
+if grep -q "function emit workers" "$TMP/debug-serial.log"; then
+  echo "serial debug build unexpectedly used parallel function emission" >&2
   exit 1
 fi
+grep -q "function emit workers: 8 deterministic threads" "$TMP/debug-requested.log"
 rg -q 'noinline "disable-tail-calls"="true"' "$TMP/debug-requested.ll"
 rg -q 'uwtable "frame-pointer"="all"' "$TMP/debug-requested.ll"
 

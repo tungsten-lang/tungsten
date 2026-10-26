@@ -1403,13 +1403,23 @@
     candidates = next_candidates
     candidate_names = candidates.keys()
 
--> find_reassigned_params(body, param_names)
+-> find_reassigned_params(body, param_names, assign_counts = nil)
   if body == nil || param_names == nil || param_names.size() == 0
     return []
+  n_param_names = param_names.size()
+  if assign_counts != nil
+    any_assigned = false
+    i = 0
+    while i < n_param_names
+      if assign_counts[param_names[i]] != nil
+        any_assigned = true
+        break
+      i += 1
+    if !any_assigned
+      return []
   assigned = {}
   scan_assigns_for_params(body, assigned)
   result = []
-  n_param_names = param_names.size()
   i = 0
   while i < n_param_names
     pname = param_names[i]
@@ -1742,7 +1752,7 @@
   if !is_ast_node?(node)
     return nil
   kind = ast_kind(node)
-  if kind in (:fn_def :method_def :class_def :module_def :trait_def :gpu_kernel_def)
+  if kind in (:var :int :float :string :symbol :nil :nil_lit :bool :boolean :ivar :cvar :gvar :constant :class_ref :self :next :break :field_decl :view_decl :namespace_decl :ivars_decl :fn_def :method_def :class_def :module_def :trait_def :gpu_kernel_def)
     return nil
   if kind == :assign || kind == :compound_assign
     target = node.target
@@ -1753,6 +1763,31 @@
         old = 0
       counts[tname] = old + 1
     count_local_assignments(node.value, counts)
+    return nil
+  if kind == :call
+    count_local_assignments(node.receiver, counts)
+    count_local_assignments(node.args, counts)
+    count_local_assignments(node.block, counts)
+    return nil
+  if kind == :binary_op || kind == :and || kind == :or
+    count_local_assignments(node.left, counts)
+    count_local_assignments(node.right, counts)
+    return nil
+  if kind == :unary_op || kind == :not
+    count_local_assignments(node.operand, counts)
+    return nil
+  if kind == :while
+    count_local_assignments(node.condition, counts)
+    count_local_assignments(node.body, counts)
+    return nil
+  if kind == :return || kind == :puts || kind == :print || kind == :raise
+    count_local_assignments(node.value, counts)
+    return nil
+  if kind == :block
+    count_local_assignments(node.body, counts)
+    return nil
+  if kind == :array
+    count_local_assignments(node.elements, counts)
     return nil
   if kind == :multi_assign
     targets = node.targets
@@ -1780,7 +1815,20 @@
     count_local_assignments(node.else_body, counts)
     return nil
   if kind == :with || kind == :parallel_with
-    count_local_assignments(node.bindings, counts)
+    wbindings = node.bindings
+    if wbindings != nil
+      n_wb = wbindings.size()
+      wi = 0
+      while wi < n_wb
+        wb = wbindings[wi]
+        if wb != nil && wb[0] != nil && is_ast_node?(wb[0]) && ast_kind(wb[0]) == :var && wb[0].name != nil
+          wname = wb[0].name
+          old = counts[wname]
+          if old == nil
+            old = 0
+          counts[wname] = old + 1
+        wi += 1
+    count_local_assignments(wbindings, counts)
     count_local_assignments(node.body, counts)
     return nil
   if kind == :hash_literal
@@ -2153,45 +2201,53 @@
     pi_walk(expr_ci, visible_local, visible_candidates, mod, nil)
     ci += 1
 
-  # Inductive verification for direct self-recursive calls: if all external
-  # call sites pass a consistent type tuple, verify that under that parameter
-  # typing every self-call in the function body preserves the same types.
+  # Interprocedural + inductive verification for calls inside candidate fns:
+  # seed each caller with its tentative observed param types across 2 rounds so
+  # call chains (caller -> helper) and self-recursive calls propagate concrete
+  # parameter types regardless of source definition order.
   self_calls = mod[:pi_self_calls]
   if self_calls != nil
     skeys = self_calls.keys()
-    ski = 0
-    while ski < skeys.size()
-      snm = skeys[ski]
-      ski += 1
-      def_node = candidates[snm]
-      obs = mod[:observed_param_types][snm]
-      if def_node != nil && param_infer_bailed[snm] != true && obs != nil && def_node.params != nil && obs.size() == def_node.params.size()
-        param_names = []
-        pi = 0
-        while pi < def_node.params.size()
-          param_names.push(param_runtime_name(def_node.params[pi]))
-          pi += 1
-        reassigned = find_reassigned_params(def_node.body, param_names)
-        reassigned_set = {}
-        ri = 0
-        while ri < reassigned.size()
-          reassigned_set[reassigned[ri]] = true
-          ri += 1
-        inner = {}
-        pi = 0
-        while pi < param_names.size()
-          pname = param_names[pi]
-          if reassigned_set[pname] != true
-            t_seed = pi_tentative_param_type(obs[pi])
-            if t_seed != nil
-              inner[pname] = t_seed
-          pi += 1
-        pi_collect_local_types(def_node.body, inner, mod)
-        sc_list = self_calls[snm]
-        sci = 0
-        while sci < sc_list.size()
-          pi_record_call(def_node, sc_list[sci], inner, mod)
-          sci += 1
+    round = 0
+    while round < 2
+      ski = 0
+      while ski < skeys.size()
+        snm = skeys[ski]
+        ski += 1
+        def_node = candidates[snm]
+        obs = mod[:observed_param_types][snm]
+        if def_node != nil && def_node.params != nil
+          param_names = []
+          pi = 0
+          while pi < def_node.params.size()
+            param_names.push(param_runtime_name(def_node.params[pi]))
+            pi += 1
+          reassigned = find_reassigned_params(def_node.body, param_names)
+          reassigned_set = {}
+          ri = 0
+          while ri < reassigned.size()
+            reassigned_set[reassigned[ri]] = true
+            ri += 1
+          inner = {}
+          if param_infer_bailed[snm] != true && obs != nil && obs.size() == def_node.params.size()
+            pi = 0
+            while pi < param_names.size()
+              pname = param_names[pi]
+              if reassigned_set[pname] != true
+                t_seed = pi_tentative_param_type(obs[pi])
+                if t_seed != nil
+                  inner[pname] = t_seed
+              pi += 1
+          pi_collect_local_types(def_node.body, inner, mod)
+          sc_list = self_calls[snm]
+          sci = 0
+          while sci < sc_list.size()
+            sc_entry = sc_list[sci]
+            callee_node = candidates[sc_entry[0]]
+            if callee_node != nil && (round == 1 || inner.size() > 0 || def_node.params.size() == 0)
+              pi_record_call(callee_node, sc_entry[1], inner, mod)
+            sci += 1
+      round += 1
   mod[:pi_self_calls] = nil
   nil
 
@@ -2239,12 +2295,12 @@
   if k == :call && node.receiver == nil
     nname = node.name
     if nname != nil && candidates[nname] != nil
-      if enclosing_fn != nil && nname == enclosing_fn
-        sc = mod[:pi_self_calls][nname]
+      if enclosing_fn != nil
+        sc = mod[:pi_self_calls][enclosing_fn]
         if sc == nil
           sc = []
-          mod[:pi_self_calls][nname] = sc
-        sc.push(node)
+          mod[:pi_self_calls][enclosing_fn] = sc
+        sc.push([nname, node])
       else
         pi_record_call(candidates[nname], node, local, mod)
   if k == :with
@@ -3297,11 +3353,46 @@
     i += 1
   nil
 
--> mut_accumulator_candidates(body, raw_int_candidates = nil, declared_types = nil)
+-> has_mut_accumulator_seed?(body, raw_int_candidates, declared_types, assign_counts)
+  if body == nil
+    return false
+  n_body = body.size()
+  i = 0
+  while i < n_body
+    st = body[i]
+    if st != nil && is_ast_node?(st)
+      k = ast_kind(st)
+      if k == :assign
+        st_tgt = st.target
+        if st_tgt != nil && is_ast_node?(st_tgt) && ast_kind(st_tgt) == :var
+          name = st_tgt.name
+          if (raw_int_candidates == nil || raw_int_candidates[name] != true) && (declared_types == nil || declared_types[name] == nil || is_bigint_type(declared_types[name])) && (assign_counts == nil || (assign_counts[name] != nil && assign_counts[name] > 1))
+            if mut_literal_leaves_only?(st.value)
+              return true
+      elsif k == :while
+        if has_mut_accumulator_seed?(st.body, raw_int_candidates, declared_types, assign_counts)
+          return true
+      elsif k == :if
+        if has_mut_accumulator_seed?(st.then_body, raw_int_candidates, declared_types, assign_counts) || has_mut_accumulator_seed?(st.else_body, raw_int_candidates, declared_types, assign_counts)
+          return true
+        elsifs = st.elsif_clauses
+        if elsifs != nil
+          n_elsifs = elsifs.size()
+          j = 0
+          while j < n_elsifs
+            if has_mut_accumulator_seed?(elsifs[j][1], raw_int_candidates, declared_types, assign_counts)
+              return true
+            j += 1
+    i += 1
+  false
+
+-> mut_accumulator_candidates(body, raw_int_candidates = nil, declared_types = nil, assign_counts = nil)
   # Reproducible performance control: production/default compilation keeps
   # mutate-if-unique enabled, while the BigInt loop A/B can force ordinary
   # immutable result churn from the same source program.
   if env("TUNGSTEN_BIGINT_MUTATE_UNIQUE") == "0"
+    return {}
+  if !has_mut_accumulator_seed?(body, raw_int_candidates, declared_types, assign_counts)
     return {}
   assigned = {}
   dead = {}
@@ -3357,7 +3448,7 @@
 
 -> sum_chunk_var(node, mut_accumulators, declared_types, mod)
   nbody = node.body
-  if mut_accumulators == nil || nbody == nil
+  if mut_accumulators == nil || mut_accumulators.size() == 0 || nbody == nil
     return nil
   # gather accumulation counts per var over direct body statements
   counts = {}

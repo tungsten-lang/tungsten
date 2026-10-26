@@ -1613,7 +1613,7 @@
     "; scope " + op.to_s()
 
   else
-    "; UNKNOWN WIRE OP: " + op.to_s()
+    nil
 
 # -- Helpers --
 

@@ -94,7 +94,7 @@ use wire
         ci = 0
         while ci < wire_sequence_size(cases)
           target_idx = label_map[wire_sequence_get(cases, ci)[:label]]
-          if target_idx != nil
+          if target_idx != nil && !succs[i].include?(target_idx)
             succs[i].push(target_idx)
             preds[target_idx].push(i)
           ci += 1

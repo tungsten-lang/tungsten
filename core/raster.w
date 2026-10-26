@@ -479,10 +479,10 @@
   8
 
 -> png_put32(buf, at, v) (u8[] i64 i64) i64
-  buf[at] = (v / 16777216) % 256
-  buf[at + 1] = (v / 65536) % 256
-  buf[at + 2] = (v / 256) % 256
-  buf[at + 3] = v % 256
+  buf[at] = (v >> 24) & 255
+  buf[at + 1] = (v >> 16) & 255
+  buf[at + 2] = (v >> 8) & 255
+  buf[at + 3] = v & 255
   at + 4
 
 -> png_crc_table(t) (i64[]) i64
@@ -491,17 +491,17 @@
     c = n
     k = 0
     while k < 8
-      if c % 2 == 1
-        c = 3988292384 ^ (c / 2)
+      if (c & 1) == 1
+        c = 3988292384 ^ (c >> 1)
       else
-        c = c / 2
+        c = c >> 1
       k += 1
     t[n] = c
     n += 1
   0
 
 -> png_crc_byte(t, crc, b) (i64[] i64 i64) i64
-  t[(crc ^ b) % 256] ^ (crc / 256)
+  t[(crc ^ b) & 255] ^ (crc >> 8)
 
 # Writes length, type, data and CRC; returns the new position.
 -> png_chunk(out, pos, kind, data, n, t) (u8[] i64 i64 u8[] i64 i64[]) i64
@@ -511,15 +511,15 @@
   k = 0
   while k < 4
     ob = out[pos + 4 + k] ## i64
-    crc = png_crc_byte(t, crc, ob)
+    crc = t[(crc ^ ob) & 255] ^ (crc >> 8)
     k += 1
   i = 0
   while i < n
-    out[p] = data[i]
     db = data[i] ## i64
-    crc = png_crc_byte(t, crc, db)
-    p += 1
+    out[p + i] = db
+    crc = t[(crc ^ db) & 255] ^ (crc >> 8)
     i += 1
+  p += n
   png_put32(out, p, crc ^ 4294967295)
 
 -> png_abs(v) (i64) i64
@@ -530,9 +530,15 @@
 
 -> png_paeth(a, b, c) (i64 i64 i64) i64
   p = a + b - c
-  pa = png_abs(p - a)
-  pb = png_abs(p - b)
-  pc = png_abs(p - c)
+  pa = p - a
+  if pa < 0
+    pa = 0 - pa
+  pb = p - b
+  if pb < 0
+    pb = 0 - pb
+  pc = p - c
+  if pc < 0
+    pc = 0 - pc
   if pa <= pb && pa <= pc
     a
   elsif pb <= pc
@@ -542,85 +548,97 @@
 
 # Chooses per row the filter (none/sub/up/paeth) with the least absolute sum.
 -> png_filter_rows(px, w, h, raw) (i64[] i64 i64 u8[]) i64
-  stride = w * 3 + 1
-  cur = i64[w * 3]
-  up = i64[w * 3]
+  w3 = w * 3
+  stride = w3 + 1
+  cur = i64[w3]
+  up = i64[w3]
   y = 0
   while y < h
+    yw = y * w
     x = 0
     while x < w
-      c = px[y * w + x]
-      cur[3 * x] = (c / 65536) % 256
-      cur[3 * x + 1] = (c / 256) % 256
-      cur[3 * x + 2] = c % 256
+      c = px[yw + x]
+      x3 = 3 * x
+      cur[x3] = (c >> 16) & 255
+      cur[x3 + 1] = (c >> 8) & 255
+      cur[x3 + 2] = c & 255
       x += 1
-    best = 0
-    best_cost = 0
-    f = 0
-    while f < 4
-      cost = 0
-      i = 0
-      while i < w * 3
-        a = 0
-        if i >= 3
-          a = cur[i - 3]
-        b = up[i]
-        cc = 0
-        if i >= 3
-          cc = up[i - 3]
-        v = cur[i]
-        if f == 1
-          v = (cur[i] - a + 256) % 256
-        elsif f == 2
-          v = (cur[i] - b + 256) % 256
-        elsif f == 3
-          v = (cur[i] - png_paeth(a, b, cc) + 256) % 256
-        if v < 128
-          cost += v
-        else
-          cost += 256 - v
-        i += 1
-      if f == 0 || cost < best_cost
-        best = f
-        best_cost = cost
-      f += 1
-    base = y * stride
-    raw[base] = best
-    if best == 3
-      raw[base] = 4
+    cost0 = 0
+    cost1 = 0
+    cost2 = 0
+    cost3 = 0
     i = 0
-    while i < w * 3
+    while i < w3
       a = 0
-      if i >= 3
-        a = cur[i - 3]
-      b = up[i]
       cc = 0
       if i >= 3
+        a = cur[i - 3]
         cc = up[i - 3]
-      v = cur[i]
-      if best == 1
-        v = (cur[i] - a + 256) % 256
-      elsif best == 2
-        v = (cur[i] - b + 256) % 256
-      elsif best == 3
-        v = (cur[i] - png_paeth(a, b, cc) + 256) % 256
-      raw[base + 1 + i] = v
+      b = up[i]
+      ci = cur[i]
+      v0 = ci
+      v1 = (ci - a) & 255
+      v2 = (ci - b) & 255
+      v3 = (ci - png_paeth(a, b, cc)) & 255
+      cost0 += v0 < 128 ? v0 : 256 - v0
+      cost1 += v1 < 128 ? v1 : 256 - v1
+      cost2 += v2 < 128 ? v2 : 256 - v2
+      cost3 += v3 < 128 ? v3 : 256 - v3
       i += 1
+    best = 0
+    best_cost = cost0
+    if cost1 < best_cost
+      best = 1
+      best_cost = cost1
+    if cost2 < best_cost
+      best = 2
+      best_cost = cost2
+    if cost3 < best_cost
+      best = 3
+      best_cost = cost3
+    base = y * stride
+    raw[base] = best == 3 ? 4 : best
     i = 0
-    while i < w * 3
-      up[i] = cur[i]
-      i += 1
+    if best == 0
+      while i < w3
+        raw[base + 1 + i] = cur[i]
+        up[i] = cur[i]
+        i += 1
+    elsif best == 1
+      while i < w3
+        a = i >= 3 ? cur[i - 3] : 0
+        raw[base + 1 + i] = (cur[i] - a) & 255
+        up[i] = cur[i]
+        i += 1
+    elsif best == 2
+      while i < w3
+        raw[base + 1 + i] = (cur[i] - up[i]) & 255
+        up[i] = cur[i]
+        i += 1
+    else
+      while i < w3
+        a = 0
+        cc = 0
+        if i >= 3
+          a = cur[i - 3]
+          cc = up[i - 3]
+        raw[base + 1 + i] = (cur[i] - png_paeth(a, up[i], cc)) & 255
+        i += 1
+      i = 0
+      while i < w3
+        up[i] = cur[i]
+        i += 1
     y += 1
   0
 
 # Bit writer state lives in st: st[0] = bit buffer, st[1] = bit count, st[2] = byte position.
 -> png_bits(out, st, value, nbits) (u8[] i64[] i64 i64) i64
-  buf = st[0] + value * (2 ** st[1])
+  buf = st[0] | (value << st[1])
   cnt = st[1] + nbits
   pos = st[2]
   while cnt >= 8
-    out[pos] = buf % 256
-    buf = buf / 256
+    out[pos] = buf & 255
+    buf = buf >> 8
     cnt -= 8
     pos += 1
   st[0] = buf
@@ -632,7 +650,7 @@
   r = 0
   i = 0
   while i < len
-    r = r * 2 + (code / (2 ** i)) % 2
+    r = (r << 1) | ((code >> i) & 1)
     i += 1
   r
 
@@ -676,12 +694,37 @@
   dbase = i64[30]
   dextra = i64[30]
   png_fill_tables(lbase, lextra, dbase, dextra)
+  lit_code = i64[288]
+  lit_bits = i64[288]
+  s = 0
+  while s < 144
+    lit_code[s] = png_rev(48 + s, 8)
+    lit_bits[s] = 8
+    s += 1
+  while s < 256
+    lit_code[s] = png_rev(400 + s - 144, 9)
+    lit_bits[s] = 9
+    s += 1
+  while s < 280
+    lit_code[s] = png_rev(s - 256, 7)
+    lit_bits[s] = 7
+    s += 1
+  while s < 288
+    lit_code[s] = png_rev(192 + s - 280, 8)
+    lit_bits[s] = 8
+    s += 1
+  dist_rev = i64[30]
+  s = 0
+  while s < 30
+    dist_rev[s] = png_rev(s, 5)
+    s += 1
   i = 0
   while i < 32768
     head[i] = -1
     i += 1
-  png_bits(out, st, 1, 1)
-  png_bits(out, st, 1, 2)
+  buf = 3
+  cnt = 3
+  pos = 2
   i = 0
   while i < n
     best_len = 0
@@ -690,23 +733,51 @@
       s0 = src[i] ## i64
       s1 = src[i + 1] ## i64
       s2 = src[i + 2] ## i64
-      hsh = ((s0 * 1024) ^ (s1 * 32) ^ s2) % 32768
+      hsh = ((s0 << 10) ^ (s1 << 5) ^ s2) & 32767
       cand = head[hsh]
       chain = 0
+      max_len = n - i
+      if max_len > 258
+        max_len = 258
       while cand >= 0 && chain < 48 && i - cand <= 32768
-        len = 0
-        while len < 258 && i + len < n && src[cand + len] == src[i + len]
-          len += 1
-        if len > best_len
-          best_len = len
-          best_dist = i - cand
-        cand = prev[cand % 32768]
+        if src[cand + best_len] == src[i + best_len] && src[cand] == s0 && src[cand + 1] == s1
+          len = 2
+          while len < max_len && src[cand + len] == src[i + len]
+            len += 1
+          if len > best_len
+            best_len = len
+            best_dist = i - cand
+            if best_len == max_len
+              break
+        cand = prev[cand & 32767]
         chain += 1
-      prev[i % 32768] = head[hsh]
+      prev[i & 32767] = head[hsh]
       head[hsh] = i
     if best_len >= 3
-      png_length(out, st, best_len, lbase, lextra)
-      png_distance(out, st, best_dist, dbase, dextra)
+      lcode = 28
+      while lbase[lcode] > best_len
+        lcode -= 1
+      lsym = 257 + lcode
+      buf = buf | (lit_code[lsym] << cnt)
+      cnt += lit_bits[lsym]
+      le = lextra[lcode]
+      if le > 0
+        buf = buf | ((best_len - lbase[lcode]) << cnt)
+        cnt += le
+      dcode = 29
+      while dbase[dcode] > best_dist
+        dcode -= 1
+      buf = buf | (dist_rev[dcode] << cnt)
+      cnt += 5
+      de = dextra[dcode]
+      if de > 0
+        buf = buf | ((best_dist - dbase[dcode]) << cnt)
+        cnt += de
+      while cnt >= 8
+        out[pos] = buf & 255
+        buf = buf >> 8
+        cnt -= 8
+        pos += 1
       k = 1
       while k < best_len
         j = i + k
@@ -714,28 +785,45 @@
           t0 = src[j] ## i64
           t1 = src[j + 1] ## i64
           t2 = src[j + 2] ## i64
-          h2 = ((t0 * 1024) ^ (t1 * 32) ^ t2) % 32768
-          prev[j % 32768] = head[h2]
+          h2 = ((t0 << 10) ^ (t1 << 5) ^ t2) & 32767
+          prev[j & 32767] = head[h2]
           head[h2] = j
         k += 1
       i += best_len
     else
       lit = src[i] ## i64
-      png_lit(out, st, lit)
+      buf = buf | (lit_code[lit] << cnt)
+      cnt += lit_bits[lit]
+      while cnt >= 8
+        out[pos] = buf & 255
+        buf = buf >> 8
+        cnt -= 8
+        pos += 1
       i += 1
-  png_lit(out, st, 256)
-  if st[1] > 0
-    png_bits(out, st, 0, 8 - st[1])
-  pos = st[2]
+  buf = buf | (lit_code[256] << cnt)
+  cnt += lit_bits[256]
+  if (cnt & 7) != 0
+    cnt += 8 - (cnt & 7)
+  while cnt >= 8
+    out[pos] = buf & 255
+    buf = buf >> 8
+    cnt -= 8
+    pos += 1
   a = 1
   b = 0
   i = 0
   while i < n
-    sv = src[i] ## i64
-    a = (a + sv) % 65521
-    b = (b + a) % 65521
-    i += 1
-  png_put32(out, pos, b * 65536 + a)
+    lim = i + 5552
+    if lim > n
+      lim = n
+    while i < lim
+      sv = src[i] ## i64
+      a += sv
+      b += a
+      i += 1
+    a = a % 65521
+    b = b % 65521
+  png_put32(out, pos, (b << 16) | a)
 
 -> png_fill_tables(lbase, lextra, dbase, dextra) (i64[] i64[] i64[] i64[]) i64
   i = 0
@@ -743,10 +831,10 @@
   while i < 28
     e = 0
     if i >= 8
-      e = (i - 4) / 4
+      e = (i - 4) >> 2
     lbase[i] = v
     lextra[i] = e
-    v += 2 ** e
+    v += 1 << e
     i += 1
   lbase[28] = 258
   lextra[28] = 0
@@ -755,10 +843,10 @@
   while i < 30
     e = 0
     if i >= 4
-      e = (i - 2) / 2
+      e = (i - 2) >> 1
     dbase[i] = v
     dextra[i] = e
-    v += 2 ** e
+    v += 1 << e
     i += 1
   0
 

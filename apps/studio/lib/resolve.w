@@ -429,6 +429,7 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
       deps.push(asset_sha(s["src"]))
       p = {"src" => s["src"], "count" => a["count"]}
       p["in"] = s["in"] if s["in"] != nil
+      replace_param(s, p, deps)
     elsif kind == "program"
       die("program shot " + s["id"] + " has no source hash (Project.prepare_programs)") if s["source_sha"] == nil
       # frames the program renders: its own count, or round(duration x rate) (the legacy scene runner's count), so
@@ -442,6 +443,7 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
       deps.push(s["source_sha"])
       get(s, "deps", []).each ->(d)
         deps.push(asset_sha(d))
+      replace_param(s, p, deps)
     elsif kind == "card"
       p = {"bg" => s["bg"], "elements" => s["elements"]}
     elsif kind == "group"
@@ -468,6 +470,31 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
     recipe = hash_of(rh)
     {"id" => s["id"], "kind" => kind, "params" => p, "trans_in" => get(s, "trans_in", {"kind" => "cut", "frames" => 0}),
      "recipe" => recipe, "deps" => deps}
+
+  # A frame sequence's (or program's) background plate, swapped pixel for pixel: "replace": {"match": asset, "with":
+  # asset} draws, wherever a frame's pixel equals the match image's exactly (the 8-bit background its renderer drew,
+  # untouched by any content), the with image's pixel instead (the same background computed in higher precision and
+  # dithered). Both images enter the recipe.
+  -> replace_param(s, p, deps)
+    rp = s["replace"]
+    return nil if rp == nil
+    deps.push(asset_sha(rp["match"]))
+    deps.push(asset_sha(rp["with"]))
+    p["replace"] = {"match" => rp["match"], "with" => rp["with"]}
+    nil
+
+  # The encoder quality of a segment: the cut's encoder "quality_by_kind" ({kind: quality}), the highest over the
+  # items the segment shows, else nil (the cut's one quality). Flat synthetic pictures (animations, cards) band at
+  # qualities that suit grainy stills: VideoToolbox H.264 at 0.70 cut a dark radial gradient into 16 x 16 blocks.
+  -> segment_quality(ents)
+    qk = get(get(@cut, "encoder", {}), "quality_by_kind", nil)
+    return nil if qk == nil
+    q = to_f(get(get(@cut, "encoder", {}), "quality", ~0.75))
+    ents.each ->(e)
+      it = entry_item(e)
+      kq = qk[it["kind"]]
+      q = to_f(kq) if kq != nil && to_f(kq) > q
+    q
 
   # ------------------------------------------------------------------------------------------ audio, subtitles
   -> audio_lines
@@ -663,6 +690,10 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
           it = entry_item(e)
           parts.push([it["recipe"], s - it["f0"], e[2]])
           names.push(it["id"])
-        out.push({"f0" => s, "n" => n, "key" => hash_of(parts), "items" => names})
+        q = segment_quality(x[2])
+        parts.push(["q", fixed6(q)]) if q != nil
+        sg = {"f0" => s, "n" => n, "key" => hash_of(parts), "items" => names}
+        sg["q"] = q if q != nil
+        out.push(sg)
         s += n
     out

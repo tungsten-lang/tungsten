@@ -13,6 +13,10 @@
 #      recipe hash over kind, parameters, dependency hashes and the kind's renderer version.
 #   4. intervals: the edit decision table, constant active sets; segments: <= 48-frame runs aligned to each
 #      interval's start, keyed by what they show in item-local time.
+#   A cut with "snap": "ceil" (the legacy Python renderers' rule) starts each shot at the first frame at or after its
+#   instant instead of the nearest, and measures the item-local times of its events (phrases, shakes, overlays)
+#   from that first frame, which is where the renderers' item-local clock (k / fps) starts. The duration a camera
+#   move spans stays the exact anchor-to-anchor time.
 
 SEG_MAX = 48
 # The compositor (transitions, fades, packing) is part of every frame key.
@@ -119,6 +123,21 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
 
   -> samples_of_fl(fl)
     fl / (FLICKS / @sr)
+
+  # The first frame of a shot that starts at fl: the nearest frame (round half up), or with the cut's "snap":
+  # "ceil" the first frame at or after fl.
+  -> cut_frame(fl)
+    return snap_flicks(fl, @num, @den) if get(@cut, "snap", "nearest") != "ceil"
+    a = fl * @num
+    b = @den * FLICKS
+    q = a / b
+    q -= 1 if a % b != 0 && a < 0
+    q += 1 if a - q * b > 0
+    q
+
+  # Flicks rounded to whole milliseconds (half up).
+  -> round_ms(fl)
+    ms_of(fl + FL_MS / 2)
 
   # ------------------------------------------------------------------------------------------ 1. lines
   -> line(id)
@@ -280,10 +299,12 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
       s = shots[i]
       t0 = starts[i]
       t1 = i + 1 < shots.size ? starts[i + 1] : end_fl
-      f0 = snap_flicks(t0, @num, @den)
-      f1 = i + 1 < shots.size ? snap_flicks(t1, @num, @den) : @frames
+      f0 = cut_frame(t0)
+      f1 = i + 1 < shots.size ? cut_frame(t1) : @frames
       die("shot " + s["id"] + " is shorter than a frame") if f1 <= f0
-      item = item_for(s, t0, t1, shakes, overlays)
+      org = t0
+      org = f0 * @fpf if get(@cut, "snap", "nearest") == "ceil"
+      item = item_for(s, t0, t1, shakes, overlays, org)
       item["f0"] = f0
       item["f1"] = f1
       item["t0_ms"] = ms_of(t0)
@@ -349,26 +370,29 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
 
   # Shakes and timed overlays near an item, in item-local ms (they may fall before 0 or after dur: the item is
   # also drawn as the outgoing side of the next item's dissolve).
-  -> near(p, kind, t0, t1, shakes, overlays)
+  -> near(p, kind, t0, t1, shakes, overlays, org)
     sh = []
     shakes.each ->(t)
-      sh.push(ms_of(t - t0)) if t >= t0 - 1000 * FL_MS && t < t1 + 2000 * FL_MS
+      sh.push(ms_of(t - org)) if t >= t0 - 1000 * FL_MS && t < t1 + 2000 * FL_MS
     p["shakes"] = sh
     su = []
     overlays.each ->(x)
       c = x[2]
       if get(c, "on", ["still", "clip"]).include?(kind)
         if x[0] + x[1] * FL_MS > t0 && x[0] < t1 + 2000 * FL_MS
-          su.push([ms_of(x[0] - t0), x[1], {"el" => c["el"], "reveal_ms" => get(c, "reveal_ms", 0), "fade_ms" => get(c, "fade_ms", 0),
+          su.push([ms_of(x[0] - org), x[1], {"el" => c["el"], "reveal_ms" => get(c, "reveal_ms", 0), "fade_ms" => get(c, "fade_ms", 0),
                                            "stroke_min_alpha" => get(c, "stroke_min_alpha", 0)}])
     p["overlays"] = su
     p
 
-  -> item_for(s, t0f, t1f, shakes, overlays)
+  -> item_for(s, t0f, t1f, shakes, overlays, org)
     kind = s["kind"]
     t0 = ms_of(t0f)
     t1 = ms_of(t1f)
     dur = t1 - t0
+    # phrase times are found relative to t0; shift them to the item-local origin (0 unless the cut snaps "ceil").
+    # A clip's playing time (dur - at + add_ms) still ends at the shot's exact end: add_ms takes the same shift.
+    osh = round_ms(t0f - org)
     p = {"dur_ms" => dur}
     deps = []
     if kind == "still" || kind == "clip"
@@ -382,6 +406,7 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
         w = s["wipe"]
         deps.push(asset_sha(w["src"]))
         at = phrase_local(get(w["at"], "phrase", nil), t0, t1, get(w, "default_ms", 6000))
+        at += osh if get(w["at"], "phrase", nil) != nil
         p["wipe"] = {"src" => w["src"], "at_ms" => at, "ms" => w["ms"]}
       if s["clip"] != nil
         c = s["clip"]
@@ -391,11 +416,13 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
           deps.push(asset_sha(pt["src"]))
           parts.push({"src" => pt["src"], "first" => get(pt, "first", 0), "count" => get(pt, "count", ca["count"] - get(pt, "first", 0))})
         at = 0
-        at = phrase_local(c["at"]["phrase"], t0, t1, 0) if c["at"] != nil
+        at = phrase_local(c["at"]["phrase"], t0, t1, 0) + osh if c["at"] != nil
         p["clip"] = {"parts" => parts, "xf" => get(c, "xf", 0), "fps" => get(c, "fps", @num / @den), "at_ms" => at,
-                     "speed" => c["speed"], "add_ms" => get(c, "add_ms", 0), "blend" => get(c, "blend", true),
+                     "speed" => c["speed"], "add_ms" => get(c, "add_ms", 0) + osh, "blend" => get(c, "blend", true),
                      "pre" => c["pre"], "zoom" => c["zoom"], "hold" => c["hold"]}
-      near(p, kind, t0f, t1f, shakes, overlays)
+        # "nearest": unblended playback shows the nearest source frame (the default shows the one at or before)
+        p["clip"]["nearest"] = true if get(c, "nearest", false)
+      near(p, kind, t0f, t1f, shakes, overlays, org)
     elsif kind == "frames"
       # a frame sequence shows frame k at local frame k: its duration is not part of what it draws
       a = asset(s["src"])
@@ -422,7 +449,7 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
       s["panes"].each ->(ch)
         deps.push(asset_sha(ch["src"]))
         at = 0
-        at = phrase_local(ch["at"]["phrase"], t0, t1, get(ch, "default_ms", 0)) if ch["at"] != nil
+        at = phrase_local(ch["at"]["phrase"], t0, t1, get(ch, "default_ms", 0)) + osh if ch["at"] != nil
         q = {}
         ch.keys.each ->(k)
           q[k] = ch[k] if k != "at" && k != "default_ms"

@@ -585,6 +585,12 @@ use grade
       k0 = pos.floor.to_i
       k1 = [n - 1, k0 + 1].min
       wgt = pos - k0
+      if get(clip, "nearest", false)
+        # the nearest source frame, never a blend of two
+        k0 = (pos + ~0.5).floor.to_i
+        k0 = n - 1 if k0 > n - 1
+        k1 = k0
+        wgt = ~0.0
       zm = clip["zoom"]
       e = ease(clamp01((lt - at) / avail))
       z = to_f(zm["z0"]) + to_f(zm["dz"]) * e

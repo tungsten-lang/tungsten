@@ -10,9 +10,41 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #include <time.h>
 
 extern char **environ;
+
+static __attribute__((noinline)) int64_t tc_host_cache_bytes_extern(TcValue arg) {
+  int64_t val = 0;
+#ifdef __APPLE__
+  if (tc_kind(arg) == TC_VAL_STRING) {
+    size_t nlen = tc_str_len(arg);
+    const char *nptr = tc_str_bytes_only(arg);
+    if (nlen == 15 && memcmp(nptr, "l1d_cache_bytes", 15) == 0) {
+      int64_t v = 0; size_t len = sizeof(v);
+      if (sysctlbyname("hw.perflevel0.l1dcachesize", &v, &len, NULL, 0) == 0 && v > 0) val = v;
+      else { len = sizeof(v); if (sysctlbyname("hw.l1dcachesize", &v, &len, NULL, 0) == 0 && v > 0) val = v; }
+    } else if (nlen == 14 && memcmp(nptr, "l2_cache_bytes", 14) == 0) {
+      int64_t v = 0; size_t len = sizeof(v);
+      if (sysctlbyname("hw.perflevel0.l2cachesize", &v, &len, NULL, 0) == 0 && v > 0) val = v;
+      else { len = sizeof(v); if (sysctlbyname("hw.l2cachesize", &v, &len, NULL, 0) == 0 && v > 0) val = v; }
+    } else if (nlen == 11 && memcmp(nptr, "cpus_per_l2", 11) == 0) {
+      int64_t v = 0; size_t len = sizeof(v);
+      if (sysctlbyname("hw.perflevel0.cpusperl2", &v, &len, NULL, 0) == 0 && v > 0) val = v;
+      else {
+        uint64_t cfg[8] = {0}; len = sizeof(cfg);
+        if (sysctlbyname("hw.cacheconfig", cfg, &len, NULL, 0) == 0 && cfg[2] > 0) val = (int64_t)cfg[2];
+      }
+    }
+  }
+#else
+  (void)arg;
+#endif
+  return val;
+}
 
 /* Forward declarations from node_arena.c — the C VM-side slab-AST
  * helpers that ccall_nobox dispatches to in vm_call_body.inc. */

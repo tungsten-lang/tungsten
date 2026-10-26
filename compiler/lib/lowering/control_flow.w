@@ -1956,11 +1956,6 @@
   if body == nil || body.size() != 1
     return false
   t = ast_kind(body[0])
-  # :return and :raise both terminate their block cleanly — lower_if_expr_body
-  # calls lower_statement on them, which emits `ret i64` / the raise path, and
-  # the block is marked terminated so the result-ptr store is skipped. Allowing
-  # them here enables switch_i64 for the hot dispatch functions in pass_registry
-  # (lower_statement / lower_expression) whose arms are all `return lower_X(…)`.
   t != :if && t != :while && t != :with && t != :parallel_with && t != :case && t != :case_value && t != :begin && t != :method_def && t != :fn_def && t != :class_def
 
 # True when every arm pattern is an integer (or char) literal. Used
@@ -2100,10 +2095,10 @@
     subj_boxed = ensure_i64_value(wfn, subj_tv)
     # Canonicalize: slab-stored/heap short strings and symbols carry
     # different WValue bits than the SSO literal keys baked into the
-    # switch; w_switch_canonical repacks ≤5-byte content to SSO bits
-    # (longer content already matches by slab id).
+    # switch; __w_switch_canonical_fast handles inline/slab in registers
+    # and falls back to w_switch_canonical for heap/rope values.
     subj_raw = next_temp(wfn)
-    emit_wire_call_direct_i64(wfn, nil, [subj_boxed], nil, nil, "w_switch_canonical", nil, nil, subj_raw)
+    emit_wire_call_direct_i64(wfn, nil, [subj_boxed], nil, nil, "__w_switch_canonical_fast", nil, nil, subj_raw)
   else
     subj_raw = ensure_raw_machine_int(wfn, subj_tv, :i64, subj_type)
   default_label = next_label(wfn, "case.default")
@@ -2118,8 +2113,10 @@
   # bit when resolving medium-length string_id keys. SSO-5 keys
   # already have the bit baked into their literal value, so they
   # don't need this flag.
+  materialize_bindings(ctx)
   emit_wire_switch_i64(wfn, cases, default_label, symbol_switch, subj_raw)
 
+  end_reachable = false
   i = 0
   while i < cases.size()
     c = cases[i]
@@ -2130,6 +2127,7 @@
     materialize_bindings(ctx)
     if !block_terminated(wfn)
       emit_wire_br(wfn, end_label, nil, nil)
+      end_reachable = true
     i += 1
 
   start_block(wfn, default_label)
@@ -2138,7 +2136,10 @@
   materialize_bindings(ctx)
   if !block_terminated(wfn)
     emit_wire_br(wfn, end_label, nil, nil)
+    end_reachable = true
 
+  if !end_reachable
+    return typed_value(:i64, w_nil.to_s())
   start_block(wfn, end_label)
   result = next_temp(wfn)
   emit_wire_load_i64(wfn, result_ptr, result)

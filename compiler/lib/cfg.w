@@ -396,7 +396,7 @@ use wire
               if type(arg) == "String" && arg.byte_at(1) == 118 && promotable[arg] == true
                 promotable[arg] = false
               ai += 1
-        elsif op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :string_i64 || op == :symbol_i64 || op == :call_loc_set_col
+        elsif op == :br || op == :cond_br || op == :switch_i64 || op == :ret_i64 || op == :ret_void || op == :string_i64 || op == :symbol_i64 || op == :call_loc_set_col
           ii += 1
           next
         elsif op == :setjmp || op == :add_i48_checked || op == :sub_i48_checked || op == :mul_i48_checked

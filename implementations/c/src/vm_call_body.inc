@@ -554,6 +554,8 @@
               result = w_wire_field_store(args[1], args[2], args[3]);
             } else if (fn_len == 18 && memcmp(fn, "w_wire_kind_extern", 18) == 0 && argc == 2) {
               result = int_value(w_wire_kind_extern(args[1]));
+            } else if (fn_len == 25 && memcmp(fn, "w_host_cache_bytes_extern", 25) == 0 && argc == 2) {
+              result = int_value(tc_host_cache_bytes_extern(args[1]));
             } else if (fn_len == 16 && memcmp(fn, "w_is_wire_extern", 16) == 0 && argc == 2) {
               result = int_value(w_is_wire_extern(args[1]));
             } else if (fn_len == 18 && memcmp(fn, "w_wire_store_reset", 18) == 0 && argc == 2) {

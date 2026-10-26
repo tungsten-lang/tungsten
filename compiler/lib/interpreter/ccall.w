@@ -957,6 +957,10 @@
       if args.size() != 2
         raise "w_string_first_byte expects one argument"
       return ccall("w_int", ccall_nobox("w_string_first_byte", args[1]))
+    when "w_host_cache_bytes_extern"
+      if args.size() != 2
+        raise "w_host_cache_bytes_extern expects one argument"
+      return ccall("w_int", ccall_nobox("w_host_cache_bytes_extern", args[1]))
     when "w_prime_test_i64"
       if args.size() != 2
         raise "w_prime_test_i64 expects one argument"

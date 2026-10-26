@@ -2406,6 +2406,8 @@ WValue __w_cpu_count(void);
 WValue __w_l1d_cache_bytes(void);
 WValue __w_l2_cache_bytes(void);
 WValue __w_cpus_per_l2(void);
+int64_t w_host_cache_bytes_extern(WValue name_wv);
+WValue w_wire_kind_sym(WValue wire, WValue table);
 
 /* ---- Monotonic clock ---- */
 WValue __w_clock_ms(void);

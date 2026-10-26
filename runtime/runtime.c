@@ -23478,6 +23478,18 @@ int64_t w_wire_kind_extern(WValue wire) {
     return (int64_t)w_wire_kind(wire);
 }
 
+WValue w_wire_kind_sym(WValue wire, WValue table) {
+    if (__builtin_expect(w_is_wire(wire), 1)) {
+        uint32_t id = w_wire_kind(wire);
+        if (__builtin_expect(id > 0 && w_is_array(table), 1)) {
+            WArray *a = w_as_array(table);
+            if (__builtin_expect(id < a->size, 1))
+                return a->slots[a->start + id];
+        }
+    }
+    return W_NIL;
+}
+
 int64_t w_is_wire_extern(WValue value) { return w_is_wire(value) ? 1 : 0; }
 
 int64_t w_wire_store_reset(int64_t reserved) {
@@ -23716,6 +23728,12 @@ int64_t w_is_ast_node_full(WValue x, WValue node_sym) {
 WValue w_node_kind_sym(WValue node, WValue table) {
     int kind_id = w_node_kind(node);
     if (kind_id < 0 || kind_id > (int)W_AST_KIND_MAX) return W_NIL;
+    if (__builtin_expect(w_is_array(table), 1)) {
+        WArray *a = w_as_array(table);
+        if (__builtin_expect((uint32_t)kind_id < a->size, 1))
+            return a->slots[a->start + (uint32_t)kind_id];
+        return W_NIL;
+    }
     return w_array_get(table, w_int((int64_t)kind_id));
 }
 
@@ -39618,8 +39636,28 @@ static size_t w_ascii_rtrim_len(const char *str, size_t len) {
     return end;
 }
 
-static inline const char *w_mem_search(const char *hay, size_t hay_len,
-                                       const char *needle, size_t needle_len) {
+static inline __attribute__((always_inline)) int w_needle_match_tail(
+    const char *h, const char *needle, size_t needle_len) {
+    if (needle_len <= 6) {
+        if (needle_len >= 5) {
+            uint32_t a, b;
+            memcpy(&a, h + 1, 4);
+            memcpy(&b, needle + 1, 4);
+            return a == b;
+        }
+        if (needle_len == 4) {
+            uint16_t a, b;
+            memcpy(&a, h + 1, 2);
+            memcpy(&b, needle + 1, 2);
+            return a == b;
+        }
+        return needle_len == 2 || h[1] == needle[1];
+    }
+    return w_bytes_equal_fast((const uint8_t *)(h + 1), (const uint8_t *)(needle + 1), needle_len - 2);
+}
+
+static inline __attribute__((always_inline)) const char *w_mem_search(
+    const char *hay, size_t hay_len, const char *needle, size_t needle_len) {
     if (needle_len == 0) return hay;
     if (needle_len > hay_len) return NULL;
     if (needle_len == 1) {
@@ -39634,43 +39672,35 @@ static inline const char *w_mem_search(const char *hay, size_t hay_len,
     if (limit >= 16) {
         uint8x16_t v_first = vdupq_n_u8(first);
         uint8x16_t v_last = vdupq_n_u8(last);
+        size_t end16 = limit - 16;
         if (limit >= 64) {
-            while (i + 32 <= limit) {
+            while (i + 64 <= limit) {
                 uint8x16_t b0_a = vld1q_u8((const uint8_t *)hay + i);
                 uint8x16_t b1_a = vld1q_u8((const uint8_t *)hay + i + needle_len - 1);
                 uint8x16_t b0_b = vld1q_u8((const uint8_t *)hay + i + 16);
                 uint8x16_t b1_b = vld1q_u8((const uint8_t *)hay + i + 16 + needle_len - 1);
+                uint8x16_t b0_c = vld1q_u8((const uint8_t *)hay + i + 32);
+                uint8x16_t b1_c = vld1q_u8((const uint8_t *)hay + i + 32 + needle_len - 1);
+                uint8x16_t b0_d = vld1q_u8((const uint8_t *)hay + i + 48);
+                uint8x16_t b1_d = vld1q_u8((const uint8_t *)hay + i + 48 + needle_len - 1);
                 uint8x16_t eq_a = vandq_u8(vceqq_u8(b0_a, v_first), vceqq_u8(b1_a, v_last));
                 uint8x16_t eq_b = vandq_u8(vceqq_u8(b0_b, v_first), vceqq_u8(b1_b, v_last));
-                if (__builtin_expect(vmaxvq_u8(vorrq_u8(eq_a, eq_b)) != 0, 0)) {
-                    uint64_t ma = vget_lane_u64(
-                        vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq_a), 4)), 0);
-                    while (ma != 0) {
-                        int lane = __builtin_ctzll(ma) >> 2;
-                        if (needle_len == 2 ||
-                            (needle_len == 3 ? hay[i + lane + 1] == needle[1]
-                                             : w_bytes_equal_fast((const uint8_t *)(hay + i + lane + 1),
-                                                                  (const uint8_t *)(needle + 1), needle_len - 2)))
-                            return hay + i + lane;
-                        ma &= ~(0xFULL << (lane << 2));
+                uint8x16_t eq_c = vandq_u8(vceqq_u8(b0_c, v_first), vceqq_u8(b1_c, v_last));
+                uint8x16_t eq_d = vandq_u8(vceqq_u8(b0_d, v_first), vceqq_u8(b1_d, v_last));
+                uint8x16_t or_ab = vorrq_u8(eq_a, eq_b);
+                uint8x16_t or_cd = vorrq_u8(eq_c, eq_d);
+                if (__builtin_expect(vmaxvq_u8(vorrq_u8(or_ab, or_cd)) != 0, 0)) {
+                    if (vmaxvq_u8(or_ab) == 0) {
+                        i += 32;
+                        if (vmaxvq_u8(eq_c) == 0) i += 16;
+                    } else {
+                        if (vmaxvq_u8(eq_a) == 0) i += 16;
                     }
-                    size_t ib = i + 16;
-                    uint64_t mb = vget_lane_u64(
-                        vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq_b), 4)), 0);
-                    while (mb != 0) {
-                        int lane = __builtin_ctzll(mb) >> 2;
-                        if (needle_len == 2 ||
-                            (needle_len == 3 ? hay[ib + lane + 1] == needle[1]
-                                             : w_bytes_equal_fast((const uint8_t *)(hay + ib + lane + 1),
-                                                                  (const uint8_t *)(needle + 1), needle_len - 2)))
-                            return hay + ib + lane;
-                        mb &= ~(0xFULL << (lane << 2));
-                    }
+                    break;
                 }
-                i += 32;
+                i += 64;
             }
         }
-        size_t end16 = limit - 16;
         while (i <= end16) {
             uint8x16_t b0 = vld1q_u8((const uint8_t *)hay + i);
             uint8x16_t b1 = vld1q_u8((const uint8_t *)hay + i + needle_len - 1);
@@ -39680,22 +39710,35 @@ static inline const char *w_mem_search(const char *hay, size_t hay_len,
                     vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
                 while (m != 0) {
                     int lane = __builtin_ctzll(m) >> 2;
-                    if (needle_len == 2 ||
-                        (needle_len == 3 ? hay[i + lane + 1] == needle[1]
-                                         : w_bytes_equal_fast((const uint8_t *)(hay + i + lane + 1),
-                                                              (const uint8_t *)(needle + 1), needle_len - 2)))
+                    if (w_needle_match_tail(hay + i + lane, needle, needle_len))
                         return hay + i + lane;
                     m &= ~(0xFULL << (lane << 2));
                 }
             }
             i += 16;
         }
+        if (i < limit) {
+            i = limit - 16;
+            uint8x16_t b0 = vld1q_u8((const uint8_t *)hay + i);
+            uint8x16_t b1 = vld1q_u8((const uint8_t *)hay + i + needle_len - 1);
+            uint8x16_t eq = vandq_u8(vceqq_u8(b0, v_first), vceqq_u8(b1, v_last));
+            if (vmaxvq_u8(eq) != 0) {
+                uint64_t m = vget_lane_u64(
+                    vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
+                while (m != 0) {
+                    int lane = __builtin_ctzll(m) >> 2;
+                    if (w_needle_match_tail(hay + i + lane, needle, needle_len))
+                        return hay + i + lane;
+                    m &= ~(0xFULL << (lane << 2));
+                }
+            }
+        }
+        return NULL;
     }
 #endif
     for (; i < limit; i++) {
         if ((uint8_t)hay[i] == first && (uint8_t)hay[i + needle_len - 1] == last &&
-            (needle_len == 2 || w_bytes_equal_fast((const uint8_t *)(hay + i + 1),
-                                                   (const uint8_t *)(needle + 1), needle_len - 2)))
+            w_needle_match_tail(hay + i, needle, needle_len))
             return hay + i;
     }
     return NULL;
@@ -39882,6 +39925,31 @@ WValue w_string_slice_raw(WValue str, int64_t start, int64_t len) {
             uint64_t mask = (1ULL << (8 * len)) - 1;
             return W_TAG_STRINGSYM | ((uint64_t)len << 1) |
                    (((str >> (4 + 8 * start)) & mask) << 4);
+        }
+        if (mode == 6 && !g_slab_needs_lock) {
+            uint32_t idx = (uint32_t)((str >> 4) & 0xFFFFFF);
+            const uint8_t *slot = g_string_slab.base + ((size_t)idx << 5);
+            size_t cached = (size_t)((str >> 28) & 0x3F);
+            int64_t slen = (int64_t)(cached ? cached : slot[1]);
+            if (start < 0) {
+                start += slen;
+                if (start < 0) start = 0;
+            }
+            if (start >= slen || len <= 0) return W_TAG_STRINGSYM;
+            if (start + len > slen) len = slen - start;
+            const char *s = (const char *)(slot + W_SLAB_DATA_OFFSET);
+            if (len <= 5) return w_box_inline_str(s + start, (size_t)len);
+            if (start == 0 && len == slen) return str;
+            uint64_t skey = ((uint64_t)idx << 12) | ((uint64_t)start << 6) | (uint64_t)len;
+            static uint64_t last_skey = 0;
+            static WValue last_sval = 0;
+            if (__builtin_expect(skey == last_skey, 1)) return last_sval;
+            int is_ascii = (slot[0] & W_SFLAG_ASCII) != 0;
+            WValue res = is_ascii ? w_string_n_known_ascii(s + start, (size_t)len, 1)
+                                  : w_string_n(s + start, (size_t)len);
+            last_skey = skey;
+            last_sval = res;
+            return res;
         }
         const char *s;
         int64_t slen;
@@ -53719,13 +53787,16 @@ WValue __w_argv_program(void) {
  * Longer slab content strips the optional cached-length bits so its identity
  * matches the compiler's static tag/mode/index key. */
 WValue w_switch_canonical(WValue v) {
-    if (w_is_rope(v)) v = w_rope_flatten(v);
-    if (!w_is_stringy(v)) return v;
-    uint64_t mode = (v >> 1) & 0x7;
-    if (mode <= 5) return v;             /* already inline SSO */
-    if (mode == 6) {
-        size_t cached = (size_t)((v >> 28) & 0x3F);
-        if (__builtin_expect(cached > 5, 1)) return v & ~(0x3FULL << 28);
+    if (__builtin_expect(w_is_stringy(v), 1)) {
+        uint64_t mode = (v >> 1) & 0x7;
+        if (mode <= 5) return v;             /* already inline SSO */
+        if (mode == 6) return v & ~(0x3FULL << 28);
+    } else {
+        if (w_is_rope(v)) v = w_rope_flatten(v);
+        if (!w_is_stringy(v)) return v;
+        uint64_t mode = (v >> 1) & 0x7;
+        if (mode <= 5) return v;
+        if (mode == 6) return v & ~(0x3FULL << 28);
     }
     int is_sym = (int)(v & 1);
     char tmp[8];
@@ -53733,7 +53804,6 @@ WValue w_switch_canonical(WValue v) {
     size_t len;
     w_str_data(v, tmp, &s, &len);
     if (len > 5) {
-        if (mode == 6) return v & ~(0x3FULL << 28);
         if (len <= W_SLAB_SSO2_MAX) {
             WValue existing = w_slab_lookup_existing(
                 s, len, w_hash_wyhash((const uint8_t *)s, len));
@@ -60652,6 +60722,40 @@ int64_t w_cpus_per_l2_i64(void) {
     return 1;
 }
 WValue __w_cpus_per_l2(void) { return w_int(w_cpus_per_l2_i64()); }
+
+int64_t w_host_cache_bytes_extern(WValue name_wv) {
+#ifdef __APPLE__
+    char ibuf[6];
+    const char *ptr;
+    size_t len;
+    if (!w_is_stringy(name_wv)) return 0;
+    w_str_data(name_wv, ibuf, &ptr, &len);
+    if (len == 15 && memcmp(ptr, "l1d_cache_bytes", 15) == 0) {
+        int64_t v = 0; size_t slen = sizeof(v);
+        if (sysctlbyname("hw.perflevel0.l1dcachesize", &v, &slen, NULL, 0) == 0 && v > 0) return v;
+        slen = sizeof(v);
+        if (sysctlbyname("hw.l1dcachesize", &v, &slen, NULL, 0) == 0 && v > 0) return v;
+        return 0;
+    }
+    if (len == 14 && memcmp(ptr, "l2_cache_bytes", 14) == 0) {
+        int64_t v = 0; size_t slen = sizeof(v);
+        if (sysctlbyname("hw.perflevel0.l2cachesize", &v, &slen, NULL, 0) == 0 && v > 0) return v;
+        slen = sizeof(v);
+        if (sysctlbyname("hw.l2cachesize", &v, &slen, NULL, 0) == 0 && v > 0) return v;
+        return 0;
+    }
+    if (len == 11 && memcmp(ptr, "cpus_per_l2", 11) == 0) {
+        int64_t v = 0; size_t slen = sizeof(v);
+        if (sysctlbyname("hw.perflevel0.cpusperl2", &v, &slen, NULL, 0) == 0 && v > 0) return v;
+        uint64_t cfg[8] = {0}; slen = sizeof(cfg);
+        if (sysctlbyname("hw.cacheconfig", cfg, &slen, NULL, 0) == 0 && cfg[2] > 0) return (int64_t)cfg[2];
+        return 0;
+    }
+#else
+    (void)name_wv;
+#endif
+    return 0;
+}
 
 /* Raw-i64 entry points for prime?/prime_12k?/prime_30k? on a known-Int receiver.
  * The compiled lowering calls these directly (call_direct_i64), skipping WValue
@@ -69503,19 +69607,7 @@ WValue w_string_index(WValue recv, WValue needle_v, WValue offset_v) {
         ((needle_v & (W_TAG_MASK | 1)) == W_TAG_STRINGSYM)) {
         size_t rmode = (size_t)((recv >> 1) & 7);
         size_t nmode = (size_t)((needle_v >> 1) & 7);
-        if (rmode <= 5 && nmode <= 5) {
-            if (nmode == 0) return W_TAG_INT;
-            if (nmode > rmode) return W_NIL;
-            uint64_t r_pay = recv >> 4;
-            uint64_t mask = (1ULL << (8 * nmode)) - 1;
-            uint64_t n_pay = (needle_v >> 4) & mask;
-            for (size_t i = 0; i <= rmode - nmode; i++) {
-                if (((r_pay >> (8 * i)) & mask) == n_pay)
-                    return W_TAG_INT | (uint64_t)i;
-            }
-            return W_NIL;
-        }
-        if (rmode >= 6 && nmode >= 6) {
+        if (__builtin_expect(rmode >= 6 && nmode >= 6, 1)) {
             const char *str;
             size_t str_len;
             if (rmode == 7) {
@@ -69542,6 +69634,18 @@ WValue w_string_index(WValue recv, WValue needle_v, WValue offset_v) {
             }
             const char *found = w_mem_search(str, str_len, needle, needle_len);
             return found ? (W_TAG_INT | ((uint64_t)(found - str) & W_PAYLOAD_MASK)) : W_NIL;
+        }
+        if (rmode <= 5 && nmode <= 5) {
+            if (nmode == 0) return W_TAG_INT;
+            if (nmode > rmode) return W_NIL;
+            uint64_t r_pay = recv >> 4;
+            uint64_t mask = (1ULL << (8 * nmode)) - 1;
+            uint64_t n_pay = (needle_v >> 4) & mask;
+            for (size_t i = 0; i <= rmode - nmode; i++) {
+                if (((r_pay >> (8 * i)) & mask) == n_pay)
+                    return W_TAG_INT | (uint64_t)i;
+            }
+            return W_NIL;
         }
     }
     if (w_is_rope(recv)) recv = w_rope_flatten(recv);
@@ -77262,6 +77366,46 @@ WValue w_strbuf_reuse_or_new(WValue *slot, int64_t cap) {
 /* Append a string (WValue) to the buffer in place; returns the buffer. */
 WValue w_strbuf_append(WValue buf, WValue str) {
     WStrBuf *sb = (WStrBuf *)w_as_ptr(buf);
+    if (__builtin_expect((str & (W_TAG_MASK | 1)) == W_TAG_STRINGSYM, 1)) {
+        size_t mode = (str >> 1) & 7;
+        if (mode <= 5) {
+            if (mode == 0) return buf;
+            if (__builtin_expect(sb->size + 8 < sb->cap, 1)) {
+                uint64_t pay = str >> 4;
+                memcpy(sb->data + sb->size, &pay, 8);
+                sb->size += (int64_t)mode;
+                sb->data[sb->size] = '\0';
+                if (__builtin_expect((str & 0x0000080808080800ULL) != 0, 0))
+                    sb->flags &= (uint8_t)~W_STRBUF_FLAG_ASCII;
+                return buf;
+            }
+        } else {
+            const char *s;
+            size_t slen;
+            if (mode == 7) {
+                WString *ws = w_as_heap_str(str);
+                s = ws->data;
+                slen = w_heap_string_len(ws);
+                if (!w_heap_string_ascii_p(ws)) sb->flags &= (uint8_t)~W_STRBUF_FLAG_ASCII;
+            } else {
+                uint32_t idx = (uint32_t)((str >> 4) & 0xFFFFFF);
+                const uint8_t *slot = g_string_slab.base + ((size_t)idx << 5);
+                s = (const char *)(slot + W_SLAB_DATA_OFFSET);
+                size_t cached = (size_t)((str >> 28) & 0x3F);
+                slen = cached ? cached : slot[1];
+                if ((slot[0] & W_SFLAG_ASCII) == 0) sb->flags &= (uint8_t)~W_STRBUF_FLAG_ASCII;
+            }
+            if (__builtin_expect(sb->size + (int64_t)slen >= sb->cap, 0)) {
+                int64_t new_cap = (sb->size + (int64_t)slen + 1) * 2;
+                sb->data = realloc(sb->data, new_cap);
+                sb->cap = new_cap;
+            }
+            memcpy(sb->data + sb->size, s, slen);
+            sb->size += (int64_t)slen;
+            sb->data[sb->size] = '\0';
+            return buf;
+        }
+    }
     /* as_str() calls w_str_data -- which already returns the byte length --
      * discards it, and stages inline-mode bytes in a thread-local rotating
      * buffer; the length then had to be recovered with strlen. That cost an

@@ -829,7 +829,7 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
       if type(cond) == "String" && cond.size() > 0 && cond.byte_at(0) == 37
         out.push(cond)
       return out
-    if op == :ret_i64 || op == :truthy_inline || op == :store_global || op == :free_value
+    if op == :ret_i64 || op == :switch_i64 || op == :truthy_inline || op == :store_global || op == :free_value
       val = wire_get(inst, :value)
       if type(val) == "String" && val.size() > 0 && val.byte_at(0) == 37
         out.push(val)

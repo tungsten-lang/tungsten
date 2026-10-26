@@ -143,7 +143,7 @@
     if a >= b
       return ""
     if subj_str != nil
-      s_str = subj_str ## String
+      s_str = subj_str ## string
       if s_str.ascii?()
         return s_str.slice(a, b - a)
     ccall("w_string_from_codes", subj, a_in, b_in - a_in)
@@ -2179,6 +2179,8 @@
         @lead_rep_nb = 2
         if op_n > 6 && ops[6] == 1 && !consume_at?(2, args_a[6])
           @lead_after_char = args_a[6]
+    elsif !@has_pos_anchor && op_n == 8 && ops[1] == 16 && ops[2] == 11 && branches[2] == 0 && ops[3] == 1 && ops[4] == 16 && ops[5] == 11 && branches[5] == 0 && (args_a[3] & args_a[2]) == 0 && (args_a[3] & args_a[5]) == 0
+      @cap_fast_kind = -1
     @linear = 1
     if @has_subcall
       @linear = 0
@@ -2228,6 +2230,8 @@
         @linear = 0
     if @linear == 2 && @ncap == 2 && op_n == 10 && ops[0] == 7 && args_a[0] == 0 && ops[1] == 7 && args_a[1] == 2 && ops[2] == 11 && branches[2] == 0 && ops[3] == 16 && args_a[3] == 4 && branches[3] == 5 && ops[4] == 11 && args_a[4] == args_a[2] && branches[4] == 0 && ops[5] == 7 && args_a[5] == 3 && ops[6] == 1 && ops[7] == 21 && args_a[7] == 1 && branches[7] == 0 && ops[8] == 7 && args_a[8] == 1 && ops[9] == 4
       @linear = 1
+      if @lit_anchored == 0
+        @pf_exact_match = 16
     @pf_kind = 0
     @pf_char = 0
     @pf_flag = 0
@@ -2260,6 +2264,9 @@
             @pf_lit_ptr = ccall_nobox("w_string_data_ptr", @pf_lit_str) ## i64
       elsif @ncap == 2 && @lit_anchored == 0 && op_n == p_lit + 8 && ops[0] == 7 && args_a[0] == 0 && ops[p_lit + 1] == 7 && args_a[p_lit + 1] == 2 && ops[p_lit + 2] == 11 && branches[p_lit + 2] == 0 && ops[p_lit + 3] == 16 && args_a[p_lit + 3] == p_lit + 4 && branches[p_lit + 3] == p_lit + 5 && ops[p_lit + 4] == 11 && args_a[p_lit + 4] == args_a[p_lit + 2] && branches[p_lit + 4] == 0 && ops[p_lit + 5] == 7 && args_a[p_lit + 5] == 3 && ops[p_lit + 6] == 7 && args_a[p_lit + 6] == 1 && ops[p_lit + 7] == 4
         @cap_fast_kind = 1
+        @pf_lit_len = p_lit
+        @pf_char = lit[0]
+        @pf_flag = lit[p_lit - 1]
       return nil
     @cf_ok = true
     @cf_empty = false
@@ -2291,6 +2298,8 @@
     if op_n >= 5 && ops[0] == 7 && args_a[0] == 0 && ops[1] == 25 && (branches[1] & 15) == 3 && args_a[1] == 4 && ops[2] == 1 && ops[3] == 26
       @pf_kind = 10
       @pf_char = args_a[2]
+      if @lit_anchored == 0 && ops[4] == 11 && branches[4] == 0 && ((op_n == 7 && ops[5] == 7 && ops[6] == 4) || (op_n == 9 && ops[5] == 16 && args_a[5] == 6 && branches[5] == 7 && ops[6] == 11 && args_a[6] == args_a[4] && branches[6] == 0 && ops[7] == 7 && ops[8] == 4))
+        @pf_exact_match = 14
       return nil
     if @pf_cls_cnt > 0
       if pfs_len == 0 && @pf_flag == 0 && @pf_range_cnt == 0 && @pf_cat_cnt == 0 && @lead_after_char < 0
@@ -2338,6 +2347,8 @@
         @pf_exact_match = 10
       elsif @lit_anchored == 0 && op_n == 10 && ops[0] == 7 && ops[1] == 25 && args_a[1] == 4 && (branches[1] & 15) == 4 && ops[2] == 1 && ops[3] == 26 && ops[4] == 10 && args_a[4] == 1 && ops[5] == 11 && args_a[5] == 1 && branches[5] == 0 && ops[6] == 16 && args_a[6] == 7 && branches[6] == 8 && ops[7] == 11 && args_a[7] == 1 && branches[7] == 0 && ops[8] == 7 && ops[9] == 4
         @pf_exact_match = 11
+      elsif @lit_anchored == 0 && @lead_rep_nb == 1 && ops[1] == 11 && branches[1] == 0 && ops[4] == 1 && (args_a[4] & args_a[1]) == 0 && ops[5] == 11 && branches[5] == 0 && ((op_n == 8 && ops[6] == 7 && ops[7] == 4) || (op_n == 10 && ops[6] == 16 && args_a[6] == 7 && branches[6] == 8 && ops[7] == 11 && args_a[7] == args_a[5] && branches[7] == 0 && ops[8] == 7 && ops[9] == 4))
+        @pf_exact_match = 15
       elsif @lit_anchored == 0 && @linear == 1 && op_n >= 5 && ops[0] == 7 && ops[op_n - 2] == 7 && ops[op_n - 1] == 4
         if @ncap == 4 && op_n == 19 && ops[1] == 7 && args_a[1] == 2 && ops[2] == 11 && args_a[2] == 1 && branches[2] == 0 && ops[3] == 11 && args_a[3] == 1 && branches[3] == 0 && ops[4] == 11 && args_a[4] == 1 && branches[4] == 0 && ops[5] == 11 && args_a[5] == 1 && branches[5] == 0 && ops[6] == 7 && args_a[6] == 3 && ops[7] == 1 && ops[8] == 7 && args_a[8] == 4 && ops[9] == 11 && args_a[9] == 1 && branches[9] == 0 && ops[10] == 11 && args_a[10] == 1 && branches[10] == 0 && ops[11] == 7 && args_a[11] == 5 && ops[12] == 1 && ops[13] == 7 && args_a[13] == 6 && ops[14] == 11 && args_a[14] == 1 && branches[14] == 0 && ops[15] == 11 && args_a[15] == 1 && branches[15] == 0 && ops[16] == 7 && args_a[16] == 7 && args_a[17] == 1
           @cap_fast_kind = 2
@@ -2686,47 +2697,49 @@
     if @saved == nil
       @saved = make_saved()
     saved = @saved ## i64[]
-    if @pure_lit != 0 && @ascii_only && subject.ascii?()
-      @subj_ascii = 1
-      if @pure_lit == 1
-        pos = subject.index(@pf_lit_str, start)
-        if pos == nil
+    if @pure_lit != 0 && @ascii_only
+      s_str_p = subject ## string
+      if s_str_p.ascii?()
+        @subj_ascii = 1
+        if @pure_lit == 1
+          pos = s_str_p.index(@pf_lit_str ## string, start)
+          if pos == nil
+            if smode == 1
+              @@last_saved = nil
+              @@last_subj_str = nil
+            return nil
+          s0_lit = pos ## i64
+          saved[0] = s0_lit
+          saved[1] = s0_lit + (@pf_lit_len ## i64)
+          if smode == 1
+            @@last_subj_str = subject
+            @@last_subj = nil
+            @@last_subj_len = s_str_p.size()
+            @@last_saved = saved
+            @@last_ncap = 1
+            @@last_group_names = @group_names
+          return saved
+        if start > 0
           if smode == 1
             @@last_saved = nil
             @@last_subj_str = nil
           return nil
-        s0_lit = pos ## i64
-        saved[0] = s0_lit
-        saved[1] = s0_lit + (@pf_lit_len ## i64)
+        ok_lit = @pure_lit == 2 ? s_str_p.starts_with?(@pf_lit_str) : (s_str_p == @pf_lit_str)
+        if !ok_lit
+          if smode == 1
+            @@last_saved = nil
+            @@last_subj_str = nil
+          return nil
+        saved[0] = 0
+        saved[1] = @pf_lit_len ## i64
         if smode == 1
           @@last_subj_str = subject
           @@last_subj = nil
-          @@last_subj_len = subject.size()
+          @@last_subj_len = s_str_p.size()
           @@last_saved = saved
           @@last_ncap = 1
           @@last_group_names = @group_names
         return saved
-      if start > 0
-        if smode == 1
-          @@last_saved = nil
-          @@last_subj_str = nil
-        return nil
-      ok_lit = @pure_lit == 2 ? subject.starts_with?(@pf_lit_str) : (subject == @pf_lit_str)
-      if !ok_lit
-        if smode == 1
-          @@last_saved = nil
-          @@last_subj_str = nil
-        return nil
-      saved[0] = 0
-      saved[1] = @pf_lit_len ## i64
-      if smode == 1
-        @@last_subj_str = subject
-        @@last_subj = nil
-        @@last_subj_len = subject.size()
-        @@last_saved = saved
-        @@last_ncap = 1
-        @@last_group_names = @group_names
-      return saved
     pf_kind = @pf_kind ## i64
     pf_char = @pf_char ## i64
     pf_flag = @pf_flag ## i64
@@ -2886,64 +2899,74 @@
     ops = @op ## i64[]
     args_a = @a ## i64[]
     branches = @b ## i64[]
-    if (@cap_fast_kind ## i64) != 0
+    if (@cap_fast_kind ## i64) > 0
       if (@cap_fast_kind ## i64) == 2
         sep1_c = args_a[7] ## i64
         sep2_c = args_a[12] ## i64
         stop_c = (n - 10) ## i64
         while start <= stop_c
-          if subj[start + 4] == sep1_c && subj[start + 7] == sep2_c
-            digs_c = (subj[start] & subj[start + 1] & subj[start + 2] & subj[start + 3] & subj[start + 5] & subj[start + 6] & subj[start + 8] & subj[start + 9]) ## i64
-            if (digs_c & 1) != 0
-              saved[0] = start
-              saved[1] = start + 10
-              saved[2] = start
-              saved[3] = start + 4
-              saved[4] = start + 5
-              saved[5] = start + 7
-              saved[6] = start + 8
-              saved[7] = start + 10
-              if smode == 1
-                @@last_subj_str = subject
-                @@last_subj = subj
-                @@last_subj_len = n
-                @@last_saved = saved
-                @@last_ncap = 4
-                @@last_group_names = @group_names
-              return saved
+          if subj[start + 4] == sep1_c
+            if subj[start + 7] == sep2_c
+              digs_c = (subj[start] & subj[start + 1] & subj[start + 2] & subj[start + 3] & subj[start + 5] & subj[start + 6] & subj[start + 8] & subj[start + 9]) ## i64
+              if (digs_c & 1) != 0
+                saved[0] = start
+                saved[1] = start + 10
+                saved[2] = start
+                saved[3] = start + 4
+                saved[4] = start + 5
+                saved[5] = start + 7
+                saved[6] = start + 8
+                saved[7] = start + 10
+                if smode == 1
+                  @@last_subj_str = subject
+                  @@last_subj = subj
+                  @@last_subj_len = n
+                  @@last_saved = saved
+                  @@last_ncap = 4
+                  @@last_group_names = @group_names
+                return saved
           start = start + 1
         if smode == 1
           @@last_saved = nil
           @@last_subj_str = nil
         return nil
-      pf_lit_c = @pf_lit ## i64[]
-      plen_c = pf_lit_c.size() ## i64
-      c0_c = pf_lit_c[0] ## i64
-      clast_c = pf_lit_c[plen_c - 1] ## i64
+      plen_c = @pf_lit_len ## i64
       cmask_c = args_a[plen_c + 2] ## i64
       stop_c1 = (n - plen_c - 1) ## i64
       while start <= stop_c1
-        if subj[start] == c0_c && subj[start + plen_c - 1] == clast_c && (subj[start + plen_c] & cmask_c) != 0
-          j_c = 1 ## i64
-          while j_c < plen_c - 1 && subj[start + j_c] == pf_lit_c[j_c]
-            j_c = j_c + 1
-          if j_c >= plen_c - 1
-            cap_b = (start + plen_c) ## i64
-            cap_e = (cap_b + 1) ## i64
-            while cap_e < n && (subj[cap_e] & cmask_c) != 0
-              cap_e = cap_e + 1
-            saved[0] = start
-            saved[1] = cap_e
-            saved[2] = cap_b
-            saved[3] = cap_e
-            if smode == 1
-              @@last_subj_str = subject
-              @@last_subj = subj
-              @@last_subj_len = n
-              @@last_saved = saved
-              @@last_ncap = 2
-              @@last_group_names = @group_names
-            return saved
+        if subj[start + plen_c - 1] == pf_flag
+          if subj[start] == pf_char
+            if (subj[start + plen_c] & cmask_c) != 0
+              j_c = 1 ## i64
+              if plen_c > 2
+                pf_lit_c = @pf_lit ## i64[]
+                while j_c < plen_c - 1
+                  if subj[start + j_c] != pf_lit_c[j_c]
+                    break
+                  j_c = j_c + 1
+              if j_c >= plen_c - 1
+                cap_b = (start + plen_c) ## i64
+                cap_e = (cap_b + 1) ## i64
+                while cap_e + 3 < n
+                  if (subj[cap_e] & subj[cap_e + 1] & subj[cap_e + 2] & subj[cap_e + 3] & cmask_c) == 0
+                    break
+                  cap_e = cap_e + 4
+                while cap_e < n
+                  if (subj[cap_e] & cmask_c) == 0
+                    break
+                  cap_e = cap_e + 1
+                saved[0] = start
+                saved[1] = cap_e
+                saved[2] = cap_b
+                saved[3] = cap_e
+                if smode == 1
+                  @@last_subj_str = subject
+                  @@last_subj = subj
+                  @@last_subj_len = n
+                  @@last_saved = saved
+                  @@last_ncap = 2
+                  @@last_group_names = @group_names
+                return saved
         start = start + 1
       if smode == 1
         @@last_saved = nil
@@ -4069,10 +4092,14 @@
     nc = @ncap ## i64
     if nc <= 4 && (@@last_subj_len ## i64) < 2097150
       sv = saved ## i64[]
-      p0 = (nc << 42) | (((sv[0] + 1) & 2097151) << 21) | ((sv[1] + 1) & 2097151)
-      p1 = nc > 1 ? ((((sv[2] + 1) & 2097151) << 21) | ((sv[3] + 1) & 2097151)) : 0
-      p2 = nc > 2 ? ((((sv[4] + 1) & 2097151) << 21) | ((sv[5] + 1) & 2097151)) : 0
-      p3 = nc > 3 ? ((((sv[6] + 1) & 2097151) << 21) | ((sv[7] + 1) & 2097151)) : 0
+      p0 = ((nc << 42) | (((sv[0] + 1) & 2097151) << 21) | ((sv[1] + 1) & 2097151)) ## i64
+      p1 = (nc >= 2 ? ((((sv[2] + 1) & 2097151) << 21) | ((sv[3] + 1) & 2097151)) : 0) ## i64
+      p2 = 0 ## i64
+      p3 = 0 ## i64
+      if nc >= 3
+        p2 = ((((sv[4] + 1) & 2097151) << 21) | ((sv[5] + 1) & 2097151)) ## i64
+        if nc >= 4
+          p3 = ((((sv[6] + 1) & 2097151) << 21) | ((sv[7] + 1) & 2097151)) ## i64
       return RegexMatch.new((@subj_ascii ## i64) == 1 ? nil : @subj, nil, @group_names, subject, p0, p1, p2, p3)
     if (@linear ## i64) == 1
       @saved = i64[nc * 2]
@@ -4087,13 +4114,13 @@
       return false
     lit_mode = @pure_lit ## i64
     if lit_mode != 0
-      s_str = subject ## String
+      s_str = subject ## string
       if lit_mode == 1
-        return s_str.index(@pf_lit_str ## String) != nil
+        return s_str.index(@pf_lit_str ## string) != nil
       if lit_mode == 2
         p_ptr = @pf_lit_ptr ## i64
+        p_len = @pf_lit_bytes ## i64
         if p_ptr != 0 && ((sv_tag >> 1) & 7) >= 6
-          p_len = @pf_lit_bytes ## i64
           if (ccall_nobox("w_string_byte_length", subject) ## i64) < p_len
             return false
           s_ptr = ccall_nobox("w_string_data_ptr", subject) ## i64
@@ -4159,71 +4186,6 @@
         ch6 = cp6
         s6 = s6 + 1
       return false
-    if kind == 1
-      mask = @pf_char ## i64
-      while i < n
-        if (subj[i] & mask) != 0
-          return true
-        i = i + 1
-      return false
-    if kind == 9
-      args_a = @a ## i64[]
-      ch9 = args_a[5] ## i64
-      m9 = args_a[1] ## i64
-      i = 1 ## i64
-      while i < n
-        if subj[i] == ch9 && (subj[i - 1] & m9) != 0
-          return true
-        i = i + 1
-      return false
-    if kind == 10
-      args_a = @a ## i64[]
-      m10 = args_a[1] ## i64
-      c1_10 = args_a[5] ## i64
-      c2_10 = args_a[6] ## i64
-      while i < n
-        if (subj[i] & m10) != 0
-          i = i + 1
-          while i < n && (subj[i] & m10) != 0
-            i = i + 1
-          if i + 1 >= n || subj[i] != c1_10 || subj[i + 1] != c2_10
-            return true
-        else
-          i = i + 1
-      return false
-    if kind == 11
-      args_a = @a ## i64[]
-      c11 = args_a[2] ## i64
-      m11 = args_a[5] ## i64
-      while i < n
-        if (subj[i] & m11) != 0
-          if i == 0 || (subj[i - 1] != c11 && (subj[i - 1] & 2) == 0)
-            return true
-          i = i + 1
-          while i < n && (subj[i] & 2) != 0
-            i = i + 1
-        else
-          i = i + 1
-      return false
-    if kind == 12 && subj_ascii == 1
-      args_a = @a ## i64[]
-      branches = @b ## i64[]
-      cbm12 = @cls_bm ## i64[]
-      sep12 = args_a[4] ## i64
-      c0_12 = (args_a[1] ## i64) * 6
-      lo12 = args_a[5] ## i64
-      hi12 = branches[5] ## i64
-      lim12 = (n - 1) ## i64
-      i = 1 ## i64
-      while i < lim12
-        if subj[i] == sep12
-          ch_n12 = subj[i + 1] ## i64
-          if ch_n12 >= lo12 && ch_n12 <= hi12
-            ch_p12 = subj[i - 1] ## i64
-            if ((cbm12[c0_12 + (ch_p12 >> 30)] >> ((ch_p12 >> 25) & 31)) & 1) != 0
-              return true
-        i = i + 1
-      return false
     if kind == 8
       ops = @op ## i64[]
       args_a = @a ## i64[]
@@ -4231,6 +4193,18 @@
       plen8 = (end8 - 1) ## i64
       lim8 = (n - plen8) ## i64
       m8 = @pf_char ## i64
+      if end8 == 11
+        if ops[5] == 1
+          if ops[8] == 1
+            sep1_8 = args_a[5] ## i64
+            sep2_8 = args_a[8] ## i64
+            while i <= lim8
+              if subj[i + 4] == sep1_8
+                if subj[i + 7] == sep2_8
+                  if (subj[i] & subj[i + 1] & subj[i + 2] & subj[i + 3] & subj[i + 5] & subj[i + 6] & subj[i + 8] & subj[i + 9] & m8) != 0
+                    return true
+              i = i + 1
+            return false
       while i <= lim8
         if (subj[i] & m8) != 0
           pc8 = 2 ## i64
@@ -4244,6 +4218,159 @@
             pc8 = pc8 + 1
           if pc8 >= end8
             return true
+        i = i + 1
+      return false
+    if kind >= 9
+      if kind == 9
+        args_a = @a ## i64[]
+        ch9 = args_a[5] ## i64
+        m9 = args_a[1] ## i64
+        i = 1 ## i64
+        while i + 3 < n
+          if subj[i] == ch9 || subj[i + 1] == ch9 || subj[i + 2] == ch9 || subj[i + 3] == ch9
+            if subj[i] == ch9 && (subj[i - 1] & m9) != 0
+              return true
+            if subj[i + 1] == ch9 && (subj[i] & m9) != 0
+              return true
+            if subj[i + 2] == ch9 && (subj[i + 1] & m9) != 0
+              return true
+            if subj[i + 3] == ch9 && (subj[i + 2] & m9) != 0
+              return true
+          i = i + 4
+        while i < n
+          if subj[i] == ch9 && (subj[i - 1] & m9) != 0
+            return true
+          i = i + 1
+        return false
+      if kind == 10
+        args_a = @a ## i64[]
+        m10 = args_a[1] ## i64
+        c1_10 = args_a[5] ## i64
+        c2_10 = args_a[6] ## i64
+        skip2_10 = (((c1_10 | c2_10) & m10) == 0 ? 2 : 1) ## i64
+        while i < n
+          if (subj[i] & m10) != 0
+            i = i + 1
+            while i < n && (subj[i] & m10) != 0
+              i = i + 1
+            if i + 1 >= n || subj[i] != c1_10 || subj[i + 1] != c2_10
+              return true
+            i = i + skip2_10
+          else
+            i = i + 1
+        return false
+      if kind == 11
+        args_a = @a ## i64[]
+        c11 = args_a[2] ## i64
+        m11 = args_a[5] ## i64
+        while i < n
+          if (subj[i] & m11) != 0
+            if i == 0 || (subj[i - 1] != c11 && (subj[i - 1] & 2) == 0)
+              return true
+            i = i + 1
+            while i < n && (subj[i] & 2) != 0
+              i = i + 1
+          else
+            i = i + 1
+        return false
+      if kind == 14
+        args_a = @a ## i64[]
+        c14 = @pf_char ## i64
+        m14 = args_a[4] ## i64
+        lim14 = (n - 1) ## i64
+        while i + 3 < lim14
+          if subj[i] == c14 || subj[i + 1] == c14 || subj[i + 2] == c14 || subj[i + 3] == c14
+            if subj[i] == c14 && (subj[i + 1] & m14) != 0
+              return true
+            if subj[i + 1] == c14 && (subj[i + 2] & m14) != 0
+              return true
+            if subj[i + 2] == c14 && (subj[i + 3] & m14) != 0
+              return true
+            if subj[i + 3] == c14 && (subj[i + 4] & m14) != 0
+              return true
+          i = i + 4
+        while i < lim14
+          if subj[i] == c14 && (subj[i + 1] & m14) != 0
+            return true
+          i = i + 1
+        return false
+      if kind == 15
+        args_a = @a ## i64[]
+        m1_15 = args_a[1] ## i64
+        sep15 = args_a[4] ## i64
+        m2_15 = args_a[5] ## i64
+        lim15 = (n - 1) ## i64
+        i = 1 ## i64
+        while i + 3 < lim15
+          if subj[i] == sep15 || subj[i + 1] == sep15 || subj[i + 2] == sep15 || subj[i + 3] == sep15
+            if subj[i] == sep15 && (subj[i - 1] & m1_15) != 0 && (subj[i + 1] & m2_15) != 0
+              return true
+            if subj[i + 1] == sep15 && (subj[i] & m1_15) != 0 && (subj[i + 2] & m2_15) != 0
+              return true
+            if subj[i + 2] == sep15 && (subj[i + 1] & m1_15) != 0 && (subj[i + 3] & m2_15) != 0
+              return true
+            if subj[i + 3] == sep15 && (subj[i + 2] & m1_15) != 0 && (subj[i + 4] & m2_15) != 0
+              return true
+          i = i + 4
+        while i < lim15
+          if subj[i] == sep15 && (subj[i - 1] & m1_15) != 0 && (subj[i + 1] & m2_15) != 0
+            return true
+          i = i + 1
+        return false
+      if kind == 16
+        args_a = @a ## i64[]
+        m16 = args_a[2] ## i64
+        sep16 = args_a[6] ## i64
+        lim16 = (n - 1) ## i64
+        at16 = 1 ## i64
+        while at16 < lim16
+          while at16 + 3 < lim16
+            if subj[at16] == sep16 || subj[at16 + 1] == sep16 || subj[at16 + 2] == sep16 || subj[at16 + 3] == sep16
+              break
+            at16 = at16 + 4
+          while at16 < lim16 && subj[at16] != sep16
+            at16 = at16 + 1
+          if at16 >= lim16
+            return false
+          if (subj[at16 - 1] & m16) != 0
+            s16 = (at16 - 1) ## i64
+            while s16 > 0 && (subj[s16 - 1] & m16) != 0
+              s16 = s16 - 1
+            while s16 < at16
+              len16 = (at16 - s16) ## i64
+              if at16 + len16 < n
+                k16 = 0 ## i64
+                while k16 < len16 && subj[s16 + k16] == subj[at16 + 1 + k16]
+                  k16 = k16 + 1
+                if k16 >= len16
+                  return true
+              s16 = s16 + 1
+          at16 = at16 + 1
+        return false
+      if kind == 12 && subj_ascii == 1
+        args_a = @a ## i64[]
+        branches = @b ## i64[]
+        cbm12 = @cls_bm ## i64[]
+        sep12 = args_a[4] ## i64
+        c0_12 = (args_a[1] ## i64) * 6
+        lo12 = args_a[5] ## i64
+        hi12 = branches[5] ## i64
+        lim12 = (n - 1) ## i64
+        i = 1 ## i64
+        while i < lim12
+          if subj[i] == sep12
+            ch_n12 = subj[i + 1] ## i64
+            if ch_n12 >= lo12 && ch_n12 <= hi12
+              ch_p12 = subj[i - 1] ## i64
+              if ((cbm12[c0_12 + (ch_p12 >> 30)] >> ((ch_p12 >> 25) & 31)) & 1) != 0
+                return true
+          i = i + 1
+        return false
+    if kind == 1
+      mask = @pf_char ## i64
+      while i < n
+        if (subj[i] & mask) != 0
+          return true
         i = i + 1
       return false
     if kind == 2
@@ -4360,9 +4487,9 @@
     if nc <= 4 && (@@last_subj_len ## i64) < 2097150
       sv = saved ## i64[]
       p0 = (nc << 42) | (((sv[0] + 1) & 2097151) << 21) | ((sv[1] + 1) & 2097151)
-      p1 = nc > 1 ? ((((sv[2] + 1) & 2097151) << 21) | ((sv[3] + 1) & 2097151)) : 0
-      p2 = nc > 2 ? ((((sv[4] + 1) & 2097151) << 21) | ((sv[5] + 1) & 2097151)) : 0
-      p3 = nc > 3 ? ((((sv[6] + 1) & 2097151) << 21) | ((sv[7] + 1) & 2097151)) : 0
+      p1 = nc >= 2 ? ((((sv[2] + 1) & 2097151) << 21) | ((sv[3] + 1) & 2097151)) : 0
+      p2 = nc >= 3 ? ((((sv[4] + 1) & 2097151) << 21) | ((sv[5] + 1) & 2097151)) : 0
+      p3 = nc >= 4 ? ((((sv[6] + 1) & 2097151) << 21) | ((sv[7] + 1) & 2097151)) : 0
       return RegexMatch.new((@subj_ascii ## i64) == 1 ? nil : @subj, nil, @group_names, subject, p0, p1, p2, p3)
     if (@linear ## i64) == 1
       @saved = i64[nc * 2]
@@ -4375,8 +4502,7 @@
     sv_tag = wvalue_bits(subject) ## i64
     if ((sv_tag >> 48) != -7 || (sv_tag & 1) != 0) && type(subject) != "String"
       return out
-    s_str = subject ## String
-    is_ascii = s_str.ascii?()
+    s_str = subject ## string
     mask = @scan_flag_mask ## i64
     if mask != 0
       if subject != @subj_key
@@ -4384,6 +4510,7 @@
         @subj_key = subject
       subj = @subj ## i64[]
       n = @subj_len ## i64
+      is_ascii_f = (@subj_ascii ## i64) == 1
       i = 0 ## i64
       while i < n
         while i < n && (subj[i] & mask) == 0
@@ -4394,8 +4521,9 @@
         i = i + 1
         while i < n && (subj[i] & mask) != 0
           i = i + 1
-        out.push(is_ascii ? s_str.slice(b0_f, i - b0_f) : Regex.span_from(subj, b0_f, i))
+        out.push(is_ascii_f ? s_str.slice(b0_f, i - b0_f) : Regex.span_from(subj, b0_f, i))
       return out
+    is_ascii = s_str.ascii?()
     sc_pos = 0 ## i64
     ncap = @ncap ## i64
     while true
@@ -4436,7 +4564,7 @@
     sv = saved ## i64[]
     b0 = sv[0] ## i64
     e0 = sv[1] ## i64
-    s_str = subject ## String
+    s_str = subject ## string
     if s_str.ascii?()
       slen_a = s_str.size() ## i64
       return s_str.slice(0, b0) + replacement + s_str.slice(e0, slen_a - e0)
@@ -4447,8 +4575,7 @@
     sv_tag = wvalue_bits(subject) ## i64
     if ((sv_tag >> 48) != -7 || (sv_tag & 1) != 0) && type(subject) != "String"
       return subject
-    s_str = subject ## String
-    is_ascii = s_str.ascii?()
+    s_str = subject ## string
     mask = @scan_flag_mask ## i64
     if mask != 0
       if subject != @subj_key
@@ -4456,6 +4583,7 @@
         @subj_key = subject
       subj = @subj ## i64[]
       n = @subj_len ## i64
+      is_ascii_f = (@subj_ascii ## i64) == 1
       i = 0 ## i64
       while i < n && (subj[i] & mask) == 0
         i = i + 1
@@ -4465,8 +4593,11 @@
       last_f = 0 ## i64
       while i < n
         if i > last_f
-          if is_ascii
-            sb_f.append(s_str.slice(last_f, i - last_f))
+          if is_ascii_f
+            if i - last_f == 1
+              sb_f.append(wvalue_from_bits((-1_970_324_836_974_590 | (((subj[last_f] >> 25) & 255) << 4)) ## i64))
+            else
+              sb_f.append(s_str.slice(last_f, i - last_f))
           else
             sb_f.append(Regex.span_from(subj, last_f, i))
         i = i + 1
@@ -4477,11 +4608,15 @@
         while i < n && (subj[i] & mask) == 0
           i = i + 1
       if last_f < n
-        if is_ascii
-          sb_f.append(s_str.slice(last_f, n - last_f))
+        if is_ascii_f
+          if n - last_f == 1
+            sb_f.append(wvalue_from_bits((-1_970_324_836_974_590 | (((subj[last_f] >> 25) & 255) << 4)) ## i64))
+          else
+            sb_f.append(s_str.slice(last_f, n - last_f))
         else
           sb_f.append(Regex.span_from(subj, last_f, n))
       return sb_f.to_s()
+    is_ascii = s_str.ascii?()
     saved = find_saved_from(subject, 0, 2)
     if saved == nil
       return subject
@@ -4522,36 +4657,49 @@
     sv_tag = wvalue_bits(subject) ## i64
     if ((sv_tag >> 48) != -7 || (sv_tag & 1) != 0) && type(subject) != "String"
       return out
-    s_str = subject ## String
+    s_str = subject ## string
+    if (@cap_fast_kind ## i64) == -1
+      args_s = @a ## i64[]
+      m1_s = args_s[2] ## i64
+      delim_s = args_s[3] ## i64
+      m2_s = args_s[5] ## i64
+      if subject != @subj_key
+        @subj = decode_subject(subject)
+        @subj_key = subject
+      subj = @subj ## i64[]
+      n = @subj_len ## i64
+      is_ascii_s = (@subj_ascii ## i64) == 1
+      last_s = 0 ## i64
+      i_s = 0 ## i64
+      while i_s < n
+        while i_s < n && subj[i_s] != delim_s
+          i_s = i_s + 1
+        if i_s >= n
+          break
+        b0_s = i_s ## i64
+        while b0_s > last_s && (subj[b0_s - 1] & m1_s) != 0
+          b0_s = b0_s - 1
+        e0_s = (i_s + 1) ## i64
+        while e0_s < n && (subj[e0_s] & m2_s) != 0
+          e0_s = e0_s + 1
+        if is_ascii_s
+          if b0_s - last_s == 1
+            out.push(wvalue_from_bits((-1_970_324_836_974_590 | (((subj[last_s] >> 25) & 255) << 4)) ## i64))
+          else
+            out.push(s_str.slice(last_s, b0_s - last_s))
+        else
+          out.push(span_str(last_s, b0_s))
+        last_s = e0_s
+        i_s = e0_s
+      if is_ascii_s
+        if n - last_s == 1
+          out.push(wvalue_from_bits((-1_970_324_836_974_590 | (((subj[last_s] >> 25) & 255) << 4)) ## i64))
+        else
+          out.push(s_str.slice(last_s, n - last_s))
+      else
+        out.push(span_str(last_s, n))
+      return out
     is_ascii = s_str.ascii?()
-    if @op.size() == 8 && @op[1] == 16 && @op[2] == 11 && @b[2] == 0 && @op[3] == 1 && @op[4] == 16 && @op[5] == 11 && @b[5] == 0
-      m1_s = @a[2] ## i64
-      delim_s = @a[3] ## i64
-      m2_s = @a[5] ## i64
-      if (delim_s & m1_s) == 0 && (delim_s & m2_s) == 0
-        if subject != @subj_key
-          @subj = decode_subject(subject)
-          @subj_key = subject
-        subj = @subj ## i64[]
-        n = @subj_len ## i64
-        last_s = 0 ## i64
-        i_s = 0 ## i64
-        while i_s < n
-          while i_s < n && subj[i_s] != delim_s
-            i_s = i_s + 1
-          if i_s >= n
-            break
-          b0_s = i_s ## i64
-          while b0_s > last_s && (subj[b0_s - 1] & m1_s) != 0
-            b0_s = b0_s - 1
-          e0_s = (i_s + 1) ## i64
-          while e0_s < n && (subj[e0_s] & m2_s) != 0
-            e0_s = e0_s + 1
-          out.push(is_ascii ? s_str.slice(last_s, b0_s - last_s) : span_str(last_s, b0_s))
-          last_s = e0_s
-          i_s = e0_s
-        out.push(is_ascii ? s_str.slice(last_s, n - last_s) : span_str(last_s, n))
-        return out
     saved = find_saved_from(subject, 0, 2)
     if saved == nil
       out.push(subject)
@@ -4581,7 +4729,7 @@
     out
 
   -> make_saved
-    n = @ncap * 2
+    n = (@ncap * 2) ## i64
     s = i64[n]
     i = 0 ## i64
     while i < n
@@ -5459,11 +5607,11 @@
     if kind == "String"
       if @name_to_group == nil
         return nil
-      return (@name_to_group ## Hash)[key]
+      return (@name_to_group ## hash)[key]
     if kind == "Symbol"
       if @name_to_group == nil
         return nil
-      return (@name_to_group ## Hash)[key.to_s]
+      return (@name_to_group ## hash)[key.to_s]
     nil
 
   -> span_str(a_in, b_in)
@@ -5471,8 +5619,9 @@
     b = b_in ## i64
     if a >= b
       return ""
-    if @subj == nil || (@subject != nil && (@subject ## String).ascii?())
-      return (@subject ## String).slice(a, b - a)
+    if @subj == nil
+      s_str = @subject ## string
+      return s_str.slice(a, b - a)
     Regex.span_from(@subj, a, b)
 
   -> string
@@ -5491,19 +5640,23 @@
     b = self.end_offset(0)
     if b == nil
       return nil
-    slen = @subj != nil ? ((@subj ## i64[]).size() ## i64) : ((@subject ## String).size() ## i64)
+    if @subj != nil
+      slen = (@subj ## i64[]).size() ## i64
+    else
+      s_str = @subject ## string
+      slen = s_str.size() ## i64
     span_str(b, slen)
 
   -> [](key)
-    idx = 0 ## i64
     kbits = wvalue_bits(key) ## i64
     ktag = (kbits >> 48) ## i64
+    idx = 0 ## i64
     if ktag == -6
       idx = key ## i64
     elsif ktag == -7 && (kbits & 1) == 0
       if @name_to_group == nil
         return nil
-      ntg = @name_to_group ## Hash
+      ntg = @name_to_group ## hash
       index = ntg[key]
       if index == nil
         return nil
@@ -5537,9 +5690,8 @@
     if a >= b
       return ""
     if @subj == nil
-      return (@subject ## String).slice(a, b - a)
-    if @subject != nil && (@subject ## String).ascii?()
-      return (@subject ## String).slice(a, b - a)
+      s_str = @subject ## string
+      return s_str.slice(a, b - a)
     Regex.span_from(@subj, a, b)
 
   -> offset(key)

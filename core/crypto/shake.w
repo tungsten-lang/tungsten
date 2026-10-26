@@ -12,7 +12,7 @@ in Crypto
     ccall("w_crypto_shake_hex", data, bits, outlen)
 
   -> .shake128(data, outlen)
-    ccall("w_crypto_shake_bytes", data, 128, outlen)
+    digest(data, 128, outlen)
 
   -> .shake256(data, outlen)
-    ccall("w_crypto_shake_bytes", data, 256, outlen)
+    digest(data, 256, outlen)

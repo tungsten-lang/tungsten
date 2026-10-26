@@ -35521,9 +35521,34 @@ W_TARGET_SHA3 static void w_sha512_hw_compress(uint64_t state[8], const uint8_t 
  * already runs at multiple GB/s per core on this target and an accelerated
  * variant would need its own differential harness to trust. */
 
-static uint64_t w_keccak_rotl64(uint64_t x, int n) { return (x << n) | (x >> (64 - n)); }
+static int w_hw_sha3_available(void) {
+#if W_CRYPTO_HW
+    static int cached = -1;
+    int v = cached;
+    if (v < 0) {
+#if defined(__APPLE__)
+        cached = v = w_hw_sysctl_probe("hw.optional.arm.FEAT_SHA3") ||
+                     w_hw_sysctl_probe("hw.optional.armv8_2_sha3");
+#elif defined(__linux__)
+#ifdef HWCAP_SHA3
+        cached = v = (getauxval(AT_HWCAP) & HWCAP_SHA3) != 0;
+#else
+        cached = v = 0;
+#endif
+#else
+        cached = v = 1;
+#endif
+    }
+    return v;
+#else
+    return 0;
+#endif
+}
 
-static void w_keccakf1600(uint64_t st[25]) {
+static inline uint64_t w_keccak_rotl64(uint64_t x, int n) { return (x << n) | (x >> (64 - n)); }
+
+#if W_CRYPTO_HW
+W_TARGET_SHA3 static void w_keccak_absorb_hw(uint64_t st[25], const uint8_t *data, size_t blocks, size_t rate_words) {
     static const uint64_t rc[24] = {
         0x0000000000000001ULL, 0x0000000000008082ULL, 0x800000000000808aULL, 0x8000000080008000ULL,
         0x000000000000808bULL, 0x0000000080000001ULL, 0x8000000080008081ULL, 0x8000000000008009ULL,
@@ -35532,31 +35557,210 @@ static void w_keccakf1600(uint64_t st[25]) {
         0x8000000000008002ULL, 0x8000000000000080ULL, 0x000000000000800aULL, 0x800000008000000aULL,
         0x8000000080008081ULL, 0x8000000000008080ULL, 0x0000000080000001ULL, 0x8000000080008008ULL
     };
-    static const int rotc[24] = {1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 2, 14,
-                                 27, 41, 56, 8, 25, 43, 62, 18, 39, 61, 20, 44};
-    static const int piln[24] = {10, 7, 11, 17, 18, 3, 5, 16, 8, 21, 24, 4,
-                                 15, 23, 19, 13, 12, 2, 20, 14, 22, 9, 6, 1};
-    for (int round = 0; round < 24; round++) {
-        uint64_t bc[5], t;
-        for (int i = 0; i < 5; i++)
-            bc[i] = st[i] ^ st[i + 5] ^ st[i + 10] ^ st[i + 15] ^ st[i + 20];
-        for (int i = 0; i < 5; i++) {
-            t = bc[(i + 4) % 5] ^ w_keccak_rotl64(bc[(i + 1) % 5], 1);
-            for (int j = 0; j < 25; j += 5) st[j + i] ^= t;
+    uint64x2_t s00 = vld1q_dup_u64(&st[0]),  s01 = vld1q_dup_u64(&st[1]),  s02 = vld1q_dup_u64(&st[2]),  s03 = vld1q_dup_u64(&st[3]),  s04 = vld1q_dup_u64(&st[4]);
+    uint64x2_t s05 = vld1q_dup_u64(&st[5]),  s06 = vld1q_dup_u64(&st[6]),  s07 = vld1q_dup_u64(&st[7]),  s08 = vld1q_dup_u64(&st[8]),  s09 = vld1q_dup_u64(&st[9]);
+    uint64x2_t s10 = vld1q_dup_u64(&st[10]), s11 = vld1q_dup_u64(&st[11]), s12 = vld1q_dup_u64(&st[12]), s13 = vld1q_dup_u64(&st[13]), s14 = vld1q_dup_u64(&st[14]);
+    uint64x2_t s15 = vld1q_dup_u64(&st[15]), s16 = vld1q_dup_u64(&st[16]), s17 = vld1q_dup_u64(&st[17]), s18 = vld1q_dup_u64(&st[18]), s19 = vld1q_dup_u64(&st[19]);
+    uint64x2_t s20 = vld1q_dup_u64(&st[20]), s21 = vld1q_dup_u64(&st[21]), s22 = vld1q_dup_u64(&st[22]), s23 = vld1q_dup_u64(&st[23]), s24 = vld1q_dup_u64(&st[24]);
+
+    size_t rate_bytes = rate_words * 8;
+    for (size_t blk = 0; blk < blocks; blk++, data += rate_bytes) {
+        if (rate_words >= 9) {
+            const uint64_t *w = (const uint64_t *)data;
+            s00 = veorq_u64(s00, vld1q_dup_u64(&w[0]));
+            s01 = veorq_u64(s01, vld1q_dup_u64(&w[1]));
+            s02 = veorq_u64(s02, vld1q_dup_u64(&w[2]));
+            s03 = veorq_u64(s03, vld1q_dup_u64(&w[3]));
+            s04 = veorq_u64(s04, vld1q_dup_u64(&w[4]));
+            s05 = veorq_u64(s05, vld1q_dup_u64(&w[5]));
+            s06 = veorq_u64(s06, vld1q_dup_u64(&w[6]));
+            s07 = veorq_u64(s07, vld1q_dup_u64(&w[7]));
+            s08 = veorq_u64(s08, vld1q_dup_u64(&w[8]));
+            if (rate_words >= 13) {
+                s09 = veorq_u64(s09, vld1q_dup_u64(&w[9]));
+                s10 = veorq_u64(s10, vld1q_dup_u64(&w[10]));
+                s11 = veorq_u64(s11, vld1q_dup_u64(&w[11]));
+                s12 = veorq_u64(s12, vld1q_dup_u64(&w[12]));
+                if (rate_words >= 17) {
+                    s13 = veorq_u64(s13, vld1q_dup_u64(&w[13]));
+                    s14 = veorq_u64(s14, vld1q_dup_u64(&w[14]));
+                    s15 = veorq_u64(s15, vld1q_dup_u64(&w[15]));
+                    s16 = veorq_u64(s16, vld1q_dup_u64(&w[16]));
+                    if (rate_words >= 18) {
+                        s17 = veorq_u64(s17, vld1q_dup_u64(&w[17]));
+                        if (rate_words >= 21) {
+                            s18 = veorq_u64(s18, vld1q_dup_u64(&w[18]));
+                            s19 = veorq_u64(s19, vld1q_dup_u64(&w[19]));
+                            s20 = veorq_u64(s20, vld1q_dup_u64(&w[20]));
+                        }
+                    }
+                }
+            }
         }
-        t = st[1];
-        for (int i = 0; i < 24; i++) {
-            int j = piln[i];
-            bc[0] = st[j];
-            st[j] = w_keccak_rotl64(t, rotc[i]);
-            t = bc[0];
+
+#pragma clang loop unroll(full)
+        for (int round = 0; round < 24; round++) {
+            uint64x2_t c0 = veor3q_u64(veor3q_u64(s00, s05, s10), s15, s20);
+            uint64x2_t c1 = veor3q_u64(veor3q_u64(s01, s06, s11), s16, s21);
+            uint64x2_t c2 = veor3q_u64(veor3q_u64(s02, s07, s12), s17, s22);
+            uint64x2_t c3 = veor3q_u64(veor3q_u64(s03, s08, s13), s18, s23);
+            uint64x2_t c4 = veor3q_u64(veor3q_u64(s04, s09, s14), s19, s24);
+
+            uint64x2_t d0 = vrax1q_u64(c4, c1);
+            uint64x2_t d1 = vrax1q_u64(c0, c2);
+            uint64x2_t d2 = vrax1q_u64(c1, c3);
+            uint64x2_t d3 = vrax1q_u64(c2, c4);
+            uint64x2_t d4 = vrax1q_u64(c3, c0);
+
+            s00 = veorq_u64(s00, d0);
+            uint64x2_t t = s01;
+            s01 = vxarq_u64(s06, d1, 64 - 44);
+            s06 = vxarq_u64(s09, d4, 64 - 20);
+            s09 = vxarq_u64(s22, d2, 64 - 61);
+            s22 = vxarq_u64(s14, d4, 64 - 39);
+            s14 = vxarq_u64(s20, d0, 64 - 18);
+            s20 = vxarq_u64(s02, d2, 64 - 62);
+            s02 = vxarq_u64(s12, d2, 64 - 43);
+            s12 = vxarq_u64(s13, d3, 64 - 25);
+            s13 = vxarq_u64(s19, d4, 64 - 8);
+            s19 = vxarq_u64(s23, d3, 64 - 56);
+            s23 = vxarq_u64(s15, d0, 64 - 41);
+            s15 = vxarq_u64(s04, d4, 64 - 27);
+            s04 = vxarq_u64(s24, d4, 64 - 14);
+            s24 = vxarq_u64(s21, d1, 64 - 2);
+            s21 = vxarq_u64(s08, d3, 64 - 55);
+            s08 = vxarq_u64(s16, d1, 64 - 45);
+            s16 = vxarq_u64(s05, d0, 64 - 36);
+            s05 = vxarq_u64(s03, d3, 64 - 28);
+            s03 = vxarq_u64(s18, d3, 64 - 21);
+            s18 = vxarq_u64(s17, d2, 64 - 15);
+            s17 = vxarq_u64(s11, d1, 64 - 10);
+            s11 = vxarq_u64(s07, d2, 64 - 6);
+            s07 = vxarq_u64(s10, d0, 64 - 3);
+            s10 = vxarq_u64(t,   d1, 64 - 1);
+
+            c0 = vbcaxq_u64(s00, s02, s01); c1 = vbcaxq_u64(s01, s03, s02);
+            s02 = vbcaxq_u64(s02, s04, s03); s03 = vbcaxq_u64(s03, s00, s04); s04 = vbcaxq_u64(s04, s01, s00);
+            s00 = veorq_u64(c0, vld1q_dup_u64(&rc[round])); s01 = c1;
+
+            c0 = vbcaxq_u64(s05, s07, s06); c1 = vbcaxq_u64(s06, s08, s07);
+            s07 = vbcaxq_u64(s07, s09, s08); s08 = vbcaxq_u64(s08, s05, s09); s09 = vbcaxq_u64(s09, s06, s05);
+            s05 = c0; s06 = c1;
+
+            c0 = vbcaxq_u64(s10, s12, s11); c1 = vbcaxq_u64(s11, s13, s12);
+            s12 = vbcaxq_u64(s12, s14, s13); s13 = vbcaxq_u64(s13, s10, s14); s14 = vbcaxq_u64(s14, s11, s10);
+            s10 = c0; s11 = c1;
+
+            c0 = vbcaxq_u64(s15, s17, s16); c1 = vbcaxq_u64(s16, s18, s17);
+            s17 = vbcaxq_u64(s17, s19, s18); s18 = vbcaxq_u64(s18, s15, s19); s19 = vbcaxq_u64(s19, s16, s15);
+            s15 = c0; s16 = c1;
+
+            c0 = vbcaxq_u64(s20, s22, s21); c1 = vbcaxq_u64(s21, s23, s22);
+            s22 = vbcaxq_u64(s22, s24, s23); s23 = vbcaxq_u64(s23, s20, s24); s24 = vbcaxq_u64(s24, s21, s20);
+            s20 = c0; s21 = c1;
         }
-        for (int j = 0; j < 25; j += 5) {
-            for (int i = 0; i < 5; i++) bc[i] = st[j + i];
-            for (int i = 0; i < 5; i++) st[j + i] ^= (~bc[(i + 1) % 5]) & bc[(i + 2) % 5];
-        }
-        st[0] ^= rc[round];
     }
+
+    vst1q_lane_u64(&st[0],  s00, 0); vst1q_lane_u64(&st[1],  s01, 0); vst1q_lane_u64(&st[2],  s02, 0); vst1q_lane_u64(&st[3],  s03, 0); vst1q_lane_u64(&st[4],  s04, 0);
+    vst1q_lane_u64(&st[5],  s05, 0); vst1q_lane_u64(&st[6],  s06, 0); vst1q_lane_u64(&st[7],  s07, 0); vst1q_lane_u64(&st[8],  s08, 0); vst1q_lane_u64(&st[9],  s09, 0);
+    vst1q_lane_u64(&st[10], s10, 0); vst1q_lane_u64(&st[11], s11, 0); vst1q_lane_u64(&st[12], s12, 0); vst1q_lane_u64(&st[13], s13, 0); vst1q_lane_u64(&st[14], s14, 0);
+    vst1q_lane_u64(&st[15], s15, 0); vst1q_lane_u64(&st[16], s16, 0); vst1q_lane_u64(&st[17], s17, 0); vst1q_lane_u64(&st[18], s18, 0); vst1q_lane_u64(&st[19], s19, 0);
+    vst1q_lane_u64(&st[20], s20, 0); vst1q_lane_u64(&st[21], s21, 0); vst1q_lane_u64(&st[22], s22, 0); vst1q_lane_u64(&st[23], s23, 0); vst1q_lane_u64(&st[24], s24, 0);
+}
+#endif
+
+static void w_keccakf1600(uint64_t st[25]) {
+#if W_CRYPTO_HW
+    if (__builtin_expect(w_hw_sha3_available(), 1)) {
+        w_keccak_absorb_hw(st, NULL, 1, 0);
+        return;
+    }
+#endif
+    static const uint64_t rc[24] = {
+        0x0000000000000001ULL, 0x0000000000008082ULL, 0x800000000000808aULL, 0x8000000080008000ULL,
+        0x000000000000808bULL, 0x0000000080000001ULL, 0x8000000080008081ULL, 0x8000000000008009ULL,
+        0x000000000000008aULL, 0x0000000000000088ULL, 0x0000000080008009ULL, 0x000000008000000aULL,
+        0x000000008000808bULL, 0x800000000000008bULL, 0x8000000000008089ULL, 0x8000000000008003ULL,
+        0x8000000000008002ULL, 0x8000000000000080ULL, 0x000000000000800aULL, 0x800000008000000aULL,
+        0x8000000080008081ULL, 0x8000000000008080ULL, 0x0000000080000001ULL, 0x8000000080008008ULL
+    };
+    uint64_t s00 = st[0],  s01 = st[1],  s02 = st[2],  s03 = st[3],  s04 = st[4];
+    uint64_t s05 = st[5],  s06 = st[6],  s07 = st[7],  s08 = st[8],  s09 = st[9];
+    uint64_t s10 = st[10], s11 = st[11], s12 = st[12], s13 = st[13], s14 = st[14];
+    uint64_t s15 = st[15], s16 = st[16], s17 = st[17], s18 = st[18], s19 = st[19];
+    uint64_t s20 = st[20], s21 = st[21], s22 = st[22], s23 = st[23], s24 = st[24];
+
+    for (int round = 0; round < 24; round++) {
+        uint64_t c0 = s00 ^ s05 ^ s10 ^ s15 ^ s20;
+        uint64_t c1 = s01 ^ s06 ^ s11 ^ s16 ^ s21;
+        uint64_t c2 = s02 ^ s07 ^ s12 ^ s17 ^ s22;
+        uint64_t c3 = s03 ^ s08 ^ s13 ^ s18 ^ s23;
+        uint64_t c4 = s04 ^ s09 ^ s14 ^ s19 ^ s24;
+
+        uint64_t d0 = c4 ^ w_keccak_rotl64(c1, 1);
+        uint64_t d1 = c0 ^ w_keccak_rotl64(c2, 1);
+        uint64_t d2 = c1 ^ w_keccak_rotl64(c3, 1);
+        uint64_t d3 = c2 ^ w_keccak_rotl64(c4, 1);
+        uint64_t d4 = c3 ^ w_keccak_rotl64(c0, 1);
+
+        s00 ^= d0; s05 ^= d0; s10 ^= d0; s15 ^= d0; s20 ^= d0;
+        s01 ^= d1; s06 ^= d1; s11 ^= d1; s16 ^= d1; s21 ^= d1;
+        s02 ^= d2; s07 ^= d2; s12 ^= d2; s17 ^= d2; s22 ^= d2;
+        s03 ^= d3; s08 ^= d3; s13 ^= d3; s18 ^= d3; s23 ^= d3;
+        s04 ^= d4; s09 ^= d4; s14 ^= d4; s19 ^= d4; s24 ^= d4;
+
+        uint64_t t = s01;
+        s01 = w_keccak_rotl64(s06, 44);
+        s06 = w_keccak_rotl64(s09, 20);
+        s09 = w_keccak_rotl64(s22, 61);
+        s22 = w_keccak_rotl64(s14, 39);
+        s14 = w_keccak_rotl64(s20, 18);
+        s20 = w_keccak_rotl64(s02, 62);
+        s02 = w_keccak_rotl64(s12, 43);
+        s12 = w_keccak_rotl64(s13, 25);
+        s13 = w_keccak_rotl64(s19, 8);
+        s19 = w_keccak_rotl64(s23, 56);
+        s23 = w_keccak_rotl64(s15, 41);
+        s15 = w_keccak_rotl64(s04, 27);
+        s04 = w_keccak_rotl64(s24, 14);
+        s24 = w_keccak_rotl64(s21, 2);
+        s21 = w_keccak_rotl64(s08, 55);
+        s08 = w_keccak_rotl64(s16, 45);
+        s16 = w_keccak_rotl64(s05, 36);
+        s05 = w_keccak_rotl64(s03, 28);
+        s03 = w_keccak_rotl64(s18, 21);
+        s18 = w_keccak_rotl64(s17, 15);
+        s17 = w_keccak_rotl64(s11, 10);
+        s11 = w_keccak_rotl64(s07, 6);
+        s07 = w_keccak_rotl64(s10, 3);
+        s10 = w_keccak_rotl64(t, 1);
+
+        c0 = s00 ^ ((~s01) & s02); c1 = s01 ^ ((~s02) & s03);
+        s02 ^= (~s03) & s04; s03 ^= (~s04) & s00; s04 ^= (~s00) & s01;
+        s00 = c0 ^ rc[round]; s01 = c1;
+
+        c0 = s05 ^ ((~s06) & s07); c1 = s06 ^ ((~s07) & s08);
+        s07 ^= (~s08) & s09; s08 ^= (~s09) & s05; s09 ^= (~s05) & s06;
+        s05 = c0; s06 = c1;
+
+        c0 = s10 ^ ((~s11) & s12); c1 = s11 ^ ((~s12) & s13);
+        s12 ^= (~s13) & s14; s13 ^= (~s14) & s10; s14 ^= (~s10) & s11;
+        s10 = c0; s11 = c1;
+
+        c0 = s15 ^ ((~s16) & s17); c1 = s16 ^ ((~s17) & s18);
+        s17 ^= (~s18) & s19; s18 ^= (~s19) & s15; s19 ^= (~s15) & s16;
+        s15 = c0; s16 = c1;
+
+        c0 = s20 ^ ((~s21) & s22); c1 = s21 ^ ((~s22) & s23);
+        s22 ^= (~s23) & s24; s23 ^= (~s24) & s20; s24 ^= (~s20) & s21;
+        s20 = c0; s21 = c1;
+    }
+
+    st[0]  = s00; st[1]  = s01; st[2]  = s02; st[3]  = s03; st[4]  = s04;
+    st[5]  = s05; st[6]  = s06; st[7]  = s07; st[8]  = s08; st[9]  = s09;
+    st[10] = s10; st[11] = s11; st[12] = s12; st[13] = s13; st[14] = s14;
+    st[15] = s15; st[16] = s16; st[17] = s17; st[18] = s18; st[19] = s19;
+    st[20] = s20; st[21] = s21; st[22] = s22; st[23] = s23; st[24] = s24;
 }
 
 /* Sponge over a little-endian host (every Tungsten target). pad is the domain
@@ -35566,13 +35770,32 @@ static void w_keccak_sponge(const uint8_t *data, size_t len, size_t rate, uint8_
     uint64_t st[25];
     uint8_t *sb = (uint8_t *)st;
     memset(st, 0, sizeof st);
+    size_t rate_words = rate >> 3;
+#if W_CRYPTO_HW
+    if (len >= rate && __builtin_expect(w_hw_sha3_available(), 1)) {
+        size_t full_blocks = len / rate;
+        w_keccak_absorb_hw(st, data, full_blocks, rate_words);
+        data += full_blocks * rate;
+        len -= full_blocks * rate;
+    }
+#endif
     while (len >= rate) {
-        for (size_t i = 0; i < rate; i++) sb[i] ^= data[i];
+        for (size_t i = 0; i < rate_words; i++) {
+            uint64_t v;
+            memcpy(&v, data + i * 8, 8);
+            st[i] ^= v;
+        }
         w_keccakf1600(st);
         data += rate;
         len -= rate;
     }
-    for (size_t i = 0; i < len; i++) sb[i] ^= data[i];
+    size_t rem_words = len >> 3;
+    for (size_t i = 0; i < rem_words; i++) {
+        uint64_t v;
+        memcpy(&v, data + i * 8, 8);
+        st[i] ^= v;
+    }
+    for (size_t i = rem_words * 8; i < len; i++) sb[i] ^= data[i];
     sb[len] ^= pad;
     sb[rate - 1] ^= 0x80;
     w_keccakf1600(st);
@@ -35620,7 +35843,41 @@ static uint32_t w_crc32_sw(uint32_t crc, const uint8_t *p, size_t n, int castagn
 }
 
 #if W_CRYPTO_HW
-W_TARGET_CRC static uint32_t w_crc32_hw_ieee(uint32_t crc, const uint8_t *p, size_t n) {
+__attribute__((target("crc,aes"))) static uint32_t w_crc32_hw_ieee(uint32_t crc, const uint8_t *p, size_t n) {
+    if (n >= 1024 && w_hw_aes_available()) {
+        static uint32_t k1 = 0, k2 = 0, k3 = 0;
+        if (__builtin_expect(k1 == 0, 0)) {
+            uint32_t c = 1;
+            for (int i = 0; i < 31; i++) c = __builtin_arm_crc32d(c, 0);
+            k1 = c;
+            for (int i = 31; i < 63; i++) c = __builtin_arm_crc32d(c, 0);
+            k2 = c;
+            for (int i = 63; i < 95; i++) c = __builtin_arm_crc32d(c, 0);
+            k3 = c;
+        }
+        const poly64_t pk1 = (poly64_t)k1, pk2 = (poly64_t)k2, pk3 = (poly64_t)k3;
+        while (n >= 1024) {
+            uint32_t c0 = crc, c1 = 0, c2 = 0, c3 = 0;
+            const uint8_t *p0 = p, *p1 = p + 256, *p2 = p + 512, *p3 = p + 768;
+            for (int i = 0; i < 32; i++) {
+                uint64_t v0, v1, v2, v3;
+                memcpy(&v0, p0 + i * 8, 8);
+                memcpy(&v1, p1 + i * 8, 8);
+                memcpy(&v2, p2 + i * 8, 8);
+                memcpy(&v3, p3 + i * 8, 8);
+                c0 = __builtin_arm_crc32d(c0, v0);
+                c1 = __builtin_arm_crc32d(c1, v1);
+                c2 = __builtin_arm_crc32d(c2, v2);
+                c3 = __builtin_arm_crc32d(c3, v3);
+            }
+            uint64_t cl0 = (uint64_t)vmull_p64((poly64_t)c0, pk3);
+            uint64_t cl1 = (uint64_t)vmull_p64((poly64_t)c1, pk2);
+            uint64_t cl2 = (uint64_t)vmull_p64((poly64_t)c2, pk1);
+            crc = c3 ^ __builtin_arm_crc32d(0, cl0 ^ cl1 ^ cl2);
+            p += 1024;
+            n -= 1024;
+        }
+    }
     while (n >= 8) {
         uint64_t v;
         memcpy(&v, p, 8);
@@ -35632,7 +35889,41 @@ W_TARGET_CRC static uint32_t w_crc32_hw_ieee(uint32_t crc, const uint8_t *p, siz
     return crc;
 }
 
-W_TARGET_CRC static uint32_t w_crc32_hw_castagnoli(uint32_t crc, const uint8_t *p, size_t n) {
+__attribute__((target("crc,aes"))) static uint32_t w_crc32_hw_castagnoli(uint32_t crc, const uint8_t *p, size_t n) {
+    if (n >= 1024 && w_hw_aes_available()) {
+        static uint32_t k1 = 0, k2 = 0, k3 = 0;
+        if (__builtin_expect(k1 == 0, 0)) {
+            uint32_t c = 1;
+            for (int i = 0; i < 31; i++) c = __builtin_arm_crc32cd(c, 0);
+            k1 = c;
+            for (int i = 31; i < 63; i++) c = __builtin_arm_crc32cd(c, 0);
+            k2 = c;
+            for (int i = 63; i < 95; i++) c = __builtin_arm_crc32cd(c, 0);
+            k3 = c;
+        }
+        const poly64_t pk1 = (poly64_t)k1, pk2 = (poly64_t)k2, pk3 = (poly64_t)k3;
+        while (n >= 1024) {
+            uint32_t c0 = crc, c1 = 0, c2 = 0, c3 = 0;
+            const uint8_t *p0 = p, *p1 = p + 256, *p2 = p + 512, *p3 = p + 768;
+            for (int i = 0; i < 32; i++) {
+                uint64_t v0, v1, v2, v3;
+                memcpy(&v0, p0 + i * 8, 8);
+                memcpy(&v1, p1 + i * 8, 8);
+                memcpy(&v2, p2 + i * 8, 8);
+                memcpy(&v3, p3 + i * 8, 8);
+                c0 = __builtin_arm_crc32cd(c0, v0);
+                c1 = __builtin_arm_crc32cd(c1, v1);
+                c2 = __builtin_arm_crc32cd(c2, v2);
+                c3 = __builtin_arm_crc32cd(c3, v3);
+            }
+            uint64_t cl0 = (uint64_t)vmull_p64((poly64_t)c0, pk3);
+            uint64_t cl1 = (uint64_t)vmull_p64((poly64_t)c1, pk2);
+            uint64_t cl2 = (uint64_t)vmull_p64((poly64_t)c2, pk1);
+            crc = c3 ^ __builtin_arm_crc32cd(0, cl0 ^ cl1 ^ cl2);
+            p += 1024;
+            n -= 1024;
+        }
+    }
     while (n >= 8) {
         uint64_t v;
         memcpy(&v, p, 8);
@@ -35981,83 +36272,131 @@ static int w_aes_gcm_open_core(const uint8_t *key, size_t keylen, const uint8_t 
     return 1;
 }
 
-static void w_md5_digest(const uint8_t *data, size_t len, uint8_t out[16]) {
-    static const uint32_t r[64] = {
-        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
-        5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
-        4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
-        6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
-    };
-    static const uint32_t k[64] = {
-        0xd76aa478U, 0xe8c7b756U, 0x242070dbU, 0xc1bdceeeU,
-        0xf57c0fafU, 0x4787c62aU, 0xa8304613U, 0xfd469501U,
-        0x698098d8U, 0x8b44f7afU, 0xffff5bb1U, 0x895cd7beU,
-        0x6b901122U, 0xfd987193U, 0xa679438eU, 0x49b40821U,
-        0xf61e2562U, 0xc040b340U, 0x265e5a51U, 0xe9b6c7aaU,
-        0xd62f105dU, 0x02441453U, 0xd8a1e681U, 0xe7d3fbc8U,
-        0x21e1cde6U, 0xc33707d6U, 0xf4d50d87U, 0x455a14edU,
-        0xa9e3e905U, 0xfcefa3f8U, 0x676f02d9U, 0x8d2a4c8aU,
-        0xfffa3942U, 0x8771f681U, 0x6d9d6122U, 0xfde5380cU,
-        0xa4beea44U, 0x4bdecfa9U, 0xf6bb4b60U, 0xbebfbc70U,
-        0x289b7ec6U, 0xeaa127faU, 0xd4ef3085U, 0x04881d05U,
-        0xd9d4d039U, 0xe6db99e5U, 0x1fa27cf8U, 0xc4ac5665U,
-        0xf4292244U, 0x432aff97U, 0xab9423a7U, 0xfc93a039U,
-        0x655b59c3U, 0x8f0ccc92U, 0xffeff47dU, 0x85845dd1U,
-        0x6fa87e4fU, 0xfe2ce6e0U, 0xa3014314U, 0x4e0811a1U,
-        0xf7537e82U, 0xbd3af235U, 0x2ad7d2bbU, 0xeb86d391U
-    };
+#define W_MD5_F1(x, y, z) ((z) ^ ((x) & ((y) ^ (z))))
+#define W_MD5_F2(x, y, z) W_MD5_F1((z), (x), (y))
+#define W_MD5_F3(x, y, z) ((x) ^ (y) ^ (z))
+#define W_MD5_F4(x, y, z) ((y) ^ ((x) | ~(z)))
+#define W_MD5_STEP(f, a, b, c, d, x, t, s) \
+    (a) += f((b), (c), (d)) + (x) + (t); \
+    (a) = w_rotl32((a), (s)); \
+    (a) += (b);
 
-    uint32_t h0 = 0x67452301U;
-    uint32_t h1 = 0xefcdab89U;
-    uint32_t h2 = 0x98badcfeU;
-    uint32_t h3 = 0x10325476U;
-
-    size_t total = w_digest_padded_len(len);
-    uint8_t *msg = calloc(1, total);
-    if (len > 0) memcpy(msg, data, len);
-    msg[len] = 0x80;
-    uint64_t bit_len = (uint64_t)len * 8U;
-    for (int i = 0; i < 8; i++) msg[total - 8 + i] = (uint8_t)(bit_len >> (8 * i));
-
-    for (size_t offset = 0; offset < total; offset += 64) {
-        uint32_t w[16];
-        for (int i = 0; i < 16; i++) w[i] = w_load_le32(msg + offset + i * 4);
+static void w_md5_compress(uint32_t st[4], const uint8_t *data, size_t blocks) {
+    uint32_t h0 = st[0], h1 = st[1], h2 = st[2], h3 = st[3];
+    for (size_t blk = 0; blk < blocks; blk++, data += 64) {
+        uint32_t w0  = w_load_le32(data +  0), w1  = w_load_le32(data +  4);
+        uint32_t w2  = w_load_le32(data +  8), w3  = w_load_le32(data + 12);
+        uint32_t w4  = w_load_le32(data + 16), w5  = w_load_le32(data + 20);
+        uint32_t w6  = w_load_le32(data + 24), w7  = w_load_le32(data + 28);
+        uint32_t w8  = w_load_le32(data + 32), w9  = w_load_le32(data + 36);
+        uint32_t w10 = w_load_le32(data + 40), w11 = w_load_le32(data + 44);
+        uint32_t w12 = w_load_le32(data + 48), w13 = w_load_le32(data + 52);
+        uint32_t w14 = w_load_le32(data + 56), w15 = w_load_le32(data + 60);
 
         uint32_t a = h0, b = h1, c = h2, d = h3;
-        for (uint32_t i = 0; i < 64; i++) {
-            uint32_t f, g;
-            if (i < 16) {
-                f = (b & c) | (~b & d);
-                g = i;
-            } else if (i < 32) {
-                f = (d & b) | (~d & c);
-                g = (5 * i + 1) & 15;
-            } else if (i < 48) {
-                f = b ^ c ^ d;
-                g = (3 * i + 5) & 15;
-            } else {
-                f = c ^ (b | ~d);
-                g = (7 * i) & 15;
-            }
-            uint32_t tmp = d;
-            d = c;
-            c = b;
-            b = b + w_rotl32(a + f + k[i] + w[g], r[i]);
-            a = tmp;
-        }
+
+        W_MD5_STEP(W_MD5_F1, a, b, c, d, w0,  0xd76aa478U,  7)
+        W_MD5_STEP(W_MD5_F1, d, a, b, c, w1,  0xe8c7b756U, 12)
+        W_MD5_STEP(W_MD5_F1, c, d, a, b, w2,  0x242070dbU, 17)
+        W_MD5_STEP(W_MD5_F1, b, c, d, a, w3,  0xc1bdceeeU, 22)
+        W_MD5_STEP(W_MD5_F1, a, b, c, d, w4,  0xf57c0fafU,  7)
+        W_MD5_STEP(W_MD5_F1, d, a, b, c, w5,  0x4787c62aU, 12)
+        W_MD5_STEP(W_MD5_F1, c, d, a, b, w6,  0xa8304613U, 17)
+        W_MD5_STEP(W_MD5_F1, b, c, d, a, w7,  0xfd469501U, 22)
+        W_MD5_STEP(W_MD5_F1, a, b, c, d, w8,  0x698098d8U,  7)
+        W_MD5_STEP(W_MD5_F1, d, a, b, c, w9,  0x8b44f7afU, 12)
+        W_MD5_STEP(W_MD5_F1, c, d, a, b, w10, 0xffff5bb1U, 17)
+        W_MD5_STEP(W_MD5_F1, b, c, d, a, w11, 0x895cd7beU, 22)
+        W_MD5_STEP(W_MD5_F1, a, b, c, d, w12, 0x6b901122U,  7)
+        W_MD5_STEP(W_MD5_F1, d, a, b, c, w13, 0xfd987193U, 12)
+        W_MD5_STEP(W_MD5_F1, c, d, a, b, w14, 0xa679438eU, 17)
+        W_MD5_STEP(W_MD5_F1, b, c, d, a, w15, 0x49b40821U, 22)
+
+        W_MD5_STEP(W_MD5_F2, a, b, c, d, w1,  0xf61e2562U,  5)
+        W_MD5_STEP(W_MD5_F2, d, a, b, c, w6,  0xc040b340U,  9)
+        W_MD5_STEP(W_MD5_F2, c, d, a, b, w11, 0x265e5a51U, 14)
+        W_MD5_STEP(W_MD5_F2, b, c, d, a, w0,  0xe9b6c7aaU, 20)
+        W_MD5_STEP(W_MD5_F2, a, b, c, d, w5,  0xd62f105dU,  5)
+        W_MD5_STEP(W_MD5_F2, d, a, b, c, w10, 0x02441453U,  9)
+        W_MD5_STEP(W_MD5_F2, c, d, a, b, w15, 0xd8a1e681U, 14)
+        W_MD5_STEP(W_MD5_F2, b, c, d, a, w4,  0xe7d3fbc8U, 20)
+        W_MD5_STEP(W_MD5_F2, a, b, c, d, w9,  0x21e1cde6U,  5)
+        W_MD5_STEP(W_MD5_F2, d, a, b, c, w14, 0xc33707d6U,  9)
+        W_MD5_STEP(W_MD5_F2, c, d, a, b, w3,  0xf4d50d87U, 14)
+        W_MD5_STEP(W_MD5_F2, b, c, d, a, w8,  0x455a14edU, 20)
+        W_MD5_STEP(W_MD5_F2, a, b, c, d, w13, 0xa9e3e905U,  5)
+        W_MD5_STEP(W_MD5_F2, d, a, b, c, w2,  0xfcefa3f8U,  9)
+        W_MD5_STEP(W_MD5_F2, c, d, a, b, w7,  0x676f02d9U, 14)
+        W_MD5_STEP(W_MD5_F2, b, c, d, a, w12, 0x8d2a4c8aU, 20)
+
+        W_MD5_STEP(W_MD5_F3, a, b, c, d, w5,  0xfffa3942U,  4)
+        W_MD5_STEP(W_MD5_F3, d, a, b, c, w8,  0x8771f681U, 11)
+        W_MD5_STEP(W_MD5_F3, c, d, a, b, w11, 0x6d9d6122U, 16)
+        W_MD5_STEP(W_MD5_F3, b, c, d, a, w14, 0xfde5380cU, 23)
+        W_MD5_STEP(W_MD5_F3, a, b, c, d, w1,  0xa4beea44U,  4)
+        W_MD5_STEP(W_MD5_F3, d, a, b, c, w4,  0x4bdecfa9U, 11)
+        W_MD5_STEP(W_MD5_F3, c, d, a, b, w7,  0xf6bb4b60U, 16)
+        W_MD5_STEP(W_MD5_F3, b, c, d, a, w10, 0xbebfbc70U, 23)
+        W_MD5_STEP(W_MD5_F3, a, b, c, d, w13, 0x289b7ec6U,  4)
+        W_MD5_STEP(W_MD5_F3, d, a, b, c, w0,  0xeaa127faU, 11)
+        W_MD5_STEP(W_MD5_F3, c, d, a, b, w3,  0xd4ef3085U, 16)
+        W_MD5_STEP(W_MD5_F3, b, c, d, a, w6,  0x04881d05U, 23)
+        W_MD5_STEP(W_MD5_F3, a, b, c, d, w9,  0xd9d4d039U,  4)
+        W_MD5_STEP(W_MD5_F3, d, a, b, c, w12, 0xe6db99e5U, 11)
+        W_MD5_STEP(W_MD5_F3, c, d, a, b, w15, 0x1fa27cf8U, 16)
+        W_MD5_STEP(W_MD5_F3, b, c, d, a, w2,  0xc4ac5665U, 23)
+
+        W_MD5_STEP(W_MD5_F4, a, b, c, d, w0,  0xf4292244U,  6)
+        W_MD5_STEP(W_MD5_F4, d, a, b, c, w7,  0x432aff97U, 10)
+        W_MD5_STEP(W_MD5_F4, c, d, a, b, w14, 0xab9423a7U, 15)
+        W_MD5_STEP(W_MD5_F4, b, c, d, a, w5,  0xfc93a039U, 21)
+        W_MD5_STEP(W_MD5_F4, a, b, c, d, w12, 0x655b59c3U,  6)
+        W_MD5_STEP(W_MD5_F4, d, a, b, c, w3,  0x8f0ccc92U, 10)
+        W_MD5_STEP(W_MD5_F4, c, d, a, b, w10, 0xffeff47dU, 15)
+        W_MD5_STEP(W_MD5_F4, b, c, d, a, w1,  0x85845dd1U, 21)
+        W_MD5_STEP(W_MD5_F4, a, b, c, d, w8,  0x6fa87e4fU,  6)
+        W_MD5_STEP(W_MD5_F4, d, a, b, c, w15, 0xfe2ce6e0U, 10)
+        W_MD5_STEP(W_MD5_F4, c, d, a, b, w6,  0xa3014314U, 15)
+        W_MD5_STEP(W_MD5_F4, b, c, d, a, w13, 0x4e0811a1U, 21)
+        W_MD5_STEP(W_MD5_F4, a, b, c, d, w4,  0xf7537e82U,  6)
+        W_MD5_STEP(W_MD5_F4, d, a, b, c, w11, 0xbd3af235U, 10)
+        W_MD5_STEP(W_MD5_F4, c, d, a, b, w2,  0x2ad7d2bbU, 15)
+        W_MD5_STEP(W_MD5_F4, b, c, d, a, w9,  0xeb86d391U, 21)
+
         h0 += a;
         h1 += b;
         h2 += c;
         h3 += d;
     }
-    free(msg);
+    st[0] = h0; st[1] = h1; st[2] = h2; st[3] = h3;
+}
+#undef W_MD5_F1
+#undef W_MD5_F2
+#undef W_MD5_F3
+#undef W_MD5_F4
+#undef W_MD5_STEP
 
-    uint32_t h[4] = {h0, h1, h2, h3};
+static void w_md5_digest(const uint8_t *data, size_t len, uint8_t out[16]) {
+    uint32_t st[4] = {0x67452301U, 0xefcdab89U, 0x98badcfeU, 0x10325476U};
+    size_t full_blocks = len / 64;
+    if (full_blocks > 0) {
+        w_md5_compress(st, data, full_blocks);
+    }
+    size_t rem = len - full_blocks * 64;
+    size_t tail_len = (rem < 56) ? 64 : 128;
+    uint8_t tail[128];
+    memset(tail, 0, tail_len);
+    if (rem > 0) memcpy(tail, data + full_blocks * 64, rem);
+    tail[rem] = 0x80;
+    uint64_t bit_len = (uint64_t)len * 8U;
+    for (int i = 0; i < 8; i++) tail[tail_len - 8 + i] = (uint8_t)(bit_len >> (8 * i));
+    w_md5_compress(st, tail, tail_len / 64);
+
     for (int i = 0; i < 4; i++) {
-        out[i * 4] = (uint8_t)h[i];
-        out[i * 4 + 1] = (uint8_t)(h[i] >> 8);
-        out[i * 4 + 2] = (uint8_t)(h[i] >> 16);
-        out[i * 4 + 3] = (uint8_t)(h[i] >> 24);
+        out[i * 4]     = (uint8_t)st[i];
+        out[i * 4 + 1] = (uint8_t)(st[i] >> 8);
+        out[i * 4 + 2] = (uint8_t)(st[i] >> 16);
+        out[i * 4 + 3] = (uint8_t)(st[i] >> 24);
     }
 }
 
@@ -73889,7 +74228,7 @@ WValue w_array_view(WValue arr, WValue lo_v, WValue len_v) {
     /* Reuse w_array_view: same heap struct, W_FLAG_VIEW set,
      * `slots` ptr offset to the live window. */
     int8_t eb = src->ebits;
-    int64_t abs_bits = eb < 0 ? -eb : (eb == 65 ? 64 : eb);
+    int64_t abs_bits = array_storage_bits(eb);
     WValue view_val;
     if (abs_bits == 4) {
         if ((src->start + lo) & 1) {
@@ -73897,6 +74236,12 @@ WValue w_array_view(WValue arr, WValue lo_v, WValue len_v) {
             return W_NIL;
         }
         view_val = w_array_view_raw((uint8_t *)src->slots + ((int64_t)src->start + lo) / 2, eb, len);
+    } else if (abs_bits == 1) {
+        if ((src->start + lo) & 7) {
+            w_raise(w_string("arr.slice_view: u1 slice must align on a byte boundary"));
+            return W_NIL;
+        }
+        view_val = w_array_view_raw((uint8_t *)src->slots + ((int64_t)src->start + lo) / 8, eb, len);
     } else {
         view_val = w_array_view_raw((uint8_t *)src->slots + ((int64_t)src->start + lo) * (abs_bits / 8), eb, len);
     }
@@ -74519,7 +74864,7 @@ WValue w_big_array_subview(WValue arr_val, int64_t lo, int64_t len) {
     if (lo + len > src->size) len = src->size - lo;
 
     int8_t eb = (int8_t)src->ebits;
-    int64_t abs_bits = eb < 0 ? -eb : (eb == 65 ? 64 : eb);
+    int64_t abs_bits = array_storage_bits(eb);
     int64_t base_index = src->start + lo;
     uint8_t *base;
     if (abs_bits == 4) {

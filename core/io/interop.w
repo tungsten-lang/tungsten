@@ -1,9 +1,9 @@
 # Standard scientific interchange formats (HDF5, Apache Parquet, Apache Arrow IPC)
 # implemented natively in pure Tungsten — no Python, h5py, or PyArrow runtime dependency.
-use ../io
-use ../file
-use ../base64
-use ../math
+use core/io
+use core/file
+use core/base64
+use core/math
 
 + SciByteBuf
   rw :buf, :len
@@ -20,10 +20,7 @@ use ../math
     if ncap < need
       ncap = need + 256
     nb = u8[ncap]
-    i = 0
-    while i < @len
-      nb[i] = @buf[i]
-      i += 1
+    sci_copy_bytes(nb, 0, @buf, 0, @len)
     @buf = nb
     self
 
@@ -36,10 +33,7 @@ use ../math
   -> extend(bytes)
     n = bytes.size
     ensure_cap(n)
-    i = 0
-    while i < n
-      @buf[@len + i] = bytes[i]
-      i += 1
+    sci_copy_bytes(@buf, @len, bytes, 0, n)
     @len += n
     self
 
@@ -116,11 +110,10 @@ use ../math
       i += 1
 
   -> to_bytes
+    if @len == @buf.size
+      return @buf
     out = u8[@len]
-    i = 0
-    while i < @len
-      out[i] = @buf[i]
-      i += 1
+    sci_copy_bytes(out, 0, @buf, 0, @len)
     out
 
 + SciBin
@@ -285,42 +278,170 @@ use ../math
     out.put_u32_le(hi)
 
 # ---- RFC 1951 DEFLATE / RFC 1950 zlib / RFC 1952 gzip ----
+-> sci_copy_bytes(dst, dst_off, src, src_off, n) (u8[] i64 u8[] i64 i64) i64
+  i = 0
+  while i < n
+    dst[dst_off + i] = src[src_off + i]
+    i += 1
+  n
+
+-> sci_zlib_compress_kernel(src, n, out) (u8[] i64 u8[]) i64
+  out[0] = 120
+  out[1] = 1
+  out_pos = 2
+  pos = 0
+  while pos < n || n == 0
+    chunk = n - pos
+    if chunk > 65535
+      chunk = 65535
+    last = (pos + chunk >= n) ? 1 : 0
+    nchunk = chunk ^ 65535
+    out[out_pos] = last
+    out[out_pos + 1] = chunk & 255
+    out[out_pos + 2] = (chunk >> 8) & 255
+    out[out_pos + 3] = nchunk & 255
+    out[out_pos + 4] = (nchunk >> 8) & 255
+    out_pos += 5
+    i = 0
+    while i < chunk
+      out[out_pos + i] = src[pos + i]
+      i += 1
+    out_pos += chunk
+    pos += chunk
+    if n == 0
+      break
+  s1 = 1
+  s2 = 0
+  i = 0
+  while i < n
+    lim = i + 5552
+    if lim > n
+      lim = n
+    while i < lim
+      s1 += src[i] ## i64
+      s2 += s1
+      i += 1
+    s1 = s1 % 65521
+    s2 = s2 % 65521
+  out[out_pos] = (s2 >> 8) & 255
+  out[out_pos + 1] = s2 & 255
+  out[out_pos + 2] = (s1 >> 8) & 255
+  out[out_pos + 3] = s1 & 255
+  out_pos + 4
+
+-> sci_build_huffman_kernel(lengths, n, counts, next_code, tab) (i64[] i64 i64[] i64[] i32[]) i64
+  i = 0
+  while i < n
+    l = lengths[i]
+    if l > 0
+      counts[l] += 1
+    i += 1
+  code = 0
+  bits = 1
+  while bits <= 15
+    code = (code + counts[bits - 1]) << 1
+    next_code[bits] = code
+    bits += 1
+  i = 0
+  while i < n
+    l = lengths[i]
+    if l > 0
+      c = next_code[l]
+      next_code[l] = c + 1
+      rev = 0
+      b = 0
+      tmp = c
+      while b < l
+        rev = (rev << 1) | (tmp & 1)
+        tmp = tmp >> 1
+        b += 1
+      entry = ((i + 1) << 4) | l
+      step = 1 << l
+      idx = rev
+      while idx < 32768
+        tab[idx] = entry
+        idx += step
+    i += 1
+  0
+
+-> sci_inflate_huffman_kernel(src, src_n, st, lit_tab, dist_tab, lbase, lextra, dbase, dextra, out_buf, out_len, out_cap) (u8[] i64 i64[] i32[] i32[] i64[] i64[] i64[] i64[] u8[] i64 i64) i64
+  pos = st[0]
+  buf = st[1]
+  cnt = st[2]
+  while true
+    if out_len + 258 > out_cap
+      st[0] = pos
+      st[1] = buf
+      st[2] = cnt
+      return 0 - 1 - out_len
+    while cnt < 15 && pos < src_n
+      buf = buf | ((src[pos] ## i64) << cnt)
+      pos += 1
+      cnt += 8
+    entry = lit_tab[buf & 32767] ## i64
+    blen = entry & 15
+    if blen == 0 || cnt < blen
+      return 0 - 2000000000
+    buf = buf >> blen
+    cnt -= blen
+    sym = (entry >> 4) - 1
+    if sym < 256
+      out_buf[out_len] = sym
+      out_len += 1
+    elsif sym == 256
+      st[0] = pos
+      st[1] = buf
+      st[2] = cnt
+      return out_len
+    else
+      lidx = sym - 257
+      le = lextra[lidx]
+      while cnt < le
+        if pos >= src_n
+          return 0 - 2000000001
+        buf = buf | ((src[pos] ## i64) << cnt)
+        pos += 1
+        cnt += 8
+      length = lbase[lidx] + (buf & ((1 << le) - 1))
+      buf = buf >> le
+      cnt -= le
+      while cnt < 15 && pos < src_n
+        buf = buf | ((src[pos] ## i64) << cnt)
+        pos += 1
+        cnt += 8
+      dentry = dist_tab[buf & 32767] ## i64
+      dblen = dentry & 15
+      if dblen == 0 || cnt < dblen
+        return 0 - 2000000000
+      buf = buf >> dblen
+      cnt -= dblen
+      didx = (dentry >> 4) - 1
+      de = dextra[didx]
+      while cnt < de
+        if pos >= src_n
+          return 0 - 2000000001
+        buf = buf | ((src[pos] ## i64) << cnt)
+        pos += 1
+        cnt += 8
+      dist = dbase[didx] + (buf & ((1 << de) - 1))
+      buf = buf >> de
+      cnt -= de
+      start = out_len - dist
+      k = 0
+      while k < length
+        out_buf[out_len + k] = out_buf[start + k]
+        k += 1
+      out_len += length
+  out_len
+
 + SciDeflate
   -> .zlib_compress(src)
     # Use stored DEFLATE blocks inside RFC 1950 zlib framing (valid for any size, exact & fast).
-    n = src.size
-    out = SciByteBuf.new(n + 64)
-    out.push(120)
-    out.push(1)
-    pos = 0
-    while pos < n || n == 0
-      chunk = n - pos
-      if chunk > 65535
-        chunk = 65535
-      last = (pos + chunk >= n) ? 1 : 0
-      out.push(last)
-      out.put_u16_le(chunk)
-      out.put_u16_le(chunk ^ 65535)
-      i = 0
-      while i < chunk
-        out.push(src[pos + i])
-        i += 1
-      pos += chunk
-      if n == 0
-        break
-    # Adler-32 big-endian
-    s1 = 1
-    s2 = 0
-    i = 0
-    while i < n
-      s1 = (s1 + (src[i] ## i64)) % 65521
-      s2 = (s2 + s1) % 65521
-      i += 1
-    out.push((s2 >> 8) & 255)
-    out.push(s2 & 255)
-    out.push((s1 >> 8) & 255)
-    out.push(s1 & 255)
-    out.to_bytes
+    n = src.size ## i64
+    num_blocks = n == 0 ? 1 : (n + 65534) / 65535
+    out = u8[2 + num_blocks * 5 + n + 4]
+    sci_zlib_compress_kernel(src, n, out)
+    out
 
   -> .zlib_decompress(src)
     if src.size < 6
@@ -350,73 +471,108 @@ use ../math
   -> .build_huffman(lengths, nsyms)
     counts = i64[16]
     next_code = i64[16]
-    i = 0
-    while i < nsyms
-      l = lengths[i]
-      if l > 0
-        counts[l] += 1
-      i += 1
-    code = 0
-    bits = 1
-    while bits <= 15
-      code = (code + counts[bits - 1]) << 1
-      next_code[bits] = code
-      bits += 1
-    # Map (bits << 16) | code -> sym + 1
-    table = {}
-    i = 0
-    while i < nsyms
-      l = lengths[i]
-      if l > 0
-        c = next_code[l]
-        next_code[l] = c + 1
-        table[(l << 16) | c] = i
-      i += 1
-    table
+    tab = i32[32768]
+    sci_build_huffman_kernel(lengths, nsyms, counts, next_code, tab)
+    tab
 
   -> .read_bits(src, st, nbits)
     # st[0]=byte_pos, st[1]=bit_buf, st[2]=bit_cnt
     buf = st[1]
     cnt = st[2]
     pos = st[0]
-    while cnt < nbits
-      if pos >= src.size
+    nb = nbits ## i64
+    src_n = src.size ## i64
+    while cnt < nb
+      if pos >= src_n
         raise "unexpected EOF in deflate stream"
       buf = buf | ((src[pos] ## i64) << cnt)
       pos += 1
       cnt += 8
-    val = buf & ((1 << nbits) - 1)
+    val = buf & ((1 << nb) - 1)
     st[0] = pos
-    st[1] = buf >> nbits
-    st[2] = cnt - nbits
+    st[1] = buf >> nb
+    st[2] = cnt - nb
     val
 
   -> .decode_sym(src, st, table)
-    code = 0
-    bits = 1
-    while bits <= 15
-      bit = SciDeflate.read_bits(src, st, 1)
-      code = (code << 1) | bit
-      key = (bits << 16) | code
-      if table.has_key?(key)
-        return table[key]
-      bits += 1
-    raise "invalid Huffman code in deflate stream"
+    buf = st[1]
+    cnt = st[2]
+    pos = st[0]
+    src_n = src.size ## i64
+    while cnt < 15 && pos < src_n
+      buf = buf | ((src[pos] ## i64) << cnt)
+      pos += 1
+      cnt += 8
+    entry = table[buf & 32767] ## i64
+    blen = entry & 15
+    if blen == 0 || cnt < blen
+      raise "invalid Huffman code in deflate stream"
+    st[0] = pos
+    st[1] = buf >> blen
+    st[2] = cnt - blen
+    (entry >> 4) - 1
 
   -> .inflate_raw(src, start_pos)
+    src_n = src.size ## i64
     st = i64[3]
-    st[0] = start_pos
+    st[0] = start_pos ## i64
     st[1] = 0
     st[2] = 0
-    out = SciByteBuf.new(256)
-    lbase = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
-    lextra = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0]
-    dbase = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577]
-    dextra = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
-    cl_order = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+    init_cap = src_n * 2 + 512
+    out = SciByteBuf.new(init_cap)
 
-    fixed_lit = nil
-    fixed_dist = nil
+    if @@fixed_lit == nil
+      lbase = i64[29]
+      lextra = i64[29]
+      lbase_lit = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
+      lextra_lit = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0]
+      i = 0
+      while i < 29
+        lbase[i] = lbase_lit[i] ## i64
+        lextra[i] = lextra_lit[i] ## i64
+        i += 1
+      @@lbase = lbase
+      @@lextra = lextra
+
+      dbase = i64[30]
+      dextra = i64[30]
+      dbase_lit = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577]
+      dextra_lit = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
+      i = 0
+      while i < 30
+        dbase[i] = dbase_lit[i] ## i64
+        dextra[i] = dextra_lit[i] ## i64
+        i += 1
+      @@dbase = dbase
+      @@dextra = dextra
+
+      ll = i64[288]
+      i = 0
+      while i < 144
+        ll[i] = 8
+        i += 1
+      while i < 256
+        ll[i] = 9
+        i += 1
+      while i < 280
+        ll[i] = 7
+        i += 1
+      while i < 288
+        ll[i] = 8
+        i += 1
+      @@fixed_lit = SciDeflate.build_huffman(ll, 288)
+      dl = i64[32]
+      i = 0
+      while i < 32
+        dl[i] = 5
+        i += 1
+      @@fixed_dist = SciDeflate.build_huffman(dl, 32)
+
+    lbase = @@lbase
+    lextra = @@lextra
+    dbase = @@dbase
+    dextra = @@dextra
+    cl_order = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
 
     bfinal = 0
     while bfinal == 0
@@ -427,44 +583,21 @@ use ../math
         st[1] = 0
         st[2] = 0
         pos = st[0]
-        len = SciBin.u16_le(src, pos)
-        nlen = SciBin.u16_le(src, pos + 2)
+        len = SciBin.u16_le(src, pos) ## i64
+        nlen = SciBin.u16_le(src, pos + 2) ## i64
         if (len ^ nlen) != 65535
           raise "corrupt stored block length"
         pos += 4
-        i = 0
-        while i < len
-          out.push(src[pos + i])
-          i += 1
+        out.ensure_cap(len)
+        sci_copy_bytes(out.buf, out.len, src, pos, len)
+        out.len = out.len + len
         st[0] = pos + len
       elsif btype == 1 || btype == 2
         lit_tab = nil
         dist_tab = nil
         if btype == 1
-          if fixed_lit == nil
-            ll = i64[288]
-            i = 0
-            while i < 144
-              ll[i] = 8
-              i += 1
-            while i < 256
-              ll[i] = 9
-              i += 1
-            while i < 280
-              ll[i] = 7
-              i += 1
-            while i < 288
-              ll[i] = 8
-              i += 1
-            fixed_lit = SciDeflate.build_huffman(ll, 288)
-            dl = i64[32]
-            i = 0
-            while i < 32
-              dl[i] = 5
-              i += 1
-            fixed_dist = SciDeflate.build_huffman(dl, 32)
-          lit_tab = fixed_lit
-          dist_tab = fixed_dist
+          lit_tab = @@fixed_lit
+          dist_tab = @@fixed_dist
         else
           hlit = SciDeflate.read_bits(src, st, 5) + 257
           hdist = SciDeflate.read_bits(src, st, 5) + 1
@@ -519,21 +652,19 @@ use ../math
           dist_tab = SciDeflate.build_huffman(dl, hdist)
 
         while true
-          sym = SciDeflate.decode_sym(src, st, lit_tab)
-          if sym < 256
-            out.push(sym)
-          elsif sym == 256
+          if out.len + 258 > out.buf.size
+            out.ensure_cap(out.buf.size + 4096)
+          res = sci_inflate_huffman_kernel(src, src_n, st, lit_tab, dist_tab, lbase, lextra, dbase, dextra, out.buf, out.len, out.buf.size)
+          if res >= 0
+            out.len = res
             break
+          elsif res == 0 - 2000000000
+            raise "invalid Huffman code in deflate stream"
+          elsif res == 0 - 2000000001
+            raise "unexpected EOF in deflate stream"
           else
-            lidx = sym - 257
-            length = lbase[lidx] + SciDeflate.read_bits(src, st, lextra[lidx])
-            didx = SciDeflate.decode_sym(src, st, dist_tab)
-            dist = dbase[didx] + SciDeflate.read_bits(src, st, dextra[didx])
-            start = out.len - dist
-            k = 0
-            while k < length
-              out.push(out.buf[start + k])
-              k += 1
+            out.len = 0 - 1 - res
+            out.ensure_cap(out.buf.size + 4096)
       else
         raise "invalid deflate block type"
     out.to_bytes

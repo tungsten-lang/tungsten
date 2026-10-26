@@ -26,6 +26,38 @@
 #define RDX_COMMON
 #define RDX_CAT2(a, b) a##b
 #define RDX_CAT(a, b) RDX_CAT2(a, b)
+
+static void *g_rdx_scratch_ptr = NULL;
+static size_t g_rdx_scratch_cap = 0;
+static _Atomic int g_rdx_scratch_busy = 0;
+
+static inline void *rdx_scratch_acquire(size_t bytes, int *pooled) {
+    if (bytes <= (32u << 20) &&
+        atomic_exchange_explicit(&g_rdx_scratch_busy, 1, memory_order_acquire) == 0) {
+        if (bytes > g_rdx_scratch_cap) {
+            void *p = realloc(g_rdx_scratch_ptr, bytes);
+            if (!p) {
+                atomic_store_explicit(&g_rdx_scratch_busy, 0, memory_order_release);
+                *pooled = 0;
+                return NULL;
+            }
+            g_rdx_scratch_ptr = p;
+            g_rdx_scratch_cap = bytes;
+        }
+        *pooled = 1;
+        return g_rdx_scratch_ptr;
+    }
+    *pooled = 0;
+    return malloc(bytes);
+}
+
+static inline void rdx_scratch_release(void *p, int pooled) {
+    if (pooled) {
+        atomic_store_explicit(&g_rdx_scratch_busy, 0, memory_order_release);
+    } else {
+        free(p);
+    }
+}
 #endif
 
 #define RDX_FN(name) RDX_CAT(RDX_CAT(rdx_##name##_, RDX_SUF), )
@@ -46,7 +78,8 @@ void RDX_FN(sort)(RDX_T *a, long n) {
         for (long i = 0, j = n - 1; i < j; i++, j--) { RDX_T t = a[i]; a[i] = a[j]; a[j] = t; }
         return;
     }
-    RDX_T *tmp = (RDX_T *)malloc((size_t)n * sizeof(RDX_T));
+    int pooled = 0;
+    RDX_T *tmp = (RDX_T *)rdx_scratch_acquire((size_t)n * sizeof(RDX_T), &pooled);
     if (!tmp) { RDX_PDQ(a, n); return; }
     size_t count[sizeof(RDX_T)][256];
     memset(count, 0, sizeof(count));
@@ -64,14 +97,25 @@ void RDX_FN(sort)(RDX_T *a, long n) {
         if (cnt[(size_t)((src[0] >> shift) & 0xFFu)] == (size_t)n) continue;
         size_t acc = 0;
         for (int k = 0; k < 256; k++) { size_t c = cnt[k]; cnt[k] = acc; acc += c; }
-        for (long i = 0; i < n; i++) {
+        long i = 0;
+        for (; i + 4 <= n; i += 4) {
+            RDX_T v0 = src[i];
+            RDX_T v1 = src[i + 1];
+            RDX_T v2 = src[i + 2];
+            RDX_T v3 = src[i + 3];
+            dst[cnt[(size_t)((v0 >> shift) & 0xFFu)]++] = v0;
+            dst[cnt[(size_t)((v1 >> shift) & 0xFFu)]++] = v1;
+            dst[cnt[(size_t)((v2 >> shift) & 0xFFu)]++] = v2;
+            dst[cnt[(size_t)((v3 >> shift) & 0xFFu)]++] = v3;
+        }
+        for (; i < n; i++) {
             RDX_T v = src[i];
             dst[cnt[(size_t)((v >> shift) & 0xFFu)]++] = v;
         }
         RDX_T *t = src; src = dst; dst = t;
     }
     if (src != a) memcpy(a, src, (size_t)n * sizeof(RDX_T));
-    free(tmp);
+    rdx_scratch_release(tmp, pooled);
 }
 
 #undef RDX_FN

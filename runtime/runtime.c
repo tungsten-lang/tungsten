@@ -22497,6 +22497,14 @@ static inline int w_bytes_ascii_p(const uint8_t *data, size_t len) {
     }
     size_t i = 0;
 #ifdef __aarch64__
+    while (i + 64 <= len) {
+        uint8x16_t v0 = vld1q_u8(data + i);
+        uint8x16_t v1 = vld1q_u8(data + i + 16);
+        uint8x16_t v2 = vld1q_u8(data + i + 32);
+        uint8x16_t v3 = vld1q_u8(data + i + 48);
+        if (vmaxvq_u8(vorrq_u8(vorrq_u8(v0, v1), vorrq_u8(v2, v3))) >= 0x80) return 0;
+        i += 64;
+    }
     while (i + 16 <= len) {
         uint8x16_t v = vld1q_u8(data + i);
         if (vmaxvq_u8(v) >= 0x80) return 0;
@@ -34358,13 +34366,26 @@ static void w_crypto_input_data(WValue data, const uint8_t **out, size_t *len, c
 
 static WValue w_hex_from_bytes(const uint8_t *bytes, size_t len) {
     static const char hex[] = "0123456789abcdef";
-    char *out = malloc(len * 2 + 1);
+    size_t hlen = len * 2;
+    if (hlen <= W_SLAB_SSO2_MAX) {
+        char stack_out[W_SLAB_SSO2_MAX + 1];
+        for (size_t i = 0; i < len; i++) {
+            stack_out[i * 2] = hex[bytes[i] >> 4];
+            stack_out[i * 2 + 1] = hex[bytes[i] & 0x0F];
+        }
+        stack_out[hlen] = '\0';
+        return w_string_n_known_ascii(stack_out, hlen, 1);
+    }
+    if (__builtin_expect(!g_string_slab.base, 0)) w_slab_init();
+    WString *ws = (WString *)malloc(sizeof(WString) + hlen + 1);
+    w_heap_string_set_meta(ws, (uint32_t)hlen, 1);
+    char *out = ws->data;
     for (size_t i = 0; i < len; i++) {
         out[i * 2] = hex[bytes[i] >> 4];
         out[i * 2 + 1] = hex[bytes[i] & 0x0F];
     }
-    out[len * 2] = '\0';
-    return w_string_take(out, len * 2);
+    out[hlen] = '\0';
+    return w_box_heap_str(ws);
 }
 
 static uint32_t w_rotl32(uint32_t x, uint32_t n) {
@@ -35810,29 +35831,100 @@ static void w_ghash_mul(uint8_t X[16], const uint8_t H[16]) {
 }
 
 static void w_ghash_absorb(uint8_t Y[16], const uint8_t H[16], const uint8_t *data, size_t len) {
+#if W_CRYPTO_HW
+    if (w_hw_aes_available()) {
+        while (len >= 16) {
+            vst1q_u8(Y, veorq_u8(vld1q_u8(Y), vld1q_u8(data)));
+            w_ghash_mul_hw(Y, H);
+            data += 16;
+            len -= 16;
+        }
+        if (len > 0) {
+            for (size_t i = 0; i < len; i++) Y[i] ^= data[i];
+            w_ghash_mul_hw(Y, H);
+        }
+        return;
+    }
+#endif
     while (len >= 16) {
         for (int i = 0; i < 16; i++) Y[i] ^= data[i];
-        w_ghash_mul(Y, H);
+        w_ghash_mul_sw(Y, H);
         data += 16;
         len -= 16;
     }
     if (len > 0) {
         for (size_t i = 0; i < len; i++) Y[i] ^= data[i];
-        w_ghash_mul(Y, H);
+        w_ghash_mul_sw(Y, H);
     }
 }
+
+#if W_CRYPTO_HW
+W_TARGET_AES static void w_aes_gcm_ctr_hw(const WAesKey *ks, const uint8_t nonce[12],
+                                          const uint8_t *in, size_t len, uint8_t *out) {
+    uint8_t ctr0[16], ctr1[16], ctr2[16], ctr3[16];
+    memcpy(ctr0, nonce, 12);
+    memcpy(ctr1, nonce, 12);
+    memcpy(ctr2, nonce, 12);
+    memcpy(ctr3, nonce, 12);
+    uint32_t c = 2;
+    size_t off = 0;
+    int nr = ks->nrounds;
+    while (off + 64 <= len) {
+        w_store_be32(ctr0 + 12, c);
+        w_store_be32(ctr1 + 12, c + 1);
+        w_store_be32(ctr2 + 12, c + 2);
+        w_store_be32(ctr3 + 12, c + 3);
+        c += 4;
+        uint8x16_t b0 = vld1q_u8(ctr0);
+        uint8x16_t b1 = vld1q_u8(ctr1);
+        uint8x16_t b2 = vld1q_u8(ctr2);
+        uint8x16_t b3 = vld1q_u8(ctr3);
+        for (int i = 0; i < nr - 1; i++) {
+            uint8x16_t rk = vld1q_u8(ks->rk[i]);
+            b0 = vaesmcq_u8(vaeseq_u8(b0, rk));
+            b1 = vaesmcq_u8(vaeseq_u8(b1, rk));
+            b2 = vaesmcq_u8(vaeseq_u8(b2, rk));
+            b3 = vaesmcq_u8(vaeseq_u8(b3, rk));
+        }
+        uint8x16_t rkl = vld1q_u8(ks->rk[nr - 1]);
+        uint8x16_t rkf = vld1q_u8(ks->rk[nr]);
+        b0 = veorq_u8(vaeseq_u8(b0, rkl), rkf);
+        b1 = veorq_u8(vaeseq_u8(b1, rkl), rkf);
+        b2 = veorq_u8(vaeseq_u8(b2, rkl), rkf);
+        b3 = veorq_u8(vaeseq_u8(b3, rkl), rkf);
+        vst1q_u8(out + off +  0, veorq_u8(vld1q_u8(in + off +  0), b0));
+        vst1q_u8(out + off + 16, veorq_u8(vld1q_u8(in + off + 16), b1));
+        vst1q_u8(out + off + 32, veorq_u8(vld1q_u8(in + off + 32), b2));
+        vst1q_u8(out + off + 48, veorq_u8(vld1q_u8(in + off + 48), b3));
+        off += 64;
+    }
+    uint8_t ks_block[16];
+    for (; off < len; off += 16) {
+        w_store_be32(ctr0 + 12, c++);
+        w_aes_encrypt_block_hw(ks, ctr0, ks_block);
+        size_t n = len - off < 16 ? len - off : 16;
+        for (size_t i = 0; i < n; i++) out[off + i] = in[off + i] ^ ks_block[i];
+    }
+}
+#endif
 
 /* AES-GCM seal/open core (12-byte nonce, 16-byte tag). Returns 1 on success;
  * open returns 0 on tag mismatch (constant-time compare) and leaves out
  * unspecified. out must hold ptlen+16 (seal) / ctlen-16 (open) bytes. */
 static void w_aes_gcm_ctr(const WAesKey *ks, const uint8_t nonce[12], const uint8_t *in,
                           size_t len, uint8_t *out) {
+#if W_CRYPTO_HW
+    if (w_hw_aes_available()) {
+        w_aes_gcm_ctr_hw(ks, nonce, in, len, out);
+        return;
+    }
+#endif
     uint8_t ctr[16], ks_block[16];
     memcpy(ctr, nonce, 12);
     uint32_t c = 2;
     for (size_t off = 0; off < len; off += 16) {
         w_store_be32(ctr + 12, c++);
-        w_aes_encrypt_block(ks, ctr, ks_block);
+        w_aes_encrypt_block_sw(ks, ctr, ks_block);
         size_t n = len - off < 16 ? len - off : 16;
         for (size_t i = 0; i < n; i++) out[off + i] = in[off + i] ^ ks_block[i];
     }
@@ -35976,22 +36068,33 @@ static void w_sha1_digest(const uint8_t *data, size_t len, uint8_t out[20]) {
     uint32_t h3 = 0x10325476U;
     uint32_t h4 = 0xc3d2e1f0U;
 
+#if W_CRYPTO_HW
+    if (w_hw_sha1_available()) {
+        uint32_t st[5] = {h0, h1, h2, h3, h4};
+        size_t full_blocks = len / 64;
+        if (full_blocks > 0) {
+            w_sha1_hw_compress(st, data, full_blocks);
+        }
+        size_t rem = len - full_blocks * 64;
+        size_t tail_len = (rem < 56) ? 64 : 128;
+        uint8_t tail[128];
+        memset(tail, 0, tail_len);
+        if (rem > 0) memcpy(tail, data + full_blocks * 64, rem);
+        tail[rem] = 0x80;
+        uint64_t bit_len = (uint64_t)len * 8U;
+        for (int i = 0; i < 8; i++) tail[tail_len - 1 - i] = (uint8_t)(bit_len >> (8 * i));
+        w_sha1_hw_compress(st, tail, tail_len / 64);
+        for (int i = 0; i < 5; i++) w_store_be32(out + i * 4, st[i]);
+        return;
+    }
+#endif
+
     size_t total = w_digest_padded_len(len);
     uint8_t *msg = calloc(1, total);
     if (len > 0) memcpy(msg, data, len);
     msg[len] = 0x80;
     uint64_t bit_len = (uint64_t)len * 8U;
     for (int i = 0; i < 8; i++) msg[total - 1 - i] = (uint8_t)(bit_len >> (8 * i));
-
-#if W_CRYPTO_HW
-    if (w_hw_sha1_available()) {
-        uint32_t st[5] = {h0, h1, h2, h3, h4};
-        w_sha1_hw_compress(st, msg, total / 64);
-        free(msg);
-        for (int i = 0; i < 5; i++) w_store_be32(out + i * 4, st[i]);
-        return;
-    }
-#endif
 
     for (size_t offset = 0; offset < total; offset += 64) {
         uint32_t w[80];
@@ -36057,23 +36160,34 @@ static void w_sha256_family_digest(const uint8_t *data, size_t len, const uint32
     uint32_t h[8];
     memcpy(h, initial, sizeof(h));
 
-    size_t total = w_digest_padded_len(len);
-    uint8_t *msg = calloc(1, total);
-    if (len > 0) memcpy(msg, data, len);
-    msg[len] = 0x80;
-    uint64_t bit_len = (uint64_t)len * 8U;
-    for (int i = 0; i < 8; i++) msg[total - 1 - i] = (uint8_t)(bit_len >> (8 * i));
-
 #if W_SHA256_HW
     if (w_sha256_hw_available()) {
-        w_sha256_hw_compress(h, msg, total / 64);
-        free(msg);
+        size_t full_blocks = len / 64;
+        if (full_blocks > 0) {
+            w_sha256_hw_compress(h, data, full_blocks);
+        }
+        size_t rem = len - full_blocks * 64;
+        size_t tail_len = (rem < 56) ? 64 : 128;
+        uint8_t tail[128];
+        memset(tail, 0, tail_len);
+        if (rem > 0) memcpy(tail, data + full_blocks * 64, rem);
+        tail[rem] = 0x80;
+        uint64_t bit_len = (uint64_t)len * 8U;
+        for (int i = 0; i < 8; i++) tail[tail_len - 1 - i] = (uint8_t)(bit_len >> (8 * i));
+        w_sha256_hw_compress(h, tail, tail_len / 64);
         uint8_t full[32];
         for (int i = 0; i < 8; i++) w_store_be32(full + i * 4, h[i]);
         memcpy(out, full, out_len);
         return;
     }
 #endif
+
+    size_t total = w_digest_padded_len(len);
+    uint8_t *msg = calloc(1, total);
+    if (len > 0) memcpy(msg, data, len);
+    msg[len] = 0x80;
+    uint64_t bit_len = (uint64_t)len * 8U;
+    for (int i = 0; i < 8; i++) msg[total - 1 - i] = (uint8_t)(bit_len >> (8 * i));
 
     for (size_t offset = 0; offset < total; offset += 64) {
         uint32_t w[64];
@@ -36161,23 +36275,34 @@ static void w_sha512_family_digest(const uint8_t *data, size_t len, const uint64
     uint64_t h[8];
     memcpy(h, initial, sizeof(h));
 
-    size_t total = w_digest_padded_len_128(len);
-    uint8_t *msg = calloc(1, total);
-    if (len > 0) memcpy(msg, data, len);
-    msg[len] = 0x80;
-    uint64_t bit_len = (uint64_t)len * 8U;
-    for (int i = 0; i < 8; i++) msg[total - 1 - i] = (uint8_t)(bit_len >> (8 * i));
-
 #if W_CRYPTO_HW
     if (w_hw_sha512_available()) {
-        w_sha512_hw_compress(h, msg, total / 128);
-        free(msg);
+        size_t full_blocks = len / 128;
+        if (full_blocks > 0) {
+            w_sha512_hw_compress(h, data, full_blocks);
+        }
+        size_t rem = len - full_blocks * 128;
+        size_t tail_len = (rem < 112) ? 128 : 256;
+        uint8_t tail[256];
+        memset(tail, 0, tail_len);
+        if (rem > 0) memcpy(tail, data + full_blocks * 128, rem);
+        tail[rem] = 0x80;
+        uint64_t bit_len = (uint64_t)len * 8U;
+        for (int i = 0; i < 8; i++) tail[tail_len - 1 - i] = (uint8_t)(bit_len >> (8 * i));
+        w_sha512_hw_compress(h, tail, tail_len / 128);
         uint8_t full[64];
         for (int i = 0; i < 8; i++) w_store_be64(full + i * 8, h[i]);
         memcpy(out, full, out_len);
         return;
     }
 #endif
+
+    size_t total = w_digest_padded_len_128(len);
+    uint8_t *msg = calloc(1, total);
+    if (len > 0) memcpy(msg, data, len);
+    msg[len] = 0x80;
+    uint64_t bit_len = (uint64_t)len * 8U;
+    for (int i = 0; i < 8; i++) msg[total - 1 - i] = (uint8_t)(bit_len >> (8 * i));
 
     for (size_t offset = 0; offset < total; offset += 128) {
         uint64_t w[80];
@@ -39538,46 +39663,56 @@ static int w_bytes_valid_utf8_p(const uint8_t *data, size_t len) {
     size_t i = 0;
     while (i < len) {
 #ifdef __aarch64__
+        while (i + 64 <= len) {
+            uint8x16_t v0 = vld1q_u8(data + i);
+            uint8x16_t v1 = vld1q_u8(data + i + 16);
+            uint8x16_t v2 = vld1q_u8(data + i + 32);
+            uint8x16_t v3 = vld1q_u8(data + i + 48);
+            uint8x16_t or01 = vorrq_u8(v0, v1);
+            uint8x16_t or23 = vorrq_u8(v2, v3);
+            if (vmaxvq_u8(vorrq_u8(or01, or23)) >= 0x80) break;
+            i += 64;
+        }
         while (i + 16 <= len) {
             uint8x16_t v = vld1q_u8(data + i);
             if (vmaxvq_u8(v) >= 0x80) break;
             i += 16;
         }
-        if (i >= len) break;
 #endif
-        uint8_t c = data[i];
-        if (c < 0x80) {
-            i++;
-        } else if (c >= 0xC2 && c <= 0xDF) {
-            if (i + 1 >= len || !w_utf8_cont(data[i + 1])) return 0;
-            i += 2;
-        } else if (c == 0xE0) {
-            if (i + 2 >= len || data[i + 1] < 0xA0 || data[i + 1] > 0xBF || !w_utf8_cont(data[i + 2])) return 0;
-            i += 3;
-        } else if (c >= 0xE1 && c <= 0xEC) {
-            if (i + 2 >= len || !w_utf8_cont(data[i + 1]) || !w_utf8_cont(data[i + 2])) return 0;
-            i += 3;
-        } else if (c == 0xED) {
-            if (i + 2 >= len || data[i + 1] < 0x80 || data[i + 1] > 0x9F || !w_utf8_cont(data[i + 2])) return 0;
-            i += 3;
-        } else if (c >= 0xEE && c <= 0xEF) {
-            if (i + 2 >= len || !w_utf8_cont(data[i + 1]) || !w_utf8_cont(data[i + 2])) return 0;
-            i += 3;
-        } else if (c == 0xF0) {
-            if (i + 3 >= len || data[i + 1] < 0x90 || data[i + 1] > 0xBF ||
-                !w_utf8_cont(data[i + 2]) || !w_utf8_cont(data[i + 3])) return 0;
-            i += 4;
-        } else if (c >= 0xF1 && c <= 0xF3) {
-            if (i + 3 >= len || !w_utf8_cont(data[i + 1]) || !w_utf8_cont(data[i + 2]) ||
-                !w_utf8_cont(data[i + 3])) return 0;
-            i += 4;
-        } else if (c == 0xF4) {
-            if (i + 3 >= len || data[i + 1] < 0x80 || data[i + 1] > 0x8F ||
-                !w_utf8_cont(data[i + 2]) || !w_utf8_cont(data[i + 3])) return 0;
-            i += 4;
-        } else {
-            return 0;
+        for (;;) {
+            while (i + 8 <= len) {
+                uint64_t w;
+                memcpy(&w, data + i, 8);
+                uint64_t m = w & 0x8080808080808080ULL;
+                if (m != 0) {
+                    i += (size_t)(__builtin_ctzll(m) >> 3);
+                    goto check_mb;
+                }
+                i += 8;
+                if (i + 16 <= len) goto neon_resume;
+            }
+            while (i < len && data[i] < 0x80) i++;
+            if (i >= len) return 1;
+        check_mb:;
+            uint8_t c = data[i];
+            if ((uint32_t)(c - 0xC2) <= (0xDF - 0xC2)) {
+                if (i + 1 >= len || !w_utf8_cont(data[i + 1])) return 0;
+                i += 2;
+            } else if ((c & 0xF0) == 0xE0) {
+                if (i + 2 >= len) return 0;
+                uint8_t b1 = data[i + 1], b2 = data[i + 2];
+                if (((b1 & 0xC0) ^ 0x80) | ((b2 & 0xC0) ^ 0x80)) return 0;
+                if ((c == 0xE0 && b1 < 0xA0) || (c == 0xED && b1 > 0x9F)) return 0;
+                i += 3;
+            } else {
+                if (i + 3 >= len) return 0;
+                uint8_t b1 = data[i + 1], b2 = data[i + 2], b3 = data[i + 3];
+                if (((b1 & 0xC0) ^ 0x80) | ((b2 & 0xC0) ^ 0x80) | ((b3 & 0xC0) ^ 0x80)) return 0;
+                if ((uint32_t)((((uint32_t)c << 8) | b1) - 0xF090U) > (0xF48FU - 0xF090U)) return 0;
+                i += 4;
+            }
         }
+    neon_resume:;
     }
     return 1;
 }
@@ -39975,6 +40110,33 @@ WValue w_string_slice_raw(WValue str, int64_t start, int64_t len) {
         if (start + len > slen) len = slen - start;
         if (len <= 5) return w_box_inline_str(s + start, (size_t)len);
         if (start == 0 && len == slen) return str;
+        if (len <= 16 && !g_slab_needs_lock) {
+            uint64_t w0, w1;
+            if (len >= 8) {
+                memcpy(&w0, s + start, 8);
+                memcpy(&w1, s + start + len - 8, 8);
+            } else {
+                uint32_t a, b;
+                memcpy(&a, s + start, 4);
+                memcpy(&b, s + start + len - 4, 4);
+                w0 = a;
+                w1 = b;
+            }
+            struct { uint64_t len, w0, w1; WValue val; } static s_cache[1024];
+            uint32_t cidx = (uint32_t)(((w0 * 0x9E3779B97F4A7C15ULL) ^ (w1 * 0xBF58476D1CE4E5B9ULL) ^ (uint64_t)len) >> 54);
+            if (s_cache[cidx].len == (uint64_t)len && s_cache[cidx].w0 == w0 && s_cache[cidx].w1 == w1)
+                return s_cache[cidx].val;
+            WString *saved_park = w_str_park;
+            w_str_park = NULL;
+            WValue res = is_ascii ? w_string_n_known_ascii(s + start, (size_t)len, 1)
+                                  : w_string_n(s + start, (size_t)len);
+            w_str_park = saved_park;
+            s_cache[cidx].len = (uint64_t)len;
+            s_cache[cidx].w0 = w0;
+            s_cache[cidx].w1 = w1;
+            s_cache[cidx].val = res;
+            return res;
+        }
         return is_ascii ? w_string_n_known_ascii(s + start, (size_t)len, 1)
                         : w_string_n(s + start, (size_t)len);
     }
@@ -54073,13 +54235,68 @@ WValue __w_read_file_bytes(WValue path_val) {
 }
 
 WValue __w_read_file(WValue path_val) {
-    WValue bytes = __w_read_file_bytes(path_val);
-    if (bytes == W_NIL) return W_NIL;
-    WArray *a = w_as_array(bytes);
-    const char *data = (const char *)a->slots + a->start;
-    WValue result = w_string_n(data, (size_t)a->size);
-    w_value_free(bytes);
-    return result;
+    const char *path = as_str(path_val);
+    w_sandbox_gate("read_file", path);
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return W_NIL;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0 || st.st_size < 0 || S_ISDIR(st.st_mode)) {
+        close(fd);
+        return W_NIL;
+    }
+    if (st.st_size > INT32_MAX) {
+        close(fd);
+        w_raise(w_string("File.read: file exceeds string capacity"));
+    }
+
+    size_t len = (size_t)st.st_size;
+    if (len > W_SLAB_SSO2_MAX) {
+        if (__builtin_expect(!g_string_slab.base, 0)) w_slab_init();
+        WString *ws = (WString *)malloc(sizeof(WString) + len + 1);
+        if (!ws) {
+            close(fd);
+            return W_NIL;
+        }
+        size_t off = 0;
+        while (off < len) {
+            ssize_t n = read(fd, ws->data + off, len - off);
+            if (n < 0) {
+                if (errno == EINTR) continue;
+                close(fd);
+                free(ws);
+                return W_NIL;
+            }
+            if (n == 0) break;
+            off += (size_t)n;
+        }
+        close(fd);
+        ws->data[off] = '\0';
+        if (__builtin_expect(off <= W_SLAB_SSO2_MAX, 0)) {
+            WValue small = w_string_n(ws->data, off);
+            free(ws);
+            return small;
+        }
+        int ascii = w_bytes_ascii_p((const uint8_t *)ws->data, off);
+        w_heap_string_set_meta(ws, (uint32_t)off, ascii);
+        return w_box_heap_str(ws);
+    }
+
+    char small_buf[W_SLAB_SSO2_MAX + 1];
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = read(fd, small_buf + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            close(fd);
+            return W_NIL;
+        }
+        if (n == 0) break;
+        off += (size_t)n;
+    }
+    close(fd);
+    small_buf[off] = '\0';
+    return w_string_n(small_buf, off);
 }
 
 /* Read at most `limit` bytes from the start of a file.  Format sniffers must
@@ -54977,22 +55194,20 @@ WValue __w_file_handle_read(WValue handle_val, WValue length_val) {
 /* The next line, or nil at EOF. chomp drops the line ending ("\n", "\r\n"
  * or a final "\r"), like Ruby's String#chomp in the Ruby implementation;
  * each_line keeps it. */
+static __thread char *g_gets_buf = NULL;
+static __thread size_t g_gets_cap = 0;
+
 WValue __w_file_handle_gets(WValue handle_val, WValue chomp_val) {
     FILE *f = w_file_handle_ptr(handle_val);
-    char *line = NULL;
-    size_t cap = 0;
-    ssize_t n = getline(&line, &cap, f);
+    ssize_t n = getline(&g_gets_buf, &g_gets_cap, f);
     if (n < 0) {
-        free(line);
         return W_NIL;
     }
     if (w_truthy(chomp_val) && n > 0) {
-        if (line[n - 1] == '\n') n--;
-        if (n > 0 && line[n - 1] == '\r') n--;
+        if (g_gets_buf[n - 1] == '\n') n--;
+        if (n > 0 && g_gets_buf[n - 1] == '\r') n--;
     }
-    WValue out = w_string_n(line, (size_t)n);
-    free(line);
-    return out;
+    return w_string_n(g_gets_buf, (size_t)n);
 }
 
 WValue __w_file_handle_flush(WValue handle_val) {
@@ -58868,6 +59083,23 @@ static WValue w_ic_string_include(WValue r, WValue *a, int c) {
 }
 static WValue w_ic_string_valid_utf8_q(WValue r, WValue *a, int c) {
     (void)a; (void)c;
+    if (__builtin_expect((r & (W_TAG_MASK | 1)) == W_TAG_STRINGSYM, 1)) {
+        size_t mode = (r >> 1) & 7;
+        if (mode <= 5) {
+            if (__builtin_expect((r & 0x0000080808080800ULL) == 0, 1)) return W_TRUE;
+        } else if (mode == 6) {
+            uint32_t idx = (uint32_t)((r >> 4) & 0xFFFFFF);
+            const uint8_t *slot = g_string_slab.base + ((size_t)idx << 5);
+            if (__builtin_expect((slot[0] & W_SFLAG_ASCII) != 0, 1)) return W_TRUE;
+            size_t cached = (size_t)((r >> 28) & 0x3F);
+            size_t len = cached ? cached : slot[1];
+            return w_bool(w_bytes_valid_utf8_p(slot + W_SLAB_DATA_OFFSET, len));
+        } else {
+            WString *ws = w_as_heap_str(r);
+            if (w_heap_string_ascii_p(ws)) return W_TRUE;
+            return w_bool(w_bytes_valid_utf8_p((const uint8_t *)ws->data, w_heap_string_len(ws)));
+        }
+    }
     char buf[6]; const char *s; size_t len;
     w_str_data(r, buf, &s, &len);
     return w_bool(w_bytes_valid_utf8_p((const uint8_t *)s, len));
@@ -71833,7 +72065,46 @@ WValue w_array_memmove_f64(WValue src_v, WValue dst_v, WValue count_v) {
     }
     WArray *src = w_as_array(src_v);
     WArray *dst = w_as_array(dst_v);
-    int64_t count = w_to_i64(count_v);
+    int64_t count = ((uint64_t)count_v < 0x0001000000000000ULL)
+                        ? (int64_t)count_v
+                        : w_to_i64(count_v);
+    if (count == 0 && dst->ebits == -64 && dst->size > 0 &&
+        src->ebits == 65 && src->size > 0 && w_is_array(src->slots[src->start])) {
+        double *dst_ptr = (double *)dst->slots + dst->start;
+        int64_t total = dst->size;
+        int64_t idx = 0;
+        for (int64_t r = 0; r < src->size && idx < total; r++) {
+            WValue rv = src->slots[src->start + r];
+            if (!w_is_array(rv)) break;
+            WArray *row = w_as_array(rv);
+            int64_t rlen = row->size;
+            if (idx + rlen > total) rlen = total - idx;
+            if (row->ebits == 65) {
+                const WValue *rslots = row->slots + row->start;
+                for (int64_t j = 0; j < rlen; j++) {
+                    WValue v = rslots[j];
+                    if (__builtin_expect(w_is_double(v), 1)) {
+                        union { uint64_t u; double d; } u;
+                        u.u = v - W_DOUBLE_BIAS;
+                        dst_ptr[idx + j] = u.d;
+                    } else if (w_is_int(v)) {
+                        dst_ptr[idx + j] = (double)w_as_int(v);
+                    } else {
+                        dst_ptr[idx + j] = w_as_double(v);
+                    }
+                }
+            } else if (row->ebits == -64) {
+                memcpy(dst_ptr + idx, (const double *)row->slots + row->start, (size_t)rlen * sizeof(double));
+            } else {
+                for (int64_t j = 0; j < rlen; j++) {
+                    WValue v = w_array_get(rv, w_int(j));
+                    dst_ptr[idx + j] = w_is_int(v) ? (double)w_as_int(v) : w_as_double(v);
+                }
+            }
+            idx += rlen;
+        }
+        return dst_v;
+    }
     if (dst->ebits != -64 || count < 0 || count > src->size ||
         count > dst->size) {
         w_raise(w_string("array_memmove_f64: bad type or length"));
@@ -71843,11 +72114,26 @@ WValue w_array_memmove_f64(WValue src_v, WValue dst_v, WValue count_v) {
     if (src->ebits == -64 && count > 0) {
         double *src_ptr = (double *)src->slots + src->start;
         memmove(dst_ptr, src_ptr, (size_t)count * sizeof(double));
+    } else if (src->ebits == 65) {
+        const WValue *sslots = src->slots + src->start;
+        for (int64_t i = 0; i < count; i++) {
+            WValue v = sslots[i];
+            if (__builtin_expect(w_is_double(v), 1)) {
+                union { uint64_t u; double d; } u;
+                u.u = v - W_DOUBLE_BIAS;
+                dst_ptr[i] = u.d;
+            } else if (w_is_int(v)) {
+                dst_ptr[i] = (double)w_as_int(v);
+            } else {
+                dst_ptr[i] = w_as_double(v);
+            }
+        }
     } else if (src->ebits != -64) {
         /* List convenience lanes preserve their old numeric conversion while
          * typed f64 views take the overlap-safe bulk path above. */
         for (int64_t i = 0; i < count; i++) {
-            dst_ptr[i] = w_as_double(w_array_get(src_v, w_int(i)));
+            WValue v = w_array_get(src_v, w_int(i));
+            dst_ptr[i] = w_is_int(v) ? (double)w_as_int(v) : w_as_double(v);
         }
     }
     return dst_v;
@@ -76362,11 +76648,7 @@ static inline int w_ta_use_radix(int64_t storage_bits, int64_t n) {
         case 8:  return n >= 64;
         case 16: return n >= 128;
         case 32: return n >= 512;
-        /* 64-bit radix also has an upper cutoff: its scratch ping-pong
-         * (2x the array footprint in cold pages) loses to in-place ipnsort
-         * once the working set outgrows cache — measured in situ, radix
-         * wins [2k, 128k) and ipnsort wins above even on low-entropy data. */
-        default: return n >= 2048 && n < 131072;
+        default: return n >= 1024 && n <= 1048576;
     }
 }
 
@@ -76426,6 +76708,169 @@ static void w_stable_merge_wvalues(WValue *a, int64_t n) {
     free(tmp);
 }
 
+typedef struct {
+    uint64_t key;
+    WValue val;
+} WStrSortItem;
+
+static inline void w_str_raw_ptr_len(WValue v, char buf6[6], const char **out_s, size_t *out_len) {
+    size_t mode = (v >> 1) & 7;
+    if (mode <= 5) {
+        uint64_t pay = v >> 4;
+        memcpy(buf6, &pay, 6);
+        *out_s = buf6;
+        *out_len = mode;
+    } else if (mode == 6) {
+        uint32_t idx = (uint32_t)((v >> 4) & 0xFFFFFF);
+        const uint8_t *slot = g_string_slab.base + ((size_t)idx << 5);
+        *out_s = (const char *)(slot + W_SLAB_DATA_OFFSET);
+        size_t cached = (size_t)((v >> 28) & 0x3F);
+        *out_len = cached ? cached : slot[1];
+    } else {
+        WString *ws = w_as_heap_str(v);
+        *out_s = ws->data;
+        *out_len = w_heap_string_len(ws);
+    }
+}
+
+static void w_sort_strings_radix(WValue *slots, int64_t sz, int stable) {
+    int64_t s = 1;
+    while (s < sz && w_string_compare(slots[s - 1], slots[s]) <= 0) s++;
+    if (s == sz) return;
+
+    int pooled = 0;
+    size_t need_bytes = (size_t)sz * 2 * sizeof(WStrSortItem);
+    WStrSortItem *buf = (WStrSortItem *)rdx_scratch_acquire(need_bytes, &pooled);
+    if (!buf) {
+        if (stable) w_stable_merge_wvalues(slots, sz);
+        else qsort(slots, (size_t)sz, sizeof(WValue), w_value_compare);
+        return;
+    }
+    WStrSortItem *items = buf;
+    WStrSortItem *tmp = buf + sz;
+
+    char b0[6], b1[6], b2[6];
+    const char *p0, *p1, *p2;
+    size_t l0, l1, l2;
+    w_str_raw_ptr_len(slots[0], b0, &p0, &l0);
+    w_str_raw_ptr_len(slots[sz - 1], b1, &p1, &l1);
+    w_str_raw_ptr_len(slots[sz >> 1], b2, &p2, &l2);
+    size_t cp = l0 < l1 ? l0 : l1;
+    if (l2 < cp) cp = l2;
+    if (cp > 64) cp = 64;
+    size_t k_cp = 0;
+    while (k_cp < cp && p0[k_cp] == p1[k_cp] && p0[k_cp] == p2[k_cp]) k_cp++;
+    cp = k_cp;
+
+    size_t count[8][256];
+rebuild_keys:
+    memset(count, 0, sizeof(count));
+    for (int64_t i = 0; i < sz; i++) {
+        WValue v = slots[i];
+        char ibuf[6];
+        const char *ptr;
+        size_t len;
+        w_str_raw_ptr_len(v, ibuf, &ptr, &len);
+        if (cp > 0) {
+            if (len < cp || memcmp(ptr, p0, cp) != 0) {
+                cp = 0;
+                goto rebuild_keys;
+            }
+        }
+        size_t rem = len - cp;
+        const uint8_t *p = (const uint8_t *)ptr + cp;
+        uint64_t k = 0;
+        if (rem >= 8) {
+            memcpy(&k, p, 8);
+            k = __builtin_bswap64(k);
+        } else {
+            switch (rem) {
+                case 7: k |= (uint64_t)p[6] << 8;  /* fallthrough */
+                case 6: k |= (uint64_t)p[5] << 16; /* fallthrough */
+                case 5: k |= (uint64_t)p[4] << 24; /* fallthrough */
+                case 4: { uint32_t hi; memcpy(&hi, p, 4); k |= (uint64_t)__builtin_bswap32(hi) << 32; break; }
+                case 3: k |= (uint64_t)p[2] << 40; /* fallthrough */
+                case 2: k |= (uint64_t)p[1] << 48; /* fallthrough */
+                case 1: k |= (uint64_t)p[0] << 56; break;
+                default: break;
+            }
+        }
+        items[i].key = k;
+        items[i].val = v;
+        count[0][k & 0xFFu]++;
+        count[1][(k >> 8) & 0xFFu]++;
+        count[2][(k >> 16) & 0xFFu]++;
+        count[3][(k >> 24) & 0xFFu]++;
+        count[4][(k >> 32) & 0xFFu]++;
+        count[5][(k >> 40) & 0xFFu]++;
+        count[6][(k >> 48) & 0xFFu]++;
+        count[7][(k >> 56) & 0xFFu]++;
+    }
+
+    WStrSortItem *src = items, *dst = tmp;
+    for (int pass = 0; pass < 8; pass++) {
+        size_t *cnt = count[pass];
+        int shift = pass * 8;
+        if (cnt[(size_t)((src[0].key >> shift) & 0xFFu)] == (size_t)sz) continue;
+        size_t acc = 0;
+        for (int b = 0; b < 256; b++) { size_t c = cnt[b]; cnt[b] = acc; acc += c; }
+        int64_t i = 0;
+        for (; i + 4 <= sz; i += 4) {
+            WStrSortItem x0 = src[i];
+            WStrSortItem x1 = src[i + 1];
+            WStrSortItem x2 = src[i + 2];
+            WStrSortItem x3 = src[i + 3];
+            dst[cnt[(size_t)((x0.key >> shift) & 0xFFu)]++] = x0;
+            dst[cnt[(size_t)((x1.key >> shift) & 0xFFu)]++] = x1;
+            dst[cnt[(size_t)((x2.key >> shift) & 0xFFu)]++] = x2;
+            dst[cnt[(size_t)((x3.key >> shift) & 0xFFu)]++] = x3;
+        }
+        for (; i < sz; i++) {
+            WStrSortItem x = src[i];
+            dst[cnt[(size_t)((x.key >> shift) & 0xFFu)]++] = x;
+        }
+        WStrSortItem *t = src; src = dst; dst = t;
+    }
+
+    for (int64_t i = 0; i < sz; i++) slots[i] = src[i].val;
+
+    int64_t i = 0;
+    while (i + 1 < sz) {
+        if (__builtin_expect(src[i].key == src[i + 1].key, 0)) {
+            int64_t r_start = i;
+            uint64_t rk = src[i].key;
+            int has_diff_val = (src[i].val != src[i + 1].val);
+            i += 2;
+            while (i < sz && src[i].key == rk) {
+                if (src[i].val != src[r_start].val) has_diff_val = 1;
+                i++;
+            }
+            if (has_diff_val) {
+                int64_t r_len = i - r_start;
+                if (r_len <= 16) {
+                    for (int64_t a = r_start + 1; a < i; a++) {
+                        WValue v = slots[a];
+                        int64_t b = a - 1;
+                        while (b >= r_start && w_string_compare(slots[b], v) > 0) {
+                            slots[b + 1] = slots[b];
+                            b--;
+                        }
+                        slots[b + 1] = v;
+                    }
+                } else if (stable) {
+                    w_stable_merge_wvalues(slots + r_start, r_len);
+                } else {
+                    qsort(slots + r_start, (size_t)r_len, sizeof(WValue), w_value_compare);
+                }
+            }
+        } else {
+            i++;
+        }
+    }
+
+    rdx_scratch_release(buf, pooled);
+}
+
 static WValue w_array_sort_impl(WValue arr, int stable) {
     WArray *src = w_as_array(arr);
     int64_t bits = array_storage_bits(src->ebits);
@@ -76440,20 +76885,33 @@ static WValue w_array_sort_impl(WValue arr, int stable) {
     if (dst->ebits == 65) {
         WValue *slots = (WValue *)dst->slots;
         if (sz > 1) {
-            int all_int = 1, all_dbl = 1, all_dec = 1;
+            WValue v0 = slots[0];
+            int all_int = 0, all_dbl = 0, all_dec = 0, all_str = 0;
             int min_sc = 100, max_sc = -100;
-            for (int64_t i = 0; i < sz && (all_int | all_dbl | all_dec); i++) {
-                WValue v = slots[i];
-                all_int &= w_is_int(v);
-                all_dbl &= w_is_double(v);
-                if (all_dec) {
-                    if (w_is_decimal(v)) {
-                        int sc = w_unbox_decimal_scale(v);
-                        if (sc < min_sc) min_sc = sc;
-                        if (sc > max_sc) max_sc = sc;
-                    } else {
-                        all_dec = 0;
-                    }
+            if (w_is_int(v0)) {
+                all_int = 1;
+                for (int64_t i = 1; i < sz; i++) {
+                    if (__builtin_expect(!w_is_int(slots[i]), 0)) { all_int = 0; break; }
+                }
+            } else if (w_is_double(v0)) {
+                all_dbl = 1;
+                for (int64_t i = 1; i < sz; i++) {
+                    if (__builtin_expect(!w_is_double(slots[i]), 0)) { all_dbl = 0; break; }
+                }
+            } else if ((v0 & (W_TAG_MASK | 1)) == W_TAG_STRINGSYM) {
+                all_str = 1;
+                for (int64_t i = 1; i < sz; i++) {
+                    if (__builtin_expect((slots[i] & (W_TAG_MASK | 1)) != W_TAG_STRINGSYM, 0)) { all_str = 0; break; }
+                }
+            } else if (w_is_decimal(v0)) {
+                all_dec = 1;
+                min_sc = max_sc = w_unbox_decimal_scale(v0);
+                for (int64_t i = 1; i < sz; i++) {
+                    WValue v = slots[i];
+                    if (__builtin_expect(!w_is_decimal(v), 0)) { all_dec = 0; break; }
+                    int sc = w_unbox_decimal_scale(v);
+                    if (sc < min_sc) min_sc = sc;
+                    if (sc > max_sc) max_sc = sc;
                 }
             }
             if (all_int) {
@@ -76468,17 +76926,28 @@ static WValue w_array_sort_impl(WValue arr, int stable) {
             if (all_dbl) {
                 uint64_t *u = (uint64_t *)slots;
                 for (int64_t i = 0; i < sz; i++) {
-                    double d = w_as_double(slots[i]);
-                    memcpy(&u[i], &d, sizeof(double));
+                    uint64_t raw = u[i] - W_DOUBLE_BIAS;
+                    u[i] = raw ^ (((uint64_t)((int64_t)raw >> 63)) | 0x8000000000000000ULL);
                 }
-                w_ta_f64_enc(u, sz);
                 if (w_ta_use_radix(64, sz)) rdx_sort_u64(u, sz); else ipn_sort_u64(u, sz);
-                w_ta_f64_dec(u, sz);
                 for (int64_t i = 0; i < sz; i++) {
-                    double d;
-                    memcpy(&d, &u[i], sizeof(double));
-                    slots[i] = w_box_double(d);
+                    uint64_t enc = u[i];
+                    uint64_t raw = enc ^ ((enc & 0x8000000000000000ULL) ? 0x8000000000000000ULL : 0xFFFFFFFFFFFFFFFFULL);
+                    u[i] = raw + W_DOUBLE_BIAS;
                 }
+                return result;
+            }
+            if (all_str && sz >= 32) {
+                w_sort_strings_radix(slots, sz, stable);
+                return result;
+            }
+            if (all_dec && min_sc == max_sc) {
+                uint64_t *u = (uint64_t *)slots;
+                for (int64_t i = 0; i < sz; i++)
+                    u[i] ^= (UINT64_C(1) << 45);
+                if (w_ta_use_radix(64, sz)) rdx_sort_u64(u, sz); else ipn_sort_u64(u, sz);
+                for (int64_t i = 0; i < sz; i++)
+                    u[i] ^= (UINT64_C(1) << 45);
                 return result;
             }
             if (all_dec && max_sc - min_sc <= 7) {
@@ -76489,13 +76958,19 @@ static WValue w_array_sort_impl(WValue arr, int stable) {
                 for (int64_t i = 0; i < sz; i++) {
                     int64_t sig = w_unbox_decimal_sig(slots[i]);
                     int sc = w_unbox_decimal_scale(slots[i]);
-                    int64_t ssig = sig * p10[sc - min_sc];
-                    u[i] = (uint64_t)ssig ^ UINT64_C(0x8000000000000000);
+                    int dsc = sc - min_sc;
+                    int64_t ssig = sig * p10[dsc];
+                    u[i] = (((uint64_t)ssig << 3) ^ UINT64_C(0x8000000000000000)) | (uint64_t)dsc;
                 }
                 if (w_ta_use_radix(64, sz)) rdx_sort_u64(u, sz); else ipn_sort_u64(u, sz);
                 for (int64_t i = 0; i < sz; i++) {
-                    int64_t ssig = (int64_t)(u[i] ^ UINT64_C(0x8000000000000000));
-                    slots[i] = w_decimal(ssig, min_sc);
+                    uint64_t enc = u[i];
+                    int64_t ssig = ((int64_t)(enc ^ UINT64_C(0x8000000000000000))) >> 3;
+                    if (__builtin_expect((enc & 7u) == 0, 1)) {
+                        slots[i] = w_box_decimal(ssig, min_sc);
+                    } else {
+                        slots[i] = w_decimal(ssig, min_sc);
+                    }
                 }
                 return result;
             }
@@ -77640,10 +78115,23 @@ WValue w_string_take_byte_array(WValue bytes, WValue len_wv) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
-static size_t g_page_size(void) { return (size_t)sysconf(_SC_PAGESIZE); }
-static size_t g_align_up(size_t v, size_t a) { return (v + a - 1) & ~(a - 1); }
-static size_t g_stack_size(void) { return g_align_up(W_GOROUTINE_STACK_SIZE, g_page_size()); }
-static size_t g_slot_size(void) { return g_stack_size() + g_page_size(); }
+static size_t g_cached_page_size = 0;
+static size_t g_cached_stack_size = 0;
+static size_t g_cached_slot_size = 0;
+
+static inline size_t g_align_up(size_t v, size_t a) { return (v + a - 1) & ~(a - 1); }
+static inline size_t g_page_size(void) {
+    if (__builtin_expect(g_cached_page_size != 0, 1)) return g_cached_page_size;
+    return (size_t)sysconf(_SC_PAGESIZE);
+}
+static inline size_t g_stack_size(void) {
+    if (__builtin_expect(g_cached_stack_size != 0, 1)) return g_cached_stack_size;
+    return g_align_up(W_GOROUTINE_STACK_SIZE, g_page_size());
+}
+static inline size_t g_slot_size(void) {
+    if (__builtin_expect(g_cached_slot_size != 0, 1)) return g_cached_slot_size;
+    return g_stack_size() + g_page_size();
+}
 
 typedef struct {
     void *base;
@@ -77659,8 +78147,8 @@ static pthread_once_t g_arena_once = PTHREAD_ONCE_INIT;
 /* Goroutine pool: recycle entire WGoroutine (struct + stack) as a unit.
  * Per-thread free list eliminates mutex contention on the hot path.
  * Global overflow list handles cross-thread recycling. */
-#define W_GPOOL_LOCAL_MAX  256   /* per-thread cache */
-#define W_GPOOL_GLOBAL_MAX 4096  /* shared overflow */
+#define W_GPOOL_LOCAL_MAX  2048  /* per-thread cache */
+#define W_GPOOL_GLOBAL_MAX 8192  /* shared overflow */
 
 static __thread WGoroutine *g_local_pool[W_GPOOL_LOCAL_MAX];
 static __thread int g_local_pool_count = 0;
@@ -77676,7 +78164,10 @@ static int g_stack_freelist_count = 0;
 static pthread_mutex_t g_stack_freelist_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void g_arena_init_once(void) {
-    size_t total = g_slot_size() * W_MAX_GOROUTINES;
+    g_cached_page_size = (size_t)sysconf(_SC_PAGESIZE);
+    g_cached_stack_size = g_align_up(W_GOROUTINE_STACK_SIZE, g_cached_page_size);
+    g_cached_slot_size = g_cached_stack_size + g_cached_page_size;
+    size_t total = g_cached_slot_size * W_MAX_GOROUTINES;
     g_arena.base = mmap(NULL, total, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (g_arena.base == MAP_FAILED) {
         die("goroutine arena: mmap failed");
@@ -77812,10 +78303,9 @@ void __attribute__((naked)) w_ctx_swap(WContext *save, WContext *restore) {
 }
 
 /* Set up initial context: when switched to, starts executing entry() on the given stack. */
-static void w_ctx_make(WContext *ctx, void *stack, size_t stack_size, void (*entry)(void)) {
+static inline void w_ctx_make(WContext *ctx, void *stack, size_t stack_size, void (*entry)(void)) {
     /* ARM64 stack grows downward, must be 16-byte aligned */
     uintptr_t sp = ((uintptr_t)stack + stack_size) & ~15UL;
-    memset(ctx, 0, sizeof(*ctx));
     ctx->sp = sp;
     ctx->x30 = (uint64_t)entry;  /* LR = entry point; ret in w_ctx_swap jumps here */
     ctx->x29 = 0;                /* frame pointer = NULL (top of call chain) */
@@ -78161,12 +78651,10 @@ static void g_body_entry(void) {
 }
 
 WValue w_goroutine_spawn(WValue closure) {
-    w_scheduler_init();
-    g_slab_needs_lock = 1;  /* enable slab mutex now that we're multithreaded */
+    if (__builtin_expect(!g_scheduler_initialized, 0)) w_scheduler_init();
     if (!w_is_closure(closure)) {
         w_raise(w_string("go requires a closure"));
     }
-    g_arena_init();
 
     /* Try recycled goroutine first (per-thread pool, no lock) */
     WGoroutine *g = g_pool_get();
@@ -78461,8 +78949,7 @@ static void *p_thread_entry(void *arg) {
             if (action > 0) {
                 p_local_push(p, g);
             } else if (action < 0) {
-                /* Recycle the goroutine's stack */
-                g_stack_free(g->stack_base);
+                g_pool_return(g);
             }
             /* A committed park transfers ownership; do not read g again. */
         } else {
@@ -78508,6 +78995,7 @@ void w_scheduler_start(WValue num_procs_wv) {
     }
 
     g_num_processors = num_procs;
+    g_slab_needs_lock = 1;
     g_scheduler_active = 1;
     g_mp_scheduler_active = 1;
 
@@ -78593,8 +79081,7 @@ static __attribute__((noinline)) void w_mutex_pause(WGoroutine *self) {
     } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
         /* drove a goroutine cooperatively */
     } else {
-        struct timespec ts = {0, 100000};
-        nanosleep(&ts, NULL);
+        sched_yield();
     }
 }
 
@@ -78683,9 +79170,17 @@ WValue w_mutex_locked(WValue value) {
 
 /* ---- Channels ---- */
 
-static WChan *as_chan(WValue v) {
-    if (!w_is_channel(v)) die("expected channel");
+static inline WChan *as_chan(WValue v) {
+    if (__builtin_expect(!w_is_channel(v), 0)) die("expected channel");
     return (WChan *)w_as_ptr(v);
+}
+
+static inline void w_chan_lock(WChan *ch) {
+    if (__builtin_expect(g_slab_needs_lock, 0)) pthread_mutex_lock(&ch->lock);
+}
+
+static inline void w_chan_unlock(WChan *ch) {
+    if (__builtin_expect(g_slab_needs_lock, 0)) pthread_mutex_unlock(&ch->lock);
 }
 
 static WValue w_chan_allocate(int64_t cap, int unbounded) {
@@ -78733,10 +79228,15 @@ static int w_chan_grow_unbounded(WChan *ch) {
         return 0;
     }
     int64_t new_cap = ch->cap * 2;
-    WValue *buffer = calloc((size_t)new_cap, sizeof(WValue));
+    WValue *buffer = malloc((size_t)new_cap * sizeof(WValue));
     if (!buffer) return 0;
-    for (int64_t i = 0; i < ch->count; i++) {
-        buffer[i] = ch->buffer[(ch->head + i) % ch->cap];
+    if (ch->count > 0) {
+        int64_t first = ch->cap - ch->head;
+        if (first > ch->count) first = ch->count;
+        memcpy(buffer, ch->buffer + ch->head, (size_t)first * sizeof(WValue));
+        if (ch->count > first) {
+            memcpy(buffer + first, ch->buffer, (size_t)(ch->count - first) * sizeof(WValue));
+        }
     }
     free(ch->buffer);
     ch->buffer = buffer;
@@ -78754,45 +79254,129 @@ enum {
 
 /* Keep TLS lookup inside a fresh call: inlining into a retry loop lets the C
  * compiler retain the old worker's TLS address across a migrating yield. */
-static __attribute__((noinline)) void w_chan_pause(void) {
+static __attribute__((noinline)) void w_chan_pause_spin(int *spin) {
     if (g_current) {
         w_goroutine_yield();
     } else if (!g_mp_scheduler_active && w_scheduler_run_one()) {
         /* drove a goroutine cooperatively */
+        if (spin) *spin = 0;
     } else {
-        struct timespec ts = {0, 100000};  /* 100us */
+        int s = spin ? (*spin)++ : 16;
+        if (s < 16) {
+            sched_yield();
+        } else {
+            struct timespec ts = {0, 10000};  /* 10us */
+            nanosleep(&ts, NULL);
+        }
+    }
+}
+
+static __attribute__((noinline)) void w_chan_pause(void) {
+    w_chan_pause_spin(NULL);
+}
+
+static __attribute__((noinline)) void w_chan_sender_pause_spin(WChan *ch, uint64_t ticket, int *spin) {
+    if (g_current) {
+        w_goroutine_yield();
+        return;
+    }
+    if (!g_mp_scheduler_active && w_scheduler_run_one()) {
+        if (spin) *spin = 0;
+        return;
+    }
+    for (int k = 0; k < 4096; k++) {
+        if (*(volatile int *)&ch->closed) {
+            if (spin) *spin = 0;
+            return;
+        }
+        if (ticket != 0) {
+            if (*(volatile uint64_t *)&ch->received_seq >= ticket) {
+                if (spin) *spin = 0;
+                return;
+            }
+        } else if (ch->cap == 0) {
+            if (*(volatile int64_t *)&ch->count == 0) {
+                if (spin) *spin = 0;
+                return;
+            }
+        } else {
+            if (*(volatile int64_t *)&ch->count < *(volatile int64_t *)&ch->cap) {
+                if (spin) *spin = 0;
+                return;
+            }
+        }
+#if defined(__aarch64__)
+        __asm__ volatile("yield" ::: "memory");
+#elif defined(__x86_64__)
+        __asm__ volatile("pause" ::: "memory");
+#endif
+    }
+    int s = spin ? (*spin)++ : 16;
+    if (s < 16) {
+        sched_yield();
+    } else {
+        struct timespec ts = {0, 10000};
         nanosleep(&ts, NULL);
     }
 }
 
 static void w_chan_receiver_wait_cleanup(void *arg) {
     WChan *ch = (WChan *)arg;
-    pthread_mutex_lock(&ch->lock);
+    w_chan_lock(ch);
     if (ch->recv_waiters > 0) ch->recv_waiters--;
-    pthread_mutex_unlock(&ch->lock);
+    w_chan_unlock(ch);
+}
+
+static __attribute__((noinline)) void w_chan_receiver_wait_core(WChan *ch, int *spin) {
+    if (g_current) {
+        w_goroutine_yield();
+        return;
+    }
+    if (!g_mp_scheduler_active && w_scheduler_run_one()) {
+        if (spin) *spin = 0;
+        return;
+    }
+    for (int k = 0; k < 4096; k++) {
+        if (*(volatile int64_t *)&ch->count > 0 || *(volatile int *)&ch->closed) {
+            if (spin) *spin = 0;
+            return;
+        }
+#if defined(__aarch64__)
+        __asm__ volatile("yield" ::: "memory");
+#elif defined(__x86_64__)
+        __asm__ volatile("pause" ::: "memory");
+#endif
+    }
+    int s = spin ? (*spin)++ : 16;
+    if (s < 16) {
+        sched_yield();
+    } else {
+        struct timespec ts = {0, 10000};
+        nanosleep(&ts, NULL);
+    }
 }
 
 /* Advertise an unbuffered receiver only for one cancellable scheduler pause.
  * pthread cleanup prevents a killed native receiver from leaving stale
  * readiness behind and making try_send lose a value. */
-static __attribute__((noinline)) void w_chan_receiver_pause(WChan *ch) {
+static __attribute__((noinline)) void w_chan_receiver_pause_spin(WChan *ch, int *spin) {
     if (ch->cap != 0) {
-        w_chan_pause();
+        w_chan_receiver_wait_core(ch, spin);
         return;
     }
     WGoroutine *self = g_current;
-    pthread_mutex_lock(&ch->lock);
+    w_chan_lock(ch);
     ch->recv_waiters++;
-    pthread_mutex_unlock(&ch->lock);
+    w_chan_unlock(ch);
     if (self) {
         /* pthread cleanup belongs to an OS thread, not a migrating G. No
          * native cleanup frame may remain installed across a G suspension. */
-        w_chan_pause();
+        w_goroutine_yield();
         w_chan_receiver_wait_cleanup(ch);
         return;
     }
     pthread_cleanup_push(w_chan_receiver_wait_cleanup, ch);
-    w_chan_pause();
+    w_chan_receiver_wait_core(ch, spin);
     pthread_cleanup_pop(1);
 }
 
@@ -78810,15 +79394,29 @@ static int w_chan_deadline_expired(int64_t deadline) {
     return __w_clock_ns_raw() >= deadline;
 }
 
+static __thread WArray *g_chan_pair_arr = NULL;
+
+static inline WValue w_chan_pair_result(WValue v0, WValue v1) {
+    WArray *a = g_chan_pair_arr;
+    if (__builtin_expect(!a, 0)) {
+        WValue wv = w_array_new_inline(65, 2);
+        a = w_as_array(wv);
+        a->size = 2;
+        g_chan_pair_arr = a;
+    }
+    WValue *slots = (WValue *)a->slots;
+    slots[0] = v0;
+    slots[1] = v1;
+    a->size = 2;
+    return w_box_array(a);
+}
+
 static WValue w_chan_status_result(WValue value, int status) {
-    WValue result = w_array_new_empty();
-    w_array_push(result, value);
-    w_array_push(result, w_int(status));
-    return result;
+    return w_chan_pair_result(value, w_int(status));
 }
 
 /* Caller holds ch->lock. */
-static int w_chan_take_locked(WChan *ch, WValue *value) {
+static inline int w_chan_take_locked(WChan *ch, WValue *value) {
     if (ch->count <= 0) return 0;
     *value = ch->buffer[ch->head];
     if (ch->cap == 0) {
@@ -78826,7 +79424,8 @@ static int w_chan_take_locked(WChan *ch, WValue *value) {
         ch->received_seq = ch->handoff_seq;
         ch->handoff_committed = 0;
     } else {
-        ch->head = (ch->head + 1) % ch->cap;
+        int64_t next = ch->head + 1;
+        ch->head = (next == ch->cap) ? 0 : next;
         ch->count--;
     }
     return 1;
@@ -78834,46 +79433,48 @@ static int w_chan_take_locked(WChan *ch, WValue *value) {
 
 static int w_chan_try_send_status(WValue channel, WValue val) {
     WChan *ch = as_chan(channel);
-    pthread_mutex_lock(&ch->lock);
+    w_chan_lock(ch);
 
-    if (ch->closed) {
-        pthread_mutex_unlock(&ch->lock);
+    if (__builtin_expect(ch->closed, 0)) {
+        w_chan_unlock(ch);
         return W_CHAN_RESULT_CLOSED;
     }
 
     if (ch->unbounded) {
         if (ch->count == ch->cap && !w_chan_grow_unbounded(ch)) {
-            pthread_mutex_unlock(&ch->lock);
+            w_chan_unlock(ch);
             w_raise(w_string("Channel buffer allocation failed"));
         }
         ch->buffer[ch->tail] = val;
-        ch->tail = (ch->tail + 1) % ch->cap;
+        int64_t next = ch->tail + 1;
+        ch->tail = (next == ch->cap) ? 0 : next;
         ch->count++;
-        pthread_mutex_unlock(&ch->lock);
+        w_chan_unlock(ch);
         return W_CHAN_RESULT_RECEIVED;
     }
 
     if (ch->cap == 0) {
         if (ch->recv_waiters <= 0 || ch->count != 0) {
-            pthread_mutex_unlock(&ch->lock);
+            w_chan_unlock(ch);
             return W_CHAN_RESULT_UNAVAILABLE;
         }
         ch->buffer[0] = val;
         ch->count = 1;
         ch->handoff_seq++;
         ch->handoff_committed = 1;
-        pthread_mutex_unlock(&ch->lock);
+        w_chan_unlock(ch);
         return W_CHAN_RESULT_RECEIVED;
     }
 
     if (ch->count >= ch->cap) {
-        pthread_mutex_unlock(&ch->lock);
+        w_chan_unlock(ch);
         return W_CHAN_RESULT_UNAVAILABLE;
     }
     ch->buffer[ch->tail] = val;
-    ch->tail = (ch->tail + 1) % ch->cap;
+    int64_t next = ch->tail + 1;
+    ch->tail = (next == ch->cap) ? 0 : next;
     ch->count++;
-    pthread_mutex_unlock(&ch->lock);
+    w_chan_unlock(ch);
     return W_CHAN_RESULT_RECEIVED;
 }
 
@@ -78893,39 +79494,52 @@ WValue w_chan_try_send_result(WValue channel, WValue val) {
 
 WValue w_chan_send_timeout(WValue channel, WValue val, WValue milliseconds) {
     int64_t deadline = w_chan_timeout_deadline(milliseconds);
+    int spin = 0;
     while (1) {
         if (w_chan_try_send(channel, val) == W_TRUE) return W_TRUE;
         if (w_chan_deadline_expired(deadline)) return W_FALSE;
-        w_chan_pause();
+        w_chan_pause_spin(&spin);
     }
 }
 
 WValue w_chan_send(WValue channel, WValue val) {
     WChan *ch = as_chan(channel);
-    pthread_mutex_lock(&ch->lock);
+    w_chan_lock(ch);
 
-    if (ch->closed) {
-        pthread_mutex_unlock(&ch->lock);
+    if (__builtin_expect(ch->closed, 0)) {
+        w_chan_unlock(ch);
         w_raise(w_string("send on closed channel"));
+    }
+
+    if (__builtin_expect(ch->cap > 0 && ch->count < ch->cap, 1)) {
+        /* Fast path: buffered with room available (also covers unbounded with room) */
+        ch->buffer[ch->tail] = val;
+        int64_t next = ch->tail + 1;
+        ch->tail = (next == ch->cap) ? 0 : next;
+        ch->count++;
+        w_chan_unlock(ch);
+        return W_NIL;
     }
 
     if (ch->unbounded) {
         if (ch->count == ch->cap && !w_chan_grow_unbounded(ch)) {
-            pthread_mutex_unlock(&ch->lock);
+            w_chan_unlock(ch);
             w_raise(w_string("Channel buffer allocation failed"));
         }
         ch->buffer[ch->tail] = val;
-        ch->tail = (ch->tail + 1) % ch->cap;
+        int64_t next = ch->tail + 1;
+        ch->tail = (next == ch->cap) ? 0 : next;
         ch->count++;
-        pthread_mutex_unlock(&ch->lock);
+        w_chan_unlock(ch);
         return W_NIL;
     }
 
     if (ch->cap == 0) {
         uint64_t ticket = 0;
+        int spin = 0;
         while (ticket == 0) {
             if (ch->closed) {
-                pthread_mutex_unlock(&ch->lock);
+                w_chan_unlock(ch);
                 w_raise(w_string("send on closed channel"));
             }
             if (ch->count == 0) {
@@ -78933,79 +79547,72 @@ WValue w_chan_send(WValue channel, WValue val) {
                 ch->count = 1;
                 ch->handoff_committed = 0;
                 ticket = ++ch->handoff_seq;
-                pthread_mutex_unlock(&ch->lock);
+                w_chan_unlock(ch);
                 break;
             }
-            pthread_mutex_unlock(&ch->lock);
-            w_chan_pause();
-            pthread_mutex_lock(&ch->lock);
+            w_chan_unlock(ch);
+            w_chan_sender_pause_spin(ch, 0, &spin);
+            w_chan_lock(ch);
         }
 
+        spin = 0;
         while (1) {
-            pthread_mutex_lock(&ch->lock);
+            w_chan_lock(ch);
             if (ch->received_seq >= ticket) {
-                pthread_mutex_unlock(&ch->lock);
+                w_chan_unlock(ch);
                 return W_NIL;
             }
             if (ch->closed) {
-                pthread_mutex_unlock(&ch->lock);
+                w_chan_unlock(ch);
                 w_raise(w_string("send on closed channel"));
             }
-            pthread_mutex_unlock(&ch->lock);
-            w_chan_pause();
+            w_chan_unlock(ch);
+            w_chan_sender_pause_spin(ch, ticket, &spin);
         }
     }
 
-    if (ch->cap > 0 && ch->count < ch->cap) {
-        /* Buffered: room available */
-        ch->buffer[ch->tail] = val;
-        ch->tail = (ch->tail + 1) % ch->cap;
-        ch->count++;
-        pthread_mutex_unlock(&ch->lock);
-        return W_NIL;
-    }
-
-    /* Buffer full: park sender (cooperative yield) */
-    /* For now, just block with a spin + yield */
-    pthread_mutex_unlock(&ch->lock);
+    /* Buffer full: park sender (cooperative yield or adaptive spin) */
+    w_chan_unlock(ch);
+    int spin = 0;
 
     while (1) {
-        pthread_mutex_lock(&ch->lock);
+        w_chan_lock(ch);
         if (ch->closed) {
-            pthread_mutex_unlock(&ch->lock);
+            w_chan_unlock(ch);
             w_raise(w_string("send on closed channel"));
         }
         if (ch->cap > 0 && ch->count < ch->cap) {
             ch->buffer[ch->tail] = val;
-            ch->tail = (ch->tail + 1) % ch->cap;
+            int64_t next = ch->tail + 1;
+            ch->tail = (next == ch->cap) ? 0 : next;
             ch->count++;
-            pthread_mutex_unlock(&ch->lock);
+            w_chan_unlock(ch);
             return W_NIL;
         }
-        pthread_mutex_unlock(&ch->lock);
-        /* Yield to other goroutines or sleep briefly */
-        w_chan_pause();
+        w_chan_unlock(ch);
+        w_chan_sender_pause_spin(ch, 0, &spin);
     }
 }
 
 static WValue w_chan_recv_value(WValue channel, int *received) {
     WChan *ch = as_chan(channel);
+    int spin = 0;
 
     while (1) {
-        pthread_mutex_lock(&ch->lock);
+        w_chan_lock(ch);
         WValue val = W_NIL;
-        if (w_chan_take_locked(ch, &val)) {
-            pthread_mutex_unlock(&ch->lock);
+        if (__builtin_expect(w_chan_take_locked(ch, &val), 1)) {
+            w_chan_unlock(ch);
             *received = 1;
             return val;
         }
         if (ch->closed) {
-            pthread_mutex_unlock(&ch->lock);
+            w_chan_unlock(ch);
             *received = 0;
             return W_NIL;
         }
-        pthread_mutex_unlock(&ch->lock);
-        w_chan_receiver_pause(ch);
+        w_chan_unlock(ch);
+        w_chan_receiver_pause_spin(ch, &spin);
     }
 }
 
@@ -79017,55 +79624,53 @@ WValue w_chan_recv(WValue channel) {
 WValue w_chan_recv_result(WValue channel) {
     int received = 0;
     WValue value = w_chan_recv_value(channel, &received);
-    WValue result = w_array_new_empty();
-    w_array_push(result, value);
-    w_array_push(result, received ? W_TRUE : W_FALSE);
-    return result;
+    return w_chan_pair_result(value, received ? W_TRUE : W_FALSE);
 }
 
 WValue w_chan_try_recv_result(WValue channel) {
     WChan *ch = as_chan(channel);
-    pthread_mutex_lock(&ch->lock);
+    w_chan_lock(ch);
     WValue value = W_NIL;
     if (w_chan_take_locked(ch, &value)) {
-        pthread_mutex_unlock(&ch->lock);
+        w_chan_unlock(ch);
         return w_chan_status_result(value, W_CHAN_RESULT_RECEIVED);
     }
     int status = ch->closed ? W_CHAN_RESULT_CLOSED : W_CHAN_RESULT_UNAVAILABLE;
-    pthread_mutex_unlock(&ch->lock);
+    w_chan_unlock(ch);
     return w_chan_status_result(W_NIL, status);
 }
 
 WValue w_chan_recv_timeout_result(WValue channel, WValue milliseconds) {
     WChan *ch = as_chan(channel);
     int64_t deadline = w_chan_timeout_deadline(milliseconds);
+    int spin = 0;
 
     while (1) {
-        pthread_mutex_lock(&ch->lock);
+        w_chan_lock(ch);
         WValue value = W_NIL;
         if (w_chan_take_locked(ch, &value)) {
-            pthread_mutex_unlock(&ch->lock);
+            w_chan_unlock(ch);
             return w_chan_status_result(value, W_CHAN_RESULT_RECEIVED);
         }
         if (ch->closed) {
-            pthread_mutex_unlock(&ch->lock);
+            w_chan_unlock(ch);
             return w_chan_status_result(W_NIL, W_CHAN_RESULT_CLOSED);
         }
         if (w_chan_deadline_expired(deadline)) {
-            pthread_mutex_unlock(&ch->lock);
+            w_chan_unlock(ch);
             return w_chan_status_result(W_NIL, W_CHAN_RESULT_UNAVAILABLE);
         }
-        pthread_mutex_unlock(&ch->lock);
-        w_chan_receiver_pause(ch);
+        w_chan_unlock(ch);
+        w_chan_receiver_pause_spin(ch, &spin);
     }
 }
 
 WValue w_chan_close(WValue channel) {
     WChan *ch = as_chan(channel);
-    pthread_mutex_lock(&ch->lock);
+    w_chan_lock(ch);
     ch->closed = 1;
     if (ch->cap == 0 && !ch->handoff_committed) ch->count = 0;
-    pthread_mutex_unlock(&ch->lock);
+    w_chan_unlock(ch);
     return W_NIL;
 }
 

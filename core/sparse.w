@@ -132,6 +132,7 @@ use core/numeric/float
 
   -> new
     @data_typed = nil
+    @dv_f64 = nil
     self
 
   # ≤6 args each (runtime dispatch limit is 8 including self)
@@ -179,6 +180,7 @@ use core/numeric/float
     @col_idx = nil
     @values = nil
     @data_typed = nil
+    @dv_f64 = nil
     self
 
   -> as_coo(rows, cols, row_idx, col_idx, values)
@@ -193,6 +195,7 @@ use core/numeric/float
     @col_idx = canonical[1]
     @values = canonical[2]
     @data_typed = nil
+    @dv_f64 = nil
     self
 
   ro :rows, :cols, :indptr, :indices, :data
@@ -214,6 +217,7 @@ use core/numeric/float
     @col_idx = nil
     @values = nil
     @data_typed = nil
+    @dv_f64 = nil
     self
 
   -> to_csr
@@ -235,24 +239,62 @@ use core/numeric/float
     a = self
     if @fmt != :csr
       a = to_csr
-    # try native SpMV (f32 typed arrays) when bridge linked
-    # pure path always works for list Float
-    y = []
+    nrows = a.rows
+    ncols = a.cols
+    if nrows >= 16 && ncols > 0 && type(x[0]) == "Float"
+      a.ensure_f64_csr
+      xv = a.xv_f64
+      yv = a.yv_f64 ## f64[]
+      ccall("w_array_memmove_f64", x, xv, ncols)
+      sparse_csr_matvec_f64(nrows, a.ip_i64, a.ix_i64, a.dv_f64, xv, yv)
+      y = Array.new(nrows)
+      i = 0 ## i64
+      while i < nrows
+        y[i] = yv[i]
+        i = i + 1
+      return y
     ip = a.indptr
     ix = a.indices
     dv = a.data
-    nrows = a.rows
-    i = 0
+    y = Array.new(nrows)
+    i = 0 ## i64
     while i < nrows
       s = ~0.0
-      p = ip[i]
-      pend = ip[i + 1]
+      p = ip[i] ## i64
+      pend = ip[i + 1] ## i64
       while p < pend
         s = s + dv[p] * x[ix[p]]
         p = p + 1
-      y.push(s)
+      y[i] = s
       i = i + 1
     y
+
+  -> ensure_f64_csr
+    if @dv_f64 != nil
+      return self
+    nnz = @data.size()
+    m = @rows
+    n = @cols
+    ip = i64[m + 1]
+    ix = i64[nnz > 0 ? nnz : 1]
+    dv = f64[nnz > 0 ? nnz : 1]
+    i = 0 ## i64
+    while i <= m
+      ip[i] = @indptr[i]
+      i = i + 1
+    i = 0 ## i64
+    while i < nnz
+      ix[i] = @indices[i]
+      dv[i] = @data[i] + ~0.0
+      i = i + 1
+    @ip_i64 = ip
+    @ix_i64 = ix
+    @dv_f64 = dv
+    @xv_f64 = f64[n > 0 ? n : 1]
+    @yv_f64 = f64[m > 0 ? m : 1]
+    self
+
+  ro :ip_i64, :ix_i64, :dv_f64, :xv_f64, :yv_f64
 
   # SpMV via Apple SparseBLAS. Builds typed i32/f32 WArrays once, then
   # calls w_sparse_spmv_f32. Falls back to pure matvec if bridge missing.
@@ -439,3 +481,16 @@ use core/numeric/float
     SparseMatrix.coo(rows, cols, ri, ci, vv)
   -> .from_dense(rows)
     SparseMatrix.from_dense(rows)
+
+-> sparse_csr_matvec_f64(nrows, ip, ix, dv, xv, yv) (i64 i64[] i64[] f64[] f64[] f64[]) i64
+  i = 0
+  while i < nrows
+    s = ~0.0
+    p = ip[i]
+    pend = ip[i + 1]
+    while p < pend
+      s = s + dv[p] * xv[ix[p]]
+      p = p + 1
+    yv[i] = s
+    i = i + 1
+  0

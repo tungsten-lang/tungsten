@@ -65,12 +65,12 @@
   -> solve(rhs)
     dim = @dimension
     raise "DenseLUFactor.solve: RHS length must equal dimension" if rhs.size() != dim
-    out_flat = ccall("w_array_new_aligned", -64, dim)
+    out_flat = f64[dim]
     solve_into(rhs, out_flat)
-    out = []
-    i = 0
+    out = Array.new(dim)
+    i = 0 ## i64
     while i < dim
-      out.push(out_flat[i])
+      out[i] = out_flat[i]
       i += 1
     out
 
@@ -91,28 +91,28 @@
     return [] if rhses.size() == 0
     count = rhses.size()
     dim = @dimension
-    flat = ccall("w_array_new_aligned", -64, dim * count)
-    r = 0
+    flat = f64[dim * count]
+    r = 0 ## i64
     while r < count
       rhs_r = rhses[r]
       raise "DenseLUFactor.solve_many: RHS length must equal dimension" if rhs_r.size() != dim
-      base = r * dim
-      i = 0
+      base = (r * dim) ## i64
+      i = 0 ## i64
       while i < dim
-        flat[base + i] = rhs_r[i] + ~0.0
+        flat[base + i] = (rhs_r[i] + ~0.0) ## f64
         i += 1
       r += 1
     solve_many_into(flat, flat, count)
-    out = []
-    r = 0
+    out = Array.new(count)
+    r = 0 ## i64
     while r < count
-      row = []
-      base = r * dim
-      i = 0
+      row = Array.new(dim)
+      base = (r * dim) ## i64
+      i = 0 ## i64
       while i < dim
-        row.push(flat[base + i])
+        row[i] = flat[base + i]
         i += 1
-      out.push(row)
+      out[r] = row
       r += 1
     out
 
@@ -134,12 +134,12 @@
   -> solve(rhs)
     dim = @dimension
     raise "DenseCholeskyFactor.solve: RHS length must equal dimension" if rhs.size() != dim
-    out_flat = ccall("w_array_new_aligned", -64, dim)
+    out_flat = f64[dim]
     solve_into(rhs, out_flat)
-    out = []
-    i = 0
+    out = Array.new(dim)
+    i = 0 ## i64
     while i < dim
-      out.push(out_flat[i])
+      out[i] = out_flat[i]
       i += 1
     out
 
@@ -157,28 +157,28 @@
     return [] if rhses.size() == 0
     count = rhses.size()
     dim = @dimension
-    flat = ccall("w_array_new_aligned", -64, dim * count)
-    r = 0
+    flat = f64[dim * count]
+    r = 0 ## i64
     while r < count
       rhs_r = rhses[r]
       raise "DenseCholeskyFactor.solve_many: RHS length must equal dimension" if rhs_r.size() != dim
-      base = r * dim
-      i = 0
+      base = (r * dim) ## i64
+      i = 0 ## i64
       while i < dim
-        flat[base + i] = rhs_r[i] + ~0.0
+        flat[base + i] = (rhs_r[i] + ~0.0) ## f64
         i += 1
       r += 1
     solve_many_into(flat, flat, count)
-    out = []
-    r = 0
+    out = Array.new(count)
+    r = 0 ## i64
     while r < count
-      row = []
-      base = r * dim
-      i = 0
+      row = Array.new(dim)
+      base = (r * dim) ## i64
+      i = 0 ## i64
       while i < dim
-        row.push(flat[base + i])
+        row[i] = flat[base + i]
         i += 1
-      out.push(row)
+      out[r] = row
       r += 1
     out
 
@@ -202,13 +202,13 @@
     out
 
   -> solve(rhs)
-    workspace = ccall("w_array_new_aligned", -64, @rows)
+    workspace = f64[@rows]
     solve_into(rhs, workspace)
-    out = []
     cols = @columns
-    i = 0
+    out = Array.new(cols)
+    i = 0 ## i64
     while i < cols
-      out.push(workspace[i])
+      out[i] = workspace[i]
       i += 1
     out
 
@@ -229,28 +229,28 @@
     count = rhses.size()
     nrows = @rows
     ncols = @columns
-    workspace = ccall("w_array_new_aligned", -64, nrows * count)
-    r = 0
+    workspace = f64[nrows * count]
+    r = 0 ## i64
     while r < count
       rhs_r = rhses[r]
       raise "DenseQRFactor.solve_many: RHS length must equal rows" if rhs_r.size() != nrows
-      base = r * nrows
-      i = 0
+      base = (r * nrows) ## i64
+      i = 0 ## i64
       while i < nrows
-        workspace[base + i] = rhs_r[i] + ~0.0
+        workspace[base + i] = (rhs_r[i] + ~0.0) ## f64
         i += 1
       r += 1
     solve_many_into(workspace, workspace, count)
-    out = []
-    r = 0
+    out = Array.new(count)
+    r = 0 ## i64
     while r < count
-      solution = []
-      base = r * nrows
-      i = 0
+      solution = Array.new(ncols)
+      base = (r * nrows) ## i64
+      i = 0 ## i64
       while i < ncols
-        solution.push(workspace[base + i])
+        solution[i] = workspace[base + i]
         i += 1
-      out.push(solution)
+      out[r] = solution
       r += 1
     out
 
@@ -264,15 +264,10 @@
     a[0].size()
 
   -> .zeros(m, n)
-    out = []
-    i = 0
+    out = Array.new(m)
+    i = 0 ## i64
     while i < m
-      row = []
-      j = 0
-      while j < n
-        row = row.push(~0.0)
-        j = j + 1
-      out = out.push(row)
+      out[i] = Array.new(n, ~0.0)
       i = i + 1
     out
 
@@ -319,49 +314,31 @@
     k = LinAlg.cols(a)
     n = LinAlg.cols(b)
     if linalg_matmul_accelerated_raw(m, k, n) != 0
-      fa = ccall("w_array_new_aligned", -64, m * k)
-      i = 0
-      while i < m
-        row = a[i]
-        base = i * k
-        j = 0
-        while j < k
-          fa[base + j] = row[j] + ~0.0
-          j = j + 1
-        i = i + 1
-      fb = ccall("w_array_new_aligned", -64, k * n)
-      i = 0
-      while i < k
-        row = b[i]
-        base = i * n
-        j = 0
-        while j < n
-          fb[base + j] = row[j] + ~0.0
-          j = j + 1
-        i = i + 1
-      fc = ccall("w_array_new_aligned", -64, m * n)
+      fa = LinAlg.flatten_2d(a, m, k)
+      fb = LinAlg.flatten_2d(b, k, n)
+      fc = f64[m * n]
       ccall("w_blas_dgemm_nn", fa, fb, fc, m, n, k)
-      out = []
-      i = 0
+      out = Array.new(m)
+      i = 0 ## i64
       while i < m
-        row = []
-        base = i * n
-        j = 0
+        row = Array.new(n)
+        base = (i * n) ## i64
+        j = 0 ## i64
         while j < n
-          row.push(fc[base + j])
+          row[j] = fc[base + j]
           j = j + 1
-        out.push(row)
+        out[i] = row
         i = i + 1
       return out
     out = LinAlg.zeros(m, n)
-    i = 0
+    i = 0 ## i64
     while i < m
       ai = a[i]
       oi = out[i]
-      j = 0
+      j = 0 ## i64
       while j < n
         s = ~0.0
-        t = 0
+        t = 0 ## i64
         while t < k
           s = s + ai[t] * b[t][j]
           t = t + 1
@@ -373,7 +350,7 @@
   -> .dot(u, v)
     s = ~0.0
     n = u.size()
-    i = 0
+    i = 0 ## i64
     while i < n
       s = s + u[i] * v[i]
       i = i + 1
@@ -391,18 +368,26 @@
   -> .lapack_cutoff
     8
 
-  -> .flatten_square(a, n)
-    flat = ccall("w_array_new_aligned", -64, n * n)
-    i = 0
-    while i < n
+  -> .flatten_2d(a, m, k)
+    flat = f64[m * k]
+    return flat if m <= 0 || k <= 0
+    a00 = (a[0][0] + ~0.0) ## f64
+    flat[0] = a00 == ~0.0 ? ~1.0 : ~0.0
+    ccall("w_array_memmove_f64", a, flat, 0)
+    return flat if flat[0] == a00
+    i = 0 ## i64
+    while i < m
       row = a[i]
-      base = i * n
-      j = 0
-      while j < n
-        flat[base + j] = row[j] + ~0.0
+      base = (i * k) ## i64
+      j = 0 ## i64
+      while j < k
+        flat[base + j] = (row[j] + ~0.0) ## f64
         j = j + 1
       i = i + 1
     flat
+
+  -> .flatten_square(a, n)
+    LinAlg.flatten_2d(a, n, n)
 
   # Factor a non-empty square f64 matrix once for repeated right-hand sides.
   # The public matrix remains untouched; LAPACK owns the staged copy.
@@ -410,7 +395,7 @@
     n = LinAlg.rows(a)
     raise "LinAlg.factor_lu: requires a non-empty square matrix" if n == 0 || LinAlg.cols(a) != n
     flat = LinAlg.flatten_square(a, n)
-    pivots = ccall("w_array_new_aligned", 33, n)
+    pivots = i32[n]
     info = ccall("w_blas_dgetrf_rowmajor", flat, pivots, n)
     raise "LinAlg.factor_lu: singular" if info > 0
     raise "LinAlg.factor_lu: LAPACK failed with info=" + info.to_s if info < 0
@@ -431,21 +416,21 @@
     m = LinAlg.rows(a)
     n = LinAlg.cols(a)
     raise "LinAlg.factor_qr: requires a non-empty matrix with rows >= columns" if n == 0 || m < n
-    flat = ccall("w_array_new_aligned", -64, m * n)
-    i = 0
+    flat = f64[m * n]
+    i = 0 ## i64
     while i < m
       ai = a[i]
-      j = 0
+      j = 0 ## i64
       while j < n
-        flat[j * m + i] = ai[j] + ~0.0
+        flat[j * m + i] = (ai[j] + ~0.0) ## f64
         j += 1
       i += 1
-    tau = ccall("w_array_new_aligned", -64, n)
+    tau = f64[n]
     info = ccall("w_blas_dgeqrf_factor", flat, tau, m, n)
     raise "LinAlg.factor_qr: LAPACK failed with info=" + info.to_s if info != 0
     max_diag = ~0.0
     min_diag = nil
-    i = 0
+    i = 0 ## i64
     while i < n
       diagonal = flat[i * m + i].abs
       max_diag = diagonal if diagonal > max_diag
@@ -458,26 +443,23 @@
     n = LinAlg.rows(a)
     if n >= LinAlg.lapack_cutoff
       flat = LinAlg.flatten_square(a, n)
-      rhs = ccall("w_array_new_aligned", -64, n)
-      i = 0
-      while i < n
-        rhs[i] = b[i] + ~0.0
-        i = i + 1
+      rhs = f64[n]
+      ccall("w_array_memmove_f64", b, rhs, n)
       info = ccall("w_blas_dgesv_rowmajor", flat, rhs, n)
       raise "LinAlg.solve: singular" if info != 0
-      x = []
-      i = 0
+      x = Array.new(n)
+      i = 0 ## i64
       while i < n
-        x = x.push(rhs[i])
+        x[i] = rhs[i]
         i = i + 1
       return x
     aw = LinAlg.copy_mat(a)
-    bw = []
-    i = 0
+    bw = Array.new(n)
+    i = 0 ## i64
     while i < n
-      bw = bw.push(b[i] + ~0.0)
+      bw[i] = b[i] + ~0.0
       i = i + 1
-    k = 0
+    k = 0 ## i64
     while k < n
       piv = k
       awk = aw[k]
@@ -516,11 +498,7 @@
         bw[i] = bw[i] - f * bwk
         i = i + 1
       k = k + 1
-    x = []
-    i = 0
-    while i < n
-      x = x.push(~0.0)
-      i = i + 1
+    x = Array.new(n, ~0.0)
     i = n - 1
     while i >= 0
       awi = aw[i]
@@ -534,18 +512,18 @@
     x
 
   -> .copy_mat(a)
-    out = []
     na = a.size()
-    i = 0
+    out = Array.new(na)
+    i = 0 ## i64
     while i < na
       ai = a[i]
       nai = ai.size()
-      row = []
-      j = 0
+      row = Array.new(nai)
+      j = 0 ## i64
       while j < nai
-        row = row.push(ai[j] + ~0.0)
+        row[j] = ai[j] + ~0.0
         j = j + 1
-      out = out.push(row)
+      out[i] = row
       i = i + 1
     out
 
@@ -601,7 +579,7 @@
   # 128x128 det would). sign is -1/0/+1; log|det| is -inf when singular.
   -> .slogdet(a)
     n = LinAlg.rows(a)
-    out = ccall("w_array_new_aligned", -64, 2)
+    out = f64[2]
     ccall("w_blas_dget_slogdet", LinAlg.flatten_square(a, n), n, out)
     [out[0], out[1]]
 
@@ -611,16 +589,16 @@
       flat = LinAlg.flatten_square(a, n)
       info = ccall("w_blas_dpotrf_lower", flat, n)
       raise "LinAlg.cholesky: not SPD" if info != 0
-      out = []
-      i = 0
+      out = Array.new(n)
+      i = 0 ## i64
       while i < n
-        row = []
-        base = i * n
-        j = 0
+        row = Array.new(n)
+        base = (i * n) ## i64
+        j = 0 ## i64
         while j < n
-          row.push(flat[base + j])
+          row[j] = flat[base + j]
           j = j + 1
-        out.push(row)
+        out[i] = row
         i = i + 1
       return out
     L = LinAlg.zeros(n, n)
@@ -649,31 +627,31 @@
   -> .transpose(a)
     m = LinAlg.rows(a)
     n = LinAlg.cols(a)
-    out = []
-    j = 0
+    out = Array.new(n)
+    j = 0 ## i64
     while j < n
-      row = []
-      i = 0
+      row = Array.new(m)
+      i = 0 ## i64
       while i < m
-        row.push(a[i][j])
+        row[i] = a[i][j]
         i = i + 1
-      out.push(row)
+      out[j] = row
       j = j + 1
     out
 
   -> .mat_vec(a, v)
-    out = []
     na = a.size()
     nv = v.size()
-    i = 0
+    out = Array.new(na)
+    i = 0 ## i64
     while i < na
       ai = a[i]
       s = ~0.0
-      j = 0
+      j = 0 ## i64
       while j < nv
         s = s + ai[j] * v[j]
         j = j + 1
-      out = out.push(s)
+      out[i] = s
       i = i + 1
     out
 
@@ -695,38 +673,40 @@
     m = LinAlg.rows(a)
     n = LinAlg.cols(a)
     raise "LinAlg.qr: requires m >= n" if m < n
-    flat = ccall("w_array_new_aligned", -64, m * n)
-    i = 0
+    flat = f64[m * n]
+    i = 0 ## i64
     while i < m
       ai = a[i]
-      j = 0
+      j = 0 ## i64
       while j < n
-        flat[j * m + i] = ai[j] + ~0.0
+        flat[j * m + i] = (ai[j] + ~0.0) ## f64
         j += 1
       i += 1
-    qflat = ccall("w_array_new_aligned", -64, m * n)
-    rflat = ccall("w_array_new_aligned", -64, n * n)
+    qflat = f64[m * n]
+    rflat = f64[n * n]
     info = ccall("w_blas_dgeqrf_qr", flat, qflat, rflat, m, n)
     raise "LinAlg.qr: LAPACK failed with info=" + info.to_s if info != 0
-    q = []
-    i = 0
+    q = Array.new(m)
+    i = 0 ## i64
     while i < m
-      row = []
-      j = 0
+      row = Array.new(n)
+      base = (i * n) ## i64
+      j = 0 ## i64
       while j < n
-        row.push(qflat[i * n + j])
+        row[j] = qflat[base + j]
         j += 1
-      q.push(row)
+      q[i] = row
       i += 1
-    r = []
-    i = 0
+    r = Array.new(n)
+    i = 0 ## i64
     while i < n
-      row = []
-      j = 0
+      row = Array.new(n)
+      base = (i * n) ## i64
+      j = 0 ## i64
       while j < n
-        row.push(rflat[i * n + j])
+        row[j] = rflat[base + j]
         j += 1
-      r.push(row)
+      r[i] = row
       i += 1
     max_diag = ~0.0
     min_diag = nil

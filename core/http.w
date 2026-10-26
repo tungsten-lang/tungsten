@@ -239,34 +239,45 @@
 
   -> .valid_token?(text)
     return false if text == nil || text.empty?
-    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-.^_`|~"
-    i = 0
-    while i < text.size
-      return false if allowed.index(text.slice(i, 1)) == nil
+    view = ccall("w_string_bytes_view", text) ## u8[]
+    n = view.size ## i64
+    i = 0 ## i64
+    while i < n
+      b = view[i] ## i64
+      ok = (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 45 || b == 95 || b == 46 || b == 33 || (b >= 35 && b <= 39) || b == 42 || b == 43 || (b >= 94 && b <= 96) || b == 124 || b == 126
+      return false if !ok
       i += 1
     true
 
   -> .decimal?(text)
     return false if text == nil || text.empty?
-    i = 0
-    while i < text.size
-      return false if "0123456789".index(text.slice(i, 1)) == nil
+    view = ccall("w_string_bytes_view", text) ## u8[]
+    n = view.size ## i64
+    i = 0 ## i64
+    while i < n
+      b = view[i] ## i64
+      return false if b < 48 || b > 57
       i += 1
     true
 
   -> .valid_field_value?(text)
-    bytes = text.bytes.to_a
-    i = 0
-    while i < bytes.size
-      byte = bytes[i]
+    view = ccall("w_string_bytes_view", text) ## u8[]
+    n = view.size ## i64
+    i = 0 ## i64
+    while i < n
+      byte = view[i] ## i64
       return false if byte == 127 || (byte < 32 && byte != 9)
       i += 1
     true
 
   -> .hexadecimal?(text)
     return false if text == nil || text.empty?
-    i = 0
-    while i < text.size
-      return false if "0123456789abcdefABCDEF".index(text.slice(i, 1)) == nil
+    view = ccall("w_string_bytes_view", text) ## u8[]
+    n = view.size ## i64
+    i = 0 ## i64
+    while i < n
+      b = view[i] ## i64
+      ok = (b >= 48 && b <= 57) || (b >= 97 && b <= 102) || (b >= 65 && b <= 70)
+      return false if !ok
       i += 1
     true

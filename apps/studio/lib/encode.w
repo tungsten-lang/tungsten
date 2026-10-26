@@ -32,14 +32,21 @@ use render
 
   -> new_session
     return VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], bitrate: @bitrate, input: :rgb24}) if @bitrate != nil
-    VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], quality: @quality, input: :rgb24})
+    q = @quality
+    q = @seg_quality if @seg_quality != nil
+    VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], quality: q, input: :rgb24})
 
   -> name
     "videotoolbox-" + @codec.to_s
 
-  -> open(path, n)
+  # q: this segment's quality (the cut's quality_by_kind), or nil for the cut's quality. A segment of another
+  # quality always gets a fresh session.
+  -> open(path, n, q = nil)
     @path = path
     @n = n
+    if q != nil && !@per_segment
+      die("quality_by_kind needs a session per segment (unset STUDIO_VT_SESSION)")
+    @seg_quality = q
     @enc = new_session() if @per_segment
     self
 
@@ -162,7 +169,7 @@ SEGMENT_EXT = {"ext" => "hevc"}
     s = segs[i]
     path = segment_path(build, s["key"])
     if !File.exist?(path)
-      enc.open(path, s["n"])
+      enc.open(path, s["n"], s["q"])
       f = s["f0"]
       e = s["f0"] + s["n"]
       while f < e
@@ -175,7 +182,7 @@ SEGMENT_EXT = {"ext" => "hevc"}
 
 # Decode frame k of a stored segment (interim: ffmpeg) to a PNG or raw yuv420p, for `studio frame`.
 -> decode_segment_frame(path, k, out, yuv, rate)
-  if path.ends_with?(".hevc") || path.ends_with?(".h264")
+  if path.ends_with?(".hevc") || path.ends_with?(".hevc10") || path.ends_with?(".h264")
     wrap = out + ".seg.mp4"
     m = Mux.new(wrap, {rate: rate, tc_start: nil})
     m.append_file(path)

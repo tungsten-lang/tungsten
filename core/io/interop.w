@@ -356,7 +356,7 @@ use core/math
         tmp = tmp >> 1
         b += 1
       entry = ((i + 1) << 4) | l
-      step = 1 << l
+      step = (1 ## i64) << l
       idx = rev
       while idx < 32768
         tab[idx] = entry
@@ -402,7 +402,7 @@ use core/math
         buf = buf | ((src[pos] ## i64) << cnt)
         pos += 1
         cnt += 8
-      length = lbase[lidx] + (buf & ((1 << le) - 1))
+      length = lbase[lidx] + (buf & (((1 ## i64) << le) - 1))
       buf = buf >> le
       cnt -= le
       while cnt < 15 && pos < src_n
@@ -423,7 +423,7 @@ use core/math
         buf = buf | ((src[pos] ## i64) << cnt)
         pos += 1
         cnt += 8
-      dist = dbase[didx] + (buf & ((1 << de) - 1))
+      dist = dbase[didx] + (buf & (((1 ## i64) << de) - 1))
       buf = buf >> de
       cnt -= de
       start = out_len - dist

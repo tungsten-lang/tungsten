@@ -2133,6 +2133,8 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # wrapped i64 view of a literal agrees exactly with the self-hosted
   # BigInt view, so the fold decision cannot diverge between stages.
   shl_literal_base = op == :LSHIFT && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int
+  if op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)
+    shl_literal_base = true
   if shl_literal_base && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
     lv = node.left.value
     rv = node.right.value

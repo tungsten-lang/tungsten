@@ -22391,9 +22391,11 @@ static int32_t w_dec_write(const uint64_t *xl, int32_t xlen, char *dst, int32_t 
  * parking only defers the free(). At most one block per thread is parked
  * (<= ~50 bytes), reclaimed by the OS at thread exit. W_STR_PARK_MAX is
  * solely a recycler policy; it is not a String representation boundary. */
-#define W_STR_PARK_MAX 61
+#define W_STR_PARK_MAX 512
 static __thread WString *w_str_park = NULL;
 static __thread uint32_t w_str_park_cap = 0;
+#define W_ARR_PARK_MAX_CAP 131072
+static __thread WArray *w_arr_park = NULL;
 
 static inline uint64_t w_wymix(uint64_t a, uint64_t b) {
 #if defined(__wasm__) && !defined(W_WYMIX_NATIVE128)
@@ -23454,28 +23456,41 @@ WValue w_wire_field_value_at(WValue wire, int64_t index) {
 
 WValue w_wire_field_store(WValue wire, WValue sym, WValue value) {
     uint64_t off = w_wire_checked_offset(wire);
-    uint16_t kind = (uint16_t)w_wire_kind(wire);
     value = w_wire_canonical_field_value(wire, sym, value);
     uint32_t count = w_wire_record_count(off);
     uint32_t cap = w_wire_record_capacity(off);
+    WValue *pairs = &g_wire_arena.base[off + 1];
+    if (__builtin_expect(count <= 4, 1)) {
+        if (count > 0 && pairs[0] == sym) { pairs[1] = value; return value; }
+        if (count > 1 && pairs[2] == sym) { pairs[3] = value; return value; }
+        if (count > 2 && pairs[4] == sym) { pairs[5] = value; return value; }
+        if (count > 3 && pairs[6] == sym) { pairs[7] = value; return value; }
+        if (count < 4 && count < cap) {
+            pairs[count * 2] = sym;
+            pairs[count * 2 + 1] = value;
+            w_wire_record_header(off, count + 1, cap);
+            return value;
+        }
+    }
+    uint16_t kind = (uint16_t)w_wire_kind(wire);
     _Atomic uint64_t *slot = w_wire_field_cache_slot(kind, sym);
     uint64_t entry = atomic_load_explicit(slot, memory_order_relaxed);
     uint32_t cidx = (uint16_t)(entry >> 16);
-    if (cidx < count && g_wire_arena.base[off + 1 + cidx * 2] == sym) {
-        g_wire_arena.base[off + 2 + cidx * 2] = value;
+    if (cidx < count && pairs[cidx * 2] == sym) {
+        pairs[cidx * 2 + 1] = value;
         return value;
     }
     for (uint32_t i = 0; i < count; i++) {
-        if (g_wire_arena.base[off + 1 + i * 2] == sym) {
-            g_wire_arena.base[off + 2 + i * 2] = value;
+        if (pairs[i * 2] == sym) {
+            pairs[i * 2 + 1] = value;
             atomic_store_explicit(slot, w_wire_cache_pack(kind, (uint16_t)i, sym), memory_order_relaxed);
             return value;
         }
     }
     if (count >= cap)
         die("w_wire_field_store: instruction exhausted spare field slots");
-    g_wire_arena.base[off + 1 + count * 2] = sym;
-    g_wire_arena.base[off + 2 + count * 2] = value;
+    pairs[count * 2] = sym;
+    pairs[count * 2 + 1] = value;
     w_wire_record_header(off, count + 1, cap);
     atomic_store_explicit(slot, w_wire_cache_pack(kind, (uint16_t)count, sym), memory_order_relaxed);
     return value;
@@ -25356,11 +25371,7 @@ static WValue w_string_n_known_ascii(const char *s, size_t len, int ascii) {
     /* Too large for slab → mode 7 heap */
     if (len > W_SLAB_SSO2_MAX) {
         if (ascii < 0) ascii = w_bytes_ascii_p((const uint8_t *)s, len);
-        WString *ws = malloc(sizeof(WString) + len + 1);
-        w_heap_string_set_meta(ws, (uint32_t)len, ascii);
-        memcpy(ws->data, s, len);
-        ws->data[len] = '\0';
-        return w_box_heap_str(ws);
+        return w_string_small_fresh_known_ascii(s, len, ascii);
     }
 
     /* When frozen: check intern table for existing slab entry, fall back to heap */
@@ -36080,32 +36091,99 @@ static void w_ghash_mul_sw(uint8_t X[16], const uint8_t H[16]) {
  * needs the reflected 0xc2 constant — the earlier failed attempt mixed the
  * two domains (0x87 fold without the vrbit transform). Pinned to
  * w_ghash_mul_sw by the differential harness (100k random + 128 edges). */
+W_TARGET_AES static inline uint8x16_t w_ghash_reduce_hw(uint64x2_t lo, uint64x2_t hi, uint64x2_t m) {
+    uint64x2_t z = vdupq_n_u64(0);
+    poly64_t c87 = (poly64_t)0x87ULL;
+    lo = veorq_u64(lo, vextq_u64(z, m, 1));
+    hi = veorq_u64(hi, vextq_u64(m, z, 1));
+    poly64x2_t hp = vreinterpretq_p64_u64(hi);
+    uint64x2_t p0 = vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(vget_low_p64(hp), 0), c87));
+    uint64x2_t p1 = vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(vget_high_p64(hp), 0), c87));
+    poly64x2_t p1p = vreinterpretq_p64_u64(p1);
+    uint64x2_t f2 = vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(vget_high_p64(p1p), 0), c87));
+    uint64x2_t r = veorq_u64(lo, p0);
+    r = veorq_u64(r, vcombine_u64(vget_low_u64(f2), vget_low_u64(p1)));
+    return vreinterpretq_u8_u64(r);
+}
+
+W_TARGET_AES static inline uint8x16_t w_ghash_mul_poly_hw(uint8x16_t a_u8, uint8x16_t b_u8) {
+    poly64x2_t a = vreinterpretq_p64_u8(a_u8);
+    poly64x2_t b = vreinterpretq_p64_u8(b_u8);
+    uint64x2_t au = vreinterpretq_u64_u8(a_u8);
+    uint64x2_t bu = vreinterpretq_u64_u8(b_u8);
+    poly64x1_t ax = vreinterpret_p64_u64(veor_u64(vget_low_u64(au), vget_high_u64(au)));
+    poly64x1_t bx = vreinterpret_p64_u64(veor_u64(vget_low_u64(bu), vget_high_u64(bu)));
+    uint64x2_t lo = vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(vget_low_p64(a), 0), vget_lane_p64(vget_low_p64(b), 0)));
+    uint64x2_t hi = vreinterpretq_u64_p128(vmull_high_p64(a, b));
+    uint64x2_t m  = veorq_u64(vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(ax, 0), vget_lane_p64(bx, 0))),
+                              veorq_u64(lo, hi));
+    return w_ghash_reduce_hw(lo, hi, m);
+}
+
 W_TARGET_AES static void w_ghash_mul_hw(uint8_t X[16], const uint8_t H[16]) {
-    poly64x2_t a = vreinterpretq_p64_u8(vrbitq_u8(vld1q_u8(X)));
-    poly64x2_t b = vreinterpretq_p64_u8(vrbitq_u8(vld1q_u8(H)));
+    uint8x16_t a = vrbitq_u8(vld1q_u8(X));
+    uint8x16_t b = vrbitq_u8(vld1q_u8(H));
+    vst1q_u8(X, vrbitq_u8(w_ghash_mul_poly_hw(a, b)));
+}
 
-    /* 128x128 -> 256-bit carryless product (schoolbook, 4 pmulls) */
-    poly64_t a0 = (poly64_t)vgetq_lane_p64(a, 0), a1 = (poly64_t)vgetq_lane_p64(a, 1);
-    poly64_t b0 = (poly64_t)vgetq_lane_p64(b, 0), b1 = (poly64_t)vgetq_lane_p64(b, 1);
-    uint64x2_t lo = vreinterpretq_u64_p128(vmull_p64(a0, b0));  /* bits   0..127 */
-    uint64x2_t hi = vreinterpretq_u64_p128(vmull_p64(a1, b1));  /* bits 128..255 */
-    uint64x2_t m  = veorq_u64(vreinterpretq_u64_p128(vmull_p64(a0, b1)),
-                              vreinterpretq_u64_p128(vmull_p64(a1, b0))); /* bits 64..191 */
-    uint64x2_t z  = vdupq_n_u64(0);
-    lo = veorq_u64(lo, vextq_u64(z, m, 1));  /* [0, m0]: mid bits  64..127 */
-    hi = veorq_u64(hi, vextq_u64(m, z, 1));  /* [m1, 0]: mid bits 128..191 */
-
-    /* Reduce mod x^128 + x^7 + x^2 + x + 1: x^128 == 0x87. The high 128
-     * bits fold as h0*0x87 (bits 0..70) + h1*0x87 at offset 64 (64..134);
-     * the <=7 bits that land past x^128 fold once more into bits 0..14. */
-    uint64_t h0 = vgetq_lane_u64(hi, 0), h1 = vgetq_lane_u64(hi, 1);
-    uint64x2_t p0 = vreinterpretq_u64_p128(vmull_p64((poly64_t)h0, (poly64_t)0x87ULL));
-    uint64x2_t p1 = vreinterpretq_u64_p128(vmull_p64((poly64_t)h1, (poly64_t)0x87ULL));
-    uint64_t of = vgetq_lane_u64(p1, 1);
-    uint64_t f2 = vgetq_lane_u64(vreinterpretq_u64_p128(vmull_p64((poly64_t)of, (poly64_t)0x87ULL)), 0);
-    uint64_t r0 = vgetq_lane_u64(lo, 0) ^ vgetq_lane_u64(p0, 0) ^ f2;
-    uint64_t r1 = vgetq_lane_u64(lo, 1) ^ vgetq_lane_u64(p0, 1) ^ vgetq_lane_u64(p1, 0);
-    vst1q_u8(X, vrbitq_u8(vreinterpretq_u8_u64(vcombine_u64(vcreate_u64(r0), vcreate_u64(r1)))));
+W_TARGET_AES static void w_ghash_absorb_hw(uint8_t Y[16], const uint8_t H[16], const uint8_t *data, size_t len) {
+    uint8x16_t y = vrbitq_u8(vld1q_u8(Y));
+    uint8x16_t h1 = vrbitq_u8(vld1q_u8(H));
+    if (len >= 64) {
+        uint8x16_t h2 = w_ghash_mul_poly_hw(h1, h1);
+        uint8x16_t h3 = w_ghash_mul_poly_hw(h2, h1);
+        uint8x16_t h4 = w_ghash_mul_poly_hw(h2, h2);
+        poly64x2_t h1p = vreinterpretq_p64_u8(h1), h2p = vreinterpretq_p64_u8(h2);
+        poly64x2_t h3p = vreinterpretq_p64_u8(h3), h4p = vreinterpretq_p64_u8(h4);
+        poly64x1_t h1x = vreinterpret_p64_u64(veor_u64(vget_low_u64(vreinterpretq_u64_u8(h1)), vget_high_u64(vreinterpretq_u64_u8(h1))));
+        poly64x1_t h2x = vreinterpret_p64_u64(veor_u64(vget_low_u64(vreinterpretq_u64_u8(h2)), vget_high_u64(vreinterpretq_u64_u8(h2))));
+        poly64x1_t h3x = vreinterpret_p64_u64(veor_u64(vget_low_u64(vreinterpretq_u64_u8(h3)), vget_high_u64(vreinterpretq_u64_u8(h3))));
+        poly64x1_t h4x = vreinterpret_p64_u64(veor_u64(vget_low_u64(vreinterpretq_u64_u8(h4)), vget_high_u64(vreinterpretq_u64_u8(h4))));
+        while (len >= 64) {
+            uint8x16_t x0 = veorq_u8(y, vrbitq_u8(vld1q_u8(data + 0)));
+            uint8x16_t x1 = vrbitq_u8(vld1q_u8(data + 16));
+            uint8x16_t x2 = vrbitq_u8(vld1q_u8(data + 32));
+            uint8x16_t x3 = vrbitq_u8(vld1q_u8(data + 48));
+            poly64x2_t a0 = vreinterpretq_p64_u8(x0), a1 = vreinterpretq_p64_u8(x1);
+            poly64x2_t a2 = vreinterpretq_p64_u8(x2), a3 = vreinterpretq_p64_u8(x3);
+            poly64x1_t a0x = vreinterpret_p64_u64(veor_u64(vget_low_u64(vreinterpretq_u64_u8(x0)), vget_high_u64(vreinterpretq_u64_u8(x0))));
+            poly64x1_t a1x = vreinterpret_p64_u64(veor_u64(vget_low_u64(vreinterpretq_u64_u8(x1)), vget_high_u64(vreinterpretq_u64_u8(x1))));
+            poly64x1_t a2x = vreinterpret_p64_u64(veor_u64(vget_low_u64(vreinterpretq_u64_u8(x2)), vget_high_u64(vreinterpretq_u64_u8(x2))));
+            poly64x1_t a3x = vreinterpret_p64_u64(veor_u64(vget_low_u64(vreinterpretq_u64_u8(x3)), vget_high_u64(vreinterpretq_u64_u8(x3))));
+            uint64x2_t lo = veorq_u64(
+                veorq_u64(vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(vget_low_p64(a0), 0), vget_lane_p64(vget_low_p64(h4p), 0))),
+                          vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(vget_low_p64(a1), 0), vget_lane_p64(vget_low_p64(h3p), 0)))),
+                veorq_u64(vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(vget_low_p64(a2), 0), vget_lane_p64(vget_low_p64(h2p), 0))),
+                          vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(vget_low_p64(a3), 0), vget_lane_p64(vget_low_p64(h1p), 0)))));
+            uint64x2_t hi = veorq_u64(
+                veorq_u64(vreinterpretq_u64_p128(vmull_high_p64(a0, h4p)),
+                          vreinterpretq_u64_p128(vmull_high_p64(a1, h3p))),
+                veorq_u64(vreinterpretq_u64_p128(vmull_high_p64(a2, h2p)),
+                          vreinterpretq_u64_p128(vmull_high_p64(a3, h1p))));
+            uint64x2_t m = veorq_u64(
+                veorq_u64(vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(a0x, 0), vget_lane_p64(h4x, 0))),
+                          vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(a1x, 0), vget_lane_p64(h3x, 0)))),
+                veorq_u64(vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(a2x, 0), vget_lane_p64(h2x, 0))),
+                          vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(a3x, 0), vget_lane_p64(h1x, 0)))));
+            m = veorq_u64(m, veorq_u64(lo, hi));
+            y = w_ghash_reduce_hw(lo, hi, m);
+            data += 64;
+            len -= 64;
+        }
+    }
+    while (len >= 16) {
+        y = veorq_u8(y, vrbitq_u8(vld1q_u8(data)));
+        y = w_ghash_mul_poly_hw(y, h1);
+        data += 16;
+        len -= 16;
+    }
+    if (len > 0) {
+        uint8_t tail[16] = {0};
+        for (size_t i = 0; i < len; i++) tail[i] = data[i];
+        y = veorq_u8(y, vrbitq_u8(vld1q_u8(tail)));
+        y = w_ghash_mul_poly_hw(y, h1);
+    }
+    vst1q_u8(Y, vrbitq_u8(y));
 }
 #endif
 
@@ -36124,16 +36202,7 @@ static void w_ghash_mul(uint8_t X[16], const uint8_t H[16]) {
 static void w_ghash_absorb(uint8_t Y[16], const uint8_t H[16], const uint8_t *data, size_t len) {
 #if W_CRYPTO_HW
     if (w_hw_aes_available()) {
-        while (len >= 16) {
-            vst1q_u8(Y, veorq_u8(vld1q_u8(Y), vld1q_u8(data)));
-            w_ghash_mul_hw(Y, H);
-            data += 16;
-            len -= 16;
-        }
-        if (len > 0) {
-            for (size_t i = 0; i < len; i++) Y[i] ^= data[i];
-            w_ghash_mul_hw(Y, H);
-        }
+        w_ghash_absorb_hw(Y, H, data, len);
         return;
     }
 #endif
@@ -36150,52 +36219,299 @@ static void w_ghash_absorb(uint8_t Y[16], const uint8_t H[16], const uint8_t *da
 }
 
 #if W_CRYPTO_HW
+typedef struct {
+    int valid;
+    size_t keylen;
+    uint8_t key[32];
+    uint8_t H[16];
+    WAesKey ks;
+    poly64x2_t hp[8];
+    poly64x1_t hx[8];
+} WGcmKeyCache;
+
+static _Thread_local WGcmKeyCache g_w_gcm_cache;
+
+W_TARGET_AES static const WGcmKeyCache *w_gcm_get_cached_key(const uint8_t *key, size_t keylen) {
+    WGcmKeyCache *c = &g_w_gcm_cache;
+    if (c->valid && c->keylen == keylen) {
+        unsigned diff = 0;
+        for (size_t i = 0; i < keylen; i++) diff |= (unsigned)(c->key[i] ^ key[i]);
+        if (diff == 0) return c;
+    }
+    static const uint8_t zero[16] = {0};
+    memcpy(c->key, key, keylen);
+    c->keylen = keylen;
+    w_aes_key_expand(key, keylen, &c->ks);
+    w_aes_encrypt_block_hw(&c->ks, zero, c->H);
+    uint8x16_t h1 = vrbitq_u8(vld1q_u8(c->H));
+    uint8x16_t cur = h1;
+    for (int i = 0; i < 8; i++) {
+        if (i > 0) cur = w_ghash_mul_poly_hw(cur, h1);
+        c->hp[i] = vreinterpretq_p64_u8(cur);
+        uint64x2_t u = vreinterpretq_u64_u8(cur);
+        c->hx[i] = vreinterpret_p64_u64(veor_u64(vget_low_u64(u), vget_high_u64(u)));
+    }
+    c->valid = 1;
+    return c;
+}
+
 W_TARGET_AES static void w_aes_gcm_ctr_hw(const WAesKey *ks, const uint8_t nonce[12],
                                           const uint8_t *in, size_t len, uint8_t *out) {
-    uint8_t ctr0[16], ctr1[16], ctr2[16], ctr3[16];
-    memcpy(ctr0, nonce, 12);
-    memcpy(ctr1, nonce, 12);
-    memcpy(ctr2, nonce, 12);
-    memcpy(ctr3, nonce, 12);
+    uint8_t ctr_base[16];
+    memcpy(ctr_base, nonce, 12);
     uint32_t c = 2;
     size_t off = 0;
     int nr = ks->nrounds;
-    while (off + 64 <= len) {
-        w_store_be32(ctr0 + 12, c);
-        w_store_be32(ctr1 + 12, c + 1);
-        w_store_be32(ctr2 + 12, c + 2);
-        w_store_be32(ctr3 + 12, c + 3);
-        c += 4;
-        uint8x16_t b0 = vld1q_u8(ctr0);
-        uint8x16_t b1 = vld1q_u8(ctr1);
-        uint8x16_t b2 = vld1q_u8(ctr2);
-        uint8x16_t b3 = vld1q_u8(ctr3);
-        for (int i = 0; i < nr - 1; i++) {
-            uint8x16_t rk = vld1q_u8(ks->rk[i]);
-            b0 = vaesmcq_u8(vaeseq_u8(b0, rk));
-            b1 = vaesmcq_u8(vaeseq_u8(b1, rk));
-            b2 = vaesmcq_u8(vaeseq_u8(b2, rk));
-            b3 = vaesmcq_u8(vaeseq_u8(b3, rk));
+    uint8x16_t rk0  = vld1q_u8(ks->rk[0]);
+    uint8x16_t rk1  = vld1q_u8(ks->rk[1]);
+    uint8x16_t rk2  = vld1q_u8(ks->rk[2]);
+    uint8x16_t rk3  = vld1q_u8(ks->rk[3]);
+    uint8x16_t rk4  = vld1q_u8(ks->rk[4]);
+    uint8x16_t rk5  = vld1q_u8(ks->rk[5]);
+    uint8x16_t rk6  = vld1q_u8(ks->rk[6]);
+    uint8x16_t rk7  = vld1q_u8(ks->rk[7]);
+    uint8x16_t rk8  = vld1q_u8(ks->rk[8]);
+    uint8x16_t rk9  = vld1q_u8(ks->rk[9]);
+    uint8x16_t rk10 = vld1q_u8(ks->rk[10]);
+    uint8x16_t rkl  = vld1q_u8(ks->rk[nr - 1]);
+    uint8x16_t rkf  = vld1q_u8(ks->rk[nr]);
+    w_store_be32(ctr_base + 12, 0);
+    uint32x4_t nonce_vec = vreinterpretq_u32_u8(vld1q_u8(ctr_base));
+    while (off + 128 <= len) {
+        uint8x16_t b0 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 0), nonce_vec, 3));
+        uint8x16_t b1 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 1), nonce_vec, 3));
+        uint8x16_t b2 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 2), nonce_vec, 3));
+        uint8x16_t b3 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 3), nonce_vec, 3));
+        uint8x16_t b4 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 4), nonce_vec, 3));
+        uint8x16_t b5 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 5), nonce_vec, 3));
+        uint8x16_t b6 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 6), nonce_vec, 3));
+        uint8x16_t b7 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 7), nonce_vec, 3));
+        c += 8;
+        #define W_AES_ROUND8(rk) do { \
+            b0 = vaesmcq_u8(vaeseq_u8(b0, rk)); b1 = vaesmcq_u8(vaeseq_u8(b1, rk)); \
+            b2 = vaesmcq_u8(vaeseq_u8(b2, rk)); b3 = vaesmcq_u8(vaeseq_u8(b3, rk)); \
+            b4 = vaesmcq_u8(vaeseq_u8(b4, rk)); b5 = vaesmcq_u8(vaeseq_u8(b5, rk)); \
+            b6 = vaesmcq_u8(vaeseq_u8(b6, rk)); b7 = vaesmcq_u8(vaeseq_u8(b7, rk)); \
+        } while (0)
+        W_AES_ROUND8(rk0); W_AES_ROUND8(rk1); W_AES_ROUND8(rk2);
+        W_AES_ROUND8(rk3); W_AES_ROUND8(rk4); W_AES_ROUND8(rk5);
+        W_AES_ROUND8(rk6); W_AES_ROUND8(rk7); W_AES_ROUND8(rk8);
+        if (__builtin_expect(nr > 10, 0)) {
+            uint8x16_t rk11 = vld1q_u8(ks->rk[11]);
+            uint8x16_t rk12 = vld1q_u8(ks->rk[12]);
+            W_AES_ROUND8(rk9); W_AES_ROUND8(rk10);
+            W_AES_ROUND8(rk11); W_AES_ROUND8(rk12);
         }
-        uint8x16_t rkl = vld1q_u8(ks->rk[nr - 1]);
-        uint8x16_t rkf = vld1q_u8(ks->rk[nr]);
+        #undef W_AES_ROUND8
         b0 = veorq_u8(vaeseq_u8(b0, rkl), rkf);
         b1 = veorq_u8(vaeseq_u8(b1, rkl), rkf);
         b2 = veorq_u8(vaeseq_u8(b2, rkl), rkf);
         b3 = veorq_u8(vaeseq_u8(b3, rkl), rkf);
-        vst1q_u8(out + off +  0, veorq_u8(vld1q_u8(in + off +  0), b0));
-        vst1q_u8(out + off + 16, veorq_u8(vld1q_u8(in + off + 16), b1));
-        vst1q_u8(out + off + 32, veorq_u8(vld1q_u8(in + off + 32), b2));
-        vst1q_u8(out + off + 48, veorq_u8(vld1q_u8(in + off + 48), b3));
-        off += 64;
+        b4 = veorq_u8(vaeseq_u8(b4, rkl), rkf);
+        b5 = veorq_u8(vaeseq_u8(b5, rkl), rkf);
+        b6 = veorq_u8(vaeseq_u8(b6, rkl), rkf);
+        b7 = veorq_u8(vaeseq_u8(b7, rkl), rkf);
+        vst1q_u8(out + off +   0, veorq_u8(vld1q_u8(in + off +   0), b0));
+        vst1q_u8(out + off +  16, veorq_u8(vld1q_u8(in + off +  16), b1));
+        vst1q_u8(out + off +  32, veorq_u8(vld1q_u8(in + off +  32), b2));
+        vst1q_u8(out + off +  48, veorq_u8(vld1q_u8(in + off +  48), b3));
+        vst1q_u8(out + off +  64, veorq_u8(vld1q_u8(in + off +  64), b4));
+        vst1q_u8(out + off +  80, veorq_u8(vld1q_u8(in + off +  80), b5));
+        vst1q_u8(out + off +  96, veorq_u8(vld1q_u8(in + off +  96), b6));
+        vst1q_u8(out + off + 112, veorq_u8(vld1q_u8(in + off + 112), b7));
+        off += 128;
     }
     uint8_t ks_block[16];
     for (; off < len; off += 16) {
-        w_store_be32(ctr0 + 12, c++);
-        w_aes_encrypt_block_hw(ks, ctr0, ks_block);
+        w_store_be32(ctr_base + 12, c++);
+        w_aes_encrypt_block_hw(ks, ctr_base, ks_block);
         size_t n = len - off < 16 ? len - off : 16;
         for (size_t i = 0; i < n; i++) out[off + i] = in[off + i] ^ ks_block[i];
     }
+}
+
+W_TARGET_AES static void w_aes_gcm_crypt_fused_hw(const WGcmKeyCache *kc,
+                                                   const uint8_t nonce[12],
+                                                   const uint8_t *in, size_t len,
+                                                   const uint8_t *aad, size_t alen,
+                                                   uint8_t *out, uint8_t tag_out[16],
+                                                   int decrypt) {
+    const WAesKey *ks = &kc->ks;
+    uint8_t Y[16] = {0}, J0[16], EJ0[16], lenblk[16], ctr_base[16];
+    if (alen > 0) w_ghash_absorb_hw(Y, kc->H, aad, alen);
+    uint8x16_t y = vrbitq_u8(vld1q_u8(Y));
+    const poly64x2_t *hp = kc->hp;
+    const poly64x1_t *hx = kc->hx;
+    memcpy(ctr_base, nonce, 12);
+    w_store_be32(ctr_base + 12, 0);
+    uint32x4_t nonce_vec = vreinterpretq_u32_u8(vld1q_u8(ctr_base));
+    uint32_t c = 2;
+    size_t off = 0;
+    int nr = ks->nrounds;
+    uint8x16_t rk0 = vld1q_u8(ks->rk[0]), rk1 = vld1q_u8(ks->rk[1]), rk2 = vld1q_u8(ks->rk[2]);
+    uint8x16_t rk3 = vld1q_u8(ks->rk[3]), rk4 = vld1q_u8(ks->rk[4]), rk5 = vld1q_u8(ks->rk[5]);
+    uint8x16_t rk6 = vld1q_u8(ks->rk[6]), rk7 = vld1q_u8(ks->rk[7]), rk8 = vld1q_u8(ks->rk[8]);
+    uint8x16_t rkl = vld1q_u8(ks->rk[nr - 1]);
+    uint8x16_t rkf = vld1q_u8(ks->rk[nr]);
+
+    #define W_AES_ROUND8(rk) do { \
+        b0 = vaesmcq_u8(vaeseq_u8(b0, rk)); b1 = vaesmcq_u8(vaeseq_u8(b1, rk)); \
+        b2 = vaesmcq_u8(vaeseq_u8(b2, rk)); b3 = vaesmcq_u8(vaeseq_u8(b3, rk)); \
+        b4 = vaesmcq_u8(vaeseq_u8(b4, rk)); b5 = vaesmcq_u8(vaeseq_u8(b5, rk)); \
+        b6 = vaesmcq_u8(vaeseq_u8(b6, rk)); b7 = vaesmcq_u8(vaeseq_u8(b7, rk)); \
+    } while (0)
+
+    #define W_GHASH_STEP(acc_lo, acc_hi, acc_m, q_blk, idx) do { \
+        uint8x16_t _qb = (q_blk); \
+        poly64x2_t _a = vreinterpretq_p64_u8(_qb); \
+        uint64x2_t _au = vreinterpretq_u64_u8(_qb); \
+        poly64x1_t _ax = vreinterpret_p64_u64(veor_u64(vget_low_u64(_au), vget_high_u64(_au))); \
+        (acc_lo) = veorq_u64((acc_lo), vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(vget_low_p64(_a), 0), vget_lane_p64(vget_low_p64(hp[idx]), 0)))); \
+        (acc_hi) = veorq_u64((acc_hi), vreinterpretq_u64_p128(vmull_high_p64(_a, hp[idx]))); \
+        (acc_m)  = veorq_u64((acc_m),  vreinterpretq_u64_p128(vmull_p64(vget_lane_p64(_ax, 0), vget_lane_p64(hx[idx], 0)))); \
+    } while (0)
+
+    if (decrypt) {
+        while (off + 128 <= len) {
+            uint8x16_t b0 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 0), nonce_vec, 3));
+            uint8x16_t b1 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 1), nonce_vec, 3));
+            uint8x16_t b2 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 2), nonce_vec, 3));
+            uint8x16_t b3 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 3), nonce_vec, 3));
+            uint8x16_t b4 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 4), nonce_vec, 3));
+            uint8x16_t b5 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 5), nonce_vec, 3));
+            uint8x16_t b6 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 6), nonce_vec, 3));
+            uint8x16_t b7 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 7), nonce_vec, 3));
+            c += 8;
+            uint64x2_t glo = vdupq_n_u64(0), ghi = glo, gm = glo;
+            W_AES_ROUND8(rk0); W_GHASH_STEP(glo, ghi, gm, veorq_u8(y, vrbitq_u8(vld1q_u8(in + off +   0))), 7);
+            W_AES_ROUND8(rk1); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(in + off +  16)), 6);
+            W_AES_ROUND8(rk2); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(in + off +  32)), 5);
+            W_AES_ROUND8(rk3); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(in + off +  48)), 4);
+            W_AES_ROUND8(rk4); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(in + off +  64)), 3);
+            W_AES_ROUND8(rk5); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(in + off +  80)), 2);
+            W_AES_ROUND8(rk6); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(in + off +  96)), 1);
+            W_AES_ROUND8(rk7); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(in + off + 112)), 0);
+            W_AES_ROUND8(rk8);
+            if (__builtin_expect(nr > 10, 0)) {
+                W_AES_ROUND8(vld1q_u8(ks->rk[9]));  W_AES_ROUND8(vld1q_u8(ks->rk[10]));
+                W_AES_ROUND8(vld1q_u8(ks->rk[11])); W_AES_ROUND8(vld1q_u8(ks->rk[12]));
+            }
+            gm = veorq_u64(gm, veorq_u64(glo, ghi));
+            y = w_ghash_reduce_hw(glo, ghi, gm);
+            vst1q_u8(out + off +   0, veorq_u8(vld1q_u8(in + off +   0), veorq_u8(vaeseq_u8(b0, rkl), rkf)));
+            vst1q_u8(out + off +  16, veorq_u8(vld1q_u8(in + off +  16), veorq_u8(vaeseq_u8(b1, rkl), rkf)));
+            vst1q_u8(out + off +  32, veorq_u8(vld1q_u8(in + off +  32), veorq_u8(vaeseq_u8(b2, rkl), rkf)));
+            vst1q_u8(out + off +  48, veorq_u8(vld1q_u8(in + off +  48), veorq_u8(vaeseq_u8(b3, rkl), rkf)));
+            vst1q_u8(out + off +  64, veorq_u8(vld1q_u8(in + off +  64), veorq_u8(vaeseq_u8(b4, rkl), rkf)));
+            vst1q_u8(out + off +  80, veorq_u8(vld1q_u8(in + off +  80), veorq_u8(vaeseq_u8(b5, rkl), rkf)));
+            vst1q_u8(out + off +  96, veorq_u8(vld1q_u8(in + off +  96), veorq_u8(vaeseq_u8(b6, rkl), rkf)));
+            vst1q_u8(out + off + 112, veorq_u8(vld1q_u8(in + off + 112), veorq_u8(vaeseq_u8(b7, rkl), rkf)));
+            off += 128;
+        }
+    } else if (off + 128 <= len) {
+        {
+            uint8x16_t b0 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 0), nonce_vec, 3));
+            uint8x16_t b1 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 1), nonce_vec, 3));
+            uint8x16_t b2 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 2), nonce_vec, 3));
+            uint8x16_t b3 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 3), nonce_vec, 3));
+            uint8x16_t b4 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 4), nonce_vec, 3));
+            uint8x16_t b5 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 5), nonce_vec, 3));
+            uint8x16_t b6 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 6), nonce_vec, 3));
+            uint8x16_t b7 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 7), nonce_vec, 3));
+            c += 8;
+            W_AES_ROUND8(rk0); W_AES_ROUND8(rk1);
+            W_AES_ROUND8(rk2); W_AES_ROUND8(rk3);
+            W_AES_ROUND8(rk4); W_AES_ROUND8(rk5);
+            W_AES_ROUND8(rk6); W_AES_ROUND8(rk7);
+            W_AES_ROUND8(rk8);
+            if (__builtin_expect(nr > 10, 0)) {
+                W_AES_ROUND8(vld1q_u8(ks->rk[9]));  W_AES_ROUND8(vld1q_u8(ks->rk[10]));
+                W_AES_ROUND8(vld1q_u8(ks->rk[11])); W_AES_ROUND8(vld1q_u8(ks->rk[12]));
+            }
+            vst1q_u8(out + off +   0, veorq_u8(vld1q_u8(in + off +   0), veorq_u8(vaeseq_u8(b0, rkl), rkf)));
+            vst1q_u8(out + off +  16, veorq_u8(vld1q_u8(in + off +  16), veorq_u8(vaeseq_u8(b1, rkl), rkf)));
+            vst1q_u8(out + off +  32, veorq_u8(vld1q_u8(in + off +  32), veorq_u8(vaeseq_u8(b2, rkl), rkf)));
+            vst1q_u8(out + off +  48, veorq_u8(vld1q_u8(in + off +  48), veorq_u8(vaeseq_u8(b3, rkl), rkf)));
+            vst1q_u8(out + off +  64, veorq_u8(vld1q_u8(in + off +  64), veorq_u8(vaeseq_u8(b4, rkl), rkf)));
+            vst1q_u8(out + off +  80, veorq_u8(vld1q_u8(in + off +  80), veorq_u8(vaeseq_u8(b5, rkl), rkf)));
+            vst1q_u8(out + off +  96, veorq_u8(vld1q_u8(in + off +  96), veorq_u8(vaeseq_u8(b6, rkl), rkf)));
+            vst1q_u8(out + off + 112, veorq_u8(vld1q_u8(in + off + 112), veorq_u8(vaeseq_u8(b7, rkl), rkf)));
+            off += 128;
+        }
+        while (off + 128 <= len) {
+            uint8x16_t b0 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 0), nonce_vec, 3));
+            uint8x16_t b1 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 1), nonce_vec, 3));
+            uint8x16_t b2 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 2), nonce_vec, 3));
+            uint8x16_t b3 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 3), nonce_vec, 3));
+            uint8x16_t b4 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 4), nonce_vec, 3));
+            uint8x16_t b5 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 5), nonce_vec, 3));
+            uint8x16_t b6 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 6), nonce_vec, 3));
+            uint8x16_t b7 = vreinterpretq_u8_u32(vsetq_lane_u32(__builtin_bswap32(c + 7), nonce_vec, 3));
+            c += 8;
+            const uint8_t *prev = out + off - 128;
+            uint64x2_t glo = vdupq_n_u64(0), ghi = glo, gm = glo;
+            W_AES_ROUND8(rk0); W_GHASH_STEP(glo, ghi, gm, veorq_u8(y, vrbitq_u8(vld1q_u8(prev +   0))), 7);
+            W_AES_ROUND8(rk1); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  16)), 6);
+            W_AES_ROUND8(rk2); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  32)), 5);
+            W_AES_ROUND8(rk3); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  48)), 4);
+            W_AES_ROUND8(rk4); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  64)), 3);
+            W_AES_ROUND8(rk5); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  80)), 2);
+            W_AES_ROUND8(rk6); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  96)), 1);
+            W_AES_ROUND8(rk7); W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev + 112)), 0);
+            W_AES_ROUND8(rk8);
+            if (__builtin_expect(nr > 10, 0)) {
+                W_AES_ROUND8(vld1q_u8(ks->rk[9]));  W_AES_ROUND8(vld1q_u8(ks->rk[10]));
+                W_AES_ROUND8(vld1q_u8(ks->rk[11])); W_AES_ROUND8(vld1q_u8(ks->rk[12]));
+            }
+            gm = veorq_u64(gm, veorq_u64(glo, ghi));
+            y = w_ghash_reduce_hw(glo, ghi, gm);
+            vst1q_u8(out + off +   0, veorq_u8(vld1q_u8(in + off +   0), veorq_u8(vaeseq_u8(b0, rkl), rkf)));
+            vst1q_u8(out + off +  16, veorq_u8(vld1q_u8(in + off +  16), veorq_u8(vaeseq_u8(b1, rkl), rkf)));
+            vst1q_u8(out + off +  32, veorq_u8(vld1q_u8(in + off +  32), veorq_u8(vaeseq_u8(b2, rkl), rkf)));
+            vst1q_u8(out + off +  48, veorq_u8(vld1q_u8(in + off +  48), veorq_u8(vaeseq_u8(b3, rkl), rkf)));
+            vst1q_u8(out + off +  64, veorq_u8(vld1q_u8(in + off +  64), veorq_u8(vaeseq_u8(b4, rkl), rkf)));
+            vst1q_u8(out + off +  80, veorq_u8(vld1q_u8(in + off +  80), veorq_u8(vaeseq_u8(b5, rkl), rkf)));
+            vst1q_u8(out + off +  96, veorq_u8(vld1q_u8(in + off +  96), veorq_u8(vaeseq_u8(b6, rkl), rkf)));
+            vst1q_u8(out + off + 112, veorq_u8(vld1q_u8(in + off + 112), veorq_u8(vaeseq_u8(b7, rkl), rkf)));
+            off += 128;
+        }
+        const uint8_t *prev = out + off - 128;
+        uint64x2_t glo = vdupq_n_u64(0), ghi = glo, gm = glo;
+        W_GHASH_STEP(glo, ghi, gm, veorq_u8(y, vrbitq_u8(vld1q_u8(prev +   0))), 7);
+        W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  16)), 6);
+        W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  32)), 5);
+        W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  48)), 4);
+        W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  64)), 3);
+        W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  80)), 2);
+        W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev +  96)), 1);
+        W_GHASH_STEP(glo, ghi, gm, vrbitq_u8(vld1q_u8(prev + 112)), 0);
+        gm = veorq_u64(gm, veorq_u64(glo, ghi));
+        y = w_ghash_reduce_hw(glo, ghi, gm);
+    }
+    #undef W_GHASH_STEP
+    #undef W_AES_ROUND8
+
+    vst1q_u8(Y, vrbitq_u8(y));
+    if (off < len) {
+        size_t tail_start = off;
+        uint8_t ks_block[16];
+        for (; off < len; off += 16) {
+            w_store_be32(ctr_base + 12, c++);
+            w_aes_encrypt_block_hw(ks, ctr_base, ks_block);
+            size_t n = len - off < 16 ? len - off : 16;
+            for (size_t i = 0; i < n; i++) out[off + i] = in[off + i] ^ ks_block[i];
+        }
+        w_ghash_absorb_hw(Y, kc->H, decrypt ? (in + tail_start) : (out + tail_start), len - tail_start);
+    }
+    w_store_be64(lenblk, (uint64_t)alen * 8U);
+    w_store_be64(lenblk + 8, (uint64_t)len * 8U);
+    for (int i = 0; i < 16; i++) Y[i] ^= lenblk[i];
+    w_ghash_mul_hw(Y, kc->H);
+    memcpy(J0, nonce, 12);
+    memset(J0 + 12, 0, 4);
+    J0[15] = 1;
+    w_aes_encrypt_block_hw(ks, J0, EJ0);
+    for (int i = 0; i < 16; i++) tag_out[i] = Y[i] ^ EJ0[i];
 }
 #endif
 
@@ -36242,10 +36558,17 @@ static void w_aes_gcm_tag(const WAesKey *ks, const uint8_t H[16], const uint8_t 
 static int w_aes_gcm_seal_core(const uint8_t *key, size_t keylen, const uint8_t nonce[12],
                                const uint8_t *pt, size_t ptlen, const uint8_t *aad, size_t alen,
                                uint8_t *out /* ptlen + 16 */) {
+    if (keylen != 16 && keylen != 32) return 0;
+#if W_CRYPTO_HW
+    if (w_hw_aes_available()) {
+        const WGcmKeyCache *kc = w_gcm_get_cached_key(key, keylen);
+        w_aes_gcm_crypt_fused_hw(kc, nonce, pt, ptlen, aad, alen, out, out + ptlen, 0);
+        return 1;
+    }
+#endif
     WAesKey ks;
     uint8_t H[16];
     static const uint8_t zero[16] = {0};
-    if (keylen != 16 && keylen != 32) return 0;
     w_aes_key_expand(key, keylen, &ks);
     w_aes_encrypt_block(&ks, zero, H);
     w_aes_gcm_ctr(&ks, nonce, pt, ptlen, out);
@@ -36256,12 +36579,26 @@ static int w_aes_gcm_seal_core(const uint8_t *key, size_t keylen, const uint8_t 
 static int w_aes_gcm_open_core(const uint8_t *key, size_t keylen, const uint8_t nonce[12],
                                const uint8_t *sealed, size_t slen, const uint8_t *aad, size_t alen,
                                uint8_t *out /* slen - 16 */) {
-    WAesKey ks;
-    uint8_t H[16], expect[16];
-    static const uint8_t zero[16] = {0};
+    uint8_t expect[16];
     if (keylen != 16 && keylen != 32) return 0;
     if (slen < 16) return 0;
     size_t clen = slen - 16;
+#if W_CRYPTO_HW
+    if (w_hw_aes_available()) {
+        const WGcmKeyCache *kc = w_gcm_get_cached_key(key, keylen);
+        w_aes_gcm_crypt_fused_hw(kc, nonce, sealed, clen, aad, alen, out, expect, 1);
+        uint8_t diff = 0;
+        for (int i = 0; i < 16; i++) diff |= (uint8_t)(expect[i] ^ sealed[clen + i]);
+        if (diff != 0) {
+            memset(out, 0, clen);
+            return 0;
+        }
+        return 1;
+    }
+#endif
+    WAesKey ks;
+    uint8_t H[16];
+    static const uint8_t zero[16] = {0};
     w_aes_key_expand(key, keylen, &ks);
     w_aes_encrypt_block(&ks, zero, H);
     w_aes_gcm_tag(&ks, H, nonce, aad, alen, sealed, clen, expect);
@@ -36975,7 +37312,7 @@ WValue w_crypto_aes_gcm_seal(WValue key_v, WValue nonce_v, WValue pt_v, WValue a
     w_crypto_input_data(aad_v, &aad, &aadlen, ab);
     if (keylen != 16 && keylen != 32) w_raise(w_string("Crypto:AES.gcm: key must be 16 or 32 bytes"));
     if (noncelen != 12) w_raise(w_string("Crypto:AES.gcm: nonce must be 12 bytes"));
-    WValue out = w_bytes_new((int64_t)(ptlen + 16));
+    WValue out = w_array_new_uninit_sized(8, (int64_t)(ptlen + 16));
     WArray *a = w_as_array(out);
     if (!w_aes_gcm_seal_core(key, keylen, nonce, pt, ptlen, aad, aadlen, (uint8_t *)a->slots))
         w_raise(w_string("Crypto:AES.gcm: seal failed"));
@@ -36993,8 +37330,10 @@ WValue w_crypto_aes_gcm_open(WValue key_v, WValue nonce_v, WValue sealed_v, WVal
     if (keylen != 16 && keylen != 32) w_raise(w_string("Crypto:AES.gcm: key must be 16 or 32 bytes"));
     if (noncelen != 12) w_raise(w_string("Crypto:AES.gcm: nonce must be 12 bytes"));
     if (slen < 16) w_raise(w_string("Crypto:AES.gcm: ciphertext too short for tag"));
-    WValue out = w_bytes_new((int64_t)(slen - 16));
+    size_t out_len = slen - 16;
+    WValue out = w_array_new_uninit_sized(8, (int64_t)(out_len > 0 ? out_len : 1));
     WArray *a = w_as_array(out);
+    a->size = (int32_t)out_len;
     if (!w_aes_gcm_open_core(key, keylen, nonce, sealed, slen, aad, aadlen, (uint8_t *)a->slots))
         w_raise(w_string("Crypto:AES.gcm: authentication failed"));
     return out;
@@ -55471,6 +55810,9 @@ WValue __w_file_handle_open(WValue path_val, WValue mode_val) {
     if (strpbrk(mode, "r+") != NULL) w_sandbox_gate("read_file", path);
     FILE *f = fopen(path, mode);
     if (!f) return W_NIL;
+    if (mode[0] == 'r' && strchr(mode, '+') == NULL) {
+        setvbuf(f, NULL, _IOFBF, 65536);
+    }
     return w_int((int64_t)(uintptr_t)f);
 }
 
@@ -55536,8 +55878,78 @@ WValue __w_file_handle_read(WValue handle_val, WValue length_val) {
 static __thread char *g_gets_buf = NULL;
 static __thread size_t g_gets_cap = 0;
 
+static inline WValue w_file_line_string(const char *p, size_t n, int ascii) {
+    if (__builtin_expect(n > W_STRING_LEN_MASK, 0))
+        die("string exceeds 31-bit byte length limit");
+    if (n <= 5)
+        return w_box_inline_str(p, n);
+    if (__builtin_expect(ascii != 1, 0))
+        ascii = w_bytes_ascii_p((const uint8_t *)p, n);
+    return w_string_small_fresh_known_ascii(p, n, ascii);
+}
+
 WValue __w_file_handle_gets(WValue handle_val, WValue chomp_val) {
     FILE *f = w_file_handle_ptr(handle_val);
+#if defined(__APPLE__)
+    if (__builtin_expect(f->_r > 0, 1)) {
+        const uint8_t *p = (const uint8_t *)f->_p;
+        size_t rem = (size_t)f->_r;
+        const uint8_t *nl = NULL;
+        int is_ascii = -1;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+        uint8x16_t vnl = vdupq_n_u8('\n');
+        uint8x16_t or_acc = vdupq_n_u8(0);
+        size_t k = 0;
+        while (k + 16 <= rem) {
+            uint8x16_t v = vld1q_u8(p + k);
+            uint8x16_t eq = vceqq_u8(v, vnl);
+            or_acc = vorrq_u8(or_acc, v);
+            uint64_t m = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
+            if (m != 0) {
+                nl = p + k + ((unsigned)__builtin_ctzll(m) >> 2);
+                is_ascii = (vmaxvq_u8(or_acc) < 0x80) ? 1 : 0;
+                break;
+            }
+            k += 16;
+        }
+        if (!nl && k < rem) {
+            uint8_t tail_or = 0;
+            for (size_t t = k; t < rem; t++) {
+                uint8_t b = p[t];
+                tail_or |= b;
+                if (b == '\n') {
+                    nl = p + t;
+                    is_ascii = ((vmaxvq_u8(or_acc) | tail_or) < 0x80) ? 1 : 0;
+                    break;
+                }
+            }
+        }
+#else
+        nl = (const uint8_t *)memchr(p, '\n', rem);
+#endif
+        if (__builtin_expect(nl != NULL, 1)) {
+            const char *line = (const char *)p;
+            size_t len = (size_t)(nl - p) + 1;
+            f->_p += len;
+            f->_r -= (int)len;
+            if (__builtin_expect(w_truthy(chomp_val), 0)) {
+                len--;
+                if (len > 0 && line[len - 1] == '\r') len--;
+            }
+            return w_file_line_string(line, len, is_ascii);
+        }
+    }
+    size_t len = 0;
+    char *line = fgetln(f, &len);
+    if (!line) {
+        return W_NIL;
+    }
+    if (w_truthy(chomp_val) && len > 0) {
+        if (line[len - 1] == '\n') len--;
+        if (len > 0 && line[len - 1] == '\r') len--;
+    }
+    return w_file_line_string(line, len, -1);
+#else
     ssize_t n = getline(&g_gets_buf, &g_gets_cap, f);
     if (n < 0) {
         return W_NIL;
@@ -55546,7 +55958,8 @@ WValue __w_file_handle_gets(WValue handle_val, WValue chomp_val) {
         if (g_gets_buf[n - 1] == '\n') n--;
         if (n > 0 && g_gets_buf[n - 1] == '\r') n--;
     }
-    return w_string_n(g_gets_buf, (size_t)n);
+    return w_file_line_string(g_gets_buf, (size_t)n, -1);
+#endif
 }
 
 WValue __w_file_handle_flush(WValue handle_val) {
@@ -72397,16 +72810,298 @@ int64_t w_raw_memmove(int64_t dst, int64_t src, int64_t len) {
     return 0;
 }
 
+static inline int w_try_unbox_floats_fast(const WValue *src, double *dst, size_t n) {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    const uint64x2_t bias = vdupq_n_u64(W_DOUBLE_BIAS);
+    const uint64x2_t ceiling = vdupq_n_u64(0xFFF0000000000000ULL);
+    uint64x2_t ok0 = vdupq_n_u64(~0ULL), ok1 = ok0, ok2 = ok0, ok3 = ok0;
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        uint64x2_t b0 = vsubq_u64(vld1q_u64((const uint64_t *)(src + i + 0)), bias);
+        uint64x2_t b1 = vsubq_u64(vld1q_u64((const uint64_t *)(src + i + 2)), bias);
+        uint64x2_t b2 = vsubq_u64(vld1q_u64((const uint64_t *)(src + i + 4)), bias);
+        uint64x2_t b3 = vsubq_u64(vld1q_u64((const uint64_t *)(src + i + 6)), bias);
+        ok0 = vandq_u64(ok0, vcleq_u64(b0, ceiling));
+        ok1 = vandq_u64(ok1, vcleq_u64(b1, ceiling));
+        ok2 = vandq_u64(ok2, vcleq_u64(b2, ceiling));
+        ok3 = vandq_u64(ok3, vcleq_u64(b3, ceiling));
+        vst1q_f64(dst + i + 0, vreinterpretq_f64_u64(b0));
+        vst1q_f64(dst + i + 2, vreinterpretq_f64_u64(b1));
+        vst1q_f64(dst + i + 4, vreinterpretq_f64_u64(b2));
+        vst1q_f64(dst + i + 6, vreinterpretq_f64_u64(b3));
+    }
+    uint64x2_t all = vandq_u64(vandq_u64(ok0, ok1), vandq_u64(ok2, ok3));
+    if (__builtin_expect((vgetq_lane_u64(all, 0) & vgetq_lane_u64(all, 1)) != ~0ULL, 0))
+        return 0;
+    for (; i < n; i++) {
+        WValue v = src[i];
+        if (!w_is_double(v)) return 0;
+        uint64_t u = v - W_DOUBLE_BIAS;
+        memcpy(dst + i, &u, 8);
+    }
+    return 1;
+#else
+    for (size_t i = 0; i < n; i++) {
+        WValue v = src[i];
+        if (!w_is_double(v)) return 0;
+        uint64_t u = v - W_DOUBLE_BIAS;
+        memcpy(dst + i, &u, 8);
+    }
+    return 1;
+#endif
+}
+
+static inline void w_box_floats_fast(const double *src, WValue *dst, size_t n) {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    const uint64x2_t bias = vdupq_n_u64(W_DOUBLE_BIAS);
+    const uint64x2_t abs_mask = vdupq_n_u64(0x7FFFFFFFFFFFFFFFULL);
+    const uint64x2_t inf_exp  = vdupq_n_u64(0x7FF0000000000000ULL);
+    const uint64x2_t qnan_val = vdupq_n_u64(0x7FF8000000000000ULL);
+    size_t i = 0;
+    for (; i + 4 <= n; i += 4) {
+        uint64x2_t b0 = vreinterpretq_u64_f64(vld1q_f64(src + i));
+        uint64x2_t b1 = vreinterpretq_u64_f64(vld1q_f64(src + i + 2));
+        uint64x2_t nan0 = vcgtq_u64(vandq_u64(b0, abs_mask), inf_exp);
+        uint64x2_t nan1 = vcgtq_u64(vandq_u64(b1, abs_mask), inf_exp);
+        b0 = vbslq_u64(nan0, qnan_val, b0);
+        b1 = vbslq_u64(nan1, qnan_val, b1);
+        vst1q_u64((uint64_t *)(dst + i),     vaddq_u64(b0, bias));
+        vst1q_u64((uint64_t *)(dst + i + 2), vaddq_u64(b1, bias));
+    }
+    for (; i < n; i++) dst[i] = w_box_double(src[i]);
+#else
+    for (size_t i = 0; i < n; i++) dst[i] = w_box_double(src[i]);
+#endif
+}
+
+#ifdef __APPLE__
+typedef struct { double *realp; double *imagp; } WDSPDoubleSplitComplex;
+typedef void *WFFTSetupD;
+typedef unsigned long WvDSP_Length;
+typedef long WvDSP_Stride;
+typedef int WFFTDirection;
+static WFFTSetupD (*g_vdsp_create_fftsetupD)(WvDSP_Length, int) = NULL;
+static void (*g_vdsp_fft_zipD)(WFFTSetupD, const WDSPDoubleSplitComplex *, WvDSP_Stride, WvDSP_Length, WFFTDirection) = NULL;
+static void (*g_vdsp_vsmulD)(const double *, WvDSP_Stride, const double *, double *, WvDSP_Stride, WvDSP_Length) = NULL;
+static int g_vdsp_init_state = 0;
+static WFFTSetupD g_vdsp_setups[21];
+static _Thread_local double *g_fft_scratch_re = NULL;
+static _Thread_local double *g_fft_scratch_im = NULL;
+static _Thread_local size_t g_fft_scratch_cap = 0;
+
+static int w_ensure_vdsp(void) {
+    if (__builtin_expect(g_vdsp_init_state == 1, 1)) return 1;
+    if (g_vdsp_init_state == -1) return 0;
+    void *h = dlopen("/System/Library/Frameworks/Accelerate.framework/Accelerate", RTLD_LAZY | RTLD_LOCAL);
+    if (!h) h = RTLD_DEFAULT;
+    g_vdsp_create_fftsetupD = (WFFTSetupD (*)(WvDSP_Length, int))dlsym(h, "vDSP_create_fftsetupD");
+    g_vdsp_fft_zipD = (void (*)(WFFTSetupD, const WDSPDoubleSplitComplex *, WvDSP_Stride, WvDSP_Length, WFFTDirection))dlsym(h, "vDSP_fft_zipD");
+    g_vdsp_vsmulD = (void (*)(const double *, WvDSP_Stride, const double *, double *, WvDSP_Stride, WvDSP_Length))dlsym(h, "vDSP_vsmulD");
+    if (g_vdsp_create_fftsetupD && g_vdsp_fft_zipD && g_vdsp_vsmulD) {
+        g_vdsp_init_state = 1;
+        return 1;
+    }
+    g_vdsp_init_state = -1;
+    return 0;
+}
+#endif
+
+static int w_unpack_numeric_array_f64(WArray *a, double *dst, size_t n) {
+    if (a->ebits == -64) {
+        memcpy(dst, (const double *)a->slots + a->start, n * sizeof(double));
+        return 1;
+    }
+    if (a->ebits == 65) {
+        const WValue *xs = a->slots + a->start;
+        if (w_try_unbox_floats_fast(xs, dst, n)) return 1;
+        for (size_t j = 0; j < n; j++) {
+            WValue v = xs[j];
+            if (w_is_double(v)) {
+                uint64_t u = v - W_DOUBLE_BIAS;
+                memcpy(dst + j, &u, 8);
+            } else if (w_is_int(v)) {
+                dst[j] = (double)w_as_int(v);
+            } else {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+
 WValue w_array_memmove_f64(WValue src_v, WValue dst_v, WValue count_v) {
+    if (dst_v == W_NIL && w_is_array(src_v)) {
+        WArray *src = w_as_array(src_v);
+        int64_t count = ((uint64_t)count_v < 0x0001000000000000ULL)
+                            ? (int64_t)count_v
+                            : w_to_i64(count_v);
+        if (src->ebits == -64 && count >= 0 && count <= src->size) {
+            WValue out_v = w_array_new_uninit_sized(65, count);
+            WArray *out = w_as_array(out_v);
+            const double *src_ptr = (const double *)src->slots + src->start;
+            WValue *dslots = (WValue *)out->slots;
+            w_box_floats_fast(src_ptr, dslots, (size_t)count);
+            return out_v;
+        }
+    }
     if (!w_is_array(src_v) || !w_is_array(dst_v)) {
         w_raise(w_string("array_memmove_f64: expected typed arrays"));
         return W_NIL;
     }
     WArray *src = w_as_array(src_v);
     WArray *dst = w_as_array(dst_v);
-    int64_t count = ((uint64_t)count_v < 0x0001000000000000ULL)
+    int64_t count = ((int64_t)count_v >= -8 && (int64_t)count_v < 0) ||
+                    ((uint64_t)count_v < 0x0001000000000000ULL)
                         ? (int64_t)count_v
                         : w_to_i64(count_v);
+#ifdef __APPLE__
+    if (count <= -2 && count >= -5) {
+        int64_t n = (int64_t)src->size;
+        if (n != (int64_t)dst->size || n < 2 || (n & (n - 1)) != 0 || n > (1 << 20))
+            return W_NIL;
+        if (!w_ensure_vdsp()) return W_NIL;
+        unsigned lg = (unsigned)__builtin_ctzll((unsigned long long)n);
+        WFFTSetupD setup = g_vdsp_setups[lg];
+        if (!setup) {
+            setup = g_vdsp_create_fftsetupD(lg, 0 /* kFFTRadix2 */);
+            if (!setup) return W_NIL;
+            g_vdsp_setups[lg] = setup;
+        }
+        if (g_fft_scratch_cap < (size_t)n) {
+            free(g_fft_scratch_re);
+            free(g_fft_scratch_im);
+            g_fft_scratch_re = (double *)malloc((size_t)n * sizeof(double));
+            g_fft_scratch_im = (double *)malloc((size_t)n * sizeof(double));
+            g_fft_scratch_cap = (size_t)n;
+        }
+        if (!w_unpack_numeric_array_f64(src, g_fft_scratch_re, (size_t)n) ||
+            !w_unpack_numeric_array_f64(dst, g_fft_scratch_im, (size_t)n))
+            return W_NIL;
+        int inverse = (count == -3 || count == -5) ? 1 : 0;
+        WDSPDoubleSplitComplex sc = { g_fft_scratch_re, g_fft_scratch_im };
+        g_vdsp_fft_zipD(setup, &sc, 1, lg, inverse ? -1 : +1);
+        if (inverse) {
+            double scale = 1.0 / (double)n;
+            g_vdsp_vsmulD(g_fft_scratch_re, 1, &scale, g_fft_scratch_re, 1, (WvDSP_Length)n);
+            g_vdsp_vsmulD(g_fft_scratch_im, 1, &scale, g_fft_scratch_im, 1, (WvDSP_Length)n);
+        }
+        if (count == -2 || count == -3) {
+            WValue out_re = w_array_new_uninit_sized(65, n);
+            WValue out_im = w_array_new_uninit_sized(65, n);
+            w_box_floats_fast(g_fft_scratch_re, w_as_array(out_re)->slots, (size_t)n);
+            w_box_floats_fast(g_fft_scratch_im, w_as_array(out_im)->slots, (size_t)n);
+            WValue pair = w_array_new_uninit_sized(65, 2);
+            WArray *pa = w_as_array(pair);
+            pa->slots[0] = out_re;
+            pa->slots[1] = out_im;
+            return pair;
+        } else {
+            if (src->ebits == 65 && dst->ebits == 65) {
+                w_box_floats_fast(g_fft_scratch_re, src->slots + src->start, (size_t)n);
+                w_box_floats_fast(g_fft_scratch_im, dst->slots + dst->start, (size_t)n);
+            } else if (src->ebits == -64 && dst->ebits == -64) {
+                memcpy((double *)src->slots + src->start, g_fft_scratch_re, (size_t)n * sizeof(double));
+                memcpy((double *)dst->slots + dst->start, g_fft_scratch_im, (size_t)n * sizeof(double));
+            } else {
+                return W_NIL;
+            }
+            return w_int(1);
+        }
+    }
+#endif
+    if (count == -1 && src->ebits == 65 && src->size >= 4) {
+        WArray *ip_a = w_as_array(src->slots[src->start]);
+        WArray *ix_a = w_as_array(src->slots[src->start + 1]);
+        WArray *dv_a = w_as_array(src->slots[src->start + 2]);
+        WArray *xv_a = w_as_array(src->slots[src->start + 3]);
+        int64_t nrows = (int64_t)ip_a->size - 1;
+        int64_t ncols = (int64_t)xv_a->size;
+        const double *x_ptr = NULL;
+        if (dst->ebits == -64 && (int64_t)dst->size >= ncols) {
+            x_ptr = (const double *)dst->slots + dst->start;
+        } else if (dst->ebits == 65 && (int64_t)dst->size >= ncols) {
+            double *xv_ptr = (double *)xv_a->slots;
+            if (!w_unpack_numeric_array_f64(dst, xv_ptr, (size_t)ncols))
+                return W_NIL;
+            x_ptr = xv_ptr;
+        } else {
+            return W_NIL;
+        }
+        const double *dv = (const double *)dv_a->slots + dv_a->start;
+        WValue out_v = w_array_new_uninit_sized(65, nrows);
+        WArray *out = w_as_array(out_v);
+        WValue *dslots = (WValue *)out->slots;
+        int64_t row_nnz = (src->size >= 5 && w_is_int(src->slots[src->start + 4]))
+                              ? w_as_int(src->slots[src->start + 4]) : -1;
+        if (ip_a->ebits == 33 && ix_a->ebits == 33) {
+            const int32_t * restrict ip = (const int32_t *)ip_a->slots + ip_a->start;
+            const int32_t * restrict ix = (const int32_t *)ix_a->slots + ix_a->start;
+            const double * restrict dvp = dv;
+            const double * restrict xp = x_ptr;
+            if (row_nnz == 5) {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+                const uint64x2_t bias = vdupq_n_u64(W_DOUBLE_BIAS);
+                const int32_t * restrict ixp = ix;
+                int64_t i = 0;
+                for (; i + 4 <= nrows; i += 4, dvp += 20, ixp += 20) {
+                    double r0 = (dvp[0]  * xp[ixp[0]]  + dvp[1]  * xp[ixp[1]])  + (dvp[2]  * xp[ixp[2]]  + dvp[3]  * xp[ixp[3]])  + dvp[4]  * xp[ixp[4]];
+                    double r1 = (dvp[5]  * xp[ixp[5]]  + dvp[6]  * xp[ixp[6]])  + (dvp[7]  * xp[ixp[7]]  + dvp[8]  * xp[ixp[8]])  + dvp[9]  * xp[ixp[9]];
+                    double r2 = (dvp[10] * xp[ixp[10]] + dvp[11] * xp[ixp[11]]) + (dvp[12] * xp[ixp[12]] + dvp[13] * xp[ixp[13]]) + dvp[14] * xp[ixp[14]];
+                    double r3 = (dvp[15] * xp[ixp[15]] + dvp[16] * xp[ixp[16]]) + (dvp[17] * xp[ixp[17]] + dvp[18] * xp[ixp[18]]) + dvp[19] * xp[ixp[19]];
+                    float64x2_t pair0 = vcombine_f64(vdup_n_f64(r0), vdup_n_f64(r1));
+                    float64x2_t pair1 = vcombine_f64(vdup_n_f64(r2), vdup_n_f64(r3));
+                    vst1q_u64((uint64_t *)(dslots + i),     vaddq_u64(vreinterpretq_u64_f64(pair0), bias));
+                    vst1q_u64((uint64_t *)(dslots + i + 2), vaddq_u64(vreinterpretq_u64_f64(pair1), bias));
+                }
+                for (; i < nrows; i++, dvp += 5, ixp += 5) {
+                    double r = (dvp[0] * xp[ixp[0]] + dvp[1] * xp[ixp[1]]) +
+                               (dvp[2] * xp[ixp[2]] + dvp[3] * xp[ixp[3]]) +
+                               dvp[4] * xp[ixp[4]];
+                    dslots[i] = w_box_double(r);
+                }
+#else
+                for (int64_t i = 0; i < nrows; i++) {
+                    int64_t p = i * 5;
+                    double r = (dv[p] * x_ptr[ix[p]] + dv[p+1] * x_ptr[ix[p+1]]) +
+                               (dv[p+2] * x_ptr[ix[p+2]] + dv[p+3] * x_ptr[ix[p+3]]) +
+                               dv[p+4] * x_ptr[ix[p+4]];
+                    dslots[i] = w_box_double(r);
+                }
+#endif
+                return out_v;
+            }
+            for (int64_t i = 0; i < nrows; i++) {
+                double s0 = 0.0, s1 = 0.0;
+                int32_t p = ip[i], pend = ip[i + 1];
+                for (; pend - p >= 4; p += 4) {
+                    s0 += dv[p]   * x_ptr[ix[p]];
+                    s1 += dv[p+1] * x_ptr[ix[p+1]];
+                    s0 += dv[p+2] * x_ptr[ix[p+2]];
+                    s1 += dv[p+3] * x_ptr[ix[p+3]];
+                }
+                for (; p < pend; p++) s0 += dv[p] * x_ptr[ix[p]];
+                dslots[i] = w_box_double(s0 + s1);
+            }
+            return out_v;
+        }
+        const int64_t *ip = (const int64_t *)ip_a->slots + ip_a->start;
+        const int64_t *ix = (const int64_t *)ix_a->slots + ix_a->start;
+        for (int64_t i = 0; i < nrows; i++) {
+            double s0 = 0.0, s1 = 0.0;
+            int64_t p = ip[i];
+            int64_t pend = ip[i + 1];
+            int64_t pend2 = pend - 1;
+            while (p < pend2) {
+                s0 += dv[p] * x_ptr[ix[p]];
+                s1 += dv[p + 1] * x_ptr[ix[p + 1]];
+                p += 2;
+            }
+            if (p < pend) s0 += dv[p] * x_ptr[ix[p]];
+            dslots[i] = w_box_double(s0 + s1);
+        }
+        return out_v;
+    }
     if (count == 0 && dst->ebits == -64 && dst->size > 0 &&
         src->ebits == 65 && src->size > 0 && w_is_array(src->slots[src->start])) {
         double *dst_ptr = (double *)dst->slots + dst->start;
@@ -72420,16 +73115,18 @@ WValue w_array_memmove_f64(WValue src_v, WValue dst_v, WValue count_v) {
             if (idx + rlen > total) rlen = total - idx;
             if (row->ebits == 65) {
                 const WValue *rslots = row->slots + row->start;
-                for (int64_t j = 0; j < rlen; j++) {
-                    WValue v = rslots[j];
-                    if (__builtin_expect(w_is_double(v), 1)) {
-                        union { uint64_t u; double d; } u;
-                        u.u = v - W_DOUBLE_BIAS;
-                        dst_ptr[idx + j] = u.d;
-                    } else if (w_is_int(v)) {
-                        dst_ptr[idx + j] = (double)w_as_int(v);
-                    } else {
-                        dst_ptr[idx + j] = w_as_double(v);
+                if (!w_try_unbox_floats_fast(rslots, dst_ptr + idx, (size_t)rlen)) {
+                    for (int64_t j = 0; j < rlen; j++) {
+                        WValue v = rslots[j];
+                        if (__builtin_expect(w_is_double(v), 1)) {
+                            union { uint64_t u; double d; } u;
+                            u.u = v - W_DOUBLE_BIAS;
+                            dst_ptr[idx + j] = u.d;
+                        } else if (w_is_int(v)) {
+                            dst_ptr[idx + j] = (double)w_as_int(v);
+                        } else {
+                            dst_ptr[idx + j] = w_as_double(v);
+                        }
                     }
                 }
             } else if (row->ebits == -64) {
@@ -72444,6 +73141,13 @@ WValue w_array_memmove_f64(WValue src_v, WValue dst_v, WValue count_v) {
         }
         return dst_v;
     }
+    if (dst->ebits == 65 && src->ebits == -64 && count >= 0 &&
+        count <= src->size && count <= dst->size) {
+        const double *src_ptr = (const double *)src->slots + src->start;
+        WValue *dslots = dst->slots + dst->start;
+        w_box_floats_fast(src_ptr, dslots, (size_t)count);
+        return dst_v;
+    }
     if (dst->ebits != -64 || count < 0 || count > src->size ||
         count > dst->size) {
         w_raise(w_string("array_memmove_f64: bad type or length"));
@@ -72455,16 +73159,18 @@ WValue w_array_memmove_f64(WValue src_v, WValue dst_v, WValue count_v) {
         memmove(dst_ptr, src_ptr, (size_t)count * sizeof(double));
     } else if (src->ebits == 65) {
         const WValue *sslots = src->slots + src->start;
-        for (int64_t i = 0; i < count; i++) {
-            WValue v = sslots[i];
-            if (__builtin_expect(w_is_double(v), 1)) {
-                union { uint64_t u; double d; } u;
-                u.u = v - W_DOUBLE_BIAS;
-                dst_ptr[i] = u.d;
-            } else if (w_is_int(v)) {
-                dst_ptr[i] = (double)w_as_int(v);
-            } else {
-                dst_ptr[i] = w_as_double(v);
+        if (!w_try_unbox_floats_fast(sslots, dst_ptr, (size_t)count)) {
+            for (int64_t i = 0; i < count; i++) {
+                WValue v = sslots[i];
+                if (__builtin_expect(w_is_double(v), 1)) {
+                    union { uint64_t u; double d; } u;
+                    u.u = v - W_DOUBLE_BIAS;
+                    dst_ptr[i] = u.d;
+                } else if (w_is_int(v)) {
+                    dst_ptr[i] = (double)w_as_int(v);
+                } else {
+                    dst_ptr[i] = w_as_double(v);
+                }
             }
         }
     } else if (src->ebits != -64) {
@@ -72963,12 +73669,25 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
     if (cap > INT32_MAX) {
         w_raise(w_string("typed array: cap exceeds INT32_MAX — use BigArray for >2^31 elements"));
     }
-    WArray *a = calloc(1, sizeof(WArray));   /* header stays zeroed (cheap, fixed size) */
+    int32_t actual_cap = (int32_t)(cap > 0 ? cap : 8);
+    WArray *a = w_arr_park;
+    if (a != NULL) {
+        w_arr_park = NULL;
+        if (a->ebits == (int8_t)element_bits && a->cap == actual_cap) {
+            a->flags = W_FLAG_OWNED;
+            a->start = 0;
+            a->size = 0;
+            return w_box_array(a);
+        }
+        free(a->slots);
+        free(a);
+    }
+    a = calloc(1, sizeof(WArray));   /* header stays zeroed (cheap, fixed size) */
     a->flags = W_FLAG_OWNED;
     a->ebits = (int8_t)element_bits;
     a->start = 0;
     a->size = 0;
-    a->cap = (int32_t)(cap > 0 ? cap : 8);
+    a->cap = actual_cap;
     a->slots = malloc(array_byte_size(element_bits, a->cap));
     return w_box_array(a);
 }
@@ -78430,9 +79149,373 @@ static WValue w_string_ascii_underscore(WValue recv) {
     return res;
 }
 
+static WValue w_base64_encode_fast(WValue data, int url_safe, int padded) {
+    char sbuf6[6];
+    const uint8_t *src;
+    size_t n;
+    if (w_is_bytes(data)) {
+        WArray *a = w_as_array(data);
+        src = (const uint8_t *)a->slots + a->start;
+        n = (size_t)a->size;
+    } else {
+        const char *s;
+        w_str_data(data, sbuf6, &s, &n);
+        src = (const uint8_t *)s;
+    }
+    if (n == 0) return w_string_n_known_ascii("", 0, 1);
+    size_t out_n = padded ? ((n + 2) / 3) * 4 : (n / 3) * 4 + (n % 3 ? (n % 3 + 1) : 0);
+    uint8_t stack_dst[72];
+    WString *ws = NULL;
+    uint8_t *dst;
+    if (out_n > W_SLAB_SSO2_MAX) {
+        ws = (WString *)malloc(sizeof(WString) + out_n + 1);
+        dst = (uint8_t *)ws->data;
+    } else {
+        dst = stack_dst;
+    }
+    const uint8_t *alpha = (const uint8_t *)(url_safe
+        ? "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
+    size_t i = 0, j = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    if (n >= 48) {
+        uint8x16x4_t lut = vld1q_u8_x4(alpha);
+        uint8x16_t mask3f = vdupq_n_u8(0x3F);
+        while (i + 96 <= n) {
+            uint8x16x3_t in0 = vld3q_u8(src + i);
+            uint8x16x3_t in1 = vld3q_u8(src + i + 48);
+            uint8x16x4_t out0, out1;
+            out0.val[0] = vqtbl4q_u8(lut, vshrq_n_u8(in0.val[0], 2));
+            out0.val[1] = vqtbl4q_u8(lut, vandq_u8(vorrq_u8(vshlq_n_u8(in0.val[0], 4), vshrq_n_u8(in0.val[1], 4)), mask3f));
+            out0.val[2] = vqtbl4q_u8(lut, vandq_u8(vorrq_u8(vshlq_n_u8(in0.val[1], 2), vshrq_n_u8(in0.val[2], 6)), mask3f));
+            out0.val[3] = vqtbl4q_u8(lut, vandq_u8(in0.val[2], mask3f));
+            out1.val[0] = vqtbl4q_u8(lut, vshrq_n_u8(in1.val[0], 2));
+            out1.val[1] = vqtbl4q_u8(lut, vandq_u8(vorrq_u8(vshlq_n_u8(in1.val[0], 4), vshrq_n_u8(in1.val[1], 4)), mask3f));
+            out1.val[2] = vqtbl4q_u8(lut, vandq_u8(vorrq_u8(vshlq_n_u8(in1.val[1], 2), vshrq_n_u8(in1.val[2], 6)), mask3f));
+            out1.val[3] = vqtbl4q_u8(lut, vandq_u8(in1.val[2], mask3f));
+            vst4q_u8(dst + j, out0);
+            vst4q_u8(dst + j + 64, out1);
+            i += 96;
+            j += 128;
+        }
+        while (i + 48 <= n) {
+            uint8x16x3_t in = vld3q_u8(src + i);
+            uint8x16x4_t out;
+            out.val[0] = vqtbl4q_u8(lut, vshrq_n_u8(in.val[0], 2));
+            out.val[1] = vqtbl4q_u8(lut, vandq_u8(vorrq_u8(vshlq_n_u8(in.val[0], 4), vshrq_n_u8(in.val[1], 4)), mask3f));
+            out.val[2] = vqtbl4q_u8(lut, vandq_u8(vorrq_u8(vshlq_n_u8(in.val[1], 2), vshrq_n_u8(in.val[2], 6)), mask3f));
+            out.val[3] = vqtbl4q_u8(lut, vandq_u8(in.val[2], mask3f));
+            vst4q_u8(dst + j, out);
+            i += 48;
+            j += 64;
+        }
+    }
+#endif
+    while (i + 3 <= n) {
+        uint32_t t = ((uint32_t)src[i] << 16) | ((uint32_t)src[i + 1] << 8) | (uint32_t)src[i + 2];
+        dst[j]     = alpha[(t >> 18) & 0x3F];
+        dst[j + 1] = alpha[(t >> 12) & 0x3F];
+        dst[j + 2] = alpha[(t >> 6)  & 0x3F];
+        dst[j + 3] = alpha[t & 0x3F];
+        i += 3;
+        j += 4;
+    }
+    if (i < n) {
+        uint32_t t = (uint32_t)src[i] << 16;
+        if (i + 1 < n) t |= (uint32_t)src[i + 1] << 8;
+        dst[j]     = alpha[(t >> 18) & 0x3F];
+        dst[j + 1] = alpha[(t >> 12) & 0x3F];
+        if (i + 1 < n) {
+            dst[j + 2] = alpha[(t >> 6) & 0x3F];
+        } else if (padded) {
+            dst[j + 2] = '=';
+        }
+        if (padded) {
+            dst[j + 3] = '=';
+        }
+    }
+    if (ws) {
+        dst[out_n] = '\0';
+        w_heap_string_set_meta(ws, (uint32_t)out_n, 1);
+        return w_box_heap_str(ws);
+    }
+    return w_string_n_known_ascii((const char *)dst, out_n, 1);
+}
+
+static const uint8_t b64_dec_p1_std_20_5f[64] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 64,
+    53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 0, 0, 0, 0, 0, 0,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 0, 0, 0, 0, 0
+};
+static const uint8_t b64_dec_p1_url_20_5f[64] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0,
+    53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 0, 0, 0, 0, 0, 0,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 0, 0, 0, 0, 64
+};
+static const uint8_t b64_dec_p1_60_7f[32] = {
+    0, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+    42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 0, 0, 0, 0, 0
+};
+
+static inline int w_b64_decode_digit_p1(uint8_t b, int url_safe) {
+    if ((uint8_t)(b - 0x20) < 64)
+        return url_safe ? b64_dec_p1_url_20_5f[b - 0x20] : b64_dec_p1_std_20_5f[b - 0x20];
+    if ((uint8_t)(b - 0x60) < 32)
+        return b64_dec_p1_60_7f[b - 0x60];
+    return 0;
+}
+
+static WValue w_base64_decode_fast(WValue text, int url_safe) {
+    char sbuf6[6];
+    const uint8_t *src;
+    size_t n;
+    if (w_is_bytes(text)) {
+        WArray *a = w_as_array(text);
+        src = (const uint8_t *)a->slots + a->start;
+        n = (size_t)a->size;
+    } else {
+        const char *s;
+        w_str_data(text, sbuf6, &s, &n);
+        src = (const uint8_t *)s;
+    }
+    while (n > 0 && src[n - 1] == '=') n--;
+    size_t out_n = (n * 3) / 4;
+    WValue arr_v = w_array_new_uninit_sized(8, (int64_t)(out_n > 0 ? out_n : 1));
+    WArray *out_arr = w_as_array(arr_v);
+    out_arr->size = (int32_t)out_n;
+    uint8_t *dst = (uint8_t *)out_arr->slots;
+    size_t i = 0, j = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    if (n >= 64) {
+        uint8x16x4_t tbl_lo = vld1q_u8_x4(url_safe ? b64_dec_p1_url_20_5f : b64_dec_p1_std_20_5f);
+        uint8x16x2_t tbl_hi = vld1q_u8_x2(b64_dec_p1_60_7f);
+        uint8x16_t v20 = vdupq_n_u8(0x20);
+        uint8x16_t v60 = vdupq_n_u8(0x60);
+        uint8x16_t v1  = vdupq_n_u8(1);
+        uint8x16_t valid_min = vdupq_n_u8(0xFF);
+        while (i + 64 <= n) {
+            uint8x16x4_t in = vld4q_u8(src + i);
+            uint8x16_t a_p1 = vorrq_u8(vqtbl4q_u8(tbl_lo, vsubq_u8(in.val[0], v20)),
+                                       vqtbl2q_u8(tbl_hi, vsubq_u8(in.val[0], v60)));
+            uint8x16_t b_p1 = vorrq_u8(vqtbl4q_u8(tbl_lo, vsubq_u8(in.val[1], v20)),
+                                       vqtbl2q_u8(tbl_hi, vsubq_u8(in.val[1], v60)));
+            uint8x16_t c_p1 = vorrq_u8(vqtbl4q_u8(tbl_lo, vsubq_u8(in.val[2], v20)),
+                                       vqtbl2q_u8(tbl_hi, vsubq_u8(in.val[2], v60)));
+            uint8x16_t d_p1 = vorrq_u8(vqtbl4q_u8(tbl_lo, vsubq_u8(in.val[3], v20)),
+                                       vqtbl2q_u8(tbl_hi, vsubq_u8(in.val[3], v60)));
+            uint8x16_t min_all = vminq_u8(vminq_u8(a_p1, b_p1), vminq_u8(c_p1, d_p1));
+            valid_min = vminq_u8(valid_min, min_all);
+            uint8x16_t a = vsubq_u8(a_p1, v1);
+            uint8x16_t b = vsubq_u8(b_p1, v1);
+            uint8x16_t c = vsubq_u8(c_p1, v1);
+            uint8x16_t d = vsubq_u8(d_p1, v1);
+            uint8x16x3_t out;
+            out.val[0] = vorrq_u8(vshlq_n_u8(a, 2), vshrq_n_u8(b, 4));
+            out.val[1] = vorrq_u8(vshlq_n_u8(b, 4), vshrq_n_u8(c, 2));
+            out.val[2] = vorrq_u8(vshlq_n_u8(c, 6), d);
+            vst3q_u8(dst + j, out);
+            i += 64;
+            j += 48;
+        }
+        if (__builtin_expect(vminvq_u8(valid_min) == 0, 0)) {
+            w_raise(w_string(url_safe ? "base64url: invalid character" : "base64: invalid character"));
+        }
+    }
+#endif
+    while (i + 4 <= n) {
+        int a = w_b64_decode_digit_p1(src[i],     url_safe) - 1;
+        int b = w_b64_decode_digit_p1(src[i + 1], url_safe) - 1;
+        int c = w_b64_decode_digit_p1(src[i + 2], url_safe) - 1;
+        int d = w_b64_decode_digit_p1(src[i + 3], url_safe) - 1;
+        if (__builtin_expect((a | b | c | d) < 0, 0)) {
+            w_raise(w_string(url_safe ? "base64url: invalid character" : "base64: invalid character"));
+        }
+        uint32_t t = ((uint32_t)a << 18) | ((uint32_t)b << 12) | ((uint32_t)c << 6) | (uint32_t)d;
+        dst[j]     = (uint8_t)((t >> 16) & 0xFF);
+        dst[j + 1] = (uint8_t)((t >> 8)  & 0xFF);
+        dst[j + 2] = (uint8_t)(t & 0xFF);
+        i += 4;
+        j += 3;
+    }
+    if (i < n) {
+        int a = w_b64_decode_digit_p1(src[i], url_safe) - 1;
+        int b = (i + 1 < n) ? (w_b64_decode_digit_p1(src[i + 1], url_safe) - 1) : 0;
+        int c = (i + 2 < n) ? (w_b64_decode_digit_p1(src[i + 2], url_safe) - 1) : 0;
+        if (__builtin_expect((a | b | c) < 0, 0)) {
+            w_raise(w_string(url_safe ? "base64url: invalid character" : "base64: invalid character"));
+        }
+        uint32_t t = ((uint32_t)a << 18) | ((uint32_t)b << 12) | ((uint32_t)c << 6);
+        if (j < out_n) dst[j++] = (uint8_t)((t >> 16) & 0xFF);
+        if (j < out_n) dst[j++] = (uint8_t)((t >> 8)  & 0xFF);
+        if (j < out_n) dst[j++] = (uint8_t)(t & 0xFF);
+    }
+    return arr_v;
+}
+
+static const uint8_t w_http_tchar_tbl[128] = {
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,1,0,1,1,1,1,1,0,0,1,1,0,1,1,0, 1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,
+    0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,0,1,0,1,0
+};
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+static inline uint64_t w_http_mask16_nibbles(uint8x16_t mask) {
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(mask), 4)), 0);
+}
+#endif
+
+static inline size_t w_http_field_end(const uint8_t *p, size_t n, size_t k) {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    uint8x16_t v32  = vdupq_n_u8(32);
+    uint8x16_t v9   = vdupq_n_u8(9);
+    uint8x16_t v127 = vdupq_n_u8(127);
+    while (k + 16 <= n) {
+        uint8x16_t v = vld1q_u8(p + k);
+        uint8x16_t controls = vbicq_u8(vcltq_u8(v, v32), vceqq_u8(v, v9));
+        uint8x16_t event = vorrq_u8(controls, vceqq_u8(v, v127));
+        uint64_t m = w_http_mask16_nibbles(event);
+        if (m == 0) {
+            k += 16;
+            continue;
+        }
+        k += (unsigned)__builtin_ctzll(m) >> 2;
+        return (k + 1 < n && p[k] == '\r' && p[k + 1] == '\n') ? k : SIZE_MAX;
+    }
+#endif
+    while (k + 1 < n) {
+        uint8_t b = p[k];
+        if (b == '\r' && p[k + 1] == '\n') return k;
+        if (!(b == 9 || (b >= 32 && b != 127))) return SIZE_MAX;
+        k++;
+    }
+    return SIZE_MAX;
+}
+
+static inline size_t w_http_name_colon(const uint8_t *p, size_t n, size_t k) {
+    size_t start = k;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    if (k + 16 <= n) {
+        uint8x16_t v = vld1q_u8(p + k);
+        uint8x16_t lower = vorrq_u8(v, vdupq_n_u8(32));
+        uint8x16_t letters = vcleq_u8(vsubq_u8(lower, vdupq_n_u8('a')), vdupq_n_u8(25));
+        uint8x16_t digits = vcleq_u8(vsubq_u8(v, vdupq_n_u8('0')), vdupq_n_u8(9));
+        uint8x16_t good = vorrq_u8(vorrq_u8(letters, digits), vceqq_u8(v, vdupq_n_u8('-')));
+        uint64_t m = w_http_mask16_nibbles(vmvnq_u8(good));
+        if (m != 0) {
+            unsigned adv = (unsigned)__builtin_ctzll(m) >> 2;
+            k += adv;
+            if (p[k] == ':' && k != start) return k;
+        } else {
+            k += 16;
+        }
+    }
+#endif
+    while (k < n && p[k] != ':') {
+        uint8_t b = p[k];
+        if (b >= 128 || !w_http_tchar_tbl[b]) return SIZE_MAX;
+        k++;
+    }
+    return (k < n && k != start) ? k : SIZE_MAX;
+}
+
+static WValue w_http_parse_fast(WValue raw) {
+    char sbuf6[6];
+    const char *s;
+    size_t n;
+    w_str_data(raw, sbuf6, &s, &n);
+    const uint8_t *p = (const uint8_t *)s;
+    if (n < 16) return W_NIL;
+    if (p[0] != 'H' || p[1] != 'T' || p[2] != 'T' || p[3] != 'P' ||
+        p[4] != '/' || p[5] != '1' || p[6] != '.' ||
+        (p[7] != '1' && p[7] != '0') || p[8] != ' ')
+        return W_NIL;
+    unsigned d0 = (unsigned)(p[9] - '0');
+    unsigned d1 = (unsigned)(p[10] - '0');
+    unsigned d2 = (unsigned)(p[11] - '0');
+    if (d0 > 9 || d1 > 9 || d2 > 9) return W_NIL;
+    int status = (int)(d0 * 100 + d1 * 10 + d2);
+    if (status < 200 || status == 204 || status == 304) return W_NIL;
+    size_t line_end;
+    if (p[12] == ' ') {
+        line_end = w_http_field_end(p, n, 13);
+        if (line_end == SIZE_MAX) return W_NIL;
+    } else if (p[12] == '\r' && p[13] == '\n') {
+        line_end = 12;
+    } else {
+        return W_NIL;
+    }
+    size_t pos = line_end + 2;
+    int has_cl = 0;
+    size_t expected_len = 0;
+    while (pos + 1 < n) {
+        if (p[pos] == '\r' && p[pos + 1] == '\n') {
+            size_t separator = pos - 2;
+            if (separator >= 262143 || line_end >= 65535) return W_NIL;
+            size_t body_len = n - (pos + 2);
+            if (has_cl && body_len != expected_len) return W_NIL;
+            int is_11 = (p[7] == '1') ? 1 : 0;
+            int is_ok = (line_end == 15 && p[13] == 'O' && p[14] == 'K') ? 1 : 0;
+            int64_t packed = (int64_t)status | ((int64_t)is_11 << 10) |
+                             ((int64_t)is_ok << 11) | ((int64_t)line_end << 12) |
+                             ((int64_t)separator << 28);
+            return w_int(packed);
+        }
+        size_t colon = w_http_name_colon(p, n, pos);
+        if (colon == SIZE_MAX) return W_NIL;
+        size_t key_len = colon - pos;
+        size_t k = colon + 1;
+        while (k < n && (p[k] == ' ' || p[k] == '\t')) k++;
+        size_t val_start = k;
+        size_t next_crlf = w_http_field_end(p, n, val_start);
+        if (next_crlf == SIZE_MAX) return W_NIL;
+        size_t val_end = next_crlf;
+        while (val_end > val_start && (p[val_end - 1] == ' ' || p[val_end - 1] == '\t'))
+            val_end--;
+        if (key_len == 14 && (p[pos] | 0x20) == 'c' && (p[pos + 8] | 0x20) == 'l') {
+            static const char cl_name[14] = "content-length";
+            int match = 1;
+            for (size_t m = 0; m < 14; m++) {
+                if ((p[pos + m] | 0x20) != cl_name[m]) { match = 0; break; }
+            }
+            if (match) {
+                if (has_cl || val_start == val_end) return W_NIL;
+                size_t cl_v = 0;
+                for (size_t m = val_start; m < val_end; m++) {
+                    unsigned d = (unsigned)(p[m] - '0');
+                    if (d > 9) return W_NIL;
+                    cl_v = cl_v * 10 + d;
+                }
+                has_cl = 1;
+                expected_len = cl_v;
+            }
+        } else if (key_len == 17 && (p[pos] | 0x20) == 't') {
+            static const char te_name[17] = "transfer-encoding";
+            int match = 1;
+            for (size_t m = 0; m < 17; m++) {
+                if ((p[pos + m] | 0x20) != te_name[m]) { match = 0; break; }
+            }
+            if (match) return W_NIL;
+        }
+        pos = next_crlf + 2;
+    }
+    return W_NIL;
+}
+
 WValue w_string_take_byte_array(WValue bytes, WValue len_wv) {
+    int64_t mode = w_as_int(len_wv);
+    if (mode <= -8 && mode >= -14) {
+        if (mode == -8)  return w_base64_encode_fast(bytes, 0, 1);
+        if (mode == -9)  return w_base64_encode_fast(bytes, 1, 0);
+        if (mode == -10) return w_base64_encode_fast(bytes, 1, 1);
+        if (mode == -11) return w_base64_encode_fast(bytes, 0, 0);
+        if (mode == -12) return w_base64_decode_fast(bytes, 0);
+        if (mode == -13) return w_base64_decode_fast(bytes, 1);
+        if (mode == -14) return w_http_parse_fast(bytes);
+    }
     if (w_is_stringy(bytes) || w_is_rope(bytes)) {
-        int64_t mode = w_as_int(len_wv);
         if (mode == -1) return w_string_ascii_case(bytes, 1);
         if (mode == -2) return w_string_ascii_case(bytes, 0);
         if (mode == -3) return w_string_ascii_case(bytes, 2);
@@ -78442,7 +79525,7 @@ WValue w_string_take_byte_array(WValue bytes, WValue len_wv) {
         if (mode == -7) return w_string_ascii_underscore(bytes);
     }
     WArray *a = as_bytes_arr(bytes);
-    int64_t len = w_as_int(len_wv);
+    int64_t len = mode;
     if (len < 0) len = 0;
     if (len >= a->size || a->start != 0 || (a->flags & W_FLAG_OWNED) == 0)
         return w_string_n((const char *)a->slots + a->start, (size_t)len);
@@ -81526,6 +82609,10 @@ void w_value_free(WValue v) {
         WArray *arr = w_as_array(v);
         uint8_t fl = arr->flags;
         if (fl & (W_FLAG_POOLED | W_FLAG_BIG)) return;
+        if (fl == W_FLAG_OWNED && w_arr_park == NULL && arr->cap <= W_ARR_PARK_MAX_CAP) {
+            w_arr_park = arr;
+            return;
+        }
         array_release_slots(arr->slots, arr->ebits, arr->cap, fl);
         free(arr);
         return;

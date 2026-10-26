@@ -387,6 +387,13 @@
     # opt-in, so the result is nil (boxed). Declared machine bases
     # (`## i64`/`## u64` slots) keep their machine result type below.
     if node.op == :LSHIFT && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int
+      if node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
+        lv = node.left.value
+        rv = node.right.value
+        if lv >= 0 && lv <= 140737488355327 && rv >= 0 && rv <= 46 && lv <= (140737488355327 >> rv)
+          return :i64
+      return nil
+    if node.op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)
       return nil
     if is_integer_like_type(lt) && is_integer_like_type(rt)
       int_ops = infer_maps[:int_op_map]

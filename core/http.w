@@ -9,12 +9,28 @@
 
 # HTTPResponse — immutable buffered HTTP response.
 + HTTPResponse
-  ro :version, :status, :reason, :headers, :body
+  ro :version, :status, :reason
 
-  -> new(@version, @status, @reason, @headers, @body)
+  -> new(@version, @status, @reason, @headers, @body, @raw_resp = nil)
+
+  -> body
+    if @body == nil && @raw_resp != nil
+      bstart = ((@headers ## i64) >> 16) + 4
+      @body = @raw_resp.slice(bstart, @raw_resp.size - bstart)
+    @body
+
+  -> headers
+    if @raw_resp != nil
+      bounds = @headers ## i64
+      if @body == nil
+        bstart = (bounds >> 16) + 4
+        @body = @raw_resp.slice(bstart, @raw_resp.size - bstart)
+      @headers = HTTP.__parse_headers(@raw_resp, bounds & 65535, bounds >> 16)
+      @raw_resp = nil
+    @headers
 
   -> header(name)
-    @headers[name.to_s.downcase]
+    self.headers[name.to_s.downcase]
 
   -> success?
     @status >= 200 && @status < 300
@@ -111,56 +127,133 @@
     out += "Connection: close\r\n\r\n"
     out
 
-  -> .parse_response(raw, request_method = nil)
-    separator = raw.index("\r\n\r\n")
-    if separator == nil
-      raise "HTTP: incomplete response headers"
-
-    header_text = raw.slice(0, separator)
-    lines = header_text.split("\r\n")
-    if lines.empty?
-      raise "HTTP: missing status line"
-    status_line = lines[0]
-    first_space = status_line.index(" ")
-    if first_space == nil
-      raise "HTTP: malformed status line"
-    second_space = status_line.index(" ", first_space + 1)
-    version = status_line.slice(0, first_space)
-    if version != "HTTP/1.0" && version != "HTTP/1.1"
-      raise "HTTP: unsupported response version: " + version
-    if second_space == nil
-      status_text = status_line.slice(first_space + 1, status_line.size - first_space - 1)
-      reason = ""
-    else
-      status_text = status_line.slice(first_space + 1, second_space - first_space - 1)
-      reason = status_line.slice(second_space + 1, status_line.size - second_space - 1)
-    if status_text.size != 3 || !HTTP.decimal?(status_text)
-      raise "HTTP: malformed response status"
-    if !HTTP.valid_field_value?(reason)
-      raise "HTTP: invalid response reason"
-    status = status_text.to_i
-
+  -> .__parse_headers(raw, start_pos, separator)
+    view = ccall("w_string_bytes_view", raw) ## u8[]
     headers = {}
-    i = 1
-    while i < lines.size
-      line = lines[i]
-      if line.empty? || line.starts_with?(" ") || line.starts_with?("\t")
-        raise "HTTP: malformed response header"
-      colon = line.index(":")
-      if colon == nil || colon == 0
-        raise "HTTP: malformed response header"
-      name = line.slice(0, colon)
-      if !HTTP.valid_token?(name)
-        raise "HTTP: invalid response header name"
-      value = line.slice(colon + 1, line.size - colon - 1).strip
-      if !HTTP.valid_field_value?(value)
-        raise "HTTP: invalid response header value"
-      key = name.downcase
+    pos = start_pos ## i64
+    sep = separator ## i64
+    while pos < sep
+      next_crlf = http_find_crlf(view, pos, sep)
+      colon = http_find_colon_valid_token(view, pos, next_crlf)
+      val_start = colon + 1
+      val_end = next_crlf
+      while val_start < val_end
+        vb = view[val_start] ## i64
+        break if vb != 32 && vb != 9 && vb != 13 && vb != 10
+        val_start += 1
+      while val_end > val_start
+        vb = view[val_end - 1] ## i64
+        break if vb != 32 && vb != 9 && vb != 13 && vb != 10
+        val_end -= 1
+      key = raw.slice(pos, colon - pos).downcase
+      value = val_end > val_start ? raw.slice(val_start, val_end - val_start) : ""
       if headers[key] == nil
         headers[key] = value
       else
         headers[key] += ", " + value
-      i += 1
+      pos = next_crlf + 2
+    headers
+
+  -> .parse_response(raw, request_method = nil)
+    if request_method == nil
+      fast_pack = ccall("w_string_take_byte_array", raw, -14)
+      if fast_pack != nil
+        pk = fast_pack ## i64
+        f_status = pk & 1023
+        f_version = ((pk >> 10) & 1) == 1 ? "HTTP/1.1" : "HTTP/1.0"
+        f_line_end = (pk >> 12) & 65535
+        f_sep = (pk >> 28) & 262143
+        if ((pk >> 11) & 1) == 1
+          f_reason = "OK"
+        elsif f_line_end <= 13
+          f_reason = ""
+        else
+          f_reason = raw.slice(13, f_line_end - 13)
+        f_bounds = (f_line_end + 2) | (f_sep << 16)
+        return HTTPResponse.new(f_version, f_status, f_reason, f_bounds, nil, raw)
+
+    separator = raw.index("\r\n\r\n")
+    if separator == nil
+      raise "HTTP: incomplete response headers"
+    if separator == 0
+      raise "HTTP: missing status line"
+
+    view = ccall("w_string_bytes_view", raw) ## u8[]
+    line_end = http_find_crlf(view, 0, separator)
+    version = nil
+    status = 0
+    reason = ""
+    if line_end >= 12 && view[0] == 72 && view[1] == 84 && view[2] == 84 && view[3] == 80 && view[4] == 47 && view[5] == 49 && view[6] == 46 && view[8] == 32 && (view[7] == 49 || view[7] == 48)
+      version = view[7] == 49 ? "HTTP/1.1" : "HTTP/1.0"
+      d0 = view[9] ## i64
+      d1 = view[10] ## i64
+      d2 = view[11] ## i64
+      if d0 < 48 || d0 > 57 || d1 < 48 || d1 > 57 || d2 < 48 || d2 > 57
+        raise "HTTP: malformed response status"
+      status = (d0 - 48) * 100 + (d1 - 48) * 10 + (d2 - 48)
+      if line_end == 12
+        reason = ""
+      elsif view[12] == 32
+        if !http_valid_field_range?(view, 13, line_end)
+          raise "HTTP: invalid response reason"
+        if line_end == 15 && view[13] == 79 && view[14] == 75
+          reason = "OK"
+        else
+          reason = raw.slice(13, line_end - 13)
+      else
+        raise "HTTP: malformed response status"
+    else
+      status_line = raw.slice(0, line_end)
+      first_space = status_line.index(" ")
+      if first_space == nil
+        raise "HTTP: malformed status line"
+      second_space = status_line.index(" ", first_space + 1)
+      version = status_line.slice(0, first_space)
+      if version != "HTTP/1.0" && version != "HTTP/1.1"
+        raise "HTTP: unsupported response version: " + version
+      if second_space == nil
+        status_text = status_line.slice(first_space + 1, status_line.size - first_space - 1)
+        reason = ""
+      else
+        status_text = status_line.slice(first_space + 1, second_space - first_space - 1)
+        reason = status_line.slice(second_space + 1, status_line.size - second_space - 1)
+      if status_text.size != 3 || !HTTP.decimal?(status_text)
+        raise "HTTP: malformed response status"
+      if !HTTP.valid_field_value?(reason)
+        raise "HTTP: invalid response reason"
+      status = status_text.to_i
+
+    headers = {}
+    pos = line_end + 2
+    while pos < separator
+      next_crlf = http_find_crlf(view, pos, separator)
+      b0 = view[pos] ## i64
+      if next_crlf == pos || b0 == 32 || b0 == 9
+        raise "HTTP: malformed response header"
+      colon = http_find_colon_valid_token(view, pos, next_crlf)
+      if colon == -1
+        raise "HTTP: malformed response header"
+      if colon == -2
+        raise "HTTP: invalid response header name"
+      val_start = colon + 1
+      val_end = next_crlf
+      while val_start < val_end
+        vb = view[val_start] ## i64
+        break if vb != 32 && vb != 9 && vb != 13 && vb != 10
+        val_start += 1
+      while val_end > val_start
+        vb = view[val_end - 1] ## i64
+        break if vb != 32 && vb != 9 && vb != 13 && vb != 10
+        val_end -= 1
+      if !http_valid_field_range?(view, val_start, val_end)
+        raise "HTTP: invalid response header value"
+      key = raw.slice(pos, colon - pos).downcase
+      value = val_end > val_start ? raw.slice(val_start, val_end - val_start) : ""
+      if headers[key] == nil
+        headers[key] = value
+      else
+        headers[key] += ", " + value
+      pos = next_crlf + 2
 
     body = raw.slice(separator + 4, raw.size - separator - 4)
     if status >= 100 && status < 200
@@ -281,3 +374,39 @@
       return false if !ok
       i += 1
     true
+
+-> http_find_crlf(view, start, limit) (u8[] i64 i64) i64
+  i = start
+  while i + 1 < limit
+    if view[i] == 13 && view[i + 1] == 10
+      return i
+    i += 1
+  limit
+
+-> http_valid_field_range?(view, start, finish) (u8[] i64 i64) bool
+  i = start
+  while i < finish
+    byte = view[i] ## i64
+    if byte == 127 || (byte < 32 && byte != 9)
+      return false
+    i += 1
+  true
+
+-> http_find_colon_valid_token(view, start, finish) (u8[] i64 i64) i64
+  i = start
+  while i < finish
+    b = view[i] ## i64
+    if b == 58
+      if i == start
+        return 0 - 1
+      return i
+    ok = (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 45 || b == 95 || b == 46 || b == 33 || (b >= 35 && b <= 39) || b == 42 || b == 43 || (b >= 94 && b <= 96) || b == 124 || b == 126
+    if !ok
+      j = i + 1
+      while j < finish
+        if view[j] == 58
+          return 0 - 2
+        j += 1
+      return 0 - 1
+    i += 1
+  0 - 1

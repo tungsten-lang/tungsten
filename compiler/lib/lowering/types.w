@@ -1190,6 +1190,10 @@ known_impure_ccall_targets = init_known_impure_ccall_targets()
   nil
 
 -> iterator_block_param_types(recv_type, method_name)
+  if method_name == "each_line"
+    return [:string]
+  if method_name == "each_byte"
+    return [:i64]
   elem_t = typed_array_element_value_type(recv_type)
   if elem_t == nil
     return nil

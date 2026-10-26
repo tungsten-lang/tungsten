@@ -413,10 +413,11 @@ use core/mmap
 
   # Yields each remaining line, line ending included.
   -> each_line(&)
-    line = ccall("__w_file_handle_gets", self.stream(), false)
+    fp = self.stream()
+    line = ccall("__w_file_handle_gets", fp, false)
     while line != nil
       yield line
-      line = ccall("__w_file_handle_gets", self.stream(), false)
+      line = ccall("__w_file_handle_gets", fp, false)
     self
 
   -> flush

@@ -66,8 +66,8 @@ vignette, grain (count, base, mid, optional `blur_var`), jitter, shakes and a ca
 | `still` | a panel under a camera move from the style's table: zoom moves `{amp: [base, per s, max], focus_k, reverse}` or travelling moves `{z: [z0, z1], x/y: {base: center\|focus\|weight, span: [s0, per s] \| edge: fraction, dir}}`; `fx` (rain, fog, snow, dust/embers, flicker, shake); a `wipe` to a second image at a phrase; a `matte` (the letterbox colour and its overlay elements); timed overlays |
 | `clip` | a still plus `clip`: frame-sequence `parts` (each `{src, first, count}`) joined by `xf`-frame crossfades, played at `speed: [min, max]` to fill the item (+ `add_ms`) from a phrase `at`, with `blend` (or, unblended, `nearest`: the nearest source frame rather than the one at or before), a `zoom` curve, a `pre` pull from the still, or a `hold` push on the last frame |
 | `group` | panes, each `{src, pane: [x, y, w, h], at (phrase), lead_ms, fade_ms, zoom, focus, frame: pane\|picture (+ x), shade: {rows, to}, elements}`, plus a matte |
-| `frames` | a pre-rendered frame sequence (`in` offset) |
-| `program` | a Tungsten program's frames (below) |
+| `frames` | a pre-rendered frame sequence (`in` offset); optional `replace: {match, with}` (below) |
+| `program` | a Tungsten program's frames (below); optional `replace` as for `frames` |
 | `card` | `bg: {color, paper: {key, seed, down, blur, amount, tint}}` and `elements` |
 | `black` | |
 
@@ -85,6 +85,20 @@ work directory linking a folder's entries, so a program that reads its video fol
 writes into the cache. `captions: {run, file}` reads the SRT the program writes for its own frames (a shot opts in
 with `captions_from_program`). Frames are cached under H(program text, data, compiler, run arguments) and rendered
 per hold, only those the segments need, in up to `--jobs` processes.
+
+**Background plates (de-banding).** A frame sequence drawn over an 8-bit gradient (rsvg's radial gradients step one
+code every ~60 px) can take `"replace": {"match": <image asset>, "with": <image asset>}`: every pixel that still equals
+the match plate exactly (the renderer's own 8-bit background, untouched by any content) takes the with plate's pixel
+instead (the same gradient computed in floating point and dithered). Static, so it costs the encoder little; with a
+10-bit encode (`hevc10`) the dither averages back into a smooth gradient. Both plates enter the item's recipe.
+
+**Encoder per kind.** The cut's `"encoder"` may add `"quality_by_kind": {kind: quality}`: a segment is encoded at the
+highest quality among the items it shows (a dissolve from a still into an animation takes the animation's). For H.264,
+whose parameter sets do not depend on quality, the segments still append under one sample description (checked: q0.70
+stills and q0.90 animations in one passthrough master). HEVC's parameter sets change with quality, so an HEVC cut keeps
+one quality. Measured on dark radial gradients (Profiles in Philosophy, 2026-10-26): VideoToolbox H.264 at 0.70 cuts
+them into 16 x 16 blocks; 0.90 matches libx264 crf 18; HEVC Main10 (`hevc10`) at 0.60 with a dithered plate is smoother
+than the 8-bit source itself, and on grainy stills beats libx264 crf 18 (VMAF 96.4 vs 95.9 at 14.9 vs 18.1 Mb/s).
 
 **Captions.** Lines carry caption chunks `cc: [{w: [first word, end word), text}]`, laid out by the author (breaks,
 speaker labels); their times come from the take's word starts and ends (`words_ms`, `words_end_ms`), so they follow a

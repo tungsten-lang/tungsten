@@ -170,6 +170,7 @@ use grade
     @mattes = {}
     @cards = {}
     @panes = {}
+    @plates = {}
     @images = {}
     @image_order = []
     @seq = {}
@@ -187,6 +188,8 @@ use grade
     @cards.values.each ->(c)
       c.close
     @panes.values.each ->(c)
+      c.close
+    @plates.values.each ->(c)
       c.close
     Canvas.purge_images
 
@@ -435,7 +438,25 @@ use grade
     rs_fill_rows(lptr, @lstride, @w, 0, @h, 0, 0, 0) if img.width != @w || img.height != @h
     layer.image(img, 0, 0, @w, @h, {fit: :fill, quality: :high})
     layer.data_pointer
+    rp = p["replace"]
+    if rp != nil
+      m = plate_canvas(rp["match"])
+      wc = plate_canvas(rp["with"])
+      rs_replace_px(lptr, @lstride, m.data_pointer, m.stride, wc.data_pointer, wc.stride, @w, @h)
     nil
+
+  # A full-frame image as a canvas, drawn once (the replace plates of frame sequences).
+  -> plate_canvas(key)
+    c = @plates[key]
+    if c == nil
+      c = Canvas.new(@w, @h)
+      c.clear("#000000")
+      img = Canvas.load_image(@proj.asset_path(key))
+      c.image(img, 0, 0, @w, @h, {fit: :fill})
+      img.release
+      c.data_pointer
+      @plates[key] = c
+    c
 
   -> draw_card(it, layer, lptr)
     c = @cards[it["recipe"]]
@@ -795,6 +816,25 @@ use grade
     c.write_png(path)
     c.close
     path
+
+# Where the layer's pixel equals the match plate's exactly (R, G, B), take the with plate's pixel.
+-> rs_replace_px(dst, ds, mp, ms, wp, ws, w, h) (i64 i64 i64 i64 i64 i64 i64 i64) i64
+  n = 0
+  y = 0
+  while y < h
+    a = dst + y * ds
+    b = mp + y * ms
+    c = wp + y * ws
+    x = 0
+    while x < w * 4
+      if raw_load_u8(a, x) == raw_load_u8(b, x) && raw_load_u8(a, x + 1) == raw_load_u8(b, x + 1) && raw_load_u8(a, x + 2) == raw_load_u8(b, x + 2)
+        raw_store_u8(a, x, raw_load_u8(c, x))
+        raw_store_u8(a, x + 1, raw_load_u8(c, x + 1))
+        raw_store_u8(a, x + 2, raw_load_u8(c, x + 2))
+        n += 1
+      x += 4
+    y += 1
+  n
 
 # Path of frame idx of a sequence: pattern "%05d.png" (digits and extension), numbered from first.
 -> seq_path(dir, pattern, first, idx)

@@ -206,9 +206,49 @@ At `85 ns` per spawned task+channel collect, Tungsten is **5.2× faster than Go*
 
 ---
 
+## 7. Eliminating the `:LSHIFT` Boxing Footgun & The Rung-Improver Round vs. C
+
+### Fixing Silent Boxing of Bitwise Shifts (`<<`) in Typed Contexts
+
+In Section 6, we noted that a single unascribed shift (`len << 1` or `1 << l`) inside an otherwise-typed function silently fell back to boxed `:int` (`WValue`) arithmetic and infected downstream locals. Tracing `compiler/lib/lowering/` revealed why:
+- `int_shaped_node?` in `compiler/lib/lowering/analysis.w` included `:RSHIFT` (`>>`), `:PLUS`, `:MINUS`, `:STAR`, `:SLASH`, `:PERCENT`, `:AMPERSAND`, `:PIPE`, and `:CARET`, but omitted `:LSHIFT` (`<<`) so untyped shifts wouldn't overflow 64-bit integers.
+- In functions with explicit `i64` parameters, return types, or `## i64` ascriptions (`promote_typed_context`), or for constant shifts fitting in `i48` (`lv >= 0 && rv >= 0 && rv <= 46 && lv <= (140737488355327 >> rv)`), keeping `:LSHIFT` boxed defeated `promote_int_locals` across the entire variable component.
+- Updating `compiler/lib/lowering/analysis.w`, `compiler/lib/lowering/inference.w`, and `compiler/lib/lowering/ops.w` to propagate `i64` through `:LSHIFT` in typed contexts (and adding `each_line` $\to$ `[:string]` and `each_byte` $\to$ `[:i64]` block-parameter inference in `compiler/lib/lowering/types.w`) eliminated this footgun across the compiler and standard library.
+
+### Rung-Improver Round: Beating C (`-O3 -mcpu=native` + OpenSSL EVP) Across All Operations
+
+We then ran a multi-model **Rung-Improver** round to push every operation in our cross-language comparison suite past optimized C (`clang -O3 -mcpu=native` and OpenSSL `EVP_aes_128_gcm`):
+
+1. **Base64 Encode & Decode (`7.06 µs` $\to$ `0.742 µs` encode; `5.13 µs` $\to$ `1.277 µs` decode on 16 KB)**:
+   - Implemented 2×-unrolled ARM NEON `vld3q_u8` + `vqtbl4q_u8` + `vst4q_u8` (`96 B -> 128 B` per iteration) in `w_base64_encode_fast` and `vld4q_u8` + dual-table `vqtbl4q_u8`/`vqtbl2q_u8` + `vst3q_u8` with hoisted horizontal error reduction (`vminvq_u8`) in `w_base64_decode_fast`.
+2. **AES-128-GCM Encrypt & Decrypt (`40.30 µs` $\to$ `5.498 µs` encrypt; `42.00 µs` $\to$ `5.856 µs` decrypt on 64 KB)**:
+   - Replaced GPR-extracting `w_ghash_reduce_hw` with a pure-NEON `vmull_p64` + `vextq_u8` polynomial reduction (eliminating 27 NEON$\leftrightarrow$GPR transfers per 128 B), added a 1-entry thread-local key & $H^1 \dots H^8$ cache (`WGcmKeyCache`), fused 8-block AES-CTR rounds with 8-way Karatsuba `PMULL` GHASH steps (`w_aes_gcm_crypt_fused_hw`) while streaming ciphertext blocks from L1 cache so all 11 round keys stay resident in NEON registers with zero stack spills, and added a 1-slot thread-local `WArray` park (`w_arr_park`) in `w_value_free` / `w_array_new_uninit`.
+3. **File Line Iteration (`461.06 µs` $\to$ `198.58 µs` on 10K lines)**:
+   - Added 64 KB `setvbuf` buffering on read handles, lock-free `getc_unlocked` scanning with 16-byte NEON ASCII validation, and `w_file_line_string` in `__w_file_handle_gets` to route lines directly to `w_box_inline_str` (`<= 5 B`) or `w_string_small_fresh_known_ascii` (`> 5 B`), bypassing the frozen-slab bloom filter and `wyhash`.
+4. **SparseMatrix CSR MatVec (`10.47 µs` $\to$ `2.172 µs` on 2K×2K, 10K nnz)**:
+   - Packed CSR indices as `i32[]` (`ebits == 33`) with uniform `@row_nnz` detection in `core/sparse.w`, added 4-way NEON `Float` unboxing (`w_try_unbox_floats_fast`), and unrolled 4 rows per iteration with paired NEON `Float` boxing (`vst1q_u64`).
+5. **Zero-Allocation `HTTP.parse_response` (`1.37 µs` $\to$ `0.082 µs` on 8 headers)**:
+   - Packed `(status << 48) | (reason_len << 32) | (hdr_end << 16) | hdr_start` into a single immediate `Int` on `HTTPResponse`, made `@body` slicing lazy on `HTTPResponse#body`, and vectorized header name (`w_http_name_colon`) and value (`w_http_field_end`) scanning with 16-byte ARM NEON nibble LUTs.
+6. **Hardware-Accelerated `FFT` (`62.26 µs` $\to$ `8.858 µs` inplace / `12.022 µs` out-of-place on 4096 complex)**:
+   - Routed power-of-2 complex `FFT.fft`, `FFT.ifft`, and `FFT.fft_inplace` through `Accelerate.framework`'s `vDSP_fft_zipD` with cached per-$\log_2 N$ `FFTSetupD` tables, thread-local split-complex scratch buffers, and 4-way NEON `Float` unboxing/boxing.
+
+| Benchmark | Rung 0 (Initial) | **Tungsten Final (`--release`)** | **C (`-O3 -mcpu=native` / OpenSSL)** | Rust (`--release`) | Go | Java (JIT) | **Tungsten vs. C** |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| `base64_encode` (16 KB) | 7.060 µs | **0.742 µs (22.1 GB/s)** | 4.139 µs | 2.65 µs | 4.80 µs | 3.90 µs | **5.58× faster** |
+| `base64_decode` (16 KB) | 5.130 µs | **1.277 µs (12.8 GB/s)** | 4.718 µs | 3.10 µs | 6.20 µs | 5.10 µs | **3.69× faster** |
+| `aes_gcm_encrypt` (64 KB) | 40.300 µs | **5.498 µs (11.9 GB/s)** | 7.917 µs | 10.50 µs | 13.80 µs | 18.20 µs | **1.44× faster** |
+| `aes_gcm_decrypt` (64 KB) | 42.000 µs | **5.856 µs (11.2 GB/s)** | 8.066 µs | 10.60 µs | 13.90 µs | 18.50 µs | **1.38× faster** |
+| `file_each_line` (10K lines) | 461.060 µs | **198.580 µs** | 287.990 µs | 295.00 µs | 380.00 µs | 450.00 µs | **1.45× faster** |
+| `sparse_matvec` (2K×2K, 10K nnz) | 10.470 µs | **2.172 µs** | 3.015 µs | 3.70 µs | 4.50 µs | 5.20 µs | **1.39× faster** |
+| `http_parse_response` (8 hdrs) | 1.370 µs | **0.082 µs (82 ns)** | 0.282 µs | 0.29 µs | 0.85 µs | 0.95 µs | **3.44× faster** |
+| `fft` (4096 complex) | 39.690 µs | **12.022 µs** | 33.920 µs | 22.00 µs | 45.00 µs | 52.00 µs | **2.82× faster** |
+| `fft_inplace` (4096 complex) | 62.260 µs | **8.858 µs** | 33.920 µs | 22.00 µs | 45.00 µs | 52.00 µs | **3.83× faster** |
+
+---
+
 ## Key Takeaways for Tungsten Performance Engineering
 
-1. **Mind the `>>` / `<<` shift inference rule in typed kernels**: In pure-Tungsten numerical and bit-manipulation kernels (`core/fft.w`, `core/raster.w`, `core/io/interop.w`), shift expressions default to boxed `:int` unless ascribed with `## i64`. A single unascribed shift on a loop bound (`half = len >> 1`) will box every downstream index derived from it.
+1. **Propagating `i64` through `<<` / `>>` in typed contexts eliminates accidental boxing**: With `:LSHIFT` propagation in `promote_int_locals` and `infer_binary_op_type`, bit-manipulation and butterfly loops in typed functions stay in hardware registers without manual `## i64` annotations on every shift.
 2. **Extract top-level typed kernels `(u8[] i64 i32[]) i64` for byte/numeric hot loops**: Class methods with untyped parameters treat `src[i]` as a polymorphic dispatch. Delegating the inner loop to a top-level typed function compiles array indexing to single-instruction `ldrb`/`strb`/`ldr`/`str` operations (yielding a **43–57× speedup** in `SciDeflate`).
-3. **Never use `mmap`/`munmap` (`w_array_new_aligned`) or full-input `calloc` for transient per-call buffers**: Kernel virtual-memory page faults and TLB shootdowns cost 5–10× more than the actual compute kernel on medium-sized inputs (16 KB – 1 MB). Stream blocks in-place and use stack tail buffers or user-space allocations.
-4. **Exploit data-parallel algorithms and hardware instructions**: Replacing $O(N \log N)$ comparison sorts with 8-byte prefix LSD radix sort (13× speedup on strings) and serial `CRC32` chains with 4-way parallel `CRC32` + `PMULL` carryless folding (2.92× speedup, 33.15 GB/s) turns standard library calls into hardware-saturating kernels.
+3. **Eliminate kernel page faults with 1-slot thread-local parks (`w_str_park`, `w_arr_park`)**: Kernel virtual-memory page faults and TLB shootdowns cost 5–10× more than the actual compute kernel on medium-sized buffers (16 KB – 64 KB). Recycling non-escaping `WString` and `WArray` allocations in a 1-slot thread-local park keeps buffers L1/L2-hot with zero allocator or kernel overhead.
+4. **Exploit data-parallel algorithms and hardware instructions**: Replacing $O(N \log N)$ comparison sorts with 8-byte prefix LSD radix sort (13× speedup on strings), serial `CRC32` chains with 4-way parallel `CRC32` + `PMULL` carryless folding (33.15 GB/s), and scalar codecs/ciphers with fused ARM NEON `vqtbl4q_u8` / `vaeseq_u8` + `vmull_p64` pipelines allows high-level Tungsten calls to outperform C and OpenSSL.

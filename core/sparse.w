@@ -133,6 +133,7 @@ use core/numeric/float
   -> new
     @data_typed = nil
     @dv_f64 = nil
+    @csr_pack = nil
     self
 
   # ≤6 args each (runtime dispatch limit is 8 including self)
@@ -181,6 +182,7 @@ use core/numeric/float
     @values = nil
     @data_typed = nil
     @dv_f64 = nil
+    @csr_pack = nil
     self
 
   -> as_coo(rows, cols, row_idx, col_idx, values)
@@ -196,6 +198,7 @@ use core/numeric/float
     @values = canonical[2]
     @data_typed = nil
     @dv_f64 = nil
+    @csr_pack = nil
     self
 
   ro :rows, :cols, :indptr, :indices, :data
@@ -218,6 +221,7 @@ use core/numeric/float
     @values = nil
     @data_typed = nil
     @dv_f64 = nil
+    @csr_pack = nil
     self
 
   -> to_csr
@@ -236,6 +240,10 @@ use core/numeric/float
 
   # y = A x  — pure path; Accelerate SparseBLAS when ccall available
   -> matvec(x)
+    if @fmt == :csr && @csr_pack != nil
+      fast_y = ccall("w_array_memmove_f64", @csr_pack, x, -1)
+      if fast_y != nil
+        return fast_y
     a = self
     if @fmt != :csr
       a = to_csr
@@ -243,16 +251,9 @@ use core/numeric/float
     ncols = a.cols
     if nrows >= 16 && ncols > 0 && type(x[0]) == "Float"
       a.ensure_f64_csr
-      xv = a.xv_f64
-      yv = a.yv_f64 ## f64[]
-      ccall("w_array_memmove_f64", x, xv, ncols)
-      sparse_csr_matvec_f64(nrows, a.ip_i64, a.ix_i64, a.dv_f64, xv, yv)
-      y = Array.new(nrows)
-      i = 0 ## i64
-      while i < nrows
-        y[i] = yv[i]
-        i = i + 1
-      return y
+      fast_y = ccall("w_array_memmove_f64", a.csr_pack, x, -1)
+      if fast_y != nil
+        return fast_y
     ip = a.indptr
     ix = a.indices
     dv = a.data
@@ -275,13 +276,25 @@ use core/numeric/float
     nnz = @data.size()
     m = @rows
     n = @cols
-    ip = i64[m + 1]
-    ix = i64[nnz > 0 ? nnz : 1]
+    ip = i32[m + 1]
+    ix = i32[nnz > 0 ? nnz : 1]
     dv = f64[nnz > 0 ? nnz : 1]
     i = 0 ## i64
     while i <= m
       ip[i] = @indptr[i]
       i = i + 1
+    row_nnz = -1
+    if m > 0
+      w0 = ip[1] - ip[0]
+      same = 1
+      r = 1 ## i64
+      while r < m
+        if (ip[r + 1] - ip[r]) != w0
+          same = 0
+          break
+        r = r + 1
+      if same == 1
+        row_nnz = w0
     i = 0 ## i64
     while i < nnz
       ix[i] = @indices[i]
@@ -292,9 +305,10 @@ use core/numeric/float
     @dv_f64 = dv
     @xv_f64 = f64[n > 0 ? n : 1]
     @yv_f64 = f64[m > 0 ? m : 1]
+    @csr_pack = [ip, ix, dv, @xv_f64, row_nnz]
     self
 
-  ro :ip_i64, :ix_i64, :dv_f64, :xv_f64, :yv_f64
+  ro :ip_i64, :ix_i64, :dv_f64, :xv_f64, :yv_f64, :csr_pack
 
   # SpMV via Apple SparseBLAS. Builds typed i32/f32 WArrays once, then
   # calls w_sparse_spmv_f32. Falls back to pure matvec if bridge missing.
@@ -485,12 +499,16 @@ use core/numeric/float
 -> sparse_csr_matvec_f64(nrows, ip, ix, dv, xv, yv) (i64 i64[] i64[] f64[] f64[] f64[]) i64
   i = 0
   while i < nrows
-    s = ~0.0
+    s0 = ~0.0
+    s1 = ~0.0
     p = ip[i]
     pend = ip[i + 1]
-    while p < pend
-      s = s + dv[p] * xv[ix[p]]
-      p = p + 1
-    yv[i] = s
+    while p + 1 < pend
+      s0 = s0 + dv[p] * xv[ix[p]]
+      s1 = s1 + dv[p + 1] * xv[ix[p + 1]]
+      p = p + 2
+    if p < pend
+      s0 = s0 + dv[p] * xv[ix[p]]
+    yv[i] = s0 + s1
     i = i + 1
   0

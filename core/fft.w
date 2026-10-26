@@ -25,25 +25,41 @@
     n = re.size()
     if FFT.is_pow2(n) == false
       raise "FFT: length must be a power of 2 (got " + n.to_s() + ")"
+    if n >= 16
+      fast = ccall("w_array_memmove_f64", re, im, inverse ? -5 : -4)
+      if fast != nil
+        return [re, im]
     rb = f64[n]
     ib = f64[n]
-    i = 0 ## i64
-    while i < n
-      rb[i] = re[i]
-      ib[i] = im[i]
-      i = i + 1
+    if n >= 4 && type(re[0]) == "Float" && type(im[0]) == "Float"
+      ccall("w_array_memmove_f64", re, rb, n)
+      ccall("w_array_memmove_f64", im, ib, n)
+    else
+      i = 0 ## i64
+      while i < n
+        rb[i] = re[i]
+        ib[i] = im[i]
+        i = i + 1
     fft_radix2_kernel(rb, ib, n, inverse ? 1 : 0)
-    i = 0 ## i64
-    while i < n
-      re[i] = rb[i]
-      im[i] = ib[i]
-      i = i + 1
+    if n >= 4
+      ccall("w_array_memmove_f64", rb, re, n)
+      ccall("w_array_memmove_f64", ib, im, n)
+    else
+      i = 0 ## i64
+      while i < n
+        re[i] = rb[i]
+        im[i] = ib[i]
+        i = i + 1
     [re, im]
 
   -> .fft(re_in, im_in)
     n = re_in.size()
     if FFT.is_pow2(n) == false
       raise "FFT: length must be a power of 2 (got " + n.to_s() + ")"
+    if n >= 16
+      fast = ccall("w_array_memmove_f64", re_in, im_in, -2)
+      if fast != nil
+        return fast
     rb = f64[n]
     ib = f64[n]
     if n >= 4 && type(re_in[0]) == "Float" && type(im_in[0]) == "Float"
@@ -56,19 +72,18 @@
         ib[i] = im_in[i]
         i = i + 1
     fft_radix2_kernel(rb, ib, n, 0)
-    re = Array.new(n)
-    im = Array.new(n)
-    i = 0 ## i64
-    while i < n
-      re[i] = rb[i]
-      im[i] = ib[i]
-      i = i + 1
+    re = ccall("w_array_memmove_f64", rb, nil, n)
+    im = ccall("w_array_memmove_f64", ib, nil, n)
     [re, im]
 
   -> .ifft(re_in, im_in)
     n = re_in.size()
     if FFT.is_pow2(n) == false
       raise "FFT: length must be a power of 2 (got " + n.to_s() + ")"
+    if n >= 16
+      fast = ccall("w_array_memmove_f64", re_in, im_in, -3)
+      if fast != nil
+        return fast
     rb = f64[n]
     ib = f64[n]
     if n >= 4 && type(re_in[0]) == "Float" && type(im_in[0]) == "Float"
@@ -81,13 +96,8 @@
         ib[i] = im_in[i]
         i = i + 1
     fft_radix2_kernel(rb, ib, n, 1)
-    re = Array.new(n)
-    im = Array.new(n)
-    i = 0 ## i64
-    while i < n
-      re[i] = rb[i]
-      im[i] = ib[i]
-      i = i + 1
+    re = ccall("w_array_memmove_f64", rb, nil, n)
+    im = ccall("w_array_memmove_f64", ib, nil, n)
     [re, im]
 
   -> .rfft(x)

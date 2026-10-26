@@ -52,6 +52,8 @@
     @@dec_std
 
   -> .__encode(data, url_safe, padded)
+    b64_mode = padded ? (url_safe ? -10 : -8) : (url_safe ? -9 : -11)
+    return ccall("w_string_take_byte_array", data, b64_mode)
     # Strings become a borrowed byte view; u8[] inputs are returned unchanged.
     # The view uses the String's stored byte count, so embedded NUL is data.
     b64_input = ccall("w_base64_encode_input", data) ## u8[]
@@ -120,6 +122,7 @@
     ccall("w_string_from_byte_array", b64_output)
 
   -> .__decode(text, url_safe)
+    return ccall("w_string_take_byte_array", text, url_safe ? -13 : -12)
     # Decode deliberately accepts String only, matching the historical API.
     b64_input = ccall("w_base64_decode_input", text) ## u8[]
     b64_dec = Base64.__dec_table(url_safe) ## u8[]

@@ -738,10 +738,20 @@
         return int_shaped_node?(node.args[0], declared_types, mod)
   when :binary_op
     op = node.op
-    # :LSHIFT is deliberately absent (like :POW): a shift-left overflows i64
-    # with tiny operands, and raw slots have no representation for the BigInt
-    # the untyped semantics then require. Its lowering routes through the
-    # checked __w_shl_fast instead, so a shift-bearing chain must stay boxed.
+    if op == :LSHIFT
+      if node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int
+        if node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
+          lv = node.left.value
+          rv = node.right.value
+          if lv >= 0 && lv <= 140737488355327 && rv >= 0 && rv <= 46 && lv <= (140737488355327 >> rv)
+            return true
+        return false
+      if node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 46)
+        return false
+      lhs_ascribed_int = node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :type_ascription && assign_int_hint_type(node.left.type_hint) != nil
+      if lhs_ascribed_int || (mod != nil && mod[:promote_typed_context] == true)
+        return int_shaped_node?(node.left, declared_types, mod) && int_shaped_node?(node.right, declared_types, mod)
+      return false
     if op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :RSHIFT)
       return int_shaped_node?(node.left, declared_types, mod) && int_shaped_node?(node.right, declared_types, mod)
   # `c ? a : b` (an if/else with single-expression arms) is one of its arms,
@@ -1354,11 +1364,16 @@
     # raw_return: the enclosing fn has the raw-i64 ABI, so `return x` hands x
     # back as a machine int — no WValue boundary, no escape. Carried on mod
     # for the duration of this walk (lowering is single-threaded).
+    has_typed_ctx = raw_return || n_declared_names > 0 || n_hinted_names > 0
     if mod != nil && raw_return
       mod[:promote_raw_return] = true
+    if mod != nil && has_typed_ctx
+      mod[:promote_typed_context] = true
     visit_promote_list(body, records, known, mod)
     if mod != nil && raw_return
       mod[:promote_raw_return] = nil
+    if mod != nil && has_typed_ctx
+      mod[:promote_typed_context] = nil
     next_candidates = {}
     kept = 0
     i = 0

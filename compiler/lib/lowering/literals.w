@@ -55,6 +55,8 @@
 # literals keep their current behavior (range-checked separately later).
 -> int_literal_exceeds_i64?(node)
   raw = node.raw
+  if raw == nil || raw.size() < 19
+    return false
   if !decimal_int_literal?(raw)
     return false
   decimal_text_exceeds_i64?(raw)
@@ -177,18 +179,20 @@
   else
     raise compile_error_for_node(:E_LOWER_UNKNOWN_MAGIC, "Unknown magic constant: " + node.name, ctx[:source_path], node)
 
+sso5_str_text_cache = {}
+sso5_sym_text_cache = {}
+
 -> lower_string(ctx, node)
   s = node.value
   byte_len = utf8_byte_length(s)
   # SSO-5: strings ≤5 bytes are encoded directly as an i64 constant — no global, no w_string call
   if byte_len <= 5
-    v = (w_tag_stringsym + byte_len * 2) ## i64
-    bytes = s.bytes()
-    i = 0
-    while i < byte_len
-      v = (v + bytes[i] * (1 << (4 + 8 * i))) ## i64
-      i += 1
-    return typed_value(:i64, wvalue_literal_text(machine_i64_box(v)))
+    cached = sso5_str_text_cache[s]
+    if cached != nil
+      return typed_value(:i64, cached)
+    txt = wvalue_literal_text(sso5_wvalue(s))
+    sso5_str_text_cache[s] = txt
+    return typed_value(:i64, txt)
   str_id = module_string_constant(ctx[:mod], s)
   temp_ptr = next_temp(ctx[:func])
   temp = next_temp(ctx[:func])
@@ -444,8 +448,13 @@
   byte_len = utf8_byte_length(s)
   # SSO-5: symbols ≤5 bytes are inline constants (string WValue | 1 for symbol bit).
   if byte_len <= 5
+    cached = sso5_sym_text_cache[s]
+    if cached != nil
+      return typed_value(:i64, cached)
     v = sso5_wvalue(s) + 1
-    return typed_value(:i64, wvalue_literal_text(v))
+    txt = wvalue_literal_text(v)
+    sso5_sym_text_cache[s] = txt
+    return typed_value(:i64, txt)
   # Slab-interned symbols (6-61 bytes) — WValue is resolved at emit
   # time once build_string_wvalues has assigned slab slot indices.
   # Symbols >61 bytes would force the runtime intern path

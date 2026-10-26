@@ -18,6 +18,12 @@ use naming
   # Hash, avoiding repeated string hashing in canonical-content walks.
   ccall("w_content_temp_norm", name, temp_map)
 
+canonical_op_tokens = [nil]
+canonical_op_token_i = 1
+while canonical_op_token_i < 280
+  canonical_op_tokens.push("o" + canonical_op_token_i.to_s())
+  canonical_op_token_i += 1
+
 -> canonical_op_code(op, op_codes)
   # Packed WIRE gives every opcode a generated, process-independent ordinal.
   # Using it directly keeps a function hash independent of which unrelated
@@ -205,16 +211,51 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       encode_codegen_meta_field(field, wire_field_value_at(inst, i), buf, temp_map, mod)
     i += 1
 
+-> encode_int_meta_field(prefix, value, buf)
+  if value == nil
+    return nil
+  text = value.to_s()
+  buf << prefix
+  buf << text.size().to_s()
+  buf << ":"
+  buf << text
+  buf << ";"
+
 # Encode one instruction into the canonical string buffer.
 -> encode_inst(inst, buf, temp_map, label_map, fn_hashes, mod, self_name, op_codes)
   op = wire_kind(inst)
-  buf << "o"
-  buf << canonical_op_code(op, op_codes).to_s()
+  kind_id = ccall_nobox("w_wire_kind_extern", inst) ## i64
+  if kind_id > 0 && kind_id < 274
+    buf << canonical_op_tokens[kind_id]
+  else
+    buf << "o"
+    buf << canonical_op_code(op, op_codes).to_s()
+
+  if op == :call_loc_set_col
+    encode_int_meta_field("kcol=", wire_get(inst, :col), buf)
+    encode_int_meta_field("kfile_byte_len=", wire_get(inst, :file_byte_len), buf)
+    encode_int_meta_field("kfile_str_id=", wire_get(inst, :file_str_id), buf)
+    encode_int_meta_field("kline=", wire_get(inst, :line), buf)
+    buf << ";"
+    return nil
 
   # Register temp output
   t = wire_get(inst, :temp)
   if t != nil
     norm_temp(t, temp_map)
+
+  if op in (:load_i64 :alloca_i64 :load_ptr)
+    buf << "p"
+    buf << wire_get(inst, :ptr)
+    buf << ";"
+    return nil
+
+  if op == :store_i64
+    encode_val(buf, wire_get(inst, :value), temp_map)
+    buf << "p"
+    buf << wire_get(inst, :ptr)
+    buf << ";"
+    return nil
 
   if op in (:call_direct_i64 :call_direct_void :call_direct_ptr)
     if op == :call_direct_i64
@@ -349,26 +390,13 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     buf << ";"
     return nil
 
-  if op in (:load_i64 :alloca_i64 :load_ptr)
-    buf << "p"
-    buf << wire_get(inst, :ptr)
-    buf << ";"
-    return nil
-
-  if op == :store_i64
-    encode_val(buf, wire_get(inst, :value), temp_map)
-    buf << "p"
-    buf << wire_get(inst, :ptr)
-    buf << ";"
-    return nil
-
   if op == :store_ptr
     encode_codegen_meta_field(:dest, wire_get(inst, :dest), buf, temp_map, mod)
     encode_val(buf, wire_get(inst, :value), temp_map)
     buf << ";"
     return nil
 
-  if op in (:truthy_inline :nanbox_bool :free_value :not_i1 :zext_i1_i64 :trunc_i64_i32)
+  if op in (:truthy_inline :nanbox_bool :free_value :not_i1 :zext_i1_i64 :trunc_i64_i32 :icmp_ne_zero :inttoptr_i64 :ptr_to_i64 :i64_to_ptr)
     encode_val(buf, wire_get(inst, :value), temp_map)
     buf << ";"
     return nil
@@ -379,7 +407,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     buf << ";"
     return nil
 
-  if op in (:nanunbox_int :scope_push :scope_pop :ret_void :unreachable)
+  if op in (:nanunbox_int :scope_push :scope_pop :ret_void :unreachable :cleanup_pop)
     buf << ";"
     return nil
 
@@ -415,6 +443,27 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
   if op == :load_class
     buf << "C"
     buf << wire_get(inst, :class_name)
+    buf << ";"
+    return nil
+
+  if op == :ivar_get_idx
+    encode_val(buf, wire_get(inst, :self_reg), temp_map)
+    off = wire_get(inst, :offset).to_s()
+    buf << "O"
+    buf << off
+    buf << "O"
+    buf << off
+    buf << ";"
+    return nil
+
+  if op == :ivar_set_idx
+    encode_val(buf, wire_get(inst, :value), temp_map)
+    encode_val(buf, wire_get(inst, :self_reg), temp_map)
+    off = wire_get(inst, :offset).to_s()
+    buf << "O"
+    buf << off
+    buf << "O"
+    buf << off
     buf << ";"
     return nil
 
@@ -1339,6 +1388,116 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       ii += 1
     bi += 1
 
+-> content_hash_parallel_job_count(count)
+  if env("TUNGSTEN_BATCH_WORKER_PROCESS") == "1" || env("TUNGSTEN_PARALLEL_MIDEND") == "0" || env("TUNGSTEN_PARALLEL_CONTENT_HASH") == "0" || runtime_identity() != "compiled-runtime"
+    return 1
+  if count < 64
+    return 1
+  requested = 0
+  configured = env("TUNGSTEN_MIDEND_JOBS")
+  if configured != nil && configured != "" && configured != "auto"
+    requested = configured.to_i()
+  if requested < 1
+    requested = ccall("w_cpu_count")
+    if requested > 8
+      requested = 8
+  if requested < 1
+    requested = 1
+  if requested > count
+    requested = count
+  if requested > 32
+    requested = 32
+  requested
+
+-> content_hash_batch_worker(state)
+  batch = state[:batch]
+  mod = state[:mod]
+  fn_hashes = state[:fn_hashes]
+  op_codes = state[:op_codes]
+  release_mode = state[:release_mode]
+  contents = state[:contents]
+  hash_contents_arr = state[:hash_contents_arr]
+  hashes = state[:hashes]
+  index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  while index < batch.size()
+    func = batch[index]
+    content = canonical_content(func, mod, fn_hashes, op_codes, release_mode)
+    hash_content = content
+    if func[:incremental_core_candidate] == true
+      hash_content = "cached-core:" + content_hash_identity_field(func[:name]) + content
+    contents[index] = content
+    hash_contents_arr[index] = hash_content
+    hashes[index] = wyhash64_hex_string(hash_content)
+    index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  true
+
+-> content_hash_commit_entry(func, content, hash_content, h, fn_hashes, fn_contents, hash_contents)
+  salt = 0
+  resolved = false
+  while !resolved
+    prior = hash_contents[h]
+    if prior == nil
+      hash_contents[h] = {hash: h, content: hash_content}
+      resolved = true
+    elsif prior[:hash] == h && prior[:content] == hash_content
+      resolved = true
+    else
+      salt += 1
+      h = wyhash64_hex_string("collision:" + salt.to_s() + ":" + hash_content)
+  fn_hash_put(fn_hashes, func[:name], h)
+  fn_content_put(fn_contents, func[:name], content)
+  nil
+
+-> content_hash_flush_batch(batch, mod, fn_hashes, fn_contents, hash_contents, op_codes, release_mode)
+  n = batch.size()
+  if n == 0
+    return nil
+  jobs = content_hash_parallel_job_count(n)
+  if jobs > 1
+    contents = Array.new(n)
+    hash_contents_arr = Array.new(n)
+    hashes = Array.new(n)
+    cursor = ccall("w_atomic_new", u0xFFFA000000000000)
+    naming_cache_state[:frozen] = true
+    workers = []
+    w = 0
+    while w < jobs
+      state = {
+        batch: batch,
+        mod: mod,
+        fn_hashes: fn_hashes,
+        op_codes: op_codes,
+        release_mode: release_mode,
+        contents: contents,
+        hash_contents_arr: hash_contents_arr,
+        hashes: hashes,
+        cursor: cursor
+      }
+      workers.push(Thread.new ->
+        content_hash_batch_worker(state))
+      w += 1
+    w = 0
+    while w < workers.size()
+      ccall("w_thread_join_release", workers[w])
+      w += 1
+    naming_cache_state[:frozen] = false
+    i = 0
+    while i < n
+      content_hash_commit_entry(batch[i], contents[i], hash_contents_arr[i], hashes[i], fn_hashes, fn_contents, hash_contents)
+      i += 1
+    return nil
+  i = 0
+  while i < n
+    func = batch[i]
+    content = canonical_content(func, mod, fn_hashes, op_codes, release_mode)
+    hash_content = content
+    if func[:incremental_core_candidate] == true
+      hash_content = "cached-core:" + content_hash_identity_field(func[:name]) + content
+    h = wyhash64_hex_string(hash_content)
+    content_hash_commit_entry(func, content, hash_content, h, fn_hashes, fn_contents, hash_contents)
+    i += 1
+  nil
+
 # Main pass: hash functions without a cached hash, dedup, rewrite references.
 -> content_hash_pass(mod, verbose = false, release_mode = false)
   functions = mod[:functions]
@@ -1399,7 +1558,7 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       while ii < instrs.size()
         inst = instrs[ii]
         callee = nil
-        if wire_kind(inst) in (:call_direct_i64 :call_direct_void)
+        if wire_kind(inst) in (:call_direct_i64 :call_direct_void :call_direct_ptr)
           callee = wire_get(inst, :name)
         elsif wire_kind(inst) == :closure_new
           callee = wire_get(inst, :fn_name)
@@ -1453,39 +1612,43 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     else
       pending = next_pending
 
-  # Hash each function in topo order
+  # Pre-warm llvm_param_reg cache on the main thread before parallel wave hashing.
+  fi = 0
+  while fi < hash_functions.size()
+    fparams = hash_functions[fi][:params]
+    if fparams != nil
+      pi = 0
+      while pi < fparams.size()
+        llvm_param_reg(fparams[pi])
+        pi += 1
+    fi += 1
+
+  # Hash each function in topo order, grouping independent waves for parallel hashing.
+  batch = []
+  batch_names = {}
   oi = 0
   while oi < order.size()
     func = hash_functions[order[oi]]
     # Skip main and empty functions
     if func[:is_toplevel] != true && func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
-      content = canonical_content(func, mod, fn_hashes, op_codes, release_mode)
-      hash_content = content
-      if func[:incremental_core_candidate] == true
-        # Compact Core once on the cache miss, but never deduplicate it with
-        # the program delta or another callable Core symbol. The stable source
-        # name keeps each published callable present while LLVM names stay
-        # short on all subsequent hits.
-        hash_content = "cached-core:" + content_hash_identity_field(func[:name]) + content
-      h = wyhash64_hex_string(hash_content)
-      salt = 0
-      resolved = false
-      while !resolved
-        prior = hash_contents[h]
-        if prior == nil
-          hash_contents[h] = {hash: h, content: hash_content}
-          resolved = true
-        elsif prior[:hash] == h && prior[:content] == hash_content
-          resolved = true
-        else
-          # A real hash collision (or a defensive mismatch returned by a host
-          # Hash implementation) gets a deterministic rehash. The full
-          # canonical content is still compared below before deduplication.
-          salt += 1
-          h = wyhash64_hex_string("collision:" + salt.to_s() + ":" + hash_content)
-      fn_hash_put(fn_hashes, func[:name], h)
-      fn_content_put(fn_contents, func[:name], content)
+      fname = func[:name]
+      edges = calls_to[fname]
+      depends_on_batch = false
+      if edges != nil
+        ei = 0
+        while ei < edges.size()
+          if batch_names[edges[ei]] == true
+            depends_on_batch = true
+            break
+          ei += 1
+      if depends_on_batch
+        content_hash_flush_batch(batch, mod, fn_hashes, fn_contents, hash_contents, op_codes, release_mode)
+        batch = []
+        batch_names = {}
+      batch.push(func)
+      batch_names[fname] = true
     oi += 1
+  content_hash_flush_batch(batch, mod, fn_hashes, fn_contents, hash_contents, op_codes, release_mode)
 
   # Group by hash
   hash_groups = {}  # hash → [fn_name, ...]

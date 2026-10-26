@@ -300,9 +300,31 @@ wire_block_record_fields = [:label, :instructions]
     f[:reflective_method_access] = true
   nil
 
+-> build_wire_temp_names
+  a = []
+  i = 0
+  while i < 4096
+    a.push("%t" + i.to_s())
+    i += 1
+  a
+
+wire_temp_names = build_wire_temp_names()
+
+-> build_wire_var_slot_names
+  a = []
+  i = 0
+  while i < 512
+    a.push("%vs." + i.to_s())
+    i += 1
+  a
+
+wire_var_slot_names = build_wire_var_slot_names()
+
 -> next_temp(f)
   n = f[:next_temp]
   f[:next_temp] = n + 1
+  if n >= 0 && n < 4096
+    return wire_temp_names[n]
   "%t" + n.to_s()
 
 -> next_label(f, prefix)
@@ -326,7 +348,11 @@ wire_block_record_fields = [:label, :instructions]
   # Dotted name: valid in LLVM, impossible as a Tungsten identifier — a
   # user param/local literally named v<N> would otherwise collide with
   # the minted slot ("multiple definition of local value named 'v1'").
-  ptr = "%vs." + n.to_s()
+  ptr = nil
+  if n >= 0 && n < 512
+    ptr = wire_var_slot_names[n]
+  else
+    ptr = "%vs." + n.to_s()
   f[:var_slots][name] = ptr
   f[:var_slot_types][name] = slot_type
   ptr

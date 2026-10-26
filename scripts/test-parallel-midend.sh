@@ -10,6 +10,7 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/cache"
 export TUNGSTEN_CACHE_DIR="$TMP/cache"
 export TUNGSTEN_INCREMENTAL=0
+export TUNGSTEN_CORE_LOWER_CACHE=0
 export TUNGSTEN_FRONTEND_DISK_CACHE=0
 export TUNGSTEN_FUNCTION_EMIT_CACHE=0
 flags=(--emit-ll --release --native --fast --verbose)

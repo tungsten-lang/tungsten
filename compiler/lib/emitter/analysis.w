@@ -595,7 +595,7 @@ function_emit_cache_state = {
 # Return the runtime function names that an instruction will reference when rendered.
 -> runtime_fns_for_inst(inst, string_wvs = nil)
   op = wire_kind(inst)
-  if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop || op == :load_global || op == :load_class
+  if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop
     return nil
   case op
   when :call_direct_i64, :call_direct_i128, :call_direct_void, :call_direct_ptr
@@ -834,31 +834,34 @@ function_emit_cache_state = {
       ii = 0
       while ii < ninstrs
         inst = instrs[ii]
-        if wire_get(inst, :src_line) != nil
-          ret_label = nil
-          site_ic_id = nil
-          if wire_kind(inst) == :call_method_i64
-            site_ic_id = wire_get(inst, :ic_id)
-            ret_label = "cs." + site_ic_id.to_s() + ".ret"
-          elsif wire_kind(inst) in (:call_direct_void :call_direct_i64) && wire_get(inst, :loc_site_id) != nil
-            ret_label = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
-          if ret_label != nil
-            file_id = files[fn_path]
-            if file_id == nil
-              file_id = next_file_id
-              files[fn_path] = file_id
-              next_file_id = next_file_id + 1
-            col_val = wire_get(inst, :src_col)
-            if col_val == nil
-              col_val = 0
-            sites.push({
-              fn_name: f[:name],
-              ret_label: ret_label,
-              ic_id: site_ic_id,
-              file_id: file_id,
-              line: wire_get(inst, :src_line),
-              col: col_val
-            })
+        op = wire_kind(inst)
+        if op == :call_method_i64 || op == :call_direct_i64 || op == :call_direct_void
+          src_line = wire_get(inst, :src_line)
+          if src_line != nil
+            ret_label = nil
+            site_ic_id = nil
+            if op == :call_method_i64
+              site_ic_id = wire_get(inst, :ic_id)
+              ret_label = "cs." + site_ic_id.to_s() + ".ret"
+            elsif wire_get(inst, :loc_site_id) != nil
+              ret_label = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
+            if ret_label != nil
+              file_id = files[fn_path]
+              if file_id == nil
+                file_id = next_file_id
+                files[fn_path] = file_id
+                next_file_id = next_file_id + 1
+              col_val = wire_get(inst, :src_col)
+              if col_val == nil
+                col_val = 0
+              sites.push({
+                fn_name: f[:name],
+                ret_label: ret_label,
+                ic_id: site_ic_id,
+                file_id: file_id,
+                line: src_line,
+                col: col_val
+              })
         ii += 1
       bi += 1
     fi += 1
@@ -1238,16 +1241,18 @@ function_emit_cache_state = {
 # the historical "first call wins" behavior in ccall_needed, where a later
 # mismatch survived lowering and failed only in LLVM (or linked with a wrong C
 # ABI when the declaration lived in another translation unit).
+wire_i64_call_contracts = ["i64()", "i64(i64)", "i64(i64,i64)", "i64(i64,i64,i64)", "i64(i64,i64,i64,i64)", "i64(i64,i64,i64,i64,i64)", "i64(i64,i64,i64,i64,i64,i64)", "i64(i64,i64,i64,i64,i64,i64,i64)", "i64(i64,i64,i64,i64,i64,i64,i64,i64)"]
+wire_void_call_contracts = ["void()", "void(i64)", "void(i64,i64)", "void(i64,i64,i64)", "void(i64,i64,i64,i64)", "void(i64,i64,i64,i64,i64)", "void(i64,i64,i64,i64,i64,i64)", "void(i64,i64,i64,i64,i64,i64,i64)", "void(i64,i64,i64,i64,i64,i64,i64,i64)"]
+
 -> wire_direct_call_contract(inst)
   op = wire_kind(inst)
   return_type = nil
-  arg_types = []
   if op == :call_direct_i64
     return_type = "i64"
-  elsif op == :call_direct_i128
-    return_type = "i128"
   elsif op == :call_direct_void
     return_type = "void"
+  elsif op == :call_direct_i128
+    return_type = "i128"
   elsif op == :call_direct_ptr
     return_type = "ptr"
   elsif op == :call_direct_i64_ptr1
@@ -1258,9 +1263,16 @@ function_emit_cache_state = {
     return nil
 
   args = wire_get(inst, :args)
+  nargs = wire_sequence_size(args)
   declared_types = wire_get(inst, :arg_types)
+  if declared_types == nil && nargs <= 8
+    if op == :call_direct_i64
+      return wire_i64_call_contracts[nargs]
+    if op == :call_direct_void
+      return wire_void_call_contracts[nargs]
+  arg_types = []
   i = 0
-  while i < wire_sequence_size(args)
+  while i < nargs
     arg_type = nil
     if declared_types != nil && i < wire_sequence_size(declared_types)
       arg_type = wire_sequence_get(declared_types, i)
@@ -1301,22 +1313,8 @@ function_emit_cache_state = {
 
 -> verify_wire_call_contracts(mod)
   contracts = {}
-  target_details = {}
   fns = mod[:functions]
   nfns = fns.size()
-  tfi = 0
-  while tfi < nfns
-    target_func = fns[tfi]
-    tf_name = target_func[:name]
-    target_name = target_func[:original_name]
-    if target_name == nil
-      target_name = tf_name
-    target_arity = 0
-    tf_params = target_func[:params]
-    if tf_params != nil
-      target_arity = tf_params.size()
-    target_details[tf_name] = target_name + "/" + target_arity.to_s()
-    tfi += 1
   fi = 0
   while fi < nfns
     func = fns[fi]
@@ -1333,22 +1331,38 @@ function_emit_cache_state = {
       while ii < ninstrs
         inst = instructions[ii]
         contract = wire_direct_call_contract(inst)
-        if contract != nil && wire_get(inst, :name) != nil
+        if contract != nil
           iname = wire_get(inst, :name)
-          prior = contracts[iname]
-          if prior != nil
-            prior_contract = prior[:contract]
-            if prior_contract != contract
-              prior_name = prior[:function]
-              target_detail = target_details[iname]
-              if target_detail == nil
-                target_detail = "external"
-              origins = wire_symbol_origins(mod, iname)
-              origin_detail = ""
-              if origins.size() > 0
-                origin_detail = "; origins " + origins.join(", ")
-              return "WIRE call contract mismatch for @" + iname + " (" + target_detail + origin_detail + "): " + prior_contract + " in @" + prior_name + " vs " + contract + " in @" + current_name
-          contracts[iname] = {contract: contract, function: current_name}
+          if iname != nil
+            prior = contracts[iname]
+            if prior != nil
+              prior_contract = prior[:contract]
+              if prior_contract != contract
+                target_details = {}
+                tfi = 0
+                while tfi < nfns
+                  target_func = fns[tfi]
+                  tf_name = target_func[:name]
+                  target_name = target_func[:original_name]
+                  if target_name == nil
+                    target_name = tf_name
+                  target_arity = 0
+                  tf_params = target_func[:params]
+                  if tf_params != nil
+                    target_arity = tf_params.size()
+                  target_details[tf_name] = target_name + "/" + target_arity.to_s()
+                  tfi += 1
+                prior_name = prior[:function]
+                target_detail = target_details[iname]
+                if target_detail == nil
+                  target_detail = "external"
+                origins = wire_symbol_origins(mod, iname)
+                origin_detail = ""
+                if origins.size() > 0
+                  origin_detail = "; origins " + origins.join(", ")
+                return "WIRE call contract mismatch for @" + iname + " (" + target_detail + origin_detail + "): " + prior_contract + " in @" + prior_name + " vs " + contract + " in @" + current_name
+            else
+              contracts[iname] = {contract: contract, function: current_name}
         ii += 1
       bi += 1
     fi += 1

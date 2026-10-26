@@ -79,9 +79,14 @@ use runtime_types
   kind = ast_kind(node)
   if kind == :return
     if node.value != nil
-      rt = infer_type(node.value, var_types, fn_return_types, infer_maps)
-      if rt != nil
-        evidence[normalize_type_symbol(rt)] = true
+      if ast_kind(node.value) == :nil_lit
+        evidence[:nil] = true
+      else
+        rt = infer_type(node.value, var_types, fn_return_types, infer_maps)
+        if rt != nil
+          evidence[normalize_type_symbol(rt)] = true
+    else
+      evidence[:nil] = true
     return nil
   if tail_position && kind == :if
     collect_body_return_evidence(node.then_body, var_types, fn_return_types, infer_maps, evidence)
@@ -95,11 +100,26 @@ use runtime_types
     collect_body_return_evidence(node.body, var_types, fn_return_types, infer_maps, evidence)
     collect_body_return_evidence(node.rescue_body, var_types, fn_return_types, infer_maps, evidence)
     collect_body_return_evidence(node.ensure_body, var_types, fn_return_types, infer_maps, evidence)
+  elsif tail_position && kind == :case_value && node.arms != nil && node.else_body != nil && node.else_body.size() > 0
+    ai = 0
+    while ai < node.arms.size()
+      collect_body_return_evidence(node.arms[ai].body, var_types, fn_return_types, infer_maps, evidence)
+      ai += 1
+    collect_body_return_evidence(node.else_body, var_types, fn_return_types, infer_maps, evidence)
+  elsif tail_position && kind == :case && node.whens != nil && node.else_body != nil && node.else_body.size() > 0
+    wi = 0
+    while wi < node.whens.size()
+      collect_body_return_evidence(node.whens[wi].body, var_types, fn_return_types, infer_maps, evidence)
+      wi += 1
+    collect_body_return_evidence(node.else_body, var_types, fn_return_types, infer_maps, evidence)
   else
     if tail_position
-      rt = infer_type(node, var_types, fn_return_types, infer_maps)
-      if rt != nil
-        evidence[normalize_type_symbol(rt)] = true
+      if kind == :nil_lit
+        evidence[:nil] = true
+      else
+        rt = infer_type(node, var_types, fn_return_types, infer_maps)
+        if rt != nil
+          evidence[normalize_type_symbol(rt)] = true
     children = ast_children(node)
     ci = 0
     while ci < children.size()
@@ -119,6 +139,8 @@ use runtime_types
 -> infer_return_type_evidence(node, var_types, fn_return_types, infer_maps)
   evidence = {}
   collect_body_return_evidence(node.body, var_types, fn_return_types, infer_maps, evidence)
+  if evidence[:nil] == true
+    return nil
   types = evidence.keys()
   if types.size() == 1
     return types[0]

@@ -87,16 +87,27 @@
 
 -> find_captured_params_in_body(body, fn_params)
   captures = []
-  if body == nil
+  if body == nil || fn_params == nil || fn_params.size() == 0
     return captures
+  find_captured_params_in_list(body, captures, fn_params)
+  captures
+
+-> find_captured_params_in_list(body, captures, fn_params)
+  if body == nil
+    return nil
+  n_body = body.size()
   i = 0
-  while i < body.size()
+  while i < n_body
     find_captured_params_in_node(body[i], captures, fn_params)
     i += 1
-  captures
+  nil
 
 -> find_captured_params_in_node(node, captures, fn_params)
   if node == nil
+    return nil
+
+  t = ast_kind(node)
+  if t in (:var :int :float :string :symbol :bool :boolean :nil :nil_lit :ivar :cvar :gvar :constant :class_ref :self :next :break)
     return nil
 
   if ast_get(node, :block) != nil
@@ -104,9 +115,8 @@
     merge_capture_names(captures, find_captures(ast_get(node, :block), block_ctx))
     if fn_params.include?("__self") && !captures.include?("__self")
       captures.push("__self")
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(ast_get(node, :block), :body), fn_params))
+    find_captured_params_in_list(ast_get(ast_get(node, :block), :body), captures, fn_params)
 
-  t = ast_kind(node)
   # Bare lambda in argument / assignment / element position: same treatment
   # as a call's trailing block above, so params it captures get their slot
   # initialized at function entry.
@@ -115,7 +125,7 @@
     merge_capture_names(captures, find_captures(node, block_ctx))
     if fn_params.include?("__self") && !captures.include?("__self")
       captures.push("__self")
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :body), fn_params))
+    find_captured_params_in_list(ast_get(node, :body), captures, fn_params)
     return nil
   case t
   when :call
@@ -162,19 +172,19 @@
     return nil
   when :if
     find_captured_params_in_node(ast_get(node, :condition), captures, fn_params)
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :then_body), fn_params))
+    find_captured_params_in_list(ast_get(node, :then_body), captures, fn_params)
     if ast_get(node, :elsif_clauses) != nil
       i = 0
       while i < ast_get(node, :elsif_clauses).size()
         clause = ast_get(node, :elsif_clauses)[i]
         find_captured_params_in_node(clause[0], captures, fn_params)
-        merge_capture_names(captures, find_captured_params_in_body(clause[1], fn_params))
+        find_captured_params_in_list(clause[1], captures, fn_params)
         i += 1
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :else_body), fn_params))
+    find_captured_params_in_list(ast_get(node, :else_body), captures, fn_params)
     return nil
   when :while
     find_captured_params_in_node(ast_get(node, :condition), captures, fn_params)
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :body), fn_params))
+    find_captured_params_in_list(ast_get(node, :body), captures, fn_params)
     return nil
   when :case
     if ast_get(node, :whens) != nil
@@ -185,9 +195,9 @@
         while ci < ast_get(w, :conditions).size()
           find_captured_params_in_node(ast_get(w, :conditions)[ci], captures, fn_params)
           ci += 1
-        merge_capture_names(captures, find_captured_params_in_body(ast_get(w, :body), fn_params))
+        find_captured_params_in_list(ast_get(w, :body), captures, fn_params)
         i += 1
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :else_body), fn_params))
+    find_captured_params_in_list(ast_get(node, :else_body), captures, fn_params)
     return nil
   when :case_value
     find_captured_params_in_node(ast_get(node, :subject), captures, fn_params)
@@ -198,14 +208,14 @@
         find_captured_params_in_node(ast_get(arm, :pattern), captures, fn_params)
         if ast_get(arm, :guard) != nil
           find_captured_params_in_node(ast_get(arm, :guard), captures, fn_params)
-        merge_capture_names(captures, find_captured_params_in_body(ast_get(arm, :body), fn_params))
+        find_captured_params_in_list(ast_get(arm, :body), captures, fn_params)
         i += 1
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :else_body), fn_params))
+    find_captured_params_in_list(ast_get(node, :else_body), captures, fn_params)
     return nil
   when :begin
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :body), fn_params))
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :rescue_body), fn_params))
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :ensure_body), fn_params))
+    find_captured_params_in_list(ast_get(node, :body), captures, fn_params)
+    find_captured_params_in_list(ast_get(node, :rescue_body), captures, fn_params)
+    find_captured_params_in_list(ast_get(node, :ensure_body), captures, fn_params)
     return nil
   when :array
     if ast_get(node, :elements) != nil
@@ -236,7 +246,7 @@
     merge_capture_names(captures, find_captures({params: [], body: ast_get(node, :body)}, block_ctx))
     if fn_params.include?("__self") && !captures.include?("__self")
       captures.push("__self")
-    merge_capture_names(captures, find_captured_params_in_body(ast_get(node, :body), fn_params))
+    find_captured_params_in_list(ast_get(node, :body), captures, fn_params)
     return nil
   else
     nil

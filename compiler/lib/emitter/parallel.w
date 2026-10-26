@@ -7,7 +7,7 @@
   # child by another worker team and oversubscribe the host.
   if cache_bucket != nil || env("TUNGSTEN_BATCH_WORKER_PROCESS") == "1" || env("TUNGSTEN_PARALLEL_FUNCTION_EMIT") == "0" || runtime_identity() != "compiled-runtime"
     return 1
-  if mod[:enhanced_stacktraces] == true || mod[:functions].size() < 64
+  if mod[:functions].size() < 64
     return 1
   requested = 0
   configured = env("TUNGSTEN_EMITTER_JOBS")
@@ -25,13 +25,30 @@
     requested = 32
   requested
 
--> emitter_prepare_parallel_metadata(functions, fp_flags)
+-> emitter_prepare_parallel_metadata(functions, fp_flags, attr_groups = nil, base_attr_text = nil)
   fi = 0
   while fi < functions.size()
     # Complete the last function-record mutation before workers start. Once
     # they are running, the WIRE graph is read-only.
-    functions[fi][:fp_flags] = fp_flags
-    blocks = functions[fi][:blocks]
+    f = functions[fi]
+    f[:fp_flags] = fp_flags
+    if attr_groups != nil && base_attr_text != nil && f[:embedded_ll] == nil && f[:embedded_asm] == nil
+      function_attr_group_id(attr_groups, base_attr_text)
+      attr_text = base_attr_text
+      if f[:noinline] == true
+        attr_text = attr_text + " noinline"
+      elsif f[:is_toplevel] == true && f[:blocks] != nil && f[:blocks].size() > 2000
+        attr_text = attr_text + " noinline optnone"
+      function_attr_group_id(attr_groups, attr_text)
+    if f[:params] != nil
+      pi = 0
+      while pi < f[:params].size()
+        if f[:embedded_ll] != nil
+          llvm_safe_name(f[:params][pi])
+        else
+          llvm_param_reg(f[:params][pi])
+        pi += 1
+    blocks = f[:blocks]
     bi = 0
     while bi < blocks.size()
       instructions = blocks[bi][:instructions]
@@ -75,6 +92,7 @@
   texts = Array.new(functions.size())
   ptr_ids = Array.new(functions.size())
   cursor = ccall("w_atomic_new", u0xFFFA000000000000)
+  naming_cache_state[:frozen] = true
   workers = []
   worker = 0
   while worker < jobs
@@ -99,4 +117,5 @@
   while worker < workers.size()
     ccall("w_thread_join_release", workers[worker])
     worker += 1
+  naming_cache_state[:frozen] = false
   {texts: texts, ptr_ids: ptr_ids}

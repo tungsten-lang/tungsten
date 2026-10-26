@@ -225,9 +225,7 @@
     return typed_value(:raw_i64, ensure_i64_value(wfn, value))
 
   if name == "wvalue_from_bits" && receiver == nil && args != nil && args.size() == 1
-    value = lower_expression(ctx, args[0])
-    inferred = infer_type(args[0], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
-    return typed_value(:i64, ensure_raw_machine_int(wfn, value, :i64, inferred))
+    return typed_value(:i64, lower_machine_int_expression(ctx, args[0], :i64))
 
   # Carry-primitive intrinsic: `mulhi(a, b)` = high 64 bits of the unsigned
   # 64x64->128 product, lowered to a single UMULH (arm64) / MULX (x86). Builtin

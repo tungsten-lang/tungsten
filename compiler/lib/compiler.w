@@ -210,6 +210,106 @@ use target
   mod[:string_index] = nil
   nil
 
+-> wire_leaf_param_index(operand, param_regs)
+  if operand == nil
+    return -2
+  n = param_regs.size()
+  i = 0
+  while i < n
+    if operand == param_regs[i]
+      return i
+    i += 1
+  if operand.starts_with?("%")
+    return -2
+  -1
+
+-> wire_inline_map_operand(idx, lit_val, args)
+  if idx >= 0
+    return wire_sequence_get(args, idx)
+  lit_val
+
+-> wire_inline_tiny_leaves(mod)
+  fns = mod[:functions]
+  n_fns = fns.size()
+  candidates = {}
+  fi = 0
+  while fi < n_fns
+    func = fns[fi]
+    if func[:incremental_core_frozen] != true && func[:return_type] == "i64" && (func[:extra_params] == nil || func[:extra_params].size() == 0) && func[:noinline] != true && func[:blocks].size() == 1
+      params = func[:params]
+      n_params = params.size()
+      param_regs = []
+      pi = 0
+      while pi < n_params
+        param_regs.push(llvm_param_reg(params[pi]))
+        pi += 1
+      instrs = func[:blocks][0][:instructions]
+      n_instrs = instrs.size()
+      if n_instrs == 1 && wire_kind(instrs[0]) == :ret_i64
+        rv = wire_get(instrs[0], :value)
+        pidx = wire_leaf_param_index(rv, param_regs)
+        if pidx >= -1
+          candidates[func[:name]] = {kind: :passthrough, arity: n_params, pidx: pidx, val: rv}
+      elsif n_instrs == 2 && wire_kind(instrs[1]) == :ret_i64
+        op0 = instrs[0]
+        k0 = wire_kind(op0)
+        t0 = wire_get(op0, :temp)
+        if t0 != nil && wire_get(instrs[1], :value) == t0
+          if k0 in (:add_i64 :sub_i64 :mul_i64 :and_i64 :or_i64 :xor_i64 :shl_i64 :ashr_i64 :lshr_i64)
+            lhs = wire_get(op0, :lhs)
+            rhs = wire_get(op0, :rhs)
+            l_idx = wire_leaf_param_index(lhs, param_regs)
+            r_idx = wire_leaf_param_index(rhs, param_regs)
+            if l_idx >= -1 && r_idx >= -1
+              candidates[func[:name]] = {kind: :binop, arity: n_params, op: k0, l_idx: l_idx, lhs: lhs, r_idx: r_idx, rhs: rhs}
+          elsif k0 in (:w_int_inline :unbox_int_fast)
+            v0 = wire_get(op0, :value)
+            v_idx = wire_leaf_param_index(v0, param_regs)
+            if v_idx >= -1
+              candidates[func[:name]] = {kind: :unop, arity: n_params, op: k0, v_idx: v_idx, val: v0}
+    fi += 1
+  if candidates.size() == 0
+    return 0
+  inlined = 0
+  fi = 0
+  while fi < n_fns
+    func = fns[fi]
+    if func[:incremental_core_frozen] != true
+      blocks = func[:blocks]
+      n_blocks = blocks.size()
+      bi = 0
+      while bi < n_blocks
+        instrs = blocks[bi][:instructions]
+        n_instrs = instrs.size()
+        ii = 0
+        while ii < n_instrs
+          inst = instrs[ii]
+          if wire_kind(inst) == :call_direct_i64
+            callee = wire_get(inst, :name)
+            cand = candidates[callee]
+            if cand != nil && callee != func[:name] && wire_get(inst, :arg_types) == nil && wire_get(inst, :call_conv) == nil
+              args = wire_get(inst, :args)
+              temp = wire_get(inst, :temp)
+              if args != nil && temp != nil && wire_sequence_size(args) == cand[:arity]
+                ckind = cand[:kind]
+                if ckind == :passthrough
+                  mv = wire_inline_map_operand(cand[:pidx], cand[:val], args)
+                  instrs[ii] = wire_make_add_i64("0", mv, temp)
+                  inlined += 1
+                elsif ckind == :binop
+                  ml = wire_inline_map_operand(cand[:l_idx], cand[:lhs], args)
+                  mr = wire_inline_map_operand(cand[:r_idx], cand[:rhs], args)
+                  instrs[ii] = wire_instruction({op: cand[:op], lhs: ml, rhs: mr, temp: temp})
+                  inlined += 1
+                elsif ckind == :unop
+                  mv = wire_inline_map_operand(cand[:v_idx], cand[:val], args)
+                  instrs[ii] = wire_instruction({op: cand[:op], value: mv, temp: temp})
+                  inlined += 1
+          ii += 1
+        bi += 1
+    fi += 1
+  inlined
+
 -> compile(ast, source_path, verbose = false, frame_pointers = false, sidemap_path = nil, release_mode = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false, source_manifest = nil)
   compile_started_at = clock()
 
@@ -279,6 +379,8 @@ use target
     fi += 1
   if ssa_report != nil && ssa_report != ""
     write_file(ssa_report, ssa_converted.sort().join("\n") + "\n")
+  if (release_mode && env("TUNGSTEN_WIRE_INLINE") != "0") || env("TUNGSTEN_WIRE_INLINE") == "1"
+    mod[:wire_inlined_calls] = wire_inline_tiny_leaves(mod)
   t_cfg = clock() - cfg_started_at
 
   # Escape summaries first: ownership consults mod[:fn_escs] to avoid

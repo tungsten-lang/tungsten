@@ -1045,7 +1045,7 @@
   # returned local is not an escape and may stay in a raw slot.
   raw_int_return = raw_i64_sig && rt != :bool
   child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod, raw_int_return)
-  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates], child_var_types)
+  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates], child_var_types, child_ctx[:local_assignment_counts])
   if raw_i64_sig
     new_fn[:raw_i64_signature] = true
     # ensure_return_value reads raw_return_type — explicit `return X`
@@ -1127,7 +1127,7 @@
   while pi < params.size()
     param_names_list.push(param_runtime_name(params[pi]))
     pi += 1
-  reassigned = find_reassigned_params(body, param_names_list)
+  reassigned = find_reassigned_params(body, param_names_list, child_ctx[:local_assignment_counts])
   # Round-5 (2026-07-22): a param reassigned with a machine-int annotation
   # anywhere in the body is promoted to a RAW machine entry slot — the same
   # representation a local gets from `y = x ## u64`. One representation for
@@ -1135,21 +1135,22 @@
   # native 2^64 wrap on unannotated arithmetic reassigns in the chain, no
   # mid-branch retype. Captured params stay boxed (closure capture
   # snapshots WValues), as do already-typed signature params.
-  param_hint_map = find_param_machine_hints(body, param_names_list)
-  captured_for_hints = find_captured_params_in_body(body, param_names_list)
-  hi = 0
-  while hi < reassigned.size()
-    hname = reassigned[hi]
-    if param_hint_map[hname] != nil && child_var_types[hname] == nil
-      hcaptured = false
-      hj = 0
-      while hj < captured_for_hints.size()
-        if captured_for_hints[hj] == hname
-          hcaptured = true
-        hj += 1
-      if !hcaptured
-        child_var_types[hname] = param_hint_map[hname]
-    hi += 1
+  captured_params = find_captured_params_in_body(body, param_names_list)
+  if reassigned.size() > 0
+    param_hint_map = find_param_machine_hints(body, reassigned)
+    hi = 0
+    while hi < reassigned.size()
+      hname = reassigned[hi]
+      if param_hint_map[hname] != nil && child_var_types[hname] == nil
+        hcaptured = false
+        hj = 0
+        while hj < captured_params.size()
+          if captured_params[hj] == hname
+            hcaptured = true
+          hj += 1
+        if !hcaptured
+          child_var_types[hname] = param_hint_map[hname]
+      hi += 1
   pi = 0
   while pi < reassigned.size()
     pname = reassigned[pi]
@@ -1177,7 +1178,6 @@
     child_ctx[:bindings][pname] = nil
     pi += 1
 
-  captured_params = find_captured_params_in_body(body, param_names_list)
   pi = 0
   while pi < captured_params.size()
     pname = captured_params[pi]
@@ -2326,6 +2326,7 @@
   # same scan the slot logic trusts); lower_assign_expr / compound assigns
   # kill facts for every other write they lower. Blocks build fresh ctxs
   # without the map, so a fact never crosses a closure boundary.
+  reassigned = find_reassigned_params(body, param_names, child_ctx[:local_assignment_counts])
   tag_facts = {}
   if node.is_class_method != true
     self_tag = overload_exact_tag_test(mod, class_name)
@@ -2333,7 +2334,7 @@
       tag_facts["__self"] = {entry: self_tag, provenance: :structural}
   if node.param_types != nil && ast_get(node, :overload_gated_worker) == true
     seed_pts = node.param_types
-    seed_reassigned = find_reassigned_params(body, param_names)
+    seed_reassigned = reassigned
     spi = 0
     while spi < seed_pts.size() && spi < params.size()
       seed_name = param_runtime_name(params[spi])
@@ -2349,7 +2350,7 @@
       spi += 1
   child_ctx[:tag_facts] = tag_facts
 
-  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates], child_var_types)
+  child_ctx[:mut_accumulators] = mut_accumulator_candidates(body, child_ctx[:raw_int_candidates], child_var_types, child_ctx[:local_assignment_counts])
 
   block_return_buf = nil
   if needs_block_return
@@ -2429,8 +2430,7 @@
       lower_ivar_set_expr(child_ctx, "@" + p.name, typed_value(:i64, ivar_value))
     i += 1
 
-  # Pre-scan body for parameter reassignment
-  reassigned = find_reassigned_params(body, param_names)
+  # Pre-scan body for parameter reassignment (computed above)
   pi = 0
   while pi < reassigned.size()
     pname = reassigned[pi]

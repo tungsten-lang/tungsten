@@ -53,7 +53,7 @@ escape_impure_calls_map = init_escape_impure_calls_map()
     "w_eq", "w_neq", "w_eq_lit", "w_neq_lit", "w_lt", "w_gt", "w_lte", "w_gte",
     "__w_eq_fast", "__w_neq_fast", "__w_eq_lit_fast", "__w_neq_lit_fast",
     "__w_lt_fast", "__w_gt_fast", "__w_lte_fast", "__w_gte_fast",
-    "__w_streq_fast", "__w_streq2_fast",
+    "__w_streq_fast", "__w_streq2_fast", "__w_switch_canonical_fast", "w_switch_canonical",
     "w_bit_and", "w_bit_or", "w_bit_xor", "w_bit_shl", "w_bit_shr",
     "w_negate", "w_not", "w_to_s", "w_int_to_s", "w_to_i", "w_to_f",
     "w_string", "w_str_to_sym", "w_str_concat", "w_str_concat_free_rhs", "w_str_concat_free_lhs",
@@ -75,15 +75,10 @@ escape_pure_builtins_map = init_escape_pure_builtins_map()
 # forward derivation walk below traced back to one. nil when unrelated.
 # param_idx is keyed by the exact register (naming.w llvm_param_reg), never by
 # a stripped spelling: a temporary `%t0` is not the parameter `t0`.
--> escape_param_source(value, temp_from_param, param_idx)
+-> escape_param_source(value, temp_from_param, param_idx = nil)
   if value == nil
     return nil
-  src = temp_from_param[value]
-  if src != nil
-    return src
-  if type(value) == "String"
-    return param_idx[value]
-  nil
+  temp_from_param[value]
 
 # Record that `value` (if param-derived) escapes. `stored` distinguishes a
 # value retained somewhere that outlives the call (ivar, global, container,
@@ -191,6 +186,7 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
   # Flows into the result (returned or derived into it).
   param_returned = []
   param_idx = {}
+  temp_from_param = {}
   pi = 0
   while pi < params.size()
     param_escaped.push(false)
@@ -200,12 +196,48 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
     param_kind_stored[:string].push(false)
     param_kind_stored[:hash].push(false)
     param_returned.push(false)
-    param_idx[llvm_param_reg(params[pi])] = pi
+    preg = llvm_param_reg(params[pi])
+    param_idx[preg] = pi
+    temp_from_param[preg] = pi
     pi += 1
 
-  state = {param_escaped: param_escaped, param_stored: param_stored, param_int_stored: param_int_stored, param_kind_stored: param_kind_stored, param_returned: param_returned, param_idx: param_idx, temp_from_param: {}}
-  temp_from_param = state[:temp_from_param]
   has_side_effects = false
+  if params.size() == 0
+    bi = 0
+    while bi < func[:blocks].size() && !has_side_effects
+      instrs = func[:blocks][bi][:instructions]
+      ii = 0
+      while ii < instrs.size()
+        inst = instrs[ii]
+        op = wire_kind(inst)
+        if op == :call_direct_i64 || op == :call_direct_void
+          call_name = wire_get(inst, :name)
+          if !(call_name in ("w_array_get" "w_array_get_i64" "w_array_idx_i64" "__w_array_get_i64_fast" "__w_array_idx_i64_fast")) && container_store_first_kept(call_name) == nil && !is_consuming_builtin(call_name) && !is_pure_builtin(call_name)
+            if is_impure_call(call_name)
+              has_side_effects = true
+              break
+        elsif op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :call_loc_set_col || op == :phi_ssa
+          ignored = nil
+        elsif op in (:call_method_i64 :ivar_set :ivar_set_idx :store_global :store_cvar :class_store :puts_i64 :print_i64 :class_add_method :class_add_static_method :class_add_ivar :type_class_register :node_kind_class_register :class_new)
+          has_side_effects = true
+          break
+        elsif (wire_get(inst, :args) != nil || wire_get(inst, :receiver) != nil) && !(op in (:memo_call0_i64 :memo_call1_i64 :memo_call2_i64 :call_direct_i128 :call_direct_i64_ptr1 :call_direct_void_ptr1 :call_direct_ptr :call_fused_out_reuse))
+          has_side_effects = true
+          break
+        ii += 1
+      bi += 1
+    fn_escs[func[:name]] = {
+      escs: param_escaped,
+      stored_escs: param_stored,
+      int_stored_escs: param_int_stored,
+      kind_stored_escs: param_kind_stored,
+      ret_escs: param_returned,
+      pure: !has_side_effects,
+      param_count: 0
+    }
+    return fn_escs[func[:name]]
+
+  state = {param_escaped: param_escaped, param_stored: param_stored, param_int_stored: param_int_stored, param_kind_stored: param_kind_stored, param_returned: param_returned, param_idx: param_idx, temp_from_param: temp_from_param}
   # temp -> text of the string/symbol constant it holds (method names)
   name_texts = {}
 
@@ -292,7 +324,7 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
       elsif op == :store_i64 || op == :store_ptr || op == :view_store_field || op == :store_memo_ptr || op == :slab_node_set_idx
         escape_mark_value(wire_get(inst, :value), true, state)
 
-      elsif op == :br || op == :cond_br || op == :call_loc_set_col || op == :scope_push || op == :scope_pop || op == :alloca_i64 || op == :ret_void || op == :ret_i32 || op == :unreachable || op == :load_global || op == :load_class || op == :free_value
+      elsif op in (:br :cond_br :call_loc_set_col :scope_push :scope_pop :alloca_i64 :ret_void :ret_i32 :unreachable :load_global :load_class :free_value)
         ignored = nil
 
       elsif op == :ret_i64
@@ -321,7 +353,7 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
         if wire_get(inst, :temp) != nil && strings != nil
           name_texts[wire_get(inst, :temp)] = strings[wire_get(inst, :string_id)]
 
-      elsif op == :truthy_inline || op == :nanbox_bool || op == :not_i1 || op == :zext_i1_i64
+      elsif op in (:truthy_inline :nanbox_bool :not_i1 :zext_i1_i64)
         src = escape_param_source(wire_get(inst, :value), temp_from_param, param_idx)
         if src != nil && wire_get(inst, :temp) != nil
           temp_from_param[wire_get(inst, :temp)] = src
@@ -414,6 +446,14 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
         has_side_effects = true
         escape_mark_value(wire_get(inst, :super_reg), true, state)
 
+      elsif op in (:switch_i64 :cleanup_pop :load_cvar :ivar_get :ivar_get_idx :bigint_literal_i64 :const_float :const_decimal :const_rational :const_char :fn_addr_i64)
+        ignored = nil
+
+      elsif op in (:icmp_ne_zero :inttoptr_i64 :ptr_to_i64 :i64_to_ptr)
+        src = escape_param_source(wire_get(inst, :value), temp_from_param, param_idx)
+        if src != nil && wire_get(inst, :temp) != nil
+          temp_from_param[wire_get(inst, :temp)] = src
+
       else
         # Catch-all for every other instruction shape. Any op that carries
         # an argument list or a receiver is a call the rules above do not
@@ -447,61 +487,158 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
     param_count: params.size()
   }
 
+-> escape_parallel_job_count(mod)
+  if env("TUNGSTEN_PARALLEL_MIDEND") == "0" || env("TUNGSTEN_PARALLEL_ESCAPE") == "0" || env("TUNGSTEN_BATCH_WORKER_PROCESS") == "1" || runtime_identity() != "compiled-runtime" || mod[:functions].size() < 512
+    return 1
+  requested = 0
+  configured = env("TUNGSTEN_MIDEND_JOBS")
+  if configured != nil && configured != "" && configured != "auto"
+    requested = configured.to_i()
+  if requested < 1
+    requested = ccall("w_cpu_count")
+    if requested > 8
+      requested = 8
+  if requested < 1
+    requested = 1
+  if requested > mod[:functions].size()
+    requested = mod[:functions].size()
+  if requested > 32
+    requested = 32
+  requested
+
+-> escape_scan_one(fi, functions, fn_map, mod, strings, calls_to, precomputed)
+  func = functions[fi]
+  blocks = func[:blocks]
+  params = func[:params]
+  if blocks.size() == 0 || params == nil
+    calls_to[fi] = []
+    return nil
+  if params.size() == 0
+    calls_to[fi] = []
+    local_escs = {}
+    escape_analyze(func, mod, local_escs, strings)
+    precomputed[fi] = local_escs[func[:name]]
+    return nil
+  edges = []
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    ii = 0
+    while ii < instrs.size()
+      inst = instrs[ii]
+      if wire_kind(inst) in (:call_direct_i64 :call_direct_void)
+        callee_idx = fn_map[wire_get(inst, :name)]
+        if callee_idx != nil
+          found = false
+          ei = 0
+          while ei < edges.size()
+            if edges[ei] == callee_idx
+              found = true
+              break
+            ei += 1
+          if !found
+            edges.push(callee_idx)
+      ii += 1
+    bi += 1
+  calls_to[fi] = edges
+  if edges.size() == 0
+    local_escs = {}
+    escape_analyze(func, mod, local_escs, strings)
+    precomputed[fi] = local_escs[func[:name]]
+  nil
+
+-> escape_parallel_worker(state)
+  functions = state[:functions]
+  fn_map = state[:fn_map]
+  mod = state[:mod]
+  strings = state[:strings]
+  calls_to = state[:calls_to]
+  precomputed = state[:precomputed]
+  n_funcs = functions.size()
+  index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  while index < n_funcs
+    escape_scan_one(index, functions, fn_map, mod, strings, calls_to, precomputed)
+    index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  true
+
 # Build a call graph and process functions bottom-up.
 # Leaf functions (no calls to other user-defined functions) first.
 -> escape_pass(mod)
   fn_escs = {}
   functions = mod[:functions]
+  n_funcs = functions.size()
+
+  strings = mod[:string_texts]
+  if strings == nil
+    strings = int_temp_string_texts(mod)
+    mod[:string_texts] = strings
 
   # Build name → function index map
   fn_map = {}
-  fi = 0
-  while fi < functions.size()
-    fn_map[functions[fi][:name]] = fi
-    fi += 1
-
-  # Collect call edges: which functions call which (by function index)
-  n_funcs = functions.size()
   calls_to = []
-  processed = []
+  precomputed = []
   fi = 0
   while fi < n_funcs
-    func = functions[fi]
-    edges = []
-    bi = 0
-    while bi < func[:blocks].size()
-      instrs = func[:blocks][bi][:instructions]
-      ii = 0
-      while ii < instrs.size()
-        inst = instrs[ii]
-        if wire_kind(inst) in (:call_direct_i64 :call_direct_void)
-          callee_idx = fn_map[wire_get(inst, :name)]
-          if callee_idx != nil
-            found = false
-            ei = 0
-            while ei < edges.size()
-              if edges[ei] == callee_idx
-                found = true
-                break
-              ei += 1
-            if !found
-              edges.push(callee_idx)
-        ii += 1
-      bi += 1
-    calls_to.push(edges)
-    processed.push(false)
+    fn_map[functions[fi][:name]] = fi
+    calls_to.push(nil)
+    precomputed.push(nil)
     fi += 1
 
-  # Topological sort: process functions with no unprocessed callees first
-  order = []
-  # Simple iterative topo sort: keep scanning until all processed
-  remaining = n_funcs
-  while remaining > 0
-    progress = false
+  jobs = escape_parallel_job_count(mod)
+  if jobs > 1
+    naming_cache_state[:frozen] = true
+    state = {
+      functions: functions,
+      fn_map: fn_map,
+      mod: mod,
+      strings: strings,
+      calls_to: calls_to,
+      precomputed: precomputed,
+      cursor: ccall("w_atomic_new", u0xFFFA000000000000)
+    }
+    workers = []
+    worker = 1
+    while worker < jobs
+      workers.push(Thread.new ->
+        escape_parallel_worker(state))
+      worker += 1
+    escape_parallel_worker(state)
+    worker = 0
+    while worker < workers.size()
+      ccall("w_thread_join_release", workers[worker])
+      worker += 1
+    naming_cache_state[:frozen] = false
+  else
     fi = 0
     while fi < n_funcs
+      escape_scan_one(fi, functions, fn_map, mod, strings, calls_to, precomputed)
+      fi += 1
+
+  processed = []
+  pending = []
+  fi = 0
+  while fi < n_funcs
+    pre = precomputed[fi]
+    if pre != nil
+      fn_escs[functions[fi][:name]] = pre
+      processed.push(true)
+    elsif functions[fi][:blocks].size() == 0 || functions[fi][:params] == nil
+      processed.push(true)
+    else
+      processed.push(false)
+      pending.push(fi)
+    fi += 1
+
+  # Topological sort on remaining non-leaf functions
+  order = []
+  remaining = pending.size()
+  n_pending = pending.size()
+  while remaining > 0
+    progress = false
+    pi = 0
+    while pi < n_pending
+      fi = pending[pi]
       if !processed[fi]
-        # Check if all callees are processed
         edges = calls_to[fi]
         all_done = true
         ei = 0
@@ -515,22 +652,19 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
           processed[fi] = true
           remaining = remaining - 1
           progress = true
-      fi += 1
+      pi += 1
     if !progress
       # Cycle detected (recursion): process remaining in any order
-      fi = 0
-      while fi < n_funcs
+      pi = 0
+      while pi < n_pending
+        fi = pending[pi]
         if !processed[fi]
           order.push(fi)
           processed[fi] = true
           remaining = remaining - 1
-        fi += 1
+        pi += 1
 
-  # Analyze in topological order
-  strings = mod[:string_texts]
-  if strings == nil
-    strings = int_temp_string_texts(mod)
-    mod[:string_texts] = strings
+  # Analyze remaining non-leaf functions in topological order
   oi = 0
   while oi < order.size()
     func = functions[order[oi]]

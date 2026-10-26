@@ -65,7 +65,7 @@
       while ii < instrs.size()
         inst = instrs[ii]
         op = wire_kind(inst)
-        if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop || op == :load_global || op == :load_class
+        if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop
           ii += 1
           next
         if op == :call_direct_i64
@@ -328,8 +328,8 @@
   # assigned deterministically in source order.
   parallel_function_jobs = emitter_parallel_job_count(mod, function_emit_cache_bucket_value)
   if parallel_function_jobs > 1
-    emitter_prepare_parallel_metadata(mod[:functions], fp_flags)
-    function_attr_group_id(attr_groups, function_attr_text(frame_pointers, mod[:llvm_fn_attrs], mod[:preserve_debug_frames] == true))
+    base_attr_text = function_attr_text(frame_pointers, mod[:llvm_fn_attrs], mod[:preserve_debug_frames] == true)
+    emitter_prepare_parallel_metadata(mod[:functions], fp_flags, attr_groups, base_attr_text)
     parallel_rendered = emitter_render_functions_parallel(mod[:functions], mod[:string_wvalues], slab_info, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, parallel_function_jobs)
     i = 0
     while i < parallel_rendered[:texts].size()
@@ -946,6 +946,18 @@
 
 -> hidden_exit_label_for_inst(inst, arm64_target = true)
   op = wire_kind(inst)
+  if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :call_loc_set_col || op == :ret_i64 || op == :phi_ssa || op == :alloca_i64 || op == :icmp_i64 || op == :truthy_inline || op == :add_i64 || op == :sub_i64 || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :scope_push || op == :scope_pop
+    return nil
+  if op == :call_direct_i64 || op == :call_direct_void
+    if wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
+      return "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
+    return nil
+  if op == :call_method_i64
+    if wire_get(inst, :devirt_fn) != nil || wire_get(inst, :construct_fn) != nil
+      return "dv." + wire_get(inst, :ic_id).to_s() + ".done"
+    if wire_get(inst, :src_line) != nil
+      return "cs." + wire_get(inst, :ic_id).to_s() + ".ret"
+    return nil
   # Portable (non-arm64) lowering of the asm-backed carry ops renders a
   # real IR loop whose final block is the instruction's exit.
   if op == :asm_add_no && !arm64_target
@@ -960,18 +972,6 @@
     return "ovf.merge." + wire_get(inst, :block_id).to_s()
   if op in (:add_i48_guarded :sub_i48_guarded :mul_i48_guarded)
     return "g.done." + wire_get(inst, :block_id).to_s()
-  # Method-dispatch call sites carrying source-loc info split the block so
-  # their return address is addressable via blockaddress(@fn, %cs.N.ret).
-  # A devirtualized site additionally merges its direct and IC arms in a
-  # dv.N.done block, which is then the real exit regardless of src_line.
-  if op == :call_method_i64 && (wire_get(inst, :devirt_fn) != nil || wire_get(inst, :construct_fn) != nil)
-    return "dv." + wire_get(inst, :ic_id).to_s() + ".done"
-  if op == :call_method_i64 && wire_get(inst, :src_line) != nil
-    return "cs." + wire_get(inst, :ic_id).to_s() + ".ret"
-  # Direct-call fallible sites (w_raise, w_array_get, w_array_set) use the
-  # loc_site_id namespace since they don't have an ic_id.
-  if op in (:call_direct_void :call_direct_i64) && wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
-    return "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
   nil
 
 -> build_phi_label_redirects(f, arm64_target = true)
@@ -1224,7 +1224,7 @@
     while j < blk[:instructions].size()
       out << "  "
       inst = blk[:instructions][j]
-      if !direct_buffer_emit || !append_instruction_direct(out, inst, phi_label_redirects)
+      if !direct_buffer_emit || !append_instruction_direct(out, inst, phi_label_redirects, string_wvs, used_ptr_ids)
         out << render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots)
       out << "\n"
       j += 1

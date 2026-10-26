@@ -178,17 +178,6 @@
   # Hot path — measured frequencies in parentheses
   when :var            # 33934
     return lower_var(ctx, node)
-  when :gvar
-    return lower_gvar(ctx, node)
-  when :class_ref
-    # ClassRef lowering: pass the ClassRef node DIRECTLY to lower_var.
-    # lower_var only reads `node.name` and ClassRef shares the same
-    # slab layout as Var (@name w64 at slot 0), so the accessor returns
-    # the same value. Avoiding the synthetic Tungsten:AST:Var.new
-    # construction keeps stage 0 (interpreted) and stage 1 binary
-    # (compiled) byte-identical — the synthetic allocation in the
-    # dispatch arm was leaking a closure between stages.
-    return lower_var(ctx, node)
   when :call           # 17573
     return lower_call(ctx, node)
   when :symbol         # 13153
@@ -222,6 +211,17 @@
     return lower_in_test(ctx, node)
   when :not            # 210
     return lower_not(ctx, node)
+  when :class_ref
+    # ClassRef lowering: pass the ClassRef node DIRECTLY to lower_var.
+    # lower_var only reads `node.name` and ClassRef shares the same
+    # slab layout as Var (@name w64 at slot 0), so the accessor returns
+    # the same value. Avoiding the synthetic Tungsten:AST:Var.new
+    # construction keeps stage 0 (interpreted) and stage 1 binary
+    # (compiled) byte-identical — the synthetic allocation in the
+    # dispatch arm was leaking a closure between stages.
+    return lower_var(ctx, node)
+  when :gvar
+    return lower_gvar(ctx, node)
 
   # Mid-frequency
   when :case_value

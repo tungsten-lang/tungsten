@@ -486,6 +486,21 @@
     self.modpow(exponent, modulus)
 
   -> divmod(other)
+    if (($value >> 48) & 0xFFFF) == 0xFFFA && ((other$value >> 48) & 0xFFFF) == 0xFFFA
+      dm_b = (other$value & 0xFFFFFFFFFFFF) ## i64
+      if (dm_b & 0x800000000000) != 0
+        dm_b -= 281_474_976_710_656
+      dm_a = ($value & 0xFFFFFFFFFFFF) ## i64
+      if (dm_a & 0x800000000000) != 0
+        dm_a -= 281_474_976_710_656
+      if dm_b != 0 && !(dm_a == -140_737_488_355_328 && dm_b == -1)
+        dm_q = dm_a / dm_b
+        dm_r = dm_a - dm_q * dm_b
+        if dm_r != 0 && ((dm_r ^ dm_b) < 0)
+          dm_q -= 1
+          dm_r += dm_b
+        tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+        return [wvalue_from_bits((tag | (dm_q & 0xFFFFFFFFFFFF)) ## i64), wvalue_from_bits((tag | (dm_r & 0xFFFFFFFFFFFF)) ## i64)]
     ccall("w_bigint_divmod", self, other)
 
   -> tdiv(other)
@@ -517,6 +532,18 @@
     ccall("w_bigint_tmod", self, other)
 
   -> tdivmod(other)
+    if (($value >> 48) & 0xFFFF) == 0xFFFA && ((other$value >> 48) & 0xFFFF) == 0xFFFA
+      td_b = (other$value & 0xFFFFFFFFFFFF) ## i64
+      if (td_b & 0x800000000000) != 0
+        td_b -= 281_474_976_710_656
+      td_a = ($value & 0xFFFFFFFFFFFF) ## i64
+      if (td_a & 0x800000000000) != 0
+        td_a -= 281_474_976_710_656
+      if td_b != 0 && !(td_a == -140_737_488_355_328 && td_b == -1)
+        td_q = td_a / td_b
+        td_r = td_a - td_q * td_b
+        tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+        return [wvalue_from_bits((tag | (td_q & 0xFFFFFFFFFFFF)) ## i64), wvalue_from_bits((tag | (td_r & 0xFFFFFFFFFFFF)) ## i64)]
     ccall("w_bigint_tdivmod", self, other)
 
   -> fdiv(other)
@@ -553,6 +580,21 @@
     ccall("w_bigint_fmod", self, other)
 
   -> fdivmod(other)
+    if (($value >> 48) & 0xFFFF) == 0xFFFA && ((other$value >> 48) & 0xFFFF) == 0xFFFA
+      fd_b = (other$value & 0xFFFFFFFFFFFF) ## i64
+      if (fd_b & 0x800000000000) != 0
+        fd_b -= 281_474_976_710_656
+      fd_a = ($value & 0xFFFFFFFFFFFF) ## i64
+      if (fd_a & 0x800000000000) != 0
+        fd_a -= 281_474_976_710_656
+      if fd_b != 0 && !(fd_a == -140_737_488_355_328 && fd_b == -1)
+        fd_q = fd_a / fd_b
+        fd_r = fd_a - fd_q * fd_b
+        if fd_r != 0 && ((fd_r ^ fd_b) < 0)
+          fd_q -= 1
+          fd_r += fd_b
+        tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+        return [wvalue_from_bits((tag | (fd_q & 0xFFFFFFFFFFFF)) ## i64), wvalue_from_bits((tag | (fd_r & 0xFFFFFFFFFFFF)) ## i64)]
     ccall("w_bigint_fdivmod", self, other)
 
   -> cdiv(other)
@@ -589,6 +631,21 @@
     ccall("w_bigint_cmod", self, other)
 
   -> cdivmod(other)
+    if (($value >> 48) & 0xFFFF) == 0xFFFA && ((other$value >> 48) & 0xFFFF) == 0xFFFA
+      cd_b = (other$value & 0xFFFFFFFFFFFF) ## i64
+      if (cd_b & 0x800000000000) != 0
+        cd_b -= 281_474_976_710_656
+      cd_a = ($value & 0xFFFFFFFFFFFF) ## i64
+      if (cd_a & 0x800000000000) != 0
+        cd_a -= 281_474_976_710_656
+      if cd_b != 0 && !(cd_a == -140_737_488_355_328 && cd_b == -1)
+        cd_q = cd_a / cd_b
+        cd_r = cd_a - cd_q * cd_b
+        if cd_r != 0 && ((cd_r ^ cd_b) >= 0)
+          cd_q += 1
+          cd_r -= cd_b
+        tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+        return [wvalue_from_bits((tag | (cd_q & 0xFFFFFFFFFFFF)) ## i64), wvalue_from_bits((tag | (cd_r & 0xFFFFFFFFFFFF)) ## i64)]
     ccall("w_bigint_cdivmod", self, other)
 
   -> divexact(other)
@@ -639,6 +696,13 @@
     ccall("w_bigint_congruent_p", self, c, d)
 
   -> isqrt_rem
+    if (($value >> 48) & 0xFFFF) == 0xFFFA
+      ir_n = ($value & 0xFFFFFFFFFFFF) ## i64
+      if (ir_n & 0x800000000000) == 0
+        ir_r = Math.sqrt(ir_n ## f64) ## i64
+        ir_rem = ir_n - ir_r * ir_r
+        tag = -1_688_849_860_263_936 ## i64  # 0xFFFA000000000000
+        return [wvalue_from_bits((tag | (ir_r & 0xFFFFFFFFFFFF)) ## i64), wvalue_from_bits((tag | (ir_rem & 0xFFFFFFFFFFFF)) ## i64)]
     ccall("w_bigint_isqrt_rem", self)
 
   -> iroot(n)

@@ -121,12 +121,13 @@
 -> lower_var(ctx, node)
   name = node.name
   wfn = ctx[:func]
+  mod = ctx[:mod]
 
   # A tight bang stays in the identifier token for method-name compatibility.
   # Only a bound variable supplies the receiver of postfix factorial.
-  if name.ends_with?("!") && name.size() > 1
+  if name.size() > 1 && name.ends_with?("!")
     base = name.slice(0, name.size() - 1)
-    if wfn[:var_slots][base] != nil || ctx[:bindings][base] != nil || wfn[:params].include?(base) || ctx[:mod][:top_level_vars][base] == true
+    if wfn[:var_slots][base] != nil || ctx[:bindings][base] != nil || wfn[:params].include?(base) || mod[:top_level_vars][base] == true
       return lower_expression(ctx, Tungsten:AST:Call.new(Tungsten:AST:Var.new(base), "factorial", [], nil))
 
   # Bare zero-argument block-presence query. This must precede ordinary
@@ -145,7 +146,8 @@
   #   /^-?[0-9]+$/       → integer (w_int(N))
   #   "..." / '...'      → string (quotes stripped)
   #   anything else      → string (raw token, e.g. -D BACKEND=metal)
-  define_val = ctx[:mod][:build_defines][name]
+  build_defines = mod[:build_defines]
+  define_val = (build_defines != nil && build_defines.size() > 0) ? build_defines[name] : nil
   if define_val != nil
     if define_val == "true"
       return typed_value(:i64, w_true.to_s())
@@ -215,11 +217,8 @@
       return lower_view_field(ctx, Tungsten:AST:ViewField.new(field))
 
   raw_type = ctx[:var_types][name]
-  machine_int = is_raw_int_storage_type(raw_type)
-  machine_float = is_machine_float_type(raw_type)
-  top_level_raw_type = nil
-  if ctx[:mod][:top_level_var_types] != nil
-    top_level_raw_type = ctx[:mod][:top_level_var_types][name]
+  machine_int = raw_type != nil && is_raw_int_storage_type(raw_type)
+  machine_float = raw_type != nil && !machine_int && is_machine_float_type(raw_type)
 
   # Unboxed loop variable: load raw, return as :raw_i64. As of
   # 2026-04-15: must be :raw_i64, NOT :raw_int, because under
@@ -239,16 +238,13 @@
   ptr = wfn[:var_slots][name]
   if ptr != nil
     temp = next_temp(wfn)
-    load_op = :load_i64
     if machine_int
-      load_op = machine_load_op(raw_type)
-    elsif machine_float
-      load_op = float_load_op(raw_type)
-    emit_wire_dynamic_2(wfn, load_op, :ptr, ptr, :temp, temp)
-    if machine_int
+      emit_wire_dynamic_2(wfn, machine_load_op(raw_type), :ptr, ptr, :temp, temp)
       return typed_value(raw_machine_value_type(raw_type), temp)
     if machine_float
+      emit_wire_dynamic_2(wfn, float_load_op(raw_type), :ptr, ptr, :temp, temp)
       return typed_value(raw_float_value_type(raw_type), temp)
+    emit_wire_load_i64(wfn, ptr, temp)
     return typed_value(:i64, temp)
 
   # Check temp bindings next (covers default-param overrides and register renames)
@@ -283,13 +279,13 @@
     i += 1
 
   # Check if it's a built-in runtime class
-  if mark_builtin_class_used(ctx[:mod], name)
+  if mark_builtin_class_used(mod, name)
     temp = next_temp(wfn)
     emit_wire_load_class(wfn, name, temp)
     return typed_value(:i64, temp)
 
   # Check if it's a class name (user-defined)
-  if ctx[:mod][:known_classes][name] != nil
+  if mod[:known_classes][name] != nil
     temp = next_temp(wfn)
     emit_wire_load_class(wfn, name, temp)
     return typed_value(:i64, temp)
@@ -299,8 +295,8 @@
   # under `use carbide` loads `Tungsten:Carbide:Route`. Exact lookup
   # only; unmatched names fall through unchanged.
   if name.include?(":")
-    aliased = constant_alias_expand(ctx[:mod], name)
-    if aliased != nil && ctx[:mod][:known_classes][aliased] != nil
+    aliased = constant_alias_expand(mod, name)
+    if aliased != nil && mod[:known_classes][aliased] != nil
       temp = next_temp(wfn)
       emit_wire_load_class(wfn, aliased, temp)
       return typed_value(:i64, temp)
@@ -314,7 +310,7 @@
   # additive — it rescues references that would otherwise fall through to
   # implicit-self dispatch (and fail) or resolve to nil.
   if !name.include?(":") && ctx[:class_name] != nil
-    ns_resolved = resolve_class_in_namespace(ctx[:mod], ctx[:class_name], name)
+    ns_resolved = resolve_class_in_namespace(mod, ctx[:class_name], name)
     if ns_resolved != nil
       temp = next_temp(wfn)
       emit_wire_load_class(wfn, ns_resolved, temp)
@@ -335,11 +331,14 @@
   # A declared method on self is lexical to the class and wins over a
   # same-spelled module binding predeclared by the top-level analysis pass.
   if ctx[:class_name] != nil && ctx[:is_class_method] != true
-    if class_has_instance_method?(ctx[:mod], ctx[:class_name], name)
+    if class_has_instance_method?(mod, ctx[:class_name], name)
       return lower_implicit_self_bare_method(ctx, name)
 
   # Check if it's a top-level (module-scope) variable
-  if ctx[:mod][:top_level_vars][name] == true
+  if mod[:top_level_vars][name] == true
+    top_level_raw_type = nil
+    if mod[:top_level_var_types] != nil
+      top_level_raw_type = mod[:top_level_var_types][name]
     temp = next_temp(wfn)
     # Match the load width to the global's storage width. i128/u128
     # globals (`## u128` / `## i128`) need `load i128`; otherwise the

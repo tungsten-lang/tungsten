@@ -57,7 +57,14 @@ use runtime_types
     j += 1
   true
 
+llvm_safe_name_cache = {}
+llvm_param_reg_cache = {}
+naming_cache_state = {frozen: false}
+
 -> llvm_safe_name(name)
+  cached = llvm_safe_name_cache[name]
+  if cached != nil
+    return cached
   chars = name.chars()
   i = 0
   clean = true
@@ -70,6 +77,8 @@ use runtime_types
       break
     i += 1
   if clean
+    if naming_cache_state[:frozen] != true
+      llvm_safe_name_cache[name] = name
     return name
   hex_chars = "0123456789abcdef"
   out = StringBuffer(name.size() + 8)
@@ -93,7 +102,10 @@ use runtime_types
         shift -= 4
       out << "_"
     i += 1
-  out.to_s()
+  res = out.to_s()
+  if naming_cache_state[:frozen] != true
+    llvm_safe_name_cache[name] = res
+  res
 
 # -- LLVM parameter registers --
 #
@@ -117,12 +129,22 @@ use runtime_types
 # embedded `ll` body, whose hand-written IR names its parameters verbatim
 # (see emit_param_signature).
 -> llvm_param_reg(name)
-  "%." + llvm_safe_name(name)
+  cached = llvm_param_reg_cache[name]
+  if cached != nil
+    return cached
+  res = "%." + llvm_safe_name(name)
+  if naming_cache_state[:frozen] != true
+    llvm_param_reg_cache[name] = res
+  res
+
+naming_is_native_runtime = runtime_identity() == "native"
 
 # UTF-8 byte length of a Tungsten string (chars are codepoints).
 # Shared by lowering (class-name registration) and the emitter (string
 # constants); lives here so neither tower needs the other for it.
 -> utf8_byte_length(s)
+  if naming_is_native_runtime
+    return ccall_nobox("w_string_byte_length", s)
   n = 0
   i = 0
   chars = s.chars()

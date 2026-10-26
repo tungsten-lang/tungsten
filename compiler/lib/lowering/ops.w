@@ -362,6 +362,10 @@
   # function, then unboxed. Array#size alone made that mistake millions of
   # times while the compiler encoded its metadata.
   if ast_kind(node) == :unary_op && node.op == :MINUS
+    if node.operand != nil && is_ast_node?(node.operand) && ast_kind(node.operand) == :int
+      ov = node.operand.value
+      if ov >= 0 && ov <= 9223372036854775807
+        return (0 - ov).to_s()
     wfn = ctx[:func]
     operand = lower_machine_int_expression(ctx, node.operand, type)
     temp = next_temp(wfn)
@@ -378,6 +382,32 @@
   if ast_kind(node) == :binary_op
     int_op = machine_int_op(type, node.op)
     if int_op != nil
+      if node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
+        lv = node.left.value
+        rv = node.right.value
+        if lv >= 0 && lv <= 140737488355327 && rv >= 0 && rv <= 140737488355327
+          case node.op
+          when :LSHIFT
+            if rv <= 46 && lv <= (140737488355327 >> rv)
+              return (lv << rv).to_s()
+          when :RSHIFT
+            if rv <= 46
+              return (lv >> rv).to_s()
+          when :AMP
+            return (lv & rv).to_s()
+          when :PIPE
+            return (lv | rv).to_s()
+          when :CARET
+            return (lv ^ rv).to_s()
+          when :PLUS
+            if lv + rv <= 140737488355327
+              return (lv + rv).to_s()
+          when :MINUS
+            if lv >= rv
+              return (lv - rv).to_s()
+          when :STAR
+            if rv == 0 || lv <= (140737488355327 / rv)
+              return (lv * rv).to_s()
       wfn = ctx[:func]
       # The context narrows the RESULT, never an operand wider than it. A
       # 64-bit context over a 128-bit operand — `(product >> 64) ## u64`,
@@ -2135,11 +2165,23 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   shl_literal_base = op == :LSHIFT && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int
   if op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)
     shl_literal_base = true
-  if shl_literal_base && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
+  if node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
     lv = node.left.value
     rv = node.right.value
-    if lv >= 0 && rv >= 0 && rv <= 46 && lv <= (140737488355327 >> rv)
-      return typed_value(:raw_int, (lv << rv).to_s())
+    if lv >= 0 && lv <= 140737488355327 && rv >= 0 && rv <= 140737488355327
+      case op
+      when :LSHIFT
+        if rv <= 46 && lv <= (140737488355327 >> rv)
+          return typed_value(:raw_int, (lv << rv).to_s())
+      when :RSHIFT
+        if rv <= 46
+          return typed_value(:raw_int, (lv >> rv).to_s())
+      when :AMP
+        return typed_value(:raw_int, (lv & rv).to_s())
+      when :PIPE
+        return typed_value(:raw_int, (lv | rv).to_s())
+      when :CARET
+        return typed_value(:raw_int, (lv ^ rv).to_s())
 
   machine_type = machine_int_result_type(lt, rt)
   # `:int` is a BOXED integer that may have promoted to a heap BigInt at

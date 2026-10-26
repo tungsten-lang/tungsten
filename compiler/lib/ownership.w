@@ -101,7 +101,7 @@ heap_producer_calls_map = init_heap_producer_calls_map()
     "__w_eq_fast", "__w_neq_fast", "__w_eq_lit_fast", "__w_neq_lit_fast",
     "__w_lt_fast", "__w_gt_fast", "__w_lte_fast", "__w_gte_fast",
     "w_string_index", "w_string_rindex", "w_string_count", "w_string_repeat",
-    "__w_string_byte_length_fast", "w_wire_sequence_from_array"
+    "__w_string_byte_length_fast", "__w_switch_canonical_fast", "w_switch_canonical", "w_wire_sequence_from_array"
   ]
   i = 0
   while i < names.size()
@@ -452,6 +452,14 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
   # are looked up directly in mod[:string_texts]).
   names = {}
   texts = mod == nil ? nil : mod[:string_texts]
+  has_setjmp = false
+  has_store_i64 = false
+  has_loop_arith = false
+  has_int_arith = false
+  has_direct_call = false
+  has_heap_producer = false
+  has_method_reg = false
+  int_fresh = mod == nil ? nil : mod[:int_fresh_fns]
 
   # Walk blocks in order (sufficient for monotonic analysis)
   bi = 0
@@ -462,6 +470,26 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
     while ii < instrs.size()
       inst = instrs[ii]
       op = wire_kind(inst)
+
+      if op == :setjmp
+        has_setjmp = true
+      elsif op == :store_i64
+        has_store_i64 = true
+      elsif op == :class_add_method
+        has_method_reg = true
+      elsif op == :call_direct_i64
+        has_direct_call = true
+        cname = wire_get(inst, :name)
+        if int_temp_arith?(cname)
+          has_int_arith = true
+          if loop_release_arith?(cname)
+            has_loop_arith = true
+        elsif cname == "w_bigint_from_dec_str" || (int_fresh != nil && int_fresh[cname] == true)
+          has_int_arith = true
+        if !has_method_reg && cname != nil && cname.size() >= 10 && cname.index("method") != nil
+          has_method_reg = true
+      elsif op == :bigint_literal_i64
+        has_int_arith = true
 
       if op == :load_class && wire_get(inst, :temp) != nil
         class_temps[wire_get(inst, :temp)] = wire_get(inst, :class_name)
@@ -530,6 +558,7 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
             producer_class = construct_producer_class(inst, mod, class_temps)
             is_producer = producer_class != nil
           if is_producer
+            has_heap_producer = true
             producers[wire_get(inst, :temp)] = {op: op, block: bi, class: producer_class, instruction: inst}
             if scope_stack.size() > 0
               scope_stack[scope_stack.size() - 1][:temps].push(wire_get(inst, :temp))
@@ -552,12 +581,14 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
       ii += 1
     bi += 1
 
-  func[:ownership] = {escaped: escaped, producers: producers, scope_locals: scope_locals, func_scope: func_scope_temps}
+  func[:ownership] = {escaped: escaped, producers: producers, scope_locals: scope_locals, func_scope: func_scope_temps, has_setjmp: has_setjmp, has_store_i64: has_store_i64, has_loop_arith: has_loop_arith, has_int_arith: has_int_arith, has_direct_call: has_direct_call, has_heap_producer: has_heap_producer, has_method_reg: has_method_reg, int_fresh_known: int_fresh != nil}
 
 # Entry point: analyze all functions in the module.
 -> ownership_pass(mod)
   if mod[:string_texts] == nil
     mod[:string_texts] = int_temp_string_texts(mod)
+  if env("TUNGSTEN_FREE") != "0" && env("TUNGSTEN_INT_TEMP_RELEASE") != "0" && mod[:integer_contract_intact] == true
+    int_fresh_discover(mod)
   fi = 0
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
@@ -601,6 +632,8 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
 -> ownership_pass_parallel(mod, jobs)
   if mod[:string_texts] == nil
     mod[:string_texts] = int_temp_string_texts(mod)
+  if env("TUNGSTEN_FREE") != "0" && env("TUNGSTEN_INT_TEMP_RELEASE") != "0" && mod[:integer_contract_intact] == true
+    int_fresh_discover(mod)
   state = {
     functions: mod[:functions],
     mod: mod,
@@ -716,8 +749,9 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
   while fi < mod[:functions].size()
     func = mod[:functions][fi]
     if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+      own = func[:ownership]
       insert_frees(func)
-      if loop_rel
+      if loop_rel && (own == nil || (!own[:has_setjmp] && own[:has_store_i64] && own[:has_loop_arith]))
         ignored = loop_carried_releases(func)
       if int_temps == nil
         int_temps = env("TUNGSTEN_INT_TEMP_RELEASE") != "0" && mod[:integer_contract_intact] == true
@@ -726,11 +760,23 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
           if strings == nil
             strings = int_temp_string_texts(mod)
           mod[:method_table] = module_method_table(mod, strings)
-          fresh = int_fresh_returns(mod)
+          if mod[:int_fresh_fns] != nil
+            fresh = mod[:int_fresh_fns]
+            int_fresh_apply_seals(mod[:int_fresh_cands], fresh)
+          else
+            fresh = int_fresh_returns(mod)
       if int_temps && slot_rel
-        ignored = owned_slot_releases(func, mod, fresh, strings)
+        if own == nil || own[:int_fresh_known] != true
+          if own == nil || (!own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_direct_call]))
+            ignored = owned_slot_releases(func, mod, fresh, strings)
+        elsif !own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_heap_producer])
+          ignored = owned_slot_releases(func, mod, fresh, strings)
       if int_temps
-        ignored = int_temp_releases(func, strings, fresh, mod)
+        if own == nil || own[:int_fresh_known] != true
+          if own == nil || (!own[:has_setjmp] && (own[:has_int_arith] || (fresh.size() > 0 && own[:has_direct_call])))
+            ignored = int_temp_releases(func, strings, fresh, mod)
+        elsif !own[:has_setjmp] && own[:has_int_arith]
+          ignored = int_temp_releases(func, strings, fresh, mod)
     fi += 1
 
 # ---------------------------------------------------------------------------
@@ -946,6 +992,8 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
   blocks = func[:blocks]
   slots = func[:var_slots]
   return 0 if slots == nil || slots.size() == 0 || blocks.size() < 2
+  own = func[:ownership]
+  return 0 if own != nil && own[:has_setjmp]
   promoted = func[:promoted_vars]
   return 0 if promoted != nil && promoted.size() == slots.size()
   slot_ptr = nil
@@ -984,7 +1032,7 @@ loop_release_compiled_runtime = runtime_identity() in ("compiled-runtime" "tungs
             break
       ii += 1
     bi += 1
-  return 0 if !candidate || has_setjmp(func)
+  return 0 if !candidate || (own == nil && has_setjmp(func))
 
   cfg = build_cfg(func)
   idom = compute_dominators(cfg)
@@ -1333,10 +1381,13 @@ int_temp_reader_map = init_int_temp_reader_map()
 -> int_temp_releases(func, strings, fresh, mod)
   blocks = func[:blocks]
   return 0 if blocks.size() == 0
+  own = func[:ownership]
+  return 0 if own != nil && own[:has_setjmp]
   # Cheap pre-filter: most functions never produce an integer temporary.
-  found = false
+  arith = []
+  arith_set = nil
   bi = 0
-  while bi < blocks.size() && !found
+  while bi < blocks.size()
     instrs = blocks[bi][:instructions]
     ii = 0
     while ii < instrs.size()
@@ -1346,20 +1397,26 @@ int_temp_reader_map = init_int_temp_reader_map()
         return 0
       if k == :call_direct_i64
         cname = wire_get(inst, :name)
-        if (int_temp_producer?(cname, fresh) || cname == "w_bigint_from_dec_str") && wire_get(inst, :temp) != nil
-          found = true
-          break
-      elsif k == :bigint_literal_i64 && wire_get(inst, :temp) != nil
-        found = true
-        break
+        t = wire_get(inst, :temp)
+        if t != nil && (int_temp_producer?(cname, fresh) || cname == "w_bigint_from_dec_str")
+          if arith_set == nil
+            arith_set = {}
+          arith_set[t] = true
+          arith.push(t)
+      elsif k == :bigint_literal_i64
+        t = wire_get(inst, :temp)
+        if t != nil
+          if arith_set == nil
+            arith_set = {}
+          arith_set[t] = true
+          arith.push(t)
       ii += 1
     bi += 1
-  return 0 if !found || has_setjmp(func)
+  return 0 if arith_set == nil || (own == nil && has_setjmp(func))
 
   defs = {}
   uses = {}
   known_int = {}
-  arith = []
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
@@ -1374,8 +1431,6 @@ int_temp_reader_map = init_int_temp_reader_map()
         defs[t] = loc
         if k == :nanbox_int
           known_int[t] = true
-        elsif (k == :call_direct_i64 && int_temp_producer?(wire_get(inst, :name), fresh)) || int_fresh_source?(inst)
-          arith.push(t)
       refs = loop_release_operands(inst)
       if refs == nil
         if env("TUNGSTEN_INT_TEMP_RELEASE_DEBUG") == "1"
@@ -1384,9 +1439,10 @@ int_temp_reader_map = init_int_temp_reader_map()
       ri = 0
       while ri < refs.size()
         r = refs[ri]
-        if uses[r] == nil
-          uses[r] = []
-        uses[r].push(loc)
+        if arith_set[r] == true
+          if uses[r] == nil
+            uses[r] = []
+          uses[r].push(loc)
         ri += 1
       ii += 1
     bi += 1
@@ -1536,7 +1592,7 @@ int_temp_reader_map = init_int_temp_reader_map()
 # a BigInt result shared in that case; the release then only drops the mark.
 # Returns name -> true.  Memoized calls go through memo_call_*, never a
 # direct call, so a cached result is never taken for a fresh one.
--> int_fresh_returns(mod)
+-> int_fresh_discover(mod)
   fresh = {}
   cands = []
   funcs = mod[:functions]
@@ -1573,12 +1629,24 @@ int_temp_reader_map = init_int_temp_reader_map()
       if ok
         fresh[c[:name]] = true
         changed = true
+  mod[:int_fresh_fns] = fresh
+  mod[:int_fresh_cands] = cands
+  fresh
+
+-> int_fresh_apply_seals(cands, fresh)
+  if cands == nil
+    return nil
   ci = 0
   while ci < cands.size()
     c = cands[ci]
     ci += 1
     if fresh[c[:name]] == true
       int_fresh_insert_seals(c)
+  nil
+
+-> int_fresh_returns(mod)
+  fresh = int_fresh_discover(mod)
+  int_fresh_apply_seals(mod[:int_fresh_cands], fresh)
   fresh
 
 # {name:, func:, callees: [...], seals: [[block, index, temp, args], ...]} when
@@ -1600,7 +1668,7 @@ int_temp_reader_map = init_int_temp_reader_map()
       if lk == :ret_i64
         has_ret = true
         rv = wire_get(last, :value)
-        if rv == nil || rv.size() == 0 || rv.byte_at(0) != 37
+        if rv == nil || rv.size() < 3 || rv.byte_at(0) != 37 || rv.byte_at(1) != 116
           return nil
         pi = n - 2
         while pi >= 0
@@ -1785,6 +1853,8 @@ int_temp_reader_map = init_int_temp_reader_map()
   blocks = func[:blocks]
   slots = func[:var_slots]
   return 0 if slots == nil || slots.size() == 0 || blocks.size() < 1
+  own = func[:ownership]
+  return 0 if own != nil && own[:has_setjmp]
   promoted = func[:promoted_vars]
   return 0 if promoted != nil && promoted.size() == slots.size()
   heap_cells = func[:heap_slot_names]
@@ -1802,6 +1872,7 @@ int_temp_reader_map = init_int_temp_reader_map()
   producer_temps = nil
   has_producer = false
   stored_vals = nil
+  tracked_use = nil
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
@@ -1812,9 +1883,18 @@ int_temp_reader_map = init_int_temp_reader_map()
       if k == :setjmp
         return 0
       if k == :store_i64 && cand[wire_get(inst, :ptr)] == true
+        sv = wire_get(inst, :value)
         if stored_vals == nil
           stored_vals = []
-        stored_vals.push(wire_get(inst, :value))
+          tracked_use = {}
+        stored_vals.push(sv)
+        tracked_use[sv] = true if sv != nil
+      elsif k == :load_i64 && cand[wire_get(inst, :ptr)] == true
+        lt = wire_get(inst, :temp)
+        if lt != nil
+          if tracked_use == nil
+            tracked_use = {}
+          tracked_use[lt] = true
       elsif k == :bigint_literal_i64 && wire_get(inst, :temp) != nil
         if producer_temps == nil
           producer_temps = {}
@@ -1847,6 +1927,7 @@ int_temp_reader_map = init_int_temp_reader_map()
   stores = {}
   bad = {}
   rets = []
+  known_int = {}
   bi = 0
   while bi < blocks.size()
     instrs = blocks[bi][:instructions]
@@ -1859,6 +1940,8 @@ int_temp_reader_map = init_int_temp_reader_map()
       loc = bbase + ii
       if t != nil
         defs[t] = loc
+        if k == :nanbox_int
+          known_int[t] = true
       if k in (:ret_i64 :ret_i32 :ret_void)
         rets.push(loc)
       access = nil
@@ -1878,20 +1961,13 @@ int_temp_reader_map = init_int_temp_reader_map()
       while ri < refs.size()
         r = refs[ri]
         bad[r] = true if cand[r] == true && r != access
-        uses[r] = [] if uses[r] == nil
-        uses[r].push(loc)
+        if tracked_use[r] == true
+          uses[r] = [] if uses[r] == nil
+          uses[r].push(loc)
         ri += 1
       ii += 1
     bi += 1
   return 0 if rets.size() == 0
-
-  known_int = {}
-  dk = defs.keys()
-  di = 0
-  while di < dk.size()
-    d = defs[dk[di]]
-    known_int[dk[di]] = true if wire_kind(blocks[d >> 20][:instructions][d & 0xFFFFF]) == :nanbox_int
-    di += 1
 
   ctx = {blocks: blocks, defs: defs, uses: uses, cand: cand, wo: wo, known_int: known_int, fresh: fresh, strings: strings, mod: mod}
   info = {}
@@ -2307,7 +2383,7 @@ int_temp_reader_map = init_int_temp_reader_map()
       if lk == :ret_i64
         has_ret = true
         rv = wire_get(last, :value)
-        if rv == nil || rv.size() == 0 || rv.byte_at(0) != 37
+        if rv == nil || rv.size() < 3 || rv.byte_at(0) != 37 || rv.byte_at(1) != 116
           return nil
         pi = n - 2
         while pi >= 0
@@ -2445,8 +2521,11 @@ int_temp_reader_map = init_int_temp_reader_map()
   funcs = mod[:functions]
   fi = 0
   while fi < funcs.size()
-    blocks = funcs[fi][:blocks]
+    func = funcs[fi]
     fi += 1
+    own = func[:ownership]
+    next if own != nil && own[:has_method_reg] == false
+    blocks = func[:blocks]
     cls_of = nil
     bi = 0
     while bi < blocks.size()

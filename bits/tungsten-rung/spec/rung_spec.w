@@ -440,8 +440,8 @@ describe "rung ladders" ->
     expect(fl["credit"]).to eq(["filer"])
     expect(rung_read(out + "/state.md")).to eq("accepted flaky\naccepted filer\n")
     report = rung_read(out + "/report.md")
-    expect(report.index("broken: rate limited: Error: rate limit exceeded after 2 attempts; skipped this round") != nil).to eq(true)
-    expect(report.index("nologin: not signed in: Not signed in after 1 attempt") != nil).to eq(true)
+    expect(report.index("broken: rate limited: Error: rate limit exceeded (after 2 attempts); skipped this round") != nil).to eq(true)
+    expect(report.index("nologin: not signed in: Not signed in (after 1 attempt)") != nil).to eq(true)
     expect(report.index("flaky: attempt 1: rate limited: HTTP 429 Too Many Requests (retried)") != nil).to eq(true)
 
   it "runs a parallel group within its provider's concurrency cap" ->
@@ -499,6 +499,9 @@ describe "rung ladders" ->
     expect(spec_count_lines(SPEC_DIR + "/quota.count")).to eq(1)
     expect(rung_json_read(out + "/steps/r01-s01-quota/calls/quota/meta.json")["failure"]).to eq("usage-limit")
     expect(rung_json_read(out + "/status.json")["stop"]).to eq("plateau: no step improved the state in round 2")
+    report = rung_read(out + "/report.md")
+    expect(report.index("quota: usage limit: You've hit your weekly limit · resets Nov 1 (after 1 attempt); skipped for the rest of this run") != nil).to eq(true)
+    expect(report.index("(not called); skipped for the rest of this run") != nil).to eq(true)
 
   it "names retired models and real errors, not the CLI's noise lines" ->
     p = spec_prompt("gone.md", "---\nmodels: retired, noisy, alpha\nretries: 1\nretry_wait: 0\nmax_rounds: 1\n---\nTask ten.\n")

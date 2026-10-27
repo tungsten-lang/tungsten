@@ -533,7 +533,10 @@
       c["notes"].each -> (n)
         problems.push("- round " + s["round"].to_s + ", step " + s["slot"].to_s + ", " + c["model"] + ": " + n + " (retried)")
       if c["status"] != "ok"
-        problems.push("- round " + s["round"].to_s + ", step " + s["slot"].to_s + ", " + c["model"] + ": " + c["reason"] + " after " + c["attempts"].to_s + " attempt" + (c["attempts"] == 1 ? "" : "s") + "; skipped this round")
+        cls = rung_failure_class(c["reason"])
+        until_when = (cls == "usage-limit" || cls == "unavailable") ? "skipped for the rest of this run" : "skipped this round"
+        tries = c["attempts"] == 0 ? "not called" : "after " + c["attempts"].to_s + " attempt" + (c["attempts"] == 1 ? "" : "s")
+        problems.push("- round " + s["round"].to_s + ", step " + s["slot"].to_s + ", " + c["model"] + ": " + c["reason"] + " (" + tries + "); " + until_when)
     if s["integration"] == "failed"
       problems.push("- round " + s["round"].to_s + ", step " + s["slot"].to_s + ", integrator: " + s["integration_reason"] + "; state kept")
     s["notes"].each -> (n)

@@ -58352,6 +58352,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
         const char *pn =
             w_is_symbol(recv) ? "Symbol" :
             (w_is_body(recv) || w_is_wire_sequence(recv)) ? "Array" :
+            w_is_hash(recv) ? "Hash" :
             w_is_bool(recv) ? "Boolean" : NULL;
         return w_bool((pn && strcmp(pn, tn) == 0) ||
                       w_primitive_is_a_type_name(recv, tn, strlen(tn)));
@@ -58381,6 +58382,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
             w_is_string(recv) ? "String" :
             w_is_symbol(recv) ? "Symbol" :
             (w_is_array(recv) || w_is_body(recv) || w_is_wire_sequence(recv)) ? "Array" :
+            w_is_hash(recv) ? "Hash" :
             w_is_bool(recv) ? "Boolean" : NULL;
         return w_bool((pn && w_typename_base_eq(pn, tn, tn_len)) ||
                       w_primitive_is_a_type_name(recv, tn, tn_len));

@@ -18,6 +18,8 @@ use runner
 use prompts
 use ladder
 
+# Argon reads this text as the parser's schema: an "(default: X)" in an
+# option's description becomes that option's value, so say defaults in words.
 RUNG_MANPAGE = <<~EOT
   NAME
       rung -- run a prompt up a ladder of models, integrating after every call
@@ -55,7 +57,7 @@ RUNG_MANPAGE = <<~EOT
           Per-call timeout for every model call.
 
       -o, --out DIR
-          The run directory (default: FILE.rung/STAMP beside the prompt file).
+          The run directory; without it, FILE.rung/STAMP beside the prompt file.
 
       -n, --dry-run
           Write the plan and round 1's first prompts, call nothing.

@@ -167,6 +167,30 @@ describe "rung prompt files" ->
     expect(l2[1]).to eq(["beta", "gamma"])
     expect(rung_ladder_models(l)).to eq(["codex", "ollama:a", "ollama:b", "ollama:c", "claude"])
 
+describe "rung command line" ->
+  it "parses options, groups and flags, and leaves unset options nil" ->
+    o = rung_cli(["task.md", "-m", "codex,ollama:a|ollama:b", "--no-guard", "-r", "0", "-n"])
+    expect(o["args"]).to eq(["task.md"])
+    expect(o["models"]).to eq(["codex", "ollama:a|ollama:b"])
+    expect(o["no_guard"]).to eq(true)
+    expect(o["dry_run"]).to eq(true)
+    expect(o["max_rounds"]).to eq(0)
+    plain = rung_cli(["task.md"])
+    expect(plain["out"]).to be_nil
+    expect(plain["timeout"]).to be_nil
+    expect(plain["integrator"]).to be_nil
+    expect(plain["max_rounds"]).to be_nil
+    expect(plain["resume"]).to be_nil
+    expect(plain["config"]).to be_nil
+
+  it "puts the run directory beside the prompt file by default" ->
+    p = spec_prompt("where.md", "---\nmodels: gamma\nmax_rounds: 1\n---\nTask seven.\n")
+    expect(spec_run([p, "--dry-run"])).to eq(0)
+    runs = rung_children(SPEC_DIR + "/where.rung")
+    expect(runs.size).to eq(1)
+    expect(runs[0].size).to eq(15)
+    expect(File.exist?(SPEC_DIR + "/where.rung/" + runs[0] + "/plan.md")).to eq(true)
+
 describe "rung TOML subset" ->
   it "parses tables, quoted keys, strings, numbers, booleans and arrays" ->
     t = rung_toml_parse(SPEC_TOML)

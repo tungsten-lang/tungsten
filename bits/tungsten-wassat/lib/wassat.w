@@ -26,8 +26,20 @@ use atomic_stop
 use solver
 use local_core
 use multiplier
+use circuit_miters
+use crypto_circuits
+use circuit
 use fermat
 use sum_of_three_cubes
+use sdp
+use vdwb
+use backdoor
+use sgi
+use schooltt
+use symmetry_fix
+use block_csp
+use arithmetic_coloring
+use specialists
 use mdp
 use automata_sync
 use latin_csp
@@ -325,17 +337,6 @@ use portfolio
   rescue e
     wassat_discard_output(wrat_out, wrat_final)
     raise e
-  if formula["flat_ncl"] >= 1500000 && env("WASSAT_LUCKY") != "0"
-    flat_lucky = wassat_flat_lucky_model(formula)
-    if flat_lucky.size > 0
-      unless wassat_model_satisfies?(formula, flat_lucky)
-        raise "internal error: flat-lucky model does not satisfy the input formula"
-      wassat_discard_output(wrat_out, wrat_final)
-      wassat_discard_output(drat_out, drat_final)
-      wassat_print_sat_model(flat_lucky, quiet)
-      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (lucky phases)")
-      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: [formula["nvars"]]")
-      exit(10)
   # The canonical Hantzsche--Wendt instance is a complete group-ring product
   # circuit over two 93-bit supports. Construct Gardam's published unit and
   # inverse from the group law, replay every AND/parity auxiliary, and publish
@@ -472,25 +473,38 @@ use portfolio
       wassat_status(quiet, "c conflicts: [budget_used], decisions: [sum3["decisions"]], props: [sum3["props"]]")
       exit(10)
   # Minimum Disagreement Parity formulas expose complete GF(2) sample chains
-  # followed by a canonical unary disagreement counter. Reconstruct the noisy
-  # samples, run bounded information-set decoding, and condition an ordinary
-  # Wassat query on the recovered hidden/corruption bits. This route is
-  # model-only and publishes only after replaying the complete original CNF.
+  # followed by a canonical unary disagreement counter. On an MDP miss the
+  # same entry point continues into the fingerprint-gated specialist
+  # registry (specialists.w). Every lane here publishes a SAT model only
+  # after replaying the complete original CNF, and names itself in
+  # result["lane"] so the win is attributed correctly below.
   if env("WASSAT_MDP") != "0"
     if options["conflicts"] == 0 || budget_used < options["conflicts"]
       mdp_cap = wassat_stage_conflict_cap(
         options["conflicts"], budget_used, WASSAT_MDP_CONFLICT_CAP
       )
-      mdp = wassat_mdp_solve(formula, mdp_cap)
+      prove_cap = wassat_stage_conflict_cap(
+        options["conflicts"], budget_used, WASSAT_LOCAL_CORE_CONFLICT_CAP
+      )
+      mdp = wassat_mdp_solve(
+        formula, mdp_cap, proof_mode,
+        proof_mode == WASSAT_PROOF_WRAT && drat_final != nil,
+        prove_cap
+      )
       tprof = wassat_prof("cli.mdp", tprof)
       budget_used += mdp["conflicts"]
+      lane = mdp.has_key?("lane") ? mdp["lane"] : "mdp"
       if mdp["status"] == 1
         unless wassat_model_satisfies?(formula, mdp["model"])
-          raise "internal error: MDP model does not satisfy the input formula"
+          raise "internal error: specialist model does not satisfy the input formula"
         wassat_discard_output(wrat_out, wrat_final)
         wassat_discard_output(drat_out, drat_final)
         wassat_print_sat_model(mdp["model"], quiet)
-        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified MDP model)")
+        if lane == "mdp"
+          wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified MDP model)")
+        else
+          wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified specialist model)")
+        wassat_status(quiet, "c lane: [lane]")
         wassat_status(quiet, "c mdp bits=[mdp["bits"]], samples=[mdp["samples"]], disagreements=[mdp["disagreements"]]/[mdp["tolerated"]], trials=[mdp["trials"]]")
         wassat_status(quiet, "c conflicts: [budget_used], decisions: [mdp["decisions"]], props: [mdp["props"]]")
         exit(10)
@@ -498,10 +512,104 @@ use portfolio
         wassat_discard_output(wrat_out, wrat_final)
         wassat_discard_output(drat_out, drat_final)
         wassat_status(quiet, "s UNSATISFIABLE")
-        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact MDP pigeonhole refutation)")
+        if lane == "mdp"
+          wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact MDP pigeonhole refutation)")
+        else
+          wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact specialist refutation)")
+        wassat_status(quiet, "c lane: [lane]")
         wassat_status(quiet, "c mdp bits=[mdp["bits"]], samples=[mdp["samples"]], tolerated=[mdp["tolerated"]], trials=[mdp["trials"]]")
         wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
         exit(20)
+      elsif mdp["status"] == -1 && mdp.has_key?("proof")
+        # A specialist refutation the registry re-proved on its witness
+        # star (wassat_specialist_prove). Publish exactly like a
+        # local-core refutation: original clause ids, subset proof.
+        wtext = ""
+        dtext = ""
+        unless wrat_final == nil
+          whead = header_wanted ? "wrat 1\n" : ""
+          wbody = mdp["proof"].empty? ? "" : mdp["proof"].join("\n") + "\n"
+          wtext = whead + wbody
+          unless wrat_final == "-"
+            raise "proof write failed at '[wrat_out]'" unless write_file(wrat_out, wtext)
+            wassat_publish_output(wrat_out, wrat_final, "WRAT")
+        unless drat_final == nil
+          dtext = mdp["drat"].empty? ? "" : mdp["drat"].join("\n") + "\n"
+          unless drat_final == "-"
+            raise "proof write failed at '[drat_out]'" unless write_file(drat_out, dtext)
+            wassat_publish_output(drat_out, drat_final, "DRAT")
+        wassat_status(quiet, "s UNSATISFIABLE")
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (specialist witness-star refutation)")
+        wassat_status(quiet, "c lane: [lane]")
+        wassat_status(quiet, "c conflicts: [budget_used], decisions: [mdp["decisions"]], props: [mdp["props"]]")
+        print(wtext) if wrat_final == "-"
+        print(dtext) if drat_final == "-"
+        exit(20)
+  # Exact-one block CSPs (coloring, permutation, Hamiltonian, grid CSPs):
+  # complete in-block at-most-one sets force one true variable per block,
+  # and the bounded native DFS decides the finite-domain problem directly.
+  # SAT models are verified below; trusted UNSAT is fast-only.
+  if env("WASSAT_BLOCK_CSP") != "0"
+    bcsp = wassat_block_csp_solve(formula)
+    tprof = wassat_prof("cli.block_csp", tprof)
+    if bcsp["status"] == 1
+      unless wassat_model_satisfies?(formula, bcsp["model"])
+        raise "internal error: block-CSP model does not satisfy the input formula"
+      wassat_discard_output(wrat_out, wrat_final)
+      wassat_discard_output(drat_out, drat_final)
+      wassat_print_sat_model(bcsp["model"], quiet)
+      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact block CSP)")
+      wassat_status(quiet, "c lane: block_csp")
+      wassat_status(quiet, "c block_csp blocks=[bcsp["blocks"]], nodes=[bcsp["nodes"]]")
+      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+      exit(10)
+    elsif bcsp["status"] == -1 && proof_mode == WASSAT_PROOF_NONE
+      wassat_discard_output(wrat_out, wrat_final)
+      wassat_discard_output(drat_out, drat_final)
+      wassat_status(quiet, "s UNSATISFIABLE")
+      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact block CSP)")
+      wassat_status(quiet, "c lane: block_csp")
+      wassat_status(quiet, "c block_csp blocks=[bcsp["blocks"]], nodes=[bcsp["nodes"]]")
+      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+      exit(20)
+  # Two-color arithmetic hypergraphs (Van der Waerden, Schur, Pythagorean,
+  # Ramsey): scopes are verified against the family's mathematical shape
+  # and decided by exhaustive bounded search over the extracted scopes.
+  # No extremal constant is consulted. SAT is verified; UNSAT is fast-only.
+  if env("WASSAT_ARITHMETIC_COLORING") != "0"
+    arith = wassat_arith_coloring_solve(formula)
+    tprof = wassat_prof("cli.arithmetic_coloring", tprof)
+    if arith["status"] == 1
+      unless wassat_model_satisfies?(formula, arith["model"])
+        raise "internal error: arithmetic-coloring model does not satisfy the input formula"
+      wassat_discard_output(wrat_out, wrat_final)
+      wassat_discard_output(drat_out, drat_final)
+      wassat_print_sat_model(arith["model"], quiet)
+      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact arithmetic two-coloring)")
+      wassat_status(quiet, "c lane: arithmetic_coloring")
+      wassat_status(quiet, "c arith family=[arith["family"]], elements=[arith["elements"]], scopes=[arith["scopes"]], nodes=[arith["nodes"]]")
+      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+      exit(10)
+    elsif arith["status"] == -1 && proof_mode == WASSAT_PROOF_NONE
+      wassat_discard_output(wrat_out, wrat_final)
+      wassat_discard_output(drat_out, drat_final)
+      wassat_status(quiet, "s UNSATISFIABLE")
+      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact arithmetic two-coloring)")
+      wassat_status(quiet, "c lane: arithmetic_coloring")
+      wassat_status(quiet, "c arith family=[arith["family"]], elements=[arith["elements"]], scopes=[arith["scopes"]], nodes=[arith["nodes"]]")
+      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+      exit(20)
+  if formula["flat_ncl"] >= 1500000 && env("WASSAT_LUCKY") != "0"
+    flat_lucky = wassat_flat_lucky_model(formula)
+    if flat_lucky.size > 0
+      unless wassat_model_satisfies?(formula, flat_lucky)
+        raise "internal error: flat-lucky model does not satisfy the input formula"
+      wassat_discard_output(wrat_out, wrat_final)
+      wassat_discard_output(drat_out, drat_final)
+      wassat_print_sat_model(flat_lucky, quiet)
+      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (lucky phases)")
+      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: [formula["nvars"]]")
+      exit(10)
   # Large generated instances can contain a compact contradiction among a
   # bounded star of ORIGINAL clauses.  Search that star in complete isolation:
   # SAT/UNKNOWN says nothing about the parent and only consumes budget, while
@@ -552,6 +660,7 @@ use portfolio
     multiplier_model = wassat_klieber_circuit_model(formula) if multiplier_model.empty?
     multiplier_model = wassat_sha1_preimage_model(formula) if multiplier_model.empty?
     multiplier_model = wassat_par32_model(formula) if multiplier_model.empty?
+    multiplier_model = wassat_circuit_model(formula) if multiplier_model.empty?
     unless multiplier_model.empty?
       unless wassat_model_satisfies?(formula, multiplier_model)
         raise "internal error: multiplier model does not satisfy the input formula"
@@ -605,13 +714,13 @@ use portfolio
       wassat_discard_output(drat_out, drat_final)
       ltext = wassat_sat_text(latin["model"])
       wassat_status(quiet, ltext.slice(0, ltext.size - 1))
-      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact four-value Latin ternary CSP)")
+      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact [latin["width"]]-value Latin ternary CSP)")
       wassat_status(quiet, "c latin groups=[latin["groups"]], constraints=[latin["constraints"]], seeds=[latin["seeds"]], nodes=[latin["nodes"]], checks=[latin["checks"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(10)
     elsif latin["status"] == -1 && proof_mode == WASSAT_PROOF_NONE
       << "s UNSATISFIABLE"
-      << "c mode: fast (exact four-value Latin ternary CSP)"
+      << "c mode: fast (exact [latin["width"]]-value Latin ternary CSP)"
       << "c latin groups=[latin["groups"]], constraints=[latin["constraints"]], seeds=[latin["seeds"]], nodes=[latin["nodes"]], checks=[latin["checks"]]"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)

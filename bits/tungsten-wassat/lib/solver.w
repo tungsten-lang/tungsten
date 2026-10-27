@@ -94,11 +94,13 @@ WASSAT_PROOF_DRAT = 2
     @pwork = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 4] : i64[1]
     @phint = @proof_mode == WASSAT_PROOF_WRAT ? i64[nv + 4] : i64[1]
     if !flat_shell
+      max_dec = nv
+      max_dec = env("WASSAT_MAX_DEC_VAR").to_i if env("WASSAT_MAX_DEC_VAR") != nil
       v = 1
       while v <= nv
         @vq_prev[v] = v - 1
         @vq_next[v] = v + 1
-        @vq_stamp[v] = nv - v + 1
+        @vq_stamp[v] = v <= max_dec ? nv - v + 1 : 0
         v += 1
       if nv >= 1
         @vq_next[nv] = 0
@@ -143,6 +145,8 @@ WASSAT_PROOF_DRAT = 2
     @hstate[0] = nv
     @hstate[1] = 32
     if !flat_shell
+      max_dec2 = nv
+      max_dec2 = env("WASSAT_MAX_DEC_VAR").to_i if env("WASSAT_MAX_DEC_VAR") != nil
       @heappos[0] = -1
       v = 0
       while v <= nv
@@ -153,6 +157,7 @@ WASSAT_PROOF_DRAT = 2
       while v <= nv
         @heap[v - 1] = v
         @heappos[v] = v - 1
+        @activity[v] = -1 if v > max_dec2
         v += 1
 
     @tsize = 0
@@ -2600,13 +2605,16 @@ WASSAT_PROOF_DRAT = 2
       @bphase[v] = -1 unless lean
       v += 1
     unless lean
+      max_dec = nv
+      max_dec = env("WASSAT_MAX_DEC_VAR").to_i if env("WASSAT_MAX_DEC_VAR") != nil
       v = 1
       while v <= nv
         @vq_prev[v] = v - 1
         @vq_next[v] = v + 1
-        @vq_stamp[v] = nv - v + 1
+        @vq_stamp[v] = v <= max_dec ? nv - v + 1 : 0
         @heap[v - 1] = v
         @heappos[v] = v - 1
+        @activity[v] = -1 if v > max_dec
         v += 1
       if nv >= 1
         @vq_next[nv] = 0
@@ -5714,7 +5722,7 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
 -> wassat_evsids_rescale(act, hst, nv) (i64[] i64[] i64) i64
   v = 1
   while v <= nv
-    act[v] = act[v] >> 32
+    act[v] = act[v] >> 32 if act[v] >= 0
     v += 1
   hst[1] = hst[1] >> 32
   if hst[1] < 32
@@ -5725,6 +5733,7 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
 # stamp. The stamp orders "recently in a conflict"; backjump repositions the
 # search cursor to the highest-stamp unassigned variable.
 -> wassat_vmtf_front(vqn, vqp, vqs, vst, v) (i64[] i64[] i64[] i64[] i64) i64
+  return 0 if vqs[v] == 0
   return 0 if vst[0] == v
   pn = vqn[v]
   pp = vqp[v]
@@ -5765,6 +5774,7 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
   r
 
 -> wassat_evsids_bump(act, heap, hpos, hst, v, nv) (i64[] i64[] i64[] i64[] i64 i64) i64
+  return 0 if act[v] < 0
   act[v] = act[v] + hst[1]
   if act[v] > 4503599627370496
     z = wassat_evsids_rescale(act, hst, nv)

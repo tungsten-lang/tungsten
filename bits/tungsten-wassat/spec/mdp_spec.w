@@ -186,4 +186,53 @@ describe "Wassat Minimum Disagreement Parity shortcut" ->
     )).to eq(true)
     expect(file?(proof)).to eq(false)
 
+  it "solves partitioned exact-one binary CSPs via iterative symmetry fixing and degree peeling" ->
+    lines = []
+    b = 0
+    while b < 25
+      v0 = b * 4 + 1
+      mdp_fixture_clause(lines, [v0, v0 + 1, v0 + 2, v0 + 3])
+      i = 0
+      while i < 4
+        j = i + 1
+        while j < 4
+          mdp_fixture_clause(lines, [0 - (v0 + i), 0 - (v0 + j)])
+          j += 1
+        i += 1
+      b += 1
+    b = 0
+    while b < 24
+      u0 = b * 4 + 1
+      v0 = (b + 1) * 4 + 1
+      c = 0
+      while c < 4
+        mdp_fixture_clause(lines, [0 - (u0 + c), 0 - (v0 + c)])
+        c += 1
+      b += 1
+    while lines.size < 500
+      mdp_fixture_clause(lines, [-1, -5])
+    cnf = "p cnf 100 [lines.size]\n" + lines.join("\n") + "\n"
+    formula = wassat_parse_cnf_native(cnf)
+    result = wassat_mdp_solve(formula)
+    expect(result["recognized"]).to eq(true)
+    expect(result["status"]).to eq(1)
+    expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
+
+  it "does not refute a satisfiable formula matching a Van der Waerden tally" ->
+    # Same (nvars, clauses, width/sign histogram) as the nv=260 W(2,5) shape,
+    # but every clause is over the same five variables, so the formula is
+    # satisfiable. A tally is not a refutation: the lane must fall through.
+    lines = []
+    i = 0
+    while i < 8320
+      lines.push("1 2 3 4 5 0")
+      lines.push("-1 -2 -3 -4 -5 0")
+      i += 1
+    cnf = "p cnf 260 16640\n" + lines.join("\n") + "\n"
+    formula = wassat_parse_cnf_native(cnf)
+    result = wassat_mdp_solve(formula)
+    expect(result["status"] == -1).to eq(false)
+    if result["status"] == 1
+      expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
+
 spec_summary

@@ -1,10 +1,11 @@
-# Exact solver for compact four-value Latin CSP encodings.
+# Exact solver for compact Latin CSP encodings over w values (3..6).
 #
 # A recognized formula is a partition of every Boolean variable into positive
-# width-four domain clauses, followed (in any clause order) only by negative
-# ternary nogoods.  Each nogood scope contains three distinct domains, exactly
-# 48 of its 64 value triples are forbidden, and the 16 allowed triples form a
-# Latin relation: any two values determine the third uniquely.
+# width-w domain clauses (one w for the whole formula), followed (in any
+# clause order) only by negative ternary nogoods.  Each nogood scope contains
+# three distinct domains, exactly w*w*(w-1) of its w^3 value triples are
+# forbidden, and the w*w allowed triples form a Latin relation: any two
+# values determine the third uniquely.
 #
 # No explicit at-most-one clauses are needed.  From any Boolean model choose
 # one true value in each positive domain row and turn the other values false.
@@ -28,19 +29,19 @@ WASSAT_LATIN_NODE_CAP = 500000
 WASSAT_LATIN_STRUCTURAL_CAP = 50000000
 WASSAT_LATIN_CHECK_CAP = 200000000
 WASSAT_LATIN_HASH_CAP = 8192
+WASSAT_LATIN_MIN_WIDTH = 3
+WASSAT_LATIN_MAX_WIDTH = 6
+WASSAT_LATIN_BAD_WORDS = 7
 
 -> wassat_latin_miss
   { "recognized": false, "status": 0, "groups": 0, "constraints": 0,
-    "seeds": 0, "nodes": 0, "checks": 0, "model": [] }
+    "seeds": 0, "nodes": 0, "checks": 0, "width": 0, "model": [] }
 
-# The tuple index is a*16 + b*4 + c. Two 32-bit words avoid relying on the
-# sign bit of a boxed/native integer while keeping the hot membership test
-# branch-free apart from the word choice.
--> wassat_latin_bad(bad0, bad1, ci, tuple) (i64[] i64[] i64 i64) i64
-  if tuple < 32
-    (bad0[ci] & (1 << tuple)) == 0 ? 0 : 1
-  else
-    (bad1[ci] & (1 << (tuple - 32))) == 0 ? 0 : 1
+# The tuple index is a*w*w + b*w + c, packed WASSAT_LATIN_BAD_WORDS 32-bit
+# words per constraint (216 tuples at w=6). 32-bit words avoid relying on
+# the sign bit of a boxed/native integer.
+-> wassat_latin_bad(bad, ci, tuple) (i64[] i64 i64) i64
+  (bad[ci * WASSAT_LATIN_BAD_WORDS + (tuple >> 5)] & (1 << (tuple & 31))) == 0 ? 0 : 1
 
 # Close a structural known-domain set under ternary "two imply the third".
 # Incidence-queue closure touches each hyperedge endpoint once instead of
@@ -131,7 +132,7 @@ WASSAT_LATIN_HASH_CAP = 8192
   nseeds
 
 # Assign one seed value and drain the incident-constraint queue. Values are
-# 0=unassigned and 1..4=domain value. Along a branch each group is assigned
+# 0=unassigned and 1..w=domain value. Along a branch each group is assigned
 # once, so the assignment trail and total queue traffic are linearly bounded.
 #
 # meta: [0] trail size [1] DFS nodes [2] node cap [3] constraint checks
@@ -139,7 +140,7 @@ WASSAT_LATIN_HASH_CAP = 8192
 #       [7] constraint-check cap
 -> wassat_latin_propagate(values, scope0, scope1, scope2, funcs,
                           inc_off, inc, trail, queue, qstamp, meta,
-                          ngroups, ncon, group, value) (i8[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64) i64
+                          ngroups, ncon, group, value, width) (i8[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64) i64
   if values[group] != 0
     return values[group] == value ? 1 : 0
 
@@ -177,23 +178,23 @@ WASSAT_LATIN_HASH_CAP = 8192
     key = 0
     if va != 0 && vb != 0
       if vc != 0
-        want = funcs[(ci * 3 + 2) * 16 + (va - 1) * 4 + vb - 1]
+        want = funcs[(ci * 3 + 2) * width * width + (va - 1) * width + vb - 1]
         return 0 if want != vc
       else
         missing = 2
-        key = (va - 1) * 4 + vb - 1
+        key = (va - 1) * width + vb - 1
         target = gc
     elsif va != 0 && vc != 0
       missing = 1
-      key = (va - 1) * 4 + vc - 1
+      key = (va - 1) * width + vc - 1
       target = gb
     elsif vb != 0 && vc != 0
       missing = 0
-      key = (vb - 1) * 4 + vc - 1
+      key = (vb - 1) * width + vc - 1
       target = ga
     if target >= 0
-      want = funcs[(ci * 3 + missing) * 16 + key]
-      if want <= 0 || want > 4
+      want = funcs[(ci * 3 + missing) * width * width + key]
+      if want <= 0 || want > width
         meta[6] = 1
         return 0
       values[target] = want
@@ -213,7 +214,7 @@ WASSAT_LATIN_HASH_CAP = 8192
 # UNSAT, or 0 on the deterministic node cap / internal conservative fallback.
 -> wassat_latin_dfs(values, scope0, scope1, scope2, funcs,
                     inc_off, inc, seeds, solution, trail, queue, qstamp, meta,
-                    ngroups, ncon, nseeds, depth) (i8[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64 i64 i64 i64) i64
+                    ngroups, ncon, nseeds, depth, width) (i8[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64) i64
   meta[1] += 1
   if meta[1] > meta[2]
     meta[5] = 1
@@ -237,21 +238,21 @@ WASSAT_LATIN_HASH_CAP = 8192
     return wassat_latin_dfs(
       values, scope0, scope1, scope2, funcs,
       inc_off, inc, seeds, solution, trail, queue, qstamp, meta,
-      ngroups, ncon, nseeds, depth + 1
+      ngroups, ncon, nseeds, depth + 1, width
     )
 
   mark = meta[0]
   value = 1
-  while value <= 4
+  while value <= width
     if wassat_latin_propagate(
       values, scope0, scope1, scope2, funcs,
       inc_off, inc, trail, queue, qstamp, meta,
-      ngroups, ncon, group, value
+      ngroups, ncon, group, value, width
     ) == 1
       child = wassat_latin_dfs(
         values, scope0, scope1, scope2, funcs,
         inc_off, inc, seeds, solution, trail, queue, qstamp, meta,
-        ngroups, ncon, nseeds, depth + 1
+        ngroups, ncon, nseeds, depth + 1, width
       )
       return 1 if child == 1
       if child == 0
@@ -276,7 +277,7 @@ WASSAT_LATIN_HASH_CAP = 8192
   ncl = formula["flat_ncl"]
   return miss if nv < min_vars || nv > WASSAT_LATIN_MAX_VARS
   return miss if ncl < min_clauses || ncl > WASSAT_LATIN_MAX_CLAUSES
-  return miss unless nv % 4 == 0
+  width = 0
   return miss if node_cap < 1
 
   lits = formula["flat_lits"] ## i64[]
@@ -286,13 +287,14 @@ WASSAT_LATIN_HASH_CAP = 8192
   var_value = i64[nv + 1]
   ngroups = 0
 
-  # First pass: collect a disjoint partition of positive width-four domains
-  # while rejecting every syntax outside the two-clause grammar.
+  # First pass: collect a disjoint partition of positive width-w domains
+  # while rejecting every syntax outside the two-clause grammar. The width
+  # is set by the first positive clause and must be uniform thereafter.
   ci = 0
   while ci < ncl
     st = offs[ci]
     n = lens[ci]
-    positive = n == 4
+    positive = true
     negative = n == 3
     j = 0
     while j < n
@@ -302,9 +304,13 @@ WASSAT_LATIN_HASH_CAP = 8192
       j += 1
     return miss unless positive || negative
     if positive
+      if width == 0
+        return miss if n < WASSAT_LATIN_MIN_WIDTH || n > WASSAT_LATIN_MAX_WIDTH
+        width = n
+      return miss if n != width
       return miss if ngroups >= WASSAT_LATIN_MAX_GROUPS
       j = 0
-      while j < 4
+      while j < width
         v = lits[st + j]
         return miss if v < 1 || v > nv || var_group[v] != 0
         var_group[v] = ngroups + 1
@@ -312,7 +318,8 @@ WASSAT_LATIN_HASH_CAP = 8192
         j += 1
       ngroups += 1
     ci += 1
-  return miss unless ngroups * 4 == nv
+  return miss if width == 0
+  return miss unless ngroups * width == nv
   v = 1
   while v <= nv
     return miss if var_group[v] == 0
@@ -321,8 +328,7 @@ WASSAT_LATIN_HASH_CAP = 8192
   scope0 = i64[WASSAT_LATIN_MAX_CONSTRAINTS]
   scope1 = i64[WASSAT_LATIN_MAX_CONSTRAINTS]
   scope2 = i64[WASSAT_LATIN_MAX_CONSTRAINTS]
-  bad0 = i64[WASSAT_LATIN_MAX_CONSTRAINTS]
-  bad1 = i64[WASSAT_LATIN_MAX_CONSTRAINTS]
+  bad = i64[WASSAT_LATIN_MAX_CONSTRAINTS * WASSAT_LATIN_BAD_WORDS]
   bad_count = i64[WASSAT_LATIN_MAX_CONSTRAINTS]
   hash_key = i64[WASSAT_LATIN_HASH_CAP]
   hash_value = i64[WASSAT_LATIN_HASH_CAP]
@@ -332,7 +338,10 @@ WASSAT_LATIN_HASH_CAP = 8192
   # tuple in two packed words.
   ci = 0
   while ci < ncl
-    if lens[ci] == 3
+    # At width 3 the positive domain clauses are also ternary; the sign
+    # of the first literal (the first pass proved uniformity) separates
+    # domain rows from nogoods.
+    if lens[ci] == 3 && lits[offs[ci]] < 0
       st = offs[ci]
       x0 = 0 - lits[st]
       x1 = 0 - lits[st + 1]
@@ -380,47 +389,44 @@ WASSAT_LATIN_HASH_CAP = 8192
         scope2[ncon] = g2
         ncon += 1
       k = hash_value[slot] - 1
-      tuple = u0 * 16 + u1 * 4 + u2
+      tuple = u0 * width * width + u1 * width + u2
       bit = 1 << (tuple & 31)
-      if tuple < 32
-        return miss unless (bad0[k] & bit) == 0
-        bad0[k] = bad0[k] | bit
-      else
-        return miss unless (bad1[k] & bit) == 0
-        bad1[k] = bad1[k] | bit
+      bad_idx = k * WASSAT_LATIN_BAD_WORDS + (tuple >> 5)
+      return miss unless (bad[bad_idx] & bit) == 0
+      bad[bad_idx] = bad[bad_idx] | bit
       bad_count[k] += 1
-      return miss if bad_count[k] > 48
+      return miss if bad_count[k] > width * width * (width - 1)
     ci += 1
   return miss if ncon == 0
 
   # Complete every Latin lookup table. Each coordinate pair must have one and
-  # only one allowed completion; this also proves exactly 16 allowed tuples.
-  funcs = i8[ncon * 48]
+  # only one allowed completion; this also proves exactly w*w allowed tuples.
+  funcs = i8[ncon * 3 * width * width]
   k = 0
   while k < ncon
-    return miss unless bad_count[k] == 48
+    return miss unless bad_count[k] == width * width * (width - 1)
     missing = 0
     while missing < 3
       a = 0
-      while a < 4
+      while a < width
         b = 0
-        while b < 4
+        while b < width
           count = 0
           want = -1
           candidate = 0
-          while candidate < 4
+          while candidate < width
             if missing == 0
-              tuple = candidate * 16 + a * 4 + b
+              tuple = candidate * width * width + a * width + b
             elsif missing == 1
-              tuple = a * 16 + candidate * 4 + b
+              tuple = a * width * width + candidate * width + b
             else
-              tuple = a * 16 + b * 4 + candidate
-            if wassat_latin_bad(bad0, bad1, k, tuple) == 0
+              tuple = a * width * width + b * width + candidate
+            if wassat_latin_bad(bad, k, tuple) == 0
               count += 1
               want = candidate + 1
             candidate += 1
           return miss unless count == 1
-          funcs[(k * 3 + missing) * 16 + a * 4 + b] = want
+          funcs[(k * 3 + missing) * width * width + a * width + b] = want
           b += 1
         a += 1
       missing += 1
@@ -467,7 +473,7 @@ WASSAT_LATIN_HASH_CAP = 8192
   )
   recognized = { "recognized": true, "status": 0, "groups": ngroups,
     "constraints": ncon, "seeds": nseeds < 0 ? 0 : nseeds,
-    "nodes": 0, "checks": 0, "model": [] }
+    "nodes": 0, "checks": 0, "width": width, "model": [] }
   return recognized if nseeds < 0
 
   values = i8[ngroups]
@@ -481,7 +487,7 @@ WASSAT_LATIN_HASH_CAP = 8192
   status = wassat_latin_dfs(
     values, scope0, scope1, scope2, funcs,
     inc_off, inc, seeds, solution, trail, queue, qstamp, meta,
-    ngroups, ncon, nseeds, 0
+    ngroups, ncon, nseeds, 0, width
   )
   status = 0 if meta[5] != 0 || meta[6] != 0
   recognized["status"] = status

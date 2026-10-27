@@ -145,7 +145,41 @@ use ../../tungsten-wrat/lib/wrat
         i += 1
   model
 
-describe "Wassat exact four-value Latin CSP shortcut" ->
+# Width-w rendering of the same construction: value(c) = value(a) +
+# value(b) + k (mod w), which is Latin for every w.
+-> latin_w_render(width, ngroups, relations)
+  clauses = []
+  group = 0
+  while group < ngroups
+    row = []
+    value = 0
+    while value < width
+      row.push(group * width + value + 1)
+      value += 1
+    clauses.push(row)
+    group += 1
+  relations.each -> (relation)
+    a = 0
+    while a < width
+      b = 0
+      while b < width
+        c = 0
+        while c < width
+          unless c == (a + b + relation[3]) % width
+            clauses.push([
+              0 - (relation[0] * width + a + 1),
+              0 - (relation[1] * width + b + 1),
+              0 - (relation[2] * width + c + 1)
+            ])
+          c += 1
+        b += 1
+      a += 1
+  lines = []
+  clauses.each -> (clause)
+    lines.push(clause.join(" ") + " 0")
+  "p cnf [ngroups * width] [lines.size]\n" + lines.join("\n") + "\n"
+
+describe "Wassat exact Latin CSP shortcut" ->
   it "solves compact generated SAT and UNSAT cycles exactly" ->
     sat_text = latin_csp_text(false)
     sat = latin_csp_solve_text(sat_text)
@@ -255,7 +289,7 @@ describe "Wassat exact four-value Latin CSP shortcut" ->
       observed = read_file(output)
       expect(observed.include?("s SATISFIABLE")).to eq(true)
       expect(observed.include?(
-        "exact four-value Latin ternary CSP"
+        "exact 4-value Latin ternary CSP"
       )).to eq(true)
       model = latin_csp_cli_model(observed)
       expect(model.size).to eq(64)
@@ -273,7 +307,7 @@ describe "Wassat exact four-value Latin CSP shortcut" ->
       observed = read_file(output)
       expect(observed.include?("s UNSATISFIABLE")).to eq(true)
       expect(observed.include?(
-        "c mode: fast (exact four-value Latin ternary CSP)"
+        "c mode: fast (exact 4-value Latin ternary CSP)"
       )).to eq(true)
 
     it "uses the verified Latin model in proof mode and leaves no proof" ->
@@ -287,7 +321,7 @@ describe "Wassat exact four-value Latin CSP shortcut" ->
       expect(latin_csp_cli_exits(cmd, 10)).to eq(true)
       observed = read_file(output)
       expect(observed.include?(
-        "c mode: proof (exact four-value Latin ternary CSP)"
+        "c mode: proof (exact 4-value Latin ternary CSP)"
       )).to eq(true)
       expect(file?(proof)).to eq(false)
       model = latin_csp_cli_model(observed)
@@ -307,9 +341,42 @@ describe "Wassat exact four-value Latin CSP shortcut" ->
       observed = read_file(output)
       expect(observed.include?("s UNSATISFIABLE")).to eq(true)
       expect(observed.include?(
-        "exact four-value Latin ternary CSP"
+        "exact 4-value Latin ternary CSP"
       )).to eq(false)
       expect(file?(proof)).to eq(true)
       expect(wrat_verify(text, read_file(proof))["verified"]).to eq(true)
+
+  context "widths beyond four" ->
+    it "solves width 3 and refutes its offset variant" ->
+      sat = wassat_latin_csp_solve_limits(
+        wassat_parse_cnf_native(
+          latin_w_render(3, 6, latin_csp_relations(false))
+        ), WASSAT_LATIN_NODE_CAP, 0, 0
+      )
+      expect(sat["width"]).to eq(3)
+      expect(sat["status"]).to eq(1)
+      unsat = wassat_latin_csp_solve_limits(
+        wassat_parse_cnf_native(
+          latin_w_render(3, 6, latin_csp_relations(true))
+        ), WASSAT_LATIN_NODE_CAP, 0, 0
+      )
+      expect(unsat["status"]).to eq(-1)
+
+    it "solves width 5 and refutes its offset variant" ->
+      sat_text = latin_w_render(5, 6, latin_csp_relations(false))
+      sat = wassat_latin_csp_solve_limits(
+        wassat_parse_cnf_native(sat_text), WASSAT_LATIN_NODE_CAP, 0, 0
+      )
+      expect(sat["width"]).to eq(5)
+      expect(sat["status"]).to eq(1)
+      expect(wassat_model_satisfies?(
+        wassat_parse_cnf_native(sat_text), sat["model"]
+      )).to eq(true)
+      unsat = wassat_latin_csp_solve_limits(
+        wassat_parse_cnf_native(
+          latin_w_render(5, 6, latin_csp_relations(true))
+        ), WASSAT_LATIN_NODE_CAP, 0, 0
+      )
+      expect(unsat["status"]).to eq(-1)
 
 spec_summary

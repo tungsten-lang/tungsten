@@ -18,9 +18,13 @@ Every implementation comes with a number of core classes, see _[The Tungsten Cor
 3. [Semantics](04_semantics.md)
 4. [Object Model](05_object_model.md)
 5. [Floating-Point Math Modes](floating-point-math.md)
-6. Appendix
+6. [WValue Encoding](wvalue_encoding.md)
+7. [Hash Freezing](hash_freezing.md)
+8. [Unit Registry Format](unit_registry_format.md)
+9. Appendix
     A: [Units of measurement](appendix_units_of_measurement.md)
-    B: [Language inspiration](appendix_language_inspiration.md)
+    B: [Physical constants](appendix_physical_constants.md)
+    C: [Language inspiration](appendix_language_inspiration.md)
 
 [Home]:     https://tungsten-lang.org/
 [Docs]:     https://docs.tungsten-lang.org/2026.07.04/docs

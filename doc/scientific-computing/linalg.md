@@ -15,7 +15,7 @@ This is the numerical backend for [CP and Tucker decomposition](tensor-decomposi
 Dense Tensor is the matrix type. `.T` / `.H` / `.diag` / `Tensor.diag` are
 methods on that type, not extra classes — see [tensor-vs-array.md](tensor-vs-array.md).
 
-## Surface (`core/sci/linalg.w`)
+## Surface (`core/linalg.w`)
 
 | Op | Notes |
 |----|--------|

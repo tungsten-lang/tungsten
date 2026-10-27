@@ -28,6 +28,42 @@ set of hard-won compiler-performance lessons.
   and nine exact upper bounds without a pinned GF(2) comparator), the candidate 7×7
   rank-247 record, and exact tunnels into term-disjoint restart basins.
 
+### Compiler, Runtime & Bignum Engineering
+
+- **[bignum-engine.md](bignum-engine.md)** — how the C runtime's `WValue`
+  arbitrary-precision integer engine went from trailing GMP to winning 470+ of
+  485 benchmark cells against GMP 6.3's `mpz_*` API on Apple M5 Max.
+- **[bignum-multiply.md](bignum-multiply.md)** — building a fast arbitrary-precision
+  multiply natively in Tungsten (Goldilocks NTT + Karatsuba), taking modular
+  squarings from 118× to ~3× of GMP.
+- **[compiler-and-runtime-optimization-campaign.md](compiler-and-runtime-optimization-campaign.md)** —
+  profile-guided optimization across the C runtime, `core/`, and the self-hosted
+  WIRE compiler pipeline.
+- **[stdlib-and-runtime-performance-campaign.md](stdlib-and-runtime-performance-campaign.md)** —
+  engineering and cross-language benchmarks across JSON/CSV/Base64/UTF-8, regex,
+  radix sort, work-stealing channels, and linear algebra against C, Rust, Go, and Java.
+- **[slab-ast-design.md](slab-ast-design.md)** — replacing heap-allocated hash AST
+  nodes in the self-hosted compiler with a one-word-per-node arena-and-handle
+  Slab AST.
+- **[lto-target-features-mismatch.md](lto-target-features-mismatch.md)** — root-causing
+  an 18% LTO performance regression to a missing `target-features` attribute across
+  `-march=native` boundaries.
+
+### SIMD, Lexing & Apple Silicon Hardware
+
+- **[json-lexer-perf-ladder.md](json-lexer-perf-ladder.md)** — pushing a self-hosted
+  JSON lexer from 1.4 GB/s to 21 GB/s (2.57 billion tokens/sec) across 32 threads.
+- **[simd-classifier-from-scratch.md](simd-classifier-from-scratch.md)** — building a
+  4.7 GB/s simdjson-class structural classifier in 200 lines of C.
+- **[shrn-xtn-apple-silicon.md](shrn-xtn-apple-silicon.md)** — why NEON `shrn`/`xtn`
+  bitmap tail compression loses to vector-domain lane reduction on Apple Silicon.
+- **[lightning-1-7b-passing-mlx.md](lightning-1-7b-passing-mlx.md)** — taking pure-Tungsten
+  Lightning-1.7B NVFP4 decode from 0.71× to 1.16× MLX (240 tok/s).
+- **[metal4-matmul2d-on-m5-max.md](metal4-matmul2d-on-m5-max.md)** — wiring Metal 4's
+  cooperative-tensor `mpp::tensor_ops::matmul2d` into the runtime on M5 Max.
+- **[sme-sme2-on-apple-silicon.md](sme-sme2-on-apple-silicon.md)** — probing ARM
+  SME / SME2 and LUTI4 on Apple Silicon for quantized LLM inference.
+
 ## Project summary
 
 A flip-graph matrix-multiplication search (flips + reductions + plus-transitions,

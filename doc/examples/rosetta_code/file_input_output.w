@@ -1,9 +1,6 @@
-contents = File.read 'input.txt'
+# File input/output
 
-File.write 'output.txt', contents
-
-# OR
-
-File.copy 'input.txt', 'output.txt'
+contents = File.read("input.txt")
+File.write("output.txt", contents)
 
 ## expect skip filesystem side effects

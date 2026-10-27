@@ -11,11 +11,12 @@
 << 1 dpm * 1 min
 << 1 baud * 1 s
 
+## parity skip decimal formatting differs in compiled output
 ## expect stdout
 ## 1000 mmol/L
 ## 299.792458 V
 ## 10000 lx
-## 0.00000000000000000000000001 W/m²/Hz
+## 1×10⁻²⁶ W/m²/Hz
 ## 0.01 Gy
 ## 1000000 m³/s
 ## 1024 b

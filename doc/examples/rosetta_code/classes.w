@@ -17,7 +17,6 @@ p2 = Point(0, 0)
 << p1
 << "Distance: [p1.distance(p2)]"
 
-## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten classes.w`
 ## expect stdout
 ## (3, 4)
 ## Distance: 5

@@ -1,3 +1,5 @@
+# 100 doors (analytical)
+
 (1..10)/sq -> << "Door [i] is open"
 
 ## expect stdout

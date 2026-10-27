@@ -67,10 +67,9 @@ establish class-group completeness or a unit-group basis.
 `F2LinearSystemCertificate` is the reference finite certificate. It replays
 elementary row operations, validates canonical RREF, and independently checks
 the particular solution and kernel basis. `ExplicitSelmerIntersectionCertificate`
-binds producer dependencies to the exact supplied matrices but deliberately
-refuses to return a rank bound. Its columns do not yet carry a certified
-ambient square-class basis, so its name denotes an explicit constraint
-intersection rather than the true arithmetic Selmer group.
+binds producer dependencies to the exact supplied matrices; on its own it
+refuses to return a rank bound until composed with a certified ambient
+square-class basis and BPS comparison certificate (`descent_comparison.w`).
 
 ## Certified integral elliptic arithmetic
 
@@ -226,15 +225,17 @@ explicit descent:
     two-dimensional subspace of \(J[2]\); the named decomposition-group and
     local Kummer theorems therefore bound the local quotient by dimension
     two, which the disk span attains, certifying the complete \(p=3\) image;
-    the known rational divisor class still gives only a one-dimensional
-    lower-bound subspace at 2;
-17. intersect the future explicitly labeled theta-module and local-image
-    conditions with that replay-certified F2 kernel.
+    at \(p=2\), recursive dyadic cells and Hensel-disk BPS evaluation
+    (`local_theta.w`) span the complete four-dimensional Kummer image;
+17. intersect the certified theta-module and local-image conditions with that
+    replay-certified F2 kernel (`descent_comparison.w`), proving
+    \(\dim J(\mathbb Q)[2] = \dim K = 1\) with injective localization at 2 and 3,
+    \(\dim \mathrm{Sel}_2(J) \le 2\), and \(\mathrm{rank}\, J(\mathbb Q) \le 1\).
 
 Step 7 is the BPS true setup. Its certificate checks the component polynomial
 identities exactly and records the section 6.5 fake-to-true comparison and the
-divisor-of-a-ratio identity as named trusted theorem imports. It is not yet a
-completed Selmer computation. The remaining path is:
+divisor-of-a-ratio identity as named trusted theorem imports. The full
+dependency chain composed by the shell-width replay is:
 
 ```text
 certified finite and archimedean places for S = {2, 3, 13}
@@ -246,15 +247,14 @@ certified finite and archimedean places for S = {2, 3, 13}
   -> certified Sp6(F2) actions and primewise Frobenius cycle constraints
   -> certified p=5 splitting-field incidence labeling and Frobenius element
   -> certified characteristic-zero subdegrees and global subgroup up to conjugacy
-  -> common shell-width root labeling and comparison kernel
   -> certified odd and dyadic ambient localization and good-reduction residue disks
   -> certified complete p=5 good-reduction BPS local image
   -> certified regular cuspidal model and complete p=13 BPS local image
   -> certified recursive p=3 cells and complete local BPS image
-  -> recursive dyadic cells and a certified Jacobian local image at 2
-  -> explicit Selmer upper bound
-  -> BPS comparison and rational J[2]
-  -> Mordell-Weil rank upper bound
+  -> certified recursive dyadic cells and complete local BPS image at 2
+  -> certified explicit Selmer intersection (dimension 2)
+  -> certified BPS comparison and rational J[2] (dim J(Q)[2] = dim K = 1)
+  -> certified Mordell-Weil rank upper bound (rank J(Q) <= 1)
 ```
 
 An earlier implementation divided the degree-27 true target by the rank-four
@@ -341,10 +341,11 @@ different:
    generators, relations, cusp boundaries, and cuspidal dimensions are also
    implemented; exact prime Hecke operators, degeneracy maps, old subspaces,
    and canonical new Hecke quotients have replay certificates and explicit
-   Heilbronn/Atkin--Lehner--Li theorem imports; one rational weight-two
-   eigenpacket can be recovered with exact Euler-recurrence q-coefficients;
-   composite Hecke indices, multiple-packet splitting, and non-rational
-   eigenform coefficient fields remain);
+   Heilbronn/Atkin--Lehner--Li theorem imports; composite \(T_n/U_{p^r}\)
+   recurrences, deterministic simultaneous newform-packet splitting over
+   \(\mathbb Q\) or exact number fields, and normalized packet q-expansions are
+   implemented; higher-weight symbols, nebentypus characters, and embeddings
+   between independently presented coefficient fields remain);
 5. local/global Galois cohomology, Selmer and dual Selmer groups,
    Poitou--Tate duality, and deformation rings;
 6. a kernel-checked Ribet level-lowering theorem;

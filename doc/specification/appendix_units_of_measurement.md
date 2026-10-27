@@ -56,10 +56,6 @@ standard, or calibration require that context explicitly.
 
 To do:
 
-    Tetration: 2↑↑1000 = 2^2^2^2....1000 times (or hyper-4, repeated exponentiation)
-    Easily creates numbers greater than the 2^80 atoms in the universe.
-    What is the largest number representable by 2^80 bits? 2^2^80 - 1
-
     https://en.wikipedia.org/wiki/List_of_humorous_units_of_measurement
 
     https://www.nist.gov/pml/time-and-frequency-division/popular-links/time-frequency-z/time-and-frequency-z-f#:~:text=Femtosecond%20(fs),(10%2D15%20s).
@@ -422,7 +418,7 @@ The following units are defined as built-ins:
 
     # SI photometry units
     Luminous intensity (Iᵥ)
-      C: Candela # lm/sr
+      cd: Candela # lm/sr
 
     Luminance (Lᵥ)
       cd/m²: Candela per square meter (sometimes called nits, 1 nit = 1 cd/m²)
@@ -452,7 +448,7 @@ The following units are defined as built-ins:
       lm⋅s⋅m⁻³: lumen second per metre³
 
     Luminous efficacy (η)
-      lm/W: lumer per Watt
+      lm/W: lumen per Watt
 
     Luminous efficiency (V)
 
@@ -524,7 +520,7 @@ The following units are defined as built-ins:
     Committed dose
       Sv: sievert
 
-    Raio of measurements of physical field and power quantities
+    Ratio of measurements of physical field and power quantities
       Np: neper
 
     Logarithmic ratio
@@ -537,7 +533,7 @@ The following units are defined as built-ins:
       ‴: ligne
 
     Solid angle
-      sr: stredian
+      sr: steradian
 
     Plane angle
       rad: radian

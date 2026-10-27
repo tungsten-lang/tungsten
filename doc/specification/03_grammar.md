@@ -154,7 +154,9 @@ Generic traits may carry type parameters and `with T in (…)` constraints, matc
     MethodName  = Identifier | OperatorName .
     Arity       = "/" ( Digit { Digit } | "*" | "&" ) .
     ParamList   = "(" [ Param { "," Param } ] ")" .
-    Param       = [ "@" ] Identifier [ ":" TypeName ] [ "=" Expression ]
+    Param       = [ "@" ] Identifier [ "=" Expression ]
+                | Identifier ":" [ Expression ]
+                | "**" Identifier
                 | "*" Identifier
                 | "&" [ Identifier ]
                 .

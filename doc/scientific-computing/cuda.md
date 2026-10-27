@@ -12,7 +12,7 @@ bin/tungsten compile kernels.w
 ## Host API (`core/cuda.w`)
 
 ```
-use core/sci/cuda
+use core/cuda
 << CUDA.available?          # 0 without bridge
 << CUDA.device_count
 # CUDA.malloc / memcpy_h2d / memcpy_d2h / synchronize / free

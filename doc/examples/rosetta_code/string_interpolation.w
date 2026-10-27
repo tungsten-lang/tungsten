@@ -1,7 +1,8 @@
+# String interpolation (included)
+
 size = "little"
 
 << "Mary had a [size] lamb."
-
 << "Mary had a %s lamb." % size
 
 ## expect stdout

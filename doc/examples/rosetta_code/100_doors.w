@@ -1,12 +1,19 @@
-# 100 Doors
+# 100 doors
 
-doors = bool[100]
+doors = []
+(0...100).each -> (_)
+  doors.push(false)
 
-1..100 -> pass.prev...100 .step(pass) -> doors.flip(door_idx)
+(1..100).each -> (pass)
+  door = pass - 1
+  while door < 100
+    doors[door] = !doors[door]
+    door += pass
 
-0..99 -> << "Door [i + 1] is open" if doors[i]
+(0...100).each -> (i)
+  if doors[i]
+    << "Door [i + 1] is open"
 
-## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten 100_doors.w`
 ## expect stdout
 ## Door 1 is open
 ## Door 4 is open

@@ -1,6 +1,8 @@
 # Amicable pairs
 
 -> sum_divisors(n)
+  if n < 2
+    return 0
   sum = 1
   i = 2
   while i * i <= n
@@ -11,14 +13,17 @@
     i += 1
   sum
 
-n = 2
-while n < 20000
-  m = sum_divisors(n)
-  if m > n and sum_divisors(m) == n
-    << "[n] and [m]"
-  n += 1
+-> find_amicable(limit)
+  n = 2
+  while n < limit
+    m = sum_divisors(n)
+    if m > n && m < limit
+      if sum_divisors(m) == n
+        << "[n] and [m]"
+    n += 1
 
-## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten amicable_pairs.w`
+find_amicable(20000)
+
 ## expect timeout 20
 ## expect stdout
 ## 220 and 284

@@ -1,4 +1,4 @@
-# Collatz conjecture / Hailstone sequence
+# Hailstone sequence / Collatz conjecture
 
 -> collatz(n)
   seq = [n]
@@ -11,12 +11,11 @@
   seq
 
 seq = collatz(27)
-puts "Collatz(27): [seq.size] steps"
-puts "First 10: [seq.first(10)]"
-puts "Last 10:  [seq.last(10)]"
+<< "Collatz(27): [seq.size] elements"
+<< "First 4: [seq.slice(0, 4)]"
+<< "Last 4:  [seq.slice(seq.size - 4, 4)]"
 
-## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten collatz.w`
 ## expect stdout
-## Collatz(27): 112 steps
-## First 10: 27
-## Last 10:  1
+## Collatz(27): 112 elements
+## First 4: [27, 82, 41, 124]
+## Last 4:  [8, 4, 2, 1]

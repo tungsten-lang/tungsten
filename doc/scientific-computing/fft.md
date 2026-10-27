@@ -5,7 +5,7 @@
 Radix-2 iterative Cooley–Tukey on split real/imag arrays:
 
 ```
-use core/sci/fft
+use core/fft
 re = [~1.0, ~0.0, ~0.0, ~0.0, ~0.0, ~0.0, ~0.0, ~0.0]
 im = [~0.0, ~0.0, ~0.0, ~0.0, ~0.0, ~0.0, ~0.0, ~0.0]
 ft = FFT.fft(re, im)     # [re_out, im_out]

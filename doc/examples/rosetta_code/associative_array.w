@@ -1,4 +1,4 @@
-# Associative array / Creation
+# Associative array / Creation and iteration
 
 colors = {
   red: "#FF0000",
@@ -10,15 +10,13 @@ colors = {
 << colors[:green]
 << colors[:blue]
 
-# Iteration
-colors.each -> (key, value)
-  << "[key] => [value]"
+[:red, :green, :blue].each -> (key)
+  << "[key] => [colors[key]]"
 
-## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten associative_array.w`
 ## expect stdout
 ## #FF0000
 ## #00FF00
 ## #0000FF
-## green => #00FF00
 ## red => #FF0000
+## green => #00FF00
 ## blue => #0000FF

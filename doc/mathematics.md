@@ -266,9 +266,10 @@ certifies the stabilizer subdegrees
 \(1,1,2,2,2,2,3,3,6,6\). Together with the global orbit partition this
 identifies, up to conjugacy, subgroup-table class 693 of order 36; the finite
 groups and incidence actions are replayed, while completeness of GAP's
-1,369-class subgroup table is an explicit trusted import. Missing links are
-a common characteristic-zero labeling, the local image at 2, the BPS
-comparison kernel and rational \(J[2]\), and the final Selmer/rank bound.
+1,369-class subgroup table is an explicit trusted import. Combined with the
+local images at 2, 3, and 13 and the BPS comparison kernel (`local_theta.w`,
+`descent_comparison.w`), the monolithic shell-width replay certifies
+\(\dim \mathrm{Sel}_2(J) \le 2\) and \(\mathrm{rank}\, J(\mathbb Q) \le 1\).
 
 The local-field foundation is now executable but should not be confused with
 that missing local image. Tungsten computes exact rational square classes in
@@ -305,10 +306,10 @@ All nine reverse-lift to `Sp6(F2)` actions with a two-dimensional fixed
 subspace. After the explicitly named decomposition-group and local Kummer
 theorems, this proves that the disk span is the complete local image.
 
-The remaining local BPS step is \(p=2\). Its special fiber is
-\((S+Z)^4\) and has no smooth point, so it needs the recursive dyadic cell
-tree, dyadic function evaluation through zeros and poles, and an independent
-local-dimension certificate.
+At \(p=2\), where the special fiber is \((S+Z)^4\) and has no smooth point,
+recursive dyadic cells (`local_theta.w`) resolve Hensel disks whose BPS
+evaluations span the complete four-dimensional Kummer image, matching the
+independently certified local dimension.
 
 The finite reference theta module itself is now present: it constructs the 28
 odd quadratic refinements of the symplectic form on \(\mathbb F_2^6\),
@@ -316,9 +317,10 @@ exhausts the 315 syzygetic quadruples, and replay-checks the canonical module
 dimensions \(0,1,7,21,27,28\). It also verifies exact symplectic generators,
 their complete incidence-preserving permutations, finite action orbits, and
 primewise Frobenius cycle constraints. The shell-width prime-5 fiber has a
-complete arithmetic incidence labeling, and exact characteristic-zero
-subdegrees now determine the global subgroup up to conjugacy. What remains is
-an explicit compatible root labeling and the Jacobian/descent image at 2.
+complete arithmetic incidence labeling, exact characteristic-zero
+subdegrees determine the global subgroup up to conjugacy, and theta-module
+comparison (`descent_comparison.w`) proves \(\dim J(\mathbb Q)[2] = \dim K = 1\)
+with injective localization at both 2 and 3.
 
 ## Fermat and modularity
 

@@ -1,3 +1,5 @@
+# String concatenation
+
 s = "hello"
 
 << "[s] template"          # => hello template

@@ -44,6 +44,32 @@ describe "Wassat exact conflict-cover shortcut" ->
     expect(result["recognized"]).to eq(true)
     expect(result["status"]).to eq(-1)
 
+  it "solves exact cover by complementary placement pairs (DLX shape)" ->
+    # Placements are the six 2-subsets of {a,b,c,d}; rows are elements,
+    # conflicts join placements sharing an element. An independent set
+    # hitting every row is exactly an exact cover (two complementary
+    # placements), which is what Algorithm X searches for.
+    conflicts = []
+    a = 1
+    while a <= 6
+      b = a + 1
+      while b <= 6
+        complementary = (a == 1 && b == 2) || (a == 3 && b == 4) || (a == 5 && b == 6)
+        conflicts.push([a, b]) unless complementary
+        b += 1
+      a += 1
+    f = covering_formula(
+      [[1, 3, 5], [1, 4, 6], [2, 3, 6], [2, 4, 5]],
+      conflicts, 6
+    )
+    result = wassat_covering_solve(f)
+    expect(result["status"]).to eq(1)
+    expect(wassat_model_satisfies?(f, result["model"])).to eq(true)
+    chosen = 0
+    result["model"].each -> (lit)
+      chosen += 1 if lit > 0
+    expect(chosen).to eq(2)
+
   it "returns unknown rather than guessing when its node cap is exhausted" ->
     f = covering_formula(
       [[1, 2, 3], [2, 3, 4]],

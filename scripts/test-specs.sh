@@ -383,7 +383,7 @@ run_wassat_spec() {
   # native-parser-shaped test double in cnf.w; their end-to-end CLI examples
   # still invoke the separately compiled Wassat binary.
   case "$name" in
-    solver_spec|portfolio_spec|ternary_affine_spec|covering_spec|directed_kernel_spec|latin_csp_spec|hantzsche_wendt_spec|knight_tour_spec)
+    solver_spec|portfolio_spec|ternary_affine_spec|covering_spec|directed_kernel_spec|latin_csp_spec|hantzsche_wendt_spec|knight_tour_spec|schooltt_spec|block_csp_spec|arithmetic_coloring_spec|circuit_spec)
       compile_wassat_spec=1 ;;
     *)
       compile_wassat_spec=0 ;;

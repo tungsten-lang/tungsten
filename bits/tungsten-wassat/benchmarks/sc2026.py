@@ -370,6 +370,22 @@ def cmd_verify(args) -> None:
 # run
 
 
+def lane_of(text: str) -> str:
+    """Which solver lane produced the verdict, for per-lane accounting.
+
+    Specialist lanes print an explicit `c lane: <name>` line; older lanes
+    name themselves only in the `c mode: ... (<lane>)` parenthetical, so
+    fall back to that text. Generic search prints no lane marker.
+    """
+    mode_lane = ""
+    for line in text.splitlines():
+        if line.startswith("c lane: "):
+            return line[len("c lane: "):].strip()
+        if line.startswith("c mode: ") and "(" in line and line.endswith(")"):
+            mode_lane = line[line.index("(") + 1:-1].strip()
+    return mode_lane
+
+
 def competition_output(text: str) -> tuple[str, dict[int, bool], str | None]:
     """Parse strict competition output and return verdict, model, error."""
     statuses: list[str] = []
@@ -498,7 +514,7 @@ def cmd_run(args) -> None:
     print(f"#   machine      shared developer laptop (official: NHR competition node)")
     selection = "complete published track" if len(files) == len(published()) else "developer subset"
     print(f"#   selection    {selection}")
-    print("solverid,instanceid,runtime,status,score,vresult")
+    print("solverid,instanceid,runtime,status,score,vresult,lane")
     writer = csv.writer(sys.stdout)
     for path in files:
         entry = index.get(path.stem, {})
@@ -510,6 +526,7 @@ def cmd_run(args) -> None:
             code, out = proc.returncode, proc.stdout
         except subprocess.TimeoutExpired:
             elapsed, code, out = args.timeout, None, ""
+        lane = lane_of(out)
         if code is None:
             status, vresult = "solver-timeout", ""
         else:
@@ -553,7 +570,7 @@ def cmd_run(args) -> None:
         # PAR-2 charges twice the timeout to every unsolved or invalid row.
         score = elapsed if status in ("sat", "unsat") else 2 * args.timeout
         writer.writerow([args.solverid, entry.get("hash", path.stem), f"{elapsed:.2f}", status,
-                         f"{score:.2f}", vresult])
+                         f"{score:.2f}", vresult, lane])
         sys.stdout.flush()
 
 
@@ -593,6 +610,15 @@ def cmd_compare(args) -> None:
           f"treat as an ordering, not a ratio.")
     print(f"ahead of the published field best on {faster}, behind on {slower}, "
           f"no published row for {missing}")
+    lanes = {}
+    for r in mine:
+        if r["status"] in ("sat", "unsat"):
+            lane = r.get("lane") or "(generic)"
+            lanes[lane] = lanes.get(lane, 0) + 1
+    if lanes:
+        print("\nsolved rows by lane:")
+        for lane, count in sorted(lanes.items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"  {lane:40s} {count}")
 
 
 def cmd_select(args) -> None:

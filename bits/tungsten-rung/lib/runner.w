@@ -1,7 +1,8 @@
 # rung — running model calls: timeouts, retries, guards and concurrency.
 #
 # A call is a Hash (see rung_new_call). rung_run_calls runs a batch of them
-# to completion: each provider runs at most its `concurrency` calls at once,
+# to completion: each provider runs at most its `concurrency` calls at once
+# (machine-wide for a shared provider such as ollama),
 # a call past its timeout gets TERM and, 10 s later, KILL (to its whole
 # process group), and a failed call is retried after `retry_wait` seconds up
 # to `retries` times unless the failure cannot heal by waiting (not signed
@@ -56,6 +57,7 @@ RUNG_RT = {"running" => [], "quiet" => false}
     "started" => 0,
     "killed_at" => nil,
     "timed_out" => false,
+    "slot" => nil,
     "notes" => []
   }
   call
@@ -192,6 +194,7 @@ RUNG_LIMIT_ANSWER_WORDS = ["rate limit", "usage limit", "too many requests", "hi
   rung_json_write(rung_call_meta_path(call), meta)
 
 -> rung_finish_attempt(call, code, now)
+  rung_release_slot(call)
   call["exit"] = code
   call["ms"] = call["ms"] + (now - call["started"])
   call["process"] = nil
@@ -210,6 +213,49 @@ RUNG_LIMIT_ANSWER_WORDS = ["rate limit", "usage limit", "too many requests", "hi
   call["status"] = "failed"
   rung_write_call_meta(call)
   "done"
+
+# ---- machine-wide slots for shared providers ------------------------------------------
+#
+# A shared provider (ollama by default: its cap is an account limit) counts
+# calls across every rung process on the machine. Each running call holds a
+# slot directory, ~/.cache/rung/slots/<provider>.<i> (or $RUNG_SLOTS/...):
+# mkdir is atomic, the owner file names the holding pid, and a slot whose
+# owner is gone is reclaimed.
+
+-> rung_slot_root
+  env = Env.get("RUNG_SLOTS")
+  return env if !rung_blank?(env)
+  rung_home + "/.cache/rung/slots"
+
+-> rung_try_mkdir(dir)
+  Process.spawn(["/bin/mkdir", dir]).wait == 0
+
+-> rung_take_slot(provider, cap, label)
+  root = rung_slot_root
+  rung_mkdir(root)
+  i = 1
+  while i <= cap
+    dir = root + "/" + rung_slug(provider) + "." + i.to_s
+    got = rung_try_mkdir(dir)
+    if !got
+      owner = rung_read(dir + "/owner")
+      if owner != nil
+        pid = rung_first_word(owner)
+        if !rung_pid_alive?(pid)
+          rung_rm_rf(dir)
+          got = rung_try_mkdir(dir)
+    if got
+      rung_write(dir + "/owner", rung_my_pid + " " + label + "\n")
+      return dir
+    i += 1
+  nil
+
+-> rung_release_slot(call)
+  slot = call["slot"]
+  if slot != nil
+    rung_rm_rf(slot)
+    call["slot"] = nil
+  nil
 
 -> rung_active_for(running, provider)
   n = 0
@@ -237,6 +283,7 @@ RUNG_LIMIT_ANSWER_WORDS = ["rate limit", "usage limit", "too many requests", "hi
       p.kill(9)
       p.wait
     c["process"] = nil
+    rung_release_slot(c)
   nil
 
 -> rung_interrupted?
@@ -262,9 +309,21 @@ RUNG_LIMIT_ANSWER_WORDS = ["rate limit", "usage limit", "too many requests", "hi
     still = []
     pending.each -> (c)
       cap = c["entry"]["concurrency"]
-      if c["not_before"] <= now && rung_active_for(running, c["entry"]["provider"]) < cap
+      prov = c["entry"]["provider"]
+      ready = c["not_before"] <= now && rung_active_for(running, prov) < cap
+      if ready && c["entry"]["shared"] == true
+        c["slot"] = rung_take_slot(prov, cap, c["label"])
+        if c["slot"] == nil
+          ready = false
+          c["not_before"] = now + 1000
+          if c["waiting"] != true
+            rung_say("    " + c["label"] + ": waiting for a free " + prov + " slot (" + cap.to_s + " at once, machine-wide)")
+            c["waiting"] = true
+      if ready
+        c["waiting"] = false
         rung_start_attempt(c)
         if c["status"] == "failed"
+          rung_release_slot(c)
           rung_write_call_meta(c)
           rung_say("    " + c["label"] + ": " + c["reason"])
         else

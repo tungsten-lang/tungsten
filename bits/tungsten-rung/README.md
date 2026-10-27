@@ -108,6 +108,7 @@ check = 'llm models'               # exit 0 means "signed in" for rung models
 
 [providers.ollama]
 concurrency = 3                    # at most three ollama calls at once
+shared = true                      # ... counted across every rung on the machine
 ```
 
 The placeholders are `{prompt_file}`, `{workdir}`, `{answer_file}`, `{model}` (an
@@ -123,6 +124,12 @@ members answer the same state at once, and each provider caps how many of its
 calls run together: 3 for `ollama` and 1 for everything else, set with
 `[providers.<name>] concurrency`. Calls from different providers in one group
 always overlap. Every call keeps its own timeout, retries and guard.
+
+The ollama cap is an account limit, so ollama is `shared`: its cap counts calls
+from every rung process on the machine, not just this run. Each running call
+holds a slot directory, `~/.cache/rung/slots/ollama.<i>` (or `$RUNG_SLOTS`). A
+call that finds no free slot waits, and a slot whose owning process has died
+is reclaimed. Other providers count per run unless you set `shared = true`.
 
 The integrator then merges the whole group in one call. It sees every answer
 side by side, keeps what is better, and names the contributors on its

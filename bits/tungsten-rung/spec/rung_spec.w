@@ -92,6 +92,13 @@ FAKE_REGISTRY = <<~EOT
   [models."fake:*"]
   command = "sleep 1; printf 'IMPROVE by fake:%s\\n' {model}"
   provider = "fake"
+
+  [providers.share]
+  concurrency = 2
+  shared = true
+
+  [models."share:*"]
+  command = "sleep 1; printf 'IMPROVE by share:%s\\n' {model}"
 EOT
 
 rung_write(SPEC_DIR + "/fake_integrator.sh", FAKE_INTEGRATOR)
@@ -207,6 +214,8 @@ describe "rung registry" ->
     expect(rung_resolve_model(reg, "grok")["command"].index("--permission-mode dontAsk --no-subagents") != nil).to eq(true)
     expect(rung_resolve_model(reg, "muse")["command"].index("--workspace {workdir}") != nil).to eq(true)
     expect(rung_resolve_model(reg, "codex")["concurrency"]).to eq(1)
+    expect(rung_resolve_model(reg, "codex")["shared"]).to eq(false)
+    expect(rung_resolve_model(reg, "ollama:glm-5.3")["shared"]).to eq(true)
 
   it "merges a user file over the built-ins key by key" ->
     reg = rung_builtin_registry
@@ -406,6 +415,24 @@ describe "rung ladders" ->
     # three one-second calls, two at a time: about two seconds, not one or three
     expect(g["ms"] >= 1900).to eq(true)
     expect(g["ms"] < 3300).to eq(true)
+
+  it "counts a shared provider's cap across processes and reclaims dead slots" ->
+    slots = SPEC_DIR + "/slots"
+    Env.set("RUNG_SLOTS", slots)
+    # slot 1 is held by a live process (this one, outside the run), slot 2 by a dead pid
+    rung_write(slots + "/share.1/owner", rung_my_pid + " another rung\n")
+    rung_write(slots + "/share.2/owner", "999999 a crashed rung\n")
+    p = spec_prompt("shared.md", "---\nmodels: share:a | share:b | share:c\nmax_rounds: 1\n---\nTask six.\n")
+    out = SPEC_DIR + "/run-shared"
+    expect(spec_run([p, "--out", out])).to eq(0)
+    g = spec_step(out, "r01-s01-share-a+share-b+share-c")
+    expect(g["answers"]).to eq(3)
+    # one free slot machine-wide: the three one-second calls ran one at a time
+    expect(g["ms"] >= 2900).to eq(true)
+    expect(File.exist?(slots + "/share.1/owner")).to eq(true)
+    expect(File.exist?(slots + "/share.2")).to eq(false)
+    expect(rung_json_read(out + "/rung.json")["entries"]["share:a"]["shared"]).to eq(true)
+    Env.set("RUNG_SLOTS", "")
 
   it "gives each call read-only copies of the staged files" ->
     d = SPEC_DIR + "/stagecase"

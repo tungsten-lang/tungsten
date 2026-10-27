@@ -20,7 +20,8 @@
 #               name has none (glm-5.3 -> glm-5.3:cloud)
 #
 # [providers.<name>] concurrency = N caps how many calls of one provider run
-# at once (default 3 for ollama, 1 for everything else).
+# at once (default 3 for ollama, 1 for everything else); shared = true makes
+# that cap machine-wide across rung processes (default for ollama).
 
 RUNG_DEFAULT_GUARD = "~/math/openai/tools/guard.sh"
 
@@ -72,7 +73,7 @@ RUNG_DEFAULT_GUARD = "~/math/openai/tools/guard.sh"
       "stage_max_files" => 200,
       "stage_max_bytes" => 8000000
     },
-    "providers" => {"ollama" => {"concurrency" => 3}},
+    "providers" => {"ollama" => {"concurrency" => 3, "shared" => true}},
     "models" => models
   }
   reg
@@ -188,6 +189,7 @@ RUNG_DEFAULT_GUARD = "~/math/openai/tools/guard.sh"
     "timeout" => rung_int(timeout, "timeout of [name]"),
     "provider" => provider,
     "concurrency" => rung_provider_cap(reg, provider),
+    "shared" => rung_provider_shared?(reg, provider),
     "check" => entry["check"] == nil ? "" : entry["check"],
     "bin" => bin,
     "model" => model_arg,
@@ -201,6 +203,13 @@ RUNG_DEFAULT_GUARD = "~/math/openai/tools/guard.sh"
     n = rung_int(p["concurrency"], "concurrency of provider [provider]")
     return n < 1 ? 1 : n
   provider == "ollama" ? 3 : 1
+
+# A shared provider's cap counts calls across every rung on the machine
+# (an account limit, like ollama's); otherwise it counts within one run.
+-> rung_provider_shared?(reg, provider)
+  p = reg["providers"] == nil ? nil : reg["providers"][provider]
+  return false if p == nil || p["shared"] == nil
+  p["shared"] == true
 
 -> rung_first_word(cmd)
   t = cmd.strip
@@ -264,7 +273,7 @@ RUNG_DEFAULT_GUARD = "~/math/openai/tools/guard.sh"
   out = out + "# Placeholders: {prompt_file} {workdir} {answer_file} {model} {timeout}\n\n"
   out = out + rung_toml_table("defaults", reg["defaults"], ["models", "integrator", "timeout", "retries", "retry_wait", "max_rounds", "guard", "guard_mem_mb", "stage_max_files", "stage_max_bytes"]) + "\n"
   rung_sorted(reg["providers"].keys).each -> (p)
-    out = out + rung_toml_table("providers." + rung_toml_key(p), reg["providers"][p], ["concurrency"]) + "\n"
+    out = out + rung_toml_table("providers." + rung_toml_key(p), reg["providers"][p], ["concurrency", "shared"]) + "\n"
   rung_model_names(reg).each -> (m)
     out = out + rung_toml_table("models." + rung_toml_key(m), reg["models"][m], ["command", "answer", "timeout", "provider", "default_tag", "check", "bin", "guard_mem_mb"]) + "\n"
   out

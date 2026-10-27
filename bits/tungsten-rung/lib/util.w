@@ -262,6 +262,20 @@ RUNG_VERSION = "0.1.0"
 -> rung_stamp_compact
   OS.capture("/bin/date '+%Y%m%d-%H%M%S'").strip
 
+# ---- processes -----------------------------------------------------------------------
+
+RUNG_PID = {"pid" => ""}
+
+# This process's pid: the parent of the shell OS.capture starts.
+-> rung_my_pid
+  if RUNG_PID["pid"] == ""
+    RUNG_PID["pid"] = OS.capture("echo $PPID").strip
+  RUNG_PID["pid"]
+
+-> rung_pid_alive?(pid)
+  return false if rung_blank?(pid)
+  Process.spawn(["/bin/sh", "-c", "kill -0 \"$1\" 2>/dev/null", "sh", pid.to_s]).wait == 0
+
 # ---- JSON ---------------------------------------------------------------------------
 
 -> rung_json_read(p)

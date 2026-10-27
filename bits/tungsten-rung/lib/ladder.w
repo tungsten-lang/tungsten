@@ -292,13 +292,6 @@
 
 # ---- the loop ----------------------------------------------------------------------------
 
--> rung_my_pid
-  OS.capture("echo $PPID").strip
-
--> rung_pid_alive?(pid)
-  return false if rung_blank?(pid)
-  Process.spawn(["/bin/sh", "-c", "kill -0 \"$1\" 2>/dev/null", "sh", pid.to_s]).wait == 0
-
 -> rung_take_lock(run_dir)
   lock = rung_json_read(run_dir + "/lock.json")
   me = rung_my_pid

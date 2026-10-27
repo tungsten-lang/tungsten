@@ -1,0 +1,5 @@
+*.wc
+*.ll
+*.sidemap
+*.dSYM/
+bin/rung

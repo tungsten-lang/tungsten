@@ -9,6 +9,15 @@
 -> receiver_static_type(ctx, recv_node)
   recv_type = infer_type(recv_node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
   if recv_type == nil && recv_node != nil && ast_kind(recv_node) == :var
+    # Unknown is still a local type: lower_var resolves slots, bindings and
+    # parameters before module globals. Borrowing a same-named global's
+    # type here can turn a local array's .each into integer range iteration.
+    name = recv_node.name
+    if ctx[:func][:var_slots][name] != nil || ctx[:bindings][name] != nil
+      return nil
+    params = ctx[:func][:params]
+    if params != nil && params.include?(name)
+      return nil
     if ctx[:mod][:top_level_static_types] != nil
       recv_type = ctx[:mod][:top_level_static_types][recv_node.name]
     if recv_type == nil && ctx[:mod][:top_level_var_types] != nil

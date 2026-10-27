@@ -17,7 +17,7 @@ RUNG_KILL_GRACE_MS = 10000
 
 # Process-wide state: the calls running now (killed on Ctrl-C or error)
 # and whether progress lines are printed.
-RUNG_RT = {"running" => [], "quiet" => false}
+RUNG_RT = {"running" => [], "quiet" => false, "exhausted" => {}}
 
 -> rung_say(s)
   return nil if RUNG_RT["quiet"]
@@ -134,12 +134,58 @@ RUNG_RT = {"running" => [], "quiet" => false}
     return true if text.index(x) != nil
   false
 
-RUNG_SIGNIN_WORDS = ["not signed in", "not logged in", "please log in", "please sign in", "login required", "unauthorized", "invalid api key", "authentication failed"]
-RUNG_LIMIT_WORDS = ["rate limit", "rate-limit", "ratelimit", "usage limit", "too many requests", "quota", "resource_exhausted", "overloaded", "429"]
+# Failure classes, each reported with the CLI's own line as evidence:
+#   usage limit   a quota window (weekly, daily, session, credits): waiting a
+#                 minute cannot help, so it is not retried, and the model is
+#                 skipped for the rest of this run
+#   rate limited  a transient 429 / too many requests / overloaded: retried
+#   model unavailable  retired or unknown: not retried, skipped for the run
+#   not signed in not retried
+RUNG_SIGNIN_WORDS = ["not signed in", "not logged in", "please log in", "please sign in", "please run /login", "login required", "unauthorized", "invalid api key", "authentication failed"]
+RUNG_QUOTA_WORDS = ["usage limit", "weekly limit", "daily limit", "monthly limit", "session limit", "hourly limit", "hit your limit", "limit reached", "quota", "out of credits", "insufficient credits", "usage credits", "upgrade for higher limits"]
+RUNG_RATE_WORDS = ["rate limit", "rate-limit", "ratelimit", "too many requests", "resource_exhausted", "overloaded", "429", "try again later"]
+RUNG_GONE_WORDS = ["was retired", "model not found", "no such model", "does not exist", "not_found_error", "unknown model", "invalid model"]
+# Lines CLIs print on every run that say nothing about why one failed.
+RUNG_NOISE_WORDS = ["doesn't recognize the model", "claude-code:unrecognized_model", "claude_code_auto_compact_window", "error: exit status"]
 # Stricter lists for a short answer on exit 0: a CLI that prints its refusal
 # as the answer (a real answer may well mention "429" or "quota").
-RUNG_SIGNIN_ANSWER_WORDS = ["not signed in", "not logged in", "please log in", "please sign in"]
-RUNG_LIMIT_ANSWER_WORDS = ["rate limit", "usage limit", "too many requests", "hit your limit"]
+RUNG_SIGNIN_ANSWER_WORDS = ["not signed in", "not logged in", "please log in", "please sign in", "please run /login"]
+RUNG_QUOTA_ANSWER_WORDS = ["usage limit", "weekly limit", "daily limit", "monthly limit", "session limit", "hit your limit", "limit reached"]
+RUNG_RATE_ANSWER_WORDS = ["rate limit", "too many requests"]
+
+# The first line of text that mentions one of the words, trimmed for a report.
+-> rung_evidence(text, words)
+  rung_lines(text).each -> (l)
+    t = l.strip
+    if t != "" && rung_has_any?(t.downcase, words)
+      return t.size > 160 ? t.slice(0, 157) + "..." : t
+  ""
+
+-> rung_reason(kind, evidence)
+  evidence == "" ? kind : kind + ": " + evidence
+
+-> rung_trim_line(t)
+  t.size > 160 ? t.slice(0, 157) + "..." : t
+
+# The most telling line of a failed run: an "API Error"/"error" line that is
+# not known noise, else the first line that is not noise.
+-> rung_error_line(text)
+  ls = rung_lines(text)
+  ls.each -> (l)
+    t = l.strip
+    low = t.downcase
+    if low.index("api error") != nil && !rung_has_any?(low, RUNG_NOISE_WORDS)
+      return rung_trim_line(t)
+  ls.each -> (l)
+    t = l.strip
+    low = t.downcase
+    if low.index("error") != nil && !rung_has_any?(low, RUNG_NOISE_WORDS)
+      return rung_trim_line(t)
+  ls.each -> (l)
+    t = l.strip
+    if t != "" && !rung_has_any?(t.downcase, RUNG_NOISE_WORDS)
+      return rung_trim_line(t)
+  ""
 
 # nil when the attempt produced a usable answer, else why not.
 -> rung_attempt_failure(call, code)
@@ -150,9 +196,10 @@ RUNG_LIMIT_ANSWER_WORDS = ["rate limit", "usage limit", "too many requests", "hi
   answer = "" if answer == nil
   # a failing CLI often prints its complaint on stdout (= the answer file)
   if code != 0
-    log = log + "\n" + rung_tail(call["answer_file"], 2000)
+    log = rung_tail(call["answer_file"], 2000) + "\n" + log
   low = log.downcase
-  short_low = answer.size < 600 ? answer.downcase : ""
+  short = answer.size < 600 ? answer : ""
+  short_low = short.downcase
   if call["timed_out"]
     return "timed out after " + call["timeout"].to_s + " s"
   if low.index("guard: killed (rss") != nil
@@ -161,20 +208,35 @@ RUNG_LIMIT_ANSWER_WORDS = ["rate limit", "usage limit", "too many requests", "hi
     return "killed by the time guard"
   return "work dir missing" if code == 97
   return "command not found" if code == 127
-  return "not signed in" if code != 0 && rung_has_any?(low, RUNG_SIGNIN_WORDS)
-  return "not signed in" if rung_has_any?(short_low, RUNG_SIGNIN_ANSWER_WORDS)
   if code != 0
-    return "rate limited" if rung_has_any?(low, RUNG_LIMIT_WORDS)
-    line = rung_first_line(rung_tail(call["log_file"], 400))
+    return rung_reason("usage limit", rung_evidence(log, RUNG_QUOTA_WORDS)) if rung_has_any?(low, RUNG_QUOTA_WORDS)
+    return rung_reason("not signed in", rung_evidence(log, RUNG_SIGNIN_WORDS)) if rung_has_any?(low, RUNG_SIGNIN_WORDS)
+    return rung_reason("model unavailable", rung_evidence(log, RUNG_GONE_WORDS)) if rung_has_any?(low, RUNG_GONE_WORDS)
+    return rung_reason("rate limited", rung_evidence(log, RUNG_RATE_WORDS)) if rung_has_any?(low, RUNG_RATE_WORDS)
+    line = rung_error_line(log)
     return "exit code " + code.to_s + (line == "" ? "" : ": " + line)
-  return "rate limited" if rung_has_any?(short_low, RUNG_LIMIT_ANSWER_WORDS)
+  return rung_reason("usage limit", rung_evidence(short, RUNG_QUOTA_ANSWER_WORDS)) if rung_has_any?(short_low, RUNG_QUOTA_ANSWER_WORDS)
+  return rung_reason("not signed in", rung_evidence(short, RUNG_SIGNIN_ANSWER_WORDS)) if rung_has_any?(short_low, RUNG_SIGNIN_ANSWER_WORDS)
+  return rung_reason("rate limited", rung_evidence(short, RUNG_RATE_ANSWER_WORDS)) if rung_has_any?(short_low, RUNG_RATE_ANSWER_WORDS)
   return "empty answer" if rung_blank?(answer)
   if call["validate"] == "verdict" && answer.index("</rung-verdict>") == nil
     return "no <rung-verdict> block in the answer"
   nil
 
+# The class of a failure reason: usage-limit, unavailable, rate-limited,
+# signin, timeout, missing or error.
+-> rung_failure_class(reason)
+  return "usage-limit" if reason.starts_with?("usage limit")
+  return "unavailable" if reason.starts_with?("model unavailable")
+  return "rate-limited" if reason.starts_with?("rate limited")
+  return "signin" if reason.starts_with?("not signed in")
+  return "timeout" if reason.starts_with?("timed out")
+  return "missing" if reason == "command not found" || reason == "work dir missing" || reason.starts_with?("could not start")
+  "error"
+
 -> rung_retryable?(reason)
-  !(reason == "not signed in" || reason == "command not found" || reason == "work dir missing" || reason.starts_with?("could not start"))
+  c = rung_failure_class(reason)
+  !(c == "usage-limit" || c == "unavailable" || c == "signin" || c == "missing")
 
 -> rung_write_call_meta(call)
   meta = {
@@ -183,6 +245,7 @@ RUNG_LIMIT_ANSWER_WORDS = ["rate limit", "usage limit", "too many requests", "hi
     "provider" => call["entry"]["provider"],
     "status" => call["status"],
     "reason" => call["reason"],
+    "failure" => call["status"] == "ok" ? "" : rung_failure_class(call["reason"]),
     "attempts" => call["attempts"],
     "exit" => call["exit"],
     "ms" => call["ms"],
@@ -294,7 +357,9 @@ RUNG_LIMIT_ANSWER_WORDS = ["rate limit", "usage limit", "too many requests", "hi
 -> rung_run_calls(calls, poll_ms = 200)
   pending = []
   calls.each -> (c)
-    if c["status"] == "ok" || rung_call_done?(c)
+    if c["status"] == "failed"
+      rung_say("    " + c["label"] + ": " + c["reason"])
+    elsif c["status"] == "ok" || rung_call_done?(c)
       rung_say("    " + c["label"] + ": reused the finished answer")
     else
       pending.push(c)

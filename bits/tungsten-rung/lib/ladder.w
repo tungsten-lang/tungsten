@@ -180,7 +180,16 @@
   group.each -> (name)
     entry = m["entries"][name]
     c = rung_new_call("model", name, entry, sdir + "/calls/" + rung_slug(name), rung_call_settings(m, run_dir, entry, "model"))
-    if !rung_call_done?(c)
+    spent = RUNG_RT["exhausted"][name]
+    if rung_call_done?(c)
+      0
+    elsif spent != nil
+      # a usage window does not reset within a run, nor does a retired
+      # model come back: do not call it again
+      c["status"] = "failed"
+      head = spent.starts_with?("usage limit") ? "usage limit" : "model unavailable"
+      c["reason"] = head + " (earlier in this run)" + spent.slice(head.size, spent.size - head.size)
+    else
       rung_write(c["prompt_file"], prompt)
     calls.push(c)
   calls
@@ -192,6 +201,10 @@
   rung_say("  step " + slot.to_s + "/" + m["ladder"].size.to_s + ": " + rung_group_text(group))
   calls = rung_step_calls(m, run_dir, sdir, task, state, round, slot, group)
   rung_run_calls(calls)
+  calls.each -> (c)
+    cls = c["status"] == "failed" && c["attempts"] > 0 ? rung_failure_class(c["reason"]) : ""
+    if cls == "usage-limit" || cls == "unavailable"
+      RUNG_RT["exhausted"][c["label"]] = c["reason"]
   answers = []
   call_recs = []
   members = []
@@ -249,6 +262,15 @@
       rec["integration"] = "failed"
       rec["integration_reason"] = ic["reason"]
       rec["status"] = "integration-failed"
+      cls = rung_failure_class(ic["reason"])
+      if cls == "usage-limit" || cls == "unavailable" || cls == "signin" || cls == "missing"
+        # Every later step would fail the same way. Pause without step.json,
+        # so `rung --resume` redoes only this integration (the answers are kept).
+        rec["ms"] = rung_ms - t0
+        rec["halt"] = "the integrator (" + ientry["name"] + ") is unavailable: " + ic["reason"]
+        rung_append(run_dir + "/log.md", "- round " + round.to_s + ", step " + slot.to_s + ": paused, " + rec["halt"] + "\n")
+        rung_say("    → paused: " + rec["halt"])
+        return rec
   rec["ms"] = rung_ms - t0
   rec["finished"] = rung_timestamp
   rung_write(sdir + "/state.md", rung_blank?(new_state) ? rung_initial_state(task) : new_state.strip + "\n")
@@ -271,6 +293,7 @@
   s
 
 -> rung_step_summary(rec)
+  return "paused: " + rec["halt"] if rec["halt"] != nil
   st = rec["status"]
   if st == "skipped"
     return "skipped (every call failed)"
@@ -343,6 +366,10 @@
         rec = rung_json_read(sdir + "/step.json")
         if rec == nil
           rec = rung_run_step(m, run_dir, sdir, task, state, round, slot, group, (round - 1) * ladder.size + slot)
+          if rec["halt"] != nil
+            steps.push(rec)
+            stop = "paused: " + rec["halt"] + " (continue with rung --resume once it is back)"
+            break
         else
           rung_say("  step " + slot.to_s + "/" + ladder.size.to_s + ": " + rung_group_text(group) + " (done earlier) → " + rung_step_summary(rec))
         if rec["improved"]
@@ -352,6 +379,7 @@
         integrated += 1 if rec["integration"] == "ok"
         steps.push(rec)
         slot += 1
+      break if stop != nil
       if answered == 0
         stop = "every model failed in round " + round.to_s
       elsif integrated == 0
@@ -372,10 +400,14 @@
     rung_drop_lock(run_dir)
     raise msg
   rounds = stop.starts_with?("reached max") ? round - 1 : round
-  rung_set_status(run_dir, "finished", {"stop" => stop, "rounds" => rounds, "steps" => steps.size})
+  final = stop.starts_with?("paused") ? "paused" : "finished"
+  done = 0
+  steps.each -> (st)
+    done += 1 if st["halt"] == nil
+  rung_set_status(run_dir, final, {"stop" => stop, "rounds" => rounds, "steps" => done})
   rung_write_report(run_dir, m, steps, stop, rounds)
   rung_drop_lock(run_dir)
-  {"stop" => stop, "rounds" => rounds, "steps" => steps}
+  {"stop" => stop, "rounds" => rounds, "steps" => steps, "state" => final}
 
 # ---- dry run --------------------------------------------------------------------------------
 

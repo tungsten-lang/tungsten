@@ -84,7 +84,22 @@ FAKE_REGISTRY = <<~EOT
   answer = "file"
 
   [models.flaky]
-  command = "if [ -e {{DIR}}/flaky.flag ]; then echo 'IMPROVE by flaky'; else touch {{DIR}}/flaky.flag; echo 'usage limit reached' >&2; exit 1; fi"
+  command = "if [ -e {{DIR}}/flaky.flag ]; then echo 'IMPROVE by flaky'; else touch {{DIR}}/flaky.flag; echo 'HTTP 429 Too Many Requests' >&2; exit 1; fi"
+
+  [models.quota]
+  command = "echo run >> {{DIR}}/quota.count; echo \"You've hit your weekly limit · resets Nov 1\"; exit 1"
+
+  [models.retired]
+  command = "echo 'Claude Code doesn'\\''t recognize the model \"x:cloud\"' >&2; echo 'API Error: 410 x:0731 was retired on September 25, 2026.'; echo 'Error: exit status 1' >&2; exit 1"
+
+  [models.noisy]
+  command = "echo 'Claude Code doesn'\\''t recognize the model \"y:cloud\"' >&2; echo 'Error: connection reset by peer' >&2; echo 'Error: exit status 1' >&2; exit 1"
+
+  [models.delta]
+  command = "echo run >> {{DIR}}/delta.count; echo 'IMPROVE by delta'"
+
+  [models.gate]
+  command = "if [ -e {{DIR}}/gate.open ]; then sh {{DIR}}/fake_integrator.sh {prompt_file}; else echo \"You've hit your weekly limit · resets Nov 1 at 2pm\"; exit 1; fi"
 
   [models.lister]
   command = "ls -R . > /dev/null; cat notes/a.md; cat src/x.w"
@@ -409,11 +424,11 @@ describe "rung ladders" ->
     expect(spec_run([p, "--out", out])).to eq(0)
     b = spec_step(out, "r01-s01-broken")
     expect(b["status"]).to eq("skipped")
-    expect(b["calls"][0]["reason"]).to eq("rate limited")
+    expect(b["calls"][0]["reason"]).to eq("rate limited: Error: rate limit exceeded")
     expect(b["calls"][0]["attempts"]).to eq(2)
     expect(File.exist?(out + "/steps/r01-s01-broken/calls/broken/attempt-1-log.txt")).to eq(true)
     n = spec_step(out, "r01-s02-nologin")
-    expect(n["calls"][0]["reason"]).to eq("not signed in")
+    expect(n["calls"][0]["reason"]).to eq("not signed in: Not signed in")
     expect(n["calls"][0]["attempts"]).to eq(1)
     s = spec_step(out, "r01-s03-slow")
     expect(s["calls"][0]["reason"]).to eq("timed out after 1 s")
@@ -425,9 +440,9 @@ describe "rung ladders" ->
     expect(fl["credit"]).to eq(["filer"])
     expect(rung_read(out + "/state.md")).to eq("accepted flaky\naccepted filer\n")
     report = rung_read(out + "/report.md")
-    expect(report.index("broken: rate limited after 2 attempts; skipped this round") != nil).to eq(true)
-    expect(report.index("nologin: not signed in after 1 attempt") != nil).to eq(true)
-    expect(report.index("flaky: attempt 1: rate limited (retried)") != nil).to eq(true)
+    expect(report.index("broken: rate limited: Error: rate limit exceeded after 2 attempts; skipped this round") != nil).to eq(true)
+    expect(report.index("nologin: not signed in: Not signed in after 1 attempt") != nil).to eq(true)
+    expect(report.index("flaky: attempt 1: rate limited: HTTP 429 Too Many Requests (retried)") != nil).to eq(true)
 
   it "runs a parallel group within its provider's concurrency cap" ->
     p = spec_prompt("group.md", "---\nmodels: fake:m1 | fake:m2 | fake:m3\nmax_rounds: 1\n---\nTask four.\n")
@@ -470,6 +485,46 @@ describe "rung ladders" ->
     expect(File.stat(out + "/stage/notes/a.md").permissions).to eq(0o444)
     expect(File.stat(d + "/notes/a.md").permissions != 0o444).to eq(true)
     expect(rung_read(out + "/steps/r01-s01-lister/calls/lister/answer.md")).to eq("note a\nx = 1\n")
+
+  it "names usage limits, does not retry them, and skips the model for the rest of the run" ->
+    p = spec_prompt("quota.md", "---\nmodels: quota, alpha\nretries: 2\nretry_wait: 0\nmax_rounds: 3\n---\nTask eight.\n")
+    out = SPEC_DIR + "/run-quota"
+    expect(spec_run([p, "--out", out])).to eq(0)
+    q1 = spec_step(out, "r01-s01-quota")["calls"][0]
+    expect(q1["reason"]).to eq("usage limit: You've hit your weekly limit · resets Nov 1")
+    expect(q1["attempts"]).to eq(1)
+    q2 = spec_step(out, "r02-s01-quota")["calls"][0]
+    expect(q2["reason"]).to eq("usage limit (earlier in this run): You've hit your weekly limit · resets Nov 1")
+    expect(q2["attempts"]).to eq(0)
+    expect(spec_count_lines(SPEC_DIR + "/quota.count")).to eq(1)
+    expect(rung_json_read(out + "/steps/r01-s01-quota/calls/quota/meta.json")["failure"]).to eq("usage-limit")
+    expect(rung_json_read(out + "/status.json")["stop"]).to eq("plateau: no step improved the state in round 2")
+
+  it "names retired models and real errors, not the CLI's noise lines" ->
+    p = spec_prompt("gone.md", "---\nmodels: retired, noisy, alpha\nretries: 1\nretry_wait: 0\nmax_rounds: 1\n---\nTask ten.\n")
+    out = SPEC_DIR + "/run-gone"
+    expect(spec_run([p, "--out", out])).to eq(0)
+    r = spec_step(out, "r01-s01-retired")["calls"][0]
+    expect(r["reason"]).to eq("model unavailable: API Error: 410 x:0731 was retired on September 25, 2026.")
+    expect(r["attempts"]).to eq(1)
+    n = spec_step(out, "r01-s02-noisy")["calls"][0]
+    expect(n["reason"]).to eq("exit code 1: Error: connection reset by peer")
+    expect(n["attempts"]).to eq(2)
+
+  it "pauses when the integrator hits its limit, and resumes with the answers kept" ->
+    p = spec_prompt("gate.md", "---\nmodels: delta\nintegrator: gate\nmax_rounds: 1\n---\nTask nine.\n")
+    out = SPEC_DIR + "/run-gate"
+    expect(spec_run([p, "--out", out])).to eq(3)
+    st = rung_json_read(out + "/status.json")
+    expect(st["state"]).to eq("paused")
+    expect(st["stop"].index("the integrator (gate) is unavailable: usage limit: You've hit your weekly limit") != nil).to eq(true)
+    expect(File.exist?(out + "/steps/r01-s01-delta/step.json")).to eq(false)
+    expect(rung_json_read(out + "/steps/r01-s01-delta/integrate/meta.json")["attempts"]).to eq(1)
+    rung_write(SPEC_DIR + "/gate.open", "")
+    expect(spec_run(["--resume", out])).to eq(0)
+    expect(rung_json_read(out + "/status.json")["state"]).to eq("finished")
+    expect(spec_count_lines(SPEC_DIR + "/delta.count")).to eq(1)
+    expect(rung_read(out + "/state.md")).to eq("accepted delta\n")
 
   it "refuses to reuse a non-empty run directory" ->
     p = SPEC_DIR + "/plateau.md"

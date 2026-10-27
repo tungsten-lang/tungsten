@@ -37,7 +37,9 @@ Build it from the Tungsten root with `cd bits/tungsten-rung && ../../bin/tungste
 | `-q, --quiet` | Only the final summary. |
 
 Exit codes: 0 when finished (plateau or round cap), 1 on error, 2 on usage errors,
-and 130 when interrupted (every running call is stopped first).
+3 when paused because the integrator is unavailable (`rung --resume` continues
+once it is back), and 130 when interrupted (every running call is stopped
+first).
 
 ## The prompt file
 
@@ -153,11 +155,22 @@ time would be judged in an arbitrary order.
 5. `report.md` holds the final state, the credited improvements, the step log
    with timings, the claims still to verify, and every failure and skip.
 
-A rate-limited or failing call is retried after `retry_wait` seconds, up to
-`retries` times. If it still fails, the model is skipped for that step and the
-report says why (rate limited, timed out, not signed in, exit code, empty
-answer). A call that answers "not signed in" or "command not found" is not
-retried.
+A failed call is classified, and the report quotes the CLI's own line as
+evidence:
+
+| failure | example evidence | what rung does |
+|---|---|---|
+| usage limit | `You've hit your weekly limit · resets Nov 1`, `429 … session usage limit` | No retry, since waiting a minute cannot help. The model is skipped for the rest of the run. |
+| model unavailable | `API Error: 410 … was retired` | Same as a usage limit. |
+| rate limited | `429 Too Many Requests`, `overloaded` | Retried after `retry_wait` seconds, up to `retries` times. |
+| not signed in, command not found | `Not signed in` | No retry. |
+| timed out, exit code N, empty answer | the error line, not the CLI's warning noise | Retried. |
+
+A model that still fails is skipped for that step, and the ladder goes on
+without it. If the integrator fails with a usage limit, sign-in or
+unavailability error, every later step would fail the same way. So rung
+pauses at once (status `paused`, exit 3) without recording the step, and
+`rung --resume` later redoes only that integration, reusing the answers.
 
 ## The run directory
 
@@ -167,7 +180,7 @@ task.rung/20261027-101500/
   task.md          the task
   stage/           read-only master copies of the staged files
   state.md         the current state
-  status.json      created / planned / running / finished / interrupted / failed
+  status.json      created / planned / running / finished / paused / interrupted / failed
   log.md           one line per finished step
   report.md
   steps/r01-s01-codex/

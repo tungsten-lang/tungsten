@@ -184,6 +184,8 @@ EOT
   << "rung: stopped after " + res["rounds"].to_s + " round" + (res["rounds"] == 1 ? "" : "s") + ", " + res["steps"].size.to_s + " steps: " + res["stop"]
   << "state:  " + run_dir + "/state.md"
   << "report: " + run_dir + "/report.md"
+  # 3: paused (the integrator is unavailable); rung --resume continues it
+  return 3 if res["state"] == "paused"
   0
 
 -> rung_cmd_config(opts)

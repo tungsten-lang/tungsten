@@ -17,13 +17,16 @@
     n = sum_of_squares(n)
   true
 
-count = 0
-n = 1
-while count < 8
-  if happy?(n)
-    << n
-    count += 1
-  n += 1
+-> first_happy(limit)
+  count = 0
+  n = 1
+  while count < limit
+    if happy?(n)
+      << n
+      count += 1
+    n += 1
+
+first_happy(8)
 
 ## expect stdout
 ## 1

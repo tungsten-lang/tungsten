@@ -58,14 +58,14 @@ ref = add/2
 # Arity is checked at compile time where the callee is known:
 # add(1) or add(1, 2, 3) is E_LOWER_ARITY, never nil-padded or truncated.
 
-# Pure function, auto-memoized (compiled)
+# Pure function, auto-memoized
 fn fib(n)
   if n <= 1
     n
   else
     fib(n - 1) + fib(n - 2)
 
-# Arity shorthand: args are @1, @2, … (compiled)
+# Arity shorthand: args are @1, @2, …
 -> add/2
   @1 + @2
 
@@ -205,7 +205,7 @@ trait Greetable
   is Greetable
   -> new(@name) rw
 
-<< Person.new("Alice").greet()   # (compiled)
+<< Person.new("Alice").greet()
 ```
 
 ## Collections
@@ -216,7 +216,7 @@ arr = [1, 2, 3, 4, 5]
 << arr.map ->(x) x * 2
 << arr.select ->(x) x > 3
 << arr.sum
-<< arr.reduce(0, ->(a, b) a + b)   # (compiled)
+<< arr.reduce(0, ->(a, b) a + b)
 
 # Blocks also bind `item` implicitly
 << arr.map -> item ** 2

@@ -43,7 +43,6 @@
   under the limit cannot exhaust the machine together. The allocation paths
   are untouched; startup cost is one thread.
 
-||||||| /tmp/base_33353.md
 - **A parameter named `t0` compiles** — WIRE emitted each parameter as
   `%<name>`, in the one LLVM namespace per function that the compiler's own
   `%t<N>` temporaries share, so `-> run(k, t0, t1)` died in clang with

@@ -1,3 +1,5 @@
+# Loops/For with a specified step
+
 i = 2
 while i <= 8
   <- "[i], "

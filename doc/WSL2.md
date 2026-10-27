@@ -40,8 +40,8 @@ Or from a clone:
 ```bash
 git clone https://github.com/tungsten-lang/tungsten
 cd tungsten
+bin/tungsten bootstrap      # bootstrap the self-hosted compiler (stages 0-2)
 bin/tungsten start          # orient
-bin/tungsten build          # bootstrap the self-hosted compiler
 ```
 
 ## 4. Try it

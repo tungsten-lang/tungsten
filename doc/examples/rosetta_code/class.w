@@ -1,19 +1,19 @@
-+ Animal
-  -> .inherited(subclass)
-    << "new subclass of [self]: [subclass]"
+# Classes and methods
 
-+ Cat < Animal
-+ Dog < Animal
++ Counter
+  -> new(@count) ro
 
-+ Lab    < Dog
-+ Collie < Dog
+  -> increment
+    @count += 1
 
-##############
+  -> add(n)
+    @count += n
 
-+ Animal
-  + Cat
-  + Dog
-    + Lab
-    + Collie
+c = Counter.new(0)
+c.increment
+c.increment
+c.add(5)
+<< c.count
 
 ## expect stdout
+## 7

@@ -38,12 +38,18 @@ core/algebra/polynomial_specialize.w    # specialize into a smaller ring, in_rin
 core/algebra/simple_extension.w   # certified K[a]/(m) quotient fields
 core/algebra/etale_algebra.w      # squarefree quotients and CRT products
 core/algebra/orders.w             # monogenic orders and Dedekind certificates
+core/algebra/gaussian_integer.w   # exact Z[i] Euclidean domain and prime factorization
+core/algebra/eisenstein_integer.w # exact Z[ω] Euclidean domain and prime factorization
 core/algebra/integer_lattice.w    # exact lattices and prime-field kernels
 core/algebra/maximal_orders.w     # degree-generic Round 2 integral closures
 core/algebra/lattice_reduction.w  # exact Gram-matrix LLL and ideal bases
+core/algebra/smith_normal_form.w  # exact integer Smith normal form with unimodular U, V
+core/algebra/group_presentation.w # finitely presented groups, abelianization, Todd-Coxeter
+core/algebra/chain_complex.w      # exact integer chain complexes and homology via SNF
 core/algebra/arithmetic_circuit.w # exact finite circuit/formula DAG semantics
 core/algebra/lattice_polytope.w   # exact simplices, polygons, Ehrhart fixtures, Laurent jets
 core/algebra/toric_polytope.w     # Newton polytopes, Ehrhart cones, toric periods
+core/algebra/toric_fan.w          # rational polyhedral cones and toric fans
 core/algebra/parity_lattice.w     # certified affine F2 Construction-A lift
 core/algebra/divided_power.w      # characteristic-two divided squares and carry laws
 core/algebra/residue_algebra.w    # reduced O/pO and primitive idempotents
@@ -72,6 +78,12 @@ core/algebra/p_adic_geometry.w     # good-reduction residue-disk covers
 core/algebra/p_adic_descent.w      # certified good-reduction BPS local images
 core/algebra/regular_models.w      # cuspidal bad fibers and local bounds
 core/algebra/local_geometry.w      # Newton polygons and Puiseux branch lifts
+core/algebra/p_adic_series.w       # truncated p-adic power series and formal groups
+core/algebra/p_adic_charts.w       # recursive p-adic blowup charts and local disks
+core/algebra/local_normalization.w # local branch normalization and conductor invariants
+core/algebra/local_intersection.w  # local intersection multiplicities on arithmetic surfaces
+core/algebra/local_invariants.w    # local genus, delta, and conductor invariants
+core/algebra/local_theta.w         # local decomposition-group fixed subspaces in J[2]
 core/algebra/elliptic.w            # integral Weierstrass and Frey certificates
 core/algebra/elliptic_tate.w       # Tate local data, Kodaira, conductors
 core/algebra/modular_forms.w       # Gamma0, X0, dimensions, Sturm bounds
@@ -96,11 +108,13 @@ core/algebra/theta_galois.w        # trusted-table subgroup-class replay
 core/algebra/theta_determinantal.w # Galois-fixed even determinantal classes
 core/algebra/theta_octads.w        # Aronhold rows and induced octad actions
 core/algebra/theta_subdegrees.w    # exact relative factors and global subgroup
+core/algebra/descent_comparison.w  # BPS comparison kernel, rational J[2], and rank bounds
 core/algebra/point_search.w        # exact bounded search for one quartic family
 core/algebra/quartic_invariants.w  # ternary resultant, discriminant, I27
 core/algebra/automorphisms.w       # normalized-hyperflex certificate
 core/algebra/zeta.w                # reduction, point counts, zeta, Weil cubic
 core/algebra/galois.w              # reciprocal genus-three Weil sextics
+core/algebra/coleman.w             # tiny Coleman integration and Chabauty bounds
 ```
 
 ## Surface syntax
@@ -1289,7 +1303,7 @@ point-difference vector, then independently computes the kernel of Frobenius
 minus the identity on the certified geometric 2-torsion module.
 Good-reduction formal-group divisibility gives
 \(J(\mathbb Q_p)/2J(\mathbb Q_p)\cong J(\mathbb F_p)/2J(\mathbb F_p)\),
-whose dimension is \(\dim J[2](\mathbb F_p)\). If the clean disk images reach
+whose dimension is \(\dim J\[2\](\mathbb F_p)\). If the clean disk images reach
 that dimension, no unseen divisor class can enlarge the image and the result
 is marked complete. If they do not, Tungsten returns an explicitly labelled
 lower bound.
@@ -1394,9 +1408,10 @@ calculation into \(\dim J(\mathbb Q_3)/2J(\mathbb Q_3)=2\). Because the
 explicit disk values span two dimensions, the \(p=3\) BPS image is complete.
 
 At \(p=2\), the special fiber is \((S+Z)^4\) and has no smooth point.
-The recursive cell representation is available, but dyadic BPS evaluation
-through its singular tree and an independent local-dimension certificate are
-the remaining bad-prime local work.
+Using the recursive dyadic cell tree (`local_theta.w`), exact Hensel-disk BPS
+evaluation spans the complete four-dimensional Kummer image, and exact
+theta-module comparison (`descent_comparison.w`) proves
+\(\dim J(\mathbb Q)[2] = \dim K = 1\) with injective localization at both 2 and 3.
 
 The small rational and curve examples run in both engines. Exact
 number-field localization is intentionally an opt-in compiled lane: on the
@@ -1771,12 +1786,13 @@ witness, or input outside the structural family is reported as an error; it
 is never silently converted into a negative mathematical claim.
 
 The exact F2 intersection kernel needed by generalized explicit descent is
-available, but the ambient basis and arithmetic producers remain separate
-proof obligations. In particular, point searches, Frobenius data, torsion
-bounds, bitangent counts, and divisor obstructions do not certify a Jacobian
-rank. `Jacobian#rank` remains unavailable until a verified explicit-Selmer
-bound, BPS comparison kernel, rational two-torsion dimension, and matching
-lower bound have all been composed.
+available, and for the shell-width quartic the monolithic replay
+(`descent_comparison.w`) composes the verified explicit-Selmer intersection,
+BPS comparison kernel, and rational two-torsion dimension to certify
+\(\dim \mathrm{Sel}_2(J) \le 2\) and \(\mathrm{rank}\, J(\mathbb Q) \le 1\).
+Generic `Jacobian#rank` and `rank_upper_bound` still raise unless supplied a
+curve-specific certificate; point searches, Frobenius data, torsion bounds,
+bitangent counts, and divisor obstructions alone do not certify a Jacobian rank.
 
 ## Certified geometric prefix for plane-quartic 2-descent
 
@@ -2258,10 +2274,10 @@ explicit.certified?
 The row-reduction certificate replays elementary operations, checks canonical
 RREF, and independently verifies the kernel basis. A producer certificate must
 freshly verify the exact constraint name, width, matrix, and right-hand side.
-The ambient columns are not yet tied to certified square-class generators, so
-this remains a checked explicit constraint intersection rather than a true
-arithmetic Selmer group. `ExplicitSelmerIntersectionCertificate#rank_upper_bound`
-always raises; the ambient basis and BPS comparison are still required.
+An unattached `ExplicitSelmerIntersectionCertificate` is a checked explicit
+constraint intersection rather than a true arithmetic Selmer group, so its bare
+`#rank_upper_bound` raises unless composed with a certified ambient basis and
+BPS comparison certificate (`descent_comparison.w`).
 
 For finite non-linear obligations, the optional
 `bits/tungsten-wassat/lib/algebra_certificate.w` bridge exports standard CNF,

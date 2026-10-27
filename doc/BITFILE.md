@@ -6,7 +6,7 @@ external "ruby", "4.0.2"
 external "llvm", "current"
 external "openssl", "current"
 
-bit “tungsten-carbide”, “~> 0.0.1”
+bit "tungsten-carbide", "~> 0.0.1"
 
 group :development ->
   bit "tungsten-console"

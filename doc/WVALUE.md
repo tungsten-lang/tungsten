@@ -3,7 +3,7 @@
 Quick reference for the NaN-boxed `uint64_t` encoding. See
 `doc/specification/wvalue_encoding.md` for the full specification.
 
-Reference implementation: `stages/tungsten/runtime/wvalue.h` (standalone C header, MIT licensed).
+Reference implementation: `runtime/wvalue.h` (standalone C header, MIT licensed).
 
 ---
 
@@ -49,9 +49,9 @@ Truthiness: `v > 1` (unsigned). Only nil and false are falsey.
 └────────────────┴────────────────────────────────────────┴───────┘
 ```
 
-Sub-tags: 0=generic 1=atomic 2=free(was bigint, now tag 0xFFFB) 4=struct
-5=hash 6=closure 7=regex 8=range 9=small-array A=socket B=string-buffer C=class D=uuid
-E=regex-match F=domain
+Sub-tags: 0=generic 1=atomic 2=free(was bigint, now tag 0xFFFB) 3=free 4=struct
+5=hash 6=closure 7=free 8=range 9=small-array A=socket B=string-buffer C=class D=uuid
+E=free F=domain
 
 ## Array (0xFFF4)
 
@@ -177,10 +177,10 @@ Inline string (len 0-5):
 └────────────────┴────────┴────────────┴─────┴──┘
 
 Slab string (len 6-61):
-63              48 47       28 27                 4 3  1  0
-┌────────────────┬────────────┬────────────────────┬─────┬──┐
-│   0xFFF9       │   0 pad    │ 24-bit slab index  │  6  │0 │
-└────────────────┴────────────┴────────────────────┴─────┴──┘
+63              48 47     34 33      28 27                 4 3  1  0
+┌────────────────┬──────────┬──────────┬────────────────────┬─────┬──┐
+│   0xFFF9       │  0 pad   │ 6b len   │ 24-bit slab index  │  6  │0 │
+└────────────────┴──────────┴──────────┴────────────────────┴─────┴──┘
 
 Heap string (normally len > 61, or a post-freeze dynamic string):
 63              48 47                       4 3  1  0
@@ -188,11 +188,11 @@ Heap string (normally len > 61, or a post-freeze dynamic string):
 │   0xFFF9       │ WString* (16-byte aligned) │  7  │0 │  ← heap sentinel
 └────────────────┴────────────────────────────┴─────┴──┘
 
-Symbol:
-63              48 47                                  1  0
-┌────────────────┬─────────────────────────────────────┬──┐
-│   0xFFF9       │          47-bit symbol ID            │1 │
-└────────────────┴─────────────────────────────────────┴──┘
+Symbol (shares the 3-bit mode field at bits 3..1 with strings):
+63              48 47                            4 3  1  0
+┌────────────────┬────────────────────────────────┬─────┬──┐
+│   0xFFF9       │ SSO-5 / slab (6) / WString*(7) │mode │1 │
+└────────────────┴────────────────────────────────┴─────┴──┘
 ```
 
 ---
@@ -335,26 +335,29 @@ Percentage: sig=765, scale=-2, unit_id=0xFF → "7.65%"
 
 ## Packed Types (0xFFFE)
 
-Six subtypes via bits 47-45:
+Eight subtypes via bits 47-45:
 
 ### Color (subtype 000)
 
 ```
-63        48 47  45 44      37 36      29 28      21 20     13 12       0
-┌──────────┬──────┬──────────┬──────────┬──────────┬─────────┬──────────┐
-│  0xFFFE  │ 000  │   red    │  green   │   blue   │  alpha  │  flags   │
-│          │      │   8b     │   8b     │   8b     │   8b    │   12b    │
-└──────────┴──────┴──────────┴──────────┴──────────┴─────────┴──────────┘
+SDR mode (bit 0 = 0):
+63        48 47  45 44      37 36      29 28      21 20     13 12      1  0
+┌──────────┬──────┬──────────┬──────────┬──────────┬─────────┬──────────┬──┐
+│  0xFFFE  │ 000  │   red    │  green   │   blue   │  alpha  │  flags   │0 │
+│          │      │   8b     │   8b     │   8b     │   8b    │   12b    │  │
+└──────────┴──────┴──────────┴──────────┴──────────┴─────────┴──────────┴──┘
+
+HDR mode (bit 0 = 1): three 14-bit signed fixed-point channels (R 44..31, G 30..17, B 16..3), 2-bit space (2..1).
 ```
 
 ### Complex (subtype 001)
 
 ```
-63        48 47  45 44          29 28    23 22            7 6         1
-┌──────────┬──────┬──────────────┬────────┬───────────────┬───────────┐
-│  0xFFFE  │ 001  │ real sig     │ r.scl  │  imag sig     │  i.scl    │
-│          │      │  16b (±32K)  │  6b    │  16b (±32K)   │   6b      │
-└──────────┴──────┴──────────────┴────────┴───────────────┴───────────┘
+63        48 47  45 44          29 28    23 22            7 6         1  0
+┌──────────┬──────┬──────────────┬────────┬───────────────┬───────────┬──┐
+│  0xFFFE  │ 001  │ real sig     │ r.scl  │  imag sig     │  i.scl    │0 │
+│          │      │  16b (±32K)  │  6b    │  16b (±32K)   │   6b      │  │
+└──────────┴──────┴──────────────┴────────┴───────────────┴───────────┴──┘
 ```
 
 ### Rational (subtype 010)
@@ -367,26 +370,42 @@ Six subtypes via bits 47-45:
 └──────────┴──────┴──────────────────────┴────────────────────────────┘
 ```
 
+### Node (subtype 011)
+
+```
+AST slab-node reference (kind + offset into the node arena; see W_PACKED_NODE in runtime/wvalue.h).
+```
+
 ### DateTime (subtype 100)
 
 ```
-63        48 47 45 44     33 32 29 28 24 23 19 18  13 12   7 6      1
-┌──────────┬─────┬─────────┬─────┬─────┬─────┬──────┬──────┬────────┐
-│  0xFFFE  │ 100 │  year   │ mon │ day │hour │ min  │ sec  │  tz    │
-│          │     │ 12b(±2K)│ 4b  │ 5b  │ 5b  │  6b  │  6b  │ 6b(±31)│
-└──────────┴─────┴─────────┴─────┴─────┴─────┴──────┴──────┴────────┘
+63        48 47 45 44     33 32 29 28 24 23 19 18  13 12   7 6       0
+┌──────────┬─────┬─────────┬─────┬─────┬─────┬──────┬──────┬─────────┐
+│  0xFFFE  │ 100 │  year   │ mon │ day │hour │ min  │ sec  │   tz    │
+│          │     │ 12b     │ 4b  │ 5b  │ 5b  │  6b  │  6b  │ 7b(±60) │
+└──────────┴─────┴─────────┴─────┴─────┴─────┴──────┴──────┴─────────┘
 
-tz = half-hours from UTC (e.g., +5:30 = 11, -8:00 = -16)
+year = unsigned (civil year + 1024, range -1024..3071)
+tz   = 7-bit signed quarter-hours from UTC + singleton codes (date-only, month-only, local)
 ```
 
 ### IPv4 (subtype 101)
 
 ```
-63        48 47  45 44                          13 12      7 6      1
-┌──────────┬──────┬──────────────────────────────┬─────────┬────────┐
-│  0xFFFE  │ 101  │    32-bit IPv4 address       │  CIDR   │ flags  │
-│          │      │    (network byte order)      │   6b    │  6b    │
-└──────────┴──────┴──────────────────────────────┴─────────┴────────┘
+63        48 47  45 44                          13 12      7 6      1  0
+┌──────────┬──────┬──────────────────────────────┬─────────┬────────┬──┐
+│  0xFFFE  │ 101  │    32-bit IPv4 address       │  CIDR   │ flags  │0 │
+│          │      │    (network byte order)      │   6b    │  6b    │  │
+└──────────┴──────┴──────────────────────────────┬─────────┴────────┴──┘
+```
+
+### Body (subtype 110)
+
+```
+63        48 47  45 44                  21 20                        0
+┌──────────┬──────┬──────────────────────┬────────────────────────────┐
+│  0xFFFE  │ 110  │  arena offset (24b)  │    element count (21b)     │
+└──────────┴──────┴──────────────────────┴────────────────────────────┘
 ```
 
 ### Location (subtype 111)
@@ -492,12 +511,12 @@ heap struct stored with sub-tag 0xF:
 
 ```c
 typedef struct {
-    uint8_t domain_type;   // 0=decimal 1=currency 2=quantity 3=duration
+    uint8_t domain_type;   // 0=decimal 1=currency 2=quantity 3=duration 4=rational
     uint8_t pad[7];
-    int64_t sig;           // full 64-bit significand
+    int64_t sig;           // full 64-bit significand (or numerator for rational)
     int32_t scale;
     int32_t extra;         // symbol_id / unit_id / duration mode
-    int64_t extra2;        // duration mode 1: ms
+    int64_t extra2;        // duration mode 1: ms (or denominator for rational)
 } WDomainHeap;             // 32 bytes, 16-byte aligned
 ```
 

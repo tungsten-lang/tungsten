@@ -16,10 +16,10 @@ greet
 -> apply(x, y)
   yield(x, y)
 
-result = apply(10, 20) -> a * b
+result = apply(10, 20) -> (a, b)
+  a * b
 << result
 
-## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten call_a_function.w`
 ## expect stdout
 ## Hello!
 ## 7

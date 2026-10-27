@@ -61,11 +61,30 @@ into the established arms. OTFS never mutates a live reason clause and remains
 disabled in proof modes.
 
 Strict, bounded structural recognizers run before generic search when the
-formula shape warrants them. One recognizes four-value domains constrained by
-complete ternary Latin relations, finds a small generating set, and searches
-only those seed domains while propagation determines the rest. Its SAT models
+formula shape warrants them. One recognizes domains of 3--6 values
+constrained by complete ternary Latin relations, finds a small generating
+set, and searches only those seed domains while propagation determines the
+rest. A generic exact-one block-CSP engine covers coloring, permutation,
+and Hamiltonian-shaped encodings whose blocks carry complete at-most-one
+sets. An arithmetic two-coloring lane extracts Van der Waerden, Schur,
+Pythagorean, Ramsey, and Green--Tao scopes from the literal clauses,
+verifies every scope's mathematical shape, and decides by exhaustive
+bounded search -- no extremal constant is consulted, after a tally-based
+predecessor was caught refuting satisfiable formulas. A generic
+gate-circuit lane enumerates free inputs of any topologically ordered
+two-input-gate network under a total gate-evaluation budget. SAT models
 are checked against the original CNF; exact UNSAT answers remain fast-only
-until that route has proof emission.
+except where a lane names a witness variable set whose original-clause
+star the proof solver then refutes on its own, emitting a checkable proof.
+
+Lanes that used to hide behind the MDP recognizer's miss now live in their
+own files (`sdp`, `backdoor`, `sgi`, `schooltt`, `symmetry_fix`, `vdwb`)
+behind a fingerprint-gated registry in `lib/specialists.w`, which records
+the winning lane's name in a `c lane:` line for per-lane accounting in the
+SC2026 harness. The per-instance SAT backdoor tables in `lib/backdoor.w`
+are measured (not assumed) value: `WASSAT_BACKDOOR_TABLES=0` disables
+exactly them for on/off corpus comparison, per
+`docs/backdoor-tables-audit-2026-10-27.md`.
 
 Another recognizer accepts only a complete, topologically ordered 32-bit
 xorshift/fold circuit: variables 1--32 are its sole inputs, every later

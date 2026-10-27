@@ -139,6 +139,19 @@ describe "Wassat bounded original-clause local core" ->
       expect(wrat_verify(LOCAL_CORE_FULL, wrat_text)["verified"]).to eq(true)
       expect(wrat_verify(LOCAL_CORE_FULL, drat_text)["verified"]).to eq(true)
 
+    it "builds a witness star for specialist proof conversion" ->
+      formula = wassat_parse_cnf_native(LOCAL_CORE_FULL)
+      candidate = wassat_star_candidate(formula, [7, 8])
+      expect(candidate["recognized"]).to eq(true)
+      expect(candidate["gids"]).to eq(LOCAL_CORE_ALL_FOUR_GIDS)
+      result = wassat_local_core_search(
+        formula, candidate, WASSAT_PROOF_WRAT, 0, true
+      )
+      expect(result["status"]).to eq(-1)
+      wrat_text = "wrat 1\n" + result["proof"].join("\n") + "\n"
+      expect(wrat_verify(LOCAL_CORE_FULL, wrat_text)["verified"]).to eq(true)
+      expect(wassat_star_candidate(formula, [])["recognized"]).to eq(false)
+
     it "treats subset SAT and budget UNKNOWN as fallthrough-only results" ->
       formula = wassat_parse_cnf_native(LOCAL_CORE_FULL)
       sat_candidate = local_core_manual_candidate([[7, 8]], [2], 8)

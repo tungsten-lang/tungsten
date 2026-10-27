@@ -169,6 +169,63 @@ WASSAT_LOCAL_CORE_CONFLICT_CAP = 300000
     "variables": pm[1], "literals": pm[3],
     "status": 0, "conflicts": 0, "proof": [], "drat": [] }
 
+# Build a refute-only candidate from the one-hop incidence star of a
+# caller-supplied variable set. Structural UNSAT lanes use this to turn a
+# fast-only refutation into a checkable proof: the lane names the variables
+# of its witness (a clique, a counter, a core), every original clause
+# touching them is selected with its original proof id, and
+# wassat_local_core_search either refutes that exact subset -- a proof of
+# the full formula, since every selected clause is one of its axioms -- or
+# falls through with no verdict. The specialist's own argument is never
+# trusted by the proof path; only the subset search publishes.
+-> wassat_star_candidate(formula, seed_vars)
+  miss = wassat_local_core_miss
+  return miss unless formula.has_key?("flat_ncl")
+  return miss if seed_vars.empty?
+  nv = formula["nvars"]
+  ncl = formula["flat_ncl"]
+  lits = formula["flat_lits"] ## i64[]
+  offs = formula["flat_offs"] ## i64[]
+  lens = formula["flat_lens"] ## i64[]
+  seed = i64[nv + 1]
+  used = i64[nv + 1]
+  seed_vars.each -> (v)
+    seed[v] = 1 if v >= 1 && v <= nv
+  clauses = []
+  gids = []
+  total_lits = 0
+  ci = 0
+  while ci < ncl
+    st = offs[ci]
+    n = lens[ci]
+    touches = false
+    j = 0
+    while j < n && !touches
+      l = lits[st + j]
+      v = l < 0 ? 0 - l : l
+      touches = true if v >= 1 && v <= nv && seed[v] == 1
+      j += 1
+    if touches
+      return miss if clauses.size >= WASSAT_LOCAL_CORE_CLAUSE_CAP
+      return miss if total_lits + n > WASSAT_LOCAL_CORE_LITERAL_CAP
+      total_lits += n
+      clause = []
+      j = 0
+      while j < n
+        clause.push(lits[st + j])
+        l = lits[st + j]
+        v = l < 0 ? 0 - l : l
+        used[v] = 1 if v >= 1 && v <= nv
+        j += 1
+      clauses.push(clause)
+      gids.push(ci + 1)
+    ci += 1
+  return miss if clauses.empty?
+  { "recognized": true, "clauses": clauses, "gids": gids,
+    "used": used, "prefix": 0, "seed_variables": seed_vars.size,
+    "variables": 0, "literals": total_lits,
+    "status": 0, "conflicts": 0, "proof": [], "drat": [] }
+
 # Search an already selected candidate as an isolated, refute-only formula.
 # This split keeps the proof-lifting boundary directly testable on tiny,
 # non-contiguous original-clause subsets without manufacturing a competition-

@@ -92,6 +92,12 @@ module Tungsten
     end
     alias eql? ==
 
+    def coerce(other)
+      return [other, @codepoint] if other.is_a?(Integer)
+
+      raise TypeError, "#{self.class} can't be coerced into #{other.class}"
+    end
+
     def hash
       @codepoint.hash
     end

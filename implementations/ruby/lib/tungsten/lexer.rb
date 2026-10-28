@@ -700,8 +700,8 @@ module Tungsten
       elsif skip_scan(/&(?=[a-zA-Z_),])/)
         token :"&"
 
-      # !() @ $ ? : ; . ,
-      elsif (text = scan(%r[[!@$?:;.,]]))
+      # !() @ $ ? : ; . , - + ~
+      elsif (text = scan(%r[[!@$?:;.,\-+~]]))
         token text.to_sym
 
       # Unicode square root — prefix operator: √expr ⇒ expr.sqrt
@@ -1366,8 +1366,8 @@ module Tungsten
     # exception hints.) The compiled lexer takes ANY `## ` run as a hint,
     # but doc/examples' `## expect ...` expectation comments rely on
     # unknown words staying comments here.
-    TYPE_HINT_WORDS = (TYPE_NAMES + %w[big recycle reuse no_raise fold]).freeze
-    TYPE_HINT_START = /## +(?=(?:#{TYPE_HINT_WORDS.join("|")})\b|[a-z]\w*:)/
+    TYPE_HINT_WORDS = (TYPE_NAMES + %w[big recycle reuse reuse_drain no_raise fold hash array symbol float char object ptr]).freeze
+    TYPE_HINT_START = /## +(?=(?:#{TYPE_HINT_WORDS.join("|")})\b|[A-Z]\w*|[a-z]\w*:)/
 
     SIGN = /[+−-]/
 

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "bigdecimal"
+require_relative "runtime/compiler_intrinsics"
 
 module Tungsten
   # Control-flow signals use throw/catch instead of raise/rescue for performance.
@@ -83,6 +84,8 @@ module Tungsten
   end
 
   class Interpreter < Visitor
+    include Runtime::CompilerIntrinsics
+
     W_NIL           = 0x0000_0000_0000_0000
     W_FALSE         = 0x0000_0000_0000_0001
     W_TRUE          = 0x0000_0000_0000_0002
@@ -224,7 +227,7 @@ module Tungsten
     ].freeze
     TUNGSTEN_KEYWORDS = %w[
       begin break case else elsif ensure exit extern false fn go if in is loop module nil next on parallel
-      raise rescue return self super then trait true unless until use when while with yield
+      raise recase rescue return self super then trait true unless until use when while with yield
     ].to_h { |word| [ word, true ] }.freeze
     TUNGSTEN_TYPE_NAME_WORDS = %w[
       bool int integer string string_buffer
@@ -239,10 +242,10 @@ module Tungsten
       posit8 posit16 posit32 posit64
     ].to_h { |word| [ word, true ] }.freeze
     LEXER_VALUE_TOKEN_TYPES = %i[
-      INT FLOAT DECIMAL STRING STRING_INTERP REGEX REGEX_CAPTURE SYMBOL NAME ID IVAR CVAR GLOBAL RPAREN RBRACKET
-      RBRACE MAGIC_FILE MAGIC_LINE MAGIC_DIR UUID CURRENCY QUANTITY DURATION WVALUE BYTE_ARRAY BYTE_ARRAY_INTERP DATE
-      DATETIME TIME MONTH IP4 CIDR4 RATIONAL CHAR CODEPOINT KEY WORD_ARRAY SYMBOL_ARRAY BASE32 BASE58 BASE64 PARG
-      SUPERSCRIPT COLOR
+      INT FLOAT DECIMAL STRING STRING_INTERP REGEX REGEX_CAPTURE SYMBOL NAME CONSTANT TYPE ID IVAR CVAR GLOBAL RPAREN
+      RBRACKET RBRACE MAGIC_FILE MAGIC_LINE MAGIC_DIR UUID CURRENCY QUANTITY DURATION WVALUE BYTE_ARRAY
+      BYTE_ARRAY_INTERP DATE DATETIME TIME MONTH IP4 CIDR4 IP6 CIDR6 RATIONAL CHAR CODEPOINT KEY WORD_ARRAY SYMBOL_ARRAY
+      BASE32 BASE58 BASE64 PARG SUPERSCRIPT EXPONENT COLOR SELF_REF
     ].to_h { |type| [ type, true ] }.freeze
     LEXER_OP_TYPES = {
       "<-" => :PRINT_OP,
@@ -334,6 +337,7 @@ module Tungsten
       @profile_dispatch_counts = Hash.new { |h, k| h[k] = Hash.new(0) }
 
       @sandbox = sandbox
+      init_compiler_intrinsics
       Runtime::Builtins.setup(self, sandbox: sandbox)
       BUILTIN_TYPES.each { |name| @classes[name] ||= Runtime::WClass.new(name, nil) }
     end
@@ -1051,7 +1055,7 @@ module Tungsten
     def visit_hash_literal(node)
       result = {}
       node.entries.each do |key_node, value_node|
-        result[canonical_hash_key(evaluate(key_node))] = evaluate(value_node)
+        hash_indifferent_set(result, evaluate(key_node), evaluate(value_node))
       end
       result
     end
@@ -1161,6 +1165,7 @@ module Tungsten
          left.is_a?(Numeric) && right.is_a?(Numeric)
         return false
       end
+      return right == left if right.is_a?(Tungsten::CharValue) && left.is_a?(Integer)
       if (left.is_a?(::Hash) && right.is_a?(::Hash)) ||
          (left.is_a?(::Array) && right.is_a?(::Array))
         return container_eq(left, right, {})
@@ -1330,7 +1335,7 @@ module Tungsten
         if left.is_a?(Quantity)
           return convert_quantity_pipe(left, node.right)
         end
-        if left.is_a?(Numeric) && !node.right.is_a?(AST::Int)
+        if left.is_a?(Numeric) && !node.right.is_a?(AST::Int) && !unit_pipe_rhs_shadowed?(node.right)
           load_quantity_support
           rhs = node.right
           fmt = nil
@@ -1339,9 +1344,13 @@ module Tungsten
             fmt = rhs.args[0].value
             unit_str = rhs.name
           else
-            unit_str = ast_to_unit_string(rhs)
+            unit_str = begin
+              ast_to_unit_string(rhs)
+            rescue Tungsten::Error
+              nil
+            end
           end
-          unit = Tungsten::Units.parse(unit_str) rescue nil
+          unit = unit_str ? (Tungsten::Units.parse(unit_str) rescue nil) : nil
           if unit
             qty = Tungsten::Quantity.new(left, unit)
             qty.display_format = fmt if fmt
@@ -1470,7 +1479,28 @@ module Tungsten
       convert_quantity_pipe(qty, node)
     end
 
+    def unit_pipe_rhs_shadowed?(rhs)
+      case rhs
+      when AST::StringLiteral, AST::Int
+        false
+      when AST::Var
+        name = rhs.name.to_s
+        @env.defined?(name) || @root_env.defined?(name)
+      when AST::Call
+        return true unless rhs.obj.nil?
+        name = rhs.name.to_s
+        return true if @env.defined?(name) || @root_env.defined?(name) || @builtins.key?(name)
+        rhs.args.any? { |a| unit_pipe_rhs_shadowed?(a) }
+      when AST::BinaryOp
+        return true unless %i[/ * **].include?(rhs.operator)
+        unit_pipe_rhs_shadowed?(rhs.left) || unit_pipe_rhs_shadowed?(rhs.right)
+      else
+        true
+      end
+    end
+
     def visit_global_var(node)
+      return @self_stack.last if node.name == "$value"
       if node.name.to_s.match?(/\A\$\d+\z/)
         return @globals[node.name.to_s]
       end
@@ -1750,7 +1780,7 @@ module Tungsten
         superclass = if node.superclass
           # An explicit `< Super` wins; any `[role]` alongside it (e.g.
           # `< Node [slab]`) is a compiler annotation the interpreter ignores.
-          @classes[node.superclass]
+          @classes[node.superclass] || resolve_unique_namespaced_constant(node.superclass)
         elsif node.class_role
           # Legacy form: a bare `[Role]` that resolves to a class names the
           # superclass (e.g. `+ Foo [Global]`). A role that doesn't resolve to
@@ -1913,9 +1943,28 @@ module Tungsten
     end
 
     def visit_def(node)
+      if !@env.equal?(@root_env)
+        cached_param_slot_names(node, node.args || EMPTY_ARGS) unless node.instance_variable_defined?(:@slot_names_template)
+        cached_simple_method_plan(node) unless node.instance_variable_defined?(:@simple_method_plan)
+        unless node.instance_variable_defined?(:@has_return)
+          node.instance_variable_set(:@has_return, Interpreter.body_has_return?(node.body))
+        end
+        node = node.dup
+      end
       node.closure_env = @env
       @env.set(node.name.to_s, node) if node.name
       node
+    end
+
+    def bind_closure_block(block)
+      return nil unless block
+
+      cached_param_slot_names(block, block.args || EMPTY_ARGS) unless block.instance_variable_defined?(:@slot_names_template)
+      cached_simple_block_plan(block) unless block.instance_variable_defined?(:@simple_block_plan)
+      bound = block.dup
+      bound.closure_env = @env
+      bound.closure_block = @current_block
+      bound
     end
 
     def visit_fn(node)
@@ -1958,7 +2007,7 @@ module Tungsten
       f = node.args[0]
       r = evaluate(node.args[1])
       lo, hi = sigma_range_bounds(r, node)
-      f.closure_env = @env if f.is_a?(AST::Block)
+      f = bind_closure_block(f) if f.is_a?(AST::Block)
       terms = sigma_poly_extract(f)
       return sigma_terms_sum(terms, lo, hi) if terms
       acc = 0
@@ -2126,10 +2175,7 @@ module Tungsten
             end
           )
         end
-        if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+        block = bind_closure_block(block) if block
 
         if recv.is_a?(Quantity) && node.name == "of"
           substance = evaluate(node.args[0]).to_s
@@ -2193,7 +2239,9 @@ module Tungsten
             result
           end
         elsif recv.is_a?(Runtime::WClass)
-          if recv.name == "Tungsten" && node.name == "root" && no_call_args?(node.args)
+          if recv.name == "Tungsten" && %w[PROTECT_THE_CORE! STOP_THE_PRESS! LOCK_THE_DOORS!].include?(node.name.to_s)
+            return nil
+          elsif recv.name == "Tungsten" && node.name == "root" && no_call_args?(node.args)
             root_builtin = @builtins["__project_root"]
             Tungsten::PathValue.new(root_builtin ? root_builtin.call(nil, EMPTY_ARGS, nil) : Dir.pwd)
           elsif (class_method = recv.lookup_class_method(node.name.to_s, argc: (node.args || EMPTY_ARGS).size))
@@ -2305,6 +2353,16 @@ module Tungsten
                 end
                 raise
               end
+            elsif recv.is_a?(Runtime::PackedNode)
+              argc = (node.args || EMPTY_ARGS).length
+              if argc == 0 && (mm = w_class.lookup_method("method_missing", argc: 1))
+                return call_w_method(recv, mm, [node.name.to_sym], block, call_node: node)
+              elsif argc == 1 && node.name.to_s.end_with?("=") &&
+                    (mms = w_class.lookup_method("method_missing_set", argc: 2))
+                return call_w_method(
+                  recv, mms, [node.name.to_s.chomp("=").to_sym, evaluate(node.args[0])], block, call_node: node
+                )
+              end
             end
           end
 
@@ -2334,8 +2392,14 @@ module Tungsten
         end
       else
         name = node.name.to_s
-        if name == "ccall"
+        if name == "ccall" || name == "ccall_nobox" || name == "ccall_rawargs"
           return dispatch_interpreted_ccall(evaluate_args(node.args), node)
+        end
+        if name == "slab_alloc_init"
+          return dispatch_slab_alloc_init(evaluate_args(node.args))
+        end
+        if name == "wvalue_bits" || name == "wvalue_from_bits"
+          return node.args && !node.args.empty? ? evaluate(node.args[0]) : nil
         end
         if name == "Σ"
           return eval_sigma(node)
@@ -2362,10 +2426,7 @@ module Tungsten
           if self_obj.is_a?(Runtime::WClass)
             if (overloads = typed_overload_group(self_obj, name))
               block = node.block
-              if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+              block = bind_closure_block(block) if block
               return dispatch_typed_overload(self_obj, self_obj, overloads, node, block)
             end
 
@@ -2373,30 +2434,21 @@ module Tungsten
                      resolve_w_method(node, self_obj, name)
             if method
               block = node.block
-              if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+              block = bind_closure_block(block) if block
               return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
             end
           elsif self_obj.is_a?(Runtime::WObject)
             owner = self_obj.w_class
             if (overloads = typed_overload_group(owner, name))
               block = node.block
-              if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+              block = bind_closure_block(block) if block
               return dispatch_typed_overload(self_obj, owner, overloads, node, block)
             end
 
             method = resolve_w_method(node, owner, name)
             if method
               block = node.block
-              if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+              block = bind_closure_block(block) if block
               return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
             end
           end
@@ -2408,10 +2460,7 @@ module Tungsten
           if func.is_a?(Tungsten::AST::Def)
             profile_visit_call("local #{name}") if @profile_enabled
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return call_method(func, node.args, block)
           end
         end
@@ -2419,10 +2468,7 @@ module Tungsten
         if (builtin = @builtins[name])
           profile_visit_call("builtin #{name}") if @profile_enabled
           block = node.block
-          if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+          block = bind_closure_block(block) if block
           args = evaluate_args(node.args)
           return invoke_builtin(builtin, nil, args, block)
         end
@@ -2433,10 +2479,7 @@ module Tungsten
           if (overloads = typed_overload_group(self_obj, name))
             profile_visit_call("#{self_obj.name}##{name}") if @profile_enabled
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return dispatch_typed_overload(self_obj, self_obj, overloads, node, block)
           end
 
@@ -2448,10 +2491,7 @@ module Tungsten
               node.cached_local_miss_shape = @env.lookup_shape
             end
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
           end
         elsif self_obj.is_a?(Runtime::WObject)
@@ -2459,10 +2499,7 @@ module Tungsten
           if (overloads = typed_overload_group(owner, name))
             profile_visit_call("#{owner.name}##{name}") if @profile_enabled
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return dispatch_typed_overload(self_obj, owner, overloads, node, block)
           end
 
@@ -2473,10 +2510,7 @@ module Tungsten
               node.cached_local_miss_shape = @env.lookup_shape
             end
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
           end
         end
@@ -2593,7 +2627,8 @@ module Tungsten
         arg = one_call_arg_node(arg_nodes)
         return NO_DIRECT_CALL unless arg
 
-        ((direct_arg_value(arg) >> 7) & 15) != 15
+        cp = (direct_arg_value(arg) >> 18) & 0x1FFFFF
+        cp >= 48 && cp <= 57
       when "is_lower?"
         arg = one_call_arg_node(arg_nodes)
         return NO_DIRECT_CALL unless arg
@@ -3445,7 +3480,10 @@ module Tungsten
 
     def evaluate_begin_rescue(node, error)
       if node.rescue_body && !node.rescue_body.empty?
-        @env.set(node.rescue_var, error.message) if node.rescue_var
+        if node.rescue_var
+          rv = error.respond_to?(:raised_value) && !error.raised_value.nil? && !error.raised_value.is_a?(String) ? error.raised_value : error.message
+          @env.set(node.rescue_var, rv)
+        end
         evaluate(node.rescue_body)
       else
         raise error
@@ -3454,10 +3492,25 @@ module Tungsten
 
     def visit_raise(node)
       value = node.value ? evaluate(node.value) : "runtime error"
-      runtime_error(value.to_s, node: node)
+      msg = if value.is_a?(Hash) && (m = hash_indifferent_get(value, :message))
+              file = hash_indifferent_get(value, :file)
+              row = hash_indifferent_get(value, :row)
+              col = hash_indifferent_get(value, :col)
+              file ? "#{file}:#{row}:#{col}: #{m}" : m.to_s
+            else
+              value.to_s
+            end
+      begin
+        runtime_error(msg, node: node)
+      rescue Tungsten::Error => e
+        e.raised_value = value
+        raise e
+      end
     end
 
     def visit_use(node)
+      return nil if SKIP_COMPILER_CORE_USE_PATHS[node.path.to_s]
+
       path = resolve_use_path(node.path)
       return nil if @loaded_files.key?(path)
       @loaded_files[path] = true
@@ -4363,6 +4416,8 @@ module Tungsten
     end
 
     def simple_while_compare(left, op, right)
+      left = left.codepoint if left.is_a?(Tungsten::CharValue) && right.is_a?(Integer)
+      right = right.codepoint if right.is_a?(Tungsten::CharValue) && left.is_a?(Integer)
       case op
       when :== then left == right
       when :!= then left != right
@@ -4463,7 +4518,7 @@ module Tungsten
 
     def visit_in_test(node)
       lhs = evaluate(node.lhs)
-      node.elements.any? { |el| evaluate(el) == lhs }
+      node.elements.any? { |el| tungsten_eq(evaluate(el), lhs) }
     end
 
     def visit_break(node)
@@ -4681,8 +4736,9 @@ module Tungsten
     def visit_path(node)
       # Try the full namespaced name first (e.g., "Argon:Result")
       full_name = node.names.join(":")
-      if node.names.length > 1 && (@classes[full_name] || @modules[full_name])
-        return @classes[full_name] || @modules[full_name]
+      if node.names.length > 1
+        found = @classes[full_name] || @modules[full_name] || resolve_unique_namespaced_constant(full_name)
+        return found if found
       end
 
       name = node.names.first
@@ -4978,7 +5034,9 @@ module Tungsten
         case recv
         when ::Hash
           hash_indifferent_get(recv, key)
-        when ::Array, ::String, Tungsten::ByteArray
+        when Runtime::WireRecord
+          recv.load(key)
+        when Runtime::WireSequence, ::Array, ::String, Tungsten::ByteArray
           recv[key]
         else
           NO_DIRECT_CALL
@@ -4991,8 +5049,10 @@ module Tungsten
         value = direct_arg_value(arg_nodes[1])
         case recv
         when ::Hash
-          recv[canonical_hash_key(key)] = value
-        when ::Array, Tungsten::ByteArray
+          hash_indifferent_set(recv, key, value)
+        when Runtime::WireRecord
+          recv.store(key, value)
+        when Runtime::WireSequence, ::Array, Tungsten::ByteArray
           recv[key] = value
         else
           NO_DIRECT_CALL
@@ -5003,7 +5063,7 @@ module Tungsten
         case recv
         when ::String
           recv.bytesize
-        when ::Array, ::Hash, Tungsten::ByteArray
+        when Runtime::WireSequence, ::Array, ::Hash, Tungsten::ByteArray
           recv.length
         else
           NO_DIRECT_CALL
@@ -5120,7 +5180,7 @@ module Tungsten
         return NO_DIRECT_CALL unless recv.is_a?(::Hash)
 
         arg = one_call_arg_node(arg_nodes)
-        arg ? recv.key?(direct_arg_value(arg)) : NO_DIRECT_CALL
+        arg ? hash_indifferent_key?(recv, direct_arg_value(arg)) : NO_DIRECT_CALL
       when "slice"
         return NO_DIRECT_CALL unless recv.is_a?(::String)
 
@@ -5648,6 +5708,9 @@ module Tungsten
     def dispatch_interpreted_ccall(args, node = nil)
       runtime_error("ccall requires a runtime function name", node: node) if args.empty?
       cname = args[0].to_s
+      compiler_result = dispatch_compiler_ccall(cname, args)
+      return compiler_result unless compiler_result.equal?(COMPILER_CCALL_MISS)
+
       case cname
       when "w_date_new_w"
         runtime_error("w_date_new_w expects seven fields", node: node) unless args.size == 8
@@ -5806,7 +5869,7 @@ module Tungsten
       when "w_string_bytes_view"
         args[1].to_s.bytes
       else
-        runtime_error("undefined method 'ccall'", node: node, length: 5)
+        runtime_error("undefined method 'ccall' (#{cname})", node: node, length: 5)
       end
     end
 
@@ -6087,9 +6150,29 @@ module Tungsten
         return r.denominator == 1 ? r.numerator : r
       end
       return key.numerator if key.is_a?(::Rational) && key.denominator == 1
-      # Native hashes fold string and symbol keys into one spelling.
-      return key.name if key.is_a?(::Symbol)
       key
+    end
+
+    def hash_indifferent_set(hash, key, value)
+      key = canonical_hash_key(key)
+      if key.is_a?(::Symbol)
+        return hash[key.name] = value if !hash.key?(key) && hash.key?(key.name)
+      elsif key.is_a?(String)
+        return hash[key.to_sym] = value if !hash.key?(key) && hash.key?(key.to_sym)
+      end
+      hash[key] = value
+    end
+
+    def hash_indifferent_key?(hash, key)
+      key = canonical_hash_key(key)
+      return true if hash.key?(key)
+      if key.is_a?(::Symbol)
+        hash.key?(key.name)
+      elsif key.is_a?(String)
+        hash.key?(key.to_sym)
+      else
+        false
+      end
     end
 
     def hash_indifferent_get(hash, key)
@@ -6223,6 +6306,9 @@ module Tungsten
     end
 
     def primitive_runtime_class(recv)
+      return @classes["Tungsten:AST:Node"] || @classes["Node"] if recv.is_a?(Runtime::PackedNode)
+      return @classes["Token"] || try_autoload_core("Token") if packed_token_int?(recv)
+
       name =
         case recv
         when Tungsten::Atomic then "Atomic"

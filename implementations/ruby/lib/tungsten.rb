@@ -38,7 +38,7 @@ module Tungsten
   end
 
   class Error < StandardError
-    attr_accessor :location, :source_code, :file_path, :call_stack, :name_length
+    attr_accessor :location, :source_code, :file_path, :call_stack, :name_length, :raised_value
   end
 
   DimensionError = Class.new(Error)
@@ -112,8 +112,12 @@ module Tungsten
 
   module Runtime
     autoload :Builtins,          "tungsten/runtime/builtins"
+    autoload :CompilerIntrinsics, "tungsten/runtime/compiler_intrinsics"
+    autoload :PackedNode,        "tungsten/runtime/compiler_intrinsics"
     autoload :RawWValue,         "tungsten/runtime/raw_w_value"
     autoload :WClass,            "tungsten/runtime/w_class"
+    autoload :WireRecord,        "tungsten/runtime/compiler_intrinsics"
+    autoload :WireSequence,      "tungsten/runtime/compiler_intrinsics"
     autoload :WObject,           "tungsten/runtime/w_object"
     autoload :WMethod,           "tungsten/runtime/w_method"
   end

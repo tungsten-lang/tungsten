@@ -219,13 +219,17 @@ module Tungsten
                       when :"&(", :"&" then "&"
                       when *DOT_OPERATOR_NAMES then @token.type.to_s
                       end
-      check_for :ID, :NAME, :KEYWORD, :TYPE, :"&(", :"&", *DOT_OPERATOR_NAMES
+      check_for :ID, :NAME, :CONSTANT, :KEYWORD, :TYPE, :"&(", :"&", *DOT_OPERATOR_NAMES
 
       name = operator_name || @token.value.to_s
       name_file = @token.file
       name_row = @token.row
       name_col = @token.col
       next_token
+      if @token.type?(:!) && @token.row == name_row && @token.col == name_col + name.length
+        name = "#{name}!"
+        next_token
+      end
 
       args = parse_call_args(opening_consumed: fused_and_call)
       block = parse_block
@@ -1014,13 +1018,17 @@ module Tungsten
                           when :"&(", :"&" then "&"
                           when *DOT_OPERATOR_NAMES then @token.type.to_s
                           end
-          check_for :ID, :NAME, :KEYWORD, :TYPE, :"&(", :"&", *DOT_OPERATOR_NAMES
+          check_for :ID, :NAME, :CONSTANT, :KEYWORD, :TYPE, :"&(", :"&", *DOT_OPERATOR_NAMES
 
           name = operator_name || @token.value.to_s
           name_file = @token.file
           name_row = @token.row
           name_col = @token.col
           next_token
+          if @token.type?(:!) && @token.row == name_row && @token.col == name_col + name.length
+            name = "#{name}!"
+            next_token
+          end
 
           args = parse_call_args(opening_consumed: fused_and_call)
           block = parse_block
@@ -1113,6 +1121,17 @@ module Tungsten
           exponent = Int.new(digits.to_i)
           next_token
           atomic = BinaryOp.new(atomic, :**, exponent)
+        when :GLOBAL
+          prev_byte_pos = pos - @token.value.bytesize - 1
+          break if prev_byte_pos < 0 || [32, 9, 10, 13].include?(string.getbyte(prev_byte_pos))
+
+          field = @token.value.to_s.delete_prefix("$")
+          loc_file = @token.file
+          loc_row = @token.row
+          loc_col = @token.col
+          next_token
+          atomic = Call.new(atomic, "$#{field}", [])
+          atomic.set_location(loc_file, loc_row, loc_col)
         else
           break
         end
@@ -1582,7 +1601,7 @@ module Tungsten
         next_token_skip_whitespace  # past the type-param name
         next_token_skip_whitespace  # past `in`
         consume :"("
-        until @token.type?(:")") || @token.type?(:NL) || @token.type?(:EOF)
+        until @token.type?(:")") || @token.type?(:EOF)
           next_token
         end
         consume :")"
@@ -2056,6 +2075,11 @@ module Tungsten
         check_for :NAME, :CONSTANT, :ID, :TYPE
         superclass = @token.value
         next_token_skip_space
+        if @token.type?(:"<") && check(GENERIC_ARGS_AHEAD)
+          next_token until @token.type?(:">") || @token.type?(:NL) || @token.type?(:EOF)
+          consume :">"
+          skip_space
+        end
       end
 
       parse_class_role.call if @token.type?(:"[") && class_role.nil?
@@ -2259,8 +2283,14 @@ module Tungsten
       # The division operator's name is itself "/".
       arity = @token.type?(:ID_WITH_ARITY) ? extract_arity(name) : nil
       base_name = arity ? name.to_s.split("/", 2)[0] : name
+      name_row = @token.row
+      name_col = @token.col
 
       next_token
+      if @token.type?(:!) && @token.row == name_row && @token.col == name_col + base_name.to_s.length
+        base_name = "#{base_name}!"
+        next_token
+      end
 
       # `-> ==/1` — operator methods take their arity via a trailing slash
       # (identifier names arrive pre-fused as ID_WITH_ARITY). Mirrors the
@@ -2289,14 +2319,10 @@ module Tungsten
       when :NL, :";"
         # no args, no inline body
 
-      # -> name/2 @1 + @2
+      # -> name/2 @1 + @2  or  -> name expr / -> name return_type
       when :SP, :"&"
-        if arity
-          next_token  # consume SP, inline body follows
-          inline_body = true
-        else
-          unexpected "use parentheses when a method has parameters"
-        end
+        next_token if @token.type?(:SP)
+        inline_body = true
 
       # -> name(args)
       when :"("
@@ -2367,9 +2393,13 @@ module Tungsten
         # Return type: bare :TYPE followed by `:` (inline body) or
         # newline/indent/statement-end.
         if @token.type?(:TYPE) && looks_like_return_type_ahead?
-          return_type = @token.value.to_sym
-          next_token
+          return_type = parse_type_name_with_array_suffix
           skip_space
+        end
+
+        if return_type.nil? && param_types && @method[:args].empty? && param_types.size == 1 && !arity
+          return_type = param_types[0]
+          param_types = nil
         end
 
         # A space after `)` tentatively marks an inline body above, but that
@@ -2510,9 +2540,9 @@ module Tungsten
     end
 
     # A param-type-list element is a builtin type name (`i64`) or a class
-    # name (`BigInt`, `Number`, `VECTOR`), matching the compiler parser's
-    # is_param_type_token? (T_TYPE | T_NAME | T_CONSTANT).
-    PARAM_TYPE_NAME_PATTERN = "(?:#{Tungsten::Lexer::TYPE_NAME_PATTERN})\\b|[A-Z]\\w*".freeze
+    # name (`BigInt`, `Number`, `VECTOR`), with optional `[]` array suffix,
+    # matching the compiler parser's is_param_type_token? (T_TYPE | T_NAME | T_CONSTANT).
+    PARAM_TYPE_NAME_PATTERN = "(?:(?:#{Tungsten::Lexer::TYPE_NAME_PATTERN})\\b|[A-Z]\\w*)(?:\\[\\])?".freeze
     PARAM_TYPE_LIST_AHEAD =
       /\A\s*(?:#{PARAM_TYPE_NAME_PATTERN})(?:\s+(?:#{PARAM_TYPE_NAME_PATTERN}))*\s*\)/
 
@@ -2529,6 +2559,20 @@ module Tungsten
       result
     end
 
+    def parse_type_name_with_array_suffix
+      name = @token.value.to_s
+      next_token
+      if @token.type?(:"[]")
+        next_token
+        name = "#{name}[]"
+      elsif @token.type?(:"[")
+        next_token
+        consume :"]"
+        name = "#{name}[]"
+      end
+      name.to_sym
+    end
+
     # Parse a `(type type ...)` annotation with @token at the opening
     # paren, leaving @token just past `)`. Callers gate entry with
     # looks_like_param_types_ahead?.
@@ -2539,8 +2583,8 @@ module Tungsten
         unless @token.type?(:TYPE) || @token.type?(:NAME) || @token.type?(:CONSTANT)
           error "expected type name in param type list, got #{@token.type}"
         end
-        types << @token.value.to_sym
-        next_token_skip_space
+        types << parse_type_name_with_array_suffix
+        skip_space
       end
       consume :")"
       types
@@ -2548,10 +2592,11 @@ module Tungsten
 
     # Lookahead: when @token is at `:TYPE`, is the token a
     # return-type annotation? True iff what comes after it (modulo
-    # trailing whitespace) is `:` (inline body), a newline, `;`, or EOF.
+    # optional `[]` and trailing whitespace) is `:` (inline body), a newline, `;`, or EOF.
     # Rejects `type.method`, `type[idx]`, `type(args)` expression starts.
     def looks_like_return_type_ahead?
       saved_pos = pos
+      scan(/\[\]/)
       scan(/[ \t]*/)
       ch = rest[0]
       result = ch == ":" || ch == "\n" || ch == ";" || ch.nil?
@@ -2730,6 +2775,7 @@ module Tungsten
 
       ivar_bound = @token.type?(:IVAR)
       name = parse_arg_name
+      next_token_skip_whitespace if @token.type?(:TYPE_HINT)
 
       error "duplicate arg name: #{name}" if @method[:args].any? { |arg| arg.name == name }
 
@@ -2855,7 +2901,7 @@ module Tungsten
     end
 
     def keyword_label_token?
-      (@token.type?(:ID) || soft_identifier_keyword?) && label_colon_ahead?
+      (@token.type?(:ID) || @token.type?(:TYPE) || soft_identifier_keyword?) && label_colon_ahead?
     end
 
     def named_label_token?

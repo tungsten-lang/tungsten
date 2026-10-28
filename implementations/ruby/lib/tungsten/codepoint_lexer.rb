@@ -1195,6 +1195,8 @@ module Tungsten
 
     def type_hint_start?(pos)
       b = @source.getbyte(pos)
+      return true if upper_byte?(b)
+
       if lower_byte?(b)
         p = pos
         p += 1 while ident_continue_byte?(@source.getbyte(p))
@@ -1347,6 +1349,58 @@ module Tungsten
         p += utf8_width_at(p)
       end
       depth.zero?
+    end
+
+    def scan_heredoc(start_col)
+      start_row = @row
+      advance(3)
+      advance while byte == 32 || byte == 9
+      delim_start = @pos
+      if alpha_byte?(byte) || byte == 95
+        advance while alpha_byte?(byte) || digit_byte?(byte) || byte == 95
+      end
+      delim = slice(delim_start)
+      error "expected heredoc delimiter after <<~" if delim.empty?
+
+      advance while !eof? && byte != 10
+      error "unterminated heredoc: <<~#{delim}" if eof?
+      @pos += 1
+      @row += 1
+      @col = 1
+
+      body_lines = []
+      min_indent = nil
+      loop do
+        error "unterminated heredoc: <<~#{delim}" if eof?
+        line_start = @pos
+        advance while !eof? && byte != 10
+        line = slice(line_start)
+        if line.strip == delim && line =~ /\A[ \t]*#{Regexp.escape(delim)}[ \t]*\z/
+          break
+        end
+        body_lines << line
+        stripped = line.lstrip
+        unless stripped.empty?
+          indent = line.bytesize - stripped.bytesize
+          min_indent = indent if min_indent.nil? || indent < min_indent
+        end
+        error "unterminated heredoc: <<~#{delim}" if eof?
+        @pos += 1
+        @row += 1
+        @col = 1
+      end
+
+      min_indent ||= 0
+      dedented = body_lines.map do |l|
+        if l.empty? || l.bytesize <= min_indent
+          ""
+        else
+          l.byteslice(min_indent, l.bytesize - min_indent)
+        end
+      end.join("\n")
+
+      set_token(:STRING, dedented, start_row, start_col)
+      true
     end
 
     def scan_interpolation_expr
@@ -2268,6 +2322,7 @@ module Tungsten
           emit_operator(:"<-", 2, start_col)
         when 60
           return emit_operator(:"<<=", 3, start_col) if byte(2) == 61
+          return scan_heredoc(start_col) if byte(2) == 126
 
           emit_operator(:<<, 2, start_col)
         when 61

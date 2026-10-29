@@ -142,4 +142,29 @@ describe "Wassat arithmetic two-coloring" ->
     )
     expect(res["recognized"]).to eq(false)
 
+describe "Wassat arithmetic color symmetry" ->
+  it "requires matching scopes even when color and width counts match" ->
+    scopes = arith_ap_scopes(9, 3)
+    lines = []
+    i = 0
+    scopes.each -> (scope)
+      # Replace (1,2,3) with a duplicate of (1,3,5), leaving its negative
+      # partner intact. Counts stay balanced, but complementation is no
+      # longer a symmetry. The unique model assigns the first branch
+      # element, 5, true, so blindly fixing it false would be unsound.
+      positive = i == 0 ? [1, 3, 5] : scope
+      lines.push(positive.join(" ") + " 0")
+      neg = []
+      scope.each -> (v)
+        neg.push(0 - v)
+      lines.push(neg.join(" ") + " 0")
+      i += 1
+    text = "p cnf 9 [lines.size]\n" + lines.join("\n") + "\n"
+    formula = wassat_parse_cnf_native(text)
+    result = wassat_arith_coloring_solve(formula)
+    expect(result["recognized"]).to eq(true)
+    expect(result["status"]).to eq(1)
+    expect(result["model"].include?(5)).to eq(true)
+    expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
+
 spec_summary

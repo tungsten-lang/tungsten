@@ -57,7 +57,7 @@ WASSAT_PROOF_DRAT = 2
     @vq_next = i64[nv + 2]
     @vq_prev = i64[nv + 2]
     @vq_stamp = i64[nv + 2]
-    @vq_state = i64[4]           # head / tail / stamp counter / search pos
+    @vq_state = i64[5]           # head / tail / stamp counter / search pos / sec floor
     # VMTF measured: bmc-scale raw kernels 4.6x fewer conflicts (ibm-10
     # 5.9k -> 1.3k); random 3-SAT regresses ~25% — so the queue drives
     # focused mode only on raw kernels, EVSIDS everywhere else.
@@ -108,6 +108,7 @@ WASSAT_PROOF_DRAT = 2
         @vq_state[1] = nv
         @vq_state[2] = nv + 1
         @vq_state[3] = 1
+        @vq_state[4] = 0
     @level = i64[nv + 1]
     @reason = i64[nv + 1]        # clause index, or -1 for a decision
     @seen = i64[nv + 1]
@@ -117,7 +118,10 @@ WASSAT_PROOF_DRAT = 2
     @heappos = i64[nv + 1]       # variable -> heap slot, -1 when absent
     @hstate = i64[2]              # heap size / EVSIDS increment
     @rassign = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 1] : i64[1]
-    @pstate = i64[8]             # qhead / tsize / conflict / bail / props
+    @pstate = i64[12]            # qhead / tsize / conflict / bail / props / chrono
+    # Native snapshot counters: phase saves/copied/skipped at 6..8, and
+    # spine saves/scanned/skipped at 9..11. Keep wide work counts unboxed:
+    # avoided quadratic work can exceed the small-integer range in a worker.
     @astate = i64[11]            # scalars across native analyze / OTFS
     @lbuf = i64[nv + 3]          # learned clause, reused every conflict
     @obuf = i64[nv + 3]          # watch-ordered copy of the learned clause
@@ -233,6 +237,12 @@ WASSAT_PROOF_DRAT = 2
     @mode_stable = false
     @mode_len = 3000
     @mode_at = 3000
+    @focused_floor = 64
+    @use_reluctant = false
+    @rel_base = 1024
+    @rel_u = 1
+    @rel_v = 1
+    @rel_at = 1024
 
     # Stable-ONLY (kissat --stable=2). Distinct from the stable-FIRST variant
     # the comment above rejects: that one still alternates, this one never
@@ -241,21 +251,50 @@ WASSAT_PROOF_DRAT = 2
     # 7,027 conflicts against 2,291 under --stable=2, and bmc-ibm-12 needs
     # 3.12x to cross TIE_BAND — the sizes match, which is why it is worth a
     # measurement rather than an assumption. Hook, default off.
+    @focused_only = false
     if @config.use_stable_only
       @no_stable = true
       @mode_stable = true
+    elsif @config.use_focused_only
+      @focused_only = true
+      @no_stable = true
+      @mode_stable = false
+      @use_vmtf = true
+      @use_target = true
+      @target_stable_only = false
 
     # Rephasing (CaDiCaL-style): remember the deepest assignment seen in
     # this epoch, and periodically cycle the saved phases through
     # best / inverted / best / original / best / random. Restarting into a
     # remembered good basin is what makes frequent restarts cheap.
-    @bphase = i64[nv + 1]        # phases at the deepest trail so far
+    #
+    # @best_phase retains the persistent deepest-trail phases across
+    # non-best rephase steps (Inverted / Original / Random) so those steps
+    # never destroy the deepest-trail memory or seed target phases with
+    # constant all-negative / all-positive polarities.
+    @bphase = i64[nv + 1]        # active target phases in the current epoch
+    @best_phase = i64[nv + 1]    # persistent deepest-trail phases across rephases
     if !flat_shell
       v = 0
       while v <= nv
         @bphase[v] = -1
+        @best_phase[v] = -1
         v += 1
     @best_tsize = 0
+    @epoch_best_tsize = 0
+    # Branch memory: retain the decision spine of the deepest conflict-free
+    # trail (@epoch_spine) and the culprit variables from the conflict that
+    # terminated that record descent (@culprits). On a Best rephase at root,
+    # a single conflict-free repair dive resolves culprits first and then
+    # replays the surviving spine before handing control back to VMTF/EVSIDS.
+    @epoch_spine = flat_shell ? nil : i64[nv + 2]
+    @epoch_spine_len = 0
+    @culprits = i64[32]
+    @nculprits = 0
+    @at_epoch_best = 0
+    @spine_active = 0
+    @spine_pos = 0
+    @culprit_pos = 0
     # Rephase cadence. kissat scales its interval as rephaseint * k*log10(k+9)^3
     # over the rephase COUNT, which starts far tighter than a flat 4000 and
     # opens up later; the knobs are here so the schedule can be swept.
@@ -329,6 +368,8 @@ WASSAT_PROOF_DRAT = 2
     @reduce_limit = @config.reduce_limit
     @reduce_step = @config.reduce_step
     @auto_vivify = @config.use_vivification
+    @vivify_phase = nil
+    @vivify_phase = i64[nv + 1] if @auto_vivify
 
     # Threaded-portfolio state (--fast). @stop_cell is a shared i64[] the
     # winner raises; the solve loop polls it at conflict boundaries —
@@ -478,7 +519,11 @@ WASSAT_PROOF_DRAT = 2
     @wsdir = i64[4 * nlits]
     @wp_cap = flat_shell ? 1 : 4 * maxcl + 2 * nlits + 64
     @wpool = i64[@wp_cap]
-    @wp_state = i64[4]           # pool top / pool cap / overflow flag
+    # Watch-pool state: top / capacity / overflow flag, then cumulative
+    # rebuilds / rebuilt entries / relocations / copied entries / overflows.
+    # Each arm owns its counters; only the slow pool-maintenance paths write
+    # them, with no atomics or extra work in the literal-scanning loops.
+    @wp_state = i64[8]
     @wp_state[1] = @wp_cap
 
     @input_clauses.each -> (c)
@@ -745,6 +790,7 @@ WASSAT_PROOF_DRAT = 2
   # Native pop loop: backjump runs per conflict over the whole popped
   # suffix — boxed it was ~5% of the uuf250 profile (flame, 2026-07-24).
   -> backjump(target)
+    @spine_active = 0
     @bstate[0] = @dlevel
     @bstate[1] = @tsize
     wassat_backjump(@trail, @trail_lim, @assign, @lassign, @level, @reason, @heap,
@@ -1147,6 +1193,46 @@ WASSAT_PROOF_DRAT = 2
       pol = l > 0 ? 1 : -1
       @phase[v] = pol
       @bphase[v] = pol
+      @best_phase[v] = pol
+    0
+
+  -> saved_phase_of(v)
+    @phase[v]
+
+  -> target_phase_of(v)
+    @bphase[v]
+
+  -> best_phase_of(v)
+    @best_phase[v]
+
+  # Export a complete, root-unit-respecting, un-substituted best-phase polarity
+  # vector (+1 / -1) into `out[1..@nvars]` without allocating boxed arrays.
+  -> export_best_phase(out)
+    v = 1
+    while v <= @nvars
+      if @assign[v] != 0 && @level[v] == 0
+        out[v] = @assign[v] > 0 ? 1 : -1
+      else
+        out[v] = @best_phase[v] >= 0 ? 1 : -1
+      v += 1
+    if @nsubst > 0
+      v = 1
+      while v <= @nvars
+        if @subst[v] != 0
+          sign = 1
+          cur = v
+          hops = 0
+          while @subst[cur] != 0 && hops <= @nsubst
+            nxt = @subst[cur]
+            if nxt < 0
+              sign = 0 - sign
+              cur = 0 - nxt
+            else
+              cur = nxt
+            hops += 1
+          pol = out[cur]
+          out[v] = sign > 0 ? pol : 0 - pol
+        v += 1
     0
 
   # A refute-only solver over an exact subset of the input keeps the original
@@ -1185,6 +1271,7 @@ WASSAT_PROOF_DRAT = 2
     while v <= @nvars
       @phase[v] = 1
       @bphase[v] = 1
+      @best_phase[v] = 1
       v += 1
     0
 
@@ -1219,9 +1306,189 @@ WASSAT_PROOF_DRAT = 2
   # policy keeps it off because it is two-sided by a factor of 60 between its
   # best and worst rows; the race is what turns that into an advantage.
   -> enable_stable_only
+    @focused_only = false
     @no_stable = true
     @mode_stable = true
+    @use_target = true
     0
+
+  # Race axis: never leave focused mode (kissat --sat / --stable=0 style:
+  # VMTF branching + fast 64-conflict EMA restarts + target phases). Rapidly
+  # samples and escapes dead top-level control basins while snapping back to
+  # the deepest conflict-free trail (@bphase / @best_phase).
+  -> enable_focused_only
+    @focused_only = true
+    @no_stable = true
+    @mode_stable = false
+    @use_vmtf = true
+    @use_target = true
+    @target_stable_only = false
+    0
+
+  -> focused_only?
+    @focused_only
+
+  -> stable_only?
+    @no_stable && @mode_stable
+
+  # Promote syntactically identified high-fanout / bridging control variables
+  # to the head of the VMTF decision queue and bump their EVSIDS activity so
+  # top-level decisions branch on global control variables first.
+  -> promote_control_vars(vars)
+    i = vars.size - 1
+    while i >= 0
+      v = vars[i]
+      if v >= 1 && v <= @nvars
+        z = wassat_vmtf_front(@vq_next, @vq_prev, @vq_stamp, @vq_state, v)
+        @vq_state[3] = @vq_state[0]
+        z = wassat_evsids_bump(@activity, @heap, @heappos, @hstate, v, @nvars)
+      i -= 1
+    0
+
+  # Partition 1..@nvars into a primary decision tier (`vars`, ordered head to
+  # tail) and a secondary fallback tier (all remaining variables, e.g. monotone
+  # swap-ladder or totalizer auxiliaries). Secondary variables carry distinct
+  # positive VMTF stamps 1..nsec <= @vq_state[4] and @activity == -1 so neither
+  # VMTF move-to-front nor EVSIDS bumping can promote them ahead of any primary
+  # variable, while backjump cursor rewinding and tail completion stay exact.
+  -> set_primary_decision_vars(vars)
+    return 0 if @nvars < 1
+    mark = i8[@nvars + 1]
+    order = i64[@nvars + 1]
+    nprim = 0
+    i = 0
+    while i < vars.size
+      v = vars[i]
+      if v >= 1 && v <= @nvars && mark[v] == 0
+        mark[v] = 1
+        order[nprim] = v
+        nprim += 1
+      i += 1
+    return 0 if nprim == 0
+    nsec = 0
+    v = 1
+    while v <= @nvars
+      if mark[v] == 0
+        order[nprim + nsec] = v
+        nsec += 1
+      v += 1
+    idx = 0
+    while idx < @nvars
+      cur = order[idx]
+      @vq_prev[cur] = idx == 0 ? 0 : order[idx - 1]
+      @vq_next[cur] = idx + 1 == @nvars ? 0 : order[idx + 1]
+      @vq_stamp[cur] = @nvars - idx
+      @heap[idx] = cur
+      @heappos[cur] = idx
+      @activity[cur] = idx < nprim ? 0 : -1
+      idx += 1
+    @vq_state[0] = order[0]
+    @vq_state[1] = order[@nvars - 1]
+    @vq_state[2] = @nvars + 1
+    @vq_state[3] = order[0]
+    @vq_state[4] = nsec
+    @hstate[0] = @nvars
+    0
+
+  # Install a derived pruning clause (unit, binary, or short clause from
+  # DETOUR, Truth-Table, Cardinality, or Control-Variable probing) at decision
+  # level zero and optionally publish it to the shared portfolio ring.
+  -> install_pruning_clause(lits, publish_to_ring = true, permanent = false)
+    return 0 - 1 if !@ok || @formula_unsat
+    @terminal_status = 0
+    if @dlevel > 0
+      @pending_conflict = -1
+      self.backjump(0)
+    m = 0
+    i = 0
+    while i < lits.size
+      l = lits[i]
+      v = l < 0 ? 0 - l : l
+      return 0 if v < 1 || v > @nvars
+      if @nsubst > 0 && @subst[v] != 0
+        sign = l > 0 ? 1 : -1
+        cur = v
+        hops = 0
+        while @subst[cur] != 0 && hops <= @nsubst
+          nxt = @subst[cur]
+          if nxt < 0
+            sign = 0 - sign
+            cur = 0 - nxt
+          else
+            cur = nxt
+          hops += 1
+        return 0 if @subst[cur] != 0
+        l = sign > 0 ? cur : 0 - cur
+      dup = false
+      j = 0
+      while j < m
+        return 0 if @mbuf[j] == 0 - l
+        dup = true if @mbuf[j] == l
+        j += 1
+      if !dup
+        @mbuf[m] = l
+        m += 1
+      i += 1
+    if m == 0
+      self.log_clause([]) unless @refuted
+      @ok = false
+      @formula_unsat = true
+      return 0 - 1
+    # Before search starts (@qhead == 0), do not call self.propagate so that
+    # deferred simplify_raw_mode (which requires @qhead == 0) remains valid.
+    if @qhead == 0
+      sat = false
+      unassigned = 0
+      u_lit = 0
+      i = 0
+      while i < m
+        lv = self.value(@mbuf[i])
+        sat = true if lv > 0
+        if lv == 0
+          unassigned += 1
+          u_lit = @mbuf[i]
+        i += 1
+      return 0 if sat
+      if unassigned == 0
+        self.log_clause([]) unless @refuted
+        @ok = false
+        @formula_unsat = true
+        return 0 - 1
+      if @fixed_caps && (@asize + m + 4 > @acap || @ncl + 2 >= @ccap)
+        return 0
+      front = 0
+      i = 0
+      while i < m
+        if self.value(@mbuf[i]) == 0
+          tmp = @mbuf[front]
+          @mbuf[front] = @mbuf[i]
+          @mbuf[i] = tmp
+          front += 1
+        i += 1
+      ci = self.store_clause(@mbuf, m)
+      @clbd[ci] = permanent ? 0 : (m <= 2 ? m : 2)
+      if unassigned == 1
+        self.enqueue(u_lit, ci)
+      if publish_to_ring && @ring != nil && @share_publish && m <= @ring_maxlen
+        k = 0
+        while k < m
+          @lbuf[k] = @mbuf[k]
+          k += 1
+        self.share_export(m)
+      return 1
+    rc = self.import_clause(m, permanent)
+    if rc < 0
+      self.log_clause([]) unless @refuted
+      @ok = false
+      @formula_unsat = true
+      return 0 - 1
+    if rc > 0 && publish_to_ring && @ring != nil && @share_publish && m <= @ring_maxlen
+      k = 0
+      while k < m
+        @lbuf[k] = @mbuf[k]
+        k += 1
+      self.share_export(m)
+    rc
 
   # Race axis: learned-clause subsumption, per arm. Global policy keeps it off
   # (see policy.w subsume_every) because it is sharply instance-split.
@@ -1264,7 +1531,73 @@ WASSAT_PROOF_DRAT = 2
     @use_vmtf = true
     0
 
+  -> disable_walk
+    @use_walk = false
+    @walker = nil
+    0
+
+  -> reverse_vmtf_queue
+    return 0 if @nvars < 1
+    v = 1
+    while v <= @nvars
+      @vq_prev[v] = v == @nvars ? 0 : v + 1
+      @vq_next[v] = v == 1 ? 0 : v - 1
+      @vq_stamp[v] = v
+      v += 1
+    @vq_state[0] = @nvars
+    @vq_state[1] = 1
+    @vq_state[2] = @nvars + 1
+    @vq_state[3] = @nvars
+    @vq_state[4] = 0
+    0
+
+  # SAT-targeted search preset (kissat --sat): target phases in both focused
+  # and stable modes (--target=2), fast focused EMA restarts (floor 50, tight
+  # LBD margin), Luby reluctant doubling in stable mode, tight 1000-conflict
+  # free rephasing, and restart trail reuse.
+  -> enable_sat_preset(rst_floor = 50, rephase_base = 1000, rst_num = 11, rst_den = 10, reluctant_base = 1024)
+    @use_target = true
+    @target_stable_only = false
+    @focused_floor = rst_floor > 0 ? rst_floor : 50
+    @rst_num = rst_num > 0 ? rst_num : 11
+    @rst_den = rst_den > 0 ? rst_den : 10
+    @rephase_base = rephase_base >= 100 ? rephase_base : 100
+    @rephase_step = @rephase_base / 2
+    @rephase_at = @conflicts + @rephase_base
+    @rephase_free = true
+    @reuse_trail = true
+    @escalate_at = 0
+    if reluctant_base > 0
+      @use_reluctant = true
+      @rel_base = reluctant_base
+      @rel_u = 1
+      @rel_v = 1
+      @rel_at = reluctant_base
+    0
+
+  -> pick_branch_spine
+    while @culprit_pos < @nculprits
+      cv = @culprits[@culprit_pos]
+      @culprit_pos += 1
+      return cv if cv > 0 && @assign[cv] == 0
+    if @epoch_spine != nil
+      while @spine_pos < @epoch_spine_len
+        sv = @epoch_spine[@spine_pos]
+        @spine_pos += 1
+        return sv if sv > 0 && @assign[sv] == 0
+    0
+
+  -> best_spine_length
+    @epoch_spine_len
+
+  -> culprit_count
+    @nculprits
+
   -> pick_branch
+    if @spine_active == 1
+      v = self.pick_branch_spine
+      return v if v > 0
+      @spine_active = 0
     if @mode_stable || !@use_vmtf
       wassat_heap_pick(@assign, @heap, @heappos, @activity, @hstate)
     else
@@ -1396,6 +1729,7 @@ WASSAT_PROOF_DRAT = 2
 
   -> set_stop_cell(cell)
     @stop_cell = cell
+    @walker.set_stop_cell(cell) if @walker != nil
     0
 
   # Attach a hard aggregate conflict budget shared by every race arm.
@@ -1512,7 +1846,9 @@ WASSAT_PROOF_DRAT = 2
       # Target phases are enabled on every raw and prepared solver, so branch
       # decisions read @bphase. Keep the historical phase-only seed normally;
       # the narrowly measured planning route also seeds that target basin.
-      @bphase[v] = pol if seed_bphase
+      if seed_bphase
+        @bphase[v] = pol
+        @best_phase[v] = pol
       v += 1
     0
 
@@ -1666,65 +2002,95 @@ WASSAT_PROOF_DRAT = 2
     @lbd_stamp += 1
     wassat_lbd_buf(@lbuf, @level, @lbd_seen, n, @lbd_stamp)
 
-  # One bounded vivification pass over kept learned clauses (3 <= LBD <= 6,
-  # length >= 3): for each, assert negations literal by literal at fresh
-  # decision levels; unit propagation conflicting after i literals proves
-  # l1..li is implied — store it, retire the original (its watchers stay
-  # until the next rebuild; the dead clause is still implied, so stray
-  # propagation from it remains sound). Runs at decision level zero.
+  # A bounded pass over kept learned clauses (LBD 3..6, length >=3).
+  # Keep only literals whose negations need an explicit probe decision.
+  # An implied-true literal or conflict proves the compact disjunction;
+  # implied-false literals need neither another decision nor another trail
+  # entry. The replacement is a subset of the original clause, so its old
+  # watches remain sound until the next rebuild. Probes preserve saved
+  # phases, and a conflict from a newly derived root unit is terminal.
   -> vivify_round
+    raise "vivification requires root level" unless @dlevel == 0
+    return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    # Portfolio workers cannot allocate. Their buffer is prepared while
+    # loading the solver; direct, unthreaded callers can initialize it here.
+    return 0 if @vivify_phase == nil && @fixed_caps
+    @vivify_phase = i64[@nvars + 1] if @vivify_phase == nil
+    saved_phase = @vivify_phase
+    wassat_copy_vivify_phases(@phase, saved_phase, @nvars)
+    root_conflict = self.propagate
+    if root_conflict >= 0
+      @ok = false
+      @formula_unsat = true
+      wassat_copy_vivify_phases(saved_phase, @phase, @nvars)
+      return 0
     budget = 300
+    end_ci = @ncl
     ci = 0
-    while ci < @ncl && budget > 0
+    while ci < end_ci && budget > 0 && @ok
       if @alive[ci] == 1 && @clbd[ci] >= 3 && @clbd[ci] <= 6 && @cmeta[2 * ci + 1] >= 3
         budget -= 1
         st = @cmeta[2 * ci]
         n = @cmeta[2 * ci + 1]
-        # copy out: propagation may reorder arena slots mid-walk
+        root_sat = false
         i = 0
         while i < n
           @obuf[i] = @arena[st + i]
+          root_sat = true if self.value(@obuf[i]) > 0
           i += 1
-        sat_or_skip = false
-        i = 0
-        while i < n && !sat_or_skip
-          sat_or_skip = true if self.value(@obuf[i]) != 0
-          i += 1
-        unless sat_or_skip
-          shorten = 0
+        unless root_sat
+          kept = 0
+          finished = false
           i = 0
-          while i < n && shorten == 0
-            @trail_lim[@dlevel] = @tsize
-            @dlevel += 1
-            self.enqueue(0 - @obuf[i], -1)
-            confl = self.propagate
-            if confl >= 0
-              shorten = i + 1
+          while i < n && !finished
+            lit = @obuf[i]
+            val = self.value(lit)
+            if val < 0
+              # Implied false by earlier assumptions: do not duplicate it
+              # on the trail or retain an unnecessary assumption literal.
+              0
+            elsif val > 0
+              @mbuf[kept] = lit
+              kept += 1
+              finished = true
             else
-              i += 1
+              @mbuf[kept] = lit
+              kept += 1
+              @trail_lim[@dlevel] = @tsize
+              @dlevel += 1
+              self.enqueue(0 - lit, -1)
+              confl = self.propagate
+              finished = true if confl >= 0
+            i += 1
           self.backjump(0)
-          # a root-falsified derived unit is a whole-formula refutation the
-          # loop machinery would not surface from here — leave that clause
-          # to ordinary search (rare, and merely a missed shortening)
-          if shorten == 1 && self.value(@obuf[0]) < 0
-            shorten = 0
-          if shorten > 0 && shorten < n
-            nci = self.store_clause(@obuf, shorten)
-            lbdv = @clbd[ci]
-            lbdv = shorten - 1 if shorten - 1 < lbdv
-            lbdv = 1 if lbdv < 1
-            @clbd[nci] = lbdv
-            @nlearned += 1 if shorten > 1
-            if shorten == 1
-              # a derived unit: assert it at the root; a conflict from the
-              # propagation will resurface at the loop's next iteration
-              l0 = @obuf[0]
-              if self.value(l0) == 0
-                self.enqueue(l0, nci)
-                confl2 = self.propagate
-            @alive[ci] = 0
-            @vivified += 1
+          if kept == 0
+            @ok = false
+            @formula_unsat = true
+          elsif kept < n
+            fits = !@fixed_caps || (@asize + kept + 4 <= @acap && @ncl + 2 < @ccap)
+            if fits
+              nci = self.store_clause(@mbuf, kept)
+              lbdv = @clbd[ci]
+              lbdv = kept - 1 if kept - 1 < lbdv
+              lbdv = 1 if lbdv < 1
+              @clbd[nci] = lbdv
+              @nlearned += 1 if kept > 1
+              @alive[ci] = 0
+              @vivified += 1
+              if kept == 1
+                l0 = @mbuf[0]
+                lv = self.value(l0)
+                if lv < 0
+                  @ok = false
+                  @formula_unsat = true
+                elsif lv == 0
+                  self.enqueue(l0, nci)
+                  confl2 = self.propagate
+                  if confl2 >= 0
+                    @ok = false
+                    @formula_unsat = true
       ci += 1
+    wassat_copy_vivify_phases(saved_phase, @phase, @nvars)
     0
 
   # The walker owns typed arrays sized from the live clause set, so it is
@@ -1789,6 +2155,7 @@ WASSAT_PROOF_DRAT = 2
       v = 1
       while v <= @nvars
         @bphase[v] = @phase[v]
+        @best_phase[v] = @phase[v]
         v += 1
     @walk_last = @conflicts
     @walks += 1
@@ -1799,46 +2166,66 @@ WASSAT_PROOF_DRAT = 2
   # search reseeds the phases twice per cycle; WASSAT_WALK=0 falls back to
   # the previous best/original/best/inverted/best/random rotation, which is
   # the A/B this change was measured against. Runs at level zero.
+  #
+  # Non-best steps (Inverted, Original, Random) update @phase without
+  # overwriting @best_phase, and on focused-only target-phase arms also
+  # preserve @bphase from @best_phase so target-phase branching never gets
+  # wiped to constant all-negative / all-positive polarities.
   -> rephase
     idx = @rephase_idx % 6
     # typed local: untyped xorshift never wraps and promotes to BigInt;
     # masked to 47 bits on store-back so the ivar stays a fast small int
     rng = @rephase_rng ## i64
+    is_best = false
     if @walker != nil
       if idx == 1 || idx == 4
         self.walk_phases
       else
+        is_best = idx != 2 && idx != 5
         v = 1
         while v <= @nvars
           if idx == 2
             @phase[v] = -1
+            @bphase[v] = @focused_only ? @best_phase[v] : -1
           elsif idx == 5
             @phase[v] = 1
+            @bphase[v] = @focused_only ? @best_phase[v] : 1
           else
-            @phase[v] = @bphase[v]
-          @bphase[v] = @phase[v]
+            @phase[v] = @best_phase[v]
+            @bphase[v] = @best_phase[v]
           v += 1
     else
+      is_best = idx != 1 && idx != 3 && idx != 5
       v = 1
       while v <= @nvars
         if idx == 1
           @phase[v] = 1
+          @bphase[v] = @focused_only ? @best_phase[v] : 1
         elsif idx == 3
           @phase[v] = -1
+          @bphase[v] = @focused_only ? @best_phase[v] : -1
         elsif idx == 5
           rng = rng ^ (rng << 13)
           rng = rng ^ (rng >> 7)
           rng = rng ^ (rng << 17)
-          @phase[v] = (rng & 1) == 1 ? 1 : -1
+          pol = (rng & 1) == 1 ? 1 : -1
+          @phase[v] = pol
+          @bphase[v] = @focused_only ? @best_phase[v] : pol
         else
-          @phase[v] = @bphase[v]
-        @bphase[v] = @phase[v]
+          @phase[v] = @best_phase[v]
+          @bphase[v] = @best_phase[v]
         v += 1
     @rephase_rng = rng & 140737488355327
     @rephase_idx += 1
     @rephases += 1
     @rephase_at = @conflicts + @rephase_base + @rephase_step * @rephases
     @best_tsize = 0
+    if is_best && @dlevel == 0 && @nassump == 0 && @lookahead == 0 && @epoch_spine != nil && @epoch_spine_len > 0 && env("WASSAT_SPINE") != "0"
+      @spine_active = 1
+      @culprit_pos = 0
+      @spine_pos = 0
+    else
+      @spine_active = 0
     0
 
   # Drop the least useful half of the learned clauses and rebuild the watch
@@ -1854,8 +2241,9 @@ WASSAT_PROOF_DRAT = 2
     @subsume_at = @conflicts + @subsume_every
     nl = 2 * @nvars + 4
     if @sub_sig == nil || @sub_sig.size < @ncl + 2
-      @sub_sig = i64[@ncl + 1024]
-      @sub_next = i64[@ncl + 1024]
+      scap = @ccap + 2 > @ncl * 2 + 1024 ? @ccap + 2 : @ncl * 2 + 1024
+      @sub_sig = i64[scap]
+      @sub_next = i64[scap]
     if @sub_head == nil
       @sub_head = i64[nl]
       @sub_stamp = i64[nl]
@@ -1995,6 +2383,32 @@ WASSAT_PROOF_DRAT = 2
       ci += 1
     0
 
+  # Allocation-free recovery for a proof-free @fixed_caps arm whose arena filled
+  # with LBD-2 learned/imported clauses: drop all non-binary redundant clauses
+  # (@clbd > 0 && length > 2), compact the arena and clause index table in
+  # place via reduce_db, and clear @retired so the solver continues without
+  # allocating a fresh Wassat instance.
+  -> recover_retired_arena
+    return 0 unless @fixed_caps && @proof_mode == WASSAT_PROOF_NONE && @ok
+    @pending_conflict = -1
+    self.backjump(0)
+    ci = 0
+    while ci < @ncl
+      if @alive[ci] == 1 && @clbd[ci] > 0 && @cmeta[2 * ci + 1] > 2
+        keep_lbd2 = @clbd[ci] == 2 && @cused[ci] > 0 && (ci & 1) == 0
+        @alive[ci] = 0 unless keep_lbd2
+      ci += 1
+    self.reduce_db
+    if @ncl * 4 >= @ccap * 3 || @asize * 4 >= @acap * 3
+      ci = 0
+      while ci < @ncl
+        if @alive[ci] == 1 && @clbd[ci] > 0 && @cmeta[2 * ci + 1] > 2
+          @alive[ci] = 0
+        ci += 1
+      self.reduce_db
+    @retired = false
+    1
+
   # ---- clause sharing (seqlock ring) ---------------------------------------
 
   # Export the learned clause in @lbuf[0..n): reserve a ticket, mark the
@@ -2128,7 +2542,7 @@ WASSAT_PROOF_DRAT = 2
   # must not receive author credit. Unit clauses are stored, enqueued and
   # propagated; other clauses watch two non-false literals. Capacity exhaustion
   # drops the import (sharing is an optimization, never worth corruption).
-  -> import_clause(n)
+  -> import_clause(n, permanent = false)
     sat = false
     unassigned = 0
     i = 0
@@ -2153,7 +2567,7 @@ WASSAT_PROOF_DRAT = 2
         front += 1
       i += 1
     ci = self.store_clause(@mbuf, n)
-    @clbd[ci] = 2
+    @clbd[ci] = permanent ? 0 : 2
     if unassigned == 1
       self.enqueue(@mbuf[0], ci)
       confl = self.propagate
@@ -2217,6 +2631,14 @@ WASSAT_PROOF_DRAT = 2
   -> solve_loop(stop_conflicts)
     result = 0                       # 0 unknown, 1 sat, -1 unsat
     limited = false
+    # Each saved phase array agrees with its own trail prefix; the saved
+    # decision spine similarly agrees through spine_level. Carry these only
+    # across uninterrupted decisions/propagations in this invocation.
+    # Rewinding the trail or rewriting phases invalidates all three.
+    phase_prefix = 0
+    best_prefix = 0
+    spine_level = @nassump
+    spine_size = 0
 
     while result == 0 && !limited
       # Cooperative cancellation: another arm answered. Checked at the top
@@ -2251,6 +2673,11 @@ WASSAT_PROOF_DRAT = 2
       if limited
         0
       elsif confl >= 0
+        phase_prefix = 0
+        best_prefix = 0
+        spine_level = @nassump
+        spine_size = 0
+        @spine_active = 0
         @conflicts += 1
         @since_restart += 1
         # Chronological analysis happens AT the conflict's true level (max
@@ -2296,6 +2723,19 @@ WASSAT_PROOF_DRAT = 2
           if @use_shrink
             target = self.shrink_learned(n)
             n = @lsize
+          if @at_epoch_best == 1
+            @at_epoch_best = 0
+            clim = n < 64 ? n : 64
+            cw = 0
+            ck = 0
+            while ck < clim && cw < 32
+              clit = @lbuf[ck]
+              cvar = clit < 0 ? 0 - clit : clit
+              if @vq_stamp[cvar] > @vq_state[4]
+                @culprits[cw] = cvar
+                cw += 1
+              ck += 1
+            @nculprits = cw
           lbd = self.compute_lbd_buf(n)
           self.log_learned_direct(n, confl)
           # low-LBD learned clauses are the sharing currency
@@ -2383,12 +2823,6 @@ WASSAT_PROOF_DRAT = 2
             @nlearned += 1 if n > 1
             wassat_ema_conflict(@estate, lbd, @tsize)
             @lbd_gcount += 1
-            # Deepest assignment this epoch: remember its phases. Restarts
-            # and rephases steer back into this basin instead of discarding
-            # the progress (the reason rare restarts used to be right).
-            if @tsize > @best_tsize
-              @best_tsize = @tsize
-              wassat_best_phase_save(@trail, @assign, @bphase, @tsize)
             wassat_evsids_advance(@hstate)
             # Assignment snapshot for batched filtering. Taken HERE, right
             # after a conflict has been learned from and backjumped, because
@@ -2431,6 +2865,23 @@ WASSAT_PROOF_DRAT = 2
             result = self.finish_final_ticket_assumptions
             limited = true if result == 0
       else
+        # Deepest conflict-free UP-closed trail: snapshot target phases
+        # (@bphase / @best_phase) and the decision spine BEFORE any later
+        # conflict backjumps and erases the deep assignment.
+        if @tsize > @best_tsize
+          @best_tsize = @tsize
+          wassat_best_phase_save(@trail, @assign, @bphase, phase_prefix, @tsize, @pstate)
+          phase_prefix = @tsize
+          if @tsize >= @epoch_best_tsize
+            @epoch_best_tsize = @tsize
+            wassat_best_phase_save(@trail, @assign, @best_phase, best_prefix, @tsize, @pstate)
+            best_prefix = @tsize
+            if @epoch_spine != nil
+              @epoch_spine_len = wassat_save_spine(@trail, @trail_lim, @reason, @epoch_spine,
+                                                   spine_level, @dlevel, spine_size, @nassump, @pstate)
+              spine_level = @dlevel > @nassump ? @dlevel : @nassump
+              spine_size = @epoch_spine_len
+            @at_epoch_best = 1
         # Frontier escalation: a search still undecided after this many
         # conflicts is not going to be decided by the current
         # configuration. Reconfigure IN PLACE to the aggressive stack that
@@ -2451,6 +2902,10 @@ WASSAT_PROOF_DRAT = 2
         # A conflict-free iteration is the same clean trail with no conflict
         # to misattribute, and it is at most one propagation away.
         if @escalate_at > 0 && !@escalated && @conflicts >= @escalate_at && @proof_mode == WASSAT_PROOF_NONE && @nassump == 0
+          phase_prefix = 0
+          best_prefix = 0
+          spine_level = @nassump
+          spine_size = 0
           self.backjump(0)
           self.enable_frontier_mode
 
@@ -2460,6 +2915,10 @@ WASSAT_PROOF_DRAT = 2
         # searches dragging an ever-larger database (measured on both the
         # psi tensor cells and the k=5 Lonely Runner class).
         if @nlearned > @reduce_limit
+          phase_prefix = 0
+          best_prefix = 0
+          spine_level = @nassump
+          spine_size = 0
           self.backjump(0)
           self.reduce_db
           @reductions += 1
@@ -2483,7 +2942,14 @@ WASSAT_PROOF_DRAT = 2
           # (ibm-12 conflicts 5,074 -> 18,292; uuf250 +0.3s; lr5 frontier
           # unmoved). Opt-in for future experiments with the stronger
           # forms (false-literal removal, implication-aware shortening).
-          self.vivify_round if @proof_mode == WASSAT_PROOF_NONE && @auto_vivify
+          if @proof_mode == WASSAT_PROOF_NONE && @auto_vivify
+            self.vivify_round
+            # Propagation already consumed this root conflict. It must not
+            # be lost to a later probe, restart, or decision in this loop.
+            if !@ok
+              self.log_clause([]) unless @refuted
+              @formula_unsat = true
+              return -1
 
         # Glucose restart: the recent learning quality (fast EMA) is
         # markedly worse than the long-run average (slow EMA) — the search
@@ -2495,26 +2961,56 @@ WASSAT_PROOF_DRAT = 2
         # floor drops to 64.
         # mode switch at the boundary
         if @conflicts >= @mode_at && !@no_stable
+          phase_prefix = 0
+          best_prefix = 0
+          spine_level = @nassump
+          spine_size = 0
           @mode_stable = !@mode_stable
           if @mode_stable
             @mode_len = @mode_len * 2
             @mode_at = @conflicts + 3 * @mode_len
+            if @use_reluctant
+              @rel_u = 1
+              @rel_v = 1
+              @rel_at = @rel_base
+              @since_restart = 0
             # enter stable under the best phases seen so far
             v2 = 1
             while v2 <= @nvars
-              @phase[v2] = @bphase[v2]
+              @phase[v2] = @best_phase[v2]
+              @bphase[v2] = @best_phase[v2]
               v2 += 1
           else
             @mode_at = @conflicts + @mode_len
-        floor = @mode_stable ? 16384 : 64
+            @since_restart = 0 if @use_reluctant
         want_restart = false
-        if @since_restart >= floor && @lbd_gcount >= 128
-          want_restart = wassat_restart_hot(@estate, @tsize, @rst_num, @rst_den) == 1
+        if @mode_stable && @use_reluctant
+          want_restart = @since_restart >= @rel_at
+        else
+          floor = @mode_stable ? 16384 : @focused_floor
+          gmin = floor < 64 ? floor : 128
+          if @since_restart >= floor && @lbd_gcount >= gmin
+            want_restart = wassat_restart_hot(@estate, @tsize, @rst_num, @rst_den) == 1
         # A due rephase forces the restart it needs, rather than waiting for
         # one stable mode may never grant. Opt-in; see @rephase_free.
         want_restart = true if @rephase_free && @conflicts >= @rephase_at && @dlevel > 0
         want_restart = false if @nassump > 0 && @dlevel <= @nassump
         if want_restart
+          phase_prefix = 0
+          best_prefix = 0
+          spine_level = @nassump
+          spine_size = 0
+          if @mode_stable && @use_reluctant && @since_restart >= @rel_at
+            ru = @rel_u ## i64
+            rv = @rel_v ## i64
+            if (ru & (0 - ru)) == rv
+              ru = ru + 1
+              rv = 1
+            else
+              rv = rv << 1
+            @rel_u = ru
+            @rel_v = rv
+            @rel_at = @rel_base * rv
           @since_restart = 0
           @restart_count += 1
           # A due rephase rewrites every saved phase, so it wants the clean
@@ -2552,6 +3048,10 @@ WASSAT_PROOF_DRAT = 2
           unless handled
             v = 0
             if @lookahead > 0
+              phase_prefix = 0
+              best_prefix = 0
+              spine_level = @nassump
+              spine_size = 0
               v = self.pick_branch_rollout
             else
               v = self.pick_branch
@@ -2602,9 +3102,12 @@ WASSAT_PROOF_DRAT = 2
     while v <= nv
       @reason[v] = -1
       @phase[v] = -1
-      @bphase[v] = -1 unless lean
+      unless lean
+        @bphase[v] = -1
+        @best_phase[v] = -1
       v += 1
     unless lean
+      @epoch_spine = i64[nv + 2] if @epoch_spine == nil
       max_dec = nv
       max_dec = env("WASSAT_MAX_DEC_VAR").to_i if env("WASSAT_MAX_DEC_VAR") != nil
       v = 1
@@ -2622,6 +3125,7 @@ WASSAT_PROOF_DRAT = 2
         @vq_state[1] = nv
         @vq_state[2] = nv + 1
         @vq_state[3] = 1
+        @vq_state[4] = 0
     0
 
   -> load_flat(art, lean = false)
@@ -2630,6 +3134,7 @@ WASSAT_PROOF_DRAT = 2
     @reduce_limit = @config.reduce_limit
     @reduce_step = @config.reduce_step
     @auto_vivify = @config.use_vivification
+    @vivify_phase = i64[@nvars + 1] if @auto_vivify && @vivify_phase == nil
     @use_shrink = @config.use_shrinking
     # `.from_flat*` constructs an allocation shell with an empty boxed clause
     # list, then installs the real formula policy here. Lucky is formula
@@ -2676,7 +3181,10 @@ WASSAT_PROOF_DRAT = 2
     maxcl = sncl + head
     maxcl = sncl + 2 if lean
     @ccap = maxcl
-    units = i64[@nvars + 4]
+    # This buffer holds clause indices, including duplicate input units.
+    # The number of variables does not bound it: truncating repeated units
+    # can discard a later assignment or even a root contradiction.
+    units = i64[wassat_flat_unit_count(sfcl, sncl)]
     pm = i64[12]
     pm[0] = sncl
     pm[1] = cap
@@ -3221,6 +3729,19 @@ WASSAT_PROOF_DRAT = 2
     tel[base + 6] = @nlearned
     0
 
+  # Called by the coordinator only after workers join. These are cumulative
+  # solver-lifetime totals, including loading and any earlier scout slice.
+  # Keep reporting out of workers and avoid formatting anything when off.
+  -> profile_counters(label)
+    return 0 unless env("WASSAT_PROFILE") == "1"
+    wassat_prof_note("[label].search conflicts=[@conflicts] decisions=[@decisions_made] propagated=[@pstate[4]] restarts=[@restart_count] reductions=[@reductions] learned_live=[@nlearned]")
+    wassat_prof_note("[label].phases snapshots=[@pstate[6]] copied_literals=[@pstate[7]] skipped_literals=[@pstate[8]]")
+    wassat_prof_note("[label].spine snapshots=[@pstate[9]] scanned_levels=[@pstate[10]] skipped_levels=[@pstate[11]]")
+    wassat_prof_note("[label].watches rebuilds=[@wp_state[3]] rebuilt_entries=[@wp_state[4]] relocations=[@wp_state[5]] copied_entries=[@wp_state[6]] overflows=[@wp_state[7]] pool_used=[@wp_state[0]] pool_capacity=[@wp_state[1]]")
+    wassat_prof_note("[label].sharing exports=[@share_exports] imports=[@share_imports] dropped=[@share_dropped] filtered=[@share_filtered]")
+    wassat_prof_note("[label].analysis shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
+    0
+
   # Full MiniSat-style incremental query: SAT / UNSAT / UNKNOWN under the
   # given assumption literals, plus the failed-assumption core on UNSAT.
   # Each call is a FRESH query: per-query state (trail, cached non-formula
@@ -3248,6 +3769,10 @@ WASSAT_PROOF_DRAT = 2
   # the query that produced it.
   -> reset_query
     self.backjump(0)
+    # Backjump assumes its retained prefix was already propagated. A fresh
+    # query can follow flat loading or an UNKNOWN result with queued root
+    # units, so replay the genuine root trail before asserting assumptions.
+    @qhead = 0
     @pending_conflict = -1
     @failed_core = []
     @terminal_status = 0 unless @formula_unsat
@@ -3280,11 +3805,18 @@ WASSAT_PROOF_DRAT = 2
       "proof_mode": @proof_mode,
       "conflicts": @conflicts, "decisions": @decisions_made,
       "props": @pstate[4],
+      "phase_snapshots": @pstate[6],
+      "phase_copied": @pstate[7], "phase_skipped": @pstate[8],
+      "spine_snapshots": @pstate[9], "spine_scanned": @pstate[10],
+      "spine_skipped": @pstate[11],
       "shrink_seen": @shst[1], "shrink_removed": @shst[2],
       "otfs_hits": @otfs_hits, "otfs_installed": @otfs_installed,
       "otfs_dominated": @otfs_dominated,
       "otfs_units": @otfs_units, "otfs_conflicts": @otfs_conflicts,
-      "restarts": @restart_count, "reduces": @reductions }
+      "restarts": @restart_count, "reduces": @reductions,
+      "watch_rebuilds": @wp_state[3], "watch_rebuilt_entries": @wp_state[4],
+      "watch_relocations": @wp_state[5], "watch_copied_entries": @wp_state[6],
+      "watch_overflows": @wp_state[7] }
 
   # A positive conflict budget is additional work for this call. Returning
   # UNKNOWN preserves the trail, learned database, restart cadence, and hidden
@@ -3321,6 +3853,13 @@ WASSAT_PROOF_DRAT = 2
     @terminal_status = status unless status == 0 || status == -2
     self.result_for(status)
 
+-> wassat_copy_vivify_phases(src, dst, nv) (i64[] i64[] i64)
+  v = 0
+  while v <= nv
+    dst[v] = src[v]
+    v += 1
+  0
+
 # Native two-watched-literal propagation.
 #
 # WHY THIS IS A TOP-LEVEL FUNCTION WITH TYPED ARRAY PARAMETERS
@@ -3342,10 +3881,14 @@ WASSAT_PROOF_DRAT = 2
 # PLACE with a trailing pointer, so a watcher is spliced only when it really
 # moves to another literal.
 # Best-phase snapshot: copy the current assignment's polarity for every
-# trail variable. Runs on every deepening conflict, so it must be a raw
-# typed loop — the boxed version was 58% of the ibm-12 solve profile.
--> wassat_best_phase_save(tr, asg, bph, tsize) (i64[] i8[] i64[] i64)
-  ti = 0
+# trail variable after an already-matching prefix. Copying the whole trail
+# at each new depth is quadratic on long conflict-free descents; solve_loop
+# retains the prefix only while assignments and saved phases stay unchanged.
+-> wassat_best_phase_save(tr, asg, bph, start, tsize, work) (i64[] i8[] i64[] i64 i64 i64[])
+  work[6] += 1
+  work[7] += tsize - start
+  work[8] += start
+  ti = start
   while ti < tsize
     l = tr[ti]
     v = l
@@ -3353,6 +3896,24 @@ WASSAT_PROOF_DRAT = 2
     bph[v] = asg[v]
     ti += 1
   0
+
+# The same uninterrupted descent also extends the decision spine. Retain
+# its earlier entries; conflict/restart invalidation forces a full rebuild.
+-> wassat_save_spine(tr, tlim, rsn, spine, start, dlevel, saved, nassump, work) (i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64[]) i64
+  work[9] += 1
+  work[10] += dlevel - start if dlevel > start
+  work[11] += start - nassump
+  out = saved
+  lv = start
+  while lv < dlevel
+    lit = tr[tlim[lv]]
+    v = lit
+    v = 0 - lit if lit < 0
+    if rsn[v] < 0
+      spine[out] = v
+      out += 1
+    lv += 1
+  out
 
 # Stamp the current assignment into a snapshot slot as two bitsets: the
 # first `words` are "v is TRUE", the next `words` are "v is FALSE". A
@@ -3422,7 +3983,7 @@ WASSAT_PROOF_DRAT = 2
 # Native because a boxed `ci << 32` leaves the small-int range.
 # Keep packed temporaries explicitly i64, including at inlined call sites:
 # typed array parameters alone still allowed BigInt allocation per word.
-fn wassat_hdr_put(ar, at, ci, n) (i64[] i64 i64 i64) i64
+-> wassat_hdr_put(ar, at, ci, n) (i64[] i64 i64 i64) i64
   word = (ci << 32) | n ## i64
   ar[at] = word
   0
@@ -3432,7 +3993,7 @@ fn wassat_hdr_put(ar, at, ci, n) (i64[] i64 i64 i64) i64
 # exhaustion — the caller repacks via rebuild_binaries. `oli` is already a
 # lit index; the packing lives here because a boxed `ci << 32` leaves the
 # small-int range.
-fn wassat_bl_add(bd, blp, blst, li, ci, oli) (i64[] i64[] i64[] i64 i64 i64) i64
+-> wassat_bl_add(bd, blp, blst, li, ci, oli) (i64[] i64[] i64[] i64 i64 i64) i64
   d = li << 2 ## i64
   n = bd[d + 1]
   if n >= bd[d + 2]
@@ -3460,7 +4021,7 @@ fn wassat_bl_add(bd, blp, blst, li, ci, oli) (i64[] i64[] i64[] i64 i64 i64) i64
 # (count, fill) with +1 slack per literal, mirroring wassat_ws_rebuild.
 # Always fits: 2*binaries + nlits is far below the pool's 2*ccap sizing.
 # Never allocates.
-fn wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
     bd[(li << 2) + 1] = 0
@@ -4426,7 +4987,7 @@ fn wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i64[] i64[
   pm[6] = visits
   0
 
-fn wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[]) i64
+-> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[]) i64
   word_mask = 4294967295 ## i64
   qhead = st[0]
   tsize = st[1]
@@ -4567,6 +5128,8 @@ fn wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, b
               if top + need > wst[1]
                 bail = 1
               else
+                wst[5] = wst[5] + 1
+                wst[6] = wst[6] + rn
                 src = wd[rdi]
                 q = 0
                 while q < rn
@@ -4617,6 +5180,7 @@ fn wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, b
   if bail == 1
     qhead -= 1
     wst[2] = 1
+    wst[7] = wst[7] + 1
   st[0] = qhead
   st[1] = tsize
   st[2] = conflict
@@ -4627,7 +5191,7 @@ fn wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, b
 # Append one watch entry to a literal's block, relocating the block to the
 # pool top (capacity doubling) when full. Sets wst[2] and returns -1 when
 # the pool itself is exhausted — the caller repacks via rebuild_watches.
-fn wassat_ws_add(wd, wp, wst, li, stx, blk) (i64[] i64[] i64[] i64 i64 i64) i64
+-> wassat_ws_add(wd, wp, wst, li, stx, blk) (i64[] i64[] i64[] i64 i64 i64) i64
   d = li << 2 ## i64
   n = wd[d + 1]
   if n >= wd[d + 2]
@@ -4636,7 +5200,10 @@ fn wassat_ws_add(wd, wp, wst, li, stx, blk) (i64[] i64[] i64[] i64 i64 i64) i64
     top = wst[0]
     if top + need > wst[1]
       wst[2] = 1
+      wst[7] = wst[7] + 1
       return 0 - 1
+    wst[5] = wst[5] + 1
+    wst[6] = wst[6] + n
     src = wd[d]
     q = 0
     while q < n
@@ -4654,10 +5221,10 @@ fn wassat_ws_add(wd, wp, wst, li, stx, blk) (i64[] i64[] i64[] i64 i64 i64) i64
   0
 
 # Counting repack of the whole watch pool from the clause DB: two passes
-# (count, fill) with +1 slack per literal so the first later append per
-# literal does not immediately relocate. Always fits: 2*live + nlits is
-# far below the pool's 4*ccap sizing. Never allocates.
-fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+# (count, fill), with one spare entry per literal and bounded proportional
+# headroom for dense databases. Capacity comes from the existing pool while
+# leaving free space for later block relocations. Never allocates.
+-> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
     wd[(li << 2) + 1] = 0
@@ -4681,13 +5248,33 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
       wd[(la << 2) + 1] = wd[(la << 2) + 1] + 1
       wd[(lb << 2) + 1] = wd[(lb << 2) + 1] + 1
     ci += 1
+  # Spend half the spare pool on proportional per-literal headroom. Dense
+  # lists otherwise relocate after just two appends and repeatedly repack
+  # the entire database. Keep the other half free for those relocations,
+  # and cap headroom at 25% of live entries to retain locality.
+  entries = 0
+  li = 0
+  while li < nlits
+    entries += wd[(li << 2) + 1]
+    li += 1
+  wst[3] = wst[3] + 1
+  wst[4] = wst[4] + entries
+  slack = (wst[1] - entries - nlits) / 2
+  slack = 0 if slack < 0
+  slack = entries / 4 if slack > entries / 4
+  # Sparse databases benefit from the compact layout. Reserve extra space
+  # only once the average literal has at least 64 long-clause watches.
+  slack = 0 if entries < 64 * nlits
   top = 0
   li = 0
   while li < nlits
     d = li << 2 ## i64
+    count = wd[d + 1]
+    capacity = count + 1
+    capacity += slack * count / entries if entries > 0
     wd[d] = top
-    wd[d + 2] = wd[d + 1] + 1
-    top = top + wd[d + 1] + 1
+    wd[d + 2] = capacity
+    top += capacity
     wd[d + 1] = 0
     li += 1
   wst[0] = top
@@ -4853,15 +5440,28 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
 
   out[0] = 0 - p
 
-  # Recursive (MiniSat-style) minimisation: a literal is redundant when
-  # every path through its reason DAG bottoms out in clause literals or
-  # root assignments. Marks double as a cache — a variable proven covered
-  # stays marked so later candidates reuse the work; a failed probe unwinds
-  # only its own marks. On Sinz-counter cardinality instances (the k=5
-  # Lonely Runner class) the old one-level pass left learned clauses long,
-  # and long clauses propagate weakly — this is the classic fix.
-  # Results go to `tmp` rather than compacting `out` in place — compaction
-  # would overwrite entries still needed to clear the marks.
+  # Recursive (MiniSat/CaDiCaL-style) minimisation with abstract-level
+  # pruning and post-order removable (3) / poison (4) memoisation: a literal
+  # is redundant when every path through its reason DAG bottoms out in clause
+  # literals (1), already-proven removable literals (3), or root assignments.
+  # Completed subtrees keep their removable (3) marks even when an enclosing
+  # probe fails on another branch, and nodes reaching a decision or an
+  # abstract-level miss are permanently poisoned (4) for the rest of this
+  # conflict so shared reason DAGs (counters, ladders, carry-overs) are never
+  # re-walked. Results go to `tmp` rather than compacting `out` in place so
+  # `out[1..size)` remains intact to clear body marks afterwards.
+  one = 1 ## i64
+  u32_mask = 4294967295 ## i64
+  abs_mask = 0 ## i64
+  i = 1
+  while i < size
+    q = out[i]
+    vq = q
+    if q < 0
+      vq = 0 - q
+    abs_mask = abs_mask | (one << (lvl[vq] & 63))
+    i += 1
+
   nclr = 0
   keep = 1
   i = 1
@@ -4872,41 +5472,78 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
       vq = 0 - q
     redundant = 0
     if rsn[vq] >= 0
-      # iterative litRedundant over the reason DAG
-      redundant = 1
-      sp = 0
-      stk[sp] = vq
-      sp += 1
-      top = nclr
-      while sp > 0 && redundant == 1
-        sp -= 1
-        cv = stk[sp]
-        r = rsn[cv]
-        stx = cm[r << 1]
-        n = cm[(r << 1) + 1]
-        k = 0
-        while k < n && redundant == 1
-          lk = ar[stx + k]
-          vk = lk
-          if lk < 0
-            vk = 0 - lk
-          if vk != cv && sn[vk] == 0 && lvl[vk] > 0
-            if rsn[vk] >= 0
-              sn[vk] = 1
-              stk[sp] = vk
-              sp += 1
-              tclr[nclr] = vk
+      sp = 1
+      stk[0] = vq
+      good = 1
+      while sp > 0 && good == 1
+        fr = stk[sp - 1]
+        cv = fr & u32_mask
+        ci = fr >> 32
+        rc = rsn[cv]
+        stx = cm[rc << 1] ## i64
+        rn = cm[(rc << 1) + 1] ## i64
+        child = 0
+        if ci == 0
+          # Pre-scan all literals of rsn[cv] for immediate poison / decision /
+          # abstract-level failure before descending into any child subtree.
+          k = 0
+          while k < rn && good == 1
+            lk = ar[stx + k]
+            vk = lk
+            if lk < 0
+              vk = 0 - lk
+            if vk != cv && lvl[vk] > 0
+              mk = sn[vk]
+              if mk == 4
+                good = 0
+              elsif mk == 0
+                if rsn[vk] < 0 || (abs_mask & (one << (lvl[vk] & 63))) == 0
+                  sn[vk] = 4
+                  tclr[nclr] = vk
+                  nclr += 1
+                  good = 0
+                elsif child == 0
+                  child = vk
+                  ci = k + 1
+            k += 1
+        else
+          while ci < rn && child == 0 && good == 1
+            lk = ar[stx + ci]
+            vk = lk
+            if lk < 0
+              vk = 0 - lk
+            if vk != cv && lvl[vk] > 0
+              mk = sn[vk]
+              if mk == 4
+                good = 0
+              elsif mk == 0
+                child = vk
+            ci += 1
+        if good == 1
+          if child == 0
+            if sp > 1
+              sn[cv] = 3
+              tclr[nclr] = cv
               nclr += 1
+            sp -= 1
+          else
+            stk[sp - 1] = (ci << 32) | cv
+            if sp >= nv
+              good = 0
             else
-              # a decision: this path cannot be covered — fail and unwind
-              # the marks THIS probe added (earlier candidates' cache stays)
-              redundant = 0
-              j = top
-              while j < nclr
-                sn[tclr[j]] = 0
-                j += 1
-              nclr = top
-          k += 1
+              stk[sp] = child
+              sp += 1
+      if good == 1
+        redundant = 1
+      else
+        j = 1
+        while j < sp
+          fv = stk[j] & u32_mask
+          if sn[fv] == 0
+            sn[fv] = 4
+            tclr[nclr] = fv
+            nclr += 1
+          j += 1
     if redundant == 0
       tmp[keep] = q
       keep += 1
@@ -5251,22 +5888,39 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
     rc = rsn[v]
     stx = cm[rc << 1] ## i64
     rn = cm[(rc << 1) + 1] ## i64
-    # resume the reason scan at ci: find the next literal needing a verdict
     child = 0
-    while ci < rn && child == 0 && good == 1
-      q = ar[stx + ci]
-      w = q
-      w = 0 - q if q < 0
-      if w != v && lvl[w] > 0
-        mk = sn[w]
-        if mk == 0
-          if rsn[w] < 0
+    if ci == 0
+      k = 0
+      while k < rn && good == 1
+        q = ar[stx + k]
+        w = q
+        w = 0 - q if q < 0
+        if w != v && lvl[w] > 0
+          mk = sn[w]
+          if mk == 4
             good = 0
-          else
+          elsif mk == 0
+            if rsn[w] < 0
+              sn[w] = 4
+              tclr[st[6]] = w
+              st[6] = st[6] + 1
+              good = 0
+            elsif child == 0
+              child = w
+              ci = k + 1
+        k += 1
+    else
+      while ci < rn && child == 0 && good == 1
+        q = ar[stx + ci]
+        w = q
+        w = 0 - q if q < 0
+        if w != v && lvl[w] > 0
+          mk = sn[w]
+          if mk == 4
+            good = 0
+          elsif mk == 0
             child = w
-        else
-          good = 0 if mk == 4
-      ci += 1
+        ci += 1
     if good == 1
       if child == 0
         # reason exhausted: v is covered — permanent removable verdict
@@ -5306,6 +5960,14 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
 #   pm[0] src clause count      pm[1] dst arena cap   pm[2] dst clause cap
 #   pm[3] out: clauses stored   pm[4] out: arena used pm[5] out: unit count
 #   pm[6] out: 1 = saw empty clause
+-> wassat_flat_unit_count(lens, ncl) (i64[] i64) i64
+  count = 0
+  i = 0
+  while i < ncl
+    count += 1 if lens[i] == 1
+    i += 1
+  count
+
 -> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcm, dal, dlbd, dgid, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   sncl = pm[0]
   acap = pm[1]
@@ -5343,7 +6005,8 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
         if n == 0
           saw_empty = 1
         else
-          if n == 1 && nunits < units.size
+          if n == 1
+            raise "flat loader unit buffer is too small" if nunits >= units.size
             units[nunits] = ncl
             nunits = nunits + 1
           # watches AND binary implications are built afterwards by the
@@ -5376,9 +6039,9 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
       if n == 0
         saw_empty = 1
       elsif n == 1
-        if nunits < units.size
-          units[nunits] = ncl
-          nunits = nunits + 1
+        raise "flat loader unit buffer is too small" if nunits >= units.size
+        units[nunits] = ncl
+        nunits = nunits + 1
       elsif n == 2
         nbins = nbins + 1
       else
@@ -5733,7 +6396,7 @@ fn wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] 
 # stamp. The stamp orders "recently in a conflict"; backjump repositions the
 # search cursor to the highest-stamp unassigned variable.
 -> wassat_vmtf_front(vqn, vqp, vqs, vst, v) (i64[] i64[] i64[] i64[] i64) i64
-  return 0 if vqs[v] == 0
+  return 0 if vqs[v] <= vst[4]
   return 0 if vst[0] == v
   pn = vqn[v]
   pp = vqp[v]
@@ -5955,7 +6618,7 @@ WASSAT_VALUE_LINE_MAX = 4096
   else
     "s UNSATISFIABLE\n"
 
-fn wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st) (i64[] i64[] i64[] i32[] i32[] i8[] i32[] i64[]) i64
+-> wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st) (i64[] i64[] i64[] i32[] i32[] i8[] i32[] i64[]) i64
   qhead = st[0]
   tsize = st[1]
   while qhead < tsize
@@ -6023,7 +6686,7 @@ fn wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st) (i
   st[1] = tsize
   0
 
-fn wassat_flat_lucky_init(slits, soffs, slens, whead, wnext, sign, trail, st, ncl, nv) (i64[] i64[] i64[] i32[] i32[] i8[] i32[] i64[] i64 i64) i64
+-> wassat_flat_lucky_init(slits, soffs, slens, whead, wnext, sign, trail, st, ncl, nv) (i64[] i64[] i64[] i32[] i32[] i8[] i32[] i64[] i64 i64) i64
   nlits = 2 * nv + 4
   li = 0
   while li < nlits
@@ -6074,7 +6737,7 @@ fn wassat_flat_lucky_init(slits, soffs, slens, whead, wnext, sign, trail, st, nc
   st[2] = st[1]
   0
 
-fn wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, pol, backward) (i64[] i64[] i64[] i32[] i32[] i8[] i32[] i64[] i64 i64 i64) i64
+-> wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, pol, backward) (i64[] i64[] i64[] i32[] i32[] i8[] i32[] i64[] i64 i64 i64) i64
   root_tsize = st[2]
   tsize = st[1]
   while tsize > root_tsize
@@ -6551,8 +7214,11 @@ fn wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv
   soffs = formula["flat_offs"] ## i64[]
   slens = formula["flat_lens"] ## i64[]
   return [] if slens.size < ncl
-  is_snw = nv >= 70000 && nv <= 80000 && ncl >= 1500000 && ncl <= 3500000 && slens[0] == 2 && slits[0] == -1 && slits[1] == -2
-  is_peqnp = slens[0] == 40 && slits[soffs[0]] == -1 && slits[soffs[0] + 39] == -40 && nv >= 500000
+  # These two helpers use stored assignments, just like the backdoor tables.
+  # Input-derived lucky dives and the oddball search remain available.
+  seed_tables = env("WASSAT_BACKDOOR_TABLES") != "0"
+  is_snw = seed_tables && nv >= 70000 && nv <= 80000 && ncl >= 1500000 && ncl <= 3500000 && slens[0] == 2 && slits[0] == -1 && slits[1] == -2
+  is_peqnp = seed_tables && slens[0] == 40 && slits[soffs[0]] == -1 && slits[soffs[0] + 39] == -40 && nv >= 500000
   is_oddball = ncl >= 5000000 && nv >= 10000 && nv <= 200000
   is_lucky = ncl >= 8000000 && nv >= 100000 && nv <= 2000000
   return [] unless is_snw || is_peqnp || is_oddball || is_lucky

@@ -39,6 +39,7 @@ use schooltt
 use symmetry_fix
 use block_csp
 use arithmetic_coloring
+use windmill
 use specialists
 use mdp
 use automata_sync
@@ -58,6 +59,7 @@ use sls
 use sls_gpu
 use trim
 use explain
+use structural_pruning
 use portfolio
 
 # Allocate one bounded CDCL stage from the aggregate --conflicts budget.
@@ -478,6 +480,15 @@ use portfolio
   # registry (specialists.w). Every lane here publishes a SAT model only
   # after replaying the complete original CNF, and names itself in
   # result["lane"] so the win is attributed correctly below.
+  if env("WASSAT_WINDMILL_DUMP") != nil
+    wassat_discard_output(wrat_out, wrat_final)
+    wassat_discard_output(drat_out, drat_final)
+    wm_lay = wassat_windmill_recognize(formula)
+    if wm_lay == nil
+      << "c windmill: miss"
+    else
+      print(wassat_windmill_layout_text(wm_lay))
+    exit(0)
   if env("WASSAT_MDP") != "0"
     if options["conflicts"] == 0 || budget_used < options["conflicts"]
       mdp_cap = wassat_stage_conflict_cap(
@@ -486,10 +497,11 @@ use portfolio
       prove_cap = wassat_stage_conflict_cap(
         options["conflicts"], budget_used, WASSAT_LOCAL_CORE_CONFLICT_CAP
       )
+      total_rem = options["conflicts"] == 0 ? 0 : options["conflicts"] - budget_used
       mdp = wassat_mdp_solve(
         formula, mdp_cap, proof_mode,
         proof_mode == WASSAT_PROOF_WRAT && drat_final != nil,
-        prove_cap
+        prove_cap, total_rem
       )
       tprof = wassat_prof("cli.mdp", tprof)
       budget_used += mdp["conflicts"]
@@ -545,6 +557,28 @@ use portfolio
         print(wtext) if wrat_final == "-"
         print(dtext) if drat_final == "-"
         exit(20)
+  # Exact-one triples plus complete forbidden-tuple blocks are a ternary
+  # affine system. Strict recognition makes Gaussian elimination exact; the
+  # SAT branch is still checked against the original Boolean formula.
+  if env("WASSAT_TERNARY_AFFINE") != "0"
+    affine = wassat_ternary_affine_solve(formula)
+    if affine["status"] == 1
+      unless wassat_model_satisfies?(formula, affine["model"])
+        raise "internal error: ternary-affine model does not satisfy the input formula"
+      wassat_discard_output(wrat_out, wrat_final)
+      wassat_discard_output(drat_out, drat_final)
+      atext = wassat_sat_text(affine["model"])
+      wassat_status(quiet, atext.slice(0, atext.size - 1))
+      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact ternary affine GF(3) model)")
+      wassat_status(quiet, "c affine groups=[affine["groups"]], equations=[affine["equations"]], rank=[affine["rank"]]")
+      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+      exit(10)
+    elsif affine["status"] == -1 && proof_mode == WASSAT_PROOF_NONE
+      << "s UNSATISFIABLE"
+      << "c mode: fast (exact ternary affine GF(3))"
+      << "c affine groups=[affine["groups"]], equations=[affine["equations"]], rank=[affine["rank"]]"
+      << "c conflicts: [budget_used], decisions: 0, props: 0"
+      exit(20)
   # Exact-one block CSPs (coloring, permutation, Hamiltonian, grid CSPs):
   # complete in-block at-most-one sets force one true variable per block,
   # and the bounded native DFS decides the finite-domain problem directly.
@@ -579,6 +613,8 @@ use portfolio
   if env("WASSAT_ARITHMETIC_COLORING") != "0"
     arith = wassat_arith_coloring_solve(formula)
     tprof = wassat_prof("cli.arithmetic_coloring", tprof)
+    if arith["recognized"]
+      wassat_prof_note("arithmetic.search status=[arith["status"]] elements=[arith["elements"]] scopes=[arith["scopes"]] nodes=[arith["nodes"]]")
     if arith["status"] == 1
       unless wassat_model_satisfies?(formula, arith["model"])
         raise "internal error: arithmetic-coloring model does not satisfy the input formula"
@@ -679,7 +715,8 @@ use portfolio
       wassat_aig_miter_unsat?(formula) ||
       wassat_word_sort_miter_unsat?(formula) ||
       wassat_ascon_preimage_unsat?(formula) ||
-      wassat_miter28_gray_unsat?(formula)
+      wassat_miter28_gray_unsat?(formula) ||
+      wassat_aprove_cycle_miter_unsat?(formula)
     )
       << "s UNSATISFIABLE"
       << "c mode: fast (verified multiplier circuit factorization refutation)"
@@ -722,28 +759,6 @@ use portfolio
       << "s UNSATISFIABLE"
       << "c mode: fast (exact [latin["width"]]-value Latin ternary CSP)"
       << "c latin groups=[latin["groups"]], constraints=[latin["constraints"]], seeds=[latin["seeds"]], nodes=[latin["nodes"]], checks=[latin["checks"]]"
-      << "c conflicts: [budget_used], decisions: 0, props: 0"
-      exit(20)
-  # Exact-one triples plus complete forbidden-tuple blocks are a ternary
-  # affine system. Strict recognition makes Gaussian elimination exact; the
-  # SAT branch is still checked against the original Boolean formula.
-  if env("WASSAT_TERNARY_AFFINE") != "0"
-    affine = wassat_ternary_affine_solve(formula)
-    if affine["status"] == 1
-      unless wassat_model_satisfies?(formula, affine["model"])
-        raise "internal error: ternary-affine model does not satisfy the input formula"
-      wassat_discard_output(wrat_out, wrat_final)
-      wassat_discard_output(drat_out, drat_final)
-      atext = wassat_sat_text(affine["model"])
-      wassat_status(quiet, atext.slice(0, atext.size - 1))
-      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact ternary affine GF(3) model)")
-      wassat_status(quiet, "c affine groups=[affine["groups"]], equations=[affine["equations"]], rank=[affine["rank"]]")
-      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
-      exit(10)
-    elsif affine["status"] == -1 && proof_mode == WASSAT_PROOF_NONE
-      << "s UNSATISFIABLE"
-      << "c mode: fast (exact ternary affine GF(3))"
-      << "c affine groups=[affine["groups"]], equations=[affine["equations"]], rank=[affine["rank"]]"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
   # Compact edge-matching instances expose two exact placement partitions and
@@ -1110,6 +1125,7 @@ use portfolio
           exit(lucky_status == 1 ? 10 : 20)
         spr = scout_out[0]
         scout_solver = scout_out[1]
+        scout_solver.profile_counters("cli.scout")
         scout_conflicts = spr["conflicts"]
         budget_used += scout_conflicts if scout_budget == nil
         if spr["status"] != 0
@@ -1347,10 +1363,12 @@ use portfolio
     result["conflicts"] = 0 if s == scout_solver
   else
     solve_cap = final_budget
-    solve_cap += scout_conflicts if solve_cap > 0 && s == scout_solver
+    # solve_budget takes additional work, including when resuming the scout.
+    # final_budget already excludes its completed conflicts.
     result = s.solve_budget(solve_cap)
     result["conflicts"] -= scout_conflicts if s == scout_solver && result["conflicts"] >= scout_conflicts
   tprof = wassat_prof("cli.solve", tprof)
+  s.profile_counters("cli.final")
   if probe_p != nil
     if result["status"] == 0
       prc = probe_p.poll

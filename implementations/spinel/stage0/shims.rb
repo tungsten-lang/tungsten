@@ -98,7 +98,7 @@ class StringBuffer
   end
 
   def append(value)
-    s = "" + value.to_s
+    s = value.to_s
     if s.bytesize > 0
       @parts.push(s)
       @byte_len += s.bytesize
@@ -126,7 +126,7 @@ class StringBuffer
       @parts.push(joined)
       return joined
     end
-    "" + @parts[0].to_s
+    @parts[0]
   end
 
   def length
@@ -197,10 +197,8 @@ class PackedNode
     @kind = kind.to_i
     @sc = sc.to_i
     @offset = offset.to_i
-    @fields = [nil, 0, ""]
-    @fields.clear
-    @sparse = {"__spinel_k__" => nil, "__spinel_i__" => 0, "__spinel_s__" => ""}
-    @sparse.clear
+    @fields = nil
+    @sparse = nil
     @analysis = nil
     @ivar_offsets = nil
     @ivar_count = nil
@@ -209,31 +207,55 @@ class PackedNode
 
   def set_field(off, val)
     i = off.to_i
-    while @fields.length <= i
-      @fields.push(nil)
+    f = @fields
+    if f.nil?
+      f = [nil, 0, ""]
+      f.clear
+      @fields = f
     end
-    @fields[i] = val
+    while f.length <= i
+      f.push(nil)
+    end
+    f[i] = val
     val
   end
 
   def get_field(off)
+    f = @fields
+    return nil if f.nil?
     i = off.to_i
-    return nil if i < 0 || i >= @fields.length
-    @fields[i]
+    return nil if i < 0 || i >= f.length
+    f[i]
+  end
+
+  def sparse_sym(key)
+    return key if key.is_a?(Symbol)
+    key.to_s.to_sym
   end
 
   def set_sparse(key, val)
-    @sparse[key.to_s] = val
+    sp = @sparse
+    if sp.nil?
+      sp = {:__spinel_k__ => nil, :__spinel_i__ => 0, :__spinel_s__ => ""}
+      sp.clear
+      @sparse = sp
+    end
+    sp[sparse_sym(key)] = val
     val
   end
 
   def get_sparse(key)
-    @sparse[key.to_s]
+    sp = @sparse
+    return nil if sp.nil?
+    sp[sparse_sym(key)]
   end
 
   def copy_metadata_to(dst)
-    @sparse.each do |k, v|
-      dst.set_sparse(k, v)
+    sp = @sparse
+    unless sp.nil?
+      sp.each do |k, v|
+        dst.set_sparse(k, v)
+      end
     end
     dst.analysis = @analysis
     dst.ivar_offsets = @ivar_offsets
@@ -247,57 +269,70 @@ class PackedNode
 end
 
 class WireRecord
-  attr_accessor :kind, :keys, :values, :index_by_key
+  attr_accessor :kind, :keys, :key_syms, :values
 
   def initialize(kind)
     @kind = kind.to_i
     @keys = [nil, 0, ""]
     @keys.clear
+    @key_syms = [:__spinel_sym__]
+    @key_syms.clear
     @values = [nil, 0, ""]
     @values.clear
-    @index_by_key = {"__spinel_k__" => 0}
-    @index_by_key.clear
+  end
+
+  def sym_key(sym)
+    return sym if sym.is_a?(Symbol)
+    sym.to_s.to_sym
   end
 
   def store_at(idx, sym, val)
     i = idx.to_i
-    key = sym.to_s
-    while @keys.length <= i
+    s = sym_key(sym)
+    ks = @key_syms
+    while ks.length <= i
+      ks.push(:__spinel_empty__)
       @keys.push(nil)
       @values.push(nil)
     end
+    ks[i] = s
     @keys[i] = sym
     @values[i] = val
-    @index_by_key[key] = i + 1
     val
   end
 
   def store(sym, val)
-    key = sym.to_s
-    idx_plus_1 = @index_by_key[key]
-    if !idx_plus_1.nil? && idx_plus_1 > 0
-      @values[idx_plus_1 - 1] = val
-    else
-      idx = @keys.length
-      @keys.push(sym)
-      @values.push(val)
-      @index_by_key[key] = idx + 1
+    s = sym_key(sym)
+    ks = @key_syms
+    n = ks.length
+    i = 0
+    while i < n
+      if ks[i] == s
+        @values[i] = val
+        return val
+      end
+      i += 1
     end
+    ks.push(s)
+    @keys.push(sym)
+    @values.push(val)
     val
   end
 
   def load(sym)
-    key = sym.to_s
-    idx_plus_1 = @index_by_key[key]
-    if !idx_plus_1.nil? && idx_plus_1 > 0
-      @values[idx_plus_1 - 1]
-    else
-      nil
+    s = sym_key(sym)
+    ks = @key_syms
+    n = ks.length
+    i = 0
+    while i < n
+      return @values[i] if ks[i] == s
+      i += 1
     end
+    nil
   end
 
   def field_count
-    @keys.length
+    @key_syms.length
   end
 
   def key_at(idx)
@@ -318,7 +353,7 @@ class WireRecord
 
   def clone_record
     copy = WireRecord.new(@kind)
-    n = @keys.length
+    n = @key_syms.length
     i = 0
     while i < n
       copy.store_at(i, @keys[i], @values[i])

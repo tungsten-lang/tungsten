@@ -1,5 +1,5 @@
 # Native allocation regression, driven by packed_allocations_test.py.
-use wassat
+use ../lib/wassat
 
 ar = i64[70005]
 cm = i64[2]

@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 # Two-color arithmetic hypergraphs rendered directly as monochromatic
 # nogoods: an all-positive clause forbids all-false, an all-negative one

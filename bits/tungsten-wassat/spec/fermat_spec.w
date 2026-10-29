@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 -> fermat_fixture_clause(lines, values)
   lines.push(values.join(" ") + " 0")

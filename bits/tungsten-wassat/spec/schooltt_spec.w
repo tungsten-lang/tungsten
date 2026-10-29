@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 # Synthetic schooltt shapes: 200 disjoint 25-wide lesson blocks over
 # consecutive variables, padded with a repeated binary clause to the

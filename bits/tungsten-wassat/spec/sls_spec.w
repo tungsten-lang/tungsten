@@ -2,7 +2,7 @@
 # search returns a model or nothing, never UNSAT.
 
 use spec
-use wassat
+use ../lib/wassat
 
 SLS_CHAIN = "p cnf 3 3\n1 0\n-1 2 0\n-2 3 0\n"
 SLS_PHP22 = "p cnf 4 6\n1 2 0\n3 4 0\n-1 -3 0\n-2 -4 0\n1 3 0\n2 4 0\n"

@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 use ../../tungsten-wrat/lib/wrat
 
 # Pigeonhole PHP(p,h) as DIMACS text: p pigeons, h holes, UNSAT when p > h.

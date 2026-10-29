@@ -1,6 +1,6 @@
 # spec: skip -- never listed in the wassat lane; not triaged because the whole lane fails interpreted with 'no block given'
 use spec
-use wassat
+use ../lib/wassat
 
 -> large_proof_fixture
   lines = ["p cnf 3 50001"]

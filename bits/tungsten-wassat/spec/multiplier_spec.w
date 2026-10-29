@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 -> multiplier_gate_lines(a, b, o, kind)
   out = []

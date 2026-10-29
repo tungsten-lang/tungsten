@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 use ../../tungsten-wrat/lib/wrat
 
 # Four-valued domains.  A relation [a, b, c, k] permits exactly

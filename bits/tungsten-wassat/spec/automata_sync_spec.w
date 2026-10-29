@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 -> automata_sync_cnf(q, steps, transition0, transition1)
   lines = []

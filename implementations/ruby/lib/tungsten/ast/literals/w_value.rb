@@ -13,5 +13,9 @@ module Tungsten::AST
 
       @raw = format("u0x%016X", @value)
     end
+
+    def eval_in(interp)
+      interp.decode_w_value(@value, @raw)
+    end
   end
 end

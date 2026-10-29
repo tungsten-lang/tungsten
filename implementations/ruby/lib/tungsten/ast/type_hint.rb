@@ -10,6 +10,10 @@ module Tungsten::AST
       @hint = hint
     end
 
+    def eval_in(interp)
+      interp.visit_type_hint(self)
+    end
+
     def children
       yield @value if @value.is_a?(Node)
     end

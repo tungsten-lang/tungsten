@@ -1313,6 +1313,9 @@ module Tungsten
       elsif match_bytes?("\\e")
         out << "\e"
         advance(2)
+      elsif match_bytes?("\\0")
+        out << "\0"
+        advance(2)
       elsif match_bytes?("\\\\")
         out << "\\"
         advance(2)

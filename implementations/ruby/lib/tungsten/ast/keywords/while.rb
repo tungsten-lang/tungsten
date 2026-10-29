@@ -11,6 +11,10 @@ module Tungsten::AST
       @check_first = check_first
     end
 
+    def eval_in(interp)
+      interp.visit_while(self)
+    end
+
     def children
       yield @condition if @condition.is_a?(Node)
       yield @body if @body.is_a?(Node)
@@ -37,6 +41,10 @@ module Tungsten::AST
   end
 
   class Until < While
+    def eval_in(interp)
+      interp.visit_until(self)
+    end
+
     def sexp_name
       :until
     end

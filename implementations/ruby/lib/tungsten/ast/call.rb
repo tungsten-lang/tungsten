@@ -14,9 +14,11 @@ module Tungsten::AST
     attr_accessor :has_parens
     attr_accessor :cached_env, :cached_slot
     attr_accessor :cached_layout_shape
+    attr_accessor :cached_miss_shape
     attr_accessor :cached_dispatch_owner, :cached_dispatch_version, :cached_w_method
     attr_accessor :cached_local_miss_shape
     attr_accessor :cached_name_sym  # spinel-only: sym id for @name; -1 sentinel = not yet cached
+    attr_reader :special_bare_call, :constant_name
 
     def initialize(obj, name, args = [], block = nil, column: nil, parens: false)
       @obj = obj
@@ -25,6 +27,25 @@ module Tungsten::AST
       @cached_name_sym = -1
       @cached_slot = -1
       @cached_layout_shape = 1
+      @cached_miss_shape = 1
+      @special_bare_call =
+        case @name
+        when "ccall", "ccall_nobox", "ccall_rawargs" then 1
+        when "slab_alloc_init" then 2
+        when "wvalue_bits", "wvalue_from_bits" then 3
+        when "Σ" then 4
+        else 0
+        end
+      first = @name&.getbyte(0)
+      @constant_name =
+        if first.nil? || (first >= 97 && first <= 122)
+          false
+        elsif first >= 65 && first <= 90
+          true
+        else
+          ch = @name[0]
+          ch == ch.upcase
+        end
 
       @args =
         if args.nil?
@@ -39,6 +60,10 @@ module Tungsten::AST
 
       @name_column_number = column
       @has_parens = parens
+    end
+
+    def eval_in(interp)
+      interp.visit_call(self)
     end
 
     def children

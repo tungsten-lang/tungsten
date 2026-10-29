@@ -1218,6 +1218,7 @@ module Tungsten
         elsif skip_scan(/\\t/)  then str << "\t"
         elsif skip_scan(/\\e\[/) then str << "\e["
         elsif skip_scan(/\\e/)  then str << "\e"
+        elsif skip_scan(/\\0/)  then str << "\0"
         elsif (text = scan(/\\u([0-9a-fA-F]{4})/)) then str << [text[2..5].to_i(16)].pack("U")
         elsif skip_scan(/\\\\/) then str << "\\"
         elsif skip_scan(/\\"/)  then str << '"'

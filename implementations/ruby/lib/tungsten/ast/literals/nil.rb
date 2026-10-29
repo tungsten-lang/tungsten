@@ -1,5 +1,9 @@
 module Tungsten::AST
   class Nil < Node
+    def eval_in(_interp)
+      nil
+    end
+
     def clone
       self.class.new
     end

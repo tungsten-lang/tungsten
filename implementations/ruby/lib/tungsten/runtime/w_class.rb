@@ -10,13 +10,15 @@ module Tungsten
       # an overload-table walk. Names are never pruned; the per-class
       # @method_overloads table stays authoritative for actual selection.
       @typed_overload_names = {}
+      @hierarchy_epoch = 0
 
       class << self
         attr_reader :typed_overload_names
+        attr_accessor :hierarchy_epoch
       end
 
       attr_accessor :name, :superclass, :methods, :traits, :version, :class_vars, :method_overloads,
-                    :class_methods, :class_method_overloads, :constants
+                    :class_methods, :class_method_overloads, :constants, :defining_env
 
       def initialize(name, superclass = nil)
         @name = name
@@ -29,6 +31,7 @@ module Tungsten
         @version = 0
         @class_vars = {}
         @constants = {}
+        @defining_env = nil
       end
 
       # Class-body constants (`ROWS = [...]` inside `+ Foo`), resolved
@@ -81,6 +84,7 @@ module Tungsten
         WClass.typed_overload_names[name] = true if method.param_types
         @methods[name] = method
         @version += 1
+        WClass.hierarchy_epoch += 1
       end
 
       def define_class_method(name, method)
@@ -88,6 +92,7 @@ module Tungsten
         WClass.typed_overload_names[name] = true if method.param_types
         @class_methods[name] = method
         @version += 1
+        WClass.hierarchy_epoch += 1
       end
 
       def lookup_class_method(name, argc: nil)
@@ -119,7 +124,10 @@ module Tungsten
           @methods[mname] = method
           changed = true
         end
-        @version += 1 if changed
+        if changed
+          @version += 1
+          WClass.hierarchy_epoch += 1
+        end
       end
 
       # The nearest class up the chain carrying overload registrations for

@@ -12,6 +12,10 @@ module Tungsten::AST
       @right    = right
     end
 
+    def eval_in(interp)
+      interp.visit_binary_op(self)
+    end
+
     def children
       yield @left if @left.is_a?(Node)
       yield @right if @right.is_a?(Node)

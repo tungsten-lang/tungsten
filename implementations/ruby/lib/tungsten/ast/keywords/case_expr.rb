@@ -8,6 +8,10 @@ module Tungsten::AST
       @else_body = List.from(else_body)
     end
 
+    def eval_in(interp)
+      interp.visit_case_expr(self)
+    end
+
     def ==(other)
       super && other.receiver == receiver &&
                other.whens == whens &&

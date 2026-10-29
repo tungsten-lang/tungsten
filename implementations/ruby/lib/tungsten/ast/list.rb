@@ -20,6 +20,10 @@ module Tungsten::AST
       @list = list
     end
 
+    def eval_in(interp)
+      interp.visit_list(self)
+    end
+
     def [](i)
       @list[i]
     end

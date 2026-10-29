@@ -7,6 +7,10 @@ module Tungsten::AST
       @right = right
     end
 
+    def eval_in(interp)
+      interp.visit_and(self)
+    end
+
     def children
       yield @left if @left.is_a?(Node)
       yield @right if @right.is_a?(Node)

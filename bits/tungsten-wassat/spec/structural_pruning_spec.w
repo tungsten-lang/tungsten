@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 -> spec_flat_formula(text)
   f = wassat_parse_cnf(text)

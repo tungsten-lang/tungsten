@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 # Small synthetic instance of Bryant's public MIT-licensed MDP encoding.
 -> mdp_fixture_clause(lines, values)

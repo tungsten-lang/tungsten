@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 describe "Scout continuation with local search" ->
   it "resumes a detached scout through its phase walk" ->

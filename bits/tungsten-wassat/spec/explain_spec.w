@@ -2,7 +2,7 @@
 # resolves through the labels sidecar; unlabeled citations surface loudly.
 
 use spec
-use wassat
+use ../lib/wassat
 
 EXPLAIN_PHP32 = "p cnf 6 9\n1 2 0\n3 4 0\n5 6 0\n-1 -3 0\n-1 -5 0\n-3 -5 0\n-2 -4 0\n-2 -6 0\n-4 -6 0\n"
 

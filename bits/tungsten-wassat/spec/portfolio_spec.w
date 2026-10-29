@@ -3,7 +3,7 @@
 # compiled-only.
 
 use spec
-use wassat
+use ../lib/wassat
 use ../../tungsten-wrat/lib/wrat
 
 PORT_BIN_ENV = env("WASSAT_TEST_BIN")

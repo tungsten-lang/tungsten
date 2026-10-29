@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 # Synthetic exact-one block CSPs: graph coloring and Hamiltonian path.
 

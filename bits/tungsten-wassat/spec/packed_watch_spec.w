@@ -1,6 +1,6 @@
 # spec: skip -- never listed in the wassat lane; not triaged because the whole lane fails interpreted with 'no block given'
 use spec
-use wassat
+use ../lib/wassat
 
 describe "Packed watch words above the boxed small-integer range" ->
   it "preserves high clause ids through binary propagation" ->

@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 # `attackers[v - 1]` is the ordered list of variables attacking v.
 -> directed_kernel_text(attackers)

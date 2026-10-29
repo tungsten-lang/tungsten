@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 -> ais_counter_cell(n, k, row, col)
   n + row * k + col + 1

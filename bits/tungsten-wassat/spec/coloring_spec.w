@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 # Build a width-three graph-coloring encoding. Complete mode yields K11 and
 # therefore contains a K4/3-color obstruction. Partite mode yields K4-free

@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 # A complete 2x2 instance of the compact encoding. Variables 1..16 are the
 # cell/piece placement matrix; 17..24 are four two-color internal edges.

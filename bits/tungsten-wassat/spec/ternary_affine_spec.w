@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 -> ternary_affine_cnf(ngroups, equations)
   lines = []

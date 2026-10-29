@@ -7,7 +7,7 @@
 # spec merely runs both.
 
 use spec
-use wassat
+use ../lib/wassat
 use ../../tungsten-wrat/lib/wrat
 
 # Probing target: assuming x propagates a and -a, so -x is implied; y then

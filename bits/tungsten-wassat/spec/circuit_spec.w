@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 # Generic gate-circuit preimage lane. A gate [a, b, o, tt] forbids, for
 # each input combination (a + 2*b), the output value tt does not select.

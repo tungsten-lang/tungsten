@@ -1,7 +1,7 @@
 # Spec helper for tungsten-wassat tests
 
 use spec
-use wassat
+use ../lib/wassat
 
 Test.configure -> (config)
   config.formatter = :documentation

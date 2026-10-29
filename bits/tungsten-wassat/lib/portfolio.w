@@ -1832,6 +1832,15 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   # additional work, and the CLI has already charged the scout work once, so
   # final accounting subtracts this offset from the winning arm.
   offsets = i64[cap]
+  # Run shared syntactic structural pruning (Control-Variable identification,
+  # Cardinality/Sequential-Counter bound propagation, DETOUR wavefront
+  # portal-balance pruning, and Clue/Sudoku Truth-Table domain projection)
+  # once on the main thread when the formula is within the fast structural
+  # envelope, and share all derived unit and binary pruning clauses across
+  # every arm in the race.
+  prune_info = nil
+  if formula != nil && env("WASSAT_STRUCTURAL_PRUNE") != "0" && nv <= 100000 && art["fncl"] <= 800000
+    prune_info = wassat_structural_prune(nv, formula)
   solvers = []
   a = 0
   while a < threads
@@ -1880,20 +1889,33 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       # and trajectory-dependent: forced on every arm it wins 2bitadd_10 and
       # schooltt but turns f1000 from 5.7s into a >150s timeout, twice.
       cfgs[a * WASSAT_CFG_STRIDE + 7] = (art["config"].trail_reuse_mask >> source) & 1
-      # STABLE-ONLY axis (kissat --stable=2), same mask form. Violently
-      # two-sided as a global -- 2bitadd_10 0.32x and ContextModel 0.29x FOR
-      # it, dspam 20.21x and f600 3.70x against -- which is the textbook case
-      # for racing it instead of choosing it.
+      # STABLE-ONLY axis (kissat --stable=2, reluctant restarts) and
+      # FOCUSED-ONLY axis (kissat --sat, fast EMA restarts + target phases).
+      # In a 4-arm raw race:
+      #   arms 0, 1: standard focused/stable alternation
+      #   arm 2: fast-restart focused-only + target phases
+      #   arm 3: reluctant-restart stable-only + target phases
       cfgs[a * WASSAT_CFG_STRIDE + 8] = (art["config"].stable_only_mask >> source) & 1
+      cfgs[a * WASSAT_CFG_STRIDE + 9] = (art["config"].focused_only_mask >> source) & 1
       wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE,
                                art["config"].force_simplify?,
                                art["config"].use_vmtf(art["raw"] == true))
+    if prune_info != nil && !continued
+      # Share all pruned unit and binary clauses with every arm, and specialize
+      # arms across DETOUR wavefront (mode 1), Clue/Sudoku Truth-Table (mode 2),
+      # Control-Inverted Focused (mode 3), and Reluctant Control-EVSIDS (mode 4).
+      arm_mode = 0
+      arm_mode = 1 if a == 2 || a == 4
+      arm_mode = 2 if a == 1 || a == 5
+      arm_mode = 3 if a == 6
+      arm_mode = 4 if a == 3 || a == 7
+      wassat_apply_structural_pruning(s, prune_info, arm_mode, a == 0)
     solvers.push(s)
     a += 1
   { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
     "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
-    "credit": credit, "offsets": offsets, "sls": [],
+    "credit": credit, "offsets": offsets, "sls": [], "prune_info": prune_info,
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
     "otfs_index": otfs_index, "otfs_specialists": otfs_specialists,
     "sls_allowed": sls_worker > 0, "sls_repair_allowed": repair_allowed,
@@ -2028,6 +2050,7 @@ WASSAT_TEL_STRIDE = 8
   s.enable_subsume(cfgs[b + 6] == 2 ? 10000 : 3000) if cfgs[b + 6] > 0
   s.enable_trail_reuse if cfgs[b + 7] == 1
   s.enable_stable_only if cfgs[b + 8] == 1
+  s.enable_focused_only if cfgs[b + 9] == 1
   0
 
 # Register the SLS arm. Occupies the fixed slot threads+2 so it never collides
@@ -2613,6 +2636,9 @@ WASSAT_AXIS_SLOTS = 10
             wassat_race_apply_config(ns, cfgs, cb,
                                      art["config"].force_simplify?,
                                      art["config"].use_vmtf(art["raw"] == true))
+            if race["prune_info"] != nil
+              wassat_apply_structural_pruning(ns, race["prune_info"], 0, false)
+            solvers[worst].profile_counters("race.arm[worst].retired.round[round]")
             solvers[worst] = ns
             # A fresh solver's counters restart at zero, so its telemetry
             # baseline restarts with them. `spent` deliberately does NOT: the
@@ -2638,7 +2664,12 @@ WASSAT_AXIS_SLOTS = 10
     base = a * (nv + 8)
     kind = a < threads ? "raw" : "pre"
     ms = res[base + nv + 5] - res[base + nv + 6]
-    wassat_prof_note("race.arm[a] [kind] status=[res[base]] conflicts=[res[base + nv + 4]] ms=[ms]")
+    wassat_prof_note("race.arm[a] [kind] status=[res[base]] conflicts=[res[base + nv + 4]] ms=[ms] race_ms=[tel[a * WASSAT_TEL_STRIDE + 7]]")
+    if a < threads
+      solvers[a].profile_counters("race.arm[a]")
+    else
+      out = pre[a - threads]["out"]
+      out[2].profile_counters("race.arm[a]") if out.size >= 3
     a += 1
   if sls.size > 0
     ms = res[sls_base + nv + 5] - res[sls_base + nv + 6]
@@ -2757,6 +2788,10 @@ WASSAT_AXIS_SLOTS = 10
   stop = i64[4]
   res = i64[threads * (nv + 8)]
 
+  prune_info = nil
+  if env("WASSAT_STRUCTURAL_PRUNE") != "0" && nv <= 100000 && art["fncl"] <= 800000
+    prune_info = wassat_structural_prune(nv, formula)
+
   solvers = []
   a = 0
   while a < threads
@@ -2787,6 +2822,13 @@ WASSAT_AXIS_SLOTS = 10
     s.reseed_phases(4242 + a * 104729) if grp == 3
     s.reseed_phases(90001 + a * 15485863) if grp >= 4
     s.enable_chrono if grp % 2 == 1
+    s.enable_focused_only if a % 4 == 2
+    s.enable_stable_only if a % 4 == 3
+    if prune_info != nil
+      arm_mode = 0
+      arm_mode = 1 if a == 2 || a == 4
+      arm_mode = 2 if a == 1 || a == 5
+      wassat_apply_structural_pruning(s, prune_info, arm_mode, a == 0 && share)
     solvers.push(s)
     a += 1
 

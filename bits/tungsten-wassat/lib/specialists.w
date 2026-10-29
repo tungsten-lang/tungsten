@@ -66,7 +66,7 @@
     res["status"] = 0
   res
 
--> wassat_specialists_solve(formula, result, proof_mode = 0, conflict_cap = 0, dual_drat = false)
+-> wassat_specialists_solve(formula, result, proof_mode = 0, conflict_cap = 0, dual_drat = false, total_budget = 0)
   return result unless formula.has_key?("flat_ncl")
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
@@ -125,4 +125,16 @@
     if res["status"] != 0
       res["lane"] = "vdwb"
       return res
+  if env("WASSAT_WINDMILL") != "0" && nv >= 20000 && nv <= 2000000 && ncl >= 100000 && ncl <= 20000000 && fp[0] <= 64
+    res = wassat_windmill_solve(formula, result, total_budget)
+    tprof = wassat_prof("lane.windmill", tprof)
+    if res["status"] == 1
+      res["conflicts"] += result["conflicts"]
+      res["decisions"] += result["decisions"]
+      res["props"] += result["props"]
+      res["lane"] = "windmill"
+      return res
+    result["conflicts"] += res["conflicts"]
+    result["decisions"] += res["decisions"]
+    result["props"] += res["props"]
   result

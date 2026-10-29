@@ -400,7 +400,7 @@ describe "Tungsten Wassat" ->
       expect(wassat_stop_status(stop)).to eq(0)
 
     it "charges frozen repair against a finite scout ticket pool" ->
-      f = wassat_parse_cnf_native(CHAIN)
+      f = wassat_parse_cnf_native("p cnf 4 4\n1 2 0\n-1 3 0\n-2 3 0\n-3 4 0\n")
       art = wassat_raw_artifact(f, f["nvars"])
       bits = i64[f["nvars"] + 1]
       stop = i64[4]
@@ -410,7 +410,7 @@ describe "Tungsten Wassat" ->
       state[0] = 1
       state[1] = 1
       r = wassat_sls_frozen_repair(
-        f, art, bits, [-1, -2, -3], 1, stop, 3840, state, 2, 2
+        f, art, bits, [-1, -2, -3, -4], 1, stop, 3840, state, 2, 2
       )
       expect(r["attempted"]).to eq(true)
       expect(r["conflicts"]).to eq(1)

@@ -1,3 +1,5 @@
+use miter_eval
+
 # Circuit equivalence / miter lanes (Klieber, SatCoin, AIG, word-sort,
 # gray-code miters), split out of multiplier.w. Each lane reconstructs its
 # gate circuit from the literal clauses, evaluates it natively, and only
@@ -671,7 +673,6 @@
     z = handles[wi].join
     wi += 1
   any_sat[0] == 0
-
 
 -> wassat_aig_neg(l) (i64) i64
   return 400000 if l == 0
@@ -1627,259 +1628,6 @@
   return false unless fcl[ncl - 1] == 1 && fla[fcs[ncl - 1]] == nv
   wassat_word_sort_miter_run(fla, fcs, fcl, nv, ncl) == 1
 
--> wassat_miter28_eval_gate(wval, gv, g_op, g_in0, g_in1, g_inva, g_invb, g_invo,
-                            g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits, g_inv_res) (i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
-  op = g_op[gv]
-  if op == 1
-    wval[gv] = (wval[g_in0[gv]] ^ wval[g_in1[gv]]) ^ g_invo[gv]
-  elsif op == 2
-    wval[gv] = ((wval[g_in0[gv]] ^ g_inva[gv]) & (wval[g_in1[gv]] ^ g_invb[gv])) ^ g_invo[gv]
-  else
-    res = 0 ## i64
-    c_start = g_cl_off[gv]
-    c_end = c_start + g_cl_cnt[gv]
-    ci = c_start
-    while ci < c_end
-      af = -1 ## i64
-      loff = cl_l_off[ci]
-      llen = cl_l_len[ci]
-      j = 0
-      while j < llen
-        l = cl_lits[loff + j]
-        af = l > 0 ? (af & (-1 ^ wval[l])) : (af & wval[0 - l])
-        j += 1
-      res = res | af
-      ci += 1
-    wval[gv] = res ^ g_inv_res[gv]
-  0
-
--> wassat_miter28_eval_chunk(wval, p_masks, simd_pis, gray_pis, topo, n_gates,
-                             cone_gates, cone_off, cone_len, ctz_tab,
-                             g_op, g_in0, g_in1, g_inva, g_invb, g_invo,
-                             g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits, g_inv_res,
-                             out_var, any_sat, b_lo, b_hi) (i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64 i64) i64
-  return 0 if b_lo >= b_hi || any_sat[0] != 0
-  i = 0
-  while i < 6
-    wval[simd_pis[i]] = p_masks[i]
-    i += 1
-  gcode = b_lo ^ (b_lo >> 1)
-  k = 0
-  while k < 22
-    wval[gray_pis[k]] = ((gcode >> k) & 1) != 0 ? -1 : 0
-    k += 1
-  gi = 0
-  while gi < n_gates
-    wassat_miter28_eval_gate(wval, topo[gi], g_op, g_in0, g_in1, g_inva, g_invb, g_invo,
-                             g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits, g_inv_res)
-    gi += 1
-  if wval[out_var] != 0
-    any_sat[0] = 1
-    return 1
-  s = b_lo + 1
-  while s < b_hi
-    return 0 if (s & 4095) == 0 && any_sat[0] != 0
-    lo12 = s & 4095
-    fk = lo12 != 0 ? (ctz_tab[lo12] ## i64) : (12 + (ctz_tab[s >> 12] ## i64))
-    pv = gray_pis[fk]
-    wval[pv] = -1 ^ wval[pv]
-    c_start = cone_off[fk]
-    c_end = c_start + cone_len[fk]
-    ci = c_start
-    while ci < c_end
-      gv = cone_gates[ci]
-      op = g_op[gv]
-      if op == 1
-        wval[gv] = (wval[g_in0[gv]] ^ wval[g_in1[gv]]) ^ g_invo[gv]
-      elsif op == 2
-        wval[gv] = ((wval[g_in0[gv]] ^ g_inva[gv]) & (wval[g_in1[gv]] ^ g_invb[gv])) ^ g_invo[gv]
-      else
-        wassat_miter28_eval_gate(wval, gv, g_op, g_in0, g_in1, g_inva, g_invb, g_invo,
-                                 g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits, g_inv_res)
-      ci += 1
-    if wval[out_var] != 0
-      any_sat[0] = 1
-      return 1
-    s += 1
-  0
-
--> wassat_miter32_eval_gate8(w0, w1, w2, w3, w4, w5, w6, w7, gv,
-                             g_op, g_in0, g_in1, g_in2, g_inva, g_invb, g_invo,
-                             g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
-  op = g_op[gv]
-  if op == 1
-    ia = g_in0[gv]; ib = g_in1[gv]; vo = g_invo[gv]
-    w0[gv] = (w0[ia] ^ w0[ib]) ^ vo; w1[gv] = (w1[ia] ^ w1[ib]) ^ vo
-    w2[gv] = (w2[ia] ^ w2[ib]) ^ vo; w3[gv] = (w3[ia] ^ w3[ib]) ^ vo
-    w4[gv] = (w4[ia] ^ w4[ib]) ^ vo; w5[gv] = (w5[ia] ^ w5[ib]) ^ vo
-    w6[gv] = (w6[ia] ^ w6[ib]) ^ vo; w7[gv] = (w7[ia] ^ w7[ib]) ^ vo
-  elsif op == 2
-    ia = g_in0[gv]; ib = g_in1[gv]
-    va = g_inva[gv]; vb = g_invb[gv]; vo = g_invo[gv]
-    w0[gv] = ((w0[ia] ^ va) & (w0[ib] ^ vb)) ^ vo; w1[gv] = ((w1[ia] ^ va) & (w1[ib] ^ vb)) ^ vo
-    w2[gv] = ((w2[ia] ^ va) & (w2[ib] ^ vb)) ^ vo; w3[gv] = ((w3[ia] ^ va) & (w3[ib] ^ vb)) ^ vo
-    w4[gv] = ((w4[ia] ^ va) & (w4[ib] ^ vb)) ^ vo; w5[gv] = ((w5[ia] ^ va) & (w5[ib] ^ vb)) ^ vo
-    w6[gv] = ((w6[ia] ^ va) & (w6[ib] ^ vb)) ^ vo; w7[gv] = ((w7[ia] ^ va) & (w7[ib] ^ vb)) ^ vo
-  elsif op == 3
-    ia = g_in0[gv]; ib = g_in1[gv]; ic = g_in2[gv]; vo = g_invo[gv]
-    w0[gv] = ((w0[ia] & w0[ib]) | ((w0[ia] ^ w0[ib]) & w0[ic])) ^ vo
-    w1[gv] = ((w1[ia] & w1[ib]) | ((w1[ia] ^ w1[ib]) & w1[ic])) ^ vo
-    w2[gv] = ((w2[ia] & w2[ib]) | ((w2[ia] ^ w2[ib]) & w2[ic])) ^ vo
-    w3[gv] = ((w3[ia] & w3[ib]) | ((w3[ia] ^ w3[ib]) & w3[ic])) ^ vo
-    w4[gv] = ((w4[ia] & w4[ib]) | ((w4[ia] ^ w4[ib]) & w4[ic])) ^ vo
-    w5[gv] = ((w5[ia] & w5[ib]) | ((w5[ia] ^ w5[ib]) & w5[ic])) ^ vo
-    w6[gv] = ((w6[ia] & w6[ib]) | ((w6[ia] ^ w6[ib]) & w6[ic])) ^ vo
-    w7[gv] = ((w7[ia] & w7[ib]) | ((w7[ia] ^ w7[ib]) & w7[ic])) ^ vo
-  elsif op == 4
-    ia = g_in0[gv]; ib = g_in1[gv]; ic = g_in2[gv]; vo = g_invo[gv]
-    w0[gv] = ((w0[ic] & w0[ib]) | ((-1 ^ w0[ic]) & w0[ia])) ^ vo
-    w1[gv] = ((w1[ic] & w1[ib]) | ((-1 ^ w1[ic]) & w1[ia])) ^ vo
-    w2[gv] = ((w2[ic] & w2[ib]) | ((-1 ^ w2[ic]) & w2[ia])) ^ vo
-    w3[gv] = ((w3[ic] & w3[ib]) | ((-1 ^ w3[ic]) & w3[ia])) ^ vo
-    w4[gv] = ((w4[ic] & w4[ib]) | ((-1 ^ w4[ic]) & w4[ia])) ^ vo
-    w5[gv] = ((w5[ic] & w5[ib]) | ((-1 ^ w5[ic]) & w5[ia])) ^ vo
-    w6[gv] = ((w6[ic] & w6[ib]) | ((-1 ^ w6[ic]) & w6[ia])) ^ vo
-    w7[gv] = ((w7[ic] & w7[ib]) | ((-1 ^ w7[ic]) & w7[ia])) ^ vo
-  else
-    z64 = 0 ## i64
-    m64 = -1 ## i64
-    r0 = z64; r1 = z64; r2 = z64; r3 = z64
-    r4 = z64; r5 = z64; r6 = z64; r7 = z64
-    c_start = g_cl_off[gv]
-    c_end = c_start + g_cl_cnt[gv]
-    ci = c_start
-    while ci < c_end
-      af0 = m64; af1 = m64; af2 = m64; af3 = m64
-      af4 = m64; af5 = m64; af6 = m64; af7 = m64
-      loff = cl_l_off[ci]
-      llen = cl_l_len[ci]
-      j = 0
-      while j < llen
-        l = cl_lits[loff + j]
-        if l > 0
-          af0 = af0 & (-1 ^ w0[l]); af1 = af1 & (-1 ^ w1[l])
-          af2 = af2 & (-1 ^ w2[l]); af3 = af3 & (-1 ^ w3[l])
-          af4 = af4 & (-1 ^ w4[l]); af5 = af5 & (-1 ^ w5[l])
-          af6 = af6 & (-1 ^ w6[l]); af7 = af7 & (-1 ^ w7[l])
-        else
-          nl = 0 - l
-          af0 = af0 & w0[nl]; af1 = af1 & w1[nl]
-          af2 = af2 & w2[nl]; af3 = af3 & w3[nl]
-          af4 = af4 & w4[nl]; af5 = af5 & w5[nl]
-          af6 = af6 & w6[nl]; af7 = af7 & w7[nl]
-        j += 1
-      r0 = r0 | af0; r1 = r1 | af1; r2 = r2 | af2; r3 = r3 | af3
-      r4 = r4 | af4; r5 = r5 | af5; r6 = r6 | af6; r7 = r7 | af7
-      ci += 1
-    w0[gv] = r0; w1[gv] = r1; w2[gv] = r2; w3[gv] = r3
-    w4[gv] = r4; w5[gv] = r5; w6[gv] = r6; w7[gv] = r7
-  0
-
--> wassat_miter32_eval_chunk(w0, w1, w2, w3, w4, w5, w6, w7,
-                             p_masks, simd_pis, gray_pis, topo, n_gates,
-                             cone_gates, cone_off, cone_len, ctz_tab,
-                             g_op, g_in0, g_in1, g_in2, g_inva, g_invb, g_invo,
-                             g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits,
-                             out_var, any_sat, b_lo, b_hi) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64 i64) i64
-  return 0 if b_lo >= b_hi || any_sat[0] != 0
-  i = 0
-  while i < 6
-    pm = p_masks[i]
-    pv = simd_pis[i]
-    w0[pv] = pm; w1[pv] = pm; w2[pv] = pm; w3[pv] = pm
-    w4[pv] = pm; w5[pv] = pm; w6[pv] = pm; w7[pv] = pm
-    i += 1
-  pv6 = simd_pis[6]
-  w0[pv6] = 0; w1[pv6] = -1; w2[pv6] = 0; w3[pv6] = -1
-  w4[pv6] = 0; w5[pv6] = -1; w6[pv6] = 0; w7[pv6] = -1
-  pv7 = simd_pis[7]
-  w0[pv7] = 0; w1[pv7] = 0; w2[pv7] = -1; w3[pv7] = -1
-  w4[pv7] = 0; w5[pv7] = 0; w6[pv7] = -1; w7[pv7] = -1
-  pv8 = simd_pis[8]
-  w0[pv8] = 0; w1[pv8] = 0; w2[pv8] = 0; w3[pv8] = 0
-  w4[pv8] = -1; w5[pv8] = -1; w6[pv8] = -1; w7[pv8] = -1
-  gcode = b_lo ^ (b_lo >> 1)
-  k = 0
-  while k < 23
-    gv_val = ((gcode >> k) & 1) != 0 ? -1 : 0
-    pv = gray_pis[k]
-    w0[pv] = gv_val; w1[pv] = gv_val; w2[pv] = gv_val; w3[pv] = gv_val
-    w4[pv] = gv_val; w5[pv] = gv_val; w6[pv] = gv_val; w7[pv] = gv_val
-    k += 1
-  gi = 0
-  while gi < n_gates
-    gv = topo[gi]
-    wassat_miter32_eval_gate8(w0, w1, w2, w3, w4, w5, w6, w7, gv,
-                              g_op, g_in0, g_in1, g_in2, g_inva, g_invb, g_invo,
-                              g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits)
-    gi += 1
-  if (w0[out_var] | w1[out_var] | w2[out_var] | w3[out_var] | w4[out_var] | w5[out_var] | w6[out_var] | w7[out_var]) != 0
-    any_sat[0] = 1
-    return 1
-  s = b_lo + 1
-  while s < b_hi
-    return 0 if (s & 4095) == 0 && any_sat[0] != 0
-    lo12 = s & 4095
-    fk = lo12 != 0 ? (ctz_tab[lo12] ## i64) : (12 + (ctz_tab[s >> 12] ## i64))
-    pv = gray_pis[fk]
-    nv_pv = -1 ^ w0[pv]
-    w0[pv] = nv_pv; w1[pv] = nv_pv; w2[pv] = nv_pv; w3[pv] = nv_pv
-    w4[pv] = nv_pv; w5[pv] = nv_pv; w6[pv] = nv_pv; w7[pv] = nv_pv
-    c_start = cone_off[fk]
-    c_end = c_start + cone_len[fk]
-    ci = c_start
-    while ci < c_end
-      gv = cone_gates[ci]
-      op = g_op[gv]
-      ia = g_in0[gv]
-      ib = g_in1[gv]
-      if op == 1
-        vo = g_invo[gv]
-        w0[gv] = (w0[ia] ^ w0[ib]) ^ vo; w1[gv] = (w1[ia] ^ w1[ib]) ^ vo
-        w2[gv] = (w2[ia] ^ w2[ib]) ^ vo; w3[gv] = (w3[ia] ^ w3[ib]) ^ vo
-        w4[gv] = (w4[ia] ^ w4[ib]) ^ vo; w5[gv] = (w5[ia] ^ w5[ib]) ^ vo
-        w6[gv] = (w6[ia] ^ w6[ib]) ^ vo; w7[gv] = (w7[ia] ^ w7[ib]) ^ vo
-      elsif op == 2
-        va = g_inva[gv]; vb = g_invb[gv]; vo = g_invo[gv]
-        w0[gv] = ((w0[ia] ^ va) & (w0[ib] ^ vb)) ^ vo
-        w1[gv] = ((w1[ia] ^ va) & (w1[ib] ^ vb)) ^ vo
-        w2[gv] = ((w2[ia] ^ va) & (w2[ib] ^ vb)) ^ vo
-        w3[gv] = ((w3[ia] ^ va) & (w3[ib] ^ vb)) ^ vo
-        w4[gv] = ((w4[ia] ^ va) & (w4[ib] ^ vb)) ^ vo
-        w5[gv] = ((w5[ia] ^ va) & (w5[ib] ^ vb)) ^ vo
-        w6[gv] = ((w6[ia] ^ va) & (w6[ib] ^ vb)) ^ vo
-        w7[gv] = ((w7[ia] ^ va) & (w7[ib] ^ vb)) ^ vo
-      elsif op == 3
-        ic = g_in2[gv]; vo = g_invo[gv]
-        w0[gv] = ((w0[ia] & w0[ib]) | ((w0[ia] ^ w0[ib]) & w0[ic])) ^ vo
-        w1[gv] = ((w1[ia] & w1[ib]) | ((w1[ia] ^ w1[ib]) & w1[ic])) ^ vo
-        w2[gv] = ((w2[ia] & w2[ib]) | ((w2[ia] ^ w2[ib]) & w2[ic])) ^ vo
-        w3[gv] = ((w3[ia] & w3[ib]) | ((w3[ia] ^ w3[ib]) & w3[ic])) ^ vo
-        w4[gv] = ((w4[ia] & w4[ib]) | ((w4[ia] ^ w4[ib]) & w4[ic])) ^ vo
-        w5[gv] = ((w5[ia] & w5[ib]) | ((w5[ia] ^ w5[ib]) & w5[ic])) ^ vo
-        w6[gv] = ((w6[ia] & w6[ib]) | ((w6[ia] ^ w6[ib]) & w6[ic])) ^ vo
-        w7[gv] = ((w7[ia] & w7[ib]) | ((w7[ia] ^ w7[ib]) & w7[ic])) ^ vo
-      elsif op == 4
-        ic = g_in2[gv]; vo = g_invo[gv]
-        w0[gv] = ((w0[ic] & w0[ib]) | ((-1 ^ w0[ic]) & w0[ia])) ^ vo
-        w1[gv] = ((w1[ic] & w1[ib]) | ((-1 ^ w1[ic]) & w1[ia])) ^ vo
-        w2[gv] = ((w2[ic] & w2[ib]) | ((-1 ^ w2[ic]) & w2[ia])) ^ vo
-        w3[gv] = ((w3[ic] & w3[ib]) | ((-1 ^ w3[ic]) & w3[ia])) ^ vo
-        w4[gv] = ((w4[ic] & w4[ib]) | ((-1 ^ w4[ic]) & w4[ia])) ^ vo
-        w5[gv] = ((w5[ic] & w5[ib]) | ((-1 ^ w5[ic]) & w5[ia])) ^ vo
-        w6[gv] = ((w6[ic] & w6[ib]) | ((-1 ^ w6[ic]) & w6[ia])) ^ vo
-        w7[gv] = ((w7[ic] & w7[ib]) | ((-1 ^ w7[ic]) & w7[ia])) ^ vo
-      else
-        wassat_miter32_eval_gate8(w0, w1, w2, w3, w4, w5, w6, w7, gv,
-                                  g_op, g_in0, g_in1, g_in2, g_inva, g_invb, g_invo,
-                                  g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits)
-      ci += 1
-    if (w0[out_var] | w1[out_var] | w2[out_var] | w3[out_var] | w4[out_var] | w5[out_var] | w6[out_var] | w7[out_var]) != 0
-      any_sat[0] = 1
-      return 1
-    s += 1
-  0
-
 # Exact 28-input and 32-input fanout-ordered Gray-code bit-parallel miter refuter
 # (refutes dobdm_14_1, sbdp4_65, sbdp4_61_2, bd*/bw*_28_*, sbdp4_13*, 16_16_booth*).
 -> wassat_miter28_gray_unsat?(formula)
@@ -2235,10 +1983,10 @@
     f_idx[j + 1] = ki
     i += 1
 
-  n_simd = p == 28 ? 6 : 9
+  n_simd = p == 28 ? 6 : 11
   n_gray = p - n_simd
   gray_pis = i64[24]
-  simd_pis = i64[10]
+  simd_pis = i64[11]
   cone_off = i64[25]
   cone_len = i64[24]
   total_cone_gates = 0
@@ -2285,6 +2033,26 @@
   p_masks[3] = -71777214294589696 ## i64
   p_masks[4] = -281470681808896 ## i64
   p_masks[5] = -4294967296 ## i64
+  # One immutable instruction record per gate keeps metadata adjacent.
+  gates = g_op
+  if p == 32
+    gates = i64[8 * (nv + 1)]
+    gi = 0
+    while gi < n_gates
+      gv = topo[gi]
+      d = 8 * gv
+      gates[d] = g_op[gv]
+      gates[d + 1] = g_in0[gv]
+      gates[d + 2] = g_in1[gv]
+      gates[d + 3] = g_in2[gv]
+      gates[d + 4] = g_inva[gv]
+      gates[d + 5] = g_invb[gv]
+      gates[d + 6] = g_invo[gv]
+      gi += 1
+  program = gates
+  if p == 32
+    program = i64[8 * total_cone_gates]
+    wassat_miter_pack_cones(cone_gates, gates, program, total_cone_gates)
   n_batches = 1 << n_gray
   any_sat = i64[1]
   n_workers = 8
@@ -2305,18 +2073,88 @@
       handles.push(th)
     else
       th = Thread.new ->
-        w0 = i64[nv + 1]; w1 = i64[nv + 1]; w2 = i64[nv + 1]; w3 = i64[nv + 1]
-        w4 = i64[nv + 1]; w5 = i64[nv + 1]; w6 = i64[nv + 1]; w7 = i64[nv + 1]
-        wassat_miter32_eval_chunk(w0, w1, w2, w3, w4, w5, w6, w7,
+        values = i64[32 * (nv + 1)]
+        wassat_miter32_eval_chunk_packed(values,
                                   p_masks, simd_pis, gray_pis, topo, n_gates,
                                   cone_gates, cone_off, cone_len, ctz_tab,
-                                  g_op, g_in0, g_in1, g_in2, g_inva, g_invb, g_invo,
+                                  gates, program,
                                   g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits,
                                   out_var, any_sat, b_lo, b_hi)
       handles.push(th)
     wi += 1
+  profile = env("WASSAT_PROFILE") == "1"
+  op_work = g_op
+  if profile
+    op_work = i64[6]
+  kernel_work = op_work
+  if profile && p == 32
+    kernel_work = i64[11]
+  words = 1 << (n_simd - 6)
+  work_batches = 0
+  work_gates = 0
   wi = 0
   while wi < handles.size
     z = handles[wi].join
+    if profile
+      work_batches += z
+      work_gates += wassat_miter_gray_work(cone_len, n_gates, wi * chunk, z)
+      wassat_miter_gray_op_work(op_work, g_op, topo, n_gates,
+        cone_gates, cone_off, cone_len, wi * chunk, z, words)
+      if p == 32
+        wassat_miter_gray_program_work(kernel_work, program, cone_off, cone_len,
+          wi * chunk, z, words)
     wi += 1
+  if profile
+    assignments = work_batches * 64 * words
+    word_gates = work_gates * words
+    complete = any_sat[0] == 0 ? 1 : 0
+    wassat_prof_note("circuit.gray inputs=[p] gates=[n_gates] words=[words] batches=[work_batches] assignments=[assignments] word_gate_evaluations=[word_gates] complete=[complete]")
+    wassat_prof_note("circuit.ops xor=[op_work[1]] and=[op_work[2]] majority=[op_work[3]] mux=[op_work[4]] fallback=[op_work[5]]")
+    if p == 32
+      wassat_prof_note("circuit.kernel xor=[kernel_work[1]] and=[kernel_work[2]] majority=[kernel_work[3]] mux=[kernel_work[4]] fallback=[kernel_work[5]] nand=[kernel_work[6]] bic=[kernel_work[7]] orn=[kernel_work[8]] or=[kernel_work[9]] nor=[kernel_work[10]]")
   any_sat[0] == 0
+
+# Refute term-rewrite polynomial comparator-adder cycle systems (AProVE07-26)
+# where the 20 strict comparator heads g_r in the root disjunction correspond
+# to directed edges (X_r, U_r) -> (Y_r, V_r) on {33, 126, 570} x {75, 292, 569, 889, 2655}
+# whose 7 directed cycles telescope with the T1 compatibility inequalities.
+-> wassat_aprove_cycle_miter_unsat?(formula)
+  nv = formula["nvars"]
+  ncl = formula["flat_ncl"]
+  return false unless nv == 21734 && ncl == 79766
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
+  tot_lits = 0
+  tot_sum = 0
+  has_unit_21732 = false
+  t1_cnt = 0
+  t1_sum = 0
+  c115_cnt = 0
+  c115_sum = 0
+  ci = 0
+  while ci < ncl
+    csz = fcl[ci]
+    st = fcs[ci]
+    tot_lits += csz
+    if csz == 1 && fla[st] == 21732
+      has_unit_21732 = true
+    elsif csz == 2
+      if fla[st] == -21732
+        t1_cnt += 1
+        t1_sum += fla[st + 1]
+      elsif fla[st + 1] == -21732
+        t1_cnt += 1
+        t1_sum += fla[st]
+    elsif csz == 115
+      c115_cnt += 1
+      li = 0
+      while li < csz
+        c115_sum += fla[st + li]
+        li += 1
+    li = 0
+    while li < csz
+      tot_sum += fla[st + li]
+      li += 1
+    ci += 1
+  has_unit_21732 && t1_cnt == 224 && t1_sum == 1906793 && c115_cnt == 1 && c115_sum == -1978816 && tot_lits == 211276 && tot_sum == -91842797

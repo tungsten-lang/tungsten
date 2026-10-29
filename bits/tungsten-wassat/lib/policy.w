@@ -835,11 +835,22 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
   -> use_stable_only
     env("WASSAT_STABLE_ONLY") == "1"
 
-  # Which arms run stable-only, as a bitmask over arm index. Default 0 until
-  # the axis is measured; the sweep drives it from one binary.
+  -> use_focused_only
+    env("WASSAT_FOCUSED_ONLY") == "1"
+
+  # Which arms run stable-only (reluctant restarts, floor 16384) vs
+  # focused-only (fast EMA restarts, floor 64 + target phases, kissat --sat
+  # style), as bitmasks over arm index. In a 4-arm raw race:
+  #   arms 0, 1: standard focused/stable alternation
+  #   arm 2 (bit 2 = 4): fast-restart focused-only + target phases
+  #   arm 3 (bit 3 = 8): reluctant-restart stable-only + target phases
   -> stable_only_mask
     return wassat_decimal_in_range("WASSAT_STABLE_ARMS", env("WASSAT_STABLE_ARMS"), 0, 65535) if env("WASSAT_STABLE_ARMS") != nil
-    0
+    136
+
+  -> focused_only_mask
+    return wassat_decimal_in_range("WASSAT_FOCUSED_ARMS", env("WASSAT_FOCUSED_ARMS"), 0, 65535) if env("WASSAT_FOCUSED_ARMS") != nil
+    84
 
   -> trail_reuse_mask
     return wassat_decimal_in_range("WASSAT_REUSE_ARMS", env("WASSAT_REUSE_ARMS"), 0, 255) if env("WASSAT_REUSE_ARMS") != nil
@@ -966,6 +977,8 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     arms = 1 if arms < 1
     if self.use_planning_diversity
       arms = 12 if arms > 12
+    elsif cores >= 10
+      arms = 8 if arms > 8
     else
       arms = 4 if arms > 4
 

@@ -255,6 +255,29 @@ WASSAT_ARITH_NODE_CAP = 2000000
     si += 1
   true
 
+# Color complementation is a symmetry only when every extracted scope
+# forbids both colors. Check the actual clause scopes, ignoring duplicates;
+# a matching family name or width histogram is not enough.
+-> wassat_arith_color_symmetric?(scope_off, scope_elem, scope_forbid, nscopes)
+  colors = {}
+  si = 0
+  while si < nscopes
+    key = ""
+    j = scope_off[si]
+    while j < scope_off[si + 1]
+      key = key + "[scope_elem[j]],"
+      j += 1
+    mask = colors[key]
+    mask = 0 if mask == nil
+    colors[key] = mask | (1 << scope_forbid[si])
+    si += 1
+  keys = colors.keys
+  i = 0
+  while i < keys.size
+    return false if colors[keys[i]] != 3
+    i += 1
+  true
+
 -> wassat_arith_coloring_solve(formula)
   miss = wassat_arith_miss
   return miss unless formula.has_key?("flat_ncl")
@@ -460,10 +483,23 @@ WASSAT_ARITH_NODE_CAP = 2000000
   qstamp = i64[nscopes]
   meta = i64[5]
   meta[2] = WASSAT_ARITH_NODE_CAP
-  status = wassat_arith_dfs(
-    assign, scope_off, scope_elem, scope_forbid,
-    inc_off, inc, order, trail, queue, qstamp, meta, nelem, nscopes
-  )
+  # If every scope is invariant under swapping colors, each model has a
+  # complemented model. Fix one element to color zero before searching;
+  # the omitted root branch is exactly the complement of this one.
+  symmetric = wassat_arith_color_symmetric?(scope_off, scope_elem, scope_forbid, nscopes)
+  seed_ok = 1
+  if symmetric
+    seed_ok = wassat_arith_propagate(
+      assign, scope_off, scope_elem, scope_forbid,
+      inc_off, inc, trail, queue, qstamp, meta,
+      nelem, nscopes, order[0], 0
+    )
+  status = 0 - 1
+  if seed_ok == 1
+    status = wassat_arith_dfs(
+      assign, scope_off, scope_elem, scope_forbid,
+      inc_off, inc, order, trail, queue, qstamp, meta, nelem, nscopes
+    )
   status = 0 if meta[3] != 0
   result = { "recognized": true, "status": status, "elements": nelem,
     "scopes": nscopes, "nodes": meta[1], "family": family, "model": [] }

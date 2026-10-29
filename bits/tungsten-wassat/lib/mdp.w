@@ -732,7 +732,7 @@ WASSAT_MDP_RNG_MASK = 4294967295
     sample += 1
   assumptions
 
--> wassat_mdp_solve(formula, conflict_cap = WASSAT_MDP_CONFLICT_CAP, proof_mode = 0, dual_drat = false, prove_cap = 0)
+-> wassat_mdp_solve(formula, conflict_cap = WASSAT_MDP_CONFLICT_CAP, proof_mode = 0, dual_drat = false, prove_cap = 0, total_budget = 0)
   result = {
     "recognized": false, "status": 0, "model": [],
     "bits": 0, "samples": 0, "tolerated": 0,
@@ -754,7 +754,7 @@ WASSAT_MDP_RNG_MASK = 4294967295
     # The registry's conflict budget is for witness-star proof search,
     # not MDP completion, so it gets the wider prove_cap allocation.
     return wassat_specialists_solve(
-      formula, result, proof_mode, prove_cap, dual_drat
+      formula, result, proof_mode, prove_cap, dual_drat, total_budget
     )
   tprof = wassat_prof("mdp.recognize", tprof)
   result["recognized"] = true

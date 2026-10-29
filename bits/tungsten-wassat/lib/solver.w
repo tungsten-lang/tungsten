@@ -5689,22 +5689,15 @@ WASSAT_PROOF_DRAT = 2
             tv = tr[ti]
             av = tv
             av = 0 - tv if tv < 0
-            if lvl[av] != bl
-              # Chronological backtracking interleaves foreign-level entries
-              # into this level's trail segment. SKIP them rather than abandon
-              # the block. This is never unsound: if every marked literal of
-              # `bl` is still inside the segment the walk finds them all and
-              # derives exactly what the plain case derives; if any sits
-              # outside it, the scan runs past `flr` and aborts as before. The
-              # worst case is a fruitless walk, not a wrong clause -- which is
-              # what makes it safe to try without per-variable trail positions.
-              ti -= 1
+            # Most trail entries are unmarked. Check that first, so they
+            # do not need a second dependent load from the level array.
+            # Chronological backtracking can interleave foreign levels:
+            # marked entries from those levels must still be skipped.
+            mk = sn[av]
+            if (mk == 1 || mk == 2) && lvl[av] == bl
+              scanning = 0
             else
-              mk = sn[av]
-              if mk == 1 || mk == 2
-                scanning = 0
-              else
-                ti -= 1
+              ti -= 1
         if bad == 0
           tv = tr[ti]
           av = tv
@@ -5818,7 +5811,9 @@ WASSAT_PROOF_DRAT = 2
             drop = wassat_shrink_probe(ar, lvl, rsn, sn, cm, dstk, tclr, st, w, 1)
             sn[w] = 1 if drop == 0
           if drop == 0
-            tmp[wp] = q
+            # Until a probe removes a literal, the retained prefix is
+            # already in place. Only the compacted suffix needs writes.
+            tmp[wp] = q if wp != r
             wp += 1
           r += 1
         m = wp

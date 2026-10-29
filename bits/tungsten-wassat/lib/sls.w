@@ -14,7 +14,7 @@
 #
 # Everything the flip loop touches is flat typed storage walked by one
 # native function (`wassat_sls_run`), the solver core's proven pattern:
-# clause literal arena + offsets, intrusive per-literal occurrence lists,
+# clause literal arena + offsets, contiguous per-literal occurrence lists,
 # per-clause true-literal counts with the classic critical-variable slot
 # (O(1) break bookkeeping), per-variable weighted scores maintained
 # incrementally, and an unsatisfied-clause list with positions. The plan
@@ -130,7 +130,6 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       @fcs = i64[@ncl + 2]
       @fcl = i64[@ncl + 2]
     @och = i64[2 * nv + 4]
-    @ocn = i64[total + 2]
     @ocv = i64[total + 2]
 
     # The boxed path still has to flatten @work; the flat path already wrote
@@ -146,7 +145,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
           @fla[pos] = l
           pos += 1
         ci += 1
-    wassat_sls_build_occ(@fla, @fcs, @fcl, @och, @ocn, @ocv, @ncl, nv)
+    wassat_sls_build_occ(@fla, @fcs, @fcl, @och, @ocv, @ncl, nv)
 
     @asg = i64[nv + 1]           # 0 false, 1 true (see bool[] note above)
     @satc = i64[@ncl + 2]
@@ -176,7 +175,8 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     # standalone walk behaves exactly as before; a race arm swaps in the
     # shared cell so a win by any other arm stops this one immediately
     # rather than at the end of its flip budget (see wassat_sls_arm_body).
-    @stop = i64[4]
+    @private_stop = i64[4]
+    @stop = @private_stop
     # [0] improvement window in flips  [1] windows without progress before
     # retiring  [2] set by the kernel when it retired on a plateau
     @plateau = i64[4]
@@ -191,7 +191,10 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     0
 
   -> set_stop_cell(cell)
-    @stop = cell
+    # Detaching a continued scout must leave the native flip loop a valid
+    # cell. Retain our own zero cell so detachment neither allocates nor
+    # clears a cancellation flag that other race arms still observe.
+    @stop = cell == nil ? @private_stop : cell
     0
 
   # One full search from a fresh seeded assignment. Deterministic per seed.
@@ -230,7 +233,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     return self.result(seed) if max_flips <= @st[4] || @st[9] == 1
     @st[5] = max_flips
     @st[12] = 1
-    wassat_sls_run(@fla, @fcs, @fcl, @och, @ocn, @ocv, @asg, @satc, @crit,
+    wassat_sls_run(@fla, @fcs, @fcl, @och, @ocv, @asg, @satc, @crit,
                    @wght, @score, @ccf, @lastf, @ulist, @upos, @gstk, @gin,
                    @bag, @wtr, @st, @stop, @plateau)
     self.result(seed)
@@ -280,7 +283,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @st[12] = 0
     wassat_sls_init_state(@fla, @fcs, @fcl, @asg, @satc, @crit, @wght,
                           @ulist, @upos, @score, @gstk, @gin, @st)
-    wassat_sls_run(@fla, @fcs, @fcl, @och, @ocn, @ocv, @asg, @satc, @crit,
+    wassat_sls_run(@fla, @fcs, @fcl, @och, @ocv, @asg, @satc, @crit,
                    @wght, @score, @ccf, @lastf, @ulist, @upos, @gstk, @gin,
                    @bag, @wtr, @st, @stop, @plateau)
     0
@@ -313,7 +316,6 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @fcs = i64[cap + 2]
     @fcl = i64[cap + 2]
     @och = i64[2 * nv + 4]
-    @ocn = i64[tot + 2]
     @ocv = i64[tot + 2]
     @stamp = i64[2 * nv + 4]
     @satc = i64[cap + 2]
@@ -334,7 +336,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @apm[6] = @wcap_cl
     @apm[7] = @wcap_lit
     wassat_sls_from_arena(ar, cmeta, alive, clbd, asg, @fla, @fcs, @fcl,
-                          @och, @ocn, @ocv, @stamp, @apm)
+                          @och, @ocv, @stamp, @apm)
     @ncl = @apm[2]
     @ncl
 
@@ -485,27 +487,40 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   pm[3] = pos
   0
 
--> wassat_sls_build_occ(fla, fcs, fcl, och, ocn, ocv, ncl, nv) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+# Build contiguous literal occurrences in the same reverse-insertion order
+# as the linked representation. End offsets double as descending fill cursors,
+# so construction needs no additional scratch allocation.
+-> wassat_sls_build_occ(fla, fcs, fcl, och, ocv, ncl, nv) (i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+  limit = 2 * nv + 4
   i = 0
-  limit = (nv << 1) + 4 ## i64
   while i < limit
-    och[i] = 0 - 1
+    och[i] = 0
     i += 1
   ci = 0
   while ci < ncl
     o = fcs[ci]
-    n = fcl[ci]
     j = 0
-    while j < n
+    while j < fcl[ci]
       l = fla[o + j]
-      li = 0 ## i64
-      if l > 0
-        li = l << 1
-      else
-        li = ((0 - l) << 1) + 1
-      ocn[o + j] = och[li]
-      ocv[o + j] = ci
-      och[li] = o + j
+      li = l > 0 ? 2 * l : 2 * (0 - l) + 1
+      och[li] += 1
+      j += 1
+    ci += 1
+  total = 0
+  i = 0
+  while i < limit
+    total += och[i]
+    och[i] = total
+    i += 1
+  ci = 0
+  while ci < ncl
+    o = fcs[ci]
+    j = 0
+    while j < fcl[ci]
+      l = fla[o + j]
+      li = l > 0 ? 2 * l : 2 * (0 - l) + 1
+      och[li] -= 1
+      ocv[och[li]] = ci
       j += 1
     ci += 1
   0
@@ -569,7 +584,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   st[7] = ucount
   0
 
--> wassat_sls_run(fla, fcs, fcl, och, ocn, ocv, asg, satc, crit, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_run(fla, fcs, fcl, och, ocv, asg, satc, crit, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   nv = st[0]
   ncl = st[1]
   ucount = st[2]
@@ -768,7 +783,8 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     else
       li = (v << 1) + 1
     w = och[li]
-    while w >= 0
+    wend = och[li + 1]
+    while w < wend
       ci = ocv[w]
       old = satc[ci]
       satc[ci] = old + 1
@@ -807,7 +823,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
             gsize += 1
             gin[x] = 1
         crit[ci] = crit[ci] ^ v
-      w = ocn[w]
+      w += 1
 
     # clauses losing a true literal: occurrences of v's now-false literal
     if nowtrue == 1
@@ -815,7 +831,8 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     else
       li = v << 1
     w = och[li]
-    while w >= 0
+    wend = och[li + 1]
+    while w < wend
       ci = ocv[w]
       old = satc[ci]
       satc[ci] = old - 1
@@ -847,7 +864,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         crit[ci] = x
         if old == 2
           score[x] = score[x] - wght[ci]
-      w = ocn[w]
+      w += 1
 
     if ucount < best
       best = ucount
@@ -944,14 +961,13 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 #
 #   pm[0] clauses in   pm[1] nvars   pm[2] clauses out   pm[3] literals out
 #   pm[6] clause capacity            pm[7] literal capacity
--> wassat_sls_from_arena(ar, cmeta, alive, clbd, asg, fla, fcs, fcl, och, ocn, ocv, stamp, pm) (i64[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_from_arena(ar, cmeta, alive, clbd, asg, fla, fcs, fcl, och, ocv, stamp, pm) (i64[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   ncl_in = pm[0]
   nv = pm[1]
   capcl = pm[6]
   caplit = pm[7]
   i = 0
   while i < 2 * nv + 4
-    och[i] = -1
     stamp[i] = 0
     i += 1
   out = 0
@@ -1001,21 +1017,13 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       if keep == 1
         fcs[out] = start
         fcl[out] = cnt
-        k = 0
-        while k < cnt
-          l = fla[start + k]
-          li = 2 * l
-          li = 2 * (0 - l) + 1 if l < 0
-          ocn[start + k] = och[li]
-          ocv[start + k] = out
-          och[li] = start + k
-          k += 1
         out += 1
       else
         pos = start
     ci += 1
   pm[2] = out
   pm[3] = pos
+  wassat_sls_build_occ(fla, fcs, fcl, och, ocv, out, nv)
   0
 
 # Library entry: parse-level formula in, model or nothing out. Never UNSAT.

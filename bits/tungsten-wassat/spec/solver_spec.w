@@ -10,7 +10,7 @@
 # failure mode these bits exist to prevent.
 
 use spec
-use wassat
+use ../lib/wassat
 
 # --- fixtures ---------------------------------------------------------------
 

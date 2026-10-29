@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 use ../../tungsten-wrat/lib/wrat
 
 LOCAL_CORE_FULL = "p cnf 8 8\n1 0\n7 8 0\n-1 2 0\n7 -8 0\n-2 3 0\n-7 8 0\n3 0\n-7 -8 0\n"

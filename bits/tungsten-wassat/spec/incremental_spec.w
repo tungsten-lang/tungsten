@@ -2,7 +2,7 @@
 # cores as certificates, query lifecycle, and the freeze contract.
 
 use spec
-use wassat
+use ../lib/wassat
 use ../../tungsten-wrat/lib/wrat
 
 # 1 -> 2 -> 3 as implications, nothing asserted: satisfiable every way.

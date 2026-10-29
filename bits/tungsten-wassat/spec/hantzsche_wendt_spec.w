@@ -1,5 +1,5 @@
 use spec
-use solver
+use ../lib/solver
 use hantzsche_wendt
 
 # Build the public group-ring encoding from its algebraic schema.  This is

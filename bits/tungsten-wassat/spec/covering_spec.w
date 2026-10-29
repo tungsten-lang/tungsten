@@ -1,5 +1,5 @@
 use spec
-use wassat
+use ../lib/wassat
 
 -> covering_formula(rows, conflicts, nvars = 4)
   lines = []

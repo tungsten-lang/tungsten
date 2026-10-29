@@ -14,14 +14,39 @@ module Tungsten
     attr_accessor :token
 
     KEYWORDS = %w[
-      if unless while until rescue ensure else elsif when then begin case class module return break next on yield super use
-      with alias raise true false nil is
+      ...
+      alias always
+      begin break
+      case continue
+      else elsif ensure
+      fn
+      if in is
+      loop
+      module
+      next
+      on
+      raise recase redo rescue retry return
+      super
+      then trait
+      unless until use
+      when while with
+      yield
     ].freeze
 
     TYPE_NAMES = %w[
-      any bool boolean byte char decimal f32 f64 float i8 i16 i32 i64 int integer key nil number object path ptr string
-      symbol u8 u16 u32 u64 uint void w32 w64
+      bool int integer string string_buffer
+      i4 i8 i16 i32 i64 i128
+      u4 u8 u16 u32 u64 u128
+      w64
+      f16 f32 f64 f80 f128 f256
+      d128 c32 c64 c128
+      bigint bigdecimal
+      bf16 tf32 fp8 fp4 nf4
+      mxfp8 mxfp6 mxfp4 mxint8
+      posit8 posit16 posit32 posit64
     ].freeze
+
+    TYPE_HINT_WORDS = (TYPE_NAMES + %w[big recycle reuse reuse_drain no_raise fold hash array symbol float char object ptr]).freeze
 
     TYPE_NAME_PATTERN = TYPE_NAMES.join("|").freeze
     TYPE_HINT_START = /## +(?=(?:any|bool|boolean|byte|char|decimal|f32|f64|float|i8|i16|i32|i64|int|integer|key|nil|number|object|path|ptr|string|symbol|u8|u16|u32|u64|uint|void|w32|w64)\b|[a-z]\w*:)/.freeze
@@ -118,6 +143,22 @@ module Tungsten
     def next_token_skip_whitespace_all
       next_token
       skip_whitespace_all
+    end
+
+    def next_statement
+      next_token
+      skip_statement_end
+    end
+
+    def skip_statement_end
+      next_token while @token.type == :SP || @token.type == :NL || @token.type == :TYPE_HINT
+
+      case @token.type
+      when :';'
+        next_token
+      when :KEYWORD
+        next_token if @token.value == :end
+      end
     end
   end
 end

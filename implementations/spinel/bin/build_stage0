@@ -17,7 +17,7 @@ RUNTIME_ARCHIVE="$BUILD/runtime-stage0.a"
 RUNTIME_OBJ_DIR="$BUILD/runtime-stage0-objs"
 RUBY_BIN="${RUBY:-ruby}"
 FORCE_STAGE0="${TUNGSTEN_SPINEL_FORCE_STAGE0:-0}"
-: "${TUNGSTEN_SPINEL_STAGE0_CLANG_OPT:=-O3 -march=native -mtune=native -ffast-math -DNDEBUG -flto=auto}"
+: "${TUNGSTEN_SPINEL_STAGE0_CLANG_OPT:=-O3 -march=native -mtune=native -ffast-math -DNDEBUG}"
 : "${TUNGSTEN_SPINEL_STAGE0_NO_GC:=0}"
 : "${TUNGSTEN_SPINEL_STAGE0_GC_THRESHOLD:=536870912}"
 export TUNGSTEN_SPINEL_STAGE0_CLANG_OPT
@@ -43,21 +43,22 @@ stage0_input_sha() {
     "$SPINEL_DIR/scripts/stage0_fingerprint.rb" \
     "$SPINEL_DIR/scripts/tree_fingerprint.rb" \
     "$SPINEL_DIR/scripts/build_bundle.rb" \
+    "$SPINEL_DIR/scripts/inject_args_pool.rb" \
     "$SPINEL_DIR/stage0" \
     "$ROOT/implementations/ruby/lib" \
     "$ROOT/runtime/runtime.c" \
     "$ROOT/runtime/terminal_input.c" \
+    "$ROOT/runtime/ssmr_witness.c" \
+    "$ROOT/runtime/lexchar_tables.c" \
+    "$ROOT/runtime/unicode_tables.c" \
     "$ROOT/runtime/event_kqueue.c" \
     "$ROOT/runtime/aks.c" \
     "$ROOT/runtime/tls_stub.c" \
     "$ROOT/runtime/slab_zstd.c" \
     "$ROOT/runtime/w_char_table.c" \
     "$ROOT/runtime/w_lexchar_cache.c" \
-    "$UPSTREAM/spinel" \
-    "$UPSTREAM/spinel_parse" \
-    "$UPSTREAM/spinel_codegen" \
-    "$UPSTREAM/spinel_codegen.rb" \
-    "$UPSTREAM/lib/sp_runtime.h" \
+    "$UPSTREAM/bin/spinel" \
+    "$UPSTREAM/lib/spinel_rt.h" \
     "$UPSTREAM/lib/libspinel_rt.a"
 }
 
@@ -83,9 +84,28 @@ runtime_archive_stale() {
     return 0
   fi
 
+  for runtime_obj in \
+    runtime.o \
+    terminal_input.o \
+    ssmr_witness.o \
+    lexchar_tables.o \
+    unicode_tables.o \
+    event_kqueue.o \
+    aks.o \
+    tls_stub.o \
+    slab_zstd.o
+  do
+    if [ ! -f "$RUNTIME_OBJ_DIR/$runtime_obj" ]; then
+      return 0
+    fi
+  done
+
   for runtime_src in \
     "$ROOT/runtime/runtime.c" \
     "$ROOT/runtime/terminal_input.c" \
+    "$ROOT/runtime/ssmr_witness.c" \
+    "$ROOT/runtime/lexchar_tables.c" \
+    "$ROOT/runtime/unicode_tables.c" \
     "$ROOT/runtime/event_kqueue.c" \
     "$ROOT/runtime/aks.c" \
     "$ROOT/runtime/tls_stub.c" \
@@ -106,21 +126,21 @@ rebuild_runtime_archive() {
     zstd_cflags="-I$homebrew_prefix/include"
   fi
   mkdir -p "$RUNTIME_OBJ_DIR"
-  rm -f "$RUNTIME_OBJ_DIR"/*.o
+  rm -f "$RUNTIME_OBJ_DIR"/*.o "$RUNTIME_ARCHIVE"
   (
     cd "$RUNTIME_OBJ_DIR"
-    # -flto=auto emits LTO bitcode; the stage0 link step (which also
-    # passes -flto=auto) can then inline runtime functions into the
-    # generated stage0 code across the archive boundary.
-    clang -O3 -DNDEBUG -march=native -mtune=native -flto=auto \
+    clang -O3 -DNDEBUG -march=native -mtune=native \
       -I"$ROOT/runtime" $zstd_cflags \
       -c "$ROOT/runtime/runtime.c" \
          "$ROOT/runtime/terminal_input.c" \
+         "$ROOT/runtime/ssmr_witness.c" \
+         "$ROOT/runtime/lexchar_tables.c" \
+         "$ROOT/runtime/unicode_tables.c" \
          "$ROOT/runtime/event_kqueue.c" \
          "$ROOT/runtime/aks.c" \
          "$ROOT/runtime/tls_stub.c" \
          "$ROOT/runtime/slab_zstd.c"
-    ar rcs "$RUNTIME_ARCHIVE" runtime.o terminal_input.o event_kqueue.o aks.o tls_stub.o slab_zstd.o
+    ar rcs "$RUNTIME_ARCHIVE" runtime.o terminal_input.o ssmr_witness.o lexchar_tables.o unicode_tables.o event_kqueue.o aks.o tls_stub.o slab_zstd.o
   )
 }
 
@@ -145,6 +165,7 @@ stage0_stale() {
 : "${SPINEL_STAGE0_REAL_LEXER:=1}"
 : "${SPINEL_STAGE0_REAL_PARSER:=1}"
 : "${SPINEL_STAGE0_FULL_REAL_PARSER:=1}"
+: "${SPINEL_STAGE0_PARSER_COMPAT:=0}"
 : "${SPINEL_STAGE0_REAL_ENV:=1}"
 : "${SPINEL_STAGE0_REAL_LOADER:=1}"
 : "${SPINEL_STAGE0_REAL_INTERPRETER:=1}"
@@ -155,6 +176,7 @@ export SPINEL_STAGE0_REAL_TOKEN
 export SPINEL_STAGE0_REAL_LEXER
 export SPINEL_STAGE0_REAL_PARSER
 export SPINEL_STAGE0_FULL_REAL_PARSER
+export SPINEL_STAGE0_PARSER_COMPAT
 export SPINEL_STAGE0_REAL_ENV
 export SPINEL_STAGE0_REAL_LOADER
 export SPINEL_STAGE0_REAL_INTERPRETER
@@ -175,7 +197,7 @@ fi
 
 "$RUBY_BIN" "$SPINEL_DIR/scripts/build_bundle.rb" "$BUNDLE"
 
-SPINEL_NO_GC="$TUNGSTEN_SPINEL_STAGE0_NO_GC" "$UPSTREAM/spinel" "$BUNDLE" -c -o "$C_FILE"
+SPINEL_NO_GC="$TUNGSTEN_SPINEL_STAGE0_NO_GC" "$UPSTREAM/spinel" --int-overflow=wrap "$BUNDLE" -c -o "$C_FILE"
 
 # Post-codegen: pool the per-call sp_PolyArray that evaluate_args
 # produces. Removes ~448 B of dirty-page traffic per interpreter
@@ -210,7 +232,7 @@ if [ "$TUNGSTEN_SPINEL_STAGE0_NO_GC" != "1" ]; then
   GC_CFLAGS="-DSP_GC_THRESHOLD_INIT=$TUNGSTEN_SPINEL_STAGE0_GC_THRESHOLD"
 fi
 
-cc $TUNGSTEN_SPINEL_STAGE0_CLANG_OPT $NO_GC_CFLAGS $GC_CFLAGS -w -Wno-all -Wno-int-conversion -Wno-incompatible-pointer-types -ffunction-sections -fdata-sections \
+cc $TUNGSTEN_SPINEL_STAGE0_CLANG_OPT -DSP_INT_OVERFLOW_MODE_WRAP $NO_GC_CFLAGS $GC_CFLAGS -w -Wno-all -Wno-int-conversion -Wno-incompatible-pointer-types -ffunction-sections -fdata-sections \
   -I"$UPSTREAM/lib" -I"$UPSTREAM/lib/regexp" $RUNTIME_INCLUDES \
   "$C_FILE" $RUNTIME_LINK -lm "$UPSTREAM/lib/libspinel_rt.a" -Wl,-dead_strip \
   -o "$BIN"

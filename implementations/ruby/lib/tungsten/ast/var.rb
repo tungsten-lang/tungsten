@@ -8,14 +8,18 @@ module Tungsten::AST
     attr_accessor :cached_miss_shape         # inline cache for @root_env hits when current frame misses
     attr_accessor :cached_const_env_version  # inline cache for non-class constant negative lookups
     attr_accessor :cached_dispatch_owner, :cached_dispatch_version, :cached_w_method
-    attr_reader :bang_base, :is_self
+    attr_reader :bang_base, :is_self, :constant_name
 
     def initialize(name)
       @name = Tungsten::AST.intern_name(name)
+      @cached_env = nil
       @cached_slot = -1
       @cached_layout_shape = 1
       @cached_miss_shape = 1
       @cached_const_env_version = -1
+      @cached_dispatch_owner = nil
+      @cached_dispatch_version = 0
+      @cached_w_method = nil
       @is_self = @name == "self"
       @bang_base = @name.end_with?("!") && @name.size > 1 ? -@name.delete_suffix("!") : nil
       first = @name.getbyte(0)

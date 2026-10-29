@@ -6,5 +6,9 @@ module Tungsten::AST
       # at parse time; Tungsten::Date validates on evaluation.
       @value = value.to_s
     end
+
+    def eval_in(interp)
+      interp.visit_date(self)
+    end
   end
 end

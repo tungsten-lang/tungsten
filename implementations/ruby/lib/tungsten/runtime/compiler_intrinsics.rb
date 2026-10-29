@@ -221,11 +221,125 @@ module Tungsten
         out
       end
 
+      COMPILER_CCALL_IDS = {
+        "w_is_node_extern" => 1,
+        "w_is_ast_node_full" => 2,
+        "w_node_alloc" => 3,
+        "w_node_field_store" => 4,
+        "w_node_field_load" => 5,
+        "w_node_kind_extern" => 6,
+        "w_node_kind_sym" => 7,
+        "w_node_offset_extern" => 8,
+        "w_node_size_class_extern" => 9,
+        "w_node_singleton" => 10,
+        "w_node_inline_payload" => 11,
+        "w_ast_bool_cached" => 12,
+        "w_ast_intern_node" => 13,
+        "w_ast_intern_str_of" => 14,
+        "w_ast_sparse_set" => 15,
+        "w_ast_sparse_get" => 16,
+        "w_ast_sparse_copy" => 17,
+        "w_ast_analysis_set" => 18,
+        "w_ast_analysis_get" => 19,
+        "w_ast_ivar_offsets_set" => 20,
+        "w_ast_ivar_offsets_get" => 21,
+        "w_ast_ivar_count_set" => 22,
+        "w_ast_ivar_count_get" => 23,
+        "w_ast_store_reset" => 24,
+        "w_ast_store_generation" => 25,
+        "w_ast_stats_dump" => 26,
+        "w_ast_body_builder_new" => 27,
+        "w_ast_body_builder_push" => 28,
+        "w_ast_body_builder_finish" => 29,
+        "w_content_temp_map_new" => 30,
+        "w_content_temp_map_seed" => 31,
+        "w_content_temp_norm" => 32,
+        "w_wire_function_record_new" => 33,
+        "w_wire_block_record_new" => 34,
+        "w_wire_alloc" => 35,
+        "w_wire_alloc_reserve" => 35,
+        "w_wire_field_store_at" => 36,
+        "w_wire_field_store" => 37,
+        "w_wire_field_load" => 38,
+        "w_wire_field_load_nil" => 38,
+        "w_wire_field_count" => 39,
+        "w_wire_field_symbol_at" => 40,
+        "w_wire_field_value_at" => 41,
+        "w_wire_kind_extern" => 42,
+        "w_wire_kind_sym" => 43,
+        "w_is_wire_extern" => 44,
+        "w_wire_sequence_from_array" => 45,
+        "w_wire_sequence_size" => 46,
+        "w_wire_sequence_get" => 47,
+        "w_wire_sequence_set" => 48,
+        "w_wire_store_reset" => 49,
+        "w_wire_store_mark" => 50,
+        "w_wire_clone" => 51,
+        "w_wire_temp_operands" => 52,
+        "w_make_token_extern" => 53,
+        "w_token_type_extern" => 54,
+        "w_token_length_extern" => 55,
+        "w_token_offset_extern" => 56,
+        "w_parser_tok_raw" => 57,
+        "w_parser_chars_equal_ascii" => 58,
+        "w_location_file" => 59,
+        "w_location_file_offset" => 60,
+        "w_unbox_location_file_id_extern" => 61,
+        "w_unbox_location_line_extern" => 62,
+        "w_unbox_location_col_extern" => 63,
+        "w_unbox_location_offset_extern" => 64,
+        "w_loc_register_file" => 65,
+        "w_loc_register_source_text" => 66,
+        "w_loc_line_for_offset" => 67,
+        "w_loc_col_for_offset" => 68,
+        "w_numeric_to_i64" => 69,
+        "w_array_data_ptr" => 70,
+        "w_lex64_scan_to_cp" => 71,
+        "w_string_byte_length" => 72,
+        "w_string_len" => 72,
+        "w_string_slice_bytes" => 73,
+        "w_string_eq_bytes_lit" => 74,
+        "w_string_first_byte" => 75,
+        "w_u64" => 76,
+        "w_int" => 76,
+        "w_int_to_hex_str" => 77,
+        "w_algebra_rewrite_source" => 78,
+        "w_compiler_image_lean_profile" => 79,
+        "w_eputs" => 80,
+        "w_flush" => 81,
+        "w_setenv" => 82,
+        "w_run_argv" => 83,
+        "w_host_cache_bytes_extern" => 84,
+        "w_executable_dir" => 85,
+        "w_executable_path" => 86,
+        "w_runtime_dir" => 87,
+        "w_isatty_stdout" => 88,
+        "w_isatty_stdin" => 89,
+        "w_cpu_count" => 90,
+        "__w_cpu_count" => 90,
+        "w_slab_freeze_safe" => 91,
+        "w_slab_is_frozen" => 92,
+        "w_freeze" => 93,
+        "w_frozen_p" => 94,
+        "w_core_cache_read" => 95,
+        "w_core_cache_read_rebase_locations" => 95,
+        "w_core_cache_write" => 96,
+        "w_zstd_compress_llvm_escaped" => 97,
+        "__w_bit_ctpop_u32" => 98,
+        "__w_bit_ctpop_u64" => 99,
+        "__w_bit_cttz_u32" => 100,
+        "__w_bit_cttz_u64" => 101,
+        "__w_bit_ctlz_u64" => 102
+      }.freeze
+
       def dispatch_compiler_ccall(cname, args)
-        case cname
-        when "w_is_node_extern"
+        ccall_id = COMPILER_CCALL_IDS[cname]
+        return COMPILER_CCALL_MISS unless ccall_id
+
+        case ccall_id
+        when 1
           args[1].is_a?(PackedNode) ? 1 : 0
-        when "w_is_ast_node_full"
+        when 2
           x = args[1]
           node_sym = args[2]
           if x.nil?
@@ -237,55 +351,55 @@ module Tungsten
           else
             0
           end
-        when "w_node_alloc"
+        when 3
           kind = args[1].to_i
           sc = args[2].to_i
           PackedNode.new(kind, sc, (@ast_next_offset += 8), [])
-        when "w_node_field_store"
+        when 4
           node = args[1]
           off = args[2].to_i
           val = args[3]
           node.fields[off] = val if node.is_a?(PackedNode)
           val
-        when "w_node_field_load"
+        when 5
           node = args[1]
           off = args[2].to_i
           node.is_a?(PackedNode) ? node.fields[off] : nil
-        when "w_node_kind_extern"
+        when 6
           node = args[1]
           node.is_a?(PackedNode) ? node.kind : 0
-        when "w_node_kind_sym"
+        when 7
           node = args[1]
           table = args[2]
           if node.is_a?(PackedNode) && table.is_a?(Array)
             table[node.kind]
           end
-        when "w_node_offset_extern"
+        when 8
           node = args[1]
           node.is_a?(PackedNode) ? node.offset : 0
-        when "w_node_size_class_extern"
+        when 9
           node = args[1]
           node.is_a?(PackedNode) ? node.sc : 0
-        when "w_node_singleton"
+        when 10
           kind = args[1].to_i
           @ast_singletons[kind] ||= PackedNode.new(kind, 0, 0, [])
-        when "w_node_inline_payload"
+        when 11
           kind = args[1].to_i
           payload = args[2].to_i & 0xFFFF_FFFF
           @ast_inline_nodes[[kind, payload]] ||= PackedNode.new(kind, 0, payload, [])
-        when "w_ast_bool_cached"
+        when 12
           truthy = args[1].to_i != 0
           key = truthy ? 1 : 0
           @ast_bool_nodes[key] ||= PackedNode.new(39, 0, (@ast_next_offset += 2), [truthy])
-        when "w_ast_intern_node"
+        when 13
           kind = args[1].to_i
           str = args[2].to_s
           id, canonical_str = (@ast_intern_table[str] ||= [(@ast_intern_next_id += 1), str])
           @ast_intern_nodes[[kind, id]] ||= PackedNode.new(kind, 0, id, [], intern_str: canonical_str)
-        when "w_ast_intern_str_of"
+        when 14
           node = args[1]
           node.is_a?(PackedNode) ? node.intern_str : nil
-        when "w_ast_sparse_set"
+        when 15
           node = args[1]
           sym = args[2]
           val = args[3]
@@ -303,7 +417,7 @@ module Tungsten
             (node.sparse ||= {})[key] = val
           end
           val
-        when "w_ast_sparse_get"
+        when 16
           node = args[1]
           sym = args[2]
           return nil unless node.is_a?(PackedNode)
@@ -319,7 +433,7 @@ module Tungsten
           else
             node.sparse ? node.sparse[key] : nil
           end
-        when "w_ast_sparse_copy"
+        when 17
           src = args[1]
           dst = args[2]
           if src.is_a?(PackedNode) && dst.is_a?(PackedNode)
@@ -329,52 +443,52 @@ module Tungsten
             dst.ivar_count = src.ivar_count
           end
           dst
-        when "w_ast_analysis_set"
+        when 18
           node = args[1]
           val = args[2]
           node.analysis = val if node.is_a?(PackedNode)
           val
-        when "w_ast_analysis_get"
+        when 19
           node = args[1]
           node.is_a?(PackedNode) ? node.analysis : nil
-        when "w_ast_ivar_offsets_set"
+        when 20
           node = args[1]
           val = args[2]
           node.ivar_offsets = val if node.is_a?(PackedNode)
           val
-        when "w_ast_ivar_offsets_get"
+        when 21
           node = args[1]
           node.is_a?(PackedNode) ? node.ivar_offsets : nil
-        when "w_ast_ivar_count_set"
+        when 22
           node = args[1]
           val = args[2]
           node.ivar_count = val if node.is_a?(PackedNode)
           val
-        when "w_ast_ivar_count_get"
+        when 23
           node = args[1]
           node.is_a?(PackedNode) ? node.ivar_count : nil
-        when "w_ast_store_reset"
+        when 24
           @ast_store_gen += 1
           @ast_bool_nodes.clear
           @ast_intern_table.clear
           @ast_intern_nodes.clear
           @ast_intern_next_id = 0
           @ast_store_gen
-        when "w_ast_store_generation"
+        when 25
           @ast_store_gen
-        when "w_ast_stats_dump"
+        when 26
           0
-        when "w_ast_body_builder_new"
+        when 27
           []
-        when "w_ast_body_builder_push"
+        when 28
           arr = args[1]
           arr.push(args[3]) if arr.is_a?(Array)
           arr
-        when "w_ast_body_builder_finish"
+        when 29
           args[1]
-        when "w_content_temp_map_new"
+        when 30
           [Array.new(args[1].to_i), {}, args[2].to_i]
-        when "w_content_temp_map_seed"
+        when 31
           state = args[1]
           name = args[2]
           idx = args[3]
@@ -386,7 +500,7 @@ module Tungsten
             state[1][name] = idx
           end
           nil
-        when "w_content_temp_norm"
+        when 32
           name = args[1]
           state = args[2]
           dense = state[0]
@@ -403,7 +517,7 @@ module Tungsten
             state[2] = out + 1
           end
           out
-        when "w_wire_function_record_new"
+        when 33
           fields = args[1]
           rec = WireRecord.new(265)
           values = [
@@ -421,33 +535,33 @@ module Tungsten
             i += 1
           end
           rec
-        when "w_wire_block_record_new"
+        when 34
           fields = args[1]
           rec = WireRecord.new(266)
           rec.store_at(0, fields[0], args[2])
           rec.store_at(1, fields[1], [])
           rec
-        when "w_wire_alloc", "w_wire_alloc_reserve"
+        when 35
           WireRecord.new(args[1].to_i)
-        when "w_wire_field_store_at"
+        when 36
           rec = args[1]
           rec.store_at(args[2].to_i, args[3], args[4]) if rec.is_a?(WireRecord)
-        when "w_wire_field_store"
+        when 37
           rec = args[1]
           rec.store(args[2], args[3]) if rec.is_a?(WireRecord)
-        when "w_wire_field_load", "w_wire_field_load_nil"
+        when 38
           rec = args[1]
           rec.is_a?(WireRecord) ? rec.load(args[2]) : nil
-        when "w_wire_field_count"
+        when 39
           rec = args[1]
           rec.is_a?(WireRecord) ? rec.keys.length : 0
-        when "w_wire_field_symbol_at"
+        when 40
           rec = args[1]
           rec.is_a?(WireRecord) ? rec.keys[args[2].to_i] : nil
-        when "w_wire_field_value_at"
+        when 41
           rec = args[1]
           rec.is_a?(WireRecord) ? rec.values[args[2].to_i] : nil
-        when "w_wire_kind_extern"
+        when 42
           v = args[1]
           if v.is_a?(WireRecord)
             v.kind
@@ -456,23 +570,23 @@ module Tungsten
           else
             0
           end
-        when "w_wire_kind_sym"
+        when 43
           v = args[1]
           syms = args[2]
           if v.is_a?(WireRecord) && syms.is_a?(Array)
             syms[v.kind]
           end
-        when "w_is_wire_extern"
+        when 44
           v = args[1]
           (v.is_a?(WireRecord) || v.is_a?(WireSequence)) ? 1 : 0
-        when "w_wire_sequence_from_array"
+        when 45
           arr = args[1]
           if arr.is_a?(WireSequence)
             arr
           elsif arr.is_a?(Array)
             WireSequence.new(arr.dup)
           end
-        when "w_wire_sequence_size"
+        when 46
           seq = args[1]
           if seq.is_a?(WireSequence)
             seq.size
@@ -481,24 +595,24 @@ module Tungsten
           else
             0
           end
-        when "w_wire_sequence_get"
+        when 47
           seq = args[1]
           idx = args[2].to_i
           if seq.is_a?(WireSequence) || seq.is_a?(Array)
             seq[idx]
           end
-        when "w_wire_sequence_set"
+        when 48
           seq = args[1]
           idx = args[2].to_i
           val = args[3]
           if seq.is_a?(WireSequence) || seq.is_a?(Array)
             seq[idx] = val
           end
-        when "w_wire_store_reset"
+        when 49
           0
-        when "w_wire_store_mark"
+        when 50
           1
-        when "w_wire_clone"
+        when 51
           v = args[1]
           if v.is_a?(WireRecord)
             v.clone_record
@@ -507,22 +621,22 @@ module Tungsten
           else
             v
           end
-        when "w_wire_temp_operands"
+        when 52
           wire_temp_operands_for(args[1])
-        when "w_make_token_extern"
+        when 53
           t = args[1].to_i & 0xFF
           l = args[2].to_i & 0xFFF
           o = args[3].to_i & 0xFF_FFFF
           to_signed_i64(W_PACKED_TOKEN_TAG | (t << 38) | (l << 26) | (o << 2))
-        when "w_token_type_extern"
+        when 54
           (args[1].to_i >> 38) & 0xFF
-        when "w_token_length_extern"
+        when 55
           (args[1].to_i >> 26) & 0xFFF
-        when "w_token_offset_extern"
+        when 56
           (args[1].to_i >> 2) & 0xFF_FFFF
-        when "w_parser_tok_raw"
+        when 57
           args[1].to_i
-        when "w_parser_chars_equal_ascii"
+        when 58
           chars = args[1]
           off = args[2].to_i
           len = args[3].to_i
@@ -543,35 +657,35 @@ module Tungsten
           else
             0
           end
-        when "w_location_file"
+        when 59
           fid = args[1].to_i & 0x3FFF
           line = args[2].to_i & 0x3FFFF
           col = args[3].to_i & 0x7FF
           to_signed_i64(W_PACKED_LOC_BASE | (1 << 43) | (fid << 29) | (line << 11) | col)
-        when "w_location_file_offset"
+        when 60
           fid = args[1].to_i & 0x3FFF
           off = args[2].to_i & 0x1FFF_FFFF
           to_signed_i64(W_PACKED_LOC_BASE | (2 << 43) | (fid << 29) | off)
-        when "w_unbox_location_file_id_extern"
+        when 61
           (args[1].to_i >> 29) & 0x3FFF
-        when "w_unbox_location_line_extern"
+        when 62
           (args[1].to_i >> 11) & 0x3FFFF
-        when "w_unbox_location_col_extern"
+        when 63
           args[1].to_i & 0x7FF
-        when "w_unbox_location_offset_extern"
+        when 64
           args[1].to_i & 0x1FFF_FFFF
-        when "w_loc_register_file"
+        when 65
           path = args[1].to_s
           line_at = args[2].is_a?(Array) ? args[2] : []
           col_at = args[3].is_a?(Array) ? args[3] : []
           register_loc_file_entry(path, line_at, col_at)
-        when "w_loc_register_source_text"
+        when 66
           path = args[1].to_s
           source = args[2].to_s
           @loc_source_texts[path] = source
           line_at, col_at = build_loc_tables_from_source(source)
           register_loc_file_entry(path, line_at, col_at)
-        when "w_loc_line_for_offset"
+        when 67
           fid = args[1].to_i
           off = args[2].to_i
           tbl = @loc_line_tables[fid]
@@ -580,7 +694,7 @@ module Tungsten
           else
             -1
           end
-        when "w_loc_col_for_offset"
+        when 68
           fid = args[1].to_i
           off = args[2].to_i
           tbl = @loc_col_tables[fid]
@@ -589,12 +703,12 @@ module Tungsten
           else
             -1
           end
-        when "w_numeric_to_i64"
+        when 69
           v = args[1]
           v.is_a?(Tungsten::CharValue) ? v.codepoint : v.to_i
-        when "w_array_data_ptr"
+        when 70
           args[1]
-        when "w_lex64_scan_to_cp"
+        when 71
           data = args[1]
           n = args[2].to_i
           p = args[3].to_i
@@ -608,38 +722,38 @@ module Tungsten
             end
           end
           p
-        when "w_string_byte_length", "w_string_len"
+        when 72
           args[1].to_s.bytesize
-        when "w_string_slice_bytes"
+        when 73
           args[1].to_s.byteslice(args[2].to_i, args[3].to_i) || ""
-        when "w_string_eq_bytes_lit"
+        when 74
           args[1].to_s.byteslice(args[2].to_i, args[3].to_i) == args[4].to_s
-        when "w_string_first_byte"
+        when 75
           v = args[1]
           if v.is_a?(String)
             v.empty? ? -1 : v.getbyte(0)
           else
             -2
           end
-        when "w_u64", "w_int"
+        when 76
           args[1]
-        when "w_int_to_hex_str"
+        when 77
           format("%016x", args[1].to_i & U64_MASK)
-        when "w_algebra_rewrite_source"
+        when 78
           args[1]
-        when "w_compiler_image_lean_profile"
+        when 79
           nil
-        when "w_eputs"
+        when 80
           $stderr.puts(w_to_s(args[1]))
           $stderr.flush
           nil
-        when "w_flush"
+        when 81
           $stdout.flush
           $stderr.flush
           nil
-        when "w_setenv"
+        when 82
           Tungsten::Env.set(args[1], args[2])
-        when "w_run_argv"
+        when 83
           argv_arr = args[1]
           if argv_arr.is_a?(Array) && !argv_arr.empty?
             cmd = argv_arr.map(&:to_s)
@@ -657,45 +771,45 @@ module Tungsten
           else
             -1
           end
-        when "w_host_cache_bytes_extern"
+        when 84
           0
-        when "w_executable_dir"
+        when 85
           ENV["TUNGSTEN_ROOT"] ? File.join(ENV["TUNGSTEN_ROOT"], "bin") : File.expand_path("../../../../../bin", __dir__)
-        when "w_executable_path"
+        when 86
           ENV["TUNGSTEN_ROOT"] ? File.join(ENV["TUNGSTEN_ROOT"], "bin/tungsten-compiler") : File.expand_path("../../../../../bin/tungsten-compiler", __dir__)
-        when "w_runtime_dir"
+        when 87
           ENV["TUNGSTEN_ROOT"] ? File.join(ENV["TUNGSTEN_ROOT"], "runtime") : File.expand_path("../../../../../runtime", __dir__)
-        when "w_isatty_stdout"
+        when 88
           $stdout.tty?
-        when "w_isatty_stdin"
+        when 89
           $stdin.tty?
-        when "w_cpu_count", "__w_cpu_count"
+        when 90
           4
-        when "w_slab_freeze_safe"
+        when 91
           nil
-        when "w_slab_is_frozen"
+        when 92
           false
-        when "w_freeze"
+        when 93
           args[1]
-        when "w_frozen_p"
+        when 94
           false
-        when "w_core_cache_read", "w_core_cache_read_rebase_locations"
+        when 95
           nil
-        when "w_core_cache_write"
+        when 96
           false
-        when "w_zstd_compress_llvm_escaped"
+        when 97
           nil
-        when "__w_bit_ctpop_u32"
+        when 98
           (args[1].to_i & 0xFFFF_FFFF).to_s(2).count("1")
-        when "__w_bit_ctpop_u64"
+        when 99
           (args[1].to_i & U64_MASK).to_s(2).count("1")
-        when "__w_bit_cttz_u32"
+        when 100
           raw = args[1].to_i & 0xFFFF_FFFF
           raw.zero? ? 32 : (raw & -raw).bit_length - 1
-        when "__w_bit_cttz_u64"
+        when 101
           raw = args[1].to_i & U64_MASK
           raw.zero? ? 64 : (raw & -raw).bit_length - 1
-        when "__w_bit_ctlz_u64"
+        when 102
           raw = args[1].to_i & U64_MASK
           raw.zero? ? 64 : 64 - raw.bit_length
         else

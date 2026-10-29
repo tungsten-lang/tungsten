@@ -7,6 +7,10 @@ module Tungsten::AST
       @size = size
     end
 
+    def eval_in(interp)
+      interp.visit_typed_array(self)
+    end
+
     def children
       yield @size if @size.is_a?(Node)
     end

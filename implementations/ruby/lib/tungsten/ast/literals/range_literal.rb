@@ -8,6 +8,10 @@ module Tungsten::AST
       @exclusive = exclusive
     end
 
+    def eval_in(interp)
+      interp.visit_range_literal(self)
+    end
+
     def children
       yield @from if @from.is_a?(Node)
       yield @to if @to.is_a?(Node)

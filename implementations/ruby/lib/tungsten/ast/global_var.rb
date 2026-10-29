@@ -6,6 +6,10 @@ module Tungsten::AST
       @name = Tungsten::AST.intern_name(name)
     end
 
+    def eval_in(interp)
+      interp.visit_global_var(self)
+    end
+
     def can_assign?
       true
     end

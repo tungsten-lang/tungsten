@@ -6,6 +6,10 @@ module Tungsten::AST
       @exp = exp
     end
 
+    def eval_in(interp)
+      interp.visit_splat(self)
+    end
+
     def ==(other)
       super && other.exp == exp
     end

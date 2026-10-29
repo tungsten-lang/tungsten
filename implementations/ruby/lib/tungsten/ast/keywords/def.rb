@@ -64,7 +64,7 @@ module Tungsten::AST
     #   param_types: Array[Symbol] — one type symbol per positional param
     #   return_type: Symbol — the declared return type
     attr_accessor :param_types, :return_type
-    attr_accessor :has_return
+    attr_accessor :has_return, :slot_names_template, :simple_method_plan
 
     def initialize(name, args, body, receiver: nil, block: nil, yields: nil, splat_index: nil, double_splat: nil)
       @name = Tungsten::AST.intern_name(name)
@@ -79,6 +79,8 @@ module Tungsten::AST
       @param_types  = nil
       @return_type  = nil
       @has_return   = nil
+      @slot_names_template = nil
+      @simple_method_plan = nil
     end
 
     def eval_in(interp)

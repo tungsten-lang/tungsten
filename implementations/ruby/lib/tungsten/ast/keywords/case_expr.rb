@@ -1,11 +1,12 @@
 module Tungsten::AST
   class CaseExpr < Node
-    attr_accessor :receiver, :whens, :else_body
+    attr_accessor :receiver, :whens, :else_body, :literal_case_lookup
 
     def initialize(receiver, whens, else_body = nil)
       @receiver = receiver
       @whens = whens
       @else_body = List.from(else_body)
+      @literal_case_lookup = nil
     end
 
     def eval_in(interp)

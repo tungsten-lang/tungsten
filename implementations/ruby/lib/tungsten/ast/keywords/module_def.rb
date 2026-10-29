@@ -7,6 +7,10 @@ module Tungsten::AST
       @body = List.from(body)
     end
 
+    def eval_in(interp)
+      interp.visit_module_def(self)
+    end
+
     def children
       yield @body if @body.is_a?(Node)
     end

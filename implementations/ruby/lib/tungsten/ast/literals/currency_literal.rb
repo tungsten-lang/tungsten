@@ -7,6 +7,10 @@ module Tungsten::AST
       @symbol = symbol
     end
 
+    def eval_in(interp)
+      interp.visit_currency_literal(self)
+    end
+
     def ==(other)
       other.is_a?(CurrencyLiteral) &&
         other.value_str == @value_str &&

@@ -18,6 +18,10 @@ module Tungsten::AST
       new names, true
     end
 
+    def eval_in(interp)
+      interp.visit_path(self)
+    end
+
     def children; end
 
     def single?(name)

@@ -7,6 +7,10 @@ module Tungsten::AST
       @elements = elements
     end
 
+    def eval_in(interp)
+      interp.visit_in_test(self)
+    end
+
     def children
       yield @lhs if @lhs.is_a?(Node)
       @elements.each { |element| yield element if element.is_a?(Node) }

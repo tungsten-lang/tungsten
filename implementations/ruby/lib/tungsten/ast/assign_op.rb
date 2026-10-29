@@ -8,6 +8,10 @@ module Tungsten::AST
       @value    = value
     end
 
+    def eval_in(interp)
+      interp.visit_assign_op(self)
+    end
+
     def children
       yield @name if @name.is_a?(Node)
       yield @value if @value.is_a?(Node)

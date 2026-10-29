@@ -6,6 +6,10 @@ module Tungsten::AST
       @entries = entries
     end
 
+    def eval_in(interp)
+      interp.visit_hash_literal(self)
+    end
+
     def ==(other)
       super && other.entries == entries
     end

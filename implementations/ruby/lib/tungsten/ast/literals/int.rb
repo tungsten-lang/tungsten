@@ -12,6 +12,10 @@ module Tungsten::AST
         end
     end
 
+    def eval_in(_interp)
+      @value
+    end
+
     private
 
     def parse_literal(raw)

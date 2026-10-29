@@ -543,46 +543,16 @@ module Tungsten
     end
 
     def evaluate(node)
-      klass = node.class
-      case
-      when klass == AST::List          then return visit_list(node)
-      when klass == AST::Print         then return visit_print(node)
-      when klass == AST::Int           then return node.value
-      when klass == AST::Var           then return visit_var(node)
-      when klass == AST::BinaryOp      then return visit_binary_op(node)
-      when klass == AST::Call          then return visit_call(node)
-      when klass == AST::Write         then return visit_write(node)
-      when klass == AST::Symbol        then return cached_symbol_value(node)
-      when klass == AST::If            then return visit_if(node)
-      when klass == AST::Assign        then return visit_assign(node)
-      when klass == AST::TypeHint      then return visit_type_hint(node)
-      when klass == AST::StringLiteral then return node.value
-      when klass == AST::Nil           then return nil
-      when klass == AST::InstanceVar   then return @self_stack.last.instance_vars[node.name]
-      when klass == AST::AssignOp      then return visit_assign_op(node)
-      when klass == AST::And           then return visit_and(node)
-      when klass == AST::Return        then return visit_return(node)
-      when klass == AST::Recase        then return visit_recase(node)
-      when klass == AST::Boolean       then return node.value
-      when klass == AST::Or            then return visit_or(node)
-      when klass == AST::InTest        then return visit_in_test(node)
-      when klass == AST::While         then return visit_while(node)
-      when klass == AST::CaseExpr      then return visit_case_expr(node)
-      when klass == AST::HashLiteral   then return visit_hash_literal(node)
-      when klass == AST::ArrayLiteral  then return visit_array_literal(node)
-      end
-      return decode_w_value(node.value, node.raw) if klass.name == "Tungsten::AST::WValue"
-      case klass.name
-      when "Tungsten::AST::Char"
-        return Tungsten::CharValue.new(node.value)
-      when "Tungsten::AST::Float",
-           "Tungsten::AST::Decimal",
-           "Tungsten::AST::Month",
-           "Tungsten::AST::Week"
-        return node.value
-      end
+      node.eval_in(self)
+    end
 
+    def evaluate_fallback(node)
+      klass = node.class
       __send__(@dispatch[klass] ||= klass.visitor_method, node)
+    end
+
+    def read_ivar(name)
+      @self_stack.last.instance_vars[name]
     end
 
     def runtime_error(msg, node: nil, length: nil)
@@ -625,30 +595,31 @@ module Tungsten
     end
 
     def resolve_cached_local(node, name)
-      if node.cached_layout_shape == @env.layout_shape
-        return @env.get_slot(node.cached_slot)
-      end
+      shape = @env.layout_shape
+      return @env.get_slot(node.cached_slot) if node.cached_layout_shape == shape
 
-      if (ce = node.cached_env) && ce.equal?(@env)
-        return ce.get_slot(node.cached_slot)
+      if (ce = node.cached_env)
+        return ce.get_slot(node.cached_slot) if ce.equal?(@env)
+        return ce.get_slot(node.cached_slot) if node.cached_miss_shape == shape && @env.parent.equal?(ce)
       end
 
       idx = @env.slot_index(name)
       if idx
         node.cached_env = @env
         node.cached_slot = idx
-        node.cached_layout_shape = @env.layout_shape
+        node.cached_layout_shape = shape
         return @env.get_slot(idx)
       end
 
-      env = @env
-      env = env.parent
+      parent = @env.parent
+      env = parent
       while env
         idx = env.slot_index(name)
         if idx
           node.cached_env = env
           node.cached_slot = idx
           node.cached_layout_shape = 1
+          node.cached_miss_shape = env.equal?(parent) ? shape : 1
           return env.get_slot(idx)
         end
 
@@ -661,28 +632,31 @@ module Tungsten
     def cached_w_method(node, owner)
       return nil unless owner
       return nil unless (cached_owner = node.cached_dispatch_owner)&.equal?(owner)
-      return nil unless node.cached_dispatch_version == owner.version
+      return nil unless node.cached_dispatch_version == ((Runtime::WClass.hierarchy_epoch << 16) ^ owner.version)
 
       node.cached_w_method
     end
 
     def cache_w_method(node, owner, method)
       node.cached_dispatch_owner = owner
-      node.cached_dispatch_version = owner.version
+      node.cached_dispatch_version = (Runtime::WClass.hierarchy_epoch << 16) ^ owner.version
       node.cached_w_method = method
     end
 
     def resolve_w_method(node, owner, name)
       return nil unless owner
 
+      ver = (Runtime::WClass.hierarchy_epoch << 16) ^ owner.version
       if (cached_owner = node.cached_dispatch_owner)&.equal?(owner) &&
-         node.cached_dispatch_version == owner.version
+         node.cached_dispatch_version == ver
         return node.cached_w_method
       end
 
-      call_args = node.respond_to?(:args) ? node.args : nil
+      call_args = node.is_a?(AST::Call) ? node.args : nil
       method = owner.lookup_method(name, argc: (call_args || EMPTY_ARGS).size)
-      cache_w_method(node, owner, method) if method
+      node.cached_dispatch_owner = owner
+      node.cached_dispatch_version = ver
+      node.cached_w_method = method
       method
     end
 
@@ -869,7 +843,9 @@ module Tungsten
         recv = method.defining_class&.name
         name = method.name
         label = recv ? "#{recv}##{name}" : name.to_s
-        { label: label, location: @call_locations[i] }
+        loc = @call_locations[i]
+        loc = loc.location if loc.is_a?(AST::Node)
+        { label: label, location: loc }
       end
     end
 
@@ -1150,8 +1126,17 @@ module Tungsten
     end
 
     def visit_list(node)
+      items = node.list
+      len = items.length
+      return nil if len == 0
+      return items[0].eval_in(self) if len == 1
+
       result = nil
-      node.each { |exp| result = evaluate(exp) }
+      i = 0
+      while i < len
+        result = items[i].eval_in(self)
+        i += 1
+      end
       result
     end
 
@@ -1795,6 +1780,7 @@ module Tungsten
         w_class = Runtime::WClass.new(node.name, superclass)
         @classes[node.name] = w_class
       end
+      w_class.defining_env ||= @env
 
       effective_body = expand_on_guards(node.body)
 
@@ -1807,7 +1793,8 @@ module Tungsten
             class_method = !expr.receiver.nil?
             w_method = Runtime::WMethod.new(expr.name, expr.args, body, w_class,
                                             splat_index: expr.splat_index, param_types: expr.param_types,
-                                            class_method: class_method, block_param: expr.block)
+                                            class_method: class_method, block_param: expr.block,
+                                            defining_env: @env)
             if class_method
               w_class.define_class_method(expr.name.to_s, w_method)
             else
@@ -1829,11 +1816,14 @@ module Tungsten
             end
           when Tungsten::AST::Assign
             # A class-body constant (`ROWS = [...]`) also lives on the class
-            # so its methods can read it regardless of who called them —
-            # method frames chain to the CALLER's env, not the class body's.
+            # so its methods can read it regardless of who called them.
             value = evaluate(expr)
             target = expr.name
-            w_class.constants[target.name.to_s] = value if target.is_a?(Tungsten::AST::Var) && target.constant?
+            if target.is_a?(Tungsten::AST::Var) && target.constant?
+              cname = target.name.to_s
+              w_class.constants[cname] = value
+              (@class_constant_names ||= {})[cname] = true
+            end
           else
             evaluate(expr)
           end
@@ -2391,30 +2381,32 @@ module Tungsten
           end
         end
       else
-        name = node.name.to_s
-        if name == "ccall" || name == "ccall_nobox" || name == "ccall_rawargs"
-          return dispatch_interpreted_ccall(evaluate_args(node.args), node)
-        end
-        if name == "slab_alloc_init"
-          return dispatch_slab_alloc_init(evaluate_args(node.args))
-        end
-        if name == "wvalue_bits" || name == "wvalue_from_bits"
-          return node.args && !node.args.empty? ? evaluate(node.args[0]) : nil
-        end
-        if name == "Σ"
-          return eval_sigma(node)
-        end
-
-        # Class constructor call: Dog("Rex") → Dog.new("Rex")
-        if (w_class = @classes[name])
-          profile_visit_call("#{name}.new") if @profile_enabled
-          return instantiate_from_nodes(w_class, node.args)
+        name = node.name
+        if (special = node.special_bare_call) != 0
+          case special
+          when 1
+            return dispatch_interpreted_ccall(evaluate_args(node.args), node)
+          when 2
+            return dispatch_slab_alloc_init(evaluate_args(node.args))
+          when 3
+            return node.args && !node.args.empty? ? evaluate(node.args[0]) : nil
+          when 4
+            return eval_sigma(node)
+          end
         end
 
-        # Module method call: Greetable.method
-        if (w_module = @modules[name])
-          profile_visit_call("module #{name}") if @profile_enabled
-          return w_module
+        if node.constant_name
+          # Class constructor call: Dog("Rex") → Dog.new("Rex")
+          if (w_class = @classes[name])
+            profile_visit_call("#{name}.new") if @profile_enabled
+            return instantiate_from_nodes(w_class, node.args)
+          end
+
+          # Module method call: Greetable.method
+          if (w_module = @modules[name])
+            profile_visit_call("module #{name}") if @profile_enabled
+            return w_module
+          end
         end
 
         local_miss_cached = !@profile_enabled &&
@@ -3171,7 +3163,8 @@ module Tungsten
       end
 
       params = method.params || EMPTY_ARGS
-      method_env = new_param_env(@env, params, method, barrier: true)
+      parent_env = method.defining_env || method.defining_class&.defining_env || @root_env
+      method_env = new_param_env(parent_env, params, method, barrier: true)
 
       if method.block_param && !block && args.size > params.size && args.last.is_a?(Tungsten::AST::Def)
         args = args.dup
@@ -3199,7 +3192,8 @@ module Tungsten
       end
 
       params = method.params || EMPTY_ARGS
-      method_env = new_param_env(@env, params, method, barrier: true)
+      parent_env = method.defining_env || method.defining_class&.defining_env || @root_env
+      method_env = new_param_env(parent_env, params, method, barrier: true)
 
       if !method.block_param && bind_exact_small_args_from_nodes(method_env, params, arg_nodes, method.splat_index, nil)
         return execute_bound_w_method(recv, method, method_env, block, call_node)
@@ -3408,18 +3402,21 @@ module Tungsten
       @current_block = block
       @self_stack.push(recv)
       @call_methods.push(method)
-      @call_locations.push(call_node&.location)
+      @call_locations.push(call_node)
 
       begin
-        with_profile_callable(method) do
-          body = method.body
-          if method.instance_variable_defined?(:@has_return)
-            hr = method.instance_variable_get(:@has_return)
-          else
-            hr = Interpreter.body_has_return?(body)
-            method.instance_variable_set(:@has_return, hr)
+        body = method.body
+        hr = method.has_return
+        if hr.nil?
+          hr = Interpreter.body_has_return?(body)
+          method.has_return = hr
+        end
+        if @profile_enabled
+          with_profile_callable(method) do
+            hr ? catch(RETURN_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
           end
-          hr ? catch(RETURN_SIGNAL) { evaluate(body) } : evaluate(body)
+        else
+          hr ? catch(RETURN_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
         end
       ensure
         @call_locations.pop
@@ -3604,20 +3601,26 @@ module Tungsten
     end
 
     def try_autoload_core(name)
-      return (@classes["BigInt"] ||= (@classes["Integer"] || try_autoload_core("Integer"))) if name.to_s == "BigInt"
+      key = name.to_s
+      return (@classes["BigInt"] ||= (@classes["Integer"] || try_autoload_core("Integer"))) if key == "BigInt"
 
-      base_dir = @current_file ? File.dirname(@current_file) : Dir.pwd
+      base_dir = @current_file ? ((@dirname_cache ||= {})[@current_file] ||= File.dirname(@current_file)) : Dir.pwd
       root = find_project_root(base_dir)
       return nil unless root
+
+      failed_for_root = ((@failed_autoloads ||= {})[root] ||= {})
+      return nil if failed_for_root.key?(key)
 
       # The autoload manifest (core/tungsten.w's `auto :Name, "path"` table)
       # is the authority on where a stdlib class or trait lives — e.g.
       # Comparable is core/traits/comparable.w, not core/comparable.w. Fall
       # back to the flat downcased filename for names outside the table.
-      relative = core_autoload_table(root)[name.to_s]
-      core_path = File.join(root, "core", "#{relative || name.downcase}.w")
-      return nil unless File.exist?(core_path)
-      return nil if @loaded_files.key?(core_path)
+      relative = core_autoload_table(root)[key]
+      core_path = File.join(root, "core", "#{relative || key.downcase}.w")
+      if @loaded_files.key?(core_path) || !File.exist?(core_path)
+        failed_for_root[key] = true
+        return nil
+      end
 
       @loaded_files[core_path] = true
       source = File.read(core_path)
@@ -3639,7 +3642,9 @@ module Tungsten
         @env = prev_env
       end
 
-      @classes[name] || @modules[name]
+      resolved = @classes[name] || @modules[name]
+      failed_for_root[key] = true unless resolved
+      resolved
     end
 
     def core_autoload_table(root)
@@ -3662,20 +3667,29 @@ module Tungsten
     end
 
     def find_project_root(dir)
+      cache = (@project_root_cache ||= {})
+      return cache[dir] if cache.key?(dir)
+
       d = dir
+      found = nil
       10.times do
-        return d if File.directory?(File.join(d, "bits"))
-        return d if File.directory?(File.join(d, "bit"))
+        if File.directory?(File.join(d, "bits")) || File.directory?(File.join(d, "bit"))
+          found = d
+          break
+        end
         parent = File.dirname(d)
         break if parent == d
+
         d = parent
       end
-      configured_root = ENV["TUNGSTEN_ROOT"]
-      if configured_root && File.directory?(File.join(configured_root, "core"))
-        return File.expand_path(configured_root)
+      if found.nil?
+        configured_root = ENV["TUNGSTEN_ROOT"]
+        if configured_root && File.directory?(File.join(configured_root, "core"))
+          found = File.expand_path(configured_root)
+        end
       end
 
-      nil
+      cache[dir] = found
     end
 
     def cached_literal_case_lookup(node)
@@ -4534,42 +4548,50 @@ module Tungsten
     end
 
     def visit_var(node)
-      if node.name.end_with?("!") && node.name.size > 1
-        base = node.name.delete_suffix("!")
-        if @env.defined?(base) && !@env.get(base).is_a?(AST::Def)
-          return evaluate(AST::Call.new(AST::Var.new(base), "factorial", []))
+      if (base = node.bang_base) && @env.defined?(base) && !@env.get(base).is_a?(AST::Def)
+        return evaluate(AST::Call.new(AST::Var.new(base), "factorial", []))
+      end
+
+      if !node.constant?
+        shape = @env.layout_shape
+        if node.cached_layout_shape == shape
+          value = @env.get_slot(node.cached_slot)
+          return value if !value.equal?(Environment::UNDEFINED) && !value.is_a?(Tungsten::AST::Def)
+        end
+
+        if (ce = node.cached_env)
+          if ce.equal?(@env) || (node.cached_miss_shape == shape && @env.parent.equal?(ce))
+            value = ce.get_slot(node.cached_slot)
+            return value if !value.equal?(Environment::UNDEFINED) && !value.is_a?(Tungsten::AST::Def)
+          end
+        end
+
+        return @self_stack.last if node.is_self
+      else
+        const_ver = (@classes.size << 20) ^ (@modules.size << 8) ^ (@class_constant_names ? @class_constant_names.size : 0)
+        if node.cached_const_env_version != const_ver
+          name = node.name
+          w_class = @classes[name] || try_autoload_core(name)
+          return w_class if w_class
+
+          w_module = @modules[name]
+          return w_module if w_module
+
+          namespaced = resolve_unique_namespaced_constant(name)
+          return namespaced if namespaced
+
+          if @class_constant_names&.key?(name)
+            if !@env.defined_locally_or_in_scope?(name)
+              value = resolve_class_constant(name)
+              return value unless value.equal?(Environment::UNDEFINED)
+            end
+          else
+            node.cached_const_env_version = const_ver
+          end
         end
       end
 
-      # Inline cache hit: same Environment instance → same slot layout
-      if (ce = node.cached_env) && ce.equal?(@env)
-        value = ce.get_slot(node.cached_slot)
-        return value unless value.equal?(Environment::UNDEFINED)
-      end
-
-      name = node.name
-      return @self_stack.last if name == "self"
-
-      # Class/module reference (with core autoload)
-      if node.constant?
-        w_class = @classes[name] || try_autoload_core(name)
-        return w_class if w_class
-
-        w_module = @modules[name]
-        return w_module if w_module
-
-        namespaced = resolve_unique_namespaced_constant(name)
-        return namespaced if namespaced
-      end
-
-      # Bare constant: the defining class's table beats names leaked from
-      # the CALLER's frames (a method env chains to its caller's env); a
-      # local of the current method scope (up to its barrier) still shadows.
-      if node.constant? && !@env.defined_locally_or_in_scope?(name)
-        value = resolve_class_constant(name)
-        return value unless value.equal?(Environment::UNDEFINED)
-      end
-
+      name ||= node.name
       value = resolve_cached_local(node, name)
       unless value.equal?(Environment::UNDEFINED)
         if value.is_a?(Tungsten::AST::Def) && (value.args.nil? || value.args.all? { |a| a.default })
@@ -4625,6 +4647,8 @@ module Tungsten
     # push neither self nor a call frame. Callers fall back to lexical and
     # builtin lookups when this misses.
     def resolve_class_constant(name)
+      return Environment::UNDEFINED unless @class_constant_names&.key?(name)
+
       seen = nil
       innermost = @call_methods.last&.defining_class
       self_class = find_current_class
@@ -4654,21 +4678,32 @@ module Tungsten
     end
 
     def resolve_unique_namespaced_constant(name)
+      version = (@classes.size << 16) ^ @modules.size
+      cache = (@namespaced_const_cache ||= {})
+      if @namespaced_const_version != version
+        cache.clear
+        @namespaced_const_version = version
+      elsif cache.key?(name)
+        return cache[name]
+      end
+
       suffix = ":#{name}"
       matches = []
       @classes.each { |constant_name, value| matches << value if constant_name.to_s.end_with?(suffix) }
       @modules.each { |constant_name, value| matches << value if constant_name.to_s.end_with?(suffix) }
-      matches.size == 1 ? matches.first : nil
+      cache[name] = matches.size == 1 ? matches.first : nil
     end
 
     def visit_trait_def(node)
       w_trait = Runtime::WClass.new(node.name)
+      w_trait.defining_env = @env
       @modules[node.name] = w_trait
 
       expand_on_guards(node.body).each do |expr|
         if expr.is_a?(Tungsten::AST::Def)
           w_method = Runtime::WMethod.new(expr.name, expr.args, expr.body, w_trait,
-                                          splat_index: expr.splat_index, block_param: expr.block)
+                                          splat_index: expr.splat_index, block_param: expr.block,
+                                          defining_env: @env)
           w_trait.define_method(expr.name.to_s, w_method)
         elsif accessor_declaration?(expr)
           define_accessor(w_trait, expr)
@@ -4703,12 +4738,14 @@ module Tungsten
 
     def visit_module_def(node)
       w_module = Runtime::WClass.new(node.name)
+      w_module.defining_env = @env
       @modules[node.name] = w_module
 
       expand_on_guards(node.body).each do |expr|
         if expr.is_a?(Tungsten::AST::Def)
           w_method = Runtime::WMethod.new(expr.name, expr.args, expr.body, w_module,
-                                          splat_index: expr.splat_index, block_param: expr.block)
+                                          splat_index: expr.splat_index, block_param: expr.block,
+                                          defining_env: @env)
           w_module.define_method(expr.name.to_s, w_method)
         else
           evaluate(expr)
@@ -6022,12 +6059,13 @@ module Tungsten
       old_block = @current_block
       @env = env
       @current_block = block
-      with_profile_callable(func) do
-        body = func.body
 
-        # The bytecode VM is still experimental and is slower than the tree
-        # walker for common numeric loops, so keep it opt-in while tuning.
-        if BYTECODE_ENABLED && !block && !func.instance_variable_get(:@bc_checked)
+      body = func.body
+
+      # The bytecode VM is still experimental and is slower than the tree
+      # walker for common numeric loops, so keep it opt-in while tuning.
+      if BYTECODE_ENABLED
+        if !block && !func.instance_variable_get(:@bc_checked)
           func.instance_variable_set(:@bc_checked, true)
           bc = Bytecode::Compiler.new(func.args || EMPTY_ARGS).compile(body)
           func.instance_variable_set(:@bytecode, bc) if bc
@@ -6036,8 +6074,8 @@ module Tungsten
         bc = func.instance_variable_get(:@bytecode)
         if bc
           begin
-            return (@bc_vm ||= Bytecode::VM.new(self)).execute(bc, env)
-          rescue => e
+            return with_profile_callable(func) { (@bc_vm ||= Bytecode::VM.new(self)).execute(bc, env) }
+          rescue => _e
             # Bytecode execution failed (e.g. unsupported op hit) — fall through to tree-walker
             func.instance_variable_set(:@bytecode, nil)
           ensure
@@ -6045,19 +6083,24 @@ module Tungsten
             @env = old_env
           end
         end
+      end
 
-        if func.instance_variable_defined?(:@has_return)
-          hr = func.instance_variable_get(:@has_return)
+      hr = func.has_return
+      if hr.nil?
+        hr = Interpreter.body_has_return?(body)
+        func.has_return = hr
+      end
+      begin
+        if @profile_enabled
+          with_profile_callable(func) do
+            hr ? catch(RETURN_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
+          end
         else
-          hr = Interpreter.body_has_return?(body)
-          func.instance_variable_set(:@has_return, hr)
+          hr ? catch(RETURN_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
         end
-        begin
-          hr ? catch(RETURN_SIGNAL) { evaluate(body) } : evaluate(body)
-        ensure
-          @current_block = old_block
-          @env = old_env
-        end
+      ensure
+        @current_block = old_block
+        @env = old_env
       end
     end
 
@@ -6306,25 +6349,21 @@ module Tungsten
     end
 
     def primitive_runtime_class(recv)
-      return @classes["Tungsten:AST:Node"] || @classes["Node"] if recv.is_a?(Runtime::PackedNode)
-      return @classes["Token"] || try_autoload_core("Token") if packed_token_int?(recv)
-
-      name =
-        case recv
-        when Tungsten::Atomic then "Atomic"
-        when Tungsten::SmallArrayValue then "SmallArray"
-        when ::Array then "Array"
-        when ::Hash then "Hash"
-        when ::String then "String"
-        when ::Symbol then "Symbol"
-        when Tungsten::CharValue then "Char"
-        when ::Integer then "Int"
-        when ::Float then "Float"
-        when TrueClass, FalseClass then "Bool"
-        when NilClass then "Nil"
-        end
-
-      name && @classes[name]
+      case recv
+      when ::Integer
+        packed_token_int?(recv) ? (@classes["Token"] || try_autoload_core("Token")) : @classes["Int"]
+      when ::Array then @classes["Array"]
+      when ::String then @classes["String"]
+      when ::Hash then @classes["Hash"]
+      when Runtime::PackedNode then @classes["Tungsten:AST:Node"] || @classes["Node"]
+      when ::Symbol then @classes["Symbol"]
+      when TrueClass, FalseClass then @classes["Bool"]
+      when NilClass then @classes["Nil"]
+      when ::Float then @classes["Float"]
+      when Tungsten::CharValue then @classes["Char"]
+      when Tungsten::SmallArrayValue then @classes["SmallArray"]
+      when Tungsten::Atomic then @classes["Atomic"]
+      end
     end
 
     # The class object for `.class` dispatch. Returns the WClass for
@@ -6498,6 +6537,12 @@ module Tungsten
       else Environment::UNDEFINED
       end
     end
+
+    public :decode_w_value, :cached_symbol_value, :visit_list, :visit_array_literal, :visit_var,
+           :visit_binary_op, :visit_call, :visit_assign, :visit_assign_op, :visit_type_hint,
+           :visit_and, :visit_or, :visit_in_test, :visit_hash_literal, :visit_if, :visit_while,
+           :visit_until, :visit_return, :visit_recase, :visit_case_expr, :visit_print, :visit_write,
+           :visit_def, :visit_fn
 
     if DISPATCH_PROFILE_ENABLED
       module DispatchProfiling

@@ -32,6 +32,10 @@ module Tungsten::AST
       other.class == self.class
     end
 
+    def eval_in(interp)
+      interp.evaluate_fallback(self)
+    end
+
     def location
       return @location if @location
       return nil unless @location_row

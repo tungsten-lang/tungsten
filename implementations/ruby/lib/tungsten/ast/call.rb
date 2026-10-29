@@ -25,9 +25,14 @@ module Tungsten::AST
 
       @name = Tungsten::AST.intern_name(name)
       @cached_name_sym = -1
+      @cached_env = nil
       @cached_slot = -1
       @cached_layout_shape = 1
       @cached_miss_shape = 1
+      @cached_dispatch_owner = nil
+      @cached_dispatch_version = 0
+      @cached_w_method = nil
+      @cached_local_miss_shape = nil
       @special_bare_call =
         case @name
         when "ccall", "ccall_nobox", "ccall_rawargs" then 1

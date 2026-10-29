@@ -3,12 +3,14 @@ module Tungsten::AST
   #    expressions
   #
   class While < Node
-    attr_accessor :condition, :body, :check_first
+    attr_accessor :condition, :body, :check_first, :loop_flags, :simple_while_plan
 
     def initialize(condition, body = nil, check_first)
       @condition = condition
       @body = List.from body
       @check_first = check_first
+      @loop_flags = -1
+      @simple_while_plan = nil
     end
 
     def eval_in(interp)

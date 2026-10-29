@@ -554,7 +554,7 @@ module Tungsten
     def parse_ternary_branch
       if @token.type?(:KEYWORD)
         keyword = @token.value
-        if %i[break next return].include?(keyword)
+        if keyword == :break || keyword == :next || keyword == :return
           next_token
           skip_space
           value = nil
@@ -571,15 +571,17 @@ module Tungsten
     def parse_range
       exp = parse_pipeline
 
-      return exp unless %i[.. ...].include?(@token.type)
+      tt = @token.type
+      return exp unless tt == :".." || tt == :"..."
 
-      exclusive = @token.type?(:"...")
+      exclusive = tt == :"..."
 
       next_token
 
       # Endless range: 1.. (no right-hand side). ARROW matters because
       # `0.. -> ; ...` is the block-iteration form.
-      if %i[\] ) , NL ; EOF DEDENT SP ARROW].include?(@token.type)
+      case @token.type
+      when :"]", :")", :",", :NL, :";", :EOF, :DEDENT, :SP, :ARROW
         return RangeLiteral.new(exp, nil, exclusive:)
       end
 
@@ -758,39 +760,76 @@ module Tungsten
       AST::InTest.new(left, elements)
     end
 
+    def cmp_operator?(type)
+      case type
+      when :<, :<=, :>, :>=, :<=>, :∈, :∉, :⊆
+        true
+      else
+        false
+      end
+    end
+
+    def chainable_cmp_operator?(type)
+      case type
+      when :<, :<=, :>, :>=, :∈, :∉, :⊆
+        true
+      else
+        false
+      end
+    end
+
     def parse_cmp
       left = parse_eql
-      chain = []
-      loop do
-        next_token while @token.type?(:SP)
-        break unless %i[< <= > >= <=> ∈ ∉ ⊆].include?(@token.type)
+      next_token while @token.type?(:SP)
+      return left unless cmp_operator?(@token.type)
+
+      parse_cmp_tail(left)
+    end
+
+    def parse_cmp_tail(left)
+      chain = nil
+      while true
         operator = @token.type
-        hidden = "__comparison##{@token.row}_#{@token.col}"
+        cmp_row = @token.row
+        cmp_col = @token.col
         next_token_skip_whitespace
         right = parse_eql
         next_token while @token.type?(:SP)
         if operator == :<=>
           left = BinaryOp.new(left, operator, right)
-          next
-        end
-        continues = %i[< <= > >= ∈ ∉ ⊆].include?(@token.type)
-        saved = continues ? Assign.new(Var.new(hidden), right) : right
-        comparison = case operator
-                     when :∈, :∉
-                       element = Var.new(hidden + "_element")
-                       test = Call.new(saved, "include?", [element])
-                       test = Not.new(test) if operator == :∉
-                       Begin.new([Assign.new(element, left), test])
-                     when :⊆ then Call.new(left, "subset?", [saved])
-                     else BinaryOp.new(left, operator, saved)
-                     end
-        if continues
-          chain << comparison
-          left = Var.new(hidden)
         else
-          left = chain.reverse_each.reduce(comparison) { |rest, test| And.new(test, rest) }
-          chain = []
+          continues = chainable_cmp_operator?(@token.type)
+          hidden = (continues || operator == :∈ || operator == :∉) ? "__comparison##{cmp_row}_#{cmp_col}" : nil
+          saved = continues ? Assign.new(Var.new(hidden.to_s), right) : right
+          comparison = case operator
+                       when :∈, :∉
+                         element = Var.new(hidden.to_s + "_element")
+                         test = Call.new(saved, "include?", [element])
+                         test = Not.new(test) if operator == :∉
+                         Begin.new([Assign.new(element, left), test])
+                       when :⊆ then Call.new(left, "subset?", [saved])
+                       else BinaryOp.new(left, operator, saved)
+                       end
+          if continues
+            if chain.nil?
+              chain = [comparison]
+            else
+              chain << comparison
+            end
+            left = Var.new(hidden.to_s)
+          elsif !chain.nil? && !chain.empty?
+            idx = chain.length - 1
+            left = comparison
+            while idx >= 0
+              left = And.new(chain[idx], left)
+              idx -= 1
+            end
+            chain.clear
+          else
+            left = comparison
+          end
         end
+        break unless cmp_operator?(@token.type)
       end
       left
     end
@@ -942,17 +981,22 @@ module Tungsten
     def parse_atomic_with_method
       primary_type = @token.type
       atomic = parse_atomic
-      product_receiver = primary_type == :"(" ||
-        (%i[INT ID IVAR CVAR GLOBAL PARG CONSTANT].include?(primary_type) &&
-         [Int, Var, InstanceVar, ClassVar, GlobalVar].include?(atomic.class) &&
-         !(atomic.is_a?(Var) && atomic.name.end_with?("!")))
-      if product_receiver && [:"!", :PRIMORIAL].include?(@token.type) &&
+      if (@token.type == :"!" || @token.type == :PRIMORIAL) &&
          !string.byteslice(0, pos - 1).match?(/\s\z/)
-        name = @token.type == :"!" ? "factorial" : "primorial"
-        location = [@token.file, @token.row, @token.col]
-        next_token
-        atomic = Call.new(atomic, name, [])
-        atomic.set_location(*location)
+        product_receiver = primary_type == :"(" ||
+          ((primary_type == :INT || primary_type == :ID || primary_type == :IVAR ||
+            primary_type == :CVAR || primary_type == :GLOBAL || primary_type == :PARG ||
+            primary_type == :CONSTANT) &&
+           (atomic.is_a?(Int) || atomic.is_a?(Var) || atomic.is_a?(InstanceVar) ||
+            atomic.is_a?(ClassVar) || atomic.is_a?(GlobalVar)) &&
+           !(atomic.is_a?(Var) && atomic.name.end_with?("!")))
+        if product_receiver
+          name = @token.type == :"!" ? "factorial" : "primorial"
+          location = [@token.file, @token.row, @token.col]
+          next_token
+          atomic = Call.new(atomic, name, [])
+          atomic.set_location(*location)
+        end
       end
 
       # Handle: <quantity> of <substance>
@@ -2876,7 +2920,7 @@ module Tungsten
     end
 
     def soft_identifier_keyword?
-      @token.type?(:KEYWORD) && SOFT_IDENTIFIER_KEYWORDS.include?(@token.value)
+      @token.type?(:KEYWORD) && @token.value == :with
     end
 
     def identifier_name_token?
@@ -3046,10 +3090,11 @@ module Tungsten
 
       args  = parse_call_args
       # Don't consume -> block for known variables — let implicit_each? handle it
-      is_var = @scopes.last.include?(name.to_s)
+      name_s = name.to_s
+      is_var = @scopes.last.include?(name_s)
       default = nil
       block = nil
-      if %w[ro rw].include?(name.to_s) && @token.type?(:"{")
+      if @token.type?(:"{") && (name_s == "ro" || name_s == "rw")
         if looks_like_hash?
           default = parse_hash_literal
         else
@@ -3265,7 +3310,7 @@ module Tungsten
         end
       elsif @token.type?(:EOF) || @token.type?(:DEDENT)
         body = List.new
-      elsif @token.type?(:KEYWORD) && %i[return break next].include?(@token.value)
+      elsif @token.type?(:KEYWORD) && (@token.value == :return || @token.value == :break || @token.value == :next)
         # Control flow as the inline body: ->(x) return false if x < 0 —
         # a non-local return from the enclosing method, legal in the
         # compiled parser. parse_assignment_no_control would void-check it.
@@ -3503,7 +3548,8 @@ module Tungsten
     end
 
     def check_valid_method_name
-      if %w[is_a? responds_to? nil?].include?(@token.value)
+      case @token.value
+      when "is_a?", "responds_to?", "nil?"
         error "'#{@token.value}' can't be redefined"
       end
     end
@@ -3542,10 +3588,15 @@ module Tungsten
 
     def end_token?
       case @token.type
-      when *%i[ } \] %} EOF]
+      when :"}", :"]", :"%}", :EOF
         true
       when :KEYWORD
-        %i[else elsif when in rescue ensure then].include?(@token.value)
+        case @token.value
+        when :else, :elsif, :when, :in, :rescue, :ensure, :then
+          true
+        else
+          false
+        end
       else
         false
       end
@@ -3795,7 +3846,13 @@ module Tungsten
         node
       when Call
         node.obj = sigma_rewrite(node.obj, svar) if node.obj
-        node.args = Array(node.args).map { |a| sigma_rewrite(a, svar) } if node.args
+        if (cargs = node.args)
+          ci = 0
+          while ci < cargs.length
+            cargs[ci] = sigma_rewrite(cargs[ci], svar)
+            ci += 1
+          end
+        end
         node
       else
         node

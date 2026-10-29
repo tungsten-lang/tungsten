@@ -36,10 +36,8 @@ module Tungsten
       "beer"        => EnergyFuel.new(1.7e9,   :volume, false)
     }.freeze
 
-    private
-
     def visit_quantity_literal(node)
-      value = evaluate(node.number)
+      value = node.number.eval_in(self)
       unit_str = node.unit_string
 
       # "burned cord" → create quantity with real unit, tag for energy conversion via "of"
@@ -54,6 +52,8 @@ module Tungsten
       unit = Tungsten::Units.parse(unit_str)
       Tungsten::Quantity.new(value, unit)
     end
+
+    private
 
     def convert_quantity_pipe(qty, node)
       # Multi-unit decomposition: quantity | [h, min, s]

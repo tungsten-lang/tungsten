@@ -10,6 +10,10 @@ module Tungsten::AST
       @uncertainty = uncertainty
     end
 
+    def eval_in(interp)
+      interp.visit_measurement_literal(self)
+    end
+
     def ==(other)
       other.is_a?(MeasurementLiteral) &&
         other.number == @number &&

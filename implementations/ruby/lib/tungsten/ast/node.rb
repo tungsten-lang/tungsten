@@ -103,7 +103,7 @@ module Tungsten::AST
     #
     def attributes
       instance_variables.each do |var|
-        next if location_instance_var?(var) || var == :@parent
+        next if location_instance_var?(var) || runtime_cache_instance_var?(var) || var == :@parent
 
         child = instance_variable_get var
         name = var.to_s[1..-1]
@@ -122,7 +122,7 @@ module Tungsten::AST
     #
     def children
       instance_variables.each do |var|
-        next if location_instance_var?(var) || var == :@parent
+        next if location_instance_var?(var) || runtime_cache_instance_var?(var) || var == :@parent
 
         child = instance_variable_get var
 
@@ -151,7 +151,7 @@ module Tungsten::AST
     end
 
     def inspect
-      vars = instance_variables.reject { |v| v == :@parent || location_instance_var?(v) }
+      vars = instance_variables.reject { |v| v == :@parent || location_instance_var?(v) || runtime_cache_instance_var?(v) }
       "#<%s %s>" % [self.class.name.split('::').last, vars.map { |name| "%s=%s" % [name, instance_variable_get(name).inspect] }.join(', ')]
     end
 
@@ -293,7 +293,7 @@ module Tungsten::AST
         # Parent is navigation metadata, not AST identity. Parser.parse sets
         # these upward links before the interpreter computes pure-function
         # memo keys, so following one here creates a body -> fn -> body cycle.
-        next if location_instance_var?(var) || var == :@parent
+        next if location_instance_var?(var) || runtime_cache_instance_var?(var) || var == :@parent
         child = instance_variable_get(var)
         case child
         when Node then parts << child.ast_fingerprint(name_map)
@@ -328,6 +328,38 @@ module Tungsten::AST
     end
 
     private
+
+    RUNTIME_CACHE_IVARS = {
+      :@cached_env => true,
+      :@cached_slot => true,
+      :@cached_layout_shape => true,
+      :@cached_miss_shape => true,
+      :@cached_const_env_version => true,
+      :@cached_dispatch_owner => true,
+      :@cached_dispatch_version => true,
+      :@cached_w_method => true,
+      :@cached_local_miss_shape => true,
+      :@cached_name_sym => true,
+      :@runtime_symbol => true,
+      :@slot_names_template => true,
+      :@simple_method_plan => true,
+      :@simple_block_plan => true,
+      :@free_var_cache => true,
+      :@free_var_slot_names_template => true,
+      :@has_next_flag => true,
+      :@has_return => true,
+      :@loop_flags => true,
+      :@simple_while_plan => true,
+      :@literal_case_lookup => true,
+      :@closure_env => true,
+      :@closure_block => true,
+      :@memo_cache => true,
+      :@cache_path => true
+    }.freeze
+
+    def runtime_cache_instance_var?(var)
+      RUNTIME_CACHE_IVARS.key?(var)
+    end
 
     def location_instance_var?(var)
       var == :@location || var == :@location_file || var == :@location_row || var == :@location_col

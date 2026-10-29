@@ -6,6 +6,10 @@ module Tungsten::AST
       @args = args || []
     end
 
+    def eval_in(interp)
+      interp.visit_super(self)
+    end
+
     def ==(other)
       super && other.args == args
     end

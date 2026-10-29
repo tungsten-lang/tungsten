@@ -141,21 +141,27 @@ module Tungsten
         scan_token
       end
 
-      @regex_capture_scope = false if %i[NL ;].include?(@token.type)
-      @regex_capture_scope = true if @token.type == :REGEX
+      tt = @token.type
+      if tt == :NL || tt == :";"
+        @regex_capture_scope = false
+      elsif tt == :REGEX
+        @regex_capture_scope = true
+      end
 
       # Track open-bracket nesting so indentation inside a multi-line
       # (...)/[...]/{...} is treated as line-continuation, not as block
       # structure (see handle_indentation).
-      case @token.type
+      case tt
       when :"(", :"[", :"{"
         @bracket_depth += 1
       when :")", :"]", :"}"
-        @bracket_depth -= 1 if @bracket_depth.positive?
+        @bracket_depth -= 1 if @bracket_depth > 0
       end
 
-      @line_start = false unless %i[INDENT DEDENT NL SP SHEBANG].include?(@token.type)
-      @last_significant_token_type = @token.type unless %i[INDENT DEDENT NL SP SHEBANG].include?(@token.type)
+      unless tt == :INDENT || tt == :DEDENT || tt == :NL || tt == :SP || tt == :SHEBANG
+        @line_start = false
+        @last_significant_token_type = tt
+      end
       @token
     end
 
@@ -2132,7 +2138,18 @@ module Tungsten
     ].freeze
 
     def regex_literal_allowed?
-      @line_start || !VALUE_TOKEN_TYPES.include?(@last_significant_token_type)
+      return true if @line_start
+
+      case @last_significant_token_type
+      when :INT, :FLOAT, :DECIMAL, :STRING, :STRING_INTERP, :REGEX, :REGEX_CAPTURE, :SYMBOL, :NAME, :ID,
+           :IVAR, :CVAR, :GLOBAL, :")", :"]", :"}", :MAGIC_FILE, :MAGIC_LINE, :MAGIC_DIR, :UUID, :CURRENCY,
+           :QUANTITY, :DURATION, :WVALUE, :BYTE_ARRAY, :BYTE_ARRAY_INTERP, :DATE, :DATETIME, :TIME, :MONTH,
+           :IP4, :CIDR4, :RATIONAL, :CHAR, :CODEPOINT, :KEY, :WORD_ARRAY, :SYMBOL_ARRAY, :PARG, :SUPERSCRIPT,
+           :COLOR, :TRUE, :FALSE, :NIL
+        false
+      else
+        true
+      end
     end
 
     def regex_literal_ahead?

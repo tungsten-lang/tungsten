@@ -172,9 +172,11 @@
   # 754 MB / 35.6M clauses), sizing offs and lens at text.size/2 allocates
   # >9 GiB before parsing begins, exceeding the 8 GiB process memory ceiling;
   # use the p-line clause count when present to tighten the initial caps.
+  # Apply the same bounded hint scan to medium files too; byte-based clause
+  # tables otherwise overallocate heavily even for a short scout solve.
   cap_l = text.size / 2 + 64
   cap_c = text.size / 2 + 64
-  if text.size >= 16777216
+  if text.size >= 65536
     decl = wassat_parse_cnf_header_clauses(text)
     if decl > 0 && decl + 64 < cap_c
       cap_c = decl + 64

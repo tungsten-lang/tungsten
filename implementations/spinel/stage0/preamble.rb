@@ -22,39 +22,6 @@ class AST
   end
 end
 
-# Runtime FFI: the spinel-compiled stage 0 links runtime/runtime.c, so
-# the w_node_* / w_ast_* slab-AST primitives are available as C
-# symbols. compiler/lib/ast.w builds AST nodes by `ccall("w_node_alloc",
-# ...)` / `ccall_nobox("w_node_inline_payload", ...)`; without a
-# stage-0 binding for these, parser.parse() dies at "stage0 unknown
-# function: ccall" on the first AST node it tries to construct.
-#
-# Declared here once (BEFORE module Tungsten — flatten_namespaces
-# strips Tungsten's `end` by finding the file's LAST `end` line, so
-# any extra module after Tungsten would lose its terminator) so the
-# visit_call :ccall arm (in build_bundle.rb) can dispatch by C
-# function name. WValue / sp_RbVal at the C level is int64_t, so
-# [:int]/[:int] suffices for the FFI signature — stage 0 passes raw
-# slab offsets through opaquely.
-module WRuntime
-  # All w_* runtime functions take and return int64_t (WValue is a
-  # NaN-boxed int64). Spinel's :int FFI spec maps to plain int (32-bit
-  # on all current targets) which truncates slab offsets at the
-  # boundary — use :long, which spinel emits as native `long` (64-bit
-  # under LP64 — macOS arm64 + Linux x86_64). If we ever support
-  # Windows (LLP64, long is 32-bit) this needs an :int64 alias in
-  # spinel.
-  ffi_func :w_node_singleton,      [:long],               :long
-  ffi_func :w_node_inline_payload, [:long, :long],        :long
-  ffi_func :w_node_offset_extern,  [:long],               :long
-  ffi_func :w_ast_bool_cached,     [:long],               :long
-  ffi_func :w_is_ast_node_full,    [:long, :long],        :long
-  ffi_func :w_node_kind_extern,    [:long],               :long
-  ffi_func :w_node_alloc,          [:long, :long],        :long
-  ffi_func :w_node_field_load,     [:long, :long],        :long
-  ffi_func :w_node_field_store,    [:long, :long, :long], :void
-end
-
 # kind_sym_table_data — mirror of compiler/lib/ast_schema.w:305. The
 # table maps slab-node kind ids → :symbol literals. Stage 0 can't run
 # the top-level `kind_sym_table_data = [...]` assign in ast_schema.w

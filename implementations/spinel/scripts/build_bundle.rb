@@ -28,8 +28,19 @@ sources << tungsten_file("token.rb")
 sources << tungsten_file("visitor.rb")
 sources << File.join(SPINEL_DIR, "stage0", "lexer_stub.rb")
 
-sources << tungsten_file("ast/node.rb")
-sources.concat(files_under("ast").reject { |path| path.end_with?("/node.rb") })
+ast_base_files = [
+  tungsten_file("ast/node.rb"),
+  tungsten_file("ast/list.rb"),
+  tungsten_file("ast/value.rb"),
+  tungsten_file("ast/unary_expression.rb"),
+  tungsten_file("ast/keyword_args.rb"),
+  tungsten_file("ast/keyword_value.rb"),
+  tungsten_file("ast/keywords/def.rb"),
+  tungsten_file("ast/keywords/while.rb"),
+  tungsten_file("ast/keywords/flip2.rb")
+]
+sources.concat(ast_base_files)
+sources.concat(files_under("ast").reject { |path| ast_base_files.include?(path) || path.end_with?("/ast/super.rb") })
 
 sources << tungsten_file("runtime/w_object.rb")
 sources << tungsten_file("runtime/w_class.rb")
@@ -167,30 +178,80 @@ def stage0_runtime_source(path)
       module Tungsten
         module Runtime
           class WClass
-            attr_accessor :name, :superclass, :methods, :traits, :version, :class_vars
+            attr_accessor :name, :superclass, :methods_table, :class_methods_table, :traits, :version, :class_vars, :constants_table
 
             def initialize(name, superclass = nil)
               @name = name
               @superclass = superclass
-              @methods = {}
-              @traits = []
+              @methods_table = {"__spinel_mt_i__" => 0, "__spinel_mt_s__" => ""}
+              @methods_table.clear
+              @class_methods_table = {"__spinel_cmt_i__" => 0, "__spinel_cmt_s__" => ""}
+              @class_methods_table.clear
+              @traits = [nil, 0, ""]
+              @traits.clear
               @version = 0
-              @class_vars = {}
+              @class_vars = {"__spinel_cv_i__" => 0, "__spinel_cv_s__" => ""}
+              @class_vars.clear
+              @constants_table = {"__spinel_c_i__" => 0, "__spinel_c_s__" => ""}
+              @constants_table.clear
+            end
+
+            def get_cvar(name)
+              klass = self
+              while klass != nil
+                if klass.class_vars.key?(name)
+                  v = nil
+                  v = klass.class_vars[name]
+                  return v
+                end
+                klass = klass.superclass
+              end
+              nil
+            end
+
+            def set_cvar(name, value)
+              klass = self
+              while klass != nil
+                if klass.class_vars.key?(name)
+                  klass.class_vars[name] = value
+                  return value
+                end
+                klass = klass.superclass
+              end
+              @class_vars[name] = value
+              value
+            end
+
+            def has_constant?(name)
+              @constants_table.key?(name)
+            end
+
+            def get_constant(name)
+              v = nil
+              v = @constants_table[name]
+              v
+            end
+
+            def set_constant(name, value)
+              @constants_table[name] = value
+              value
             end
 
             def lookup_method(name)
-              # The "" + name.to_s key hoist that lived here was
-              # made redundant by spinel commit efeaf10:
-              #   force_class_method_param_type("WClass",
-              #     "lookup_method", "name", "string")
-              # plus force_ivar_type("WClass", "@methods",
-              # "str_poly_hash") in 0d26277. Spinel now lowers
-              # @methods[name] to sp_StrPolyHash_get(self->iv_methods,
-              # lv_name) without an intermediate concat alloc.
               klass = self
               while klass != nil
-                method = klass.methods[name]
+                method = klass.methods_table[name]
                 return method if method != nil
+
+                ti = klass.traits.length - 1
+                while ti >= 0
+                  tr = klass.traits[ti]
+                  if tr != nil
+                    tm = tr.lookup_method(name)
+                    return tm if tm != nil
+                  end
+                  ti -= 1
+                end
 
                 klass = klass.superclass
               end
@@ -198,14 +259,30 @@ def stage0_runtime_source(path)
             end
 
             def define_method(name, method)
-              # No "" + hoist — codegen-side string-param override
-              # (see #lookup_method) makes name already const char*.
-              @methods[name] = method
+              @methods_table[name] = method
+              @version += 1
+              method
+            end
+
+            def lookup_class_method(name)
+              klass = self
+              while klass != nil
+                method = klass.class_methods_table[name]
+                return method if method != nil
+
+                klass = klass.superclass
+              end
+              nil
+            end
+
+            def define_class_method(name, method)
+              @class_methods_table[name] = method
               @version += 1
               method
             end
 
             def include_trait(trait)
+              @traits.push(trait)
               @version += 1
             end
 
@@ -333,18 +410,27 @@ def stage0_token_source
 end
 
 def stage0_token_compat(body)
+  body = body.sub("attr_accessor :file, :row, :col", "attr_accessor :file, :row, :col, :interp_parts")
   body = replace_method(body, "initialize", <<~RUBY)
     def initialize
-      @type = nil
+      @type = :EOF
+      @value = :eof
+      @value = ""
       @value = nil
       @file = nil
       @row = 0
       @col = 0
+      @interp_parts = List.new
     end
   RUBY
   body = replace_method(body, "keyword?", <<~RUBY)
     def keyword?(sym)
-      false
+      @type == :KEYWORD && (@value == sym || @value.to_s == sym.to_s)
+    end
+  RUBY
+  body = replace_method(body, "location", <<~RUBY)
+    def location
+      Location.new(@file || 0, @row, @col)
     end
   RUBY
   body = replace_method(body, "to_s", <<~RUBY)
@@ -354,12 +440,17 @@ def stage0_token_compat(body)
   RUBY
   body = replace_method(body, "suffix?", <<~RUBY)
     def suffix?
-      false
+      return false unless @type == :KEYWORD
+      v = @value
+      v == :if || v == :unless || v == :while || v == :until || v == :rescue || v == :ensure
     end
   RUBY
   body = replace_method(body, "assignment_operator?", <<~RUBY)
     def assignment_operator?
-      false
+      t = @type
+      t == :"+=" || t == :"-=" || t == :"*=" || t == :"/=" || t == :"//=" || t == :"%=" ||
+        t == :"|=" || t == :"&=" || t == :"^=" || t == :"**=" || t == :"<<=" || t == :">>=" ||
+        t == :"||=" || t == :"&&="
     end
   RUBY
   body
@@ -421,26 +512,32 @@ def stage0_codepoint_lexer_source
 end
 
 def stage0_codepoint_lexer_compat(body)
-  # These class constants are lazy/data-table caches that the stage0 lexer never
-  # reads (every reader is rewritten away below), so they were nilled out to
-  # shrink the bundle. A `= nil` constant has no inferable type, which the C
-  # Spinel backend cannot declare (it emits `cst_X = 0` with no declaration), so
-  # delete the declarations outright instead of nilling them. Dropping a dead
-  # constant is equivalent for the legacy Ruby path (its readers are unreachable
-  # at runtime, and the C backend already eliminates each `nil`-receiver read).
+  type_names_list = %w[
+    bool int integer string string_buffer
+    i4 i8 i16 i32 i64 i128
+    u4 u8 u16 u32 u64 u128
+    w64
+    f16 f32 f64 f80 f128 f256
+    d128 c32 c64 c128
+    bigint bigdecimal
+    bf16 tf32 fp8 fp4 nf4
+    mxfp8 mxfp6 mxfp4 mxint8
+    posit8 posit16 posit32 posit64
+  ]
+  type_hint_words_list = (type_names_list + %w[big recycle reuse reuse_drain no_raise fold hash array symbol float char object ptr]).uniq
+  type_names_hash_src = "{ " + type_names_list.map { |n| "#{n.inspect} => true" }.join(", ") + " }"
+  type_hint_words_hash_src = "{ " + type_hint_words_list.map { |n| "#{n.inspect} => true" }.join(", ") + " }"
+
   body = body.sub(/^\s*KEYWORDS_BY_FIRST_AND_LENGTH = .*?\.freeze\n\s*(?=TYPE_NAMES_BY_FIRST_AND_LENGTH = )/m, "")
   body = body.sub(/^\s*TYPE_NAMES_BY_FIRST_AND_LENGTH = .*?\.freeze\n\s*(?=TYPE_NAMES = )/m, "")
-  # TYPE_NAMES keeps a typed (empty-hash) value rather than being deleted: its
-  # reader `type_hint_start?` does `TYPE_NAMES.each_key`, and deleting the
-  # constant would let that resolve to Lexer::TYPE_NAMES (a String array), whose
-  # `each_key` is unsupported. An empty hash iterates zero times — the same
-  # behavior the nil cache had in stage0 — and the C backend can declare it.
-  body = body.gsub(/^\s*TYPE_NAMES = .*?\.freeze\n/, "    TYPE_NAMES = {}\n")
-  body = body.sub(/^\s*ONE_CHAR_TOKENS = \{\n.*?^\s*\}\.freeze\n/m, "")
+  body = body.gsub(/^\s*TYPE_NAMES = .*?\.freeze\n/, "    TYPE_NAMES = #{type_names_hash_src}\n")
+  body = body.gsub(/^\s*TYPE_HINT_WORDS = .*?\.freeze\n/, "    TYPE_HINT_WORDS = #{type_hint_words_hash_src}\n")
   body = body.sub(/^\s*REGEX_PROFILE_NAMES = \{\n.*?^\s*\}\.freeze\n/m, "")
   body = body.gsub(/^\s*SUBSCRIPT_TAIL = .*?\.freeze\n/, "")
   body = body.gsub(/^\s*SUPERSCRIPT_DIGITS = .*?\.freeze\n/, "")
   body = body.gsub(/^\s*UNICODE_IDENTIFIER = .*?\.freeze\n/, "")
+  body = body.gsub(/^\s*DOUBLE_STRUCK_NAME = .*?\.freeze\n/, "")
+  body = body.gsub("if ident_start_byte?(byte(1)) || match_regex_at(UNICODE_IDENTIFIER, @pos + 1)", "if ident_start_byte?(byte(1))")
   body = body.gsub(/^\s*BYTE_ARRAY_BINARY = .*?\.freeze\n/, "")
   body = body.gsub(/^\s*BYTE_ARRAY_OCTAL = .*?\.freeze\n/, "")
   body = body.gsub(/^\s*BYTE_ARRAY_DECIMAL = .*?\.freeze\n/, "")
@@ -449,55 +546,57 @@ def stage0_codepoint_lexer_compat(body)
   body = body.gsub("def initialize(code, profile: false)", "def initialize(code)")
   body = body.gsub("@profile_enabled = profile", "@profile_enabled = false")
   body = body.gsub(/^\s*@profile_.* if profile\n/, "")
+  body = body.gsub(/^\s*@profile_.* if @profile_enabled\n/, "")
+  body = body.gsub(/^\s*profile_path\(.* if @profile_enabled\n/, "")
   body = body.gsub("return scan_regex_capture if regex_capture_start?\n", "")
   body = body.gsub("return if hex_reference_literal_possible? && network_literal_shape_possible? && scan_network_literal", "return if false")
   body = body.gsub("return if byte(1) == 58 && network_literal_shape_possible? && scan_network_literal", "return if false")
   body = body.gsub("return if bracketed_ip6_start? && scan_network_literal", "return if false")
   body = body.gsub("if (fe80_start? || (hex_reference_literal_possible? && network_literal_shape_possible?)) && scan_network_literal", "if false")
-  body = body.gsub(
-    "return scan_codepoint_literal if byte(1) == 43 && hex_byte?(byte(2))",
-    "if byte(1) == 43\n          return scan_codepoint_literal if hex_byte?(byte(2))\n        end"
-  )
-  body = body.sub(/      when 126\n        if digit_byte\?\(byte\(1\)\).*?        end\n      when 48/m, "      when 126\n        return emit_fixed(:~, 1)\n      when 48")
-  body = body.sub(/      when 95\n        if match_bytes\?\("__FILE__"\).*?        return scan_identifier\n      when 74/m, "      when 95\n        return scan_identifier\n      when 74")
-  body = body.sub(/      when 117\n        return scan_wvalue if byte\(1\) == 48 && byte\(2\) == 120\n\n        return scan_identifier\n      when 80/m,
-                  "      when 117\n        return scan_identifier\n      when 80")
-  body = body.gsub(
-    "return scan_operator_or_punctuation if byte(1) == 42 || byte(1) == 61",
-    "if byte(1) == 42\n          return scan_operator_or_punctuation\n        end\n        if byte(1) == 61\n          return scan_operator_or_punctuation\n        end"
-  )
-  body = body.gsub(
-    "return scan_operator_or_punctuation if byte(1) == 61 || byte(1) == 62 || byte(1) == 126",
-    "if byte(1) == 61\n          return scan_operator_or_punctuation\n        end\n        if byte(1) == 62\n          return scan_operator_or_punctuation\n        end\n        if byte(1) == 126\n          return scan_operator_or_punctuation\n        end"
-  )
-  body = body.sub(/        if \(@pos\.zero\? \|\| @line_start\) && space_byte\?\(next_byte\) && upper_byte\?\(byte\(2\)\)\n.*?        end\n\n        profile_path\(:plus\) if @profile_enabled\n/m,
-                  "        profile_path(:plus) if @profile_enabled\n")
-  body = body.sub(/      when 46\n        return scan_dot if byte\(1\) == 46\n\n        # Dot-prefix elementwise operators:.*?\n\n        return emit_fixed\(:\"\.\"\, 1\)\n      when 47/m,
-                  "      when 46\n        return emit_fixed(:\".\", 1)\n      when 47")
   body = body.gsub("if next_byte == 126 && approximate_float_literal_possible?", "if false")
+  body = body.gsub("if third && third != 9", "if third >= 0 && third != 9")
+  body = body.gsub("if byte(2) == 92 && (esc = byte(3))", "if byte(2) == 92 && byte(3) >= 0\n        esc = byte(3)")
+
   body = replace_method(body, "clean", <<~RUBY)
     def clean(code)
       code.to_s
     end
   RUBY
+  body = replace_method(body, "byte", <<~RUBY)
+    def byte(offset = 0)
+      idx = @pos + offset
+      return -1 if idx < 0 || idx >= @length
+      @source.getbyte(idx) || -1
+    end
+  RUBY
+  body = replace_method(body, "utf8_width_at", <<~RUBY)
+    def utf8_width_at(pos)
+      return 1 if pos >= @length
+      b = @source.getbyte(pos) || 0
+      return 1 if b < 128
+      return 2 if b < 224
+      return 3 if b < 240
+      4
+    end
+  RUBY
   body = replace_method(body, "set_token", <<~RUBY)
     def set_token(type, value = nil, row = @row, col = @col)
       @token.reset_location
-      @token.file = 0
+      @token.file = @file
       @token.row = row
       @token.col = col
       @token.type = type
-      @token.value = value.to_s
+      @token.value = value
     end
   RUBY
   body = replace_method(body, "newline_byte?", <<~RUBY)
     def newline_byte?(b)
-      b >= 0 && b == 10
+      b == 10
     end
   RUBY
   body = replace_method(body, "space_byte?", <<~RUBY)
     def space_byte?(b)
-      b >= 0 && b == 32
+      b == 32
     end
   RUBY
   body = replace_method(body, "digit_byte?", <<~RUBY)
@@ -507,7 +606,7 @@ def stage0_codepoint_lexer_compat(body)
   RUBY
   body = replace_method(body, "sign_byte?", <<~RUBY)
     def sign_byte?(b)
-      b >= 0 && (b == 43 || b == 45)
+      b == 43 || b == 45
     end
   RUBY
   body = replace_method(body, "lower_byte?", <<~RUBY)
@@ -522,17 +621,17 @@ def stage0_codepoint_lexer_compat(body)
   RUBY
   body = replace_method(body, "alpha_byte?", <<~RUBY)
     def alpha_byte?(b)
-      b >= 0 && (lower_byte?(b) || upper_byte?(b))
+      lower_byte?(b) || upper_byte?(b)
     end
   RUBY
   body = replace_method(body, "ident_start_byte?", <<~RUBY)
     def ident_start_byte?(b)
-      b >= 0 && (lower_byte?(b) || b == 95)
+      lower_byte?(b) || b == 95
     end
   RUBY
   body = replace_method(body, "ident_continue_byte?", <<~RUBY)
     def ident_continue_byte?(b)
-      b >= 0 && (ident_start_byte?(b) || digit_byte?(b))
+      ident_start_byte?(b) || digit_byte?(b)
     end
   RUBY
   body = replace_method(body, "hex_byte?", <<~RUBY)
@@ -557,15 +656,150 @@ def stage0_codepoint_lexer_compat(body)
   RUBY
   body = replace_method(body, "prefix_int_byte?", <<~RUBY)
     def prefix_int_byte?(b)
-      b >= 0 &&
-        (b == 98 || b == 66 || b == 100 || b == 111 || b == 79 || b == 114 || b == 118 || b == 120 || b == 88)
+      b == 98 || b == 66 || b == 100 || b == 111 || b == 79 || b == 114 || b == 118 || b == 120 || b == 88
     end
   RUBY
   body = replace_method(body, "terminator_byte?", <<~RUBY)
     def terminator_byte?(b)
-      b >= 0 &&
-        (b == 0 || b == 32 || b == 10 || b == 9 || b == 13 || b == 12 || b == 35 || b == 59 ||
-          b == 40 || b == 41 || b == 91 || b == 93 || b == 123 || b == 125 || b == 44)
+      b <= 0 || b == 32 || b == 10 || b == 9 || b == 13 || b == 12 || b == 35 || b == 59 ||
+        b == 40 || b == 41 || b == 91 || b == 93 || b == 123 || b == 125 || b == 44
+    end
+  RUBY
+  body = replace_method(body, "method_operator_after?", <<~RUBY)
+    def method_operator_after?(bytes)
+      b = byte(bytes)
+      b < 0 || b == 32 || b == 10 || b == 40 || b == 47
+    end
+  RUBY
+  body = replace_method(body, "scan_symbol_or_colon", <<~RUBY)
+    def scan_symbol_or_colon
+      start_col = @col
+
+      if byte(1) == 45
+        third = byte(2)
+        if third >= 0 && third != 9 && third != 10 && third != 13 && third != 32
+          return scan_ascii_char_literal(start_col)
+        end
+      end
+
+      if ident_start_byte?(byte(1)) || upper_byte?(byte(1)) || digit_byte?(byte(1))
+        start = @pos
+        advance
+        if upper_byte?(byte)
+          scan_ascii_name_bytes
+        else
+          scan_ident_bytes
+        end
+        return set_token(:SYMBOL, slice(start), @row, start_col)
+      end
+
+      operator = scan_symbol_operator
+      return set_token(:SYMBOL, operator, @row, start_col) if operator
+
+      advance
+      set_token(:":", nil, @row, start_col)
+    end
+  RUBY
+  body = replace_method(body, "scan_ascii_char_literal", <<~RUBY)
+    def scan_ascii_char_literal(start_col)
+      esc = byte(3)
+      if byte(2) == 92 && esc >= 0
+        cp =
+          case esc
+          when 110 then 10
+          when 116 then 9
+          when 114 then 13
+          when 92  then 92
+          when 48  then 0
+          when 115 then 32
+          when 39  then 39
+          when 34  then 34
+          else esc
+          end
+        advance(4)
+        return set_token(:CHAR, cp, @row, start_col)
+      end
+
+      cp = byte(2)
+      advance(3)
+      set_token(:CHAR, cp, @row, start_col)
+    end
+  RUBY
+  body = replace_method(body, "handle_indentation", <<~RUBY)
+    def handle_indentation
+      return unless @line_start
+
+      if @bracket_depth > 0
+        cp = @pos
+        while cp < @length && @source.getbyte(cp) == 32
+          cp += 1
+        end
+        @col += (cp - @pos)
+        @pos = cp
+        return
+      end
+
+      cp = @pos
+      while cp < @length && @source.getbyte(cp) == 32
+        cp += 1
+      end
+      if cp < @length && @source.getbyte(cp) == 35
+        after = cp + 1 < @length ? (@source.getbyte(cp + 1) || -1) : -1
+        if after < 0 || after == 32 || after == 10 || after == 35
+          @col += (cp - @pos)
+          @pos = cp
+          return
+        end
+      end
+
+      if eof? || (!space_byte?(byte) && !newline_byte?(byte))
+        @dedebt += @indent
+        return
+      end
+
+      p = @pos
+      while p < @length && @source.getbyte(p) == 32
+        p += 1
+      end
+      return unless p < @length && @source.getbyte(p) != 10
+
+      spaces = p - @pos
+      return if (spaces & 1) == 1
+
+      @pos = p
+      @col += spaces
+      diff = (spaces / 2) - @indent
+      if diff > 0
+        @indebt = diff
+      elsif diff < 0
+        @dedebt = -diff
+      end
+    end
+  RUBY
+  body = replace_method(body, "primorial_ahead?", <<~RUBY)
+    def primorial_ahead?
+      return false if match_bytes?("##") || @pos <= 0
+      prev = @source.getbyte(@pos - 1) || 0
+      alpha_byte?(prev) || digit_byte?(prev) || prev == 95 || prev == 41 || prev == 93 || prev == 125 || prev == 33 || prev == 39 || prev == 34
+    end
+  RUBY
+  body = replace_method(body, "type_hint_start?", <<~RUBY)
+    def type_hint_start?(pos)
+      return false if @line_start
+      return false if pos >= @length
+      b = @source.getbyte(pos) || -1
+      return true if upper_byte?(b)
+
+      if lower_byte?(b)
+        p = pos
+        while p < @length && ident_continue_byte?(@source.getbyte(p) || -1)
+          p += 1
+        end
+        return true if p < @length && @source.getbyte(p) == 58
+        word = @source.byteslice(pos, p - pos)
+        return true if TYPE_HINT_WORDS.key?(word)
+      end
+      false
     end
   RUBY
   body = replace_method(body, "color_literal_ahead?", <<~RUBY)
@@ -595,253 +829,6 @@ def stage0_codepoint_lexer_compat(body)
       nil
     end
   RUBY
-  body = replace_method(body, "scan_name", <<~RUBY)
-    def scan_name
-      start_col = @col
-      start = @pos
-      while !eof?
-        b = byte
-        ok = false
-        if b >= 65
-          if b <= 90
-            ok = true
-          end
-        end
-        if b >= 97
-          if b <= 122
-            ok = true
-          end
-        end
-        if b >= 48
-          if b <= 57
-            ok = true
-          end
-        end
-        if b == 95
-          ok = true
-        end
-        if ok
-          advance
-        else
-          break
-        end
-      end
-      set_token(:ID, slice(start), @row, start_col)
-    end
-  RUBY
-  body = replace_method(body, "scan_operator_or_punctuation", <<~RUBY)
-    def scan_operator_or_punctuation
-      start_col = @col
-      if byte == 60
-        if byte(1) == 60
-          advance(2)
-          return set_token(:<<, nil, @row, start_col)
-        end
-      end
-      if byte == 43
-        if byte(1) == 61
-          advance(2)
-          return set_token(:"+=", nil, @row, start_col)
-        end
-      end
-      if byte == 45
-        if byte(1) == 61
-          advance(2)
-          return set_token(:"-=", nil, @row, start_col)
-        end
-      end
-      if byte == 45
-        if byte(1) == 62
-          advance(2)
-          return set_token(:"->", nil, @row, start_col)
-        end
-      end
-      if byte == 61
-        if byte(1) == 62
-          advance(2)
-          return set_token(:"=>", nil, @row, start_col)
-        end
-      end
-      if byte == 61
-        if byte(1) == 61
-          advance(2)
-          return set_token(:==, nil, @row, start_col)
-        end
-      end
-      if byte == 33
-        if byte(1) == 61
-          advance(2)
-          return set_token(:!=, nil, @row, start_col)
-        end
-      end
-      if byte == 60
-        if byte(1) == 61
-          advance(2)
-          return set_token(:<=, nil, @row, start_col)
-        end
-      end
-      if byte == 62
-        if byte(1) == 61
-          advance(2)
-          return set_token(:>=, nil, @row, start_col)
-        end
-      end
-      if byte == 124
-        if byte(1) == 124
-          advance(2)
-          return set_token(:"||", nil, @row, start_col)
-        end
-      end
-      if byte == 38
-        if byte(1) == 38
-          advance(2)
-          return set_token(:"&&", nil, @row, start_col)
-        end
-      end
-      emit_fixed(byte.chr.to_sym, 1)
-    end
-  RUBY
-  body = replace_method(body, "scan_multi_char_operator", <<~RUBY)
-    def scan_multi_char_operator(one, start_col)
-      if one == 60
-        if byte(1) == 60
-          return emit_operator(:<<, 2, start_col)
-        end
-        if byte(1) == 61
-          return emit_operator(:<=, 2, start_col)
-        end
-      end
-      if one == 43
-        if byte(1) == 61
-          return emit_operator(:"+=", 2, start_col)
-        end
-      end
-      if one == 45
-        if byte(1) == 61
-          return emit_operator(:"-=", 2, start_col)
-        end
-        if byte(1) == 62
-          return emit_operator(:"->", 2, start_col)
-        end
-      end
-      if one == 61
-        if byte(1) == 61
-          return emit_operator(:==, 2, start_col)
-        end
-      end
-      if one == 33
-        if byte(1) == 61
-          return emit_operator(:!=, 2, start_col)
-        end
-      end
-      if one == 62
-        if byte(1) == 61
-          return emit_operator(:>=, 2, start_col)
-        end
-      end
-      if one == 124
-        if byte(1) == 124
-          return emit_operator(:"||", 2, start_col)
-        end
-      end
-      if one == 38
-        if byte(1) == 38
-          return emit_operator(:"&&", 2, start_col)
-        end
-      end
-      nil
-    end
-  RUBY
-  body = replace_method(body, "scan_space_or_newline", <<~RUBY)
-    def scan_space_or_newline
-      start_col = @col
-      while space_byte?(byte)
-        advance
-      end
-      if byte == 10
-        advance
-        @row += 1
-        @col = 1
-        @line_start = true
-        set_token(:NL, 1, @row, start_col)
-      else
-        set_token(:SP, nil, @row, start_col)
-      end
-    end
-  RUBY
-  body = replace_method(body, "scan_comment", <<~RUBY)
-    def scan_comment
-      start_col = @col
-      while @pos < @length
-        if newline_byte?(byte)
-          break
-        end
-        advance
-      end
-      if newline_byte?(byte)
-        advance
-        set_token(:NL, nil, @row, start_col)
-        @row += 1
-        @col = 1
-        @line_start = true
-      else
-        set_token(:EOF, nil, @row, start_col)
-      end
-    end
-  RUBY
-  body = replace_method(body, "scan_key_literal", <<~RUBY)
-    def scan_key_literal
-      start_col = @col
-      advance
-      content_start = @pos
-      while @pos < @length
-        if byte == 93
-          break
-        end
-        advance
-      end
-      error "unterminated key literal" if eof?
-
-      content = slice(content_start).strip
-      advance
-      set_token(:KEY, content, @row, start_col)
-    end
-  RUBY
-  body = replace_method(body, "consume_newlines", <<~RUBY)
-    def consume_newlines
-      p = @pos
-      count = 0
-      loop do
-        before_spaces = p
-        while p < @length
-          if @source.getbyte(p) == 32
-            p += 1
-          else
-            break
-          end
-        end
-        if p < @length
-          if @source.getbyte(p) == 10
-            count += 1
-            p += 1
-          else
-            p = before_spaces
-            break
-          end
-        else
-          p = before_spaces
-          break
-        end
-      end
-      return nil if count == 0
-
-      advance(p - @pos)
-      @row += count
-      @col = 1
-      @line_start = true
-      set_token(:NL, count, @row, 1)
-    end
-  RUBY
   body = replace_method(body, "skip", <<~RUBY)
     def skip(pattern)
       0
@@ -854,29 +841,11 @@ def stage0_codepoint_lexer_compat(body)
       nil
     end
   RUBY
-  body = replace_method(body, "scan_symbol_operator", <<~RUBY)
-    def scan_symbol_operator
-      return false unless byte == 58
-
-      SYMBOL_OPERATORS.each do |op|
-        next unless match_bytes?(op)
-
-        advance(op.bytesize)
-        return true
-      end
-      false
-    end
-  RUBY
   body = replace_method(body, "slice", <<~RUBY)
     def slice(start_pos = @pos, end_pos = @pos)
       start_i = start_pos.to_i
       end_i = end_pos.to_i
-      @source.byteslice(start_i, end_i - start_i)
-    end
-  RUBY
-  body = replace_method(body, "pos=", <<~RUBY)
-    def pos=(new_pos)
-      @pos = new_pos
+      @source.byteslice(start_i, end_i - start_i) || ""
     end
   RUBY
   body = replace_method(body, "match_scanner_pattern", <<~RUBY)
@@ -893,17 +862,39 @@ def stage0_codepoint_lexer_compat(body)
     def scan_string
       start_col = @col
       advance
+      parts = List.new
       str = ""
+      has_interp = false
 
       loop do
         error "unterminated string" if eof?
 
-        case byte
-        when 34
+        b = byte
+        if b == 34
           advance
           break
-        when 92
+        elsif b == 92
           str = str + scan_string_escape
+        elsif b == 91
+          if byte(1) != 93 && matching_close_bracket_before_newline?(@pos + 1)
+            has_interp = true
+            if !str.empty?
+              pair_s = List.new
+              pair_s.push(:str)
+              pair_s.push(str)
+              parts.push(pair_s)
+              str = ""
+            end
+            advance
+            expr_str = scan_interpolation_expr
+            pair_e = List.new
+            pair_e.push(:expr)
+            pair_e.push(expr_str)
+            parts.push(pair_e)
+          else
+            str = str + "["
+            advance
+          end
         else
           chunk_start = @pos
           advance_utf8_char
@@ -911,102 +902,192 @@ def stage0_codepoint_lexer_compat(body)
         end
       end
 
-      set_token(:STRING, str, @row, start_col)
+      if has_interp
+        if !str.empty?
+          pair_tail = List.new
+          pair_tail.push(:str)
+          pair_tail.push(str)
+          parts.push(pair_tail)
+        end
+        @token.interp_parts = parts
+        set_token(:STRING_INTERP, "", @row, start_col)
+      else
+        set_token(:STRING, str, @row, start_col)
+      end
     end
   RUBY
   body = replace_method(body, "scan_string_escape", <<~RUBY)
     def scan_string_escape
-      advance
-      b = byte
-      if b == 110
-        advance
+      if match_bytes?("\\\\n")
+        advance(2)
         return 10.chr
-      end
-      if b == 114
-        advance
+      elsif match_bytes?("\\\\r")
+        advance(2)
         return 13.chr
-      end
-      if b == 116
-        advance
+      elsif match_bytes?("\\\\t")
+        advance(2)
         return 9.chr
-      end
-      if b == 92
+      elsif match_bytes?("\\\\e[")
+        advance(3)
+        return 27.chr + "["
+      elsif match_bytes?("\\\\e")
+        advance(2)
+        return 27.chr
+      elsif match_bytes?("\\\\0")
+        advance(2)
+        return 0.chr
+      elsif match_bytes?("\\\\\\\\")
+        advance(2)
+        return 92.chr
+      elsif match_bytes?("\\\\\\"")
+        advance(2)
+        return 34.chr
+      elsif match_bytes?("\\\\'")
+        advance(2)
+        return 39.chr
+      elsif match_bytes?("\\\\[")
+        advance(2)
+        return "["
+      elsif match_bytes?("\\\\]")
+        advance(2)
+        return "]"
+      elsif match_bytes?("\\\\u") && hex_byte?(byte(2)) && hex_byte?(byte(3)) && hex_byte?(byte(4)) && hex_byte?(byte(5))
+        cp = slice(@pos + 2, @pos + 6).to_i(16)
+        advance(6)
+        return encode_utf8_codepoint(cp)
+      else
         advance
         return 92.chr
       end
-      if b == 34
-        advance
-        return 34.chr
+    end
+
+    def encode_utf8_codepoint(cp)
+      if cp < 0x80
+        cp.chr
+      elsif cp < 0x800
+        (0xC0 | (cp >> 6)).chr + (0x80 | (cp & 0x3F)).chr
+      elsif cp < 0x10000
+        (0xE0 | (cp >> 12)).chr + (0x80 | ((cp >> 6) & 0x3F)).chr + (0x80 | (cp & 0x3F)).chr
+      else
+        (0xF0 | (cp >> 18)).chr + (0x80 | ((cp >> 12) & 0x3F)).chr + (0x80 | ((cp >> 6) & 0x3F)).chr + (0x80 | (cp & 0x3F)).chr
       end
-      if b == 91
-        advance
-        return "["
-      end
-      if b == 93
-        advance
-        return "]"
-      end
-      92.chr
     end
   RUBY
-  body = replace_method(body, "scan_ident_bytes", <<~RUBY)
-    def scan_ident_bytes
-      advance while ident_continue_byte?(byte)
+  body = replace_method(body, "scan_heredoc", <<~RUBY)
+    def scan_heredoc(start_col)
+      start_row = @row
+      advance(3)
+      advance while byte == 32 || byte == 9
+      delim_start = @pos
+      if alpha_byte?(byte) || byte == 95
+        advance while alpha_byte?(byte) || digit_byte?(byte) || byte == 95
+      end
+      delim = slice(delim_start)
+      error "expected heredoc delimiter after <<~" if delim.empty?
+
+      advance while !eof? && byte != 10
+      error "unterminated heredoc" if eof?
+      @pos += 1
+      @row += 1
+      @col = 1
+
+      body_lines = [""]
+      body_lines.clear
+      min_indent = -1
+      loop do
+        error "unterminated heredoc" if eof?
+        line_start = @pos
+        advance while !eof? && byte != 10
+        line = slice(line_start)
+        if line.strip == delim
+          break
+        end
+        body_lines.push(line)
+        stripped = line.lstrip
+        unless stripped.empty?
+          indent = line.bytesize - stripped.bytesize
+          min_indent = indent if min_indent < 0 || indent < min_indent
+        end
+        error "unterminated heredoc" if eof?
+        @pos += 1
+        @row += 1
+        @col = 1
+      end
+
+      min_indent = 0 if min_indent < 0
+      out_lines = [""]
+      out_lines.clear
+      i = 0
+      while i < body_lines.length
+        l = body_lines[i]
+        if l.empty? || l.bytesize <= min_indent
+          out_lines.push("")
+        else
+          out_lines.push(l.byteslice(min_indent, l.bytesize - min_indent) || "")
+        end
+        i += 1
+      end
+
+      set_token(:STRING, out_lines.join("\n"), start_row, start_col)
+      true
     end
   RUBY
-  body = replace_method(body, "scan_identifier", <<~RUBY)
-    def scan_identifier
+  body = replace_method(body, "scan_name", <<~RUBY)
+    def scan_name
       start_col = @col
       start = @pos
-      scan_ident_bytes
-      text = slice(start, @pos)
-      if text == "if"
-        return set_token(:KEYWORD, text, @row, start_col)
-      end
-      if text == "else"
-        return set_token(:KEYWORD, text, @row, start_col)
-      end
-      if text == "elsif"
-        return set_token(:KEYWORD, text, @row, start_col)
-      end
-      if text == "while"
-        return set_token(:KEYWORD, text, @row, start_col)
-      end
-      if text == "return"
-        return set_token(:KEYWORD, text, @row, start_col)
-      end
-      if text == "true"
-        return set_token(:TRUE, nil, @row, start_col)
-      end
-      if text == "false"
-        return set_token(:FALSE, nil, @row, start_col)
-      end
-      if text == "nil"
-        return set_token(:NIL, nil, @row, start_col)
-      end
-      set_token(:ID, text, @row, start_col)
+      scan_ascii_name_bytes
+      value = slice(start)
+      type = constant_name?(value) ? :CONSTANT : :NAME
+      set_token(type, value, @row, start_col)
     end
   RUBY
-  body = replace_method(body, "emit_reserved_identifier", <<~RUBY)
-    def emit_reserved_identifier(start, finish, start_col)
-      false
-    end
-  RUBY
-  body = replace_method(body, "scan_ascii_name_bytes", <<~RUBY)
-    def scan_ascii_name_bytes
-      advance while ident_continue_byte?(byte)
-    end
-  RUBY
-  body = replace_method(body, "scan_at", <<~RUBY)
-    def scan_at
-      start_col = @col
-      start = @pos
-      advance
-      if ident_start_byte?(byte)
-        advance while ident_continue_byte?(byte)
-        return set_token(:IVAR, slice(start, @pos), @row, start_col)
+  body = replace_method(body, "keyword_at", <<~RUBY)
+    def keyword_at(start, finish)
+      text = slice(start, finish)
+      case text
+      when "..." then :"..."
+      when "alias" then :alias
+      when "always" then :always
+      when "begin" then :begin
+      when "break" then :break
+      when "case" then :case
+      when "continue" then :continue
+      when "else" then :else
+      when "elsif" then :elsif
+      when "ensure" then :ensure
+      when "fn" then :fn
+      when "if" then :if
+      when "in" then :in
+      when "is" then :is
+      when "loop" then :loop
+      when "module" then :module
+      when "next" then :next
+      when "on" then :on
+      when "raise" then :raise
+      when "recase" then :recase
+      when "redo" then :redo
+      when "rescue" then :rescue
+      when "retry" then :retry
+      when "return" then :return
+      when "super" then :super
+      when "then" then :then
+      when "trait" then :trait
+      when "unless" then :unless
+      when "until" then :until
+      when "use" then :use
+      when "when" then :when
+      when "while" then :while
+      when "with" then :with
+      when "yield" then :yield
+      else nil
       end
-      set_token(:'@', "@", @row, start_col)
+    end
+  RUBY
+  body = replace_method(body, "type_name_at", <<~RUBY)
+    def type_name_at(start, finish)
+      text = slice(start, finish)
+      TYPE_NAMES.key?(text) ? text : nil
     end
   RUBY
   body = replace_method(body, "scan_byte_array", <<~RUBY)
@@ -1031,85 +1112,6 @@ def stage0_codepoint_lexer_compat(body)
       nil
     end
   RUBY
-  body = replace_method(body, "keyword_at", <<~RUBY)
-    def keyword_at(start, finish)
-      text = slice(start, finish)
-      return "if" if text == "if"
-      return "else" if text == "else"
-      return "while" if text == "while"
-      return "true" if text == "true"
-      return "false" if text == "false"
-      return "nil" if text == "nil"
-      nil
-    end
-  RUBY
-  body = replace_method(body, "type_name_at", <<~RUBY)
-    def type_name_at(start, finish)
-      nil
-    end
-  RUBY
-  body = replace_method(body, "constant_name?", <<~RUBY)
-    def constant_name?(value)
-      false
-    end
-  RUBY
-  body = replace_method(body, "scan_number", <<~RUBY)
-    def scan_number(approx: false)
-      start_col = @col
-      start = @pos
-      consume_number_sign
-      advance if approx || byte == 126
-      consume_number_sign
-
-      if byte == 48
-        radix = byte(1)
-        if radix == 120 || radix == 88
-          advance(2)
-          while hex_byte?(byte) || byte == 95
-            advance
-          end
-          return set_token(:INT, slice(start), @row, start_col)
-        elsif radix == 98 || radix == 66
-          advance(2)
-          while byte == 48 || byte == 49 || byte == 95
-            advance
-          end
-          return set_token(:INT, slice(start), @row, start_col)
-        elsif radix == 111 || radix == 79
-          advance(2)
-          while (byte >= 48 && byte <= 55) || byte == 95
-            advance
-          end
-          return set_token(:INT, slice(start), @row, start_col)
-        elsif radix == 100 || radix == 68
-          advance(2)
-          while digit_byte?(byte) || byte == 95
-            advance
-          end
-          return set_token(:INT, slice(start), @row, start_col)
-        end
-      end
-
-      loop do
-        b = byte
-        break unless digit_byte?(b) || b == 95
-
-        advance
-      end
-      if byte == 46 && digit_byte?(byte(1))
-        advance
-        loop do
-          b = byte
-          break unless digit_byte?(b) || b == 95
-
-          advance
-        end
-        return set_token(:DECIMAL, slice(start), @row, start_col)
-      end
-
-      set_token(approx ? :FLOAT : :INT, slice(start), @row, start_col)
-    end
-  RUBY
   body = replace_method(body, "finish_number_token", <<~RUBY)
     def finish_number_token(num_str, num_type, start_col)
       set_token(num_type, num_str, @row, start_col)
@@ -1121,55 +1123,55 @@ def stage0_codepoint_lexer_compat(body)
       start = @pos
       advance(2)
       advance while hex_byte?(byte)
-      set_token(:CODEPOINT, slice(start), @row, start_col)
+      hex = slice(start + 2)
+      cp = hex.to_i(16)
+      set_token(:CODEPOINT, encode_utf8_codepoint(cp), @row, start_col)
     end
   RUBY
-  body = replace_method(body, "regex_literal_allowed?", <<~RUBY)
-    def regex_literal_allowed?
-      true
-    end
-  RUBY
-  body = replace_method(body, "regex_capture_start?", <<~RUBY)
-    def regex_capture_start?
-      false
-    end
-  RUBY
-  body = replace_method(body, "bracketed_ip6_start?", <<~RUBY)
-    def bracketed_ip6_start?
-      false
-    end
-  RUBY
-  body = replace_method(body, "approximate_decimal_after?", <<~RUBY)
-    def approximate_decimal_after?(index)
-      false
-    end
-  RUBY
-  body = replace_method(body, "approximate_float_literal_possible?", <<~RUBY)
-    def approximate_float_literal_possible?
-      false
-    end
-  RUBY
-  body = replace_method(body, "rational_literal_possible?", <<~RUBY)
-    def rational_literal_possible?
-      false
+  body = replace_method(body, "scan_wvalue", <<~RUBY)
+    def scan_wvalue
+      start_col = @col
+      start = @pos
+      advance(3)
+      advance while hex_byte?(byte)
+      set_token(:WVALUE, slice(start), @row, start_col)
     end
   RUBY
   body = replace_method(body, "scan_regex_literal", <<~RUBY)
     def scan_regex_literal
       start = @pos
       start_col = @col
-      advance
-      while @pos < @length
-        if byte == 47
-          break
-        end
-        advance_utf8_char
-      end
-      error "unterminated regex literal" if eof?
+      i = start + 1
+      escaped = false
+      in_class = false
 
-      pattern = slice(start + 1, @pos)
-      advance
-      set_token(:REGEX, pattern, @row, start_col)
+      while i < @length
+        b = @source.getbyte(i) || -1
+        error "unterminated regex literal" if b == 10
+
+        if escaped
+          escaped = false
+        elsif b == 92
+          escaped = true
+        elsif b == 91
+          in_class = true
+        elsif b == 93
+          in_class = false
+        elsif b == 47 && !in_class
+          pattern = @source.byteslice(start + 1, i - start - 1) || ""
+          i += 1
+          opts_start = i
+          while i < @length && alpha_byte?(@source.getbyte(i) || -1)
+            i += 1
+          end
+          opts = @source.byteslice(opts_start, i - opts_start) || ""
+          advance(i - start)
+          return set_token(:REGEX, pattern, @row, start_col)
+        end
+        i += 1
+      end
+
+      error "unterminated regex literal"
     end
   RUBY
   body = replace_method(body, "scan_superscript", <<~RUBY)
@@ -1182,13 +1184,9 @@ def stage0_codepoint_lexer_compat(body)
       false
     end
   RUBY
-  body = replace_method(body, "scan_wvalue", <<~RUBY)
-    def scan_wvalue
-      start_col = @col
-      start = @pos
-      advance(3)
-      advance while hex_byte?(byte)
-      set_token(:WVALUE, slice(start), @row, start_col)
+  body = replace_method(body, "scan_unicode_name", <<~RUBY)
+    def scan_unicode_name
+      false
     end
   RUBY
   body = replace_method(body, "scan_subscript_tail", <<~RUBY)
@@ -1216,6 +1214,11 @@ def stage0_codepoint_lexer_compat(body)
       unit
     end
   RUBY
+  body = replace_method(body, "extend_unit_with_of_phrase", <<~RUBY)
+    def extend_unit_with_of_phrase(unit)
+      unit
+    end
+  RUBY
   body = replace_method(body, "validate_duration_order!", <<~RUBY)
     def validate_duration_order!(str)
       nil
@@ -1228,6 +1231,7 @@ def stage0_codepoint_lexer_compat(body)
   RUBY
   %w[
     fe80_start?
+    bracketed_ip6_start?
     hex_reference_literal_possible?
     network_literal_shape_possible?
     special_decimal_literal_possible?
@@ -1236,6 +1240,7 @@ def stage0_codepoint_lexer_compat(body)
     radix_number_literal?
     sexagesimal_decimal_prefix?
     approximate_float_literal_possible?
+    regex_capture_start?
     scan_float_literal
     scan_rational_literal
     scan_special_decimal_literal
@@ -1250,6 +1255,11 @@ def stage0_codepoint_lexer_compat(body)
       end
     RUBY
   end
+  body = replace_method(body, "approximate_decimal_after?", <<~RUBY)
+    def approximate_decimal_after?(index)
+      false
+    end
+  RUBY
   replace_method(body, "match_regex_at", <<~RUBY)
     def match_regex_at(regex, pos = 0)
       nil
@@ -2038,11 +2048,13 @@ def stage0_environment_compat(body)
       # `@values = {}` but the rebuilt spinel emitted a code path
       # that segfaulted bootstrap.
       @values = {"__spinel_env_poly_i__" => 0, "__spinel_env_poly_s__" => ""}
+      @values.clear
       @slot_names = {"__spinel_slot0__" => 0}
+      @slot_names.clear
       @slot_values = [nil, 0, ""]
       @slot_values.clear
       @slot_values.push(nil)
-      @barrier = false
+      @barrier = true
       @slot_names_shared = false
       @layout_shape = 0
       @lookup_shape = 0
@@ -2056,26 +2068,22 @@ def stage0_environment_compat(body)
       @parent = parent
     end
 
-    # Spinel-stage0 perf: pool-recycle entry point. Called by
-    # call_w_method on env release to drain the str_poly_hash
-    # back to its initial 2-placeholder shape (which keeps
-    # spinel's str_poly_hash type inference happy — see comment
-    # in #initialize) without reallocating the hash struct or its
-    # internal arrays. Drops ~4 % CPU in stage 0 and (more
-    # importantly) bounds the page-out traffic that's the real
-    # bottleneck in NO_GC mode.
-    #
-    # Named pool_reset (not reset) to avoid spinel mis-dispatching
-    # to Node_TransformState#reset, which also exists with a
-    # different arity and confuses spinel's per-mname lookup.
+    def set_barrier(flag)
+      @barrier = flag
+      self
+    end
+
+    def barrier
+      @barrier
+    end
+
     def pool_reset(parent)
       @parent = parent
-      @values.clear
+      @values.clear if @values.length > 0
       @slot_names.clear
-      @slot_names["__spinel_slot0__"] = 0
       @slot_values.clear
       @slot_values.push(nil)
-      @barrier = false
+      @barrier = true
       @slot_names_shared = false
       @layout_shape = 0
       @lookup_shape = 0
@@ -2102,13 +2110,11 @@ def stage0_environment_compat(body)
       layout_shape
     end
   RUBY
-  body = replace_method(body, "barrier?", "    def barrier?\n      false\n    end\n")
+  body = replace_method(body, "barrier?", "    def barrier?\n      @barrier\n    end\n")
   body = replace_method(body, "lookup_shape", "    def lookup_shape\n      0\n    end\n")
   body = replace_method(body, "slot_index", <<~RUBY)
     def slot_index(name)
-      idx = @slot_names[name]
-      return idx unless idx.nil?
-      nil
+      @slot_names[name.to_s]
     end
   RUBY
   body = replace_method(body, "get_slot", <<~RUBY)
@@ -2124,14 +2130,15 @@ def stage0_environment_compat(body)
   RUBY
   body = replace_method(body, "get", <<~RUBY)
     def get(name)
+      k = name.to_s
       env = self
       while true
-        idx = env.slot_index(name)
+        idx = env.slot_index(k)
         unless idx.nil?
           return env.get_slot(idx)
         end
         parent = env.parent
-        if parent == nil
+        if parent.nil?
           return nil
         end
         env = parent
@@ -2144,7 +2151,7 @@ def stage0_environment_compat(body)
     end
 
     def bind_value(name, value)
-      @values[name] = value
+      @values[name.to_s] = value
       value
     end
 
@@ -2165,37 +2172,55 @@ def stage0_environment_compat(body)
   RUBY
   body = replace_method(body, "set", <<~RUBY)
     def set(name, value)
-      # No "" + hoist — codegen-side string-param override (see
-      # #get) makes name already const char*.
-      bind_slot(name, value)
+      k = name.to_s
+      idx = @slot_names[k]
+      unless idx.nil?
+        @slot_values[idx] = value
+        return value
+      end
+      if !@barrier
+        env = self
+        while true
+          parent = env.parent
+          if parent.nil?
+            break
+          end
+          env = parent
+          idx2 = env.slot_index(k)
+          unless idx2.nil?
+            return env.set_slot(idx2, value)
+          end
+          if env.barrier?
+            return env.bind_slot(k, value)
+          end
+        end
+      end
+      bind_slot(k, value)
       value
     end
   RUBY
   body = replace_method(body, "define", <<~RUBY)
     def define(name, value)
-      # No "" + hoist — codegen-side string-param override (see
-      # #get).
       bind_slot(name, value)
       value
     end
   RUBY
   body = replace_method(body, "define_slot", <<~RUBY)
     def define_slot(name, index, value)
-      @slot_names[name] = index
-      @slot_values[index] = value
+      i = index.to_i
+      @slot_names[name.to_s] = i
+      @slot_values[i] = value
       value
     end
 
     def bind_slot(name, value)
-      idx = @slot_names[name]
+      k = name.to_s
+      idx = @slot_names[k]
       unless idx.nil?
         @slot_values[idx] = value
       else
-        # Keep the missing lookup's nil out of the value written to the
-        # String=>Integer slot table. Spinel is flow-insensitive, so reusing
-        # idx here widens @slot_names to a boxed hash.
         new_idx = @slot_values.length
-        @slot_names[name] = new_idx
+        @slot_names[k] = new_idx
         @slot_values.push(value)
       end
       value
@@ -2211,22 +2236,24 @@ def stage0_environment_compat(body)
   RUBY
   body = replace_method(body, "defined?", <<~RUBY)
     def defined?(name)
-      # No "" + hoist — codegen-side string-param override (see #get).
-      return true if slot_index(name) > 0
+      idx = slot_index(name)
+      return true unless idx.nil?
       return @parent.defined?(name) if @parent
       false
     end
   RUBY
   body = replace_method(body, "defined_locally_or_in_scope?", <<~RUBY)
     def defined_locally_or_in_scope?(name)
-      return true if slot_index(name) > 0
+      idx = slot_index(name)
+      return true unless idx.nil?
+      return false if @barrier
       return @parent.defined_locally_or_in_scope?(name) if @parent
       false
     end
   RUBY
   body = replace_method(body, "defined_locally?", <<~RUBY)
     def defined_locally?(name)
-      slot_index(name) > 0
+      !slot_index(name).nil?
     end
   RUBY
   body = replace_method(body, "fetch", <<~RUBY)
@@ -2333,14 +2360,18 @@ def stage0_ast_builtin_dispatch
 end
 
 def stage0_real_interpreter_compat(body)
+  body = body.gsub(/^\s*include (?:Runtime::)?CompilerIntrinsics\n/, "")
+  body = body.sub(
+    "    def to_s\n      match\n    end\n",
+    "    def to_s\n      \"\" + match.to_s\n    end\n"
+  )
+  body = body.gsub(/^\s*public\s+:decode_w_value.*?(?=\n\s*\n|\n\s*if\b)/m, "")
   # Initialize @top_env alongside @env. visit_call's user-fn lookup
   # uses @top_env to skip the env parent-chain walk for top-level
   # Defs — most lookups resolve to a Def in the root env.
-  # Keep env recycling behind SP_GC_DISABLE. Reused Environment objects are
-  # only safe in the no-GC bootstrap path. Use a linked free-list rather than
-  # an Array so the pool itself does not allocate or fight Spinel's array type
-  # inference.
-  body = body.gsub("@env = Environment.new\n", "@env = Environment.new(nil)\n      @top_env = @env\n      @env_pool = nil\n      @env_pool_count = 0\n      @env_pool_enabled = ENV[\"SP_GC_DISABLE\"] == \"1\" ? 1 : 0\n      @stage0_next_layout_shape = 1\n")
+  # Use a linked free-list rather than an Array so the pool itself does not
+  # allocate or fight Spinel's array type inference.
+  body = body.gsub("@env = Environment.new\n", "@env = Environment.new(nil)\n      @top_env = @env\n      @env_pool = nil\n      @env_pool_count = 0\n      @env_pool_enabled = ENV[\"SP_GC_DISABLE\"] == \"0\" ? 0 : 1\n      @stage0_next_layout_shape = 1\n      @method_cache_epoch = 1\n")
   body = body.gsub("@env = Environment.new(@env, barrier: true)", "@env = Environment.new(@env)")
   body = body.gsub("Environment.new(parent, barrier:)", "Environment.new(parent)")
   body = body.gsub("Environment.new(parent, barrier:, slot_names: cached_param_slot_names(owner, params))", "Environment.new(parent)")
@@ -2359,13 +2390,48 @@ def stage0_real_interpreter_compat(body)
     "      @profile_dispatch_counts = {}\n" \
     "      @returning = false\n" \
     "      @return_value = nil\n" \
+    "      @return_target_depth = -1\n" \
+    "      @call_depth = 0\n" \
+    "      @in_block_depth = 0\n" \
+    "      @current_block_owner_depth = 0\n" \
     "      @breaking = false\n" \
     "      @nexting = false\n" \
     "      @exiting = false\n" \
-    "      @current_block = \"\"\n"
+    "      @current_block = nil\n" \
+    "      @current_class = nil\n" \
+    "      @current_module = nil\n" \
+    "      @traits = {\"__spinel_trait__\" => Runtime::WClass.new(\"__spinel_trait__\", nil)}\n" \
+    "      @traits.clear\n" \
+      "      dummy_node = PackedNode.new(0, 0, 0)\n" \
+    "      @ast_next_offset = 1\n" \
+    "      @ast_store_gen = 1\n" \
+    "      @ast_singletons = {0 => dummy_node}\n" \
+    "      @ast_singletons.clear\n" \
+    "      @ast_inline_nodes = {0 => dummy_node}\n" \
+    "      @ast_inline_nodes.clear\n" \
+    "      @ast_bool_nodes = {0 => dummy_node}\n" \
+    "      @ast_bool_nodes.clear\n" \
+    "      @ast_intern_next_id = 0\n" \
+    "      @ast_intern_ids = {\"__spinel_intern__\" => 0}\n" \
+    "      @ast_intern_ids.clear\n" \
+    "      @ast_intern_strs = {0 => \"\"}\n" \
+    "      @ast_intern_strs.clear\n" \
+    "      @ast_intern_nodes = {0 => dummy_node}\n" \
+    "      @ast_intern_nodes.clear\n" \
+    "      @loc_files = [\"\"]\n" \
+    "      @loc_line_tables = [List.new]\n" \
+    "      @loc_col_tables = [List.new]\n" \
+    "      @loc_sources = [\"\"]\n" \
+    "      @lex64_tables = {\"__spinel_lex64__\" => \"\"}\n" \
+    "      @lex64_tables.clear\n"
   )
+  body = body.gsub("      init_compiler_intrinsics\n", "")
   body = body.gsub("      Runtime::Builtins.setup(self)\n", "")
-  body = body.gsub(/      BUILTIN_TYPES\.each \{ \|name\| @classes\[name\] \|\|= Runtime::WClass\.new\(name, nil\) \}\n/, "")
+  body = body.gsub("      Runtime::Builtins.setup(self, sandbox: sandbox)\n", "")
+  body = body.gsub(
+    /      BUILTIN_TYPES\.each \{ \|name\| @classes\[name\] \|\|= Runtime::WClass\.new\(name, nil\) \}\n/,
+    "      BUILTIN_TYPES.each { |name| @classes[name] = Runtime::WClass.new(name, nil) }\n"
+  )
   body = body.sub(/      @env\.set\("ℎ".*?      @env\.set\("𝐹".*?\n/m, "")
   body = replace_method(body, "self.body_has_return?", <<~RUBY)
     def self.body_has_return?(node)
@@ -2419,67 +2485,165 @@ def stage0_real_interpreter_compat(body)
   RUBY
   body = replace_method(body, "visit_class_def", <<~RUBY)
     def visit_class_def(node)
-      w_class = @classes[node.name]
+      full_name = node.name.to_s
+      if @current_module != nil && @current_module != "" && !full_name.include?(":")
+        full_name = @current_module + ":" + full_name
+      end
+      ns_prefix = ""
+      short_name = full_name
+      if full_name.include?(":")
+        last_colon = full_name.rindex(":")
+        if last_colon != nil && last_colon > 0
+          ns_prefix = full_name.slice(0, last_colon) || ""
+          short_name = full_name.slice(last_colon + 1, full_name.length - last_colon - 1) || ""
+        end
+      end
+      w_class = @classes[full_name]
       if w_class == nil
         superclass = nil
         if node.superclass
-          superclass = @classes[node.superclass]
+          super_name = node.superclass.to_s
+          if ns_prefix != ""
+            superclass = @classes[ns_prefix + ":" + super_name]
+          end
+          if superclass == nil && @current_module != nil && @current_module != ""
+            superclass = @classes[@current_module + ":" + super_name]
+          end
+          if superclass == nil
+            superclass = @classes[super_name]
+          end
         end
-        w_class = Runtime::WClass.new(node.name, superclass)
-        @classes[node.name] = w_class
+        w_class = Runtime::WClass.new(full_name, superclass)
+        @classes[full_name] = w_class
+        if short_name != "" && short_name != full_name && @classes[short_name] == nil
+          @classes[short_name] = w_class
+        end
       end
+      old_class = @current_class
+      @current_class = w_class
       body = node.body.list
       i = 0
       while i < body.length
         stage0_define_class_body_method(w_class, body[i])
         i += 1
       end
+      @current_class = old_class
 
       w_class
     end
 
     def stage0_define_class_body_method(w_class, expr)
-      if expr.doc == 12
+      while expr != nil && expr.doc == 53
+        expr = expr.value
+      end
+      return nil if expr == nil
+      d = expr.doc
+      if d == 12
         return stage0_define_class_method(w_class, expr)
+      end
+      if d == 13
+        call_name = expr.name.to_s
+        if call_name == "ro" || call_name == "rw"
+          stage0_define_accessors(w_class, expr.args, call_name == "rw")
+        end
+        return nil
+      end
+      if d == 8
+        target = expr.name
+        val = evaluate(expr.value)
+        if target.is_a?(String)
+          w_class.set_constant(target, val)
+          @env.bind_value(target, val)
+        elsif target.doc == 9
+          tname = target.name.to_s
+          w_class.set_constant(tname, val)
+          @env.bind_value(tname, val)
+        elsif target.doc == 28
+          w_class.set_cvar(target.name.to_s, val)
+        end
+        return val
+      end
+      if d == 46
+        trait_name = expr.trait_name.to_s
+        trait_obj = @traits[trait_name]
+        if trait_obj != nil
+          trait_obj.methods_table.each do |mname, mdef|
+            if w_class.methods_table[mname] == nil
+              w_class.methods_table[mname] = mdef
+            end
+          end
+          @method_cache_epoch += 1
+        end
+        return nil
+      end
+      if d == 24 || d == 25 || d == 26
+        return evaluate(expr)
       end
       nil
     end
 
+    def stage0_define_accessors(w_class, args, writable)
+      return nil if args == nil
+      i = 0
+      while i < args.length
+        arg = args[i]
+        attr_name = ""
+        if arg.doc == 16
+          attr_name = arg.value.to_s
+          if attr_name.start_with?(":")
+            attr_name = attr_name.slice(1, attr_name.length - 1)
+          end
+        elsif arg.doc == 9
+          attr_name = arg.name.to_s
+        elsif arg.doc == 4
+          attr_name = arg.value.to_s
+        end
+        if attr_name != ""
+          ivar_name = "@" + attr_name
+          ivar_node = InstanceVar.new(ivar_name)
+          getter_body = List.new([ivar_node])
+          getter_def = Def.new(attr_name, [], getter_body)
+          getter_def.accessor_kind = 1
+          getter_def.accessor_ivar = ivar_name
+          w_class.methods_table[attr_name] = getter_def
+          if writable
+            param_arg = Arg.new("val")
+            assign_node = Assign.new(InstanceVar.new(ivar_name), Var.new("val"))
+            setter_body = List.new([assign_node])
+            setter_def = Def.new(attr_name + "=", [param_arg], setter_body)
+            setter_def.accessor_kind = 2
+            setter_def.accessor_ivar = ivar_name
+            w_class.methods_table[attr_name + "="] = setter_def
+          end
+        end
+        i += 1
+      end
+      @method_cache_epoch += 1
+      nil
+    end
+
     def stage0_define_class_method(w_class, expr)
-    if w_class.name == "RegexLexer"
-      if expr.name == "tokenize" || expr.name == "tokenize_one"
-        return nil
+      if expr.receiver != nil
+        w_class.class_methods_table[expr.name.to_s] = expr
+      else
+        w_class.methods_table[expr.name.to_s] = expr
       end
+      @method_cache_epoch += 1
+      expr
     end
-    if ENV["TUNGSTEN_STAGE0_DEFINE_METHOD_TRACE"] == "1"
-      trace_path = "/tmp/tungsten-stage0-define-methods"
-      trace_text = ""
-      if File.exist?(trace_path)
-        trace_text = File.read(trace_path)
-      end
-      File.write(trace_path, trace_text + w_class.name.to_s + ":" + expr.name.to_s + "\n")
-    end
-    w_class.methods[expr.name.to_s] = expr
-    expr
-  end
   RUBY
   body = replace_method(body, "visit_def", <<~RUBY)
     def visit_def(node)
-      if @stage0_loading_depth != nil && @stage0_loading_depth > 0 && @current_file.to_s.end_with?("compiler/lib/parser.w")
-        parser_class = @classes["Parser"]
-        if parser_class != nil
-          return stage0_define_class_method(parser_class, node)
-        end
+      if @current_class != nil
+        return stage0_define_class_method(@current_class, node)
       end
-      @env.bind_value(node.name.to_s, node)
+      @top_env.bind_value(node.name.to_s, node)
+      if @env.object_id != @top_env.object_id
+        @env.bind_value(node.name.to_s, node)
+      end
       node
     end
   RUBY
-  # visit_begin: spinel can't handle Ruby's begin/rescue cleanly in the
-  # generated C, and the heavy version inside KEEP_INTERPRETER_CORE
-  # never runs by default. Replace at top level so begin blocks actually
-  # evaluate their body in stage0 (compiler/tungsten.w wraps compile_one
-  # in begin/rescue, so without this the program silently exits).
   body = replace_method(body, "visit_begin", <<~RUBY)
     def visit_begin(node)
       evaluate(node.body)
@@ -3247,6 +3411,7 @@ def stage0_real_interpreter_compat(body)
       invoke_method_builtin call_lambda_with_values with_profile_callable hash_indifferent_get
       wyhash_mix_u64_value wyhash_read_u32_value wyhash_read_u64_value wyhash64_string_value
       primitive_runtime_class tungsten_class_name tungsten_type_info substance_mass parse_energy_fuel
+      evaluate_fallback read_ivar resolve_class_constant resolve_unique_namespaced_constant
     ].each do |name|
       body = replace_method(body, name, <<~RUBY)
       def #{name}(a = nil, b = nil, c = nil, d = nil)
@@ -3857,36 +4022,13 @@ def stage0_real_interpreter_compat(body)
   end
   body = replace_method(body, "run", <<~RUBY)
     def run(source, file_path = "")
-      if file_path.to_s.end_with?("compiler/tungsten.w")
-        source = stage0_normalize_compiler_source(source)
-      else
-        source = stage0_normalize_compiler_language_source(source)
-      end
-      dump_path = ENV["TUNGSTEN_STAGE0_NORMALIZED_DUMP"]
-      if dump_path != nil && dump_path != ""
-        File.write(dump_path, source)
-      end
+      source = source.to_s
       @source = source
       @current_file = file_path
+      if file_path != nil && file_path != ""
+        @loaded_files[file_path.to_s] = true
+      end
       ast = parse_with_file(source, file_path)
-      if ENV["TUNGSTEN_STAGE0_BOOT_TRACE"] == "1"
-        File.write("/tmp/tungsten-stage0-boot-parse-done", ast.length.to_s)
-      end
-      if ENV["TUNGSTEN_STAGE0_PARSE_DEBUG"] == "1"
-        puts "stage0 source length"
-        puts source.length
-        puts "stage0 ast length"
-        puts ast.length
-        i = 0
-        while i < ast.length && i < 20
-          expr = ast[i]
-          puts "stage0 ast doc " + i.to_s + " " + expr.doc.to_s
-          if expr.respond_to?(:name)
-            puts "stage0 ast name " + expr.name.to_s
-          end
-          i += 1
-        end
-      end
       evaluate(ast)
       0
     end
@@ -3901,129 +4043,104 @@ def stage0_real_interpreter_compat(body)
   RUBY
   body = replace_method(body, "evaluate", <<~RUBY)
     def evaluate(node)
-      return nil unless node
-      # Hoist `node.doc` into a single read so spinel doesn't
-      # re-emit the ~100-line cls_id type-switch per branch.
-      # Original 47 separate `if node.doc == N` lines blew the
-      # compiled `evaluate` to 5,700+ lines / 4,653 iv_doc reads;
-      # one cached read drops it to a flat 47-arm dispatch.
-      doc = node.doc
-      return visit_list(node) if doc == 1
-      return visit_print(node) if doc == 2
-      return visit_int(node) if doc == 3
-      return visit_string_literal(node) if doc == 4
-      return visit_boolean(node) if doc == 5
-      return visit_nil(node) if doc == 6
-      return visit_binary_op(node) if doc == 7
-      return visit_assign(node) if doc == 8
-      return visit_var(node) if doc == 9
-      return visit_if(node) if doc == 10
-      return visit_while(node) if doc == 11
-      return visit_def(node) if doc == 12
-      return visit_call(node) if doc == 13
-      return visit_return(node) if doc == 14
-      return visit_assign_op(node) if doc == 15
-      return cached_symbol_value(node) if doc == 16
-      return visit_array_literal(node) if doc == 17
-      return visit_hash_literal(node) if doc == 18
-      return visit_and(node) if doc == 19
-      return visit_or(node) if doc == 20
-      return visit_in_test(node) if doc == 21
-      return visit_case_expr(node) if doc == 22
-      return visit_use(node) if doc == 23
-      return visit_class_def(node) if doc == 24
-      return visit_module_def(node) if doc == 25
-      return visit_trait_def(node) if doc == 26
-      return visit_instance_var(node) if doc == 27
-      return visit_class_var(node) if doc == 28
-      return visit_global_var(node) if doc == 29
-      return visit_self(node) if doc == 30
-      return node.value if doc == 31
-      return node.value if doc == 32
-      return decode_w_value(node.value, node.raw) if doc == 33
-      return visit_begin(node) if doc == 34
-      return visit_raise(node) if doc == 35
-      if doc == 36
+      return nil if node.nil?
+      d = node.doc
+      return nil if d.nil?
+      doc = d + 0
+      case doc
+      when 1 then visit_list(node)
+      when 2 then visit_print(node)
+      when 3 then visit_int(node)
+      when 4 then visit_string_literal(node)
+      when 5 then visit_boolean(node)
+      when 6 then visit_nil(node)
+      when 7 then visit_binary_op(node)
+      when 8 then visit_assign(node)
+      when 9 then visit_var(node)
+      when 10 then visit_if(node)
+      when 11 then visit_while(node)
+      when 12 then visit_def(node)
+      when 13 then visit_call(node)
+      when 14 then visit_return(node)
+      when 15 then visit_assign_op(node)
+      when 16 then cached_symbol_value(node)
+      when 17 then visit_array_literal(node)
+      when 18 then visit_hash_literal(node)
+      when 19 then visit_and(node)
+      when 20 then visit_or(node)
+      when 21 then visit_in_test(node)
+      when 22 then visit_case_expr(node)
+      when 23 then visit_use(node)
+      when 24 then visit_class_def(node)
+      when 25 then visit_module_def(node)
+      when 26 then visit_trait_def(node)
+      when 27 then visit_instance_var(node)
+      when 28 then visit_class_var(node)
+      when 29 then visit_global_var(node)
+      when 30 then visit_self(node)
+      when 31 then node.value
+      when 32 then node.value
+      when 33 then decode_w_value(node.value, node.raw)
+      when 34 then visit_begin(node)
+      when 35 then visit_raise(node)
+      when 36
         visit_write(node)
-        return nil
+        nil
+      when 37 then visit_fn(node)
+      when 38 then visit_yield(node)
+      when 39 then visit_break(node)
+      when 40 then visit_next(node)
+      when 41 then visit_not(node)
+      when 42 then visit_tuple(node)
+      when 43 then visit_splat(node)
+      when 44 then visit_string_interpolation(node)
+      when 45 then visit_alias(node)
+      when 46 then visit_is(node)
+      when 47 then visit_super(node)
+      when 48 then visit_range_literal(node)
+      when 49 then visit_typed_array(node)
+      when 50 then node.value
+      when 51 then visit_magic_constant(node)
+      when 52 then visit_path(node)
+      when 53 then evaluate(node.value)
+      when 54 then node
+      when 56 then visit_unary_op(node)
+      when 57 then visit_with(node)
+      when 58 then visit_until(node)
+      else nil
       end
-      return visit_fn(node) if doc == 37
-      return visit_yield(node) if doc == 38
-      return visit_break(node) if doc == 39
-      return visit_next(node) if doc == 40
-      return visit_not(node) if doc == 41
-      return visit_tuple(node) if doc == 42
-      return visit_splat(node) if doc == 43
-      return visit_string_interpolation(node) if doc == 44
-      return visit_alias(node) if doc == 45
-      return visit_is(node) if doc == 46
-      return visit_super(node) if doc == 47
-      nil
     end
   RUBY
   body = replace_method(body, "visit_list", <<~RUBY)
     def visit_list(node)
-      # Debug ENV checks were the #1 hotspot per `sample` — getenv()
-      # was called millions of times during compile. Stripped from the
-      # interpreter hot path; rebuild with a debug bundle if needed.
+      return nil unless node.is_a?(List)
       result = nil
       list = node.list
+      n = list.length
       i = 0
-      if @stage0_eval_depth == nil
-        @stage0_eval_depth = 0
-      end
-      @stage0_eval_depth += 1
-      trace_eval = @stage0_eval_depth == 1
-      while i < list.length
-        if @stage0_loading_depth != nil && @stage0_loading_depth > 0
-          item = list[i]
-          doc = item.doc
-          load_item = doc == 12 || doc == 23 || doc == 24 || doc == 25 || doc == 26 || doc == 37
-          if doc == 8
-            value_doc = item.value.doc
-            load_item = value_doc == 3 || value_doc == 4 || value_doc == 5 || value_doc == 6 ||
-                        value_doc == 16 || value_doc == 31 || value_doc == 32 || value_doc == 33
-          end
-          unless load_item
-            i += 1
-            next
-          end
-        end
-        if trace_eval
-          item = list[i]
-          label = item.doc.to_s
-          if item.respond_to?(:name)
-            label = label + ":" + item.name.to_s
-          elsif item.respond_to?(:path)
-            label = label + ":" + item.path.to_s
-          end
-          File.write("/tmp/tungsten-stage0-eval-trace", "before:" + i.to_s + ":" + label)
-        end
+      while i < n
         result = evaluate(list[i])
-        if trace_eval
-          File.write("/tmp/tungsten-stage0-eval-trace", "after:" + i.to_s)
-        end
-        break if @returning
-        break if @exiting
-        break if @breaking
-        break if @nexting
+        break if @returning || @exiting || @breaking || @nexting
         i += 1
       end
-      @stage0_eval_depth -= 1
       result
     end
   RUBY
   body = replace_method(body, "visit_int", <<~RUBY)
     def visit_int(node)
-      text = node.value.to_s
-      text.to_i
+      if node.is_a?(Int)
+        return node.value
+      end
+      node.value.to_i
     end
   RUBY
   unless body.match?(/^[ \t]*def[ \t]+visit_int(?:\b|\s|\()/)
     body = body.sub(/(^[ \t]*)def[ \t]+visit_boolean\(node\)/, <<~RUBY.rstrip)
 \\1def visit_int(node)
-\\1  text = node.value.to_s
-\\1  text.to_i
+\\1  if node.is_a?(Int)
+\\1    return node.value
+\\1  end
+\\1  node.value.to_i
 \\1end
 
 \\1def visit_boolean(node)
@@ -4035,7 +4152,7 @@ def stage0_real_interpreter_compat(body)
       i = 0
       while i < node.args.length
         result = evaluate(node.args[i])
-        puts result
+        puts w_to_s(result)
         i += 1
       end
       result
@@ -4059,75 +4176,123 @@ def stage0_real_interpreter_compat(body)
   RUBY
   body = replace_method(body, "visit_binary_op", <<~RUBY)
     def visit_binary_op(node)
+      return nil unless node.is_a?(BinaryOp)
       left = evaluate(node.left)
-      op = stage0_binary_op_operator(node)
+      op_code = node.bop_code
+      rnode = node.right
 
-      if op == :in
-        if node.right.doc == 1
+      if op_code == 21
+        if rnode.doc == 1
           i = 0
-          while i < node.right.length
-            value = evaluate(node.right[i])
-            return true if left == value
+          while i < rnode.length
+            value = evaluate(rnode[i])
+            if value.is_a?(WRange)
+              return true if value.include?(left)
+            else
+              return true if left == value
+            end
             i += 1
           end
+          return false
         end
+        rhs = evaluate(rnode)
+        return rhs.include?(left) if rhs.is_a?(WRange) || rhs.is_a?(List) || rhs.is_a?(Array) || rhs.is_a?(String)
         return false
       end
 
-      # Short-circuit booleans: || returns left if truthy else right;
-      # && returns right if left is truthy else left.
-      if op == :"||"
+      if op_code == 19
         return left if truthy?(left)
-        return evaluate(node.right)
-      elsif op == :"&&"
+        return evaluate(rnode)
+      elsif op_code == 20
         return left unless truthy?(left)
-        return evaluate(node.right)
+        return evaluate(rnode)
       end
 
-      right = evaluate(node.right)
+      right = evaluate(rnode)
 
-      if op == :""
-        false
-      elsif op == :==
-        left == right
-      elsif op == :!=
-        !(left == right)
-      elsif op == :<
-        left < right
-      elsif op == :<=
-        left <= right
-      elsif op == :>
-        left > right
-      elsif op == :>=
-        left >= right
-      elsif op == :<=>
-        left <=> right
-      elsif op == :+
-        if left.is_a?(String) || right.is_a?(String)
+      case op_code
+      when 1
+        if left.is_a?(PackedNode) && right.is_a?(PackedNode)
+          left.object_id == right.object_id
+        elsif left.is_a?(PackedNode) || right.is_a?(PackedNode)
+          false
+        else
+          left == right
+        end
+      when 2
+        if left.is_a?(PackedNode) && right.is_a?(PackedNode)
+          left.object_id != right.object_id
+        elsif left.is_a?(PackedNode) || right.is_a?(PackedNode)
+          true
+        else
+          !(left == right)
+        end
+      when 3 then left < right
+      when 4 then left <= right
+      when 5 then left > right
+      when 6 then left >= right
+      when 7 then left <=> right
+      when 8
+        if left.is_a?(List) && right.is_a?(List)
+          res = List.new
+          li = 0
+          while li < left.length
+            res.push(left[li])
+            li += 1
+          end
+          ri = 0
+          while ri < right.length
+            res.push(right[ri])
+            ri += 1
+          end
+          res
+        elsif left.is_a?(String) || right.is_a?(String)
           left.to_s + right.to_s
         else
           left + right
         end
-      elsif op == :-
-        left - right
-      elsif op == :*
-        left * right
-      elsif op == :/
-        left / right
-      elsif op == :%
-        left % right
-      elsif op == :**
-        left ** right
-      elsif op == :<<
-        left << right
-      elsif op == :>>
-        left >> right
-      elsif op == :&
-        left & right
-      elsif op == :|
-        left | right
-      elsif op == :^
-        left ^ right
+      when 9 then left - right
+      when 10
+        if left.is_a?(List) && right.is_a?(Integer)
+          res = List.new
+          ti = 0
+          while ti < right
+            li = 0
+            while li < left.length
+              res.push(left[li])
+              li += 1
+            end
+            ti += 1
+          end
+          res
+        elsif left.is_a?(String) && right.is_a?(Integer)
+          out_s = ""
+          ti = 0
+          while ti < right
+            out_s = out_s + left
+            ti += 1
+          end
+          out_s
+        else
+          left * right
+        end
+      when 11 then left / right
+      when 12 then left % right
+      when 13 then left ** right
+      when 14
+        if left.is_a?(StringBuffer)
+          left.push(right.to_s)
+        elsif left.is_a?(List)
+          left.push(right)
+          left
+        else
+          left << right
+        end
+      when 15 then left >> right
+      when 16 then left & right
+      when 17 then left | right
+      when 18 then left ^ right
+      when 22 then false
       else
         runtime_error("unknown operator", node: node)
       end
@@ -4140,7 +4305,12 @@ def stage0_real_interpreter_compat(body)
       @return_value = nil
       target = node
       target = node.name
-      if target.doc == 27
+      if target.is_a?(String)
+        @env.set(target, value)
+        return value
+      end
+      tdoc = target.doc
+      if tdoc == 27
         self_obj = nil
         if @self_stack.length > 0
           self_obj = @self_stack[@self_stack.length - 1]
@@ -4149,8 +4319,47 @@ def stage0_real_interpreter_compat(body)
           self_obj.set_ivar(target.name.to_s, value)
           return value
         end
-      end
-      if target.doc == 9
+      elsif tdoc == 28
+        self_obj = nil
+        if @self_stack.length > 0
+          self_obj = @self_stack[@self_stack.length - 1]
+        end
+        if self_obj.is_a?(WObject) && self_obj.w_class != nil
+          self_obj.w_class.set_cvar(target.name.to_s, value)
+        elsif self_obj.is_a?(WClass)
+          self_obj.set_cvar(target.name.to_s, value)
+        elsif @current_class != nil
+          @current_class.set_cvar(target.name.to_s, value)
+        end
+        return value
+      elsif tdoc == 29
+        @globals[target.name.to_s] = value
+        return value
+      elsif tdoc == 17
+        tlist = target.list
+        ti = 0
+        while ti < tlist.length
+          sub = tlist[ti]
+          elem_val = nil
+          if value.is_a?(List) || value.is_a?(Array)
+            if ti < value.length
+              elem_val = value[ti]
+            end
+          elsif ti == 0
+            elem_val = value
+          end
+          if sub.is_a?(String)
+            @env.set(sub, elem_val)
+          elsif sub.doc == 9
+            @env.set(sub.name.to_s, elem_val)
+          elsif sub.doc == 27
+            self_obj = @self_stack.length > 0 ? @self_stack[@self_stack.length - 1] : nil
+            self_obj.set_ivar(sub.name.to_s, elem_val) if self_obj != nil
+          end
+          ti += 1
+        end
+        return value
+      elsif tdoc == 9
         @env.set(target.name.to_s, value)
       else
         @env.set(target.to_s, value)
@@ -4160,14 +4369,12 @@ def stage0_real_interpreter_compat(body)
   RUBY
   body = replace_method(body, "visit_instance_var", <<~RUBY)
     def visit_instance_var(node)
-      self_obj = nil
-      if @self_stack.length > 0
-        self_obj = @self_stack[@self_stack.length - 1]
-      end
-      if self_obj != nil
-        return self_obj.get_ivar(node.name.to_s)
-      end
-      nil
+      return nil if @self_stack.length == 0
+      self_obj = @self_stack[@self_stack.length - 1]
+      return nil if self_obj.nil?
+      ivar_name = node.is_a?(InstanceVar) ? node.name : ("" + node.name.to_s)
+      return self_obj.get_ivar(ivar_name) if self_obj.is_a?(WObject)
+      self_obj.get_ivar(ivar_name)
     end
   RUBY
   body = replace_method(body, "visit_var", <<~RUBY)
@@ -4662,9 +4869,12 @@ def stage0_real_interpreter_compat(body)
       return "Int" if value.is_a?(Integer)
       return "Float" if value.is_a?(Float)
       return "String" if value.is_a?(String)
+      return "StringBuffer" if value.is_a?(StringBuffer)
       return "Symbol" if value.is_a?(Symbol)
-      return "Array" if value.is_a?(Array)
+      return "Array" if value.is_a?(Array) || value.is_a?(List) || value.is_a?(WireSequence)
       return "Hash" if value.is_a?(Hash)
+      return "WValue" if value.is_a?(PackedNode) || value.is_a?(WireRecord)
+      return "ContentTempMap" if value.is_a?(ContentTempMap)
       if value.is_a?(WObject)
         klass = value.w_class
         return klass.name.to_s unless klass.nil?
@@ -4673,23 +4883,163 @@ def stage0_real_interpreter_compat(body)
       return "Class" if value.is_a?(WClass)
       "Unknown"
     end
+
+    def stage0_wyhash_mix_u64(a, b)
+      a0 = a & 0xFFFF
+      a1 = (a >> 16) & 0xFFFF
+      a2 = (a >> 32) & 0xFFFF
+      a3 = (a >> 48) & 0xFFFF
+      b0 = b & 0xFFFF
+      b1 = (b >> 16) & 0xFFFF
+      b2 = (b >> 32) & 0xFFFF
+      b3 = (b >> 48) & 0xFFFF
+
+      c0 = a0 * b0
+      r0 = c0 & 0xFFFF
+      c1 = (c0 >> 16) + a0 * b1 + a1 * b0
+      r1 = c1 & 0xFFFF
+      c2 = (c1 >> 16) + a0 * b2 + a1 * b1 + a2 * b0
+      r2 = c2 & 0xFFFF
+      c3 = (c2 >> 16) + a0 * b3 + a1 * b2 + a2 * b1 + a3 * b0
+      r3 = c3 & 0xFFFF
+      c4 = (c3 >> 16) + a1 * b3 + a2 * b2 + a3 * b1
+      r4 = c4 & 0xFFFF
+      c5 = (c4 >> 16) + a2 * b3 + a3 * b2
+      r5 = c5 & 0xFFFF
+      c6 = (c5 >> 16) + a3 * b3
+      r6 = c6 & 0xFFFF
+      r7 = (c6 >> 16) & 0xFFFF
+
+      lo0 = r0 ^ r4
+      lo1 = r1 ^ r5
+      lo2 = r2 ^ r6
+      lo3 = r3 ^ r7
+      out = lo0 | (lo1 << 16) | (lo2 << 32)
+      if lo3 >= 0x8000
+        out = (out | ((lo3 - 0x8000) << 48)) + (-9223372036854775807 - 1)
+      else
+        out = out | (lo3 << 48)
+      end
+      out
+    end
+
+    def stage0_wyhash_read_u32(text, offset)
+      (text.getbyte(offset) || 0) |
+        ((text.getbyte(offset + 1) || 0) << 8) |
+        ((text.getbyte(offset + 2) || 0) << 16) |
+        ((text.getbyte(offset + 3) || 0) << 24)
+    end
+
+    def stage0_wyhash_read_u64(text, offset)
+      lo = stage0_wyhash_read_u32(text, offset)
+      hi = stage0_wyhash_read_u32(text, offset + 4)
+      if hi >= 0x80000000
+        (lo | ((hi - 0x80000000) << 32)) + (-9223372036854775807 - 1)
+      else
+        lo | (hi << 32)
+      end
+    end
+
+    def stage0_wyhash64_string(text)
+      len = text.bytesize
+      s0 = -6884282663029611473
+      s1 = -1800455987208640293
+      s2 = -8161530843051276573
+      s3 = 6384245875588680899
+      seed = 1311768467294899695
+      a = 0
+      b = 0
+      if len <= 16
+        if len >= 4
+          head_offset = (len >> 3) << 2
+          tail_offset = len - 4
+          tail_head_offset = len - 4 - head_offset
+          ah = stage0_wyhash_read_u32(text, 0)
+          al = stage0_wyhash_read_u32(text, head_offset)
+          if ah >= 0x80000000
+            a = (al | ((ah - 0x80000000) << 32)) + (-9223372036854775807 - 1)
+          else
+            a = al | (ah << 32)
+          end
+          bh = stage0_wyhash_read_u32(text, tail_offset)
+          bl = stage0_wyhash_read_u32(text, tail_head_offset)
+          if bh >= 0x80000000
+            b = (bl | ((bh - 0x80000000) << 32)) + (-9223372036854775807 - 1)
+          else
+            b = bl | (bh << 32)
+          end
+        elsif len > 0
+          first = text.getbyte(0) || 0
+          middle = text.getbyte(len >> 1) || 0
+          last = text.getbyte(len - 1) || 0
+          a = (first << 16) | (middle << 8) | last
+        end
+      else
+        i = len
+        offset = 0
+        if i > 48
+          s0v = seed
+          s1v = seed
+          s2v = seed
+          while i > 48
+            d0 = stage0_wyhash_read_u64(text, offset)
+            d1 = stage0_wyhash_read_u64(text, offset + 8)
+            d2 = stage0_wyhash_read_u64(text, offset + 16)
+            d3 = stage0_wyhash_read_u64(text, offset + 24)
+            d4 = stage0_wyhash_read_u64(text, offset + 32)
+            d5 = stage0_wyhash_read_u64(text, offset + 40)
+            s0v = stage0_wyhash_mix_u64(d0 ^ s1, d1 ^ s0v)
+            s1v = stage0_wyhash_mix_u64(d2 ^ s2, d3 ^ s1v)
+            s2v = stage0_wyhash_mix_u64(d4 ^ s3, d5 ^ s2v)
+            offset += 48
+            i -= 48
+          end
+          seed = s0v ^ s1v ^ s2v
+        end
+        while i > 16
+          d0 = stage0_wyhash_read_u64(text, offset)
+          d1 = stage0_wyhash_read_u64(text, offset + 8)
+          seed = stage0_wyhash_mix_u64(d0 ^ s1, d1 ^ seed)
+          offset += 16
+          i -= 16
+        end
+        a = stage0_wyhash_read_u64(text, offset + i - 16)
+        b = stage0_wyhash_read_u64(text, offset + i - 8)
+      end
+      stage0_wyhash_mix_u64(s1 ^ len, stage0_wyhash_mix_u64(a ^ s1, b ^ seed))
+    end
+
+    def stage0_u64_hex(u)
+      hex_chars = "0123456789abcdef"
+      out = ""
+      shift = 60
+      while shift >= 0
+        idx = (u >> shift) & 15
+        out = out + (hex_chars.byteslice(idx, 1) || "")
+        shift -= 4
+      end
+      out
+    end
+
+    def stage0_shell_join(arr)
+      cmd_s = ""
+      if arr.is_a?(List) || arr.is_a?(Array)
+        ai = 0
+        while ai < arr.length
+          arg_s = arr[ai].to_s
+          cmd_s = cmd_s + " " if ai > 0
+          cmd_s = cmd_s + "'" + arg_s.gsub("'", "'\\\\''") + "'"
+          ai += 1
+        end
+      end
+      cmd_s
+    end
   RUBY
   body = replace_method(body, "visit_call", <<~RUBY)
     def visit_call(node)
+      return nil unless node.is_a?(Call)
       result = nil
-      # Hoist `node.name` and `node.args` once each — every `if
-      # node.name == "X"` arm otherwise re-emits the ~20-line cls_id
-      # type-switch to extract iv_name. The original visit_call
-      # compiled to 2,075 lines / 703 iv_name reads; one cached pair
-      # of reads collapses the bloat.
-      name = stage0_call_name(node)
-      if @stage0_call_eval_trace_enabled == 1
-        File.write("/tmp/tungsten-stage0-call-eval-trace", name)
-      end
-      # Sym dispatch: convert name to sp_sym once and cache on the Call
-      # node. Subsequent visits skip sp_sym_intern entirely — without
-      # caching, the per-visit intern dominates the profile (the prior
-      # uncached step-C bench landed strcmp at 583 samples).
+      name = node.name
       name_sym = node.cached_name_sym
       if name_sym == :__spinel_uncached_name__
         name_sym = stage0_str_to_sym(name)
@@ -4699,57 +5049,94 @@ def stage0_real_interpreter_compat(body)
       obj = node.obj
       if !obj.nil?
         if name_sym == :new
-          if obj.doc == 9
-            class_name = obj.name.to_s
-            if class_name == "Environment" || class_name == "Interpreter" || class_name == "Loader" || class_name == "Parser" || class_name == "REPL" || class_name == "RegexLexer"
-              w_class = @classes[class_name]
-              if w_class.nil?
-                runtime_error("stage0 unknown class: " + class_name)
-              end
-              return instantiate_from_nodes(w_class, args)
+          if obj.is_a?(Var)
+            class_name = obj.name
+            if class_name == "StringBuffer"
+              return StringBuffer.new
             end
-            if class_name == "Lexer"
-              w_class = @classes["Lexer"]
-              if w_class.nil?
-                w_class = @classes["CodepointLexer"]
-              end
-              if w_class.nil?
-                runtime_error("stage0 unknown class: Lexer")
-              end
+            w_class = @classes[class_name]
+            if w_class.nil? && class_name == "Lexer"
+              w_class = @classes["CodepointLexer"]
+            end
+            if !w_class.nil?
               return instantiate_from_nodes(w_class, args)
             end
           end
         end
         recv = evaluate(obj)
         if name_sym == :new
-          return instantiate_from_nodes(recv, args)
+          if recv.is_a?(WClass)
+            return instantiate_from_nodes(recv, args)
+          end
         end
         name_s = name
-        owner = recv
         if recv.is_a?(WObject)
-          owner = recv.w_class
+          w_class = recv.w_class
+          if !w_class.nil?
+            method = nil
+            if node.cached_dispatch_owner.equal?(w_class) && node.cached_dispatch_version == @method_cache_epoch
+              method = node.cached_w_method
+            else
+              method = w_class.lookup_method(name_s)
+              node.cached_dispatch_owner = w_class
+              node.cached_dispatch_version = @method_cache_epoch
+              node.cached_w_method = method
+            end
+            return call_w_method_from_nodes(recv, method, args, node.block) if !method.nil?
+          end
+        elsif recv.is_a?(WClass)
+          method = recv.lookup_class_method(name_s)
+          method = recv.lookup_method(name_s) if method.nil?
+          return call_w_method_from_nodes(recv, method, args, node.block) if !method.nil?
+          if recv.has_constant?(name_s)
+            return recv.get_constant(name_s)
+          end
+        elsif recv.is_a?(PackedNode)
+          w_class = @classes["Tungsten:AST:Node"] || @classes["Node"]
+          if !w_class.nil?
+            method = w_class.lookup_method(name_s)
+            return call_w_method_from_nodes(recv, method, args, node.block) if method
+            if args.length == 0
+              mm = w_class.lookup_method("method_missing")
+              if mm
+                mm_args = evaluate_args(nil)
+                mm_args.push(name_sym)
+                return call_w_method(recv, mm, mm_args, node.block)
+              end
+            elsif args.length == 1 && name_s.end_with?("=")
+              mms = w_class.lookup_method("method_missing_set")
+              if mms
+                base_sym = name_s.slice(0, name_s.length - 1).to_sym
+                mms_args = evaluate_args(nil)
+                mms_args.push(base_sym)
+                mms_args.push(evaluate(args[0]))
+                return call_w_method(recv, mms, mms_args, node.block)
+              end
+            end
+          end
+        elsif recv.is_a?(Integer) && (recv & -70368744177664) == -1125899906842624
+          return (recv >> 38) & 0xFF if name_sym == :type
+          return (recv >> 2) & 0xFFFFFF if name_sym == :offset
+          return (recv >> 26) & 0xFFF if name_sym == :length
+          return (recv & 1) != 0 if name_sym == :line_start?
+          if name_sym == :value
+            src = evaluate(args[0]).to_s
+            return src.slice((recv >> 2) & 0xFFFFFF, (recv >> 26) & 0xFFF) || ""
+          end
+          if name_sym == :equal?
+            src = evaluate(args[0]).to_s
+            lit = evaluate(args[1]).to_s
+            tlen = (recv >> 26) & 0xFFF
+            return false if tlen != lit.length
+            return (src.slice((recv >> 2) & 0xFFFFFF, tlen) || "") == lit
+          end
+          w_class = @classes["Token"]
+          if !w_class.nil?
+            method = w_class.lookup_method(name_s)
+            return call_w_method_from_nodes(recv, method, args, node.block) if method
+          end
         end
-        # Spinel-stage0 hack: bypass the cached_dispatch_owner /
-        # cached_w_method cache. Spinel emits .equal? on poly
-        # objects as a no-op temp that always evaluates to TRUE in
-        # the surrounding `if (..., TRUE) { ... }` shape — so the
-        # cache hit branch fires on the FIRST call (when both
-        # cached fields are nil), reads nil for method, falls
-        # through to stage0_primitive_call, and every user-method
-        # call returns nil. Skipping the cache walks lookup_method
-        # on every dispatch (slow but correct).
-        method = owner.lookup_method(name_s)
-        return call_w_method_from_nodes(recv, method, args, node.block) if method
-        w_class = recv.w_class
-        if !w_class.nil?
-          method = w_class.lookup_method(name_s)
-          return call_w_method_from_nodes(recv, method, args, node.block) if method
-        end
-        # Inline the dominant primitive dispatches. `[]`, `length` /
-        # `size`, and `empty?` sit on the parser/lowering hot path; the
-        # generic primitive fallback also stringifies some non-List
-        # values when sizing them, which is both slow and wrong.
-        if name_sym == :"[]"
+        if name_sym == :"[]" && args.length == 1
           return stage0_aref(recv, evaluate(args[0]))
         end
         if name_sym == :length || name_sym == :size
@@ -4758,16 +5145,74 @@ def stage0_real_interpreter_compat(body)
         if name_sym == :empty?
           return stage0_value_length(recv) == 0
         end
-        return stage0_primitive_call(recv, name_sym, args)
-        runtime_error("stage0 unsupported receiver call: " + name, node: node)
+        return stage0_primitive_call(recv, name_sym, args, node.block)
       end
-#{stage0_ast_builtin_dispatch}
+
+      if name_sym == :ccall || name_sym == :ccall_nobox || name_sym == :ccall_rawargs
+        return stage0_dispatch_ccall(args)
+      end
+      if name_sym == :slab_alloc_init
+        return stage0_slab_alloc_init(args)
+      end
+      if name_sym == :StringBuffer
+        return StringBuffer.new
+      end
+      if name_sym == :wyhash64_string || name_sym == :digest_string64
+        return stage0_wyhash64_string(evaluate(args[0]).to_s)
+      end
+      if name_sym == :wyhash64_hex_string || name_sym == :digest_sha256
+        return stage0_u64_hex(stage0_wyhash64_string(evaluate(args[0]).to_s))
+      end
+      if name_sym == :wyhash_mix_u64
+        return stage0_wyhash_mix_u64(evaluate(args[0]).to_i, evaluate(args[1]).to_i)
+      end
+      if name_sym == :u64_hex
+        return stage0_u64_hex(evaluate(args[0]).to_i)
+      end
+      if name_sym == :digest_file64
+        p = evaluate(args[0]).to_s
+        return nil unless File.exist?(p)
+        return stage0_wyhash64_string(File.read(p))
+      end
+      if name_sym == :wymix
+        res = stage0_wyhash_mix_u64(evaluate(args[0]).to_i, evaluate(args[1]).to_i)
+        masked = res & 0x0000FFFFFFFFFFFF
+        return masked >= 0x800000000000 ? masked - 0x1000000000000 : masked
+      end
+      if name_sym == :wvalue_bits || name_sym == :wvalue_from_bits
+        return args.length > 0 ? evaluate(args[0]) : nil
+      end
+
+      self_obj = nil
+      if @self_stack.length > 0
+        self_obj = @self_stack[@self_stack.length - 1]
+      end
+      if !self_obj.nil? && self_obj.is_a?(WObject)
+        w_class = self_obj.w_class
+        if !w_class.nil?
+          method = w_class.lookup_method(name)
+          return call_w_method_from_nodes(self_obj, method, args, node.block) if method
+        end
+      elsif !self_obj.nil? && self_obj.is_a?(WClass)
+        method = self_obj.lookup_class_method(name)
+        method = self_obj.lookup_method(name) if method.nil?
+        return call_w_method_from_nodes(self_obj, method, args, node.block) if method
+      elsif !self_obj.nil? && self_obj.is_a?(PackedNode)
+        w_class = @classes["Tungsten:AST:Node"] || @classes["Node"]
+        if !w_class.nil?
+          method = w_class.lookup_method(name)
+          return call_w_method_from_nodes(self_obj, method, args, node.block) if method
+        end
+      end
+
+      if name_sym == :ro || name_sym == :rw
+        if @current_class != nil
+          stage0_define_accessors(@current_class, args, name_sym == :rw)
+        end
+        return nil
+      end
+
       if name_sym == :argv
-        # Read sp_argv (mapped from ARGV) directly. The previous design
-        # cached args in $stage0_argv built via sp_str_concat3, but that
-        # string lives in sp_str_heap and the global isn't a GC root, so
-        # a sweep during program execution would reclaim it. ARGV[0] is
-        # the .w file passed to stage0; user args start at ARGV[1].
         argv_list = List.new
         i = 1
         while i < ARGV.length
@@ -4780,32 +5225,159 @@ def stage0_real_interpreter_compat(body)
         i = 0
         while i < args.length
           result = evaluate(args[i])
-          puts result
+          puts w_to_s(result)
           i += 1
         end
         return result
       end
-      if name_sym == :exit
-        File.write("/tmp/stage0-trace-EXIT-B", "site=B_builtin_dispatch")
-        @exiting = true
-        return result
+      if name_sym == :puts || name_sym == :log
+        i = 0
+        while i < args.length
+          v = evaluate(args[i])
+          puts(v.nil? ? "nil" : w_to_s(v))
+          i += 1
+        end
+        return nil
       end
-      if name_sym == :clock
+      if name_sym == :print
+        i = 0
+        while i < args.length
+          v = evaluate(args[i])
+          print(v.nil? ? "nil" : w_to_s(v))
+          i += 1
+        end
+        return nil
+      end
+      if name_sym == :flush || name_sym == :alias_method
+        return nil
+      end
+      if name_sym == :runtime_identity
+        return "ruby spinel"
+      end
+      if name_sym == :block? || name_sym == :block_given?
+        return @current_block != nil
+      end
+      if name_sym == :cache_read
+        return nil
+      end
+      if name_sym == :cache_write
+        return false
+      end
+      if name_sym == :exit
+        code = 0
+        if args.length > 0
+          code = evaluate(args[0]).to_i
+        end
+        exit(code)
+      end
+      if name_sym == :clock || name_sym == :clock_ms
         return 0
       end
-      if name_sym == :write_file
+      if name_sym == :write_file || name_sym == :write_file_bytes
         path = evaluate(args[0])
         data = evaluate(args[1])
         File.write(path.to_s, data.to_s)
-        return nil
+        return true
       end
-      if name_sym == :read_file
+      if name_sym == :read_file || name_sym == :read_file_bytes
         path = evaluate(args[0])
         return File.read(path.to_s)
       end
-      if name_sym == :file?
+      if name_sym == :file? || name_sym == :file_exists? || name_sym == :file_file?
         path = evaluate(args[0])
         return File.exist?(path.to_s)
+      end
+      if name_sym == :file_directory?
+        path = evaluate(args[0]).to_s
+        return Dir.exist?(path)
+      end
+      if name_sym == :file_symlink?
+        return false
+      end
+      if name_sym == :file_size
+        path = evaluate(args[0]).to_s
+        return File.exist?(path) ? File.read(path).bytesize : nil
+      end
+      if name_sym == :file_mtime_ns
+        path = evaluate(args[0]).to_s
+        return File.exist?(path) ? 1 : nil
+      end
+      if name_sym == :file_stat_data
+        path = evaluate(args[0]).to_s
+        return nil unless File.exist?(path)
+        sz = File.read(path).bytesize
+        return List.new([0, 0, 0o100644, 1, 0, 0, 0, sz, 4096, 1, 1, 1, 1, 1, "file"])
+      end
+      if name_sym == :file_unlink || name_sym == :file_unlink_strict || name_sym == :file_rm
+        path = evaluate(args[0]).to_s
+        if File.exist?(path)
+          File.delete(path)
+        end
+        return true
+      end
+      if name_sym == :file_mkdir
+        path = evaluate(args[0]).to_s
+        system("mkdir -p '" + path.gsub("'", "'\\''") + "'")
+        return true
+      end
+      if name_sym == :file_rename || name_sym == :file_mv
+        src = evaluate(args[0]).to_s
+        dst = evaluate(args[1]).to_s
+        return system("mv -f '" + src.gsub("'", "'\\''") + "' '" + dst.gsub("'", "'\\''") + "'")
+      end
+      if name_sym == :file_pwd || name_sym == :__project_root
+        return Dir.pwd
+      end
+      if name_sym == :file_realpath || name_sym == :file_expand_path
+        p = evaluate(args[0]).to_s
+        if args.length > 1
+          base = evaluate(args[1])
+          if base != nil && !p.start_with?("/")
+            p = base.to_s + "/" + p
+          end
+        elsif !p.start_with?("/")
+          p = Dir.pwd + "/" + p
+        end
+        return p
+      end
+      if name_sym == :file_dirname
+        p = evaluate(args[0]).to_s
+        idx = p.rindex("/")
+        return "." if idx == nil
+        return "/" if idx == 0
+        return p.byteslice(0, idx) || "."
+      end
+      if name_sym == :file_basename
+        p = evaluate(args[0]).to_s
+        idx = p.rindex("/")
+        return p if idx == nil
+        return p.byteslice(idx + 1, p.bytesize - idx - 1) || ""
+      end
+      if name_sym == :file_extname
+        b = evaluate(args[0]).to_s
+        slash = b.rindex("/")
+        if slash != nil
+          b = b.byteslice(slash + 1, b.bytesize - slash - 1) || ""
+        end
+        dot = b.rindex(".")
+        return "" if dot == nil || dot == 0
+        return b.byteslice(dot, b.bytesize - dot) || ""
+      end
+      if name_sym == :file_join
+        out = ""
+        i = 0
+        while i < args.length
+          seg = evaluate(args[i]).to_s
+          if i == 0
+            out = seg
+          elsif out.end_with?("/")
+            out = out + (seg.start_with?("/") ? (seg.byteslice(1, seg.bytesize - 1) || "") : seg)
+          else
+            out = out + (seg.start_with?("/") ? seg : "/" + seg)
+          end
+          i += 1
+        end
+        return out
       end
       if name_sym == :env
         env_name = evaluate(args[0])
@@ -4813,328 +5385,39 @@ def stage0_real_interpreter_compat(body)
       end
       if name_sym == :system
         command = evaluate(args[0])
-        system(command.to_s)
-        return nil
+        return system(command.to_s)
+      end
+      if name_sym == :system_argv
+        arr = evaluate(args[0])
+        return system(stage0_shell_join(arr))
       end
       if name_sym == :capture
         command = evaluate(args[0])
-        return IO.popen(command.to_s).read
+        return `\#{command.to_s}`
+      end
+      if name_sym == :capture_argv
+        arr = evaluate(args[0])
+        return `\#{stage0_shell_join(arr)}`
+      end
+      if name_sym == :popen
+        command = evaluate(args[0]).to_s
+        out = `\#{command}`
+        return List.new([out, $?.exitstatus == 0])
+      end
+      if name_sym == :popen_argv
+        arr = evaluate(args[0])
+        out = `\#{stage0_shell_join(arr)}`
+        return List.new([out, $?.exitstatus == 0])
       end
       if name_sym == :type
         return stage0_type_name(evaluate(args[0]))
       end
-      if name_sym == :stage0_tokenize_source
-        source = evaluate(args[0])
-        file = evaluate(args[1])
-        return stage0_tokenize_source_for_compiler(source, file)
-      end
-      if name_sym == :stage0_set_lexer_input
-        @stage0_lexer_source = evaluate(args[0])
-        @stage0_lexer_file = evaluate(args[1])
-        return nil
-      end
-      if name_sym == :stage0_tokenize_lexer_input
-        return stage0_tokenize_source_for_compiler(@stage0_lexer_source, @stage0_lexer_file)
-      end
-      if name_sym == :ast_node_key
-        return evaluate(args[0])
-      end
-      if name_sym == :ast_get
-        ast_node = evaluate(args[0])
-        ast_key = evaluate(args[1])
-        if ast_node.is_a?(Hash)
-          ast_value = ast_node[ast_key]
-          return ast_value if ast_value != nil
-          ast_value = ast_node[ast_key.to_s]
-          return ast_value if ast_value != nil
-          ast_value = ast_node[ast_key.to_sym]
-          return ast_value if ast_value != nil
-        end
-        return nil
-      end
-      if name_sym == :ast_set
-        ast_node = evaluate(args[0])
-        ast_key = evaluate(args[1])
-        ast_value = evaluate(args[2])
-        if ast_node.is_a?(Hash)
-          ast_node[ast_key] = ast_value
-          ast_node[ast_key.to_s] = ast_value
-          return ast_value
-        end
-        return ast_value
-      end
-      if name_sym == :ast_kind
-        ast_node = evaluate(args[0])
-        if ast_node.is_a?(Hash)
-          ast_value = ast_node[:node]
-          return ast_value if ast_value != nil
-          return ast_node["node"]
-        end
-        return nil
-      end
-      if name_sym == :program_body
-        ast_node = evaluate(args[0])
-        if ast_node.is_a?(Hash)
-          return ast_node[:expressions]
-        end
-        return nil
-      end
-      if name_sym == :block_body
-        ast_node = evaluate(args[0])
-        if ast_node.is_a?(Hash)
-          return ast_node[:body]
-        end
-        return nil
-      end
-      if name_sym == :is_ast_node?
-        ast_node = evaluate(args[0])
-        return ast_node.is_a?(Hash) && ast_node[:node] != nil
-      end
-      if name_sym == :ast_children || name_sym == :ast_array_fields || name_sym == :ast_children_program || name_sym == :ast_children_block
-        ast_node = evaluate(args[0])
-        out = []
-        if ast_node.is_a?(Hash)
-          ast_node.each_value do |value|
-            if value.is_a?(Hash) && value[:node] != nil
-              out.push(value)
-            elsif value.is_a?(Array) || value.is_a?(List)
-              value.each do |element|
-                out.push(element) if element.is_a?(Hash) && element[:node] != nil
-              end
-            end
-          end
-        end
-        return out
-      end
-      if name_sym == :ast_deep_clone
-        return evaluate(args[0])
-      end
-      if name_sym == :keys
-        return []
-      end
-      if name_sym == :size || name_sym == :length
-        return 0
-      end
-      if name_sym == :empty?
-        return true
-      end
-      if name_sym == :StringBuffer
-        return ""
-      end
-      if name_sym == :stage0_str_append
-        buf = evaluate(args[0])
-        value = evaluate(args[1])
-        return buf.to_s + value.to_s
-      end
-      if name_sym == :stage0_load_program_ast
-        path = evaluate(args[0])
-        return stage0_load_program_ast_direct(path.to_s)
-      end
-      if name_sym == :stage0_hash_set
-        hash = evaluate(args[0])
-        key = evaluate(args[1])
-        value = evaluate(args[2])
-        hash[key] = value
-        return value
-      end
-      if name_sym == :stage0_class_has_method
-        class_name = evaluate(args[0]).to_s
-        method_name = evaluate(args[1]).to_s
-        w_class = @classes[class_name]
-        return false if w_class.nil?
-        return !w_class.lookup_method(method_name).nil?
-      end
-      if name_sym == :stage0_class_method_body_summary
-        class_name = evaluate(args[0]).to_s
-        method_name = evaluate(args[1]).to_s
-        w_class = @classes[class_name]
-        return "" if w_class.nil?
-        method = w_class.lookup_method(method_name)
-        return "" if method.nil?
-        out = "length=" + method.body.length.to_s + "\n"
-        i = 0
-        while i < method.body.length && i < 80
-          expr = method.body[i]
-          out = out + i.to_s + ":doc=" + expr.doc.to_s
-          if expr.doc == 10
-            out = out + ":then=" + expr.then_block.length.to_s + ":else=" + expr.else_block.length.to_s
-            j = 0
-            while j < expr.then_block.length && j < 8
-              child = expr.then_block[j]
-              out = out + ":t" + j.to_s + "=" + child.doc.to_s
-              if child.doc == 13
-                out = out + "/" + child.name.to_s
-              end
-              if child.doc == 8
-                out = out + "/" + child.name.to_s
-              end
-              j += 1
-            end
-          end
-          if expr.doc == 11
-            out = out + ":body=" + expr.body.length.to_s
-            j = 0
-            while j < expr.body.length && j < 12
-              child = expr.body[j]
-              out = out + ":b" + j.to_s + "=" + child.doc.to_s
-              if child.doc == 10
-                out = out + "/if"
-                out = out + "[then=" + child.then_block.length.to_s
-                k = 0
-                while k < child.then_block.length && k < 4
-                  grandchild = child.then_block[k]
-                  out = out + ":t" + k.to_s + "=" + grandchild.doc.to_s
-                  if grandchild.doc == 13
-                    out = out + "/" + grandchild.name.to_s
-                  end
-                  if grandchild.doc == 8
-                    out = out + "/" + grandchild.name.to_s
-                  end
-                  k += 1
-                end
-                out = out + "]"
-              end
-              if child.doc == 8
-                out = out + "/" + child.name.to_s
-              end
-              if child.doc == 13
-                out = out + "/" + child.name.to_s
-              end
-              j += 1
-            end
-          end
-          if expr.doc == 13
-            out = out + ":call=" + expr.name.to_s
-          end
-          if expr.doc == 8
-            out = out + ":assign=" + expr.name.to_s
-          end
-          out = out + "\n"
-          i += 1
-        end
-        return out
-      end
-      if name_sym == :stage0_root_has
-        root_name = evaluate(args[0]).to_s
-        return @top_env.values_table.key?(root_name)
-      end
-      if name_sym == :stage0_reset_method_trace
-        @stage0_method_trace_count = 0
-        File.write("/tmp/tungsten-stage0-method-trace.txt", "")
-        return nil
-      end
-      if name_sym == :stage0_wparser_trace
-        if @stage0_wparser_trace_enabled == 1
-          if @stage0_wparser_trace_count == nil
-            @stage0_wparser_trace_count = 0
-            File.write("/tmp/tungsten-stage0-wparser-trace.txt", "")
-          end
-          if @stage0_wparser_trace_count < 500
-            trace_label_s = evaluate(args[0]).to_s
-            trace_pos_s = evaluate(args[1]).to_s
-            trace_type_s = evaluate(args[2]).to_s
-            trace_value_s = evaluate(args[3]).to_s
-            trace_text = ""
-            if File.exist?("/tmp/tungsten-stage0-wparser-trace.txt")
-              trace_text = File.read("/tmp/tungsten-stage0-wparser-trace.txt")
-            end
-            File.write("/tmp/tungsten-stage0-wparser-trace.txt",
-                       trace_text + trace_label_s + " pos=" + trace_pos_s + " type=" + trace_type_s + " value=" + trace_value_s + "\n")
-            @stage0_wparser_trace_count += 1
-          end
-        end
-        return nil
-      end
 
-      # ccall / ccall_nobox dispatch — compiler/lib/ast.w builds
-      # slab-AST nodes via `ccall("w_node_alloc", ...)` etc; stage 0
-      # has no compiler/lowering pass to turn those into direct
-      # extern calls, so the interpreter has to dispatch by C
-      # function name to the WRuntime FFI module declared in
-      # preamble.rb. Both forms behave identically at the runtime
-      # level (only the lowering distinguishes them — ccall_nobox
-      # tells lower_call to keep machine-int args raw).
-      if name_sym == :ccall || name_sym == :ccall_nobox
-        # Unbox args via .to_i before passing to FFI. Spinel's
-        # compile_ffi_func_call emits `((long)(call_arg))` for :long
-        # specs, which is a plain C cast — works on mrb_int but not
-        # on sp_RbVal. Hoisting through .to_i (which unboxes poly to
-        # int) keeps the FFI shim happy.
-        fn_name = evaluate(args[0]).to_s
-        # w_node_kind_sym is special: the runtime expects the table
-        # arg as a WValue-tagged Tungsten Array, but stage 0
-        # represents kind_sym_table_data as a plain spinel sp_List
-        # — AND the top-level `kind_sym_table_data = [...]` assign
-        # in compiler/lib/ast_schema.w never runs because the
-        # @stage0_loading_depth > 0 visit_list filter strips
-        # non-(def|use|class|module|trait) statements from `use`d
-        # files. We can't loosen the filter (it triggered heavy
-        # evaluation loops). Mirror the table inline here from
-        # ast_schema.w:305 — keep in sync if KIND_ID_TABLE changes
-        # (schema_hash check upstream catches drift). 135 entries
-        # (indices 0..134).
-        if fn_name == "w_node_kind_sym"
-          node_val = evaluate(args[1]).to_i
-          kind_id = WRuntime.w_node_kind_extern(node_val)
-          return nil if kind_id < 0
-          return nil if kind_id > 134
-          return stage0_kind_sym_table[kind_id]
-        end
-        a1 = args.length > 1 ? evaluate(args[1]).to_i : 0
-        a2 = args.length > 2 ? evaluate(args[2]).to_i : 0
-        a3 = args.length > 3 ? evaluate(args[3]).to_i : 0
-        if fn_name == "w_node_singleton"
-          return WRuntime.w_node_singleton(a1)
-        end
-        if fn_name == "w_node_inline_payload"
-          return WRuntime.w_node_inline_payload(a1, a2)
-        end
-        if fn_name == "w_node_offset_extern"
-          return WRuntime.w_node_offset_extern(a1)
-        end
-        if fn_name == "w_ast_bool_cached"
-          return WRuntime.w_ast_bool_cached(a1)
-        end
-        if fn_name == "w_node_kind_extern"
-          return WRuntime.w_node_kind_extern(a1)
-        end
-        if fn_name == "w_is_ast_node_full"
-          return WRuntime.w_is_ast_node_full(a1, a2)
-        end
-        if fn_name == "w_node_alloc"
-          return WRuntime.w_node_alloc(a1, a2)
-        end
-        if fn_name == "w_node_field_load"
-          return WRuntime.w_node_field_load(a1, a2)
-        end
-        if fn_name == "w_node_field_store"
-          WRuntime.w_node_field_store(a1, a2, a3)
-          return nil
-        end
-        runtime_error("stage0 unknown ccall target: " + fn_name, node: node)
-      end
-
-      self_obj = nil
-      if @self_stack.length > 0
-        self_obj = @self_stack[@self_stack.length - 1]
-      end
-      # Spinel-stage0 hack: skip the dispatch cache for self-method
-      # lookup — see the receiver-method dispatch comment above for
-      # why .equal? on poly always returns TRUE here.
-      w_class = self_obj.w_class
+      w_class = @classes[name]
       if !w_class.nil?
-        method = w_class.lookup_method(name)
-        return call_w_method_from_nodes(self_obj, method, args, node.block) if method
+        return instantiate_from_nodes(w_class, args)
       end
 
-      # Two-tier lookup: most user-fn references resolve to a Def in
-      # the root env, so we skip the env-chain walk by probing the
-      # current frame first and then jumping straight to @top_env.
-      # Stage0 has no closures, so vars only live in the current frame
-      # (params/locals) or the root (top-level Defs); intermediate
-      # frames don't contain names not already shadowed by the current
-      # frame. The chain-walking sp_Environment_get was ~300 samples
-      # on the prior bootstrap profile.
       fn = nil
       if node.cached_dispatch_owner.nil?
         fn = node.cached_w_method
@@ -5145,24 +5428,30 @@ def stage0_real_interpreter_compat(body)
         if fn.nil?
           if @env.object_id != @top_env.object_id
             fn = stage0_str_poly_hash_get(@top_env.values_table, name)
-            if !fn.nil?
+            if !fn.nil? && fn.respond_to?(:doc) && fn.doc == 12
               node.cached_dispatch_owner = nil
               node.cached_w_method = fn
             end
           end
-        elsif @env.object_id == @top_env.object_id
+        elsif @env.object_id == @top_env.object_id && fn.respond_to?(:doc) && fn.doc == 12
           node.cached_dispatch_owner = nil
           node.cached_w_method = fn
         end
       end
       if fn.nil?
-        if !@stage0_loading_depth.nil? && @stage0_loading_depth > 0
-          return nil
-        end
+        fn = stage0_env_get(@env, name)
+      end
+      if fn.nil?
         runtime_error("stage0 unknown function: " + name, node: node)
       end
-      if fn.doc == 12
-        return stage0_call_def_from_nodes(fn, name, args)
+      if fn.respond_to?(:doc)
+        if fn.doc == 12
+          return stage0_call_def_from_nodes(fn, name, args, node.block)
+        end
+        if fn.doc == 37 || fn.doc == 38 || fn.doc == 54
+          eval_args = evaluate_args(args)
+          return stage0_invoke_block(fn, eval_args)
+        end
       end
 
       result
@@ -5172,6 +5461,11 @@ def stage0_real_interpreter_compat(body)
     def visit_return(node)
       @return_value = evaluate(node.value)
       @returning = true
+      if @in_block_depth > 0
+        @return_target_depth = @current_block_owner_depth
+      else
+        @return_target_depth = @call_depth
+      end
       @return_value
     end
   RUBY
@@ -5222,7 +5516,7 @@ def stage0_real_interpreter_compat(body)
   end
   body = replace_method(body, "cached_symbol_value", <<~RUBY)
     def cached_symbol_value(node)
-      node.value.to_s
+      node.value
     end
   RUBY
   %w[
@@ -5273,6 +5567,31 @@ def stage0_real_interpreter_compat(body)
   RUBY
   body = replace_method(body, "w_to_s", <<~RUBY)
     def w_to_s(value)
+      return "nil" if value == nil
+      return "true" if value == true
+      return "false" if value == false
+      return value.to_s if value.is_a?(StringBuffer)
+      if value.is_a?(List) || value.is_a?(Array)
+        out = "["
+        i = 0
+        while i < value.length
+          out = out + ", " if i > 0
+          elem = value[i]
+          if elem.is_a?(String)
+            out = out + "\"" + elem + "\""
+          else
+            out = out + w_to_s(elem)
+          end
+          i += 1
+        end
+        return out + "]"
+      end
+      if value.is_a?(WObject) && value.w_class != nil
+        to_s_method = value.w_class.lookup_method("to_s")
+        if to_s_method != nil
+          return call_w_method_from_nodes(value, to_s_method, nil).to_s
+        end
+      end
       value.to_s
     end
   RUBY
@@ -5475,6 +5794,285 @@ def stage0_real_interpreter_compat(body)
     end
     RUBY
   end
+  body = replace_method(body, "visit_self", <<~RUBY)
+    def visit_self(node)
+      if @self_stack.length > 0
+        return @self_stack[@self_stack.length - 1]
+      end
+      nil
+    end
+  RUBY
+  body = replace_method(body, "visit_class_var", <<~RUBY)
+    def visit_class_var(node)
+      self_obj = nil
+      if @self_stack.length > 0
+        self_obj = @self_stack[@self_stack.length - 1]
+      end
+      if self_obj.is_a?(WObject) && self_obj.w_class != nil
+        return self_obj.w_class.get_cvar(node.name.to_s)
+      elsif self_obj.is_a?(WClass)
+        return self_obj.get_cvar(node.name.to_s)
+      elsif @current_class != nil
+        return @current_class.get_cvar(node.name.to_s)
+      end
+      nil
+    end
+  RUBY
+  body = replace_method(body, "visit_global_var", <<~RUBY)
+    def visit_global_var(node)
+      if node.name.to_s == "$value"
+        return @self_stack.length > 0 ? @self_stack[@self_stack.length - 1] : nil
+      end
+      @globals[node.name.to_s]
+    end
+  RUBY
+  body = replace_method(body, "visit_write", <<~RUBY)
+    def visit_write(node)
+      i = 0
+      while i < node.args.length
+        print w_to_s(evaluate(node.args[i]))
+        i += 1
+      end
+      nil
+    end
+  RUBY
+  body = replace_method(body, "visit_raise", <<~RUBY)
+    def visit_raise(node)
+      msg = evaluate(node.value)
+      runtime_error(w_to_s(msg), node: node)
+    end
+  RUBY
+  body = replace_method(body, "visit_module_def", <<~RUBY)
+    def visit_module_def(node)
+      mod_name = node.name.to_s
+      if @current_module != nil && @current_module != ""
+        mod_name = @current_module + ":" + mod_name
+      end
+      w_mod = @classes[mod_name]
+      if w_mod == nil
+        w_mod = Runtime::WClass.new(mod_name, nil)
+        @classes[mod_name] = w_mod
+      end
+      old_mod = @current_module
+      old_class = @current_class
+      @current_module = mod_name
+      @current_class = w_mod
+      evaluate(node.body)
+      @current_class = old_class
+      @current_module = old_mod
+      w_mod
+    end
+  RUBY
+  body = replace_method(body, "visit_trait_def", <<~RUBY)
+    def visit_trait_def(node)
+      tname = node.name.to_s
+      trait_obj = @traits[tname]
+      if trait_obj == nil
+        trait_obj = Runtime::WClass.new(tname, nil)
+        @traits[tname] = trait_obj
+      end
+      old_class = @current_class
+      @current_class = trait_obj
+      body = node.body.list
+      i = 0
+      while i < body.length
+        stage0_define_class_body_method(trait_obj, body[i])
+        i += 1
+      end
+      @current_class = old_class
+      trait_obj
+    end
+  RUBY
+  body = replace_method(body, "visit_path", <<~RUBY)
+    def visit_path(node)
+      segs = node.names
+      return nil if segs == nil || segs.length == 0
+      full = ""
+      i = 0
+      while i < segs.length
+        full = full + ":" if i > 0
+        full = full + segs[i].to_s
+        i += 1
+      end
+      cls = @classes[full]
+      return cls if cls != nil
+      if segs.length >= 2
+        prefix = ""
+        pi = 0
+        while pi < segs.length - 1
+          prefix = prefix + ":" if pi > 0
+          prefix = prefix + segs[pi].to_s
+          pi += 1
+        end
+        last_seg = segs[segs.length - 1].to_s
+        owner = @classes[prefix]
+        if owner.is_a?(WClass)
+          if owner.has_constant?(last_seg)
+            return owner.get_constant(last_seg)
+          end
+        end
+        val = stage0_env_get(@env, last_seg)
+        return val if val != nil
+      end
+      stage0_env_get(@env, full)
+    end
+  RUBY
+  body = replace_method(body, "visit_unary_op", <<~RUBY)
+    def visit_unary_op(node)
+      val = evaluate(node.right)
+      op = node.operator
+      if op == :-
+        return -val
+      elsif op == :+
+        return val
+      elsif op == :~
+        return ~val
+      elsif op == :!
+        return !truthy?(val)
+      end
+      val
+    end
+  RUBY
+  body = replace_method(body, "visit_string_interpolation", <<~RUBY)
+    def visit_string_interpolation(node)
+      out = ""
+      parts = node.parts
+      i = 0
+      while i < parts.length
+        part = parts[i]
+        if part.is_a?(String)
+          out = out + part
+        else
+          out = out + w_to_s(evaluate(part))
+        end
+        i += 1
+      end
+      out
+    end
+  RUBY
+  body = replace_method(body, "visit_range_literal", <<~RUBY)
+    def visit_range_literal(node)
+      from_val = evaluate(node.from)
+      if node.to.nil?
+        return WRange.new(from_val, 0, node.exclusive, true)
+      end
+      to_val = evaluate(node.to)
+      WRange.new(from_val, to_val, node.exclusive, false)
+    end
+  RUBY
+  body = replace_method(body, "visit_typed_array", <<~RUBY)
+    def visit_typed_array(node)
+      size = evaluate(node.size_node).to_i
+      res = List.new
+      et = node.element_type.to_s
+      fill = 0
+      if et == "bool"
+        fill = false
+      elsif et == "f32" || et == "f64"
+        fill = 0.0
+      end
+      i = 0
+      while i < size
+        res.push(fill)
+        i += 1
+      end
+      res
+    end
+  RUBY
+  body = replace_method(body, "visit_magic_constant", <<~RUBY)
+    def visit_magic_constant(node)
+      if node.value == :__LINE__
+        return node.location_row || 0
+      elsif node.value == :__FILE__
+        return @current_file || "(eval)"
+      elsif node.value == :__DIR__
+        return @current_file ? File.dirname(@current_file) : Dir.pwd
+      end
+      nil
+    end
+  RUBY
+  body = replace_method(body, "visit_char", <<~RUBY)
+    def visit_char(node)
+      node.value
+    end
+  RUBY
+  body = replace_method(body, "visit_until", <<~RUBY)
+    def visit_until(node)
+      result = nil
+      while !truthy?(evaluate(node.condition))
+        result = evaluate(node.body)
+        break if @returning
+        break if @exiting
+        if @breaking
+          @breaking = false
+          break
+        end
+        if @nexting
+          @nexting = false
+          next
+        end
+      end
+      result
+    end
+  RUBY
+  body = replace_method(body, "visit_with", <<~RUBY)
+    def visit_with(node)
+      bindings = node.bindings
+      return nil if bindings == nil || bindings.length == 0
+      pair = bindings[0]
+      var_node = pair[0]
+      coll = evaluate(pair[1])
+      return nil if coll == nil
+      items = nil
+      if coll.is_a?(WRange)
+        items = coll.to_list.list
+      elsif coll.is_a?(List)
+        items = coll.list
+      elsif coll.is_a?(Array)
+        items = coll
+      elsif coll.is_a?(Hash)
+        items = coll.keys
+      end
+      return nil if items == nil
+      var_name = var_node != nil ? var_node.name.to_s : ""
+      result = nil
+      i = 0
+      while i < items.length
+        elem = items[i]
+        if var_name != ""
+          @env.set(var_name, elem)
+        end
+        @env.set("_", elem)
+        result = evaluate(node.body)
+        break if @returning
+        break if @exiting
+        if @breaking
+          @breaking = false
+          break
+        end
+        if @nexting
+          @nexting = false
+          i += 1
+          next
+        end
+        i += 1
+      end
+      result
+    end
+  RUBY
+  body = replace_method(body, "visit_yield", <<~RUBY)
+    def visit_yield(node)
+      blk = @current_block
+      return nil if blk == nil
+      args = evaluate_args(node.args)
+      stage0_invoke_block(blk, args)
+    end
+  RUBY
+  body = replace_method(body, "visit_fn", <<~RUBY)
+    def visit_fn(node)
+      node
+    end
+  RUBY
   body = replace_method(body, "visit_break", <<~RUBY)
     def visit_break(node)
       @breaking = true
@@ -5514,29 +6112,14 @@ def stage0_real_interpreter_compat(body)
     def visit_case_expr(node)
       return nil unless node.is_a?(CaseExpr)
       whens = node.whens
-      if ENV["TUNGSTEN_STAGE0_CASE_TRACE"] == "1"
-        trace = "case_enter whens=" + whens.length.to_s + " receiver_type=" + stage0_type_name(node.receiver) + "\n"
-        File.write("/tmp/tungsten-stage0-case-trace", trace)
-      end
       if node.receiver
         receiver_val = evaluate(node.receiver)
-        if ENV["TUNGSTEN_STAGE0_CASE_TRACE"] == "1"
-          trace = "receiver=" + receiver_val.to_s + " type=" + stage0_type_name(receiver_val) + " whens=" + whens.length.to_s + "\n"
-          File.write("/tmp/tungsten-stage0-case-trace", trace)
-        end
         wi = 0
         while wi < whens.length
           ci = 0
           while ci < whens[wi][0].length
             cond_val = evaluate(whens[wi][0][ci])
-            if ENV["TUNGSTEN_STAGE0_CASE_TRACE"] == "1"
-              trace = "compare receiver=" + receiver_val.to_s + " cond=" + cond_val.to_s + " wi=" + wi.to_s + " ci=" + ci.to_s + "\n"
-              File.write("/tmp/tungsten-stage0-case-trace", trace)
-            end
-            if cond_val == receiver_val
-              if ENV["TUNGSTEN_STAGE0_CASE_TRACE"] == "1"
-                File.write("/tmp/tungsten-stage0-case-trace", "match wi=" + wi.to_s + " ci=" + ci.to_s + "\n")
-              end
+            if cond_val.is_a?(WRange) ? cond_val.include?(receiver_val) : (cond_val == receiver_val)
               return evaluate(whens[wi][1])
             end
             ci += 1
@@ -5558,7 +6141,7 @@ def stage0_real_interpreter_compat(body)
       end
       else_body = node.else_body
       if else_body != nil
-        if else_body.empty?
+        if else_body.is_a?(List) && else_body.empty?
           return nil
         end
         return evaluate(else_body)
@@ -5579,24 +6162,67 @@ def stage0_real_interpreter_compat(body)
   RUBY
   body = replace_method(body, "visit_assign_op", <<~RUBY)
     def visit_assign_op(node)
-      current = evaluate(node.name)
-      value = evaluate(node.value)
-      op = node.operator.to_s
-      if op == "+" || op == "PLUS"
-        result = current + value
-      elsif op == "-" || op == "MINUS"
-        result = current - value
-      elsif op == "*" || op == "STAR"
-        result = current * value
-      elsif op == "/" || op == "SLASH"
-        result = current / value
-      else
-        result = value
-      end
-
       target = node
       target = node.name
-      if target.doc == 9
+      if target.is_a?(String)
+        current = @env.get(target)
+      else
+        current = evaluate(target)
+      end
+      op = node.operator.to_s
+      if op == "||" || op == "OR_ASSIGN"
+        return current if truthy?(current)
+        result = evaluate(node.value)
+      elsif op == "&&" || op == "AND_ASSIGN"
+        return current if !truthy?(current)
+        result = evaluate(node.value)
+      else
+        value = evaluate(node.value)
+        if op == "+" || op == "PLUS"
+          if current.is_a?(List) && value.is_a?(List)
+            res = List.new
+            li = 0
+            while li < current.length
+              res.push(current[li])
+              li += 1
+            end
+            ri = 0
+            while ri < value.length
+              res.push(value[ri])
+              ri += 1
+            end
+            result = res
+          elsif current.is_a?(String) || value.is_a?(String)
+            result = current.to_s + value.to_s
+          else
+            result = current + value
+          end
+        elsif op == "-" || op == "MINUS"
+          result = current - value
+        elsif op == "*" || op == "STAR"
+          result = current * value
+        elsif op == "/" || op == "SLASH"
+          result = current / value
+        elsif op == "%" || op == "PERCENT"
+          result = current % value
+        elsif op == "|" || op == "PIPE"
+          result = current | value
+        elsif op == "&" || op == "AMPERSAND"
+          result = current & value
+        elsif op == "^" || op == "CARET"
+          result = current ^ value
+        elsif op == "<<" || op == "LSHIFT"
+          result = current << value
+        elsif op == ">>" || op == "RSHIFT"
+          result = current >> value
+        else
+          result = value
+        end
+      end
+
+      if target.is_a?(String)
+        @env.set(target, result)
+      elsif target.doc == 9
         @env.set(target.name.to_s, result)
       elsif target.doc == 27
         self_obj = nil
@@ -5606,17 +6232,22 @@ def stage0_real_interpreter_compat(body)
         if self_obj != nil
           self_obj.set_ivar(target.name.to_s, result)
         end
+      elsif target.doc == 28
+        self_obj = @self_stack.length > 0 ? @self_stack[@self_stack.length - 1] : nil
+        if self_obj.is_a?(WObject) && self_obj.w_class != nil
+          self_obj.w_class.set_cvar(target.name.to_s, result)
+        elsif self_obj.is_a?(WClass)
+          self_obj.set_cvar(target.name.to_s, result)
+        end
+      elsif target.doc == 29
+        @globals[target.name.to_s] = result
       end
       result
     end
   RUBY
   body = replace_method(body, "visit_symbol", <<~RUBY)
     def visit_symbol(node)
-      value = node.value.to_s
-      if value.start_with?(":")
-        return value.slice(1, value.length - 1)
-      end
-      value
+      node.value
     end
   RUBY
   body = body.sub(/^\s*def visit_array_literal\(node\)\n.*?^\s*def visit_hash_literal\(node\)/m, <<~RUBY.rstrip)
@@ -5646,10 +6277,7 @@ def stage0_real_interpreter_compat(body)
   RUBY
   body = body.sub(/^\s*def visit_hash_literal\(node\)\n.*?^\s*def visit_range_literal\(node\)/m, <<~RUBY.rstrip)
     def visit_hash_literal(node)
-      if @stage0_call_trace_enabled == 1
-        File.write("/tmp/tungsten-stage0-hash-visit.txt", "hash")
-      end
-      entries = node.entries.list
+      entries = node.hash_entries.list
       entry_count = entries.length
       if entry_count == 0
         return {}
@@ -5659,7 +6287,7 @@ def stage0_real_interpreter_compat(body)
       if stage0_static_hash_key?(key_node)
         key = stage0_static_hash_key(key_node)
       else
-        key = evaluate(key_node).to_s
+        key = evaluate(key_node)
       end
       value = evaluate(entry_items[1])
       result = {}
@@ -5671,7 +6299,7 @@ def stage0_real_interpreter_compat(body)
         if stage0_static_hash_key?(key_node)
           key = stage0_static_hash_key(key_node)
         else
-          key = evaluate(key_node).to_s
+          key = evaluate(key_node)
         end
         value = evaluate(entry_items[1])
         result[key] = value
@@ -5737,6 +6365,13 @@ def stage0_real_interpreter_compat(body)
       nil
     end
   RUBY
+  body = replace_method(body, "resolve_builtin_constant", <<~RUBY)
+    def resolve_builtin_constant(name)
+      name = name.to_s
+      return argv if name == "ARGV"
+      Environment::UNDEFINED
+    end
+  RUBY
   body
 end
 
@@ -5783,7 +6418,9 @@ def stage0_full_interpreter_compat(body)
   body = body.gsub(/^\s*ENERGY_FUELS = \{\n.*?^\s*\}\.freeze\n/m, "    ENERGY_FUELS = {}\n")
   body = body.gsub(/^\s*ENERGY_OUTPUT_UNITS = \{\n.*?^\s*\}\.freeze\n/m, "    ENERGY_OUTPUT_UNITS = {}\n")
   body = body.gsub(/      @value_nodes = \{\n.*?      \}\.compare_by_identity\n/m, "      @value_nodes = {}\n")
+  body = body.gsub("      init_compiler_intrinsics\n", "")
   body = body.gsub("      Runtime::Builtins.setup(self)\n", "")
+  body = body.gsub("      Runtime::Builtins.setup(self, sandbox: sandbox)\n", "")
   body = body.gsub(/      BUILTIN_TYPES\.each \{ \|name\| @classes\[name\] \|\|= Runtime::WClass\.new\(name, nil\) \}\n/, "")
   body = body.gsub(/^\s*@file_sources\[.*?\] = source.*\n/, "")
   body = body.sub(/      @env\.set\("ℎ".*?      @env\.set\("𝐹".*?\n/m, "")
@@ -5822,7 +6459,7 @@ def stage0_full_interpreter_compat(body)
       @dispatch = {}
       @env_pool = nil
       @env_pool_count = 0
-      @env_pool_enabled = ENV["SP_GC_DISABLE"] == "1" ? 1 : 0
+      @env_pool_enabled = ENV["SP_GC_DISABLE"] == "0" ? 0 : 1
       @stage0_next_layout_shape = 1
       @loaded_files = Set.new
       @stage0_loading_depth = 0
@@ -6204,11 +6841,7 @@ def stage0_full_interpreter_compat(body)
   end
   body = replace_method(body, "visit_symbol", <<~RUBY)
     def visit_symbol(node)
-      value = node.value.to_s
-      if value.start_with?(":")
-        return value.slice(1, value.length - 1)
-      end
-      value
+      node.value
     end
   RUBY
   body = replace_method(body, "resolve_use_path", <<~RUBY)
@@ -6722,7 +7355,7 @@ def stage0_interpreter_raw_compat(body)
       @dispatch = {}
       @env_pool = nil
       @env_pool_count = 0
-      @env_pool_enabled = ENV["SP_GC_DISABLE"] == "1" ? 1 : 0
+      @env_pool_enabled = ENV["SP_GC_DISABLE"] == "0" ? 0 : 1
       @stage0_next_layout_shape = 1
       @loaded_files = Set.new
       @stage0_loading_depth = 0
@@ -7402,13 +8035,20 @@ def stage0_list_source
         attr_accessor :list
 
         def self.from(obj)
-          result = new
-          if obj
-            obj.each do |item|
-              result << item
+          return new if obj.nil?
+          return obj if obj.is_a?(List)
+          if obj.is_a?(Array)
+            res = new
+            i = 0
+            while i < obj.length
+              res.push(obj[i])
+              i += 1
             end
+            return res
           end
-          result
+          res = new
+          res.push(obj)
+          res
         end
 
         def initialize(list = [])
@@ -7417,21 +8057,32 @@ def stage0_list_source
         end
 
         def [](i)
-          @list[i.to_i]
+          idx = i.to_i
+          if idx < 0
+            idx = @list.length + idx
+          end
+          return nil if idx < 0 || idx >= @list.length
+          @list[idx]
         end
 
         def []=(i, value)
-          @list[i.to_i] = value
+          idx = i.to_i
+          if idx < 0
+            idx = @list.length + idx
+          end
+          while @list.length <= idx
+            @list.push(nil)
+          end
+          @list[idx] = value
           value
         end
 
         def set_at(i, value)
-          @list[i.to_i] = value
-          value
+          self[i] = value
         end
 
         def <<(exp)
-          @list << exp
+          @list.push(exp)
           self
         end
 
@@ -7440,7 +8091,30 @@ def stage0_list_source
           self
         end
 
+        def pop
+          @list.pop
+        end
+
+        def clear
+          @list.clear
+          self
+        end
+
+        def delete_at(i)
+          @list.delete_at(i.to_i)
+        end
+
+        def include?(val)
+          i = 0
+          while i < @list.length
+            return true if @list[i] == val
+            i += 1
+          end
+          false
+        end
+
         def each(&block)
+          @list.each(&block) if block
           self
         end
 
@@ -7456,8 +8130,16 @@ def stage0_list_source
           @list.length
         end
 
+        def size
+          @list.length
+        end
+
         def first
           @list.first
+        end
+
+        def to_a
+          @list
         end
       end
     end
@@ -7545,7 +8227,8 @@ def stage0_literal_source(path)
       module Tungsten::AST
         class RangeLiteral < Node
           attr_accessor :from, :to, :exclusive
-          def initialize(from, to, exclusive:)
+          def initialize(from, to, exclusive = false)
+            @doc = 48
             @from = from
             @to = to
             @exclusive = exclusive
@@ -7575,9 +8258,10 @@ def stage0_literal_source(path)
       module Tungsten::AST
         class RegexLiteral < Node
           attr_accessor :value, :pattern, :options
-          def initialize(pattern)
+          def initialize(pattern, options = "")
+            @doc = 31
             @pattern = pattern
-            @options = 0
+            @options = options
             @value = pattern
           end
         end
@@ -7587,10 +8271,66 @@ def stage0_literal_source(path)
     <<~RUBY
       module Tungsten::AST
         class TypedArray < Node
-          attr_accessor :element_type, :size
+          attr_accessor :element_type, :size_node
           def initialize(element_type, size)
+            @doc = 49
             @element_type = element_type
-            @size = size
+            @size_node = size
+          end
+        end
+      end
+    RUBY
+  when "char.rb"
+    <<~RUBY
+      module Tungsten::AST
+        class Char < Node
+          attr_accessor :value
+          def initialize(value)
+            @doc = 50
+            if value.is_a?(String)
+              cps = value.codepoints
+              @value = cps.length > 0 ? cps[0] : 0
+            else
+              @value = value.to_i
+            end
+          end
+        end
+      end
+    RUBY
+  when "magic_constant.rb"
+    <<~RUBY
+      module Tungsten::AST
+        class MagicConstant < Node
+          attr_accessor :value
+          def initialize(value)
+            @doc = 51
+            @value = value.to_sym
+          end
+        end
+      end
+    RUBY
+  when "float.rb"
+    <<~RUBY
+      module Tungsten::AST
+        class FloatLiteral < Node
+          attr_accessor :value
+          def initialize(value)
+            @doc = 31
+            s = value.to_s.delete("_")
+            s = s[1, s.length - 1] if s.start_with?("~")
+            @value = s.to_f
+          end
+        end
+      end
+    RUBY
+  when "decimal.rb"
+    <<~RUBY
+      module Tungsten::AST
+        class Decimal < Node
+          attr_accessor :value
+          def initialize(value)
+            @doc = 31
+            @value = value.to_s.delete("_").to_f
           end
         end
       end
@@ -7770,7 +8510,8 @@ def stage0_ast_compat(body, path)
       def initialize(value)
         @doc = 16
         v = value.to_s
-        @value = v.start_with?(":") ? v[1..] : v
+        v = v[1, v.length - 1] if v.start_with?(":")
+        @value = v.to_sym
       end
     RUBY
   when %r{/ast/array_literal\.rb\z}
@@ -7798,11 +8539,6 @@ def stage0_ast_compat(body, path)
           while i < entries.length
             pair = entries[i]
             if pair.is_a?(List)
-              # Push through a poly-laundered local: inside the is_a?(List)
-              # narrowed branch spinel would emit sp_box_obj(pair, 125) on the
-              # already-boxed sp_RbVal `pair` (sp_box_obj wants a void*). Seeding
-              # to_push from entries (poly) keeps the slot sp_RbVal and unnarrowed
-              # so it's passed straight through to List#push (which takes sp_RbVal).
               to_push = entries
               to_push = pair
               list.push(to_push)
@@ -7816,6 +8552,30 @@ def stage0_ast_compat(body, path)
           end
           @entries = list
         end
+      end
+
+      def hash_entries
+        @entries
+      end
+    RUBY
+  when %r{/ast/arg\.rb\z}
+    replace_method(body, "initialize", <<~RUBY)
+      def initialize(name, default = nil, type = nil)
+        @name = name.to_s
+        @default = default
+        @type = type
+      end
+
+      def default_value
+        @default
+      end
+    RUBY
+  when %r{/ast/keywords/with\.rb\z}
+    replace_method(body, "initialize", <<~RUBY)
+      def initialize(bindings, body = nil)
+        @doc = 57
+        @bindings = bindings
+        @body = List.from(body)
       end
     RUBY
   when %r{/ast/and\.rb\z}
@@ -7859,15 +8619,15 @@ def stage0_ast_compat(body, path)
     replace_method(body, "initialize", <<~RUBY)
       def initialize(path)
         @doc = 23
-        @path = path
+        @path = path.to_s
       end
     RUBY
   when %r{/ast/keywords/class_def\.rb\z}
     replace_method(body, "initialize", <<~RUBY)
-      def initialize(name, body = nil, superclass = "", class_role: nil)
+      def initialize(name, body = nil, superclass = "", class_role = nil)
         @doc = 24
         @name = name
-        @body = body
+        @body = List.from(body)
         @superclass = superclass
         @class_role = class_role
       end
@@ -7892,7 +8652,7 @@ def stage0_ast_compat(body, path)
     replace_method(body, "initialize", <<~RUBY)
       def initialize(name)
         @doc = 27
-        @name = Tungsten::AST.intern_name(name)
+        @name = "" + name.to_s
       end
     RUBY
   when %r{/ast/class_var\.rb\z}
@@ -7923,14 +8683,10 @@ def stage0_ast_compat(body, path)
     replace_method(body, "initialize", <<~RUBY)
       def initialize(body, rescue_var = nil, rescue_body = nil, ensure_body = nil)
         @doc = 34
-        # Stage0's List#each is a no-op stub, so List.from(body) returns
-        # an empty List. The parser already passes a List of statements
-        # for body — assign it directly so visit_begin actually evaluates
-        # the body block.
-        @body = body
+        @body = List.from(body)
         @rescue_var = rescue_var
-        @rescue_body = rescue_body
-        @ensure_body = ensure_body
+        @rescue_body = rescue_body ? List.from(rescue_body) : nil
+        @ensure_body = ensure_body ? List.from(ensure_body) : nil
       end
     RUBY
   when %r{/ast/keywords/raise\.rb\z}
@@ -7948,7 +8704,7 @@ def stage0_ast_compat(body, path)
 
           def initialize(args)
             @doc = 36
-            @args = List.new
+            @args = args
           end
         end
       end
@@ -7959,9 +8715,21 @@ def stage0_ast_compat(body, path)
         class Fn < Def
           def initialize(name, args, body, receiver: nil, block: nil, yields: nil, splat_index: nil, double_splat: nil)
             @doc = 37
-            @name = name.to_s
-            @args = args.to_s
-            @body = List.new
+            @name = name ? name.to_s : nil
+            @args = args || []
+            @body = body
+            @receiver = receiver
+            @block = block
+            @splat_index = splat_index
+            @double_splat = double_splat
+            @stage0_param_names = []
+            if @args
+              i = 0
+              while i < @args.length
+                @stage0_param_names.push(@args[i].name.to_s)
+                i += 1
+              end
+            end
           end
         end
       end
@@ -7974,7 +8742,7 @@ def stage0_ast_compat(body, path)
 
           def initialize(args)
             @doc = 38
-            @args = List.new
+            @args = args
           end
         end
       end
@@ -7987,7 +8755,7 @@ def stage0_ast_compat(body, path)
 
           def initialize(value = nil)
             @doc = 39
-            @value = nil
+            @value = value
           end
         end
       end
@@ -8000,7 +8768,7 @@ def stage0_ast_compat(body, path)
 
           def initialize(value = nil)
             @doc = 40
-            @value = nil
+            @value = value
           end
         end
       end
@@ -8092,7 +8860,18 @@ def stage0_ast_compat(body, path)
   when %r{/ast/path\.rb\z}
     body = replace_method(body, "initialize", <<~RUBY)
       def initialize(names, global = false)
-        @names = [names.to_s]
+        @doc = 52
+        if names.is_a?(Array)
+          @names = [""]
+          @names.clear
+          i = 0
+          while i < names.length
+            @names.push(names[i].to_s)
+            i += 1
+          end
+        else
+          @names = [names.to_s]
+        end
         @global = global
       end
     RUBY
@@ -8110,32 +8889,87 @@ def stage0_ast_compat(body, path)
         end
       end
     RUBY
+  when %r{/ast/type_hint\.rb\z}
+    replace_method(body, "initialize", <<~RUBY)
+      def initialize(value, hint)
+        @doc = 53
+        @value = value
+        @hint = hint
+      end
+    RUBY
+  when %r{/ast/block\.rb\z}
+    replace_method(body, "initialize", <<~RUBY)
+      def initialize(args = [], body = nil)
+        @doc = 54
+        @args = args || []
+        @body = List.from(body)
+      end
+    RUBY
+  when %r{/ast/keywords/on_guard\.rb\z}
+    replace_method(body, "initialize", <<~RUBY)
+      def initialize(predicate, capabilities, body = nil)
+        @doc = 55
+        @predicate = predicate
+        @capabilities = capabilities
+        @body = List.from(body)
+      end
+    RUBY
   when %r{/ast/call\.rb\z}
     body = replace_method(body, "initialize", <<~RUBY)
       def initialize(obj, name, args = [], block = nil, column = 0, parens = false)
         @doc = 13
         @obj = obj
-        @name = name.to_s
+        @name = "" + name.to_s
         @args = args
         @block = block
         @name_column_number = column
         @has_parens = parens
         @cached_name_sym = :__spinel_uncached_name__
+        @cached_dispatch_owner = nil
+        @cached_dispatch_version = 0
         @cached_w_method = nil
       end
     RUBY
     replace_method(body, "can_assign?", <<~RUBY)
       def can_assign?
-        false
+        (@obj.nil? && (@args.nil? || @args.empty?) && @block.nil?) || @name == "[]"
       end
     RUBY
   when %r{/ast/binary_op\.rb\z}
+    body = body.sub("    attr_accessor :left, :operator, :right\n",
+                    "    attr_accessor :left, :operator, :right, :bop_code\n")
     replace_method(body, "initialize", <<~RUBY)
       def initialize(left, operator, right)
         @doc = 7
         @left = left
-        @operator = operator.to_sym
+        op_s = "" + operator.to_s
+        @operator = op_s.to_sym
         @right = right
+        @bop_code =
+          if op_s == "==" then 1
+          elsif op_s == "!=" then 2
+          elsif op_s == "<" then 3
+          elsif op_s == "<=" then 4
+          elsif op_s == ">" then 5
+          elsif op_s == ">=" then 6
+          elsif op_s == "<=>" then 7
+          elsif op_s == "+" then 8
+          elsif op_s == "-" then 9
+          elsif op_s == "*" then 10
+          elsif op_s == "/" then 11
+          elsif op_s == "%" then 12
+          elsif op_s == "**" then 13
+          elsif op_s == "<<" then 14
+          elsif op_s == ">>" then 15
+          elsif op_s == "&" then 16
+          elsif op_s == "|" then 17
+          elsif op_s == "^" then 18
+          elsif op_s == "||" then 19
+          elsif op_s == "&&" then 20
+          elsif op_s == "in" then 21
+          elsif op_s == "" then 22
+          else 0
+          end
       end
     RUBY
   when %r{/ast/assign\.rb\z}
@@ -8157,12 +8991,19 @@ def stage0_ast_compat(body, path)
       end
     RUBY
   when %r{/ast/var\.rb\z}
+    body = body.sub("    attr_accessor :name\n",
+                    "    attr_accessor :name, :var_kind\n")
     body = replace_method(body, "initialize", <<~RUBY)
       def initialize(name)
         @doc = 9
-        @name = name.to_s
+        s = "" + name.to_s
+        @name = s
+        @var_kind = s == "self" ? 1 : (s == "clock" ? 2 : 0)
         @cached_slot = -1
         @cached_layout_shape = 1
+        @cached_dispatch_owner = nil
+        @cached_dispatch_version = 0
+        @cached_w_method = nil
       end
     RUBY
     replace_method(body, "constant?", <<~RUBY)
@@ -8181,18 +9022,27 @@ def stage0_ast_compat(body, path)
     RUBY
   when %r{/ast/keywords/def\.rb\z}
     body = body.sub("    attr_accessor :instances, :owner\n",
-                    "    attr_accessor :instances, :owner\n    attr_accessor :stage0_param_names\n")
+                    "    attr_accessor :instances, :owner\n    attr_accessor :stage0_param_names, :accessor_kind, :accessor_ivar\n")
     body = replace_method(body, "initialize", <<~RUBY)
-      def initialize(name, args, body, receiver: nil, block: nil, yields: nil, splat_index: nil, double_splat: nil)
+      def initialize(name, args, body, receiver = nil, block = nil, yields = nil, splat_index = nil, double_splat = nil)
         @doc = 12
-        @name = name.to_s
-        @args = args
+        @name = name ? ("" + name.to_s) : nil
+        @args = args || []
         @body = body
-        @stage0_param_names = []
-        i = 0
-        while i < args.length
-          @stage0_param_names.push(args[i].name.to_s)
-          i += 1
+        @receiver = receiver
+        @block = block
+        @splat_index = splat_index
+        @double_splat = double_splat
+        @accessor_kind = 0
+        @accessor_ivar = ""
+        @stage0_param_names = [""]
+        @stage0_param_names.clear
+        if @args
+          i = 0
+          while i < @args.length
+            @stage0_param_names.push("" + @args[i].name.to_s)
+            i += 1
+          end
         end
       end
     RUBY
@@ -8217,12 +9067,27 @@ def stage0_ast_compat(body, path)
       end
     RUBY
   when %r{/ast/keywords/while\.rb\z}
-    replace_method(body, "initialize", <<~RUBY)
-      def initialize(condition, body = nil, check_first = true)
-        @doc = 11
-        @condition = condition
-        @body = body
-        @check_first = check_first
+    <<~RUBY
+      module Tungsten::AST
+        class While < Node
+          attr_accessor :condition, :body, :check_first
+
+          def initialize(condition, body = nil, check_first = true)
+            @doc = 11
+            @condition = condition
+            @body = List.from(body)
+            @check_first = check_first
+          end
+        end
+
+        class Until < While
+          def initialize(condition, body = nil, check_first = true)
+            @doc = 58
+            @condition = condition
+            @body = List.from(body)
+            @check_first = check_first
+          end
+        end
       end
     RUBY
   when %r{/ast/keywords/return\.rb\z}
@@ -8256,32 +9121,9 @@ def stage0_ast_compat(body, path)
   when %r{/ast/unary_op\.rb\z}
     replace_method(body, "initialize", <<~RUBY)
       def initialize(operator, right)
-        @operator = operator
+        @doc = 56
+        @operator = operator.to_sym
         @right = right
-      end
-    RUBY
-  when %r{/ast/list\.rb\z}
-    body = replace_method(body, "initialize", <<~RUBY)
-      def initialize(list = [])
-        @doc = 1
-        @list = list
-      end
-    RUBY
-    body = replace_method(body, "self.from", <<~RUBY)
-      def self.from(obj)
-        List.new
-      end
-    RUBY
-    body = replace_method(body, "<<", <<~RUBY)
-      def <<(exp)
-        @list.push(exp)
-        self
-      end
-    RUBY
-    body = body.sub("def <<(exp)\n        @list.push(exp)\n        self\n      end\n", "def <<(exp)\n        @list.push(exp)\n        self\n      end\n\n      def push(exp)\n        @list.push(exp)\n        self\n      end\n")
-    replace_method(body, "each", <<~RUBY)
-      def each(&block)
-        self
       end
     RUBY
   else
@@ -9483,23 +10325,34 @@ def stage0_parser_compat(body)
 end
 
 def stage0_parser_block_compat(body)
+  body = body.gsub(/^\s*def parse_continue\s*=\s*parse_next\s*$/, "    def parse_continue\n      parse_next\n    end")
+  body = body.gsub(/^\s*def parse_load\s*=\s*unexpected "load not yet implemented"\s*$/, "    def parse_load\n      unexpected \"load not yet implemented\"\n    end")
+  body = body.gsub("parse_expression(allow_multi_assign: true)", "parse_expression(true)")
+  body = body.gsub("parse_expression(allow_multi_assign: false)", "parse_expression(false)")
+  body = body.gsub("def parse_expression(allow_multi_assign: false)", "def parse_expression(allow_multi_assign = false)")
+  body = body.gsub("def parse_assignment_no_control(allow_ops: true, allow_suffix: true)", "def parse_assignment_no_control(allow_ops = true, allow_suffix = true)")
+  body = body.gsub("parse_assignment(allow_ops:, allow_suffix:)", "parse_assignment(allow_ops, allow_suffix)")
+  body = body.gsub("def parse_assignment(allow_ops: true, allow_suffix: true)", "def parse_assignment(allow_ops = true, allow_suffix = true)")
+  body = body.gsub("def parse_continuation_call(receiver, consume_self: false)", "def parse_continuation_call(receiver, consume_self = false)")
+  body = body.gsub("parse_continuation_call(exp, consume_self: true)", "parse_continuation_call(exp, true)")
+  body = body.gsub("def parse_call_args(opening_consumed: false)", "def parse_call_args(opening_consumed = false)")
+  body = body.gsub("parse_call_args(opening_consumed: fused_and_call)", "parse_call_args(fused_and_call)")
+  body = body.gsub("def parse_block(same_line: nil)", "def parse_block(same_line = nil)")
+  body = body.gsub("parse_block(same_line: start_row)", "parse_block(start_row)")
+  body = body.gsub("RangeLiteral.new(exp, nil, exclusive:)", "RangeLiteral.new(exp, nil, exclusive)")
+  body = body.gsub("RangeLiteral.new(exp, right, exclusive:)", "RangeLiteral.new(exp, right, exclusive)")
+  body = body.gsub("parens: @last_call_parens", "0, @last_call_parens")
+  body = body.gsub(/\bFloat\.new\(/, "FloatLiteral.new(")
+  body = body.gsub("check(GENERIC_ARGS_AHEAD)", "generic_args_ahead?")
+  body = body.gsub("check(/ in \\(/)", "string.byteslice(pos, 5) == \" in (\"")
+  body = body.gsub('@token.type?(:SYMBOL) && @token.value.to_s.match?(/\A:[A-Z]/)', "capitalized_symbol_token?")
+  body = body.gsub('elsif @token.type?(:ID) && @token.value == "self" && check(/\\./)', 'elsif @token.type?(:ID) && @token.value == "self" && source_byte_at(pos) == 46')
   body = body.gsub("parse_method_internal(node_class: Fn)", "parse_method_internal(true)")
   body = body.gsub("def parse_method_internal(node_class: Def)", "def parse_method_internal(fn_mode = false)")
   body = body.gsub("if node_class == Fn", "if fn_mode")
   body = body.gsub("return parse_anonymous_lambda(node_class:)", "return parse_anonymous_lambda(fn_mode)")
   body = body.gsub("def parse_anonymous_lambda(node_class: Def)", "def parse_anonymous_lambda(fn_mode = false)")
-  body = body.sub(<<~RUBY, <<~RUBY)
-      node = node_class.new(base_name, args, body)
-      node.receiver     = receiver
-      node.block        = block
-      node.splat_index  = splat_index
-      node.double_splat = double_splat
-      node.param_types  = param_types
-      node.return_type  = return_type
-      node.set_location(loc_file, loc_row, loc_col)
-
-      node
-  RUBY
+  body = body.gsub(/^[ \t]*node = node_class\.new\(base_name, args, body\)\n(?:[ \t]*node\.\w+\s*=.*\n)+[ \t]*node\.set_location\(loc_file, loc_row, loc_col\)\n\n[ \t]*node/, <<~RUBY.chomp)
       if fn_mode
         node = Fn.new(base_name, args, body)
         node.receiver     = receiver
@@ -9523,14 +10376,7 @@ def stage0_parser_block_compat(body)
 
       node
   RUBY
-  body = body.sub(<<~RUBY, <<~RUBY)
-      node = node_class.new(nil, @method[:args].any? ? @method[:args] : nil, body)
-      node.block        = @method[:block]
-      node.splat_index  = @method[:splat_index]
-      node.double_splat = @method[:double_splat]
-
-      node
-  RUBY
+  body = body.gsub(/^[ \t]*node = node_class\.new\(nil, @method\[:args\]\.any\? \? @method\[:args\] : nil, body\)\n(?:[ \t]*node\.\w+\s*=.*\n)+\n[ \t]*node/, <<~RUBY.chomp)
       if fn_mode
         node = Fn.new(nil, @method[:args].any? ? @method[:args] : nil, body)
         node.block        = @method[:block]
@@ -9546,12 +10392,674 @@ def stage0_parser_block_compat(body)
 
       node
   RUBY
+  body = replace_method(body, "self.parse_operator", <<~RUBY)
+    def self.parse_operator(name, next_op, node, operators, right_assoc = false)
+      nil
+    end
+  RUBY
+  body = body.gsub(/^\s*parse_operator\s+:or,.*$/, <<~RUBY)
+    def parse_or
+      left = parse_and
+      while true
+        case @token.type
+        when :SP
+          next_token
+        when :"||"
+          check_void_value(left)
+          next_token_skip_whitespace
+          right = parse_and
+          left = Or.new(left, right)
+        else
+          return left
+        end
+      end
+    end
+  RUBY
+  body = body.gsub(/^\s*parse_operator\s+:and,.*$/, <<~RUBY)
+    def parse_and
+      left = parse_in_test
+      while true
+        case @token.type
+        when :SP
+          next_token
+        when :"&&"
+          check_void_value(left)
+          next_token_skip_whitespace
+          right = parse_in_test
+          left = And.new(left, right)
+        else
+          return left
+        end
+      end
+    end
+  RUBY
+  body = body.gsub(/^\s*parse_operator\s+:eql,.*$/, <<~RUBY)
+    def parse_eql
+      left = parse_logical_or
+      while true
+        case @token.type
+        when :SP
+          next_token
+        when :"==", :"!=", :"=~", :"≈"
+          check_void_value(left)
+          operator = @token.type
+          next_token_skip_whitespace
+          right = parse_logical_or
+          left = mathematical_binary(left, operator, right)
+        else
+          return left
+        end
+      end
+    end
+  RUBY
+  body = body.gsub(/^\s*parse_operator\s+:logical_and,.*$/, <<~RUBY)
+    def parse_logical_and
+      left = parse_shift
+      while true
+        case @token.type
+        when :SP
+          next_token
+        when :"&", :".&", :"∩"
+          check_void_value(left)
+          operator = @token.type
+          next_token_skip_whitespace
+          right = parse_shift
+          left = mathematical_binary(left, operator, right)
+        else
+          return left
+        end
+      end
+    end
+  RUBY
+  body = body.gsub(/^\s*parse_operator\s+:add_or_sub,.*$/, <<~RUBY)
+    def parse_add_or_sub
+      left = parse_mul_or_div
+      while true
+        case @token.type
+        when :SP
+          next_token
+        when :"+", :"-", :"%+", :"%-", :".+", :".-", :"±"
+          check_void_value(left)
+          operator = @token.type
+          next_token_skip_whitespace
+          right = parse_mul_or_div
+          left = mathematical_binary(left, operator, right)
+        else
+          return left
+        end
+      end
+    end
+  RUBY
+  body = body.gsub(/^\s*parse_operator\s+:mul_or_div,.*$/, <<~RUBY)
+    def parse_mul_or_div
+      left = parse_pow
+      while true
+        case @token.type
+        when :SP
+          next_token
+        when :"*", :"/", :"//", :"%", :"%*", :".*", :"./"
+          check_void_value(left)
+          operator = @token.type
+          next_token_skip_whitespace
+          right = parse_pow
+          left = mathematical_binary(left, operator, right)
+        else
+          return left
+        end
+      end
+    end
+  RUBY
+  body = body.gsub(/^\s*parse_operator\s+:pow,.*$/, <<~RUBY)
+    def parse_pow
+      left = parse_unary
+      while true
+        case @token.type
+        when :SP
+          next_token
+        when :"**", :"%**", :"↑↑"
+          check_void_value(left)
+          operator = @token.type
+          next_token_skip_whitespace
+          right = parse_pow
+          left = mathematical_binary(left, operator, right)
+        else
+          return left
+        end
+      end
+    end
+  RUBY
+  body = replace_method(body, "self.parse", <<~RUBY)
+    def self.parse(str = "")
+      new(str.to_s).parse
+    end
+  RUBY
+  body = replace_method(body, "initialize", <<~RUBY)
+    def initialize(str = "")
+      @source = str.to_s
+      @token = Token.new
+      @lexer_adapter = CodepointLexer.new(@source)
+      @assigning = []
+      @method    = {}
+      @unclosed  = []
+      @scopes    = [Set.new]
+      @in_class_body = false
+      @namespace_prefix = nil
+      @nested_methods = 0
+      @no_spaced_call_args = false
+      @suppress_block = false
+      @last_call_parens = false
+    end
+  RUBY
+  body = replace_method(body, "file=", <<~RUBY)
+    def file=(path)
+      @file = path
+      @lexer_adapter.file = path if @lexer_adapter
+    end
+  RUBY
+  body = replace_method(body, "error", <<~RUBY)
+    def error(msg)
+      row = @token.row || 1
+      raise "syntax on line " + row.to_s + ": " + msg.to_s
+    end
+  RUBY
+  body = replace_method(body, "next_token", <<~RUBY)
+    def next_token
+      @token = @lexer_adapter.next_token
+    end
+  RUBY
+  body = replace_method(body, "pos", <<~RUBY)
+    def pos
+      @lexer_adapter.pos
+    end
+  RUBY
+  body = replace_method(body, "pos=", <<~RUBY)
+    def pos=(new_pos = 0)
+      @lexer_adapter.pos = new_pos
+    end
+  RUBY
+  body = replace_method(body, "string", <<~RUBY)
+    def string
+      @lexer_adapter.string
+    end
+  RUBY
+  body = replace_method(body, "rest", <<~RUBY)
+    def rest
+      @lexer_adapter.rest
+    end
+  RUBY
+  body = replace_method(body, "eos?", <<~RUBY)
+    def eos?
+      @lexer_adapter.eos?
+    end
+  RUBY
+  body = body.sub(<<-'RUBY', <<-'RUBY')
+      when :REGEX
+        pattern, options = @token.value
+        node_and_next_token RegexLiteral.new(pattern, options)
+      when :STRING_INTERP
+        parts = @token.value.map do |type, val|
+          if type == :str
+            StringLiteral.new(val)
+          else
+            Tungsten::Parser.parse_expression_fragment(val)
+          end
+        end
+        node_and_next_token StringInterpolation.new(parts)
+RUBY
+      when :REGEX
+        node_and_next_token RegexLiteral.new(@token.value.to_s, "")
+      when :STRING_INTERP
+        parts = []
+        raw_parts = @token.interp_parts
+        if raw_parts
+          i = 0
+          while i < raw_parts.length
+            pair = raw_parts[i]
+            part_node = nil
+            if pair[0] == :str
+              part_node = StringLiteral.new(pair[1].to_s)
+            else
+              part_node = Tungsten::Parser.parse_expression_fragment(pair[1].to_s)
+            end
+            parts << part_node
+            i += 1
+          end
+        end
+        node_and_next_token StringInterpolation.new(parts)
+RUBY
+  body = replace_method(body, "parse_logical_or", <<~RUBY)
+    def parse_logical_or
+      left = parse_logical_and
+
+      while true
+        case @token.type
+        when :SP
+          next_token
+        when :∪
+          next_token_skip_whitespace
+          left = Call.new(left, "union", [parse_logical_and])
+        when :|, :"»", :"^", :".|", :".^"
+          check_void_value(left)
+          method = @token.type
+          next_token_skip_whitespace
+          right = parse_logical_and
+          left = BinaryOp.new(left, method, right)
+        else
+          return left
+        end
+      end
+    end
+  RUBY
+  body = replace_method(body, "parse_atomic_with_method", <<~RUBY)
+    def parse_atomic_with_method
+      primary_type = @token.type
+      atomic = parse_atomic
+      product_receiver = primary_type == :"(" ||
+        (%i[INT ID IVAR CVAR GLOBAL PARG CONSTANT].include?(primary_type) &&
+         (atomic.is_a?(Int) || atomic.is_a?(Var) || atomic.is_a?(InstanceVar) || atomic.is_a?(ClassVar) || atomic.is_a?(GlobalVar)) &&
+         !(atomic.is_a?(Var) && atomic.name.end_with?("!")))
+      if product_receiver && (@token.type == :"!" || @token.type == :PRIMORIAL) &&
+         pos >= 2 && ![32, 9, 10, 13].include?(source_byte_at(pos - 2))
+        name = @token.type == :"!" ? "factorial" : "primorial"
+        loc_file = @token.file
+        loc_row = @token.row
+        loc_col = @token.col
+        next_token
+        atomic = Call.new(atomic, name, [])
+        atomic.set_location(loc_file, loc_row, loc_col)
+      end
+
+      parse_atomic_method_suffix(atomic)
+    end
+  RUBY
+  body = replace_method(body, "parse_use", <<~RUBY)
+    def parse_use
+      loc_file = @token.file
+      loc_row = @token.row
+      loc_col = @token.col
+
+      s = string
+      n = s.bytesize
+      p = pos
+      p += 1 while p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+      if p < n && s.getbyte(p) == 34
+        next_token_skip_space
+        path = @token.value.to_s
+        next_token
+      else
+        start = p
+        while p < n
+          b = s.getbyte(p)
+          break if b == 32 || b == 9 || b == 10 || b == 13 || b == 59 || b == 35
+          p += 1
+        end
+        path = s.byteslice(start, p - start) || ""
+        self.pos = p
+        next_token
+      end
+
+      node = Use.new(path)
+      node.set_location(loc_file, loc_row, loc_col)
+      node
+    end
+  RUBY
+  body = replace_method(body, "scan_word_array_body", <<~RUBY)
+    def scan_word_array_body
+      words = [""]
+      words.clear
+      s = string
+      n = s.bytesize
+      p = pos
+      while true
+        while p < n
+          b = s.getbyte(p)
+          break unless b == 32 || b == 9 || b == 10 || b == 13
+          p += 1
+        end
+        error "unterminated word array" if p >= n
+        if s.getbyte(p) == 93
+          p += 1
+          break
+        end
+        if s.getbyte(p) == 35
+          p += 1 while p < n && s.getbyte(p) != 10
+          next
+        end
+        w_start = p
+        while p < n
+          b = s.getbyte(p)
+          break if b == 32 || b == 9 || b == 10 || b == 13 || b == 93 || b == 35
+          p += 1
+        end
+        words.push(s.byteslice(w_start, p - w_start) || "")
+      end
+      self.pos = p
+      next_token
+      words
+    end
+  RUBY
+  body = replace_method(body, "looks_like_param_types_ahead?", <<~RUBY)
+    def looks_like_param_types_ahead?
+      s = string
+      n = s.bytesize
+      p = pos
+      p += 1 while p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+      count = 0
+      while p < n && s.getbyte(p) != 41
+        w_start = p
+        b = s.getbyte(p)
+        if b >= 65 && b <= 90
+          p += 1
+          while p < n
+            c = s.getbyte(p)
+            break unless (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95
+            p += 1
+          end
+        elsif b >= 97 && b <= 122
+          p += 1
+          while p < n
+            c = s.getbyte(p)
+            break unless (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95
+            p += 1
+          end
+          word = s.byteslice(w_start, p - w_start) || ""
+          return false unless Tungsten::CodepointLexer::TYPE_NAMES.key?(word)
+        else
+          return false
+        end
+        if p + 1 < n && s.getbyte(p) == 91 && s.getbyte(p + 1) == 93
+          p += 2
+        end
+        count += 1
+        p += 1 while p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+      end
+      count > 0 && p < n && s.getbyte(p) == 41
+    end
+  RUBY
+  body = replace_method(body, "looks_like_return_type_ahead?", <<~RUBY)
+    def looks_like_return_type_ahead?
+      s = string
+      n = s.bytesize
+      p = pos
+      if p + 1 < n && s.getbyte(p) == 91 && s.getbyte(p + 1) == 93
+        p += 2
+      end
+      p += 1 while p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+      return true if p >= n
+      b = s.getbyte(p)
+      b == 58 || b == 10 || b == 59
+    end
+  RUBY
+  body = replace_method(body, "with_loop_start?", <<~RUBY)
+    def with_loop_start?
+      return false unless @token.keyword?(:with)
+      s = string
+      n = s.bytesize
+      p = pos
+      return false unless p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+      p += 1 while p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+      return false if p >= n
+      while p < n
+        b = s.getbyte(p)
+        break if b == 32 || b == 9 || b == 10 || b == 13
+        p += 1
+      end
+      return false unless p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+      p += 1 while p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+      return false unless p + 2 <= n && s.byteslice(p, 2) == "in"
+      after = p + 2 < n ? s.getbyte(p + 2) : 32
+      after == 32 || after == 9 || after == 10 || after == 40
+    end
+  RUBY
+  body = replace_method(body, "looks_like_hash?", <<~RUBY)
+    def looks_like_hash?
+      return false unless @token.type?(:"{")
+      s = string
+      n = s.bytesize
+      p = pos
+      p += 1 while p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9 || s.getbyte(p) == 10 || s.getbyte(p) == 13)
+      return false if p >= n
+      b = s.getbyte(p)
+      return true if b == 125
+      if b == 34
+        p += 1
+        while p < n && s.getbyte(p) != 34
+          p += 1 if s.getbyte(p) == 92
+          p += 1
+        end
+        return false if p >= n
+        p += 1
+        p += 1 while p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+        return p < n && s.getbyte(p) == 58
+      elsif (b >= 97 && b <= 122) || b == 95
+        p += 1
+        while p < n
+          c = s.getbyte(p)
+          break unless (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95
+          p += 1
+        end
+        p += 1 while p < n && (s.getbyte(p) == 32 || s.getbyte(p) == 9)
+        return p < n && s.getbyte(p) == 58
+      end
+      false
+    end
+  RUBY
+  body = replace_method(body, "parse_class", <<~RUBY)
+    def parse_class
+      loc_file = @token.file
+      loc_row = @token.row
+      loc_col = @token.col
+      next_token_skip_whitespace
+
+      check_for :NAME, :CONSTANT, :ID, :TYPE
+
+      name = @token.value
+      next_token_skip_space
+
+      if capitalized_symbol_token?
+        while capitalized_symbol_token?
+          name = AST.intern_name("\#{name}:\#{AST.intern_name_without_prefix(@token.value, ":")}")
+          next_token_skip_space
+        end
+      end
+      name = AST.intern_name("\#{@namespace_prefix}:\#{name}") if @namespace_prefix && !name.to_s.include?(":")
+
+      if @token.type?(:"<") && generic_args_ahead?
+        next_token until @token.type?(:">") || @token.type?(:NL) || @token.type?(:EOF)
+        consume :">"
+        skip_space
+      end
+
+      superclass = nil
+      class_role = nil
+
+      if @token.type?(:"[")
+        next_token_skip_space
+        check_for :NAME, :CONSTANT, :ID, :TYPE
+        class_role = @token.value
+        next_token_skip_space
+        check_for(:"]")
+        next_token_skip_space
+      end
+
+      if @token.type?(:"<")
+        next_token_skip_space
+        check_for :NAME, :CONSTANT, :ID, :TYPE
+        superclass = @token.value
+        next_token_skip_space
+        if @token.type?(:"<") && generic_args_ahead?
+          next_token until @token.type?(:">") || @token.type?(:NL) || @token.type?(:EOF)
+          consume :">"
+          skip_space
+        end
+      end
+
+      if @token.type?(:"[") && class_role.nil?
+        next_token_skip_space
+        check_for :NAME, :CONSTANT, :ID, :TYPE
+        class_role = @token.value
+        next_token_skip_space
+        check_for(:"]")
+        next_token_skip_space
+      end
+
+      skip_statement_end
+
+      previous_in_class_body = @in_class_body
+      @in_class_body = true
+      if @token.type?(:INDENT)
+        body = with_indent { parse_body }
+      else
+        body = List.new
+      end
+      @in_class_body = previous_in_class_body
+
+      node = ClassDef.new(name, body, superclass, class_role)
+      node.set_location(loc_file, loc_row, loc_col)
+      node
+    end
+  RUBY
+  body = replace_method(body, "parse_data_declaration", <<~RUBY)
+    def parse_data_declaration
+      next_token_skip_space
+      return Nil.new unless @token.type?(:ID) || @token.type?(:TYPE)
+
+      kind = @token.value.to_s
+      next_token_skip_space
+      if @token.type?(:"(")
+        next_token_skip_space
+        check_for :NAME, :CONSTANT, :ID, :TYPE
+        next_token_skip_space
+        check_for :")"
+        next_token_skip_space
+      end
+      skip_statement_end
+
+      return Nil.new unless @token.type?(:INDENT)
+
+      fields = [""]
+      fields.clear
+      line = [""]
+      line.clear
+
+      depth = 0
+      loop do
+        case @token.type
+        when :INDENT
+          depth += 1
+        when :DEDENT
+          if kind == "data" && !line.empty?
+            if line[0] == "field" && line.length > 1
+              fields.push(line[1])
+            end
+          end
+          line.clear
+          depth -= 1
+          next_token
+          break if depth <= 0
+          next
+        when :NL
+          if depth > 0
+            if kind == "data" && !line.empty?
+              if line[0] == "field" && line.length > 1
+                fields.push(line[1])
+              end
+            end
+            line.clear
+          end
+        else
+          if depth > 0 && @token.value
+            line.push(@token.value.to_s)
+          end
+        end
+
+        next_token
+      end
+
+      if kind == "data" && !fields.empty?
+        sym_args = []
+        i = 0
+        while i < fields.length
+          sym_args.push(Symbol.new(fields[i]))
+          i += 1
+        end
+        return Call.new(nil, "ro", sym_args)
+      end
+
+      Nil.new
+    end
+  RUBY
+  body = replace_method(body, "parse_case", <<~RUBY)
+    def parse_case
+      loc_file = @token.file
+      loc_row = @token.row
+      loc_col = @token.col
+      next_token_skip_space
+
+      conditionless = @token.type?(:NL) || @token.type?(:";")
+      receiver = conditionless ? nil : parse_assignment_no_control
+      skip_statement_end
+
+      whens = []
+      else_body = nil
+
+      if @token.keyword?(:when)
+        whens, else_body = parse_when_clauses
+      elsif !conditionless && @token.type?(:INDENT)
+        consume :INDENT
+        if @token.keyword?(:when)
+          whens, else_body = parse_when_clauses
+        else
+          whens, else_body = parse_arrow_case_clauses
+        end
+        consume :DEDENT unless @token.type?(:EOF)
+      else
+        whens, else_body = parse_arrow_case_clauses
+      end
+
+      node = CaseExpr.new(receiver, whens, else_body)
+      node.set_location(loc_file, loc_row, loc_col)
+      node
+    end
+
+    def case_arrow_stop?
+      @token.type?(:DEDENT) || @token.type?(:EOF) || @token.type?(:")") ||
+        @token.type?(:"]") || @token.type?(:"}") || @token.type?(:",")
+    end
+
+    def parse_arrow_case_clauses
+      whens = []
+      else_body = nil
+      until case_arrow_stop?
+        skip_statement_end
+        break if case_arrow_stop?
+
+        if @token.type?(:"=>")
+          next_token_skip_space
+          else_body = parse_arrow_case_body
+        else
+          conditions = [parse_expression]
+          while @token.comma?
+            next_token_skip_whitespace
+            conditions << parse_expression
+          end
+          skip_space
+          consume :"=>"
+          skip_space
+          body = parse_arrow_case_body
+          whens << [conditions, body]
+        end
+      end
+      [whens, else_body]
+    end
+  RUBY
   body = replace_method(body, "check_for", <<~RUBY)
-    def check_for(a, b = nil, c = nil, d = nil)
+    def check_for(a, b = nil, c = nil, d = nil, *rest)
       return if @token.type?(a)
       return if b && @token.type?(b)
       return if c && @token.type?(c)
       return if d && @token.type?(d)
+      return if rest && rest.include?(@token.type)
 
       error "expecting token"
     end
@@ -9589,7 +11097,7 @@ def stage0_parser_block_compat(body)
       start_file = @token.file
       start_col = @token.col
 
-      if @in_class_body && @token.type?(:-)
+      if allow_multi_assign && @in_class_body && @token.type?(:-)
         node = parse_data_declaration
         node.set_location(start_file, start_row, start_col)
         return node
@@ -9628,6 +11136,7 @@ def stage0_parser_block_compat(body)
           i = 0
           while i < targets.length
             t = targets[i]
+            t = t.exp if t.is_a?(Splat)
             if t.is_a?(Var)
               push_var(t)
             end
@@ -9644,8 +11153,23 @@ def stage0_parser_block_compat(body)
         end
       end
 
+      if @token.type?(:"<>")
+        exp = Var.new(exp.name) if exp.is_a?(Call) && !exp.obj && (exp.args.nil? || exp.args.empty?) && exp.block.nil?
+        error "expected a variable on the left of '<>'" unless exp.is_a?(Var)
+        next_token_skip_whitespace
+        rhs = parse_ternary
+        rhs = Var.new(rhs.name) if rhs.is_a?(Call) && !rhs.obj && (rhs.args.nil? || rhs.args.empty?) && rhs.block.nil?
+        error "expected a variable on the right of '<>'" unless rhs.is_a?(Var)
+        push_var(exp)
+        push_var(rhs)
+        value = ArrayLiteral.new([Var.new(rhs.name), Var.new(exp.name)])
+        swap = Assign.new(ArrayLiteral.new([Var.new(exp.name), Var.new(rhs.name)]), value)
+        swap.set_location(start_file, start_row, start_col)
+        return swap
+      end
+
       if implicit_each?(exp)
-        block = parse_block
+        block = parse_block(start_row)
         if block
           if exp.is_a?(Var) && exp.name == "each"
             exp = Call.new(nil, "each", [], block)
@@ -9696,7 +11220,7 @@ def stage0_parser_block_compat(body)
         unexpected
       end
 
-      check_for :SP, :NL, :EOF, :"=>"
+      check_for :SP, :NL, :EOF, :"=>", :")" unless @token.row > start_row
       exp
     end
   RUBY
@@ -9707,14 +11231,23 @@ def stage0_parser_block_compat(body)
       while true
         if @token.type?(:SP)
           next_token
+        elsif @token.type?(:TYPE_HINT)
+          hint = @token.value
+          next_token
+          if fold_hint_text?(hint) && (exp.is_a?(Print) || exp.is_a?(Write)) && exp.args.any?
+            last_idx = exp.args.length - 1
+            exp.args[last_idx] = TypeHint.new(exp.args[last_idx], hint).at(exp.args[last_idx])
+          else
+            exp = TypeHint.new(exp, hint).at(exp)
+          end
         elsif @token.type?(:"=")
+          target_hint = nil
+          if exp.is_a?(TypeHint) && exp.value.is_a?(Var)
+            target_hint = exp.hint
+            exp = exp.value
+          end
           if exp.is_a?(Call) && exp.name == "[]"
             next_token_skip_whitespace
-            # Reconstruct rather than mutate: spinel can't narrow the poly
-            # `exp` for the `exp.name =`/`exp.args <<` setters (it would emit
-            # `exp->iv_name` on an sp_RbVal). Build a fresh Call with the new
-            # name and the appended value instead. Reads (exp.obj/exp.args)
-            # dispatch polymorphically and are fine.
             new_args = exp.args
             new_args << parse_assignment_no_control
             exp = Call.new(exp.obj, "[]=", new_args)
@@ -9728,6 +11261,10 @@ def stage0_parser_block_compat(body)
 
               if exp.is_a?(Var) && exp.name == "self"
                 error "can't reassign self"
+              end
+
+              if exp.is_a?(Call) && (exp.name.end_with?("?") || exp.name.end_with?("!"))
+                error "methods ending in '?' or '!' are invalid assignment targets"
               end
 
               exp = Var.new(exp.name) if exp.is_a?(Call)
@@ -9753,13 +11290,27 @@ def stage0_parser_block_compat(body)
                 end
               end
 
-              exp = Assign.new(exp, value, hint)
+              exp = Assign.new(exp, value, hint || target_hint)
             end
           end
         else
           break unless @token.assignment_operator?
           unexpected unless allow_ops
+
+          if compound_call_target?(exp)
+            op = @token.type.to_s.chop.to_sym
+            next_token_skip_whitespace
+            value = parse_assignment_no_control
+            exp = build_compound_call_assign(exp, op, value)
+            allow_ops = true
+            next
+          end
+
           break unless exp.can_assign?
+
+          if exp.is_a?(Path)
+            error "can't reassign a constant"
+          end
 
           if exp.is_a?(Var) && exp.name == "self"
             error "can't reassign self"
@@ -9773,13 +11324,54 @@ def stage0_parser_block_compat(body)
           method = @token.type.to_s.chop
           next_token_skip_whitespace
           value = parse_assignment_no_control
-          exp = AssignOp.new(exp, method.to_sym, value)
+          if method == "||" || method == "&&"
+            read = exp.is_a?(Call) ? Var.new(exp.name) : exp
+            combined = method == "||" ? Or.new(read, value) : And.new(read, value)
+            exp = Assign.new(read, combined)
+          else
+            exp = AssignOp.new(exp, method.to_sym, value)
+          end
         end
 
         allow_ops = true
       end
 
       exp
+    end
+  RUBY
+  body = replace_method(body, "compound_call_target?", <<~RUBY)
+    def compound_call_target?(node)
+      node.is_a?(Call) && node.obj && node.block.nil? &&
+        (node.name == "[]" || (node.args.empty? && !node.name.to_s.end_with?("?") && !node.name.to_s.end_with?("!")))
+    end
+
+    def capitalized_symbol_token?
+      return false unless @token.type?(:SYMBOL)
+      s = @token.value.to_s
+      return false unless s.bytesize >= 2 && s.getbyte(0) == 58
+      b = s.getbyte(1)
+      b >= 65 && b <= 90
+    end
+
+    def generic_args_ahead?
+      i = pos
+      s = string
+      n = s.bytesize
+      return false if i >= n
+      b = s.getbyte(i)
+      return false unless (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 || (b >= 48 && b <= 57)
+      i += 1
+      while i < n
+        b = s.getbyte(i)
+        if (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 95
+          i += 1
+        else
+          break
+        end
+      end
+      return false if i >= n
+      b = s.getbyte(i)
+      b == 62 || b == 44 || b == 47 || b == 42
     end
   RUBY
   body = replace_method(body, "pipe_target", <<~RUBY)
@@ -9930,13 +11522,14 @@ def insert_before_last_end(body, insertion)
 end
 
 def insert_before_private(body, insertion)
-  return body.sub(/\n\s*private\n/, "\n#{insertion}\n    private\n") if body.match?(/\n\s*private\n/)
+  idx = body.rindex(/\n\s*private\n/)
+  return body[0...idx] + "\n#{insertion}\n    private\n" + body[(idx + body[idx..].match(/\A\n\s*private\n/)[0].length)..] if idx
 
   insert_before_last_end(body, insertion)
 end
 
 def strip_stage0_ast_methods(body)
-  strip_methods(body, %w[children accept_children == clone to_sexp ast_fingerprint name_size])
+  strip_methods(body, %w[eval_in children accept_children == clone to_sexp ast_fingerprint name_size])
 end
 
 def strip_methods(body, names)
@@ -9971,7 +11564,7 @@ def stage0_location_source
   <<~RUBY
     module Tungsten
       class Location
-        attr_reader(*%i[file row col])
+        attr_reader :file, :row, :col
 
         def initialize(file, row, col)
           @file = file
@@ -10065,7 +11658,17 @@ def stage0_node_source
         end
 
         def at(obj)
-          set_location(0, obj.row, obj.col)
+          if obj.is_a?(Token) || obj.is_a?(Location)
+            set_location(0, obj.row, obj.col)
+          elsif obj
+            set_location(0, obj.location_row, obj.location_col)
+          else
+            self
+          end
+        end
+
+        def set_parents!(parent = nil)
+          self
         end
 
         def attributes
@@ -10249,13 +11852,6 @@ final_bundle = replace_method(final_bundle, "hash_indifferent_get", <<~RUBY)
 RUBY
 final_bundle = replace_method(final_bundle, "evaluate_args", <<~RUBY)
   def evaluate_args(arg_nodes)
-    # Spinel-stage0 perf: leave evaluate_args as the original
-    # fresh-allocation shape — pooling here broke spinel's static
-    # type inference (values typed int_array via empty-literal
-    # default + pool's sp_RbVal return path can't be reconciled).
-    # The env_pool already covers the dominant allocation source;
-    # args-pool was a smaller win that's not worth fighting
-    # spinel's type tracker over.
     values = []
     if arg_nodes == nil
       return values
@@ -10277,36 +11873,23 @@ final_bundle = replace_method(final_bundle, "bind_params", <<~RUBY)
   def bind_params(env, params, args, splat_index = nil)
     return nil if params == nil
 
-    # Spinel-stage0 hack: drop the splat-arg branch entirely.
-    # Spinel emits `splat_index != nil` as `((_t, TRUE) && ...)` —
-    # the TRUE always wins — so with splat_index defaulting to nil
-    # (lowered to int 0 in spinel), `i == splat_index` then fires
-    # on iteration 0 and binds args[0] as a single-element rest
-    # array instead of binding it to the first param directly.
-    # No compiler/lib/*.w def uses `*args` (verified by
-    # `grep -rE '^\s*-> \w+\([^)]*\*' compiler/lib/`), so the
-    # splat arm is dead code in stage 0 and removing it sidesteps
-    # the nil-check landmine.
+    old_env = @env
+    @env = env
     i = 0
     while i < params.length
       param = params[i]
-      # The "" + param.name.to_s key hoist that used to live here is
-      # made redundant by the codegen-side string-param overrides for
-      # Environment#set (in spinel commit 0d26277). param.name on an
-      # sp_Arg / sp_Param node returns a const char* directly.
-      # Dropping the hoist eliminates one alloc per param per call —
-      # for compiler/tungsten.w that's tens of thousands of saved
-      # string allocs over a full compile, directly reducing the
-      # dirty-page traffic that drove jetsam kills.
-      name = param      # poly-seed: force lv_name to sp_RbVal (param is poly)
+      name = param
       name = param.name
       if i < args.length
         env.bind_new_slot(name, args[i])
+      elsif param.default_value != nil
+        env.bind_new_slot(name, evaluate(param.default_value))
       else
         env.bind_new_slot(name, nil)
       end
       i += 1
     end
+    @env = old_env
     nil
   end
 RUBY
@@ -10315,57 +11898,63 @@ final_bundle = replace_method(final_bundle, "execute_bound_w_method", <<~RUBY)
     old_env = @env
     old_returning = @returning
     old_return_value = @return_value
+    old_block = @current_block
+    old_in_block = @in_block_depth
+    prev_block_env = nil
+    if block != nil
+      prev_block_env = block.closure_env
+      block.closure_env = old_env
+    end
+    @call_depth += 1
+    my_depth = @call_depth
+    @in_block_depth = 0
     @self_stack.push(recv)
     @env = method_env
+    @current_block = block
+    if method.block != nil
+      bname = method.block.is_a?(Arg) ? method.block.name.to_s : method.block.to_s
+      if bname != "" && bname != "&"
+        method_env.bind_new_slot(bname, block)
+      end
+    end
     @returning = false
     @return_value = nil
-    old_current_function = @stage0_current_function
-    @stage0_current_function = method.name
-    if @stage0_stack_trace_enabled == 1
-      if @stage0_call_stack == nil
-        @stage0_call_stack = []
-      end
-      @stage0_call_stack.push(method.name.to_s)
-      File.write("/tmp/tungsten-stage0-call-stack", @stage0_call_stack.join(">"))
-    end
     result = evaluate(method.body)
-    if @stage0_stack_trace_enabled == 1 && @stage0_call_stack != nil
-      @stage0_call_stack.pop
-    end
-    @stage0_current_function = old_current_function
-    if @returning
-      result = @return_value
+    if block != nil
+      block.closure_env = prev_block_env
     end
     @env = old_env
-    @returning = old_returning
-    @return_value = old_return_value
+    @current_block = old_block
+    @in_block_depth = old_in_block
     @self_stack.pop
+    @call_depth -= 1
+    if @returning
+      result = @return_value
+      if @return_target_depth < 0 || @return_target_depth >= my_depth
+        @returning = old_returning
+        @return_value = old_return_value
+        @return_target_depth = -1
+      end
+    else
+      @returning = old_returning
+      @return_value = old_return_value
+    end
     result
   end
 RUBY
 final_bundle = replace_method(final_bundle, "call_w_method", <<~RUBY)
   def call_w_method(recv, method, args, block = nil, call_node: nil)
-    return nil if method == nil
+    return nil if method.nil?
+    if method.is_a?(Def) && recv.is_a?(WObject)
+      ak = method.accessor_kind
+      if ak == 1 && (args.nil? || args.length == 0)
+        return recv.get_ivar(method.accessor_ivar)
+      elsif ak == 2 && !args.nil? && args.length == 1
+        return recv.set_ivar(method.accessor_ivar, args[0])
+      end
+    end
 
     params = method.args
-    if @stage0_bind_trace_enabled == 1
-      trace_path = "/tmp/tungsten-stage0-bind-trace"
-      trace_text = ""
-      if File.exist?(trace_path)
-        trace_text = "" + File.read(trace_path).to_s
-      end
-      trace_text = trace_text + method.name.to_s + " params=" + params.length.to_s + " args=" + args.length.to_s + "\n"
-      File.write(trace_path, trace_text)
-    end
-    # Spinel-stage0 perf: with SPINEL_NO_GC=1 each Environment.new
-    # leaks (no sweep, no recycle). Profile showed Environment_new
-    # at 4.3 % CPU on the hot path; the page-out traffic those
-    # leaks produce hit 137 GB / 920 s in a stage 0 run yesterday
-    # and is the actual bottleneck (per macOS diagnostic report).
-    # Recycle envs via a per-Interpreter free-list initialised in
-    # initialize_env_pool. Cap at 4 K to bound stable footprint;
-    # tested compiles use ~thousands of method calls but only
-    # ~hundreds live at any moment (deepest stack).
     if @env_pool_enabled == 1 && @env_pool_count > 0
       method_env = @env_pool
       @env_pool = method_env.pool_next
@@ -10377,8 +11966,6 @@ final_bundle = replace_method(final_bundle, "call_w_method", <<~RUBY)
     end
     bind_params(method_env, params, args, 0)
     result = execute_bound_w_method(recv, method, method_env, block, call_node)
-    # Release after execute; method_env's contents are now dead
-    # (no SP_GC_ROOT in caller scope keeps any binding alive).
     if @env_pool_enabled == 1
       method_env.pool_link(@env_pool)
       @env_pool = method_env
@@ -10389,33 +11976,74 @@ final_bundle = replace_method(final_bundle, "call_w_method", <<~RUBY)
 RUBY
 final_bundle = replace_method(final_bundle, "call_w_method_from_nodes", <<~RUBY)
   def call_w_method_from_nodes(recv, method, arg_nodes, block = nil, call_node: nil)
-    call_w_method(recv, method, evaluate_args(arg_nodes), block, call_node: call_node)
+    return nil if method.nil?
+    unless method.is_a?(Def)
+      return call_w_method(recv, method, evaluate_args(arg_nodes), block, call_node: call_node)
+    end
+    ak = method.accessor_kind
+    if ak != 0 && recv.is_a?(WObject)
+      if ak == 1 && (arg_nodes.nil? || arg_nodes.length == 0)
+        return recv.get_ivar(method.accessor_ivar)
+      elsif ak == 2 && !arg_nodes.nil? && arg_nodes.length == 1
+        return recv.set_ivar(method.accessor_ivar, evaluate(arg_nodes[0]))
+      end
+    end
+
+    if @env_pool_enabled == 1 && @env_pool_count > 0
+      method_env = @env_pool
+      @env_pool = method_env.pool_next
+      @env_pool_count -= 1
+      method_env.pool_reset(@env)
+      stage0_mark_env(method_env)
+    else
+      method_env = new_param_env(@env, method.args, method)
+    end
+    params = method.args
+    param_names = method.stage0_param_names
+    arg_count = !arg_nodes.nil? ? arg_nodes.length : 0
+    param_count = param_names.length
+    i = 0
+    while i < arg_count
+      val = evaluate(arg_nodes[i])
+      if i < param_count
+        method_env.bind_new_slot(param_names[i] || "", val)
+      end
+      i += 1
+    end
+    if i < param_count && !params.nil?
+      old_env = @env
+      @env = method_env
+      while i < param_count
+        pnode = params[i]
+        pname = param_names[i] || ""
+        if !pnode.nil? && !pnode.default_value.nil?
+          method_env.bind_new_slot(pname, evaluate(pnode.default_value))
+        else
+          method_env.bind_new_slot(pname, nil)
+        end
+        i += 1
+      end
+      @env = old_env
+    end
+    result = execute_bound_w_method(recv, method, method_env, block, call_node)
+    if @env_pool_enabled == 1
+      method_env.pool_link(@env_pool)
+      @env_pool = method_env
+      @env_pool_count += 1
+    end
+    result
   end
 RUBY
 final_bundle = replace_method(final_bundle, "instantiate_from_nodes", <<~RUBY)
   def instantiate_from_nodes(w_class, arg_nodes)
+    cm = w_class.lookup_class_method("new")
+    return call_w_method_from_nodes(w_class, cm, arg_nodes) if cm != nil
     obj = WObject.new(w_class)
     constructor = w_class.lookup_method("new")
     call_w_method_from_nodes(obj, constructor, arg_nodes) if constructor
     obj
   end
 RUBY
-# Strip debug ENV lookups from hot paths. Each `ENV["TUNGSTEN_..."] == "1"`
-# compiles to `sp_str_eq(sp_str_dup_external(getenv(X)), "1")` — getenv +
-# heap alloc + strcmp on every visit_hash_literal/visit_use/etc. The
-# dynamic version of stage0 has these unconditionally false; folding them
-# at build time eliminates the runtime overhead.
-#
-# 2026-05-22: extended the fold-to-false list to cover every trace ENV
-# var used by the bundle. Profiling stage 0 (compiler/tungsten.w under
-# the spinel-bootstrap path) showed 11.4 % of CPU in
-# getenv + __findenv_locked: there are 30 ENV[...] sites scattered
-# through visit_call / visit_def / visit_use / stack-trace helpers,
-# each hitting __findenv_locked's mutex on every interpreter step.
-# Folding them all to `false` is sound for non-debug runs since stage 0
-# only ever runs from the bootstrap script (no human sets these vars).
-# If you need any of these traces at debug time, comment the fold out
-# and rebuild.
 TRACE_ENV_VARS = %w[
   SPINEL_STAGE0_CALL_TRACE
   PROFILE_CALLS
@@ -10456,17 +12084,16 @@ TRACE_ENV_VARS = %w[
 ].freeze
 fold_pattern = Regexp.union(TRACE_ENV_VARS.map { |v| "TUNGSTEN_#{v}" })
 final_bundle = final_bundle.gsub(/ENV\["(?:#{fold_pattern.source})"\] == "1"/, "false")
-# Also fold the != "1" inverse where it appears (`unless ENV[…] == "1"` etc.)
 final_bundle = final_bundle.gsub(/ENV\["(?:#{fold_pattern.source})"\] != "1"/, "true")
 final_bundle = final_bundle.sub(
   "      @loaded_files = {}\n      @current_file = nil\n",
   "      @loaded_files = {}\n      @stage0_loading_depth = 0\n      @current_file = nil\n"
 )
 final_bundle = final_bundle.sub(
-  "      @current_block = \"\"\n",
-  "      @current_block = \"\"\n" \
+  "      @current_block = nil\n",
+  "      @current_block = nil\n" \
   "      @stage0_current_function = \"\"\n" \
-  "      @stage0_stack_trace_enabled = ENV[\"TUNGSTEN_STAGE0_STACK_TRACE\"] == \"1\" ? 1 : 0\n" \
+  "      @stage0_stack_trace_enabled = 0\n" \
   "      @stage0_call_stack = []\n"
 )
 final_use_methods = <<~RUBY
@@ -10476,10 +12103,6 @@ final_use_methods = <<~RUBY
     stdout_enabled = ENV["TUNGSTEN_PROGRESS_STDOUT"] == "1"
     return nil if (path == nil || path == "") && !stdout_enabled
 
-    # Build via string concatenation rather than `String.new << x`: in the
-    # stage0 bundle `String.new` resolves to the bundle's own String shim
-    # class (a user object with no `<<` operator), which the C spinel
-    # rejects. `+` on string literals lowers cleanly under both compilers.
     stamp = Time.now.to_i.to_s
     line = stamp + "\\t" + event.to_s
     if detail != nil && detail != ""
@@ -10500,2376 +12123,382 @@ final_use_methods = <<~RUBY
     nil
   end
 
-  def stage0_symbol_start_char?(ch)
-    code = ch.ord
-    return true if code >= 65 && code <= 90
-    return true if code >= 97 && code <= 122
-    ch == "_"
-  end
-
-  def stage0_symbol_part_char?(ch)
-    code = ch.ord
-    return true if code >= 65 && code <= 90
-    return true if code >= 97 && code <= 122
-    return true if code >= 48 && code <= 57
-    return true if ch == "_"
-    return true if ch == "?"
-    ch == "!"
-  end
-
-  def stage0_stringify_symbol_literals(line)
-    out = ""
-    in_string = false
-    i = 0
-    while i < line.length
-      ch = line.slice(i, 1)
-      if in_string
-        out = out + ch
-        if ch == "\\\\\\\\"
-          if i + 1 < line.length
-            out = out + line.slice(i + 1, 1)
-            i += 2
-            next
-          end
-        elsif ch == "\\\""
-          in_string = false
-        end
-        i += 1
-        next
-      end
-      if ch == "\\\""
-        in_string = true
-        out = out + ch
-        i += 1
-        next
-      end
-      if ch == ":" && i + 1 < line.length
-        next_ch = line.slice(i + 1, 1)
-        if stage0_symbol_start_char?(next_ch)
-          j = i + 2
-          while j < line.length && stage0_symbol_part_char?(line.slice(j, 1))
-            j += 1
-          end
-          sym_name = line.slice(i + 1, j - i - 1)
-          out = out + "\\\""
-          out = out + sym_name
-          out = out + "\\\""
-          i = j
-          next
-        end
-      end
-      out = out + ch
-      i += 1
+  def visit_unary_op(node)
+    val = evaluate(node.right)
+    op = node.operator.to_s
+    if op == "-"
+      return 0.0 - val if val.is_a?(Float)
+      return 0 - val.to_i
+    elsif op == "+"
+      return val
+    elsif op == "~"
+      return ~val.to_i
+    elsif op == "!"
+      return !truthy?(val)
     end
-    out
-  end
-
-  def stage0_collapse_simple_hash_blocks(source)
-    lines = source.to_s.split("\n")
-    out = ""
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      stripped = line.strip
-      if stripped.length > 0 && stripped.slice(stripped.length - 1, 1) == "{"
-        joined = ""
-        j = i + 1
-        close_token = ""
-        ok = true
-        while j < lines.length
-          inner = lines[j].strip
-          if inner == "}" || inner == "})"
-            close_token = inner
-            break
-          end
-          if joined != ""
-            joined = joined + " "
-          end
-          joined = joined + inner
-          j += 1
-        end
-        if ok && close_token != "" && joined != ""
-          out = out + line
-          out = out + joined
-          out = out + close_token
-          out = out + "\n"
-          i = j + 1
-          next
-        end
-      end
-      out = out + line
-      out = out + "\n"
-      i += 1
-    end
-    out
-  end
-
-  def stage0_strip_inline_language_comments(source)
-    lines = source.to_s.split("\n")
-    out = ""
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      if !line.strip.start_with?("#")
-        in_string = false
-        j = 0
-        cut = -1
-        while j < line.length
-          ch = line.slice(j, 1)
-          if in_string
-            if ch == "\\\\\\\\"
-              j += 2
-              next
-            elsif ch == "\\\""
-              in_string = false
-            end
-          elsif ch == "\\\""
-            in_string = true
-          elsif ch == "#"
-            if j == 0 || line.slice(j - 1, 1) == " " || line.slice(j - 1, 1) == "\t"
-              cut = j
-              break
-            end
-          end
-          j += 1
-        end
-        if cut >= 0
-          line = line.slice(0, cut)
-        end
-      end
-      out = out + line
-      out = out + "\n"
-      i += 1
-    end
-    out
-  end
-
-  def stage0_normalize_source(source)
-    lines = source.to_s.split("\\n")
-    out = ""
-    # Rewrite `<recv> << <expr>` (5 names: out, parts, result, fn_out,
-    # globals_out) to `<recv> = <recv> + <expr>` per-line — spinel's
-    # gsub-with-block silently no-ops (the block never fires), so the
-    # regex/block approach we tried first didn't work at runtime even
-    # though it works in CRuby. This split/join variant matches what
-    # the rest of the bundle uses (and what spinel supports).
-    rewrite_recvs = %w[out parts result fn_out globals_out]
-    new_lines = ""
-    li = 0
-    while li < lines.length
-      cur = lines[li]
-      cur_stripped = cur.strip
-      did_rewrite = false
-      ri = 0
-      while ri < rewrite_recvs.length
-        recv = rewrite_recvs[ri]
-        prefix = recv + " <" + "< "
-        if cur_stripped.start_with?(prefix)
-          # Preserve leading indentation by finding it
-          ws_len = cur.length - cur.lstrip.length
-          ws = cur.slice(0, ws_len)
-          expr = cur_stripped.slice(prefix.length, cur_stripped.length - prefix.length)
-          cur = ws + recv + " = " + recv + " + " + expr
-          did_rewrite = true
-          ri = rewrite_recvs.length
-        end
-        ri = ri + 1
-      end
-      new_lines = new_lines + cur + "\\n"
-      li = li + 1
-    end
-    source = new_lines
-    lines = source.split("\\n")
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      if line.strip == "" || line.strip.start_with?("#")
-        i += 1
-        next
-      end
-      line = self.stage0_stringify_symbol_literals(line)
-      line = self.stage0_rewrite_named_new(line, "Environment", "stage0_environment")
-      line = self.stage0_rewrite_named_new(line, "Interpreter", "stage0_interpreter")
-      line = self.stage0_rewrite_named_new(line, "Lexer", "stage0_lexer")
-      line = self.stage0_rewrite_named_new(line, "Loader", "stage0_loader")
-      line = self.stage0_rewrite_named_new(line, "Parser", "stage0_parser")
-      line = self.stage0_rewrite_named_new(line, "RegexLexer", "stage0_regex_lexer")
-      line = self.stage0_rewrite_named_new(line, "REPL", "stage0_repl")
-      class_parts = line.split("+ ")
-      if class_parts.length > 1 && class_parts[0] == ""
-        out = out + "class "
-        out = out + class_parts[1]
-      else
-        out = out + line
-      end
-      out = out + "\\n"
-      i += 1
-    end
-    out_s = out
-    out_s = out_s.split("raw_int_candidate_map(body, child_var_types)").join("{}")
-    out_s = out_s.split("raw_int_candidate_map(body, ctx[\\\"var_types\\\"])" ).join("{}")
-    out_s = out_s.split("raw_int_candidate_map(ast[\\\"expressions\\\"], var_types)").join("{}")
-    # slab_ast's first two arguments are required raw integer literals. The
-    # reduced stage-0 evaluator does not reliably implement the tuple-style
-    # `in` guard here, which leaves both operands nil in WIRE.
-    out_s = out_s.split("if kind_tv[\\\"type\\\"] in (\\\"raw_int\\\" \\\"raw_i64\\\" \\\"raw_u64\\\")").join("if true")
-    out_s = out_s.split("if sc_tv[\\\"type\\\"] in (\\\"raw_int\\\" \\\"raw_i64\\\" \\\"raw_u64\\\")").join("if true")
-    start_pos = out_s.index("-> wire_module")
-    end_pos = out_s.index("-> next_call_site_id")
-    if start_pos >= 0 && end_pos >= 0
-      # The original wire.w wire_module returns a symbol-keyed hash
-      # (`source_path:`, `functions:`, etc.) and the rest of the
-      # compiler reads back via `mod[:foo]`. The earlier rewrite to
-      # string-keyed (`"source_path" =>`) was inconsistent with how
-      # callers (lower_ast, emit_artifact, ...) actually access the
-      # hash, leading to nil reads + crashes in stage0_primitive_call
-      # ([] on a nil-typed value). Keep symbol keys here so the
-      # access paths match.
-      wire_module = "-> wire_module(source_path)\\n" +
-                    "  result = {source_path: source_path, functions: [], strings: [], string_ids_by_text: {}, known_classes: {}, known_traits: {}, known_calls: {}, known_static_methods: {}, known_fn_param_counts: {}, known_fn_overloads: {}, known_typed_overload_counts: {}, known_unique_typed_overload_keys: {}, known_unique_typed_overload_param_types: {}, known_pure_calls: {}, fn_return_types: {}, class_methods: {}, cvar_globals: {}, fn_memo_tables: {}, fn_memo_table_order: [], used_memo_tables: {}, used_memo_table_order: [], top_level_vars: {}, top_level_var_types: {}, top_level_static_types: {}, next_string: 0, next_block: 0, next_ic: 0, next_call_site: 0, reuse_sites: [], next_reuse_site: 0}\\n" +
-                    "  result\\n\\n"
-      out_s = out_s.slice(0, start_pos) + wire_module + out_s.slice(end_pos, out_s.length - end_pos)
-    end
-    out_s
-  end
-
-  def stage0_normalize_source_without_symbol_stringify(source)
-    lines = source.to_s.split("\n")
-    out = ""
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      if line.strip == "" || line.strip.start_with?("#")
-        i += 1
-        next
-      end
-      line = self.stage0_rewrite_named_new(line, "Environment", "stage0_environment")
-      line = self.stage0_rewrite_named_new(line, "Interpreter", "stage0_interpreter")
-      line = self.stage0_rewrite_named_new(line, "Lexer", "stage0_lexer")
-      line = self.stage0_rewrite_named_new(line, "Loader", "stage0_loader")
-      line = self.stage0_rewrite_named_new(line, "Parser", "stage0_parser")
-      line = self.stage0_rewrite_named_new(line, "RegexLexer", "stage0_regex_lexer")
-      line = self.stage0_rewrite_named_new(line, "REPL", "stage0_repl")
-      class_parts = line.split("+ ")
-      if class_parts.length > 1 && class_parts[0] == ""
-        out = out + "class "
-        out = out + class_parts[1]
-      else
-        out = out + line
-      end
-      out = out + "\n"
-      i += 1
-    end
-    out
-  end
-
-  def stage0_normalize_regex_source(source)
-    lines = source.to_s.split("\\n")
-    out = ""
-    skipping = false
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      if skipping
-        if line.start_with?("  -> ")
-          skipping = false
-        else
-          i += 1
-          next
-        end
-      end
-      if line == "  -> tokenize" || line == "  -> tokenize_one" || line == "  -> scan_regex"
-        skipping = true
-        i += 1
-        next
-      end
-      out = out + line
-      out = out + "\\n"
-      i += 1
-    end
-    self.stage0_normalize_source(out)
-  end
-
-  def stage0_normalize_lexer_source(source)
-    "class Lexer\n" +
-      "  -> new(source, file = nil)\n" +
-      "    stage0_set_lexer_input(source, file)\n" +
-      "  -> tokenize\n" +
-      "    stage0_tokenize_lexer_input()\n"
-  end
-
-  def stage0_normalize_wire_source(source)
-    lines = self.stage0_normalize_source(source).split("\\n")
-    out = ""
-    skip_result_after_entry = false
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      if line == "    blocks:          [],"
-        out = out + "    blocks:          [{label: \\"__entry\\", instructions: []}],\\n"
-        i += 1
-        next
-      end
-      if line == "  start_block(result, \\"__entry\\")"
-        skip_result_after_entry = true
-        i += 1
-        next
-      end
-      if skip_result_after_entry && line == "  result"
-        skip_result_after_entry = false
-        i += 1
-        next
-      end
-      skip_result_after_entry = false
-      out = out + line
-      out = out + "\\n"
-      i += 1
-    end
-    out_s = out
-    build_start = out_s.index("-> build_function")
-    build_end = out_s.index("-> next_temp")
-    if build_start >= 0 && build_end > build_start
-      build_fn = ""
-      build_fn = build_fn + "-> build_function(name, params, return_type, is_toplevel, extra_params)\\n"
-      build_fn = build_fn + "  result = {name: name, original_name: name, params: params, extra_params: extra_params, return_type: return_type, is_toplevel: is_toplevel, blocks: [], var_slots: {}, var_slot_types: {}, next_temp: 0, next_label: 0, next_var: 0, next_scope: 0, loop_stack: [], scope_recycle_stack: [nil], recycle_vars: {}, is_memoized: false, exit_label: nil, result_slot: nil}\\n"
-      build_fn = build_fn + "  start_block(result, \\"__entry\\")\\n"
-      build_fn = build_fn + "  result\\n\\n"
-      out_s = out_s.slice(0, build_start) + build_fn + out_s.slice(build_end, out_s.length - build_end)
-    end
-    emit_start = out_s.index("-> emit_instruction")
-    emit_end = out_s.index("-> emit_scope_push")
-    if emit_start >= 0 && emit_end > emit_start
-      emit_fn = ""
-      emit_fn = emit_fn + "-> emit_instruction(f, instruction)\\n"
-      emit_fn = emit_fn + "  blk = current_block(f)\\n"
-      emit_fn = emit_fn + "  instrs = blk[\\"instructions\\"]\\n"
-      emit_fn = emit_fn + "  instrs.push(instruction)\\n"
-      emit_fn = emit_fn + "  stage0_hash_set(blk, \\"instructions\\", instrs)\\n"
-      emit_fn = emit_fn + "  nil\\n"
-      out_s = out_s.slice(0, emit_start) + emit_fn + out_s.slice(emit_end, out_s.length - emit_end)
-    end
-    finalize_start = out_s.index("-> finalize_function")
-    finalize_end = out_s.index("-> optimize_function")
-    if finalize_start >= 0 && finalize_end > finalize_start
-      finalize_fn = ""
-      finalize_fn = finalize_fn + "-> finalize_function(f)\\n"
-      finalize_fn = finalize_fn + "  terminated = block_terminated(f)\\n"
-      finalize_fn = finalize_fn + "  if env(\\"TUNGSTEN_STAGE0_LOWER_TRACE\\") == \\"1\\"\\n"
-      finalize_fn = finalize_fn + "    trace = \\"terminated=\\" + type(terminated).to_s() + \\":\\" + terminated.to_s() + \\" return_type=\\" + f[\\"return_type\\"].to_s() + \\" before=\\" + f[\\"blocks\\"][0][\\"instructions\\"].size().to_s() + \\"\\\\n\\"\\n"
-      finalize_fn = finalize_fn + "  if terminated\\n"
-      finalize_fn = finalize_fn + "    nil\\n"
-      finalize_fn = finalize_fn + "  else\\n"
-      finalize_fn = finalize_fn + "    if env(\\"TUNGSTEN_STAGE0_LOWER_TRACE\\") == \\"1\\"\\n"
-      finalize_fn = finalize_fn + "      trace = trace + \\"branch=else\\\\n\\"\\n"
-      finalize_fn = finalize_fn + "    emit_recycles_for_current_scope(f)\\n"
-      finalize_fn = finalize_fn + "    emit_instruction(f, {op: \\"ret_i32\\", value: \\"0\\"})\\n"
-      finalize_fn = finalize_fn + "  if env(\\"TUNGSTEN_STAGE0_LOWER_TRACE\\") == \\"1\\"\\n"
-      finalize_fn = finalize_fn + "    trace = trace + \\"after=\\" + f[\\"blocks\\"][0][\\"instructions\\"].size().to_s() + \\"\\\\n\\"\\n"
-      finalize_fn = finalize_fn + "    write_file(\\"/tmp/tungsten-stage0-finalize-fn\\", trace)\\n"
-      finalize_fn = finalize_fn + "  nil\\n"
-      out_s = out_s.slice(0, finalize_start) + finalize_fn + out_s.slice(finalize_end, out_s.length - finalize_end)
-    end
-    out_s
-  end
-
-  def stage0_normalize_target_source(source)
-    out = ""
-    out = out + "-> detect_target\\n"
-    out = out + "  { os: \\"macos\\", arch: \\"arm64\\", features: [] }\\n"
-    out = out + "-> detect_features(os)\\n"
-    out = out + "  []\\n"
-    out = out + "-> detect_llvm_target\\n"
-    out = out + "  { datalayout: \\"\\", triple: \\"\\", fn_attrs: \\"\\" }\\n"
-    out = out + "-> detect_host_fn_attrs\\n"
-    out = out + "  \\"\\"\\n"
-    out = out + "-> normalize_designator(name)\\n"
-    out = out + "  if name in (\\"amd64\\" \\"intel\\")\\n"
-    out = out + "    return \\"x86_64\\"\\n"
-    out = out + "  if name == \\"aarch64\\"\\n"
-    out = out + "    return \\"arm64\\"\\n"
-    out = out + "  name\\n"
-    out = out + "-> evaluate_target_predicate(node, target)\\n"
-    out = out + "  case node[:node]\\n"
-    out = out + "  when :target_designator\\n"
-    out = out + "    name = normalize_designator(node[:name])\\n"
-    out = out + "    return target[:os] == name || target[:arch] == name\\n"
-    out = out + "  when :target_and\\n"
-    out = out + "    return evaluate_target_predicate(node[:left], target) && evaluate_target_predicate(node[:right], target)\\n"
-    out = out + "  when :target_or\\n"
-    out = out + "    return evaluate_target_predicate(node[:left], target) || evaluate_target_predicate(node[:right], target)\\n"
-    out = out + "  when :target_not\\n"
-    out = out + "    return !evaluate_target_predicate(node[:expression], target)\\n"
-    out = out + "  false\\n"
-    out = out + "-> target_matches?(predicate, capabilities, target)\\n"
-    out = out + "  if !evaluate_target_predicate(predicate, target)\\n"
-    out = out + "    return false\\n"
-    out = out + "  i = 0\\n"
-    out = out + "  while i < capabilities.size()\\n"
-    out = out + "    if !target[:features].include?(capabilities[i])\\n"
-    out = out + "      return false\\n"
-    out = out + "    i += 1\\n"
-    out = out + "  true\\n"
-    out = out + "-> expand_on_guards(body, target)\\n"
-    out = out + "  result = []\\n"
-    out = out + "  i = 0\\n"
-    out = out + "  while i < body.size()\\n"
-    out = out + "    expr = body[i]\\n"
-    out = out + "    if expr[:node] == :on_guard\\n"
-    out = out + "      if target_matches?(expr[:predicate], expr[:capabilities], target)\\n"
-    out = out + "        j = 0\\n"
-    out = out + "        while j < expr[:body].size()\\n"
-    out = out + "          result.push(expr[:body][j])\\n"
-    out = out + "          j += 1\\n"
-    out = out + "    else\\n"
-    out = out + "      result.push(expr)\\n"
-    out = out + "    i += 1\\n"
-    out = out + "  result\\n"
-    out
-  end
-
-  def stage0_normalize_lowering_source(source)
-    normalized = self.stage0_normalize_source(self.stage0_strip_inline_language_comments(source))
-    # Stage 0 deliberately disables entrypoint ARGV discovery. The normal
-    # compiler now fuses those checks into the builtin-runtime-use walk, so
-    # strip the two inline checks here instead of replacing the removed
-    # recursive ast_uses_argv helper.
-    normalized = normalized.split(
-      "    if t == \\"var\\" && mod[\\"uses_argv\\"] != true && node.name == \\"ARGV\\"\\n" \
-      "      mod[\\"uses_argv\\"] = true\\n"
-    ).join("")
-    normalized = normalized.split(
-      "    if mod[\\"uses_argv\\"] != true && node.receiver == nil && node.name == \\"argv\\"\\n" \
-      "      mod[\\"uses_argv\\"] = true\\n"
-    ).join("")
-    profile_start = normalized.index("-> lower_ast_print_profile")
-    profile_end = normalized.index("-> lower_ast(ast")
-    if profile_start >= 0 && profile_end >= 0
-      normalized = normalized.slice(0, profile_start) +
-                   "-> lower_ast_print_profile(profile)\\n  nil\\n" +
-                   normalized.slice(profile_end, normalized.length - profile_end)
-    end
-    maps_start = normalized.index("-> build_infer_maps")
-    maps_end = normalized.index("-> normalize_type_symbol")
-    if maps_start >= 0 && maps_end >= 0
-      normalized = normalized.slice(0, maps_start) +
-                   "-> build_infer_maps(int_op_map, cmp_op_map, float_op_map, fcmp_op_map)\\n  nil\\n" +
-                   normalized.slice(maps_end, normalized.length - maps_end)
-    end
-    normalized = normalized.split("max_iter = 3").join("max_iter = 0")
-    normalized = normalized.split("still_changing = true").join("still_changing = false")
-    normalized = normalized.split("builtin_runtime_classes = [\\"Socket\\", \\"Response\\", \\"TLS\\", \\"StringBuffer\\", \\"StandardError\\"]").join("builtin_runtime_classes = nil")
-    normalized = normalized.split("static_cond = static_bool_value(node[:condition])").join("static_cond = nil")
-    normalized = normalized.split("static_cond = static_bool_value(node[\\"condition\\"])").join("static_cond = nil")
-    normalized = normalized.split("  setup_started_at = clock()\n").join(
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"setup_start\\\")\n" \
-      "  setup_started_at = clock()\n"
-    )
-    normalized = normalized.split("  mod = wire_module(source_path)\n").join(
-      "  mod = wire_module(source_path)\n" \
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"wire_module_done\\\")\n"
-    )
-    normalized = normalized.split("  builtin_classes = builtin_runtime_classes\n").join(
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"before_builtin_classes\\\")\n" \
-      "  builtin_classes = builtin_runtime_classes\n" \
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"after_builtin_classes\\\")\n"
-    )
-    normalized = normalized.split("  prepass_started_at = clock()\n").join(
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"before_prepass\\\")\n" \
-      "  prepass_started_at = clock()\n"
-    )
-    normalized = normalized.split("  collect_top_level_static_types(mod, ast[\\\"expressions\\\"])\n").join(
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"before_static_types\\\")\n" \
-      "  collect_top_level_static_types(mod, ast[\\\"expressions\\\"])\n" \
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"after_static_types\\\")\n"
-    )
-    normalized = normalized.split("  mark_builtin_runtime_class_uses(ast[\\\"expressions\\\"], mod)\n").join(
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"before_builtin_uses\\\")\n" \
-      "  mark_builtin_runtime_class_uses(ast[\\\"expressions\\\"], mod)\n" \
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"after_builtin_uses\\\")\n"
-    )
-    normalized = normalized.split("  source_class_init_started_at = clock()\n").join(
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"before_source_classes\\\")\n" \
-      "  source_class_init_started_at = clock()\n"
-    )
-    normalized = normalized.split("  collect_ivar_types(mod)\n").join(
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"before_ivar_types\\\")\n" \
-      "  collect_ivar_types(mod)\n" \
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"after_ivar_types\\\")\n"
-    )
-    normalized = normalized.split("  mark_nonescaping_small_arrays(ast[:expressions])\n").join("  nil\n")
-    normalized = normalized.split("  mark_nonescaping_small_arrays(ast[\\\"expressions\\\"])\n").join(
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"skip_small_arrays\\\")\n" \
-      "  nil\n"
-    )
-    normalized = self.stage0_collapse_simple_hash_blocks(normalized)
-    normalized = normalized.split("  if !block_terminated(main_fn)\\n").join("  if block_terminated(main_fn) == false\\n")
-    normalized = normalized.split("  if !block_terminated(wfn)\\n").join("  if block_terminated(wfn) == false\\n")
-    normalized = normalized.split("    if !block_terminated(wfn)\\n").join("    if block_terminated(wfn) == false\\n")
-    normalized = normalized.split("  if !block_terminated(new_fn)\\n").join("  if block_terminated(new_fn) == false\\n")
-    normalized = normalized.split("    if !block_terminated(new_fn)\\n").join("    if block_terminated(new_fn) == false\\n")
-
-    lower_statement_start = normalized.index("-> lower_statement(ctx, node)")
-    lower_statement_end = normalized.index("-> lower_expression", lower_statement_start || 0)
-    if lower_statement_start != nil && lower_statement_end != nil && lower_statement_end > lower_statement_start
-      lower_statement = ""
-      lower_statement = lower_statement + "-> lower_statement(ctx, node)\\n"
-      lower_statement = lower_statement + "  t = node[\\\"node\\\"]\\n"
-      lower_statement = lower_statement + "  if t == \\\"assign\\\"\\n"
-      lower_statement = lower_statement + "    lower_assign_expr(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"if\\\"\\n"
-      lower_statement = lower_statement + "    materialize_bindings(ctx)\\n"
-      lower_statement = lower_statement + "    return lower_if(ctx, node)\\n"
-      lower_statement = lower_statement + "  if t == \\\"call\\\"\\n"
-      lower_statement = lower_statement + "    if node[\\\"receiver\\\"] == nil && node[\\\"name\\\"] == \\\"constant_alias\\\"\\n"
-      lower_statement = lower_statement + "      return nil\\n"
-      lower_statement = lower_statement + "    lower_expression(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"return\\\"\\n"
-      lower_statement = lower_statement + "    return lower_return(ctx, node)\\n"
-      lower_statement = lower_statement + "  if t == \\\"compound_assign\\\"\\n"
-      lower_statement = lower_statement + "    lower_compound_assign(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"binary_op\\\"\\n"
-      lower_statement = lower_statement + "    lower_expression(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"while\\\"\\n"
-      lower_statement = lower_statement + "    materialize_bindings(ctx)\\n"
-      lower_statement = lower_statement + "    return lower_while(ctx, node)\\n"
-      lower_statement = lower_statement + "  if t == \\\"method_def\\\"\\n"
-      lower_statement = lower_statement + "    idx = ctx[\\\"enclosing_stmt_idx\\\"]\\n"
-      lower_statement = lower_statement + "    if idx == nil\\n"
-      lower_statement = lower_statement + "      idx = 0\\n"
-      lower_statement = lower_statement + "    if false\\n"
-      lower_statement = lower_statement + "      nil\\n"
-      lower_statement = lower_statement + "    return lower_method_def(ctx, node)\\n"
-      lower_statement = lower_statement + "  if t == \\\"puts\\\"\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"print\\\"\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"fn_def\\\"\\n"
-      lower_statement = lower_statement + "    return lower_fn_def(ctx, node)\\n"
-      lower_statement = lower_statement + "  if t == \\\"class_def\\\" || t == \\\"module_def\\\"\\n"
-      lower_statement = lower_statement + "    return lower_class_def(ctx, node)\\n"
-      lower_statement = lower_statement + "  if t == \\\"trait_def\\\" || t == \\\"trait_include\\\"\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"case\\\"\\n"
-      lower_statement = lower_statement + "    materialize_bindings(ctx)\\n"
-      lower_statement = lower_statement + "    lower_case(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"case_value\\\"\\n"
-      lower_statement = lower_statement + "    materialize_bindings(ctx)\\n"
-      lower_statement = lower_statement + "    lower_case_value(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"begin\\\"\\n"
-      lower_statement = lower_statement + "    materialize_bindings(ctx)\\n"
-      lower_statement = lower_statement + "    return lower_begin(ctx, node)\\n"
-      lower_statement = lower_statement + "  if t == \\\"raise\\\"\\n"
-      lower_statement = lower_statement + "    return lower_raise(ctx, node)\\n"
-      lower_statement = lower_statement + "  if t == \\\"break\\\"\\n"
-      lower_statement = lower_statement + "    return lower_break(ctx)\\n"
-      lower_statement = lower_statement + "  if t == \\\"next\\\"\\n"
-      lower_statement = lower_statement + "    return lower_next(ctx)\\n"
-      lower_statement = lower_statement + "  if t == \\\"with\\\"\\n"
-      lower_statement = lower_statement + "    materialize_bindings(ctx)\\n"
-      lower_statement = lower_statement + "    return lower_with(ctx, node)\\n"
-      lower_statement = lower_statement + "  if t == \\\"yield\\\"\\n"
-      lower_statement = lower_statement + "    lower_yield(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"passthrough\\\"\\n"
-      lower_statement = lower_statement + "    lower_expression(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"go\\\"\\n"
-      lower_statement = lower_statement + "    lower_go(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"multi_assign\\\"\\n"
-      lower_statement = lower_statement + "    lower_multi_assign(ctx, node)\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  if t == \\\"on_guard\\\"\\n"
-      lower_statement = lower_statement + "    return nil\\n"
-      lower_statement = lower_statement + "  nil\\n"
-      normalized = normalized.slice(0, lower_statement_start) + lower_statement + normalized.slice(lower_statement_end, normalized.length - lower_statement_end)
-    end
-    # The Spinel-built stage0 parser currently loses the top-level dedent
-    # after this particular multi-line hash argument in lower_var. Keep the
-    # source equivalent, but make the call one physical line for stage0.
-    lower_var_self_dispatch = "    emit_instruction(wfn, {\\n" +
-      "      op: :call_method_i64,\\n" +
-      "      temp: temp,\\n" +
-      "      temp_args_val: temp_args,\\n" +
-      "      receiver: self_reg,\\n" +
-      "      method_name_val: method_name_val,\\n" +
-      "      args: [],\\n" +
-      "      ic_id: ic_id\\n" +
-      "    })\\n"
-    normalized = normalized.split(lower_var_self_dispatch).join(
-      "    emit_instruction(wfn, {op: :call_method_i64, temp: temp, temp_args_val: temp_args, receiver: self_reg, method_name_val: method_name_val, args: [], ic_id: ic_id})\\n"
-    )
-    ctx_start = normalized.index("  ctx = {")
-    ctx_end = -1
-    if ctx_start >= 0
-      ctx_tail = normalized.slice(ctx_start, normalized.length - ctx_start)
-      ctx_marker = ctx_tail.index("  mark_builtin_runtime_class_uses")
-      if ctx_marker != nil && ctx_marker >= 0
-        ctx_end = ctx_start + ctx_marker
-      end
-    end
-    if ctx_start >= 0 && ctx_end > ctx_start
-	      ctx_block = ""
-	      ctx_block = ctx_block + "  ctx = {}\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"mod\\\"] = mod\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"func\\\"] = main_fn\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"var_types\\\"] = var_types\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"class_name\\\"] = nil\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"source_path\\\"] = source_path\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"bindings\\\"] = {}\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"unboxed_vars\\\"] = {}\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"raw_int_candidates\\\"] = {}\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"method_name\\\"] = nil\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"is_class_method\\\"] = false\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"is_block\\\"] = false\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"verbose\\\"] = verbose\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"profile\\\"] = profile\\n"
-	      # progress_enabled?() isn't defined anywhere in compiler/ — the
-	      # template references a function that was either removed or
-	      # never existed. Hard-code false in stage 0 (no progress UI
-	      # during bootstrap). Drop this stub if/when progress_enabled?
-	      # lands upstream.
-	      ctx_block = ctx_block + "  ctx[\\\"progress\\\"] = false\\n"
-	      ctx_block = ctx_block + "  ctx[\\\"progress_lowered_functions\\\"] = 0\\n"
-	      ctx_block = ctx_block + "  ctx[:progress] = ctx[\\\"progress\\\"]\\n"
-      normalized = normalized.slice(0, ctx_start) + ctx_block + normalized.slice(ctx_end, normalized.length - ctx_end)
-    end
-	    normalized = normalized.split("lowering_op_map = init_op_map()\\n").join("")
-	    normalized = normalized.split("  prepend_memo_table_initializers(main_fn, mod)\\n").join("  nil\\n")
-	    # Compiler refactor (commit 9a98107f etc.) migrated ast["expressions"]
-	    # to ast.expressions across the lowering pipeline. The stage 0 bundle's
-	    # AST is a Hash (`{"expressions" => out, :expressions => out, ...}`)
-	    # and `hash.expressions` returns nil under stage 0's interpreter, so
-	    # the rewrite below — which substitutes the lower_program call site
-	    # with an inline iteration — needs to match BOTH spellings. The
-	    # `.expressions` form is what current sources use.
-	    normalized = normalized.split("  lower_program(ctx, ast.expressions)\\n").join("  lower_program(ctx, ast[\\\"expressions\\\"])\\n")
-	    normalized = normalized.split("  lower_program(ctx, ast[\\\"expressions\\\"])\\n").join(
-	      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-	      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"before_lower_program\\\")\n" \
-	      "  statements = ast[\\\"expressions\\\"]\n" \
-	      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-	      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"after_statements\\\")\n" \
-	      "  prev_stmts = ctx[\\\"enclosing_stmts\\\"]\n" \
-	      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-	      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"after_prev_stmts\\\")\n" \
-	      "  ctx[\\\"enclosing_stmts\\\"] = statements\n" \
-	      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-	      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"after_ctx_stmts\\\")\n" \
-	      "  stage0_i = 0\n" \
-	      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\n" \
-	      "    write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"before_loop_size\\\")\n" \
-	      "  while stage0_i < statements.size()\n" \
-	      "    if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\" && stage0_i == 0\n" \
-	      "      write_file(\\\"/tmp/tungsten-stage0-lower-phase\\\", \\\"inside_loop\\\")\n" \
-	      "    ctx[\\\"enclosing_stmt_idx\\\"] = stage0_i\n" \
-	      "    if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\" && stage0_i < 5\n" \
-	      "      st = statements[stage0_i]\n" \
-	      "      write_file(\\\"/tmp/tungsten-stage0-lower-stmt-\\\" + stage0_i.to_s(), \\\"i=\\\" + stage0_i.to_s() + \\\" node=\\\" + st[\\\"node\\\"].to_s())\n" \
-	      "    lower_statement(ctx, statements[stage0_i])\n" \
-	      "    if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\" && stage0_i < 5\n" \
-	      "      write_file(\\\"/tmp/tungsten-stage0-lower-stmt-after-\\\" + stage0_i.to_s(), \\\"after_i=\\\" + stage0_i.to_s())\n" \
-	      "    stage0_i += 1\n" \
-	      "  ctx[\\\"enclosing_stmts\\\"] = prev_stmts\n" \
-	      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\\n" \
-	      "    trace = \\\"exprs=\\\" + ast[\\\"expressions\\\"].size().to_s() + \\\"\\\\n\\\"\\n" \
-      "    trace = trace + \\\"blocks=\\\" + main_fn[\\\"blocks\\\"].size().to_s() + \\\"\\\\n\\\"\\n" \
-      "    if main_fn[\\\"blocks\\\"].size() > 0\\n" \
-      "      trace = trace + \\\"after_lower_instrs=\\\" + main_fn[\\\"blocks\\\"][0][\\\"instructions\\\"].size().to_s() + \\\"\\\\n\\\"\\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-lower-trace\\\", trace)\\n"
-    )
-	    normalized = normalized.split("    lower_statement(ctx, statements[i])\\n").join(
-	      "    if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\" && i < 5\\n" \
-	      "      st = statements[i]\\n" \
-	      "      trace = \\\"i=\\\" + i.to_s() + \\\" node=\\\" + st[\\\"node\\\"].to_s() + \\\"/\\\" + st[:node].to_s() + \\\"\\\\n\\\"\\n" \
-	      "      write_file(\\\"/tmp/tungsten-stage0-lower-stmt-\\\" + i.to_s(), trace)\\n" \
-      "    lower_statement(ctx, statements[i])\\n" \
-      "    if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\" && i < 5\\n" \
-      "      trace = \\\"after_i=\\\" + i.to_s() + \\\" instrs=\\\" + ctx[\\\"func\\\"][\\\"blocks\\\"][0][\\\"instructions\\\"].size().to_s() + \\\"\\\\n\\\"\\n" \
-	      "      write_file(\\\"/tmp/tungsten-stage0-lower-stmt-after-\\\" + i.to_s(), trace)\\n"
-	    )
-    lower_program_start = normalized.index("-> lower_program(ctx, statements)")
-    lower_program_end = normalized.index("-> lower_statement(ctx, node)", lower_program_start || 0)
-    if lower_program_start != nil && lower_program_end != nil && lower_program_end > lower_program_start
-      lower_program = ""
-      lower_program = lower_program + "-> lower_program(ctx, statements)\\n"
-      lower_program = lower_program + "  prev_stmts = ctx[\\\"enclosing_stmts\\\"]\\n"
-      lower_program = lower_program + "  ctx[\\\"enclosing_stmts\\\"] = statements\\n"
-      lower_program = lower_program + "  i = 0\\n"
-      lower_program = lower_program + "  while i < statements.size()\\n"
-      lower_program = lower_program + "    if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\" && i < 5\\n"
-      lower_program = lower_program + "      st = statements[i]\\n"
-      lower_program = lower_program + "      write_file(\\\"/tmp/tungsten-stage0-lower-stmt-\\\" + i.to_s(), \\\"i=\\\" + i.to_s() + \\\" node=\\\" + st[\\\"node\\\"].to_s())\\n"
-      lower_program = lower_program + "    if block_terminated(ctx[\\\"func\\\"])\\n"
-      lower_program = lower_program + "      ctx[\\\"enclosing_stmts\\\"] = prev_stmts\\n"
-      lower_program = lower_program + "      return nil\\n"
-      lower_program = lower_program + "    ctx[\\\"enclosing_stmt_idx\\\"] = i\\n"
-      lower_program = lower_program + "    lower_statement(ctx, statements[i])\\n"
-      lower_program = lower_program + "    if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\" && i < 5\\n"
-      lower_program = lower_program + "      write_file(\\\"/tmp/tungsten-stage0-lower-stmt-after-\\\" + i.to_s(), \\\"after_i=\\\" + i.to_s())\\n"
-      lower_program = lower_program + "    i += 1\\n"
-      lower_program = lower_program + "  ctx[\\\"enclosing_stmts\\\"] = prev_stmts\\n"
-      lower_program = lower_program + "  nil\\n"
-      normalized = normalized.slice(0, lower_program_start) + lower_program + normalized.slice(lower_program_end, normalized.length - lower_program_end)
-    end
-	    normalized = normalized.split("  finalize_function(main_fn)\\n").join(
-	      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\\n" \
-      "    trace = \\\"before_finalize_blocks=\\\" + main_fn[\\\"blocks\\\"].size().to_s() + \\\"\\\\n\\\"\\n" \
-      "    if main_fn[\\\"blocks\\\"].size() > 0\\n" \
-      "      trace = trace + \\\"before_finalize_instrs=\\\" + main_fn[\\\"blocks\\\"][0][\\\"instructions\\\"].size().to_s() + \\\"\\\\n\\\"\\n" \
-      "    bt = block_terminated(main_fn)\\n" \
-      "    trace = trace + \\\"block_terminated=\\\" + type(bt).to_s() + \\\":\\\" + bt.to_s() + \\\"\\\\n\\\"\\n" \
-      "    if bt == false\\n" \
-      "      trace = trace + \\\"not_bt_branch=1\\\\n\\\"\\n" \
-      "    else\\n" \
-      "      trace = trace + \\\"not_bt_branch=0\\\\n\\\"\\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-finalize-before\\\", trace)\\n" \
-      "  finalize_function(main_fn)\\n" \
-      "  if env(\\\"TUNGSTEN_STAGE0_LOWER_TRACE\\\") == \\\"1\\\"\\n" \
-      "    trace = \\\"after_finalize_blocks=\\\" + main_fn[\\\"blocks\\\"].size().to_s() + \\\"\\\\n\\\"\\n" \
-      "    if main_fn[\\\"blocks\\\"].size() > 0\\n" \
-      "      trace = trace + \\\"after_finalize_instrs=\\\" + main_fn[\\\"blocks\\\"][0][\\\"instructions\\\"].size().to_s() + \\\"\\\\n\\\"\\n" \
-      "    write_file(\\\"/tmp/tungsten-stage0-finalize-after\\\", trace)\\n"
-    )
-    normalized = normalized.split("lowering_int_op_map = init_int_op_map()\\n").join("")
-    normalized = normalized.split("lowering_cmp_op_map = init_cmp_op_map()\\n").join("")
-    normalized = normalized.split("lowering_float_op_map = init_float_op_map()\\n").join("")
-    normalized = normalized.split("lowering_fcmp_op_map = init_fcmp_op_map()\\n").join("")
-    normalized = normalized.split("lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map, lowering_float_op_map, lowering_fcmp_op_map)\\n").join("")
-    normalized
-  end
-
-  def stage0_normalize_content_hash_source(source)
-    "-> content_hash_pass(mod, verbose = false)\\n  mod\\n"
-  end
-
-  def stage0_normalize_loader_source(_source)
-    source = ""
-    source = source + "use lexer\\n"
-    source = source + "use parser\\n"
-    source = source + "\\n"
-    source = source + "+ Loader\\n"
-    source = source + "  -> new(@verbose = false)\\n"
-    source = source + "    @loaded_files = []\\n"
-    source = source + "\\n"
-    source = source + "  -> load_program_ast(path, from_file = nil)\\n"
-    source = source + "    resolved = resolve_path(path, from_file)\\n"
-    source = source + "    if env(\\\"TUNGSTEN_STAGE0_LOADER_TRACE\\\") == \\\"1\\\"\\n"
-    source = source + "      trace_path = \\\"/tmp/tungsten-stage0-loader-trace.txt\\\"\\n"
-    source = source + "      trace_text = \\\"\\\"\\n"
-    source = source + "      if file?(trace_path)\\n"
-    source = source + "        trace_text = read_file(trace_path)\\n"
-    source = source + "      write_file(trace_path, trace_text + \\\"load \\\" + resolved + \\\"\\\\n\\\")\\n"
-    source = source + "    if @loaded_files.include?(resolved)\\n"
-    source = source + "      if env(\\\"TUNGSTEN_STAGE0_LOADER_TRACE\\\") == \\\"1\\\"\\n"
-    source = source + "        trace_path = \\\"/tmp/tungsten-stage0-loader-trace.txt\\\"\\n"
-    source = source + "        write_file(trace_path, read_file(trace_path) + \\\"skip \\\" + resolved + \\\"\\\\n\\\")\\n"
-    source = source + "      empty_tokens = stage0_tokenize_source(\\\"\\\", resolved)\\n"
-    source = source + "      empty_parser = Parser.new(empty_tokens)\\n"
-    source = source + "      return empty_parser.parse()\\n"
-    source = source + "    @loaded_files.push(resolved)\\n"
-    source = source + "    if env(\\\"TUNGSTEN_STAGE0_LOADER_TRACE\\\") == \\\"1\\\"\\n"
-    source = source + "      trace_path = \\\"/tmp/tungsten-stage0-loader-trace.txt\\\"\\n"
-    source = source + "      write_file(trace_path, read_file(trace_path) + \\\"read \\\" + resolved + \\\"\\\\n\\\")\\n"
-    source = source + "    source = read_file(resolved)\\n"
-    source = source + "    tokens = stage0_tokenize_source(source, resolved)\\n"
-    source = source + "    parser = Parser.new(tokens)\\n"
-    source = source + "    if env(\\\"TUNGSTEN_STAGE0_LOADER_TRACE\\\") == \\\"1\\\"\\n"
-    source = source + "      trace_path = \\\"/tmp/tungsten-stage0-loader-trace.txt\\\"\\n"
-    source = source + "      write_file(trace_path, read_file(trace_path) + \\\"parser-new \\\" + resolved + \\\"\\\\n\\\")\\n"
-    source = source + "    ast = parser.parse()\\n"
-    source = source + "    if env(\\\"TUNGSTEN_STAGE0_LOADER_TRACE\\\") == \\\"1\\\"\\n"
-    source = source + "      trace_path = \\\"/tmp/tungsten-stage0-loader-trace.txt\\\"\\n"
-    source = source + "      write_file(trace_path, read_file(trace_path) + \\\"parsed \\\" + resolved + \\\"\\\\n\\\")\\n"
-    source = source + "    expressions = []\\n"
-    source = source + "    i = 0\\n"
-    source = source + "    raw_expressions = ast_get(ast, :expressions)\\n"
-    source = source + "    while i < raw_expressions.size()\\n"
-    source = source + "      expr = raw_expressions[i]\\n"
-    source = source + "      if ast_kind(expr) == :use\\n"
-    source = source + "        imported = self.load_program_ast(ast_get(expr, :path), resolved)\\n"
-    source = source + "        j = 0\\n"
-    source = source + "        imported_expressions = ast_get(imported, :expressions)\\n"
-    source = source + "        while j < imported_expressions.size()\\n"
-    source = source + "          expressions.push(imported_expressions[j])\\n"
-    source = source + "          j += 1\\n"
-    source = source + "      else\\n"
-    source = source + "        expressions.push(expr)\\n"
-    source = source + "      i += 1\\n"
-    source = source + "    ast_set(ast, :expressions, expressions)\\n"
-    source = source + "    if env(\\\"TUNGSTEN_STAGE0_LOADER_TRACE\\\") == \\\"1\\\"\\n"
-    source = source + "      trace_path = \\\"/tmp/tungsten-stage0-loader-trace.txt\\\"\\n"
-    source = source + "      write_file(trace_path, read_file(trace_path) + \\\"done \\\" + resolved + \\\"\\\\n\\\")\\n"
-    source = source + "    ast\\n"
-    source = source + "\\n"
-    source = source + "  -> resolve_path(path, from_file = nil)\\n"
-    source = source + "    if path.ends_with?(\\\".w\\\") && file?(path)\\n"
-    source = source + "      return path\\n"
-    source = source + "    base_dir = \\\"\\\"\\n"
-    source = source + "    root_dir = \\\"\\\"\\n"
-    source = source + "    if from_file != nil\\n"
-    source = source + "      parts = from_file.split(\\\"/\\\")\\n"
-    source = source + "      count = parts.size() - 1\\n"
-    source = source + "      pi = 0\\n"
-    source = source + "      while pi < count\\n"
-    source = source + "        if pi == 0\\n"
-    source = source + "          base_dir = parts[pi]\\n"
-    source = source + "        else\\n"
-    source = source + "          base_dir = base_dir + \\\"/\\\" + parts[pi]\\n"
-    source = source + "        pi += 1\\n"
-    source = source + "      root_dir = base_dir\\n"
-    source = source + "      if count > 0 && parts[count - 1] == \\\"lib\\\"\\n"
-    source = source + "        root_dir = \\\"\\\"\\n"
-    source = source + "        pi = 0\\n"
-    source = source + "        while pi < count - 1\\n"
-    source = source + "          if pi == 0\\n"
-    source = source + "            root_dir = parts[pi]\\n"
-    source = source + "          else\\n"
-    source = source + "            root_dir = root_dir + \\\"/\\\" + parts[pi]\\n"
-    source = source + "          pi += 1\\n"
-    source = source + "    resolved = path\\n"
-    source = source + "    if !resolved.ends_with?(\\\".w\\\")\\n"
-    source = source + "      resolved = resolved + \\\".w\\\"\\n"
-    source = source + "    if file?(resolved)\\n"
-    source = source + "      return resolved\\n"
-    source = source + "    candidate = base_dir + \\\"/\\\" + path\\n"
-    source = source + "    if !candidate.ends_with?(\\\".w\\\")\\n"
-    source = source + "      candidate = candidate + \\\".w\\\"\\n"
-    source = source + "    if file?(candidate)\\n"
-    source = source + "      return candidate\\n"
-    source = source + "    if root_dir != \\\"\\\"\\n"
-    source = source + "      candidate = root_dir + \\\"/\\\" + path\\n"
-    source = source + "      if !candidate.ends_with?(\\\".w\\\")\\n"
-    source = source + "        candidate = candidate + \\\".w\\\"\\n"
-    source = source + "      if file?(candidate)\\n"
-    source = source + "        return candidate\\n"
-    source = source + "    candidate = \\\"compiler/\\\" + path\\n"
-    source = source + "    if !candidate.ends_with?(\\\".w\\\")\\n"
-    source = source + "      candidate = candidate + \\\".w\\\"\\n"
-    source = source + "    if file?(candidate)\\n"
-    source = source + "      return candidate\\n"
-    source = source + "    resolved\\n"
-    stage0_normalize_compiler_language_source(source)
-  end
-
-  def stage0_normalize_compiler_language_source(source)
-    normalized = ""
-    normalized = "" + self.stage0_normalize_source(self.stage0_strip_inline_language_comments(source)).to_s
-    if normalized.include?("-> ast_file(path, source, body)") && normalized.include?("slab_alloc_init(")
-      return "" + self.stage0_normalize_ast_source(normalized).to_s
-    end
-    normalized = normalized.split("stage0_loader(").join("Loader.new(")
-    normalized = normalized.split("stage0_lexer(").join("Lexer.new(")
-    normalized = normalized.split("stage0_parser(").join("Parser.new(")
-    normalized = normalized.split("stage0_interpreter(").join("Interpreter.new(")
-    normalized = normalized.split("stage0_regex_lexer(").join("RegexLexer.new(")
-    normalized = self.stage0_patch_parser_source(normalized)
-    "" + normalized.to_s
-  end
-
-  def stage0_normalize_ruby_parse_source(source)
-    lines = self.stage0_strip_inline_language_comments(source).split("\n")
-    out = ""
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      stripped = line.strip
-      if stripped != "" && !stripped.start_with?("#")
-        line = self.stage0_stringify_symbol_literals(line)
-        then_return = line.index(" then return ")
-        if then_return != nil && then_return >= 0
-          indent = ""
-          j = 0
-          while j < line.length && line.slice(j, 1) == " "
-            indent = indent + " "
-            j += 1
-          end
-          before = line.slice(0, then_return)
-          after = line.slice(then_return + 13, line.length - then_return - 13)
-          out = out + before
-          out = out + "\n"
-          out = out + indent
-          out = out + "  return "
-          out = out + after
-          out = out + "\n"
-        else
-          out = out + line
-          out = out + "\n"
-        end
-      end
-      i += 1
-    end
-    normalized = out.split("emit_instruction(wfn, {op: \\\"const_color\\\", temp: temp,\\n    r: (packed >> 24) & 0xff,\\n    g: (packed >> 16) & 0xff,\\n    b: (packed >> 8) & 0xff,\\n    a: packed & 0xff})").join("emit_instruction(wfn, {op: \\\"const_color\\\", temp: temp, r: (packed >> 24) & 0xff, g: (packed >> 16) & 0xff, b: (packed >> 8) & 0xff, a: packed & 0xff})")
-    normalized = normalized.split("raw_int_candidate_map(body, child_var_types)").join("{}")
-    normalized = normalized.split("raw_int_candidate_map(body, ctx[\\\"var_types\\\"])" ).join("{}")
-    # slab_ast's first two arguments are required raw integer literals. The
-    # direct parser stringifies symbol literals before this point, while its
-    # reduced evaluator does not reliably implement the tuple-style `in` guard.
-    normalized = normalized.split("if kind_tv[\\\"type\\\"] in (\\\"raw_int\\\" \\\"raw_i64\\\" \\\"raw_u64\\\")").join("if true")
-    normalized = normalized.split("if sc_tv[\\\"type\\\"] in (\\\"raw_int\\\" \\\"raw_i64\\\" \\\"raw_u64\\\")").join("if true")
-    # The reduced parser does not treat newlines inside braces as structural
-    # whitespace. Split compiler modules now contain multiline hash literals,
-    # so normalize them just as the original monolithic lowering source was.
-    self.stage0_collapse_simple_hash_blocks(normalized)
-  end
-
-  def stage0_normalize_ast_source(source)
-    return ""
-
-    out = ""
-    ctor_source = source.split("-> ast_node_key(node)")[0]
-    ctor_source.split("\n").each do |line|
-      stripped = line.strip
-      next unless stripped.start_with?("-> ast_")
-
-      sig = stripped.byteslice(3, stripped.length - 3)
-      open_idx = sig.index("(")
-      if open_idx == nil
-        name = sig
-        params_src = ""
-      else
-        name = sig.byteslice(0, open_idx)
-        rest = sig.byteslice(open_idx + 1, sig.length - open_idx - 1)
-        close_idx = rest.index(")")
-        if close_idx == nil
-          params_src = rest
-        else
-          params_src = rest.byteslice(0, close_idx)
-        end
-      end
-      node_name = name.sub(/^ast_/, "")
-      node_name = "nil_lit" if node_name == "nil"
-      node_name = "self_ref" if node_name == "self"
-      node_name = "return" if node_name == "return_nil"
-      params = params_src.split(",").map do |part|
-        part.strip.split("=").first.strip
-      end.reject(&:empty?)
-
-      out << "-> " + name
-      out << "(" + params_src + ")" unless params_src.empty?
-      out << "\n"
-      fields = ["node: :" + node_name]
-      params.each do |param_name|
-        fields << param_name + ": " + param_name
-      end
-      out << "  {" + fields.join(", ") + "}\n\n"
-    end
-
-    out << <<~W
-      -> ast_node_key(node)
-        node
-
-      -> ast_get(node, sym)
-        if node == nil
-          return nil
-        if type(node) == "Hash"
-          value = node[sym]
-          if value != nil
-            return value
-          return node[sym.to_s()]
-        nil
-
-      -> ast_set(node, sym, value)
-        if node == nil
-          return nil
-        if type(node) == "Hash"
-          node[sym.to_s()] = value
-          return value
-        value
-
-      -> ast_kind(node)
-        if node == nil
-          return nil
-        if type(node) == "Hash"
-          value = node["node"]
-          if value != nil
-            return value
-          return node[:node]
-        nil
-
-      -> block_body(node)
-        ast_get(node, :body)
-
-      -> program_body(node)
-        ast_get(node, :expressions)
-
-      -> is_ast_node?(node)
-        type(node) == "Hash" && ast_kind(node) != nil
-
-      -> ast_children_program(node)
-        out = []
-        exprs = program_body(node)
-        if exprs != nil
-          j = 0
-          while j < exprs.size()
-            elt = exprs[j]
-            if is_ast_node?(elt)
-              out.push(elt)
-            j += 1
-        out
-
-      -> ast_children_block(node)
-        out = []
-        params = ast_get(node, :params)
-        if params != nil
-          j = 0
-          while j < params.size()
-            elt = params[j]
-            if is_ast_node?(elt)
-              out.push(elt)
-            j += 1
-        body = block_body(node)
-        if body != nil
-          j = 0
-          while j < body.size()
-            elt = body[j]
-            if is_ast_node?(elt)
-              out.push(elt)
-            j += 1
-        out
-
-      -> ast_children(node)
-        out = []
-        if type(node) != "Hash"
-          return out
-        keys = node.keys()
-        i = 0
-        while i < keys.size()
-          v = node[keys[i]]
-          if is_ast_node?(v)
-            out.push(v)
-          elsif type(v) == "Array"
-            j = 0
-            while j < v.size()
-              elt = v[j]
-              if is_ast_node?(elt)
-                out.push(elt)
-              j += 1
-          i += 1
-        out
-
-      -> ast_array_fields(node)
-        ast_children(node)
-
-      -> ast_deep_clone(node)
-        node
-    W
-    out
-  end
-
-  def stage0_replace_parser_method(source, name, replacement)
-    marker = "  -> " + name
-    start_pos = source.index(marker)
-    if ENV["TUNGSTEN_STAGE0_PATCH_DEBUG"] == "1"
-      File.write("/tmp/tungsten-stage0-patch-debug.txt",
-                 "replace " + name.to_s + " start=" + start_pos.to_s + "\n")
-    end
-    if start_pos == nil || start_pos < 0
-      return source
-    end
-    tail_start = start_pos + marker.length
-    tail = source.slice(tail_start, source.length - tail_start)
-    rel_end = tail.index("\n  -> ")
-    if rel_end == nil || rel_end < 0
-      end_pos = source.length
-    else
-      end_pos = tail_start + rel_end
-    end
-    source.slice(0, start_pos) + replacement + source.slice(end_pos, source.length - end_pos)
-  end
-
-  def stage0_prefix_parser_self_calls(source)
-    source
-  end
-
-  def stage0_patch_parser_source(source)
-    marker_pos = source.index("  -> parse_call_chain")
-    if ENV["TUNGSTEN_STAGE0_PATCH_DEBUG"] == "1"
-      File.write("/tmp/tungsten-stage0-patch-debug.txt",
-                 "patch marker=" + marker_pos.to_s + "\n")
-    end
-    if marker_pos == nil || marker_pos < 0
-      return source
-    end
-    source = source.split("  -> new(@tokens)\n").join(
-      "  -> new(tokens)\n" \
-      "    @tokens = tokens\n"
-    )
-    source = source.split("    @pos = 0\n    @token_count = @tokens.size()").join(
-      "    @pos = 0\n" \
-      "    @current_type = \\\"\\\"\n" \
-      "    @current_value = \\\"\\\"\n" \
-      "    @token_count = @tokens.size()"
-    )
-    source = source.split("    @pos = 0\n    @current_type = \\\"\\\"\n").join(
-      "    @pos = 0\n" \
-      "    if env(\\\"TUNGSTEN_STAGE0_WPARSER_INIT_TRACE\\\") == \\\"1\\\"\n" \
-      "      write_file(\\\"/tmp/tungsten-stage0-parser-new-1\\\", @tokens.size().to_s())\n" \
-      "    @current_type = \\\"\\\"\n"
-    )
-    source = source.split("    sync_current()\n  -> sync_current\n").join(
-      "    if env(\\\"TUNGSTEN_STAGE0_WPARSER_INIT_TRACE\\\") == \\\"1\\\"\n" \
-      "      write_file(\\\"/tmp/tungsten-stage0-parser-new-before-sync\\\", @token_count.to_s())\n" \
-      "    sync_current()\n" \
-      "    if env(\\\"TUNGSTEN_STAGE0_WPARSER_INIT_TRACE\\\") == \\\"1\\\"\n" \
-      "      write_file(\\\"/tmp/tungsten-stage0-parser-new-after-sync\\\", @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" \
-      "  -> sync_current\n" \
-      "    if env(\\\"TUNGSTEN_STAGE0_WPARSER_INIT_TRACE\\\") == \\\"1\\\"\n" \
-      "      write_file(\\\"/tmp/tungsten-stage0-parser-sync-enter\\\", @pos.to_s() + \\\":\\\" + @token_count.to_s())\n"
-    )
-    source = source.split("      @current_type = @current_token[\\\"type\\\"]\n      @current_value = @current_token[\\\"value\\\"]").join(
-      "      @current_type = @current_token[\\\"type\\\"].to_s()\n" \
-      "      @current_value = @current_token[\\\"value\\\"]\n" \
-      "      if env(\\\"TUNGSTEN_STAGE0_WPARSER_INIT_TRACE\\\") == \\\"1\\\"\n" \
-      "        write_file(\\\"/tmp/tungsten-stage0-parser-sync-token\\\", @current_type.to_s() + \\\":\\\" + @current_value.to_s())"
-    )
-    source = source.split("    @current_type = \\\"EOF\\\"\n    @current_value = nil").join(
-      "    @current_type = \\\"EOF\\\"\n" \
-      "    @current_value = \\\"\\\""
-    )
-    source = source.split("  -> parse_primary\n").join("  -> parse_primary\n    skip_spaces()\n")
-    source = source.split("  -> parse_primary\n    skip_spaces()\n").join(
-      "  -> parse_primary\n" \
-      "    skip_spaces()\n" \
-      "    if env(\\\"TUNGSTEN_STAGE0_ARROW_TRACE\\\") == \\\"1\\\" && at?(\\\"ARROW\\\")\n" \
-      "      write_file(\\\"/tmp/tungsten-stage0-arrow-primary\\\", @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n"
-    )
-    source = source.split("    left = parse_ternary()\n\n    # Multi-assignment").join(
-      "    left = parse_ternary()\n" \
-      "    skip_spaces()\n\n" \
-      "    # Multi-assignment"
-    )
-    source = source.split("    left = parse_ternary()\n    if at?(\\\"COMMA\\\")").join(
-      "    left = parse_ternary()\n" \
-      "    skip_spaces()\n" \
-      "    if at?(\\\"COMMA\\\")"
-    )
-    {
-      "PLUS_EQ" => "PLUS_EQ",
-      "MINUS_EQ" => "MINUS_EQ",
-      "STAR_EQ" => "STAR_EQ",
-      "SLASH_EQ" => "SLASH_EQ",
-      "PERCENT_EQ" => "PERCENT_EQ",
-      "PLUS_PLUS" => "PLUS_PLUS",
-      "MINUS_MINUS" => "MINUS_MINUS",
-      "OR_ASSIGN" => "OR_ASSIGN"
-    }.each do |sym_name, string_name|
-      source = source.split("if at?(:" + sym_name + ")").join("if at?(\\\"" + string_name + "\\\")")
-    end
-    source = source.split("    tok = @current_token\n    while tok[\\\"type\\\"] in").join(
-      "    skip_spaces()\n" \
-      "    tok = @current_token\n" \
-      "    while tok[\\\"type\\\"] in"
-    )
-    source = source.split("      left = ast_binary_op(left, op, right)\n      tok = @current_token").join(
-      "      left = ast_binary_op(left, op, right)\n" \
-      "      skip_spaces()\n" \
-      "      tok = @current_token"
-    )
-    source = source.split("    left = parse_unary()\n    if at?(\\\"POW\\\")").join(
-      "    left = parse_unary()\n" \
-      "    skip_spaces()\n" \
-      "    if at?(\\\"POW\\\")"
-    )
-    source = source.split("      return parse_method_def()\n").join(
-      "      if env(\\\"TUNGSTEN_STAGE0_ARROW_TRACE\\\") == \\\"1\\\"\n" \
-      "        write_file(\\\"/tmp/tungsten-stage0-arrow-method-branch\\\", @pos.to_s() + \\\":peek=\\" + peek()[\\\"type\\\"].to_s())\n" \
-      "      return parse_method_def()\n"
-    )
-    source = source.split("    if at?(\\\"KEYWORD\\\", \\\"true\\\")\n").join(
-      "    if at?(\\\"TRUE\\\")\n" \
-      "      advance()\n" \
-      "      return ast_bool(true)\n" \
-      "    if at?(\\\"FALSE\\\")\n" \
-      "      advance()\n" \
-      "      return ast_bool(false)\n" \
-      "    if at?(\\\"NIL\\\")\n" \
-      "      advance()\n" \
-      "      return ast_nil()\n" \
-      "    if at?(\\\"KEYWORD\\\", \\\"true\\\")\n"
-    )
-    source = source.split("    if at?(:PUTS_OP)\n").join(
-      "    if at?(\\\"LSHIFT\\\")\n" \
-      "      advance()\n" \
-      "      value = parse_assignment()\n" \
-      "      return ast_puts(value)\n" \
-      "    if at?(\\\"PUTS_OP\\\")\n" \
-      "      advance()\n" \
-      "      value = parse_assignment()\n" \
-      "      return ast_puts(value)\n" \
-      "    if at?(:PUTS_OP)\n"
-    )
-    source = source.split("    then_body = parse_body()\n\n    elsif_clauses = []\n").join(
-      "    then_body = parse_body()\n" \
-      "    skip_newlines()\n" \
-      "    skip_spaces()\n\n" \
-      "    elsif_clauses = []\n"
-    )
-    source = source.split("    then_body = parse_body()\n    elsif_clauses = []\n").join(
-      "    then_body = parse_body()\n" \
-      "    skip_newlines()\n" \
-      "    skip_spaces()\n" \
-      "    if env(\\\"TUNGSTEN_STAGE0_IF_TRACE\\\") == \\\"1\\\"\n" \
-      "      write_file(\\\"/tmp/tungsten-stage0-if-trace\\\", @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" \
-      "    elsif_clauses = []\n"
-    )
-    source = source.split("    while at?(\\\"KEYWORD\\\", \\\"elsif\\\")\n").join(
-      "    while at?(\\\"KEYWORD\\\", \\\"elsif\\\")\n" \
-      "      if env(\\\"TUNGSTEN_STAGE0_IF_TRACE\\\") == \\\"1\\\"\n" \
-      "        write_file(\\\"/tmp/tungsten-stage0-if-trace\\\", \\\"elsif:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n"
-    )
-    source = source.split("    arrow_tok = expect(\\\"ARROW\\\")\n    method_line = arrow_tok[\\\"line\\\"]\n").join(
-      "    arrow_tok = expect(\\\"ARROW\\\")\n" \
-      "    skip_spaces()\n" \
-      "    method_line = arrow_tok[\\\"line\\\"]\n"
-    )
-    source = source.split("elsif at?(\\\"INDENT\\\")\n      body = parse_body()").join(
-      "elsif at?(\\\"INDENT\\\")\n" \
-      "      body = parse_body()\n" \
-      "    elsif at?(\\\"SP\\\")\n" \
-      "      body = parse_body()"
-    )
-    source = source.split("        match?(\\\"COMMA\\\")\n      expect(\\\"RPAREN\\\")").join(
-      "        match?(\\\"COMMA\\\")\n" \
-      "        skip_spaces()\n" \
-      "      expect(\\\"RPAREN\\\")"
-    )
-    source = source.split("    elsif at?(\\\"LPAREN\\\")\n      advance()\n      while !at?(\\\"RPAREN\\\")\n        params.push(parse_method_param())\n        match?(\\\"COMMA\\\")\n        skip_spaces()\n      expect(\\\"RPAREN\\\")").join(
-      "    elsif at?(\\\"LPAREN\\\")\n" \
-      "      advance()\n" \
-      "      keep_params = true\n" \
-      "      while keep_params\n" \
-      "        skip_spaces()\n" \
-      "        if at?(\\\"RPAREN\\\")\n" \
-      "          keep_params = false\n" \
-      "        else\n" \
-      "          params.push(parse_method_param())\n" \
-      "          skip_spaces()\n" \
-      "          if at?(\\\"COMMA\\\")\n" \
-      "            advance()\n" \
-      "            skip_spaces()\n" \
-      "          else\n" \
-      "            keep_params = false\n" \
-      "      expect(\\\"RPAREN\\\")"
-    )
-    source = source.split("      tok = expect_identifier_name()\n      param_name = tok[\\\"value\\\"]\n    if at?(\\\"COLON\\\")\n").join(
-      "      tok = expect_identifier_name()\n" \
-      "      param_name = tok[\\\"value\\\"]\n" \
-      "    skip_spaces()\n" \
-      "    if at?(\\\"COLON\\\")\n"
-    )
-    source = source.split("      advance()\n      default = nil\n      if !at?(\\\"COMMA\\\") && !at?(\\\"RPAREN\\\")\n").join(
-      "      advance()\n" \
-      "      skip_spaces()\n" \
-      "      default = nil\n" \
-      "      if !at?(\\\"COMMA\\\") && !at?(\\\"RPAREN\\\")\n"
-    )
-    source = source.split("    if at?(\\\"ASSIGN\\\")\n      advance()\n      default = parse_expression()\n").join(
-      "    if at?(\\\"ASSIGN\\\")\n" \
-      "      advance()\n" \
-      "      skip_spaces()\n" \
-      "      default = parse_expression()\n"
-    )
-    source = source.split("    skip_newlines()\n    body = nil\n").join(
-      "    skip_newlines()\n" \
-      "    if env(\\\"TUNGSTEN_STAGE0_METHOD_BODY_TRACE\\\") == \\\"1\\\"\n" \
-      "      write_file(\\\"/tmp/tungsten-stage0-method-body-start\\\", base_name.to_s() + \\\":\\" + @pos.to_s() + \\\":\\" + @current_type.to_s() + \\\":\\" + @current_value.to_s())\n" \
-      "    body = nil\n"
-    )
-    source = source.split("      if !at?(\\\"NEWLINE\\\") && !at?(\\\"DEDENT\\\") && !at?(\\\"EOF\\\") && !at?(\\\"SEMICOLON\\\")\n        trailing_expr = parse_expression()\n").join(
-      "      stop_trailing = false\n" \
-      "      if at?(\\\"NEWLINE\\\")\n" \
-      "        stop_trailing = true\n" \
-      "      if at?(\\\"DEDENT\\\")\n" \
-      "        stop_trailing = true\n" \
-      "      if at?(\\\"EOF\\\")\n" \
-      "        stop_trailing = true\n" \
-      "      if at?(\\\"SEMICOLON\\\")\n" \
-      "        stop_trailing = true\n" \
-      "      if stop_trailing == false\n" \
-      "        trailing_expr = parse_expression()\n"
-    )
-    source = source.split("    result = ast_method_def(base_name, params, body, type_hints, is_class_method)\n").join(
-      "    result = ast_method_def(base_name, params, body, type_hints, is_class_method)\n" \
-      "    if env(\\\"TUNGSTEN_STAGE0_METHOD_PARSE_TRACE\\\") == \\\"1\\\"\n" \
-      "      write_file(\\\"/tmp/tungsten-stage0-method-parse-trace\\\", base_name.to_s() + \\\":\\\" + result[\\\"node\\\"].to_s())\n"
-    )
-    source = source.split("      elsif_body = parse_body()\n      elsif_clauses.push([elsif_cond, elsif_body])\n").join(
-      "      elsif_body = parse_body()\n" \
-      "      skip_newlines()\n" \
-      "      skip_spaces()\n" \
-      "      elsif_clauses.push([elsif_cond, elsif_body])\n"
-    )
-    source = source.split("    body = parse_body()\n\n    rescue_var = nil\n").join(
-      "    body = parse_body()\n" \
-      "    skip_newlines()\n" \
-      "    skip_spaces()\n\n" \
-      "    rescue_var = nil\n"
-    )
-    source = source.split("    body = parse_body()\n    rescue_var = nil\n").join(
-      "    body = parse_body()\n" \
-      "    skip_newlines()\n" \
-      "    skip_spaces()\n" \
-      "    rescue_var = nil\n"
-    )
-    source = source.split("      rescue_body = parse_body()\n\n    ensure_body = nil\n").join(
-      "      rescue_body = parse_body()\n" \
-      "      skip_newlines()\n" \
-      "      skip_spaces()\n\n" \
-      "    ensure_body = nil\n"
-    )
-    source = source.split("      rescue_body = parse_body()\n    ensure_body = nil\n").join(
-      "      rescue_body = parse_body()\n" \
-      "      skip_newlines()\n" \
-      "      skip_spaces()\n" \
-      "    ensure_body = nil\n"
-    )
-
-    parse_call_chain = "  -> parse_call_chain\n" +
-      "    expr = parse_primary()\n" +
-      "    skip_spaces()\n" +
-      "    cont = true\n" +
-      "    while cont\n" +
-      "      cont = false\n" +
-      "      if at?(\\\"DOT\\\")\n" +
-      "        advance()\n" +
-      "        name_tok = expect_method_name()\n" +
-      "        name = name_tok[\\\"value\\\"]\n" +
-      "        result = parse_call_args_and_block(true, name_tok[:line], name_tok[\\\"col\\\"], name_tok[\\\"value\\\"])\n" +
-      "        args = result[0]\n" +
-      "        block = result[1]\n" +
-      "        if args == nil\n" +
-      "          args = []\n" +
-      "        expr = ast_call(expr, name, args, block)\n" +
-      "        expr[:line] = name_tok[:line]\n" +
-      "        expr[\\\"col\\\"] = name_tok[\\\"col\\\"]\n" +
-      "        cont = true\n" +
-      "      if at?(\\\"SAFE_NAV\\\")\n" +
-      "        advance()\n" +
-      "        name_tok = expect_method_name()\n" +
-      "        name = name_tok[\\\"value\\\"]\n" +
-      "        result = parse_call_args_and_block(true, name_tok[:line], name_tok[\\\"col\\\"], name_tok[\\\"value\\\"])\n" +
-      "        args = result[0]\n" +
-      "        block = result[1]\n" +
-      "        if args == nil\n" +
-      "          args = []\n" +
-      "        expr = ast_safe_nav(expr, name, args, block)\n" +
-      "        expr[:line] = name_tok[:line]\n" +
-      "        expr[\\\"col\\\"] = name_tok[\\\"col\\\"]\n" +
-      "        cont = true\n" +
-      "      if at?(\\\"LBRACKET\\\")\n" +
-      "        if is_block_node?(expr)\n" +
-      "          cont = false\n" +
-      "        else\n" +
-      "          lbr_tok = current()\n" +
-      "          advance()\n" +
-      "          index = parse_expression()\n" +
-      "          expect(\\\"RBRACKET\\\")\n" +
-      "          assigned = false\n" +
-      "          if at?(\\\"ASSIGN\\\")\n" +
-      "            advance()\n" +
-      "            value = parse_assignment()\n" +
-      "            expr = ast_call(expr, \\\"[]=\\\", [index, value])\n" +
-      "            assigned = true\n" +
-      "          if assigned == false\n" +
-      "            expr = ast_call(expr, \\\"[]\\\", [index])\n" +
-      "          expr[:line] = lbr_tok[:line]\n" +
-      "          expr[\\\"col\\\"] = lbr_tok[\\\"col\\\"]\n" +
-      "          cont = true\n" +
-      "      skip_spaces()\n" +
-      "    expr\n"
-
-    parse_call_args = "  -> parse_call_args_and_block(allow_block_without_args, call_line, call_col, call_name)\n" +
-      "    args = nil\n" +
-      "    block = nil\n" +
-      "    has_parens = false\n" +
-      "    if at?(\\\"LPAREN\\\")\n" +
-      "      has_parens = true\n" +
-      "      advance()\n" +
-      "      args = parse_arg_list(\\\"RPAREN\\\")\n" +
-      "      expect(\\\"RPAREN\\\")\n" +
-      "    if args != nil || has_parens || allow_block_without_args\n" +
-      "      if at?(\\\"LBRACE\\\")\n" +
-      "        block = parse_block()\n" +
-      "      if block == nil && at?(\\\"ARROW\\\")\n" +
-      "        block = parse_lambda()\n" +
-      "    [args, block]\n"
-
-    parse_arg_list = "  -> parse_arg_list(terminator)\n" +
-      "    args = []\n" +
-      "    skip_newlines()\n" +
-      "    while true\n" +
-      "      skip_spaces()\n" +
-      "      skip_newlines()\n" +
-      "      skip_spaces()\n" +
-      "      if at?(terminator)\n" +
-      "        return args\n" +
-      "      if at?(\\\"AMPERSAND\\\")\n" +
-      "        advance()\n" +
-      "        name_tok = expect_identifier_name()\n" +
-      "        args.push(ast_var(name_tok[\\\"value\\\"]))\n" +
-      "      elsif at?(\\\"POW\\\")\n" +
-      "        advance()\n" +
-      "        args.push(parse_expression())\n" +
-      "      elsif at?(\\\"STAR\\\")\n" +
-      "        advance()\n" +
-      "        if at?(\\\"STAR\\\")\n" +
-      "          advance()\n" +
-      "        args.push(parse_expression())\n" +
-      "      elsif keyword_label_token?()\n" +
-      "        entries = []\n" +
-      "        while keyword_label_token?()\n" +
-      "          key_tok = advance()\n" +
-      "          advance()\n" +
-      "          val = parse_expression()\n" +
-      "          entries.push([ast_symbol(key_tok[\\\"value\\\"]), val])\n" +
-      "          skip_spaces()\n" +
-      "          if at?(\\\"COMMA\\\")\n" +
-      "            advance()\n" +
-      "            skip_spaces()\n" +
-      "            skip_newlines()\n" +
-      "          else\n" +
-      "            kwh = ast_hash_literal(entries)\n" +
-      "            kwh[:from_kwargs] = true\n" +
-      "            args.push(kwh)\n" +
-      "            if at?(\\\"COMMA\\\")\n" +
-      "              advance()\n" +
-      "              skip_spaces()\n" +
-      "              skip_newlines()\n" +
-      "            else\n" +
-      "              return args\n" +
-      "        kwh = ast_hash_literal(entries)\n" +
-      "        kwh[:from_kwargs] = true\n" +
-      "        args.push(kwh)\n" +
-      "      else\n" +
-      "        arg = parse_expression()\n" +
-      "        skip_spaces()\n" +
-      "        if at?(\\\"FAT_ARROW\\\")\n" +
-      "          advance()\n" +
-      "          val = parse_expression()\n" +
-      "          arg = ast_hash_literal([[arg, val]])\n" +
-      "        args.push(arg)\n" +
-      "      skip_spaces()\n" +
-      "      if at?(\\\"COMMA\\\")\n" +
-      "        advance()\n" +
-      "        skip_spaces()\n" +
-      "        skip_newlines()\n" +
-      "      else\n" +
-      "        return args\n" +
-      "    args\n"
-
-    parse_if = "  -> parse_if\n" +
-      "    expect(\\\"KEYWORD\\\", \\\"if\\\")\n" +
-      "    condition = parse_expression()\n" +
-      "    if at?(\\\"KEYWORD\\\", \\\"then\\\")\n" +
-      "      advance()\n" +
-      "      then_expr = parse_expression()\n" +
-      "      else_body = nil\n" +
-      "      if at?(\\\"KEYWORD\\\", \\\"else\\\")\n" +
-      "        advance()\n" +
-      "        else_body = [parse_expression()]\n" +
-      "      return ast_if(condition, [then_expr], [], else_body)\n" +
-      "    skip_newlines()\n" +
-      "    skip_spaces()\n" +
-      "    then_body = parse_body()\n" +
-      "    skip_newlines()\n" +
-      "    skip_spaces()\n" +
-      "    if env(\\\"TUNGSTEN_STAGE0_IF_TRACE\\\") == \\\"1\\\"\n" +
-      "      write_file(\\\"/tmp/tungsten-stage0-if-trace\\\", \\\"after_then:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "    elsif_clauses = []\n" +
-      "    keep_elsif = true\n" +
-      "    while keep_elsif\n" +
-      "      skip_newlines()\n" +
-      "      skip_spaces()\n" +
-      "      if env(\\\"TUNGSTEN_STAGE0_IF_TRACE\\\") == \\\"1\\\"\n" +
-      "        write_file(\\\"/tmp/tungsten-stage0-if-trace\\\", \\\"elsif_check:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "      if at?(\\\"KEYWORD\\\", \\\"elsif\\\")\n" +
-      "        if env(\\\"TUNGSTEN_STAGE0_IF_TRACE\\\") == \\\"1\\\"\n" +
-      "          write_file(\\\"/tmp/tungsten-stage0-if-trace\\\", \\\"elsif_take:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "        advance()\n" +
-      "        elsif_cond = parse_expression()\n" +
-      "        skip_newlines()\n" +
-      "        skip_spaces()\n" +
-      "        elsif_body = parse_body()\n" +
-      "        elsif_clauses.push([elsif_cond, elsif_body])\n" +
-      "      else\n" +
-      "        keep_elsif = false\n" +
-      "    skip_newlines()\n" +
-      "    skip_spaces()\n" +
-      "    else_body = nil\n" +
-      "    if at?(\\\"KEYWORD\\\", \\\"else\\\")\n" +
-      "      advance()\n" +
-      "      skip_newlines()\n" +
-      "      skip_spaces()\n" +
-      "      else_body = parse_body()\n" +
-      "    ast_if(condition, then_body, elsif_clauses, else_body)\n"
-
-    parse_range = "  -> parse_range\n" +
-      "    left = parse_pipeline()\n" +
-      "    skip_spaces()\n" +
-      "    if at?(\\\"DOTDOT\\\")\n" +
-      "      advance()\n" +
-      "      right = nil\n" +
-      "      stop = false\n" +
-      "      if at?(\\\"RBRACKET\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"RPAREN\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"NEWLINE\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"EOF\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"COMMA\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"DEDENT\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"ARROW\\\")\n" +
-      "        stop = true\n" +
-      "      if stop == false\n" +
-      "        right = parse_or()\n" +
-      "      return ast_range(left, right, false)\n" +
-      "    if at?(\\\"DOTDOTDOT\\\")\n" +
-      "      advance()\n" +
-      "      right = nil\n" +
-      "      stop = false\n" +
-      "      if at?(\\\"RBRACKET\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"RPAREN\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"NEWLINE\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"EOF\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"COMMA\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"DEDENT\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"ARROW\\\")\n" +
-      "        stop = true\n" +
-      "      if stop == false\n" +
-      "        right = parse_or()\n" +
-      "      return ast_range(left, right, true)\n" +
-      "    left\n"
-
-    parse_or = "  -> parse_or\n" +
-      "    left = parse_and()\n" +
-      "    skip_spaces()\n" +
-      "    while at?(\\\"OR\\\")\n" +
-      "      advance()\n" +
-      "      skip_spaces()\n" +
-      "      right = parse_and()\n" +
-      "      left = ast_or(left, right)\n" +
-      "      skip_spaces()\n" +
-      "    left\n"
-
-    parse_and = "  -> parse_and\n" +
-      "    left = parse_in_test()\n" +
-      "    skip_spaces()\n" +
-      "    while at?(\\\"AND\\\")\n" +
-      "      advance()\n" +
-      "      skip_spaces()\n" +
-      "      right = parse_in_test()\n" +
-      "      left = ast_and(left, right)\n" +
-      "      skip_spaces()\n" +
-      "    left\n"
-
-    parse_in_test = "  -> parse_in_test\n" +
-      "    left = parse_bitwise_or()\n" +
-      "    skip_spaces()\n" +
-      "    if at?(\\\"KEYWORD\\\", \\\"in\\\")\n" +
-      "      advance()\n" +
-      "      skip_spaces()\n" +
-      "      tok = current()\n" +
-      "      if at?(\\\"LPAREN\\\")\n" +
-      "        advance()\n" +
-      "      else\n" +
-      "        raise {rt: :compile_error, code: :E_PARSE_IN_EXPECTS_TUPLE, message: \\\"`in` requires a parenthesized tuple on the right-hand side\\\", file: tok[:file], row: tok[:line], col: tok[:col], span_length: 1}\n" +
-      "      elements = []\n" +
-      "      keep = true\n" +
-      "      while keep\n" +
-      "        skip_spaces()\n" +
-      "        if at?(\\\"RPAREN\\\")\n" +
-      "          advance()\n" +
-      "          keep = false\n" +
-      "        elsif at?(\\\"EOF\\\")\n" +
-      "          keep = false\n" +
-      "        else\n" +
-      "          elements.push(parse_expression())\n" +
-      "          skip_spaces()\n" +
-      "      if elements.size() == 0\n" +
-      "        raise {rt: :compile_error, code: :E_PARSE_IN_EMPTY_TUPLE, message: \\\"`in` tuple must have at least one element\\\", file: tok[:file], row: tok[:line], col: tok[:col], span_length: 1}\n" +
-      "      return ast_in_test(left, elements)\n" +
-      "    left\n"
-
-    parse_begin = "  -> parse_begin\n" +
-      "    expect(\\\"KEYWORD\\\", \\\"begin\\\")\n" +
-      "    skip_newlines()\n" +
-      "    skip_spaces()\n" +
-      "    body = parse_body()\n" +
-      "    skip_newlines()\n" +
-      "    skip_spaces()\n" +
-      "    rescue_var = nil\n" +
-      "    rescue_body = nil\n" +
-      "    if at?(\\\"KEYWORD\\\", \\\"rescue\\\")\n" +
-      "      advance()\n" +
-      "      skip_spaces()\n" +
-      "      if at?(\\\"ID\\\")\n" +
-      "        rescue_var = expect(\\\"ID\\\")[\\\"value\\\"]\n" +
-      "        skip_spaces()\n" +
-      "        if at?(\\\"COLON\\\")\n" +
-      "          advance()\n" +
-      "          skip_spaces()\n" +
-      "          expect(\\\"NAME\\\")\n" +
-      "      skip_newlines()\n" +
-      "      skip_spaces()\n" +
-      "      rescue_body = parse_body()\n" +
-      "      skip_newlines()\n" +
-      "      skip_spaces()\n" +
-      "    ensure_body = nil\n" +
-      "    if at?(\\\"KEYWORD\\\", \\\"ensure\\\")\n" +
-      "      advance()\n" +
-      "      skip_newlines()\n" +
-      "      skip_spaces()\n" +
-      "      ensure_body = parse_body()\n" +
-      "    ast_begin(body, rescue_var, rescue_body, ensure_body)\n"
-
-    parse_raise = "  -> parse_raise\n" +
-      "    raise_tok = current()\n" +
-      "    advance()\n" +
-      "    skip_spaces()\n" +
-      "    node = ast_raise(parse_expression())\n" +
-      "    node[:line] = raise_tok[:line]\n" +
-      "    node[\\\"col\\\"] = raise_tok[\\\"col\\\"]\n" +
-      "    node\n"
-
-    skip_structure_whitespace = "  -> skip_structure_whitespace\n" +
-      "    keep = true\n" +
-      "    while keep\n" +
-      "      keep = false\n" +
-      "      type_name = @current_type.to_s()\n" +
-      "      if type_name == \\\"NEWLINE\\\"\n" +
-      "        advance()\n" +
-      "        keep = true\n" +
-      "      if type_name == \\\"SEMICOLON\\\"\n" +
-      "        advance()\n" +
-      "        keep = true\n" +
-      "      if type_name == \\\"INDENT\\\"\n" +
-      "        advance()\n" +
-      "        keep = true\n" +
-      "      if type_name == \\\"DEDENT\\\"\n" +
-      "        advance()\n" +
-      "        keep = true\n" +
-      "      if type_name == \\\"SP\\\"\n" +
-      "        advance()\n" +
-      "        keep = true\n"
-
-    parse_hash_literal = "  -> parse_hash_literal\n" +
-      "    expect(\\\"LBRACE\\\")\n" +
-      "    skip_structure_whitespace()\n" +
-      "    entries = []\n" +
-      "    while true\n" +
-      "      skip_structure_whitespace()\n" +
-      "      if at?(\\\"RBRACE\\\")\n" +
-      "        advance()\n" +
-      "        return ast_hash_literal(entries)\n" +
-      "      key_like = false\n" +
-      "      if @current_type.to_s() == \\\"ID\\\"\n" +
-      "        key_like = true\n" +
-      "      if @current_type.to_s() == \\\"TYPE\\\"\n" +
-      "        key_like = true\n" +
-      "      if soft_identifier_keyword?(@current_token)\n" +
-      "        key_like = true\n" +
-      "      if key_like\n" +
-      "        if peek()[\\\"type\\\"].to_s() == \\\"COLON\\\"\n" +
-      "          key_tok = advance()\n" +
-      "          advance()\n" +
-      "          skip_spaces()\n" +
-      "          shorthand = false\n" +
-      "          if at?(\\\"COMMA\\\")\n" +
-      "            shorthand = true\n" +
-      "          if at?(\\\"RBRACE\\\")\n" +
-      "            shorthand = true\n" +
-      "          if at?(\\\"NEWLINE\\\")\n" +
-      "            shorthand = true\n" +
-      "          if at?(\\\"DEDENT\\\")\n" +
-      "            shorthand = true\n" +
-      "          if shorthand\n" +
-      "            entries.push([ast_symbol(key_tok[\\\"value\\\"]), ast_var(key_tok[\\\"value\\\"])])\n" +
-      "          else\n" +
-      "            value = parse_expression()\n" +
-      "            entries.push([ast_symbol(key_tok[\\\"value\\\"]), value])\n" +
-      "        else\n" +
-      "          key = parse_expression(false)\n" +
-      "          skip_spaces()\n" +
-      "          if at?(\\\"FAT_ARROW\\\")\n" +
-      "            advance()\n" +
-      "          else\n" +
-      "            expect(\\\"COLON\\\")\n" +
-      "          value = parse_expression()\n" +
-      "          entries.push([key, value])\n" +
-      "      else\n" +
-      "        key = parse_expression(false)\n" +
-      "        skip_spaces()\n" +
-      "        if at?(\\\"FAT_ARROW\\\")\n" +
-      "          advance()\n" +
-      "        else\n" +
-      "          expect(\\\"COLON\\\")\n" +
-      "        value = parse_expression()\n" +
-      "        entries.push([key, value])\n" +
-      "      skip_structure_whitespace()\n" +
-      "      if at?(\\\"COMMA\\\")\n" +
-      "        advance()\n" +
-      "        skip_structure_whitespace()\n" +
-      "      else\n" +
-      "        expect(\\\"RBRACE\\\")\n" +
-      "        return ast_hash_literal(entries)\n" +
-      "    ast_hash_literal(entries)\n"
-
-    parse_expression = "  -> parse_expression(allow_passthrough = true)\n" +
-      "    if env(\\\"TUNGSTEN_STAGE0_ARROW_TRACE\\\") == \\\"1\\\" && at?(\\\"ARROW\\\")\n" +
-      "      write_file(\\\"/tmp/tungsten-stage0-arrow-expression\\\", @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "    if at?(\\\"KEYWORD\\\", \\\"trait\\\")\n" +
-      "      return parse_trait_def()\n" +
-      "    if at?(\\\"CLASS_DEF\\\")\n" +
-      "      return parse_class_def()\n" +
-      "    start_line = current()[:line]\n" +
-      "    expr = parse_assignment()\n" +
-      "    if is_block_node?(expr) == false\n" +
-      "      if current()[:line] == start_line\n" +
-      "        if at?(\\\"KEYWORD\\\", \\\"if\\\")\n" +
-      "          advance()\n" +
-      "          condition = parse_assignment()\n" +
-      "          expr = ast_if(condition, [expr])\n" +
-      "        if at?(\\\"KEYWORD\\\", \\\"unless\\\")\n" +
-      "          advance()\n" +
-      "          condition = parse_assignment()\n" +
-      "          expr = ast_if(ast_not(condition), [expr])\n" +
-      "        if at?(\\\"KEYWORD\\\", \\\"while\\\")\n" +
-      "          advance()\n" +
-      "          condition = parse_assignment()\n" +
-      "          expr = ast_while(condition, [expr])\n" +
-      "        if at?(\\\"KEYWORD\\\", \\\"rescue\\\")\n" +
-      "          advance()\n" +
-      "          fallback = parse_assignment()\n" +
-      "          expr = ast_rescue_expr(expr, fallback)\n" +
-      "    if allow_passthrough\n" +
-      "      if current()[:line] == start_line\n" +
-      "        if at?(\\\"COLON\\\")\n" +
-      "          advance()\n" +
-      "          passthrough = parse_assignment()\n" +
-      "          expr = ast_passthrough(expr, passthrough)\n" +
-      "    expr\n"
-
-    parse_program = "  -> parse_program\n" +
-      "    skip_newlines()\n" +
-      "    exprs = []\n" +
-      "    while true\n" +
-      "      skip_newlines()\n" +
-      "      if env(\\\"TUNGSTEN_STAGE0_PROGRAM_TRACE\\\") == \\\"1\\\"\n" +
-      "        write_file(\\\"/tmp/tungsten-stage0-program-trace\\\", \\\"loop:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "      if @current_type.to_s() == \\\"EOF\\\"\n" +
-      "        return exprs\n" +
-      "      if @current_type.to_s() == \\\"DEDENT\\\"\n" +
-      "        return exprs\n" +
-      "      if env(\\\"TUNGSTEN_STAGE0_PROGRAM_TRACE\\\") == \\\"1\\\"\n" +
-      "        write_file(\\\"/tmp/tungsten-stage0-program-trace\\\", \\\"before_expr:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "      expr = parse_expression()\n" +
-      "      if env(\\\"TUNGSTEN_STAGE0_PROGRAM_TRACE\\\") == \\\"1\\\"\n" +
-      "        write_file(\\\"/tmp/tungsten-stage0-program-trace\\\", \\\"after_expr:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "      exprs.push(finish_statement_expression(expr))\n" +
-      "      if env(\\\"TUNGSTEN_STAGE0_PROGRAM_TRACE\\\") == \\\"1\\\"\n" +
-      "        write_file(\\\"/tmp/tungsten-stage0-program-trace\\\", \\\"after_finish:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "    exprs\n"
-
-    parse_body = "  -> parse_body\n" +
-      "    if @current_type == \\\"INDENT\\\"\n" +
-      "      advance()\n" +
-      "    skip_newlines()\n" +
-      "    skip_spaces()\n" +
-      "    body_col = current()[\\\"col\\\"]\n" +
-      "    exprs = []\n" +
-      "    active = true\n" +
-      "    while active\n" +
-      "      skip_newlines()\n" +
-      "      skip_spaces()\n" +
-      "      if env(\\\"TUNGSTEN_STAGE0_BODY_TRACE\\\") == \\\"1\\\"\n" +
-      "        write_file(\\\"/tmp/tungsten-stage0-body-trace\\\", \\\"loop:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "      stop = false\n" +
-      "      if @current_type.to_s() == \\\"EOF\\\"\n" +
-      "        stop = true\n" +
-      "      if env(\\\"TUNGSTEN_STAGE0_BODY_TRACE\\\") == \\\"1\\\"\n" +
-      "        write_file(\\\"/tmp/tungsten-stage0-body-trace\\\", \\\"after_eof_guard:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s())\n" +
-      "      if @current_type.to_s() == \\\"DEDENT\\\"\n" +
-      "        advance()\n" +
-      "        stop = true\n" +
-      "      if env(\\\"TUNGSTEN_STAGE0_BODY_TRACE\\\") == \\\"1\\\"\n" +
-      "        write_file(\\\"/tmp/tungsten-stage0-body-trace\\\", \\\"after_dedent_guard:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s())\n" +
-      "      if env(\\\"TUNGSTEN_STAGE0_BODY_TRACE\\\") == \\\"1\\\"\n" +
-      "        write_file(\\\"/tmp/tungsten-stage0-body-trace\\\", \\\"before_col_guard:\\\" + @pos.to_s() + \\\":\\\" + current()[\\\"col\\\"].to_s() + \\\":\\\" + body_col.to_s())\n" +
-      "      current_col_text = current()[\\\"col\\\"].to_s()\n" +
-      "      body_col_text = body_col.to_s()\n" +
-      "      if current_col_text == body_col_text\n" +
-      "        current_col_text = body_col_text\n" +
-      "      else\n" +
-      "        stop = true\n" +
-      "      if stop\n" +
-      "        active = false\n" +
-      "      else\n" +
-      "        if env(\\\"TUNGSTEN_STAGE0_BODY_TRACE\\\") == \\\"1\\\"\n" +
-      "          write_file(\\\"/tmp/tungsten-stage0-body-trace\\\", \\\"before_expr:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "        expr = parse_expression()\n" +
-      "        if env(\\\"TUNGSTEN_STAGE0_BODY_TRACE\\\") == \\\"1\\\"\n" +
-      "          write_file(\\\"/tmp/tungsten-stage0-body-trace\\\", \\\"after_expr:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "        exprs.push(finish_statement_expression(expr))\n" +
-      "        if env(\\\"TUNGSTEN_STAGE0_BODY_TRACE\\\") == \\\"1\\\"\n" +
-      "          write_file(\\\"/tmp/tungsten-stage0-body-trace\\\", \\\"after_finish:\\\" + @pos.to_s() + \\\":\\\" + @current_type.to_s() + \\\":\\\" + @current_value.to_s())\n" +
-      "    exprs\n"
-
-    parse_fn_def = "  -> parse_fn_def\n" +
-      "    fn_tok = expect(\\\"KEYWORD\\\", \\\"fn\\\")\n" +
-      "    fn_line = fn_tok[\\\"line\\\"]\n" +
-      "    name = expect(\\\"ID\\\")[\\\"value\\\"]\n" +
-      "    params = []\n" +
-      "    if at?(\\\"LPAREN\\\")\n" +
-      "      advance()\n" +
-      "      while !at?(\\\"RPAREN\\\")\n" +
-      "        params.push(parse_method_param())\n" +
-      "        match?(\\\"COMMA\\\")\n" +
-      "        skip_spaces()\n" +
-      "      expect(\\\"RPAREN\\\")\n" +
-      "    skip_newlines()\n" +
-      "    body = []\n" +
-      "    if at?(\\\"INDENT\\\")\n" +
-      "      body = parse_body()\n" +
-      "    elsif at?(\\\"DEDENT\\\") || at?(\\\"EOF\\\") || at?(\\\"CLASS_DEF\\\") || at?(\\\"ARROW\\\")\n" +
-      "      body = []\n" +
-      "    else\n" +
-      "      body = [parse_expression()]\n" +
-      "    if @in_class_body\n" +
-      "      return ast_method_def(name, params, body, nil, false)\n" +
-      "    result = ast_fn_def(name, params, body, nil)\n" +
-      "    ast_set(result, \\\"line\\\", fn_line)\n" +
-      "    result\n"
-
-    parse_int_value = "  -> parse_int_value(str)\n" +
-      "    if str.size() >= 2\n" +
-      "      prefix = str.slice(0, 2)\n" +
-      "      if prefix in (\\\"0x\\\" \\\"0X\\\")\n" +
-      "        return parse_hex_int(str)\n" +
-      "      if prefix in (\\\"0b\\\" \\\"0B\\\")\n" +
-      "        return parse_bin_int(str)\n" +
-      "      if prefix in (\\\"0o\\\" \\\"0O\\\")\n" +
-      "        return parse_oct_int(str)\n" +
-      "    str.replace(\\\"_\\\", \\\"\\\").to_i()\n"
-
-    parse_use = "  -> parse_use\n" +
-      "    advance()\n" +
-      "    path = \\\"\\\"\n" +
-      "    active = true\n" +
-      "    while active\n" +
-      "      stop = false\n" +
-      "      if at?(\\\"NEWLINE\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"EOF\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"DEDENT\\\")\n" +
-      "        stop = true\n" +
-      "      if at?(\\\"SEMICOLON\\\")\n" +
-      "        stop = true\n" +
-      "      if stop\n" +
-      "        active = false\n" +
-      "      else\n" +
-      "        if at?(\\\"SP\\\")\n" +
-      "          advance()\n" +
-      "        else\n" +
-      "          path = path + @current_value.to_s()\n" +
-      "          advance()\n" +
-      "    ast_use(path)\n"
-
-    at_predicate = "  -> at?(type, value = nil)\n" +
-      "    if @current_type.to_s() != type.to_s()\n" +
-      "      return false\n" +
-      "    if value == nil\n" +
-      "      return true\n" +
-      "    @current_value == value\n"
-
-    expect = "  -> expect(type, value = nil)\n" +
-      "    tok = @current_token\n" +
-      "    bad = false\n" +
-      "    if @current_type.to_s() != type.to_s()\n" +
-      "      bad = true\n" +
-      "    if value != nil\n" +
-      "      if @current_value != value\n" +
-      "        bad = true\n" +
-      "    if bad\n" +
-      "      raise {rt: :compile_error, code: :E_PARSE_EXPECTED_TOKEN, message: \\\"Expected token\\\", file: tok[:file], row: tok[:line], col: tok[:col], span_length: 1}\n" +
-      "    advance()\n" +
-      "    tok\n"
-
-    skip_spaces = "  -> skip_spaces\n" +
-      "    while at?(\\\"SP\\\")\n" +
-      "      advance()\n"
-
-    skip_newlines = "  -> skip_newlines\n" +
-      "    keep = true\n" +
-      "    while keep\n" +
-      "      keep = false\n" +
-      "      type_name = @current_type.to_s()\n" +
-      "      if type_name == \\\"TYPE_HINT\\\"\n" +
-      "        @pending_type_hints.push(@current_value)\n" +
-      "        advance()\n" +
-      "        keep = true\n" +
-      "      if type_name == \\\"NEWLINE\\\"\n" +
-      "        advance()\n" +
-      "        keep = true\n"
-
-    skip_statement_end = "  -> skip_statement_end\n" +
-      "    keep = true\n" +
-      "    while keep\n" +
-      "      keep = false\n" +
-      "      type_name = @current_type.to_s()\n" +
-      "      if type_name == \\\"TYPE_HINT\\\"\n" +
-      "        @pending_type_hints.push(@current_value)\n" +
-      "        advance()\n" +
-      "        keep = true\n" +
-      "      if type_name == \\\"NEWLINE\\\"\n" +
-      "        advance()\n" +
-      "        keep = true\n" +
-      "      if type_name == \\\"SEMICOLON\\\"\n" +
-      "        advance()\n" +
-      "        keep = true\n"
-
-    source = stage0_replace_parser_method(source, "at?", at_predicate)
-    source = stage0_replace_parser_method(source, "expect", expect)
-    source = stage0_replace_parser_method(source, "skip_newlines", skip_newlines)
-    source = stage0_replace_parser_method(source, "skip_spaces", skip_spaces)
-    source = stage0_replace_parser_method(source, "skip_statement_end", skip_statement_end)
-    source = stage0_replace_parser_method(source, "parse_call_chain", parse_call_chain)
-    source = stage0_replace_parser_method(source, "parse_call_args_and_block", parse_call_args)
-    source = stage0_replace_parser_method(source, "parse_arg_list", parse_arg_list)
-    source = stage0_replace_parser_method(source, "parse_if", parse_if)
-    source = stage0_replace_parser_method(source, "parse_range", parse_range)
-    source = stage0_replace_parser_method(source, "parse_or", parse_or)
-    source = stage0_replace_parser_method(source, "parse_and", parse_and)
-    source = stage0_replace_parser_method(source, "parse_in_test", parse_in_test)
-    source = stage0_replace_parser_method(source, "parse_begin", parse_begin)
-    source = stage0_replace_parser_method(source, "parse_raise", parse_raise)
-    source = stage0_replace_parser_method(source, "skip_structure_whitespace", skip_structure_whitespace)
-    source = stage0_replace_parser_method(source, "parse_hash_literal", parse_hash_literal)
-    source = stage0_replace_parser_method(source, "parse_program", parse_program)
-    source = stage0_replace_parser_method(source, "parse_body", parse_body)
-    source = stage0_replace_parser_method(source, "parse_fn_def", parse_fn_def)
-    source = stage0_replace_parser_method(source, "parse_int_value", parse_int_value)
-    source = stage0_replace_parser_method(source, "parse_use", parse_use)
-    source = source.split("      return parse_var_or_call()\n").join(
-      "      tok = advance()\n" \
-      "      return ast_var(tok[\\\"value\\\"])\n"
-    )
-    source = self.stage0_prefix_parser_self_calls(source)
-    source = source.split("at?(:*)").join("at?(\\\"STAR\\\")")
-    source = source.split("@current_type.to_s()").join("@current_type")
-    source = source.split("type.to_s()").join("type")
-    source
-  end
-
-  def stage0_normalize_compiler_source(source)
-    normalized = ""
-    normalized = self.stage0_normalize_compiler_language_source(source)
-    args_parts = normalized.split("args = argv()\\n")
-    if args_parts.length > 1
-      phase_parts = args_parts[1].split("-> phase_elapsed")
-      if phase_parts.length > 1
-        driver = ""
-        driver = driver + "args = argv()\\n"
-        driver = driver + "command        = \\"compile\\"\\n"
-        driver = driver + "out_path       = nil\\n"
-        driver = driver + "file_path      = \\"compiler/tungsten.w\\"\\n"
-        driver = driver + "eval_code      = nil\\n"
-        driver = driver + "emit_wire      = false\\n"
-        driver = driver + "verbose        = false\\n"
-        driver = driver + "show_ast       = false\\n"
-        driver = driver + "show_lex       = false\\n"
-        driver = driver + "no_lto         = false\\n"
-        driver = driver + "frame_pointers = false\\n"
-        driver = driver + "keep_ll        = false\\n"
-        driver = driver + "emit_ll_only   = true\\n"
-        driver = driver + "release_mode   = true\\n"
-        driver = driver + "fast_mode      = false\\n"
-        driver = driver + "intern_algo    = \\"raw\\"\\n"
-        driver = driver + "runtime_archive = nil\\n\\n"
-        tail = phase_parts[1]
-        pi = 2
-        while pi < phase_parts.length
-          tail = tail + "-> phase_elapsed" + phase_parts[pi]
-          pi += 1
-        end
-        normalized = args_parts[0] + driver + "-> phase_elapsed" + tail
-      end
-    end
-    start_pos = normalized.index("-> compile(ast")
-    end_pos = normalized.index("-> compile_to_wire")
-    if start_pos >= 0 && end_pos >= 0
-      compile_fn = ""
-      compile_fn = compile_fn + "-> compile(ast, source_path, verbose = false, frame_pointers = false, sidemap_path = nil, release_mode = false, fast_mode = false)\\n"
-      compile_fn = compile_fn + "  if env(\\"TUNGSTEN_STAGE0_COMPILE_TRACE\\") == \\"1\\"\\n"
-      compile_fn = compile_fn + "    exprs = ast[\\"expressions\\"]\\n"
-      compile_fn = compile_fn + "    trace = \\"ast_exprs=\\" + type(exprs).to_s() + \\":\\" + exprs.size().to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "    if exprs.size() > 0\\n"
-      compile_fn = compile_fn + "      e0 = exprs[0]\\n"
-      compile_fn = compile_fn + "      trace = trace + \\"e0=\\" + type(e0).to_s() + \\":\\" + e0[\\"node\\"].to_s() + \\"/\\" + e0[:node].to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "    node_trace = \\"\\"\\n"
-      compile_fn = compile_fn + "    ni = 0\\n"
-      compile_fn = compile_fn + "    while ni < exprs.size() && ni < 80\\n"
-      compile_fn = compile_fn + "      node_trace = node_trace + ni.to_s() + \\":\\" + exprs[ni][\\"node\\"].to_s() + \\":line=\\" + exprs[ni][\\"line\\"].to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "      ni += 1\\n"
-      compile_fn = compile_fn + "    fn_count = 0\\n"
-      compile_fn = compile_fn + "    method_count = 0\\n"
-      compile_fn = compile_fn + "    class_count = 0\\n"
-      compile_fn = compile_fn + "    def_count = 0\\n"
-      compile_fn = compile_fn + "    i = 0\\n"
-      compile_fn = compile_fn + "    while i < exprs.size()\\n"
-      compile_fn = compile_fn + "      nt = exprs[i][\\"node\\"]\\n"
-      compile_fn = compile_fn + "      if nt == \\"fn_def\\"\\n"
-      compile_fn = compile_fn + "        fn_count += 1\\n"
-      compile_fn = compile_fn + "      if nt == \\"method_def\\"\\n"
-      compile_fn = compile_fn + "        method_count += 1\\n"
-      compile_fn = compile_fn + "      if nt == \\"class_def\\"\\n"
-      compile_fn = compile_fn + "        class_count += 1\\n"
-      compile_fn = compile_fn + "      if nt == \\"def\\"\\n"
-      compile_fn = compile_fn + "        def_count += 1\\n"
-      compile_fn = compile_fn + "      i += 1\\n"
-      compile_fn = compile_fn + "    trace = trace + \\"ast_counts fn=\\" + fn_count.to_s() + \\" method=\\" + method_count.to_s() + \\" class=\\" + class_count.to_s() + \\" def=\\" + def_count.to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "    trace = trace + node_trace\\n"
-      compile_fn = compile_fn + "    write_file(\\"/tmp/tungsten-stage0-ast-trace\\", trace)\\n"
-      compile_fn = compile_fn + "  mod = lower_ast(ast, source_path, verbose, fast_mode)\\n"
-      compile_fn = compile_fn + "  if env(\\"TUNGSTEN_STAGE0_COMPILE_TRACE\\") == \\"1\\"\\n"
-      compile_fn = compile_fn + "    fns = mod[\\"functions\\"]\\n"
-      compile_fn = compile_fn + "    trace = \\"functions=\\" + type(fns).to_s() + \\":\\" + fns.size().to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "    if fns.size() > 0\\n"
-      compile_fn = compile_fn + "      f0 = fns[0]\\n"
-      compile_fn = compile_fn + "      trace = trace + \\"f0=\\" + type(f0).to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "      trace = trace + \\"name=\\" + f0[\\"name\\"].to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "      trace = trace + \\"ret=\\" + f0[\\"return_type\\"].to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "      trace = trace + \\"blocks=\\" + f0[\\"blocks\\"].size().to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "      if f0[\\"blocks\\"].size() > 0\\n"
-      compile_fn = compile_fn + "        trace = trace + \\"instrs=\\" + f0[\\"blocks\\"][0][\\"instructions\\"].size().to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "        if f0[\\"blocks\\"][0][\\"instructions\\"].size() > 0\\n"
-      compile_fn = compile_fn + "          inst0 = f0[\\"blocks\\"][0][\\"instructions\\"][0]\\n"
-      compile_fn = compile_fn + "          trace = trace + \\"inst0=\\" + inst0[\\"op\\"].to_s() + \\" value=\\" + inst0[\\"value\\"].to_s() + \\" name=\\" + inst0[\\"name\\"].to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "        if f0[\\"blocks\\"][0][\\"instructions\\"].size() > 1\\n"
-      compile_fn = compile_fn + "          inst1 = f0[\\"blocks\\"][0][\\"instructions\\"][1]\\n"
-      compile_fn = compile_fn + "          trace = trace + \\"inst1=\\" + inst1[\\"op\\"].to_s() + \\" value=\\" + inst1[\\"value\\"].to_s() + \\" name=\\" + inst1[\\"name\\"].to_s() + \\"\\\\n\\"\\n"
-      compile_fn = compile_fn + "    write_file(\\"/tmp/tungsten-stage0-compile-trace\\", trace)\\n"
-      compile_fn = compile_fn + "  content_hash_pass(mod, verbose)\n"
-      compile_fn = compile_fn + "  mod[:enhanced_stacktraces] = true\\n"
-      compile_fn = compile_fn + "  if release_mode\\n"
-      compile_fn = compile_fn + "    mod[:enhanced_stacktraces] = false\\n"
-      compile_fn = compile_fn + "  llvm_target = detect_llvm_target()\\n"
-      compile_fn = compile_fn + "  llvm_datalayout = llvm_target[\\"datalayout\\"]\\n"
-      compile_fn = compile_fn + "  llvm_triple = llvm_target[\\"triple\\"]\\n"
-      compile_fn = compile_fn + "  llvm_fn_attrs = llvm_target[\\"fn_attrs\\"]\\n"
-      compile_fn = compile_fn + "  if llvm_datalayout == nil\\n"
-      compile_fn = compile_fn + "    llvm_datalayout = \\"\\"\\n"
-      compile_fn = compile_fn + "  if llvm_triple == nil\\n"
-      compile_fn = compile_fn + "    llvm_triple = \\"\\"\\n"
-      compile_fn = compile_fn + "  if llvm_fn_attrs == nil\\n"
-      compile_fn = compile_fn + "    llvm_fn_attrs = \\"\\"\\n"
-      compile_fn = compile_fn + "  stage0_hash_set(mod, \\"llvm_datalayout\\", llvm_datalayout)\\n"
-      compile_fn = compile_fn + "  stage0_hash_set(mod, \\"llvm_triple\\", llvm_triple)\\n"
-      compile_fn = compile_fn + "  stage0_hash_set(mod, \\"llvm_fn_attrs\\", llvm_fn_attrs)\\n"
-      compile_fn = compile_fn + "  ir = emit_artifact(mod, frame_pointers)\\n"
-      compile_fn = compile_fn + "  if sidemap_path != nil\\n"
-      compile_fn = compile_fn + "    sidemap_text = mod[:symbol_sidemap_text]\\n"
-      compile_fn = compile_fn + "    if sidemap_text != nil\\n"
-      compile_fn = compile_fn + "      write_file(sidemap_path, sidemap_text)\\n"
-      compile_fn = compile_fn + "  ir\\n\\n"
-      normalized = normalized.slice(0, start_pos) + compile_fn + normalized.slice(end_pos, normalized.length - end_pos)
-    end
-    dispatch_parts = normalized.split("if eval_code != nil\\n")
-    if dispatch_parts.length > 1
-      normalized = dispatch_parts[0] +
-                   "compile_one(file_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only)\\n"
-    end
-    normalized = normalized.split("  loader = Loader.new(verbose)\\n  load_started_at = clock\\n  ast = loader.load_program_ast(file_path)\\n").join(
-      "  load_started_at = clock\\n  ast = stage0_load_program_ast(file_path)\\n"
-    )
-    normalized = normalized.split(
-      "  if env(\\\"TUNGSTEN_STOP_AFTER_LOAD_PARSE\\\") == \\\"1\\\"\\n" \
-      "    if verbose\\n" \
-      "      << \\\"\\\"\\n" \
-      "      << fmt_elapsed(phase_elapsed(load_started_at)) + \\\" load+parse\\\"\\n" \
-      "    exit 0\\n"
-    ).join("")
-    if normalized.include?("  kernels = collect_gpu_kernels(ast)\\n") && normalized.include?("-> runtime_event_source")
-      guard_start = normalized.index("  if emit_ll_only_arg\\n    write_file(ll_path + \\\".done\\\", \\\"done\\\")\\n")
-      runtime_start = normalized.index("-> runtime_event_source")
-      if guard_start >= 0 && runtime_start > guard_start
-        emit_done = "  write_file(ll_path + \\\".done\\\", \\\"done\\\")\\n" \
-                    "  return ll_path\\n"
-        normalized = normalized.slice(0, guard_start) + emit_done + normalized.slice(runtime_start, normalized.length - runtime_start)
-      end
-    end
-    "" + normalized.to_s
-  end
-
-  def stage0_normalize_emitter_source(source)
-    normalized = self.stage0_normalize_source(source)
-    # The `<var> << <expr>` -> `<var> = <var> + <expr>` append rewrite (for
-    # out, parts, result, fn_out, globals_out) is already performed inside
-    # stage0_normalize_source above with the identical receiver list, so the
-    # gsub-with-block that used to live here was pure duplication. It also
-    # silently no-ops under spinel (the block never fires — see the note in
-    # stage0_normalize_source), and the C spinel rejects
-    # gsub(Regexp.new(...)) { block } outright. Dropped.
-    start_pos = normalized.index("-> build_string_wvalues")
-    end_pos = normalized.index("-> emit_string_constants")
-    if start_pos >= 0 && end_pos >= 0
-      normalized = normalized.slice(0, start_pos) +
-                   "-> build_string_wvalues(strings)\\n  result = {}\\n  result[:wvalues] = {}\\n  result[:slab_entries] = []\\n  result[:total_slots] = 1\\n  result\\n" +
-                   normalized.slice(end_pos, normalized.length - end_pos)
-    end
-    string_consts_start = normalized.index("-> emit_string_constants")
-    string_consts_end = normalized.index("-> declare_runtime")
-    if string_consts_start >= 0 && string_consts_end > string_consts_start
-      normalized = normalized.slice(0, string_consts_start) +
-                   "-> emit_string_constants(strings, slab_info, used_ptr_ids)\\n  \\"\\"\\n" +
-                   normalized.slice(string_consts_end, normalized.length - string_consts_end)
-    end
-    normalized = normalized.split("  out.to_s()\\n-> declare_fn").join("  out\\n-> declare_fn")
-    normalized = normalized.split("  attr_id = function_attr_group_id(attr_groups, attr_text)\\n  out = out + \\"define \\"\\n").join(
-      "  attr_id = function_attr_group_id(attr_groups, attr_text)\\n" \
-      "  if env(\\"TUNGSTEN_STAGE0_EMIT_FUNCTION_TRACE\\") == \\"1\\"\\n" \
-      "    write_file(\\"/tmp/tungsten-stage0-emit-function-after-attr\\", out.to_s())\\n" \
-      "  out = out + \\"define \\"\\n" \
-      "  if env(\\"TUNGSTEN_STAGE0_EMIT_FUNCTION_TRACE\\") == \\"1\\"\\n" \
-      "    write_file(\\"/tmp/tungsten-stage0-emit-function-after-define\\", out.to_s())\\n"
-    )
-    normalized = normalized.split("  out.to_s()\\n-> emit_param_signature").join(
-      "  if env(\\"TUNGSTEN_STAGE0_EMIT_FUNCTION_TRACE\\") == \\"1\\"\\n" \
-      "    write_file(\\"/tmp/tungsten-stage0-emit-function-len\\", out.to_s().size().to_s())\\n" \
-      "    write_file(\\"/tmp/tungsten-stage0-emit-function-text\\", out.to_s())\\n" \
-      "  out.to_s()\\n-> emit_param_signature"
-    )
-    declare_fn_start = normalized.index("-> declare_fn(name")
-    declare_fn_end = normalized.index("-> join_arg_types2")
-    if declare_fn_start >= 0 && declare_fn_end > declare_fn_start
-      declare_helpers = ""
-      declare_helpers = declare_helpers + "-> declare_fn(name, ret_type, arg_types_str)\\n  declare_fn_attrs(name, ret_type, arg_types_str, \\"nounwind\\")\\n"
-      declare_helpers = declare_helpers + "-> declare_fn_noreturn(name, ret_type, arg_types_str)\\n  declare_fn_attrs(name, ret_type, arg_types_str, \\"noreturn cold nounwind\\")\\n"
-      declare_helpers = declare_helpers + "-> declare_fn_attrs(name, ret_type, arg_types_str, attrs)\\n  \\"declare \\" + ret_type + \\" @\\" + name + \\"(\\" + arg_types_str + \\") \\" + attrs + \\"\\\\n\\"\\n"
-      normalized = normalized.slice(0, declare_fn_start) + declare_helpers + normalized.slice(declare_fn_end, normalized.length - declare_fn_end)
-    end
-    join_start = normalized.index("-> join_arg_types2")
-    join_end = normalized.index("-> runtime_decl_name")
-    if join_start >= 0 && join_end > join_start
-      join_helpers = ""
-      join_helpers = join_helpers + "-> join_arg_types2(lhs, rhs)\\n  lhs + \\", \\" + rhs\\n"
-      join_helpers = join_helpers + "-> join_arg_types3(a, b, c)\\n  a + \\", \\" + b + \\", \\" + c\\n"
-      join_helpers = join_helpers + "-> join_arg_types4(a, b, c, d)\\n  a + \\", \\" + b + \\", \\" + c + \\", \\" + d\\n"
-      join_helpers = join_helpers + "-> join_arg_types5(a, b, c, d, e)\\n  a + \\", \\" + b + \\", \\" + c + \\", \\" + d + \\", \\" + e\\n"
-      normalized = normalized.slice(0, join_start) + join_helpers + normalized.slice(join_end, normalized.length - join_end)
-    end
-    filter_start = normalized.index("-> filter_runtime_decls")
-    filter_end = normalized.index("-> function_attr_text")
-    if filter_start >= 0 && filter_end > filter_start
-      normalized = normalized.slice(0, filter_start) +
-                   "-> filter_runtime_decls(decls, used_fns)\\n  decls\\n" +
-                   normalized.slice(filter_end, normalized.length - filter_end)
-    end
-    attr_text_start = normalized.index("-> function_attr_text")
-    attr_text_end = normalized.index("-> function_attr_group_id")
-    if attr_text_start >= 0 && attr_text_end > attr_text_start
-      normalized = normalized.slice(0, attr_text_start) +
-                   "-> function_attr_text(frame_pointers, host_fn_attrs)\\n  \\"nounwind\\"\\n" +
-                   normalized.slice(attr_text_end, normalized.length - attr_text_end)
-    end
-    attr_groups_start = normalized.index("-> emit_function_attr_groups")
-    attr_groups_end = normalized.index("-> call_prefix")
-    if attr_groups_start >= 0 && attr_groups_end > attr_groups_start
-      normalized = normalized.slice(0, attr_groups_start) +
-                   "-> emit_function_attr_groups(attr_groups)\\n  \\"\\"\\n" +
-                   normalized.slice(attr_groups_end, normalized.length - attr_groups_end)
-    end
-    redirect_map_start = normalized.index("-> build_phi_label_redirects")
-    redirect_map_end = normalized.index("-> emit_function(f", redirect_map_start)
-    if redirect_map_start >= 0 && redirect_map_end > redirect_map_start
-      redirect_helpers = ""
-      redirect_helpers = redirect_helpers + "-> build_phi_label_redirects(f)\\n  nil\\n"
-      redirect_helpers = redirect_helpers + "-> redirect_phi_label(label, redirect)\\n  label\\n\\n"
-      normalized = normalized.slice(0, redirect_map_start) + redirect_helpers + normalized.slice(redirect_map_end, normalized.length - redirect_map_end)
-    end
-    normalized = normalized.split("  triple = mod[:llvm_triple]\\n").join(
-      "  triple = mod[:llvm_triple]\\n" +
-      "  if datalayout == nil\\n" +
-      "    datalayout = \\\"\\\"\\n" +
-      "  if triple == nil\\n" +
-      "    triple = \\\"\\\"\\n"
-    )
-    small_array_start = normalized.index("  sa_consts = mod[:small_array_consts]")
-    small_array_end = normalized.index("  rsites = mod[:reuse_sites]")
-    if small_array_start >= 0 && small_array_end > small_array_start
-      normalized = normalized.slice(0, small_array_start) +
-                   "  sa_consts = []\\n" +
-                   normalized.slice(small_array_end, normalized.length - small_array_end)
-    end
-    reuse_start = normalized.index("  rsites = mod[:reuse_sites]")
-    reuse_end = normalized.index("  used_ptr_ids = {}")
-    if reuse_start >= 0 && reuse_end > reuse_start
-      normalized = normalized.slice(0, reuse_start) +
-                   normalized.slice(reuse_end, normalized.length - reuse_end)
-    end
-    artifact_join = ""
-    artifact_join = artifact_join + "  artifact = header\\n"
-    artifact_join = artifact_join + "  artifact = artifact + decls_out\\n"
-    artifact_join = artifact_join + "  artifact = artifact + globals_out\\n"
-    artifact_join = artifact_join + "  artifact = artifact + strings_out\\n"
-    artifact_join = artifact_join + "  artifact = artifact + fn_out\\n"
-    artifact_join = artifact_join + "  artifact = artifact + fn_meta_out\\n"
-    artifact_join = artifact_join + "  artifact = artifact + call_site_out\\n"
-    artifact_join = artifact_join + "  artifact = artifact + llvm_used_out\\n"
-    artifact_join = artifact_join + "  artifact = artifact + attr_groups_out\\n"
-    artifact_join = artifact_join + "  artifact"
-    normalized = normalized.split("  header + decls_out + globals_out.to_s() + strings_out + fn_out.to_s() + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out").join(artifact_join)
-    normalized = normalized.split("  header + decls_out + globals_out + strings_out + fn_out + fn_meta_out + call_site_out + llvm_used_out + attr_groups_out").join(artifact_join)
-    normalized = normalized.split("  op = inst[\\"op\\"]\\n  case op\\n").join(
-      "  op = inst[\\"op\\"]\\n" \
-      "  op_text = op.to_s()\\n" \
-      "  if op_text == \\"ret_i32\\"\\n" \
-      "    return \\"ret i32 \\" + inst[\\"value\\"]\\n" \
-      "  if op_text == \\"ret_i64\\"\\n" \
-      "    return \\"ret i64 \\" + inst[\\"value\\"]\\n" \
-      "  if op_text == \\"ret_void\\"\\n" \
-      "    return \\"ret void\\"\\n" \
-      "  if op_text == \\"call_direct_void\\"\\n" \
-      "    args = inst[\\"args\\"]\\n" \
-      "    if args == nil || args.size() == 0\\n" \
-      "      return \\"call void @\\" + inst[\\"name\\"] + \\"()\\"\\n" \
-      "  case op\\n"
-    )
-    normalized = normalized.split("  attr_groups_out = emit_function_attr_groups(attr_groups)\\n  artifact = header\\n").join(
-      "  attr_groups_out = emit_function_attr_groups(attr_groups)\\n" +
-      "  if env(\\\"TUNGSTEN_STAGE0_EMITTER_TRACE\\\") == \\\"1\\\"\\n" +
-      "    trace = \\\"globals=\\\" + type(globals_out).to_s() + \\\":\\\" + globals_out.to_s().size().to_s() + \\\"\\\\n\\\"\\n" +
-      "    trace = trace + \\\"strings=\\\" + type(strings_out).to_s() + \\\":\\\" + strings_out.to_s().size().to_s() + \\\"\\\\n\\\"\\n" +
-      "    trace = trace + \\\"fn=\\\" + type(fn_out).to_s() + \\\":\\\" + fn_out.to_s().size().to_s() + \\\"\\\\n\\\"\\n" +
-      "    trace = trace + \\\"fn_meta=\\\" + type(fn_meta_out).to_s() + \\\":\\\" + fn_meta_out.to_s().size().to_s() + \\\"\\\\n\\\"\\n" +
-      "    trace = trace + \\\"call_site=\\\" + type(call_site_out).to_s() + \\\":\\\" + call_site_out.to_s().size().to_s() + \\\"\\\\n\\\"\\n" +
-      "    trace = trace + \\\"llvm_used=\\\" + type(llvm_used_out).to_s() + \\\":\\\" + llvm_used_out.to_s().size().to_s() + \\\"\\\\n\\\"\\n" +
-      "    trace = trace + \\\"attrs=\\\" + type(attr_groups_out).to_s() + \\\":\\\" + attr_groups_out.to_s().size().to_s() + \\\"\\\\n\\\"\\n" +
-      "    write_file(\\\"/tmp/tungsten-stage0-emitter-components\\\", trace)\\n" +
-      "  artifact = header\\n"
-    )
-    meta_start = normalized.index("-> collect_call_sites")
-    meta_end = normalized.index("-> emit_artifact")
-    if meta_start >= 0 && meta_end > meta_start
-      meta_stubs = ""
-      meta_stubs = meta_stubs + "-> collect_call_sites(mod)\\n  {sites: [], files: {}}\\n"
-      meta_stubs = meta_stubs + "-> emit_call_site_table(mod)\\n  \\"\\"\\n"
-      meta_stubs = meta_stubs + "-> emit_fn_meta_table(mod)\\n  \\"\\"\\n"
-      meta_stubs = meta_stubs + "-> emit_stacktrace_llvm_used()\\n  \\"\\"\\n"
-      meta_stubs = meta_stubs + "-> address_taken_function_for_inst(inst)\\n  nil\\n"
-      meta_stubs = meta_stubs + "-> collect_address_taken_functions(mod)\\n  {}\\n"
-      meta_stubs = meta_stubs + "-> internal_fastcc_candidate?(func, address_taken)\\n  false\\n"
-      meta_stubs = meta_stubs + "-> fastcc_direct_call_op?(op)\\n  false\\n"
-      meta_stubs = meta_stubs + "-> apply_fastcc_plan(mod)\\n  mod[:fastcc_count] = 0\\n  nil\\n"
-      normalized = normalized.slice(0, meta_start) + meta_stubs + normalized.slice(meta_end, normalized.length - meta_end)
-    end
-    lines = normalized.split("\\n")
-    rewritten = ""
-    li = 0
-    while li < lines.length
-      line = lines[li]
-      pos = 0
-      while pos < line.length && line.slice(pos, 1) == " "
-        pos += 1
-      end
-      indent = line.slice(0, pos)
-      rest = line.slice(pos, line.length - pos)
-      marker = rest.index(" << ")
-      if marker != nil && marker >= 0
-        lhs = rest.slice(0, marker)
-        rhs = rest.slice(marker + 4, rest.length - marker - 4)
-        space_pos = lhs.index(" ")
-        dot_pos = lhs.index(".")
-        bracket_pos = lhs.index("[")
-        if lhs != "" && (space_pos == nil || space_pos < 0) && (dot_pos == nil || dot_pos < 0) && (bracket_pos == nil || bracket_pos < 0)
-          rewritten = rewritten + indent + lhs + " = stage0_str_append(" + lhs + ", " + rhs + ")\\n"
-        else
-          rewritten = rewritten + line + "\\n"
-        end
-      else
-        rewritten = rewritten + line + "\\n"
-      end
-      li += 1
-    end
-    normalized = rewritten
-    normalized = normalized.split("out = stage0_str_append(out, \\"define \\")").join("out = stage0_str_append(out, \\"define i32 @\\")")
-    normalized = normalized.split("out = stage0_str_append(out, ret_ty)").join("out = out")
-    normalized = normalized.split("out = stage0_str_append(out, \\" @\\")").join("out = out")
-    normalized
-  end
-
-  def stage0_rewrite_named_new(line, class_name, helper_name)
-    needle = class_name + ".new("
-    parts = line.split(needle)
-    if parts.length > 1
-      return parts[0] + helper_name + "(" + parts[1]
-    end
-    line
+    val
   end
 
   def stage0_eval_args(arg_nodes)
-    args = []
-    i = 0
-    while i < arg_nodes.length
-      args.push(evaluate(arg_nodes[i]))
-      i += 1
-    end
-    args
+    evaluate_args(arg_nodes)
   end
 
   def stage0_aref(value, index)
+    if index.is_a?(WRange)
+      if value.is_a?(String)
+        slen = value.length
+        st = index.from
+        st = slen + st if st < 0
+        return "" if st < 0 || st > slen
+        if index.endless
+          en = slen - 1
+        else
+          en = index.to
+          en = slen + en if en < 0
+          en -= 1 if index.exclusive
+        end
+        return "" if en < st
+        return value.slice(st, en - st + 1) || ""
+      elsif value.is_a?(List) || value.is_a?(Array)
+        alen = value.length
+        res = List.new
+        st = index.from
+        st = alen + st if st < 0
+        return res if st < 0 || st > alen
+        if index.endless
+          en = alen - 1
+        else
+          en = index.to
+          en = alen + en if en < 0
+          en -= 1 if index.exclusive
+        end
+        en = alen - 1 if en >= alen
+        i = st
+        while i <= en
+          res.push(value[i])
+          i += 1
+        end
+        return res
+      end
+    end
+    if value.is_a?(WireRecord)
+      return value.load(index)
+    end
+    if value.is_a?(WireSequence)
+      return value[index.to_i]
+    end
+    if value.is_a?(PackedNode)
+      node_cls = @classes["Tungsten:AST:Node"] || @classes["Node"]
+      if node_cls != nil
+        m = node_cls.lookup_method("[]")
+        if m != nil
+          aref_args = evaluate_args(nil)
+          aref_args.push(index)
+          return call_w_method(value, m, aref_args)
+        end
+      end
+      return value.get_sparse(index)
+    end
     if value.is_a?(Hash)
       hash_value = value[index]
       return hash_value if hash_value != nil
-      return value[index.to_s]
+      if index.is_a?(String)
+        hash_value = value[index.to_sym]
+        return hash_value if hash_value != nil
+      elsif index.is_a?(Symbol)
+        return value[index.to_s]
+      end
+      return nil
+    end
+    if value.is_a?(String)
+      return value.slice(index.to_i, 1) || ""
     end
     value[index]
   end
 
   def stage0_value_length(value)
-    value.length
+    return 0 if value == nil
+    return value.byte_length if value.is_a?(StringBuffer)
+    return value.size if value.is_a?(WireSequence)
+    return value.field_count if value.is_a?(WireRecord)
+    return value.bytesize if value.is_a?(String)
+    return value.length if value.is_a?(List) || value.is_a?(Array) || value.is_a?(Hash)
+    value.to_s.bytesize
   end
 
-  def stage0_call_def_from_nodes(fn, call_name, arg_nodes)
-    # Evaluate arg expressions in the caller's @env, then bind into
-    # the callee's fresh env. The old code allocated an intermediate
-    # arg_values poly_array per call (and looped twice); skip that —
-    # Ruby semantics let us evaluate each arg in the old env and
-    # set into the new env directly. ~50% fewer per-call allocations
-    # in the dominant hot path of compiler/lib/lowering.w.
+  def stage0_collect_free_vars(node, env)
+    vars = [""]
+    vars.clear
+    seen = {"__spinel_fv__" => true}
+    seen.clear
+    stage0_walk_free_vars(node, env, vars, seen)
+    vars
+  end
+
+  def stage0_walk_free_vars(node, env, vars, seen)
+    return nil unless node
+    if node.is_a?(Array)
+      i = 0
+      while i < node.length
+        stage0_walk_free_vars(node[i], env, vars, seen)
+        i += 1
+      end
+      return nil
+    end
+    return nil unless node.respond_to?(:doc)
+    doc = node.doc
+    if doc == 1 || doc == 17
+      i = 0
+      while i < node.length
+        stage0_walk_free_vars(node[i], env, vars, seen)
+        i += 1
+      end
+      return nil
+    end
+    if doc == 9
+      name = node.name.to_s
+      if name.length > 0
+        c0 = name.getbyte(0)
+        is_const = c0 >= 65 && c0 <= 90
+        if !seen[name] && !is_const && c0 != 64 && !env.defined_locally_or_in_scope?(name)
+          seen[name] = true
+          vars.push(name)
+        end
+      end
+      return nil
+    end
+    if doc == 8
+      stage0_walk_free_vars(node.value, env, vars, seen)
+      t = node.name
+      if t != nil && t.respond_to?(:doc) && t.doc == 9
+        seen[t.name.to_s] = true
+      else
+        stage0_walk_free_vars(t, env, vars, seen)
+      end
+      return nil
+    end
+    if doc == 15
+      stage0_walk_free_vars(node.value, env, vars, seen)
+      stage0_walk_free_vars(node.name, env, vars, seen)
+      return nil
+    end
+    if doc == 7 || doc == 19 || doc == 20
+      stage0_walk_free_vars(node.left, env, vars, seen)
+      stage0_walk_free_vars(node.right, env, vars, seen)
+      return nil
+    end
+    if doc == 10
+      stage0_walk_free_vars(node.condition, env, vars, seen)
+      stage0_walk_free_vars(node.then_block, env, vars, seen)
+      stage0_walk_free_vars(node.else_block, env, vars, seen)
+      return nil
+    end
+    if doc == 11 || doc == 58
+      stage0_walk_free_vars(node.condition, env, vars, seen)
+      stage0_walk_free_vars(node.body, env, vars, seen)
+      return nil
+    end
+    if doc == 13
+      stage0_walk_free_vars(node.obj, env, vars, seen)
+      cargs = node.args
+      if cargs != nil
+        i = 0
+        while i < cargs.length
+          stage0_walk_free_vars(cargs[i], env, vars, seen)
+          i += 1
+        end
+      end
+      return nil
+    end
+    if doc == 2 || doc == 36 || doc == 38 || doc == 47
+      kargs = node.args
+      if kargs != nil
+        i = 0
+        while i < kargs.length
+          stage0_walk_free_vars(kargs[i], env, vars, seen)
+          i += 1
+        end
+      end
+      return nil
+    end
+    if doc == 14 || doc == 35 || doc == 39 || doc == 40 || doc == 53
+      stage0_walk_free_vars(node.value, env, vars, seen)
+      return nil
+    end
+    if doc == 18
+      entries = node.entries
+      if entries != nil
+        i = 0
+        while i < entries.length
+          pair = entries[i]
+          if pair != nil
+            stage0_walk_free_vars(pair[0], env, vars, seen)
+            stage0_walk_free_vars(pair[1], env, vars, seen)
+          end
+          i += 1
+        end
+      end
+      return nil
+    end
+    if doc == 21
+      stage0_walk_free_vars(node.lhs, env, vars, seen)
+      elems = node.elements
+      if elems != nil
+        i = 0
+        while i < elems.length
+          stage0_walk_free_vars(elems[i], env, vars, seen)
+          i += 1
+        end
+      end
+      return nil
+    end
+    if doc == 22 && node.is_a?(CaseExpr)
+      stage0_walk_free_vars(node.receiver, env, vars, seen)
+      whens = node.whens
+      if whens != nil
+        wi = 0
+        while wi < whens.length
+          ci = 0
+          while ci < whens[wi][0].length
+            stage0_walk_free_vars(whens[wi][0][ci], env, vars, seen)
+            ci += 1
+          end
+          stage0_walk_free_vars(whens[wi][1], env, vars, seen)
+          wi += 1
+        end
+      end
+      stage0_walk_free_vars(node.else_body, env, vars, seen)
+      return nil
+    end
+    if doc == 34
+      stage0_walk_free_vars(node.body, env, vars, seen)
+      stage0_walk_free_vars(node.rescue_body, env, vars, seen)
+      stage0_walk_free_vars(node.ensure_body, env, vars, seen)
+      return nil
+    end
+    if doc == 41
+      stage0_walk_free_vars(node.operand, env, vars, seen)
+      return nil
+    end
+    if doc == 42
+      elems = node.elements
+      if elems != nil
+        i = 0
+        while i < elems.length
+          stage0_walk_free_vars(elems[i], env, vars, seen)
+          i += 1
+        end
+      end
+      return nil
+    end
+    if doc == 43
+      stage0_walk_free_vars(node.exp, env, vars, seen)
+      return nil
+    end
+    if doc == 44
+      parts = node.parts
+      if parts != nil
+        i = 0
+        while i < parts.length
+          stage0_walk_free_vars(parts[i], env, vars, seen)
+          i += 1
+        end
+      end
+      return nil
+    end
+    if doc == 48
+      stage0_walk_free_vars(node.from, env, vars, seen)
+      stage0_walk_free_vars(node.to, env, vars, seen)
+      return nil
+    end
+    if doc == 49
+      stage0_walk_free_vars(node.size_node, env, vars, seen)
+      return nil
+    end
+    if doc == 56
+      stage0_walk_free_vars(node.right, env, vars, seen)
+      return nil
+    end
+    nil
+  end
+
+  def stage0_invoke_block(block, args)
+    return nil if block == nil
+    old_env = @env
+    parent_env = block.closure_env != nil ? block.closure_env : old_env
+    block_env = Environment.new(parent_env)
+    block_env.set_barrier(false)
+    stage0_mark_env(block_env)
+    params = block.args
+    if params != nil && params.length > 0
+      if params.length > 1 && args.length == 1
+        if args[0].is_a?(List)
+          args = args[0].to_a
+        elsif args[0].is_a?(Array)
+          args = args[0]
+        end
+      end
+      i = 0
+      while i < params.length
+        param = params[i]
+        pname = param.name.to_s
+        if i < args.length
+          block_env.bind_new_slot(pname, args[i])
+        elsif param.default_value != nil
+          @env = block_env
+          block_env.bind_new_slot(pname, evaluate(param.default_value))
+          @env = old_env
+        else
+          block_env.bind_new_slot(pname, nil)
+        end
+        i += 1
+      end
+    elsif args.length > 0
+      free_vars = block.free_var_cache
+      if free_vars == nil
+        free_vars = stage0_collect_free_vars(block.body, parent_env)
+        block.free_var_cache = free_vars
+      end
+      if free_vars.length > 1 && args.length == 1
+        if args[0].is_a?(List)
+          args = args[0].to_a
+        elsif args[0].is_a?(Array)
+          args = args[0]
+        end
+      end
+      fi = 0
+      while fi < free_vars.length
+        break if fi >= args.length
+        block_env.bind_new_slot(free_vars[fi], args[fi])
+        fi += 1
+      end
+      block_env.bind_new_slot("_", args[0])
+      ai = 0
+      while ai < args.length
+        block_env.bind_new_slot("_" + (ai + 1).to_s, args[ai])
+        ai += 1
+      end
+    end
+    @env = block_env
+    @in_block_depth += 1
+    result = evaluate(block.body)
+    @in_block_depth -= 1
+    @env = old_env
+    result
+  end
+
+  def stage0_call_def_from_nodes(fn, call_name, arg_nodes, block = nil)
     old_env = @env
     old_returning = @returning
     old_return_value = @return_value
+    old_block = @current_block
+    old_in_block = @in_block_depth
+    old_owner_depth = @current_block_owner_depth
+    prev_block_env = nil
+    if block != nil
+      prev_block_env = block.closure_env
+      block.closure_env = old_env
+    end
     if @env_pool_enabled == 1 && @env_pool_count > 0
       new_env = @env_pool
       @env_pool = new_env.pool_next
@@ -12879,8 +12508,9 @@ final_use_methods = <<~RUBY
       new_env = Environment.new(old_env)
     end
     stage0_mark_env(new_env)
+    params = fn.args
     param_names = fn.stage0_param_names
-    arg_count = arg_nodes.length
+    arg_count = arg_nodes != nil ? arg_nodes.length : 0
     param_count = param_names.length
     i = 0
     while i < arg_count
@@ -12893,29 +12523,59 @@ final_use_methods = <<~RUBY
       i += 1
     end
     @env = new_env
+    if i < param_count && params != nil
+      while i < param_count
+        pnode = params[i]
+        if pnode != nil && pnode.default_value != nil
+          new_env.bind_new_slot(param_names[i], evaluate(pnode.default_value))
+        else
+          new_env.bind_new_slot(param_names[i], nil)
+        end
+        i += 1
+      end
+    end
+    if fn.block != nil
+      bname = fn.block.is_a?(Arg) ? fn.block.name.to_s : fn.block.to_s
+      if bname != "" && bname != "&"
+        new_env.bind_new_slot(bname, block)
+      end
+    end
+    if block != nil
+      if @in_block_depth > 0
+        # keep current_block_owner_depth pointing to outer method
+      else
+        @current_block_owner_depth = @call_depth
+      end
+    end
+    @call_depth += 1
+    my_depth = @call_depth
+    @in_block_depth = 0
+    @current_block = block
     @returning = false
     @return_value = nil
+    @self_stack.push(nil)
 
-    old_current_function = @stage0_current_function
-    @stage0_current_function = call_name
-    if @stage0_stack_trace_enabled == 1
-      if @stage0_call_stack == nil
-        @stage0_call_stack = []
-      end
-      @stage0_call_stack.push(call_name.to_s)
-      File.write("/tmp/tungsten-stage0-call-stack", @stage0_call_stack.join(">"))
-    end
     result = evaluate(fn.body)
-    if @stage0_stack_trace_enabled == 1 && @stage0_call_stack != nil
-      @stage0_call_stack.pop
+    if block != nil
+      block.closure_env = prev_block_env
     end
-    @stage0_current_function = old_current_function
+    @self_stack.pop
+    @env = old_env
+    @current_block = old_block
+    @in_block_depth = old_in_block
+    @current_block_owner_depth = old_owner_depth
+    @call_depth -= 1
     if @returning
       result = @return_value
+      if @return_target_depth < 0 || @return_target_depth >= my_depth
+        @returning = old_returning
+        @return_value = old_return_value
+        @return_target_depth = -1
+      end
+    else
+      @returning = old_returning
+      @return_value = old_return_value
     end
-    @env = old_env
-    @returning = old_returning
-    @return_value = old_return_value
     if @env_pool_enabled == 1
       new_env.pool_link(@env_pool)
       @env_pool = new_env
@@ -12924,66 +12584,1366 @@ final_use_methods = <<~RUBY
     result
   end
 
-  def stage0_primitive_call(recv, name_sym, arg_nodes)
-    # Lazy arg evaluation: skip the per-call `args = []` poly_array
-    # allocation (and the inline-cap-16 sp_RbVal buffer it triggers)
-    # for branches that need only args[0] / args[1] / no args. The
-    # original code eagerly allocated a fresh array every primitive
-    # call; in compiler/lib/lowering.w that's millions of allocs/sec.
-    # Branches that use args[0]/args[1] now call evaluate(arg_nodes[0])
-    # / evaluate(arg_nodes[1]) directly. Order branches hottest-first
-    # so the common cases match before the strcmp chain reaches the
-    # rare ones.
-    if name_sym == :"[]"
-      # Hoist the index eval into a local. Spinel's []-on-poly emits a
-      # per-cls_id dispatch table that re-evaluates the index expression
-      # ONCE PER BRANCH (~10 cls_id branches), each hitting a fresh
-      # poly_to_s/poly_to_i — burning millions of evaluate+alloc/free
-      # per second on the lowering hot path.
-      idx_v = evaluate(arg_nodes[0])
-      if recv.is_a?(Hash)
-        hash_value = recv[idx_v]
-        return hash_value if hash_value != nil
-        hash_value = recv[idx_v.to_sym]
-        return hash_value if hash_value != nil
-        return recv[idx_v.to_s]
-      end
-      return recv[idx_v]
+  def stage0_slab_alloc_init(arg_nodes)
+    kind_id = evaluate(arg_nodes[0]).to_i
+    size_class = evaluate(arg_nodes[1]).to_i
+    offset = @ast_next_offset
+    @ast_next_offset += 8
+    pnode = PackedNode.new(kind_id, size_class, offset)
+    idx = 2
+    slot = 0
+    while idx < arg_nodes.length
+      pnode.set_field(slot, evaluate(arg_nodes[idx]))
+      slot += 1
+      idx += 1
     end
-    if name_sym == :size || name_sym == :length
-      if recv.is_a?(List)
-        return recv.length
+    pnode
+  end
+
+  def stage0_clone_wire_value(val)
+    if val.is_a?(WireRecord)
+      copy = WireRecord.new(val.kind)
+      n = val.field_count
+      i = 0
+      while i < n
+        copy.store_at(i, val.key_at(i), stage0_clone_wire_value(val.value_at(i)))
+        i += 1
       end
-      if recv.is_a?(Array)
-        return recv.length
+      return copy
+    elsif val.is_a?(WireSequence)
+      copy = WireSequence.new
+      n = val.size
+      i = 0
+      while i < n
+        copy.push(stage0_clone_wire_value(val[i]))
+        i += 1
       end
-      if recv.is_a?(Hash)
-        return recv.length
+      return copy
+    elsif val.is_a?(List)
+      cloned = []
+      n = val.length
+      i = 0
+      while i < n
+        cloned.push(stage0_clone_wire_value(val[i]))
+        i += 1
       end
-      return recv.to_s.length
+      return List.new(cloned)
+    elsif val.is_a?(Hash)
+      copy = {}
+      val.each do |k, v|
+        copy[k] = stage0_clone_wire_value(v)
+      end
+      return copy
     end
-    if name_sym == :to_s
-      return recv.to_s
+    val
+  end
+
+  def stage0_dispatch_ccall(arg_nodes)
+    fn_name = evaluate(arg_nodes[0]).to_s
+    argc = arg_nodes.length
+    if fn_name == "w_is_node_extern"
+      v = evaluate(arg_nodes[1])
+      return v.is_a?(PackedNode) ? 1 : 0
+    end
+    if fn_name == "w_is_ast_node_full"
+      v = evaluate(arg_nodes[1])
+      return 0 if v == nil
+      return 1 if v.is_a?(PackedNode)
+      if v.is_a?(Hash) && argc > 2
+        k = evaluate(arg_nodes[2])
+        return (v[k] != nil || v[k.to_s] != nil || v[k.to_sym] != nil) ? 1 : 0
+      end
+      return 0
+    end
+    if fn_name == "w_node_alloc"
+      kind_id = evaluate(arg_nodes[1]).to_i
+      size_class = evaluate(arg_nodes[2]).to_i
+      offset = @ast_next_offset
+      @ast_next_offset += 8
+      return PackedNode.new(kind_id, size_class, offset)
+    end
+    if fn_name == "w_node_field_store"
+      n = evaluate(arg_nodes[1])
+      slot = evaluate(arg_nodes[2]).to_i
+      val = evaluate(arg_nodes[3])
+      n.set_field(slot, val) if n.is_a?(PackedNode)
+      return val
+    end
+    if fn_name == "w_node_field_load"
+      n = evaluate(arg_nodes[1])
+      slot = evaluate(arg_nodes[2]).to_i
+      return n.get_field(slot) if n.is_a?(PackedNode)
+      return nil
+    end
+    if fn_name == "w_node_kind_extern"
+      n = evaluate(arg_nodes[1])
+      return n.kind if n.is_a?(PackedNode)
+      return 0
+    end
+    if fn_name == "w_node_kind_sym"
+      n = evaluate(arg_nodes[1])
+      tbl = evaluate(arg_nodes[2])
+      if n.is_a?(PackedNode) && (tbl.is_a?(List) || tbl.is_a?(Array))
+        kid = n.kind
+        if kid >= 0 && kid < tbl.length
+          return tbl[kid]
+        end
+      end
+      return nil
+    end
+    if fn_name == "w_node_offset_extern"
+      n = evaluate(arg_nodes[1])
+      return n.offset if n.is_a?(PackedNode)
+      return 0
+    end
+    if fn_name == "w_node_size_class_extern"
+      n = evaluate(arg_nodes[1])
+      return n.sc if n.is_a?(PackedNode)
+      return 0
+    end
+    if fn_name == "w_node_singleton"
+      kid = evaluate(arg_nodes[1]).to_i
+      existing = @ast_singletons[kid]
+      if existing == nil
+        existing = PackedNode.new(kid, 0, kid)
+        @ast_singletons[kid] = existing
+      end
+      return existing
+    end
+    if fn_name == "w_node_inline_payload"
+      kid = evaluate(arg_nodes[1]).to_i
+      payload = evaluate(arg_nodes[2]).to_i & 0xFFFFFFFF
+      key = (kid << 32) | payload
+      node = @ast_inline_nodes[key]
+      if node == nil
+        node = PackedNode.new(kid, 0, payload)
+        @ast_inline_nodes[key] = node
+      end
+      return node
+    end
+    if fn_name == "w_ast_bool_cached"
+      truthy = evaluate(arg_nodes[1]).to_i != 0
+      key = truthy ? 1 : 0
+      node = @ast_bool_nodes[key]
+      if node == nil
+        offset = @ast_next_offset
+        @ast_next_offset += 8
+        node = PackedNode.new(39, 1, offset)
+        node.set_field(0, truthy)
+        @ast_bool_nodes[key] = node
+      end
+      return node
+    end
+    if fn_name == "w_ast_intern_node"
+      kid = evaluate(arg_nodes[1]).to_i
+      val = evaluate(arg_nodes[2])
+      str = val.to_s
+      tag = val.is_a?(Symbol) ? "1:" : "0:"
+      skey = tag + str
+      sid = @ast_intern_ids[skey]
+      if sid == nil
+        @ast_intern_next_id += 1
+        sid = @ast_intern_next_id
+        @ast_intern_ids[skey] = sid
+        @ast_intern_strs[sid] = str
+      end
+      nkey = (kid << 32) | sid
+      cached = @ast_intern_nodes[nkey]
+      if cached == nil
+        cached = PackedNode.new(kid, 0, sid, str)
+        @ast_intern_nodes[nkey] = cached
+      end
+      return cached
+    end
+    if fn_name == "w_ast_intern_str_of"
+      n = evaluate(arg_nodes[1])
+      if n.is_a?(PackedNode)
+        s = n.intern_str
+        return s if s != nil && s != ""
+        return @ast_intern_strs[n.offset] || ""
+      end
+      return ""
+    end
+    if fn_name == "w_ast_sparse_set"
+      n = evaluate(arg_nodes[1])
+      k = evaluate(arg_nodes[2])
+      v = evaluate(arg_nodes[3])
+      n.set_sparse(k, v) if n.is_a?(PackedNode)
+      return v
+    end
+    if fn_name == "w_ast_sparse_get"
+      n = evaluate(arg_nodes[1])
+      k = evaluate(arg_nodes[2])
+      return n.get_sparse(k) if n.is_a?(PackedNode)
+      return nil
+    end
+    if fn_name == "w_ast_sparse_copy"
+      src = evaluate(arg_nodes[1])
+      dst = evaluate(arg_nodes[2])
+      if src.is_a?(PackedNode) && dst.is_a?(PackedNode)
+        src.copy_metadata_to(dst)
+      end
+      return dst
+    end
+    if fn_name == "w_ast_analysis_set"
+      n = evaluate(arg_nodes[1])
+      v = evaluate(arg_nodes[2])
+      n.analysis = v if n.is_a?(PackedNode)
+      return v
+    end
+    if fn_name == "w_ast_analysis_get"
+      n = evaluate(arg_nodes[1])
+      return n.analysis if n.is_a?(PackedNode)
+      return nil
+    end
+    if fn_name == "w_ast_ivar_offsets_set"
+      n = evaluate(arg_nodes[1])
+      v = evaluate(arg_nodes[2])
+      n.ivar_offsets = v if n.is_a?(PackedNode)
+      return v
+    end
+    if fn_name == "w_ast_ivar_offsets_get"
+      n = evaluate(arg_nodes[1])
+      return n.ivar_offsets if n.is_a?(PackedNode)
+      return nil
+    end
+    if fn_name == "w_ast_ivar_count_set"
+      n = evaluate(arg_nodes[1])
+      v = evaluate(arg_nodes[2])
+      n.ivar_count = v if n.is_a?(PackedNode)
+      return v
+    end
+    if fn_name == "w_ast_ivar_count_get"
+      n = evaluate(arg_nodes[1])
+      return n.ivar_count if n.is_a?(PackedNode)
+      return nil
+    end
+    if fn_name == "w_ast_store_reset"
+      @ast_singletons.clear
+      @ast_inline_nodes.clear
+      @ast_bool_nodes.clear
+      @ast_intern_ids.clear
+      @ast_intern_nodes.clear
+      @ast_intern_strs.clear
+      @ast_intern_next_id = 0
+      @ast_next_offset = 65536
+      @ast_store_gen += 1
+      return nil
+    end
+    if fn_name == "w_ast_store_generation"
+      return @ast_store_gen
+    end
+    if fn_name == "w_ast_store_stats_dump"
+      return nil
+    end
+    if fn_name == "w_ast_body_builder_new"
+      return List.new
+    end
+    if fn_name == "w_ast_body_builder_push"
+      storage = evaluate(arg_nodes[1])
+      _size = evaluate(arg_nodes[2])
+      val = evaluate(arg_nodes[3])
+      storage.push(val) if storage.is_a?(List) || storage.is_a?(Array)
+      return storage
+    end
+    if fn_name == "w_ast_body_builder_finish"
+      storage = evaluate(arg_nodes[1])
+      _size = evaluate(arg_nodes[2])
+      return storage if storage.is_a?(List)
+      return List.new(storage) if storage.is_a?(Array)
+      return List.new
+    end
+    if fn_name == "w_content_temp_map_new"
+      cap = evaluate(arg_nodes[1]).to_i
+      start_id = evaluate(arg_nodes[2]).to_i
+      return ContentTempMap.new(cap, start_id)
+    end
+    if fn_name == "w_content_temp_map_seed"
+      m = evaluate(arg_nodes[1])
+      name = evaluate(arg_nodes[2])
+      idx = evaluate(arg_nodes[3]).to_i
+      if m.is_a?(ContentTempMap)
+        ord = -1
+        if name.is_a?(String) && name.bytesize >= 3 && name.getbyte(0) == 37 && name.getbyte(1) == 116
+          valid = true
+          acc = 0
+          bi = 2
+          blen = name.bytesize
+          while bi < blen
+            b = name.getbyte(bi)
+            if b >= 48 && b <= 57
+              acc = acc * 10 + (b - 48)
+            else
+              valid = false
+              break
+            end
+            bi += 1
+          end
+          ord = acc if valid
+        end
+        m.seed(ord, name, idx)
+      end
+      return nil
+    end
+    if fn_name == "w_content_temp_norm"
+      name = evaluate(arg_nodes[1])
+      m = evaluate(arg_nodes[2])
+      if m.is_a?(ContentTempMap)
+        ord = -1
+        if name.is_a?(String) && name.bytesize >= 3 && name.getbyte(0) == 37 && name.getbyte(1) == 116
+          valid = true
+          acc = 0
+          bi = 2
+          blen = name.bytesize
+          while bi < blen
+            b = name.getbyte(bi)
+            if b >= 48 && b <= 57
+              acc = acc * 10 + (b - 48)
+            else
+              valid = false
+              break
+            end
+            bi += 1
+          end
+          ord = acc if valid
+        end
+        return m.norm(ord, name)
+      end
+      return 0
+    end
+    if fn_name == "w_wire_function_record_new"
+      fields = evaluate(arg_nodes[1])
+      name = evaluate(arg_nodes[2])
+      params = evaluate(arg_nodes[3])
+      return_type = evaluate(arg_nodes[4])
+      is_toplevel = evaluate(arg_nodes[5])
+      extra_params = evaluate(arg_nodes[6])
+      rec = WireRecord.new(265)
+      rec.store_at(0, fields[0], name)
+      rec.store_at(1, fields[1], name)
+      rec.store_at(2, fields[2], params)
+      rec.store_at(3, fields[3], extra_params)
+      rec.store_at(4, fields[4], return_type)
+      rec.store_at(5, fields[5], is_toplevel)
+      rec.store_at(6, fields[6], List.new)
+      rec.store_at(7, fields[7], {})
+      rec.store_at(8, fields[8], {})
+      rec.store_at(9, fields[9], 0)
+      rec.store_at(10, fields[10], 0)
+      rec.store_at(11, fields[11], 0)
+      rec.store_at(12, fields[12], 0)
+      rec.store_at(13, fields[13], List.new)
+      rec.store_at(14, fields[14], 0)
+      rec.store_at(15, fields[15], List.new)
+      rec.store_at(16, fields[16], List.new)
+      rec.store_at(17, fields[17], List.new([nil]))
+      rec.store_at(18, fields[18], {})
+      rec.store_at(19, fields[19], List.new)
+      rec.store_at(20, fields[20], {})
+      rec.store_at(21, fields[21], false)
+      rec.store_at(22, fields[22], false)
+      rec.store_at(23, fields[23], nil)
+      rec.store_at(24, fields[24], nil)
+      return rec
+    end
+    if fn_name == "w_wire_block_record_new"
+      fields = evaluate(arg_nodes[1])
+      label = evaluate(arg_nodes[2])
+      rec = WireRecord.new(266)
+      rec.store_at(0, fields[0], label)
+      rec.store_at(1, fields[1], List.new)
+      return rec
+    end
+    if fn_name == "w_wire_alloc" || fn_name == "w_wire_alloc_reserve"
+      return WireRecord.new(evaluate(arg_nodes[1]).to_i)
+    end
+    if fn_name == "w_wire_field_store_at"
+      rec = evaluate(arg_nodes[1])
+      idx = evaluate(arg_nodes[2]).to_i
+      sym = evaluate(arg_nodes[3])
+      val = evaluate(arg_nodes[4])
+      rec.store_at(idx, sym, val) if rec.is_a?(WireRecord)
+      return val
+    end
+    if fn_name == "w_wire_field_store"
+      rec = evaluate(arg_nodes[1])
+      sym = evaluate(arg_nodes[2])
+      val = evaluate(arg_nodes[3])
+      if rec.is_a?(WireRecord)
+        rec.store(sym, val)
+      elsif rec.is_a?(Hash)
+        rec[sym] = val
+      end
+      return val
+    end
+    if fn_name == "w_wire_field_load" || fn_name == "w_wire_field_load_nil"
+      rec = evaluate(arg_nodes[1])
+      sym = evaluate(arg_nodes[2])
+      if rec.is_a?(WireRecord)
+        return rec.load(sym)
+      elsif rec.is_a?(Hash)
+        v = rec[sym]
+        return v if v != nil
+        if sym.is_a?(String)
+          return rec[sym.to_sym]
+        elsif sym.is_a?(Symbol)
+          return rec[sym.to_s]
+        end
+      end
+      return nil
+    end
+    if fn_name == "w_wire_field_count"
+      rec = evaluate(arg_nodes[1])
+      return rec.field_count if rec.is_a?(WireRecord)
+      return rec.length if rec.is_a?(Hash)
+      return 0
+    end
+    if fn_name == "w_wire_field_symbol_at"
+      rec = evaluate(arg_nodes[1])
+      idx = evaluate(arg_nodes[2]).to_i
+      return rec.key_at(idx) if rec.is_a?(WireRecord)
+      return nil
+    end
+    if fn_name == "w_wire_field_value_at"
+      rec = evaluate(arg_nodes[1])
+      idx = evaluate(arg_nodes[2]).to_i
+      return rec.value_at(idx) if rec.is_a?(WireRecord)
+      return nil
+    end
+    if fn_name == "w_wire_kind_extern"
+      rec = evaluate(arg_nodes[1])
+      return rec.kind if rec.is_a?(WireRecord)
+      return 267 if rec.is_a?(WireSequence)
+      return 0
+    end
+    if fn_name == "w_wire_kind_sym"
+      rec = evaluate(arg_nodes[1])
+      tbl = evaluate(arg_nodes[2])
+      if rec.is_a?(WireRecord) && (tbl.is_a?(List) || tbl.is_a?(Array))
+        kid = rec.kind
+        return tbl[kid] if kid >= 0 && kid < tbl.length
+      end
+      return nil
+    end
+    if fn_name == "w_is_wire_extern"
+      rec = evaluate(arg_nodes[1])
+      return (rec.is_a?(WireRecord) || rec.is_a?(WireSequence)) ? 1 : 0
+    end
+    if fn_name == "w_wire_sequence_from_array"
+      arr = evaluate(arg_nodes[1])
+      return arr if arr.is_a?(WireSequence)
+      seq = WireSequence.new
+      if arr.is_a?(List) || arr.is_a?(Array)
+        i = 0
+        while i < arr.length
+          seq.push(arr[i])
+          i += 1
+        end
+      end
+      return seq
+    end
+    if fn_name == "w_wire_sequence_size"
+      s = evaluate(arg_nodes[1])
+      return s.size if s.is_a?(WireSequence)
+      return s.length if s.is_a?(List) || s.is_a?(Array)
+      return 0
+    end
+    if fn_name == "w_wire_sequence_get"
+      s = evaluate(arg_nodes[1])
+      idx = evaluate(arg_nodes[2]).to_i
+      return s[idx] if s.is_a?(WireSequence) || s.is_a?(List) || s.is_a?(Array)
+      return nil
+    end
+    if fn_name == "w_wire_sequence_set"
+      s = evaluate(arg_nodes[1])
+      idx = evaluate(arg_nodes[2]).to_i
+      val = evaluate(arg_nodes[3])
+      if s.is_a?(WireSequence) || s.is_a?(List) || s.is_a?(Array)
+        s[idx] = val
+        return val
+      end
+      return nil
+    end
+    if fn_name == "w_wire_store_reset" || fn_name == "w_wire_store_mark"
+      return 0
+    end
+    if fn_name == "w_wire_clone"
+      return stage0_clone_wire_value(evaluate(arg_nodes[1]))
+    end
+    if fn_name == "w_wire_temp_operands"
+      rec = evaluate(arg_nodes[1])
+      out = List.new
+      if rec.is_a?(WireRecord)
+        n = rec.field_count
+        i = 0
+        while i < n
+          k = rec.key_at(i).to_s
+          v = rec.value_at(i)
+          i += 1
+          next if k == "temp" || v == nil
+          if v.is_a?(WireSequence)
+            vn = v.size
+            vi = 0
+            while vi < vn
+              item = v[vi]
+              vi += 1
+              if item.is_a?(String) && !item.empty? && item.getbyte(0) == 37
+                out.push(item)
+              elsif item.is_a?(Hash)
+                iv = item[:value] || item["value"]
+                out.push(iv) if iv.is_a?(String) && !iv.empty? && iv.getbyte(0) == 37
+              elsif item.is_a?(List) || item.is_a?(Array)
+                return nil
+              end
+            end
+          elsif v.is_a?(String) && !v.empty? && v.getbyte(0) == 37
+            out.push(v)
+          elsif v.is_a?(List) || v.is_a?(Array) || v.is_a?(Hash)
+            return nil
+          end
+        end
+      end
+      return out
+    end
+    if fn_name == "w_wire_func_current_instructions"
+      fn_rec = evaluate(arg_nodes[1])
+      return nil unless fn_rec.is_a?(WireRecord)
+      blocks = fn_rec.load(:blocks)
+      cbi = fn_rec.load(:current_block_index).to_i
+      return nil if cbi < 0
+      if blocks.is_a?(WireSequence) && cbi < blocks.size
+        blk = blocks[cbi]
+        return blk.load(:instructions) if blk.is_a?(WireRecord)
+      elsif (blocks.is_a?(List) || blocks.is_a?(Array)) && cbi < blocks.length
+        blk = blocks[cbi]
+        return blk.load(:instructions) if blk.is_a?(WireRecord)
+      end
+      return nil
+    end
+    if fn_name == "w_wire_func_push_instruction"
+      fn_rec = evaluate(arg_nodes[1])
+      instr = evaluate(arg_nodes[2])
+      if fn_rec.is_a?(WireRecord)
+        blocks = fn_rec.load(:blocks)
+        cbi = fn_rec.load(:current_block_index).to_i
+        blk = nil
+        if cbi >= 0
+          if blocks.is_a?(WireSequence) && cbi < blocks.size
+            blk = blocks[cbi]
+          elsif (blocks.is_a?(List) || blocks.is_a?(Array)) && cbi < blocks.length
+            blk = blocks[cbi]
+          end
+        end
+        if blk.is_a?(WireRecord)
+          seq = blk.load(:instructions)
+          if seq.is_a?(WireSequence) || seq.is_a?(List) || seq.is_a?(Array)
+            seq.push(instr)
+          end
+        end
+      end
+      return instr
+    end
+    if fn_name == "w_make_token_extern"
+      t = evaluate(arg_nodes[1]).to_i & 0xFF
+      l = evaluate(arg_nodes[2]).to_i & 0xFFF
+      o = evaluate(arg_nodes[3]).to_i & 0xFFFFFF
+      return -1125899906842624 | (t << 38) | (l << 26) | (o << 2)
+    end
+    if fn_name == "w_token_type_extern"
+      return (evaluate(arg_nodes[1]).to_i >> 38) & 0xFF
+    end
+    if fn_name == "w_token_length_extern"
+      return (evaluate(arg_nodes[1]).to_i >> 26) & 0xFFF
+    end
+    if fn_name == "w_token_offset_extern"
+      return (evaluate(arg_nodes[1]).to_i >> 2) & 0xFFFFFF
+    end
+    if fn_name == "w_parser_tok_raw"
+      return evaluate(arg_nodes[1]).to_i
+    end
+    if fn_name == "w_parser_chars_equal_ascii"
+      chars = evaluate(arg_nodes[1])
+      off = evaluate(arg_nodes[2]).to_i
+      len = evaluate(arg_nodes[3]).to_i
+      lit = evaluate(arg_nodes[4]).to_s
+      return 0 if lit.bytesize != len
+      if chars.is_a?(List) || chars.is_a?(Array)
+        return 0 if off < 0 || off + len > chars.length
+        i = 0
+        while i < len
+          return 0 if chars[off + i].to_i != lit.getbyte(i)
+          i += 1
+        end
+        return 1
+      elsif chars.is_a?(String)
+        return 0 if off < 0 || off + len > chars.bytesize
+        return chars.byteslice(off, len) == lit ? 1 : 0
+      end
+      return 0
+    end
+    if fn_name == "w_location_file"
+      fid = evaluate(arg_nodes[1]).to_i & 0x3FFF
+      line = evaluate(arg_nodes[2]).to_i & 0x3FFFF
+      col = evaluate(arg_nodes[3]).to_i & 0x7FF
+      return -307863255777280 | (fid << 29) | (line << 11) | col
+    end
+    if fn_name == "w_location_file_offset"
+      fid = evaluate(arg_nodes[1]).to_i & 0x3FFF
+      off = evaluate(arg_nodes[2]).to_i & 0x1FFFFFFF
+      return -299067162755072 | (fid << 29) | off
+    end
+    if fn_name == "w_unbox_location_file_id" || fn_name == "w_unbox_location_file_id_extern"
+      return (evaluate(arg_nodes[1]).to_i >> 29) & 0x3FFF
+    end
+    if fn_name == "w_unbox_location_line" || fn_name == "w_unbox_location_line_extern"
+      return (evaluate(arg_nodes[1]).to_i >> 11) & 0x3FFFF
+    end
+    if fn_name == "w_unbox_location_col" || fn_name == "w_unbox_location_col_extern"
+      return evaluate(arg_nodes[1]).to_i & 0x7FF
+    end
+    if fn_name == "w_unbox_location_offset" || fn_name == "w_unbox_location_offset_extern"
+      return evaluate(arg_nodes[1]).to_i & 0x1FFFFFFF
+    end
+    if fn_name == "w_loc_register_file"
+      path = evaluate(arg_nodes[1]).to_s
+      line_at = argc > 2 ? evaluate(arg_nodes[2]) : nil
+      col_at = argc > 3 ? evaluate(arg_nodes[3]) : nil
+      fid = @loc_files.length
+      @loc_files.push(path)
+      @loc_line_tables.push(line_at)
+      @loc_col_tables.push(col_at)
+      @loc_sources.push("")
+      return fid
+    end
+    if fn_name == "w_loc_register_source_text"
+      fid = evaluate(arg_nodes[1]).to_i
+      text = evaluate(arg_nodes[2]).to_s
+      while @loc_sources.length <= fid
+        @loc_sources.push("")
+      end
+      @loc_sources[fid] = text
+      return fid
+    end
+    if fn_name == "w_loc_line_for_offset"
+      fid = evaluate(arg_nodes[1]).to_i
+      off = evaluate(arg_nodes[2]).to_i
+      if fid > 0 && fid < @loc_line_tables.length
+        tbl = @loc_line_tables[fid]
+        if tbl.is_a?(List) || tbl.is_a?(Array)
+          return tbl[off].to_i if off >= 0 && off < tbl.length
+          return tbl[tbl.length - 1].to_i if tbl.length > 0
+        end
+      end
+      src = (fid > 0 && fid < @loc_sources.length) ? @loc_sources[fid] : ""
+      return 1 if src == nil || src == ""
+      prefix = src.byteslice(0, off) || ""
+      c = 0
+      pi = 0
+      plen = prefix.bytesize
+      while pi < plen
+        c += 1 if prefix.getbyte(pi) == 10
+        pi += 1
+      end
+      return c + 1
+    end
+    if fn_name == "w_loc_col_for_offset"
+      fid = evaluate(arg_nodes[1]).to_i
+      off = evaluate(arg_nodes[2]).to_i
+      if fid > 0 && fid < @loc_col_tables.length
+        tbl = @loc_col_tables[fid]
+        if tbl.is_a?(List) || tbl.is_a?(Array)
+          return tbl[off].to_i if off >= 0 && off < tbl.length
+          return tbl[tbl.length - 1].to_i if tbl.length > 0
+        end
+      end
+      src = (fid > 0 && fid < @loc_sources.length) ? @loc_sources[fid] : ""
+      return 1 if src == nil || src == ""
+      prefix = src.byteslice(0, off) || ""
+      nl = prefix.rindex("\\n")
+      return nl == nil ? off + 1 : off - nl
+    end
+    if fn_name == "w_numeric_to_i64" || fn_name == "w_u64" || fn_name == "w_int"
+      return evaluate(arg_nodes[1]).to_i
+    end
+    if fn_name == "w_int_to_hex_str"
+      return stage0_u64_hex(evaluate(arg_nodes[1]).to_i)
+    end
+    if fn_name == "w_string_byte_length" || fn_name == "w_string_len"
+      return evaluate(arg_nodes[1]).to_s.bytesize
+    end
+    if fn_name == "w_string_slice_bytes"
+      s = evaluate(arg_nodes[1]).to_s
+      st = evaluate(arg_nodes[2]).to_i
+      ln = evaluate(arg_nodes[3]).to_i
+      return "" if ln <= 0 || st < 0 || st >= s.bytesize
+      return s.byteslice(st, ln) || ""
+    end
+    if fn_name == "w_string_eq_bytes_lit"
+      s = evaluate(arg_nodes[1]).to_s
+      st = evaluate(arg_nodes[2]).to_i
+      ln = evaluate(arg_nodes[3]).to_i
+      lit = evaluate(arg_nodes[4]).to_s
+      return false if lit.bytesize != ln || st < 0 || st + ln > s.bytesize
+      return s.byteslice(st, ln) == lit
+    end
+    if fn_name == "w_string_first_byte"
+      s = evaluate(arg_nodes[1]).to_s
+      return -1 if s.bytesize == 0
+      return s.getbyte(0)
+    end
+    if fn_name == "w_algebra_rewrite_source"
+      return evaluate(arg_nodes[1])
+    end
+    if fn_name == "w_array_data_ptr"
+      return evaluate(arg_nodes[1])
+    end
+    if fn_name == "w_read_lex64_table"
+      path = evaluate(arg_nodes[1]).to_s
+      cached = @lex64_tables[path]
+      return cached if cached != nil
+      if File.exist?(path)
+        data = File.binread(path)
+        if data.bytesize >= 16 && data.byteslice(0, 4) == "WLX8"
+          body = data.byteslice(16, data.bytesize - 16)
+          @lex64_tables[path] = body
+          return body
+        end
+      end
+      return nil
+    end
+    if fn_name == "w_lchs_scan_64"
+      s = evaluate(arg_nodes[1]).to_s
+      pos = evaluate(arg_nodes[2]).to_i
+      len = evaluate(arg_nodes[3]).to_i
+      mask = evaluate(arg_nodes[4]).to_i
+      limit = s.bytesize
+      limit = len if len < limit
+      i = pos
+      while i < limit
+        b = s.getbyte(i)
+        if b < 64
+          break if ((mask >> b) & 1) == 0
+        else
+          break if ((mask >> 63) & 1) == 0
+        end
+        i += 1
+      end
+      return i
+    end
+    if fn_name == "w_lex64_scan_to_cp"
+      data = evaluate(arg_nodes[1])
+      n = evaluate(arg_nodes[2]).to_i
+      p = evaluate(arg_nodes[3]).to_i
+      target = evaluate(arg_nodes[4]).to_i
+      if data.is_a?(List) || data.is_a?(Array)
+        limit = data.length < n ? data.length : n
+        while p < limit
+          lc = data[p].to_i
+          cp_val = (lc >> 18) & 0x1FFFFF
+          return p if cp_val == target
+          p += 1
+        end
+      end
+      return p
+    end
+    if fn_name == "w_executable_dir"
+      return File.expand_path("bin")
+    end
+    if fn_name == "w_executable_path"
+      return File.expand_path("bin/tungsten-compiler")
+    end
+    if fn_name == "w_runtime_dir"
+      return File.expand_path("runtime")
+    end
+    if fn_name == "w_cpu_count" || fn_name == "__w_cpu_count"
+      return 4
+    end
+    if fn_name == "w_isatty_stdout" || fn_name == "w_isatty_stdin"
+      return false
+    end
+    if fn_name == "w_slab_is_frozen" || fn_name == "w_frozen_p" || fn_name == "w_core_cache_write"
+      return false
+    end
+    if fn_name == "w_freeze"
+      return evaluate(arg_nodes[1])
+    end
+    if fn_name == "w_host_cache_bytes_extern"
+      return 0
+    end
+    if fn_name == "w_eputs"
+      $stderr.puts(evaluate(arg_nodes[1]).to_s)
+      return nil
+    end
+    if fn_name == "w_flush"
+      $stdout.flush
+      $stderr.flush
+      return nil
+    end
+    if fn_name == "w_setenv"
+      ENV[evaluate(arg_nodes[1]).to_s] = evaluate(arg_nodes[2]).to_s
+      return nil
+    end
+    if fn_name == "w_run_argv"
+      argv_val = evaluate(arg_nodes[1])
+      cmd_s = ""
+      if argv_val.is_a?(List) || argv_val.is_a?(Array)
+        ai = 0
+        while ai < argv_val.length
+          cmd_s = cmd_s + " " if ai > 0
+          arg_s = argv_val[ai].to_s
+          cmd_s = cmd_s + "'" + arg_s.gsub("'", "'\\\\''") + "'"
+          ai += 1
+        end
+      else
+        cmd_s = argv_val.to_s
+      end
+      ok = system(cmd_s)
+      return ok ? 0 : 1
+    end
+    if fn_name == "__w_bit_ctpop_u64" || fn_name == "__w_bit_ctpop_64" || fn_name == "__w_bit_ctpop_16" || fn_name == "__w_bit_ctpop_8"
+      v = evaluate(arg_nodes[1]).to_i
+      c = 0
+      i = 0
+      while i < 64
+        c += (v >> i) & 1
+        i += 1
+      end
+      return c
+    end
+    if fn_name == "__w_bit_ctpop_u32" || fn_name == "__w_bit_ctpop_32"
+      v = evaluate(arg_nodes[1]).to_i & 0xFFFFFFFF
+      c = 0
+      while v > 0
+        c += (v & 1)
+        v = v >> 1
+      end
+      return c
+    end
+    if fn_name == "__w_bit_cttz_u64" || fn_name == "__w_bit_cttz_64"
+      v = evaluate(arg_nodes[1]).to_i
+      return 64 if v == 0
+      c = 0
+      while c < 64 && ((v >> c) & 1) == 0
+        c += 1
+      end
+      return c
+    end
+    if fn_name == "__w_bit_cttz_u32" || fn_name == "__w_bit_cttz_32"
+      v = evaluate(arg_nodes[1]).to_i & 0xFFFFFFFF
+      return 32 if v == 0
+      c = 0
+      while c < 32 && ((v >> c) & 1) == 0
+        c += 1
+      end
+      return c
+    end
+    if fn_name == "__w_bit_ctlz_u64" || fn_name == "__w_bit_ctlz_64"
+      v = evaluate(arg_nodes[1]).to_i
+      return 64 if v == 0
+      c = 0
+      i = 63
+      while i >= 0 && ((v >> i) & 1) == 0
+        c += 1
+        i -= 1
+      end
+      return c
+    end
+    nil
+  end
+
+  def stage0_tungsten_lchs_flag(cp)
+    if cp < 128
+      return 0x80 if cp == 10 || cp == 13
+      return 0x10 if cp == 32 || cp == 9
+      return 0x02 if cp == 34 || cp == 39
+      return 0x29 if cp >= 48 && cp <= 57
+      return 0x08 if cp >= 65 && cp <= 70
+      return 0x60 if cp == 95
+      return 0x68 if cp >= 97 && cp <= 102
+      return 0x60 if cp >= 103 && cp <= 122
+      return 0x04 if cp == 33 || cp == 35 || cp == 37 || cp == 38 || (cp >= 40 && cp <= 47) || (cp >= 58 && cp <= 63) || cp == 91 || cp == 93 || cp == 94 || (cp >= 123 && cp <= 126)
+      return 0
+    end
+    return 0x60 if cp == 0x00B5
+    return 0x60 if cp >= 0x00C0 && cp <= 0x02AF && cp != 0x00D7 && cp != 0x00F7
+    return 0x60 if cp >= 0x0370 && cp <= 0x04FF
+    return 0x60 if cp >= 0x0904 && cp <= 0x0939
+    return 0x60 if cp >= 0x1D00 && cp <= 0x1EFF
+    return 0x60 if cp == 0x207F || (cp >= 0x2090 && cp <= 0x209C)
+    return 0x60 if cp == 0x2107 || cp == 0x2113 || cp == 0x2119 || cp == 0x211A || cp == 0x212F
+    return 0x60 if cp == 0x222B || cp == 0x2C7C
+    return 0x60 if cp >= 0x3040 && cp <= 0x30FF
+    return 0x60 if cp >= 0x1D400 && cp <= 0x1D7FF
+    0
+  end
+
+  def stage0_primitive_call(recv, name_sym, arg_nodes, block = nil)
+    argc = arg_nodes != nil ? arg_nodes.length : 0
+    if name_sym == :is_a? || name_sym == :kind_of?
+      target_t = evaluate(arg_nodes[0])
+      target_name = ""
+      if target_t.is_a?(WClass)
+        target_name = target_t.name.to_s
+      elsif target_t.is_a?(String) || target_t.is_a?(Symbol)
+        target_name = target_t.to_s
+      end
+      return true if target_name == "Object"
+      return stage0_type_name(recv) == target_name
     end
     if name_sym == :nil?
       return recv == nil
     end
-    if name_sym == :empty?
-      if recv.is_a?(List)
+    if name_sym == :to_s
+      return w_to_s(recv)
+    end
+    if name_sym == :inspect
+      return w_to_s(recv)
+    end
+    if recv.is_a?(StringBuffer)
+      if name_sym == :push || name_sym == :"<<" || name_sym == :append
+        recv.push(evaluate(arg_nodes[0]).to_s)
+        return recv
+      end
+      if name_sym == :push_char || name_sym == :push_byte
+        recv.push_byte(evaluate(arg_nodes[0]).to_i)
+        return recv
+      end
+      if name_sym == :byte_length || name_sym == :length || name_sym == :size
+        return recv.byte_length
+      end
+      if name_sym == :empty?
         return recv.empty?
       end
-      return recv.to_s.empty?
+      if name_sym == :clear
+        return recv.clear
+      end
+      if name_sym == :slice_bytes
+        return recv.slice_bytes(evaluate(arg_nodes[0]).to_i, evaluate(arg_nodes[1]).to_i)
+      end
     end
-    if name_sym == :push
+    if recv.is_a?(WRange)
+      if name_sym == :include? || name_sym == :cover?
+        return recv.include?(evaluate(arg_nodes[0]))
+      end
+      if name_sym == :begin || name_sym == :first || name_sym == :min
+        return recv.from
+      end
+      if name_sym == :end || name_sym == :last || name_sym == :max
+        return nil if recv.endless
+        return recv.exclusive ? (recv.to - 1) : recv.to
+      end
+      if name_sym == :exclude_end?
+        return recv.exclusive
+      end
+      if name_sym == :to_a
+        return recv.to_list
+      end
+      recv = recv.to_list
+    end
+    if recv.is_a?(WireRecord)
+      if name_sym == :load || name_sym == :"[]"
+        return recv.load(evaluate(arg_nodes[0]))
+      end
+      if name_sym == :store || name_sym == :"[]="
+        return recv.store(evaluate(arg_nodes[0]), evaluate(arg_nodes[1]))
+      end
+    end
+    if recv.is_a?(WireSequence)
+      if name_sym == :push || name_sym == :"<<"
+        return recv.push(evaluate(arg_nodes[0]))
+      end
+      if name_sym == :size || name_sym == :length
+        return recv.size
+      end
+      if name_sym == :empty?
+        return recv.empty?
+      end
+      if name_sym == :get || name_sym == :"[]"
+        return recv[evaluate(arg_nodes[0]).to_i]
+      end
+      if name_sym == :set || name_sym == :"[]="
+        return recv[evaluate(arg_nodes[0]).to_i] = evaluate(arg_nodes[1])
+      end
+      if name_sym == :to_a
+        return List.new(recv.items)
+      end
+      recv = List.new(recv.items)
+    end
+    if name_sym == :each
+      if block != nil
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        if recv.is_a?(List) || recv.is_a?(Array)
+          i = 0
+          while i < recv.length
+            stage0_invoke_block(block, [recv[i]])
+            break if @returning || @exiting
+            if @breaking
+              @breaking = false
+              break
+            end
+            if @nexting
+              @nexting = false
+            end
+            i += 1
+          end
+        elsif recv.is_a?(Hash)
+          bparams = block.args
+          bparam_len = bparams != nil ? bparams.length : 0
+          recv.each do |k, v|
+            if bparam_len >= 2
+              stage0_invoke_block(block, [k, v])
+            else
+              stage0_invoke_block(block, [List.new([k, v])])
+            end
+            break if @returning || @exiting
+            if @breaking
+              @breaking = false
+              break
+            end
+            if @nexting
+              @nexting = false
+            end
+          end
+        end
+        @current_block_owner_depth = old_owner
+      end
+      return recv
+    end
+    if name_sym == :each_with_index
+      if block != nil
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        if recv.is_a?(List) || recv.is_a?(Array)
+          i = 0
+          while i < recv.length
+            stage0_invoke_block(block, [recv[i], i])
+            break if @returning || @exiting
+            if @breaking
+              @breaking = false
+              break
+            end
+            if @nexting
+              @nexting = false
+            end
+            i += 1
+          end
+        end
+        @current_block_owner_depth = old_owner
+      end
+      return recv
+    end
+    if name_sym == :map || name_sym == :collect
+      res = List.new
+      if block != nil
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        if recv.is_a?(List) || recv.is_a?(Array)
+          i = 0
+          while i < recv.length
+            val = stage0_invoke_block(block, [recv[i]])
+            break if @returning || @exiting
+            if @breaking
+              @breaking = false
+              break
+            end
+            res.push(val)
+            i += 1
+          end
+        elsif recv.is_a?(Hash)
+          bparams = block.args
+          bparam_len = bparams != nil ? bparams.length : 0
+          recv.each do |k, v|
+            if bparam_len >= 2
+              val = stage0_invoke_block(block, [k, v])
+            else
+              val = stage0_invoke_block(block, [List.new([k, v])])
+            end
+            break if @returning || @exiting
+            res.push(val)
+          end
+        end
+        @current_block_owner_depth = old_owner
+      end
+      return res
+    end
+    if name_sym == :select || name_sym == :filter || name_sym == :find_all
+      res = List.new
+      if block != nil && (recv.is_a?(List) || recv.is_a?(Array))
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        i = 0
+        while i < recv.length
+          elem = recv[i]
+          keep = stage0_invoke_block(block, [elem])
+          break if @returning || @exiting
+          res.push(elem) if truthy?(keep)
+          i += 1
+        end
+        @current_block_owner_depth = old_owner
+      end
+      return res
+    end
+    if name_sym == :reject
+      res = List.new
+      if block != nil && (recv.is_a?(List) || recv.is_a?(Array))
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        i = 0
+        while i < recv.length
+          elem = recv[i]
+          drop = stage0_invoke_block(block, [elem])
+          break if @returning || @exiting
+          res.push(elem) if !truthy?(drop)
+          i += 1
+        end
+        @current_block_owner_depth = old_owner
+      end
+      return res
+    end
+    if name_sym == :any?
+      if recv.is_a?(List) || recv.is_a?(Array)
+        if block == nil
+          return recv.length > 0
+        end
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        i = 0
+        found = false
+        while i < recv.length
+          v = stage0_invoke_block(block, [recv[i]])
+          break if @returning || @exiting
+          if truthy?(v)
+            found = true
+            break
+          end
+          i += 1
+        end
+        @current_block_owner_depth = old_owner
+        return found
+      end
+      return false
+    end
+    if name_sym == :all?
+      if recv.is_a?(List) || recv.is_a?(Array)
+        return true if block == nil
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        i = 0
+        ok = true
+        while i < recv.length
+          v = stage0_invoke_block(block, [recv[i]])
+          break if @returning || @exiting
+          if !truthy?(v)
+            ok = false
+            break
+          end
+          i += 1
+        end
+        @current_block_owner_depth = old_owner
+        return ok
+      end
+      return true
+    end
+    if name_sym == :none?
+      if recv.is_a?(List) || recv.is_a?(Array)
+        return recv.length == 0 if block == nil
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        i = 0
+        ok = true
+        while i < recv.length
+          v = stage0_invoke_block(block, [recv[i]])
+          break if @returning || @exiting
+          if truthy?(v)
+            ok = false
+            break
+          end
+          i += 1
+        end
+        @current_block_owner_depth = old_owner
+        return ok
+      end
+      return true
+    end
+    if name_sym == :find || name_sym == :detect
+      if block != nil && (recv.is_a?(List) || recv.is_a?(Array))
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        i = 0
+        found_elem = nil
+        while i < recv.length
+          elem = recv[i]
+          v = stage0_invoke_block(block, [elem])
+          break if @returning || @exiting
+          if truthy?(v)
+            found_elem = elem
+            break
+          end
+          i += 1
+        end
+        @current_block_owner_depth = old_owner
+        return found_elem
+      end
+      return nil
+    end
+    if name_sym == :flat_map
+      res = List.new
+      if block != nil && (recv.is_a?(List) || recv.is_a?(Array))
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        i = 0
+        while i < recv.length
+          sub = stage0_invoke_block(block, [recv[i]])
+          break if @returning || @exiting
+          if sub.is_a?(List) || sub.is_a?(Array)
+            si = 0
+            while si < sub.length
+              res.push(sub[si])
+              si += 1
+            end
+          else
+            res.push(sub)
+          end
+          i += 1
+        end
+        @current_block_owner_depth = old_owner
+      end
+      return res
+    end
+    if name_sym == :times
+      if block != nil && recv.is_a?(Integer)
+        old_owner = @current_block_owner_depth
+        if @in_block_depth == 0
+          @current_block_owner_depth = @call_depth
+        end
+        i = 0
+        while i < recv
+          stage0_invoke_block(block, [i])
+          break if @returning || @exiting
+          if @breaking
+            @breaking = false
+            break
+          end
+          if @nexting
+            @nexting = false
+          end
+          i += 1
+        end
+        @current_block_owner_depth = old_owner
+      end
+      return recv
+    end
+    if name_sym == :"[]"
+      idx_v = evaluate(arg_nodes[0])
+      if argc == 2
+        len_v = evaluate(arg_nodes[1]).to_i
+        if recv.is_a?(List) || recv.is_a?(Array)
+          res = List.new
+          st = idx_v.to_i
+          st = recv.length + st if st < 0
+          return res if st < 0 || len_v <= 0
+          ei = 0
+          while ei < len_v && (st + ei) < recv.length
+            res.push(recv[st + ei])
+            ei += 1
+          end
+          return res
+        else
+          return recv.to_s.slice(idx_v.to_i, len_v) || ""
+        end
+      end
+      return stage0_aref(recv, idx_v)
+    end
+    if name_sym == :size || name_sym == :length || name_sym == :bytesize || name_sym == :byte_length
+      return stage0_value_length(recv)
+    end
+    if name_sym == :empty?
+      return stage0_value_length(recv) == 0
+    end
+    if name_sym == :push || name_sym == :append
       recv.push(evaluate(arg_nodes[0]))
       return recv
+    end
+    if name_sym == :pop
+      return recv.pop if recv.is_a?(List) || recv.is_a?(Array)
+      return nil
+    end
+    if name_sym == :shift
+      if recv.is_a?(List)
+        return nil if recv.length == 0
+        return recv.delete_at(0)
+      elsif recv.is_a?(Array)
+        return recv.shift
+      end
+      return nil
+    end
+    if name_sym == :unshift
+      val = evaluate(arg_nodes[0])
+      if recv.is_a?(List)
+        recv.list.unshift(val)
+      elsif recv.is_a?(Array)
+        recv.unshift(val)
+      end
+      return recv
+    end
+    if name_sym == :clear
+      recv.clear
+      return recv
+    end
+    if name_sym == :delete_at
+      idx = evaluate(arg_nodes[0]).to_i
+      return recv.delete_at(idx) if recv.is_a?(List) || recv.is_a?(Array)
+      return nil
+    end
+    if name_sym == :delete
+      k = evaluate(arg_nodes[0])
+      if recv.is_a?(Hash)
+        v = recv.delete(k)
+        return v if v != nil
+        if k.is_a?(String)
+          return recv.delete(k.to_sym)
+        elsif k.is_a?(Symbol)
+          return recv.delete(k.to_s)
+        end
+        return nil
+      elsif recv.is_a?(List)
+        return recv.list.delete(k)
+      elsif recv.is_a?(Array)
+        return recv.delete(k)
+      end
+      return nil
     end
     if name_sym == :"[]="
       key_v = evaluate(arg_nodes[0])
       val_v = evaluate(arg_nodes[1])
       if recv.is_a?(Hash)
+        if key_v.is_a?(String) && recv.key?(key_v.to_sym)
+          recv.delete(key_v.to_sym)
+        elsif key_v.is_a?(Symbol) && recv.key?(key_v.to_s)
+          recv.delete(key_v.to_s)
+        end
         recv[key_v] = val_v
-        recv[key_v.to_s] = val_v
         return val_v
       end
       recv[key_v] = val_v
@@ -12991,32 +13951,200 @@ final_use_methods = <<~RUBY
     end
     if name_sym == :"<<"
       v = evaluate(arg_nodes[0])
+      if recv.is_a?(StringBuffer)
+        recv.push(v.to_s)
+        return recv
+      end
       if recv.is_a?(String)
-        # recv is poly here (spinel doesn't narrow is_a?(String)); spinel
-        # strings are immutable const char* so in-place << is already a
-        # new-string concat — string-coerce recv and return the result.
         return ("" + recv.to_s) + v.to_s
+      end
+      if recv.is_a?(List)
+        recv.push(v)
+        return recv
       end
       recv << v
       return recv
     end
-      if name_sym == :include?
-        value = evaluate(arg_nodes[0])
-        if recv.is_a?(Set)
-          return recv.include?(value.to_s)
+    if name_sym == :concat
+      other = evaluate(arg_nodes[0])
+      if (recv.is_a?(List) || recv.is_a?(Array)) && (other.is_a?(List) || other.is_a?(Array))
+        oi = 0
+        while oi < other.length
+          recv.push(other[oi])
+          oi += 1
         end
-        if recv.is_a?(List)
-          i = 0
-          while i < recv.length
-            return true if recv[i] == value
-            i += 1
-          end
-          return false
-        end
-        return recv.include?(value)
       end
+      return recv
+    end
+    if name_sym == :dup || name_sym == :clone
+      if recv.is_a?(List)
+        res = List.new
+        i = 0
+        while i < recv.length
+          res.push(recv[i])
+          i += 1
+        end
+        return res
+      elsif recv.is_a?(Hash)
+        res = {}
+        recv.each do |k, v|
+          res[k] = v
+        end
+        return res
+      elsif recv.is_a?(String)
+        return "" + recv
+      end
+      return recv
+    end
+    if name_sym == :reverse
+      if recv.is_a?(List) || recv.is_a?(Array)
+        res = List.new
+        i = recv.length - 1
+        while i >= 0
+          res.push(recv[i])
+          i -= 1
+        end
+        return res
+      else
+        return recv.to_s.reverse
+      end
+    end
+    if name_sym == :uniq
+      if recv.is_a?(List) || recv.is_a?(Array)
+        res = List.new
+        i = 0
+        while i < recv.length
+          elem = recv[i]
+          found = false
+          j = 0
+          while j < res.length
+            if res[j] == elem
+              found = true
+              break
+            end
+            j += 1
+          end
+          res.push(elem) unless found
+          i += 1
+        end
+        return res
+      end
+      return recv
+    end
+    if name_sym == :compact
+      if recv.is_a?(List) || recv.is_a?(Array)
+        res = List.new
+        i = 0
+        while i < recv.length
+          elem = recv[i]
+          res.push(elem) if elem != nil
+          i += 1
+        end
+        return res
+      end
+      return recv
+    end
+    if name_sym == :flatten
+      if recv.is_a?(List) || recv.is_a?(Array)
+        res = List.new
+        i = 0
+        while i < recv.length
+          elem = recv[i]
+          if elem.is_a?(List) || elem.is_a?(Array)
+            j = 0
+            while j < elem.length
+              res.push(elem[j])
+              j += 1
+            end
+          else
+            res.push(elem)
+          end
+          i += 1
+        end
+        return res
+      end
+      return recv
+    end
+    if name_sym == :include? || name_sym == :contains?
+      value = evaluate(arg_nodes[0])
+      if recv.is_a?(Set)
+        return recv.include?(value.to_s)
+      end
+      if recv.is_a?(List) || recv.is_a?(Array)
+        i = 0
+        while i < recv.length
+          return true if recv[i] == value
+          i += 1
+        end
+        return false
+      end
+      if recv.is_a?(Hash)
+        return true if recv.key?(value)
+        if value.is_a?(String)
+          return recv.key?(value.to_sym)
+        elsif value.is_a?(Symbol)
+          return recv.key?(value.to_s)
+        end
+        return false
+      end
+      return recv.to_s.include?(value.to_s)
+    end
     if name_sym == :has_key? || name_sym == :key?
-      return recv.key?(evaluate(arg_nodes[0]))
+      k = evaluate(arg_nodes[0])
+      if recv.is_a?(Hash)
+        return true if recv.key?(k)
+        if k.is_a?(String)
+          return recv.key?(k.to_sym)
+        elsif k.is_a?(Symbol)
+          return recv.key?(k.to_s)
+        end
+      end
+      return false
+    end
+    if name_sym == :keys
+      res = List.new
+      if recv.is_a?(Hash)
+        recv.each do |k, _v|
+          res.push(k)
+        end
+      end
+      return res
+    end
+    if name_sym == :values
+      res = List.new
+      if recv.is_a?(Hash)
+        recv.each do |_k, v|
+          res.push(v)
+        end
+      end
+      return res
+    end
+    if name_sym == :merge
+      other = evaluate(arg_nodes[0])
+      res = {}
+      if recv.is_a?(Hash)
+        recv.each do |k, v|
+          res[k] = v
+        end
+      end
+      if other.is_a?(Hash)
+        other.each do |k, v|
+          res[k] = v
+        end
+      end
+      return res
+    end
+    if name_sym == :fetch
+      k = evaluate(arg_nodes[0])
+      if recv.is_a?(Hash)
+        return recv[k] if recv.key?(k)
+        if k.is_a?(String) && recv.key?(k.to_sym)
+          return recv[k.to_sym]
+        elsif k.is_a?(Symbol) && recv.key?(k.to_s)
+          return recv[k.to_s]
+        end
+      end
+      return argc > 1 ? evaluate(arg_nodes[1]) : nil
     end
     if name_sym == :start_with? || name_sym == :starts_with?
       return recv.to_s.start_with?(evaluate(arg_nodes[0]).to_s)
@@ -13025,50 +14153,383 @@ final_use_methods = <<~RUBY
       return recv.to_s.end_with?(evaluate(arg_nodes[0]).to_s)
     end
     if name_sym == :split
-      return recv.to_s.split(evaluate(arg_nodes[0]).to_s)
+      sep = argc > 0 ? evaluate(arg_nodes[0]).to_s : " "
+      parts = recv.to_s.split(sep)
+      res = List.new
+      i = 0
+      while i < parts.length
+        res.push(parts[i])
+        i += 1
+      end
+      return res
+    end
+    if name_sym == :lines
+      parts = recv.to_s.lines
+      res = List.new
+      i = 0
+      while i < parts.length
+        res.push(parts[i])
+        i += 1
+      end
+      return res
+    end
+    if name_sym == :bytes
+      bs = recv.to_s.bytes
+      res = List.new
+      i = 0
+      while i < bs.length
+        res.push(bs[i])
+        i += 1
+      end
+      return res
+    end
+    if name_sym == :chars
+      cs = recv.to_s.chars
+      res = List.new
+      i = 0
+      while i < cs.length
+        res.push(cs[i])
+        i += 1
+      end
+      return res
+    end
+    if name_sym == :codes || name_sym == :codepoints
+      cps = recv.to_s.codepoints
+      res = List.new
+      i = 0
+      while i < cps.length
+        res.push(cps[i])
+        i += 1
+      end
+      return res
+    end
+    if name_sym == :lchs
+      cps = recv.to_s.codepoints
+      res = List.new
+      has_lang = argc > 0 && evaluate(arg_nodes[0]).is_a?(String)
+      lex64_tag = -1055531162664960
+      i = 0
+      while i < cps.length
+        cp = cps[i]
+        if has_lang
+          fl = stage0_tungsten_lchs_flag(cp)
+          res.push(lex64_tag | (cp << 18) | fl)
+        else
+          fl = 0
+          fl |= 0x40 if (cp >= 97 && cp <= 122) || (cp >= 65 && cp <= 90) || cp == 95
+          fl |= 0x20 if (fl & 0x40) != 0 || (cp >= 48 && cp <= 57)
+          fl |= 0x10 if cp == 32 || cp == 9
+          fl |= 0x08 if (cp >= 48 && cp <= 57) || (cp >= 97 && cp <= 102) || (cp >= 65 && cp <= 70)
+          fl |= 0x01 if cp >= 48 && cp <= 57
+          digit = (cp >= 48 && cp <= 57) ? cp - 48 : 0xF
+          res.push(lex64_tag | (cp << 18) | (digit << 7) | fl)
+        end
+        i += 1
+      end
+      return res
+    end
+    if name_sym == :getbyte || name_sym == :byte_at
+      return recv.to_s.getbyte(evaluate(arg_nodes[0]).to_i)
+    end
+    if name_sym == :slice || name_sym == :byteslice || name_sym == :slice_bytes
+      idx = evaluate(arg_nodes[0]).to_i
+      if argc > 1
+        len = evaluate(arg_nodes[1]).to_i
+        if recv.is_a?(List) || recv.is_a?(Array)
+          res = List.new
+          st = idx < 0 ? recv.length + idx : idx
+          return res if st < 0 || len <= 0
+          ei = 0
+          while ei < len && (st + ei) < recv.length
+            res.push(recv[st + ei])
+            ei += 1
+          end
+          return res
+        else
+          s = recv.to_s
+          return (name_sym == :slice ? s.slice(idx, len) : s.byteslice(idx, len)) || ""
+        end
+      else
+        if recv.is_a?(List) || recv.is_a?(Array)
+          return recv[idx]
+        else
+          s = recv.to_s
+          return (name_sym == :slice ? s.slice(idx, 1) : s.byteslice(idx, 1)) || ""
+        end
+      end
+    end
+    if name_sym == :index
+      needle = evaluate(arg_nodes[0])
+      if recv.is_a?(List) || recv.is_a?(Array)
+        i = argc > 1 ? evaluate(arg_nodes[1]).to_i : 0
+        while i < recv.length
+          return i if recv[i] == needle
+          i += 1
+        end
+        return nil
+      else
+        s = recv.to_s
+        if argc > 1
+          return s.index(needle.to_s, evaluate(arg_nodes[1]).to_i)
+        end
+        return s.index(needle.to_s)
+      end
+    end
+    if name_sym == :rindex
+      needle = evaluate(arg_nodes[0]).to_s
+      if argc > 1
+        return recv.to_s.rindex(needle, evaluate(arg_nodes[1]).to_i)
+      end
+      return recv.to_s.rindex(needle)
     end
     if name_sym == :join
       sep = ""
-      if arg_nodes.length > 0
+      if argc > 0
         sep = evaluate(arg_nodes[0]).to_s
       end
       out = ""
-      i = 0
-      while i < recv.length
-        if i > 0
-          out = out + sep
+      if recv.is_a?(List) || recv.is_a?(Array)
+        i = 0
+        while i < recv.length
+          if i > 0
+            out = out + sep
+          end
+          out = out + w_to_s(recv[i])
+          i += 1
         end
-        out = out + recv[i].to_s
-        i += 1
       end
       return out
     end
-    if name_sym == :replace
+    if name_sym == :replace || name_sym == :gsub
+      a = evaluate(arg_nodes[0]).to_s
+      if argc > 1
+        b = evaluate(arg_nodes[1]).to_s
+        return recv.to_s.gsub(a, b)
+      end
+      return recv.to_s
+    end
+    if name_sym == :sub
       a = evaluate(arg_nodes[0]).to_s
       b = evaluate(arg_nodes[1]).to_s
-      return recv.to_s.gsub(a, b)
+      return recv.to_s.sub(a, b)
     end
-    if name_sym == :strip
+    if name_sym == :strip || name_sym == :trim
       return recv.to_s.strip
     end
+    if name_sym == :lstrip
+      return recv.to_s.lstrip
+    end
+    if name_sym == :rstrip
+      return recv.to_s.rstrip
+    end
+    if name_sym == :chomp
+      return recv.to_s.chomp
+    end
+    if name_sym == :upcase || name_sym == :upper
+      return recv.to_s.upcase
+    end
+    if name_sym == :downcase || name_sym == :lower
+      return recv.to_s.downcase
+    end
+    if name_sym == :pad_left || name_sym == :rjust
+      width = evaluate(arg_nodes[0]).to_i
+      pad_ch = argc > 1 ? evaluate(arg_nodes[1]).to_s : " "
+      pad_ch = " " if pad_ch == ""
+      s = recv.to_s
+      while s.length < width
+        s = pad_ch + s
+      end
+      return s
+    end
+    if name_sym == :pad_right || name_sym == :ljust
+      width = evaluate(arg_nodes[0]).to_i
+      pad_ch = argc > 1 ? evaluate(arg_nodes[1]).to_s : " "
+      pad_ch = " " if pad_ch == ""
+      s = recv.to_s
+      while s.length < width
+        s = s + pad_ch
+      end
+      return s
+    end
     if name_sym == :to_i
-      text = recv.to_s
-      return text.to_i
+      if argc > 0
+        return recv.to_s.to_i(evaluate(arg_nodes[0]).to_i)
+      end
+      return recv.to_i
+    end
+    if name_sym == :to_f
+      return recv.to_f
+    end
+    if name_sym == :to_sym
+      return recv.to_s.to_sym
+    end
+    if name_sym == :to_a
+      return recv if recv.is_a?(List)
+      if recv.is_a?(Array)
+        return List.new(recv)
+      end
+      return List.new
     end
     if name_sym == :ord
       return recv.to_s.ord
     end
-    if name_sym == :keys
-      return []
+    if name_sym == :chr
+      return (recv.to_i & 0xFF).chr
+    end
+    if name_sym == :abs
+      return recv < 0 ? -recv : recv
+    end
+    if name_sym == :min
+      if recv.is_a?(List) || recv.is_a?(Array)
+        return nil if recv.length == 0
+        m = recv[0]
+        i = 1
+        while i < recv.length
+          m = recv[i] if recv[i] < m
+          i += 1
+        end
+        return m
+      end
+      other = evaluate(arg_nodes[0])
+      return recv <= other ? recv : other
+    end
+    if name_sym == :max
+      if recv.is_a?(List) || recv.is_a?(Array)
+        return nil if recv.length == 0
+        m = recv[0]
+        i = 1
+        while i < recv.length
+          m = recv[i] if recv[i] > m
+          i += 1
+        end
+        return m
+      end
+      other = evaluate(arg_nodes[0])
+      return recv >= other ? recv : other
     end
     if name_sym == :sort
+      if recv.is_a?(List) || recv.is_a?(Array)
+        res = List.new
+        i = 0
+        while i < recv.length
+          res.push(recv[i])
+          i += 1
+        end
+        n = res.length
+        a_idx = 0
+        while a_idx < n
+          b_idx = a_idx + 1
+          while b_idx < n
+            if res[b_idx].to_s < res[a_idx].to_s
+              tmp = res[a_idx]
+              res[a_idx] = res[b_idx]
+              res[b_idx] = tmp
+            end
+            b_idx += 1
+          end
+          a_idx += 1
+        end
+        return res
+      end
+      return recv
+    end
+    if name_sym == :sort_by
+      if block != nil && (recv.is_a?(List) || recv.is_a?(Array))
+        res = List.new
+        keys = List.new
+        i = 0
+        while i < recv.length
+          elem = recv[i]
+          res.push(elem)
+          keys.push(stage0_invoke_block(block, [elem]))
+          i += 1
+        end
+        n = res.length
+        a_idx = 0
+        while a_idx < n
+          b_idx = a_idx + 1
+          while b_idx < n
+            ka = keys[a_idx]
+            kb = keys[b_idx]
+            swap = false
+            if ka.is_a?(Integer) && kb.is_a?(Integer)
+              swap = kb < ka
+            else
+              swap = kb.to_s < ka.to_s
+            end
+            if swap
+              tmp = res[a_idx]
+              res[a_idx] = res[b_idx]
+              res[b_idx] = tmp
+              ktmp = keys[a_idx]
+              keys[a_idx] = keys[b_idx]
+              keys[b_idx] = ktmp
+            end
+            b_idx += 1
+          end
+          a_idx += 1
+        end
+        return res
+      end
       return recv
     end
     if name_sym == :first
+      if recv.is_a?(List) || recv.is_a?(Array)
+        return recv.length > 0 ? recv[0] : nil
+      end
       return nil
     end
     if name_sym == :last
+      if recv.is_a?(List) || recv.is_a?(Array)
+        return recv.length > 0 ? recv[recv.length - 1] : nil
+      end
       return nil
+    end
+    if name_sym == :count
+      if recv.is_a?(String) && argc > 0
+        s = recv.to_s
+        sub = evaluate(arg_nodes[0]).to_s
+        return 0 if sub.bytesize == 0
+        b0 = sub.getbyte(0)
+        c = 0
+        i = 0
+        slen = s.bytesize
+        while i < slen
+          c += 1 if s.getbyte(i) == b0
+          i += 1
+        end
+        return c
+      elsif recv.is_a?(List) || recv.is_a?(Array)
+        if block != nil
+          c = 0
+          i = 0
+          while i < recv.length
+            c += 1 if truthy?(stage0_invoke_block(block, [recv[i]]))
+            i += 1
+          end
+          return c
+        elsif argc > 0
+          target = evaluate(arg_nodes[0])
+          c = 0
+          i = 0
+          while i < recv.length
+            c += 1 if recv[i] == target
+            i += 1
+          end
+          return c
+        end
+        return recv.length
+      end
+      return 0
+    end
+    if name_sym == :valid_utf8?
+      return true
+    end
+    if name_sym == :freeze
+      return recv
+    end
+    if name_sym == :frozen?
+      return false
     end
     if recv.is_a?(Hash)
       field_value = recv[name_sym]
@@ -13076,170 +14537,6 @@ final_use_methods = <<~RUBY
       return recv[name_sym.to_s]
     end
     nil
-  end
-
-  def stage0_program_resolve_path(path, from_file = nil)
-    base = ""
-    if path.byteslice(0, 1) == "/"
-      candidate = path
-      if !candidate.end_with?(".w")
-        candidate = candidate + ".w"
-      end
-      return candidate if File.exist?(candidate)
-    end
-
-    if from_file != nil
-      # Use a FRESH String local: the `from_file = nil` default types the param
-      # TY_UNKNOWN (and the C compiler is flow-insensitive, so reassigning
-      # from_file doesn't re-type it), making from_file.byteslice(...) TY_UNKNOWN
-      # and `== "/"` hit "unsupported equality". `ff` is only ever assigned a
-      # String ("" + ...), so it types TY_STRING and byteslice/== resolve.
-      ff = "" + from_file.to_s
-      last_slash = -1
-      i = 0
-      while i < ff.length
-        if ff.byteslice(i, 1) == "/"
-          last_slash = i
-        end
-        i += 1
-      end
-      if last_slash > 0
-        base = ff.byteslice(0, last_slash)
-        candidate = base + "/" + path
-        if !candidate.end_with?(".w")
-          candidate = candidate + ".w"
-        end
-        return candidate if File.exist?(candidate)
-      end
-    end
-
-    candidate = "compiler/" + path
-    if !candidate.end_with?(".w")
-      candidate = candidate + ".w"
-    end
-    return candidate if File.exist?(candidate)
-
-    candidate = path
-    if !candidate.end_with?(".w")
-      candidate = candidate + ".w"
-    end
-    candidate
-  end
-
-  def stage0_hash_get_any(hash, string_key, symbol_key)
-    value = hash[string_key]
-    return value if value != nil
-    hash[symbol_key]
-  end
-
-  def stage0_ast_hash(kind)
-    # Include one nil field so spinel infers a string-keyed poly hash.
-    # A string-only hash becomes SymStrHash, and later poly-valued fields
-    # such as params/body are silently skipped by the generated []= path.
-    {"node" => kind, "line" => nil}
-  end
-
-  def stage0_ast_hash_set(hash, key, value)
-    hash[key.to_s] = value
-    value
-  end
-
-  def stage0_ast_hash_set_node(hash, key, value)
-    stage0_ast_hash_set(hash, key, stage0_ruby_ast_to_compiler_value(value))
-  end
-
-  def stage0_ruby_ast_list_to_array(list_node)
-    out = []
-    return out if list_node == nil
-
-    items = list_node.list
-    return out if items == nil
-
-    i = 0
-    while i < items.length
-      out.push(stage0_ruby_ast_to_compiler_value(items[i]))
-      i += 1
-    end
-    out
-  end
-
-  def stage0_ruby_ast_array_to_array(array)
-    out = []
-    return out if array == nil
-
-    i = 0
-    while i < array.length
-      out.push(stage0_ruby_ast_to_compiler_value(array[i]))
-      i += 1
-    end
-    out
-  end
-
-  def stage0_ruby_ast_pair_array_to_array(array)
-    out = []
-    return out if array == nil
-
-    i = 0
-    while i < array.length
-      pair = array[i]
-      out.push([stage0_ruby_ast_to_compiler_value(pair[0]), stage0_ruby_ast_to_compiler_value(pair[1])])
-      i += 1
-    end
-    out
-  end
-
-  def stage0_ruby_ast_node_kind(node)
-    doc = node.doc
-    return "list" if doc == 1
-    return "print" if doc == 2
-    return "int" if doc == 3
-    return "string" if doc == 4
-    return "bool" if doc == 5
-    return "nil_lit" if doc == 6
-    return "binary_op" if doc == 7
-    return "assign" if doc == 8
-    return "var" if doc == 9
-    return "if" if doc == 10
-    return "while" if doc == 11
-    return "method_def" if doc == 12
-    return "call" if doc == 13
-    return "return" if doc == 14
-    return "compound_assign" if doc == 15
-    return "symbol" if doc == 16
-    return "array" if doc == 17
-    return "hash_literal" if doc == 18
-    return "and" if doc == 19
-    return "or" if doc == 20
-    return "in_test" if doc == 21
-    return "case" if doc == 22
-    return "use" if doc == 23
-    return "class_def" if doc == 24
-    return "module_def" if doc == 25
-    return "trait_def" if doc == 26
-    return "ivar" if doc == 27
-    return "cvar" if doc == 28
-    return "global" if doc == 29
-    return "self_ref" if doc == 30
-    return "float" if doc == 31
-    return "decimal" if doc == 32
-    return "wvalue" if doc == 33
-    return "begin" if doc == 34
-    return "raise" if doc == 35
-    return "puts" if doc == 36
-    return "fn_def" if doc == 37
-    return "block" if doc == 38
-    return "param" if doc == 39
-    return "not" if doc == 40
-    return "byte_array" if doc == 41
-    return "string_interp" if doc == 42
-    return "regex" if doc == 43
-    return "range" if doc == 44
-    return "typed_array" if doc == 45
-    return "target_designator" if doc == 46
-    return "target_and" if doc == 47
-    return "target_or" if doc == 48
-    return "target_not" if doc == 49
-    "unknown"
   end
 
   def stage0_static_hash_key?(node)
@@ -13252,7 +14549,7 @@ final_use_methods = <<~RUBY
   end
 
   def stage0_var_name(node)
-    node.name
+    node.is_a?(Var) ? node.name : ("" + node.name.to_s)
   end
 
   def stage0_mark_env(env)
@@ -13277,7 +14574,7 @@ final_use_methods = <<~RUBY
   end
 
   def stage0_call_name(node)
-    node.name
+    node.is_a?(Call) ? node.name : ("" + node.name.to_s)
   end
 
   def stage0_str_to_sym(name)
@@ -13292,395 +14589,8 @@ final_use_methods = <<~RUBY
     node.operator
   end
 
-  def stage0_ruby_ast_field_name(kind, name)
-    name_s = name.to_s
-    return "receiver" if name_s == "obj"
-    return "op" if name_s == "operator"
-    return "operand" if kind == "unary_op" && name_s == "right"
-    return "target" if kind == "assign" && name_s == "name"
-    return "target" if kind == "compound_assign" && name_s == "name"
-    return "params" if (kind == "method_def" || kind == "fn_def" || kind == "block") && name_s == "args"
-    return "then_body" if name_s == "then_block"
-    return "else_body" if name_s == "else_block" || name_s == "else"
-    return "subject" if name_s == "receiver" && kind == "case_value"
-    name_s
-  end
-
-  def stage0_ruby_ast_known_node?(value)
-    true
-  end
-
-  def stage0_ruby_ast_to_compiler_value(value)
-    return nil if value == nil
-    if value.is_a?(String) || value.is_a?(Integer) || value.is_a?(Float) || value == true || value == false
-      return value
-    end
-    if value.is_a?(Symbol)
-      return value.to_s
-    end
-
-    doc = value.doc
-    if ENV["TUNGSTEN_STAGE0_CONVERT_TRACE"] == "1"
-      if @stage0_convert_trace_count == nil
-        @stage0_convert_trace_count = 0
-      end
-      if @stage0_convert_trace_count < 80
-        trace_path = "/tmp/tungsten-stage0-convert-trace"
-        trace_text = ""
-        if File.exist?(trace_path)
-          trace_text = File.read(trace_path)
-        end
-        trace_text = trace_text + @stage0_convert_trace_count.to_s + ":doc=" + doc.to_s + "\n"
-        File.write(trace_path, trace_text)
-        @stage0_convert_trace_count += 1
-      end
-    end
-
-    if doc == 1
-      return stage0_ruby_ast_list_to_array(value)
-    end
-    if doc == 3 || doc == 4 || doc == 5 || doc == 16 || doc == 31 || doc == 32 || doc == 33 || doc == 41
-      h = stage0_ast_hash(stage0_ruby_ast_node_kind(value))
-      stage0_ast_hash_set(h, "value", value.value)
-      stage0_ast_hash_set(h, "raw", value.raw) if doc == 3
-      return h
-    end
-    if doc == 6
-      return stage0_ast_hash("nil_lit")
-    end
-
-    kind = stage0_ruby_ast_node_kind(value)
-    h = stage0_ast_hash(kind)
-
-    if doc == 2 || doc == 36
-      args = stage0_ruby_ast_array_to_array(value.args)
-      if args.length > 0
-        stage0_ast_hash_set(h, "value", args[0])
-      else
-        stage0_ast_hash_set(h, "value", nil)
-      end
-      return h
-    end
-    if doc == 7
-      stage0_ast_hash_set_node(h, "left", value.left)
-      stage0_ast_hash_set(h, "op", value.operator)
-      stage0_ast_hash_set_node(h, "right", value.right)
-      return h
-    end
-    if doc == 8
-      stage0_ast_hash_set_node(h, "target", value.name)
-      stage0_ast_hash_set_node(h, "value", value.value)
-      stage0_ast_hash_set_node(h, "type_hint", value.type_hint)
-      return h
-    end
-    if doc == 9 || doc == 27 || doc == 28 || doc == 29 || doc == 46
-      stage0_ast_hash_set(h, "name", value.name)
-      return h
-    end
-    if doc == 10
-      stage0_ast_hash_set_node(h, "condition", value.condition)
-      stage0_ast_hash_set_node(h, "then_body", value.then_block)
-      stage0_ast_hash_set(h, "elsif_clauses", [])
-      stage0_ast_hash_set_node(h, "else_body", value.else_block)
-      return h
-    end
-    if doc == 11
-      stage0_ast_hash_set_node(h, "condition", value.condition)
-      stage0_ast_hash_set_node(h, "body", value.body)
-      stage0_ast_hash_set(h, "check_first", value.check_first)
-      return h
-    end
-    if doc == 12 || doc == 37
-      stage0_ast_hash_set(h, "name", value.name)
-      stage0_ast_hash_set(h, "params", stage0_ruby_ast_array_to_array(value.args))
-      stage0_ast_hash_set_node(h, "body", value.body)
-      stage0_ast_hash_set(h, "type_hints", nil)
-      stage0_ast_hash_set(h, "is_class_method", false) if doc == 12
-      stage0_ast_hash_set(h, "param_types", stage0_ruby_ast_array_to_array(value.param_types)) if value.param_types != nil
-      stage0_ast_hash_set(h, "return_type", value.return_type) if value.return_type != nil
-      return h
-    end
-    if doc == 13
-      stage0_ast_hash_set_node(h, "receiver", value.obj)
-      stage0_ast_hash_set(h, "name", value.name)
-      stage0_ast_hash_set(h, "args", stage0_ruby_ast_array_to_array(value.args))
-      stage0_ast_hash_set_node(h, "block", value.block)
-      return h
-    end
-    if doc == 14 || doc == 35
-      stage0_ast_hash_set_node(h, "value", value.value)
-      return h
-    end
-    if doc == 15
-      stage0_ast_hash_set_node(h, "target", value.name)
-      stage0_ast_hash_set(h, "op", value.operator)
-      stage0_ast_hash_set_node(h, "value", value.value)
-      return h
-    end
-    if doc == 17
-      stage0_ast_hash_set(h, "elements", stage0_ruby_ast_list_to_array(value))
-      return h
-    end
-    if doc == 18
-      stage0_ast_hash_set(h, "entries", stage0_ruby_ast_pair_array_to_array(value.entries))
-      return h
-    end
-    if doc == 19 || doc == 20 || doc == 47 || doc == 48
-      stage0_ast_hash_set_node(h, "left", value.left)
-      stage0_ast_hash_set_node(h, "right", value.right)
-      return h
-    end
-    if doc == 21
-      stage0_ast_hash_set_node(h, "lhs", value.lhs)
-      stage0_ast_hash_set(h, "elements", stage0_ruby_ast_array_to_array(value.elements))
-      return h
-    end
-    if doc == 22
-      stage0_ast_hash_set(h, "whens", stage0_ruby_ast_array_to_array(value.whens))
-      stage0_ast_hash_set_node(h, "else_body", value.else_body)
-      return h
-    end
-    if doc == 23
-      stage0_ast_hash_set(h, "path", value.path)
-      return h
-    end
-    if doc == 24
-      stage0_ast_hash_set(h, "name", value.name)
-      stage0_ast_hash_set_node(h, "superclass", value.superclass)
-      stage0_ast_hash_set_node(h, "body", value.body)
-      stage0_ast_hash_set(h, "class_role", value.class_role)
-      return h
-    end
-    if doc == 25 || doc == 26
-      stage0_ast_hash_set(h, "name", value.name)
-      stage0_ast_hash_set_node(h, "body", value.body)
-      return h
-    end
-    if doc == 30
-      return h
-    end
-    if doc == 34
-      stage0_ast_hash_set_node(h, "body", value.body)
-      stage0_ast_hash_set(h, "rescue_var", value.rescue_var)
-      stage0_ast_hash_set_node(h, "rescue_body", value.rescue_body)
-      stage0_ast_hash_set_node(h, "ensure_body", value.ensure_body)
-      return h
-    end
-    if doc == 38
-      stage0_ast_hash_set(h, "params", stage0_ruby_ast_array_to_array(value.args))
-      stage0_ast_hash_set_node(h, "body", value.body)
-      return h
-    end
-    if doc == 39
-      stage0_ast_hash_set(h, "name", value.name)
-      stage0_ast_hash_set_node(h, "default", value.default)
-      stage0_ast_hash_set(h, "ivar_assign", false)
-      stage0_ast_hash_set(h, "keyword", value.keyword)
-      stage0_ast_hash_set(h, "block_param", false)
-      stage0_ast_hash_set(h, "splat", false)
-      return h
-    end
-    if doc == 40 || doc == 49
-      stage0_ast_hash_set_node(h, "operand", value.exp)
-      return h
-    end
-    if doc == 42
-      stage0_ast_hash_set(h, "parts", stage0_ruby_ast_array_to_array(value.parts))
-      return h
-    end
-    if doc == 43
-      stage0_ast_hash_set(h, "pattern", value.pattern)
-      stage0_ast_hash_set(h, "options", value.options)
-      return h
-    end
-    if doc == 44
-      stage0_ast_hash_set_node(h, "from", value.from)
-      stage0_ast_hash_set_node(h, "to", value.to)
-      stage0_ast_hash_set(h, "exclusive", value.exclusive)
-      return h
-    end
-    if doc == 45
-      stage0_ast_hash_set(h, "element_type", value.element_type)
-      stage0_ast_hash_set_node(h, "size", value.size)
-      return h
-    end
-    h
-  end
-
-  def stage0_ruby_ast_program(list_node)
-    exprs = stage0_ruby_ast_list_to_array(list_node)
-    {"node" => "program", :node => "program", "expressions" => exprs, :expressions => exprs}
-  end
-
-  def stage0_parse_append_chunk_exprs(out, chunk, resolved)
-    return out if chunk.strip == ""
-
-    parsed = parse_with_file(chunk, resolved)
-    exprs = stage0_ruby_ast_list_to_array(parsed)
-    i = 0
-    while i < exprs.length
-      out.push(exprs[i])
-      i += 1
-    end
-    out
-  end
-
-  def stage0_parse_source_exprs(source, resolved)
-    out = stage0_ruby_ast_array_to_array(nil)
-    chunk = ""
-    source_text = source.to_s
-    lines = source_text.split("\n")
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      stripped = line.strip
-      top_level = false
-      if stripped != "" && line.slice(0, 1) != " " && line.slice(0, 1) != "\t"
-        if stripped.start_with?("use ") || stripped.start_with?("-> ") ||
-           stripped.start_with?("class ") || stripped.start_with?("module ") ||
-           stripped.start_with?("trait ") || stripped.start_with?("fn ")
-          top_level = true
-        end
-      end
-      if top_level && chunk.strip != ""
-        stage0_parse_append_chunk_exprs(out, chunk, resolved)
-        chunk = ""
-      end
-      chunk = chunk + line
-      chunk = chunk + "\n"
-      i += 1
-    end
-    stage0_parse_append_chunk_exprs(out, chunk, resolved)
-    out
-  end
-
-  def stage0_direct_source_for(resolved, raw_source)
-    if resolved.end_with?("compiler/lib/compiler.w")
-      return stage0_normalize_compiler_source(raw_source)
-    end
-    if resolved.end_with?("compiler/lib/content_hash.w")
-      return stage0_normalize_content_hash_source(raw_source)
-    end
-    if resolved.end_with?("compiler/lib/target.w")
-      return stage0_normalize_target_source(raw_source)
-    end
-    if resolved.end_with?("compiler/lib/lowering/pass_registry.w")
-      return stage0_normalize_lowering_source(raw_source)
-    end
-    if resolved.end_with?("compiler/lib/lowering/analysis.w")
-      source = stage0_normalize_source(raw_source)
-      raw_start = source.index("-> raw_int_candidate_map")
-      raw_end = source.index("-> find_reassigned_params", raw_start || 0)
-      if raw_start != nil && raw_end != nil && raw_end > raw_start
-        source = source.slice(0, raw_start) +
-                 "-> raw_int_candidate_map(body, declared_types)\n  {}\n\n" +
-                 source.slice(raw_end, source.length - raw_end)
-      end
-      return source
-    end
-    if resolved.end_with?("compiler/lib/lowering.w")
-      return stage0_normalize_lowering_source(raw_source)
-    end
-    if resolved.end_with?("compiler/lib/emitter.w")
-      source = stage0_normalize_emitter_source(raw_source)
-      return source
-    end
-    if resolved.end_with?("compiler/lib/lowering/calls.w")
-      source = stage0_normalize_ruby_parse_source(raw_source)
-      return source
-    end
-    # All four files (cfg.w, ownership.w, escape.w, metal_emitter.w)
-    # used to be stubbed to empty source on the assumption that the
-    # stage 0 parser couldn't handle them. Empirical testing showed
-    # they parse fine — each loads with the expected expression
-    # count. The stubs were unnecessary defensive code.
-    # metal_emitter.w used to be stubbed too; trying without the stub.
-    # If stage 0 chokes on its source we'll see a parser error in
-    # the run output and can add it back. The compiler being
-    # bootstrapped doesn't use @gpu kernels itself, so the
-    # metal_emitter passes are dead code at stage 1 — failing to
-    # parse them only matters when stage 0 builds the IR layout.
-    stage0_normalize_ruby_parse_source(raw_source)
-  end
-
-  def stage0_parse_program_file(path, from_file, loaded)
-    resolved = stage0_program_resolve_path(path, from_file)
-    stage0_progress_mark("load:start", resolved)
-    if loaded[resolved] == true
-      stage0_progress_mark("load:skip", resolved)
-      return {"node" => "program", :node => "program", "expressions" => [], :expressions => []}
-    end
-
-    loaded[resolved] = true
-    raw_source = File.read(resolved)
-    stage0_progress_mark("load:read", resolved + "\\tbytes=" + raw_source.length.to_s)
-    source = stage0_direct_source_for(resolved, raw_source)
-    exprs = stage0_parse_source_exprs(source, resolved)
-    stage0_progress_mark("load:parsed", resolved + "\\texpressions=" + exprs.length.to_s)
-    if ENV["TUNGSTEN_STAGE0_LOAD_TRACE"] == "1"
-      trace_path = "/tmp/tungsten-stage0-load-trace"
-      trace_text = ""
-      if File.exist?(trace_path)
-        trace_text = File.read(trace_path)
-      end
-      trace_text = trace_text + "load " + resolved + " exprs=" + exprs.length.to_s + "\n"
-      File.write(trace_path, trace_text)
-    end
-    out = []
-    i = 0
-    while i < exprs.length
-      expr = exprs[i]
-      if stage0_hash_get_any(expr, "node", :node).to_s == "use"
-        use_path = stage0_hash_get_any(expr, "path", :path).to_s
-        stage0_progress_mark("load:use", resolved + "\\tpath=" + use_path)
-        imported = stage0_parse_program_file(use_path, resolved, loaded)
-        imported_exprs = stage0_hash_get_any(imported, "expressions", :expressions)
-        if ENV["TUNGSTEN_STAGE0_LOAD_TRACE"] == "1"
-          trace_path = "/tmp/tungsten-stage0-load-trace"
-          trace_text = ""
-          if File.exist?(trace_path)
-            trace_text = File.read(trace_path)
-          end
-          trace_text = trace_text + "use " + stage0_hash_get_any(expr, "path", :path).to_s + " imported=" + imported_exprs.length.to_s + "\n"
-          File.write(trace_path, trace_text)
-        end
-        j = 0
-        while j < imported_exprs.length
-          out.push(imported_exprs[j])
-          j += 1
-        end
-      else
-        out.push(expr)
-      end
-      i += 1
-    end
-    if ENV["TUNGSTEN_STAGE0_LOAD_TRACE"] == "1"
-      trace_path = "/tmp/tungsten-stage0-load-trace"
-      trace_text = ""
-      if File.exist?(trace_path)
-        trace_text = File.read(trace_path)
-      end
-      trace_text = trace_text + "done " + resolved + " out=" + out.length.to_s + "\n"
-      File.write(trace_path, trace_text)
-    end
-    stage0_progress_mark("load:done", resolved + "\\texpressions=" + out.length.to_s)
-    {"node" => "program", :node => "program", "expressions" => out, :expressions => out}
-  end
-
-  def stage0_load_program_ast_direct(path)
-    stage0_parse_program_file(path, nil, {})
-  end
-
   def resolve_use_path(use_path)
-    # Spinel stage0: avoid the `file = @current_file.to_s;
-    # parts = file.split("/")` chain — analyzer folds the .to_s
-    # to int-default and split lowers to `lv_parts = 0`. Use
-    # byteslice on @current_file directly to find the last "/".
-    # Without this fix, every relative `use lowering` from
-    # inside compiler/lib/compiler.w resolves to bare
-    # "lowering.w" (no path prefix), reads 0 bytes, lower_ast
-    # never binds, and stage 0 errors "unknown function: lower_ast".
-    path = use_path
+    path = use_path.to_s
     base = "."
     if @current_file != nil
       last_slash = -1
@@ -13719,206 +14629,144 @@ final_use_methods = <<~RUBY
     elements = node.elements
     i = 0
     while i < elements.length
-      return true if evaluate(elements[i]) == lhs
+      ev = evaluate(elements[i])
+      if ev.is_a?(WRange)
+        return true if ev.include?(lhs)
+      else
+        return true if ev == lhs
+      end
       i += 1
     end
     false
   end
 
-  def stage0_parse_interpreter_append_chunk(out, chunk, path)
-    return out if chunk.strip == ""
-
-    parsed = parse_with_file(chunk, path)
-    items = parsed.list
-    i = 0
-    while i < items.length
-      out.push(items[i])
-      i += 1
-    end
-    out
-  end
-
-  def stage0_parse_interpreter_source(source, path)
-    out = stage0_ruby_ast_array_to_array(nil)
-    chunk = ""
-    lines = source.split("\n")
-    i = 0
-    while i < lines.length
-      line = lines[i]
-      stripped = line.strip
-      top_level = false
-      if stripped != "" && line.slice(0, 1) != " " && line.slice(0, 1) != "\t"
-        if stripped.start_with?("use ") || stripped.start_with?("-> ") ||
-           stripped.start_with?("class ") || stripped.start_with?("module ") ||
-           stripped.start_with?("trait ") || stripped.start_with?("fn ")
-          top_level = true
-        end
-      end
-      if top_level && chunk.strip != ""
-        stage0_parse_interpreter_append_chunk(out, chunk, path)
-        chunk = ""
-      end
-      chunk = chunk + line + "\n"
-      i += 1
-    end
-    stage0_parse_interpreter_append_chunk(out, chunk, path)
-    List.new(out)
+  def stage0_skip_use_path?(path)
+    return true if path.end_with?("core/numeric/int.w")
+    return true if path.end_with?("core/string.w")
+    return true if path.end_with?("core/string_buffer.w")
+    false
   end
 
   def visit_use(node)
     path = resolve_use_path(node.path)
-    if ENV["TUNGSTEN_SPINEL_STAGE0_DEBUG"] == "1"
-      puts "stage0 use"
-      puts path
-    end
+    return nil if stage0_skip_use_path?(path)
     return nil if @loaded_files[path] == true
 
     @loaded_files[path] = true
     raw_source = File.read(path)
-    source = ""
-    if ENV["TUNGSTEN_SPINEL_STAGE0_CALL_TRACE"] == "1"
-      use_trace_path = "/tmp/tungsten-stage0-use-trace.txt"
-      use_trace_text = ""
-      if File.exist?(use_trace_path)
-        use_trace_text = File.read(use_trace_path)
-      end
-      File.write(use_trace_path, use_trace_text + path + "\n")
-    end
-    if path.end_with?("compiler/lib/compiler.w")
-      source = self.stage0_normalize_compiler_source(raw_source)
-    elsif path.end_with?("compiler/lib/ast.w")
-      source = self.stage0_normalize_ast_source(raw_source)
-    elsif path.end_with?("compiler/lib/loader.w")
-      source = self.stage0_normalize_loader_source(raw_source)
-    elsif path.end_with?("compiler/lib/lexer.w")
-      source = self.stage0_normalize_lexer_source(raw_source)
-    elsif path.end_with?("compiler/lib/parser.w")
-      source = self.stage0_normalize_compiler_language_source(raw_source)
-      dump_path = ENV["TUNGSTEN_SPINEL_STAGE0_PARSER_DUMP"]
-      if dump_path != nil && dump_path != ""
-        File.write(dump_path, source)
-      end
-    elsif path.end_with?("compiler/lib/error_formatter.w")
-      source = self.stage0_normalize_ruby_parse_source(raw_source)
-    elsif path.end_with?("compiler/lib/interpreter.w") ||
-       path.end_with?("compiler/lib/loader.w") ||
-       path.end_with?("compiler/lib/metal_emitter.w")
-      source = self.stage0_normalize_lexer_source(raw_source)
-    elsif path.end_with?("compiler/lib/wire.w")
-      source = self.stage0_normalize_wire_source(raw_source)
-      dump_path = ENV["TUNGSTEN_SPINEL_STAGE0_WIRE_DUMP"]
-      if dump_path != nil && dump_path != ""
-        File.write(dump_path, source)
-      end
-    elsif path.end_with?("compiler/lib/target.w")
-      source = self.stage0_normalize_target_source(raw_source)
-    elsif path.end_with?("compiler/lib/lowering/analysis.w")
-      source = self.stage0_normalize_source(raw_source)
-      raw_start = source.index("-> raw_int_candidate_map")
-      raw_end = source.index("-> find_reassigned_params", raw_start || 0)
-      if raw_start != nil && raw_end != nil && raw_end > raw_start
-        source = source.slice(0, raw_start) +
-                 "-> raw_int_candidate_map(body, declared_types)\n  {}\n\n" +
-                 source.slice(raw_end, source.length - raw_end)
-      end
-    elsif path.end_with?("compiler/lib/lowering.w")
-      source = self.stage0_normalize_lowering_source(raw_source)
-      dump_path = ENV["TUNGSTEN_SPINEL_STAGE0_LOWERING_DUMP"]
-      if dump_path != nil && dump_path != ""
-        File.write(dump_path, source)
-      end
-    elsif path.end_with?("compiler/lib/lowering/pass_registry.w")
-      source = self.stage0_normalize_lowering_source(raw_source)
-      dump_path = ENV["TUNGSTEN_SPINEL_STAGE0_PASS_REGISTRY_DUMP"]
-      if dump_path != nil && dump_path != ""
-        File.write(dump_path, source)
-      end
-    elsif path.end_with?("compiler/lib/content_hash.w")
-      source = self.stage0_normalize_content_hash_source(raw_source)
-    elsif path.end_with?("compiler/lib/emitter.w")
-      source = self.stage0_normalize_emitter_source(raw_source)
-      dump_path = ENV["TUNGSTEN_SPINEL_STAGE0_EMITTER_DUMP"]
-      if dump_path != nil && dump_path != ""
-        File.write(dump_path, source)
-      end
-    elsif path.end_with?("languages/tungsten/lexers/regex.w")
-      source = self.stage0_normalize_regex_source(raw_source)
-    else
-      source = self.stage0_normalize_source(raw_source)
-    end
-    if ENV["TUNGSTEN_SPINEL_STAGE0_DEBUG"] == "1"
-      puts "stage0 use source length"
-      puts source.length
-    end
     old_file = @current_file
+    old_source = @source
     old_returning = @returning
     old_return_value = @return_value
     old_exiting = @exiting
-    if @stage0_loading_depth == nil
-      @stage0_loading_depth = 0
-    end
     @current_file = path
-    ast = stage0_parse_interpreter_source(source, path)
-    if ENV["TUNGSTEN_SPINEL_STAGE0_DEBUG"] == "1"
-      puts "stage0 use ast length"
-      puts ast.length
-    end
-    @stage0_loading_depth += 1
+    @source = raw_source
+    ast = parse_with_file(raw_source, path)
     evaluate(ast)
-    @stage0_loading_depth -= 1
-    if ENV["TUNGSTEN_SPINEL_STAGE0_CALL_TRACE"] == "1"
-      use_trace_path = "/tmp/tungsten-stage0-use-trace.txt"
-      use_trace_text = ""
-      if File.exist?(use_trace_path)
-        use_trace_text = File.read(use_trace_path)
-      end
-      File.write(use_trace_path, use_trace_text + path + " done\n")
-    end
     @returning = old_returning
     @return_value = old_return_value
     @exiting = old_exiting
     @current_file = old_file
+    @source = old_source
     nil
   end
 RUBY
 postamble_marker = "\n  end\n\n\n# -- implementations/spinel/stage0/postamble.rb --"
 final_bundle = replace_method(final_bundle, "visit_var", <<~RUBY)
   def visit_var(node)
-    name = stage0_var_name(node)
-    idx = @env.slot_index(name)
-    unless idx.nil?
-      value = @env.get_slot(idx)
-      return value unless value.nil?
+    return nil unless node.is_a?(Var)
+    vkind = node.var_kind
+    if vkind == 1
+      return @self_stack.length > 0 ? @self_stack[@self_stack.length - 1] : nil
     end
 
-    # Walk the parent chain with concrete sp_Environment* locals, mirroring
-    # Environment#get EXACTLY: spinel can't box an sp_Environment* into a
-    # poly slot, the .get poly dispatch flips the local poly, and even a
-    # `while pe != nil` loop CONDITION boxes pe -> poly. Using a flag-driven
-    # loop with `if np == nil` STATEMENT checks (as get does) and only
-    # concrete `.parent`/Environment-method uses keeps pe/np typed
-    # sp_Environment*. Stops at the first slot found (get's semantics).
+    env_shape = @env.layout_shape
+    if env_shape > 1 && node.cached_layout_shape == env_shape
+      return @env.get_slot(node.cached_slot)
+    end
+
+    name = node.name
+    idx = @env.slot_index(name)
+    unless idx.nil?
+      if env_shape > 1
+        node.cached_slot = idx
+        node.cached_layout_shape = env_shape
+      end
+      return @env.get_slot(idx)
+    end
+
     pe = @env
     looking = true
     while looking
-      np = pe.parent
-      if np == nil
+      if pe.barrier && !pe.parent.nil?
+        # lexical barrier: only check @top_env after a barrier
+        pidx = @top_env.slot_index(name)
+        unless pidx.nil?
+          val = @top_env.get_slot(pidx)
+          if val.is_a?(Def) && (val.args.nil? || val.args.length == 0)
+            return stage0_call_def_from_nodes(val, name, [], nil)
+          end
+          return val
+        end
         looking = false
       else
-        pe = np
-        pidx = pe.slot_index(name)
-        unless pidx.nil?
-          value = pe.get_slot(pidx)
-          return value unless value.nil?
+        np = pe.parent
+        if np.nil?
           looking = false
+        else
+          pe = np
+          pidx = pe.slot_index(name)
+          unless pidx.nil?
+            val = pe.get_slot(pidx)
+            if pe.equal?(@top_env) && val.is_a?(Def) && (val.args.nil? || val.args.length == 0)
+              return stage0_call_def_from_nodes(val, name, [], nil)
+            end
+            return val
+          end
         end
       end
     end
 
-    # The reduced stage0 parser represents a bare no-arg `clock` expression
-    # as a Var rather than a Call. Preserve normal lexical shadowing above,
-    # then use the same deterministic bootstrap clock as visit_call.
-    return 0 if name == "clock"
+    return 0 if vkind == 2
+
+    if @self_stack.length > 0
+      self_obj = @self_stack[@self_stack.length - 1]
+      if self_obj.is_a?(WObject)
+        wcls = self_obj.w_class
+        if !wcls.nil?
+          m = nil
+          if node.cached_dispatch_owner.equal?(wcls) && node.cached_dispatch_version == @method_cache_epoch
+            m = node.cached_w_method
+          else
+            m = wcls.lookup_method(name)
+            node.cached_dispatch_owner = wcls
+            node.cached_dispatch_version = @method_cache_epoch
+            node.cached_w_method = m
+          end
+          return call_w_method_from_nodes(self_obj, m, nil) if !m.nil?
+        end
+      elsif self_obj.is_a?(WClass)
+        cm = self_obj.lookup_class_method(name)
+        return call_w_method_from_nodes(self_obj, cm, nil) if !cm.nil?
+      elsif self_obj.is_a?(PackedNode)
+        node_cls = @classes["Tungsten:AST:Node"] || @classes["Node"]
+        if !node_cls.nil?
+          m = node_cls.lookup_method(name)
+          return call_w_method_from_nodes(self_obj, m, nil) if !m.nil?
+        end
+      elsif self_obj.is_a?(Integer) && (self_obj & -70368744177664) == -1125899906842624
+        tok_cls = @classes["Token"]
+        if !tok_cls.nil?
+          m = tok_cls.lookup_method(name)
+          return call_w_method_from_nodes(self_obj, m, nil) if !m.nil?
+        end
+      end
+    end
+
+    fn = @top_env.values_table[name]
+    if fn.is_a?(Def) && (fn.args.nil? || fn.args.length == 0)
+      return stage0_call_def_from_nodes(fn, name, [], nil)
+    end
 
     klass = @classes[name]
     return klass unless klass.nil?
@@ -13926,7 +14774,7 @@ final_bundle = replace_method(final_bundle, "visit_var", <<~RUBY)
     nil
   end
 RUBY
-final_bundle = final_bundle.sub(postamble_marker, final_use_methods + "\n  end\n\n\n# -- implementations/spinel/stage0/postamble.rb --")
+final_bundle = final_bundle.sub(postamble_marker) { final_use_methods + "\n  end\n\n\n# -- implementations/spinel/stage0/postamble.rb --" }
 
 # Tungsten declares a `class Time < Literal` stub that visit_time_literal
 # wraps values in. Spinel's runtime owns the C name `sp_Time` for its own

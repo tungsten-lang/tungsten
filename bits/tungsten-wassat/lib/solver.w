@@ -5094,17 +5094,15 @@ WASSAT_PROOF_DRAT = 2
           j -= 1
         else
           k = 2
-          found = -1
-          while k < n && found < 0
+          while k < n
             lk = ar[stx + k]
             sk = lk >> 63
             vk = (asg[(lk ^ sk) - sk] ^ sk) - sk
-            if vk >= 0
-              found = k
+            break if vk >= 0
             k += 1
-          if found >= 0
-            repl = ar[stx + found]
-            ar[stx + found] = neg
+          if k < n
+            repl = ar[stx + k]
+            ar[stx + k] = neg
             ar[stx + 1] = repl
             # remove this entry: pull the (unvisited) front entry into j
             # and shrink the block from the front, then append (stx, other)
@@ -6159,30 +6157,47 @@ WASSAT_PROOF_DRAT = 2
   hpos[vb] = a
   1
 
+# Sift a saved variable through a hole. Parent/child shifts retain the exact
+# tie order of swaps, while each displaced variable is written only once.
 -> wassat_heap_up(heap, hpos, act, index) (i64[] i64[] i64[] i64) i64
   i = index
+  return i if i <= 0
+  v = heap[i]
+  key = act[v]
   while i > 0
     parent = (i - 1) / 2
-    if act[heap[i]] <= act[heap[parent]]
-      return i
-    z = wassat_heap_swap(heap, hpos, i, parent)
+    pv = heap[parent]
+    break if key <= act[pv]
+    heap[i] = pv
+    hpos[pv] = i
     i = parent
+  if i != index
+    heap[i] = v
+    hpos[v] = i
   i
 
 -> wassat_heap_down(heap, hpos, act, hst, index) (i64[] i64[] i64[] i64[] i64) i64
   i = index
-  while 0 < 1
-    left = 2 * i + 1
-    if left >= hst[0]
-      return i
+  size = hst[0]
+  left = 2 * i + 1
+  return i if left >= size
+  v = heap[i]
+  key = act[v]
+  while left < size
     best = left
     right = left + 1
-    if right < hst[0] && act[heap[right]] > act[heap[left]]
+    if right < size && act[heap[right]] > act[heap[left]]
       best = right
-    if act[heap[best]] <= act[heap[i]]
-      return i
-    z = wassat_heap_swap(heap, hpos, i, best)
+    child = heap[best]
+    break if act[child] <= key
+    heap[i] = child
+    hpos[child] = i
     i = best
+    left = 2 * i + 1
+  if i != index
+    heap[i] = v
+    hpos[v] = i
+  i
 
 # WRAT hint construction: mark the learned clause (1), close the conflict
 # cone over reason clauses (2), then cite each cone reason in trail order

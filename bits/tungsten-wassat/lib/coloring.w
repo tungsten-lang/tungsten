@@ -83,50 +83,53 @@ WASSAT_COLORING_NODE_CAP = 200000
   while ci < ncl
     n = fcl[ci]
     off = fcs[ci]
-    # Evaluate clause under forced_lit (0 = unassigned, 1 = pos true, -1 = neg true)
-    sat = false
-    rem_len = 0
-    disjoint = true
-    j = 0
-    while j < n
-      l = fla[off + j]
-      v = l < 0 ? 0 - l : l
-      if v < 1 || v > nv
-        sat = true
-      else
-        fl = forced_lit[v]
-        if (fl == 1 && l > 0) || (fl == -1 && l < 0)
-          sat = true
-        elsif fl == 0
-          rem_len += 1
-          disjoint = false if choice_owner[v] != 0
-          disjoint = false if pos_only && l < 0
-      j += 1
-    if !sat && rem_len >= 3 && disjoint
-      # Also ensure no duplicate variable inside the clause itself
-      dup = false
+    # Restriction can only shorten clauses: binary/unit clauses cannot
+    # become choices of length three, so their literals need no scan here.
+    if n >= 3
+      # Evaluate clause under forced_lit (0 = unassigned, 1 = pos true, -1 = neg true)
+      sat = false
+      rem_len = 0
+      disjoint = true
       j = 0
       while j < n
         l = fla[off + j]
         v = l < 0 ? 0 - l : l
-        if forced_lit[v] == 0
-          if choice_owner[v] != 0
-            dup = true
-          else
-            choice_owner[v] = m + 1
-            choice_pol[v] = l > 0 ? 1 : -1
-            u_vars[u_count] = v
-            u_count += 1
+        if v < 1 || v > nv
+          sat = true
+        else
+          fl = forced_lit[v]
+          if (fl == 1 && l > 0) || (fl == -1 && l < 0)
+            sat = true
+          elsif fl == 0
+            rem_len += 1
+            disjoint = false if choice_owner[v] != 0
+            disjoint = false if pos_only && l < 0
         j += 1
-      if dup
-        # Roll back partial marks for this clause
-        while u_count > 0 && choice_owner[u_vars[u_count - 1]] == m + 1
-          u_count -= 1
-          choice_owner[u_vars[u_count]] = 0
-          choice_pol[u_vars[u_count]] = 0
-      else
-        choice_ci[m] = ci
-        m += 1
+      if !sat && rem_len >= 3 && disjoint
+        # Also ensure no duplicate variable inside the clause itself
+        dup = false
+        j = 0
+        while j < n
+          l = fla[off + j]
+          v = l < 0 ? 0 - l : l
+          if forced_lit[v] == 0
+            if choice_owner[v] != 0
+              dup = true
+            else
+              choice_owner[v] = m + 1
+              choice_pol[v] = l > 0 ? 1 : -1
+              u_vars[u_count] = v
+              u_count += 1
+          j += 1
+        if dup
+          # Roll back partial marks for this clause
+          while u_count > 0 && choice_owner[u_vars[u_count - 1]] == m + 1
+            u_count -= 1
+            choice_owner[u_vars[u_count]] = 0
+            choice_pol[u_vars[u_count]] = 0
+        else
+          choice_ci[m] = ci
+          m += 1
     ci += 1
 
   return 0 if m < 2 || u_count < m * 3

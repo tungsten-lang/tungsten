@@ -4285,6 +4285,38 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
       hops += 1
     sign > 0 ? v : 0 - v
 
+  # Empty assumption levels still count as decision levels. Repeated or
+  # substituted assumptions can therefore take levels beyond nvars even
+  # though the trail contains at most nvars assignments. Reserve the three
+  # level-indexed buffers before search, while at the root. Distinct mapped
+  # variables each consume one of the ordinary variable levels; only the
+  # remaining assumption entries need extra capacity. Reuse analysis scratch
+  # to count them without allocating, then clear every borrowed mark.
+  -> prepare_assumption_levels(assumptions)
+    upper = @nvars + assumptions.size
+    return 0 if upper < @trail_lim.size && upper < @lbd_seen.size && upper < @shcnt.size
+    distinct = 0
+    i = 0
+    while i < assumptions.size
+      v = assumptions[i].abs
+      if @seen[v] == 0
+        @seen[v] = 1
+        @mclr[distinct] = v
+        distinct += 1
+      i += 1
+    i = 0
+    while i < distinct
+      @seen[@mclr[i]] = 0
+      i += 1
+    highest = upper - distinct
+    return 0 if highest < @trail_lim.size && highest < @lbd_seen.size && highest < @shcnt.size
+    raise "assumption decision levels exceed fixed solver capacity" if @fixed_caps
+    cap = highest + 2
+    @trail_lim = i64[cap] if highest >= @trail_lim.size
+    @lbd_seen = i64[cap] if highest >= @lbd_seen.size
+    @shcnt = i64[cap] if highest >= @shcnt.size
+    0
+
   -> solve_assuming_budget(assumptions, max_conflicts)
     assumptions.each -> (a)
       raise "assumption literal must not be zero" if a == 0
@@ -4300,6 +4332,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
       @assump = []
       assumptions.each -> (a)
         @assump.push(self.assumption_representative(a))
+    self.prepare_assumption_levels(@assump)
     @nassump = assumptions.size
     r = self.solve_query(max_conflicts)
     if @nsubst > 0 && r["core"].size > 0
@@ -6407,7 +6440,8 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
 # literal count (all-zero between calls — restored via the level list
 # before returning); `stk` carries the descending distinct-level list at
 # its TOP end and the per-attempt pulled-variable list at its bottom
-# (nlev + pulled <= dlevel + |segment| <= nv + 1, so they cannot meet);
+# (distinct other-level entries and pulled variables are disjoint and
+# together number at most nv, so the two ends cannot meet);
 # `dstk` is the probes' DFS stack and `tclr` the removable/poison
 # clear-list (each listed var is currently marked, so it never exceeds
 # nv entries). `sn` marks — 1 clause body, 2 open same-level, 3

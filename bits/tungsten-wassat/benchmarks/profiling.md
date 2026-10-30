@@ -101,6 +101,11 @@ are word-gate evaluations, not hardware instruction counts.
 `analysis mark_bytes` reports the byte payload of the per-variable analysis
 mark table. The table holds only marks 0 through 4 and uses one byte per
 variable across minimization, shrinking, assumption cores, and proof hints.
+`analysis reason_bytes` reports the signed 32-bit reason array payload,
+including the unused variable-zero slot. Clause indices already occupy a
+signed high word in packed headers and binary entries; insertion and flat
+loading reject indices outside that range. The -1 sentinel remains signed,
+and global proof IDs retain their 64-bit storage.
 
 `phases payload_bytes` sums the saved, target, and best phase tables plus
 allocated probing and vivification phase backups. These polarity buffers use

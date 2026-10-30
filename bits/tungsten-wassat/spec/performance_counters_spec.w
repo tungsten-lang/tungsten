@@ -15,7 +15,7 @@ use ../lib/solver
   asg = i8[4]
   lasg = i8[10]
   lvl = i64[4]
-  rsn = i64[4]
+  rsn = i32[4]
   phs = i8[4]
   tr = i64[4]
   st = i64[6]

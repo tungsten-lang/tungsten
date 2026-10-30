@@ -68,6 +68,10 @@ WASSAT_COLORING_NODE_CAP = 200000
 # complete AMO hole cliques force relay literals that reduce the remaining
 # clauses to such an AMO-clique-cover obstruction (relativized PHP).
 -> wassat_amo_cover_or_rphp_unsat(fla, fcs, fcl, nv, ncl, forced_lit, pos_only) (i64[] i64[] i64[] i64 i64 i8[] bool) i64
+  # Each graph word contains at most 62 bits. Keep mask construction and
+  # word reads native: boxing high bits here creates temporary BigInts in
+  # the graph traversal even though every value fits in signed 64 bits.
+  one = 1 ## i64
   choice_owner = i64[nv + 1]
   choice_pol = i8[nv + 1]
   choice_ci = i64[nv + 1]
@@ -174,14 +178,26 @@ WASSAT_COLORING_NODE_CAP = 200000
           p2 = l2 > 0 ? 1 : -1
           if p1 == 0 - choice_pol[v1] && p2 == 0 - choice_pol[v2]
             w1 = idx2 / 62
-            b1 = 1 << (idx2 % 62)
+            b1 = one << (idx2 % 62) ## i64
             w2 = idx1 / 62
-            b2 = 1 << (idx1 % 62)
-            g_full[idx1 * words + w1] = g_full[idx1 * words + w1] | b1
-            g_full[idx2 * words + w2] = g_full[idx2 * words + w2] | b2
+            b2 = one << (idx1 % 62) ## i64
+            edge = idx1 * words + w1 ## i64
+            bits = g_full[edge] ## i64
+            bits = bits | b1
+            g_full[edge] = bits
+            edge = idx2 * words + w2 ## i64
+            bits = g_full[edge] ## i64
+            bits = bits | b2
+            g_full[edge] = bits
             if choice_owner[v1] != choice_owner[v2]
-              g_inter[idx1 * words + w1] = g_inter[idx1 * words + w1] | b1
-              g_inter[idx2 * words + w2] = g_inter[idx2 * words + w2] | b2
+              edge = idx1 * words + w1 ## i64
+              bits = g_inter[edge] ## i64
+              bits = bits | b1
+              g_inter[edge] = bits
+              edge = idx2 * words + w2 ## i64
+              bits = g_inter[edge] ## i64
+              bits = bits | b2
+              g_inter[edge] = bits
     ci += 1
 
   # Connected components of G_inter on 0..u_count-1
@@ -211,8 +227,9 @@ WASSAT_COLORING_NODE_CAP = 200000
         while nxt < u_count
           if comp_id[nxt] == 0
             w = nxt / 62
-            b = 1 << (nxt % 62)
-            if (g_inter[cur * words + w] & b) != 0
+            b = one << (nxt % 62) ## i64
+            bits = g_inter[cur * words + w] ## i64
+            if (bits & b) != 0
               comp_id[nxt] = ncomp
               queue[qt] = nxt
               qt += 1
@@ -235,8 +252,9 @@ WASSAT_COLORING_NODE_CAP = 200000
       while ib < c_end
         ub = comp_nodes[ib]
         w = ub / 62
-        b = 1 << (ub % 62)
-        if (g_full[ua * words + w] & b) == 0
+        b = one << (ub % 62) ## i64
+        bits = g_full[ua * words + w] ## i64
+        if (bits & b) == 0
           ok = false
         ib += 1
       ia += 1
@@ -320,9 +338,13 @@ WASSAT_COLORING_NODE_CAP = 200000
                   hit_comp[yi] = hc
                   seen_u_for_y[yi] = 0
                   hit_cnt[yi] = 0
-                bit = 1 << loc
-                if (seen_u_for_y[yi] & bit) == 0
-                  seen_u_for_y[yi] = seen_u_for_y[yi] | bit
+                bit = one << loc ## i64
+                bits = seen_u_for_y[yi] ## i64
+                if (bits & bit) == 0
+                  edge = yi ## i64
+                  bits = seen_u_for_y[edge] ## i64
+                  bits = bits | bit
+                  seen_u_for_y[edge] = bits
                   hit_cnt[yi] = hit_cnt[yi] + 1
                   if hit_cnt[yi] == c_size
                     forced_lit[vb] = lb > 0 ? 1 : -1
@@ -345,9 +367,13 @@ WASSAT_COLORING_NODE_CAP = 200000
                   hit_comp[yi] = hc
                   seen_u_for_y[yi] = 0
                   hit_cnt[yi] = 0
-                bit = 1 << loc
-                if (seen_u_for_y[yi] & bit) == 0
-                  seen_u_for_y[yi] = seen_u_for_y[yi] | bit
+                bit = one << loc ## i64
+                bits = seen_u_for_y[yi] ## i64
+                if (bits & bit) == 0
+                  edge = yi ## i64
+                  bits = seen_u_for_y[edge] ## i64
+                  bits = bits | bit
+                  seen_u_for_y[edge] = bits
                   hit_cnt[yi] = hit_cnt[yi] + 1
                   if hit_cnt[yi] == c_size
                     forced_lit[va] = la > 0 ? 1 : -1
@@ -363,6 +389,7 @@ WASSAT_COLORING_NODE_CAP = 200000
   0
 
 -> wassat_amo_cover_residual_unsat(fla, fcs, fcl, nv, ncl, forced_lit) (i64[] i64[] i64[] i64 i64 i8[]) i64
+  one = 1 ## i64
   choice_owner = i64[nv + 1]
   choice_pol = i8[nv + 1]
   u_vars = i64[nv + 1]
@@ -455,14 +482,26 @@ WASSAT_COLORING_NODE_CAP = 200000
           p2 = l2 > 0 ? 1 : -1
           if p1 == 0 - choice_pol[v1] && p2 == 0 - choice_pol[v2]
             w1 = idx2 / 62
-            b1 = 1 << (idx2 % 62)
+            b1 = one << (idx2 % 62) ## i64
             w2 = idx1 / 62
-            b2 = 1 << (idx1 % 62)
-            g_full[idx1 * words + w1] = g_full[idx1 * words + w1] | b1
-            g_full[idx2 * words + w2] = g_full[idx2 * words + w2] | b2
+            b2 = one << (idx1 % 62) ## i64
+            edge = idx1 * words + w1 ## i64
+            bits = g_full[edge] ## i64
+            bits = bits | b1
+            g_full[edge] = bits
+            edge = idx2 * words + w2 ## i64
+            bits = g_full[edge] ## i64
+            bits = bits | b2
+            g_full[edge] = bits
             if choice_owner[v1] != choice_owner[v2]
-              g_inter[idx1 * words + w1] = g_inter[idx1 * words + w1] | b1
-              g_inter[idx2 * words + w2] = g_inter[idx2 * words + w2] | b2
+              edge = idx1 * words + w1 ## i64
+              bits = g_inter[edge] ## i64
+              bits = bits | b1
+              g_inter[edge] = bits
+              edge = idx2 * words + w2 ## i64
+              bits = g_inter[edge] ## i64
+              bits = bits | b2
+              g_inter[edge] = bits
     ci += 1
 
   comp_id = i64[u_count]
@@ -490,8 +529,9 @@ WASSAT_COLORING_NODE_CAP = 200000
         while nxt < u_count
           if comp_id[nxt] == 0
             w = nxt / 62
-            b = 1 << (nxt % 62)
-            if (g_inter[cur * words + w] & b) != 0
+            b = one << (nxt % 62) ## i64
+            bits = g_inter[cur * words + w] ## i64
+            if (bits & b) != 0
               comp_id[nxt] = ncomp
               queue[qt] = nxt
               qt += 1
@@ -513,8 +553,9 @@ WASSAT_COLORING_NODE_CAP = 200000
       while ib < c_end
         ub = comp_nodes[ib]
         w = ub / 62
-        b = 1 << (ub % 62)
-        return 0 if (g_full[ua * words + w] & b) == 0
+        b = one << (ub % 62) ## i64
+        bits = g_full[ua * words + w] ## i64
+        return 0 if (bits & b) == 0
         ib += 1
       ia += 1
     c += 1

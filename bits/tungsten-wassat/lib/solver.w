@@ -111,7 +111,7 @@ WASSAT_PROOF_DRAT = 2
         @vq_state[4] = 0
     @level = i64[nv + 1]
     @reason = i64[nv + 1]        # clause index, or -1 for a decision
-    @seen = i64[nv + 1]
+    @seen = i8[nv + 1]          # analysis/hint marks are only 0..4
     @phase = i64[nv + 1]         # saved polarity: 1 or -1
     @activity = i64[nv + 1]      # scaled integer VSIDS score
     @heap = i64[nv + 1]          # max-heap of branching variables
@@ -4250,7 +4250,7 @@ WASSAT_PROOF_DRAT = 2
     wassat_prof_note("[label].sharing exports=[@share_exports] imports=[@share_imports] dropped=[@share_dropped] filtered=[@share_filtered]")
     wassat_prof_note("[label].inprocess_work cancelled=[@inp_totals[0]] units=[@inp_totals[1]] subsume_work=[@inp_totals[2]] scc_work=[@inp_totals[3]] cleaned_literals=[@inp_totals[4]]")
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
-    wassat_prof_note("[label].analysis shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
+    wassat_prof_note("[label].analysis mark_bytes=[@nvars + 1] shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
     0
 
   # Full MiniSat-style incremental query: SAT / UNSAT / UNKNOWN under the
@@ -6100,7 +6100,7 @@ WASSAT_PROOF_DRAT = 2
 #
 #   st[0] = conflicting clause   st[1] = trail size   st[2] = decision level
 #   st[3] = learned clause size  st[4] = backjump level
--> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark) (i64[] i8[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   confl = st[0]
   tsize = st[1]
   dl = st[2]
@@ -6409,7 +6409,7 @@ WASSAT_PROOF_DRAT = 2
 #   st[1] += body literals examined   st[2] += literals removed
 #   st[3] += block attempts           st[4] += blocks shrunk
 #   st[6] = removable/poison clear-list size (internal)
--> wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk, dstk, tclr, cnt, st, nv) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+-> wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk, dstk, tclr, cnt, st, nv) (i64[] i8[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
   n = st[0]
   if n <= 2
     tgt = 0
@@ -6649,7 +6649,7 @@ WASSAT_PROOF_DRAT = 2
 # In fallback mode (fbk 1) a failed root is NOT poisoned: the caller
 # re-marks it as clause body — CaDiCaL sets keep on exactly that path,
 # and keep wins over poison in its early-return order.
--> wassat_shrink_probe(ar, lvl, rsn, sn, cm, dstk, tclr, st, root, fbk) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_shrink_probe(ar, lvl, rsn, sn, cm, dstk, tclr, st, root, fbk) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64 i64) i64
   if rsn[root] < 0
     if fbk == 0
       sn[root] = 4
@@ -6988,7 +6988,7 @@ WASSAT_PROOF_DRAT = 2
 # cone over reason clauses (2), then cite each cone reason in trail order
 # with the conflict last. Marks are cleared before returning. Returns the
 # hint count, or -1 when a cone literal has no reason (caller raises).
--> wassat_wrat_hints(ar, cm, rsn, sn, tr, gid, work, hout, lbuf, n, confl, tsize) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
+-> wassat_wrat_hints(ar, cm, rsn, sn, tr, gid, work, hout, lbuf, n, confl, tsize) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
   i = 0
   while i < n
     q = lbuf[i]

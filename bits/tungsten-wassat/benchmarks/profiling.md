@@ -93,6 +93,10 @@ normalized kernels (including NAND, bit-clear, OR-not, OR, and NOR). It excludes
 the first full-graph batch per worker, which remains in `circuit.ops`. These
 are word-gate evaluations, not hardware instruction counts.
 
+`analysis mark_bytes` reports the byte payload of the per-variable analysis
+mark table. The table holds only marks 0 through 4 and uses one byte per
+variable across minimization, shrinking, assumption cores, and proof hints.
+
 Runtime `TALLOC` lines count five instrumented allocation categories: BigInt
 arenas, new arrays, aligned arrays, array growth, and hashes. Byte totals are
 instrumentation estimates, not peak memory or all malloc traffic: some array

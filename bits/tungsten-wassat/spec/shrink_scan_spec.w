@@ -21,7 +21,7 @@ use ../lib/solver
   asg = i8[nv + 3]
   lvl = i64[nv + 3]
   rsn = i64[nv + 3]
-  sn = i64[nv + 3]
+  sn = i8[nv + 3]
   tr = i64[nv + 3]
   tlim = i64[nv + 3]
   out = i64[nv + 3]

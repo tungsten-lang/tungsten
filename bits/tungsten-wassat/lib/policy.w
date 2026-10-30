@@ -1116,17 +1116,15 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # XOR arm on mod2 instances.
     return 128 if raw && self.short_dense_ternary_scout?
     return 256 if raw && @nvars >= 50 && @nvars <= 150 && @nclauses >= 200 && @nclauses <= 750 && @ternary * 4 >= @nclauses * 3
-    # Bound discarded work on million-clause raw kernels.  The ordinary
-    # 2,000-conflict scout costs ~3.2s on schooltt and is not continued.
-    # A 128-conflict experiment was faster there, but was too aggressive:
-    # linked_list_swap_contents_safety_unwind45 has a deterministic scout
-    # refutation at 242 conflicts and fell through into a long race at 128.
-    # The native first slice is 512 conflicts; that preserves the refutation
-    # (about 4.9s at either cap in interleaved runs) while keeping schooltt's
-    # scout around 0.65s instead of 3.2s.  Keep the full cap below the
-    # threshold so the bmc-ibm-6/10 class retains its known 1-2k-conflict
-    # scout wins.
-    return 512 if raw && @nclauses >= 1000000
+    # Hand off large kernels sooner when diversified raw arms will replace
+    # the scout. Goldcrest spends seconds on the discarded 128..512 prefix.
+    # Keep 512 when memory or CPU limits leave one raw arm: the serial
+    # fallback reuses the scout and enables chronological backtracking after
+    # the handoff, so a smaller cap also changes its search trajectory.
+    # In particular, cabp-X-can__715 regresses at an unconditional cap of 128.
+    # Smaller kernels retain the 1-2k-conflict bmc-ibm scout wins.
+    if raw && @nclauses >= 1000000
+      return self.raw_race_arms > 1 ? 128 : 512
     raw ? 2000 : 4000
 
   -> reduce_limit

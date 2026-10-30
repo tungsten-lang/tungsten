@@ -449,7 +449,11 @@
     if t == :datetime
       return ccall("w_date_parse", "" + ast_get(node, :value).to_s())
     if t == :time
-      return ccall("w_time_parse", "" + ast_get(node, :value).to_s())
+      # Run the interpreted Time.parse. A direct call here would use the
+      # compiled constructor and hand the tree walker a native object whose
+      # @nanos it cannot read.
+      try_autoload_class("Time")
+      return dispatch_method(@classes["Time"], "parse", ["" + ast_get(node, :value).to_s()], nil, env)
     if t == :month
       return ccall("w_date_parse", "" + ast_get(node, :value).to_s())
     if t == :rational

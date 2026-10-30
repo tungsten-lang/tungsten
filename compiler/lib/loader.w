@@ -1211,11 +1211,16 @@ loader_parse_cache_state = {
     # class name; their accessors now require the source-defined type class.
     if t == :ip6 || t == :cidr6
       consider_autoload_name("IPv6", defined, registry, seen, pending)
-    # Date, Datetime, and Time literals share the packed Date runtime type. Their
-    # native accessors now live in core/date.w, so literal-only programs must
-    # register Date's 0xE4 type class even when they never name Date directly.
-    if t == :date || t == :datetime || t == :time
+    # Date and Datetime literals are packed Dates. Accessors live in
+    # core/date.w, so a literal-only program registers Date even when the
+    # source never names it.
+    if t == :date || t == :datetime
       consider_autoload_name("Date", defined, registry, seen, pending)
+    # A time literal lowers to Time.parse after this walk. The synthetic
+    # ClassRef is not in the source AST, so register Time here or the call
+    # receiver is nil.
+    if t == :time
+      consider_autoload_name("Time", defined, registry, seen, pending)
     # Rational literals are packed values whose accessors and conversions
     # live in core/numeric/rational.w.
     if t == :rational
@@ -1411,10 +1416,9 @@ loader_parse_cache_state = {
     nil
 
   -> cache_version
-    # v25: definitions and closed-world contract calls carry source provenance
-    # in sparse AST metadata. Older cache entries cannot validate Core ownership
-    # or dependency-owned barriers soundly.
-    "loader-ast-v25"
+    # v26: a time literal autoloads Time. v25 caches spliced the packed Date
+    # class instead, so a cached program still called Time.parse on nil.
+    "loader-ast-v26"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")

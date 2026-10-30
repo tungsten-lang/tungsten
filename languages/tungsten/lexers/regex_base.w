@@ -612,7 +612,8 @@ use known_units
     seconds = sec_hi + sec_lo
     @pos += 2
     time_str = hour_str + ":" + minutes + ":" + seconds
-    # Optional fractional seconds
+    # Optional fractional seconds. A dot with no digits is a method
+    # call (`14:30:45.hour`), so put the dot back.
     if @pos < @char_count && @chars[@pos] == "."
       @pos += 1
       frac = ""
@@ -621,6 +622,8 @@ use known_units
         @pos += 1
       if frac.size() > 0
         time_str = time_str + "." + frac
+      else
+        @pos -= 1
     # Optional timezone: Z, +HH:MM, -HH:MM
     time_str = scan_timezone(time_str)
     emit(:TIME, time_str)
@@ -712,7 +715,7 @@ use known_units
         seconds = @chars[@pos] + @chars[@pos + 1]
         @pos += 2
         time_str = time_str + ":" + seconds
-        # Optional fractional seconds
+        # Optional fractional seconds. A bare dot starts a method call.
         if @pos < @char_count && @chars[@pos] == "."
           @pos += 1
           frac = ""
@@ -721,6 +724,8 @@ use known_units
             @pos += 1
           if frac.size() > 0
             time_str = time_str + "." + frac
+          else
+            @pos -= 1
     # Optional timezone
     time_str = scan_timezone(time_str)
     time_str

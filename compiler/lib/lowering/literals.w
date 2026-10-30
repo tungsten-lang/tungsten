@@ -899,13 +899,12 @@ sso5_sym_text_cache = {}
   typed_value(:i64, temp)
 
 -> lower_time(ctx, node)
-  wfn = ctx[:func]
-  # Parse "hh:mm:ss[.frac][±hh:mm|Z]"
+  # Parse "hh:mm:ss[.frac][±hh:mm|Z]". Keep the civil checks (leap second,
+  # packable offset), then build a Time. The string is the literal text, so
+  # a bare clock stays naive and a fraction survives.
   parsed = parse_time_string(node.value)
   validate_time(parsed[:hour], parsed[:min], parsed[:sec], node.value, ctx, node, 0, 0, 0, parsed[:tz])
-  temp = next_temp(wfn)
-  emit_wire_const_date(wfn, 0, parsed[:hour], parsed[:min], 0, parsed[:sec], temp, parsed[:tz], 0)
-  typed_value(:i64, temp)
+  lower_expression(ctx, Tungsten:AST:Call.new(Tungsten:AST:ClassRef.new("Time"), "parse", [Tungsten:AST:String.new(node.value)], nil))
 
 -> parse_time_string(s)
   # Parse "hh:mm:ss[.frac][±hh:mm|Z]" → {hour, min, sec, tz}

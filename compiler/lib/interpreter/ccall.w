@@ -629,6 +629,10 @@
       if args.size() != 1
         raise "w_date_today expects no arguments"
       return ccall("w_date_today")
+    when "w_instant_now"
+      if args.size() != 1
+        raise "w_instant_now expects no arguments"
+      return ccall("w_instant_now")
     when "w_char_new"
       return ccall("w_char_new", args[1])
     when "w_ipv4_parse"

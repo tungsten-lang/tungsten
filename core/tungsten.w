@@ -273,6 +273,7 @@
   auto :System,       "system"
   auto :Table,        "table"
   auto :Thread,       "thread"
+  auto :Time,         "time"
   auto :Timer,        "timer"
   auto :TLS,          "tls"
   auto :Token,        "token"

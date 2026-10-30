@@ -41,7 +41,7 @@ fi
 
 echo
 echo "### library specs"
-for spec in solver phase_snapshot shrink_scan ordered_scan heap_sift parser_capacity inprocess inprocess_cancel flat_units vivification structural_pruning windmill cli preprocess incremental sls sls_stop scout_walk trim explain portfolio multiplier fermat sum_of_three_cubes mdp automata_sync ternary_affine ais coloring coloring_mask coloring_choice covering directed_kernel edge_matching sliding_puzzle stedman hantzsche_wendt knight_tour path_cover local_core latin_csp algebra_certificate router_trainer; do
+for spec in solver phase_snapshot shrink_scan ordered_scan heap_sift parser_capacity input_empty inprocess inprocess_cancel flat_units vivification structural_pruning windmill cli preprocess incremental sls sls_stop scout_walk trim explain portfolio multiplier fermat sum_of_three_cubes mdp automata_sync ternary_affine ais coloring coloring_mask coloring_choice covering directed_kernel edge_matching sliding_puzzle stedman hantzsche_wendt knight_tour path_cover local_core latin_csp algebra_certificate router_trainer; do
   path="bits/tungsten-wassat/spec/${spec}_spec.w"
   if [[ "$spec" == "router_trainer" ]]; then
     path="bits/tungsten-wassat/benchmarks/router_trainer_spec.w"

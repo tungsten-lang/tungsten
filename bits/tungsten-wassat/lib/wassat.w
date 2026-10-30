@@ -340,6 +340,33 @@ use portfolio
   rescue e
     wassat_discard_output(wrat_out, wrat_final)
     raise e
+  # An original empty clause is already a complete refutation. The strict
+  # parser has validated the WHOLE input before this point; do not construct
+  # specialist or search arenas for a formula that cannot have a model.
+  # Proof modes cite the original empty clause and keep normal atomic output
+  # publication and stdout/stderr separation.
+  if config.empty_clause_count > 0
+    empty_id = wassat_first_empty_clause(formula["flat_lens"], formula["flat_ncl"])
+    raise "internal error: empty-clause count has no witness" if empty_id == 0
+    wtext = ""
+    unless wrat_final == nil
+      whead = header_wanted ? "wrat 1\n" : ""
+      wtext = whead + "[formula["flat_ncl"] + 1] 0 [empty_id] 0\n"
+      unless wrat_final == "-"
+        raise "proof write failed at '[wrat_out]'" unless write_file(wrat_out, wtext)
+        wassat_publish_output(wrat_out, wrat_final, "WRAT")
+    unless drat_final == nil || drat_final == "-"
+      raise "proof write failed at '[drat_out]'" unless write_file(drat_out, "0\n")
+      wassat_publish_output(drat_out, drat_final, "DRAT")
+    tprof = wassat_prof("cli.input_validation", tprof)
+    wassat_prof_note("input empty_clauses=[config.empty_clause_count] first_empty_clause=[empty_id]") if tprof != 0
+    wassat_status(quiet, "s UNSATISFIABLE")
+    wassat_status(quiet, "c mode: [wassat_mode_of(options)] (original empty clause)")
+    wassat_status(quiet, "c conflicts: 0, decisions: 0, props: 0")
+    print(wtext) if wrat_final == "-"
+    print("0\n") if drat_final == "-"
+    exit(20)
+
   # The canonical Hantzsche--Wendt instance is a complete group-ring product
   # circuit over two 93-bit supports. Construct Gardam's published unit and
   # inverse from the group law, replay every AND/parity auxiliary, and publish

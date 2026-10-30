@@ -7,6 +7,7 @@
 
 # Clause-shape histogram over the parser's flat lengths:
 #   [0] total literals  [1] longest clause  [2] units  [3] binary  [4] ternary
+#   [5] empty input clauses
 -> wassat_shape_counts(lens, ncl, out) (i64[] i64 i64[])
   i = 0
   while i < ncl
@@ -16,6 +17,16 @@
     out[2] = out[2] + 1 if n == 1
     out[3] = out[3] + 1 if n == 2
     out[4] = out[4] + 1 if n == 3
+    out[5] = out[5] + 1 if n == 0
+    i += 1
+  0
+
+# Called only when the shape pass counted an empty clause. Return its
+# one-based original clause id for a one-step hinted refutation.
+-> wassat_first_empty_clause(lens, ncl) (i64[] i64) i64
+  i = 0
+  while i < ncl
+    return i + 1 if lens[i] == 0
     i += 1
   0
 
@@ -484,6 +495,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
   2000000
 
 + WassatConfig
+  ro :empty_clause_count
   -> new(@nvars, clauses)
     @nclauses = clauses.size
     @nliterals = 0
@@ -491,6 +503,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     @ternary = 0
     @units = 0
     @max_clause = 0
+    @empty_clause_count = 0
     clauses.each -> (clause)
       n = clause.size
       @nliterals += n
@@ -498,6 +511,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
       @units += 1 if n == 1
       @binary += 1 if n == 2
       @ternary += 1 if n == 3
+      @empty_clause_count += 1 if n == 0
 
   # Shape counters straight from the parser's flat length array, for the
   # raw path that never materializes boxed clauses (see
@@ -516,6 +530,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     @units = counts[2]
     @binary = counts[3]
     @ternary = counts[4]
+    @empty_clause_count = counts[5]
     0
 
   -> raw_heuristics?

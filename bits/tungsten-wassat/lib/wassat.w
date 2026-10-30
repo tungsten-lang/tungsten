@@ -665,6 +665,7 @@ use portfolio
       exit(20)
   if formula["flat_ncl"] >= 1500000 && env("WASSAT_LUCKY") != "0"
     flat_lucky = wassat_flat_lucky_model(formula)
+    tprof = wassat_prof("cli.flat_lucky", tprof)
     if flat_lucky.size > 0
       unless wassat_model_satisfies?(formula, flat_lucky)
         raise "internal error: flat-lucky model does not satisfy the input formula"

@@ -1167,7 +1167,7 @@ WASSAT_PROOF_DRAT = 2
         while v <= @nvars
           @phase[v] = -1
           v += 1
-    tl = wassat_prof("lucky result=[r]", tl)
+    tl = wassat_prof("lucky result=[r]", tl) if tl != 0
     r
 
   # One dive. `pol` is the polarity assumed for every free variable; a
@@ -2453,7 +2453,7 @@ WASSAT_PROOF_DRAT = 2
     @inp_subsumed += pm[4]
     @inp_strengthened += pm[5]
     @need_clean = true if pm[4] > 0 || pm[5] > 0
-    z = wassat_prof("subsume irred=[irred] subsumed=[pm[4]] strengthened=[pm[5]] promoted=[pm[10]] visits=[pm[6]] work=[pm[13]] stopped=[pm[12]]", ts)
+    z = wassat_prof("subsume irred=[irred] subsumed=[pm[4]] strengthened=[pm[5]] promoted=[pm[10]] visits=[pm[6]] work=[pm[13]] stopped=[pm[12]]", ts) if ts != 0
     pm[4] + pm[5]
 
   # Root-level clause cleaning, to a fixpoint: propagate the root trail,
@@ -2712,7 +2712,7 @@ WASSAT_PROOF_DRAT = 2
     @inp_totals[1] = @inp_totals[1] + units
     cancelled = wassat_stop_requested?(@stop_cell) ? 1 : 0
     @inp_totals[0] = @inp_totals[0] + cancelled
-    z = wassat_prof("inprocess round=[@inprocessings] conflicts=[@conflicts] budget=[budget] units=[units] failed=[@inp_failed - failed0] lifted=[@inp_lifted - lifted0] equivs=[@inp_equivs - equiv0] vivified=[@vivified - viv0] subsumed=[@inp_subsumed - sub0] strengthened=[@inp_strengthened - strength0] substituted=[@nsubst - subst0] cleaned=[@inp_cleaned - clean0] watch_rebuilds=[@wp_state[3] - rebuild0] cancelled=[cancelled] ms_clean=[t2 - t1 + t6 - t5] ms_probe=[t3 - t2] ms_vivify=[t4 - t3] ms_subsume=[t5 - t4] ms_subst=[t7 - t6]", t0)
+    z = wassat_prof("inprocess round=[@inprocessings] conflicts=[@conflicts] budget=[budget] units=[units] failed=[@inp_failed - failed0] lifted=[@inp_lifted - lifted0] equivs=[@inp_equivs - equiv0] vivified=[@vivified - viv0] subsumed=[@inp_subsumed - sub0] strengthened=[@inp_strengthened - strength0] substituted=[@nsubst - subst0] cleaned=[@inp_cleaned - clean0] watch_rebuilds=[@wp_state[3] - rebuild0] cancelled=[cancelled] ms_clean=[t2 - t1 + t6 - t5] ms_probe=[t3 - t2] ms_vivify=[t4 - t3] ms_subsume=[t5 - t4] ms_subst=[t7 - t6]", t0) if t0 != 0
     0
 
   -> reduce_db

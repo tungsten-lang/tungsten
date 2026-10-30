@@ -1742,10 +1742,14 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     vfree_oracle = Wassat.from_flat(nv, vinfo["vfree_art"], 0)
     vfree_oracle.disable_walk
     vfree_oracle.enable_chrono
+    # Assumption oracles: mid-search substitution would park assumable
+    # variables at the root.
+    vfree_oracle.disable_substitution
 
     refute_oracle = Wassat.from_flat(nv, raw_art, 0)
     refute_oracle.disable_walk
     refute_oracle.enable_chrono
+    refute_oracle.disable_substitution
     wassat_apply_structural_pruning(refute_oracle, prune_info, 0, false) if prune_info != nil
 
     coord = {

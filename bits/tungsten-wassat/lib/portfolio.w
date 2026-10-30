@@ -1853,6 +1853,11 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     s = continued ? incumbent : Wassat.from_flat(nv, art, 0)
     offsets[a] = incumbent_conflicts if continued
     s.enable_otfs if specialist
+    # INPROCESSING axis (policy inprocess_arm_mask). Cleared before
+    # enable_fixed_caps, which prepares the scratch of arms that keep it.
+    if !continued && matrix_threads > 1 && ((art["config"].inprocess_arm_mask >> (specialist ? 1 : a)) & 1) == 0
+      s.disable_inprocess
+    s.delay_inprocess(a * art["config"].inprocess_stagger) unless continued
     s.enable_fixed_caps
     s.set_stop_cell(stop)
     # A lone raw arm has nobody to share with — the preprocessing arms solve
@@ -2659,6 +2664,25 @@ WASSAT_AXIS_SLOTS = 10
             if trace
               z = ccall("__w_eprint", "c trace r[round] REALLOC arm[worst] score=[score[worst]] med=[med] -> vmtf=[cfgs[cb]] ph=[cfgs[cb + 1]]/[cfgs[cb + 2]] chrono=[cfgs[cb + 3]] simp=[cfgs[cb + 4]]\n")
     round += 1
+  # Workers already record completion immediately before publishing a win.
+  # Report the join tail without adding clocks or atomics to their hot loops.
+  if env("WASSAT_PROFILE") == "1"
+    answer_ms = 0
+    last_ms = 0
+    k = 0
+    while k < total
+      b = k * (nv + 8)
+      ended = res[b + nv + 5]
+      last_ms = ended if ended > last_ms
+      decisive = res[b] == 1 || res[b] == -1
+      answer_ms = ended if decisive && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+      k += 1
+    if sls.size > 0
+      ended = res[sls_base + nv + 5]
+      last_ms = ended if ended > last_ms
+      answer_ms = ended if res[sls_base] == 1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+    if answer_ms > 0
+      wassat_prof_note("race.stop answer_to_last_arm_ms=[last_ms - answer_ms]")
   a = 0
   while a < total
     base = a * (nv + 8)

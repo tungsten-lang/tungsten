@@ -42,6 +42,29 @@ discarded. The reports include:
   Gray-code counters include completed prefixes when a worker stops early;
   `complete=1` means exhaustive evaluation found no satisfying assignment.
 
+Inprocessing reports include per-round changes in forced units, failed probes,
+lifted literals, equivalences, vivified/subsumed/strengthened clauses, and
+watch rebuilds. Parked substituted variables are excluded from forced-unit
+counts. `inprocess_work` gives cumulative cancellations, SCC work, charged
+subsumption scan work, and cleaned literals. Subsumption candidate visits are
+budgeted separately from index construction; length-based scan charges can
+exceed the number of words inspected before an early exit. These counters
+are work measures, not wall-time limits.
+
+`race.stop answer_to_last_arm_ms` is the difference between the earliest
+winning worker completion timestamp and the last worker completion timestamp,
+reported after joins. It has millisecond resolution and measures the worker
+completion tail, not the whole process exit latency. Cancellation checks run
+at safe boundaries: unfinished probes are discarded, while a started clause
+rewrite or required watch repair finishes before return.
+
+For a controlled maintenance-only cancellation test, build
+`benchmarks/inprocess_cancel_bench.w` with `--release`, then pass an input CNF,
+pass mask, delay in milliseconds, and arm count. A delay of `-1` measures
+uninterrupted work; a nonnegative delay publishes a synthetic win after the
+start barrier. `tail_us` ends at maintenance return, before fingerprinting.
+It must not be presented as a full-solve timing.
+
 Counters are cumulative for each solver object, including input loading and
 earlier scout slices. A scout and its continuation are snapshots of the same
 work: do not add them together. `propagated` counts dequeued trail literals,

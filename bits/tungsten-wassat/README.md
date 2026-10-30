@@ -77,6 +77,18 @@ are checked against the original CNF; exact UNSAT answers remain fast-only
 except where a lane names a witness variable set whose original-clause
 star the proof solver then refutes on its own, emitting a checkable proof.
 
+The native raw race also has a bounded exact circuit arm. It derives each
+output's complete two-input truth table from all its defining CNF clauses,
+then checks unit and wider assertions over every primary-input assignment in
+64-assignment batches. Incomplete definitions reject the plan. It accepts at
+most 24 inputs, 8,192 variables and 32,768 clauses, subject to a 134,217,728
+batch-operation limit. Evaluation reuses fixed buffers and polls cancellation
+between batches. Only exhaustive refutation publishes UNSAT; a surviving
+assignment leaves the other arms running. This arm is fast-only and produces
+no proof certificate. `WASSAT_SMALL_CIRCUIT=0` disables it for comparisons;
+`WASSAT_PROFILE=1` reports its batches, gate evaluations, assertion checks,
+stop reason, and elapsed time.
+
 Lanes that used to hide behind the MDP recognizer's miss now live in their
 own files (`sdp`, `backdoor`, `sgi`, `schooltt`, `symmetry_fix`, `vdwb`)
 behind a fingerprint-gated registry in `lib/specialists.w`, which records

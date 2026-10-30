@@ -3889,6 +3889,7 @@ WASSAT_PROOF_DRAT = 2
   # Geometric, so the retries cost at most one extra pass in total.
   -> extract_xor_gates
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    prof_start = wassat_prof_clock
     ceil = @config.congruence_gate_ceiling
     maxg = @ncl + 16
     maxg = 131072 if maxg > 131072
@@ -3925,7 +3926,7 @@ WASSAT_PROOF_DRAT = 2
         nm = st[0]
         ng = st[1]
         self.add_merge_binaries(out, nm)
-    z = wassat_prof("congruence.xor gates=[ng] merges=[nm] cap=[maxg]", wassat_prof_clock)
+    z = wassat_prof("congruence.xor gates=[ng] merges=[nm] cap=[maxg]", prof_start) if prof_start != 0
     nm
 
   # Congruence closure, stage 2: AND gate extraction. Merges are emitted as
@@ -3937,6 +3938,7 @@ WASSAT_PROOF_DRAT = 2
   # merge slots.
   -> extract_and_gates
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    prof_start = wassat_prof_clock
     ceil = @config.congruence_gate_ceiling
     maxg = @ncl + 16
     maxg = 131072 if maxg > 131072
@@ -3966,7 +3968,7 @@ WASSAT_PROOF_DRAT = 2
         nm = st[0]
         ng = st[1]
         self.add_merge_binaries(out, nm)
-    z = wassat_prof("congruence.and gates=[ng] merges=[nm] cap=[maxg]", wassat_prof_clock)
+    z = wassat_prof("congruence.and gates=[ng] merges=[nm] cap=[maxg]", prof_start) if prof_start != 0
     nm
 
   # Turn each equivalent-literal pair into the two binaries that state it.
@@ -3995,6 +3997,7 @@ WASSAT_PROOF_DRAT = 2
   # binaries and lets the substitution round consume them.
   -> extract_binaries
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
+    prof_start = wassat_prof_clock
     cap = @config.ternary_count + 4
     return 0 if cap < 8
     hcap = 1024
@@ -4014,7 +4017,7 @@ WASSAT_PROOF_DRAT = 2
       @obuf[1] = out[2 * i + 1]
       self.store_clause(@obuf, 2)
       i += 1
-    z = wassat_prof("congruence.binaries extracted=[n]", wassat_prof_clock)
+    z = wassat_prof("congruence.binaries extracted=[n]", prof_start) if prof_start != 0
     n
 
   # Equivalent-literal substitution against the live database.
@@ -4040,6 +4043,7 @@ WASSAT_PROOF_DRAT = 2
     mid = @conflicts > 0
     pre = mid && @inp_s_idx != nil && @inp_ht != nil && @sub_next != nil && @sub_next.size >= @ncl + 2
     return 0 if mid && !pre && @fixed_caps
+    prof_start = wassat_prof_clock
     idx = pre ? @inp_s_idx : i64[nl]
     low = pre ? @inp_s_low : i64[nl]
     onstk = pre ? @inp_s_onstk : i64[nl]
@@ -4113,7 +4117,6 @@ WASSAT_PROOF_DRAT = 2
         # representative's when the model is read.
         self.enqueue(v, 0 - 1) if self.value(v) == 0
       v += 1
-    z = wassat_prof("subst vars=[@nsubst] rewritten=[rst[2]] taut=[rst[3]] units=[rst[1]] edges=[st[2]]", wassat_prof_clock)
     u = 0
     while u < rst[1]
       ci = units[u]
@@ -4125,6 +4128,7 @@ WASSAT_PROOF_DRAT = 2
         @ok = false
         @formula_unsat = true
       u += 1
+    z = wassat_prof("subst vars=[@nsubst] rewritten=[rst[2]] taut=[rst[3]] units=[rst[1]] edges=[st[2]]", prof_start) if prof_start != 0
     0
 
   # Replay the equivalences onto the assignment: a substituted variable is

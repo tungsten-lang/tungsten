@@ -42,6 +42,11 @@ discarded. The reports include:
   Gray-code counters include completed prefixes when a worker stops early;
   `complete=1` means exhaustive evaluation found no satisfying assignment.
 
+Congruence timers include scratch preparation, extraction, and insertion of
+new binary clauses. The substitution timer includes SCC discovery, rewriting,
+watch repair, and enqueueing derived units when a rewrite occurs. These clocks
+have millisecond resolution, so a small pass can legitimately report `0ms`.
+
 Inprocessing reports include per-round changes in forced units, failed probes,
 lifted literals, equivalences, vivified/subsumed/strengthened clauses, and
 watch rebuilds. Parked substituted variables are excluded from forced-unit

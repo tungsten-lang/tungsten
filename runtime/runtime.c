@@ -73,6 +73,7 @@ extern char **environ;
 
 /* Forward declarations */
 static WMethod *w_method_lookup(WClass *klass, WValue name);
+static WValue w_instant_to_s(WValue v);
 static WMethod *w_method_lookup_arity(WClass *klass, WValue name, int arity);
 static WMethod *w_static_method_lookup(WClass *klass, WValue name);
 static WMethod *w_static_method_lookup_arity(WClass *klass, WValue name, int arity);
@@ -44995,6 +44996,12 @@ WValue w_add(WValue a, WValue b) {
         return w_box_instant(w_unbox_instant(a) + w_as_int(b));
     if (w_is_int(a) && w_is_instant(b))
         return w_box_instant(w_as_int(a) + w_unbox_instant(b));
+    /* Duration and Quantity shifts live on Instant#+. The int arms above
+     * stay here. The method adds through from_millis, never `self + x`. */
+    if (w_is_instant(a))
+        return w_method_call_fast(a, w_string("+"), &b, 1);
+    if (w_is_instant(b))
+        return w_method_call_fast(b, w_string("+"), &a, 1);
     /* char + int → char (shift codepoint) */
     if (w_is_char(a) && w_is_int(b))
         return w_box_char(w_char_codepoint(a) + (uint32_t)w_as_int(b));
@@ -45126,6 +45133,10 @@ WValue w_sub(WValue a, WValue b) {
     /* instant - int → instant */
     if (w_is_instant(a) && w_is_int(b))
         return w_box_instant(w_unbox_instant(a) - w_as_int(b));
+    /* Instant - Duration/Quantity. Instant - Instant stays the Duration
+     * arm above and must not reach this method. */
+    if (w_is_instant(a))
+        return w_method_call_fast(a, w_string("-"), &b, 1);
     /* rational - rational */
     if (w_is_rational_any(a) && w_is_rational_any(b))
         return w_rational_sub(a, b);
@@ -49346,18 +49357,8 @@ WValue w_to_s(WValue v) {
     if (w_is_bool(v))   return w_string(v == W_TRUE ? "true" : "false");
     if (w_is_bigint(v)) return bigint_to_s_boxed(v);
 
-    if (w_is_instant(v)) {
-        int64_t ms = w_unbox_instant(v);
-        char ibuf[21];
-        char *p = ibuf + 20;
-        *p = '\0';
-        uint64_t u = ms < 0 ? (uint64_t)(-ms) : (uint64_t)ms;
-        if (u == 0) { *--p = '0'; }
-        else { while (u > 0) { *--p = '0' + (char)(u % 10); u /= 10; } }
-        if (ms < 0) *--p = '-';
-        return w_string_n(p, (size_t)(ibuf + 20 - p));
-    }
-
+    if (w_is_instant(v))
+        return w_instant_to_s(v);
 
     if (w_is_char(v)) {
         uint32_t cp = w_char_codepoint(v);
@@ -54670,6 +54671,7 @@ static WValue g_tn_nil, g_tn_bool, g_tn_int, g_tn_bigint, g_tn_float,
     g_tn_string, g_tn_strbuf, g_tn_symbol, g_tn_char, g_tn_big_array,
     g_tn_small_array, g_tn_array, g_tn_hash, g_tn_range,
     g_tn_decimal, g_tn_bigdecimal, g_tn_currency, g_tn_quantity, g_tn_duration, g_tn_date,
+    g_tn_instant,
     g_tn_complex, g_tn_rational, g_tn_color, g_tn_ipv4, g_tn_ipv6, g_tn_mac,
     g_tn_uuid, g_tn_mmap, g_tn_socket, g_tn_vec2f, g_tn_point2d, g_tn_vec2i, g_tn_vec3f,
     g_tn_sockaddr, g_tn_object, g_tn_class, g_tn_unknown;
@@ -54686,6 +54688,7 @@ static void w_typenames_init(void) {
     g_tn_bigdecimal = w_string("BigDecimal");
     g_tn_currency = w_string("Currency");  g_tn_quantity = w_string("Quantity");
     g_tn_duration = w_string("Duration");  g_tn_date = w_string("Date");
+    g_tn_instant = w_string("Instant");
     g_tn_complex = w_string("Complex");    g_tn_rational = w_string("Rational");
     g_tn_color = w_string("Color");        g_tn_ipv4 = w_string("IPv4");
     g_tn_ipv6 = w_string("IPv6");          g_tn_mac = w_string("MAC");
@@ -54739,6 +54742,7 @@ WValue __w_type(WValue v) {
     if (w_is_quantity(v)) return g_tn_quantity;
     if (w_is_duration(v)) return g_tn_duration;
     if (w_is_date(v))     return g_tn_date;
+    if (w_is_instant(v))  return g_tn_instant;
     if (w_is_complex(v))  return g_tn_complex;
     if (w_is_rational_any(v)) return g_tn_rational;
     if (w_is_color(v))    return g_tn_color;
@@ -58277,6 +58281,8 @@ static int w_type_name_eq_lit(const char *tn, size_t tn_len, const char *lit) {
 }
 
 static int w_primitive_is_a_type_name(WValue recv, const char *tn, size_t tn_len) {
+    if (w_is_instant(recv))
+        return w_type_name_eq_lit(tn, tn_len, "Instant");
     if (w_is_char(recv))
         return w_type_name_eq_lit(tn, tn_len, "Char");
     if (w_is_ipv4(recv))
@@ -58694,6 +58700,33 @@ uint64_t w_dispatch_key(WValue v) {
 
 /* ---- Type class table: dispatch key → class_id for Tungsten-defined methods ---- */
 static uint16_t g_type_class[256] = {0};
+
+/* << and w_to_s print an Instant. Prefer Instant#to_s (ISO-8601) once the
+ * class is loaded. The numeric fallback covers a packed word whose class
+ * was never registered. Instant#to_s builds a StringBuffer and does not
+ * call w_to_s on the instant, so this does not recurse. */
+static WValue w_instant_to_s(WValue v) {
+    uint16_t cid_slot = g_type_class[0xF8];
+    if (cid_slot) {
+        WClass *klass = g_class_table[cid_slot - 1];
+        if (klass) {
+            WMethod *m = w_method_lookup(klass, WN_to_s);
+            if (m) {
+                typedef WValue (*method_fn_1)(WValue);
+                return ((method_fn_1)m->fn_ptr)(v);
+            }
+        }
+    }
+    int64_t ms = w_unbox_instant(v);
+    char ibuf[21];
+    char *p = ibuf + 20;
+    *p = '\0';
+    uint64_t u = ms < 0 ? (uint64_t)(-ms) : (uint64_t)ms;
+    if (u == 0) { *--p = '0'; }
+    else { while (u > 0) { *--p = '0' + (char)(u % 10); u /= 10; } }
+    if (ms < 0) *--p = '-';
+    return w_string_n(p, (size_t)(ibuf + 20 - p));
+}
 
 static void w_public_type_class_register(uint8_t key, WClass *klass) {
     /* These keys intentionally expose only method facades. Packed Body uses

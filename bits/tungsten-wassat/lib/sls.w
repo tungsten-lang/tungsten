@@ -178,8 +178,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @private_stop = i64[4]
     @stop = @private_stop
     # [0] improvement window in flips  [1] windows without progress before
-    # retiring  [2] set by the kernel when it retired on a plateau
-    @plateau = i64[4]
+    # retiring  [2] retired flag; [3..5] reference, count, next boundary
+    # retained across pauses so continuation preserves the same walk.
+    @plateau = i64[6]
 
   # Share an interrupt cell with a race. Cell 0 nonzero means "somebody else
   # answered, stop now"; the walker never writes it.
@@ -623,10 +624,13 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   # and the kernel sets pm2[2] when it did. 0 disables.
   plat_win = pm2[0]
   plat_max = pm2[1]
-  plat_ref = best
-  plat_run = 0
-  plat_next = plat_win
-  plat_stop = 0
+  # Continuation keeps the original retirement windows. Resetting them
+  # grants extra flips on every pause and can revive a retired walk.
+  plat_ref = resume == 1 ? pm2[3] : best
+  plat_run = resume == 1 ? pm2[4] : 0
+  plat_next = resume == 1 ? pm2[5] : plat_win
+  plat_stop = resume == 1 ? pm2[2] : 0
+  pm2[2] = 0 if resume == 0
   while ucount > 0 && step < maxflips && wassat_stop_load(stp) == 0 && plat_stop == 0
     if plat_win > 0 && step >= plat_next
       plat_next = step + plat_win
@@ -893,6 +897,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   st[10] = wtn
   st[11] = wovf
   st[12] = 1
+  pm2[3] = plat_ref
+  pm2[4] = plat_run
+  pm2[5] = plat_next
   0
 
 # Mark the smallest exact SAT-repair fringe around a best SLS snapshot:

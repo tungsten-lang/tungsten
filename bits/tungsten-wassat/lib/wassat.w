@@ -794,7 +794,10 @@ use portfolio
   quad_shift = 0
   orig_formula = formula
   if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COLORING") != "0"
+    color_prof = wassat_prof_clock
     clique_size = wassat_coloring_clique_unsat(formula)
+    tprof = wassat_prof("cli.coloring_clique", color_prof)
+    wassat_prof_note("coloring certificate_size=[clique_size]") if tprof != 0
     if clique_size > 0
       << "s UNSATISFIABLE"
       << "c mode: fast (verified [clique_size]-clique / [clique_size - 1]-color obstruction)"

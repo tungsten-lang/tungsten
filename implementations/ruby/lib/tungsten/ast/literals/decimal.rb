@@ -8,5 +8,9 @@ module Tungsten::AST
       cleaned = "-#{cleaned}" if value.to_s.start_with?("\u2212")
       @value = cleaned.to_d
     end
+
+    def eval_in(_interp)
+      @value
+    end
   end
 end

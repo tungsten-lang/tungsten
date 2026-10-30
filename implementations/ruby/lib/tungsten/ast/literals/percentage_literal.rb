@@ -7,6 +7,10 @@ module Tungsten::AST
       @num_type = num_type
     end
 
+    def eval_in(interp)
+      interp.visit_percentage_literal(self)
+    end
+
     def ==(other)
       other.is_a?(PercentageLiteral) &&
         other.value_str == @value_str &&

@@ -35,6 +35,16 @@ In particular, `str` is not an alias: Tungsten's text type is `string`.
 This diagnostic concerns source type names; the compiler's internal `:str`
 interpolation marker is unrelated.
 
+## E_PARSE_COMPOSITION_OPERAND
+
+Function composition (`f ∘ g`) builds a unary closure that calls `f(g(x))`. An
+operand of `∘` is not callable syntax: the parser accepts a bare function or
+closure variable name (`f`), a zero-argument method reference (`obj.method`),
+or a closure expression (`-> (x) ...`, `-> /1 ...`).
+
+**Fix:** Pass a callable name, method reference, or closure on each side of
+`∘`, or wrap an arbitrary expression in a closure (`(-> (x) expr) ∘ g`).
+
 ## E_LEX_UNEXPECTED_CHAR
 
 The lexer hit a character that does not start any token.
@@ -74,7 +84,7 @@ Lowering recognized a name or pattern common in another language that Tungsten
 spells differently (for example `print`, `def`, `class`).
 
 **Fix:** Use Tungsten surface forms: `<<` to print, `->` for methods, `+ Name`
-for classes. See `doc/TUNGSTEN_FOR_LLMs.md`.
+for classes. See `doc/TUNGSTEN_FOR_LLMS.md`.
 
 ## E_LOWER_TYPED_ARG_MISMATCH
 

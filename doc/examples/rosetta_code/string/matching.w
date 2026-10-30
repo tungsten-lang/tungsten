@@ -1,7 +1,9 @@
+# String matching
+
 << "abcd".starts_with?("ab")
 << "abcd".ends_with?("ab")
 << "abcd".include?("aa")
-<< "abab".index("aa") == nil
+<< ("abab".index("aa") == nil)
 << "abab".index("ab")
 
 ## expect stdout

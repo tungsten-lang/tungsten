@@ -26,4 +26,8 @@ fn fib(n)
 
 << add(3, 4)
 
-## expect skip currently triggers infinite recursion in the runtime
+## expect stdout
+## Hello, world!
+## 25
+## 55
+## 7

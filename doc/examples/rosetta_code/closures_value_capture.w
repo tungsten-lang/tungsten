@@ -4,12 +4,14 @@
 
 closures = []
 (0..2).each -> (i)
-  closures.push(-> () i * i)
+  closures.push(-> ()
+    i * i
+  )
 
 closures.each -> (c)
-  << c()
+  << c.call()
 
-## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten closures_value_capture.w`
+## expect skip compiled-only for now — the Ruby interpreter shares loop bindings; try `bin/tungsten closures_value_capture.w`
 ## expect stdout
 ## 0
 ## 1

@@ -115,14 +115,14 @@ All heap-allocated objects use 16-byte-aligned pointers. The low 4 bits
 | 0x4 | instance | user-defined class instance |
 | 0x5 | hash | hash table |
 | 0x6 | closure | function closure |
-| 0x7 | regex | compiled regex |
+| 0x7 | free | regex moved to generic header type |
 | 0x8 | range | range object |
 | 0x9 | small array | fixed-capacity inline array |
 | 0xA | socket | network socket handle (WSocket*) |
 | 0xB | string buffer | mutable string builder (bigint moved to top-level tag 0xFFFB in v4) |
 | 0xC | class | class metaobject |
 | 0xD | uuid | 128-bit UUID |
-| 0xE | regex match | immutable structured capture snapshot |
+| 0xE | free | regex match moved to generic header type |
 | 0xF | domain | heap-overflow domain type (see §11) |
 
 **Boxing:** `(uint64_t)(uintptr_t)ptr | subtag`
@@ -534,16 +534,22 @@ bits 47-45. All fields are packed into the remaining 45 bits.
 ### 9.1 Color (subtype 000)
 
 ```
+SDR mode (bit 0 = 0):
 bits 47-45: 000 (subtype)
 bits 44-37: red (8 bits)
 bits 36-29: green (8 bits)
 bits 28-21: blue (8 bits)
 bits 20-13: alpha (8 bits)
-bits 12-0:  colorspace/flags (12 bits, reserved)
-```
+bits 12-1:  colorspace/flags (12 bits)
+bit  0:     0 (SDR mode)
 
-Shifted from the 45-bit boundary: R at bits 36-44, G at 28-35, B at 20-27,
-A at 12-19, flags at 0-11.
+HDR mode (bit 0 = 1):
+bits 44-31: red (14-bit signed fixed-point, value / 1024.0, ±7.999)
+bits 30-17: green (14-bit signed fixed-point)
+bits 16-3:  blue (14-bit signed fixed-point)
+bits 2-1:   colorspace (2 bits: 0=sRGB-linear, 1=Display P3, 2=Rec.2020, 3=CIE XYZ)
+bit  0:     1 (HDR mode)
+```
 
 ### 9.2 Complex (subtype 001)
 
@@ -724,12 +730,13 @@ struct stored with sub-tag 0xF in the 0x0000 object space.
 ```c
 typedef struct {
     uint8_t domain_type;   // W_DOMAIN_DECIMAL (0), W_DOMAIN_CURRENCY (1),
-                           // W_DOMAIN_QUANTITY (2), W_DOMAIN_DURATION (3)
+                           // W_DOMAIN_QUANTITY (2), W_DOMAIN_DURATION (3),
+                           // W_DOMAIN_RATIONAL (4)
     uint8_t pad[7];        // alignment
-    int64_t sig;           // full-precision significand
+    int64_t sig;           // full-precision significand (or numerator for rational)
     int32_t scale;         // scale
     int32_t extra;         // symbol_id (currency), unit_id (quantity), mode (duration)
-    int64_t extra2;        // duration mode 1: ms value
+    int64_t extra2;        // duration mode 1: ms value (or denominator for rational)
 } WDomainHeap;  // 32 bytes
 ```
 
@@ -756,7 +763,7 @@ Type checks are designed for minimal instruction count:
 | Truthiness | `v > 1` (unsigned) | 1 |
 | Nil | `v == 0` | 1 |
 | Tagged type | `(v >> 48) == TAG` | 2 |
-| Double | `(v - BIAS) <= 0xFFF7...` | 2 |
+| Double | `(v - BIAS) <= 0xFFF0...` | 2 |
 | String | `(v >> 48) == 0xFFF9 && !(v & 1)` | 3 |
 | Symbol | `(v >> 48) == 0xFFF9 && (v & 1)` | 3 |
 | Numeric subtype | `(v >> 48) == 0xFFFD && ((v >> 46) & 3) == X` | 4 |
@@ -781,6 +788,10 @@ Type checks are designed for minimal instruction count:
 #define W_BIASED_NAN    0x7FF9000000000000ULL
 
 // Tags (high 16 bits)
+#define W_TAG_SIMD2D    0xFFF2000000000000ULL
+#define W_TAG_SIMD3D    0xFFF3000000000000ULL
+#define W_TAG_ARRAY     0xFFF4000000000000ULL
+#define W_TAG_SOCKADDR  0xFFF6000000000000ULL
 #define W_TAG_INSTANT   0xFFF8000000000000ULL
 #define W_TAG_STRINGSYM 0xFFF9000000000000ULL
 #define W_TAG_INT       0xFFFA000000000000ULL
@@ -826,21 +837,20 @@ Type checks are designed for minimal instruction count:
 #define W_UNIT_PERCENT  0xFF
 
 // Object sub-tags
-#define W_SUBTAG_GENERIC  0
-#define W_SUBTAG_ATOMIC   1
-#define W_SUBTAG_BIGINT   2   /* v4: dispatch key only; the value rides top-level tag 0xFFFB */
-#define W_SUBTAG_INSTANCE 4
-#define W_SUBTAG_HASH     5
-#define W_SUBTAG_CLOSURE  6
-#define W_SUBTAG_REGEX    7
-#define W_SUBTAG_RANGE    8
+#define W_SUBTAG_GENERIC     0
+#define W_SUBTAG_ATOMIC      1
+#define W_SUBTAG_BIGINT      2   /* v4: dispatch key only; the value rides top-level tag 0xFFFB */
+#define W_SUBTAG_INSTANCE    4
+#define W_SUBTAG_HASH        5
+#define W_SUBTAG_CLOSURE     6
+#define W_SUBTAG_RANGE       8
 #define W_SUBTAG_SMALL_ARRAY 9
-#define W_SUBTAG_ARRAY    0xA
-#define W_SUBTAG_STRBUF   0xB
-#define W_SUBTAG_CLASS    0xC
-#define W_SUBTAG_UUID     0xD
-#define W_SUBTAG_REGEX_MATCH 0xE
-#define W_SUBTAG_DOMAIN   0xF
+#define W_SUBTAG_SOCKET      0xA
+#define W_SUBTAG_ARRAY       0xA /* v5: dispatch key only; the value rides top-level tag 0xFFF4 */
+#define W_SUBTAG_STRBUF      0xB
+#define W_SUBTAG_CLASS       0xC
+#define W_SUBTAG_UUID        0xD
+#define W_SUBTAG_DOMAIN      0xF
 
 // Numeric subtypes
 #define W_NUMERIC_DECIMAL   0
@@ -851,8 +861,10 @@ Type checks are designed for minimal instruction count:
 #define W_PACKED_COLOR     0
 #define W_PACKED_COMPLEX   1
 #define W_PACKED_RATIONAL  2
+#define W_PACKED_NODE      3
 #define W_PACKED_DATE      4
 #define W_PACKED_IPV4      5
+#define W_PACKED_BODY      6
 #define W_PACKED_LOCATION  7
 
 // Domain heap type discriminators
@@ -860,6 +872,7 @@ Type checks are designed for minimal instruction count:
 #define W_DOMAIN_CURRENCY  1
 #define W_DOMAIN_QUANTITY  2
 #define W_DOMAIN_DURATION  3
+#define W_DOMAIN_RATIONAL  4
 ```
 
 ---

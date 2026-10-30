@@ -92,10 +92,6 @@ c = 299_792_458 m/s
 << "A marathon is [42195 m | mi(1)]"
 ```
 
-> **Note:** unit conversion on the **compiled** path is still evolving
-> (preview). Prefer trying unit snippets with quick run / `-e` first; if a
-> conversion fails under `-o`, check release notes and the units appendix.
-
 SI base units, many derived units, binary information units (`KiB`, `Mbps`),
 and time scales from `ns` to `fortnight` are listed in
 [appendix_units_of_measurement.md](../specification/appendix_units_of_measurement.md).
@@ -165,7 +161,7 @@ Also seen in the language surface:
 | `Δx` / prime `x'` | Deltas / "other" field in binary methods |
 | `Σ(...)` | Summation sugar |
 | `∫(...)` | Numerical integral; REPL can plot |
-| `π` `τ` `ℯ` `ϕ` | Math constants (Decimals); `π²`, `2 * π` work |
+| `π` `τ` `ℯ` `ϕ` | Math constants (`Float` values); `π²`, `2 * π` work |
 | `2π`, `0.5τ` | Exact π-multiple quantities — `Math.sin(1000000π)` is exactly 0 |
 
 A number written against `π` or `τ` (no space) is an exact π-multiple that
@@ -209,8 +205,8 @@ Rules of thumb:
   subtraction (`2024 - 01 - 15`).
 - Runtime types include `Date`, `Month`, `Instant` (unix ms), and `Duration`
   (see [WVALUE.md](../WVALUE.md) and `core/date.w` / `core/duration.w`).
-- Interpreter and compiler differ slightly on range-checking of date fields;
-  the interpreter is stricter about invalid calendar components.
+- Invalid calendar or clock fields are rejected both at compile time
+  (`E_LOWER_DATE_*` / `E_LOWER_TIME_*`) and at runtime (`Date.parse` / `Date.new`).
 
 ---
 

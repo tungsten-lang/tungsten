@@ -69,16 +69,25 @@ COMMANDS
                          without modifying files. Supports text/JSON output and
                          per-code off/warning/error severity overrides.
     explain CODE         Explain a stable compiler/runtime error code
+    bench [OP...]        Run the primitive-op velocity baseline, cross-language
+                         algorithm suite (--suite), or bignum suite (bignum)
+    autotune             Sweep runtime and memory parameters for the host CPU
+    media                Verify/probe media masters and run sync tests
+    gpu-check            Verify GPU toolchain and kernel compilation
+    wasm                 Build or test the wasm32 interpreter target
+    notes                Generate release notes from git history
     bit ...              The Bit package manager (install, new, search, ...)
-    ai / symbolicate / forge / flame / profile
+    ai / symbolicate / forge / flame / fire / profile
                          Additional tools
 
-    doctor, bootstrap, and release are pure bash (bin/commands/*.sh).
-    Doctor and bootstrap work on a fresh clone; bootstrap chains
-    into the full `tungsten build` pipeline. compile, run, console, start,
-    new, fmt, forge, flame, profile, bit, ai, and symbolicate use the compiled
-    CLI when present. `build` is driven by the Tungsten orchestrator
-    (bin/commands/build.w) and requires an existing compiler.
+    doctor, bootstrap, release, cleanup, gpu-bench, debug, and notes are bash
+    wrappers (bin/commands/*.sh). Doctor and bootstrap work on a fresh clone;
+    bootstrap chains into the full `tungsten build` pipeline. compile,
+    compile-batch, check, run, console, start, new, fmt, lint, sandbox,
+    explain, forge, flame, fire, profile, bit, ai, and symbolicate use the
+    compiled CLI (bin/tungsten.w) when present. `build` and `install` are
+    driven by the Tungsten orchestrator (bin/commands/build.w) and require an
+    existing compiler.
 
     The REPL is started with `tungsten console` or the `wit` binary — not
     `tungsten --repl`.

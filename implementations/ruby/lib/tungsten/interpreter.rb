@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "bigdecimal"
+require_relative "runtime/compiler_intrinsics"
 
 module Tungsten
   # Control-flow signals use throw/catch instead of raise/rescue for performance.
@@ -83,6 +84,8 @@ module Tungsten
   end
 
   class Interpreter < Visitor
+    include Runtime::CompilerIntrinsics
+
     W_NIL           = 0x0000_0000_0000_0000
     W_FALSE         = 0x0000_0000_0000_0001
     W_TRUE          = 0x0000_0000_0000_0002
@@ -176,7 +179,11 @@ module Tungsten
     # Avoids catch(RETURN_SIGNAL) overhead (~3% of total) on every call
     # when the method never returns early.
     def self.body_has_return?(node)
+      return false unless node
       return true if node.is_a?(AST::Return)
+      return false if node.is_a?(AST::Def) || node.is_a?(AST::ClassDef) ||
+                      node.is_a?(AST::ModuleDef) || node.is_a?(AST::TraitDef)
+
       node.children { |c| return true if body_has_return?(c) }
       false
     end
@@ -224,7 +231,7 @@ module Tungsten
     ].freeze
     TUNGSTEN_KEYWORDS = %w[
       begin break case else elsif ensure exit extern false fn go if in is loop module nil next on parallel
-      raise rescue return self super then trait true unless until use when while with yield
+      raise recase rescue return self super then trait true unless until use when while with yield
     ].to_h { |word| [ word, true ] }.freeze
     TUNGSTEN_TYPE_NAME_WORDS = %w[
       bool int integer string string_buffer
@@ -239,10 +246,10 @@ module Tungsten
       posit8 posit16 posit32 posit64
     ].to_h { |word| [ word, true ] }.freeze
     LEXER_VALUE_TOKEN_TYPES = %i[
-      INT FLOAT DECIMAL STRING STRING_INTERP REGEX REGEX_CAPTURE SYMBOL NAME ID IVAR CVAR GLOBAL RPAREN RBRACKET
-      RBRACE MAGIC_FILE MAGIC_LINE MAGIC_DIR UUID CURRENCY QUANTITY DURATION WVALUE BYTE_ARRAY BYTE_ARRAY_INTERP DATE
-      DATETIME TIME MONTH IP4 CIDR4 RATIONAL CHAR CODEPOINT KEY WORD_ARRAY SYMBOL_ARRAY BASE32 BASE58 BASE64 PARG
-      SUPERSCRIPT COLOR
+      INT FLOAT DECIMAL STRING STRING_INTERP REGEX REGEX_CAPTURE SYMBOL NAME CONSTANT TYPE ID IVAR CVAR GLOBAL RPAREN
+      RBRACKET RBRACE MAGIC_FILE MAGIC_LINE MAGIC_DIR UUID CURRENCY QUANTITY DURATION WVALUE BYTE_ARRAY
+      BYTE_ARRAY_INTERP DATE DATETIME TIME MONTH IP4 CIDR4 IP6 CIDR6 RATIONAL CHAR CODEPOINT KEY WORD_ARRAY SYMBOL_ARRAY
+      BASE32 BASE58 BASE64 PARG SUPERSCRIPT EXPONENT COLOR SELF_REF
     ].to_h { |type| [ type, true ] }.freeze
     LEXER_OP_TYPES = {
       "<-" => :PRINT_OP,
@@ -334,6 +341,7 @@ module Tungsten
       @profile_dispatch_counts = Hash.new { |h, k| h[k] = Hash.new(0) }
 
       @sandbox = sandbox
+      init_compiler_intrinsics
       Runtime::Builtins.setup(self, sandbox: sandbox)
       BUILTIN_TYPES.each { |name| @classes[name] ||= Runtime::WClass.new(name, nil) }
     end
@@ -539,46 +547,16 @@ module Tungsten
     end
 
     def evaluate(node)
-      klass = node.class
-      case
-      when klass == AST::List          then return visit_list(node)
-      when klass == AST::Print         then return visit_print(node)
-      when klass == AST::Int           then return node.value
-      when klass == AST::Var           then return visit_var(node)
-      when klass == AST::BinaryOp      then return visit_binary_op(node)
-      when klass == AST::Call          then return visit_call(node)
-      when klass == AST::Write         then return visit_write(node)
-      when klass == AST::Symbol        then return cached_symbol_value(node)
-      when klass == AST::If            then return visit_if(node)
-      when klass == AST::Assign        then return visit_assign(node)
-      when klass == AST::TypeHint      then return visit_type_hint(node)
-      when klass == AST::StringLiteral then return node.value
-      when klass == AST::Nil           then return nil
-      when klass == AST::InstanceVar   then return @self_stack.last.instance_vars[node.name]
-      when klass == AST::AssignOp      then return visit_assign_op(node)
-      when klass == AST::And           then return visit_and(node)
-      when klass == AST::Return        then return visit_return(node)
-      when klass == AST::Recase        then return visit_recase(node)
-      when klass == AST::Boolean       then return node.value
-      when klass == AST::Or            then return visit_or(node)
-      when klass == AST::InTest        then return visit_in_test(node)
-      when klass == AST::While         then return visit_while(node)
-      when klass == AST::CaseExpr      then return visit_case_expr(node)
-      when klass == AST::HashLiteral   then return visit_hash_literal(node)
-      when klass == AST::ArrayLiteral  then return visit_array_literal(node)
-      end
-      return decode_w_value(node.value, node.raw) if klass.name == "Tungsten::AST::WValue"
-      case klass.name
-      when "Tungsten::AST::Char"
-        return Tungsten::CharValue.new(node.value)
-      when "Tungsten::AST::Float",
-           "Tungsten::AST::Decimal",
-           "Tungsten::AST::Month",
-           "Tungsten::AST::Week"
-        return node.value
-      end
+      node.eval_in(self)
+    end
 
+    def evaluate_fallback(node)
+      klass = node.class
       __send__(@dispatch[klass] ||= klass.visitor_method, node)
+    end
+
+    def read_ivar(name)
+      @self_stack.last.instance_vars[name]
     end
 
     def runtime_error(msg, node: nil, length: nil)
@@ -621,31 +599,32 @@ module Tungsten
     end
 
     def resolve_cached_local(node, name)
-      if node.cached_layout_shape == @env.layout_shape
-        return @env.get_slot(node.cached_slot)
-      end
+      shape = @env.layout_shape
+      return @env.slot_values[node.cached_slot] if node.cached_layout_shape == shape
 
-      if (ce = node.cached_env) && ce.equal?(@env)
-        return ce.get_slot(node.cached_slot)
+      if (ce = node.cached_env)
+        return ce.slot_values[node.cached_slot] if ce.equal?(@env)
+        return ce.slot_values[node.cached_slot] if node.cached_miss_shape == shape && @env.parent.equal?(ce)
       end
 
       idx = @env.slot_index(name)
       if idx
         node.cached_env = @env
         node.cached_slot = idx
-        node.cached_layout_shape = @env.layout_shape
-        return @env.get_slot(idx)
+        node.cached_layout_shape = shape
+        return @env.slot_values[idx]
       end
 
-      env = @env
-      env = env.parent
+      parent = @env.parent
+      env = parent
       while env
         idx = env.slot_index(name)
         if idx
           node.cached_env = env
           node.cached_slot = idx
           node.cached_layout_shape = 1
-          return env.get_slot(idx)
+          node.cached_miss_shape = env.equal?(parent) ? shape : 1
+          return env.slot_values[idx]
         end
 
         env = env.parent
@@ -657,28 +636,31 @@ module Tungsten
     def cached_w_method(node, owner)
       return nil unless owner
       return nil unless (cached_owner = node.cached_dispatch_owner)&.equal?(owner)
-      return nil unless node.cached_dispatch_version == owner.version
+      return nil unless node.cached_dispatch_version == ((Runtime::WClass.hierarchy_epoch << 16) ^ owner.version)
 
       node.cached_w_method
     end
 
     def cache_w_method(node, owner, method)
       node.cached_dispatch_owner = owner
-      node.cached_dispatch_version = owner.version
+      node.cached_dispatch_version = (Runtime::WClass.hierarchy_epoch << 16) ^ owner.version
       node.cached_w_method = method
     end
 
     def resolve_w_method(node, owner, name)
       return nil unless owner
 
+      ver = (Runtime::WClass.hierarchy_epoch << 16) ^ owner.version
       if (cached_owner = node.cached_dispatch_owner)&.equal?(owner) &&
-         node.cached_dispatch_version == owner.version
+         node.cached_dispatch_version == ver
         return node.cached_w_method
       end
 
-      call_args = node.respond_to?(:args) ? node.args : nil
+      call_args = node.is_a?(AST::Call) ? node.args : nil
       method = owner.lookup_method(name, argc: (call_args || EMPTY_ARGS).size)
-      cache_w_method(node, owner, method) if method
+      node.cached_dispatch_owner = owner
+      node.cached_dispatch_version = ver
+      node.cached_w_method = method
       method
     end
 
@@ -865,7 +847,9 @@ module Tungsten
         recv = method.defining_class&.name
         name = method.name
         label = recv ? "#{recv}##{name}" : name.to_s
-        { label: label, location: @call_locations[i] }
+        loc = @call_locations[i]
+        loc = loc.location if loc.is_a?(AST::Node)
+        { label: label, location: loc }
       end
     end
 
@@ -1010,11 +994,11 @@ module Tungsten
     end
 
     def visit_symbol(node)
-      cached_symbol_value(node)
+      node.eval_in(self)
     end
 
     def visit_string_interpolation(node)
-      node.parts.map { |part| w_to_s(evaluate(part)) }.join
+      node.parts.map { |part| w_to_s(part.eval_in(self)) }.join
     end
 
     def visit_char(node)
@@ -1036,32 +1020,32 @@ module Tungsten
       result = []
       node.list.each do |e|
         if e.is_a?(Tungsten::AST::Splat)
-          result.concat(Array(evaluate(e.exp)))
+          result.concat(Array(e.exp.eval_in(self)))
         else
-          result << evaluate(e)
+          result << e.eval_in(self)
         end
       end
       result
     end
 
     def visit_tuple(node)
-      node.elements.map { |e| evaluate(e) }.freeze
+      node.elements.map { |e| e.eval_in(self) }.freeze
     end
 
     def visit_hash_literal(node)
       result = {}
       node.entries.each do |key_node, value_node|
-        result[canonical_hash_key(evaluate(key_node))] = evaluate(value_node)
+        hash_indifferent_set(result, key_node.eval_in(self), value_node.eval_in(self))
       end
       result
     end
 
     def visit_range_literal(node)
-      from = evaluate(node.from)
+      from = node.from.eval_in(self)
       if node.to.nil?
         return node.exclusive ? (from...) : (from..)
       end
-      to = evaluate(node.to)
+      to = node.to.eval_in(self)
       node.exclusive ? (from...to) : (from..to)
     end
 
@@ -1072,8 +1056,8 @@ module Tungsten
     def visit_date(node)         = Date.new(node.value)
     def visit_date_time(node)    = DateTime.new(node.value)
     def visit_time_literal(node) = Time.new(node.value)
-    def visit_set_literal(node)      = SetLiteral.new(node.elements.map { |e| evaluate(e) })
-    def visit_multiset_literal(node) = MultisetLiteral.new(node.elements.map { |e| evaluate(e) })
+    def visit_set_literal(node)      = SetLiteral.new(node.elements.map { |e| e.eval_in(self) })
+    def visit_multiset_literal(node) = MultisetLiteral.new(node.elements.map { |e| e.eval_in(self) })
     def visit_uuid(node)         = UUID.new(node.value)
     def visit_color_literal(node) = Color.new(node.r, node.g, node.b, node.a)
     def visit_rational_literal(node) = node.value
@@ -1090,7 +1074,7 @@ module Tungsten
     end
 
     def visit_typed_array(node)
-      size = evaluate(node.size).to_i
+      size = node.size.eval_in(self).to_i
       case node.element_type.to_s
       when "bool"
         Array.new(size, false)
@@ -1104,7 +1088,7 @@ module Tungsten
     def visit_byte_array_interpolation(node)
       result = []
       node.parts.each do |part|
-        val = evaluate(part)
+        val = part.eval_in(self)
         case val
         when Tungsten::ByteArray
           result.concat(val.bytes)
@@ -1136,7 +1120,7 @@ module Tungsten
     end
 
     def visit_measurement_literal(node)
-      value = evaluate(node.number)
+      value = node.number.eval_in(self)
       Tungsten::Measurement.new(value, node.uncertainty)
     end
 
@@ -1146,8 +1130,17 @@ module Tungsten
     end
 
     def visit_list(node)
+      items = node.list
+      len = items.length
+      return nil if len == 0
+      return items[0].eval_in(self) if len == 1
+
       result = nil
-      node.each { |exp| result = evaluate(exp) }
+      i = 0
+      while i < len
+        result = items[i].eval_in(self)
+        i += 1
+      end
       result
     end
 
@@ -1157,10 +1150,16 @@ module Tungsten
     # ordering crosses the boundary, equality deliberately does not
     # (matching the native runtime's w_eq).
     def tungsten_eq(left, right)
-      if (left.is_a?(Float) ^ right.is_a?(Float)) &&
-         left.is_a?(Numeric) && right.is_a?(Numeric)
-        return false
+      return left == right if left.is_a?(Integer) && right.is_a?(Integer)
+      return left.equal?(right) if left.is_a?(::Symbol) || right.is_a?(::Symbol) || left.nil? || right.nil?
+
+      if left.is_a?(Float)
+        return left == right if right.is_a?(Float)
+        return false if right.is_a?(Numeric)
+      elsif right.is_a?(Float)
+        return false if left.is_a?(Numeric)
       end
+      return right == left if right.is_a?(Tungsten::CharValue) && left.is_a?(Integer)
       if (left.is_a?(::Hash) && right.is_a?(::Hash)) ||
          (left.is_a?(::Array) && right.is_a?(::Array))
         return container_eq(left, right, {})
@@ -1321,16 +1320,22 @@ module Tungsten
       prod
     end
 
-    def visit_binary_op(node)
-      @profile_binary_ops[node.operator] += 1 if @profile_enabled
-      left = evaluate(node.left)
+    WOBJECT_BINARY_OP_NAMES = {
+      :+ => "+", :- => "-", :* => "*", :/ => "/", :** => "**", :% => "%",
+      :| => "|", :& => "&", :^ => "^", :== => "==", :!= => "==",
+      :<=> => "<=>", :< => "<", :<= => "<=", :> => ">", :>= => ">="
+    }.freeze
 
-      case node.operator
-      when :|
+    def visit_binary_op(node)
+      op = node.operator
+      @profile_binary_ops[op] += 1 if @profile_enabled
+      left = node.left.eval_in(self)
+
+      if op == :|
         if left.is_a?(Quantity)
           return convert_quantity_pipe(left, node.right)
         end
-        if left.is_a?(Numeric) && !node.right.is_a?(AST::Int)
+        if left.is_a?(Numeric) && !node.right.is_a?(AST::Int) && !unit_pipe_rhs_shadowed?(node.right)
           load_quantity_support
           rhs = node.right
           fmt = nil
@@ -1339,42 +1344,54 @@ module Tungsten
             fmt = rhs.args[0].value
             unit_str = rhs.name
           else
-            unit_str = ast_to_unit_string(rhs)
+            unit_str = begin
+              ast_to_unit_string(rhs)
+            rescue Tungsten::Error
+              nil
+            end
           end
-          unit = Tungsten::Units.parse(unit_str) rescue nil
+          unit = unit_str ? (Tungsten::Units.parse(unit_str) rescue nil) : nil
           if unit
             qty = Tungsten::Quantity.new(left, unit)
             qty.display_format = fmt if fmt
             return qty
           end
         end
-      when :"»"
+      elsif op == :"»"
         runtime_error("» requires a Quantity on the left", node: node) unless left.is_a?(Quantity)
         return convert_quantity_pipe(left, node.right)
       end
 
-      right = evaluate(node.right)
+      right = node.right.eval_in(self)
 
       # Source-defined objects own their arithmetic and set operators as they do
       # in the self-hosted interpreter and native lowering. Ruby cannot apply
       # primitive arithmetic directly to Runtime::WObject.
       if left.is_a?(Runtime::WObject)
-        operator_name = {
-          :+ => "+", :- => "-", :* => "*", :/ => "/", :** => "**", :% => "%",
-          :| => "|", :& => "&", :^ => "^", :== => "==", :!= => "==",
-          :<=> => "<=>", :< => "<", :<= => "<=", :> => ">", :>= => ">="
-        }[node.operator]
+        operator_name = WOBJECT_BINARY_OP_NAMES[op]
         if operator_name && (method = left.w_class.lookup_method(operator_name))
           result = call_w_method(left, method, [right], call_node: node)
-          return node.operator == :!= ? !truthy?(result) : result
+          return op == :!= ? !truthy?(result) : result
         end
       end
 
-      case node.operator
-      when :==  then adaptive_eq(numeric_lit_node?(node.left) || numeric_lit_node?(node.right), left, right)
+      case op
+      when :==
+        return left == right if left.is_a?(Integer) && right.is_a?(Integer)
+        return left.equal?(right) if left.is_a?(::Symbol) || right.is_a?(::Symbol) || left.nil? || right.nil?
+        if left.is_a?(Float) || right.is_a?(Float)
+          return adaptive_eq(numeric_lit_node?(node.left) || numeric_lit_node?(node.right), left, right)
+        end
+        tungsten_eq(left, right)
       when :≈   then tungsten_approx_eq(left, right)
       when :<   then left < right
-      when :!=  then !adaptive_eq(numeric_lit_node?(node.left) || numeric_lit_node?(node.right), left, right)
+      when :!=
+        return left != right if left.is_a?(Integer) && right.is_a?(Integer)
+        return !left.equal?(right) if left.is_a?(::Symbol) || right.is_a?(::Symbol) || left.nil? || right.nil?
+        if left.is_a?(Float) || right.is_a?(Float)
+          return !adaptive_eq(numeric_lit_node?(node.left) || numeric_lit_node?(node.right), left, right)
+        end
+        !tungsten_eq(left, right)
       when :"=~"
         regex, subject = left.is_a?(Regexp) ? [left, right] : [right, left]
         runtime_error("=~ requires a regex operand", node: node) unless regex.is_a?(Regexp)
@@ -1386,6 +1403,7 @@ module Tungsten
         end
         !!match
       when :+
+        return left + right if left.is_a?(Integer) && right.is_a?(Integer)
         if percent_value?(right) && !percent_value?(left)
           return apply_percent_ruby(left, right, +1)
         elsif percent_value?(left) && !percent_value?(right)
@@ -1400,6 +1418,7 @@ module Tungsten
         end
         left + right
       when :*
+        return left * right if left.is_a?(Integer) && right.is_a?(Integer)
         if percent_value?(right) && !percent_value?(left)
           return apply_percent_ruby(left, right, 0)
         elsif percent_value?(left) && !percent_value?(right)
@@ -1415,6 +1434,7 @@ module Tungsten
         r_val = right.is_a?(Tungsten::Measurement) ? right.value : right
         Tungsten::Measurement.new(l_val, r_val.abs)
       when :-
+        return left - right if left.is_a?(Integer) && right.is_a?(Integer)
         if percent_value?(right) && !percent_value?(left)
           return apply_percent_ruby(left, right, -1)
         end
@@ -1470,7 +1490,28 @@ module Tungsten
       convert_quantity_pipe(qty, node)
     end
 
+    def unit_pipe_rhs_shadowed?(rhs)
+      case rhs
+      when AST::StringLiteral, AST::Int
+        false
+      when AST::Var
+        name = rhs.name.to_s
+        @env.defined?(name) || @root_env.defined?(name)
+      when AST::Call
+        return true unless rhs.obj.nil?
+        name = rhs.name.to_s
+        return true if @env.defined?(name) || @root_env.defined?(name) || @builtins.key?(name)
+        rhs.args.any? { |a| unit_pipe_rhs_shadowed?(a) }
+      when AST::BinaryOp
+        return true unless %i[/ * **].include?(rhs.operator)
+        unit_pipe_rhs_shadowed?(rhs.left) || unit_pipe_rhs_shadowed?(rhs.right)
+      else
+        true
+      end
+    end
+
     def visit_global_var(node)
+      return @self_stack.last if node.name == "$value"
       if node.name.to_s.match?(/\A\$\d+\z/)
         return @globals[node.name.to_s]
       end
@@ -1494,7 +1535,7 @@ module Tungsten
     end
 
     def visit_assign(node)
-      value = apply_type_hint(evaluate(node.value), node.type_hint)
+      value = apply_type_hint(node.value.eval_in(self), node.type_hint)
       target = node.name
 
       if target.is_a?(Tungsten::AST::ArrayLiteral)
@@ -1544,9 +1585,9 @@ module Tungsten
       hint = node.hint
       inner = node.value
       value = if fold_hint_text?(hint) && inner.is_a?(AST::Def) && inner.name.nil?
-                evaluate(inner.body)
+                inner.body.eval_in(self)
               else
-                evaluate(inner)
+                inner.eval_in(self)
               end
       if fold_hint_text?(hint)
         rest = fold_hint_rest_type(hint)
@@ -1614,10 +1655,10 @@ module Tungsten
       elsif target.is_a?(Tungsten::AST::GlobalVar)
         @globals[target.name.to_s] = value
       elsif target.is_a?(Tungsten::AST::Var) && target.cached_layout_shape == @env.layout_shape
-        @env.set_slot(target.cached_slot, value)
+        @env.slot_values[target.cached_slot] = value
       elsif target.is_a?(Tungsten::AST::Var) && (ce = target.cached_env) && ce.equal?(@env)
         # Inline cache hit for assignment — same env, same slot
-        ce.set_slot(target.cached_slot, value)
+        ce.slot_values[target.cached_slot] = value
       elsif target.is_a?(Tungsten::AST::Var)
         name = target.name.to_s
         @env.set(name, value)
@@ -1633,11 +1674,12 @@ module Tungsten
 
     def visit_assign_op(node)
       target = node.name
-      right = evaluate(node.value)
+      right = node.value.eval_in(self)
 
       if target.is_a?(Tungsten::AST::Var) && target.cached_layout_shape == @env.layout_shape
         slot = target.cached_slot
-        current = @env.get_slot(slot)
+        slots = @env.slot_values
+        current = slots[slot]
         result = case node.operator
                  when :+  then current + right
                  when :-  then current - right
@@ -1647,13 +1689,14 @@ module Tungsten
                  when :** then tungsten_pow(current, right)
                  else runtime_error("unknown compound operator: #{node.operator}", node: node)
                  end
-        @env.set_slot(slot, result)
+        slots[slot] = result
         return result
       end
 
       if target.is_a?(Tungsten::AST::Var) && (ce = target.cached_env) && ce.equal?(@env)
         slot = target.cached_slot
-        current = ce.get_slot(slot)
+        slots = ce.slot_values
+        current = slots[slot]
         result = case node.operator
                  when :+  then current + right
                  when :-  then current - right
@@ -1663,7 +1706,7 @@ module Tungsten
                  when :** then tungsten_pow(current, right)
                  else runtime_error("unknown compound operator: #{node.operator}", node: node)
                  end
-        ce.set_slot(slot, result)
+        slots[slot] = result
         return result
       end
 
@@ -1683,7 +1726,7 @@ module Tungsten
       else
         name = target.name.to_s
         current = if (ce = target.cached_env) && ce.equal?(@env)
-                    ce.get_slot(target.cached_slot)
+                    ce.slot_values[target.cached_slot]
                   else
                     resolved = resolve_cached_local(target, name)
                     if resolved.equal?(Environment::UNDEFINED)
@@ -1714,7 +1757,7 @@ module Tungsten
         # read found the slot in (may be an outer captured scope across a
         # barrier). The cache was just refreshed by resolve_cached_local
         # in the read path above.
-        ce.set_slot(target.cached_slot, result)
+        ce.slot_values[target.cached_slot] = result
       else
         @env.set(name, result)
       end
@@ -1724,7 +1767,7 @@ module Tungsten
 
     def visit_print(node)
       node.args.each do |arg|
-        value = evaluate(arg)
+        value = arg.eval_in(self)
         $stdout.puts(w_to_s(value))
       end
       nil
@@ -1732,7 +1775,7 @@ module Tungsten
 
     def visit_write(node)
       node.args.each do |arg|
-        value = evaluate(arg)
+        value = arg.eval_in(self)
         $stdout.print(w_to_s(value))
       end
       nil
@@ -1750,7 +1793,7 @@ module Tungsten
         superclass = if node.superclass
           # An explicit `< Super` wins; any `[role]` alongside it (e.g.
           # `< Node [slab]`) is a compiler annotation the interpreter ignores.
-          @classes[node.superclass]
+          @classes[node.superclass] || resolve_unique_namespaced_constant(node.superclass)
         elsif node.class_role
           # Legacy form: a bare `[Role]` that resolves to a class names the
           # superclass (e.g. `+ Foo [Global]`). A role that doesn't resolve to
@@ -1765,6 +1808,7 @@ module Tungsten
         w_class = Runtime::WClass.new(node.name, superclass)
         @classes[node.name] = w_class
       end
+      w_class.defining_env ||= @env
 
       effective_body = expand_on_guards(node.body)
 
@@ -1777,7 +1821,8 @@ module Tungsten
             class_method = !expr.receiver.nil?
             w_method = Runtime::WMethod.new(expr.name, expr.args, body, w_class,
                                             splat_index: expr.splat_index, param_types: expr.param_types,
-                                            class_method: class_method, block_param: expr.block)
+                                            class_method: class_method, block_param: expr.block,
+                                            defining_env: @env)
             if class_method
               w_class.define_class_method(expr.name.to_s, w_method)
             else
@@ -1799,11 +1844,14 @@ module Tungsten
             end
           when Tungsten::AST::Assign
             # A class-body constant (`ROWS = [...]`) also lives on the class
-            # so its methods can read it regardless of who called them —
-            # method frames chain to the CALLER's env, not the class body's.
+            # so its methods can read it regardless of who called them.
             value = evaluate(expr)
             target = expr.name
-            w_class.constants[target.name.to_s] = value if target.is_a?(Tungsten::AST::Var) && target.constant?
+            if target.is_a?(Tungsten::AST::Var) && target.constant?
+              cname = target.name.to_s
+              w_class.constants[cname] = value
+              (@class_constant_names ||= {})[cname] = true
+            end
           else
             evaluate(expr)
           end
@@ -1913,9 +1961,27 @@ module Tungsten
     end
 
     def visit_def(node)
+      if !@env.equal?(@root_env)
+        cached_param_slot_names(node, node.args || EMPTY_ARGS) unless node.slot_names_template
+        cached_simple_method_plan(node) unless node.simple_method_plan
+        node.has_return = Interpreter.body_has_return?(node.body) if node.has_return.nil?
+        node = node.dup
+      end
       node.closure_env = @env
       @env.set(node.name.to_s, node) if node.name
       node
+    end
+
+    def bind_closure_block(block)
+      return nil unless block
+
+      cached_param_slot_names(block, block.args || EMPTY_ARGS) unless block.slot_names_template
+      cached_simple_block_plan(block) unless block.simple_block_plan
+      block.has_next_flag = Interpreter.body_has_next?(block.body) ? 1 : 0 if block.has_next_flag == -1
+      bound = block.dup
+      bound.closure_env = @env
+      bound.closure_block = @current_block
+      bound
     end
 
     def visit_fn(node)
@@ -1958,7 +2024,7 @@ module Tungsten
       f = node.args[0]
       r = evaluate(node.args[1])
       lo, hi = sigma_range_bounds(r, node)
-      f.closure_env = @env if f.is_a?(AST::Block)
+      f = bind_closure_block(f) if f.is_a?(AST::Block)
       terms = sigma_poly_extract(f)
       return sigma_terms_sum(terms, lo, hi) if terms
       acc = 0
@@ -2100,7 +2166,7 @@ module Tungsten
 
     def visit_call(node)
       if node.obj
-        recv = evaluate(node.obj)
+        recv = node.obj.eval_in(self)
         block = node.block
 
         if !@profile_enabled && !block && recv.is_a?(Runtime::WObject) &&
@@ -2126,20 +2192,19 @@ module Tungsten
             end
           )
         end
-        if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+        block = bind_closure_block(block) if block
 
         if recv.is_a?(Quantity) && node.name == "of"
-          substance = evaluate(node.args[0]).to_s
+          substance = node.args[0].eval_in(self).to_s
           substance = "burned #{substance}" if recv.instance_variable_get(:@burned)
           return substance_mass(recv, substance)
         end
 
-        case node.name
-        when "-" then return -recv
-        when "+" then return +recv
+        cname = node.name
+        if cname == "-"
+          return -recv
+        elsif cname == "+"
+          return +recv
         end
 
         # Tungsten `is_a?(Int)` passes the Int WClass, which is not a Ruby
@@ -2147,7 +2212,7 @@ module Tungsten
         # required") and core methods such as Date.ordinal never reach their
         # Ruby fallback. Answer the check with Tungsten type names instead.
         if node.name == "is_a?" && !block && small_arg_length_without_splat(node.args) == 1
-          return tungsten_is_a?(recv, evaluate(node.args[0]))
+          return tungsten_is_a?(recv, node.args[0].eval_in(self))
         end
 
         # Anonymous arrows are represented as nameless Def nodes by the Ruby
@@ -2193,7 +2258,9 @@ module Tungsten
             result
           end
         elsif recv.is_a?(Runtime::WClass)
-          if recv.name == "Tungsten" && node.name == "root" && no_call_args?(node.args)
+          if recv.name == "Tungsten" && %w[PROTECT_THE_CORE! STOP_THE_PRESS! LOCK_THE_DOORS!].include?(node.name.to_s)
+            return nil
+          elsif recv.name == "Tungsten" && node.name == "root" && no_call_args?(node.args)
             root_builtin = @builtins["__project_root"]
             Tungsten::PathValue.new(root_builtin ? root_builtin.call(nil, EMPTY_ARGS, nil) : Dir.pwd)
           elsif (class_method = recv.lookup_class_method(node.name.to_s, argc: (node.args || EMPTY_ARGS).size))
@@ -2305,6 +2372,16 @@ module Tungsten
                 end
                 raise
               end
+            elsif recv.is_a?(Runtime::PackedNode)
+              argc = (node.args || EMPTY_ARGS).length
+              if argc == 0 && (mm = w_class.lookup_method("method_missing", argc: 1))
+                return call_w_method(recv, mm, [node.name.to_sym], block, call_node: node)
+              elsif argc == 1 && node.name.to_s.end_with?("=") &&
+                    (mms = w_class.lookup_method("method_missing_set", argc: 2))
+                return call_w_method(
+                  recv, mms, [node.name.to_s.chomp("=").to_sym, evaluate(node.args[0])], block, call_node: node
+                )
+              end
             end
           end
 
@@ -2333,24 +2410,32 @@ module Tungsten
           end
         end
       else
-        name = node.name.to_s
-        if name == "ccall"
-          return dispatch_interpreted_ccall(evaluate_args(node.args), node)
-        end
-        if name == "Σ"
-          return eval_sigma(node)
+        name = node.name
+        if (special = node.special_bare_call) != 0
+          case special
+          when 1
+            return dispatch_interpreted_ccall(evaluate_args(node.args), node)
+          when 2
+            return dispatch_slab_alloc_init(evaluate_args(node.args))
+          when 3
+            return node.args && !node.args.empty? ? node.args[0].eval_in(self) : nil
+          when 4
+            return eval_sigma(node)
+          end
         end
 
-        # Class constructor call: Dog("Rex") → Dog.new("Rex")
-        if (w_class = @classes[name])
-          profile_visit_call("#{name}.new") if @profile_enabled
-          return instantiate_from_nodes(w_class, node.args)
-        end
+        if node.constant_name
+          # Class constructor call: Dog("Rex") → Dog.new("Rex")
+          if (w_class = @classes[name])
+            profile_visit_call("#{name}.new") if @profile_enabled
+            return instantiate_from_nodes(w_class, node.args)
+          end
 
-        # Module method call: Greetable.method
-        if (w_module = @modules[name])
-          profile_visit_call("module #{name}") if @profile_enabled
-          return w_module
+          # Module method call: Greetable.method
+          if (w_module = @modules[name])
+            profile_visit_call("module #{name}") if @profile_enabled
+            return w_module
+          end
         end
 
         local_miss_cached = !@profile_enabled &&
@@ -2362,10 +2447,7 @@ module Tungsten
           if self_obj.is_a?(Runtime::WClass)
             if (overloads = typed_overload_group(self_obj, name))
               block = node.block
-              if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+              block = bind_closure_block(block) if block
               return dispatch_typed_overload(self_obj, self_obj, overloads, node, block)
             end
 
@@ -2373,30 +2455,21 @@ module Tungsten
                      resolve_w_method(node, self_obj, name)
             if method
               block = node.block
-              if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+              block = bind_closure_block(block) if block
               return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
             end
           elsif self_obj.is_a?(Runtime::WObject)
             owner = self_obj.w_class
             if (overloads = typed_overload_group(owner, name))
               block = node.block
-              if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+              block = bind_closure_block(block) if block
               return dispatch_typed_overload(self_obj, owner, overloads, node, block)
             end
 
             method = resolve_w_method(node, owner, name)
             if method
               block = node.block
-              if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+              block = bind_closure_block(block) if block
               return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
             end
           end
@@ -2408,10 +2481,7 @@ module Tungsten
           if func.is_a?(Tungsten::AST::Def)
             profile_visit_call("local #{name}") if @profile_enabled
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return call_method(func, node.args, block)
           end
         end
@@ -2419,10 +2489,7 @@ module Tungsten
         if (builtin = @builtins[name])
           profile_visit_call("builtin #{name}") if @profile_enabled
           block = node.block
-          if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+          block = bind_closure_block(block) if block
           args = evaluate_args(node.args)
           return invoke_builtin(builtin, nil, args, block)
         end
@@ -2433,10 +2500,7 @@ module Tungsten
           if (overloads = typed_overload_group(self_obj, name))
             profile_visit_call("#{self_obj.name}##{name}") if @profile_enabled
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return dispatch_typed_overload(self_obj, self_obj, overloads, node, block)
           end
 
@@ -2448,10 +2512,7 @@ module Tungsten
               node.cached_local_miss_shape = @env.lookup_shape
             end
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
           end
         elsif self_obj.is_a?(Runtime::WObject)
@@ -2459,10 +2520,7 @@ module Tungsten
           if (overloads = typed_overload_group(owner, name))
             profile_visit_call("#{owner.name}##{name}") if @profile_enabled
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return dispatch_typed_overload(self_obj, owner, overloads, node, block)
           end
 
@@ -2473,10 +2531,7 @@ module Tungsten
               node.cached_local_miss_shape = @env.lookup_shape
             end
             block = node.block
-            if block
-          block.closure_env = @env
-          block.closure_block = @current_block
-        end
+            block = bind_closure_block(block) if block
             return call_w_method_from_nodes(self_obj, method, node.args, block, call_node: node)
           end
         end
@@ -2561,79 +2616,63 @@ module Tungsten
       result
     end
 
+    FUNCTION_INTRINSIC_IDS = {
+      "wyhash64_string" => 1,
+      "is_keyword?" => 2,
+      "is_type_name?" => 3,
+      "is_value_type?" => 4,
+      "lc_cp" => 5,
+      "is_digit?" => 6,
+      "is_lower?" => 7,
+      "is_upper?" => 8,
+      "is_alpha?" => 9,
+      "is_ident_start?" => 10,
+      "is_ident_char?" => 11,
+      "is_name_char?" => 12,
+      "is_currency_suffix?" => 13
+    }.freeze
+
     def call_function_intrinsic_from_nodes(func, arg_nodes)
-      case func.name.to_s
-      when "wyhash64_string"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
+      fid = FUNCTION_INTRINSIC_IDS[func.name]
+      return NO_DIRECT_CALL unless fid
 
-        text = direct_arg_value(arg)
+      arg = one_call_arg_node(arg_nodes)
+      return NO_DIRECT_CALL unless arg
+
+      case fid
+      when 1
+        text = arg.eval_in(self)
         text.is_a?(::String) ? wyhash64_string_value(text) : NO_DIRECT_CALL
-      when "is_keyword?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        TUNGSTEN_KEYWORDS[direct_arg_value(arg)] == true
-      when "is_type_name?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        TUNGSTEN_TYPE_NAME_WORDS[direct_arg_value(arg)] == true
-      when "is_value_type?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        LEXER_VALUE_TOKEN_TYPES[direct_arg_value(arg)] == true
-      when "lc_cp"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        (direct_arg_value(arg) >> 18) & 0x1FFFFF
-      when "is_digit?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        ((direct_arg_value(arg) >> 7) & 15) != 15
-      when "is_lower?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        cp = (direct_arg_value(arg) >> 18) & 0x1FFFFF
+      when 2
+        TUNGSTEN_KEYWORDS[arg.eval_in(self)] == true
+      when 3
+        TUNGSTEN_TYPE_NAME_WORDS[arg.eval_in(self)] == true
+      when 4
+        LEXER_VALUE_TOKEN_TYPES[arg.eval_in(self)] == true
+      when 5
+        (arg.eval_in(self) >> 18) & 0x1FFFFF
+      when 6
+        cp = (arg.eval_in(self) >> 18) & 0x1FFFFF
+        cp >= 48 && cp <= 57
+      when 7
+        cp = (arg.eval_in(self) >> 18) & 0x1FFFFF
         cp >= 97 && cp <= 122
-      when "is_upper?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        cp = (direct_arg_value(arg) >> 18) & 0x1FFFFF
+      when 8
+        cp = (arg.eval_in(self) >> 18) & 0x1FFFFF
         cp >= 65 && cp <= 90
-      when "is_alpha?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        cp = (direct_arg_value(arg) >> 18) & 0x1FFFFF
+      when 9
+        cp = (arg.eval_in(self) >> 18) & 0x1FFFFF
         (cp >= 97 && cp <= 122) || (cp >= 65 && cp <= 90)
-      when "is_ident_start?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        (direct_arg_value(arg) & 64) != 0
-      when "is_ident_char?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        (direct_arg_value(arg) & 32) != 0
-      when "is_name_char?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        lc = direct_arg_value(arg)
+      when 10
+        (arg.eval_in(self) & 64) != 0
+      when 11
+        (arg.eval_in(self) & 32) != 0
+      when 12
+        lc = arg.eval_in(self)
         cp = (lc >> 18) & 0x1FFFFF
         (lc & 32) != 0 || (cp >= 65 && cp <= 90)
-      when "is_currency_suffix?"
-        arg = one_call_arg_node(arg_nodes)
-        return NO_DIRECT_CALL unless arg
-
-        ch = direct_arg_value(arg)
+      when 13
+        ch = arg.eval_in(self)
         ch == "¢" || ch == "円" || ch == "元"
       else
         NO_DIRECT_CALL
@@ -2641,15 +2680,13 @@ module Tungsten
     end
 
     def cached_simple_method_plan(func)
-      if func.instance_variable_defined?(:@simple_method_plan)
-        plan = func.instance_variable_get(:@simple_method_plan)
-        return nil if plan.equal?(SIMPLE_METHOD_UNSUPPORTED)
-
-        return plan
+      plan = func.simple_method_plan
+      if plan
+        return plan.equal?(SIMPLE_METHOD_UNSUPPORTED) ? nil : plan
       end
 
       plan = build_simple_method_plan(func) || SIMPLE_METHOD_UNSUPPORTED
-      func.instance_variable_set(:@simple_method_plan, plan)
+      func.simple_method_plan = plan
       plan.equal?(SIMPLE_METHOD_UNSUPPORTED) ? nil : plan
     end
 
@@ -2859,15 +2896,13 @@ module Tungsten
     end
 
     def cached_simple_block_plan(block)
-      if block.instance_variable_defined?(:@simple_block_plan)
-        plan = block.instance_variable_get(:@simple_block_plan)
-        return nil if plan.equal?(SIMPLE_BLOCK_UNSUPPORTED)
-
-        return plan
+      plan = block.simple_block_plan
+      if plan
+        return plan.equal?(SIMPLE_BLOCK_UNSUPPORTED) ? nil : plan
       end
 
       plan = build_simple_block_plan(block) || SIMPLE_BLOCK_UNSUPPORTED
-      block.instance_variable_set(:@simple_block_plan, plan)
+      block.simple_block_plan = plan
       plan.equal?(SIMPLE_BLOCK_UNSUPPORTED) ? nil : plan
     end
 
@@ -2958,12 +2993,12 @@ module Tungsten
       when 0
         execute_simple_block_plan(closure_env, steps)
       when 1
-        execute_simple_block_plan(closure_env, steps, evaluate(arg_nodes[0]))
+        execute_simple_block_plan(closure_env, steps, arg_nodes[0].eval_in(self))
       when 2
-        execute_simple_block_plan(closure_env, steps, evaluate(arg_nodes[0]), evaluate(arg_nodes[1]))
+        execute_simple_block_plan(closure_env, steps, arg_nodes[0].eval_in(self), arg_nodes[1].eval_in(self))
       when 3
         execute_simple_block_plan(
-          closure_env, steps, evaluate(arg_nodes[0]), evaluate(arg_nodes[1]), evaluate(arg_nodes[2])
+          closure_env, steps, arg_nodes[0].eval_in(self), arg_nodes[1].eval_in(self), arg_nodes[2].eval_in(self)
         )
       else
         SIMPLE_BLOCK_UNSUPPORTED
@@ -3088,7 +3123,12 @@ module Tungsten
       @env = env
       @current_block = block.closure_block if block.closure_env
       begin
-        catch_next_if_needed(block.body) { evaluate(block.body) }
+        hn = block.has_next_flag
+        if hn == -1
+          hn = Interpreter.body_has_next?(block.body) ? 1 : 0
+          block.has_next_flag = hn
+        end
+        hn == 1 ? catch(NEXT_SIGNAL) { block.body.eval_in(self) } : block.body.eval_in(self)
       ensure
         @current_block = old_block
         @env = old_env
@@ -3136,7 +3176,8 @@ module Tungsten
       end
 
       params = method.params || EMPTY_ARGS
-      method_env = new_param_env(@env, params, method, barrier: true)
+      parent_env = method.defining_env || method.defining_class&.defining_env || @root_env
+      method_env = new_param_env(parent_env, params, method, barrier: true)
 
       if method.block_param && !block && args.size > params.size && args.last.is_a?(Tungsten::AST::Def)
         args = args.dup
@@ -3152,7 +3193,7 @@ module Tungsten
     end
 
     def call_w_method_from_nodes(recv, method, arg_nodes, block = nil, call_node: nil)
-      if !@profile_enabled && !block
+      if DISPATCH_PROFILE_ENABLED && !block
         result = call_self_hosted_parser_intrinsic_from_nodes(recv, method, arg_nodes)
         return result unless result.equal?(NO_DIRECT_CALL)
       end
@@ -3164,7 +3205,8 @@ module Tungsten
       end
 
       params = method.params || EMPTY_ARGS
-      method_env = new_param_env(@env, params, method, barrier: true)
+      parent_env = method.defining_env || method.defining_class&.defining_env || @root_env
+      method_env = new_param_env(parent_env, params, method, barrier: true)
 
       if !method.block_param && bind_exact_small_args_from_nodes(method_env, params, arg_nodes, method.splat_index, nil)
         return execute_bound_w_method(recv, method, method_env, block, call_node)
@@ -3184,15 +3226,13 @@ module Tungsten
     end
 
     def cached_simple_w_method_plan(method)
-      if method.instance_variable_defined?(:@simple_w_method_plan)
-        plan = method.instance_variable_get(:@simple_w_method_plan)
-        return nil if plan.equal?(SIMPLE_W_METHOD_UNSUPPORTED)
-
-        return plan
+      plan = method.simple_w_method_plan
+      if plan
+        return plan.equal?(SIMPLE_W_METHOD_UNSUPPORTED) ? nil : plan
       end
 
       plan = build_simple_w_method_plan(method) || SIMPLE_W_METHOD_UNSUPPORTED
-      method.instance_variable_set(:@simple_w_method_plan, plan)
+      method.simple_w_method_plan = plan
       plan.equal?(SIMPLE_W_METHOD_UNSUPPORTED) ? nil : plan
     end
 
@@ -3373,18 +3413,21 @@ module Tungsten
       @current_block = block
       @self_stack.push(recv)
       @call_methods.push(method)
-      @call_locations.push(call_node&.location)
+      @call_locations.push(call_node)
 
       begin
-        with_profile_callable(method) do
-          body = method.body
-          if method.instance_variable_defined?(:@has_return)
-            hr = method.instance_variable_get(:@has_return)
-          else
-            hr = Interpreter.body_has_return?(body)
-            method.instance_variable_set(:@has_return, hr)
+        body = method.body
+        hr = method.has_return
+        if hr.nil?
+          hr = Interpreter.body_has_return?(body)
+          method.has_return = hr
+        end
+        if @profile_enabled
+          with_profile_callable(method) do
+            hr ? catch(RETURN_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
           end
-          hr ? catch(RETURN_SIGNAL) { evaluate(body) } : evaluate(body)
+        else
+          hr ? catch(RETURN_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
         end
       ensure
         @call_locations.pop
@@ -3432,32 +3475,50 @@ module Tungsten
     def visit_begin(node)
       result = nil
       begin
-        result = evaluate(node.body)
+        result = node.body.eval_in(self)
       rescue Tungsten::Error => e
         result = evaluate_begin_rescue(node, e)
       rescue NoMethodError, ZeroDivisionError, SystemStackError, TypeError, ::FrozenError => e
         result = evaluate_begin_rescue(node, runtime_error_from_exception(e, node: node))
       ensure
-        evaluate(node.ensure_body) if node.ensure_body && !node.ensure_body.empty?
+        node.ensure_body.eval_in(self) if node.ensure_body && !node.ensure_body.empty?
       end
       result
     end
 
     def evaluate_begin_rescue(node, error)
       if node.rescue_body && !node.rescue_body.empty?
-        @env.set(node.rescue_var, error.message) if node.rescue_var
-        evaluate(node.rescue_body)
+        if node.rescue_var
+          rv = error.respond_to?(:raised_value) && !error.raised_value.nil? && !error.raised_value.is_a?(String) ? error.raised_value : error.message
+          @env.set(node.rescue_var, rv)
+        end
+        node.rescue_body.eval_in(self)
       else
         raise error
       end
     end
 
     def visit_raise(node)
-      value = node.value ? evaluate(node.value) : "runtime error"
-      runtime_error(value.to_s, node: node)
+      value = node.value ? node.value.eval_in(self) : "runtime error"
+      msg = if value.is_a?(Hash) && (m = hash_indifferent_get(value, :message))
+              file = hash_indifferent_get(value, :file)
+              row = hash_indifferent_get(value, :row)
+              col = hash_indifferent_get(value, :col)
+              file ? "#{file}:#{row}:#{col}: #{m}" : m.to_s
+            else
+              value.to_s
+            end
+      begin
+        runtime_error(msg, node: node)
+      rescue Tungsten::Error => e
+        e.raised_value = value
+        raise e
+      end
     end
 
     def visit_use(node)
+      return nil if SKIP_COMPILER_CORE_USE_PATHS[node.path.to_s]
+
       path = resolve_use_path(node.path)
       return nil if @loaded_files.key?(path)
       @loaded_files[path] = true
@@ -3551,20 +3612,26 @@ module Tungsten
     end
 
     def try_autoload_core(name)
-      return (@classes["BigInt"] ||= (@classes["Integer"] || try_autoload_core("Integer"))) if name.to_s == "BigInt"
+      key = name.to_s
+      return (@classes["BigInt"] ||= (@classes["Integer"] || try_autoload_core("Integer"))) if key == "BigInt"
 
-      base_dir = @current_file ? File.dirname(@current_file) : Dir.pwd
+      base_dir = @current_file ? ((@dirname_cache ||= {})[@current_file] ||= File.dirname(@current_file)) : Dir.pwd
       root = find_project_root(base_dir)
       return nil unless root
+
+      failed_for_root = ((@failed_autoloads ||= {})[root] ||= {})
+      return nil if failed_for_root.key?(key)
 
       # The autoload manifest (core/tungsten.w's `auto :Name, "path"` table)
       # is the authority on where a stdlib class or trait lives — e.g.
       # Comparable is core/traits/comparable.w, not core/comparable.w. Fall
       # back to the flat downcased filename for names outside the table.
-      relative = core_autoload_table(root)[name.to_s]
-      core_path = File.join(root, "core", "#{relative || name.downcase}.w")
-      return nil unless File.exist?(core_path)
-      return nil if @loaded_files.key?(core_path)
+      relative = core_autoload_table(root)[key]
+      core_path = File.join(root, "core", "#{relative || key.downcase}.w")
+      if @loaded_files.key?(core_path) || !File.exist?(core_path)
+        failed_for_root[key] = true
+        return nil
+      end
 
       @loaded_files[core_path] = true
       source = File.read(core_path)
@@ -3586,7 +3653,9 @@ module Tungsten
         @env = prev_env
       end
 
-      @classes[name] || @modules[name]
+      resolved = @classes[name] || @modules[name]
+      failed_for_root[key] = true unless resolved
+      resolved
     end
 
     def core_autoload_table(root)
@@ -3609,35 +3678,40 @@ module Tungsten
     end
 
     def find_project_root(dir)
+      cache = (@project_root_cache ||= {})
+      return cache[dir] if cache.key?(dir)
+
       d = dir
+      found = nil
       10.times do
-        return d if File.directory?(File.join(d, "bits"))
-        return d if File.directory?(File.join(d, "bit"))
+        if File.directory?(File.join(d, "bits")) || File.directory?(File.join(d, "bit"))
+          found = d
+          break
+        end
         parent = File.dirname(d)
         break if parent == d
+
         d = parent
       end
-      configured_root = ENV["TUNGSTEN_ROOT"]
-      if configured_root && File.directory?(File.join(configured_root, "core"))
-        return File.expand_path(configured_root)
+      if found.nil?
+        configured_root = ENV["TUNGSTEN_ROOT"]
+        if configured_root && File.directory?(File.join(configured_root, "core"))
+          found = File.expand_path(configured_root)
+        end
       end
 
-      nil
+      cache[dir] = found
     end
 
     def cached_literal_case_lookup(node)
-      if node.instance_variable_defined?(:@literal_case_lookup)
-        lookup = node.instance_variable_get(:@literal_case_lookup)
-        return nil if lookup.equal?(NO_LITERAL_CASE_LOOKUP)
-
-        return lookup
+      lookup = node.literal_case_lookup
+      if lookup
+        return lookup.equal?(NO_LITERAL_CASE_LOOKUP) ? nil : lookup
       end
 
       lookup = build_literal_case_lookup(node) || NO_LITERAL_CASE_LOOKUP
-      node.instance_variable_set(:@literal_case_lookup, lookup)
-      return nil if lookup.equal?(NO_LITERAL_CASE_LOOKUP)
-
-      lookup
+      node.literal_case_lookup = lookup
+      lookup.equal?(NO_LITERAL_CASE_LOOKUP) ? nil : lookup
     end
 
     def build_literal_case_lookup(node)
@@ -3678,15 +3752,15 @@ module Tungsten
     end
 
     def visit_case_expr(node)
-      subject = node.receiver ? evaluate(node.receiver) : :no_subject
-      loop do
+      subject = node.receiver ? node.receiver.eval_in(self) : :no_subject
+      while true
         recase_expr = catch(RECASE_SIGNAL) do
           return visit_case_expr_dispatch(node, subject)
         end
         if recase_expr.nil?
-          subject = node.receiver ? evaluate(node.receiver) : :no_subject
+          subject = node.receiver ? node.receiver.eval_in(self) : :no_subject
         else
-          subject = evaluate(recase_expr)
+          subject = recase_expr.eval_in(self)
         end
       end
     end
@@ -3697,51 +3771,66 @@ module Tungsten
         if (lookup = cached_literal_case_lookup(node))
           exact_matches = lookup[receiver_val.class]
           if exact_matches&.key?(receiver_val)
-            return evaluate(exact_matches[receiver_val])
+            return exact_matches[receiver_val].eval_in(self)
           end
         end
 
         node.whens.each do |conditions, body|
           conditions.each do |cond|
-            cond_val = evaluate(cond)
+            cond_val = cond.eval_in(self)
             if cond_val.is_a?(Regexp)
               if (match = cond_val.match(receiver_val.to_s))
                 @globals["$~"] = match
                 @globals["$0"] = match[0]
                 match.captures.each_with_index { |capture, i| @globals["$#{i + 1}"] = capture }
-                return evaluate(body)
+                return body.eval_in(self)
               end
             elsif cond_val.is_a?(Numeric)
               # Numeric when-matching follows == semantics: exact tower
               # crosses, floats isolated, literal whens adapt when exact.
               # (Ranges/Classes are non-Numeric and keep === below.)
-              return evaluate(body) if adaptive_eq(numeric_lit_node?(cond), cond_val, receiver_val)
+              return body.eval_in(self) if adaptive_eq(numeric_lit_node?(cond), cond_val, receiver_val)
             elsif cond_val === receiver_val || cond_val == receiver_val
-              return evaluate(body)
+              return body.eval_in(self)
             end
           end
         end
       else
         # Condition-less case: each when condition is a boolean guard
         node.whens.each do |conditions, body|
-          if conditions.any? { |cond| truthy?(evaluate(cond)) }
-            return evaluate(body)
+          if conditions.any? { |cond| truthy?(cond.eval_in(self)) }
+            return body.eval_in(self)
           end
         end
       end
-      node.else_body && !node.else_body.empty? ? evaluate(node.else_body) : nil
+      node.else_body && !node.else_body.empty? ? node.else_body.eval_in(self) : nil
     end
 
     def visit_not(node)
-      !truthy?(evaluate(node.exp))
+      !truthy?(node.exp.eval_in(self))
     end
 
     def visit_if(node)
-      if truthy?(evaluate(node.condition))
-        evaluate(node.then_block)
+      if truthy?(node.condition.eval_in(self))
+        node.then_block.eval_in(self)
       elsif (else_block = node.else_block) && !else_block.empty?
-        evaluate(else_block)
+        else_block.eval_in(self)
       end
+    end
+
+    def compute_while_loop_flags(node)
+      loop_body = node.check_first == true ? node.body : node.check_first
+      flags = 0
+      flags |= 1 if Interpreter.body_has_next?(loop_body)
+      flags |= 2 if Interpreter.body_has_break?(loop_body)
+      st = static_condition_truth(node.condition)
+      if st == true
+        flags |= 4
+      elsif st == false
+        flags |= 8
+      end
+      node.loop_flags = flags
+      flags
     end
 
     def visit_while(node)
@@ -3750,53 +3839,89 @@ module Tungsten
         return result unless result.equal?(SIMPLE_WHILE_UNSUPPORTED)
       end
 
-      loop_body = node.check_first == true ? node.body : node.check_first
-      has_next = Interpreter.body_has_next?(loop_body)
-      static_truth = static_condition_truth(node.condition)
+      flags = node.loop_flags
+      flags = compute_while_loop_flags(node) if flags == -1
 
-      catch_break_if_needed(loop_body) do
+      if flags == 0 && node.check_first == true
+        cond = node.condition
+        body = node.body
         result = nil
-        if node.check_first == true
-          if static_truth == true
-            loop do
-              result = has_next ? catch(NEXT_SIGNAL) { evaluate(node.body) } : evaluate(node.body)
+        while truthy?(cond.eval_in(self))
+          result = body.eval_in(self)
+        end
+        return result
+      end
+
+      if (flags & 2) != 0
+        catch(BREAK_SIGNAL) { execute_general_while(node, flags) }
+      else
+        execute_general_while(node, flags)
+      end
+    end
+
+    def execute_general_while(node, flags)
+      has_next = (flags & 1) != 0
+      always_true = (flags & 4) != 0
+      always_false = (flags & 8) != 0
+      result = nil
+
+      if node.check_first == true
+        body = node.body
+        if always_true
+          if has_next
+            while true
+              result = catch(NEXT_SIGNAL) { body.eval_in(self) }
             end
-          elsif static_truth == false
-            result
           else
-            while truthy?(evaluate(node.condition))
-              result = has_next ? catch(NEXT_SIGNAL) { evaluate(node.body) } : evaluate(node.body)
+            while true
+              result = body.eval_in(self)
+            end
+          end
+        elsif always_false
+          result
+        elsif has_next
+          cond = node.condition
+          while truthy?(cond.eval_in(self))
+            result = catch(NEXT_SIGNAL) { body.eval_in(self) }
+          end
+        else
+          cond = node.condition
+          while truthy?(cond.eval_in(self))
+            result = body.eval_in(self)
+          end
+        end
+      else
+        # suffix while — body is in check_first
+        body = node.check_first
+        cond = node.condition
+        if always_true
+          if has_next
+            while true
+              catch(NEXT_SIGNAL) { result = body.eval_in(self) }
+            end
+          else
+            while true
+              result = body.eval_in(self)
             end
           end
         else
-          # suffix while — body is in check_first
-          if static_truth == true
-            loop do
-              if has_next
-                catch(NEXT_SIGNAL) { result = evaluate(node.check_first) }
-              else
-                result = evaluate(node.check_first)
+          while true
+            if has_next
+              did_next = true
+              catch(NEXT_SIGNAL) do
+                result = body.eval_in(self)
+                did_next = false
               end
+              next if did_next
+            else
+              result = body.eval_in(self)
             end
-          else
-            loop do
-              if has_next
-                did_next = true
-                catch(NEXT_SIGNAL) do
-                  result = evaluate(node.check_first)
-                  did_next = false
-                end
-                next if did_next
-              else
-                result = evaluate(node.check_first)
-              end
-              break if static_truth == false
-              break unless truthy?(evaluate(node.condition))
-            end
+            break if always_false
+            break unless truthy?(cond.eval_in(self))
           end
         end
-        result
       end
+      result
     end
 
     def static_condition_truth(node)
@@ -3844,15 +3969,13 @@ module Tungsten
     end
 
     def cached_simple_while_plan(node)
-      if node.instance_variable_defined?(:@simple_while_plan)
-        plan = node.instance_variable_get(:@simple_while_plan)
-        return nil if plan.equal?(SIMPLE_WHILE_UNSUPPORTED)
-
-        return plan
+      plan = node.simple_while_plan
+      if plan
+        return plan.equal?(SIMPLE_WHILE_UNSUPPORTED) ? nil : plan
       end
 
       plan = build_simple_while_plan(node) || SIMPLE_WHILE_UNSUPPORTED
-      node.instance_variable_set(:@simple_while_plan, plan)
+      node.simple_while_plan = plan
       plan.equal?(SIMPLE_WHILE_UNSUPPORTED) ? nil : plan
     end
 
@@ -4029,7 +4152,7 @@ module Tungsten
       if assign_only
         result = nil
         if condition_op.equal?(SIMPLE_WHILE_ALWAYS_TRUE)
-          loop do
+          while true
             i = 0
             while i < steps.length
               step = steps[i]
@@ -4058,7 +4181,7 @@ module Tungsten
     def execute_mixed_simple_while_plan(slots, condition_op, left, right, steps)
       result = nil
       if condition_op.equal?(SIMPLE_WHILE_ALWAYS_TRUE)
-        loop do
+        while true
           result = execute_mixed_simple_while_steps(slots, steps)
           return result if @simple_while_break_taken
         end
@@ -4082,7 +4205,7 @@ module Tungsten
         slot_map[name] = slot
       end
 
-      slots = env.instance_variable_get(:@slot_values)
+      slots = env.slot_values
 
       bound_left = nil
       bound_right = nil
@@ -4196,7 +4319,7 @@ module Tungsten
     end
 
     def bind_simple_while_expression(expr, slot_map, env, slots = nil)
-      slots ||= env.instance_variable_get(:@slot_values)
+      slots ||= env.slot_values
       case expr[0]
       when :var
         slot = slot_map.fetch(expr[1])
@@ -4363,6 +4486,8 @@ module Tungsten
     end
 
     def simple_while_compare(left, op, right)
+      left = left.codepoint if left.is_a?(Tungsten::CharValue) && right.is_a?(Integer)
+      right = right.codepoint if right.is_a?(Tungsten::CharValue) && left.is_a?(Integer)
       case op
       when :== then left == right
       when :!= then left != right
@@ -4374,30 +4499,55 @@ module Tungsten
     end
 
     def visit_until(node)
-      loop_body = node.check_first == true ? node.body : node.check_first
-      has_next = Interpreter.body_has_next?(loop_body)
-
-      catch_break_if_needed(loop_body) do
-        result = nil
-        if node.check_first == true
-          until truthy?(evaluate(node.condition))
-            result = has_next ? catch(NEXT_SIGNAL) { evaluate(node.body) } : evaluate(node.body)
-          end
-        else
-          loop do
-            result = has_next ? catch(NEXT_SIGNAL) { evaluate(node.check_first) } : evaluate(node.check_first)
-            break if truthy?(evaluate(node.condition))
-          end
-        end
-        result
+      flags = node.loop_flags
+      if flags == -1
+        loop_body = node.check_first == true ? node.body : node.check_first
+        flags = 0
+        flags |= 1 if Interpreter.body_has_next?(loop_body)
+        flags |= 2 if Interpreter.body_has_break?(loop_body)
+        node.loop_flags = flags
       end
+
+      if flags == 0 && node.check_first == true
+        cond = node.condition
+        body = node.body
+        result = nil
+        until truthy?(cond.eval_in(self))
+          result = body.eval_in(self)
+        end
+        return result
+      end
+
+      if (flags & 2) != 0
+        catch(BREAK_SIGNAL) { execute_general_until(node, (flags & 1) != 0) }
+      else
+        execute_general_until(node, (flags & 1) != 0)
+      end
+    end
+
+    def execute_general_until(node, has_next)
+      result = nil
+      cond = node.condition
+      if node.check_first == true
+        body = node.body
+        until truthy?(cond.eval_in(self))
+          result = has_next ? catch(NEXT_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
+        end
+      else
+        body = node.check_first
+        while true
+          result = has_next ? catch(NEXT_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
+          break if truthy?(cond.eval_in(self))
+        end
+      end
+      result
     end
 
     def visit_with(node)
       body_has_next = Interpreter.body_has_next?(node.body)
 
       catch_break_if_needed(node.body) do
-        collections = node.bindings.map { |_var, expr| evaluate(expr) }
+        collections = node.bindings.map { |_var, expr| expr.eval_in(self) }
         result = nil
         iterate_with(node.bindings, collections, 0, node.body, body_has_next:) { |r| result = r }
         result
@@ -4408,7 +4558,7 @@ module Tungsten
       return nil unless Tungsten::Target.matches?(node.predicate, node.capabilities)
 
       result = nil
-      node.body.each { |expr| result = evaluate(expr) }
+      node.body.each { |expr| result = expr.eval_in(self) }
       result
     end
 
@@ -4452,69 +4602,77 @@ module Tungsten
     end
 
     def visit_and(node)
-      left = evaluate(node.left)
-      truthy?(left) ? evaluate(node.right) : left
+      left = node.left.eval_in(self)
+      truthy?(left) ? node.right.eval_in(self) : left
     end
 
     def visit_or(node)
-      left = evaluate(node.left)
-      truthy?(left) ? left : evaluate(node.right)
+      left = node.left.eval_in(self)
+      truthy?(left) ? left : node.right.eval_in(self)
     end
 
     def visit_in_test(node)
-      lhs = evaluate(node.lhs)
-      node.elements.any? { |el| evaluate(el) == lhs }
+      lhs = node.lhs.eval_in(self)
+      node.elements.any? { |el| tungsten_eq(el.eval_in(self), lhs) }
     end
 
     def visit_break(node)
-      throw BREAK_SIGNAL, (node.value ? evaluate(node.value) : nil)
+      throw BREAK_SIGNAL, (node.value ? node.value.eval_in(self) : nil)
     end
 
     def visit_next(node)
-      throw NEXT_SIGNAL, (node.value ? evaluate(node.value) : nil)
+      throw NEXT_SIGNAL, (node.value ? node.value.eval_in(self) : nil)
     end
 
     def visit_return(node)
-      throw RETURN_SIGNAL, (node.value ? evaluate(node.value) : nil)
+      throw RETURN_SIGNAL, (node.value ? node.value.eval_in(self) : nil)
     end
 
     def visit_var(node)
-      if node.name.end_with?("!") && node.name.size > 1
-        base = node.name.delete_suffix("!")
-        if @env.defined?(base) && !@env.get(base).is_a?(AST::Def)
-          return evaluate(AST::Call.new(AST::Var.new(base), "factorial", []))
+      if (base = node.bang_base) && @env.defined?(base) && !@env.get(base).is_a?(AST::Def)
+        return evaluate(AST::Call.new(AST::Var.new(base), "factorial", []))
+      end
+
+      if !node.constant_name
+        shape = @env.layout_shape
+        if node.cached_layout_shape == shape
+          value = @env.slot_values[node.cached_slot]
+          return value if !value.equal?(Environment::UNDEFINED) && !value.is_a?(Tungsten::AST::Def)
+        end
+
+        if (ce = node.cached_env)
+          if ce.equal?(@env) || (node.cached_miss_shape == shape && @env.parent.equal?(ce))
+            value = ce.slot_values[node.cached_slot]
+            return value if !value.equal?(Environment::UNDEFINED) && !value.is_a?(Tungsten::AST::Def)
+          end
+        end
+
+        return @self_stack.last if node.is_self
+      else
+        const_ver = (@classes.size << 20) ^ (@modules.size << 8) ^ (@class_constant_names ? @class_constant_names.size : 0)
+        if node.cached_const_env_version != const_ver
+          name = node.name
+          w_class = @classes[name] || try_autoload_core(name)
+          return w_class if w_class
+
+          w_module = @modules[name]
+          return w_module if w_module
+
+          namespaced = resolve_unique_namespaced_constant(name)
+          return namespaced if namespaced
+
+          if @class_constant_names&.key?(name)
+            if !@env.defined_locally_or_in_scope?(name)
+              value = resolve_class_constant(name)
+              return value unless value.equal?(Environment::UNDEFINED)
+            end
+          else
+            node.cached_const_env_version = const_ver
+          end
         end
       end
 
-      # Inline cache hit: same Environment instance → same slot layout
-      if (ce = node.cached_env) && ce.equal?(@env)
-        value = ce.get_slot(node.cached_slot)
-        return value unless value.equal?(Environment::UNDEFINED)
-      end
-
-      name = node.name
-      return @self_stack.last if name == "self"
-
-      # Class/module reference (with core autoload)
-      if node.constant?
-        w_class = @classes[name] || try_autoload_core(name)
-        return w_class if w_class
-
-        w_module = @modules[name]
-        return w_module if w_module
-
-        namespaced = resolve_unique_namespaced_constant(name)
-        return namespaced if namespaced
-      end
-
-      # Bare constant: the defining class's table beats names leaked from
-      # the CALLER's frames (a method env chains to its caller's env); a
-      # local of the current method scope (up to its barrier) still shadows.
-      if node.constant? && !@env.defined_locally_or_in_scope?(name)
-        value = resolve_class_constant(name)
-        return value unless value.equal?(Environment::UNDEFINED)
-      end
-
+      name ||= node.name
       value = resolve_cached_local(node, name)
       unless value.equal?(Environment::UNDEFINED)
         if value.is_a?(Tungsten::AST::Def) && (value.args.nil? || value.args.all? { |a| a.default })
@@ -4570,6 +4728,8 @@ module Tungsten
     # push neither self nor a call frame. Callers fall back to lexical and
     # builtin lookups when this misses.
     def resolve_class_constant(name)
+      return Environment::UNDEFINED unless @class_constant_names&.key?(name)
+
       seen = nil
       innermost = @call_methods.last&.defining_class
       self_class = find_current_class
@@ -4599,21 +4759,32 @@ module Tungsten
     end
 
     def resolve_unique_namespaced_constant(name)
+      version = (@classes.size << 16) ^ @modules.size
+      cache = (@namespaced_const_cache ||= {})
+      if @namespaced_const_version != version
+        cache.clear
+        @namespaced_const_version = version
+      elsif cache.key?(name)
+        return cache[name]
+      end
+
       suffix = ":#{name}"
       matches = []
       @classes.each { |constant_name, value| matches << value if constant_name.to_s.end_with?(suffix) }
       @modules.each { |constant_name, value| matches << value if constant_name.to_s.end_with?(suffix) }
-      matches.size == 1 ? matches.first : nil
+      cache[name] = matches.size == 1 ? matches.first : nil
     end
 
     def visit_trait_def(node)
       w_trait = Runtime::WClass.new(node.name)
+      w_trait.defining_env = @env
       @modules[node.name] = w_trait
 
       expand_on_guards(node.body).each do |expr|
         if expr.is_a?(Tungsten::AST::Def)
           w_method = Runtime::WMethod.new(expr.name, expr.args, expr.body, w_trait,
-                                          splat_index: expr.splat_index, block_param: expr.block)
+                                          splat_index: expr.splat_index, block_param: expr.block,
+                                          defining_env: @env)
           w_trait.define_method(expr.name.to_s, w_method)
         elsif accessor_declaration?(expr)
           define_accessor(w_trait, expr)
@@ -4648,12 +4819,14 @@ module Tungsten
 
     def visit_module_def(node)
       w_module = Runtime::WClass.new(node.name)
+      w_module.defining_env = @env
       @modules[node.name] = w_module
 
       expand_on_guards(node.body).each do |expr|
         if expr.is_a?(Tungsten::AST::Def)
           w_method = Runtime::WMethod.new(expr.name, expr.args, expr.body, w_module,
-                                          splat_index: expr.splat_index, block_param: expr.block)
+                                          splat_index: expr.splat_index, block_param: expr.block,
+                                          defining_env: @env)
           w_module.define_method(expr.name.to_s, w_method)
         else
           evaluate(expr)
@@ -4681,8 +4854,9 @@ module Tungsten
     def visit_path(node)
       # Try the full namespaced name first (e.g., "Argon:Result")
       full_name = node.names.join(":")
-      if node.names.length > 1 && (@classes[full_name] || @modules[full_name])
-        return @classes[full_name] || @modules[full_name]
+      if node.names.length > 1
+        found = @classes[full_name] || @modules[full_name] || resolve_unique_namespaced_constant(full_name)
+        return found if found
       end
 
       name = node.names.first
@@ -4728,7 +4902,7 @@ module Tungsten
     end
 
     def visit_splat(node)
-      evaluate(node.exp)
+      node.exp.eval_in(self)
     end
 
     EMPTY_ARGS = [].freeze
@@ -4749,7 +4923,7 @@ module Tungsten
           has_splat = true
           break
         end
-        args[i] = evaluate(a)
+        args[i] = a.eval_in(self)
         i += 1
       end
       if has_splat
@@ -4758,9 +4932,9 @@ module Tungsten
         while i < len
           a = arg_nodes[i]
           if a.is_a?(Tungsten::AST::Splat)
-            result.concat(Array(evaluate(a.exp)))
+            result.concat(Array(a.exp.eval_in(self)))
           else
-            result << evaluate(a)
+            result << a.eval_in(self)
           end
           i += 1
         end
@@ -4966,57 +5140,113 @@ module Tungsten
       false
     end
 
+    PRIMITIVE_METHOD_IDS = {
+      "[]" => 1,
+      "[]=" => 2,
+      "length" => 3,
+      "size" => 3,
+      "empty?" => 4,
+      "first" => 5,
+      "last" => 6,
+      "push" => 7,
+      "pop" => 8,
+      "shift" => 9,
+      "to_s" => 10,
+      "to_i" => 11,
+      "to_f" => 12,
+      "chr" => 13,
+      "prev" => 14,
+      "next" => 15,
+      "succ" => 15,
+      "tetrate" => 16,
+      "factorial" => 17,
+      "primorial" => 17,
+      "prime?" => 18,
+      "nextprime" => 19,
+      "next_prime" => 19,
+      "prevprime" => 20,
+      "prev_prime" => 20,
+      "chars" => 21,
+      "bytes" => 22,
+      "starts_with?" => 23,
+      "includes?" => 24,
+      "replace" => 25,
+      "keys" => 26,
+      "values" => 27,
+      "has_key?" => 28,
+      "key?" => 28,
+      "slice" => 29,
+      "copy" => 30,
+      "sort" => 31,
+      "sort!" => 32,
+      "mergesort!" => 32,
+      "shuffle" => 33,
+      "shuffle!" => 34,
+      "rotate" => 35,
+      "rotate!" => 36,
+      "join" => 37,
+      "ord" => 38,
+      "respond_to?" => 39
+    }.freeze
+
     def call_primitive_method_from_nodes(recv, name, arg_nodes, block)
       return NO_DIRECT_CALL if block
 
-      case name
-      when "[]"
+      pid = PRIMITIVE_METHOD_IDS[name]
+      return NO_DIRECT_CALL unless pid
+
+      case pid
+      when 1
         arg = one_call_arg_node(arg_nodes)
         return NO_DIRECT_CALL unless arg
 
-        key = direct_arg_value(arg)
+        key = arg.eval_in(self)
         case recv
         when ::Hash
           hash_indifferent_get(recv, key)
-        when ::Array, ::String, Tungsten::ByteArray
+        when Runtime::WireRecord
+          recv.load(key)
+        when Runtime::WireSequence, ::Array, ::String, Tungsten::ByteArray
           recv[key]
         else
           NO_DIRECT_CALL
         end
-      when "[]="
+      when 2
         len = small_arg_length_without_splat(arg_nodes)
         return NO_DIRECT_CALL unless len == 2
 
-        key = direct_arg_value(arg_nodes[0])
-        value = direct_arg_value(arg_nodes[1])
+        key = arg_nodes[0].eval_in(self)
+        value = arg_nodes[1].eval_in(self)
         case recv
         when ::Hash
-          recv[canonical_hash_key(key)] = value
-        when ::Array, Tungsten::ByteArray
+          hash_indifferent_set(recv, key, value)
+        when Runtime::WireRecord
+          recv.store(key, value)
+        when Runtime::WireSequence, ::Array, Tungsten::ByteArray
           recv[key] = value
         else
           NO_DIRECT_CALL
         end
-      when "length", "size"
+      when 3
         return NO_DIRECT_CALL unless no_call_args?(arg_nodes)
 
         case recv
         when ::String
           recv.bytesize
-        when ::Array, ::Hash, Tungsten::ByteArray
+        when Runtime::WireSequence, ::Array, ::Hash, Tungsten::ByteArray
           recv.length
         else
           NO_DIRECT_CALL
         end
-      when "empty?"
+      when 4
         return NO_DIRECT_CALL unless no_call_args?(arg_nodes)
 
         recv.respond_to?(:empty?) ? recv.empty? : NO_DIRECT_CALL
-      when "first"
+      when 5
         recv.is_a?(::Array) && no_call_args?(arg_nodes) ? recv.first : NO_DIRECT_CALL
-      when "last"
+      when 6
         recv.is_a?(::Array) && no_call_args?(arg_nodes) ? recv.last : NO_DIRECT_CALL
-      when "push"
+      when 7
         return NO_DIRECT_CALL unless recv.is_a?(::Array)
 
         len = small_arg_length_without_splat(arg_nodes)
@@ -5026,67 +5256,67 @@ module Tungsten
         when 0
           recv.push
         when 1
-          recv.push(direct_arg_value(arg_nodes[0]))
+          recv.push(arg_nodes[0].eval_in(self))
         when 2
-          recv.push(direct_arg_value(arg_nodes[0]), direct_arg_value(arg_nodes[1]))
+          recv.push(arg_nodes[0].eval_in(self), arg_nodes[1].eval_in(self))
         when 3
-          recv.push(direct_arg_value(arg_nodes[0]), direct_arg_value(arg_nodes[1]), direct_arg_value(arg_nodes[2]))
+          recv.push(arg_nodes[0].eval_in(self), arg_nodes[1].eval_in(self), arg_nodes[2].eval_in(self))
         end
-      when "pop"
+      when 8
         recv.is_a?(::Array) && no_call_args?(arg_nodes) ? recv.pop : NO_DIRECT_CALL
-      when "shift"
+      when 9
         recv.is_a?(::Array) && no_call_args?(arg_nodes) ? recv.shift : NO_DIRECT_CALL
-      when "to_s"
+      when 10
         len = small_arg_length_without_splat(arg_nodes)
         return NO_DIRECT_CALL unless len == 0 || len == 1
 
         if len == 1 && recv.is_a?(::Integer)
-          recv.to_s(direct_arg_value(arg_nodes[0]).to_i)
+          recv.to_s(arg_nodes[0].eval_in(self).to_i)
         elsif len == 0
           recv.to_s
         else
           NO_DIRECT_CALL
         end
-      when "to_i"
+      when 11
         no_call_args?(arg_nodes) ? Runtime::Builtins.stable_to_i(recv) : NO_DIRECT_CALL
-      when "to_f"
+      when 12
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? recv.to_f : NO_DIRECT_CALL
-      when "chr"
+      when 13
         if recv.is_a?(::Integer) && no_call_args?(arg_nodes)
           recv.chr(Encoding::UTF_8)
         else
           NO_DIRECT_CALL
         end
-      when "prev"
+      when 14
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? recv - 1 : NO_DIRECT_CALL
-      when "next", "succ"
+      when 15
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? recv + 1 : NO_DIRECT_CALL
-      when "tetrate"
+      when 16
         arg = one_call_arg_node(arg_nodes)
         return NO_DIRECT_CALL unless recv.is_a?(::Integer) && arg
-        height = direct_arg_value(arg)
+        height = arg.eval_in(self)
         runtime_error("tetration height must be a nonnegative integer") unless height.is_a?(::Integer) && height >= 0
         runtime_error("tetration base must be a nonnegative integer") if recv.negative?
         return 1 if height.zero? || recv == 1
         return height.even? ? 1 : 0 if recv.zero?
 
         height.times.reduce(1) { |tower, _| recv ** tower }
-      when "factorial", "primorial"
+      when 17
         return NO_DIRECT_CALL unless recv.is_a?(::Integer) && no_call_args?(arg_nodes)
         runtime_error("Int##{name}: negative receiver") if recv.negative?
 
         (2..recv).reduce(1) do |acc, item|
           name == "factorial" || tungsten_int_prime?(item) ? acc * item : acc
         end
-      when "prime?"
+      when 18
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? tungsten_int_prime?(recv) : NO_DIRECT_CALL
-      when "nextprime", "next_prime"
+      when 19
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? tungsten_nextprime(recv) : NO_DIRECT_CALL
-      when "prevprime", "prev_prime"
+      when 20
         recv.is_a?(::Integer) && no_call_args?(arg_nodes) ? tungsten_prevprime(recv) : NO_DIRECT_CALL
-      when "chars"
+      when 21
         recv.is_a?(::String) && no_call_args?(arg_nodes) ? recv.chars : NO_DIRECT_CALL
-      when "bytes"
+      when 22
         return NO_DIRECT_CALL unless no_call_args?(arg_nodes)
 
         case recv
@@ -5097,31 +5327,31 @@ module Tungsten
         when ::Symbol then Tungsten::ByteArray.new(recv.to_s.bytes)
         else NO_DIRECT_CALL
         end
-      when "starts_with?"
+      when 23
         return NO_DIRECT_CALL unless recv.is_a?(::String)
 
         arg = one_call_arg_node(arg_nodes)
-        arg ? recv.start_with?(direct_arg_value(arg).to_s) : NO_DIRECT_CALL
-      when "includes?"
+        arg ? recv.start_with?(arg.eval_in(self).to_s) : NO_DIRECT_CALL
+      when 24
         arg = one_call_arg_node(arg_nodes)
         return NO_DIRECT_CALL unless arg
 
-        recv.respond_to?(:include?) ? recv.include?(direct_arg_value(arg)) : NO_DIRECT_CALL
-      when "replace"
+        recv.respond_to?(:include?) ? recv.include?(arg.eval_in(self)) : NO_DIRECT_CALL
+      when 25
         return NO_DIRECT_CALL unless recv.is_a?(::String)
 
         len = small_arg_length_without_splat(arg_nodes)
-        len == 2 ? recv.gsub(direct_arg_value(arg_nodes[0]), direct_arg_value(arg_nodes[1])) : NO_DIRECT_CALL
-      when "keys"
+        len == 2 ? recv.gsub(arg_nodes[0].eval_in(self), arg_nodes[1].eval_in(self)) : NO_DIRECT_CALL
+      when 26
         recv.is_a?(::Hash) && no_call_args?(arg_nodes) ? recv.keys : NO_DIRECT_CALL
-      when "values"
+      when 27
         recv.is_a?(::Hash) && no_call_args?(arg_nodes) ? recv.values : NO_DIRECT_CALL
-      when "has_key?", "key?"
+      when 28
         return NO_DIRECT_CALL unless recv.is_a?(::Hash)
 
         arg = one_call_arg_node(arg_nodes)
-        arg ? recv.key?(direct_arg_value(arg)) : NO_DIRECT_CALL
-      when "slice"
+        arg ? hash_indifferent_key?(recv, arg.eval_in(self)) : NO_DIRECT_CALL
+      when 29
         return NO_DIRECT_CALL unless recv.is_a?(::String)
 
         len = small_arg_length_without_splat(arg_nodes)
@@ -5129,13 +5359,13 @@ module Tungsten
 
         case len
         when 1
-          recv.slice(direct_arg_value(arg_nodes[0]))
+          recv.slice(arg_nodes[0].eval_in(self))
         when 2
-          recv.byteslice(direct_arg_value(arg_nodes[0]), direct_arg_value(arg_nodes[1]))
+          recv.byteslice(arg_nodes[0].eval_in(self), arg_nodes[1].eval_in(self))
         else
           NO_DIRECT_CALL
         end
-      when "copy"
+      when 30
         return NO_DIRECT_CALL unless recv.is_a?(::Array)
 
         len = small_arg_length_without_splat(arg_nodes)
@@ -5143,25 +5373,26 @@ module Tungsten
 
         case len
         when 1
-          recv.slice(direct_arg_value(arg_nodes[0]), recv.length - direct_arg_value(arg_nodes[0]).to_i)
+          start = arg_nodes[0].eval_in(self)
+          recv.slice(start, recv.length - start.to_i)
         when 2
-          recv.slice(direct_arg_value(arg_nodes[0]), direct_arg_value(arg_nodes[1]))
+          recv.slice(arg_nodes[0].eval_in(self), arg_nodes[1].eval_in(self))
         else
           NO_DIRECT_CALL
         end
-      when "sort"
+      when 31
         if recv.is_a?(::Array) && no_call_args?(arg_nodes)
           Runtime::Builtins.array_mergesort_copy(recv)
         else
           NO_DIRECT_CALL
         end
-      when "sort!", "mergesort!"
+      when 32
         if recv.is_a?(::Array) && no_call_args?(arg_nodes)
           Runtime::Builtins.array_mergesort_in_place!(recv)
         else
           NO_DIRECT_CALL
         end
-      when "shuffle"
+      when 33
         return NO_DIRECT_CALL unless recv.is_a?(::Array)
 
         len = small_arg_length_without_splat(arg_nodes)
@@ -5173,49 +5404,49 @@ module Tungsten
         when 1
           return NO_DIRECT_CALL if arg_nodes[0].is_a?(Tungsten::AST::HashLiteral)
 
-          indexes = direct_arg_value(arg_nodes[0])
+          indexes = arg_nodes[0].eval_in(self)
           indexes.is_a?(::Hash) ? NO_DIRECT_CALL : Runtime::Builtins.array_gather(recv, indexes)
         else
           NO_DIRECT_CALL
         end
-      when "shuffle!"
+      when 34
         if recv.is_a?(::Array) && no_call_args?(arg_nodes)
           Runtime::Builtins.array_shuffle_in_place!(recv)
         else
           NO_DIRECT_CALL
         end
-      when "rotate"
+      when 35
         return NO_DIRECT_CALL unless recv.is_a?(::Array)
 
         len = small_arg_length_without_splat(arg_nodes)
         return NO_DIRECT_CALL unless len == 0 || len == 1
 
-        Runtime::Builtins.array_rotate_copy(recv, len == 0 ? 1 : direct_arg_value(arg_nodes[0]))
-      when "rotate!"
+        Runtime::Builtins.array_rotate_copy(recv, len == 0 ? 1 : arg_nodes[0].eval_in(self))
+      when 36
         return NO_DIRECT_CALL unless recv.is_a?(::Array)
 
         len = small_arg_length_without_splat(arg_nodes)
         return NO_DIRECT_CALL unless len == 0 || len == 1
 
-        Runtime::Builtins.array_rotate_in_place!(recv, len == 0 ? 1 : direct_arg_value(arg_nodes[0]))
-      when "join"
+        Runtime::Builtins.array_rotate_in_place!(recv, len == 0 ? 1 : arg_nodes[0].eval_in(self))
+      when 37
         return NO_DIRECT_CALL unless recv.is_a?(::Array)
 
         len = small_arg_length_without_splat(arg_nodes)
         return NO_DIRECT_CALL unless len == 0 || len == 1
 
-        recv.join(len == 0 ? "" : direct_arg_value(arg_nodes[0]))
-      when "ord"
+        recv.join(len == 0 ? "" : arg_nodes[0].eval_in(self))
+      when 38
         if (recv.is_a?(::String) || recv.is_a?(Tungsten::CharValue)) && no_call_args?(arg_nodes)
           recv.ord
         else
           NO_DIRECT_CALL
         end
-      when "respond_to?"
+      when 39
         arg = one_call_arg_node(arg_nodes)
         return NO_DIRECT_CALL unless arg
 
-        method_name = direct_arg_value(arg).to_s
+        method_name = arg.eval_in(self).to_s
         !hidden_ruby_object_method?(method_name) && recv.respond_to?(method_name)
       else
         NO_DIRECT_CALL
@@ -5528,29 +5759,42 @@ module Tungsten
       nil
     end
 
+    BUILTIN_METHOD_IDS = {
+      "to_s" => 1,
+      "class" => 2,
+      "class_name" => 3,
+      "nil?" => 4,
+      "itself" => 5,
+      "is_a?" => 6,
+      "respond_to?" => 7
+    }.freeze
+
     def call_builtin_from_nodes(recv, name, arg_nodes)
+      bid = BUILTIN_METHOD_IDS[name]
+      return NO_DIRECT_CALL unless bid
+
       len = small_arg_length_without_splat(arg_nodes)
       return NO_DIRECT_CALL unless len
 
-      case name
-      when "to_s"
+      case bid
+      when 1
         len == 0 ? recv.to_s : NO_DIRECT_CALL
-      when "class"
+      when 2
         len == 0 ? class_object_for(recv) : NO_DIRECT_CALL
-      when "class_name"
+      when 3
         len == 0 ? class_object_for(recv).name : NO_DIRECT_CALL
-      when "nil?"
+      when 4
         len == 0 ? false : NO_DIRECT_CALL
-      when "itself"
+      when 5
         len == 0 ? recv : NO_DIRECT_CALL
-      when "is_a?"
+      when 6
         return NO_DIRECT_CALL unless len == 1
 
-        tungsten_is_a?(recv, evaluate(arg_nodes[0]))
-      when "respond_to?"
+        tungsten_is_a?(recv, arg_nodes[0].eval_in(self))
+      when 7
         return NO_DIRECT_CALL unless len == 1
 
-        method_name = evaluate(arg_nodes[0]).to_s
+        method_name = arg_nodes[0].eval_in(self).to_s
         !!recv.w_class.lookup_method(method_name) ||
           @method_builtins.key?(method_name) ||
           BUILTIN_METHODS.include?(method_name) ||
@@ -5567,7 +5811,7 @@ module Tungsten
       return NO_DIRECT_CALL unless len
 
       if recv.is_a?(Regexp) && name == "match_data" && len == 1 && !block
-        match_data = recv.match(evaluate(arg_nodes[0]).to_s)
+        match_data = recv.match(arg_nodes[0].eval_in(self).to_s)
         return match_data ? RegexMatchValue.new(match_data) : nil
       end
 
@@ -5575,20 +5819,20 @@ module Tungsten
       when 0
         block ? recv.public_send(name) { |*bargs| invoke_block(block, bargs) } : recv.public_send(name)
       when 1
-        arg0 = evaluate(arg_nodes[0])
+        arg0 = arg_nodes[0].eval_in(self)
         block ? recv.public_send(name, arg0) { |*bargs| invoke_block(block, bargs) } : recv.public_send(name, arg0)
       when 2
-        arg0 = evaluate(arg_nodes[0])
-        arg1 = evaluate(arg_nodes[1])
+        arg0 = arg_nodes[0].eval_in(self)
+        arg1 = arg_nodes[1].eval_in(self)
         if block
           recv.public_send(name, arg0, arg1) { |*bargs| invoke_block(block, bargs) }
         else
           recv.public_send(name, arg0, arg1)
         end
       when 3
-        arg0 = evaluate(arg_nodes[0])
-        arg1 = evaluate(arg_nodes[1])
-        arg2 = evaluate(arg_nodes[2])
+        arg0 = arg_nodes[0].eval_in(self)
+        arg1 = arg_nodes[1].eval_in(self)
+        arg2 = arg_nodes[2].eval_in(self)
         if block
           recv.public_send(name, arg0, arg1, arg2) { |*bargs| invoke_block(block, bargs) }
         else
@@ -5648,6 +5892,9 @@ module Tungsten
     def dispatch_interpreted_ccall(args, node = nil)
       runtime_error("ccall requires a runtime function name", node: node) if args.empty?
       cname = args[0].to_s
+      compiler_result = dispatch_compiler_ccall(cname, args)
+      return compiler_result unless compiler_result.equal?(COMPILER_CCALL_MISS)
+
       case cname
       when "w_date_new_w"
         runtime_error("w_date_new_w expects seven fields", node: node) unless args.size == 8
@@ -5806,7 +6053,7 @@ module Tungsten
       when "w_string_bytes_view"
         args[1].to_s.bytes
       else
-        runtime_error("undefined method 'ccall'", node: node, length: 5)
+        runtime_error("undefined method 'ccall' (#{cname})", node: node, length: 5)
       end
     end
 
@@ -5824,7 +6071,7 @@ module Tungsten
         arg0 = arg_nodes[0]
         return false if param0.default || arg0.is_a?(Tungsten::AST::Splat)
 
-        env.set_slot(0, evaluate(arg0))
+        env.slot_values[0] = arg0.eval_in(self)
         true
       when 2
         param0 = params[0]
@@ -5834,8 +6081,9 @@ module Tungsten
         return false if param0.default || param1.default
         return false if arg0.is_a?(Tungsten::AST::Splat) || arg1.is_a?(Tungsten::AST::Splat)
 
-        env.set_slot(0, evaluate(arg0))
-        env.set_slot(1, evaluate(arg1))
+        slots = env.slot_values
+        slots[0] = arg0.eval_in(self)
+        slots[1] = arg1.eval_in(self)
         true
       when 3
         param0 = params[0]
@@ -5847,9 +6095,10 @@ module Tungsten
         return false if param0.default || param1.default || param2.default
         return false if arg0.is_a?(Tungsten::AST::Splat) || arg1.is_a?(Tungsten::AST::Splat) || arg2.is_a?(Tungsten::AST::Splat)
 
-        env.set_slot(0, evaluate(arg0))
-        env.set_slot(1, evaluate(arg1))
-        env.set_slot(2, evaluate(arg2))
+        slots = env.slot_values
+        slots[0] = arg0.eval_in(self)
+        slots[1] = arg1.eval_in(self)
+        slots[2] = arg2.eval_in(self)
         true
       else
         false
@@ -5870,25 +6119,24 @@ module Tungsten
     end
 
     def cached_param_slot_names(owner, params)
-      if owner.instance_variable_defined?(:@slot_names_template)
-        owner.instance_variable_get(:@slot_names_template)
-      else
-        slot_names = {}
-        i = 0
-        while i < params.length
-          slot_names[params[i].name] = i
-          i += 1
-        end
-        # A block is a child scope, not a method barrier. Assignments to names
-        # already present in its captured frame must therefore write through
-        # Environment#set instead of being shadowed by preallocated slots.
-        # Explicit block parameters still own local slots. Methods/functions
-        # retain eager local-slot collection because their barrier owns every
-        # local assignment.
-        collect_local_slot_names(callable_body(owner), slot_names) unless owner.is_a?(AST::Block)
-        slot_names.freeze
-        owner.instance_variable_set(:@slot_names_template, slot_names)
+      tmpl = owner.slot_names_template
+      return tmpl if tmpl
+
+      slot_names = {}
+      i = 0
+      while i < params.length
+        slot_names[params[i].name] = i
+        i += 1
       end
+      # A block is a child scope, not a method barrier. Assignments to names
+      # already present in its captured frame must therefore write through
+      # Environment#set instead of being shadowed by preallocated slots.
+      # Explicit block parameters still own local slots. Methods/functions
+      # retain eager local-slot collection because their barrier owns every
+      # local assignment.
+      collect_local_slot_names(callable_body(owner), slot_names) unless owner.is_a?(AST::Block)
+      slot_names.freeze
+      owner.slot_names_template = slot_names
     end
 
     def callable_body(owner)
@@ -5940,18 +6188,17 @@ module Tungsten
     def cached_free_var_slot_names(block, free_vars)
       return EMPTY_SLOT_NAMES if free_vars.empty?
 
-      if block.instance_variable_defined?(:@free_var_slot_names_template)
-        block.instance_variable_get(:@free_var_slot_names_template)
-      else
-        slot_names = {}
-        i = 0
-        while i < free_vars.length
-          slot_names[free_vars[i]] = i
-          i += 1
-        end
-        slot_names.freeze
-        block.instance_variable_set(:@free_var_slot_names_template, slot_names)
+      tmpl = block.free_var_slot_names_template
+      return tmpl if tmpl
+
+      slot_names = {}
+      i = 0
+      while i < free_vars.length
+        slot_names[free_vars[i]] = i
+        i += 1
       end
+      slot_names.freeze
+      block.free_var_slot_names_template = slot_names
     end
 
     def execute_callable_body(func, env, block)
@@ -5959,12 +6206,13 @@ module Tungsten
       old_block = @current_block
       @env = env
       @current_block = block
-      with_profile_callable(func) do
-        body = func.body
 
-        # The bytecode VM is still experimental and is slower than the tree
-        # walker for common numeric loops, so keep it opt-in while tuning.
-        if BYTECODE_ENABLED && !block && !func.instance_variable_get(:@bc_checked)
+      body = func.body
+
+      # The bytecode VM is still experimental and is slower than the tree
+      # walker for common numeric loops, so keep it opt-in while tuning.
+      if BYTECODE_ENABLED
+        if !block && !func.instance_variable_get(:@bc_checked)
           func.instance_variable_set(:@bc_checked, true)
           bc = Bytecode::Compiler.new(func.args || EMPTY_ARGS).compile(body)
           func.instance_variable_set(:@bytecode, bc) if bc
@@ -5973,8 +6221,8 @@ module Tungsten
         bc = func.instance_variable_get(:@bytecode)
         if bc
           begin
-            return (@bc_vm ||= Bytecode::VM.new(self)).execute(bc, env)
-          rescue => e
+            return with_profile_callable(func) { (@bc_vm ||= Bytecode::VM.new(self)).execute(bc, env) }
+          rescue => _e
             # Bytecode execution failed (e.g. unsupported op hit) — fall through to tree-walker
             func.instance_variable_set(:@bytecode, nil)
           ensure
@@ -5982,19 +6230,24 @@ module Tungsten
             @env = old_env
           end
         end
+      end
 
-        if func.instance_variable_defined?(:@has_return)
-          hr = func.instance_variable_get(:@has_return)
+      hr = func.has_return
+      if hr.nil?
+        hr = Interpreter.body_has_return?(body)
+        func.has_return = hr
+      end
+      begin
+        if @profile_enabled
+          with_profile_callable(func) do
+            hr ? catch(RETURN_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
+          end
         else
-          hr = Interpreter.body_has_return?(body)
-          func.instance_variable_set(:@has_return, hr)
+          hr ? catch(RETURN_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
         end
-        begin
-          hr ? catch(RETURN_SIGNAL) { evaluate(body) } : evaluate(body)
-        ensure
-          @current_block = old_block
-          @env = old_env
-        end
+      ensure
+        @current_block = old_block
+        @env = old_env
       end
     end
 
@@ -6021,7 +6274,7 @@ module Tungsten
           if i < args.size
             env.set_slot(i, args[i])
           elsif param.default
-            env.set_slot(i, evaluate(param.default))
+            env.set_slot(i, param.default.eval_in(self))
           else
             raise Tungsten::Error, "missing argument: #{param.name}"
           end
@@ -6061,14 +6314,13 @@ module Tungsten
       @env = method_env
       with_profile_callable(func) do
         body = func.body
-        if func.instance_variable_defined?(:@has_return)
-          hr = func.instance_variable_get(:@has_return)
-        else
+        hr = func.has_return
+        if hr.nil?
           hr = Interpreter.body_has_return?(body)
-          func.instance_variable_set(:@has_return, hr)
+          func.has_return = hr
         end
         begin
-          hr ? catch(RETURN_SIGNAL) { evaluate(body) } : evaluate(body)
+          hr ? catch(RETURN_SIGNAL) { body.eval_in(self) } : body.eval_in(self)
         ensure
           @env = old_env
         end
@@ -6087,9 +6339,29 @@ module Tungsten
         return r.denominator == 1 ? r.numerator : r
       end
       return key.numerator if key.is_a?(::Rational) && key.denominator == 1
-      # Native hashes fold string and symbol keys into one spelling.
-      return key.name if key.is_a?(::Symbol)
       key
+    end
+
+    def hash_indifferent_set(hash, key, value)
+      key = canonical_hash_key(key)
+      if key.is_a?(::Symbol)
+        return hash[key.name] = value if !hash.key?(key) && hash.key?(key.name)
+      elsif key.is_a?(String)
+        return hash[key.to_sym] = value if !hash.key?(key) && hash.key?(key.to_sym)
+      end
+      hash[key] = value
+    end
+
+    def hash_indifferent_key?(hash, key)
+      key = canonical_hash_key(key)
+      return true if hash.key?(key)
+      if key.is_a?(::Symbol)
+        hash.key?(key.name)
+      elsif key.is_a?(String)
+        hash.key?(key.to_sym)
+      else
+        false
+      end
     end
 
     def hash_indifferent_get(hash, key)
@@ -6223,22 +6495,21 @@ module Tungsten
     end
 
     def primitive_runtime_class(recv)
-      name =
-        case recv
-        when Tungsten::Atomic then "Atomic"
-        when Tungsten::SmallArrayValue then "SmallArray"
-        when ::Array then "Array"
-        when ::Hash then "Hash"
-        when ::String then "String"
-        when ::Symbol then "Symbol"
-        when Tungsten::CharValue then "Char"
-        when ::Integer then "Int"
-        when ::Float then "Float"
-        when TrueClass, FalseClass then "Bool"
-        when NilClass then "Nil"
-        end
-
-      name && @classes[name]
+      case recv
+      when ::Integer
+        packed_token_int?(recv) ? (@classes["Token"] || try_autoload_core("Token")) : @classes["Int"]
+      when ::Array then @classes["Array"]
+      when ::String then @classes["String"]
+      when ::Hash then @classes["Hash"]
+      when Runtime::PackedNode then @classes["Tungsten:AST:Node"] || @classes["Node"]
+      when ::Symbol then @classes["Symbol"]
+      when TrueClass, FalseClass then @classes["Bool"]
+      when NilClass then @classes["Nil"]
+      when ::Float then @classes["Float"]
+      when Tungsten::CharValue then @classes["Char"]
+      when Tungsten::SmallArrayValue then @classes["SmallArray"]
+      when Tungsten::Atomic then @classes["Atomic"]
+      end
     end
 
     # The class object for `.class` dispatch. Returns the WClass for
@@ -6297,15 +6568,15 @@ module Tungsten
     end
 
     def call_builtin(recv, name, args)
-      case name
-      when "to_s"       then recv.to_s
-      when "class"      then class_object_for(recv)
-      when "class_name" then class_object_for(recv).name
-      when "nil?"    then false
-      when "itself" then recv
-      when "is_a?"
+      case BUILTIN_METHOD_IDS[name]
+      when 1 then recv.to_s
+      when 2 then class_object_for(recv)
+      when 3 then class_object_for(recv).name
+      when 4 then false
+      when 5 then recv
+      when 6
         tungsten_is_a?(recv, args[0])
-      when "respond_to?"
+      when 7
         method_name = args[0].to_s
         !!recv.w_class.lookup_method(method_name) ||
           @method_builtins.key?(method_name) ||
@@ -6337,7 +6608,7 @@ module Tungsten
         if depth + 1 < bindings.size
           iterate_with(bindings, collections, depth + 1, body, body_has_next:) { |r| yield r }
         else
-          body_has_next ? catch(NEXT_SIGNAL) { yield evaluate(body) } : yield(evaluate(body))
+          body_has_next ? catch(NEXT_SIGNAL) { yield body.eval_in(self) } : yield(body.eval_in(self))
         end
       end
     end
@@ -6412,6 +6683,24 @@ module Tungsten
       else Environment::UNDEFINED
       end
     end
+
+    public :decode_w_value, :cached_symbol_value, :visit_alias, :visit_and, :visit_array_literal,
+           :visit_assign, :visit_assign_op, :visit_begin, :visit_binary_op, :visit_boolean,
+           :visit_break, :visit_byte_array_interpolation, :visit_byte_array_literal, :visit_call,
+           :visit_case_expr, :visit_case_expr_dispatch, :visit_char, :visit_cidr4, :visit_cidr6,
+           :visit_class_def, :visit_class_var, :visit_color_literal, :visit_currency_literal,
+           :visit_date, :visit_date_time, :visit_def, :visit_duration, :visit_fn, :visit_global_var,
+           :visit_hash_literal, :visit_if, :visit_in_test, :visit_instance_var, :visit_ip4,
+           :visit_ip6, :visit_is, :visit_key_literal, :visit_list, :visit_magic_constant,
+           :visit_measurement_literal, :visit_module_def, :visit_month, :visit_multiset_literal,
+           :visit_next, :visit_nil, :visit_not, :visit_on_guard, :visit_or, :visit_path,
+           :visit_percentage_literal, :visit_print, :visit_quantity_literal, :visit_raise,
+           :visit_range_literal, :visit_rational_literal, :visit_recase, :visit_regex_literal,
+           :visit_return, :visit_self, :visit_set_literal, :visit_splat, :visit_string_interpolation,
+           :visit_string_literal, :visit_super, :visit_symbol, :visit_time_literal, :visit_trait_def,
+           :visit_tuple, :visit_type_hint, :visit_typed_array, :visit_until, :visit_use, :visit_uuid,
+           :visit_var, :visit_w_value, :visit_week, :visit_while, :visit_with, :visit_write,
+           :visit_yield
 
     if DISPATCH_PROFILE_ENABLED
       module DispatchProfiling

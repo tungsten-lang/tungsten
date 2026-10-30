@@ -6,6 +6,10 @@ module Tungsten::AST
       @parts = parts
     end
 
+    def eval_in(interp)
+      interp.visit_byte_array_interpolation(self)
+    end
+
     def children
       @parts.each { |part| yield part if part.is_a?(Node) }
     end

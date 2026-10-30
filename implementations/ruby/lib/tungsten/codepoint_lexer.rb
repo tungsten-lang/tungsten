@@ -141,21 +141,27 @@ module Tungsten
         scan_token
       end
 
-      @regex_capture_scope = false if %i[NL ;].include?(@token.type)
-      @regex_capture_scope = true if @token.type == :REGEX
+      tt = @token.type
+      if tt == :NL || tt == :";"
+        @regex_capture_scope = false
+      elsif tt == :REGEX
+        @regex_capture_scope = true
+      end
 
       # Track open-bracket nesting so indentation inside a multi-line
       # (...)/[...]/{...} is treated as line-continuation, not as block
       # structure (see handle_indentation).
-      case @token.type
+      case tt
       when :"(", :"[", :"{"
         @bracket_depth += 1
       when :")", :"]", :"}"
-        @bracket_depth -= 1 if @bracket_depth.positive?
+        @bracket_depth -= 1 if @bracket_depth > 0
       end
 
-      @line_start = false unless %i[INDENT DEDENT NL SP SHEBANG].include?(@token.type)
-      @last_significant_token_type = @token.type unless %i[INDENT DEDENT NL SP SHEBANG].include?(@token.type)
+      unless tt == :INDENT || tt == :DEDENT || tt == :NL || tt == :SP || tt == :SHEBANG
+        @line_start = false
+        @last_significant_token_type = tt
+      end
       @token
     end
 
@@ -1195,6 +1201,8 @@ module Tungsten
 
     def type_hint_start?(pos)
       b = @source.getbyte(pos)
+      return true if upper_byte?(b)
+
       if lower_byte?(b)
         p = pos
         p += 1 while ident_continue_byte?(@source.getbyte(p))
@@ -1311,6 +1319,9 @@ module Tungsten
       elsif match_bytes?("\\e")
         out << "\e"
         advance(2)
+      elsif match_bytes?("\\0")
+        out << "\0"
+        advance(2)
       elsif match_bytes?("\\\\")
         out << "\\"
         advance(2)
@@ -1347,6 +1358,58 @@ module Tungsten
         p += utf8_width_at(p)
       end
       depth.zero?
+    end
+
+    def scan_heredoc(start_col)
+      start_row = @row
+      advance(3)
+      advance while byte == 32 || byte == 9
+      delim_start = @pos
+      if alpha_byte?(byte) || byte == 95
+        advance while alpha_byte?(byte) || digit_byte?(byte) || byte == 95
+      end
+      delim = slice(delim_start)
+      error "expected heredoc delimiter after <<~" if delim.empty?
+
+      advance while !eof? && byte != 10
+      error "unterminated heredoc: <<~#{delim}" if eof?
+      @pos += 1
+      @row += 1
+      @col = 1
+
+      body_lines = []
+      min_indent = nil
+      loop do
+        error "unterminated heredoc: <<~#{delim}" if eof?
+        line_start = @pos
+        advance while !eof? && byte != 10
+        line = slice(line_start)
+        if line.strip == delim && line =~ /\A[ \t]*#{Regexp.escape(delim)}[ \t]*\z/
+          break
+        end
+        body_lines << line
+        stripped = line.lstrip
+        unless stripped.empty?
+          indent = line.bytesize - stripped.bytesize
+          min_indent = indent if min_indent.nil? || indent < min_indent
+        end
+        error "unterminated heredoc: <<~#{delim}" if eof?
+        @pos += 1
+        @row += 1
+        @col = 1
+      end
+
+      min_indent ||= 0
+      dedented = body_lines.map do |l|
+        if l.empty? || l.bytesize <= min_indent
+          ""
+        else
+          l.byteslice(min_indent, l.bytesize - min_indent)
+        end
+      end.join("\n")
+
+      set_token(:STRING, dedented, start_row, start_col)
+      true
     end
 
     def scan_interpolation_expr
@@ -2075,7 +2138,18 @@ module Tungsten
     ].freeze
 
     def regex_literal_allowed?
-      @line_start || !VALUE_TOKEN_TYPES.include?(@last_significant_token_type)
+      return true if @line_start
+
+      case @last_significant_token_type
+      when :INT, :FLOAT, :DECIMAL, :STRING, :STRING_INTERP, :REGEX, :REGEX_CAPTURE, :SYMBOL, :NAME, :ID,
+           :IVAR, :CVAR, :GLOBAL, :")", :"]", :"}", :MAGIC_FILE, :MAGIC_LINE, :MAGIC_DIR, :UUID, :CURRENCY,
+           :QUANTITY, :DURATION, :WVALUE, :BYTE_ARRAY, :BYTE_ARRAY_INTERP, :DATE, :DATETIME, :TIME, :MONTH,
+           :IP4, :CIDR4, :RATIONAL, :CHAR, :CODEPOINT, :KEY, :WORD_ARRAY, :SYMBOL_ARRAY, :PARG, :SUPERSCRIPT,
+           :COLOR, :TRUE, :FALSE, :NIL
+        false
+      else
+        true
+      end
     end
 
     def regex_literal_ahead?
@@ -2268,6 +2342,7 @@ module Tungsten
           emit_operator(:"<-", 2, start_col)
         when 60
           return emit_operator(:"<<=", 3, start_col) if byte(2) == 61
+          return scan_heredoc(start_col) if byte(2) == 126
 
           emit_operator(:<<, 2, start_col)
         when 61

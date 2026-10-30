@@ -9,5 +9,9 @@ module Tungsten::AST
       @b = b
       @a = a
     end
+
+    def eval_in(interp)
+      interp.visit_color_literal(self)
+    end
   end
 end

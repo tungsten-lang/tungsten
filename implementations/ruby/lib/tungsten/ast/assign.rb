@@ -16,6 +16,10 @@ module Tungsten::AST
       @cached_layout_shape = 0
     end
 
+    def eval_in(interp)
+      interp.visit_assign(self)
+    end
+
     def children
       yield @name if @name.is_a?(Node)
       yield @value if @value.is_a?(Node)

@@ -201,7 +201,11 @@ else
   fi
   if ! clang ${(z)TUNGSTEN_SPINEL_STAGE1_CLANG_OPT} -DNDEBUG ${=TUNGSTEN_MARCH_ARGS} \
       -Wl,-dead_strip -Wl,-stack_size,0x8000000 \
-      "$RUNTIME_ARCHIVE" "$STAGE1_LL" ${=ZSTD_LDFLAGS} -o "$STAGE1" \
+      "$RUNTIME_ARCHIVE" \
+      "$BUILD/runtime-stage0-objs/lexchar_tables.o" \
+      "$BUILD/runtime-stage0-objs/ssmr_witness.o" \
+      "$BUILD/runtime-stage0-objs/unicode_tables.o" \
+      "$STAGE1_LL" ${=ZSTD_LDFLAGS} -o "$STAGE1" \
       >>"$STAGE1_BUILD_LOG" 2>&1; then
     cat "$STAGE1_BUILD_LOG"
     echo "failed to link stage 1 from $STAGE1_LL — see $STAGE1_BUILD_LOG" >&2

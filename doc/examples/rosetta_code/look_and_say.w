@@ -2,11 +2,12 @@
 
 -> look_and_say(s)
   result = ""
+  chars = s.chars
   i = 0
-  while i < s.size
-    c = s[i]
+  while i < chars.size
+    c = chars[i]
     count = 1
-    while i + count < s.size and s[i + count] == c
+    while i + count < chars.size && chars[i + count] == c
       count += 1
     result += count.to_s + c
     i += count
@@ -17,7 +18,6 @@ s = "1"
   << s
   s = look_and_say(s)
 
-## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten look_and_say.w`
 ## expect stdout
 ## 1
 ## 11

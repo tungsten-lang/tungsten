@@ -4,7 +4,7 @@ Tungsten has three engines that each implement the language separately:
 the native interpreter (`bin/tungsten run --interpret`,
 `compiler/lib/interpreter.w`), the WIRE → LLVM compiled path
 (`bin/tungsten compile` / `-o`), and the Ruby tree-walker
-(`bin/tungsten --interpret`, `implementations/ruby/`). The parity suite
+(`bin/tungsten --ruby`, `implementations/ruby/`). The parity suite
 runs the *same* program through the engines and diffs the transcripts, so a
 behaviour that quietly drifts in one engine shows up as a red diff instead
 of surviving as folklore.
@@ -61,9 +61,9 @@ stage `test-specs.sh` runs never touches the spec suite's slots), or
 2. `bin/tungsten -c spec/parity/<name>_spec.w` must say `200 OK`.
 3. `scripts/parity.sh --files <name>` — iterate until it is PASS, or split
    the divergent line(s) into their own xfail spec (below).
-4. Add the path to `parity_specs` in `scripts/spec-lanes.sh`. Every tracked
-   `spec/**/*_spec.w` must be classified there; an unlisted file fails the
-   whole suite closed.
+4. `scripts/spec-lanes.sh` automatically classifies every `spec/parity/*_spec.w`
+   into the parity lane by folder convention (`scripts/spec-lanes.sh --check`
+   verifies classification).
 
 ## xfail policy
 

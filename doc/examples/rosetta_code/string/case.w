@@ -1,9 +1,8 @@
-# https://rosettacode.org/wiki/String_case#Ruby
+# String case
 
-"alphaBETA".downcase   # => "alphabeta"
-"alphaBETA".upcase     # => "ALPHABETA"
-
-"alphaBETA".swapcase   # => "ALPHAbeta"
-"alphaBETA".capitalize # => "Alphabeta
+<< "alphaBETA".downcase
+<< "alphaBETA".upcase
 
 ## expect stdout
+## alphabeta
+## ALPHABETA

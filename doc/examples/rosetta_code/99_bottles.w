@@ -1,19 +1,24 @@
 # 99 Bottles of Beer
 
 -> bottles(n)
-  when n == 0 "no more bottles"
-  when n == 1 "1 bottle"
-  else        "[n] bottles"
+  if n == 0
+    "no more bottles"
+  elsif n == 1
+    "1 bottle"
+  else
+    "[n] bottles"
 
-n = 99
+-> sing(start)
+  n = start
+  while n > 0
+    << "[bottles(n)] of beer on the wall, [bottles(n)] of beer."
+    n -= 1
+    << "Take one down and pass it around, [bottles(n)] of beer on the wall."
+    if n > 0
+      << ""
 
-while n > 0
-  << "[bottles(n)] of beer on the wall, [bottles(n)] of beer."
+sing(99)
 
-  << "Take one down and pass it around, " + bottles(n--) + " of beer on the wall."
-  <<
-
-## expect skip until the bug in compiler interpolation is fixed
 ## expect stdout
 ## 99 bottles of beer on the wall, 99 bottles of beer.
 ## Take one down and pass it around, 98 bottles of beer on the wall.

@@ -1,13 +1,12 @@
 # Catalan numbers
 
--> factorial(n)
-  if n <= 1
-    1
-  else
-    n * factorial(n - 1)
-
 -> catalan(n)
-  factorial(2 * n) / (factorial(n + 1) * factorial(n))
+  c = 1
+  i = 1
+  while i <= n
+    c = c * 2 * (2 * i - 1) / (i + 1)
+    i += 1
+  c
 
 (0..15).each -> (n)
   << "C([n]) = [catalan(n)]"

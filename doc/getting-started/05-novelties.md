@@ -115,7 +115,7 @@ Desugars to a multi-assign of `[b, a]` — no temporary in source.
 
 ---
 
-## 7. `fn` — pure and memoized *(compiled)*
+## 7. `fn` — pure and memoized
 
 ```tungsten
 fn fib(n)
@@ -126,13 +126,13 @@ fn fib(n)
 ```
 
 `fn` tells the compiler the function is pure and eligible for automatic
-memoization. Great for recursive combinatorics; use `-o` to compile.
+memoization. Great for recursive combinatorics.
 
 Ordinary `->` functions are not auto-memoized.
 
 ---
 
-## 8. Arity form and `@1`, `@2` *(compiled)*
+## 8. Arity form and `@1`, `@2`
 
 ```tungsten
 -> add/2

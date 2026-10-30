@@ -1,5 +1,9 @@
 module Tungsten::AST
   class Fn < Def
+    def eval_in(interp)
+      interp.visit_fn(self)
+    end
+
     def ast_fingerprint(name_map = {})
       parts = [self.class.name]
       # Args: positional structure only (types/defaults), not names

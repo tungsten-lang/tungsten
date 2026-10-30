@@ -18,7 +18,7 @@
 4. bits only — too fundamental for bits  
 
 ```
-use core/sci/interpolate
+use core/interpolate
 << Interpolate.linear(xs, ys, x)
 spl = Interpolate.spline_natural(xs, ys)
 << Interpolate.spline_eval(spl, x)

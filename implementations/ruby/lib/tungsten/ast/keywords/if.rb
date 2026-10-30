@@ -16,6 +16,10 @@ module Tungsten::AST
       @else_block = List.from(a_else)
     end
 
+    def eval_in(interp)
+      interp.visit_if(self)
+    end
+
     def children
       yield @condition if @condition.is_a?(Node)
       yield @then_block if @then_block.is_a?(Node)

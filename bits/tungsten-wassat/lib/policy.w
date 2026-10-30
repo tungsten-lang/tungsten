@@ -192,7 +192,27 @@ WASSAT_CONGRUENCE_DEFAULT = true
 # scout's completed lucky/SLS allocations remain resident while the raw race
 # runs. A continuation is still one arena and must not be counted twice.
 -> wassat_cdcl_arena_bytes(formula)
-  25165824 + 24 * formula["flat_nlits"] + 160 * formula["flat_ncl"] + 640 * formula["nvars"]
+  25165824 + 24 * formula["flat_nlits"] + 160 * formula["flat_ncl"] + 640 * formula["nvars"] + wassat_inprocess_scratch_bytes(formula["flat_ncl"], formula["nvars"])
+
+# Conservative per-solver scratch for the enabled inprocessing passes.
+# Clause-slot tables include loader headroom; SCC and subsumption share two
+# literal tables. A disabled schedule reserves none of this optional scratch.
+-> wassat_inprocess_scratch_bytes(ncl, nv)
+  return 0 if env("WASSAT_INPROCESS") == "0"
+  return 0 if ncl > 2500000 || nv > 400000
+  return 0 if ncl < 500 && env("WASSAT_INPROCESS") == nil
+  mask = 15
+  mask = wassat_decimal_in_range("WASSAT_INPROCESS_PASSES", env("WASSAT_INPROCESS_PASSES"), 0, 15) if env("WASSAT_INPROCESS_PASSES") != nil
+  bytes = 1024 + 8 * (nv + 2)
+  bytes += 24 * (nv + 2) if (mask & 1) != 0
+  bytes += 8 * (nv + 1) if (mask & 2) != 0
+  subst = (mask & 8) != 0 && env("WASSAT_SUBST") != "0"
+  if subst
+    bytes += 4194304 + 136 * (nv + 2) + 12 * ncl + 1048576
+  if (mask & 4) != 0
+    bytes += 12 * ncl + 1048576
+    bytes += 12 * ncl + 1048576 + 32 * (nv + 2) unless subst
+  bytes
 
 -> wassat_preprocess_arena_bytes(formula)
   # A live preprocessor retains roughly six 2*ncl clause tables, three
@@ -780,9 +800,59 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     return wassat_decimal_in_range("WASSAT_SUBSUME", env("WASSAT_SUBSUME"), 0, 2000000000) if env("WASSAT_SUBSUME") != nil
     0
 
+  # Fixed mid-search inprocessing interval, in conflicts. Set only by
+  # WASSAT_INPROCESS, which is an ablation/measurement hook: a positive value
+  # pins a fixed cadence, and 0 disables inprocessing entirely (including the
+  # automatic schedule below).
   -> inprocess_every
     return wassat_decimal_in_range("WASSAT_INPROCESS", env("WASSAT_INPROCESS"), 0, 2000000000) if env("WASSAT_INPROCESS") != nil
     0
+
+  # The automatic schedule for compounding mid-search inprocessing
+  # (Wassat#inprocess_round: root cleaning, failed-literal probing,
+  # vivification, all-clause subsumption, equivalent-literal substitution).
+  #
+  # Why the old pass (v1) was off, and why this one is on:
+  #   * v1 only re-ran SCC substitution, which consumes binary clauses that CDCL
+  #     rarely learns, so it had almost nothing to work on.
+  #   * v1 vivification fired at the first reduction (2-4k conflicts), which
+  #     perturbed searches that finish in a few thousand conflicts (ibm-12,
+  #     uuf250) for no gain.
+  # This schedule waits until a search has proved it is not easy. The first
+  # round runs at 25k conflicts, and the interval grows geometrically from
+  # there (see Wassat#inprocess_round). Anything that finishes earlier runs
+  # exactly the same search as before.
+  #
+  # Shape gate: dense random 3-SAT (ternary-dominated, few variables) has no
+  # binary implication structure for probing or substitution, and its learned
+  # clauses do not subsume one another, so it is left alone. The clause-count
+  # bounds keep the per-arm scratch (about 2 words per clause slot plus 10 per
+  # literal) inside the race's memory model.
+  -> auto_inprocess_first
+    return 0 if env("WASSAT_INPROCESS") != nil
+    return 0 if @nclauses < 500 || @nclauses > 2500000 || @nvars > 400000
+    return 0 if @nvars <= 600 && @ternary * 4 >= @nclauses * 3
+    25000
+
+  # Which inprocessing passes run, as a bitmask: 1 probing, 2 vivification,
+  # 4 subsumption, 8 substitution. Ablation hook; the default runs all four.
+  -> inprocess_passes
+    return wassat_decimal_in_range("WASSAT_INPROCESS_PASSES", env("WASSAT_INPROCESS_PASSES"), 0, 15) if env("WASSAT_INPROCESS_PASSES") != nil
+    15
+
+  # Which raw race arms run mid-search inprocessing, as a bitmask over matrix
+  # arm index: bit a set means arm a runs it. An arm left out searches without
+  # it (it still imports clauses from arms that do), so the race can hedge a
+  # trajectory change instead of imposing it on every arm.
+  # WASSAT_INPROCESS_ARMS is the measurement hook.
+  # Optional separation of first rounds by raw arm index; default unchanged.
+  -> inprocess_stagger
+    return 0 if env("WASSAT_INPROCESS_STAGGER") == nil
+    wassat_decimal_in_range("WASSAT_INPROCESS_STAGGER", env("WASSAT_INPROCESS_STAGGER"), 0, 1000000)
+
+  -> inprocess_arm_mask
+    return wassat_decimal_in_range("WASSAT_INPROCESS_ARMS", env("WASSAT_INPROCESS_ARMS"), 0, 65535) if env("WASSAT_INPROCESS_ARMS") != nil
+    65535
 
   # Trail reuse on restart. A restart discards a trail the heuristic would
   # largely rebuild; keeping the prefix whose decisions still outrank the best
@@ -989,7 +1059,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # renderings. Unknown memory (zero) leaves the CPU-only decision intact.
     memory = System.physical_memory_bytes ## i64
     if memory > 0
-      per_arm = 25165824 + 24 * @nliterals + 160 * @nclauses + 640 * @nvars
+      per_arm = 25165824 + 24 * @nliterals + 160 * @nclauses + 640 * @nvars + wassat_inprocess_scratch_bytes(@nclauses, @nvars)
       budget = memory / 3
       budget = 2684354560 if budget > 2684354560
       while arms > 1 && per_arm * arms > budget

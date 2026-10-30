@@ -1,9 +1,10 @@
 # rung — the model registry.
 #
-# Built-in defaults match the standing ladder (codex, agy, grok, muse,
-# claude, plus any `ollama:<model>`). ~/.config/rung/models.toml (or
-# --config / $RUNG_CONFIG) is merged over them key by key, so a user file
-# may change one timeout without restating a whole entry.
+# Built-in defaults match the standing ladder (codex, agy, grok, claude);
+# muse and any `ollama:<model>` are available but off the default ladder.
+# ~/.config/rung/models.toml (or --config / $RUNG_CONFIG) is merged over
+# them key by key, so a user file may change one timeout without restating
+# a whole entry.
 #
 # A model entry:
 #   command     shell command template; {prompt_file}, {workdir},
@@ -62,7 +63,7 @@ RUNG_DEFAULT_GUARD = "~/math/openai/tools/guard.sh"
   }
   reg = {
     "defaults" => {
-      "models" => ["codex", "agy", "grok", "muse", "claude"],
+      "models" => ["codex", "agy", "grok", "claude"],
       "integrator" => "claude",
       "timeout" => 2400,
       "retries" => 2,

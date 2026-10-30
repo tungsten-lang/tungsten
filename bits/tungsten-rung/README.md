@@ -7,7 +7,7 @@ verdict: did the state improve, what changed, and which claims still need
 checking. Rounds repeat until one full round brings no improvement.
 
 ```sh
-rung task.md                                    # the default ladder: codex, agy, grok, muse, claude
+rung task.md                                    # the default ladder: codex, agy, grok, claude
 rung task.md --models "ollama:glm-5.3,claude"   # a different ladder
 rung task.md -m "codex,ollama:glm-5.3|ollama:kimi-k3,claude" -r 3
 rung task.md --dry-run                          # write the plan and the first prompts, call nothing

@@ -418,11 +418,58 @@ WASSAT_PROOF_DRAT = 2
     @asg_count = 0
     @asg_filter = false
     @rhist = i64[64]             # reduce_db scratch (worker threads: no alloc)
-    # Mid-search inprocessing schedule (0 = off, the shipped default until
-    # measured). See the call site in solve_loop.
+    # Mid-search inprocessing schedule. WASSAT_INPROCESS pins a fixed
+    # interval (0 = off); otherwise policy's shape-gated automatic schedule
+    # decides the first round, and later rounds space out geometrically.
+    # See inprocess_round.
     @inprocess_every = @config.inprocess_every
-    @inprocess_at = @inprocess_every
+    @inprocess_at = @inprocess_every > 0 ? @inprocess_every : @config.auto_inprocess_first
+    @inprocess_step = 15000
+    @inprocess_passes = @config.inprocess_passes
     @inprocessings = 0
+    @inp_props_at = 0
+    # Scratch for the inprocessing passes. Prepared on the main thread by
+    # prepare_inprocessing, because fixed-capacity race arms must not allocate.
+    @inp_ready = false
+    @inp_pm = i64[16]
+    @inp_sst = i64[8]
+    @inp_rst = i64[8]
+    # Native cumulative counters: cancelled rounds, genuine units,
+    # subsumption work, SCC work, cleaned literals. Never boxed in workers.
+    @inp_totals = i64[8]
+    @inp_phase = nil
+    @inp_mark = nil
+    @inp_lits = nil
+    @inp_units = nil
+    @inp_s_idx = nil
+    @inp_s_low = nil
+    @inp_s_onstk = nil
+    @inp_s_reprs = nil
+    @inp_s_stk = nil
+    @inp_s_work = nil
+    @inp_s_wcur = nil
+    @inp_s_mark = nil
+    @inp_ht = nil
+    @probe_cursor = 1
+    @probe_gen = 0
+    @inp_nlift = 0
+    @inp_neq = 0
+    @vivify_cursor = 0
+    @subsume_cursor = 0
+    # Substitution parks variables at the root. Assumption queries may name
+    # any variable, so a solver that serves them must never substitute
+    # mid-search (solve_assuming_budget clears this).
+    @allow_subst = true
+    @need_clean = false
+    # -1: the first clean always runs (see clean_root_clauses).
+    @last_clean_tsize = -1
+    # Inprocessing yield, reported under WASSAT_PROFILE.
+    @inp_failed = 0
+    @inp_lifted = 0
+    @inp_equivs = 0
+    @inp_subsumed = 0
+    @inp_strengthened = 0
+    @inp_cleaned = 0
     # Learned-clause subsumption scratch, allocated lazily on first use.
     @subsume_every = @config.subsume_every
     @subsume_at = @subsume_every
@@ -1310,6 +1357,10 @@ WASSAT_PROOF_DRAT = 2
     @no_stable = true
     @mode_stable = true
     @use_target = true
+    # The arm's whole point is never leaving stable mode. Frontier escalation
+    # would rewrite it into focused-only VMTF at 250k conflicts, which made
+    # every stable-only arm in a long race a duplicate of the focused ones.
+    @escalate_at = 0
     0
 
   # Race axis: never leave focused mode (kissat --sat / --stable=0 style:
@@ -1495,6 +1546,73 @@ WASSAT_PROOF_DRAT = 2
   -> enable_subsume(every)
     @subsume_every = every
     @subsume_at = every
+    self.prepare_subsume_scratch if every > 0 && @proof_mode == WASSAT_PROOF_NONE
+    0
+
+  # Override the inprocessing schedule for one solver (race diversity): the
+  # first round at `first` conflicts, later rounds `step` apart, growing.
+  # A WASSAT_INPROCESS=0 ablation stays off. Prepares the scratch, so call it
+  # on the main thread before enable_fixed_caps.
+  -> enable_inprocess(first, step = 0)
+    return 0 if env("WASSAT_INPROCESS") == "0"
+    @inprocess_at = @conflicts + first
+    @inprocess_step = step if step > 0
+    self.prepare_inprocessing if first > 0
+    0
+
+  # Delay the first round for an explicitly staggered portfolio experiment.
+  -> delay_inprocess(conflicts)
+    @inprocess_at += conflicts if @inprocess_at > 0 && conflicts > 0
+    0
+
+  # Race axis: call before enable_fixed_caps to avoid preparing scratch.
+  -> disable_inprocess
+    @inprocess_at = 0
+    0
+
+  # For solvers that answer assumption queries: substitution parks variables
+  # at the root, where a later assumption on one of them would be misread.
+  -> disable_substitution
+    @allow_subst = false
+    0
+
+  # Allocate every inprocessing buffer up front, on the main thread. A
+  # fixed-capacity worker never allocates; a pass whose scratch is missing
+  # is skipped instead.
+  -> prepare_inprocessing
+    return 0 if @inp_ready || @proof_mode != WASSAT_PROOF_NONE
+    return 0 if @nvars > 400000 || @ccap > 4000000
+    nv = @nvars
+    nl = 2 * nv + 4
+    if (@inprocess_passes & 1) != 0
+      @inp_phase = i64[nv + 1]
+      @inp_mark = i64[nv + 1]
+      @inp_lits = i64[nv + 2]
+    if (@inprocess_passes & 2) != 0 && @vivify_phase == nil
+      @vivify_phase = i64[nv + 1]
+    @inp_units = i64[nv + 2] if @inp_units == nil
+    if (@inprocess_passes & 8) != 0 && @allow_subst && @config.use_substitution(true)
+      @inp_s_idx = i64[nl]
+      @inp_s_low = i64[nl]
+      @inp_s_onstk = i64[nl]
+      @inp_s_reprs = i64[nl]
+      @inp_s_stk = @sub_head != nil ? @sub_head : i64[nl]
+      @inp_s_work = i64[nl]
+      @inp_s_wcur = i64[nl]
+      @inp_s_mark = @sub_stamp != nil ? @sub_stamp : i64[nl]
+      # Subsumption and SCC never run at the same time, and the subsumption
+      # pass resets its head and stamp tables on entry.
+      @sub_head = @inp_s_stk if @sub_head == nil
+      @sub_stamp = @inp_s_mark if @sub_stamp == nil
+      hcap = 1024
+      while hcap < 2 * (@ccap + 16) && hcap < 524288
+        hcap = hcap * 2
+      @inp_ht = i64[hcap]
+      @subst = i64[nv + 2] if @nsubst == 0 && @subst.size < nv + 2
+      # SCC rewrite needs one unit-clause slot per clause, but no signatures.
+      @sub_next = i64[@ccap + 2] if @sub_next == nil
+    self.prepare_subsume_scratch if (@inprocess_passes & 4) != 0 || @subsume_every > 0
+    @inp_ready = true
     0
 
   -> enable_chrono
@@ -1511,6 +1629,9 @@ WASSAT_PROOF_DRAT = 2
     @use_vmtf = true
     @use_target = true
     @use_chrono = true
+    # All-UIP shrinking cannot run under chronological backtracking (see the
+    # note at its call site in solve_loop): it aborts or misfires there.
+    @use_shrink = false
     @no_stable = true
     @mode_stable = false
     @rst_num = 21
@@ -1762,6 +1883,11 @@ WASSAT_PROOF_DRAT = 2
   # Freeze capacities: grow-in-thread is forbidden, exhaustion retires the
   # arm. Call on the main thread after construction.
   -> enable_fixed_caps
+    # The last main-thread moment before this solver becomes a worker: the
+    # inprocessing scratch must exist now or never. Solvers that never freeze
+    # (serial, scouts) allocate it lazily at their first round instead, so a
+    # short-lived solver never pays for it.
+    self.prepare_inprocessing if @inprocess_at > 0
     @fixed_caps = true
     0
 
@@ -2009,7 +2135,14 @@ WASSAT_PROOF_DRAT = 2
   # entry. The replacement is a subset of the original clause, so its old
   # watches remain sound until the next rebuild. Probes preserve saved
   # phases, and a conflict from a newly derived root unit is terminal.
-  -> vivify_round
+  #
+  # The defaults are the original reduce_db-time pass. inprocess_round calls
+  # it with `wide` set: a rotating cursor across rounds, a propagation budget
+  # instead of a clause count, the wider learned tiers (LBD 1..8, length
+  # 3..24), and short irredundant clauses (length 3..12), whose replacement
+  # stays irredundant.
+  -> vivify_round(budget = 300, wide = false, prop_budget = 0)
+    return 0 if wassat_stop_requested?(@stop_cell)
     raise "vivification requires root level" unless @dlevel == 0
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
     # Portfolio workers cannot allocate. Their buffer is prepared while
@@ -2024,14 +2157,26 @@ WASSAT_PROOF_DRAT = 2
       @formula_unsat = true
       wassat_copy_vivify_phases(saved_phase, @phase, @nvars)
       return 0
-    budget = 300
     end_ci = @ncl
+    props0 = @pstate[4]
     ci = 0
-    while ci < end_ci && budget > 0 && @ok
-      if @alive[ci] == 1 && @clbd[ci] >= 3 && @clbd[ci] <= 6 && @cmeta[2 * ci + 1] >= 3
+    ci = @vivify_cursor if wide && @vivify_cursor < end_ci
+    scanned = 0
+    while scanned < end_ci && budget > 0 && @ok
+      break if wassat_stop_requested?(@stop_cell)
+      ci = 0 if ci >= end_ci
+      n = @cmeta[2 * ci + 1]
+      lb = @clbd[ci]
+      cand = false
+      if @alive[ci] == 1
+        if wide
+          cand = (lb >= 1 && lb <= 8 && n >= 3 && n <= 24) || (lb == 0 && n >= 3 && n <= 12)
+        else
+          cand = lb >= 3 && lb <= 6 && n >= 3
+      if cand
         budget -= 1
+        budget = 0 if prop_budget > 0 && @pstate[4] - props0 > prop_budget
         st = @cmeta[2 * ci]
-        n = @cmeta[2 * ci + 1]
         root_sat = false
         i = 0
         while i < n
@@ -2041,8 +2186,12 @@ WASSAT_PROOF_DRAT = 2
         unless root_sat
           kept = 0
           finished = false
+          cancelled = false
           i = 0
           while i < n && !finished
+            if wassat_stop_requested?(@stop_cell)
+              cancelled = true
+              break
             lit = @obuf[i]
             val = self.value(lit)
             if val < 0
@@ -2063,6 +2212,9 @@ WASSAT_PROOF_DRAT = 2
               finished = true if confl >= 0
             i += 1
           self.backjump(0)
+          # A partial test proves nothing. Keep the original clause.
+          if cancelled
+            break
           if kept == 0
             @ok = false
             @formula_unsat = true
@@ -2070,11 +2222,16 @@ WASSAT_PROOF_DRAT = 2
             fits = !@fixed_caps || (@asize + kept + 4 <= @acap && @ncl + 2 < @ccap)
             if fits
               nci = self.store_clause(@mbuf, kept)
-              lbdv = @clbd[ci]
-              lbdv = kept - 1 if kept - 1 < lbdv
-              lbdv = 1 if lbdv < 1
-              @clbd[nci] = lbdv
-              @nlearned += 1 if kept > 1
+              if lb == 0
+                # An irredundant clause's replacement is irredundant too:
+                # reduce_db must never be able to drop the only copy.
+                @clbd[nci] = 0
+              else
+                lbdv = lb
+                lbdv = kept - 1 if kept - 1 < lbdv
+                lbdv = 1 if lbdv < 1
+                @clbd[nci] = lbdv
+                @nlearned += 1 if kept > 1
               @alive[ci] = 0
               @vivified += 1
               if kept == 1
@@ -2090,6 +2247,8 @@ WASSAT_PROOF_DRAT = 2
                     @ok = false
                     @formula_unsat = true
       ci += 1
+      scanned += 1
+    @vivify_cursor = ci if wide
     wassat_copy_vivify_phases(saved_phase, @phase, @nvars)
     0
 
@@ -2239,22 +2398,321 @@ WASSAT_PROOF_DRAT = 2
     return 0 unless @subsume_every > 0 && @proof_mode == WASSAT_PROOF_NONE
     return 0 if @conflicts < @subsume_at
     @subsume_at = @conflicts + @subsume_every
+    self.run_subsume(0, 2000000)
+    0
+
+  # Subsumption scratch: signatures and one-watch occurrence links per clause
+  # slot, a head and a stamp per literal. Main thread only.
+  -> prepare_subsume_scratch
     nl = 2 * @nvars + 4
-    if @sub_sig == nil || @sub_sig.size < @ncl + 2
-      scap = @ccap + 2 > @ncl * 2 + 1024 ? @ccap + 2 : @ncl * 2 + 1024
-      @sub_sig = i64[scap]
-      @sub_next = i64[scap]
-    if @sub_head == nil
-      @sub_head = i64[nl]
-      @sub_stamp = i64[nl]
-    pm = i64[8]
+    if @sub_sig == nil || @sub_sig.size < @ccap + 2
+      @sub_sig = i64[@ccap + 2]
+      @sub_next = i64[@ccap + 2] if @sub_next == nil || @sub_next.size < @ccap + 2
+    @sub_head = i64[nl] if @sub_head == nil
+    @sub_stamp = i64[nl] if @sub_stamp == nil
+    @inp_units = i64[@nvars + 2] if @inp_units == nil
+    0
+
+  # One pass of wassat_learned_subsume. `irred` 1 also lets irredundant
+  # clauses be subsumed or strengthened (inprocessing); 0 touches learned
+  # clauses only (the reduce_db race axis). Clause bodies change in place, so
+  # the next clean_root_clauses (end of reduce_db) restores the watch and
+  # binary-list invariants.
+  -> run_subsume(irred, budget)
+    return 0 if wassat_stop_requested?(@stop_cell)
+    if @sub_sig == nil || @sub_sig.size < @ncl + 2 || @sub_head == nil
+      return 0 if @fixed_caps
+      self.prepare_subsume_scratch
+      if @sub_sig.size < @ncl + 2
+        @sub_sig = i64[@ncl * 2 + 1024]
+        @sub_next = i64[@ncl * 2 + 1024]
+    pm = @inp_pm
+    k = 0
+    while k < 16
+      pm[k] = 0
+      k += 1
     pm[0] = @ncl
     pm[1] = @nvars
     pm[2] = 32
-    pm[3] = 2000000
+    pm[3] = budget
+    pm[7] = irred
+    pm[8] = irred == 1 ? @subsume_cursor : 0
+    pm[9] = pm[8]
+    # Binaries still subsume, but the all-clause pass does not target them.
+    # A binary target can only go as a duplicate, or shrink to a unit
+    # against a binary that shares one literal and negates the other, and
+    # that unit is a failed literal, which probe_round looks for. On binary
+    # formulas (qwh: 537k of 542k clauses) the targets would spend the
+    # whole budget on those.
+    pm[11] = irred == 1 ? 3 : 2
+    ts = wassat_prof_clock
     wassat_learned_subsume(@cmeta, @alive, @arena, @clbd, @sub_sig,
-                           @sub_head, @sub_next, @sub_stamp, pm)
-    z = wassat_prof("subsume_learned subsumed=[pm[4]] strengthened=[pm[5]] visits=[pm[6]]", wassat_prof_clock)
+                           @sub_head, @sub_next, @sub_stamp, pm, @stop_cell)
+    @subsume_cursor = pm[9] if irred == 1
+    @inp_totals[2] = @inp_totals[2] + pm[13]
+    @inp_subsumed += pm[4]
+    @inp_strengthened += pm[5]
+    @need_clean = true if pm[4] > 0 || pm[5] > 0
+    z = wassat_prof("subsume irred=[irred] subsumed=[pm[4]] strengthened=[pm[5]] promoted=[pm[10]] visits=[pm[6]] work=[pm[13]] stopped=[pm[12]]", ts)
+    pm[4] + pm[5]
+
+  # Root-level clause cleaning, to a fixpoint: propagate the root trail,
+  # drop every clause a root literal satisfies, strip every root-false
+  # literal, assert the units that exposes, and repeat. Both watch structures
+  # are repacked from the cleaned database.
+  #
+  # This is what makes in-place rewriting safe mid-search. A rebuilt watch
+  # list watches positions 0 and 1 of each clause; once the root trail is
+  # fully propagated a root-false literal sitting there is never visited
+  # again, and the clause silently stops propagating. After cleaning, every
+  # literal of every live clause is unassigned, so any order is a valid watch
+  # order. A clause that shrinks to two literals moves into the binary lists.
+  #
+  # Reasons of root assignments are cleared: analysis never resolves on
+  # level 0, and the clauses that implied them may have just been dropped.
+  -> clean_root_clauses
+    # In-place rewrites MUST finish watch repair even when the race ended.
+    return 0 if !@need_clean && wassat_stop_requested?(@stop_cell)
+    # Assumptions are decisions at levels >= 1, so the level-zero trail is
+    # formula-implied even inside an assumption query.
+    return 0 unless @ok && @dlevel == 0 && @proof_mode == WASSAT_PROOF_NONE
+    # The root trail only grows. When it has not moved and no pass rewrote a
+    # clause body in place, the last clean already left every live clause
+    # free of root-assigned literals, and another scan would change nothing.
+    return 0 if !@need_clean && @tsize == @last_clean_tsize
+    if @inp_units == nil
+      return 0 if @fixed_caps
+      @inp_units = i64[@nvars + 2]
+    st = @inp_pm
+    again = true
+    while again && @ok
+      again = false
+      if self.propagate >= 0
+        @ok = false
+        @formula_unsat = true
+      else
+        k = 0
+        while k < 8
+          st[k] = 0
+          k += 1
+        wassat_clean_root(@cmeta, @alive, @arena, @lassign, @inp_units, st, @ncl, @nvars + 2)
+        @inp_cleaned += st[2] + st[4]
+        @inp_totals[4] = @inp_totals[4] + st[5]
+        self.rebuild_binaries
+        self.rebuild_watches
+        if st[0] == 1
+          @ok = false
+          @formula_unsat = true
+        else
+          nu = st[1]
+          over = st[3]
+          u = 0
+          while u < nu && @ok
+            ci = @inp_units[u]
+            l = @arena[@cmeta[2 * ci]]
+            @alive[ci] = 0
+            lv = self.value(l)
+            if lv == 0
+              self.enqueue(l, -1)
+              again = true
+            elsif lv < 0
+              @ok = false
+              @formula_unsat = true
+            u += 1
+          again = true if over == 1
+    if @ok
+      i = 0
+      while i < @tsize
+        l = @trail[i]
+        @reason[l < 0 ? 0 - l : l] = -1
+        i += 1
+    @last_clean_tsize = @tsize
+    @need_clean = false
+    0
+
+  # Decide `lit` at level 1 and propagate. A conflict makes -lit a root unit
+  # (failed literal) and returns 1. Otherwise the implied literals are either
+  # stamped into @inp_mark with generation `gen` (+gen true, -gen false), when
+  # `compare` is 0, or compared against that stamp: a literal implied by both
+  # polarities of the probed variable is a root unit (lifting), collected
+  # from the bottom of @inp_lits; a literal implied with opposite signs is
+  # equivalent to the probed variable, collected from the top. Returns 0
+  # normally, 1 for a failed literal, or 2 after cancelling and backjumping.
+  -> probe_lit(lit, gen, compare)
+    mark = @tsize
+    @trail_lim[0] = @tsize
+    @dlevel = 1
+    self.enqueue(lit, -1)
+    confl = self.propagate
+    if wassat_stop_requested?(@stop_cell)
+      self.backjump(0)
+      return 2
+    if confl >= 0
+      self.backjump(0)
+      self.enqueue(0 - lit, -1)
+      @inp_failed += 1
+      if self.propagate >= 0
+        @ok = false
+        @formula_unsat = true
+      return 1
+    i = mark + 1
+    while i < @tsize
+      if (i & 1023) == 0 && wassat_stop_requested?(@stop_cell)
+        self.backjump(0)
+        return 2
+      l = @trail[i]
+      x = l < 0 ? 0 - l : l
+      sg = l < 0 ? 0 - gen : gen
+      if compare == 0
+        @inp_mark[x] = sg
+      elsif @inp_mark[x] == sg
+        @inp_lits[@inp_nlift] = l
+        @inp_nlift += 1
+      elsif @inp_mark[x] == 0 - sg
+        # Under -lit this is l; under lit it was -l. So lit <=> -l.
+        @inp_neq += 1
+        @inp_lits[@nvars + 2 - @inp_neq] = 0 - l
+      i += 1
+    self.backjump(0)
+    0
+
+  # Failed-literal probing with lifting and equivalence detection, at the
+  # root, over a rotating cursor and a propagation budget. Only variables
+  # with binary implications are probed: without them a probe propagates
+  # nothing a decision would not. Equivalences are stated as two binaries,
+  # which the substitution pass then collapses. Saved phases are restored.
+  -> probe_round(prop_budget)
+    return 0 if wassat_stop_requested?(@stop_cell)
+    return 0 unless @ok && @dlevel == 0 && @nassump == 0 && @proof_mode == WASSAT_PROOF_NONE
+    return 0 if @inp_mark == nil || @inp_phase == nil || @inp_lits == nil
+    if self.propagate >= 0
+      @ok = false
+      @formula_unsat = true
+      return 0
+    wassat_copy_vivify_phases(@phase, @inp_phase, @nvars)
+    props0 = @pstate[4]
+    allow_eq = @allow_subst && (@inprocess_passes & 8) != 0 && @inp_s_idx != nil && @config.use_substitution(true)
+    eq_room = 4096
+    v = @probe_cursor
+    v = 1 if v < 1 || v > @nvars
+    scanned = 0
+    while scanned < @nvars && @ok && @pstate[4] - props0 < prop_budget
+      break if wassat_stop_requested?(@stop_cell)
+      if @assign[v] == 0
+        # +v propagates through the binaries holding -v, and -v through those
+        # holding +v.
+        pos_n = @bldir[(((v << 1) + 1) << 2) + 1]
+        neg_n = @bldir[((v << 1) << 2) + 1]
+        if pos_n > 0 || neg_n > 0
+          @probe_gen += 1
+          @inp_nlift = 0
+          @inp_neq = 0
+          r = self.probe_lit(v, @probe_gen, 0)
+          if r == 0 && @ok
+            r = self.probe_lit(0 - v, @probe_gen, 1)
+          if r == 0 && @ok
+            j = 0
+            while j < @inp_nlift && @ok
+              l = @inp_lits[j]
+              lv = self.value(l)
+              if lv == 0
+                self.enqueue(l, -1)
+                @inp_lifted += 1
+              elsif lv < 0
+                @ok = false
+                @formula_unsat = true
+              j += 1
+            if @inp_nlift > 0 && @ok && self.propagate >= 0
+              @ok = false
+              @formula_unsat = true
+            if allow_eq && @ok && @assign[v] == 0
+              j = 1
+              while j <= @inp_neq && eq_room > 0
+                x = @inp_lits[@nvars + 2 - j]
+                xv = x < 0 ? 0 - x : x
+                fits = !@fixed_caps || (@asize + 8 <= @acap && @ncl + 3 < @ccap)
+                if fits && @assign[xv] == 0
+                  @obuf[0] = 0 - v
+                  @obuf[1] = x
+                  ci = self.store_clause(@obuf, 2)
+                  @clbd[ci] = 0
+                  @obuf[0] = v
+                  @obuf[1] = 0 - x
+                  ci = self.store_clause(@obuf, 2)
+                  @clbd[ci] = 0
+                  @inp_equivs += 1
+                  eq_room -= 1
+                j += 1
+      v += 1
+      v = 1 if v > @nvars
+      scanned += 1
+    @probe_cursor = v
+    wassat_copy_vivify_phases(@inp_phase, @phase, @nvars)
+    0
+
+  # One round of compounding mid-search inprocessing, at the root, in the
+  # order each pass feeds the next: clean -> probe (new units, equivalence
+  # binaries) -> vivify (shorter clauses) -> subsume (fewer clauses) -> clean
+  # -> substitute (collapse equivalences) -> clean. Propagation and candidate
+  # visits use the established search-relative budgets; index/SCC work is
+  # reported separately. These are not wall-time limits. Mandatory repair and
+  # a started substitution commit finish before cancellation can return.
+  -> inprocess_round
+    return 0 if wassat_stop_requested?(@stop_cell)
+    return 0 unless @ok && @dlevel == 0 && @nassump == 0 && @proof_mode == WASSAT_PROOF_NONE
+    self.prepare_inprocessing unless @fixed_caps
+    return 0 unless @inp_ready
+    t0 = wassat_prof_clock
+    @inprocessings += 1
+    work = @pstate[4] - @inp_props_at
+    budget = work / 20
+    budget = 200000 if budget < 200000
+    budget = 20000000 if budget > 20000000
+    fixed0 = @tsize
+    subst0 = @nsubst
+    viv0 = @vivified
+    failed0 = @inp_failed
+    lifted0 = @inp_lifted
+    equiv0 = @inp_equivs
+    sub0 = @inp_subsumed
+    strength0 = @inp_strengthened
+    clean0 = @inp_cleaned
+    rebuild0 = @wp_state[3]
+    # Per-pass clocks for the profile line (0 when profiling is off).
+    t1 = wassat_prof_clock
+    self.clean_root_clauses
+    t2 = wassat_prof_clock
+    if @ok && !wassat_stop_requested?(@stop_cell) && (@inprocess_passes & 1) != 0
+      self.probe_round(budget / 2)
+    t3 = wassat_prof_clock
+    if @ok && !wassat_stop_requested?(@stop_cell) && (@inprocess_passes & 2) != 0
+      self.vivify_round(@ncl, true, budget)
+    t4 = wassat_prof_clock
+    if @ok && !wassat_stop_requested?(@stop_cell) && (@inprocess_passes & 4) != 0
+      # An index visit costs the same order as a propagated literal (qwh:
+      # ~4k visits/ms against ~5k props/ms), so the visit budget is the
+      # round's propagation budget, as for probing and vivification. A fixed
+      # 4M spent ~600 ms a round on qwh for no irredundant yield.
+      self.run_subsume(1, budget)
+    t5 = wassat_prof_clock
+    self.clean_root_clauses if @ok
+    t6 = wassat_prof_clock
+    if @ok && !wassat_stop_requested?(@stop_cell) && (@inprocess_passes & 8) != 0 && @allow_subst && @inp_s_idx != nil && @config.use_substitution(true)
+      self.substitute_equivalences
+      self.clean_root_clauses if @ok
+    t7 = wassat_prof_clock
+    @nlearned = 0
+    ci = 0
+    while ci < @ncl
+      @nlearned += 1 if @alive[ci] == 1 && @clbd[ci] > 0
+      ci += 1
+    @inp_props_at = @pstate[4]
+    # Eliminated variables are parked on the trail; they are not forced units.
+    units = @tsize - fixed0 - (@nsubst - subst0)
+    @inp_totals[1] = @inp_totals[1] + units
+    cancelled = wassat_stop_requested?(@stop_cell) ? 1 : 0
+    @inp_totals[0] = @inp_totals[0] + cancelled
+    z = wassat_prof("inprocess round=[@inprocessings] conflicts=[@conflicts] budget=[budget] units=[units] failed=[@inp_failed - failed0] lifted=[@inp_lifted - lifted0] equivs=[@inp_equivs - equiv0] vivified=[@vivified - viv0] subsumed=[@inp_subsumed - sub0] strengthened=[@inp_strengthened - strength0] substituted=[@nsubst - subst0] cleaned=[@inp_cleaned - clean0] watch_rebuilds=[@wp_state[3] - rebuild0] cancelled=[cancelled] ms_clean=[t2 - t1 + t6 - t5] ms_probe=[t3 - t2] ms_vivify=[t4 - t3] ms_subsume=[t5 - t4] ms_subst=[t7 - t6]", t0)
     0
 
   -> reduce_db
@@ -2375,6 +2833,11 @@ WASSAT_PROOF_DRAT = 2
 
     # rebuild watches from scratch over the survivors (tight repack)
     self.rebuild_watches
+    # Subsumption rewrote clause bodies in place, or root units arrived since
+    # inprocessing last cleaned: strip root-false literals, drop root-satisfied
+    # clauses, and repack both watch structures from a consistent database.
+    if @need_clean || (@inprocessings > 0 && @tsize > @last_clean_tsize)
+      self.clean_root_clauses
     # recount the live learned population for the reduction schedule
     @nlearned = 0
     ci = 0
@@ -2647,6 +3110,10 @@ WASSAT_PROOF_DRAT = 2
       conflict_ticket = -1
       if wassat_stop_requested?(@stop_cell)
         limited = true
+      elsif !@ok
+        # A root-level pass (cleaning after a compaction, an import) already
+        # consumed a root conflict; propagation will not find it again.
+        confl = -2
       else
         if @pending_conflict >= 0
           confl = @pending_conflict
@@ -2672,6 +3139,10 @@ WASSAT_PROOF_DRAT = 2
           )
       if limited
         0
+      elsif confl == -2
+        self.log_clause([]) unless @refuted
+        @formula_unsat = true
+        result = -1
       elsif confl >= 0
         phase_prefix = 0
         best_prefix = 0
@@ -2926,16 +3397,22 @@ WASSAT_PROOF_DRAT = 2
           # INPROCESSING. Every remaining losing row has a comparable or
           # better conflict RATE than CaDiCaL and 4-40x the conflicts, and the
           # difference is that CaDiCaL keeps simplifying mid-search while this
-          # solver simplified once at load. This is the cheapest honest
-          # version: re-run equivalent-literal substitution here, which is
-          # already a level-zero point (backjump(0) above), already rebuilds
-          # watches and binary lists, and is already designed to be called
-          # repeatedly -- congruence_rounds calls it in a loop, @subst is
-          # allocated once and its chains resolved in unsubstitute.
-          if @inprocess_every > 0 && @conflicts >= @inprocess_at
-            @inprocess_at = @conflicts + @inprocess_every
-            self.simplify_raw_mode(0)
-            @inprocessings += 1
+          # solver simplified once at load. The first version re-ran only SCC
+          # substitution here and starved: CDCL rarely learns the binaries it
+          # consumes. inprocess_round runs the compounding pipeline instead
+          # (probe, vivify, subsume, substitute, with root cleaning between),
+          # on a delayed geometric schedule (policy.w auto_inprocess_first).
+          if @inprocess_at > 0 && @conflicts >= @inprocess_at && @proof_mode == WASSAT_PROOF_NONE && @nassump == 0
+            self.inprocess_round
+            step = @inprocess_every > 0 ? @inprocess_every : @inprocess_step
+            @inprocess_at = @conflicts + step
+            if @inprocess_every == 0
+              @inprocess_step = (@inprocess_step * 3) / 2
+              @inprocess_step = 100000 if @inprocess_step > 100000
+          if !@ok
+            self.log_clause([]) unless @refuted
+            @formula_unsat = true
+            return -1
           # Vivification (DETOUR dominance on learned clauses) — MEASURED
           # NET-NEGATIVE in v1 form and gated off: prefix-conflict
           # shortening replaced clauses but perturbed trajectories
@@ -3135,6 +3612,11 @@ WASSAT_PROOF_DRAT = 2
     @reduce_step = @config.reduce_step
     @auto_vivify = @config.use_vivification
     @vivify_phase = i64[@nvars + 1] if @auto_vivify && @vivify_phase == nil
+    # The shell was constructed with an empty clause list; the schedule
+    # belongs to the real formula's shape.
+    @inprocess_every = @config.inprocess_every
+    @inprocess_at = @inprocess_every > 0 ? @inprocess_every : @config.auto_inprocess_first
+    @inprocess_passes = @config.inprocess_passes
     @use_shrink = @config.use_shrinking
     # `.from_flat*` constructs an allocation shell with an empty boxed clause
     # list, then installs the real formula policy here. Lucky is formula
@@ -3549,18 +4031,34 @@ WASSAT_PROOF_DRAT = 2
   # the mapping is replayed onto the assignment once, when a model is
   # extracted (see unsubstitute).
   -> substitute_equivalences
+    return 0 if !@allow_subst || wassat_stop_requested?(@stop_cell)
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
     nl = 2 * @nvars + 4
-    idx = i64[nl]
-    low = i64[nl]
-    onstk = i64[nl]
-    reprs = i64[nl]
-    stk = i64[nl]
-    work = i64[nl]
-    wcur = i64[nl]
-    st = i64[8]
+    # Mid-search rounds reuse the scratch prepare_inprocessing allocated (a
+    # fixed-capacity worker may not allocate). The load-time call keeps its
+    # own exact-size tables, so its rewrite is unchanged.
+    mid = @conflicts > 0
+    pre = mid && @inp_s_idx != nil && @inp_ht != nil && @sub_next != nil && @sub_next.size >= @ncl + 2
+    return 0 if mid && !pre && @fixed_caps
+    idx = pre ? @inp_s_idx : i64[nl]
+    low = pre ? @inp_s_low : i64[nl]
+    onstk = pre ? @inp_s_onstk : i64[nl]
+    reprs = pre ? @inp_s_reprs : i64[nl]
+    stk = pre ? @inp_s_stk : i64[nl]
+    work = pre ? @inp_s_work : i64[nl]
+    wcur = pre ? @inp_s_wcur : i64[nl]
+    if pre
+      wassat_zero_i64(idx, nl)
+      wassat_zero_i64(low, nl)
+      wassat_zero_i64(onstk, nl)
+      wassat_zero_i64(reprs, nl)
+    st = @inp_sst
+    wassat_zero_i64(st, 8)
     wassat_scc(@bldir, @bl_pool, @assign, idx, low, onstk, reprs, stk,
-               work, wcur, st, 2 * @nvars + 2)
+               work, wcur, st, 2 * @nvars + 2, @stop_cell)
+    @inp_totals[3] = @inp_totals[3] + st[5]
+    # SCC only wrote scratch. Discard a partial result before any rewrite.
+    return 0 if st[4] != 0 || wassat_stop_requested?(@stop_cell)
     if st[0] == 1
       @ok = false
       @formula_unsat = true
@@ -3569,14 +4067,24 @@ WASSAT_PROOF_DRAT = 2
     hcap = 1024
     while hcap < 2 * (@ncl + 16)
       hcap = hcap * 2
-    ht = i64[hcap]
-    mark = i64[nl]
-    units = i64[@ncl + 2]
-    rst = i64[8]
+    ht = pre ? @inp_ht : i64[hcap]
+    mark = pre ? @inp_s_mark : i64[nl]
+    units = pre ? @sub_next : i64[@ncl + 2]
+    # The prepared table is capped, so bound its linear probe: a missed
+    # duplicate costs a redundant clause, an unbounded probe a full scan.
+    plim = pre ? 32 : hcap
+    if pre
+      wassat_zero_i64(ht, ht.size)
+      wassat_zero_i64(mark, nl)
+    rst = @inp_rst
+    wassat_zero_i64(rst, 8)
     wassat_subst_rewrite(@cmeta, @alive, @arena, @clbd, reprs, mark, ht,
-                         units, rst, @ncl, hcap - 1)
+                         units, rst, @ncl, ht.size - 1, plim)
     self.rebuild_watches
     self.rebuild_binaries
+    # Mid-search the root is fully propagated, so a rewritten clause can now
+    # watch a root-false literal: the caller's clean must not be skipped.
+    @need_clean = true if mid
     if rst[0] == 1
       @ok = false
       @formula_unsat = true
@@ -3586,8 +4094,9 @@ WASSAT_PROOF_DRAT = 2
     # merges introduced, and a fresh array would throw away every mapping
     # the previous rounds established — silently, and only visible as a
     # wrong model. Entries already written are likewise never overwritten;
-    # the chain they form is resolved in unsubstitute.
-    @subst = i64[@nvars + 2] if @nsubst == 0
+    # the chain they form is resolved in unsubstitute. (prepare_inprocessing
+    # may have sized it already, still all zero.)
+    @subst = i64[@nvars + 2] if @nsubst == 0 && @subst.size < @nvars + 2
     v = 1
     while v <= @nvars
       r = reprs[v << 1]
@@ -3739,6 +4248,8 @@ WASSAT_PROOF_DRAT = 2
     wassat_prof_note("[label].spine snapshots=[@pstate[9]] scanned_levels=[@pstate[10]] skipped_levels=[@pstate[11]]")
     wassat_prof_note("[label].watches rebuilds=[@wp_state[3]] rebuilt_entries=[@wp_state[4]] relocations=[@wp_state[5]] copied_entries=[@wp_state[6]] overflows=[@wp_state[7]] pool_used=[@wp_state[0]] pool_capacity=[@wp_state[1]]")
     wassat_prof_note("[label].sharing exports=[@share_exports] imports=[@share_imports] dropped=[@share_dropped] filtered=[@share_filtered]")
+    wassat_prof_note("[label].inprocess_work cancelled=[@inp_totals[0]] units=[@inp_totals[1]] subsume_work=[@inp_totals[2]] scc_work=[@inp_totals[3]] cleaned_literals=[@inp_totals[4]]")
+    wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
     wassat_prof_note("[label].analysis shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
     0
 
@@ -3750,16 +4261,44 @@ WASSAT_PROOF_DRAT = 2
   -> solve_assuming(assumptions)
     self.solve_assuming_budget(assumptions, 0)
 
+  -> assumption_representative(lit)
+    v = lit < 0 ? 0 - lit : lit
+    sign = lit < 0 ? -1 : 1
+    hops = 0
+    while @nsubst > 0 && @subst[v] != 0 && hops <= @nsubst
+      r = @subst[v]
+      sign = 0 - sign if r < 0
+      v = r < 0 ? 0 - r : r
+      hops += 1
+    sign > 0 ? v : 0 - v
+
   -> solve_assuming_budget(assumptions, max_conflicts)
     assumptions.each -> (a)
       raise "assumption literal must not be zero" if a == 0
       v = a.abs
       raise "assumption literal [a] exceeds variable count [@nvars]" if v > @nvars
     raise "conflict budget must be non-negative" if max_conflicts < 0
+    # Any variable may be assumed in this or a later query, so this solver
+    # must never park one at the root by mid-search substitution.
+    @allow_subst = false
     self.reset_query
     @assump = assumptions
+    if @nsubst > 0
+      @assump = []
+      assumptions.each -> (a)
+        @assump.push(self.assumption_representative(a))
     @nassump = assumptions.size
     r = self.solve_query(max_conflicts)
+    if @nsubst > 0 && r["core"].size > 0
+      original_core = []
+      r["core"].each -> (lit)
+        i = 0
+        while i < @assump.size
+          if @assump[i] == lit
+            original_core.push(assumptions[i])
+            break
+          i += 1
+      r["core"] = original_core
     @assump = []
     @nassump = 0
     r
@@ -4623,12 +5162,19 @@ WASSAT_PROOF_DRAT = 2
 #   st[1] = literals mapped away from themselves
 #   st[2] = edges traversed
 #   st[3] = the contradictory variable, when st[0] is 1
--> wassat_scc(bd, blp, asg, idx, low, onstk, reprs, stk, work, wcur, st, nlits) (i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
+-> wassat_scc(bd, blp, asg, idx, low, onstk, reprs, stk, work, wcur, st, nlits, stop_cell) (i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[])
   dfsi = 1
   stop = 0
   ticks = 0
+  work_done = 0
   node = 2
   while node < nlits && st[0] == 0
+    work_done += 1
+    if (work_done & 1023) == 0 && wassat_stop_requested?(stop_cell)
+      st[2] = ticks
+      st[4] = 1
+      st[5] = work_done
+      return 0
     nv = node >> 1
     if idx[node] == 0 && asg[nv] == 0
       work[0] = node
@@ -4649,6 +5195,12 @@ WASSAT_PROOF_DRAT = 2
         k = wcur[top - 1]
         advanced = 0
         while k < bn && advanced == 0
+          work_done += 1
+          if (work_done & 1023) == 0 && wassat_stop_requested?(stop_cell)
+            st[2] = ticks
+            st[4] = 1
+            st[5] = work_done
+            return 0
           w = blp[blo + k] & 4294967295
           k += 1
           ticks += 1
@@ -4672,21 +5224,45 @@ WASSAT_PROOF_DRAT = 2
           if low[u] == idx[u]
             base = stop - 1
             while stk[base] != u
+              work_done += 1
+              if (work_done & 1023) == 0 && wassat_stop_requested?(stop_cell)
+                st[2] = ticks
+                st[4] = 1
+                st[5] = work_done
+                return 0
               base -= 1
             rep = u
             j = base
             while j < stop
+              work_done += 1
+              if (work_done & 1023) == 0 && wassat_stop_requested?(stop_cell)
+                st[2] = ticks
+                st[4] = 1
+                st[5] = work_done
+                return 0
               if stk[j] < rep
                 rep = stk[j]
               j += 1
             j = base
             while j < stop
+              work_done += 1
+              if (work_done & 1023) == 0 && wassat_stop_requested?(stop_cell)
+                st[2] = ticks
+                st[4] = 1
+                st[5] = work_done
+                return 0
               x = stk[j]
               onstk[x] = 0
               reprs[x] = rep
               j += 1
             j = base
             while j < stop
+              work_done += 1
+              if (work_done & 1023) == 0 && wassat_stop_requested?(stop_cell)
+                st[2] = ticks
+                st[4] = 1
+                st[5] = work_done
+                return 0
               x = stk[j]
               if reprs[x ^ 1] == rep
                 st[0] = 1
@@ -4697,6 +5273,7 @@ WASSAT_PROOF_DRAT = 2
             stop = base
     node += 1
   st[2] = ticks
+  st[5] = work_done
   0
 
 # Rewrite every live clause through `reprs`, in place. A mapped clause can
@@ -4711,7 +5288,8 @@ WASSAT_PROOF_DRAT = 2
 #
 #   st[0] = 1 when a clause became empty   st[1] = units collected
 #   st[2] = clauses rewritten              st[3] = clauses killed as tautologies
--> wassat_subst_rewrite(cm, alive, ar, clbd, reprs, mark, ht, units, st, ncl, hmask) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+# `plim` bounds the duplicate table's linear probe (hmask + 1 = unbounded).
+-> wassat_subst_rewrite(cm, alive, ar, clbd, reprs, mark, ht, units, st, ncl, hmask, plim) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
   gen = 0
   nu = 0
   rewritten = 0
@@ -4785,7 +5363,7 @@ WASSAT_PROOF_DRAT = 2
         h = acc & hmask
         dup_ci = 0 - 1
         probes = 0
-        while ht[h] != 0 && dup_ci < 0 && probes <= hmask
+        while ht[h] != 0 && dup_ci < 0 && probes < plim
           dci = ht[h] - 1
           if cm[(dci << 1) + 1] == m
             stx2 = cm[dci << 1] ## i64
@@ -4812,7 +5390,7 @@ WASSAT_PROOF_DRAT = 2
           alive[ci] = 0
           killed += 1
         else
-          if probes <= hmask
+          if ht[h] == 0
             ht[h] = ci + 1
     ci += 1
   st[1] = nu
@@ -4820,8 +5398,9 @@ WASSAT_PROOF_DRAT = 2
   st[3] = killed
   0
 
-# Backward subsumption + self-subsuming resolution over the LEARNED clause
-# set, run at reduce_db time (decision level zero).
+# Backward subsumption + self-subsuming resolution (SSR), at decision level
+# zero: from reduce_db over learned targets (the race axis), and from
+# inprocess_round over every clause.
 #
 # This is the pass CaDiCaL's mid-search advantage actually consists of. The
 # earlier inprocessing attempt repeated SCC substitution instead, which
@@ -4829,47 +5408,109 @@ WASSAT_PROOF_DRAT = 2
 # graph barely grew and it lost. Learned clauses, by contrast, subsume each
 # other constantly.
 #
-# Signature-first, the standard filter: sig(C) ORs 1 << (litindex & 63), and
-# C can only be contained in D when (sig(C) & ~sig(D)) == 0, which rejects
-# almost every pair with one AND. Survivors get an exact test through a
-# generation-stamped literal array.
+# ONE-WATCH INDEX. Every short clause C (2..8 literals) is indexed under one
+# literal only, its rarest. A target D is then checked against the clauses
+# indexed under each of its literals l (C's watch is in D: candidates for
+# C subset-of D, and for SSR on any other literal of C) and under each -l (C's
+# watch is negated in D: SSR on exactly that literal). Any C that subsumes or
+# strengthens D has its watch in one of those 2|D| lists, so the search is
+# complete with one link per clause. (The previous version indexed only
+# under D[0] and probed only C[0], which missed every pair whose first
+# literals differed.)
 #
-# Only LEARNED clauses (clbd > 0) are ever deleted or strengthened, so an
-# irredundant clause can never be lost, and a clause that is somebody's reason
-# is safe too -- reduce_db already runs from a level-zero trail where only
-# level-zero reasons are live, and those are units, which this pass skips
-# (n < 2). Strengthening rewrites in place and shortens the header; the caller
-# rebuilds watches and binary lists afterwards, exactly as reduce_db already
-# does.
+# Signature filter: sig ORs 1 << (litindex & 63). For either outcome, at most
+# one bit of sig(C) may be missing from sig(D): diff = sig(C) & ~sig(D) must
+# satisfy (diff & (diff - 1)) == 0. The exact test then scans all of C,
+# so a stale index entry (C shortened in place after it was indexed) costs
+# only completeness, never soundness.
 #
-#   pm in : [0] ncl  [1] nvars  [2] max clause length considered
-#           [3] work budget (candidate visits)
-#   pm out: [4] subsumed  [5] strengthened  [6] visits used
--> wassat_learned_subsume(cm, alive, ar, clbd, sig, ohead, onext, stamp, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+# Soundness. Learned clauses are implied by the formula, so subsuming or
+# strengthening ANY clause with one keeps the formula equivalent, with one
+# rule: when a learned C deletes an irredundant D, C becomes irredundant
+# (clbd 0) so reduce_db can never drop the only copy. The stamp table is
+# reset on entry; stale generations from an earlier call would read as false
+# hits. Bodies change in place and lengths shrink (a binary can become a
+# unit), so the caller must run clean_root_clauses, which repacks watches and
+# binary lists and asserts any exposed unit.
+#
+#   pm in : [0] ncl  [1] nvars  [2] max target length  [3] visit budget
+#           [7] 1 = irredundant targets too  [8] first target (rotating cursor)
+#           [11] min target length (below 2 reads as 2)
+#   pm out: [4] subsumed  [5] strengthened  [6] visits used  [9] next cursor
+#           [10] clauses promoted to irredundant
+-> wassat_learned_subsume(cm, alive, ar, clbd, sig, ohead, onext, stamp, pm, stop_cell) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   ncl = pm[0]
   nv = pm[1]
   maxlen = pm[2]
+  minlen = pm[11]
+  minlen = 2 if minlen < 2
   budget = pm[3]
+  irred = pm[7]
+  start = pm[8]
   nlits = 2 * nv + 4
   subsumed = 0
   strengthened = 0
+  promoted = 0
   visits = 0
+  poll_at = 1024
+  work_done = 0
+  maxsub = 8
 
   li = 0
   while li < nlits
+    work_done += 1
+    if (li & 1023) == 0 && wassat_stop_requested?(stop_cell)
+      pm[12] = 1
+      pm[13] = work_done + visits
+      return 0
     ohead[li] = 0 - 1
+    stamp[li] = 0
     li += 1
 
-  # signatures, and occurrence lists over LEARNED clauses only
+  # literal occurrence counts (in stamp, temporarily) over the clauses the
+  # pass looks at, to pick each subsumer's rarest literal
   ci = 0
   while ci < ncl
+    work_done += 1
+    if (ci & 1023) == 0 && wassat_stop_requested?(stop_cell)
+      pm[12] = 1
+      pm[13] = work_done + visits
+      return 0
+    if alive[ci] == 1
+      n = cm[(ci << 1) + 1] ## i64
+      if n >= 2 && n <= maxlen
+        stx = cm[ci << 1] ## i64
+        j = 0
+        work_done += n
+        while j < n
+          l = ar[stx + j]
+          lx = 0 ## i64
+          if l > 0
+            lx = l << 1
+          else
+            lx = ((0 - l) << 1) + 1
+          stamp[lx] = stamp[lx] + 1
+          j += 1
+    ci += 1
+
+  # signatures, and the one-watch index over short clauses
+  ci = 0
+  while ci < ncl
+    work_done += 1
+    if (ci & 1023) == 0 && wassat_stop_requested?(stop_cell)
+      pm[12] = 1
+      pm[13] = work_done + visits
+      return 0
     sig[ci] = 0
     if alive[ci] == 1
       n = cm[(ci << 1) + 1] ## i64
       if n >= 2 && n <= maxlen
         stx = cm[ci << 1] ## i64
         sg = 0 ## i64
+        best = 0 - 1 ## i64
+        bestc = 0 ## i64
         j = 0
+        work_done += n
         while j < n
           l = ar[stx + j]
           lx = 0 ## i64
@@ -4878,113 +5519,257 @@ WASSAT_PROOF_DRAT = 2
           else
             lx = ((0 - l) << 1) + 1
           sg = sg | (1 << (lx & 63))
+          if best < 0 || stamp[lx] < bestc
+            best = lx
+            bestc = stamp[lx]
           j += 1
         sig[ci] = sg
-        if clbd[ci] > 0
-          # index the learned clause under its FIRST literal only; a
-          # container D must hold every literal of C, so walking one of C's
-          # literals is enough to find every candidate.
-          l = ar[stx]
-          lx = 0
-          if l > 0
-            lx = l << 1
-          else
-            lx = ((0 - l) << 1) + 1
-          onext[ci] = ohead[lx]
-          ohead[lx] = ci
+        # A tautological subsumer must never be indexed: with x and -x both
+        # in C, a target holding -x would read x as the single flipped
+        # literal and lose -x to a "resolvent" that is not one.
+        taut = 0
+        if n <= maxsub
+          j = 0
+          while j < n && taut == 0
+            a1 = ar[stx + j]
+            q = j + 1
+            while q < n
+              taut = 1 if ar[stx + q] == 0 - a1
+              q += 1
+            j += 1
+        if n <= maxsub && taut == 0
+          onext[ci] = ohead[best]
+          ohead[best] = ci
     ci += 1
 
-  # for each alive clause C, look for learned D that C subsumes or strengthens
-  gen = 0
-  ci = 0
-  while ci < ncl && visits < budget
-    if alive[ci] == 1
-      n = cm[(ci << 1) + 1] ## i64
-      if n >= 2 && n <= maxlen
-        stx = cm[ci << 1] ## i64
-        sgc = sig[ci] ## i64
-        sgc_tail = 0 ## i64
+  li = 0
+  while li < nlits
+    work_done += 1
+    if (li & 1023) == 0 && wassat_stop_requested?(stop_cell)
+      pm[12] = 1
+      pm[13] = work_done + visits
+      return 0
+    stamp[li] = 0
+    li += 1
+
+  gen = 0 ## i64
+  if start < 0 || start >= ncl
+    start = 0
+  d = start
+  scanned = 0
+  while scanned < ncl && visits < budget
+    work_done += 1
+    if (scanned & 1023) == 0 && wassat_stop_requested?(stop_cell)
+      pm[4] = subsumed
+      pm[5] = strengthened
+      pm[6] = visits
+      pm[9] = d
+      pm[10] = promoted
+      pm[12] = 1
+      pm[13] = work_done + visits
+      return 0
+    if alive[d] == 1 && (clbd[d] > 0 || irred == 1)
+      dn = cm[(d << 1) + 1] ## i64
+      if dn >= minlen && dn <= maxlen
+        work_done += dn
+        dstx = cm[d << 1] ## i64
         gen += 1
-        j = 0
-        while j < n
-          l = ar[stx + j]
-          lx = 0 ## i64
-          if l > 0
-            lx = l << 1
+        k = 0
+        while k < dn
+          dl = ar[dstx + k]
+          dx = 0 ## i64
+          if dl > 0
+            dx = dl << 1
           else
-            lx = ((0 - l) << 1) + 1
-          stamp[lx] = gen
-          sgc_tail = sgc_tail | (1 << (lx & 63)) if j > 0
-          j += 1
-        # candidates are the learned clauses indexed under C's first literal,
-        # plus those under its negation (which is where strengthening lives)
-        pass_i = 0
-        while pass_i < 2 && visits < budget
-          l0 = ar[stx]
-          lx0 = 0 ## i64
-          if l0 > 0
-            lx0 = l0 << 1
+            dx = ((0 - dl) << 1) + 1
+          stamp[dx] = gen
+          k += 1
+        notd = (0 - sig[d]) - 1 ## i64
+        done = 0
+        k = 0
+        while k < dn && done == 0 && visits < budget
+          dl = ar[dstx + k]
+          dx = 0 ## i64
+          if dl > 0
+            dx = dl << 1
           else
-            lx0 = ((0 - l0) << 1) + 1
-          lx0 = lx0 ^ 1 if pass_i == 1
-          d = ohead[lx0]
-          while d >= 0 && visits < budget
-            visits += 1
-            if d != ci && alive[d] == 1 && clbd[d] > 0
-              dn = cm[(d << 1) + 1] ## i64
-              dstx = cm[d << 1] ## i64
-              # Signature filter. C can only be CONTAINED in D when every bit
-              # of sig(C) is also in sig(D), i.e. (sigC & ~sigD) == 0 -- one
-              # AND rejects almost every pair. On the strengthening pass, when
-              # D still carries -l0 at index 0, -l0 is the single flipped
-              # literal so every tail literal of C (sgc_tail) must be in sig(D).
-              skip = 0
-              notd = (0 - sig[d]) - 1 ## i64
-              if pass_i == 0
-                skip = 1 if (sgc & notd) != 0
-              else
-                skip = 1 if (sgc_tail & notd) != 0 && ar[dstx] == 0 - l0
-              if dn >= n && skip == 0
-                # exact test: every literal of C present in D (subsumption),
-                # or all but one with that one's negation present (SSR)
-                hits = 0
-                flipped = 0
-                flip_at = 0 - 1
-                k = 0
-                while k < dn
-                  dl = ar[dstx + k]
-                  dx = 0 ## i64
-                  if dl > 0
-                    dx = dl << 1
-                  else
-                    dx = ((0 - dl) << 1) + 1
-                  if stamp[dx] == gen
-                    hits += 1
-                  else
-                    if stamp[dx ^ 1] == gen
-                      flipped += 1
-                      flip_at = k
-                  k += 1
-                if hits == n
-                  alive[d] = 0
-                  subsumed += 1
-                else
-                  if hits == n - 1 && flipped == 1 && dn > 2
-                    # drop the flipped literal from D, in place
-                    m = flip_at
-                    while m < dn - 1
-                      ar[dstx + m] = ar[dstx + m + 1]
-                      m += 1
-                    cm[(d << 1) + 1] = dn - 1
-                    ar[dstx - 1] = (d << 32) | (dn - 1)
-                    strengthened += 1
-            d = onext[d]
-          pass_i += 1
-    ci += 1
+            dx = ((0 - dl) << 1) + 1
+          pass_i = 0
+          while pass_i < 2 && done == 0
+            c = ohead[dx ^ pass_i]
+            while c >= 0 && done == 0 && visits < budget
+              if visits >= poll_at
+                if wassat_stop_requested?(stop_cell)
+                  pm[4] = subsumed
+                  pm[5] = strengthened
+                  pm[6] = visits
+                  pm[9] = d
+                  pm[10] = promoted
+                  pm[12] = 1
+                  pm[13] = work_done + visits
+                  return 0
+                poll_at = visits + 1024
+              visit_limit = poll_at < budget ? poll_at : budget
+              while c >= 0 && done == 0 && visits < visit_limit
+                visits += 1
+                if c != d && alive[c] == 1
+                  cn = cm[(c << 1) + 1] ## i64
+                  if cn >= 1 && cn <= dn
+                    diff = sig[c] & notd ## i64
+                    if (diff & (diff - 1)) == 0
+                      cstx = cm[c << 1] ## i64
+                      hits = 0
+                      flipped = 0
+                      flip_x = 0 - 1 ## i64
+                      j = 0
+                      work_done += cn
+                      while j < cn && flipped < 2
+                        cl = ar[cstx + j]
+                        cx = 0 ## i64
+                        if cl > 0
+                          cx = cl << 1
+                        else
+                          cx = ((0 - cl) << 1) + 1
+                        if stamp[cx] == gen
+                          hits += 1
+                        elsif stamp[cx ^ 1] == gen
+                          flipped += 1
+                          flip_x = cx ^ 1
+                        j += 1
+                      if hits == cn
+                        alive[d] = 0
+                        subsumed += 1
+                        if clbd[d] == 0 && clbd[c] > 0
+                          clbd[c] = 0
+                          promoted += 1
+                        done = 1
+                      elsif hits == cn - 1 && flipped == 1
+                        work_done += 2 * dn
+                        # drop D's literal flip_x, in place
+                        m = 0
+                        q = 0
+                        while q < dn
+                          ql = ar[dstx + q]
+                          qx = 0 ## i64
+                          if ql > 0
+                            qx = ql << 1
+                          else
+                            qx = ((0 - ql) << 1) + 1
+                          if qx != flip_x
+                            ar[dstx + m] = ql
+                            m += 1
+                          q += 1
+                        cm[(d << 1) + 1] = m
+                        ar[dstx - 1] = (d << 32) | m
+                        strengthened += 1
+                        # D changed under its stamps and signature; revisit it
+                        # in a later pass rather than reason about a moving set.
+                        ns = 0 ## i64
+                        q = 0
+                        while q < m
+                          ql = ar[dstx + q]
+                          qx = 0 ## i64
+                          if ql > 0
+                            qx = ql << 1
+                          else
+                            qx = ((0 - ql) << 1) + 1
+                          ns = ns | (1 << (qx & 63))
+                          q += 1
+                        sig[d] = ns
+                        done = 1
+                c = onext[c]
+            pass_i += 1
+          k += 1
+    d += 1
+    d = 0 if d >= ncl
+    scanned += 1
 
+  pm[13] = work_done + visits
+  pm[12] = 2 if visits >= budget
   pm[4] = subsumed
   pm[5] = strengthened
   pm[6] = visits
+  pm[9] = d
+  pm[10] = promoted
+  0
+
+# Strip root-assigned literals from every live clause, in place. A clause
+# with a root-true literal dies; a clause that loses literals gets its
+# length and header rewritten. Clauses left with one literal are reported in
+# `units` (at most `ucap`; st[3] = 1 when more were found, so the caller
+# runs another round after asserting these).
+#   st[0] = 1 when a clause became empty   st[1] = units reported
+#   st[2] = clauses killed                 st[3] = units overflowed
+#   st[4] = clauses shortened              st[5] = literals removed
+-> wassat_clean_root(cm, alive, ar, lasg, units, st, ncl, ucap) (i64[] i64[] i64[] i8[] i64[] i64[] i64 i64)
+  nu = 0
+  killed = 0
+  shrunk = 0
+  removed = 0
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1
+      n = cm[(ci << 1) + 1] ## i64
+      stx = cm[ci << 1] ## i64
+      sat = 0
+      nf = 0
+      j = 0
+      while j < n && sat == 0
+        l = ar[stx + j]
+        lx = 0 ## i64
+        if l > 0
+          lx = l << 1
+        else
+          lx = ((0 - l) << 1) + 1
+        lv = lasg[lx]
+        if lv > 0
+          sat = 1
+        elsif lv < 0
+          nf += 1
+        j += 1
+      if sat == 1
+        alive[ci] = 0
+        killed += 1
+      else
+        m = n
+        if nf > 0
+          m = 0
+          j = 0
+          while j < n
+            l = ar[stx + j]
+            lx = 0 ## i64
+            if l > 0
+              lx = l << 1
+            else
+              lx = ((0 - l) << 1) + 1
+            if lasg[lx] == 0
+              ar[stx + m] = l
+              m += 1
+            j += 1
+          cm[(ci << 1) + 1] = m
+          ar[stx - 1] = (ci << 32) | m
+          removed += n - m
+          shrunk += 1
+        if m == 0
+          st[0] = 1
+        elsif m == 1
+          if nu < ucap
+            units[nu] = ci
+            nu += 1
+          else
+            st[3] = 1
+    ci += 1
+  st[1] = nu
+  st[2] = killed
+  st[4] = shrunk
+  st[5] = removed
+  0
+
+-> wassat_zero_i64(a, n) (i64[] i64)
+  i = 0
+  while i < n
+    a[i] = 0
+    i += 1
   0
 
 -> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[]) i64

@@ -97,6 +97,10 @@ are word-gate evaluations, not hardware instruction counts.
 mark table. The table holds only marks 0 through 4 and uses one byte per
 variable across minimization, shrinking, assumption cores, and proof hints.
 
+`phases payload_bytes` sums the saved, target, and best phase tables plus
+allocated probing and vivification phase backups. These polarity buffers use
+one signed byte per variable for values -1, 0, and 1.
+
 Runtime `TALLOC` lines count five instrumented allocation categories: BigInt
 arenas, new arrays, aligned arrays, array growth, and hashes. Byte totals are
 instrumentation estimates, not peak memory or all malloc traffic: some array

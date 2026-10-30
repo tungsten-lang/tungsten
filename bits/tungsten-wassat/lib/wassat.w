@@ -54,6 +54,7 @@ use sliding_puzzle
 use stedman
 use hantzsche_wendt
 use knight_tour
+use path_cover
 use preprocess
 use sls
 use sls_gpu
@@ -962,6 +963,10 @@ use portfolio
         scout_res = i64[3 * scout_span]
         scout_sls_base = scout_span
         scout_xor_base = 2 * scout_span
+        scout_path_width = config.max_clause_size
+        scout_path_enabled = env("WASSAT_PATH_COVER") != "0" && wassat_path_cover_candidate?(scout_nv, formula["flat_ncl"], scout_path_width)
+        scout_path_out = nil
+        scout_path_out = i64[12] if scout_path_enabled
         scout_out = []
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
@@ -969,6 +974,14 @@ use portfolio
         # 2,000 conflicts are expensive: n320p5q2_n spends 748ms there while the
         # walker reaches a model in 6,610 flips. Racing it means a formula local
         # search cracks is answered before the scout's cap is even approached.
+        # A checked complete-path domain certificate races the scout. It
+        # has a fixed work cap, polls the same stop cell, and gets no grace
+        # wait: a miss ends with the scout instead of delaying generic search.
+        scout_path_h = nil
+        if scout_path_enabled
+          scout_path_h = Thread.new -> wassat_path_cover_arm_body(
+            formula, scout_path_width, scout_path_out, scout_stop
+          )
         lucky_h = nil
         if scout_lucky
           lucky_h = Thread.new -> wassat_lucky_arm_body(scout_nv, art, scout_res, 0, scout_stop)
@@ -1041,6 +1054,10 @@ use portfolio
         z = wassat_stop_cancel(scout_stop)
         z = scout_sls_h.join if scout_sls_h != nil
         z = scout_xor_h.join if scout_circuit == nil
+        z = scout_path_h.join if scout_path_h != nil
+        if scout_path_enabled && env("WASSAT_PROFILE") == "1"
+          path_tail = scout_path_out[9] > 0 ? ccall("__w_clock_ms") - scout_path_out[9] : 0
+          wassat_prof_note("path_cover width=[scout_path_out[1]] work=[scout_path_out[2]] removed=[scout_path_out[3]] empty_axis=[scout_path_out[4]] empty_index=[scout_path_out[5]] stopped=[scout_path_out[6]] recognized=[scout_path_out[7]] stop_tail_ms=[path_tail]")
         # Repair is real CDCL work even though it lives inside the model-only
         # SLS arm. Charge it whether the repair wins or the walk later falls
         # through, and retain the count in every early verdict below.
@@ -1048,6 +1065,18 @@ use portfolio
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_path_enabled && scout_path_out[0] == -1
+          path_scout = scout_out[0]
+          budget_used += path_scout["conflicts"] if scout_budget == nil
+          path_solver = scout_out[1]
+          path_solver.profile_counters("cli.scout")
+          pre_msp = ccall("__w_clock_ms") - t0
+          << "s UNSATISFIABLE"
+          << "c mode: fast (verified complete-path domain contradiction)"
+          << "c path_cover width=[scout_path_out[1]], work=[scout_path_out[2]], removed=[scout_path_out[3]]"
+          << "c conflicts: [budget_used], decisions: [path_scout["decisions"]], props: [path_scout["props"]]"
+          << "c stats restarts=[path_scout["restarts"]] reduces=[path_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], pre_msp)
+          exit(20)
         # A GE refutation outranks everything: it is a verdict about the whole
         # input, costs zero conflicts, and cannot disagree with any other arm.
         if scout_res[scout_xor_base] == 0 - 1

@@ -123,15 +123,12 @@ cat.speak
 A fuller walk-through:
 
 ```bash
-bin/tungsten -o /tmp/classes doc/examples/03-oop/classes.w && /tmp/classes
+bin/tungsten doc/examples/03-oop/classes.w
 # Rex says woof
 # Rex fetches the ball!
 # Whiskers says meow
 # Whiskers purrs...
 ```
-
-(Quick-run support for some inheritance / accessor shapes is still catching
-up — prefer `-o` when an OOP example misbehaves under plain `bin/tungsten`.)
 
 ---
 
@@ -199,7 +196,7 @@ Inside a trait, `with OtherTrait` composes another trait in.
 
 a = Money($10.00)
 b = Money($2.50)
-<< (a + b).to_s               # depends on operator method wiring
+<< (a + b).to_s               # => $12.50
 ```
 
 Operators are methods on the receiver (`+/1`, `*/1`, …), so domain types can

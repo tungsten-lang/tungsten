@@ -30,7 +30,7 @@ orig = src.dup
 #    stable across backends that omit the old optional FFI-externs section.
 #    The runtime array declarations are available by this point, and the pool
 #    helpers are `static inline` so the compiler can fold them into call sites.
-declaration_re = /^static sp_PolyArray \* sp_Interpreter_evaluate_args\([^\n]*\);\n/
+declaration_re = /^static (?:inline )?sp_PolyArray \* sp_Interpreter_evaluate_args\([^\n]*\);\n/
 declaration = src.match(declaration_re)
 unless declaration
   warn "inject_args_pool: evaluate_args declaration not found in #{path}"
@@ -64,6 +64,19 @@ C
 
 src.insert(declaration.begin(0), "#{pool_block}\n")
 
+# 1b. Register pooled PolyArrays with Spinel's global GC mark hook so a
+#     collection does not sweep idle pool entries and hand them back out
+#     via sp_PolyArray_new() while they are still in sp_args_pool_data.
+mark_globals_target = "static void sp_mark_user_globals(void) {\n"
+raise "sp_mark_user_globals definition not found" unless src.include?(mark_globals_target)
+
+src.sub!(
+  mark_globals_target,
+  "#{mark_globals_target}  for (int _api = 0; _api < sp_args_pool_count; _api++) {\n" \
+  "    if (sp_args_pool_data[_api]) sp_gc_mark((void *)sp_args_pool_data[_api]);\n" \
+  "  }\n"
+)
+
 # 2. Replace evaluate_args' fresh allocation with a pool pop.
 #    There is exactly one `lv_values = sp_PolyArray_new();` inside
 #    sp_Interpreter_evaluate_args' body, immediately after the
@@ -74,7 +87,7 @@ src.insert(declaration.begin(0), "#{pool_block}\n")
 # (e.g. call_node mrb_int -> sp_RbVal between bootstrap baselines)
 # doesn't break the injector. `[^)]*` is safe — no spinel param type
 # contains a literal ')'.
-fn_def_re = /static sp_PolyArray \* sp_Interpreter_evaluate_args\([^)]*\) \{/
+fn_def_re = /static (?:inline )?sp_PolyArray \* sp_Interpreter_evaluate_args\([^)]*\) \{/
 fn_match = src.match(fn_def_re)
 raise "evaluate_args definition not found" unless fn_match
 fn_start = fn_match.begin(0)
@@ -119,7 +132,7 @@ src[brace_open..fn_end] = new_body
 #    positive there.
 # Same wildcard-param match as evaluate_args above — robust to the
 # call_node param being typed mrb_int (bs7) or sp_RbVal (bs8+).
-fn2_def_re = /static sp_RbVal sp_Interpreter_call_w_method\([^)]*\) \{/
+fn2_def_re = /static (?:inline )?sp_RbVal sp_Interpreter_call_w_method\([^)]*\) \{/
 fn2_match = src.match(fn2_def_re)
 raise "call_w_method definition not found" unless fn2_match
 fn2_start = fn2_match.begin(0)

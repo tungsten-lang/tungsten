@@ -109,23 +109,20 @@ it via **MLX** (`mlx_load_safetensors` in `runtime/mlx_bridge.c` /
 llama bit). It’s not a general scientific archive (no groups/attrs like
 HDF5).
 
-## MLX — what else to expose
+## MLX — exposed bridge ops
 
-Already: sgemm/dgemm/hgemm/bgemm, batch sgemm, safetensors load, nvfp4
-quant matmul.
-
-Worth adding next:
+Exposed in `runtime/mlx_bridge.c` and `core/mlx.w`:
 
 | MLX op | Sci / ML use |
 |--------|----------------|
-| `mlx_add` / `mul` / `exp` / … | fused GPU elementwise on arrays |
-| `mlx_softmax` / `mlx_matmul` graph | training-style graphs |
-| reductions `sum`/`max` | over axes |
-| `mlx_fft` if present | GPU FFT |
-| random generators | Monte Carlo on GPU |
-| compile / eval control | keep graphs off the CPU |
+| `sgemm` / `dgemm` / `hgemm` / `bgemm` / `batch_sgemm` | dense and batched GEMM |
+| `safetensors` load / `nvfp4` quant matmul | LLM weights and quantized decode |
+| `add` / `mul` / `exp` / … (`w_mlx_*_f32`) | fused GPU elementwise on arrays |
+| `softmax` / `rms_norm` / `rope` / `sdpa` | attention and normalization kernels |
+| reductions `sum` / `max` | over arrays and axes |
+| `rfft` (`w_mlx_rfft_mag_f32`) | GPU FFT magnitude |
 
-Keep MLX **opt-in** (dylib size) — same as today.
+MLX remains **opt-in** (dylib size).
 
 ## Accelerate (in progress)
 

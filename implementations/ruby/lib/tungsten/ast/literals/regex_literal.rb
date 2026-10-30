@@ -11,5 +11,9 @@ module Tungsten::AST
       flags |= Regexp::EXTENDED if @options.include?("x")
       @value = Regexp.new(@pattern, flags)
     end
+
+    def eval_in(_interp)
+      @value
+    end
   end
 end

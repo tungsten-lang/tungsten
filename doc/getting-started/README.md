@@ -70,7 +70,7 @@ bin/tungsten doc/examples/03-oop/classes.w
 ```bash
 bin/tungsten start           # map of the language + next steps
 bin/tungsten start --agent   # same, for coding agents
-bin/tungsten doctor          # check clang, LLVM, Ruby
+bin/tungsten doctor          # check clang, make, lld, zstd, compiler
 bin/wit                      # interactive REPL (or: bin/tungsten console)
 ```
 
@@ -79,7 +79,7 @@ bin/wit                      # interactive REPL (or: bin/tungsten console)
 | Doc | Audience |
 | --- | -------- |
 | [README.md](../../README.md) | Install, flags, showcase snippets |
-| [TUNGSTEN_FOR_LLMs.md](../TUNGSTEN_FOR_LLMs.md) | Dense surface reference for agents |
+| [TUNGSTEN_FOR_LLMS.md](../TUNGSTEN_FOR_LLMS.md) | Dense surface reference for agents |
 | [TUNGSTEN.md](../TUNGSTEN.md) | Man-page style overview |
 | [WVALUE.md](../WVALUE.md) | Runtime value tagging (NaN-boxing) |
 | [specification/](../specification/) | Formal language spec |

@@ -193,7 +193,7 @@ When you want an explicit mode:
 | `--ruby`   | Ruby tree-walking interpreter, or Ruby stage-1 bootstrap for `build`.        |
 | `--spinel` | Spinel stage-0 bootstrap for `build` (experimental; mutually exclusive with `--ruby`). |
 
-Ruby is **not** required for normal; it is needed for the `--ruby` developer option.
+Ruby is **not** required for normal use; it is needed for the `--ruby` developer option.
 
 </small>
 

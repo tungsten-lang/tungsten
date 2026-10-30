@@ -817,7 +817,7 @@ module Tungsten
           payload = CacheIntegrity.unwrap(blob)
           next nil unless payload
 
-          Marshal.load(payload)
+          interpreter.restore_ast_cache_state(Marshal.load(payload))
         rescue StandardError
           nil
         end
@@ -828,7 +828,7 @@ module Tungsten
           path = args[0].to_s
           tmp_path = "#{path}.tmp.#{$$}"
           FileUtils.mkdir_p(File.dirname(path))
-          payload = Marshal.dump(args[1])
+          payload = Marshal.dump(interpreter.snapshot_ast_cache_state(args[1]))
           File.binwrite(tmp_path, CacheIntegrity.wrap(payload))
           File.rename(tmp_path, path)
           true
@@ -970,6 +970,22 @@ module Tungsten
           ::Digest::SHA256.hexdigest(args[0].to_s)[0, 16]
         end
 
+        interpreter.define_builtin("digest_string64") do |_recv, args, _block|
+          u64 = interpreter.send(:wyhash64_string_value, args[0].to_s)
+          interpreter.send(:to_signed_i64, u64)
+        end
+
+        interpreter.define_builtin("digest_file64") do |_recv, args, _block|
+          path = path_string(args[0])
+          next nil unless File.file?(path)
+
+          bytes = File.binread(path)
+          u64 = interpreter.send(:wyhash64_string_value, bytes)
+          interpreter.send(:to_signed_i64, u64)
+        rescue SystemCallError
+          nil
+        end
+
         interpreter.define_builtin("alias_method") do |_recv, _args, _block|
           # core/date.w aliases to_s/1 to strftime/1. Ruby Date#to_s already
           # accepts a format string, so the alias is a no-op here.
@@ -980,6 +996,8 @@ module Tungsten
           value = args[0]
           case value
           when Runtime::WObject then value.w_class.name
+          when Runtime::WireSequence then "Array"
+          when Runtime::PackedNode, Runtime::WireRecord then "WValue"
           when Tungsten::ByteArray then "ByteArray"
           when Tungsten::CharValue then "Char"
           when Tungsten::StringBuffer then "StringBuffer"
@@ -1265,6 +1283,8 @@ module Tungsten
           case recv
           when Runtime::FileHandle then recv.type
           when Runtime::WObject then recv.w_class.name
+          when Runtime::WireSequence then "Array"
+          when Runtime::PackedNode, Runtime::WireRecord then "WValue"
           when Tungsten::ByteArray then "ByteArray"
           when Tungsten::CharValue then "Char"
           when Tungsten::StringBuffer then "StringBuffer"
@@ -1458,6 +1478,10 @@ module Tungsten
 
         interpreter.define_method_builtin("valid_utf8?") do |recv, _args, _block|
           recv.to_s.dup.force_encoding(Encoding::UTF_8).valid_encoding?
+        end
+
+        interpreter.define_method_builtin("byte_at") do |recv, args, _block|
+          recv.to_s.getbyte(args[0].to_i)
         end
 
         interpreter.define_method_builtin("chars") do |recv, _args, _block|

@@ -6,7 +6,7 @@ SciPy name: `solve_ivp`. We use **Solve** so BVP/DAE can join later
 without `core/ode` becoming a lie.
 
 ```
-use core/sci/solve
+use core/solve
 f = -> (t, y)
   # y' = -y
   out = []
@@ -28,7 +28,7 @@ traj = Solve.rk4(f, ~0.0, ~1.0, [~1.0], ~0.05)
 Tungsten: **`core/optim`** (sibling of solve).
 
 ```
-use core/sci/optim
+use core/optim
 g = -> (x) x * x - ~2.0
 << Optim.root_bisection(g, ~0.0, ~2.0)
 # also: root_newton, minimize_gd_fd, minimize_nm, least_squares

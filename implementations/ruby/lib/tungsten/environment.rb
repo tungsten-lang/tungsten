@@ -5,7 +5,7 @@ module Tungsten
     UNDEFINED = Object.new.freeze
     EMPTY_SHAPE = 0
 
-    attr_reader :parent, :layout_shape
+    attr_reader :parent, :layout_shape, :slot_values
 
     def initialize(parent = nil, barrier: false, slot_names: nil, undefined_from: nil)
       @parent = parent
@@ -102,7 +102,7 @@ module Tungsten
         idx = env.slot_index(name)
         return env.set_slot(idx, value) if idx
 
-        if env.instance_variable_get(:@barrier)
+        if env.barrier?
           env.define(name, value)
           return value
         end
@@ -161,7 +161,7 @@ module Tungsten
       env = self
       while env
         return true if env.defined_locally?(name)
-        break if env.instance_variable_get(:@barrier)
+        break if env.barrier?
 
         env = env.parent
       end

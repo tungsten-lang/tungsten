@@ -52,7 +52,7 @@ kept in lockstep with that semantics. `@gpu fn` is a separate kernel dialect
 The C VM in `implementations/c` bootstraps the self-hosted compiler. It is
 not a full language implementation. `implementations/ruby` is.
 
-Agent-oriented summary: [TUNGSTEN_FOR_LLMs.md](../TUNGSTEN_FOR_LLMs.md)
+Agent-oriented summary: [TUNGSTEN_FOR_LLMS.md](../TUNGSTEN_FOR_LLMS.md)
 (section **Engines**).
 
 ---
@@ -309,7 +309,7 @@ GOOD_7 = [1, 5]          # digits are fine in SCREAMING_SNAKE
 ## Where to go next
 
 - Revisit features: [Index](README.md)
-- Dense reference: [TUNGSTEN_FOR_LLMs.md](../TUNGSTEN_FOR_LLMs.md)
+- Dense reference: [TUNGSTEN_FOR_LLMS.md](../TUNGSTEN_FOR_LLMS.md)
 - Value tags: [WVALUE.md](../WVALUE.md)
 - Performance story: [tungsten-performance-engineering.md](../articles/tungsten-performance-engineering.md)
 - Spec: [specification/](../specification/)

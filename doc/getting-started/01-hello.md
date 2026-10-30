@@ -95,31 +95,31 @@ i = 4
 
 ## Run vs compile
 
-`bin/tungsten` has two main ways to execute code:
+`bin/tungsten` compiles through WIRE by default, with an opt-in interpreter:
 
 | Command | What happens |
 | ------- | ------------ |
-| `bin/tungsten file.w` | **Quick run** — interprets (or picks a fast path). Good for scripts and examples. |
-| `bin/tungsten -o out file.w` | **Compile** to a native binary via LLVM → clang. Most complete engine. |
-| `bin/tungsten -e '…'` | Eval a one-liner (quick path). |
+| `bin/tungsten file.w` | **Run** — compiles through WIRE, caches the native binary, and runs it. |
+| `bin/tungsten -o out file.w` | **Compile** to an explicit native binary via WIRE → LLVM → clang. |
+| `bin/tungsten run --interpret file.w` | **Interpret** — runs the self-hosted tree-walking interpreter. |
+| `bin/tungsten -e '…'` | Eval a one-liner through WIRE. |
 | `bin/tungsten --ruby file.w` | Force the Ruby tree-walking interpreter. |
 
 ```bash
-# Quick run
+# Compile and run (cached)
 bin/tungsten hello.w
 
-# Native binary
+# Explicit native binary
 bin/tungsten -o hello hello.w
 ./hello
 
-# Optimized native build
+# Optimized release build (full LTO)
 bin/tungsten -o hello --release --native hello.w
 ```
 
-Most of this tutorial's snippets work under quick run. A few constructs —
-`fn` pure functions, `@1`/`@2` arity args, trait dispatch, some accessors —
-need the **compiled** path. They are marked *(compiled)* in later pages and
-collected in [06 — Gotchas](06-gotchas.md).
+All snippets in this tutorial work directly with `bin/tungsten file.w`.
+Remaining edge-case engine differences are covered in
+[06 — Gotchas](06-gotchas.md).
 
 ---
 

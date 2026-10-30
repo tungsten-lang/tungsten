@@ -195,7 +195,7 @@ Nominal solar values follow [IAU Resolution B3](https://www.iau.org/common/Uploa
 
 ## Mathematical constants and π-quantities
 
-Bare mathematical constants evaluate as Decimals on both engines: `π`
+Bare mathematical constants evaluate as `Float` values on both engines: `π`
 (3.14159…), `τ` (2π), `ℯ` (Euler's number), and `ϕ`/`φ` (the golden
 ratio). Superscript powers apply to any of them (`π²`, `x⁷`), and `2 * π`
 multiplies out to a plain number immediately.

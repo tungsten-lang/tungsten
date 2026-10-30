@@ -3,5 +3,9 @@ module Tungsten::AST
     def initialize(value)
       @value = value
     end
+
+    def eval_in(interp)
+      interp.visit_duration(self)
+    end
   end
 end

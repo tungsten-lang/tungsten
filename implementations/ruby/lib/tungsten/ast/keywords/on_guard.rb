@@ -22,6 +22,10 @@ module Tungsten::AST
       @body = List.from(body)
     end
 
+    def eval_in(interp)
+      interp.visit_on_guard(self)
+    end
+
     def ==(other)
       super && other.predicate    == predicate &&
                other.capabilities == capabilities &&

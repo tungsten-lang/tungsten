@@ -194,17 +194,23 @@ The following identifiers are used as reserved words, or _keywords_ of the langu
 
 They must be spelled exactly as written here:
 
-    break
-    case continue
-    else elsif exit
-    false
-    if in
-    next nil
-    raise redo rescue retry return
+    and auto
+    begin break
+    case ccall continue
+    data defer
+    else elsif ensure exit
+    false field fn
+    if in is
+    loop
+    module
+    next nil not
+    or
+    private protected public
+    raise readonly redo rescue retry return ro rw
     self super
-    trait true
+    then trait true
     unless until use
-    when while
+    when while with
     yield
 
     __DIR__
@@ -215,65 +221,27 @@ They must be spelled exactly as written here:
 
 The following tokens are reserved for future expansion of the Tungsten language:
 
-    asm async await
-    macro
-    of out
-    ptr
-    secret sync
-    type
-    uniq
-    with
-
-    mut mod freeze
-    safe unsafe
-
-    always and as assert assigns at
-    bad begin by
-    class compare
-    do
-    end ensure error every export extends extern
-    fn for from
-    is
-    ln
-    module
-    noop not
-    or
-    private protected public
-    reraise rm
-    then
-
-
-    abort abstract alias align always args asm assert assigns async atomic auto await
-    base begin binding bitstype body bool byte bytetype
-    cache cast catch char clone compile const continue
-    debug default defer deferred defined? del delegate delete delta deprecated done dynamic
-    eager ensure enum eps eval event every except exec exit export external
-    factory fail fallthrough field final finally for foreach foreign from function
-    get global goto guard
+    abort abstract alias align always args asm assert assigns async atomic await
+    bad base binding bitstype body bool by byte bytetype
+    cache cast catch char class clone compare compile const
+    debug default deferred defined? del delegate delete delta deprecated do done dynamic
+    eager elif enum eps error eval event every except exec export extends external extern
+    factory fail fallthrough final finally for foreach foreign freeze from function
+    get global good goto guard
     immutable implements implicit import imports include inherit inline interface internal invariant involatile item
-    lambda lazy let library load local loop
-    macro map match me mixin mutable
-    namespace new none nothrow null
-    object of on operator out override
-    package packed parallel parse part perform pragma privately proc property pub pure
-    raises range record ref repeat require restrict resume rethrow
-    safe scope sealed set shadow shared sizeof static struct suspend switch sync synchronized
-    template test this throw throws to trait transient trap try type typealias typedef typeof
-    undef undefined union unreachable unsafe use using
-    val var version void volatile
-    with without
-
-    INFINITY ∞
-    NAN
+    lambda lazy let library ln load local
+    macro map match me mixin mod mut mutable
+    namespace new none noop nothrow null
+    object of off on operator out override
+    package packed parallel parse part perform pragma privately proc property ptr pub pure
     quietly
-
-    on off
+    raises range record ref repeat require reraise restrict resume rethrow rm
+    safe scope sealed secret set shadow shared sizeof static struct suspend switch sync synchronized
+    template test this throw throws to transient trap try type typealias typedef typeof
+    undef undefined union uniq unreachable unsafe using
+    val var version void volatile
+    without
     yes no
-    good bad
-
-    # maybe
-    done
-    elif extern
 
     # magic methods
     @@caller
@@ -517,7 +485,7 @@ ASCII literals are described by the following lexical definitions:
 | 0b000_1010 | 0o012 | 10  | 0x0A | LF  | ^J  | \n | Line Feed                     |
 | 0b000_1011 | 0o013 | 11  | 0x0B | VT  | ^K  | \v | Vertical Tab                  |
 | 0b000_1100 | 0o014 | 12  | 0x0C | FF  | ^L  | \f | Form Feed                     |
-| 0b000_1101 | 0o015 | 13  | 0x0D | CR  | ^M  | \r | Carraige Return               |
+| 0b000_1101 | 0o015 | 13  | 0x0D | CR  | ^M  | \r | Carriage Return               |
 | 0b000_1110 | 0o016 | 14  | 0x0E | SO  | ^N  |    | Shift Out                     |
 | 0b000_1111 | 0o017 | 15  | 0x0F | SI  | ^O  |    | Shift In                      |
 | 0b001_0000 | 0o020 | 16  | 0x10 | DLE | ^P  |    | Data Link Escape              |
@@ -760,35 +728,18 @@ Algorithms on generic `Integer` cannot assume the default promotion policy,
 while `Int` methods may. Fixed-width behavior is opt-in through hints such as
 `## i64` and `## u64`.
 
-Unsigned integers are input and output using the `0x` prefix and hexadecimal (base 16) digits `0–9a–f` (the capitalized digits `A–F` also work). The size of the unsigned value is determined by the number of hex digits used:
+Hexadecimal (`0x`), binary (`0b`), octal (`0o`), and base-20 (`0v`) integer literals evaluate to the same `Int` / `BigInt` integer family as decimal literals:
 
-    wit> 0x1.class
-    Int8U
-
-    wit> 0x123.class
-    Int16U
-
-    wit> 0x1234567.class
-    Int32U
-
-    wit> 0x123456789abcdef.class
-    Int64U
-
-This behavior is based on the observation that when one uses unsigned hex literals for integer values, one typically is using them to represent a fixed numeric byte sequence, rather than just an integer value.
-
-Binary and octal literals are also supported:
+    wit> 0x10.class_name
+    Int
 
     wit> 0b10
-    0x02
-
-    wit> 0b10.class
-    Int8U
+    2
 
     wit> 0o10
-    0x08
+    8
 
-    wit> 0o10.class
-    Int8U
+Fixed-width signed and unsigned machine types (`i8`..`i128`, `u8`..`u128`) are selected through type annotations (`## i64`, `## u64`, or typed function signatures).
 
 The minimum and maximum representable values of primitive numeric types such as integers are given by the `min/0` and `max/0` methods:
 
@@ -878,7 +829,7 @@ Tungsten allows you to create new units of measurement, auto-generating the conv
 
 Tungsten ships with all dimensions from the International System of Units, abbreviated SI from the French _Le **S**ystème **I**nternational d'Unités_.
 
-Example: literal definition of Planck's constant: `ℎ = 6.626_069_57(29)×10²³J·s`.
+Example: literal definition of Planck's constant: `ℎ = 6.626_070_15×10⁻³⁴J·s`.
 
 _Note: Trailing zeros are meaningful, as they indicate the precision associated with the number. Decimal literals will be normalized to a standard form before returned: e.g., "x10^2" => "×10²"._
 
@@ -949,10 +900,10 @@ Decimal literals can be defined with semantic meaning:
     wit> 3m5s
 
     wit> ℎ
-      => 6.626_069_57(29)×10²³J·s
+      => 6.626_070_15×10⁻³⁴J·s
 
     wit> ℏ
-      => 1.054_571_726(47)×10³⁴J·s
+      => 1.054_571_817×10⁻³⁴J·s
 
     # exact calculations using irrational numbers
     wit> 2π - 1π - 1π
@@ -961,8 +912,8 @@ Decimal literals can be defined with semantic meaning:
     wit> 3π / 2
       => 1.5π
 
-    wit> 512GiB %% bytes
-      => 549_755_813_888·bytes
+    wit> 512 GiB | B
+      => 549755813888 B
 
     Tungsten.register_unit "km", alias: "kilometer",     equals: 1000m
     Tungsten.register_unit "cm", alias: "centimeter",    equals: 1m⁻²
@@ -1015,9 +966,11 @@ Additional information about precision can be conveyed through additional notati
 
 #### Metric prefixes
 
-| Prefix | Symbol | 1000<sup>m</sup>    | 10<sup>n</sup> | Decimal                           | English word | Since |
-| ------ | :----: | ------------------- | -------------- | --------------------------------: | ------------ | :---: |
-| yotta  | Y      | 1000⁸               | 10²⁴           | 1 000 000 000 000 000 000 000 000 | septillion   | 1991  |
+| Prefix | Symbol | 1000<sup>m</sup>    | 10<sup>n</sup> | Decimal                                  | English word | Since |
+| ------ | :----: | ------------------- | -------------- | ---------------------------------------: | ------------ | :---: |
+| quetta | Q      | 1000¹⁰              | 10³⁰           | 1 000 000 000 000 000 000 000 000 000 000 | nonillion    | 2022  |
+| ronna  | R      | 1000⁹               | 10²⁷           | 1 000 000 000 000 000 000 000 000 000    | octillion    | 2022  |
+| yotta  | Y      | 1000⁸               | 10²⁴           | 1 000 000 000 000 000 000 000 000        | septillion   | 1991  |
 | zetta  | Z      | 1000⁷               | 10²¹           | 1 000 000 000 000 000 000 000     | sextillion   | 1991  |
 | exa    | E      | 1000⁶               | 10¹⁸           | 1 000 000 000 000 000 000         | quintillion  | 1975  |
 | peta   | P      | 1000⁵               | 10¹⁵           | 1 000 000 000 000 000             | quadrillion  | 1975  |
@@ -1040,23 +993,27 @@ Additional information about precision can be conveyed through additional notati
 | pico   | p      | 1000⁻⁴              | 10⁻¹²          | 0.000 000 000 001                 | trillionth    | 1960  |
 | femto  | f      | 1000⁻⁵              | 10⁻¹⁵          | 0.000 000 000 000 001             | quadrillionth | 1964  |
 | atto   | a      | 1000⁻⁶              | 10⁻¹⁸          | 0.000 000 000 000 000 001         | quitillionth  | 1964  |
-| zepto  | z      | 1000⁻⁷              | 10⁻²¹          | 0.000 000 000 000 000 000 001     | sextillionth  | 1991  |
-| yocto  | y      | 1000⁻⁸              | 10⁻²⁴          | 0.000 000 000 000 000 000 000 001 | septillionth  | 1991  |
+| zepto  | z      | 1000⁻⁷              | 10⁻²¹          | 0.000 000 000 000 000 000 001            | sextillionth  | 1991  |
+| yocto  | y      | 1000⁻⁸              | 10⁻²⁴          | 0.000 000 000 000 000 000 000 001        | septillionth  | 1991  |
+| ronto  | r      | 1000⁻⁹              | 10⁻²⁷          | 0.000 000 000 000 000 000 000 000 001    | octillionth   | 2022  |
+| quecto | q      | 1000⁻¹⁰             | 10⁻³⁰          | 0.000 000 000 000 000 000 000 000 000 001| nonillionth   | 2022  |
 
 Note: dag,dkg: decagram, mcg: microgram, megagram: tonne (t), megatonne or megaton -> teragram (Tg)
 
 #### Binary prefixes
 
-| Prefix | Symbol | 2<sup>n</sup> | Derivation    | Decimal                           |
-| ------ | ------ | ------------- | ------------- | --------------------------------- |
-| kibi   | Ki     | 2¹⁰           | kilo:  (10³)¹ | 1 024                             |
-| mebi   | Mi     | 2²⁰           | mega:  (10³)² | 1 048 576                         |
-| gibi   | Gi     | 2³⁰           | giga:  (10³)³ | 1 073 741 824                     |
-| tebi   | Ti     | 2⁴⁰           | tera:  (10³)⁴ | 1 099 511 627 776                 |
-| pebi   | Pi     | 2⁵⁰           | peta:  (10³)⁵ | 1 125 899 906 842 624             |
-| exbi   | Ei     | 2⁶⁰           | exa:   (10³)⁶ | 1 152 921 504 606 846 976         |
-| zebi   | Zi     | 2⁷⁰           | zetta: (10³)⁷ | 1 180 591 620 717 411 303 424     |
-| yobi   | Yi     | 2⁸⁰           | yobi:  (10³)⁸ | 1 208 925 819 614 629 174 706 176 |
+| Prefix | Symbol | 2<sup>n</sup> | Derivation     | Decimal                                   |
+| ------ | ------ | ------------- | -------------- | ----------------------------------------- |
+| kibi   | Ki     | 2¹⁰           | kilo:  (10³)¹  | 1 024                                     |
+| mebi   | Mi     | 2²⁰           | mega:  (10³)²  | 1 048 576                                 |
+| gibi   | Gi     | 2³⁰           | giga:  (10³)³  | 1 073 741 824                             |
+| tebi   | Ti     | 2⁴⁰           | tera:  (10³)⁴  | 1 099 511 627 776                         |
+| pebi   | Pi     | 2⁵⁰           | peta:  (10³)⁵  | 1 125 899 906 842 624                     |
+| exbi   | Ei     | 2⁶⁰           | exa:   (10³)⁶  | 1 152 921 504 606 846 976                 |
+| zebi   | Zi     | 2⁷⁰           | zetta: (10³)⁷  | 1 180 591 620 717 411 303 424             |
+| yobi   | Yi     | 2⁸⁰           | yotta: (10³)⁸  | 1 208 925 819 614 629 174 706 176         |
+| robi   | Ri     | 2⁹⁰           | ronna: (10³)⁹  | 1 237 940 039 285 380 274 899 124 224     |
+| quebi  | Qi     | 2¹⁰⁰          | quetta: (10³)¹⁰| 1 267 650 600 228 229 401 496 703 205 376 |
 
 ### 2.9.3 Floating points
 
@@ -1107,7 +1064,7 @@ There are three specified standard floating-point values that do not correspond 
 | −Inf16  | −Inf32  | −Inf, −∞ | -Inf128  | -Inf256  | negative infinity | A value less than all finite floating-point values               |
 | NaN16   | NaN32   | NaN      | NaN128   | NaN256   | not a number      | A value not equal to any floating-point value (including itself) |
 
-For further discussion of how these non-finite floating-point values are ordered with respect to each other and other floats, see [Numeric Comparisons](http://www.google.com). By the [IEEE 754 standard][IEEE 754], these floating-point values are the results of certain arithmetic operations.
+For further discussion of how these non-finite floating-point values are ordered with respect to each other and other floats, see [Floating-Point Math Modes](floating-point-math.md). By the [IEEE 754 standard][IEEE 754], these floating-point values are the results of certain arithmetic operations.
 
     wit> 1 / Inf
     ~0.0e0
@@ -1424,7 +1381,7 @@ Tungsten has no version or semantic-version literal. A sequence such as `1.2.3` 
 Tungsten represents boolean values with two objects literals: `true` and `false`.
 
     Boolean = True | False .
-    True    = "true"  | "on"  | yes" .
+    True    = "true"  | "on"  | "yes" .
     False   = "false" | "off" | "no" .
 
 Token: `BOOLEAN`
@@ -1539,5 +1496,3 @@ Certain symbols serve more than one purpose in the grammar.
 The augmented assignment operators, serve lexically as delimiters, but also perform an operation.
 
 Any printing ASCII character not listed above as an operator, delimiter, or literal introducer is unused by Tungsten; its occurrence outside string literals and comments is an error.
-
-A physical line is a sequence of characters terminated by an end-of-line sequence. In source files, any of the standard platform line termination sequences can be used – Unix (`LF`), Windows (`CR LF`), or the old Macintosh (`CR`). All line termination sequences can be used interchangeably, regardless of platform.

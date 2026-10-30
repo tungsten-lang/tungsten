@@ -8,5 +8,9 @@ module Tungsten::AST
       @denominator = parts[1].to_i
       @value = Rational(@numerator, @denominator)
     end
+
+    def eval_in(_interp)
+      @value
+    end
   end
 end

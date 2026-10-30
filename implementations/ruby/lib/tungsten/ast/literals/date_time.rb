@@ -6,5 +6,9 @@ module Tungsten::AST
       # from the text the same way Date.parse does.
       @value = value.to_s
     end
+
+    def eval_in(interp)
+      interp.visit_date_time(self)
+    end
   end
 end

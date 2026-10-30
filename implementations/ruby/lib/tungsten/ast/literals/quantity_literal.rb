@@ -7,6 +7,10 @@ module Tungsten::AST
       @unit_string = unit_string
     end
 
+    def eval_in(interp)
+      interp.visit_quantity_literal(self)
+    end
+
     def ==(other)
       other.is_a?(QuantityLiteral) &&
         other.number == @number &&

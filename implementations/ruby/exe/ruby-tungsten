@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT) && RubyVM::YJIT.respond_to?(:enable) && ENV["TUNGSTEN_NO_YJIT"] != "1"
 require "bundler/setup"
+$LOAD_PATH.unshift(File.expand_path("../lib", __dir__)) unless $LOAD_PATH.include?(File.expand_path("../lib", __dir__))
 require_relative "../lib/tungsten"
 require "optparse"
 

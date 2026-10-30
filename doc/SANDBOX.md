@@ -95,7 +95,9 @@ not a complete jail.
   directly, including the ungated C entry points behind the gated ones. This is
   the big one, and it is not fixable inside the runtime — `ccall`'s whole
   purpose is raw access.
-- **No memory limit.** Nothing stops an allocation spiral.
+- **Soft memory ceiling only.** The runtime's memory watchdog (`TUNGSTEN_MEMORY_LIMIT`,
+  default `8G`) samples physical footprint every 100 ms and exits with status
+  137 when exceeded, which catches runaway leaks, not tight kernel-enforced spikes.
 - **No process-count limit.** `proc_spawn` is gated, but a program that reaches
   `fork` another way is not bounded.
 - **No CPU bound.** The gate does not stop an infinite loop; the CLI does not

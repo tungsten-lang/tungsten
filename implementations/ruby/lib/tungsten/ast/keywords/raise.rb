@@ -6,6 +6,10 @@ module Tungsten::AST
       @value = value
     end
 
+    def eval_in(interp)
+      interp.visit_raise(self)
+    end
+
     def ==(other)
       super && other.value == value
     end

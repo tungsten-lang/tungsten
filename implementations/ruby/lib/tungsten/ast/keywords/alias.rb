@@ -7,6 +7,10 @@ module Tungsten::AST
       @from = from
     end
 
+    def eval_in(interp)
+      interp.visit_alias(self)
+    end
+
     def to_sexp
       [:alias, @to.to_sexp, @from.to_sexp]
     end

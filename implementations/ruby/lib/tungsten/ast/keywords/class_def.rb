@@ -15,6 +15,10 @@ module Tungsten::AST
       @class_role = Tungsten::AST.intern_name(class_role)
     end
 
+    def eval_in(interp)
+      interp.visit_class_def(self)
+    end
+
     def children
       yield @body if @body.is_a?(Node)
     end

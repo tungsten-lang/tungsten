@@ -1,9 +1,11 @@
-<< "TUNGSTEN" == "TUNGSTEN"
-<< "TUNGSTEN" != "Tungsten"
-<< "z" > "a"
-<< "z" >= "a"
-<< "a" < "z"
-<< "a" <= "z"
+# String comparison
+
+<< ("TUNGSTEN" == "TUNGSTEN")
+<< ("TUNGSTEN" != "Tungsten")
+<< ("z" > "a")
+<< ("z" >= "a")
+<< ("a" < "z")
+<< ("a" <= "z")
 
 ## expect stdout
 ## true

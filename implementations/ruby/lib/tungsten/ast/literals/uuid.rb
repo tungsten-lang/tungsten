@@ -5,5 +5,9 @@ module Tungsten::AST
     def initialize(value)
       @value = UUIDTools::UUID.parse(value.to_s)
     end
+
+    def eval_in(interp)
+      interp.visit_uuid(self)
+    end
   end
 end

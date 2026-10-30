@@ -5,12 +5,37 @@ module Tungsten::AST
     attr_accessor :name
     attr_accessor :cached_env, :cached_slot  # inline variable cache: env identity + slot index
     attr_accessor :cached_layout_shape       # inline cache across equivalent method frames
+    attr_accessor :cached_miss_shape         # inline cache for @root_env hits when current frame misses
+    attr_accessor :cached_const_env_version  # inline cache for non-class constant negative lookups
     attr_accessor :cached_dispatch_owner, :cached_dispatch_version, :cached_w_method
+    attr_reader :bang_base, :is_self, :constant_name
 
     def initialize(name)
       @name = Tungsten::AST.intern_name(name)
+      @cached_env = nil
       @cached_slot = -1
       @cached_layout_shape = 1
+      @cached_miss_shape = 1
+      @cached_const_env_version = -1
+      @cached_dispatch_owner = nil
+      @cached_dispatch_version = 0
+      @cached_w_method = nil
+      @is_self = @name == "self"
+      @bang_base = @name.end_with?("!") && @name.size > 1 ? -@name.delete_suffix("!") : nil
+      first = @name.getbyte(0)
+      @constant_name =
+        if first.nil? || (first >= 97 && first <= 122)
+          false
+        elsif first >= 65 && first <= 90
+          true
+        else
+          ch = @name[0]
+          ch == ch.upcase
+        end
+    end
+
+    def eval_in(interp)
+      interp.visit_var(self)
     end
 
     def can_assign?
@@ -20,10 +45,7 @@ module Tungsten::AST
     def children; end
 
     def constant?
-      return @constant_name if instance_variable_defined?(:@constant_name)
-
-      first = name[0]
-      @constant_name = first == first.upcase
+      @constant_name
     end
 
     def ==(other)

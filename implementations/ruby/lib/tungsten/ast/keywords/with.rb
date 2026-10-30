@@ -13,6 +13,10 @@ module Tungsten::AST
       @body = List.from body
     end
 
+    def eval_in(interp)
+      interp.visit_with(self)
+    end
+
     def ==(other)
       super && other.bindings == bindings &&
                other.body     == body

@@ -9,6 +9,10 @@ module Tungsten::AST
       @ensure_body = List.from(ensure_body)
     end
 
+    def eval_in(interp)
+      interp.visit_begin(self)
+    end
+
     def ==(other)
       super && other.body == body &&
                other.rescue_var == rescue_var &&

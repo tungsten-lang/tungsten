@@ -103,7 +103,7 @@ Blocks can bind an implicit `item`:
 << [1, 2, 3].map -> item ** 2
 ```
 
-### Pure / memoized functions *(compiled)*
+### Pure / memoized functions
 
 ```tungsten
 fn fib(n)
@@ -115,14 +115,9 @@ fn fib(n)
 << fib(10)                  # => 55
 ```
 
-`fn` marks a pure function the compiler may auto-memoize. Prefer the compiled
-path for programs that use `fn`:
+`fn` marks a pure function that the compiler automatically memoizes.
 
-```bash
-bin/tungsten -o /tmp/fib your_fib.w && /tmp/fib
-```
-
-### Arity shorthand *(compiled)*
+### Arity shorthand
 
 ```tungsten
 -> add/2
@@ -237,9 +232,7 @@ numbers = [5, 3, 1, 4, 2]
 
 doubled = numbers.map ->(x) x * 2
 evens = numbers.select ->(x) x % 2 == 0
-
-# reduce is available on the compiled path
-total = numbers.reduce(0, ->(a, b) a + b)   # (compiled)
+total = numbers.reduce(0, ->(a, b) a + b)
 ```
 
 ```bash
@@ -284,7 +277,7 @@ ensure
   << "cleanup"
 ```
 
-`<!" is a raise shorthand: `<! "boom"`.
+`<!` is a raise shorthand: `<! "boom"`.
 
 ---
 
@@ -300,7 +293,7 @@ ensure
 ## Try it
 
 ```bash
-bin/tungsten doc/examples/01-basics/functions.w   # may need -o for fn / @1
+bin/tungsten doc/examples/01-basics/functions.w
 bin/tungsten doc/examples/02-data/arrays.w
 bin/tungsten doc/examples/02-data/hashes.w
 ```

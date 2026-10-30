@@ -3,5 +3,9 @@ module Tungsten::AST
     def initialize(value)
       @value = value
     end
+
+    def eval_in(_interp)
+      @value
+    end
   end
 end

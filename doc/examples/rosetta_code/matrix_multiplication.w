@@ -24,9 +24,9 @@
 a = [[1, 2], [3, 4]]
 b = [[5, 6], [7, 8]]
 result = mat_mul(a, b)
-result.each { |row| puts row }
+result.each -> (row)
+  << row
 
-## expect skip compiled-only for now — the Ruby interpreter (which runs this harness) can't execute it; try `bin/tungsten matrix_multiplication.w`
 ## expect stdout
 ## [19, 22]
 ## [43, 50]

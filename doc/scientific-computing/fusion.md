@@ -219,6 +219,6 @@ How to read it:
   (~0.8 ms ≈ 160 MB over ~200 GB/s), where it is ~10× the 8-thread
   CPU and ~13× JAX. f32 only — MSL has no f64 — so its sums differ
   from the f64 rows below display precision.
-- Making the *fused expression form* reach the threads/GPU numbers
-  automatically = parallelizing/offloading the fused loop in the
-  compiler, which is the remaining doc'd future work.
+- The compiler's fusion pass (`compiler/lib/lowering/fusion.w`) also
+  supports parallel fused loops (`w_parallel_for` past 100k elements)
+  and `@gpu` offload for fused elementwise expressions.

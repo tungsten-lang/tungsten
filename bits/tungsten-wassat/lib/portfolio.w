@@ -25,6 +25,7 @@
 # mode is a loud fatal error, never a hang.
 
 use atomic_stop
+use small_circuit
 use ../../../core/bit_ops
 
 WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
@@ -1814,7 +1815,11 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   # arm (slot threads+2, always reserved so indices never move), allocated
   # once: `res` is addressed by arm index and must not move after an arm has
   # a pointer into it.
+  circuit_plan = nil
+  if env("WASSAT_SMALL_CIRCUIT") != "0"
+    circuit_plan = wassat_small_circuit_plan(formula)
   cap = threads + 3
+  cap += 1 if circuit_plan != nil
   stop = i64[4]
   res = i64[cap * (nv + 8)]
   tel = i64[cap * WASSAT_TEL_STRIDE]
@@ -1919,6 +1924,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     a += 1
   { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
     "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
+    "circuit_plan": circuit_plan,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
     "credit": credit, "offsets": offsets, "sls": [], "prune_info": prune_info,
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
@@ -2379,6 +2385,10 @@ WASSAT_AXIS_SLOTS = 10
   sls = race["sls"]
   sls_idx = threads + 2
   sls_base = sls_idx * (nv + 8)
+  circuit_idx = threads + 3
+  circuit_base = circuit_idx * (nv + 8)
+  circuit_plan = race["circuit_plan"]
+  circuit_handle = nil
   round_ms = wassat_race_round_ms
   trace = wassat_race_trace?
   # Reallocation needs somebody to reallocate: with one raw arm there is no
@@ -2424,6 +2434,22 @@ WASSAT_AXIS_SLOTS = 10
     slice[a] = round1 == 0 ? budget : round1
     slice[a] = budget if budget > 0 && (slice[a] == 0 || slice[a] > budget)
     a += 1
+  # Unwrap boxed metadata before spawning. This worker touches only native
+  # arrays and atomics, and may continue across CDCL round barriers.
+  if circuit_plan != nil
+    circuit_lits = formula["flat_lits"]
+    circuit_offs = formula["flat_offs"]
+    circuit_lens = formula["flat_lens"]
+    circuit_program = circuit_plan["program"]
+    circuit_inputs = circuit_plan["inputs"]
+    circuit_assertions = circuit_plan["assertions"]
+    circuit_meta = circuit_plan["meta"]
+    circuit_values = circuit_plan["values"]
+    circuit_handle = Thread.new -> wassat_small_circuit_arm(
+      circuit_lits, circuit_offs, circuit_lens, circuit_program,
+      circuit_inputs, circuit_assertions, circuit_meta, circuit_values,
+      stop, res, circuit_base, nv
+    )
   round = 0
   running = 1
   while running == 1
@@ -2493,6 +2519,7 @@ WASSAT_AXIS_SLOTS = 10
         st = res[a * (nv + 8)]
         decisive_now = 1 if st == 1 || st == 0 - 1
         a += 1
+      decisive_now = 1 if circuit_plan != nil && ccall("__w_arr_load_acq", res, circuit_base) == -1
       cdcl_can_continue = 0
       if decisive_now == 0 && round1 > 0
         a = 0
@@ -2508,10 +2535,10 @@ WASSAT_AXIS_SLOTS = 10
       if decisive_now == 1 || round1 == 0 || cdcl_can_continue == 0
         z = wassat_stop_cancel(stop)
       z = sls_handle.join
-    # ---- barrier: every arm is stopped, the coordinator may dispatch again --
+    # ---- barrier: boxed workers are stopped, coordinator may dispatch again --
     #
-    # Everything from here to the next spawn runs with no worker live, which is
-    # the condition the whole design is built around: inline caches are
+    # Only the native circuit evaluator may remain live. It performs no
+    # boxed dispatch. The other workers must be stopped here because inline caches are
     # process-global, so the coordinator scores, sorts, allocates and builds
     # replacement solvers HERE and does nothing but join while arms run.
     running = 0
@@ -2526,6 +2553,7 @@ WASSAT_AXIS_SLOTS = 10
         decided = 1 if st == 1 || st == 0 - 1
         a += 1
       decided = 1 if sls.size > 0 && res[sls_base] == 1
+      decided = 1 if circuit_plan != nil && ccall("__w_arr_load_acq", res, circuit_base) == -1
       if decided == 0
         # Score the round every arm just finished, and retire the arms that
         # cannot continue: retired by the solver, stuck (no conflict advanced,
@@ -2664,6 +2692,9 @@ WASSAT_AXIS_SLOTS = 10
             if trace
               z = ccall("__w_eprint", "c trace r[round] REALLOC arm[worst] score=[score[worst]] med=[med] -> vmtf=[cfgs[cb]] ph=[cfgs[cb + 1]]/[cfgs[cb + 2]] chrono=[cfgs[cb + 3]] simp=[cfgs[cb + 4]]\n")
     round += 1
+  if circuit_handle != nil
+    z = wassat_stop_cancel(stop)
+    z = circuit_handle.join
   # Workers already record completion immediately before publishing a win.
   # Report the join tail without adding clocks or atomics to their hot loops.
   if env("WASSAT_PROFILE") == "1"
@@ -2681,6 +2712,12 @@ WASSAT_AXIS_SLOTS = 10
       ended = res[sls_base + nv + 5]
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[sls_base] == 1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+    if circuit_plan != nil
+      ended = res[circuit_base + nv + 5]
+      last_ms = ended if ended > last_ms
+      answer_ms = ended if res[circuit_base] == -1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+      cm = circuit_plan["meta"]
+      wassat_prof_note("race.circuit inputs=[cm[1]] gates=[cm[2]] batches=[cm[6]]/[cm[5]] gate_evaluations=[cm[7]] assertion_literals=[cm[8]] stopped=[cm[9]] result=[cm[10]] ms=[ended - res[circuit_base + nv + 6]]")
     if answer_ms > 0
       wassat_prof_note("race.stop answer_to_last_arm_ms=[last_ms - answer_ms]")
   a = 0
@@ -2712,6 +2749,9 @@ WASSAT_AXIS_SLOTS = 10
         status = 1
         winner = a
       a += 1
+  if status == 0 && circuit_plan != nil && res[circuit_base] == -1
+    status = -1
+    winner = circuit_idx
   # A model-only arm cannot beat a refutation, so it is consulted last and
   # only when nothing decisive was found.
   if status == 0 && sls.size > 0 && res[sls_base] == 1
@@ -2724,7 +2764,7 @@ WASSAT_AXIS_SLOTS = 10
     conflicts = ccall("__w_arr_load_acq", conflict_budget, 0)
   if winner >= 0
     base = winner * (nv + 8)
-    if winner != sls_idx && conflict_budget == nil
+    if winner != sls_idx && winner != circuit_idx && conflict_budget == nil
       conflicts += res[base + nv + 4] - offsets[winner]
     if status == 1
       v = 1
@@ -2737,7 +2777,8 @@ WASSAT_AXIS_SLOTS = 10
   # model check against the original formula, never passed off as an answer.
   { "status": status, "model": model, "winner": winner, "conflicts": conflicts,
     "conflict_budget": conflict_budget,
-    "pre_index": (winner >= threads && winner != sls_idx) ? winner - threads : 0 - 1,
+    "pre_index": (winner >= threads && winner < threads + pre.size) ? winner - threads : 0 - 1,
+    "circuit_won": winner == circuit_idx,
     "sls_won": winner == sls_idx,
     "sls_repair_won": winner == sls_idx && res[sls_base + nv + 1] == 1,
     "sls_repair_conflicts": repair_conflicts }

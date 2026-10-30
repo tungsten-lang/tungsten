@@ -322,6 +322,34 @@ describe "Tungsten Wassat CLI" ->
       check = wrat_verify(text, proof_text)
       expect(check["verified"]).to eq(true)
 
+    it "certifies an original empty clause in every proof dialect" ->
+      bin = cli_test_bin
+      cnf = "/tmp/wassat-cli-input-empty.cnf"
+      text = "p cnf 2 3\n1 2 0\n0\n-1 0\n"
+      expect(write_file(cnf, text)).to eq(true)
+      ["--proof", "--lrat", "--drat"].each -> (flag)
+        proof = "/tmp/wassat-cli-input-empty.cert"
+        expect(cli_exits(bin + " " + cnf + " " + flag + " " + proof + " > /tmp/wassat-cli-input-empty.out 2>&1", 20)).to eq(true)
+        expect(wrat_verify(text, read_file(proof))["verified"]).to eq(true)
+        out = read_file("/tmp/wassat-cli-input-empty.out")
+        expect(out.index("original empty clause") != nil).to eq(true)
+        expect(out.index("conflicts: 0") != nil).to eq(true)
+      expect(cli_exits(bin + " " + cnf + " --drat - > /tmp/wassat-cli-input-empty.stdout 2>/tmp/wassat-cli-input-empty.stderr", 20)).to eq(true)
+      expect(read_file("/tmp/wassat-cli-input-empty.stdout")).to eq("0\n")
+      expect(read_file("/tmp/wassat-cli-input-empty.stderr").index("s UNSATISFIABLE") != nil).to eq(true)
+
+    it "validates trailing input before using an earlier empty clause" ->
+      bin = cli_test_bin
+      cnf = "/tmp/wassat-cli-empty-invalid-tail.cnf"
+      proof = "/tmp/wassat-cli-empty-invalid-tail.wrat"
+      expect(write_file(cnf, "p cnf 1 2\n0\nx 0\n")).to eq(true)
+      expect(write_file(proof, "stale\n")).to eq(true)
+      expect(cli_exits(bin + " " + cnf + " --proof " + proof + " > /tmp/wassat-cli-empty-invalid-tail.out 2>&1", 1)).to eq(true)
+      expect(read_file(proof)).to eq(nil)
+      out = read_file("/tmp/wassat-cli-empty-invalid-tail.out")
+      expect(out.index("s UNSATISFIABLE") == nil).to eq(true)
+      expect(out.index("s UNKNOWN") != nil).to eq(true)
+
     it "reports malformed input as a clean error, not a crash" ->
       bin = cli_test_bin
       bad = "/tmp/wassat-cli-smoke-bad.cnf"

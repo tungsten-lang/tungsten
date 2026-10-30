@@ -128,4 +128,22 @@ describe "Wassat incremental phase snapshots" ->
     expect(r["spine_scanned"] >= 6).to eq(true)
     expect(r["spine_skipped"] >= 0).to eq(true)
 
+  it "exchanges signed byte phases with local search" ->
+    clauses = [[1, 2], [-1, 3], [-2, 3]]
+    phases = i8[4]
+    phases[1] = -1
+    phases[2] = -1
+    phases[3] = -1
+    walker = WassatSls.new(3, clauses, nil, nil)
+    remaining = walker.walk_from_phase(phases, 1000, 42)
+    expect(remaining).to eq(0)
+    clauses.each -> (clause)
+      hit = clause.any? -> (lit)
+        phases[lit.abs] == (lit > 0 ? 1 : -1)
+      expect(hit).to eq(true)
+    v = 1
+    while v <= 3
+      expect(phases[v] == 1 || phases[v] == -1).to eq(true)
+      v += 1
+
 spec_summary

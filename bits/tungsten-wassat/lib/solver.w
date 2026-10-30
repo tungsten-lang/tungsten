@@ -6,7 +6,7 @@
 #
 # DATA LAYOUT
 #
-# Everything hot lives in flat `i64[]` arrays rather than boxed collections.
+# Hot state lives in flat typed arrays rather than boxed collections.
 # Clauses are stored consecutively in one arena with per-clause offsets, so
 # propagation walks machine integers and allocates nothing.  Literals are
 # indexed by `lit_index`: variable v maps to 2v (positive) and 2v+1
@@ -112,7 +112,7 @@ WASSAT_PROOF_DRAT = 2
     @level = i64[nv + 1]
     @reason = i64[nv + 1]        # clause index, or -1 for a decision
     @seen = i8[nv + 1]          # analysis/hint marks are only 0..4
-    @phase = i64[nv + 1]         # saved polarity: 1 or -1
+    @phase = i8[nv + 1]          # saved polarity: 1 or -1
     @activity = i64[nv + 1]      # scaled integer VSIDS score
     @heap = i64[nv + 1]          # max-heap of branching variables
     @heappos = i64[nv + 1]       # variable -> heap slot, -1 when absent
@@ -272,8 +272,8 @@ WASSAT_PROOF_DRAT = 2
     # non-best rephase steps (Inverted / Original / Random) so those steps
     # never destroy the deepest-trail memory or seed target phases with
     # constant all-negative / all-positive polarities.
-    @bphase = i64[nv + 1]        # active target phases in the current epoch
-    @best_phase = i64[nv + 1]    # persistent deepest-trail phases across rephases
+    @bphase = i8[nv + 1]        # active target phases in the current epoch
+    @best_phase = i8[nv + 1]    # persistent deepest-trail phases across rephases
     if !flat_shell
       v = 0
       while v <= nv
@@ -369,7 +369,7 @@ WASSAT_PROOF_DRAT = 2
     @reduce_step = @config.reduce_step
     @auto_vivify = @config.use_vivification
     @vivify_phase = nil
-    @vivify_phase = i64[nv + 1] if @auto_vivify
+    @vivify_phase = i8[nv + 1] if @auto_vivify
 
     # Threaded-portfolio state (--fast). @stop_cell is a shared i64[] the
     # winner raises; the solve loop polls it at conflict boundaries —
@@ -1585,11 +1585,11 @@ WASSAT_PROOF_DRAT = 2
     nv = @nvars
     nl = 2 * nv + 4
     if (@inprocess_passes & 1) != 0
-      @inp_phase = i64[nv + 1]
+      @inp_phase = i8[nv + 1]
       @inp_mark = i64[nv + 1]
       @inp_lits = i64[nv + 2]
     if (@inprocess_passes & 2) != 0 && @vivify_phase == nil
-      @vivify_phase = i64[nv + 1]
+      @vivify_phase = i8[nv + 1]
     @inp_units = i64[nv + 2] if @inp_units == nil
     if (@inprocess_passes & 8) != 0 && @allow_subst && @config.use_substitution(true)
       @inp_s_idx = i64[nl]
@@ -2148,7 +2148,7 @@ WASSAT_PROOF_DRAT = 2
     # Portfolio workers cannot allocate. Their buffer is prepared while
     # loading the solver; direct, unthreaded callers can initialize it here.
     return 0 if @vivify_phase == nil && @fixed_caps
-    @vivify_phase = i64[@nvars + 1] if @vivify_phase == nil
+    @vivify_phase = i8[@nvars + 1] if @vivify_phase == nil
     saved_phase = @vivify_phase
     wassat_copy_vivify_phases(@phase, saved_phase, @nvars)
     root_conflict = self.propagate
@@ -3611,7 +3611,7 @@ WASSAT_PROOF_DRAT = 2
     @reduce_limit = @config.reduce_limit
     @reduce_step = @config.reduce_step
     @auto_vivify = @config.use_vivification
-    @vivify_phase = i64[@nvars + 1] if @auto_vivify && @vivify_phase == nil
+    @vivify_phase = i8[@nvars + 1] if @auto_vivify && @vivify_phase == nil
     # The shell was constructed with an empty clause list; the schedule
     # belongs to the real formula's shape.
     @inprocess_every = @config.inprocess_every
@@ -4244,7 +4244,10 @@ WASSAT_PROOF_DRAT = 2
   -> profile_counters(label)
     return 0 unless env("WASSAT_PROFILE") == "1"
     wassat_prof_note("[label].search conflicts=[@conflicts] decisions=[@decisions_made] propagated=[@pstate[4]] restarts=[@restart_count] reductions=[@reductions] learned_live=[@nlearned]")
-    wassat_prof_note("[label].phases snapshots=[@pstate[6]] copied_literals=[@pstate[7]] skipped_literals=[@pstate[8]]")
+    phase_bytes = 3 * (@nvars + 1)
+    phase_bytes += @nvars + 1 if @vivify_phase != nil
+    phase_bytes += @nvars + 1 if @inp_phase != nil
+    wassat_prof_note("[label].phases snapshots=[@pstate[6]] copied_literals=[@pstate[7]] skipped_literals=[@pstate[8]] payload_bytes=[phase_bytes]")
     wassat_prof_note("[label].spine snapshots=[@pstate[9]] scanned_levels=[@pstate[10]] skipped_levels=[@pstate[11]]")
     wassat_prof_note("[label].watches rebuilds=[@wp_state[3]] rebuilt_entries=[@wp_state[4]] relocations=[@wp_state[5]] copied_entries=[@wp_state[6]] overflows=[@wp_state[7]] pool_used=[@wp_state[0]] pool_capacity=[@wp_state[1]]")
     wassat_prof_note("[label].sharing exports=[@share_exports] imports=[@share_imports] dropped=[@share_dropped] filtered=[@share_filtered]")
@@ -4392,7 +4395,7 @@ WASSAT_PROOF_DRAT = 2
     @terminal_status = status unless status == 0 || status == -2
     self.result_for(status)
 
--> wassat_copy_vivify_phases(src, dst, nv) (i64[] i64[] i64)
+-> wassat_copy_vivify_phases(src, dst, nv) (i8[] i8[] i64)
   v = 0
   while v <= nv
     dst[v] = src[v]
@@ -4423,7 +4426,7 @@ WASSAT_PROOF_DRAT = 2
 # trail variable after an already-matching prefix. Copying the whole trail
 # at each new depth is quadratic on long conflict-free descents; solve_loop
 # retains the prefix only while assignments and saved phases stay unchanged.
--> wassat_best_phase_save(tr, asg, bph, start, tsize, work) (i64[] i8[] i64[] i64 i64 i64[])
+-> wassat_best_phase_save(tr, asg, bph, start, tsize, work) (i64[] i8[] i8[] i64 i64 i64[])
   work[6] += 1
   work[7] += tsize - start
   work[8] += start
@@ -5772,7 +5775,7 @@ WASSAT_PROOF_DRAT = 2
     i += 1
   0
 
--> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[]) i64
+-> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[]) i64
   word_mask = 4294967295 ## i64
   qhead = st[0]
   tsize = st[1]

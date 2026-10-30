@@ -2,6 +2,15 @@ use spec
 use ../lib/wassat
 use ../../tungsten-wrat/lib/wrat
 
+# Pin available raw-arm counts so policy tests are independent of host RAM.
++ WassatSingleRawArmConfig < WassatConfig
+  -> raw_race_arms
+    1
+
++ WassatTwoRawArmConfig < WassatConfig
+  -> raw_race_arms
+    2
+
 # Pigeonhole PHP(p,h) as DIMACS text: p pigeons, h holes, UNSAT when p > h.
 # Compact and deterministic, so the compiled smoke tests stay hermetic.
 -> cli_php_cnf(pigeons, holes)
@@ -148,15 +157,19 @@ describe "Tungsten Wassat CLI" ->
       expect(WassatConfig.new(42, compact_choice).race_route?).to eq(false)
       expect(WassatConfig.new(0, []).race_route?).to eq(false)
 
-    it "bounds discarded scout work on million-clause raw kernels" ->
+    it "shortens large scouts only when multiple raw arms will run" ->
       counts = i64[8]
-      below = WassatConfig.new(1, [])
+      below = WassatTwoRawArmConfig.new(1, [])
       below.adopt_counts(999999, counts)
-      large = WassatConfig.new(1, [])
-      large.adopt_counts(1000000, counts)
+      raced = WassatTwoRawArmConfig.new(1, [])
+      raced.adopt_counts(1000000, counts)
+      serial = WassatSingleRawArmConfig.new(1, [])
+      serial.adopt_counts(1000000, counts)
       expect(below.probe_conflicts(true)).to eq(2000)
-      expect(large.probe_conflicts(true)).to eq(512)
-      expect(large.probe_conflicts(false)).to eq(4000)
+      expect(raced.probe_conflicts(true)).to eq(128)
+      expect(serial.probe_conflicts(true)).to eq(512)
+      expect(raced.probe_conflicts(false)).to eq(4000)
+      expect(serial.probe_conflicts(false)).to eq(4000)
 
     it "bypasses discarded scout work only on dense low-variable ternary tasks" ->
       counts = i64[8]

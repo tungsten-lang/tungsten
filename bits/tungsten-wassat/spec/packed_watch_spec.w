@@ -1,6 +1,5 @@
-# spec: skip -- never listed in the wassat lane; not triaged because the whole lane fails interpreted with 'no block given'
 use spec
-use ../lib/wassat
+use ../lib/solver
 
 describe "Packed watch words above the boxed small-integer range" ->
   it "preserves high clause ids through binary propagation" ->
@@ -8,12 +7,12 @@ describe "Packed watch words above the boxed small-integer range" ->
     pool = i64[32]
     ps = i64[3]
     ps[1] = 32
-    wassat_bl_add(bd, pool, ps, 3, 70000, 5)
+    wassat_bl_add(bd, pool, ps, 3, 2147483647, 5)
     ar = i64[1]
     asg = i8[4]
     lasg = i8[10]
     lvl = i64[4]
-    rsn = i64[4]
+    rsn = i32[4]
     phs = i8[4]
     wd = i64[40]
     wp = i64[1]
@@ -27,13 +26,13 @@ describe "Packed watch words above the boxed small-integer range" ->
     st[1] = 1
     wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, ws, tr, st, 1, bd, pool)
     expect(asg[2]).to eq(-1)
-    expect(rsn[2]).to eq(70000)
+    expect(rsn[2]).to eq(2147483647)
     expect(tr[1]).to eq(-2)
     expect(st[2]).to eq(-1)
 
   it "preserves high arena offsets and header ids through long propagation" ->
     ar = i64[70005]
-    wassat_hdr_put(ar, 70000, 70000, 3)
+    wassat_hdr_put(ar, 70000, 2147483647, 3)
     ar[70001] = -1
     ar[70002] = 3
     ar[70003] = 2
@@ -45,7 +44,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     asg = i8[4]
     lasg = i8[10]
     lvl = i64[4]
-    rsn = i64[4]
+    rsn = i32[4]
     phs = i8[4]
     tr = i64[4]
     st = i64[6]
@@ -61,7 +60,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     lasg[5] = 1
     wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, ws, tr, st, 1, bd, bp)
     expect(asg[3]).to eq(1)
-    expect(rsn[3]).to eq(70000)
+    expect(rsn[3]).to eq(2147483647)
     expect(tr[1]).to eq(3)
     expect(st[2]).to eq(-1)
 

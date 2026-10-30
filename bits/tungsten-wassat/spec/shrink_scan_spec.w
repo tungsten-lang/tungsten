@@ -20,7 +20,7 @@ use ../lib/solver
     ci += 1
   asg = i8[nv + 3]
   lvl = i64[nv + 3]
-  rsn = i64[nv + 3]
+  rsn = i32[nv + 3]
   sn = i8[nv + 3]
   tr = i64[nv + 3]
   tlim = i64[nv + 3]

@@ -54,6 +54,7 @@ use sliding_puzzle
 use stedman
 use hantzsche_wendt
 use gray_track
+use matching_balance
 use partition_circuit
 use knight_tour
 use path_cover
@@ -383,6 +384,23 @@ use portfolio
       wassat_status(quiet, "s UNSATISFIABLE")
       wassat_status(quiet, "c mode: fast (clause-checked cyclic Gray-code counting refutation)")
       wassat_status(quiet, "c gray words=[gray[1]] bits=[gray[2]] rotations=[gray[4]] xor_gates=[gray[5]] exact_one_pairs=[gray[6]] scanned_clauses=[gray[3]] candidates=[gray[7]]")
+      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+      exit(20)
+
+  # Exact-one row incidence is an edge graph. A checked bipartite component
+  # with unequal sides cannot be covered once by its selected edge variables.
+  if (
+    proof_mode == WASSAT_PROOF_NONE && config.max_clause_size <= 32 &&
+    formula["nvars"] <= 4096 && formula["flat_ncl"] <= 50000 &&
+    env("WASSAT_MATCHING_BALANCE") != "0"
+  )
+    balance = wassat_matching_balance_refute(formula, i64[2], clock_ms() + 20)
+    tprof = wassat_prof("cli.matching_balance", tprof)
+    wassat_prof_note("matching rows=[balance[1]] edges=[balance[2]] components=[balance[3]] left=[balance[4]] right=[balance[5]] clause_visits=[balance[6]] amo_pairs=[balance[7]] stop=[balance[8]]") if tprof != 0
+    if balance[0] == -1
+      wassat_status(quiet, "s UNSATISFIABLE")
+      wassat_status(quiet, "c mode: fast (clause-checked bipartite matching imbalance)")
+      wassat_status(quiet, "c matching rows=[balance[1]] edges=[balance[2]] left=[balance[4]] right=[balance[5]] amo_pairs=[balance[7]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(20)
 

@@ -284,20 +284,38 @@ describe "Tungsten Wassat CLI" ->
       sat = "/tmp/wassat-cli-large-model.cnf"
       clauses = []
       v = 1
-      while v <= 4000
+      while v <= 100001
         clauses.push("[v] 0")
         v += 1
-      text = "p cnf 4000 4000\n" + clauses.join("\n") + "\n"
+      text = "p cnf 100001 100001\n" + clauses.join("\n") + "\n"
       expect(write_file(sat, text)).to eq(true)
       expect(cli_exits(bin + " " + sat + " --fast > /tmp/wassat-cli-large-model.out 2>&1", 10)).to eq(true)
       lines = read_file("/tmp/wassat-cli-large-model.out").split("\n")
+      # Cross the streaming-output threshold and check every literal.
       values = []
+      next_literal = 1
+      ordered = true
+      terminators = 0
       lines.each -> (line)
         if line.starts_with?("v ")
           expect(line.size <= WASSAT_VALUE_LINE_MAX).to eq(true)
           values.push(line)
+          fields = wassat_tokenize(line)
+          j = 1
+          while j < fields.size
+            if fields[j] == "0"
+              terminators += 1
+              ordered = false if next_literal != 100002
+            else
+              ordered = false if fields[j].to_i != next_literal
+              next_literal += 1
+            j += 1
       expect(values.size > 1).to eq(true)
       expect(values[values.size - 1].ends_with?(" 0")).to eq(true)
+
+      expect(ordered).to eq(true)
+      expect(next_literal).to eq(100002)
+      expect(terminators).to eq(1)
 
     it "writes a WRAT certificate that the independent checker verifies" ->
       bin = cli_test_bin

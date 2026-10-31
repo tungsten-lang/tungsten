@@ -4373,9 +4373,10 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
     model = []
     if sat
       self.unsubstitute
+      model = Array.new(@nvars)
       v = 1
       while v <= @nvars
-        model.push(@assign[v] >= 0 ? v : 0 - v)
+        model[v - 1] = @assign[v] >= 0 ? v : 0 - v
         v += 1
 
     core = []
@@ -7433,8 +7434,9 @@ WASSAT_VALUE_LINE_MAX = 4096
       while ti < tn
         z = ccall("w_value_free_w", tokens[ti])
         ti += 1
-      z = ccall("w_value_free_w", tokens)
-      tokens = ["v"]
+      # Reuse the line's token capacity after releasing its temporary strings.
+      tokens.clear
+      tokens.push("v")
       line_len = 1
     tokens.push(s)
     line_len += tlen

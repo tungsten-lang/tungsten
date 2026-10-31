@@ -89,6 +89,23 @@ A cached-width admission check skips unrelated layouts before allocation.
 The clause checks use fixed native arrays; profiling reports scanned clauses,
 rotation relations, complete XOR gates, exact-one pairs, and candidate layouts.
 
+A model-only arithmetic circuit route reconstructs up to three-input Boolean
+truth tables, then uses 64-lane one-hot evaluations to infer equal-sum item
+weights. A balanced greedy split and a bounded two-item exchange produce a
+candidate; every original clause must pass before SAT is returned. Failure
+or an unsupported circuit falls back to normal search, never UNSAT. It uses
+input clauses, not instance names, stored weights, or answer tables. Numeric
+variable order must provide a useful topological order; clause order can
+affect heuristic recognition. A cheap primary-layout check skips unrelated
+inputs. Limits are 512 primary inputs, 200,000 variables, 800,000 clauses,
+30 output bits, a polled four-million-clause-visit limit, and a 50 ms CLI
+deadline.
+Fixed native buffers are reused across evaluations; the model is allocated
+at its final size. Cancellation is checked during recognition, evaluation,
+exchange search, and clause replay. `WASSAT_PARTITION_CIRCUIT=0` disables it.
+Profiling reports clause visits, truth-table candidates, gate evaluations,
+pair inserts/probes, checked clauses, candidate models, and the stop reason.
+
 The native raw race also has a bounded exact circuit arm. It derives each
 output's complete two-input truth table from all its defining CNF clauses,
 then checks unit and wider assertions over every primary-input assignment in

@@ -41,11 +41,16 @@ use encode
   write_text(mfile, meta)
   wav = p.out_path("mix.wav")
   audio = File.exist?(wav) && get(opts, "audio", true)
-  part = out + ".part.mp4"
+  mov = out.downcase.ends_with?(".mov")
+  part = out + (mov ? ".part.mov" : ".part.mp4")
+  if p.encoder["backend"] == "ffmpeg" && get(opts, "edit_lists", true) == false
+    die("strict edit-list-free delivery requires the native mux")
   if p.encoder["backend"] != "ffmpeg"
     t0 = clock_ms()
     mo = {rate: r["rate"], tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr}
+    mo[:edit_lists] = get(opts, "edit_lists", "audio")
     if audio
+      mo[:audio_codec] = get(opts, "audio_codec", nil)
       mo[:audio] = wav
       kb = get(p.cut_cfg(p.cut), "audio_kbps", nil)
       mo[:audio_kbps] = kb if kb != nil
@@ -69,7 +74,7 @@ use encode
   else
     cmd = cmd + " -map_metadata 1 -map_chapters 1"
   cmd = cmd + " -c:v copy -timecode " + get(r, "tc_start", "00:00:00:00") + " -write_tmcd 1 -video_track_timescale 12288"
-  cmd = cmd + " -movflags +faststart -f mp4 " + shq(part)
+  cmd = cmd + " -movflags +faststart -f " + (mov ? "mov" : "mp4") + " " + shq(part)
   t0 = clock_ms()
   die("mux failed") if !OS.system(cmd)
   File.rename(part, out)
@@ -95,15 +100,20 @@ use encode
   out = opt_arg(args, "--out", p.out_path(preset + ".mp4"))
   die("no master " + src + " (run studio mux)") if !File.exist?(src)
   t0 = clock_ms()
-  res = Transcode.run(src, out, {preset: preset})
+  topts = {preset: preset, retries: opt_arg(args, "--retries", "2").to_i}
+  codec = opt_arg(args, "--codec", nil)
+  topts[:codec] = codec if codec != nil
+  kbps = opt_arg(args, "--kbps", nil)
+  topts[:bitrate] = kbps.to_i * 1000 if kbps != nil
+  res = Transcode.run(src, out, topts)
   dt = clock_ms() - t0
   << "share: " + res[:frames].to_s + " frames in " + dt.to_s + " ms (" + res[:fps].to_s + " fps), " + (res[:file_bytes] / 1048576).to_s + " MB -> " + out
   chs = chapter_list(r, 0, r["frames"])
-  ck = nil
-  if chs.size > 0
-    ck = Transcode.check(out, {preset: preset, frames: r["frames"], tc_start: r["tc_start"], chapters: chs})
-  else
-    ck = Transcode.check(out, {preset: preset, frames: r["frames"], tc_start: r["tc_start"]})
+  topts[:frames] = r["frames"]
+  topts[:rate] = r["rate"]
+  topts[:tc_start] = r["tc_start"]
+  topts[:chapters] = chs if chs.size > 0
+  ck = Transcode.check(out, topts)
   << MediaVerify.format(ck)
   ck[:ok] ? 0 : 1
 
@@ -121,6 +131,8 @@ use encode
   fr = opt_arg(args, "--from", nil)
   opts["from"] = fr.to_i if fr != nil
   opts["audio"] = false if args.include?("--no-audio")
+  opts["edit_lists"] = false if args.include?("--no-edit-lists")
+  opts["audio_codec"] = opt_arg(args, "--audio-codec", nil)
   res = mux_master(p, r, out, opts)
   << "mux: " + res[0].to_s + " frames from " + r["segments"].size.to_s + " segments (passthrough) + mix -> " + out + " in " + res[1].to_s + " ms"
   << "mux facts: " + res[2].to_s if res.size > 2
@@ -165,6 +177,7 @@ use encode
   res = []
   << "verify " + master
   vo = {rate: [num, den], frames: nfr, tc_start: r["tc_start"]}
+  vo[:edit_lists] = false if args.include?("--no-edit-lists")
   chs = chapter_list(r, 0, nfr)
   vo[:chapters] = chs if chs.size > 0
   mv = MediaVerify.check(master, vo)

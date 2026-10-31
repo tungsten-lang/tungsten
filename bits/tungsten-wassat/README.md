@@ -95,16 +95,23 @@ repairs near models with incremental CDCL assumptions on whole keys. Failed
 cores release keys; auxiliary variables remain free. Additional constraints
 are enforced by the original CNF solver and a complete model check. No stored
 models, instance identifiers, or expected verdicts are used, and this lane
-never publishes UNSAT. The walk reuses its buffers, polls cancellation every
-16 moves, and stops after 20,000 moves; repair uses at most 50,000 conflicts.
+never publishes UNSAT. The walk caches exact move costs, reuses its buffers,
+and polls cancellation every 16 moves. It first tries to repair a candidate
+with at most two violated key/lock pairs. If that repair consumes 4,096
+conflicts without a result, the walk uses its remaining move allowance to
+seek a one-pair candidate. A reusable snapshot retains the first repair candidate
+only when refinement starts. Refinement reuses the CDCL arena and learned clauses; a failed
+refinement retains the earlier candidate and its expanded set of free keys.
+The entire attempt uses at most 20,000 moves and 50,000 repair conflicts.
 Repair also participates in the race's aggregate conflict budget.
 
 The keychart arm preserves all baseline arms and requires a spare CPU and
 room for another CDCL arena. It is disabled for explicitly rounded races and
 for pinned `WASSAT_ARMS` runs unless `WASSAT_KEYCHART=1` opts in. Set
 `WASSAT_KEYCHART=0` to disable it for comparisons. `WASSAT_PROFILE=1` reports
-moves, candidate evaluations, violated pairs, weight updates, repair queries,
-conflicts, relaxed keys, elapsed times, and cancellation. Recognition currently
+moves, candidate evaluations, violated pairs, weight updates, snapshots,
+refinement attempts, repair queries, conflicts, cumulative key relaxations,
+elapsed times, and cancellation. Recognition currently
 accepts the ordered four-depth encoding with at most 64 keys, 64 locks,
 16 positions, 50,000 variables and 100,000 clauses; other shapes use the
 existing arms.

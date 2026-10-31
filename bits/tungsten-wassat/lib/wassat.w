@@ -56,6 +56,7 @@ use hantzsche_wendt
 use gray_track
 use matching_balance
 use partition_circuit
+use pair_affine
 use knight_tour
 use path_cover
 use preprocess
@@ -403,6 +404,28 @@ use portfolio
       wassat_status(quiet, "c matching rows=[balance[1]] edges=[balance[2]] left=[balance[4]] right=[balance[5]] amo_pairs=[balance[7]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(20)
+
+  # Recover shared nonlinear Boolean pairs from exact small truth tables,
+  # solve the resulting linear system, and publish only a checked CNF model.
+  if (
+    config.max_clause_size >= 4 && config.max_clause_size <= 6 &&
+    formula["nvars"] <= 1024 && formula["flat_ncl"] <= 32768 &&
+    env("WASSAT_PAIR_AFFINE") != "0"
+  )
+    pair_model = wassat_pair_affine_model(formula, i64[2], clock_ms() + 50)
+    tprof = wassat_prof("cli.pair_affine", tprof)
+    if pair_model != nil
+      am = pair_model["meta"]
+      wassat_prof_note("pair_affine blocks=[am[1]] columns=[am[2]] pairs=[am[3]] rank=[am[4]] grouped_clauses=[am[5]] anf_xors=[am[6]] row_xors=[am[7]] word_xors=[am[8]] checked_literals=[am[9]] stop=[am[10]]") if tprof != 0
+      if am[0] == 1
+        wassat_discard_output(wrat_out, wrat_final)
+        wassat_discard_output(drat_out, drat_final)
+        atext = wassat_sat_text(pair_model["model"])
+        wassat_status(quiet, atext.slice(0, atext.size - 1))
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified Boolean pair-function affine model)")
+        wassat_status(quiet, "c pair_affine blocks=[am[1]] columns=[am[2]] pairs=[am[3]] rank=[am[4]]")
+        wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+        exit(10)
 
   # Bounded input-derived partition search. All arithmetic is a model-finding
   # heuristic; full original-CNF replay is required before returning SAT.

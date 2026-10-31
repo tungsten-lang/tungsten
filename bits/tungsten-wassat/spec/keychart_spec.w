@@ -42,11 +42,11 @@ describe "Input-derived keychart recognition and kernels" ->
     f = keychart_test_formula([])
     p = wassat_keychart_plan(f)
     st = p["state"]
-    wassat_keychart_seed(p["allowed"], p["value"], p["count"], p["other"], p["dist"], p["weight"], st, 4, 2, 2)
+    wassat_keychart_seed(p["allowed"], p["value"], p["count"], p["other"], p["dist"], p["weight"], p["gain"], st, 4, 2, 2)
     st[8] = -1
     stop = i64[4]
     z = wassat_stop_cancel(stop)
-    wassat_keychart_walk(p["allowed"], p["value"], p["count"], p["other"], p["dist"], p["weight"], st, 4, 2, 2, 4, 1, 100, stop)
+    wassat_keychart_walk(p["allowed"], p["value"], p["count"], p["other"], p["dist"], p["weight"], p["gain"], st, 4, 2, 2, 4, 1, 100, stop)
     expect(st[9]).to eq(1)
     expect(st[1]).to eq(0)
 
@@ -60,7 +60,13 @@ describe "Input-derived keychart recognition and kernels" ->
     o = p["other"]
     d = p["dist"]
     w = p["weight"]
-    wassat_keychart_seed(a, v, c, o, d, w, st, 4, 2, 2)
+    g = p["gain"]
+    wassat_keychart_seed(a, v, c, o, d, w, g, st, 4, 2, 2)
+    i = 0
+    while i < 8
+      w[i] = i + 1
+      i += 1
+    wassat_keychart_rebuild(a, v, c, o, d, w, g, st, 4, 2, 2, 4)
     k = 0
     while k < 4
       pos = 0
@@ -70,12 +76,12 @@ describe "Input-derived keychart recognition and kernels" ->
         while cand < 4
           if cand != old
             before = st[3]
-            delta = wassat_keychart_delta(a, v, c, o, d, w, 4, 2, 2, 4, k, pos, cand)
+            delta = wassat_keychart_delta(a, v, c, o, d, w, g, 4, 2, 2, 4, k, pos, cand)
             v[k * 2 + pos] = cand
-            wassat_keychart_rebuild(a, v, c, o, d, w, st, 4, 2, 2, 4)
+            wassat_keychart_rebuild(a, v, c, o, d, w, g, st, 4, 2, 2, 4)
             expect(st[3]).to eq(before + delta)
             v[k * 2 + pos] = old
-            wassat_keychart_rebuild(a, v, c, o, d, w, st, 4, 2, 2, 4)
+            wassat_keychart_rebuild(a, v, c, o, d, w, g, st, 4, 2, 2, 4)
           cand += 1
         pos += 1
       k += 1

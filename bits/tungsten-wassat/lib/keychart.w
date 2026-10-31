@@ -142,14 +142,16 @@ use atomic_stop
   { "meta": meta, "allowed": allowed, "wkey": wkey, "wlock": wlock,
     "value": i64[nk * np], "count": i64[nl * np * 4],
     "other": i64[nl * nk * np], "dist": i64[nl * nk],
-    "weight": i64[nl * nk], "state": i64[16], "mutable": i8[nk],
+    "weight": i64[nl * nk], "gain": i64[nl * np * 8], "state": i64[16], "mutable": i8[nk],
     "phases": i64[nv], "sign": i64[nv + 1],
     "assumptions": i64[nk * np] }
 
--> wassat_keychart_rebuild(allowed, value, count, other, dist, weight, st, nk, nl, np, nd) (i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64) i64
+-> wassat_keychart_rebuild(allowed, value, count, other, dist, weight, gain, st, nk, nl, np, nd) (i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64) i64
   i = 0
   while i < nl * np * nd
     count[i] = 0
+    gain[i * 2] = 0
+    gain[i * 2 + 1] = 0
     i += 1
   l = 0
   while l < nl
@@ -195,6 +197,12 @@ use atomic_stop
           m = low
           m = second if n == low && ties == 1
           other[pair * np + p] = m
+          # Exact effect on this forbidden key of removing/adding one
+          # authorized key from its current depth bucket. Different buckets
+          # are disjoint, so a move's two effects add without approximation.
+          at = ((l * np + p) * nd + value[k * np + p]) * 2
+          gain[at] -= weight[pair] if n <= m
+          gain[at + 1] += weight[pair] if n < m
           p += 1
       k += 1
     l += 1
@@ -203,7 +211,7 @@ use atomic_stop
   st[4] = bad if bad < st[4]
   bad
 
--> wassat_keychart_delta(allowed, value, count, other, dist, weight, nk, nl, np, nd, key, pos, cand) (i8[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64 i64) i64
+-> wassat_keychart_delta(allowed, value, count, other, dist, weight, gain, nk, nl, np, nd, key, pos, cand) (i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64 i64) i64
   old = value[key * np + pos]
   delta = 0
   l = 0
@@ -216,24 +224,11 @@ use atomic_stop
       cost = rest if rest < cost
       delta += weight[pair] * (cost - dist[pair])
     else
-      k = 0
-      while k < nk
-        pair = l * nk + k
-        if allowed[pair] == 0
-          d = value[k * np + pos]
-          change = 0
-          change = -1 if d == old
-          change = 1 if d == cand
-          if change != 0
-            cost = count[base + d] + change
-            rest = other[pair * np + pos]
-            cost = rest if rest < cost
-            delta += weight[pair] * (cost - dist[pair])
-        k += 1
+      delta += gain[(base + old) * 2] + gain[(base + cand) * 2 + 1]
     l += 1
   delta
 
--> wassat_keychart_walk(allowed, value, count, other, dist, weight, st, nk, nl, np, nd, jump, steps, stop) (i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64 i64[]) i64
+-> wassat_keychart_walk(allowed, value, count, other, dist, weight, gain, st, nk, nl, np, nd, jump, steps, stop) (i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64 i64[]) i64
   seed = st[0]
   iter = 0
   while iter < steps && st[2] > st[8]
@@ -262,7 +257,7 @@ use atomic_stop
             diff = 0 - diff if diff < 0
             valid = false if diff > jump
           if valid
-            delta = wassat_keychart_delta(allowed, value, count, other, dist, weight, nk, nl, np, nd, k, p, d)
+            delta = wassat_keychart_delta(allowed, value, count, other, dist, weight, gain, nk, nl, np, nd, k, p, d)
             st[5] += 1
             if ties == 0 || delta < best
               best = delta
@@ -315,7 +310,7 @@ use atomic_stop
     value[bk * np + bp] = bc
     st[1] += 1
     st[6] += 1
-    z = wassat_keychart_rebuild(allowed, value, count, other, dist, weight, st, nk, nl, np, nd)
+    z = wassat_keychart_rebuild(allowed, value, count, other, dist, weight, gain, st, nk, nl, np, nd)
     iter += 1
   st[0] = seed
   st[2]
@@ -324,7 +319,7 @@ use atomic_stop
 # state: RNG, moves, bad pairs, score, best bad, move evaluations, rebuilds,
 # weight bumps, target bad, cancelled, repair rounds, repair conflicts,
 # relaxed keys, local-search ms, repair ms, verified result.
--> wassat_keychart_seed(allowed, value, count, other, dist, weight, st, nk, nl, np) (i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
+-> wassat_keychart_seed(allowed, value, count, other, dist, weight, gain, st, nk, nl, np) (i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
   seed = 1
   i = 0
   while i < nk * nl
@@ -348,7 +343,7 @@ use atomic_stop
   st[0] = seed
   st[4] = nk * nl
   st[8] = 2
-  wassat_keychart_rebuild(allowed, value, count, other, dist, weight, st, nk, nl, np, 4)
+  wassat_keychart_rebuild(allowed, value, count, other, dist, weight, gain, st, nk, nl, np, 4)
   0
 
 -> wassat_keychart_phases(value, count, allowed, dist, mutable, wkey, wlock, phases, sign, nk, nl, np, nv) (i64[] i64[] i8[] i64[] i8[] i32[] i32[] i64[] i64[] i64 i64 i64 i64)
@@ -409,8 +404,8 @@ use atomic_stop
   nl = m[1]
   np = m[2]
   t0 = ccall("__w_clock_ms")
-  wassat_keychart_seed(plan["allowed"], plan["value"], plan["count"], plan["other"], plan["dist"], plan["weight"], st, nk, nl, np)
-  wassat_keychart_walk(plan["allowed"], plan["value"], plan["count"], plan["other"], plan["dist"], plan["weight"], st, nk, nl, np, 4, 1, 20000, stop)
+  wassat_keychart_seed(plan["allowed"], plan["value"], plan["count"], plan["other"], plan["dist"], plan["weight"], plan["gain"], st, nk, nl, np)
+  wassat_keychart_walk(plan["allowed"], plan["value"], plan["count"], plan["other"], plan["dist"], plan["weight"], plan["gain"], st, nk, nl, np, 4, 1, 20000, stop)
   st[13] = ccall("__w_clock_ms") - t0
   return [] if wassat_stop_requested?(stop) || st[2] > 2
   phases = plan["phases"]

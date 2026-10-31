@@ -1,6 +1,13 @@
 use spec
 use keychart_fixture
 
+# Independent portable oracle: the production verifier releases native
+# scratch through an FFI call unavailable to the tree-walking interpreter.
+-> keychart_test_cnf_model(f, model)
+  f["clauses"].all? -> (clause)
+    clause.any? -> (lit)
+      model.include?(lit)
+
 describe "Input-derived keychart recognition and kernels" ->
   it "infers domains and shared supports without instance metadata" ->
     f = keychart_test_formula([])
@@ -85,3 +92,43 @@ describe "Input-derived keychart recognition and kernels" ->
           cand += 1
         pos += 1
       k += 1
+
+  it "retains a detached fallback while refinement changes current values" ->
+    f = keychart_test_formula([])
+    p = wassat_keychart_plan(f)
+    st = p["state"]
+    a = p["allowed"]
+    v = p["value"]
+    b = p["best_value"]
+    c = p["count"]
+    o = p["other"]
+    d = p["dist"]
+    w = p["weight"]
+    g = p["gain"]
+    wassat_keychart_seed(a, v, c, o, d, w, g, st, 4, 2, 2)
+    i = 0
+    while i < 8
+      v[i] = i / 2
+      i += 1
+    wassat_keychart_rebuild(a, v, c, o, d, w, g, st, 4, 2, 2, 4)
+    expect(st[2]).to eq(0)
+    wassat_keychart_copy_values(v, b, 8)
+    first = b.to_s
+    st[8] = -1
+    wassat_keychart_walk(a, v, c, o, d, w, g, st, 4, 2, 2, 4, 1, 64, i64[4])
+    expect(st[1]).to eq(64)
+    expect(b.to_s).to eq(first)
+    # Overwrite the working state with an illegal adjacent jump. Restoring the
+    # detached snapshot must still produce a model of every original clause.
+    v[0] = v[1] >= 2 ? 0 : 3
+    expect(b.to_s).to eq(first)
+    wassat_keychart_copy_values(b, v, 8)
+    wassat_keychart_rebuild(a, v, c, o, d, w, g, st, 4, 2, 2, 4)
+    # A genuinely new candidate must reset the old relaxed-key fringe.
+    i = 0
+    while i < 4
+      p["mutable"][i] = 1
+      i += 1
+    wassat_keychart_phases(v, c, a, d, p["mutable"], p["wkey"], p["wlock"], p["phases"], p["sign"], 4, 2, 2, f["nvars"])
+    expect(keychart_test_cnf_model(f, p["phases"])).to eq(true)
+    expect(p["mutable"].to_s).to eq(i8[4].to_s)

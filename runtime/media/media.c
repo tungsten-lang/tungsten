@@ -66,6 +66,7 @@ extern double w_num_to_f64(WValue v);
 #define W_MEDIA_ERR_DROPPED  (-900001)
 #define W_MEDIA_ERR_FORMAT   (-900002)
 #define W_MEDIA_ERR_TIMING   (-900003)
+#define W_MEDIA_ERR_LEVEL    (-900004)
 
 /* ======================================================================
    Helpers
@@ -1410,6 +1411,7 @@ typedef struct MEncoder {
     double         quality;
     int64_t        bitrate;
     int            gop, reorder, speed;
+    int            pinned_hevc_level;
     uint64_t       conv_ns, submit_ns, wait_ns;
     CFDictionaryRef kf_props;
     CFDictionaryRef attach;
@@ -1444,6 +1446,13 @@ static void m_output(void *outref, void *frameref, OSStatus st, VTEncodeInfoFlag
     } else {
         CMFormatDescriptionRef fd = CMSampleBufferGetFormatDescription(sb);
         if (!s->format) {
+            if (e->pinned_hevc_level) {
+                CFDictionaryRef ext = CMFormatDescriptionGetExtensions(fd);
+                CFDictionaryRef atoms = ext ? CFDictionaryGetValue(ext, kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) : NULL;
+                CFDataRef config = atoms ? CFDictionaryGetValue(atoms, CFSTR("hvcC")) : NULL;
+                if (!config || CFDataGetLength(config) < 13 || CFDataGetBytePtr(config)[12] != e->pinned_hevc_level)
+                    s->err = W_MEDIA_ERR_LEVEL;
+            }
             CFRetain(fd);
             s->format = (void *)fd;
         } else if (!CMFormatDescriptionEqual((CMFormatDescriptionRef)s->format, fd)) {
@@ -1521,6 +1530,23 @@ static const CFStringRef *m_h264_level(const char *lv) {
     return NULL;
 }
 
+/* VT advertises HEVC AutoLevel enums only, but its profile-level naming
+ * convention also accepts explicit levels. Verify the emitted hvcC rather
+ * than trusting SetProperty success (unsupported strings may be ignored). */
+static int m_hevc_level(const char *level, int bits, char *name, size_t cap) {
+    static const char *names[] = {"1", "2", "2.1", "3", "3.1", "4", "4.1", "5", "5.1", "5.2", "6", "6.1", "6.2"};
+    static const int ids[] = {30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186};
+    for (size_t i = 0; i < sizeof ids / sizeof ids[0]; i++) {
+        char alias[16];
+        snprintf(alias, sizeof alias, "%s.0", names[i]);
+        if (strcmp(level, names[i]) && (strchr(names[i], '.') || strcmp(level, alias))) continue;
+        int major = ids[i] / 30, minor = (ids[i] % 30) / 3;
+        snprintf(name, cap, "HEVC_%s_%d_%d", bits == 10 ? "Main10" : "Main", major, minor);
+        return ids[i];
+    }
+    return 0;
+}
+
 MEncoder *w_media_enc_open(const char *cname, int w, int h, int num, int den, double quality, int64_t bitrate, int gop,
                            const char *in, const char *site, int reorder, int speed, const char *level,
                            char *err, size_t cap) {
@@ -1531,14 +1557,21 @@ MEncoder *w_media_enc_open(const char *cname, int w, int h, int num, int den, do
     if (quality > 1.0 || (quality < 0 && quality != -1.0)) { snprintf(err, cap, "quality must be in 0..1"); return NULL; }
     if (gop < 1) { snprintf(err, cap, "gop must be at least 1"); return NULL; }
     const CFStringRef *profile = codec->profile;
+    char hevc_profile[64] = "";
+    int pinned_hevc_level = 0;
     if (level && level[0] && strcasecmp(level, "auto")) {
-        if (codec->type != kCMVideoCodecType_H264) { snprintf(err, cap, "level: only H.264 takes an explicit level (VideoToolbox picks HEVC's)"); return NULL; }
-        profile = m_h264_level(level);
-        if (!profile) { snprintf(err, cap, "unknown H.264 level '%s' (3.0 .. 5.2, auto)", level); return NULL; }
+        if (codec->type == kCMVideoCodecType_HEVC) {
+            pinned_hevc_level = m_hevc_level(level, codec->bits, hevc_profile, sizeof hevc_profile);
+            if (!pinned_hevc_level) { snprintf(err, cap, "unknown HEVC level '%s' (1 .. 6.2, auto)", level); return NULL; }
+        } else if (codec->type == kCMVideoCodecType_H264) {
+            profile = m_h264_level(level);
+            if (!profile) { snprintf(err, cap, "unknown H.264 level '%s' (3.0 .. 5.2, auto)", level); return NULL; }
+        } else { snprintf(err, cap, "level: applies to H.264 and HEVC only"); return NULL; }
     }
     MEncoder *e = calloc(1, sizeof *e);
     if (!e) { snprintf(err, cap, "out of memory"); return NULL; }
     e->codec = codec;
+    e->pinned_hevc_level = pinned_hevc_level;
     e->w = w;
     e->h = h;
     e->num = num;
@@ -1566,7 +1599,11 @@ MEncoder *w_media_enc_open(const char *cname, int w, int h, int num, int den, do
     st = noErr;
 #define M_SETQ(key, val, name) do { OSStatus s_ = VTSessionSetProperty(vt, key, val); if (s_ != noErr && st == noErr) { st = s_; snprintf(err, cap, "VideoToolbox refused %s (OSStatus %d)", name, (int)s_); } } while (0)
     VTSessionSetProperty(vt, kVTCompressionPropertyKey_RealTime, kCFBooleanFalse);
-    if (profile) M_SETQ(kVTCompressionPropertyKey_ProfileLevel, *profile, "ProfileLevel");
+    if (hevc_profile[0]) {
+        CFStringRef chosen = CFStringCreateWithCString(NULL, hevc_profile, kCFStringEncodingUTF8);
+        M_SETQ(kVTCompressionPropertyKey_ProfileLevel, chosen, "HEVC ProfileLevel");
+        CFRelease(chosen);
+    } else if (profile) M_SETQ(kVTCompressionPropertyKey_ProfileLevel, *profile, "ProfileLevel");
     if (codec->quality_ok) {
         M_SETQ(kVTCompressionPropertyKey_AllowFrameReordering, e->reorder ? kCFBooleanTrue : kCFBooleanFalse, "AllowFrameReordering");
         /* Keyframes are forced at segment starts; the interval is a backstop
@@ -1604,7 +1641,11 @@ MEncoder *w_media_enc_open(const char *cname, int w, int h, int num, int den, do
         free(e);
         return NULL;
     }
-    VTCompressionSessionPrepareToEncodeFrames(vt);
+    st = VTCompressionSessionPrepareToEncodeFrames(vt);
+    if (st != noErr) {
+        snprintf(err, cap, "VideoToolbox cannot prepare this codec/size/level (OSStatus %d)", (int)st);
+        VTCompressionSessionInvalidate(vt); CFRelease(vt); free(e); return NULL;
+    }
     e->kf_props = m_dict1(kVTEncodeFrameOptionKey_ForceKeyFrame, kCFBooleanTrue);
     CFStringRef loc = e->siting == M_SITE_CENTER ? kCVImageBufferChromaLocation_Center
                     : e->siting == M_SITE_TOPLEFT ? kCVImageBufferChromaLocation_TopLeft
@@ -1815,6 +1856,7 @@ static void m_seg_wait(WMediaSegment *s) {
 static const char *m_err_text(int32_t err, char *buf, size_t cap) {
     if (err == W_MEDIA_ERR_DROPPED) return "VideoToolbox dropped a frame";
     if (err == W_MEDIA_ERR_FORMAT) return "the format description changed inside the segment";
+    if (err == W_MEDIA_ERR_LEVEL) return "VideoToolbox did not emit the requested HEVC level";
     if (err == W_MEDIA_ERR_TIMING) return "a sample came back with a timestamp outside the segment";
     snprintf(buf, cap, "VideoToolbox error (OSStatus %d)", (int)err);
     return buf;

@@ -578,6 +578,63 @@ typedef struct {
     int64_t  off, size;
 } ATop;
 
+static uint32_t a_trak_handler(ABox *t);
+
+/* Flatten a single unit-rate edit. Video reordering is represented by
+ * signed ctts v1 offsets. Audio priming/trimming and empty chapter edits
+ * cannot simply be deleted: strict delivery refuses them. */
+static int a_flatten_edits(ABox *trak, uint32_t movie_ts, int strict, char *err, size_t cap) {
+    uint32_t handler = a_trak_handler(trak);
+    int video = handler == A_FOURCC('v','i','d','e');
+    if (!strict && !video) return 0;
+    ABox *edts = a_box_find(trak, A_FOURCC('e','d','t','s'));
+    if (!edts) return 0;
+    ABox *elst = a_box_find(edts, A_FOURCC('e','l','s','t'));
+    if (!elst || elst->len < 28 || a_rd32(elst->raw + 12) != 1) goto unsupported;
+    int v1 = elst->raw[8] == 1;
+    if (elst->raw[8] > 1 || elst->len < (v1 ? 36u : 28u)) goto unsupported;
+    uint64_t duration = v1 ? a_rd64(elst->raw + 16) : a_rd32(elst->raw + 16);
+    int64_t offset = v1 ? (int64_t)a_rd64(elst->raw + 24) : (int32_t)a_rd32(elst->raw + 20);
+    size_t rate_at = v1 ? 32 : 24;
+    if (offset < 0 || a_rd32(elst->raw + rate_at) != 0x00010000) goto unsupported;
+    ABox *mdia = a_box_find(trak, A_FOURCC('m','d','i','a'));
+    ABox *mdhd = mdia ? a_box_find(mdia, A_FOURCC('m','d','h','d')) : NULL;
+    if (!mdhd || mdhd->len < 32) goto unsupported;
+    int mv1 = mdhd->raw[8] == 1;
+    if (mv1 && mdhd->len < 44) goto unsupported;
+    uint32_t media_ts = a_rd32(mdhd->raw + (mv1 ? 28 : 20));
+    uint64_t media_dur = mv1 ? a_rd64(mdhd->raw + 32) : a_rd32(mdhd->raw + 24);
+    if (!video && (offset || (__int128)duration * media_ts != (__int128)media_dur * movie_ts)) goto unsupported;
+    if (video && offset) {
+        ABox *minf = a_box_find(mdia, A_FOURCC('m','i','n','f'));
+        ABox *stbl = minf ? a_box_find(minf, A_FOURCC('s','t','b','l')) : NULL;
+        ABox *ctts = stbl ? a_box_find(stbl, A_FOURCC('c','t','t','s')) : NULL;
+        if (!ctts || ctts->len < 16 || ctts->raw[8] > 1) goto unsupported;
+        uint32_t count = a_rd32(ctts->raw + 12);
+        if (count > (ctts->len - 16) / 8) goto unsupported;
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t raw = a_rd32(ctts->raw + 20 + 8*i);
+            int64_t value = ctts->raw[8] ? (int64_t)(int32_t)raw : (int64_t)raw;
+            value -= offset;
+            if (value < INT32_MIN || value > INT32_MAX) goto unsupported;
+        }
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t raw = a_rd32(ctts->raw + 20 + 8*i);
+            int64_t value = ctts->raw[8] ? (int64_t)(int32_t)raw : (int64_t)raw;
+            a_be32(ctts->raw + 20 + 8*i, (uint32_t)(int32_t)(value - offset));
+        }
+        ctts->raw[8] = 1;
+    }
+    int at = (int)(edts - trak->kid);
+    a_box_free(edts);
+    memmove(trak->kid + at, trak->kid + at + 1, (size_t)(trak->nk-at-1)*sizeof(ABox));
+    trak->nk--;
+    return 0;
+unsupported:
+    snprintf(err, cap, "edit_lists:false cannot preserve this track's priming, trimming or empty edit; use PCM audio in MOV and chapters starting at frame 0 (edit_lists:audio removes video edits only)");
+    return -1;
+}
+
 /* What a_patch_moov adds to a file AVAssetWriter wrote. */
 typedef struct APatch {
     int             mov;
@@ -591,6 +648,7 @@ typedef struct APatch {
     int             nchap;
     int             chpl;             /* also a Nero chpl box (MP4) */
     int             faststart;
+    int             flatten_edits;  /* 1 video only, 2 every track (strict) */
 } APatch;
 
 /* Read the top-level boxes and parse the moov. 0 on success. */
@@ -762,6 +820,14 @@ static int a_patch_moov(const char *src, const char *dst, const APatch *o, char 
         a_add_udta(moov, cb, cl);
         free(cb);
     }
+    if (o->flatten_edits) {
+        for (int i = 0; i < moov->nk; i++) {
+            ABox *t = &moov->kid[i];
+            if (t->type == A_FOURCC('t','r','a','k') && a_flatten_edits(t, movie_ts, o->flatten_edits == 2, err, errcap)) {
+                a_box_free(&root); close(fd); return -1;
+            }
+        }
+    }
     /* the new samples: [tc frame number][chapter titles] */
     size_t chap_bytes = 0;
     for (int i = 0; i < o->nchap; i++) chap_bytes += a_chap_sample(o->chap[i].title, NULL);
@@ -906,6 +972,7 @@ typedef struct AMux {
     int       has_tc, tc_drop, tc_quanta;
     int64_t   tc_start;
     int       faststart;
+    int       flatten_edits;
     uint32_t  fourcc;
     int32_t   width, height;
     AChapter *chap;             /* chapters (title, first frame), ascending */
@@ -1409,6 +1476,12 @@ WValue w_media_mux_set(WValue mv, WValue keyv, WValue v) {
     AMux *m = w_media_handle_get(mv, W_MEDIA_KIND_MUX, "Mux#set");
     char k[32];
     w_media_str(keyv, k, sizeof k);
+    if (!strcmp(k, "edit_lists")) {
+        char mode[32];
+        w_media_str(v, mode, sizeof mode);
+        m->flatten_edits = v == W_FALSE ? 2 : (!strcmp(mode, "audio") ? 1 : 0);
+        return W_NIL;
+    }
     if (!strcmp(k, "chpl")) {
         m->chpl = v > 1;
         return W_NIL;
@@ -1600,7 +1673,7 @@ static void a_mux_finish(AMux *m, int64_t out[5]) {
     dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
     dispatch_release(sem);
     if (m->writer.status != AVAssetWriterStatusCompleted) a_mux_fail(m, "finishing %s failed", m->path);
-    if (m->has_tc || m->nchap > 0) {
+    if (m->has_tc || m->nchap > 0 || m->flatten_edits) {
         char err[512];
         for (int i = 0; i < m->nchap; i++)
             if (m->chap[i].frame >= m->frames) {
@@ -1613,6 +1686,7 @@ static void a_mux_finish(AMux *m, int64_t out[5]) {
         o.frames = m->frames; o.has_tc = m->has_tc; o.tc_drop = m->tc_drop; o.tc_frame = m->tc_start;
         o.tc_quanta = (uint32_t)m->tc_quanta; o.chap = m->chap; o.nchap = m->nchap; o.chpl = m->chpl;
         o.faststart = m->faststart;
+        o.flatten_edits = m->flatten_edits;
         /* without a timecode AVAssetWriter wrote the final path: patch it into the temporary one and move that back */
         const char *from = m->has_tc ? m->tmp : m->path, *to = m->has_tc ? m->path : m->tmp;
         int rc = a_patch_moov(from, to, &o, err, sizeof err);
@@ -1967,7 +2041,7 @@ int w_media_scale_metal(WMediaScale *s, const uint8_t *src, size_t sstride, size
    ======================================================================
  *
  * A producer thread pulls compressed samples in decode order and decodes
- * each one synchronously; decoded frames wait in a small pending list until
+ * batches asynchronously; decoded frames wait in a small pending list until
  * no frame still to come can precede them (a frame is final once the next
  * sample's decode time passes its presentation time, since DTS <= PTS), then
  * move to a bounded queue the consumer takes them from. */
@@ -2010,7 +2084,7 @@ typedef struct ADec {
     int64_t          next_id;
     ADecFrame       *q;                /* final, in order */
     int              qh, qn, qcap;
-    int              eof, stop, debug;
+    int              eof, stop, debug, serial;
     char             err[512];
     int64_t          decoded, delivered;
     uint64_t         dec_ns;
@@ -2025,7 +2099,7 @@ static int64_t a_dec_time(ADec *d, CMTime t) {
 }
 
 static void a_dec_output(void *ref, void *frameref, OSStatus st, VTDecodeInfoFlags flags, CVImageBufferRef img, CMTime pts, CMTime dur) {
-    (void)dur;
+    (void)dur; (void)flags;
     ADec *d = ref;
     pthread_mutex_lock(&d->mu);
     /* the frame's time: from the sample it came from (frameref is its id) */
@@ -2040,7 +2114,8 @@ static void a_dec_output(void *ref, void *frameref, OSStatus st, VTDecodeInfoFla
         }
     if (d->debug && d->decoded < 16) fprintf(stderr, "media decoder: output pts %lld (in flight %d)\n", (long long)p, d->nfly);
     if (st != noErr || !img) {
-        if (!d->err[0] && !(flags & kVTDecodeInfo_FrameDropped)) snprintf(d->err, sizeof d->err, "VideoToolbox could not decode a frame (OSStatus %d)", (int)st);
+        if (!d->err[0]) snprintf(d->err, sizeof d->err, "VideoToolbox could not decode a frame (OSStatus %d)", (int)st);
+        pthread_cond_broadcast(&d->cv);
         pthread_mutex_unlock(&d->mu);
         return;
     }
@@ -2114,6 +2189,9 @@ static CMSampleBufferRef a_dec_next_sample(ADec *d, int64_t *dts) {
         if (d->seg && d->seg_k < d->seg->n) break;
         if (d->seg) {
             d->seg_base += d->seg->n;
+            /* Segment samples borrow this storage. Drain before freeing it. */
+            VTDecompressionSessionFinishDelayedFrames(d->vt);
+            VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
             w_media_seg_free(d->seg);
             d->seg = NULL;
             free(d->seg_sorted);
@@ -2157,6 +2235,7 @@ static CMSampleBufferRef a_dec_next_sample(ADec *d, int64_t *dts) {
 static void *a_dec_thread(void *arg) {
     ADec *d = arg;
     @autoreleasepool {
+        int batch = 0;
         for (;;) {
             int64_t dts = 0;
             CMSampleBufferRef sb = NULL;
@@ -2196,8 +2275,13 @@ static void *a_dec_thread(void *arg) {
             if (CMSampleBufferGetNumSamples(sb) > 0) {
                 uint64_t t0 = m_avf_now_ns();
                 VTDecodeInfoFlags info = 0;
-                OSStatus st = VTDecompressionSessionDecodeFrame(d->vt, sb, 0, (void *)(intptr_t)id, &info);
-                VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
+                OSStatus st = VTDecompressionSessionDecodeFrame(d->vt, sb, d->serial ? 0 : kVTDecodeFrame_EnableAsynchronousDecompression, (void *)(intptr_t)id, &info);
+                /* Bounded batches overlap decoding of adjacent frames without
+                 * letting an asynchronous decoder retain the entire movie. */
+                if (++batch == (d->serial ? 1 : 8) || st != noErr) {
+                    VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
+                    batch = 0;
+                }
                 d->dec_ns += m_avf_now_ns() - t0;
                 if (st != noErr) {
                     pthread_mutex_lock(&d->mu);
@@ -2221,6 +2305,8 @@ static void a_dec_free(ADec *d) {
         pthread_mutex_unlock(&d->mu);
         pthread_join(d->th, NULL);
     }
+    /* Callbacks touch pend/fly and mu, so drain before releasing those. */
+    if (d->vt) VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
     for (int i = 0; i < d->npend; i++) CVBufferRelease(d->pend[i].pb);
     for (int i = 0; i < d->qn; i++) CVBufferRelease(d->q[(d->qh + i) % d->qcap].pb);
     free(d->pend);
@@ -2262,6 +2348,7 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
     pthread_cond_init(&d->cv, NULL);
     d->pix = pix;
     d->debug = getenv("TUNGSTEN_MEDIA_DEBUG") != NULL;
+    d->serial = getenv("TUNGSTEN_MEDIA_DECODER_SERIAL") != NULL;
     d->qcap = 6;
     d->q = calloc((size_t)d->qcap, sizeof(ADecFrame));
     if (path) {
@@ -2787,6 +2874,12 @@ WValue w_media_transcode_new(WValue spec) {
         o.frames = t->total;
         t->mux = a_mux_open(&o, err, sizeof err);
         if (!t->mux) { a_trans_free(t); w_media_raise("Transcode: %s", err); }
+        WValue edits = a_spec(spec, "edit_lists");
+        if (edits == W_FALSE) t->mux->flatten_edits = 2;
+        else {
+            char mode[32]; w_media_str(edits, mode, sizeof mode);
+            if (!strcmp(mode, "audio")) t->mux->flatten_edits = 1;
+        }
         a_mux_set_chapters(t->mux, t->chap, t->nchap);
         a_chapters_free(t->chap, t->nchap);
         t->chap = NULL;
@@ -3008,6 +3101,21 @@ WValue w_media_probe(WValue pathv, WValue samplesv, WValue audiov) {
         out = w_array_push(out, a_pair("chapter_locales", w_int((int64_t)asset.availableChapterLocales.count)));
         out = w_array_push(out, a_pair("chapters", a_probe_chapters(asset)));
         out = w_array_push(out, a_pair("chpl", a_probe_chpl(path.UTF8String)));
+        int edit_fd = open(path.UTF8String, O_RDONLY), edit_count = -1;
+        if (edit_fd >= 0) {
+            ATop tops[64]; int nt = 0, mi = -1; ABox root; char error[256];
+            if (!a_read_moov(edit_fd, path.UTF8String, tops, &nt, &mi, &root, error, sizeof error)) {
+                edit_count = 0;
+                ABox *moov = &root.kid[0];
+                for (int i = 0; i < moov->nk; i++) {
+                    ABox *t = &moov->kid[i];
+                    if (t->type == A_FOURCC('t','r','a','k') && a_box_find(t, A_FOURCC('e','d','t','s'))) edit_count++;
+                }
+                a_box_free(&root);
+            }
+            close(edit_fd);
+        }
+        out = w_array_push(out, a_pair("edit_lists", w_int(edit_count)));
         if (vt.count) {
             AVAssetTrack *v = vt[0];
             out = w_array_push(out, a_pair("sample_descriptions", w_int((int64_t)v.formatDescriptions.count)));

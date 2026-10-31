@@ -37,7 +37,7 @@
 # 2160p (alias 4k), 4320p (8k, HEVC: H.264 stops at 4096 x 2304), and
 # vertical (1080x1920, centre crop) / vertical_pad (whole frame, bars) /
 # vertical4k. Ladder bitrates are YouTube's recommended upload rates (SDR, up
-# to 30 fps; doubled above), GOP half a second, B-frames on. H.264 levels are
+# to 30 fps; doubled above), GOP half a second, B-frames on. H.264 and bitrate-driven HEVC levels are
 # set to the lowest level that holds the size, frame rate and bitrate;
 # Transcode.check verifies codec, profile, bit depth, 4:2:0, size and that
 # the stream's level holds the picture (and is no higher than the preset's
@@ -134,7 +134,8 @@
 
   # HEVC Main tier (Table A.8): [name, general_level_idc, MaxLumaPs, MaxLumaSr, MaxBR kb/s].
   -> .hevc_levels
-    [["3", 90, 552960, 16588800, 6000], ["3.1", 93, 983040, 33177600, 10000], ["4", 120, 2228224, 66846720, 12000],
+    [["1", 30, 36864, 552960, 128], ["2", 60, 122880, 3686400, 1500], ["2.1", 63, 245760, 7372800, 3000],
+     ["3", 90, 552960, 16588800, 6000], ["3.1", 93, 983040, 33177600, 10000], ["4", 120, 2228224, 66846720, 12000],
      ["4.1", 123, 2228224, 133693440, 20000], ["5", 150, 8912896, 267386880, 25000], ["5.1", 153, 8912896, 534773760, 40000],
      ["5.2", 156, 8912896, 1069547520, 60000], ["6", 180, 35651584, 1069547520, 60000], ["6.1", 183, 35651584, 2139095040, 120000],
      ["6.2", 186, 35651584, 4278190080, 240000]]
@@ -169,12 +170,22 @@
       i += 1
     nil
 
+  # Explicit HEVC names follow VT's profile-level convention; the runtime
+  # verifies hvcC because property-set success alone is insufficient.
+  -> .level_pinnable?(codec)
+    codec.to_s == "h264" || codec.to_s == "hevc" || codec.to_s == "hevc10"
+
   # The level row named `name` (or with level_idc `name`) for codec, or nil.
   -> .level_row(codec, name)
     rows = codec.to_s == "h264" ? Transcode.h264_levels : Transcode.hevc_levels
+    label = name.to_s
+    if codec.to_s == "h264" && !label.include?(".")
+      label = label + ".0"
+    elsif codec.to_s != "h264" && label.ends_with?(".0")
+      label = label[0...(label.size - 2)]
     i = 0
     while i < rows.size
-      if rows[i][0] == name.to_s || rows[i][1] == name
+      if rows[i][0] == label || rows[i][1] == name
         return rows[i]
       i += 1
     nil
@@ -210,12 +221,50 @@
   # audio_src: are needed). Options (a preset: fills in the rest): width,
   # height, fit (:stretch, :contain, :cover), crop, rect, filter
   # (:lanczos3), scale_backend (:auto), via (:yuv, :rgb), codec, quality or
-  # bitrate, level (H.264; default: the lowest that fits), gop or
+  # bitrate, level (H.264 / HEVC; default: the lowest that fits), gop or
   # gop_seconds, reorder, speed, format, audio (:copy, :aac, :pcm, false),
   # audio_src, audio_kbps, chapters (:copy, an Array, false), tc (:copy, a
   # label, false), start, frames, rate, faststart, progress (true: a line
   # every ~10 s of video).
+  # Retry only transient VT dropped-frame failures. Each attempt writes beside
+  # dst; a failed encode never destroys an existing delivery copy.
+  -> .retryable?(message)
+    message.to_s.include?("VideoToolbox dropped a frame")
+
   -> .run(src, dst, opts = {})
+    Transcode.deliver(src, dst, opts, ->(a, b, c) Transcode.run_once(a, b, c))
+
+  # Shared delivery transaction, with an encoder callback for deterministic
+  # failure-path tests (the public run always supplies the native transcode).
+  -> .deliver(src, dst, opts, encode)
+    if type(src) != "Array" && File.expand_path(src.to_s) == File.expand_path(dst.to_s)
+      raise "Transcode: [dst] is the source; write a new file"
+    retries = Transcode.opt(opts, :retries, 2)
+    delay = Transcode.opt(opts, :retry_delay, 1)
+    raise "Transcode: retries must be in 0..5" if retries < 0 || retries > 5
+    raise "Transcode: retry_delay must be in 0..60 seconds" if delay < 0 || delay > 60
+    ext = dst.to_s.downcase.ends_with?(".mov") ? ".mov" : ".mp4"
+    tmp = dst.to_s + ".transcode-[OS.capture("echo $PPID").strip()]-[(clock() * ~1000000.0).to_i]" + ext
+    attempt = 0
+    begin
+      while true
+        begin
+          result = encode.call(src, tmp, opts)
+          File.rename(tmp, dst)
+          result[:path] = dst
+          result[:attempts] = attempt + 1
+          return result
+        rescue e
+          File.delete(tmp) if File.exist?(tmp)
+          raise e if attempt >= retries || !Transcode.retryable?(e.to_s)
+          attempt += 1
+          << "Transcode: dropped frame; retry [attempt]/[retries] in [delay] s"
+          sleep(delay)
+          delay = [delay * 2, 60].min
+    ensure
+      File.delete(tmp) if File.exist?(tmp)
+
+  -> .run_once(src, dst, opts = {})
     o = {}
     pn = Transcode.opt(opts, :preset, nil)
     if pn != nil
@@ -273,8 +322,8 @@
     quality = Transcode.opt(o, :quality, nil)
     bitrate = nil if quality != nil && !opts.has_key?(:bitrate)
     level = Transcode.opt(o, :level, nil)
-    if level == nil && codec == "h264"
-      row = Transcode.min_level("h264", w, h, rate, bitrate)
+    if level == nil && (codec == "h264" || ((codec == "hevc" || codec == "hevc10") && bitrate != nil))
+      row = Transcode.min_level(codec, w, h, rate, bitrate)
       level = row == nil ? "auto" : row[0]
     # chapters and timecode
     chapters = Transcode.opt(o, :chapters, "copy")
@@ -317,7 +366,7 @@
             ["speed", Transcode.opt(o, :speed, false)], ["format", Transcode.opt(o, :format, nil)],
             ["audio", audio == nil ? nil : audio.to_s], ["audio_src", audio_src], ["audio_kbps", Transcode.opt(o, :audio_kbps, nil)],
             ["tc", tc_frame], ["drop", drop], ["quanta", Timecode.quanta(rate)], ["chapters", chs],
-            ["faststart", Transcode.opt(o, :faststart, true)]]
+            ["faststart", Transcode.opt(o, :faststart, true)], ["edit_lists", Transcode.opt(o, :edit_lists, true)]]
     t0 = clock()
     th = ccall("w_media_transcode_new", spec)
     done = false
@@ -338,6 +387,12 @@
         res[pr[0].to_sym] = pr[1]
     ensure
       ccall("w_media_transcode_free", th) if !done
+    cap = Transcode.opt(o, :level_cap, nil)
+    if cap != nil && (codec == "h264" || codec == "hevc" || codec == "hevc10")
+      facts = MediaVerify.facts(dst, false, false)
+      caprow = Transcode.level_row(codec, cap)
+      if caprow == nil || facts[:level] == nil || facts[:level] > caprow[1]
+        raise "Transcode: encoded level [facts[:level]] exceeds or cannot satisfy level_cap [cap]"
     res[:fps] = res[:frames].to_f / res[:seconds]
     res[:path] = dst
     res[:rate] = rate
@@ -368,9 +423,18 @@
     r = MediaVerify.check(path, o)
     f = r[:facts]
     codec = Transcode.opt(o, :codec, nil)
+    prores = {"prores422" => "apcn", "prores422hq" => "apch", "prores422lt" => "apcs", "prores422proxy" => "apco"}
+    if codec != nil && prores.has_key?(codec.to_s)
+      w = Transcode.opt(o, :width, f[:width])
+      h = Transcode.opt(o, :height, f[:height])
+      ok = f[:codec] == prores[codec.to_s] && f[:width] == w && f[:height] == h
+      r[:checks] << {name: "preset", ok: ok, detail: "[f[:codec]] (want [prores[codec.to_s]]), [f[:width]]x[f[:height]] (want [w]x[h])"}
+      r[:ok] = r[:ok] && ok
+      return r
     if codec != nil
       want4cc = codec.to_s == "h264" ? "avc1" : "hvc1"
-      prof_ok = codec.to_s == "h264" ? f[:profile] == 100 : f[:profile] == 1
+      depth = codec.to_s == "hevc10" ? 10 : 8
+      prof_ok = codec.to_s == "h264" ? f[:profile] == 100 : f[:profile] == (depth == 10 ? 2 : 1)
       w = Transcode.opt(o, :width, f[:width])
       h = Transcode.opt(o, :height, f[:height])
       rate = r[:rate]
@@ -381,8 +445,12 @@
       cap = Transcode.opt(o, :level_cap, nil)
       caprow = cap == nil ? nil : Transcode.level_row(codec, cap)
       lvl = f[:level]
-      ok = f[:codec] == want4cc && prof_ok && f[:bit_depth] == 8 && f[:chroma_format] == 1 && f[:width] == w && f[:height] == h
-      ok = ok && need != nil && lvl != nil && lvl >= need[1] && (caprow == nil || lvl <= caprow[1])
+      ok = f[:codec] == want4cc && prof_ok && f[:bit_depth] == depth && f[:chroma_format] == 1 && f[:width] == w && f[:height] == h
+      ok = ok && need != nil && lvl != nil && lvl >= need[1] && (cap == nil || (caprow != nil && lvl <= caprow[1]))
+      requested = Transcode.opt(o, :level, nil)
+      if requested != nil && requested.to_s != "auto"
+        exact = Transcode.level_row(codec, requested)
+        ok = ok && exact != nil && lvl == exact[1]
       maxbr = nil
       if lvl != nil
         lr = Transcode.level_row(codec, lvl)

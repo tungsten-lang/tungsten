@@ -177,6 +177,9 @@
     checks << {name: "colour", ok: cok,
                detail: "container [f[:primaries]] / [f[:transfer]] / [f[:matrix]], full range [f[:full_range]], chroma [f[:chroma_location]]" + vd}
 
+    if opts != nil && opts.has_key?(:edit_lists) && opts[:edit_lists] == false
+      checks << {name: "no edit lists", ok: f[:edit_lists] == 0, detail: "[f[:edit_lists]] edts boxes"}
+
     # faststart
     if MediaVerify.opt(opts, :faststart, true)
       checks << {name: "faststart", ok: f[:moov_first] == true, detail: "moov before mdat: [f[:moov_first]] (brand [f[:brand]])"}

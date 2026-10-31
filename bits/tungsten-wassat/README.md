@@ -89,6 +89,26 @@ no proof certificate. `WASSAT_SMALL_CIRCUIT=0` disables it for comparisons;
 `WASSAT_PROFILE=1` reports its batches, gate evaluations, assertion checks,
 stop reason, and elapsed time.
 
+A separate model-only keychart arm derives four-depth key domains and lock OR
+supports from the input CNF. It searches legal adjacent-depth choices, then
+repairs near models with incremental CDCL assumptions on whole keys. Failed
+cores release keys; auxiliary variables remain free. Additional constraints
+are enforced by the original CNF solver and a complete model check. No stored
+models, instance identifiers, or expected verdicts are used, and this lane
+never publishes UNSAT. The walk reuses its buffers, polls cancellation every
+16 moves, and stops after 20,000 moves; repair uses at most 50,000 conflicts.
+Repair also participates in the race's aggregate conflict budget.
+
+The keychart arm preserves all baseline arms and requires a spare CPU and
+room for another CDCL arena. It is disabled for explicitly rounded races and
+for pinned `WASSAT_ARMS` runs unless `WASSAT_KEYCHART=1` opts in. Set
+`WASSAT_KEYCHART=0` to disable it for comparisons. `WASSAT_PROFILE=1` reports
+moves, candidate evaluations, violated pairs, weight updates, repair queries,
+conflicts, relaxed keys, elapsed times, and cancellation. Recognition currently
+accepts the ordered four-depth encoding with at most 64 keys, 64 locks,
+16 positions, 50,000 variables and 100,000 clauses; other shapes use the
+existing arms.
+
 Lanes that used to hide behind the MDP recognizer's miss now live in their
 own files (`sdp`, `backdoor`, `sgi`, `schooltt`, `symmetry_fix`, `vdwb`)
 behind a fingerprint-gated registry in `lib/specialists.w`, which records

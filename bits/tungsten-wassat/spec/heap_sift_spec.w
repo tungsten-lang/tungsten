@@ -4,7 +4,7 @@ use ../lib/solver
 describe "Stable heap sifting" ->
   it "preserves equal-priority removal order" ->
     heap = i64[8]
-    pos = i64[8]
+    pos = i32[8]
     act = i64[8]
     state = i64[2]
     v = 1
@@ -20,7 +20,7 @@ describe "Stable heap sifting" ->
 
   it "maintains inverse positions and maximum priority through repeated bumps" ->
     heap = i64[128]
-    pos = i64[128]
+    pos = i32[128]
     act = i64[128]
     state = i64[2]
     v = 1
@@ -33,7 +33,8 @@ describe "Stable heap sifting" ->
     while k < 511
       v = (k * 73) % 127 + 1
       act[v] = act[v] + 37
-      z = wassat_heap_up(heap, pos, act, pos[v])
+      index = pos[v] ## i64
+      z = wassat_heap_up(heap, pos, act, index)
       expect(wassat_heap_valid(heap, pos, act, state, 127)).to eq(1)
       k += 1
     previous = 1000000
@@ -48,7 +49,7 @@ describe "Stable heap sifting" ->
 
   it "does not inspect absent entries when sifting an empty heap" ->
     heap = i64[0]
-    pos = i64[0]
+    pos = i32[0]
     act = i64[0]
     state = i64[2]
     expect(wassat_heap_down(heap, pos, act, state, 0)).to eq(0)

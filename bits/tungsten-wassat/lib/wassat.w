@@ -1296,6 +1296,7 @@ use portfolio
           arm_tag = "arm [rr["winner"]]"
           arm_tag = "sls arm" if rr["sls_won"] == true
           arm_tag = "exact small-circuit arm" if rr["circuit_won"] == true
+          arm_tag = "keychart repair arm" if rr["keychart_won"] == true
           arm_tag = "sls frozen-fringe repair" if rr["sls_repair_won"] == true
           if pidx >= 0
             spec = race["pre"][pidx]

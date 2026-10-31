@@ -26,6 +26,7 @@
 
 use atomic_stop
 use small_circuit
+use keychart
 use ../../../core/bit_ops
 
 WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
@@ -1818,8 +1819,26 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   circuit_plan = nil
   if env("WASSAT_SMALL_CIRCUIT") != "0"
     circuit_plan = wassat_small_circuit_plan(formula)
+  # The keychart lane is additive and uses boxed incremental queries. Rounded
+  # races do not admit it: every boxed worker must join before a coordinator
+  # scoring barrier. Explicit arm pins retain their historical width unless
+  # WASSAT_KEYCHART=1 requests this separate experiment.
+  keychart_plan = nil
+  keychart_workers = threads + pre_workers + sls_worker + (circuit_plan == nil ? 0 : 1)
+  keychart_allowed = env("WASSAT_KEYCHART") != "0" && art["raw"] == true
+  keychart_allowed = false if env("WASSAT_ARMS") != nil && env("WASSAT_KEYCHART") != "1"
+  keychart_allowed = false if wassat_race_round1_conflicts != 0
+  keychart_allowed = false if System.cpu_count <= keychart_workers || System.physical_memory_bytes <= 0
+  if keychart_allowed
+    keychart_allowed = wassat_race_memory_fits?(
+      formula, cdcl_arenas + (repair_allowed ? 1 : 0) + 1,
+      sls_arenas, preprocess_arenas
+    )
+  keychart_plan = wassat_keychart_plan(formula) if keychart_allowed
   cap = threads + 3
   cap += 1 if circuit_plan != nil
+  keychart_index = keychart_plan == nil ? -1 : cap
+  cap += 1 if keychart_plan != nil
   stop = i64[4]
   res = i64[cap * (nv + 8)]
   tel = i64[cap * WASSAT_TEL_STRIDE]
@@ -1846,6 +1865,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   prune_info = nil
   if formula != nil && env("WASSAT_STRUCTURAL_PRUNE") != "0" && nv <= 100000 && art["fncl"] <= 800000
     prune_info = wassat_structural_prune(nv, formula)
+  wassat_keychart_prepare(keychart_plan, art, stop) if keychart_plan != nil
   solvers = []
   a = 0
   while a < threads
@@ -1924,13 +1944,14 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     a += 1
   { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
     "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
-    "circuit_plan": circuit_plan,
+    "circuit_plan": circuit_plan, "keychart_plan": keychart_plan,
+    "keychart_index": keychart_index,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
     "credit": credit, "offsets": offsets, "sls": [], "prune_info": prune_info,
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
     "otfs_index": otfs_index, "otfs_specialists": otfs_specialists,
     "sls_allowed": sls_worker > 0, "sls_repair_allowed": repair_allowed,
-    "resident_cdcl_arenas": cdcl_arenas,
+    "resident_cdcl_arenas": cdcl_arenas + (keychart_plan == nil ? 0 : 1),
     "resident_sls_arenas": sls_arenas,
     "resident_preprocess_arenas": preprocess_arenas,
     "repair_cdcl_arenas": repair_allowed ? 1 : 0 }
@@ -2389,6 +2410,12 @@ WASSAT_AXIS_SLOTS = 10
   circuit_base = circuit_idx * (nv + 8)
   circuit_plan = race["circuit_plan"]
   circuit_handle = nil
+  keychart_plan = race["keychart_plan"]
+  keychart_idx = race["keychart_index"]
+  keychart_base = keychart_idx * (nv + 8)
+  keychart_handle = nil
+  if keychart_plan != nil && conflict_budget != nil
+    keychart_plan["solver"].set_shared_conflict_budget(conflict_budget, budget, keychart_idx + 1)
   round_ms = wassat_race_round_ms
   trace = wassat_race_trace?
   # Reallocation needs somebody to reallocate: with one raw arm there is no
@@ -2506,6 +2533,10 @@ WASSAT_AXIS_SLOTS = 10
         sout, first_sls, repair_allowed, repair_cap,
         conflict_budget, budget, sls_idx + 1
       )
+    if keychart_plan != nil
+      keychart_handle = Thread.new -> wassat_keychart_arm(
+        keychart_plan, formula, stop, res, keychart_base, nv
+      )
     handles.each -> (h)
       z = h.join
     # Join decisive CDCL work FIRST. If this was its final bounded slice (or
@@ -2535,6 +2566,11 @@ WASSAT_AXIS_SLOTS = 10
       if decisive_now == 1 || round1 == 0 || cdcl_can_continue == 0
         z = wassat_stop_cancel(stop)
       z = sls_handle.join
+    if keychart_handle != nil
+      # Admitted only for a continuous race. A final CDCL slice or any winner
+      # stops the walk before the coordinator waits for its safe-point poll.
+      z = wassat_stop_cancel(stop)
+      z = keychart_handle.join
     # ---- barrier: boxed workers are stopped, coordinator may dispatch again --
     #
     # Only the native circuit evaluator may remain live. It performs no
@@ -2718,6 +2754,13 @@ WASSAT_AXIS_SLOTS = 10
       answer_ms = ended if res[circuit_base] == -1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       cm = circuit_plan["meta"]
       wassat_prof_note("race.circuit inputs=[cm[1]] gates=[cm[2]] batches=[cm[6]]/[cm[5]] gate_evaluations=[cm[7]] assertion_literals=[cm[8]] stopped=[cm[9]] result=[cm[10]] ms=[ended - res[circuit_base + nv + 6]]")
+    if keychart_plan != nil
+      ended = res[keychart_base + nv + 5]
+      last_ms = ended if ended > last_ms
+      answer_ms = ended if res[keychart_base] == 1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+      km = keychart_plan["state"]
+      wassat_prof_note("race.keychart moves=[km[1]] bad=[km[2]] best_bad=[km[4]] evaluations=[km[5]] rebuilds=[km[6]] bumps=[km[7]] cancelled=[km[9]] repair_rounds=[km[10]] conflicts=[km[11]] relaxed_keys=[km[12]] walk_ms=[km[13]] repair_ms=[km[14]] verified=[km[15]]")
+      keychart_plan["solver"].profile_counters("race.keychart.repair")
     if answer_ms > 0
       wassat_prof_note("race.stop answer_to_last_arm_ms=[last_ms - answer_ms]")
   a = 0
@@ -2757,14 +2800,18 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && sls.size > 0 && res[sls_base] == 1
     status = 1
     winner = sls_idx
+  if status == 0 && keychart_plan != nil && res[keychart_base] == 1
+    status = 1
+    winner = keychart_idx
   model = []
+  keychart_conflicts = keychart_plan == nil ? 0 : res[keychart_base + nv + 4]
   repair_conflicts = sls.size > 0 ? res[sls_base + nv + 7] : 0
-  conflicts = repair_conflicts
+  conflicts = repair_conflicts + keychart_conflicts
   if conflict_budget != nil
     conflicts = ccall("__w_arr_load_acq", conflict_budget, 0)
   if winner >= 0
     base = winner * (nv + 8)
-    if winner != sls_idx && winner != circuit_idx && conflict_budget == nil
+    if winner != sls_idx && winner != circuit_idx && winner != keychart_idx && conflict_budget == nil
       conflicts += res[base + nv + 4] - offsets[winner]
     if status == 1
       v = 1
@@ -2778,7 +2825,9 @@ WASSAT_AXIS_SLOTS = 10
   { "status": status, "model": model, "winner": winner, "conflicts": conflicts,
     "conflict_budget": conflict_budget,
     "pre_index": (winner >= threads && winner < threads + pre.size) ? winner - threads : 0 - 1,
-    "circuit_won": winner == circuit_idx,
+    "circuit_won": circuit_plan != nil && winner == circuit_idx,
+    "keychart_won": keychart_plan != nil && winner == keychart_idx,
+    "keychart_conflicts": keychart_conflicts,
     "sls_won": winner == sls_idx,
     "sls_repair_won": winner == sls_idx && res[sls_base + nv + 1] == 1,
     "sls_repair_conflicts": repair_conflicts }

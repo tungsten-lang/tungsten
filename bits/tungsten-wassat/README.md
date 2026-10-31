@@ -77,6 +77,18 @@ are checked against the original CNF; exact UNSAT answers remain fast-only
 except where a lane names a witness variable set whose original-clause
 star the proof solver then refutes on its own, emitting a checkable proof.
 
+A bounded single-track Gray-code recognizer checks a sufficient subset of
+original clauses: every column has a selected cyclic rotation of the first,
+complete XOR definitions expose adjacent-bit flips, and each cyclic edge has
+exactly one flip. All columns therefore have the same even flip count F, so
+W words and B bits require W = B*F. A failure of divisibility by 2B gives a
+counting refutation, with no instance-name or answer lookup. Missing rotation,
+XOR, or exact-one clauses make recognition decline. This route is fast-only;
+proof modes retain proof-producing CDCL. `WASSAT_GRAY_TRACK=0` disables it.
+A cached-width admission check skips unrelated layouts before allocation.
+The clause checks use fixed native arrays; profiling reports scanned clauses,
+rotation relations, complete XOR gates, exact-one pairs, and candidate layouts.
+
 The native raw race also has a bounded exact circuit arm. It derives each
 output's complete two-input truth table from all its defining CNF clauses,
 then checks unit and wider assertions over every primary-input assignment in

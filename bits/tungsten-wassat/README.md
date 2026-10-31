@@ -102,6 +102,21 @@ and a polled 20 ms CLI deadline. Counters track rows, edges, components, side
 sizes, clause visits, exclusion checks, and cancellation/deadline stops.
 `WASSAT_MATCHING_BALANCE=0` disables it for comparisons.
 
+A second model-only route groups small clauses by their variable support and
+computes each block's exact forbidden truth table. Its Boolean algebraic
+normal form can expose disjoint nonlinear variable pairs whose function is
+shared across constraints. Those pair functions become linear coordinates;
+packed Gaussian elimination over GF(2) finds a candidate, which is lifted
+back to Boolean variables and checked against every original clause. This
+route never reports UNSAT. It tolerates clause/literal ordering and identifier
+changes; incompatible pair functions, higher-degree terms, or a failed model
+check fall back to normal search. Limits are 1,024 Boolean variables,
+32,768 clauses, 1,024 support blocks, and clause widths two through six;
+the CLI only attempts maximum widths four through six, with a polled 50 ms
+deadline. Fixed native buffers avoid per-row allocation. Counters track ANF
+operations, elimination rows/words, rank, checked literals, and stop reasons.
+`WASSAT_PAIR_AFFINE=0` disables it for comparisons.
+
 A model-only arithmetic circuit route reconstructs up to three-input Boolean
 truth tables, then uses 64-lane one-hot evaluations to infer equal-sum item
 weights. A balanced greedy split and a bounded two-item exchange produce a

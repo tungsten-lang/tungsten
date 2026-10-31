@@ -511,7 +511,7 @@ describe "Tungsten Wassat" ->
       asg = i8[6]
       act = i64[6]
       heap = i64[6]
-      hpos = i64[6]
+      hpos = i32[6]
       hst = i64[2]
       v = 0
       while v < 6
@@ -533,7 +533,7 @@ describe "Tungsten Wassat" ->
       asg = i8[5]
       act = i64[5]
       heap = i64[5]
-      hpos = i64[5]
+      hpos = i32[5]
       hst = i64[2]
       v = 0
       while v < 5
@@ -558,7 +558,7 @@ describe "Tungsten Wassat" ->
     it "grows the integer increment by one sixteenth and rescales safely" ->
       act = i64[4]
       heap = i64[4]
-      hpos = i64[4]
+      hpos = i32[4]
       hst = i64[2]
       v = 0
       while v < 4

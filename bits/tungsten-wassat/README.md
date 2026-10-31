@@ -89,6 +89,19 @@ A cached-width admission check skips unrelated layouts before allocation.
 The clause checks use fixed native arrays; profiling reports scanned clauses,
 rotation relations, complete XOR gates, exact-one pairs, and candidate layouts.
 
+A bounded matching-balance checker derives a graph from positive choice
+clauses: each participating variable must occur in exactly two distinct rows.
+It checks bipartiteness component by component, then verifies every original
+negative binary needed to make each row in a candidate component exact-one.
+A selected edge contributes once to each side, so unequal side counts give a
+counting refutation. No board geometry or identifier layout is assumed.
+Incomplete incidence or exclusions make recognition decline. This route is
+fast-only; proof requests retain proof-producing CDCL. It uses fixed native
+buffers, at most 4,096 variables and 50,000 clauses, rows of width at most 32,
+and a polled 20 ms CLI deadline. Counters track rows, edges, components, side
+sizes, clause visits, exclusion checks, and cancellation/deadline stops.
+`WASSAT_MATCHING_BALANCE=0` disables it for comparisons.
+
 A model-only arithmetic circuit route reconstructs up to three-input Boolean
 truth tables, then uses 64-lane one-hot evaluations to infer equal-sum item
 weights. A balanced greedy split and a bounded two-item exchange produce a

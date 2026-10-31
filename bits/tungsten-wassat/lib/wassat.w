@@ -54,6 +54,7 @@ use sliding_puzzle
 use stedman
 use hantzsche_wendt
 use gray_track
+use partition_circuit
 use knight_tour
 use path_cover
 use preprocess
@@ -384,6 +385,24 @@ use portfolio
       wassat_status(quiet, "c gray words=[gray[1]] bits=[gray[2]] rotations=[gray[4]] xor_gates=[gray[5]] exact_one_pairs=[gray[6]] scanned_clauses=[gray[3]] candidates=[gray[7]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(20)
+
+  # Bounded input-derived partition search. All arithmetic is a model-finding
+  # heuristic; full original-CNF replay is required before returning SAT.
+  if wassat_partition_primary(formula) != 0 && env("WASSAT_PARTITION_CIRCUIT") != "0"
+    partition = wassat_partition_model(formula, i64[2], clock_ms() + 50)
+    tprof = wassat_prof("cli.partition_circuit", tprof)
+    if partition != nil
+      pm = partition["meta"]
+      wassat_prof_note("partition inputs=[pm[1]] gates=[pm[2]] bits=[pm[3]] clause_visits=[pm[4]] truth_candidates=[pm[5]] gate_evals=[pm[6]] pair_inserts=[pm[7]] pair_probes=[pm[8]] verified_clauses=[pm[9]] models=[pm[10]] stop=[pm[11]]") if tprof != 0
+      if pm[0] == 1
+        wassat_discard_output(wrat_out, wrat_final)
+        wassat_discard_output(drat_out, drat_final)
+        ptext = wassat_sat_text(partition["model"])
+        wassat_status(quiet, ptext.slice(0, ptext.size - 1))
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified equal-sum partition circuit model)")
+        wassat_status(quiet, "c partition inputs=[pm[1]] gates=[pm[2]] bits=[pm[3]] pair_probes=[pm[8]]")
+        wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+        exit(10)
 
   # The canonical Hantzsche--Wendt instance is a complete group-ring product
   # circuit over two 93-bit supports. Construct Gardam's published unit and

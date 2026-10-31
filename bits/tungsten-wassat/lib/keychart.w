@@ -140,9 +140,9 @@ use atomic_stop
   nl = meta[1]
   np = meta[2]
   { "meta": meta, "allowed": allowed, "wkey": wkey, "wlock": wlock,
-    "value": i64[nk * np], "count": i64[nl * np * 4],
+    "value": i64[nk * np], "best_value": i64[nk * np], "count": i64[nl * np * 4],
     "other": i64[nl * nk * np], "dist": i64[nl * nk],
-    "weight": i64[nl * nk], "gain": i64[nl * np * 8], "state": i64[16], "mutable": i8[nk],
+    "weight": i64[nl * nk], "gain": i64[nl * np * 8], "state": i64[19], "mutable": i8[nk],
     "phases": i64[nv], "sign": i64[nv + 1],
     "assumptions": i64[nk * np] }
 
@@ -315,10 +315,18 @@ use atomic_stop
   st[0] = seed
   st[2]
 
+-> wassat_keychart_copy_values(src, dst, n) (i64[] i64[] i64)
+  i = 0
+  while i < n
+    dst[i] = src[i]
+    i += 1
+  0
+
 # All scratch belongs to this plan and is reused across the walk and queries.
 # state: RNG, moves, bad pairs, score, best bad, move evaluations, rebuilds,
 # weight bumps, target bad, cancelled, repair rounds, repair conflicts,
-# relaxed keys, local-search ms, repair ms, verified result.
+# relaxed keys, local-search ms, repair ms, verified result, snapshots,
+# repair stop (1 refuted, 2 non-resumable miss), refinement attempts.
 -> wassat_keychart_seed(allowed, value, count, other, dist, weight, gain, st, nk, nl, np) (i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
   seed = 1
   i = 0
@@ -347,6 +355,10 @@ use atomic_stop
   0
 
 -> wassat_keychart_phases(value, count, allowed, dist, mutable, wkey, wlock, phases, sign, nk, nl, np, nv) (i64[] i64[] i8[] i64[] i8[] i32[] i32[] i64[] i64[] i64 i64 i64 i64)
+  k = 0
+  while k < nk
+    mutable[k] = 0
+    k += 1
   primary = nk * np * 4
   base = primary + nl * np * 4
   v = 1
@@ -396,6 +408,75 @@ use atomic_stop
   plan["solver"] = solver
   0
 
+# Prepare a new candidate without replacing the solver or its learned clauses.
+-> wassat_keychart_set_candidate(plan, formula)
+  st = plan["state"]
+  m = plan["meta"]
+  phases = plan["phases"]
+  wassat_keychart_phases(plan["value"], plan["count"], plan["allowed"], plan["dist"], plan["mutable"], plan["wkey"], plan["wlock"], phases, plan["sign"], m[0], m[1], m[2], formula["nvars"])
+  if st[2] == 0 && wassat_model_satisfies?(formula, phases)
+    st[15] = 1
+    return phases
+  plan["solver"].set_phases(phases)
+  []
+
+-> wassat_keychart_repair_until(plan, formula, stop, ceiling)
+  st = plan["state"]
+  m = plan["meta"]
+  np = m[2]
+  phases = plan["phases"]
+  mutable = plan["mutable"]
+  solver = plan["solver"]
+  assumptions = plan["assumptions"]
+  before_ms = st[14]
+  t0 = ccall("__w_clock_ms")
+  while st[10] < 100 && st[11] < ceiling && !wassat_stop_requested?(stop)
+    assumptions.clear
+    i = 0
+    while i < m[3]
+      l = phases[i]
+      assumptions.push(l) if l > 0 && mutable[i / (np * 4)] == 0
+      i += 1
+    cap = ceiling - st[11]
+    cap = 5000 if cap > 5000
+    r = solver.solve_assuming_budget(assumptions, cap)
+    delta = r["conflicts"] - st[11]
+    st[11] = r["conflicts"]
+    st[10] += 1
+    st[14] = before_ms + ccall("__w_clock_ms") - t0
+    if r["sat"]
+      if wassat_model_satisfies?(formula, r["model"])
+        st[15] = 1
+        return r["model"]
+      st[17] = 2
+      return []
+    elsif r["unsat"]
+      core = r["core"]
+      if core.empty?
+        st[17] = 1
+        return []
+      added = 0
+      ci = 0
+      while ci < core.size
+        v = core[ci].abs
+        if v < 1 || v > m[3]
+          st[17] = 2
+          return []
+        k = (v - 1) / (np * 4)
+        if mutable[k] == 0
+          mutable[k] = 1
+          added += 1
+        ci += 1
+      st[12] += added
+      if added == 0
+        st[17] = 2
+        return []
+    elsif delta == 0
+      st[17] = 2
+      return []
+  st[17] = 2 if st[10] >= 100
+  []
+
 -> wassat_keychart_search(plan, formula, stop)
   st = plan["state"]
   return [] if wassat_stop_requested?(stop)
@@ -408,54 +489,33 @@ use atomic_stop
   wassat_keychart_walk(plan["allowed"], plan["value"], plan["count"], plan["other"], plan["dist"], plan["weight"], plan["gain"], st, nk, nl, np, 4, 1, 20000, stop)
   st[13] = ccall("__w_clock_ms") - t0
   return [] if wassat_stop_requested?(stop) || st[2] > 2
-  phases = plan["phases"]
-  mutable = plan["mutable"]
-  wassat_keychart_phases(plan["value"], plan["count"], plan["allowed"], plan["dist"], mutable, plan["wkey"], plan["wlock"], phases, plan["sign"], nk, nl, np, formula["nvars"])
-  # A zero structural cost is still only a candidate for the original CNF.
-  if st[2] == 0 && wassat_model_satisfies?(formula, phases)
-    st[15] = 1
-    return phases
-  solver = plan["solver"]
-  solver.set_phases(phases)
-  assumptions = plan["assumptions"]
+  model = wassat_keychart_set_candidate(plan, formula)
+  return model unless model.empty?
+  refine = st[2] == 2 && st[1] < 20000
+  ceiling = refine ? 4096 : 50000
+  model = wassat_keychart_repair_until(plan, formula, stop, ceiling)
+  return model unless model.empty?
+  return [] if !refine || wassat_stop_requested?(stop) || st[17] != 0
+  # Preserve quick repairs. Only a failed short repair spends the remaining
+  # move allowance seeking a one-pair candidate; total work caps stay fixed.
+  wassat_keychart_copy_values(plan["value"], plan["best_value"], nk * np)
+  st[16] += 1
+  st[18] += 1
+  st[8] = 1
+  left = 20000 - st[1]
   t0 = ccall("__w_clock_ms")
-  while st[10] < 100 && st[11] < 50000 && !wassat_stop_requested?(stop)
-    assumptions.clear
-    i = 0
-    while i < m[3]
-      l = phases[i]
-      assumptions.push(l) if l > 0 && mutable[i / (np * 4)] == 0
-      i += 1
-    cap = 50000 - st[11]
-    cap = 5000 if cap > 5000
-    r = solver.solve_assuming_budget(assumptions, cap)
-    delta = r["conflicts"] - st[11]
-    st[11] = r["conflicts"]
-    st[10] += 1
-    st[14] = ccall("__w_clock_ms") - t0
-    if r["sat"]
-      if wassat_model_satisfies?(formula, r["model"])
-        st[15] = 1
-        return r["model"]
-      return []
-    elsif r["unsat"]
-      core = r["core"]
-      return [] if core.empty?
-      added = 0
-      ci = 0
-      while ci < core.size
-        v = core[ci].abs
-        return [] if v < 1 || v > m[3]
-        k = (v - 1) / (np * 4)
-        if mutable[k] == 0
-          mutable[k] = 1
-          added += 1
-        ci += 1
-      st[12] += added
-      return [] if added == 0
-    elsif delta == 0
-      return []
-  []
+  wassat_keychart_walk(plan["allowed"], plan["value"], plan["count"], plan["other"], plan["dist"], plan["weight"], plan["gain"], st, nk, nl, np, 4, 1, left, stop)
+  st[13] += ccall("__w_clock_ms") - t0
+  return [] if wassat_stop_requested?(stop)
+  if st[2] > 1
+    wassat_keychart_copy_values(plan["best_value"], plan["value"], nk * np)
+  wassat_keychart_rebuild(plan["allowed"], plan["value"], plan["count"], plan["other"], plan["dist"], plan["weight"], plan["gain"], st, nk, nl, np, 4)
+  if st[2] < 2
+    model = wassat_keychart_set_candidate(plan, formula)
+    return model unless model.empty?
+  # If refinement missed, retain both the first candidate and its expanded
+  # assumption fringe. In either case, reuse the same bounded CDCL arena.
+  wassat_keychart_repair_until(plan, formula, stop, 50000)
 
 -> wassat_keychart_arm(plan, formula, stop, res, base, nv)
   res[base + nv + 6] = ccall("__w_clock_ms")

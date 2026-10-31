@@ -2759,7 +2759,7 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[keychart_base] == 1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       km = keychart_plan["state"]
-      wassat_prof_note("race.keychart moves=[km[1]] bad=[km[2]] best_bad=[km[4]] evaluations=[km[5]] rebuilds=[km[6]] bumps=[km[7]] cancelled=[km[9]] repair_rounds=[km[10]] conflicts=[km[11]] relaxed_keys=[km[12]] walk_ms=[km[13]] repair_ms=[km[14]] verified=[km[15]]")
+      wassat_prof_note("race.keychart moves=[km[1]] bad=[km[2]] best_bad=[km[4]] evaluations=[km[5]] walk_rebuilds=[km[6]] snapshots=[km[16]] bumps=[km[7]] cancelled=[km[9]] repair_rounds=[km[10]] conflicts=[km[11]] relaxed_keys=[km[12]] walk_ms=[km[13]] repair_ms=[km[14]] verified=[km[15]] repair_stop=[km[17]] refinements=[km[18]]")
       keychart_plan["solver"].profile_counters("race.keychart.repair")
     if answer_ms > 0
       wassat_prof_note("race.stop answer_to_last_arm_ms=[last_ms - answer_ms]")

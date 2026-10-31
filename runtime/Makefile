@@ -313,6 +313,17 @@ test-hash-tombstone: tests/test_hash_tombstone
 tests/test_hash_tombstone: tests/test_hash_tombstone.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_hash_tombstone.c $(RUNTIME_LDFLAGS) -o tests/test_hash_tombstone
 
+# Array allocation profile regression tests
+test-array-alloc-profile: tests/test_array_alloc_profile
+	TUNGSTEN_ALLOC_PROFILE=0 ./tests/test_array_alloc_profile
+	TUNGSTEN_ALLOC_PROFILE=1 ./tests/test_array_alloc_profile
+
+# The test includes runtime.c to inspect the private counters.
+tests/test_array_alloc_profile: tests/test_array_alloc_profile.c $(RUNTIME_DEPS)
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(filter-out runtime.c,$(RUNTIME_SRCS)) tests/test_array_alloc_profile.c $(RUNTIME_LDFLAGS) -o $@
+
+.PHONY: test-array-alloc-profile
+
 # String slab freeze regression tests
 test-string-slab: tests/test_string_slab
 	./tests/test_string_slab
@@ -342,9 +353,10 @@ tests/test_exception_frames: tests/test_exception_frames.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_exception_frames.c $(RUNTIME_LDFLAGS) -o tests/test_exception_frames
 
 # Run all tests
-test-all: test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-hash-tombstone test-string-slab test-ivars test-node-arena test-exception-frames
+test-all: test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-hash-tombstone test-array-alloc-profile test-string-slab test-ivars test-node-arena test-exception-frames
 
 clean:
+	rm -f tests/test_array_alloc_profile
 	rm -f runtime.o terminal_input.o test_nanbox bench_wvalue bench_bigint bench_prime_sweep bench_array_growth bench_array_push_double bench_array_push_quarter bench_array_push_quarter_4k bench_array_push_eighth_1k bench_array_push_eighth_4k bench_array_push_quarter_8k bench_array_push_quarter_16k bench_array_push_half_8k bench_runtime_hotpaths bench_string_encoding bench_node bench_location bench_slab_init bench_before bench_http bench_http_before
 	rm -f tests/test_goroutine_arena tests/test_threads tests/test_atomics tests/test_sockets tests/test_goroutines tests/test_event_loop tests/test_integration tests/test_hash tests/test_hash_tombstone tests/test_string_slab tests/test_ivars tests/test_node_arena tests/test_exception_frames
 

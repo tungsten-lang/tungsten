@@ -557,7 +557,10 @@ WValue __w_u32_flops(WValue countsv) {
  * Relaxed atomic per-kind counters at the runtime's allocation choke
  * points, dumped atexit as both a human table and machine-readable
  * `TALLOC <kind> <count> <bytes>` lines (consumed by `tungsten flame
- * --alloc`). Zero cost when off: one predicted branch per site. */
+ * --alloc`). Array counters cover WArray payload requests, excluding headers
+ * and allocator overhead. Growth counts the full requested replacement buffer,
+ * not the increase in capacity; reuse and borrowed views allocate no payload.
+ * Disabled profiling costs one predicted branch per site. */
 #define W_ALLOCPROF_BIGINT   0
 #define W_ALLOCPROF_ARR      1
 #define W_ALLOCPROF_ALIGNED  2
@@ -73648,7 +73651,7 @@ WValue w_array_new(int64_t element_bits, int64_t cap) {
     if (cap > INT32_MAX) {
         w_raise(w_string("typed array: cap exceeds INT32_MAX — use BigArray for >2^31 elements"));
     }
-    w_allocprof(W_ALLOCPROF_ARR, (long long)(cap > 0 ? cap : 8) * 8);
+    w_allocprof(W_ALLOCPROF_ARR, array_byte_size(element_bits, cap > 0 ? cap : 8));
     WArray *a = calloc(1, sizeof(WArray));
     a->flags = W_FLAG_OWNED;
     a->ebits = (int8_t)element_bits;
@@ -73682,6 +73685,7 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
         free(a->slots);
         free(a);
     }
+    w_allocprof(W_ALLOCPROF_ARR, array_byte_size(element_bits, actual_cap));
     a = calloc(1, sizeof(WArray));   /* header stays zeroed (cheap, fixed size) */
     a->flags = W_FLAG_OWNED;
     a->ebits = (int8_t)element_bits;
@@ -73720,6 +73724,7 @@ WValue w_array_new_inline(int64_t element_bits, int64_t n) {
         w_as_array(value)->size = (int32_t)n;
         return value;
     }
+    w_allocprof(W_ALLOCPROF_ARR, (long long)payload);
     size_t slot_offset = (sizeof(WArray) + 15u) & ~(size_t)15u;
     WArray *a = malloc(slot_offset + payload);
     memset(a, 0, sizeof(WArray));
@@ -73977,8 +73982,8 @@ WValue w_array_push(WValue arr, WValue val) {
             uint8_t old_flags = a->flags;
             uint8_t *new_data;
 
+            w_allocprof(W_ALLOCPROF_GROW, new_bytes);
             if (!has_views && !(old_flags & (W_FLAG_INLINE | W_FLAG_PAGE_ALIGNED))) {
-                w_allocprof(W_ALLOCPROF_GROW, new_bytes);
                 new_data = realloc(old_slots, new_bytes);
                 if (!new_data) die("typed array realloc failed");
             } else {
@@ -75177,6 +75182,7 @@ WValue w_array_unshift(WValue arr, WValue val) {
     }
     // Case 3: grow, copy elements to positions 1..N, write val at 0.
     int64_t new_cap = array_next_capacity(a->cap);
+    w_allocprof(W_ALLOCPROF_GROW, array_byte_size(a->ebits, new_cap));
     uint8_t *new_data = malloc((size_t)array_byte_size(a->ebits, new_cap));
     if (!new_data) die("typed array allocation failed");
     WValue *old_slots = a->slots;

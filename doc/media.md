@@ -350,7 +350,7 @@ movie's duration implies. `format:` is `:rgba`, `:bgra` (VideoToolbox's
 BT.709 conversion, from the stream's tags) or `:nv12` (the decoded 8-bit
 4:2:0 planes, Y' then CbCr, no conversion).
 
-- **Order.** Samples are fed in decode order and decoded one at a time;
+- **Order.** Samples are fed in decode order in bounded asynchronous batches of eight;
   a decoded frame is handed out once no frame still to come can precede it:
   its time is below the next sample's decode time (DTS <= PTS) and below every
   frame VideoToolbox still holds. Frames are identified by the sample they came
@@ -382,7 +382,7 @@ r = Transcode.run(segment_paths, "share.mp4", rate: [24, 1], audio_src: "mix.wav
 | `fit`, `crop`, `rect`, `filter`, `scale_backend` | `:stretch`, ..., `:lanczos3`, `:auto` | as for `Scaler` |
 | `via` | `:yuv` | `:yuv` resamples the decoded Y' and CbCr planes; `:rgb` decodes to BGRA, scales RGBA, converts back |
 | `codec`, `quality`, `bitrate`, `gop`, `gop_seconds`, `reorder`, `speed` | `:h264`, ..., 1 s | as for `VideoEncoder`; a segment (closed GOP) is `gop` frames |
-| `level` | lowest that fits | H.264 level (`"3.1"` ... `"5.2"`); VideoToolbox picks HEVC's |
+| `level` | lowest that fits for H.264 and bitrate-driven HEVC; otherwise auto | H.264 (`"3.0"` ... `"5.2"`) or HEVC Main/Main10 (`"1"` ... `"6.2"`); emitted HEVC level verified |
 | `audio` | `:copy` | `:copy` (passthrough), `:aac`, `:pcm` (MOV), false |
 | `audio_src`, `audio_kbps` | the source, preset | a WAV or movie to take the sound from |
 | `chapters` | `:copy` | `:copy` (the source's chapter track), `[[title, frame], ...]`, false |
@@ -390,6 +390,8 @@ r = Transcode.run(segment_paths, "share.mp4", rate: [24, 1], audio_src: "mix.wav
 | `start`, `frames` | 0, the rest | a range of the source (movies) |
 | `rate` | the source's | needed for segments |
 | `format`, `faststart`, `progress` | from `dst`, true, false | |
+| `retries`, `retry_delay` | 2, 1 second | dropped-frame failures only, exponential backoff capped at 60 s; max 5 retries |
+| `edit_lists` | true | `:audio` flattens video edits; false requires every track to be representable without edits |
 
 The result: `{frames:, duplicated:, dropped:, seconds:, fps:, decode_s:,
 scale_s:, encode_wait_s:, mux_s:, scale_backend:, via:, file_bytes:,
@@ -452,9 +454,50 @@ rate, bits)` computes it (HEVC: Table A.8, Main tier).
 
 `Transcode.check(path, preset:, ...)` runs every MediaVerify check (pass
 `chapters:`, `frames:`, `tc_start:` as for `MediaVerify.check`) plus
-`preset`: sample entry `avc1` / `hvc1`, profile (High 100 / Main 1), 8-bit,
+`preset`: sample entry `avc1` / `hvc1`, profile/depth (H.264 High 100 / 8-bit, HEVC Main 1 / 8-bit, Main10 2 / 10-bit),
 4:2:0, the size, the stream's level at least the minimum the picture needs and
 at most the preset's cap, and the average bitrate within that level's MaxBR.
+An explicit `level:` must match exactly. ProRes targets check their sample entry
+and dimensions in addition to MediaVerify's timing, colour and audio checks.
+
+Transcodes write to a unique temporary file next to the destination, then rename
+on success. A failed attempt leaves an existing destination intact. Only the
+VideoToolbox dropped-frame error retries; invalid inputs, levels and file errors
+fail immediately. The result includes `attempts:`.
+
+HEVC explicit levels use VideoToolbox's `HEVC_<Main|Main10>_<major>_<minor>` naming
+convention (`Main10` for 10-bit). The public enumeration advertises AutoLevel
+only, but a macOS probe confirmed explicit levels in the emitted bitstream.
+The runtime validates hvcC on the first output of every segment, so a backend
+that silently ignores the request fails instead of claiming the level is pinned.
+`Transcode.level_pinnable?` reports whether the API supports that codec's levels;
+the actual encoder may reject a size/rate/level combination.
+
+`TUNGSTEN_MEDIA_DECODER_SERIAL=1` retains the old per-frame decode wait for
+comparison or diagnosing a backend; normal decoding uses bounded asynchronous
+submission. `benchmarks/media/decode_bench.w` compares both paths with one frozen
+release binary.
+
+### Edit-list-free delivery
+
+`Mux.new(..., edit_lists: :audio)` and `Transcode.run(..., edit_lists: :audio)`
+move the video B-frame offset into signed composition offsets (ctts v1), retaining
+AAC priming edits. `edit_lists: false` removes all edits, including identity edits
+in timecode and chapter tracks. It refuses audio priming/trimming or a late first
+chapter that cannot be removed without changing playback. Use PCM audio in MOV
+and chapters beginning at frame 0 for strictly edit-list-free masters:
+
+```tungsten
+Transcode.run("master.mp4", "delivery.mov", codec: :hevc10, audio: :pcm, edit_lists: false)
+MediaVerify.check("delivery.mov", edit_lists: false)
+```
+
+`MediaVerify.facts` includes the actual container `edit_lists` count (edts boxes),
+which differs from AVFoundation's implicit track segment count. The CLI accepts
+`media transcode --no-edit-lists --audio pcm` and `media verify --no-edit-lists`.
+Studio mux defaults to video edit removal; strict delivery is
+`studio mux episode.json --out master.mov --audio-codec pcm --no-edit-lists`.
+AAC MP4 delivery still needs its priming edit to preserve sample-exact sync.
 
 ## How it is built
 

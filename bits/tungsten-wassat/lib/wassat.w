@@ -53,6 +53,7 @@ use edge_matching
 use sliding_puzzle
 use stedman
 use hantzsche_wendt
+use gray_track
 use knight_tour
 use path_cover
 use preprocess
@@ -366,6 +367,23 @@ use portfolio
     print(wtext) if wrat_final == "-"
     print("0\n") if drat_final == "-"
     exit(20)
+
+  # Bounded clause checks recover cyclic bit tracks and exactly-one flips.
+  # Rotation invariance makes the flip count a multiple of twice the bit
+  # width. This arithmetic certificate is fast-only until it emits DRAT.
+  if (
+    proof_mode == WASSAT_PROOF_NONE &&
+    wassat_gray_track_bits(formula["nvars"], config.max_clause_size) > 0 &&
+    env("WASSAT_GRAY_TRACK") != "0"
+  )
+    gray = wassat_gray_track_refute(formula)
+    tprof = wassat_prof("cli.gray_track", tprof)
+    if gray[0] == -1
+      wassat_status(quiet, "s UNSATISFIABLE")
+      wassat_status(quiet, "c mode: fast (clause-checked cyclic Gray-code counting refutation)")
+      wassat_status(quiet, "c gray words=[gray[1]] bits=[gray[2]] rotations=[gray[4]] xor_gates=[gray[5]] exact_one_pairs=[gray[6]] scanned_clauses=[gray[3]] candidates=[gray[7]]")
+      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+      exit(20)
 
   # The canonical Hantzsche--Wendt instance is a complete group-ring product
   # circuit over two 93-bit supports. Construct Gardam's published unit and

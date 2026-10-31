@@ -44,9 +44,12 @@ WASSAT_PROOF_DRAT = 2
 # Packed headers and binary reasons recover their high word with signed >> 32.
 # Keep clause indices nonnegative in that representation; -1 means no reason.
 WASSAT_MAX_CLAUSE_INDEX = 2147483647
+# Heap positions also use signed 32-bit slots with -1 as the absent sentinel.
+WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
 + Wassat
   -> new(@nvars, @input_clauses, @proof_mode, legacy_lookahead = 0, flat_shell = false)
+    raise "variable count exceeds signed 32-bit packed representation" if @nvars > WASSAT_MAX_VARIABLE_INDEX
     nv = @nvars
     @config = WassatConfig.new(@nvars, @input_clauses)
     @lookahead = @config.lookahead_candidates
@@ -119,7 +122,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
     @phase = i8[nv + 1]          # saved polarity: 1 or -1
     @activity = i64[nv + 1]      # scaled integer VSIDS score
     @heap = i64[nv + 1]          # max-heap of branching variables
-    @heappos = i64[nv + 1]       # variable -> heap slot, -1 when absent
+    @heappos = i32[nv + 1]       # variable -> heap slot, -1 when absent
     @hstate = i64[2]              # heap size / EVSIDS increment
     @rassign = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 1] : i64[1]
     @pstate = i64[12]            # qhead / tsize / conflict / bail / props / chrono
@@ -6147,7 +6150,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
 #
 #   st[0] = conflicting clause   st[1] = trail size   st[2] = decision level
 #   st[3] = learned clause size  st[4] = backjump level
--> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark) (i64[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark) (i64[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   confl = st[0]
   tsize = st[1]
   dl = st[2]
@@ -6981,7 +6984,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
 #
 # `hst[0]` is the live heap size and `hst[1]` is the EVSIDS increment.
 
--> wassat_heap_swap(heap, hpos, a, b) (i64[] i64[] i64 i64) i64
+-> wassat_heap_swap(heap, hpos, a, b) (i64[] i32[] i64 i64) i64
   va = heap[a]
   vb = heap[b]
   heap[a] = vb
@@ -6992,7 +6995,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
 
 # Sift a saved variable through a hole. Parent/child shifts retain the exact
 # tie order of swaps, while each displaced variable is written only once.
--> wassat_heap_up(heap, hpos, act, index) (i64[] i64[] i64[] i64) i64
+-> wassat_heap_up(heap, hpos, act, index) (i64[] i32[] i64[] i64) i64
   i = index
   return i if i <= 0
   v = heap[i]
@@ -7009,7 +7012,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
     hpos[v] = i
   i
 
--> wassat_heap_down(heap, hpos, act, hst, index) (i64[] i64[] i64[] i64[] i64) i64
+-> wassat_heap_down(heap, hpos, act, hst, index) (i64[] i32[] i64[] i64[] i64) i64
   i = index
   size = hst[0]
   left = 2 * i + 1
@@ -7124,7 +7127,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
 # are kept — re-appended in original order and re-propagated by the caller
 # (st[2] returns the qhead rewind point).
 #   st[0] = dlevel in/out   st[1] = tsize in/out   st[2] = qhead out
--> wassat_backjump(tr, tlim, asg, lasg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i64[] i64[] i8[] i8[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+-> wassat_backjump(tr, tlim, asg, lasg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i64[] i64[] i8[] i8[] i64[] i32[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
   dl = st[0]
   ts = st[1]
   kept = 0
@@ -7157,7 +7160,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
   st[2] = ts - kept
   0
 
--> wassat_heap_insert(heap, hpos, act, hst, v) (i64[] i64[] i64[] i64[] i64) i64
+-> wassat_heap_insert(heap, hpos, act, hst, v) (i64[] i32[] i64[] i64[] i64) i64
   if hpos[v] >= 0
     return 0
   index = hst[0]
@@ -7167,7 +7170,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
   z = wassat_heap_up(heap, hpos, act, index)
   1
 
--> wassat_heap_pop(heap, hpos, act, hst) (i64[] i64[] i64[] i64[]) i64
+-> wassat_heap_pop(heap, hpos, act, hst) (i64[] i32[] i64[] i64[]) i64
   size = hst[0]
   if size < 1
     return 0
@@ -7184,7 +7187,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
 # Assigned variables can remain in the heap after propagation. Discard them
 # only when they reach the top; backjump reinserts a variable iff it had
 # already been discarded. This avoids arbitrary heap removals on every unit.
--> wassat_heap_pick(asg, heap, hpos, act, hst) (i8[] i64[] i64[] i64[] i64[]) i64
+-> wassat_heap_pick(asg, heap, hpos, act, hst) (i8[] i64[] i32[] i64[] i64[]) i64
   v = 0 ## i64
   while v == 0 && hst[0] > 0
     cand = wassat_heap_pop(heap, hpos, act, hst) ## i64
@@ -7196,7 +7199,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
 # assigned tops exactly as pick does — that is pick's own behaviour, not an
 # extra side effect — so calling this never changes which variable pick then
 # returns. -1 when the heap holds no unassigned variable.
--> wassat_heap_peek_act(asg, heap, hpos, act, hst) (i8[] i64[] i64[] i64[] i64[]) i64
+-> wassat_heap_peek_act(asg, heap, hpos, act, hst) (i8[] i64[] i32[] i64[] i64[]) i64
   while hst[0] > 0 && asg[heap[0]] != 0
     z = wassat_heap_pop(heap, hpos, act, hst)
   r = -1
@@ -7205,7 +7208,7 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
 
 # Debug/spec helper: validates the heap order and inverse-position map without
 # adding checks to the search hot path.
--> wassat_heap_valid(heap, hpos, act, hst, nv) (i64[] i64[] i64[] i64[] i64) i64
+-> wassat_heap_valid(heap, hpos, act, hst, nv) (i64[] i32[] i64[] i64[] i64) i64
   size = hst[0]
   if size < 0 || size > nv
     return 0
@@ -7279,13 +7282,14 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
   r = vqs[v] if v > 0
   r
 
--> wassat_evsids_bump(act, heap, hpos, hst, v, nv) (i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_evsids_bump(act, heap, hpos, hst, v, nv) (i64[] i64[] i32[] i64[] i64 i64) i64
   return 0 if act[v] < 0
   act[v] = act[v] + hst[1]
   if act[v] > 4503599627370496
     z = wassat_evsids_rescale(act, hst, nv)
   if hpos[v] >= 0
-    z = wassat_heap_up(heap, hpos, act, hpos[v])
+    index = hpos[v] ## i64
+    z = wassat_heap_up(heap, hpos, act, index)
   1
 
 # Per-conflict EMA updates (fixed-point << 16) and the per-decision restart

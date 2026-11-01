@@ -113,4 +113,29 @@ describe "Native DIMACS decimal bounds" ->
       a = digit_bound_scan("p cnf 2000000000 1\n[value] 0\n")
       expect(a[0][4]).to eq(3)
 
+describe "Native DIMACS exact zero terminators" ->
+  it "keeps empty-clause offsets across every accepted delimiter and EOF" ->
+    [" ", "\t", "\r", "\n"].each ->(sep)
+      f = wassat_parse_cnf_native("p cnf 1 3\n0[sep]1 0[sep]0")
+      expect(f["flat_ncl"]).to eq(3)
+      expect(f["flat_nlits"]).to eq(1)
+      expect(f["flat_offs"][0]).to eq(0)
+      expect(f["flat_offs"][1]).to eq(0)
+      expect(f["flat_offs"][2]).to eq(1)
+      expect(f["flat_lens"][0]).to eq(0)
+      expect(f["flat_lens"][1]).to eq(1)
+      expect(f["flat_lens"][2]).to eq(0)
+  it "requires a delimiter before treating zero as a terminator" ->
+    ["0x", "0c", "0%", "000", "-00", "+00", "0-1", "00+1"].each ->(value)
+      a = digit_bound_scan("p cnf 1 1\n[value]\n")
+      expect(a[0][4]).to eq(3)
+      expect(a[0][5]).to eq(2)
+  it "retains header and declared-count errors for exact zero" ->
+    a = digit_bound_scan("0\n")
+    expect(a[0][4]).to eq(1)
+    expect(a[0][5]).to eq(1)
+    a = digit_bound_scan("p cnf 1 0\n0\n")
+    expect(a[0][4]).to eq(6)
+    expect(a[0][5]).to eq(2)
+
 spec_summary

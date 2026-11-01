@@ -944,7 +944,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 # Worst-case sizing for a walk over a solver's arena: how many irredundant
 # clauses are alive and how many literals they hold. Learned clauses carry a
 # non-zero LBD, originals do not -- the same test `reduce_db` uses.
--> wassat_sls_arena_size(cmeta, alive, clbd, pm) (i64[] i64[] i64[] i64[])
+-> wassat_sls_arena_size(cmeta, alive, clbd, pm) (i64[] i8[] i64[] i64[])
   ncl_in = pm[0]
   tot = 0
   cnt = 0
@@ -968,7 +968,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 #
 #   pm[0] clauses in   pm[1] nvars   pm[2] clauses out   pm[3] literals out
 #   pm[6] clause capacity            pm[7] literal capacity
--> wassat_sls_from_arena(ar, cmeta, alive, clbd, asg, fla, fcs, fcl, och, ocv, stamp, pm) (i64[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_from_arena(ar, cmeta, alive, clbd, asg, fla, fcs, fcl, och, ocv, stamp, pm) (i64[] i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   ncl_in = pm[0]
   nv = pm[1]
   capcl = pm[6]

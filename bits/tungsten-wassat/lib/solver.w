@@ -97,7 +97,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @chrono_t = 50
     @otfs_allowed = @proof_mode == WASSAT_PROOF_NONE && nv < 10000000 && env("WASSAT_OTFS") != "0"
     @kbuf = i64[nv + 2]          # backjump keep-buffer for out-of-order levels
-    @bstate = i64[4]             # dlevel / tsize / qhead across native backjump
+    @bstate = i64[4]             # dlevel / tsize / qhead / cumulative unassignments
     @pwork = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 4] : i64[1]
     @phint = @proof_mode == WASSAT_PROOF_WRAT ? i64[nv + 4] : i64[1]
     if !flat_shell
@@ -424,7 +424,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @asg_pending = 0
     @asg_count = 0
     @asg_filter = false
-    @rhist = i64[64]             # reduce_db scratch (worker threads: no alloc)
+    # Reduction scratch: 64 histogram buckets, two compaction outputs,
+    # then cumulative clause visits, copied words, remapped clauses/reasons.
+    @rhist = i64[70]             # reused by every reduction; no worker allocation
     # Mid-search inprocessing schedule. WASSAT_INPROCESS pins a fixed
     # interval (0 = off); otherwise policy's shape-gated automatic schedule
     # decides the first round, and later rounds space out geometrically.
@@ -534,7 +536,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # miss; sharing one 16-byte-aligned pair means one cache line and one
     # array descriptor instead of two of each.
     @cmeta = i64[2 * maxcl]
-    @alive = i64[maxcl]
+    @alive = i8[maxcl]          # 0 dead / 1 live; one byte per clause
     @clbd = i64[maxcl]           # 0 = original clause (never deleted)
     @cused = i64[maxcl]          # conflict count when last resolved in analysis
     @gid = i64[maxcl]            # clause index -> global proof id
@@ -602,6 +604,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @nsubst = 0
     @raw_flat = false
     # Lucky phases run at most once per solver, on the first solve_query.
+    @lucky_cancel_rebuild = false
     @lucky_pending = @config.use_lucky
     self.prepare_walk
 
@@ -618,27 +621,24 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> grow_arena(need)
     if @asize + need > @acap
-      ncap = @acap * 2
-      ncap = @asize + need + 1024 if ncap < @asize + need
-      # Proof-free reductions compact the arena; a search that still cannot
-      # finish may grow it until the runtime's typed-array limit fires as a
-      # cryptic crash hours in. Fail precisely instead.
+      # Grow the existing typed array so aliases keep the same descriptor and
+      # the runtime can reuse/reallocate its backing storage. Replacing it with
+      # a fresh doubled array retains the old arena and copies the entire DB.
+      # Expose only a modest zeroed suffix; Array.push amortizes backing growth.
+      ncap = @asize + need + 65536
       if ncap > 1073741824
         raise "learned-clause arena exceeded 8 GiB; instance too hard for the current search — bound it with --conflicts or use the portfolio"
-      bigger = i64[ncap]
-      i = 0
-      while i < @asize
-        bigger[i] = @arena[i]
-        i += 1
-      @arena = bigger
-      @acap = ncap
+      arena = @arena ## i64[]
+      while arena.size < ncap
+        arena.push(0)
+      @acap = arena.size
     0
 
   -> grow_clause_tables
     if @ncl + 1 >= @ccap
       ncap = @ccap * 2
       cm = i64[2 * ncap]
-      al = i64[ncap]
+      al = i8[ncap]
       lb = i64[ncap]
       cu = i64[ncap]
       has_gid = @gid.size > 1
@@ -896,6 +896,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       self.rebuild_watches
       @pstate[2] = -1
       @pstate[3] = 0
+      # Only lucky dives may abandon this now-consistent propagation queue.
+      # General CDCL and inprocessing callers still require a full fixpoint.
+      if @lucky_cancel_rebuild && wassat_stop_requested?(@stop_cell)
+        @wp_state[11] += 1
+        break
       wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase,
                        @wsdir, @wpool, @wp_state,
                        @trail, @pstate, @dlevel,
@@ -1125,6 +1130,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     0
 
   -> enable_lucky_once
+    @lucky_cancel_rebuild = false
     @lucky_pending = true
     0
 
@@ -1186,6 +1192,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # dive that got stuck (the trail is returned to a propagated root).
   -> lucky_dive(pol, backward)
     return 0 if wassat_stop_requested?(@stop_cell)
+    @lucky_cancel_rebuild = true
     # backjump(0) declares the whole remaining trail propagated (it sets
     # @qhead to the trail size), so it is NOT a safe way to reach a
     # propagated root: load_flat deliberately hands the solver its input
@@ -1195,6 +1202,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     self.backjump(0) if @dlevel > 0
     if self.propagate >= 0
       @formula_unsat = true
+      @lucky_cancel_rebuild = false
       return 0 - 1
     stuck = 0
     i = 0
@@ -1226,15 +1234,23 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # lucky_probe report a miss; the winning arm owns the real verdict.
     if wassat_stop_requested?(@stop_cell)
       self.backjump(0)
+      # Backjump skips an already-root queue. Replay retained root units if
+      # this private solver is later resumed after a cancelled repair.
+      @qhead = 0
+      @lucky_cancel_rebuild = false
       return 0
     if stuck == 2
       @formula_unsat = true
       self.backjump(0)
+      @lucky_cancel_rebuild = false
       return 0 - 1
     if stuck == 1
       self.backjump(0)
       z = self.propagate
+      @qhead = 0 if wassat_stop_requested?(@stop_cell)
+      @lucky_cancel_rebuild = false
       return 0
+    @lucky_cancel_rebuild = false
     1
 
   # Pop assigned entries lazily until the highest-activity unassigned
@@ -2727,41 +2743,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> reduce_db
     self.subsume_learned
-    # histogram LBD values to find a cut that removes about half
-    total = 0
-    i = 0
-    while i < 64
-      @rhist[i] = 0
-      i += 1
-    ci = 0
-    while ci < @ncl
-      if @alive[ci] == 1 && @clbd[ci] > 0
-        b = @clbd[ci]
-        b = 63 if b > 63
-        @rhist[b] += 1
-        total += 1
-      ci += 1
-    cut = 63
-    if total > 0
-      half = total / 2
-      acc = 0
-      b = 63
-      while b >= 2 && acc < half
-        acc += @rhist[b]
-        cut = b
-        b -= 1
-
-    # Keep binaries and anything below the cut; drop the rest — EXCEPT
-    # tier-2 clauses (LBD <= 6) resolved in analysis since the previous
-    # reduction: recency of use predicts future use better than glue alone
-    # (glucose-style tiering; the counting chains of cardinality instances
-    # live or die by this).
-    ci = 0
-    while ci < @ncl
-      if @alive[ci] == 1 && @clbd[ci] >= cut && @cmeta[2 * ci + 1] > 2 && @clbd[ci] > 2
-        keep2 = @clbd[ci] <= 6 && @cused[ci] >= @last_reduce_at
-        @alive[ci] = 0 unless keep2
-      ci += 1
+    wassat_reduce_select(@cmeta, @alive, @clbd, @cused, @rhist,
+                           @ncl, @last_reduce_at)
     @last_reduce_at = @conflicts
 
     # Proof-free mode reclaims the arena in place: live clauses slide
@@ -2770,75 +2753,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Only sound without proof logging — proof replay would still need the
     # dead literals; --fast is PROOF_NONE by contract.
     if @proof_mode == WASSAT_PROOF_NONE
-      wp = 0
-      ci = 0
-      while ci < @ncl
-        if @alive[ci] == 1
-          st = @cmeta[2 * ci]
-          n = @cmeta[2 * ci + 1]
-          # the header travels with the body; its packed (index, length)
-          # is position-independent, so a plain copy is correct
-          if st != wp + 1
-            @arena[wp] = @arena[st - 1]
-            k = 0
-            while k < n
-              @arena[wp + 1 + k] = @arena[st + k]
-              k += 1
-            @cmeta[2 * ci] = wp + 1
-          wp += n + 1
-        else
-          @cmeta[2 * ci + 1] = 0
-        ci += 1
-      @asize = wp
-
-      # Under FIXED capacities the clause INDEX space is recycled too.
-      # Without this it is monotonic — one slot burned per conflict, never
-      # returned — so a frozen arm retires after @ccap conflicts however much
-      # arena it has left (uuf250-01 retires at ~10k against the ~135k
-      # conflicts it needs). Renumbering is sound because an index is only a
-      # name: the per-clause tables are compacted in the same order
-      # (dest <= src), the arena header's packed (index, length) is rewritten
-      # in place, and the two structures that address clauses BY INDEX —
-      # @reason and the binary implication lists — are remapped and rebuilt.
-      # Watch entries carry arena OFFSETS and are repacked below anyway.
-      #
-      # @gid doubles as the old->new map: it holds certificate ids, which
-      # PROOF_NONE neither assigns meaning to nor reads, so inside this
-      # branch it is free scratch.
-      if @fixed_caps && @gid.size >= @ncl
-        nn = 0
-        ci = 0
-        while ci < @ncl
-          if @alive[ci] == 1
-            @gid[ci] = nn
-            nn += 1
-          else
-            @gid[ci] = -1
-          ci += 1
-        ci = 0
-        while ci < @ncl
-          nci = @gid[ci]
-          if nci >= 0
-            st = @cmeta[2 * ci]
-            n = @cmeta[2 * ci + 1]
-            @cmeta[2 * nci] = st
-            @cmeta[2 * nci + 1] = n
-            @alive[nci] = 1
-            @clbd[nci] = @clbd[ci]
-            @cused[nci] = @cused[ci]
-            wassat_hdr_put(@arena, st - 1, nci, n)
-          ci += 1
-        @ncl = nn
-        # A reason names its clause by index. A reason clause that did not
-        # survive becomes a root fact: only level-zero reasons can be live
-        # here (reduce_db always runs from a level-zero trail), and neither
-        # analysis nor minimisation ever dereferences one.
-        v = 1
-        while v <= @nvars
-          r = @reason[v]
-          @reason[v] = @gid[r] if r >= 0
-          v += 1
-        # binary-list entries pack the clause index, so they must be rebuilt
+      remap = @fixed_caps && @gid.size >= @ncl
+      wassat_reduce_compact(@cmeta, @alive, @arena, @clbd, @cused,
+                             @gid, @reason, @rhist, @ncl, @nvars, remap ? 1 : 0)
+      @asize = @rhist[64]
+      if remap
+        @ncl = @rhist[65]
         self.rebuild_binaries
 
     # rebuild watches from scratch over the survivors (tight repack)
@@ -3632,6 +3552,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # list, then installs the real formula policy here. Lucky is formula
     # shaped, so retaining the shell's cached value silently bypasses gates
     # such as the dense-ternary ntil policy.
+    @lucky_cancel_rebuild = false
     @lucky_pending = @config.use_lucky
     sncl = art["fncl"]
     raise "clause count exceeds signed 32-bit packed representation" if sncl > WASSAT_MAX_CLAUSE_INDEX + 1
@@ -3685,7 +3606,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     pm[9] = synth
     if !lean && art["raw"] == true && sncl >= 40000000 && art.has_key?("formula_ref") && sfcl.size > 0
       @cmeta = i64[2 * maxcl]
-      @alive = i64[maxcl]
+      @alive = i8[maxcl]
       wassat_load_flat_meta(art["fcs"], sfcl, @cmeta, @alive, units, pm)
       old_fcs = art["fcs"]
       old_fcl = art["fcl"]
@@ -3725,7 +3646,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @arena = i64[cap]
       @acap = cap
       @cmeta = i64[2 * maxcl]
-      @alive = i64[maxcl]
+      @alive = i8[maxcl]
       @clbd = i64[maxcl]
       @cused = i64[maxcl]
       @gid = (@proof_mode == WASSAT_PROOF_NONE && sncl >= 5000000) ? i64[1] : i64[maxcl]
@@ -3868,9 +3789,16 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> congruence_rounds
     self.extract_binaries
     rounds = @config.congruence_max_rounds
+    and_scratch = nil
+    xor_scratch = nil
+    scc_scratch = nil
+    if rounds > 1
+      and_scratch = [nil, nil, nil, nil, nil]
+      xor_scratch = [nil, nil, nil, nil, nil, nil, nil, nil]
+      scc_scratch = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
     r = 0
     while r < rounds
-      m = self.extract_and_gates + self.extract_xor_gates
+      m = self.extract_and_gates(and_scratch) + self.extract_xor_gates(xor_scratch)
       break if m == 0
       # The LAST round's substitution is the caller's, not ours. That is
       # what makes congruence_max_rounds 1 bit-identical to the single pass
@@ -3878,7 +3806,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       # rather than one pass plus a redundant SCC sweep.
       break if r + 1 >= rounds
       before = @nsubst
-      self.substitute_equivalences
+      self.substitute_equivalences(scc_scratch)
       break unless @ok
       # A round whose merges the SCC pass declined to substitute cannot
       # change what the next extraction hashes, so it is the fixpoint.
@@ -3898,7 +3826,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # individually and doubles its hash table at 50% load, so it has no cap at
   # all; doubling a flat arena is the same policy with one allocation.
   # Geometric, so the retries cost at most one extra pass in total.
-  -> extract_xor_gates
+  -> extract_xor_gates(scratch = nil)
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
     prof_start = wassat_prof_clock
     ceil = @config.congruence_gate_ceiling
@@ -3918,14 +3846,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       ghcap = 1024
       while ghcap < 4 * maxg
         ghcap = ghcap * 2
-      lcount = i64[nl]
-      cht = i64[chcap]
-      mark = i64[nl]
-      qli = i64[8]
-      gar = i64[gcap]
-      ght = i64[ghcap]
-      out = i64[2 * maxg]
-      st = i64[8]
+      lcount = wassat_congruence_buffer(scratch, 0, nl)
+      cht = wassat_congruence_buffer(scratch, 1, chcap)
+      mark = wassat_congruence_buffer(scratch, 2, nl)
+      qli = wassat_congruence_buffer(scratch, 3, 8)
+      gar = wassat_congruence_buffer(scratch, 4, gcap)
+      ght = wassat_congruence_buffer(scratch, 5, ghcap)
+      out = wassat_congruence_buffer(scratch, 6, 2 * maxg)
+      st = wassat_congruence_buffer(scratch, 7, 8)
       wassat_extract_xor_gates(@cmeta, @alive, @arena, @lassign, lcount, cht,
                                mark, qli, gar, ght, out, st, @ncl, nl,
                                chcap - 1, gcap, ghcap - 1, maxg)
@@ -3947,7 +3875,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # Same growth policy as the XOR pass above: size from the formula, and
   # double whenever the scan reports it ran out of arena, hash table or
   # merge slots.
-  -> extract_and_gates
+  -> extract_and_gates(scratch = nil)
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
     prof_start = wassat_prof_clock
     ceil = @config.congruence_gate_ceiling
@@ -3963,11 +3891,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       hcap = 1024
       while hcap < 4 * maxg
         hcap = hcap * 2
-      mark = i64[2 * @nvars + 4]
-      gar = i64[gcap]
-      ght = i64[hcap]
-      out = i64[2 * maxg]
-      st = i64[8]
+      mark = wassat_congruence_buffer(scratch, 0, 2 * @nvars + 4)
+      gar = wassat_congruence_buffer(scratch, 1, gcap)
+      ght = wassat_congruence_buffer(scratch, 2, hcap)
+      out = wassat_congruence_buffer(scratch, 3, 2 * maxg)
+      st = wassat_congruence_buffer(scratch, 4, 8)
       wassat_extract_and_gates(@cmeta, @alive, @arena, @lassign, @bldir,
                                @bl_pool, mark, gar, ght, out, st, @ncl,
                                gcap, hcap - 1, maxg)
@@ -4044,7 +3972,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # so every clause a later conflict resolves is over representatives only;
   # the mapping is replayed onto the assignment once, when a model is
   # extracted (see unsubstitute).
-  -> substitute_equivalences
+  -> substitute_equivalences(scratch = nil)
     return 0 if !@allow_subst || wassat_stop_requested?(@stop_cell)
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
     nl = 2 * @nvars + 4
@@ -4055,13 +3983,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     pre = mid && @inp_s_idx != nil && @inp_ht != nil && @sub_next != nil && @sub_next.size >= @ncl + 2
     return 0 if mid && !pre && @fixed_caps
     prof_start = wassat_prof_clock
-    idx = pre ? @inp_s_idx : i64[nl]
-    low = pre ? @inp_s_low : i64[nl]
-    onstk = pre ? @inp_s_onstk : i64[nl]
-    reprs = pre ? @inp_s_reprs : i64[nl]
-    stk = pre ? @inp_s_stk : i64[nl]
-    work = pre ? @inp_s_work : i64[nl]
-    wcur = pre ? @inp_s_wcur : i64[nl]
+    idx = pre ? @inp_s_idx : wassat_congruence_buffer(scratch, 0, nl)
+    low = pre ? @inp_s_low : wassat_congruence_buffer(scratch, 1, nl)
+    onstk = pre ? @inp_s_onstk : wassat_congruence_buffer(scratch, 2, nl)
+    reprs = pre ? @inp_s_reprs : wassat_congruence_buffer(scratch, 3, nl)
+    stk = pre ? @inp_s_stk : wassat_congruence_buffer(scratch, 4, nl)
+    work = pre ? @inp_s_work : wassat_congruence_buffer(scratch, 5, nl)
+    wcur = pre ? @inp_s_wcur : wassat_congruence_buffer(scratch, 6, nl)
     if pre
       wassat_zero_i64(idx, nl)
       wassat_zero_i64(low, nl)
@@ -4082,9 +4010,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     hcap = 1024
     while hcap < 2 * (@ncl + 16)
       hcap = hcap * 2
-    ht = pre ? @inp_ht : i64[hcap]
-    mark = pre ? @inp_s_mark : i64[nl]
-    units = pre ? @sub_next : i64[@ncl + 2]
+    ht = pre ? @inp_ht : wassat_congruence_buffer(scratch, 7, hcap)
+    mark = pre ? @inp_s_mark : wassat_congruence_buffer(scratch, 8, nl)
+    units = pre ? @sub_next : wassat_congruence_buffer(scratch, 9, scratch == nil ? @ncl + 2 : @ccap + 2)
     # The prepared table is capped, so bound its linear probe: a missed
     # duplicate costs a redundant clause, an unbounded probe a full scan.
     plim = pre ? 32 : hcap
@@ -4267,13 +4195,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     phase_bytes += @nvars + 1 if @vivify_phase != nil
     phase_bytes += @nvars + 1 if @inp_phase != nil
     wassat_prof_note("[label].phases snapshots=[@pstate[6]] copied_literals=[@pstate[7]] skipped_literals=[@pstate[8]] payload_bytes=[phase_bytes]")
+    wassat_prof_note("[label].backjump unassigned=[@bstate[3]]")
     wassat_prof_note("[label].spine snapshots=[@pstate[9]] scanned_levels=[@pstate[10]] skipped_levels=[@pstate[11]]")
     wassat_prof_note("[label].watches rebuilds=[@wp_state[3]] rebuilt_entries=[@wp_state[4]] relocations=[@wp_state[5]] copied_entries=[@wp_state[6]] overflows=[@wp_state[7]] pool_used=[@wp_state[0]] pool_capacity=[@wp_state[1]]")
-    wassat_prof_note("[label].watch_recycle blocks=[@wp_state[8]] copied=[@wp_state[9]] reclaimed=[@wp_state[10]]")
+    wassat_prof_note("[label].watch_recycle blocks=[@wp_state[8]] copied=[@wp_state[9]] reclaimed=[@wp_state[10]] cancelled_repairs=[@wp_state[11]]")
     wassat_prof_note("[label].sharing exports=[@share_exports] imports=[@share_imports] dropped=[@share_dropped] filtered=[@share_filtered]")
     wassat_prof_note("[label].inprocess_work cancelled=[@inp_totals[0]] units=[@inp_totals[1]] subsume_work=[@inp_totals[2]] scc_work=[@inp_totals[3]] cleaned_literals=[@inp_totals[4]]")
     wassat_prof_note("[label].subst_hash clauses=[@inp_totals[5]] probes=[@inp_totals[6]] compared_literals=[@inp_totals[7]]")
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
+    wassat_prof_note("[label].reduction clause_visits=[@rhist[66]] copied_words=[@rhist[67]] remapped_clauses=[@rhist[68]] remapped_reasons=[@rhist[69]]")
     wassat_prof_note("[label].analysis mark_bytes=[@nvars + 1] reason_bytes=[4 * (@nvars + 1)] shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
     0
 
@@ -4619,7 +4549,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # (count, fill) with +1 slack per literal, mirroring wassat_ws_rebuild.
 # Always fits: 2*binaries + nlits is far below the pool's 2*ccap sizing.
 # Never allocates.
--> wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i8[] i64[] i64[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
     bd[(li << 2) + 1] = 0
@@ -4680,6 +4610,19 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     ci += 1
   0
 
+# Invocation-local scratch for repeated gate extraction and SCC rewrites.
+# The retained capacity is reset, matching fresh zero-filled arrays. The
+# single-round path retains its exact-size allocation behavior.
+-> wassat_congruence_buffer(scratch, slot, size)
+  return i64[size] if scratch == nil
+  a = scratch[slot]
+  if a == nil || a.size < size
+    a = i64[size]
+    scratch[slot] = a
+  else
+    wassat_zero_i64(a, a.size)
+  a
+
 # ---- congruence closure ---------------------------------------------------
 
 # Ternary strengthening — kissat's extract_binaries. If one literal of a
@@ -4699,7 +4642,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # ternaries is stored once.
 #
 #   out[2i], out[2i+1] = the pair's signed literals   st[0] = pairs
--> wassat_extract_binaries(cm, alive, ar, lasg, bd, blp, mark, ht, out, st, ncl, outcap, hmask) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
+-> wassat_extract_binaries(cm, alive, ar, lasg, bd, blp, mark, ht, out, st, ncl, outcap, hmask) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
   gen = 0
   n = 0
   ci = 0
@@ -4824,7 +4767,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #
 #   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
 #   st[2] = 1 when a capacity stopped the scan short of the whole formula
--> wassat_extract_and_gates(cm, alive, ar, lasg, bd, blp, mark, gar, ght, out, st, ncl, gcap, hmask, outcap) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64)
+-> wassat_extract_and_gates(cm, alive, ar, lasg, bd, blp, mark, gar, ght, out, st, ncl, gcap, hmask, outcap) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64)
   gen = 0
   gtop = 0
   nm = 0
@@ -4975,7 +4918,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #
 #   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
 #   st[2] = 1 when a capacity stopped the scan short of the whole formula
--> wassat_extract_xor_gates(cm, alive, ar, lasg, lcount, cht, mark, qli, gar, ght, out, st, ncl, nlits, chmask, gcap, ghmask, outcap) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64)
+-> wassat_extract_xor_gates(cm, alive, ar, lasg, lcount, cht, mark, qli, gar, ght, out, st, ncl, nlits, chmask, gcap, ghmask, outcap) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64)
   li = 0
   while li < nlits
     lcount[li] = 0
@@ -5359,7 +5302,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[4] = clauses hashed                  st[5] = occupied slots probed
 #   st[6] = candidate literals compared      st[7] = maximum probe advance
 # `plim` bounds the duplicate table's linear probe (hmask + 1 = unbounded).
--> wassat_subst_rewrite(cm, alive, ar, clbd, reprs, mark, ht, units, st, ncl, hmask, plim) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
+-> wassat_subst_rewrite(cm, alive, ar, clbd, reprs, mark, ht, units, st, ncl, hmask, plim) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
   gen = 0
   nu = 0
   rewritten = 0
@@ -5512,7 +5455,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #           [11] min target length (below 2 reads as 2)
 #   pm out: [4] subsumed  [5] strengthened  [6] visits used  [9] next cursor
 #           [10] clauses promoted to irredundant
--> wassat_learned_subsume(cm, alive, ar, clbd, sig, ohead, onext, stamp, pm, stop_cell) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_learned_subsume(cm, alive, ar, clbd, sig, ohead, onext, stamp, pm, stop_cell) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   ncl = pm[0]
   nv = pm[1]
   maxlen = pm[2]
@@ -5775,7 +5718,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[0] = 1 when a clause became empty   st[1] = units reported
 #   st[2] = clauses killed                 st[3] = units overflowed
 #   st[4] = clauses shortened              st[5] = literals removed
--> wassat_clean_root(cm, alive, ar, lasg, units, st, ncl, ucap) (i64[] i64[] i64[] i8[] i64[] i64[] i64 i64)
+-> wassat_clean_root(cm, alive, ar, lasg, units, st, ncl, ucap) (i64[] i8[] i64[] i8[] i64[] i64[] i64 i64)
   nu = 0
   killed = 0
   shrunk = 0
@@ -5837,6 +5780,131 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   st[2] = killed
   st[4] = shrunk
   st[5] = removed
+  0
+
+# Select the same LBD cut and survivors using the retained histogram scratch.
+-> wassat_reduce_select(cm, alive, lbd, used, hist, ncl, last) (i64[] i8[] i64[] i64[] i64[] i64 i64) i64
+  # histogram LBD values to find a cut that removes about half
+  total = 0
+  i = 0
+  while i < 64
+    hist[i] = 0
+    i += 1
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && lbd[ci] > 0
+      b = lbd[ci]
+      b = 63 if b > 63
+      hist[b] += 1
+      total += 1
+    ci += 1
+  cut = 63
+  if total > 0
+    half = total / 2
+    acc = 0
+    b = 63
+    while b >= 2 && acc < half
+      acc += hist[b]
+      cut = b
+      b -= 1
+
+  # Keep binaries and anything below the cut; drop the rest — EXCEPT
+  # tier-2 clauses (LBD <= 6) resolved in analysis since the previous
+  # reduction: recency of use predicts future use better than glue alone
+  # (glucose-style tiering; the counting chains of cardinality instances
+  # live or die by this).
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && lbd[ci] >= cut && cm[2 * ci + 1] > 2 && lbd[ci] > 2
+      keep2 = lbd[ci] <= 6 && used[ci] >= last
+      alive[ci] = 0 unless keep2
+    ci += 1
+  hist[66] += 2 * ncl
+  0
+
+# Proof-free, root-level compaction. The caller repacks watches and, when
+# remap is enabled, binary indices after this indivisible mutation finishes.
+# state reuses the histogram slab: outputs 64/65, cumulative work 66..69.
+-> wassat_reduce_compact(cm, alive, ar, lbd, used, gid, rsn, state, ncl, nv, remap) (i64[] i8[] i64[] i64[] i64[] i64[] i32[] i64[] i64 i64 i64) i64
+  copied = 0
+  mapped = 0
+  wp = 0
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1
+      st = cm[2 * ci]
+      n = cm[2 * ci + 1]
+      # the header travels with the body; its packed (index, length)
+      # is position-independent, so a plain copy is correct
+      if st != wp + 1
+        copied += n + 1
+        ar[wp] = ar[st - 1]
+        k = 0
+        while k < n
+          ar[wp + 1 + k] = ar[st + k]
+          k += 1
+        cm[2 * ci] = wp + 1
+      wp += n + 1
+    else
+      cm[2 * ci + 1] = 0
+    ci += 1
+  state[64] = wp
+  state[65] = ncl
+  state[66] += ncl
+  state[67] += copied
+
+  # Under FIXED capacities the clause INDEX space is recycled too.
+  # Without this it is monotonic — one slot burned per conflict, never
+  # returned — so a frozen arm retires after @ccap conflicts however much
+  # arena it has left (uuf250-01 retires at ~10k against the ~135k
+  # conflicts it needs). Renumbering is sound because an index is only a
+  # name: the per-clause tables are compacted in the same order
+  # (dest <= src), the arena header's packed (index, length) is rewritten
+  # in place, and the two structures that address clauses BY INDEX —
+  # rsn and the binary implication lists — are remapped and rebuilt.
+  # Watch entries carry arena OFFSETS and are repacked below anyway.
+  #
+  # gid doubles as the old->new map: it holds certificate ids, which
+  # PROOF_NONE neither assigns meaning to nor reads, so inside this
+  # branch it is free scratch.
+  if remap == 1
+    nn = 0
+    ci = 0
+    while ci < ncl
+      if alive[ci] == 1
+        gid[ci] = nn
+        nn += 1
+      else
+        gid[ci] = -1
+      ci += 1
+    ci = 0
+    while ci < ncl
+      nci = gid[ci]
+      if nci >= 0
+        st = cm[2 * ci]
+        n = cm[2 * ci + 1]
+        cm[2 * nci] = st
+        cm[2 * nci + 1] = n
+        alive[nci] = 1
+        lbd[nci] = lbd[ci]
+        used[nci] = used[ci]
+        wassat_hdr_put(ar, st - 1, nci, n)
+      ci += 1
+    state[65] = nn
+    state[66] += 2 * ncl
+    state[68] += nn
+    # A reason names its clause by index. A reason clause that did not
+    # survive becomes a root fact: only level-zero reasons can be live
+    # here (reduce_db always runs from a level-zero trail), and neither
+    # analysis nor minimisation ever dereferences one.
+    v = 1
+    while v <= nv
+      r = rsn[v]
+      if r >= 0
+        rsn[v] = gid[r]
+        mapped += 1
+      v += 1
+  state[69] += mapped
   0
 
 -> wassat_zero_i64(a, n) (i64[] i64)
@@ -5956,7 +6024,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           while k < n
             lk = ar[stx + k]
             sk = lk >> 63
-            vk = (asg[(lk ^ sk) - sk] ^ sk) - sk
+            # Reuse the per-literal truth bytes maintained for watched literals.
+            kli = (((lk ^ sk) - sk) << 1) + (sk & 1)
+            vk = lasg[kli]
             break if vk >= 0
             k += 1
           if k < n
@@ -6013,7 +6083,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               if st[5] == 1
                 mxl = 0
                 k = 1
-                while k < n
+                # Assigned antecedents cannot exceed the current decision
+                # level, so reaching it completes the reason maximum.
+                while k < n && mxl < dl
                   lk = ar[stx + k]
                   vk2 = lk
                   if lk < 0
@@ -6110,7 +6182,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # (count, fill), with one spare entry per literal and bounded proportional
 # headroom for dense databases. Capacity comes from the existing pool while
 # leaving free space for later block relocations. Never allocates.
--> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i8[] i64[] i64[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
     wd[(li << 2) + 1] = 0
@@ -6139,25 +6211,31 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # the entire database. Keep the other half free for those relocations,
   # and cap headroom at 25% of live entries to retain locality.
   entries = 0
+  dense_entries = 0
   li = 0
   while li < nlits
-    entries += wd[(li << 2) + 1]
+    count = wd[(li << 2) + 1]
+    entries += count
+    dense_entries += count if count >= 64
     li += 1
   wst[3] = wst[3] + 1
   wst[4] = wst[4] + entries
+  # Preserve the compact sparse layout until repeated overflows demonstrate
+  # thrashing. Reserving space on the first build can instead cause an extra
+  # repack by crowding out relocations of the many short lists.
+  sparse = entries < 64 * nlits
+  reserve_entries = sparse ? dense_entries : entries
+  reserve_entries = 0 if sparse && wst[7] < 3
   slack = (wst[1] - entries - nlits) / 2
   slack = 0 if slack < 0
-  slack = entries / 4 if slack > entries / 4
-  # Sparse databases benefit from the compact layout. Reserve extra space
-  # only once the average literal has at least 64 long-clause watches.
-  slack = 0 if entries < 64 * nlits
+  slack = reserve_entries / 4 if slack > reserve_entries / 4
   top = 0
   li = 0
   while li < nlits
     d = li << 2 ## i64
     count = wd[d + 1]
     capacity = count + 1
-    capacity += slack * count / entries if entries > 0
+    capacity += slack * count / reserve_entries if reserve_entries > 0 && (!sparse || count >= 64)
     wd[d] = top
     wd[d + 3] = top
     wd[d + 2] = capacity
@@ -6851,7 +6929,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     i += 1
   count
 
--> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcm, dal, dlbd, dgid, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcm, dal, dlbd, dgid, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[])
   sncl = pm[0]
   acap = pm[1]
   ccap = pm[2]
@@ -6902,7 +6980,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   pm[5] = nunits
   pm[6] = saw_empty
 
--> wassat_load_flat_meta(sfcs, sfcl, dcm, dal, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_load_flat_meta(sfcs, sfcl, dcm, dal, units, pm) (i64[] i64[] i64[] i8[] i64[] i64[])
   sncl = pm[0]
   acap = pm[1]
   ccap = pm[2]
@@ -7181,6 +7259,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # are kept — re-appended in original order and re-propagated by the caller
 # (st[2] returns the qhead rewind point).
 #   st[0] = dlevel in/out   st[1] = tsize in/out   st[2] = qhead out
+#   st[3] = cumulative unassigned variables (one update per call)
 -> wassat_backjump(tr, tlim, asg, lasg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i64[] i64[] i8[] i8[] i64[] i32[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
   dl = st[0]
   ts = st[1]
@@ -7209,6 +7288,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     tr[ts] = kbuf[i]
     ts += 1
     i -= 1
+  st[3] = st[3] + st[1] - ts
   st[0] = dl
   st[1] = ts
   st[2] = ts - kept
@@ -7562,6 +7642,40 @@ WASSAT_VALUE_LINE_MAX = 4096
           repl = slits[o + found]
           slits[o + found] = neg
           slits[o + slot] = repl
+          # Amortize lookahead over at least six already-scanned false tail
+          # literals. Prepare the second watch without per-clause cursors.
+          if found >= 8 && ov < 0
+            rav = repl < 0 ? 0 - repl : repl
+            if sign[rav] == 0
+              second = 0 - 1
+              j = found + 1
+              while j < n
+                lj = slits[o + j]
+                jav = lj < 0 ? 0 - lj : lj
+                jsv = sign[jav]
+                jv = lj > 0 ? jsv : 0 - jsv
+                if jv >= 0
+                  second = j
+                  break
+                j += 1
+              # Four state slots remain sufficient for library callers.
+              # The CLI provides four extra slots for cumulative work counts.
+              if st.size >= 8
+                st[4] += 1
+                st[5] += second < 0 ? n - found - 1 : second - found
+                st[6] += second < 0 ? 1 : 0
+                st[7] += found - 2
+              # The prefix was false. With no second live literal, repl
+              # is unit; otherwise put that second literal first in the tail
+              # for the pending other-watch event. Only permute clause data.
+              if second < 0
+                sign[rav] = repl > 0 ? 1 : -1
+                trail[tsize] = repl
+                tsize += 1
+              else
+                saved = slits[o + 2]
+                slits[o + 2] = slits[o + second]
+                slits[o + second] = saved
           if prev_w < 0
             whead[li] = next_w
           else
@@ -7595,10 +7709,12 @@ WASSAT_VALUE_LINE_MAX = 4096
     whead[li] = 0 - 1
     li += 1
   tsize = 0
+  skipped = 0
   c = 0
   while c < ncl
     n = slens[c]
     if n == 0
+      st[3] = skipped
       return 0 - 1
     elsif n == 1
       l = slits[soffs[c]]
@@ -7609,7 +7725,13 @@ WASSAT_VALUE_LINE_MAX = 4096
         sign[av] = want
         trail[tsize] = l
         tsize += 1
+        # During construction, -2 marks a literal fixed true by a root unit.
+        # Its watch bucket is never processed: the assignment is permanent.
+        root_li = av << 1
+        root_li += 1 if l < 0
+        whead[root_li] = -2
       elsif sv != want
+        st[3] = skipped
         return 0 - 1
     else
       o = soffs[c]
@@ -7625,6 +7747,12 @@ WASSAT_VALUE_LINE_MAX = 4096
         li1 = l1 << 1
       else
         li1 = ((0 - l1) << 1) + 1
+      # Reuse head loads instead of looking up both assignment signs again.
+      # All negative link values remain valid end markers for propagation.
+      if whead[li0] == -2 || whead[li1] == -2
+        skipped += 1
+        c += 1
+        next
       w0 = c << 1
       w1 = w0 + 1
       wnext[w0] = whead[li0]
@@ -7632,6 +7760,7 @@ WASSAT_VALUE_LINE_MAX = 4096
       wnext[w1] = whead[li1]
       whead[li1] = w1
     c += 1
+  st[3] = skipped
   st[0] = 0
   st[1] = tsize
   rc = wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st)
@@ -8107,7 +8236,8 @@ WASSAT_VALUE_LINE_MAX = 4096
   st[2] = st[1]
   1
 
--> wassat_flat_lucky_model(formula)
+# Shared implementation for the candidate and verified entry points below.
+-> wassat_flat_lucky_compute(formula, verify_model)
   return [] unless formula.has_key?("flat_ncl")
   ncl = formula["flat_ncl"]
   nv = formula["nvars"]
@@ -8129,7 +8259,11 @@ WASSAT_VALUE_LINE_MAX = 4096
   whead = i32[2 * nv + 4]
   wnext = i32[2 * ncl]
   st = i64[8]
+  init_started = wassat_prof_clock()
   rc = wassat_flat_lucky_init(slits, soffs, slens, whead, wnext, sign, trail, st, ncl, nv)
+  if env("WASSAT_PROFILE") == "1"
+    z = wassat_prof("flat_lucky.init", init_started)
+    z = wassat_prof_note("flat_lucky.init clauses=[ncl] skipped_root_clauses=[st[3]] root_assignments=[st[2]] status=[rc]")
   r = 0
   if rc == 0
     seeded = 0
@@ -8144,18 +8278,21 @@ WASSAT_VALUE_LINE_MAX = 4096
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 1, 0) if r == 0 && seeded == 0
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 0 - 1, 1) if r == 0 && seeded == 0
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 1, 1) if r == 0 && seeded == 0
+  if env("WASSAT_PROFILE") == "1"
+    z = wassat_prof_note("flat_lucky.lookahead attempts=[st[4]] tail_reads=[st[5]] units=[st[6]] false_prefix_literals=[st[7]]")
   z = ccall("w_value_free_w", wnext)
   z = ccall("w_value_free_w", whead)
   z = ccall("w_value_free_w", trail)
   if r != 1
     z = ccall("w_value_free_w", sign)
     return []
-  pm = i64[2]
-  pm[1] = ncl
-  wassat_verify_flat_i8(slits, soffs, slens, sign, pm)
-  if pm[0] != 1
-    z = ccall("w_value_free_w", sign)
-    return []
+  if verify_model
+    pm = i64[2]
+    pm[1] = ncl
+    wassat_verify_flat_i8(slits, soffs, slens, sign, pm)
+    if pm[0] != 1
+      z = ccall("w_value_free_w", sign)
+      return []
   model = i64[nv]
   v = 1
   while v <= nv
@@ -8163,6 +8300,16 @@ WASSAT_VALUE_LINE_MAX = 4096
     v += 1
   z = ccall("w_value_free_w", sign)
   model
+
+# The CLI uses this candidate entry point and retains its final original-CNF
+# output guard. It must never publish the candidate without that check.
+-> wassat_flat_lucky_candidate(formula)
+  wassat_flat_lucky_compute(formula, false)
+
+# Preserve the library contract, including verification using the existing
+# sign buffer rather than allocating and filling a second assignment array.
+-> wassat_flat_lucky_model(formula)
+  wassat_flat_lucky_compute(formula, true)
 
 # Output-integrity guard: does the model satisfy every clause of the formula?
 # Every SAT answer must pass this scan against the ORIGINAL formula before it

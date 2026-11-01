@@ -47,6 +47,7 @@ use latin_csp
 use ternary_affine
 use ais
 use coloring
+use mycielski
 use covering
 use directed_kernel
 use edge_matching
@@ -55,6 +56,7 @@ use stedman
 use hantzsche_wendt
 use gray_track
 use matching_balance
+use matching_parity
 use partition_circuit
 use pair_affine
 use adder_conservation
@@ -330,14 +332,23 @@ use portfolio
   formula = wassat_parse_cnf_native(cnf_text)
   z = ccall("w_value_free_w", cnf_text)
   cnf_text = ""
+  tprof = wassat_prof("cli.parse", tprof)
+  parity_source = nil
+  if proof_mode == WASSAT_PROOF_NONE
+    parity_source = wassat_matching_parity_source(formula)
   if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PAIR_GADGET") != "0"
     wassat_apply_pair_gadget_quotient(formula)
   # Cache the one full clause-shape pass immediately. Exact structural lanes
   # use it for constant-time admission gates, and ordinary routing reuses the
   # same object below instead of rescanning every unrelated formula.
+  config_started = wassat_prof_clock()
   config = WassatConfig.from_lens(
     formula["nvars"], formula["flat_lens"], formula["flat_ncl"]
   )
+  if config_started != 0
+    z = wassat_prof("config.shape", config_started)
+    z = wassat_prof_note("config.shape scanned_clauses=[formula["flat_ncl"]]")
+  tprof = wassat_prof("cli.input_setup", tprof)
   wrat_out = wassat_reserve_output(wrat_final, input, "WRAT")
   drat_out = nil
   begin
@@ -743,11 +754,16 @@ use portfolio
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(20)
   if formula["flat_ncl"] >= 1500000 && env("WASSAT_LUCKY") != "0"
-    flat_lucky = wassat_flat_lucky_model(formula)
+    # The shared output guard below verifies this candidate exactly once.
+    flat_lucky = wassat_flat_lucky_candidate(formula)
     tprof = wassat_prof("cli.flat_lucky", tprof)
+    lucky_ok = false
     if flat_lucky.size > 0
-      unless wassat_model_satisfies?(formula, flat_lucky)
-        raise "internal error: flat-lucky model does not satisfy the input formula"
+      lucky_ok = wassat_model_satisfies?(formula, flat_lucky)
+      tprof = wassat_prof("cli.flat_lucky_verify", tprof)
+      # A rejected candidate falls through just as the verified helper did.
+      z = ccall("w_value_free_w", flat_lucky) unless lucky_ok
+    if lucky_ok
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
       wassat_print_sat_model(flat_lucky, quiet)
@@ -835,6 +851,12 @@ use portfolio
       << "c mode: fast (verified multiplier circuit factorization refutation)"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
+  # A cheap checked graph obstruction precedes broader CSP recognition.
+  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COLORING") != "0" && wassat_mycielski_unsat?(formula)
+    << "s UNSATISFIABLE"
+    << "c mode: fast (checked Mycielski coloring obstruction)"
+    << "c conflicts: [budget_used], decisions: 0, props: 0"
+    exit(20)
   # Bounded synchronizing-automaton encodings expose both transition maps in
   # their clause incidence.  Recover a Černý word directly, expand it to every
   # image/selector variable, and accept only a full original-CNF model.
@@ -981,7 +1003,7 @@ use portfolio
       << "c directed components=[directed["components"]], checked=[directed["checked"]], unique=[directed["unique"]], multi=[directed["multi"]], nodes=[directed["nodes"]], forced=[directed["forced"]]"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(directed["status"] == 1 ? 10 : 20)
-  tprof = wassat_prof("cli.parse", tprof)
+  tprof = wassat_prof("cli.structural_tail", tprof)
 
   # Preprocess once, above solver construction. The artifact carries the
   # reduced clauses with their global proof ids, the elimination stack for
@@ -1034,6 +1056,7 @@ use portfolio
         if options["conflicts"] > 0
           remaining = options["conflicts"] - budget_used
           probe_cap = remaining if remaining < probe_cap
+        wassat_prof_note("scout policy cap=[probe_cap] raw=[raw_probe] wall_ms=[probe_wall]") if tprof != 0
         # SCOUT RACE. One or two arms over the same artifact, each on its own
         # solver, concurrently: kissat's lucky phases (the four decision-free
         # dives of lucky.c, its `luckyearly` shot) when formula policy enables
@@ -1080,6 +1103,25 @@ use portfolio
         scout_path_out = nil
         scout_path_out = i64[12] if scout_path_enabled
         scout_out = []
+        # Wide resolution chains may stall the initial scout. Offer the same
+        # bounded native arm here, with no grace wait after a scout miss.
+        # The established width-four route remains in the post-scout race.
+        cover_workers = 2 + (scout_lucky ? 1 : 0) + (scout_path_enabled ? 1 : 0)
+        cover_workers += 1 if wassat_sls_arm_memory_allowed?(formula)
+        scout_cover_plan = wassat_resolution_cover_plan(formula, cover_workers, true)
+        scout_cover_res = nil
+        scout_cover_h = nil
+        if scout_cover_plan != nil
+          scout_cover_res = i64[scout_nv + 8]
+          scout_cover_h = wassat_cover_start(formula, scout_cover_plan, scout_stop, scout_cover_res, 0)
+        # Checked matching parity runs beside the scout, using original flat
+        # clauses and private scratch. A miss has no grace period: cancellation
+        # below ends it with the scout. Proof modes never enter this branch.
+        parity_workers = cover_workers + (scout_cover_plan == nil ? 0 : 1)
+        scout_parity = wassat_matching_parity_plan(parity_source, parity_workers)
+        scout_parity_h = nil
+        if scout_parity != nil
+          scout_parity_h = wassat_matching_parity_start(parity_source, scout_parity, scout_stop)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1167,6 +1209,15 @@ use portfolio
         z = scout_sls_h.join if scout_sls_h != nil
         z = scout_xor_h.join if scout_circuit == nil
         z = scout_path_h.join if scout_path_h != nil
+        if scout_cover_h != nil
+          z = scout_cover_h.join
+          if env("WASSAT_PROFILE") == "1"
+            cover_tail = scout_cover_res[0] != 0 ? clock_ms() - scout_cover_res[scout_nv + 5] : 0
+            wassat_cover_profile("scout.cover", scout_cover_plan, scout_cover_res[0])
+            wassat_prof_note("scout.cover answer_to_join_ms=[cover_tail]")
+        if scout_parity_h != nil
+          z = scout_parity_h.join
+          wassat_matching_parity_profile(scout_parity) if env("WASSAT_PROFILE") == "1"
         if scout_path_enabled && env("WASSAT_PROFILE") == "1"
           path_tail = scout_path_out[9] > 0 ? ccall("__w_clock_ms") - scout_path_out[9] : 0
           wassat_prof_note("path_cover width=[scout_path_out[1]] work=[scout_path_out[2]] removed=[scout_path_out[3]] empty_axis=[scout_path_out[4]] empty_index=[scout_path_out[5]] stopped=[scout_path_out[6]] recognized=[scout_path_out[7]] stop_tail_ms=[path_tail]")
@@ -1177,6 +1228,37 @@ use portfolio
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_parity != nil && scout_parity[0] == -1
+          parity_scout = scout_out[0]
+          budget_used += parity_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          << "s UNSATISFIABLE"
+          << "c mode: fast (clause-checked matching parity scout)"
+          << "c matching rows=[scout_parity[7]] amo_pairs=[scout_parity[8]] units=[scout_parity[1]]"
+          << "c conflicts: [budget_used], decisions: [parity_scout["decisions"]], props: [parity_scout["props"]]"
+          << "c stats restarts=[parity_scout["restarts"]] reduces=[parity_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(20)
+        if scout_cover_res != nil && scout_cover_res[0] != 0
+          cover_scout = scout_out[0]
+          budget_used += cover_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          cover_status = scout_cover_res[0]
+          if cover_status == 1
+            cmodel = []
+            v = 1
+            while v <= scout_nv
+              cmodel.push(scout_cover_res[v] == 1 ? v : -v)
+              v += 1
+            cmodel = wassat_project_quad_model(cmodel, quad_shift, orig_nvars) if quad_shift > 0
+            unless wassat_model_satisfies?(orig_formula, cmodel)
+              raise "internal error: resolution-cover model does not satisfy the input formula"
+            wassat_print_sat_model(cmodel, false)
+          else
+            << "s UNSATISFIABLE"
+          << "c mode: fast (checked resolution-cover scout)"
+          << "c conflicts: [budget_used], decisions: [cover_scout["decisions"]], props: [cover_scout["props"]]"
+          << "c stats restarts=[cover_scout["restarts"]] reduces=[cover_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(cover_status == 1 ? 10 : 20)
         if scout_path_enabled && scout_path_out[0] == -1
           path_scout = scout_out[0]
           budget_used += path_scout["conflicts"] if scout_budget == nil
@@ -1332,13 +1414,23 @@ use portfolio
         )
           sls_flips = 0
         race = nil
-        if arms > 1 || pre_arms > 0 || sls_flips > 0
+        cover_workers = arms + pre_arms + (sls_flips > 0 ? 1 : 0)
+        cover_workers += 1 if config.continue_scout? && scout_solver != nil
+        cover_plan = wassat_resolution_cover_plan(formula, cover_workers)
+        if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil
           continuation = config.continue_scout? ? scout_solver : nil
+          matrix_arms = arms
+          if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan != nil
+            # Preserve the lone solver's trajectory and memory footprint.
+            # The added cover worker races the already-built scout.
+            continuation = scout_solver
+            matrix_arms = 0 if continuation != nil
+            continuation.enable_chrono if continuation != nil
           continuation_spent = continuation == nil ? 0 : scout_conflicts
-          race = wassat_race_build(formula["nvars"], art, arms, formula,
+          race = wassat_race_build(formula["nvars"], art, matrix_arms, formula,
                                    continuation, continuation_spent, pre_arms,
                                    sls_flips > 0 ? 1 : 0, scout_cdcl_arenas,
-                                   scout_sls_arenas, 1)
+                                   scout_sls_arenas, 1, cover_plan)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
           if pre_arms > 0
             # A preprocessor per arm: two threads rendering through one would
@@ -1380,6 +1472,7 @@ use portfolio
           arm_tag = "arm [rr["winner"]]"
           arm_tag = "sls arm" if rr["sls_won"] == true
           arm_tag = "exact small-circuit arm" if rr["circuit_won"] == true
+          arm_tag = "checked resolution-cover arm" if rr["cover_won"] == true
           arm_tag = "keychart repair arm" if rr["keychart_won"] == true
           arm_tag = "sls frozen-fringe repair" if rr["sls_repair_won"] == true
           if pidx >= 0
@@ -1404,6 +1497,9 @@ use portfolio
           exit(rr["status"] == 1 ? 10 : 20)
         if rr != nil
           budget_used += rr["conflicts"]
+          # A bounded lone continuation is still the serial solver. Reuse
+          # it when reporting UNKNOWN instead of allocating another arena.
+          race = nil if matrix_arms == 0
       if staged_pre
         pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula) if pre == nil
         pre.force_full_pipeline

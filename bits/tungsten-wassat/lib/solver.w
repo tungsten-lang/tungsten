@@ -3024,10 +3024,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> solve_loop(stop_conflicts)
     result = 0                       # 0 unknown, 1 sat, -1 unsat
     limited = false
-    # Each saved phase array agrees with its own trail prefix; the saved
-    # decision spine similarly agrees through spine_level. Carry these only
-    # across uninterrupted decisions/propagations in this invocation.
-    # Rewinding the trail or rewriting phases invalidates all three.
+    # Each saved phase array agrees with its own trail prefix. Independent
+    # solvers retain the unchanged prefix across normal conflict backjumps;
+    # rewrites, compaction and restarts invalidate it. Sharing arms keep full
+    # refreshes: timing changes can alter their learned-clause exchanges.
+    # The decision spine restarts after every conflict, and all prefixes
+    # start fresh per invocation.
     phase_prefix = 0
     best_prefix = 0
     spine_level = @nassump
@@ -3074,8 +3076,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         @formula_unsat = true
         result = -1
       elsif confl >= 0
-        phase_prefix = 0
-        best_prefix = 0
         spine_level = @nassump
         spine_size = 0
         @spine_active = 0
@@ -3147,6 +3147,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           # the arm retires loudly — never a realloc in a worker thread.
           compacted = false
           if @fixed_caps && (@asize + n + 4 > @acap || @ncl + 2 >= @ccap)
+            phase_prefix = 0
+            best_prefix = 0
             self.backjump(0)
             self.reduce_db
             compacted = true
@@ -3182,6 +3184,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               jump = target
               jump = cl - 1 if @use_chrono && @nassump == 0 && cl - target > @chrono_t
               self.backjump(jump)
+              if @ring == nil
+                # qhead excludes chronological assignments reappended from
+                # the popped suffix. Only the original prefix is unchanged.
+                phase_prefix = @qhead if phase_prefix > @qhead
+                best_prefix = @qhead if best_prefix > @qhead
+              else
+                phase_prefix = 0
+                best_prefix = 0
               if n == 1
                 # Unit clauses are stored too, not just asserted: a logged clause
                 # consumes an id in the checker's database, so skipping the store
@@ -3244,6 +3254,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               @import_pending += 1
               if @import_pending >= 2048 && @pending_conflict < 0
                 @import_pending = 0
+                phase_prefix = 0
+                best_prefix = 0
                 self.backjump(0)
                 rc = self.share_import
                 if rc < 0

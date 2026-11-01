@@ -3886,9 +3886,16 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> congruence_rounds
     self.extract_binaries
     rounds = @config.congruence_max_rounds
+    and_scratch = nil
+    xor_scratch = nil
+    scc_scratch = nil
+    if rounds > 1
+      and_scratch = [nil, nil, nil, nil, nil]
+      xor_scratch = [nil, nil, nil, nil, nil, nil, nil, nil]
+      scc_scratch = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
     r = 0
     while r < rounds
-      m = self.extract_and_gates + self.extract_xor_gates
+      m = self.extract_and_gates(and_scratch) + self.extract_xor_gates(xor_scratch)
       break if m == 0
       # The LAST round's substitution is the caller's, not ours. That is
       # what makes congruence_max_rounds 1 bit-identical to the single pass
@@ -3896,7 +3903,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       # rather than one pass plus a redundant SCC sweep.
       break if r + 1 >= rounds
       before = @nsubst
-      self.substitute_equivalences
+      self.substitute_equivalences(scc_scratch)
       break unless @ok
       # A round whose merges the SCC pass declined to substitute cannot
       # change what the next extraction hashes, so it is the fixpoint.
@@ -3916,7 +3923,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # individually and doubles its hash table at 50% load, so it has no cap at
   # all; doubling a flat arena is the same policy with one allocation.
   # Geometric, so the retries cost at most one extra pass in total.
-  -> extract_xor_gates
+  -> extract_xor_gates(scratch = nil)
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
     prof_start = wassat_prof_clock
     ceil = @config.congruence_gate_ceiling
@@ -3936,14 +3943,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       ghcap = 1024
       while ghcap < 4 * maxg
         ghcap = ghcap * 2
-      lcount = i64[nl]
-      cht = i64[chcap]
-      mark = i64[nl]
-      qli = i64[8]
-      gar = i64[gcap]
-      ght = i64[ghcap]
-      out = i64[2 * maxg]
-      st = i64[8]
+      lcount = wassat_congruence_buffer(scratch, 0, nl)
+      cht = wassat_congruence_buffer(scratch, 1, chcap)
+      mark = wassat_congruence_buffer(scratch, 2, nl)
+      qli = wassat_congruence_buffer(scratch, 3, 8)
+      gar = wassat_congruence_buffer(scratch, 4, gcap)
+      ght = wassat_congruence_buffer(scratch, 5, ghcap)
+      out = wassat_congruence_buffer(scratch, 6, 2 * maxg)
+      st = wassat_congruence_buffer(scratch, 7, 8)
       wassat_extract_xor_gates(@cmeta, @alive, @arena, @lassign, lcount, cht,
                                mark, qli, gar, ght, out, st, @ncl, nl,
                                chcap - 1, gcap, ghcap - 1, maxg)
@@ -3965,7 +3972,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # Same growth policy as the XOR pass above: size from the formula, and
   # double whenever the scan reports it ran out of arena, hash table or
   # merge slots.
-  -> extract_and_gates
+  -> extract_and_gates(scratch = nil)
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
     prof_start = wassat_prof_clock
     ceil = @config.congruence_gate_ceiling
@@ -3981,11 +3988,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       hcap = 1024
       while hcap < 4 * maxg
         hcap = hcap * 2
-      mark = i64[2 * @nvars + 4]
-      gar = i64[gcap]
-      ght = i64[hcap]
-      out = i64[2 * maxg]
-      st = i64[8]
+      mark = wassat_congruence_buffer(scratch, 0, 2 * @nvars + 4)
+      gar = wassat_congruence_buffer(scratch, 1, gcap)
+      ght = wassat_congruence_buffer(scratch, 2, hcap)
+      out = wassat_congruence_buffer(scratch, 3, 2 * maxg)
+      st = wassat_congruence_buffer(scratch, 4, 8)
       wassat_extract_and_gates(@cmeta, @alive, @arena, @lassign, @bldir,
                                @bl_pool, mark, gar, ght, out, st, @ncl,
                                gcap, hcap - 1, maxg)
@@ -4062,7 +4069,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # so every clause a later conflict resolves is over representatives only;
   # the mapping is replayed onto the assignment once, when a model is
   # extracted (see unsubstitute).
-  -> substitute_equivalences
+  -> substitute_equivalences(scratch = nil)
     return 0 if !@allow_subst || wassat_stop_requested?(@stop_cell)
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
     nl = 2 * @nvars + 4
@@ -4073,13 +4080,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     pre = mid && @inp_s_idx != nil && @inp_ht != nil && @sub_next != nil && @sub_next.size >= @ncl + 2
     return 0 if mid && !pre && @fixed_caps
     prof_start = wassat_prof_clock
-    idx = pre ? @inp_s_idx : i64[nl]
-    low = pre ? @inp_s_low : i64[nl]
-    onstk = pre ? @inp_s_onstk : i64[nl]
-    reprs = pre ? @inp_s_reprs : i64[nl]
-    stk = pre ? @inp_s_stk : i64[nl]
-    work = pre ? @inp_s_work : i64[nl]
-    wcur = pre ? @inp_s_wcur : i64[nl]
+    idx = pre ? @inp_s_idx : wassat_congruence_buffer(scratch, 0, nl)
+    low = pre ? @inp_s_low : wassat_congruence_buffer(scratch, 1, nl)
+    onstk = pre ? @inp_s_onstk : wassat_congruence_buffer(scratch, 2, nl)
+    reprs = pre ? @inp_s_reprs : wassat_congruence_buffer(scratch, 3, nl)
+    stk = pre ? @inp_s_stk : wassat_congruence_buffer(scratch, 4, nl)
+    work = pre ? @inp_s_work : wassat_congruence_buffer(scratch, 5, nl)
+    wcur = pre ? @inp_s_wcur : wassat_congruence_buffer(scratch, 6, nl)
     if pre
       wassat_zero_i64(idx, nl)
       wassat_zero_i64(low, nl)
@@ -4100,9 +4107,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     hcap = 1024
     while hcap < 2 * (@ncl + 16)
       hcap = hcap * 2
-    ht = pre ? @inp_ht : i64[hcap]
-    mark = pre ? @inp_s_mark : i64[nl]
-    units = pre ? @sub_next : i64[@ncl + 2]
+    ht = pre ? @inp_ht : wassat_congruence_buffer(scratch, 7, hcap)
+    mark = pre ? @inp_s_mark : wassat_congruence_buffer(scratch, 8, nl)
+    units = pre ? @sub_next : wassat_congruence_buffer(scratch, 9, scratch == nil ? @ncl + 2 : @ccap + 2)
     # The prepared table is capped, so bound its linear probe: a missed
     # duplicate costs a redundant clause, an unbounded probe a full scan.
     plim = pre ? 32 : hcap
@@ -4697,6 +4704,19 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       bd[db + 1] = bd[db + 1] + 1
     ci += 1
   0
+
+# Invocation-local scratch for repeated gate extraction and SCC rewrites.
+# The retained capacity is reset, matching fresh zero-filled arrays. The
+# single-round path retains its exact-size allocation behavior.
+-> wassat_congruence_buffer(scratch, slot, size)
+  return i64[size] if scratch == nil
+  a = scratch[slot]
+  if a == nil || a.size < size
+    a = i64[size]
+    scratch[slot] = a
+  else
+    wassat_zero_i64(a, a.size)
+  a
 
 # ---- congruence closure ---------------------------------------------------
 

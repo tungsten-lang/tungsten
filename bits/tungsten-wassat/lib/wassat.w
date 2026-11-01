@@ -1340,13 +1340,23 @@ use portfolio
         )
           sls_flips = 0
         race = nil
-        if arms > 1 || pre_arms > 0 || sls_flips > 0
+        cover_workers = arms + pre_arms + (sls_flips > 0 ? 1 : 0)
+        cover_workers += 1 if config.continue_scout? && scout_solver != nil
+        cover_plan = wassat_resolution_cover_plan(formula, cover_workers)
+        if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil
           continuation = config.continue_scout? ? scout_solver : nil
+          matrix_arms = arms
+          if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan != nil
+            # Preserve the lone solver's trajectory and memory footprint.
+            # The added cover worker races the already-built scout.
+            continuation = scout_solver
+            matrix_arms = 0 if continuation != nil
+            continuation.enable_chrono if continuation != nil
           continuation_spent = continuation == nil ? 0 : scout_conflicts
-          race = wassat_race_build(formula["nvars"], art, arms, formula,
+          race = wassat_race_build(formula["nvars"], art, matrix_arms, formula,
                                    continuation, continuation_spent, pre_arms,
                                    sls_flips > 0 ? 1 : 0, scout_cdcl_arenas,
-                                   scout_sls_arenas, 1)
+                                   scout_sls_arenas, 1, cover_plan)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
           if pre_arms > 0
             # A preprocessor per arm: two threads rendering through one would
@@ -1388,6 +1398,7 @@ use portfolio
           arm_tag = "arm [rr["winner"]]"
           arm_tag = "sls arm" if rr["sls_won"] == true
           arm_tag = "exact small-circuit arm" if rr["circuit_won"] == true
+          arm_tag = "checked resolution-cover arm" if rr["cover_won"] == true
           arm_tag = "keychart repair arm" if rr["keychart_won"] == true
           arm_tag = "sls frozen-fringe repair" if rr["sls_repair_won"] == true
           if pidx >= 0
@@ -1412,6 +1423,9 @@ use portfolio
           exit(rr["status"] == 1 ? 10 : 20)
         if rr != nil
           budget_used += rr["conflicts"]
+          # A bounded lone continuation is still the serial solver. Reuse
+          # it when reporting UNKNOWN instead of allocating another arena.
+          race = nil if matrix_arms == 0
       if staged_pre
         pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula) if pre == nil
         pre.force_full_pipeline

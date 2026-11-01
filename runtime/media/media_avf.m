@@ -38,6 +38,8 @@
 #include <dispatch/dispatch.h>
 #include <CommonCrypto/CommonDigest.h>
 #include <sys/file.h>
+#include <sys/utsname.h>
+#include <sys/sysctl.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <mach/mach_time.h>
@@ -48,6 +50,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -808,7 +811,7 @@ static int a_patch_moov(const char *src, const char *dst, const APatch *o, char 
         ABox *t = &moov->kid[i];
         if (t->type != A_FOURCC('t','r','a','k') || (i >= first_new && i < first_new + added)) continue;
         uint32_t h = a_trak_handler(t);
-        if (i == video_i) a_add_tref(t, vrefs, nvref);
+        if (i == video_i && nvref) a_add_tref(t, vrefs, nvref);
         else if (chap_id && h == A_FOURCC('s','o','u','n')) {
             uint8_t r[12];
             a_be32(r, 12);
@@ -954,7 +957,7 @@ typedef struct AMux {
     int32_t   delay;            /* DTS delay in frames (0 without reordering) */
     int64_t   video_bytes;
     int       has_audio, aac;
-    int       audio_kbps;
+    int       audio_kbps, pcm_bits, pcm_float;
     /* audio source */
     int       akind;            /* A_AUDIO_* */
     int32_t   arate, ach;       /* sample rate, channels */
@@ -1093,6 +1096,7 @@ static AMux *a_mux_open(const AMuxOpts *o, char *err, size_t cap) {
         }
         if (!strcasecmp(fmt, "mov")) m->mov = 1;
         else if (strcasecmp(fmt, "mp4")) { free(m); snprintf(err, cap, "format must be :mp4 or :mov (got '%s')", fmt); return NULL; }
+        m->pcm_bits = 24;
         m->num = o->num;
         m->den = o->den;
         if (m->num <= 0 || m->den <= 0) { free(m); snprintf(err, cap, "rate must be a positive [num, den]"); return NULL; }
@@ -1130,7 +1134,11 @@ static AMux *a_mux_open(const AMuxOpts *o, char *err, size_t cap) {
             if (!copy) {
                 if (!ac[0]) snprintf(ac, sizeof ac, "%s", m->mov ? "pcm" : "aac");
                 if (!strcasecmp(ac, "aac")) m->aac = 1;
-                else if (strcasecmp(ac, "pcm")) { a_mux_free(m); snprintf(err, cap, "audio codec must be :aac, :pcm or :copy (got '%s')", ac); return NULL; }
+                else if (!strcasecmp(ac, "pcm_s16le")) m->pcm_bits = 16;
+                else if (!strcasecmp(ac, "pcm_s24le")) m->pcm_bits = 24;
+                else if (!strcasecmp(ac, "pcm_s32le")) m->pcm_bits = 32;
+                else if (!strcasecmp(ac, "pcm_f32le")) { m->pcm_bits = 32; m->pcm_float = 1; }
+                else if (strcasecmp(ac, "pcm")) { a_mux_free(m); snprintf(err, cap, "audio codec must be aac, pcm, pcm_s16le/pcm_s24le/pcm_s32le/pcm_f32le or copy (got '%s')", ac); return NULL; }
                 if (!m->aac && !m->mov) { a_mux_free(m); snprintf(err, cap, "PCM audio needs a .mov (MP4 carries AAC)"); return NULL; }
             }
             m->audio_kbps = o->audio_kbps > 0 ? o->audio_kbps : (m->ach >= 2 ? 320 : 192);
@@ -1259,8 +1267,8 @@ static void a_mux_start(AMux *m, WMediaSegment *s) {
                          AVChannelLayoutKey: ld};
         } else {
             settings = @{AVFormatIDKey: @(kAudioFormatLinearPCM), AVSampleRateKey: @(m->arate),
-                         AVNumberOfChannelsKey: @(m->ach), AVLinearPCMBitDepthKey: @24,
-                         AVLinearPCMIsFloatKey: @NO, AVLinearPCMIsBigEndianKey: @NO,
+                         AVNumberOfChannelsKey: @(m->ach), AVLinearPCMBitDepthKey: @(m->pcm_bits),
+                         AVLinearPCMIsFloatKey: @(m->pcm_float), AVLinearPCMIsBigEndianKey: @NO,
                          AVLinearPCMIsNonInterleaved: @NO, AVChannelLayoutKey: ld};
         }
         m->audio = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeAudio outputSettings:settings sourceFormatHint:m->afmt];
@@ -2137,7 +2145,7 @@ typedef struct ADec {
     int              nfly, cfly;
     int64_t          next_id;
     ADecFrame       *q;                /* final, in order */
-    int              qh, qn, qcap;
+    int              qh, qn, qcap, peak_qn;
     int              eof, stop, debug, serial;
     char             err[512];
     int64_t          decoded, delivered;
@@ -2223,6 +2231,7 @@ static void a_dec_release(ADec *d, int64_t limit, int all) {
         if (d->stop) { CVBufferRelease(f.pb); break; }
         d->q[(d->qh + d->qn) % d->qcap] = f;
         d->qn++;
+        if (d->qn > d->peak_qn) d->peak_qn = d->qn;
         pthread_cond_broadcast(&d->cv);
     }
 }
@@ -2394,6 +2403,17 @@ static void a_dec_destroy(ADec *d) {
     free(d);
 }
 
+static int a_dec_vsub(ADec *d) {
+    return d->pix == kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange ? 1 : 2;
+}
+
+static OSType a_dec_yuv_pixel(uint32_t codec) {
+    if (codec == kCMVideoCodecType_AppleProRes422 || codec == kCMVideoCodecType_AppleProRes422HQ ||
+        codec == kCMVideoCodecType_AppleProRes422LT || codec == kCMVideoCodecType_AppleProRes422Proxy)
+        return kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange;
+    return kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange;
+}
+
 static int a_siting_of(CFTypeRef loc) {
     if (loc && CFGetTypeID(loc) == CFStringGetTypeID()) {
         if (CFEqual(loc, kCVImageBufferChromaLocation_Center)) return 1;
@@ -2405,7 +2425,7 @@ static int a_siting_of(CFTypeRef loc) {
 /* Open a decoder: path (a movie file) or segs (segment files, with rate),
  * output pixel format pix ('420v' or 'BGRA'), frames before start_frame
  * dropped (files). NULL with a message. */
-static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, int32_t den, OSType pix, int64_t start_frame, int timeout_ms,
+static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, int32_t den, OSType pix, int64_t start_frame, int timeout_ms, int queue_cap,
                         char *err, size_t cap) {
     ADec *d = calloc(1, sizeof *d);
     d->refs = 1;
@@ -2415,7 +2435,8 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
     d->pix = pix;
     d->debug = getenv("TUNGSTEN_MEDIA_DEBUG") != NULL;
     d->serial = getenv("TUNGSTEN_MEDIA_DECODER_SERIAL") != NULL;
-    d->qcap = 6;
+    if (queue_cap < 1 || queue_cap > 32) { snprintf(err, cap, "decode_ahead must be in 1..32"); a_dec_free(d); return NULL; }
+    d->qcap = queue_cap;
     d->q = calloc((size_t)d->qcap, sizeof(ADecFrame));
     if (path) {
         d->asset = [[AVURLAsset alloc] initWithURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:path]]
@@ -2431,6 +2452,7 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
         d->w = dim.width;
         d->h = dim.height;
         d->codec = CMFormatDescriptionGetMediaSubType(fd);
+        if (!d->pix) d->pix = a_dec_yuv_pixel(d->codec);
         d->ts = t.naturalTimeScale;
         CMTime md = t.minFrameDuration;
         if (num > 0 && den > 0) { d->num = num; d->den = den; }
@@ -2474,6 +2496,7 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
         d->num = s0->rate_num;
         d->den = s0->rate_den;
         d->codec = s0->fourcc;
+        if (!d->pix) d->pix = a_dec_yuv_pixel(d->codec);
         CFDictionaryRef ext = CMFormatDescriptionGetExtensions((CMFormatDescriptionRef)s0->format);
         d->siting = a_siting_of(ext ? CFDictionaryGetValue(ext, kCMFormatDescriptionExtension_ChromaLocationTopField) : NULL);
         w_media_seg_free(s0);
@@ -2562,24 +2585,25 @@ WValue w_media_decoder_open(WValue srcv, WValue fmtv, WValue optv) {
     @autoreleasepool {
         char path[4096], fmt[16], err[512];
         w_media_str(fmtv, fmt, sizeof fmt);
-        int p010 = !strcasecmp(fmt, "p010") || !strcasecmp(fmt, "x420");
-        int nv12 = p010 || !strcasecmp(fmt, "nv12") || !strcasecmp(fmt, "420v");
+        int p010 = !strcasecmp(fmt, "p010"), p210 = !strcasecmp(fmt, "p210");
+        int nv12 = p010 || p210 || !strcasecmp(fmt, "nv12") || !strcasecmp(fmt, "420v");
         int rgba = !fmt[0] || !strcasecmp(fmt, "rgba");
-        if (!nv12 && !rgba && strcasecmp(fmt, "bgra")) w_media_raise("VideoDecoder: format must be :rgba, :bgra, :nv12 or :p010 (got '%s')", fmt);
+        if (!nv12 && !rgba && strcasecmp(fmt, "bgra")) w_media_raise("VideoDecoder: format must be :rgba, :bgra, :nv12 or :p010/:p210 (got '%s')", fmt);
         int64_t start = (int64_t)w_media_num(m_avf_arr(optv, 0), 0, "start");
         int32_t num = (int32_t)w_media_num(m_avf_arr(optv, 1), 0, "rate"), den = (int32_t)w_media_num(m_avf_arr(optv, 2), 0, "rate");
         int timeout_ms = (int)w_media_num(m_avf_arr(optv, 3), 30000, "timeout_ms");
+        int queue_cap = (int)w_media_num(m_avf_arr(optv, 4), 6, "decode_ahead");
         ADec *d;
-        OSType pix = p010 ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : nv12 ? kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange : kCVPixelFormatType_32BGRA;
+        OSType pix = p210 ? kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange : p010 ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : nv12 ? kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange : kCVPixelFormatType_32BGRA;
         if (w_is_array(srcv)) {
             int n = 0;
             char **segs = a_paths(srcv, &n);
-            d = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, err, sizeof err);
+            d = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, queue_cap, err, sizeof err);
             a_paths_free(segs, n);
         } else {
             if (!w_media_str(srcv, path, sizeof path) || !path[0]) w_media_raise("VideoDecoder: source must be a path or an array of segment paths");
             if (access(path, R_OK) != 0) w_media_raise("VideoDecoder: cannot read %s: %s", path, strerror(errno));
-            d = a_dec_open(path, NULL, 0, num, den, pix, start, timeout_ms, err, sizeof err);
+            d = a_dec_open(path, NULL, 0, num, den, pix, start, timeout_ms, queue_cap, err, sizeof err);
         }
         if (!d) w_media_raise("VideoDecoder: %s", err);
         ADecH *h = calloc(1, sizeof *h);
@@ -2615,8 +2639,8 @@ WValue w_media_decoder_read(WValue hv, WValue dstv, WValue stridev) {
     int64_t avail;
     uint8_t *dst = (uint8_t *)(uintptr_t)m_avf_dest(dstv, &avail, "VideoDecoder#read");
     int w = d->w, hh = d->h;
-    size_t bps = d->pix == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange ? 2 : 1;
-    size_t cw = (size_t)((w + 1) / 2) * 2 * bps, ch = (size_t)((hh + 1) / 2);
+    size_t bps = d->pix == kCVPixelFormatType_32BGRA || d->pix == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ? 1 : 2;
+    size_t cw = (size_t)((w + 1) / 2) * 2 * bps, ch = (size_t)((hh + a_dec_vsub(d) - 1) / a_dec_vsub(d));
     size_t row = h->nv12 ? cw : (size_t)w * 4;
     double stride = w_media_num(stridev, (double)row, "stride");
     size_t rows = (size_t)hh + (h->nv12 ? ch : 0);
@@ -2701,18 +2725,46 @@ WValue w_media_decoder_close(WValue hv) {
  * rendered frames do. Segments are cut every gop frames (closed GOPs) and
  * appended one behind, so the encoder keeps working while the mux writes. */
 
+static int a_same_file(const struct stat *a, const struct stat *b) {
+    return a->st_dev == b->st_dev && a->st_ino == b->st_ino && a->st_size == b->st_size &&
+        a->st_mtimespec.tv_sec == b->st_mtimespec.tv_sec && a->st_mtimespec.tv_nsec == b->st_mtimespec.tv_nsec &&
+        a->st_ctimespec.tv_sec == b->st_ctimespec.tv_sec && a->st_ctimespec.tv_nsec == b->st_ctimespec.tv_nsec;
+}
+
 static int a_file_hash(const char *path, char hex[65]) {
     FILE *file = fopen(path, "rb");
     if (!file) return -1;
+    struct stat before, after;
+    if (fstat(fileno(file), &before)) { fclose(file); return -1; }
     CC_SHA256_CTX context; CC_SHA256_Init(&context);
     uint8_t buffer[65536], hash[CC_SHA256_DIGEST_LENGTH];
     size_t n;
     while ((n = fread(buffer, 1, sizeof buffer, file))) CC_SHA256_Update(&context, buffer, (CC_LONG)n);
-    int bad = ferror(file); fclose(file);
+    int bad = ferror(file) || fstat(fileno(file), &after) || !a_same_file(&before, &after); fclose(file);
     if (bad) return -1;
     CC_SHA256_Final(hash, &context);
     for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) snprintf(hex + i*2, 3, "%02x", hash[i]);
     return 0;
+}
+
+static pthread_once_t a_identity_once = PTHREAD_ONCE_INIT;
+static char a_identity[65];
+static void a_identity_init(void) {
+    Dl_info image;
+    char hash[65], model[256] = "unknown", value[4096];
+    size_t n = sizeof model;
+    struct utsname system;
+    if (!dladdr((void *)w_media_transcode_new, &image) || a_file_hash(image.dli_fname, hash) || uname(&system)) return;
+    sysctlbyname("hw.model", model, &n, NULL, 0);
+    snprintf(value, sizeof value, "%s|%s|%s|%s|%s|%s", hash, system.sysname, system.release, system.version, system.machine, model);
+    uint8_t digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(value, (CC_LONG)strlen(value), digest);
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) snprintf(a_identity + 2*i, 3, "%02x", digest[i]);
+}
+WValue w_media_runtime_identity(void) {
+    pthread_once(&a_identity_once, a_identity_init);
+    if (!a_identity[0]) w_media_raise("Transcode: cannot identify the running media implementation");
+    return w_string(a_identity);
 }
 
 WValue w_media_source_hash(WValue source) {
@@ -2726,6 +2778,10 @@ typedef struct ATrans {
     int              cache_fd, cached_segments, next_checkpoint;
     int64_t          resumed;
     char             cancel_file[4096];
+    char             source_path[4096], audio_path[4096];
+    struct stat      source_stat, audio_stat;
+    uint64_t         disk_reserve;
+    int              source_checked, audio_checked, queue_segments, peak_segments;
 
     ADec          *dec;
     MEncoder      *enc;
@@ -2821,12 +2877,46 @@ static void a_cache_scan(ATrans *t) {
     t->next_checkpoint = t->cached_segments;
 }
 
+static void a_trans_check_inputs(ATrans *t) {
+    if (t->disk_reserve) {
+        char directory[4096]; snprintf(directory, sizeof directory, "%s", t->path);
+        char *slash = strrchr(directory, '/');
+        if (slash) { if (slash == directory) slash[1] = 0; else *slash = 0; }
+        else snprintf(directory, sizeof directory, ".");
+        struct statvfs space;
+        if (statvfs(directory, &space) || (long double)space.f_bavail * space.f_frsize < t->disk_reserve)
+            a_trans_raise(t, "configured free-disk reserve reached; delivery preserved");
+    }
+    struct stat current;
+    int changed = (t->source_checked && (stat(t->source_path, &current) || !a_same_file(&current, &t->source_stat))) ||
+                  (t->audio_checked && (stat(t->audio_path, &current) || !a_same_file(&current, &t->audio_stat)));
+    if (!changed) return;
+    /* A mutation can invalidate newly encoded GOPs under the original source key. */
+    if (t->resume[0]) for (int i = 0; i < t->next_checkpoint; i++) {
+        char path[4200]; a_cache_path(t, i, path, "sha256"); unlink(path);
+    }
+    a_trans_raise(t, "source changed during the job; checkpoints invalidated");
+}
+
+/* Deterministic kill/mutation tests stop at real durable boundaries. Inert
+ * unless both explicitly test-named environment variables are supplied. */
+static void a_test_barrier(const char *point) {
+    const char *chosen = getenv("TUNGSTEN_MEDIA_TEST_BARRIER"), *marker = getenv("TUNGSTEN_MEDIA_TEST_MARKER");
+    if (!chosen || !marker || strcmp(chosen, point)) return;
+    int fd = open(marker, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return;
+    (void)write(fd, point, strlen(point)); (void)fsync(fd); close(fd);
+    for (int i = 0; i < 6000 && access(marker, F_OK) == 0; i++) usleep(10000);
+}
+
 static void a_cache_save(ATrans *t, WMediaSegment *segment) {
+    a_trans_check_inputs(t);
     if (!t->resume[0]) return;
     char path[4200], meta[4200], tmp[4220], hash[65], err[512] = "cannot hash checkpoint";
     a_cache_path(t, t->next_checkpoint, path, "twms");
     a_cache_path(t, t->next_checkpoint, meta, "sha256");
     if (w_media_seg_save(segment, path, err, sizeof err) || a_file_hash(path, hash)) a_trans_raise(t, "checkpoint: %s", err);
+    a_test_barrier("segment-synced");
     snprintf(tmp, sizeof tmp, "%s.part", meta);
     FILE *f = fopen(tmp, "w");
     if (!f) a_trans_raise(t, "cannot write checkpoint digest");
@@ -2837,6 +2927,7 @@ static void a_cache_save(ATrans *t, WMediaSegment *segment) {
     if (directory < 0 || fsync(directory)) { if (directory >= 0) close(directory); a_trans_raise(t, "checkpoint directory sync failed"); }
     close(directory);
     t->next_checkpoint++;
+    a_test_barrier("digest-committed");
 }
 
 /* Append the oldest queued segment to the mux. */
@@ -2861,7 +2952,8 @@ static void a_trans_cut(ATrans *t) {
     t->seg_frames = 0;
     if (!s) return;
     t->q[t->nq++] = s;
-    if (t->nq >= 3) a_trans_flush_one(t);
+    if (t->nq > t->peak_segments) t->peak_segments = t->nq;
+    if (t->nq >= t->queue_segments) a_trans_flush_one(t);
 }
 
 /* Scale one decoded frame into the encoder and submit it. */
@@ -2939,11 +3031,17 @@ WValue w_media_transcode_new(WValue spec) {
         AChapter *ch = a_chapters_from(a_spec(spec, "chapters"), &nch, "Transcode");
         ATrans *t = calloc(1, sizeof *t);
         t->cache_fd = -1;
+        double reserve = w_media_num(a_spec(spec, "disk_reserve_bytes"), 0, "disk_reserve_bytes");
+        if (!isfinite(reserve) || reserve < 0 || reserve > 1e18) { a_trans_free(t); w_media_raise("Transcode: invalid disk reserve"); }
+        t->disk_reserve = (uint64_t)reserve;
         w_media_str(a_spec(spec, "cancel_file"), t->cancel_file, sizeof t->cancel_file);
         t->chap = ch;
         t->nchap = nch;
         t->t0 = m_avf_now_ns();
         int timeout_ms = (int)w_media_num(a_spec(spec, "timeout_ms"), 30000, "timeout_ms");
+        int queue_cap = (int)w_media_num(a_spec(spec, "decode_ahead"), 6, "decode_ahead");
+        t->queue_segments = (int)w_media_num(a_spec(spec, "segments_ahead"), 3, "segments_ahead");
+        if (t->queue_segments < 1 || t->queue_segments > 3) { a_trans_free(t); w_media_raise("Transcode: segments_ahead must be in 1..3"); }
         WValue srcv = a_spec(spec, "src");
         if (!w_media_str(a_spec(spec, "dst"), dst, sizeof dst) || !dst[0]) { a_trans_free(t); w_media_raise("Transcode: dst must be a path"); }
         snprintf(t->path, sizeof t->path, "%s", dst);
@@ -2964,17 +3062,25 @@ WValue w_media_transcode_new(WValue spec) {
         }
         w_media_str(a_spec(spec, "via"), buf, sizeof buf);
         t->via_rgb = !strcasecmp(buf, "rgb") || !strcasecmp(buf, "rgba");
-        OSType pix = t->via_rgb ? kCVPixelFormatType_32BGRA : kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange;
+        OSType pix = t->via_rgb ? kCVPixelFormatType_32BGRA : 0;
         if (w_is_array(srcv)) {
             int n = 0;
             char **segs = a_paths(srcv, &n);
-            t->dec = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, err, sizeof err);
+            t->dec = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, queue_cap, err, sizeof err);
             a_paths_free(segs, n);
             if (t->start > 0 && t->dec) { a_trans_free(t); w_media_raise("Transcode: start: is for movie sources (pass the segments you want)"); }
         } else {
             if (!w_media_str(srcv, src, sizeof src) || !src[0]) { a_trans_free(t); w_media_raise("Transcode: src must be a path or an array of segment paths"); }
             if (access(src, R_OK) != 0) { int e = errno; a_trans_free(t); w_media_raise("Transcode: cannot read %s: %s", src, strerror(e)); }
-            t->dec = a_dec_open(src, NULL, 0, num, den, pix, t->start + t->resumed, timeout_ms, err, sizeof err);
+            struct stat before;
+            char expected[65], actual[65];
+            w_media_str(a_spec(spec, "source_hash"), expected, sizeof expected);
+            if (stat(src, &before) || (expected[0] && (a_file_hash(src, actual) || strcmp(expected, actual))) ||
+                stat(src, &t->source_stat) || !a_same_file(&before, &t->source_stat)) {
+                a_trans_free(t); w_media_raise("Transcode: source changed before decoding");
+            }
+            snprintf(t->source_path, sizeof t->source_path, "%s", src); t->source_checked = 1;
+            t->dec = a_dec_open(src, NULL, 0, num, den, pix, t->start + t->resumed, timeout_ms, queue_cap, err, sizeof err);
         }
         if (!t->dec) { a_trans_free(t); w_media_raise("Transcode: %s", err); }
         t->sw = t->dec->w;
@@ -3014,12 +3120,13 @@ WValue w_media_transcode_new(WValue spec) {
         } else {
             uint8_t fy[4] = {16, 0, 0, 0}, fc[4] = {128, 128, 0, 0};
             int s = t->dec->siting;
-            double osx = s == 1 ? 1.0 : 0.5, osy = s == 2 ? 0.5 : 1.0;
+            int source_vsub = a_dec_vsub(t->dec);
+            double osx = s == 1 ? 1.0 : 0.5, osy = source_vsub == 1 || s == 2 ? 0.5 : 1.0;
             rc = w_media_scale_plan(&t->py, 1, W_MEDIA_ALPHA_NONE, filter, t->sw, t->sh, t->w, t->h, crop, rect, 1, 1, 0.5, 0.5,
                                     1, 1, 0.5, 0.5, fy, bits, err, sizeof err);
             if (rc == 0) {
-                rc = w_media_scale_plan(&t->pc, 2, W_MEDIA_ALPHA_NONE, filter, (t->sw + 1) / 2, (t->sh + 1) / 2, t->w / 2, t->h / vsub,
-                                        crop, rect, 2, 2, osx, osy, 2, vsub, 0.5, vsub == 2 ? 1.0 : 0.5, fc, bits, err, sizeof err);
+                rc = w_media_scale_plan(&t->pc, 2, W_MEDIA_ALPHA_NONE, filter, (t->sw + 1) / 2, (t->sh + source_vsub - 1) / source_vsub, t->w / 2, t->h / vsub,
+                                        crop, rect, 2, source_vsub, osx, osy, 2, vsub, 0.5, vsub == 2 ? 1.0 : 0.5, fc, bits, err, sizeof err);
                 if (rc != 0) w_media_scale_free(&t->py);
             }
         }
@@ -3038,6 +3145,16 @@ WValue w_media_transcode_new(WValue spec) {
         if (ac[0] && strcasecmp(ac, "none")) {
             if (!w_media_str(a_spec(spec, "audio_src"), apath, sizeof apath) || !apath[0]) snprintf(apath, sizeof apath, "%s", w_is_array(srcv) ? "" : src);
             if (!apath[0]) { a_trans_free(t); w_media_raise("Transcode: audio: segments carry no audio; give audio_src: (a WAV or a movie)"); }
+            if (strcmp(apath, t->source_path)) {
+                struct stat before;
+                char expected[65], actual[65];
+                w_media_str(a_spec(spec, "audio_hash"), expected, sizeof expected);
+                if (stat(apath, &before) || (expected[0] && (a_file_hash(apath, actual) || strcmp(expected, actual))) ||
+                    stat(apath, &t->audio_stat) || !a_same_file(&before, &t->audio_stat)) {
+                    a_trans_free(t); w_media_raise("Transcode: audio source changed before decoding");
+                }
+                snprintf(t->audio_path, sizeof t->audio_path, "%s", apath); t->audio_checked = 1;
+            }
             o.audio = apath;
             o.audio_codec = ac;
             o.audio_kbps = (int)w_media_num(a_spec(spec, "audio_kbps"), 0, "audio_kbps");
@@ -3082,6 +3199,7 @@ WValue w_media_transcode_step(WValue hv, WValue nv) {
     @autoreleasepool {
         char err[512];
         int64_t k = 0;
+        a_trans_check_inputs(t);
         if (t->cancel_file[0] && access(t->cancel_file, F_OK) == 0) a_trans_raise(t, "transcode cancelled");
         while (t->done < t->total && k < n) {
             if (t->cancel_file[0] && access(t->cancel_file, F_OK) == 0) a_trans_raise(t, "transcode cancelled");
@@ -3120,6 +3238,7 @@ WValue w_media_transcode_step(WValue hv, WValue nv) {
 WValue w_media_transcode_finish(WValue hv) {
     ATrans *t = w_media_handle_get(hv, W_MEDIA_KIND_TRANSCODE, "Transcode#finish");
     @autoreleasepool {
+        a_trans_check_inputs(t);
         if (t->done < t->total) a_trans_raise(t, "finish after %lld of %lld frames (step until done)", (long long)t->done, (long long)t->total);
         if (t->seg_frames > 0) {
             WMediaSegment *s = w_media_enc_cut(t->enc);
@@ -3130,6 +3249,7 @@ WValue w_media_transcode_finish(WValue hv) {
         int64_t out[5];
         uint64_t a = m_avf_now_ns();
         a_mux_finish(t->mux, out);
+        a_test_barrier("mux-finished");
         t->mux_ns += m_avf_now_ns() - a;
         t->finished = 1;
         WValue r = w_array_new_empty();
@@ -3149,6 +3269,9 @@ WValue w_media_transcode_finish(WValue hv) {
         r = w_array_push(r, a_pair("mux_s", w_float((double)t->mux_ns / 1e9)));
         r = w_array_push(r, a_pair("scale_backend", w_string(w_media_backend_name(t->used))));
         r = w_array_push(r, a_pair("decode_bits", w_int(t->via_rgb ? 8 : 10)));
+        r = w_array_push(r, a_pair("decode_chroma", w_string(t->via_rgb ? "rgb" : a_dec_vsub(t->dec) == 1 ? "422" : "420")));
+        r = w_array_push(r, a_pair("decoder_queue_peak", w_int(t->dec->peak_qn)));
+        r = w_array_push(r, a_pair("segment_queue_peak", w_int(t->peak_segments)));
         r = w_array_push(r, a_pair("via", w_string(t->via_rgb ? "rgb" : "yuv")));
         r = w_array_push(r, a_pair("source", w_string((char[]){(char)(t->dec->codec >> 24), (char)(t->dec->codec >> 16), (char)(t->dec->codec >> 8), (char)t->dec->codec, 0})));
         w_media_handle_drop(hv, W_MEDIA_KIND_TRANSCODE);

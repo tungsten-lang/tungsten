@@ -2148,7 +2148,20 @@ WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap) {
         snprintf(err, cap, "%s has a corrupt header", path);
         return NULL;
     }
-    fseeko(f, (off_t)hsz, SEEK_SET);
+    /* Validate physical lengths before allocating attacker-controlled counts.
+     * In particular a short file must never request a terabyte of memory. */
+    struct stat file_stat;
+    uint64_t required = (uint64_t)hsz + flen + (uint64_t)n * 24 + dlen;
+    int32_t width = (int32_t)m_get32(hdr + 16), height = (int32_t)m_get32(hdr + 20);
+    int32_t num = (int32_t)m_get32(hdr + 24), den = (int32_t)m_get32(hdr + 28);
+    if (fstat(fileno(f), &file_stat) || required != (uint64_t)file_stat.st_size ||
+        !n || !dlen || width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
+        num <= 0 || den <= 0 || num > 1000000 || den > 1000000 ||
+        (m_get32(hdr + 52) & ~1u) || fseeko(f, (off_t)hsz, SEEK_SET)) {
+        fclose(f);
+        snprintf(err, cap, "%s has invalid segment lengths, dimensions or clock", path);
+        return NULL;
+    }
     WMediaSegment *s = m_seg_new();
     s->fourcc = m_get32(hdr + 12);
     s->width = (int32_t)m_get32(hdr + 16);
@@ -2164,14 +2177,16 @@ WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap) {
     s->s = malloc(sizeof(WMediaSample) * (n ? n : 1));
     s->cap = (int32_t)(n ? n : 1);
     int ok = fmt && rec && s->data && s->s;
+    if (s->data) {
+        pthread_mutex_lock(&g_stat_lock);
+        g_seg_bytes += (int64_t)dlen;
+        pthread_mutex_unlock(&g_stat_lock);
+    } else s->dcap = 0;
     if (ok && flen) ok = fread(fmt, 1, flen, f) == flen;
     if (ok && n) ok = fread(rec, 24, n, f) == n;
     if (ok && dlen) ok = fread(s->data, 1, dlen, f) == dlen;
     fclose(f);
     if (ok) {
-        pthread_mutex_lock(&g_stat_lock);
-        g_seg_bytes += (int64_t)dlen;
-        pthread_mutex_unlock(&g_stat_lock);
         for (uint32_t i = 0; i < n && ok; i++) {
             const uint8_t *r = rec + 24 * (size_t)i;
             WMediaSample *x = &s->s[i];
@@ -2180,7 +2195,7 @@ WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap) {
             x->pts = (int32_t)m_get32(r + 12);
             x->dts = (int32_t)m_get32(r + 16);
             x->sync = r[20];
-            if (x->offset + x->size > dlen) ok = 0;
+            if (!x->size || x->offset > dlen || x->size > dlen - x->offset || x->sync > 1) ok = 0;
         }
         s->n = (int32_t)n;
         s->len = dlen;
@@ -2193,7 +2208,8 @@ WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap) {
             CFDataRef d = CFDataCreate(NULL, fmt, flen);
             ext = CFPropertyListCreateWithData(NULL, d, kCFPropertyListImmutable, NULL, NULL);
             CFRelease(d);
-            if (ext && CFGetTypeID(ext) != CFDictionaryGetTypeID()) { CFRelease(ext); ext = NULL; ok = 0; }
+            if (!ext) ok = 0;
+            else if (CFGetTypeID(ext) != CFDictionaryGetTypeID()) { CFRelease(ext); ext = NULL; ok = 0; }
         }
         if (ok) {
             CMVideoFormatDescriptionRef fd = NULL;

@@ -18,7 +18,8 @@
 # times wander a little (the legacy one has a 513-tick frame) still maps
 # each frame to its own index.
 #
-# Transcoding. By default (via: :yuv) frames decode to P010 10-bit 4:2:0 and the
+# Transcoding. By default (via: :yuv) frames decode to 10-bit bi-planar YUV (4:2:2
+# for ProRes 422 sources, 4:2:0 otherwise) and the
 # Y' and CbCr planes are resampled separately (Scaler's filters, chroma
 # siting honoured on both sides) straight into the encoder's buffers: no
 # colour conversion, so the BT.709 values of the master carry over. via:
@@ -46,13 +47,13 @@
 + VideoDecoder
   ro :source, :format, :width, :height, :rate, :handle, :frame
 
-  # VideoDecoder.new(source, format: :rgba (:bgra, :nv12, :p010), start: 0, rate: nil, timeout_ms: 30000)
+  # VideoDecoder.new(source, format: :rgba (:bgra, :nv12, :p010, :p210), start: 0, rate: nil, timeout_ms: 30000, decode_ahead: 6)
   # source: a movie path, or an Array of segment files (in order).
   -> new(@source, opts = {})
     @format = Transcode.opt(opts, :format, "rgba").to_s
     r = Transcode.opt(opts, :rate, nil)
     rr = r == nil ? [0, 0] : Timecode.rate(r)
-    @handle = ccall("w_media_decoder_open", @source, @format, [Transcode.opt(opts, :start, 0), rr[0], rr[1], Transcode.opt(opts, :timeout_ms, 30000)])
+    @handle = ccall("w_media_decoder_open", @source, @format, [Transcode.opt(opts, :start, 0), rr[0], rr[1], Transcode.opt(opts, :timeout_ms, 30000), Transcode.opt(opts, :decode_ahead, 6)])
     @width = ccall("w_media_decoder_info", @handle, "width")
     @height = ccall("w_media_decoder_info", @handle, "height")
     @rate = ccall("w_media_decoder_info", @handle, "rate")
@@ -61,7 +62,7 @@
 
   # Bytes in one frame of this format.
   -> frame_bytes
-    (@format == "nv12" || @format == "p010") ? ((@width + 1) / 2) * 2 * (@height + (@height + 1) / 2) * (@format == "p010" ? 2 : 1) : @width * @height * 4
+    (@format == "nv12" || @format == "p010" || @format == "p210") ? ((@width + 1) / 2) * 2 * (@height + (@format == "p210" ? @height : (@height + 1) / 2)) * (@format == "nv12" ? 1 : 2) : @width * @height * 4
 
   # The next frame (presentation order) into buf (a u8[] / ByteArray /
   # address; nil: one buffer the decoder keeps), or nil at the end. #frame
@@ -370,7 +371,8 @@
             ["audio", audio == nil ? nil : audio.to_s], ["audio_src", audio_src], ["audio_kbps", Transcode.opt(o, :audio_kbps, nil)],
             ["tc", tc_frame], ["drop", drop], ["quanta", Timecode.quanta(rate)], ["chapters", chs],
             ["faststart", Transcode.opt(o, :faststart, true)], ["edit_lists", Transcode.opt(o, :edit_lists, true)], ["timeout_ms", Transcode.opt(o, :timeout_ms, 30000)],
-            ["cancel_file", Transcode.opt(o, :cancel_file, nil)]]
+            ["cancel_file", Transcode.opt(o, :cancel_file, nil)], ["decode_ahead", Transcode.opt(o, :decode_ahead, 6)],
+            ["segments_ahead", Transcode.opt(o, :segments_ahead, 3)], ["disk_reserve_bytes", Transcode.opt(o, :disk_reserve_bytes, 0)]]
     resume = Transcode.opt(o, :resume_dir, nil)
     if resume != nil
       raise "Transcode: resumable sources must be a movie" if !movie
@@ -379,8 +381,11 @@
       identity = []
       spec.each ->(pair)
         identity << pair if pair[0] != "dst" && pair[0] != "timeout_ms" && pair[0] != "cancel_file"
-      # Version the numerical/segment contract as well as the source bytes.
-      key = Crypto.sha256(JSON.encode(["av-resume-v2-p010", identity, inputs]))
+      # Bind checkpoints to the actual loaded binary, OS/encoder platform and caller implementation.
+      implementation = [ccall("w_media_runtime_identity"), Transcode.opt(o, :implementation_id, nil)]
+      key = Crypto.sha256(JSON.encode(["av-resume-v3", implementation, identity, inputs]))
+      spec << ["source_hash", inputs[0]]
+      spec << ["audio_hash", inputs[1]] if audio_src != nil
       directory = File.expand_path(resume.to_s) + "/" + key
       Dir.mkdir_p(directory)
       spec << ["resume_dir", directory]
@@ -404,6 +409,18 @@
         res[pr[0].to_sym] = pr[1]
     ensure
       ccall("w_media_transcode_free", th) if !done
+    # AutoLevel on some VT quality encoders advertises a level whose bitrate
+    # limit is below the produced stream. Choose from measured video bytes,
+    # then re-encode with that explicit level (one bounded correction).
+    if level == nil && (codec == "hevc" || codec == "hevc10")
+      facts = MediaVerify.facts(dst, true, false)
+      if facts[:video_bytes] != nil && facts[:level] != nil
+        bits = facts[:video_bytes] * 8 * rate[0] / (total * rate[1])
+        needed = Transcode.min_level(codec, w, h, rate, bits)
+        if needed != nil && facts[:level] < needed[1]
+          corrected = o.dup
+          corrected[:level] = needed[0]
+          return Transcode.run_once(src, dst, corrected)
     cap = Transcode.opt(o, :level_cap, nil)
     if cap != nil && (codec == "h264" || codec == "hevc" || codec == "hevc10")
       facts = MediaVerify.facts(dst, false, false)

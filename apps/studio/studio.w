@@ -142,7 +142,7 @@ use lib/fcpxml
     return 0
   mkdir_p(p.build + "/tmp")
   # program frames these segments need, rendered first (the programs run `jobs` at a time)
-  p.ensure_program_frames(r, take, jobs)
+  p.ensure_program_frames(r, take, opt(args, "--animation-jobs", jobs.to_s).to_i)
   if jobs <= 1
     eng = Engine.new(p, r)
     enc = make_encoder(r, p.encoder, p.build + "/tmp/fifo." + run_token())

@@ -34,6 +34,9 @@ with tempfile.TemporaryDirectory(prefix='bit-commands-') as d:
     (project/'Bitfile').write_text('name "project"\n')
     (home/'demo').mkdir();(home/'demo/current').symlink_to(package,target_is_directory=True)
     assert json.loads(run('demo','echo','installed'))['args']==['installed']
+    (home/'demo/current').unlink();(home/'demo').rmdir()
+    (home/'tungsten-demo').mkdir();(home/'tungsten-demo/current').symlink_to(package,target_is_directory=True)
+    assert json.loads(run('demo','echo','prefixed'))['args']==['prefixed']
     # Built-in names stay reserved, and help/list never execute package code.
     assert 'Available commands' in run('help','commands') or 'install' in run('help','commands')
     # Packaging includes root commands without a redundant asset declaration.

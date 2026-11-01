@@ -52,9 +52,12 @@ in Tungsten:Bit
       if dependency != nil
         << "bit: command dependency [name] requires an installed lockfile entry; run bit install"
         exit(2)
-    home = bit_home() + "/" + name
-    return home + "/current" if matches?(home + "/current", name)
-    return home if matches?(home, name)
+    # Package directories may retain their tungsten- prefix while their
+    # declared command namespace is the shorter package name.
+    homes = [bit_home() + "/" + name, bit_home() + "/tungsten-" + name]
+    homes.each ->(home)
+      return home + "/current" if matches?(home + "/current", name)
+      return home if matches?(home, name)
     toolchain = env("TUNGSTEN_ROOT")
     if toolchain != nil
       root = toolchain + "/bits/" + name

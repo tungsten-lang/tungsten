@@ -47,6 +47,7 @@ use latin_csp
 use ternary_affine
 use ais
 use coloring
+use mycielski
 use covering
 use directed_kernel
 use edge_matching
@@ -835,6 +836,12 @@ use portfolio
       << "c mode: fast (verified multiplier circuit factorization refutation)"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
+  # A cheap checked graph obstruction precedes broader CSP recognition.
+  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COLORING") != "0" && wassat_mycielski_unsat?(formula)
+    << "s UNSATISFIABLE"
+    << "c mode: fast (checked Mycielski coloring obstruction)"
+    << "c conflicts: [budget_used], decisions: 0, props: 0"
+    exit(20)
   # Bounded synchronizing-automaton encodings expose both transition maps in
   # their clause incidence.  Recover a Černý word directly, expand it to every
   # image/selector variable, and accept only a full original-CNF model.

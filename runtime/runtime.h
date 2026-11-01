@@ -2432,6 +2432,13 @@ WValue __w_file_mtime_ns(WValue path_val);
 WValue __w_file_expand_path(WValue path_val);
 WValue __w_file_expand_path_base(WValue path_val, WValue base_val);
 WValue __w_file_join(WValue left, WValue right);
+WValue __w_file_basename(WValue path);
+WValue __w_file_dirname(WValue path);
+WValue __w_file_extname(WValue path);
+
+WValue __w_file_realpath(WValue path);
+WValue __w_file_readlink(WValue path);
+WValue __w_file_symlink(WValue target, WValue path);
 WValue __w_file_stat_data(WValue path_val, WValue follow_val);
 WValue __w_tempfile_create(WValue prefix_val, WValue directory_val);
 WValue __w_file_link(WValue target_val, WValue link_val);

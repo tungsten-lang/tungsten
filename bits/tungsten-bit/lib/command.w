@@ -5,10 +5,12 @@ in Tungsten:Bit
 
 + Command
   ro :args
+  ro :raw_args
   ro :options
   ro :flags
 
   -> new(@args)
+    @raw_args = @args.dup
     @options = {}
     @flags   = {}
     parse_args(@args)

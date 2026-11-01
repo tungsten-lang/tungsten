@@ -3607,6 +3607,23 @@ module Tungsten
         return lib_path if File.exist?(lib_path)
       end
 
+      # Match the native loader's last-resort bundled-bit lookup. Installed
+      # command packages can import Bit:Command without checkout-relative paths.
+      toolchain = ENV["TUNGSTEN_ROOT"]
+      if toolchain && toolchain != project_root && !use_path.start_with?(".", "/")
+        bit_name, *parts = use_path.split("/")
+        namespace = bit_name.delete_prefix("tungsten-")
+        sub_path = parts.join("/")
+        entry_file = sub_path.empty? ? "#{namespace}.w" : "#{sub_path}.w"
+        [bit_name, "tungsten-#{namespace}"].uniq.each do |package|
+          lib = File.join(toolchain, "bits", package, "lib")
+          bundled = File.join(lib, entry_file)
+          return bundled if File.file?(bundled)
+          namespaced = File.join(lib, namespace, "#{sub_path}.w")
+          return namespaced if !sub_path.empty? && File.file?(namespaced)
+        end
+      end
+
       # Fall back to the original (may raise on File.read)
       candidate
     end

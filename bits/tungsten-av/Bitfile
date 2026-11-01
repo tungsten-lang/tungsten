@@ -1,4 +1,7 @@
 name "av"
-version "0.2.0"
+version "0.3.0"
 summary "Plan, render, verify and deliver audio/video projects"
 license "MIT OR Apache-2.0"
+
+includes ["native/platform.c"]
+asset "native"

@@ -63,7 +63,7 @@ class Runner:
         self._signal(process, signal.SIGKILL)
         process.wait()
 
-    def run(self, argv, *, cwd=None, env=None, capture=False, timeout=None, log=None):
+    def run(self, argv, *, cwd=None, env=None, capture=False, timeout=None, log=None, echo=None):
         if self.cancelled.is_set():
             raise Cancelled('pipeline cancelled before starting a stage')
         deadline = self.timeout if timeout is None else timeout
@@ -87,7 +87,9 @@ class Runner:
                     log.write(block); log.flush()
                     # Keep CLI output visible without buffering an entire render log.
                     import sys
-                    sys.stdout.buffer.write(block); sys.stdout.buffer.flush()
+                    output = sys.stdout.buffer if echo is None else echo
+                    if output is not False:
+                        output.write(block); output.flush()
             reader = threading.Thread(target=copy_log, daemon=True)
             reader.start()
         started = time.monotonic()

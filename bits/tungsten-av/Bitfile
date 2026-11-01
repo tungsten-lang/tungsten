@@ -1,0 +1,4 @@
+name "av"
+version "0.2.0"
+summary "Plan, render, verify and deliver audio/video projects"
+license "MIT OR Apache-2.0"

@@ -1533,6 +1533,7 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 
     append_unique(members, "lib") if Dir.exists?("lib")
     append_unique(members, "spec") if Dir.exists?("spec")
+    append_unique(members, "commands") if Dir.exists?("commands")
 
     @bitfile.executables.each -> (executable)
       source = executable.source

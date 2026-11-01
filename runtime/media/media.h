@@ -69,6 +69,7 @@
     X(w_media_decoder_read, 3)         \
     X(w_media_decoder_info, 2)         \
     X(w_media_decoder_close, 1)        \
+    X(w_media_runtime_identity, 0)     \
     X(w_media_source_hash, 1)          \
     X(w_media_transcode_new, 1)        \
     X(w_media_transcode_step, 2)       \

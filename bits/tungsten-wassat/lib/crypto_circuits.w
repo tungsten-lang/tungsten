@@ -833,6 +833,60 @@
     pass += 1
   false
 
+# Close root units in clause order, retaining the model decoder's exact scan
+# order and conflict behavior. No per-pass allocation; st records passes,
+# clause visits, literal visits and new assignments for profiling.
+-> wassat_par32_root_units(fla, fcs, fcl, val, st, ncl) (i64[] i64[] i64[] i8[] i64[] i64) bool
+  passes = 0
+  clauses = 0
+  literals = 0
+  assigned = 0
+  changed = 1
+  while changed == 1
+    changed = 0
+    passes += 1
+    ci = 0
+    while ci < ncl
+      clauses += 1
+      off = fcs[ci]
+      k = fcl[ci]
+      sat = 0
+      unset = 0
+      last_l = 0
+      j = 0
+      while j < k
+        literals += 1
+        l = fla[off + j]
+        v = wassat_multiplier_abs(l)
+        av = val[v]
+        if av != 0
+          if (l > 0 && av == 1) || (l < 0 && av == -1)
+            sat = 1
+            j = k
+          else
+            j += 1
+        else
+          unset += 1
+          last_l = l
+          j += 1
+      if sat == 0
+        if unset == 0
+          st[0] = passes
+          st[1] = clauses
+          st[2] = literals
+          st[3] = assigned
+          return false
+        if unset == 1
+          val[wassat_multiplier_abs(last_l)] = last_l > 0 ? 1 : -1
+          assigned += 1
+          changed = 1
+      ci += 1
+  st[0] = passes
+  st[1] = clauses
+  st[2] = literals
+  st[3] = assigned
+  true
+
 -> wassat_par32_model(formula)
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
@@ -847,37 +901,11 @@
     ci += 1
 
   val = i8[nv + 1]
-  changed = true
-  while changed
-    changed = false
-    ci = 0
-    while ci < ncl
-      off = fcs[ci]
-      k = fcl[ci]
-      sat = false
-      unset = 0
-      last_l = 0
-      j = 0
-      while j < k
-        l = fla[off + j]
-        v = wassat_multiplier_abs(l)
-        av = val[v]
-        if av != 0
-          if (l > 0 && av == 1) || (l < 0 && av == -1)
-            sat = true
-            j = k
-          else
-            j += 1
-        else
-          unset += 1
-          last_l = l
-          j += 1
-      if !sat
-        return [] if unset == 0
-        if unset == 1
-          val[wassat_multiplier_abs(last_l)] = last_l > 0 ? 1 : -1
-          changed = true
-      ci += 1
+  unit_stats = i64[4]
+  unit_start = wassat_prof_clock
+  unit_ok = wassat_par32_root_units(fla, fcs, fcl, val, unit_stats, ncl)
+  z = wassat_prof("par32.units passes=[unit_stats[0]] clauses=[unit_stats[1]] literals=[unit_stats[2]] assigned=[unit_stats[3]]", unit_start) if unit_start != 0
+  return [] unless unit_ok
 
   rem0 = []
   by_v0 = {}

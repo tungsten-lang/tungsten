@@ -442,7 +442,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @inp_sst = i64[8]
     @inp_rst = i64[8]
     # Native cumulative counters: cancelled rounds, genuine units,
-    # subsumption work, SCC work, cleaned literals. Never boxed in workers.
+    # subsumption work, SCC work, cleaned literals, then substitution hash
+    # clauses/probes/compared literals. Never boxed in workers.
     @inp_totals = i64[8]
     @inp_phase = nil
     @inp_mark = nil
@@ -4094,6 +4095,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_zero_i64(rst, 8)
     wassat_subst_rewrite(@cmeta, @alive, @arena, @clbd, reprs, mark, ht,
                          units, rst, @ncl, ht.size - 1, plim)
+    @inp_totals[5] = @inp_totals[5] + rst[4]
+    @inp_totals[6] = @inp_totals[6] + rst[5]
+    @inp_totals[7] = @inp_totals[7] + rst[6]
+    wassat_prof_note("subst.hash clauses=[rst[4]] probes=[rst[5]] compared_literals=[rst[6]] max_advance=[rst[7]]") if prof_start != 0
     self.rebuild_watches
     self.rebuild_binaries
     # Mid-search the root is fully propagated, so a rewritten clause can now
@@ -4267,6 +4272,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_prof_note("[label].watch_recycle blocks=[@wp_state[8]] copied=[@wp_state[9]] reclaimed=[@wp_state[10]]")
     wassat_prof_note("[label].sharing exports=[@share_exports] imports=[@share_imports] dropped=[@share_dropped] filtered=[@share_filtered]")
     wassat_prof_note("[label].inprocess_work cancelled=[@inp_totals[0]] units=[@inp_totals[1]] subsume_work=[@inp_totals[2]] scc_work=[@inp_totals[3]] cleaned_literals=[@inp_totals[4]]")
+    wassat_prof_note("[label].subst_hash clauses=[@inp_totals[5]] probes=[@inp_totals[6]] compared_literals=[@inp_totals[7]]")
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
     wassat_prof_note("[label].analysis mark_bytes=[@nvars + 1] reason_bytes=[4 * (@nvars + 1)] shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
     0
@@ -5329,6 +5335,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   st[5] = work_done
   0
 
+# A commutative sum of mixed literal keys preserves clause-order independence.
+# Mixing before summation avoids identical bucket starts for every equal-sum
+# pair of variable indices. Exact literal comparison still decides equality.
+-> wassat_subst_lit_hash(li) (i64) i64
+  x = li * 0x9e3779b97f4a7c15
+  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
+  x = (x ^ (x >> 27)) * 0x94d049bb133111eb
+  x ^ (x >> 31)
+
 # Rewrite every live clause through `reprs`, in place. A mapped clause can
 # only ever shrink (duplicates collapse), so the body stays at its arena
 # offset and only the packed header word and the clause-table length move.
@@ -5340,7 +5355,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # literal with no clearing pass.
 #
 #   st[0] = 1 when a clause became empty   st[1] = units collected
-#   st[2] = clauses rewritten              st[3] = clauses killed as tautologies
+#   st[2] = clauses rewritten              st[3] = tautologies/duplicates removed
+#   st[4] = clauses hashed                  st[5] = occupied slots probed
+#   st[6] = candidate literals compared      st[7] = maximum probe advance
 # `plim` bounds the duplicate table's linear probe (hmask + 1 = unbounded).
 -> wassat_subst_rewrite(cm, alive, ar, clbd, reprs, mark, ht, units, st, ncl, hmask, plim) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
   gen = 0
@@ -5369,7 +5386,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         if mark[li] == gen || mark[li ^ 1] == gen
           hit = 1
         mark[li] = gen
-        acc = acc + li * 1000003
+        acc = acc + wassat_subst_lit_hash(li)
         j += 1
       m = n
       taut = 0
@@ -5396,7 +5413,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             if (li & 1) == 1
               nl = 0 - nl
             ar[stx + m] = nl
-            acc = acc + li * 1000003
+            acc = acc + wassat_subst_lit_hash(li)
             m += 1
           j += 1
         if taut == 1
@@ -5416,13 +5433,16 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         h = acc & hmask
         dup_ci = 0 - 1
         probes = 0
+        st[4] += 1
         while ht[h] != 0 && dup_ci < 0 && probes < plim
+          st[5] += 1
           dci = ht[h] - 1
           if cm[(dci << 1) + 1] == m
             stx2 = cm[dci << 1] ## i64
             same = 1
             q = 0
             while q < m && same == 1
+              st[6] += 1
               l2 = ar[stx2 + q]
               l2i = 0 ## i64
               if l2 > 0
@@ -5437,6 +5457,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           if dup_ci < 0
             h = (h + 1) & hmask
             probes += 1
+        st[7] = probes if probes > st[7]
         if dup_ci >= 0
           if clbd[ci] == 0 && clbd[dup_ci] > 0
             clbd[dup_ci] = 0

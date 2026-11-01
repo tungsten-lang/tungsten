@@ -365,3 +365,26 @@ See [LICENSE](LICENSE).
 ## Author
 
 Erik Peterson.
+
+### Package subcommands
+
+`bit NAME SUBCOMMAND` resolves the bit named `NAME` and runs
+`commands/SUBCOMMAND.w`. Nested folders define nested commands, for example
+`commands/db/migrate.w` becomes `bit NAME db migrate`. The longest matching
+command path wins; remaining arguments, including flags and `--`, pass through
+unchanged. Each source uses ordinary `argv()` and relative `use` imports.
+`BIT_PACKAGE_ROOT` and `BIT_COMMAND_NAME` identify the selected package.
+
+`bit NAME`, `bit NAME help`, and `bit help NAME` list commands without running
+package code. Built-in package-manager commands remain reserved. Resolution
+prefers the current project's own namespace, explicit path dependencies, then
+exact installed lockfile entries. A declared dependency without a usable lock
+fails with an installation instruction. Global installed `current` links and
+in-tree toolchain bits provide commands outside a declared dependency. The
+package Bitfile's `name` is the namespace, even when its directory is named
+`tungsten-NAME`. `bit pack` includes the root `commands/` directory automatically.
+
+The repository's `bin/bit` launcher selects that checkout's toolchain; it can be
+symlinked onto PATH. Script arguments are separated from compiler flags at each
+execution boundary. The `av` bit demonstrates a command package with a shared
+implementation under `lib/av/`.

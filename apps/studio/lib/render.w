@@ -176,9 +176,12 @@ use grade
     @seq = {}
     @seq_order = []
     @item_keys = {}
+    @caption_canvas = nil
+    @caption_canvas = Canvas.new(@w, @h) if @proj.ep["burned_captions"] != nil
     @frames_rendered = 0
 
   -> close
+    @caption_canvas.close if @caption_canvas != nil
     @act_a.close
     @act_b.close
     @layer0.close
@@ -806,6 +809,21 @@ use grade
       rem = (fit["f1"] - f + ~0.0) / (nd + ~0.0)
       pw = to_f(fit["params"]["power"])
       rs_scale_rgb(@out, n3, Math.exp(pw * Math.log(rem)))
+    if @caption_canvas != nil
+      ms = f * @r["rate"][1] * 1000 / @r["rate"][0]
+      @proj.ep["burned_captions"].each ->(cue)
+        if cue["start_ms"] <= ms && ms < cue["end_ms"]
+          c = @caption_canvas
+          rs_rgb_to_canvas(@out, @w, @h, c.data_pointer, c.stride)
+          b = cue["box"]
+          c.rect(b[0], b[1], b[2], b[3], fill: cue["background"])
+          cue["lines"].each ->(line)
+            c.save
+            c.translate(line["x"], line["y"])
+            line["paths"].each ->(path)
+              c.path(path, fill: cue["foreground"])
+            c.restore
+          rs_copy_rgb(c.data_pointer, c.stride, @w, @h, @out)
     @frames_rendered += 1
     @out
 

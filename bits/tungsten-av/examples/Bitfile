@@ -1,0 +1,12 @@
+name "example-film"
+version "0.1.0"
+av.project "example-film", source: "input.mov"
+av.output "master", path: "render/master.mov", format: :mov
+av.video "master", codec: :prores422hq
+av.audio "master", codec: :pcm, sample_format: :s24le, sample_rate: 48000, channels: 2
+av.output "share", from: "master", path: "render/share.mp4", format: :mp4, width: 1280, height: 720
+av.video "share", codec: :hevc10, bitrate: "1800k"
+av.audio "share", codec: :aac, bitrate: "192k"
+av.colour "all", primaries: :bt709, transfer: :bt709, matrix: :bt709, range: :limited, untagged: :reject
+av.resources memory_mb: 4096, jobs: 4, animation_jobs: 2, disk_reserve_mb: 1024
+av.publish "upload", root: "upload", profiles: ["master", "share"]

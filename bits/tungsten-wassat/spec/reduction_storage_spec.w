@@ -5,7 +5,7 @@ use ../lib/solver
 # survivor overlaps its old body, so retaining literal order matters.
 -> reduction_storage_fixture(remap)
   cm = i64[8]
-  alive = i64[4]
+  alive = i8[4]
   ar = i64[12]
   lbd = i64[4]
   used = i64[4]
@@ -69,7 +69,7 @@ describe "Wassat reduction storage" ->
 
   it "protects originals, binary clauses, low glue and recently used tier two" ->
     cm = i64[16]
-    alive = i64[8]
+    alive = i8[8]
     lbd = i64[8]
     used = i64[8]
     hist = i64[70]
@@ -93,7 +93,7 @@ describe "Wassat reduction storage" ->
 
   it "handles an empty database without consuming sentinel entries" ->
     cm = i64[1]
-    alive = i64[1]
+    alive = i8[1]
     ar = i64[1]
     lbd = i64[1]
     used = i64[1]

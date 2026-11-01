@@ -50804,6 +50804,7 @@ WValue w_array_new_empty(void) {
     arr->ebits = 65;              /* polymorphic arrays carry ebits=w64 so the */
     arr->_pad[0] = 0;             /* typed-array machinery can drive their reads through */
     arr->_pad[1] = 0;             /* the same `slots` ptr without a struct re-cast. */
+    w_allocprof(W_ALLOCPROF_ARR, sizeof(WValue) * arr->cap);
     arr->slots = malloc(sizeof(WValue) * arr->cap);
     return w_box_array(arr);
 }

@@ -29,6 +29,23 @@ int main(int argc, char **argv) {
     (void)argv;
     const char *e = getenv("TUNGSTEN_ALLOC_PROFILE");
     enabled = e && e[0] == '1';
+    /* Empty polymorphic arrays allocate eight words on a pool miss, and
+     * allocate nothing when the same payload is recycled. Both public
+     * constructors must follow the same accounting contract. */
+    WValue empty = w_array_new_empty();
+    expect(W_ALLOCPROF_ARR, 1, 64);
+    w_array_recycle_public(empty);
+    WValue recycled_empty = w_array_new_empty();
+    assert(recycled_empty == empty);
+    expect(W_ALLOCPROF_ARR, 0, 0);
+    release(recycled_empty);
+    empty = w_array_recycle_or_new_empty();
+    expect(W_ALLOCPROF_ARR, 1, 64);
+    w_array_recycle_public(empty);
+    recycled_empty = w_array_recycle_or_new_empty();
+    assert(recycled_empty == empty);
+    expect(W_ALLOCPROF_ARR, 0, 0);
+    release(recycled_empty);
     /* Seventeen elements force rounding for the packed bool/nibble tiers.
      * Expected byte counts are independent of array_byte_size. */
     const int widths[][2] = {

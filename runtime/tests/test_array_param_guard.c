@@ -42,6 +42,18 @@ int main(void) {
                         widths[wi] == kinds[k][1] && poly == (kinds[k][0] == 65), tier == 2);
         }
     }
+    /* Guard-only oracle: vary metadata without indexing the backing storage.
+     * Unrecognized legacy codes must still follow array_storage_bits. */
+    WValue forged = w_array_new(64, 1);
+    const int all_widths[] = {-1,0,1,4,8,16,32,64,127,128,129};
+    for (int code = -128; code <= 127; ++code) {
+        w_as_array(forged)->ebits = (int8_t)code;
+        for (size_t wi = 0; wi < sizeof(all_widths)/sizeof(all_widths[0]); ++wi)
+            for (int poly = 0; poly < 2; ++poly)
+                check_guard(forged, all_widths[wi], poly,
+                    all_widths[wi] == w_array_storage_bits(code) && poly == (code == 65), 0);
+    }
+    w_as_array(forged)->ebits = 64;
     WValue scalar[] = {W_NIL,W_TRUE,w_int(123),w_string("not an array")};
     for (size_t i = 0; i < sizeof(scalar)/sizeof(scalar[0]); ++i)
         check_guard(scalar[i],64,0,1,0);

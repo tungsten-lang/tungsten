@@ -73860,9 +73860,22 @@ static __attribute__((noinline)) WValue w_check_array_ebits_slow(WValue arr, int
 WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
                            WValue site_v) {
     if (w_is_array(arr)) {
-        int64_t ebits = w_as_array(arr)->ebits;
-        if ((ebits == 65) == (want_poly != 0) &&
-            array_storage_bits(ebits) == want_bits)
+        /* Canonical valid ebits codes, indexed as an unsigned byte.  Bit 7
+         * distinguishes boxed WValues from raw 64-bit storage.  Unknown
+         * codes retain the complete compatibility check in the slow path. */
+        static const uint8_t widths[256] = {
+            [1] = 1, [4] = 4, [(uint8_t)-4] = 4,
+            [8] = 8, [108] = 8, [16] = 16, [116] = 16,
+            [32] = 32, [33] = 32, [64] = 64, [66] = 64,
+            [65] = 128 | 64,
+            [(uint8_t)-16] = 16, [(uint8_t)-32] = 32,
+            [(uint8_t)-64] = 64, [(uint8_t)-116] = 16,
+            [(uint8_t)-108] = 8, [(uint8_t)-109] = 8,
+            [(uint8_t)-104] = 4
+        };
+        unsigned code = widths[(uint8_t)w_as_array(arr)->ebits];
+        if (code && (code & 127) == want_bits &&
+            (code >> 7) == (want_poly != 0))
             return arr;
     }
     return w_check_array_ebits_slow(arr, want_bits, want_poly, site_v);

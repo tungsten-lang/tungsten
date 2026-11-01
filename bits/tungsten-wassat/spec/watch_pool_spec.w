@@ -1,8 +1,7 @@
 use spec
 use ../lib/solver
 
--> pool_fixture(ncl, extra)
-  nlits = 28
+-> pool_fixture(ncl, extra, nlits = 28, overflows = 0)
   ar = i64[4 * ncl + 4]
   cm = i64[2 * ncl]
   alive = i64[ncl]
@@ -23,6 +22,7 @@ use ../lib/solver
   wp = i64[cap + 2]
   ws = i64[12]
   ws[1] = cap
+  ws[7] = overflows
   wp[cap] = 8273
   wp[cap + 1] = 19285
   z = wassat_ws_rebuild(cm, alive, ar, wd, wp, ws, ncl, nlits)
@@ -102,6 +102,23 @@ describe "Wassat watch-pool headroom" ->
 
   it "bounds extra capacity in a dense oversized pool" ->
     pool_check(pool_fixture(2048, 100000))
+
+  it "reserves room for concentrated lists in a globally sparse formula" ->
+    result = pool_fixture(2048, 512, 4096, 3)
+    pool_check(result)
+    expect(result["entries"] < 64 * result["nlits"]).to eq(true)
+    expect(result["wd"][10] > result["wd"][9] + 1).to eq(true)
+    expect(result["ws"][0] <= result["entries"] + result["nlits"] + 256).to eq(true)
+
+  it "keeps sparse lists compact before repeated pool overflows" ->
+    result = pool_fixture(2048, 512, 4096, 2)
+    pool_check(result)
+    expect(result["ws"][0]).to eq(result["entries"] + result["nlits"])
+
+  it "keeps uniformly short lists compact when most variables are unused" ->
+    result = pool_fixture(96, 100000, 4096)
+    pool_check(result)
+    expect(result["ws"][0]).to eq(result["entries"] + result["nlits"])
 
   it "handles an empty watch database without division by zero" ->
     pool_check(pool_fixture(0, 64))

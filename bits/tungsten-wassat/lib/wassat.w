@@ -340,9 +340,13 @@ use portfolio
   # Cache the one full clause-shape pass immediately. Exact structural lanes
   # use it for constant-time admission gates, and ordinary routing reuses the
   # same object below instead of rescanning every unrelated formula.
+  config_started = wassat_prof_clock()
   config = WassatConfig.from_lens(
     formula["nvars"], formula["flat_lens"], formula["flat_ncl"]
   )
+  if config_started != 0
+    z = wassat_prof("config.shape", config_started)
+    z = wassat_prof_note("config.shape scanned_clauses=[formula["flat_ncl"]]")
   wrat_out = wassat_reserve_output(wrat_final, input, "WRAT")
   drat_out = nil
   begin

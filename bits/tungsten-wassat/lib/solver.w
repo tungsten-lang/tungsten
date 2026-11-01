@@ -97,7 +97,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @chrono_t = 50
     @otfs_allowed = @proof_mode == WASSAT_PROOF_NONE && nv < 10000000 && env("WASSAT_OTFS") != "0"
     @kbuf = i64[nv + 2]          # backjump keep-buffer for out-of-order levels
-    @bstate = i64[4]             # dlevel / tsize / qhead across native backjump
+    @bstate = i64[4]             # dlevel / tsize / qhead / cumulative unassignments
     @pwork = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 4] : i64[1]
     @phint = @proof_mode == WASSAT_PROOF_WRAT ? i64[nv + 4] : i64[1]
     if !flat_shell
@@ -4198,6 +4198,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     phase_bytes += @nvars + 1 if @vivify_phase != nil
     phase_bytes += @nvars + 1 if @inp_phase != nil
     wassat_prof_note("[label].phases snapshots=[@pstate[6]] copied_literals=[@pstate[7]] skipped_literals=[@pstate[8]] payload_bytes=[phase_bytes]")
+    wassat_prof_note("[label].backjump unassigned=[@bstate[3]]")
     wassat_prof_note("[label].spine snapshots=[@pstate[9]] scanned_levels=[@pstate[10]] skipped_levels=[@pstate[11]]")
     wassat_prof_note("[label].watches rebuilds=[@wp_state[3]] rebuilt_entries=[@wp_state[4]] relocations=[@wp_state[5]] copied_entries=[@wp_state[6]] overflows=[@wp_state[7]] pool_used=[@wp_state[0]] pool_capacity=[@wp_state[1]]")
     wassat_prof_note("[label].watch_recycle blocks=[@wp_state[8]] copied=[@wp_state[9]] reclaimed=[@wp_state[10]] cancelled_repairs=[@wp_state[11]]")
@@ -7261,6 +7262,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # are kept — re-appended in original order and re-propagated by the caller
 # (st[2] returns the qhead rewind point).
 #   st[0] = dlevel in/out   st[1] = tsize in/out   st[2] = qhead out
+#   st[3] = cumulative unassigned variables (one update per call)
 -> wassat_backjump(tr, tlim, asg, lasg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i64[] i64[] i8[] i8[] i64[] i32[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
   dl = st[0]
   ts = st[1]
@@ -7289,6 +7291,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     tr[ts] = kbuf[i]
     ts += 1
     i -= 1
+  st[3] = st[3] + st[1] - ts
   st[0] = dl
   st[1] = ts
   st[2] = ts - kept

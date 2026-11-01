@@ -17,7 +17,11 @@ EP = pathlib.Path(os.environ.get("TW_FILM_ROOT", str(pathlib.Path(sys.argv[0]).a
 CFG = json.loads((EP / "tools/tw.json").read_text())
 TW = pathlib.Path(os.environ.get("STUDIO_TW", CFG["tungsten"])).expanduser()
 BIN = EP / "render/scenes_bin"
-FPS = 24
+from timeline import Timeline, frame_at, rate
+from process_control import Runner
+PROJECT = Timeline.load(EP, CFG, require_resolved=False)
+FPS = PROJECT.rate
+RUNNER = Runner(float(os.environ.get("TW_STAGE_TIMEOUT", CFG.get("stage_timeout", 3600))))
 args = sys.argv[1:]
 
 
@@ -43,7 +47,7 @@ def build_program():
     """scenes.w from anim/ (fast), then the compile when its text or the compiler changed."""
     t0 = time.time()
     mods = os.environ.get("TW_MODULES", "").split()       # a subset (helpers + finished modules) while others are written
-    subprocess.check_call([sys.executable, str(EP / "tools/build_scenes.py")] + mods, stdout=subprocess.DEVNULL)
+    RUNNER.run([sys.executable, str(EP / "tools/build_scenes.py")] + mods)
     key = sha_bytes((EP / "scenes.w").read_bytes(), compiler_id())
     kf = EP / "render/scenes_bin.key"
     if BIN.exists() and kf.exists() and kf.read_text().strip() == key:
@@ -52,11 +56,8 @@ def build_program():
     part = BIN.with_name("scenes_bin.part")
     log = EP / "render/tungsten/scenes_compile.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    with open(log, "w") as lf:
-        r = subprocess.call([str(TW / "bin/tungsten"), "-o", str(part), str(EP / "scenes.w")], cwd=TW, stdout=lf,
-                            stderr=subprocess.STDOUT)
-    if r != 0:
-        raise SystemExit(f"scenes.w compile failed: {log}")
+    with open(log, "wb") as lf:
+        RUNNER.run([str(TW / "bin/tungsten"), "-o", str(part), str(EP / "scenes.w")], cwd=TW, log=lf)
     part.rename(BIN)
     kf.write_text(key + "\n")
     print(f"anims: compiled scenes.w in {time.time() - t0:.1f} s", flush=True)
@@ -93,7 +94,7 @@ def anim_key(aid, dur, deps, prog_key):
     # the dispatcher's shared code only: its branch list (which modules are compiled in) does not change a frame
     disp = "\n".join(l for l in disp.splitlines()
                      if not re.match(r'\s*(if|elsif) anim_id == "', l) and not re.match(r"\s*draw_[A-Za-z0-9_]+\(svg, db, t, len\)", l))
-    parts = [A.joinpath("core.w").read_bytes(), disp, dur, compiler_id()]
+    parts = [A.joinpath("core.w").read_bytes(), disp, dur, compiler_id(), FPS, PROJECT.width, PROJECT.height]
     for m in sorted(deps.get(aid, {aid})):
         parts += [m, A.joinpath(f"{m}.w").read_bytes()]
     data = [EP / f"data/wb/{aid}.tsv", EP / "data/satori_raw.txt", EP / f"data/cues_{aid}.csv", EP / f"data/words_{aid}.csv", EP / "research/dating_bands.csv",
@@ -118,13 +119,14 @@ def anim_key(aid, dur, deps, prog_key):
 
 def run_range(aid, dur, f0, f1):
     t0 = time.time()
-    r = subprocess.run([str(BIN), "scene", str(EP), aid, dur, str(f0), str(f1)], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"{aid} {f0}..{f1} failed: {r.stdout[-400:]} {r.stderr[-400:]}")
+    RUNNER.run([str(BIN), "scene", str(EP), aid, dur, str(f0), str(f1)])
     return aid, f0, f1, time.time() - t0
 
 
 def main():
+    authored=CFG.get('scene_rate',[24,1] if CFG.get('generator_clock')!='env-v1' else None)
+    if authored and rate(authored)!=FPS:
+        raise ValueError('authored scene_rate differs from the selected cut')
     if args[:1] != ["still"]:
         for gate in CFG.get("gates", []):
             match = re.search(gate["pattern"], (EP / gate["file"]).read_text(), re.M)
@@ -135,7 +137,7 @@ def main():
         aid, t, out = args[1], float(args[2]), args[3]
         build_program()
         dur = {r["id"]: r["dur"] for r in csv.DictReader(open(EP / "data/anim_durations.csv"))}[aid]
-        subprocess.check_call([str(BIN), "still", str(EP), aid, dur, str(t), out])
+        RUNNER.run([str(BIN), "still", str(EP), aid, dur, str(t), out])
         return
     jobs = int(opt("--jobs", "10"))
     only = set(opt("--only", "").split())
@@ -149,7 +151,7 @@ def main():
         aid, dur = r["id"], r["dur"]
         if only and aid not in only:
             continue
-        nf = int(round(float(dur) * FPS))
+        nf = frame_at(dur, FPS)
         d = EP / f"anim_frames/{aid}"
         key = anim_key(aid, dur, deps, prog_key)
         kf = d / ".key"
@@ -192,4 +194,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with RUNNER.signals():
+        main()

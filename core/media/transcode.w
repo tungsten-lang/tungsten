@@ -18,7 +18,7 @@
 # times wander a little (the legacy one has a 513-tick frame) still maps
 # each frame to its own index.
 #
-# Transcoding. By default (via: :yuv) frames decode to 8-bit 4:2:0 and the
+# Transcoding. By default (via: :yuv) frames decode to P010 10-bit 4:2:0 and the
 # Y' and CbCr planes are resampled separately (Scaler's filters, chroma
 # siting honoured on both sides) straight into the encoder's buffers: no
 # colour conversion, so the BT.709 values of the master carry over. via:
@@ -46,13 +46,13 @@
 + VideoDecoder
   ro :source, :format, :width, :height, :rate, :handle, :frame
 
-  # VideoDecoder.new(source, format: :rgba (:bgra, :nv12), start: 0, rate: nil)
+  # VideoDecoder.new(source, format: :rgba (:bgra, :nv12, :p010), start: 0, rate: nil, timeout_ms: 30000)
   # source: a movie path, or an Array of segment files (in order).
   -> new(@source, opts = {})
     @format = Transcode.opt(opts, :format, "rgba").to_s
     r = Transcode.opt(opts, :rate, nil)
     rr = r == nil ? [0, 0] : Timecode.rate(r)
-    @handle = ccall("w_media_decoder_open", @source, @format, [Transcode.opt(opts, :start, 0), rr[0], rr[1]])
+    @handle = ccall("w_media_decoder_open", @source, @format, [Transcode.opt(opts, :start, 0), rr[0], rr[1], Transcode.opt(opts, :timeout_ms, 30000)])
     @width = ccall("w_media_decoder_info", @handle, "width")
     @height = ccall("w_media_decoder_info", @handle, "height")
     @rate = ccall("w_media_decoder_info", @handle, "rate")
@@ -61,7 +61,7 @@
 
   # Bytes in one frame of this format.
   -> frame_bytes
-    @format == "nv12" ? @width * @height + ((@width + 1) / 2) * 2 * ((@height + 1) / 2) : @width * @height * 4
+    (@format == "nv12" || @format == "p010") ? ((@width + 1) / 2) * 2 * (@height + (@height + 1) / 2) * (@format == "p010" ? 2 : 1) : @width * @height * 4
 
   # The next frame (presentation order) into buf (a u8[] / ByteArray /
   # address; nil: one buffer the decoder keeps), or nil at the end. #frame
@@ -86,6 +86,9 @@
 
   -> decode_seconds
     ccall("w_media_decoder_info", @handle, "decode_s")
+
+  -> cancel
+    ccall("w_media_decoder_info", @handle, "cancel")
 
   -> close
     ccall("w_media_decoder_close", @handle)
@@ -366,7 +369,21 @@
             ["speed", Transcode.opt(o, :speed, false)], ["format", Transcode.opt(o, :format, nil)],
             ["audio", audio == nil ? nil : audio.to_s], ["audio_src", audio_src], ["audio_kbps", Transcode.opt(o, :audio_kbps, nil)],
             ["tc", tc_frame], ["drop", drop], ["quanta", Timecode.quanta(rate)], ["chapters", chs],
-            ["faststart", Transcode.opt(o, :faststart, true)], ["edit_lists", Transcode.opt(o, :edit_lists, true)]]
+            ["faststart", Transcode.opt(o, :faststart, true)], ["edit_lists", Transcode.opt(o, :edit_lists, true)], ["timeout_ms", Transcode.opt(o, :timeout_ms, 30000)],
+            ["cancel_file", Transcode.opt(o, :cancel_file, nil)]]
+    resume = Transcode.opt(o, :resume_dir, nil)
+    if resume != nil
+      raise "Transcode: resumable sources must be a movie" if !movie
+      inputs = [ccall("w_media_source_hash", src)]
+      inputs << ccall("w_media_source_hash", audio_src) if audio_src != nil
+      identity = []
+      spec.each ->(pair)
+        identity << pair if pair[0] != "dst" && pair[0] != "timeout_ms" && pair[0] != "cancel_file"
+      # Version the numerical/segment contract as well as the source bytes.
+      key = Crypto.sha256(JSON.encode(["av-resume-v2-p010", identity, inputs]))
+      directory = File.expand_path(resume.to_s) + "/" + key
+      Dir.mkdir_p(directory)
+      spec << ["resume_dir", directory]
     t0 = clock()
     th = ccall("w_media_transcode_new", spec)
     done = false
@@ -427,7 +444,7 @@
     if codec != nil && prores.has_key?(codec.to_s)
       w = Transcode.opt(o, :width, f[:width])
       h = Transcode.opt(o, :height, f[:height])
-      ok = f[:codec] == prores[codec.to_s] && f[:width] == w && f[:height] == h
+      ok = f[:codec] == prores[codec.to_s] && f[:width] == w && f[:height] == h && f[:bit_depth] == 10 && f[:chroma_format] == 2
       r[:checks] << {name: "preset", ok: ok, detail: "[f[:codec]] (want [prores[codec.to_s]]), [f[:width]]x[f[:height]] (want [w]x[h])"}
       r[:ok] = r[:ok] && ok
       return r

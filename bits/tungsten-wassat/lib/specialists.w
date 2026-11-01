@@ -3,10 +3,10 @@
 # recognizer in its own file; this dispatcher is the one place that knows
 # their order, their cheap admission gates, and their names.
 #
-# Admission uses one shared pass over the flat clause arrays (the
-# fingerprint) instead of every lane rescanning the formula to discover it
-# does not apply. Every gate below is implied by the lane's own internal
-# checks, so gating here cannot change which lane answers -- only how much
+# Header-only gates first identify lanes that need the fingerprint. When
+# any remain, one shared pass over the flat clause arrays replaces each
+# lane rescanning the formula to discover it does not apply. Every gate
+# below is implied by the lane's own internal checks, so gating here cannot change which lane answers -- only how much
 # work a miss costs. A lane that answers records its name in
 # result["lane"], which the CLI prints as a `c lane:` line and the SC2026
 # harness records per row.
@@ -66,16 +66,31 @@
     res["status"] = 0
   res
 
+# Header-only admission for the three lanes that consume the fingerprint.
+# Bits: 1 SDP, 2 symmetry fixing, 4 windmill. Other lanes do not need it.
+-> wassat_specialist_fingerprint_mask(nv, ncl, windmill_enabled) (i64 i64 bool) i64
+  mask = 0
+  mask = mask | 1 if nv >= 10000 && nv <= 250000 && ncl >= 15000 && ncl <= 350000
+  mask = mask | 2 if nv >= 100 && nv <= 40000 && ncl >= 500 && ncl <= 1200000
+  mask = mask | 4 if windmill_enabled && nv >= 20000 && nv <= 2000000 && ncl >= 100000 && ncl <= 20000000
+  mask
+
 -> wassat_specialists_solve(formula, result, proof_mode = 0, conflict_cap = 0, dual_drat = false, total_budget = 0)
   return result unless formula.has_key?("flat_ncl")
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
   fp = i64[6]
-  wassat_fingerprint_scan(
-    formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], ncl, fp
-  )
+  mask = wassat_specialist_fingerprint_mask(nv, ncl, env("WASSAT_WINDMILL") != "0")
   tprof = wassat_prof_clock
-  if nv >= 10000 && nv <= 250000 && ncl >= 15000 && ncl <= 350000 && fp[0] <= 3
+  if mask != 0
+    wassat_fingerprint_scan(
+      formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], ncl, fp
+    )
+  tprof = wassat_prof("specialists.fingerprint", tprof)
+  if env("WASSAT_PROFILE") == "1"
+    scanned = mask != 0 ? ncl : 0
+    z = wassat_prof_note("specialists.fingerprint eligible_mask=[mask] scanned_clauses=[scanned]")
+  if (mask & 1) != 0 && fp[0] <= 3
     res = wassat_sdp_solve(formula, result)
     tprof = wassat_prof("lane.sdp", tprof)
     if res["status"] != 0
@@ -107,7 +122,7 @@
       if res["status"] != 0
         res["lane"] = "sgi_mcsplit"
         return res
-    if nv <= 40000 && ncl >= 500 && ncl <= 1200000 && fp[4] >= 10
+    if (mask & 2) != 0 && fp[4] >= 10
       res = wassat_symmetry_fix_solve(formula, result)
       tprof = wassat_prof("lane.symmetry_fix", tprof)
       if res["status"] != 0
@@ -125,7 +140,7 @@
     if res["status"] != 0
       res["lane"] = "vdwb"
       return res
-  if env("WASSAT_WINDMILL") != "0" && nv >= 20000 && nv <= 2000000 && ncl >= 100000 && ncl <= 20000000 && fp[0] <= 64
+  if (mask & 4) != 0 && fp[0] <= 64
     res = wassat_windmill_solve(formula, result, total_budget)
     tprof = wassat_prof("lane.windmill", tprof)
     if res["status"] == 1

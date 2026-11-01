@@ -3633,7 +3633,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       self.init_var_tables(false)
       nbins = pm[7]
       nlong = pm[8]
-      @wp_cap = 2 * (nlong + head) + 2 * @nvars + 1048576
+      # After one reserved slot per literal, a fixed million spare entries
+      # forces huge databases to rebuild for small amounts of watch movement.
+      # Keep proportional relocation space while retaining this compact pool.
+      @wp_cap = 2 * (nlong + head) + 2 * @nvars + 1048576 + nlong / 4
       @wpool = i64[@wp_cap]
       @wp_state[0] = 0
       @wp_state[1] = @wp_cap

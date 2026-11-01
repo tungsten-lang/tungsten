@@ -318,19 +318,33 @@ use portfolio
   proof_mode = WASSAT_PROOF_NONE
   proof_mode = WASSAT_PROOF_DRAT unless drat_final == nil
   proof_mode = WASSAT_PROOF_WRAT unless wrat_final == nil
-  # Read the formula BEFORE touching any destination; only then truncate.
+  # Open/read the input before touching any proof destination. Large inputs
+  # stay mapped through strict count/fill scans and are closed on every exit.
   tprof = wassat_prof_clock
-  cnf_text = read_file(input)
-  raise "cannot read input formula '[input]'" if cnf_text == nil
-  if wrat_final != nil && wrat_final != "-" && drat_final != nil && drat_final != "-"
-    raise "hinted and DRAT outputs resolve to the same file" if wassat_same_file?(wrat_final, drat_final)
-  # Clear stale finals before parsing, but create no temporary artifact until
-  # strict DIMACS validation succeeds. A malformed input therefore leaves
-  # neither an old proof nor a leaked temp file.
-  wassat_clear_output(wrat_final, input, "WRAT")
-  wassat_clear_output(drat_final, input, "DRAT")
-  formula = wassat_parse_cnf_native(cnf_text)
-  z = ccall("w_value_free_w", cnf_text)
+  cnf_text = ""
+  cnf_mapping = nil
+  input_bytes = File.size(input)
+  if input_bytes != nil && input_bytes > 2147483647
+    cnf_mapping = File.mmap(input)
+  else
+    cnf_text = read_file(input)
+    raise "cannot read input formula '[input]'" if cnf_text == nil
+  formula = nil
+  begin
+    if wrat_final != nil && wrat_final != "-" && drat_final != nil && drat_final != "-"
+      raise "hinted and DRAT outputs resolve to the same file" if wassat_same_file?(wrat_final, drat_final)
+    # Malformed input leaves neither a stale final nor a leaked temporary.
+    wassat_clear_output(wrat_final, input, "WRAT")
+    wassat_clear_output(drat_final, input, "DRAT")
+    if cnf_mapping == nil
+      formula = wassat_parse_cnf_native(cnf_text)
+    else
+      formula = wassat_parse_cnf_mapped(cnf_mapping)
+  ensure
+    if cnf_mapping != nil
+      cnf_mapping.close
+    else
+      z = ccall("w_value_free_w", cnf_text)
   cnf_text = ""
   tprof = wassat_prof("cli.parse", tprof)
   parity_source = nil

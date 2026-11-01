@@ -28,21 +28,47 @@ use klieber_local
     ti = 0
     while ti < ntargets
       tl = targets[ti]
-      tv = wassat_multiplier_abs(tl)
+      tv = wassat_multiplier_abs(tl) ## i64
       t_inv = tl < 0 ? -1 : 0 ## i64
-      tw = val[tv] ^ t_inv
+      tw = val[tv] ^ t_inv ## i64
       t_scores[ti] += 1 if tw != 0
       ti += 1
     s += step_b
   0
 
--> wassat_klieber_eval_chunk(wval, p_masks, ga, gna, gb, gnb, gpol, stage_gates, stage_off, targets, found, p, ntargets, b_lo, b_hi) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64) i64
+# Sequential records avoid gathering five separate gate arrays in every batch.
+# All admitted variable ids fit i32; sign masks must sign-extend from -1/0.
+-> wassat_klieber_pack_stages(program, gates, ga, gna, gb, gnb, gpol, n) (i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  i = 0
+  while i < n
+    u = gates[i]
+    program[6 * i] = u
+    program[6 * i + 1] = ga[u]
+    program[6 * i + 2] = gna[u]
+    program[6 * i + 3] = gb[u]
+    program[6 * i + 4] = gnb[u]
+    program[6 * i + 5] = gpol[u]
+    i += 1
+  0
+
+# Reserve the single result slot, write its payload, then release-publish it.
+# Other workers treat a reservation as a stop; the caller joins before reading.
+-> wassat_klieber_publish(found, assignment) (i64[] i64) i64
+  won = ccall("__w_arr_compare_exchange", found, 0, 0, -1)
+  if won == 1
+    found[1] = assignment
+    z = ccall("__w_arr_store_rel", found, 0, 1)
+  won
+
+-> wassat_klieber_eval_packed(wval, p_masks, program, stage_off, targets, found, p, ntargets, b_lo, b_hi, work, slot) (i64[] i64[] i32[] i64[] i64[] i64[] i64 i64 i64 i64 i64[] i64) i64
   k = 0
   while k < 6
     wval[k + 1] = p_masks[k]
     k += 1
+  gates = 0
+  stages = 0
   b = b_lo
-  while b < b_hi && found[0] == 0
+  while b < b_hi && wassat_stop_load(found) == 0
     k = 6
     while k < p
       wval[k + 1] = ((b >> (k - 6)) & 1) != 0 ? -1 : 0
@@ -50,18 +76,20 @@ use klieber_local
     mask = -1 ## i64
     st = 0
     while st < ntargets && mask != 0
-      g_idx = stage_off[st]
-      g_end = stage_off[st + 1]
+      g_idx = 6 * stage_off[st]
+      g_end = 6 * stage_off[st + 1]
+      gates += (g_end - g_idx) / 6
+      stages += 1
       while g_idx < g_end
-        u = stage_gates[g_idx]
-        va = wval[ga[u]] ^ gna[u]
-        vb = wval[gb[u]] ^ gnb[u]
-        wval[u] = (va & vb) ^ gpol[u]
-        g_idx += 1
+        u = program[g_idx]
+        va = wval[program[g_idx + 1]] ^ program[g_idx + 2]
+        vb = wval[program[g_idx + 3]] ^ program[g_idx + 4]
+        wval[u] = (va & vb) ^ program[g_idx + 5]
+        g_idx += 6
       tl = targets[st]
-      tv = wassat_multiplier_abs(tl)
+      tv = wassat_multiplier_abs(tl) ## i64
       t_inv = tl < 0 ? -1 : 0 ## i64
-      tw = wval[tv] ^ t_inv
+      tw = wval[tv] ^ t_inv ## i64
       mask = mask & tw
       st += 1
     if mask != 0
@@ -69,9 +97,11 @@ use klieber_local
       while lane < 64 && ((mask >> lane) & 1) == 0
         lane += 1
       if lane < 64
-        found[1] = (b << 6) | lane
-        found[0] = 1
+        wassat_klieber_publish(found, (b << 6) | lane)
     b += 1
+  work[slot] = b - b_lo
+  work[slot + 1] = gates
+  work[slot + 2] = stages
   0
 
 # Staged 64-bit bitwise cone evaluator for small-input 2-input AND/OR circuits
@@ -182,7 +212,8 @@ use klieber_local
     if env("WASSAT_PROFILE") == "1"
       wassat_prof_note("klieber local: ms=[clock_ms() - started] batches=[found[2]] gates=[found[3]] best=[found[4]] stop=[found[5]] found=[found[0]]")
   else
-    # Score each target on 32 evenly-spaced batches to put the most selective target first
+    t_exhaustive = wassat_prof_clock()
+    # Score spaced sample batches to put the most selective target first
     p_masks = i64[6]
     p_masks[0] = -6148914691236517206 ## i64
     p_masks[1] = -3689348814741910324 ## i64
@@ -239,6 +270,9 @@ use klieber_local
           u += 1
       ti += 1
     stage_off[ntargets] = sg_len
+    program = i32[6 * sg_len]
+    wassat_klieber_pack_stages(program, stage_gates, ga, gna, gb, gnb, gpol, sg_len)
+    t_exhaustive = wassat_prof("klieber.prepare", t_exhaustive)
 
     # Search all n_batches across 4 worker threads
     found[0] = 0
@@ -246,21 +280,30 @@ use klieber_local
     n_workers = 4
     n_workers = 1 if n_batches < 64
     chunk = (n_batches + n_workers - 1) / n_workers
+    # Separate worker counters by more than a cache line; read after joining.
+    work = i64[16 * n_workers]
     handles = []
     wi = 0
     while wi < n_workers
       b_lo = wi * chunk
       b_hi = b_lo + chunk
       b_hi = n_batches if b_hi > n_batches
+      slot = 16 * wi
       th = Thread.new ->
         wval = i64[nv + 1]
-        wassat_klieber_eval_chunk(wval, p_masks, ga, gna, gb, gnb, gpol, stage_gates, stage_off, targets, found, p, ntargets, b_lo, b_hi)
+        wassat_klieber_eval_packed(wval, p_masks, program, stage_off, targets, found, p, ntargets, b_lo, b_hi, work, slot)
       handles.push(th)
       wi += 1
     wi = 0
     while wi < handles.size
       z = handles[wi].join
       wi += 1
+    t_exhaustive = wassat_prof("klieber.search", t_exhaustive)
+    if env("WASSAT_PROFILE") == "1"
+      wi = 0
+      while wi < n_workers
+        wassat_prof_note("klieber exhaustive: worker=[wi] batches=[work[16 * wi]] gates=[work[16 * wi + 1]] stages=[work[16 * wi + 2]]")
+        wi += 1
   return [] if found[0] == 0 || found[1] < 0
 
   win_idx = found[1]

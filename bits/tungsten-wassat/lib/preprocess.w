@@ -232,6 +232,15 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @clauses_subsumed = 0
     @clauses_strengthened = 0
     @vars_eliminated = 0
+    @compact_after_eliminated = 0
+    @compact_retry_fasize = 0
+    @storage_compaction_ms = 0
+    @storage_scanned_clauses = 0
+    @storage_compactions = 0
+    @storage_compacted_literals = 0
+    @storage_reclaimed_literals = 0
+    @storage_reclaimed_occurrences = 0
+    @compact_pm = i64[2]
     @bve_hash_probes = 0
     @bve_hash_hits = 0
     @bve_compared_literals = 0
@@ -505,6 +514,28 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       @fsig = sg
       @fpgid = gd
       @fccap = ncap
+    0
+
+  -> compact_live_storage
+    started = wassat_prof_clock
+    before_literals = @fasize
+    before_occurrences = @osize
+    wassat_pre_compact_live(@fla, @fcs, @fcl, @falive, @ftaut,
+                            @oh, @on, @ov, @ncl, @nvars, @compact_pm)
+    @fasize = @compact_pm[0]
+    @osize = @compact_pm[1]
+    @compact_after_eliminated = @vars_eliminated
+    # Repeated tiny deletions must not cause a whole-database scan on every
+    # growth. Require new appended storage proportional to the scan's size
+    # before trying again; ordinary geometric growth remains the fallback.
+    @compact_retry_fasize = @fasize + (@facap + @ncl + 2 * @nvars + 2) / 4
+    @storage_compaction_ms += wassat_prof_clock - started if started != 0
+    @storage_scanned_clauses += @ncl
+    @storage_compactions += 1
+    @storage_compacted_literals += @fasize
+    @storage_reclaimed_literals += before_literals - @fasize
+    @storage_reclaimed_occurrences += before_occurrences - @osize
+    wassat_prof_note("pre.storage compactions=[@storage_compactions] ms=[@storage_compaction_ms] scanned_clauses=[@storage_scanned_clauses] copied_literals=[@storage_compacted_literals] reclaimed_literals=[@storage_reclaimed_literals] reclaimed_occurrences=[@storage_reclaimed_occurrences]") if env("WASSAT_PROFILE") == "1"
     0
 
   -> grow_arena(need)
@@ -1670,6 +1701,15 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @ticks += @bve_pm[7]
     return false if @bve_pm[4] == 0
 
+    # The proposal contains copied literals and stable parent clause ids.
+    # Reclaim before collecting occurrence lists or starting the atomic commit,
+    # and only when this proposal would otherwise grow the backing buffers.
+    needed = @bve_pm[12]
+    if @vars_eliminated > @compact_after_eliminated && @fasize >= @compact_retry_fasize && (@fasize + needed > @facap || @osize + needed > @ocap)
+      return false if self.cancelled
+      self.compact_live_storage
+      return false unless self.within_budget
+
     # commit from the packed buffer: all resolvents added, all originals
     # deleted, or nothing — the atomicity contract is unchanged
     count = @bve_pm[5]
@@ -1976,6 +2016,12 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                  "clauses_subsumed": @clauses_subsumed,
                  "clauses_strengthened": @clauses_strengthened,
                  "vars_eliminated": @vars_eliminated,
+                 "storage_compactions": @storage_compactions,
+                 "storage_compaction_ms": @storage_compaction_ms,
+                 "storage_scanned_clauses": @storage_scanned_clauses,
+                 "storage_compacted_literals": @storage_compacted_literals,
+                 "storage_reclaimed_literals": @storage_reclaimed_literals,
+                 "storage_reclaimed_occurrences": @storage_reclaimed_occurrences,
                  "bve_hash_probes": @bve_hash_probes,
                  "bve_hash_hits": @bve_hash_hits,
                  "bve_compared_literals": @bve_compared_literals,
@@ -2753,6 +2799,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 #   pm[0] pivot  pm[1] margin  pm[2] occ-product cap  pm[3] out capacity
 #   pm[4] feasible(out)  pm[5] resolvent count(out)  pm[6] hash/header cap
 #   pm[7] ticks(out)  pm[8] next lgen(out)
+#   pm[9..11] hash work(out)  pm[12] proposed literal count(out)
 -> wassat_pre_bve_scan(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, lstamp, hbuf, hpos, out, pm, lgen0) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64)
   v = pm[0]
   margin = pm[1]
@@ -2781,6 +2828,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   pm[11] = 0
   pm[9] = 0
   pm[10] = 0
+  pm[12] = 0
   pm[4] = 0
   pm[5] = 0
 
@@ -2958,6 +3006,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       pm[11] = hash_probes
       pm[9] = hash_hits
       pm[10] = compared_literals
+      pm[12] = new_lits
       pm[4] = feasible
       pm[5] = count
       pm[7] = ticks
@@ -3257,3 +3306,37 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     out.push(sign[v] >= 0 ? v : 0 - v)
     v += 1
   out
+
+# Clause ids and proof ids remain stable. Store order makes source offsets
+# monotone, so live literals can be packed down in place. Rebuild occurrence
+# links in the original clause/literal order, leaving heuristic counts intact.
+-> wassat_pre_compact_live(fla, fcs, fcl, alive, taut, oh, ocn, ocv, ncl, nv, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64[])
+  li = 0
+  while li < 2 * nv + 2
+    oh[li] = -1
+    li += 1
+  asize = 0
+  osize = 0
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1
+      old = fcs[ci]
+      n = fcl[ci]
+      fcs[ci] = asize
+      j = 0
+      while j < n
+        l = fla[old + j]
+        fla[asize] = l
+        asize += 1
+        if taut[ci] == 0
+          av = l >= 0 ? l : 0 - l
+          li = (av << 1) + (l < 0 ? 1 : 0)
+          ocn[osize] = oh[li]
+          ocv[osize] = ci
+          oh[li] = osize
+          osize += 1
+        j += 1
+    ci += 1
+  pm[0] = asize
+  pm[1] = osize
+  0

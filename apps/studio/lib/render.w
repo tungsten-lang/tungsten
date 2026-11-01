@@ -362,8 +362,10 @@ use grade
   # ------------------------------------------------------------------------------------------ sources
 
   # A crop of zoom z around (cx, cy) (+ jitter in source pixels), resampled to the active picture. Drawn as the
-  # whole image under a sub-pixel transform (a CoreGraphics crop rect would round to whole source pixels and make
-  # slow moves step).
+  # whole image at its exact fractional position with quality :exact (core/canvas.w: the runtime's own separable
+  # cubic resampler). A CoreGraphics crop rect rounds to whole source pixels, and CGContextDrawImage itself snaps an
+  # axis-aligned draw to the device grid (2026-11-01, Erik on the Upanishads s09 push: "super jittery"): slow moves
+  # held still for frames, then jumped 0.8-0.9 px, and the 0.3 px jitter flipped by whole pixels.
   -> draw_source(canvas, img, z, cx, cy, jx, jy, flip)
     iw = img.width + ~0.0
     ih = img.height + ~0.0
@@ -385,7 +387,7 @@ use grade
       canvas.save
       canvas.translate(@aw, 0)
       canvas.scale_by(-1, 1)
-    canvas.image(img, ~0.0 - x0 * s, ~0.0 - y0 * s, iw * s, ih * s, {fit: :fill, quality: :high})
+    canvas.image(img, ~0.0 - x0 * s, ~0.0 - y0 * s, iw * s, ih * s, {fit: :fill, quality: :exact})
     canvas.restore if flip
     nil
 
@@ -404,7 +406,7 @@ use grade
     x0 = [[cx * iw - cw / ~2.0, ~0.0].max, iw - cw].min
     y0 = [[cy * ih - ch / ~2.0, ~0.0].max, ih - ch].min
     s = (pw + ~0.0) / cw
-    canvas.image(img, ~0.0 - x0 * s, ~0.0 - y0 * s, iw * s, ih * s, {fit: :fill, quality: :high})
+    canvas.image(img, ~0.0 - x0 * s, ~0.0 - y0 * s, iw * s, ih * s, {fit: :fill, quality: :exact})
     nil
 
   # ------------------------------------------------------------------------------------------ items
@@ -563,7 +565,7 @@ use grade
     x0 = [[~0.5 * iw - cw / ~2.0 + jx, ~0.0].max, iw - cw].min
     y0 = [[~0.5 * ih - ch / ~2.0 + jy, ~0.0].max, ih - ch].min
     s = (@aw + ~0.0) / cw
-    canvas.image(img, ~0.0 - x0 * s, ~0.0 - y0 * s, iw * s, ih * s, {fit: :fill, quality: :high, opacity: alpha})
+    canvas.image(img, ~0.0 - x0 * s, ~0.0 - y0 * s, iw * s, ih * s, {fit: :fill, quality: :exact, opacity: alpha})
     nil
 
   # The weights of position pos of the sequence: entry k0 alone, or k0 and k0 + 1 mixed by the fraction.

@@ -1088,6 +1088,17 @@ use portfolio
         scout_path_out = nil
         scout_path_out = i64[12] if scout_path_enabled
         scout_out = []
+        # Wide resolution chains may stall the initial scout. Offer the same
+        # bounded native arm here, with no grace wait after a scout miss.
+        # The established width-four route remains in the post-scout race.
+        cover_workers = 2 + (scout_lucky ? 1 : 0) + (scout_path_enabled ? 1 : 0)
+        cover_workers += 1 if wassat_sls_arm_memory_allowed?(formula)
+        scout_cover_plan = wassat_resolution_cover_plan(formula, cover_workers, true)
+        scout_cover_res = nil
+        scout_cover_h = nil
+        if scout_cover_plan != nil
+          scout_cover_res = i64[scout_nv + 8]
+          scout_cover_h = wassat_cover_start(formula, scout_cover_plan, scout_stop, scout_cover_res, 0)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1175,6 +1186,12 @@ use portfolio
         z = scout_sls_h.join if scout_sls_h != nil
         z = scout_xor_h.join if scout_circuit == nil
         z = scout_path_h.join if scout_path_h != nil
+        if scout_cover_h != nil
+          z = scout_cover_h.join
+          if env("WASSAT_PROFILE") == "1"
+            cover_tail = scout_cover_res[0] != 0 ? clock_ms() - scout_cover_res[scout_nv + 5] : 0
+            wassat_cover_profile("scout.cover", scout_cover_plan, scout_cover_res[0])
+            wassat_prof_note("scout.cover answer_to_join_ms=[cover_tail]")
         if scout_path_enabled && env("WASSAT_PROFILE") == "1"
           path_tail = scout_path_out[9] > 0 ? ccall("__w_clock_ms") - scout_path_out[9] : 0
           wassat_prof_note("path_cover width=[scout_path_out[1]] work=[scout_path_out[2]] removed=[scout_path_out[3]] empty_axis=[scout_path_out[4]] empty_index=[scout_path_out[5]] stopped=[scout_path_out[6]] recognized=[scout_path_out[7]] stop_tail_ms=[path_tail]")
@@ -1185,6 +1202,27 @@ use portfolio
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_cover_res != nil && scout_cover_res[0] != 0
+          cover_scout = scout_out[0]
+          budget_used += cover_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          cover_status = scout_cover_res[0]
+          if cover_status == 1
+            cmodel = []
+            v = 1
+            while v <= scout_nv
+              cmodel.push(scout_cover_res[v] == 1 ? v : -v)
+              v += 1
+            cmodel = wassat_project_quad_model(cmodel, quad_shift, orig_nvars) if quad_shift > 0
+            unless wassat_model_satisfies?(orig_formula, cmodel)
+              raise "internal error: resolution-cover model does not satisfy the input formula"
+            wassat_print_sat_model(cmodel, false)
+          else
+            << "s UNSATISFIABLE"
+          << "c mode: fast (checked resolution-cover scout)"
+          << "c conflicts: [budget_used], decisions: [cover_scout["decisions"]], props: [cover_scout["props"]]"
+          << "c stats restarts=[cover_scout["restarts"]] reduces=[cover_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(cover_status == 1 ? 10 : 20)
         if scout_path_enabled && scout_path_out[0] == -1
           path_scout = scout_out[0]
           budget_used += path_scout["conflicts"] if scout_budget == nil

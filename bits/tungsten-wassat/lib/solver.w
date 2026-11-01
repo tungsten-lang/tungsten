@@ -602,6 +602,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @nsubst = 0
     @raw_flat = false
     # Lucky phases run at most once per solver, on the first solve_query.
+    @lucky_cancel_rebuild = false
     @lucky_pending = @config.use_lucky
     self.prepare_walk
 
@@ -896,6 +897,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       self.rebuild_watches
       @pstate[2] = -1
       @pstate[3] = 0
+      # Only lucky dives may abandon this now-consistent propagation queue.
+      # General CDCL and inprocessing callers still require a full fixpoint.
+      if @lucky_cancel_rebuild && wassat_stop_requested?(@stop_cell)
+        @wp_state[11] += 1
+        break
       wassat_propagate(@arena, @assign, @lassign, @level, @reason, @phase,
                        @wsdir, @wpool, @wp_state,
                        @trail, @pstate, @dlevel,
@@ -1125,6 +1131,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     0
 
   -> enable_lucky_once
+    @lucky_cancel_rebuild = false
     @lucky_pending = true
     0
 
@@ -1186,6 +1193,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # dive that got stuck (the trail is returned to a propagated root).
   -> lucky_dive(pol, backward)
     return 0 if wassat_stop_requested?(@stop_cell)
+    @lucky_cancel_rebuild = true
     # backjump(0) declares the whole remaining trail propagated (it sets
     # @qhead to the trail size), so it is NOT a safe way to reach a
     # propagated root: load_flat deliberately hands the solver its input
@@ -1195,6 +1203,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     self.backjump(0) if @dlevel > 0
     if self.propagate >= 0
       @formula_unsat = true
+      @lucky_cancel_rebuild = false
       return 0 - 1
     stuck = 0
     i = 0
@@ -1226,15 +1235,23 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # lucky_probe report a miss; the winning arm owns the real verdict.
     if wassat_stop_requested?(@stop_cell)
       self.backjump(0)
+      # Backjump skips an already-root queue. Replay retained root units if
+      # this private solver is later resumed after a cancelled repair.
+      @qhead = 0
+      @lucky_cancel_rebuild = false
       return 0
     if stuck == 2
       @formula_unsat = true
       self.backjump(0)
+      @lucky_cancel_rebuild = false
       return 0 - 1
     if stuck == 1
       self.backjump(0)
       z = self.propagate
+      @qhead = 0 if wassat_stop_requested?(@stop_cell)
+      @lucky_cancel_rebuild = false
       return 0
+    @lucky_cancel_rebuild = false
     1
 
   # Pop assigned entries lazily until the highest-activity unassigned
@@ -3632,6 +3649,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # list, then installs the real formula policy here. Lucky is formula
     # shaped, so retaining the shell's cached value silently bypasses gates
     # such as the dense-ternary ntil policy.
+    @lucky_cancel_rebuild = false
     @lucky_pending = @config.use_lucky
     sncl = art["fncl"]
     raise "clause count exceeds signed 32-bit packed representation" if sncl > WASSAT_MAX_CLAUSE_INDEX + 1
@@ -4269,7 +4287,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_prof_note("[label].phases snapshots=[@pstate[6]] copied_literals=[@pstate[7]] skipped_literals=[@pstate[8]] payload_bytes=[phase_bytes]")
     wassat_prof_note("[label].spine snapshots=[@pstate[9]] scanned_levels=[@pstate[10]] skipped_levels=[@pstate[11]]")
     wassat_prof_note("[label].watches rebuilds=[@wp_state[3]] rebuilt_entries=[@wp_state[4]] relocations=[@wp_state[5]] copied_entries=[@wp_state[6]] overflows=[@wp_state[7]] pool_used=[@wp_state[0]] pool_capacity=[@wp_state[1]]")
-    wassat_prof_note("[label].watch_recycle blocks=[@wp_state[8]] copied=[@wp_state[9]] reclaimed=[@wp_state[10]]")
+    wassat_prof_note("[label].watch_recycle blocks=[@wp_state[8]] copied=[@wp_state[9]] reclaimed=[@wp_state[10]] cancelled_repairs=[@wp_state[11]]")
     wassat_prof_note("[label].sharing exports=[@share_exports] imports=[@share_imports] dropped=[@share_dropped] filtered=[@share_filtered]")
     wassat_prof_note("[label].inprocess_work cancelled=[@inp_totals[0]] units=[@inp_totals[1]] subsume_work=[@inp_totals[2]] scc_work=[@inp_totals[3]] cleaned_literals=[@inp_totals[4]]")
     wassat_prof_note("[label].subst_hash clauses=[@inp_totals[5]] probes=[@inp_totals[6]] compared_literals=[@inp_totals[7]]")
@@ -6139,25 +6157,31 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # the entire database. Keep the other half free for those relocations,
   # and cap headroom at 25% of live entries to retain locality.
   entries = 0
+  dense_entries = 0
   li = 0
   while li < nlits
-    entries += wd[(li << 2) + 1]
+    count = wd[(li << 2) + 1]
+    entries += count
+    dense_entries += count if count >= 64
     li += 1
   wst[3] = wst[3] + 1
   wst[4] = wst[4] + entries
+  # Preserve the compact sparse layout until repeated overflows demonstrate
+  # thrashing. Reserving space on the first build can instead cause an extra
+  # repack by crowding out relocations of the many short lists.
+  sparse = entries < 64 * nlits
+  reserve_entries = sparse ? dense_entries : entries
+  reserve_entries = 0 if sparse && wst[7] < 3
   slack = (wst[1] - entries - nlits) / 2
   slack = 0 if slack < 0
-  slack = entries / 4 if slack > entries / 4
-  # Sparse databases benefit from the compact layout. Reserve extra space
-  # only once the average literal has at least 64 long-clause watches.
-  slack = 0 if entries < 64 * nlits
+  slack = reserve_entries / 4 if slack > reserve_entries / 4
   top = 0
   li = 0
   while li < nlits
     d = li << 2 ## i64
     count = wd[d + 1]
     capacity = count + 1
-    capacity += slack * count / entries if entries > 0
+    capacity += slack * count / reserve_entries if reserve_entries > 0 && (!sparse || count >= 64)
     wd[d] = top
     wd[d + 3] = top
     wd[d + 2] = capacity

@@ -102,6 +102,32 @@
     lowering_infer_maps[:typed_fn_return_names][node.name] = true
   typed_call_signature_key(node.name, node.param_types)
 
+# A typed free function's physical signature includes trailing defaults. Match
+# a shorter source call against the provided prefix, then let its entry guards
+# supply missing arguments before unboxing.
+-> typed_default_call_key(mod, name, arg_types)
+  found = nil
+  keys = mod[:known_fn_defs].keys()
+  i = 0
+  while i < keys.size()
+    key = keys[i]
+    definition = mod[:known_fn_defs][key]
+    if definition != nil && definition.name == name && definition.param_types != nil && arg_types.size() < definition.params.size()
+      matches = true
+      j = 0
+      while j < definition.params.size()
+        if j < arg_types.size()
+          expected = normalize_type_symbol(definition.param_types[j])
+          matches = false if arg_types[j] != nil && arg_types[j] != expected
+        elsif definition.params[j].default == nil
+          matches = false
+        j += 1
+      if matches
+        return nil if found != nil && found != key
+        found = key
+    i += 1
+  found
+
 -> mangle_type_signature(types)
   out = StringBuffer(types.size() * 16)
   i = 0

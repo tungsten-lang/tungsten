@@ -14,4 +14,8 @@ while [ -L "$BIT_LAUNCHER" ]; do
 done
 BIT_TOOLCHAIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$BIT_LAUNCHER")/.." && pwd -P)
 export TUNGSTEN_ROOT="$BIT_TOOLCHAIN_ROOT"
+# Keep compiler caches with the selected toolchain, including from a foreign cwd.
+if [ -z "${TUNGSTEN_CACHE_DIR:-}" ]; then
+  export TUNGSTEN_CACHE_DIR="$BIT_TOOLCHAIN_ROOT/build/cache"
+fi
 exec "$BIT_TOOLCHAIN_ROOT/bin/tungsten" "$BIT_TOOLCHAIN_ROOT/bits/tungsten-bit/lib/bit.w" -- "$@"

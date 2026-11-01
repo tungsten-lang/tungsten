@@ -2119,6 +2119,10 @@ module Tungsten
         check_for :NAME, :CONSTANT, :ID, :TYPE
         superclass = @token.value
         next_token_skip_space
+        while @token.type?(:SYMBOL) && @token.value.to_s.match?(/\A:[A-Z]/)
+          superclass = AST.intern_name("#{superclass}:#{AST.intern_name_without_prefix(@token.value, ":")}")
+          next_token_skip_space
+        end
         if @token.type?(:"<") && check(GENERIC_ARGS_AHEAD)
           next_token until @token.type?(:">") || @token.type?(:NL) || @token.type?(:EOF)
           consume :">"

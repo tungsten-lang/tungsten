@@ -233,6 +233,10 @@
     @ascii_only = true
     @has_backref = false
     @has_subcall = false
+    # Deep ordinary alternation also spills into the recursive VM branch.
+    # Its save/restore of the subcall cursor needs the empty-stack sentinel
+    # even when this pattern contains no subroutine calls.
+    @cs_top = -1
     @has_pos_anchor = false
     @ignore_case = false
     @multiline = false
@@ -1979,10 +1983,28 @@
       compile_star(child, greedy ? 1 : 0)
     else
       extra = hi - lo
+      # Skipping an optional iteration ends this repetition. Independent
+      # optionals enumerate exponentially many identical ways to consume the
+      # same count on failure (for example an overlong identifier).
+      splits = i64[extra]
       i = 0
       while i < extra
-        compile_opt(child, greedy)
-        i = i + 1
+        split = emit(OP_SPLIT, 0, 0) ## i64
+        splits[i] = split
+        first = @op_len ## i64
+        compile_node(child)
+        set_split(split, first, 0, greedy)
+        i += 1
+      finish = @op_len ## i64
+      aa = @a ## i64[]
+      bb = @b ## i64[]
+      i = 0
+      while i < extra
+        if greedy
+          bb[splits[i]] = finish
+        else
+          aa[splits[i]] = finish
+        i += 1
 
   -> set_split(s_in, pref_in, alt_in, greedy)
     s = s_in ## i64
@@ -2044,9 +2066,13 @@
         pc = pc + 1
       elsif op == OP_SAVE || op == OP_MARK || op == OP_GUARD
         pc = pc + 1
-      elsif lit.size() == 0 && ((op == OP_ANCHOR && aa[pc] == 1) || (op == OP_BOL && !@multiline))
+      elsif lit.size() == 0 && op == OP_ANCHOR && aa[pc] == 1
         @lit_anchored = 1
-        pc = pc + 1
+        pc += 1
+      elsif lit.size() == 0 && op == OP_BOL
+        # ^ is a line anchor on every engine; only \A anchors the string.
+        # A literal-prefix optimization must still search after newlines.
+        pc += 1
       elsif op == OP_ASSERT && (bb[pc] & 15) == 5
         pc = pc + 1
       elsif op == OP_ASSERT_END && aa[pc] == 0

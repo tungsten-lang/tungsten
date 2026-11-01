@@ -57,6 +57,24 @@
   when "file_expand_path_base"
     ccall("__w_file_expand_path_base", args[0], args[1])
 
+  when "file_realpath"
+    ccall("__w_file_realpath", args[0])
+
+  when "file_readlink"
+    ccall("__w_file_readlink", args[0])
+
+  when "file_symlink"
+    ccall("__w_file_symlink", args[0], args[1])
+
+  when "file_basename"
+    ccall("__w_file_basename", args[0])
+
+  when "file_dirname"
+    ccall("__w_file_dirname", args[0])
+
+  when "file_extname"
+    ccall("__w_file_extname", args[0])
+
   when "file_join"
     ccall("__w_file_join", args[0], args[1])
 
@@ -541,7 +559,7 @@
 # List of builtin names
 builtin_names = [
   "puts", "print", "read_file", "read_file_bytes", "file?", "file_exists?", "file_directory?", "read_dir",
-  "file_size", "file_mtime_ns", "file_expand_path", "file_expand_path_base", "file_join", "write_file", "write_file_bytes", "file_stat_data", "tempfile_create", "file_unlink", "file_unlink_strict",
+  "file_size", "file_mtime_ns", "file_expand_path", "file_expand_path_base", "file_join", "file_basename", "file_dirname", "file_extname", "file_realpath", "file_readlink", "file_symlink", "write_file", "write_file_bytes", "file_stat_data", "tempfile_create", "file_unlink", "file_unlink_strict",
   "file_link", "file_chmod", "file_rename", "file_temp_for", "file_fsync", "file_fsync_parent",
   "cache_read", "cache_write",
   "exit", "type", "to_s", "to_i", "class",

@@ -31,19 +31,19 @@
   out = []
 
   parts -> (part)
-    out.push(part) if part != ""
+    out.push(part) if part != "" && !out.include?(part)
 
   out
 
 # Resolve the runtime/ directory.
-# First checks if "runtime/" exists relative to CWD (works during bootstrap).
-# Otherwise resolves relative to the compiler binary's install location.
+# An explicitly selected toolchain wins over a different checkout in CWD.
+# Without one, the local runtime remains useful during bootstrap.
 -> resolve_runtime_dir
-  if file?("runtime/runtime.c")
-    return "runtime/"
   root = env("TUNGSTEN_ROOT")
   if root != nil && root != "" && file?(root + "/runtime/runtime.c")
     return root + "/runtime/"
+  if file?("runtime/runtime.c")
+    return "runtime/"
   ccall("w_runtime_dir")
 
 # CPU names accepted by --cpu are passed to clang command strings, so keep the
@@ -378,7 +378,7 @@
 
   includes = extra_c_includes
 
-  includes -> clang_cmd << inc + " "
+  includes -> clang_cmd << dev_runtime_shell_quote(inc) + " "
 
   if parallel_objs != nil
     clang_cmd << parallel_objs

@@ -127,6 +127,21 @@
     return kw_rebound[pname]
   llvm_param_reg(pname)
 
+# Resolve the boxed missing-argument sentinel before a typed entry unboxes it.
+# Earlier parameter bindings are already available to dependent defaults.
+-> defaulted_param_input(child_ctx, new_fn, param)
+  pname = param_runtime_name(param)
+  input = kwargs_param_input(child_ctx, pname)
+  if param.default == nil
+    return input
+  is_nil = next_temp(new_fn)
+  emit_wire_icmp_i64(new_fn, input, "eq", w_nil.to_s(), is_nil)
+  default_val = lower_expression(child_ctx, param.default)
+  default_reg = ensure_i64_value(new_fn, default_val)
+  result = next_temp(new_fn)
+  emit_wire_select_i64(new_fn, is_nil, input, result, default_reg)
+  result
+
 -> method_lowering_analysis(node)
   cached = ast_analysis_get(node)
   if cached != nil
@@ -1074,50 +1089,24 @@
   if !raw_i64_sig && !raw_int_sig
     emit_kwargs_prologue(child_ctx, new_fn, params, param_names)
 
-  # Unbox ## i64 parameters once at function entry — skipped when this
-  # fn has the raw-i64 ABI (callers pass already-raw values). The
-  # binding still maps the pname to the raw register, so downstream
-  # arithmetic reads it as a raw int.
+  # Defaults apply to boxed entry values; only then unbox machine parameters.
   i = 0
   while i < params.size()
-    pname = param_runtime_name(params[i])
+    p = params[i]
+    pname = param_runtime_name(p)
     pt = child_var_types[pname]
+    input = defaulted_param_input(child_ctx, new_fn, p)
     if is_raw_int_storage_type(pt)
       if raw_i64_sig || raw_int_sig
         child_ctx[:bindings][pname] = llvm_param_reg(pname)
       elsif pt in (:i64 :u64)
-        # Checked unbox: a boxed caller passes values >2^47 as heap bigint
-        # boxes, which the plain shl/ashr nanunbox would pass through as
-        # pointer bits — comparisons inside the body then silently fail
-        # (49-bit flip-graph masks: dup-scan missed, walk crippled). The
-        # runtime w_to_i64/w_to_u64 handles inline and bigint boxes both.
         raw = next_temp(new_fn)
-        emit_wire_call_direct_i64(new_fn, ["i64"], [kwargs_param_input(child_ctx, pname)], nil, nil, machine_unbox_fn(pt), nil, nil, raw)
+        emit_wire_call_direct_i64(new_fn, ["i64"], [input], nil, nil, machine_unbox_fn(pt), nil, nil, raw)
         child_ctx[:bindings][pname] = raw
       else
-        raw = nanunbox_int_emit(new_fn, kwargs_param_input(child_ctx, pname))
-        child_ctx[:bindings][pname] = raw
-    i += 1
-
-  # Emit default parameter guards: if param == nil then param = default
-  # Uses select to pick between param and default value
-  i = 0
-  while i < params.size()
-    p = params[i]
-    if p.default != nil
-      pname = param_runtime_name(p)
-      param_reg = kwargs_param_input(child_ctx, pname)
-      # Check if param is nil (W_NIL = 0)
-      is_nil = next_temp(new_fn)
-      emit_wire_icmp_i64(new_fn, param_reg, "eq", w_nil.to_s(), is_nil)
-      # Lower the default expression
-      default_val = lower_expression(child_ctx, p.default)
-      default_reg = ensure_i64_value(new_fn, default_val)
-      # Select: if nil then default else param
-      result = next_temp(new_fn)
-      emit_wire_select_i64(new_fn, is_nil, param_reg, result, default_reg)
-      # Bind the result so future references to pname use the defaulted value
-      child_ctx[:bindings][pname] = result
+        child_ctx[:bindings][pname] = nanunbox_int_emit(new_fn, input)
+    elsif p.default != nil
+      child_ctx[:bindings][pname] = input
     i += 1
 
   # Pre-scan body for parameter reassignment: create var_slots and initialize
@@ -2383,51 +2372,26 @@
       i += 1
     emit_kwargs_prologue(child_ctx, new_fn, params, kwargs_slot_names)
 
-  # Unbox typed machine-int class-method parameters once at function entry.
-  i = 0
-  while i < params.size()
-    pname = param_runtime_name(params[i])
-    pt = child_var_types[pname]
-    if is_raw_int_storage_type(pt)
-      if raw_abi && is_machine_int64_type(pt)
-        child_ctx[:bindings][pname] = llvm_param_reg(pname)
-      elsif pt in (:i64 :u64)
-        # Checked unbox, mirroring lower_method_def: a boxed caller passes
-        # values >2^47 as heap BigInt boxes, which the plain shl/ashr
-        # nanunbox reads as pointer bits (the lexer's `## i64: tok` packed
-        # tokens hit exactly this — stage 2 lexed garbage). w_to_i64/w_to_u64
-        # handle inline and bigint boxes both.
-        raw = next_temp(new_fn)
-        emit_wire_call_direct_i64(new_fn, ["i64"], [kwargs_param_input(child_ctx, pname)], nil, nil, machine_unbox_fn(pt), nil, nil, raw)
-        child_ctx[:bindings][pname] = raw
-      else
-        raw = nanunbox_int_emit(new_fn, kwargs_param_input(child_ctx, pname))
-        child_ctx[:bindings][pname] = raw
-    i += 1
-
-  # Per-param entry sequence, mirroring the interpreter's binding loop:
-  # the default guard runs first (nil is the missing-argument sentinel),
-  # then the @ivar store uses the guarded value. Historically the ivar
-  # stores ran before ALL the guards, so `-> new(@scale: 2)` stored nil
-  # into @scale whenever the argument was omitted.
+  # Mirror the interpreter's parameter order: default, ivar store, unbox.
   i = 0
   while i < params.size()
     p = params[i]
     pname = param_runtime_name(p)
-    if p.default != nil
-      param_reg = kwargs_param_input(child_ctx, pname)
-      is_nil = next_temp(new_fn)
-      emit_wire_icmp_i64(new_fn, param_reg, "eq", w_nil.to_s(), is_nil)
-      default_val = lower_expression(child_ctx, p.default)
-      default_reg = ensure_i64_value(new_fn, default_val)
-      result = next_temp(new_fn)
-      emit_wire_select_i64(new_fn, is_nil, param_reg, result, default_reg)
-      child_ctx[:bindings][pname] = result
+    pt = child_var_types[pname]
+    input = defaulted_param_input(child_ctx, new_fn, p)
     if p.ivar_assign == true
-      ivar_value = kwargs_param_input(child_ctx, p.name)
-      if p.default != nil && child_ctx[:bindings][p.name] != nil
-        ivar_value = child_ctx[:bindings][p.name]
-      lower_ivar_set_expr(child_ctx, "@" + p.name, typed_value(:i64, ivar_value))
+      lower_ivar_set_expr(child_ctx, "@" + p.name, typed_value(:i64, input))
+    if is_raw_int_storage_type(pt)
+      if raw_abi && is_machine_int64_type(pt)
+        child_ctx[:bindings][pname] = llvm_param_reg(pname)
+      elsif pt in (:i64 :u64)
+        raw = next_temp(new_fn)
+        emit_wire_call_direct_i64(new_fn, ["i64"], [input], nil, nil, machine_unbox_fn(pt), nil, nil, raw)
+        child_ctx[:bindings][pname] = raw
+      else
+        child_ctx[:bindings][pname] = nanunbox_int_emit(new_fn, input)
+    elsif p.default != nil
+      child_ctx[:bindings][pname] = input
     i += 1
 
   # Pre-scan body for parameter reassignment (computed above)

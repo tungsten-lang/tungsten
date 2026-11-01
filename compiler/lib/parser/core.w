@@ -821,6 +821,7 @@
   # -- Expression parsing --
 
   -> is_block_node?(node)
+    return false if ast_get(node, :parenthesized) == true || ast_get(node, :ternary) == true
     t = ast_kind(node)
     if t == :var || t == :ivar || t == :int || t == :string || t == :symbol || t == :binary_op || t == :assign
       return false
@@ -1387,7 +1388,7 @@
   -> parse_ternary_from(condition)
     if @current_type == T_QUESTION
       advance()
-      true_val = parse_expression(false)
+      true_val = parse_assignment()
       # Drop a `## type` ascription on the true branch (e.g.
       # `cond ? 1 ## T : 0 ## T`). v0 doesn't apply the hint;
       # lowering still infers from the underlying expression.
@@ -1395,8 +1396,10 @@
         validate_type_hint_spelling(current_value())
         advance()
       expect_type(T_COLON)
-      false_val = parse_expression(false)
-      return Tungsten:AST:If.new(condition, [true_val], [], [false_val])
+      false_val = parse_assignment()
+      node = Tungsten:AST:If.new(condition, [true_val], [], [false_val])
+      ast_set(node, :ternary, true)
+      return node
     condition
 
   # Space-separated trailing method call: `EXPR .method(args)` binds the call

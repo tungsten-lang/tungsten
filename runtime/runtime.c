@@ -58058,20 +58058,22 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
         /* Literal: optional sign, then digits, then a delimiter. One pass. */
         int neg = 0, signed_tok = 0;
         if (c == '-' || c == '+') { neg = (c == '-'); signed_tok = 1; i++; }
-        int64_t v = 0; int nd = 0;
+        /* The required first digit needs neither multiplication nor a bound check. */
+        if (i >= tlen || !(cls[(unsigned char)tx[i]] & DC_DIGIT)) P_ERR(3);
+        size_t digit_start = i;
+        int64_t v = tx[i++] - '0';
         while (i < tlen && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
             int digit = tx[i] - '0';
             v = v * 10 + digit;
             if (v > 2000000000LL) P_ERR(4);
-            nd++; i++;
+            i++;
         }
-        /* No digits, or trailing junk inside the token, is a bad token. */
-        if (nd == 0) P_ERR(3);
+        /* Trailing junk inside the token is a bad token. */
         if (!AT_BREAK(i)) P_ERR(3);
 
         if (v == 0) {
             /* The terminator is the exact token `0`: -0, +0 and 00 are not. */
-            if (nd != 1 || signed_tok) P_ERR(3);
+            if (i - digit_start != 1 || signed_tok) P_ERR(3);
             if (ncl >= declared) P_ERR(6);
             offs[ncl] = cur_off; lens[ncl] = cur_len;
             ncl++; cur_off = nlits; cur_len = 0;

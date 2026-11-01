@@ -120,6 +120,26 @@ describe "Clause-checked matching parity" ->
     cs = [[1, 2], [-1, 3], [-2, 3], [-1, -3], [-2, -3]]
     expect(parity_result(3, cs)[0]).to eq(-1)
 
+  it "recycles satisfied-clause flags into row IDs without losing rows" ->
+    rows = parity_wide_rows
+    cs = [rows[0], [-10], rows[1], [10, 11], rows[2]]
+    parity_graph(rows).each -> (c)
+      cs.push(c) if c[0] < 0
+    r = parity_result(11, cs, 5)
+    expect(r[0]).to eq(-1)
+    expect(r[6]).to eq(3)
+    expect(r[8]).to eq(45)
+    expect(r[15] > 0).to eq(true)
+    expect(r[16]).to eq(2)
+
+  it "checks a late true literal when an early scan did not cache its clause" ->
+    cs = parity_graph(parity_wide_rows)
+    cs.push([1, 2, 3, 4, 5, 11]); cs.push([11])
+    r = parity_result(11, cs, 5)
+    expect(r[0]).to eq(-1)
+    expect(r[6]).to eq(3)
+    expect(r[16]).to eq(1)
+
   it "observes cancellation, deadlines, and a finite work budget" ->
     f = parity_formula(9, parity_graph(parity_wide_rows)); stop = i64[2]
     z = wassat_stop_cancel(stop)
@@ -127,7 +147,10 @@ describe "Clause-checked matching parity" ->
     expect(r[0]).to eq(0); expect(r[10]).to eq(1); expect(r[4]).to eq(0)
     r = wassat_matching_parity_refute(f, i64[2], clock_ms() - 1)
     expect(r[0]).to eq(0); expect(r[10]).to eq(2)
-    m = i64[15]; m[4] = 100000001
+    m = i64[17]; m[4] = 100000001
+    z = wassat_matching_parity_check(f["flat_lits"], f["flat_offs"], f["flat_lens"], 9, f["flat_ncl"], 5, m, i64[2], 0)
+    expect(z).to eq(0); expect(m[10]).to eq(3)
+    m = i64[17]; m[15] = 100000001
     z = wassat_matching_parity_check(f["flat_lits"], f["flat_offs"], f["flat_lens"], 9, f["flat_ncl"], 5, m, i64[2], 0)
     expect(z).to eq(0); expect(m[10]).to eq(3)
 

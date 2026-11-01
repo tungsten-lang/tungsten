@@ -8,13 +8,13 @@ use cnf
 
 # meta: result, units, resolved units, rounds, literal visits, binary edges,
 # rows, witness rows, exclusion pairs, graph visits, stop reason, start, end,
-# work ticks, components. stop: 1 cancellation, 2 deadline, 3 work limit.
+# work ticks, components, satisfied-cache hits, cached clauses. stop: 1 cancellation, 2 deadline, 3 work limit.
 -> wassat_parity_stop(m, stop, deadline) (i64[] i64[] i64) i64
   if wassat_stop_load(stop) != 0
     m[10] = 1
   elsif deadline > 0 && clock_ms() >= deadline
     m[10] = 2
-  elsif m[4] + m[9] > 100000000
+  elsif m[4] + m[9] + m[15] > 100000000
     m[10] = 3
   m[10]
 
@@ -26,60 +26,71 @@ use cnf
 
 # Result: -1 checked conflict, 0 stopped, 1 saturated. Values are entailed by
 # the original formula throughout; satisfied clauses need no further work.
--> wassat_parity_units(lits, offs, lens, nc, values, m, stop, deadline) (i64[] i64[] i64[] i64 i8[] i64[] i64[] i64) i64
+-> wassat_parity_units(lits, offs, lens, nc, values, done, m, stop, deadline) (i64[] i64[] i64[] i64 i8[] i32[] i64[] i64[] i64) i64
   changed = 1
   while changed != 0
     changed = 0
     ci = 0
     while ci < nc
       return 0 if (ci & 1023) == 0 && wassat_parity_stop(m, stop, deadline) != 0
-      j = 0; open = 0; unit = 0; satisfied = 0
-      while j < lens[ci] && open < 2 && satisfied == 0
-        return 0 if (j & 4095) == 4095 && wassat_parity_stop(m, stop, deadline) != 0
-        l = lits[offs[ci] + j]; v = l < 0 ? -l : l
-        a = values[v]; sign = l < 0 ? -1 : 1
-        if a == sign
-          satisfied = 1
-        elsif a == 0
-          open += 1; unit = l
-        m[4] += 1; j += 1
-      if satisfied == 0 && open < 2
-        return -1 if open == 0
-        v = unit < 0 ? -unit : unit
-        values[v] = unit < 0 ? -1 : 1
-        m[1] += 1; changed = 1
+      if done[ci] != 0
+        m[15] += 1
+      else
+        j = 0; open = 0; unit = 0; satisfied = 0
+        while j < lens[ci] && open < 2 && satisfied == 0
+          return 0 if (j & 4095) == 4095 && wassat_parity_stop(m, stop, deadline) != 0
+          l = lits[offs[ci] + j]; v = l < 0 ? -l : l
+          a = values[v]; sign = l < 0 ? -1 : 1
+          if a == sign
+            satisfied = 1
+          elsif a == 0
+            open += 1; unit = l
+          m[4] += 1; j += 1
+        if satisfied == 1
+          done[ci] = 1; m[16] += 1
+        elsif open < 2
+          return -1 if open == 0
+          v = unit < 0 ? -unit : unit
+          values[v] = unit < 0 ? -1 : 1
+          m[1] += 1; changed = 1
+          done[ci] = 1; m[16] += 1
       ci += 1
   1
 
 # Each pair of consecutive targets records a residual binary clause (a,b)
 # as edges not-a -> b and not-b -> a. Rebuild into the same fixed buffers.
--> wassat_parity_binary(lits, offs, lens, nv, nc, values, head, dest, links, m, stop, deadline) (i64[] i64[] i64[] i64 i64 i8[] i32[] i32[] i32[] i64[] i64[] i64) i64
+-> wassat_parity_binary(lits, offs, lens, nv, nc, values, done, head, dest, links, m, stop, deadline) (i64[] i64[] i64[] i64 i64 i8[] i32[] i32[] i32[] i32[] i64[] i64[] i64) i64
   i = 0
   while i < 2 * nv
     head[i] = 0; i += 1
   count = 0; ci = 0
   while ci < nc
     return -1 if (ci & 1023) == 0 && wassat_parity_stop(m, stop, deadline) != 0
-    j = 0; open = 0; a = 0; b = 0; satisfied = 0
-    while j < lens[ci] && open < 3 && satisfied == 0
-      return -1 if (j & 4095) == 4095 && wassat_parity_stop(m, stop, deadline) != 0
-      l = lits[offs[ci] + j]; v = l < 0 ? -l : l
-      if values[v] == (l < 0 ? -1 : 1)
-        satisfied = 1
-      elsif values[v] == 0
-        if open == 0
-          a = wassat_parity_node(l)
-        else
-          b = wassat_parity_node(l)
-        open += 1
-      m[4] += 1; j += 1
-    if satisfied == 0 && open == 2
-      src = a ^ 1
-      dest[count] = b; links[count] = head[src]; head[src] = count + 1
-      count += 1
-      src = b ^ 1
-      dest[count] = a; links[count] = head[src]; head[src] = count + 1
-      count += 1
+    if done[ci] != 0
+      m[15] += 1
+    else
+      j = 0; open = 0; a = 0; b = 0; satisfied = 0
+      while j < lens[ci] && open < 3 && satisfied == 0
+        return -1 if (j & 4095) == 4095 && wassat_parity_stop(m, stop, deadline) != 0
+        l = lits[offs[ci] + j]; v = l < 0 ? -l : l
+        if values[v] == (l < 0 ? -1 : 1)
+          satisfied = 1
+        elsif values[v] == 0
+          if open == 0
+            a = wassat_parity_node(l)
+          else
+            b = wassat_parity_node(l)
+          open += 1
+        m[4] += 1; j += 1
+      if satisfied == 1
+        done[ci] = 1; m[16] += 1
+      elsif open == 2
+        src = a ^ 1
+        dest[count] = b; links[count] = head[src]; head[src] = count + 1
+        count += 1
+        src = b ^ 1
+        dest[count] = a; links[count] = head[src]; head[src] = count + 1
+        count += 1
     ci += 1
   m[5] = count
   count
@@ -119,35 +130,39 @@ use cnf
   ci = 0; nr = 0
   while ci < nc
     return -1 if (ci & 1023) == 0 && wassat_parity_stop(m, stop, deadline) != 0
-    j = 0; size = 0; eligible = 1
-    while j < lens[ci] && eligible == 1
-      return -1 if (j & 4095) == 4095 && wassat_parity_stop(m, stop, deadline) != 0
-      l = lits[offs[ci] + j]; v = l < 0 ? -l : l
-      if values[v] == (l < 0 ? -1 : 1) || (values[v] == 0 && l < 0)
-        eligible = 0
-      elsif values[v] == 0
-        size += 1
-      m[4] += 1; j += 1
-    if eligible == 1 && size >= min_width && size <= 128
-      rows[nr] = ci
-      j = 0
-      while j < lens[ci]
+    # nr <= ci: writing a row ID only overwrites cache slots already read.
+    if rows[ci] != 0
+      m[15] += 1
+    else
+      j = 0; size = 0; eligible = 1
+      while j < lens[ci] && eligible == 1
         return -1 if (j & 4095) == 4095 && wassat_parity_stop(m, stop, deadline) != 0
         l = lits[offs[ci] + j]; v = l < 0 ? -l : l
-        m[4] += 1
-        if values[v] == 0
-          # Reject duplicate literals rather than treating a repeated variable
-          # in one row as an edge to itself. Reset stamps before this phase.
-          return -1 if seen[v] == ci + 1
-          seen[v] = ci + 1
-          if first[v] == 0
-            first[v] = nr + 1
-          elsif second[v] == 0
-            second[v] = nr + 1
-          else
-            second[v] = -1
-        j += 1
-      nr += 1
+        if values[v] == (l < 0 ? -1 : 1) || (values[v] == 0 && l < 0)
+          eligible = 0
+        elsif values[v] == 0
+          size += 1
+        m[4] += 1; j += 1
+      if eligible == 1 && size >= min_width && size <= 128
+        rows[nr] = ci
+        j = 0
+        while j < lens[ci]
+          return -1 if (j & 4095) == 4095 && wassat_parity_stop(m, stop, deadline) != 0
+          l = lits[offs[ci] + j]; v = l < 0 ? -l : l
+          m[4] += 1
+          if values[v] == 0
+            # Reject duplicate literals rather than treating a repeated variable
+            # in one row as an edge to itself. Reset stamps before this phase.
+            return -1 if seen[v] == ci + 1
+            seen[v] = ci + 1
+            if first[v] == 0
+              first[v] = nr + 1
+            elsif second[v] == 0
+              second[v] = nr + 1
+            else
+              second[v] = -1
+          j += 1
+        nr += 1
     ci += 1
   m[6] = nr
   nr
@@ -195,12 +210,15 @@ use cnf
   values = i8[nv + 1]
   head = i32[2 * nv]; dest = i32[2 * nc]; links = i32[2 * nc]
   seen = i32[2 * nv + 1]
+  # Entailed assignments only grow. Reuse the later row-ID buffer to memoize
+  # satisfied original clauses during propagation and binary extraction.
+  rows = i32[nc]
   rounds = 0; added = 1
   while added > 0 && rounds < 8
-    z = wassat_parity_units(lits, offs, lens, nc, values, m, stop, deadline)
+    z = wassat_parity_units(lits, offs, lens, nc, values, rows, m, stop, deadline)
     return -1 if z == -1
     return 0 if z == 0
-    count = wassat_parity_binary(lits, offs, lens, nv, nc, values, head, dest, links, m, stop, deadline)
+    count = wassat_parity_binary(lits, offs, lens, nv, nc, values, rows, head, dest, links, m, stop, deadline)
     return 0 if count < 0
     added = wassat_parity_resolve(nv, count, values, head, dest, links, seen, m, stop, deadline)
     return -1 if added == -1
@@ -208,7 +226,7 @@ use cnf
     rounds += 1; m[3] = rounds
   # No stale residual graph: only inspect rows after a fixed point.
   return 0 if added > 0
-  rows = i32[nc]; first = i32[nv + 1]; second = i32[nv + 1]
+  first = i32[nv + 1]; second = i32[nv + 1]
   i = 0
   while i <= 2 * nv
     seen[i] = 0; i += 1
@@ -250,7 +268,7 @@ use cnf
   0
 
 -> wassat_matching_parity_refute(formula, stop, deadline = 0, min_width = 5)
-  m = i64[15]
+  m = i64[17]
   m[11] = clock_ms()
   m[0] = wassat_matching_parity_check(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], formula["nvars"], formula["flat_ncl"], min_width, m, stop, deadline)
   m[12] = clock_ms()
@@ -288,7 +306,7 @@ use cnf
 
 -> wassat_matching_parity_plan(source, workers)
   return nil if source == nil || System.cpu_count <= workers
-  i64[15]
+  i64[17]
 
 -> wassat_matching_parity_arm(lits, offs, lens, nv, nc, m, stop) (i64[] i64[] i64[] i64 i64 i64[] i64[]) i64
   m[11] = clock_ms()
@@ -307,4 +325,4 @@ use cnf
   Thread.new -> wassat_matching_parity_arm(lits, offs, lens, nv, nc, m, stop)
 
 -> wassat_matching_parity_profile(m)
-  wassat_prof_note("scout.matching_parity status=[m[0]] units=[m[1]] resolved=[m[2]] rounds=[m[3]] literal_visits=[m[4]] binary_edges=[m[5]] rows=[m[6]] witness_rows=[m[7]] amo_pairs=[m[8]] graph_visits=[m[9]] stop=[m[10]] ms=[m[12] - m[11]] finish_to_join_ms=[clock_ms() - m[12]]")
+  wassat_prof_note("scout.matching_parity status=[m[0]] units=[m[1]] resolved=[m[2]] rounds=[m[3]] literal_visits=[m[4]] binary_edges=[m[5]] rows=[m[6]] witness_rows=[m[7]] amo_pairs=[m[8]] graph_visits=[m[9]] cache_hits=[m[15]] cached_clauses=[m[16]] stop=[m[10]] ms=[m[12] - m[11]] finish_to_join_ms=[clock_ms() - m[12]]")

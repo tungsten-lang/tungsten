@@ -748,11 +748,16 @@ use portfolio
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(20)
   if formula["flat_ncl"] >= 1500000 && env("WASSAT_LUCKY") != "0"
-    flat_lucky = wassat_flat_lucky_model(formula)
+    # The shared output guard below verifies this candidate exactly once.
+    flat_lucky = wassat_flat_lucky_candidate(formula)
     tprof = wassat_prof("cli.flat_lucky", tprof)
+    lucky_ok = false
     if flat_lucky.size > 0
-      unless wassat_model_satisfies?(formula, flat_lucky)
-        raise "internal error: flat-lucky model does not satisfy the input formula"
+      lucky_ok = wassat_model_satisfies?(formula, flat_lucky)
+      tprof = wassat_prof("cli.flat_lucky_verify", tprof)
+      # A rejected candidate falls through just as the verified helper did.
+      z = ccall("w_value_free_w", flat_lucky) unless lucky_ok
+    if lucky_ok
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
       wassat_print_sat_model(flat_lucky, quiet)

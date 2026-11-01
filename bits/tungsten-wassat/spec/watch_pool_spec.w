@@ -21,7 +21,7 @@ use ../lib/solver
   cap = entries + nlits + extra
   wd = i64[4 * nlits]
   wp = i64[cap + 2]
-  ws = i64[8]
+  ws = i64[12]
   ws[1] = cap
   wp[cap] = 8273
   wp[cap + 1] = 19285

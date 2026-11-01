@@ -3895,6 +3895,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     nm = 0
     ng = 0
     attempts = 0
+    binary_checks = 0
+    binary_marks = 0
+    reverse_candidates = 0
     grow = true
     while grow
       grow = false
@@ -3911,6 +3914,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       wassat_extract_and_gates(@cmeta, @alive, @arena, @lassign, @bldir,
                                @bl_pool, mark, gar, ght, out, st, @ncl,
                                gcap, hcap - 1, maxg)
+      binary_checks += st[3]
+      binary_marks += st[4]
+      reverse_candidates += st[5]
       if st[2] == 1 && maxg < ceil
         maxg = 2 * maxg
         maxg = ceil if maxg > ceil
@@ -3919,7 +3925,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         nm = st[0]
         ng = st[1]
         self.add_merge_binaries(out, nm)
-    z = wassat_prof("congruence.and gates=[ng] merges=[nm] cap=[maxg] attempts=[attempts]", prof_start) if prof_start != 0
+    z = wassat_prof("congruence.and gates=[ng] merges=[nm] cap=[maxg] attempts=[attempts] checks=[binary_checks] marks=[binary_marks] reverse=[reverse_candidates]", prof_start) if prof_start != 0
     nm
 
   # Turn each equivalent-literal pair into the two binaries that state it.
@@ -4770,17 +4776,23 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # The side-condition test is the 3-bit marking scheme reduced to what it is
 # actually for: stamp the whole binary block of -lhs with one generation,
 # then answer each of the k membership questions with a single load. A
-# candidate therefore costs |binaries(-lhs)| + k, never k^2, and candidates
-# with fewer negated binary occurrences than the arity are rejected before
-# any scanning at all.
+# candidate normally costs |binaries(-lhs)| + k. For high-degree literals,
+# querying the opposite endpoints costs less when their total degree is
+# smaller; both directions index the same binary clauses. Candidates with
+# fewer negated binary occurrences than the arity are rejected immediately.
 #
 # Gates are keyed by (arity, sorted RHS) in an open-addressed table over a
 # flat gate arena; a probe that matches an existing entry is a merge.
 #
 #   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
 #   st[2] = 1 when a capacity stopped the scan short of the whole formula
+#   st[3] = binary entries checked  st[4] = scratch marks written
+#   st[5] = candidates checked from opposite binary endpoints
 -> wassat_extract_and_gates(cm, alive, ar, lasg, bd, blp, mark, gar, ght, out, st, ncl, gcap, hmask, outcap) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64)
   gen = 0
+  binary_checks = 0
+  binary_marks = 0
+  reverse_candidates = 0
   gtop = 0
   nm = 0
   ng = 0
@@ -4818,22 +4830,61 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               d = nlh << 2 ## i64
               p = bd[d]
               e = p + bd[d + 1]
-              while p < e
-                mark[blp[p] & 4294967295] = gen
-                p += 1
+              # Every binary is present at both endpoints. For a large
+              # lhs block, use the opposite blocks only when their combined
+              # lengths are smaller. No extra index or reordered pool.
+              reverse = false
+              if e - p >= 64
+                cost = 0
+                k = 0
+                while k < n && cost < e - p
+                  if k != j
+                    l2 = ar[stx + k]
+                    sign = l2 >> 63
+                    l2i = ((((l2 ^ sign) - sign) << 1) + (sign & 1)) ^ 1
+                    cost += bd[(l2i << 2) + 1]
+                  k += 1
+                reverse = cost < e - p
               matched = 0
-              k = 0
-              while k < n
-                if k != j
-                  l2 = ar[stx + k]
-                  l2i = 0 ## i64
-                  if l2 > 0
-                    l2i = l2 << 1
-                  else
-                    l2i = ((0 - l2) << 1) + 1
-                  if mark[l2i ^ 1] == gen
-                    matched += 1
-                k += 1
+              if reverse
+                reverse_candidates += 1
+                k = 0
+                valid = true
+                while k < n && valid
+                  if k != j
+                    l2 = ar[stx + k]
+                    sign = l2 >> 63
+                    l2i = ((((l2 ^ sign) - sign) << 1) + (sign & 1)) ^ 1
+                    other = l2i << 2
+                    op = bd[other]
+                    op_start = op
+                    oe = op + bd[other + 1]
+                    found = false
+                    while op < oe && !found
+                      found = (blp[op] & 4294967295) == nlh
+                      op += 1
+                    binary_checks += op - op_start
+                    valid = found
+                    matched += 1 if found
+                  k += 1
+              else
+                binary_checks += e - p
+                binary_marks += e - p
+                while p < e
+                  mark[blp[p] & 4294967295] = gen
+                  p += 1
+                k = 0
+                while k < n
+                  if k != j
+                    l2 = ar[stx + k]
+                    l2i = 0 ## i64
+                    if l2 > 0
+                      l2i = l2 << 1
+                    else
+                      l2i = ((0 - l2) << 1) + 1
+                    if mark[l2i ^ 1] == gen
+                      matched += 1
+                  k += 1
               if matched == arity
                 base = gtop
                 gar[base] = arity
@@ -4899,6 +4950,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                   ng += 1
             j += 1
     ci += 1
+  st[3] = binary_checks
+  st[4] = binary_marks
+  st[5] = reverse_candidates
   st[0] = nm
   st[1] = ng
   st[2] = 0

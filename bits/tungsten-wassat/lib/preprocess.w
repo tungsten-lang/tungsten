@@ -55,7 +55,7 @@ WASSAT_PRE_BUCKET_CAP = 1024
 # resolvent count are independent bounds because one is packed into
 # @bve_out, while every distinct resolvent consumes one slot in BOTH
 # @bve_hash and @bve_hpos.
-WASSAT_PRE_BVE_OUT_CAPACITY = 131072
+WASSAT_PRE_BVE_OUT_CAPACITY = 131072  # 2^17: packed BVE header-offset width
 WASSAT_PRE_BVE_HASH_CAPACITY = 8192
 
 # Ticks one native subsumption chunk may retire before it returns to the
@@ -232,6 +232,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @clauses_subsumed = 0
     @clauses_strengthened = 0
     @vars_eliminated = 0
+    @bve_hash_probes = 0
+    @bve_hash_hits = 0
+    @bve_compared_literals = 0
     @and2_candidates = 0
     @and2_eliminated = 0
     @and2_done = false
@@ -246,7 +249,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @bve_hash = i64[WASSAT_PRE_BVE_HASH_CAPACITY]
                                  # per-candidate dedup hashes (bucket)
     @bve_hpos = i64[WASSAT_PRE_BVE_HASH_CAPACITY]
-                                 # header offsets; hash hits confirm exact sets
+                                 # AND header offsets / epoch-tagged BVE headers; exact set checks
 
     # reusable BFS scratch for implication paths (allocated on first use);
     # a fresh boxed array per path was the substitution phase's entire cost
@@ -1661,6 +1664,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     wassat_pre_bve_scan(@fla, @fcs, @fcl, @falive, @ftaut, @oh, @on, @ov,
                         @lstamp, @bve_hash, @bve_hpos, @bve_out, @bve_pm, @lgen)
     @lgen = @bve_pm[8]
+    @bve_hash_probes += @bve_pm[11]
+    @bve_hash_hits += @bve_pm[9]
+    @bve_compared_literals += @bve_pm[10]
     @ticks += @bve_pm[7]
     return false if @bve_pm[4] == 0
 
@@ -1783,6 +1789,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     while i < scored.size && @status == 0 && self.within_budget
       progress = true if self.try_eliminate(scored[i] % 16777216)
       i += 1
+    wassat_prof_note("pre.bve_hash probes=[@bve_hash_probes] hits=[@bve_hash_hits] compared_literals=[@bve_compared_literals]") if env("WASSAT_PROFILE") == "1"
     progress
 
   # ---- driver ---------------------------------------------------------------
@@ -1969,6 +1976,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                  "clauses_subsumed": @clauses_subsumed,
                  "clauses_strengthened": @clauses_strengthened,
                  "vars_eliminated": @vars_eliminated,
+                 "bve_hash_probes": @bve_hash_probes,
+                 "bve_hash_hits": @bve_hash_hits,
+                 "bve_compared_literals": @bve_compared_literals,
                  "and2_candidates": @and2_candidates,
                  "and2_eliminated": @and2_eliminated,
                  "root_prop_scanned": @pst[4], "root_prop_visits": @pst[5],
@@ -2753,8 +2763,24 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   max_hashcap = WASSAT_PRE_BVE_HASH_CAPACITY ## i64
   outcap = max_outcap if outcap > max_outcap
   hashcap = max_hashcap if hashcap > max_hashcap
+  # A header offset occupies 17 bits. Tag the existing header table with
+  # this pivot's first literal-stamp generation, avoiding a full clear for
+  # every pivot. After the packed tag range, clear each call safely.
+  hash_epoch = lgen0 + 1
+  if lgen0 >= 70368744177663
+    hash_epoch = 0
+    hi = 0
+    while hi < hashcap
+      hpos[hi] = -1
+      hi += 1
   gen = lgen0
   ticks = 0
+  hash_probes = 0
+  hash_hits = 0
+  compared_literals = 0
+  pm[11] = 0
+  pm[9] = 0
+  pm[10] = 0
   pm[4] = 0
   pm[5] = 0
 
@@ -2880,12 +2906,19 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                     j = j + 1
                   h = h ^ rl
                   isdup = 0
-                  j = 0
-                  while j < count && isdup == 0
-                    if hbuf[j] == h && out[hpos[j]] == rl
-                      # same hash and same length: confirm identical literal
-                      # sets (unique lits per resolvent, so subset ⟹ equal)
-                      sp = hpos[j]
+                  vacant = -1
+                  probes = 0
+                  slot = 0
+                  if hashcap > 0
+                    slot = ((h ^ (h >> 32)) & 2147483647) % hashcap
+                  while probes < hashcap && isdup == 0 && vacant < 0
+                    encoded = hpos[slot]
+                    probes += 1
+                    if (encoded >> 17) != hash_epoch
+                      vacant = slot
+                    elsif hbuf[slot] == h && out[encoded & 131071] == rl
+                      hash_hits += 1
+                      sp = encoded & 131071
                       same = 1
                       p = 0
                       while p < rl && same == 1
@@ -2894,19 +2927,22 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                         while q < rl && found == 0
                           if out[sp + 3 + q] == out[base + p]
                             found = 1
-                          q = q + 1
+                          q += 1
+                        compared_literals += q
                         if found == 0
                           same = 0
-                        p = p + 1
+                        p += 1
                       if same == 1
                         isdup = 1
-                    j = j + 1
+                    slot += 1
+                    slot = 0 if slot == hashcap
+                  hash_probes += probes
                   if isdup == 0
-                    if count >= hashcap
+                    if count >= hashcap || vacant < 0
                       feasible = 0
                     else
-                      hbuf[count] = h
-                      hpos[count] = hdr
+                      hbuf[vacant] = h
+                      hpos[vacant] = (hash_epoch << 17) | hdr
                       out[hdr] = rl
                       out[hdr + 1] = aci
                       out[hdr + 2] = bci
@@ -2919,6 +2955,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                         feasible = 0
             wb = ocn[wb]
         wa = ocn[wa]
+      pm[11] = hash_probes
+      pm[9] = hash_hits
+      pm[10] = compared_literals
       pm[4] = feasible
       pm[5] = count
       pm[7] = ticks
@@ -3109,6 +3148,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                "clauses_subsumed": 0,
                "clauses_strengthened": 0,
                "vars_eliminated": 0,
+               "bve_hash_probes": 0,
+               "bve_hash_hits": 0,
+               "bve_compared_literals": 0,
                "and2_candidates": 0,
                "and2_eliminated": 0,
                "root_prop_scanned": 0, "root_prop_visits": 0,

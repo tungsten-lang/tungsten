@@ -36,4 +36,39 @@ describe "Original empty-clause recognition" ->
     expect(WassatConfig.from_lens(2, lens, 3).empty_clause_count).to eq(0)
     expect(wassat_first_empty_clause(lens, 3)).to eq(0)
 
+  it "matches the accumulating kernel across prefixes and vector-sized tails" ->
+    test = 0
+    while test < 128
+      n = test % 70
+      lens = i64[72]
+      j = 0
+      while j < 72
+        lens[j] = (test * 17 + j * 23) % 37
+        j += 1
+      expected = i64[8]
+      wassat_shape_counts(lens, n, expected)
+      actual = wassat_shape_counts_new(lens, n)
+      expect(actual).to eq(expected)
+      j = 0
+      while j < 72
+        expect(lens[j]).to eq((test * 17 + j * 23) % 37)
+        j += 1
+      test += 1
+
+  it "retains wide literal totals and the longest clause" ->
+    lens = empty_lengths([2147483640, 2147483640, 0, 1, 2, 3])
+    out = wassat_shape_counts_new(lens, 6)
+    expect(out[0]).to eq(4294967286)
+    expect(out[1]).to eq(2147483640)
+    expect(out[2]).to eq(1)
+    expect(out[3]).to eq(1)
+    expect(out[4]).to eq(1)
+    expect(out[5]).to eq(1)
+
+  it "preserves accumulation into an existing output buffer" ->
+    lens = empty_lengths([0, 1, 2, 3, 4])
+    out = empty_lengths([11, 50, 3, 4, 5, 6, 0, 0])
+    wassat_shape_counts(lens, 5, out)
+    expect(out).to eq(empty_lengths([21, 50, 4, 5, 6, 7, 0, 0]))
+
 spec_summary

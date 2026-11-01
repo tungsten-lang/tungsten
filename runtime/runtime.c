@@ -57220,6 +57220,7 @@ WValue w_core_cache_read_rebase_locations(WValue path_val,
 
 typedef struct {
     pid_t pid;
+    int own_group;
 } WSystemChild;
 
 /* A cancelled Thread must not strand the process it was waiting for.  Spawn
@@ -57235,7 +57236,7 @@ static void w_system_child_cleanup(void *arg) {
 
     pid_t pid = child->pid;
     int status;
-    kill(-pid, SIGTERM);
+    kill(child->own_group ? -pid : pid, SIGTERM);
     for (int attempt = 0; attempt < 10; attempt++) {
         pid_t waited = waitpid(pid, &status, WNOHANG);
         if (waited == pid || (waited == -1 && errno == ECHILD)) {
@@ -57247,10 +57248,17 @@ static void w_system_child_cleanup(void *arg) {
         nanosleep(&grace, NULL);
     }
 
-    kill(-pid, SIGKILL);
+    kill(child->own_group ? -pid : pid, SIGKILL);
     while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {}
     child->pid = -1;
     pthread_setcancelstate(old_cancel_state, NULL);
+}
+
+/* An outer stage supervisor can own one group across Tungsten worker pools.
+ * Default Process.spawn/system semantics retain a separate child group. */
+static int w_child_own_group(void) {
+    const char *inherit = getenv("TUNGSTEN_INHERIT_PROCESS_GROUP");
+    return !(inherit && !strcmp(inherit, "1"));
 }
 
 /* posix_spawn instead of system(3): system() sets SIGINT/SIGQUIT to SIG_IGN
@@ -57263,14 +57271,15 @@ WValue __w_system(WValue cmd_val) {
     char *spawn_argv[] = { "sh", "-c", (char *)cmd, NULL };
     posix_spawnattr_t attr;
     if (posix_spawnattr_init(&attr) != 0) return W_FALSE;
-    short flags = POSIX_SPAWN_SETPGROUP;
+    int own_group = w_child_own_group();
+    short flags = own_group ? POSIX_SPAWN_SETPGROUP : 0;
     if (posix_spawnattr_setflags(&attr, flags) != 0 ||
-        posix_spawnattr_setpgroup(&attr, 0) != 0) {
+        (own_group && posix_spawnattr_setpgroup(&attr, 0) != 0)) {
         posix_spawnattr_destroy(&attr);
         return W_FALSE;
     }
 
-    WSystemChild child = { .pid = -1 };
+    WSystemChild child = { .pid = -1, .own_group = own_group };
     int spawn_error = posix_spawn(&child.pid, "/bin/sh", NULL, &attr,
                                   spawn_argv, environ);
     posix_spawnattr_destroy(&attr);
@@ -57334,9 +57343,10 @@ WValue __w_proc_spawn(WValue argv_val) {
         free(argv);
         return w_int(-1);
     }
-    short flags = POSIX_SPAWN_SETPGROUP;
+    int own_group = w_child_own_group();
+    short flags = own_group ? POSIX_SPAWN_SETPGROUP : 0;
     if (posix_spawnattr_setflags(&attr, flags) != 0 ||
-        posix_spawnattr_setpgroup(&attr, 0) != 0) {
+        (own_group && posix_spawnattr_setpgroup(&attr, 0) != 0)) {
         posix_spawnattr_destroy(&attr);
         for (int i = 0; i < argc; i++) free(argv[i]);
         free(argv);
@@ -57410,7 +57420,7 @@ WValue __w_proc_kill(WValue pid_val, WValue sig_val) {
     pid_t pid = (pid_t)w_as_int(pid_val);
     int sig = (int)w_as_int(sig_val);
     if (pid <= 1) return W_FALSE;
-    return kill(-pid, sig) == 0 ? W_TRUE : W_FALSE;
+    return kill(getpgid(pid) == pid ? -pid : pid, sig) == 0 ? W_TRUE : W_FALSE;
 }
 
 /* Liveness probe: signal 0 to the process (not the group). */

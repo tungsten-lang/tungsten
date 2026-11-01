@@ -8,11 +8,14 @@ dithered plate's (episode.json "replace" on the animation shots); tools/tw_short
 The gradient is read from the Tungsten sources, so a changed background is noticed: tw_bg.w draws only these stops.
     python3 tools/tw_plates.py           (re-made when the sources or tw_bg.w change; tools/tw_render.sh and tw_short.sh run it)"""
 import hashlib, json, os, pathlib, re, subprocess, sys
+from process_control import Runner
+from timeline import Timeline
 
 EP = pathlib.Path(os.environ.get("TW_FILM_ROOT", str(pathlib.Path(sys.argv[0]).absolute().parent.parent)))
 TW = pathlib.Path(os.environ.get("STUDIO_TW", json.loads((EP / "tools/tw.json").read_text())["tungsten"])).expanduser()
 SOURCE = pathlib.Path(__file__).resolve().parent / "tw_bg.w"
 BG = EP / "render/tungsten/tw_bg"
+RUNNER = Runner(float(os.environ.get("TW_STAGE_TIMEOUT", 3600)))
 STOPS = ['stop-color="#131b2c"', 'stop-color="#090d15"', 'stop-color="#04060a"']
 
 
@@ -44,10 +47,9 @@ def make(name, src, fn, w, h, outdir):
         return False
     tmp = outdir / "bg_rsvg.svg"
     tmp.write_text(svg)
-    subprocess.check_call(["rsvg-convert", "-z", "1", "-o", str(outdir / "bg_rsvg.png"), str(tmp)])
+    RUNNER.run(["rsvg-convert", "-z", "1", "-o", str(outdir / "bg_rsvg.png"), str(tmp)])
     tmp.unlink()
-    subprocess.check_call([str(BG), str(outdir / "bg_dither.png"), str(w), str(h), str(cx), str(cy), str(r), str(mid)],
-                          stdout=subprocess.DEVNULL)
+    RUNNER.run([str(BG), str(outdir / "bg_dither.png"), str(w), str(h), str(cx), str(cy), str(r), str(mid)])
     kf.write_text(key + "\n")
     print(f"plates: {name} {w}x{h} cx {cx} cy {cy} r {r} mid {mid} -> {outdir.relative_to(EP)}/bg_rsvg.png, bg_dither.png")
     return True
@@ -56,12 +58,28 @@ def make(name, src, fn, w, h, outdir):
 def main():
     src = SOURCE
     if not BG.exists() or src.stat().st_mtime > BG.stat().st_mtime:
-        subprocess.check_call([str(TW / "bin/tungsten"), "-o", str(BG), str(src)], cwd=TW, stdout=subprocess.DEVNULL)
-    a = make("film", EP / "anim/core.w", "background", 1920, 1080, EP / "anim")
-    b = make("short", EP / "short/short.w", "s_bg", 1080, 1920, EP / "short") if (EP / "short/short.w").exists() else False
+        RUNNER.run([str(TW / "bin/tungsten"), "-o", str(BG), str(src)], cwd=TW)
+    config=json.loads((EP/"tools/tw.json").read_text())
+    def geometry(role,source):
+        explicit=config.get('authoring_geometry',{}).get(role)
+        if explicit: return explicit
+        if config.get('generator_clock')=='env-v1':
+            project=Timeline.load(EP,config,role=='short',False)
+            return project.width,project.height
+        match=re.search(r'Svg.new\((\d+), (\d+)\)',source.read_text())
+        if not match: raise ValueError(f'configure authoring_geometry.{role} for {source}')
+        return [int(match[1]),int(match[2])]
+    # Plates must match the authored PNGs before studio scales the selected cut.
+    w,h=geometry('film',EP/'tools/build_scenes.py')
+    a=make("film",EP/"anim/core.w","background",w,h,EP/"anim")
+    b=False
+    if (EP / "short/short.w").exists():
+        w,h=geometry('short',EP/'short/short.w')
+        b=make("short",EP/"short/short.w","s_bg",w,h,EP/"short")
     if not (a or b):
         print("plates: up to date")
 
 
 if __name__ == "__main__":
-    main()
+    with RUNNER.signals():
+        main()

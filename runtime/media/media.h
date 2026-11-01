@@ -69,6 +69,7 @@
     X(w_media_decoder_read, 3)         \
     X(w_media_decoder_info, 2)         \
     X(w_media_decoder_close, 1)        \
+    X(w_media_source_hash, 1)          \
     X(w_media_transcode_new, 1)        \
     X(w_media_transcode_step, 2)       \
     X(w_media_transcode_finish, 1)     \
@@ -214,6 +215,7 @@ typedef struct WMediaScale {
     int        icx, icy, icw, ich;
     WMediaAxis ax, ay;
     uint8_t    fill[4];
+    int        in_bits;       /* 8, or 10 in MSB-aligned 16-bit words */
     int        out_bits;      /* 8, or 10 (16-bit words, MSB-aligned) */
     uint64_t   id;            /* unique per plan */
     /* backend state */
@@ -275,6 +277,7 @@ int   w_media_enc_encode_rgb(MEncoder *e, const uint8_t *src, size_t stride);
 WMediaSegment *w_media_enc_cut(MEncoder *e);
 /* Wait for a segment's frames; 0, or -1 with a message. */
 int   w_media_seg_finish(WMediaSegment *s, char *err, size_t cap);
+int   w_media_seg_save(WMediaSegment *s, const char *path, char *err, size_t cap);
 void  w_media_seg_free(WMediaSegment *s);
 /* Load a segment file (TWMS); NULL with a message. */
 WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap);

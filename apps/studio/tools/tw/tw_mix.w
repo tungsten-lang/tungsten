@@ -5,7 +5,7 @@
 # The samples are not touched unless --level is given: then the engine's leveling (a linear gain to --lufs and the
 # true-peak look-ahead limiter at --tp less --margin, as engine/master.w of the Numbers series) is applied instead.
 #
-#   tw_mix <in.wav> <out.wav> <frames> [--fps 24] [--lufs -16] [--tp -1.5] [--margin 0.3] [--level]
+#   tw_mix <in.wav> <out.wav> <frames> [--rate 24/1] [--lufs -16] [--tp -1.5] [--margin 0.3] [--level]
 # Prints one "key value" line per fact. Compile with the ceil worktree's Tungsten (tools/tw_render.sh does).
 
 use ../../lib/audio
@@ -92,11 +92,15 @@ use ../../lib/audio
   n
 
 -> main(args)
-  die("usage: tw_mix <in.wav> <out.wav> <frames> \[--fps 24] \[--lufs -16] \[--tp -1.5] \[--margin 0.3] \[--level]") if args.size < 3
+  die("usage: tw_mix <in.wav> <out.wav> <frames> \[--rate 24/1] \[--lufs -16] \[--tp -1.5] \[--margin 0.3] \[--level]") if args.size < 3
   src = args[0]
   out = args[1]
   nfr = args[2].to_i
-  fps = arg_of(args, "--fps", "24").to_i
+  rate = arg_of(args, "--rate", arg_of(args, "--fps", "24") + "/1").split("/")
+  num = rate[0].to_i
+  den = rate.size > 1 ? rate[1].to_i : 1
+  die("mix: rate and frames must be positive") if num <= 0 || den <= 0 || nfr <= 0
+  die("mix: picture duration is not an integer number of samples") if (nfr * 48000 * den) % num != 0
   target = arg_of(args, "--lufs", "-16").to_f
   tp_db = arg_of(args, "--tp", "-1.5").to_f
   margin = arg_of(args, "--margin", "0.3").to_f
@@ -106,7 +110,7 @@ use ../../lib/audio
   die("mix.wav: " + info[3].to_s + " Hz, expected 48000") if info[3] != 48000
   die("mix.wav: expected 24-bit stereo PCM") if info[5] || info[4] != 24 || info[2] != 2
   frames = info[1] / 6
-  n = nfr * 48000 / fps
+  n = nfr * 48000 * den / num
   bus = f32[n * 2]
   mm = File.mmap(src)
   s24_bus(mm.as_u8, info[0], frames, n, bus)

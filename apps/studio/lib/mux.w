@@ -105,6 +105,20 @@ use encode
   topts[:codec] = codec if codec != nil
   kbps = opt_arg(args, "--kbps", nil)
   topts[:bitrate] = kbps.to_i * 1000 if kbps != nil
+  topts[:rate] = r["rate"]
+  topts[:frames] = r["frames"]
+  resume = opt_arg(args, "--resume", nil)
+  topts[:resume_dir] = resume if resume != nil
+  topts[:timeout_ms] = opt_arg(args, "--timeout-ms", "30000").to_i
+  cancel = opt_arg(args, "--cancel-file", nil)
+  topts[:cancel_file] = cancel if cancel != nil
+  topts[:edit_lists] = false if args.include?("--no-edit-lists")
+  ac = opt_arg(args, "--audio-codec", nil)
+  topts[:audio] = ac if ac != nil
+  ww = opt_arg(args, "--width", nil)
+  hh = opt_arg(args, "--height", nil)
+  topts[:width] = ww.to_i if ww != nil
+  topts[:height] = hh.to_i if hh != nil
   res = Transcode.run(src, out, topts)
   dt = clock_ms() - t0
   << "share: " + res[:frames].to_s + " frames in " + dt.to_s + " ms (" + res[:fps].to_s + " fps), " + (res[:file_bytes] / 1048576).to_s + " MB -> " + out
@@ -187,7 +201,7 @@ use encode
     res.push(["media:" + c[:name].to_s, c[:ok], c[:detail]])
   << "studio checks (ffprobe):"
   v = OS.capture("ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,avg_frame_rate,time_base,nb_frames,color_range,color_space,color_transfer,color_primaries,chroma_location -of default=nw=1 " + shq(master))
-  check(res, "video stream", (probe_val(v, "codec_name") == "h264" || probe_val(v, "codec_name") == "hevc") && probe_val(v, "width") == r["w"].to_s && probe_val(v, "height") == r["h"].to_s, probe_val(v, "codec_name").to_s + " " + probe_val(v, "width").to_s + "x" + probe_val(v, "height").to_s)
+  check(res, "video stream", (probe_val(v, "codec_name") == "h264" || probe_val(v, "codec_name") == "hevc" || probe_val(v, "codec_name") == "prores") && probe_val(v, "width") == r["w"].to_s && probe_val(v, "height") == r["h"].to_s, probe_val(v, "codec_name").to_s + " " + probe_val(v, "width").to_s + "x" + probe_val(v, "height").to_s)
   rate = num.to_s + "/" + den.to_s
   check(res, "CFR " + rate, probe_val(v, "r_frame_rate") == rate && probe_val(v, "avg_frame_rate") == rate, "r_frame_rate " + probe_val(v, "r_frame_rate").to_s + ", avg " + probe_val(v, "avg_frame_rate").to_s)
   check(res, "frame count", probe_val(v, "nb_frames") == nfr.to_s, probe_val(v, "nb_frames").to_s + " of " + nfr.to_s)

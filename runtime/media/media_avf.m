@@ -36,6 +36,8 @@
 #include <VideoToolbox/VideoToolbox.h>
 #import <Metal/Metal.h>
 #include <dispatch/dispatch.h>
+#include <CommonCrypto/CommonDigest.h>
+#include <sys/file.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <mach/mach_time.h>
@@ -47,6 +49,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <time.h>
 
 #pragma clang diagnostic error "-Wmissing-prototypes"
 /* The synchronous AVAsset accessors are deprecated in favour of async loads;
@@ -1669,9 +1672,14 @@ static void a_mux_finish(AMux *m, int64_t out[5]) {
     [m->video markAsFinished];
     [m->writer endSessionAtSourceTime:CMTimeMake(m->frames * m->ticks, m->ts)];
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    [m->writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(sem); }];
-    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    dispatch_retain(sem);
+    [m->writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(sem); dispatch_release(sem); }];
+    const char *wait = getenv("TUNGSTEN_MEDIA_WAIT_MS");
+    int64_t wait_ms = wait ? strtoll(wait, NULL, 10) : 30000;
+    if (wait_ms <= 0) wait_ms = 30000;
+    long expired = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, wait_ms * NSEC_PER_MSEC));
     dispatch_release(sem);
+    if (expired) a_mux_fail(m, "finishing the writer timed out after %lld ms", (long long)wait_ms);
     if (m->writer.status != AVAssetWriterStatusCompleted) a_mux_fail(m, "finishing %s failed", m->path);
     if (m->has_tc || m->nchap > 0 || m->flatten_edits) {
         char err[512];
@@ -1815,7 +1823,43 @@ static const char *a_msl =
     "  float v = w[0] * H[(ulong)s0 * p.rw + x];\n"
     "  for (uint t = 1; t < p.taps; t++) v = fma(w[t], H[(ulong)(s0 + t) * p.rw + x], v);\n"
     "  *o = uchar(u8(v));\n"
-    "}\n";
+    "}\n"
+    "\n"
+    "inline float plane_load(device const uchar *src, ulong offset, uint bits) {\n"
+    "  return bits == 10 ? float(*((device const ushort *)(src + offset)) >> 6) * 0.25f : float(src[offset]);\n"
+    "}\n"
+    "kernel void hp(device const uchar *src [[buffer(0)]], device const int *xs [[buffer(1)]], device const float *xw [[buffer(2)]],\n"
+    "               device float *H [[buffer(3)]], constant HP &p [[buffer(4)]], uint2 g [[thread_position_in_grid]]) {\n"
+    "  if (g.x >= p.rw || g.y >= p.rows) return;\n"
+    "  uint C = p.alpha, bps = p.pad == 10 ? 2 : 1;\n"
+    "  int first = xs[g.x]; device const float *w = xw + (ulong)g.x * p.taps;\n"
+    "  for (uint c = 0; c < C; c++) {\n"
+    "    float v = 0;\n"
+    "    for (uint k = 0; k < p.taps; k++) {\n"
+    "      ulong offset = (ulong)(p.lo + g.y) * p.sstride + ((ulong)(first + k) * C + c) * bps;\n"
+    "      v = fma(w[k], plane_load(src, offset, p.pad), v);\n"
+    "    }\n"
+    "    H[((ulong)g.y * p.rw + g.x) * C + c] = v;\n"
+    "  }\n"
+    "}\n"
+    "kernel void vp(device const float *H [[buffer(0)]], device const int *ys [[buffer(1)]], device const float *yw [[buffer(2)]],\n"
+    "               device uchar *dst [[buffer(3)]], constant VP &p [[buffer(4)]], uint2 g [[thread_position_in_grid]]) {\n"
+    "  if (g.x >= p.dw || g.y >= p.dh) return;\n"
+    "  uint C = p.alpha, bps = p.pad == 10 ? 2 : 1;\n"
+    "  int x = int(g.x) - int(p.rx), y = int(g.y) - int(p.ry);\n"
+    "  for (uint c = 0; c < C; c++) {\n"
+    "    float v = float((p.fill >> (8*c)) & 255u);\n"
+    "    if (x >= 0 && y >= 0 && x < int(p.rw) && y < int(p.rh)) {\n"
+    "      int first = ys[y] - int(p.lo); device const float *w = yw + (ulong)y * p.taps;\n"
+    "      v = w[0] * H[((ulong)first * p.rw + x) * C + c];\n"
+    "      for (uint k = 1; k < p.taps; k++) v = fma(w[k], H[((ulong)(first+k) * p.rw + x) * C + c], v);\n"
+    "    }\n"
+    "    ulong offset = (ulong)g.y * p.dstride + ((ulong)g.x * C + c) * bps;\n"
+    "    if (p.pad == 10) *((device ushort *)(dst + offset)) = ushort(uint(clamp(v*4.0f,0.0f,1023.0f)+0.5f) << 6);\n"
+    "    else dst[offset] = u8(v);\n"
+    "  }\n"
+    "}\n"
+    "";
 
 typedef struct { uint32_t rw, rows, lo, taps, axlo, sstride, alpha, pad; } AMtlHP;
 typedef struct { uint32_t dw, dh, rx, ry, rw, rh, taps, lo, dstride, alpha, fill, pad; } AMtlVP;
@@ -1823,7 +1867,7 @@ typedef struct { uint32_t dw, dh, rx, ry, rw, rh, taps, lo, dstride, alpha, fill
 typedef id (*a_mtl_create_fn)(void);
 static pthread_once_t g_mtl_once = PTHREAD_ONCE_INIT;
 static id g_mtl_dev, g_mtl_queue;
-static id g_mtl_h[5], g_mtl_v[5];
+static id g_mtl_h[5], g_mtl_v[5], g_mtl_hp, g_mtl_vp;
 static int g_mtl_ok;
 static char g_mtl_err[512];
 static pthread_mutex_t g_mtl_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -1861,6 +1905,11 @@ static void a_mtl_load(void) {
                 return;
             }
         }
+        id<MTLFunction> hp = [lib newFunctionWithName:@"hp"], vp = [lib newFunctionWithName:@"vp"];
+        g_mtl_hp = hp ? [dev newComputePipelineStateWithFunction:hp error:&err] : nil;
+        g_mtl_vp = vp ? [dev newComputePipelineStateWithFunction:vp error:&err] : nil;
+        [hp release]; [vp release];
+        if (!g_mtl_hp || !g_mtl_vp) { snprintf(g_mtl_err, sizeof g_mtl_err, "Metal plane kernels: %s", err.localizedDescription.UTF8String ?: "?"); [lib release]; [dev release]; return; }
         [lib release];
         g_mtl_queue = [dev newCommandQueue];
         g_mtl_dev = dev;
@@ -1929,7 +1978,12 @@ static int a_mtl_encode(id<MTLComputeCommandEncoder> ce, WMediaJob *j, id *keep,
     WMediaScale *s = j->s;
     id<MTLDevice> dev = g_mtl_dev;
     int C = s->ch;
-    if (s->out_bits > 8) { snprintf(err, cap, "Metal writes 8-bit planes only"); return -1; }
+    int wide = s->in_bits > 8 || s->out_bits > 8;
+    if (wide && C == 4) { snprintf(err, cap, "Metal 10-bit scaling requires one or two channels"); return -1; }
+    int ibps = s->in_bits > 8 ? 2 : 1, obps = s->out_bits > 8 ? 2 : 1;
+    if (j->sstride % (C * ibps) || j->dstride % (C * obps) || (uintptr_t)j->src % ibps || (uintptr_t)j->dst % obps) {
+        snprintf(err, cap, "Metal needs sample-aligned planes"); return -1;
+    }
     if ((C == 4 && (j->sstride % 4 || j->dstride % 4 || (uintptr_t)j->src % 4 || (uintptr_t)j->dst % 4)) ||
         (C == 2 && (j->sstride % 2 || j->dstride % 2 || (uintptr_t)j->src % 2 || (uintptr_t)j->dst % 2))) {
         snprintf(err, cap, "Metal needs pixel-aligned rows");
@@ -1953,7 +2007,7 @@ static int a_mtl_encode(id<MTLComputeCommandEncoder> ce, WMediaJob *j, id *keep,
     }
     /* only the source rows the plan reads */
     size_t soff = (size_t)s->ay.lo * j->sstride;
-    size_t slen = (size_t)(rows - 1) * j->sstride + (size_t)s->src_w * C;
+    size_t slen = (size_t)(rows - 1) * j->sstride + (size_t)s->src_w * C * ibps;
     if (soff + slen > j->src_len) slen = j->src_len - soff;
     int scopy = 0, dcopy = 0;
     size_t so = 0, dof = 0;
@@ -1971,8 +2025,8 @@ static int a_mtl_encode(id<MTLComputeCommandEncoder> ce, WMediaJob *j, id *keep,
     keep[(*nkeep)++] = db;
     if (scopy) a_pcopy([(id<MTLBuffer>)sb contents], sbase, slen);
     *copy_out = dcopy;
-    AMtlHP hp = {(uint32_t)s->rw, (uint32_t)rows, 0, (uint32_t)s->ax.taps, (uint32_t)s->ax.lo, (uint32_t)j->sstride, (uint32_t)s->alpha, 0};
-    id<MTLComputePipelineState> ph = g_mtl_h[C], pv = g_mtl_v[C];
+    AMtlHP hp = {(uint32_t)s->rw, (uint32_t)rows, 0, (uint32_t)s->ax.taps, (uint32_t)s->ax.lo, (uint32_t)j->sstride, (uint32_t)(wide ? C : s->alpha), (uint32_t)s->in_bits};
+    id<MTLComputePipelineState> ph = wide ? g_mtl_hp : g_mtl_h[C], pv = wide ? g_mtl_vp : g_mtl_v[C];
     [ce setComputePipelineState:ph];
     [ce setBuffer:sb offset:so atIndex:0];
     [ce setBuffer:p->xs offset:0 atIndex:1];
@@ -1983,7 +2037,7 @@ static int a_mtl_encode(id<MTLComputeCommandEncoder> ce, WMediaJob *j, id *keep,
     [ce dispatchThreads:MTLSizeMake((NSUInteger)s->rw, (NSUInteger)rows, 1) threadsPerThreadgroup:MTLSizeMake(tw, th, 1)];
     uint32_t fill = (uint32_t)s->fill[0] | ((uint32_t)s->fill[1] << 8) | ((uint32_t)s->fill[2] << 16) | ((uint32_t)s->fill[3] << 24);
     AMtlVP vp = {(uint32_t)s->dst_w, (uint32_t)s->dst_h, (uint32_t)s->rx, (uint32_t)s->ry, (uint32_t)s->rw, (uint32_t)s->rh,
-                 (uint32_t)s->ay.taps, (uint32_t)s->ay.lo, (uint32_t)j->dstride, (uint32_t)s->alpha, fill, 0};
+                 (uint32_t)s->ay.taps, (uint32_t)s->ay.lo, (uint32_t)j->dstride, (uint32_t)(wide ? C : s->alpha), fill, (uint32_t)s->out_bits};
     [ce setComputePipelineState:pv];
     [ce setBuffer:p->H offset:0 atIndex:0];
     [ce setBuffer:p->ys offset:0 atIndex:1];
@@ -2020,7 +2074,7 @@ int w_media_scale_metal_jobs(WMediaJob *jobs, int n, char *err, size_t cap) {
         for (int i = 0; i < n && rc == 0; i++)
             if (copy_out[i]) {
                 WMediaScale *s = jobs[i].s;
-                a_pcopy(jobs[i].dst, [(id<MTLBuffer>)keep[2 * i + 1] contents], (size_t)(s->dst_h - 1) * jobs[i].dstride + (size_t)s->dst_w * s->ch);
+                a_pcopy(jobs[i].dst, [(id<MTLBuffer>)keep[2 * i + 1] contents], (size_t)(s->dst_h - 1) * jobs[i].dstride + (size_t)s->dst_w * s->ch * (s->out_bits > 8 ? 2 : 1));
             }
         for (int i = 0; i < nkeep; i++) [keep[i] release];
         pthread_mutex_unlock(&g_mtl_mu);
@@ -2074,7 +2128,7 @@ typedef struct ADec {
     int              siting;           /* source chroma siting (M_SITE_*-like: 0 left, 1 center, 2 topleft) */
     /* thread */
     pthread_t        th;
-    int              th_started;
+    int              th_started, refs, timeout_ms;
     pthread_mutex_t  mu;
     pthread_cond_t   cv;
     ADecFrame       *pend;             /* decoded, sorted by pts */
@@ -2089,6 +2143,9 @@ typedef struct ADec {
     int64_t          decoded, delivered;
     uint64_t         dec_ns;
 } ADec;
+
+static void a_dec_destroy(ADec *d);
+static void a_dec_unref(ADec *d) { if (__atomic_sub_fetch(&d->refs, 1, __ATOMIC_ACQ_REL) == 0) a_dec_destroy(d); }
 
 /* A sample's presentation time on the output timeline (the movie's edit
  * list applied), in source ticks (files) or frames (segments). VideoToolbox
@@ -2236,6 +2293,11 @@ static void *a_dec_thread(void *arg) {
     ADec *d = arg;
     @autoreleasepool {
         int batch = 0;
+        if (getenv("TUNGSTEN_MEDIA_TEST_STALL_DECODER")) {
+            pthread_mutex_lock(&d->mu);
+            while (!d->stop) pthread_cond_wait(&d->cv, &d->mu);
+            pthread_mutex_unlock(&d->mu);
+        }
         for (;;) {
             int64_t dts = 0;
             CMSampleBufferRef sb = NULL;
@@ -2293,18 +2355,20 @@ static void *a_dec_thread(void *arg) {
             CFRelease(sb);
         }
     }
+    @autoreleasepool { a_dec_unref(d); }
     return NULL;
 }
 
 static void a_dec_free(ADec *d) {
     if (!d) return;
-    if (d->th_started) {
-        pthread_mutex_lock(&d->mu);
-        d->stop = 1;
-        pthread_cond_broadcast(&d->cv);
-        pthread_mutex_unlock(&d->mu);
-        pthread_join(d->th, NULL);
-    }
+    pthread_mutex_lock(&d->mu);
+    d->stop = 1;
+    pthread_cond_broadcast(&d->cv);
+    pthread_mutex_unlock(&d->mu);
+    a_dec_unref(d);
+}
+
+static void a_dec_destroy(ADec *d) {
     /* Callbacks touch pend/fly and mu, so drain before releasing those. */
     if (d->vt) VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
     for (int i = 0; i < d->npend; i++) CVBufferRelease(d->pend[i].pb);
@@ -2341,9 +2405,11 @@ static int a_siting_of(CFTypeRef loc) {
 /* Open a decoder: path (a movie file) or segs (segment files, with rate),
  * output pixel format pix ('420v' or 'BGRA'), frames before start_frame
  * dropped (files). NULL with a message. */
-static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, int32_t den, OSType pix, int64_t start_frame,
+static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, int32_t den, OSType pix, int64_t start_frame, int timeout_ms,
                         char *err, size_t cap) {
     ADec *d = calloc(1, sizeof *d);
+    d->refs = 1;
+    d->timeout_ms = timeout_ms > 0 ? timeout_ms : 30000;
     pthread_mutex_init(&d->mu, NULL);
     pthread_cond_init(&d->cv, NULL);
     d->pix = pix;
@@ -2413,8 +2479,10 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
         w_media_seg_free(s0);
         d->frames_hint = -1;
     }
-    if (pthread_create(&d->th, NULL, a_dec_thread, d) != 0) { snprintf(err, cap, "cannot start the decoder thread"); a_dec_free(d); return NULL; }
+    __atomic_add_fetch(&d->refs, 1, __ATOMIC_RELAXED);
+    if (pthread_create(&d->th, NULL, a_dec_thread, d) != 0) { __atomic_sub_fetch(&d->refs, 1, __ATOMIC_RELAXED); snprintf(err, cap, "cannot start the decoder thread"); a_dec_free(d); return NULL; }
     d->th_started = 1;
+    pthread_detach(d->th);
     return d;
 }
 
@@ -2422,7 +2490,17 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
  * in the output timeline), 0 at the end, -1 with a message. */
 static int a_dec_next(ADec *d, CVPixelBufferRef *pb, int64_t *frame, char *err, size_t cap) {
     pthread_mutex_lock(&d->mu);
-    while (d->qn == 0 && !d->eof && !d->err[0]) pthread_cond_wait(&d->cv, &d->mu);
+    struct timespec until;
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_sec += d->timeout_ms / 1000;
+    until.tv_nsec += (long)(d->timeout_ms % 1000) * 1000000L;
+    if (until.tv_nsec >= 1000000000L) { until.tv_sec++; until.tv_nsec -= 1000000000L; }
+    while (d->qn == 0 && !d->eof && !d->err[0]) {
+        if (pthread_cond_timedwait(&d->cv, &d->mu, &until) == ETIMEDOUT) {
+            snprintf(d->err, sizeof d->err, "decoder timed out after %d ms without a frame", d->timeout_ms);
+            d->stop = 1; pthread_cond_broadcast(&d->cv); break;
+        }
+    }
     if (d->err[0]) {
         snprintf(err, cap, "%s", d->err);
         pthread_mutex_unlock(&d->mu);
@@ -2484,22 +2562,24 @@ WValue w_media_decoder_open(WValue srcv, WValue fmtv, WValue optv) {
     @autoreleasepool {
         char path[4096], fmt[16], err[512];
         w_media_str(fmtv, fmt, sizeof fmt);
-        int nv12 = !strcasecmp(fmt, "nv12") || !strcasecmp(fmt, "420v");
+        int p010 = !strcasecmp(fmt, "p010") || !strcasecmp(fmt, "x420");
+        int nv12 = p010 || !strcasecmp(fmt, "nv12") || !strcasecmp(fmt, "420v");
         int rgba = !fmt[0] || !strcasecmp(fmt, "rgba");
-        if (!nv12 && !rgba && strcasecmp(fmt, "bgra")) w_media_raise("VideoDecoder: format must be :rgba, :bgra or :nv12 (got '%s')", fmt);
+        if (!nv12 && !rgba && strcasecmp(fmt, "bgra")) w_media_raise("VideoDecoder: format must be :rgba, :bgra, :nv12 or :p010 (got '%s')", fmt);
         int64_t start = (int64_t)w_media_num(m_avf_arr(optv, 0), 0, "start");
         int32_t num = (int32_t)w_media_num(m_avf_arr(optv, 1), 0, "rate"), den = (int32_t)w_media_num(m_avf_arr(optv, 2), 0, "rate");
+        int timeout_ms = (int)w_media_num(m_avf_arr(optv, 3), 30000, "timeout_ms");
         ADec *d;
-        OSType pix = nv12 ? kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange : kCVPixelFormatType_32BGRA;
+        OSType pix = p010 ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : nv12 ? kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange : kCVPixelFormatType_32BGRA;
         if (w_is_array(srcv)) {
             int n = 0;
             char **segs = a_paths(srcv, &n);
-            d = a_dec_open(NULL, segs, n, num, den, pix, 0, err, sizeof err);
+            d = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, err, sizeof err);
             a_paths_free(segs, n);
         } else {
             if (!w_media_str(srcv, path, sizeof path) || !path[0]) w_media_raise("VideoDecoder: source must be a path or an array of segment paths");
             if (access(path, R_OK) != 0) w_media_raise("VideoDecoder: cannot read %s: %s", path, strerror(errno));
-            d = a_dec_open(path, NULL, 0, num, den, pix, start, err, sizeof err);
+            d = a_dec_open(path, NULL, 0, num, den, pix, start, timeout_ms, err, sizeof err);
         }
         if (!d) w_media_raise("VideoDecoder: %s", err);
         ADecH *h = calloc(1, sizeof *h);
@@ -2532,25 +2612,30 @@ WValue w_media_decoder_read(WValue hv, WValue dstv, WValue stridev) {
     CVPixelBufferRef pb = NULL;
     int64_t frame = 0;
     char err[512];
-    int r = a_dec_next(d, &pb, &frame, err, sizeof err);
-    if (r < 0) w_media_raise("VideoDecoder#read: %s", err);
-    if (r == 0) return W_NIL;
     int64_t avail;
     uint8_t *dst = (uint8_t *)(uintptr_t)m_avf_dest(dstv, &avail, "VideoDecoder#read");
     int w = d->w, hh = d->h;
+    size_t bps = d->pix == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange ? 2 : 1;
+    size_t cw = (size_t)((w + 1) / 2) * 2 * bps, ch = (size_t)((hh + 1) / 2);
+    size_t row = h->nv12 ? cw : (size_t)w * 4;
+    double stride = w_media_num(stridev, (double)row, "stride");
+    size_t rows = (size_t)hh + (h->nv12 ? ch : 0);
+    if (!isfinite(stride) || stride < (double)row || stride > (double)(SIZE_MAX / rows) ||
+        stride != floor(stride) || (h->nv12 && bps == 2 && fmod(stride, 2) != 0))
+        w_media_raise("VideoDecoder#read: invalid plane stride");
+    size_t ds = (size_t)stride, need = ds * (rows - 1) + row;
+    if (avail >= 0 && (size_t)avail < need)
+        w_media_raise("VideoDecoder#read: %lld bytes is too few for a %dx%d frame at stride %zu", (long long)avail, w, hh, ds);
+    int r = a_dec_next(d, &pb, &frame, err, sizeof err);
+    if (r < 0) w_media_raise("VideoDecoder#read: %s", err);
+    if (r == 0) return W_NIL;
     CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
     if (h->nv12) {
-        size_t ds = (size_t)w_media_num(stridev, (double)w, "stride");
-        size_t cw = (size_t)((w + 1) / 2) * 2, ch = (size_t)((hh + 1) / 2);
-        size_t need = ds * (size_t)hh + ds * ch;
-        if (avail >= 0 && (size_t)avail < need) { CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly); CVBufferRelease(pb); w_media_raise("VideoDecoder#read: %lld bytes is too few for a %dx%d nv12 frame", (long long)avail, w, hh); }
         const uint8_t *y = CVPixelBufferGetBaseAddressOfPlane(pb, 0), *c = CVPixelBufferGetBaseAddressOfPlane(pb, 1);
         size_t ys = CVPixelBufferGetBytesPerRowOfPlane(pb, 0), cs = CVPixelBufferGetBytesPerRowOfPlane(pb, 1);
-        for (int i = 0; i < hh; i++) memcpy(dst + (size_t)i * ds, y + (size_t)i * ys, (size_t)w);
+        for (int i = 0; i < hh; i++) memcpy(dst + (size_t)i * ds, y + (size_t)i * ys, (size_t)w * bps);
         for (size_t i = 0; i < ch; i++) memcpy(dst + ds * (size_t)hh + i * ds, c + i * cs, cw);
     } else {
-        size_t ds = (size_t)w_media_num(stridev, (double)w * 4, "stride");
-        if (avail >= 0 && (size_t)avail < ds * (size_t)(hh - 1) + (size_t)w * 4) { CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly); CVBufferRelease(pb); w_media_raise("VideoDecoder#read: %lld bytes is too few for a %dx%d frame", (long long)avail, w, hh); }
         const uint8_t *p = CVPixelBufferGetBaseAddress(pb);
         size_t ps = CVPixelBufferGetBytesPerRow(pb);
         if (h->rgba) {
@@ -2571,6 +2656,12 @@ WValue w_media_decoder_info(WValue hv, WValue keyv) {
     ADec *d = h->d;
     char k[32];
     w_media_str(keyv, k, sizeof k);
+    if (!strcmp(k, "cancel")) {
+        pthread_mutex_lock(&d->mu);
+        if (!d->err[0]) snprintf(d->err, sizeof d->err, "decoder cancelled");
+        d->stop = 1; pthread_cond_broadcast(&d->cv);
+        pthread_mutex_unlock(&d->mu); return W_TRUE;
+    }
     if (!strcmp(k, "width")) return w_int(d->w);
     if (!strcmp(k, "height")) return w_int(d->h);
     if (!strcmp(k, "frames")) return d->frames_hint >= 0 ? w_int(d->frames_hint) : W_NIL;
@@ -2602,7 +2693,7 @@ WValue w_media_decoder_close(WValue hv) {
    Transcode: decode -> scale -> encode -> mux, no ffmpeg
    ======================================================================
  *
- * Y'CbCr path (default): frames decode to 8-bit 4:2:0 and the Y' and CbCr
+ * Y'CbCr path (default): frames decode to P010 10-bit 4:2:0 and the Y' and CbCr
  * planes are resampled separately into the encoder's pool buffer (chroma
  * siting honoured on both sides), so there is no colour conversion at all.
  * RGB path (via: "rgb"): frames decode to BGRA (VideoToolbox's BT.709
@@ -2610,7 +2701,32 @@ WValue w_media_decoder_close(WValue hv) {
  * rendered frames do. Segments are cut every gop frames (closed GOPs) and
  * appended one behind, so the encoder keeps working while the mux writes. */
 
+static int a_file_hash(const char *path, char hex[65]) {
+    FILE *file = fopen(path, "rb");
+    if (!file) return -1;
+    CC_SHA256_CTX context; CC_SHA256_Init(&context);
+    uint8_t buffer[65536], hash[CC_SHA256_DIGEST_LENGTH];
+    size_t n;
+    while ((n = fread(buffer, 1, sizeof buffer, file))) CC_SHA256_Update(&context, buffer, (CC_LONG)n);
+    int bad = ferror(file); fclose(file);
+    if (bad) return -1;
+    CC_SHA256_Final(hash, &context);
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) snprintf(hex + i*2, 3, "%02x", hash[i]);
+    return 0;
+}
+
+WValue w_media_source_hash(WValue source) {
+    char path[4096], hash[65];
+    if (!w_media_str(source, path, sizeof path) || a_file_hash(path, hash)) w_media_raise("Transcode: cannot hash source");
+    return w_string(hash);
+}
+
 typedef struct ATrans {
+    char             resume[4096];
+    int              cache_fd, cached_segments, next_checkpoint;
+    int64_t          resumed;
+    char             cancel_file[4096];
+
     ADec          *dec;
     MEncoder      *enc;
     AMux          *mux;
@@ -2650,6 +2766,7 @@ static void a_trans_free(ATrans *t) {
         if (t->via_rgb) w_media_scale_free(&t->prgb);
         else { w_media_scale_free(&t->py); w_media_scale_free(&t->pc); }
     }
+    if (t->cache_fd >= 0) close(t->cache_fd);
     free(t->rgb);
     a_chapters_free(t->chap, t->nchap);
     free(t);
@@ -2678,6 +2795,50 @@ static void a_trans_raise(ATrans *t, const char *fmt, ...) {
     w_media_raise("Transcode: %s", buf);
 }
 
+static void a_cache_path(ATrans *t, int index, char path[4200], const char *extension) {
+    snprintf(path, 4200, "%s/%08d.%s", t->resume, index, extension);
+}
+
+static void a_cache_scan(ATrans *t) {
+    char path[4200], meta[4200], hash[65], want[65], err[512];
+    while (t->resumed < t->total) {
+        a_cache_path(t, t->cached_segments, path, "twms");
+        a_cache_path(t, t->cached_segments, meta, "sha256");
+        FILE *f = fopen(meta, "r");
+        if (!f) break;
+        int ok = fscanf(f, "%64s", want) == 1; fclose(f);
+        if (!ok || a_file_hash(path, hash) || strcmp(hash, want)) break;
+        WMediaSegment *segment = w_media_seg_load(path, err, sizeof err);
+        if (!segment) break;
+        int64_t expected = t->total - t->resumed;
+        if (expected > t->gop) expected = t->gop;
+        ok = segment->n == expected && segment->n > 0 && segment->s[0].sync;
+        w_media_seg_free(segment);
+        if (!ok) break;
+        t->resumed += expected; t->cached_segments++;
+    }
+    t->done = t->resumed;
+    t->next_checkpoint = t->cached_segments;
+}
+
+static void a_cache_save(ATrans *t, WMediaSegment *segment) {
+    if (!t->resume[0]) return;
+    char path[4200], meta[4200], tmp[4220], hash[65], err[512] = "cannot hash checkpoint";
+    a_cache_path(t, t->next_checkpoint, path, "twms");
+    a_cache_path(t, t->next_checkpoint, meta, "sha256");
+    if (w_media_seg_save(segment, path, err, sizeof err) || a_file_hash(path, hash)) a_trans_raise(t, "checkpoint: %s", err);
+    snprintf(tmp, sizeof tmp, "%s.part", meta);
+    FILE *f = fopen(tmp, "w");
+    if (!f) a_trans_raise(t, "cannot write checkpoint digest");
+    int ok = fprintf(f, "%s\n", hash) > 0 && fflush(f) == 0 && fsync(fileno(f)) == 0;
+    ok = fclose(f) == 0 && ok;
+    if (!ok || rename(tmp, meta)) { unlink(tmp); a_trans_raise(t, "checkpoint digest commit failed"); }
+    int directory = open(t->resume, O_RDONLY);
+    if (directory < 0 || fsync(directory)) { if (directory >= 0) close(directory); a_trans_raise(t, "checkpoint directory sync failed"); }
+    close(directory);
+    t->next_checkpoint++;
+}
+
 /* Append the oldest queued segment to the mux. */
 static void a_trans_flush_one(ATrans *t) {
     /* the segment stays queued until appended, so a raise leaves it to a_trans_free */
@@ -2685,6 +2846,7 @@ static void a_trans_flush_one(ATrans *t) {
     char err[256];
     uint64_t a = m_avf_now_ns();
     if (w_media_seg_finish(s, err, sizeof err) != 0) a_trans_raise(t, "%s", err);
+    a_cache_save(t, s);
     uint64_t b = m_avf_now_ns();
     t->wait_ns += b - a;
     a_mux_append(t->mux, s);
@@ -2732,12 +2894,18 @@ static void a_trans_encode(ATrans *t, CVPixelBufferRef src) {
         size_t dyl = dys * CVPixelBufferGetHeightOfPlane(out, 0), dcl = dcs * CVPixelBufferGetHeightOfPlane(out, 1);
         int b, b2;
         int be = t->backend == W_MEDIA_BACKEND_AUTO ? w_media_scale_default_backend(1, t->py.filter) : t->backend;
-        if (be == W_MEDIA_BACKEND_METAL && t->py.out_bits == 8) {
+        if (be == W_MEDIA_BACKEND_METAL) {
             /* both planes in one command buffer */
             WMediaJob jobs[2] = {{&t->py, sy, sys, syl, dy, dys, dyl}, {&t->pc, sc, scs, scl, dc, dcs, dcl}};
             b = b2 = w_media_scale_metal_jobs(jobs, 2, err, sizeof err) == 0 ? W_MEDIA_BACKEND_METAL : -1;
+            if (b < 0 && t->backend == W_MEDIA_BACKEND_METAL) {
+                CVPixelBufferUnlockBaseAddress(out, 0);
+                CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
+                CVPixelBufferRelease(out);
+                a_trans_raise(t, "Metal scaling: %s", err);
+            }
             if (b < 0) {
-                /* Metal would not take these buffers: the CPU from now on */
+                /* AUTO may fall back when Metal cannot take the buffers. */
                 t->backend = W_MEDIA_BACKEND_CPU;
                 b = w_media_scale_run(&t->py, t->backend, sy, sys, syl, dy, dys, dyl, err, sizeof err);
                 b2 = b < 0 ? b : w_media_scale_run(&t->pc, t->backend, sc, scs, scl, dc, dcs, dcl, err, sizeof err);
@@ -2770,9 +2938,12 @@ WValue w_media_transcode_new(WValue spec) {
         int nch = 0;
         AChapter *ch = a_chapters_from(a_spec(spec, "chapters"), &nch, "Transcode");
         ATrans *t = calloc(1, sizeof *t);
+        t->cache_fd = -1;
+        w_media_str(a_spec(spec, "cancel_file"), t->cancel_file, sizeof t->cancel_file);
         t->chap = ch;
         t->nchap = nch;
         t->t0 = m_avf_now_ns();
+        int timeout_ms = (int)w_media_num(a_spec(spec, "timeout_ms"), 30000, "timeout_ms");
         WValue srcv = a_spec(spec, "src");
         if (!w_media_str(a_spec(spec, "dst"), dst, sizeof dst) || !dst[0]) { a_trans_free(t); w_media_raise("Transcode: dst must be a path"); }
         snprintf(t->path, sizeof t->path, "%s", dst);
@@ -2782,19 +2953,28 @@ WValue w_media_transcode_new(WValue spec) {
         t->start = (int64_t)w_media_num(a_spec(spec, "start"), 0, "start");
         t->total = (int64_t)w_media_num(a_spec(spec, "frames"), 0, "frames");
         if (t->total <= 0) { a_trans_free(t); w_media_raise("Transcode: frames must be positive"); }
+        t->gop = (int)w_media_num(a_spec(spec, "gop"), 48, "gop");
+        if (t->gop < 1) t->gop = 1;
+        w_media_str(a_spec(spec, "resume_dir"), t->resume, sizeof t->resume);
+        if (t->resume[0]) {
+            char lock[4200]; snprintf(lock, sizeof lock, "%s/.lock", t->resume);
+            t->cache_fd = open(lock, O_CREAT | O_RDWR, 0600);
+            if (t->cache_fd < 0 || flock(t->cache_fd, LOCK_EX | LOCK_NB)) { a_trans_free(t); w_media_raise("Transcode: resume cache is busy or inaccessible"); }
+            a_cache_scan(t);
+        }
         w_media_str(a_spec(spec, "via"), buf, sizeof buf);
         t->via_rgb = !strcasecmp(buf, "rgb") || !strcasecmp(buf, "rgba");
-        OSType pix = t->via_rgb ? kCVPixelFormatType_32BGRA : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+        OSType pix = t->via_rgb ? kCVPixelFormatType_32BGRA : kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange;
         if (w_is_array(srcv)) {
             int n = 0;
             char **segs = a_paths(srcv, &n);
-            t->dec = a_dec_open(NULL, segs, n, num, den, pix, 0, err, sizeof err);
+            t->dec = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, err, sizeof err);
             a_paths_free(segs, n);
             if (t->start > 0 && t->dec) { a_trans_free(t); w_media_raise("Transcode: start: is for movie sources (pass the segments you want)"); }
         } else {
             if (!w_media_str(srcv, src, sizeof src) || !src[0]) { a_trans_free(t); w_media_raise("Transcode: src must be a path or an array of segment paths"); }
             if (access(src, R_OK) != 0) { int e = errno; a_trans_free(t); w_media_raise("Transcode: cannot read %s: %s", src, strerror(e)); }
-            t->dec = a_dec_open(src, NULL, 0, num, den, pix, t->start, err, sizeof err);
+            t->dec = a_dec_open(src, NULL, 0, num, den, pix, t->start + t->resumed, timeout_ms, err, sizeof err);
         }
         if (!t->dec) { a_trans_free(t); w_media_raise("Transcode: %s", err); }
         t->sw = t->dec->w;
@@ -2844,6 +3024,7 @@ WValue w_media_transcode_new(WValue spec) {
             }
         }
         if (rc != 0) { a_trans_free(t); w_media_raise("Transcode: %s", err); }
+        if (!t->via_rgb) { t->py.in_bits = t->pc.in_bits = 10; t->py.vimage_ok = t->pc.vimage_ok = 0; }
         t->planned = 1;
         /* mux */
         AMuxOpts o;
@@ -2881,6 +3062,12 @@ WValue w_media_transcode_new(WValue spec) {
             if (!strcmp(mode, "audio")) t->mux->flatten_edits = 1;
         }
         a_mux_set_chapters(t->mux, t->chap, t->nchap);
+        for (int i = 0; i < t->cached_segments; i++) {
+            char checkpoint[4200]; a_cache_path(t, i, checkpoint, "twms");
+            WMediaSegment *cached = w_media_seg_load(checkpoint, err, sizeof err);
+            if (!cached) { a_trans_free(t); w_media_raise("Transcode: checkpoint changed during reuse"); }
+            a_mux_append(t->mux, cached); w_media_seg_free(cached);
+        }
         a_chapters_free(t->chap, t->nchap);
         t->chap = NULL;
         t->nchap = 0;
@@ -2895,7 +3082,11 @@ WValue w_media_transcode_step(WValue hv, WValue nv) {
     @autoreleasepool {
         char err[512];
         int64_t k = 0;
+        if (t->cancel_file[0] && access(t->cancel_file, F_OK) == 0) a_trans_raise(t, "transcode cancelled");
         while (t->done < t->total && k < n) {
+            if (t->cancel_file[0] && access(t->cancel_file, F_OK) == 0) a_trans_raise(t, "transcode cancelled");
+            const char *fail = getenv("TUNGSTEN_MEDIA_TEST_FAIL_AFTER");
+            if (fail && t->done >= strtoll(fail, NULL, 10)) a_trans_raise(t, "injected media failure after %lld frames", (long long)t->done);
             CVPixelBufferRef pb = NULL;
             int64_t f = 0;
             int r = a_dec_next(t->dec, &pb, &f, err, sizeof err);
@@ -2942,6 +3133,7 @@ WValue w_media_transcode_finish(WValue hv) {
         t->mux_ns += m_avf_now_ns() - a;
         t->finished = 1;
         WValue r = w_array_new_empty();
+        r = w_array_push(r, a_pair("resumed_frames", w_int(t->resumed)));
         r = w_array_push(r, a_pair("frames", w_int(out[0])));
         r = w_array_push(r, a_pair("duplicated", w_int(t->dups)));
         r = w_array_push(r, a_pair("dropped", w_int(t->drops)));
@@ -2956,6 +3148,7 @@ WValue w_media_transcode_finish(WValue hv) {
         r = w_array_push(r, a_pair("encode_wait_s", w_float(t->wait_ns / 1e9 + w_media_enc_seconds(t->enc, 2))));
         r = w_array_push(r, a_pair("mux_s", w_float((double)t->mux_ns / 1e9)));
         r = w_array_push(r, a_pair("scale_backend", w_string(w_media_backend_name(t->used))));
+        r = w_array_push(r, a_pair("decode_bits", w_int(t->via_rgb ? 8 : 10)));
         r = w_array_push(r, a_pair("via", w_string(t->via_rgb ? "rgb" : "yuv")));
         r = w_array_push(r, a_pair("source", w_string((char[]){(char)(t->dec->codec >> 24), (char)(t->dec->codec >> 16), (char)(t->dec->codec >> 8), (char)t->dec->codec, 0})));
         w_media_handle_drop(hv, W_MEDIA_KIND_TRANSCODE);
@@ -3142,6 +3335,12 @@ WValue w_media_probe(WValue pathv, WValue samplesv, WValue audiov) {
                 CMVideoDimensions d = CMVideoFormatDescriptionGetDimensions(fd);
                 CFDictionaryRef ext = CMFormatDescriptionGetExtensions(fd);
                 out = w_array_push(out, a_pair("codec", a_fourcc(sub)));
+                /* ProRes 422's four registered profiles carry 10-bit 4:2:2. */
+                if (sub == kCMVideoCodecType_AppleProRes422 || sub == kCMVideoCodecType_AppleProRes422HQ ||
+                    sub == kCMVideoCodecType_AppleProRes422LT || sub == kCMVideoCodecType_AppleProRes422Proxy) {
+                    out = w_array_push(out, a_pair("bit_depth", w_int(10)));
+                    out = w_array_push(out, a_pair("chroma_format", w_int(2)));
+                }
                 out = w_array_push(out, a_pair("width", w_int(d.width)));
                 out = w_array_push(out, a_pair("height", w_int(d.height)));
                 out = w_array_push(out, a_pair("primaries", a_ext_str(ext, kCMFormatDescriptionExtension_ColorPrimaries)));

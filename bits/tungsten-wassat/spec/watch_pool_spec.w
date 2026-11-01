@@ -4,7 +4,7 @@ use ../lib/solver
 -> pool_fixture(ncl, extra, nlits = 28, overflows = 0)
   ar = i64[4 * ncl + 4]
   cm = i64[2 * ncl]
-  alive = i64[ncl]
+  alive = i8[ncl]
   entries = 0
   ci = 0
   while ci < ncl
@@ -35,7 +35,7 @@ use ../lib/solver
 -> pool_check(result)
   ar = result["ar"] ## i64[]
   cm = result["cm"] ## i64[]
-  alive = result["alive"] ## i64[]
+  alive = result["alive"] ## i8[]
   wd = result["wd"] ## i64[]
   wp = result["wp"] ## i64[]
   ws = result["ws"] ## i64[]

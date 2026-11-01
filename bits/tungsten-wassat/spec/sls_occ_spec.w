@@ -33,7 +33,7 @@ describe "Contiguous SLS occurrences" ->
     expect(sls_occ_at(starts, clauses, 2)).to eq([])
     expect(starts[8]).to eq(0)
   it "builds the same ranges after root filtering, deduplication and tautology removal" ->
-    arena = i64[10]; meta = i64[8]; alive = i64[4]; lbd = i64[4]; assign = i8[4]
+    arena = i64[10]; meta = i64[8]; alive = i8[4]; lbd = i64[4]; assign = i8[4]
     input = [1, 2, -1, 3, 2, -2, 3, 2, 2, 3]
     i = 0
     while i < 10

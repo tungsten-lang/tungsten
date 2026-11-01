@@ -62,7 +62,7 @@ describe "Wassat duplicate input units" ->
     ncl = f["flat_ncl"]
     units = i64[ncl]
     meta = i64[2 * (ncl + 2)]
-    alive = i64[ncl + 2]
+    alive = i8[ncl + 2]
     pm = i64[12]
     pm[0] = ncl
     pm[1] = 64
@@ -81,7 +81,7 @@ describe "Wassat duplicate input units" ->
     f = flat_units_formula("p cnf 1 1\n1 0\n")
     units = i64[0]
     meta = i64[6]
-    alive = i64[3]
+    alive = i8[3]
     pm = i64[12]
     pm[0] = 1
     pm[1] = 16

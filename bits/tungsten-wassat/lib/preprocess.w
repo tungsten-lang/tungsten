@@ -218,6 +218,11 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @probes_failed = 0
     @hbr_added = 0
     @vars_substituted = 0
+    @scc_runs = 0
+    @scc_nodes = 0
+    @scc_components = 0
+    @scc_singletons = 0
+    @scc_peak_frames = 0
     @clauses_subsumed = 0
     @clauses_strengthened = 0
     @vars_eliminated = 0
@@ -907,49 +912,62 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       comp[i] = -1
       i += 1
     counter = i64[2]             # [0] next index, [1] next component
-    cur = []                     # Tarjan stack of lit nodes
+    cur = i64[n]                 # Reused component stack
+    cur_size = 0
+    frame_node = i64[n]          # Reused DFS stack
+    frame_child = i64[n]
+    peak = 0
     node = 2
     while node < 2 * @nvars + 2
       if index[node] < 0 && @passign[node / 2] == 0
-        # explicit DFS: frames of [lit_node, child_cursor]
-        frames = [[node, 0]]
-        while !frames.empty?
-          fr = frames[frames.size - 1]
-          u = fr[0]
-          if fr[1] == 0
+        depth = 1
+        peak = 1 if peak < 1
+        frame_node[0] = node
+        frame_child[0] = 0
+        while depth > 0
+          u = frame_node[depth - 1]
+          if frame_child[depth - 1] == 0
             index[u] = counter[0]
             low[u] = counter[0]
             counter[0] = counter[0] + 1
-            cur.push(u)
+            cur[cur_size] = u
+            cur_size += 1
             oncur[u] = 1
           edges = adj[u]
           advanced = false
-          k = fr[1]
+          k = frame_child[depth - 1]
           while k < edges.size && !advanced
             w = self.lit_index(edges[k][0])
             @ticks += 1
             if index[w] < 0
-              fr[1] = k + 1
-              frames.push([w, 0])
+              frame_child[depth - 1] = k + 1
+              frame_node[depth] = w
+              frame_child[depth] = 0
+              depth += 1
+              peak = depth if depth > peak
               advanced = true
             else
               low[u] = low[w] if oncur[w] == 1 && low[w] < low[u]
               k += 1
           unless advanced
-            fr[1] = edges.size
-            frames.pop
-            unless frames.empty?
-              parent = frames[frames.size - 1][0]
+            depth -= 1
+            if depth > 0
+              parent = frame_node[depth - 1]
               low[parent] = low[u] if low[u] < low[parent]
             if low[u] == index[u]
               done = false
               while !done
-                w = cur.pop
+                cur_size -= 1
+                w = cur[cur_size]
                 oncur[w] = 0
                 comp[w] = counter[1]
                 done = true if w == u
               counter[1] = counter[1] + 1
       node += 1
+    @scc_runs += 1
+    @scc_nodes += counter[0]
+    @scc_components += counter[1]
+    @scc_peak_frames = peak if peak > @scc_peak_frames
     comp
 
   # BFS a path of implication edges from literal `a` to literal `b`,
@@ -1007,15 +1025,26 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     comp = self.tarjan(adj)
     tsub = wassat_prof("pre.subst.tarjan", tsub)
 
-    # group literals by component
-    groups = {}
+    # Singleton components cannot substitute anything. Count first, then
+    # retain the original first-member order for nontrivial components.
+    sizes = i64[2 * @nvars + 2]
     node = 2
     while node < 2 * @nvars + 2
-      if comp[node] >= 0
-        key = comp[node]
+      key = comp[node]
+      sizes[key] = sizes[key] + 1 if key >= 0
+      node += 1
+    groups = {}
+    singletons = 0
+    node = 2
+    while node < 2 * @nvars + 2
+      key = comp[node]
+      if key >= 0 && sizes[key] > 1
         groups[key] = [] unless groups.has_key?(key)
         groups[key].push(node)
+      elsif key >= 0
+        singletons += 1
       node += 1
+    @scc_singletons += singletons
     tsub = wassat_prof("pre.subst.group", tsub)
 
     before = @vars_substituted
@@ -1027,6 +1056,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           self.substitute_class(adj, comp, members)
     if @proof_mode == WASSAT_PROOF_NONE && @lazy_lits && @status == 0 && @vars_substituted > before
       self.rewrite_all_subst_flat
+    wassat_prof_note("pre.subst.work runs=[@scc_runs] nodes=[@scc_nodes] components=[@scc_components] singletons=[@scc_singletons] peak_frames=[@scc_peak_frames]") if tsub != 0
     tsub = wassat_prof("pre.subst.rewrite", tsub)
     0
 
@@ -1915,6 +1945,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       "wrat": @wrat_lines, "drat": @drat_lines,
       "stats": { "probes": @probes_run, "probes_failed": @probes_failed,
                  "vars_substituted": @vars_substituted,
+                 "scc_runs": @scc_runs, "scc_nodes": @scc_nodes,
+                 "scc_components": @scc_components, "scc_singletons": @scc_singletons,
+                 "scc_peak_frames": @scc_peak_frames,
                  "clauses_subsumed": @clauses_subsumed,
                  "clauses_strengthened": @clauses_strengthened,
                  "vars_eliminated": @vars_eliminated,
@@ -2977,6 +3010,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     "wrat": [], "drat": [],
     "stats": { "probes": 0, "probes_failed": 0,
                "vars_substituted": 0,
+               "scc_runs": 0, "scc_nodes": 0, "scc_components": 0,
+               "scc_singletons": 0, "scc_peak_frames": 0,
                "clauses_subsumed": 0,
                "clauses_strengthened": 0,
                "vars_eliminated": 0,

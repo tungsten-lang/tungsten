@@ -1041,6 +1041,7 @@ use portfolio
         if options["conflicts"] > 0
           remaining = options["conflicts"] - budget_used
           probe_cap = remaining if remaining < probe_cap
+        wassat_prof_note("scout policy cap=[probe_cap] raw=[raw_probe] wall_ms=[probe_wall]") if tprof != 0
         # SCOUT RACE. One or two arms over the same artifact, each on its own
         # solver, concurrently: kissat's lucky phases (the four decision-free
         # dives of lucky.c, its `luckyearly` shot) when formula policy enables

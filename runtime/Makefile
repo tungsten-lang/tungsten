@@ -324,6 +324,15 @@ tests/test_array_alloc_profile: tests/test_array_alloc_profile.c $(RUNTIME_DEPS)
 
 .PHONY: test-array-alloc-profile
 
+# Typed-array native parameter boundary: width checks and borrowed views.
+test-array-param-guard: tests/test_array_param_guard
+	./tests/test_array_param_guard
+
+tests/test_array_param_guard: tests/test_array_param_guard.c $(RUNTIME_DEPS)
+	$(CLANG) -O3 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) $< $(RUNTIME_LDFLAGS) -o $@
+
+.PHONY: test-array-param-guard
+
 # String slab freeze regression tests
 test-string-slab: tests/test_string_slab
 	./tests/test_string_slab
@@ -353,7 +362,7 @@ tests/test_exception_frames: tests/test_exception_frames.c $(RUNTIME_DEPS)
 	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread $(RUNTIME_SRCS) tests/test_exception_frames.c $(RUNTIME_LDFLAGS) -o tests/test_exception_frames
 
 # Run all tests
-test-all: test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-hash-tombstone test-array-alloc-profile test-string-slab test-ivars test-node-arena test-exception-frames
+test-all: test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-hash-tombstone test-array-alloc-profile test-array-param-guard test-string-slab test-ivars test-node-arena test-exception-frames
 
 clean:
 	rm -f tests/test_array_alloc_profile

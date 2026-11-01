@@ -73807,7 +73807,7 @@ static WValue w_big_array_param_view(WValue arr, WValue site_v) {
     return w_box_array(a);
 }
 
-WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
+static __attribute__((noinline)) WValue w_check_array_ebits_slow(WValue arr, int64_t want_bits, int64_t want_poly,
                            WValue site_v) {
     int64_t got_ebits;
     if (w_is_array(arr)) {
@@ -73848,6 +73848,20 @@ WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
     }
     w_raise(w_str_concat(site_v, w_string(tail)));
     return arr;
+}
+
+/* Ordinary WArray arguments are overwhelmingly the common boundary case.
+ * Keep success leaf-sized: diagnostic formatting and BigArray-view creation
+ * belong to the cold path and must not impose their stack frame per argument. */
+WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
+                           WValue site_v) {
+    if (w_is_array(arr)) {
+        int64_t ebits = w_as_array(arr)->ebits;
+        if ((ebits == 65) == (want_poly != 0) &&
+            array_storage_bits(ebits) == want_bits)
+            return arr;
+    }
+    return w_check_array_ebits_slow(arr, want_bits, want_poly, site_v);
 }
 
 /* (#68) page-aligned typed-array allocation. Required for the

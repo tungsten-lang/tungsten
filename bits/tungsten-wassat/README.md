@@ -99,8 +99,14 @@ evaluations, or a polled 200 ms deadline, whichever comes first. Cancellation
 and the deadline are checked every 32 batches. This is a bounded startup probe;
 an admitted miss can add that work before the solving arms start. Profiling
 reports batches, gate evaluations, best target count, and the stop reason.
-`WASSAT_KLIEBER_LOCAL=0` disables this extension for comparisons. The existing
-search for circuits with at most 24 primary inputs is unchanged.
+`WASSAT_KLIEBER_LOCAL=0` disables this extension for comparisons. Circuits with
+at most 24 primary inputs use exhaustive staged search. Those workers share a
+compact program of 32-bit gate records, retain native 64-bit target masks, and
+poll an atomic result flag after each batch. A single publisher reserves the
+assignment slot before writing it; the caller joins every worker before
+reading the result. Profiling reports preparation/search time and each worker's
+completed batches, gate evaluations, and target stages. Exhausting this search
+is still only a model-search miss; ordinary solving supplies any UNSAT answer.
 
 A bounded matching-balance checker derives a graph from positive choice
 clauses: each participating variable must occur in exactly two distinct rows.

@@ -89,6 +89,19 @@ A cached-width admission check skips unrelated layouts before allocation.
 The clause checks use fixed native arrays; profiling reports scanned clauses,
 rotation relations, complete XOR gates, exact-one pairs, and candidate layouts.
 
+For topologically numbered two-input circuits with a conjunction sink and
+25–32 primary inputs, a bounded model search evaluates 64 neighboring input
+assignments per word. Target weights, random two-bit neighbors, and restarts
+help escape local maxima. It reuses native scratch arrays and accepts a model
+only after checking every original clause; misses resume ordinary solving in
+both fast and proof modes. The search stops at 16,384 batches, 134,217,728 gate
+evaluations, or a polled 200 ms deadline, whichever comes first. Cancellation
+and the deadline are checked every 32 batches. This is a bounded startup probe;
+an admitted miss can add that work before the solving arms start. Profiling
+reports batches, gate evaluations, best target count, and the stop reason.
+`WASSAT_KLIEBER_LOCAL=0` disables this extension for comparisons. The existing
+search for circuits with at most 24 primary inputs is unchanged.
+
 A bounded matching-balance checker derives a graph from positive choice
 clauses: each participating variable must occur in exactly two distinct rows.
 It checks bipartiteness component by component, then verifies every original

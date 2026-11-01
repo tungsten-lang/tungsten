@@ -3,7 +3,7 @@ use ../lib/wassat
 
 ar = i64[70005]
 cm = i64[2]
-alive = i64[1]
+alive = i8[1]
 wd = i64[40]
 wp = i64[32]
 ws = i64[12]

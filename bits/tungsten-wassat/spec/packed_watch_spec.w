@@ -72,7 +72,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     cm = i64[2]
     cm[0] = 70001
     cm[1] = 3
-    alive = i64[1]
+    alive = i8[1]
     alive[0] = 1
     wd = i64[40]
     wp = i64[32]

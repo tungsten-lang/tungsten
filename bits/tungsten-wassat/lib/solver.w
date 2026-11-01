@@ -536,7 +536,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # miss; sharing one 16-byte-aligned pair means one cache line and one
     # array descriptor instead of two of each.
     @cmeta = i64[2 * maxcl]
-    @alive = i64[maxcl]
+    @alive = i8[maxcl]          # 0 dead / 1 live; one byte per clause
     @clbd = i64[maxcl]           # 0 = original clause (never deleted)
     @cused = i64[maxcl]          # conflict count when last resolved in analysis
     @gid = i64[maxcl]            # clause index -> global proof id
@@ -621,27 +621,24 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> grow_arena(need)
     if @asize + need > @acap
-      ncap = @acap * 2
-      ncap = @asize + need + 1024 if ncap < @asize + need
-      # Proof-free reductions compact the arena; a search that still cannot
-      # finish may grow it until the runtime's typed-array limit fires as a
-      # cryptic crash hours in. Fail precisely instead.
+      # Grow the existing typed array so aliases keep the same descriptor and
+      # the runtime can reuse/reallocate its backing storage. Replacing it with
+      # a fresh doubled array retains the old arena and copies the entire DB.
+      # Expose only a modest zeroed suffix; Array.push amortizes backing growth.
+      ncap = @asize + need + 65536
       if ncap > 1073741824
         raise "learned-clause arena exceeded 8 GiB; instance too hard for the current search — bound it with --conflicts or use the portfolio"
-      bigger = i64[ncap]
-      i = 0
-      while i < @asize
-        bigger[i] = @arena[i]
-        i += 1
-      @arena = bigger
-      @acap = ncap
+      arena = @arena ## i64[]
+      while arena.size < ncap
+        arena.push(0)
+      @acap = arena.size
     0
 
   -> grow_clause_tables
     if @ncl + 1 >= @ccap
       ncap = @ccap * 2
       cm = i64[2 * ncap]
-      al = i64[ncap]
+      al = i8[ncap]
       lb = i64[ncap]
       cu = i64[ncap]
       has_gid = @gid.size > 1
@@ -3609,7 +3606,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     pm[9] = synth
     if !lean && art["raw"] == true && sncl >= 40000000 && art.has_key?("formula_ref") && sfcl.size > 0
       @cmeta = i64[2 * maxcl]
-      @alive = i64[maxcl]
+      @alive = i8[maxcl]
       wassat_load_flat_meta(art["fcs"], sfcl, @cmeta, @alive, units, pm)
       old_fcs = art["fcs"]
       old_fcl = art["fcl"]
@@ -3649,7 +3646,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @arena = i64[cap]
       @acap = cap
       @cmeta = i64[2 * maxcl]
-      @alive = i64[maxcl]
+      @alive = i8[maxcl]
       @clbd = i64[maxcl]
       @cused = i64[maxcl]
       @gid = (@proof_mode == WASSAT_PROOF_NONE && sncl >= 5000000) ? i64[1] : i64[maxcl]
@@ -4552,7 +4549,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # (count, fill) with +1 slack per literal, mirroring wassat_ws_rebuild.
 # Always fits: 2*binaries + nlits is far below the pool's 2*ccap sizing.
 # Never allocates.
--> wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i8[] i64[] i64[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
     bd[(li << 2) + 1] = 0
@@ -4645,7 +4642,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # ternaries is stored once.
 #
 #   out[2i], out[2i+1] = the pair's signed literals   st[0] = pairs
--> wassat_extract_binaries(cm, alive, ar, lasg, bd, blp, mark, ht, out, st, ncl, outcap, hmask) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
+-> wassat_extract_binaries(cm, alive, ar, lasg, bd, blp, mark, ht, out, st, ncl, outcap, hmask) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
   gen = 0
   n = 0
   ci = 0
@@ -4770,7 +4767,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #
 #   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
 #   st[2] = 1 when a capacity stopped the scan short of the whole formula
--> wassat_extract_and_gates(cm, alive, ar, lasg, bd, blp, mark, gar, ght, out, st, ncl, gcap, hmask, outcap) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64)
+-> wassat_extract_and_gates(cm, alive, ar, lasg, bd, blp, mark, gar, ght, out, st, ncl, gcap, hmask, outcap) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64)
   gen = 0
   gtop = 0
   nm = 0
@@ -4921,7 +4918,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #
 #   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
 #   st[2] = 1 when a capacity stopped the scan short of the whole formula
--> wassat_extract_xor_gates(cm, alive, ar, lasg, lcount, cht, mark, qli, gar, ght, out, st, ncl, nlits, chmask, gcap, ghmask, outcap) (i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64)
+-> wassat_extract_xor_gates(cm, alive, ar, lasg, lcount, cht, mark, qli, gar, ght, out, st, ncl, nlits, chmask, gcap, ghmask, outcap) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64)
   li = 0
   while li < nlits
     lcount[li] = 0
@@ -5305,7 +5302,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[4] = clauses hashed                  st[5] = occupied slots probed
 #   st[6] = candidate literals compared      st[7] = maximum probe advance
 # `plim` bounds the duplicate table's linear probe (hmask + 1 = unbounded).
--> wassat_subst_rewrite(cm, alive, ar, clbd, reprs, mark, ht, units, st, ncl, hmask, plim) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
+-> wassat_subst_rewrite(cm, alive, ar, clbd, reprs, mark, ht, units, st, ncl, hmask, plim) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
   gen = 0
   nu = 0
   rewritten = 0
@@ -5458,7 +5455,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #           [11] min target length (below 2 reads as 2)
 #   pm out: [4] subsumed  [5] strengthened  [6] visits used  [9] next cursor
 #           [10] clauses promoted to irredundant
--> wassat_learned_subsume(cm, alive, ar, clbd, sig, ohead, onext, stamp, pm, stop_cell) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_learned_subsume(cm, alive, ar, clbd, sig, ohead, onext, stamp, pm, stop_cell) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   ncl = pm[0]
   nv = pm[1]
   maxlen = pm[2]
@@ -5721,7 +5718,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[0] = 1 when a clause became empty   st[1] = units reported
 #   st[2] = clauses killed                 st[3] = units overflowed
 #   st[4] = clauses shortened              st[5] = literals removed
--> wassat_clean_root(cm, alive, ar, lasg, units, st, ncl, ucap) (i64[] i64[] i64[] i8[] i64[] i64[] i64 i64)
+-> wassat_clean_root(cm, alive, ar, lasg, units, st, ncl, ucap) (i64[] i8[] i64[] i8[] i64[] i64[] i64 i64)
   nu = 0
   killed = 0
   shrunk = 0
@@ -5786,7 +5783,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   0
 
 # Select the same LBD cut and survivors using the retained histogram scratch.
--> wassat_reduce_select(cm, alive, lbd, used, hist, ncl, last) (i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_reduce_select(cm, alive, lbd, used, hist, ncl, last) (i64[] i8[] i64[] i64[] i64[] i64 i64) i64
   # histogram LBD values to find a cut that removes about half
   total = 0
   i = 0
@@ -5828,7 +5825,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # Proof-free, root-level compaction. The caller repacks watches and, when
 # remap is enabled, binary indices after this indivisible mutation finishes.
 # state reuses the histogram slab: outputs 64/65, cumulative work 66..69.
--> wassat_reduce_compact(cm, alive, ar, lbd, used, gid, rsn, state, ncl, nv, remap) (i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64 i64 i64) i64
+-> wassat_reduce_compact(cm, alive, ar, lbd, used, gid, rsn, state, ncl, nv, remap) (i64[] i8[] i64[] i64[] i64[] i64[] i32[] i64[] i64 i64 i64) i64
   copied = 0
   mapped = 0
   wp = 0
@@ -6185,7 +6182,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # (count, fill), with one spare entry per literal and bounded proportional
 # headroom for dense databases. Capacity comes from the existing pool while
 # leaving free space for later block relocations. Never allocates.
--> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i8[] i64[] i64[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
     wd[(li << 2) + 1] = 0
@@ -6932,7 +6929,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     i += 1
   count
 
--> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcm, dal, dlbd, dgid, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcm, dal, dlbd, dgid, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[])
   sncl = pm[0]
   acap = pm[1]
   ccap = pm[2]
@@ -6983,7 +6980,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   pm[5] = nunits
   pm[6] = saw_empty
 
--> wassat_load_flat_meta(sfcs, sfcl, dcm, dal, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_load_flat_meta(sfcs, sfcl, dcm, dal, units, pm) (i64[] i64[] i64[] i8[] i64[] i64[])
   sncl = pm[0]
   acap = pm[1]
   ccap = pm[2]

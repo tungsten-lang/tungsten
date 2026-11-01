@@ -16,7 +16,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     phs = i8[4]
     wd = i64[40]
     wp = i64[1]
-    ws = i64[8]
+    ws = i64[12]
     tr = i64[4]
     st = i64[6]
     tr[0] = 1
@@ -38,7 +38,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     ar[70003] = 2
     wd = i64[40]
     wp = i64[32]
-    ws = i64[8]
+    ws = i64[12]
     ws[1] = 32
     wassat_ws_add(wd, wp, ws, 3, 70001, 3)
     asg = i8[4]
@@ -76,7 +76,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     alive[0] = 1
     wd = i64[40]
     wp = i64[32]
-    ws = i64[8]
+    ws = i64[12]
     ws[1] = 32
     wassat_ws_rebuild(cm, alive, ar, wd, wp, ws, 1, 10)
     expect(wd[13]).to eq(1)

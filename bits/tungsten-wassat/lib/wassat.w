@@ -332,6 +332,7 @@ use portfolio
   formula = wassat_parse_cnf_native(cnf_text)
   z = ccall("w_value_free_w", cnf_text)
   cnf_text = ""
+  tprof = wassat_prof("cli.parse", tprof)
   parity_source = nil
   if proof_mode == WASSAT_PROOF_NONE
     parity_source = wassat_matching_parity_source(formula)
@@ -347,6 +348,7 @@ use portfolio
   if config_started != 0
     z = wassat_prof("config.shape", config_started)
     z = wassat_prof_note("config.shape scanned_clauses=[formula["flat_ncl"]]")
+  tprof = wassat_prof("cli.input_setup", tprof)
   wrat_out = wassat_reserve_output(wrat_final, input, "WRAT")
   drat_out = nil
   begin
@@ -1001,7 +1003,7 @@ use portfolio
       << "c directed components=[directed["components"]], checked=[directed["checked"]], unique=[directed["unique"]], multi=[directed["multi"]], nodes=[directed["nodes"]], forced=[directed["forced"]]"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(directed["status"] == 1 ? 10 : 20)
-  tprof = wassat_prof("cli.parse", tprof)
+  tprof = wassat_prof("cli.structural_tail", tprof)
 
   # Preprocess once, above solver construction. The artifact carries the
   # reduced clauses with their global proof ids, the elimination stack for

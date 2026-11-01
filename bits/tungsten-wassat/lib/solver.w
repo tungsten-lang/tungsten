@@ -6026,7 +6026,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           while k < n
             lk = ar[stx + k]
             sk = lk >> 63
-            vk = (asg[(lk ^ sk) - sk] ^ sk) - sk
+            # Reuse the per-literal truth bytes maintained for watched literals.
+            kli = (((lk ^ sk) - sk) << 1) + (sk & 1)
+            vk = lasg[kli]
             break if vk >= 0
             k += 1
           if k < n

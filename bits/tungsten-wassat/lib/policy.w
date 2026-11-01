@@ -21,6 +21,34 @@
     i += 1
   0
 
+# Fresh histograms can use local reductions and write the output once.
+# Keep wassat_shape_counts for callers accumulating into an existing buffer.
+-> wassat_shape_counts_new(lens, ncl) (i64[] i64) i64[]
+  total = 0
+  longest = 0
+  units = 0
+  binary = 0
+  ternary = 0
+  empty = 0
+  i = 0
+  while i < ncl
+    n = lens[i]
+    total += n
+    longest = n if n > longest
+    units += n == 1 ? 1 : 0
+    binary += n == 2 ? 1 : 0
+    ternary += n == 3 ? 1 : 0
+    empty += n == 0 ? 1 : 0
+    i += 1
+  out = i64[8]
+  out[0] = total
+  out[1] = longest
+  out[2] = units
+  out[3] = binary
+  out[4] = ternary
+  out[5] = empty
+  out
+
 # Called only when the shape pass counted an empty clause. Return its
 # one-based original clause id for a one-step hinted refutation.
 -> wassat_first_empty_clause(lens, ncl) (i64[] i64) i64
@@ -518,8 +546,7 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
   # wassat_raw_artifact). Same numbers the boxed constructor computes.
   -> .from_lens(nvars, lens, ncl)
     c = WassatConfig.new(nvars, [])
-    counts = i64[8]
-    wassat_shape_counts(lens, ncl, counts)
+    counts = wassat_shape_counts_new(lens, ncl)
     c.adopt_counts(ncl, counts)
     c
 

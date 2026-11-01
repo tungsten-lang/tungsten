@@ -1,7 +1,7 @@
 use spec
 use ../lib/solver
 
--> lucky_root_fixture(text)
+-> lucky_root_fixture(text, state_size = 8)
   f = wassat_parse_cnf(text)
   cs = f["clauses"]
   count = 0
@@ -16,7 +16,7 @@ use ../lib/solver
     ci += 1
   nv = f["nvars"]
   head = i32[2 * nv + 4]; links = i32[2 * cs.size]
-  sign = i8[nv + 1]; trail = i32[nv + 2]; st = i64[8]
+  sign = i8[nv + 1]; trail = i32[nv + 2]; st = i64[state_size]
   rc = wassat_flat_lucky_init(lits, offs, lens, head, links, sign, trail, st, cs.size, nv)
   [lits, offs, lens, head, links, sign, trail, st, nv, rc]
 
@@ -65,5 +65,42 @@ describe "Flat lucky watches satisfied by permanent roots" ->
   it "still detects a contradictory later root unit" ->
     a = lucky_root_fixture("p cnf 2 3\n1 0\n1 2 0\n-1 0\n")
     expect(a[9]).to eq(-1)
+
+describe "Flat lucky replacement lookahead" ->
+  it "moves a later replacement before a long false prefix" ->
+    a = lucky_root_fixture("p cnf 11 10\n-1 -2 -3 -4 -5 -6 -7 -8 9 -10 11 0\n1 0\n2 0\n3 0\n4 0\n5 0\n6 0\n7 0\n8 0\n10 0\n")
+    expect(a[9]).to eq(0)
+    expect(a[5][9]).to eq(0)
+    expect(a[5][11]).to eq(0)
+    expect(a[7][4]).to eq(1)
+    expect(a[7][5]).to eq(2)
+    expect(a[7][6]).to eq(0)
+    expect(a[7][7]).to eq(6)
+    expect(lucky_root_dive_check(a, -1, 0)).to eq([1, 1])
+    expect(a[5][11]).to eq(1)
+    expect(lucky_root_dive_check(a, 1, 1)).to eq([1, 1])
+  it "propagates the sole remaining replacement and its consequences" ->
+    a = lucky_root_fixture("p cnf 11 11\n-1 -2 -3 -4 -5 -6 -7 -8 9 -10 0\n-9 11 0\n1 0\n2 0\n3 0\n4 0\n5 0\n6 0\n7 0\n8 0\n10 0\n")
+    expect(a[9]).to eq(0)
+    expect(a[5][9]).to eq(1)
+    expect(a[5][11]).to eq(1)
+    expect(a[7][2]).to eq(11)
+    expect(a[7][4]).to eq(1)
+    expect(a[7][5]).to eq(1)
+    expect(a[7][6]).to eq(1)
+    expect(lucky_root_dive_check(a, -1, 0)).to eq([1, 1])
+  it "preserves repeated unassigned literals across opposite dives" ->
+    a = lucky_root_fixture("p cnf 9 9\n-1 -2 -3 -4 -5 -6 -7 -8 9 9 0\n1 0\n2 0\n3 0\n4 0\n5 0\n6 0\n7 0\n8 0\n")
+    expect(a[9]).to eq(0)
+    expect(a[7][4]).to eq(1)
+    expect(lucky_root_dive_check(a, -1, 0)).to eq([1, 1])
+    expect(a[5][9]).to eq(1)
+    expect(lucky_root_dive_check(a, 1, 1)).to eq([1, 1])
+  it "keeps four-slot library state valid without optional counters" ->
+    a = lucky_root_fixture("p cnf 10 10\n-1 -2 -3 -4 -5 -6 -7 -8 9 -10 0\n1 0\n2 0\n3 0\n4 0\n5 0\n6 0\n7 0\n8 0\n10 0\n", 4)
+    expect(a[9]).to eq(0)
+    expect(a[5][9]).to eq(1)
+    expect(lucky_root_dive_check(a, -1, 0)).to eq([1, 1])
+    expect(lucky_root_dive_check(a, 1, 1)).to eq([1, 1])
 
 spec_summary

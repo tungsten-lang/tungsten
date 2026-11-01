@@ -124,6 +124,11 @@ miss adds bounded startup work. Fixed native scratch and counted token buffers
 are reused during recognition and reduction. Profiling reports gates, canonical
 nodes, XOR/majority rewrites, adder operations, counted reductions, work visits,
 initial terms, target rank, elapsed time and stop reason.
+Half-adder exclusions are decided once in the existing operation-state buffer.
+The counted reduction loop uses typed native token access, preserves operation
+order and multiplicities, and polls cancellation and deadline every 256 visits.
+Additional counters report exclusion lookups, excluded half adders, reduction
+passes and token-availability attempts.
 `WASSAT_ADDER_CONSERVATION=0` disables this route for comparisons.
 
 A bounded matching-balance checker derives a graph from positive choice

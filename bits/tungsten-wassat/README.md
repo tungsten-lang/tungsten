@@ -108,6 +108,24 @@ reading the result. Profiling reports preparation/search time and each worker's
 completed batches, gate evaluations, and target stages. Exhausting this search
 is still only a model-search miss; ordinary solving supplies any UNSAT answer.
 
+A bounded adder-conservation checker reconstructs two AND-inverter circuits
+from complete original gate clauses and input-equality clauses. Canonical
+XOR and majority identities expose half/full adders. Counted rewrites preserve
+an integer weighted sum of common input products; distinct lower bit positions
+then force the selected output bits equal. Opposite unit requirements give a
+fast-mode refutation. Missing premises, inconsistent weights, unsuccessful
+reduction, cancellation or resource limits fall through to ordinary solving.
+Proof modes retain proof-producing CDCL. There are no instance identifiers,
+stored weights or answer tables. Admission requires topological variable
+numbering, two units, clauses of width at most three, at most 64 primary input
+roots, 10,000 variables and 40,000 clauses. The CLI polls a 100 ms deadline;
+the checker also caps nodes, XOR width, operations and work visits. An admitted
+miss adds bounded startup work. Fixed native scratch and counted token buffers
+are reused during recognition and reduction. Profiling reports gates, canonical
+nodes, XOR/majority rewrites, adder operations, counted reductions, work visits,
+initial terms, target rank, elapsed time and stop reason.
+`WASSAT_ADDER_CONSERVATION=0` disables this route for comparisons.
+
 A bounded matching-balance checker derives a graph from positive choice
 clauses: each participating variable must occur in exactly two distinct rows.
 It checks bipartiteness component by component, then verifies every original

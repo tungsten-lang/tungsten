@@ -57,6 +57,7 @@ use gray_track
 use matching_balance
 use partition_circuit
 use pair_affine
+use adder_conservation
 use knight_tour
 use path_cover
 use preprocess
@@ -814,6 +815,11 @@ use portfolio
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified multiplier circuit model)")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(10)
+    if proof_mode == WASSAT_PROOF_NONE && wassat_adder_conservation_unsat?(formula)
+      << "s UNSATISFIABLE"
+      << "c mode: fast (checked adder conservation refutation)"
+      << "c conflicts: [budget_used], decisions: 0, props: 0"
+      exit(20)
     if proof_mode == WASSAT_PROOF_NONE && (
       wassat_factorize_unsat?(formula) ||
       wassat_linvrinv_unsat?(formula) ||

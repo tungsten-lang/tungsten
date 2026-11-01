@@ -3960,12 +3960,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     hcap = 1024
     while hcap < 4 * cap
       hcap = hcap * 2
-    mark = i64[2 * @nvars + 4]
     out = i64[2 * cap]
     ht = i64[hcap]
     st = i64[8]
     wassat_extract_binaries(@cmeta, @alive, @arena, @lassign, @bldir,
-                            @bl_pool, mark, ht, out, st, @ncl, cap,
+                            @bl_pool, ht, out, st, @ncl, cap,
                             hcap - 1)
     n = st[0]
     i = 0
@@ -3974,7 +3973,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @obuf[1] = out[2 * i + 1]
       self.store_clause(@obuf, 2)
       i += 1
-    z = wassat_prof("congruence.binaries extracted=[n]", prof_start) if prof_start != 0
+    z = wassat_prof("congruence.binaries extracted=[n] checks=[st[1]] queries=[st[2]]", prof_start) if prof_start != 0
     n
 
   # Equivalent-literal substitution against the live database.
@@ -4649,10 +4648,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # not the strengthening itself but the new implication-graph edge, which
 # the SCC pass downstream can close into an equivalence.
 #
-# Membership is answered by stamping, not searching: the negated literal's
-# whole binary block is marked with one generation, then both partners are
-# tested with a single load each, so a clause costs the sum of three binary
-# block lengths rather than a product.
+# Binary clauses are indexed at both endpoints. Membership queries scan
+# either the negated literal's block or the two partner blocks, whichever
+# has fewer entries. Stop on a match; no temporary mark array is needed.
 #
 # Pairs are deduplicated against each other through an open-addressed table
 # keyed on the packed literal-index pair (existing binaries are already
@@ -4660,8 +4658,50 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # ternaries is stored once.
 #
 #   out[2i], out[2i+1] = the pair's signed literals   st[0] = pairs
--> wassat_extract_binaries(cm, alive, ar, lasg, bd, blp, mark, ht, out, st, ncl, outcap, hmask) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
-  gen = 0
+#   st[1] = binary entries checked   st[2] = membership queries
+# Test either binary clause (a,b) or (a,c) through the smaller combined
+# adjacency. Both endpoints index the same clause. Return (reads << 1) | hit
+# so the caller can retain work counters without a separate output buffer.
+-> wassat_binary_either(bd, blp, a, b, c) (i64[] i64[] i64 i64 i64) i64
+  ad = a << 2 ## i64
+  an = bd[ad + 1] ## i64
+  bn = bd[(b << 2) + 1] ## i64
+  cn = bd[(c << 2) + 1] ## i64
+  reads = 0 ## i64
+  if bn + cn < an
+    d = b << 2 ## i64
+    p = bd[d] ## i64
+    start = p ## i64
+    e = p + bn ## i64
+    while p < e
+      found = (blp[p] & 4294967295) == a
+      p += 1
+      return ((p - start) << 1) | 1 if found
+    reads = p - start ## i64
+    d = c << 2 ## i64
+    p = bd[d] ## i64
+    start = p ## i64
+    e = p + cn ## i64
+    while p < e
+      found = (blp[p] & 4294967295) == a
+      p += 1
+      return ((reads + p - start) << 1) | 1 if found
+    reads += p - start
+  else
+    p = bd[ad] ## i64
+    start = p ## i64
+    e = p + an ## i64
+    while p < e
+      x = blp[p] & 4294967295 ## i64
+      p += 1
+      return ((p - start) << 1) | 1 if x == b || x == c
+    reads = p - start ## i64
+  reads << 1
+
+
+-> wassat_extract_binaries(cm, alive, ar, lasg, bd, blp, ht, out, st, ncl, outcap, hmask) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
+  checks = 0
+  queries = 0
   n = 0
   ci = 0
   while ci < ncl && n < outcap
@@ -4689,51 +4729,34 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         found = 0
         ll = 0
         kk = 0
-        gen += 1
-        d = (la ^ 1) << 2 ## i64
-        p = bd[d]
-        e = p + bd[d + 1]
-        while p < e
-          mark[blp[p] & 4294967295] = gen
-          p += 1
-        if mark[lb] == gen || mark[lc] == gen
+        hit = wassat_binary_either(bd, blp, la ^ 1, lb, lc)
+        checks += hit >> 1
+        queries += 1
+        if (hit & 1) == 1
           ll = lb
           kk = lc
           found = 1
         if found == 0
-          gen += 1
-          d = (lb ^ 1) << 2
-          p = bd[d]
-          e = p + bd[d + 1]
-          while p < e
-            mark[blp[p] & 4294967295] = gen
-            p += 1
-          if mark[la] == gen || mark[lc] == gen
+          hit = wassat_binary_either(bd, blp, lb ^ 1, la, lc)
+          checks += hit >> 1
+          queries += 1
+          if (hit & 1) == 1
             ll = la
             kk = lc
             found = 1
         if found == 0
-          gen += 1
-          d = (lc ^ 1) << 2
-          p = bd[d]
-          e = p + bd[d + 1]
-          while p < e
-            mark[blp[p] & 4294967295] = gen
-            p += 1
-          if mark[la] == gen || mark[lb] == gen
+          hit = wassat_binary_either(bd, blp, lc ^ 1, la, lb)
+          checks += hit >> 1
+          queries += 1
+          if (hit & 1) == 1
             ll = la
             kk = lb
             found = 1
         if found == 1
-          gen += 1
-          d = ll << 2
-          p = bd[d]
-          e = p + bd[d + 1]
-          while p < e
-            mark[blp[p] & 4294967295] = gen
-            p += 1
-          if mark[kk] == gen
-            found = 0
+          hit = wassat_binary_either(bd, blp, ll, kk, kk)
+          checks += hit >> 1
+          queries += 1
+          found = 0 if (hit & 1) == 1
         if found == 1
           x = ll
           y = kk
@@ -4761,6 +4784,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             n += 1
     ci += 1
   st[0] = n
+  st[1] = checks
+  st[2] = queries
   0
 
 # AND gate extraction — kissat's extract_and_gates_with_base_clause.

@@ -568,16 +568,17 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # and unpacking live ONLY in native typed code: a boxed `ci << 32`
     # promotes past the small-int range.
     nlits = 2 * nv + 4
-    # same stride-4 directory as the binary blocks: start / size / capacity
-    # share a cache line, and propagate carries one descriptor, not three
+    # The stride-4 directory holds start / size / remaining capacity / base.
+    # Base retains the block origin so a consumed prefix can be reused.
     @wsdir = i64[4 * nlits]
     @wp_cap = flat_shell ? 1 : 4 * maxcl + 2 * nlits + 64
     @wpool = i64[@wp_cap]
     # Watch-pool state: top / capacity / overflow flag, then cumulative
-    # rebuilds / rebuilt entries / relocations / copied entries / overflows.
+    # rebuilds / rebuilt entries / relocations / copied entries / overflows,
+    # then prefix recycles / recycled copies / reclaimed slots.
     # Each arm owns its counters; only the slow pool-maintenance paths write
     # them, with no atomics or extra work in the literal-scanning loops.
-    @wp_state = i64[8]
+    @wp_state = i64[12]
     @wp_state[1] = @wp_cap
 
     @input_clauses.each -> (c)
@@ -4263,6 +4264,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_prof_note("[label].phases snapshots=[@pstate[6]] copied_literals=[@pstate[7]] skipped_literals=[@pstate[8]] payload_bytes=[phase_bytes]")
     wassat_prof_note("[label].spine snapshots=[@pstate[9]] scanned_levels=[@pstate[10]] skipped_levels=[@pstate[11]]")
     wassat_prof_note("[label].watches rebuilds=[@wp_state[3]] rebuilt_entries=[@wp_state[4]] relocations=[@wp_state[5]] copied_entries=[@wp_state[6]] overflows=[@wp_state[7]] pool_used=[@wp_state[0]] pool_capacity=[@wp_state[1]]")
+    wassat_prof_note("[label].watch_recycle blocks=[@wp_state[8]] copied=[@wp_state[9]] reclaimed=[@wp_state[10]]")
     wassat_prof_note("[label].sharing exports=[@share_exports] imports=[@share_imports] dropped=[@share_dropped] filtered=[@share_filtered]")
     wassat_prof_note("[label].inprocess_work cancelled=[@inp_totals[0]] units=[@inp_totals[1]] subsume_work=[@inp_totals[2]] scc_work=[@inp_totals[3]] cleaned_literals=[@inp_totals[4]]")
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
@@ -4405,7 +4407,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       "restarts": @restart_count, "reduces": @reductions,
       "watch_rebuilds": @wp_state[3], "watch_rebuilt_entries": @wp_state[4],
       "watch_relocations": @wp_state[5], "watch_copied_entries": @wp_state[6],
-      "watch_overflows": @wp_state[7] }
+      "watch_overflows": @wp_state[7], "watch_recycles": @wp_state[8],
+      "watch_recycle_copied": @wp_state[9], "watch_reclaimed_slots": @wp_state[10] }
 
   # A positive conflict budget is additional work for this call. Returning
   # UNKNOWN preserves the trail, learned database, restart cadence, and hidden
@@ -5886,7 +5889,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # lists this replaced (prepend). the block start cannot move during the scan
     # (appends go to OTHER literals); removal swaps the front entry in and
     # shrinks the block from the front, which keeps every unvisited entry
-    # below j and leaks one pool slot until the next repack.
+    # below j. An append can reclaim that dead prefix before relocating.
     wdi = li << 2 ## i64
     lo = wd[wdi]
     j = lo + wd[wdi + 1] - 1
@@ -5955,6 +5958,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             rdi = ri << 2 ## i64
             rn = wd[rdi + 1]
             if rn >= wd[rdi + 2]
+              recycled = wassat_ws_recycle(wd, wp, wst, rdi)
+            if rn >= wd[rdi + 2]
               need = 4
               need = rn * 2 if rn * 2 > 4
               top = wst[0]
@@ -5969,6 +5974,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                   wp[top + q] = wp[src + q]
                   q += 1
                 wd[rdi] = top
+                wd[rdi + 3] = top
                 wd[rdi + 2] = need
                 wst[0] = top + need
             if bail == 0
@@ -6021,12 +6027,37 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   st[4] = st[4] + visits
   0
 
+# Reclaim a substantial dead prefix before allocating another watch block.
+# Require at least four slots and half the live length: copying a long
+# list to recover one slot would make repeated remove/append cycles quadratic.
+# Forward copying is overlap-safe because the destination is below the source.
+# wd has stride four; wst has twelve slots, including counters at 8..10.
+-> wassat_ws_recycle(wd, wp, wst, d) (i64[] i64[] i64[] i64) i64
+  src = wd[d]
+  base = wd[d + 3]
+  freed = src - base
+  n = wd[d + 1]
+  if freed >= 4 && freed >= n / 2
+    q = 0
+    while q < n
+      wp[base + q] = wp[src + q]
+      q += 1
+    wd[d] = base
+    wd[d + 2] = wd[d + 2] + freed
+    wst[8] = wst[8] + 1
+    wst[9] = wst[9] + n
+    wst[10] = wst[10] + freed
+    return 1
+  0
+
 # Append one watch entry to a literal's block, relocating the block to the
 # pool top (capacity doubling) when full. Sets wst[2] and returns -1 when
 # the pool itself is exhausted — the caller repacks via rebuild_watches.
 -> wassat_ws_add(wd, wp, wst, li, stx, blk) (i64[] i64[] i64[] i64 i64 i64) i64
   d = li << 2 ## i64
   n = wd[d + 1]
+  if n >= wd[d + 2]
+    recycled = wassat_ws_recycle(wd, wp, wst, d)
   if n >= wd[d + 2]
     need = 4
     need = n * 2 if n * 2 > 4
@@ -6044,6 +6075,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       wp[top + q] = word
       q += 1
     wd[d] = top
+    wd[d + 3] = top
     wd[d + 2] = need
     wst[0] = top + need
   bli = blk << 1 ## i64
@@ -6106,6 +6138,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     capacity = count + 1
     capacity += slack * count / entries if entries > 0
     wd[d] = top
+    wd[d + 3] = top
     wd[d + 2] = capacity
     top += capacity
     wd[d + 1] = 0

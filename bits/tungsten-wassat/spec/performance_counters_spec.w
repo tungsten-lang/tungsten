@@ -9,7 +9,7 @@ use ../lib/solver
   ar[3] = 3
   wd = i64[40]
   wp = i64[pool_cap]
-  ws = i64[8]
+  ws = i64[12]
   ws[1] = pool_cap
   wassat_ws_add(wd, wp, ws, 3, 1, 2)
   asg = i8[4]
@@ -48,7 +48,7 @@ describe "Wassat cumulative performance counters" ->
     expect(bd[13]).to eq(2)
     wd = i64[40]
     wp = i64[16]
-    ws = i64[8]
+    ws = i64[12]
     ws[1] = 16
     wassat_ws_add(wd, wp, ws, 3, 1, 2)
     wassat_ws_add(wd, wp, ws, 3, 1, 2)
@@ -57,7 +57,7 @@ describe "Wassat cumulative performance counters" ->
   it "counts successful block relocations, copied entries, and failed appends separately" ->
     wd = i64[40]
     wp = i64[12]
-    ws = i64[8]
+    ws = i64[12]
     ws[1] = 12
     i = 0
     while i < 8
@@ -100,7 +100,7 @@ describe "Wassat cumulative performance counters" ->
     alive[0] = 1
     wd = i64[40]
     wp = i64[16]
-    ws = i64[8]
+    ws = i64[12]
     ws[1] = 16
     ws[5] = 7
     wassat_ws_rebuild(cm, alive, ar, wd, wp, ws, 1, 10)
@@ -116,5 +116,8 @@ describe "Wassat cumulative performance counters" ->
     expect(r["watch_relocations"] >= 2).to eq(true)
     expect(r["watch_copied_entries"]).to eq(0)
     expect(r["watch_overflows"]).to eq(0)
+    expect(r["watch_recycles"]).to eq(0)
+    expect(r["watch_recycle_copied"]).to eq(0)
+    expect(r["watch_reclaimed_slots"]).to eq(0)
 
 spec_summary

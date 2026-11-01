@@ -205,18 +205,31 @@ exchange search, and clause replay. `WASSAT_PARTITION_CIRCUIT=0` disables it.
 Profiling reports clause visits, truth-table candidates, gate evaluations,
 pair inserts/probes, checked clauses, candidate models, and the stop reason.
 
-A bounded resolution-cover arm runs beside CDCL on large, repetitive,
-mostly width-four inputs. It follows checked resolution chains from original
-clauses, then records which assignments each derived clause excludes. A
-complete cover proves UNSAT; an all-but-one cover entails its remaining
-assignment. Only another checked cover or propagation through original
-clauses can turn those assignments into a refutation. The worker reuses
-fixed typed-array scratch and checks cancellation, a 15-second deadline,
-and a work cap. Missing premises and incomplete coverage fall through.
-Proof modes bypass this arm. `WASSAT_RESOLUTION_COVER=0` disables it;
-`=1` bypasses the default shape and arm-pin gates for experiments while
-retaining resource and proof checks. `WASSAT_PROFILE=1` reports cover rows,
-resolution steps, clause scans, derived units, stop reason and elapsed time.
+A bounded resolution-cover arm runs beside CDCL on large, repetitive inputs.
+Width-four prefixes retain the post-scout route; wider prefixes can also
+start the arm beside the initial scout, with no extra grace wait on a miss.
+Checked chains use original clauses of at most eight literals and record
+which assignments each resolvent excludes. A complete cover proves UNSAT;
+an all-but-one cover entails its remaining assignment. Only another checked
+cover or propagation through original clauses can derive a refutation.
+If the remaining formula is binary, iterative strongly connected components
+can construct a candidate model. SAT is published only after complete
+original-clause replay; an inconsistent or unsupported residual declines.
+The worker reuses typed-array scratch, allocates the compact binary graph
+once at its measured size, and polls cancellation, a 15-second deadline and
+a work cap. Proof modes bypass this arm. `WASSAT_RESOLUTION_COVER=0` disables
+it; `=1` bypasses shape and arm-pin gates for experiments while retaining
+resource and proof checks. Profiling reports resolution steps, clause scans,
+derived units, residual clauses, active graph variables, graph visits,
+replayed clauses, model verification, stop reason and elapsed time.
+
+Watch-pool rebuilds retain the compact layout for sparse formulas until
+three pool overflows demonstrate repeated repacking. They then reserve
+bounded headroom for individual dense lists; globally dense formulas keep
+their existing policy. Lucky dives can stop after a completed watch
+repair; they reset the retained root queue so a resumed solver propagates
+those units again. Ordinary CDCL and inprocessing still complete propagation.
+The `watch_recycle` profile includes `cancelled_repairs`.
 
 The native raw race also has a bounded exact circuit arm. It derives each
 output's complete two-input truth table from all its defining CNF clauses,

@@ -2488,23 +2488,7 @@ WASSAT_AXIS_SLOTS = 10
       stop, res, circuit_base, nv
     )
   if cover_plan != nil
-    cover_lits = formula["flat_lits"]
-    cover_offs = formula["flat_offs"]
-    cover_lens = formula["flat_lens"]
-    cover_nc = formula["flat_ncl"]
-    cover_degree = cover_plan["degree"]
-    cover_position = cover_plan["position"]
-    cover_values = cover_plan["values"]
-    cover_index = cover_plan["index"]
-    cover_score = cover_plan["score"]
-    cover_vars = cover_plan["vars"]
-    cover_rows = cover_plan["cover"]
-    cover_meta = cover_plan["meta"]
-    cover_handle = Thread.new -> wassat_cover_arm(
-      cover_lits, cover_offs, cover_lens, nv, cover_nc, cover_degree,
-      cover_position, cover_values, cover_index, cover_score, cover_vars,
-      cover_rows, cover_meta, stop, res, cover_base
-    )
+    cover_handle = wassat_cover_start(formula, cover_plan, stop, res, cover_base)
   round = 0
   running = 1
   while running == 1
@@ -2579,7 +2563,7 @@ WASSAT_AXIS_SLOTS = 10
         decisive_now = 1 if st == 1 || st == 0 - 1
         a += 1
       decisive_now = 1 if circuit_plan != nil && ccall("__w_arr_load_acq", res, circuit_base) == -1
-      decisive_now = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) == -1
+      decisive_now = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) != 0
       cdcl_can_continue = 0
       if decisive_now == 0 && round1 > 0
         a = 0
@@ -2619,7 +2603,7 @@ WASSAT_AXIS_SLOTS = 10
         a += 1
       decided = 1 if sls.size > 0 && res[sls_base] == 1
       decided = 1 if circuit_plan != nil && ccall("__w_arr_load_acq", res, circuit_base) == -1
-      decided = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) == -1
+      decided = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) != 0
       if decided == 0
         # Score the round every arm just finished, and retire the arms that
         # cannot continue: retired by the solver, stuck (no conflict advanced,
@@ -2798,8 +2782,8 @@ WASSAT_AXIS_SLOTS = 10
       cm = cover_plan["meta"]
       ended = cm[12]
       last_ms = ended if ended > last_ms
-      answer_ms = ended if res[cover_base] == -1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
-      wassat_prof_note("race.cover status=[res[cover_base]] projections=[cm[1]] rows=[cm[2]] chain_steps=[cm[3]] scan_clauses=[cm[4]] up_clauses=[cm[5]] entailed=[cm[6]] propagated=[cm[7]] stop=[cm[8]] conflict_clause=[cm[9]] ticks=[cm[10]] ms=[cm[12] - cm[11]]")
+      answer_ms = ended if res[cover_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+      wassat_cover_profile("race.cover", cover_plan, res[cover_base])
     if answer_ms > 0
       wassat_prof_note("race.stop answer_to_last_arm_ms=[last_ms - answer_ms]")
   a = 0
@@ -2834,8 +2818,8 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && circuit_plan != nil && res[circuit_base] == -1
     status = -1
     winner = circuit_idx
-  if status == 0 && cover_plan != nil && res[cover_base] == -1
-    status = -1
+  if status == 0 && cover_plan != nil && res[cover_base] != 0
+    status = res[cover_base]
     winner = cover_idx
   # A model-only arm cannot beat a refutation, so it is consulted last and
   # only when nothing decisive was found.

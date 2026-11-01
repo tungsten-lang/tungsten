@@ -424,7 +424,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @asg_pending = 0
     @asg_count = 0
     @asg_filter = false
-    @rhist = i64[64]             # reduce_db scratch (worker threads: no alloc)
+    # Reduction scratch: 64 histogram buckets, two compaction outputs,
+    # then cumulative clause visits, copied words, remapped clauses/reasons.
+    @rhist = i64[70]             # reused by every reduction; no worker allocation
     # Mid-search inprocessing schedule. WASSAT_INPROCESS pins a fixed
     # interval (0 = off); otherwise policy's shape-gated automatic schedule
     # decides the first round, and later rounds space out geometrically.
@@ -2744,41 +2746,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> reduce_db
     self.subsume_learned
-    # histogram LBD values to find a cut that removes about half
-    total = 0
-    i = 0
-    while i < 64
-      @rhist[i] = 0
-      i += 1
-    ci = 0
-    while ci < @ncl
-      if @alive[ci] == 1 && @clbd[ci] > 0
-        b = @clbd[ci]
-        b = 63 if b > 63
-        @rhist[b] += 1
-        total += 1
-      ci += 1
-    cut = 63
-    if total > 0
-      half = total / 2
-      acc = 0
-      b = 63
-      while b >= 2 && acc < half
-        acc += @rhist[b]
-        cut = b
-        b -= 1
-
-    # Keep binaries and anything below the cut; drop the rest — EXCEPT
-    # tier-2 clauses (LBD <= 6) resolved in analysis since the previous
-    # reduction: recency of use predicts future use better than glue alone
-    # (glucose-style tiering; the counting chains of cardinality instances
-    # live or die by this).
-    ci = 0
-    while ci < @ncl
-      if @alive[ci] == 1 && @clbd[ci] >= cut && @cmeta[2 * ci + 1] > 2 && @clbd[ci] > 2
-        keep2 = @clbd[ci] <= 6 && @cused[ci] >= @last_reduce_at
-        @alive[ci] = 0 unless keep2
-      ci += 1
+    wassat_reduce_select(@cmeta, @alive, @clbd, @cused, @rhist,
+                           @ncl, @last_reduce_at)
     @last_reduce_at = @conflicts
 
     # Proof-free mode reclaims the arena in place: live clauses slide
@@ -2787,75 +2756,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Only sound without proof logging — proof replay would still need the
     # dead literals; --fast is PROOF_NONE by contract.
     if @proof_mode == WASSAT_PROOF_NONE
-      wp = 0
-      ci = 0
-      while ci < @ncl
-        if @alive[ci] == 1
-          st = @cmeta[2 * ci]
-          n = @cmeta[2 * ci + 1]
-          # the header travels with the body; its packed (index, length)
-          # is position-independent, so a plain copy is correct
-          if st != wp + 1
-            @arena[wp] = @arena[st - 1]
-            k = 0
-            while k < n
-              @arena[wp + 1 + k] = @arena[st + k]
-              k += 1
-            @cmeta[2 * ci] = wp + 1
-          wp += n + 1
-        else
-          @cmeta[2 * ci + 1] = 0
-        ci += 1
-      @asize = wp
-
-      # Under FIXED capacities the clause INDEX space is recycled too.
-      # Without this it is monotonic — one slot burned per conflict, never
-      # returned — so a frozen arm retires after @ccap conflicts however much
-      # arena it has left (uuf250-01 retires at ~10k against the ~135k
-      # conflicts it needs). Renumbering is sound because an index is only a
-      # name: the per-clause tables are compacted in the same order
-      # (dest <= src), the arena header's packed (index, length) is rewritten
-      # in place, and the two structures that address clauses BY INDEX —
-      # @reason and the binary implication lists — are remapped and rebuilt.
-      # Watch entries carry arena OFFSETS and are repacked below anyway.
-      #
-      # @gid doubles as the old->new map: it holds certificate ids, which
-      # PROOF_NONE neither assigns meaning to nor reads, so inside this
-      # branch it is free scratch.
-      if @fixed_caps && @gid.size >= @ncl
-        nn = 0
-        ci = 0
-        while ci < @ncl
-          if @alive[ci] == 1
-            @gid[ci] = nn
-            nn += 1
-          else
-            @gid[ci] = -1
-          ci += 1
-        ci = 0
-        while ci < @ncl
-          nci = @gid[ci]
-          if nci >= 0
-            st = @cmeta[2 * ci]
-            n = @cmeta[2 * ci + 1]
-            @cmeta[2 * nci] = st
-            @cmeta[2 * nci + 1] = n
-            @alive[nci] = 1
-            @clbd[nci] = @clbd[ci]
-            @cused[nci] = @cused[ci]
-            wassat_hdr_put(@arena, st - 1, nci, n)
-          ci += 1
-        @ncl = nn
-        # A reason names its clause by index. A reason clause that did not
-        # survive becomes a root fact: only level-zero reasons can be live
-        # here (reduce_db always runs from a level-zero trail), and neither
-        # analysis nor minimisation ever dereferences one.
-        v = 1
-        while v <= @nvars
-          r = @reason[v]
-          @reason[v] = @gid[r] if r >= 0
-          v += 1
-        # binary-list entries pack the clause index, so they must be rebuilt
+      remap = @fixed_caps && @gid.size >= @ncl
+      wassat_reduce_compact(@cmeta, @alive, @arena, @clbd, @cused,
+                             @gid, @reason, @rhist, @ncl, @nvars, remap ? 1 : 0)
+      @asize = @rhist[64]
+      if remap
+        @ncl = @rhist[65]
         self.rebuild_binaries
 
     # rebuild watches from scratch over the survivors (tight repack)
@@ -4299,6 +4205,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_prof_note("[label].inprocess_work cancelled=[@inp_totals[0]] units=[@inp_totals[1]] subsume_work=[@inp_totals[2]] scc_work=[@inp_totals[3]] cleaned_literals=[@inp_totals[4]]")
     wassat_prof_note("[label].subst_hash clauses=[@inp_totals[5]] probes=[@inp_totals[6]] compared_literals=[@inp_totals[7]]")
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
+    wassat_prof_note("[label].reduction clause_visits=[@rhist[66]] copied_words=[@rhist[67]] remapped_clauses=[@rhist[68]] remapped_reasons=[@rhist[69]]")
     wassat_prof_note("[label].analysis mark_bytes=[@nvars + 1] reason_bytes=[4 * (@nvars + 1)] shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
     0
 
@@ -5875,6 +5782,131 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   st[2] = killed
   st[4] = shrunk
   st[5] = removed
+  0
+
+# Select the same LBD cut and survivors using the retained histogram scratch.
+-> wassat_reduce_select(cm, alive, lbd, used, hist, ncl, last) (i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+  # histogram LBD values to find a cut that removes about half
+  total = 0
+  i = 0
+  while i < 64
+    hist[i] = 0
+    i += 1
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && lbd[ci] > 0
+      b = lbd[ci]
+      b = 63 if b > 63
+      hist[b] += 1
+      total += 1
+    ci += 1
+  cut = 63
+  if total > 0
+    half = total / 2
+    acc = 0
+    b = 63
+    while b >= 2 && acc < half
+      acc += hist[b]
+      cut = b
+      b -= 1
+
+  # Keep binaries and anything below the cut; drop the rest — EXCEPT
+  # tier-2 clauses (LBD <= 6) resolved in analysis since the previous
+  # reduction: recency of use predicts future use better than glue alone
+  # (glucose-style tiering; the counting chains of cardinality instances
+  # live or die by this).
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && lbd[ci] >= cut && cm[2 * ci + 1] > 2 && lbd[ci] > 2
+      keep2 = lbd[ci] <= 6 && used[ci] >= last
+      alive[ci] = 0 unless keep2
+    ci += 1
+  hist[66] += 2 * ncl
+  0
+
+# Proof-free, root-level compaction. The caller repacks watches and, when
+# remap is enabled, binary indices after this indivisible mutation finishes.
+# state reuses the histogram slab: outputs 64/65, cumulative work 66..69.
+-> wassat_reduce_compact(cm, alive, ar, lbd, used, gid, rsn, state, ncl, nv, remap) (i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64 i64 i64) i64
+  copied = 0
+  mapped = 0
+  wp = 0
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1
+      st = cm[2 * ci]
+      n = cm[2 * ci + 1]
+      # the header travels with the body; its packed (index, length)
+      # is position-independent, so a plain copy is correct
+      if st != wp + 1
+        copied += n + 1
+        ar[wp] = ar[st - 1]
+        k = 0
+        while k < n
+          ar[wp + 1 + k] = ar[st + k]
+          k += 1
+        cm[2 * ci] = wp + 1
+      wp += n + 1
+    else
+      cm[2 * ci + 1] = 0
+    ci += 1
+  state[64] = wp
+  state[65] = ncl
+  state[66] += ncl
+  state[67] += copied
+
+  # Under FIXED capacities the clause INDEX space is recycled too.
+  # Without this it is monotonic — one slot burned per conflict, never
+  # returned — so a frozen arm retires after @ccap conflicts however much
+  # arena it has left (uuf250-01 retires at ~10k against the ~135k
+  # conflicts it needs). Renumbering is sound because an index is only a
+  # name: the per-clause tables are compacted in the same order
+  # (dest <= src), the arena header's packed (index, length) is rewritten
+  # in place, and the two structures that address clauses BY INDEX —
+  # rsn and the binary implication lists — are remapped and rebuilt.
+  # Watch entries carry arena OFFSETS and are repacked below anyway.
+  #
+  # gid doubles as the old->new map: it holds certificate ids, which
+  # PROOF_NONE neither assigns meaning to nor reads, so inside this
+  # branch it is free scratch.
+  if remap == 1
+    nn = 0
+    ci = 0
+    while ci < ncl
+      if alive[ci] == 1
+        gid[ci] = nn
+        nn += 1
+      else
+        gid[ci] = -1
+      ci += 1
+    ci = 0
+    while ci < ncl
+      nci = gid[ci]
+      if nci >= 0
+        st = cm[2 * ci]
+        n = cm[2 * ci + 1]
+        cm[2 * nci] = st
+        cm[2 * nci + 1] = n
+        alive[nci] = 1
+        lbd[nci] = lbd[ci]
+        used[nci] = used[ci]
+        wassat_hdr_put(ar, st - 1, nci, n)
+      ci += 1
+    state[65] = nn
+    state[66] += 2 * ncl
+    state[68] += nn
+    # A reason names its clause by index. A reason clause that did not
+    # survive becomes a root fact: only level-zero reasons can be live
+    # here (reduce_db always runs from a level-zero trail), and neither
+    # analysis nor minimisation ever dereferences one.
+    v = 1
+    while v <= nv
+      r = rsn[v]
+      if r >= 0
+        rsn[v] = gid[r]
+        mapped += 1
+      v += 1
+  state[69] += mapped
   0
 
 -> wassat_zero_i64(a, n) (i64[] i64)

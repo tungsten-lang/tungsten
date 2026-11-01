@@ -76,4 +76,41 @@ describe "Native DIMACS capacity hints" ->
     expect(-> () wassat_parse_cnf_native_buffers("p cnf 1 1\n1 1 1 0\n", 1, 8, 2)).to raise_error
     expect(-> () wassat_parse_cnf_native_buffers("p cnf 1 8\n", 1, 2, 32)).to raise_error
 
+
+-> digit_bound_scan(text)
+  lits = i64[32]; offs = i64[8]; lens = i64[8]; hdr = i64[8]
+  z = ccall("__w_parse_dimacs", text, lits, offs, lens, hdr)
+  [hdr, lits]
+
+describe "Native DIMACS decimal bounds" ->
+  it "accepts signed literals exactly at the scanner limit" ->
+    a = digit_bound_scan("p cnf 2000000000 1\n2000000000 -2000000000 +1999999999 0\n")
+    expect(a[0][4]).to eq(0)
+    expect(a[0][0]).to eq(2000000000)
+    expect(a[0][3]).to eq(3)
+    expect(a[1][0]).to eq(2000000000)
+    expect(a[1][1]).to eq(-2000000000)
+    expect(a[1][2]).to eq(1999999999)
+  it "rejects the first out-of-range digit in either polarity" ->
+    ["2000000001", "-2000000001", "+2000000001", "2000000010", "18446744073709551616"].each ->(value)
+      a = digit_bound_scan("p cnf 2000000000 1\n[value] 0\n")
+      expect(a[0][4]).to eq(4)
+      expect(a[0][5]).to eq(2)
+  it "preserves arbitrarily padded leading zeros on nonzero numbers" ->
+    zeros = "0" * 100
+    a = digit_bound_scan("p cnf [zeros]2000000000 1\n-[zeros]2000000000 0\n")
+    expect(a[0][4]).to eq(0)
+    expect(a[1][0]).to eq(-2000000000)
+  it "applies the same bound to both declaration fields" ->
+    a = digit_bound_scan("p cnf 2000000001 0\n")
+    expect(a[0][4]).to eq(2)
+    a = digit_bound_scan("p cnf 1 2000000001\n")
+    expect(a[0][4]).to eq(2)
+    a = digit_bound_scan("p cnf 1 2000000000\n")
+    expect(a[0][4]).to eq(7)
+  it "keeps zero-terminator and delimiter validation strict" ->
+    ["00", "-0", "+0", "1junk", "2000000000x"].each ->(value)
+      a = digit_bound_scan("p cnf 2000000000 1\n[value] 0\n")
+      expect(a[0][4]).to eq(3)
+
 spec_summary

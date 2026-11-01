@@ -7673,10 +7673,12 @@ WASSAT_VALUE_LINE_MAX = 4096
     whead[li] = 0 - 1
     li += 1
   tsize = 0
+  skipped = 0
   c = 0
   while c < ncl
     n = slens[c]
     if n == 0
+      st[3] = skipped
       return 0 - 1
     elsif n == 1
       l = slits[soffs[c]]
@@ -7687,7 +7689,13 @@ WASSAT_VALUE_LINE_MAX = 4096
         sign[av] = want
         trail[tsize] = l
         tsize += 1
+        # During construction, -2 marks a literal fixed true by a root unit.
+        # Its watch bucket is never processed: the assignment is permanent.
+        root_li = av << 1
+        root_li += 1 if l < 0
+        whead[root_li] = -2
       elsif sv != want
+        st[3] = skipped
         return 0 - 1
     else
       o = soffs[c]
@@ -7703,6 +7711,12 @@ WASSAT_VALUE_LINE_MAX = 4096
         li1 = l1 << 1
       else
         li1 = ((0 - l1) << 1) + 1
+      # Reuse head loads instead of looking up both assignment signs again.
+      # All negative link values remain valid end markers for propagation.
+      if whead[li0] == -2 || whead[li1] == -2
+        skipped += 1
+        c += 1
+        next
       w0 = c << 1
       w1 = w0 + 1
       wnext[w0] = whead[li0]
@@ -7710,6 +7724,7 @@ WASSAT_VALUE_LINE_MAX = 4096
       wnext[w1] = whead[li1]
       whead[li1] = w1
     c += 1
+  st[3] = skipped
   st[0] = 0
   st[1] = tsize
   rc = wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st)
@@ -8208,7 +8223,11 @@ WASSAT_VALUE_LINE_MAX = 4096
   whead = i32[2 * nv + 4]
   wnext = i32[2 * ncl]
   st = i64[8]
+  init_started = wassat_prof_clock()
   rc = wassat_flat_lucky_init(slits, soffs, slens, whead, wnext, sign, trail, st, ncl, nv)
+  if env("WASSAT_PROFILE") == "1"
+    z = wassat_prof("flat_lucky.init", init_started)
+    z = wassat_prof_note("flat_lucky.init clauses=[ncl] skipped_root_clauses=[st[3]] root_assignments=[st[2]] status=[rc]")
   r = 0
   if rc == 0
     seeded = 0

@@ -1,4 +1,5 @@
 use miter_eval
+use klieber_local
 
 # Circuit equivalence / miter lanes (Klieber, SatCoin, AIG, word-sort,
 # gray-code miters), split out of multiplier.w. Each lane reconstructs its
@@ -105,10 +106,12 @@ use miter_eval
   ntargets = fcl[wide_ci] - 1
   return [] if ntargets < 2 || ntargets > 32
   p = nv - 1 - n_tern
-  return [] if p < 6 || p > 24
+  return [] if p < 6 || p > 32
+  return [] if p > 24 && env("WASSAT_KLIEBER_LOCAL") == "0"
   return [] unless ncl == 3 * n_tern + ntargets + 2
 
-  # Parse each gate v in p+1..nv-1 from its ternary clause and verify its 2 binary clauses
+  # Reconstruct gates from ternaries and check the binary-clause counts.
+  # Exact gate semantics and the sink still require final original-CNF replay.
   ga = i64[nv + 1]
   gna = i64[nv + 1]
   gb = i64[nv + 1]
@@ -167,87 +170,97 @@ use miter_eval
     return [] unless has_tern[v] == 1 && bin_cnt[v] == 2
     v += 1
 
-  # Score each target on 32 evenly-spaced batches to put the most selective target first
-  p_masks = i64[6]
-  p_masks[0] = -6148914691236517206 ## i64
-  p_masks[1] = -3689348814741910324 ## i64
-  p_masks[2] = -1085102592571150096 ## i64
-  p_masks[3] = -71777214294589696 ## i64
-  p_masks[4] = -281470681808896 ## i64
-  p_masks[5] = -4294967296 ## i64
   val = i64[nv + 1]
-  n_batches = 1 << (p - 6)
-  step_b = n_batches >> 5
-  step_b = 1 if step_b < 1
-  t_scores = i64[ntargets]
-  wassat_klieber_score_targets(val, p_masks, ga, gna, gb, gnb, gpol, targets, t_scores, nv, p, ntargets, n_batches, step_b)
+  found = i64[6]
+  if p > 24
+    started = clock_ms()
+    # Cap both elapsed time and native work; a miss always resumes CDCL.
+    cap = 134217728 / (nv - p - 1)
+    cap = 16384 if cap > 16384
+    wassat_klieber_local_search(val, ga, gna, gb, gnb, gpol, targets,
+      found, p, nv, ntargets, i64[2], started + 200, cap)
+    if env("WASSAT_PROFILE") == "1"
+      wassat_prof_note("klieber local: ms=[clock_ms() - started] batches=[found[2]] gates=[found[3]] best=[found[4]] stop=[found[5]] found=[found[0]]")
+  else
+    # Score each target on 32 evenly-spaced batches to put the most selective target first
+    p_masks = i64[6]
+    p_masks[0] = -6148914691236517206 ## i64
+    p_masks[1] = -3689348814741910324 ## i64
+    p_masks[2] = -1085102592571150096 ## i64
+    p_masks[3] = -71777214294589696 ## i64
+    p_masks[4] = -281470681808896 ## i64
+    p_masks[5] = -4294967296 ## i64
+    n_batches = 1 << (p - 6)
+    step_b = n_batches >> 5
+    step_b = 1 if step_b < 1
+    t_scores = i64[ntargets]
+    wassat_klieber_score_targets(val, p_masks, ga, gna, gb, gnb, gpol, targets, t_scores, nv, p, ntargets, n_batches, step_b)
 
-  # Sort targets by ascending t_scores
-  ti = 0
-  while ti < ntargets
-    best = ti
-    tj = ti + 1
-    while tj < ntargets
-      best = tj if t_scores[tj] < t_scores[best]
-      tj += 1
-    if best != ti
-      tmp_t = targets[ti]; targets[ti] = targets[best]; targets[best] = tmp_t
-      tmp_s = t_scores[ti]; t_scores[ti] = t_scores[best]; t_scores[best] = tmp_s
-    ti += 1
+    # Sort targets by ascending t_scores
+    ti = 0
+    while ti < ntargets
+      best = ti
+      tj = ti + 1
+      while tj < ntargets
+        best = tj if t_scores[tj] < t_scores[best]
+        tj += 1
+      if best != ti
+        tmp_t = targets[ti]; targets[ti] = targets[best]; targets[best] = tmp_t
+        tmp_s = t_scores[ti]; t_scores[ti] = t_scores[best]; t_scores[best] = tmp_s
+      ti += 1
 
-  # Build incremental cone stages for the sorted targets
-  in_prev = i8[nv + 1]
-  in_curr = i8[nv + 1]
-  stage_gates = i64[nv]
-  stage_off = i64[ntargets + 1]
-  sg_len = 0
-  ti = 0
-  while ti < ntargets
-    stage_off[ti] = sg_len
-    tv = wassat_multiplier_abs(targets[ti])
-    if in_prev[tv] == 0 && tv > p
-      in_curr[tv] = 1
-      u = tv
-      while u > p
-        if in_curr[u] == 1
-          ua = ga[u]
-          ub = gb[u]
-          in_curr[ua] = 1 if ua > p && in_prev[ua] == 0
-          in_curr[ub] = 1 if ub > p && in_prev[ub] == 0
-        u -= 1
-      u = p + 1
-      while u <= tv
-        if in_curr[u] == 1
-          stage_gates[sg_len] = u
-          sg_len += 1
-          in_prev[u] = 1
-          in_curr[u] = 0
-        u += 1
-    ti += 1
-  stage_off[ntargets] = sg_len
+    # Build incremental cone stages for the sorted targets
+    in_prev = i8[nv + 1]
+    in_curr = i8[nv + 1]
+    stage_gates = i64[nv]
+    stage_off = i64[ntargets + 1]
+    sg_len = 0
+    ti = 0
+    while ti < ntargets
+      stage_off[ti] = sg_len
+      tv = wassat_multiplier_abs(targets[ti])
+      if in_prev[tv] == 0 && tv > p
+        in_curr[tv] = 1
+        u = tv
+        while u > p
+          if in_curr[u] == 1
+            ua = ga[u]
+            ub = gb[u]
+            in_curr[ua] = 1 if ua > p && in_prev[ua] == 0
+            in_curr[ub] = 1 if ub > p && in_prev[ub] == 0
+          u -= 1
+        u = p + 1
+        while u <= tv
+          if in_curr[u] == 1
+            stage_gates[sg_len] = u
+            sg_len += 1
+            in_prev[u] = 1
+            in_curr[u] = 0
+          u += 1
+      ti += 1
+    stage_off[ntargets] = sg_len
 
-  # Search all n_batches across 4 worker threads
-  found = i64[2]
-  found[0] = 0
-  found[1] = -1
-  n_workers = 4
-  n_workers = 1 if n_batches < 64
-  chunk = (n_batches + n_workers - 1) / n_workers
-  handles = []
-  wi = 0
-  while wi < n_workers
-    b_lo = wi * chunk
-    b_hi = b_lo + chunk
-    b_hi = n_batches if b_hi > n_batches
-    th = Thread.new ->
-      wval = i64[nv + 1]
-      wassat_klieber_eval_chunk(wval, p_masks, ga, gna, gb, gnb, gpol, stage_gates, stage_off, targets, found, p, ntargets, b_lo, b_hi)
-    handles.push(th)
-    wi += 1
-  wi = 0
-  while wi < handles.size
-    z = handles[wi].join
-    wi += 1
+    # Search all n_batches across 4 worker threads
+    found[0] = 0
+    found[1] = -1
+    n_workers = 4
+    n_workers = 1 if n_batches < 64
+    chunk = (n_batches + n_workers - 1) / n_workers
+    handles = []
+    wi = 0
+    while wi < n_workers
+      b_lo = wi * chunk
+      b_hi = b_lo + chunk
+      b_hi = n_batches if b_hi > n_batches
+      th = Thread.new ->
+        wval = i64[nv + 1]
+        wassat_klieber_eval_chunk(wval, p_masks, ga, gna, gb, gnb, gpol, stage_gates, stage_off, targets, found, p, ntargets, b_lo, b_hi)
+      handles.push(th)
+      wi += 1
+    wi = 0
+    while wi < handles.size
+      z = handles[wi].join
+      wi += 1
   return [] if found[0] == 0 || found[1] < 0
 
   win_idx = found[1]

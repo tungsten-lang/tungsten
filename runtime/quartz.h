@@ -54,6 +54,7 @@ int w_cg_canvas_buffer(int64_t handle, WCGBufferInfo *out);
     X(w_cg_canvas_new, 6)         \
     X(w_cg_canvas_close, 1)       \
     X(w_cg_canvas_info, 2)        \
+    X(w_cg_font_shape, 3)         \
     X(w_cg_stats, 0)              \
     X(w_cg_save, 1)               \
     X(w_cg_restore, 1)            \

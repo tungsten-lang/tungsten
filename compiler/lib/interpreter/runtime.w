@@ -744,6 +744,17 @@
   # then resolves from @classes.
   -> eval_class_ref(node, env)
     name = ast_get(node, :name)
+    # Resolve constants against the defining method's lexical namespace before
+    # falling back to global classes; inherited methods keep their own scope.
+    lexical = env.defined?("__lexical_class__") ? env.get("__lexical_class__") : @defining_class
+    if lexical != nil && !name.include?(":")
+      parts = lexical[:name].split(":")
+      while parts.size > 0
+        candidate = parts.join(":") + ":" + name
+        if @classes.has_key?(candidate)
+          name = candidate
+          break
+        parts.pop()
     if !@classes.has_key?(name)
       # Bit constant alias: rewrite the first segment (`WC:Route` →
       # `Tungsten:Carbide:Route`) and resolve exactly — mirrors

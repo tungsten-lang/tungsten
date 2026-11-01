@@ -226,6 +226,13 @@ use lowering/definitions
   mod[:known_calls]["file_expand_path"] = "__w_file_expand_path"
   mod[:known_calls]["file_expand_path_base"] = "__w_file_expand_path_base"
   mod[:known_calls]["file_join"] = "__w_file_join"
+  mod[:known_calls]["file_basename"] = "__w_file_basename"
+  mod[:known_calls]["file_dirname"] = "__w_file_dirname"
+  mod[:known_calls]["file_extname"] = "__w_file_extname"
+
+  mod[:known_calls]["file_realpath"] = "__w_file_realpath"
+  mod[:known_calls]["file_readlink"] = "__w_file_readlink"
+  mod[:known_calls]["file_symlink"] = "__w_file_symlink"
   mod[:known_calls]["read_dir"] = "__w_file_read_dir"
   mod[:known_calls]["write_file"] = "__w_write_file"
   mod[:known_calls]["write_file_bytes"] = "__w_write_file"

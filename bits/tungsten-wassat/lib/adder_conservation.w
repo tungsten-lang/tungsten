@@ -5,14 +5,74 @@
 # selected output bits equal, contradicting their unit clauses.
 # This does not emit DRAT: proof modes must use the ordinary solver.
 use atomic_stop
+use cnf
+
+# The caller supplies checked adder identities and premarks excluded half
+# adders. used: 0 eligible, 1 applied, 2 excluded. Preserve scan order and
+# count both repeated input occurrences and colliding output terms exactly.
+-> wassat_adder_reduce(ops, count, used, available, meta, stop, deadline) (i32[] i64 i8[] i32[] i64[] i64[] i64) i64
+  return 0 if meta[8] != 0
+  if wassat_stop_load(stop) != 0
+    meta[8] = 1
+    return 0
+  if deadline > 0 && clock_ms() >= deadline
+    meta[8] = 2
+    return 0
+  progress = true
+  while progress
+    meta[13] += 1
+    progress = false
+    oi = 0
+    while oi < count
+      meta[7] += 1
+      if meta[7] > 2000000
+        meta[8] = 3
+        return 0
+      if (meta[7] & 255) == 0
+        if wassat_stop_load(stop) != 0
+          meta[8] = 1
+          return 0
+        if deadline > 0 && clock_ms() >= deadline
+          meta[8] = 2
+          return 0
+      at = 7 * oi
+      if used[oi] == 0
+        meta[14] += 1
+        side = ops[at]
+        n = ops[at + 1]
+        allowed = true
+        base = side * 65536 + 32768
+        i = 0
+        while i < n && allowed
+          x = ops[at + 2 + i]
+          needed = 1
+          j = 0
+          while j < i
+            needed += 1 if ops[at + 2 + j] == x
+            j += 1
+          allowed = false if available[base + x] < needed
+          i += 1
+        if allowed
+          i = 0
+          while i < n
+            available[base + ops[at + 2 + i]] -= 1
+            i += 1
+          available[base + ops[at + 5]] += 1
+          available[base + ops[at + 6]] += 1
+          used[oi] = 1
+          meta[6] += 1
+          progress = true
+      oi += 1
+  1
 
 + WassatAdderConservation
   ro :meta
 
   -> new(@stop, @deadline)
     # status, gates, nodes, XORs, majorities, operations, rewrites, visits,
-    # stop (1 cancel, 2 deadline, 3 capacity), initial terms, target rank
-    @meta = i64[11]
+    # stop (1 cancel, 2 deadline, 3 capacity), initial terms, target rank,
+    # pair lookups, excluded half adders, reduction passes, token attempts
+    @meta = i64[15]
 
   -> allocate
     @scratch = i32[64]
@@ -471,42 +531,22 @@ use atomic_stop
           i += 1
       oi += 1
     used = i8[count]
-    progress = true
-    while progress
-      progress = false
-      oi = 0
-      while oi < count
-        return 0 if visit?
-        at = 7 * oi
-        if used[oi] == 0
-          side = ops[at]
-          n = ops[at + 1]
-          a = ops[at + 2]
-          b = ops[at + 3]
-          key = side * 4294967296 + (a < b ? a + 32768 : b + 32768) * 65536 + (a < b ? b + 32768 : a + 32768)
-          allowed = n == 3 || pairs[key] == nil
-          base = side * 65536 + 32768
-          i = 0
-          while i < n && allowed
-            x = ops[at + 2 + i]
-            needed = 1
-            j = 0
-            while j < i
-              needed += 1 if ops[at + 2 + j] == x
-              j += 1
-            allowed = false if available[base + x] < needed
-            i += 1
-          if allowed
-            i = 0
-            while i < n
-              available[base + ops[at + 2 + i]] -= 1
-              i += 1
-            available[base + ops[at + 5]] += 1
-            available[base + ops[at + 6]] += 1
-            used[oi] = 1
-            @meta[6] += 1
-            progress = true
-        oi += 1
+    # Pair membership is immutable: decide excluded half adders once, using
+    # the existing used buffer. No hash lookup is needed in later passes.
+    oi = 0
+    while oi < count
+      return 0 if visit?
+      at = 7 * oi
+      if ops[at + 1] == 2
+        a = ops[at + 2]
+        b = ops[at + 3]
+        key = ops[at] * 4294967296 + (a < b ? a + 32768 : b + 32768) * 65536 + (a < b ? b + 32768 : a + 32768)
+        @meta[11] += 1
+        if pairs[key] != nil
+          used[oi] = 2
+          @meta[12] += 1
+      oi += 1
+    return 0 if wassat_adder_reduce(ops, count, used, available, @meta, @stop, @deadline) == 0
     # Modulo 2^(rank+1), distinct nonnegative lower ranks sum to less than
     # 2^rank. Thus the sole bit at rank is determined by the common sum.
     required = i8[2]
@@ -547,5 +587,5 @@ use atomic_stop
   started = clock_ms()
   meta = wassat_adder_conservation_refute(formula, i64[1], started + 100)
   if env("WASSAT_PROFILE") == "1"
-    wassat_prof_note("adder_conservation status=[meta[0]] gates=[meta[1]] nodes=[meta[2]] xors=[meta[3]] majorities=[meta[4]] ops=[meta[5]] rewrites=[meta[6]] visits=[meta[7]] stop=[meta[8]] terms=[meta[9]] rank=[meta[10]] ms=[clock_ms() - started]")
+    wassat_prof_note("adder_conservation status=[meta[0]] gates=[meta[1]] nodes=[meta[2]] xors=[meta[3]] majorities=[meta[4]] ops=[meta[5]] rewrites=[meta[6]] visits=[meta[7]] stop=[meta[8]] terms=[meta[9]] rank=[meta[10]] pair_lookups=[meta[11]] excluded=[meta[12]] passes=[meta[13]] attempts=[meta[14]] ms=[clock_ms() - started]")
   meta[0] == -1

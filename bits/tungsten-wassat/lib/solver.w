@@ -5393,6 +5393,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[4] = clauses hashed                  st[5] = occupied slots probed
 #   st[6] = candidate literals compared      st[7] = maximum probe advance
 # `plim` bounds the duplicate table's linear probe (hmask + 1 = unbounded).
+# Duplicate slots pack a 31-bit hash fingerprint above the 32-bit clause id + 1.
+# Zero remains empty; exact literal equality still decides a matching key.
 -> wassat_subst_rewrite(cm, alive, ar, clbd, reprs, mark, ht, units, st, ncl, hmask, plim) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
   gen = 0
   nu = 0
@@ -5465,13 +5467,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             nu += 1
       if taut == 0 && m >= 2
         h = acc & hmask
+        fingerprint = (acc >> 32) & 2147483647 ## i64
         dup_ci = 0 - 1
         probes = 0
         st[4] += 1
         while ht[h] != 0 && dup_ci < 0 && probes < plim
           st[5] += 1
-          dci = ht[h] - 1
-          if cm[(dci << 1) + 1] == m
+          packed = ht[h] ## i64
+          dci = (packed & 4294967295) - 1 ## i64
+          if (packed >> 32) == fingerprint && cm[(dci << 1) + 1] == m
             stx2 = cm[dci << 1] ## i64
             same = 1
             q = 0
@@ -5499,7 +5503,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           killed += 1
         else
           if ht[h] == 0
-            ht[h] = ci + 1
+            ht[h] = (fingerprint << 32) | (ci + 1)
     ci += 1
   st[1] = nu
   st[2] = rewritten

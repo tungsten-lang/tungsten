@@ -223,6 +223,12 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @scc_components = 0
     @scc_singletons = 0
     @scc_peak_frames = 0
+    @scc_edges = 0
+    @scc_graph_bytes = 0
+    @scc_graph_offsets = nil
+    @scc_graph_cursor = nil
+    @scc_graph_targets = nil
+    @scc_graph_clauses = nil
     @clauses_subsumed = 0
     @clauses_strengthened = 0
     @vars_eliminated = 0
@@ -879,29 +885,35 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 
   # ---- technique 2: equivalent-literal substitution -------------------------
 
-  # Binary implication graph over unassigned literals; edges carry the clause
-  # index that justifies them. adj[lit_index] -> Array of [to_lit, ci].
+  # Borrowed CSR graph scratch: offsets, destination literal indices, and
+  # justifying clause indices. Entries retain ascending clause order, as the
+  # former adjacency lists did. A graph is valid until the next rebuild.
   -> build_binary_graph
-    adj = []
-    i = 0
-    while i < 2 * @nvars + 2
-      adj.push([])
-      i += 1
-    ci = 0
-    while ci < @ncl
-      if @falive[ci] == 1 && @ftaut[ci] == 0 && @fcl[ci] == 2
-        a = @fla[@fcs[ci]]
-        b = @fla[@fcs[ci] + 1]
-        # `a == b` is a duplicated-literal pseudo-binary; its hint replay
-        # would classify as two unassigned occurrences, never a unit.
-        if a != b && self.value(a) == 0 && self.value(b) == 0
-          adj[self.lit_index(0 - a)].push([b, ci])
-          adj[self.lit_index(0 - b)].push([a, ci])
-      ci += 1
-    adj
+    n = 2 * @nvars + 2
+    if @scc_graph_offsets == nil
+      @scc_graph_offsets = i64[n + 1]
+      @scc_graph_cursor = i64[n]
+    ne = wassat_pre_graph_count(@fla, @fcs, @fcl, @falive, @ftaut,
+                                @passign, @scc_graph_offsets, @ncl, n)
+    if @scc_graph_targets == nil || @scc_graph_targets.size < ne
+      cap = ne
+      if @scc_graph_targets != nil
+        cap = 2 * @scc_graph_targets.size
+        cap = ne if cap < ne
+      @scc_graph_targets = i64[cap]
+      @scc_graph_clauses = i64[cap]
+    wassat_pre_graph_fill(@fla, @fcs, @fcl, @falive, @ftaut, @passign,
+                          @scc_graph_offsets, @scc_graph_cursor,
+                          @scc_graph_targets, @scc_graph_clauses, @ncl, n)
+    @scc_edges += ne
+    @scc_graph_bytes = 8 * (@scc_graph_offsets.size + @scc_graph_cursor.size +
+                           @scc_graph_targets.size + @scc_graph_clauses.size)
+    [@scc_graph_offsets, @scc_graph_targets, @scc_graph_clauses]
 
   # Iterative Tarjan over literal nodes. Returns comp[lit_index] labels.
   -> tarjan(adj)
+    offsets = adj[0] ## i64[]
+    targets = adj[1] ## i64[]
     n = 2 * @nvars + 2
     index = i64[n]
     low = i64[n]
@@ -934,11 +946,12 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
             cur[cur_size] = u
             cur_size += 1
             oncur[u] = 1
-          edges = adj[u]
+          start = offsets[u]
+          count = offsets[u + 1] - start
           advanced = false
           k = frame_child[depth - 1]
-          while k < edges.size && !advanced
-            w = self.lit_index(edges[k][0])
+          while k < count && !advanced
+            w = targets[start + k]
             @ticks += 1
             if index[w] < 0
               frame_child[depth - 1] = k + 1
@@ -975,6 +988,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   # restricted to nodes of one component. Returns the clause-index list of
   # the edges, or [] when a == b.
   -> implication_path(adj, comp, a, b)
+    offsets = adj[0] ## i64[]
+    targets = adj[1] ## i64[]
+    clauses = adj[2] ## i64[]
     ai = self.lit_index(a)
     bi = self.lit_index(b)
     return [] if ai == bi
@@ -992,15 +1008,15 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     while qi < queue.size && !found
       u = queue[qi]
       qi += 1
-      edges = adj[u]
-      k = 0
-      while k < edges.size
-        w = self.lit_index(edges[k][0])
+      k = offsets[u]
+      end = offsets[u + 1]
+      while k < end
+        w = targets[k]
         @ticks += 1
         if comp[w] == comp[ai] && @bfs_mark[w] != gen && w != ai
           @bfs_mark[w] = gen
           @bfs_from[w] = u
-          @bfs_ci[w] = edges[k][1]
+          @bfs_ci[w] = clauses[k]
           queue.push(w)
           found = true if w == bi
         k += 1
@@ -1057,7 +1073,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           self.substitute_class(adj, comp, members)
     if @proof_mode == WASSAT_PROOF_NONE && @lazy_lits && @status == 0 && @vars_substituted > before
       self.rewrite_all_subst_flat
-    wassat_prof_note("pre.subst.work runs=[@scc_runs] nodes=[@scc_nodes] components=[@scc_components] singletons=[@scc_singletons] peak_frames=[@scc_peak_frames]") if tsub != 0
+    wassat_prof_note("pre.subst.work runs=[@scc_runs] nodes=[@scc_nodes] components=[@scc_components] singletons=[@scc_singletons] peak_frames=[@scc_peak_frames] edges=[@scc_edges] graph_bytes=[@scc_graph_bytes]") if tsub != 0
     tsub = wassat_prof("pre.subst.rewrite", tsub)
     0
 
@@ -1949,6 +1965,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                  "scc_runs": @scc_runs, "scc_nodes": @scc_nodes,
                  "scc_components": @scc_components, "scc_singletons": @scc_singletons,
                  "scc_peak_frames": @scc_peak_frames,
+                 "scc_edges": @scc_edges, "scc_graph_bytes": @scc_graph_bytes,
                  "clauses_subsumed": @clauses_subsumed,
                  "clauses_strengthened": @clauses_strengthened,
                  "vars_eliminated": @vars_eliminated,
@@ -1957,6 +1974,65 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                  "root_prop_scanned": @pst[4], "root_prop_visits": @pst[5],
                  "root_prop_two_open": @pst[6],
                  "ticks": @ticks } }
+
+# Count and fill use the same admission rule: live, non-tautological binary
+# clauses with distinct, unassigned literals. Both directions retain input
+# clause order, including parallel edges and their proof references.
+# A repeated literal is not an implication edge: proof replay sees two
+# unassigned occurrences, so it cannot justify a unit through that clause.
+-> wassat_pre_graph_count(ar, cs, cl, alive, taut, asg, offsets, ncl, n) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+  i = 0
+  while i <= n
+    offsets[i] = 0
+    i += 1
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && taut[ci] == 0 && cl[ci] == 2
+      a = ar[cs[ci]]
+      b = ar[cs[ci] + 1]
+      sa = a >> 63
+      sb = b >> 63
+      av = (a ^ sa) - sa
+      bv = (b ^ sb) - sb
+      if a != b && asg[av] == 0 && asg[bv] == 0
+        ai = ((av << 1) + (sa & 1)) ^ 1
+        bi = ((bv << 1) + (sb & 1)) ^ 1
+        offsets[ai + 1] += 1
+        offsets[bi + 1] += 1
+    ci += 1
+  i = 0
+  while i < n
+    offsets[i + 1] += offsets[i]
+    i += 1
+  offsets[n]
+
+-> wassat_pre_graph_fill(ar, cs, cl, alive, taut, asg, offsets, cursor, targets, clauses, ncl, n) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+  i = 0
+  while i < n
+    cursor[i] = offsets[i]
+    i += 1
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && taut[ci] == 0 && cl[ci] == 2
+      a = ar[cs[ci]]
+      b = ar[cs[ci] + 1]
+      sa = a >> 63
+      sb = b >> 63
+      av = (a ^ sa) - sa
+      bv = (b ^ sb) - sb
+      if a != b && asg[av] == 0 && asg[bv] == 0
+        ai = (av << 1) + (sa & 1)
+        bi = (bv << 1) + (sb & 1)
+        at = cursor[ai ^ 1]
+        targets[at] = bi
+        clauses[at] = ci
+        cursor[ai ^ 1] = at + 1
+        at = cursor[bi ^ 1]
+        targets[at] = ai
+        clauses[at] = ci
+        cursor[bi ^ 1] = at + 1
+    ci += 1
+  0
 
 # Native root-level unit propagation over the flat clause arena and the
 # intrusive occurrence lists. Same reasoning as the solver's native helpers:
@@ -3029,6 +3105,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                "vars_substituted": 0,
                "scc_runs": 0, "scc_nodes": 0, "scc_components": 0,
                "scc_singletons": 0, "scc_peak_frames": 0,
+               "scc_edges": 0, "scc_graph_bytes": 0,
                "clauses_subsumed": 0,
                "clauses_strengthened": 0,
                "vars_eliminated": 0,

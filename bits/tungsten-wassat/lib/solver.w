@@ -3832,6 +3832,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     ceil = @config.congruence_gate_ceiling
     maxg = @ncl + 16
     maxg = 131072 if maxg > 131072
+    # Retain the merge-buffer capacity when restarting extraction.
+    if scratch != nil && scratch[6] != nil
+      retained = scratch[6].size / 2
+      maxg = retained if retained > maxg
     maxg = ceil if maxg > ceil
     chcap = 1024
     while chcap < 2 * (@ncl + 16)
@@ -3839,9 +3843,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     nl = 2 * @nvars + 4
     nm = 0
     ng = 0
+    attempts = 0
     grow = true
     while grow
       grow = false
+      attempts += 1
       gcap = 8 * maxg
       ghcap = 1024
       while ghcap < 4 * maxg
@@ -3865,7 +3871,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         nm = st[0]
         ng = st[1]
         self.add_merge_binaries(out, nm)
-    z = wassat_prof("congruence.xor gates=[ng] merges=[nm] cap=[maxg]", prof_start) if prof_start != 0
+    z = wassat_prof("congruence.xor gates=[ng] merges=[nm] cap=[maxg] attempts=[attempts]", prof_start) if prof_start != 0
     nm
 
   # Congruence closure, stage 2: AND gate extraction. Merges are emitted as
@@ -3881,12 +3887,18 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     ceil = @config.congruence_gate_ceiling
     maxg = @ncl + 16
     maxg = 131072 if maxg > 131072
+    # Retain the merge-buffer capacity when restarting extraction.
+    if scratch != nil && scratch[3] != nil
+      retained = scratch[3].size / 2
+      maxg = retained if retained > maxg
     maxg = ceil if maxg > ceil
     nm = 0
     ng = 0
+    attempts = 0
     grow = true
     while grow
       grow = false
+      attempts += 1
       gcap = 8 * maxg
       hcap = 1024
       while hcap < 4 * maxg
@@ -3907,7 +3919,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         nm = st[0]
         ng = st[1]
         self.add_merge_binaries(out, nm)
-    z = wassat_prof("congruence.and gates=[ng] merges=[nm] cap=[maxg]", prof_start) if prof_start != 0
+    z = wassat_prof("congruence.and gates=[ng] merges=[nm] cap=[maxg] attempts=[attempts]", prof_start) if prof_start != 0
     nm
 
   # Turn each equivalent-literal pair into the two binaries that state it.

@@ -57980,6 +57980,8 @@ static const uint8_t w_dimacs_cls[256] = {
 };
 #define DC_BREAK (DC_SPACE | DC_NL)
 
+/* Each prior digit leaves v <= 2000000000. One more multiply/add fits
+ * int64_t, so the range check can follow accumulation without signed overflow. */
 WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
                         WValue lens_val, WValue hdr_val) {
     char inline_buf[6];
@@ -58035,8 +58037,8 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
                     int64_t v = 0;
                     while (i < tlen && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
                         int digit = tx[i] - '0';
-                        if (v > (2000000000LL - digit) / 10) P_ERR(2);
                         v = v * 10 + digit;
+                        if (v > 2000000000LL) P_ERR(2);
                         i++;
                     }
                     vals[vi] = v;
@@ -58059,8 +58061,8 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
         int64_t v = 0; int nd = 0;
         while (i < tlen && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
             int digit = tx[i] - '0';
-            if (v > (2000000000LL - digit) / 10) P_ERR(4);
             v = v * 10 + digit;
+            if (v > 2000000000LL) P_ERR(4);
             nd++; i++;
         }
         /* No digits, or trailing junk inside the token, is a bad token. */

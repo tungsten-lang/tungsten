@@ -1078,6 +1078,8 @@
     # barrier); closures that capture method-locals keep write-through
     # because their block_env has no barrier and chains to this env.
     method_env = Environment.new(@env, true)
+    # Closures inherit their creating method's lexical constant scope.
+    method_env.define("__lexical_class__", method[:w_class])
     # Own a __block__ slot per frame (nil when no block arrives) so
     # block? answers for THIS call — without the slot, the lookup
     # would walk past the barrier into a caller frame's binding. The

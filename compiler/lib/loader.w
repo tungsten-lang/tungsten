@@ -1416,9 +1416,10 @@ loader_parse_cache_state = {
     nil
 
   -> cache_version
+    # v27: installed packages can import bundled toolchain bit APIs.
     # v26: a time literal autoloads Time. v25 caches spliced the packed Date
     # class instead, so a cached program still called Time.parse on nil.
-    "loader-ast-v26"
+    "loader-ast-v27"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")
@@ -1666,6 +1667,14 @@ loader_parse_cache_state = {
         if file?(lib_candidate)
           return normalize_load_path(lib_candidate)
       ri += 1
+
+    # Bundled command/library APIs must remain available to packages installed
+    # outside the source checkout. Project and registry resolutions above win.
+    toolchain = env("TUNGSTEN_ROOT")
+    if toolchain != nil && toolchain != "" && toolchain != project_root && !path.starts_with?(".") && !path.starts_with?("/")
+      found = resolve_bit(bit_name, sub_path, toolchain + "/bits", toolchain)
+      if found != nil
+        return found
 
     resolved
 

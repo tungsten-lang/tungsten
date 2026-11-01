@@ -832,6 +832,14 @@
           return lib_candidate
       ri += 1
 
+    # Installed packages can use bundled toolchain APIs after local/registry
+    # and standard-library candidates, matching the compiled loader.
+    toolchain = env("TUNGSTEN_ROOT")
+    if toolchain != nil && toolchain != "" && toolchain != project_root && !use_path.starts_with?(".") && !use_path.starts_with?("/")
+      found = resolve_use_bit(bit_name, sub_path, toolchain + "/bits", toolchain)
+      if found != nil
+        return found
+
     path
 
   -> use_bit_lock_fields(line)

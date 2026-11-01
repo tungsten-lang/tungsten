@@ -346,6 +346,62 @@ static void cg_apply_defaults(CGCanvas *c) {
 }
 
 /* w_cg_canvas_new(width, height, scale, space, depth, manage) -> handle */
+
+/* Shape with one exact font file and return positioned vector outlines. Unlike
+ * family-name selection this never silently accepts a fallback font. */
+typedef struct { char *data; size_t size, cap; int failed; } CGOutline;
+static void cg_outline_append(CGOutline *b, const char *fmt, ...) {
+    if (b->failed) return;
+    char text[256]; va_list args; va_start(args,fmt); int n=vsnprintf(text,sizeof text,fmt,args); va_end(args);
+    if(n<0 || (size_t)n>=sizeof text || b->size+(size_t)n>16*1024*1024) { b->failed=1; return; }
+    if(b->size+(size_t)n+1>b->cap) { size_t cap=(b->size+n+1)*2; char *p=realloc(b->data,cap); if(!p){b->failed=1;return;} b->data=p;b->cap=cap; }
+    memcpy(b->data+b->size,text,n+1);b->size+=n;
+}
+static void cg_outline_element(void *context,const CGPathElement *e) {
+    CGOutline *b=context; CGPoint *p=e->points;
+    switch(e->type) {
+      case kCGPathElementMoveToPoint: cg_outline_append(b,"M%.9g %.9g ",p[0].x,p[0].y);break;
+      case kCGPathElementAddLineToPoint: cg_outline_append(b,"L%.9g %.9g ",p[0].x,p[0].y);break;
+      case kCGPathElementAddQuadCurveToPoint: cg_outline_append(b,"Q%.9g %.9g %.9g %.9g ",p[0].x,p[0].y,p[1].x,p[1].y);break;
+      case kCGPathElementAddCurveToPoint: cg_outline_append(b,"C%.9g %.9g %.9g %.9g %.9g %.9g ",p[0].x,p[0].y,p[1].x,p[1].y,p[2].x,p[2].y);break;
+      case kCGPathElementCloseSubpath: cg_outline_append(b,"Z ");break;
+    }
+}
+WValue w_cg_font_shape(WValue file_v,WValue text_v,WValue size_v) {
+    char file[4096]; if(!cg_str(file_v,file,sizeof file))cg_raise("font path must be a string");
+    char small[6];const char *text;size_t n;if(!cg_str_view(text_v,small,&text,&n)||n>1024*1024)cg_raise("invalid caption string");
+    double size=cg_num(size_v,"font size");if(!isfinite(size)||size<=0||size>4096)cg_raise("invalid font size");
+    CFURLRef url=CFURLCreateFromFileSystemRepresentation(NULL,(const UInt8 *)file,strlen(file),false);
+    CFArrayRef descriptors=url?CTFontManagerCreateFontDescriptorsFromURL(url):NULL;
+    if(url)CFRelease(url);
+    if(!descriptors||CFArrayGetCount(descriptors)==0){if(descriptors)CFRelease(descriptors);cg_raise("cannot load exact font file: %s",file);}
+    CTFontRef font=CTFontCreateWithFontDescriptor((CTFontDescriptorRef)CFArrayGetValueAtIndex(descriptors,0),size,NULL);CFRelease(descriptors);
+    CFStringRef string=cg_cfstring(text,n);const void *keys[]={kCTFontAttributeName};const void *values[]={font};
+    CFDictionaryRef attrs=CFDictionaryCreate(NULL,keys,values,1,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
+    CFAttributedStringRef attributed=CFAttributedStringCreate(NULL,string,attrs);CTLineRef line=CTLineCreateWithAttributedString(attributed);
+    CFStringRef requested=CTFontCopyPostScriptName(font);CFArrayRef runs=CTLineGetGlyphRuns(line);
+    WValue paths=w_array_new_empty();CGRect bounds=CGRectNull;int missing=0;
+    for(CFIndex r=0;r<CFArrayGetCount(runs);r++) {
+      CTRunRef run=(CTRunRef)CFArrayGetValueAtIndex(runs,r);CFIndex count=CTRunGetGlyphCount(run);
+      CTFontRef actual=(CTFontRef)CFDictionaryGetValue(CTRunGetAttributes(run),kCTFontAttributeName);CFStringRef name=CTFontCopyPostScriptName(actual);
+      if(!CFEqual(name,requested))missing=1;CFRelease(name);
+      CGGlyph *glyphs=calloc(count?count:1,sizeof *glyphs);CGPoint *positions=calloc(count?count:1,sizeof *positions);
+      if(!glyphs||!positions){free(glyphs);free(positions);missing=1;break;}CTRunGetGlyphs(run,CFRangeMake(0,0),glyphs);CTRunGetPositions(run,CFRangeMake(0,0),positions);
+      for(CFIndex g=0;g<count;g++) {
+        if(glyphs[g]==0){missing=1;continue;}
+        CGAffineTransform transform=CGAffineTransformMake(1,0,0,-1,positions[g].x,-positions[g].y);
+        CGPathRef path=CTFontCreatePathForGlyph(actual,glyphs[g],&transform);if(!path)continue;
+        bounds=CGRectUnion(bounds,CGPathGetPathBoundingBox(path));CGOutline b={0};CGPathApply(path,&b,cg_outline_element);CGPathRelease(path);
+        if(b.failed){free(b.data);missing=1;continue;}if(b.data)paths=w_array_push(paths,w_string(b.data));free(b.data);
+      }
+      free(glyphs);free(positions);
+    }
+    double advance=CTLineGetTypographicBounds(line,NULL,NULL,NULL);CFRelease(requested);CFRelease(line);CFRelease(attributed);CFRelease(attrs);CFRelease(string);CFRelease(font);
+    if(missing)cg_raise("caption contains missing glyphs or requires a fallback font: %s",file);
+    if(CGRectIsNull(bounds))bounds=CGRectZero;
+    WValue result=w_array_new_empty();result=w_array_push(result,w_float(advance));double b[]={bounds.origin.x,bounds.origin.y,bounds.size.width,bounds.size.height};result=w_array_push(result,cg_float_array(b,4));result=w_array_push(result,paths);return result;
+}
+
 WValue w_cg_canvas_new(WValue wv, WValue hv, WValue scalev, WValue spacev, WValue depthv, WValue managev) {
     double uw = cg_num(wv, "width");
     double uh = cg_num(hv, "height");

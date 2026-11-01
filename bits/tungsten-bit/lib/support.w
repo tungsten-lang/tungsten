@@ -1,4 +1,5 @@
 # Support objects for the bit command implementations.
+use bitfile_syntax
 
 in Tungsten:Bit
 
@@ -795,6 +796,7 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   ro :dependencies
   ro :executables
   ro :assets
+  ro :directives
   ro :path
 
   -> new(name = "unknown", version = "0.0.0", summary = "", license = "", source = nil, dependencies = nil, path = nil, tungsten_requirement = nil, executables = nil, assets = nil)
@@ -811,23 +813,43 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     @assets = assets || []
     @path = path
     @group_stack = []
+    @directives = []
 
   -> .load(path)
     if !File.exists?(path)
       return nil
     Bitfile.parse(File.read(path), path)
 
-  -> .parse(content, path = nil)
+  # Namespaces opt in to strict literal syntax; legacy package declarations keep
+  # their existing parser and compatibility behavior.
+  -> .parse(content, path = nil, namespaces = nil)
     bitfile = Bitfile.new()
     bitfile.set_path(path)
-    lines = content.split("\n")
-    i = 0
-    n = lines.size()
-    while i < n
-      bitfile.apply_line(lines[i])
-      i += 1
+    if namespaces == nil
+      content.split("\n").each ->(line)
+        bitfile.apply_line(line)
+    else
+      BitfileSyntax.statements(content, namespaces).each ->(entry)
+        if entry[2] == nil
+          bitfile.apply_line(entry[1])
+        else
+          begin
+            statement = entry[1]
+            space = 0
+            while space < statement.size && statement.byte_at(space) != 32 && statement.byte_at(space) != 9
+              space += 1
+            method = statement.slice(0, space)
+            name = method.slice(entry[2].size + 1, method.size)
+            raise "invalid directive name" if !BitfileSyntax.identifier?(name)
+            parsed = BitfileLiterals.new(statement.slice(space, statement.size)).arguments
+            bitfile.directives.push(BitfileDirective.new(entry[2], name, parsed[0], parsed[1], entry[0]))
+          rescue error
+            raise "[path || "Bitfile"]:[entry[0]]: [error]"
     bitfile.infer_name_from_path()
     bitfile
+
+  -> .literal_arguments(text)
+    BitfileLiterals.new(text).arguments
 
   -> set_path(path)
     @path = path
@@ -857,7 +879,7 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       i += 1
     groups
 
-  -> quoted(line)
+  -> quoted(line, decode_escapes = false)
     n = line.size()
     i = 0
     quote_b = 0
@@ -899,6 +921,34 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
         following = line.slice(i + 1, 1)
         if following == quote || following == "\\"
           value = value + following
+          i += 1
+        elsif decode_escapes
+          if following == "n"
+            value += "\n"
+          elsif following == "r"
+            value += "\r"
+          elsif following == "t"
+            value += "\t"
+          elsif following == "b"
+            value += 8.chr
+          elsif following == "f"
+            value += 12.chr
+          elsif following == "/"
+            value += "/"
+          elsif following == "u"
+            cp = BitfileSyntax.hex4(line.slice(i + 2, 4))
+            i += 4
+            if cp >= 55296 && cp <= 56319
+              raise "missing Unicode low surrogate" if line.slice(i + 2, 2) != "\\u"
+              low = BitfileSyntax.hex4(line.slice(i + 4, 4))
+              raise "invalid Unicode low surrogate" if low < 56320 || low > 57343
+              cp = 65536 + (cp - 55296) * 1024 + low - 56320
+              i += 6
+            elsif cp >= 56320 && cp <= 57343
+              raise "unexpected Unicode low surrogate"
+            value += cp.chr
+          else
+            raise "unsupported string escape"
           i += 1
         else
           value = value + c

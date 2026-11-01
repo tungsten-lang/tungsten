@@ -1,10 +1,10 @@
 name: AV pipeline
 on:
   pull_request:
-    paths: ['runtime/runtime.c', 'runtime/media/**', 'core/media/**', 'apps/studio/**', 'bits/tungsten-av/**', 'bits/tungsten-bit/lib/**', 'bin/bit', 'scripts/test-bit-commands.py', 'scripts/test-media-malformed.py', 'bin/commands/media.w', 'spec/core/media*', '.github/workflows/av-pipeline.yml']
+    paths: ['runtime/runtime.c', 'runtime/runtime.h', 'runtime/quartz.*', 'runtime/media/**', 'core/regex.w', 'core/json.w', 'compiler/lib/loader.w', 'compiler/lib/interpreter/**', 'implementations/ruby/lib/tungsten/parser.rb', 'implementations/ruby/lib/tungsten/interpreter.rb', 'spec/core/file_paths_links_spec.w', 'spec/core/regex_backtracking_depth_spec.w', 'spec/core/json_number_precision_spec.w', 'spec/parity/grouped_ternary_receiver_spec.w', 'spec/parity/typed_default_arguments_spec.w', 'spec/parity/namespaced_superclass_spec.w', 'spec/parity/conditional_nested_capture_spec.w', 'spec/packages/bitfile_namespaces_spec.w', 'compiler/lib/driver/**', 'compiler/lib/lowering/**', 'compiler/lib/parser/**', 'compiler/lib/builtins.w', 'compiler/lib/lowering.w', 'core/media/**', 'apps/studio/**', 'bits/tungsten-av/**', 'bits/tungsten-bit/lib/**', 'bin/bit', 'bin/tungsten', 'scripts/test-bit-commands.py', 'scripts/test-media-malformed.py', 'bin/commands/media.w', 'spec/core/media*', '.github/workflows/av-pipeline.yml']
   push:
     branches: [main]
-    paths: ['runtime/runtime.c', 'runtime/media/**', 'core/media/**', 'apps/studio/**', 'bits/tungsten-av/**', 'bits/tungsten-bit/lib/**', 'bin/bit', 'scripts/test-bit-commands.py', 'scripts/test-media-malformed.py', 'bin/commands/media.w', 'spec/core/media*', '.github/workflows/av-pipeline.yml']
+    paths: ['runtime/runtime.c', 'runtime/runtime.h', 'runtime/quartz.*', 'runtime/media/**', 'core/regex.w', 'core/json.w', 'compiler/lib/loader.w', 'compiler/lib/interpreter/**', 'implementations/ruby/lib/tungsten/parser.rb', 'implementations/ruby/lib/tungsten/interpreter.rb', 'spec/core/file_paths_links_spec.w', 'spec/core/regex_backtracking_depth_spec.w', 'spec/core/json_number_precision_spec.w', 'spec/parity/grouped_ternary_receiver_spec.w', 'spec/parity/typed_default_arguments_spec.w', 'spec/parity/namespaced_superclass_spec.w', 'spec/parity/conditional_nested_capture_spec.w', 'spec/packages/bitfile_namespaces_spec.w', 'compiler/lib/driver/**', 'compiler/lib/lowering/**', 'compiler/lib/parser/**', 'compiler/lib/builtins.w', 'compiler/lib/lowering.w', 'core/media/**', 'apps/studio/**', 'bits/tungsten-av/**', 'bits/tungsten-bit/lib/**', 'bin/bit', 'bin/tungsten', 'scripts/test-bit-commands.py', 'scripts/test-media-malformed.py', 'bin/commands/media.w', 'spec/core/media*', '.github/workflows/av-pipeline.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,8 +26,6 @@ jobs:
       - if: runner.os == 'macOS'
         run: brew install ffmpeg
       - run: PYTHONPATH=apps/studio/tools/tw python -m unittest discover -s apps/studio/tools/tw/tests -v
-      - run: python -m unittest discover -s bits/tungsten-av/tests -p test_av.py -v
-      - run: python -m unittest discover -s bits/tungsten-av/tests -p test_crash.py -v
   native:
     runs-on: macos-15
     timeout-minutes: 60
@@ -36,10 +34,6 @@ jobs:
       - run: brew install llvm oniguruma openssl@3 zstd ffmpeg
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install -r apps/studio/tools/tw/requirements.txt
       - run: bin/tungsten bootstrap --no-bits
       - run: bin/tungsten spec/core/media_transcode_spec.w
       - run: bin/tungsten spec/core/media_delivery_spec.w
@@ -49,7 +43,20 @@ jobs:
       - run: bin/tungsten spec/core/process_spawn_argv_ownership_spec.w
       - run: bin/tungsten spec/parity/media_delivery_contract_spec.w
       - run: bin/tungsten run --interpret spec/parity/media_delivery_contract_spec.w
-      - run: PYTHONPATH=apps/studio/tools/tw RUN_AV_NATIVE=1 python -m unittest discover -s apps/studio/tools/tw/tests -p test_native_pipeline.py -v
-      - run: python scripts/test-bit-commands.py
-      - run: python scripts/test-media-malformed.py
-      - run: RUN_AV_NATIVE=1 python -m unittest discover -s bits/tungsten-av/tests -v
+      - run: python3 scripts/test-bit-commands.py
+      - run: python3 scripts/test-media-malformed.py
+      - name: Native AV language and runtime regressions
+        run: |
+          for spec in spec/core/file_paths_links_spec.w spec/core/regex_backtracking_depth_spec.w spec/core/json_number_precision_spec.w spec/parity/grouped_ternary_receiver_spec.w spec/parity/typed_default_arguments_spec.w spec/parity/namespaced_superclass_spec.w spec/parity/conditional_nested_capture_spec.w spec/packages/bitfile_namespaces_spec.w; do
+            bin/tungsten "$spec"
+            bin/tungsten run --interpret "$spec"
+          done
+      - run: bin/tungsten bits/tungsten-av/tests/native_spec.w
+      - run: bin/tungsten bits/tungsten-av/tests/banding_spec.w
+      - run: ruby bits/tungsten-av/tests/audio_formats.rb
+      - run: ruby bits/tungsten-av/tests/integration.rb
+      - run: ruby bits/tungsten-av/tests/timeline_integration.rb
+      - run: ruby bits/tungsten-av/tests/crash.rb
+      - run: ruby bits/tungsten-av/tests/cache.rb
+      - run: ruby bits/tungsten-av/tests/toolchain_import.rb
+      - run: ruby bits/tungsten-av/tests/library_import.rb

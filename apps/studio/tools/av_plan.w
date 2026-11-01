@@ -1,6 +1,6 @@
 # Resolve the authored clock without creating build directories or running generators.
-use ../../../../apps/studio/lib/base
-use ../../../../apps/studio/lib/resolve
+use ../lib/base
+use ../lib/resolve
 args = argv()
 episode = JSON.parse(File.read(args[0]))
 # Planning needs a recipe token for duration-based program shots but never runs

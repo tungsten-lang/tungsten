@@ -539,6 +539,10 @@
       expr = parse_expression()
       skip_newlines()
       expect_type(T_RPAREN)
+      # Explicit grouping makes a statement-shaped value an expression receiver.
+      # Ternaries share If's AST shape; without this wrapper the addition and
+      # indexing guards mistake `(flag ? a : b)` for a block ending a statement.
+      ast_set(expr, :parenthesized, true) if is_block_node?(expr)
       return expr
 
     # Array literal

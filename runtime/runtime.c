@@ -56030,26 +56030,19 @@ WValue __w_file_rm(WValue path_val) {
 }
 
 WValue __w_file_expand_path(WValue path_val) {
-    const char *path = as_str(path_val);
-    char resolved[4096];
-    if (realpath(path, resolved))
-        return w_string(resolved);
-    /* If file doesn't exist yet, expand ~ and relative manually */
-    if (path[0] == '~' && (path[1] == '/' || path[1] == '\0')) {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(resolved, sizeof(resolved), "%s%s", home, path + 1);
-            return w_string(resolved);
-        }
+    /* Expand lexically, as Ruby File.expand_path does. Following a final
+     * symlink here redirects an output filename into its previous release. */
+    const char *path=as_str(path_val);char cwd[4096];const char *prefix="";
+    if(path[0]=='~'&&(path[1]=='/'||path[1]==0)){prefix=getenv("HOME");if(!prefix)prefix="";path++;}
+    else if(path[0]!='/'){if(!getcwd(cwd,sizeof cwd)){w_raise(w_string("File.expand_path getcwd failed"));return W_NIL;}prefix=cwd;}
+    size_t n=strlen(prefix)+strlen(path)+2;char *input=malloc(n),*out=malloc(n);if(!input||!out){free(input);free(out);w_raise(w_string("File.expand_path allocation failed"));return W_NIL;}
+    snprintf(input,n,"%s/%s",prefix,path);size_t used=1;out[0]='/';out[1]=0;char *save=NULL;
+    for(char *part=strtok_r(input,"/",&save);part;part=strtok_r(NULL,"/",&save)){
+        if(!strcmp(part,"."))continue;
+        if(!strcmp(part,"..")){if(used>1){while(used>1&&out[used-1]!='/')used--;if(used>1)used--;}out[used]=0;continue;}
+        if(used>1)out[used++]='/';size_t length=strlen(part);memcpy(out+used,part,length);used+=length;out[used]=0;
     }
-    if (path[0] != '/') {
-        char cwd[4096];
-        if (getcwd(cwd, sizeof(cwd))) {
-            snprintf(resolved, sizeof(resolved), "%s/%s", cwd, path);
-            return w_string(resolved);
-        }
-    }
-    return w_string(path);
+    WValue result=w_string(out);free(input);free(out);return result;
 }
 
 WValue __w_file_expand_path_base(WValue path_val, WValue base_val) {
@@ -56069,6 +56062,42 @@ WValue __w_file_expand_path_base(WValue path_val, WValue base_val) {
     WValue joined_value = w_string(joined);
     free(joined);
     return __w_file_expand_path(joined_value);
+}
+
+/* File path/link operations shared by compiled code and the native interpreter. */
+WValue __w_file_realpath(WValue value) {
+    const char *path=as_str(value); w_sandbox_gate("file_realpath",path);
+    char *resolved=realpath(path,NULL);
+    if(!resolved) { w_raise(w_string("File.realpath failed")); return W_NIL; }
+    WValue result=w_string(resolved);free(resolved);return result;
+}
+WValue __w_file_readlink(WValue value) {
+    const char *path=as_str(value);w_sandbox_gate("file_readlink",path);
+    size_t cap=256;char *buffer=NULL;
+    while(cap<=1024*1024) { char *next=realloc(buffer,cap+1);if(!next){free(buffer);w_raise(w_string("File.readlink allocation failed"));return W_NIL;}buffer=next;
+        ssize_t n=readlink(path,buffer,cap);if(n<0){free(buffer);w_raise(w_string("File.readlink failed"));return W_NIL;}
+        if((size_t)n<cap){buffer[n]=0;WValue result=w_string(buffer);free(buffer);return result;}cap*=2;
+    }
+    free(buffer);w_raise(w_string("File.readlink target exceeds 1 MiB"));return W_NIL;
+}
+WValue __w_file_symlink(WValue target_value,WValue path_value) {
+    char *target=strdup(as_str(target_value));const char *path=as_str(path_value);w_sandbox_gate("file_symlink",path);
+    if(!target){w_raise(w_string("File.symlink allocation failed"));return W_NIL;}
+    int status=symlink(target,path);free(target);if(status<0){w_raise(w_string("File.symlink failed"));return W_NIL;}return w_int(0);
+}
+
+WValue __w_file_basename(WValue value) {
+    const char *path=as_str(value);size_t n=strlen(path);while(n>1&&path[n-1]=='/')n--;size_t start=n;while(start>0&&path[start-1]!='/')start--;
+    if(n==1&&path[0]=='/')return w_string("/");char *copy=strndup(path+start,n-start);WValue result=w_string(copy);free(copy);return result;
+}
+WValue __w_file_dirname(WValue value) {
+    const char *path=as_str(value);size_t n=strlen(path);while(n>1&&path[n-1]=='/')n--;while(n>0&&path[n-1]!='/')n--;while(n>1&&path[n-1]=='/')n--;
+    if(!n)return w_string(".");char *copy=strndup(path,n);WValue result=w_string(copy);free(copy);return result;
+}
+WValue __w_file_extname(WValue value) {
+    WValue basename=__w_file_basename(value);const char *base=as_str(basename),*visible=base;
+    while(*visible=='.')visible++;
+    const char *dot=strrchr(base,'.');if(!dot||dot<visible)return w_string("");return w_string(dot);
 }
 
 WValue __w_file_join(WValue a, WValue b) {

@@ -453,13 +453,13 @@ walk_requires_includes() {
   local start_dir="$1"
   local repo_root="$2"
   local visited=""
-  local queue="$start_dir"
+  local -a queue=("$start_dir")
+  local queue_index=0
   local emitted=""
 
-  while [ -n "$queue" ]; do
-    local current="${queue%% *}"
-    queue="${queue#* }"
-    [ "$queue" = "$current" ] && queue=""
+  while [ "$queue_index" -lt "${#queue[@]}" ]; do
+    local current="${queue[$queue_index]}"
+    queue_index=$((queue_index + 1))
 
     case ",$visited," in
       *,"$current",*) continue ;;
@@ -481,7 +481,7 @@ walk_requires_includes() {
         echo "bin/tungsten: requires '$req' not found under $repo_root/bits/" >&2
         return 1
       fi
-      queue="${queue} ${req_dir}"
+      queue+=("$req_dir")
     done < <(bitfile_requires "$current")
   done
 

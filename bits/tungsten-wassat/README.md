@@ -54,6 +54,14 @@ database reduction. Policy selection is deterministic for a formula. Concurrent
 races intentionally sample several search trajectories, however, so the winning
 arm and wall time can vary with scheduling.
 
+Structural detour probes without monotone chains reuse a packed short-clause
+occurrence index and native assignment scratch. They preserve clause order,
+implication order and the existing assignment cutoff. Transition probes retain
+status and trail length without copying unused implication lists; state probes
+still collect implications for pruning and phase hints. Profiling reports
+trial count, occurrence visits, literal inspections, assignments and copied
+implications, plus the selected scout conflict cap.
+
 Selected local cores use append-only on-the-fly strengthening (OTFS). When CPU
 and memory remain after the ordinary fast-mode workers are counted, the raw
 race also adds one import-only OTFS specialist without replacing or publishing

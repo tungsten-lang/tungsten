@@ -804,7 +804,139 @@
 
 # ---- 3. DETOUR Bidirectional Wavefront & Macro-Transition Pruning -----------
 
--> wassat_struct_trial_propagate(base_val, tval, trail, pos_occ, neg_occ, short_clauses, assump, ladder_chains = nil, var_chain = nil, var_pos = nil)
+# Pack short-clause occurrences once for repeated chain-free trial probes.
+-> wassat_struct_trial_pack(nv, clauses)
+  nl = 0
+  clauses.each -> (c) nl += c.size
+  fla = i64[nl]
+  offs = i64[clauses.size + 1]
+  at = 0
+  ci = 0
+  clauses.each -> (c)
+    offs[ci] = at
+    c.each -> (l)
+      fla[at] = l
+      at += 1
+    ci += 1
+  offs[ci] = at
+  occ_off = i64[2 * nv + 3]
+  occ_ids = i64[nl]
+  wassat_struct_occ_index(nv, fla, offs, occ_off, occ_ids, i64[2 * nv + 2])
+  [fla, offs, occ_off, occ_ids, i64[3], i64[7]]
+
+-> wassat_struct_occ_index(nv, fla, offs, occ_off, occ_ids, cursor) (i64 i64[] i64[] i64[] i64[] i64[])
+  i = 0
+  while i < fla.size
+    l = fla[i]
+    v = l < 0 ? 0 - l : l
+    if v >= 1 && v <= nv
+      li = l > 0 ? v << 1 : (v << 1) + 1
+      occ_off[li + 1] += 1
+    i += 1
+  i = 0
+  while i < 2 * nv + 2
+    occ_off[i + 1] += occ_off[i]
+    cursor[i] = occ_off[i]
+    i += 1
+  ci = 0
+  while ci + 1 < offs.size
+    j = offs[ci]
+    while j < offs[ci + 1]
+      l = fla[j]
+      v = l < 0 ? 0 - l : l
+      if v >= 1 && v <= nv
+        li = l > 0 ? v << 1 : (v << 1) + 1
+        occ_ids[cursor[li]] = ci
+        cursor[li] += 1
+      j += 1
+    ci += 1
+
+# state: last status/trail length; cumulative trials, occurrences, literal
+# inspections, assignments and copied implications. Scratch is reused.
+-> wassat_struct_trial_native(base, val, trail, fla, offs, occ_off, occ_ids, assumptions, na, state) (i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[])
+  ts = 0
+  ok = 1
+  i = 0
+  visits = 0
+  inspections = 0
+  while i < na && ok == 1
+    l = assumptions[i]
+    v = l < 0 ? 0 - l : l
+    pol = l > 0 ? 1 : -1
+    cur = base[v] != 0 ? base[v] : val[v]
+    if cur == 0 - pol
+      ok = 0
+    elsif cur == 0
+      val[v] = pol
+      trail[ts] = l
+      ts += 1
+    i += 1
+  qh = 0
+  while qh < ts && ok == 1 && ts < 2048
+    l = trail[qh]
+    qh += 1
+    li = l > 0 ? (l << 1) + 1 : (0 - l) << 1
+    oi = occ_off[li]
+    oe = occ_off[li + 1]
+    while oi < oe && ok == 1 && ts < 2048
+      ci = occ_ids[oi]
+      visits += 1
+      sat = 0
+      unassigned = 0
+      ul = 0
+      k = offs[ci]
+      while k < offs[ci + 1]
+        cl = fla[k]
+        v = cl < 0 ? 0 - cl : cl
+        cur = base[v] != 0 ? base[v] : val[v]
+        vv = cl > 0 ? cur : 0 - cur
+        if vv > 0
+          sat = 1
+        elsif vv == 0
+          unassigned += 1
+          ul = cl
+        inspections += 1
+        k += 1
+      if sat == 0
+        if unassigned == 0
+          ok = 0
+        elsif unassigned == 1
+          v = ul < 0 ? 0 - ul : ul
+          val[v] = ul > 0 ? 1 : -1
+          trail[ts] = ul
+          ts += 1
+      oi += 1
+  i = 0
+  while i < ts
+    l = trail[i]
+    v = l < 0 ? 0 - l : l
+    val[v] = 0
+    i += 1
+  state[0] = ok
+  state[1] = ts
+  state[2] += 1
+  state[3] += visits
+  state[4] += inspections
+  state[5] += ts
+
+-> wassat_struct_trial_propagate(base_val, tval, trail, pos_occ, neg_occ, short_clauses, assump, ladder_chains = nil, var_chain = nil, var_pos = nil, packed = nil, collect_implied = true)
+  if packed != nil && assump.size <= 3 && (ladder_chains == nil || ladder_chains.empty?)
+    args = packed[4] ## i64[]
+    state = packed[5] ## i64[]
+    i = 0
+    while i < assump.size
+      args[i] = assump[i]
+      i += 1
+    wassat_struct_trial_native(base_val, tval, trail, packed[0], packed[1], packed[2], packed[3], args, assump.size, state)
+    implied = nil
+    implied = [] if collect_implied
+    if collect_implied && state[0] == 1
+      i = 0
+      while i < state[1]
+        implied.push(trail[i])
+        i += 1
+      state[6] += state[1]
+    return [state[0], state[1], implied]
   ts = 0
   ok = 1
   i = 0
@@ -895,11 +1027,12 @@
           trail[ts] = ul
           ts += 1
       j += 1
-  out_lits = []
+  out_lits = nil
+  out_lits = [] if collect_implied
   i = 0
   while i < ts
     l = trail[i]
-    out_lits.push(l) if ok == 1
+    out_lits.push(l) if ok == 1 && collect_implied
     tval[l.abs] = 0
     i += 1
   [ok, ts, out_lits]
@@ -940,46 +1073,40 @@
   return { "unsat": false, "units": units, "binaries": binaries, "witness_phases": [] } if layers.size < 2
 
   short_clauses = []
-  pos_occ = []
-  neg_occ = []
-  v = 0
-  while v <= nv
-    pos_occ.push([])
-    neg_occ.push([])
-    v += 1
   ci = 0
   while ci < clauses.size
     c = clauses[ci]
-    if c.size >= 2 && c.size <= 4
-      idx = short_clauses.size
-      short_clauses.push(c)
+    short_clauses.push(c) if c.size >= 2 && c.size <= 4
+    ci += 1
+  binaries.each -> (b) short_clauses.push(b)
+
+  # Flat native occurrences avoid one growing array per literal. The chain
+  # path retains its ordered list representation and monotone-chain jumps.
+  packed = nil
+  pos_occ = []
+  neg_occ = []
+  if ladder_chains.empty?
+    packed = wassat_struct_trial_pack(nv, short_clauses)
+  else
+    v = 0
+    while v <= nv
+      pos_occ.push([])
+      neg_occ.push([])
+      v += 1
+    ci = 0
+    while ci < short_clauses.size
+      c = short_clauses[ci]
       j = 0
       while j < c.size
         l = c[j]
         lv = l.abs
         if lv >= 1 && lv <= nv
           if l > 0
-            pos_occ[lv].push(idx)
+            pos_occ[lv].push(ci)
           else
-            neg_occ[lv].push(idx)
+            neg_occ[lv].push(ci)
         j += 1
-    ci += 1
-  bi = 0
-  while bi < binaries.size
-    b = binaries[bi]
-    idx = short_clauses.size
-    short_clauses.push(b)
-    j = 0
-    while j < 2
-      l = b[j]
-      lv = l.abs
-      if lv >= 1 && lv <= nv
-        if l > 0
-          pos_occ[lv].push(idx)
-        else
-          neg_occ[lv].push(idx)
-      j += 1
-    bi += 1
+      ci += 1
 
   base_val = cinfo["val"]
   tval = i8[nv + 1]
@@ -996,7 +1123,7 @@
     s = 0
     while s < grp.size
       lit = grp[s]
-      res = wassat_struct_trial_propagate(base_val, tval, trail, pos_occ, neg_occ, short_clauses, [lit], ladder_chains, var_chain, var_pos)
+      res = wassat_struct_trial_propagate(base_val, tval, trail, pos_occ, neg_occ, short_clauses, [lit], ladder_chains, var_chain, var_pos, packed)
       if res[0] == 1
         ralive.push(1)
         rimp.push(res[2])
@@ -1023,7 +1150,7 @@
       s2 = 0
       while s2 < g2.size
         if alive[r][s1] == 1 && alive[r + 1][s2] == 1
-          res = wassat_struct_trial_propagate(base_val, tval, trail, pos_occ, neg_occ, short_clauses, [g1[s1], g2[s2]], ladder_chains, var_chain, var_pos)
+          res = wassat_struct_trial_propagate(base_val, tval, trail, pos_occ, neg_occ, short_clauses, [g1[s1], g2[s2]], ladder_chains, var_chain, var_pos, packed, false)
           row.push(res[0] == 1 ? (1 + res[1]) : 0)
         else
           row.push(0)
@@ -1048,7 +1175,7 @@
             s3 = 0
             while s3 < g3.size && !macro_ok
               if trans[r + 1][s2][s3] > 0
-                res = wassat_struct_trial_propagate(base_val, tval, trail, pos_occ, neg_occ, short_clauses, [g1[s1], g2[s2], g3[s3]], ladder_chains, var_chain, var_pos)
+                res = wassat_struct_trial_propagate(base_val, tval, trail, pos_occ, neg_occ, short_clauses, [g1[s1], g2[s2], g3[s3]], ladder_chains, var_chain, var_pos, packed, false)
                 macro_ok = true if res[0] == 1
               s3 += 1
             if !macro_ok
@@ -1176,6 +1303,9 @@
       cur = fwd_parent[r][cur]
       r -= 1
 
+  if packed != nil && env("WASSAT_PROFILE") == "1"
+    work = packed[5]
+    wassat_prof_note("struct.detour.work trials=[work[2]] occurrences=[work[3]] literals=[work[4]] assignments=[work[5]] copied_implications=[work[6]]")
   { "unsat": false, "units": units, "binaries": binaries, "witness_phases": witness_phases }
 
 # ---- 4. Clue / Sudoku Bitmask Truth-Table Pruning ---------------------------

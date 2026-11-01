@@ -338,9 +338,16 @@ and GPU buffers. `Scaler.backends` lists what this machine has.
   and programs that never scale do not load them; `TUNGSTEN_MEDIA_NO_METAL=1`
   hides Metal.
 
+Plane scaling also accepts `channels: 1` (Y') or `channels: 2` (CbCr),
+`source_bits: 8 | 10`, and `bits: 8 | 10`. Ten-bit samples use P010's
+MSB-aligned 16-bit representation and two-byte-aligned row strides. Fill values
+remain in 8-bit code units. CPU and Metal use the same tables and float
+intermediate; vImage supports 8-bit planes only. A forced Metal backend fails
+explicitly when it cannot process a job; AUTO can fall back to CPU.
+
 ## VideoDecoder
 
-`VideoDecoder.new(source, format: :rgba, start: 0, rate: nil)` decodes a
+`VideoDecoder.new(source, format: :rgba, start: 0, rate: nil, timeout_ms: 30000)` decodes a
 movie's first video track (AVAssetReader passthrough samples) or a list of
 segment files with a `VTDecompressionSession` (hardware) on a thread of its
 own, and hands frames out in presentation order: `read(buf = nil, stride =
@@ -348,7 +355,8 @@ nil)` fills `buf` (or one buffer the decoder keeps) and returns it, or nil at
 the end; `frame` is the index of the frame just read, `frames` the count the
 movie's duration implies. `format:` is `:rgba`, `:bgra` (VideoToolbox's
 BT.709 conversion, from the stream's tags) or `:nv12` (the decoded 8-bit
-4:2:0 planes, Y' then CbCr, no conversion).
+4:2:0 planes, Y' then CbCr, no conversion), or `:p010` (10-bit 4:2:0,
+MSB-aligned little-endian 16-bit samples, Y' then interleaved CbCr).
 
 - **Order.** Samples are fed in decode order in bounded asynchronous batches of eight;
   a decoded frame is handed out once no frame still to come can precede it:
@@ -361,6 +369,13 @@ BT.709 conversion, from the stream's tags) or `:nv12` (the decoded 8-bit
   rounded, so a master whose frame times wander a little (the legacy
   Archimedes master has a 513-tick frame) still maps every frame to its own
   index.
+
+`cancel` wakes readers with a cancellation error. Each read has a finite
+no-frame timeout. `close` requests stop and releases the caller's ownership;
+the worker retains the decoder until its callbacks have drained, so early close
+does not wait synchronously for VideoToolbox. Native framework calls that stall
+internally require an outer process deadline; the shared film toolkit provides
+that supervisor and terminates the whole stage process group.
 
 ## Transcode
 
@@ -392,19 +407,24 @@ r = Transcode.run(segment_paths, "share.mp4", rate: [24, 1], audio_src: "mix.wav
 | `format`, `faststart`, `progress` | from `dst`, true, false | |
 | `retries`, `retry_delay` | 2, 1 second | dropped-frame failures only, exponential backoff capped at 60 s; max 5 retries |
 | `edit_lists` | true | `:audio` flattens video edits; false requires every track to be representable without edits |
+| `resume_dir` | nil | durable, checksummed closed-GOP cache; movie sources only |
+| `timeout_ms` | 30000 | maximum decoder wait without a frame |
+| `cancel_file` | nil | existence requests cancellation at the next frame boundary |
 
 The result: `{frames:, duplicated:, dropped:, seconds:, fps:, decode_s:,
 scale_s:, encode_wait_s:, mux_s:, scale_backend:, via:, file_bytes:,
-video_bytes:, audio_samples:, chapters:, tc_start:, level:, ...}`.
+video_bytes:, audio_samples:, chapters:, tc_start:, level:, decode_bits:, resumed_frames:, ...}`.
 
-- **Y'CbCr path** (default): the decoder gives 8-bit 4:2:0 and the scaler
+- **Y'CbCr path** (default): the decoder gives P010 10-bit 4:2:0 and the scaler
   resamples the Y' plane and the interleaved CbCr plane separately, straight
   from the decoder's buffer into the encoder's pool buffer, with the chroma
   siting honoured on both sides (the source's from its format description,
   left for ours; a left-sited 4:2:0 chroma sample sits on luma column 2i and
   between luma rows 2j and 2j+1). There is no colour conversion at all, so
   the master's BT.709 code values carry over, as in `ffmpeg -vf scale` on
-  yuv420p. Pads are Y' 16, CbCr 128.
+  yuv420p10. Fractional code values survive both float passes: 10-bit outputs
+  round once to 0..1023; 8-bit outputs round once after dividing by four.
+  Pads are Y' 64, CbCr 512 in 10-bit codes.
 - **RGB path** (`via: :rgb`): BGRA from VideoToolbox, the RGBA scaler
   (`alpha: :opaque`), then `media.c`'s converter: what a render scaled to 4K
   goes through.
@@ -426,6 +446,28 @@ video_bytes:, audio_samples:, chapters:, tc_start:, level:, ...}`.
   is never waited on. `Transcode.run` steps the native transcoder ~10 s of
   video at a time (`progress: true` prints a line each step) and frees it
   (deleting the partial file) if anything raises.
+
+### Durable resume and interruption
+
+```sh
+bin/tungsten media transcode input.mov share.mov --codec hevc10 --audio pcm --resume /tmp/av-checkpoints --timeout-ms 30000 --verify
+```
+
+The cache namespace hashes source and optional audio-source bytes, every encode,
+geometry and mux option, and the numerical contract version. Destination paths,
+read deadlines and cancellation-file paths do not affect reuse. A cache has an
+exclusive writer lock. Completed closed GOPs are committed as TWMS plus SHA-256
+sidecars, fsynced before reuse. The first missing, corrupt or incomplete GOP ends
+the reusable prefix; later GOPs are recomputed. Audio, chapters, timecode and the
+container are rebuilt, then the completed output replaces the destination. A
+fully cached run still validates/remuxes the segments. Segment-list inputs are
+rejected for resume. Treat source files as immutable during a run.
+
+A cancellation or failure preserves the previous destination and completed
+checkpoints. `TUNGSTEN_MEDIA_TEST_FAIL_AFTER` and
+`TUNGSTEN_MEDIA_TEST_STALL_DECODER` are deterministic fault-injection hooks for
+focused tests. `TUNGSTEN_MEDIA_WAIT_MS` bounds the AVAssetWriter completion wait
+(default 30000 ms). Hard stage deadlines remain necessary around native drivers.
 
 ### Presets
 

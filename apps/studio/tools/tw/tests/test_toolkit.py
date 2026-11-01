@@ -56,27 +56,38 @@ class BandingTests(unittest.TestCase):
             self.assertLess(float(np.abs(dec-160).max()),.8)
 
 
-@unittest.skipUnless(pathlib.Path(glyphs.FONTS["cuneiform"]).exists(), "Noto script fonts are needed for glyph verification")
 class GlyphTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from fixtures import font
+        cls.tmp=tempfile.TemporaryDirectory()
+        cls.font=pathlib.Path(cls.tmp.name)/'fixture.ttf'
+        font(cls.font)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
     def test_all_four_ancient_scripts_have_actual_outlines(self):
-        root=pathlib.Path.home()/'videos/profiles-in-philosophy/zoroaster/fonts'
-        cases=[('𒀀',glyphs.FONTS['cuneiform']),('𓀀',glyphs.FONTS['hieroglyphs']),
-               ('𐬀𐬁',root/'NotoSansAvestan-Regular.ttf'),('𐎠𐎡',root/'NotoSansOldPersian-Regular.ttf')]
-        for text,font in cases:
-            if not pathlib.Path(font).exists(): self.skipTest(f'font not available: {font}')
+        for text in ('𒀀','𓀀','𐬀𐬁','𐎠𐎡','אבְ'):
             with self.subTest(text=text):
-                svg=glyphs.text_svg(text,font)
+                svg=glyphs.text_svg(text,self.font)
                 self.assertIn('<path d="M',svg)
                 self.assertNotIn('<text',svg)
 
     def test_missing_glyph_fails_instead_of_tofu(self):
         with self.assertRaisesRegex(ValueError,'missing'):
-            glyphs.text_svg('\U0010ffff',glyphs.FONTS['cuneiform'])
+            glyphs.text_svg('\U0010ffff',self.font)
 
     def test_legacy_single_glyph_api(self):
-        path,advance=glyphs.glyph_path('𒀀')
-        self.assertTrue(path.startswith('M'))
-        self.assertGreater(advance,0)
+        with mock.patch.dict(glyphs.FONTS,cuneiform=str(self.font)):
+            path,advance=glyphs.glyph_path('𒀀')
+            self.assertTrue(path.startswith('M'))
+            self.assertGreater(advance,0)
+
+    def test_direction_is_applied_to_shaped_outlines(self):
+        self.assertNotEqual(glyphs.text_svg('𐬀𐬁',self.font,direction='rtl'),
+                            glyphs.text_svg('𐬀𐬁',self.font,direction='ltr'))
 
 
 class MigrationTests(unittest.TestCase):
@@ -111,7 +122,7 @@ tools/venv/bin/python -I tools/prep_photos.py > /dev/null
             cfg={'tungsten':'/tmp/isolated-tw','publish':{'render':[['source.mp4','dest.mp4']]}}
             (root/'tools/tw.json').write_text(json.dumps(cfg))
             t=Toolkit(root)
-            with mock.patch.object(t,'banding',side_effect=ValueError('failed check')):
+            with mock.patch.object(t,'provenance',return_value={}), mock.patch.object(t,'verify_candidate',side_effect=ValueError('failed check')):
                 with self.assertRaisesRegex(ValueError,'failed check'): t.publish('render')
             self.assertEqual((root/'dest.mp4').read_bytes(),b'previous output')
 

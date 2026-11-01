@@ -228,7 +228,7 @@ summary from the source header, and a link to the source.
 | `VideoSegment` | `+ VideoSegment` | VideoSegment — one closed GOP: compressed samples in decode order plus the | [`core/media/video_encoder.w`](../core/media/video_encoder.w) |
 | `Mux` | `+ Mux` | Mux — an MP4 or MOV master from encoded segments, audio and timecode, with | [`core/media/mux.w`](../core/media/mux.w) |
 | `MediaVerify` | `+ MediaVerify` | MediaVerify — read a master back with AVFoundation and check the A/V | [`core/media/verify.w`](../core/media/verify.w) |
-| `Scaler` | `+ Scaler` | Scaler — high-quality resampling of RGBA frames: Lanczos-3, bicubic or | [`core/media/scaler.w`](../core/media/scaler.w) |
+| `Scaler` | `+ Scaler` | Scaler — high-quality resampling of RGBA frames and 8/10-bit planes: Lanczos-3, bicubic or | [`core/media/scaler.w`](../core/media/scaler.w) |
 | `VideoDecoder` | `+ VideoDecoder` | VideoDecoder and Transcode — read masters and segments back with | [`core/media/transcode.w`](../core/media/transcode.w) |
 | `Transcode` | `+ Transcode` | Transcode — decode, scale, encode and mux in one pass: share copies, 4K masters, | [`core/media/transcode.w`](../core/media/transcode.w) |
 | `ColorSpace` | `+ ColorSpace` | ColorSpace — RGB colour spaces (primaries, white point and transfer | [`core/color_space.w`](../core/color_space.w) |

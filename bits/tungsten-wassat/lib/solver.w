@@ -7640,6 +7640,40 @@ WASSAT_VALUE_LINE_MAX = 4096
           repl = slits[o + found]
           slits[o + found] = neg
           slits[o + slot] = repl
+          # Amortize lookahead over at least six already-scanned false tail
+          # literals. Prepare the second watch without per-clause cursors.
+          if found >= 8 && ov < 0
+            rav = repl < 0 ? 0 - repl : repl
+            if sign[rav] == 0
+              second = 0 - 1
+              j = found + 1
+              while j < n
+                lj = slits[o + j]
+                jav = lj < 0 ? 0 - lj : lj
+                jsv = sign[jav]
+                jv = lj > 0 ? jsv : 0 - jsv
+                if jv >= 0
+                  second = j
+                  break
+                j += 1
+              # Four state slots remain sufficient for library callers.
+              # The CLI provides four extra slots for cumulative work counts.
+              if st.size >= 8
+                st[4] += 1
+                st[5] += second < 0 ? n - found - 1 : second - found
+                st[6] += second < 0 ? 1 : 0
+                st[7] += found - 2
+              # The prefix was false. With no second live literal, repl
+              # is unit; otherwise put that second literal first in the tail
+              # for the pending other-watch event. Only permute clause data.
+              if second < 0
+                sign[rav] = repl > 0 ? 1 : -1
+                trail[tsize] = repl
+                tsize += 1
+              else
+                saved = slits[o + 2]
+                slits[o + 2] = slits[o + second]
+                slits[o + second] = saved
           if prev_w < 0
             whead[li] = next_w
           else
@@ -8242,6 +8276,8 @@ WASSAT_VALUE_LINE_MAX = 4096
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 1, 0) if r == 0 && seeded == 0
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 0 - 1, 1) if r == 0 && seeded == 0
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 1, 1) if r == 0 && seeded == 0
+  if env("WASSAT_PROFILE") == "1"
+    z = wassat_prof_note("flat_lucky.lookahead attempts=[st[4]] tail_reads=[st[5]] units=[st[6]] false_prefix_literals=[st[7]]")
   z = ccall("w_value_free_w", wnext)
   z = ccall("w_value_free_w", whead)
   z = ccall("w_value_free_w", trail)

@@ -231,7 +231,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @and2_done = false
 
     # native-call scratch
-    @pst = i64[4]                # qhead / tsize / conflict / ticks
+    @pst = i64[7]                # qhead / tsize / conflict / ticks / scanned / visits / two-open
     @subscan_pm = i64[10]
     @subscan_out = i64[16384]    # survivor triples: 3 slots each + header
     @bve_pm = i64[13]
@@ -321,6 +321,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     tp = wassat_prof_clock
     self.intake_flat(parse)
     tp = wassat_prof("pre.intake_flat", tp)
+    wassat_prof_note("pre.root_work clauses=[@pst[5]] scanned_literals=[@pst[4]] two_open_stops=[@pst[6]]") if tp != 0
     return nil if self.cancelled
     # Raw-kernel policy, measured on the bmc family: on big structured
     # instances substitution made search HARDER (ibm-12: 12.2k conflicts on
@@ -1953,6 +1954,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                  "vars_eliminated": @vars_eliminated,
                  "and2_candidates": @and2_candidates,
                  "and2_eliminated": @and2_eliminated,
+                 "root_prop_scanned": @pst[4], "root_prop_visits": @pst[5],
+                 "root_prop_two_open": @pst[6],
                  "ticks": @ticks } }
 
 # Native root-level unit propagation over the flat clause arena and the
@@ -1960,7 +1963,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 # typed array parameters keep literal reads raw machine integers.
 #
 #   st[0] = qhead   st[1] = trail size   st[2] = conflict ci or -1
-#   st[3] = accumulated ticks
+#   st[3] = accumulated budget ticks (full clause lengths)
+#   st[4..6] = cumulative scanned literals / live clause visits / two-open stops
 # Measurement hooks for the two elimination bounds. The margin is resolvent
 # growth allowed per pivot (0 = zero-growth); the cap rejects pivots whose
 # pos*neg occurrence product exceeds it. qg-family rows eliminate ZERO
@@ -2000,6 +2004,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   tsize = st[1]
   conflict = -1
   ticks = 0
+  scanned = 0
+  visits = 0
+  two_open = 0
   while qhead < tsize && conflict < 0
     p = tr[qhead]
     qhead += 1
@@ -2015,6 +2022,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       if falive[ci] == 1 && ftaut[ci] == 0
         stx = fcs[ci]
         n = fcl[ci]
+        visits += 1
         ticks = ticks + n
         sat = 0
         unassigned = 0
@@ -2022,6 +2030,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
         j = 0
         while j < n
           l = fla[stx + j]
+          j += 1
           vv = 0
           if l > 0
             vv = asg[l]
@@ -2029,12 +2038,17 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
             vv = 0 - asg[0 - l]
           if vv > 0
             sat = 1
-            j = n
+            break
           else
             if vv == 0
               unassigned = unassigned + 1
               unit = l
-            j = j + 1
+              # Two open literals rule out both a unit and a conflict.
+              # Keep charging the original clause length to the budget.
+              if unassigned == 2
+                two_open += 1
+                break
+        scanned += j
         if sat == 0
           if unassigned == 0
             conflict = ci
@@ -2055,6 +2069,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   st[1] = tsize
   st[2] = conflict
   st[3] = st[3] + ticks
+  st[4] += scanned
+  st[5] += visits
+  st[6] += two_open
   0
 
 # Native subsumption pass over a chunk of the clause range. For each live
@@ -3017,6 +3034,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                "vars_eliminated": 0,
                "and2_candidates": 0,
                "and2_eliminated": 0,
+               "root_prop_scanned": 0, "root_prop_visits": 0,
+               "root_prop_two_open": 0,
                "ticks": 0 } }
 
 -> wassat_pre_stats_text(stats, pre_ms)

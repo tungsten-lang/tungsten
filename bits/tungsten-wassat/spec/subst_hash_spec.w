@@ -85,4 +85,28 @@ describe "Substitution duplicate-clause hashing" ->
     expect(r["stats"][5] < 384).to eq(true)
     expect(r["stats"][7] < 16).to eq(true)
 
+-> subst_fixture_tag(a, b, c) (i64 i64 i64) i64
+  acc = wassat_subst_lit_hash(a << 1) + wassat_subst_lit_hash(b << 1) ## i64
+  acc = acc + wassat_subst_lit_hash(c << 1)
+  (acc >> 32) & 2147483647
+
+describe "Substitution hash fingerprints" ->
+  it "checks literal equality after a fingerprint collision" ->
+    # These fixtures cover the native wrapping and interpreted integer hashes.
+    pairs = [[[88, 160, 179], [69, 113, 230]], [[38, 163, 171], [35, 49, 68]]]
+    collisions = 0
+    pairs.each ->(pair)
+      a = pair[0]
+      b = pair[1]
+      collisions += 1 if subst_fixture_tag(a[0], a[1], a[2]) == subst_fixture_tag(b[0], b[1], b[2])
+      r = hash_rewrite_fixture([a, b, [a[2], a[1], a[0]]], 256, [], 1, 1)
+      expect(r["clauses"]).to eq([a, b])
+      expect(r["stats"][3]).to eq(1)
+    expect(collisions > 0).to eq(true)
+
+  it "keeps colliding buckets distinct after signed substitution" ->
+    r = hash_rewrite_fixture([[-1, 2], [-3, 4], [2, -1], [-5, 6]], 6, [[5, 1], [6, 2]], 1, 1)
+    expect(r["clauses"]).to eq([[-1, 2], [-3, 4]])
+    expect(r["stats"][3]).to eq(2)
+
 spec_summary

@@ -1450,20 +1450,35 @@
       "unsat": false, "units": [], "binaries": [],
       "control_vars": [], "detour_phases": [], "tt_phases": []
     }
-  ctrl = wassat_identify_control_vars(nv, formula, 64)
-  card = wassat_extract_cardinality_and_propagate(nv, formula)
+  tp = wassat_prof_clock
+  # Each pass reads the same clauses. Materialize a flat formula once for
+  # this invocation, without caching mutable boxed data in the caller.
+  clauses = wassat_struct_clauses_of(formula)
+  view = { "clauses": clauses }
+  tp = wassat_prof("struct.clauses", tp)
+  if tp != 0
+    copied = 0
+    copied = clauses.size unless formula.has_key?("clauses") && formula["clauses"] != nil && !formula["clauses"].empty?
+    wassat_prof_note("struct.input clauses=[clauses.size] materialized_clauses=[copied]")
+  ctrl = wassat_identify_control_vars(nv, view, 64)
+  tp = wassat_prof("struct.control", tp)
+  card = wassat_extract_cardinality_and_propagate(nv, view)
+  tp = wassat_prof("struct.cardinality", tp)
+  wassat_prof_note("struct.cardinality.work units=[card["units"].size] binaries=[card["binaries"].size] groups=[card["eo_groups"].size] chains=[card["chains"].size]") if tp != 0
   if card["unsat"]
     return {
       "unsat": true, "units": card["units"], "binaries": card["binaries"],
       "control_vars": ctrl["control_vars"], "detour_phases": [], "tt_phases": []
     }
-  det = wassat_detour_prune(nv, formula, card)
+  det = wassat_detour_prune(nv, view, card)
+  tp = wassat_prof("struct.detour", tp)
   if det["unsat"]
     return {
       "unsat": true, "units": det["units"], "binaries": det["binaries"],
       "control_vars": ctrl["control_vars"], "detour_phases": [], "tt_phases": []
     }
-  tt = wassat_truth_table_prune(nv, formula, 128)
+  tt = wassat_truth_table_prune(nv, view, 128)
+  tp = wassat_prof("struct.truth_table", tp)
   if tt["unsat"]
     return {
       "unsat": true, "units": tt["units"], "binaries": tt["binaries"],
@@ -1527,6 +1542,8 @@
         merged_bins.push([a, b])
     i += 1
 
+  tp = wassat_prof("struct.merge", tp)
+  wassat_prof_note("struct.output units=[merged_units.size] binaries=[merged_bins.size] controls=[ctrl["control_vars"].size] detour_phases=[det["witness_phases"].size] tt_phases=[tt["phase_hints"].size]") if tp != 0
   {
     "unsat": unsat,
     "units": merged_units,

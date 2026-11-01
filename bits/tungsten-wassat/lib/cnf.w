@@ -157,7 +157,9 @@
           decl = decl * 10 + (text.byte_at(j) - 48)
           has_digit = true
           j += 1
-        return decl if has_digit && decl > 0
+        # A digit run cut by the hint window may be only a prefix of the
+        # actual clause count. Ignore it and let the strict scanner decide.
+        return decl if has_digit && decl > 0 && j < limit
     while i < limit && text.byte_at(i) != 10
       i += 1
     i += 1
@@ -175,6 +177,7 @@
   # Apply the same bounded hint scan to medium files too; byte-based clause
   # tables otherwise overallocate heavily even for a short scout solve.
   cap_l = text.size / 2 + 64
+  fallback_l = cap_l
   cap_c = text.size / 2 + 64
   if text.size >= 65536
     decl = wassat_parse_cnf_header_clauses(text)
@@ -182,16 +185,40 @@
       cap_c = decl + 64
       rem_bytes = text.size - 2 * decl
       if rem_bytes > 0
+        fallback_l = rem_bytes / 2 + 64
+        # Three bytes per literal is only an estimate, not a bound.
+        # Short positive literals may require the conservative retry below.
         if text.size >= 400000000 && decl >= 20000000
           cap_l = rem_bytes / 3 + 64
         else
           cap_l = rem_bytes / 2 + 64
+  wassat_parse_cnf_native_buffers(text, cap_l, cap_c, fallback_l)
+
+# A small initial literal buffer is safe only with a bounded retry. The
+# strict native scanner rewrites the same clause tables and header; nothing
+# is published until it accepts the entire input. Keeping this boundary
+# separate also lets native specs exercise exhaustion with small fixtures.
+-> wassat_parse_cnf_native_buffers(text, cap_l, cap_c, fallback_l) (String i64 i64 i64)
+  started = wassat_prof_clock()
+  retries = 0
   lits = i64[cap_l]
   offs = i64[cap_c]
   lens = i64[cap_c]
   hdr = i64[8]
   z = ccall("__w_parse_dimacs", text, lits, offs, lens, hdr)
   err = hdr[4]
+  if err == 7 && cap_l < fallback_l
+    # The scanner retains no reference to these private buffers. Release
+    # the failed literal allocation before making its larger replacement.
+    z = ccall("w_value_free_w", lits)
+    cap_l = fallback_l
+    lits = i64[cap_l]
+    retries = 1
+    z = ccall("__w_parse_dimacs", text, lits, offs, lens, hdr)
+    err = hdr[4]
+  if env("WASSAT_PROFILE") == "1"
+    z = wassat_prof("parse.native", started)
+    z = wassat_prof_note("parse.native literals=[hdr[3]] clauses=[hdr[2]] literal_capacity=[cap_l] clause_capacity=[cap_c] retries=[retries] error=[err]")
   if err != 0
     msgs = { 1: "missing or duplicate p cnf header", 2: "malformed p-line",
              3: "invalid DIMACS token", 4: "literal exceeds declared variable count",

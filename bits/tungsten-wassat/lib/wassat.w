@@ -56,6 +56,7 @@ use stedman
 use hantzsche_wendt
 use gray_track
 use matching_balance
+use matching_parity
 use partition_circuit
 use pair_affine
 use adder_conservation
@@ -331,6 +332,9 @@ use portfolio
   formula = wassat_parse_cnf_native(cnf_text)
   z = ccall("w_value_free_w", cnf_text)
   cnf_text = ""
+  parity_source = nil
+  if proof_mode == WASSAT_PROOF_NONE
+    parity_source = wassat_matching_parity_source(formula)
   if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PAIR_GADGET") != "0"
     wassat_apply_pair_gadget_quotient(formula)
   # Cache the one full clause-shape pass immediately. Exact structural lanes
@@ -1099,6 +1103,14 @@ use portfolio
         if scout_cover_plan != nil
           scout_cover_res = i64[scout_nv + 8]
           scout_cover_h = wassat_cover_start(formula, scout_cover_plan, scout_stop, scout_cover_res, 0)
+        # Checked matching parity runs beside the scout, using original flat
+        # clauses and private scratch. A miss has no grace period: cancellation
+        # below ends it with the scout. Proof modes never enter this branch.
+        parity_workers = cover_workers + (scout_cover_plan == nil ? 0 : 1)
+        scout_parity = wassat_matching_parity_plan(parity_source, parity_workers)
+        scout_parity_h = nil
+        if scout_parity != nil
+          scout_parity_h = wassat_matching_parity_start(parity_source, scout_parity, scout_stop)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1192,6 +1204,9 @@ use portfolio
             cover_tail = scout_cover_res[0] != 0 ? clock_ms() - scout_cover_res[scout_nv + 5] : 0
             wassat_cover_profile("scout.cover", scout_cover_plan, scout_cover_res[0])
             wassat_prof_note("scout.cover answer_to_join_ms=[cover_tail]")
+        if scout_parity_h != nil
+          z = scout_parity_h.join
+          wassat_matching_parity_profile(scout_parity) if env("WASSAT_PROFILE") == "1"
         if scout_path_enabled && env("WASSAT_PROFILE") == "1"
           path_tail = scout_path_out[9] > 0 ? ccall("__w_clock_ms") - scout_path_out[9] : 0
           wassat_prof_note("path_cover width=[scout_path_out[1]] work=[scout_path_out[2]] removed=[scout_path_out[3]] empty_axis=[scout_path_out[4]] empty_index=[scout_path_out[5]] stopped=[scout_path_out[6]] recognized=[scout_path_out[7]] stop_tail_ms=[path_tail]")
@@ -1202,6 +1217,16 @@ use portfolio
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_parity != nil && scout_parity[0] == -1
+          parity_scout = scout_out[0]
+          budget_used += parity_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          << "s UNSATISFIABLE"
+          << "c mode: fast (clause-checked matching parity scout)"
+          << "c matching rows=[scout_parity[7]] amo_pairs=[scout_parity[8]] units=[scout_parity[1]]"
+          << "c conflicts: [budget_used], decisions: [parity_scout["decisions"]], props: [parity_scout["props"]]"
+          << "c stats restarts=[parity_scout["restarts"]] reduces=[parity_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(20)
         if scout_cover_res != nil && scout_cover_res[0] != 0
           cover_scout = scout_out[0]
           budget_used += cover_scout["conflicts"] if scout_budget == nil

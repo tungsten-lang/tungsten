@@ -8185,7 +8185,8 @@ WASSAT_VALUE_LINE_MAX = 4096
   st[2] = st[1]
   1
 
--> wassat_flat_lucky_model(formula)
+# Shared implementation for the candidate and verified entry points below.
+-> wassat_flat_lucky_compute(formula, verify_model)
   return [] unless formula.has_key?("flat_ncl")
   ncl = formula["flat_ncl"]
   nv = formula["nvars"]
@@ -8228,12 +8229,13 @@ WASSAT_VALUE_LINE_MAX = 4096
   if r != 1
     z = ccall("w_value_free_w", sign)
     return []
-  pm = i64[2]
-  pm[1] = ncl
-  wassat_verify_flat_i8(slits, soffs, slens, sign, pm)
-  if pm[0] != 1
-    z = ccall("w_value_free_w", sign)
-    return []
+  if verify_model
+    pm = i64[2]
+    pm[1] = ncl
+    wassat_verify_flat_i8(slits, soffs, slens, sign, pm)
+    if pm[0] != 1
+      z = ccall("w_value_free_w", sign)
+      return []
   model = i64[nv]
   v = 1
   while v <= nv
@@ -8241,6 +8243,16 @@ WASSAT_VALUE_LINE_MAX = 4096
     v += 1
   z = ccall("w_value_free_w", sign)
   model
+
+# The CLI uses this candidate entry point and retains its final original-CNF
+# output guard. It must never publish the candidate without that check.
+-> wassat_flat_lucky_candidate(formula)
+  wassat_flat_lucky_compute(formula, false)
+
+# Preserve the library contract, including verification using the existing
+# sign buffer rather than allocating and filling a second assignment array.
+-> wassat_flat_lucky_model(formula)
+  wassat_flat_lucky_compute(formula, true)
 
 # Output-integrity guard: does the model satisfy every clause of the formula?
 # Every SAT answer must pass this scan against the ORIGINAL formula before it

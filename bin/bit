@@ -1,0 +1,17 @@
+#!/bin/sh
+# Source-checkout entry point; package commands use the chosen isolated toolchain.
+set -eu
+# Keep explicit package/toolchain environment through noninteractive bash drivers.
+unset BASH_ENV
+BIT_LAUNCHER=$0
+while [ -L "$BIT_LAUNCHER" ]; do
+  BIT_LAUNCHER_DIR=$(CDPATH= cd -- "$(dirname -- "$BIT_LAUNCHER")" && pwd -P)
+  BIT_LINK_TARGET=$(readlink "$BIT_LAUNCHER")
+  case "$BIT_LINK_TARGET" in
+    /*) BIT_LAUNCHER=$BIT_LINK_TARGET ;;
+    *) BIT_LAUNCHER=$BIT_LAUNCHER_DIR/$BIT_LINK_TARGET ;;
+  esac
+done
+BIT_TOOLCHAIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$BIT_LAUNCHER")/.." && pwd -P)
+export TUNGSTEN_ROOT="$BIT_TOOLCHAIN_ROOT"
+exec "$BIT_TOOLCHAIN_ROOT/bin/tungsten" "$BIT_TOOLCHAIN_ROOT/bits/tungsten-bit/lib/bit.w" -- "$@"

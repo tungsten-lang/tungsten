@@ -1,10 +1,10 @@
 name: AV pipeline
 on:
   pull_request:
-    paths: ['runtime/runtime.c', 'runtime/media/**', 'core/media/**', 'apps/studio/**', 'bin/commands/media.w', 'spec/core/media*', '.github/workflows/av-pipeline.yml']
+    paths: ['runtime/runtime.c', 'runtime/media/**', 'core/media/**', 'apps/studio/**', 'bits/tungsten-av/**', 'bits/tungsten-bit/lib/**', 'bin/bit', 'scripts/test-bit-commands.py', 'scripts/test-media-malformed.py', 'bin/commands/media.w', 'spec/core/media*', '.github/workflows/av-pipeline.yml']
   push:
     branches: [main]
-    paths: ['runtime/runtime.c', 'runtime/media/**', 'core/media/**', 'apps/studio/**', 'bin/commands/media.w', 'spec/core/media*', '.github/workflows/av-pipeline.yml']
+    paths: ['runtime/runtime.c', 'runtime/media/**', 'core/media/**', 'apps/studio/**', 'bits/tungsten-av/**', 'bits/tungsten-bit/lib/**', 'bin/bit', 'scripts/test-bit-commands.py', 'scripts/test-media-malformed.py', 'bin/commands/media.w', 'spec/core/media*', '.github/workflows/av-pipeline.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,6 +26,8 @@ jobs:
       - if: runner.os == 'macOS'
         run: brew install ffmpeg
       - run: PYTHONPATH=apps/studio/tools/tw python -m unittest discover -s apps/studio/tools/tw/tests -v
+      - run: python -m unittest discover -s bits/tungsten-av/tests -p test_av.py -v
+      - run: python -m unittest discover -s bits/tungsten-av/tests -p test_crash.py -v
   native:
     runs-on: macos-15
     timeout-minutes: 60
@@ -48,3 +50,6 @@ jobs:
       - run: bin/tungsten spec/parity/media_delivery_contract_spec.w
       - run: bin/tungsten run --interpret spec/parity/media_delivery_contract_spec.w
       - run: PYTHONPATH=apps/studio/tools/tw RUN_AV_NATIVE=1 python -m unittest discover -s apps/studio/tools/tw/tests -p test_native_pipeline.py -v
+      - run: python scripts/test-bit-commands.py
+      - run: python scripts/test-media-malformed.py
+      - run: RUN_AV_NATIVE=1 python -m unittest discover -s bits/tungsten-av/tests -v

@@ -6,7 +6,7 @@ use ../lib/solver
   total = ncl + 1
   clauses.each ->(c) total += c.size
   cm = i64[2 * ncl]
-  alive = i64[ncl]
+  alive = i8[ncl]
   ar = i64[total]
   clbd = i64[ncl]
   reprs = i64[2 * nv + 4]

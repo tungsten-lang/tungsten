@@ -58023,6 +58023,8 @@ static const uint8_t w_dimacs_cls[256] = {
 };
 #define DC_BREAK (DC_SPACE | DC_NL)
 
+/* Each prior digit leaves v <= 2000000000. One more multiply/add fits
+ * int64_t, so the range check can follow accumulation without signed overflow. */
 WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
                         WValue lens_val, WValue hdr_val) {
     char inline_buf[6];
@@ -58078,8 +58080,8 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
                     int64_t v = 0;
                     while (i < tlen && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
                         int digit = tx[i] - '0';
-                        if (v > (2000000000LL - digit) / 10) P_ERR(2);
                         v = v * 10 + digit;
+                        if (v > 2000000000LL) P_ERR(2);
                         i++;
                     }
                     vals[vi] = v;
@@ -58099,20 +58101,22 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
         /* Literal: optional sign, then digits, then a delimiter. One pass. */
         int neg = 0, signed_tok = 0;
         if (c == '-' || c == '+') { neg = (c == '-'); signed_tok = 1; i++; }
-        int64_t v = 0; int nd = 0;
+        /* The required first digit needs neither multiplication nor a bound check. */
+        if (i >= tlen || !(cls[(unsigned char)tx[i]] & DC_DIGIT)) P_ERR(3);
+        size_t digit_start = i;
+        int64_t v = tx[i++] - '0';
         while (i < tlen && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
             int digit = tx[i] - '0';
-            if (v > (2000000000LL - digit) / 10) P_ERR(4);
             v = v * 10 + digit;
-            nd++; i++;
+            if (v > 2000000000LL) P_ERR(4);
+            i++;
         }
-        /* No digits, or trailing junk inside the token, is a bad token. */
-        if (nd == 0) P_ERR(3);
+        /* Trailing junk inside the token is a bad token. */
         if (!AT_BREAK(i)) P_ERR(3);
 
         if (v == 0) {
             /* The terminator is the exact token `0`: -0, +0 and 00 are not. */
-            if (nd != 1 || signed_tok) P_ERR(3);
+            if (i - digit_start != 1 || signed_tok) P_ERR(3);
             if (ncl >= declared) P_ERR(6);
             offs[ncl] = cur_off; lens[ncl] = cur_len;
             ncl++; cur_off = nlits; cur_len = 0;
@@ -73879,7 +73883,7 @@ static WValue w_big_array_param_view(WValue arr, WValue site_v) {
     return w_box_array(a);
 }
 
-WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
+static __attribute__((noinline)) WValue w_check_array_ebits_slow(WValue arr, int64_t want_bits, int64_t want_poly,
                            WValue site_v) {
     int64_t got_ebits;
     if (w_is_array(arr)) {
@@ -73920,6 +73924,20 @@ WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
     }
     w_raise(w_str_concat(site_v, w_string(tail)));
     return arr;
+}
+
+/* Ordinary WArray arguments are overwhelmingly the common boundary case.
+ * Keep success leaf-sized: diagnostic formatting and BigArray-view creation
+ * belong to the cold path and must not impose their stack frame per argument. */
+WValue w_check_array_ebits(WValue arr, int64_t want_bits, int64_t want_poly,
+                           WValue site_v) {
+    if (w_is_array(arr)) {
+        int64_t ebits = w_as_array(arr)->ebits;
+        if ((ebits == 65) == (want_poly != 0) &&
+            array_storage_bits(ebits) == want_bits)
+            return arr;
+    }
+    return w_check_array_ebits_slow(arr, want_bits, want_poly, site_v);
 }
 
 /* (#68) page-aligned typed-array allocation. Required for the

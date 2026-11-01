@@ -54,6 +54,14 @@ database reduction. Policy selection is deterministic for a formula. Concurrent
 races intentionally sample several search trajectories, however, so the winning
 arm and wall time can vary with scheduling.
 
+Structural detour probes without monotone chains reuse a packed short-clause
+occurrence index and native assignment scratch. They preserve clause order,
+implication order and the existing assignment cutoff. Transition probes retain
+status and trail length without copying unused implication lists; state probes
+still collect implications for pruning and phase hints. Profiling reports
+trial count, occurrence visits, literal inspections, assignments and copied
+implications, plus the selected scout conflict cap.
+
 Selected local cores use append-only on-the-fly strengthening (OTFS). When CPU
 and memory remain after the ordinary fast-mode workers are counted, the raw
 race also adds one import-only OTFS specialist without replacing or publishing
@@ -131,6 +139,27 @@ Additional counters report exclusion lookups, excluded half adders, reduction
 passes and token-availability attempts.
 `WASSAT_ADDER_CONSERVATION=0` disables this route for comparisons.
 
+A bounded Mycielski checker recovers three-bit graph colors from complete
+original XOR clauses and edge-disjunction clauses. It checks a common palette
+against local domain clauses, then verifies successive graph layers down to an
+edge. Each layer has an apex, independent shadows, and a bijection whose exact
+neighborhoods match the preceding graph; this raises its chromatic lower bound
+by one. A lower bound larger than the palette proves UNSAT in fast mode.
+No instance name, expected graph size or stored answer establishes a result.
+Proof requests retain proof-producing CDCL. Missing XOR premises, incompatible
+coordinate layouts or polarity frames, failed graph checks, cancellation and
+limits all fall through. Coordinates must form disjoint, consistently ordered
+triples; signed literals are normalized through checked edge relations.
+Admission is limited to 10,000 variables, 40,000 clauses of width at most three,
+512 graph vertices and two million work visits. The CLI polls a 50 ms deadline;
+an admitted miss can add bounded work before the solving arms start. Fixed
+native buffers hold clause-support masks and graph data; only populated hash
+slots are visited, and each recursive layer reuses a slice of scratch arrays.
+Profiling reports XORs, vertices, edges, palette size, lower bound, layers,
+work visits, domain clauses, apex candidates, neighborhood comparisons,
+occupied support groups, elapsed time and stop reason.
+`WASSAT_MYCIELSKI=0` disables this route for comparisons.
+
 A bounded matching-balance checker derives a graph from positive choice
 clauses: each participating variable must occur in exactly two distinct rows.
 It checks bipartiteness component by component, then verifies every original
@@ -175,6 +204,32 @@ at its final size. Cancellation is checked during recognition, evaluation,
 exchange search, and clause replay. `WASSAT_PARTITION_CIRCUIT=0` disables it.
 Profiling reports clause visits, truth-table candidates, gate evaluations,
 pair inserts/probes, checked clauses, candidate models, and the stop reason.
+
+A bounded resolution-cover arm runs beside CDCL on large, repetitive inputs.
+Width-four prefixes retain the post-scout route; wider prefixes can also
+start the arm beside the initial scout, with no extra grace wait on a miss.
+Checked chains use original clauses of at most eight literals and record
+which assignments each resolvent excludes. A complete cover proves UNSAT;
+an all-but-one cover entails its remaining assignment. Only another checked
+cover or propagation through original clauses can derive a refutation.
+If the remaining formula is binary, iterative strongly connected components
+can construct a candidate model. SAT is published only after complete
+original-clause replay; an inconsistent or unsupported residual declines.
+The worker reuses typed-array scratch, allocates the compact binary graph
+once at its measured size, and polls cancellation, a 15-second deadline and
+a work cap. Proof modes bypass this arm. `WASSAT_RESOLUTION_COVER=0` disables
+it; `=1` bypasses shape and arm-pin gates for experiments while retaining
+resource and proof checks. Profiling reports resolution steps, clause scans,
+derived units, residual clauses, active graph variables, graph visits,
+replayed clauses, model verification, stop reason and elapsed time.
+
+Watch-pool rebuilds retain the compact layout for sparse formulas until
+three pool overflows demonstrate repeated repacking. They then reserve
+bounded headroom for individual dense lists; globally dense formulas keep
+their existing policy. Lucky dives can stop after a completed watch
+repair; they reset the retained root queue so a resumed solver propagates
+those units again. Ordinary CDCL and inprocessing still complete propagation.
+The `watch_recycle` profile includes `cancelled_repairs`.
 
 The native raw race also has a bounded exact circuit arm. It derives each
 output's complete two-input truth table from all its defining CNF clauses,

@@ -96,7 +96,7 @@ describe "Wassat cumulative performance counters" ->
     cm = i64[2]
     cm[0] = 1
     cm[1] = 3
-    alive = i64[1]
+    alive = i8[1]
     alive[0] = 1
     wd = i64[40]
     wp = i64[16]

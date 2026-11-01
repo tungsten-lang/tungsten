@@ -57982,20 +57982,11 @@ static const uint8_t w_dimacs_cls[256] = {
 
 /* Each prior digit leaves v <= 2000000000. One more multiply/add fits
  * int64_t, so the range check can follow accumulation without signed overflow. */
-WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
-                        WValue lens_val, WValue hdr_val) {
-    char inline_buf[6];
-    const char *tx; size_t tlen;
-    w_str_data(text_val, inline_buf, &tx, &tlen);
-    WArray *la = w_as_array(lits_val);
-    WArray *oa = w_as_array(offs_val);
-    WArray *na = w_as_array(lens_val);
-    WArray *ha = w_as_array(hdr_val);
-    int64_t *lits = (int64_t *)la->slots + la->start;
-    int64_t *offs = (int64_t *)oa->slots + oa->start;
-    int64_t *lens = (int64_t *)na->slots + na->start;
-    int64_t *hdr  = (int64_t *)ha->slots + ha->start;
-    int64_t lcap = la->size, ccap = oa->size;
+/* Inline the one strict scanner at two constant-mode call sites. This keeps
+ * count-only mode out of the ordinary fill loop without duplicating grammar. */
+static inline __attribute__((always_inline)) WValue w_dimacs_scan(
+        const char *tx, size_t tlen, int64_t *lits, int64_t *offs,
+        int64_t *lens, int64_t *hdr, int64_t lcap, int64_t ccap, int count_only) {
     int64_t nvars = 0, declared = 0, ncl = 0, nlits = 0, cur_off = 0, cur_len = 0;
     int have_header = 0, done = 0, line_started = 0;
     int64_t lineno = 1;
@@ -58075,12 +58066,13 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
             /* The terminator is the exact token `0`: -0, +0 and 00 are not. */
             if (i - digit_start != 1 || signed_tok) P_ERR(3);
             if (ncl >= declared) P_ERR(6);
-            offs[ncl] = cur_off; lens[ncl] = cur_len;
+            if (!count_only) { offs[ncl] = cur_off; lens[ncl] = cur_len; }
             ncl++; cur_off = nlits; cur_len = 0;
         } else {
             if (v > nvars) P_ERR(4);
             if (nlits + 1 > lcap) P_ERR(7);
-            lits[nlits++] = neg ? -v : v;
+            if (!count_only) lits[nlits] = neg ? -v : v;
+            nlits++;
             cur_len++;
             cur_off = nlits - cur_len;
         }
@@ -58092,6 +58084,38 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
     return W_NIL;
 #undef AT_BREAK
 #undef P_ERR
+}
+/* The scanner accepts a String or an open read-only Mmap. Passing nil for
+ * all three output buffers performs the same strict validation/count pass
+ * without materializing the formula. This sizes large mapped inputs exactly. */
+WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
+                        WValue lens_val, WValue hdr_val) {
+    char inline_buf[6];
+    const char *tx; size_t tlen;
+    WMmap *mapping = as_mmap(text_val);
+    if (mapping) {
+        if (mapping->closed) w_raise(w_string("DIMACS: mmap is closed"));
+        tx = (const char *)mapping->data;
+        tlen = (size_t)mapping->size;
+    } else {
+        w_str_data(text_val, inline_buf, &tx, &tlen);
+    }
+    if (!w_is_array(hdr_val)) w_raise(w_string("DIMACS: header must be an i64 array"));
+    WArray *ha = w_as_array(w_check_array_ebits(hdr_val, 64, 0, w_string("CNF")));
+    if (ha->size < 6) w_raise(w_string("DIMACS: header buffer is too small"));
+    int64_t *hdr = (int64_t *)ha->slots + ha->start;
+    if (lits_val == W_NIL && offs_val == W_NIL && lens_val == W_NIL)
+        return w_dimacs_scan(tx, tlen, NULL, NULL, NULL, hdr, INT64_MAX, INT64_MAX, 1);
+    if (!w_is_array(lits_val) || !w_is_array(offs_val) || !w_is_array(lens_val))
+        w_raise(w_string("DIMACS: supply three i64 output arrays or three nil buffers"));
+    WArray *la = w_as_array(w_check_array_ebits(lits_val, 64, 0, w_string("CNF")));
+    WArray *oa = w_as_array(w_check_array_ebits(offs_val, 64, 0, w_string("CNF")));
+    WArray *na = w_as_array(w_check_array_ebits(lens_val, 64, 0, w_string("CNF")));
+    int64_t *lits = (int64_t *)la->slots + la->start;
+    int64_t *offs = (int64_t *)oa->slots + oa->start;
+    int64_t *lens = (int64_t *)na->slots + na->start;
+    int64_t ccap = oa->size < na->size ? oa->size : na->size;
+    return w_dimacs_scan(tx, tlen, lits, offs, lens, hdr, la->size, ccap, 0);
 }
 
 WValue __w_file_id(WValue path_val) {

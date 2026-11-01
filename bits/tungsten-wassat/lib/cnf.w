@@ -194,11 +194,43 @@
           cap_l = rem_bytes / 2 + 64
   wassat_parse_cnf_native_buffers(text, cap_l, cap_c, fallback_l)
 
+# Check the complete strict scan before trusting its counts or publishing data.
+-> wassat_parse_cnf_check_header(hdr)
+  err = hdr[4]
+  if err != 0
+    msgs = { 1: "missing or duplicate p cnf header", 2: "malformed p-line",
+             3: "invalid DIMACS token", 4: "literal exceeds declared variable count",
+             5: "clause not terminated by 0", 6: "clause count mismatch",
+             7: "input exceeds parser buffers", 8: "XNF/native XOR clauses are not supported; expand them to CNF" }
+    raise "[msgs[err]] (line [hdr[5]])"
+  raise "implausible variable count [hdr[0]] in header" if hdr[0] > 50000000
+  0
+
+# Large files cannot be represented by String. The caller owns the mapping
+# through both strict scans. The count pass bounds allocation by actual syntax
+# rather than the file's byte length.
+-> wassat_parse_cnf_mapped(mapping)
+  started = wassat_prof_clock
+  hdr = i64[8]
+  z = ccall("__w_parse_dimacs", mapping, nil, nil, nil, hdr)
+  wassat_parse_cnf_check_header(hdr)
+  z = wassat_prof("parse.count bytes=[mapping.size] literals=[hdr[3]] clauses=[hdr[2]]", started) if started != 0
+  cap_l = hdr[3] + 1
+  cap_c = hdr[2] + 2
+  wassat_parse_cnf_native_buffers(mapping, cap_l, cap_c, cap_l)
+
+-> wassat_parse_cnf_file_native(path)
+  mapping = File.mmap(path)
+  begin
+    wassat_parse_cnf_mapped(mapping)
+  ensure
+    mapping.close
+
 # A small initial literal buffer is safe only with a bounded retry. The
 # strict native scanner rewrites the same clause tables and header; nothing
 # is published until it accepts the entire input. Keeping this boundary
 # separate also lets native specs exercise exhaustion with small fixtures.
--> wassat_parse_cnf_native_buffers(text, cap_l, cap_c, fallback_l) (String i64 i64 i64)
+-> wassat_parse_cnf_native_buffers(text, cap_l, cap_c, fallback_l)
   started = wassat_prof_clock()
   retries = 0
   lits = i64[cap_l]
@@ -219,14 +251,8 @@
   if env("WASSAT_PROFILE") == "1"
     z = wassat_prof("parse.native", started)
     z = wassat_prof_note("parse.native literals=[hdr[3]] clauses=[hdr[2]] literal_capacity=[cap_l] clause_capacity=[cap_c] retries=[retries] error=[err]")
-  if err != 0
-    msgs = { 1: "missing or duplicate p cnf header", 2: "malformed p-line",
-             3: "invalid DIMACS token", 4: "literal exceeds declared variable count",
-             5: "clause not terminated by 0", 6: "clause count mismatch",
-             7: "input exceeds parser buffers", 8: "XNF/native XOR clauses are not supported; expand them to CNF" }
-    raise "[msgs[err]] (line [hdr[5]])"
+  wassat_parse_cnf_check_header(hdr)
   nvars = hdr[0]
-  raise "implausible variable count [nvars] in header" if nvars > 50000000
   ncl = hdr[2]
   # NO eager boxed materialization. Building one Array per clause cost ~60% of
   # parse time (302ms of 499ms on a 10M-clause instance) for data the flat

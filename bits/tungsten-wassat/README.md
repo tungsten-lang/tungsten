@@ -205,6 +205,19 @@ exchange search, and clause replay. `WASSAT_PARTITION_CIRCUIT=0` disables it.
 Profiling reports clause visits, truth-table candidates, gate evaluations,
 pair inserts/probes, checked clauses, candidate models, and the stop reason.
 
+A bounded resolution-cover arm runs beside CDCL on large, repetitive,
+mostly width-four inputs. It follows checked resolution chains from original
+clauses, then records which assignments each derived clause excludes. A
+complete cover proves UNSAT; an all-but-one cover entails its remaining
+assignment. Only another checked cover or propagation through original
+clauses can turn those assignments into a refutation. The worker reuses
+fixed typed-array scratch and checks cancellation, a 15-second deadline,
+and a work cap. Missing premises and incomplete coverage fall through.
+Proof modes bypass this arm. `WASSAT_RESOLUTION_COVER=0` disables it;
+`=1` bypasses the default shape and arm-pin gates for experiments while
+retaining resource and proof checks. `WASSAT_PROFILE=1` reports cover rows,
+resolution steps, clause scans, derived units, stop reason and elapsed time.
+
 The native raw race also has a bounded exact circuit arm. It derives each
 output's complete two-input truth table from all its defining CNF clauses,
 then checks unit and wider assertions over every primary-input assignment in

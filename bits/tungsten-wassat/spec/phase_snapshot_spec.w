@@ -146,4 +146,54 @@ describe "Wassat incremental phase snapshots" ->
       expect(phases[v] == 1 || phases[v] == -1).to eq(true)
       v += 1
 
+describe "Phase prefixes retained across ordinary conflict backjumps" ->
+  it "retains a long matching prefix when the asserting clause jumps above root" ->
+    a = []
+    b = []
+    v = 1
+    while v <= 50
+      a.push(v)
+      b.push(v)
+      v += 1
+    a.push(60)
+    a.push(61)
+    b.push(60)
+    b.push(-61)
+    [false, true].each -> (chrono)
+      s = PhaseSnapshotFixture.new(80, [a, b], WASSAT_PROOF_NONE)
+      s.prepare_snapshot_test
+      s.chrono_snapshot_test if chrono
+      r = s.solve_budget(0)
+      expect(r["sat"]).to eq(true)
+      expect(r["conflicts"] > 0).to eq(true)
+      expect(s.snapshot_matches_model?).to eq(true)
+      expect([a, b].all? -> (c) c.any? -> (l) r["model"].include?(l)).to eq(true)
+      # Full invalidation recopies the first 50 surviving assignments in
+      # both phase arrays. Retention should stay below even that overhead.
+      expect(r["phase_copied"] < 2 * 80 + 2 * 50).to eq(true)
+
+describe "Phase prefix policy in clause-sharing arms" ->
+  it "preserves full refreshes when a solver joins a sharing ring" ->
+    a = []
+    b = []
+    v = 1
+    while v <= 50
+      a.push(v)
+      b.push(v)
+      v += 1
+    a.push(60)
+    a.push(61)
+    b.push(60)
+    b.push(-61)
+    s = PhaseSnapshotFixture.new(80, [a, b], WASSAT_PROOF_NONE)
+    s.prepare_snapshot_test
+    ring = i64[8 + 4 * (3 + 80)]
+    s.enable_sharing(ring, 4, 80, 0, false)
+    r = s.solve_budget(0)
+    expect(r["sat"]).to eq(true)
+    expect(r["conflicts"] > 0).to eq(true)
+    expect(s.snapshot_matches_model?).to eq(true)
+    expect([a, b].all? -> (c) c.any? -> (l) r["model"].include?(l)).to eq(true)
+    expect(r["phase_copied"] >= 2 * 80 + 2 * 50).to eq(true)
+
 spec_summary

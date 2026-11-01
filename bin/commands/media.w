@@ -32,6 +32,7 @@
   << "       tungsten media transcode IN OUT \[--size WxH] \[--fit F] \[--filter F] \[--codec C] \[--quality Q | --kbps N] \[--level L] \[--gop N]"
   << "                                \[--audio copy|aac|pcm|none] \[--audio-kbps N] \[--audio-src PATH] \[--rate N/D] \[--start F] \[--frames N]"
   << "                                \[--via yuv|rgb] \[--backend B] \[--chapters FILE | --no-chapters] \[--tc HH:MM:SS:FF | --no-tc] \[--verify]"
+  << "                                \[--resume DIR] \[--timeout-ms N] \[--cancel-file PATH]"
   << "                                \[--retries N] \[--retry-delay S] \[--no-edit-lists | --video-no-edits]"
   << "       tungsten media preset NAME IN OUT \[transcode options] \[--no-verify]"
   << "       tungsten media presets"
@@ -197,6 +198,15 @@ if cmd == "transcode" || cmd == "preset"
       verify = true
     elsif a == "--no-verify"
       verify = false
+    elsif a == "--timeout-ms"
+      opts[:timeout_ms] = flag_value(args, i).to_i
+      i += 1
+    elsif a == "--cancel-file"
+      opts[:cancel_file] = flag_value(args, i)
+      i += 1
+    elsif a == "--resume"
+      opts[:resume_dir] = flag_value(args, i)
+      i += 1
     elsif a == "--retries"
       opts[:retries] = flag_value(args, i).to_i
       i += 1

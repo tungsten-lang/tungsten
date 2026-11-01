@@ -6031,7 +6031,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               if st[5] == 1
                 mxl = 0
                 k = 1
-                while k < n
+                # Assigned antecedents cannot exceed the current decision
+                # level, so reaching it completes the reason maximum.
+                while k < n && mxl < dl
                   lk = ar[stx + k]
                   vk2 = lk
                   if lk < 0

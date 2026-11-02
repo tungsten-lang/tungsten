@@ -1,7 +1,7 @@
 use spec
 use ../lib/solver
 
--> lucky_root_fixture(text, state_size = 8)
+-> lucky_root_fixture(text, state_size = 8, watch_budget = 0)
   f = wassat_parse_cnf(text)
   cs = f["clauses"]
   count = 0
@@ -17,6 +17,7 @@ use ../lib/solver
   nv = f["nvars"]
   head = i32[2 * nv + 4]; links = i32[2 * cs.size]
   sign = i8[nv + 1]; trail = i32[nv + 2]; st = i64[state_size]
+  st[14] = watch_budget if state_size >= 16
   rc = wassat_flat_lucky_init(lits, offs, lens, head, links, sign, trail, st, cs.size, nv)
   [lits, offs, lens, head, links, sign, trail, st, nv, rc]
 
@@ -129,5 +130,50 @@ describe "Flat lucky large-input admission and work counters" ->
     expect(lucky_root_dive_check(a, -1, 0)).to eq([0, 0])
     st = a[7]
     expect([st[8], st[9], st[10], st[11], st[12], st[13]]).to eq([1, 1, 1, 1, 2, 4])
+
+describe "Flat lucky speculative work budget" ->
+  it "stops a dive without treating exhaustion as a failed literal" ->
+    a = lucky_root_fixture("p cnf 6 3\n-1 2 0\n-3 4 0\n-5 6 0\n", 16, 1)
+    expect(a[9]).to eq(0)
+    expect(lucky_root_dive_check(a, 1, 0)[0]).to eq(-2)
+    expect(a[7][15]).to eq(1)
+    expect(a[7][10]).to eq(0)
+    expect(a[7][11]).to eq(0)
+    expect(a[7][2]).to eq(0)
+    a[7][14] = 0
+    a[7][15] = 0
+    expect(lucky_root_dive_check(a, 1, 0)).to eq([1, 1])
+  it "interrupts a long watch bucket and leaves it safe to finish" ->
+    text = "p cnf 2 1026\n1 0\n"
+    i = 0
+    while i < 1025
+      text += "-1 2 0\n"
+      i += 1
+    a = lucky_root_fixture(text, 16, 1)
+    expect(a[9]).to eq(-2)
+    expect(a[7][15]).to eq(1)
+    expect(a[7][13]).to eq(1024)
+    expect(a[7][0]).to eq(0)
+    a[7][14] = 0
+    rc = wassat_flat_lucky_prop(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7])
+    expect(rc).to eq(0)
+    expect(a[5][2]).to eq(1)
+    expect(a[7][0]).to eq(a[7][1])
+  it "does not promote an opposite decision after its propagation is interrupted" ->
+    a = lucky_root_fixture("p cnf 3 3\n1 2 0\n1 -2 0\n-1 3 0\n", 16, 1)
+    expect(lucky_root_dive_check(a, -1, 0)[0]).to eq(-2)
+    expect(a[7][15]).to eq(1)
+    expect(a[7][10]).to eq(1)
+    expect(a[7][11]).to eq(0)
+    expect(a[7][2]).to eq(0)
+    a[7][14] = 0
+    expect(lucky_root_dive_check(a, -1, 0)).to eq([1, 1])
+  it "preserves complete models with a generous or disabled budget" ->
+    a = lucky_root_fixture("p cnf 3 2\n1 2 0\n-2 3 0\n", 16, 100)
+    expect(lucky_root_dive_check(a, -1, 0)).to eq([1, 1])
+    expect(a[7][15]).to eq(0)
+    b = lucky_root_fixture("p cnf 3 2\n1 2 0\n-2 3 0\n", 16, 0)
+    expect(lucky_root_dive_check(b, -1, 0)).to eq([1, 1])
+    expect(b[7][15]).to eq(0)
 
 spec_summary

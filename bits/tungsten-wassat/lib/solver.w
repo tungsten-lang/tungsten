@@ -7868,6 +7868,13 @@ WASSAT_VALUE_LINE_MAX = 4096
   qstart = qhead
   visits = 0
   tsize = st[1]
+  # Optional sixteen-slot state bounds speculative work across all dives.
+  # -2 is exhaustion, distinct from a conflict: callers must not flip a
+  # decision or retain a failed-literal conclusion after an incomplete scan.
+  watch_limit = st.size >= 16 ? st[14] : 0
+  if watch_limit > 0 && st[13] >= watch_limit
+    st[15] = 1
+    return 0 - 2
   while qhead < tsize
     p = trail[qhead] ## i64
     qhead += 1
@@ -7881,6 +7888,15 @@ WASSAT_VALUE_LINE_MAX = 4096
     w = whead[li] ## i64
     while w >= 0
       visits += 1
+      if watch_limit > 0 && (visits & 1023) == 0 && st[13] + visits >= watch_limit
+        # The watch lists are consistent before changing this entry. Leave
+        # this trail literal pending; a later unbounded call may replay it.
+        st[0] = qhead - 1
+        st[1] = tsize
+        st[12] += qhead - qstart
+        st[13] += visits
+        st[15] = 1
+        return 0 - 2
       next_w = wnext[w] ## i64
       c = w >> 1
       slot = w & 1
@@ -8036,7 +8052,7 @@ WASSAT_VALUE_LINE_MAX = 4096
   st[0] = 0
   st[1] = tsize
   rc = wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st)
-  return 0 - 1 if rc < 0
+  return rc if rc < 0
   st[2] = st[1]
   0
 
@@ -8065,6 +8081,7 @@ WASSAT_VALUE_LINE_MAX = 4096
       st[0] = save_tsize
       st[1] = save_tsize + 1
       rc = wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st)
+      return 0 - 2 if rc == 0 - 2
       if rc < 0
         st[10] += 1 if st.size >= 14
         cur_tsize = st[1]
@@ -8079,6 +8096,7 @@ WASSAT_VALUE_LINE_MAX = 4096
         st[0] = save_tsize
         st[1] = save_tsize + 1
         rc2 = wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st)
+        return 0 - 2 if rc2 == 0 - 2
         if rc2 < 0
           st[11] += 1 if st.size >= 14
           return 0
@@ -8526,6 +8544,15 @@ WASSAT_VALUE_LINE_MAX = 4096
   # dives and changed the later CDCL watch order; leave their search alone.
   nv <= 2000000 || ncl <= 3 * nv
 
+# Polarity dives should spend roughly linear work before ordinary search.
+# The allowable-sequence profile visited 1.42B watches in four failed dives
+# over 12.6M clauses (13 seconds before CDCL). Successful large-circuit
+# controls need fewer than two visits per clause. Keep generous headroom,
+# shared across all four dives; zero is the measurement-only opt-out.
+-> wassat_flat_lucky_watch_budget(ncl)
+  return wassat_decimal_in_range("WASSAT_FLAT_LUCKY_WATCH_BUDGET", env("WASSAT_FLAT_LUCKY_WATCH_BUDGET"), 0, 4000000000) if env("WASSAT_FLAT_LUCKY_WATCH_BUDGET") != nil
+  8 * ncl
+
 # Shared implementation for the candidate and verified entry points below.
 -> wassat_flat_lucky_compute(formula, verify_model)
   return [] unless formula.has_key?("flat_ncl")
@@ -8554,8 +8581,9 @@ WASSAT_VALUE_LINE_MAX = 4096
   wnext = i32[2 * ncl]
   # Existing lookahead counters occupy 4..7. Then dives, decisions, opposite
   # attempts, failed dives, propagated literals and visited watch entries.
-  # Four/eight-slot library callers keep their original state contract.
-  st = i64[14]
+  # Slots14/15 are an optional shared watch budget and exhaustion flag.
+  # Four/eight/fourteen-slot library callers remain unbounded.
+  st = i64[16]
   init_started = wassat_prof_clock()
   rc = wassat_flat_lucky_init(slits, soffs, slens, whead, wnext, sign, trail, st, ncl, nv)
   if env("WASSAT_PROFILE") == "1"
@@ -8571,13 +8599,15 @@ WASSAT_VALUE_LINE_MAX = 4096
     if seeded == 0 && is_oddball
       seeded = wassat_oddball_seed(slits, soffs, slens, whead, wnext, sign, trail, st, ncl, nv)
     if seeded >= 0 && (seeded == 1 || is_lucky)
+      st[14] = wassat_flat_lucky_watch_budget(ncl) if seeded == 0
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 0 - 1, 0)
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 1, 0) if r == 0 && seeded == 0
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 0 - 1, 1) if r == 0 && seeded == 0
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 1, 1) if r == 0 && seeded == 0
   if env("WASSAT_PROFILE") == "1"
     z = wassat_prof_note("flat_lucky.lookahead attempts=[st[4]] tail_reads=[st[5]] units=[st[6]] false_prefix_literals=[st[7]]")
-    z = wassat_prof_note("flat_lucky.search dives=[st[8]] decisions=[st[9]] opposite_attempts=[st[10]] failed_dives=[st[11]] propagated=[st[12]] watch_visits=[st[13]] scratch_bytes=[13 * nv + 8 * ncl + 137]")
+    z = wassat_prof_note("flat_lucky.search dives=[st[8]] decisions=[st[9]] opposite_attempts=[st[10]] failed_dives=[st[11]] propagated=[st[12]] watch_visits=[st[13]] scratch_bytes=[13 * nv + 8 * ncl + 153]")
+    z = wassat_prof_note("flat_lucky.budget watch_limit=[st[14]] exhausted=[st[15]]")
   z = ccall("w_value_free_w", wnext)
   z = ccall("w_value_free_w", whead)
   z = ccall("w_value_free_w", trail)

@@ -96,15 +96,7 @@ check("a nil value still counts as an entry", n.length == 1)
 check("a nil value reads back as nil", n.get(3) == nil)
 check("has() cannot see a nil value", !n.has(3))
 
-# BUG: the usage documented at the top of core/hash_custom.w — `h.set("foo", 1)` — raises the
-# uncatchable "runtime error: expected int, got string" on both engines. `-> hash(key) (string) i64`
-# immediately does `v = key; v ^ (v >> 30)` on the boxed string, and the bitwise operators reject
-# a string operand, so no string key can ever be stored.
-# Repro: printf 'use core/hash_custom\nh = HashCustom.new(:splitmix64, 64)\nh.set("foo", 1)\n' > /tmp/hc.w &&
-#        bin/tungsten run --interpret /tmp/hc.w
-# check("string keys", HashCustom.new(:splitmix64, 64).set("foo", 1) == nil)
-# BUG: `hash` is declared `i64` but the multiplications promote to BigInt instead of wrapping —
-# h.hash(5) is 739245978801580075080537957964831963804 on both engines, far outside i64.
-# check("hash stays in i64", h.hash(5) < 9223372036854775808)
+check("string keys", HashCustom.new(:splitmix64, 64).set("foo", 1) == nil)
+check("hash stays in i64", h.hash(5) < 9223372036854775808)
 
 << "ALL PASS hash_custom_spec ([passed.load()] checks)"

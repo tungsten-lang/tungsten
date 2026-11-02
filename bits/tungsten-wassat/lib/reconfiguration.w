@@ -1,7 +1,9 @@
-# SAT-only bounded token-jump search, recovered from repeated graph blocks.
+# Bounded token-jump search, recovered from repeated graph blocks.
 # A proposed path is only a partial assignment. Unit completion and every
-# original clause must succeed before a model can be returned.
+# original clause must succeed before a model can be returned. UNSAT additionally
+# requires the full original-clause transition contract and exhausted search.
 use atomic_stop
+use reconfiguration_verify
 
 WASSAT_RECONF_MAX_VERTICES = 512
 WASSAT_RECONF_MAX_STATES = 64
@@ -183,6 +185,7 @@ fn wassat_reconf_ctz(x) (i64) i64
   h & mask
 
 -> wassat_reconf_search(initial, goal, adj, states, parents, n, horizon, cap, m, stop, deadline) (i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64) i64
+  m[24] = 0
   return 0 - 1 if n < 1 || n > WASSAT_RECONF_MAX_VERTICES || horizon < 1 || horizon > WASSAT_RECONF_MAX_STATES
   return 0 - 1 if cap < 2 || cap > WASSAT_RECONF_NODE_CAP || (cap & (cap - 1)) != 0
   words = (n + 63) / 64
@@ -325,7 +328,7 @@ fn wassat_reconf_ctz(x) (i64) i64
                   scratch[uw] = (scratch[uw] ^ ub) ## i64
               u += 1
         v += 1
-  m[2] = 3
+  m[24] = 1
   0 - 1
 
 -> wassat_reconf_complete(lits, offs, lens, nv, nc, values, m, stop, deadline) (i64[] i64[] i64[] i64 i64 i8[] i64[] i64[] i64) i64
@@ -400,7 +403,13 @@ fn wassat_reconf_ctz(x) (i64) i64
   began = clock_ms()
   node = wassat_reconf_search(initial, goal, adj, states, parents, n, m[4], cap, m, stop, deadline)
   m[19] = clock_ms() - began
-  return 0 if node < 0
+  if node < 0
+    if m[24] == 1 && wassat_reconf_stop(m, stop, deadline) == 0
+      began = clock_ms()
+      certified = wassat_rc_verify(lits, offs, lens, nv, nc, n, starts, initial, goal, m, stop, deadline)
+      m[29] = clock_ms() - began
+      return -1 if certified == 1
+    return 0
   step = m[4] - 1
   while step >= 0
     return 0 if node < 0 || node >= m[8]
@@ -444,13 +453,21 @@ fn wassat_reconf_ctz(x) (i64) i64
   return 0 if nv < 64 || nv > 500000 || nc < 1000 || nc > 1500000
   return 0 if offs.size < nc || lens.size < nc || lits.size < 2
   ci = 0
+  largest = 0
   while ci < 512
-    return 0 if lens[ci] != 2
+    if lens[ci] != 2
+      return 1 if ci >= largest && largest >= 4
+      return 0
     off = offs[ci]
     return 0 if off < 0 || off > lits.size - 2
     u = lits[off]
     v = lits[off + 1]
-    return 0 if u >= 0 || v >= 0 || u < 0 - WASSAT_RECONF_MAX_VERTICES || v < 0 - WASSAT_RECONF_MAX_VERTICES
+    if u >= 0 || v >= 0
+      return 1 if ci >= largest && largest >= 4
+      return 0
+    return 0 if u < 0 - WASSAT_RECONF_MAX_VERTICES || v < 0 - WASSAT_RECONF_MAX_VERTICES
+    largest = -u if -u > largest
+    largest = -v if -v > largest
     ci += 1
   1
 
@@ -466,9 +483,9 @@ fn wassat_reconf_ctz(x) (i64) i64
   return nil if formula["flat_nlits"] > 8000000
   if mode != "1"
     return nil if wassat_reconf_prefix(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], nv, nc) == 0
-  bytes = wassat_reconf_bytes(nv)
+  bytes = wassat_reconf_bytes(nv) + wassat_rc_verify_bytes(nc)
   return nil unless wassat_race_memory_fits?(formula, cdcl_arenas, sls_arenas, 1, bytes)
-  m = i64[24]
+  m = i64[32]
   m[22] = bytes
   { "meta": m }
 
@@ -477,10 +494,10 @@ fn wassat_reconf_ctz(x) (i64) i64
   m[18] = clock_ms()
   res[nv + 6] = m[17]
   res[nv + 5] = m[18]
-  if found == 1 && wassat_stop_load(stop) == 0
-    z = ccall("__w_arr_store_rel", res, 0, 1)
-    won = wassat_stop_publish(stop, 1)
-    return 1
+  if found != 0 && wassat_stop_load(stop) == 0
+    z = ccall("__w_arr_store_rel", res, 0, found)
+    won = wassat_stop_publish(stop, found)
+    return found
   0
 
 -> wassat_reconf_start(formula, plan, stop, res)
@@ -490,4 +507,4 @@ fn wassat_reconf_ctz(x) (i64) i64
 
 -> wassat_reconf_profile(plan, status)
   m = plan["meta"]
-  wassat_prof_note("scout.reconfiguration status=[status] recognized=[m[1]] stopped=[m[2]] vertices=[m[3]] stages=[m[4]] edges=[m[5]] expanded=[m[6]] generated=[m[7]] states=[m[8]] peak_heap=[m[9]] hash_probes=[m[10]] graph_words=[m[11]] polls=[m[12]] lift_passes=[m[13]] lift_assigned=[m[14]] replay_clauses=[m[15]] replay_literals=[m[16]] prepare_ms=[m[20]] search_ms=[m[19]] lift_ms=[m[21]] scratch_bytes=[m[22]] best_missing=[m[23]] ms=[m[18] - m[17]]")
+  wassat_prof_note("scout.reconfiguration status=[status] recognized=[m[1]] stopped=[m[2]] vertices=[m[3]] stages=[m[4]] edges=[m[5]] expanded=[m[6]] generated=[m[7]] states=[m[8]] peak_heap=[m[9]] hash_probes=[m[10]] graph_words=[m[11]] polls=[m[12]] lift_passes=[m[13]] lift_assigned=[m[14]] replay_clauses=[m[15]] replay_literals=[m[16]] prepare_ms=[m[20]] search_ms=[m[19]] lift_ms=[m[21]] scratch_bytes=[m[22]] best_missing=[m[23]] exhausted=[m[24]] verified=[m[25]] verify_probes=[m[26]] verify_clauses=[m[27]] amo_pairs=[m[28]] verify_ms=[m[29]] ms=[m[18] - m[17]]")

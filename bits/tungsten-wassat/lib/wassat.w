@@ -1302,6 +1302,15 @@ use reconfiguration
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_reconf_res != nil && scout_reconf_res[0] == -1
+          reconf_scout = scout_out[0]
+          budget_used += reconf_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          << "s UNSATISFIABLE"
+          << "c mode: fast (clause-checked graph reconfiguration scout)"
+          << "c conflicts: [budget_used], decisions: [reconf_scout["decisions"]], props: [reconf_scout["props"]]"
+          << "c stats restarts=[reconf_scout["restarts"]] reduces=[reconf_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(20)
         if scout_reconf_res != nil && scout_reconf_res[0] == 1
           reconf_scout = scout_out[0]
           budget_used += reconf_scout["conflicts"] if scout_budget == nil

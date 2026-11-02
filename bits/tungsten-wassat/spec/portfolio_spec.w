@@ -502,6 +502,9 @@ describe "Wassat portfolio (process race)" ->
       f = wassat_parse_cnf_native(PORT_SLS_UNSAT)
       art = wassat_raw_artifact(f, f["nvars"])
       race = wassat_race_build(f["nvars"], art, 1, f, nil, 0, 0, 1)
+      # Isolate CDCL-budget cancellation: the exact circuit arm can now
+      # refute this two-variable formula before the first conflict ticket.
+      race["circuit_plan"] = nil
       wassat_race_add_sls(race, 200000000, 3, art)
       r = wassat_race_run(race, 1)
       sls_base = (race["threads"] + 2) * (f["nvars"] + 8)

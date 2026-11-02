@@ -26,6 +26,7 @@
 
 use atomic_stop
 use small_circuit
+use dependency_circuit
 use resolution_cover
 use keychart
 use domain_walk
@@ -1827,6 +1828,11 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   circuit_plan = nil
   if env("WASSAT_SMALL_CIRCUIT") != "0"
     circuit_plan = wassat_small_circuit_plan(formula)
+    if circuit_plan == nil && art["config"].max_clause_size <= 3 && env("WASSAT_DEPENDENCY_CIRCUIT") != "0" && formula["dependency_circuit_done"] != true
+      dep_bytes = 192 * (nv + formula["flat_ncl"] + 1)
+      if System.cpu_count > threads + pre_workers + sls_worker
+        if wassat_race_memory_fits?(formula, cdcl_arenas + (repair_allowed ? 1 : 0), sls_arenas, preprocess_arenas, dep_bytes)
+          circuit_plan = wassat_dependency_circuit_plan(formula)
   # The keychart lane is additive and uses boxed incremental queries. Rounded
   # races do not admit it: every boxed worker must join before a coordinator
   # scoring barrier. Explicit arm pins retain their historical width unless
@@ -1864,7 +1870,9 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   pre_sls_extra = wassat_pre_sls_extra_bytes(formula)
   pre_sls_extra += wassat_domain_bytes(nv, formula["flat_ncl"]) if domain_plan != nil
   pre_sls_extra += 53 * (nv + 1) + 68157440 if cover_plan != nil
-  pre_sls_extra += 128 * (nv + formula["flat_ncl"] + 1) if circuit_plan != nil
+  if circuit_plan != nil
+    circuit_bytes = circuit_plan["dependency"] == true ? 192 : 128
+    pre_sls_extra += circuit_bytes * (nv + formula["flat_ncl"] + 1)
   if pre_sls_allowed
     pre_sls_allowed = wassat_race_memory_fits?(formula,
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1),
@@ -2604,11 +2612,18 @@ WASSAT_AXIS_SLOTS = 10
     circuit_assertions = circuit_plan["assertions"]
     circuit_meta = circuit_plan["meta"]
     circuit_values = circuit_plan["values"]
-    circuit_handle = Thread.new -> wassat_small_circuit_arm(
-      circuit_lits, circuit_offs, circuit_lens, circuit_program,
-      circuit_inputs, circuit_assertions, circuit_meta, circuit_values,
-      stop, res, circuit_base, nv
-    )
+    if circuit_plan["dependency"] == true
+      circuit_handle = Thread.new -> wassat_dependency_circuit_arm(
+        circuit_lits, circuit_offs, circuit_lens, circuit_program,
+        circuit_inputs, circuit_assertions, circuit_meta, circuit_values,
+        stop, res, circuit_base, nv
+      )
+    else
+      circuit_handle = Thread.new -> wassat_small_circuit_arm(
+        circuit_lits, circuit_offs, circuit_lens, circuit_program,
+        circuit_inputs, circuit_assertions, circuit_meta, circuit_values,
+        stop, res, circuit_base, nv
+      )
   if cover_plan != nil
     cover_handle = wassat_cover_start(formula, cover_plan, stop, res, cover_base)
   if domain_plan != nil
@@ -2936,6 +2951,8 @@ WASSAT_AXIS_SLOTS = 10
       answer_ms = ended if res[circuit_base] == -1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       cm = circuit_plan["meta"]
       wassat_prof_note("race.circuit inputs=[cm[1]] gates=[cm[2]] batches=[cm[6]]/[cm[5]] gate_evaluations=[cm[7]] assertion_literals=[cm[8]] stopped=[cm[9]] result=[cm[10]] ms=[ended - res[circuit_base + nv + 6]]")
+      if circuit_plan["dependency"] == true
+        wassat_prof_note("race.circuit.dependencies recognized=[cm[0]] relations=[cm[13]] hash_probes=[cm[12]] clauses=[cm[14]] dependency_visits=[cm[15]] build_ms=[cm[16]]")
     if keychart_plan != nil
       ended = res[keychart_base + nv + 5]
       last_ms = ended if ended > last_ms

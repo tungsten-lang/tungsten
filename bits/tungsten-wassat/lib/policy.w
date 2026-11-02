@@ -271,7 +271,7 @@ WASSAT_CONGRUENCE_DEFAULT = true
   1048576 + (3 * lits + 7 * ncl + 12 * nv) * 8
 
 -> wassat_race_memory_fits?(formula, cdcl_arenas, sls_arenas,
-                            preprocess_arenas = 0)
+                            preprocess_arenas = 0, extra_bytes = 0)
   memory = System.physical_memory_bytes ## i64
   # These gates add optional resident arenas. Unknown capacity fails closed;
   # the baseline serial/raw solver remains available without them.
@@ -281,7 +281,7 @@ WASSAT_CONGRUENCE_DEFAULT = true
   estimated = wassat_cdcl_arena_bytes(formula) * cdcl_arenas
   estimated += wassat_sls_arena_bytes(formula) * sls_arenas
   estimated += wassat_preprocess_arena_bytes(formula) * preprocess_arenas
-  estimated <= budget
+  estimated + extra_bytes <= budget
 
 # Metaflip-style frozen-core / exact-fringe repair.  These are internal
 # resource limits, not tuning options: the arm inspects the walk it actually

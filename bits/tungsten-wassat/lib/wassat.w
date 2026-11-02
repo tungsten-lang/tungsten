@@ -1534,6 +1534,7 @@ use portfolio
           arm_tag = "exact small-circuit arm" if rr["circuit_won"] == true
           arm_tag = "checked resolution-cover arm" if rr["cover_won"] == true
           arm_tag = "keychart repair arm" if rr["keychart_won"] == true
+          arm_tag = "finite-domain walk arm" if rr["domain_won"] == true
           arm_tag = "sls frozen-fringe repair" if rr["sls_repair_won"] == true
           if pidx >= 0
             spec = race["pre"][pidx]

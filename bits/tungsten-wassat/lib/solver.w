@@ -1173,7 +1173,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @lucky_pending = true
     0
 
-  -> lucky_probe
+  -> lucky_probe(prop_budget = 0)
     return 0 unless @ok && @lucky_pending
     @lucky_pending = false
     return 0 unless @proof_mode == WASSAT_PROOF_NONE
@@ -1207,10 +1207,16 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       while v <= @nvars
         sphase[v] = @phase[v]
         v += 1
-    r = self.lucky_dive(0 - 1, 0)
-    r = self.lucky_dive(1, 0) if r == 0 && !wassat_stop_requested?(@stop_cell)
-    r = self.lucky_dive(0 - 1, 1) if r == 0 && !wassat_stop_requested?(@stop_cell)
-    r = self.lucky_dive(1, 1) if r == 0 && !wassat_stop_requested?(@stop_cell)
+    prop_start = @pstate[4]
+    prop_limit = prop_budget > 0 ? prop_start + prop_budget : 0
+    r = self.lucky_dive(0 - 1, 0, prop_limit)
+    r = self.lucky_dive(1, 0, prop_limit) if r == 0 && !wassat_stop_requested?(@stop_cell)
+    r = self.lucky_dive(0 - 1, 1, prop_limit) if r == 0 && !wassat_stop_requested?(@stop_cell)
+    r = self.lucky_dive(1, 1, prop_limit) if r == 0 && !wassat_stop_requested?(@stop_cell)
+    if tl != 0
+      wassat_prof_note("lucky work_props=[@pstate[4] - prop_start] prop_budget=[prop_budget] exhausted=[r == -2]")
+    # Work exhaustion only abandons a proposal, never proves a conflict.
+    r = 0 if r == -2
     if r != 1
       if sphase != nil
         v = 0
@@ -1228,8 +1234,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # One dive. `pol` is the polarity assumed for every free variable; a
   # non-zero `backward` walks the variables from @nvars down to 1 instead of
   # up. Returns 1 for a total assignment, -1 for root-level UNSAT, 0 for a
-  # dive that got stuck (the trail is returned to a propagated root).
-  -> lucky_dive(pol, backward)
+  # dive that got stuck, or -2 for work exhaustion. Exhaustion unwinds to
+  # root and queues its units again before ordinary search resumes.
+  -> lucky_dive(pol, backward, prop_limit = 0)
+    return -1 if @formula_unsat
     return 0 if wassat_stop_requested?(@stop_cell)
     @lucky_cancel_rebuild = true
     # backjump(0) declares the whole remaining trail propagated (it sets
@@ -1246,6 +1254,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     stuck = 0
     i = 0
     while i < @nvars && stuck == 0 && !wassat_stop_requested?(@stop_cell)
+      # Check only between completed propagation calls: watch lists and all
+      # conflict/failed-literal conclusions are consistent at this point.
+      # Retain a completed assignment even if its last propagation overshot.
+      if prop_limit > 0 && @pstate[4] >= prop_limit && @tsize < @nvars
+        self.backjump(0)
+        @qhead = 0
+        @lucky_cancel_rebuild = false
+        return -2
       v = backward == 0 ? i + 1 : @nvars - i
       if @assign[v] == 0
         l = pol > 0 ? v : 0 - v
@@ -3064,6 +3080,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # ---- search -------------------------------------------------------------
 
   -> solve_loop(stop_conflicts)
+    # A lucky dive or root-level pass can consume the conflict before this
+    # entry point runs. Repropagating that exhausted queue is not a new query.
+    if @formula_unsat
+      self.log_clause([]) unless @refuted
+      return -1
     result = 0                       # 0 unknown, 1 sat, -1 unsat
     limited = false
     # Each saved phase array agrees with its own trail prefix. Independent
@@ -4452,6 +4473,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> solve_query(max_conflicts)
     raise "conflict budget must be non-negative, got [max_conflicts]" if max_conflicts < 0
+    # Formula-level refutations outrank any cached per-query result.
+    if @formula_unsat
+      self.log_clause([]) unless @refuted
+      @terminal_status = -1
     return self.result_for(@terminal_status) unless @terminal_status == 0
     if @pending_simplify >= 0
       cong = @pending_simplify

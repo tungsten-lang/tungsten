@@ -31,4 +31,36 @@ describe "Wassat exact color-complement symmetry guard" ->
   it "rejects a scope lacking its complementary color" ->
     expect(guard_scopes([[0, 0, 1, 2], [1, 0, 1, 2], [1, 1, 3, 5]])).to eq(false)
 
+describe "Arithmetic color width filter" ->
+  it "rejects unequal color width sets before exact scope matching" ->
+    offsets = i64[3]
+    offsets[1] = 3
+    offsets[2] = 7
+    colors = i8[2]
+    colors[1] = 1
+    expect(wassat_arith_widths_match(offsets, colors, 2, 0)).to eq(0)
+
+  it "does not confuse duplicate multiplicity with missing complementary scopes" ->
+    offsets = i64[4]
+    offsets[1] = 3
+    offsets[2] = 6
+    offsets[3] = 9
+    colors = i8[3]
+    colors[2] = 1
+    elems = i64[9]
+    i = 0
+    while i < 9
+      elems[i] = i % 3
+      i += 1
+    expect(wassat_arith_widths_match(offsets, colors, 3, 0)).to eq(1)
+    expect(wassat_arith_color_symmetric?(offsets, elems, colors, 3)).to eq(true)
+    elems[8] = 4
+    expect(wassat_arith_color_symmetric?(offsets, elems, colors, 3)).to eq(false)
+
+  it "leaves unsupported widths to the exact checker without a masked shift" ->
+    offsets = i64[2]
+    offsets[1] = 63
+    colors = i8[1]
+    expect(wassat_arith_widths_match(offsets, colors, 1, 0)).to eq(1)
+
 spec_summary

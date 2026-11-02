@@ -145,6 +145,8 @@ test: $(BIN)
 		diff -u tests/wire_fixed_records.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/content_temp_map.w | \
 		diff -u tests/content_temp_map.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/keyword_hash_argument.w | \
+		diff -u tests/keyword_hash_argument.expected -
 	@test "$$(TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 \
 		$(BIN) --dump-ast tests/embedded_ll_vector_const.w | grep -o ':node => :fn_def' | wc -l | tr -d ' ')" = 1
 	@test "$$(TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 \

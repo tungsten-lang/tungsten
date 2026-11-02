@@ -1273,10 +1273,16 @@ static int compile_hash(TcAstValue node, TcChunk *chunk, TcError *err) {
       tc_error_set(err, "hash entry malformed");
       return 0;
     }
-    if (!compile_expr(pair.as.array->items[0], chunk, err) ||
-        !compile_expr(pair.as.array->items[1], chunk, err)) {
+    /* Canonical keyword hashes carry raw symbol keys; ordinary hash keys
+     * remain expression nodes. Preserve the key as a literal symbol. */
+    TcAstValue key = pair.as.array->items[0];
+    if (key.kind == TC_AST_SYMBOL) {
+      int cid = emit_symbol_const(chunk, key.as.string.bytes, key.as.string.len, err);
+      if (cid < 0 || !tc_emit_op_u32(chunk, TC_OP_CONST, (uint32_t)cid, err)) return 0;
+    } else if (!compile_expr(key, chunk, err)) {
       return 0;
     }
+    if (!compile_expr(pair.as.array->items[1], chunk, err)) return 0;
   }
   return tc_emit_op_u32(chunk, TC_OP_HASH, (uint32_t)entries->as.array->count, err);
 }

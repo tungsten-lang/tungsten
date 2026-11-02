@@ -5971,20 +5971,97 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   hist[66] += 2 * ncl
   0
 
+# Fixed-capacity compaction reclaims both body and clause-index space.
+# All destinations precede their sources, so both moves share one scan.
+-> wassat_reduce_compact_fixed(cm, alive, ar, lbd, used, gid, rsn, state, ncl, nv) (i64[] i8[] i64[] i64[] i64[] i64[] i32[] i64[] i64 i64) i64
+  copied = 0
+  mapped = 0
+  wp = 0
+  nn = 0
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1
+      st = cm[2 * ci]
+      n = cm[2 * ci + 1]
+      nci = nn
+      gid[ci] = nn
+      nn += 1
+      # the header travels with the body; its packed (index, length)
+      # is position-independent, so a plain copy is correct
+      if st != wp + 1
+        copied += n + 1
+        ar[wp] = ar[st - 1]
+        k = 0
+        while k < n
+          ar[wp + 1 + k] = ar[st + k]
+          k += 1
+      # Both destinations precede their sources. Compact metadata together
+      # with the body, avoiding two more full-database passes. The original
+      # prefix normally keeps its indices: leave those tables and headers
+      # alone instead of rewriting millions of unchanged records.
+      if nci != ci
+        cm[2 * nci] = wp + 1
+        cm[2 * nci + 1] = n
+        alive[nci] = 1
+        lbd[nci] = lbd[ci]
+        used[nci] = used[ci]
+        wassat_hdr_put(ar, wp, nci, n)
+      elsif st != wp + 1
+        cm[2 * ci] = wp + 1
+      wp += n + 1
+    else
+      cm[2 * ci + 1] = 0
+      gid[ci] = -1
+    ci += 1
+  state[64] = wp
+  state[65] = nn
+  state[66] += ncl
+  state[67] += copied
+
+  # Under FIXED capacities the clause INDEX space is recycled too.
+  # Without this it is monotonic — one slot burned per conflict, never
+  # returned — so a frozen arm retires after @ccap conflicts however much
+  # arena it has left (uuf250-01 retires at ~10k against the ~135k
+  # conflicts it needs). Renumbering is sound because an index is only a
+  # name: the per-clause tables are compacted in the same order
+  # (dest <= src), the arena header's packed (index, length) is rewritten
+  # in place, and the two structures that address clauses BY INDEX —
+  # rsn and the binary implication lists — are remapped and rebuilt.
+  # Watch entries carry arena OFFSETS and are repacked below anyway.
+  #
+  # gid doubles as the old->new map: it holds certificate ids, which
+  # PROOF_NONE neither assigns meaning to nor reads, so this path may
+  # reuse it as scratch.
+  state[68] += nn
+  # A reason names its clause by index. A reason clause that did not
+  # survive becomes a root fact: only level-zero reasons can be live
+  # here (reduce_db always runs from a level-zero trail), and neither
+  # analysis nor minimisation ever dereferences one.
+  v = 1
+  while v <= nv
+    r = rsn[v]
+    if r >= 0
+      rsn[v] = gid[r]
+      mapped += 1
+    v += 1
+  state[69] += mapped
+  0
+
 # Proof-free, root-level compaction. The caller repacks watches and, when
 # remap is enabled, binary indices after this indivisible mutation finishes.
 # state reuses the histogram slab: outputs 64/65, cumulative work 66..69.
 -> wassat_reduce_compact(cm, alive, ar, lbd, used, gid, rsn, state, ncl, nv, remap) (i64[] i8[] i64[] i64[] i64[] i64[] i32[] i64[] i64 i64 i64) i64
+  if remap == 1
+    return wassat_reduce_compact_fixed(cm, alive, ar, lbd, used, gid, rsn, state, ncl, nv)
+  # Growing-capacity arms keep their clause indices. Preserve their single
+  # body scan without adding per-clause remapping branches or table writes.
   copied = 0
-  mapped = 0
   wp = 0
   ci = 0
   while ci < ncl
     if alive[ci] == 1
       st = cm[2 * ci]
       n = cm[2 * ci + 1]
-      # the header travels with the body; its packed (index, length)
-      # is position-independent, so a plain copy is correct
       if st != wp + 1
         copied += n + 1
         ar[wp] = ar[st - 1]
@@ -6001,59 +6078,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   state[65] = ncl
   state[66] += ncl
   state[67] += copied
-
-  # Under FIXED capacities the clause INDEX space is recycled too.
-  # Without this it is monotonic — one slot burned per conflict, never
-  # returned — so a frozen arm retires after @ccap conflicts however much
-  # arena it has left (uuf250-01 retires at ~10k against the ~135k
-  # conflicts it needs). Renumbering is sound because an index is only a
-  # name: the per-clause tables are compacted in the same order
-  # (dest <= src), the arena header's packed (index, length) is rewritten
-  # in place, and the two structures that address clauses BY INDEX —
-  # rsn and the binary implication lists — are remapped and rebuilt.
-  # Watch entries carry arena OFFSETS and are repacked below anyway.
-  #
-  # gid doubles as the old->new map: it holds certificate ids, which
-  # PROOF_NONE neither assigns meaning to nor reads, so inside this
-  # branch it is free scratch.
-  if remap == 1
-    nn = 0
-    ci = 0
-    while ci < ncl
-      if alive[ci] == 1
-        gid[ci] = nn
-        nn += 1
-      else
-        gid[ci] = -1
-      ci += 1
-    ci = 0
-    while ci < ncl
-      nci = gid[ci]
-      if nci >= 0
-        st = cm[2 * ci]
-        n = cm[2 * ci + 1]
-        cm[2 * nci] = st
-        cm[2 * nci + 1] = n
-        alive[nci] = 1
-        lbd[nci] = lbd[ci]
-        used[nci] = used[ci]
-        wassat_hdr_put(ar, st - 1, nci, n)
-      ci += 1
-    state[65] = nn
-    state[66] += 2 * ncl
-    state[68] += nn
-    # A reason names its clause by index. A reason clause that did not
-    # survive becomes a root fact: only level-zero reasons can be live
-    # here (reduce_db always runs from a level-zero trail), and neither
-    # analysis nor minimisation ever dereferences one.
-    v = 1
-    while v <= nv
-      r = rsn[v]
-      if r >= 0
-        rsn[v] = gid[r]
-        mapped += 1
-      v += 1
-  state[69] += mapped
   0
 
 -> wassat_zero_i64(a, n) (i64[] i64)

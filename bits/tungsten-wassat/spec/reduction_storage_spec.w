@@ -57,7 +57,7 @@ describe "Wassat reduction storage" ->
     expect([f[5][0], f[5][1], f[5][2], f[5][3]]).to eq([-1, 0, -1, 1])
     expect([f[6][1], f[6][2], f[6][3], f[6][4]]).to eq([0, 1, -1, -1])
     expect([f[3][0], f[3][1], f[4][0], f[4][1]]).to eq([4, 8, 41, 43])
-    expect([f[7][64], f[7][65], f[7][66], f[7][67], f[7][68], f[7][69]]).to eq([8, 2, 12, 8, 2, 3])
+    expect([f[7][64], f[7][65], f[7][66], f[7][67], f[7][68], f[7][69]]).to eq([8, 2, 4, 8, 2, 3])
 
   it "keeps clause indices and reasons when the map is a one-word sentinel" ->
     f = reduction_storage_fixture(false)
@@ -66,6 +66,44 @@ describe "Wassat reduction storage" ->
     expect([f[2][0], f[2][5]]).to eq([4294967300, 12884901890])
     expect([f[6][1], f[6][2], f[6][3], f[6][4], f[5][0]]).to eq([1, 3, 2, -1, 77])
     expect([f[7][64], f[7][65], f[7][66], f[7][67], f[7][68], f[7][69]]).to eq([8, 4, 4, 8, 0, 0])
+
+  it "leaves a surviving prefix in place and moves only the following bodies" ->
+    f = reduction_storage_fixture(true)
+    f[1][0] = 1
+    wassat_reduce_compact(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], 4, 4, 1)
+    expect([f[0][0], f[0][1], f[0][2], f[0][3], f[0][4], f[0][5]]).to eq([1, 1, 3, 4, 8, 2])
+    expect([f[2][0], f[2][1], f[2][2], f[2][7], f[2][8], f[2][9]]).to eq([1, -1, 4294967300, 8589934594, -3, 4])
+    expect([f[5][0], f[5][1], f[5][2], f[5][3]]).to eq([0, 1, -1, 2])
+    expect([f[7][64], f[7][65], f[7][66], f[7][67]]).to eq([10, 3, 4, 3])
+
+  it "can compact the already renumbered database again" ->
+    f = reduction_storage_fixture(true)
+    wassat_reduce_compact(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], 4, 4, 1)
+    f[1][0] = 0
+    wassat_reduce_compact(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], 2, 4, 1)
+    expect([f[0][0], f[0][1], f[2][0], f[2][1], f[2][2]]).to eq([1, 2, 2, -3, 4])
+    expect([f[3][0], f[4][0], f[6][1], f[6][2], f[6][3], f[6][4]]).to eq([8, 43, -1, 0, -1, -1])
+    expect([f[7][64], f[7][65], f[7][66], f[7][67], f[7][68], f[7][69]]).to eq([3, 1, 6, 11, 3, 5])
+
+  it "preserves all live data when every index maps to itself" ->
+    f = reduction_storage_fixture(true)
+    f[1][0] = 1
+    f[1][2] = 1
+    wassat_reduce_compact(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], 4, 4, 1)
+    expect([f[0][0], f[0][2], f[0][4], f[0][6]]).to eq([1, 3, 8, 10])
+    expect([f[2][0], f[2][2], f[2][7], f[2][9]]).to eq([1, 4294967300, 8589934593, 12884901890])
+    expect([f[5][0], f[5][1], f[5][2], f[5][3]]).to eq([0, 1, 2, 3])
+    expect([f[6][1], f[6][2], f[6][3], f[6][4]]).to eq([1, 3, 2, -1])
+    expect([f[7][64], f[7][65], f[7][66], f[7][67]]).to eq([12, 4, 4, 0])
+
+  it "turns reasons into root facts when every clause is removed" ->
+    f = reduction_storage_fixture(true)
+    f[1][1] = 0
+    f[1][3] = 0
+    wassat_reduce_compact(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], 4, 4, 1)
+    expect([f[0][1], f[0][3], f[0][5], f[0][7]]).to eq([0, 0, 0, 0])
+    expect([f[6][1], f[6][2], f[6][3], f[6][4]]).to eq([-1, -1, -1, -1])
+    expect([f[7][64], f[7][65], f[7][66], f[7][67], f[7][68], f[7][69]]).to eq([0, 0, 4, 0, 0, 3])
 
   it "protects originals, binary clauses, low glue and recently used tier two" ->
     cm = i64[16]

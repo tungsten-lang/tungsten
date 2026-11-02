@@ -33,6 +33,7 @@ use projected_sls
 use permutation_walk
 use cyclic_decode
 use nae_decode
+use capacity_clique
 use ../../../core/bit_ops
 
 WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
@@ -1892,6 +1893,14 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, nae_extra)
+  capacity_plan = nil
+  if art["raw"] == true && cycle_plan == nil
+    capacity_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
+    capacity_extra += nae_plan["scratch"] if nae_plan != nil
+    capacity_plan = wassat_capacity_plan(formula,
+      pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1),
+      cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
+      sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, capacity_extra)
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -1906,6 +1915,8 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   cap += 1 if cycle_plan != nil
   nae_index = nae_plan == nil ? -1 : cap
   cap += 1 if nae_plan != nil
+  capacity_index = capacity_plan == nil ? -1 : cap
+  cap += 1 if capacity_plan != nil
   stop = i64[4]
   res = i64[cap * (nv + 8)]
   tel = i64[cap * WASSAT_TEL_STRIDE]
@@ -2017,6 +2028,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     "domain_index": domain_index, "perm_plan": perm_plan, "perm_index": perm_index,
     "cycle_plan": cycle_plan, "cycle_index": cycle_index,
     "nae_plan": nae_plan, "nae_index": nae_index,
+    "capacity_plan": capacity_plan, "capacity_index": capacity_index,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
     "credit": credit, "offsets": offsets, "sls": [], "prune_info": prune_info,
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
@@ -2529,6 +2541,11 @@ WASSAT_AXIS_SLOTS = 10
   nae_idx = race["nae_index"]
   nae_base = nae_idx * (nv + 8)
   nae_handle = nil
+  capacity_plan = race["capacity_plan"]
+  capacity_plan = nil if budget > 0
+  capacity_idx = race["capacity_index"]
+  capacity_base = capacity_idx * (nv + 8)
+  capacity_handle = nil
   if keychart_plan != nil && conflict_budget != nil
     keychart_plan["solver"].set_shared_conflict_budget(conflict_budget, budget, keychart_idx + 1)
   round_ms = wassat_race_round_ms
@@ -2602,6 +2619,8 @@ WASSAT_AXIS_SLOTS = 10
     cycle_handle = wassat_cycle_start(formula, cycle_plan, stop, res, cycle_base)
   if nae_plan != nil
     nae_handle = wassat_nae_start(formula, nae_plan, stop, res, nae_base)
+  if capacity_plan != nil
+    capacity_handle = wassat_capacity_start(formula, capacity_plan, stop, res, capacity_base)
   round = 0
   running = 1
   while running == 1
@@ -2684,6 +2703,7 @@ WASSAT_AXIS_SLOTS = 10
       decisive_now = 1 if perm_plan != nil && ccall("__w_arr_load_acq", res, perm_base) == 1
       decisive_now = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) == 1
       decisive_now = 1 if nae_plan != nil && ccall("__w_arr_load_acq", res, nae_base) != 0
+      decisive_now = 1 if capacity_plan != nil && ccall("__w_arr_load_acq", res, capacity_base) != 0
       cdcl_can_continue = 0
       if decisive_now == 0 && round1 > 0
         a = 0
@@ -2728,6 +2748,7 @@ WASSAT_AXIS_SLOTS = 10
       decided = 1 if perm_plan != nil && ccall("__w_arr_load_acq", res, perm_base) == 1
       decided = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) == 1
       decided = 1 if nae_plan != nil && ccall("__w_arr_load_acq", res, nae_base) != 0
+      decided = 1 if capacity_plan != nil && ccall("__w_arr_load_acq", res, capacity_base) != 0
       if decided == 0
         # Score the round every arm just finished, and retire the arms that
         # cannot continue: retired by the solver, stuck (no conflict advanced,
@@ -2878,6 +2899,9 @@ WASSAT_AXIS_SLOTS = 10
   if cycle_handle != nil
     z = wassat_stop_cancel(stop)
     z = cycle_handle.join
+  if capacity_handle != nil
+    z = wassat_stop_cancel(stop)
+    z = capacity_handle.join
   if nae_handle != nil
     z = wassat_stop_cancel(stop)
     z = nae_handle.join
@@ -2949,6 +2973,12 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[nae_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       wassat_nae_profile(nae_plan, res[nae_base])
+    if capacity_plan != nil
+      cm = capacity_plan["meta"]
+      ended = cm[18]
+      last_ms = ended if ended > last_ms
+      answer_ms = ended if res[capacity_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+      wassat_capacity_profile(capacity_plan, res[capacity_base])
     if answer_ms > 0
       wassat_prof_note("race.stop answer_to_last_arm_ms=[last_ms - answer_ms]")
   a = 0
@@ -2986,6 +3016,9 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && cover_plan != nil && res[cover_base] != 0
     status = res[cover_base]
     winner = cover_idx
+  if status == 0 && capacity_plan != nil && res[capacity_base] == -1
+    status = -1
+    winner = capacity_idx
   if status == 0 && nae_plan != nil && res[nae_base] != 0
     status = res[nae_base]
     winner = nae_idx
@@ -3014,7 +3047,7 @@ WASSAT_AXIS_SLOTS = 10
     conflicts = ccall("__w_arr_load_acq", conflict_budget, 0)
   if winner >= 0
     base = winner * (nv + 8)
-    if winner != sls_idx && winner != circuit_idx && winner != keychart_idx && winner != cover_idx && winner != domain_idx && winner != perm_idx && winner != cycle_idx && winner != nae_idx && conflict_budget == nil
+    if winner != sls_idx && winner != circuit_idx && winner != keychart_idx && winner != cover_idx && winner != domain_idx && winner != perm_idx && winner != cycle_idx && winner != nae_idx && winner != capacity_idx && conflict_budget == nil
       conflicts += res[base + nv + 4] - offsets[winner]
     if status == 1
       v = 1
@@ -3035,6 +3068,7 @@ WASSAT_AXIS_SLOTS = 10
     "permutation_won": perm_plan != nil && winner == perm_idx,
     "cyclic_won": cycle_plan != nil && winner == cycle_idx,
     "nae_won": nae_plan != nil && winner == nae_idx,
+    "capacity_won": capacity_plan != nil && winner == capacity_idx,
     "keychart_conflicts": keychart_conflicts,
     "sls_won": winner == sls_idx,
     "sls_repair_won": winner == sls_idx && res[sls_base + nv + 1] == 1,

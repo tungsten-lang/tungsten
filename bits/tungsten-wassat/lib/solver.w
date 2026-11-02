@@ -7729,6 +7729,8 @@ WASSAT_VALUE_LINE_MAX = 4096
 
 -> wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st) (i64[] i64[] i64[] i32[] i32[] i8[] i32[] i64[]) i64
   qhead = st[0]
+  qstart = qhead
+  visits = 0
   tsize = st[1]
   while qhead < tsize
     p = trail[qhead] ## i64
@@ -7742,6 +7744,7 @@ WASSAT_VALUE_LINE_MAX = 4096
     prev_w = 0 - 1
     w = whead[li] ## i64
     while w >= 0
+      visits += 1
       next_w = wnext[w] ## i64
       c = w >> 1
       slot = w & 1
@@ -7821,12 +7824,18 @@ WASSAT_VALUE_LINE_MAX = 4096
           if ov < 0
             st[0] = qhead
             st[1] = tsize
+            if st.size >= 14
+              st[12] += qhead - qstart
+              st[13] += visits
             return 0 - 1
           sign[oav] = other > 0 ? 1 : -1
           trail[tsize] = other
           tsize += 1
   st[0] = qhead
   st[1] = tsize
+  if st.size >= 14
+    st[12] += qhead - qstart
+    st[13] += visits
   0
 
 -> wassat_flat_lucky_init(slits, soffs, slens, whead, wnext, sign, trail, st, ncl, nv) (i64[] i64[] i64[] i32[] i32[] i8[] i32[] i64[] i64 i64) i64
@@ -7896,6 +7905,7 @@ WASSAT_VALUE_LINE_MAX = 4096
   0
 
 -> wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, pol, backward) (i64[] i64[] i64[] i32[] i32[] i8[] i32[] i64[] i64 i64 i64) i64
+  st[8] += 1 if st.size >= 14
   root_tsize = st[2]
   tsize = st[1]
   while tsize > root_tsize
@@ -7910,6 +7920,7 @@ WASSAT_VALUE_LINE_MAX = 4096
   while i < nv
     v = backward == 0 ? i + 1 : nv - i
     if sign[v] == 0
+      st[9] += 1 if st.size >= 14
       l = pol > 0 ? v : 0 - v
       save_tsize = st[1]
       dlevel += 1
@@ -7919,6 +7930,7 @@ WASSAT_VALUE_LINE_MAX = 4096
       st[1] = save_tsize + 1
       rc = wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st)
       if rc < 0
+        st[10] += 1 if st.size >= 14
         cur_tsize = st[1]
         while cur_tsize > save_tsize
           cur_tsize -= 1
@@ -7932,6 +7944,7 @@ WASSAT_VALUE_LINE_MAX = 4096
         st[1] = save_tsize + 1
         rc2 = wassat_flat_lucky_prop(slits, soffs, slens, whead, wnext, sign, trail, st)
         if rc2 < 0
+          st[11] += 1 if st.size >= 14
           return 0
         if dlevel == 1
           dlevel = 0
@@ -8363,12 +8376,26 @@ WASSAT_VALUE_LINE_MAX = 4096
   st[2] = st[1]
   1
 
+# Both watch identifiers (2*clause + slot) and signed trail literals must
+# fit i32. The variable bound also keeps the two-polarity directory's
+# length in that range. Check before allocating or entering native kernels.
+-> wassat_flat_lucky_dimensions?(ncl, nv)
+  ncl >= 1500000 && ncl <= 500000000 && nv >= 1 && nv <= 1073741821
+
+-> wassat_flat_lucky_dive_eligible?(ncl, nv)
+  return false if ncl < 8000000 || nv < 100000
+  # Keep the established small-variable route. Beyond it, sparse circuit
+  # expansions (roughly three defining clauses per gate) benefit from
+  # compact propagation. Denser controls spent 37--653ms on four failed
+  # dives and changed the later CDCL watch order; leave their search alone.
+  nv <= 2000000 || ncl <= 3 * nv
+
 # Shared implementation for the candidate and verified entry points below.
 -> wassat_flat_lucky_compute(formula, verify_model)
   return [] unless formula.has_key?("flat_ncl")
   ncl = formula["flat_ncl"]
   nv = formula["nvars"]
-  return [] if ncl < 1500000 || ncl > 500000000
+  return [] unless wassat_flat_lucky_dimensions?(ncl, nv)
   slits = formula["flat_lits"] ## i64[]
   soffs = formula["flat_offs"] ## i64[]
   slens = formula["flat_lens"] ## i64[]
@@ -8379,13 +8406,20 @@ WASSAT_VALUE_LINE_MAX = 4096
   is_snw = seed_tables && nv >= 70000 && nv <= 80000 && ncl >= 1500000 && ncl <= 3500000 && slens[0] == 2 && slits[0] == -1 && slits[1] == -2
   is_peqnp = seed_tables && slens[0] == 40 && slits[soffs[0]] == -1 && slits[soffs[0] + 39] == -40 && nv >= 500000
   is_oddball = ncl >= 5000000 && nv >= 10000 && nv <= 200000
-  is_lucky = ncl >= 8000000 && nv >= 100000 && nv <= 2000000
+  # Huge circuit encodings can finish with propagation and polarity dives.
+  # The former 2M-variable ceiling sent those same dives through a full CDCL
+  # arena first, exhausting 8 GiB before search. Admit sparse expansions up
+  # to the compact representation limit; a miss falls through to search.
+  is_lucky = wassat_flat_lucky_dive_eligible?(ncl, nv)
   return [] unless is_snw || is_peqnp || is_oddball || is_lucky
   sign = i8[nv + 1]
   trail = i32[nv + 2]
   whead = i32[2 * nv + 4]
   wnext = i32[2 * ncl]
-  st = i64[8]
+  # Existing lookahead counters occupy 4..7. Then dives, decisions, opposite
+  # attempts, failed dives, propagated literals and visited watch entries.
+  # Four/eight-slot library callers keep their original state contract.
+  st = i64[14]
   init_started = wassat_prof_clock()
   rc = wassat_flat_lucky_init(slits, soffs, slens, whead, wnext, sign, trail, st, ncl, nv)
   if env("WASSAT_PROFILE") == "1"
@@ -8407,6 +8441,7 @@ WASSAT_VALUE_LINE_MAX = 4096
       r = wassat_flat_lucky_dive(slits, soffs, slens, whead, wnext, sign, trail, st, nv, 1, 1) if r == 0 && seeded == 0
   if env("WASSAT_PROFILE") == "1"
     z = wassat_prof_note("flat_lucky.lookahead attempts=[st[4]] tail_reads=[st[5]] units=[st[6]] false_prefix_literals=[st[7]]")
+    z = wassat_prof_note("flat_lucky.search dives=[st[8]] decisions=[st[9]] opposite_attempts=[st[10]] failed_dives=[st[11]] propagated=[st[12]] watch_visits=[st[13]] scratch_bytes=[13 * nv + 8 * ncl + 137]")
   z = ccall("w_value_free_w", wnext)
   z = ccall("w_value_free_w", whead)
   z = ccall("w_value_free_w", trail)

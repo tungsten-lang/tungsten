@@ -103,4 +103,31 @@ describe "Flat lucky replacement lookahead" ->
     expect(lucky_root_dive_check(a, -1, 0)).to eq([1, 1])
     expect(lucky_root_dive_check(a, 1, 1)).to eq([1, 1])
 
+describe "Flat lucky large-input admission and work counters" ->
+  it "admits large circuits only within packed watch and trail bounds" ->
+    expect(wassat_flat_lucky_dimensions?(50408539, 18865943)).to eq(true)
+    expect(wassat_flat_lucky_dimensions?(1500000, 1)).to eq(true)
+    expect(wassat_flat_lucky_dimensions?(500000000, 1073741821)).to eq(true)
+    expect(wassat_flat_lucky_dimensions?(1499999, 18865943)).to eq(false)
+    expect(wassat_flat_lucky_dimensions?(500000001, 18865943)).to eq(false)
+    expect(wassat_flat_lucky_dimensions?(50408539, 0)).to eq(false)
+    expect(wassat_flat_lucky_dimensions?(50408539, 1073741822)).to eq(false)
+  it "extends the dive to sparse large encodings without adding dense misses" ->
+    expect(wassat_flat_lucky_dive_eligible?(8000000, 100000)).to eq(true)
+    expect(wassat_flat_lucky_dive_eligible?(500000000, 2000000)).to eq(true)
+    expect(wassat_flat_lucky_dive_eligible?(9000000, 3000000)).to eq(true)
+    expect(wassat_flat_lucky_dive_eligible?(9000001, 3000000)).to eq(false)
+    expect(wassat_flat_lucky_dive_eligible?(8000000, 99999)).to eq(false)
+    expect(wassat_flat_lucky_dive_eligible?(7999999, 3000000)).to eq(false)
+  it "counts a decision and its implied circuit values without search allocations" ->
+    a = lucky_root_fixture("p cnf 3 2\n1 2 0\n-2 3 0\n", 14)
+    expect(lucky_root_dive_check(a, -1, 0)).to eq([1, 1])
+    st = a[7]
+    expect([st[8], st[9], st[10], st[11], st[12], st[13]]).to eq([1, 1, 0, 0, 3, 2])
+  it "counts both failed polarities and declines to publish a model" ->
+    a = lucky_root_fixture("p cnf 2 4\n1 2 0\n1 -2 0\n-1 2 0\n-1 -2 0\n", 14)
+    expect(lucky_root_dive_check(a, -1, 0)).to eq([0, 0])
+    st = a[7]
+    expect([st[8], st[9], st[10], st[11], st[12], st[13]]).to eq([1, 1, 1, 1, 2, 4])
+
 spec_summary

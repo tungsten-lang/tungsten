@@ -374,6 +374,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # avoided reduce also skips a 200k-clause watch rebuild).
     @reduce_limit = @config.reduce_limit
     @reduce_step = @config.reduce_step
+    @reduce_floor = env("WASSAT_REDUCE_FLOOR") != "0"
     @auto_vivify = @config.use_vivification
     @vivify_phase = nil
     @vivify_phase = i8[nv + 1] if @auto_vivify
@@ -425,8 +426,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @asg_count = 0
     @asg_filter = false
     # Reduction scratch: 64 histogram buckets, two compaction outputs,
-    # then cumulative clause visits, copied words, remapped clauses/reasons.
-    @rhist = i64[70]             # reused by every reduction; no worker allocation
+    # then cumulative clause visits, copied words, remapped clauses/reasons,
+    # over-limit reductions, schedule adjustments and added learning headroom.
+    @rhist = i64[73]             # reused by every reduction; no worker allocation
     # Mid-search inprocessing schedule. WASSAT_INPROCESS pins a fixed
     # interval (0 = off); otherwise policy's shape-gated automatic schedule
     # decides the first round, and later rounds space out geometrically.
@@ -3372,7 +3374,20 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           self.backjump(0)
           self.reduce_db
           @reductions += 1
-          @reduce_limit += @reduce_step
+          next_limit = @reduce_limit + @reduce_step
+          @rhist[70] += 1 if @nlearned >= next_limit
+          if @reduce_floor
+            # Protected survivors can exceed the nominal limit. Reserve
+            # fresh learning headroom before another root-level rebuild,
+            # including reductions that delete only a handful of clauses.
+            headroom = @reduce_step
+            headroom = 128 if headroom < 128
+            adjusted = @nlearned + headroom
+            if next_limit < adjusted
+              @rhist[71] += 1
+              @rhist[72] += adjusted - next_limit
+              next_limit = adjusted
+          @reduce_limit = next_limit
           # INPROCESSING. Every remaining losing row has a comparable or
           # better conflict RATE than CaDiCaL and 4-40x the conflicts, and the
           # difference is that CaDiCaL keeps simplifying mid-search while this
@@ -4261,6 +4276,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> profile_counters(label)
     return 0 unless env("WASSAT_PROFILE") == "1"
     wassat_prof_note("[label].search conflicts=[@conflicts] decisions=[@decisions_made] propagated=[@pstate[4]] restarts=[@restart_count] reductions=[@reductions] learned_live=[@nlearned]")
+    wassat_prof_note("[label].reduce_schedule above_limit=[@rhist[70]] floor_adjustments=[@rhist[71]] added_headroom=[@rhist[72]] next_limit=[@reduce_limit]")
     phase_bytes = 3 * (@nvars + 1)
     phase_bytes += @nvars + 1 if @vivify_phase != nil
     phase_bytes += @nvars + 1 if @inp_phase != nil

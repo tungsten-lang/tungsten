@@ -710,3 +710,692 @@
 
   -> inspect
     to_s
+
+# Certified prime ideals of maximal Z-orders.
+#
+# A rational prime p is first checked against the Round 2 fixed-point
+# criterion.  The reduced finite algebra O/radical(pO) is then split into
+# finite fields by its primitive idempotents.  Each projection
+#
+#   O -> O/radical(pO) -> k_i
+#
+# is replayed on an order basis; its kernel is a maximal ideal above p.
+# Frobenius-lifted idempotents in O/pO give the local dimensions e_i f_i, so
+# residue degrees and ramification indices are certified together.
+
++ OrderResidueFieldMapCertificate
+  -> new(@residue_map)
+    @verified_cache = nil
+
+  ro :residue_map
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    return true if @verified_cache == true
+    if @residue_map.class_name != "OrderResidueFieldMap"
+      raise "residue-field-map certificate has the wrong subject"
+    residue = @residue_map.residue_algebra
+    if !residue.certificate.verified?
+      raise "residue-field map has an uncertified reduced algebra"
+    field = @residue_map.field
+    if field.class_name != "FiniteField"
+      raise "residue-field target is not a finite field"
+    if field.characteristic != residue.prime
+      raise "residue-field characteristic changed"
+    if field.degree != @residue_map.residue_degree
+      raise "residue-field degree changed"
+    found_idempotent = false
+    residue.primitive_idempotents.each -> (idempotent)
+      found_idempotent = true if residue.equal?(
+        idempotent, @residue_map.idempotent)
+    if !found_idempotent
+      raise "residue-field map uses a nonprimitive idempotent"
+    if !field.one?(@residue_map.image(
+         @residue_map.order.one))
+      raise "residue-field map does not preserve one"
+    if !field.zero?(@residue_map.image(
+         @residue_map.order.zero))
+      raise "residue-field map does not preserve zero"
+
+    order_basis = @residue_map.order.basis
+    images = []
+    order_basis.each -> (element)
+      images.push(@residue_map.image(element))
+    image_columns = []
+    images.each -> (image)
+      image_columns.push(field.element_coefficients(image))
+    image_rank = PrimeLinearAlgebra.rank_columns(
+      image_columns, residue.prime, field.degree)
+    if image_rank != field.degree
+      raise "residue-field map is not surjective"
+
+    i = 0
+    while i < order_basis.size
+      j = 0
+      while j < order_basis.size
+        source_sum = @residue_map.order.algebra.add(
+          order_basis[i], order_basis[j])
+        image_sum = field.add(images[i], images[j])
+        if !field.equal?(
+             @residue_map.image(source_sum), image_sum)
+          raise "residue-field map does not preserve addition"
+        source_product = @residue_map.order.algebra.multiply(
+          order_basis[i], order_basis[j])
+        image_product = field.multiply(images[i], images[j])
+        if !field.equal?(
+             @residue_map.image(source_product), image_product)
+          raise "residue-field map does not preserve multiplication"
+        j += 1
+      i += 1
+
+    kernel = @residue_map.kernel_lattice
+    if !@residue_map.order.lattice.contains_lattice?(kernel)
+      raise "residue-field kernel is not contained in its order"
+    kernel.basis_vectors.each -> (vector)
+      element = @residue_map.order.algebra.coerce(vector)
+      if !field.zero?(@residue_map.image(element))
+        raise "displayed residue-field kernel has a nonzero image"
+    index = @residue_map.order.lattice.index_from(kernel)
+    if index != field.order
+      raise "residue-field kernel has the wrong lattice index"
+    @verified_cache = true
+    true
+
+  -> certified?
+    verified?
+
+  -> to_s
+    text = "OrderResidueFieldMapCertificate(F_"
+    text + @residue_map.field.order.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ OrderResidueFieldMap
+  -> new(@residue_algebra, idempotent,
+         @generator_search_limit = 250_000)
+    if @residue_algebra.class_name != "OrderResidueAlgebra"
+      raise "residue-field map needs an OrderResidueAlgebra"
+    if @generator_search_limit < 1
+      raise "residue-field generator search limit must be positive"
+    @order = @residue_algebra.order
+    @prime = @residue_algebra.prime
+    @idempotent = @residue_algebra.normalize(idempotent)
+    primitive = false
+    @residue_algebra.primitive_idempotents.each -> (candidate)
+      primitive = true if @residue_algebra.equal?(
+        candidate, @idempotent)
+    if !primitive
+      raise "residue-field map needs a primitive idempotent"
+    @component_basis = @residue_algebra.component_basis(
+      @idempotent)
+    @residue_degree = @component_basis.size
+    if @residue_degree < 1
+      raise "residue-field component has zero degree"
+    @generator = nil
+    @minimal_polynomial = nil
+    @power_basis = []
+    choose_generator
+    @kernel_lattice_cache = nil
+    @certificate_cache = OrderResidueFieldMapCertificate.new(self)
+    if !@certificate_cache.verified?
+      raise "residue-field map failed certification"
+
+  ro :residue_algebra, :order, :prime
+
+  -> idempotent
+    out = []
+    @idempotent.each -> (entry)
+      out.push(entry)
+    out
+
+  ro :residue_degree, :field
+
+  -> generator
+    out = []
+    @generator.each -> (entry)
+      out.push(entry)
+    out
+
+  ro :minimal_polynomial
+
+  -> component_basis
+    out = []
+    @component_basis.each -> (source)
+      vector = []
+      source.each -> (entry)
+        vector.push(entry)
+      out.push(vector)
+    out
+
+  -> power_basis
+    out = []
+    @power_basis.each -> (source)
+      vector = []
+      source.each -> (entry)
+        vector.push(entry)
+      out.push(vector)
+    out
+
+  -> candidate_from_code(code)
+    remaining = code
+    value = @residue_algebra.zero
+    i = 0
+    while i < @component_basis.size
+      coefficient = remaining % @prime
+      remaining = remaining / @prime
+      if coefficient != 0
+        value = @residue_algebra.add(
+          value,
+          @residue_algebra.scale(
+            @component_basis[i], coefficient))
+      i += 1
+    value
+
+  -> choose_generator
+    if @residue_degree == 1
+      @generator = @idempotent
+      @field = FiniteField.new(@prime)
+      @power_basis = [@idempotent]
+      ring = PolynomialRing.new(
+        [:T], FiniteField.new(@prime))
+      @minimal_polynomial = ring.generator(0) - 1
+      return self
+
+    candidate_count = @prime ** @residue_degree
+    code = 1
+    attempts = 0
+    while code < candidate_count
+      attempts += 1
+      if attempts > @generator_search_limit
+        raise "residue-field generator search limit exceeded; prime decomposition unknown"
+      candidate = candidate_from_code(code)
+      polynomial = @residue_algebra.minimal_polynomial(
+        candidate, @idempotent)
+      if polynomial.degree == @residue_degree
+        @generator = candidate
+        @minimal_polynomial = polynomial
+        @field = FiniteField.new(
+          @prime, polynomial.coefficients)
+        break
+      code += 1
+    if @generator == nil
+      raise "residue-field generator search exhausted the component"
+
+    @power_basis = []
+    value = @idempotent
+    i = 0
+    while i < @residue_degree
+      @power_basis.push(value)
+      value = @residue_algebra.multiply(
+        value, @generator)
+      i += 1
+    rank = PrimeLinearAlgebra.rank_columns(
+      @power_basis, @prime,
+      @residue_algebra.dimension)
+    if rank != @residue_degree
+      raise "residue-field power basis is dependent"
+    self
+
+  -> component_coordinates(value)
+    projected = @residue_algebra.multiply(
+      @idempotent,
+      @residue_algebra.normalize(value))
+    PrimeLinearAlgebra.solve_columns(
+      @power_basis, projected, @prime)
+
+  -> image_order_coordinates(coordinates)
+    reduced = @residue_algebra.project_order_coordinates(
+      coordinates)
+    @field.encode_coefficients(
+      component_coordinates(reduced))
+
+  -> integer_order_coordinates(value)
+    element = @order.coerce(value)
+    coordinates = @order.coordinates(element)
+    out = []
+    coordinates.each -> (coefficient)
+      if coefficient.denominator != 1
+        raise "residue-field source is not integral in its order"
+      out.push(coefficient.numerator)
+    out
+
+  -> image(value)
+    image_order_coordinates(
+      integer_order_coordinates(value))
+
+  -> reduce(value)
+    image(value)
+
+  -> kernel_basis_vectors
+    columns = []
+    i = 0
+    while i < @order.rank
+      coordinates = PrimeLinearAlgebra.zero_vector(
+        @order.rank)
+      coordinates[i] = 1
+      image = image_order_coordinates(coordinates)
+      columns.push(@field.element_coefficients(image))
+      i += 1
+    matrix = PrimeLinearAlgebra.matrix_from_columns(
+      columns, @residue_degree, @prime)
+    kernel = PrimeLinearAlgebra.kernel_data(
+      matrix, @prime, @order.rank)
+    relative = []
+    kernel[0].each -> (vector)
+      lifted = []
+      vector.each -> (coefficient)
+        lifted.push(Rational.new(coefficient))
+      relative.push(lifted)
+    kernel[1].each -> (pivot)
+      vector = []
+      i = 0
+      while i < @order.rank
+        value = i == pivot ? @prime : 0
+        vector.push(Rational.new(value))
+        i += 1
+      relative.push(vector)
+    if relative.size != @order.rank
+      raise "residue-field kernel lattice has the wrong rank"
+    ExactRationalLinearAlgebra.compose_columns(
+      @order.basis_vectors, relative)
+
+  -> kernel_lattice
+    if @kernel_lattice_cache == nil
+      @kernel_lattice_cache = AlgebraOrderLattice.new(
+        @order.algebra, kernel_basis_vectors)
+    @kernel_lattice_cache
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+  -> to_s
+    text = "OrderResidueFieldMap(p=" + @prime.to_s
+    text + ", f=" + @residue_degree.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ DedekindLinearRootCertificate
+  -> new(@maximal_order_computation, @prime, root)
+    @root = PrimeLinearAlgebra.normalize(
+      root, @prime)
+    source = @maximal_order_computation.source
+    polynomial = source.algebra.defining_polynomial
+    finite_ring = PolynomialRing.new(
+      polynomial.ring.names,
+      FiniteField.new(@prime))
+    @polynomial = polynomial.change_ring(
+      finite_ring).monic
+    @factor = finite_ring.generator(0) - @root
+
+  ro :maximal_order_computation, :prime, :root, :polynomial, :factor
+
+  -> polynomial_zero_at_root?
+    coefficients = @polynomial.coefficients
+    value = 0
+    i = coefficients.size - 1
+    while i >= 0
+      value = PrimeLinearAlgebra.normalize(
+        value * @root + coefficients[i],
+        @prime)
+      i -= 1
+    value == 0
+
+  -> verified?
+    expected = "MaximalOrderComputation"
+    return false if @maximal_order_computation.class_name != expected
+    return false if !@maximal_order_computation.certificate.verified?
+    return false if @prime < 2 || !@prime.prime?
+    return false if @maximal_order_computation.index % @prime == 0
+    return false if @root < 0 || @root >= @prime
+    source = @maximal_order_computation.source
+    source_polynomial = source.algebra.defining_polynomial
+    finite_ring = PolynomialRing.new(
+      source_polynomial.ring.names,
+      FiniteField.new(@prime))
+    expected_polynomial = source_polynomial.change_ring(
+      finite_ring).monic
+    return false if !@polynomial.eql?(expected_polynomial)
+    return false if !@factor.eql?(
+      finite_ring.generator(0) - @root)
+    polynomial_zero_at_root?
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :exact_modular_root
+
+  -> kernel_checked?
+    true
+
+
++ DedekindOrderResidueFieldMapCertificate
+  -> new(@residue_map)
+    @verified_cache = nil
+
+  ro :residue_map
+
+  -> verified?
+    answer = false
+    begin
+      answer = verify!
+    rescue error
+      answer = false
+    answer
+
+  -> verify!
+    return true if @verified_cache == true
+    expected = "DedekindOrderResidueFieldMap"
+    return false if @residue_map.class_name != expected
+    computation = @residue_map.maximal_order_computation
+    return false if computation.class_name != "MaximalOrderComputation"
+    return false if !computation.certificate.verified?
+    return false if !@residue_map.order.same_order?(
+      computation.order)
+    return false if !@residue_map.source_order.same_order?(
+      computation.source)
+    prime = @residue_map.prime
+    return false if prime < 2 || !prime.prime?
+    return false if computation.index % prime == 0
+
+    factorization = @residue_map.factorization
+    root_certificate = @residue_map.root_certificate
+    polynomial = nil
+    if factorization != nil
+      return false if factorization.class_name != "PolynomialFactorization"
+      return false if !factorization.certificate.verified?
+      polynomial = factorization.polynomial
+    else
+      expected_root_class = "DedekindLinearRootCertificate"
+      return false if root_certificate.class_name != expected_root_class
+      return false if !root_certificate.verified?
+      return false if root_certificate.maximal_order_computation != computation
+      return false if root_certificate.prime != prime
+      polynomial = root_certificate.polynomial
+    return false if polynomial.ring.field.class_name != "FiniteField"
+    return false if !polynomial.ring.field.prime_field?
+    return false if polynomial.ring.field.characteristic != prime
+    expected_polynomial = computation.source.algebra.defining_polynomial
+    finite_ring = PolynomialRing.new(
+      expected_polynomial.ring.names,
+      FiniteField.new(prime))
+    expected_reduction = expected_polynomial.change_ring(
+      finite_ring).monic
+    return false if !polynomial.eql?(expected_reduction)
+
+    factor = @residue_map.factor
+    return false if factor.class_name != "Polynomial"
+    return false if factor.ring != polynomial.ring
+    return false if factor.degree < 1
+    return false if !factor.eql?(factor.monic)
+    if factorization != nil
+      found = false
+      factors = factorization.factors
+      i = 0
+      while i < factors.size
+        found = true if factors[i].eql?(factor)
+        i += 1
+      return false if !found
+    else
+      return false if !root_certificate.factor.eql?(factor)
+
+    field = @residue_map.field
+    return false if field.class_name != "FiniteField"
+    return false if field.characteristic != prime
+    return false if field.degree != factor.degree
+    if factor.degree == 1
+      return false if !field.prime_field?
+    else
+      return false if field.modulus.to_s != factor.coefficients.to_s
+
+    expected_images = @residue_map.recompute_basis_images
+    return false if expected_images.to_s != @residue_map.basis_images.to_s
+    order_basis = @residue_map.order.basis
+    images = @residue_map.basis_images
+    return false if images.size != order_basis.size
+    image_columns = []
+    i = 0
+    while i < images.size
+      image_columns.push(field.element_coefficients(
+        images[i]))
+      i += 1
+    image_rank = PrimeLinearAlgebra.rank_columns(
+      image_columns, prime, field.degree)
+    return false if image_rank != field.degree
+
+    i = 0
+    while i < order_basis.size
+      return false if !field.equal?(
+        @residue_map.image(order_basis[i]),
+        images[i])
+      j = 0
+      while j < order_basis.size
+        source_product = @residue_map.order.algebra.multiply(
+          order_basis[i], order_basis[j])
+        image_product = field.multiply(
+          images[i], images[j])
+        return false if !field.equal?(
+          @residue_map.image(source_product),
+          image_product)
+        j += 1
+      i += 1
+
+    kernel = @residue_map.kernel_lattice
+    return false if !@residue_map.order.lattice.contains_lattice?(
+      kernel)
+    kernel_vectors = kernel.basis_vectors
+    i = 0
+    while i < kernel_vectors.size
+      element = @residue_map.order.algebra.coerce(
+        kernel_vectors[i])
+      return false if !field.zero?(
+        @residue_map.image(element))
+      i += 1
+    index = @residue_map.order.lattice.index_from(kernel)
+    return false if index != field.order
+    @verified_cache = true
+    true
+
+  -> certified?
+    verified?
+
+  -> proof_kind
+    :exact_dedekind_residue_map
+
+  -> kernel_checked?
+    true
+
+  -> to_s
+    text = "DedekindOrderResidueFieldMapCertificate(F_"
+    text + @residue_map.field.order.to_s + ")"
+
+  -> inspect
+    to_s
+
+
++ DedekindOrderResidueFieldMap
+  -> new(@maximal_order_computation, @prime,
+         @factor, @factorization)
+    initialize_dedekind_residue_map(nil)
+
+  -> new(@maximal_order_computation, @prime,
+         @factor, @factorization,
+         root_certificate)
+    initialize_dedekind_residue_map(
+      root_certificate)
+
+  -> initialize_dedekind_residue_map(root_certificate)
+    expected = "MaximalOrderComputation"
+    if @maximal_order_computation.class_name != expected
+      raise "Dedekind residue map needs a maximal-order computation"
+    if !@maximal_order_computation.certificate.verified?
+      raise "Dedekind residue map needs a certified maximal order"
+    if @prime < 2 || !@prime.prime?
+      raise "Dedekind residue map needs a rational prime"
+    if @maximal_order_computation.index % @prime == 0
+      raise "Dedekind residue map needs index prime to p"
+    @order = @maximal_order_computation.order
+    @source_order = @maximal_order_computation.source
+    @root_certificate = root_certificate
+    if @factor.class_name != "Polynomial" || @factor.degree < 1
+      raise "Dedekind residue map needs a nonconstant factor"
+    if @factorization == nil && @root_certificate == nil
+      raise "Dedekind residue map needs a factor proof"
+    @residue_degree = @factor.degree
+    if @residue_degree == 1
+      @field = FiniteField.new(@prime)
+      if @root_certificate == nil
+        @root = @field.coerce(0 - @factor.coeff(0))
+      else
+        @root = @field.coerce(
+          @root_certificate.root)
+    else
+      @field = FiniteField.new(
+        @prime, @factor.coefficients)
+      @root = @field.generator
+    @basis_images = recompute_basis_images
+    @kernel_lattice_cache = nil
+    @certificate_cache = DedekindOrderResidueFieldMapCertificate.new(
+      self)
+    if !@certificate_cache.verified?
+      raise "Dedekind residue-field map failed certification"
+
+  ro :maximal_order_computation, :order, :source_order, :prime, :factor, :factorization
+  ro :root_certificate, :residue_degree, :field, :root
+
+  -> rational_mod_prime(value)
+    rational = Rational.coerce(value)
+    numerator = PrimeLinearAlgebra.normalize(
+      rational.numerator, @prime)
+    denominator = PrimeLinearAlgebra.normalize(
+      rational.denominator, @prime)
+    if denominator == 0
+      raise "order basis denominator is not invertible modulo p"
+    inverse = PrimeLinearAlgebra.inverse(
+      denominator, @prime)
+    @field.coerce(numerator * inverse)
+
+  -> evaluate_power_coordinates(coordinates)
+    value = @field.zero
+    power = @field.one
+    i = 0
+    while i < coordinates.size
+      coefficient = rational_mod_prime(
+        coordinates[i])
+      if !@field.zero?(coefficient)
+        value = @field.add(
+          value,
+          @field.multiply(coefficient, power))
+      power = @field.multiply(power, @root)
+      i += 1
+    value
+
+  -> recompute_basis_images
+    out = []
+    @order.basis_vectors.each -> (vector)
+      out.push(evaluate_power_coordinates(vector))
+    out
+
+  -> basis_images
+    out = []
+    @basis_images.each -> (image)
+      out.push(image)
+    out
+
+  -> image_order_coordinates(coordinates)
+    if coordinates.class_name != "Array"
+      raise "residue-field order coordinates must be an Array"
+    if coordinates.size != @order.rank
+      raise "residue-field order coordinates have the wrong dimension"
+    value = @field.zero
+    i = 0
+    while i < coordinates.size
+      coefficient = @field.coerce(coordinates[i])
+      if !@field.zero?(coefficient)
+        term = @field.multiply(
+          coefficient, @basis_images[i])
+        value = @field.add(value, term)
+      i += 1
+    value
+
+  -> integer_order_coordinates(value)
+    element = @order.coerce(value)
+    coordinates = @order.coordinates(element)
+    out = []
+    coordinates.each -> (coefficient)
+      if coefficient.denominator != 1
+        raise "residue-field source is not integral in its order"
+      out.push(coefficient.numerator)
+    out
+
+  -> image(value)
+    image_order_coordinates(
+      integer_order_coordinates(value))
+
+  -> reduce(value)
+    image(value)
+
+  -> kernel_basis_vectors
+    columns = []
+    i = 0
+    while i < @order.rank
+      columns.push(@field.element_coefficients(
+        @basis_images[i]))
+      i += 1
+    matrix = PrimeLinearAlgebra.matrix_from_columns(
+      columns, @residue_degree, @prime)
+    kernel = PrimeLinearAlgebra.kernel_data(
+      matrix, @prime, @order.rank)
+    relative = []
+    kernel[0].each -> (vector)
+      lifted = []
+      vector.each -> (coefficient)
+        lifted.push(Rational.new(coefficient))
+      relative.push(lifted)
+    kernel[1].each -> (pivot)
+      vector = []
+      i = 0
+      while i < @order.rank
+        value = i == pivot ? @prime : 0
+        vector.push(Rational.new(value))
+        i += 1
+      relative.push(vector)
+    if relative.size != @order.rank
+      raise "residue-field kernel lattice has the wrong rank"
+    ExactRationalLinearAlgebra.compose_columns(
+      @order.basis_vectors, relative)
+
+  -> kernel_lattice
+    if @kernel_lattice_cache == nil
+      @kernel_lattice_cache = AlgebraOrderLattice.new(
+        @order.algebra, kernel_basis_vectors)
+    @kernel_lattice_cache
+
+  -> certificate
+    @certificate_cache
+
+  -> certified?
+    certificate.verified?
+
+  -> to_s
+    text = "DedekindOrderResidueFieldMap(p=" + @prime.to_s
+    text + ", f=" + @residue_degree.to_s + ")"
+
+  -> inspect
+    to_s
+
+

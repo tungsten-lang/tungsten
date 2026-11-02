@@ -1,3 +1,5 @@
+use algebra/smith_normal_form
+
 # Chain complexes of free abelian groups and their integral homology.
 #
 # A complex is a list of ranks n_0, ..., n_top and boundary matrices

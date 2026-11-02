@@ -7,7 +7,7 @@
 # from projection sheets to geometric branches. It is finite jet data, not a
 # construction of the complete local normalization ring.
 
-use core/algebra/local_geometry
+use algebra/local_geometry
 
 + PlaneLocalGeometry
   # Remove a common power from x=t^e and every retained nonzero y exponent.

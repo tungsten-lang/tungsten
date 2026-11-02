@@ -10,7 +10,7 @@
 # from the S-pair identities to "B is a Groebner basis" remains an explicitly
 # labelled classical theorem import.
 
-use core/algebra/groebner
+use algebra/groebner
 
 + PolynomialReductionCertificate
   -> new(@dividend, @divisors, @quotients, @remainder)

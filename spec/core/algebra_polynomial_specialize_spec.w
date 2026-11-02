@@ -1,7 +1,7 @@
-# spec: interpreter -- compiled: did not finish in 600 s on a loaded machine
 # Specialization into smaller rings, re-embedding, and divisibility.
 
-use algebra
+use core/algebra/finite_field
+use core/algebra/polynomial
 
 -> check(name, got, want)
   equal = got == want

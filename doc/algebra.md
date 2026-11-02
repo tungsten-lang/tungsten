@@ -24,17 +24,12 @@ FLT-scale roadmap are in [certified-mathematics.md](certified-mathematics.md).
 core/algebra.w                     # orchestrator + Algebra facade
 core/algebra/field.w               # Field protocol, RationalField
 core/algebra/finite_field.w        # 𝔽_p and arbitrary finite extensions
-core/algebra/polynomial.w          # rings, sparse ops, division, content
-core/algebra/polynomial_resultant.w
-core/algebra/polynomial_gcd.w
-core/algebra/polynomial_factor.w # exact factorization over ℚ
-core/algebra/polynomial_factor_finite.w # complete finite-field factorization
-core/algebra/polynomial_gcd_modular.w   # Brown modular multivariate gcd over finite fields
-core/algebra/polynomial_resultant_multivariate.w # any-arity resultants, discriminants, derivatives
-core/algebra/groebner_length.w          # zero-dimensional ideals: standard monomials and length
-core/algebra/polynomial_matrix.w        # matrices over F[z]: row reduction, order and kernel bases
+core/algebra/polynomial.w          # rings, sparse ops, division, content, specialize, in_ring, divides?
+core/algebra/polynomial_gcd.w      # univariate/multivariate PRS and Brown modular GCD over finite fields
+core/algebra/polynomial_resultant.w # univariate and any-arity resultants, discriminants, derivatives
+core/algebra/polynomial_factor.w   # exact univariate factorization over ℚ and finite fields
+core/algebra/polynomial_matrix.w   # matrices over F[z]: row reduction, order and kernel bases
 core/algebra/polynomial_factor_multivariate.w # multivariate factorization over finite fields (Hensel + Zassenhaus)
-core/algebra/polynomial_specialize.w    # specialize into a smaller ring, in_ring, divides?
 core/algebra/simple_extension.w   # certified K[a]/(m) quotient fields
 core/algebra/etale_algebra.w      # squarefree quotients and CRT products
 core/algebra/orders.w             # monogenic orders and Dedekind certificates
@@ -57,11 +52,11 @@ core/algebra/prime_ideals.w       # residue maps and certified primes above p
 core/algebra/ideal_arithmetic.w   # HNF ideals, valuations, factorizations
 core/algebra/real_roots.w          # Sturm isolation and certified RootOf values
 core/algebra/algebraic_real.w      # exact RootOf arithmetic and certificates
-core/algebra/expression.w          # symbolic factor and exact real solve facade
+core/algebra/symbolic_expression.w # symbolic factor and exact real solve facade
 core/algebra/number_field.w        # exact number fields and integral bases
 core/algebra/p_adic.w              # rational Q_p square classes and Hensel lifts
 core/algebra/archimedean.w         # exact real places and complex-pair counts
-core/algebra/groebner.w            # Buchberger, Ideal, eliminate, saturate
+core/algebra/groebner.w            # Buchberger, Ideal, eliminate, saturate, zero-dimensional length
 core/algebra/groebner_certificates.w # proof-producing Buchberger witnesses
 core/algebra/f2_linear.w           # replay-certified linear algebra over F2
 core/algebra/s_units.w             # certified S-unit square-class bases

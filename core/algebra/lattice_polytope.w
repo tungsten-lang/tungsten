@@ -5,7 +5,7 @@
 # to implement general convex hulls or the analytic Monge--Ampere argument.
 
 use core/numeric/rational
-use core/algebra/integer_lattice
+use algebra/integer_lattice
 
 + LatticeCombinatorics
   -> .integer?(value)

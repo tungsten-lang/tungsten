@@ -10,7 +10,7 @@
 # value below is therefore |G^ab| and its invariant factors, taken from the
 # standard presentations of S_3, Q_8, D_4, A_5 and the free groups.
 
-use algebra
+use core/algebra/group_presentation
 
 -> group_presentation_check(name, condition)
   raise "FAIL " + name if !condition
@@ -170,16 +170,12 @@ group_presentation_check("validate.generator_out_of_range",
 group_presentation_check("validate.negative_generator_index",
                          group_presentation_raises?(->()
                            FinitelyPresentedGroup.new(2, [[[-1, 1]]])))
-# BUG: core/algebra/group_presentation.w:22 and :26 raise double-quoted
-# messages containing "[generator, exponent]", which Tungsten interpolates, so
-# the guards die calling the undefined `generator` instead of raising --
-# uncatchable compiled. Restore when those two messages escape their brackets.
-# group_presentation_check("validate.relator_not_a_word",
-#                          group_presentation_raises?(->()
-#                            FinitelyPresentedGroup.new(1, [7])))
-# group_presentation_check("validate.letter_not_a_pair",
-#                          group_presentation_raises?(->()
-#                            FinitelyPresentedGroup.new(1, [[[0, 1, 2]]])))
+group_presentation_check("validate.relator_not_a_word",
+                         group_presentation_raises?(->()
+                           FinitelyPresentedGroup.new(1, [7])))
+group_presentation_check("validate.letter_not_a_pair",
+                         group_presentation_raises?(->()
+                           FinitelyPresentedGroup.new(1, [[[0, 1, 2]]])))
 
 # --- Seifert fibrations --------------------------------------------------------
 # Poincare's homology 3-sphere: e0 = -1 with invariants (2,1), (3,1), (5,1).
@@ -247,10 +243,8 @@ group_presentation_check("seifert.orlik_matches_smith", orlik_ok)
 
 group_presentation_check("seifert.rejects_bad_invariant",
                          group_presentation_raises?(->() SeifertFibration.new(0, [[0, 1]])))
-# BUG: core/algebra/group_presentation.w:134 raises "a Seifert invariant is an
-# [a, b] pair", whose bracketed text interpolates the undefined `a`.
-# group_presentation_check("seifert.rejects_non_pair",
-#                          group_presentation_raises?(->() SeifertFibration.new(0, [[2]])))
+group_presentation_check("seifert.rejects_non_pair",
+                         group_presentation_raises?(->() SeifertFibration.new(0, [[2]])))
 group_presentation_check("seifert.rejects_non_coprime_sphere",
                          group_presentation_raises?(->() SeifertFibration.three_sphere(2, 4)))
 

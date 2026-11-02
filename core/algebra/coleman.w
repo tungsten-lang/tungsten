@@ -32,10 +32,10 @@
 # curve has exactly these rational points, given those inputs"; the result
 # object records every digit floor it used.
 
-use core/algebra/p_adic_series
-use core/algebra/c_ab
-use core/algebra/p_adic_geometry
-use core/algebra/zeta
+use algebra/p_adic_series
+use algebra/c_ab
+use algebra/p_adic_geometry
+use algebra/zeta
 
 + ColemanDisk
   -> new(@name, @kind, center, coordinate_series, @omega, @columns,

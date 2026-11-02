@@ -1,5 +1,6 @@
 use miter_eval
 use klieber_local
+use circuit_certificate
 
 # Circuit equivalence / miter lanes (Klieber, SatCoin, AIG, word-sort,
 # gray-code miters), split out of multiplier.w. Each lane reconstructs its
@@ -576,8 +577,8 @@ use klieber_local
   out_meta[0] = pos_lit_total
   1
 
--> wassat_satcoin_fill_pos_clauses(fla, fcs, fcl, ncl, max_eval, clause_off, cl_lit_off, cl_lit_len, cl_lits, cur_cl, total_pos_cl) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64[] i64[] i64) i64
-  m = 66
+-> wassat_satcoin_fill_pos_clauses(fla, fcs, fcl, ncl, first_eval, max_eval, clause_off, cl_lit_off, cl_lit_len, cl_lits, cur_cl, total_pos_cl) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64[] i64) i64
+  m = first_eval
   while m <= max_eval
     cur_cl[m] = clause_off[m]
     m += 1
@@ -593,7 +594,7 @@ use klieber_local
         if uv > m
           m = uv; m_sign = l > 0 ? 1 : -1
         j += 1
-      if m >= 66 && m <= max_eval && m_sign > 0
+      if m >= first_eval && m <= max_eval && m_sign > 0
         idx = cur_cl[m]
         cl_lit_len[idx] = k - 1
         cur_cl[m] = idx + 1
@@ -602,7 +603,7 @@ use klieber_local
   while pi < total_pos_cl
     cl_lit_off[pi + 1] = cl_lit_off[pi] + cl_lit_len[pi]
     pi += 1
-  m = 66
+  m = first_eval
   while m <= max_eval
     cur_cl[m] = clause_off[m]
     m += 1
@@ -618,7 +619,7 @@ use klieber_local
         if uv > m
           m = uv; m_sign = l > 0 ? 1 : -1
         j += 1
-      if m >= 66 && m <= max_eval && m_sign > 0
+      if m >= first_eval && m <= max_eval && m_sign > 0
         idx = cur_cl[m]
         cur_cl[m] = idx + 1
         lp = cl_lit_off[idx]
@@ -676,6 +677,17 @@ use klieber_local
   return false unless cnt_ok == 1
   pos_lit_total = out_meta[0]
 
+  free_arr = i64[n_free]
+  k = 0
+  while k < n_free
+    free_arr[k] = free_vars[k]
+    k += 1
+  certificate_work = i64[5]
+  supported = wassat_circuit_prefix_supported?(fla, fcs, fcl, ncl,
+    assign_i64, free_arr, n_free, 73, max_eval, certificate_work)
+  wassat_prof_note("circuit.certificate lane=satcoin supported=[supported] clauses=[certificate_work[0]] gates=[certificate_work[1]] batches=[certificate_work[2]] literal_visits=[certificate_work[3]] miss=[certificate_work[4]]")
+  return false unless supported
+
   clause_off = i64[max_eval + 2]
   m = 73
   while m <= max_eval
@@ -686,7 +698,7 @@ use klieber_local
   cl_lit_len = i64[total_pos_cl]
   cl_lits = i64[pos_lit_total]
   cur_cl = i64[max_eval + 1]
-  wassat_satcoin_fill_pos_clauses(fla, fcs, fcl, ncl, max_eval, clause_off, cl_lit_off, cl_lit_len, cl_lits, cur_cl, total_pos_cl)
+  wassat_satcoin_fill_pos_clauses(fla, fcs, fcl, ncl, 73, max_eval, clause_off, cl_lit_off, cl_lit_len, cl_lits, cur_cl, total_pos_cl)
 
   # Evaluate all 1 << (n_free - 6) batches across 4 worker threads
   p_masks = i64[6]
@@ -696,11 +708,6 @@ use klieber_local
   p_masks[3] = -71777214294589696 ## i64
   p_masks[4] = -281470681808896 ## i64
   p_masks[5] = -4294967296 ## i64
-  free_arr = i64[n_free]
-  k = 0
-  while k < n_free
-    free_arr[k] = free_vars[k]
-    k += 1
   n_sinks = sinks.size
   sink_arr = i64[n_sinks]
   k = 0
@@ -759,7 +766,7 @@ use klieber_local
 -> wassat_aig_cone_has_conflict(v, st, has_node, left, right, mark_pos, conf_stamp, conf_val) (i64 i64 i8[] i64[] i64[] i64[] i64[] i8[]) i64
   return 1 if mark_pos[-v + 400000] == st
   return 0 if has_node[v] == 0
-  return conf_val[v] ## i64 if conf_stamp[v] == st
+  return conf_val[v] if conf_stamp[v] == st
   l = left[v]
   r = right[v]
   res = 0
@@ -814,6 +821,10 @@ use klieber_local
     idx = (idx + 1) & 1048575
   val
 
+# Outside the literal range, including TRUE (400000) and FALSE (0).
+# Exhausting the optional rewrite arena must never manufacture FALSE.
+WASSAT_AIG_NO_NODE = 400001
+
 -> wassat_aig_intern_and(a, b, has_node, left, right, ht_key, ht_val, state) (i64 i64 i8[] i64[] i64[] i64[] i64[] i64[]) i64
   return 0 if a == 0 || b == 0
   return b if a == 400000
@@ -828,7 +839,7 @@ use klieber_local
   nid = wassat_aig_ht_get(ht_key, ht_val, key)
   return nid if nid != 0
   nid = state[1]
-  return 0 if nid >= 399999
+  return WASSAT_AIG_NO_NODE if nid >= 399999
   state[1] = nid + 1
   has_node[nid] = 1
   left[nid] = a
@@ -860,6 +871,9 @@ use klieber_local
   res = u
   if rx != left[u] || ry != right[u]
     res = wassat_aig_intern_and(rx, ry, has_node, left, right, ht_key, ht_val, state)
+    # Keeping the original expression is valid under the current assumption
+    # even when its simplified replacement cannot be allocated.
+    res = u if res == WASSAT_AIG_NO_NODE
   memo_stamp[u] = st_deep
   memo_val[u] = res
   res
@@ -1862,9 +1876,11 @@ use klieber_local
   g_cl_off = i64[nv + 1]
   g_cl_cnt = i64[nv + 1]
   g_inv_res = i64[nv + 1]
-  cl_l_off = i64[ncl + 1]
-  cl_l_len = i64[ncl]
-  cl_lits = i64[ncl * 5]
+  # The output acceptance relation can require up to sixteen truth-table
+  # minterms, independently of how many original output clauses there are.
+  cl_l_off = i64[ncl + 17]
+  cl_l_len = i64[ncl + 16]
+  cl_lits = i64[ncl * 5 + 64]
   n_simp_cl = 0
   n_simp_lits = 0
 
@@ -1918,6 +1934,9 @@ use klieber_local
           if const_zero > 0 && av == const_zero
             sat_const = true if l < 0
           elsif av == gv
+            # The fallback gate encoding requires one output occurrence.
+            # In particular, (g OR -g OR a) must not become a constraint on g.
+            return false if pol_gv != 0
             pol_gv = l > 0 ? 1 : -1
           else
             lval = l > 0 ? env[av] : (1 - env[av])
@@ -1975,41 +1994,59 @@ use klieber_local
         classified = true
     unless classified
       g_op[gv] = 5
-      want_pol = (gv == out_var && want_out == 0) ? -1 : 1
       g_inv_res[gv] = 0
       g_cl_off[gv] = n_simp_cl
       cnt_cl = 0
-      ci = head[gv]
-      while ci >= 0
-        off = fcs[ci]
-        clen = fcl[ci]
-        sat_const = false
-        has_want = false
-        j = 0
-        while j < clen
-          l = fla[off + j]
-          av = wassat_multiplier_abs(l)
-          if const_zero > 0 && av == const_zero
-            sat_const = true if l < 0
-          elsif av == gv
-            has_want = true if (l > 0 ? 1 : -1) == want_pol
-          j += 1
-        if has_want && !sat_const
-          cl_l_off[n_simp_cl] = n_simp_lits
-          llen = 0
+      if gv == out_var
+        # tt records whether the requested output is ALLOWED, including
+        # rows where both output values satisfy the original clauses. Encode
+        # that relation directly; positive clauses alone only record when
+        # the output is FORCED and can discard valid satisfying rows.
+        mask = 0
+        while mask < n_masks
+          if ((tt >> mask) & 1) != 0
+            cl_l_off[n_simp_cl] = n_simp_lits
+            cl_l_len[n_simp_cl] = k0
+            j = 0
+            while j < k0
+              cl_lits[n_simp_lits] = ((mask >> j) & 1) == 1 ? 0 - ins0[j] : ins0[j]
+              n_simp_lits += 1
+              j += 1
+            n_simp_cl += 1
+            cnt_cl += 1
+          mask += 1
+      else
+        ci = head[gv]
+        while ci >= 0
+          off = fcs[ci]
+          clen = fcl[ci]
+          sat_const = false
+          has_want = false
           j = 0
           while j < clen
             l = fla[off + j]
             av = wassat_multiplier_abs(l)
-            if av != gv && (const_zero == 0 || av != const_zero)
-              cl_lits[n_simp_lits] = l
-              n_simp_lits += 1
-              llen += 1
+            if const_zero > 0 && av == const_zero
+              sat_const = true if l < 0
+            elsif av == gv
+              has_want = true if l > 0
             j += 1
-          cl_l_len[n_simp_cl] = llen
-          n_simp_cl += 1
-          cnt_cl += 1
-        ci = next_cl[ci]
+          if has_want && !sat_const
+            cl_l_off[n_simp_cl] = n_simp_lits
+            llen = 0
+            j = 0
+            while j < clen
+              l = fla[off + j]
+              av = wassat_multiplier_abs(l)
+              if av != gv && (const_zero == 0 || av != const_zero)
+                cl_lits[n_simp_lits] = l
+                n_simp_lits += 1
+                llen += 1
+              j += 1
+            cl_l_len[n_simp_cl] = llen
+            n_simp_cl += 1
+            cnt_cl += 1
+          ci = next_cl[ci]
       g_cl_cnt[gv] = cnt_cl
     gi += 1
   return false if ready[out_var] == 0
@@ -2169,48 +2206,3 @@ use klieber_local
     if p == 32
       wassat_prof_note("circuit.kernel xor=[kernel_work[1]] and=[kernel_work[2]] majority=[kernel_work[3]] mux=[kernel_work[4]] fallback=[kernel_work[5]] nand=[kernel_work[6]] bic=[kernel_work[7]] orn=[kernel_work[8]] or=[kernel_work[9]] nor=[kernel_work[10]]")
   any_sat[0] == 0
-
-# Refute term-rewrite polynomial comparator-adder cycle systems (AProVE07-26)
-# where the 20 strict comparator heads g_r in the root disjunction correspond
-# to directed edges (X_r, U_r) -> (Y_r, V_r) on {33, 126, 570} x {75, 292, 569, 889, 2655}
-# whose 7 directed cycles telescope with the T1 compatibility inequalities.
--> wassat_aprove_cycle_miter_unsat?(formula)
-  nv = formula["nvars"]
-  ncl = formula["flat_ncl"]
-  return false unless nv == 21734 && ncl == 79766
-  fla = formula["flat_lits"] ## i64[]
-  fcs = formula["flat_offs"] ## i64[]
-  fcl = formula["flat_lens"] ## i64[]
-  tot_lits = 0
-  tot_sum = 0
-  has_unit_21732 = false
-  t1_cnt = 0
-  t1_sum = 0
-  c115_cnt = 0
-  c115_sum = 0
-  ci = 0
-  while ci < ncl
-    csz = fcl[ci]
-    st = fcs[ci]
-    tot_lits += csz
-    if csz == 1 && fla[st] == 21732
-      has_unit_21732 = true
-    elsif csz == 2
-      if fla[st] == -21732
-        t1_cnt += 1
-        t1_sum += fla[st + 1]
-      elsif fla[st + 1] == -21732
-        t1_cnt += 1
-        t1_sum += fla[st]
-    elsif csz == 115
-      c115_cnt += 1
-      li = 0
-      while li < csz
-        c115_sum += fla[st + li]
-        li += 1
-    li = 0
-    while li < csz
-      tot_sum += fla[st + li]
-      li += 1
-    ci += 1
-  has_unit_21732 && t1_cnt == 224 && t1_sum == 1906793 && c115_cnt == 1 && c115_sum == -1978816 && tot_lits == 211276 && tot_sum == -91842797

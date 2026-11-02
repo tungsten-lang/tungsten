@@ -44,6 +44,38 @@ describe "Wassat exact conflict-cover shortcut" ->
     expect(result["recognized"]).to eq(true)
     expect(result["status"]).to eq(-1)
 
+  it "keeps positive-row coverage separate from bitset conflicts" ->
+    f = covering_formula(
+      [[1, 2, 3], [2, 3, 4], [3, 4, 1], [4, 1, 2]],
+      [[2, 3], [2, 4], [3, 4]]
+    )
+    result = wassat_af_bitset_solve(
+      f["flat_lits"], f["flat_offs"], f["flat_lens"],
+      f["flat_ncl"], 4, WASSAT_COVER_NODE_CAP
+    )
+    expect(result["status"]).to eq(1)
+    expect(wassat_model_satisfies?(f, result["model"])).to eq(true)
+
+  it "agrees with the exact answer for every conflict subset on four bitset rows" ->
+    rows = [[1, 2, 3], [2, 3, 4], [3, 4, 1], [4, 1, 2]]
+    edges = covering_complete_edges(4)
+    mask = 0
+    while mask < 64
+      conflicts = []
+      i = 0
+      while i < edges.size
+        conflicts.push(edges[i]) if (mask & (1 << i)) != 0
+        i += 1
+      f = covering_formula(rows, conflicts)
+      result = wassat_af_bitset_solve(
+        f["flat_lits"], f["flat_offs"], f["flat_lens"],
+        f["flat_ncl"], 4, WASSAT_COVER_NODE_CAP
+      )
+      expect(result["status"]).to eq(mask == 63 ? -1 : 1)
+      if result["status"] == 1
+        expect(wassat_model_satisfies?(f, result["model"])).to eq(true)
+      mask += 1
+
   it "solves exact cover by complementary placement pairs (DLX shape)" ->
     # Placements are the six 2-subsets of {a,b,c,d}; rows are elements,
     # conflicts join placements sharing an element. An independent set

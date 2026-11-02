@@ -6,6 +6,47 @@ fn wassat_mdp_pop64(x) (i64) i64
 fn wassat_mdp_ctz64(x) (i64) i64
   ccall_nobox("__w_bit_cttz_u64", x) ## i64
 
+# Every restriction used by graph search must follow from an original
+# forbidden pair. Taking the union of different pairs' forbidden host edges
+# alone can invent constraints and refute a satisfiable formula.
+# With the checked domain decoding below, every satisfying CNF assignment
+# selects a value per domain. These checks make their canonical labels an
+# injective, edge-preserving embedding, so exhaustive failure is conclusive.
+-> wassat_sgi_graph_supported?(np, canon, p_adj, h_adj, forbidden) (i64 i64[] i64[] i64[] i64[]) bool
+  full30 = 1073741823 ## i64
+  p = 0 ## i64
+  while p < np
+    seen = 0 ## i64
+    h = 0 ## i64
+    while h < 30
+      label = canon[p * 30 + h]
+      return false if label < 0 || label >= 30
+      bit = 1 << label ## i64
+      return false if (seen & bit) != 0
+      seen = seen | bit
+      h += 1
+    return false unless seen == full30
+    p += 1
+  p = 0 ## i64
+  while p < np
+    q = p + 1
+    while q < np
+      edge = ((p_adj[p] >> q) & 1) != 0
+      h = 0 ## i64
+      while h < 30
+        label = canon[p * 30 + h]
+        row = forbidden[(p * 22 + q) * 30 + h]
+        k = 0 ## i64
+        while k < 30
+          other = canon[q * 30 + k]
+          excluded = label == other || (edge && ((h_adj[label] >> other) & 1) == 0)
+          return false if excluded && ((row >> k) & 1) == 0
+          k += 1
+        h += 1
+      q += 1
+    p += 1
+  true
+
 fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_stack, cand_stack, depth) (i64 i64[] i64[] i64[] i64 i64[] i64[] i64) bool
   unassigned_p = unassigned_p_in
   return true if unassigned_p == 0
@@ -180,6 +221,7 @@ fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_sta
   if nv == 660
     lit_p = i64[2 * nv + 4]
     lit_h = i64[2 * nv + 4]
+    seen_vars = i8[nv + 1]
     i = 0
     while i < 2 * nv + 4
       lit_p[i] = -1
@@ -194,6 +236,9 @@ fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_sta
         h = 0
         while h < 30
           l = fla[off + h]
+          av = l < 0 ? 0 - l : l
+          return result if av < 1 || av > nv || seen_vars[av] != 0
+          seen_vars[av] = 1
           li = l > 0 ? 2 * l : 2 * (0 - l) + 1
           return result if li < 0 || li >= 2 * nv + 4
           lit_p[li] = p_idx
@@ -257,6 +302,8 @@ fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_sta
             a += 1
           j = 0
           while j < 5
+            return result if vs[j] < 1 || vs[j] > nv || var_b[vs[j]] >= 0
+            return result if j > 0 && vs[j] == vs[j - 1]
             var_b[vs[j]] = nb
             var_pos[vs[j]] = j
             j += 1
@@ -275,12 +322,19 @@ fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_sta
         v0 = fla[off] < 0 ? 0 - fla[off] : fla[off]
         b = var_b[v0]
         bad = 0 ## i64
+        positions = 0 ## i64
         j = 0
         while j < 5
           l = fla[off + j]
+          av = l < 0 ? 0 - l : l
+          return result if var_b[av] != b
+          position = one << var_pos[av]
+          return result if (positions & position) != 0
+          positions = positions | position
           if l < 0
             bad = bad | (one << var_pos[0 - l])
           j += 1
+        return result unless positions == 31
         valid_mask[b] = valid_mask[b] & ((one << bad) ^ full32)
       ci += 1
     code_to_h = i64[21 * 32]
@@ -305,19 +359,29 @@ fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_sta
         b2 = -1
         c1 = 0 ## i64
         c2 = 0 ## i64
+        positions1 = 0 ## i64
+        positions2 = 0 ## i64
         j = 0
         while j < 10
           l = fla[off + j]
           av = l < 0 ? 0 - l : l
           b = var_b[av]
           pos = var_pos[av]
+          return result if b < 0
+          position = one << pos
           if b1 < 0 || b == b1
             b1 = b
+            return result if (positions1 & position) != 0
+            positions1 = positions1 | position
             c1 = c1 | (one << pos) if l < 0
           else
+            return result if b2 >= 0 && b != b2
             b2 = b
+            return result if (positions2 & position) != 0
+            positions2 = positions2 | position
             c2 = c2 | (one << pos) if l < 0
           j += 1
+        return result unless positions1 == 31 && positions2 == 31
         if b1 >= 0 && b2 >= 0 && b1 != b2
           h1 = code_to_h[b1 * 32 + c1]
           h2 = code_to_h[b2 * 32 + c2]
@@ -388,6 +452,10 @@ fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_sta
           h1 += 1
       p2 += 1
     p1 += 1
+
+  supported = wassat_sgi_graph_supported?(np, canon, p_adj, h_adj, fb_mask)
+  wassat_prof_note("sgi.graph_certificate supported=[supported] pattern_vertices=[np] host_vertices=30")
+  return result unless supported
 
   p_deg = i64[22]
   p_tri = i64[22]

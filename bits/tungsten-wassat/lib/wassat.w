@@ -1531,12 +1531,15 @@ use reconfiguration
         cover_workers = arms + pre_arms + (sls_flips > 0 ? 1 : 0)
         cover_workers += 1 if config.continue_scout? && scout_solver != nil
         cover_plan = wassat_resolution_cover_plan(formula, cover_workers)
-        if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil
+        cycle_plan = nil
+        if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && options["conflicts"] == 0
+          cycle_plan = wassat_cycle_plan(formula, scout_cdcl_arenas, scout_sls_arenas)
+        if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil || cycle_plan != nil
           continuation = config.continue_scout? ? scout_solver : nil
           matrix_arms = arms
-          if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan != nil
+          if arms == 1 && pre_arms == 0 && sls_flips == 0 && (cover_plan != nil || cycle_plan != nil)
             # Preserve the lone solver's trajectory and memory footprint.
-            # The added cover worker races the already-built scout.
+            # The added worker races the already-built scout.
             continuation = scout_solver
             matrix_arms = 0 if continuation != nil
             continuation.enable_chrono if continuation != nil
@@ -1544,7 +1547,7 @@ use reconfiguration
           race = wassat_race_build(formula["nvars"], art, matrix_arms, formula,
                                    continuation, continuation_spent, pre_arms,
                                    sls_flips > 0 ? 1 : 0, scout_cdcl_arenas,
-                                   scout_sls_arenas, 1, cover_plan)
+                                   scout_sls_arenas, 1, cover_plan, cycle_plan)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
           if pre_arms > 0
             # A preprocessor per arm: two threads rendering through one would

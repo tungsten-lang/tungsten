@@ -66,6 +66,7 @@ extern double w_num_to_f64(WValue v);
 #define W_MEDIA_ERR_DROPPED  (-900001)
 #define W_MEDIA_ERR_FORMAT   (-900002)
 #define W_MEDIA_ERR_TIMING   (-900003)
+#define W_MEDIA_ERR_LEVEL    (-900004)
 
 /* ======================================================================
    Helpers
@@ -745,6 +746,7 @@ int w_media_scale_plan(WMediaScale *s, int ch, int alpha, int filter, int src_w,
     s->filter = filter;
     s->src_w = src_w; s->src_h = src_h; s->dst_w = dst_w; s->dst_h = dst_h;
     s->rx = prx; s->ry = pry; s->rw = prw; s->rh = prh;
+    s->in_bits = 8;
     s->out_bits = out_bits > 8 ? 10 : 8;
     for (int i = 0; i < 4; i++) s->fill[i] = fill ? fill[i] : 0;
     /* x_j = (cx + ((prx + j) * sdx + odx - rx) * cw / rw - osx) / ssx */
@@ -872,6 +874,11 @@ static void m_store_row(const WMediaScale *s, const float *acc, uint8_t *row) {
 /* Source row [ax.lo, ax.hi) to floats, with RGBA alpha handling. */
 static void m_load_row(const WMediaScale *s, const uint8_t *row, float *line) {
     int C = s->ch, lo = s->ax.lo, n = (s->ax.hi - lo) * C;
+    if (s->in_bits == 10) {
+        const uint16_t *p16 = (const uint16_t *)(const void *)row + (size_t)lo * C;
+        for (int i = 0; i < n; i++) line[i] = (float)(p16[i] >> 6) * 0.25f;
+        return;
+    }
     const uint8_t *p = row + (size_t)lo * C;
     if (C != 4 || s->alpha == W_MEDIA_ALPHA_NONE || s->alpha == W_MEDIA_ALPHA_PREMUL) {
         for (int i = 0; i < n; i++) line[i] = (float)p[i];
@@ -1062,9 +1069,18 @@ int w_media_scale_default_backend(int ch, int filter) {
 int w_media_scale_run(WMediaScale *s, int backend, const uint8_t *src, size_t sstride, size_t src_len,
                       uint8_t *dst, size_t dstride, size_t dst_len, char *err, size_t cap) {
     int bps = s->out_bits > 8 ? 2 : 1;
-    if (sstride < (size_t)s->src_w * s->ch) { snprintf(err, cap, "source stride %zu is less than %d x %d bytes", sstride, s->src_w, s->ch); return -1; }
+    int ibps = s->in_bits > 8 ? 2 : 1;
+    if ((ibps == 2 && (sstride % 2 || (uintptr_t)src % 2)) ||
+        (bps == 2 && (dstride % 2 || (uintptr_t)dst % 2))) {
+        snprintf(err, cap, "10-bit planes require two-byte sample alignment"); return -1;
+    }
+    if (sstride < (size_t)s->src_w * s->ch * ibps) { snprintf(err, cap, "source stride %zu is less than %d x %d bytes", sstride, s->src_w, s->ch); return -1; }
     if (dstride < (size_t)s->dst_w * s->ch * bps) { snprintf(err, cap, "destination stride %zu is less than %d x %d bytes", dstride, s->dst_w, s->ch * bps); return -1; }
-    size_t sneed = sstride * (size_t)(s->src_h - 1) + (size_t)s->src_w * s->ch;
+    if ((s->src_h > 1 && sstride > (SIZE_MAX - (size_t)s->src_w * s->ch * ibps) / (size_t)(s->src_h - 1)) ||
+        (s->dst_h > 1 && dstride > (SIZE_MAX - (size_t)s->dst_w * s->ch * bps) / (size_t)(s->dst_h - 1))) {
+        snprintf(err, cap, "plane stride overflows buffer size"); return -1;
+    }
+    size_t sneed = sstride * (size_t)(s->src_h - 1) + (size_t)s->src_w * s->ch * ibps;
     size_t dneed = dstride * (size_t)(s->dst_h - 1) + (size_t)s->dst_w * s->ch * bps;
     if (src_len && src_len < sneed) { snprintf(err, cap, "%zu source bytes is too few for %dx%d at stride %zu", src_len, s->src_w, s->src_h, sstride); return -1; }
     if (dst_len && dst_len < dneed) { snprintf(err, cap, "%zu destination bytes is too few for %dx%d at stride %zu", dst_len, s->dst_w, s->dst_h, dstride); return -1; }
@@ -1072,10 +1088,10 @@ int w_media_scale_run(WMediaScale *s, int backend, const uint8_t *src, size_t ss
     if (b == W_MEDIA_BACKEND_AUTO) {
         b = w_media_scale_default_backend(s->ch, s->filter);
         if (b == W_MEDIA_BACKEND_VIMAGE && !s->vimage_ok) b = W_MEDIA_BACKEND_CPU;
-        if (b == W_MEDIA_BACKEND_METAL && s->out_bits > 8) b = W_MEDIA_BACKEND_CPU;
+
     }
     if (b == W_MEDIA_BACKEND_METAL) {
-        if (s->out_bits > 8) { snprintf(err, cap, "the Metal backend writes 8-bit planes only"); return -1; }
+
         if (w_media_scale_metal(s, src, sstride, src_len ? src_len : sneed, dst, dstride, dst_len ? dst_len : dneed, err, cap) != 0) return -1;
         return b;
     }
@@ -1161,14 +1177,22 @@ WValue w_media_scaler_new(WValue specv) {
     }
     if (alpha == W_MEDIA_ALPHA_PREMUL) for (int i = 0; i < 3; i++) if (fill[i] > fill[3]) fill[i] = fill[3];
     if (alpha == W_MEDIA_ALPHA_OPAQUE) fill[3] = 255;
+    int channels = (int)m_int(m_arr_at(specv, 11), 4, "channels");
+    int in_bits = (int)m_int(m_arr_at(specv, 12), 8, "source_bits");
+    int out_bits = (int)m_int(m_arr_at(specv, 13), 8, "bits");
+    if ((in_bits != 8 && in_bits != 10) || (out_bits != 8 && out_bits != 10)) w_media_raise("Scaler: source_bits/bits must be 8 or 10");
+    if (channels != 1 && channels != 2 && channels != 4) w_media_raise("Scaler: channels must be 1, 2 or 4");
+    if (channels == 4 && (in_bits != 8 || out_bits != 8)) w_media_raise("Scaler: 10-bit planes use channels:1 or channels:2");
     MScaler *sc = calloc(1, sizeof *sc);
     if (!sc) w_media_raise("Scaler: out of memory");
     char err[256];
-    if (w_media_scale_plan(&sc->plan, 4, alpha, filter, sw, sh, dw, dh, crop, rect, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5,
-                           fill, 8, err, sizeof err) != 0) {
+    if (w_media_scale_plan(&sc->plan, channels, alpha, filter, sw, sh, dw, dh, crop, rect, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5,
+                           fill, out_bits, err, sizeof err) != 0) {
         free(sc);
         w_media_raise("Scaler: %s", err);
     }
+    sc->plan.in_bits = in_bits;
+    if (in_bits != 8) sc->plan.vimage_ok = 0;
     sc->backend = backend;
     if (backend == W_MEDIA_BACKEND_VIMAGE && !sc->plan.vimage_ok) {
         w_media_scale_free(&sc->plan);
@@ -1195,8 +1219,8 @@ WValue w_media_scaler_run(WValue hv, WValue srcv, WValue soffv, WValue sstridev,
     WMediaScale *s = &sc->plan;
     int64_t savail, davail = -1;
     const uint8_t *src = m_source(srcv, m_int(soffv, 0, "offset"), &savail, "Scaler#scale");
-    size_t ss = (size_t)m_int(sstridev, (int64_t)s->src_w * 4, "stride");
-    size_t ds = (size_t)m_int(dstridev, (int64_t)s->dst_w * 4, "stride");
+    size_t ss = (size_t)m_int(sstridev, (int64_t)s->src_w * s->ch * (s->in_bits > 8 ? 2 : 1), "stride");
+    size_t ds = (size_t)m_int(dstridev, (int64_t)s->dst_w * s->ch * (s->out_bits > 8 ? 2 : 1), "stride");
     WValue out = dstv;
     uint8_t *dst;
     if (dstv == W_NIL) {
@@ -1410,6 +1434,7 @@ typedef struct MEncoder {
     double         quality;
     int64_t        bitrate;
     int            gop, reorder, speed;
+    int            pinned_hevc_level;
     uint64_t       conv_ns, submit_ns, wait_ns;
     CFDictionaryRef kf_props;
     CFDictionaryRef attach;
@@ -1444,6 +1469,13 @@ static void m_output(void *outref, void *frameref, OSStatus st, VTEncodeInfoFlag
     } else {
         CMFormatDescriptionRef fd = CMSampleBufferGetFormatDescription(sb);
         if (!s->format) {
+            if (e->pinned_hevc_level) {
+                CFDictionaryRef ext = CMFormatDescriptionGetExtensions(fd);
+                CFDictionaryRef atoms = ext ? CFDictionaryGetValue(ext, kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) : NULL;
+                CFDataRef config = atoms ? CFDictionaryGetValue(atoms, CFSTR("hvcC")) : NULL;
+                if (!config || CFDataGetLength(config) < 13 || CFDataGetBytePtr(config)[12] != e->pinned_hevc_level)
+                    s->err = W_MEDIA_ERR_LEVEL;
+            }
             CFRetain(fd);
             s->format = (void *)fd;
         } else if (!CMFormatDescriptionEqual((CMFormatDescriptionRef)s->format, fd)) {
@@ -1521,6 +1553,23 @@ static const CFStringRef *m_h264_level(const char *lv) {
     return NULL;
 }
 
+/* VT advertises HEVC AutoLevel enums only, but its profile-level naming
+ * convention also accepts explicit levels. Verify the emitted hvcC rather
+ * than trusting SetProperty success (unsupported strings may be ignored). */
+static int m_hevc_level(const char *level, int bits, char *name, size_t cap) {
+    static const char *names[] = {"1", "2", "2.1", "3", "3.1", "4", "4.1", "5", "5.1", "5.2", "6", "6.1", "6.2"};
+    static const int ids[] = {30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186};
+    for (size_t i = 0; i < sizeof ids / sizeof ids[0]; i++) {
+        char alias[16];
+        snprintf(alias, sizeof alias, "%s.0", names[i]);
+        if (strcmp(level, names[i]) && (strchr(names[i], '.') || strcmp(level, alias))) continue;
+        int major = ids[i] / 30, minor = (ids[i] % 30) / 3;
+        snprintf(name, cap, "HEVC_%s_%d_%d", bits == 10 ? "Main10" : "Main", major, minor);
+        return ids[i];
+    }
+    return 0;
+}
+
 MEncoder *w_media_enc_open(const char *cname, int w, int h, int num, int den, double quality, int64_t bitrate, int gop,
                            const char *in, const char *site, int reorder, int speed, const char *level,
                            char *err, size_t cap) {
@@ -1531,14 +1580,21 @@ MEncoder *w_media_enc_open(const char *cname, int w, int h, int num, int den, do
     if (quality > 1.0 || (quality < 0 && quality != -1.0)) { snprintf(err, cap, "quality must be in 0..1"); return NULL; }
     if (gop < 1) { snprintf(err, cap, "gop must be at least 1"); return NULL; }
     const CFStringRef *profile = codec->profile;
+    char hevc_profile[64] = "";
+    int pinned_hevc_level = 0;
     if (level && level[0] && strcasecmp(level, "auto")) {
-        if (codec->type != kCMVideoCodecType_H264) { snprintf(err, cap, "level: only H.264 takes an explicit level (VideoToolbox picks HEVC's)"); return NULL; }
-        profile = m_h264_level(level);
-        if (!profile) { snprintf(err, cap, "unknown H.264 level '%s' (3.0 .. 5.2, auto)", level); return NULL; }
+        if (codec->type == kCMVideoCodecType_HEVC) {
+            pinned_hevc_level = m_hevc_level(level, codec->bits, hevc_profile, sizeof hevc_profile);
+            if (!pinned_hevc_level) { snprintf(err, cap, "unknown HEVC level '%s' (1 .. 6.2, auto)", level); return NULL; }
+        } else if (codec->type == kCMVideoCodecType_H264) {
+            profile = m_h264_level(level);
+            if (!profile) { snprintf(err, cap, "unknown H.264 level '%s' (3.0 .. 5.2, auto)", level); return NULL; }
+        } else { snprintf(err, cap, "level: applies to H.264 and HEVC only"); return NULL; }
     }
     MEncoder *e = calloc(1, sizeof *e);
     if (!e) { snprintf(err, cap, "out of memory"); return NULL; }
     e->codec = codec;
+    e->pinned_hevc_level = pinned_hevc_level;
     e->w = w;
     e->h = h;
     e->num = num;
@@ -1566,7 +1622,11 @@ MEncoder *w_media_enc_open(const char *cname, int w, int h, int num, int den, do
     st = noErr;
 #define M_SETQ(key, val, name) do { OSStatus s_ = VTSessionSetProperty(vt, key, val); if (s_ != noErr && st == noErr) { st = s_; snprintf(err, cap, "VideoToolbox refused %s (OSStatus %d)", name, (int)s_); } } while (0)
     VTSessionSetProperty(vt, kVTCompressionPropertyKey_RealTime, kCFBooleanFalse);
-    if (profile) M_SETQ(kVTCompressionPropertyKey_ProfileLevel, *profile, "ProfileLevel");
+    if (hevc_profile[0]) {
+        CFStringRef chosen = CFStringCreateWithCString(NULL, hevc_profile, kCFStringEncodingUTF8);
+        M_SETQ(kVTCompressionPropertyKey_ProfileLevel, chosen, "HEVC ProfileLevel");
+        CFRelease(chosen);
+    } else if (profile) M_SETQ(kVTCompressionPropertyKey_ProfileLevel, *profile, "ProfileLevel");
     if (codec->quality_ok) {
         M_SETQ(kVTCompressionPropertyKey_AllowFrameReordering, e->reorder ? kCFBooleanTrue : kCFBooleanFalse, "AllowFrameReordering");
         /* Keyframes are forced at segment starts; the interval is a backstop
@@ -1604,7 +1664,11 @@ MEncoder *w_media_enc_open(const char *cname, int w, int h, int num, int den, do
         free(e);
         return NULL;
     }
-    VTCompressionSessionPrepareToEncodeFrames(vt);
+    st = VTCompressionSessionPrepareToEncodeFrames(vt);
+    if (st != noErr) {
+        snprintf(err, cap, "VideoToolbox cannot prepare this codec/size/level (OSStatus %d)", (int)st);
+        VTCompressionSessionInvalidate(vt); CFRelease(vt); free(e); return NULL;
+    }
     e->kf_props = m_dict1(kVTEncodeFrameOptionKey_ForceKeyFrame, kCFBooleanTrue);
     CFStringRef loc = e->siting == M_SITE_CENTER ? kCVImageBufferChromaLocation_Center
                     : e->siting == M_SITE_TOPLEFT ? kCVImageBufferChromaLocation_TopLeft
@@ -1815,6 +1879,7 @@ static void m_seg_wait(WMediaSegment *s) {
 static const char *m_err_text(int32_t err, char *buf, size_t cap) {
     if (err == W_MEDIA_ERR_DROPPED) return "VideoToolbox dropped a frame";
     if (err == W_MEDIA_ERR_FORMAT) return "the format description changed inside the segment";
+    if (err == W_MEDIA_ERR_LEVEL) return "VideoToolbox did not emit the requested HEVC level";
     if (err == W_MEDIA_ERR_TIMING) return "a sample came back with a timestamp outside the segment";
     snprintf(buf, cap, "VideoToolbox error (OSStatus %d)", (int)err);
     return buf;
@@ -2010,11 +2075,9 @@ static void m_put64(uint8_t *p, uint64_t v) { m_put32(p, (uint32_t)v); m_put32(p
 static uint32_t m_get32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
 static uint64_t m_get64(const uint8_t *p) { return (uint64_t)m_get32(p) | ((uint64_t)m_get32(p + 4) << 32); }
 
-WValue w_media_segment_save(WValue sv, WValue pathv) {
-    WMediaSegment *s = w_media_segment_ready(sv, "VideoSegment#save");
-    char path[4096], tmp[4200];
-    if (!w_media_str(pathv, path, sizeof path) || !path[0]) w_media_raise("VideoSegment#save: path must be a string");
-    if (!s->format) w_media_raise("VideoSegment#save: the segment has no frames");
+int w_media_seg_save(WMediaSegment *s, const char *path, char *err, size_t cap) {
+    char tmp[4200];
+    if (!s->format) { snprintf(err, cap, "segment has no frames"); return -1; }
     CFDictionaryRef ext = CMFormatDescriptionGetExtensions((CMFormatDescriptionRef)s->format);
     CFDataRef fmt = ext ? CFPropertyListCreateData(NULL, ext, kCFPropertyListBinaryFormat_v1_0, 0, NULL) : NULL;
     size_t flen = fmt ? (size_t)CFDataGetLength(fmt) : 0;
@@ -2044,19 +2107,29 @@ WValue w_media_segment_save(WValue sv, WValue pathv) {
     }
     snprintf(tmp, sizeof tmp, "%s.tmp%d", path, (int)getpid());
     FILE *f = fopen(tmp, "wb");
-    if (!f) { if (fmt) CFRelease(fmt); free(rec); w_media_raise("VideoSegment#save: cannot write %s: %s", tmp, strerror(errno)); }
+    if (!f) { if (fmt) CFRelease(fmt); free(rec); snprintf(err, cap, "cannot write %s: %s", tmp, strerror(errno)); return -1; }
     int ok = fwrite(hdr, 1, 64, f) == 64;
     if (ok && flen) ok = fwrite(CFDataGetBytePtr(fmt), 1, flen, f) == flen;
     if (ok && s->n) ok = fwrite(rec, 24, (size_t)s->n, f) == (size_t)s->n;
     if (ok && s->len) ok = fwrite(s->data, 1, s->len, f) == s->len;
+    if (ok) ok = fflush(f) == 0 && fsync(fileno(f)) == 0;
     ok = (fclose(f) == 0) && ok;
     if (fmt) CFRelease(fmt);
     free(rec);
     if (!ok || rename(tmp, path) != 0) {
         unlink(tmp);
-        w_media_raise("VideoSegment#save: writing %s failed: %s", path, strerror(errno));
+        snprintf(err, cap, "writing %s failed: %s", path, strerror(errno)); return -1;
     }
-    return w_int((int64_t)(64 + flen + 24 * (size_t)s->n + s->len));
+    return 0;
+}
+
+WValue w_media_segment_save(WValue sv, WValue pathv) {
+    WMediaSegment *s = w_media_segment_ready(sv, "VideoSegment#save");
+    char path[4096], err[512];
+    if (!w_media_str(pathv, path, sizeof path) || !path[0]) w_media_raise("VideoSegment#save: path must be a string");
+    if (w_media_seg_save(s, path, err, sizeof err)) w_media_raise("VideoSegment#save: %s", err);
+    struct stat st;
+    return w_int(stat(path, &st) ? 0 : st.st_size);
 }
 
 WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap) {
@@ -2075,7 +2148,20 @@ WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap) {
         snprintf(err, cap, "%s has a corrupt header", path);
         return NULL;
     }
-    fseeko(f, (off_t)hsz, SEEK_SET);
+    /* Validate physical lengths before allocating attacker-controlled counts.
+     * In particular a short file must never request a terabyte of memory. */
+    struct stat file_stat;
+    uint64_t required = (uint64_t)hsz + flen + (uint64_t)n * 24 + dlen;
+    int32_t width = (int32_t)m_get32(hdr + 16), height = (int32_t)m_get32(hdr + 20);
+    int32_t num = (int32_t)m_get32(hdr + 24), den = (int32_t)m_get32(hdr + 28);
+    if (fstat(fileno(f), &file_stat) || required != (uint64_t)file_stat.st_size ||
+        !n || !dlen || width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
+        num <= 0 || den <= 0 || num > 1000000 || den > 1000000 ||
+        (m_get32(hdr + 52) & ~1u) || fseeko(f, (off_t)hsz, SEEK_SET)) {
+        fclose(f);
+        snprintf(err, cap, "%s has invalid segment lengths, dimensions or clock", path);
+        return NULL;
+    }
     WMediaSegment *s = m_seg_new();
     s->fourcc = m_get32(hdr + 12);
     s->width = (int32_t)m_get32(hdr + 16);
@@ -2091,14 +2177,16 @@ WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap) {
     s->s = malloc(sizeof(WMediaSample) * (n ? n : 1));
     s->cap = (int32_t)(n ? n : 1);
     int ok = fmt && rec && s->data && s->s;
+    if (s->data) {
+        pthread_mutex_lock(&g_stat_lock);
+        g_seg_bytes += (int64_t)dlen;
+        pthread_mutex_unlock(&g_stat_lock);
+    } else s->dcap = 0;
     if (ok && flen) ok = fread(fmt, 1, flen, f) == flen;
     if (ok && n) ok = fread(rec, 24, n, f) == n;
     if (ok && dlen) ok = fread(s->data, 1, dlen, f) == dlen;
     fclose(f);
     if (ok) {
-        pthread_mutex_lock(&g_stat_lock);
-        g_seg_bytes += (int64_t)dlen;
-        pthread_mutex_unlock(&g_stat_lock);
         for (uint32_t i = 0; i < n && ok; i++) {
             const uint8_t *r = rec + 24 * (size_t)i;
             WMediaSample *x = &s->s[i];
@@ -2107,7 +2195,7 @@ WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap) {
             x->pts = (int32_t)m_get32(r + 12);
             x->dts = (int32_t)m_get32(r + 16);
             x->sync = r[20];
-            if (x->offset + x->size > dlen) ok = 0;
+            if (!x->size || x->offset > dlen || x->size > dlen - x->offset || x->sync > 1) ok = 0;
         }
         s->n = (int32_t)n;
         s->len = dlen;
@@ -2120,7 +2208,8 @@ WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap) {
             CFDataRef d = CFDataCreate(NULL, fmt, flen);
             ext = CFPropertyListCreateWithData(NULL, d, kCFPropertyListImmutable, NULL, NULL);
             CFRelease(d);
-            if (ext && CFGetTypeID(ext) != CFDictionaryGetTypeID()) { CFRelease(ext); ext = NULL; ok = 0; }
+            if (!ext) ok = 0;
+            else if (CFGetTypeID(ext) != CFDictionaryGetTypeID()) { CFRelease(ext); ext = NULL; ok = 0; }
         }
         if (ok) {
             CMVideoFormatDescriptionRef fd = NULL;

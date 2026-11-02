@@ -6,6 +6,7 @@ in Tungsten:Bit
 use command
 use version
 use support
+use package_commands
 use commands
 
 # Command registry — maps command names to their handler classes.
@@ -60,6 +61,8 @@ commands = {
     command_class = commands[name.to_sym]
     if command_class
       command_class.new(args).execute
+    elsif Tungsten:Bit:PackageCommands.dispatch(name, args)
+      return
     else
       << "Unknown command: " + name.to_s
       << "Run `bit help` for available commands."

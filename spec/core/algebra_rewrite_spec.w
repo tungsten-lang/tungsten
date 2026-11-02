@@ -74,11 +74,14 @@ plain = "A ⊂ ℙ²_ℚ (X, Y, Z) : X² + Y² - Z² = 0"
 check("rewrite requires use algebra opt-in",
       ccall("w_algebra_rewrite_source", plain) == plain, true)
 
-commented = "# use algebra\nP2[1:0:0]"
+commented = "# use algebra\nP2\[1:0:0\]"
 check("comment cannot enable algebra rewrite",
       ccall("w_algebra_rewrite_source", commented) == commented, true)
-quoted = "label = \"use algebra\"\nP2[1:0:0]"
+quoted = "label = \"use algebra\"\nP2\[1:0:0\]"
 check("string cannot enable algebra rewrite",
       ccall("w_algebra_rewrite_source", quoted) == quoted, true)
+submodule_source = "use algebra/orders\nP2\[1:0:0\]"
+check("use algebra/... submodule enables algebra rewrite",
+      ccall("w_algebra_rewrite_source", submodule_source).include?("P2.point(\[1,0,0\])"), true)
 
 << "algebra_rewrite_spec: all checks passed"

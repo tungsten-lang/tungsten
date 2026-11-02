@@ -8,10 +8,11 @@ use geometry
 wide = 281474976710656
 safety_check("integer.values", Integer.value?(0) && Integer.value?(-1) &&
              Integer.value?(wide) && Integer.value?(-wide))
-# Instant occupies the old BigInt tag. Construct its zero-ms tagged payload
-# directly because the Instant constructor surface is still a scaffold.
+# Instant occupies the old BigInt tag. Zero milliseconds is that packed
+# word, and Instant.from_millis(0) matches it. Integer must still reject it.
 instant = wvalue_from_bits((-2251799813685248) ## i64)
 safety_check("integer.reject_instant_tag", ((instant$value >> 48) & 0xFFFF) == 0xFFF8 && !Integer.value?(instant))
+safety_check("instant epoch bits", Instant.from_millis(0) == instant && type(instant) == "Instant")
 [Integer.new, Int.new, BigInt.new, ~1.0, 1.0, Rational.new(1), instant, nil, true].each -> (bad)
   safety_check("integer.reject_scaffold_or_noninteger", !Integer.value?(bad))
   rejected = false

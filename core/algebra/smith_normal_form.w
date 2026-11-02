@@ -1,3 +1,5 @@
+use algebra/lattice_reduction
+
 # Smith normal form of an integer matrix.
 #
 # Every integer matrix A factors as U A V = D with U, V unimodular and D

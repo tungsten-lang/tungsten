@@ -12,97 +12,116 @@
 # generic entry points documented in doc/algebra.md.  It does not install
 # implicit multiplication for ordinary Tungsten expressions.
 
+# 1. Exact integer rings, lattices, linear algebra, and combinatorial structures
 use core/numeric/rational
-use core/algebra/gaussian_integer
-use core/algebra/eisenstein_integer
-use core/algebra/smith_normal_form
-use core/algebra/group_presentation
-use core/algebra/chain_complex
-use core/algebra/toric_fan
-use core/algebra/field
-use core/algebra/finite_field
-use core/algebra/polynomial
-use core/algebra/polynomial_resultant
-use core/algebra/polynomial_gcd
-use core/algebra/polynomial_factor
-use core/algebra/polynomial_factor_finite
-use core/algebra/simple_extension
-use core/algebra/etale_algebra
-use core/algebra/integer_lattice
-use core/algebra/prime_subspace
-use core/algebra/orders
-use core/algebra/maximal_orders
-use core/algebra/lattice_reduction
 use core/combinatorics/support
-use core/algebra/arithmetic_circuit
-use core/algebra/lattice_polytope
-use core/algebra/toric_polytope
-use core/algebra/parity_lattice
-use core/algebra/divided_power
-use core/algebra/residue_algebra
-use core/algebra/real_roots
-use core/algebra/groebner
-use core/algebra/groebner_certificates
-use core/algebra/algebraic_real
-use core/algebra/expression
-use core/algebra/number_field
-use core/algebra/p_adic
-use core/algebra/p_adic_series
-use core/algebra/prime_ideals
-use core/algebra/ideal_arithmetic
-use core/algebra/archimedean
-use core/algebra/f2_linear
-use core/algebra/s_units
-use core/algebra/s_class_group
-use core/algebra/p_adic_number_field
-use core/algebra/p_adic_dyadic
-use core/algebra/projective
-use core/algebra/projective_heights
-use core/algebra/curves
-use core/algebra/c_ab
-use core/algebra/c_ab_divisors
-use core/algebra/p_adic_geometry
-use core/algebra/p_adic_charts
-use core/algebra/local_geometry
-use core/algebra/local_normalization
-use core/algebra/local_intersection
-use core/algebra/local_invariants
-use core/algebra/elliptic
-use core/algebra/elliptic_tate
-use core/algebra/modular_forms
-use core/algebra/q_expansion
-use core/algebra/modular_symbols
-use core/algebra/hecke
-use core/algebra/old_new
-use core/algebra/newforms
-use core/algebra/divisors
-use core/algebra/quartics
-use core/algebra/cayley_octads
-use core/algebra/dixon
-use core/algebra/descent
-use core/algebra/descent_functions
-use core/algebra/descent_norm
-use core/algebra/descent_points
-use core/algebra/theta
-use core/algebra/theta_actions
-use core/algebra/theta_fibers
-use core/algebra/p_adic_descent
-use core/algebra/permutation_groups
-use core/algebra/theta_galois
-use core/algebra/theta_determinantal
-use core/algebra/theta_octads
-use core/algebra/theta_subdegrees
-use core/algebra/local_theta
-use core/algebra/descent_comparison
-use core/algebra/point_search
-use core/algebra/quartic_invariants
-use core/algebra/automorphisms
-use core/algebra/zeta
-use core/algebra/coleman
-use core/algebra/regular_models
-use core/algebra/galois
+use algebra/gaussian_integer
+use algebra/eisenstein_integer
+use algebra/integer_lattice
+use algebra/lattice_reduction
+use algebra/smith_normal_form
+use algebra/group_presentation
+use algebra/chain_complex
+use algebra/permutation_groups
+use algebra/f2_linear
+use algebra/prime_subspace
+use algebra/lattice_polytope
+use algebra/parity_lattice
+use algebra/divided_power
+use algebra/toric_fan
+
+# 2. Coefficient fields, univariate & multivariate polynomials, and circuits
+use algebra/field
+use algebra/finite_field
+use algebra/polynomial
+use algebra/polynomial_gcd
+use algebra/polynomial_resultant
+use algebra/polynomial_factor
+use algebra/polynomial_matrix
+use algebra/polynomial_factor_multivariate
+use algebra/arithmetic_circuit
+use algebra/toric_polytope
+
+# 3. Gröbner bases, polynomial ideals, real roots, and symbolic solve
+use algebra/groebner
+use algebra/groebner_certificates
+use algebra/real_roots
+use algebra/algebraic_real
+use algebra/symbolic_expression
+
+# 4. Field extensions, étale algebras, orders, ideals, number fields, and p-adics
+use algebra/simple_extension
+use algebra/etale_algebra
+use algebra/orders
+use algebra/maximal_orders
+use algebra/residue_algebra
+use algebra/number_field_irreducibility
+use algebra/number_field
+use algebra/prime_ideals
+use algebra/ideal_arithmetic
+use algebra/archimedean
+use algebra/p_adic
+use algebra/p_adic_series
+use algebra/s_units
+use algebra/minkowski_factor_base
+use algebra/s_class_group
+use algebra/p_adic_number_field
+use algebra/p_adic_dyadic
+
+# 5. Projective geometry, algebraic curves, divisors, local branches, and C_ab
+use algebra/projective
+use algebra/projective_heights
+use algebra/curves
+use algebra/quartics
+use algebra/divisors
+use algebra/c_ab
+use algebra/c_ab_divisors
+use algebra/c_ab_khuri_makdisi
+use algebra/p_adic_geometry
+use algebra/p_adic_charts
+use algebra/local_geometry
+use algebra/local_normalization
+use algebra/local_intersection
+use algebra/local_invariants
+
+# 6. Elliptic curves, modular forms, modular symbols, Hecke operators, and newforms
+use algebra/elliptic_tate
+use algebra/elliptic
+use algebra/modular_forms
+use algebra/q_expansion
+use algebra/modular_symbols
+use algebra/hecke
+use algebra/old_new
+use algebra/newforms
+
+# 7. Plane quartics, Cayley octads, theta characteristics, 2-descent, and Coleman
+use algebra/quartic_invariants
+use algebra/automorphisms
+use algebra/cayley_octads
+use algebra/dixon
+use algebra/descent
+use algebra/descent_functions
+use algebra/descent_norm
+use algebra/descent_points
+use algebra/theta
+use algebra/theta_actions
+use algebra/theta_galois
+use algebra/theta_determinantal
+use algebra/theta_octads
+use algebra/theta_fibers
+use algebra/theta_subdegrees
+use algebra/local_theta
+use algebra/regular_models
+use algebra/p_adic_descent
+use algebra/descent_comparison
+use algebra/point_search
+use algebra/zeta
+use algebra/coleman
+use algebra/galois
 
 
+# Exact algebraic structures: coefficient fields, polynomial rings, ideals,
+# number fields, curves, and modular forms.
 + Algebra
   -> .field(name)
     return Field.require_supported(name) if Field.supported?(name)
@@ -358,9 +377,3 @@ use core/algebra/galois
       result = field.multiply(result, rows[diagonal][diagonal])
       diagonal += 1
     result
-use core/algebra/polynomial_resultant_multivariate
-use core/algebra/groebner_length
-use core/algebra/polynomial_gcd_modular
-use core/algebra/polynomial_matrix
-use core/algebra/polynomial_factor_multivariate
-use core/algebra/polynomial_specialize

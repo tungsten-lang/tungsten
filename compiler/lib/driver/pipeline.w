@@ -259,6 +259,47 @@
 # compiler/linker executables, target flags, optional features, and ambient SDK
 # paths. `tungsten --clear-cache` remains the escape hatch for a tool that lies
 # about both its contents and filesystem identity.
+# Ask the C preprocessor for the actual dependency graph. Package companions
+# can include arbitrary local/system headers, so the environment's source-path
+# string alone cannot identify a reusable binary.
+-> incremental_c_include_identity
+  includes = extra_c_includes()
+  return "" if includes.size() == 0
+  rows = []
+  includes.each ->(source)
+    return nil if !file?(source)
+    cmd = dev_runtime_shell_quote(host_c_compiler()) + " -M -MT tungsten_extra_c -I" + dev_runtime_shell_quote(resolve_runtime_dir())
+    build_defines.keys().each ->(key)
+      cmd += " " + dev_runtime_shell_quote("-D" + key + "=" + build_defines[key])
+    cmd += " " + dev_runtime_shell_quote(source) + " 2>/dev/null"
+    text = capture(cmd)
+    return nil if text == nil || !text.starts_with?("tungsten_extra_c:")
+    text = text.slice(17, text.size()).replace("\\\n", "")
+    words = []
+    word = ""
+    escaped = false
+    i = 0
+    while i < text.size()
+      c = text.slice(i, 1)
+      if escaped
+        word += c
+        escaped = false
+      elsif c == "\\"
+        escaped = true
+      elsif c == " " || c == "\t" || c == "\n" || c == "\r"
+        words.push(word) if word != ""
+        word = ""
+      else
+        word += c
+      i += 1
+    words.push(word) if word != ""
+    return nil if words.size() == 0
+    words.each ->(path)
+      mt = file_mtime_ns(path)
+      return nil if mt == nil
+      rows.push(path + ":" + mt.to_s())
+  rows.sort().join("|")
+
 -> incremental_identity(file_path, out_path)
   exe = ccall("w_executable_path")
   em = file_mtime_ns(exe)
@@ -269,6 +310,8 @@
   ar_identity = dev_runtime_ar_identity(archive_tool(), runtime_kind)
   if cc_identity == nil || ar_identity == nil
     return nil
+  c_includes = incremental_c_include_identity()
+  return nil if c_includes == nil
   defs = ""
   # Sorted deliberately (NOT an iteration-order workaround): -D flags may
   # arrive in any order across invocations, and the cache identity string
@@ -283,7 +326,7 @@
   if ra != ""
     ramv = file_mtime_ns(ra)
     ram = ramv == nil ? "missing" : ramv.to_s()
-  ["irbin-v5", incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), cc_identity, ar_identity, release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, perf_instrument_mode.to_s(), incremental_env_s("TUNGSTEN_PERF_INSTRUMENT"), incremental_env_s("SDKROOT"), incremental_env_s("MACOSX_DEPLOYMENT_TARGET"), incremental_env_s("CPATH"), incremental_env_s("C_INCLUDE_PATH"), incremental_env_s("CPLUS_INCLUDE_PATH"), incremental_env_s("LIBRARY_PATH"), incremental_env_s("PKG_CONFIG_PATH"), incremental_env_s("PKG_CONFIG_LIBDIR"), incremental_env_s("TLS"), incremental_env_s("TUNGSTEN_TLS"), incremental_env_s("TUNGSTEN_TLS_CFLAGS"), incremental_env_s("TUNGSTEN_TLS_LDFLAGS"), incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_LOOP_RELEASE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_CORE_REACHABILITY"), incremental_env_s("TUNGSTEN_LAZY_CONTENT_HASH"), incremental_env_s("TUNGSTEN_DYNAMIC_EXPORTS"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_AR"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
+  ["irbin-v6-c-dependencies", c_includes, incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), cc_identity, ar_identity, release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, perf_instrument_mode.to_s(), incremental_env_s("TUNGSTEN_PERF_INSTRUMENT"), incremental_env_s("SDKROOT"), incremental_env_s("MACOSX_DEPLOYMENT_TARGET"), incremental_env_s("CPATH"), incremental_env_s("C_INCLUDE_PATH"), incremental_env_s("CPLUS_INCLUDE_PATH"), incremental_env_s("LIBRARY_PATH"), incremental_env_s("PKG_CONFIG_PATH"), incremental_env_s("PKG_CONFIG_LIBDIR"), incremental_env_s("TLS"), incremental_env_s("TUNGSTEN_TLS"), incremental_env_s("TUNGSTEN_TLS_CFLAGS"), incremental_env_s("TUNGSTEN_TLS_LDFLAGS"), incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_LOOP_RELEASE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_CORE_REACHABILITY"), incremental_env_s("TUNGSTEN_LAZY_CONTENT_HASH"), incremental_env_s("TUNGSTEN_DYNAMIC_EXPORTS"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_AR"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
 
 # Content-addressed final-link cache. The early irbin cache deliberately keys
 # source and output paths so it can skip every compiler phase. This cache keys

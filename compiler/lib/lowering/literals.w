@@ -899,13 +899,12 @@ sso5_sym_text_cache = {}
   typed_value(:i64, temp)
 
 -> lower_time(ctx, node)
-  wfn = ctx[:func]
-  # Parse "hh:mm:ss[.frac][±hh:mm|Z]"
+  # Parse "hh:mm:ss[.frac][±hh:mm|Z]". Keep the civil checks (leap second,
+  # packable offset), then build a Time. The string is the literal text, so
+  # a bare clock stays naive and a fraction survives.
   parsed = parse_time_string(node.value)
   validate_time(parsed[:hour], parsed[:min], parsed[:sec], node.value, ctx, node, 0, 0, 0, parsed[:tz])
-  temp = next_temp(wfn)
-  emit_wire_const_date(wfn, 0, parsed[:hour], parsed[:min], 0, parsed[:sec], temp, parsed[:tz], 0)
-  typed_value(:i64, temp)
+  lower_expression(ctx, Tungsten:AST:Call.new(Tungsten:AST:ClassRef.new("Time"), "parse", [Tungsten:AST:String.new(node.value)], nil))
 
 -> parse_time_string(s)
   # Parse "hh:mm:ss[.frac][±hh:mm|Z]" → {hour, min, sec, tz}
@@ -1302,3 +1301,21 @@ use literal_units
 
   # Pure ms without calendar → mode 1
   {mode: 1, months: 0, ms: total_ms}
+
+-> lower_byte_array(ctx, node)
+  wfn = ctx[:func]
+  vals = node.values
+  n = vals != nil ? vals.size() : 0
+  arr = next_temp(wfn)
+  emit_wire_call_direct_i64(wfn, nil, ["8", n.to_s()], nil, nil, "w_array_zeros", nil, nil, arr)
+  i = 0
+  while i < n
+    scratch = []
+    si = 0
+    while si < 10
+      scratch.push(next_temp(wfn))
+      si += 1
+    stored = next_temp(wfn)
+    emit_wire_typed_array_set_inline(wfn, arr, 8, i.to_s(), true, scratch, false, stored, (vals[i] & 0xFF).to_s())
+    i += 1
+  typed_value(:i64, arr)

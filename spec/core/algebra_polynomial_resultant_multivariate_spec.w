@@ -1,12 +1,8 @@
-# spec: compiled -- interpreter: no block given
+# spec: compiled -- interpreter: exceeds memory limit on trivariate resultant chain
 # Resultants and discriminants with respect to one variable in any arity.
 
-use core/algebra/field
 use core/algebra/finite_field
-use core/algebra/polynomial
 use core/algebra/polynomial_resultant
-use core/algebra/polynomial_gcd
-use core/algebra/polynomial_resultant_multivariate
 
 -> check(name, got, want)
   equal = got == want

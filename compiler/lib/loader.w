@@ -1095,9 +1095,11 @@ loader_parse_cache_state = {
       # while omitting any name makes a value crossing an erased/native
       # boundary fail only in compiled dispatch. String and Symbol share the
       # 0xF9 registration, so the same trigger covers both representations.
-      if @string_source_method_unresolved && call_name in ("to_s" "empty?" "size" "length" "ord" "starts_with?" "ends_with?" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "ljust" "rjust" "center" "delete" "squeeze" "tr" "ascii?" "blank?" "byte_at" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "__bytes_array" "nfc" "nfd" "nfkc" "nfkd" "normalize" "canonically_equivalent?" "each_grapheme" "graphemes" "scan" "astralize" "__astral_cp" "camelize" "underscore" "snakecase" "dasherize" "humanize" "transliterate" "__translit_fold" "parameterize" "lowercase" "uppercase" "includes?" "to_regex" "constantize" "[]=")
+      if @string_source_method_unresolved && call_name in ("to_s" "empty?" "size" "length" "ord" "starts_with?" "ends_with?" "swapcase" "capitalize" "reverse" "chars" "bytes" "upcase" "downcase" "lpad" "rpad" "ljust" "rjust" "center" "delete" "squeeze" "tr" "ascii?" "blank?" "byte_at" "codepoints" "characters" "each_byte" "each_codepoint" "each_character" "each_line" "lines" "contains?" "levenshtein" "__bytes_array" "nfc" "nfd" "nfkc" "nfkd" "nfkc_casefold" "normalize" "normalized?" "canonicalize" "canonically_equivalent?" "compat_equivalent?" "stream_safe" "valid_unicode?" "verify_unicode!" "casefold" "caseless_equal?" "unicode_upcase" "unicode_downcase" "unicode_titlecase" "display_width" "bidi_direction" "bidi_safe?" "scripts" "mixed_script?" "confusable_skeleton" "confusable?" "words" "unicode_words" "sentences" "line_breaks" "valid_identifier?" "encoding" "encode" "to_byte_array" "each_grapheme" "graphemes" "scan" "astralize" "__astral_cp" "camelize" "underscore" "snakecase" "dasherize" "humanize" "transliterate" "__translit_fold" "parameterize" "lowercase" "uppercase" "includes?" "to_regex" "constantize" "[]=")
         consider_autoload_name("String", defined, registry, seen, pending)
         @string_source_method_unresolved = false
+      if call_name in ("encoding" "encoding_id" "force_encoding" "encode" "to_byte_array" "valid_encoding?" "valid_utf8?" "valid_ascii?" "transcode" "decode" "to_string" "scrub")
+        consider_autoload_name("ByteArray", defined, registry, seen, pending)
       # Lowering synthesizes a per-element call for these Symbol-to-proc forms
       # after this source-AST walk. Mirror that exact domain here so
       # :size/:length cannot bypass String registration.
@@ -1199,6 +1201,8 @@ loader_parse_cache_state = {
     # method table, so register it before the first dynamic dispatch.
     if t in (:typed_array :typed_array_new)
       consider_autoload_name("Array", defined, registry, seen, pending)
+    if t in (:byte_array :byte_array_interp)
+      consider_autoload_name("ByteArray", defined, registry, seen, pending)
     if t == :hash_literal
       consider_autoload_name("Hash", defined, registry, seen, pending)
     # IPv4/CIDR literals carry their runtime type without naming the IPv4
@@ -1211,11 +1215,16 @@ loader_parse_cache_state = {
     # class name; their accessors now require the source-defined type class.
     if t == :ip6 || t == :cidr6
       consider_autoload_name("IPv6", defined, registry, seen, pending)
-    # Date, Datetime, and Time literals share the packed Date runtime type. Their
-    # native accessors now live in core/date.w, so literal-only programs must
-    # register Date's 0xE4 type class even when they never name Date directly.
-    if t == :date || t == :datetime || t == :time
+    # Date and Datetime literals are packed Dates. Accessors live in
+    # core/date.w, so a literal-only program registers Date even when the
+    # source never names it.
+    if t == :date || t == :datetime
       consider_autoload_name("Date", defined, registry, seen, pending)
+    # A time literal lowers to Time.parse after this walk. The synthetic
+    # ClassRef is not in the source AST, so register Time here or the call
+    # receiver is nil.
+    if t == :time
+      consider_autoload_name("Time", defined, registry, seen, pending)
     # Rational literals are packed values whose accessors and conversions
     # live in core/numeric/rational.w.
     if t == :rational
@@ -1389,8 +1398,8 @@ loader_parse_cache_state = {
       return "Array"
     nil
 
-  # The core error hierarchy (core/exception.w, core/error.w and the
-  # subclasses registered in core/tungsten.w). Kept in step with the manifest
+  # The core error hierarchy (core/errors/exception.w, core/errors/error.w and
+  # the subclasses registered in core/tungsten.w). Kept in step with the manifest
   # and with runtime/runtime.c's die_as / w_raise_error_named class names.
   -> runtime_error_class_names
     ["Exception", "Error", "ArgumentError", "RangeError", "TypeError", "NameError", "NoMethodError", "KeyError", "IndexError", "ZeroDivisionError", "OverflowError", "FrozenError", "NotImplementedError", "StopIteration", "IOError", "FileNotFound", "PermissionDenied", "EndOfFile", "NetworkError", "ConnectionRefused", "TimeoutError", "TLSError", "ParseError", "CancelledError", "AssertionError", "SystemExit", "Interrupt"]
@@ -1406,15 +1415,19 @@ loader_parse_cache_state = {
       return nil
     if @autoload_loaded[name] == true
       return nil
+    if name == "Codepoint"
+      consider_autoload_name("Char", defined, registry, seen, pending, force)
+    if name == "ByteArray"
+      consider_autoload_name("Array", defined, registry, seen, pending, force)
     seen[name] = true
     pending.push(name)
     nil
 
   -> cache_version
-    # v25: definitions and closed-world contract calls carry source provenance
-    # in sparse AST metadata. Older cache entries cannot validate Core ownership
-    # or dependency-owned barriers soundly.
-    "loader-ast-v25"
+    # v27: installed packages can import bundled toolchain bit APIs.
+    # v26: a time literal autoloads Time. v25 caches spliced the packed Date
+    # class instead, so a cached program still called Time.parse on nil.
+    "loader-ast-v27"
 
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")
@@ -1662,6 +1675,14 @@ loader_parse_cache_state = {
         if file?(lib_candidate)
           return normalize_load_path(lib_candidate)
       ri += 1
+
+    # Bundled command/library APIs must remain available to packages installed
+    # outside the source checkout. Project and registry resolutions above win.
+    toolchain = env("TUNGSTEN_ROOT")
+    if toolchain != nil && toolchain != "" && toolchain != project_root && !path.starts_with?(".") && !path.starts_with?("/")
+      found = resolve_bit(bit_name, sub_path, toolchain + "/bits", toolchain)
+      if found != nil
+        return found
 
     resolved
 

@@ -18,12 +18,12 @@ check("hash.key_kind.string", key_kinds["same"], 1)
 check("hash.key_kind.symbol", key_kinds[:same], 2)
 check("hash.key_kind.size", key_kinds.size(), 2)
 
-# Char immediates are stable keys.
+# Char and Codepoint immediates are stable keys.
 char_keys = {}
 char_keys[:-A] = 7
-char_keys[:-é] = 9
+char_keys[U+00E9] = 9
 check("hash.char.ascii", char_keys[:-A], 7)
-check("hash.char.unicode", char_keys[:-é], 9)
+check("hash.char.unicode", char_keys[U+00E9], 9)
 
 # Overwriting a live key is not a structural mutation and remains allowed.
 overwrite = {a: 1, b: 2}

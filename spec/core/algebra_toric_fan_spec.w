@@ -1,16 +1,8 @@
-# spec: compiled
 # Complete fans in Z^2 and the smooth toric surfaces they define, plus the
 # lattice-periodic triangulations of Mumford's toric degeneration.
 #   bin/tungsten -o /tmp/algebra-toric-fan-spec spec/core/algebra_toric_fan_spec.w
-#
-# COMPILED LANE ONLY. `ToricFan2D#fano?` reports a Fano surface with a
-# `return false` inside an `Array#each` block, and the native interpreter
-# does not propagate a block `return` out of the enclosing method: it answers
-# `hirzebruch(2).fano?` = true (compiled: false, which is correct — F_2
-# carries a (-2)-curve). The Fano assertions below are the mathematically
-# correct ones and run on the compiled engine.
 
-use algebra
+use core/algebra/toric_fan
 
 -> toric_fan_check(name, condition)
   raise "FAIL " + name if !condition
@@ -175,12 +167,8 @@ toric_fan_check("validate.duplicate_rays",
 # Clockwise order: det(v_0, v_1) < 0.
 toric_fan_check("validate.clockwise",
                 toric_fan_raises?(->() ToricFan2D.new([[0, 1], [1, 0], [-1, -1]])))
-# BUG: core/algebra/toric_fan.w:19 raises the double-quoted message
-# "a fan ray is an [x, y] integer vector", whose bracketed text interpolates,
-# so the guard dies on undefined `x` instead of raising its own message --
-# uncatchable on the compiled engine. Restore when the message is escaped.
-# toric_fan_check("validate.ray_shape",
-#                 toric_fan_raises?(->() ToricFan2D.new([[1, 0], [0, 1], [-1]])))
+toric_fan_check("validate.ray_shape",
+                toric_fan_raises?(->() ToricFan2D.new([[1, 0], [0, 1], [-1]])))
 toric_fan_check("validate.not_cyclic",
                 toric_fan_raises?(->() ToricFan2D.new([[1, 0], [0, 1], [1, 1], [-1, -1]])))
 

@@ -1,3 +1,5 @@
+use algebra/polynomial
+
 # Polynomial matrices over a univariate polynomial ring F[z].
 #
 # Row degrees, the leading row coefficient matrix, row reduction by

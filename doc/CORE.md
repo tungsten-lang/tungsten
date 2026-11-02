@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(676 total), grouped by area, with its declaration, a one-line
+(694 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -22,10 +22,17 @@ summary from the source header, and a link to the source.
 | `BigArray` | `+ BigArray` | Same shape as Array, but i64 fields for >2^32 elements. Used for | [`core/big_array.w`](../core/big_array.w) |
 | `BitOps` | `+ BitOps` | Fixed-width bit operations. | [`core/bit_ops.w`](../core/bit_ops.w) |
 | `BlankSlate` | `+ BlankSlate` | BlankSlate is the parent class of all classes in Tungsten. It's an explicit blank class. | [`core/blank_slate.w`](../core/blank_slate.w) |
-| `Bool` | `+ Bool` | Bool — true (subtag 0x2) and false (subtag 0x1) singletons | [`core/bool.w`](../core/bool.w) |
+| `Boolean` | `+ Boolean` | Boolean — true (subtag 0x2) and false (subtag 0x1) singletons. | [`core/boolean.w`](../core/boolean.w) |
+| `True` | `+ True < Boolean` | — | [`core/boolean.w`](../core/boolean.w) |
+| `False` | `+ False < Boolean` | — | [`core/boolean.w`](../core/boolean.w) |
 | `BoolArray` | `+ BoolArray` | Bit-packed boolean array. The dedicated WBoolArray struct was folded | [`core/bool_array.w`](../core/bool_array.w) |
 | `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. The dedicated | [`core/byte_array.w`](../core/byte_array.w) |
-| `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
+| `StreamDecoder` | — | — | [`core/byte_array.w`](../core/byte_array.w) |
+| `StreamEncoder` | — | — | [`core/byte_array.w`](../core/byte_array.w) |
+| `Char` | `+ Char < Codepoint` | Char — 7-bit ASCII character (0..127). | [`core/char.w`](../core/char.w) |
+| `Codepoint` | `+ Codepoint` | Codepoint — 21-bit Unicode scalar value (U+0000..U+10FFFF, excluding surrogates). | [`core/codepoint.w`](../core/codepoint.w) |
+| `Grapheme` | `+ Grapheme` | Grapheme — Unicode extended grapheme cluster (UAX #29). | [`core/grapheme.w`](../core/grapheme.w) |
+| `Unicode` | `+ Unicode` | Unicode — Versioned Unicode Standard algorithms & UCD properties. | [`core/unicode.w`](../core/unicode.w) |
 | `Channel` | `+ Channel` | — | [`core/channel.w`](../core/channel.w) |
 | `ChannelReceiveResult` | `+ ChannelReceiveResult` | Channel — a thread-safe FIFO for goroutine communication. | [`core/channel.w`](../core/channel.w) |
 | `ChannelTryReceiveResult` | `+ ChannelTryReceiveResult` | ChannelTryReceiveResult — nonblocking/timed receive outcome with three states. | [`core/channel.w`](../core/channel.w) |
@@ -35,6 +42,7 @@ summary from the source header, and a link to the source.
 | `Class` | `+ Class` | — | [`core/class.w`](../core/class.w) |
 | `Closure` | `+ Closure` | — | [`core/closure.w`](../core/closure.w) |
 | `CIDR` | `+ CIDR` | — | [`core/cidr.w`](../core/cidr.w) |
+| `Inet` | `+ Inet < CIDR` | — | [`core/cidr.w`](../core/cidr.w) |
 | `Color` | `+ Color` | — | [`core/color.w`](../core/color.w) |
 | `Crypto` | `+ Crypto` | — | [`core/crypto.w`](../core/crypto.w) |
 | `Currency` | `+ Currency` | Currency — monetary value with currency symbol (tag 0xFFFD) | [`core/currency.w`](../core/currency.w) |
@@ -42,28 +50,29 @@ summary from the source header, and a link to the source.
 | `Date` | `+ Date` | Date — validated packed proleptic-Gregorian calendar and datetime values. | [`core/date.w`](../core/date.w) |
 | `Digest` | `+ Digest` | — | [`core/digest.w`](../core/digest.w) |
 | `Dir` | `+ Dir` | — | [`core/dir.w`](../core/dir.w) |
-| `Directory` | `+ Directory` | — | [`core/directory.w`](../core/directory.w) |
+| `Directory` | `+ Directory < Dir` | — | [`core/dir.w`](../core/dir.w) |
 | `Duration` | `+ Duration` | Duration — time span (tag 0xFFFF). Two-component representation: | [`core/duration.w`](../core/duration.w) |
 | `Env` | `+ Env` | Env — the current process environment. | [`core/env.w`](../core/env.w) |
-| `Exception` | `+ Exception` | Exception — the root of everything `raise` can carry. Treat it as | [`core/exception.w`](../core/exception.w) |
-| `Error` | `+ Error < Exception` | Error — the base class of every rescuable error. | [`core/error.w`](../core/error.w) |
-| `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
 | `File` | `+ File` | File — whole-file I/O, metadata, paths, and filesystem operations. | [`core/file.w`](../core/file.w) |
 | `FileStat` | `+ FileStat` | FileStat — portable POSIX file metadata with nanosecond timestamps. | [`core/file.w`](../core/file.w) |
 | `FileHandle` | `+ FileHandle` | FileHandle — an open file from File.open, read and written incrementally | [`core/file.w`](../core/file.w) |
 | `Future` | `+ Future` | Future — read-only handle for asynchronous settlement and composition. | [`core/future.w`](../core/future.w) |
 | `FutureState` | `+ FutureState` | Future/Promise shared state and read-only Future facade. | [`core/future.w`](../core/future.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
+| `HashCustom` | `+ HashCustom` | Custom hash table with selectable hash function. | [`core/hash_custom.w`](../core/hash_custom.w) |
 | `HTTP` | `+ HTTP` | HTTP — HTTP/1.1 requests over event-loop-backed Socket and TLS transports. | [`core/http.w`](../core/http.w) |
 | `HTTPResponse` | `+ HTTPResponse` | HTTPResponse — immutable buffered HTTP response. | [`core/http.w`](../core/http.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |
-| `Instant` | `+ Instant` | Instant — millisecond-precision timestamp (tag 0xFFF8). | [`core/instant.w`](../core/instant.w) |
+| `Instant` | `+ Instant` | Instant — millisecond-precision UTC timestamp. | [`core/instant.w`](../core/instant.w) |
 | `Integer` | `+ Integer < Real` | Integer — the generic, representation-independent integer family. | [`core/integer.w`](../core/integer.w) |
 | `JSON` | `+ JSON` | JSON encoder/decoder — interface and default implementation. | [`core/json.w`](../core/json.w) |
+| `Locale` | `+ Locale` | Locale — CLDR-style locale data: currency, calendar names, patterns, | [`core/locale.w`](../core/locale.w) |
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |
 | `Matrix` | — | — | [`core/matrix.w`](../core/matrix.w) |
 | `Mmap` | `+ Mmap` | — | [`core/mmap.w`](../core/mmap.w) |
+| `Month` | `+ Month` | — | [`core/month.w`](../core/month.w) |
+| `Multiset` | `+ Multiset` | — | [`core/multiset.w`](../core/multiset.w) |
 | `LinAlg` | `+ LinAlg` | — | [`core/linalg.w`](../core/linalg.w) |
 | `DenseLUFactor` | `+ DenseLUFactor` | A reusable dense LU factorization. The factor and pivot buffers are | [`core/linalg.w`](../core/linalg.w) |
 | `DenseCholeskyFactor` | `+ DenseCholeskyFactor` | Reusable SPD Cholesky factor. The retained row-major lower triangle is the | [`core/linalg.w`](../core/linalg.w) |
@@ -91,26 +100,6 @@ summary from the source header, and a link to the source.
 | `QuadratureResult` | — | — | [`core/calculus.w`](../core/calculus.w) |
 | `RadialMellinTransform` | `+ RadialMellinTransform` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
 | `CohnElkiesAsymptotics` | `+ CohnElkiesAsymptotics` | — | [`core/calculus/radial_mellin.w`](../core/calculus/radial_mellin.w) |
-| `GaussianInteger` | `+ GaussianInteger` | Z[i], the Gaussian integers: complex numbers a + bi with a, b in Z. | [`core/algebra/gaussian_integer.w`](../core/algebra/gaussian_integer.w) |
-| `EisensteinInteger` | `+ EisensteinInteger` | Z[omega], the Eisenstein integers: a + b*omega with omega a primitive cube | [`core/algebra/eisenstein_integer.w`](../core/algebra/eisenstein_integer.w) |
-| `SmithNormalForm` | `+ SmithNormalForm` | Smith normal form of an integer matrix. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
-| `SmithDecomposition` | `+ SmithDecomposition` | U A V = D, with everything an integer matrix and U, V unimodular. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
-| `SmithDecompositionCertificate` | `+ SmithDecompositionCertificate` | Replays U A V and the inverse products, checks the diagonal shape and the | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
-| `FinitelyGeneratedAbelianGroup` | `+ FinitelyGeneratedAbelianGroup` | A finitely generated abelian group in invariant-factor form: | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
-| `FinitelyPresentedGroup` | `+ FinitelyPresentedGroup` | Finitely presented groups, their abelianisations, and Seifert fibrations. | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
-| `SeifertFibration` | `+ SeifertFibration` | A Seifert fibration over the 2-sphere with unnormalised Seifert invariants | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
-| `IntegerChainComplex` | `+ IntegerChainComplex` | Chain complexes of free abelian groups and their integral homology. | [`core/algebra/chain_complex.w`](../core/algebra/chain_complex.w) |
-| `IntegerChainComplexCertificate` | `+ IntegerChainComplexCertificate` | Re-checks d d = 0, replays every degree's ranks against the Smith forms, | [`core/algebra/chain_complex.w`](../core/algebra/chain_complex.w) |
-| `ToricFan2D` | `+ ToricFan2D` | Complete fans in the plane and the smooth toric surfaces they define, plus | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
-| `LatticeTriangulation` | `+ LatticeTriangulation` | A Z^2-periodic triangulation of the plane with vertex set Z^2 — the input | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
-| `FiniteLattice` | `+ FiniteLattice` | Finite lattices and Knaster-Tarski fixpoints. | [`core/algebra/finite_lattice.w`](../core/algebra/finite_lattice.w) |
-| `FdField` | `+ FdField` | ---- the field --------------------------------------------------------------- | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
-| `FdAlgebra` | `+ FdAlgebra` | ---- the algebra --------------------------------------------------------------- | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
-| `FdModule` | `+ FdModule` | A finite module given by the matrices of all basis vectors (column j of | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
-| `FdResolution` | `+ FdResolution` | Minimal projective resolution. Degree n has generators gens[n] (idempotent | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
-| `RoseGraph` | `+ RoseGraph` | ---- the graph --------------------------------------------------------------------- | [`core/algebra/coned_graphs.w`](../core/algebra/coned_graphs.w) |
-| `ConeAbelianization` | `+ ConeAbelianization` | Z^r modulo the lattice spanned by relation vectors, kept in Hermite form by | [`core/algebra/coned_graphs.w`](../core/algebra/coned_graphs.w) |
-| `CosetEnumeration` | `+ CosetEnumeration` | — | [`core/algebra/coset_enumeration.w`](../core/algebra/coset_enumeration.w) |
 | `Combinatorics` | — | — | [`core/combinatorics.w`](../core/combinatorics.w) |
 | `PolyominoEnumeration` | `+ PolyominoEnumeration` | Enumeration of polyominoes by cell count. | [`core/combinatorics/polyomino.w`](../core/combinatorics/polyomino.w) |
 | `LatticeAnimal` | `+ LatticeAnimal` | Enumeration of animals in a given lattice: grow shapes one cell at a time | [`core/combinatorics/lattice_animal.w`](../core/combinatorics/lattice_animal.w) |
@@ -228,7 +217,7 @@ summary from the source header, and a link to the source.
 | `VideoSegment` | `+ VideoSegment` | VideoSegment — one closed GOP: compressed samples in decode order plus the | [`core/media/video_encoder.w`](../core/media/video_encoder.w) |
 | `Mux` | `+ Mux` | Mux — an MP4 or MOV master from encoded segments, audio and timecode, with | [`core/media/mux.w`](../core/media/mux.w) |
 | `MediaVerify` | `+ MediaVerify` | MediaVerify — read a master back with AVFoundation and check the A/V | [`core/media/verify.w`](../core/media/verify.w) |
-| `Scaler` | `+ Scaler` | Scaler — high-quality resampling of RGBA frames: Lanczos-3, bicubic or | [`core/media/scaler.w`](../core/media/scaler.w) |
+| `Scaler` | `+ Scaler` | Scaler — high-quality resampling of RGBA frames and 8/10-bit planes: Lanczos-3, bicubic or | [`core/media/scaler.w`](../core/media/scaler.w) |
 | `VideoDecoder` | `+ VideoDecoder` | VideoDecoder and Transcode — read masters and segments back with | [`core/media/transcode.w`](../core/media/transcode.w) |
 | `Transcode` | `+ Transcode` | Transcode — decode, scale, encode and mux in one pass: share copies, 4K masters, | [`core/media/transcode.w`](../core/media/transcode.w) |
 | `ColorSpace` | `+ ColorSpace` | ColorSpace — RGB colour spaces (primaries, white point and transfer | [`core/color_space.w`](../core/color_space.w) |
@@ -254,7 +243,7 @@ summary from the source header, and a link to the source.
 | `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
 | `MAC` | `+ MAC` | MAC — heap-backed 48-bit link-layer address with native byte predicates. | [`core/mac.w`](../core/mac.w) |
 | `Mutex` | `+ Mutex` | Mutex — a non-reentrant mutual-exclusion lock. | [`core/mutex.w`](../core/mutex.w) |
-| `Module` | `+ Module` | — | [`core/module.w`](../core/module.w) |
+| `Module` | `+ Module` | Module — a namespace and mixin container of methods and constants. | [`core/module.w`](../core/module.w) |
 | `Nil` | `+ Nil` | — | [`core/nil.w`](../core/nil.w) |
 | `Number` | `+ Number` | Number — root of the numeric tower. Every concrete number is either a | [`core/number.w`](../core/number.w) |
 | `Object` | `+ Object < BlankSlate` | Object is the default root of all Tungsten objects. Object inherits from BlankSlate (the | [`core/object.w`](../core/object.w) |
@@ -271,6 +260,7 @@ summary from the source header, and a link to the source.
 | `Regex` | `+ Regex` | Regex — a homegrown regular-expression engine, written in Tungsten. | [`core/regex.w`](../core/regex.w) |
 | `RegexMatch` | `+ RegexMatch` | RegexMatch — structured numbered/named captures and codepoint spans. | [`core/regex.w`](../core/regex.w) |
 | `Sandbox` | `+ Sandbox` | Sandboxed execution — the runtime's gate over everything outside the | [`core/sandbox.w`](../core/sandbox.w) |
+| `Set` | `+ Set` | Set — mathematical set: unique elements, unordered, O(1) membership. | [`core/set.w`](../core/set.w) |
 | `SmallArray` | `+ SmallArray` | Frozen, stack-allocatable, packed array. Up to 255 elements. | [`core/small_array.w`](../core/small_array.w) |
 | `Socket` | `+ Socket` | Socket — nonblocking TCP sockets integrated with Tungsten's event loop. | [`core/socket.w`](../core/socket.w) |
 | `String` | `+ String` | Tungsten strings are immutable UTF-8 byte sequences. `size` and `length` | [`core/string.w`](../core/string.w) |
@@ -284,6 +274,7 @@ summary from the source header, and a link to the source.
 | `System` | `+ System` | — | [`core/system.w`](../core/system.w) |
 | `Table` | `+ Table` | — | [`core/table.w`](../core/table.w) |
 | `Thread` | `+ Thread` | Thread — a native OS thread (pthread). | [`core/thread.w`](../core/thread.w) |
+| `Time` | `+ Time` | Time — time-of-day value (no date component). | [`core/time.w`](../core/time.w) |
 | `Timer` | `+ Timer` | Timer — monotonic one-shot and fixed-rate timers. | [`core/timer.w`](../core/timer.w) |
 | `TLS` | `+ TLS` | TLS — verified client and configured-server transport facade. | [`core/tls.w`](../core/tls.w) |
 | `Token` | `+ Token` | — | [`core/token.w`](../core/token.w) |
@@ -296,7 +287,27 @@ summary from the source header, and a link to the source.
 | `FlatTorusOrbit` | `+ FlatTorusOrbit` | — | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitExtremum` | `+ FlatTorusOrbitExtremum` | — | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitStraightening` | `+ FlatTorusOrbitStraightening` | An exact GL(n,Z) coordinate change which sends an integer torus direction | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
-| `Algebra` | `+ Algebra` | — | [`core/algebra.w`](../core/algebra.w) |
+| `Algebra` | `+ Algebra` | Exact algebraic structures: coefficient fields, polynomial rings, ideals, | [`core/algebra.w`](../core/algebra.w) |
+| `GaussianInteger` | `+ GaussianInteger` | Z[i], the Gaussian integers: complex numbers a + bi with a, b in Z. | [`core/algebra/gaussian_integer.w`](../core/algebra/gaussian_integer.w) |
+| `EisensteinInteger` | `+ EisensteinInteger` | Z[omega], the Eisenstein integers: a + b*omega with omega a primitive cube | [`core/algebra/eisenstein_integer.w`](../core/algebra/eisenstein_integer.w) |
+| `SmithNormalForm` | `+ SmithNormalForm` | Smith normal form of an integer matrix. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `SmithDecomposition` | `+ SmithDecomposition` | U A V = D, with everything an integer matrix and U, V unimodular. | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `SmithDecompositionCertificate` | `+ SmithDecompositionCertificate` | Replays U A V and the inverse products, checks the diagonal shape and the | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `FinitelyGeneratedAbelianGroup` | `+ FinitelyGeneratedAbelianGroup` | A finitely generated abelian group in invariant-factor form: | [`core/algebra/smith_normal_form.w`](../core/algebra/smith_normal_form.w) |
+| `FinitelyPresentedGroup` | `+ FinitelyPresentedGroup` | Finitely presented groups, their abelianisations, and Seifert fibrations. | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
+| `SeifertFibration` | `+ SeifertFibration` | A Seifert fibration over the 2-sphere with unnormalised Seifert invariants | [`core/algebra/group_presentation.w`](../core/algebra/group_presentation.w) |
+| `IntegerChainComplex` | `+ IntegerChainComplex` | Chain complexes of free abelian groups and their integral homology. | [`core/algebra/chain_complex.w`](../core/algebra/chain_complex.w) |
+| `IntegerChainComplexCertificate` | `+ IntegerChainComplexCertificate` | Re-checks d d = 0, replays every degree's ranks against the Smith forms, | [`core/algebra/chain_complex.w`](../core/algebra/chain_complex.w) |
+| `ToricFan2D` | `+ ToricFan2D` | Complete fans in the plane and the smooth toric surfaces they define, plus | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
+| `LatticeTriangulation` | `+ LatticeTriangulation` | A Z^2-periodic triangulation of the plane with vertex set Z^2 — the input | [`core/algebra/toric_fan.w`](../core/algebra/toric_fan.w) |
+| `FiniteLattice` | `+ FiniteLattice` | Finite lattices and Knaster-Tarski fixpoints. | [`core/algebra/finite_lattice.w`](../core/algebra/finite_lattice.w) |
+| `FdField` | `+ FdField` | ---- the field --------------------------------------------------------------- | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
+| `FdAlgebra` | `+ FdAlgebra` | ---- the algebra --------------------------------------------------------------- | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
+| `FdModule` | `+ FdModule` | A finite module given by the matrices of all basis vectors (column j of | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
+| `FdResolution` | `+ FdResolution` | Minimal projective resolution. Degree n has generators gens[n] (idempotent | [`core/algebra/fd_algebra.w`](../core/algebra/fd_algebra.w) |
+| `RoseGraph` | `+ RoseGraph` | ---- the graph --------------------------------------------------------------------- | [`core/algebra/coned_graphs.w`](../core/algebra/coned_graphs.w) |
+| `ConeAbelianization` | `+ ConeAbelianization` | Z^r modulo the lattice spanned by relation vectors, kept in Hermite form by | [`core/algebra/coned_graphs.w`](../core/algebra/coned_graphs.w) |
+| `CosetEnumeration` | `+ CosetEnumeration` | — | [`core/algebra/coset_enumeration.w`](../core/algebra/coset_enumeration.w) |
 | `ArithmeticCircuitNode` | `+ ArithmeticCircuitNode` | — | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
 | `ArithmeticCircuit` | `+ ArithmeticCircuit` | — | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
 | `ArithmeticCircuitEvaluationCertificate` | `+ ArithmeticCircuitEvaluationCertificate` | — | [`core/algebra/arithmetic_circuit.w`](../core/algebra/arithmetic_circuit.w) |
@@ -319,6 +330,8 @@ summary from the source header, and a link to the source.
 | `FiniteField` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `PolyFast` | `+ PolyFast` | — | [`core/algebra/poly_fast.w`](../core/algebra/poly_fast.w) |
 | `NttMultiply` | `+ NttMultiply` | — | [`core/algebra/ntt.w`](../core/algebra/ntt.w) |
+| `PolynomialMatrix` | `+ PolynomialMatrix` | Polynomial matrices over a univariate polynomial ring F[z]. | [`core/algebra/polynomial_matrix.w`](../core/algebra/polynomial_matrix.w) |
+| `PolynomialMultivariateFactorization` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `FiniteFieldModulusCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `FiniteFieldMinimalPolynomialCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `SimpleExtensionField` | — | — | [`core/algebra.w`](../core/algebra.w) |
@@ -611,6 +624,9 @@ summary from the source header, and a link to the source.
 | `ManinSymbol` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `WeightTwoModularSymbols` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `WeightTwoModularSymbolsCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `RationalWeightTwoNewform` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `WeightTwoHeckeEigenpacketDecomposition` | — | — | [`core/algebra.w`](../core/algebra.w) |
+| `WeightTwoHeckeEigenpacket` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `HyperellipticCurve` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `MumfordDivisor` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `HyperellipticJacobian` | — | — | [`core/algebra.w`](../core/algebra.w) |
@@ -619,31 +635,33 @@ summary from the source header, and a link to the source.
 | `WeilSexticGaloisCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `ModularIrreducibilityCertificate` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `WeilCubic` | — | — | [`core/algebra.w`](../core/algebra.w) |
-| `ArgumentError` | `+ ArgumentError < Error` | ArgumentError — raised when an argument's value is unacceptable, | [`core/argument_error.w`](../core/argument_error.w) |
-| `RangeError` | `+ RangeError < Error` | RangeError — raised when a value falls outside the range an | [`core/range_error.w`](../core/range_error.w) |
-| `TypeError` | `+ TypeError < Error` | TypeError — raised when a value of the wrong type reaches an | [`core/type_error.w`](../core/type_error.w) |
-| `NameError` | `+ NameError < Error` | NameError — a name (variable, function, constant) could not be resolved. | [`core/name_error.w`](../core/name_error.w) |
-| `NoMethodError` | `+ NoMethodError < NameError` | NoMethodError — the receiver has no method of that name. | [`core/no_method_error.w`](../core/no_method_error.w) |
-| `KeyError` | `+ KeyError < Error` | KeyError — a required key is missing from a Hash or map. | [`core/key_error.w`](../core/key_error.w) |
-| `IndexError` | `+ IndexError < Error` | IndexError — an index is outside the receiver's bounds. | [`core/index_error.w`](../core/index_error.w) |
-| `ZeroDivisionError` | `+ ZeroDivisionError < Error` | ZeroDivisionError — integer or exact division by zero. | [`core/zero_division_error.w`](../core/zero_division_error.w) |
-| `OverflowError` | `+ OverflowError < Error` | OverflowError — an integer operation left its declared width under trap mode. | [`core/overflow_error.w`](../core/overflow_error.w) |
-| `FrozenError` | `+ FrozenError < Error` | FrozenError — a frozen (immutable or shared) value was mutated. | [`core/frozen_error.w`](../core/frozen_error.w) |
-| `NotImplementedError` | `+ NotImplementedError < Error` | NotImplementedError — an abstract or declared-only method has no body here. | [`core/not_implemented_error.w`](../core/not_implemented_error.w) |
-| `StopIteration` | `+ StopIteration < Error` | StopIteration — an enumerator has been exhausted. | [`core/stop_iteration.w`](../core/stop_iteration.w) |
-| `IOError` | `+ IOError < Error` | IOError — a file, stream, or device operation failed. | [`core/io_error.w`](../core/io_error.w) |
-| `FileNotFound` | `+ FileNotFound < IOError` | FileNotFound — the named file or directory does not exist. | [`core/file_not_found.w`](../core/file_not_found.w) |
-| `PermissionDenied` | `+ PermissionDenied < IOError` | PermissionDenied — the process lacks permission for the operation. | [`core/permission_denied.w`](../core/permission_denied.w) |
-| `EndOfFile` | `+ EndOfFile < IOError` | EndOfFile — a read past the end of the stream. | [`core/end_of_file.w`](../core/end_of_file.w) |
-| `NetworkError` | `+ NetworkError < Error` | NetworkError — a socket, DNS, or protocol operation failed. | [`core/network_error.w`](../core/network_error.w) |
-| `ConnectionRefused` | `+ ConnectionRefused < NetworkError` | ConnectionRefused — the remote host refused the connection. | [`core/connection_refused.w`](../core/connection_refused.w) |
-| `TimeoutError` | `+ TimeoutError < NetworkError` | TimeoutError — an operation exceeded its deadline. | [`core/timeout_error.w`](../core/timeout_error.w) |
-| `TLSError` | `+ TLSError < NetworkError` | TLSError — a TLS handshake, certificate, or record failure. | [`core/tls_error.w`](../core/tls_error.w) |
-| `ParseError` | `+ ParseError < Error` | ParseError — malformed input to a parser (JSON, CSV, Date, URL, ...). | [`core/parse_error.w`](../core/parse_error.w) |
-| `CancelledError` | `+ CancelledError < Error` | CancelledError — the running task was cancelled by its owner. | [`core/cancelled_error.w`](../core/cancelled_error.w) |
-| `AssertionError` | `+ AssertionError < Error` | AssertionError — a spec expectation or assertion failed. | [`core/assertion_error.w`](../core/assertion_error.w) |
-| `SystemExit` | `+ SystemExit < Exception` | SystemExit — the program is exiting; not caught by a rescue of Error. | [`core/system_exit.w`](../core/system_exit.w) |
-| `Interrupt` | `+ Interrupt < Exception` | Interrupt — the process received an interrupt signal; not caught by a rescue of Error. | [`core/interrupt.w`](../core/interrupt.w) |
+| `Exception` | `+ Exception` | Exception — the root of everything `raise` can carry. Treat it as | [`core/errors/exception.w`](../core/errors/exception.w) |
+| `Error` | `+ Error < Exception` | Error — the base class of every rescuable error. | [`core/errors/error.w`](../core/errors/error.w) |
+| `ArgumentError` | `+ ArgumentError < Error` | ArgumentError — raised when an argument's value is unacceptable, | [`core/errors/argument_error.w`](../core/errors/argument_error.w) |
+| `RangeError` | `+ RangeError < Error` | RangeError — raised when a value falls outside the range an | [`core/errors/range_error.w`](../core/errors/range_error.w) |
+| `TypeError` | `+ TypeError < Error` | TypeError — raised when a value of the wrong type reaches an | [`core/errors/type_error.w`](../core/errors/type_error.w) |
+| `NameError` | `+ NameError < Error` | NameError — a name (variable, function, constant) could not be resolved. | [`core/errors/name_error.w`](../core/errors/name_error.w) |
+| `NoMethodError` | `+ NoMethodError < NameError` | NoMethodError — the receiver has no method of that name. | [`core/errors/no_method_error.w`](../core/errors/no_method_error.w) |
+| `KeyError` | `+ KeyError < Error` | KeyError — a required key is missing from a Hash or map. | [`core/errors/key_error.w`](../core/errors/key_error.w) |
+| `IndexError` | `+ IndexError < Error` | IndexError — an index is outside the receiver's bounds. | [`core/errors/index_error.w`](../core/errors/index_error.w) |
+| `ZeroDivisionError` | `+ ZeroDivisionError < Error` | ZeroDivisionError — integer or exact division by zero. | [`core/errors/zero_division_error.w`](../core/errors/zero_division_error.w) |
+| `OverflowError` | `+ OverflowError < Error` | OverflowError — an integer operation left its declared width under trap mode. | [`core/errors/overflow_error.w`](../core/errors/overflow_error.w) |
+| `FrozenError` | `+ FrozenError < Error` | FrozenError — a frozen (immutable or shared) value was mutated. | [`core/errors/frozen_error.w`](../core/errors/frozen_error.w) |
+| `NotImplementedError` | `+ NotImplementedError < Error` | NotImplementedError — an abstract or declared-only method has no body here. | [`core/errors/not_implemented_error.w`](../core/errors/not_implemented_error.w) |
+| `StopIteration` | `+ StopIteration < Error` | StopIteration — an enumerator has been exhausted. | [`core/errors/stop_iteration.w`](../core/errors/stop_iteration.w) |
+| `IOError` | `+ IOError < Error` | IOError — a file, stream, or device operation failed. | [`core/errors/io_error.w`](../core/errors/io_error.w) |
+| `FileNotFound` | `+ FileNotFound < IOError` | FileNotFound — the named file or directory does not exist. | [`core/errors/file_not_found.w`](../core/errors/file_not_found.w) |
+| `PermissionDenied` | `+ PermissionDenied < IOError` | PermissionDenied — the process lacks permission for the operation. | [`core/errors/permission_denied.w`](../core/errors/permission_denied.w) |
+| `EndOfFile` | `+ EndOfFile < IOError` | EndOfFile — a read past the end of the stream. | [`core/errors/end_of_file.w`](../core/errors/end_of_file.w) |
+| `NetworkError` | `+ NetworkError < Error` | NetworkError — a socket, DNS, or protocol operation failed. | [`core/errors/network_error.w`](../core/errors/network_error.w) |
+| `ConnectionRefused` | `+ ConnectionRefused < NetworkError` | ConnectionRefused — the remote host refused the connection. | [`core/errors/connection_refused.w`](../core/errors/connection_refused.w) |
+| `TimeoutError` | `+ TimeoutError < NetworkError` | TimeoutError — an operation exceeded its deadline. | [`core/errors/timeout_error.w`](../core/errors/timeout_error.w) |
+| `TLSError` | `+ TLSError < NetworkError` | TLSError — a TLS handshake, certificate, or record failure. | [`core/errors/tls_error.w`](../core/errors/tls_error.w) |
+| `ParseError` | `+ ParseError < Error` | ParseError — malformed input to a parser (JSON, CSV, Date, URL, ...). | [`core/errors/parse_error.w`](../core/errors/parse_error.w) |
+| `CancelledError` | `+ CancelledError < Error` | CancelledError — the running task was cancelled by its owner. | [`core/errors/cancelled_error.w`](../core/errors/cancelled_error.w) |
+| `AssertionError` | `+ AssertionError < Error` | AssertionError — a spec expectation or assertion failed. | [`core/errors/assertion_error.w`](../core/errors/assertion_error.w) |
+| `SystemExit` | `+ SystemExit < Exception` | SystemExit — the program is exiting; not caught by a rescue of Error. | [`core/errors/system_exit.w`](../core/errors/system_exit.w) |
+| `Interrupt` | `+ Interrupt < Exception` | Interrupt — the process received an interrupt signal; not caught by a rescue of Error. | [`core/errors/interrupt.w`](../core/errors/interrupt.w) |
 
 ## Numeric tower
 
@@ -655,7 +673,7 @@ summary from the source header, and a link to the source.
 | `BF16` | `+ BF16 < Float` | Brain float 16 | [`core/numeric/bfloat16.w`](../core/numeric/bfloat16.w) |
 | `BigComplex` | `+ BigComplex < Complex` | — | [`core/numeric/big_complex.w`](../core/numeric/big_complex.w) |
 | `BigDecimal` | `+ BigDecimal < Decimal` | — | [`core/numeric/big_decimal.w`](../core/numeric/big_decimal.w) |
-| `BigInt` | `+ BigInt` | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
+| `BigInt` | `+ BigInt < Int` | — | [`core/numeric/big_int.w`](../core/numeric/big_int.w) |
 | `Int` | `+ Int < Integer` | Int — Tungsten's inline, auto-promoting integer implementation. | [`core/numeric/int.w`](../core/numeric/int.w) |
 | `IntegerFactorization` | `+ IntegerFactorization` | — | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |
 | `PrimePower` | `+ PrimePower` | Exact prime-power factorization values. | [`core/numeric/integer_factorization.w`](../core/numeric/integer_factorization.w) |

@@ -41,6 +41,21 @@
     # below, which is reached only for :object receivers.
     if name == "<=>" && args.size() == 1 && !(type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :object)
       other = args[0]
+      if (type(recv) == "ByteArray" && type(other) == "ByteArray") || (type(recv) == "Array" && type(other) == "Array")
+        na = recv.size()
+        nb = other.size()
+        lim = na < nb ? na : nb
+        idx = 0
+        while idx < lim
+          cmp = dispatch_method(recv[idx], "<=>", [other[idx]], nil, nil)
+          if cmp == nil || cmp != 0
+            return cmp
+          idx += 1
+        if na < nb
+          return -1
+        if na > nb
+          return 1
+        return 0
       if recv < other
         return -1
       if recv > other
@@ -190,6 +205,8 @@
           return ccall("w_mod", recv, args[0])
         return ccall("w_bigint_sub", recv, args[0])
       m = lookup_method(primitive_class, name, args.size(), block != nil, args)
+      if m == nil && primitive_class[:name] == "ByteArray" && @classes.has_key?("Array")
+        m = lookup_method(@classes["Array"], name, args.size(), block != nil, args)
       # BigInt#isqrt's one/two-limb native leaf is an embedded LLVM function,
       # which the tree walker cannot execute. Delegate only the Core-owned
       # body to its exact retained C boundary; a user reopen has another file
@@ -486,7 +503,11 @@
     if t == "Hash" && recv.has_key?(:rt) && recv[:rt] == :range
       return nil
     if t == "Array"
-      class_name = "Array"
+      if ccall("w_native_data_field", recv, "ebits") == 8
+        try_autoload_class("Array")
+        class_name = "ByteArray"
+      else
+        class_name = "Array"
     elsif t == "String"
       class_name = "String"
     elsif t == "Int"
@@ -503,7 +524,7 @@
     elsif t == "NilClass"
       class_name = "Nil"
     elsif t == "TrueClass" || t == "FalseClass"
-      class_name = "Bool"
+      class_name = "Boolean"
     # These handles remain publicly Unknown; the private numeric support
     # boundary exists only so the tree walker can find their source facades.
     if class_name == nil && t == "Unknown"
@@ -531,6 +552,8 @@
       # class through `type`. Literal syntax never names the class, so lazy
       # autoload may not have fired before a bodied helper is called.
       if tn != nil
+        if tn == "Char" && ((recv$value >> 25) & 0x1FFFFF) >= 128
+          tn = "Codepoint"
         try_autoload_class(tn)
         if @classes.has_key?(tn)
           return @classes[tn]
@@ -549,8 +572,8 @@
     if w_class == nil
       return false
     cname = w_class[:name]
-    if cname == "Array"
-      return name in ("flags" "ebits" "start" "size" "cap" "slots")
+    if cname == "Array" || cname == "ByteArray"
+      return name in ("flags" "ebits" "encoding_id" "start" "size" "cap" "slots")
     if cname == "BigArray"
       return name in ("ebits" "flags" "start" "size" "cap" "slots")
     if cname == "SmallArray"
@@ -574,7 +597,7 @@
   -> native_data_field_writable?(w_class, name)
     if w_class == nil
       return false
-    (w_class[:name] == "BigInt" && name == "size") || (w_class[:name] == "Array" && name in ("start" "size"))
+    (w_class[:name] == "BigInt" && name == "size") || (w_class[:name] in ("Array" "ByteArray") && name in ("start" "size" "encoding_id"))
 
   -> native_data_field_declared?(w_class, name)
     w_class != nil && w_class[:data_fields] != nil && w_class[:data_fields].has_key?(name)
@@ -1078,6 +1101,8 @@
     # barrier); closures that capture method-locals keep write-through
     # because their block_env has no barrier and chains to this env.
     method_env = Environment.new(@env, true)
+    # Closures inherit their creating method's lexical constant scope.
+    method_env.define("__lexical_class__", method[:w_class])
     # Own a __block__ slot per frame (nil when no block arrives) so
     # block? answers for THIS call — without the slot, the lookup
     # would walk past the barrier into a caller frame's binding. The

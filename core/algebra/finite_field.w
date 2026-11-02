@@ -1,3 +1,5 @@
+use algebra/field
+
 # Exact finite fields with Integer-encoded elements.
 #
 # A prime-field element is its least nonnegative residue. An element of

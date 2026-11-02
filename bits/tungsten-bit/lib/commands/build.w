@@ -25,10 +25,15 @@ in Tungsten:Bit:Commands
       native:  flag?(:native),
       cpu:     option(:cpu, ""),
       target:  option(:target, ""),
-      jobs:    option(:jobs, Tungsten:Bit:System.cpu_count) |> self.to_i
+      jobs:    option(:jobs, Tungsten:Bit:System.cpu_count) |> self.to_i,
+      unicode_version: bitfile.unicode_version
     )
 
     say "Building " + bitfile.name + " " + bitfile.version + "..."
+
+    if bitfile.unicode_version != nil && bitfile.unicode_version != ""
+      verbose("  unicode " + bitfile.unicode_version)
+      ensure_unicode_tables(bitfile, config.output)
 
     # Verify dependencies are installed
     unless Dependencies.satisfied?(bitfile)

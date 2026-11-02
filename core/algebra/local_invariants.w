@@ -6,7 +6,7 @@
 # replayed exactly; the two classical local-geometry identities are recorded
 # as theorem imports rather than presented as kernel proofs.
 
-use core/algebra/local_intersection
+use algebra/local_intersection
 
 + PlaneCurveLocalPolarCertificate
   -> new(@normalization, @polar_intersection,

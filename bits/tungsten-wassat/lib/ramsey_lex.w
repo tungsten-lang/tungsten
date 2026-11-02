@@ -87,14 +87,16 @@ WASSAT_RAMSEY_LEX_MS = 50
     # rank sum C(vertex,t), a bijection onto [0,C(n,k)) for k-subsets.
     t = 0
     r = 0
-    v = 0
-    while v < n
-      if (vertices & (1 << v)) != 0
-        t += 1
-        return 0 if t > k
-        r += choose[v * 9 + t]
-        work[8] += 1
-      v += 1
+    # Visit only the set vertex bits, preserving increasing combinadic order.
+    # The fixed-width intrinsic avoids scanning every graph vertex per clause.
+    remaining = vertices
+    while remaining != 0
+      v = ccall_nobox("__w_bit_cttz_u64", remaining) ## i64
+      t += 1
+      return 0 if t > k
+      r += choose[v * 9 + t]
+      work[8] += 1
+      remaining &= remaining - 1
     return 0 if t != k
     # Distinct edges with k endpoints and C(k,2) members form a clique.
     g = negative * 9 + k

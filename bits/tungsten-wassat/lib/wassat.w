@@ -743,10 +743,15 @@ use portfolio
   # and decided by exhaustive bounded search over the extracted scopes.
   # No extremal constant is consulted. SAT is verified; UNSAT is fast-only.
   if env("WASSAT_ARITHMETIC_COLORING") != "0"
-    arith = wassat_arith_coloring_solve(formula)
+    # This lane precedes the solving arms. Include recognition and search
+    # in its wall budget; exhaustion returns unknown and falls through.
+    arith = wassat_arith_coloring_solve(formula, WASSAT_ARITH_NODE_CAP, clock_ms() + WASSAT_ARITH_DEADLINE_MS)
     tprof = wassat_prof("cli.arithmetic_coloring", tprof)
     if arith["recognized"]
       wassat_prof_note("arithmetic.search status=[arith["status"]] elements=[arith["elements"]] scopes=[arith["scopes"]] nodes=[arith["nodes"]]")
+    if env("WASSAT_PROFILE") == "1" && arith["work"] != nil
+      aw = arith["work"]
+      wassat_prof_note("arithmetic.work calls=[aw[5]] scope_visits=[aw[6]] examined_elements=[aw[7]] forced_colors=[aw[8]] satisfied_scopes=[aw[9]] stop=[aw[3]] budget_polls=[aw[11]] queue_batches=[aw[14]]")
     if arith["status"] == 1
       unless wassat_model_satisfies?(formula, arith["model"])
         raise "internal error: arithmetic-coloring model does not satisfy the input formula"

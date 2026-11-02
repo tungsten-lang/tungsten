@@ -88,5 +88,39 @@ describe "Verified capacity clique" ->
     m[11] = clock_ms() - 1
     expect(wassat_capacity_poll(m, i64[4])).to eq(1)
     expect(m[9]).to eq(1)
+    formula = capacity_fixture
+    wassat_capacity_finish_scout(formula, { "meta": m })
+    expect(formula["capacity_clique_done"]).to eq(false)
+
+  it "does not repeat a completed scout miss" ->
+    formula = capacity_fixture("unit")
+    r = capacity_test_run(formula)
+    expect(r["status"]).to eq(0)
+    wassat_capacity_finish_scout(formula, r["plan"])
+    expect(formula["capacity_clique_done"]).to eq(true)
+    expect(wassat_capacity_plan(formula, 0, 1, 0, 0, 0)).to eq(nil)
+
+  it "leaves a cancelled scout search eligible for the later portfolio" ->
+    formula = capacity_fixture
+    r = capacity_test_run(formula, true)
+    wassat_capacity_finish_scout(formula, r["plan"])
+    expect(formula["capacity_clique_done"]).to eq(false)
+    expect(capacity_test_run(formula)["status"]).to eq(-1)
+
+  it "reserves early admission for enough positive candidate domains" ->
+    lits = i64[20]; offs = i64[5]; lens = i64[5]
+    i = 0
+    while i < 20
+      lits[i] = i + 1
+      i += 1
+    i = 0
+    while i < 5
+      offs[i] = 4 * i; lens[i] = 4
+      i += 1
+    expect(wassat_capacity_prefix(lits, offs, lens, 5, 1)).to eq(4)
+    expect(wassat_capacity_prefix(lits, offs, lens, 4, 1)).to eq(0)
+    expect(wassat_capacity_prefix(lits, offs, lens, 4, 0)).to eq(4)
+    lits[19] = -20
+    expect(wassat_capacity_prefix(lits, offs, lens, 5, 1)).to eq(0)
 
 spec_summary

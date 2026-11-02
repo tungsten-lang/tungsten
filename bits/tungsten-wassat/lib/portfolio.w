@@ -31,6 +31,7 @@ use keychart
 use domain_walk
 use projected_sls
 use permutation_walk
+use cyclic_decode
 use ../../../core/bit_ops
 
 WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
@@ -1776,7 +1777,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
 -> wassat_race_build(nv, art, threads, formula, incumbent = nil,
                      incumbent_conflicts = 0, pre_workers = 0, sls_worker = 0,
                      scout_solvers = 0, scout_sls_arenas = 0,
-                     resident_preprocess_arenas = 0, cover_plan = nil)
+                     resident_preprocess_arenas = 0, cover_plan = nil, cycle_plan = nil)
   # Continuation is additive. Replacing matrix arm 3 made qwh.35 lose its
   # repeatable 4,366-conflict trajectory; the scout has already allocated its
   # solver, so keeping it as one extra arm restores that diversity without
@@ -1875,6 +1876,12 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       pre_sls_workers + (pre_sls_allowed ? 1 : 0),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, perm_extra)
+  # The cyclic plan budgets one preserved serial CDCL arm. If construction
+  # admitted another worker, retain that established race instead; neither
+  # its CPU slots nor its resident arenas are included in the cyclic budget.
+  if cycle_plan != nil
+    if threads != 1 || pre_workers != 0 || sls_worker != 0 || circuit_plan != nil || keychart_plan != nil || cover_plan != nil || domain_plan != nil || perm_plan != nil || pre_sls_allowed
+      cycle_plan = nil
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -1885,6 +1892,8 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   cap += 1 if domain_plan != nil
   perm_index = perm_plan == nil ? -1 : cap
   cap += 1 if perm_plan != nil
+  cycle_index = cycle_plan == nil ? -1 : cap
+  cap += 1 if cycle_plan != nil
   stop = i64[4]
   res = i64[cap * (nv + 8)]
   tel = i64[cap * WASSAT_TEL_STRIDE]
@@ -1994,6 +2003,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     "keychart_index": keychart_index, "cover_plan": cover_plan,
     "cover_index": cover_index, "domain_plan": domain_plan,
     "domain_index": domain_index, "perm_plan": perm_plan, "perm_index": perm_index,
+    "cycle_plan": cycle_plan, "cycle_index": cycle_index,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
     "credit": credit, "offsets": offsets, "sls": [], "prune_info": prune_info,
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
@@ -2496,6 +2506,11 @@ WASSAT_AXIS_SLOTS = 10
   perm_idx = race["perm_index"]
   perm_base = perm_idx * (nv + 8)
   perm_handle = nil
+  cycle_plan = race["cycle_plan"]
+  cycle_plan = nil if budget > 0
+  cycle_idx = race["cycle_index"]
+  cycle_base = cycle_idx * (nv + 8)
+  cycle_handle = nil
   if keychart_plan != nil && conflict_budget != nil
     keychart_plan["solver"].set_shared_conflict_budget(conflict_budget, budget, keychart_idx + 1)
   round_ms = wassat_race_round_ms
@@ -2565,6 +2580,8 @@ WASSAT_AXIS_SLOTS = 10
     domain_handle = wassat_domain_start(formula, domain_plan, stop, res, domain_base)
   if perm_plan != nil
     perm_handle = wassat_perm_start(formula, art, perm_plan, stop, res, perm_base)
+  if cycle_plan != nil
+    cycle_handle = wassat_cycle_start(formula, cycle_plan, stop, res, cycle_base)
   round = 0
   running = 1
   while running == 1
@@ -2645,6 +2662,7 @@ WASSAT_AXIS_SLOTS = 10
       decisive_now = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) != 0
       decisive_now = 1 if domain_plan != nil && ccall("__w_arr_load_acq", res, domain_base) == 1
       decisive_now = 1 if perm_plan != nil && ccall("__w_arr_load_acq", res, perm_base) == 1
+      decisive_now = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) == 1
       cdcl_can_continue = 0
       if decisive_now == 0 && round1 > 0
         a = 0
@@ -2687,6 +2705,7 @@ WASSAT_AXIS_SLOTS = 10
       decided = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) != 0
       decided = 1 if domain_plan != nil && ccall("__w_arr_load_acq", res, domain_base) == 1
       decided = 1 if perm_plan != nil && ccall("__w_arr_load_acq", res, perm_base) == 1
+      decided = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) == 1
       if decided == 0
         # Score the round every arm just finished, and retire the arms that
         # cannot continue: retired by the solver, stuck (no conflict advanced,
@@ -2834,6 +2853,9 @@ WASSAT_AXIS_SLOTS = 10
   if domain_handle != nil
     z = wassat_stop_cancel(stop)
     z = domain_handle.join
+  if cycle_handle != nil
+    z = wassat_stop_cancel(stop)
+    z = cycle_handle.join
   if perm_handle != nil
     z = wassat_stop_cancel(stop)
     z = perm_handle.join
@@ -2890,6 +2912,12 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[perm_base] == 1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       wassat_perm_profile(perm_plan, res[perm_base])
+    if cycle_plan != nil
+      pm = cycle_plan["meta"]
+      ended = pm[18]
+      last_ms = ended if ended > last_ms
+      answer_ms = ended if res[cycle_base] == 1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+      wassat_cycle_profile(cycle_plan, res[cycle_base])
     if answer_ms > 0
       wassat_prof_note("race.stop answer_to_last_arm_ms=[last_ms - answer_ms]")
   a = 0
@@ -2941,6 +2969,9 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && perm_plan != nil && res[perm_base] == 1
     status = 1
     winner = perm_idx
+  if status == 0 && cycle_plan != nil && res[cycle_base] == 1
+    status = 1
+    winner = cycle_idx
   model = []
   keychart_conflicts = keychart_plan == nil ? 0 : res[keychart_base + nv + 4]
   repair_conflicts = sls.size > 0 ? res[sls_base + nv + 7] : 0
@@ -2949,7 +2980,7 @@ WASSAT_AXIS_SLOTS = 10
     conflicts = ccall("__w_arr_load_acq", conflict_budget, 0)
   if winner >= 0
     base = winner * (nv + 8)
-    if winner != sls_idx && winner != circuit_idx && winner != keychart_idx && winner != cover_idx && winner != domain_idx && winner != perm_idx && conflict_budget == nil
+    if winner != sls_idx && winner != circuit_idx && winner != keychart_idx && winner != cover_idx && winner != domain_idx && winner != perm_idx && winner != cycle_idx && conflict_budget == nil
       conflicts += res[base + nv + 4] - offsets[winner]
     if status == 1
       v = 1
@@ -2968,6 +2999,7 @@ WASSAT_AXIS_SLOTS = 10
     "keychart_won": keychart_plan != nil && winner == keychart_idx,
     "domain_won": domain_plan != nil && winner == domain_idx,
     "permutation_won": perm_plan != nil && winner == perm_idx,
+    "cyclic_won": cycle_plan != nil && winner == cycle_idx,
     "keychart_conflicts": keychart_conflicts,
     "sls_won": winner == sls_idx,
     "sls_repair_won": winner == sls_idx && res[sls_base + nv + 1] == 1,

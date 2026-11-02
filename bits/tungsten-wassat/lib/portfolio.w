@@ -1707,7 +1707,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   spr = nil
   if raw && art["fncl"] >= 5000000 && env("WASSAT_LUCKY") != "0"
     s.enable_lucky_once
-    lr = s.lucky_probe
+    lr = s.lucky_probe(wassat_scout_lucky_prop_budget(nv))
     spr = s.result_for(lr) if lr != 0
   if spr == nil
     slice = cap < 512 ? cap : 512

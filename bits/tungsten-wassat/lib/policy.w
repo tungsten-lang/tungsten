@@ -1163,3 +1163,12 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
   -> summary(raw)
     avg100 = @nclauses == 0 ? 0 : 100 * @nliterals / @nclauses
     "raw=[raw] vars=[@nvars] clauses=[@nclauses] literals=[@nliterals] avg_clause_x100=[avg100] binary=[@binary] ternary=[@ternary] lookahead=[self.lookahead_candidates]"
+
+# Bound the serial lucky shot before the retained CDCL scout. This budget is
+# shared across its four dives and checked between complete propagations.
+# Successful large-input controls used at most 3.2 assignment sweeps; the
+# allowable-sequence miss consumed 247 sweeps before ordinary search started.
+# Other lucky arms remain independent; zero restores the unbounded control.
+-> wassat_scout_lucky_prop_budget(nv)
+  return wassat_decimal_in_range("WASSAT_SCOUT_LUCKY_PROPS", env("WASSAT_SCOUT_LUCKY_PROPS"), 0, 4000000000) if env("WASSAT_SCOUT_LUCKY_PROPS") != nil
+  8 * nv

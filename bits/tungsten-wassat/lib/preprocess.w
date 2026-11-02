@@ -42,6 +42,7 @@
 use cnf
 use policy
 use atomic_stop
+use counter_rewrite
 
 WASSAT_PRE_PROBE_CAP = 2000
 WASSAT_PRE_OCC_PRODUCT_CAP = 4096
@@ -127,6 +128,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @seen = i64[nv + 1]          # scratch marks for cone closure
     @gone = i64[nv + 1]          # 0 live, 1 = BVE-eliminated, 2 = substituted
     @frozen = i64[nv + 1]
+    @has_frozen = false
+    @counter_base = 0
     @replit = i64[nv + 1]        # substitution: var -> representative literal
     v = 0
     while v <= nv
@@ -334,9 +337,24 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       self.refute(confl) if confl >= 0
     0
 
-  -> run_light_flat(parse)
-    self.init_budget
+  -> run_light_flat(parse, rewrite_counter = false)
     tp = wassat_prof_clock
+    # Reuse this arm's original capacity, but shrink its logical variable
+    # range: branching on discarded auxiliary coordinates changes the search.
+    # The entry is pushed first so its model lift runs after all later passes.
+    if rewrite_counter && @proof_mode == WASSAT_PROOF_NONE && @ncl == 0 && !@has_frozen
+      counter = wassat_counter_rewrite(parse, @stop_cell, @deadline_ms)
+      if counter != nil
+        parse = counter["formula"]
+        @flat = parse
+        @nvars = parse["nvars"]
+        @ncl_in = parse["flat_ncl"]
+        @counter_base = counter["meta"][1]
+        @config = WassatConfig.from_lens(@nvars, parse["flat_lens"], @ncl_in)
+        @stack.push({ "kind": "counter_rewrite", "gates": counter["gates"], "meta": counter["meta"] })
+        wassat_counter_profile(counter["meta"])
+    return nil if self.cancelled
+    self.init_budget
     self.intake_flat(parse)
     tp = wassat_prof("pre.intake_flat", tp)
     wassat_prof_note("pre.root_work clauses=[@pst[5]] scanned_literals=[@pst[4]] two_open_stops=[@pst[6]]") if tp != 0
@@ -446,6 +464,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     wassat_stop_requested?(@stop_cell)
 
   -> freeze(v)
+    @has_frozen = true
     @frozen[v] = 1
     0
 
@@ -2001,7 +2020,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           gids.push(@fpgid[ci])
         ci += 1
     { "nvars": @nvars, "clauses": clauses, "gids": gids,
-      "raw": @raw_kernel,
+      "counter_base": @counter_base, "raw": @raw_kernel,
       "next_gid": @next_gid, "status": @status, "config": @config,
       "stack": @stack, "gone": @gone,
       "fla": @fla, "fcs": @fcs, "fcl": @fcl, "falive": @falive,
@@ -3254,6 +3273,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   assumptions.each -> (a)
     raise "assumption literal must not be zero" if a == 0
     v = a.abs
+    if art.has_key?("counter_base") && art["counter_base"] > 0 && v >= art["counter_base"]
+      raise "assumption names rewritten counter variable [v]; freeze it before preprocessing"
     raise "assumption literal [a] exceeds preprocessed variable count [gone.size - 1]" if v >= gone.size
     unless gone[v] == 0
       kind = gone[v] == 2 ? "substituted" : "eliminated"
@@ -3295,6 +3316,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       unless sat
         p = e["pivot"]
         sign[p.abs] = p > 0 ? 1 : -1
+    elsif e["kind"] == "counter_rewrite"
+      z = wassat_counter_lift_sign(sign, e["gates"], e["meta"])
     elsif e["kind"] == "subst"
       r = e["rep"]
       rv = r > 0 ? sign[r.abs] : 0 - sign[r.abs]

@@ -76,7 +76,7 @@ use ../lib/reconfiguration
 
 -> rc_solve(n, rows, horizon = 2, cancelled = false)
   f = rc_flat(3 * n * horizon, rows)
-  m = i64[24]; stop = i64[4]; res = i64[f["nvars"] + 8]
+  m = i64[32]; stop = i64[4]; res = i64[f["nvars"] + 8]
   wassat_stop_cancel(stop) if cancelled
   hit = wassat_reconf_run(f["flat_lits"], f["flat_offs"], f["flat_lens"], f["nvars"], f["flat_ncl"], m, stop, res, 0, 0)
   { "hit": hit, "meta": m, "result": res, "formula": f }

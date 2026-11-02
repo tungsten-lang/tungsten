@@ -30,10 +30,43 @@ describe "Wassat bounded graph reconfiguration" ->
     expect(r["meta"][1]).to eq(1)
     expect(r["meta"][0]).to eq(0)
 
-  it "never refutes when the token graph has no path" ->
+  it "refutes an exhausted graph only after checking original transitions" ->
     r = rc_solve(4, rc_rows(4, [0, 2], [1, 3]))
+    expect(r["hit"]).to eq(-1)
+    expect(r["meta"][24]).to eq(1)
+    expect(r["meta"][25]).to eq(1)
+
+  it "clears an old exhaustion marker before declining a shorter path" ->
+    initial = i64[1]; goal = i64[1]; adj = i64[8]
+    initial[0] = 5; goal[0] = 10
+    v = 0
+    while v < 8
+      adj[v] = (1 << ((v + 1) % 8)) | (1 << ((v + 7) % 8))
+      v += 1
+    m = i64[32]; m[24] = 1
+    hit = wassat_reconf_search(initial, goal, adj, i64[128], i64[128], 8, 3, 128, m, i64[4], 0)
+    expect(hit).to eq(-1)
+    expect(m[2]).to eq(0)
+    expect(m[24]).to eq(0)
+
+  it "declines a graph refutation when a required frame clause is missing" ->
+    rows = rc_rows(4, [0, 2], [1, 3])
+    reduced = []
+    rows.each -> (row)
+      reduced.push(row) unless row == [-2, 6]
+    r = rc_solve(4, reduced)
     expect(r["hit"]).to eq(0)
-    expect(r["meta"][0]).to eq(0)
+    expect(r["meta"][24]).to eq(1)
+    expect(r["meta"][25]).to eq(0)
+
+  it "declines a graph refutation when an AMO premise is missing" ->
+    rows = rc_rows(4, [0, 2], [1, 3])
+    reduced = []
+    rows.each -> (row)
+      reduced.push(row) unless row == [-5, -6]
+    r = rc_solve(4, reduced)
+    expect(r["hit"]).to eq(0)
+    expect(r["meta"][25]).to eq(0)
 
   it "rejects contradictory original units" ->
     rows = rc_rows(8, [0, 2], [1, 3]); rows.push([1]); rows.push([-1])
@@ -79,7 +112,7 @@ describe "Wassat bounded graph reconfiguration" ->
     while v < 8
       adj[v] = (1 << ((v + 1) % 8)) | (1 << ((v + 7) % 8))
       v += 1
-    states = i64[2]; parents = i64[2]; m = i64[24]; stop = i64[4]
+    states = i64[2]; parents = i64[2]; m = i64[32]; stop = i64[4]
     hit = wassat_reconf_search(initial, goal, adj, states, parents, 8, 2, 2, m, stop, 0)
     expect(hit).to eq(-1)
     expect(m[2]).to eq(3)
@@ -87,6 +120,6 @@ describe "Wassat bounded graph reconfiguration" ->
 
   it "rejects unsafe search buffer dimensions" ->
     initial = i64[1]; goal = i64[1]; adj = i64[8]
-    expect(wassat_reconf_search(initial, goal, adj, i64[1], i64[1], 8, 2, 2, i64[24], i64[4], 0)).to eq(-1)
+    expect(wassat_reconf_search(initial, goal, adj, i64[1], i64[1], 8, 2, 2, i64[32], i64[4], 0)).to eq(-1)
 
 spec_summary

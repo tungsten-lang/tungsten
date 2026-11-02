@@ -1230,6 +1230,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # up. Returns 1 for a total assignment, -1 for root-level UNSAT, 0 for a
   # dive that got stuck (the trail is returned to a propagated root).
   -> lucky_dive(pol, backward)
+    return -1 if @formula_unsat
     return 0 if wassat_stop_requested?(@stop_cell)
     @lucky_cancel_rebuild = true
     # backjump(0) declares the whole remaining trail propagated (it sets
@@ -3064,6 +3065,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # ---- search -------------------------------------------------------------
 
   -> solve_loop(stop_conflicts)
+    # A lucky dive or root-level pass can consume the conflict before this
+    # entry point runs. Repropagating that exhausted queue is not a new query.
+    if @formula_unsat
+      self.log_clause([]) unless @refuted
+      return -1
     result = 0                       # 0 unknown, 1 sat, -1 unsat
     limited = false
     # Each saved phase array agrees with its own trail prefix. Independent
@@ -4452,6 +4458,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> solve_query(max_conflicts)
     raise "conflict budget must be non-negative, got [max_conflicts]" if max_conflicts < 0
+    # Formula-level refutations outrank any cached per-query result.
+    if @formula_unsat
+      self.log_clause([]) unless @refuted
+      @terminal_status = -1
     return self.result_for(@terminal_status) unless @terminal_status == 0
     if @pending_simplify >= 0
       cong = @pending_simplify

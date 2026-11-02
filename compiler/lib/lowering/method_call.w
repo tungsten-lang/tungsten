@@ -2373,7 +2373,12 @@
         temp = next_temp(wfn)
         emit_wire_typed_array_compound_op_inline(wfn, receiver_reg, elem_bits, fused_op, idx_reg, idx_raw, scratch, elem_signed, temp, rhs_reg)
         stamp_alias_scope(ctx, wfn, recv_node)
-        return typed_value(:i64, temp)
+        # The fused emitter returns an unboxed integer, just like an inline
+        # typed-array read. Labeling it as a WValue makes an enclosing type
+        # assertion unbox raw bits and corrupts returned assignment values.
+        if recv_type == :typed_array_u64
+          return typed_value(:raw_u64, temp)
+        return typed_value(:raw_i64, temp)
 
     if method_name == "\[]=" && node.args.size() == 2
       receiver_val = lower_expression(ctx, recv_node)

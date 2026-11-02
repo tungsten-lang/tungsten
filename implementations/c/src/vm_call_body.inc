@@ -2024,7 +2024,8 @@
           }
           CNEXT();
         }
-        if (has_receiver && name == NAME_TO_I && argc == 0) {
+        if (has_receiver && name == NAME_TO_I &&
+            (argc == 0 || (argc == 1 && tc_kind(receiver) == TC_VAL_STRING))) {
           TcValue out = tc_box_nil();
           if (value_is_int(receiver)) {
             out = receiver;
@@ -2037,7 +2038,18 @@
             }
             memcpy(text, tc_str_bytes_only(receiver), tc_str_len(receiver));
             text[tc_str_len(receiver)] = '\0';
-            out = int_value(strtoll(text, NULL, 10));
+            int base = 10;
+            if (argc == 1) {
+              int64_t radix = value_is_int(args[0]) ? tc_as_int(args[0]) : -1;
+              if (radix < 2 || radix > 36) {
+                free(text);
+                tc_error_set(err, "to_i radix must be an integer between 2 and 36");
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              base = (int)radix;
+            }
+            out = int_value(strtoll(text, NULL, base));
             free(text);
           }
           FREE_ARGS();

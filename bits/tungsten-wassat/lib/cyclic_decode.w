@@ -1,7 +1,8 @@
 # Decode a candidate circular labelling graph from matrix clauses and binary
-# implications. This is deliberately a heuristic, not an equivalence proof:
-# every original clause must accept the lifted assignment before publication.
+# implications. SAT requires original-clause replay. UNSAT additionally needs
+# the complete original-clause contract checked by the bounded ball verifier.
 use cyclic_walk
+use cyclic_bound
 
 WASSAT_CYCLE_MAX_N = 1024
 WASSAT_CYCLE_WALL_MS = 15000
@@ -208,20 +209,28 @@ WASSAT_CYCLE_WALL_MS = 15000
   resident += wassat_preprocess_arena_bytes(formula)
   limit = wassat_cycle_memory_limit(env("TUNGSTEN_MEMORY_LIMIT"))
   return nil if (resident + scratch) * 10 > limit * 9 || resident + scratch > memory / 3
-  { "n": n, "scratch": scratch, "meta": i64[24], "walk": i64[24] }
+  # Reserve the certificate's larger support table only when it independently
+  # fits. Insufficient room disables this check and preserves the model lane.
+  words = (n + 63) / 64
+  extra = 8 * (nv + 1) * words + 4 * nc + 5 * n * n + 8 * (n + 1) * words + 80 * n + 4096
+  bound = env("WASSAT_CYCLIC_BOUND") != "0"
+  bound = false if scratch + extra > memory / 64 || scratch + extra > 536870912
+  bound = false if (resident + scratch + extra) * 10 > limit * 9 || resident + scratch + extra > memory / 3
+  scratch += extra if bound
+  { "n": n, "scratch": scratch, "bound": bound, "meta": i64[24], "walk": i64[24] }
 
--> wassat_cycle_arm(lits, offs, lens, nv, nc, n, m, walk, stop, res, base) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64) i64
+-> wassat_cycle_arm(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, allow_bound) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64 i64) i64
   m[17] = clock_ms()
   deadline = (m[17] + WASSAT_CYCLE_WALL_MS) ## i64
-  hit = (wassat_cycle_search(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline)) ## i64
+  hit = (wassat_cycle_search_checked(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline, allow_bound)) ## i64
   m[18] = clock_ms()
   res[base + nv + 6] = m[17]
   res[base + nv + 5] = m[18]
-  if hit == 1 && wassat_perm_stop(m, stop, deadline) == 0
-    m[0] = 1
-    z = ccall("__w_arr_store_rel", res, base, 1)
-    won = wassat_stop_publish(stop, 1)
-    return 1
+  if hit != 0 && wassat_perm_stop(m, stop, deadline) == 0
+    m[0] = hit
+    z = ccall("__w_arr_store_rel", res, base, hit)
+    won = wassat_stop_publish(stop, hit)
+    return hit
   0
 
 -> wassat_cycle_start(formula, plan, stop, res, base)
@@ -229,11 +238,13 @@ WASSAT_CYCLE_WALL_MS = 15000
   nv = formula["nvars"]; nc = formula["flat_ncl"]; n = plan["n"]
   m = plan["meta"]; walk = plan["walk"]
   m[23] = plan["scratch"]
-  Thread.new -> wassat_cycle_arm(lits, offs, lens, nv, nc, n, m, walk, stop, res, base)
+  allow_bound = plan["bound"] ? 1 : 0
+  Thread.new -> wassat_cycle_arm(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, allow_bound)
 
 -> wassat_cycle_profile(plan, status)
   m = plan["meta"]; w = plan["walk"]
   wassat_prof_note("race.cyclic status=[status] vertices=[m[1]] edges=[m[2]] width=[m[3]] implications=[m[4]] negative_pairs=[m[5]] owner_visits=[m[6]] true_closure=[m[7]] false_closure=[m[8]] units=[m[9]] cross_pairs=[m[10]] rejected_clauses=[m[11]] polls=[m[12] + w[12]] restarts=[w[6]] iterations=[w[7]] swaps=[w[8]] bumps=[w[9]] candidates=[w[10]] updates=[w[11]] best_deficit=[w[13]] replay_clauses=[m[14]] replay_literals=[m[15]] verified=[m[16]] decode_ms=[m[19]] search_ms=[m[20]] lift_ms=[m[21]] stopped=[m[22]] scratch_bytes=[m[23]] ms=[m[18] - m[17]]")
+  wassat_prof_note("race.cyclic_bound status=[w[0]] root=[w[1]] radius=[w[2]] vertices=[w[3]] positions=[w[4]] edges=[w[5]] work=[w[14]] support_words=[w[15]] rectangle_rows=[w[16]] coverage_words=[w[17]] row_amos=[w[18]] checked_edges=[w[19]] bytes=[w[20]] ms=[w[21]]")
 
 -> wassat_cycle_edges(lits, offs, lens, nc, n, owner, matrix, m, stop, deadline) (i64[] i64[] i64[] i64 i64 i32[] i8[] i64[] i64[] i64) i64
   ci = 0 ## i64
@@ -435,6 +446,11 @@ WASSAT_CYCLE_WALL_MS = 15000
 # true/false closure,units,cross pairs,rejected clauses,polls,unused,
 # replay clauses/literals,verified,start/end,decode/search/lift ms,stop,scratch.
 -> wassat_cycle_search(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64 i64) i64
+  wassat_cycle_search_checked(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline, 0)
+
+# Certificate admission belongs to the coordinator. Direct legacy callers
+# retain the model-only contract unless they explicitly enable this variant.
+-> wassat_cycle_search_checked(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline, allow_bound) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64 i64 i64) i64
   return 0 if wassat_perm_stop(m, stop, deadline) != 0
   return 0 unless wassat_cycle_matrix(lits, offs, lens, nv, nc, n, m, stop, deadline) == 1
   heads = i32[nv + 2]
@@ -462,11 +478,21 @@ WASSAT_CYCLE_WALL_MS = 15000
   occ = i32[2 * ne]
   gf = i32[n]
   z = wassat_cycle_graph(n, matrix, left, right, gh, occ, gf)
+  t1 = (clock_ms()) ## i64
+  m[19] = t1 - m[17]
+  if allow_bound == 1
+    needed = i8[n * n]
+    candidate = wassat_cycle_bound_ball(n, width, left, right, gh, occ, needed, walk, stop, deadline)
+    if candidate == 1
+      certified = wassat_cycle_bound_verify(lits, offs, lens, nv, nc, n, width, owner, heads, dest, needed, fill, walk, stop, deadline)
+      walk[21] = clock_ms() - t1
+      m[20] = walk[21]
+      return -1 if certified == -1
+    m[22] = walk[22]
+    return 0 if walk[22] != 0 || wassat_perm_stop(m, stop, deadline) != 0
   perm = i32[n]
   rng = i64[1]
   rng[0] = 1
-  t1 = (clock_ms()) ## i64
-  m[19] = t1 - m[17]
   hit = (wassat_cycle_trial(n, ne, width, left, right, gh, occ, perm, i32[n], i32[ne], i32[ne], i32[ne], rng, walk, stop, deadline, 32, 100000)) ## i64
   m[20] = clock_ms() - t1
   m[22] = walk[22]

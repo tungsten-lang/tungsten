@@ -1,5 +1,4 @@
 use core/file
-use core/directory
 use core/dir
 
 -> check(name, condition)

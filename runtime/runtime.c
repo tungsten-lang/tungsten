@@ -58325,6 +58325,7 @@ static WValue WN_file_exists_q = 0, WN_read_file = 0, WN_write_file = 0;
 static WValue WN_length = 0;
 static WValue WN_respond_to_q = 0;
 static WValue WN_is_a_q = 0;
+static WValue WN_nil_q = 0;
 static WValue WN_spaceship = 0;
 
 /* Compare a class name (NUL-terminated) against a target type name (ptr,len),
@@ -58560,6 +58561,7 @@ static void w_init_method_names(void) {
     WN_write_file   = w_string("write_file");
     WN_respond_to_q = w_string("respond_to?");
     WN_is_a_q       = w_string("is_a?");
+    WN_nil_q        = w_string("nil?");
     WN_spaceship    = w_string("<=>");
     WN_byte_at      = w_string("byte_at");
     WN_view_at      = w_string("view_at");
@@ -71162,6 +71164,11 @@ invoke_static_method:
      * source methods win through normal lookup above; builtin containers use
      * the structural algorithm while hash-table keys keep identity hashing. */
     if (name == WN_hash && args->size == 0) return w_public_hash(recv);
+
+    /* nil? is available even when Object's source methods were not loaded.
+     * Test the value tag directly, independently of user-defined equality. */
+    if (w_hash_key_eq(name, WN_nil_q) && args->size == 0)
+        return w_bool(w_is_nil(recv));
 
     /* Global builtins callable from any context (bootstrapping fallback) */
     if ((w_hash_key_eq(name, WN_file_exists_q) || w_hash_key_eq(name, WN_file_q)) && args->size >= 1)

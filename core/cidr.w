@@ -15,3 +15,5 @@
 
   -> contains?(address)
     self.include?(address)
+
++ Inet < CIDR

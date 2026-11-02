@@ -73,6 +73,7 @@ use structural_pruning
 use portfolio
 use reconfiguration
 use quota_cover
+use lut_congruence
 
 # Allocate one bounded CDCL stage from the aggregate --conflicts budget.
 # A zero total is the public unlimited value; a zero return for a finite total
@@ -1235,10 +1236,21 @@ use quota_cover
         if scout_capacity_plan != nil
           scout_capacity_res = i64[scout_nv + 8]
           scout_capacity_h = wassat_capacity_start(formula, scout_capacity_plan, scout_stop, scout_capacity_res, 0)
+        scout_lut = nil
+        scout_lut_res = nil
+        scout_lut_h = nil
+        if options["conflicts"] == 0 && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil
+          lut_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
+          lut_cdcl = scout_lucky ? 2 : 1
+          lut_cdcl += 1 if lut_sls > 0 && wassat_sls_repair_eligible?(formula)
+          scout_lut = wassat_lut_plan(formula, cover_workers, lut_cdcl, lut_sls)
+        if scout_lut != nil
+          scout_lut_res = i64[scout_nv + 8]
+          scout_lut_h = Thread.new -> wassat_lut_run(formula, scout_lut, scout_stop, scout_lut_res)
         scout_quota = nil
         scout_quota_res = nil
         scout_quota_h = nil
-        if options["conflicts"] == 0 && !scout_lucky && !wassat_sls_arm_memory_allowed?(formula) && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil
+        if options["conflicts"] == 0 && !scout_lucky && !wassat_sls_arm_memory_allowed?(formula) && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil
           scout_quota = wassat_quota_plan(formula)
         if scout_quota != nil
           scout_quota_res = i64[scout_nv + 8]
@@ -1331,6 +1343,7 @@ use quota_cover
         capacity_cancel_ms = 0
         capacity_cancel_ms = clock_ms() if scout_capacity_h != nil
         z = wassat_stop_cancel(scout_stop)
+        z = scout_lut_h.join if scout_lut_h != nil
         z = scout_quota_h.join if scout_quota_h != nil
         if scout_capacity_h != nil
           z = scout_capacity_h.join
@@ -1360,6 +1373,10 @@ use quota_cover
           wassat_capacity_profile(scout_capacity_plan, scout_capacity_res[0], "scout.capacity")
           capacity_tail = scout_capacity_res[0] == -1 ? clock_ms() - scout_capacity_res[scout_nv + 5] : 0
           wassat_prof_note("scout.capacity answer_to_join_ms=[capacity_tail] stop_to_join_ms=[clock_ms() - capacity_cancel_ms]")
+        if scout_lut_h != nil && env("WASSAT_PROFILE") == "1"
+          wassat_lut_profile(scout_lut)
+          lut_tail = scout_lut_res[0] == -1 ? clock_ms() - scout_lut_res[scout_nv + 5] : 0
+          wassat_prof_note("scout.lut answer_to_join_ms=[lut_tail]")
         if scout_quota_h != nil && env("WASSAT_PROFILE") == "1"
           wassat_quota_profile(scout_quota, scout_quota_res[0])
           quota_tail = scout_quota_res[0] == 1 ? clock_ms() - scout_quota_res[scout_nv + 5] : 0
@@ -1378,6 +1395,15 @@ use quota_cover
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_lut_res != nil && scout_lut_res[0] == -1
+          lut_scout = scout_out[0]
+          budget_used += lut_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          << "s UNSATISFIABLE"
+          << "c mode: fast (checked LUT-congruence scout)"
+          << "c conflicts: [budget_used], decisions: [lut_scout["decisions"]], props: [lut_scout["props"]]"
+          << "c stats restarts=[lut_scout["restarts"]] reduces=[lut_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(20)
         if scout_quota_res != nil && scout_quota_res[0] == 1
           quota_scout = scout_out[0]
           budget_used += quota_scout["conflicts"] if scout_budget == nil

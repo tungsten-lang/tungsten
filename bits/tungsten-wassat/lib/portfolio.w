@@ -29,6 +29,7 @@ use small_circuit
 use resolution_cover
 use keychart
 use domain_walk
+use projected_sls
 use ../../../core/bit_ops
 
 WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
@@ -1848,6 +1849,23 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     domain_plan = wassat_domain_plan(formula, domain_workers,
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1),
       sls_arenas, preprocess_arenas)
+  # One optional light-rendering walker, admitted after every established
+  # worker. Pinning arm width and bounded/rounded runs retain their old work.
+  pre_sls_allowed = pre_workers > 0 && env("WASSAT_PRE_SLS") != "0"
+  pre_sls_allowed = false if env("WASSAT_ARMS") != nil && env("WASSAT_PRE_SLS") != "1"
+  pre_sls_allowed = false if wassat_race_round1_conflicts != 0
+  pre_sls_allowed = false unless wassat_pre_sls_shape?(formula)
+  pre_sls_workers = domain_workers + (domain_plan == nil ? 0 : 1)
+  pre_sls_allowed = false if System.cpu_count <= pre_sls_workers
+  pre_sls_extra = wassat_pre_sls_extra_bytes(formula)
+  pre_sls_extra += wassat_domain_bytes(nv, formula["flat_ncl"]) if domain_plan != nil
+  pre_sls_extra += 53 * (nv + 1) + 68157440 if cover_plan != nil
+  pre_sls_extra += 128 * (nv + formula["flat_ncl"] + 1) if circuit_plan != nil
+  if pre_sls_allowed
+    pre_sls_allowed = wassat_race_memory_fits?(formula,
+      cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1),
+      sls_arenas + 1, preprocess_arenas, pre_sls_extra)
+  wassat_prof_note("race.pre_sls_plan allowed=[pre_sls_allowed] existing_workers=[pre_sls_workers] extra_bytes=[wassat_pre_sls_extra_bytes(formula) + wassat_sls_arena_bytes(formula)]")
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -1970,6 +1988,8 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
     "otfs_index": otfs_index, "otfs_specialists": otfs_specialists,
     "sls_allowed": sls_worker > 0, "sls_repair_allowed": repair_allowed,
+    "pre_sls_allowed": pre_sls_allowed,
+    "reserved_pre_sls_arenas": pre_sls_allowed ? 1 : 0,
     "resident_cdcl_arenas": cdcl_arenas + (keychart_plan == nil ? 0 : 1),
     "resident_sls_arenas": sls_arenas,
     "resident_preprocess_arenas": preprocess_arenas,
@@ -2158,7 +2178,7 @@ WASSAT_TEL_STRIDE = 8
 # 0 is also the longest slice the race ever hands out.
 -> wassat_pre_arm_body(pre, formula, nv, res, base, heavy, stop, out, budget,
                        tel, tbase, round, budget_state = nil,
-                       budget_limit = 0, budget_slot = 0)
+                       budget_limit = 0, budget_slot = 0, pre_sls_allowed = false)
   t0 = ccall("__w_clock_ms")
   pnv = formula["nvars"]
   if round > 0
@@ -2199,9 +2219,27 @@ WASSAT_TEL_STRIDE = 8
   if budget_state != nil
     s.set_shared_conflict_budget(budget_state, budget_limit, budget_slot)
   out.push(s)
+  projected_handle = nil
+  projected_result = nil
+  projected_meta = nil
+  if pre_sls_allowed && !heavy && budget == 0 && !wassat_stop_requested?(stop)
+    if wassat_pre_sls_projected?(pnv, rendered["stats"]["vars_substituted"], rendered["status"])
+      projected_result = i64[pnv + 1]
+      projected_meta = i64[12]
+      out.push(projected_meta)
+      projected_meta[11] = wassat_pre_sls_extra_bytes(formula) + wassat_sls_arena_bytes(formula)
+      projected_handle = Thread.new -> wassat_pre_sls_body(formula, rendered, stop, projected_result, projected_meta)
   s.solve_shared_budget(res, base, budget)
   res[base + nv + 4] = res[base + pnv + 4] if pnv < nv
   s.export_telemetry(tel, tbase)
+  if projected_handle != nil
+    z = projected_handle.join
+    # Only the parent writes the CDCL slot. The private payload stays in the
+    # reduced variable space so the existing collector reconstructs it once.
+    if projected_result[0] == 1 && res[base] == 0
+      wassat_pre_sls_copy(projected_result, res, base, pnv)
+      res[base + nv + 5] = projected_meta[8]
+    wassat_pre_sls_profile(projected_meta, ccall("__w_clock_ms"))
   tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
   0
 
@@ -2535,9 +2573,12 @@ WASSAT_AXIS_SLOTS = 10
         pre_slice = slice[threads + p]
         pre_round = round
         pre_slot = threads + p + 1
+        # Reserve only one extra arena, even if a library caller registers
+        # two light renderings instead of the CLI's light/heavy pair.
+        pre_sls_allowed = race["pre_sls_allowed"] && p == 0 && budget == 0 && round1 == 0
         handles.push(Thread.new -> wassat_pre_arm_body(
           pp, pformula, nv, res, base, heavy, stop, out, pre_slice, tel,
-          tbase, pre_round, conflict_budget, budget, pre_slot
+          tbase, pre_round, conflict_budget, budget, pre_slot, pre_sls_allowed
         ))
       p += 1
     if sls.size > 0 && res[sls_base + nv + 3] == 0
@@ -2782,6 +2823,11 @@ WASSAT_AXIS_SLOTS = 10
       b = k * (nv + 8)
       ended = res[b + nv + 5]
       last_ms = ended if ended > last_ms
+      if k >= threads
+        pre_out = pre[k - threads]["out"]
+        if pre_out.size >= 4
+          projected_ended = pre_out[3][8]
+          last_ms = projected_ended if projected_ended > last_ms
       decisive = res[b] == 1 || res[b] == -1
       answer_ms = ended if decisive && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       k += 1

@@ -772,8 +772,12 @@ use reconfiguration
     if arith["recognized"]
       wassat_prof_note("arithmetic.search status=[arith["status"]] elements=[arith["elements"]] scopes=[arith["scopes"]] nodes=[arith["nodes"]]")
     if env("WASSAT_PROFILE") == "1" && arith["work"] != nil
-      aw = arith["work"]
-      wassat_prof_note("arithmetic.work calls=[aw[5]] scope_visits=[aw[6]] examined_elements=[aw[7]] forced_colors=[aw[8]] satisfied_scopes=[aw[9]] stop=[aw[3]] budget_polls=[aw[11]] queue_batches=[aw[14]]")
+      cw = arith["count_work"]
+      if cw != nil
+        wassat_prof_note("arithmetic.count nodes=[cw[2]] calls=[cw[18]] updates=[cw[6]] undo_updates=[cw[10]] forces=[cw[7]] enqueued=[cw[11]] processed=[cw[16]] branches=[cw[12]] conflicts=[cw[13]] scopes=[cw[14]] literals=[cw[15]] stop=[cw[5]] polls=[cw[8]]")
+      else
+        aw = arith["work"]
+        wassat_prof_note("arithmetic.work calls=[aw[5]] scope_visits=[aw[6]] examined_elements=[aw[7]] forced_colors=[aw[8]] satisfied_scopes=[aw[9]] stop=[aw[3]] budget_polls=[aw[11]] queue_batches=[aw[14]]")
     if arith["status"] == 1
       unless wassat_model_satisfies?(formula, arith["model"])
         raise "internal error: arithmetic-coloring model does not satisfy the input formula"

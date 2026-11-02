@@ -20,6 +20,8 @@
 # mdp_spec. SAT models are re-checked against the original CNF by the
 # caller; UNSAT is fast-only.
 
+use monochrome_count
+
 WASSAT_ARITH_MAX_ELEMENTS = 700
 WASSAT_ARITH_MAX_SCOPES = 200000
 WASSAT_ARITH_MAX_WIDTH = 28
@@ -567,29 +569,41 @@ WASSAT_ARITH_DEADLINE_MS = 50
     assign[e] = 0 - 1
     e += 1
   trail = i64[nelem + 1]
-  queue = i64[total + nscopes + 1]
-  qstamp = i64[nscopes]
   # If every scope is invariant under swapping colors, each model has a
   # complemented model. Fix one element to color zero before searching;
   # the omitted root branch is exactly the complement of this one.
   symmetric = wassat_arith_color_symmetric?(scope_off, scope_elem, scope_forbid, nscopes, deadline)
   return miss if wassat_arith_poll(meta) != 0
-  seed_ok = 1
-  if symmetric
-    seed_ok = wassat_arith_propagate(
-      assign, scope_off, scope_elem, scope_forbid,
-      inc_off, inc, trail, queue, qstamp, meta,
-      nelem, nscopes, order[0], 0
-    )
-  status = 0 - 1
-  if seed_ok == 1
-    status = wassat_arith_dfs(
-      assign, scope_off, scope_elem, scope_forbid,
-      inc_off, inc, order, trail, queue, qstamp, meta, nelem, nscopes
-    )
+  count_work = nil
+  status = 0
+  if env("WASSAT_ARITH_COUNT") != "0"
+    count_work = i64[32]
+    status = wassat_mono_run(assign, scope_off, scope_elem, scope_forbid,
+      inc_off, inc, order, trail, nelem, nscopes, node_cap, deadline,
+      symmetric ? 1 : 0, count_work, i64[4])
+    meta[0] = count_work[0]
+    meta[1] = count_work[2]
+    meta[3] = count_work[5]
+  else
+    # Retain the scan backend as a feature-disabled comparison/control.
+    queue = i64[total + nscopes + 1]
+    qstamp = i64[nscopes]
+    seed_ok = 1
+    if symmetric
+      seed_ok = wassat_arith_propagate(
+        assign, scope_off, scope_elem, scope_forbid,
+        inc_off, inc, trail, queue, qstamp, meta,
+        nelem, nscopes, order[0], 0
+      )
+    status = 0 - 1
+    if seed_ok == 1
+      status = wassat_arith_dfs(
+        assign, scope_off, scope_elem, scope_forbid,
+        inc_off, inc, order, trail, queue, qstamp, meta, nelem, nscopes
+      )
   status = 0 if meta[3] != 0
   result = { "recognized": true, "status": status, "elements": nelem,
-    "scopes": nscopes, "nodes": meta[1], "family": family, "model": [], "work": meta }
+    "scopes": nscopes, "nodes": meta[1], "family": family, "model": [], "work": meta, "count_work": count_work }
   if status == 1
     model = []
     v = 1

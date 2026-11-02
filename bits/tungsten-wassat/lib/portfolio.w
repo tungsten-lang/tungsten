@@ -27,6 +27,7 @@
 use atomic_stop
 use small_circuit
 use dependency_circuit
+use count_cover
 use resolution_cover
 use keychart
 use domain_walk
@@ -1833,6 +1834,14 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       if System.cpu_count > threads + pre_workers + sls_worker
         if wassat_race_memory_fits?(formula, cdcl_arenas + (repair_allowed ? 1 : 0), sls_arenas, preprocess_arenas, dep_bytes)
           circuit_plan = wassat_dependency_circuit_plan(formula)
+    if circuit_plan == nil && art["config"].max_clause_size <= 4 && env("WASSAT_COUNT_COVER") != "0"
+      count_allowed = env("WASSAT_ARMS") == nil || env("WASSAT_COUNT_COVER") == "1"
+      count_workers = threads + pre_workers + sls_worker + (cover_plan == nil ? 0 : 1)
+      count_extra = WASSAT_COUNT_COVER_BYTES
+      count_extra += 53 * (nv + 1) + 68157440 if cover_plan != nil
+      if count_allowed && System.cpu_count > count_workers && System.physical_memory_bytes > 0
+        if wassat_race_memory_fits?(formula, cdcl_arenas + (repair_allowed ? 1 : 0), sls_arenas, preprocess_arenas, count_extra)
+          circuit_plan = wassat_count_cover_plan(formula)
   # The keychart lane is additive and uses boxed incremental queries. Rounded
   # races do not admit it: every boxed worker must join before a coordinator
   # scoring barrier. Explicit arm pins retain their historical width unless
@@ -1871,8 +1880,11 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   pre_sls_extra += wassat_domain_bytes(nv, formula["flat_ncl"]) if domain_plan != nil
   pre_sls_extra += 53 * (nv + 1) + 68157440 if cover_plan != nil
   if circuit_plan != nil
-    circuit_bytes = circuit_plan["dependency"] == true ? 192 : 128
-    pre_sls_extra += circuit_bytes * (nv + formula["flat_ncl"] + 1)
+    if circuit_plan["count_cover"] == true
+      pre_sls_extra += WASSAT_COUNT_COVER_BYTES
+    else
+      circuit_bytes = circuit_plan["dependency"] == true ? 192 : 128
+      pre_sls_extra += circuit_bytes * (nv + formula["flat_ncl"] + 1)
   if pre_sls_allowed
     pre_sls_allowed = wassat_race_memory_fits?(formula,
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1),
@@ -2612,7 +2624,13 @@ WASSAT_AXIS_SLOTS = 10
     circuit_assertions = circuit_plan["assertions"]
     circuit_meta = circuit_plan["meta"]
     circuit_values = circuit_plan["values"]
-    if circuit_plan["dependency"] == true
+    if circuit_plan["count_cover"] == true
+      count_nc = formula["flat_ncl"]
+      circuit_handle = Thread.new -> wassat_count_cover_arm(
+        circuit_lits, circuit_offs, circuit_lens, circuit_meta,
+        stop, res, circuit_base, nv, count_nc
+      )
+    elsif circuit_plan["dependency"] == true
       circuit_handle = Thread.new -> wassat_dependency_circuit_arm(
         circuit_lits, circuit_offs, circuit_lens, circuit_program,
         circuit_inputs, circuit_assertions, circuit_meta, circuit_values,
@@ -2950,7 +2968,10 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[circuit_base] == -1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       cm = circuit_plan["meta"]
-      wassat_prof_note("race.circuit inputs=[cm[1]] gates=[cm[2]] batches=[cm[6]]/[cm[5]] gate_evaluations=[cm[7]] assertion_literals=[cm[8]] stopped=[cm[9]] result=[cm[10]] ms=[ended - res[circuit_base + nv + 6]]")
+      if circuit_plan["count_cover"] == true
+        wassat_count_cover_profile(cm)
+      else
+        wassat_prof_note("race.circuit inputs=[cm[1]] gates=[cm[2]] batches=[cm[6]]/[cm[5]] gate_evaluations=[cm[7]] assertion_literals=[cm[8]] stopped=[cm[9]] result=[cm[10]] ms=[ended - res[circuit_base + nv + 6]]")
       if circuit_plan["dependency"] == true
         wassat_prof_note("race.circuit.dependencies recognized=[cm[0]] relations=[cm[13]] hash_probes=[cm[12]] clauses=[cm[14]] dependency_visits=[cm[15]] build_ms=[cm[16]]")
     if keychart_plan != nil
@@ -3082,6 +3103,7 @@ WASSAT_AXIS_SLOTS = 10
     "conflict_budget": conflict_budget,
     "pre_index": (winner >= threads && winner < threads + pre.size) ? winner - threads : 0 - 1,
     "circuit_won": circuit_plan != nil && winner == circuit_idx,
+    "count_cover_won": circuit_plan != nil && circuit_plan["count_cover"] == true && winner == circuit_idx,
     "cover_won": cover_plan != nil && winner == cover_idx,
     "keychart_won": keychart_plan != nil && winner == keychart_idx,
     "domain_won": domain_plan != nil && winner == domain_idx,

@@ -39,6 +39,7 @@ use schooltt
 use symmetry_fix
 use block_csp
 use arithmetic_coloring
+use ramsey_lex
 use windmill
 use specialists
 use mdp
@@ -1024,6 +1025,21 @@ use portfolio
       exit(directed["status"] == 1 ? 10 : 20)
   tprof = wassat_prof("cli.structural_tail", tprof)
 
+  # Complete monochromatic clique families are invariant under vertex
+  # permutations. Add verified transposition lex leaders only in fast mode;
+  # proof modes keep their original-CNF derivation contract. Preparation has
+  # a wall budget, and a miss leaves the ordinary solving route unchanged.
+  ramsey_lex = nil
+  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && env("WASSAT_RAMSEY_LEX") != "0"
+    ramsey_lex = wassat_ramsey_lex_lift(formula, clock_ms() + WASSAT_RAMSEY_LEX_MS)
+    if ramsey_lex != nil
+      formula = ramsey_lex["formula"]
+      config = WassatConfig.from_lens(formula["nvars"], formula["flat_lens"], formula["flat_ncl"])
+      if env("WASSAT_PROFILE") == "1"
+        lex_work = ramsey_lex["work"]
+        wassat_prof_note("ramsey_lex vertices=[lex_work[2]] checked_clauses=[lex_work[3]] literal_reads=[lex_work[4]] groups=[lex_work[5]] unique=[lex_work[6]] duplicates=[lex_work[7]] rank_terms=[lex_work[8]] output_clauses=[lex_work[9]] output_literals=[lex_work[10]] auxiliaries=[lex_work[11]] transpositions=[lex_work[12]] comparisons=[lex_work[13]] copied_literals=[lex_work[14]] polls=[lex_work[15]]")
+  tprof = wassat_prof("cli.ramsey_lex", tprof)
+
   # Preprocess once, above solver construction. The artifact carries the
   # reduced clauses with their global proof ids, the elimination stack for
   # model reconstruction, and the certificate prefix for every derivation.
@@ -1269,6 +1285,7 @@ use portfolio
               cmodel.push(scout_cover_res[v] == 1 ? v : -v)
               v += 1
             cmodel = wassat_project_quad_model(cmodel, quad_shift, orig_nvars) if quad_shift > 0
+            cmodel = cmodel.slice(0, orig_nvars) if ramsey_lex != nil
             unless wassat_model_satisfies?(orig_formula, cmodel)
               raise "internal error: resolution-cover model does not satisfy the input formula"
             wassat_print_sat_model(cmodel, false)
@@ -1313,6 +1330,7 @@ use portfolio
             )
             v += 1
           xmodel = wassat_project_quad_model(xmodel, quad_shift, orig_nvars) if quad_shift > 0
+          xmodel = xmodel.slice(0, orig_nvars) if ramsey_lex != nil
           unless wassat_model_satisfies?(orig_formula, xmodel)
             raise "internal error: xor arm model does not satisfy the input formula"
           print(wassat_sat_text(xmodel))
@@ -1335,6 +1353,7 @@ use portfolio
             v += 1
           model = wassat_reconstruct_model(light_stack, wmodel, scout_nv)
           model = wassat_project_quad_model(model, quad_shift, orig_nvars) if quad_shift > 0
+          model = model.slice(0, orig_nvars) if ramsey_lex != nil
           unless wassat_model_satisfies?(orig_formula, model)
             raise "internal error: sls arm model does not satisfy the input formula"
           wassat_print_sat_model(model, false)
@@ -1359,6 +1378,7 @@ use portfolio
               v += 1
             model = wassat_reconstruct_model(light_stack, lmodel, scout_nv)
             model = wassat_project_quad_model(model, quad_shift, orig_nvars) if quad_shift > 0
+            model = model.slice(0, orig_nvars) if ramsey_lex != nil
             unless wassat_model_satisfies?(orig_formula, model)
               raise "internal error: lucky model does not satisfy the input formula"
             wassat_print_sat_model(model, false)
@@ -1379,6 +1399,7 @@ use portfolio
             model = wassat_reconstruct_model(light_stack, spr["model"], formula["nvars"])
             tprof = wassat_prof("cli.reconstruct", tprof)
             model = wassat_project_quad_model(model, quad_shift, orig_nvars) if quad_shift > 0
+            model = model.slice(0, orig_nvars) if ramsey_lex != nil
             unless wassat_model_satisfies?(orig_formula, model)
               raise "internal error: light-probe model does not satisfy the input formula"
             tprof = wassat_prof("cli.verify", tprof)
@@ -1505,6 +1526,7 @@ use portfolio
             else
               model = wassat_reconstruct_model(won_stack, rr["model"], formula["nvars"])
               model = wassat_project_quad_model(model, quad_shift, orig_nvars) if quad_shift > 0
+              model = model.slice(0, orig_nvars) if ramsey_lex != nil
             unless wassat_model_satisfies?(orig_formula, model)
               raise "internal error: race arm's model does not satisfy the input formula"
             wassat_print_sat_model(model, false)
@@ -1659,6 +1681,7 @@ use portfolio
     result["model"] = wassat_reconstruct_model(art["stack"], result["model"], formula["nvars"])
     tprof = wassat_prof("cli.reconstruct", tprof)
     result["model"] = wassat_project_quad_model(result["model"], quad_shift, orig_nvars) if quad_shift > 0
+    result["model"] = result["model"].slice(0, orig_nvars) if ramsey_lex != nil
     unless wassat_model_satisfies?(orig_formula, result["model"])
       raise "internal error: model does not satisfy the input formula"
 

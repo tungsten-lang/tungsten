@@ -24,32 +24,39 @@ WASSAT_ARITH_MAX_ELEMENTS = 700
 WASSAT_ARITH_MAX_SCOPES = 200000
 WASSAT_ARITH_MAX_WIDTH = 28
 WASSAT_ARITH_NODE_CAP = 2000000
+WASSAT_ARITH_DEADLINE_MS = 50
 
-# meta: [0] trail size [1] nodes [2] node cap [3] cap/cancel flag
-#       [4] queue generation
--> wassat_arith_propagate(assign, scope_off, scope_elem, scope_forbid,
-                          inc_off, inc, trail, queue, qstamp, meta,
-                          nelem, nscopes, elem, color) (i8[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64) i64
-  if assign[elem] >= 0
-    return assign[elem] == color ? 1 : 0
-  assign[elem] = color
-  trail[meta[0]] = elem
-  meta[0] += 1
-  meta[4] += 1
+-> wassat_arith_expired(deadline) (i64) i64
+  return 1 if deadline > 0 && clock_ms() >= deadline
+  0
+
+-> wassat_arith_poll(meta) (i64[]) i64
+  if meta[10] > 0
+    meta[11] += 1
+    if clock_ms() >= meta[10]
+      meta[3] = 2
+      return 1
+  0
+
+# meta: [0] trail size [1] nodes [2] node cap [3] stop reason
+#       [4] queue generation [5] propagation calls [6] scope visits
+#       [7] examined elements [8] forced colors [9] satisfied scopes
+#       [10] optional deadline [11] budget polls [12..13] queue head/tail
+#       [14] queue batches. Stop: 1 node cap, 2 deadline.
+# Keep the hot queue scan a leaf function. Deadline checks between batches
+# avoid imposing call-preserved register allocation on every examined scope.
+-> wassat_arith_queue(assign, scope_off, scope_elem, scope_forbid,
+                      inc_off, inc, trail, queue, qstamp, meta, quota) (i8[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  head = meta[12]
+  tail = meta[13]
   stamp = meta[4]
-  head = 0
-  tail = 0
-  p = inc_off[elem]
-  while p < inc_off[elem + 1]
-    si = inc[p]
-    if qstamp[si] != stamp
-      qstamp[si] = stamp
-      queue[tail] = si
-      tail += 1
-    p += 1
-  while head < tail
+  limit = head + quota
+  meta[14] += 1
+  bound = tail < limit ? tail : limit
+  while head < bound
     si = queue[head]
     head += 1
+    meta[6] += 1
     qstamp[si] = 0
     forbid = scope_forbid[si]
     unassigned = 0
@@ -58,15 +65,22 @@ WASSAT_ARITH_NODE_CAP = 2000000
     j = scope_off[si]
     while j < scope_off[si + 1]
       e = scope_elem[j]
+      j += 1
       if assign[e] < 0
         unassigned += 1
         last_free = e
       elsif assign[e] != forbid
         safe = 1
-      j += 1
+        break
+    meta[7] += j - scope_off[si]
+    meta[9] += 1 if safe != 0
     if safe == 0
-      return 0 if unassigned == 0
+      if unassigned == 0
+        meta[12] = head
+        meta[13] = tail
+        return 0
       if unassigned == 1
+        meta[8] += 1
         forced = 1 - forbid
         assign[last_free] = forced
         trail[meta[0]] = last_free
@@ -79,12 +93,47 @@ WASSAT_ARITH_NODE_CAP = 2000000
             queue[tail] = sj
             tail += 1
           p += 1
-  1
+        bound = tail < limit ? tail : limit
+  meta[12] = head
+  meta[13] = tail
+  head < tail ? 2 : 1
+
+-> wassat_arith_propagate(assign, scope_off, scope_elem, scope_forbid,
+                          inc_off, inc, trail, queue, qstamp, meta,
+                          nelem, nscopes, elem, color) (i8[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64) i64
+  meta[5] += 1
+  if assign[elem] >= 0
+    return assign[elem] == color ? 1 : 0
+  assign[elem] = color
+  trail[meta[0]] = elem
+  meta[0] += 1
+  meta[4] += 1
+  stamp = meta[4]
+  tail = 0
+  p = inc_off[elem]
+  while p < inc_off[elem + 1]
+    si = inc[p]
+    if qstamp[si] != stamp
+      qstamp[si] = stamp
+      queue[tail] = si
+      tail += 1
+    p += 1
+  meta[12] = 0
+  meta[13] = tail
+  status = 2
+  while status == 2
+    quota = 32768 - (meta[6] & 32767)
+    status = wassat_arith_queue(assign, scope_off, scope_elem, scope_forbid,
+      inc_off, inc, trail, queue, qstamp, meta, quota)
+    if meta[6] > 0 && (meta[6] & 32767) == 0 && wassat_arith_poll(meta) != 0
+      return 0
+  status
 
 -> wassat_arith_dfs(assign, scope_off, scope_elem, scope_forbid,
                     inc_off, inc, order, trail, queue, qstamp, meta,
                     nelem, nscopes) (i8[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
   meta[1] += 1
+  return 0 if (meta[1] & 255) == 1 && wassat_arith_poll(meta) != 0
   if meta[1] > meta[2]
     meta[3] = 1
     return 0
@@ -124,12 +173,13 @@ WASSAT_ARITH_NODE_CAP = 2000000
 
 -> wassat_arith_miss
   { "recognized": false, "status": 0, "elements": 0, "scopes": 0,
-    "nodes": 0, "family": "", "model": [] }
+    "nodes": 0, "family": "", "model": [], "work": nil }
 
 # Every scope's sorted elements, read through `values`, form an AP?
--> wassat_arith_all_ap(scope_off, scope_elem, values, nscopes)
+-> wassat_arith_all_ap(scope_off, scope_elem, values, nscopes, deadline = 0)
   si = 0
   while si < nscopes
+    return false if (si & 255) == 0 && wassat_arith_expired(deadline) != 0
     lo = scope_off[si]
     hi = scope_off[si + 1]
     return false if hi - lo < 3
@@ -142,15 +192,16 @@ WASSAT_ARITH_NODE_CAP = 2000000
     si += 1
   true
 
--> wassat_arith_family(scope_off, scope_elem, nelem, nscopes)
-  if wassat_arith_all_ap(scope_off, scope_elem, arith_index_values(nelem), nscopes)
+-> wassat_arith_family(scope_off, scope_elem, nelem, nscopes, deadline = 0)
+  if wassat_arith_all_ap(scope_off, scope_elem, arith_index_values(nelem), nscopes, deadline)
     return "van-der-waerden"
-  if wassat_arith_all_ap(scope_off, scope_elem, arith_prime_values(nelem), nscopes)
+  if wassat_arith_all_ap(scope_off, scope_elem, arith_prime_values(nelem), nscopes, deadline)
     return "green-tao"
   schur = true
   pythag = true
   si = 0
   while si < nscopes && (schur || pythag)
+    return "" if (si & 255) == 0 && wassat_arith_expired(deadline) != 0
     lo = scope_off[si]
     w = scope_off[si + 1] - lo
     if schur
@@ -174,7 +225,7 @@ WASSAT_ARITH_NODE_CAP = 2000000
     si += 1
   return "schur" if schur
   return "pythagorean" if pythag
-  return "ramsey" if wassat_arith_ramsey?(scope_off, scope_elem, nelem, nscopes)
+  return "ramsey" if wassat_arith_ramsey?(scope_off, scope_elem, nelem, nscopes, deadline)
   ""
 
 -> arith_index_values(nelem)
@@ -204,7 +255,37 @@ WASSAT_ARITH_NODE_CAP = 2000000
 
 # Elements are the edges of K_N in lexicographic order and every scope is
 # the complete edge set of some vertex clique (3..8 vertices).
--> wassat_arith_ramsey?(scope_off, scope_elem, nelem, nscopes)
+# A simple graph on k vertices has at most k*(k-1)/2 distinct edges.
+# If the actual scope contains that many, it is precisely a clique. Track
+# endpoints in a native mask and reject duplicate edges with reusable stamps;
+# no per-scope vertex Array or repeated edge-presence search is needed.
+-> wassat_arith_ramsey_shapes(scope_off, scope_elem, eu, ev, seen, nelem, nscopes, deadline) (i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
+  si = 0
+  while si < nscopes
+    return 0 if (si & 63) == 0 && wassat_arith_expired(deadline) != 0
+    lo = scope_off[si]
+    hi = scope_off[si + 1]
+    width = hi - lo
+    return 0 if width < 3 || width > 28
+    vertices = 0
+    mark = si + 1
+    j = lo
+    while j < hi
+      e = scope_elem[j]
+      return 0 if e < 0 || e >= nelem || seen[e] == mark
+      seen[e] = mark
+      vertices |= 1 << eu[e]
+      vertices |= 1 << ev[e]
+      j += 1
+    k = 0
+    while vertices != 0
+      vertices &= vertices - 1
+      k += 1
+    return 0 if k < 3 || k > 8 || width != k * (k - 1) / 2
+    si += 1
+  1
+
+-> wassat_arith_ramsey?(scope_off, scope_elem, nelem, nscopes, deadline = 0)
   nverts = 0
   cand = 3
   while cand <= 40
@@ -213,7 +294,7 @@ WASSAT_ARITH_NODE_CAP = 2000000
   return false if nverts == 0
   eu = i64[nelem]
   ev = i64[nelem]
-  edge_id = i64[nverts * nverts]
+  seen = i64[nelem]
   idx = 0
   i = 0
   while i < nverts
@@ -221,47 +302,41 @@ WASSAT_ARITH_NODE_CAP = 2000000
     while j < nverts
       eu[idx] = i
       ev[idx] = j
-      edge_id[i * nverts + j] = idx
-      edge_id[j * nverts + i] = idx
       idx += 1
       j += 1
     i += 1
-  si = 0
-  while si < nscopes
-    lo = scope_off[si]
-    w = scope_off[si + 1] - lo
-    verts = []
-    j = lo
-    while j < scope_off[si + 1]
-      e = scope_elem[j] ## i64
-      verts.push(eu[e]) unless verts.include?(eu[e])
-      verts.push(ev[e]) unless verts.include?(ev[e])
-      j += 1
-    k = verts.size
-    return false if k < 3 || k > 8 || w != k * (k - 1) / 2
-    a = 0
-    while a < k
-      b = a + 1
-      while b < k
-        want = edge_id[verts[a] * nverts + verts[b]]
-        present = false
-        j = lo
-        while j < scope_off[si + 1]
-          present = true if scope_elem[j] == want
-          j += 1
-        return false unless present
-        b += 1
-      a += 1
-    si += 1
-  true
+  wassat_arith_ramsey_shapes(scope_off, scope_elem, eu, ev, seen, nelem, nscopes, deadline) == 1
 
 # Color complementation is a symmetry only when every extracted scope
 # forbids both colors. Check the actual clause scopes, ignoring duplicates;
 # a matching family name or width histogram is not enough.
--> wassat_arith_color_symmetric?(scope_off, scope_elem, scope_forbid, nscopes)
+# Width agreement is necessary for color complementation, even with
+# duplicate clauses. A mismatch can decline before building scope strings;
+# agreement still requires the exact scope-by-scope check below.
+-> wassat_arith_widths_match(scope_off, scope_forbid, nscopes, deadline) (i64[] i8[] i64 i64) i64
+  zero_widths = 0
+  one_widths = 0
+  si = 0
+  while si < nscopes
+    if (si & 255) == 0 && deadline > 0 && clock_ms() >= deadline
+      return 0
+    width = scope_off[si + 1] - scope_off[si]
+    color = scope_forbid[si]
+    # Outside the extracted scope contract, leave the exact check in charge.
+    return 1 if width < 0 || width > 62 || color < 0 || color > 1
+    if color == 0
+      zero_widths |= 1 << width
+    else
+      one_widths |= 1 << width
+    si += 1
+  zero_widths == one_widths ? 1 : 0
+
+-> wassat_arith_color_symmetric?(scope_off, scope_elem, scope_forbid, nscopes, deadline = 0)
+  return false if wassat_arith_widths_match(scope_off, scope_forbid, nscopes, deadline) == 0
   colors = {}
   si = 0
   while si < nscopes
+    return false if (si & 63) == 0 && wassat_arith_expired(deadline) != 0
     key = ""
     j = scope_off[si]
     while j < scope_off[si + 1]
@@ -274,17 +349,23 @@ WASSAT_ARITH_NODE_CAP = 2000000
   keys = colors.keys
   i = 0
   while i < keys.size
+    return false if (i & 63) == 0 && wassat_arith_expired(deadline) != 0
     return false if colors[keys[i]] != 3
     i += 1
   true
 
--> wassat_arith_coloring_solve(formula)
+-> wassat_arith_coloring_solve(formula, node_cap = WASSAT_ARITH_NODE_CAP, deadline = 0)
   miss = wassat_arith_miss
   return miss unless formula.has_key?("flat_ncl")
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
   return miss if nv < 3 || nv > 2 * WASSAT_ARITH_MAX_ELEMENTS
   return miss if ncl < 3 || ncl > 400000
+  meta = i64[15]
+  meta[2] = node_cap
+  meta[10] = deadline
+  miss["work"] = meta
+  return miss if wassat_arith_poll(meta) != 0
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
@@ -296,6 +377,7 @@ WASSAT_ARITH_NODE_CAP = 2000000
   pair_neg = i8[nv + 1]
   ci = 0
   while ci < ncl && paired
+    return miss if (ci & 255) == 0 && wassat_arith_poll(meta) != 0
     if fcl[ci] == 2
       off = fcs[ci]
       a = fla[off]
@@ -323,6 +405,7 @@ WASSAT_ARITH_NODE_CAP = 2000000
       v += 1
     ci = 0
     while ci < ncl && paired
+      return miss if (ci & 255) == 0 && wassat_arith_poll(meta) != 0
       if fcl[ci] == 2
         off = fcs[ci]
         a = fla[off]
@@ -365,6 +448,7 @@ WASSAT_ARITH_NODE_CAP = 2000000
   total = 0
   ci = 0
   while ci < ncl
+    return miss if (ci & 255) == 0 && wassat_arith_poll(meta) != 0
     n = fcl[ci]
     off = fcs[ci]
     if paired && n == 2
@@ -426,12 +510,14 @@ WASSAT_ARITH_NODE_CAP = 2000000
   return miss if nscopes == 0 || nelem < 3
   scope_off[nscopes] = total
 
-  family = wassat_arith_family(scope_off, scope_elem, nelem, nscopes)
+  family = wassat_arith_family(scope_off, scope_elem, nelem, nscopes, deadline)
+  return miss if wassat_arith_poll(meta) != 0
   return miss if family == ""
 
   degree = i64[nelem]
   si = 0
   while si < nscopes
+    return miss if (si & 255) == 0 && wassat_arith_poll(meta) != 0
     j = scope_off[si]
     while j < scope_off[si + 1]
       degree[scope_elem[j]] += 1
@@ -447,6 +533,7 @@ WASSAT_ARITH_NODE_CAP = 2000000
   inc = i64[total > 0 ? total : 1]
   si = 0
   while si < nscopes
+    return miss if (si & 255) == 0 && wassat_arith_poll(meta) != 0
     j = scope_off[si]
     while j < scope_off[si + 1]
       e = scope_elem[j]
@@ -462,6 +549,7 @@ WASSAT_ARITH_NODE_CAP = 2000000
     e += 1
   i = 0
   while i < nelem
+    return miss if (i & 15) == 0 && wassat_arith_poll(meta) != 0
     best = i
     j = i + 1
     while j < nelem
@@ -481,12 +569,11 @@ WASSAT_ARITH_NODE_CAP = 2000000
   trail = i64[nelem + 1]
   queue = i64[total + nscopes + 1]
   qstamp = i64[nscopes]
-  meta = i64[5]
-  meta[2] = WASSAT_ARITH_NODE_CAP
   # If every scope is invariant under swapping colors, each model has a
   # complemented model. Fix one element to color zero before searching;
   # the omitted root branch is exactly the complement of this one.
-  symmetric = wassat_arith_color_symmetric?(scope_off, scope_elem, scope_forbid, nscopes)
+  symmetric = wassat_arith_color_symmetric?(scope_off, scope_elem, scope_forbid, nscopes, deadline)
+  return miss if wassat_arith_poll(meta) != 0
   seed_ok = 1
   if symmetric
     seed_ok = wassat_arith_propagate(
@@ -502,7 +589,7 @@ WASSAT_ARITH_NODE_CAP = 2000000
     )
   status = 0 if meta[3] != 0
   result = { "recognized": true, "status": status, "elements": nelem,
-    "scopes": nscopes, "nodes": meta[1], "family": family, "model": [] }
+    "scopes": nscopes, "nodes": meta[1], "family": family, "model": [], "work": meta }
   if status == 1
     model = []
     v = 1

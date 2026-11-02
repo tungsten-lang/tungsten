@@ -119,6 +119,38 @@ describe "Complete-clique lex-leader reduction" ->
     f = lex_flat(6, [[1, 2, 3], [1, 2, 4], [1, 3, 5], [2, 3, 6]])
     expect(wassat_ramsey_lex_lift(f)).to eq(nil)
 
+  it "checks complete coverage with vertex bits above the signed 32-bit range" ->
+    n = 40
+    nc = n * (n - 1) * (n - 2) / 6
+    lits = i64[3 * nc]
+    offs = i64[nc]
+    lens = i64[nc]
+    ci = 0
+    i = 0
+    while i < n
+      j = i + 1
+      while j < n
+        k = j + 1
+        while k < n
+          offs[ci] = 3 * ci
+          lens[ci] = 3
+          lits[3 * ci] = i * (2 * n - i - 1) / 2 + j - i
+          lits[3 * ci + 1] = i * (2 * n - i - 1) / 2 + k - i
+          lits[3 * ci + 2] = j * (2 * n - j - 1) / 2 + k - j
+          ci += 1
+          k += 1
+        j += 1
+      i += 1
+    work = i64[16]
+    expect(wassat_ramsey_lex_check(lits, offs, lens, 780, nc, n, work, 0)).to eq(1)
+    expect(work[6]).to eq(nc)
+    expect(work[8]).to eq(3 * nc)
+    # Replace the highest-vertex triangle by a duplicate of the first one.
+    lits[3 * (nc - 1)] = lits[0]
+    lits[3 * (nc - 1) + 1] = lits[1]
+    lits[3 * (nc - 1) + 2] = lits[2]
+    expect(wassat_ramsey_lex_check(lits, offs, lens, 780, nc, n, i64[16], 0)).to eq(0)
+
   it "returns no partial reduction after recognition or generation expiry" ->
     f = lex_flat(3, [[1, 2, 3], [-1, -2, -3]])
     expect(wassat_ramsey_lex_lift(f, clock_ms() - 1)).to eq(nil)

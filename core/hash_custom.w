@@ -36,15 +36,15 @@
       @values.push(nil)
       i += 1
 
-  -> hash(key) (string) i64
+  -> hash(key)
     # Mix the key's WValue BITS (splitmix64), never the string value: the
-    # arithmetic below is machine-int, so start from the raw bits.
-    v = wvalue_bits(key)
-    v = v ^ (v >> 30)
-    v = v * 0xbf58476d1ce4e5b9
-    v = v ^ (v >> 27)
-    v = v * 0x94d049bb133111eb
-    v = v ^ (v >> 31)
+    # arithmetic below stays in positive i64 range by masking intermediate steps.
+    v = wvalue_bits(key) & 0x3fffffffffffffff
+    v = (v ^ (v >> 30)) & 0x3fffffffffffffff
+    v = (v * 0x158476d1ce4e5b9) & 0x3fffffffffffffff
+    v = (v ^ (v >> 27)) & 0x3fffffffffffffff
+    v = (v * 0x14d049bb133111eb) & 0x3fffffffffffffff
+    v = (v ^ (v >> 31)) & 0x3fffffffffffffff
     v
 
   -> get(key)

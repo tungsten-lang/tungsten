@@ -845,6 +845,47 @@
   -> caseless_equal?(other, mode = :default, version: nil)
     Unicode.caseless_equal?(self, other, mode, version)
 
+  # Case-insensitive comparison (Ruby `String#casecmp`, Unicode-aware via
+  # `Unicode.casefold`). Returns `-1`, `0`, `1`, or `nil` if `other` is not
+  # a String or Symbol.
+  -> casecmp(other)
+    cc_t = type(other)
+    if cc_t != "String" && cc_t != "Symbol"
+      return nil
+    cc_a = Unicode.casefold(self)
+    cc_b = Unicode.casefold(other.to_s())
+    if cc_a < cc_b
+      return -1
+    if cc_a > cc_b
+      return 1
+    0
+
+  # Unicode case-insensitive equality (`true`, `false`, or `nil` if `other`
+  # is not a String or Symbol; Ruby `String#casecmp?` / D145 canonical caseless).
+  -> casecmp?(other)
+    ccq_t = type(other)
+    if ccq_t != "String" && ccq_t != "Symbol"
+      return nil
+    Unicode.caseless_equal?(self, other.to_s(), :canonical)
+
+  # Comparable range check: true when `min_val <= self && self <= max_val`.
+  -> between?(min_val, max_val)
+    bw_s = self.to_s()
+    bw_s >= min_val.to_s() && bw_s <= max_val.to_s()
+
+  # Clamp `self` to `[min_val, max_val]`.
+  -> clamp(min_val, max_val)
+    cl_s = self.to_s()
+    cl_lo = min_val.to_s()
+    cl_hi = max_val.to_s()
+    if cl_lo > cl_hi
+      raise ArgumentError.new("min argument must be smaller than or equal to max argument")
+    if cl_s < cl_lo
+      return cl_lo
+    if cl_s > cl_hi
+      return cl_hi
+    cl_s
+
   -> unicode_upcase
     Unicode.upcase(self)
 
@@ -981,6 +1022,246 @@
       else
         sc_pos = sc_end
     out
+
+  # Replace the first occurrence of `pattern` (a String or Regex) with `replacement`.
+  -> sub(pattern, replacement)
+    pat_t = type(pattern)
+    if pat_t == "Regex"
+      return (pattern ## Regex).sub(self, replacement.to_s())
+    if pat_t == "String" || pat_t == "Symbol"
+      sb_pat = pattern.to_s()
+      sb_rep = replacement.to_s()
+      sb_plen = sb_pat.size()
+      if sb_plen == 0
+        return sb_rep + self.to_s()
+      sb_pos = self.index(sb_pat)
+      if sb_pos == nil
+        return self.to_s()
+      sb_n = self.size()
+      return self.slice(0, sb_pos) + sb_rep + self.slice(sb_pos + sb_plen, sb_n - sb_pos - sb_plen)
+    sb_m = pattern.match_data_from(self, 0)
+    if sb_m == nil
+      return self.to_s()
+    sb_m.pre_match() + replacement.to_s() + sb_m.post_match()
+
+  # ---- Prefix / suffix stripping, chomp, partitioning & indentation ----
+
+  # Return a new String with leading `prefix` removed if present, or `self.to_s`
+  # unchanged (Ruby `delete_prefix`, Python `removeprefix`, Rust `strip_prefix`).
+  -> delete_prefix(prefix)
+    dp_p = prefix.to_s()
+    dp_plen = dp_p.size()
+    if dp_plen == 0
+      return self.to_s()
+    if self.starts_with?(dp_p)
+      return self.slice(dp_plen, self.size() - dp_plen)
+    self.to_s()
+
+  -> remove_prefix(prefix)
+    self.delete_prefix(prefix)
+
+  -> strip_prefix(prefix)
+    self.delete_prefix(prefix)
+
+  # Return a new String with trailing `suffix` removed if present, or `self.to_s`
+  # unchanged (Ruby `delete_suffix`, Python `removesuffix`, Rust `strip_suffix`).
+  -> delete_suffix(suffix)
+    ds_s = suffix.to_s()
+    ds_slen = ds_s.size()
+    if ds_slen == 0
+      return self.to_s()
+    if self.ends_with?(ds_s)
+      return self.slice(0, self.size() - ds_slen)
+    self.to_s()
+
+  -> remove_suffix(suffix)
+    self.delete_suffix(suffix)
+
+  -> strip_suffix(suffix)
+    self.delete_suffix(suffix)
+
+  # Remove trailing record separator `sep` (Ruby `String#chomp`).
+  # When `sep == nil` (default), strips a single trailing `"\r\n"`, `"\n"`, or `"\r"`.
+  # When `sep == ""`, strips all trailing runs of `"\r\n"` and `"\n"`.
+  # Otherwise strips `sep` if the string ends with `sep`.
+  -> chomp(sep = nil)
+    ch_n = self.size()
+    if ch_n == 0
+      return self.to_s()
+    if sep == nil
+      ch_last = self.byte_at(ch_n - 1)
+      if ch_last == 10
+        if ch_n >= 2 && self.byte_at(ch_n - 2) == 13
+          return self.slice(0, ch_n - 2)
+        return self.slice(0, ch_n - 1)
+      if ch_last == 13
+        return self.slice(0, ch_n - 1)
+      return self.to_s()
+    ch_sep = sep.to_s()
+    if ch_sep.size() == 0
+      ch_end = ch_n
+      while ch_end > 0
+        if self.byte_at(ch_end - 1) == 10
+          ch_end -= 1
+          if ch_end > 0 && self.byte_at(ch_end - 1) == 13
+            ch_end -= 1
+        else
+          break
+      return self.slice(0, ch_end)
+    self.delete_suffix(ch_sep)
+
+  # Split at the first occurrence of `sep` (String or Regex) into `[before, match, after]`.
+  # If `sep` is not found, returns `[self.to_s, "", ""]`.
+  -> partition(sep)
+    pt_t = type(sep)
+    if pt_t == "Regex"
+      pt_m = (sep ## Regex).match_data_from(self, 0)
+      if pt_m == nil
+        return [self.to_s(), "", ""]
+      return [pt_m.pre_match(), pt_m.match(), pt_m.post_match()]
+    if pt_t == "String" || pt_t == "Symbol"
+      pt_sep = sep.to_s()
+      pt_len = pt_sep.size()
+      if pt_len == 0
+        return ["", "", self.to_s()]
+      pt_pos = self.index(pt_sep)
+      if pt_pos == nil
+        return [self.to_s(), "", ""]
+      pt_n = self.size()
+      return [self.slice(0, pt_pos), pt_sep, self.slice(pt_pos + pt_len, pt_n - pt_pos - pt_len)]
+    pt_m2 = sep.match_data_from(self, 0)
+    if pt_m2 == nil
+      return [self.to_s(), "", ""]
+    [pt_m2.pre_match(), pt_m2.match(), pt_m2.post_match()]
+
+  # Split at the last occurrence of `sep` into `[before, match, after]`.
+  # If `sep` is not found, returns `["", "", self.to_s]`.
+  -> rpartition(sep)
+    rp_sep = sep.to_s()
+    rp_len = rp_sep.size()
+    if rp_len == 0
+      return [self.to_s(), "", ""]
+    rp_pos = self.rindex(rp_sep)
+    if rp_pos == nil
+      return ["", "", self.to_s()]
+    rp_n = self.size()
+    [self.slice(0, rp_pos), rp_sep, self.slice(rp_pos + rp_len, rp_n - rp_pos - rp_len)]
+
+  # Split at the first occurrence of `sep` into `[before, after]`, or `nil`
+  # if `sep` is not found (Rust `str::split_once`).
+  -> split_once(sep)
+    so_sep = sep.to_s()
+    so_len = so_sep.size()
+    if so_len == 0
+      return ["", self.to_s()]
+    so_pos = self.index(so_sep)
+    if so_pos == nil
+      return nil
+    so_n = self.size()
+    [self.slice(0, so_pos), self.slice(so_pos + so_len, so_n - so_pos - so_len)]
+
+  # Split at the last occurrence of `sep` into `[before, after]`, or `nil`
+  # if `sep` is not found (Rust `str::rsplit_once`).
+  -> rsplit_once(sep)
+    ro_sep = sep.to_s()
+    ro_len = ro_sep.size()
+    if ro_len == 0
+      return [self.to_s(), ""]
+    ro_pos = self.rindex(ro_sep)
+    if ro_pos == nil
+      return nil
+    ro_n = self.size()
+    [self.slice(0, ro_pos), self.slice(ro_pos + ro_len, ro_n - ro_pos - ro_len)]
+
+  # Convert all CRLF ("\r\n") and CR ("\r") line endings to LF ("\n").
+  -> normalize_newlines
+    nn_n = self.size()
+    if nn_n == 0
+      return self.to_s()
+    if self.index("\r") == nil
+      return self.to_s()
+    self.gsub("\r\n", "\n").gsub("\r", "\n")
+
+  -> lf
+    self.normalize_newlines()
+
+  # Indent each non-blank line by `amount` copies of `char` (default `" "`).
+  # Negative `amount` removes up to `-amount` leading `char`s per line.
+  -> indent(amount, char = " ")
+    if amount == 0 || self.size() == 0
+      return self.to_s()
+    in_ch = char.to_s()
+    if in_ch.size() == 0
+      return self.to_s()
+    in_lines = self.lines()
+    in_n = in_lines.size()
+    in_buf = StringBuffer(self.size() + (amount > 0 ? amount * in_n * in_ch.size() : 0))
+    if amount > 0
+      in_pad = in_ch * amount
+      in_i = 0
+      while in_i < in_n
+        in_line = in_lines[in_i]
+        if in_line == "\n" || in_line == "\r\n" || in_line.size() == 0
+          in_buf << in_line
+        else
+          in_buf << in_pad
+          in_buf << in_line
+        in_i += 1
+      return in_buf.to_s()
+    in_rem = 0 - amount
+    in_clen = in_ch.size()
+    in_i = 0
+    while in_i < in_n
+      in_line = in_lines[in_i]
+      in_k = 0
+      while in_k < in_rem && in_line.starts_with?(in_ch)
+        in_line = in_line.slice(in_clen, in_line.size() - in_clen)
+        in_k += 1
+      in_buf << in_line
+      in_i += 1
+    in_buf.to_s()
+
+  # Strip the longest common leading whitespace margin across all non-blank
+  # lines (Python `textwrap.dedent` / Ruby squiggly heredoc).
+  -> dedent
+    dd_n = self.size()
+    if dd_n == 0
+      return self.to_s()
+    dd_lines = self.lines()
+    dd_cnt = dd_lines.size()
+    dd_min = -1
+    dd_i = 0
+    while dd_i < dd_cnt
+      dd_line = dd_lines[dd_i]
+      if !dd_line.blank?()
+        dd_ln = dd_line.size()
+        dd_lead = 0
+        while dd_lead < dd_ln
+          dd_b = dd_line.byte_at(dd_lead)
+          if dd_b == 32 || dd_b == 9
+            dd_lead += 1
+          else
+            break
+        if dd_min < 0 || dd_lead < dd_min
+          dd_min = dd_lead
+      dd_i += 1
+    if dd_min <= 0
+      return self.to_s()
+    dd_buf = StringBuffer(dd_n)
+    dd_i = 0
+    while dd_i < dd_cnt
+      dd_line = dd_lines[dd_i]
+      dd_ln = dd_line.size()
+      dd_lead = 0
+      while dd_lead < dd_min && dd_lead < dd_ln
+        dd_b = dd_line.byte_at(dd_lead)
+        if dd_b == 32 || dd_b == 9
+          dd_lead += 1
+        else
+          break
+      dd_buf << dd_line.slice(dd_lead, dd_ln - dd_lead)
+      dd_i += 1
+    dd_buf.to_s()
 
   # ---- Mathematical alphanumerics -------------------------------------
 

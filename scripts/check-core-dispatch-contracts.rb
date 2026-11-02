@@ -221,16 +221,19 @@ RUNTIME_CLASS_CONTRACTS = {
     autoload_guard: "string_source_method_unresolved",
     source_fallback: %w[
       []= __astral_cp __bytes_array __translit_fold ascii? astralize
-      bidi_direction bidi_safe? blank? byte_at bytes camelize
-      canonicalize canonically_equivalent? capitalize casefold
-      caseless_equal? center characters chars codepoints compat_equivalent?
+      between? bidi_direction bidi_safe? blank? byte_at bytes camelize
+      canonicalize canonically_equivalent? capitalize casecmp casecmp? casefold
+      caseless_equal? center characters chars chomp clamp codepoints compat_equivalent?
       confusable? confusable_skeleton constantize contains? dasherize
-      delete display_width downcase each_byte each_character each_codepoint
-      each_grapheme each_line empty? encode encoding ends_with? graphemes humanize includes?
-      length levenshtein line_breaks lines ljust lowercase lpad mixed_script?
-      nfc nfd nfkc nfkc_casefold nfkd normalize normalized? ord parameterize
-      reverse rjust rpad scan scripts sentences size snakecase
-      squeeze starts_with? stream_safe swapcase to_byte_array to_regex to_s tr
+      dedent delete delete_prefix delete_suffix display_width downcase
+      each_byte each_character each_codepoint each_grapheme each_line empty?
+      encode encoding ends_with? graphemes humanize includes? indent
+      length levenshtein lf line_breaks lines ljust lowercase lpad mixed_script?
+      nfc nfd nfkc nfkc_casefold nfkd normalize normalize_newlines normalized?
+      ord parameterize partition remove_prefix remove_suffix reverse rjust
+      rpad rpartition rsplit_once scan scripts sentences size snakecase
+      split_once squeeze starts_with? stream_safe strip_prefix strip_suffix
+      sub swapcase to_byte_array to_regex to_s tr
       transliterate underscore unicode_downcase unicode_titlecase unicode_upcase
       unicode_words upcase uppercase valid_identifier? valid_unicode?
       verify_unicode! words

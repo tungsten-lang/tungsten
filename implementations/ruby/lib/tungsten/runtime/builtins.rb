@@ -1434,7 +1434,9 @@ module Tungsten
         end
 
         interpreter.define_method_builtin("gsub") do |recv, args, block|
-          if block
+          if recv.is_a?(Regexp)
+            args[0].to_s.gsub(recv) { args[1].to_s }
+          elsif block
             recv.gsub(args[0]) { |m| block.call(m) }
           elsif args[0].is_a?(String)
             # Compiled-engine parity: a string-pattern replacement is literal.
@@ -1442,6 +1444,18 @@ module Tungsten
             recv.gsub(args[0]) { args[1] }
           else
             recv.gsub(args[0], args[1])
+          end
+        end
+
+        interpreter.define_method_builtin("sub") do |recv, args, block|
+          if recv.is_a?(Regexp)
+            args[0].to_s.sub(recv) { args[1].to_s }
+          elsif block
+            recv.to_s.sub(args[0]) { |m| block.call(m) }
+          elsif args[0].is_a?(String) || args[0].is_a?(Symbol)
+            recv.to_s.sub(args[0].to_s) { args[1].to_s }
+          else
+            recv.to_s.sub(args[0]) { args[1].to_s }
           end
         end
 
@@ -1474,6 +1488,16 @@ module Tungsten
 
         interpreter.define_method_builtin("ascii?") do |recv, _args, _block|
           recv.to_s.ascii_only?
+        end
+
+        interpreter.define_method_builtin("blank?") do |recv, _args, _block|
+          if recv.is_a?(String) || recv.is_a?(Symbol)
+            recv.to_s.bytes.all? { |b| b == 32 || (b >= 9 && b <= 13) }
+          elsif recv.respond_to?(:empty?)
+            recv.empty?
+          else
+            recv.nil? || recv == false
+          end
         end
 
         interpreter.define_method_builtin("valid_utf8?") do |recv, _args, _block|
@@ -1536,6 +1560,14 @@ module Tungsten
           else
             call_string_w_method.call("canonically_equivalent?", recv, args, block)
           end
+        end
+
+        interpreter.define_method_builtin("casecmp") do |recv, args, block|
+          call_string_w_method.call("casecmp", recv, args, block)
+        end
+
+        interpreter.define_method_builtin("casecmp?") do |recv, args, block|
+          call_string_w_method.call("casecmp?", recv, args, block)
         end
 
         interpreter.define_method_builtin("encoding") do |recv, _args, _block|

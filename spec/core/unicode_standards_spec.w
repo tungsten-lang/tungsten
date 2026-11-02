@@ -97,4 +97,15 @@ check("UAX #31 valid_identifier?, pattern_syntax?, pattern_white_space?", "valid
 check("UAX #38 ideographic? and UTS #51 Emoji properties", U+65E5.ideographic?() && !U+0041.ideographic?() && U+1F600.emoji?() && U+1F600.emoji_presentation?() && U+1F600.extended_pictographic?() && U+1F3FB.emoji_modifier?() && U+1F44B.emoji_modifier_base?())
 check("Grapheme#emoji? and Grapheme#display_width", Grapheme.new(U+1F600.to_s()).emoji?() && Grapheme.new(U+1F600.to_s()).display_width() == 2 && !Grapheme.new("A").emoji?())
 
+# ---- String Prefix/Suffix Stripping, Chomp, Partitioning, Sub, Indentation & Comparable ----
+check("String#delete_prefix / remove_prefix / strip_prefix", "https://tungsten-lang.org".delete_prefix("https://") == "tungsten-lang.org" && "https://tungsten-lang.org".remove_prefix("http://") == "https://tungsten-lang.org" && "foobar".strip_prefix("foo") == "bar")
+check("String#delete_suffix / remove_suffix / strip_suffix", "file.tar.gz".delete_suffix(".gz") == "file.tar" && "file.tar.gz".remove_suffix(".zip") == "file.tar.gz" && "foobar".strip_suffix("bar") == "foo")
+check("String#chomp with default, paragraph mode, and custom separator", "hello\r\n".chomp() == "hello" && "hello\n".chomp() == "hello" && "hello\r".chomp() == "hello" && "hello\n\r\n".chomp("") == "hello" && "hello.w".chomp(".w") == "hello")
+check("String#partition and String#rpartition", "a=b=c".partition("=") == ["a", "=", "b=c"] && "a=b=c".rpartition("=") == ["a=b", "=", "c"] && "abc".partition("=") == ["abc", "", ""] && "abc".rpartition("=") == ["", "", "abc"] && "a123b456c".partition(/\d+/) == ["a", "123", "b456c"])
+check("String#split_once and String#rsplit_once", "a=b=c".split_once("=") == ["a", "b=c"] && "a=b=c".rsplit_once("=") == ["a=b", "c"] && "abc".split_once("=") == nil && "abc".rsplit_once("=") == nil)
+check("String#sub replaces first occurrence for String and Regex", "one two one".sub("one", "1") == "1 two one" && "a1b2c3".sub(/\d/, "X") == "aXb2c3")
+check("String#normalize_newlines / lf", "a\r\nb\rc\n".normalize_newlines() == "a\nb\nc\n" && "a\r\nb".lf() == "a\nb")
+check("String#indent and String#dedent", "a\n\nb".indent(2) == "  a\n\n  b" && "  a\n  b".indent(-2) == "a\nb" && "    hello\n      world\n\n    done".dedent() == "hello\n  world\n\ndone")
+check("String#casecmp, casecmp?, between?, and clamp", "Straße".casecmp("STRASSE") == 0 && "alpha".casecmp("BETA") == -1 && ("e" + U+0301.to_s()).casecmp?("É") && "b".between?("a", "c") && "z".clamp("a", "m") == "m" && "a".clamp("d", "m") == "d")
+
 << "ALL PASS unicode_standards_spec ([passed.load()] checks)"

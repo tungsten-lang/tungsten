@@ -210,10 +210,15 @@ test "rational vs division: 3 / 4 is INT SLASH INT"
 tokens = lex("3 / 4")
 assert_eq tokens[0][:type], :INT
 
-# Char
-test "tokenizes char literal"
-tokens = lex("U+0041")
+# Char & Codepoint
+test "tokenizes ASCII char literal :-A"
+tokens = lex(":-A")
 assert_eq tokens[0][:type], :CHAR
+assert_eq tokens[0][:value], 65
+
+test "tokenizes codepoint literal U+0041"
+tokens = lex("U+0041")
+assert_eq tokens[0][:type], :CODEPOINT
 assert_eq tokens[0][:value], 65
 
 # Color

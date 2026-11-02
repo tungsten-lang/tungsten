@@ -432,6 +432,16 @@ bitfile_service_bindings() {
     | sed 's/,$//'
 }
 
+# Parse `unicode "X.Y.Z"` or `unicode_version "X.Y.Z"` from a Bitfile.
+bitfile_unicode() {
+  local bit_dir="$1"
+  local bf="$bit_dir/Bitfile"
+  [ -f "$bf" ] || return
+  grep -E '^[[:space:]]*unicode(_version)?[[:space:]]+["'\''][^"'\'']+["'\'']' "$bf" 2>/dev/null \
+    | tail -n 1 \
+    | sed -E 's/^[[:space:]]*unicode(_version)?[[:space:]]+["'\'']([^"'\'']+)["'\''].*/\2/'
+}
+
 # Parse a Bitfile's `requires [...]` line and emit the bit names
 # one per line. Same single-line form as `includes [...]`.
 bitfile_requires() {
@@ -522,6 +532,11 @@ resolve_bitfile_env() {
             bit_bindings=$(bitfile_service_bindings "$bit_dir")
             if [ -n "$bit_bindings" ] && [ -z "$TUNGSTEN_SERVICE_BINDINGS" ]; then
               export TUNGSTEN_SERVICE_BINDINGS="$bit_bindings"
+            fi
+            local bit_unicode
+            bit_unicode=$(bitfile_unicode "$bit_dir")
+            if [ -n "$bit_unicode" ] && [ -z "$TUNGSTEN_UNICODE_VERSION" ]; then
+              export TUNGSTEN_UNICODE_VERSION="$bit_unicode"
             fi
           fi
           break

@@ -759,42 +759,163 @@
   # ---- Unicode normalization (UAX #15) --------------------------------
 
   # Canonical composition. ASCII receivers (flag-checked in the runtime)
-  # and invalid UTF-8 return identity.
-  -> nfc
+  # and invalid UTF-8 return identity. When `version` (or active `Unicode.version`)
+  # is older than 16.0.0, delegates to `Unicode.normalize` for exact historical
+  # UAX #15 rules.
+  -> nfc(version = nil)
+    if version != nil
+      return Unicode.normalize(self, :nfc, version)
     nf_form = 0 ## i64
     ccall("w_string_normalize", self, nf_form)
 
   # Canonical decomposition.
-  -> nfd
+  -> nfd(version = nil)
+    if version != nil
+      return Unicode.normalize(self, :nfd, version)
     nf_form = 1 ## i64
     ccall("w_string_normalize", self, nf_form)
 
   # Compatibility composition.
-  -> nfkc
+  -> nfkc(version = nil)
+    if version != nil
+      return Unicode.normalize(self, :nfkc, version)
     nf_form = 2 ## i64
     ccall("w_string_normalize", self, nf_form)
 
   # Compatibility decomposition.
-  -> nfkd
+  -> nfkd(version = nil)
+    if version != nil
+      return Unicode.normalize(self, :nfkd, version)
     nf_form = 3 ## i64
     ccall("w_string_normalize", self, nf_form)
 
-  -> normalize(form = :c)
+  # NFKC_Casefold (UAX #44 / D147 caseless identifier matching).
+  -> nfkc_casefold(version = nil)
+    Unicode.normalize(self, :nfkc_casefold, version)
+
+  -> normalize(form = :c, version: nil)
+    if version != nil
+      return Unicode.normalize(self, form, version)
     case form
-    when :c
+    when :c, :nfc
       nfc
-    when :d
+    when :d, :nfd
       nfd
-    when :kc
+    when :kc, :nfkc
       nfkc
-    when :kd
+    when :kd, :nfkd
       nfkd
+    when :nfkc_casefold, :kc_cf
+      Unicode.normalize(self, :nfkc_casefold, nil)
     else
-      raise "normalize: unknown form [form] (use :c, :d, :kc, or :kd)"
+      Unicode.normalize(self, form, nil)
+
+  -> normalized?(form = :c, version: nil)
+    self == self.normalize(form, version: version)
+
+  # Verify all code points are assigned in `version` (or active `Unicode.version`)
+  # and return canonical NFC form.
+  -> canonicalize(version = nil)
+    Unicode.canonicalize(self, version)
 
   # Canonical equivalence: equal after NFC. `==` stays exact byte equality.
-  -> canonically_equivalent?(other)
+  -> canonically_equivalent?(other, version: nil)
+    if version != nil
+      return Unicode.canonically_equivalent?(self, other, version)
     nfc == other.nfc
+
+  -> compat_equivalent?(other, version: nil)
+    Unicode.compat_equivalent?(self, other, version)
+
+  # UAX #15 §13 Stream-Safe Text Format (inserts U+034F CGJ after 30 non-starters).
+  -> stream_safe(version = nil)
+    Unicode.stream_safe(self, version)
+
+  # Verify UTF-8 well-formedness and repertoire assignment for `version`.
+  -> valid_unicode?(version = nil)
+    Unicode.valid?(self, version)
+
+  -> verify_unicode!(version = nil)
+    Unicode.verify!(self, version)
+
+  # Full Unicode case mapping & case folding (Unicode Standard §3.13, D144-D147).
+  -> casefold
+    Unicode.casefold(self)
+
+  -> caseless_equal?(other, mode = :default, version: nil)
+    Unicode.caseless_equal?(self, other, mode, version)
+
+  -> unicode_upcase
+    Unicode.upcase(self)
+
+  -> unicode_downcase
+    Unicode.downcase(self)
+
+  -> unicode_titlecase
+    Unicode.titlecase(self)
+
+  # UAX #11 East Asian Width terminal column width.
+  -> display_width(ambiguous = 1)
+    Unicode.display_width(self, ambiguous)
+
+  # UAX #9 Bidirectional Algorithm & UTS #39 Bidi security.
+  -> bidi_direction
+    Unicode.bidi_direction(self)
+
+  -> bidi_safe?
+    Unicode.bidi_safe?(self)
+
+  # UAX #24 Script Property & UTS #39 mixed-script and confusable detection.
+  -> scripts
+    Unicode.scripts(self)
+
+  -> mixed_script?
+    Unicode.mixed_script?(self)
+
+  -> confusable_skeleton
+    Unicode.confusable_skeleton(self)
+
+  -> confusable?(other)
+    Unicode.confusable?(self, other)
+
+  # UAX #29 Word & Sentence Segmentation, UAX #14 Line Breaking, UAX #31 Identifiers.
+  -> words
+    Unicode.words(self)
+
+  -> unicode_words
+    Unicode.words(self)
+
+  -> sentences
+    Unicode.sentences(self)
+
+  -> line_breaks
+    Unicode.line_breaks(self)
+
+  -> valid_identifier?(version = nil)
+    Unicode.valid_identifier?(self, version)
+
+  # Underlying string encoding. Tungsten strings are always UTF-8 (with
+  # single-quoted '...' ASCII literals sharing the same String class and the
+  # runtime ASCII content flag).
+  -> encoding
+    "UTF-8"
+
+  # Encode this String into a new ByteArray in the target encoding.
+  -> encode(encoding = :utf8)
+    en_n = self.size
+    en_raw = ByteArray.new(en_n)
+    en_i = 0
+    while en_i < en_n
+      en_raw[en_i] = self.byte_at(en_i)
+      en_i += 1
+    en_raw.transcode(:utf8, encoding)
+
+  -> to_byte_array
+    self.encode(:utf8)
+
+  # Create a stateful chunked/streaming encoder targeting `encoding`.
+  -> .stream_encoder(encoding = :utf8)
+    StreamEncoder.new(encoding)
 
   # ---- Grapheme clusters (UAX #29) ------------------------------------
 
@@ -815,7 +936,9 @@
 
   # Lazy grapheme-cluster view. `chars`/`characters` walk code points;
   # graphemes cluster what a reader perceives as one character.
-  -> graphemes
+  -> graphemes(version = nil)
+    if version != nil
+      return Unicode.graphemes(self, version)
     StringGraphemes.new(self)
 
   # ---- Pattern scanning ------------------------------------------------

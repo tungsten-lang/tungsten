@@ -69,3 +69,15 @@ Paths are relative to the bit root.
 
 The build tooling compiles and links these C files alongside the Tungsten runtime,
 similar to how `runtime.c` is included for normal Tungsten binaries.
+
+## UNICODE VERSION
+
+Applications and bits that require interoperability with a specific Unicode
+Standard version (for example, `15.1.0`, `13.0.0`, or `3.2.0` for IDNA2003) can
+declare the target Unicode version in their `Bitfile`:
+
+    unicode "15.1.0"
+
+`bit install` and `bit build` download the required Unicode property and
+normalization tables from the configured `source` registry into `$TUNGSTEN_HOME/unicode`
+and configure the application build with `TUNGSTEN_UNICODE_VERSION`.

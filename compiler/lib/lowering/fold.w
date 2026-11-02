@@ -112,7 +112,7 @@ FOLD_STEP_LIMIT = 100000
   if value == nil
     return Tungsten:AST:Nil.new
   t = type(value)
-  if t == "Bool" || value == true || value == false
+  if t == "Boolean" || value == true || value == false
     return Tungsten:AST:Bool.new(value)
   if t == "Int" || t == "BigInt"
     return Tungsten:AST:Int.new(value)

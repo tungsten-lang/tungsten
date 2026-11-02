@@ -488,6 +488,7 @@ module Tungsten
           else
             text[2].ord
           end
+        error "`:-X` char literal only supports ASCII. Use U+#{value.to_s(16)} for non-ASCII characters." if value >= 128
         token :CHAR, value
 
       # symbol operators

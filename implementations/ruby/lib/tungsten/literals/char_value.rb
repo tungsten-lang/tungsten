@@ -37,6 +37,22 @@ module Tungsten
       "Cn" => "Unassigned"
     }.freeze
 
+    SCRIPT_NAMES = %w[
+      Common Inherited Latin Greek Cyrillic Armenian Hebrew Arabic
+      Syriac Thaana Devanagari Bengali Gurmukhi Gujarati Oriya Tamil
+      Telugu Kannada Malayalam Sinhala Thai Lao Tibetan Myanmar
+      Georgian Hangul Ethiopic Cherokee Canadian_Aboriginal Ogham Runic Khmer
+      Mongolian Hiragana Katakana Bopomofo Han Yi Old_Italic Gothic
+      Deseret Tagalog Hanunoo Buhid Tagbanwa Limbu Tai_Le Linear_B
+      Ugaritic Shavian Osmanya Cypriot Braille Buginese Coptic New_Tai_Lue
+      Glagolitic Tifinagh Syloti_Nagri Old_Persian Kharoshthi Balinese Cuneiform Phoenician
+      Phags_Pa Nko Sundanese Lepcha Ol_Chiki Vai Saurashtra Kayah_Li
+      Rejang Lycian Carian Lydian Cham Tai_Tham Tai_Viet Avestan
+      Egyptian_Hieroglyphs Samaritan Lisu Bamum Javanese Meetei_Mayek Imperial_Aramaic Old_South_Arabian
+      Inscriptional_Parthian Inscriptional_Pahlavi Old_Turkic Kaithi Batak Brahmi Mandaic Chakma
+      Meroitic_Cursive Meroitic_Hieroglyphs Miao Sharada Sora_Sompeng Takri
+    ].freeze
+
     attr_reader :codepoint
 
     def initialize(value)
@@ -140,7 +156,7 @@ module Tungsten
     end
 
     def bytes
-      ByteArray.new(to_s.bytes)
+      to_s.bytes
     end
 
     def byte_size
@@ -157,7 +173,7 @@ module Tungsten
     end
 
     def chars
-      [ self ]
+      [ to_s ]
     end
 
     def codepoints
@@ -192,10 +208,23 @@ module Tungsten
     def valid?
       self.class.valid_codepoint?(@codepoint)
     end
+    alias scalar? valid?
+
+    def to_codepoint
+      self
+    end
+
+    def to_char
+      raise Tungsten::Error, "invalid ASCII character U+#{@codepoint.to_s(16).upcase}" unless ascii?
+
+      self
+    end
 
     def noncharacter?
       @codepoint.between?(0xFDD0, 0xFDEF) || (@codepoint & 0xFFFE) == 0xFFFE
     end
+    alias noncharacter_code_point noncharacter?
+    alias nchar noncharacter?
 
     def category
       GENERAL_CATEGORIES.each_key do |code|
@@ -207,24 +236,67 @@ module Tungsten
     def general_category
       GENERAL_CATEGORIES[category]
     end
+    alias gc general_category
+
+    def block
+      return "ASCII" if @codepoint < 128
+      return "Latin-1 Supplement" if @codepoint < 256
+      return "BMP" if @codepoint <= 0xFFFF
+
+      "Supplementary"
+    end
+    alias blk block
+
+    def script
+      SCRIPT_NAMES.each do |name|
+        return name if unicode_property?(name)
+      end
+      "Common"
+    end
+    alias sc script
 
     def unicode_name
       nil
     end
+    alias na unicode_name
+
+    def unicode_1_name
+      nil
+    end
+    alias na1 unicode_1_name
 
     def name
       unicode_name || unicode_escape
     end
 
+    def combining_class
+      mark? ? 230 : 0
+    end
+    alias ccc combining_class
+
+    def grapheme_base
+      !mark? && !control?
+    end
+    alias gr_base grapheme_base
+
+    def grapheme_extend
+      mark?
+    end
+    alias gr_ext grapheme_extend
+
     def letter?
       unicode_property?("L")
     end
     alias alphabetic? letter?
+    alias alphabetic letter?
     alias alpha? letter?
+    alias alpha letter?
 
     def mark?
       unicode_property?("M")
     end
+    alias diacritic mark?
+    alias dia mark?
 
     def number?
       unicode_property?("N")
@@ -242,11 +314,13 @@ module Tungsten
       unicode_property?("Ll")
     end
     alias lower? lowercase?
+    alias lower lowercase?
 
     def uppercase?
       unicode_property?("Lu")
     end
     alias upper? uppercase?
+    alias upper uppercase?
 
     def titlecase?
       unicode_property?("Lt")
@@ -256,6 +330,8 @@ module Tungsten
       to_s.match?(/\A[[:space:]]\z/)
     end
     alias space? whitespace?
+    alias white_space whitespace?
+    alias wspace whitespace?
 
     def control?
       unicode_property?("Cc")
@@ -281,37 +357,109 @@ module Tungsten
     def hex_digit?
       ascii? && to_s.match?(/\A[0-9A-Fa-f]\z/)
     end
+    alias hex_digit hex_digit?
+    alias ascii_hex_digit hex_digit?
+    alias ahex hex_digit?
     alias xdigit? hex_digit?
 
     def id_start?
-      unicode_property?("XID_Start")
+      @codepoint == 95 || unicode_property?("XID_Start")
     end
+    alias id_start id_start?
+    alias ids id_start?
+    alias xid_start id_start?
+    alias xids id_start?
 
     def id_continue?
       unicode_property?("XID_Continue")
     end
+    alias id_continue id_continue?
+    alias idc id_continue?
+    alias xid_continue id_continue?
+    alias xidc id_continue?
+
+    alias is_alnum? alnum?
+    alias is_alpha? alpha?
+    alias is_ascii? ascii?
+    alias is_cntrl? control?
+    alias is_digit? digit?
+    def is_graph?
+      !space? && !control?
+    end
+    alias is_lower? lower?
+    alias is_number? number?
+    alias is_print? printable?
+    alias is_punct? punct?
+    alias is_space? space?
+    alias is_upper? upper?
+    alias is_valid? valid?
+    alias is_xdigit? xdigit?
 
     def upcase
       mapped_char(to_s.upcase)
     end
     alias uppercase upcase
+    alias simple_uppercase_mapping upcase
+    alias suc upcase
+    alias uppercase_mapping upcase
+    alias uc upcase
 
     def downcase
       mapped_char(to_s.downcase)
     end
     alias lowercase downcase
+    alias simple_lowercase_mapping downcase
+    alias slc downcase
+    alias lowercase_mapping downcase
+    alias lc downcase
 
     def titlecase
+      return self.class.new(@codepoint - 1) if [ 454, 457, 460, 499 ].include?(@codepoint)
+      return self.class.new(@codepoint + 1) if [ 452, 455, 458, 497 ].include?(@codepoint)
+
       mapped_char(to_s.capitalize)
     end
+    alias simple_titlecase_mapping titlecase
+    alias stc titlecase
+    alias titlecase_mapping titlecase
+    alias tc titlecase
 
     def casefold
-      mapped_char(to_s.downcase)
+      mapped_char(to_s.downcase(:fold))
     end
+    alias simple_case_folding casefold
+    alias scf casefold
+    alias case_folding casefold
+    alias cf casefold
 
     def swapcase
       mapped_char(to_s.swapcase)
     end
+
+    def changes_when_lowercased
+      downcase != self
+    end
+    alias cwl changes_when_lowercased
+
+    def changes_when_uppercased
+      upcase != self
+    end
+    alias cwu changes_when_uppercased
+
+    def changes_when_titlecased
+      titlecase != self
+    end
+    alias cwt changes_when_titlecased
+
+    def changes_when_casefolded
+      casefold != self
+    end
+    alias cwcf changes_when_casefolded
+
+    def changes_when_casemapped
+      changes_when_lowercased || changes_when_uppercased || changes_when_titlecased
+    end
+    alias cwcm changes_when_casemapped
 
     private
 

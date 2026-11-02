@@ -372,6 +372,8 @@
     return lower_word_or_symbol_array(ctx, node.words)
   when :symbol_array   # `%i[a b c]` → Array of Symbol literals
     return lower_symbol_array(ctx, node.symbols)
+  when :byte_array     # `« 68 65 6c 6c 6f »` → ByteArray (WArray<u8>)
+    return lower_byte_array(ctx, node)
 
   # Shallow-wired literal types (return nil at runtime)
   when :month, :key, :map_op, :lambda_arity, :superscript, :encoded

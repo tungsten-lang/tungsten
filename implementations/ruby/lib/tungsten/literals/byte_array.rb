@@ -3,12 +3,15 @@
 module Tungsten
   class ByteArray
     include Enumerable
+    include Comparable
 
     attr_reader :bytes
+    attr_accessor :encoding_id
 
-    def initialize(bytes = [])
+    def initialize(bytes = [], encoding_id: 0)
       @bytes = bytes.dup
       @bytes.each { |b| validate_byte!(b) }
+      @encoding_id = encoding_id
       @frozen = false
     end
 
@@ -53,6 +56,11 @@ module Tungsten
     end
     alias eql? ==
 
+    def <=>(other)
+      return nil unless other.is_a?(ByteArray)
+      @bytes <=> other.bytes
+    end
+
     def hash
       @bytes.hash
     end
@@ -64,7 +72,7 @@ module Tungsten
     def slice(start, length = nil)
       sliced = length ? @bytes[start, length] : @bytes[start]
       return sliced if sliced.is_a?(Integer)
-      ByteArray.new(sliced || [])
+      ByteArray.new(sliced || [], encoding_id: @encoding_id)
     end
 
     def empty?

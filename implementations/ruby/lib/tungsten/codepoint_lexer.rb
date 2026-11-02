@@ -1577,6 +1577,7 @@ module Tungsten
           when 34  then 34  # "
           else esc
           end
+        error "`:-X` char literal only supports ASCII. Use U+#{cp.to_s(16)} for non-ASCII characters." if cp >= 128
         advance(4)
         return set_token(:CHAR, cp, @row, start_col)
       end

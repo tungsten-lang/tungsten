@@ -77,7 +77,7 @@
   # See [[project_const_ref_node_kind]] for the parser-level fix that
   # would eliminate this backstop.
   -> seed_primitive_class_stubs
-    names = ["Integer", "Int", "Float", "String", "Boolean", "Bool", "Nil", "Array", "Hash", "Symbol", "Range", "Class"]
+    names = ["Integer", "Int", "Float", "String", "Boolean", "Nil", "Array", "Hash", "Symbol", "Range", "Class"]
     i = 0
     while i < names.size()
       name = names[i]
@@ -534,7 +534,15 @@
     if t == :string_interp
       return eval_string_interp(node, env)
     if t == :byte_array
-      return ast_get(node, :values)
+      vals = ast_get(node, :values)
+      bn_len = vals != nil ? vals.size() : 0
+      bn_raw = ccall_nobox("w_numeric_to_i64", bn_len) ## i64
+      out = ccall_rawargs("w_bytes_new", bn_raw)
+      bi = 0
+      while bi < bn_len
+        out[bi] = vals[bi] & 255
+        bi += 1
+      return out
     if t == :byte_array_interp
       result = []
       i = 0

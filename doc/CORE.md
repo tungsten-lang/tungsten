@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(688 total), grouped by area, with its declaration, a one-line
+(694 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -22,10 +22,17 @@ summary from the source header, and a link to the source.
 | `BigArray` | `+ BigArray` | Same shape as Array, but i64 fields for >2^32 elements. Used for | [`core/big_array.w`](../core/big_array.w) |
 | `BitOps` | `+ BitOps` | Fixed-width bit operations. | [`core/bit_ops.w`](../core/bit_ops.w) |
 | `BlankSlate` | `+ BlankSlate` | BlankSlate is the parent class of all classes in Tungsten. It's an explicit blank class. | [`core/blank_slate.w`](../core/blank_slate.w) |
-| `Bool` | `+ Bool` | Bool — true (subtag 0x2) and false (subtag 0x1) singletons | [`core/bool.w`](../core/bool.w) |
+| `Boolean` | `+ Boolean` | Boolean — true (subtag 0x2) and false (subtag 0x1) singletons. | [`core/boolean.w`](../core/boolean.w) |
+| `True` | `+ True < Boolean` | — | [`core/boolean.w`](../core/boolean.w) |
+| `False` | `+ False < Boolean` | — | [`core/boolean.w`](../core/boolean.w) |
 | `BoolArray` | `+ BoolArray` | Bit-packed boolean array. The dedicated WBoolArray struct was folded | [`core/bool_array.w`](../core/bool_array.w) |
 | `ByteArray` | `+ ByteArray` | Length-counted, mutable, heap-allocated byte buffer. The dedicated | [`core/byte_array.w`](../core/byte_array.w) |
-| `Char` | `+ Char` | Char — Unicode scalar value. | [`core/char.w`](../core/char.w) |
+| `StreamDecoder` | — | — | [`core/byte_array.w`](../core/byte_array.w) |
+| `StreamEncoder` | — | — | [`core/byte_array.w`](../core/byte_array.w) |
+| `Char` | `+ Char < Codepoint` | Char — 7-bit ASCII character (0..127). | [`core/char.w`](../core/char.w) |
+| `Codepoint` | `+ Codepoint` | Codepoint — 21-bit Unicode scalar value (U+0000..U+10FFFF, excluding surrogates). | [`core/codepoint.w`](../core/codepoint.w) |
+| `Grapheme` | `+ Grapheme` | Grapheme — Unicode extended grapheme cluster (UAX #29). | [`core/grapheme.w`](../core/grapheme.w) |
+| `Unicode` | `+ Unicode` | Unicode — Versioned Unicode Standard algorithms & UCD properties. | [`core/unicode.w`](../core/unicode.w) |
 | `Channel` | `+ Channel` | — | [`core/channel.w`](../core/channel.w) |
 | `ChannelReceiveResult` | `+ ChannelReceiveResult` | Channel — a thread-safe FIFO for goroutine communication. | [`core/channel.w`](../core/channel.w) |
 | `ChannelTryReceiveResult` | `+ ChannelTryReceiveResult` | ChannelTryReceiveResult — nonblocking/timed receive outcome with three states. | [`core/channel.w`](../core/channel.w) |
@@ -46,7 +53,6 @@ summary from the source header, and a link to the source.
 | `Directory` | `+ Directory < Dir` | — | [`core/dir.w`](../core/dir.w) |
 | `Duration` | `+ Duration` | Duration — time span (tag 0xFFFF). Two-component representation: | [`core/duration.w`](../core/duration.w) |
 | `Env` | `+ Env` | Env — the current process environment. | [`core/env.w`](../core/env.w) |
-| `Float` | `+ Float` | Float — IEEE 754 double (quiet NaN range) | [`core/float.w`](../core/float.w) |
 | `File` | `+ File` | File — whole-file I/O, metadata, paths, and filesystem operations. | [`core/file.w`](../core/file.w) |
 | `FileStat` | `+ FileStat` | FileStat — portable POSIX file metadata with nanosecond timestamps. | [`core/file.w`](../core/file.w) |
 | `FileHandle` | `+ FileHandle` | FileHandle — an open file from File.open, read and written incrementally | [`core/file.w`](../core/file.w) |

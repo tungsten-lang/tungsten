@@ -1372,7 +1372,7 @@ module Tungsten
         end
 
         interpreter.define_method_builtin("printable?") do |recv, _args, _block|
-          raise Tungsten::Error, "'printable?' is only available on Key" unless recv.is_a?(Tungsten::Key)
+          raise Tungsten::Error, "'printable?' is only available on Key or Char" unless recv.is_a?(Tungsten::Key) || recv.is_a?(Tungsten::CharValue)
           recv.printable?
         end
 
@@ -1387,7 +1387,7 @@ module Tungsten
         end
 
         interpreter.define_method_builtin("codepoint") do |recv, _args, _block|
-          raise Tungsten::Error, "'codepoint' is only available on Key" unless recv.is_a?(Tungsten::Key)
+          raise Tungsten::Error, "'codepoint' is only available on Key or Char" unless recv.is_a?(Tungsten::Key) || recv.is_a?(Tungsten::CharValue)
           recv.codepoint
         end
 
@@ -1488,8 +1488,93 @@ module Tungsten
           recv.chars
         end
 
-        interpreter.define_method_builtin("graphemes") do |recv, _args, _block|
-          recv.to_s.each_grapheme_cluster.to_a
+        call_string_w_method = lambda do |mname, recv, args, block|
+          classes = interpreter.instance_variable_get(:@classes)
+          interpreter.send(:try_autoload_core, "String")
+          w_class = classes["String"]
+          method = w_class&.lookup_method(mname, argc: args.length)
+          interpreter.send(:call_w_method, recv, method, args, block)
+        end
+
+        interpreter.define_method_builtin("graphemes") do |recv, args, block|
+          if args.empty?
+            recv.to_s.each_grapheme_cluster.to_a
+          else
+            call_string_w_method.call("graphemes", recv, args, block)
+          end
+        end
+
+        interpreter.define_method_builtin("each_grapheme") do |recv, args, block|
+          clusters = if args.empty?
+            recv.to_s.each_grapheme_cluster.to_a
+          else
+            call_string_w_method.call("graphemes", recv, args, nil)
+          end
+          clusters.each { |g| block.call(g) } if block
+          recv
+        end
+
+        interpreter.define_method_builtin("nfc") do |recv, args, block|
+          args.empty? ? recv.to_s.unicode_normalize(:nfc) : call_string_w_method.call("nfc", recv, args, block)
+        end
+
+        interpreter.define_method_builtin("nfd") do |recv, args, block|
+          args.empty? ? recv.to_s.unicode_normalize(:nfd) : call_string_w_method.call("nfd", recv, args, block)
+        end
+
+        interpreter.define_method_builtin("nfkc") do |recv, args, block|
+          args.empty? ? recv.to_s.unicode_normalize(:nfkc) : call_string_w_method.call("nfkc", recv, args, block)
+        end
+
+        interpreter.define_method_builtin("nfkd") do |recv, args, block|
+          args.empty? ? recv.to_s.unicode_normalize(:nfkd) : call_string_w_method.call("nfkd", recv, args, block)
+        end
+
+        interpreter.define_method_builtin("canonically_equivalent?") do |recv, args, block|
+          if args.length <= 1
+            recv.to_s.unicode_normalize(:nfc) == args[0].to_s.unicode_normalize(:nfc)
+          else
+            call_string_w_method.call("canonically_equivalent?", recv, args, block)
+          end
+        end
+
+        interpreter.define_method_builtin("encoding") do |recv, _args, _block|
+          if recv.is_a?(Tungsten::ByteArray)
+            classes = interpreter.instance_variable_get(:@classes)
+            w_class = classes["ByteArray"]
+            interpreter.send(:try_autoload_core, "ByteArray") if !w_class || w_class.methods.empty?
+            w_class = classes["ByteArray"]
+            method = w_class&.lookup_method("encoding", argc: 0)
+            interpreter.send(:call_w_method, recv, method, [], nil)
+          else
+            "UTF-8"
+          end
+        end
+
+        interpreter.define_method_builtin("encode") do |recv, args, _block|
+          target_enc = args[0] || "utf8"
+          classes = interpreter.instance_variable_get(:@classes)
+          w_class = classes["ByteArray"]
+          interpreter.send(:try_autoload_core, "ByteArray") if !w_class || w_class.methods.empty?
+          w_class = classes["ByteArray"]
+          if recv.is_a?(Tungsten::ByteArray)
+            method = w_class&.lookup_method("encode", argc: args.length)
+            interpreter.send(:call_w_method, recv, method, args, nil)
+          else
+            raw = Tungsten::ByteArray.new(recv.to_s.bytes, encoding_id: 1)
+            method = w_class&.lookup_method("transcode", argc: 2)
+            interpreter.send(:call_w_method, raw, method, ["utf8", target_enc], nil)
+          end
+        end
+
+        interpreter.define_method_builtin("to_byte_array") do |recv, _args, _block|
+          raw = Tungsten::ByteArray.new(recv.to_s.bytes, encoding_id: 1)
+          classes = interpreter.instance_variable_get(:@classes)
+          w_class = classes["ByteArray"]
+          interpreter.send(:try_autoload_core, "ByteArray") if !w_class || w_class.methods.empty?
+          w_class = classes["ByteArray"]
+          method = w_class&.lookup_method("transcode", argc: 2)
+          interpreter.send(:call_w_method, raw, method, ["utf8", "utf8"], nil)
         end
 
         interpreter.define_method_builtin("codes") do |recv, _args, _block|
@@ -1606,7 +1691,7 @@ module Tungsten
         end
 
         interpreter.define_method_builtin("upcase") do |recv, _args, _block|
-          recv.to_s.upcase(:ascii)
+          recv.is_a?(Tungsten::CharValue) ? recv.upcase : recv.to_s.upcase(:ascii)
         end
 
         interpreter.define_method_builtin("downcase") do |recv, _args, _block|

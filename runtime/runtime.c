@@ -50797,6 +50797,8 @@ WValue w_array_new_empty(void) {
         arr->size = 0;
         arr->flags = W_FLAG_OWNED;  /* typed-style w_array_push checks this */
         arr->ebits = 65;            /* w64 — recycled arrays still carry the polymorphic ebits */
+        arr->_pad[0] = 0;
+        arr->_pad[1] = 0;
         return v;
     }
     WArray *arr = malloc(sizeof(WArray));
@@ -51192,6 +51194,7 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
         WArray *a = w_as_array(recv);
         if (strcmp(name, "flags") == 0) return w_int(a->flags);
         if (strcmp(name, "ebits") == 0) return w_int(a->ebits);
+        if (strcmp(name, "encoding_id") == 0) return w_int(a->_pad[0]);
         if (strcmp(name, "start") == 0) return w_int(a->start);
         if (strcmp(name, "size") == 0) return w_int(a->size);
         if (strcmp(name, "cap") == 0) return w_int(a->cap);
@@ -52999,6 +53002,13 @@ WValue w_native_data_field_set(WValue recv, WValue name_v, WValue value) {
         w_as_bigint(recv)->size = (int32_t)n;
         return value;
     }
+    if (w_is_array(recv) && strcmp(name, "encoding_id") == 0) {
+        int64_t n = w_as_int(value);
+        if (n < 0 || n > 255)
+            w_raise(w_string("ByteArray encoding_id is outside u8"));
+        w_as_array(recv)->_pad[0] = (uint8_t)n;
+        return value;
+    }
     if (w_is_array(recv) && (strcmp(name, "start") == 0 || strcmp(name, "size") == 0)) {
         int64_t n = w_as_int(value);
         if (n < 0 || n > UINT32_MAX)
@@ -53814,6 +53824,7 @@ static int w_ivar_lookup(WClass *klass, WValue name) {
  */
 static pthread_mutex_t g_type_table_barrier_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_type_tables_locked = 0;
+static uint16_t g_byte_array_class = 0;
 
 WValue w_type_tables_lock_safe(void) {
     pthread_mutex_lock(&g_type_table_barrier_mutex);
@@ -53872,6 +53883,8 @@ WValue w_class_new(const char *name, WValue superclass) {
         w_public_class_cache(0x0F9, class_value);
     } else if (strcmp(name, "Symbol") == 0) {
         w_public_class_cache(0x1F9, class_value);
+    } else if (strcmp(name, "ByteArray") == 0) {
+        g_byte_array_class = klass->class_id + 1;
     } else if (strcmp(name, "Unknown") == 0 &&
                (!g_public_type_class[0x101].resolved ||
                 !w_is_class(g_public_type_class[0x101].value))) {
@@ -58357,8 +58370,13 @@ static int w_type_name_eq_lit(const char *tn, size_t tn_len, const char *lit) {
 static int w_primitive_is_a_type_name(WValue recv, const char *tn, size_t tn_len) {
     if (w_is_instant(recv))
         return w_type_name_eq_lit(tn, tn_len, "Instant");
-    if (w_is_char(recv))
-        return w_type_name_eq_lit(tn, tn_len, "Char");
+    if (w_is_bytes(recv) && w_type_name_eq_lit(tn, tn_len, "ByteArray"))
+        return 1;
+    if (w_is_char(recv)) {
+        if (w_type_name_eq_lit(tn, tn_len, "Codepoint")) return 1;
+        if (w_type_name_eq_lit(tn, tn_len, "Char")) return w_char_is_ascii(recv);
+        return 0;
+    }
     if (w_is_ipv4(recv))
         return w_type_name_eq_lit(tn, tn_len, "IPv4");
     if (w_is_ipv6(recv))
@@ -58418,6 +58436,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
             return W_FALSE;
         }
         if (w_is_array(recv)) {
+            if (w_is_bytes(recv) && strcmp(tn, "ByteArray") == 0) return W_TRUE;
             return w_bool(tn[0] == 'A' && tn[1] == 'r' && tn[2] == 'r' && tn[3] == 'a' && tn[4] == 'y' && tn[5] == '\0');
         }
         if (w_is_double(recv)) {
@@ -59010,6 +59029,10 @@ static WValue w_type_class_dispatch(uint16_t class_id, WValue recv, WValue name,
 }
 
 static inline WValue w_try_type_class_dispatch(WValue recv, WValue name, WArray *args) {
+    if (w_is_bytes(recv) && g_byte_array_class) {
+        WValue result = w_type_class_dispatch(g_byte_array_class - 1, recv, name, args);
+        if (result != W_UNDEF) return result;
+    }
     uint64_t key = w_dispatch_key(recv);
     if (key >= 256) return W_UNDEF;
     uint16_t cid_slot = g_type_class[key];
@@ -70240,6 +70263,10 @@ static WMethod *w_cacheable_type_class_method(WValue recv, WValue name,
     if (w_is_closure(recv) && name == WN_call) return NULL;
 
     if (w_is_array(recv)) {
+        if (w_is_bytes(recv) && g_byte_array_class) {
+            WMethod *bm = w_type_class_method(g_byte_array_class - 1, name, argc);
+            if (bm) return (bm->arity >= 1 && bm->arity <= 5) ? bm : NULL;
+        }
         cid_slot = g_type_class[key];
     } else if (w_is_node(recv)) {
         if (!g_any_node_kind_has_methods)
@@ -70942,6 +70969,10 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
     }
 
     /* Type class dispatch: check if any Tungsten class is registered for this dispatch key */
+    if (w_is_bytes(recv) && g_byte_array_class) {
+        WValue result = w_type_class_dispatch(g_byte_array_class - 1, recv, name, args);
+        if (result != W_UNDEF) return result;
+    }
     {
         uint64_t key = w_dispatch_key(recv);
         if (key < 256) {
@@ -71031,8 +71062,18 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
 #endif
 
 
-        /* ByteArray.new(length) */
+        /* ByteArray.new(length_or_array) */
         if (strcmp(klass->name, "ByteArray") == 0 && w_hash_key_eq(name, WN_new)) {
+            if (args->size > 0 && w_is_array(args->slots[0])) {
+                WArray *src = w_as_array(args->slots[0]);
+                WValue out = w_bytes_new(src->size);
+                uint8_t *dst = (uint8_t *)w_as_array(out)->slots;
+                for (int32_t bi = 0; bi < src->size; bi++) {
+                    WValue elem = w_array_get(args->slots[0], w_int(bi));
+                    dst[bi] = (uint8_t)(w_to_i64(elem) & 0xFF);
+                }
+                return out;
+            }
             int64_t len = (args->size > 0) ? w_as_int(args->slots[0]) : 0;
             return w_bytes_new(len);
         }
@@ -73363,8 +73404,9 @@ WValue w_bytes_slice(WValue bytes, WValue start, WValue len) {
     int64_t l = w_as_int(len);
     if (s < 0) s = 0;
     if (s + l > a->size) l = a->size - s;
-    if (l <= 0) return w_bytes_new(0);
-    return w_bytes_from_data(((uint8_t *)a->slots) + s, l);
+    WValue out = (l <= 0) ? w_bytes_new(0) : w_bytes_from_data(((uint8_t *)a->slots) + s, l);
+    w_as_array(out)->_pad[0] = a->_pad[0];
+    return out;
 }
 
 WValue w_bytes_concat(WValue a_val, WValue b_val) {
@@ -73788,6 +73830,8 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
         w_arr_park = NULL;
         if (a->ebits == (int8_t)element_bits && a->cap == actual_cap) {
             a->flags = W_FLAG_OWNED;
+            a->_pad[0] = 0;
+            a->_pad[1] = 0;
             a->start = 0;
             a->size = 0;
             return w_box_array(a);
@@ -74063,6 +74107,8 @@ WValue w_array_reuse_or_new(WValue *slot, int64_t element_bits, int64_t cap) {
     if (v != W_NIL) {
         WArray *a = w_as_array(v);
         if (a->ebits == (int8_t)element_bits && a->cap >= cap) {
+            a->_pad[0] = 0;
+            a->_pad[1] = 0;
             a->start = 0;
             a->size = 0;
             return v;
@@ -75106,6 +75152,7 @@ WValue w_array_view(WValue arr, WValue lo_v, WValue len_v) {
     } else {
         view_val = w_array_view_raw((uint8_t *)src->slots + ((int64_t)src->start + lo) * (abs_bits / 8), eb, len);
     }
+    w_as_array(view_val)->_pad[0] = src->_pad[0];
     w_register_view(arr, view_val);
     return view_val;
 }

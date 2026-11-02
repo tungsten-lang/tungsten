@@ -2,7 +2,7 @@
 #
 #   bin/tungsten media verify FILE [--rate 24/1] [--frames N] [--tc HH:MM:SS:FF | --no-tc]
 #                                  [--no-audio] [--sync] [--flashes 12,60,...] [--bars]
-#                                  [--siting left] [--no-faststart] [--chapters FILE] [--json]
+#                                  [--siting left] [--no-faststart] [--no-edit-lists] [--chapters FILE] [--json]
 #   bin/tungsten media sync-test OUT [--rate 24/1] [--seconds 10] [--size 1280x720]
 #                                    [--codec h264] [--tc HH:MM:SS:FF] [--audio aac|pcm]
 #   bin/tungsten media probe FILE      raw AVFoundation facts
@@ -13,6 +13,7 @@
 #                                       [--audio copy|aac|pcm|none] [--audio-kbps N] [--audio-src WAV|MOVIE]
 #                                       [--rate N/D] [--start F] [--frames N] [--via yuv|rgb] [--backend auto|metal|vimage|cpu]
 #                                       [--chapters FILE | --no-chapters] [--tc HH:MM:SS:FF | --no-tc] [--verify] [--quiet]
+#                                       [--retries N] [--retry-delay S] [--no-edit-lists | --video-no-edits]
 #   bin/tungsten media preset NAME IN OUT [the transcode options]   a preset, then verify (--no-verify skips)
 #   bin/tungsten media presets         the presets
 #
@@ -23,7 +24,7 @@
 # verify, transcode --verify and preset exit 0 when every check passes, 1 otherwise.
 
 -> usage
-  << "usage: tungsten media verify FILE \[--rate N/D] \[--frames N] \[--tc HH:MM:SS:FF | --no-tc] \[--no-audio] \[--sync] \[--flashes a,b,...] \[--bars] \[--siting S] \[--no-faststart] \[--chapters FILE] \[--json]"
+  << "usage: tungsten media verify FILE \[--rate N/D] \[--frames N] \[--tc HH:MM:SS:FF | --no-tc] \[--no-audio] \[--sync] \[--flashes a,b,...] \[--bars] \[--siting S] \[--no-faststart] \[--no-edit-lists] \[--chapters FILE] \[--json]"
   << "       tungsten media sync-test OUT \[--rate N/D] \[--seconds S] \[--size WxH] \[--codec C] \[--tc HH:MM:SS:FF] \[--audio aac|pcm]"
   << "       tungsten media probe FILE"
   << "       tungsten media codecs"
@@ -31,6 +32,8 @@
   << "       tungsten media transcode IN OUT \[--size WxH] \[--fit F] \[--filter F] \[--codec C] \[--quality Q | --kbps N] \[--level L] \[--gop N]"
   << "                                \[--audio copy|aac|pcm|none] \[--audio-kbps N] \[--audio-src PATH] \[--rate N/D] \[--start F] \[--frames N]"
   << "                                \[--via yuv|rgb] \[--backend B] \[--chapters FILE | --no-chapters] \[--tc HH:MM:SS:FF | --no-tc] \[--verify]"
+  << "                                \[--resume DIR] \[--timeout-ms N] \[--cancel-file PATH]"
+  << "                                \[--retries N] \[--retry-delay S] \[--no-edit-lists | --video-no-edits]"
   << "       tungsten media preset NAME IN OUT \[transcode options] \[--no-verify]"
   << "       tungsten media presets"
   exit(2)
@@ -180,6 +183,10 @@ if cmd == "transcode" || cmd == "preset"
     elsif a == "--chapters"
       chapters_file = flag_value(args, i)
       i += 1
+    elsif a == "--no-edit-lists"
+      opts[:edit_lists] = false
+    elsif a == "--video-no-edits"
+      opts[:edit_lists] = "audio"
     elsif a == "--no-chapters"
       opts[:chapters] = false
     elsif a == "--tc"
@@ -191,6 +198,21 @@ if cmd == "transcode" || cmd == "preset"
       verify = true
     elsif a == "--no-verify"
       verify = false
+    elsif a == "--timeout-ms"
+      opts[:timeout_ms] = flag_value(args, i).to_i
+      i += 1
+    elsif a == "--cancel-file"
+      opts[:cancel_file] = flag_value(args, i)
+      i += 1
+    elsif a == "--resume"
+      opts[:resume_dir] = flag_value(args, i)
+      i += 1
+    elsif a == "--retries"
+      opts[:retries] = flag_value(args, i).to_i
+      i += 1
+    elsif a == "--retry-delay"
+      opts[:retry_delay] = flag_value(args, i).to_i
+      i += 1
     elsif a == "--quiet"
       quiet = true
     else
@@ -211,10 +233,11 @@ if cmd == "transcode" || cmd == "preset"
       vo[:chapters] = r[:chapters]
     if opts[:preset] != nil
       vo[:preset] = opts[:preset]
-    else
+    if opts[:codec] != nil || opts[:preset] == nil
       vo[:codec] = r[:codec]
       vo[:width] = r[:width]
       vo[:height] = r[:height]
+    vo[:edit_lists] = opts[:edit_lists] if opts.has_key?(:edit_lists)
     v = Transcode.check(dst, vo)
     << MediaVerify.format(v)
     exit(v[:ok] ? 0 : 1)
@@ -299,6 +322,8 @@ if cmd == "verify"
     elsif a == "--siting"
       opts[:siting] = flag_value(args, i)
       i += 1
+    elsif a == "--no-edit-lists"
+      opts[:edit_lists] = false
     elsif a == "--no-faststart"
       opts[:faststart] = false
     elsif a == "--json"

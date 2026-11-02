@@ -157,8 +157,11 @@
 
   -> fano?
     return false if !smooth?
-    self_intersections.each ->(d)
-      return false if d < 0 - 1
+    intersections = self_intersections
+    i = 0
+    while i < intersections.size
+      return false if intersections[i] < 0 - 1
+      i += 1
     true
 
   -> del_pezzo?

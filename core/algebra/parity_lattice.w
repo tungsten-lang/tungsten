@@ -11,8 +11,8 @@
 # and replays the finite algebraic construction; it is not a general CVP
 # solver.
 
-use core/algebra/lattice_polytope
-use core/algebra/integer_lattice
+use algebra/lattice_polytope
+use algebra/integer_lattice
 
 + ParityLiftLinearAlgebra
   -> .rref_with_rhs(matrix, rhs)

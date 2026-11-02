@@ -17,7 +17,7 @@
 # standard projective-height and telescoping lemmas are named theorem imports.
 
 use core/calculus
-use core/algebra/projective
+use algebra/projective
 
 
 + ProjectiveHeightArithmetic

@@ -338,9 +338,16 @@ and GPU buffers. `Scaler.backends` lists what this machine has.
   and programs that never scale do not load them; `TUNGSTEN_MEDIA_NO_METAL=1`
   hides Metal.
 
+Plane scaling also accepts `channels: 1` (Y') or `channels: 2` (CbCr),
+`source_bits: 8 | 10`, and `bits: 8 | 10`. Ten-bit samples use P010's
+MSB-aligned 16-bit representation and two-byte-aligned row strides. Fill values
+remain in 8-bit code units. CPU and Metal use the same tables and float
+intermediate; vImage supports 8-bit planes only. A forced Metal backend fails
+explicitly when it cannot process a job; AUTO can fall back to CPU.
+
 ## VideoDecoder
 
-`VideoDecoder.new(source, format: :rgba, start: 0, rate: nil)` decodes a
+`VideoDecoder.new(source, format: :rgba, start: 0, rate: nil, timeout_ms: 30000)` decodes a
 movie's first video track (AVAssetReader passthrough samples) or a list of
 segment files with a `VTDecompressionSession` (hardware) on a thread of its
 own, and hands frames out in presentation order: `read(buf = nil, stride =
@@ -348,9 +355,10 @@ nil)` fills `buf` (or one buffer the decoder keeps) and returns it, or nil at
 the end; `frame` is the index of the frame just read, `frames` the count the
 movie's duration implies. `format:` is `:rgba`, `:bgra` (VideoToolbox's
 BT.709 conversion, from the stream's tags) or `:nv12` (the decoded 8-bit
-4:2:0 planes, Y' then CbCr, no conversion).
+4:2:0 planes, Y' then CbCr, no conversion), or `:p010` (10-bit 4:2:0,
+MSB-aligned little-endian 16-bit samples, Y' then interleaved CbCr).
 
-- **Order.** Samples are fed in decode order and decoded one at a time;
+- **Order.** Samples are fed in decode order in bounded asynchronous batches of eight;
   a decoded frame is handed out once no frame still to come can precede it:
   its time is below the next sample's decode time (DTS <= PTS) and below every
   frame VideoToolbox still holds. Frames are identified by the sample they came
@@ -361,6 +369,13 @@ BT.709 conversion, from the stream's tags) or `:nv12` (the decoded 8-bit
   rounded, so a master whose frame times wander a little (the legacy
   Archimedes master has a 513-tick frame) still maps every frame to its own
   index.
+
+`cancel` wakes readers with a cancellation error. Each read has a finite
+no-frame timeout. `close` requests stop and releases the caller's ownership;
+the worker retains the decoder until its callbacks have drained, so early close
+does not wait synchronously for VideoToolbox. Native framework calls that stall
+internally require an outer process deadline; the shared film toolkit provides
+that supervisor and terminates the whole stage process group.
 
 ## Transcode
 
@@ -382,7 +397,7 @@ r = Transcode.run(segment_paths, "share.mp4", rate: [24, 1], audio_src: "mix.wav
 | `fit`, `crop`, `rect`, `filter`, `scale_backend` | `:stretch`, ..., `:lanczos3`, `:auto` | as for `Scaler` |
 | `via` | `:yuv` | `:yuv` resamples the decoded Y' and CbCr planes; `:rgb` decodes to BGRA, scales RGBA, converts back |
 | `codec`, `quality`, `bitrate`, `gop`, `gop_seconds`, `reorder`, `speed` | `:h264`, ..., 1 s | as for `VideoEncoder`; a segment (closed GOP) is `gop` frames |
-| `level` | lowest that fits | H.264 level (`"3.1"` ... `"5.2"`); VideoToolbox picks HEVC's |
+| `level` | lowest that fits for H.264 and bitrate-driven HEVC; otherwise auto | H.264 (`"3.0"` ... `"5.2"`) or HEVC Main/Main10 (`"1"` ... `"6.2"`); emitted HEVC level verified |
 | `audio` | `:copy` | `:copy` (passthrough), `:aac`, `:pcm` (MOV), false |
 | `audio_src`, `audio_kbps` | the source, preset | a WAV or movie to take the sound from |
 | `chapters` | `:copy` | `:copy` (the source's chapter track), `[[title, frame], ...]`, false |
@@ -390,19 +405,26 @@ r = Transcode.run(segment_paths, "share.mp4", rate: [24, 1], audio_src: "mix.wav
 | `start`, `frames` | 0, the rest | a range of the source (movies) |
 | `rate` | the source's | needed for segments |
 | `format`, `faststart`, `progress` | from `dst`, true, false | |
+| `retries`, `retry_delay` | 2, 1 second | dropped-frame failures only, exponential backoff capped at 60 s; max 5 retries |
+| `edit_lists` | true | `:audio` flattens video edits; false requires every track to be representable without edits |
+| `resume_dir` | nil | durable, checksummed closed-GOP cache; movie sources only |
+| `timeout_ms` | 30000 | maximum decoder wait without a frame |
+| `cancel_file` | nil | existence requests cancellation at the next frame boundary |
 
 The result: `{frames:, duplicated:, dropped:, seconds:, fps:, decode_s:,
 scale_s:, encode_wait_s:, mux_s:, scale_backend:, via:, file_bytes:,
-video_bytes:, audio_samples:, chapters:, tc_start:, level:, ...}`.
+video_bytes:, audio_samples:, chapters:, tc_start:, level:, decode_bits:, resumed_frames:, ...}`.
 
-- **Y'CbCr path** (default): the decoder gives 8-bit 4:2:0 and the scaler
+- **Y'CbCr path** (default): the decoder gives P010 10-bit 4:2:0 and the scaler
   resamples the Y' plane and the interleaved CbCr plane separately, straight
   from the decoder's buffer into the encoder's pool buffer, with the chroma
   siting honoured on both sides (the source's from its format description,
   left for ours; a left-sited 4:2:0 chroma sample sits on luma column 2i and
   between luma rows 2j and 2j+1). There is no colour conversion at all, so
   the master's BT.709 code values carry over, as in `ffmpeg -vf scale` on
-  yuv420p. Pads are Y' 16, CbCr 128.
+  yuv420p10. Fractional code values survive both float passes: 10-bit outputs
+  round once to 0..1023; 8-bit outputs round once after dividing by four.
+  Pads are Y' 64, CbCr 512 in 10-bit codes.
 - **RGB path** (`via: :rgb`): BGRA from VideoToolbox, the RGBA scaler
   (`alpha: :opaque`), then `media.c`'s converter: what a render scaled to 4K
   goes through.
@@ -424,6 +446,28 @@ video_bytes:, audio_samples:, chapters:, tc_start:, level:, ...}`.
   is never waited on. `Transcode.run` steps the native transcoder ~10 s of
   video at a time (`progress: true` prints a line each step) and frees it
   (deleting the partial file) if anything raises.
+
+### Durable resume and interruption
+
+```sh
+bin/tungsten media transcode input.mov share.mov --codec hevc10 --audio pcm --resume /tmp/av-checkpoints --timeout-ms 30000 --verify
+```
+
+The cache namespace hashes source and optional audio-source bytes, every encode,
+geometry and mux option, and the numerical contract version. Destination paths,
+read deadlines and cancellation-file paths do not affect reuse. A cache has an
+exclusive writer lock. Completed closed GOPs are committed as TWMS plus SHA-256
+sidecars, fsynced before reuse. The first missing, corrupt or incomplete GOP ends
+the reusable prefix; later GOPs are recomputed. Audio, chapters, timecode and the
+container are rebuilt, then the completed output replaces the destination. A
+fully cached run still validates/remuxes the segments. Segment-list inputs are
+rejected for resume. Treat source files as immutable during a run.
+
+A cancellation or failure preserves the previous destination and completed
+checkpoints. `TUNGSTEN_MEDIA_TEST_FAIL_AFTER` and
+`TUNGSTEN_MEDIA_TEST_STALL_DECODER` are deterministic fault-injection hooks for
+focused tests. `TUNGSTEN_MEDIA_WAIT_MS` bounds the AVAssetWriter completion wait
+(default 30000 ms). Hard stage deadlines remain necessary around native drivers.
 
 ### Presets
 
@@ -452,9 +496,50 @@ rate, bits)` computes it (HEVC: Table A.8, Main tier).
 
 `Transcode.check(path, preset:, ...)` runs every MediaVerify check (pass
 `chapters:`, `frames:`, `tc_start:` as for `MediaVerify.check`) plus
-`preset`: sample entry `avc1` / `hvc1`, profile (High 100 / Main 1), 8-bit,
+`preset`: sample entry `avc1` / `hvc1`, profile/depth (H.264 High 100 / 8-bit, HEVC Main 1 / 8-bit, Main10 2 / 10-bit),
 4:2:0, the size, the stream's level at least the minimum the picture needs and
 at most the preset's cap, and the average bitrate within that level's MaxBR.
+An explicit `level:` must match exactly. ProRes targets check their sample entry
+and dimensions in addition to MediaVerify's timing, colour and audio checks.
+
+Transcodes write to a unique temporary file next to the destination, then rename
+on success. A failed attempt leaves an existing destination intact. Only the
+VideoToolbox dropped-frame error retries; invalid inputs, levels and file errors
+fail immediately. The result includes `attempts:`.
+
+HEVC explicit levels use VideoToolbox's `HEVC_<Main|Main10>_<major>_<minor>` naming
+convention (`Main10` for 10-bit). The public enumeration advertises AutoLevel
+only, but a macOS probe confirmed explicit levels in the emitted bitstream.
+The runtime validates hvcC on the first output of every segment, so a backend
+that silently ignores the request fails instead of claiming the level is pinned.
+`Transcode.level_pinnable?` reports whether the API supports that codec's levels;
+the actual encoder may reject a size/rate/level combination.
+
+`TUNGSTEN_MEDIA_DECODER_SERIAL=1` retains the old per-frame decode wait for
+comparison or diagnosing a backend; normal decoding uses bounded asynchronous
+submission. `benchmarks/media/decode_bench.w` compares both paths with one frozen
+release binary.
+
+### Edit-list-free delivery
+
+`Mux.new(..., edit_lists: :audio)` and `Transcode.run(..., edit_lists: :audio)`
+move the video B-frame offset into signed composition offsets (ctts v1), retaining
+AAC priming edits. `edit_lists: false` removes all edits, including identity edits
+in timecode and chapter tracks. It refuses audio priming/trimming or a late first
+chapter that cannot be removed without changing playback. Use PCM audio in MOV
+and chapters beginning at frame 0 for strictly edit-list-free masters:
+
+```tungsten
+Transcode.run("master.mp4", "delivery.mov", codec: :hevc10, audio: :pcm, edit_lists: false)
+MediaVerify.check("delivery.mov", edit_lists: false)
+```
+
+`MediaVerify.facts` includes the actual container `edit_lists` count (edts boxes),
+which differs from AVFoundation's implicit track segment count. The CLI accepts
+`media transcode --no-edit-lists --audio pcm` and `media verify --no-edit-lists`.
+Studio mux defaults to video edit removal; strict delivery is
+`studio mux episode.json --out master.mov --audio-codec pcm --no-edit-lists`.
+AAC MP4 delivery still needs its priming edit to preserve sample-exact sync.
 
 ## How it is built
 

@@ -1,3 +1,5 @@
+use algebra/smith_normal_form
+
 # Finitely presented groups, their abelianisations, and Seifert fibrations.
 #
 # A presentation <x_1..x_n | r_1..r_k> abelianises to the cokernel of its

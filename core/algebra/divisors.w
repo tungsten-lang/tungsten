@@ -1,3 +1,6 @@
+use algebra/curves
+use algebra/quartics
+
 # Exact rational and line-presented closed places, with small formal divisors
 # on projective curves.
 #
@@ -500,8 +503,11 @@
     out
 
   -> each_term(&)
-    @terms.each -> (term)
+    i = 0
+    while i < @terms.size
+      term = @terms[i]
       &(term[0], term[1])
+      i += 1
     self
 
   -> add_normalized_term(coefficient, place)

@@ -71,3 +71,5 @@
 
   -> .rmdir(path)
     file_rmdir(path)
+
++ Directory < Dir

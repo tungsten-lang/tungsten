@@ -1,9 +1,12 @@
+use algebra/polynomial_factor
+use algebra/polynomial_matrix
+
 # Bivariate factorization over finite fields by Hensel lifting.
 #
 # For f(x, y) over a finite field the pipeline is exact:
 #   1. content in the main variable and squarefree part via multivariate gcd;
 #   2. a specialization point a with lc_y(f)(a) != 0 and f(a, y) squarefree;
-#   3. univariate factorization of f(a, y) (polynomial_factor_finite.w);
+#   3. univariate factorization of f(a, y) (polynomial_factor.w);
 #   4. linear multifactor Hensel lifting of the monic factors modulo
 #      (x - a)^k with k > deg_x f, in dense truncated-series arithmetic;
 #   5. Zassenhaus recombination: lc_y(f) * (subset product), primitive part,
@@ -11,7 +14,7 @@
 #   6. multiplicities by trial division; inseparable leftovers (zero
 #      derivative in the main variable) by swapping the main variable or
 #      taking a p-th root.
-# Reopens Polynomial; load after polynomial_factor_finite.w / polynomial_gcd.w.
+# Reopens Polynomial; load after polynomial_factor.w / polynomial_gcd.w.
 #
 # Three or more variables use the same pipeline with the ideal
 # m = (x_1 - a_1, ..., x_r - a_r) of the auxiliary variables in place of

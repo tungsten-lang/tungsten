@@ -82,6 +82,8 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
   ro :out, :num, :den, :sr, :frames
 
   -> new(@ep, @cut_name, @assets_sha, @counts, @pcaps)
+    @caption_id = nil
+    @caption_id = hash_of(@ep["burned_captions"]) if @ep["burned_captions"] != nil
     @cut = @ep["cuts"][@cut_name]
     die("no cut " + @cut_name.to_s) if @cut == nil
     @num = @cut["rate"][0]
@@ -668,6 +670,7 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
   # Frame key of frame f in an interval (TIMELINE.md §3.3): what the frame shows, in item-local time.
   -> frame_key(f, ents)
     parts = [COMPOSITOR, @cut["w"], @cut["h"], @num, @den]
+    parts.push([@caption_id, f]) if @caption_id != nil
     ents.each ->(e)
       it = entry_item(e)
       parts.push([it["recipe"], f - it["f0"], e[2]])
@@ -685,6 +688,7 @@ GRADED = {"still" => true, "clip" => true, "group" => true}
       while s < b
         n = [SEG_MAX, b - s].min
         parts = [ENCODER["id"], COMPOSITOR, @cut["w"], @cut["h"], @num, @den, n]
+        parts.push([@caption_id, s]) if @caption_id != nil
         names = []
         x[2].each ->(e)
           it = entry_item(e)

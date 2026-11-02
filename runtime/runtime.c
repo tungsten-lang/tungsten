@@ -73,6 +73,7 @@ extern char **environ;
 
 /* Forward declarations */
 static WMethod *w_method_lookup(WClass *klass, WValue name);
+static WValue w_instant_to_s(WValue v);
 static WMethod *w_method_lookup_arity(WClass *klass, WValue name, int arity);
 static WMethod *w_static_method_lookup(WClass *klass, WValue name);
 static WMethod *w_static_method_lookup_arity(WClass *klass, WValue name, int arity);
@@ -26079,8 +26080,9 @@ static void algebra_rewrite_ordinary_line(WAlgebraBuf *out,
 }
 
 /* Recognize an actual source-level feature import, not the same words inside
- * a comment or string. `use core/algebra/...` is included because the
- * orchestrator and focused layer specs import algebra submodules directly. */
+ * a comment or string. `use algebra/...` and `use core/algebra/...` are
+ * included because the orchestrator and focused layer specs import algebra
+ * submodules directly. */
 static int algebra_source_uses_algebra(const char *s, size_t n) {
     static const char public_use[] = "use algebra";
     static const char core_use[] = "use core/algebra";
@@ -26094,8 +26096,9 @@ static int algebra_source_uses_algebra(const char *s, size_t n) {
         if (p + sizeof(public_use) - 1 <= line_b &&
             memcmp(s + p, public_use, sizeof(public_use) - 1) == 0) {
             size_t after = p + sizeof(public_use) - 1;
-            if (after == line_b || s[after] == ' ' || s[after] == '\t' ||
-                s[after] == '\r' || s[after] == '#' || s[after] == ';')
+            if (after == line_b || s[after] == '/' || s[after] == ' ' ||
+                s[after] == '\t' || s[after] == '\r' || s[after] == '#' ||
+                s[after] == ';')
                 return 1;
         }
         if (p + sizeof(core_use) - 1 <= line_b &&
@@ -44998,6 +45001,12 @@ WValue w_add(WValue a, WValue b) {
         return w_box_instant(w_unbox_instant(a) + w_as_int(b));
     if (w_is_int(a) && w_is_instant(b))
         return w_box_instant(w_as_int(a) + w_unbox_instant(b));
+    /* Duration and Quantity shifts live on Instant#+. The int arms above
+     * stay here. The method adds through from_millis, never `self + x`. */
+    if (w_is_instant(a))
+        return w_method_call_fast(a, w_string("+"), &b, 1);
+    if (w_is_instant(b))
+        return w_method_call_fast(b, w_string("+"), &a, 1);
     /* char + int → char (shift codepoint) */
     if (w_is_char(a) && w_is_int(b))
         return w_box_char(w_char_codepoint(a) + (uint32_t)w_as_int(b));
@@ -45129,6 +45138,10 @@ WValue w_sub(WValue a, WValue b) {
     /* instant - int → instant */
     if (w_is_instant(a) && w_is_int(b))
         return w_box_instant(w_unbox_instant(a) - w_as_int(b));
+    /* Instant - Duration/Quantity. Instant - Instant stays the Duration
+     * arm above and must not reach this method. */
+    if (w_is_instant(a))
+        return w_method_call_fast(a, w_string("-"), &b, 1);
     /* rational - rational */
     if (w_is_rational_any(a) && w_is_rational_any(b))
         return w_rational_sub(a, b);
@@ -49349,18 +49362,8 @@ WValue w_to_s(WValue v) {
     if (w_is_bool(v))   return w_string(v == W_TRUE ? "true" : "false");
     if (w_is_bigint(v)) return bigint_to_s_boxed(v);
 
-    if (w_is_instant(v)) {
-        int64_t ms = w_unbox_instant(v);
-        char ibuf[21];
-        char *p = ibuf + 20;
-        *p = '\0';
-        uint64_t u = ms < 0 ? (uint64_t)(-ms) : (uint64_t)ms;
-        if (u == 0) { *--p = '0'; }
-        else { while (u > 0) { *--p = '0' + (char)(u % 10); u /= 10; } }
-        if (ms < 0) *--p = '-';
-        return w_string_n(p, (size_t)(ibuf + 20 - p));
-    }
-
+    if (w_is_instant(v))
+        return w_instant_to_s(v);
 
     if (w_is_char(v)) {
         uint32_t cp = w_char_codepoint(v);
@@ -50794,6 +50797,8 @@ WValue w_array_new_empty(void) {
         arr->size = 0;
         arr->flags = W_FLAG_OWNED;  /* typed-style w_array_push checks this */
         arr->ebits = 65;            /* w64 — recycled arrays still carry the polymorphic ebits */
+        arr->_pad[0] = 0;
+        arr->_pad[1] = 0;
         return v;
     }
     WArray *arr = malloc(sizeof(WArray));
@@ -51189,6 +51194,7 @@ WValue w_native_data_field(WValue recv, WValue name_v) {
         WArray *a = w_as_array(recv);
         if (strcmp(name, "flags") == 0) return w_int(a->flags);
         if (strcmp(name, "ebits") == 0) return w_int(a->ebits);
+        if (strcmp(name, "encoding_id") == 0) return w_int(a->_pad[0]);
         if (strcmp(name, "start") == 0) return w_int(a->start);
         if (strcmp(name, "size") == 0) return w_int(a->size);
         if (strcmp(name, "cap") == 0) return w_int(a->cap);
@@ -52996,6 +53002,13 @@ WValue w_native_data_field_set(WValue recv, WValue name_v, WValue value) {
         w_as_bigint(recv)->size = (int32_t)n;
         return value;
     }
+    if (w_is_array(recv) && strcmp(name, "encoding_id") == 0) {
+        int64_t n = w_as_int(value);
+        if (n < 0 || n > 255)
+            w_raise(w_string("ByteArray encoding_id is outside u8"));
+        w_as_array(recv)->_pad[0] = (uint8_t)n;
+        return value;
+    }
     if (w_is_array(recv) && (strcmp(name, "start") == 0 || strcmp(name, "size") == 0)) {
         int64_t n = w_as_int(value);
         if (n < 0 || n > UINT32_MAX)
@@ -53811,6 +53824,7 @@ static int w_ivar_lookup(WClass *klass, WValue name) {
  */
 static pthread_mutex_t g_type_table_barrier_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_type_tables_locked = 0;
+static uint16_t g_byte_array_class = 0;
 
 WValue w_type_tables_lock_safe(void) {
     pthread_mutex_lock(&g_type_table_barrier_mutex);
@@ -53869,6 +53883,8 @@ WValue w_class_new(const char *name, WValue superclass) {
         w_public_class_cache(0x0F9, class_value);
     } else if (strcmp(name, "Symbol") == 0) {
         w_public_class_cache(0x1F9, class_value);
+    } else if (strcmp(name, "ByteArray") == 0) {
+        g_byte_array_class = klass->class_id + 1;
     } else if (strcmp(name, "Unknown") == 0 &&
                (!g_public_type_class[0x101].resolved ||
                 !w_is_class(g_public_type_class[0x101].value))) {
@@ -54674,6 +54690,7 @@ static WValue g_tn_nil, g_tn_bool, g_tn_int, g_tn_bigint, g_tn_float,
     g_tn_string, g_tn_strbuf, g_tn_symbol, g_tn_char, g_tn_big_array,
     g_tn_small_array, g_tn_array, g_tn_hash, g_tn_range,
     g_tn_decimal, g_tn_bigdecimal, g_tn_currency, g_tn_quantity, g_tn_duration, g_tn_date,
+    g_tn_instant,
     g_tn_complex, g_tn_rational, g_tn_color, g_tn_ipv4, g_tn_ipv6, g_tn_mac,
     g_tn_uuid, g_tn_mmap, g_tn_socket, g_tn_vec2f, g_tn_point2d, g_tn_vec2i, g_tn_vec3f,
     g_tn_sockaddr, g_tn_object, g_tn_class, g_tn_unknown;
@@ -54690,6 +54707,7 @@ static void w_typenames_init(void) {
     g_tn_bigdecimal = w_string("BigDecimal");
     g_tn_currency = w_string("Currency");  g_tn_quantity = w_string("Quantity");
     g_tn_duration = w_string("Duration");  g_tn_date = w_string("Date");
+    g_tn_instant = w_string("Instant");
     g_tn_complex = w_string("Complex");    g_tn_rational = w_string("Rational");
     g_tn_color = w_string("Color");        g_tn_ipv4 = w_string("IPv4");
     g_tn_ipv6 = w_string("IPv6");          g_tn_mac = w_string("MAC");
@@ -54743,6 +54761,7 @@ WValue __w_type(WValue v) {
     if (w_is_quantity(v)) return g_tn_quantity;
     if (w_is_duration(v)) return g_tn_duration;
     if (w_is_date(v))     return g_tn_date;
+    if (w_is_instant(v))  return g_tn_instant;
     if (w_is_complex(v))  return g_tn_complex;
     if (w_is_rational_any(v)) return g_tn_rational;
     if (w_is_color(v))    return g_tn_color;
@@ -56026,26 +56045,19 @@ WValue __w_file_rm(WValue path_val) {
 }
 
 WValue __w_file_expand_path(WValue path_val) {
-    const char *path = as_str(path_val);
-    char resolved[4096];
-    if (realpath(path, resolved))
-        return w_string(resolved);
-    /* If file doesn't exist yet, expand ~ and relative manually */
-    if (path[0] == '~' && (path[1] == '/' || path[1] == '\0')) {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(resolved, sizeof(resolved), "%s%s", home, path + 1);
-            return w_string(resolved);
-        }
+    /* Expand lexically, as Ruby File.expand_path does. Following a final
+     * symlink here redirects an output filename into its previous release. */
+    const char *path=as_str(path_val);char cwd[4096];const char *prefix="";
+    if(path[0]=='~'&&(path[1]=='/'||path[1]==0)){prefix=getenv("HOME");if(!prefix)prefix="";path++;}
+    else if(path[0]!='/'){if(!getcwd(cwd,sizeof cwd)){w_raise(w_string("File.expand_path getcwd failed"));return W_NIL;}prefix=cwd;}
+    size_t n=strlen(prefix)+strlen(path)+2;char *input=malloc(n),*out=malloc(n);if(!input||!out){free(input);free(out);w_raise(w_string("File.expand_path allocation failed"));return W_NIL;}
+    snprintf(input,n,"%s/%s",prefix,path);size_t used=1;out[0]='/';out[1]=0;char *save=NULL;
+    for(char *part=strtok_r(input,"/",&save);part;part=strtok_r(NULL,"/",&save)){
+        if(!strcmp(part,"."))continue;
+        if(!strcmp(part,"..")){if(used>1){while(used>1&&out[used-1]!='/')used--;if(used>1)used--;}out[used]=0;continue;}
+        if(used>1)out[used++]='/';size_t length=strlen(part);memcpy(out+used,part,length);used+=length;out[used]=0;
     }
-    if (path[0] != '/') {
-        char cwd[4096];
-        if (getcwd(cwd, sizeof(cwd))) {
-            snprintf(resolved, sizeof(resolved), "%s/%s", cwd, path);
-            return w_string(resolved);
-        }
-    }
-    return w_string(path);
+    WValue result=w_string(out);free(input);free(out);return result;
 }
 
 WValue __w_file_expand_path_base(WValue path_val, WValue base_val) {
@@ -56065,6 +56077,42 @@ WValue __w_file_expand_path_base(WValue path_val, WValue base_val) {
     WValue joined_value = w_string(joined);
     free(joined);
     return __w_file_expand_path(joined_value);
+}
+
+/* File path/link operations shared by compiled code and the native interpreter. */
+WValue __w_file_realpath(WValue value) {
+    const char *path=as_str(value); w_sandbox_gate("file_realpath",path);
+    char *resolved=realpath(path,NULL);
+    if(!resolved) { w_raise(w_string("File.realpath failed")); return W_NIL; }
+    WValue result=w_string(resolved);free(resolved);return result;
+}
+WValue __w_file_readlink(WValue value) {
+    const char *path=as_str(value);w_sandbox_gate("file_readlink",path);
+    size_t cap=256;char *buffer=NULL;
+    while(cap<=1024*1024) { char *next=realloc(buffer,cap+1);if(!next){free(buffer);w_raise(w_string("File.readlink allocation failed"));return W_NIL;}buffer=next;
+        ssize_t n=readlink(path,buffer,cap);if(n<0){free(buffer);w_raise(w_string("File.readlink failed"));return W_NIL;}
+        if((size_t)n<cap){buffer[n]=0;WValue result=w_string(buffer);free(buffer);return result;}cap*=2;
+    }
+    free(buffer);w_raise(w_string("File.readlink target exceeds 1 MiB"));return W_NIL;
+}
+WValue __w_file_symlink(WValue target_value,WValue path_value) {
+    char *target=strdup(as_str(target_value));const char *path=as_str(path_value);w_sandbox_gate("file_symlink",path);
+    if(!target){w_raise(w_string("File.symlink allocation failed"));return W_NIL;}
+    int status=symlink(target,path);free(target);if(status<0){w_raise(w_string("File.symlink failed"));return W_NIL;}return w_int(0);
+}
+
+WValue __w_file_basename(WValue value) {
+    const char *path=as_str(value);size_t n=strlen(path);while(n>1&&path[n-1]=='/')n--;size_t start=n;while(start>0&&path[start-1]!='/')start--;
+    if(n==1&&path[0]=='/')return w_string("/");char *copy=strndup(path+start,n-start);WValue result=w_string(copy);free(copy);return result;
+}
+WValue __w_file_dirname(WValue value) {
+    const char *path=as_str(value);size_t n=strlen(path);while(n>1&&path[n-1]=='/')n--;while(n>0&&path[n-1]!='/')n--;while(n>1&&path[n-1]=='/')n--;
+    if(!n)return w_string(".");char *copy=strndup(path,n);WValue result=w_string(copy);free(copy);return result;
+}
+WValue __w_file_extname(WValue value) {
+    WValue basename=__w_file_basename(value);const char *base=as_str(basename),*visible=base;
+    while(*visible=='.')visible++;
+    const char *dot=strrchr(base,'.');if(!dot||dot<visible)return w_string("");return w_string(dot);
 }
 
 WValue __w_file_join(WValue a, WValue b) {
@@ -57217,6 +57265,7 @@ WValue w_core_cache_read_rebase_locations(WValue path_val,
 
 typedef struct {
     pid_t pid;
+    int own_group;
 } WSystemChild;
 
 /* A cancelled Thread must not strand the process it was waiting for.  Spawn
@@ -57232,7 +57281,7 @@ static void w_system_child_cleanup(void *arg) {
 
     pid_t pid = child->pid;
     int status;
-    kill(-pid, SIGTERM);
+    kill(child->own_group ? -pid : pid, SIGTERM);
     for (int attempt = 0; attempt < 10; attempt++) {
         pid_t waited = waitpid(pid, &status, WNOHANG);
         if (waited == pid || (waited == -1 && errno == ECHILD)) {
@@ -57244,10 +57293,17 @@ static void w_system_child_cleanup(void *arg) {
         nanosleep(&grace, NULL);
     }
 
-    kill(-pid, SIGKILL);
+    kill(child->own_group ? -pid : pid, SIGKILL);
     while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {}
     child->pid = -1;
     pthread_setcancelstate(old_cancel_state, NULL);
+}
+
+/* An outer stage supervisor can own one group across Tungsten worker pools.
+ * Default Process.spawn/system semantics retain a separate child group. */
+static int w_child_own_group(void) {
+    const char *inherit = getenv("TUNGSTEN_INHERIT_PROCESS_GROUP");
+    return !(inherit && !strcmp(inherit, "1"));
 }
 
 /* posix_spawn instead of system(3): system() sets SIGINT/SIGQUIT to SIG_IGN
@@ -57260,14 +57316,15 @@ WValue __w_system(WValue cmd_val) {
     char *spawn_argv[] = { "sh", "-c", (char *)cmd, NULL };
     posix_spawnattr_t attr;
     if (posix_spawnattr_init(&attr) != 0) return W_FALSE;
-    short flags = POSIX_SPAWN_SETPGROUP;
+    int own_group = w_child_own_group();
+    short flags = own_group ? POSIX_SPAWN_SETPGROUP : 0;
     if (posix_spawnattr_setflags(&attr, flags) != 0 ||
-        posix_spawnattr_setpgroup(&attr, 0) != 0) {
+        (own_group && posix_spawnattr_setpgroup(&attr, 0) != 0)) {
         posix_spawnattr_destroy(&attr);
         return W_FALSE;
     }
 
-    WSystemChild child = { .pid = -1 };
+    WSystemChild child = { .pid = -1, .own_group = own_group };
     int spawn_error = posix_spawn(&child.pid, "/bin/sh", NULL, &attr,
                                   spawn_argv, environ);
     posix_spawnattr_destroy(&attr);
@@ -57331,9 +57388,10 @@ WValue __w_proc_spawn(WValue argv_val) {
         free(argv);
         return w_int(-1);
     }
-    short flags = POSIX_SPAWN_SETPGROUP;
+    int own_group = w_child_own_group();
+    short flags = own_group ? POSIX_SPAWN_SETPGROUP : 0;
     if (posix_spawnattr_setflags(&attr, flags) != 0 ||
-        posix_spawnattr_setpgroup(&attr, 0) != 0) {
+        (own_group && posix_spawnattr_setpgroup(&attr, 0) != 0)) {
         posix_spawnattr_destroy(&attr);
         for (int i = 0; i < argc; i++) free(argv[i]);
         free(argv);
@@ -57407,7 +57465,7 @@ WValue __w_proc_kill(WValue pid_val, WValue sig_val) {
     pid_t pid = (pid_t)w_as_int(pid_val);
     int sig = (int)w_as_int(sig_val);
     if (pid <= 1) return W_FALSE;
-    return kill(-pid, sig) == 0 ? W_TRUE : W_FALSE;
+    return kill(getpgid(pid) == pid ? -pid : pid, sig) == 0 ? W_TRUE : W_FALSE;
 }
 
 /* Liveness probe: signal 0 to the process (not the group). */
@@ -58280,6 +58338,7 @@ static WValue WN_file_exists_q = 0, WN_read_file = 0, WN_write_file = 0;
 static WValue WN_length = 0;
 static WValue WN_respond_to_q = 0;
 static WValue WN_is_a_q = 0;
+static WValue WN_nil_q = 0;
 static WValue WN_spaceship = 0;
 
 /* Compare a class name (NUL-terminated) against a target type name (ptr,len),
@@ -58309,8 +58368,15 @@ static int w_type_name_eq_lit(const char *tn, size_t tn_len, const char *lit) {
 }
 
 static int w_primitive_is_a_type_name(WValue recv, const char *tn, size_t tn_len) {
-    if (w_is_char(recv))
-        return w_type_name_eq_lit(tn, tn_len, "Char");
+    if (w_is_instant(recv))
+        return w_type_name_eq_lit(tn, tn_len, "Instant");
+    if (w_is_bytes(recv) && w_type_name_eq_lit(tn, tn_len, "ByteArray"))
+        return 1;
+    if (w_is_char(recv)) {
+        if (w_type_name_eq_lit(tn, tn_len, "Codepoint")) return 1;
+        if (w_type_name_eq_lit(tn, tn_len, "Char")) return w_char_is_ascii(recv);
+        return 0;
+    }
     if (w_is_ipv4(recv))
         return w_type_name_eq_lit(tn, tn_len, "IPv4");
     if (w_is_ipv6(recv))
@@ -58370,6 +58436,7 @@ WValue w_value_is_a(WValue recv, WValue target) {
             return W_FALSE;
         }
         if (w_is_array(recv)) {
+            if (w_is_bytes(recv) && strcmp(tn, "ByteArray") == 0) return W_TRUE;
             return w_bool(tn[0] == 'A' && tn[1] == 'r' && tn[2] == 'r' && tn[3] == 'a' && tn[4] == 'y' && tn[5] == '\0');
         }
         if (w_is_double(recv)) {
@@ -58513,6 +58580,7 @@ static void w_init_method_names(void) {
     WN_write_file   = w_string("write_file");
     WN_respond_to_q = w_string("respond_to?");
     WN_is_a_q       = w_string("is_a?");
+    WN_nil_q        = w_string("nil?");
     WN_spaceship    = w_string("<=>");
     WN_byte_at      = w_string("byte_at");
     WN_view_at      = w_string("view_at");
@@ -58727,6 +58795,33 @@ uint64_t w_dispatch_key(WValue v) {
 /* ---- Type class table: dispatch key → class_id for Tungsten-defined methods ---- */
 static uint16_t g_type_class[256] = {0};
 
+/* << and w_to_s print an Instant. Prefer Instant#to_s (ISO-8601) once the
+ * class is loaded. The numeric fallback covers a packed word whose class
+ * was never registered. Instant#to_s builds a StringBuffer and does not
+ * call w_to_s on the instant, so this does not recurse. */
+static WValue w_instant_to_s(WValue v) {
+    uint16_t cid_slot = g_type_class[0xF8];
+    if (cid_slot) {
+        WClass *klass = g_class_table[cid_slot - 1];
+        if (klass) {
+            WMethod *m = w_method_lookup(klass, WN_to_s);
+            if (m) {
+                typedef WValue (*method_fn_1)(WValue);
+                return ((method_fn_1)m->fn_ptr)(v);
+            }
+        }
+    }
+    int64_t ms = w_unbox_instant(v);
+    char ibuf[21];
+    char *p = ibuf + 20;
+    *p = '\0';
+    uint64_t u = ms < 0 ? (uint64_t)(-ms) : (uint64_t)ms;
+    if (u == 0) { *--p = '0'; }
+    else { while (u > 0) { *--p = '0' + (char)(u % 10); u /= 10; } }
+    if (ms < 0) *--p = '-';
+    return w_string_n(p, (size_t)(ibuf + 20 - p));
+}
+
 static void w_public_type_class_register(uint8_t key, WClass *klass) {
     /* These keys intentionally expose only method facades. Packed Body uses
      * Array as its public identity and is resolved/cached by __w_type below. */
@@ -58934,6 +59029,10 @@ static WValue w_type_class_dispatch(uint16_t class_id, WValue recv, WValue name,
 }
 
 static inline WValue w_try_type_class_dispatch(WValue recv, WValue name, WArray *args) {
+    if (w_is_bytes(recv) && g_byte_array_class) {
+        WValue result = w_type_class_dispatch(g_byte_array_class - 1, recv, name, args);
+        if (result != W_UNDEF) return result;
+    }
     uint64_t key = w_dispatch_key(recv);
     if (key >= 256) return W_UNDEF;
     uint16_t cid_slot = g_type_class[key];
@@ -70164,6 +70263,10 @@ static WMethod *w_cacheable_type_class_method(WValue recv, WValue name,
     if (w_is_closure(recv) && name == WN_call) return NULL;
 
     if (w_is_array(recv)) {
+        if (w_is_bytes(recv) && g_byte_array_class) {
+            WMethod *bm = w_type_class_method(g_byte_array_class - 1, name, argc);
+            if (bm) return (bm->arity >= 1 && bm->arity <= 5) ? bm : NULL;
+        }
         cid_slot = g_type_class[key];
     } else if (w_is_node(recv)) {
         if (!g_any_node_kind_has_methods)
@@ -70866,6 +70969,10 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
     }
 
     /* Type class dispatch: check if any Tungsten class is registered for this dispatch key */
+    if (w_is_bytes(recv) && g_byte_array_class) {
+        WValue result = w_type_class_dispatch(g_byte_array_class - 1, recv, name, args);
+        if (result != W_UNDEF) return result;
+    }
     {
         uint64_t key = w_dispatch_key(recv);
         if (key < 256) {
@@ -70955,8 +71062,18 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
 #endif
 
 
-        /* ByteArray.new(length) */
+        /* ByteArray.new(length_or_array) */
         if (strcmp(klass->name, "ByteArray") == 0 && w_hash_key_eq(name, WN_new)) {
+            if (args->size > 0 && w_is_array(args->slots[0])) {
+                WArray *src = w_as_array(args->slots[0]);
+                WValue out = w_bytes_new(src->size);
+                uint8_t *dst = (uint8_t *)w_as_array(out)->slots;
+                for (int32_t bi = 0; bi < src->size; bi++) {
+                    WValue elem = w_array_get(args->slots[0], w_int(bi));
+                    dst[bi] = (uint8_t)(w_to_i64(elem) & 0xFF);
+                }
+                return out;
+            }
             int64_t len = (args->size > 0) ? w_as_int(args->slots[0]) : 0;
             return w_bytes_new(len);
         }
@@ -71088,6 +71205,11 @@ invoke_static_method:
      * source methods win through normal lookup above; builtin containers use
      * the structural algorithm while hash-table keys keep identity hashing. */
     if (name == WN_hash && args->size == 0) return w_public_hash(recv);
+
+    /* nil? is available even when Object's source methods were not loaded.
+     * Test the value tag directly, independently of user-defined equality. */
+    if (w_hash_key_eq(name, WN_nil_q) && args->size == 0)
+        return w_bool(w_is_nil(recv));
 
     /* Global builtins callable from any context (bootstrapping fallback) */
     if ((w_hash_key_eq(name, WN_file_exists_q) || w_hash_key_eq(name, WN_file_q)) && args->size >= 1)
@@ -73282,8 +73404,9 @@ WValue w_bytes_slice(WValue bytes, WValue start, WValue len) {
     int64_t l = w_as_int(len);
     if (s < 0) s = 0;
     if (s + l > a->size) l = a->size - s;
-    if (l <= 0) return w_bytes_new(0);
-    return w_bytes_from_data(((uint8_t *)a->slots) + s, l);
+    WValue out = (l <= 0) ? w_bytes_new(0) : w_bytes_from_data(((uint8_t *)a->slots) + s, l);
+    w_as_array(out)->_pad[0] = a->_pad[0];
+    return out;
 }
 
 WValue w_bytes_concat(WValue a_val, WValue b_val) {
@@ -73707,6 +73830,8 @@ WValue w_array_new_uninit(int64_t element_bits, int64_t cap) {
         w_arr_park = NULL;
         if (a->ebits == (int8_t)element_bits && a->cap == actual_cap) {
             a->flags = W_FLAG_OWNED;
+            a->_pad[0] = 0;
+            a->_pad[1] = 0;
             a->start = 0;
             a->size = 0;
             return w_box_array(a);
@@ -73982,6 +74107,8 @@ WValue w_array_reuse_or_new(WValue *slot, int64_t element_bits, int64_t cap) {
     if (v != W_NIL) {
         WArray *a = w_as_array(v);
         if (a->ebits == (int8_t)element_bits && a->cap >= cap) {
+            a->_pad[0] = 0;
+            a->_pad[1] = 0;
             a->start = 0;
             a->size = 0;
             return v;
@@ -75025,6 +75152,7 @@ WValue w_array_view(WValue arr, WValue lo_v, WValue len_v) {
     } else {
         view_val = w_array_view_raw((uint8_t *)src->slots + ((int64_t)src->start + lo) * (abs_bits / 8), eb, len);
     }
+    w_as_array(view_val)->_pad[0] = src->_pad[0];
     w_register_view(arr, view_val);
     return view_val;
 }

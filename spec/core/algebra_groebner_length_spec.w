@@ -1,10 +1,7 @@
 # Zero-dimensional ideals: standard monomials and length.
 
-use core/algebra/field
 use core/algebra/finite_field
-use core/algebra/polynomial
 use core/algebra/groebner
-use core/algebra/groebner_length
 
 -> check(name, got, want)
   if got != want

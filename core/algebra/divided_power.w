@@ -3,8 +3,8 @@
 # ordinary symmetric-square coinvariants: the diagonal divided powers retain
 # information that drives the carry cocycle.
 
-use core/algebra/lattice_polytope
-use core/algebra/integer_lattice
+use algebra/lattice_polytope
+use algebra/integer_lattice
 
 + DividedSquareSpace
   -> new(dimension)

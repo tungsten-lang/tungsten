@@ -1,4 +1,4 @@
-# Scaler — high-quality resampling of RGBA frames: Lanczos-3, bicubic or
+# Scaler — high-quality resampling of RGBA frames and 8/10-bit planes: Lanczos-3, bicubic or
 # bilinear, with premultiplied alpha, crops and pads, on the GPU (Metal), the
 # CPU vector units (vImage) or plain C.
 #
@@ -39,19 +39,24 @@
 # vImage has its own Lanczos. Scaler.backends lists what this machine has.
 
 + Scaler
-  ro :src_w, :src_h, :width, :height, :crop, :rect, :filter, :handle
+  ro :src_w, :src_h, :width, :height, :crop, :rect, :filter, :handle, :channels, :source_bits, :bits
 
   # Scaler.new(src_w, src_h, width, height, filter: :lanczos3, fit: :stretch,
   # crop: nil, rect: nil, fill: [0, 0, 0, 255], alpha: :premultiplied,
-  # backend: :auto, layout: :rgba)
+  # backend: :auto, layout: :rgba, channels: 4, source_bits: 8, bits: 8)
+  # Plane channels: 1 or 2. Ten-bit samples are MSB-aligned uint16 (P010);
+  # strides are bytes and fill remains in 8-bit code units.
   -> new(@src_w, @src_h, @width, @height, opts = {})
+    @channels = Scaler.opt(opts, :channels, 4)
+    @source_bits = Scaler.opt(opts, :source_bits, 8)
+    @bits = Scaler.opt(opts, :bits, 8)
     @filter = Scaler.opt(opts, :filter, "lanczos3").to_s
     g = Scaler.fit(@src_w, @src_h, @width, @height, Scaler.opt(opts, :fit, "stretch"))
     @crop = Scaler.opt(opts, :crop, g[:crop])
     @rect = Scaler.opt(opts, :rect, g[:rect])
     fill = Scaler.opt(opts, :fill, [0, 0, 0, 255])
     spec = [@src_w, @src_h, @width, @height, @filter, @crop, @rect, fill, Scaler.opt(opts, :alpha, "premultiplied").to_s,
-            Scaler.opt(opts, :backend, "auto").to_s, Scaler.opt(opts, :layout, "rgba").to_s]
+            Scaler.opt(opts, :backend, "auto").to_s, Scaler.opt(opts, :layout, "rgba").to_s, @channels, @source_bits, @bits]
     @handle = ccall("w_media_scaler_new", spec)
 
   -> .opt(opts, key, fallback)

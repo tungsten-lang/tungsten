@@ -432,6 +432,16 @@ bitfile_service_bindings() {
     | sed 's/,$//'
 }
 
+# Parse `unicode "X.Y.Z"` or `unicode_version "X.Y.Z"` from a Bitfile.
+bitfile_unicode() {
+  local bit_dir="$1"
+  local bf="$bit_dir/Bitfile"
+  [ -f "$bf" ] || return
+  grep -E '^[[:space:]]*unicode(_version)?[[:space:]]+["'\''][^"'\'']+["'\'']' "$bf" 2>/dev/null \
+    | tail -n 1 \
+    | sed -E 's/^[[:space:]]*unicode(_version)?[[:space:]]+["'\'']([^"'\'']+)["'\''].*/\2/'
+}
+
 # Parse a Bitfile's `requires [...]` line and emit the bit names
 # one per line. Same single-line form as `includes [...]`.
 bitfile_requires() {
@@ -453,13 +463,13 @@ walk_requires_includes() {
   local start_dir="$1"
   local repo_root="$2"
   local visited=""
-  local queue="$start_dir"
+  local -a queue=("$start_dir")
+  local queue_index=0
   local emitted=""
 
-  while [ -n "$queue" ]; do
-    local current="${queue%% *}"
-    queue="${queue#* }"
-    [ "$queue" = "$current" ] && queue=""
+  while [ "$queue_index" -lt "${#queue[@]}" ]; do
+    local current="${queue[$queue_index]}"
+    queue_index=$((queue_index + 1))
 
     case ",$visited," in
       *,"$current",*) continue ;;
@@ -481,7 +491,7 @@ walk_requires_includes() {
         echo "bin/tungsten: requires '$req' not found under $repo_root/bits/" >&2
         return 1
       fi
-      queue="${queue} ${req_dir}"
+      queue+=("$req_dir")
     done < <(bitfile_requires "$current")
   done
 
@@ -522,6 +532,11 @@ resolve_bitfile_env() {
             bit_bindings=$(bitfile_service_bindings "$bit_dir")
             if [ -n "$bit_bindings" ] && [ -z "$TUNGSTEN_SERVICE_BINDINGS" ]; then
               export TUNGSTEN_SERVICE_BINDINGS="$bit_bindings"
+            fi
+            local bit_unicode
+            bit_unicode=$(bitfile_unicode "$bit_dir")
+            if [ -n "$bit_unicode" ] && [ -z "$TUNGSTEN_UNICODE_VERSION" ]; then
+              export TUNGSTEN_UNICODE_VERSION="$bit_unicode"
             fi
           fi
           break

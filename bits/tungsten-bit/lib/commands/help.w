@@ -21,40 +21,41 @@ in Tungsten:Bit:Commands
 
     command_class = command_for(target)
     if command_class == nil
+      return true if PackageCommands.help(target)
       abort "Unknown command: " + target
 
     say command_class.new([]).usage
 
   -> command_for(name)
     case name
-      "install"  => Install
-      "new"      => New
-      "build"    => Build
-      "spec"     => Spec
-      "publish"  => Publish
-      "push"     => Push
-      "sign"     => Sign
-      "pack"     => Pack
-      "signup"   => Signup
-      "login"    => Login
-      "create"   => Create
-      "register" => Register
-      "yank"     => Yank
-      "search"   => Search
-      "clean"    => Clean
-      "generate" => Generate
-      "destroy"  => Destroy
-      "list"     => List
-      "show"     => Show
-      "update"   => Update
-      "outdated" => Outdated
-      "upgrade"  => Upgrade
-      "prune"    => Prune
-      "info"     => Info
-      "env"      => Env
-      "doctor"   => Doctor
-      "audit"    => Audit
-      "help"     => Help
+      "install"  => Tungsten:Bit:Commands:Install
+      "new"      => Tungsten:Bit:Commands:New
+      "build"    => Tungsten:Bit:Commands:Build
+      "spec"     => Tungsten:Bit:Commands:Spec
+      "publish"  => Tungsten:Bit:Commands:Publish
+      "push"     => Tungsten:Bit:Commands:Push
+      "sign"     => Tungsten:Bit:Commands:Sign
+      "pack"     => Tungsten:Bit:Commands:Pack
+      "signup"   => Tungsten:Bit:Commands:Signup
+      "login"    => Tungsten:Bit:Commands:Login
+      "create"   => Tungsten:Bit:Commands:Create
+      "register" => Tungsten:Bit:Commands:Register
+      "yank"     => Tungsten:Bit:Commands:Yank
+      "search"   => Tungsten:Bit:Commands:Search
+      "clean"    => Tungsten:Bit:Commands:Clean
+      "generate" => Tungsten:Bit:Commands:Generate
+      "destroy"  => Tungsten:Bit:Commands:Destroy
+      "list"     => Tungsten:Bit:Commands:List
+      "show"     => Tungsten:Bit:Commands:Show
+      "update"   => Tungsten:Bit:Commands:Update
+      "outdated" => Tungsten:Bit:Commands:Outdated
+      "upgrade"  => Tungsten:Bit:Commands:Upgrade
+      "prune"    => Tungsten:Bit:Commands:Prune
+      "info"     => Tungsten:Bit:Commands:Info
+      "env"      => Tungsten:Bit:Commands:Env
+      "doctor"   => Tungsten:Bit:Commands:Doctor
+      "audit"    => Tungsten:Bit:Commands:Audit
+      "help"     => Tungsten:Bit:Commands:Help
       => nil
 
   -> command_names

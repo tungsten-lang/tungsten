@@ -136,7 +136,7 @@ use grade
     if @compiler_id == nil
       cp = File.expand_path(dir_of(compiler_path()) + "/tungsten-compiler")
       st = File.stat(cp)
-      @compiler_id = sha(cp + ":" + st.size.to_s + ":" + st.mtime_ns.to_s)
+      @compiler_id = sha(cp + ":" + st.size.to_s + ":" + st.mtime_ns.to_s + ":" + env("STUDIO_IMPLEMENTATION_ID").to_s)
     @compiler_id
 
   -> program_source(spec)

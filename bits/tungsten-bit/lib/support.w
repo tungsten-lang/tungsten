@@ -1,4 +1,5 @@
 # Support objects for the bit command implementations.
+use bitfile_syntax
 
 in Tungsten:Bit
 
@@ -792,12 +793,14 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   ro :source
   ro :source_policies
   ro :tungsten_requirement
+  ro :unicode_version
   ro :dependencies
   ro :executables
   ro :assets
+  ro :directives
   ro :path
 
-  -> new(name = "unknown", version = "0.0.0", summary = "", license = "", source = nil, dependencies = nil, path = nil, tungsten_requirement = nil, executables = nil, assets = nil)
+  -> new(name = "unknown", version = "0.0.0", summary = "", license = "", source = nil, dependencies = nil, path = nil, tungsten_requirement = nil, executables = nil, assets = nil, unicode_version = nil)
     @name = name
     @version = version
     @summary = summary
@@ -806,28 +809,49 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     @source_policies = {}
     @source_policies[@source] = SourcePolicy.new(@source, 0, false)
     @tungsten_requirement = tungsten_requirement
+    @unicode_version = unicode_version
     @dependencies = dependencies || []
     @executables = executables || []
     @assets = assets || []
     @path = path
     @group_stack = []
+    @directives = []
 
   -> .load(path)
     if !File.exists?(path)
       return nil
     Bitfile.parse(File.read(path), path)
 
-  -> .parse(content, path = nil)
+  # Namespaces opt in to strict literal syntax; legacy package declarations keep
+  # their existing parser and compatibility behavior.
+  -> .parse(content, path = nil, namespaces = nil)
     bitfile = Bitfile.new()
     bitfile.set_path(path)
-    lines = content.split("\n")
-    i = 0
-    n = lines.size()
-    while i < n
-      bitfile.apply_line(lines[i])
-      i += 1
+    if namespaces == nil
+      content.split("\n").each ->(line)
+        bitfile.apply_line(line)
+    else
+      BitfileSyntax.statements(content, namespaces).each ->(entry)
+        if entry[2] == nil
+          bitfile.apply_line(entry[1])
+        else
+          begin
+            statement = entry[1]
+            space = 0
+            while space < statement.size && statement.byte_at(space) != 32 && statement.byte_at(space) != 9
+              space += 1
+            method = statement.slice(0, space)
+            name = method.slice(entry[2].size + 1, method.size)
+            raise "invalid directive name" if !BitfileSyntax.identifier?(name)
+            parsed = BitfileLiterals.new(statement.slice(space, statement.size)).arguments
+            bitfile.directives.push(BitfileDirective.new(entry[2], name, parsed[0], parsed[1], entry[0]))
+          rescue error
+            raise "[path || "Bitfile"]:[entry[0]]: [error]"
     bitfile.infer_name_from_path()
     bitfile
+
+  -> .literal_arguments(text)
+    BitfileLiterals.new(text).arguments
 
   -> set_path(path)
     @path = path
@@ -857,7 +881,7 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       i += 1
     groups
 
-  -> quoted(line)
+  -> quoted(line, decode_escapes = false)
     n = line.size()
     i = 0
     quote_b = 0
@@ -899,6 +923,34 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
         following = line.slice(i + 1, 1)
         if following == quote || following == "\\"
           value = value + following
+          i += 1
+        elsif decode_escapes
+          if following == "n"
+            value += "\n"
+          elsif following == "r"
+            value += "\r"
+          elsif following == "t"
+            value += "\t"
+          elsif following == "b"
+            value += 8.chr
+          elsif following == "f"
+            value += 12.chr
+          elsif following == "/"
+            value += "/"
+          elsif following == "u"
+            cp = BitfileSyntax.hex4(line.slice(i + 2, 4))
+            i += 4
+            if cp >= 55296 && cp <= 56319
+              raise "missing Unicode low surrogate" if line.slice(i + 2, 2) != "\\u"
+              low = BitfileSyntax.hex4(line.slice(i + 4, 4))
+              raise "invalid Unicode low surrogate" if low < 56320 || low > 57343
+              cp = 65536 + (cp - 55296) * 1024 + low - 56320
+              i += 6
+            elsif cp >= 56320 && cp <= 57343
+              raise "unexpected Unicode low surrogate"
+            value += cp.chr
+          else
+            raise "unsupported string escape"
           i += 1
         else
           value = value + c
@@ -1046,6 +1098,8 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
       @license = value if value
     elsif line.starts_with?("tungsten ")
       @tungsten_requirement = value if value
+    elsif line.starts_with?("unicode ") || line.starts_with?("unicode_version ")
+      @unicode_version = value if value
     elsif line.starts_with?("executable ")
       executable_name = value
       if executable_name != nil
@@ -1421,8 +1475,9 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
   ro :cpu
   ro :target
   ro :jobs
+  ro :unicode_version
 
-  -> new(output: "build", release: false, debug: false, native: false, cpu: "", target: "", jobs: 1)
+  -> new(output: "build", release: false, debug: false, native: false, cpu: "", target: "", jobs: 1, unicode_version: nil)
     @output = output
     @release = release
     @debug = debug
@@ -1430,9 +1485,36 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     @cpu = cpu
     @target = target
     @jobs = jobs
+    @unicode_version = unicode_version
 
   -> output_path
     File.join(@output, "bit")
+
+-> ensure_unicode_tables(bitfile, output_dir = nil)
+  return true if bitfile == nil
+  u_dir = File.join(tungsten_home(), "unicode")
+  FileUtils.mkdir_p(u_dir)
+  u_bin = File.join(u_dir, "unicode_data.bin")
+  if !File.exists?(u_bin)
+    reg = bitfile.source || default_bit_source()
+    if remote_url?(reg)
+      url = trim_trailing_slash(reg) + "/unicode/unicode_data.bin"
+      system("curl -fsSL --connect-timeout 2 --max-time 5 -o " + shell_quote(u_bin) + " " + shell_quote(url) + " 2>/dev/null")
+    else
+      local_cand = File.join(reg.replace("file://", ""), "unicode/unicode_data.bin")
+      FileUtils.cp_r(local_cand, u_bin) if File.exists?(local_cand)
+    if !File.exists?(u_bin)
+      root = env("TUNGSTEN_ROOT") || "."
+      script = File.join(root, "scripts/fetch_unicode_data.rb")
+      if File.exists?(script)
+        system("TUNGSTEN_OFFLINE=1 ruby " + shell_quote(script) + " " + shell_quote(u_dir) + " 2>/dev/null")
+  if output_dir != nil && bitfile.unicode_version != nil && bitfile.unicode_version != ""
+    out_u_dir = File.join(output_dir, "unicode")
+    FileUtils.mkdir_p(out_u_dir)
+    File.write(File.join(out_u_dir, "version"), bitfile.unicode_version + "\n")
+    if File.exists?(u_bin)
+      FileUtils.cp_r(u_bin, File.join(out_u_dir, "unicode_data.bin"))
+  true
 
 + Dependencies
   -> .satisfied?(bitfile)
@@ -1477,6 +1559,8 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
     command = shell_quote(@command) + " compile " + shell_quote(source) + " --out " + shell_quote(out)
     if clang_opt != ""
       command = "TUNGSTEN_CLANG_OPT=" + shell_quote(clang_opt) + " " + command
+    if @config.unicode_version != nil && @config.unicode_version != ""
+      command = "TUNGSTEN_UNICODE_VERSION=" + shell_quote(@config.unicode_version) + " " + command
     if release
       command = command + " --release"
     if @config.debug || (profile == "debug" && !@config.release)
@@ -1533,6 +1617,7 @@ DEFAULT_REGISTRY = "https://bits.tungsten-lang.org"
 
     append_unique(members, "lib") if Dir.exists?("lib")
     append_unique(members, "spec") if Dir.exists?("spec")
+    append_unique(members, "commands") if Dir.exists?("commands")
 
     @bitfile.executables.each -> (executable)
       source = executable.source

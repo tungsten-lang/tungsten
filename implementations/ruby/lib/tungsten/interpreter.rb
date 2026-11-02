@@ -800,6 +800,7 @@ module Tungsten
         type_name == "Decimal" || type_name == "Real" || type_name == "Number"
       when ::String then type_name == "String"
       when ::Symbol then type_name == "Symbol"
+      when Tungsten::CharValue then type_name == "Codepoint" || (type_name == "Char" && value.ascii?)
       when Tungsten::SmallArrayValue then type_name == "SmallArray"
       when ::Array then type_name == "Array"
       when ::Hash then type_name == "Hash"
@@ -1512,6 +1513,9 @@ module Tungsten
 
     def visit_global_var(node)
       return @self_stack.last if node.name == "$value"
+      if node.name == "$encoding_id" && @self_stack.last.is_a?(Tungsten::ByteArray)
+        return @self_stack.last.encoding_id
+      end
       if node.name.to_s.match?(/\A\$\d+\z/)
         return @globals[node.name.to_s]
       end
@@ -1653,7 +1657,11 @@ module Tungsten
         runtime_error("class variable '#{target.name}' outside class", node: node) unless w_class
         w_class.class_vars[target.name.to_s] = value
       elsif target.is_a?(Tungsten::AST::GlobalVar)
-        @globals[target.name.to_s] = value
+        if target.name.to_s == "$encoding_id" && @self_stack.last.is_a?(Tungsten::ByteArray)
+          @self_stack.last.encoding_id = value.to_i & 0xFF
+        else
+          @globals[target.name.to_s] = value
+        end
       elsif target.is_a?(Tungsten::AST::Var) && target.cached_layout_shape == @env.layout_shape
         @env.slot_values[target.cached_slot] = value
       elsif target.is_a?(Tungsten::AST::Var) && (ce = target.cached_env) && ce.equal?(@env)
@@ -1793,7 +1801,7 @@ module Tungsten
         superclass = if node.superclass
           # An explicit `< Super` wins; any `[role]` alongside it (e.g.
           # `< Node [slab]`) is a compiler annotation the interpreter ignores.
-          @classes[node.superclass] || resolve_unique_namespaced_constant(node.superclass)
+          @classes[node.superclass] || resolve_unique_namespaced_constant(node.superclass) || try_autoload_core(node.superclass)
         elsif node.class_role
           # Legacy form: a bare `[Role]` that resolves to a class names the
           # superclass (e.g. `+ Foo [Global]`). A role that doesn't resolve to
@@ -2207,6 +2215,11 @@ module Tungsten
           return +recv
         end
 
+        # nil? is a universal identity predicate, including nil and class values.
+        if node.name == "nil?" && !block && small_arg_length_without_splat(node.args) == 0
+          return recv.nil?
+        end
+
         # Tungsten `is_a?(Int)` passes the Int WClass, which is not a Ruby
         # Class/Module. Integer#is_a? then raises TypeError ("class or module
         # required") and core methods such as Date.ordinal never reach their
@@ -2286,6 +2299,14 @@ module Tungsten
               args = evaluate_args(node.args)
               runtime_error("Atomic.new expects one argument", node: node) unless args.size == 1
               Tungsten::Atomic.new(args[0])
+            elsif recv.name == "ByteArray"
+              args = evaluate_args(node.args)
+              case args[0]
+              when ::Array then Tungsten::ByteArray.new(args[0])
+              when Tungsten::ByteArray then Tungsten::ByteArray.new(args[0].bytes)
+              when ::Integer then Tungsten::ByteArray.new([0] * args[0])
+              else Tungsten::ByteArray.new
+              end
             else
               instantiate_from_nodes(recv, node.args)
             end
@@ -2327,6 +2348,10 @@ module Tungsten
             node.name == "atan2" ? Math.atan2(left, right) : Math.hypot(left, right)
           else
             method = resolve_w_method(node, recv, node.name)
+            unless method
+              try_autoload_core(recv.name)
+              method = recv.lookup_class_method(node.name.to_s, argc: (node.args || EMPTY_ARGS).size) || resolve_w_method(node, recv, node.name)
+            end
             if method
               begin
                 call_w_method_from_nodes(recv, method, node.args, block, call_node: node)
@@ -2356,7 +2381,7 @@ module Tungsten
             end
           end
         else
-          if (w_class = primitive_runtime_class(recv))
+          if !recv.is_a?(::String) && !(recv.is_a?(Tungsten::CharValue) && recv.respond_to?(node.name)) && (w_class = primitive_runtime_class(recv))
             if (overloads = typed_overload_group(w_class, node.name))
               return dispatch_typed_overload(recv, w_class, overloads, node, block)
             end
@@ -2365,8 +2390,8 @@ module Tungsten
             if method
               begin
                 return call_w_method_from_nodes(recv, method, node.args, block, call_node: node)
-              rescue Tungsten::Error
-                if !hidden_ruby_object_method?(node.name) && recv.respond_to?(node.name)
+              rescue Tungsten::Error => e
+                if e.message.include?("undefined method 'ccall'") && !hidden_ruby_object_method?(node.name) && recv.respond_to?(node.name)
                   args = evaluate_args(node.args)
                   return recv.public_send(node.name, *args)
                 end
@@ -2398,6 +2423,13 @@ module Tungsten
           elsif hidden_ruby_object_method?(node.name)
             runtime_error("undefined method '#{node.name}' for #{recv}", node: node, length: node.name.to_s.length)
           else
+            if !recv.respond_to?(node.name) && (w_class = primitive_runtime_class(recv))
+              try_autoload_core(w_class.name)
+              w_class = primitive_runtime_class(recv)
+              if (method = resolve_w_method(node, w_class, node.name))
+                return call_w_method_from_nodes(recv, method, node.args, block, call_node: node)
+              end
+            end
             direct_result = call_ruby_method_from_nodes(recv, node.name, node.args, block)
             return direct_result unless direct_result.equal?(NO_DIRECT_CALL)
 
@@ -3605,6 +3637,23 @@ module Tungsten
         # Standard library (legacy): lib/<path>.w
         lib_path = File.join(project_root, "lib", "#{use_path}.w")
         return lib_path if File.exist?(lib_path)
+      end
+
+      # Match the native loader's last-resort bundled-bit lookup. Installed
+      # command packages can import Bit:Command without checkout-relative paths.
+      toolchain = ENV["TUNGSTEN_ROOT"]
+      if toolchain && toolchain != project_root && !use_path.start_with?(".", "/")
+        bit_name, *parts = use_path.split("/")
+        namespace = bit_name.delete_prefix("tungsten-")
+        sub_path = parts.join("/")
+        entry_file = sub_path.empty? ? "#{namespace}.w" : "#{sub_path}.w"
+        [bit_name, "tungsten-#{namespace}"].uniq.each do |package|
+          lib = File.join(toolchain, "bits", package, "lib")
+          bundled = File.join(lib, entry_file)
+          return bundled if File.file?(bundled)
+          namespaced = File.join(lib, namespace, "#{sub_path}.w")
+          return namespaced if !sub_path.empty? && File.file?(namespaced)
+        end
       end
 
       # Fall back to the original (may raise on File.read)
@@ -6052,6 +6101,27 @@ module Tungsten
         args[1].eof?
       when "w_string_bytes_view"
         args[1].to_s.bytes
+      when "w_string_from_byte_array"
+        b = args[1]
+        bytes = b.is_a?(Tungsten::ByteArray) ? b.bytes : b.to_a
+        bytes.pack("C*").force_encoding(Encoding::UTF_8)
+      when "w_char_new", "w_box_char"
+        v = args[1]
+        v.is_a?(Tungsten::CharValue) ? v : Tungsten::CharValue.new(v.to_i)
+      when "w_string_grapheme_next"
+        str = args[1].to_s
+        byte_pos = args[2].to_i
+        if byte_pos >= str.bytesize
+          str.bytesize
+        else
+          rest = str.byteslice(byte_pos..-1)
+          cluster = rest ? rest.each_grapheme_cluster.first : nil
+          byte_pos + (cluster ? cluster.bytesize : 1)
+        end
+      when "w_string_normalize"
+        str = args[1].to_s
+        form = %i[nfc nfd nfkc nfkd][args[2].to_i] || :nfc
+        str.unicode_normalize(form)
       else
         runtime_error("undefined method 'ccall' (#{cname})", node: node, length: 5)
       end
@@ -6470,8 +6540,8 @@ module Tungsten
       ::Array    => "List",
       ::Hash     => "Map",
       ::Range    => "Range",
-      TrueClass  => "Bool",
-      FalseClass => "Bool",
+      TrueClass  => "Boolean",
+      FalseClass => "Boolean",
       NilClass   => "Nil",
     }.freeze
 
@@ -6503,10 +6573,15 @@ module Tungsten
       when ::Hash then @classes["Hash"]
       when Runtime::PackedNode then @classes["Tungsten:AST:Node"] || @classes["Node"]
       when ::Symbol then @classes["Symbol"]
-      when TrueClass, FalseClass then @classes["Bool"]
+      when TrueClass, FalseClass then @classes["Boolean"]
       when NilClass then @classes["Nil"]
       when ::Float then @classes["Float"]
-      when Tungsten::CharValue then @classes["Char"]
+      when Tungsten::CharValue
+        try_autoload_core("Codepoint") unless @classes["Codepoint"]
+        recv.ascii? ? (@classes["Char"] || @classes["Codepoint"]) : (@classes["Codepoint"] || @classes["Char"])
+      when Tungsten::ByteArray
+        try_autoload_core("ByteArray") if !@classes["ByteArray"] || @classes["ByteArray"].methods.empty?
+        @classes["ByteArray"]
       when Tungsten::SmallArrayValue then @classes["SmallArray"]
       when Tungsten::Atomic then @classes["Atomic"]
       end
@@ -6561,6 +6636,9 @@ module Tungsten
       end
       if recv.is_a?(Runtime::WClass)
         return type_name == "Class" || recv.name == type_name
+      end
+      if recv.is_a?(Tungsten::CharValue)
+        return type_name == "Codepoint" || (type_name == "Char" && recv.ascii?) || type_name == "Object"
       end
 
       typed_overload_value_matches?(recv, type_name) ||

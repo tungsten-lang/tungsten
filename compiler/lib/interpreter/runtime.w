@@ -77,7 +77,7 @@
   # See [[project_const_ref_node_kind]] for the parser-level fix that
   # would eliminate this backstop.
   -> seed_primitive_class_stubs
-    names = ["Integer", "Int", "Float", "String", "Boolean", "Bool", "Nil", "Array", "Hash", "Symbol", "Range", "Class"]
+    names = ["Integer", "Int", "Float", "String", "Boolean", "Nil", "Array", "Hash", "Symbol", "Range", "Class"]
     i = 0
     while i < names.size()
       name = names[i]
@@ -449,7 +449,11 @@
     if t == :datetime
       return ccall("w_date_parse", "" + ast_get(node, :value).to_s())
     if t == :time
-      return ccall("w_time_parse", "" + ast_get(node, :value).to_s())
+      # Run the interpreted Time.parse. A direct call here would use the
+      # compiled constructor and hand the tree walker a native object whose
+      # @nanos it cannot read.
+      try_autoload_class("Time")
+      return dispatch_method(@classes["Time"], "parse", ["" + ast_get(node, :value).to_s()], nil, env)
     if t == :month
       return ccall("w_date_parse", "" + ast_get(node, :value).to_s())
     if t == :rational
@@ -530,7 +534,15 @@
     if t == :string_interp
       return eval_string_interp(node, env)
     if t == :byte_array
-      return ast_get(node, :values)
+      vals = ast_get(node, :values)
+      bn_len = vals != nil ? vals.size() : 0
+      bn_raw = ccall_nobox("w_numeric_to_i64", bn_len) ## i64
+      out = ccall_rawargs("w_bytes_new", bn_raw)
+      bi = 0
+      while bi < bn_len
+        out[bi] = vals[bi] & 255
+        bi += 1
+      return out
     if t == :byte_array_interp
       result = []
       i = 0
@@ -740,6 +752,17 @@
   # then resolves from @classes.
   -> eval_class_ref(node, env)
     name = ast_get(node, :name)
+    # Resolve constants against the defining method's lexical namespace before
+    # falling back to global classes; inherited methods keep their own scope.
+    lexical = env.defined?("__lexical_class__") ? env.get("__lexical_class__") : @defining_class
+    if lexical != nil && !name.include?(":")
+      parts = lexical[:name].split(":")
+      while parts.size > 0
+        candidate = parts.join(":") + ":" + name
+        if @classes.has_key?(candidate)
+          name = candidate
+          break
+        parts.pop()
     if !@classes.has_key?(name)
       # Bit constant alias: rewrite the first segment (`WC:Route` →
       # `Tungsten:Carbide:Route`) and resolve exactly — mirrors

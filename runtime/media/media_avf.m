@@ -36,6 +36,10 @@
 #include <VideoToolbox/VideoToolbox.h>
 #import <Metal/Metal.h>
 #include <dispatch/dispatch.h>
+#include <CommonCrypto/CommonDigest.h>
+#include <sys/file.h>
+#include <sys/utsname.h>
+#include <sys/sysctl.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <mach/mach_time.h>
@@ -46,7 +50,9 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
+#include <time.h>
 
 #pragma clang diagnostic error "-Wmissing-prototypes"
 /* The synchronous AVAsset accessors are deprecated in favour of async loads;
@@ -578,6 +584,63 @@ typedef struct {
     int64_t  off, size;
 } ATop;
 
+static uint32_t a_trak_handler(ABox *t);
+
+/* Flatten a single unit-rate edit. Video reordering is represented by
+ * signed ctts v1 offsets. Audio priming/trimming and empty chapter edits
+ * cannot simply be deleted: strict delivery refuses them. */
+static int a_flatten_edits(ABox *trak, uint32_t movie_ts, int strict, char *err, size_t cap) {
+    uint32_t handler = a_trak_handler(trak);
+    int video = handler == A_FOURCC('v','i','d','e');
+    if (!strict && !video) return 0;
+    ABox *edts = a_box_find(trak, A_FOURCC('e','d','t','s'));
+    if (!edts) return 0;
+    ABox *elst = a_box_find(edts, A_FOURCC('e','l','s','t'));
+    if (!elst || elst->len < 28 || a_rd32(elst->raw + 12) != 1) goto unsupported;
+    int v1 = elst->raw[8] == 1;
+    if (elst->raw[8] > 1 || elst->len < (v1 ? 36u : 28u)) goto unsupported;
+    uint64_t duration = v1 ? a_rd64(elst->raw + 16) : a_rd32(elst->raw + 16);
+    int64_t offset = v1 ? (int64_t)a_rd64(elst->raw + 24) : (int32_t)a_rd32(elst->raw + 20);
+    size_t rate_at = v1 ? 32 : 24;
+    if (offset < 0 || a_rd32(elst->raw + rate_at) != 0x00010000) goto unsupported;
+    ABox *mdia = a_box_find(trak, A_FOURCC('m','d','i','a'));
+    ABox *mdhd = mdia ? a_box_find(mdia, A_FOURCC('m','d','h','d')) : NULL;
+    if (!mdhd || mdhd->len < 32) goto unsupported;
+    int mv1 = mdhd->raw[8] == 1;
+    if (mv1 && mdhd->len < 44) goto unsupported;
+    uint32_t media_ts = a_rd32(mdhd->raw + (mv1 ? 28 : 20));
+    uint64_t media_dur = mv1 ? a_rd64(mdhd->raw + 32) : a_rd32(mdhd->raw + 24);
+    if (!video && (offset || (__int128)duration * media_ts != (__int128)media_dur * movie_ts)) goto unsupported;
+    if (video && offset) {
+        ABox *minf = a_box_find(mdia, A_FOURCC('m','i','n','f'));
+        ABox *stbl = minf ? a_box_find(minf, A_FOURCC('s','t','b','l')) : NULL;
+        ABox *ctts = stbl ? a_box_find(stbl, A_FOURCC('c','t','t','s')) : NULL;
+        if (!ctts || ctts->len < 16 || ctts->raw[8] > 1) goto unsupported;
+        uint32_t count = a_rd32(ctts->raw + 12);
+        if (count > (ctts->len - 16) / 8) goto unsupported;
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t raw = a_rd32(ctts->raw + 20 + 8*i);
+            int64_t value = ctts->raw[8] ? (int64_t)(int32_t)raw : (int64_t)raw;
+            value -= offset;
+            if (value < INT32_MIN || value > INT32_MAX) goto unsupported;
+        }
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t raw = a_rd32(ctts->raw + 20 + 8*i);
+            int64_t value = ctts->raw[8] ? (int64_t)(int32_t)raw : (int64_t)raw;
+            a_be32(ctts->raw + 20 + 8*i, (uint32_t)(int32_t)(value - offset));
+        }
+        ctts->raw[8] = 1;
+    }
+    int at = (int)(edts - trak->kid);
+    a_box_free(edts);
+    memmove(trak->kid + at, trak->kid + at + 1, (size_t)(trak->nk-at-1)*sizeof(ABox));
+    trak->nk--;
+    return 0;
+unsupported:
+    snprintf(err, cap, "edit_lists:false cannot preserve this track's priming, trimming or empty edit; use PCM audio in MOV and chapters starting at frame 0 (edit_lists:audio removes video edits only)");
+    return -1;
+}
+
 /* What a_patch_moov adds to a file AVAssetWriter wrote. */
 typedef struct APatch {
     int             mov;
@@ -591,6 +654,7 @@ typedef struct APatch {
     int             nchap;
     int             chpl;             /* also a Nero chpl box (MP4) */
     int             faststart;
+    int             flatten_edits;  /* 1 video only, 2 every track (strict) */
 } APatch;
 
 /* Read the top-level boxes and parse the moov. 0 on success. */
@@ -747,7 +811,7 @@ static int a_patch_moov(const char *src, const char *dst, const APatch *o, char 
         ABox *t = &moov->kid[i];
         if (t->type != A_FOURCC('t','r','a','k') || (i >= first_new && i < first_new + added)) continue;
         uint32_t h = a_trak_handler(t);
-        if (i == video_i) a_add_tref(t, vrefs, nvref);
+        if (i == video_i && nvref) a_add_tref(t, vrefs, nvref);
         else if (chap_id && h == A_FOURCC('s','o','u','n')) {
             uint8_t r[12];
             a_be32(r, 12);
@@ -761,6 +825,14 @@ static int a_patch_moov(const char *src, const char *dst, const APatch *o, char 
         uint8_t *cb = a_chpl(o->chap, o->nchap, o->num, o->den, &cl);
         a_add_udta(moov, cb, cl);
         free(cb);
+    }
+    if (o->flatten_edits) {
+        for (int i = 0; i < moov->nk; i++) {
+            ABox *t = &moov->kid[i];
+            if (t->type == A_FOURCC('t','r','a','k') && a_flatten_edits(t, movie_ts, o->flatten_edits == 2, err, errcap)) {
+                a_box_free(&root); close(fd); return -1;
+            }
+        }
     }
     /* the new samples: [tc frame number][chapter titles] */
     size_t chap_bytes = 0;
@@ -885,7 +957,7 @@ typedef struct AMux {
     int32_t   delay;            /* DTS delay in frames (0 without reordering) */
     int64_t   video_bytes;
     int       has_audio, aac;
-    int       audio_kbps;
+    int       audio_kbps, pcm_bits, pcm_float;
     /* audio source */
     int       akind;            /* A_AUDIO_* */
     int32_t   arate, ach;       /* sample rate, channels */
@@ -906,6 +978,7 @@ typedef struct AMux {
     int       has_tc, tc_drop, tc_quanta;
     int64_t   tc_start;
     int       faststart;
+    int       flatten_edits;
     uint32_t  fourcc;
     int32_t   width, height;
     AChapter *chap;             /* chapters (title, first frame), ascending */
@@ -1023,6 +1096,7 @@ static AMux *a_mux_open(const AMuxOpts *o, char *err, size_t cap) {
         }
         if (!strcasecmp(fmt, "mov")) m->mov = 1;
         else if (strcasecmp(fmt, "mp4")) { free(m); snprintf(err, cap, "format must be :mp4 or :mov (got '%s')", fmt); return NULL; }
+        m->pcm_bits = 24;
         m->num = o->num;
         m->den = o->den;
         if (m->num <= 0 || m->den <= 0) { free(m); snprintf(err, cap, "rate must be a positive [num, den]"); return NULL; }
@@ -1060,7 +1134,11 @@ static AMux *a_mux_open(const AMuxOpts *o, char *err, size_t cap) {
             if (!copy) {
                 if (!ac[0]) snprintf(ac, sizeof ac, "%s", m->mov ? "pcm" : "aac");
                 if (!strcasecmp(ac, "aac")) m->aac = 1;
-                else if (strcasecmp(ac, "pcm")) { a_mux_free(m); snprintf(err, cap, "audio codec must be :aac, :pcm or :copy (got '%s')", ac); return NULL; }
+                else if (!strcasecmp(ac, "pcm_s16le")) m->pcm_bits = 16;
+                else if (!strcasecmp(ac, "pcm_s24le")) m->pcm_bits = 24;
+                else if (!strcasecmp(ac, "pcm_s32le")) m->pcm_bits = 32;
+                else if (!strcasecmp(ac, "pcm_f32le")) { m->pcm_bits = 32; m->pcm_float = 1; }
+                else if (strcasecmp(ac, "pcm")) { a_mux_free(m); snprintf(err, cap, "audio codec must be aac, pcm, pcm_s16le/pcm_s24le/pcm_s32le/pcm_f32le or copy (got '%s')", ac); return NULL; }
                 if (!m->aac && !m->mov) { a_mux_free(m); snprintf(err, cap, "PCM audio needs a .mov (MP4 carries AAC)"); return NULL; }
             }
             m->audio_kbps = o->audio_kbps > 0 ? o->audio_kbps : (m->ach >= 2 ? 320 : 192);
@@ -1189,8 +1267,8 @@ static void a_mux_start(AMux *m, WMediaSegment *s) {
                          AVChannelLayoutKey: ld};
         } else {
             settings = @{AVFormatIDKey: @(kAudioFormatLinearPCM), AVSampleRateKey: @(m->arate),
-                         AVNumberOfChannelsKey: @(m->ach), AVLinearPCMBitDepthKey: @24,
-                         AVLinearPCMIsFloatKey: @NO, AVLinearPCMIsBigEndianKey: @NO,
+                         AVNumberOfChannelsKey: @(m->ach), AVLinearPCMBitDepthKey: @(m->pcm_bits),
+                         AVLinearPCMIsFloatKey: @(m->pcm_float), AVLinearPCMIsBigEndianKey: @NO,
                          AVLinearPCMIsNonInterleaved: @NO, AVChannelLayoutKey: ld};
         }
         m->audio = [[AVAssetWriterInput alloc] initWithMediaType:AVMediaTypeAudio outputSettings:settings sourceFormatHint:m->afmt];
@@ -1409,6 +1487,12 @@ WValue w_media_mux_set(WValue mv, WValue keyv, WValue v) {
     AMux *m = w_media_handle_get(mv, W_MEDIA_KIND_MUX, "Mux#set");
     char k[32];
     w_media_str(keyv, k, sizeof k);
+    if (!strcmp(k, "edit_lists")) {
+        char mode[32];
+        w_media_str(v, mode, sizeof mode);
+        m->flatten_edits = v == W_FALSE ? 2 : (!strcmp(mode, "audio") ? 1 : 0);
+        return W_NIL;
+    }
     if (!strcmp(k, "chpl")) {
         m->chpl = v > 1;
         return W_NIL;
@@ -1596,11 +1680,16 @@ static void a_mux_finish(AMux *m, int64_t out[5]) {
     [m->video markAsFinished];
     [m->writer endSessionAtSourceTime:CMTimeMake(m->frames * m->ticks, m->ts)];
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    [m->writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(sem); }];
-    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    dispatch_retain(sem);
+    [m->writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(sem); dispatch_release(sem); }];
+    const char *wait = getenv("TUNGSTEN_MEDIA_WAIT_MS");
+    int64_t wait_ms = wait ? strtoll(wait, NULL, 10) : 30000;
+    if (wait_ms <= 0) wait_ms = 30000;
+    long expired = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, wait_ms * NSEC_PER_MSEC));
     dispatch_release(sem);
+    if (expired) a_mux_fail(m, "finishing the writer timed out after %lld ms", (long long)wait_ms);
     if (m->writer.status != AVAssetWriterStatusCompleted) a_mux_fail(m, "finishing %s failed", m->path);
-    if (m->has_tc || m->nchap > 0) {
+    if (m->has_tc || m->nchap > 0 || m->flatten_edits) {
         char err[512];
         for (int i = 0; i < m->nchap; i++)
             if (m->chap[i].frame >= m->frames) {
@@ -1613,6 +1702,7 @@ static void a_mux_finish(AMux *m, int64_t out[5]) {
         o.frames = m->frames; o.has_tc = m->has_tc; o.tc_drop = m->tc_drop; o.tc_frame = m->tc_start;
         o.tc_quanta = (uint32_t)m->tc_quanta; o.chap = m->chap; o.nchap = m->nchap; o.chpl = m->chpl;
         o.faststart = m->faststart;
+        o.flatten_edits = m->flatten_edits;
         /* without a timecode AVAssetWriter wrote the final path: patch it into the temporary one and move that back */
         const char *from = m->has_tc ? m->tmp : m->path, *to = m->has_tc ? m->path : m->tmp;
         int rc = a_patch_moov(from, to, &o, err, sizeof err);
@@ -1741,7 +1831,43 @@ static const char *a_msl =
     "  float v = w[0] * H[(ulong)s0 * p.rw + x];\n"
     "  for (uint t = 1; t < p.taps; t++) v = fma(w[t], H[(ulong)(s0 + t) * p.rw + x], v);\n"
     "  *o = uchar(u8(v));\n"
-    "}\n";
+    "}\n"
+    "\n"
+    "inline float plane_load(device const uchar *src, ulong offset, uint bits) {\n"
+    "  return bits == 10 ? float(*((device const ushort *)(src + offset)) >> 6) * 0.25f : float(src[offset]);\n"
+    "}\n"
+    "kernel void hp(device const uchar *src [[buffer(0)]], device const int *xs [[buffer(1)]], device const float *xw [[buffer(2)]],\n"
+    "               device float *H [[buffer(3)]], constant HP &p [[buffer(4)]], uint2 g [[thread_position_in_grid]]) {\n"
+    "  if (g.x >= p.rw || g.y >= p.rows) return;\n"
+    "  uint C = p.alpha, bps = p.pad == 10 ? 2 : 1;\n"
+    "  int first = xs[g.x]; device const float *w = xw + (ulong)g.x * p.taps;\n"
+    "  for (uint c = 0; c < C; c++) {\n"
+    "    float v = 0;\n"
+    "    for (uint k = 0; k < p.taps; k++) {\n"
+    "      ulong offset = (ulong)(p.lo + g.y) * p.sstride + ((ulong)(first + k) * C + c) * bps;\n"
+    "      v = fma(w[k], plane_load(src, offset, p.pad), v);\n"
+    "    }\n"
+    "    H[((ulong)g.y * p.rw + g.x) * C + c] = v;\n"
+    "  }\n"
+    "}\n"
+    "kernel void vp(device const float *H [[buffer(0)]], device const int *ys [[buffer(1)]], device const float *yw [[buffer(2)]],\n"
+    "               device uchar *dst [[buffer(3)]], constant VP &p [[buffer(4)]], uint2 g [[thread_position_in_grid]]) {\n"
+    "  if (g.x >= p.dw || g.y >= p.dh) return;\n"
+    "  uint C = p.alpha, bps = p.pad == 10 ? 2 : 1;\n"
+    "  int x = int(g.x) - int(p.rx), y = int(g.y) - int(p.ry);\n"
+    "  for (uint c = 0; c < C; c++) {\n"
+    "    float v = float((p.fill >> (8*c)) & 255u);\n"
+    "    if (x >= 0 && y >= 0 && x < int(p.rw) && y < int(p.rh)) {\n"
+    "      int first = ys[y] - int(p.lo); device const float *w = yw + (ulong)y * p.taps;\n"
+    "      v = w[0] * H[((ulong)first * p.rw + x) * C + c];\n"
+    "      for (uint k = 1; k < p.taps; k++) v = fma(w[k], H[((ulong)(first+k) * p.rw + x) * C + c], v);\n"
+    "    }\n"
+    "    ulong offset = (ulong)g.y * p.dstride + ((ulong)g.x * C + c) * bps;\n"
+    "    if (p.pad == 10) *((device ushort *)(dst + offset)) = ushort(uint(clamp(v*4.0f,0.0f,1023.0f)+0.5f) << 6);\n"
+    "    else dst[offset] = u8(v);\n"
+    "  }\n"
+    "}\n"
+    "";
 
 typedef struct { uint32_t rw, rows, lo, taps, axlo, sstride, alpha, pad; } AMtlHP;
 typedef struct { uint32_t dw, dh, rx, ry, rw, rh, taps, lo, dstride, alpha, fill, pad; } AMtlVP;
@@ -1749,7 +1875,7 @@ typedef struct { uint32_t dw, dh, rx, ry, rw, rh, taps, lo, dstride, alpha, fill
 typedef id (*a_mtl_create_fn)(void);
 static pthread_once_t g_mtl_once = PTHREAD_ONCE_INIT;
 static id g_mtl_dev, g_mtl_queue;
-static id g_mtl_h[5], g_mtl_v[5];
+static id g_mtl_h[5], g_mtl_v[5], g_mtl_hp, g_mtl_vp;
 static int g_mtl_ok;
 static char g_mtl_err[512];
 static pthread_mutex_t g_mtl_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -1787,6 +1913,11 @@ static void a_mtl_load(void) {
                 return;
             }
         }
+        id<MTLFunction> hp = [lib newFunctionWithName:@"hp"], vp = [lib newFunctionWithName:@"vp"];
+        g_mtl_hp = hp ? [dev newComputePipelineStateWithFunction:hp error:&err] : nil;
+        g_mtl_vp = vp ? [dev newComputePipelineStateWithFunction:vp error:&err] : nil;
+        [hp release]; [vp release];
+        if (!g_mtl_hp || !g_mtl_vp) { snprintf(g_mtl_err, sizeof g_mtl_err, "Metal plane kernels: %s", err.localizedDescription.UTF8String ?: "?"); [lib release]; [dev release]; return; }
         [lib release];
         g_mtl_queue = [dev newCommandQueue];
         g_mtl_dev = dev;
@@ -1855,7 +1986,12 @@ static int a_mtl_encode(id<MTLComputeCommandEncoder> ce, WMediaJob *j, id *keep,
     WMediaScale *s = j->s;
     id<MTLDevice> dev = g_mtl_dev;
     int C = s->ch;
-    if (s->out_bits > 8) { snprintf(err, cap, "Metal writes 8-bit planes only"); return -1; }
+    int wide = s->in_bits > 8 || s->out_bits > 8;
+    if (wide && C == 4) { snprintf(err, cap, "Metal 10-bit scaling requires one or two channels"); return -1; }
+    int ibps = s->in_bits > 8 ? 2 : 1, obps = s->out_bits > 8 ? 2 : 1;
+    if (j->sstride % (C * ibps) || j->dstride % (C * obps) || (uintptr_t)j->src % ibps || (uintptr_t)j->dst % obps) {
+        snprintf(err, cap, "Metal needs sample-aligned planes"); return -1;
+    }
     if ((C == 4 && (j->sstride % 4 || j->dstride % 4 || (uintptr_t)j->src % 4 || (uintptr_t)j->dst % 4)) ||
         (C == 2 && (j->sstride % 2 || j->dstride % 2 || (uintptr_t)j->src % 2 || (uintptr_t)j->dst % 2))) {
         snprintf(err, cap, "Metal needs pixel-aligned rows");
@@ -1879,7 +2015,7 @@ static int a_mtl_encode(id<MTLComputeCommandEncoder> ce, WMediaJob *j, id *keep,
     }
     /* only the source rows the plan reads */
     size_t soff = (size_t)s->ay.lo * j->sstride;
-    size_t slen = (size_t)(rows - 1) * j->sstride + (size_t)s->src_w * C;
+    size_t slen = (size_t)(rows - 1) * j->sstride + (size_t)s->src_w * C * ibps;
     if (soff + slen > j->src_len) slen = j->src_len - soff;
     int scopy = 0, dcopy = 0;
     size_t so = 0, dof = 0;
@@ -1897,8 +2033,8 @@ static int a_mtl_encode(id<MTLComputeCommandEncoder> ce, WMediaJob *j, id *keep,
     keep[(*nkeep)++] = db;
     if (scopy) a_pcopy([(id<MTLBuffer>)sb contents], sbase, slen);
     *copy_out = dcopy;
-    AMtlHP hp = {(uint32_t)s->rw, (uint32_t)rows, 0, (uint32_t)s->ax.taps, (uint32_t)s->ax.lo, (uint32_t)j->sstride, (uint32_t)s->alpha, 0};
-    id<MTLComputePipelineState> ph = g_mtl_h[C], pv = g_mtl_v[C];
+    AMtlHP hp = {(uint32_t)s->rw, (uint32_t)rows, 0, (uint32_t)s->ax.taps, (uint32_t)s->ax.lo, (uint32_t)j->sstride, (uint32_t)(wide ? C : s->alpha), (uint32_t)s->in_bits};
+    id<MTLComputePipelineState> ph = wide ? g_mtl_hp : g_mtl_h[C], pv = wide ? g_mtl_vp : g_mtl_v[C];
     [ce setComputePipelineState:ph];
     [ce setBuffer:sb offset:so atIndex:0];
     [ce setBuffer:p->xs offset:0 atIndex:1];
@@ -1909,7 +2045,7 @@ static int a_mtl_encode(id<MTLComputeCommandEncoder> ce, WMediaJob *j, id *keep,
     [ce dispatchThreads:MTLSizeMake((NSUInteger)s->rw, (NSUInteger)rows, 1) threadsPerThreadgroup:MTLSizeMake(tw, th, 1)];
     uint32_t fill = (uint32_t)s->fill[0] | ((uint32_t)s->fill[1] << 8) | ((uint32_t)s->fill[2] << 16) | ((uint32_t)s->fill[3] << 24);
     AMtlVP vp = {(uint32_t)s->dst_w, (uint32_t)s->dst_h, (uint32_t)s->rx, (uint32_t)s->ry, (uint32_t)s->rw, (uint32_t)s->rh,
-                 (uint32_t)s->ay.taps, (uint32_t)s->ay.lo, (uint32_t)j->dstride, (uint32_t)s->alpha, fill, 0};
+                 (uint32_t)s->ay.taps, (uint32_t)s->ay.lo, (uint32_t)j->dstride, (uint32_t)(wide ? C : s->alpha), fill, (uint32_t)s->out_bits};
     [ce setComputePipelineState:pv];
     [ce setBuffer:p->H offset:0 atIndex:0];
     [ce setBuffer:p->ys offset:0 atIndex:1];
@@ -1946,7 +2082,7 @@ int w_media_scale_metal_jobs(WMediaJob *jobs, int n, char *err, size_t cap) {
         for (int i = 0; i < n && rc == 0; i++)
             if (copy_out[i]) {
                 WMediaScale *s = jobs[i].s;
-                a_pcopy(jobs[i].dst, [(id<MTLBuffer>)keep[2 * i + 1] contents], (size_t)(s->dst_h - 1) * jobs[i].dstride + (size_t)s->dst_w * s->ch);
+                a_pcopy(jobs[i].dst, [(id<MTLBuffer>)keep[2 * i + 1] contents], (size_t)(s->dst_h - 1) * jobs[i].dstride + (size_t)s->dst_w * s->ch * (s->out_bits > 8 ? 2 : 1));
             }
         for (int i = 0; i < nkeep; i++) [keep[i] release];
         pthread_mutex_unlock(&g_mtl_mu);
@@ -1967,7 +2103,7 @@ int w_media_scale_metal(WMediaScale *s, const uint8_t *src, size_t sstride, size
    ======================================================================
  *
  * A producer thread pulls compressed samples in decode order and decodes
- * each one synchronously; decoded frames wait in a small pending list until
+ * batches asynchronously; decoded frames wait in a small pending list until
  * no frame still to come can precede them (a frame is final once the next
  * sample's decode time passes its presentation time, since DTS <= PTS), then
  * move to a bounded queue the consumer takes them from. */
@@ -2000,7 +2136,7 @@ typedef struct ADec {
     int              siting;           /* source chroma siting (M_SITE_*-like: 0 left, 1 center, 2 topleft) */
     /* thread */
     pthread_t        th;
-    int              th_started;
+    int              th_started, refs, timeout_ms;
     pthread_mutex_t  mu;
     pthread_cond_t   cv;
     ADecFrame       *pend;             /* decoded, sorted by pts */
@@ -2009,12 +2145,15 @@ typedef struct ADec {
     int              nfly, cfly;
     int64_t          next_id;
     ADecFrame       *q;                /* final, in order */
-    int              qh, qn, qcap;
-    int              eof, stop, debug;
+    int              qh, qn, qcap, peak_qn;
+    int              eof, stop, debug, serial;
     char             err[512];
     int64_t          decoded, delivered;
     uint64_t         dec_ns;
 } ADec;
+
+static void a_dec_destroy(ADec *d);
+static void a_dec_unref(ADec *d) { if (__atomic_sub_fetch(&d->refs, 1, __ATOMIC_ACQ_REL) == 0) a_dec_destroy(d); }
 
 /* A sample's presentation time on the output timeline (the movie's edit
  * list applied), in source ticks (files) or frames (segments). VideoToolbox
@@ -2025,7 +2164,7 @@ static int64_t a_dec_time(ADec *d, CMTime t) {
 }
 
 static void a_dec_output(void *ref, void *frameref, OSStatus st, VTDecodeInfoFlags flags, CVImageBufferRef img, CMTime pts, CMTime dur) {
-    (void)dur;
+    (void)dur; (void)flags;
     ADec *d = ref;
     pthread_mutex_lock(&d->mu);
     /* the frame's time: from the sample it came from (frameref is its id) */
@@ -2040,7 +2179,8 @@ static void a_dec_output(void *ref, void *frameref, OSStatus st, VTDecodeInfoFla
         }
     if (d->debug && d->decoded < 16) fprintf(stderr, "media decoder: output pts %lld (in flight %d)\n", (long long)p, d->nfly);
     if (st != noErr || !img) {
-        if (!d->err[0] && !(flags & kVTDecodeInfo_FrameDropped)) snprintf(d->err, sizeof d->err, "VideoToolbox could not decode a frame (OSStatus %d)", (int)st);
+        if (!d->err[0]) snprintf(d->err, sizeof d->err, "VideoToolbox could not decode a frame (OSStatus %d)", (int)st);
+        pthread_cond_broadcast(&d->cv);
         pthread_mutex_unlock(&d->mu);
         return;
     }
@@ -2091,6 +2231,7 @@ static void a_dec_release(ADec *d, int64_t limit, int all) {
         if (d->stop) { CVBufferRelease(f.pb); break; }
         d->q[(d->qh + d->qn) % d->qcap] = f;
         d->qn++;
+        if (d->qn > d->peak_qn) d->peak_qn = d->qn;
         pthread_cond_broadcast(&d->cv);
     }
 }
@@ -2114,6 +2255,9 @@ static CMSampleBufferRef a_dec_next_sample(ADec *d, int64_t *dts) {
         if (d->seg && d->seg_k < d->seg->n) break;
         if (d->seg) {
             d->seg_base += d->seg->n;
+            /* Segment samples borrow this storage. Drain before freeing it. */
+            VTDecompressionSessionFinishDelayedFrames(d->vt);
+            VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
             w_media_seg_free(d->seg);
             d->seg = NULL;
             free(d->seg_sorted);
@@ -2157,6 +2301,12 @@ static CMSampleBufferRef a_dec_next_sample(ADec *d, int64_t *dts) {
 static void *a_dec_thread(void *arg) {
     ADec *d = arg;
     @autoreleasepool {
+        int batch = 0;
+        if (getenv("TUNGSTEN_MEDIA_TEST_STALL_DECODER")) {
+            pthread_mutex_lock(&d->mu);
+            while (!d->stop) pthread_cond_wait(&d->cv, &d->mu);
+            pthread_mutex_unlock(&d->mu);
+        }
         for (;;) {
             int64_t dts = 0;
             CMSampleBufferRef sb = NULL;
@@ -2196,8 +2346,13 @@ static void *a_dec_thread(void *arg) {
             if (CMSampleBufferGetNumSamples(sb) > 0) {
                 uint64_t t0 = m_avf_now_ns();
                 VTDecodeInfoFlags info = 0;
-                OSStatus st = VTDecompressionSessionDecodeFrame(d->vt, sb, 0, (void *)(intptr_t)id, &info);
-                VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
+                OSStatus st = VTDecompressionSessionDecodeFrame(d->vt, sb, d->serial ? 0 : kVTDecodeFrame_EnableAsynchronousDecompression, (void *)(intptr_t)id, &info);
+                /* Bounded batches overlap decoding of adjacent frames without
+                 * letting an asynchronous decoder retain the entire movie. */
+                if (++batch == (d->serial ? 1 : 8) || st != noErr) {
+                    VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
+                    batch = 0;
+                }
                 d->dec_ns += m_avf_now_ns() - t0;
                 if (st != noErr) {
                     pthread_mutex_lock(&d->mu);
@@ -2209,18 +2364,22 @@ static void *a_dec_thread(void *arg) {
             CFRelease(sb);
         }
     }
+    @autoreleasepool { a_dec_unref(d); }
     return NULL;
 }
 
 static void a_dec_free(ADec *d) {
     if (!d) return;
-    if (d->th_started) {
-        pthread_mutex_lock(&d->mu);
-        d->stop = 1;
-        pthread_cond_broadcast(&d->cv);
-        pthread_mutex_unlock(&d->mu);
-        pthread_join(d->th, NULL);
-    }
+    pthread_mutex_lock(&d->mu);
+    d->stop = 1;
+    pthread_cond_broadcast(&d->cv);
+    pthread_mutex_unlock(&d->mu);
+    a_dec_unref(d);
+}
+
+static void a_dec_destroy(ADec *d) {
+    /* Callbacks touch pend/fly and mu, so drain before releasing those. */
+    if (d->vt) VTDecompressionSessionWaitForAsynchronousFrames(d->vt);
     for (int i = 0; i < d->npend; i++) CVBufferRelease(d->pend[i].pb);
     for (int i = 0; i < d->qn; i++) CVBufferRelease(d->q[(d->qh + i) % d->qcap].pb);
     free(d->pend);
@@ -2244,6 +2403,17 @@ static void a_dec_free(ADec *d) {
     free(d);
 }
 
+static int a_dec_vsub(ADec *d) {
+    return d->pix == kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange ? 1 : 2;
+}
+
+static OSType a_dec_yuv_pixel(uint32_t codec) {
+    if (codec == kCMVideoCodecType_AppleProRes422 || codec == kCMVideoCodecType_AppleProRes422HQ ||
+        codec == kCMVideoCodecType_AppleProRes422LT || codec == kCMVideoCodecType_AppleProRes422Proxy)
+        return kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange;
+    return kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange;
+}
+
 static int a_siting_of(CFTypeRef loc) {
     if (loc && CFGetTypeID(loc) == CFStringGetTypeID()) {
         if (CFEqual(loc, kCVImageBufferChromaLocation_Center)) return 1;
@@ -2255,14 +2425,18 @@ static int a_siting_of(CFTypeRef loc) {
 /* Open a decoder: path (a movie file) or segs (segment files, with rate),
  * output pixel format pix ('420v' or 'BGRA'), frames before start_frame
  * dropped (files). NULL with a message. */
-static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, int32_t den, OSType pix, int64_t start_frame,
+static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, int32_t den, OSType pix, int64_t start_frame, int timeout_ms, int queue_cap,
                         char *err, size_t cap) {
     ADec *d = calloc(1, sizeof *d);
+    d->refs = 1;
+    d->timeout_ms = timeout_ms > 0 ? timeout_ms : 30000;
     pthread_mutex_init(&d->mu, NULL);
     pthread_cond_init(&d->cv, NULL);
     d->pix = pix;
     d->debug = getenv("TUNGSTEN_MEDIA_DEBUG") != NULL;
-    d->qcap = 6;
+    d->serial = getenv("TUNGSTEN_MEDIA_DECODER_SERIAL") != NULL;
+    if (queue_cap < 1 || queue_cap > 32) { snprintf(err, cap, "decode_ahead must be in 1..32"); a_dec_free(d); return NULL; }
+    d->qcap = queue_cap;
     d->q = calloc((size_t)d->qcap, sizeof(ADecFrame));
     if (path) {
         d->asset = [[AVURLAsset alloc] initWithURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:path]]
@@ -2278,6 +2452,7 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
         d->w = dim.width;
         d->h = dim.height;
         d->codec = CMFormatDescriptionGetMediaSubType(fd);
+        if (!d->pix) d->pix = a_dec_yuv_pixel(d->codec);
         d->ts = t.naturalTimeScale;
         CMTime md = t.minFrameDuration;
         if (num > 0 && den > 0) { d->num = num; d->den = den; }
@@ -2321,13 +2496,16 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
         d->num = s0->rate_num;
         d->den = s0->rate_den;
         d->codec = s0->fourcc;
+        if (!d->pix) d->pix = a_dec_yuv_pixel(d->codec);
         CFDictionaryRef ext = CMFormatDescriptionGetExtensions((CMFormatDescriptionRef)s0->format);
         d->siting = a_siting_of(ext ? CFDictionaryGetValue(ext, kCMFormatDescriptionExtension_ChromaLocationTopField) : NULL);
         w_media_seg_free(s0);
         d->frames_hint = -1;
     }
-    if (pthread_create(&d->th, NULL, a_dec_thread, d) != 0) { snprintf(err, cap, "cannot start the decoder thread"); a_dec_free(d); return NULL; }
+    __atomic_add_fetch(&d->refs, 1, __ATOMIC_RELAXED);
+    if (pthread_create(&d->th, NULL, a_dec_thread, d) != 0) { __atomic_sub_fetch(&d->refs, 1, __ATOMIC_RELAXED); snprintf(err, cap, "cannot start the decoder thread"); a_dec_free(d); return NULL; }
     d->th_started = 1;
+    pthread_detach(d->th);
     return d;
 }
 
@@ -2335,7 +2513,17 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
  * in the output timeline), 0 at the end, -1 with a message. */
 static int a_dec_next(ADec *d, CVPixelBufferRef *pb, int64_t *frame, char *err, size_t cap) {
     pthread_mutex_lock(&d->mu);
-    while (d->qn == 0 && !d->eof && !d->err[0]) pthread_cond_wait(&d->cv, &d->mu);
+    struct timespec until;
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_sec += d->timeout_ms / 1000;
+    until.tv_nsec += (long)(d->timeout_ms % 1000) * 1000000L;
+    if (until.tv_nsec >= 1000000000L) { until.tv_sec++; until.tv_nsec -= 1000000000L; }
+    while (d->qn == 0 && !d->eof && !d->err[0]) {
+        if (pthread_cond_timedwait(&d->cv, &d->mu, &until) == ETIMEDOUT) {
+            snprintf(d->err, sizeof d->err, "decoder timed out after %d ms without a frame", d->timeout_ms);
+            d->stop = 1; pthread_cond_broadcast(&d->cv); break;
+        }
+    }
     if (d->err[0]) {
         snprintf(err, cap, "%s", d->err);
         pthread_mutex_unlock(&d->mu);
@@ -2397,22 +2585,25 @@ WValue w_media_decoder_open(WValue srcv, WValue fmtv, WValue optv) {
     @autoreleasepool {
         char path[4096], fmt[16], err[512];
         w_media_str(fmtv, fmt, sizeof fmt);
-        int nv12 = !strcasecmp(fmt, "nv12") || !strcasecmp(fmt, "420v");
+        int p010 = !strcasecmp(fmt, "p010"), p210 = !strcasecmp(fmt, "p210");
+        int nv12 = p010 || p210 || !strcasecmp(fmt, "nv12") || !strcasecmp(fmt, "420v");
         int rgba = !fmt[0] || !strcasecmp(fmt, "rgba");
-        if (!nv12 && !rgba && strcasecmp(fmt, "bgra")) w_media_raise("VideoDecoder: format must be :rgba, :bgra or :nv12 (got '%s')", fmt);
+        if (!nv12 && !rgba && strcasecmp(fmt, "bgra")) w_media_raise("VideoDecoder: format must be :rgba, :bgra, :nv12 or :p010/:p210 (got '%s')", fmt);
         int64_t start = (int64_t)w_media_num(m_avf_arr(optv, 0), 0, "start");
         int32_t num = (int32_t)w_media_num(m_avf_arr(optv, 1), 0, "rate"), den = (int32_t)w_media_num(m_avf_arr(optv, 2), 0, "rate");
+        int timeout_ms = (int)w_media_num(m_avf_arr(optv, 3), 30000, "timeout_ms");
+        int queue_cap = (int)w_media_num(m_avf_arr(optv, 4), 6, "decode_ahead");
         ADec *d;
-        OSType pix = nv12 ? kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange : kCVPixelFormatType_32BGRA;
+        OSType pix = p210 ? kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange : p010 ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : nv12 ? kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange : kCVPixelFormatType_32BGRA;
         if (w_is_array(srcv)) {
             int n = 0;
             char **segs = a_paths(srcv, &n);
-            d = a_dec_open(NULL, segs, n, num, den, pix, 0, err, sizeof err);
+            d = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, queue_cap, err, sizeof err);
             a_paths_free(segs, n);
         } else {
             if (!w_media_str(srcv, path, sizeof path) || !path[0]) w_media_raise("VideoDecoder: source must be a path or an array of segment paths");
             if (access(path, R_OK) != 0) w_media_raise("VideoDecoder: cannot read %s: %s", path, strerror(errno));
-            d = a_dec_open(path, NULL, 0, num, den, pix, start, err, sizeof err);
+            d = a_dec_open(path, NULL, 0, num, den, pix, start, timeout_ms, queue_cap, err, sizeof err);
         }
         if (!d) w_media_raise("VideoDecoder: %s", err);
         ADecH *h = calloc(1, sizeof *h);
@@ -2445,25 +2636,30 @@ WValue w_media_decoder_read(WValue hv, WValue dstv, WValue stridev) {
     CVPixelBufferRef pb = NULL;
     int64_t frame = 0;
     char err[512];
-    int r = a_dec_next(d, &pb, &frame, err, sizeof err);
-    if (r < 0) w_media_raise("VideoDecoder#read: %s", err);
-    if (r == 0) return W_NIL;
     int64_t avail;
     uint8_t *dst = (uint8_t *)(uintptr_t)m_avf_dest(dstv, &avail, "VideoDecoder#read");
     int w = d->w, hh = d->h;
+    size_t bps = d->pix == kCVPixelFormatType_32BGRA || d->pix == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ? 1 : 2;
+    size_t cw = (size_t)((w + 1) / 2) * 2 * bps, ch = (size_t)((hh + a_dec_vsub(d) - 1) / a_dec_vsub(d));
+    size_t row = h->nv12 ? cw : (size_t)w * 4;
+    double stride = w_media_num(stridev, (double)row, "stride");
+    size_t rows = (size_t)hh + (h->nv12 ? ch : 0);
+    if (!isfinite(stride) || stride < (double)row || stride > (double)(SIZE_MAX / rows) ||
+        stride != floor(stride) || (h->nv12 && bps == 2 && fmod(stride, 2) != 0))
+        w_media_raise("VideoDecoder#read: invalid plane stride");
+    size_t ds = (size_t)stride, need = ds * (rows - 1) + row;
+    if (avail >= 0 && (size_t)avail < need)
+        w_media_raise("VideoDecoder#read: %lld bytes is too few for a %dx%d frame at stride %zu", (long long)avail, w, hh, ds);
+    int r = a_dec_next(d, &pb, &frame, err, sizeof err);
+    if (r < 0) w_media_raise("VideoDecoder#read: %s", err);
+    if (r == 0) return W_NIL;
     CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
     if (h->nv12) {
-        size_t ds = (size_t)w_media_num(stridev, (double)w, "stride");
-        size_t cw = (size_t)((w + 1) / 2) * 2, ch = (size_t)((hh + 1) / 2);
-        size_t need = ds * (size_t)hh + ds * ch;
-        if (avail >= 0 && (size_t)avail < need) { CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly); CVBufferRelease(pb); w_media_raise("VideoDecoder#read: %lld bytes is too few for a %dx%d nv12 frame", (long long)avail, w, hh); }
         const uint8_t *y = CVPixelBufferGetBaseAddressOfPlane(pb, 0), *c = CVPixelBufferGetBaseAddressOfPlane(pb, 1);
         size_t ys = CVPixelBufferGetBytesPerRowOfPlane(pb, 0), cs = CVPixelBufferGetBytesPerRowOfPlane(pb, 1);
-        for (int i = 0; i < hh; i++) memcpy(dst + (size_t)i * ds, y + (size_t)i * ys, (size_t)w);
+        for (int i = 0; i < hh; i++) memcpy(dst + (size_t)i * ds, y + (size_t)i * ys, (size_t)w * bps);
         for (size_t i = 0; i < ch; i++) memcpy(dst + ds * (size_t)hh + i * ds, c + i * cs, cw);
     } else {
-        size_t ds = (size_t)w_media_num(stridev, (double)w * 4, "stride");
-        if (avail >= 0 && (size_t)avail < ds * (size_t)(hh - 1) + (size_t)w * 4) { CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly); CVBufferRelease(pb); w_media_raise("VideoDecoder#read: %lld bytes is too few for a %dx%d frame", (long long)avail, w, hh); }
         const uint8_t *p = CVPixelBufferGetBaseAddress(pb);
         size_t ps = CVPixelBufferGetBytesPerRow(pb);
         if (h->rgba) {
@@ -2484,6 +2680,12 @@ WValue w_media_decoder_info(WValue hv, WValue keyv) {
     ADec *d = h->d;
     char k[32];
     w_media_str(keyv, k, sizeof k);
+    if (!strcmp(k, "cancel")) {
+        pthread_mutex_lock(&d->mu);
+        if (!d->err[0]) snprintf(d->err, sizeof d->err, "decoder cancelled");
+        d->stop = 1; pthread_cond_broadcast(&d->cv);
+        pthread_mutex_unlock(&d->mu); return W_TRUE;
+    }
     if (!strcmp(k, "width")) return w_int(d->w);
     if (!strcmp(k, "height")) return w_int(d->h);
     if (!strcmp(k, "frames")) return d->frames_hint >= 0 ? w_int(d->frames_hint) : W_NIL;
@@ -2515,7 +2717,7 @@ WValue w_media_decoder_close(WValue hv) {
    Transcode: decode -> scale -> encode -> mux, no ffmpeg
    ======================================================================
  *
- * Y'CbCr path (default): frames decode to 8-bit 4:2:0 and the Y' and CbCr
+ * Y'CbCr path (default): frames decode to P010 10-bit 4:2:0 and the Y' and CbCr
  * planes are resampled separately into the encoder's pool buffer (chroma
  * siting honoured on both sides), so there is no colour conversion at all.
  * RGB path (via: "rgb"): frames decode to BGRA (VideoToolbox's BT.709
@@ -2523,7 +2725,64 @@ WValue w_media_decoder_close(WValue hv) {
  * rendered frames do. Segments are cut every gop frames (closed GOPs) and
  * appended one behind, so the encoder keeps working while the mux writes. */
 
+static int a_same_file(const struct stat *a, const struct stat *b) {
+    return a->st_dev == b->st_dev && a->st_ino == b->st_ino && a->st_size == b->st_size &&
+        a->st_mtimespec.tv_sec == b->st_mtimespec.tv_sec && a->st_mtimespec.tv_nsec == b->st_mtimespec.tv_nsec &&
+        a->st_ctimespec.tv_sec == b->st_ctimespec.tv_sec && a->st_ctimespec.tv_nsec == b->st_ctimespec.tv_nsec;
+}
+
+static int a_file_hash(const char *path, char hex[65]) {
+    FILE *file = fopen(path, "rb");
+    if (!file) return -1;
+    struct stat before, after;
+    if (fstat(fileno(file), &before)) { fclose(file); return -1; }
+    CC_SHA256_CTX context; CC_SHA256_Init(&context);
+    uint8_t buffer[65536], hash[CC_SHA256_DIGEST_LENGTH];
+    size_t n;
+    while ((n = fread(buffer, 1, sizeof buffer, file))) CC_SHA256_Update(&context, buffer, (CC_LONG)n);
+    int bad = ferror(file) || fstat(fileno(file), &after) || !a_same_file(&before, &after); fclose(file);
+    if (bad) return -1;
+    CC_SHA256_Final(hash, &context);
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) snprintf(hex + i*2, 3, "%02x", hash[i]);
+    return 0;
+}
+
+static pthread_once_t a_identity_once = PTHREAD_ONCE_INIT;
+static char a_identity[65];
+static void a_identity_init(void) {
+    Dl_info image;
+    char hash[65], model[256] = "unknown", value[4096];
+    size_t n = sizeof model;
+    struct utsname system;
+    if (!dladdr((void *)w_media_transcode_new, &image) || a_file_hash(image.dli_fname, hash) || uname(&system)) return;
+    sysctlbyname("hw.model", model, &n, NULL, 0);
+    snprintf(value, sizeof value, "%s|%s|%s|%s|%s|%s", hash, system.sysname, system.release, system.version, system.machine, model);
+    uint8_t digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(value, (CC_LONG)strlen(value), digest);
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) snprintf(a_identity + 2*i, 3, "%02x", digest[i]);
+}
+WValue w_media_runtime_identity(void) {
+    pthread_once(&a_identity_once, a_identity_init);
+    if (!a_identity[0]) w_media_raise("Transcode: cannot identify the running media implementation");
+    return w_string(a_identity);
+}
+
+WValue w_media_source_hash(WValue source) {
+    char path[4096], hash[65];
+    if (!w_media_str(source, path, sizeof path) || a_file_hash(path, hash)) w_media_raise("Transcode: cannot hash source");
+    return w_string(hash);
+}
+
 typedef struct ATrans {
+    char             resume[4096];
+    int              cache_fd, cached_segments, next_checkpoint;
+    int64_t          resumed;
+    char             cancel_file[4096];
+    char             source_path[4096], audio_path[4096];
+    struct stat      source_stat, audio_stat;
+    uint64_t         disk_reserve;
+    int              source_checked, audio_checked, queue_segments, peak_segments;
+
     ADec          *dec;
     MEncoder      *enc;
     AMux          *mux;
@@ -2563,6 +2822,7 @@ static void a_trans_free(ATrans *t) {
         if (t->via_rgb) w_media_scale_free(&t->prgb);
         else { w_media_scale_free(&t->py); w_media_scale_free(&t->pc); }
     }
+    if (t->cache_fd >= 0) close(t->cache_fd);
     free(t->rgb);
     a_chapters_free(t->chap, t->nchap);
     free(t);
@@ -2591,6 +2851,85 @@ static void a_trans_raise(ATrans *t, const char *fmt, ...) {
     w_media_raise("Transcode: %s", buf);
 }
 
+static void a_cache_path(ATrans *t, int index, char path[4200], const char *extension) {
+    snprintf(path, 4200, "%s/%08d.%s", t->resume, index, extension);
+}
+
+static void a_cache_scan(ATrans *t) {
+    char path[4200], meta[4200], hash[65], want[65], err[512];
+    while (t->resumed < t->total) {
+        a_cache_path(t, t->cached_segments, path, "twms");
+        a_cache_path(t, t->cached_segments, meta, "sha256");
+        FILE *f = fopen(meta, "r");
+        if (!f) break;
+        int ok = fscanf(f, "%64s", want) == 1; fclose(f);
+        if (!ok || a_file_hash(path, hash) || strcmp(hash, want)) break;
+        WMediaSegment *segment = w_media_seg_load(path, err, sizeof err);
+        if (!segment) break;
+        int64_t expected = t->total - t->resumed;
+        if (expected > t->gop) expected = t->gop;
+        ok = segment->n == expected && segment->n > 0 && segment->s[0].sync;
+        w_media_seg_free(segment);
+        if (!ok) break;
+        t->resumed += expected; t->cached_segments++;
+    }
+    t->done = t->resumed;
+    t->next_checkpoint = t->cached_segments;
+}
+
+static void a_trans_check_inputs(ATrans *t) {
+    if (t->disk_reserve) {
+        char directory[4096]; snprintf(directory, sizeof directory, "%s", t->path);
+        char *slash = strrchr(directory, '/');
+        if (slash) { if (slash == directory) slash[1] = 0; else *slash = 0; }
+        else snprintf(directory, sizeof directory, ".");
+        struct statvfs space;
+        if (statvfs(directory, &space) || (long double)space.f_bavail * space.f_frsize < t->disk_reserve)
+            a_trans_raise(t, "configured free-disk reserve reached; delivery preserved");
+    }
+    struct stat current;
+    int changed = (t->source_checked && (stat(t->source_path, &current) || !a_same_file(&current, &t->source_stat))) ||
+                  (t->audio_checked && (stat(t->audio_path, &current) || !a_same_file(&current, &t->audio_stat)));
+    if (!changed) return;
+    /* A mutation can invalidate newly encoded GOPs under the original source key. */
+    if (t->resume[0]) for (int i = 0; i < t->next_checkpoint; i++) {
+        char path[4200]; a_cache_path(t, i, path, "sha256"); unlink(path);
+    }
+    a_trans_raise(t, "source changed during the job; checkpoints invalidated");
+}
+
+/* Deterministic kill/mutation tests stop at real durable boundaries. Inert
+ * unless both explicitly test-named environment variables are supplied. */
+static void a_test_barrier(const char *point) {
+    const char *chosen = getenv("TUNGSTEN_MEDIA_TEST_BARRIER"), *marker = getenv("TUNGSTEN_MEDIA_TEST_MARKER");
+    if (!chosen || !marker || strcmp(chosen, point)) return;
+    int fd = open(marker, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return;
+    (void)write(fd, point, strlen(point)); (void)fsync(fd); close(fd);
+    for (int i = 0; i < 6000 && access(marker, F_OK) == 0; i++) usleep(10000);
+}
+
+static void a_cache_save(ATrans *t, WMediaSegment *segment) {
+    a_trans_check_inputs(t);
+    if (!t->resume[0]) return;
+    char path[4200], meta[4200], tmp[4220], hash[65], err[512] = "cannot hash checkpoint";
+    a_cache_path(t, t->next_checkpoint, path, "twms");
+    a_cache_path(t, t->next_checkpoint, meta, "sha256");
+    if (w_media_seg_save(segment, path, err, sizeof err) || a_file_hash(path, hash)) a_trans_raise(t, "checkpoint: %s", err);
+    a_test_barrier("segment-synced");
+    snprintf(tmp, sizeof tmp, "%s.part", meta);
+    FILE *f = fopen(tmp, "w");
+    if (!f) a_trans_raise(t, "cannot write checkpoint digest");
+    int ok = fprintf(f, "%s\n", hash) > 0 && fflush(f) == 0 && fsync(fileno(f)) == 0;
+    ok = fclose(f) == 0 && ok;
+    if (!ok || rename(tmp, meta)) { unlink(tmp); a_trans_raise(t, "checkpoint digest commit failed"); }
+    int directory = open(t->resume, O_RDONLY);
+    if (directory < 0 || fsync(directory)) { if (directory >= 0) close(directory); a_trans_raise(t, "checkpoint directory sync failed"); }
+    close(directory);
+    t->next_checkpoint++;
+    a_test_barrier("digest-committed");
+}
+
 /* Append the oldest queued segment to the mux. */
 static void a_trans_flush_one(ATrans *t) {
     /* the segment stays queued until appended, so a raise leaves it to a_trans_free */
@@ -2598,6 +2937,7 @@ static void a_trans_flush_one(ATrans *t) {
     char err[256];
     uint64_t a = m_avf_now_ns();
     if (w_media_seg_finish(s, err, sizeof err) != 0) a_trans_raise(t, "%s", err);
+    a_cache_save(t, s);
     uint64_t b = m_avf_now_ns();
     t->wait_ns += b - a;
     a_mux_append(t->mux, s);
@@ -2612,7 +2952,8 @@ static void a_trans_cut(ATrans *t) {
     t->seg_frames = 0;
     if (!s) return;
     t->q[t->nq++] = s;
-    if (t->nq >= 3) a_trans_flush_one(t);
+    if (t->nq > t->peak_segments) t->peak_segments = t->nq;
+    if (t->nq >= t->queue_segments) a_trans_flush_one(t);
 }
 
 /* Scale one decoded frame into the encoder and submit it. */
@@ -2645,12 +2986,18 @@ static void a_trans_encode(ATrans *t, CVPixelBufferRef src) {
         size_t dyl = dys * CVPixelBufferGetHeightOfPlane(out, 0), dcl = dcs * CVPixelBufferGetHeightOfPlane(out, 1);
         int b, b2;
         int be = t->backend == W_MEDIA_BACKEND_AUTO ? w_media_scale_default_backend(1, t->py.filter) : t->backend;
-        if (be == W_MEDIA_BACKEND_METAL && t->py.out_bits == 8) {
+        if (be == W_MEDIA_BACKEND_METAL) {
             /* both planes in one command buffer */
             WMediaJob jobs[2] = {{&t->py, sy, sys, syl, dy, dys, dyl}, {&t->pc, sc, scs, scl, dc, dcs, dcl}};
             b = b2 = w_media_scale_metal_jobs(jobs, 2, err, sizeof err) == 0 ? W_MEDIA_BACKEND_METAL : -1;
+            if (b < 0 && t->backend == W_MEDIA_BACKEND_METAL) {
+                CVPixelBufferUnlockBaseAddress(out, 0);
+                CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
+                CVPixelBufferRelease(out);
+                a_trans_raise(t, "Metal scaling: %s", err);
+            }
             if (b < 0) {
-                /* Metal would not take these buffers: the CPU from now on */
+                /* AUTO may fall back when Metal cannot take the buffers. */
                 t->backend = W_MEDIA_BACKEND_CPU;
                 b = w_media_scale_run(&t->py, t->backend, sy, sys, syl, dy, dys, dyl, err, sizeof err);
                 b2 = b < 0 ? b : w_media_scale_run(&t->pc, t->backend, sc, scs, scl, dc, dcs, dcl, err, sizeof err);
@@ -2683,9 +3030,18 @@ WValue w_media_transcode_new(WValue spec) {
         int nch = 0;
         AChapter *ch = a_chapters_from(a_spec(spec, "chapters"), &nch, "Transcode");
         ATrans *t = calloc(1, sizeof *t);
+        t->cache_fd = -1;
+        double reserve = w_media_num(a_spec(spec, "disk_reserve_bytes"), 0, "disk_reserve_bytes");
+        if (!isfinite(reserve) || reserve < 0 || reserve > 1e18) { a_trans_free(t); w_media_raise("Transcode: invalid disk reserve"); }
+        t->disk_reserve = (uint64_t)reserve;
+        w_media_str(a_spec(spec, "cancel_file"), t->cancel_file, sizeof t->cancel_file);
         t->chap = ch;
         t->nchap = nch;
         t->t0 = m_avf_now_ns();
+        int timeout_ms = (int)w_media_num(a_spec(spec, "timeout_ms"), 30000, "timeout_ms");
+        int queue_cap = (int)w_media_num(a_spec(spec, "decode_ahead"), 6, "decode_ahead");
+        t->queue_segments = (int)w_media_num(a_spec(spec, "segments_ahead"), 3, "segments_ahead");
+        if (t->queue_segments < 1 || t->queue_segments > 3) { a_trans_free(t); w_media_raise("Transcode: segments_ahead must be in 1..3"); }
         WValue srcv = a_spec(spec, "src");
         if (!w_media_str(a_spec(spec, "dst"), dst, sizeof dst) || !dst[0]) { a_trans_free(t); w_media_raise("Transcode: dst must be a path"); }
         snprintf(t->path, sizeof t->path, "%s", dst);
@@ -2695,19 +3051,36 @@ WValue w_media_transcode_new(WValue spec) {
         t->start = (int64_t)w_media_num(a_spec(spec, "start"), 0, "start");
         t->total = (int64_t)w_media_num(a_spec(spec, "frames"), 0, "frames");
         if (t->total <= 0) { a_trans_free(t); w_media_raise("Transcode: frames must be positive"); }
+        t->gop = (int)w_media_num(a_spec(spec, "gop"), 48, "gop");
+        if (t->gop < 1) t->gop = 1;
+        w_media_str(a_spec(spec, "resume_dir"), t->resume, sizeof t->resume);
+        if (t->resume[0]) {
+            char lock[4200]; snprintf(lock, sizeof lock, "%s/.lock", t->resume);
+            t->cache_fd = open(lock, O_CREAT | O_RDWR, 0600);
+            if (t->cache_fd < 0 || flock(t->cache_fd, LOCK_EX | LOCK_NB)) { a_trans_free(t); w_media_raise("Transcode: resume cache is busy or inaccessible"); }
+            a_cache_scan(t);
+        }
         w_media_str(a_spec(spec, "via"), buf, sizeof buf);
         t->via_rgb = !strcasecmp(buf, "rgb") || !strcasecmp(buf, "rgba");
-        OSType pix = t->via_rgb ? kCVPixelFormatType_32BGRA : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+        OSType pix = t->via_rgb ? kCVPixelFormatType_32BGRA : 0;
         if (w_is_array(srcv)) {
             int n = 0;
             char **segs = a_paths(srcv, &n);
-            t->dec = a_dec_open(NULL, segs, n, num, den, pix, 0, err, sizeof err);
+            t->dec = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, queue_cap, err, sizeof err);
             a_paths_free(segs, n);
             if (t->start > 0 && t->dec) { a_trans_free(t); w_media_raise("Transcode: start: is for movie sources (pass the segments you want)"); }
         } else {
             if (!w_media_str(srcv, src, sizeof src) || !src[0]) { a_trans_free(t); w_media_raise("Transcode: src must be a path or an array of segment paths"); }
             if (access(src, R_OK) != 0) { int e = errno; a_trans_free(t); w_media_raise("Transcode: cannot read %s: %s", src, strerror(e)); }
-            t->dec = a_dec_open(src, NULL, 0, num, den, pix, t->start, err, sizeof err);
+            struct stat before;
+            char expected[65], actual[65];
+            w_media_str(a_spec(spec, "source_hash"), expected, sizeof expected);
+            if (stat(src, &before) || (expected[0] && (a_file_hash(src, actual) || strcmp(expected, actual))) ||
+                stat(src, &t->source_stat) || !a_same_file(&before, &t->source_stat)) {
+                a_trans_free(t); w_media_raise("Transcode: source changed before decoding");
+            }
+            snprintf(t->source_path, sizeof t->source_path, "%s", src); t->source_checked = 1;
+            t->dec = a_dec_open(src, NULL, 0, num, den, pix, t->start + t->resumed, timeout_ms, queue_cap, err, sizeof err);
         }
         if (!t->dec) { a_trans_free(t); w_media_raise("Transcode: %s", err); }
         t->sw = t->dec->w;
@@ -2747,16 +3120,18 @@ WValue w_media_transcode_new(WValue spec) {
         } else {
             uint8_t fy[4] = {16, 0, 0, 0}, fc[4] = {128, 128, 0, 0};
             int s = t->dec->siting;
-            double osx = s == 1 ? 1.0 : 0.5, osy = s == 2 ? 0.5 : 1.0;
+            int source_vsub = a_dec_vsub(t->dec);
+            double osx = s == 1 ? 1.0 : 0.5, osy = source_vsub == 1 || s == 2 ? 0.5 : 1.0;
             rc = w_media_scale_plan(&t->py, 1, W_MEDIA_ALPHA_NONE, filter, t->sw, t->sh, t->w, t->h, crop, rect, 1, 1, 0.5, 0.5,
                                     1, 1, 0.5, 0.5, fy, bits, err, sizeof err);
             if (rc == 0) {
-                rc = w_media_scale_plan(&t->pc, 2, W_MEDIA_ALPHA_NONE, filter, (t->sw + 1) / 2, (t->sh + 1) / 2, t->w / 2, t->h / vsub,
-                                        crop, rect, 2, 2, osx, osy, 2, vsub, 0.5, vsub == 2 ? 1.0 : 0.5, fc, bits, err, sizeof err);
+                rc = w_media_scale_plan(&t->pc, 2, W_MEDIA_ALPHA_NONE, filter, (t->sw + 1) / 2, (t->sh + source_vsub - 1) / source_vsub, t->w / 2, t->h / vsub,
+                                        crop, rect, 2, source_vsub, osx, osy, 2, vsub, 0.5, vsub == 2 ? 1.0 : 0.5, fc, bits, err, sizeof err);
                 if (rc != 0) w_media_scale_free(&t->py);
             }
         }
         if (rc != 0) { a_trans_free(t); w_media_raise("Transcode: %s", err); }
+        if (!t->via_rgb) { t->py.in_bits = t->pc.in_bits = 10; t->py.vimage_ok = t->pc.vimage_ok = 0; }
         t->planned = 1;
         /* mux */
         AMuxOpts o;
@@ -2770,6 +3145,16 @@ WValue w_media_transcode_new(WValue spec) {
         if (ac[0] && strcasecmp(ac, "none")) {
             if (!w_media_str(a_spec(spec, "audio_src"), apath, sizeof apath) || !apath[0]) snprintf(apath, sizeof apath, "%s", w_is_array(srcv) ? "" : src);
             if (!apath[0]) { a_trans_free(t); w_media_raise("Transcode: audio: segments carry no audio; give audio_src: (a WAV or a movie)"); }
+            if (strcmp(apath, t->source_path)) {
+                struct stat before;
+                char expected[65], actual[65];
+                w_media_str(a_spec(spec, "audio_hash"), expected, sizeof expected);
+                if (stat(apath, &before) || (expected[0] && (a_file_hash(apath, actual) || strcmp(expected, actual))) ||
+                    stat(apath, &t->audio_stat) || !a_same_file(&before, &t->audio_stat)) {
+                    a_trans_free(t); w_media_raise("Transcode: audio source changed before decoding");
+                }
+                snprintf(t->audio_path, sizeof t->audio_path, "%s", apath); t->audio_checked = 1;
+            }
             o.audio = apath;
             o.audio_codec = ac;
             o.audio_kbps = (int)w_media_num(a_spec(spec, "audio_kbps"), 0, "audio_kbps");
@@ -2787,7 +3172,19 @@ WValue w_media_transcode_new(WValue spec) {
         o.frames = t->total;
         t->mux = a_mux_open(&o, err, sizeof err);
         if (!t->mux) { a_trans_free(t); w_media_raise("Transcode: %s", err); }
+        WValue edits = a_spec(spec, "edit_lists");
+        if (edits == W_FALSE) t->mux->flatten_edits = 2;
+        else {
+            char mode[32]; w_media_str(edits, mode, sizeof mode);
+            if (!strcmp(mode, "audio")) t->mux->flatten_edits = 1;
+        }
         a_mux_set_chapters(t->mux, t->chap, t->nchap);
+        for (int i = 0; i < t->cached_segments; i++) {
+            char checkpoint[4200]; a_cache_path(t, i, checkpoint, "twms");
+            WMediaSegment *cached = w_media_seg_load(checkpoint, err, sizeof err);
+            if (!cached) { a_trans_free(t); w_media_raise("Transcode: checkpoint changed during reuse"); }
+            a_mux_append(t->mux, cached); w_media_seg_free(cached);
+        }
         a_chapters_free(t->chap, t->nchap);
         t->chap = NULL;
         t->nchap = 0;
@@ -2802,7 +3199,12 @@ WValue w_media_transcode_step(WValue hv, WValue nv) {
     @autoreleasepool {
         char err[512];
         int64_t k = 0;
+        a_trans_check_inputs(t);
+        if (t->cancel_file[0] && access(t->cancel_file, F_OK) == 0) a_trans_raise(t, "transcode cancelled");
         while (t->done < t->total && k < n) {
+            if (t->cancel_file[0] && access(t->cancel_file, F_OK) == 0) a_trans_raise(t, "transcode cancelled");
+            const char *fail = getenv("TUNGSTEN_MEDIA_TEST_FAIL_AFTER");
+            if (fail && t->done >= strtoll(fail, NULL, 10)) a_trans_raise(t, "injected media failure after %lld frames", (long long)t->done);
             CVPixelBufferRef pb = NULL;
             int64_t f = 0;
             int r = a_dec_next(t->dec, &pb, &f, err, sizeof err);
@@ -2836,6 +3238,7 @@ WValue w_media_transcode_step(WValue hv, WValue nv) {
 WValue w_media_transcode_finish(WValue hv) {
     ATrans *t = w_media_handle_get(hv, W_MEDIA_KIND_TRANSCODE, "Transcode#finish");
     @autoreleasepool {
+        a_trans_check_inputs(t);
         if (t->done < t->total) a_trans_raise(t, "finish after %lld of %lld frames (step until done)", (long long)t->done, (long long)t->total);
         if (t->seg_frames > 0) {
             WMediaSegment *s = w_media_enc_cut(t->enc);
@@ -2846,9 +3249,11 @@ WValue w_media_transcode_finish(WValue hv) {
         int64_t out[5];
         uint64_t a = m_avf_now_ns();
         a_mux_finish(t->mux, out);
+        a_test_barrier("mux-finished");
         t->mux_ns += m_avf_now_ns() - a;
         t->finished = 1;
         WValue r = w_array_new_empty();
+        r = w_array_push(r, a_pair("resumed_frames", w_int(t->resumed)));
         r = w_array_push(r, a_pair("frames", w_int(out[0])));
         r = w_array_push(r, a_pair("duplicated", w_int(t->dups)));
         r = w_array_push(r, a_pair("dropped", w_int(t->drops)));
@@ -2863,6 +3268,10 @@ WValue w_media_transcode_finish(WValue hv) {
         r = w_array_push(r, a_pair("encode_wait_s", w_float(t->wait_ns / 1e9 + w_media_enc_seconds(t->enc, 2))));
         r = w_array_push(r, a_pair("mux_s", w_float((double)t->mux_ns / 1e9)));
         r = w_array_push(r, a_pair("scale_backend", w_string(w_media_backend_name(t->used))));
+        r = w_array_push(r, a_pair("decode_bits", w_int(t->via_rgb ? 8 : 10)));
+        r = w_array_push(r, a_pair("decode_chroma", w_string(t->via_rgb ? "rgb" : a_dec_vsub(t->dec) == 1 ? "422" : "420")));
+        r = w_array_push(r, a_pair("decoder_queue_peak", w_int(t->dec->peak_qn)));
+        r = w_array_push(r, a_pair("segment_queue_peak", w_int(t->peak_segments)));
         r = w_array_push(r, a_pair("via", w_string(t->via_rgb ? "rgb" : "yuv")));
         r = w_array_push(r, a_pair("source", w_string((char[]){(char)(t->dec->codec >> 24), (char)(t->dec->codec >> 16), (char)(t->dec->codec >> 8), (char)t->dec->codec, 0})));
         w_media_handle_drop(hv, W_MEDIA_KIND_TRANSCODE);
@@ -3008,6 +3417,21 @@ WValue w_media_probe(WValue pathv, WValue samplesv, WValue audiov) {
         out = w_array_push(out, a_pair("chapter_locales", w_int((int64_t)asset.availableChapterLocales.count)));
         out = w_array_push(out, a_pair("chapters", a_probe_chapters(asset)));
         out = w_array_push(out, a_pair("chpl", a_probe_chpl(path.UTF8String)));
+        int edit_fd = open(path.UTF8String, O_RDONLY), edit_count = -1;
+        if (edit_fd >= 0) {
+            ATop tops[64]; int nt = 0, mi = -1; ABox root; char error[256];
+            if (!a_read_moov(edit_fd, path.UTF8String, tops, &nt, &mi, &root, error, sizeof error)) {
+                edit_count = 0;
+                ABox *moov = &root.kid[0];
+                for (int i = 0; i < moov->nk; i++) {
+                    ABox *t = &moov->kid[i];
+                    if (t->type == A_FOURCC('t','r','a','k') && a_box_find(t, A_FOURCC('e','d','t','s'))) edit_count++;
+                }
+                a_box_free(&root);
+            }
+            close(edit_fd);
+        }
+        out = w_array_push(out, a_pair("edit_lists", w_int(edit_count)));
         if (vt.count) {
             AVAssetTrack *v = vt[0];
             out = w_array_push(out, a_pair("sample_descriptions", w_int((int64_t)v.formatDescriptions.count)));
@@ -3034,6 +3458,12 @@ WValue w_media_probe(WValue pathv, WValue samplesv, WValue audiov) {
                 CMVideoDimensions d = CMVideoFormatDescriptionGetDimensions(fd);
                 CFDictionaryRef ext = CMFormatDescriptionGetExtensions(fd);
                 out = w_array_push(out, a_pair("codec", a_fourcc(sub)));
+                /* ProRes 422's four registered profiles carry 10-bit 4:2:2. */
+                if (sub == kCMVideoCodecType_AppleProRes422 || sub == kCMVideoCodecType_AppleProRes422HQ ||
+                    sub == kCMVideoCodecType_AppleProRes422LT || sub == kCMVideoCodecType_AppleProRes422Proxy) {
+                    out = w_array_push(out, a_pair("bit_depth", w_int(10)));
+                    out = w_array_push(out, a_pair("chroma_format", w_int(2)));
+                }
                 out = w_array_push(out, a_pair("width", w_int(d.width)));
                 out = w_array_push(out, a_pair("height", w_int(d.height)));
                 out = w_array_push(out, a_pair("primaries", a_ext_str(ext, kCMFormatDescriptionExtension_ColorPrimaries)));

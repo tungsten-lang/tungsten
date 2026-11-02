@@ -45,7 +45,7 @@
     if value == false
       return "false"
     t = type(value)
-    if t == "Int" || t == "Fixnum" || t == "Float"
+    if t == "Int" || t == "Fixnum" || t == "BigInt" || t == "Float"
       return value.to_s
     if t == "String"
       return encode_string(value)
@@ -67,7 +67,7 @@
       buf << "false"
       return nil
     t = type(value)
-    if t == "Int" || t == "Fixnum" || t == "Float"
+    if t == "Int" || t == "Fixnum" || t == "BigInt" || t == "Float"
       buf << value.to_s
       return nil
     if t == "String"
@@ -377,7 +377,9 @@
     while pos < n
       d = view[pos]
       break if d < 48 || d > 57
-      int_val = int_val * 10 + (d - 48)
+      # The fast path uses at most 14 digits. Longer tokens are parsed from
+      # their original text below; do not overflow while merely scanning them.
+      int_val = int_val * 10 + (d - 48) if pos - first_digit < 14
       pos += 1
     int_digits = pos - first_digit
     if int_digits == 0
@@ -391,7 +393,7 @@
       while pos < n
         d = view[pos]
         break if d < 48 || d > 57
-        int_val = int_val * 10 + (d - 48)
+        int_val = int_val * 10 + (d - 48) if int_digits + pos - frac_start < 14
         pos += 1
       frac_digits = pos - frac_start
     # Exponent (1e5 / 2.5E-3): without this the digits after `e` were parsed
@@ -413,7 +415,7 @@
       if int_digits <= 14
         return neg ? 0 - int_val : int_val
       return s.slice(start, pos - start).to_i
-    if !has_exp && int_digits + frac_digits <= 15 && frac_digits <= 6
+    if !has_exp && int_digits + frac_digits <= 14 && frac_digits <= 6
       scale = 1.0
       if frac_digits == 1
         scale = 10.0

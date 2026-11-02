@@ -1214,11 +1214,16 @@
   # to the signature-mangled function. This is deliberately static: if the
   # argument types are unknown or no exact overload exists, the normal call path
   # below handles the expression.
-  if args != nil && args.size() > 0
+  if args != nil && (args.size() > 0 || ctx[:mod][:known_fn_overloads][name] == true)
     nargs = args.size()
     arg_types = inferred_arg_types(args, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     typed_key = typed_call_signature_key(name, arg_types)
     typed_target = ctx[:mod][:known_calls][typed_key]
+    if typed_target == nil
+      default_key = typed_default_call_key(ctx[:mod], name, arg_types)
+      if default_key != nil
+        typed_key = default_key
+        typed_target = ctx[:mod][:known_calls][typed_key]
     if typed_target != nil
       # Raw-i64 ABI win: the typed-overload key already resolved to a fn
       # registered via lower_method_def's all-i64-params detection. Pass
@@ -1275,6 +1280,10 @@
         arg_regs.push(reg)
         i += 1
 
+      expected_count = ctx[:mod][:known_fn_param_counts][typed_key]
+      if expected_count != nil
+        while arg_regs.size() < expected_count
+          arg_regs.push(w_nil.to_s())
       temp = next_temp(wfn)
       emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, typed_target, nil, nil, temp)
       fb = 0
@@ -1738,7 +1747,7 @@
     emit_wire_call_direct_i64(wfn, nil, arg_regs, nil, nil, static_fn_name, nil, nil, temp)
 
   static_return_type = static_info[:return_type]
-  if static_return_type != nil && is_machine_int64_type(static_return_type)
+  if static_info[:raw_abi] == true && static_return_type != nil && is_machine_int64_type(static_return_type)
     return typed_value(raw_machine_value_type(static_return_type), temp)
   typed_value(:i64, temp)
 

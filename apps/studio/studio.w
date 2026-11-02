@@ -5,7 +5,8 @@
 #   studio frame <episode.json> <f> [--png out] [--fresh]
 #   studio render <episode.json> [--cut full] [--jobs N] [--max-frames N] [--from F --to F]
 #   studio mix <episode.json>                           -> build/<cut>/mix.wav (+ loudness report)
-#   studio mux <episode.json>                           -> build/<cut>/master.mp4, .srt, chapters.txt
+#   studio mux <episode.json> [--no-edit-lists --audio-codec pcm --out master.mov]
+#   studio share <episode.json> [--codec hevc10] [--kbps 1800] [--retries 2]
 #   studio verify <master> [--resolved path]
 #   studio fcpxml <episode.json> [--cut full] [--out path] [--master path] -> FCPXML 1.11
 #   studio share <episode.json> [--cut full] [--preset share]  -> build/<cut>/share.mp4 (Transcode from the master)
@@ -141,7 +142,7 @@ use lib/fcpxml
     return 0
   mkdir_p(p.build + "/tmp")
   # program frames these segments need, rendered first (the programs run `jobs` at a time)
-  p.ensure_program_frames(r, take, jobs)
+  p.ensure_program_frames(r, take, opt(args, "--animation-jobs", jobs.to_s).to_i)
   if jobs <= 1
     eng = Engine.new(p, r)
     enc = make_encoder(r, p.encoder, p.build + "/tmp/fifo." + run_token())

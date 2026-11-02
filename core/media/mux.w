@@ -29,6 +29,11 @@
 # 24-hour flag, one sample spanning the whole video. faststart: true (default)
 # puts the moov before the media data.
 #
+# edit_lists: :audio moves video B-frame edits into signed ctts offsets;
+# edit_lists: false removes all edits, refusing AAC priming/trimming and
+# late-first-chapter empty edits that cannot be deleted safely. Use PCM MOV
+# with chapters starting at frame 0 for strictly edit-list-free delivery.
+#
 # Chapters: chapters: [[title, first frame], ...] (ascending; or add them one
 # at a time with #chapter before close) become a QuickTime chapter track: a
 # disabled text track, one sample per chapter lasting until the next (the
@@ -41,11 +46,12 @@
 # out.
 
 + Mux
-  ro :path, :rate, :format, :frames, :tc_start, :drop, :handle
+  ro :path, :rate, :format, :frames, :tc_start, :drop, :handle, :chapters
 
   # Mux.new(path, rate: [24, 1], format: nil (from the extension), audio: nil,
   # audio_codec: nil, audio_kbps: nil, tc_start: "00:00:00:00", drop: nil,
-  # faststart: true, frames: nil, chapters: nil, chpl: true). frames:
+  # faststart: true, frames: nil, chapters: nil, chpl: true,
+  # edit_lists: true (:audio for video only, false for all tracks)). frames:
   # promises the total frame count, so the audio is fed exactly (close
   # raises if a different count arrived).
   -> new(@path, opts = {})
@@ -68,6 +74,8 @@
     fmt = @format == nil ? nil : @format.to_s
     @handle = ccall("w_media_mux_new", @path, fmt, @rate[0], @rate[1], opts[:audio], opts[:audio_codec], opts[:audio_kbps],
                     tc_frame, @drop, Timecode.quanta(@rate), Mux.opt(opts, :faststart, true), opts[:frames])
+    if opts != nil && opts.has_key?(:edit_lists)
+      ccall("w_media_mux_set", @handle, "edit_lists", opts[:edit_lists])
     @chapters = []
     if opts != nil && opts.has_key?(:chapters) && opts[:chapters] != nil
       opts[:chapters].each ->(c)
@@ -81,9 +89,6 @@
       raise "Mux#chapter: '[title]' at frame [frame] is not after the previous chapter (frame [@chapters[@chapters.size - 1][1]])"
     @chapters << [title.to_s, frame]
     @chapters.size
-
-  -> chapters
-    @chapters
 
   # Abandon the file: the writer stops and what it wrote is deleted.
   -> cancel

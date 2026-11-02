@@ -744,6 +744,9 @@
   body = block.body
   child_ctx[:raw_int_candidates] = raw_int_candidate_map(body, child_var_types, mod)
   reassigned = find_reassigned_params(body, block_params)
+  # A conditional nested closure must see this invocation's parameters even
+  # when a later invocation skips constructing that closure.
+  merge_capture_names(reassigned, find_captured_params_in_body(body, block_params))
   pi = 0
   while pi < reassigned.size()
     pname = reassigned[pi]

@@ -113,7 +113,18 @@ limiter, 24-bit WAV exactly the picture's length. The cut's `audio_kbps` sets th
 
 **Masters.** `studio mux` appends the segments (no re-encode) with the mix, a `tmcd` track and the resolved
 chapters as a QuickTime chapter track plus Nero `chpl` (exact frames); `studio verify` checks them. `studio share`
-transcodes the master with `Transcode` (any preset; chapters and timecode carried) and checks the copy.
+transcodes the master with `Transcode` (any preset; chapters and timecode carried) and checks the copy. `--codec hevc10 --kbps 1800` selects the film toolkit's
+Main10 share format. Dropped-frame failures retry twice with backoff and preserve
+an existing output until the replacement finishes.
+
+`studio mux` removes video edit lists using signed composition offsets. For a
+master with no edit lists on any track, use `--out master.mov --audio-codec pcm
+--no-edit-lists` and chapters beginning at frame 0. AAC priming edits are retained
+in MP4 to preserve sync. `studio verify --no-edit-lists` checks the actual boxes.
+
+The [shared film toolkit](tools/tw/README.md) runs film/Short rendering, share,
+thumbnail and publication steps from per-film JSON settings. It checks banding,
+including masks for burned-in Short captions, before publication.
 
 **FCPXML.** `studio fcpxml` writes FCPXML 1.11: rational times from the integers (frame f = f·den/num s, sample s =
 s/sr s); the picture on the spine (one clip of the master per item, named by its id, a note with kind, transition and

@@ -470,6 +470,8 @@
         cp = esc.ord()
     else
       cp = raw[2].ord()
+    if cp >= 128
+      raise compile_error_with_span(:E_LEX_NON_ASCII_LITERAL, "`:-X` char literal only supports ASCII; use U+XXXX for non-ASCII codepoints", @file, @line_at[off], @col_at[off], raw.size())
     emit_at(:CHAR, cp, off)
 
   -> materialize_magic(raw, off)

@@ -124,7 +124,7 @@ while canonical_op_token_i < 280
       i += 1
     buf << "}"
     return nil
-  scalar = value_type == "String" || value_type == "Symbol" || value_type == "Integer" || value_type == "Int" || value_type == "BigInt" || value_type == "Float" || value_type == "Decimal" || value_type == "Rational" || value_type == "Boolean" || value_type == "Bool"
+  scalar = value_type == "String" || value_type == "Symbol" || value_type == "Integer" || value_type == "Int" || value_type == "BigInt" || value_type == "Float" || value_type == "Decimal" || value_type == "Rational" || value_type == "Boolean"
   if !scalar
     # Source-only objects do not participate in LLVM emission. Encode one
     # opaque marker: calling #to_s would serialize host-specific node or block

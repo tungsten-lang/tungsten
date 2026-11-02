@@ -646,6 +646,15 @@
     # (a boxed int truncates into a bogus cap/size).
     if w_class[:name] == "ByteArray"
       bn = args.size() > 0 ? args[0] : 0
+      if type(bn) == "Array" || type(bn) == "ByteArray"
+        bn_len = bn.size()
+        bn_raw = ccall_nobox("w_numeric_to_i64", bn_len) ## i64
+        out = ccall_rawargs("w_bytes_new", bn_raw)
+        bi = 0
+        while bi < bn_len
+          out[bi] = bn[bi] & 255
+          bi += 1
+        return out
       bn_raw = ccall_nobox("w_numeric_to_i64", bn) ## i64
       return ccall_rawargs("w_bytes_new", bn_raw)
     if w_class[:name] == "BoolArray"
@@ -1244,6 +1253,8 @@
       w_class = primitive_runtime_class(recv)
     while w_class != nil
       if w_class == klass || w_class[:name] == klass
+        return true
+      if w_class[:name] == "ByteArray" && (klass == "Array" || (type(klass) == "Hash" && klass.has_key?(:name) && klass[:name] == "Array"))
         return true
       w_class = w_class[:superclass]
     false

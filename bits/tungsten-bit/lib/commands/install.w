@@ -63,6 +63,9 @@ in Tungsten:Bit:Commands
     if @flags[:lock] != false
       write_lockfile(lock_path, resolution)
 
+    if bitfile.unicode_version != nil && bitfile.unicode_version != "" && !flag?(:local)
+      ensure_unicode_tables(bitfile)
+
     say "Installed " + resolution.size().to_s + " bits into " + root
 
   -> load_bitfile

@@ -46,7 +46,7 @@
 # out.
 
 + Mux
-  ro :path, :rate, :format, :frames, :tc_start, :drop, :handle
+  ro :path, :rate, :format, :frames, :tc_start, :drop, :handle, :chapters
 
   # Mux.new(path, rate: [24, 1], format: nil (from the extension), audio: nil,
   # audio_codec: nil, audio_kbps: nil, tc_start: "00:00:00:00", drop: nil,
@@ -89,9 +89,6 @@
       raise "Mux#chapter: '[title]' at frame [frame] is not after the previous chapter (frame [@chapters[@chapters.size - 1][1]])"
     @chapters << [title.to_s, frame]
     @chapters.size
-
-  -> chapters
-    @chapters
 
   # Abandon the file: the writer stops and what it wrote is deleted.
   -> cancel

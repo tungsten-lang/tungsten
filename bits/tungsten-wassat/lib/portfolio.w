@@ -2701,7 +2701,7 @@ WASSAT_AXIS_SLOTS = 10
       decisive_now = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) != 0
       decisive_now = 1 if domain_plan != nil && ccall("__w_arr_load_acq", res, domain_base) == 1
       decisive_now = 1 if perm_plan != nil && ccall("__w_arr_load_acq", res, perm_base) == 1
-      decisive_now = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) == 1
+      decisive_now = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) != 0
       decisive_now = 1 if nae_plan != nil && ccall("__w_arr_load_acq", res, nae_base) != 0
       decisive_now = 1 if capacity_plan != nil && ccall("__w_arr_load_acq", res, capacity_base) != 0
       cdcl_can_continue = 0
@@ -2746,7 +2746,7 @@ WASSAT_AXIS_SLOTS = 10
       decided = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) != 0
       decided = 1 if domain_plan != nil && ccall("__w_arr_load_acq", res, domain_base) == 1
       decided = 1 if perm_plan != nil && ccall("__w_arr_load_acq", res, perm_base) == 1
-      decided = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) == 1
+      decided = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) != 0
       decided = 1 if nae_plan != nil && ccall("__w_arr_load_acq", res, nae_base) != 0
       decided = 1 if capacity_plan != nil && ccall("__w_arr_load_acq", res, capacity_base) != 0
       if decided == 0
@@ -2965,7 +2965,7 @@ WASSAT_AXIS_SLOTS = 10
       pm = cycle_plan["meta"]
       ended = pm[18]
       last_ms = ended if ended > last_ms
-      answer_ms = ended if res[cycle_base] == 1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+      answer_ms = ended if res[cycle_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       wassat_cycle_profile(cycle_plan, res[cycle_base])
     if nae_plan != nil
       nm = nae_plan["meta"]
@@ -3022,6 +3022,9 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && nae_plan != nil && res[nae_base] != 0
     status = res[nae_base]
     winner = nae_idx
+  if status == 0 && cycle_plan != nil && res[cycle_base] == -1
+    status = -1
+    winner = cycle_idx
   # A model-only arm cannot beat a refutation, so it is consulted last and
   # only when nothing decisive was found.
   if status == 0 && sls.size > 0 && res[sls_base] == 1

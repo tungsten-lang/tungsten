@@ -8,8 +8,8 @@
 # most six variables and a few dozen monomials), not for large computational
 # geometry workloads.
 
-use core/algebra/lattice_polytope
-use core/algebra/polynomial
+use algebra/lattice_polytope
+use algebra/polynomial
 
 + ToricLinearAlgebra
   -> .copy_rational_matrix(matrix)

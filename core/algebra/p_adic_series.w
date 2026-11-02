@@ -10,7 +10,7 @@
 # power sums from Newton's identities.  Nothing here is a theorem about
 # curves; `core/algebra/coleman` layers the geometry on top.
 
-use core/algebra/p_adic
+use algebra/p_adic
 
 # ----------------------------------------------------------------------------
 # Machine lane.  When p^K < 2^62 every residue fits a signed 64-bit word and

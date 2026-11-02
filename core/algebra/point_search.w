@@ -1,3 +1,5 @@
+use algebra/curves
+
 # Exact rational-point search for a monotone family of plane quartics.
 #
 # This is deliberately a certified, narrow capability rather than a generic

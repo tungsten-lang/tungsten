@@ -25,12 +25,12 @@ invariant_check("resultant.order",
                 cusp_resultant.valuation_at_zero == 3)
 invariant_check("resultant.alias",
                 cusp_equation.resultant_in(
-                  cusp_equation.derivative(1), :y) ==
+                  cusp_equation.derivative(1), :y).in_ring(RX) ==
                   cusp_resultant)
 two_lines_resultant = (y - x).resultant_in(
   y + x, :y)
 invariant_check("resultant.two_lines",
-                two_lines_resultant == ux*2)
+                two_lines_resultant == x*2)
 invariant_check("resultant.common_factor",
                 (y**2 - x**2).resultant_in(
                   y - x, :y).zero?)

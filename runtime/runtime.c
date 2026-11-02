@@ -26080,8 +26080,9 @@ static void algebra_rewrite_ordinary_line(WAlgebraBuf *out,
 }
 
 /* Recognize an actual source-level feature import, not the same words inside
- * a comment or string. `use core/algebra/...` is included because the
- * orchestrator and focused layer specs import algebra submodules directly. */
+ * a comment or string. `use algebra/...` and `use core/algebra/...` are
+ * included because the orchestrator and focused layer specs import algebra
+ * submodules directly. */
 static int algebra_source_uses_algebra(const char *s, size_t n) {
     static const char public_use[] = "use algebra";
     static const char core_use[] = "use core/algebra";
@@ -26095,8 +26096,9 @@ static int algebra_source_uses_algebra(const char *s, size_t n) {
         if (p + sizeof(public_use) - 1 <= line_b &&
             memcmp(s + p, public_use, sizeof(public_use) - 1) == 0) {
             size_t after = p + sizeof(public_use) - 1;
-            if (after == line_b || s[after] == ' ' || s[after] == '\t' ||
-                s[after] == '\r' || s[after] == '#' || s[after] == ';')
+            if (after == line_b || s[after] == '/' || s[after] == ' ' ||
+                s[after] == '\t' || s[after] == '\r' || s[after] == '#' ||
+                s[after] == ';')
                 return 1;
         }
         if (p + sizeof(core_use) - 1 <= line_b &&

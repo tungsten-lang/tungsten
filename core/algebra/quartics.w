@@ -1,3 +1,6 @@
+use algebra/curves
+use algebra/groebner
+
 # Exact lines and plane-quartic intersections.
 #
 # A line in P^2 is stored as its canonical dual point [a:b:c], representing

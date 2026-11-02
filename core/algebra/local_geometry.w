@@ -5,8 +5,8 @@
 # iteration in FormalPuiseuxSeries. Certificates replay the supporting-edge
 # arithmetic and verify the substituted equation through the requested order.
 
-use core/algebra/polynomial_factor
-use core/algebra/curves
+use algebra/polynomial_factor
+use algebra/curves
 use core/calculus/puiseux
 
 + PlaneLocalGeometry

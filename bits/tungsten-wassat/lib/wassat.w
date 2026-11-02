@@ -40,6 +40,7 @@ use symmetry_fix
 use block_csp
 use arithmetic_coloring
 use ramsey_lex
+use ramsey_bound
 use windmill
 use specialists
 use mdp
@@ -739,6 +740,25 @@ use portfolio
       wassat_status(quiet, "c block_csp blocks=[bcsp["blocks"]], nodes=[bcsp["nodes"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(20)
+  # A recursively derived clique bound can refute a completely verified
+  # two-color graph before spending time in bounded coloring search.
+  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_RAMSEY_BOUND") != "0"
+    rb = wassat_ramsey_bound_solve(formula, clock_ms() + WASSAT_RAMSEY_BOUND_MS)
+    tprof = wassat_prof("cli.ramsey_bound", tprof)
+    if rb != nil
+      bw = rb["work"]
+      if env("WASSAT_PROFILE") == "1"
+        wassat_prof_note("ramsey_bound refuted=[bw[0]] stopped=[bw[1]] vertices=[bw[2]] scanned=[bw[3]] positive=[bw[4]] negative=[bw[5]] upper=[bw[6]] steps=[bw[7]] polls=[bw[8]] parity_steps=[bw[9]]")
+        cw = rb["check"]
+        if cw != nil
+          wassat_prof_note("ramsey_bound.coverage accepted=[cw[0]] stopped=[cw[1]] checked_clauses=[cw[3]] literal_reads=[cw[4]] groups=[cw[5]] distinct=[cw[6]] duplicates=[cw[7]] rank_terms=[cw[8]] polls=[cw[15]]")
+      if rb["status"] == -1
+        wassat_status(quiet, "s UNSATISFIABLE")
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (complete-clique recursive bound)")
+        wassat_status(quiet, "c lane: ramsey_bound")
+        wassat_status(quiet, "c bound vertices=[bw[2]] positive=[bw[4]] negative=[bw[5]] upper=[bw[6]]")
+        wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+        exit(20)
   # Two-color arithmetic hypergraphs (Van der Waerden, Schur, Pythagorean,
   # Ramsey): scopes are verified against the family's mathematical shape
   # and decided by exhaustive bounded search over the extracted scopes.

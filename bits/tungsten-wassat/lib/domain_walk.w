@@ -5,7 +5,8 @@
 # Costs sum the weights of forbidden value pairs against current neighbors;
 # local minima increase only the violated pair weights. Incremental updates
 # and fixed buffers avoid rebuilding scores or allocating during the walk.
-# Restarts use the consecutive seeds 1..8 with the same finite work budget.
+# Eight signed-shift trajectories run first. On a miss, eight logical-shift
+# trajectories follow with the same seed sequence, reusing every buffer.
 use atomic_stop
 
 WASSAT_DOMAIN_MAX_VARS = 2048
@@ -13,14 +14,15 @@ WASSAT_DOMAIN_MAX_BLOCKS = 128
 WASSAT_DOMAIN_MAX_SIZE = 32
 WASSAT_DOMAIN_MAX_CLAUSES = 400000
 WASSAT_DOMAIN_RESTART_STEPS = 100000
-WASSAT_DOMAIN_RESTARTS = 8
+WASSAT_DOMAIN_BASE_RESTARTS = 8
+WASSAT_DOMAIN_RESTARTS = 2 * WASSAT_DOMAIN_BASE_RESTARTS
 WASSAT_DOMAIN_WALL_MS = 15000
 
 # m: status, recognized, stop(1 cancel/2 deadline/3 exhausted), blocks,
 # prepared clauses/literals, restarts, iterations, flips, weight bumps,
 # candidate scores, score updates, polls, best unique violations,
 # replayed clauses/literals, verified, start/end ms, cleared weight words,
-# preparation ms, scratch bytes, current-restart iterations, unused.
+# preparation ms, scratch bytes, current-restart iterations, examined weight-bump pairs.
 -> wassat_domain_stop(m, stop, deadline) (i64[] i64[] i64) i64
   return 1 if m[2] != 0
   m[12] += 1
@@ -161,7 +163,7 @@ fn wassat_domain_ctz(x) (i64) i64
   1
 
 -> wassat_domain_trial(block_vars, block_len, forbid, dom, sol, costs, counts,
-                        weights, m, stop, nb, nv, seed, steps, deadline) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64) i64
+                        weights, active, m, stop, nb, nv, seed, shift_mask, steps, deadline) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64) i64
   stride = WASSAT_DOMAIN_MAX_SIZE
   i = 0
   while i < weights.size
@@ -178,7 +180,7 @@ fn wassat_domain_ctz(x) (i64) i64
     if dom[b] == 0
       return 0
     rng ^= rng << 13
-    rng ^= rng >> 7
+    rng ^= (rng >> 7) & shift_mask
     rng ^= rng << 17
     offset = (rng & 2147483647) % wassat_domain_pop(dom[b])
     remaining = dom[b]
@@ -217,7 +219,7 @@ fn wassat_domain_ctz(x) (i64) i64
     m[13] = unsat if unsat < m[13]
     return 1 if unsat == 0
     rng ^= rng << 13
-    rng ^= rng >> 7
+    rng ^= (rng >> 7) & shift_mask
     rng ^= rng << 17
     noise = (rng & 63) == 0
     best_b = 0 - 1
@@ -240,7 +242,7 @@ fn wassat_domain_ctz(x) (i64) i64
               ties = 0
             ties += 1
             rng ^= rng << 13
-            rng ^= rng >> 7
+            rng ^= (rng >> 7) & shift_mask
             rng ^= rng << 17
             if (rng & 2147483647) % ties == 0
               best_b = b
@@ -252,11 +254,25 @@ fn wassat_domain_ctz(x) (i64) i64
       # Increase only currently violated relation weights. Update all value
       # scores touched by those weights, without rebuilding the score table.
       m[9] += 1
+      # Preparation stamps are dead after recognition. Recycle that buffer
+      # as an ascending list of domains incident to a violated constraint.
+      # Weight updates leave counts unchanged, so the list stays valid for
+      # this bump and preserves the original pair/update order exactly.
+      used = 0
       b = 0
       while b < nb
+        if counts[b * stride + sol[b]] > 0
+          active[used] = b
+          used += 1
+        b += 1
+      i = 0
+      while i < used
+        b = active[i]
         u = block_vars[b * stride + sol[b]]
-        c = b + 1
-        while c < nb
+        j = i + 1
+        while j < used
+          c = active[j]
+          m[23] += 1
           if ((forbid[u * WASSAT_DOMAIN_MAX_BLOCKS + c] >> sol[c]) & 1) != 0
             v = block_vars[c * stride + sol[c]]
             weights[u * nv + v] += 1
@@ -264,8 +280,8 @@ fn wassat_domain_ctz(x) (i64) i64
             costs[b * stride + sol[b]] += 1
             costs[c * stride + sol[c]] += 1
             m[11] += 2
-          c += 1
-        b += 1
+          j += 1
+        i += 1
     else
       b = best_b
       u = block_vars[b * stride + sol[b]]
@@ -325,12 +341,21 @@ fn wassat_domain_ctz(x) (i64) i64
   counts = i64[WASSAT_DOMAIN_MAX_BLOCKS * WASSAT_DOMAIN_MAX_SIZE]
   weights = i64[(nv + 1) * (nv + 1)]
   m[13] = nb * nb
-  seed = 1
-  while seed <= restarts
+  attempt = 1
+  while attempt <= restarts
     return 0 if wassat_domain_stop(m, stop, deadline) != 0
-    m[6] = seed
+    m[6] = attempt
+    seed = attempt
+    shift_mask = 0 - 1 ## i64
+    if attempt > WASSAT_DOMAIN_BASE_RESTARTS
+      seed -= WASSAT_DOMAIN_BASE_RESTARTS
+      # Masking the arithmetic shift gives the logical 64-bit shift while
+      # retaining the existing first-stage trajectories. Build the mask in
+      # native arithmetic rather than materializing a boxed large integer.
+      one = 1 ## i64
+      shift_mask = (one << 57) - one ## i64
     hit = wassat_domain_trial(block_vars, block_len, forbid, dom, sol,
-      costs, counts, weights, m, stop, nb, nv + 1, seed, steps, deadline)
+      costs, counts, weights, seen, m, stop, nb, nv + 1, seed, shift_mask, steps, deadline)
     if hit == 1
       return 0 unless wassat_domain_verify(lits, offs, lens, nc, var_block, var_bit, sol, m, stop, deadline) == 1
       v = 1
@@ -339,7 +364,7 @@ fn wassat_domain_ctz(x) (i64) i64
         v += 1
       return 1
     return 0 if m[2] != 0
-    seed += 1
+    attempt += 1
   m[2] = 3
   0
 
@@ -408,4 +433,6 @@ fn wassat_domain_ctz(x) (i64) i64
 
 -> wassat_domain_profile(plan, status)
   m = plan["meta"]
-  wassat_prof_note("race.domain status=[status] recognized=[m[1]] stopped=[m[2]] blocks=[m[3]] prep_clauses=[m[4]] prep_literals=[m[5]] restarts=[m[6]] iterations=[m[7]] flips=[m[8]] bumps=[m[9]] candidates=[m[10]] updates=[m[11]] polls=[m[12]] best_unique=[m[13]] replay_clauses=[m[14]] replay_literals=[m[15]] verified=[m[16]] clear_words=[m[19]] prepare_ms=[m[20]] scratch_bytes=[m[21]] restart_iterations=[m[22]] ms=[m[18] - m[17]]")
+  signed = m[6] < WASSAT_DOMAIN_BASE_RESTARTS ? m[6] : WASSAT_DOMAIN_BASE_RESTARTS
+  logical = m[6] - signed
+  wassat_prof_note("race.domain status=[status] recognized=[m[1]] stopped=[m[2]] blocks=[m[3]] prep_clauses=[m[4]] prep_literals=[m[5]] restarts=[m[6]] iterations=[m[7]] flips=[m[8]] bumps=[m[9]] candidates=[m[10]] updates=[m[11]] polls=[m[12]] best_unique=[m[13]] replay_clauses=[m[14]] replay_literals=[m[15]] verified=[m[16]] clear_words=[m[19]] prepare_ms=[m[20]] scratch_bytes=[m[21]] restart_iterations=[m[22]] bump_pairs=[m[23]] signed_restarts=[signed] logical_restarts=[logical] ms=[m[18] - m[17]]")

@@ -23,7 +23,7 @@ use ../lib/domain_walk
 
 # Direct library calls omit wall limits so interpreted parity tests exercise
 # the same finite-domain semantics independently of interpreter speed.
--> dw_run(f, steps = 100)
+-> dw_run(f, steps = 100, shift_mask = -1)
   nv = f["nvars"]
   nc = f["flat_ncl"]
   vb = i64[nv + 1]; vi = i64[nv + 1]
@@ -39,7 +39,7 @@ use ../lib/domain_walk
   if nb > 0
     m[13] = nb * nb
     hit = wassat_domain_trial(bv, bl, forbid, dom, sol, costs, counts, weights,
-      m, stop, nb, nv + 1, 1, steps, 0)
+      seen, m, stop, nb, nv + 1, 1, shift_mask, steps, 0)
     if hit == 1
       checked = wassat_domain_verify(f["flat_lits"], f["flat_offs"], f["flat_lens"], nc, vb, vi, sol, m, stop, 0)
       if checked == 1
@@ -304,5 +304,44 @@ describe "Wassat bounded finite-domain walk" ->
     r = dw_run(dw_flat(12, rows), 100)
     expect(r["meta"][1]).to eq(1)
     expect(r["result"][0]).to eq(0)
+
+  it "reuses preparation stamps for only the violated domain pairs" ->
+    rows = dw_base(3, 2)
+    rows.push([-1, -3])
+    rows.push([-1, -4])
+    rows.push([-2, -3])
+    rows.push([-2, -4])
+    r = dw_run(dw_flat(6, rows), 20)
+    expect(r["result"][0]).to eq(0)
+    expect(r["meta"][9] > 0).to eq(true)
+    expect(r["meta"][23]).to eq(r["meta"][9])
+
+  it "finds an original model with the logical-shift stream" ->
+    rows = dw_base(4, 3)
+    rows.push([-1, -4])
+    rows.push([-1, -7])
+    rows.push([-4, -7])
+    rows.push([-2, -5])
+    rows.push([-2, -8])
+    rows.push([-5, -8])
+    one = 1 ## i64
+    mask = (one << 57) - one
+    r = dw_run(dw_flat(12, rows), 100, mask)
+    expect(r["result"][0]).to eq(1)
+    expect(r["meta"][16]).to eq(1)
+    expect(dw_replay(rows, r["result"])).to eq(true)
+
+  it "never refutes on an exhausted logical-shift walk" ->
+    rows = dw_base(3, 2)
+    rows.push([-1, -3])
+    rows.push([-1, -4])
+    rows.push([-2, -3])
+    rows.push([-2, -4])
+    one = 1 ## i64
+    mask = (one << 57) - one
+    r = dw_run(dw_flat(6, rows), 20, mask)
+    expect(r["result"][0]).to eq(0)
+    expect(r["meta"][7]).to eq(20)
+    expect(r["meta"][23]).to eq(r["meta"][9])
 
 spec_summary

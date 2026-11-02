@@ -2207,6 +2207,11 @@ module Tungsten
           return +recv
         end
 
+        # nil? is a universal identity predicate, including nil and class values.
+        if node.name == "nil?" && !block && small_arg_length_without_splat(node.args) == 0
+          return recv.nil?
+        end
+
         # Tungsten `is_a?(Int)` passes the Int WClass, which is not a Ruby
         # Class/Module. Integer#is_a? then raises TypeError ("class or module
         # required") and core methods such as Date.ordinal never reach their

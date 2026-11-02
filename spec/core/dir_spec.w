@@ -1,4 +1,4 @@
-# Directory — class-method facade over the directory intrinsics (core/directory.w).
+# Dir / Directory — class-method facade over the directory intrinsics (core/dir.w).
 #
 # Every method is a class method delegating to a `file_*` / `read_dir` intrinsic.
 # The listing half (entries/children/read/ls/each/foreach/each_child/empty?/
@@ -7,10 +7,10 @@
 # which only the compiled engine supplies (see the capability gate below).
 #
 # Run from the repository root (it lists core/traits and spec/fixtures):
-#   bin/tungsten run --interpret spec/core/directory_spec.w
-#   bin/tungsten -o /tmp/directory_spec spec/core/directory_spec.w && /tmp/directory_spec
+#   bin/tungsten run --interpret spec/core/dir_spec.w
+#   bin/tungsten -o /tmp/dir_spec spec/core/dir_spec.w && /tmp/dir_spec
 
-use core/directory
+use core/dir
 
 passed = Atomic.new(0)
 
@@ -24,6 +24,7 @@ traits = ["bit_equal.w", "bit_ordered.w", "comparable.w", "debuggable.w",
           "enumerable.w", "inspectable.w", "printable.w"]
 
 # ---- listing: entries / children / read / ls are all read_dir ----
+check("Dir.entries matches Directory.entries", Dir.entries("core/traits").sort == traits)
 check("entries lists a directory", Directory.entries("core/traits").sort == traits)
 check("entries default is the cwd", Directory.entries.include?("core"))
 check("entries omits dot and dotdot",

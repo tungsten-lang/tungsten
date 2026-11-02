@@ -1,114 +1,136 @@
+# Module — a namespace and mixin container of methods and constants.
 + Module
-  -> constants
-  -> nesting
+  ro :name
 
-  -> </1
-  -> <=/1
-  -> <=>/1
+  -> new(@name = nil)
+    @constants = {}
+    @included_modules = []
+    @instance_methods = []
+    @class_variables = {}
+    @autoloads = {}
 
-  -> ==/1
-  -> ===/1
-
-  -> >/1
-  -> >=/1
+  -> .nesting
+    []
 
   -> ancestors
-  -> autoload(module, filename)
-  -> autoload?(name)
+    [self] + @included_modules
 
-  -> class_eval(string, filename = nil, lineno = nil)
-  -> class_exec(*args) { … }
-
-  -> class_variable_defined?/1:symbol
-  -> class_variable_defined?/1:string
-
-  -> class_variable_get/1:symbol
-  -> class_variable_get/1:string
-
-  -> class_variable_set/2
-
-  -> class_variables
-  -> constant_defined?/1
-  -> constant_get/1
-  -> constant_missing/1
-  -> constant_set/2
   -> constants
+    @constants.keys
 
-  -> include(module)
-  -> included?/1
+  -> constant_defined?(sym)
+    @constants.has_key?(sym.to_sym)
+
+  -> constant_get(sym)
+    key = sym.to_sym
+    raise NameError.new("uninitialized constant [sym]") if !@constants.has_key?(key)
+    @constants[key]
+
+  -> constant_set(sym, val)
+    @constants[sym.to_sym] = val
+
+  -> constant_missing(sym)
+    raise NameError.new("uninitialized constant [sym]")
+
+  -> include(mod)
+    if !@included_modules.include?(mod)
+      @included_modules.push(mod)
+    self
+
+  -> prepend(mod)
+    if !@included_modules.include?(mod)
+      @included_modules = [mod] + @included_modules
+    self
+
+  -> included?(mod)
+    @included_modules.include?(mod)
+
   -> included_modules
-  -> inspect
-  -> instance_method/1
+    @included_modules.dup
+
   -> instance_methods
+    @instance_methods.dup
 
-  -> method_defined?/1
-  -> module_eval { … }
-  -> module_exec(*args) { … }
-
-  -> name
-
-  -> prepend/1
-
-  -> private_class_method/*
-  -> private_constant/*
-
-  -> private_instance_methods
-  -> private_method?/1
+  -> public_instance_methods
+    @instance_methods.dup
 
   -> protected_instance_methods
-  -> protected_method?/1
+    []
 
-  -> public_class_method/*
-  -> public_constant/*
-  -> public_instance_method/1
-  -> public_instance_methods
-  -> public_method?/1
+  -> private_instance_methods
+    []
 
-  -> remove_class_variable/1
+  -> method_defined?(sym)
+    @instance_methods.include?(sym.to_sym)
+
+  -> public_method?(sym)
+    @instance_methods.include?(sym.to_sym)
+
+  -> protected_method?(sym)
+    false
+
+  -> private_method?(sym)
+    false
+
+  -> instance_method(sym)
+    nil
+
+  -> public_instance_method(sym)
+    nil
+
+  -> class_variables
+    @class_variables.keys
+
+  -> class_variable_defined?(sym)
+    @class_variables.has_key?(sym.to_sym)
+
+  -> class_variable_get(sym)
+    @class_variables[sym.to_sym]
+
+  -> class_variable_set(sym, val)
+    @class_variables[sym.to_sym] = val
+
+  -> remove_class_variable(sym)
+    @class_variables.delete(sym.to_sym)
+
+  -> autoload(mod, filename)
+    @autoloads[mod.to_sym] = filename
+    nil
+
+  -> autoload?(mod)
+    @autoloads[mod.to_sym]
 
   -> singleton_class?
+    false
+
+  -> <=>(other)
+    if !other.is_a?(Module)
+      return nil
+    if self == other
+      return 0
+    if self.included?(other)
+      return -1
+    if other.included?(self)
+      return 1
+    nil
+
+  -> <(other)
+    other.is_a?(Module) && self != other && self.included?(other)
+
+  -> <=(other)
+    other.is_a?(Module) && (self == other || self.included?(other))
+
+  -> >(other)
+    other.is_a?(Module) && self != other && other.included?(self)
+
+  -> >=(other)
+    other.is_a?(Module) && (self == other || other.included?(self))
+
+  -> ===(other)
+    self == other
 
   -> to_s
+    @name != nil ? @name.to_s : "#<Module>"
 
-  private
-
-  -> alias_method(new_name, old_name)
-  -> append_features/1
-  -> attr/*
-  -> attr_accessor/*
-  -> attr_reader/*
-  -> attr_writer/*
-
-  -> define_method(name, method)
-  -> define_method(name) { … }
-
-  -> extend_object/1
-
-  -> extended/1
-
-  -> included/1
-
-  -> method_added/1
-  -> method_removed/1
-  -> method_undefined/1
-
-  -> module_function/*
-
-  -> prepend_features/1
-  -> prepended/1
-
-  -> private
-  -> private/*
-
-  -> protected
-  -> protected/*
-
-  -> public
-  -> public/*
-
-  -> refine
-
-  -> remove_method/1
-  -> undef_method/1
-
-  -> using/1
+  -> inspect
+    self.to_s

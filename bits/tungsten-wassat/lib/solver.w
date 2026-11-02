@@ -1583,6 +1583,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         i += 1
       ci = self.store_clause(@mbuf, m)
       @clbd[ci] = permanent ? 0 : (m <= 2 ? m : 2)
+      @nlearned += 1 unless permanent
       if unassigned == 1
         self.enqueue(u_lit, ci)
       if publish_to_ring && @ring != nil && @share_publish && m <= @ring_maxlen
@@ -2296,7 +2297,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                 lbdv = kept - 1 if kept - 1 < lbdv
                 lbdv = 1 if lbdv < 1
                 @clbd[nci] = lbdv
-                @nlearned += 1 if kept > 1
+                # The replacement and the retired clause each contribute one
+                # live learned entry, including a stored unit replacement.
               @alive[ci] = 0
               @vivified += 1
               if kept == 1
@@ -3000,6 +3002,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       i += 1
     ci = self.store_clause(@mbuf, n)
     @clbd[ci] = permanent ? 0 : 2
+    @nlearned += 1 unless permanent
     if unassigned == 1
       self.enqueue(@mbuf[0], ci)
       confl = self.propagate

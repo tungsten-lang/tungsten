@@ -885,8 +885,7 @@ use reconfiguration
       wassat_aig_miter_unsat?(formula) ||
       wassat_word_sort_miter_unsat?(formula) ||
       wassat_ascon_preimage_unsat?(formula) ||
-      wassat_miter28_gray_unsat?(formula) ||
-      wassat_aprove_cycle_miter_unsat?(formula)
+      wassat_miter28_gray_unsat?(formula)
     )
       << "s UNSATISFIABLE"
       << "c mode: fast (verified multiplier circuit factorization refutation)"
@@ -1511,6 +1510,23 @@ use reconfiguration
           pre_arms + 1
         )
           sls_flips = 0
+        if tprof != 0
+          # Report the prospective walker reservation even when it was
+          # denied. Mirror the gate's arena counts, including retired scouts.
+          cdcl_bytes = wassat_cdcl_arena_bytes(formula)
+          sls_bytes = wassat_sls_arena_bytes(formula)
+          pre_bytes = wassat_preprocess_arena_bytes(formula)
+          estimated_bytes = cdcl_bytes * race_cdcl_arenas
+          estimated_bytes += sls_bytes * (scout_sls_arenas + 1)
+          estimated_bytes += pre_bytes * (pre_arms + 1)
+          physical_bytes = System.physical_memory_bytes ## i64
+          budget_bytes = physical_bytes > 0 ? physical_bytes / 3 : 0
+          budget_bytes = 2684354560 if budget_bytes > 2684354560
+          per_sls_allowed = wassat_sls_arm_memory_allowed?(formula)
+          requested_sls_flips = wassat_sls_arm_flips
+          sls_admitted = sls_flips > 0
+          wassat_prof_note("race.resources raw_arms=[arms] pre_arms=[pre_arms] scout_cdcl_arenas=[scout_cdcl_arenas] scout_sls_arenas=[scout_sls_arenas] estimated_bytes=[estimated_bytes] budget_bytes=[budget_bytes] per_sls_allowed=[per_sls_allowed] requested_sls_flips=[requested_sls_flips] sls_admitted=[sls_admitted]")
+          wassat_prof_note("race.arena_bytes cdcl=[cdcl_bytes] sls=[sls_bytes] preprocess=[pre_bytes]")
         race = nil
         cover_workers = arms + pre_arms + (sls_flips > 0 ? 1 : 0)
         cover_workers += 1 if config.continue_scout? && scout_solver != nil

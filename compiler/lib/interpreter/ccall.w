@@ -5,6 +5,13 @@
       raise "ccall requires a runtime function name"
     cname = "" + args[0]
     case cname
+    when "w_value_free_w"
+      if args.size() != 2
+        raise "w_value_free_w expects one value"
+      # Interpreted values remain owned by their environments and containers.
+      # Explicit native disposal is a lifetime hint here; freeing the backing
+      # object would leave those interpreter references dangling.
+      return 0
     when "w_atomic_new"
       if args.size() != 2
         raise "w_atomic_new expects one argument"

@@ -1,8 +1,8 @@
 use spec
 use ../lib/solver
 
--> shrink_scan_fixture(interleaved, failed, fallback)
-  nv = 8
+-> shrink_scan_fixture(interleaved, failed, fallback, extra)
+  nv = 8 + extra
   ar = i64[8]
   ar[0] = -1
   ar[1] = 2
@@ -81,6 +81,14 @@ use ../lib/solver
     out[4] = -6
     out[5] = -7
     st[0] = 6
+  if extra > 0
+    out[0] = -nv
+    v = 9
+    while v < nv
+      tlim[v - 2] = v
+      out[st[0]] = -v
+      st[0] = st[0] + 1
+      v += 1
   wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk,
                  dstk, tclr, cnt, st, nv)
   result = []
@@ -98,29 +106,161 @@ use ../lib/solver
 
 describe "Wassat shrinking scan and compaction" ->
   it "replaces a same-level block with its implication point" ->
-    r = shrink_scan_fixture(false, false, false)
+    r = shrink_scan_fixture(false, false, false, 0)
     expect(r["clause"]).to eq([-6, -4, -5, -1])
     expect(r["target"]).to eq(3)
     expect(r["clean"]).to eq(true)
 
   it "skips both unmarked and marked foreign-level trail entries" ->
-    r = shrink_scan_fixture(true, false, false)
+    r = shrink_scan_fixture(true, false, false, 0)
     expect(r["clause"]).to eq([-6, -4, -5, -1])
     expect(r["clean"]).to eq(true)
 
   it "retains the original clause when all fallback probes fail" ->
-    r = shrink_scan_fixture(false, true, false)
+    r = shrink_scan_fixture(false, true, false, 0)
     expect(r["clause"]).to eq([-6, -2, -3, -4, -5])
     expect(r["attempts"]).to eq(1)
     expect(r["shrunk"]).to eq(0)
     expect(r["clean"]).to eq(true)
 
   it "compacts the retained suffix after a successful fallback probe" ->
-    r = shrink_scan_fixture(false, false, true)
+    r = shrink_scan_fixture(false, false, true, 0)
     expect(r["clause"]).to eq([-8, -6, -7, -1])
     expect(r["target"]).to eq(4)
     expect(r["attempts"]).to eq(2)
     expect(r["shrunk"]).to eq(1)
     expect(r["clean"]).to eq(true)
+
+describe "Wassat shrinking level order" ->
+  it "keeps resolution order and output order with many distinct levels" ->
+    r = shrink_scan_fixture(false, false, false, 40)
+    expected = [-48, -4, -5]
+    v = 9
+    while v < 48
+      expected.push(-v)
+      v += 1
+    expected.push(-1)
+    expect(r["clause"]).to eq(expected)
+    expect(r["clean"]).to eq(true)
+    expect(r["target"]).to eq(45)
+    expect(r["attempts"]).to eq(1)
+    expect(r["shrunk"]).to eq(1)
+
+  it "shrinks many shuffled blocks in ascending level order" ->
+    nv = 61
+    ar = i64[80]
+    cm = i64[80]
+    asg = i8[nv + 3]
+    lvl = i64[nv + 3]
+    rsn = i32[nv + 3]
+    sn = i8[nv + 3]
+    tr = i64[nv + 3]
+    tlim = i64[nv + 3]
+    out = i64[nv + 3]
+    tmp = i64[nv + 3]
+    stk = i64[nv + 3]
+    dstk = i64[nv + 3]
+    tclr = i64[nv + 3]
+    cnt = i64[nv + 3]
+    st = i64[8]
+    b = 0
+    while b < 20
+      v = 3 * b + 1
+      rsn[v] = -1
+      j = 0
+      while j < 3
+        asg[v + j] = 1
+        lvl[v + j] = b + 1
+        tr[v + j - 1] = v + j
+        j += 1
+      tlim[b + 1] = v + 2
+      j = 0
+      while j < 2
+        ci = 2 * b + j
+        ar[2 * ci] = -v
+        ar[2 * ci + 1] = v + j + 1
+        cm[2 * ci] = 2 * ci
+        cm[2 * ci + 1] = 2
+        rsn[v + j + 1] = ci
+        out[1 + 2 * ((b * 7) % 20) + j] = -(v + j + 1)
+        j += 1
+      b += 1
+    out[0] = -nv
+    st[0] = 41
+    wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk,
+                   dstk, tclr, cnt, st, nv)
+    expect(st[0]).to eq(21)
+    expect(st[3]).to eq(20)
+    expect(st[4]).to eq(20)
+    expect(st[5]).to eq(20)
+    expect(st[7]).to eq(20)
+    b = 0
+    while b < 20
+      expect(out[b + 1]).to eq(-(3 * b + 1))
+      b += 1
+    v = 0
+    while v < nv + 3
+      expect(sn[v]).to eq(0)
+      expect(cnt[v]).to eq(0)
+      v += 1
+
+  it "sorts short and long level lists without touching neighboring scratch" ->
+    [0, 1, 2, 16, 17, 63, 256, 257].each -> (n)
+      stk = i64[n + 8]
+      stk[2] = 913
+      stk[n + 3] = 917
+      i = 0
+      while i < n
+        # Alternating extremes exercise both heap children and an odd tail.
+        stk[i + 3] = i % 2 == 0 ? n - i / 2 : (i + 1) / 2
+        i += 1
+      wassat_shrink_sort_levels(stk, 3, n)
+      i = 0
+      while i < n
+        expect(stk[i + 3]).to eq(i + 1)
+        i += 1
+      expect(stk[2]).to eq(913)
+      expect(stk[n + 3]).to eq(917)
+      wassat_shrink_sort_levels(stk, 3, n)
+      i = 0
+      while i < n
+        expect(stk[i + 3]).to eq(i + 1)
+        i += 1
+
+  it "preserves a long singleton clause and clears all level counters" ->
+    nv = 64
+    ar = i64[1]
+    asg = i8[nv + 3]
+    lvl = i64[nv + 3]
+    rsn = i32[nv + 3]
+    sn = i8[nv + 3]
+    cm = i64[1]
+    tr = i64[nv + 3]
+    tlim = i64[nv + 3]
+    out = i64[nv + 3]
+    tmp = i64[nv + 3]
+    stk = i64[nv + 3]
+    dstk = i64[nv + 3]
+    tclr = i64[nv + 3]
+    cnt = i64[nv + 3]
+    st = i64[8]
+    i = 1
+    while i <= nv
+      lvl[i] = i
+      rsn[i] = -1
+      out[i - 1] = -(nv + 1 - i)
+      i += 1
+    st[0] = nv
+    wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk,
+                   dstk, tclr, cnt, st, nv)
+    expect(st[0]).to eq(nv)
+    expect(st[5]).to eq(nv - 1)
+    expect(st[3]).to eq(0)
+    i = 1
+    while i <= nv
+      expect(out[i - 1]).to eq(-(nv + 1 - i))
+      expect(sn[i]).to eq(0)
+      expect(cnt[i]).to eq(0)
+      i += 1
 
 spec_summary

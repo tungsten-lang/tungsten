@@ -592,7 +592,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # (all-zero between calls; typed arrays start zeroed); @shst carries
     # scalars/stats across the native boundary: [0] size in/out  [1] body
     # literals examined  [2] literals removed  [3] block attempts
-    # [4] blocks shrunk  [5] backjump target out  [6] probe clear-list size.
+    # [4] blocks shrunk  [5] backjump target out  [6] probe clear-list size
+    # [7] distinct decision levels collected.
     @shcnt = i64[nv + 3]
     @shst = i64[8]
     @use_shrink = @config.use_shrinking
@@ -4273,7 +4274,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_prof_note("[label].subst_hash clauses=[@inp_totals[5]] probes=[@inp_totals[6]] compared_literals=[@inp_totals[7]]")
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
     wassat_prof_note("[label].reduction clause_visits=[@rhist[66]] copied_words=[@rhist[67]] remapped_clauses=[@rhist[68]] remapped_reasons=[@rhist[69]]")
-    wassat_prof_note("[label].analysis mark_bytes=[@nvars + 1] reason_bytes=[4 * (@nvars + 1)] shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
+    wassat_prof_note("[label].analysis mark_bytes=[@nvars + 1] reason_bytes=[4 * (@nvars + 1)] shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] shrink_levels=[@shst[7]] shrink_attempts=[@shst[3]] shrink_blocks=[@shst[4]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
     0
 
   # Full MiniSat-style incremental query: SAT / UNSAT / UNKNOWN under the
@@ -4406,6 +4407,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       "spine_snapshots": @pstate[9], "spine_scanned": @pstate[10],
       "spine_skipped": @pstate[11],
       "shrink_seen": @shst[1], "shrink_removed": @shst[2],
+      "shrink_levels": @shst[7], "shrink_attempts": @shst[3], "shrink_blocks": @shst[4],
       "otfs_hits": @otfs_hits, "otfs_installed": @otfs_installed,
       "otfs_dominated": @otfs_dominated,
       "otfs_units": @otfs_units, "otfs_conflicts": @otfs_conflicts,
@@ -6696,6 +6698,48 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   st[4] = target
   0
 
+# Sort the occupied top of the shared scratch stack in ascending physical
+# order, so shrinking still visits decision levels from lowest to highest.
+# Long learned clauses used to insertion-sort each distinct level, making
+# this setup quadratic. Heapsort needs no extra buffer or recursion; retain
+# insertion sort for short lists where its smaller constant wins.
+-> wassat_shrink_sort_levels(stk, base, n) (i64[] i64 i64) i64
+  if n <= 16
+    i = 1
+    while i < n
+      value = stk[base + i]
+      j = i
+      while j > 0 && stk[base + j - 1] > value
+        stk[base + j] = stk[base + j - 1]
+        j -= 1
+      stk[base + j] = value
+      i += 1
+    return 0
+  # Build a max heap, then move its root to the end of the unsorted prefix.
+  start = n / 2
+  end = n
+  while end > 1
+    if start > 0
+      start -= 1
+      value = stk[base + start]
+      root = start
+    else
+      end -= 1
+      value = stk[base + end]
+      stk[base + end] = stk[base]
+      root = 0
+    child = 2 * root + 1
+    while child < end
+      if child + 1 < end && stk[base + child] < stk[base + child + 1]
+        child += 1
+      if value >= stk[base + child]
+        break
+      stk[base + root] = stk[base + child]
+      root = child
+      child = 2 * root + 1
+    stk[base + root] = value
+  0
+
 # All-UIP learned-clause shrinking (Feng & Bacchus 2020; CaDiCaL "shrink").
 #
 # After first-UIP analysis + recursive minimisation, try to replace each
@@ -6721,8 +6765,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #
 # Scratch: `tmp` holds the working clause body; `cnt` is a per-LEVEL
 # literal count (all-zero between calls — restored via the level list
-# before returning); `stk` carries the descending distinct-level list at
-# its TOP end and the per-attempt pulled-variable list at its bottom
+# before returning); `stk` carries all distinct levels at its TOP end,
+# with multi-literal levels in a sorted prefix of that occupied range,
+# and the per-attempt pulled-variable list at its bottom
 # (distinct other-level entries and pulled variables are disjoint and
 # together number at most nv, so the two ends cannot meet);
 # `dstk` is the probes' DFS stack and `tclr` the removable/poison
@@ -6732,13 +6777,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # contract the minimisation block satisfies. Runs with the trail
 # intact, BEFORE any backjump, and never allocates: worker threads run
 # this. Under chronological backtracking a level's literals need not be
-# contiguous in its trail segment; a foreign-level entry mid-segment
-# aborts that level's attempt (sound: the block is simply kept).
+# contiguous in its trail segment; foreign-level entries are skipped
+# while searching for the next marked literal at the current level.
 #
 #   st[0] = clause size in/out        st[5] = backjump target out
 #   st[1] += body literals examined   st[2] += literals removed
 #   st[3] += block attempts           st[4] += blocks shrunk
 #   st[6] = removable/poison clear-list size (internal)
+#   st[7] += distinct decision levels collected
 -> wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk, dstk, tclr, cnt, st, nv) (i64[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
   n = st[0]
   if n <= 2
@@ -6750,8 +6796,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       tgt = lvl[v]
     st[5] = tgt
     return n
-  # mark the body, count literals per level, and build the distinct-level
-  # list descending at the top of stk (levels[k] = stk[nv + 2 - k])
+  # Mark the body, count literals per level, and collect distinct levels
+  # at the top of stk. All levels remain here for counter cleanup.
   nlev = 0
   m = 0
   i = 1
@@ -6761,26 +6807,37 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     v = 0 - q if q < 0
     lq = lvl[v]
     if cnt[lq] == 0
-      j = nlev
-      while j > 0 && stk[nv + 3 - j] < lq
-        stk[nv + 2 - j] = stk[nv + 3 - j]
-        j -= 1
-      stk[nv + 2 - j] = lq
+      stk[nv + 2 - nlev] = lq
       nlev += 1
     cnt[lq] = cnt[lq] + 1
     sn[v] = 1
     tmp[m] = q
     m += 1
     i += 1
+  # Only multi-literal levels have work. Partition them into the occupied
+  # range's low end and sort that prefix; singleton marks remain ordinary
+  # clause support throughout the pass, just as when they were skipped in
+  # the old sorted list. Keep every level in stk for the cleanup below.
+  base = nv + 3 - nlev
+  blocks = 0
+  if nlev < m
+    j = 0
+    while j < nlev
+      lq = stk[base + j]
+      if cnt[lq] >= 2
+        stk[base + j] = stk[base + blocks]
+        stk[base + blocks] = lq
+        blocks += 1
+      j += 1
+    wassat_shrink_sort_levels(stk, base, blocks)
+  st[7] = st[7] + nlev
   st[6] = 0
   budget = 8 * n
-  # process blocks LOWEST level first (the list is descending, so walk it
-  # backward): probes only look DOWNWARD through reason DAGs, so removable
-  # marks from already-shrunken lower blocks are what let higher blocks'
-  # probes succeed — the cascade only exists in this direction (CaDiCaL's
-  # sort order does exactly this)
+  # Process blocks LOWEST level first: probes only look DOWNWARD through
+  # reason DAGs, so removable marks from lower blocks support later probes.
+  # The selected physical prefix is ascending; k traverses it in that order.
   k = nlev - 1
-  while k >= 0
+  while k >= nlev - blocks
     bl = stk[nv + 2 - k]
     if cnt[bl] >= 2
       st[3] = st[3] + 1

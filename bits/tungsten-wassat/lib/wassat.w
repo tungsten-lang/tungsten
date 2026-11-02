@@ -1210,6 +1210,30 @@ use reconfiguration
         if scout_dep_plan != nil
           scout_dep_res = i64[scout_nv + 8]
           scout_dep_h = wassat_dependency_circuit_start(formula, scout_dep_plan, scout_stop, scout_dep_res)
+        # The resource-capacity certificate can finish while scout CDCL is
+        # still constructing or searching. Admission reserves the established
+        # scout workers and scratch; a miss gets no grace wait. A cancelled
+        # attempt may try again in the later portfolio.
+        scout_capacity_plan = nil
+        scout_capacity_res = nil
+        scout_capacity_h = nil
+        if options["conflicts"] == 0 && env("WASSAT_CAPACITY_SCOUT") != "0"
+          capacity_workers = dep_workers + (scout_dep_plan == nil ? 0 : 1)
+          capacity_extra = 0
+          capacity_extra += 53 * (scout_nv + 1) + 68157440 if scout_cover_plan != nil
+          capacity_extra += 40 * (scout_nv + 1) + 25 * formula["flat_ncl"] if scout_parity != nil
+          capacity_extra += scout_reconf_plan["meta"][22] if scout_reconf_plan != nil
+          capacity_extra += 192 * (scout_nv + formula["flat_ncl"] + 1) if scout_dep_plan != nil
+          capacity_extra += 128 * (scout_nv + formula["flat_ncl"] + 1) if scout_path_enabled
+          capacity_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
+          # Include a possible SLS repair solver as well as the scout/lucky
+          # arenas. Reserving it here cannot crowd a later repair out.
+          capacity_cdcl = scout_lucky ? 2 : 1
+          capacity_cdcl += 1 if capacity_sls > 0 && wassat_sls_repair_eligible?(formula)
+          scout_capacity_plan = wassat_capacity_plan(formula, capacity_workers, capacity_cdcl, capacity_sls, 1, capacity_extra, true)
+        if scout_capacity_plan != nil
+          scout_capacity_res = i64[scout_nv + 8]
+          scout_capacity_h = wassat_capacity_start(formula, scout_capacity_plan, scout_stop, scout_capacity_res, 0)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1295,7 +1319,12 @@ use reconfiguration
           z = scout_xor_h.join
         reconf_cancel_ms = 0
         reconf_cancel_ms = ccall("__w_clock_ms") if scout_reconf_h != nil
+        capacity_cancel_ms = 0
+        capacity_cancel_ms = clock_ms() if scout_capacity_h != nil
         z = wassat_stop_cancel(scout_stop)
+        if scout_capacity_h != nil
+          z = scout_capacity_h.join
+          wassat_capacity_finish_scout(formula, scout_capacity_plan)
         if scout_dep_h != nil
           z = scout_dep_h.join
           formula["dependency_circuit_done"] = scout_dep_plan["meta"][9] != 1
@@ -1316,6 +1345,11 @@ use reconfiguration
           if env("WASSAT_PROFILE") == "1"
             wassat_reconf_profile(scout_reconf_plan, scout_reconf_res[0])
             wassat_prof_note("scout.reconfiguration stop_to_join_ms=[ccall("__w_clock_ms") - reconf_cancel_ms]")
+        if scout_capacity_h != nil && env("WASSAT_PROFILE") == "1"
+          # All scout workers have joined: include every losing arm's tail.
+          wassat_capacity_profile(scout_capacity_plan, scout_capacity_res[0], "scout.capacity")
+          capacity_tail = scout_capacity_res[0] == -1 ? clock_ms() - scout_capacity_res[scout_nv + 5] : 0
+          wassat_prof_note("scout.capacity answer_to_join_ms=[capacity_tail] stop_to_join_ms=[clock_ms() - capacity_cancel_ms]")
         if scout_path_enabled && env("WASSAT_PROFILE") == "1"
           path_tail = scout_path_out[9] > 0 ? ccall("__w_clock_ms") - scout_path_out[9] : 0
           wassat_prof_note("path_cover width=[scout_path_out[1]] work=[scout_path_out[2]] removed=[scout_path_out[3]] empty_axis=[scout_path_out[4]] empty_index=[scout_path_out[5]] stopped=[scout_path_out[6]] recognized=[scout_path_out[7]] stop_tail_ms=[path_tail]")
@@ -1330,6 +1364,15 @@ use reconfiguration
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_capacity_res != nil && scout_capacity_res[0] == -1
+          capacity_scout = scout_out[0]
+          budget_used += capacity_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          << "s UNSATISFIABLE"
+          << "c mode: fast (verified capacity-clique scout)"
+          << "c conflicts: [budget_used], decisions: [capacity_scout["decisions"]], props: [capacity_scout["props"]]"
+          << "c stats restarts=[capacity_scout["restarts"]] reduces=[capacity_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(20)
         if scout_dep_res != nil && scout_dep_res[0] == -1
           dep_scout = scout_out[0]
           budget_used += dep_scout["conflicts"] if scout_budget == nil

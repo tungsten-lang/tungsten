@@ -51,10 +51,12 @@ WASSAT_CAPACITY_WALL_MS = 2000
   table[at] == key ? 1 : 0
 
 # Cheap bounded admission only; the worker verifies complete source clauses.
--> wassat_capacity_prefix(lits, offs, lens, nc) (i64[] i64[] i64[] i64) i64
+-> wassat_capacity_prefix(lits, offs, lens, nc, early) (i64[] i64[] i64[] i64 i64) i64
   return 0 if nc < 1 || offs.size < nc || lens.size < nc
   limit = nc < 512 ? nc : 512 ## i64
   ci = 0 ## i64
+  width = 0 ## i64
+  domains = 0 ## i64
   while ci < limit
     n = lens[ci] ## i64
     off = offs[ci] ## i64
@@ -65,7 +67,11 @@ WASSAT_CAPACITY_WALL_MS = 2000
       while j < n
         good = 0 if lits[off + j] <= 0
         j += 1
-      return n if good == 1
+      if good == 1
+        return n if early == 0
+        width = n if width == 0
+        domains += 1 if n == width
+        return width if domains > width
     ci += 1
   0
 
@@ -75,16 +81,20 @@ WASSAT_CAPACITY_WALL_MS = 2000
     size *= 2
   8 * size + 32 * (nv + 1) + 1048576
 
--> wassat_capacity_plan(formula, workers, cdcl, sls, pre, extra)
+-> wassat_capacity_plan(formula, workers, cdcl, sls, pre, extra, early = false)
   mode = env("WASSAT_CAPACITY_CLIQUE")
   return nil if mode == "0" || formula == nil
+  return nil if formula["capacity_clique_done"] == true
   return nil if env("WASSAT_ARMS") != nil && mode != "1"
   return nil if wassat_race_round1_conflicts != 0
   return nil if System.cpu_count <= workers || System.physical_memory_bytes <= 0
   nv = formula["nvars"]; nc = formula["flat_ncl"]
   return nil if nv < 4 || nv > WASSAT_CAPACITY_MAX_VARS || nc < 1 || nc > WASSAT_CAPACITY_MAX_CLAUSES
   return nil if mode != "1" && (nv < 1000 || nc < 10000)
-  width = wassat_capacity_prefix(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], nc)
+  # Starting beside the scout is worthwhile only when the bounded prefix
+  # already supplies enough candidate domains for an over-capacity clique.
+  # Sparse or interspersed domains retain the established later search.
+  width = wassat_capacity_prefix(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], nc, early ? 1 : 0)
   return nil if width == 0
   bytes = wassat_capacity_bytes(nv, nc)
   return nil if bytes > System.physical_memory_bytes / 64
@@ -270,6 +280,13 @@ WASSAT_CAPACITY_WALL_MS = 2000
 -> wassat_capacity_start(formula, plan, stop, res, base)
   Thread.new -> wassat_capacity_search(formula, plan, stop, res, base)
 
--> wassat_capacity_profile(plan, status)
+# Called only after the scout worker joins. A complete deterministic miss
+# need not be repeated; an interrupted or expired search remains eligible.
+-> wassat_capacity_finish_scout(formula, plan)
+  reason = plan["meta"][10]
+  formula["capacity_clique_done"] = reason == 0 || reason == 3
+  0
+
+-> wassat_capacity_profile(plan, status, label = "race.capacity")
   m = plan["meta"]
-  wassat_prof_note("race.capacity status=[status] width=[m[0]] domains=[m[1]] clauses=[m[2]] rooms=[m[3]] implications=[m[4]] binary_probes=[m[5]] pairs=[m[6]] columns=[m[7]] clique=[m[8]] polls=[m[9]] stop=[m[10]] cached=[m[20]] binaries=[m[21]] ms=[m[18] - m[17]] extra_bytes=[m[19]]")
+  wassat_prof_note("[label] status=[status] width=[m[0]] domains=[m[1]] clauses=[m[2]] rooms=[m[3]] implications=[m[4]] binary_probes=[m[5]] pairs=[m[6]] columns=[m[7]] clique=[m[8]] polls=[m[9]] stop=[m[10]] cached=[m[20]] binaries=[m[21]] ms=[m[18] - m[17]] extra_bytes=[m[19]]")

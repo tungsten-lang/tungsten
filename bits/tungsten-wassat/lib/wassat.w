@@ -71,6 +71,7 @@ use trim
 use explain
 use structural_pruning
 use portfolio
+use reconfiguration
 
 # Allocate one bounded CDCL stage from the aggregate --conflicts budget.
 # A zero total is the public unlimited value; a zero return for a finite total
@@ -1177,6 +1178,18 @@ use portfolio
         scout_parity_h = nil
         if scout_parity != nil
           scout_parity_h = wassat_matching_parity_start(parity_source, scout_parity, scout_stop)
+        # Search a recovered reconfiguration graph beside the ordinary
+        # scout. A miss gets no grace period or extra CDCL conflicts.
+        scout_reconf_plan = nil
+        scout_reconf_res = nil
+        scout_reconf_h = nil
+        if scout_cover_plan == nil && scout_parity == nil
+          reconf_cdcl = scout_lucky ? 2 : 1
+          reconf_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
+          scout_reconf_plan = wassat_reconf_plan(formula, parity_workers, reconf_cdcl, reconf_sls)
+        if scout_reconf_plan != nil
+          scout_reconf_res = i64[scout_nv + 8]
+          scout_reconf_h = wassat_reconf_start(formula, scout_reconf_plan, scout_stop, scout_reconf_res)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1260,6 +1273,8 @@ use portfolio
         # Ordinary formulas leave the hint at zero and pay no grace wait.
         if scout_circuit == nil && scout_span > 16 && wassat_xor_grace_requested?(scout_res, scout_xor_base, scout_nv)
           z = scout_xor_h.join
+        reconf_cancel_ms = 0
+        reconf_cancel_ms = ccall("__w_clock_ms") if scout_reconf_h != nil
         z = wassat_stop_cancel(scout_stop)
         z = scout_sls_h.join if scout_sls_h != nil
         z = scout_xor_h.join if scout_circuit == nil
@@ -1273,6 +1288,11 @@ use portfolio
         if scout_parity_h != nil
           z = scout_parity_h.join
           wassat_matching_parity_profile(scout_parity) if env("WASSAT_PROFILE") == "1"
+        if scout_reconf_h != nil
+          z = scout_reconf_h.join
+          if env("WASSAT_PROFILE") == "1"
+            wassat_reconf_profile(scout_reconf_plan, scout_reconf_res[0])
+            wassat_prof_note("scout.reconfiguration stop_to_join_ms=[ccall("__w_clock_ms") - reconf_cancel_ms]")
         if scout_path_enabled && env("WASSAT_PROFILE") == "1"
           path_tail = scout_path_out[9] > 0 ? ccall("__w_clock_ms") - scout_path_out[9] : 0
           wassat_prof_note("path_cover width=[scout_path_out[1]] work=[scout_path_out[2]] removed=[scout_path_out[3]] empty_axis=[scout_path_out[4]] empty_index=[scout_path_out[5]] stopped=[scout_path_out[6]] recognized=[scout_path_out[7]] stop_tail_ms=[path_tail]")
@@ -1283,6 +1303,24 @@ use portfolio
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_reconf_res != nil && scout_reconf_res[0] == 1
+          reconf_scout = scout_out[0]
+          budget_used += reconf_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          rmodel = []
+          v = 1
+          while v <= scout_nv
+            rmodel.push(scout_reconf_res[v] == 1 ? v : 0 - v)
+            v += 1
+          rmodel = wassat_project_quad_model(rmodel, quad_shift, orig_nvars) if quad_shift > 0
+          rmodel = rmodel.slice(0, orig_nvars) if ramsey_lex != nil
+          unless wassat_model_satisfies?(orig_formula, rmodel)
+            raise "internal error: reconfiguration model does not satisfy the input formula"
+          wassat_print_sat_model(rmodel, false)
+          << "c mode: fast (verified graph reconfiguration scout)"
+          << "c conflicts: [budget_used], decisions: [reconf_scout["decisions"]], props: [reconf_scout["props"]]"
+          << "c stats restarts=[reconf_scout["restarts"]] reduces=[reconf_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(10)
         if scout_parity != nil && scout_parity[0] == -1
           parity_scout = scout_out[0]
           budget_used += parity_scout["conflicts"] if scout_budget == nil

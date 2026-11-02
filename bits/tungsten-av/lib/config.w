@@ -115,7 +115,7 @@ in Av
 
   -> toolchain
     selected = Env.get("STUDIO_TW") || @settings["toolchain"] || Env.get("TUNGSTEN_ROOT")
-    raise "select an isolated toolchain with av.project toolchain:" if selected == nil
+    raise "select a toolchain with av.project toolchain:" if selected == nil
     path(selected)
 
   -> associated(kind, profile)

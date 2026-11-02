@@ -47,7 +47,6 @@ in Av
     raise "--source/--timeline belong to init; configure sources in the Bitfile" if @source || @timeline
     raise "--apply belongs to gc" if @apply && @command != "gc"
     @project = Project.load(@directory)
-    raise "select an isolated toolchain; builds in ~/tungsten are forbidden" if @project.toolchain == Util.absolute("~/tungsten")
     package = Env.get("BIT_PACKAGE_ROOT") || @project.toolchain + "/bits/tungsten-av"
     @media = Media.new(@project.toolchain, File.realpath(package), Runner.new(Util.get(@project.resources, "timeout", 3600)))
     self

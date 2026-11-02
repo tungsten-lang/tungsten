@@ -1,5 +1,5 @@
 #!/bin/sh
-# Source-checkout entry point; package commands use the chosen isolated toolchain.
+# Source-checkout entry point; package commands use the selected toolchain.
 set -eu
 # Keep explicit package/toolchain environment through noninteractive bash drivers.
 unset BASH_ENV

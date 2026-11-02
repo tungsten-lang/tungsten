@@ -50,8 +50,9 @@ bit av files
 
 Commands accept `--project DIR`, repeated `--profile NAME` and `--json`. Plan and
 doctor do not create project artifacts or execute prepare/generator stages.
-Selected profile dependencies are included in topological order. Use an isolated
-Tungsten toolchain; builds in `~/tungsten` are intentionally rejected.
+Selected profile dependencies are included in topological order. The launcher
+selects its Tungsten checkout by default. Set `av.project toolchain:` or
+`STUDIO_TW` to select another toolchain.
 
 ## Project Bitfile
 
@@ -62,7 +63,7 @@ cyclic profiles and conflicting delivery contracts fail before media writes.
 
 ```tungsten
 name "film"
-av.project "film", source: "source.mov", toolchain: "/path/to/isolated/tungsten"
+av.project "film", source: "source.mov", toolchain: "/path/to/tungsten"
 # For authored projects use timeline: "studio/episode.json", cut: "full", mix: "mix.wav".
 av.output "master", path: "render/master.mov", format: :mov
 av.video "master", codec: :hevc10, quality: 0.85, depth: 10, chroma: "420"

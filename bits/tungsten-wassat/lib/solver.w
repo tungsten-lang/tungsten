@@ -3671,6 +3671,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @ncl = pm[3]
       @asize = pm[4]
       @wp_cap = 2 * maxcl + 4 * @nvars + 72
+      @wp_cap = wassat_lucky_watch_capacity(@cmeta, @ncl, @nvars, @wp_cap) if lean
       @wpool = i64[@wp_cap]
       @wp_state[0] = 0
       @wp_state[1] = @wp_cap
@@ -7020,6 +7021,22 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         st[6] = st[6] + 1
       j += 1
   good
+
+# A lean lucky solver needs no learned-clause headroom, but its watches
+# still move. Reserve one extra entry per two long clauses after tight packing:
+# the rebuild can spend half on per-list slack and retain half for relocation.
+# Without this floor, a dense lean pool can rebuild the complete database
+# for each single moved watch. Sparse and binary-dominated layouts keep
+# their existing capacity, and the upper bound usually avoids the scan.
+-> wassat_lucky_watch_capacity(cm, ncl, nv, capacity) (i64[] i64 i64 i64) i64
+  return capacity if 2 * ncl + ncl / 2 + 2 * nv + 4 <= capacity
+  nlong = 0
+  ci = 0
+  while ci < ncl
+    nlong += 1 if cm[2 * ci + 1] >= 3
+    ci += 1
+  required = 2 * nlong + nlong / 2 + 2 * nv + 4
+  required > capacity ? required : capacity
 
 # Native flat-formula loader: ingest a preprocessor's flat clause mirrors
 # directly — live clauses copy arena-to-arena and proof ids carry over;

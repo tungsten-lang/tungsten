@@ -1193,6 +1193,23 @@ use reconfiguration
         if scout_reconf_plan != nil
           scout_reconf_res = i64[scout_nv + 8]
           scout_reconf_h = wassat_reconf_start(formula, scout_reconf_plan, scout_stop, scout_reconf_res)
+        # Discover bounded circuit backdoors beside the first scout. The
+        # clause indexing and topological planning stay inside the worker;
+        # a miss has no grace wait and can resume in the later circuit arm.
+        scout_dep_plan = nil
+        scout_dep_res = nil
+        scout_dep_h = nil
+        dep_workers = parity_workers + (scout_parity == nil ? 0 : 1)
+        dep_workers += 1 if scout_reconf_plan != nil
+        # The automatic lane targets short-clause gate encodings. The shape
+        # count is already available, so wider CNFs pay no planning cost.
+        if config.max_clause_size <= 3 && env("WASSAT_SMALL_CIRCUIT") != "0" && env("WASSAT_DEPENDENCY_CIRCUIT") != "0" && System.cpu_count > dep_workers
+          dep_extra = 192 * (scout_nv + formula["flat_ncl"] + 1)
+          if wassat_race_memory_fits?(formula, scout_lucky ? 2 : 1, 1, 1, dep_extra)
+            scout_dep_plan = wassat_dependency_circuit_plan(formula)
+        if scout_dep_plan != nil
+          scout_dep_res = i64[scout_nv + 8]
+          scout_dep_h = wassat_dependency_circuit_start(formula, scout_dep_plan, scout_stop, scout_dep_res)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1279,6 +1296,9 @@ use reconfiguration
         reconf_cancel_ms = 0
         reconf_cancel_ms = ccall("__w_clock_ms") if scout_reconf_h != nil
         z = wassat_stop_cancel(scout_stop)
+        if scout_dep_h != nil
+          z = scout_dep_h.join
+          formula["dependency_circuit_done"] = scout_dep_plan["meta"][9] != 1
         z = scout_sls_h.join if scout_sls_h != nil
         z = scout_xor_h.join if scout_circuit == nil
         z = scout_path_h.join if scout_path_h != nil
@@ -1299,6 +1319,10 @@ use reconfiguration
         if scout_path_enabled && env("WASSAT_PROFILE") == "1"
           path_tail = scout_path_out[9] > 0 ? ccall("__w_clock_ms") - scout_path_out[9] : 0
           wassat_prof_note("path_cover width=[scout_path_out[1]] work=[scout_path_out[2]] removed=[scout_path_out[3]] empty_axis=[scout_path_out[4]] empty_index=[scout_path_out[5]] stopped=[scout_path_out[6]] recognized=[scout_path_out[7]] stop_tail_ms=[path_tail]")
+        if scout_dep_h != nil && env("WASSAT_PROFILE") == "1"
+          wassat_dependency_circuit_profile("scout.circuit", scout_dep_plan)
+          dep_tail = scout_dep_res[0] == -1 ? clock_ms() - scout_dep_res[scout_nv + 5] : 0
+          wassat_prof_note("scout.circuit answer_to_join_ms=[dep_tail]")
         # Repair is real CDCL work even though it lives inside the model-only
         # SLS arm. Charge it whether the repair wins or the walk later falls
         # through, and retain the count in every early verdict below.
@@ -1306,6 +1330,15 @@ use reconfiguration
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_dep_res != nil && scout_dep_res[0] == -1
+          dep_scout = scout_out[0]
+          budget_used += dep_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          << "s UNSATISFIABLE"
+          << "c mode: fast (clause-checked dependency circuit scout)"
+          << "c conflicts: [budget_used], decisions: [dep_scout["decisions"]], props: [dep_scout["props"]]"
+          << "c stats restarts=[dep_scout["restarts"]] reduces=[dep_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(20)
         if scout_reconf_res != nil && scout_reconf_res[0] == -1
           reconf_scout = scout_out[0]
           budget_used += reconf_scout["conflicts"] if scout_budget == nil

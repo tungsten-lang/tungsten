@@ -111,7 +111,7 @@ WASSAT_COVER_NODE_CAP = 200000
 
 # Drain the unit-row queue.  Stale entries are harmless: a later selection can
 # cover the row, and several exclusions can enqueue work before it is visited.
--> wassat_cover_propagate(status, covered, counts, row_lits, row_off, row_len,
+-> wassat_conflict_cover_propagate(status, covered, counts, row_lits, row_off, row_len,
                           occ_off, occ_rows, adj_off, adj, trail, meta,
                           queue, qmeta, nvars, nrows) (i8[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
   head = 0
@@ -229,7 +229,7 @@ WASSAT_COVER_NODE_CAP = 200000
     if wassat_cover_select(
       status, covered, counts, occ_off, occ_rows, adj_off, adj,
       trail, meta, queue, qmeta, nvars, nrows, v
-    ) == 1 && wassat_cover_propagate(
+    ) == 1 && wassat_conflict_cover_propagate(
       status, covered, counts, row_lits, row_off, row_len,
       occ_off, occ_rows, adj_off, adj, trail, meta, queue, qmeta,
       nvars, nrows
@@ -257,7 +257,7 @@ WASSAT_COVER_NODE_CAP = 200000
     unless wassat_cover_exclude(
       status, covered, counts, occ_off, occ_rows, trail, meta, queue, qmeta,
       nvars, nrows, v
-    ) == 1 && wassat_cover_propagate(
+    ) == 1 && wassat_conflict_cover_propagate(
       status, covered, counts, row_lits, row_off, row_len,
       occ_off, occ_rows, adj_off, adj, trail, meta, queue, qmeta,
       nvars, nrows
@@ -327,7 +327,7 @@ WASSAT_COVER_NODE_CAP = 200000
     )
     i += 1
   if ok == 1
-    ok = wassat_cover_propagate(
+    ok = wassat_conflict_cover_propagate(
       status, covered, counts, row_lits, row_off, row_len,
       occ_off, occ_rows, adj_off, adj, trail, meta, queue, qmeta,
       nvars, nrows
@@ -416,7 +416,7 @@ fn wassat_af_bitset_dfs(dom, out_att, conf, und_stack, need_stack, in_stack,
         while k < 16
           c += wassat_cover_pop64(und_stack[base16 + k] & dom[v16 + k])
           k += one
-        return -1 ## i64 if c == 0
+        return -1 if c == 0
         if c == 1
           u = -1 ## i64
           k = 0 ## i64
@@ -426,7 +426,7 @@ fn wassat_af_bitset_dfs(dom, out_att, conf, und_stack, need_stack, in_stack,
               utz = wassat_cover_ctz64(x)
               u = (k << five) + utz
             k += one
-          return -1 ## i64 if u < 0
+          return -1 if u < 0
           uw = u >> five
           ub = one << (u & t31)
           in_stack[base16 + uw] = in_stack[base16 + uw] | ub
@@ -459,7 +459,7 @@ fn wassat_af_bitset_dfs(dom, out_att, conf, und_stack, need_stack, in_stack,
           sol_in[k] = in_stack[base16 + k]
           k += one
         return 1 ## i64
-      return -1 ## i64 if best_v < 0
+      return -1 if best_v < 0
       cbase = depth * (160 ## i64)
       ncand = 0 ## i64
       bv16 = best_v << four
@@ -508,8 +508,8 @@ fn wassat_af_bitset_dfs(dom, out_att, conf, und_stack, need_stack, in_stack,
           dom, out_att, conf, und_stack, need_stack, in_stack,
           cand_stack, score_stack, sol_in, meta, depth + one
         )
-        return 1 ## i64 if child == 1
-        return 0 ## i64 if child == 0
+        return 1 if child == 1
+        return 0 if child == 0
         und_stack[base16 + uw] = und_stack[base16 + uw] & (ub ^ full32)
         rem_c = 0 ## i64
         k = 0 ## i64
@@ -523,13 +523,12 @@ fn wassat_af_bitset_dfs(dom, out_att, conf, und_stack, need_stack, in_stack,
       while k < 16
         rem_c += wassat_cover_pop64(und_stack[base16 + k] & dom[bv16 + k])
         k += one
-      return -1 ## i64 if rem_c == 0
+      return -1 if rem_c == 0
   -1 ## i64
 
 -> wassat_af_bitset_solve(fla, fcs, fcl, ncl, nvars, node_cap) (i64[] i64[] i64[] i64 i64 i64)
   full32 = 4294967295 ## i64
   one = 1 ## i64
-  in_att = i64[512 * 16]
   out_att = i64[512 * 16]
   conf = i64[512 * 16]
   dom = i64[512 * 16]
@@ -549,7 +548,6 @@ fn wassat_af_bitset_dfs(dom, out_att, conf, und_stack, need_stack, in_stack,
       j = 1
       while j < n
         a = fla[off + j] - 1
-        in_att[v16 + (a >> 5)] = in_att[v16 + (a >> 5)] | (one << (a & 31))
         out_att[(a << 4) + (v >> 5)] = out_att[(a << 4) + (v >> 5)] | (one << (v & 31))
         dom[v16 + (a >> 5)] = dom[v16 + (a >> 5)] | (one << (a & 31))
         j += 1
@@ -565,10 +563,9 @@ fn wassat_af_bitset_dfs(dom, out_att, conf, und_stack, need_stack, in_stack,
   v = 0
   while v < nvars
     v16 = v << 4
-    k = 0
-    while k < 16
-      conf[v16 + k] = conf[v16 + k] | in_att[v16 + k] | out_att[v16 + k]
-      k += 1
+    # Positive rows describe coverage only. Their first literal identifies a
+    # row, but does not make that variable conflict with its other literals.
+    # Only original negative binary clauses may exclude a selected pair.
     vw = v >> 5
     vb = one << (v & 31)
     if (conf[v16 + vw] & vb) != 0

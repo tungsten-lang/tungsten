@@ -2,6 +2,8 @@
 # split out of multiplier.w. Model-only or fast-only per lane; every SAT
 # model is checked against the original CNF by the caller.
 
+use circuit_certificate
+
 
 -> wassat_ascon_up_sweeps(fla, fcs, fcl, ncl, assign) (i64[] i64[] i64[] i64 i64[]) i64
   sweep = 0
@@ -252,6 +254,12 @@
     v += 1
   return false if n_free < 6 || n_free > 16
 
+  certificate_work = i64[5]
+  supported = wassat_circuit_prefix_supported?(fla, fcs, fcl, ncl,
+    assign, free_arr, n_free, 66, max_eval, certificate_work)
+  wassat_prof_note("circuit.certificate lane=ascon supported=[supported] clauses=[certificate_work[0]] gates=[certificate_work[1]] batches=[certificate_work[2]] literal_visits=[certificate_work[3]] miss=[certificate_work[4]]")
+  return false unless supported
+
   clause_off = i64[max_eval + 2]
   m = 66
   while m <= max_eval
@@ -262,7 +270,7 @@
   cl_lit_len = i64[total_pos_cl]
   cl_lits = i64[pos_lit_total]
   cur_cl = i64[max_eval + 1]
-  wassat_satcoin_fill_pos_clauses(fla, fcs, fcl, ncl, max_eval, clause_off, cl_lit_off, cl_lit_len, cl_lits, cur_cl, total_pos_cl)
+  wassat_satcoin_fill_pos_clauses(fla, fcs, fcl, ncl, 66, max_eval, clause_off, cl_lit_off, cl_lit_len, cl_lits, cur_cl, total_pos_cl)
 
   is_sink = i8[max_eval + 1]
   si = 0

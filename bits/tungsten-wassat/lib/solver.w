@@ -896,7 +896,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       self.rebuild_watches
       @pstate[2] = -1
       @pstate[3] = 0
-      # Only lucky dives may abandon this now-consistent propagation queue.
+      # Lucky dives and propagation-only probes may abandon this consistent queue.
       # General CDCL and inprocessing callers still require a full fixpoint.
       if @lucky_cancel_rebuild && wassat_stop_requested?(@stop_cell)
         @wp_state[11] += 1
@@ -1073,6 +1073,42 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     gain = @tsize - mark
     self.backjump(@dlevel - 1)
     confl >= 0 ? -1 : gain
+
+  # Propagation-only query for a private model-proposal solver. No decisions,
+  # learning or refutation publication. The detached assignment includes root
+  # units and the assumptions' implications, with 0 for unassigned variables.
+  # A conflict is only a rejected proposal. Saved phases may change, so this
+  # entry belongs to a dedicated propagation shell, never a live search arm.
+  # Counters: queries, propagated literals, cancellations, rejected queries.
+  -> propagation_snapshot(assumptions, values, counters)
+    return 0 unless @proof_mode == WASSAT_PROOF_NONE && @nsubst == 0
+    return 0 if values.size <= @nvars || counters.size < 4 || wassat_stop_requested?(@stop_cell)
+    counters[0] += 1
+    props0 = @pstate[4]
+    self.backjump(0)
+    @qhead = 0
+    old_cancel = @lucky_cancel_rebuild
+    @lucky_cancel_rebuild = true
+    conflict = self.propagate >= 0 || !@ok
+    if !conflict && !wassat_stop_requested?(@stop_cell)
+      @trail_lim[0] = @tsize
+      @dlevel = 1
+      assumptions.each -> (lit)
+        unless conflict || wassat_stop_requested?(@stop_cell)
+          v = lit < 0 ? -lit : lit
+          if v < 1 || v > @nvars || self.value(lit) < 0
+            conflict = true
+          elsif self.value(lit) == 0
+            self.enqueue(lit, -1)
+            conflict = self.propagate >= 0
+    stopped = wassat_stop_requested?(@stop_cell)
+    wassat_copy_vivify_phases(@assign, values, @nvars) unless conflict || stopped
+    self.backjump(0)
+    @lucky_cancel_rebuild = old_cancel
+    counters[1] += @pstate[4] - props0
+    counters[2] += 1 if stopped
+    counters[3] += 1 if conflict
+    stopped ? 0 : (conflict ? -1 : 1)
 
   # ---- lucky phases -------------------------------------------------------
   #

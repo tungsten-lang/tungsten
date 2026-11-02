@@ -2252,16 +2252,23 @@ WASSAT_TEL_STRIDE = 8
     # late lucky dives, or its rendering never produced a solver.
     return 0 if out.size < 3
     sr = out[2]
+    pnv = out[1]["solver_nvars"]
     sr.solve_shared_budget(res, base, budget)
-    res[base + nv + 4] = res[base + pnv + 4] if pnv < nv
+    wassat_pre_arm_copy_telemetry(res, base, pnv, nv)
     sr.export_telemetry(tel, tbase)
     tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
     return 0
   pre.set_stop_cell(stop)
-  rendered = pre.run_light_flat(formula)
+  rewrite_counter = !heavy && budget == 0 && budget_limit == 0 && env("WASSAT_COUNTER_REWRITE") != "0"
+  rewrite_counter = false if env("WASSAT_ARMS") != nil && env("WASSAT_COUNTER_REWRITE") != "1"
+  rendered = pre.run_light_flat(formula, rewrite_counter)
   return 0 if rendered == nil
   rendered = pre.run_heavy if heavy && rendered["status"] == 0
   return 0 if rendered == nil
+  pnv = rendered["nvars"]
+  rendered["stats"]["solver_nvars"] = pnv
+  # A projected walker must consume the same variable space as its rendering.
+  pre_sls_allowed = false if pnv != formula["nvars"]
   return 0 if wassat_stop_requested?(stop)
   out.push(rendered["stack"])
   out.push(rendered["stats"])
@@ -2296,7 +2303,7 @@ WASSAT_TEL_STRIDE = 8
       projected_meta[11] = wassat_pre_sls_extra_bytes(formula) + wassat_sls_arena_bytes(formula)
       projected_handle = Thread.new -> wassat_pre_sls_body(formula, rendered, stop, projected_result, projected_meta)
   s.solve_shared_budget(res, base, budget)
-  res[base + nv + 4] = res[base + pnv + 4] if pnv < nv
+  wassat_pre_arm_copy_telemetry(res, base, pnv, nv)
   s.export_telemetry(tel, tbase)
   if projected_handle != nil
     z = projected_handle.join
@@ -2307,6 +2314,16 @@ WASSAT_TEL_STRIDE = 8
       res[base + nv + 5] = projected_meta[8]
     wassat_pre_sls_profile(projected_meta, ccall("__w_clock_ms"))
   tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
+  0
+
+# A compact rendering writes metadata immediately after its own variable
+# range. Keep the race's original slab layout, including cancellation clocks.
+-> wassat_pre_arm_copy_telemetry(res, base, pnv, nv) (i64[] i64 i64 i64) i64
+  return 0 if pnv >= nv
+  i = 7 ## i64
+  while i >= 1
+    res[base + nv + i] = res[base + pnv + i]
+    i -= 1
   0
 
 # ---- the reward signal --------------------------------------------------------

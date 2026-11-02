@@ -1412,7 +1412,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # Race axis: All-UIP shrinking, per arm. Global policy keeps it off (see
   # policy.w use_shrinking); this is how the race samples it anyway.
   -> enable_shrink
-    @use_shrink = true
+    # Keep the explicit ablation effective on portfolio arms as well as
+    # directly constructed solvers. An unset override retains arm diversity.
+    @use_shrink = env("WASSAT_SHRINK") != "0"
     0
 
   # Search-time on-the-fly strengthening is deliberately a coordinator-owned

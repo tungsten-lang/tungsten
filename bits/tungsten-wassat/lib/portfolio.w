@@ -28,6 +28,7 @@ use atomic_stop
 use small_circuit
 use resolution_cover
 use keychart
+use domain_walk
 use ../../../core/bit_ops
 
 WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
@@ -1838,12 +1839,23 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       sls_arenas, preprocess_arenas
     )
   keychart_plan = wassat_keychart_plan(formula) if keychart_allowed
+  domain_plan = nil
+  domain_workers = threads + pre_workers + sls_worker
+  domain_workers += 1 if circuit_plan != nil
+  domain_workers += 1 if keychart_plan != nil
+  domain_workers += 1 if cover_plan != nil
+  if art["raw"] == true
+    domain_plan = wassat_domain_plan(formula, domain_workers,
+      cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1),
+      sls_arenas, preprocess_arenas)
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
   cap += 1 if keychart_plan != nil
   cover_index = cover_plan == nil ? -1 : cap
   cap += 1 if cover_plan != nil
+  domain_index = domain_plan == nil ? -1 : cap
+  cap += 1 if domain_plan != nil
   stop = i64[4]
   res = i64[cap * (nv + 8)]
   tel = i64[cap * WASSAT_TEL_STRIDE]
@@ -1951,7 +1963,8 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
     "circuit_plan": circuit_plan, "keychart_plan": keychart_plan,
     "keychart_index": keychart_index, "cover_plan": cover_plan,
-    "cover_index": cover_index,
+    "cover_index": cover_index, "domain_plan": domain_plan,
+    "domain_index": domain_index,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
     "credit": credit, "offsets": offsets, "sls": [], "prune_info": prune_info,
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
@@ -2424,6 +2437,10 @@ WASSAT_AXIS_SLOTS = 10
   cover_idx = race["cover_index"]
   cover_base = cover_idx * (nv + 8)
   cover_handle = nil
+  domain_plan = race["domain_plan"]
+  domain_idx = race["domain_index"]
+  domain_base = domain_idx * (nv + 8)
+  domain_handle = nil
   if keychart_plan != nil && conflict_budget != nil
     keychart_plan["solver"].set_shared_conflict_budget(conflict_budget, budget, keychart_idx + 1)
   round_ms = wassat_race_round_ms
@@ -2489,6 +2506,8 @@ WASSAT_AXIS_SLOTS = 10
     )
   if cover_plan != nil
     cover_handle = wassat_cover_start(formula, cover_plan, stop, res, cover_base)
+  if domain_plan != nil
+    domain_handle = wassat_domain_start(formula, domain_plan, stop, res, domain_base)
   round = 0
   running = 1
   while running == 1
@@ -2564,6 +2583,7 @@ WASSAT_AXIS_SLOTS = 10
         a += 1
       decisive_now = 1 if circuit_plan != nil && ccall("__w_arr_load_acq", res, circuit_base) == -1
       decisive_now = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) != 0
+      decisive_now = 1 if domain_plan != nil && ccall("__w_arr_load_acq", res, domain_base) == 1
       cdcl_can_continue = 0
       if decisive_now == 0 && round1 > 0
         a = 0
@@ -2586,7 +2606,7 @@ WASSAT_AXIS_SLOTS = 10
       z = keychart_handle.join
     # ---- barrier: boxed workers are stopped, coordinator may dispatch again --
     #
-    # Only the native circuit and cover evaluators may remain live. They perform no
+    # Only the native circuit, cover and domain evaluators may remain live. They perform no
     # boxed dispatch. The other workers must be stopped here because inline caches are
     # process-global, so the coordinator scores, sorts, allocates and builds
     # replacement solvers HERE and does nothing but join while arms run.
@@ -2604,6 +2624,7 @@ WASSAT_AXIS_SLOTS = 10
       decided = 1 if sls.size > 0 && res[sls_base] == 1
       decided = 1 if circuit_plan != nil && ccall("__w_arr_load_acq", res, circuit_base) == -1
       decided = 1 if cover_plan != nil && ccall("__w_arr_load_acq", res, cover_base) != 0
+      decided = 1 if domain_plan != nil && ccall("__w_arr_load_acq", res, domain_base) == 1
       if decided == 0
         # Score the round every arm just finished, and retire the arms that
         # cannot continue: retired by the solver, stuck (no conflict advanced,
@@ -2748,6 +2769,9 @@ WASSAT_AXIS_SLOTS = 10
   if cover_handle != nil
     z = wassat_stop_cancel(stop)
     z = cover_handle.join
+  if domain_handle != nil
+    z = wassat_stop_cancel(stop)
+    z = domain_handle.join
   # Workers already record completion immediately before publishing a win.
   # Report the join tail without adding clocks or atomics to their hot loops.
   if env("WASSAT_PROFILE") == "1"
@@ -2784,6 +2808,12 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[cover_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       wassat_cover_profile("race.cover", cover_plan, res[cover_base])
+    if domain_plan != nil
+      dm = domain_plan["meta"]
+      ended = dm[18]
+      last_ms = ended if ended > last_ms
+      answer_ms = ended if res[domain_base] == 1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+      wassat_domain_profile(domain_plan, res[domain_base])
     if answer_ms > 0
       wassat_prof_note("race.stop answer_to_last_arm_ms=[last_ms - answer_ms]")
   a = 0
@@ -2829,6 +2859,9 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && keychart_plan != nil && res[keychart_base] == 1
     status = 1
     winner = keychart_idx
+  if status == 0 && domain_plan != nil && res[domain_base] == 1
+    status = 1
+    winner = domain_idx
   model = []
   keychart_conflicts = keychart_plan == nil ? 0 : res[keychart_base + nv + 4]
   repair_conflicts = sls.size > 0 ? res[sls_base + nv + 7] : 0
@@ -2837,7 +2870,7 @@ WASSAT_AXIS_SLOTS = 10
     conflicts = ccall("__w_arr_load_acq", conflict_budget, 0)
   if winner >= 0
     base = winner * (nv + 8)
-    if winner != sls_idx && winner != circuit_idx && winner != keychart_idx && winner != cover_idx && conflict_budget == nil
+    if winner != sls_idx && winner != circuit_idx && winner != keychart_idx && winner != cover_idx && winner != domain_idx && conflict_budget == nil
       conflicts += res[base + nv + 4] - offsets[winner]
     if status == 1
       v = 1
@@ -2854,6 +2887,7 @@ WASSAT_AXIS_SLOTS = 10
     "circuit_won": circuit_plan != nil && winner == circuit_idx,
     "cover_won": cover_plan != nil && winner == cover_idx,
     "keychart_won": keychart_plan != nil && winner == keychart_idx,
+    "domain_won": domain_plan != nil && winner == domain_idx,
     "keychart_conflicts": keychart_conflicts,
     "sls_won": winner == sls_idx,
     "sls_repair_won": winner == sls_idx && res[sls_base + nv + 1] == 1,

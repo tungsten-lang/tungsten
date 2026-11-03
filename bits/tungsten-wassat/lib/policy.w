@@ -522,6 +522,19 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
   return wassat_decimal_in_range("WASSAT_PRE_MAX_CLAUSES", env("WASSAT_PRE_MAX_CLAUSES"), 0, 2000000000) if env("WASSAT_PRE_MAX_CLAUSES") != nil
   2000000
 
+# Large, moderately dense watch databases repeatedly repack while their
+# per-literal blocks migrate. Very dense databases already receive initial
+# proportional block slack; small and binary-heavy formulas keep their sizing.
+# This only increases the initial watch pool, below the existing table-growth
+# pool bound. The conservative CDCL memory envelope therefore remains valid.
+-> wassat_watch_reserve_percent(nv, ncl, nlong) (i64 i64 i64) i64
+  return 0 if ncl < 4000000 || ncl >= 40000000 || nlong < 4000000
+  return 0 if nlong < 8 * nv || nlong >= 64 * nv
+  25
+
+-> wassat_watch_reserve_capacity(capacity, percent) (i64 i64) i64
+  capacity + capacity * percent / 100
+
 + WassatConfig
   ro :empty_clause_count
   -> new(@nvars, clauses)
@@ -559,6 +572,13 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     @ternary = counts[4]
     @empty_clause_count = counts[5]
     0
+
+  # Reuse the already computed shape counts; no extra formula scan or buffer.
+  -> watch_extra_percent
+    if env("WASSAT_WATCH_EXTRA") != nil
+      return wassat_decimal_in_range("WASSAT_WATCH_EXTRA", env("WASSAT_WATCH_EXTRA"), 0, 200)
+    nlong = @nclauses - @units - @binary - @empty_clause_count
+    wassat_watch_reserve_percent(@nvars, @nclauses, nlong)
 
   -> raw_heuristics?
     # This is the historical raw-kernel classifier used by preprocessing

@@ -3653,6 +3653,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # such as the dense-ternary ntil policy.
     @lucky_cancel_rebuild = false
     @lucky_pending = @config.use_lucky
+    watch_extra = @config.watch_extra_percent
+    # The measured default covers ordinary raw loading. Explicit overrides
+    # also exercise lean and preprocessed loaders for controlled checks.
+    watch_extra = 0 if (lean || art["raw"] != true) && env("WASSAT_WATCH_EXTRA") == nil
     sncl = art["fncl"]
     raise "clause count exceeds signed 32-bit packed representation" if sncl > WASSAT_MAX_CLAUSE_INDEX + 1
     # size the arena and tables for the live clauses plus learning headroom
@@ -3736,6 +3740,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       # forces huge databases to rebuild for small amounts of watch movement.
       # Keep proportional relocation space while retaining this compact pool.
       @wp_cap = 2 * (nlong + head) + 2 * @nvars + 1048576 + nlong / 4
+      @wp_cap = wassat_watch_reserve_capacity(@wp_cap, watch_extra)
       @wpool = i64[@wp_cap]
       @wp_state[0] = 0
       @wp_state[1] = @wp_cap
@@ -3759,6 +3764,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @asize = pm[4]
       @wp_cap = 2 * maxcl + 4 * @nvars + 72
       @wp_cap = wassat_lucky_watch_capacity(@cmeta, @ncl, @nvars, @wp_cap) if lean
+      @wp_cap = wassat_watch_reserve_capacity(@wp_cap, watch_extra)
       @wpool = i64[@wp_cap]
       @wp_state[0] = 0
       @wp_state[1] = @wp_cap

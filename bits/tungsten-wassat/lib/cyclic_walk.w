@@ -1,12 +1,6 @@
 # Circular graph-label swap proposals. All search buffers are fixed and reused.
 # Explicit machine locals keep the bounded integer score kernel unboxed.
-use permutation_walk
-
--> wassat_cycle_cost(a, b, width, n) (i64 i64 i64 i64) i64
-  d = ((a ## i64) - (b ## i64)) ## i64
-  d = -d if d < 0
-  d = n - d if d > n - d
-  d < width ? width - d : 0
+use cyclic_repair
 
 # Three slope changes describe each circular triangular edge penalty.
 # Reuse the difference arrays for the finished weighted/unweighted scores.
@@ -64,6 +58,11 @@ use permutation_walk
 -> wassat_cycle_trial(n, ne, width, left, right, heads, occ, perm, tabu,
                       weights, penalty, bad, rng, m, stop, deadline,
                       restarts, steps) (i64 i64 i64 i32[] i32[] i32[] i32[] i32[] i32[] i32[] i32[] i32[] i64[] i64[] i64[] i64 i64 i64) i64
+  wassat_cycle_trial_mode(n, ne, width, left, right, heads, occ, perm, tabu, weights, penalty, bad, rng, m, stop, deadline, restarts, steps, 0, m)
+
+-> wassat_cycle_trial_mode(n, ne, width, left, right, heads, occ, perm, tabu,
+                      weights, penalty, bad, rng, m, stop, deadline,
+                      restarts, steps, allow_repair, repair) (i64 i64 i64 i32[] i32[] i32[] i32[] i32[] i32[] i32[] i32[] i32[] i64[] i64[] i64[] i64 i64 i64 i64 i64[]) i64
   # The optional bound verifier has finished using slot 23 as a poll cursor.
   m[23] = 0
   return 0 if wassat_perm_stop(m, stop, deadline) != 0
@@ -72,6 +71,11 @@ use permutation_walk
   scores = i64[size]
   plain = i64[size]
   adjacent = i32[size]
+  use_repair = allow_repair == 1 && 2 * (n - 2 * width) + 1 >= n
+  repair_limit = (n / 32) ## i64
+  repair[23] = 1000000000 if use_repair
+  best_size = (use_repair ? n : 0) ## i64
+  best_perm = i32[best_size]
   m[13] = 1000000000
   # Bound work between polls even for a dense graph or a high-degree hub.
   # One swap scores at most n*max_degree + 2*edges incident edge updates.
@@ -119,7 +123,14 @@ use permutation_walk
           bad[nb] = e
           nb += 1
         e += 1
-      m[13] = sum if sum < m[13]
+      if sum < m[13]
+        m[13] = sum
+        if use_repair && sum <= repair_limit
+          v = 0
+          while v < n
+            best_perm[v] = perm[v]
+            v += 1
+          repair[18] += 1
       return 1 if sum == 0
       edge = (bad[wassat_perm_rand(rng, nb)]) ## i64
       u = (wassat_perm_rand(rng, 2) != 0 ? left[edge] : right[edge]) ## i64
@@ -196,6 +207,19 @@ use permutation_walk
       tabu[target] = until_step
       m[8] += 1
       step += 1
+    if use_repair && repair[0] < WASSAT_CYCLE_REPAIR_ROUNDS && m[13] > 0 && m[13] <= repair_limit && m[13] < repair[23]
+      repair[23] = m[13]
+      repaired = wassat_cycle_repair(n, ne, width, left, right, heads, occ, best_perm, repair, stop, deadline)
+      if repair[22] != 0
+        m[22] = repair[22]
+        return 0
+      if repaired == 1
+        v = 0
+        while v < n
+          perm[v] = best_perm[v]
+          v += 1
+        m[13] = 0
+        return 1
     restart += 1
   m[22] = 3
   0

@@ -6,8 +6,9 @@
 |------|---------|
 | `core/math` | Elementary only (exp/log/sin). Keep thin. |
 | **`core/special`** | denser catalogue (erf, gamma, Bessel) |
-| **`core/stats`** | compatibility distribution and RNG conveniences |
+| **`core/stats`** | compatibility distribution, descriptive, and RNG conveniences |
 | **`core/statistics`** | estimation, linear-model inference, diagnostics, robust covariance |
+| **`core/probability`** | checked laws, numerical probability, Monte Carlo, and stochastic processes |
 | Whole package | The science stack stays separated by mathematical concern. |
 
 ## Special (`core/special.w`)
@@ -37,5 +38,10 @@ surface. New estimation and regression work should use `Statistics`, whose
 empty and degenerate cases raise, whose weight conventions are explicit, and
 whose scalar, weighted, and multivariate accumulators can be merged. Its OLS
 and analytic-weight WLS path uses pivoted QR with classical and HC0--HC3
-covariance plus immutable diagnostics. Distribution and sampling ownership
-remains separate. See [statistics.md](statistics.md).
+covariance plus immutable diagnostics. See [statistics.md](statistics.md).
+
+`core/probability.w` is the object-oriented, domain-checked layer for new
+stochastic code. Its nested submodules own scalar probability laws, supports,
+stable log-weight operations, serial/counter RNG streams, dense multivariate
+Normal laws, Monte Carlo algorithms, copulas, transformations, and stochastic
+processes. See [probability.md](probability.md).

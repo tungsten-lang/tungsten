@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(736 total), grouped by area, with its declaration, a one-line
+(793 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -110,6 +110,63 @@ summary from the source header, and a link to the source.
 | `StatisticsRelativeFitResult` | — | — | [`core/statistics.w`](../core/statistics.w) |
 | `StatisticsEmpiricalBernsteinSequence` | — | — | [`core/statistics.w`](../core/statistics.w) |
 | `StatisticsConfidenceSequenceResult` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `Probability` | `+ Probability` | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityNumerics` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilitySpecial` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityNumericalContract` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityAccuracy` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilitySupport` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityUnionSupport` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityFiniteSupport` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityRandom` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityRng` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityCounterRng` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityRandomBatteryResult` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityRandomTests` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilitySampling` | — | — | [`core/probability.w`](../core/probability.w) |
+| `BernoulliDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `UniformDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `NormalDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ExponentialDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `GammaDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `BetaDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `CategoricalDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `PoissonDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `MixtureDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityLinearAlgebra` | — | — | [`core/probability.w`](../core/probability.w) |
+| `MultivariateRealSupport` | — | — | [`core/probability.w`](../core/probability.w) |
+| `MultivariateProbabilityDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `MultivariateNormalDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `StochasticProcess` | — | — | [`core/probability.w`](../core/probability.w) |
+| `FiniteMarkovChain` | — | — | [`core/probability.w`](../core/probability.w) |
+| `WienerProcess` | — | — | [`core/probability.w`](../core/probability.w) |
+| `PoissonProcess` | — | — | [`core/probability.w`](../core/probability.w) |
+| `MonteCarloChain` | — | — | [`core/probability.w`](../core/probability.w) |
+| `HamiltonianMonteCarloChain` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityDiagnostics` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ProbabilityInference` | — | — | [`core/probability.w`](../core/probability.w) |
+| `RandomWalkMetropolis` | — | — | [`core/probability.w`](../core/probability.w) |
+| `HamiltonianMonteCarlo` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ParticleFilterResult` | — | — | [`core/probability.w`](../core/probability.w) |
+| `BootstrapParticleFilter` | — | — | [`core/probability.w`](../core/probability.w) |
+| `MeanFieldGaussianDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `VariationalResult` | — | — | [`core/probability.w`](../core/probability.w) |
+| `MeanFieldVariationalInference` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ContinuousTimeMarkovPath` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ContinuousTimeMarkovChain` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ContinuousTimeMarkovTransitionResult` | — | — | [`core/probability.w`](../core/probability.w) |
+| `HiddenMarkovSequence` | — | — | [`core/probability.w`](../core/probability.w) |
+| `HiddenMarkovModel` | — | — | [`core/probability.w`](../core/probability.w) |
+| `ScalarSdePath` | — | — | [`core/probability.w`](../core/probability.w) |
+| `StochasticNumerics` | — | — | [`core/probability.w`](../core/probability.w) |
+| `EulerMaruyamaProcess` | — | — | [`core/probability.w`](../core/probability.w) |
+| `RenewalProcess` | — | — | [`core/probability.w`](../core/probability.w) |
+| `GaussianCopula` | — | — | [`core/probability.w`](../core/probability.w) |
+| `CopulaDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `AffineDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `TruncatedDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
+| `FiniteConditionedDistribution` | — | — | [`core/probability.w`](../core/probability.w) |
 | `Tensor` | `+ Tensor` | — | [`core/tensor.w`](../core/tensor.w) |
 | `TensorDecomposition` | `+ TensorDecomposition` | Dense real CP-ALS and Tucker HOSVD/HOOI over the existing CPU Tensor storage. | [`core/tensor/decomposition.w`](../core/tensor/decomposition.w) |
 | `CPDecomposition` | `+ CPDecomposition` | Numerical CP factors with explicit weights, residual and stopping status. | [`core/tensor/decomposition.w`](../core/tensor/decomposition.w) |

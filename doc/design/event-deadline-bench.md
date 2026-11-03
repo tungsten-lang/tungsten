@@ -1,7 +1,9 @@
 # Deadline frontier benchmark
 
-Status: measured, uncommitted prototype on `codex/event-deadline-waits`.
-Not an across-the-board no-regression result and not ready to land as such.
+Status: September 2026 measurement of the `codex/event-deadline-waits`
+prototype, kept with its harness so the comparison can be repeated. It is not
+an across-the-board no-regression result. Main later landed an evolved form of
+this work; see [relation to main](#relation-to-main).
 
 ## Scope and method
 
@@ -106,7 +108,24 @@ Linux backends; design safe M:P expiry ownership and park-commit/generation
 tokens before moving M:P deadlines. Timer thread identity/TLS compatibility
 must be resolved separately before changing Timer callback dispatch.
 
+## Relation to main
+
+The [scheduler ownership tranche](scheduler-ownership.md) (`c37317c5a`) landed
+the heap, sticky wakeups and nanosecond kqueue clamp measured here. It also
+removed batch-mode polling: an idle cooperative scheduler now enters one
+blocking wait. That is the policy of the rejected experiment above, not the
+retained candidate. Its wake-lateness tradeoff has not been re-measured on
+main as a matched campaign. A one-block smoke run of this harness on a loaded
+host (`189ed930f` against main at `54f302497`, not a measurement) showed the
+same shape: one idle waiter used 0.04 ms of CPU instead of 1.0 ms, but woke
+about 1 ms late instead of under 0.2 ms.
+
 ## Reproduce
+
+The build runs the selected checkout's own `runtime/Makefile`, layered with
+[`event_deadlines.mk`](../../benchmarks/runtime/event_deadlines.mk), so a
+baseline with a different runtime source list still builds. To compare main
+against another runtime, substitute that commit for the baseline.
 
 From the candidate checkout (outputs go into a fresh temporary directory):
 

@@ -93,6 +93,9 @@ use ../lib/wassat
     a += 1
   edges
 
+-> ais_octahedron_edges
+  ais_complete_edges(6).reject -> (edge) edge[0] + edge[1] == 7
+
 describe "Wassat AIS sequential-counter certificate" ->
   it "certifies a permuted K4 cover bound exactly" ->
     text = ais_counter_text(4, 2, ais_complete_edges(4), true)
@@ -131,6 +134,39 @@ describe "Wassat AIS sequential-counter certificate" ->
     expect(
       wassat_ais_unsat(wassat_parse_cnf_native(duplicate))["status"]
     ).to eq(0)
+
+  it "counts overlapping triangles without treating a component as a clique" ->
+    text = ais_counter_text(6, 3, ais_octahedron_edges, true)
+    result = wassat_ais_unsat(wassat_parse_cnf_native(text))
+    expect(result["status"]).to eq(-1)
+    expect(result["lower_bound"]).to eq(4)
+    expect(result["triangles"]).to eq(8)
+    expect(result["triangle_degree"]).to eq(4)
+    expect(wassat_solve_opts(text, false)["status"]).to eq(-1)
+
+  it "declines the satisfiable overlapping-triangle boundary and edge removals" ->
+    edges = ais_octahedron_edges
+    boundary = ais_counter_text(6, 4, edges, true)
+    # Removing (1,2) and (1,5) leaves the independent triple {1,2,5}.
+    relaxed = edges.reject -> (edge) edge[0] == 1 && (edge[1] == 2 || edge[1] == 5)
+    removed = ais_counter_text(6, 3, relaxed, true)
+    [boundary, removed].each -> (text)
+      expect(wassat_ais_unsat(wassat_parse_cnf_native(text))["status"]).to eq(0)
+      expect(wassat_solve_opts(text, false)["status"]).to eq(1)
+
+  it "requires the complete counter for an overlapping-triangle refutation" ->
+    text = ais_counter_text(6, 3, ais_octahedron_edges, true, true)
+    expect(wassat_ais_unsat(wassat_parse_cnf_native(text))["status"]).to eq(0)
+
+  it "declines an exhausted triangle work cap" ->
+    adj = i8[16]
+    ais_complete_edges(4).each -> (edge)
+      a = edge[0] - 1; b = edge[1] - 1
+      adj[a * 4 + b] = 1; adj[b * 4 + a] = 1
+    meta = i64[4]
+    expect(wassat_ais_triangle_bound(adj, 4, meta, 1)).to eq(0)
+    expect(meta[3]).to eq(1)
+    expect(meta[2]).to eq(1)
 
   it "agrees with CDCL on every certified four-vertex graph" ->
     pairs = [[1, 2], [1, 3], [1, 4], [2, 3], [2, 4], [3, 4]]

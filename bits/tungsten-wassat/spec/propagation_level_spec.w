@@ -34,7 +34,7 @@ use ../lib/solver
   wassat_ws_add(wd, wp, ws, 3, 1, 4)
   bd = i64[48]
   bp = i64[1]
-  tr = i64[5]
+  tr = i32[5]
   tr[0] = 1
   st = i64[12]
   st[1] = 1
@@ -93,7 +93,7 @@ describe "Chronological implication levels" ->
   ws[1] = 16
   wassat_ws_add(wd, wp, ws, 5, 1, 1)
   bd = i64[4 * (2 * width + 4)]; bp = i64[1]
-  tr = i64[width + 1]; tr[0] = 2
+  tr = i32[width + 1]; tr[0] = 2
   st = i64[12]; st[1] = 1; st[5] = 1
   wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, ws, tr, st, current, bd, bp)
   [lvl[1], rsn[1], tr[1], st[2], asg[1]]

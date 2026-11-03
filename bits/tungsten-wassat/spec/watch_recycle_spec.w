@@ -93,7 +93,7 @@ describe "Watch-block prefix recycling" ->
     lvl = i64[4]
     rsn = i32[4]
     phs = i8[4]
-    tr = i64[4]
+    tr = i32[4]
     st = i64[6]
     bd = i64[40]
     bp = i64[1]

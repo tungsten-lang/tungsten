@@ -44,7 +44,9 @@ WASSAT_PROOF_DRAT = 2
 # Packed headers and binary reasons recover their high word with signed >> 32.
 # Keep clause indices nonnegative in that representation; -1 means no reason.
 WASSAT_MAX_CLAUSE_INDEX = 2147483647
-# Heap positions also use signed 32-bit slots with -1 as the absent sentinel.
+# Heap positions and trail literals/offsets fit signed 32-bit slots.
+# A variable appears on the trail at most once; decision levels remain i64
+# because empty assumption levels need not be bounded by the variable count.
 WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
 + Wassat
@@ -153,8 +155,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @pending_conflict = -1
     @lbd_seen = i64[nv + 2]      # scratch for literal-block-distance
     @lbd_stamp = 0
-    @trail = i64[nv + 2]
-    @trail_lim = i64[nv + 2]
+    @trail = i32[nv + 2]
+    @trail_lim = i32[nv + 2]
     # the assignment again, indexed by literal (lit_index): lassign[2v] is
     # assign[v], lassign[2v+1] is -assign[v]. One byte load answers "is this
     # literal true?" in native propagate — no sign-mask arithmetic.
@@ -4390,7 +4392,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     return 0 if highest < @trail_lim.size && highest < @lbd_seen.size && highest < @shcnt.size
     raise "assumption decision levels exceed fixed solver capacity" if @fixed_caps
     cap = highest + 2
-    @trail_lim = i64[cap] if highest >= @trail_lim.size
+    @trail_lim = i32[cap] if highest >= @trail_lim.size
     @lbd_seen = i64[cap] if highest >= @lbd_seen.size
     @shcnt = i64[cap] if highest >= @shcnt.size
     0
@@ -4554,13 +4556,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # trail variable after an already-matching prefix. Copying the whole trail
 # at each new depth is quadratic on long conflict-free descents; solve_loop
 # retains the prefix only while assignments and saved phases stay unchanged.
--> wassat_best_phase_save(tr, asg, bph, start, tsize, work) (i64[] i8[] i8[] i64 i64 i64[])
+-> wassat_best_phase_save(tr, asg, bph, start, tsize, work) (i32[] i8[] i8[] i64 i64 i64[])
   work[6] += 1
   work[7] += tsize - start
   work[8] += start
   ti = start
   while ti < tsize
-    l = tr[ti]
+    l = tr[ti] ## i64
     v = l
     v = 0 - l if l < 0
     bph[v] = asg[v]
@@ -4569,14 +4571,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
 # The same uninterrupted descent also extends the decision spine. Retain
 # its earlier entries; conflict/restart invalidation forces a full rebuild.
--> wassat_save_spine(tr, tlim, rsn, spine, start, dlevel, saved, nassump, work) (i64[] i64[] i32[] i64[] i64 i64 i64 i64 i64[]) i64
+-> wassat_save_spine(tr, tlim, rsn, spine, start, dlevel, saved, nassump, work) (i32[] i32[] i32[] i64[] i64 i64 i64 i64 i64[]) i64
   work[9] += 1
   work[10] += dlevel - start if dlevel > start
   work[11] += start - nassump
   out = saved
   lv = start
   while lv < dlevel
-    lit = tr[tlim[lv]]
+    lit = tr[tlim[lv]] ## i64
     v = lit
     v = 0 - lit if lit < 0
     if rsn[v] < 0
@@ -6165,7 +6167,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     i += 1
   0
 
--> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64 i64[] i64[]) i64
+-> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i64[] i8[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i32[] i64[] i64 i64[] i64[]) i64
   word_mask = 4294967295 ## i64
   qhead = st[0]
   tsize = st[1]
@@ -6173,7 +6175,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   bail = 0
   visits = 0
   while qhead < tsize && conflict < 0 && bail == 0
-    p = tr[qhead]
+    p = tr[qhead] ## i64
     qhead += 1
     visits += 1
     neg = 0 - p
@@ -6537,7 +6539,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[12..20] = cumulative pre-scan/resume visits, probes, failed probes,
 #     removed literals, maximum reason length, frames, input literals, skipped
 #     probes. The maximum is a high-water mark; all other counts accumulate.
--> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark) (i64[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark) (i64[] i8[] i64[] i32[] i8[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   confl = st[0]
   tsize = st[1]
   dl = st[2]
@@ -6638,13 +6640,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # counter and the resolution (this produced false UNSAT verdicts on
     # satisfiable bmc instances). Their marks stay set; the shared
     # clearing pass below handles them.
-    tv = tr[index]
+    tv = tr[index] ## i64
     av = tv
     if tv < 0
       av = 0 - tv
     while sn[av] == 0 || lvl[av] < dl
       index -= 1
-      tv = tr[index]
+      tv = tr[index] ## i64
       av = tv
       if tv < 0
         av = 0 - tv
@@ -6921,7 +6923,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[3] += block attempts           st[4] += blocks shrunk
 #   st[6] = removable/poison clear-list size (internal)
 #   st[7] += distinct decision levels collected
--> wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk, dstk, tclr, cnt, st, nv) (i64[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+-> wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk, dstk, tclr, cnt, st, nv) (i64[] i8[] i64[] i32[] i8[] i64[] i32[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
   n = st[0]
   if n <= 2
     tgt = 0
@@ -6978,8 +6980,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if cnt[bl] >= 2
       st[3] = st[3] + 1
       opn = cnt[bl]
-      flr = tlim[bl - 1]
-      ti = tlim[bl] - 1
+      flr = tlim[bl - 1] ## i64
+      ti = tlim[bl] - 1 ## i64
       np = 0
       bad = 0
       uip = 0
@@ -6992,7 +6994,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             bad = 1
             scanning = 0
           else
-            tv = tr[ti]
+            tv = tr[ti] ## i64
             av = tv
             av = 0 - tv if tv < 0
             # Most trail entries are unmarked. Check that first, so they
@@ -7005,7 +7007,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             else
               ti -= 1
         if bad == 0
-          tv = tr[ti]
+          tv = tr[ti] ## i64
           av = tv
           av = 0 - tv if tv < 0
           sn[av] = 0
@@ -7527,7 +7529,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # cone over reason clauses (2), then cite each cone reason in trail order
 # with the conflict last. Marks are cleared before returning. Returns the
 # hint count, or -1 when a cone literal has no reason (caller raises).
--> wassat_wrat_hints(ar, cm, rsn, sn, tr, gid, work, hout, lbuf, n, confl, tsize) (i64[] i64[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
+-> wassat_wrat_hints(ar, cm, rsn, sn, tr, gid, work, hout, lbuf, n, confl, tsize) (i64[] i64[] i32[] i8[] i32[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
   i = 0
   while i < n
     q = lbuf[i]
@@ -7561,7 +7563,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   hn = 0
   ti = 0
   while ti < tsize
-    q = tr[ti]
+    q = tr[ti] ## i64
     v = q
     v = 0 - q if q < 0
     if sn[v] == 2
@@ -7616,15 +7618,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # (st[2] returns the qhead rewind point).
 #   st[0] = dlevel in/out   st[1] = tsize in/out   st[2] = qhead out
 #   st[3] = cumulative unassigned variables (one update per call)
--> wassat_backjump(tr, tlim, asg, lasg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i64[] i64[] i8[] i8[] i64[] i32[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
+-> wassat_backjump(tr, tlim, asg, lasg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i32[] i32[] i8[] i8[] i64[] i32[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
   dl = st[0]
   ts = st[1]
   kept = 0
   while dl > target
-    limit = tlim[dl - 1]
+    limit = tlim[dl - 1] ## i64
     while ts > limit
       ts -= 1
-      l = tr[ts]
+      l = tr[ts] ## i64
       v = l
       v = 0 - l if l < 0
       if chrono == 1 && lvl[v] <= target

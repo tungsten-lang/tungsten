@@ -5,7 +5,7 @@ use ../lib/solver
 # the suffix being removed. Equal stamps retain the old cursor, or the last
 # variable on the original trail when a new maximum is first encountered.
 -> check_backjump_cursor(stamps, levels, initial, target, chrono, present)
-  tr = i64[10]; tlim = i64[4]; asg = i8[9]; lasg = i8[22]
+  tr = i32[10]; tlim = i32[4]; asg = i8[9]; lasg = i8[22]
   lvl = i64[9]; rsn = i32[9]; heap = i64[9]; hpos = i32[9]
   act = i64[9]; hst = i64[2]; vqs = i64[9]; vst = i64[5]
   kept = i64[10]; st = i64[4]

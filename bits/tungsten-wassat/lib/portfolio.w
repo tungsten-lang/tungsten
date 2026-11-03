@@ -27,6 +27,7 @@
 use atomic_stop
 use small_circuit
 use dependency_circuit
+use wide_circuit
 use count_cover
 use counter_cover
 use affine_design
@@ -1977,6 +1978,32 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, roster_extra)
+  # Wider AND/XOR recovery uses an empty circuit slot or follows its existing
+  # recognizer after a miss. Preserve its priority and resident scratch.
+  if art["raw"] == true && cycle_plan == nil && art["config"].max_clause_size > 3 && art["config"].max_clause_size <= 7 && env("WASSAT_SMALL_CIRCUIT") != "0" && env("WASSAT_WIDE_CIRCUIT") != "0"
+    wide_allowed = env("WASSAT_ARMS") == nil || env("WASSAT_WIDE_CIRCUIT") == "1"
+    wide_allowed = false if wassat_race_round1_conflicts != 0
+    wide_workers = pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1)
+    if wide_allowed && (circuit_plan != nil || System.cpu_count > wide_workers) && System.physical_memory_bytes > 0
+      wide_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
+      wide_extra += nae_plan["scratch"] if nae_plan != nil
+      wide_extra += capacity_plan["scratch"] if capacity_plan != nil
+      if circuit_plan != nil
+        # Early circuit reservations can already be in perm_extra. Counting
+        # them again is conservative; late recognizers are not included yet.
+        if circuit_plan.has_key?("scratch")
+          wide_extra += circuit_plan["scratch"]
+        else
+          wide_extra += 192 * (nv + formula["flat_ncl"] + 1)
+      wide_extra += wassat_wide_bytes(nv, formula["flat_ncl"])
+      if wassat_race_memory_fits?(formula,
+        cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
+        sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, wide_extra)
+        wide_plan = wassat_wide_plan(formula)
+        if circuit_plan == nil
+          circuit_plan = wide_plan
+        elsif wide_plan != nil
+          circuit_plan["wide_fallback"] = wide_plan
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -2568,6 +2595,40 @@ WASSAT_AXIS_SLOTS = 10
 #     arm's learned clauses and pays a fresh from_flat, so churn on a race
 #     whose arms are all comparable — which the measurements say is the common
 #     case — is a pure loss.
+# Keep the established recognizer first. A failed shape test does not consume
+# this circuit slot for the whole race: try the bounded wider gate evaluator
+# in the same worker. No established CDCL or SLS arm is delayed or removed.
+-> wassat_circuit_fallback_arm(formula, plan, fallback, stop, res, base, nv)
+  started = clock_ms()
+  lits = formula["flat_lits"]; offs = formula["flat_offs"]; lens = formula["flat_lens"]
+  program = plan["program"]; inputs = plan["inputs"]; assertions = plan["assertions"]
+  meta = plan["meta"]; values = plan["values"]
+  if plan["roster_bound"] == true
+    wassat_roster_arm(formula, meta, stop, res, base, nv)
+  elsif plan["affine_design"] == true
+    wassat_affine_design_arm(formula, meta, stop, res, base, nv)
+  elsif plan["counter_cover"] == true
+    wassat_counter_cover_arm(formula, meta, stop, res, base, nv)
+  elsif plan["resource_capacity"] == true
+    wassat_resource_arm(formula, meta, stop, res, base, nv)
+  elsif plan["byte_relation"] == true
+    wassat_byte_arm(formula, meta, stop, res, base, nv)
+  elsif plan["selector_latin"] == true
+    wassat_selector_latin_arm(lits, offs, lens, meta, stop, res, base, nv, formula["flat_ncl"])
+  elsif plan["count_cover"] == true
+    wassat_count_cover_arm(lits, offs, lens, meta, stop, res, base, nv, formula["flat_ncl"])
+  elsif plan["dependency"] == true
+    wassat_dependency_circuit_arm(lits, offs, lens, program, inputs, assertions, meta, values, stop, res, base, nv)
+  else
+    wassat_small_circuit_arm(lits, offs, lens, program, inputs, assertions, meta, values, stop, res, base, nv)
+  if res[base] == 0 && wassat_stop_load(stop) == 0
+    program = fallback["program"]; inputs = fallback["inputs"]; assertions = fallback["assertions"]
+    meta = fallback["meta"]; values = fallback["values"]
+    wassat_wide_arm(lits, offs, lens, program, inputs, assertions, meta, values, stop, res, base, nv)
+  res[base + nv + 6] = started
+  res[base + nv + 5] = clock_ms()
+  0
+
 -> wassat_race_run(race, budget)
   nv = race["nv"]
   res = race["res"] ## i64[]
@@ -2605,7 +2666,7 @@ WASSAT_AXIS_SLOTS = 10
   circuit_idx = threads + 3
   circuit_base = circuit_idx * (nv + 8)
   circuit_plan = race["circuit_plan"]
-  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true)
+  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true || circuit_plan["wide_circuit"] == true)
   circuit_handle = nil
   keychart_plan = race["keychart_plan"]
   keychart_idx = race["keychart_index"]
@@ -2698,7 +2759,10 @@ WASSAT_AXIS_SLOTS = 10
     circuit_assertions = circuit_plan["assertions"]
     circuit_meta = circuit_plan["meta"]
     circuit_values = circuit_plan["values"]
-    if circuit_plan["roster_bound"] == true
+    wide_fallback = budget == 0 ? circuit_plan["wide_fallback"] : nil
+    if wide_fallback != nil
+      circuit_handle = Thread.new -> wassat_circuit_fallback_arm(formula, circuit_plan, wide_fallback, stop, res, circuit_base, nv)
+    elsif circuit_plan["roster_bound"] == true
       circuit_handle = Thread.new -> wassat_roster_arm(formula, circuit_meta, stop, res, circuit_base, nv)
     elsif circuit_plan["affine_design"] == true
       circuit_handle = Thread.new -> wassat_affine_design_arm(formula, circuit_meta, stop, res, circuit_base, nv)
@@ -2719,6 +2783,12 @@ WASSAT_AXIS_SLOTS = 10
       circuit_handle = Thread.new -> wassat_count_cover_arm(
         circuit_lits, circuit_offs, circuit_lens, circuit_meta,
         stop, res, circuit_base, nv, count_nc
+      )
+    elsif circuit_plan["wide_circuit"] == true
+      circuit_handle = Thread.new -> wassat_wide_arm(
+        circuit_lits, circuit_offs, circuit_lens, circuit_program,
+        circuit_inputs, circuit_assertions, circuit_meta, circuit_values,
+        stop, res, circuit_base, nv
       )
     elsif circuit_plan["dependency"] == true
       circuit_handle = Thread.new -> wassat_dependency_circuit_arm(
@@ -3072,8 +3142,12 @@ WASSAT_AXIS_SLOTS = 10
         wassat_selector_latin_profile(cm)
       elsif circuit_plan["count_cover"] == true
         wassat_count_cover_profile(cm)
+      elsif circuit_plan["wide_circuit"] == true
+        wassat_wide_profile(cm)
       else
         wassat_prof_note("race.circuit inputs=[cm[1]] gates=[cm[2]] batches=[cm[6]]/[cm[5]] gate_evaluations=[cm[7]] assertion_literals=[cm[8]] stopped=[cm[9]] result=[cm[10]] ms=[ended - res[circuit_base + nv + 6]]")
+      if circuit_plan["wide_fallback"] != nil && budget == 0
+        wassat_wide_profile(circuit_plan["wide_fallback"]["meta"])
       if circuit_plan["dependency"] == true
         wassat_prof_note("race.circuit.dependencies recognized=[cm[0]] relations=[cm[13]] hash_probes=[cm[12]] clauses=[cm[14]] dependency_visits=[cm[15]] build_ms=[cm[16]]")
     if keychart_plan != nil
@@ -3207,17 +3281,21 @@ WASSAT_AXIS_SLOTS = 10
   # caller must walk the matching elimination stack — "pre_index" says which
   # rendering won (-1 = the raw one). Getting this wrong is caught by the
   # model check against the original formula, never passed off as an answer.
+  wide_won = circuit_plan != nil && winner == circuit_idx && circuit_plan["wide_circuit"] == true
+  if circuit_plan != nil && winner == circuit_idx && circuit_plan["wide_fallback"] != nil && budget == 0
+    wide_won = circuit_plan["wide_fallback"]["meta"][10] == -1
   { "status": status, "model": model, "winner": winner, "conflicts": conflicts,
     "conflict_budget": conflict_budget,
     "pre_index": (winner >= threads && winner < threads + pre.size) ? winner - threads : 0 - 1,
     "circuit_won": circuit_plan != nil && winner == circuit_idx,
-    "roster_bound_won": circuit_plan != nil && circuit_plan["roster_bound"] == true && winner == circuit_idx,
-    "affine_design_won": circuit_plan != nil && circuit_plan["affine_design"] == true && winner == circuit_idx,
-    "counter_cover_won": circuit_plan != nil && circuit_plan["counter_cover"] == true && winner == circuit_idx,
-    "count_cover_won": circuit_plan != nil && circuit_plan["count_cover"] == true && winner == circuit_idx,
-    "resource_capacity_won": circuit_plan != nil && circuit_plan["resource_capacity"] == true && winner == circuit_idx,
-    "byte_relation_won": circuit_plan != nil && circuit_plan["byte_relation"] == true && winner == circuit_idx,
-    "selector_latin_won": circuit_plan != nil && circuit_plan["selector_latin"] == true && winner == circuit_idx,
+    "wide_circuit_won": wide_won,
+    "roster_bound_won": circuit_plan != nil && circuit_plan["roster_bound"] == true && winner == circuit_idx && !wide_won,
+    "affine_design_won": circuit_plan != nil && circuit_plan["affine_design"] == true && winner == circuit_idx && !wide_won,
+    "counter_cover_won": circuit_plan != nil && circuit_plan["counter_cover"] == true && winner == circuit_idx && !wide_won,
+    "count_cover_won": circuit_plan != nil && circuit_plan["count_cover"] == true && winner == circuit_idx && !wide_won,
+    "resource_capacity_won": circuit_plan != nil && circuit_plan["resource_capacity"] == true && winner == circuit_idx && !wide_won,
+    "byte_relation_won": circuit_plan != nil && circuit_plan["byte_relation"] == true && winner == circuit_idx && !wide_won,
+    "selector_latin_won": circuit_plan != nil && circuit_plan["selector_latin"] == true && winner == circuit_idx && !wide_won,
     "cover_won": cover_plan != nil && winner == cover_idx,
     "keychart_won": keychart_plan != nil && winner == keychart_idx,
     "domain_won": domain_plan != nil && winner == domain_idx,

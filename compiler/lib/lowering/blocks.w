@@ -786,9 +786,11 @@
 
   # Back in caller context: create closure with captures
   if captures.size() > 0
-    # Allocate capture array on stack
+    # The runtime copies this scratch array into the closure. Reserve it once
+    # per function invocation: allocating at the creation site grows the stack
+    # on every iteration when a loop repeatedly creates a capturing block.
     arr_ptr = next_temp(wfn)
-    emit_wire_alloca_array(wfn, captures.size(), arr_ptr)
+    wfn[:blocks][0][:instructions].unshift(wire_make_alloca_array(captures.size(), arr_ptr))
     # Store each captured variable's value into the array
     ci = 0
     while ci < captures.size()

@@ -2106,6 +2106,23 @@
           }
           CNEXT();
         }
+        if (has_receiver && name == NAME_UNSHIFT && argc > 0 &&
+            tc_kind(receiver) == TC_VAL_ARRAY && tc_as_array(receiver)) {
+          TcRuntimeArray *array = tc_as_array(receiver);
+          if (!promote_ast_value(&args[0], err) ||
+              !runtime_array_ensure_cap(array, (size_t)array->size + 1, err)) {
+            FREE_ARGS();
+            goto cleanup_fail;
+          }
+          memmove(array->slots + 1, array->slots, array->size * sizeof(TcValue));
+          array->slots[0] = args[0];
+          array->size++;
+          FREE_ARGS();
+          if (!push(&vm, receiver, err)) {
+            goto cleanup_fail;
+          }
+          CNEXT();
+        }
         if (has_receiver && name == NAME_SHIFT && argc == 0 &&
             tc_kind(receiver) == TC_VAL_ARRAY && tc_as_array(receiver)) {
           TcValue out = tc_box_nil();

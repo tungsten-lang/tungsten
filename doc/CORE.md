@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(809 total), grouped by area, with its declaration, a one-line
+(837 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -300,7 +300,35 @@ summary from the source header, and a link to the source.
 | `OptimizationStatus` | `+ OptimizationStatus` | — | [`core/optimization.w`](../core/optimization.w) |
 | `Interpolate` | `+ Interpolate` | Interpolate — interpolation and numerical quadrature. | [`core/interpolate.w`](../core/interpolate.w) |
 | `SciIO` | `+ SciIO` | SciIO — scientific data interchange (no system libhdf5/netcdf/arrow). | [`core/io.w`](../core/io.w) |
-| `Plot` | `+ Plot` | Plot — terminal sparklines / heatmaps (zero-dep). | [`core/plot.w`](../core/plot.w) |
+| `Plot` | `+ Plot` | Plot — scene constructors (core/plot/) plus terminal sparklines, heatmaps, and lines. | [`core/plot.w`](../core/plot.w) |
+| `PlotData` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotStyle` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotCoordinateSystem` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotNode` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotPolyline` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotPoints` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotArrow` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotLabel` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotSampledCurve` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotVectorField` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotAxes` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotGroup` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotScene` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotLayout` | — | — | [`core/plot.w`](../core/plot.w) |
+| `PlotModelCheck` | — | — | [`core/plot.w`](../core/plot.w) |
+| `Animation` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationValue` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationCamera2D` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationKeyframe` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationTrack` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationFrame` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationTimeline` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationTrackIntervalAssertion` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationVerificationResult` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationVerificationReport` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationVerifier` | — | — | [`core/animation.w`](../core/animation.w) |
+| `AnimationPointPreview` | `+ AnimationPointPreview` | — | [`core/animation/point_preview.w`](../core/animation/point_preview.w) |
+| `AnimationWindowPreview` | `+ AnimationWindowPreview` | — | [`core/animation/window_preview.w`](../core/animation/window_preview.w) |
 | `Plot3D` | `+ Plot3D` | Plot3D — interactive 3D visualization export for grid simulations. | [`core/plot3d.w`](../core/plot3d.w) |
 | `Raster` | `+ Raster` | Raster — an RGB pixel canvas with PNG and animated-GIF encoders. | [`core/raster.w`](../core/raster.w) |
 | `PngEncoder` | `+ PngEncoder` | -------------------------------------------------------------------------- | [`core/raster.w`](../core/raster.w) |

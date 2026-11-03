@@ -34,6 +34,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
 #import <CoreGraphics/CoreGraphics.h>
+#include <stdio.h>
 #include "runtime.h"
 #include "wvalue.h"
 
@@ -141,6 +142,15 @@ static void gfx_ensure_app(void) {
     [NSApp activateIgnoringOtherApps:YES];
 }
 
+static void gfx_require_main_thread(const char *operation) {
+    if (![NSThread isMainThread]) {
+        char message[256];
+        snprintf(message, sizeof(message), "%s: must run on the process main thread",
+                 operation);
+        w_raise(w_string(message));
+    }
+}
+
 /* ---- w_gfx_window_new(device, title, width, height) ---- */
 
 WValue w_gfx_window_new(WValue device_v, WValue title_v, WValue width_v, WValue height_v) {
@@ -150,6 +160,7 @@ WValue w_gfx_window_new(WValue device_v, WValue title_v, WValue width_v, WValue 
     int h = (int)w_to_i64(height_v);
     if (w <= 0 || h <= 0) w_raise(w_string("gfx.window_new: width/height must be positive"));
 
+    gfx_require_main_thread("gfx.window_new");
     gfx_ensure_app();
 
     WGfxWindow *gw = (WGfxWindow *)calloc(1, sizeof(WGfxWindow));
@@ -159,9 +170,7 @@ WValue w_gfx_window_new(WValue device_v, WValue title_v, WValue width_v, WValue 
     gw->device = (void *)[dev retain];
 
     __block WGfxWindow *captured = gw;
-    /* All AppKit object creation must happen on the main thread. The
-     * Tungsten program's main runs on the process main thread, so a
-     * direct call is fine; dispatch_sync guards the rare embedded case. */
+    /* All AppKit work remains on the process main thread. */
     void (^build)(void) = ^{
         NSRect frame = NSMakeRect(0, 0, captured->width, captured->height);
         NSWindowStyleMask style = NSWindowStyleMaskTitled |
@@ -201,10 +210,11 @@ WValue w_gfx_window_new(WValue device_v, WValue title_v, WValue width_v, WValue 
         captured->view = (void *)view;
         captured->delegate = (void *)del;
     };
-    if ([NSThread isMainThread]) build();
-    else dispatch_sync(dispatch_get_main_queue(), build);
+    build();
 
-    gw->queue = (void *)[[dev newCommandQueue] retain];
+    id<MTLCommandQueue> queue = [dev newCommandQueue];
+    if (!queue) w_raise(w_string("gfx.window_new: could not create Metal command queue"));
+    gw->queue = (void *)queue;
 
     return w_box_ptr(gw, W_SUBTAG_GENERIC);
 }
@@ -214,6 +224,7 @@ WValue w_gfx_window_new(WValue device_v, WValue title_v, WValue width_v, WValue 
 WValue w_gfx_poll(WValue window_v) {
     WGfxWindow *gw = as_gfx_window(window_v);
     if (!gw) w_raise(w_string("gfx.poll: not a window"));
+    gfx_require_main_thread("gfx.poll");
     @autoreleasepool {
         NSEvent *ev;
         while ((ev = [NSApp nextEventMatchingMask:NSEventMaskAny
@@ -263,6 +274,7 @@ WValue w_gfx_should_close(WValue window_v) {
 WValue w_gfx_set_mouse_capture(WValue window_v, WValue on_v) {
     WGfxWindow *gw = as_gfx_window(window_v);
     if (!gw) w_raise(w_string("gfx.set_mouse_capture: not a window"));
+    gfx_require_main_thread("gfx.set_mouse_capture");
     bool on = w_to_i64(on_v) != 0;
     if (on == gw->input.mouse_captured) return W_NIL;
     gw->input.mouse_captured = on;
@@ -276,10 +288,14 @@ WValue w_gfx_set_mouse_capture(WValue window_v, WValue on_v) {
     return W_NIL;
 }
 
-/* ---- w_gfx_present(window, buffer, width, height) ----
+/* ---- present helpers ----
  * Blit an RGBA8 MTLBuffer (one uint per pixel, row-major, width*height
- * pixels) into the next drawable and present it. */
-WValue w_gfx_present(WValue window_v, WValue buffer_v, WValue width_v, WValue height_v) {
+ * pixels) into the next drawable and present it. The synchronous entry point
+ * waits for completion so CPU-authored shared buffers are safe to overwrite
+ * immediately after it returns. */
+static WValue gfx_present_impl(WValue window_v, WValue buffer_v,
+                               WValue width_v, WValue height_v,
+                               bool wait_for_completion) {
     WGfxWindow *gw = as_gfx_window(window_v);
     if (!gw) w_raise(w_string("gfx.present: not a window"));
 
@@ -295,14 +311,17 @@ WValue w_gfx_present(WValue window_v, WValue buffer_v, WValue width_v, WValue he
     int64_t need = (int64_t)w * (int64_t)h * 4;
     if (b->size < need) w_raise(w_string("gfx.present: buffer smaller than width*height*4"));
 
+    gfx_require_main_thread("gfx.present");
     @autoreleasepool {
         CAMetalLayer *layer = (CAMetalLayer *)gw->layer;
         id<CAMetalDrawable> drawable = [layer nextDrawable];
-        if (!drawable) return W_NIL;   /* dropped frame — try again next tick */
+        if (!drawable) return w_bool(0); /* dropped frame — try again next tick */
 
         id<MTLCommandQueue> queue = (id<MTLCommandQueue>)gw->queue;
         id<MTLCommandBuffer> cb = [queue commandBuffer];
+        if (!cb) w_raise(w_string("gfx.present: could not create Metal command buffer"));
         id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+        if (!blit) w_raise(w_string("gfx.present: could not create Metal blit encoder"));
         [blit copyFromBuffer:(id<MTLBuffer>)b->handle
                 sourceOffset:(NSUInteger)b->offset
            sourceBytesPerRow:(NSUInteger)(w * 4)
@@ -315,6 +334,32 @@ WValue w_gfx_present(WValue window_v, WValue buffer_v, WValue width_v, WValue he
         [blit endEncoding];
         [cb presentDrawable:drawable];
         [cb commit];
+
+        if (wait_for_completion) {
+            [cb waitUntilCompleted];
+            if ([cb status] == MTLCommandBufferStatusError) {
+                NSError *err = [cb error];
+                const char *detail = err ? [[err localizedDescription] UTF8String]
+                                         : "unknown error";
+                char message[1024];
+                snprintf(message, sizeof(message),
+                         "gfx.present_wait: command buffer failed: %s", detail);
+                w_raise(w_string(message));
+            }
+        }
     }
-    return W_NIL;
+    return w_bool(1);
+}
+
+/* Asynchronous compatibility path. Existing callers retain responsibility for
+ * keeping the source buffer unchanged until the GPU has consumed it. */
+WValue w_gfx_present(WValue window_v, WValue buffer_v,
+                     WValue width_v, WValue height_v) {
+    return gfx_present_impl(window_v, buffer_v, width_v, height_v, false);
+}
+
+/* Blocking path for deterministic previews and other CPU-authored buffers. */
+WValue w_gfx_present_wait(WValue window_v, WValue buffer_v,
+                          WValue width_v, WValue height_v) {
+    return gfx_present_impl(window_v, buffer_v, width_v, height_v, true);
 }

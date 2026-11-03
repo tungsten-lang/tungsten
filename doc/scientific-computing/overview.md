@@ -19,7 +19,8 @@ Flat under `core/` (no `core/sci/` namespace):
 | `physics.w` | measurements/GLS, gas laws, Euler systems, Cartesian finite volume, diagnostics |
 | `blas.w` | Accelerate BLAS1/2/3 + vDSP |
 | `mlx.w` | MLX GPU opt-in: GEMM + elementwise + reduce + softmax + FFT + RNG |
-| `plot.w` | **Plot** sparklines |
+| `plot.w` / `plot/` | declarative 2-D scenes, sampling, realized model-check groups, data/JSON; terminal fallbacks |
+| `animation.w` / `animation/` | deterministic keyframes, HOP timelines, temporal assertions, 2-D camera, frame descriptions |
 | `latex.w` | safe, composable LaTeX source for values, equations, tables, and publication profiles |
 | `io.w` | SciIO — CSV/FITS/Zarr/MAT/**TH5** (not full HDF5); no system lib deps |
 | `cuda.w` | CUDA host surface |
@@ -39,6 +40,11 @@ bin/tungsten -o /tmp/wt   spec/sci/wtensor_spec.w && /tmp/wt            # WTENSO
 bin/tungsten -o /tmp/wts  spec/sci/wtensor_slice_spec.w && /tmp/wts     # WTENSOR_SLICE_OK
 bin/tungsten -o /tmp/ion  spec/sci/io_native_spec.w && /tmp/ion         # IO_NATIVE_OK
 bin/tungsten -o /tmp/fmts spec/sci/formats_spec.w && /tmp/fmts          # FORMATS_OK
+bin/tungsten -o /tmp/plot spec/core/plot_scene_spec.w && /tmp/plot       # plot scene data
+bin/tungsten -o /tmp/plotmc spec/core/plot_model_check_spec.w && /tmp/plotmc # realized model checks
+bin/tungsten -o /tmp/anim spec/core/animation_timeline_spec.w && /tmp/anim # animation timeline
+bin/tungsten -o /tmp/animmc spec/core/animation_model_check_spec.w && /tmp/animmc # HOP timeline
+bin/tungsten -o /tmp/animv spec/core/animation_verification_spec.w && /tmp/animv # temporal assertions
 bash benchmarks/mlx/smoke_ops.sh                                       # MLX_OPS_OK (needs mlx-c)
 ```
 
@@ -48,4 +54,4 @@ Large multi-module programs can hit a compiler SSA name-clash (`t0`); keep specs
 
 Docs: `calculus.md`, `signal.md`, `statistics.md`, `probability.md`,
 `tensor-vs-array.md`, `wtensor.md`, `sparse.md`, `io.md` (TH5 honesty),
-`units.md`, `latex.md`, [physics.md](../physics.md).
+`units.md`, `latex.md`, `plot.md`, `animation.md`, [physics.md](../physics.md).

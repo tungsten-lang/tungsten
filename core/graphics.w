@@ -12,8 +12,9 @@
 # window's next drawable. No vertex/fragment pipeline — compute straight
 # to the screen.
 #
-# Load with `use core/graphics` (not autoloaded). macOS only — the
-# w_gfx_* symbols live in runtime/graphics.m, compiled on darwin.
+# Load with `use core/graphics` (not autoloaded). The real backend is macOS
+# only; other targets link weak runtime stubs that raise when called. Window
+# creation, polling, and presentation must remain on the process main thread.
 
 use core/metal
 
@@ -57,9 +58,20 @@ use core/metal
 
 # Present an RGBA8 buffer (width*height u32 pixels, row-major) to the
 # window by blitting it into the next drawable. Call once per frame after
-# the render kernel has finished writing the buffer.
+# the render kernel has finished writing the buffer. Presentation is
+# asynchronous: callers must not assume the buffer is safe to overwrite when
+# this function returns. Returns true when a drawable was presented, false if
+# the layer had no drawable available.
 -> gfx_present(window, buffer, width, height)
   ccall("w_gfx_present", window, buffer, width, height)
+
+# Present the same RGBA8 buffer and wait for the blit command to finish. When
+# this function returns, the caller may safely reuse or overwrite `buffer`.
+# This blocking path is intended for deterministic CPU-authored previews;
+# throughput-oriented render loops can continue to use `gfx_present` with
+# their own in-flight resource management. It returns the same success flag.
+-> gfx_present_wait(window, buffer, width, height)
+  ccall("w_gfx_present_wait", window, buffer, width, height)
 
 # ---- Hardware keyCode constants (ANSI layout positions) ----
 

@@ -1,7 +1,21 @@
-# Plot — terminal sparklines / heatmaps (zero-dep).
-# Richer braille canvas: bits/tungsten-drawille (also defines Plot/Canvas —
-# bit path wins when the bit is loaded; this core Plot is the fallback).
+# Plot — deterministic mathematical scene data plus terminal fallbacks.
+#
+# The retained 2-D scene model is split under core/plot/. It produces portable
+# Arrays/Hashes (and deterministic JSON) rather than owning a renderer. The
+# legacy zero-dependency sparkline, heatmap, and coarse terminal line helpers
+# remain here for compatibility. Braille rasterization remains in the optional
+# tungsten-drawille bit.
 
+use core/plot/support
+use core/plot/style
+use core/plot/coordinates
+use core/plot/geometry
+use core/plot/scene
+use core/plot/sampling
+use core/plot/layout
+use core/plot/model_check
+
+# Plot — scene constructors (core/plot/) plus terminal sparklines, heatmaps, and lines.
 + Plot
   # ASCII levels as a list of 1-char strings (avoids String#[] edge cases).
   # Full braille canvas: bits/tungsten-drawille.

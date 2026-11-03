@@ -1667,6 +1667,15 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
   tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
   0
 
+# The assumption oracles retain work across rounds, just like the race arms.
+# Called only by the coordinator, with no native workers still running.
+-> wassat_windmill_profile_master(coord)
+  return 0 if coord == nil || env("WASSAT_PROFILE") != "1"
+  coord["master"].profile_counters("windmill.master")
+  coord["vfree"].profile_counters("windmill.vfree")
+  coord["refute"].profile_counters("windmill.refute")
+  0
+
 -> wassat_windmill_solve(formula, result, total_budget = 0)
   miss = wassat_windmill_miss
   return miss unless formula.has_key?("flat_ncl")
@@ -1712,6 +1721,7 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     stats[0] += mres["conflicts"]
     stats[1] += mres["decisions"]
     stats[2] += mres["props"]
+    msolver.profile_counters("windmill.mirror") if tprof != 0
     tprof = wassat_prof("windmill.mirror_probe", tprof)
     if mres["status"] == 1 && wassat_model_satisfies?(formula, mres["model"])
       out["status"] = 1
@@ -1771,6 +1781,7 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     imodel = wassat_windmill_master_step(
       formula, lay, vinfo, coord, global_cuts, stats, cap, 4
     )
+    wassat_windmill_profile_master(coord) if tprof != 0
     tprof = wassat_prof("windmill.master_init", tprof)
     unless imodel.empty?
       out["status"] = 1
@@ -1791,6 +1802,7 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
   extra_arenas += 2 if coord != nil
   n_arms = wassat_windmill_arm_count(nv, ncl, extra_arenas)
   n_arms = 1 if rem_budget < 25000
+  wassat_prof_note("windmill.resources arms=[n_arms] extra_arenas=[extra_arenas] budget=[rem_budget]") if tprof != 0
 
   stop = i64[4]
   res_stride = nv + 8
@@ -1834,6 +1846,7 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     else
       slice = WASSAT_WINDMILL_ROUND_SLICE
       slice = avail if avail < slice
+      round_prof = wassat_prof_clock
       handles = []
       a = 0
       while a < n_arms
@@ -1850,6 +1863,15 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
       # Process-global inline caches: main thread ONLY joins while workers run.
       handles.each -> (h)
         z = h.join
+
+      # Read cumulative maintenance counters only after every arm has joined.
+      # This includes work hidden inside a specialist that precedes the main race.
+      if round_prof != 0
+        round_prof = wassat_prof("windmill.arm_round", round_prof)
+        a = 0
+        while a < n_arms
+          solvers[a].profile_counters("windmill.arm[a]")
+          a += 1
 
       # Barrier: accumulate telemetry and check for a verified SAT winner.
       winner_arm = -1
@@ -2009,6 +2031,7 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
               formula, lay, vinfo, best_mval, best_bad_pairs, coord["best_nbad"],
               best_kstar, best_row_hits, coord, fresh_cuts, stats, cap
             )
+            wassat_windmill_profile_master(coord) if tprof != 0
             unless rmodel.empty?
               out["status"] = 1
               out["model"] = rmodel
@@ -2022,6 +2045,7 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
             mmodel = wassat_windmill_master_step(
               formula, lay, vinfo, coord, fresh_cuts, stats, cap, 3
             )
+            wassat_windmill_profile_master(coord) if tprof != 0
             unless mmodel.empty?
               out["status"] = 1
               out["model"] = mmodel

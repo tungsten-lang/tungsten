@@ -117,8 +117,10 @@
       j = 0
       while j < definition.params.size()
         if j < arg_types.size()
-          expected = normalize_type_symbol(definition.param_types[j])
-          matches = false if arg_types[j] != nil && arg_types[j] != expected
+          # Defaults use the same declared/inferred spelling equivalence as
+          # full-arity overloads (i64[] versus typed_array_i64, Array versus array).
+          expected = canonical_signature_type(definition.param_types[j])
+          matches = false if arg_types[j] != nil && canonical_signature_type(arg_types[j]) != expected
         elsif definition.params[j].default == nil
           matches = false
         j += 1

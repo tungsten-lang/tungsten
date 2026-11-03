@@ -6344,7 +6344,15 @@ module Tungsten
           if i < args.size
             env.set_slot(i, args[i])
           elsif param.default
-            env.set_slot(i, param.default.eval_in(self))
+            # Defaults see previously bound parameters in the callee, even
+            # when a caller-local variable has the same name.
+            old_env = @env
+            begin
+              @env = env
+              env.set_slot(i, param.default.eval_in(self))
+            ensure
+              @env = old_env
+            end
           else
             raise Tungsten::Error, "missing argument: #{param.name}"
           end

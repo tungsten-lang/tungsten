@@ -1583,6 +1583,58 @@
   ],
   "task": "dribble"
  },
+ "gpt_jump_stable6": {
+  "about": "gpt: legal standing broad jump with the full six-second landing observed; 32 new starts disjoint from training, validation, and previous arena jump starts. Added after the original champion fell backward beyond the existing three-second horizon. Same body, contractions, and legality checks.",
+  "env": {
+   "ROBOLAB_SJ_NOISE": "0.003",
+   "ROBOLAB_SJ_PITCH_NOISE": "0.0015"
+  },
+  "guard": {
+   "fallen": false,
+   "foul": false,
+   "inverted": false,
+   "takeoff": true
+  },
+  "higher": true,
+  "metric": "mark",
+  "python": "robolab",
+  "seconds": 6.0,
+  "seeds": [
+   272001,
+   272002,
+   272003,
+   272004,
+   272005,
+   272006,
+   272007,
+   272008,
+   272009,
+   272010,
+   272011,
+   272012,
+   272013,
+   272014,
+   272015,
+   272016,
+   272017,
+   272018,
+   272019,
+   272020,
+   272021,
+   272022,
+   272023,
+   272024,
+   272025,
+   272026,
+   272027,
+   272028,
+   272029,
+   272030,
+   272031,
+   272032
+  ],
+  "task": "search_jump_v3"
+ },
  "hurdle": {
   "about": "hurdles cleared of 4 at 0.45 m (deterministic)",
   "env": {

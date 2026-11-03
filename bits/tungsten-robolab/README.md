@@ -128,6 +128,7 @@ springs so nothing ever steps.
 | `site/progress/` | generator of the progress page (`build_progress.py` writes `progress.html`; numbers come from `champions.json`; `--publish` / `--mark-published` with `published.json` track which videos the live artifact holds) |
 | `site/keyframe_bench/` | the Keyframe Bench artifact (`keyframe_bench.html`, https://claude.ai/artifact/L6CSUpkUVwrygS5yP6UmaB): drag-the-joints keyframes with an onion skin of the whole stride and subset keyframes (`pinned` per joint; the export gives free joints their interpolated value plus `ref_<event>_<key>_free 1`); `seed.py` writes the database seed docs, `check_bench.py` runs 30 headless checks against a mock database, `bench_perf.py` times a refresh |
 | `HANDOFF_20260929.md`, `HANDOFF_20260929_board.md` | where everything stands on 29 Sep, who owns which workstream, next steps and traps |
+| `GPT_CHALLENGERS_20260927.md`, `lib/robolab/skills/gpt_*.w`, `lib/entry/gpt_*.w`, `spec/gpt_residual_spec.w`, `params/competitor_*/`, `playground/gpt_*.py`, `results-page/`, `playground/arena/codex_challengers_20260927/` | Codex's independent challenger campaign (27-29 Sep, worktree `codex/robolab-challengers`): a bounded, zero-initialised temporal-convolution residual (`GptTemporalResidual`) against phase-indexed pure search on the jump, bat and crossover champions, ten rounds; the source of the live board's `codex-*` champions. Its evidence (`out/competitor_*`, `out/gpt_campaign_final`) and frozen binaries stay in that worktree, and its scripts name that worktree's paths |
 
 ## Setup
 

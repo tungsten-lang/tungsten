@@ -3980,6 +3980,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     nm = 0
     ng = 0
     attempts = 0
+    mixed_hash = env("WASSAT_XOR_HASH_MIX") == "0" ? 0 : 1
+    indexed = 0
+    insert_probes = 0
+    query_probes = 0
+    compared = 0
+    max_advance = 0
     grow = true
     while grow
       grow = false
@@ -3998,7 +4004,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       st = wassat_congruence_buffer(scratch, 7, 8)
       wassat_extract_xor_gates(@cmeta, @alive, @arena, @lassign, lcount, cht,
                                mark, qli, gar, ght, out, st, @ncl, nl,
-                               chcap - 1, gcap, ghcap - 1, maxg)
+                               chcap - 1, gcap, ghcap - 1, maxg, mixed_hash)
+      indexed += st[3]
+      insert_probes += st[4]
+      query_probes += st[5]
+      compared += st[6]
+      max_advance = st[7] if st[7] > max_advance
       if st[2] == 1 && maxg < ceil
         maxg = 2 * maxg
         maxg = ceil if maxg > ceil
@@ -4007,6 +4018,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         nm = st[0]
         ng = st[1]
         self.add_merge_binaries(out, nm)
+    wassat_prof_note("congruence.xor_hash clauses=[indexed] insert_probes=[insert_probes] query_probes=[query_probes] compared_literals=[compared] max_advance=[max_advance] mixed=[mixed_hash]") if prof_start != 0
     z = wassat_prof("congruence.xor gates=[ng] merges=[nm] cap=[maxg] attempts=[attempts]", prof_start) if prof_start != 0
     nm
 
@@ -5136,8 +5148,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # whose negation count has one fixed parity, so a clause is the base of an
 # XOR gate exactly when every one of its parity siblings is also present.
 # Presence is answered by a clause index built once over the short clauses:
-# an open-addressed table keyed on an ORDER-INDEPENDENT sum hash of the
-# literal indices, resolved by an exact stamped set comparison. Clauses
+# an open-addressed table keyed on an order-independent sum of mixed literal
+# keys. A linear sum clusters structured equal-sum clauses (for example,
+# incidence rectangles). Exact stamped set comparison resolves collisions. Clauses
 # with a repeated or complementary literal are left out of the index, which
 # is what makes "same size and every literal marked" an exact set equality.
 #
@@ -5153,7 +5166,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #
 #   out[2i], out[2i+1] = equivalent literal pair   st[0] = merges  st[1] = gates
 #   st[2] = 1 when a capacity stopped the scan short of the whole formula
--> wassat_extract_xor_gates(cm, alive, ar, lasg, lcount, cht, mark, qli, gar, ght, out, st, ncl, nlits, chmask, gcap, ghmask, outcap) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64)
+#   st[3..7] = indexed clauses, insertion/query probes, compared literals,
+#              maximum probe advance; summed across wrapper growth attempts.
+# `mixed_hash=0` retains the linear hash for diagnostic controls only.
+-> wassat_extract_xor_gates(cm, alive, ar, lasg, lcount, cht, mark, qli, gar, ght, out, st, ncl, nlits, chmask, gcap, ghmask, outcap, mixed_hash) (i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64 i64 i64)
+  indexed = 0
+  insert_probes = 0
+  query_probes = 0
+  compared = 0
+  max_advance = 0
   li = 0
   while li < nlits
     lcount[li] = 0
@@ -5165,7 +5186,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       if n >= 3 && n <= 5
         stx = cm[ci << 1] ## i64
         dup = 0
-        acc = 0
+        acc = 0 ## i64
         j = 0
         while j < n
           l = ar[stx + j]
@@ -5185,7 +5206,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             if (l2j >> 1) == (lj >> 1)
               dup = 1
             k += 1
-          acc = acc + lj * 1000003
+          key = (mixed_hash == 1 ? wassat_subst_lit_hash(lj) : lj * 1000003) ## i64
+          acc = acc + key
           j += 1
         if dup == 0
           j = 0
@@ -5203,6 +5225,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           while cht[h] != 0 && probes <= chmask
             h = (h + 1) & chmask
             probes += 1
+          insert_probes += probes
+          max_advance = probes if probes > max_advance
+          indexed += 1
           cht[h] = ci + 1
     ci += 1
   gen = 0
@@ -5271,15 +5296,18 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               while b < n
                 mark[(qli[b] & 0 - 2) | ((pat >> b) & 1)] = gen
                 b += 1
-              acc = 0
+              acc = 0 ## i64
               b = 0
               while b < n
-                acc = acc + ((qli[b] & 0 - 2) | ((pat >> b) & 1)) * 1000003
+                li_key = (qli[b] & 0 - 2) | ((pat >> b) & 1)
+                key = (mixed_hash == 1 ? wassat_subst_lit_hash(li_key) : li_key * 1000003) ## i64
+                acc = acc + key
                 b += 1
               h = acc & chmask
               hitc = 0
               probes = 0
               while cht[h] != 0 && hitc == 0 && probes <= chmask
+                query_probes += 1
                 dci = cht[h] - 1
                 if cm[dci * 2 + 1] == n
                   stx2 = cm[dci * 2] ## i64
@@ -5295,11 +5323,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                     if mark[l2j] != gen
                       okk = 0
                     q += 1
+                    compared += 1
                   if okk == 1
                     hitc = 1
                 if hitc == 0
                   h = (h + 1) & chmask
                   probes += 1
+              max_advance = probes if probes > max_advance
               if hitc == 0
                 ok = 0
               else
@@ -5370,6 +5400,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                 ng += 1
               j += 1
     ci += 1
+  st[3] = indexed
+  st[4] = insert_probes
+  st[5] = query_probes
+  st[6] = compared
+  st[7] = max_advance
   st[0] = nm
   st[1] = ng
   st[2] = 0

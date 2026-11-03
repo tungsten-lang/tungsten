@@ -4,6 +4,8 @@
 # from a mathematically certified error bound.  No current contract is certified.
 
 + ProbabilityNumericalContract
+  ro :operation, :arithmetic, :algorithm, :limitations
+
   -> new(operation, arithmetic, algorithm, certified, limitations)
     @operation = operation
     @arithmetic = arithmetic
@@ -12,20 +14,8 @@
     @limitations = limitations
     self
 
-  -> operation
-    @operation
-
-  -> arithmetic
-    @arithmetic
-
-  -> algorithm
-    @algorithm
-
   -> certified?
     @certified
-
-  -> limitations
-    @limitations
 
   -> to_s
     (@operation + " [" + @arithmetic + "; " + @algorithm +

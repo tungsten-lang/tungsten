@@ -3,14 +3,10 @@
 use core/probability/primitives
 
 + ProbabilitySupport
+  ro :lower, :upper
+
   -> new(@lower, @upper, @lower_closed = true, @upper_closed = true,
          @discrete = false)
-
-  -> lower
-    @lower
-
-  -> upper
-    @upper
 
   -> lower_closed?
     @lower_closed

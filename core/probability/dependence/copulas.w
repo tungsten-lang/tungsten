@@ -78,6 +78,8 @@ use core/probability/special
 
 
 + CopulaDistribution < MultivariateProbabilityDistribution
+  ro :copula, :support
+
   -> new(copula, marginals)
     if marginals.class_name != "Array" || marginals.size != copula.dimension
       raise "probability copula marginals must match copula dimension"
@@ -94,14 +96,8 @@ use core/probability/special
   -> dimension
     @marginals.size
 
-  -> copula
-    @copula
-
   -> marginals
     ProbabilityNumerics.copy_array(@marginals)
-
-  -> support
-    @support
 
   -> log_probability(value)
     vector = ProbabilityLinearAlgebra.vector_dimension(

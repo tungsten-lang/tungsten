@@ -29,6 +29,8 @@ use core/probability/primitives
 # Stable facade over the committed Stats mulberry32 engine.  It is replayable,
 # but not cryptographic, splittable, or suitable for independent GPU streams.
 + ProbabilityRng
+  ro :seed
+
   -> new(seed = 1)
     if !ProbabilityNumerics.integer?(seed)
       raise "probability RNG seed must be an integer"
@@ -36,9 +38,6 @@ use core/probability/primitives
     @seed = 1 if @seed == 0
     @engine = Stats.rng(@seed)
     self
-
-  -> seed
-    @seed
 
   -> algorithm
     "mulberry32"

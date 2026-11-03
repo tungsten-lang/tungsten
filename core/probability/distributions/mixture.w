@@ -7,6 +7,8 @@ use core/probability/sampling
 use core/probability/support
 
 + MixtureDistribution < ProbabilityDistribution
+  ro :support
+
   -> new(components, weights)
     if components.class_name != "Array" || components.size == 0
       raise "probability mixture components must be a nonempty Array"
@@ -38,9 +40,6 @@ use core/probability/support
 
   -> discrete?
     @discrete
-
-  -> support
-    @support
 
   -> pdf(value)
     if @discrete

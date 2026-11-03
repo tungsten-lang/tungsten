@@ -97,17 +97,13 @@ use core/probability/distributions/discrete
 
 
 + WienerProcess < StochasticProcess
+  ro :drift, :volatility
+
   -> new(drift = ~0.0, volatility = ~1.0)
     @drift = ProbabilityNumerics.finite_float(drift, "Wiener drift")
     @volatility = ProbabilityNumerics.positive_finite(
       volatility, "Wiener volatility")
     self
-
-  -> drift
-    @drift
-
-  -> volatility
-    @volatility
 
   -> validate_time(time)
     value = ProbabilityNumerics.finite_float(time, "Wiener time")
@@ -181,12 +177,11 @@ use core/probability/distributions/discrete
 
 
 + PoissonProcess < StochasticProcess
+  ro :rate
+
   -> new(rate)
     @rate = ProbabilityNumerics.positive_finite(rate, "Poisson process rate")
     self
-
-  -> rate
-    @rate
 
   -> expected_count(duration)
     time = ProbabilityNumerics.nonnegative_finite(

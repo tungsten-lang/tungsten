@@ -8,22 +8,18 @@ use core/probability/special
 use core/probability/support
 
 + BernoulliDistribution < ProbabilityDistribution
+  ro :p, :support
+
   -> new(p = ~0.5)
     @p = ProbabilityNumerics.unit_probability(p, "Bernoulli p")
     @support = ProbabilitySupport.new(0, 1, true, true, true)
     self
-
-  -> p
-    @p
 
   -> success_probability
     @p
 
   -> discrete?
     true
-
-  -> support
-    @support
 
   -> pmf(value)
     return ~1.0 - @p if value == 0
@@ -71,6 +67,8 @@ use core/probability/support
 
 
 + UniformDistribution < ProbabilityDistribution
+  ro :lower, :upper, :support
+
   -> new(lower = ~0.0, upper = ~1.0)
     @lower = ProbabilityNumerics.finite_float(lower, "Uniform lower bound")
     @upper = ProbabilityNumerics.finite_float(upper, "Uniform upper bound")
@@ -79,15 +77,6 @@ use core/probability/support
     @width = @upper - @lower
     @support = ProbabilitySupport.new(@lower, @upper)
     self
-
-  -> lower
-    @lower
-
-  -> upper
-    @upper
-
-  -> support
-    @support
 
   -> pdf(value)
     return value if value != value
@@ -139,6 +128,8 @@ use core/probability/support
 
 
 + NormalDistribution < ProbabilityDistribution
+  ro :mean, :standard_deviation, :variance, :support
+
   -> new(mean = ~0.0, standard_deviation = ~1.0)
     @mean = ProbabilityNumerics.finite_float(mean, "Normal mean")
     @standard_deviation = ProbabilityNumerics.positive_finite(
@@ -146,18 +137,6 @@ use core/probability/support
     @variance = @standard_deviation * @standard_deviation
     @support = ProbabilitySupport.new(nil, nil, false, false)
     self
-
-  -> mean
-    @mean
-
-  -> standard_deviation
-    @standard_deviation
-
-  -> variance
-    @variance
-
-  -> support
-    @support
 
   -> standardized(value)
     (value - @mean) / @standard_deviation
@@ -197,16 +176,12 @@ use core/probability/support
 
 
 + ExponentialDistribution < ProbabilityDistribution
+  ro :rate, :support
+
   -> new(rate = ~1.0)
     @rate = ProbabilityNumerics.positive_finite(rate, "Exponential rate")
     @support = ProbabilitySupport.new(~0.0, nil)
     self
-
-  -> rate
-    @rate
-
-  -> support
-    @support
 
   -> pdf(value)
     return ~0.0 if value < ~0.0

@@ -9,6 +9,9 @@ use core/probability/primitives
 use core/probability/rng
 
 + ProbabilityRandomBatteryResult
+  ro :sample_count, :bin_count, :mean, :variance
+  ro :serial_correlation, :chi_square
+
   -> new(sample_count, bin_count, mean, variance,
          serial_correlation, chi_square, heuristic_pass)
     @sample_count = sample_count
@@ -19,24 +22,6 @@ use core/probability/rng
     @chi_square = chi_square
     @heuristic_pass = heuristic_pass
     self
-
-  -> sample_count
-    @sample_count
-
-  -> bin_count
-    @bin_count
-
-  -> mean
-    @mean
-
-  -> variance
-    @variance
-
-  -> serial_correlation
-    @serial_correlation
-
-  -> chi_square
-    @chi_square
 
   -> heuristic_pass?
     @heuristic_pass

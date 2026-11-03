@@ -38,40 +38,23 @@ use core/probability/processes/advanced
   -> probabilities
     ProbabilityNumerics.copy_array(@probabilities)
 
-  -> time
-    @time
-
-  -> rate
-    @rate
-
-  -> poisson_mean
-    @poisson_mean
+  ro :time, :rate, :poisson_mean
 
   # Includes the n=0 term.
-  -> terms
-    @terms
-
-  -> retained_poisson_mass
-    @retained_poisson_mass
+  ro :terms, :retained_poisson_mass
 
   # Cancellation-prone diagnostic retained for transparency; not used as the
   # stopping criterion.
-  -> estimated_omitted_poisson_mass
-    @estimated_omitted_poisson_mass
+  ro :estimated_omitted_poisson_mass
 
   # Post-mode geometric bound for the uncomputed Poisson terms. A 1e-12
   # relative inflation guards the sequential binary64 recurrence, but
   # certified? remains false.
-  -> poisson_tail_bound
-    @poisson_tail_bound
+  ro :poisson_tail_bound
 
   # Kept separate from retained_poisson_mass so row-action rounding remains
   # observable rather than being hidden by normalization.
-  -> probability_mass
-    @probability_mass
-
-  -> requested_tolerance
-    @requested_tolerance
+  ro :probability_mass, :requested_tolerance
 
   -> certified?
     false

@@ -8,23 +8,16 @@ use core/probability/rng
 use core/probability/support
 
 + GammaDistribution < ProbabilityDistribution
+  ro :shape, :scale, :support
+
   -> new(shape, scale = ~1.0)
     @shape = ProbabilityNumerics.positive_finite(shape, "Gamma shape")
     @scale = ProbabilityNumerics.positive_finite(scale, "Gamma scale")
     @support = ProbabilitySupport.new(~0.0, nil)
     self
 
-  -> shape
-    @shape
-
-  -> scale
-    @scale
-
   -> rate
     ~1.0 / @scale
-
-  -> support
-    @support
 
   -> log_probability(value)
     return ProbabilityNumerics.negative_infinity if value < ~0.0
@@ -116,21 +109,14 @@ use core/probability/support
 
 
 + BetaDistribution < ProbabilityDistribution
+  ro :alpha, :beta, :support
+
   -> new(alpha, beta)
     @alpha = ProbabilityNumerics.positive_finite(alpha, "Beta alpha")
     @beta = ProbabilityNumerics.positive_finite(beta, "Beta beta")
     @log_normalizer = Special.betaln(@alpha, @beta)
     @support = ProbabilitySupport.new(~0.0, ~1.0)
     self
-
-  -> alpha
-    @alpha
-
-  -> beta
-    @beta
-
-  -> support
-    @support
 
   -> log_probability(value)
     return ProbabilityNumerics.negative_infinity if (

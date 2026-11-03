@@ -7,6 +7,8 @@ use core/probability/rng
 use core/probability/sampling
 
 + ParticleFilterResult
+  ro :log_evidence
+
   -> new(particles, weights, ess_history, log_evidence, resampled_steps)
     @particles = particles
     @weights = weights
@@ -33,9 +35,6 @@ use core/probability/sampling
 
   -> effective_sample_sizes
     ProbabilityNumerics.copy_array(@ess_history)
-
-  -> log_evidence
-    @log_evidence
 
   -> resampled_steps
     ProbabilityNumerics.copy_array(@resampled_steps)

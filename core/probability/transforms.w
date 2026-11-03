@@ -9,6 +9,8 @@ use core/probability/sampling
 use core/probability/support
 
 + AffineDistribution < ProbabilityDistribution
+  ro :base, :shift, :scale, :support
+
   -> new(base, shift, scale)
     if !base.continuous?
       raise "probability affine distribution currently requires a continuous base"
@@ -31,18 +33,6 @@ use core/probability/support
     @support = ProbabilitySupport.new(
       lower, upper, lower_closed, upper_closed)
     self
-
-  -> base
-    @base
-
-  -> shift
-    @shift
-
-  -> scale
-    @scale
-
-  -> support
-    @support
 
   -> source_value(value)
     (value - @shift) / @scale
@@ -84,6 +74,8 @@ use core/probability/support
 
 
 + TruncatedDistribution < ProbabilityDistribution
+  ro :base, :support
+
   -> new(base, lower, upper)
     if !base.continuous?
       raise "probability truncation currently requires a continuous base"
@@ -100,12 +92,6 @@ use core/probability/support
     @log_normalizer = Math.log(@normalizer)
     @support = ProbabilitySupport.new(@lower, @upper)
     self
-
-  -> base
-    @base
-
-  -> support
-    @support
 
   -> log_probability(value)
     return ProbabilityNumerics.negative_infinity if (
@@ -135,6 +121,8 @@ use core/probability/support
 
 
 + FiniteConditionedDistribution < ProbabilityDistribution
+  ro :support
+
   -> new(base, allowed_values)
     if !base.discrete? || allowed_values.class_name != "Array" || (
        allowed_values.size == 0)
@@ -159,9 +147,6 @@ use core/probability/support
 
   -> discrete?
     true
-
-  -> support
-    @support
 
   -> values
     ProbabilityNumerics.copy_array(@values)

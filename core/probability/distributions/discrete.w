@@ -10,6 +10,8 @@ use core/probability/special
 use core/probability/support
 
 + CategoricalDistribution < ProbabilityDistribution
+  ro :support
+
   -> new(weights)
     @probabilities = ProbabilityNumerics.normalized_weights(
       weights, "Categorical weights")
@@ -26,9 +28,6 @@ use core/probability/support
 
   -> category_count
     @probabilities.size
-
-  -> support
-    @support
 
   -> pmf(value)
     return ~0.0 if !ProbabilityNumerics.integer?(value)
@@ -98,19 +97,15 @@ use core/probability/support
 
 
 + PoissonDistribution < ProbabilityDistribution
+  ro :rate, :support
+
   -> new(rate)
     @rate = ProbabilityNumerics.positive_finite(rate, "Poisson rate")
     @support = ProbabilitySupport.new(0, nil, true, false, true)
     self
 
-  -> rate
-    @rate
-
   -> discrete?
     true
-
-  -> support
-    @support
 
   -> log_probability(value)
     return ProbabilityNumerics.negative_infinity if (

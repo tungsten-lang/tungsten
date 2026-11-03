@@ -7,14 +7,13 @@ use core/probability/primitives
 use core/probability/rng
 
 + MultivariateRealSupport
+  ro :dimension
+
   -> new(dimension)
     if !ProbabilityNumerics.integer?(dimension) || dimension <= 0
       raise "probability multivariate support dimension must be positive"
     @dimension = dimension
     self
-
-  -> dimension
-    @dimension
 
   -> contains?(value)
     return false if value.class_name != "Array" || value.size != @dimension
@@ -74,6 +73,8 @@ use core/probability/rng
 
 
 + MultivariateNormalDistribution < MultivariateProbabilityDistribution
+  ro :dimension, :log_determinant, :support
+
   -> new(mean, covariance)
     @mean = ProbabilityLinearAlgebra.vector(mean, "multivariate Normal mean")
     @dimension = @mean.size
@@ -88,9 +89,6 @@ use core/probability/rng
     @support = MultivariateRealSupport.new(@dimension)
     self
 
-  -> dimension
-    @dimension
-
   -> mean
     ProbabilityNumerics.copy_array(@mean)
 
@@ -99,12 +97,6 @@ use core/probability/rng
 
   -> cholesky
     ProbabilityLinearAlgebra.copy_matrix(@cholesky)
-
-  -> log_determinant
-    @log_determinant
-
-  -> support
-    @support
 
   -> validate_value(value)
     ProbabilityLinearAlgebra.vector_dimension(

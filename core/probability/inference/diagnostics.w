@@ -5,6 +5,8 @@ use core/probability/linear_algebra
 use core/probability/primitives
 
 + MonteCarloChain
+  ro :accepted, :proposed
+
   -> new(samples, log_probabilities, accepted, proposed)
     if samples.class_name != "Array" || log_probabilities.class_name != "Array" || (
        samples.size != log_probabilities.size)
@@ -36,12 +38,6 @@ use core/probability/primitives
   -> dimension
     @samples.size == 0 ? 0 : @samples[0].size
 
-  -> accepted
-    @accepted
-
-  -> proposed
-    @proposed
-
   -> acceptance_rate
     return ~0.0 if @proposed == 0
     @accepted / (@proposed + ~0.0)
@@ -57,6 +53,8 @@ use core/probability/primitives
 
 
 + HamiltonianMonteCarloChain < MonteCarloChain
+  ro :divergences, :step_size
+
   -> new(samples, log_probabilities, accepted, proposed, divergences, step_size)
     if samples.class_name != "Array" || log_probabilities.class_name != "Array" || (
        samples.size != log_probabilities.size)
@@ -72,12 +70,6 @@ use core/probability/primitives
     @divergences = divergences
     @step_size = step_size
     self
-
-  -> divergences
-    @divergences
-
-  -> step_size
-    @step_size
 
 
 + ProbabilityDiagnostics

@@ -11,6 +11,8 @@ use core/probability/primitives
 use core/probability/rng
 
 + MeanFieldGaussianDistribution < MultivariateProbabilityDistribution
+  ro :support
+
   -> new(mean, log_scales)
     @mean = ProbabilityLinearAlgebra.vector(mean, "variational mean")
     @log_scales = ProbabilityLinearAlgebra.vector_dimension(
@@ -46,9 +48,6 @@ use core/probability/rng
       i += 1
     matrix
 
-  -> support
-    @support
-
   -> log_probability(value)
     vector = ProbabilityLinearAlgebra.vector_dimension(
       value, dimension, "mean-field Gaussian value")
@@ -80,13 +79,12 @@ use core/probability/rng
 
 
 + VariationalResult
+  ro :distribution
+
   -> new(distribution, elbo_trace)
     @distribution = distribution
     @elbo_trace = ProbabilityNumerics.copy_array(elbo_trace)
     self
-
-  -> distribution
-    @distribution
 
   -> elbo_trace
     ProbabilityNumerics.copy_array(@elbo_trace)

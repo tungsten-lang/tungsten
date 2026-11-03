@@ -7,6 +7,8 @@
 use core/probability/primitives
 
 + ProbabilityCounterRng
+  ro :seed, :stream
+
   -> .multiply_high_low(left, right)
     # Exact 32x32 -> high/low using 16-bit limbs, avoiding a 64-bit product.
     left_low = left & 0xFFFF
@@ -48,12 +50,6 @@ use core/probability/primitives
     @buffer = []
     @buffer_index = 0
     self
-
-  -> seed
-    @seed
-
-  -> stream
-    @stream
 
   -> counter
     [@counter_low, @counter_high]

@@ -778,7 +778,10 @@ use lut_congruence
       wassat_prof_note("arithmetic.search status=[arith["status"]] elements=[arith["elements"]] scopes=[arith["scopes"]] nodes=[arith["nodes"]]")
     if env("WASSAT_PROFILE") == "1" && arith["work"] != nil
       cw = arith["count_work"]
-      if cw != nil
+      ww = arith["watch_work"]
+      if ww != nil
+        wassat_prof_note("arithmetic.watch nodes=[ww[2]] calls=[ww[18]] visits=[ww[6]] reads=[ww[19]] moves=[ww[20]] safe=[ww[21]] forces=[ww[7]] enqueued=[ww[11]] processed=[ww[16]] undone=[ww[10]] branches=[ww[12]] conflicts=[ww[13]] scopes=[ww[14]] literals=[ww[15]] stop=[ww[5]] polls=[ww[8]]")
+      elsif cw != nil
         wassat_prof_note("arithmetic.count nodes=[cw[2]] calls=[cw[18]] updates=[cw[6]] undo_updates=[cw[10]] forces=[cw[7]] enqueued=[cw[11]] processed=[cw[16]] branches=[cw[12]] conflicts=[cw[13]] scopes=[cw[14]] literals=[cw[15]] stop=[cw[5]] polls=[cw[8]]")
       else
         aw = arith["work"]

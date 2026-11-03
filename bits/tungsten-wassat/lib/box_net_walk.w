@@ -281,13 +281,22 @@ use atomic_stop
     k = 0 ## i64
     while k <= depth && valid != 0
       valid = 0 if x == s[2112+k] && y == s[2176+k]
-      q = 0 ## i64
-      while q < 4 && valid != 0
-        if x+wassat_box_net_dx(q) == s[2112+k] && y+wassat_box_net_dy(q) == s[2176+k]
+      if valid != 0
+        # At most one direction reaches an earlier planar square. Derive
+        # it directly instead of testing all four directions at every step.
+        dx = s[2112+k]-x ## i64
+        dy = s[2176+k]-y ## i64
+        q = -1 ## i64
+        if dy == 0
+          q = 0 if dx == 1
+          q = 1 if dx == -1
+        elsif dx == 0
+          q = 2 if dy == 1
+          q = 3 if dy == -1
+        if q >= 0
           aa = wassat_box_net_step(0,av,g[a+1],q) ## i64
           bb = wassat_box_net_step(1,bv,g[b+1],q) ## i64
           valid = 0 if g[aa] != s[1856+k] || g[aa+1] != s[1984+k] || g[bb] != s[1920+k] || g[bb+1] != s[2048+k]
-        q += 1
       k += 1
     if valid != 0
       s[1857+depth] = av

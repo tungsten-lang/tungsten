@@ -183,7 +183,7 @@ WASSAT_CYCLE_WALL_MS = 15000
   # Decoder: 26 bytes/variable, two implication arrays (at most nc edges).
   # Search: at most n*(n-1)/2 graph edges. Include all six result slots when
   # converting the lone CDCL solver into a race, plus small descriptors/ring.
-  74 * (nv + 1) + 8 * nc + 15 * n * n + 32 * n + 2097152
+  74 * (nv + 1) + 8 * nc + 15 * n * n + 52 * n + 2097152
 
 # This admission is used only beside the serial fallback. Existing full
 # races retain their resource policy; the retained scout remains the CDCL
@@ -243,7 +243,8 @@ WASSAT_CYCLE_WALL_MS = 15000
 
 -> wassat_cycle_profile(plan, status)
   m = plan["meta"]; w = plan["walk"]
-  wassat_prof_note("race.cyclic status=[status] vertices=[m[1]] edges=[m[2]] width=[m[3]] implications=[m[4]] negative_pairs=[m[5]] owner_visits=[m[6]] true_closure=[m[7]] false_closure=[m[8]] units=[m[9]] cross_pairs=[m[10]] rejected_clauses=[m[11]] polls=[m[12] + w[12]] restarts=[w[6]] iterations=[w[7]] swaps=[w[8]] bumps=[w[9]] candidates=[w[10]] updates=[w[11]] best_deficit=[w[13]] replay_clauses=[m[14]] replay_literals=[m[15]] verified=[m[16]] decode_ms=[m[19]] search_ms=[m[20]] lift_ms=[m[21]] stopped=[m[22]] scratch_bytes=[m[23]] ms=[m[18] - m[17]]")
+  sweep_edges = w[6] > 0 ? w[23] : 0
+  wassat_prof_note("race.cyclic status=[status] vertices=[m[1]] edges=[m[2]] width=[m[3]] implications=[m[4]] negative_pairs=[m[5]] owner_visits=[m[6]] true_closure=[m[7]] false_closure=[m[8]] units=[m[9]] cross_pairs=[m[10]] rejected_clauses=[m[11]] polls=[m[12] + w[12]] restarts=[w[6]] iterations=[w[7]] swaps=[w[8]] bumps=[w[9]] candidates=[w[10]] updates=[w[11]] sweep_edges=[sweep_edges] best_deficit=[w[13]] replay_clauses=[m[14]] replay_literals=[m[15]] verified=[m[16]] decode_ms=[m[19]] search_ms=[m[20]] lift_ms=[m[21]] stopped=[m[22]] scratch_bytes=[m[23]] ms=[m[18] - m[17]]")
   wassat_prof_note("race.cyclic_bound status=[w[0]] root=[w[1]] radius=[w[2]] vertices=[w[3]] positions=[w[4]] edges=[w[5]] work=[w[14]] support_words=[w[15]] rectangle_rows=[w[16]] coverage_words=[w[17]] row_amos=[w[18]] checked_edges=[w[19]] bytes=[w[20]] ms=[w[21]]")
 
 -> wassat_cycle_edges(lits, offs, lens, nc, n, owner, matrix, m, stop, deadline) (i64[] i64[] i64[] i64 i64 i32[] i8[] i64[] i64[] i64) i64

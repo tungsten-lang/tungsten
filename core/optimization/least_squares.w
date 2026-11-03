@@ -27,20 +27,8 @@
     if !Optimization.integer_value?(@max_iterations) || @max_iterations < 0
       raise "least-squares max_iterations must be a nonnegative integer"
 
-  -> residual_tol
-    @residual_tol
-  -> gradient_tol
-    @gradient_tol
-  -> step_tol
-    @step_tol
-  -> max_iterations
-    @max_iterations
-  -> rank_tolerance
-    @rank_tolerance
-  -> condition_limit
-    @condition_limit
-  -> initial_damping
-    @initial_damping
+  ro :residual_tol, :gradient_tol, :step_tol, :max_iterations, :rank_tolerance
+  ro :condition_limit, :initial_damping
 
 
 + OptimizationLeastSquaresResult

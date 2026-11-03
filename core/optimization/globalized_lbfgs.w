@@ -34,24 +34,13 @@
     if !Optimization.finite_value?(@c2) || @c2 <= ~0.0
       raise "globalized L-BFGS c2 must be finite and positive"
 
-  -> gradient_tol
-    @gradient_tol
-  -> max_iterations
-    @max_iterations
-  -> line_search_iterations
-    @line_search_iterations
-  -> history_size
-    @history_size
-  -> c0
-    @c0
+  ro :gradient_tol, :max_iterations, :line_search_iterations, :history_size, :c0
   -> safeguard_cap
     @c0
-  -> c1
-    @c1
+  ro :c1
   -> safeguard_scale
     @c1
-  -> c2
-    @c2
+  ro :c2
   -> safeguard_exponent
     @c2
 

@@ -36,11 +36,7 @@ use core/optimization/globalized_lbfgs
 + OptimizationStatus
   -> new(@code, @message)
 
-  -> code
-    @code
-
-  -> message
-    @message
+  ro :code, :message
 
   -> converged?
     @code == :converged
@@ -81,30 +77,20 @@ use core/optimization/globalized_lbfgs
     if !integer || @max_iterations < 0
       raise "optimization max_iterations must be a nonnegative integer"
 
-  -> abs_tol
-    @abs_tol
-
-  -> rel_tol
-    @rel_tol
+  ro :abs_tol, :rel_tol
 
   # Used by root finding only. Zero means that only an exact zero may stop
   # before the interval-width condition is met.
-  -> residual_tol
-    @residual_tol
+  ro :residual_tol
 
-  -> max_iterations
-    @max_iterations
+  ro :max_iterations
 
 
 + OptimizationResult
   -> new(@kind, @estimate, @value, @lower_bound, @upper_bound,
          @iterations, @evaluations, @status, @method)
 
-  -> kind
-    @kind
-
-  -> estimate
-    @estimate
+  ro :kind, :estimate
 
   -> x
     @estimate
@@ -115,8 +101,7 @@ use core/optimization/globalized_lbfgs
   -> argmin
     @estimate
 
-  -> value
-    @value
+  ro :value
 
   -> residual
     @value
@@ -127,11 +112,7 @@ use core/optimization/globalized_lbfgs
   -> minimum
     @value
 
-  -> lower_bound
-    @lower_bound
-
-  -> upper_bound
-    @upper_bound
+  ro :lower_bound, :upper_bound
 
   -> interval
     [@lower_bound, @upper_bound]
@@ -139,14 +120,7 @@ use core/optimization/globalized_lbfgs
   -> interval_width
     @upper_bound - @lower_bound
 
-  -> iterations
-    @iterations
-
-  -> evaluations
-    @evaluations
-
-  -> status
-    @status
+  ro :iterations, :evaluations, :status
 
   -> status_code
     @status.code
@@ -154,8 +128,7 @@ use core/optimization/globalized_lbfgs
   -> message
     @status.message
 
-  -> method
-    @method
+  ro :method
 
   -> converged?
     @status.converged?

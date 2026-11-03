@@ -27,20 +27,8 @@
     if @history_size == 0
       raise "L-BFGS history_size must be positive"
 
-  -> gradient_tol
-    @gradient_tol
-  -> step_tol
-    @step_tol
-  -> objective_tol
-    @objective_tol
-  -> max_iterations
-    @max_iterations
-  -> line_search_iterations
-    @line_search_iterations
-  -> curvature_tol
-    @curvature_tol
-  -> history_size
-    @history_size
+  ro :gradient_tol, :step_tol, :objective_tol, :max_iterations
+  ro :line_search_iterations, :curvature_tol, :history_size
 
 
 + OptimizationBounds
@@ -67,10 +55,7 @@
       @upper.push(hi)
       i += 1
 
-  -> lower
-    @lower
-  -> upper
-    @upper
+  ro :lower, :upper
   -> size
     @lower.size
 
@@ -153,18 +138,8 @@
         @max_outer_iterations <= 0)
       raise "constraint max_outer_iterations must be a positive integer"
 
-  -> equalities
-    @equalities
-  -> inequalities
-    @inequalities
-  -> feasibility_tol
-    @feasibility_tol
-  -> initial_penalty
-    @initial_penalty
-  -> penalty_growth
-    @penalty_growth
-  -> max_outer_iterations
-    @max_outer_iterations
+  ro :equalities, :inequalities, :feasibility_tol, :initial_penalty
+  ro :penalty_growth, :max_outer_iterations
 
 
 + OptimizationMultivariateResult

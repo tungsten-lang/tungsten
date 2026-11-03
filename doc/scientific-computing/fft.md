@@ -17,6 +17,9 @@ Also: `rfft`, `fft2` (row-column).
 
 Length must be a power of 2. Non-pow2 / Bluestein is a follow-up.
 
+Convolution, correlation, windows, and normalized periodogram/Welch spectra
+are built on `rfft` in `core/signal.w`; see [signal.md](signal.md).
+
 ## Accelerated path
 
 `fft_f32(re, im, n, inverse)` in `core/blas.w` → `w_blas_fft_f32` →

@@ -961,11 +961,13 @@ use lut_congruence
       wassat_status(quiet, "c edge grid=[edge_match["side"]]x[edge_match["side"]], cells=[edge_match["cells"]], edges=[edge_match["edges"]], nodes=[edge_match["nodes"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(10)
-  # A complete sequential at-most counter plus clique components can carry a
+  # A complete sequential at-most counter plus a checked graph bound can carry a
   # direct vertex-cover contradiction. This trusted certificate is exact but
   # has no emitted RUP derivation yet, so proof modes fall through to CDCL.
   if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_AIS") != "0"
     ais = wassat_ais_unsat(formula)
+    tprof = wassat_prof("cli.ais", tprof)
+    wassat_prof_note("ais status=[ais["status"]] vertices=[ais["graph_vars"]] lower=[ais["lower_bound"]] upper=[ais["upper_bound"]] triangles=[ais["triangles"]] max_incidence=[ais["triangle_degree"]] pair_visits=[ais["triangle_work"]] stop=[ais["triangle_stop"]]") if tprof != 0
     if ais["status"] == -1
       << "s UNSATISFIABLE"
       << "c mode: fast (exact sequential-counter clique-cover certificate)"

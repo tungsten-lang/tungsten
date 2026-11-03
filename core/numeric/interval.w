@@ -6,7 +6,7 @@
 # endpoints — good for proofs-of-concept and branch-and-bound, not yet
 # a full IEEE-1788 library).
 #
-# Product feature: pair with Solve / Optim for validated roots and with
+# Product feature: pair with Solve / Optimization for validated roots and with
 # Special for range enclosures. See doc/scientific-computing/interval.md.
 
 + Interval

@@ -25,7 +25,7 @@ b = Interval.new(~-0.5, ~0.5)
 v0 uses plain f64 endpoints (not directed rounding). Next steps:
 
 1. outward rounding mode (fesetround) in a tiny C helper  
-2. interval Newton in `Optim`  
+2. interval Newton in `Optimization`
 3. interval-aware ODE step  
 4. docs + examples in `spec/sci/interval_spec.w`
 

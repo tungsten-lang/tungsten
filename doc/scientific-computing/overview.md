@@ -11,7 +11,7 @@ Flat under `core/` (no `core/sci/` namespace):
 | `fft.w` | pure radix-2 DFT |
 | `signal.w` | finite convolution/correlation + windowed periodogram/Welch spectra |
 | `special.w` / `stats.w` | specials + distributions |
-| `solve.w` / `optim.w` / `interpolate.w` | ODE / opt / interp |
+| `solve.w` / `optimization.w` / `interpolate.w` | ODE / deterministic small dense optimization / interpolation (`optim.w`: legacy v0 surface) |
 | `calculus.w` | Taylor/differential AD, numerical gradients/Jacobians, Simpson and breakpoint GK15 quadrature |
 | `autodiff.w` | Dual JVP and Tape/TapeValue VJP; calculus facades |
 | `physics.w` | measurements/GLS, gas laws, Euler systems, Cartesian finite volume, diagnostics |

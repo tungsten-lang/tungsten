@@ -1,21 +1,20 @@
-# Optim — scalar / vector optimization and root-finding (v0).
+# Optim — legacy v0 compatibility surface.
+#
+# New scalar numerical work should use `core/optimization`, whose bracketed
+# methods return explicit OptimizationResult objects. The broader routines
+# below retain their historical return shapes until they can be replaced by
+# equally explicit, tested algorithms. Optimization is independently
+# autoloaded when the compatibility methods are called.
 
 + Optim
   -> .root_bisection(f, a, b)
-    lo = a
-    hi = b
-    fa = f(a)
-    i = 0
-    while i < 80
-      mid = ~0.5 * (lo + hi)
-      fm = f(mid)
-      if fa * fm <= ~0.0
-        hi = mid
-      else
-        lo = mid
-        fa = fm
-      i = i + 1
-    ~0.5 * (lo + hi)
+    result = Optimization.bisection(f, a, b)
+    if !result.converged?
+      raise "Optim.root_bisection failed: " + result.status.to_s
+    result.root
+
+  -> .root_bisection_result(f, a, b, criteria = nil)
+    Optimization.bisection(f, a, b, criteria)
 
   -> .root_newton(f, df, x0)
     x = x0
@@ -333,3 +332,9 @@
         damping *= ~10.0
       iteration += 1
     {:x => x, :fun => cost}
+
+  # Explicit-result migration path. The historical least_squares methods above
+  # retain their v0 hash shape ({:x, :fun}) for compatibility.
+  -> .least_squares_result(residual, x0, jacobian = nil, criteria = nil)
+    Optimization.levenberg_marquardt(
+      residual, x0, jacobian, criteria)

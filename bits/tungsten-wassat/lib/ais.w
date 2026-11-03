@@ -13,14 +13,18 @@
 #
 #     sum_C (|C|-1) > k
 #
-# is a complete, directly checkable UNSAT certificate.
+# is a complete, directly checkable UNSAT certificate. For overlapping
+# triangles, each triangle requires at least two cover vertices. If there
+# are T checked triangles and no vertex belongs to more than D of them,
+# every cover has at least ceil(2*T/D) vertices. This bound does not require
+# disjoint cliques or any special graph family.
 #
 # Recognition is deliberately strict.  Clause and literal order, variable
 # numbering, counter-row numbering, and counter-column numbering are ignored,
 # but the complete counter grammar is reconstructed and checked: k vertical
 # chains, the diagonal chain ordering, every input link, every overflow
 # clause, every initializer, and every expected transition must occur exactly
-# once.  Duplicate clauses, unused variables, non-clique graph components, or
+# once.  Duplicate clauses, unused variables, insufficient graph bounds, or
 # any resource-cap miss fall through to ordinary solving.
 
 WASSAT_AIS_MAX_GRAPH_VARS = 2048
@@ -31,7 +35,54 @@ WASSAT_AIS_MAX_EDGES = 1000000
 
 -> wassat_ais_miss
   { "recognized": false, "status": 0, "graph_vars": 0,
-    "upper_bound": 0, "lower_bound": 0, "components": 0 }
+    "upper_bound": 0, "lower_bound": 0, "components": 0,
+    "triangles": 0, "triangle_degree": 0, "triangle_work": 0,
+    "triangle_stop": 0 }
+
+# Count each triangle once using the already checked symmetric adjacency
+# matrix. Two fixed buffers suffice; a work-cap miss never certifies a bound.
+# meta: triangles, maximum vertex incidence, candidate pairs, cap reached.
+-> wassat_ais_triangle_bound(adj, n, meta, limit = 2000000) (i8[] i64 i64[] i64) i64
+  return 0 if n < 3 || n > WASSAT_AIS_MAX_GRAPH_VARS || adj.size < n * n || meta.size < 4
+  i = 0
+  while i < 4
+    meta[i] = 0
+    i += 1
+  degree = i32[n]
+  neighbors = i32[n]
+  a = 0
+  while a < n
+    count = 0
+    b = a + 1
+    while b < n
+      if adj[a * n + b] != 0
+        neighbors[count] = b
+        count += 1
+      b += 1
+    i = 0
+    while i < count
+      b = neighbors[i]
+      j = i + 1
+      while j < count
+        if meta[2] >= limit
+          meta[3] = 1
+          return 0
+        meta[2] += 1
+        c = neighbors[j]
+        if adj[b * n + c] != 0
+          meta[0] += 1
+          degree[a] += 1
+          degree[b] += 1
+          degree[c] += 1
+        j += 1
+      i += 1
+    a += 1
+  a = 0
+  while a < n
+    meta[1] = degree[a] if degree[a] > meta[1]
+    a += 1
+  return 0 if meta[1] == 0
+  (2 * meta[0] + meta[1] - 1) / meta[1]
 
 # Return status -1 only after reconstructing the exact counter and verifying
 # the clique-cover lower bound.  Status zero is a one-sided fall-through.
@@ -395,6 +446,7 @@ WASSAT_AIS_MAX_EDGES = 1000000
   members = i64[ngraph]
   components = 0
   lower = 0
+  cliques = true
   start = 0
   while start < ngraph
     if component_seen[start] == 0
@@ -423,13 +475,19 @@ WASSAT_AIS_MAX_EDGES = 1000000
         while b < ngraph
           degree += 1 if adj[a * ngraph + b] != 0
           b += 1
-        return wassat_ais_miss unless degree == size - 1
+        cliques = false unless degree == size - 1
         mi += 1
       lower += size - 1
       components += 1
     start += 1
 
-  return wassat_ais_miss unless lower > kbound
-  { "recognized": true, "status": -1, "graph_vars": ngraph,
+  tm = i64[4]
+  unless cliques
+    lower = 0
+    if env("WASSAT_AIS_TRIANGLES") != "0"
+      lower = wassat_ais_triangle_bound(adj, ngraph, tm)
+  proved = lower > kbound
+  { "recognized": proved, "status": proved ? -1 : 0, "graph_vars": ngraph,
     "upper_bound": kbound, "lower_bound": lower,
-    "components": components }
+    "components": components, "triangles": tm[0],
+    "triangle_degree": tm[1], "triangle_work": tm[2], "triangle_stop": tm[3] }

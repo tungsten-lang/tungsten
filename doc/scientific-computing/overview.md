@@ -10,7 +10,8 @@ Flat under `core/` (no `core/sci/` namespace):
 | `sparse.w` | **SparseMatrix** CSR/COO; SpMV + Apple Sparse Solvers (QR/Cholesky) |
 | `fft.w` | pure radix-2 DFT |
 | `signal.w` | finite convolution/correlation + windowed periodogram/Welch spectra |
-| `special.w` / `stats.w` | specials + distributions |
+| `special.w` / `stats.w` | special functions + compatibility distribution helpers |
+| `statistics.w` + `statistics/` | mergeable weighted/multivariate estimation; diagnosed OLS/WLS inference |
 | `solve.w` / `optimization.w` / `interpolate.w` | ODE / deterministic small dense optimization / interpolation (`optim.w`: legacy v0 surface) |
 | `calculus.w` | Taylor/differential AD, numerical gradients/Jacobians, Simpson and breakpoint GK15 quadrature |
 | `autodiff.w` | Dual JVP and Tape/TapeValue VJP; calculus facades |
@@ -42,5 +43,6 @@ Link gating (stage-1 rebuild): `@w_sparse_` → SparseBLAS+Solvers, `@w_tensor_`
 
 Large multi-module programs can hit a compiler SSA name-clash (`t0`); keep specs focused.
 
-Docs: `calculus.md`, `signal.md`, `tensor-vs-array.md`, `wtensor.md`, `sparse.md`,
-`io.md` (TH5 honesty), `units.md`, [physics.md](../physics.md).
+Docs: `calculus.md`, `signal.md`, `statistics.md`, `tensor-vs-array.md`,
+`wtensor.md`, `sparse.md`, `io.md` (TH5 honesty), `units.md`,
+[physics.md](../physics.md).

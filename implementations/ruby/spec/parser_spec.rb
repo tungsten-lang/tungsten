@@ -195,6 +195,15 @@ module Tungsten::AST
       expect(defn.args[2].default).to eq(15.int)
     end
 
+    it "parses a division operator method with a named parameter" do
+      result = described_class.parse("-> /(other)\n  other")
+      defn = result.first
+
+      expect(defn).to be_a(Def)
+      expect(defn.name).to eq("/")
+      expect(defn.args.map(&:name)).to eq(["other"])
+    end
+
     # it_parses "-> []",      Def.new(:"[]", [], nil)
     # it_parses "-> self.[]", Def.new(:"[]", [], nil, "self".var)
 

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(709 total), grouped by area, with its declaration, a one-line
+(727 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -83,6 +83,24 @@ summary from the source header, and a link to the source.
 | `SignalSpectralEstimate` | `+ SignalSpectralEstimate` | One-sided periodogram or Welch power estimate, with the frame, window, and | [`core/signal.w`](../core/signal.w) |
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
 | `Stats` | `+ Stats` | — | [`core/stats.w`](../core/stats.w) |
+| `Statistics` | `+ Statistics` | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsSummary` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsAccumulator` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsBivariateSummary` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsBivariateAccumulator` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsWeightedSummary` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsWeightedAccumulator` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsMultivariateSummary` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsMultivariateAccumulator` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsLinearModelResult` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsRegressionDiagnostics` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsRobustMeanResult` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsCheapSubsamplingResult` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsConformalRankResult` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsHalfMassConformalResult` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsRelativeFitResult` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsEmpiricalBernsteinSequence` | — | — | [`core/statistics.w`](../core/statistics.w) |
+| `StatisticsConfidenceSequenceResult` | — | — | [`core/statistics.w`](../core/statistics.w) |
 | `Tensor` | `+ Tensor` | — | [`core/tensor.w`](../core/tensor.w) |
 | `TensorDecomposition` | `+ TensorDecomposition` | Dense real CP-ALS and Tucker HOSVD/HOOI over the existing CPU Tensor storage. | [`core/tensor/decomposition.w`](../core/tensor/decomposition.w) |
 | `CPDecomposition` | `+ CPDecomposition` | Numerical CP factors with explicit weights, residual and stopping status. | [`core/tensor/decomposition.w`](../core/tensor/decomposition.w) |

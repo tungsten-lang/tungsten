@@ -176,6 +176,16 @@ describe "Wassat focused/stable mode split, target-phase protection, and structu
       expect(card["binaries"].include?([2, 3])).to eq(true)
       expect(card["binaries"].include?([4, 6])).to eq(true)
 
+    it "uses implications added by an earlier strengthening candidate" ->
+      # Neither negative literal has a chain. The first strengthening adds
+      # (-2 v 3), whose new -3=>-2 implication shortens the next clause.
+      f = spec_flat_formula("p cnf 4 3\n-1 -2 0\n1 -2 3 0\n-3 -2 4 0\n")
+      card = wassat_extract_cardinality_and_propagate(4, f)
+      expect(card["unsat"]).to eq(false)
+      expect(card["ladder_chains"].empty?).to eq(true)
+      expect(card["binaries"].include?([-2, 3])).to eq(true)
+      expect(card["binaries"].include?([-2, 4])).to eq(true)
+
   context "DETOUR bidirectional wavefront and macro-transition portal-balance pruning" ->
     it "prunes dead intermediate portal states and extracts a valid DETOUR witness route" ->
       # 3 layers of EO groups:

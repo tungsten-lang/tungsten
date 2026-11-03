@@ -55,6 +55,30 @@ use cyclic_repair
     label += 1
   1
 
+# Score every possible swap target against the same source label in one pass.
+# Reuse tails of the two score buffers; the circular sweep owns their prefixes.
+-> wassat_cycle_target_scores(n, ne, width, u, left, right, perm, weights,
+                             penalty, scores, plain) (i64 i64 i64 i64 i32[] i32[] i32[] i32[] i32[] i64[] i64[]) i64
+  label = (perm[u]) ## i64
+  v = 0
+  while v < n
+    scores[n + v] = 0
+    plain[n + v] = 0
+    plain[2 * n + v] = wassat_cycle_cost(label, (perm[v] ## i64), width, n)
+    v += 1
+  e = 0
+  while e < ne
+    a = (left[e]) ## i64
+    b = (right[e]) ## i64
+    da = plain[2 * n + b] - penalty[e]
+    db = plain[2 * n + a] - penalty[e]
+    scores[n + a] += da * weights[e]
+    scores[n + b] += db * weights[e]
+    plain[n + a] += da
+    plain[n + b] += db
+    e += 1
+  1
+
 -> wassat_cycle_trial(n, ne, width, left, right, heads, occ, perm, tabu,
                       weights, penalty, bad, rng, m, stop, deadline,
                       restarts, steps) (i64 i64 i64 i32[] i32[] i32[] i32[] i32[] i32[] i32[] i32[] i32[] i64[] i64[] i64[] i64 i64 i64) i64
@@ -68,8 +92,10 @@ use cyclic_repair
   return 0 if wassat_perm_stop(m, stop, deadline) != 0
   use_sweep = env("WASSAT_CYCLIC_SWEEP") != "0" && width > 0 && width <= n / 2
   size = (use_sweep ? n : 0) ## i64
-  scores = i64[size]
-  plain = i64[size]
+  # Very sparse graphs have too few repeated distances to repay the n-label pass.
+  use_targets = use_sweep && ne >= n && env("WASSAT_CYCLIC_TARGET_CACHE") != "0"
+  scores = i64[use_targets ? 2 * size : size]
+  plain = i64[use_targets ? 3 * size : size]
   adjacent = i32[size]
   use_repair = allow_repair == 1 && 2 * (n - 2 * width) + 1 >= n
   repair_limit = (n / 32) ## i64
@@ -137,6 +163,10 @@ use cyclic_repair
       if use_sweep
         scored = wassat_cycle_scores(n, width, u, left, right, heads, occ, perm, weights, scores, plain, adjacent)
         m[23] += heads[u + 1] - heads[u]
+        if use_targets
+          scored = wassat_cycle_target_scores(n, ne, width, u, left, right, perm, weights, penalty, scores, plain)
+          m[24] += n if m.size >= 26
+          m[25] += 2 * ne if m.size >= 26
       best_delta = (1 << 60) ## i64
       target = (-1) ## i64
       ties = (0) ## i64
@@ -150,11 +180,15 @@ use cyclic_repair
           if use_sweep
             delta = scores[perm[v]] - scores[perm[u]]
             ds = plain[perm[v]] - plain[perm[u]]
+            if use_targets
+              delta += scores[n + v]
+              ds += plain[n + v]
             e = adjacent[v] - 1
             if e >= 0
-              # The shared edge keeps its length under the swap; the sweep
-              # included its hypothetical move onto the other endpoint.
+              # The shared edge keeps its length under the swap. Both cached
+              # endpoint scores included a hypothetical zero-length edge.
               d = (width - penalty[e]) ## i64
+              d *= 2 if use_targets
               delta -= d * weights[e]
               ds -= d
           else
@@ -168,16 +202,20 @@ use cyclic_repair
                 delta += d * weights[e]
                 updates += 1
               at += 1
-          at = heads[v]
-          while at < heads[v + 1]
-            e = occ[at]
-            z = left[e] ^ right[e] ^ v
-            if z != u
-              d = wassat_cycle_cost((perm[u] ## i64), (perm[z] ## i64), width, n) - penalty[e]
-              ds += d
-              delta += d * weights[e]
-              updates += 1
-            at += 1
+          if use_targets
+            updates += heads[v + 1] - heads[v]
+            updates -= 1 if adjacent[v] > 0
+          else
+            at = heads[v]
+            while at < heads[v + 1]
+              e = occ[at]
+              z = left[e] ^ right[e] ^ v
+              if z != u
+                d = wassat_cycle_cost((perm[u] ## i64), (perm[z] ## i64), width, n) - penalty[e]
+                ds += d
+                delta += d * weights[e]
+                updates += 1
+              at += 1
           admissible = (tabu[u] <= step && tabu[v] <= step) || sum + ds < m[13]
           if admissible
             if delta < best_delta

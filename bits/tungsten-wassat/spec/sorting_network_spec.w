@@ -111,6 +111,14 @@ describe "Input-derived comparator search" ->
     while i < expected.size
       same = false if expected[i] != actual[i]; i += 1
     expect(same).to eq(true)
+  it "keeps later selector aliases outside the participation flag block" ->
+    fix = sorting_fixture(170); f = fix["formula"]; cs = f["clauses"]
+    alias = f["nvars"]+1; cs.push([-alias,1]); cs.push([alias,-1])
+    changed = sorting_flat_fixture({ "nvars": alias, "clauses": cs })
+    m = i64[32]; d = wassat_sorting_decode(changed,m,i64[4],clock_ms()+5000)
+    expect(d != nil).to eq(true)
+    expect(m[3]).to eq(87); expect(m[4]).to eq(1)
+    expect(d["vectors"][0]).to eq(170)
   it "rejects a missing matching exclusion" ->
     fix = sorting_fixture(170); f = fix["formula"]
     f["flat_lits"][0] = 1

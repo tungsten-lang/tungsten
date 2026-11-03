@@ -1,18 +1,24 @@
 # spec: compiled
 # Autoload must reach class references in EVERY syntactic position.
 #
-# `collect_autoload_refs` (compiler/lib/loader.w) walks the AST by probing a
-# fixed list of field names, and it has had three separate coverage holes:
+# `collect_autoload_refs` (compiler/lib/loader.w) used to walk the AST by
+# probing a hand-kept list of field names, and every position missing from
+# that list was a coverage hole:
 #
 #   * rescue_body / ensure_body   (fixed earlier)
 #   * :string_interp parts        — pieces are [tag, payload] pairs in
 #                                   Node#parts, not AST children
 #   * a trailing block            — hangs off Node#block, which nothing probed
+#   * elsif arms, hash-literal values, case subjects, case/when arms, unary
+#     operands — elsif arms and hash entries are pairs nested inside a child
+#     list; the rest were schema fields the list never named
 #
-# Each hole is SILENT: an unresolved class constant produces no compile error,
-# it is simply nil, and the program dies later with "undefined method 'x' for
-# nil". Every class below is named in exactly ONE position — hoisting any of
-# them to a bare statement would defeat the regression.
+# It now recurses into every schema child, nested lists included. Each hole
+# was SILENT: an unresolved class constant produces no compile error, it is
+# simply nil, and the program dies later with "undefined method 'x' for nil".
+# Every class below is named in exactly ONE position, and none of them loads
+# another as a dependency — hoisting any of them to a bare statement, or
+# naming a class that pulls one in, would defeat the regression.
 #
 # Run: `bin/tungsten -o /tmp/awf spec/compiler/autoload_walker_fields_spec.w && /tmp/awf`
 
@@ -57,3 +63,38 @@ nested = []
   nested.push("[Base64.encode(item)]")
 check("block.interp.autoload.base64", nested.size() == 1)
 check("block.interp.autoload.base64_nonempty", nested[0] != "")
+
+# --- elsif arm: a [condition, body] pair inside If#elsif_clauses -------------
+mean = 0
+if items.size() == 0
+  mean = -1
+elsif items.size() == 1
+  mean = Stats.mean([2, 4]).to_i
+check("elsif.autoload.stats", mean == 3)
+
+# --- hash-literal value: a [key, value] pair inside HashLiteral#entries ------
+palette = {"red": Color.hue_components(0)}
+check("hash_value.autoload.color", palette["red"][0] == 255)
+
+# --- case subject and case/when arm ------------------------------------------
+fields = 0
+case CSV.parse("a,b")[0].size
+when 2
+  fields = 2
+check("case_subject.autoload.csv", fields == 2)
+
+fallback = ""
+case fields
+when 2
+  fallback = Env.get("TUNGSTEN_AUTOLOAD_WALKER_UNSET_VAR", "fallback")
+check("case_when_arm.autoload.env", fallback == "fallback")
+
+# Condition-only `case` (no subject): the arm body lives in a :when node.
+ones = 0
+case
+when fields == 2
+  ones = BitOps.count_ones_u64(7)
+check("case_condition_arm.autoload.bitops", ones == 3)
+
+# --- unary operand -----------------------------------------------------------
+check("unary_operand.autoload.dir", !Dir.pwd.empty?)

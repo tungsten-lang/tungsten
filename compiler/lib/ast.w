@@ -680,6 +680,76 @@ in Tungsten:AST
     return slab_child_offsets_table[15]
   out
 
+# Append every AST node in `list`, descending nested lists.
+-> ast_push_nested_nodes(list, out)
+  j = 0
+  while j < list.size()
+    elt = list[j]
+    if is_ast_node?(elt)
+      out.push(elt)
+    elsif type(elt) == "Array"
+      ast_push_nested_nodes(elt, out)
+    j += 1
+  out
+
+# ast_children plus the nodes held further down inside a child list. Several
+# `ast` fields nest lists within their list: if.elsif_clauses holds
+# [condition, body] pairs, hash_literal.entries [key, value] pairs,
+# string_interp.parts [tag, expr] pairs, with.bindings [var, collection]
+# pairs. ast_children flattens only the outer list, so a walker built on it
+# never sees a node stored in one of those containers — a generic class
+# named only in an elsif arm, a hash value, or an interpolation was never
+# specialized and resolved to nil at runtime. Walkers that must reach every
+# node (class-reference discovery, call-site rewrites) use this. Same schema
+# walk as ast_children (left untouched: it is a lowering hot path), but every
+# child list is descended to any depth. Like ast_children, a node with no
+# children returns the shared empty table: callers must not mutate the result.
+-> ast_children_nested(node)
+  if node == nil
+    return slab_child_offsets_table[15]
+  packed = ccall_nobox("w_is_node_extern", node) == 1
+  kid = nil
+  if packed
+    kid = ccall_nobox("w_node_kind_extern", node)
+  else
+    k = ast_kind(node)
+    if k != nil
+      kid = kind_id_table[k]
+  if kid == nil || kid < 1 || kid > KIND_MAX
+    return slab_child_offsets_table[15]
+  offsets = slab_child_offsets_table[kid]
+  if offsets == nil
+    return slab_child_offsets_table[15]
+  n_off = offsets.size()
+  if n_off == 0
+    return offsets
+  keys = nil
+  if !packed
+    if type(node) != "Hash"
+      return slab_child_offsets_table[15]
+    keys = slab_child_keys_table[kid]
+  out = nil
+  i = 0
+  while i < n_off
+    v = nil
+    if packed
+      v = ccall_nobox("w_node_field_load", node, offsets[i])
+    else
+      v = node[keys[i]]
+    if v != nil
+      if is_ast_node?(v)
+        if out == nil
+          out = []
+        out.push(v)
+      elsif type(v) == "Array" && v.size() > 0
+        if out == nil
+          out = []
+        ast_push_nested_nodes(v, out)
+    i += 1
+  if out == nil || out.size() == 0
+    return slab_child_offsets_table[15]
+  out
+
 # Render a slab AST node as an indented tree for `--ast`. Each node prints
 # its kind plus inline `key=value` scalar fields on one line, then recurses
 # into AST-node and Array-of-node fields beneath it. `:loc`/`:loc_end` are

@@ -279,6 +279,12 @@ tests/test_scheduler_evented_idle: tests/test_scheduler_evented_idle.c $(RUNTIME
 .PHONY: test-scheduler-fifo-park test-scheduler-sync-migration test-scheduler-evented-idle
 
 # Event loop + non-blocking I/O test
+DEADLINE_RUNTIME_DIR ?= $(RUNTIME_DIR)
+DEADLINE_BENCH_OUT ?= bench_event_deadlines
+.PHONY: bench-event-deadlines-build
+bench-event-deadlines-build:
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread -I$(DEADLINE_RUNTIME_DIR) bench_event_deadlines.c $(addprefix $(DEADLINE_RUNTIME_DIR)/,$(filter-out runtime.c,$(RUNTIME_SRCS))) $(RUNTIME_LDFLAGS) -o $(DEADLINE_BENCH_OUT)
+
 test-event-deadlines: tests/test_event_deadlines
 	./tests/test_event_deadlines
 

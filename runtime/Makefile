@@ -278,6 +278,17 @@ tests/test_scheduler_evented_idle: tests/test_scheduler_evented_idle.c $(RUNTIME
 
 .PHONY: test-scheduler-fifo-park test-scheduler-sync-migration test-scheduler-evented-idle
 
+# Matched deadline benchmark (doc/design/event-deadline-bench.md). This
+# checkout's harness compiles against DEADLINE_RUNTIME_DIR's runtime.c, using
+# that checkout's own Makefile for its source list and flags.
+DEADLINE_RUNTIME_DIR ?= $(RUNTIME_DIR)
+DEADLINE_BENCH_OUT ?= bench_event_deadlines
+.PHONY: bench-event-deadlines-build
+bench-event-deadlines-build:
+	$(MAKE) -C $(DEADLINE_RUNTIME_DIR) -f Makefile -f $(RUNTIME_DIR)../benchmarks/runtime/event_deadlines.mk \
+	  event-deadlines-bench-exe DEADLINE_BENCH_SOURCE=$(RUNTIME_DIR)bench_event_deadlines.c \
+	  DEADLINE_BENCH_OUTPUT=$(abspath $(DEADLINE_BENCH_OUT))
+
 # Event loop + non-blocking I/O test
 test-event-deadlines: tests/test_event_deadlines
 	./tests/test_event_deadlines

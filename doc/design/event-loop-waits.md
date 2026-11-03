@@ -16,10 +16,11 @@ The shared wait-registration protocol is being integrated in stages:
    kqueue/epoll backends. The next heap deadline bounds the blocking poll. A
    newly earlier deadline or cancellation must wake an already blocked poll.
 2. Move **waiting timers** onto this heap. Dispatch due callbacks onto native
-   Threads initially, preserving their current blocking/thread-local behavior.
-   This removes one sleeping Thread per pending timer without silently turning
-   callbacks into cooperative goroutines. Reuse the current WAITING/CALLBACK/
-   TERMINAL claim and fixed-rate skip-missed-ticks semantics.
+   Threads only after resolving thread identity: repeating callbacks currently
+   reuse one Thread, so a fresh Thread or arbitrary pool worker per callback
+   would change thread-local behavior. A heap alone does not solve this
+   compatibility requirement or remove those Threads. Reuse the current
+   WAITING/CALLBACK/TERMINAL claim and fixed-rate skip-missed-ticks semantics.
 3. Add parkable single-channel waits. Register under the channel lock, recheck
    readiness, then atomically park. Send/receive/close detaches and claims
    waiters under that same lock, and schedules them after releasing it.
@@ -55,4 +56,7 @@ This entry records the remaining migration contracts, not a claim that all
 polling is removed. The deadline/wakeup backend is now available for cooperative
 socket waits. Moving Core Timer onto it still requires preserving its callback,
 cancellation and join contracts; a timer-only patch without interrupting a
-blocked poll would have a lost-wakeup bug.
+blocked poll would have a lost-wakeup bug. The
+[deadline benchmark report](event-deadline-bench.md) measures the prototype
+backend, including the idle CPU versus wake lateness tradeoff of removing
+batch-mode polling.

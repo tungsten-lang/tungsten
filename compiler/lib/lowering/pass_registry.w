@@ -267,6 +267,12 @@
     if is_machine_int_type(hint)
       raw = lower_machine_int_expression(ctx, node.expression, hint)
       return typed_value(raw_machine_value_type(hint), raw)
+    # `## i32`, `## u8`, ... convert like their assignment form `x = e ## i32`
+    # (a 64-bit machine value, not narrowed; a float truncated toward zero)
+    # instead of passing a float through unchanged.
+    if is_small_int_type(hint) && hint != :char
+      raw = lower_machine_int_expression(ctx, node.expression, hint)
+      return typed_value(raw_machine_value_type(hint), raw)
     array_etype = array_hint_element_type(node.type_hint)
     if array_etype == "f64" || array_etype == "f32"
       if ast_kind(node.expression) == :array

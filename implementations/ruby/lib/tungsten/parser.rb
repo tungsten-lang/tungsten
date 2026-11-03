@@ -395,8 +395,9 @@ module Tungsten
           # explicit node so the interpreter can apply identical wrapping.
           hint = @token.value
           next_token
-          # `## fold` names a value, never `<<` / `<-`.
-          if fold_hint_text?(hint) && (exp.is_a?(Print) || exp.is_a?(Write)) && exp.args.any?
+          # A hint names a value, never `<<` / `<-` (a print's value is nil):
+          # bind it to the last printed expression.
+          if (exp.is_a?(Print) || exp.is_a?(Write)) && exp.args.any?
             exp.args[-1] = TypeHint.new(exp.args[-1], hint).at(exp.args[-1])
           else
             exp = TypeHint.new(exp, hint).at(exp)

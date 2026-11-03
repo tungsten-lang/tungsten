@@ -128,6 +128,7 @@ module Tungsten
     W_DURATION_MONTHS_MIN = -(1 << 14)
 
     BUILTIN_METHODS = %w[to_s class class_name nil? is_a? respond_to? itself].freeze
+    MACHINE_INT_HINTS = %w[i8 i16 i32 i64 i128 u8 u16 u32 u64 u128].freeze
     HIDDEN_RUBY_OBJECT_METHODS = {
       "object_id" => true,
       "__id__" => true,
@@ -1608,6 +1609,8 @@ module Tungsten
         return value.map { |element| element.is_a?(Numeric) ? element.to_f : element }
       end
       return value.to_f if %w[f32 f64].include?(text) && value.is_a?(Numeric)
+      # A machine-int hint converts a Float's value, truncating toward zero.
+      value = value.truncate if value.is_a?(Float) && MACHINE_INT_HINTS.include?(text)
       return value unless value.is_a?(Integer)
 
       case text

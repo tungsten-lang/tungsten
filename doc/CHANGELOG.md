@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **`(float expression) ## i64` converts the value, not the operands** — the
+  compiled engine pushed a machine-int ascription into the operands of float
+  arithmetic, so `(a * ~48000.0) ## i64` computed `trunc(a) * 48000` (0 for
+  `a = ~0.279`; 48000 for 1.484 s instead of 71232) while the interpreter
+  printed 13392. Float arithmetic under `## i64`/`## u64`/`## i32`/... now runs
+  in floating point and is truncated once, like `.to_i`; integer arithmetic
+  still wraps at the machine width. Expression-level `## i32`/`## u8`/...
+  now convert like their assignment form (they passed a float through), the
+  interpreter and the Ruby implementation truncate a float under every
+  machine-int hint, and `<< e ## T` converts the printed value instead of
+  ascribing the print statement (which crashed compiled code). The grammar
+  chapter (§3.7, §3.9) now documents where `##` binds.
 - **Compiled programs free far more of what they allocate** — with no GC, the
   compiler freed only known constructors' results that never left a scope,
   plus a few BigInt loop shapes. Everything else lived until exit: the inner

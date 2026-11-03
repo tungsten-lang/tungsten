@@ -1683,10 +1683,14 @@ use lut_congruence
         cycle_plan = nil
         if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && options["conflicts"] == 0
           cycle_plan = wassat_cycle_plan(formula, scout_cdcl_arenas, scout_sls_arenas)
-        if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil || cycle_plan != nil
+        roster_plan = nil
+        if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && options["conflicts"] == 0
+          roster_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
+          roster_plan = wassat_roster_plan(formula, 1, roster_cdcl, scout_sls_arenas, 1, 0)
+        if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil || cycle_plan != nil || roster_plan != nil
           continuation = config.continue_scout? ? scout_solver : nil
           matrix_arms = arms
-          if arms == 1 && pre_arms == 0 && sls_flips == 0 && (cover_plan != nil || cycle_plan != nil)
+          if arms == 1 && pre_arms == 0 && sls_flips == 0 && (cover_plan != nil || cycle_plan != nil || roster_plan != nil)
             # Preserve the lone solver's trajectory and memory footprint.
             # The added worker races the already-built scout.
             continuation = scout_solver
@@ -1696,7 +1700,7 @@ use lut_congruence
           race = wassat_race_build(formula["nvars"], art, matrix_arms, formula,
                                    continuation, continuation_spent, pre_arms,
                                    sls_flips > 0 ? 1 : 0, scout_cdcl_arenas,
-                                   scout_sls_arenas, 1, cover_plan, cycle_plan)
+                                   scout_sls_arenas, 1, cover_plan, cycle_plan, roster_plan)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
           if pre_arms > 0
             # A preprocessor per arm: two threads rendering through one would
@@ -1743,6 +1747,7 @@ use lut_congruence
           arm_tag = "clause-checked selector Latin arm" if rr["selector_latin_won"] == true
           arm_tag = "proved byte-relation congruence" if rr["byte_relation_won"] == true
           arm_tag = "clause-checked resource capacity" if rr["resource_capacity_won"] == true
+          arm_tag = "clause-checked roster counting bound" if rr["roster_bound_won"] == true
           arm_tag = "clause-checked affine design obstruction" if rr["affine_design_won"] == true
           arm_tag = "checked resolution-cover arm" if rr["cover_won"] == true
           arm_tag = "exact arithmetic-count arm" if rr["nae_won"] == true

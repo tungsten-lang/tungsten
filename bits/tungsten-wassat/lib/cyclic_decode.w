@@ -2,6 +2,7 @@
 # implications. SAT requires original-clause replay. UNSAT additionally needs
 # the complete original-clause contract checked by the bounded ball verifier.
 use cyclic_walk
+use cyclic_order
 use cyclic_bound
 
 WASSAT_CYCLE_MAX_N = 1024
@@ -183,13 +184,14 @@ WASSAT_CYCLE_WALL_MS = 15000
   # Decoder: 26 bytes/variable, two implication arrays (at most nc edges).
   # Search: at most n*(n-1)/2 graph edges. Include all six result slots when
   # converting the lone CDCL solver into a race, plus small descriptors/ring.
-  74 * (nv + 1) + 8 * nc + 15 * n * n + 76 * n + 2097168
+  74 * (nv + 1) + 8 * nc + 15 * n * n + 92 * n + 2101264
 
 # This admission is used only beside the serial fallback. Existing full
 # races retain their resource policy; the retained scout remains the CDCL
 # arm. Count its resident companions conservatively, without building another
 # solver solely to recover implications for this model-only proposal lane.
--> wassat_cycle_plan(formula, cdcl_arenas, sls_arenas)
+-> wassat_cycle_plan(formula, cdcl_arenas, sls_arenas, scout = false)
+  return nil if scout && env("WASSAT_CYCLIC_ORDER") == "0"
   mode = env("WASSAT_CYCLIC_WALK")
   return nil if mode == "0" || formula == nil || System.cpu_count < 2
   return nil if env("WASSAT_ARMS") != nil && mode != "1"
@@ -213,12 +215,12 @@ WASSAT_CYCLE_WALL_MS = 15000
   # fits. Insufficient room disables this check and preserves the model lane.
   words = (n + 63) / 64
   extra = 8 * (nv + 1) * words + 4 * nc + 5 * n * n + 8 * (n + 1) * words + 80 * n + 4096
-  bound = env("WASSAT_CYCLIC_BOUND") != "0"
+  bound = !scout && env("WASSAT_CYCLIC_BOUND") != "0"
   bound = false if scratch + extra > memory / 64 || scratch + extra > 536870912
   bound = false if (resident + scratch + extra) * 10 > limit * 9 || resident + scratch + extra > memory / 3
   bound_extra = bound ? extra : 0
   repair_extra = wassat_cycle_repair_peak_bytes(n)
-  repair_allowed = env("WASSAT_CYCLIC_REPAIR") != "0"
+  repair_allowed = !scout && env("WASSAT_CYCLIC_REPAIR") != "0"
   repair_allowed = false if scratch + repair_extra > memory / 64 || scratch + repair_extra > 536870912
   repair_allowed = false if (resident + scratch + repair_extra) * 10 > limit * 9 || resident + scratch + repair_extra > memory / 3
   # Repair is restricted to widths for which the bound exits before allocation.
@@ -226,13 +228,13 @@ WASSAT_CYCLE_WALL_MS = 15000
   extra = bound_extra
   extra = repair_extra if repair_allowed && repair_extra > extra
   scratch += extra
-  { "n": n, "scratch": scratch, "bound": bound, "repair_allowed": repair_allowed,
-    "meta": i64[24], "walk": i64[26], "repair": i64[24] }
+  { "n": n, "scratch": scratch, "bound": bound, "repair_allowed": repair_allowed, "proposal_only": scout,
+    "meta": i64[24], "walk": i64[34], "repair": i64[24] }
 
--> wassat_cycle_arm(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, allow_bound, allow_repair, repair) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64 i64 i64 i64[]) i64
+-> wassat_cycle_arm(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, allow_bound, allow_repair, repair, proposal_only) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64 i64 i64 i64[] i64) i64
   m[17] = clock_ms()
   deadline = (m[17] + WASSAT_CYCLE_WALL_MS) ## i64
-  hit = (wassat_cycle_search_mode(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline, allow_bound, allow_repair, repair)) ## i64
+  hit = (wassat_cycle_search_mode(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline, allow_bound, allow_repair, repair, proposal_only)) ## i64
   m[18] = clock_ms()
   res[base + nv + 6] = m[17]
   res[base + nv + 5] = m[18]
@@ -251,15 +253,18 @@ WASSAT_CYCLE_WALL_MS = 15000
   allow_bound = plan["bound"] ? 1 : 0
   allow_repair = plan["repair_allowed"] ? 1 : 0
   repair = plan["repair"]
-  Thread.new -> wassat_cycle_arm(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, allow_bound, allow_repair, repair)
+  proposal_only = plan["proposal_only"] ? 1 : 0
+  Thread.new -> wassat_cycle_arm(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, allow_bound, allow_repair, repair, proposal_only)
 
--> wassat_cycle_profile(plan, status)
+-> wassat_cycle_profile(plan, status, label = "race")
   m = plan["meta"]; w = plan["walk"]
   sweep_edges = w[6] > 0 ? w[23] : 0
-  wassat_prof_note("race.cyclic status=[status] vertices=[m[1]] edges=[m[2]] width=[m[3]] implications=[m[4]] negative_pairs=[m[5]] owner_visits=[m[6]] true_closure=[m[7]] false_closure=[m[8]] units=[m[9]] cross_pairs=[m[10]] rejected_clauses=[m[11]] polls=[m[12] + w[12]] restarts=[w[6]] iterations=[w[7]] swaps=[w[8]] bumps=[w[9]] candidates=[w[10]] updates=[w[11]] sweep_edges=[sweep_edges] target_distances=[w[24]] target_updates=[w[25]] best_deficit=[w[13]] replay_clauses=[m[14]] replay_literals=[m[15]] verified=[m[16]] decode_ms=[m[19]] search_ms=[m[20]] lift_ms=[m[21]] stopped=[m[22]] scratch_bytes=[m[23]] ms=[m[18] - m[17]]")
-  wassat_prof_note("race.cyclic_bound status=[w[0]] root=[w[1]] radius=[w[2]] vertices=[w[3]] positions=[w[4]] edges=[w[5]] work=[w[14]] support_words=[w[15]] rectangle_rows=[w[16]] coverage_words=[w[17]] row_amos=[w[18]] checked_edges=[w[19]] bytes=[w[20]] ms=[w[21]]")
+  wassat_prof_note("[label].cyclic status=[status] vertices=[m[1]] edges=[m[2]] width=[m[3]] implications=[m[4]] negative_pairs=[m[5]] owner_visits=[m[6]] true_closure=[m[7]] false_closure=[m[8]] units=[m[9]] cross_pairs=[m[10]] rejected_clauses=[m[11]] polls=[m[12] + w[12]] restarts=[w[6]] iterations=[w[7]] swaps=[w[8]] bumps=[w[9]] candidates=[w[10]] updates=[w[11]] sweep_edges=[sweep_edges] target_distances=[w[24]] target_updates=[w[25]] best_deficit=[w[13]] replay_clauses=[m[14]] replay_literals=[m[15]] verified=[m[16]] decode_ms=[m[19]] search_ms=[m[20]] lift_ms=[m[21]] stopped=[m[22]] scratch_bytes=[m[23]] ms=[m[18] - m[17]]")
+  wassat_prof_note("[label].cyclic_bound status=[w[0]] root=[w[1]] radius=[w[2]] vertices=[w[3]] positions=[w[4]] edges=[w[5]] work=[w[14]] support_words=[w[15]] rectangle_rows=[w[16]] coverage_words=[w[17]] row_amos=[w[18]] checked_edges=[w[19]] bytes=[w[20]] ms=[w[21]]")
+  if w.size >= 34
+    wassat_prof_note("[label].cyclic_order status=[w[26]] attempts=[w[27]] visited=[w[28]] adjacency_checks=[w[29]] checked_edges=[w[30]] first_part=[w[31]] second_part=[w[32]] stopped=[w[33]]")
   r = plan["repair"]
-  wassat_prof_note("race.cyclic_repair allowed=[plan["repair_allowed"]] attempts=[r[0]] free_vertices=[r[1]] assignment_vars=[r[2]] variables=[r[3]] clauses=[r[4]] literals=[r[5]] conflicts=[r[6]] graph_verified=[r[7]] build_ms=[r[8]] solve_ms=[r[9]] work=[r[10]] polls=[r[12]] max_bytes=[r[14]] checked_edges=[r[15]] bad_edges=[r[16]] restricted_status=[r[17]] snapshots=[r[18]] stopped=[r[22]] last_deficit=[r[23]]")
+  wassat_prof_note("[label].cyclic_repair allowed=[plan["repair_allowed"]] attempts=[r[0]] free_vertices=[r[1]] assignment_vars=[r[2]] variables=[r[3]] clauses=[r[4]] literals=[r[5]] conflicts=[r[6]] graph_verified=[r[7]] build_ms=[r[8]] solve_ms=[r[9]] work=[r[10]] polls=[r[12]] max_bytes=[r[14]] checked_edges=[r[15]] bad_edges=[r[16]] restricted_status=[r[17]] snapshots=[r[18]] stopped=[r[22]] last_deficit=[r[23]]")
 
 -> wassat_cycle_edges(lits, offs, lens, nc, n, owner, matrix, m, stop, deadline) (i64[] i64[] i64[] i64 i64 i32[] i8[] i64[] i64[] i64) i64
   ci = 0 ## i64
@@ -468,7 +473,7 @@ WASSAT_CYCLE_WALL_MS = 15000
 -> wassat_cycle_search_checked(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline, allow_bound) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64 i64 i64) i64
   wassat_cycle_search_mode(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline, allow_bound, 0, walk)
 
--> wassat_cycle_search_mode(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline, allow_bound, allow_repair, repair) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64[]) i64
+-> wassat_cycle_search_mode(lits, offs, lens, nv, nc, n, m, walk, stop, res, base, deadline, allow_bound, allow_repair, repair, proposal_only = 0) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64[] i64[] i64 i64 i64 i64 i64[] i64) i64
   return 0 if wassat_perm_stop(m, stop, deadline) != 0
   return 0 unless wassat_cycle_matrix(lits, offs, lens, nv, nc, n, m, stop, deadline) == 1
   heads = i32[nv + 2]
@@ -511,6 +516,30 @@ WASSAT_CYCLE_WALL_MS = 15000
     m[22] = walk[22]
     return 0 if walk[22] != 0 || wassat_perm_stop(m, stop, deadline) != 0
   perm = i32[n]
+  if env("WASSAT_CYCLIC_ORDER") != "0"
+    order_stats = i64[8]
+    ordered = wassat_cycle_order(n, ne, width, left, right, gh, matrix, perm, m, order_stats, stop, deadline)
+    if ordered == 1
+      order_lift = clock_ms()
+      if wassat_cycle_lift(lits, offs, lens, nv, nc, n, perm, heads, dest, values, queue, m, stop, deadline) == 1
+        order_stats[0] = 2
+        m[20] = order_lift - t1
+        m[21] = clock_ms() - order_lift
+        v = 1
+        while v <= nv
+          return 0 if (v & 4095) == 0 && wassat_perm_stop(m, stop, deadline) != 0
+          res[base + v] = values[v]
+          v += 1
+    if walk.size >= 34
+      j = 0
+      while j < 8
+        walk[26 + j] = order_stats[j]
+        j += 1
+    return 1 if order_stats[0] == 2
+    return 0 if wassat_perm_stop(m, stop, deadline) != 0
+  if proposal_only != 0
+    m[20] = clock_ms() - t1
+    return 0
   rng = i64[1]
   rng[0] = 1
   hit = (wassat_cycle_trial_mode(n, ne, width, left, right, gh, occ, perm, i32[n], i32[ne], i32[ne], i32[ne], rng, walk, stop, deadline, 32, 100000, allow_repair, repair)) ## i64

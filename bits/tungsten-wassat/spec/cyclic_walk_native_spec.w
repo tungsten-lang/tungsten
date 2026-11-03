@@ -71,4 +71,29 @@ describe "Circular worker stop points" ->
     expect(wassat_stop_status(stop)).to eq(0)
     << "c cyclic deadline iterations=[m[7]] elapsed_ms=[clock_ms() - start]"
 
+  it "checks a deadline inside a live dense ordering traversal" ->
+    n = 1024
+    ne = n * n / 4
+    left = i32[ne]; right = i32[ne]; heads = i32[n + 1]
+    matrix = i8[n * n]
+    e = 0; a = 0
+    while a < n / 2
+      b = n / 2
+      while b < n
+        left[e] = a; right[e] = b; matrix[a * n + b] = 1
+        e += 1; b += 1
+      a += 1
+    a = 0
+    while a <= n
+      heads[a] = a * (n / 2)
+      a += 1
+    m = i64[24]; stats = i64[8]; stop = i64[4]
+    start = clock_ms()
+    expect(wassat_cycle_order(n, ne, n / 2, left, right, heads, matrix, i32[n], m, stats, stop, start + 3)).to eq(0)
+    expect(stats[3] > 0).to eq(true)
+    expect(stats[7]).to eq(2)
+    expect(stats[0]).to eq(0)
+    expect(wassat_stop_status(stop)).to eq(0)
+    << "c cyclic order deadline visits=[stats[3]] elapsed_ms=[clock_ms() - start]"
+
 spec_summary

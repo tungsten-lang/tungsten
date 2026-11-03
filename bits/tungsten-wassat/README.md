@@ -85,6 +85,19 @@ are checked against the original CNF; exact UNSAT answers remain fast-only
 except where a lane names a witness variable set whose original-clause
 star the proof solver then refutes on its own, emitting a checkable proof.
 
+For circular-label encodings, a bounded model constructor orders a bipartite
+graph's two color classes by degree-ordered breadth-first traversal and places
+them on opposite arcs. It tries at most eight roots, reuses fixed native
+buffers, and checks every graph edge before lifting and replaying every
+original CNF clause. An eligible fast-mode scout runs this construction in
+parallel; a miss ends the proposal without repeating the later search. Longer
+walks and checked capacity refutations keep their existing entry point. The
+early worker shares cancellation, respects memory admission, and is disabled
+for finite conflict budgets and proof requests. Profiling reports traversal
+visits, roots tried, edge checks, replay, allocations and join times.
+`WASSAT_CYCLIC_ORDER=0` disables the construction; `WASSAT_CYCLIC_SCOUT=0`
+disables its early launch for comparisons.
+
 A bounded single-track Gray-code recognizer checks a sufficient subset of
 original clauses: every column has a selected cyclic rotation of the first,
 complete XOR definitions expose adjacent-bit flips, and each cyclic edge has

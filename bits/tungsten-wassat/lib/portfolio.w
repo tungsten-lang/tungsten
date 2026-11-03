@@ -2016,6 +2016,16 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, net_extra)
+  # Comparator search occupies only a still-empty optional slot. Decode,
+  # packed simulation and model completion run beside the preserved arms.
+  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+    sorting_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
+    sorting_extra += nae_plan["scratch"] if nae_plan != nil
+    sorting_extra += capacity_plan["scratch"] if capacity_plan != nil
+    circuit_plan = wassat_sorting_plan(formula, art["config"],
+      pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
+      cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
+      sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, sorting_extra)
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -2680,7 +2690,7 @@ WASSAT_AXIS_SLOTS = 10
   circuit_idx = threads + 3
   circuit_base = circuit_idx * (nv + 8)
   circuit_plan = race["circuit_plan"]
-  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["box_net"] == true || circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true || circuit_plan["wide_circuit"] == true)
+  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["sorting_network"] == true || circuit_plan["box_net"] == true || circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true || circuit_plan["wide_circuit"] == true)
   circuit_handle = nil
   keychart_plan = race["keychart_plan"]
   keychart_idx = race["keychart_index"]
@@ -2776,6 +2786,8 @@ WASSAT_AXIS_SLOTS = 10
     wide_fallback = budget == 0 ? circuit_plan["wide_fallback"] : nil
     if wide_fallback != nil
       circuit_handle = Thread.new -> wassat_circuit_fallback_arm(formula, circuit_plan, wide_fallback, stop, res, circuit_base, nv)
+    elsif circuit_plan["sorting_network"] == true
+      circuit_handle = Thread.new -> wassat_sorting_arm(formula, circuit_plan, stop, res, circuit_base, nv)
     elsif circuit_plan["box_net"] == true
       circuit_handle = Thread.new -> wassat_box_net_arm(formula, circuit_plan, stop, res, circuit_base, nv)
     elsif circuit_plan["roster_bound"] == true
@@ -3144,7 +3156,9 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[circuit_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       cm = circuit_plan["meta"]
-      if circuit_plan["box_net"] == true
+      if circuit_plan["sorting_network"] == true
+        wassat_sorting_profile(cm)
+      elsif circuit_plan["box_net"] == true
         wassat_box_net_profile(cm)
       elsif circuit_plan["roster_bound"] == true
         wassat_roster_profile(cm)
@@ -3274,7 +3288,7 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && cycle_plan != nil && res[cycle_base] == 1
     status = 1
     winner = cycle_idx
-  if status == 0 && circuit_plan != nil && (circuit_plan["counter_cover"] == true || circuit_plan["box_net"] == true) && res[circuit_base] == 1
+  if status == 0 && circuit_plan != nil && (circuit_plan["counter_cover"] == true || circuit_plan["box_net"] == true || circuit_plan["sorting_network"] == true) && res[circuit_base] == 1
     status = 1
     winner = circuit_idx
   model = []
@@ -3285,6 +3299,7 @@ WASSAT_AXIS_SLOTS = 10
     bm = circuit_plan["meta"]
     conflicts += bm[40] + bm[41]
   conflicts += circuit_plan["meta"][9] if circuit_plan != nil && circuit_plan["box_net"] == true
+  conflicts += circuit_plan["meta"][17] if circuit_plan != nil && circuit_plan["sorting_network"] == true
   if conflict_budget != nil
     conflicts = ccall("__w_arr_load_acq", conflict_budget, 0)
   if winner >= 0
@@ -3315,6 +3330,7 @@ WASSAT_AXIS_SLOTS = 10
     "resource_capacity_won": circuit_plan != nil && circuit_plan["resource_capacity"] == true && winner == circuit_idx && !wide_won,
     "byte_relation_won": circuit_plan != nil && circuit_plan["byte_relation"] == true && winner == circuit_idx && !wide_won,
     "selector_latin_won": circuit_plan != nil && circuit_plan["selector_latin"] == true && winner == circuit_idx && !wide_won,
+    "sorting_network_won": circuit_plan != nil && circuit_plan["sorting_network"] == true && winner == circuit_idx,
     "box_net_won": circuit_plan != nil && circuit_plan["box_net"] == true && winner == circuit_idx,
     "cover_won": cover_plan != nil && winner == cover_idx,
     "keychart_won": keychart_plan != nil && winner == keychart_idx,

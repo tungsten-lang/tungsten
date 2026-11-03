@@ -2,27 +2,7 @@
 # Coordinates come from ordered participation flags and a terminal path.
 # Signal components and their idle-wire clauses supply the input patterns.
 # Other encodings, incomplete coordinates and exhausted bounds return nil.
-use sorting_walk
-
--> wassat_sorting_root(parent, v) (i32[] i64) i64
-  root = v ## i64
-  while parent[root] != root
-    root = parent[root]
-  while parent[v] != v
-    next_v = parent[v] ## i64
-    parent[v] = root; v = next_v
-  root
-
--> wassat_sorting_join(parent, a, b) (i32[] i64 i64) i64
-  a = wassat_sorting_root(parent,a); b = wassat_sorting_root(parent,b)
-  if a < b
-    parent[b] = a
-  else
-    parent[a] = b
-  0
-
--> wassat_sorting_abs(x) (i64) i64
-  x < 0 ? -x : x
+use sorting_inputs
 
 -> wassat_sorting_decode(formula, m, stop, deadline)
   nv = formula["nvars"]
@@ -86,19 +66,27 @@ use sorting_walk
           largest = lit if lit > largest
         j += 1
       if negs == 1 && neg > controls && neg < 4096 && largest <= controls
-        return nil if flag_clause[neg] != 0
-        flag_clause[neg] = ci+1
-        max_flag = neg if neg > max_flag
-        j = 0
-        while j < length
-          v = lits[off+j]
-          if v > 0
-            return nil if membership[v] >= 2
-            incidence[2*v+membership[v]] = neg
-            membership[v] += 1
-          j += 1
+        flag_clause[neg] = flag_clause[neg] == 0 ? ci+1 : -1
     ci += 1
+  # Participation flags form the consecutive block after the selectors.
+  # Signal aliases can have the same clause shape later in the encoding;
+  # only build wire memberships from the actual contiguous flag block.
+  while max_flag+1 < 4096 && flag_clause[max_flag+1] != 0
+    max_flag += 1
   return nil if max_flag <= controls || max_flag >= nv
+  flag = first_flag
+  while flag <= max_flag
+    return nil if flag_clause[flag] < 0
+    ci = flag_clause[flag]-1
+    j = 0
+    while j < lens[ci]
+      v = lits[offs[ci]+j]
+      if v > 0
+        return nil if membership[v] >= 2
+        incidence[2*v+membership[v]] = flag
+        membership[v] += 1
+      j += 1
+    flag += 1
   m[3] = max_flag
   roots = i32[10]
   group = i32[stride]
@@ -257,6 +245,10 @@ use sorting_walk
         value |= 1 << b; b += 1
       vectors[count] = value; count += 1
     v += 1
-  return nil if count == 0
+  if count == 0
+    return nil if env("WASSAT_SORTING_ENCODING") == "0"
+    vectors = wassat_sorting_encoded_inputs(formula,controls,max_flag,group,va,vb,m,stop,deadline)
+    return nil if vectors == nil
+    count = m[4]
   m[4] = count; m[5] = nc; m[22] = 3
   { "allowed": allowed, "vectors": vectors }

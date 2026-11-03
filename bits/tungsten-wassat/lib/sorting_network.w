@@ -8,7 +8,7 @@ WASSAT_SORTING_STEPS = 100000000
 
 -> wassat_sorting_bytes(nv, nc, nl) (i64 i64 i64) i64
   # Private literal copy, watch links, trail/signs, decoder DSU and bitplanes.
-  8*nl + 8*nc + 40*(nv+1) + 75497472
+  8*nl + 8*nc + 64*(nv+1) + 75497472
 
 # Like the bounded byte-relation lane, count retained scouts as well as
 # live arms under a six-GiB envelope. The older 2.5-GiB optional-arena gate
@@ -190,4 +190,4 @@ WASSAT_SORTING_STEPS = 100000000
   0
 
 -> wassat_sorting_profile(m)
-  wassat_prof_note("race.sorting width=[m[0]] depth=[m[1]] selectors=[m[2]] patterns=[m[4]] decode_stage=[m[22]] clause_scans=[m[5]] literal_visits=[m[23]] moves=[m[6]] accepted=[m[7]] restarts=[m[8]] best=[m[9]] evaluations=[m[12]] polls=[m[11]] stopped=[m[10]] residual_vars=[m[26]] residual_clauses=[m[27]] residual_literals=[m[28]] completion_conflicts=[m[17]] watch_visits=[m[24]] replay_clauses=[m[13]] verified=[m[18]] decode_ms=[m[14]] search_ms=[m[15]] completion_ms=[m[16]] scratch_bytes=[m[21]] worker_ms=[m[20]-m[19]]")
+  wassat_prof_note("race.sorting width=[m[0]] depth=[m[1]] selectors=[m[2]] patterns=[m[4]] decode_stage=[m[22]] control_summaries=[m[29]] input_observations=[m[30]] encoded_patterns=[m[31]] clause_scans=[m[5]] literal_visits=[m[23]] moves=[m[6]] accepted=[m[7]] restarts=[m[8]] best=[m[9]] evaluations=[m[12]] polls=[m[11]] stopped=[m[10]] residual_vars=[m[26]] residual_clauses=[m[27]] residual_literals=[m[28]] completion_conflicts=[m[17]] watch_visits=[m[24]] replay_clauses=[m[13]] verified=[m[18]] decode_ms=[m[14]] search_ms=[m[15]] completion_ms=[m[16]] scratch_bytes=[m[21]] worker_ms=[m[20]-m[19]]")

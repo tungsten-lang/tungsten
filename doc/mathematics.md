@@ -40,6 +40,7 @@ of every theorem for which that claim might be useful.
 | Descriptive, weighted, multivariate, and linear-model statistics | `use statistics`; `Statistics` | [scientific-computing/statistics.md](scientific-computing/statistics.md) |
 | Measurements, experimental GLS, gas dynamics, nonlinear PDE references | `use physics`; `Physics`, `Measurement`, `FiniteVolume` | [physics.md](physics.md) |
 | Arrays, tensors, linear algebra, optimization, ODEs | flat modules under `core/` | [scientific-computing/overview.md](scientific-computing/overview.md) |
+| Publication-ready math source | `LaTeX`, `LaTeXProfiles` | [scientific-computing/latex.md](scientific-computing/latex.md) |
 | SAT-backed finite certificates | `tungsten-wassat` producer + `tungsten-wrat` checker | [certified-mathematics.md](certified-mathematics.md) |
 | Hash-bound external proof artifacts | `ProofArtifactBundle` | [certified-mathematics.md](certified-mathematics.md) |
 | Plots | `core/plot.w`, `tungsten-drawille` | [scientific-computing/plot.md](scientific-computing/plot.md) |
@@ -426,7 +427,8 @@ The intended stack is:
 3. SVG/HTML Canvas for interactive documentation, plus GPU rendering and
    deterministic video/image export (native raster frames: `Canvas`, see
    [canvas.md](canvas.md));
-4. LaTeX-quality formula layout and stable glyph-to-glyph transforms;
+4. visual formula layout and stable glyph-to-glyph transforms beyond the
+   current [composable LaTeX source emitter](scientific-computing/latex.md);
 5. notebook/document hooks so examples and diagrams are rebuilt and tested;
 6. accessibility metadata, captions, reduced-motion variants, and static
    fallbacks.

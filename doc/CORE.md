@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(727 total), grouped by area, with its declaration, a one-line
+(736 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -67,6 +67,15 @@ summary from the source header, and a link to the source.
 | `Instant` | `+ Instant` | Instant — millisecond-precision UTC timestamp. | [`core/instant.w`](../core/instant.w) |
 | `Integer` | `+ Integer < Real` | Integer — the generic, representation-independent integer family. | [`core/integer.w`](../core/integer.w) |
 | `JSON` | `+ JSON` | JSON encoder/decoder — interface and default implementation. | [`core/json.w`](../core/json.w) |
+| `LaTeX` | `+ LaTeX` | Escaping, composable math primitives, value renderers, and paper fragments. | [`core/latex.w`](../core/latex.w) |
+| `LatexFragment` | `+ LatexFragment` | Immutable trusted TeX source. Construct through LaTeX helpers so the raw | [`core/latex.w`](../core/latex.w) |
+| `LatexBuilder` | `+ LatexBuilder` | Small append-only builder for sections assembled over several statements. | [`core/latex.w`](../core/latex.w) |
+| `LatexMath` | `+ LatexMath` | LatexMath — typed semantic mathematics with deterministic LaTeX lowering. | [`core/latex/math.w`](../core/latex/math.w) |
+| `LatexReferenceEvent` | `+ LatexReferenceEvent` | One label, ref, eqref, or cite key recorded by a structured LaTeX helper. | [`core/latex/validation.w`](../core/latex/validation.w) |
+| `LatexEventChain` | `+ LatexEventChain` | Immutable tree of reference events shared by composed fragments. | [`core/latex/validation.w`](../core/latex/validation.w) |
+| `LatexValidationReport` | `+ LatexValidationReport` | Tracked-only label, reference, and citation diagnostics for one fragment. | [`core/latex/validation.w`](../core/latex/validation.w) |
+| `LaTeXProfiles` | `+ LaTeXProfiles` | Named publication profiles: ieee, acm, arxiv, thesis, and journal. | [`core/latex/profiles.w`](../core/latex/profiles.w) |
+| `LatexProfile` | `+ LatexProfile` | Document class, packages, metadata layout, and bibliography for one venue. | [`core/latex/profiles/base.w`](../core/latex/profiles/base.w) |
 | `Locale` | `+ Locale` | Locale — CLDR-style locale data: currency, calendar names, patterns, | [`core/locale.w`](../core/locale.w) |
 | `Math` | `+ Math` | Math — pure-Tungsten implementations of math functions derived from | [`core/math.w`](../core/math.w) |
 | `Matrix` | — | — | [`core/matrix.w`](../core/matrix.w) |

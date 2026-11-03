@@ -1,4 +1,5 @@
 # MCMC, HMC, SMC, variational inference, and diagnostic contracts.
+# spec: compiled -- interpreter: memory limit exceeded at 8 GiB (passes at 24G, 20.5 GiB peak)
 
 use probability
 

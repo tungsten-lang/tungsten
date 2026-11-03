@@ -152,6 +152,30 @@ describe "Wassat focused/stable mode split, target-phase protection, and structu
       expect(card["binaries"].include?([-4, 1])).to eq(true)
       expect(card["binaries"].include?([1, 7])).to eq(true)
 
+  context "bounded cardinality scratch" ->
+    it "keeps accepted guard tails independent of later candidate clauses" ->
+      # The EO pair {1,2} resolves its two retained tails to {3,4}. Later
+      # clauses reuse the scratch with different positive and negative tails.
+      f = spec_flat_formula([
+        "p cnf 9 8", "1 2 0", "-1 -2 0", "-1 3 4 0", "-2 3 4 0",
+        "-3 -4 0", "-5 6 7 0", "-6 -7 0", "-8 -9 -3 0"
+      ].join("\n") + "\n")
+      card = wassat_extract_cardinality_and_propagate(9, f)
+      expect(card["unsat"]).to eq(false)
+      expect(card["eo_groups"].include?([3, 4])).to eq(true)
+
+    it "clears dropped marks between strengthening candidates of different widths" ->
+      # The first ternary drops position 0. The second must still compare
+      # position 1 with position 0 to discover 5=>4 and publish (4 v 6).
+      f = spec_flat_formula([
+        "p cnf 11 7", "-1 2 0", "-5 4 0", "1 2 3 0", "4 5 6 0",
+        "7 8 9 10 11 0", "3 7 8 9 10 0", "-10 0"
+      ].join("\n") + "\n")
+      card = wassat_extract_cardinality_and_propagate(11, f)
+      expect(card["unsat"]).to eq(false)
+      expect(card["binaries"].include?([2, 3])).to eq(true)
+      expect(card["binaries"].include?([4, 6])).to eq(true)
+
   context "DETOUR bidirectional wavefront and macro-transition portal-balance pruning" ->
     it "prunes dead intermediate portal states and extracts a valid DETOUR witness route" ->
       # 3 layers of EO groups:

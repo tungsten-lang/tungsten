@@ -295,6 +295,11 @@
     v += 1
   pos_occ = i64[nv + 1]
   neg_occ = i64[nv + 1]
+  # Retain only accepted guard tails; all other candidates share this fixed
+  # scratch. Clauses in this scan have at most six literals.
+  pos_scratch = i64[6]
+  guard_scanned = 0
+  guard_saved = 0
   ci = 0
   while ci < clauses.size
     c = clauses[ci]
@@ -302,7 +307,8 @@
       sat = false
       neg_cnt = 0
       neg_v = 0
-      pos_lits = []
+      pos_count = 0
+      guard_scanned += 1
       j = 0
       while j < c.size
         l = c[j]
@@ -313,15 +319,24 @@
         elsif vv == 0
           if l > 0
             pos_occ[lv] += 1
-            pos_lits.push(l)
+            pos_scratch[pos_count] = l
+            pos_count += 1
           else
             neg_occ[lv] += 1
             neg_cnt += 1
             neg_v = lv
         j += 1
-      if !sat && neg_cnt == 1 && pos_lits.size >= 2 && pos_lits.size <= 4
-        guarded_pos[neg_v] = pos_lits
+      if !sat && neg_cnt == 1 && pos_count >= 2 && pos_count <= 4
+        tail = []
+        j = 0
+        while j < pos_count
+          tail.push(pos_scratch[j])
+          j += 1
+        guarded_pos[neg_v] = tail
+        guard_saved += 1
     ci += 1
+
+  wassat_prof_note("struct.cardinality.guards scanned=[guard_scanned] retained=[guard_saved] scratch_slots=6")
 
   di = 0
   while di < pos_domains.size && eo_groups.size < 4096
@@ -730,12 +745,20 @@
   # Clause strengthening where one literal implies another (either via a
   # flat monotone chain x_r => x_s for r > s, or via binary implications):
   # in (a v b v R), if a => b then a is redundant and can be dropped.
+  # These arrays never escape: only scalar units and binary endpoints are
+  # published. Reuse bounded scratch across every candidate clause.
+  rem = i64[5]
+  kept = i64[4]
+  dropped = i8[4]
+  strength_scanned = 0
+  strength_trials = 0
   ci = 0
   while ci < clauses.size && binaries.size < 16384
     c = clauses[ci]
     if c.size >= 3 && c.size <= 5
       sat = false
-      rem = []
+      rem_count = 0
+      strength_scanned += 1
       j = 0
       while j < c.size && !sat
         l = c[j]
@@ -743,15 +766,20 @@
         if vv > 0
           sat = true
         elsif vv == 0
-          rem.push(l)
+          rem[rem_count] = l
+          rem_count += 1
         j += 1
-      if !sat && rem.size >= 2 && rem.size <= 4
+      if !sat && rem_count >= 2 && rem_count <= 4
         # Check if any literal in `rem` implies another surviving literal in `rem`
-        kept = []
-        dropped = i8[rem.size]
+        kept_count = 0
+        strength_trials += 1
+        j = 0
+        while j < rem_count
+          dropped[j] = 0
+          j += 1
         subsumed = false
         i1 = 0
-        while i1 < rem.size && !subsumed
+        while i1 < rem_count && !subsumed
           a = rem[i1]
           va = a.abs
           ca = var_chain[va]
@@ -760,7 +788,7 @@
           adj = bin_adj[a_idx]
           drop_a = false
           i2 = 0
-          while i2 < rem.size && !drop_a && !subsumed
+          while i2 < rem_count && !drop_a && !subsumed
             if i1 != i2 && dropped[i2] == 0
               b = rem[i2]
               vb = b.abs
@@ -783,16 +811,19 @@
           if drop_a
             dropped[i1] = 1
           else
-            kept.push(a)
+            kept[kept_count] = a
+            kept_count += 1
           i1 += 1
-        if !subsumed && kept.size < rem.size
-          if kept.size == 1
+        if !subsumed && kept_count < rem_count
+          if kept_count == 1
             rc = wassat_struct_enqueue_unit(nv, val, units, q, kept[0])
             return { "unsat": true, "units": units, "binaries": binaries, "eo_groups": eo_groups, "chains": chains } if rc < 0
-          elsif kept.size == 2 && binaries.size < 16384
+          elsif kept_count == 2 && binaries.size < 16384
             rc = wassat_struct_add_binary(nv, val, units, q, binaries, bin_adj, seen_bin, kept[0], kept[1])
             return { "unsat": true, "units": units, "binaries": binaries, "eo_groups": eo_groups, "chains": chains } if rc < 0
     ci += 1
+
+  wassat_prof_note("struct.cardinality.strengthen scanned=[strength_scanned] candidates=[strength_trials] scratch_slots=13")
 
   if wassat_struct_propagate_units(nv, val, units, q, bin_adj, ternaries) < 0
     return { "unsat": true, "units": units, "binaries": binaries, "eo_groups": eo_groups, "chains": chains }

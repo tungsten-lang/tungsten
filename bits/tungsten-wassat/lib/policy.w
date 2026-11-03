@@ -270,6 +270,31 @@ WASSAT_CONGRUENCE_DEFAULT = true
   # descriptors, state, and the deliberately conservative small-formula floor.
   1048576 + (3 * lits + 7 * ncl + 12 * nv) * 8
 
+# Tighter envelope for a flat walker: literals (i64), occurrences (u32),
+# six clause arrays, eight variable arrays, occurrence offsets, and the
+# intake stamp. Retain the older broad estimate above for established gates.
+-> wassat_flat_sls_arena_bytes(formula)
+  1048576 + 12 * formula["flat_nlits"] + 48 * formula["flat_ncl"] + 96 * (formula["nvars"] + 4)
+
+# A completed propagation-only lucky arm retains its lean loader, not a CDCL
+# learner or inprocessor. Count its actual layout conservatively: 8 bytes per
+# arena word, 41 per clause slot, two packed pools, up to 288 bytes per variable
+# for the shell and directories, plus 16 MiB for small buffers/boxed overhead.
+# Units may repeat, so count clauses rather than bounding them by variables.
+# The all-long watch bound avoids another full shape scan and includes the
+# relocation floor. Explicit watch headroom remains charged as well.
+-> wassat_lucky_arena_bytes(formula)
+  nv = formula["nvars"]; nc = formula["flat_ncl"]; nl = formula["flat_nlits"]
+  slots = nc + 2
+  pool = 2 * slots + 4 * nv + 72
+  watches = 2 * nc + nc / 2 + 2 * nv + 4
+  watches = pool if watches < pool
+  if env("WASSAT_WATCH_EXTRA") != nil
+    percent = wassat_decimal_in_range("WASSAT_WATCH_EXTRA", env("WASSAT_WATCH_EXTRA"), 0, 200)
+    watches = wassat_watch_reserve_capacity(watches, percent)
+  units = wassat_flat_unit_count(formula["flat_lens"], nc)
+  16777216 + 288 * (nv + 4) + 8 * (nl + nc + 2) + 41 * slots + 8 * (pool + watches + units)
+
 -> wassat_race_memory_fits?(formula, cdcl_arenas, sls_arenas,
                             preprocess_arenas = 0, extra_bytes = 0)
   memory = System.physical_memory_bytes ## i64

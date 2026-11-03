@@ -41,6 +41,7 @@ use permutation_walk
 use cyclic_decode
 use nae_decode
 use capacity_clique
+use box_net
 use ../../../core/bit_ops
 
 WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
@@ -2004,6 +2005,16 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
           circuit_plan = wide_plan
         elsif wide_plan != nil
           circuit_plan["wide_fallback"] = wide_plan
+  # Common-net construction uses only a still-empty optional slot. All of
+  # its clause decoding and search happen after the solving arms are ready.
+  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+    net_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
+    net_extra += nae_plan["scratch"] if nae_plan != nil
+    net_extra += capacity_plan["scratch"] if capacity_plan != nil
+    circuit_plan = wassat_box_net_plan(formula, art["config"],
+      pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
+      cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
+      sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, net_extra)
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -2139,7 +2150,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     "sls_allowed": sls_worker > 0, "sls_repair_allowed": repair_allowed,
     "pre_sls_allowed": pre_sls_allowed,
     "reserved_pre_sls_arenas": pre_sls_allowed ? 1 : 0,
-    "resident_cdcl_arenas": cdcl_arenas + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
+    "resident_cdcl_arenas": cdcl_arenas + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1) + (circuit_plan != nil && circuit_plan["box_net"] == true ? 1 : 0),
     "resident_sls_arenas": sls_arenas,
     "resident_preprocess_arenas": preprocess_arenas,
     "repair_cdcl_arenas": repair_allowed ? 1 : 0 }
@@ -2603,7 +2614,9 @@ WASSAT_AXIS_SLOTS = 10
   lits = formula["flat_lits"]; offs = formula["flat_offs"]; lens = formula["flat_lens"]
   program = plan["program"]; inputs = plan["inputs"]; assertions = plan["assertions"]
   meta = plan["meta"]; values = plan["values"]
-  if plan["roster_bound"] == true
+  if plan["box_net"] == true
+    wassat_box_net_arm(formula, plan, stop, res, base, nv)
+  elsif plan["roster_bound"] == true
     wassat_roster_arm(formula, meta, stop, res, base, nv)
   elsif plan["affine_design"] == true
     wassat_affine_design_arm(formula, meta, stop, res, base, nv)
@@ -2666,7 +2679,7 @@ WASSAT_AXIS_SLOTS = 10
   circuit_idx = threads + 3
   circuit_base = circuit_idx * (nv + 8)
   circuit_plan = race["circuit_plan"]
-  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true || circuit_plan["wide_circuit"] == true)
+  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["box_net"] == true || circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true || circuit_plan["wide_circuit"] == true)
   circuit_handle = nil
   keychart_plan = race["keychart_plan"]
   keychart_idx = race["keychart_index"]
@@ -2762,6 +2775,8 @@ WASSAT_AXIS_SLOTS = 10
     wide_fallback = budget == 0 ? circuit_plan["wide_fallback"] : nil
     if wide_fallback != nil
       circuit_handle = Thread.new -> wassat_circuit_fallback_arm(formula, circuit_plan, wide_fallback, stop, res, circuit_base, nv)
+    elsif circuit_plan["box_net"] == true
+      circuit_handle = Thread.new -> wassat_box_net_arm(formula, circuit_plan, stop, res, circuit_base, nv)
     elsif circuit_plan["roster_bound"] == true
       circuit_handle = Thread.new -> wassat_roster_arm(formula, circuit_meta, stop, res, circuit_base, nv)
     elsif circuit_plan["affine_design"] == true
@@ -3128,7 +3143,9 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[circuit_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       cm = circuit_plan["meta"]
-      if circuit_plan["roster_bound"] == true
+      if circuit_plan["box_net"] == true
+        wassat_box_net_profile(cm)
+      elsif circuit_plan["roster_bound"] == true
         wassat_roster_profile(cm)
       elsif circuit_plan["affine_design"] == true
         wassat_affine_design_profile(cm)
@@ -3256,7 +3273,7 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && cycle_plan != nil && res[cycle_base] == 1
     status = 1
     winner = cycle_idx
-  if status == 0 && circuit_plan != nil && circuit_plan["counter_cover"] == true && res[circuit_base] == 1
+  if status == 0 && circuit_plan != nil && (circuit_plan["counter_cover"] == true || circuit_plan["box_net"] == true) && res[circuit_base] == 1
     status = 1
     winner = circuit_idx
   model = []
@@ -3266,6 +3283,7 @@ WASSAT_AXIS_SLOTS = 10
   if circuit_plan != nil && circuit_plan["byte_relation"] == true
     bm = circuit_plan["meta"]
     conflicts += bm[40] + bm[41]
+  conflicts += circuit_plan["meta"][9] if circuit_plan != nil && circuit_plan["box_net"] == true
   if conflict_budget != nil
     conflicts = ccall("__w_arr_load_acq", conflict_budget, 0)
   if winner >= 0
@@ -3296,6 +3314,7 @@ WASSAT_AXIS_SLOTS = 10
     "resource_capacity_won": circuit_plan != nil && circuit_plan["resource_capacity"] == true && winner == circuit_idx && !wide_won,
     "byte_relation_won": circuit_plan != nil && circuit_plan["byte_relation"] == true && winner == circuit_idx && !wide_won,
     "selector_latin_won": circuit_plan != nil && circuit_plan["selector_latin"] == true && winner == circuit_idx && !wide_won,
+    "box_net_won": circuit_plan != nil && circuit_plan["box_net"] == true && winner == circuit_idx,
     "cover_won": cover_plan != nil && winner == cover_idx,
     "keychart_won": keychart_plan != nil && winner == keychart_idx,
     "domain_won": domain_plan != nil && winner == domain_idx,

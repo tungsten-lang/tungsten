@@ -270,6 +270,25 @@ accepts the ordered four-depth encoding with at most 64 keys, 64 locks,
 16 positions, 50,000 variables and 100,000 clauses; other shapes use the
 existing arms.
 
+The raw race can also construct a common unfolding net for two surfaces.
+It recovers their transitions, mapping variables, relative rotations and two
+anchors directly from the CNF. Search first connects the anchors, then grows
+the mapping with permutation-preserving moves. Fresh anchor paths avoid
+repeatedly mutating a nearly complete layout with incompatible topology.
+Every candidate is completed by original-CNF assumption solving and checked
+against every original clause. A failed proposal never publishes UNSAT.
+
+This worker preserves existing arms, requires a spare CPU and memory for a
+completion arena, and limits search to 60 seconds and completion to 4,096
+conflicts, with cooperative cancellation. Recognition supports 8--64 squares;
+automatic admission starts at 58 because smaller controls did not establish a benefit. Set
+`WASSAT_BOX_NET=0` to disable it or `=1` to opt into smaller supported shapes
+and pinned-arm experiments. Rounded and aggregate-budget races bypass it.
+`WASSAT_BOX_NET_FRESH_PERIOD=4` restores the older restart schedule for
+comparisons; the default is 1. Profiling reports clause scans, path nodes,
+moves, evaluations, restarts, repair conflicts, replay work and stage times.
+Search reuses fixed scratch arrays without allocating on each move.
+
 Lanes that used to hide behind the MDP recognizer's miss now live in their
 own files (`sdp`, `backdoor`, `sgi`, `schooltt`, `symmetry_fix`, `vdwb`)
 behind a fingerprint-gated registry in `lib/specialists.w`, which records

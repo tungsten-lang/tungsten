@@ -20,32 +20,15 @@
     if @preconditioner != :none && @preconditioner != :jacobi && @preconditioner != :ichol0
       raise "SparseSolveCriteria: preconditioner must be :none, :jacobi, or :ichol0"
 
-  -> relative_tolerance
-    @relative_tolerance
-  -> absolute_tolerance
-    @absolute_tolerance
-  -> max_iterations
-    @max_iterations
-  -> preconditioner
-    @preconditioner
+  ro :relative_tolerance, :absolute_tolerance, :max_iterations, :preconditioner
 
 + SparseSolveResult
   -> new(@status, @solution, @iterations, @residual_norm, @relative_residual, @algorithm)
 
-  -> status
-    @status
-  -> solution
-    @solution
+  ro :status, :solution, :iterations, :residual_norm, :relative_residual, :algorithm
+
   -> x
     @solution
-  -> iterations
-    @iterations
-  -> residual_norm
-    @residual_norm
-  -> relative_residual
-    @relative_residual
-  -> algorithm
-    @algorithm
   -> converged?
     @status == :converged
   -> certified?

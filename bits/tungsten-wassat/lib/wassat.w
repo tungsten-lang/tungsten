@@ -1743,6 +1743,7 @@ use lut_congruence
           arm_tag = "clause-checked selector Latin arm" if rr["selector_latin_won"] == true
           arm_tag = "proved byte-relation congruence" if rr["byte_relation_won"] == true
           arm_tag = "clause-checked resource capacity" if rr["resource_capacity_won"] == true
+          arm_tag = "clause-checked affine design obstruction" if rr["affine_design_won"] == true
           arm_tag = "checked resolution-cover arm" if rr["cover_won"] == true
           arm_tag = "exact arithmetic-count arm" if rr["nae_won"] == true
           arm_tag = "verified capacity-clique arm" if rr["capacity_won"] == true

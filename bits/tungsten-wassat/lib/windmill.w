@@ -436,14 +436,14 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
 # clauses and 1D projected pair-cut clauses, and compile 64-bit pair-cut masks
 # plus a flat V-free artifact. Returns nil when complete V ladders are absent.
 -> wassat_windmill_recover_v(formula, lay)
-  nv = formula["nvars"]
-  ncl = formula["flat_ncl"]
-  cols = lay["cols"]
-  rows = lay["rows"]
+  nv = formula["nvars"] ## i64
+  ncl = formula["flat_ncl"] ## i64
+  cols = lay["cols"] ## i64
+  rows = lay["rows"] ## i64
   return nil if cols > 62 || rows > 60
   ntrans = rows - 1
-  nmoves = lay["nmoves"]
-  sbase = lay["sbase"]
+  nmoves = lay["nmoves"] ## i64
+  sbase = lay["sbase"] ## i64
   send = sbase + 3 * rows * cols - 1
   guard = lay["guard"] ## i64[]
   fla = formula["flat_lits"] ## i64[]
@@ -581,8 +581,11 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     c1 += 1
 
   # Pass 1: size V-free flat artifact and compiled pair-cut masks.
+  # rows <= 60 bounds every mask to 61 bits. Keep both shift dimensions and
+  # mask intermediates native: boxed masks above the small-integer range
+  # otherwise allocate BigInts for each literal in both full-CNF scans.
   one = 1 ## i64
-  all_cuts = (one << (rows + 1)) - one
+  all_cuts = (one << (rows + 1)) - one ## i64
   vfree_ncl = 0
   vfree_nlits = 0
   pair_pc_cnt = i64[npairs]
@@ -594,7 +597,7 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     off = fcs[ci]
     p = -1
     nnv = 0
-    km = all_cuts
+    km = all_cuts ## i64
     j = 0
     while j < n
       l = fla[off + j]
@@ -604,8 +607,8 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
         return nil if p >= 0 && p != vp
         p = vp
         rr = v_row[av]
-        low = (one << (rr + 1)) - one
-        fcuts = l > 0 ? low : (all_cuts ^ low)
+        low = (one << (rr + 1)) - one ## i64
+        fcuts = l > 0 ? low : (all_cuts ^ low) ## i64
         km = km & fcuts
       else
         nnv += 1
@@ -651,7 +654,7 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     off = fcs[ci]
     p = -1
     nnv = 0
-    km = all_cuts
+    km = all_cuts ## i64
     j = 0
     while j < n
       l = fla[off + j]
@@ -660,8 +663,8 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
       if vp >= 0
         p = vp
         rr = v_row[av]
-        low = (one << (rr + 1)) - one
-        fcuts = l > 0 ? low : (all_cuts ^ low)
+        low = (one << (rr + 1)) - one ## i64
+        fcuts = l > 0 ? low : (all_cuts ^ low) ## i64
         km = km & fcuts
       else
         non_v[nnv] = l if nnv < 16

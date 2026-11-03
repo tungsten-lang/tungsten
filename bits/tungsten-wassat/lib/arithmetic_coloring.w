@@ -21,6 +21,7 @@
 # caller; UNSAT is fast-only.
 
 use monochrome_count
+use monochrome_watch
 
 WASSAT_ARITH_MAX_ELEMENTS = 700
 WASSAT_ARITH_MAX_SCOPES = 200000
@@ -575,12 +576,19 @@ WASSAT_ARITH_DEADLINE_MS = 50
   symmetric = wassat_arith_color_symmetric?(scope_off, scope_elem, scope_forbid, nscopes, deadline)
   return miss if wassat_arith_poll(meta) != 0
   count_work = nil
+  watch_work = nil
   status = 0
   if env("WASSAT_ARITH_COUNT") != "0"
     count_work = i64[32]
-    status = wassat_mono_run(assign, scope_off, scope_elem, scope_forbid,
-      inc_off, inc, order, trail, nelem, nscopes, node_cap, deadline,
-      symmetric ? 1 : 0, count_work, i64[4])
+    if env("WASSAT_ARITH_WATCH") != "0"
+      watch_work = count_work
+      status = wassat_mwatch_run(assign, scope_off, scope_elem, scope_forbid,
+        order, trail, nelem, nscopes, node_cap, deadline,
+        symmetric ? 1 : 0, watch_work, i64[4])
+    else
+      status = wassat_mono_run(assign, scope_off, scope_elem, scope_forbid,
+        inc_off, inc, order, trail, nelem, nscopes, node_cap, deadline,
+        symmetric ? 1 : 0, count_work, i64[4])
     meta[0] = count_work[0]
     meta[1] = count_work[2]
     meta[3] = count_work[5]
@@ -603,7 +611,7 @@ WASSAT_ARITH_DEADLINE_MS = 50
       )
   status = 0 if meta[3] != 0
   result = { "recognized": true, "status": status, "elements": nelem,
-    "scopes": nscopes, "nodes": meta[1], "family": family, "model": [], "work": meta, "count_work": count_work }
+    "scopes": nscopes, "nodes": meta[1], "family": family, "model": [], "work": meta, "count_work": watch_work == nil ? count_work : nil, "watch_work": watch_work }
   if status == 1
     model = []
     v = 1

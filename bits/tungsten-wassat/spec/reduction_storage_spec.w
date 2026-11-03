@@ -65,7 +65,7 @@ describe "Wassat reduction storage" ->
     expect([f[0][1], f[0][2], f[0][3], f[0][5], f[0][6], f[0][7]]).to eq([0, 1, 4, 0, 6, 2])
     expect([f[2][0], f[2][5]]).to eq([4294967300, 12884901890])
     expect([f[6][1], f[6][2], f[6][3], f[6][4], f[5][0]]).to eq([1, 3, 2, -1, 77])
-    expect([f[7][64], f[7][65], f[7][66], f[7][67], f[7][68], f[7][69]]).to eq([8, 4, 4, 8, 0, 0])
+    expect([f[7][64], f[7][65], f[7][66], f[7][67], f[7][68], f[7][69]]).to eq([8, 2, 4, 8, 0, 0])
 
   it "leaves a surviving prefix in place and moves only the following bodies" ->
     f = reduction_storage_fixture(true)

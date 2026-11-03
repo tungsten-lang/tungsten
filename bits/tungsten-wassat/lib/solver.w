@@ -436,9 +436,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Reduction scratch: 64 histogram buckets, two compaction outputs,
     # then cumulative clause visits, copied words, remapped clauses/reasons,
     # over-limit reductions, schedule adjustments, added learning headroom,
-    # then performed/avoided survivor recount visits.
-    @rhist = i64[75]             # reused by every reduction; last two count recount work
+    # then performed/avoided survivor recount visits and growing-table recycling.
+    @rhist = i64[77]             # recount work, growing-table recycles and reclaimed slots
     @reuse_reduce_count = env("WASSAT_REDUCE_COUNT") != "0"
+    @recycle_growing = env("WASSAT_RECYCLE_CLAUSES") != "0"
     # Mid-search inprocessing schedule. WASSAT_INPROCESS pins a fixed
     # interval (0 = off); otherwise policy's shape-gated automatic schedule
     # decides the first round, and later rounds space out geometrically.
@@ -2832,6 +2833,18 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       wassat_reduce_compact(@cmeta, @alive, @arena, @clbd, @cused,
                              @gid, @reason, @rhist, @ncl, @nvars, remap ? 1 : 0)
       @asize = @rhist[64]
+      # Growing solvers otherwise burn one metadata slot per conflict.
+      # Reclaim an index table only when tombstones occupy at least half
+      # of a substantial table; retain small and mostly-live databases.
+      if !remap && @recycle_growing && @gid.size >= @ncl && @ncl >= 65536 && @rhist[65] * 2 <= @ncl
+        wassat_reduce_compact(@cmeta, @alive, @arena, @clbd, @cused,
+                               @gid, @reason, @rhist, @ncl, @nvars, 1)
+        @vivify_cursor = wassat_recycle_cursor(@gid, @ncl, @rhist[65], @vivify_cursor)
+        @subsume_cursor = wassat_recycle_cursor(@gid, @ncl, @rhist[65], @subsume_cursor)
+        @asize = @rhist[64]
+        @rhist[75] += 1
+        @rhist[76] += @ncl - @rhist[65]
+        remap = true
       if remap
         @ncl = @rhist[65]
         self.rebuild_binaries
@@ -4345,7 +4358,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_prof_note("[label].subsume_checks compared_literals=[@inp_totals[8]] missing_rejects=[@inp_totals[9]]")
     wassat_prof_note("[label].subst_hash clauses=[@inp_totals[5]] probes=[@inp_totals[6]] compared_literals=[@inp_totals[7]]")
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
-    wassat_prof_note("[label].reduction clause_visits=[@rhist[66]] copied_words=[@rhist[67]] remapped_clauses=[@rhist[68]] remapped_reasons=[@rhist[69]] recount_visits=[@rhist[73]] recount_avoided=[@rhist[74]]")
+    wassat_prof_note("[label].reduction clause_visits=[@rhist[66]] copied_words=[@rhist[67]] remapped_clauses=[@rhist[68]] remapped_reasons=[@rhist[69]] recount_visits=[@rhist[73]] recount_avoided=[@rhist[74]] growing_recycles=[@rhist[75]] reclaimed_slots=[@rhist[76]]")
     wassat_prof_note("[label].analysis mark_bytes=[@nvars + 1] reason_bytes=[4 * (@nvars + 1)] shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] shrink_levels=[@shst[7]] shrink_attempts=[@shst[3]] shrink_blocks=[@shst[4]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
     wassat_prof_note("[label].minimize prescan_literals=[@astate[12]] resume_literals=[@astate[13]] probes=[@astate[14]] failed=[@astate[15]] removed=[@astate[16]] max_reason=[@astate[17]] frames=[@astate[18]] input_literals=[@astate[19]] budget_skipped=[@astate[20]] work_limit=[@astate[11]]")
     0
@@ -6155,19 +6168,33 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   state[69] += mapped
   0
 
+# A rotating inprocessing cursor names the next clause to visit. Preserve
+# that position when recycling growing-table indices, including an end
+# cursor that should next visit clauses appended after this compaction.
+-> wassat_recycle_cursor(map, old_count, live_count, cursor) (i64[] i64 i64 i64) i64
+  ci = cursor
+  ci = 0 if ci < 0
+  while ci < old_count
+    return map[ci] if map[ci] >= 0
+    ci += 1
+  live_count
+
 # Proof-free, root-level compaction. The caller repacks watches and, when
 # remap is enabled, binary indices after this indivisible mutation finishes.
-# state reuses the histogram slab: outputs 64/65, cumulative work 66..69.
+# state reuses the histogram slab: arena size and live count at 64/65,
+# cumulative work at 66..69. Stable indices may still extend past live count.
 -> wassat_reduce_compact(cm, alive, ar, lbd, used, gid, rsn, state, ncl, nv, remap) (i64[] i8[] i64[] i64[] i64[] i64[] i32[] i64[] i64 i64 i64) i64
   if remap == 1
     return wassat_reduce_compact_fixed(cm, alive, ar, lbd, used, gid, rsn, state, ncl, nv)
-  # Growing-capacity arms keep their clause indices. Preserve their single
-  # body scan without adding per-clause remapping branches or table writes.
+  # Retain indices on the first pass. Count survivors during the existing
+  # body scan so a growing solver can decide whether recycling is worthwhile.
   copied = 0
   wp = 0
+  live = 0
   ci = 0
   while ci < ncl
     if alive[ci] == 1
+      live += 1
       st = cm[2 * ci]
       n = cm[2 * ci + 1]
       if st != wp + 1
@@ -6183,7 +6210,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       cm[2 * ci + 1] = 0
     ci += 1
   state[64] = wp
-  state[65] = ncl
+  state[65] = live
   state[66] += ncl
   state[67] += copied
   0

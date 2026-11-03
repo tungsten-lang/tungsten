@@ -220,11 +220,15 @@ WASSAT_CYCLE_WALL_MS = 15000
   bound = false if (resident + scratch + extra) * 10 > limit * 9 || resident + scratch + extra > memory / 3
   bound_extra = bound ? extra : 0
   repair_extra = wassat_cycle_repair_peak_bytes(n)
+  # A missed bound can leave its needed-edge map and clique search slabs
+  # resident when repair starts. Reserve these alongside the repair arenas.
+  repair_extra += n * n + 8 * n if bound
   repair_allowed = !scout && env("WASSAT_CYCLIC_REPAIR") != "0"
   repair_allowed = false if scratch + repair_extra > memory / 64 || scratch + repair_extra > 536870912
   repair_allowed = false if (resident + scratch + repair_extra) * 10 > limit * 9 || resident + scratch + repair_extra > memory / 3
-  # Repair is restricted to widths for which the bound exits before allocation.
-  # Both admissions therefore charge the maximum, not two simultaneous arenas.
+  # Large proof scratch follows only a graph impossibility certificate.
+  # Verification ends the worker on either result, so repair cannot follow
+  # those allocations. Charge the maximum of these exclusive phases.
   extra = bound_extra
   extra = repair_extra if repair_allowed && repair_extra > extra
   scratch += extra
@@ -261,6 +265,8 @@ WASSAT_CYCLE_WALL_MS = 15000
   sweep_edges = w[6] > 0 ? w[23] : 0
   wassat_prof_note("[label].cyclic status=[status] vertices=[m[1]] edges=[m[2]] width=[m[3]] implications=[m[4]] negative_pairs=[m[5]] owner_visits=[m[6]] true_closure=[m[7]] false_closure=[m[8]] units=[m[9]] cross_pairs=[m[10]] rejected_clauses=[m[11]] polls=[m[12] + w[12]] restarts=[w[6]] iterations=[w[7]] swaps=[w[8]] bumps=[w[9]] candidates=[w[10]] updates=[w[11]] sweep_edges=[sweep_edges] target_distances=[w[24]] target_updates=[w[25]] best_deficit=[w[13]] replay_clauses=[m[14]] replay_literals=[m[15]] verified=[m[16]] decode_ms=[m[19]] search_ms=[m[20]] lift_ms=[m[21]] stopped=[m[22]] scratch_bytes=[m[23]] ms=[m[18] - m[17]]")
   wassat_prof_note("[label].cyclic_bound status=[w[0]] root=[w[1]] radius=[w[2]] vertices=[w[3]] positions=[w[4]] edges=[w[5]] work=[w[14]] support_words=[w[15]] rectangle_rows=[w[16]] coverage_words=[w[17]] row_amos=[w[18]] checked_edges=[w[19]] bytes=[w[20]] ms=[w[21]]")
+  if w[2] == -1
+    wassat_prof_note("[label].cyclic_clique status=[w[0]] vertices=[w[3]] capacity=[w[4]] checked_edges=[w[19]] work=[w[14]] ms=[w[21]]")
   if w.size >= 34
     wassat_prof_note("[label].cyclic_order status=[w[26]] attempts=[w[27]] visited=[w[28]] adjacency_checks=[w[29]] checked_edges=[w[30]] first_part=[w[31]] second_part=[w[32]] stopped=[w[33]]")
   r = plan["repair"]
@@ -503,16 +509,21 @@ WASSAT_CYCLE_WALL_MS = 15000
   z = wassat_cycle_graph(n, matrix, left, right, gh, occ, gf)
   t1 = (clock_ms()) ## i64
   m[19] = t1 - m[17]
-  # This is also the repair gate's complement: do not allocate bound scratch
-  # for widths whose even-ball capacity already spans the whole circle.
-  if allow_bound == 1 && 2 * (n - 2 * width) + 1 < n
+  if allow_bound == 1
     needed = i8[n * n]
-    candidate = wassat_cycle_bound_ball(n, width, left, right, gh, occ, needed, walk, stop, deadline)
+    candidate = 0
+    if env("WASSAT_CYCLIC_CLIQUE") != "0"
+      candidate = wassat_cycle_bound_clique(n,width,matrix,gh,needed,walk,stop,deadline)
+    if candidate == 0 && 2 * (n - 2 * width) + 1 < n
+      candidate = wassat_cycle_bound_ball(n, width, left, right, gh, occ, needed, walk, stop, deadline)
     if candidate == 1
       certified = wassat_cycle_bound_verify(lits, offs, lens, nv, nc, n, width, owner, heads, dest, needed, fill, walk, stop, deadline)
       walk[21] = clock_ms() - t1
       m[20] = walk[21]
-      return -1 if certified == -1
+      m[22] = walk[22]
+      # A failed premise check cannot refute the CNF. The proposed graph is
+      # nevertheless impossible, so walking or repairing it cannot help.
+      return certified
     m[22] = walk[22]
     return 0 if walk[22] != 0 || wassat_perm_stop(m, stop, deadline) != 0
   perm = i32[n]

@@ -16,9 +16,9 @@ WASSAT_CYCLE_REPAIR_LITERALS = 600000
 WASSAT_CYCLE_REPAIR_BYTES = 134217728
 WASSAT_CYCLE_REPAIR_ROUNDS = 2
 
-# Two bounded solver arenas may remain resident. The bound verifier and these
-# repairs are mutually exclusive: repair only runs when its ball check exits
-# before allocating any graph/support buffers.
+# Two bounded solver arenas may remain resident. Large certificate buffers
+# and repair arenas are exclusive: a certificate candidate ends the worker
+# after verification. The coordinator also reserves earlier search scratch.
 -> wassat_cycle_repair_peak_bytes(n) (i64) i64
   WASSAT_CYCLE_REPAIR_ROUNDS * WASSAT_CYCLE_REPAIR_BYTES + 4 * n + 4096
 

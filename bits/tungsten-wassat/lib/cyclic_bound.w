@@ -12,6 +12,7 @@ fn wassat_cycle_bound_ctz(x) (i64) i64
 # Reuse unused walk-counter slots: 0 certificate status,1 root,2 radius,
 # 3 vertices,4 positions,5 tree edges,14 work,15 support ORs,16 rectangle rows,
 # 17 coverage words,18 checked row AMOs,19 checked edges,20 bytes,21 time.
+# Radius -1 denotes a clique and positions then counts clique capacity.
 # 12/22 retain the common poll/stop contract;23 is the next work-based poll.
 -> wassat_cycle_bound_poll(m, stop, deadline) (i64[] i64[] i64) i64
   return m[22] if m[22] != 0
@@ -20,6 +21,96 @@ fn wassat_cycle_bound_ctz(x) (i64) i64
     return 3
   m[23] = m[14] + 16384
   wassat_perm_stop(m, stop, deadline)
+
+# A clique has one gap of at least k per vertex around the circle. More
+# than floor(n/k) clique vertices cannot fit. This proposes needed edges;
+# only the original-clause verifier may turn the proposal into UNSAT.
+-> wassat_cycle_bound_clique(n, k, matrix, heads, needed, m, stop, deadline) (i64 i64 i8[] i32[] i8[] i64[] i64[] i64) i64
+  return 0 if n < 3 || k < 1 || k > n / 2
+  return 0 if matrix.size < n*n || needed.size < n*n || heads.size < n+1
+  return 0 if wassat_cycle_bound_poll(m,stop,deadline) != 0
+  target = n / k + 1 ## i64
+  max_degree = 0 ## i64
+  root = 0 ## i64
+  while root < n
+    degree = heads[root+1]-heads[root] ## i64
+    max_degree = degree if degree > max_degree
+    root += 1
+  return 0 if max_degree+1 < target
+  candidates = i32[n]
+  chosen = i32[n]
+  work = 0 ## i64
+  root = 0
+  while root < n
+    return 0 if wassat_cycle_bound_poll(m,stop,deadline) != 0
+    if heads[root+1]-heads[root]+1 >= target
+      chosen[0] = root
+      count = 1 ## i64
+      remaining = 0 ## i64
+      u = 0 ## i64
+      while u < n
+        if u != root && matrix[root*n+u] != 0
+          candidates[remaining] = u
+          remaining += 1
+        u += 1
+      work += n
+      m[14] += n
+      while count < target && count+remaining >= target
+        best = -1 ## i64
+        best_score = -1 ## i64
+        i = 0 ## i64
+        while i < remaining
+          u = candidates[i]
+          score = 0 ## i64
+          j = 0 ## i64
+          while j < remaining
+            score += 1 if candidates[j] != u && matrix[u*n+candidates[j]] != 0
+            j += 1
+          work += remaining
+          m[14] += remaining
+          return 0 if work > 1000000
+          return 0 if m[14] >= m[23] && wassat_cycle_bound_poll(m,stop,deadline) != 0
+          if score > best_score
+            best_score = score
+            best = u
+          break if score == remaining-1
+          i += 1
+        break if best < 0 || count+1+best_score < target
+        chosen[count] = best
+        count += 1
+        kept = 0 ## i64
+        i = 0
+        while i < remaining
+          u = candidates[i]
+          if u != best && matrix[best*n+u] != 0
+            candidates[kept] = u
+            kept += 1
+          i += 1
+        remaining = kept
+      if count == target
+        m[0] = 1
+        m[1] = root
+        m[2] = -1
+        m[3] = count
+        m[4] = n / k
+        m[5] = 0
+        i = 0
+        while i < count
+          j = i+1 ## i64
+          while j < count
+            a = chosen[i] ## i64
+            b = chosen[j] ## i64
+            if a > b
+              tmp = a ## i64
+              a = b
+              b = tmp
+            needed[a*n+b] = 1
+            m[5] += 1
+            j += 1
+          i += 1
+        return 1
+    root += 1
+  0
 
 -> wassat_cycle_bound_ball(n, k, left, right, heads, occ, needed, m, stop, deadline) (i64 i64 i32[] i32[] i32[] i32[] i8[] i64[] i64[] i64) i64
   return 0 if wassat_cycle_bound_poll(m, stop, deadline) != 0

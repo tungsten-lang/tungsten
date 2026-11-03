@@ -124,9 +124,19 @@
       return out
     raise context + " must contain only portable value-tree data"
 
-  -> .positive_integer(value, context, maximum = 100_000)
+  # True for a finite number with no fractional part, including an
+  # integer-valued Float. `==` keeps Floats apart from the exact Integer
+  # tower, so the truncation is compared through ordering, which crosses.
+  -> .integral?(value)
+    return false if !finite?(value)
     integer = value.to_i()
-    if integer != value || integer <= 0 || integer > maximum
+    !(integer < value) && !(integer > value)
+
+  -> .positive_integer(value, context, maximum = 100_000)
+    if !integral?(value)
+      raise context + " must be a positive integer at most " + maximum.to_s()
+    integer = value.to_i()
+    if integer <= 0 || integer > maximum
       raise context + " must be a positive integer at most " + maximum.to_s()
     integer
 

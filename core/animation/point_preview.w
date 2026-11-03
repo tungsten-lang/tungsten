@@ -238,9 +238,9 @@ use core/animation
   -> .frame_index(step, frame_count, mode)
     count = PlotData.positive_integer(
       frame_count, "preview frame count", 10_000_000)
-    value = step.to_i()
-    if value != step || value < 0
+    if !PlotData.integral?(step) || step < 0
       raise "preview logical step must be a nonnegative integer"
+    value = step.to_i()
     valid_mode = mode == :once || mode == :loop
     valid_mode = valid_mode || mode == :closed_loop || mode == :ping_pong
     if !valid_mode

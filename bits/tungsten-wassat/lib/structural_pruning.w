@@ -752,6 +752,7 @@
   dropped = i8[4]
   strength_scanned = 0
   strength_trials = 0
+  strength_inactive = 0
   ci = 0
   while ci < clauses.size && binaries.size < 16384
     c = clauses[ci]
@@ -787,27 +788,32 @@
           a_idx = wassat_struct_lit_idx(a)
           adj = bin_adj[a_idx]
           drop_a = false
-          i2 = 0
-          while i2 < rem_count && !drop_a && !subsumed
-            if i1 != i2 && dropped[i2] == 0
-              b = rem[i2]
-              vb = b.abs
-              cb = var_chain[vb]
-              pb = var_pos[vb]
-              if ca > 0 && ca == cb
-                if (a > 0 && b > 0 && pa > pb) || (a < 0 && b < 0 && pa < pb)
-                  drop_a = true
-                elsif (a > 0 && b < 0 && pa <= pb) || (a < 0 && b > 0 && pa >= pb)
-                  subsumed = true
-              unless drop_a || subsumed
-                k = 0
-                while k < adj.size
-                  if adj[k] == b
+          # Without a chain or outgoing implication, a cannot be dropped.
+          # Read the live adjacency here: earlier clauses may add binaries.
+          if ca > 0 || !adj.empty?
+            i2 = 0
+            while i2 < rem_count && !drop_a && !subsumed
+              if i1 != i2 && dropped[i2] == 0
+                b = rem[i2]
+                vb = b.abs
+                cb = var_chain[vb]
+                pb = var_pos[vb]
+                if ca > 0 && ca == cb
+                  if (a > 0 && b > 0 && pa > pb) || (a < 0 && b < 0 && pa < pb)
                     drop_a = true
-                    k = adj.size
-                  else
-                    k += 1
-            i2 += 1
+                  elsif (a > 0 && b < 0 && pa <= pb) || (a < 0 && b > 0 && pa >= pb)
+                    subsumed = true
+                unless drop_a || subsumed
+                  k = 0
+                  while k < adj.size
+                    if adj[k] == b
+                      drop_a = true
+                      k = adj.size
+                    else
+                      k += 1
+              i2 += 1
+          else
+            strength_inactive += 1
           if drop_a
             dropped[i1] = 1
           else
@@ -823,7 +829,7 @@
             return { "unsat": true, "units": units, "binaries": binaries, "eo_groups": eo_groups, "chains": chains } if rc < 0
     ci += 1
 
-  wassat_prof_note("struct.cardinality.strengthen scanned=[strength_scanned] candidates=[strength_trials] scratch_slots=13")
+  wassat_prof_note("struct.cardinality.strengthen scanned=[strength_scanned] candidates=[strength_trials] inactive_literals=[strength_inactive] scratch_slots=13")
 
   if wassat_struct_propagate_units(nv, val, units, q, bin_adj, ternaries) < 0
     return { "unsat": true, "units": units, "binaries": binaries, "eo_groups": eo_groups, "chains": chains }

@@ -1248,25 +1248,25 @@
     validate_type_hint_spelling(hint)
     advance()
     hint = hint.strip()
-    # `## fold` names a value, never `<<` / `<-`. Bind it to the printed
-    # expression (the last one when `<< a, b ## fold`).
-    if fold_hint_text?(hint)
-      k = ast_kind(expr)
-      if k == :puts
-        vals = expr.value
-        if vals != nil && vals.size() > 0
-          out = []
-          last = vals.size() - 1
-          i = 0
-          while i < vals.size()
-            v = vals[i]
-            if i == last
-              v = Tungsten:AST:TypeAscription.new(v, hint)
-            out.push(v)
-            i += 1
-          return Tungsten:AST:Puts.new(out)
-      if k == :print
-        return Tungsten:AST:Print.new(Tungsten:AST:TypeAscription.new(expr.value, hint))
+    # A hint names a value, never `<<` / `<-` (a print's value is nil): bind
+    # it to the printed expression, the last one in `<< a, b ## i64`, so
+    # `<< x * ~1.5 ## i64` prints the converted value.
+    k = ast_kind(expr)
+    if k == :puts
+      vals = expr.value
+      if vals != nil && vals.size() > 0
+        out = []
+        last = vals.size() - 1
+        i = 0
+        while i < vals.size()
+          v = vals[i]
+          if i == last
+            v = Tungsten:AST:TypeAscription.new(v, hint)
+          out.push(v)
+          i += 1
+        return Tungsten:AST:Puts.new(out)
+    if k == :print
+      return Tungsten:AST:Print.new(Tungsten:AST:TypeAscription.new(expr.value, hint))
     Tungsten:AST:TypeAscription.new(expr, hint)
 
   # `str` is a common Python/Ruby translation slip, but it has never been a

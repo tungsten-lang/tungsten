@@ -89,6 +89,10 @@ fn fib(n)
 # Inside a body, type an accumulator with `## i64` / `## f64`; `~3.0` is a raw
 # float literal. Untyped decimal integer literals already infer wrapping i64
 # on the compiled path. `## int` / BigInt literals / `**` stay promoting.
+# `## T` applies to the whole expression before it (`x = a * b ## i64`); a
+# float expression is computed in floating point, then truncated once:
+# `(a * ~48000.0) ## i64` == `(a * ~48000.0).to_i`. A cast used as an operand
+# needs its own parens: `((a * ~2.5) ## i64) + 1` (`## T` runs to the `)`).
 ```
 
 ## Blocks

@@ -343,6 +343,28 @@
     return :i128
   nil
 
+# True when `node` evaluates to a float: a float literal, a value the
+# inferencer types f64/f32, or arithmetic (+ - * / % **, unary -) with such
+# an operand. Bitwise and shift operators have no float form, so a machine-int
+# context still reaches through them and converts each operand on its own.
+-> machine_int_context_float_expression?(ctx, node)
+  if node == nil || !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k == :float
+    return true
+  if k == :binary_op
+    if !(node.op in (:PLUS :MINUS :STAR :SLASH :PERCENT :POW))
+      return false
+    return machine_int_context_float_expression?(ctx, node.left) || machine_int_context_float_expression?(ctx, node.right)
+  if k == :unary_op
+    if node.op != :MINUS
+      return false
+    return machine_int_context_float_expression?(ctx, node.operand)
+  if k in (:int :char :if)
+    return false
+  is_machine_float_type(infer_type(node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps))
+
 -> lower_machine_int_expression(ctx, node, type)
   # An assignment hint belongs to the target, so a conditional RHS reaches
   # this helper without an inner TypeAscription node. Merge its arms in a raw
@@ -356,6 +378,16 @@
   # fold them into `cmp Wn, #imm` without going through nanbox/unbox.
   if ast_kind(node) == :char
     return node.value.to_s()
+  # Floating-point arithmetic converts its VALUE, once, truncating toward
+  # zero as `.to_i` does; the context never converts the operands. Recursing
+  # into `(a * ~48000.0) ## i64` multiplied trunc(a) by 48000 (0 for
+  # a = ~0.279; the interpreter computes trunc(13392.0) = 13392).
+  if machine_int_context_float_expression?(ctx, node)
+    wfn = ctx[:func]
+    raw = ensure_raw_f64(wfn, lower_expression(ctx, node))
+    converted = next_temp(wfn)
+    emit_wire_dynamic_2(wfn, f64_to_machine_int_op(type), :temp, converted, :value, raw)
+    return converted
   # Negative literals are represented as unary MINUS over an Int node. Keep
   # that operand in the same raw context too; otherwise a large tag constant
   # is first materialized as a heap BigInt on every execution of the compiled

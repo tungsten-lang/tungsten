@@ -682,7 +682,10 @@
       if value_type in ("Int" "BigInt" "Float" "Decimal" "Rational")
         return ccall("w_num_to_float", value)
       return value
-    if value_type == "Float" && hint in ("u64" "i64" "u128" "i128")
+    # Every machine-int hint truncates a Float toward zero, as compiled code
+    # converts the float value (fptosi); narrow widths are not wrapped here
+    # or in compiled code.
+    if value_type == "Float" && hint in ("u64" "i64" "u128" "i128" "u32" "i32" "u16" "i16" "u8" "i8")
       value = value.to_i()
       value_type = type(value)
     if !(value_type in ("Int" "BigInt"))

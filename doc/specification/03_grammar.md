@@ -320,6 +320,7 @@ Expressions form a precedence hierarchy. From lowest binding power to highest (s
 
 | Level | Operators / forms |
 |-------|-------------------|
+| Type ascription | `expr ## T`, a suffix on the whole expression (§3.9) |
 | Assignment | `=`, compound assigns (`+=`, `-=`, …), multi-assign |
 | Ternary | `cond ? a : b` and related conditional expressions |
 | Message chain / call | `.name`, bare calls, blocks |
@@ -461,6 +462,25 @@ Notable special cases:
   factorials do not create lazy values. This optimization requires unchanged
   Core factorial, arithmetic, and enumeration methods. Variable bounds and
   other product expressions currently retain ordinary eager evaluation.
+* `expr ## T` (type ascription) binds more loosely than every operator. It
+  applies to the whole expression before it, back to the start of the
+  statement, an enclosing `(`, or a call argument's comma: `a * b ## i64` is
+  `(a * b) ## i64`, and `f(a * b ## i64, c)` ascribes `a * b`. In an
+  assignment, `x = a * b ## i64` declares `x` as `i64` and converts the whole
+  right-hand side; after `<<` / `<-` it converts the printed value
+  (the last one in `<< a, b ## i64`). The hint text runs to the end of its
+  line or group (`## u32 unroll` carries a flag), so a cast used as an
+  operand takes its own parentheses: `((a * ~2.5) ## i64) + 1`. In
+  `(a ## i64 + 1)` the `+ 1` is hint text, not an addition.
+  A machine-integer ascription (`i8`…`i128`, `u8`…`u128`) converts the
+  expression's value. Integer arithmetic inside it runs at the machine width
+  and wraps. Arithmetic with a float operand (`+ - * / % **`, unary `-`)
+  runs in floating point, and its result is truncated toward zero once, as
+  `.to_i` does: `(~0.279 * ~48000.0) ## i64 == 13392`, not
+  `0 * 48000`. Bitwise and shift operators have no float form, so each of
+  their operands is converted on its own. Narrow hints such as `## i32`
+  truncate a float but do not wrap an integer to their width. `## f32` and
+  `## f64` convert the value to a float.
 * Print forms: `<< expr` prints values; `<- expr` is the related print variant accepted by the parser.
 
 ## 3.10 Layout and data declarations

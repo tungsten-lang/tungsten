@@ -2,12 +2,8 @@
 # cases, and explicit binary64/callback failure behavior.
 #
 # Run in both engines:
-#   env BIT_HOME=bits bin/tungsten run \
-#     spec/core/optimization_globalized_lbfgs_spec.w
-#   env BIT_HOME=bits TUNGSTEN_INCREMENTAL=0 bin/tungsten compile \
-#     spec/core/optimization_globalized_lbfgs_spec.w \
-#     --out /tmp/optimization-globalized-lbfgs-spec
-#   /tmp/optimization-globalized-lbfgs-spec
+#   bin/tungsten spec/core/optimization_globalized_lbfgs_spec.w
+#   bin/tungsten run --interpret spec/core/optimization_globalized_lbfgs_spec.w
 
 use optimization
 

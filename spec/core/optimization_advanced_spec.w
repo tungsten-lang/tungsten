@@ -3,9 +3,8 @@
 # quadratic-penalty constraint wrapper.
 #
 # Run in both engines:
-#   bin/tungsten run spec/core/optimization_advanced_spec.w
-#   bin/tungsten compile spec/core/optimization_advanced_spec.w \
-#     --out /tmp/optimization-advanced && /tmp/optimization-advanced
+#   bin/tungsten spec/core/optimization_advanced_spec.w
+#   bin/tungsten run --interpret spec/core/optimization_advanced_spec.w
 
 use optimization
 

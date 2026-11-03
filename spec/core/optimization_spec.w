@@ -1,9 +1,8 @@
 # Bounded scalar optimization results, convergence, and failure behavior.
 #
 # Run in both engines:
-#   bin/tungsten run spec/core/optimization_spec.w
-#   bin/tungsten compile spec/core/optimization_spec.w \
-#     --out /tmp/optimization-spec && /tmp/optimization-spec
+#   bin/tungsten spec/core/optimization_spec.w
+#   bin/tungsten run --interpret spec/core/optimization_spec.w
 
 use optimization
 

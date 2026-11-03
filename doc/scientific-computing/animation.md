@@ -244,31 +244,27 @@ future renderers, nor does it sanitize nondeterministic user callbacks.
 
 The retained model remains deliberately 2-D and data-first. The optional
 point rasterizer and macOS window are a focused inspection backend, not a
-general renderer. There is no media encoder, audio, TeX engine, formula
-correspondence solver, 3-D camera, physics simulation, live notebook frontend,
-cross-platform interactive engine, or shell call to an external graphics
-program.
+general renderer. `core/animation` has no media encoder, audio, TeX engine,
+formula correspondence solver, 3-D camera, physics simulation, live notebook
+frontend, cross-platform interactive engine, or shell call to an external
+graphics program. Core's separate immediate-mode modules cover some of that
+ground but do not consume `AnimationTimeline` data yet: `Motion` and `Ease`
+(`core/motion.w`) give easing, timing windows, and narration captions for
+`Svg` frames, `View3D`/`Scene3D` give a 3-D camera over `Svg`, and
+`VideoEncoder` (`core/media/`) encodes frames ([../media.md](../media.md)).
 
 ## Focused checks
 
 ```sh
-bin/tungsten run spec/core/animation_timeline_spec.w
-bin/tungsten compile spec/core/animation_timeline_spec.w \
-  --out /tmp/animation-timeline-spec
-/tmp/animation-timeline-spec
+bin/tungsten spec/core/animation_timeline_spec.w
+bin/tungsten run --interpret spec/core/animation_timeline_spec.w
 
-bin/tungsten run spec/core/animation_model_check_spec.w
-bin/tungsten compile spec/core/animation_model_check_spec.w \
-  --out /tmp/animation-model-check-spec
-/tmp/animation-model-check-spec
+bin/tungsten spec/core/animation_model_check_spec.w
+bin/tungsten run --interpret spec/core/animation_model_check_spec.w
 
-bin/tungsten run spec/core/animation_verification_spec.w
-bin/tungsten compile spec/core/animation_verification_spec.w \
-  --out /tmp/animation-verification-spec
-/tmp/animation-verification-spec
+bin/tungsten spec/core/animation_verification_spec.w
+bin/tungsten run --interpret spec/core/animation_verification_spec.w
 
-bin/tungsten run spec/core/animation_point_preview_spec.w
-bin/tungsten compile spec/core/animation_point_preview_spec.w \
-  --out /tmp/animation-point-preview-spec
-/tmp/animation-point-preview-spec
+bin/tungsten spec/core/animation_point_preview_spec.w
+bin/tungsten run --interpret spec/core/animation_point_preview_spec.w
 ```

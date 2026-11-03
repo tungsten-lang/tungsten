@@ -144,26 +144,28 @@ boundary: renderers consume the data rather than being called from Core.
 source for a capable future backend; Tungsten does not parse or run TeX, lay
 out glyphs, or promise LaTeX metrics in this tranche.
 
-There is intentionally no Core SVG/PDF/video renderer, GPU scene engine,
-interactive notebook frontend, 3-D retained scene, adaptive meshing,
-accessibility layout engine, or external graphics-tool shell-out yet. The
-optional drawille bit remains the existing bounded terminal renderer. Legacy
-`Plot.sparkline`, `.heatmap`, and `.line` remain source-compatible.
+No Core backend renders `PlotScene` data yet, apart from the narrow point
+preview in `core/animation/point_preview`. Core's immediate-mode drawing
+modules are separate APIs that do not read this data: `Svg` (`core/svg.w`)
+builds vector figures, `Canvas` (`core/canvas.w`, compiled macOS) draws native
+raster frames, `Scene3D` projects small 3-D vector scenes onto an `Svg`, and
+`Plot3D` exports gridded data to an interactive web viewer. A `PlotScene` to
+`Svg`/`Canvas` backend is open work, as are a PDF renderer, a GPU scene
+engine, an interactive notebook frontend, adaptive meshing, and an
+accessibility layout engine; `core/plot` never shells out to an external
+graphics tool. The optional drawille bit remains the bounded terminal
+renderer. Legacy `Plot.sparkline`, `.heatmap`, and `.line` remain
+source-compatible.
 
 ## Focused checks
 
 ```sh
-bin/tungsten run spec/core/plot_scene_spec.w
-bin/tungsten compile spec/core/plot_scene_spec.w --out /tmp/plot-scene-spec
-/tmp/plot-scene-spec
+bin/tungsten spec/core/plot_scene_spec.w
+bin/tungsten run --interpret spec/core/plot_scene_spec.w
 
-bin/tungsten run spec/core/plot_model_check_spec.w
-bin/tungsten compile spec/core/plot_model_check_spec.w \
-  --out /tmp/plot-model-check-spec
-/tmp/plot-model-check-spec
+bin/tungsten spec/core/plot_model_check_spec.w
+bin/tungsten run --interpret spec/core/plot_model_check_spec.w
 
-bin/tungsten run spec/core/visualization_autoload_spec.w
-bin/tungsten compile spec/core/visualization_autoload_spec.w \
-  --out /tmp/visualization-autoload-spec
-/tmp/visualization-autoload-spec
+bin/tungsten spec/core/visualization_autoload_spec.w
+bin/tungsten run --interpret spec/core/visualization_autoload_spec.w
 ```

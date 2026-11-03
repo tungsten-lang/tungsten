@@ -201,7 +201,7 @@ summary from the source header, and a link to the source.
 | `LinProg` | `+ LinProg` | LinProg — dense linear programming by the two-phase simplex method. | [`core/linprog.w`](../core/linprog.w) |
 | `Interpolate` | `+ Interpolate` | Interpolate — interpolation and numerical quadrature. | [`core/interpolate.w`](../core/interpolate.w) |
 | `SciIO` | `+ SciIO` | SciIO — scientific data interchange (no system libhdf5/netcdf/arrow). | [`core/io.w`](../core/io.w) |
-| `Plot` | `+ Plot` | — | [`core/plot.w`](../core/plot.w) |
+| `Plot` | `+ Plot` | Plot — scene constructors (core/plot/) plus terminal sparklines, heatmaps, and lines. | [`core/plot.w`](../core/plot.w) |
 | `PlotData` | — | — | [`core/plot.w`](../core/plot.w) |
 | `PlotStyle` | — | — | [`core/plot.w`](../core/plot.w) |
 | `PlotCoordinateSystem` | — | — | [`core/plot.w`](../core/plot.w) |

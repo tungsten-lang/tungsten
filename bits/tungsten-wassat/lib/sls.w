@@ -15,7 +15,7 @@
 # Everything the flip loop touches is flat typed storage walked by one
 # native function (`wassat_sls_run`), the solver core's proven pattern:
 # clause literal arena + offsets, contiguous per-literal occurrence lists,
-# per-clause true-literal counts with the classic critical-variable slot
+# per-clause packed true-count and critical-variable XOR
 # (O(1) break bookkeeping), per-variable weighted scores maintained
 # incrementally, and an unsatisfied-clause list with positions. The plan
 # asked for the assignment as bool[]; bool[] in native typed signatures
@@ -48,6 +48,10 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   # below). The portfolio passes the raw artifact so the SLS arm cannot
   # accidentally rebuild a second view from the shared parser Hash.
   -> new(@nvars, @input_clauses, stop, flat_in)
+    # Packing uses 31 bits for a variable XOR and 31 for the true count.
+    # Normalization bounds clause width by nvars. Match CDCL's limit before
+    # any allocation; bit 63 stays clear so native and interpreted shifts agree.
+    raise "variable count exceeds signed 32-bit SLS representation" if @nvars > 2147483647
     # Same guard as WassatPreprocess: an input without either trusted mirror
     # layout is boxed.
     flat = flat_in
@@ -148,8 +152,10 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     wassat_sls_build_occ(@fla, @fcs, @fcl, @och, @ocv, @ncl, nv)
 
     @asg = i64[nv + 1]           # 0 false, 1 true (see bool[] note above)
-    @satc = i64[@ncl + 2]
-    @crit = i64[@ncl + 2]
+    # One cache access supplies both fields in each occurrence update:
+    # high 32 bits = true count, low 31 bits = XOR of true variable IDs.
+    # Weights and weighted scores remain independent i64 values.
+    @clause_state = i64[@ncl + 2]
     @wght = i64[@ncl + 2]
     @score = i64[nv + 1]
     @ccf = i64[nv + 1]
@@ -234,7 +240,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     return self.result(seed) if max_flips <= @st[4] || @st[9] == 1
     @st[5] = max_flips
     @st[12] = 1
-    wassat_sls_run(@fla, @fcs, @fcl, @och, @ocv, @asg, @satc, @crit,
+    wassat_sls_run(@fla, @fcs, @fcl, @och, @ocv, @asg, @clause_state,
                    @wght, @score, @ccf, @lastf, @ulist, @upos, @gstk, @gin,
                    @bag, @wtr, @st, @stop, @plateau)
     self.result(seed)
@@ -282,9 +288,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @st[10] = 0
     @st[11] = 0
     @st[12] = 0
-    wassat_sls_init_state(@fla, @fcs, @fcl, @asg, @satc, @crit, @wght,
+    wassat_sls_init_state(@fla, @fcs, @fcl, @asg, @clause_state, @wght,
                           @ulist, @upos, @score, @gstk, @gin, @st)
-    wassat_sls_run(@fla, @fcs, @fcl, @och, @ocv, @asg, @satc, @crit,
+    wassat_sls_run(@fla, @fcs, @fcl, @och, @ocv, @asg, @clause_state,
                    @wght, @score, @ccf, @lastf, @ulist, @upos, @gstk, @gin,
                    @bag, @wtr, @st, @stop, @plateau)
     0
@@ -319,8 +325,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @och = i64[2 * nv + 4]
     @ocv = i64[tot + 2]
     @stamp = i64[2 * nv + 4]
-    @satc = i64[cap + 2]
-    @crit = i64[cap + 2]
+    @clause_state = i64[cap + 2]
     @wght = i64[cap + 2]
     @ulist = i64[cap + 2]
     @upos = i64[cap + 2]
@@ -526,7 +531,10 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     ci += 1
   0
 
--> wassat_sls_init_state(fla, fcs, fcl, asg, satc, crit, wght, ulist, upos, score, gstk, gin, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
+# A normalized clause has at most nvars distinct literals. With signed-32-bit
+# variable IDs, both fields stay nonnegative and bit 31 is always zero.
+# XORing a flipped ID cannot carry into the count in the high half.
+-> wassat_sls_init_state(fla, fcs, fcl, asg, cstate, wght, ulist, upos, score, gstk, gin, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
   nv = st[0]
   ncl = st[1]
   ucount = 0
@@ -546,8 +554,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         sc += 1
         cv = cv ^ uvar
       j += 1
-    satc[ci] = sc
-    crit[ci] = cv
+    cstate[ci] = (sc << 32) | cv
     if sc == 0
       ulist[ucount] = ci
       upos[ci] = ucount
@@ -558,7 +565,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 
   ci = 0
   while ci < ncl
-    sc = satc[ci]
+    sc = cstate[ci] >> 32
     if sc == 0
       stx = fcs[ci]
       n = fcl[ci]
@@ -569,7 +576,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         score[uvar] = score[uvar] + 1
         j += 1
     elsif sc == 1
-      score[crit[ci]] = score[crit[ci]] - 1
+      score[cstate[ci] & 2147483647] = score[cstate[ci] & 2147483647] - 1
     ci += 1
 
   gsize = 0
@@ -585,7 +592,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   st[7] = ucount
   0
 
--> wassat_sls_run(fla, fcs, fcl, och, ocv, asg, satc, crit, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_run(fla, fcs, fcl, och, ocv, asg, cstate, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   nv = st[0]
   ncl = st[1]
   ucount = st[2]
@@ -701,7 +708,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
           v2 += 1
         i = 0
         while i < ncl
-          if satc[i] == 0
+          if (cstate[i] >> 32) == 0
             stx = fcs[i]
             n = fcl[i]
             j = 0
@@ -712,8 +719,8 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
               score[uvar] = score[uvar] + wght[i]
               j += 1
           else
-            if satc[i] == 1
-              score[crit[i]] = score[crit[i]] - wght[i]
+            if (cstate[i] >> 32) == 1
+              score[cstate[i] & 2147483647] = score[cstate[i] & 2147483647] - wght[i]
           i += 1
         gsize = 0
         v2 = 1
@@ -790,8 +797,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     wend = och[li + 1]
     while w < wend
       ci = ocv[w]
-      old = satc[ci]
-      satc[ci] = old + 1
+      packed = cstate[ci] ## i64
+      old = packed >> 32
+      cstate[ci] = (packed + 4294967296) ^ v
       if old == 0
         # leaves the unsat list; every member loses its make bonus, the
         # flipped variable additionally becomes the breaker
@@ -801,7 +809,6 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         upos[last] = p
         ucount -= 1
         upos[ci] = 0 - 1
-        crit[ci] = v
         stx = fcs[ci]
         n = fcl[ci]
         j = 0
@@ -820,13 +827,12 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         score[v] = score[v] - wght[ci]
       else
         if old == 1
-          x = crit[ci]
+          x = packed & 2147483647
           score[x] = score[x] + wght[ci]
           if score[x] > 0 && ccf[x] == 1 && gin[x] == 0
             gstk[gsize] = x
             gsize += 1
             gin[x] = 1
-        crit[ci] = crit[ci] ^ v
       w += 1
 
     # clauses losing a true literal: occurrences of v's now-false literal
@@ -838,12 +844,12 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     wend = och[li + 1]
     while w < wend
       ci = ocv[w]
-      old = satc[ci]
-      satc[ci] = old - 1
+      packed = cstate[ci] ## i64
+      old = packed >> 32
+      cstate[ci] = (packed - 4294967296) ^ v
       if old == 1
         # newly unsatisfied: every member gains a make bonus, the flipped
         # variable additionally stops being the breaker
-        crit[ci] = 0
         ulist[ucount] = ci
         upos[ci] = ucount
         ucount += 1
@@ -864,8 +870,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
           j += 1
         score[v] = score[v] + wght[ci]
       else
-        x = crit[ci] ^ v ## i64
-        crit[ci] = x
+        x = (packed ^ v) & 2147483647 ## i64
         if old == 2
           score[x] = score[x] - wght[ci]
       w += 1

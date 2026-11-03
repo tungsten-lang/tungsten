@@ -457,8 +457,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @inp_rst = i64[8]
     # Native cumulative counters: cancelled rounds, genuine units,
     # subsumption work, SCC work, cleaned literals, then substitution hash
-    # clauses/probes/compared literals. Never boxed in workers.
-    @inp_totals = i64[8]
+    # clauses/probes/compared literals, then subsumption literal comparisons
+    # and rejected missing-literal candidates. Never boxed in workers.
+    @inp_totals = i64[10]
     @inp_phase = nil
     @inp_mark = nil
     @inp_lits = nil
@@ -2548,10 +2549,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                            @sub_head, @sub_next, @sub_stamp, pm, @stop_cell)
     @subsume_cursor = pm[9] if irred == 1
     @inp_totals[2] = @inp_totals[2] + pm[13]
+    @inp_totals[8] = @inp_totals[8] + pm[14]
+    @inp_totals[9] = @inp_totals[9] + pm[15]
     @inp_subsumed += pm[4]
     @inp_strengthened += pm[5]
     @need_clean = true if pm[4] > 0 || pm[5] > 0
-    z = wassat_prof("subsume irred=[irred] subsumed=[pm[4]] strengthened=[pm[5]] promoted=[pm[10]] visits=[pm[6]] work=[pm[13]] stopped=[pm[12]]", ts) if ts != 0
+    z = wassat_prof("subsume irred=[irred] subsumed=[pm[4]] strengthened=[pm[5]] promoted=[pm[10]] visits=[pm[6]] work=[pm[13]] compared_literals=[pm[14]] missing_rejects=[pm[15]] stopped=[pm[12]]", ts) if ts != 0
     pm[4] + pm[5]
 
   # Root-level clause cleaning, to a fixpoint: propagate the root trail,
@@ -4339,6 +4342,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_prof_note("[label].watch_recycle blocks=[@wp_state[8]] copied=[@wp_state[9]] reclaimed=[@wp_state[10]] cancelled_repairs=[@wp_state[11]]")
     wassat_prof_note("[label].sharing exports=[@share_exports] imports=[@share_imports] dropped=[@share_dropped] filtered=[@share_filtered]")
     wassat_prof_note("[label].inprocess_work cancelled=[@inp_totals[0]] units=[@inp_totals[1]] subsume_work=[@inp_totals[2]] scc_work=[@inp_totals[3]] cleaned_literals=[@inp_totals[4]]")
+    wassat_prof_note("[label].subsume_checks compared_literals=[@inp_totals[8]] missing_rejects=[@inp_totals[9]]")
     wassat_prof_note("[label].subst_hash clauses=[@inp_totals[5]] probes=[@inp_totals[6]] compared_literals=[@inp_totals[7]]")
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
     wassat_prof_note("[label].reduction clause_visits=[@rhist[66]] copied_words=[@rhist[67]] remapped_clauses=[@rhist[68]] remapped_reasons=[@rhist[69]] recount_visits=[@rhist[73]] recount_avoided=[@rhist[74]]")
@@ -5677,6 +5681,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #           [11] min target length (below 2 reads as 2)
 #   pm out: [4] subsumed  [5] strengthened  [6] visits used  [9] next cursor
 #           [10] clauses promoted to irredundant
+#           [14] exact literal comparisons  [15] missing-literal rejections
 -> wassat_learned_subsume(cm, alive, ar, clbd, sig, ohead, onext, stamp, pm, stop_cell) (i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   ncl = pm[0]
   nv = pm[1]
@@ -5687,6 +5692,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   irred = pm[7]
   start = pm[8]
   nlits = 2 * nv + 4
+  compared = 0 ## i64
+  missing = 0 ## i64
   subsumed = 0
   strengthened = 0
   promoted = 0
@@ -5694,6 +5701,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   poll_at = 1024
   work_done = 0
   maxsub = 8
+  shortcut = env("WASSAT_SUBSUME_SHORTCUT") != "0"
 
   li = 0
   while li < nlits
@@ -5701,6 +5709,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if (li & 1023) == 0 && wassat_stop_requested?(stop_cell)
       pm[12] = 1
       pm[13] = work_done + visits
+      pm[14] = compared
+      pm[15] = missing
       return 0
     ohead[li] = 0 - 1
     stamp[li] = 0
@@ -5714,6 +5724,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if (ci & 1023) == 0 && wassat_stop_requested?(stop_cell)
       pm[12] = 1
       pm[13] = work_done + visits
+      pm[14] = compared
+      pm[15] = missing
       return 0
     if alive[ci] == 1
       n = cm[(ci << 1) + 1] ## i64
@@ -5739,6 +5751,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if (ci & 1023) == 0 && wassat_stop_requested?(stop_cell)
       pm[12] = 1
       pm[13] = work_done + visits
+      pm[14] = compared
+      pm[15] = missing
       return 0
     sig[ci] = 0
     if alive[ci] == 1
@@ -5787,6 +5801,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if (li & 1023) == 0 && wassat_stop_requested?(stop_cell)
       pm[12] = 1
       pm[13] = work_done + visits
+      pm[14] = compared
+      pm[15] = missing
       return 0
     stamp[li] = 0
     li += 1
@@ -5806,6 +5822,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       pm[10] = promoted
       pm[12] = 1
       pm[13] = work_done + visits
+      pm[14] = compared
+      pm[15] = missing
       return 0
     if alive[d] == 1 && (clbd[d] > 0 || irred == 1)
       dn = cm[(d << 1) + 1] ## i64
@@ -5846,6 +5864,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                   pm[10] = promoted
                   pm[12] = 1
                   pm[13] = work_done + visits
+                  pm[14] = compared
+                  pm[15] = missing
                   return 0
                 poll_at = visits + 1024
               visit_limit = poll_at < budget ? poll_at : budget
@@ -5861,8 +5881,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                       flipped = 0
                       flip_x = 0 - 1 ## i64
                       j = 0
-                      work_done += cn
                       while j < cn && flipped < 2
+                        work_done += 1
+                        compared += 1
                         cl = ar[cstx + j]
                         cx = 0 ## i64
                         if cl > 0
@@ -5874,6 +5895,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                         elsif stamp[cx ^ 1] == gen
                           flipped += 1
                           flip_x = cx ^ 1
+                        elsif shortcut
+                          # Neither C subset D nor one-complement SSR is
+                          # possible once C has a literal absent in both forms.
+                          missing += 1
+                          break
                         j += 1
                       if hits == cn
                         alive[d] = 0
@@ -5924,6 +5950,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     scanned += 1
 
   pm[13] = work_done + visits
+  pm[14] = compared
+  pm[15] = missing
   pm[12] = 2 if visits >= budget
   pm[4] = subsumed
   pm[5] = strengthened

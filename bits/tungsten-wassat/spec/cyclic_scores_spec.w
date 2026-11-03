@@ -86,4 +86,73 @@ describe "Circular score sweeps" ->
     expected = env("WASSAT_CYCLIC_SWEEP") == "0" ? 0 : 3
     expect(m[23]).to eq(expected)
 
+describe "Cached circular swap targets" ->
+  it "matches complete before/after edge sums with reused buffers and shared edges" ->
+    n = 4
+    checked = 0
+    while n <= 10
+      matrix = i8[n * n]
+      a = 0
+      while a < n - 1
+        b = a + 1
+        while b < n - 1
+          if (a + b) % 3 != 0
+            matrix[a * n + b] = 1; matrix[b * n + a] = 1
+          b += 1
+        a += 1
+      ne = 0
+      a = 0
+      while a < n * n
+        ne += matrix[a]
+        a += 1
+      ne /= 2
+      left = i32[ne]; right = i32[ne]; heads = i32[n + 1]; occ = i32[2 * ne]
+      wassat_cycle_graph(n, matrix, left, right, heads, occ, i32[n])
+      perm = i32[n]; weights = i32[ne]; penalty = i32[ne]
+      scores = i64[2 * n]; plain = i64[3 * n]; adjacent = i32[n]
+      a = 0
+      while a < n
+        perm[a] = (n + 2 - a) % n
+        a += 1
+      width = 1
+      while width <= n / 2
+        e = 0
+        while e < ne
+          weights[e] = 1000000000 - 17 * e
+          penalty[e] = wassat_cycle_cost((perm[left[e]] ## i64), (perm[right[e]] ## i64), width, n)
+          e += 1
+        u = 0
+        while u < n
+          wassat_cycle_scores(n, width, u, left, right, heads, occ, perm, weights, scores, plain, adjacent)
+          wassat_cycle_target_scores(n, ne, width, u, left, right, perm, weights, penalty, scores, plain)
+          v = 0
+          while v < n
+            if u != v
+              delta = scores[perm[v]] - scores[perm[u]] + scores[n + v]
+              raw = plain[perm[v]] - plain[perm[u]] + plain[n + v]
+              e = adjacent[v] - 1
+              if e >= 0
+                delta -= 2 * (width - penalty[e]) * weights[e]
+                raw -= 2 * (width - penalty[e])
+              expected = 0; expected_raw = 0; e = 0
+              while e < ne
+                a = left[e]; b = right[e]
+                pa = a == u ? perm[v] : (a == v ? perm[u] : perm[a])
+                pb = b == u ? perm[v] : (b == v ? perm[u] : perm[b])
+                distance = pa - pb
+                distance = -distance if distance < 0
+                distance = n - distance if distance > n - distance
+                cost = distance < width ? width - distance : 0
+                expected += (cost - penalty[e]) * weights[e]
+                expected_raw += cost - penalty[e]
+                e += 1
+              expect(delta).to eq(expected)
+              expect(raw).to eq(expected_raw)
+              checked += 1
+            v += 1
+          u += 1
+        width += 1
+      n += 1
+    expect(checked > 1000).to eq(true)
+
 spec_summary

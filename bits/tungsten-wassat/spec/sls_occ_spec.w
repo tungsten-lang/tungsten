@@ -9,7 +9,25 @@ use ../lib/sls
     i += 1
   result
 
+-> sls_occ_count_error(flat)
+  message = ""
+  begin
+    WassatSls.new(1, [], nil, flat)
+  rescue e
+    message = "[e]"
+  message.index("clause count exceeds signed 32-bit SLS representation") != nil
+
 describe "Contiguous SLS occurrences" ->
+  it "checks clause ID bounds before accessing flat mirrors" ->
+    expect(wassat_sls_check_clause_count(0)).to eq(0)
+    expect(wassat_sls_check_clause_count(2147483647)).to eq(2147483647)
+    expect(-> () wassat_sls_check_clause_count(2147483648)).to raise_error
+    expect(-> () wassat_sls_check_clause_count(-1)).to raise_error
+    parsed = { "flat_ncl": 2147483648 }
+    artifact = { "fncl": 2147483648, "raw": true }
+    expect(sls_occ_count_error(parsed)).to eq(true)
+    expect(sls_occ_count_error(artifact)).to eq(true)
+
   it "preserves reverse-insertion visitation order and resets empty ranges" ->
     literals = i64[7]; offsets = i64[3]; lengths = i64[3]
     input = [1, -2, 3, 1, 2, -2, -3]
@@ -20,7 +38,7 @@ describe "Contiguous SLS occurrences" ->
     offsets[0] = 0; lengths[0] = 3
     offsets[1] = 3; lengths[1] = 2
     offsets[2] = 5; lengths[2] = 2
-    starts = i64[10]; clauses = i64[7]
+    starts = i64[10]; clauses = u32[7]
     wassat_sls_build_occ(literals, offsets, lengths, starts, clauses, 3, 3)
     expect(sls_occ_at(starts, clauses, 2)).to eq([1, 0])
     expect(sls_occ_at(starts, clauses, 3)).to eq([])
@@ -47,7 +65,7 @@ describe "Contiguous SLS occurrences" ->
       i += 1
     assign[1] = 1
     literals = i64[12]; offsets = i64[6]; lengths = i64[6]
-    starts = i64[10]; clauses = i64[12]; stamp = i64[10]; pm = i64[8]
+    starts = i64[10]; clauses = u32[12]; stamp = i64[10]; pm = i64[8]
     pm[0] = 4; pm[1] = 3; pm[6] = 4; pm[7] = 10
     wassat_sls_from_arena(arena, meta, alive, lbd, assign,
       literals, offsets, lengths, starts, clauses, stamp, pm)

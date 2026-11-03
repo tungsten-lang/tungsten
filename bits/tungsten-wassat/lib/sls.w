@@ -31,6 +31,12 @@ use atomic_stop
 
 WASSAT_SLS_WEIGHT_CAP_MULT = 16
 
+# Occurrence entries are unsigned 32-bit clause IDs; literal offsets stay i64.
+# Keep the signed 32-bit count limit before normalization or buffer allocation.
+-> wassat_sls_check_clause_count(count)
+  raise "clause count exceeds signed 32-bit SLS representation" if count < 0 || count > 2147483647
+  count
+
 + WassatSls
   # `stop` is the race's interrupt cell, honoured DURING CONSTRUCTION. The
   # normalisation walk is O(total literals) of boxed work -- on a 10M-clause
@@ -84,6 +90,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       sfcs = parsed ? flat["flat_offs"] : flat["fcs"]
       sfcl = parsed ? flat["flat_lens"] : flat["fcl"]
       sncl = parsed ? flat["flat_ncl"] : flat["fncl"]
+      wassat_sls_check_clause_count(sncl)
       stamp = i64[2 * nv + 4]
       scell = stop == nil ? i64[4] : stop
       pm = i64[6]
@@ -109,6 +116,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       @ncl = 0 if @aborted
       flat_ok = true
     unless flat_ok
+      wassat_sls_check_clause_count(@input_clauses.size)
       cnt = 0
       @input_clauses.each -> (c)
         cnt += 1
@@ -134,7 +142,8 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       @fcs = i64[@ncl + 2]
       @fcl = i64[@ncl + 2]
     @och = i64[2 * nv + 4]
-    @ocv = i64[total + 2]
+    # Clause IDs need four bytes even when total occurrences exceed 2^31.
+    @ocv = u32[total + 2]
 
     # The boxed path still has to flatten @work; the flat path already wrote
     # @fla/@fcs/@fcl in its fill pass. Occurrence lists are then built from the
@@ -315,7 +324,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @apm[0] = ncl_in
     @apm[1] = nv
     wassat_sls_arena_size(cmeta, alive, clbd, @apm)
-    cap = @apm[4] + @apm[4] / 4 + 4096
+    cap = wassat_sls_check_clause_count(@apm[4] + @apm[4] / 4 + 4096)
     tot = @apm[5] + @apm[5] / 4 + 16384
     @wcap_cl = cap
     @wcap_lit = tot
@@ -323,7 +332,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     @fcs = i64[cap + 2]
     @fcl = i64[cap + 2]
     @och = i64[2 * nv + 4]
-    @ocv = i64[tot + 2]
+    @ocv = u32[tot + 2]
     @stamp = i64[2 * nv + 4]
     @clause_state = i64[cap + 2]
     @wght = i64[cap + 2]
@@ -496,7 +505,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 # Build contiguous literal occurrences in the same reverse-insertion order
 # as the linked representation. End offsets double as descending fill cursors,
 # so construction needs no additional scratch allocation.
--> wassat_sls_build_occ(fla, fcs, fcl, och, ocv, ncl, nv) (i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_sls_build_occ(fla, fcs, fcl, och, ocv, ncl, nv) (i64[] i64[] i64[] i64[] u32[] i64 i64) i64
   limit = 2 * nv + 4
   i = 0
   while i < limit
@@ -592,7 +601,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   st[7] = ucount
   0
 
--> wassat_sls_run(fla, fcs, fcl, och, ocv, asg, cstate, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_run(fla, fcs, fcl, och, ocv, asg, cstate, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i64[] i64[] i64[] i64[] u32[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   nv = st[0]
   ncl = st[1]
   ucount = st[2]
@@ -973,7 +982,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 #
 #   pm[0] clauses in   pm[1] nvars   pm[2] clauses out   pm[3] literals out
 #   pm[6] clause capacity            pm[7] literal capacity
--> wassat_sls_from_arena(ar, cmeta, alive, clbd, asg, fla, fcs, fcl, och, ocv, stamp, pm) (i64[] i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_from_arena(ar, cmeta, alive, clbd, asg, fla, fcs, fcl, och, ocv, stamp, pm) (i64[] i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] u32[] i64[] i64[])
   ncl_in = pm[0]
   nv = pm[1]
   capcl = pm[6]

@@ -1043,11 +1043,6 @@ loader_parse_cache_state = {
       consider_autoload_name(node.name, defined, registry, seen, pending, true)
       if node.superclass != nil
         consider_autoload_name(node.superclass, defined, registry, seen, pending)
-      if node.body != nil
-        bj = 0
-        while bj < node.body.size()
-          collect_autoload_refs(node.body[bj], defined, registry, seen, pending)
-          bj += 1
     # Keep every call-specific autoload trigger in one arm. This walker visits
     # the complete AST, so repeatedly fetching `receiver`/`name` in separate
     # `t == :call` conditions is measurable on a self-host compile.
@@ -1187,15 +1182,8 @@ loader_parse_cache_state = {
     # this, code that builds arrays via literals and then calls a pure
     # Enumerable method fails at runtime with "undefined method" because
     # array.w was never pulled in (the literal alone references no name).
-    if t == :array
-      if @array_needed != false
-        consider_autoload_name("Array", defined, registry, seen, pending)
-      els = node.elements
-      if els != nil
-        ej2 = 0
-        while ej2 < els.size()
-          collect_autoload_refs(els[ej2], defined, registry, seen, pending)
-          ej2 += 1
+    if t == :array && @array_needed != false
+      consider_autoload_name("Array", defined, registry, seen, pending)
     # Typed-array constructors lower directly to WArray factories and carry no
     # Array class reference. Their public query leaves share Array's source
     # method table, so register it before the first dynamic dispatch.
@@ -1253,106 +1241,41 @@ loader_parse_cache_state = {
     # closure receiver finds them without an explicit `use core/closure`.
     if t == :block || (t == :call && node.name in ("arity" "curry" "call"))
       consider_autoload_name("Closure", defined, registry, seen, pending)
-    # `<< a, b` stores a list of value nodes in Puts#value. The generic
-    # single-value walk below intentionally ignores non-AST containers, so
-    # recurse the print list here or class refs inside `<< Digest.sha1(...)`
-    # never trigger core autoload.
-    if t == :puts && node.value != nil
-      vals = node.value
-      vi = 0
-      while vi < vals.size()
-        collect_autoload_refs(vals[vi], defined, registry, seen, pending)
-        vi += 1
-    # `"[Sandbox.active?]"` keeps its parts as [tag, payload] pairs in
-    # Node#parts, not as AST children, so the generic probes below never see
-    # them. A class named ONLY inside an interpolation would resolve to nil at
-    # runtime. Literal parts carry a String payload (tag :str); the rest carry
-    # an expression node.
-    if t in (:string_interp :byte_array_interp) && node.parts != nil
-      iparts = node.parts
-      pi = 0
-      while pi < iparts.size()
-        ipart = iparts[pi]
-        if ipart != nil && ipart[0] != :str
-          collect_autoload_refs(ipart[1], defined, registry, seen, pending)
-        pi += 1
-    if node.args != nil
-      ai = 0
-      while ai < node.args.size()
-        collect_autoload_refs(node.args[ai], defined, registry, seen, pending)
-        ai += 1
-    if node.body != nil && t != :class_def
-      collect_autoload_refs_seq(node.body, defined, registry, seen, pending)
-    if node.then_body != nil
-      collect_autoload_refs_seq(node.then_body, defined, registry, seen, pending)
-    if node.else_body != nil
-      collect_autoload_refs_seq(node.else_body, defined, registry, seen, pending)
-    # begin/rescue/ensure — the rescue and ensure clauses live in their own
-    # fields, so class refs that appear only inside them (`rescue TypeError`
-    # checks, ensure-time cleanup) would otherwise never trigger autoload.
-    if node.rescue_body != nil
-      collect_autoload_refs_seq(node.rescue_body, defined, registry, seen, pending)
-    if node.ensure_body != nil
-      collect_autoload_refs_seq(node.ensure_body, defined, registry, seen, pending)
-    # Postfix `rescue` (rescue_expr) packs its fallback expression as a single
-    # node in its own field — a class named only there must still autoload.
-    if node.fallback != nil
-      collect_autoload_refs_seq(node.fallback, defined, registry, seen, pending)
-    if node.expressions != nil
-      collect_autoload_refs_seq(node.expressions, defined, registry, seen, pending)
-    if node.value != nil && is_ast_node?(node.value)
-      collect_autoload_refs(node.value, defined, registry, seen, pending)
-    if node.left != nil && is_ast_node?(node.left)
-      collect_autoload_refs(node.left, defined, registry, seen, pending)
-    if node.right != nil && is_ast_node?(node.right)
-      collect_autoload_refs(node.right, defined, registry, seen, pending)
-    if node.condition != nil && is_ast_node?(node.condition)
-      collect_autoload_refs(node.condition, defined, registry, seen, pending)
-    # `range.each { }` (and the bare `1..N -> …` loop, which parses to `each`)
-    # lowers to a native counting loop — no Range/Number method is ever called.
-    # Recursing into the range receiver here would autoload Range, which
-    # `is Enumerable` and transitively drags in Array/Hash/Enumerable (all their
-    # w_add/closure-bearing method bodies) into a program that needs none of it.
-    # Skip the receiver walk for that one native form; every other range use
-    # (`.to_a`, `.map`, pipeline `source`, …) still autoloads normally.
-    is_native_range_each = t == :call && node.name == "each" && node.block != nil && node.receiver != nil && ast_kind(node.receiver) == :range
-    if node.receiver != nil && is_ast_node?(node.receiver) && !is_native_range_each
-      collect_autoload_refs(node.receiver, defined, registry, seen, pending)
-    if node.target != nil && is_ast_node?(node.target)
-      collect_autoload_refs(node.target, defined, registry, seen, pending)
-    # Pipeline stages (Map/Calc) carry their input in `source` and the
-    # per-element function in `func` — neither is args/body, so without
-    # these the range/array at the bottom of a `/stage…:reduce` chain is
-    # never visited and its autoload (Number/Array) is missed.
-    if node.source != nil && is_ast_node?(node.source)
-      collect_autoload_refs(node.source, defined, registry, seen, pending)
-    if node.func != nil && is_ast_node?(node.func)
-      collect_autoload_refs(node.func, defined, registry, seen, pending)
-      # A `/prime?` stage names no class either, but the fused
-      # `range /prime? :count` lowering (pipeline_fusion.w) counts through the
-      # sieve in core/prime_sieve.w. Pull PrimeSieve in so that call resolves.
-      if ast_kind(node.func) in (:var :call) && node.func.name == "prime?"
-        consider_autoload_name("PrimeSieve", defined, registry, seen, pending)
-    # A trailing block hangs off `block`, which is none of the fields above, so
-    # a class named ONLY inside one (`lines.each -> (l) out.push(JSON.parse(l))`)
-    # never autoloaded and resolved to nil at runtime. The block node carries
-    # its own `body`, which the generic walk above picks up on recursion.
-    if node.block != nil && is_ast_node?(node.block)
+    # A `/prime?` stage names no class, but the fused `range /prime? :count`
+    # lowering (pipeline_fusion.w) counts through the sieve in
+    # core/prime_sieve.w. Pull PrimeSieve in so that call resolves.
+    if t == :map && node.func != nil && is_ast_node?(node.func) && ast_kind(node.func) in (:var :call) && node.func.name == "prime?"
+      consider_autoload_name("PrimeSieve", defined, registry, seen, pending)
+    # Recurse into EVERY child the schema declares, including nodes nested
+    # inside child lists: elsif [condition, body] pairs, hash-literal
+    # [key, value] entries, interpolation [tag, expr] parts, `with` bindings.
+    # This walker used to probe a hand-kept field list; every position it
+    # missed (rescue/ensure bodies, interpolation parts, trailing blocks,
+    # postfix-rescue fallbacks, elsif arms, hash values, case subjects and
+    # arms, unary operands, ...) silently left a class named only there nil
+    # at runtime — an unresolved class is not a compile error.
+    #
+    # One exclusion: `range.each { }` (and the bare `1..N -> …` loop, which
+    # parses to `each`) lowers to a native counting loop — no Range/Number
+    # method is ever called. Walking the range receiver would autoload Range,
+    # which `is Enumerable` and transitively drags in Array/Hash/Enumerable
+    # (all their w_add/closure-bearing method bodies) into a program that
+    # needs none of it. Skip the receiver for that one native form; every
+    # other range use (`.to_a`, `.map`, pipeline `source`, …) still autoloads.
+    if t == :call && node.name == "each" && node.block != nil && node.receiver != nil && ast_kind(node.receiver) == :range
+      range_args = node.args
+      if range_args != nil
+        rai = 0
+        while rai < range_args.size()
+          collect_autoload_refs(range_args[rai], defined, registry, seen, pending)
+          rai += 1
       collect_autoload_refs(node.block, defined, registry, seen, pending)
-    nil
-
-  # Walk a body-ish field that is usually a node Array but may hold a SINGLE
-  # packed node (rescue_expr's body/fallback from postfix `rescue`). Calling
-  # .size() on an AST node yields nil, and `i < nil` raises in the compiled
-  # compiler, so the two shapes must be told apart before iterating.
-  -> collect_autoload_refs_seq(nodes, defined, registry, seen, pending)
-    if is_ast_node?(nodes)
-      collect_autoload_refs(nodes, defined, registry, seen, pending)
       return nil
-    i = 0
-    while i < nodes.size()
-      collect_autoload_refs(nodes[i], defined, registry, seen, pending)
-      i += 1
+    kids = ast_children_nested(node)
+    ki = 0
+    while ki < kids.size()
+      collect_autoload_refs(kids[ki], defined, registry, seen, pending)
+      ki += 1
     nil
 
   # Native runtime entry points whose WValue result has source-defined methods.

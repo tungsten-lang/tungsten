@@ -1233,7 +1233,9 @@
       key = mangle_generic_class_name(template_name, type_args)
       if out[key] == nil
         out[key] = [template_name, type_args]
-  children = ast_children(node)
+  # Nested: an instantiation in an elsif arm, a hash value, or an
+  # interpolation sits in a list inside a child list.
+  children = ast_children_nested(node)
   ci = 0
   while ci < children.size()
     collect_generic_instantiations_in_node(children[ci], out, mod)
@@ -1436,7 +1438,8 @@
                 inner_spec = specialize_generic_class(cref_name, resolved, mod)
                 if inner_spec != nil
                   mod[:generic_specialization_order].push(inner_spec)
-  children = ast_children(node)
+  # Nested, so a template body's elsif arms and hash values are substituted.
+  children = ast_children_nested(node)
   ci = 0
   while ci < children.size()
     substitute_type_params_in_ast(children[ci], mapping, mod)
@@ -1516,24 +1519,34 @@
       if replaced != nil
         ast_set(node, k, replaced)
     elsif type(v) == "Array"
-      any_replaced = false
-      rebuilt = []
-      j = 0
-      while j < v.size()
-        elt = v[j]
-        if is_ast_node?(elt)
-          replaced = subst_const_int_node(elt, int_map)
-          if replaced != nil
-            rebuilt.push(replaced)
-            any_replaced = true
-          else
-            rebuilt.push(elt)
-        else
-          rebuilt.push(elt)
-        j += 1
-      if any_replaced
+      rebuilt = subst_const_int_in_list(v, int_map)
+      if rebuilt != nil
         ast_set(node, k, rebuilt)
     i += 1
+  nil
+
+# subst_const_int_node over a child list, descending nested lists (elsif
+# arms, hash entries, interpolation parts). Returns the rebuilt list, or nil
+# when nothing was replaced — see rewrite_generic_call_sites_in_list.
+-> subst_const_int_in_list(list, int_map)
+  any_replaced = false
+  rebuilt = []
+  j = 0
+  while j < list.size()
+    elt = list[j]
+    replaced = nil
+    if is_ast_node?(elt)
+      replaced = subst_const_int_node(elt, int_map)
+    elsif type(elt) == "Array"
+      replaced = subst_const_int_in_list(elt, int_map)
+    if replaced != nil
+      rebuilt.push(replaced)
+      any_replaced = true
+    else
+      rebuilt.push(elt)
+    j += 1
+  if any_replaced
+    return rebuilt
   nil
 
 # Mathematical prime-field tags carry a value (`𝔽_5`, `F_7`) while a generic
@@ -1863,24 +1876,37 @@
       if replaced != nil
         ast_set(node, k, replaced)
     elsif type(v) == "Array"
-      any_replaced = false
-      rebuilt_arr = []
-      j = 0
-      while j < v.size()
-        elt = v[j]
-        if is_ast_node?(elt)
-          replaced = rewrite_generic_call_sites_in_node(elt, mod)
-          if replaced != nil
-            rebuilt_arr.push(replaced)
-            any_replaced = true
-          else
-            rebuilt_arr.push(elt)
-        else
-          rebuilt_arr.push(elt)
-        j += 1
-      if any_replaced
+      rebuilt_arr = rewrite_generic_call_sites_in_list(v, mod)
+      if rebuilt_arr != nil
         ast_set(node, k, rebuilt_arr)
     i += 1
+  nil
+
+# Rewrite each node of a child list, descending the lists nested inside it
+# (elsif [condition, body] pairs, hash [key, value] entries, interpolation
+# parts) — a generic call site there must be mangled too, or its receiver
+# stays the bare template and lowers to nil. Child lists are immutable once
+# frozen, so a changed list is rebuilt and returned for the caller to write
+# back; nil means nothing in it was replaced.
+-> rewrite_generic_call_sites_in_list(list, mod)
+  any_replaced = false
+  rebuilt = []
+  j = 0
+  while j < list.size()
+    elt = list[j]
+    replaced = nil
+    if is_ast_node?(elt)
+      replaced = rewrite_generic_call_sites_in_node(elt, mod)
+    elsif type(elt) == "Array"
+      replaced = rewrite_generic_call_sites_in_list(elt, mod)
+    if replaced != nil
+      rebuilt.push(replaced)
+      any_replaced = true
+    else
+      rebuilt.push(elt)
+    j += 1
+  if any_replaced
+    return rebuilt
   nil
 
 -> rewrite_generic_call_sites(ast, mod)
@@ -2035,30 +2061,39 @@
         if replaced != nil
           ast_set(node, keys[i], replaced)
       elsif type(v) == "Array"
-        n_v = v.size()
-        rebuilt = nil
-        j = 0
-        while j < n_v
-          elt = v[j]
-          if is_ast_node?(elt)
-            replaced = rewrite_smallarray_ctor_node(elt)
-            if replaced != nil
-              if rebuilt == nil
-                rebuilt = []
-                k = 0
-                while k < j
-                  rebuilt.push(v[k])
-                  k += 1
-              rebuilt.push(replaced)
-            elsif rebuilt != nil
-              rebuilt.push(elt)
-          elsif rebuilt != nil
-            rebuilt.push(elt)
-          j += 1
+        rebuilt = rewrite_smallarray_ctor_in_list(v)
         if rebuilt != nil
           ast_set(node, keys[i], rebuilt)
     i += 1
   nil
+
+# rewrite_smallarray_ctor_node over a child list, descending nested lists
+# (elsif arms, hash entries, interpolation parts). Returns the rebuilt list,
+# or nil when nothing was replaced — see rewrite_generic_call_sites_in_list.
+# The copy is made only at the first replacement (this walk visits every node).
+-> rewrite_smallarray_ctor_in_list(list)
+  rebuilt = nil
+  n = list.size()
+  j = 0
+  while j < n
+    elt = list[j]
+    replaced = nil
+    if is_ast_node?(elt)
+      replaced = rewrite_smallarray_ctor_node(elt)
+    elsif type(elt) == "Array"
+      replaced = rewrite_smallarray_ctor_in_list(elt)
+    if replaced != nil
+      if rebuilt == nil
+        rebuilt = []
+        k = 0
+        while k < j
+          rebuilt.push(list[k])
+          k += 1
+      rebuilt.push(replaced)
+    elsif rebuilt != nil
+      rebuilt.push(elt)
+    j += 1
+  rebuilt
 
 -> rewrite_smallarray_generic_ctors(ast)
   exprs = ast.expressions

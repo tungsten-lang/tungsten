@@ -89,6 +89,8 @@ test: $(BIN)
 		fi
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/hash_delete.w | \
 		diff -u tests/hash_delete.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/array_unshift.w | \
+		diff -u tests/array_unshift.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/positional_arity.w | \
 		diff -u tests/positional_arity.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/string_buffer_size.w | \

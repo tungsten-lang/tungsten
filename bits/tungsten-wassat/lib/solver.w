@@ -129,7 +129,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Native snapshot counters: phase saves/copied/skipped at 6..8, and
     # spine saves/scanned/skipped at 9..11. Keep wide work counts unboxed:
     # avoided quadratic work can exceed the small-integer range in a worker.
-    @astate = i64[11]            # scalars across native analyze / OTFS
+    @astate = i64[21]            # analysis / OTFS scalars and minimization work
+    # Large circuits can spend most analysis time minimizing along long
+    # reason graphs. Keep smaller kernels exhaustive: even rare truncation
+    # perturbs productive QWH and bit-vector searches. Zero is the control.
+    @astate[11] = nv >= 100000 ? 16384 : 0
+    if env("WASSAT_MINIMIZE_WORK") != nil
+      @astate[11] = wassat_decimal_in_range("WASSAT_MINIMIZE_WORK", env("WASSAT_MINIMIZE_WORK"), 0, 2000000000)
     @lbuf = i64[nv + 3]          # learned clause, reused every conflict
     @obuf = i64[nv + 3]          # watch-ordered copy of the learned clause
     @mbuf = i64[nv + 3]          # minimisation scratch
@@ -4320,6 +4326,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
     wassat_prof_note("[label].reduction clause_visits=[@rhist[66]] copied_words=[@rhist[67]] remapped_clauses=[@rhist[68]] remapped_reasons=[@rhist[69]]")
     wassat_prof_note("[label].analysis mark_bytes=[@nvars + 1] reason_bytes=[4 * (@nvars + 1)] shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] shrink_levels=[@shst[7]] shrink_attempts=[@shst[3]] shrink_blocks=[@shst[4]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
+    wassat_prof_note("[label].minimize prescan_literals=[@astate[12]] resume_literals=[@astate[13]] probes=[@astate[14]] failed=[@astate[15]] removed=[@astate[16]] max_reason=[@astate[17]] frames=[@astate[18]] input_literals=[@astate[19]] budget_skipped=[@astate[20]] work_limit=[@astate[11]]")
     0
 
   # Full MiniSat-style incremental query: SAT / UNSAT / UNKNOWN under the
@@ -6504,6 +6511,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #
 #   st[0] = conflicting clause   st[1] = trail size   st[2] = decision level
 #   st[3] = learned clause size  st[4] = backjump level
+#   st[11] = optional minimization literal-visit limit per conflict
+#   st[12..20] = cumulative pre-scan/resume visits, probes, failed probes,
+#     removed literals, maximum reason length, frames, input literals, skipped
+#     probes. The maximum is a high-water mark; all other counts accumulate.
 -> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark) (i64[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[])
   confl = st[0]
   tsize = st[1]
@@ -6649,6 +6660,18 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     abs_mask = abs_mask | (one << (lvl[vq] & 63))
     i += 1
 
+  # After a completed recursive probe exhausts the minimization work budget,
+  # retain the remaining literals of the valid first-UIP clause. Probes are
+  # indivisible: the limit may be exceeded by the final probe. Zero is
+  # unbounded. Existing scratch and post-order memoization are unchanged.
+  work_limit = st[11]
+  budget_skipped = 0
+  prescan_lits = 0
+  resume_lits = 0
+  probes = 0
+  failed = 0
+  max_reason = 0
+  frames = 0
   nclr = 0
   keep = 1
   i = 1
@@ -6658,7 +6681,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if q < 0
       vq = 0 - q
     redundant = 0
-    if rsn[vq] >= 0
+    if rsn[vq] >= 0 && (work_limit == 0 || prescan_lits + resume_lits < work_limit)
+      probes += 1
       sp = 1
       stk[0] = vq
       good = 1
@@ -6669,6 +6693,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         rc = rsn[cv]
         stx = cm[rc << 1] ## i64
         rn = cm[(rc << 1) + 1] ## i64
+        frames += 1
+        max_reason = rn if rn > max_reason
         child = 0
         if ci == 0
           # Pre-scan all literals of rsn[cv] for immediate poison / decision /
@@ -6693,7 +6719,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                   child = vk
                   ci = k + 1
             k += 1
+          prescan_lits += k
         else
+          start_ci = ci
           while ci < rn && child == 0 && good == 1
             lk = ar[stx + ci]
             vk = lk
@@ -6706,6 +6734,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               elsif mk == 0
                 child = vk
             ci += 1
+          resume_lits += ci - start_ci
         if good == 1
           if child == 0
             if sp > 1
@@ -6723,6 +6752,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       if good == 1
         redundant = 1
       else
+        failed += 1
         j = 1
         while j < sp
           fv = stk[j] & u32_mask
@@ -6731,6 +6761,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             tclr[nclr] = fv
             nclr += 1
           j += 1
+    elsif rsn[vq] >= 0
+      budget_skipped += 1
     if redundant == 0
       tmp[keep] = q
       keep += 1
@@ -6767,6 +6799,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       target = lv
     i += 1
 
+  st[12] += prescan_lits
+  st[13] += resume_lits
+  st[14] += probes
+  st[15] += failed
+  st[16] += size - keep
+  st[17] = max_reason if max_reason > st[17]
+  st[18] += frames
+  st[19] += size
+  st[20] += budget_skipped
   st[3] = keep
   st[4] = target
   0

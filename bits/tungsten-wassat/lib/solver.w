@@ -1088,11 +1088,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     return 0 if values.size <= @nvars || counters.size < 4 || wassat_stop_requested?(@stop_cell)
     counters[0] += 1
     props0 = @pstate[4]
-    self.backjump(0)
-    @qhead = 0
+    # Preserve an already closed root queue; a fresh shell still has qhead 0.
+    self.backjump(0) if @dlevel > 0
     old_cancel = @lucky_cancel_rebuild
     @lucky_cancel_rebuild = true
     conflict = self.propagate >= 0 || !@ok
+    root_conflict = conflict
     if !conflict && !wassat_stop_requested?(@stop_cell)
       @trail_lim[0] = @tsize
       @dlevel = 1
@@ -1107,6 +1108,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     stopped = wassat_stop_requested?(@stop_cell)
     wassat_copy_vivify_phases(@assign, values, @nvars) unless conflict || stopped
     self.backjump(0)
+    # A cancelled root scan or root conflict must be replayed if resumed.
+    @qhead = 0 if stopped || root_conflict
     @lucky_cancel_rebuild = old_cancel
     counters[1] += @pstate[4] - props0
     counters[2] += 1 if stopped

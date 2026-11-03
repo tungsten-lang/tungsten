@@ -32,6 +32,7 @@ use count_cover
 use counter_cover
 use affine_design
 use roster_bound
+use rectangle_bound
 use selector_latin
 use resolution_cover
 use keychart
@@ -2037,6 +2038,16 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, sparse_extra)
+  # Complete rectangle-coloring certificates use only a still-empty slot.
+  # The constant-size header gate does no structural work on the coordinator.
+  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+    rectangle_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
+    rectangle_extra += nae_plan["scratch"] if nae_plan != nil
+    rectangle_extra += capacity_plan["scratch"] if capacity_plan != nil
+    circuit_plan = wassat_rectangle_plan(formula,
+      pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
+      cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
+      sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, rectangle_extra)
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -2638,6 +2649,8 @@ WASSAT_AXIS_SLOTS = 10
   meta = plan["meta"]; values = plan["values"]
   if plan["box_net"] == true
     wassat_box_net_arm(formula, plan, stop, res, base, nv)
+  elsif plan["rectangle_bound"] == true
+    wassat_rectangle_arm(formula, meta, stop, res, base, nv)
   elsif plan["roster_bound"] == true
     wassat_roster_arm(formula, meta, stop, res, base, nv)
   elsif plan["affine_design"] == true
@@ -2701,7 +2714,7 @@ WASSAT_AXIS_SLOTS = 10
   circuit_idx = threads + 3
   circuit_base = circuit_idx * (nv + 8)
   circuit_plan = race["circuit_plan"]
-  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["sparse_domain"] == true || circuit_plan["sorting_network"] == true || circuit_plan["box_net"] == true || circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true || circuit_plan["wide_circuit"] == true)
+  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["sparse_domain"] == true || circuit_plan["sorting_network"] == true || circuit_plan["box_net"] == true || circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true || circuit_plan["rectangle_bound"] == true || circuit_plan["wide_circuit"] == true)
   circuit_handle = nil
   keychart_plan = race["keychart_plan"]
   keychart_idx = race["keychart_index"]
@@ -2803,6 +2816,8 @@ WASSAT_AXIS_SLOTS = 10
       circuit_handle = Thread.new -> wassat_sorting_arm(formula, circuit_plan, stop, res, circuit_base, nv)
     elsif circuit_plan["box_net"] == true
       circuit_handle = Thread.new -> wassat_box_net_arm(formula, circuit_plan, stop, res, circuit_base, nv)
+    elsif circuit_plan["rectangle_bound"] == true
+      circuit_handle = Thread.new -> wassat_rectangle_arm(formula, circuit_meta, stop, res, circuit_base, nv)
     elsif circuit_plan["roster_bound"] == true
       circuit_handle = Thread.new -> wassat_roster_arm(formula, circuit_meta, stop, res, circuit_base, nv)
     elsif circuit_plan["affine_design"] == true
@@ -3175,6 +3190,8 @@ WASSAT_AXIS_SLOTS = 10
         wassat_sorting_profile(cm)
       elsif circuit_plan["box_net"] == true
         wassat_box_net_profile(cm)
+      elsif circuit_plan["rectangle_bound"] == true
+        wassat_rectangle_profile(cm)
       elsif circuit_plan["roster_bound"] == true
         wassat_roster_profile(cm)
       elsif circuit_plan["affine_design"] == true
@@ -3338,6 +3355,7 @@ WASSAT_AXIS_SLOTS = 10
     "pre_index": (winner >= threads && winner < threads + pre.size) ? winner - threads : 0 - 1,
     "circuit_won": circuit_plan != nil && winner == circuit_idx,
     "wide_circuit_won": wide_won,
+    "rectangle_bound_won": circuit_plan != nil && circuit_plan["rectangle_bound"] == true && winner == circuit_idx && !wide_won,
     "roster_bound_won": circuit_plan != nil && circuit_plan["roster_bound"] == true && winner == circuit_idx && !wide_won,
     "affine_design_won": circuit_plan != nil && circuit_plan["affine_design"] == true && winner == circuit_idx && !wide_won,
     "counter_cover_won": circuit_plan != nil && circuit_plan["counter_cover"] == true && winner == circuit_idx && !wide_won,

@@ -1837,6 +1837,7 @@ use lut_congruence
           arm_tag = "clause-checked selector Latin arm" if rr["selector_latin_won"] == true
           arm_tag = "proved byte-relation congruence" if rr["byte_relation_won"] == true
           arm_tag = "clause-checked resource capacity" if rr["resource_capacity_won"] == true
+          arm_tag = "clause-checked rectangle-coloring bound" if rr["rectangle_bound_won"] == true
           arm_tag = "clause-checked roster counting bound" if rr["roster_bound_won"] == true
           arm_tag = "clause-checked affine design obstruction" if rr["affine_design_won"] == true
           arm_tag = "checked resolution-cover arm" if rr["cover_won"] == true

@@ -3,8 +3,7 @@
 + StatisticsBivariateSummary
   -> new(@count, @mean_x, @mean_y, @m2_x, @m2_y, @co_moment)
 
-  -> count
-    @count
+  ro :count
 
   -> empty?
     @count == 0
@@ -71,8 +70,7 @@
     @m2_y = ~0.0
     @co_moment = ~0.0
 
-  -> count
-    @count
+  ro :count, :moment_mean_x, :moment_mean_y, :m2_x, :m2_y, :co_moment
 
   -> empty?
     @count == 0
@@ -82,21 +80,6 @@
 
   -> sum_y
     @sum_y + @compensation_y
-
-  -> moment_mean_x
-    @moment_mean_x
-
-  -> moment_mean_y
-    @moment_mean_y
-
-  -> m2_x
-    @m2_x
-
-  -> m2_y
-    @m2_y
-
-  -> co_moment
-    @co_moment
 
   -> push(x_value, y_value)
     x = Statistics.scalar(x_value)

@@ -23,53 +23,21 @@
     @assumptions = Statistics.copy_values(assumptions)
     @warnings = Statistics.copy_values(warnings)
 
-  -> count
-    @count
-
-  -> center
-    @center
-
-  -> lower
-    @lower
-
-  -> upper
-    @upper
+  ro :count, :center, :lower, :upper, :raw_half_width, :numerical_guard
+  ro :variance_process, :predictor, :active_from, :status, :miscoverage
+  ro :kappa
 
   -> interval
     [@lower, @upper]
 
-  -> raw_half_width
-    @raw_half_width
-
-  -> numerical_guard
-    @numerical_guard
-
-  -> variance_process
-    @variance_process
-
-  -> predictor
-    @predictor
-
-  -> active_from
-    @active_from
-
   -> active?
     @status == :active
-
-  -> status
-    @status
 
   -> target
     :average_conditional_mean
 
-  -> miscoverage
-    @miscoverage
-
   -> confidence_level
     ~1.0 - @miscoverage
-
-  -> kappa
-    @kappa
 
   -> support
     Statistics.copy_values(@support)
@@ -120,26 +88,16 @@
     @last_predictor = nil
     @active_from = nil
 
-  -> count
-    @count
+  ro :count, :active_from, :miscoverage, :kappa
 
   -> active?
     @active_from != nil
-
-  -> active_from
-    @active_from
 
   -> mergeable?
     false
 
   -> support
     [@support_lower, @support_upper]
-
-  -> miscoverage
-    @miscoverage
-
-  -> kappa
-    @kappa
 
   -> variance_process
     @variance_sum + @variance_compensation

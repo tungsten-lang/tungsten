@@ -21,11 +21,7 @@
       copy.push(value)
     copy
 
-  -> rank
-    @rank
-
-  -> condition_estimate
-    @condition_estimate
+  ro :rank, :condition_estimate
 
 
 + StatisticsRegressionSolver

@@ -3,8 +3,7 @@
 + StatisticsSummary
   -> new(@count, @sum, @mean, @m2, @minimum, @maximum)
 
-  -> count
-    @count
+  ro :count, :minimum, :maximum
 
   -> empty?
     @count == 0
@@ -16,12 +15,6 @@
     if empty?
       raise "mean requires at least one observation"
     Statistics.finite_result(@mean, "mean")
-
-  -> minimum
-    @minimum
-
-  -> maximum
-    @maximum
 
   -> range
     if empty?
@@ -79,29 +72,13 @@
     @minimum = nil
     @maximum = nil
 
-  -> count
-    @count
+  ro :count, :compensation, :moment_mean, :m2, :minimum, :maximum
 
   -> empty?
     @count == 0
 
   -> sum
     @sum + @compensation
-
-  -> compensation
-    @compensation
-
-  -> moment_mean
-    @moment_mean
-
-  -> m2
-    @m2
-
-  -> minimum
-    @minimum
-
-  -> maximum
-    @maximum
 
   -> push(value)
     x = Statistics.scalar(value)

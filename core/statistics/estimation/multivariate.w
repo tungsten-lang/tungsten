@@ -4,11 +4,7 @@
   -> new(@count, @positive_weight_count, @weight_sum, @weight_square_sum,
          @mean, @scatter, @frequency_compatible)
 
-  -> count
-    @count
-
-  -> positive_weight_count
-    @positive_weight_count
+  ro :count, :positive_weight_count
 
   -> dimension
     @mean == nil ? 0 : @mean.size
@@ -136,14 +132,7 @@
     @scatter = LinAlg.zeros(dimension, dimension)
     @frequency_compatible = true
 
-  -> dimension
-    @dimension
-
-  -> count
-    @count
-
-  -> positive_weight_count
-    @positive_weight_count
+  ro :dimension, :count, :positive_weight_count
 
   -> empty?
     @positive_weight_count == 0

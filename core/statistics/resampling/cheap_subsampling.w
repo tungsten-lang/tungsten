@@ -23,44 +23,12 @@
     @assumptions = Statistics.copy_values(assumptions)
     @warnings = Statistics.copy_values(warnings)
 
-  -> estimate
-    @estimate
-
-  -> lower
-    @lower
-
-  -> upper
-    @upper
-
-  -> subsample_deviation
-    @subsample_deviation
-
-  -> finite_population_scale
-    @finite_population_scale
-
-  -> standard_error
-    @standard_error
-
-  -> critical_value
-    @critical_value
-
-  -> sample_size
-    @sample_size
-
-  -> subsample_size
-    @subsample_size
-
-  -> replicate_count
-    @replicate_count
-
-  -> level
-    @level
+  ro :estimate, :lower, :upper, :subsample_deviation, :finite_population_scale
+  ro :standard_error, :critical_value, :sample_size, :subsample_size
+  ro :replicate_count, :level, :status
 
   -> degrees_of_freedom
     @replicate_count
-
-  -> status
-    @status
 
   -> numerically_degenerate?
     @status == :degenerate

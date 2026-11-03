@@ -35,32 +35,14 @@
   -> residuals
     Statistics.copy_vector(@residuals)
 
-  -> rank
-    @rank
+  ro :rank, :residual_degrees_of_freedom, :rss, :residual_variance, :r_squared
+  ro :adjusted_r_squared, :diagnostics
 
   -> parameter_count
     @coefficients.size
 
-  -> residual_degrees_of_freedom
-    @residual_degrees_of_freedom
-
   -> df
     @residual_degrees_of_freedom
-
-  -> rss
-    @rss
-
-  -> residual_variance
-    @residual_variance
-
-  -> r_squared
-    @r_squared
-
-  -> adjusted_r_squared
-    @adjusted_r_squared
-
-  -> diagnostics
-    @diagnostics
 
   -> status
     @diagnostics.warnings.empty? ? :ok : :ok_with_warnings

@@ -1,6 +1,6 @@
 # Paper-derived deterministic Statistics foundations.
 # Run in both engines:
-#   bin/tungsten run spec/core/statistics_research_spec.w
+#   bin/tungsten run --interpret spec/core/statistics_research_spec.w
 #   bin/tungsten compile spec/core/statistics_research_spec.w --out /tmp/statistics-research-spec
 
 use statistics

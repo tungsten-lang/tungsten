@@ -15,32 +15,14 @@
     @assumptions = Statistics.copy_values(assumptions)
     @warnings = Statistics.copy_values(warnings)
 
-  -> p_value
-    @p_value
+  ro :p_value, :candidate_score, :extreme_count, :calibration_size
+  ro :miscoverage, :tie_policy, :status
 
   -> included?
     @included
 
-  -> candidate_score
-    @candidate_score
-
-  -> extreme_count
-    @extreme_count
-
-  -> calibration_size
-    @calibration_size
-
   -> augmented_size
     @calibration_size + 1
-
-  -> miscoverage
-    @miscoverage
-
-  -> tie_policy
-    @tie_policy
-
-  -> status
-    @status
 
   -> assumptions
     Statistics.copy_values(@assumptions)

@@ -20,32 +20,9 @@
     @assumptions = Statistics.copy_values(assumptions)
     @warnings = Statistics.copy_values(warnings)
 
-  -> estimate
-    @estimate
-
-  -> initial_estimate
-    @initial_estimate
-
-  -> influence_parameter
-    @influence_parameter
-
-  -> scaled_influence_parameter
-    @scaled_influence_parameter
-
-  -> equation_target
-    @equation_target
-
-  -> equation_residual
-    @equation_residual
-
-  -> group_count
-    @group_count
-
-  -> iterations
-    @iterations
-
-  -> status
-    @status
+  ro :estimate, :initial_estimate, :influence_parameter
+  ro :scaled_influence_parameter, :equation_target, :equation_residual
+  ro :group_count, :iterations, :status
 
   -> converged?
     @status == :ok || @status == :ok_with_warnings || (

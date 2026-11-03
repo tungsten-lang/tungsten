@@ -1,6 +1,6 @@
 # Weighted, multivariate, and linear-model Statistics foundations.
 # Run in both engines:
-#   bin/tungsten run spec/core/statistics_advanced_spec.w
+#   bin/tungsten run --interpret spec/core/statistics_advanced_spec.w
 #   bin/tungsten compile spec/core/statistics_advanced_spec.w --out /tmp/statistics-advanced-spec
 
 use statistics

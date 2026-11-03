@@ -1,6 +1,6 @@
 # Numerically responsible descriptive-statistics and streaming regressions.
 # Run in both engines:
-#   bin/tungsten run spec/core/statistics_spec.w
+#   bin/tungsten run --interpret spec/core/statistics_spec.w
 #   bin/tungsten compile spec/core/statistics_spec.w --out /tmp/statistics-spec
 
 use statistics

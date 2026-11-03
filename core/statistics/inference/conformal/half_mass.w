@@ -19,29 +19,14 @@
   -> included?
     @rank_result.included?
 
-  -> rank_result
-    @rank_result
-
-  -> candidate_score
-    @candidate_score
+  ro :rank_result, :candidate_score, :sample_size, :dimension, :neighbor_rank
+  ro :status
 
   -> scores
     Statistics.copy_values(@scores)
 
-  -> sample_size
-    @sample_size
-
-  -> dimension
-    @dimension
-
-  -> neighbor_rank
-    @neighbor_rank
-
   -> miscoverage
     @rank_result.miscoverage
-
-  -> status
-    @status
 
   -> assumptions
     Statistics.copy_values(@assumptions)

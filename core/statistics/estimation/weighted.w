@@ -9,11 +9,7 @@
   -> new(@count, @positive_weight_count, @weight_sum, @weight_square_sum,
          @mean, @m2, @frequency_compatible)
 
-  -> count
-    @count
-
-  -> positive_weight_count
-    @positive_weight_count
+  ro :count, :positive_weight_count
 
   -> empty?
     @positive_weight_count == 0
@@ -89,11 +85,7 @@
     @m2 = ~0.0
     @frequency_compatible = true
 
-  -> count
-    @count
-
-  -> positive_weight_count
-    @positive_weight_count
+  ro :count, :positive_weight_count, :moment_mean, :m2
 
   -> empty?
     @positive_weight_count == 0
@@ -103,12 +95,6 @@
 
   -> squared_weight_sum
     @weight_square_sum + @weight_square_compensation
-
-  -> moment_mean
-    @moment_mean
-
-  -> m2
-    @m2
 
   -> frequency_compatible?
     @frequency_compatible

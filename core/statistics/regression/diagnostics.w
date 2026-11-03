@@ -22,17 +22,8 @@
       copy.push(value)
     copy
 
-  -> rank
-    @rank
-
-  -> parameter_count
-    @parameter_count
-
-  -> residual_degrees_of_freedom
-    @residual_degrees_of_freedom
-
-  -> condition_estimate
-    @condition_estimate
+  ro :rank, :parameter_count, :residual_degrees_of_freedom
+  ro :condition_estimate
 
   -> permutation
     StatisticsRegressionDiagnostics.copy_values(@permutation)

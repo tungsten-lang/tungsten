@@ -28,20 +28,8 @@
   -> mean_scores
     Statistics.copy_values(@mean_scores)
 
-  -> threshold
-    @threshold
-
-  -> score_bound
-    @score_bound
-
-  -> holdout_size
-    @holdout_size
-
-  -> candidate_count
-    @candidate_count
-
-  -> miscoverage
-    @miscoverage
+  ro :threshold, :score_bound, :holdout_size, :candidate_count, :miscoverage
+  ro :status
 
   -> target_divergence
     :kl
@@ -51,9 +39,6 @@
 
   -> coverage_kind
     :finite_sample_bounded_score
-
-  -> status
-    @status
 
   -> assumptions
     Statistics.copy_values(@assumptions)

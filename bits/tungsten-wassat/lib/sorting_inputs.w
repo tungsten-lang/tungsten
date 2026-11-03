@@ -172,4 +172,3 @@ use sorting_walk
   return nil if count == 0
   m[4] = count; m[31] = count
   vectors
-

@@ -1738,6 +1738,7 @@ use lut_congruence
           arm_tag = "arm [rr["winner"]]"
           arm_tag = "sls arm" if rr["sls_won"] == true
           arm_tag = "exact small-circuit arm" if rr["circuit_won"] == true
+          arm_tag = "checked binary-counter cover model" if rr["counter_cover_won"] == true
           arm_tag = "clause-checked counting-cover arm" if rr["count_cover_won"] == true
           arm_tag = "clause-checked selector Latin arm" if rr["selector_latin_won"] == true
           arm_tag = "proved byte-relation congruence" if rr["byte_relation_won"] == true

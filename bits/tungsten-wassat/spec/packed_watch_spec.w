@@ -17,7 +17,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     wd = i64[40]
     wp = i64[1]
     ws = i64[12]
-    tr = i64[4]
+    tr = i32[4]
     st = i64[6]
     tr[0] = 1
     asg[1] = 1
@@ -46,7 +46,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     lvl = i64[4]
     rsn = i32[4]
     phs = i8[4]
-    tr = i64[4]
+    tr = i32[4]
     st = i64[6]
     bd = i64[40]
     bp = i64[1]

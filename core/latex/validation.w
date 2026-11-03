@@ -30,7 +30,10 @@
     LatexValidationReport.new(fragment, bibliography_keys)
 
 
+# One label, ref, eqref, or cite key recorded by a structured LaTeX helper.
 + LatexReferenceEvent
+  ro :kind, :key
+
   -> new(kind, key)
     if ![:label, :ref, :eqref, :cite].include?(kind)
       raise "unknown LaTeX reference event kind: " + kind.to_s
@@ -40,12 +43,6 @@
     else
       @key = LaTeX.validated_label(key)
 
-  -> kind
-    @kind
-
-  -> key
-    @key
-
   -> to_s
     @kind.to_s + ":" + @key
 
@@ -53,6 +50,7 @@
     to_s
 
 
+# Immutable tree of reference events shared by composed fragments.
 + LatexEventChain
   -> new(events = nil, children = nil)
     @events = []
@@ -117,6 +115,7 @@
     out
 
 
+# Tracked-only label, reference, and citation diagnostics for one fragment.
 + LatexValidationReport
   -> new(fragment, bibliography_keys = nil)
     @events = fragment.reference_events

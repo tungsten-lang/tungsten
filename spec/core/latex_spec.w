@@ -1,9 +1,9 @@
 # Focused cross-engine checks for safe LaTeX fragments and publication profiles.
 #
-# Run interpreted:
-#   bin/tungsten run spec/core/latex_spec.w
 # Run compiled:
-#   bin/tungsten compile spec/core/latex_spec.w --out /tmp/latex-spec && /tmp/latex-spec
+#   bin/tungsten spec/core/latex_spec.w
+# Run interpreted:
+#   bin/tungsten run --interpret spec/core/latex_spec.w
 
 -> latex_check(name, got, want)
   if got != want

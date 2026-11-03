@@ -1,6 +1,9 @@
 # Shared, data-oriented publication profile support.
 
+# Document class, packages, metadata layout, and bibliography for one venue.
 + LatexProfile
+  ro :name, :document_class, :bibliography_style
+
   -> new(name, document_class, class_options, packages,
          bibliography_style, metadata_style, extra_preamble = nil)
     initialize_profile(
@@ -40,12 +43,6 @@
         @extra_preamble.push(fragment)
     self
 
-  -> name
-    @name
-
-  -> document_class
-    @document_class
-
   -> class_options
     out = []
     @class_options.each -> (option)
@@ -63,9 +60,6 @@
       else
         out.push(package)
     out
-
-  -> bibliography_style
-    @bibliography_style
 
   -> safe_option?(value)
     text = value.to_s

@@ -1,8 +1,9 @@
-# Focused compiled checks for structural LaTeX rendering of algebra objects.
+# Focused cross-engine checks for structural LaTeX rendering of algebra objects.
 #
-# Run:
-#   bin/tungsten compile spec/core/latex_algebra_spec.w --out /tmp/latex-algebra-spec
-#   /tmp/latex-algebra-spec
+# Run compiled:
+#   bin/tungsten spec/core/latex_algebra_spec.w
+# Run interpreted:
+#   bin/tungsten run --interpret spec/core/latex_algebra_spec.w
 
 use core/algebra/field
 use core/algebra/polynomial

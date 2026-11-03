@@ -1,10 +1,9 @@
 # Focused interpreted/native checks for typed semantic LaTeX mathematics.
 #
-# Run interpreted:
-#   bin/tungsten run spec/core/latex_math_spec.w
 # Run compiled:
-#   bin/tungsten compile spec/core/latex_math_spec.w --out /tmp/latex-math-spec
-#   /tmp/latex-math-spec
+#   bin/tungsten spec/core/latex_math_spec.w
+# Run interpreted:
+#   bin/tungsten run --interpret spec/core/latex_math_spec.w
 
 use core/expression
 

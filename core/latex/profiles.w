@@ -7,6 +7,7 @@ use core/latex/profiles/arxiv
 use core/latex/profiles/thesis
 use core/latex/profiles/journal
 
+# Named publication profiles: ieee, acm, arxiv, thesis, and journal.
 + LaTeXProfiles
   -> .names
     [:ieee, :acm, :arxiv, :thesis, :journal]

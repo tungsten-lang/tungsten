@@ -8,6 +8,7 @@ use core/latex/profiles
 use core/latex/math
 use core/latex/validation
 
+# Escaping, composable math primitives, value renderers, and paper fragments.
 + LaTeX
   # Explicitly trust caller-supplied TeX. Prefer the structured helpers below
   # for values or text that did not originate in source code. Raw fragments
@@ -877,6 +878,8 @@ use core/latex/validation
 # Immutable trusted TeX source. Construct through LaTeX helpers so the raw
 # boundary stays visible at call sites.
 + LatexFragment
+  ro :source, :reference_chain
+
   -> new(source, reference_events = nil)
     @source = source
     if reference_events == nil
@@ -897,14 +900,8 @@ use core/latex/validation
       chains.push(part.reference_chain)
     LatexFragment.new(source, LatexEventChain.combine(chains))
 
-  -> source
-    @source
-
   -> reference_events
     @reference_chain.flatten
-
-  -> reference_chain
-    @reference_chain
 
   -> +(other)
     fragment = LaTeX.coerce(other)

@@ -5,6 +5,8 @@
 # module and may opt in through `LaTeX.semantic`.
 
 + LatexMath
+  ro :concept, :sort
+
   -> new(concept, children = nil, value = nil, sort = nil)
     @concept = concept.to_s
     @children = []
@@ -234,12 +236,6 @@
       raise "LatexMath equality result must be a proposition" if @sort != :proposition
       return true
     raise "unknown LatexMath concept: " + @concept
-
-  -> concept
-    @concept
-
-  -> sort
-    @sort
 
   -> children
     out = []

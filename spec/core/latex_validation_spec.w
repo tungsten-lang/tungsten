@@ -1,10 +1,9 @@
 # Focused interpreted/native checks for structured LaTeX reference validation.
 #
-# Run interpreted:
-#   bin/tungsten run spec/core/latex_validation_spec.w
 # Run compiled:
-#   bin/tungsten compile spec/core/latex_validation_spec.w --out /tmp/latex-validation-spec
-#   /tmp/latex-validation-spec
+#   bin/tungsten spec/core/latex_validation_spec.w
+# Run interpreted:
+#   bin/tungsten run --interpret spec/core/latex_validation_spec.w
 
 -> latex_validation_check(name, got, want)
   if got != want

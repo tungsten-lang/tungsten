@@ -1,5 +1,5 @@
 # BatConvResidual (batting round 2): the fixed features of the Codex challenger's zero-initialised temporal residual
-# (GptTemporalResidual, lib/robolab/skills/gpt_temporal.w in the Codex worktree: two causal separable convolutions at 50 Hz over
+# (GptTemporalResidual, lib/robolab/skills/gpt_temporal.w, from the Codex worktree: two causal separable convolutions at 50 Hz over
 # muscle-group contraction / velocity / acceleration / jerk and six task sensors, fixed projections, tanh-like squash), reimplemented
 # on robolab's SDK with the same architecture and the same fixed numbers, so a readout trained on one can be tried on the other.
 # Here it only provides the five features [1, f1 .. f4]; BatPowerSkill#temporal_residual holds the readout (tc0-tc19, zero =

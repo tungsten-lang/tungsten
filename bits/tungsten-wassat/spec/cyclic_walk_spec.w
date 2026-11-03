@@ -71,7 +71,7 @@ use ../lib/wassat
 describe "Circular permutation proposals" ->
   it "decodes distance, searches, lifts implications and replays every clause" ->
     f = cycle_fixture()
-    m = i64[24]; walk = i64[24]; stop = i64[4]; res = i64[50]
+    m = i64[24]; walk = i64[34]; stop = i64[4]; res = i64[50]
     expect(wassat_cycle_prefix(f["flat_lits"], f["flat_offs"], f["flat_lens"], 42, f["flat_ncl"])).to eq(6)
     expect(cycle_try(f, m, walk, stop, res)).to eq(1)
     expect(m[1]).to eq(6)
@@ -81,6 +81,8 @@ describe "Circular permutation proposals" ->
     expect(m[14]).to eq(f["flat_ncl"])
     expect(m[15]).to eq(f["flat_nlits"])
     expect(m[16]).to eq(1)
+    expect(walk[26]).to eq(2)
+    expect(walk[7]).to eq(0)
     expect(res[40]).to eq(1)
     model = []
     v = 1
@@ -92,10 +94,12 @@ describe "Circular permutation proposals" ->
 
   it "rejects a graph solution that misses an unrelated original clause" ->
     f = cycle_fixture("41 42")
-    m = i64[24]; walk = i64[24]; stop = i64[4]; res = i64[50]
+    m = i64[24]; walk = i64[34]; stop = i64[4]; res = i64[50]
     expect(cycle_try(f, m, walk, stop, res)).to eq(0)
     expect(walk[13]).to eq(0)
-    expect(m[11]).to eq(1)
+    expect(walk[26]).to eq(1)
+    expect(walk[7] > 0).to eq(true)
+    expect(m[11] >= 1).to eq(true)
     expect(m[16]).to eq(0)
     expect(res[0]).to eq(0)
     expect(wassat_stop_status(stop)).to eq(0)
@@ -131,6 +135,18 @@ describe "Circular permutation proposals" ->
     expect(cycle_try(f, m, walk, stop, res, clock_ms() - 1)).to eq(0)
     expect(m[22]).to eq(2)
     expect(res[0]).to eq(0)
+
+describe "Early circular model construction" ->
+  it "returns a miss without starting a walk when original replay rejects the proposal" ->
+    f = cycle_fixture("41 42")
+    m = i64[24]; walk = i64[34]; stop = i64[4]; res = i64[50]
+    m[17] = clock_ms()
+    expect(wassat_cycle_search_mode(f["flat_lits"], f["flat_offs"], f["flat_lens"], 42, f["flat_ncl"], 6, m, walk, stop, res, 0, 0, 0, 0, i64[24], 1)).to eq(0)
+    expect(walk[26]).to eq(1)
+    expect(walk[7]).to eq(0)
+    expect(m[11]).to eq(1)
+    expect(m[16]).to eq(0)
+    expect(wassat_stop_status(stop)).to eq(0)
 
 describe "Circular worker memory admission" ->
   it "uses runtime units, rounds down fractions, and fails closed" ->

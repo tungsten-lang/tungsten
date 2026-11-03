@@ -160,6 +160,7 @@ static TcRuntimeHash *cvar_table = NULL;
   X(PUSH,           "push")          \
   X(POP,            "pop")           \
   X(SHIFT,          "shift")         \
+  X(UNSHIFT,        "unshift")       \
   X(DELETE,         "delete")        \
   X(TO_S,           "to_s")          \
   X(TO_I,           "to_i")          \

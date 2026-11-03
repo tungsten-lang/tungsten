@@ -11,6 +11,7 @@
 #   studio fcpxml <episode.json> [--cut full] [--out path] [--master path] -> FCPXML 1.11
 #   studio share <episode.json> [--cut full] [--preset share]  -> build/<cut>/share.mp4 (Transcode from the master)
 #   studio gradecheck <episode.json> <from> <to> [--step N]   -> Metal grade vs the CPU reference
+#   studio ncw2wav <in.ncw|dir> <out.wav|dir> [--force] | <in> --check   -> Kontakt NCW samples as PCM WAV (lib/ncw.w)
 #
 # Build: bin/tungsten -o apps/studio/bin/studio apps/studio/studio.w (under the heavy lock).
 
@@ -24,6 +25,7 @@ use lib/audio
 use lib/mixplain
 use lib/mux
 use lib/fcpxml
+use lib/ncw
 
 -> opt(args, name, default)
   i = 0
@@ -313,7 +315,7 @@ use lib/fcpxml
 
 -> main(args)
   if args.size == 0
-    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|share|raw|gc|gradecheck|selftest ..."
+    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|share|raw|gc|gradecheck|ncw2wav|selftest ..."
     return 2
   c = args[0]
   return cmd_resolve(args) if c == "resolve"
@@ -330,6 +332,7 @@ use lib/fcpxml
   return cmd_raw(args) if c == "raw"
   return cmd_gc(args) if c == "gc"
   return cmd_gradecheck(args) if c == "gradecheck"
+  return ncw2wav_cli(args) if c == "ncw2wav"
   << "unknown command " + c
   2
 

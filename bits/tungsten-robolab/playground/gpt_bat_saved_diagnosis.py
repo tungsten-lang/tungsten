@@ -1,0 +1,32 @@
+"""Read-only diagnosis of frozen batting traces; no new rollouts or selection."""
+import hashlib,json,statistics
+from pathlib import Path
+import gpt_competitor as base
+import numpy as np
+ROOT=base.ROOT;OLD=ROOT/'out/competitor_20260927';OUT=ROOT/'out/competitor_bat_diagnosis'
+def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+def main():
+    OUT.mkdir(exist_ok=True)
+    paths={'baseline':OLD/'bat_pure_baseline_validation.npz','pure':OLD/'bat_pure_candidate_validation.npz','tcn':OLD/'bat_tcn_candidate_validation.npz','tcn_bias':OLD/'bat_tcn_bias_only_validation.npz','tcn_zero':OLD/'bat_tcn_zero_head_validation.npz'}
+    traces={k:np.load(p) for k,p in paths.items()};summaries={};release=2.9
+    for family in ['pure','tcn']:
+        rows=[r for r in json.loads((OLD/f'bat_{family}_validate.json').read_text()) if r['kind']=='candidate'];pitches=[r['metrics']['pitches'][0] for r in rows]
+        mean=lambda key:statistics.mean(p[key] for p in pitches if isinstance(p.get(key),(int,float)))
+        summaries[family]={'n':len(rows),'hits':sum(p['hit'] for p in pitches),'power_mean':statistics.mean(r['metrics']['power'] for r in rows),'quality_mean':statistics.mean(r['metrics']['quality'] for r in rows),'chain_sequential':sum(p.get('chain_sequential',False) for p in pitches),'plant_to_swing_ms':mean('plant_to_swing_ms'),'conditional_launch_mean_deg':mean('launch_deg'),'conditional_carry_mean_m':mean('carry_m'),'chain_peak_sample_count':sum('peak_ms_before_contact' in p for p in pitches),'mean_peak_ms_before_contact':{k:statistics.mean(p['peak_ms_before_contact'][k] for p in pitches if 'peak_ms_before_contact' in p) for k in ['pelvis','torso','hands','bat_w','head']}}
+    prefix={};reference=traces['baseline']
+    for name,data in traces.items():
+        before=np.arange(len(data['labels']))*.005<release-1e-9;ref_before=np.arange(len(reference['labels']))*.005<release-1e-9
+        exact={k:bool(np.array_equal(data[k][before],reference[k][ref_before])) for k in ['command','measured','activation','labels']}
+        exact['q']=bool(np.array_equal(data['q'][data['t']<release-1e-9],reference['q'][reference['t']<release-1e-9]))
+        prefix[name]={'exact':exact,'control_samples':int(before.sum()),'q_samples':int((data['t']<release-1e-9).sum())}
+    sources={str(p.relative_to(ROOT)):sha(p) for p in list(paths.values())+[OLD/'bat_pure_validate.json',OLD/'bat_tcn_validate.json',ROOT/'lib/robolab/skills/gpt_bat.w',ROOT/'lib/robolab/skills/bat.w',OLD/'bat_measured_motion.json']}
+    existing=json.loads((OLD/'bat_measured_motion.json').read_text());quiet={r['controller']:{g:r['groups'][g]['quiet_ms_measured'] for g in ['arms','trunk','front_hip','front_knee']} for r in existing}
+    evidence={'scope':'Existing consumed R1 validation only. No new rollout, new validation, new selection or arena claim. Prefix identity is checked on seed 271001 before pitch release at 2.9 s. Aggregates use the saved 24 randomized pitches per candidate. Missing contact metrics are averaged only where present.','sources_sha256':sources,'before_release_exact':prefix,'all_prefixes_identical':all(all(r['exact'].values()) for r in prefix.values()),'saved_validation':summaries,'existing_measured_quiet_ms':quiet,'source_finding':'GptBatSkill.aim_offsets returns nil when parent returns nil; BatSkill.aim_offsets returns nil while !@aiming. Thus no private learned correction is applied before aiming becomes active. Earlier stride arm/trunk targets remain the inherited backbone.','next_action':'A future matched experiment should allow bounded preparatory backbone motion before pitch aiming, inspect measured motion across leg lift/stride/plant/follow, and retain force/loading and contact/quality guards. Do not reinterpret command hitch as measured smoothness. Reverify current main arenas before selecting any future trial.'}
+    (OUT/'evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
+    assert evidence['all_prefixes_identical'],prefix
+    lines=['# Saved batting diagnosis','','No new rollouts or arena entries were run. The round-nine crossover search remains the only search.','','## The early correction gap','','On already-consumed seed 271001, baseline, pure, temporal, temporal bias-only and temporal zero-head trajectories are byte-identical before pitch release at 2.9 s: commanded contractions, measured contractions, activations, labels and sampled q all match. The earlier saved diagnostics locate an approximately 99 ms measured arm quiet interval and 79.2 ms trunk quiet interval during the leg-lift-to-finish sequence; the long arm quiet interval starts during stride, before aiming activates.','','Source inspection explains this limitation: the private learned layer adds offsets only when the parent aim correction is non-nil, and the parent returns nil until aiming is active. Changes to this learned head alone cannot influence the checked pre-release interval. This is a structural scope limitation of this integration, not a general statement about temporal models.','','## Existing contact and timing evidence','','| Candidate | Pitches | Hits | Mean power, m/s | Mean quality | Sequential chain | Mean plant-to-swing, ms |','|---|---:|---:|---:|---:|---:|---:|']
+    for k,v in summaries.items():lines.append(f"| {k} | {v['n']} | {v['hits']} | {v['power_mean']:.4f} | {v['quality_mean']:.4f} | {v['chain_sequential']}/{v['n']} | {v['plant_to_swing_ms']:.3f} |")
+    lines+=['','The task’s recorded segment-peak order is not sequential on these starts. This metric does not by itself establish human technique. The full JSON keeps peak timings, conditional launch/carry summaries and the original measured-motion diagnostics.','','## Contingent next experiment','','Extend the explicit preparatory contraction/keyframe path through leg lift and stride, with bounded optional residual corrections available before pitch aiming. Compare against an equally budgeted pure backbone refinement and verify disabled/zero-head parity. Preserve front-foot clearance, plant timing, measured whole-motion checks, force/loading, and actual contact/quality outcomes. Finish the current matched crossover round before starting another rollout pool.','','All source files and saved traces are hash-pinned in evidence.json. Old champions, source files and trials were not edited.']
+    (OUT/'REPORT.md').write_text('\n'.join(lines)+'\n')
+    print(json.dumps({'all_prefixes_identical':True,'prefix':prefix,'saved_validation':summaries},indent=2))
+if __name__=='__main__':main()

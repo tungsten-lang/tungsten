@@ -1093,6 +1093,8 @@ use lut_congruence
     else
       pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula)
       art = pre.run_light_flat(formula)
+    # Raw routing borrows parser arrays and constructs no initial preprocessor.
+    resident_pre_arenas = pre == nil ? 0 : 1
     tprof = wassat_prof("cli.light", tprof)
     if art["status"] == 0
       light_stack = art["stack"]
@@ -1211,7 +1213,7 @@ use lut_congruence
         # count is already available, so wider CNFs pay no planning cost.
         if config.max_clause_size <= 3 && env("WASSAT_SMALL_CIRCUIT") != "0" && env("WASSAT_DEPENDENCY_CIRCUIT") != "0" && System.cpu_count > dep_workers
           dep_extra = 192 * (scout_nv + formula["flat_ncl"] + 1)
-          if wassat_race_memory_fits?(formula, scout_lucky ? 2 : 1, 1, 1, dep_extra)
+          if wassat_race_memory_fits?(formula, scout_lucky ? 2 : 1, 1, resident_pre_arenas, dep_extra)
             scout_dep_plan = wassat_dependency_circuit_plan(formula)
         if scout_dep_plan != nil
           scout_dep_res = i64[scout_nv + 8]
@@ -1308,14 +1310,14 @@ use lut_congruence
         # disabled lucky arm must not consume either memory budget or startup
         # time: its lean from_flat still copies the complete formula.
         scout_cdcl_arenas = scout_lucky ? 2 : 1
-        unless wassat_race_memory_fits?(formula, scout_cdcl_arenas, 1, 1)
+        unless wassat_race_memory_fits?(formula, scout_cdcl_arenas, 1, resident_pre_arenas)
           scout_sls_flips = 0
         if scout_sls_flips > 0
           scout_sls_arenas = 1
           scout_repair = false
           if System.physical_memory_bytes > 0
             scout_repair = wassat_sls_repair_eligible?(formula)
-            scout_repair = wassat_race_memory_fits?(formula, 3, 1, 1) if scout_repair
+            scout_repair = wassat_race_memory_fits?(formula, 3, 1, resident_pre_arenas) if scout_repair
           scout_sls_h = Thread.new -> wassat_sls_arm_body(
             scout_nv, formula, walk_art, scout_res, scout_sls_base,
             scout_stop, scout_sls_flips, 7, scout_repair, probe_cap,
@@ -1699,7 +1701,7 @@ use lut_congruence
         race_cdcl_arenas = arms + pre_arms + scout_cdcl_arenas
         unless wassat_race_memory_fits?(
           formula, race_cdcl_arenas, scout_sls_arenas + 1,
-          pre_arms + 1
+          pre_arms + resident_pre_arenas
         )
           sls_flips = 0
         if tprof != 0
@@ -1710,7 +1712,7 @@ use lut_congruence
           pre_bytes = wassat_preprocess_arena_bytes(formula)
           estimated_bytes = cdcl_bytes * race_cdcl_arenas
           estimated_bytes += sls_bytes * (scout_sls_arenas + 1)
-          estimated_bytes += pre_bytes * (pre_arms + 1)
+          estimated_bytes += pre_bytes * (pre_arms + resident_pre_arenas)
           physical_bytes = System.physical_memory_bytes ## i64
           budget_bytes = physical_bytes > 0 ? physical_bytes / 3 : 0
           budget_bytes = 2684354560 if budget_bytes > 2684354560
@@ -1729,7 +1731,7 @@ use lut_congruence
         roster_plan = nil
         if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && options["conflicts"] == 0
           roster_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
-          roster_plan = wassat_roster_plan(formula, 1, roster_cdcl, scout_sls_arenas, 1, 0)
+          roster_plan = wassat_roster_plan(formula, 1, roster_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
         if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil || cycle_plan != nil || roster_plan != nil
           continuation = config.continue_scout? ? scout_solver : nil
           matrix_arms = arms
@@ -1743,7 +1745,8 @@ use lut_congruence
           race = wassat_race_build(formula["nvars"], art, matrix_arms, formula,
                                    continuation, continuation_spent, pre_arms,
                                    sls_flips > 0 ? 1 : 0, scout_cdcl_arenas,
-                                   scout_sls_arenas, 1, cover_plan, cycle_plan, roster_plan)
+                                   scout_sls_arenas, resident_pre_arenas, cover_plan, cycle_plan, roster_plan,
+                                   scout_lucky ? 1 : 0)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
           if pre_arms > 0
             # A preprocessor per arm: two threads rendering through one would

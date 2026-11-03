@@ -88,7 +88,7 @@ use byte_relations/decoder
 # this bounded lane has a separate six-GiB envelope, capped at one third of
 # physical RAM, leaving two GiB below the normal eight-GiB process guard.
 # This does not change admission of any established worker.
--> wassat_byte_plan(formula, workers, cdcl, sls, pre, extra)
+-> wassat_byte_plan(formula, workers, cdcl, sls, pre, extra, lucky = 0)
   mode = env("WASSAT_BYTE_RELATION")
   return nil if mode == "0" || System.cpu_count <= workers || wassat_race_round1_conflicts != 0
   return nil if env("WASSAT_ARMS") != nil && mode != "1"
@@ -104,12 +104,16 @@ use byte_relations/decoder
       wide += 1 if n == 9 || n == 33; i += 1
     return nil if units == 0 || binary < 16 || wide < 2
   scratch = 536870912 + 192 * (nv + 1) + 16 * nl + 8 * nc
-  estimate = wassat_cdcl_arena_bytes(formula) * cdcl
-  estimate += wassat_sls_arena_bytes(formula) * sls
+  # The caller includes retired lucky arenas in cdcl. Replace only those
+  # reservations with the lean loader envelope; they cannot resume CDCL.
+  return nil if lucky < 0 || lucky > cdcl
+  estimate = wassat_cdcl_arena_bytes(formula) * (cdcl - lucky)
+  estimate += wassat_lucky_arena_bytes(formula) * lucky if lucky > 0
+  estimate += wassat_flat_sls_arena_bytes(formula) * sls
   estimate += wassat_preprocess_arena_bytes(formula) * pre + extra + scratch
   memory = System.physical_memory_bytes ## i64
   ceiling = memory / 3; ceiling = 6442450944 if ceiling > 6442450944
-  wassat_prof_note("race.byte_plan estimate=[estimate] ceiling=[ceiling] scratch=[scratch]")
+  wassat_prof_note("race.byte_plan estimate=[estimate] ceiling=[ceiling] scratch=[scratch] lucky_arenas=[lucky] preprocess_arenas=[pre]")
   return nil if memory <= 0 || estimate > ceiling
   {"byte_relation": true, "meta": i64[64], "scratch": scratch}
 

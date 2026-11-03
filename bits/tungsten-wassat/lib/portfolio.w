@@ -1787,7 +1787,8 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
 -> wassat_race_build(nv, art, threads, formula, incumbent = nil,
                      incumbent_conflicts = 0, pre_workers = 0, sls_worker = 0,
                      scout_solvers = 0, scout_sls_arenas = 0,
-                     resident_preprocess_arenas = 0, cover_plan = nil, cycle_plan = nil, roster_plan = nil)
+                     resident_preprocess_arenas = 0, cover_plan = nil, cycle_plan = nil, roster_plan = nil,
+                     scout_lucky_arenas = 0)
   # Continuation is additive. Replacing matrix arm 3 made qwh.35 lose its
   # repeatable 4,366-conflict trajectory; the scout has already allocated its
   # solver, so keeping it as one extra arm restores that diversity without
@@ -1946,7 +1947,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     circuit_plan = wassat_byte_plan(formula,
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
-      sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, byte_extra)
+      sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, byte_extra, scout_lucky_arenas)
   if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
     resource_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     resource_extra += nae_plan["scratch"] if nae_plan != nil

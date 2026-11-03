@@ -1,6 +1,7 @@
 # Recover complementary arithmetic clauses from the actual input. No known
 # Ramsey/Van der Waerden number, instance identity or saved answer is used.
 use nae_count
+use monochrome_watch
 
 WASSAT_NAE_MAX_VARS = 700
 WASSAT_NAE_MAX_CLAUSES = 200000
@@ -27,7 +28,7 @@ WASSAT_NAE_WALL_MS = 20000
   1
 
 -> wassat_nae_bytes(nv, nc, nl) (i64 i64 i64) i64
-  4194304 + 40 * nc + 12 * nl + 64 * nv
+  4194304 + 65 * nc + 20 * nl + 88 * nv
 
 -> wassat_nae_plan(formula, workers, cdcl, sls, pre, extra)
   mode = env("WASSAT_NAE_COUNT")
@@ -43,7 +44,7 @@ WASSAT_NAE_WALL_MS = 20000
   bytes = wassat_nae_bytes(nv, nc, nl)
   return nil if bytes > System.physical_memory_bytes / 64
   return nil unless wassat_race_memory_fits?(formula, cdcl, sls, pre, extra + bytes)
-  { "meta": i64[32], "scratch": bytes }
+  { "meta": i64[32], "scratch": bytes, "watch_meta": i64[32] }
 
 # Each unique sorted scope must occur in both polarities. Hashes only select
 # candidates: equality compares every element. Duplicate clauses are harmless.
@@ -182,6 +183,37 @@ WASSAT_NAE_WALL_MS = 20000
   m[21] = 1
   1
 
+# The decoder has established exact complementary scopes. Preserve that
+# guard and degree order; the watched backend searches the original clauses.
+# Scratch is fixed, and the plan includes both retained decoder arrays and
+# this representation. No known extremal number or saved answer is used.
+-> wassat_nae_watch(formula, asg, order, wm, m, stop)
+  nv = formula["nvars"]; nc = formula["flat_ncl"]; nl = formula["flat_nlits"]
+  lits = formula["flat_lits"]; offs = formula["flat_offs"]; lens = formula["flat_lens"]
+  return 0 if wassat_nae_poll(m, stop) != 0
+  woff = i64[nc + 1]; wel = i64[nl]; forbid = i8[nc]
+  word = i64[nv]; wtrail = i64[nv + 1]
+  i = 0
+  while i < nv
+    word[i] = order[i]
+    i += 1
+  ci = 0
+  used = 0
+  while ci < nc
+    return 0 if (ci & 255) == 0 && wassat_nae_poll(m, stop) != 0
+    woff[ci] = used
+    forbid[ci] = lits[offs[ci]] > 0 ? 0 : 1
+    j = 0
+    while j < lens[ci]
+      l = lits[offs[ci] + j]
+      wel[used] = (l > 0 ? l : -l) - 1
+      used += 1
+      j += 1
+    ci += 1
+  woff[nc] = used
+  wassat_mwatch_run(asg, woff, wel, forbid, word, wtrail,
+    nv, nc, WASSAT_NAE_NODE_CAP, m[4], 1, wm, stop)
+
 -> wassat_nae_search(formula, plan, stop, res, base)
   nv = formula["nvars"]; nc = formula["flat_ncl"]; nl = formula["flat_nlits"]
   lits = formula["flat_lits"]; offs = formula["flat_offs"]; lens = formula["flat_lens"]
@@ -206,11 +238,23 @@ WASSAT_NAE_WALL_MS = 20000
     m[22] = clock_ms() - m[17]
     # Exact complementary scopes justify fixing the first color: every model
     # has its globally complemented model. No other symmetry is assumed.
-    seed = wassat_nae_propagate(asg, trail, heads, inc, widths, counts, remain, m, stop, (order[0] ## i64), 0)
-    if seed == 1
-      hit = wassat_nae_dfs(asg, trail, heads, inc, widths, counts, remain, order, m, stop, nv)
-    elsif m[5] == 0
-      hit = -1
+    if env("WASSAT_ARITH_WATCH") != "0"
+      wm = plan["watch_meta"]
+      if wm == nil
+        wm = i64[32]
+        plan["watch_meta"] = wm
+      hit = wassat_nae_watch(formula, asg, order, wm, m, stop)
+      i = 0
+      while i < 14
+        m[i] = wm[i] if i != 3 && i != 4 && i != 8
+        i += 1
+      m[8] += wm[8]
+    else
+      seed = wassat_nae_propagate(asg, trail, heads, inc, widths, counts, remain, m, stop, (order[0] ## i64), 0)
+      if seed == 1
+        hit = wassat_nae_dfs(asg, trail, heads, inc, widths, counts, remain, order, m, stop, nv)
+      elsif m[5] == 0
+        hit = -1
     if hit == 1
       if wassat_nae_verify(lits, offs, lens, nc, asg, m, stop) == 1
         v = 1
@@ -234,4 +278,9 @@ WASSAT_NAE_WALL_MS = 20000
 
 -> wassat_nae_profile(plan, status)
   m = plan["meta"]
-  wassat_prof_note("race.nae status=[status] scopes=[m[14]] clauses=[m[16]] nodes=[m[2]] visits=[m[6]] forces=[m[7]] undo_visits=[m[10]] enqueues=[m[11]] branches=[m[12]] conflicts=[m[13]] stop=[m[5]] polls=[m[8]] hash_probes=[m[19]] compared=[m[20]] verified=[m[21]] decode_ms=[m[22]] ms=[m[18] - m[17]] extra_bytes=[m[24]]")
+  wm = plan["watch_meta"]
+  backend = "count"
+  if wm != nil && wm[14] > 0
+    backend = "watch"
+    wassat_prof_note("race.nae_watch nodes=[wm[2]] visits=[wm[6]] reads=[wm[19]] moves=[wm[20]] safe=[wm[21]] undone=[wm[10]] branches=[wm[12]] conflicts=[wm[13]] stop=[wm[5]]")
+  wassat_prof_note("race.nae status=[status] backend=[backend] scopes=[m[14]] clauses=[m[16]] nodes=[m[2]] visits=[m[6]] forces=[m[7]] undo_visits=[m[10]] enqueues=[m[11]] branches=[m[12]] conflicts=[m[13]] stop=[m[5]] polls=[m[8]] hash_probes=[m[19]] compared=[m[20]] verified=[m[21]] decode_ms=[m[22]] ms=[m[18] - m[17]] extra_bytes=[m[24]]")

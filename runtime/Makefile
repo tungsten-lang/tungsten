@@ -370,3 +370,12 @@ clean:
 	rm -f tests/test_goroutine_arena tests/test_threads tests/test_atomics tests/test_sockets tests/test_goroutines tests/test_event_loop tests/test_integration tests/test_hash tests/test_hash_tombstone tests/test_string_slab tests/test_ivars tests/test_node_arena tests/test_exception_frames
 
 .PHONY: compile runtime-objects clean test test-arena test-threads test-atomics test-sockets test-goroutines test-event-loop test-integration test-hash test-hash-tombstone test-string-slab test-ivars test-node-arena test-exception-frames test-all bench bench-bigint bench-prime-sweep bench-array-growth bench-array-push-ab bench-runtime-hotpaths bench-string-encoding bench-node bench-location bench-slab-init bench-before bench-compare
+
+# Deterministic timeout coverage: simulated oversleep, EINTR and completion.
+test-thread-deadlines: tests/test_thread_deadlines
+	./tests/test_thread_deadlines
+
+tests/test_thread_deadlines: tests/test_thread_deadlines.c $(RUNTIME_DEPS)
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) -pthread -I$(RUNTIME_DIR) $(filter-out runtime.c,$(RUNTIME_SRCS)) $< $(RUNTIME_LDFLAGS) -o $@
+
+.PHONY: test-thread-deadlines

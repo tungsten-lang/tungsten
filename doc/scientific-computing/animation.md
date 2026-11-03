@@ -67,6 +67,22 @@ deterministic retained tracks:
   times the former 68×51 fragment count, samples an open 0.8-second excerpt,
   and plays it in ping-pong mode.
 
+Six more studies use the same retained data and preview. The machine
+self-portraits [`codex_self_portrait.w`](../examples/animations/codex_self_portrait.w),
+[`codex_unbound_self_portrait.w`](../examples/animations/codex_unbound_self_portrait.w),
+and [`codex_uncertain_light_portrait.w`](../examples/animations/codex_uncertain_light_portrait.w)
+animate 2-D point fields; the Astra series,
+[`astra_parallax_portrait.w`](../examples/animations/astra_parallax_portrait.w),
+[`astra_anamorphic_portrait.w`](../examples/animations/astra_anamorphic_portrait.w),
+and [`astra_uncertain_parallax.w`](../examples/animations/astra_uncertain_parallax.w),
+projects fixed 3-D point sculptures through an animated orientation. They are
+artistic interpretations, not claims about inner experience. `--window-smoke`
+shows three native frames; the Codex portraits and Parallax also accept
+`--window` for the full loop. `--export DIRECTORY` writes PPM frames into an
+existing directory, the Astra files also take `--stills DIRECTORY`, and
+Between views and The light between take `--data DIRECTORY` for their portable
+JSON.
+
 Most executable smoke calls use smaller retained timelines for interpreter
 responsiveness; the flame can retain its full scalar-opacity loop cheaply.
 Without flags they emit deterministic diagnostics. On macOS, compile an

@@ -494,6 +494,31 @@ RSpec.describe Tungsten::Interpreter do
     expect(run("-> greet(n = 42)\n  n\ngreet(99)")).to eq(99)
   end
 
+  it "evaluates dependent default parameters in the callee environment" do
+    code = <<~W
+      n = 99
+      -> add(n, extra = n + 1)
+        extra
+      add(2)
+    W
+    expect(run(code)).to eq(3)
+  end
+
+  it "restores the caller environment when a default parameter raises" do
+    code = <<~W
+      n = 99
+      -> fail_default
+        raise "default failed"
+      -> add(n, extra = fail_default())
+        extra
+      begin
+        add(2)
+      rescue e
+        n
+    W
+    expect(run(code)).to eq(99)
+  end
+
   it "handles recursion" do
     expect(run("-> fib(n)\n  if n < 2\n    n\n  else\n    fib(n - 1) + fib(n - 2)\nfib(10)")).to eq(55)
   end

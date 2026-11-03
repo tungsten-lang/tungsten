@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(793 total), grouped by area, with its declaration, a one-line
+(809 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -339,6 +339,11 @@ summary from the source header, and a link to the source.
 | `SparseAnalysis` | `+ SparseAnalysis` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
 | `SparseFactor` | `+ SparseFactor` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
 | `SparseBlockFactor` | `+ SparseBlockFactor` | — | [`core/sparse_factor.w`](../core/sparse_factor.w) |
+| `SparseSolveCriteria` | — | — | [`core/sparse.w`](../core/sparse.w) |
+| `SparseSolveResult` | — | — | [`core/sparse.w`](../core/sparse.w) |
+| `SparseIterative` | — | — | [`core/sparse.w`](../core/sparse.w) |
+| `SparsePreconditioner` | — | — | [`core/sparse.w`](../core/sparse.w) |
+| `SparseDiagnostics` | — | — | [`core/sparse.w`](../core/sparse.w) |
 | `CUDA` | `+ CUDA` | CUDA — host-side launch for `@gpu fn` kernels emitted as .cu. | [`core/cuda.w`](../core/cuda.w) |
 | `MAC` | `+ MAC` | MAC — heap-backed 48-bit link-layer address with native byte predicates. | [`core/mac.w`](../core/mac.w) |
 | `Mutex` | `+ Mutex` | Mutex — a non-reentrant mutual-exclusion lock. | [`core/mutex.w`](../core/mutex.w) |
@@ -386,6 +391,17 @@ summary from the source header, and a link to the source.
 | `FlatTorusOrbit` | `+ FlatTorusOrbit` | — | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitExtremum` | `+ FlatTorusOrbitExtremum` | — | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
 | `FlatTorusOrbitStraightening` | `+ FlatTorusOrbitStraightening` | An exact GL(n,Z) coordinate change which sends an integer torus direction | [`core/geometry/flat_torus.w`](../core/geometry/flat_torus.w) |
+| `CodingTheory` | `+ CodingTheory` | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `FiniteFieldEvaluationDomain` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `FiniteFieldCodeword` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `InterleavedCodeword` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `AffineLineGenerator` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `ReedSolomonCode` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `InterleavedReedSolomonCode` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `CodingTheoryMetrics` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `JohnsonBound` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `AffineLineAlignmentThresholds` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
+| `CodingTheoryInterchange` | — | — | [`core/coding_theory.w`](../core/coding_theory.w) |
 | `Algebra` | `+ Algebra` | Exact algebraic structures: coefficient fields, polynomial rings, ideals, | [`core/algebra.w`](../core/algebra.w) |
 | `GaussianInteger` | `+ GaussianInteger` | Z[i], the Gaussian integers: complex numbers a + bi with a, b in Z. | [`core/algebra/gaussian_integer.w`](../core/algebra/gaussian_integer.w) |
 | `EisensteinInteger` | `+ EisensteinInteger` | Z[omega], the Eisenstein integers: a + b*omega with omega a primitive cube | [`core/algebra/eisenstein_integer.w`](../core/algebra/eisenstein_integer.w) |

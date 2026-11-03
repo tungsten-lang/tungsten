@@ -414,7 +414,10 @@ module Tungsten
     def project_root_for(path)
       dir = File.directory?(path) ? path : File.dirname(path)
       until dir == File.dirname(dir)
-        return dir if File.directory?(File.join(dir, ".git")) || File.exist?(File.join(dir, "AGENTS.md"))
+        # A linked Git worktree stores `.git` as a file pointing at the
+        # repository metadata, while a primary checkout stores it as a
+        # directory. Both identify the project root.
+        return dir if File.exist?(File.join(dir, ".git")) || File.exist?(File.join(dir, "AGENTS.md"))
 
         dir = File.dirname(dir)
       end

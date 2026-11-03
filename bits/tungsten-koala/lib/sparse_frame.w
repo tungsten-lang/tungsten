@@ -45,10 +45,27 @@
   # Numeric columns of a DataFrame as SparseMatrix (column order
   # preserved). nil when the frame has no numeric column.
   -> .from_frame(df)
-    out = nil
-    m = df.to_matrix
-    out = SparseFrame.from_rows(m.to_a) if m != nil
-    out
+    columns = []
+    names = df.column_names
+    j = 0
+    while j < names.size
+      values = df.column_values(names[j])
+      if Stats.numeric?(values)
+        columns.push(values)
+      j += 1
+    if columns.size == 0
+      return nil
+    rows = []
+    i = 0
+    while i < df.row_count
+      row = []
+      j = 0
+      while j < columns.size
+        row.push(columns[j][i])
+        j += 1
+      rows.push(row)
+      i += 1
+    SparseFrame.from_rows(rows)
 
   # SparseMatrix → nested dense row arrays (zeros filled).
   -> .to_rows(sm)

@@ -5,7 +5,8 @@
 # scope (use SparseMatrix for LA; dense Tensor for multi-D).
 #
 # Backends:
-#   pure Tungsten SpMV always; densify + LinAlg.solve for small systems
+#   pure Tungsten operators, structural rank, CG, and BiCGSTAB always
+#   densify + LinAlg.solve remains an explicitly small-system fallback
 #   Apple SparseBLAS (Accelerate Sparse/BLAS.h) — SpMV
 #   Apple Sparse Solvers (Sparse/Solve.h) — QR / Cholesky factor+solve
 #
@@ -17,6 +18,10 @@ use core/blas
 use core/linalg
 use core/integer
 use core/numeric/float
+use core/sparse/typed_workspace
+use core/sparse/preconditioners
+use core/sparse/iterative
+use core/sparse/diagnostics
 
 + SparseMatrix
   -> .__dimension(value)
@@ -224,6 +229,15 @@ use core/numeric/float
     @csr_pack = nil
     self
 
+  -> shape
+    [@rows, @cols]
+
+  -> density
+    slots = @rows * @cols
+    if slots == 0
+      return ~0.0
+    (nnz + ~0.0) / (slots + ~0.0)
+
   -> to_csr
     if @fmt == :csr
       return self
@@ -240,6 +254,8 @@ use core/numeric/float
 
   # y = A x  — pure path; Accelerate SparseBLAS when ccall available
   -> matvec(x)
+    if x.size() != @cols
+      raise "SparseMatrix.matvec: vector length must equal columns"
     if @fmt == :csr && @csr_pack != nil
       fast_y = ccall("w_array_memmove_f64", @csr_pack, x, -1)
       if fast_y != nil
@@ -269,6 +285,32 @@ use core/numeric/float
       y[i] = s
       i = i + 1
     y
+
+  # Allocation-free portable SpMV for iterative methods and callers that own
+  # a reusable output buffer. `out` must have one cell per matrix row.
+  -> matvec_into(x, out)
+    a = self
+    if @fmt != :csr
+      a = to_csr
+    if x.size() != a.cols
+      raise "SparseMatrix.matvec_into: vector length must equal columns"
+    if out.size() != a.rows
+      raise "SparseMatrix.matvec_into: output length must equal rows"
+    nrows = a.rows
+    ip = a.indptr
+    ix = a.indices
+    dv = a.data
+    i = 0 ## i64
+    while i < nrows
+      s = ~0.0
+      p = ip[i] ## i64
+      pend = ip[i + 1] ## i64
+      while p < pend
+        s = s + dv[p] * x[ix[p]]
+        p = p + 1
+      out[i] = s
+      i = i + 1
+    out
 
   -> ensure_f64_csr
     if @dv_f64 != nil
@@ -316,6 +358,8 @@ use core/numeric/float
     a = self
     if @fmt != :csr
       a = to_csr
+    if x_list.size() != a.cols
+      raise "SparseMatrix.matvec_accel: vector length must equal columns"
     a.ensure_typed_csr
     n = a.cols
     m = a.rows
@@ -365,6 +409,219 @@ use core/numeric/float
     @indices[i]
   -> data_at(i)
     @data[i]
+
+  # Value at (row, column); missing coordinates are zero. CSR rows are
+  # canonical, so the scan stops as soon as it passes the requested column.
+  -> at(row, col)
+    if row < 0 || row >= @rows || col < 0 || col >= @cols
+      raise "SparseMatrix.at: index out of range"
+    a = self
+    if @fmt != :csr
+      a = to_csr
+    p = a.indptr_at(row)
+    pend = a.indptr_at(row + 1)
+    while p < pend
+      found = a.indices_at(p)
+      if found == col
+        return a.data_at(p)
+      if found > col
+        return ~0.0
+      p = p + 1
+    ~0.0
+
+  -> diagonal
+    a = self
+    if @fmt != :csr
+      a = to_csr
+    n = a.rows
+    if a.cols < n
+      n = a.cols
+    out = []
+    i = 0
+    while i < n
+      out = out.push(a.at(i, i))
+      i = i + 1
+    out
+
+  # CSR transpose in O(rows + cols + nnz) storage work.
+  -> transpose
+    a = self
+    if @fmt != :csr
+      a = to_csr
+    counts = []
+    j = 0
+    while j < a.cols
+      counts = counts.push(0)
+      j = j + 1
+    p = 0
+    while p < a.nnz
+      col = a.indices_at(p)
+      counts[col] = counts[col] + 1
+      p = p + 1
+    ptr = [0]
+    j = 0
+    while j < a.cols
+      ptr = ptr.push(ptr[j] + counts[j])
+      j = j + 1
+    indices = []
+    values = []
+    p = 0
+    while p < a.nnz
+      indices = indices.push(0)
+      values = values.push(~0.0)
+      p = p + 1
+    write_at = []
+    j = 0
+    while j < a.cols
+      write_at = write_at.push(ptr[j])
+      j = j + 1
+    i = 0
+    while i < a.rows
+      p = a.indptr_at(i)
+      pend = a.indptr_at(i + 1)
+      while p < pend
+        col = a.indices_at(p)
+        target = write_at[col]
+        indices[target] = i
+        values[target] = a.data_at(p)
+        write_at[col] = target + 1
+        p = p + 1
+      i = i + 1
+    SparseMatrix.csr(a.cols, a.rows, ptr, indices, values)
+
+  -> scale(scalar)
+    a = self
+    if @fmt != :csr
+      a = to_csr
+    ptr = []
+    i = 0
+    while i <= a.rows
+      ptr = ptr.push(a.indptr_at(i))
+      i = i + 1
+    indices = []
+    values = []
+    p = 0
+    while p < a.nnz
+      indices = indices.push(a.indices_at(p))
+      values = values.push(a.data_at(p) * scalar)
+      p = p + 1
+    SparseMatrix.csr(a.rows, a.cols, ptr, indices, values)
+
+  # Sparse addition by a linear merge of canonical CSR rows.
+  -> add(other)
+    if @rows != other.rows || @cols != other.cols
+      raise "SparseMatrix.add: shapes must match"
+    a = self
+    if @fmt != :csr
+      a = to_csr
+    b = other
+    if other.format != :csr
+      b = other.to_csr
+    ptr = [0]
+    indices = []
+    values = []
+    i = 0
+    while i < a.rows
+      pa = a.indptr_at(i)
+      ea = a.indptr_at(i + 1)
+      pb = b.indptr_at(i)
+      eb = b.indptr_at(i + 1)
+      while pa < ea || pb < eb
+        col = -1
+        value = ~0.0
+        if pb >= eb || (pa < ea && a.indices_at(pa) < b.indices_at(pb))
+          col = a.indices_at(pa)
+          value = a.data_at(pa)
+          pa = pa + 1
+        elsif pa >= ea || b.indices_at(pb) < a.indices_at(pa)
+          col = b.indices_at(pb)
+          value = b.data_at(pb)
+          pb = pb + 1
+        else
+          col = a.indices_at(pa)
+          value = a.data_at(pa) + b.data_at(pb)
+          pa = pa + 1
+          pb = pb + 1
+        if value != ~0.0
+          indices = indices.push(col)
+          values = values.push(value)
+      ptr = ptr.push(values.size())
+      i = i + 1
+    SparseMatrix.csr(a.rows, a.cols, ptr, indices, values)
+
+  # Sparse matrix product using a Gustavson row accumulator. Temporary memory
+  # is O(other.cols), not O(rows*cols); the result remains sparse.
+  -> matmul(other)
+    if @cols != other.rows
+      raise "SparseMatrix.matmul: inner dimensions disagree"
+    a = self
+    if @fmt != :csr
+      a = to_csr
+    b = other
+    if other.format != :csr
+      b = other.to_csr
+    marker = []
+    accum = []
+    j = 0
+    while j < b.cols
+      marker = marker.push(-1)
+      accum = accum.push(~0.0)
+      j = j + 1
+    ptr = [0]
+    indices = []
+    values = []
+    i = 0
+    while i < a.rows
+      touched = []
+      pa = a.indptr_at(i)
+      ea = a.indptr_at(i + 1)
+      while pa < ea
+        k = a.indices_at(pa)
+        av = a.data_at(pa)
+        pb = b.indptr_at(k)
+        eb = b.indptr_at(k + 1)
+        while pb < eb
+          col = b.indices_at(pb)
+          product = av * b.data_at(pb)
+          if marker[col] != i
+            marker[col] = i
+            accum[col] = product
+            touched = touched.push(col)
+          else
+            accum[col] = accum[col] + product
+          pb = pb + 1
+        pa = pa + 1
+      ordered = touched.sort -> (left, right)
+        left <=> right
+      j = 0
+      while j < ordered.size()
+        col = ordered[j]
+        value = accum[col]
+        if value != ~0.0
+          indices = indices.push(col)
+          values = values.push(value)
+        j = j + 1
+      ptr = ptr.push(values.size())
+      i = i + 1
+    SparseMatrix.csr(a.rows, b.cols, ptr, indices, values)
+
+  -> structural_rank
+    SparseDiagnostics.structural_rank(self)
+
+  -> structurally_full_rank?
+    target = @rows
+    if @cols < target
+      target = @cols
+    structural_rank == target
+
+  -> conjugate_gradient(b, criteria = nil, initial = nil)
+    SparseIterative.conjugate_gradient(self, b, criteria, initial)
+
+  -> cg(b, criteria = nil, initial = nil)
+    conjugate_gradient(b, criteria, initial)
+
+  -> bicgstab(b, criteria = nil, initial = nil)
+    SparseIterative.bicgstab(self, b, criteria, initial)
 
   # Expand to dense nested rows (for pure densify-solve fallback).
   -> to_dense

@@ -30,6 +30,7 @@ of every theorem for which that claim might be useful.
 | Ordinary numeric constants and functions | `π`, `ℯ`, `Math`, `Special` | [scientific-computing/overview.md](scientific-computing/overview.md) |
 | Symbolic expressions, exact identities, calculus | `use calculus`; `Expression`, `Calculus` | [symbolic.md](symbolic.md), [scientific-computing/calculus.md](scientific-computing/calculus.md) |
 | Fields, polynomials, ideals, arithmetic geometry | `use algebra`; `Algebra` | [algebra.md](algebra.md) |
+| Finite-field evaluation codes and agreement metrics | `use coding_theory`; `CodingTheory` | [coding_theory.md](coding_theory.md) |
 | Differential geometry and spacetime metrics | `use geometry`; `Geometry` | this guide; REPL examples in [CONSOLE.md](CONSOLE.md) |
 | Ideal-apex horns and finite cone controls | `use geometry`; `WarpedConeSurface` | this guide; REPL examples in [CONSOLE.md](CONSOLE.md) |
 | Lattice polytopes, Ehrhart fixtures, Newton polytopes and toric periods | `use algebra`; `LatticeSimplex`, `DiagonalShellPolytope`, `LatticePolytope`, `ToricHypersurfacePeriod` | [algebra.md](algebra.md) |

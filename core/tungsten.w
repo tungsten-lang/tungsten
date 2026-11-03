@@ -328,6 +328,11 @@
   auto :SparseAnalysis, "sparse_factor"
   auto :SparseFactor,   "sparse_factor"
   auto :SparseBlockFactor, "sparse_factor"
+  auto :SparseSolveCriteria, "sparse"
+  auto :SparseSolveResult,   "sparse"
+  auto :SparseIterative,     "sparse"
+  auto :SparsePreconditioner, "sparse"
+  auto :SparseDiagnostics,   "sparse"
   auto :CUDA,         "cuda"
   auto :MAC,          "mac"
   auto :Mutex,        "mutex"
@@ -423,6 +428,19 @@
   auto :FlatTorusOrbitExtremum, "geometry/flat_torus"
   auto :FlatTorusOrbitStraightening, "geometry/flat_torus"
   auto :Real,         "numeric/real"
+
+  # Exact protocol-neutral coding theory.
+  auto :CodingTheory,                    "coding_theory"
+  auto :FiniteFieldEvaluationDomain,     "coding_theory"
+  auto :FiniteFieldCodeword,             "coding_theory"
+  auto :InterleavedCodeword,             "coding_theory"
+  auto :AffineLineGenerator,             "coding_theory"
+  auto :ReedSolomonCode,                 "coding_theory"
+  auto :InterleavedReedSolomonCode,      "coding_theory"
+  auto :CodingTheoryMetrics,             "coding_theory"
+  auto :JohnsonBound,                    "coding_theory"
+  auto :AffineLineAlignmentThresholds,   "coding_theory"
+  auto :CodingTheoryInterchange,         "coding_theory"
 
   # Exact algebra. All public entry points load through the orchestrator so
   # `use algebra` remains the feature boundary while individual classes stay

@@ -50,5 +50,5 @@ use counter_cover/search
   res[base + nv + 5] = clock_ms(); m[25] = res[base + nv + 5] - started
   0
 
--> wassat_counter_cover_profile(m)
-  wassat_prof_note("race.counter_cover result=[m[17]] published=[m[26]] ms=[m[25]] inputs=[m[5]] rows=[m[11]] target=[m[10]] aliases=[m[4]] xors=[m[6]] adders=[m[8]] decode_work=[m[3]] swaps=[m[20]] best_uncovered=[m[21]] starts=[m[22]] incidence_work=[m[23]] term_visits=[m[27]] item_visits=[m[28]] original_clauses=[m[16]] decode_ms=[m[13]] search_ms=[m[14]] replay_ms=[m[15]] stop=[m[0]] polls=[m[1]]")
+-> wassat_counter_cover_profile(m, label = "race.counter_cover")
+  wassat_prof_note("[label] result=[m[17]] published=[m[26]] ms=[m[25]] inputs=[m[5]] rows=[m[11]] target=[m[10]] aliases=[m[4]] xors=[m[6]] adders=[m[8]] decode_work=[m[3]] swaps=[m[20]] best_uncovered=[m[21]] starts=[m[22]] incidence_work=[m[23]] term_visits=[m[27]] item_visits=[m[28]] original_clauses=[m[16]] decode_ms=[m[13]] search_ms=[m[14]] replay_ms=[m[15]] stop=[m[0]] polls=[m[1]]")

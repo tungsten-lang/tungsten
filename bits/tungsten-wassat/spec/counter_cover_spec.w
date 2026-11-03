@@ -185,3 +185,25 @@ describe "Cover choices behind binary counters" ->
       expect(state[1]).to eq(nb); v = 0
       while v < 3
         expect(gain[v]).to eq(expected_gain[v]); expect(loss[v]).to eq(expected_loss[v]); v += 1
+
+
+  it "publishes only a completely replayed cover model to the shared scout stop" ->
+    f = counter_cover_test_formula; nv = f["nvars"]; m = i64[64]; stop = i64[4]; res = i64[nv + 8]
+    wassat_counter_cover_arm(f, m, stop, res, 0, nv)
+    expect(res[0]).to eq(1)
+    expect(wassat_stop_status(stop)).to eq(1)
+    expect(m[26]).to eq(1)
+    expect(m[16]).to eq(f["flat_ncl"])
+    model = i64[nv + 1]; v = 1
+    while v <= nv
+      model[v] = res[v]; v += 1
+    expect(counter_cover_test_valid(f, model)).to eq(true)
+
+  it "does not publish a model after another scout arm requests cancellation" ->
+    f = counter_cover_test_formula; nv = f["nvars"]; m = i64[64]; stop = i64[4]; res = i64[nv + 8]
+    wassat_stop_cancel(stop)
+    wassat_counter_cover_arm(f, m, stop, res, 0, nv)
+    expect(res[0]).to eq(0)
+    expect(wassat_stop_status(stop)).to eq(0)
+    expect(m[26]).to eq(0)
+    expect(m[0]).to eq(1)

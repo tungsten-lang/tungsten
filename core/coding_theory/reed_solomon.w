@@ -14,20 +14,13 @@
       degree_bound, "Reed-Solomon degree bound")
     self
 
-  -> domain
-    @domain
-
-  -> field
-    @field
+  ro :domain, :field, :degree_bound
 
   -> length
     @domain.size
 
   -> size
     length
-
-  -> degree_bound
-    @degree_bound
 
   -> dimension
     @degree_bound < length ? @degree_bound : length

@@ -22,8 +22,7 @@
         @field, symbols, "codeword symbols")
     self
 
-  -> field
-    @field
+  ro :field
 
   -> size
     @symbols.size
@@ -119,17 +118,13 @@
       position += 1
     self
 
-  -> field
-    @field
+  ro :field, :width
 
   -> size
     @rows.size
 
   -> length
     size
-
-  -> width
-    @width
 
   -> row(position)
     if position < 0 || position >= @rows.size

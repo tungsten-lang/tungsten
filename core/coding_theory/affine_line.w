@@ -7,8 +7,7 @@
     @field = CodingTheorySupport.require_finite_field(field)
     self
 
-  -> field
-    @field
+  ro :field
 
   -> coordinates(parameter)
     __coordinates_raw(@field.coerce(parameter))

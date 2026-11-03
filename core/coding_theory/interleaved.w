@@ -17,11 +17,7 @@
     @component_code = ReedSolomonCode.new(@domain, @lane_degree_bound)
     self
 
-  -> domain
-    @domain
-
-  -> field
-    @field
+  ro :domain, :field, :dimension_budget, :interleaving, :lane_degree_bound
 
   -> length
     @domain.size
@@ -29,17 +25,8 @@
   -> size
     length
 
-  -> dimension_budget
-    @dimension_budget
-
   -> requested_dimension
     @dimension_budget
-
-  -> interleaving
-    @interleaving
-
-  -> lane_degree_bound
-    @lane_degree_bound
 
   -> component_dimension
     @component_code.dimension

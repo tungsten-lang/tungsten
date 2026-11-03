@@ -54,8 +54,7 @@
       i += 1
     FiniteFieldEvaluationDomain.raw(field, points)
 
-  -> field
-    @field
+  ro :field
 
   -> size
     @points.size

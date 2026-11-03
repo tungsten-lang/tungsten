@@ -1259,6 +1259,23 @@ use lut_congruence
         if scout_quota != nil
           scout_quota_res = i64[scout_nv + 8]
           scout_quota_h = Thread.new -> wassat_quota_run(formula, scout_quota, scout_stop, scout_quota_res)
+        # Counter-encoded cover choices can finish before a generic scout.
+        # Keep decoding/search in a bounded parallel worker and cancel it with
+        # the scout, without a grace wait. Preserve other specialist slots.
+        scout_counter_plan = nil
+        scout_counter_res = nil
+        scout_counter_h = nil
+        if options["conflicts"] == 0 && raw_probe && env("WASSAT_COUNTER_COVER_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_lut == nil && scout_quota == nil
+          counter_workers = cover_workers + (scout_capacity_plan == nil ? 0 : 1)
+          counter_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
+          counter_cdcl = scout_lucky ? 2 : 1
+          counter_cdcl += 1 if counter_sls > 0 && wassat_sls_repair_eligible?(formula)
+          counter_extra = scout_capacity_plan == nil ? 0 : scout_capacity_plan["scratch"]
+          scout_counter_plan = wassat_counter_cover_plan(formula, counter_workers, counter_cdcl, counter_sls, 1, counter_extra)
+        if scout_counter_plan != nil
+          scout_counter_res = i64[scout_nv + 8]
+          counter_meta = scout_counter_plan["meta"]
+          scout_counter_h = Thread.new -> wassat_counter_cover_arm(formula, counter_meta, scout_stop, scout_counter_res, 0, scout_nv)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1346,7 +1363,9 @@ use lut_congruence
         reconf_cancel_ms = ccall("__w_clock_ms") if scout_reconf_h != nil
         capacity_cancel_ms = 0
         capacity_cancel_ms = clock_ms() if scout_capacity_h != nil
+        counter_cancel_ms = scout_counter_h == nil ? 0 : clock_ms()
         z = wassat_stop_cancel(scout_stop)
+        z = scout_counter_h.join if scout_counter_h != nil
         z = scout_lut_h.join if scout_lut_h != nil
         z = scout_quota_h.join if scout_quota_h != nil
         if scout_capacity_h != nil
@@ -1392,6 +1411,10 @@ use lut_congruence
           wassat_dependency_circuit_profile("scout.circuit", scout_dep_plan)
           dep_tail = scout_dep_res[0] == -1 ? clock_ms() - scout_dep_res[scout_nv + 5] : 0
           wassat_prof_note("scout.circuit answer_to_join_ms=[dep_tail]")
+        if scout_counter_h != nil && env("WASSAT_PROFILE") == "1"
+          wassat_counter_cover_profile(scout_counter_plan["meta"], "scout.counter_cover")
+          counter_tail = scout_counter_res[0] == 1 ? clock_ms() - scout_counter_res[scout_nv + 5] : 0
+          wassat_prof_note("scout.counter_cover answer_to_join_ms=[counter_tail] stop_to_join_ms=[clock_ms() - counter_cancel_ms] scratch_bytes=[scout_counter_plan["scratch"]]")
         # Repair is real CDCL work even though it lives inside the model-only
         # SLS arm. Charge it whether the repair wins or the walk later falls
         # through, and retain the count in every early verdict below.
@@ -1408,6 +1431,24 @@ use lut_congruence
           << "c conflicts: [budget_used], decisions: [lut_scout["decisions"]], props: [lut_scout["props"]]"
           << "c stats restarts=[lut_scout["restarts"]] reduces=[lut_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
           exit(20)
+        if scout_counter_res != nil && scout_counter_res[0] == 1
+          counter_scout = scout_out[0]
+          budget_used += counter_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          cmodel = i64[scout_nv]
+          v = 1
+          while v <= scout_nv
+            cmodel[v - 1] = scout_counter_res[v] == 1 ? v : 0 - v
+            v += 1
+          cmodel = wassat_project_quad_model(cmodel, quad_shift, orig_nvars) if quad_shift > 0
+          cmodel = cmodel.slice(0, orig_nvars) if ramsey_lex != nil
+          unless wassat_model_satisfies?(orig_formula, cmodel)
+            raise "internal error: counter cover model does not satisfy the input formula"
+          wassat_print_sat_model(cmodel, false)
+          << "c mode: fast (checked binary-counter cover scout)"
+          << "c conflicts: [budget_used], decisions: [counter_scout["decisions"]], props: [counter_scout["props"]]"
+          << "c stats restarts=[counter_scout["restarts"]] reduces=[counter_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(10)
         if scout_quota_res != nil && scout_quota_res[0] == 1
           quota_scout = scout_out[0]
           budget_used += quota_scout["conflicts"] if scout_budget == nil

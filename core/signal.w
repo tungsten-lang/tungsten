@@ -31,7 +31,15 @@
 
 use core/fft
 
+# One-sided periodogram or Welch power estimate, with the frame, window, and
+# normalization metadata that produced it. Signal.periodogram and Signal.welch
+# build these; the public constructor validates the same invariants.
 + SignalSpectralEstimate
+  ro :estimator, :sample_rate, :sample_count, :segment_length, :overlap
+  ro :nfft, :segment_count, :window, :window_convention, :detrend, :scaling
+  ro :dropped_samples, :coherent_gain, :window_energy
+  ro :equivalent_noise_bandwidth
+
   # Metadata layout is private to Signal's estimators:
   # [estimator, sample_rate, sample_count, segment_length, overlap, nfft,
   #  segment_count, window, window_convention, detrend, scaling,
@@ -60,7 +68,7 @@ use core/fft
   -> .copy(values)
     out = []
     i = 0
-    while i < values.size()
+    while i < values.size
       out = out.push(values[i])
       i += 1
     out
@@ -68,7 +76,7 @@ use core/fft
   -> .float_copy(values)
     out = []
     i = 0
-    while i < values.size()
+    while i < values.size
       out = out.push(values[i] + ~0.0)
       i += 1
     out
@@ -81,41 +89,8 @@ use core/fft
   -> values
     SignalSpectralEstimate.copy(@values)
 
-  -> estimator
-    @estimator
-
-  -> sample_rate
-    @sample_rate
-
-  -> sample_count
-    @sample_count
-
-  -> segment_length
-    @segment_length
-
-  -> overlap
-    @overlap
-
-  -> nfft
-    @nfft
-
   -> zero_padding
     @nfft - @segment_length
-
-  -> segment_count
-    @segment_count
-
-  -> window
-    @window
-
-  -> window_convention
-    @window_convention
-
-  -> detrend
-    @detrend
-
-  -> scaling
-    @scaling
 
   -> sides
     :one_sided
@@ -123,20 +98,8 @@ use core/fft
   -> boundary
     :drop
 
-  -> dropped_samples
-    @dropped_samples
-
-  -> coherent_gain
-    @coherent_gain
-
-  -> window_energy
-    @window_energy
-
-  -> equivalent_noise_bandwidth
-    @equivalent_noise_bandwidth
-
   -> bin_count
-    @values.size()
+    @values.size
 
   -> frequency_resolution
     @sample_rate / (@nfft + ~0.0)
@@ -150,7 +113,7 @@ use core/fft
       scale /= @equivalent_noise_bandwidth
     power = ~0.0
     i = 0
-    while i < @values.size()
+    while i < @values.size
       power += @values[i] * scale
       if power.nan? || power.infinite?
         raise "Signal integrated spectral power is non-finite"
@@ -163,26 +126,15 @@ use core/fft
   -> to_a
     [frequencies, values]
 
+# Raw one-sided view of the unnormalized forward FFT of a real record: bins 0
+# through Nyquist, with their frequencies in sample_rate units.
 + SignalSpectrum
+  ro :frequencies, :real, :imaginary, :sample_rate, :sample_count
+
   -> new(@frequencies, @real, @imaginary, @sample_rate, @sample_count)
 
-  -> frequencies
-    @frequencies
-
-  -> real
-    @real
-
-  -> imaginary
-    @imaginary
-
-  -> sample_rate
-    @sample_rate
-
-  -> sample_count
-    @sample_count
-
   -> bin_count
-    @real.size()
+    @real.size
 
   -> frequency_resolution
     @sample_rate / (@sample_count + ~0.0)
@@ -191,7 +143,7 @@ use core/fft
   -> magnitudes
     out = []
     i = 0
-    while i < @real.size()
+    while i < @real.size
       value = Math.sqrt(
         @real[i] * @real[i] + @imaginary[i] * @imaginary[i])
       out = out.push(value)
@@ -204,7 +156,7 @@ use core/fft
     raw = magnitudes
     out = []
     i = 0
-    while i < raw.size()
+    while i < raw.size
       scale = ~1.0 / (@sample_count + ~0.0)
       interior = i > 0
       interior = false if @sample_count % 2 == 0 && i == @sample_count / 2
@@ -217,7 +169,7 @@ use core/fft
   -> phases
     out = []
     i = 0
-    while i < @real.size()
+    while i < @real.size
       out = out.push(Math.atan2(@imaginary[i], @real[i]))
       i += 1
     out
@@ -226,6 +178,8 @@ use core/fft
     [@frequencies, @real, @imaginary]
 
 
+# Signal — finite convolution/correlation, analysis windows, raw one-sided
+# spectra, and normalized periodogram/Welch spectral estimation.
 + Signal
   -> .integer?(value)
     name = value.class_name
@@ -258,11 +212,11 @@ use core/fft
     rate
 
   -> .coerce_samples(samples)
-    if samples.size() == 0
+    if samples.size == 0
       raise "Signal spectral samples must not be empty"
     out = []
     i = 0
-    while i < samples.size()
+    while i < samples.size
       value = samples[i]
       if !Signal.real_scalar?(value)
         raise "Signal spectral samples must contain only finite real numbers"
@@ -329,7 +283,7 @@ use core/fft
     total = ~0.0
     energy = ~0.0
     i = 0
-    while i < weights.size()
+    while i < weights.size
       total += weights[i]
       energy += weights[i] * weights[i]
       i += 1
@@ -337,7 +291,7 @@ use core/fft
       raise "Signal window normalization is non-finite"
     if total == ~0.0 || energy <= ~0.0
       raise "Signal window must have nonzero coherent gain and energy"
-    coherent_gain = total / (weights.size() + ~0.0)
+    coherent_gain = total / (weights.size + ~0.0)
     enbw = energy / (total * total) * sample_rate
     if enbw.nan? || enbw.infinite? || enbw <= ~0.0
       raise "Signal window equivalent noise bandwidth must be finite and positive"
@@ -346,9 +300,9 @@ use core/fft
   # Enforce the invariants of the publicly autoloaded result type as well as
   # the estimates constructed by Signal itself.
   -> .validate_spectral_estimate(frequencies, values, metadata)
-    if metadata.size() != 15
+    if metadata.size != 15
       raise "SignalSpectralEstimate metadata is invalid"
-    if frequencies.size() != values.size()
+    if frequencies.size != values.size
       raise "SignalSpectralEstimate frequencies and values must have equal length"
 
     estimator = metadata[0]
@@ -374,7 +328,7 @@ use core/fft
       raise "SignalSpectralEstimate segment_count must be positive"
     if !Signal.integer?(dropped) || dropped < 0
       raise "SignalSpectralEstimate dropped_samples is invalid"
-    if frequencies.size() != nfft / 2 + 1
+    if frequencies.size != nfft / 2 + 1
       raise "SignalSpectralEstimate bin count does not match nfft"
 
     Signal.validate_window(metadata[7], metadata[8])
@@ -411,7 +365,7 @@ use core/fft
     if step.nan? || step.infinite? || step <= ~0.0
       raise "SignalSpectralEstimate frequency resolution must be finite and positive"
     i = 0
-    while i < frequencies.size()
+    while i < frequencies.size
       frequency = frequencies[i]
       value = values[i]
       if !Signal.real_scalar?(frequency) || !Signal.real_scalar?(value)
@@ -505,15 +459,15 @@ use core/fft
     Signal.validate_window(window, convention)
     Signal.validate_detrend(detrend)
     Signal.validate_scaling(scaling)
-    fft_length = Signal.resolve_nfft(nfft, data.size())
-    weights = Signal.window(window, data.size(), convention)
+    fft_length = Signal.resolve_nfft(nfft, data.size)
+    weights = Signal.window(window, data.size, convention)
     summary = Signal.window_summary(weights, rate)
     values = Signal.frame_power(
-      data, 0, data.size(), weights, detrend, fft_length, rate, scaling,
+      data, 0, data.size, weights, detrend, fft_length, rate, scaling,
       summary[1], summary[3])
     frequencies = Signal.spectral_frequencies(rate, fft_length)
     metadata = [
-      :periodogram, rate, data.size(), data.size(), 0, fft_length, 1,
+      :periodogram, rate, data.size, data.size, 0, fft_length, 1,
       window, convention, detrend, scaling, 0,
       summary[0], summary[1], summary[2]
     ]
@@ -534,7 +488,7 @@ use core/fft
     data = Signal.coerce_samples(samples)
     if !Signal.integer?(segment_length) || segment_length < 2
       raise "Signal Welch segment_length must be an integer at least 2"
-    if segment_length > data.size()
+    if segment_length > data.size
       raise "Signal Welch segment_length must not exceed the sample count"
     overlap = segment_length / 2 if overlap == nil
     if !Signal.integer?(overlap) || overlap < 0 || overlap >= segment_length
@@ -551,7 +505,7 @@ use core/fft
     segment_count = 0
     start = 0
     last_start = 0
-    while start + segment_length <= data.size()
+    while start + segment_length <= data.size
       values = Signal.frame_power(
         data, start, segment_length, weights, detrend, fft_length, rate,
         scaling, summary[1], summary[3])
@@ -560,7 +514,7 @@ use core/fft
       else
         count = segment_count + 1 + ~0.0
         i = 0
-        while i < accumulated.size()
+        while i < accumulated.size
           accumulated[i] += (values[i] - accumulated[i]) / count
           if accumulated[i].nan? || accumulated[i].infinite?
             raise "Signal Welch power average is non-finite"
@@ -569,10 +523,10 @@ use core/fft
       segment_count += 1
       start += step
 
-    dropped = data.size() - (last_start + segment_length)
+    dropped = data.size - (last_start + segment_length)
     frequencies = Signal.spectral_frequencies(rate, fft_length)
     metadata = [
-      :welch, rate, data.size(), segment_length, overlap, fft_length,
+      :welch, rate, data.size, segment_length, overlap, fft_length,
       segment_count, window, convention, detrend, scaling, dropped,
       summary[0], summary[1], summary[2]
     ]
@@ -608,8 +562,8 @@ use core/fft
   # for noncommutative element types.
   -> .convolve(signal, kernel, mode = :full)
     Signal.validate_mode(mode)
-    signal_size = signal.size()
-    kernel_size = kernel.size()
+    signal_size = signal.size
+    kernel_size = kernel.size
     return [] if signal_size == 0 || kernel_size == 0
 
     full = []
@@ -638,7 +592,7 @@ use core/fft
   # values exposing `conjugate` (including Complex) use it on the reference.
   -> .correlate(signal, reference, mode = :full)
     reversed = []
-    i = reference.size() - 1
+    i = reference.size - 1
     while i >= 0
       reversed = reversed.push(Signal.conjugate(reference[i]))
       i -= 1
@@ -662,7 +616,7 @@ use core/fft
   # One-sided spectrum for uniformly sampled real data. Frequencies use the
   # same units as sample_rate (Hz when sample_rate is samples/second).
   -> .spectrum(samples, sample_rate = ~1.0)
-    count = samples.size()
+    count = samples.size
     raise "Signal.spectrum samples must not be empty" if count == 0
     raise "Signal.spectrum sample_rate must be positive" if sample_rate <= ~0.0
     if !FFT.is_pow2(count)

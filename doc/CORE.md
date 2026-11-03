@@ -78,9 +78,9 @@ summary from the source header, and a link to the source.
 | `DenseCholeskyFactor` | `+ DenseCholeskyFactor` | Reusable SPD Cholesky factor. The retained row-major lower triangle is the | [`core/linalg.w`](../core/linalg.w) |
 | `DenseQRFactor` | `+ DenseQRFactor` | Compact Householder QR factor for a full-column-rank m×n matrix (m>=n). | [`core/linalg.w`](../core/linalg.w) |
 | `FFT` | `+ FFT` | FFT — discrete Fourier transform (native Cooley–Tukey radix-2). | [`core/fft.w`](../core/fft.w) |
-| `Signal` | `+ Signal` | — | [`core/signal.w`](../core/signal.w) |
-| `SignalSpectrum` | `+ SignalSpectrum` | — | [`core/signal.w`](../core/signal.w) |
-| `SignalSpectralEstimate` | `+ SignalSpectralEstimate` | — | [`core/signal.w`](../core/signal.w) |
+| `Signal` | `+ Signal` | Signal — finite convolution/correlation, analysis windows, raw one-sided | [`core/signal.w`](../core/signal.w) |
+| `SignalSpectrum` | `+ SignalSpectrum` | Raw one-sided view of the unnormalized forward FFT of a real record: bins 0 | [`core/signal.w`](../core/signal.w) |
+| `SignalSpectralEstimate` | `+ SignalSpectralEstimate` | One-sided periodogram or Welch power estimate, with the frame, window, and | [`core/signal.w`](../core/signal.w) |
 | `Special` | `+ Special` | Special — transcendental / special functions (SciPy `scipy.special` analogue). | [`core/special.w`](../core/special.w) |
 | `Stats` | `+ Stats` | — | [`core/stats.w`](../core/stats.w) |
 | `Tensor` | `+ Tensor` | — | [`core/tensor.w`](../core/tensor.w) |

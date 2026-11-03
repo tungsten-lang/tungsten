@@ -1,5 +1,7 @@
-# Compiled Complex correlation contract. Complex's generic numeric tower is
-# native-compiler-only, while the rest of signal_spec runs in both engines.
+# Complex correlation contract: the reference sequence is conjugated through
+# Complex#conjugate. Run in both engines:
+#   bin/tungsten spec/core/signal_complex_spec.w
+#   bin/tungsten run --interpret spec/core/signal_complex_spec.w
 
 use signal
 

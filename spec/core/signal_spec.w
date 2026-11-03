@@ -1,15 +1,12 @@
 # Finite signal convolution/correlation and one-sided spectral conventions.
 # Run in both engines:
-#   bin/tungsten run spec/core/signal_spec.w
-#   bin/tungsten compile spec/core/signal_spec.w --out /tmp/signal-spec
+#   bin/tungsten spec/core/signal_spec.w
+#   bin/tungsten run --interpret spec/core/signal_spec.w
 
 use signal
 
 + ConjugateProbe
-  -> new(@value)
-
-  -> value
-    @value
+  -> new(@value) ro
 
   -> conjugate
     ConjugateProbe.new(0 - @value)
@@ -24,9 +21,9 @@ use signal
   difference <= tolerance
 
 -> array_close?(got, want, tolerance = ~1.0e-10)
-  return false if got.size() != want.size()
+  return false if got.size != want.size
   i = 0
-  while i < got.size()
+  while i < got.size
     return false if !close?(got[i], want[i], tolerance)
     i += 1
   true
@@ -50,8 +47,8 @@ signal_check("convolve.does_not_mutate_inputs",
              array_close?(samples, [1, 2, 3]) &&
              array_close?(kernel, [4, 5]))
 signal_check("convolve.empty",
-             Signal.convolve([], kernel).size() == 0 &&
-             Signal.convolve(samples, []).size() == 0)
+             Signal.convolve([], kernel).size == 0 &&
+             Signal.convolve(samples, []).size == 0)
 
 invalid_mode_raised = false
 begin

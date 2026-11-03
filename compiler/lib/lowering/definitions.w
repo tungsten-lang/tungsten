@@ -1807,12 +1807,13 @@
       mod[:class_method_fn_names][cname + "." + mname + "/" + pcount.to_s()] = mfn_name
 
 -> static_method_raw_abi?(node)
-  # Both class methods (`-> .name`) and typed instance methods (`->`,
-  # `fn`) qualify for the raw-i64 ABI when their type annotations make
-  # it sound. Default-valued params force the boxed path so missing
-  # args resolve to nil. Previously gated on is_class_method, which
-  # forced every instance-method call through w_method_call_cached
-  # even when the receiver type was statically known.
+  # Only class methods have a raw worker plus a boxed dispatch wrapper.
+  # Instance methods remain boxed in lower_class_method and in the method
+  # table, including typed `fn` methods. Their direct-call registry must
+  # describe that same ABI: annotations alone do not create a raw worker.
+  # They can still bypass dynamic lookup while passing boxed values.
+  return false if node.is_class_method != true
+  # Defaults require boxed arguments so missing values resolve to nil.
   params = node.params
   if params != nil
     pi = 0

@@ -71846,15 +71846,25 @@ WValue w_thread_join_timeout(WValue thread, int64_t ms) {
     }
     WThread *t = (WThread *)w_as_ptr(thread);
 
-    /* Poll-based timeout: check alive flag at intervals */
-    int64_t elapsed = 0;
+    /* Sleep requests are not elapsed time: scheduler delays may lengthen a
+     * sleep, while EINTR may shorten it. Recheck the monotonic clock after
+     * each wake and cap the last poll at the remaining timeout. */
+    struct timespec started;
+    clock_gettime(CLOCK_MONOTONIC, &started);
     int64_t interval = 1;  /* start with 1ms, back off */
-    while (t->alive && elapsed < ms) {
-        struct timespec ts;
-        ts.tv_sec = 0;
-        ts.tv_nsec = interval * 1000000;
+    while (t->alive && ms > 0) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        int64_t elapsed_ns = (int64_t)(now.tv_sec - started.tv_sec) * 1000000000
+                           + now.tv_nsec - started.tv_nsec;
+        int64_t elapsed_ms = elapsed_ns / 1000000;
+        if (elapsed_ms >= ms) break;
+        int64_t remaining_ms = ms - elapsed_ms;
+        int64_t sleep_ns = interval * 1000000;
+        if (remaining_ms <= interval)
+            sleep_ns = remaining_ms * 1000000 - elapsed_ns % 1000000;
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = sleep_ns };
         nanosleep(&ts, NULL);
-        elapsed += interval;
         if (interval < 10) interval++;
     }
 

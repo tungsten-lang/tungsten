@@ -433,8 +433,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @asg_filter = false
     # Reduction scratch: 64 histogram buckets, two compaction outputs,
     # then cumulative clause visits, copied words, remapped clauses/reasons,
-    # over-limit reductions, schedule adjustments and added learning headroom.
-    @rhist = i64[73]             # reused by every reduction; no worker allocation
+    # over-limit reductions, schedule adjustments, added learning headroom,
+    # then performed/avoided survivor recount visits.
+    @rhist = i64[75]             # reused by every reduction; last two count recount work
+    @reuse_reduce_count = env("WASSAT_REDUCE_COUNT") != "0"
     # Mid-search inprocessing schedule. WASSAT_INPROCESS pins a fixed
     # interval (0 = off); otherwise policy's shape-gated automatic schedule
     # decides the first round, and later rounds space out geometrically.
@@ -2811,7 +2813,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> reduce_db
     self.subsume_learned
-    wassat_reduce_select(@cmeta, @alive, @clbd, @cused, @rhist,
+    selected = wassat_reduce_select(@cmeta, @alive, @clbd, @cused, @rhist,
                            @ncl, @last_reduce_at)
     @last_reduce_at = @conflicts
 
@@ -2834,14 +2836,21 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Subsumption rewrote clause bodies in place, or root units arrived since
     # inprocessing last cleaned: strip root-false literals, drop root-satisfied
     # clauses, and repack both watch structures from a consistent database.
-    if @need_clean || (@inprocessings > 0 && @tsize > @last_clean_tsize)
-      self.clean_root_clauses
-    # recount the live learned population for the reduction schedule
-    @nlearned = 0
-    ci = 0
-    while ci < @ncl
-      @nlearned += 1 if @alive[ci] == 1 && @clbd[ci] > 0
-      ci += 1
+    cleaned = @need_clean || (@inprocessings > 0 && @tsize > @last_clean_tsize)
+    self.clean_root_clauses if cleaned
+    # Selection already counted every live learned clause and every deletion.
+    # Compaction and watch rebuilding preserve that count. Root cleaning may
+    # remove more clauses, so retain the independent recount on that path.
+    if @reuse_reduce_count && !cleaned
+      @nlearned = selected
+      wassat_reduce_count_note(@rhist, @ncl, 1)
+    else
+      @nlearned = 0
+      ci = 0
+      while ci < @ncl
+        @nlearned += 1 if @alive[ci] == 1 && @clbd[ci] > 0
+        ci += 1
+      wassat_reduce_count_note(@rhist, @ncl, 0)
     0
 
   # Allocation-free recovery for a proof-free @fixed_caps arm whose arena filled
@@ -4330,7 +4339,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_prof_note("[label].inprocess_work cancelled=[@inp_totals[0]] units=[@inp_totals[1]] subsume_work=[@inp_totals[2]] scc_work=[@inp_totals[3]] cleaned_literals=[@inp_totals[4]]")
     wassat_prof_note("[label].subst_hash clauses=[@inp_totals[5]] probes=[@inp_totals[6]] compared_literals=[@inp_totals[7]]")
     wassat_prof_note("[label].inprocess rounds=[@inprocessings] failed=[@inp_failed] lifted=[@inp_lifted] equivs=[@inp_equivs] vivified=[@vivified] subsumed=[@inp_subsumed] strengthened=[@inp_strengthened] substituted=[@nsubst] cleaned=[@inp_cleaned]")
-    wassat_prof_note("[label].reduction clause_visits=[@rhist[66]] copied_words=[@rhist[67]] remapped_clauses=[@rhist[68]] remapped_reasons=[@rhist[69]]")
+    wassat_prof_note("[label].reduction clause_visits=[@rhist[66]] copied_words=[@rhist[67]] remapped_clauses=[@rhist[68]] remapped_reasons=[@rhist[69]] recount_visits=[@rhist[73]] recount_avoided=[@rhist[74]]")
     wassat_prof_note("[label].analysis mark_bytes=[@nvars + 1] reason_bytes=[4 * (@nvars + 1)] shrink_seen=[@shst[1]] shrink_removed=[@shst[2]] shrink_levels=[@shst[7]] shrink_attempts=[@shst[3]] shrink_blocks=[@shst[4]] otfs_hits=[@otfs_hits] otfs_installed=[@otfs_installed] otfs_dominated=[@otfs_dominated] otfs_units=[@otfs_units] otfs_conflicts=[@otfs_conflicts] arena_used=[@asize] arena_capacity=[@acap] clause_slots=[@ncl] clause_capacity=[@ccap]")
     wassat_prof_note("[label].minimize prescan_literals=[@astate[12]] resume_literals=[@astate[13]] probes=[@astate[14]] failed=[@astate[15]] removed=[@astate[16]] max_reason=[@astate[17]] frames=[@astate[18]] input_literals=[@astate[19]] budget_skipped=[@astate[20]] work_limit=[@astate[11]]")
     0
@@ -5993,7 +6002,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   st[5] = removed
   0
 
-# Select the same LBD cut and survivors using the retained histogram scratch.
+# Select the LBD cut and return the number of surviving learned clauses.
+# The retained histogram scratch also records the database visits.
 -> wassat_reduce_select(cm, alive, lbd, used, hist, ncl, last) (i64[] i8[] i64[] i64[] i64[] i64 i64) i64
   # histogram LBD values to find a cut that removes about half
   total = 0
@@ -6028,10 +6038,16 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   while ci < ncl
     if alive[ci] == 1 && lbd[ci] >= cut && cm[2 * ci + 1] > 2 && lbd[ci] > 2
       keep2 = lbd[ci] <= 6 && used[ci] >= last
-      alive[ci] = 0 unless keep2
+      unless keep2
+        alive[ci] = 0
+        total -= 1
     ci += 1
   hist[66] += 2 * ncl
-  0
+  total
+
+-> wassat_reduce_count_note(state, ncl, reused) (i64[] i64 i64)
+  slot = reused == 1 ? 74 : 73
+  state[slot] += ncl
 
 # Fixed-capacity compaction reclaims both body and clause-index space.
 # All destinations precede their sources, so both moves share one scan.

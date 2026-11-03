@@ -1940,6 +1940,14 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, byte_extra)
+  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+    resource_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
+    resource_extra += nae_plan["scratch"] if nae_plan != nil
+    resource_extra += capacity_plan["scratch"] if capacity_plan != nil
+    circuit_plan = wassat_resource_plan(formula,
+      pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
+      cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
+      sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, resource_extra)
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -2568,7 +2576,7 @@ WASSAT_AXIS_SLOTS = 10
   circuit_idx = threads + 3
   circuit_base = circuit_idx * (nv + 8)
   circuit_plan = race["circuit_plan"]
-  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true)
+  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true)
   circuit_handle = nil
   keychart_plan = race["keychart_plan"]
   keychart_idx = race["keychart_index"]
@@ -2661,7 +2669,9 @@ WASSAT_AXIS_SLOTS = 10
     circuit_assertions = circuit_plan["assertions"]
     circuit_meta = circuit_plan["meta"]
     circuit_values = circuit_plan["values"]
-    if circuit_plan["byte_relation"] == true
+    if circuit_plan["resource_capacity"] == true
+      circuit_handle = Thread.new -> wassat_resource_arm(formula, circuit_meta, stop, res, circuit_base, nv)
+    elsif circuit_plan["byte_relation"] == true
       circuit_handle = Thread.new -> wassat_byte_arm(formula, circuit_meta, stop, res, circuit_base, nv)
     elsif circuit_plan["selector_latin"] == true
       selector_nc = formula["flat_ncl"]
@@ -3013,7 +3023,9 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[circuit_base] == -1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       cm = circuit_plan["meta"]
-      if circuit_plan["byte_relation"] == true
+      if circuit_plan["resource_capacity"] == true
+        wassat_resource_profile(cm)
+      elsif circuit_plan["byte_relation"] == true
         wassat_byte_profile(cm)
       elsif circuit_plan["selector_latin"] == true
         wassat_selector_latin_profile(cm)
@@ -3156,6 +3168,7 @@ WASSAT_AXIS_SLOTS = 10
     "pre_index": (winner >= threads && winner < threads + pre.size) ? winner - threads : 0 - 1,
     "circuit_won": circuit_plan != nil && winner == circuit_idx,
     "count_cover_won": circuit_plan != nil && circuit_plan["count_cover"] == true && winner == circuit_idx,
+    "resource_capacity_won": circuit_plan != nil && circuit_plan["resource_capacity"] == true && winner == circuit_idx,
     "byte_relation_won": circuit_plan != nil && circuit_plan["byte_relation"] == true && winner == circuit_idx,
     "selector_latin_won": circuit_plan != nil && circuit_plan["selector_latin"] == true && winner == circuit_idx,
     "cover_won": cover_plan != nil && winner == cover_idx,

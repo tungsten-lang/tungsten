@@ -23,6 +23,7 @@ assembles masters by passthrough mux, with no ffmpeg. It is the video-processing
     studio gradecheck <episode.json> <from> <to> [--step N]   # Metal grade vs the CPU reference, per code value
     studio ncw2wav <in.ncw|dir> <out.wav|dir> [--force]          # Kontakt NCW samples → PCM WAV (rate, bits, channels kept)
     studio ncw2wav <in.ncw|dir> --check                          # decode and validate only (writes nothing)
+    studio flaccheck <in.flac|dir> [--wav <dir>] [--out <tsv>]   # FLAC decoded by lib/flac.w: STREAMINFO MD5, and every sample vs the WAV
     studio selftest | gc
 
 `STUDIO_GRADE=cpu|metal` (or `"grade_impl"` in the cut) picks the per-pixel grade; the default is Metal when a device

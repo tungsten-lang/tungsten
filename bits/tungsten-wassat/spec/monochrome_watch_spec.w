@@ -143,4 +143,35 @@ describe "Watched monochromatic constraints" ->
     expect(got).to eq(mono_brute(rows, 4))
     expect(mono_accepts(rows, p["asg"])).to eq(true) if got == 1
 
+  it "preserves each scope across watch swaps and repeated bounded searches" ->
+    rows = [[0, 0, 1, 2, 3, 4], [1, 0, 1, 2, 3, 4],
+            [0, 1, 2, 5], [1, 1, 2, 5], [0, 0, 5], [1, 0, 5]]
+    p = mono_problem(rows, 6)
+    cap = 1
+    moves = 0
+    while cap <= 8
+      m = i64[32]
+      got = watch_run_problem(p, m, cap)
+      moves += m[20]
+      expect(got).to eq(mono_brute(rows, 6)) if got != 0
+      expect(mono_accepts(rows, p["asg"])).to eq(true) if got == 1
+      si = 0
+      rows.each -> (r)
+        before = []; after = []
+        j = 1
+        while j < r.size
+          before.push(r[j])
+          after.push(p["elems"][p["offs"][si] + j - 1])
+          j += 1
+        expect(after.sort).to eq(before.sort)
+        si += 1
+      i = 0
+      while i < 6
+        p["asg"][i] = -1
+        i += 1
+      cap += 1
+    expect(moves > 0).to eq(true)
+    m = i64[32]
+    expect(watch_run_problem(p, m)).to eq(mono_brute(rows, 6))
+
 spec_summary

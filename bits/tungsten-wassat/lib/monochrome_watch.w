@@ -1,6 +1,8 @@
 # Two watched elements per monochromatic nogood. Watches remain valid after
 # backtracking, so rollback clears assignments without touching every scope.
 # The caller has checked each scope has at least two distinct elements.
+# elems is private mutable scratch: keep the watches in its first two scope
+# positions and swap replacements into them. Scope membership is unchanged.
 use monochrome_count
 
 # m shares the count backend's search/budget counters. Here [6] counts watch
@@ -28,11 +30,11 @@ use monochrome_count
         next
       si = w >> 1 ## i64
       old_slot = slots[w] ## i64
-      p = offs[si] ## i64
+      p = offs[si] + 2 ## i64
       end = offs[si + 1] ## i64
       while p < end
         m[19] += 1
-        break if p != old_slot && p != other_slot && asg[elems[p]] != c
+        break if asg[elems[p]] != c
         p += 1
       if p < end
         dest = 2 * elems[p] + c ## i64
@@ -43,7 +45,9 @@ use monochrome_count
           links[prev] = next_w
         links[w] = heads[dest]
         heads[dest] = w
-        slots[w] = p
+        old_element = elems[old_slot] ## i64
+        elems[old_slot] = elems[p]
+        elems[p] = old_element
         m[20] += 1
         w = next_w
         next

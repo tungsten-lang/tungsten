@@ -23,6 +23,18 @@
 -> midi_send(out, status, data1 = -1, data2 = -1)
   ccall("w_media_midi_send", out, status, data1, data2)
 
+# a message scheduled for a host time (seconds, midi_now's clock; 0 now): delivered then by CoreMIDI
+-> midi_send_at(out, at, message)
+  ccall("w_media_midi_send_at", out, at, message)
+
+# drop what is scheduled on an output and not yet delivered
+-> midi_flush(out)
+  ccall("w_media_midi_flush", out)
+
+# the host clock (seconds): input timestamps, midi_send_at and live_play's times
+-> midi_now()
+  ccall("w_media_midi_now")
+
 -> midi_in(index, name = "")
   ccall("w_media_midi_in_open", index, name)
 

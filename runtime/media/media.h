@@ -92,6 +92,15 @@
     X(w_media_midi_close, 1)           \
     X(w_media_live_new, 1)             \
     X(w_media_live_zone, 4)            \
+    X(w_media_live_zone_file, 3)       \
+    X(w_media_live_sinc, 2)            \
+    X(w_media_live_play, 4)            \
+    X(w_media_live_release, 4)         \
+    X(w_media_live_bend, 3)            \
+    X(w_media_live_vibrato, 3)         \
+    X(w_media_midi_send_at, 3)         \
+    X(w_media_midi_flush, 1)           \
+    X(w_media_midi_now, 0)             \
     X(w_media_live_note, 3)            \
     X(w_media_live_volume, 2)          \
     X(w_media_live_info, 1)            \

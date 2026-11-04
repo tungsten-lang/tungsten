@@ -3,7 +3,8 @@
 # core/midi and core/live: a virtual MIDI destination is made, found among the destinations, sent a note on and off by an
 # output to it, and the input reads both back in order with their bytes; a virtual source appears among the sources. The live
 # sampler gets a zone (a 440 Hz sine, 1 s, its root A4), plays a note at volume 0 (nothing is heard): a voice sounds and the
-# engine renders frames; the release ends the voice; a key outside every zone starts nothing; a closed sampler raises.
+# engine renders frames; the release ends the voice; a key outside every zone starts nothing; a sample file streams past its
+# head with no underrun when scheduled ahead, its latency is measured, it bends and releases; a closed sampler raises.
 #
 # Run:
 #   bin/tungsten spec/core/midi_live_spec.w
@@ -69,6 +70,24 @@ live_note(s, 69, 0)
 wait_ms(500)
 check("the release ends it", live_info(s)[:voices] == 0)
 check("a key outside every zone starts nothing", !live_note(s, 100, 100) && live_info(s)[:voices] == 0)
+# version 2: a sample file streamed (its head in memory), scheduled at a host time, released, bent; the latency measured
+wav = "/tmp/tungsten-live-spec-" + clock_ms().to_s + ".wav"
+MediaVerify.write_click_wav(wav, 96000 * 3, 48000, [100, 60000, 120000])
+zf = live_zone_file(s, wav, 4096)
+check("a file zone: its head in memory, the rest streamed (" + zf[2].to_s + " frames, first sound at " + zf[3].to_s + ")", zf[1] == 48000.0 && zf[2] == 288000 && zf[3] >= 0)
+t0 = midi_now()
+tag = live_play(s, [zf[0], 60, 1.0, 0.5, 0, 0.05], t0 + 0.05, t0)
+check("a scheduled note has a tag", tag > 0)
+wait_ms(400)
+inf = live_info(s)
+check("it sounds past its head (streamed: " + inf[:underruns].to_s + " underruns)", inf[:voices] >= 1 && inf[:underruns] == 0)
+check("its latency is measured (" + (inf[:latency] * 1000.0).round.to_s + " ms from its cause, scheduled 50 ms ahead)", inf[:latency_n] >= 1 && inf[:latency] > 0.03 && inf[:latency] < 0.2)
+live_bend(s, 200, 0)
+live_release(s, tag, 0, 0.02)
+wait_ms(500)
+check("released", live_info(s)[:voices] == 0)
+check("memory: heads " + live_info(s)[:head_bytes].to_s + " bytes", live_info(s)[:head_bytes] > 0)
+File.delete(wav)
 check("close", live_close(s))
 bad = 0
 begin

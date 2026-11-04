@@ -45,6 +45,7 @@ use nae_decode
 use capacity_clique
 use naked_sudoku
 use affine_circuit
+use treewidth
 use box_net
 use ../../../core/bit_ops
 
@@ -1891,7 +1892,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   pre_sls_extra += wassat_domain_bytes(nv, formula["flat_ncl"]) if domain_plan != nil
   pre_sls_extra += 53 * (nv + 1) + 68157440 if cover_plan != nil
   if circuit_plan != nil
-    if circuit_plan["roster_bound"] == true || circuit_plan["affine_circuit"] == true
+    if circuit_plan["roster_bound"] == true || circuit_plan["affine_circuit"] == true || circuit_plan["treewidth"] == true
       pre_sls_extra += circuit_plan["scratch"]
     elsif circuit_plan["count_cover"] == true
       pre_sls_extra += WASSAT_COUNT_COVER_BYTES
@@ -2060,6 +2061,15 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, affine_extra)
+  # A checked treewidth lower bound uses only the still-empty worker slot.
+  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+    tree_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
+    tree_extra += nae_plan["scratch"] if nae_plan != nil
+    tree_extra += capacity_plan["scratch"] if capacity_plan != nil
+    circuit_plan = wassat_treewidth_plan(formula,
+      pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
+      cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
+      sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, tree_extra)
   # A separate bounded worker preserves every established arm. Account for
   # circuit plans admitted after the original memory/worker snapshot above.
   naked_plan = nil
@@ -2679,7 +2689,9 @@ WASSAT_AXIS_SLOTS = 10
   lits = formula["flat_lits"]; offs = formula["flat_offs"]; lens = formula["flat_lens"]
   program = plan["program"]; inputs = plan["inputs"]; assertions = plan["assertions"]
   meta = plan["meta"]; values = plan["values"]
-  if plan["affine_circuit"] == true
+  if plan["treewidth"] == true
+    wassat_treewidth_arm(formula, plan, stop, res, base, nv)
+  elsif plan["affine_circuit"] == true
     wassat_affine_circuit_arm(formula, plan, stop, res, base, nv)
   elsif plan["box_net"] == true
     wassat_box_net_arm(formula, plan, stop, res, base, nv)
@@ -2748,7 +2760,7 @@ WASSAT_AXIS_SLOTS = 10
   circuit_idx = threads + 3
   circuit_base = circuit_idx * (nv + 8)
   circuit_plan = race["circuit_plan"]
-  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["affine_circuit"] == true || circuit_plan["sparse_domain"] == true || circuit_plan["sorting_network"] == true || circuit_plan["box_net"] == true || circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true || circuit_plan["rectangle_bound"] == true || circuit_plan["wide_circuit"] == true)
+  circuit_plan = nil if budget > 0 && circuit_plan != nil && (circuit_plan["treewidth"] == true || circuit_plan["affine_circuit"] == true || circuit_plan["sparse_domain"] == true || circuit_plan["sorting_network"] == true || circuit_plan["box_net"] == true || circuit_plan["selector_latin"] == true || circuit_plan["byte_relation"] == true || circuit_plan["resource_capacity"] == true || circuit_plan["counter_cover"] == true || circuit_plan["affine_design"] == true || circuit_plan["roster_bound"] == true || circuit_plan["rectangle_bound"] == true || circuit_plan["wide_circuit"] == true)
   circuit_handle = nil
   keychart_plan = race["keychart_plan"]
   keychart_idx = race["keychart_index"]
@@ -2849,6 +2861,8 @@ WASSAT_AXIS_SLOTS = 10
     wide_fallback = budget == 0 ? circuit_plan["wide_fallback"] : nil
     if wide_fallback != nil
       circuit_handle = Thread.new -> wassat_circuit_fallback_arm(formula, circuit_plan, wide_fallback, stop, res, circuit_base, nv)
+    elsif circuit_plan["treewidth"] == true
+      circuit_handle = Thread.new -> wassat_treewidth_arm(formula, circuit_plan, stop, res, circuit_base, nv)
     elsif circuit_plan["affine_circuit"] == true
       circuit_handle = Thread.new -> wassat_affine_circuit_arm(formula, circuit_plan, stop, res, circuit_base, nv)
     elsif circuit_plan["sparse_domain"] == true
@@ -3232,7 +3246,9 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[circuit_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       cm = circuit_plan["meta"]
-      if circuit_plan["affine_circuit"] == true
+      if circuit_plan["treewidth"] == true
+        wassat_treewidth_profile(cm)
+      elsif circuit_plan["affine_circuit"] == true
         wassat_affine_circuit_profile(cm)
       elsif circuit_plan["sparse_domain"] == true
         wassat_sparse_domain_profile(cm)
@@ -3422,6 +3438,7 @@ WASSAT_AXIS_SLOTS = 10
     "resource_capacity_won": circuit_plan != nil && circuit_plan["resource_capacity"] == true && winner == circuit_idx && !wide_won,
     "byte_relation_won": circuit_plan != nil && circuit_plan["byte_relation"] == true && winner == circuit_idx && !wide_won,
     "selector_latin_won": circuit_plan != nil && circuit_plan["selector_latin"] == true && winner == circuit_idx && !wide_won,
+    "treewidth_won": circuit_plan != nil && circuit_plan["treewidth"] == true && winner == circuit_idx && !wide_won,
     "affine_circuit_won": circuit_plan != nil && circuit_plan["affine_circuit"] == true && winner == circuit_idx && !wide_won,
     "sparse_domain_won": circuit_plan != nil && circuit_plan["sparse_domain"] == true && winner == circuit_idx,
     "sorting_network_won": circuit_plan != nil && circuit_plan["sorting_network"] == true && winner == circuit_idx,

@@ -37,4 +37,29 @@ describe "Wassat common-net scratch reuse" ->
       expect(state[18]).to eq(1)
       expect(state[19]+state[20]+state[21]+state[22]).to eq(0)
 
+  it "resolves coordinate collisions and restores the older branch entries" ->
+    scratch = i64[4096]
+    # These three distinct coordinates all hash to bucket zero.
+    scratch[2112] = 0; scratch[2176] = 0
+    scratch[2113] = 1; scratch[2177] = 23
+    scratch[2114] = -1; scratch[2178] = -23
+    scratch[2560] = 3
+    scratch[2688] = 0; scratch[2689] = 1; scratch[2690] = 2
+    expect(wassat_box_net_path_find(scratch,0,0)).to eq(0)
+    expect(wassat_box_net_path_find(scratch,1,23)).to eq(1)
+    expect(wassat_box_net_path_find(scratch,-1,-23)).to eq(2)
+    expect(wassat_box_net_path_find(scratch,2,46)).to eq(-1)
+    # Backtracking removes the deepest entry, not the whole bucket.
+    scratch[2560] = scratch[2690]
+    expect(wassat_box_net_path_find(scratch,-1,-23)).to eq(-1)
+    expect(wassat_box_net_path_find(scratch,1,23)).to eq(1)
+    expect(wassat_box_net_path_find(scratch,0,0)).to eq(0)
+    scratch[2560] = scratch[2689]
+    expect(wassat_box_net_path_find(scratch,1,23)).to eq(-1)
+    expect(wassat_box_net_path_find(scratch,0,0)).to eq(0)
+    scratch[2560] = scratch[2688]
+    expect(wassat_box_net_path_find(scratch,0,0)).to eq(-1)
+    expect(scratch[2752]).to eq(10)
+    expect(scratch[2753] >= 10).to eq(true)
+
 spec_summary

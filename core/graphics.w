@@ -73,6 +73,172 @@ use core/metal
 -> gfx_present_wait(window, buffer, width, height)
   ccall("w_gfx_present_wait", window, buffer, width, height)
 
+# ---- Editor-style windows: flags, events, menus, panels ----
+#
+# An editor wants more than held keys and mouse deltas: where the pointer
+# is, which button went down and how many clicks, scroll and trackpad
+# deltas, typed text with its modifiers, the window's size and backing
+# scale as they change, a menu bar, and open/save panels. All of it is
+# below; the game-style calls above keep working on every window.
+#
+#   win = gfx_window_open(metal_device(), "Title", 1200, 800, GFX_HIDPI + GFX_KEEP_OPEN)   # flags add up (bits)
+#   gfx_menu_add(win, "File", "Open…", "o", 0, 1)
+#   while running
+#     gfx_wait(win, ~0.25)                      # sleeps until input arrives
+#     e = gfx_next_event(win)
+#     while e != nil
+#       …                                       # e[:kind] is a GFX_EV_* constant
+#       e = gfx_next_event(win)
+#     # draw only when something changed; present gfx_pixel_width x gfx_pixel_height
+#
+# Positions are points from the content's top-left (multiply by
+# gfx_scale(win) for pixels on a GFX_HIDPI window).
+
+# Window flags for gfx_window_open.
+GFX_HIDPI     = 1   # drawable = content points x backing scale, following resizes
+GFX_HIDDEN    = 2   # never shown or activated (specs, headless runs)
+GFX_BGRA      = 4   # BGRA8 layer: present CoreGraphics/cairo-order pixels as they are
+GFX_KEEP_OPEN = 8   # close button and Quit post GFX_EV_CLOSE; gfx_close closes
+
+# Event kinds (e[:kind]).
+GFX_EV_NONE       = 0
+GFX_EV_KEY_DOWN   = 1   # :key (keyCode), :mods, :repeat, :text (the key's characters)
+GFX_EV_KEY_UP     = 2
+GFX_EV_TEXT       = 3   # :text typed (printable, not a Command/Control shortcut)
+GFX_EV_MOUSE_DOWN = 4   # :x, :y, :button (0 left, 1 right, 2+ other), :clicks, :mods
+GFX_EV_MOUSE_UP   = 5
+GFX_EV_MOUSE_MOVE = 6   # :x, :y, :dx, :dy (moves coalesce)
+GFX_EV_MOUSE_DRAG = 7   # :x, :y, :dx, :dy, :button
+GFX_EV_SCROLL     = 8   # :dx, :dy points (natural direction), :precise (trackpad), :phase
+GFX_EV_MAGNIFY    = 9   # :dx = magnification step (pinch), :phase
+GFX_EV_RESIZE     = 10  # :w, :h content points, :scale
+GFX_EV_CLOSE      = 11  # :id 1 when it came from Quit
+GFX_EV_MENU       = 12  # :id of the item
+GFX_EV_FOCUS      = 13  # :id 1 gained, 0 lost
+GFX_EV_MODS       = 14  # modifier keys changed: :mods
+
+# Modifier bits (e[:mods]; gfx_menu_add's mods).
+GFX_MOD_SHIFT = 1
+GFX_MOD_CTRL  = 2
+GFX_MOD_ALT   = 4
+GFX_MOD_CMD   = 8
+GFX_MOD_CAPS  = 16
+GFX_MOD_FN    = 32
+
+# Cursors (gfx_set_cursor).
+GFX_CURSOR_ARROW       = 0
+GFX_CURSOR_IBEAM       = 1
+GFX_CURSOR_POINTING    = 2
+GFX_CURSOR_OPEN_HAND   = 3
+GFX_CURSOR_CLOSED_HAND = 4
+GFX_CURSOR_CROSSHAIR   = 5
+GFX_CURSOR_RESIZE_LR   = 6
+GFX_CURSOR_RESIZE_UD   = 7
+
+# Open a window of `width` x `height` content points with GFX_* flags, added
+# together (GFX_HIDPI + GFX_BGRA; `|` is the unit pipe in Tungsten).
+-> gfx_window_open(device, title, width, height, flags)
+  ccall("w_gfx_window_open", device, title, width, height, flags)
+
+# Pump the OS queue, sleeping up to `seconds` until input arrives (at once
+# when events are already queued). Returns how many events are queued.
+-> gfx_wait(window, seconds)
+  ccall("w_gfx_wait", window, seconds)
+
+# The oldest queued event as a hash, or nil when the queue is empty.
+-> gfx_next_event(window)
+  k = ccall("w_gfx_next_event", window)
+  if k == 0
+    return nil
+  {kind: k, x: ccall("w_gfx_event_field", window, 1), y: ccall("w_gfx_event_field", window, 2), dx: ccall("w_gfx_event_field", window, 3), dy: ccall("w_gfx_event_field", window, 4), button: ccall("w_gfx_event_field", window, 5), clicks: ccall("w_gfx_event_field", window, 6), mods: ccall("w_gfx_event_field", window, 7), key: ccall("w_gfx_event_field", window, 8), repeat: ccall("w_gfx_event_field", window, 9), phase: ccall("w_gfx_event_field", window, 10), precise: ccall("w_gfx_event_field", window, 11), w: ccall("w_gfx_event_field", window, 12), h: ccall("w_gfx_event_field", window, 13), scale: ccall("w_gfx_event_field", window, 14), id: ccall("w_gfx_event_field", window, 15), text: ccall("w_gfx_event_text", window)}
+
+# Every queued event, oldest first.
+-> gfx_events(window)
+  out = []
+  e = gfx_next_event(window)
+  while e != nil
+    out.push(e)
+    e = gfx_next_event(window)
+  out
+
+# The drawable in pixels (what to present), the content in points, and the
+# backing scale between them (1 unless the window was opened GFX_HIDPI).
+-> gfx_pixel_width(window)
+  ccall("w_gfx_metric", window, 0)
+
+-> gfx_pixel_height(window)
+  ccall("w_gfx_metric", window, 1)
+
+-> gfx_point_width(window)
+  ccall("w_gfx_metric", window, 2)
+
+-> gfx_point_height(window)
+  ccall("w_gfx_metric", window, 3)
+
+-> gfx_scale(window)
+  ccall("w_gfx_metric", window, 4)
+
+-> gfx_set_title(window, title)
+  ccall("w_gfx_set_title", window, title)
+
+# Resize the content to width x height points (a GFX_EV_RESIZE follows).
+-> gfx_set_size(window, width, height)
+  ccall("w_gfx_set_size", window, width, height)
+
+-> gfx_set_cursor(window, kind)
+  ccall("w_gfx_set_cursor", window, kind)
+
+# Close the window now (after a GFX_EV_CLOSE the program has handled).
+-> gfx_close(window)
+  ccall("w_gfx_close", window)
+
+# Add an item to the top-level menu `menu` (made on first use, left to
+# right in the order first used; an app menu with Hide and Quit comes
+# first). `key` is one character or a name (up, down, left, right, return,
+# tab, space, delete, escape, home, end, pageup, pagedown, f1-f12), "" for
+# none; `mods` GFX_MOD_* bits (0 = Command, -1 = the plain key). Choosing it
+# posts GFX_EV_MENU with `id`.
+-> gfx_menu_add(window, menu, title, key, mods, id)
+  ccall("w_gfx_menu_add", window, menu, title, key, mods, id)
+
+-> gfx_menu_separator(window, menu)
+  ccall("w_gfx_menu_add", window, menu, "-", "", 0, 0)
+
+# Enable/disable (1/0) and check/uncheck (1/0) the item `id`; -1 leaves
+# either as it is. False when no item has that id.
+-> gfx_menu_set(window, id, enabled, checked)
+  ccall("w_gfx_menu_set", window, id, enabled, checked)
+
+# Modal panels: the chosen path, or nil when cancelled. `types` is a comma
+# list of extensions ("arr,txt"; "" for any), `dir` a starting folder ("").
+-> gfx_open_panel(window, title, types, dir)
+  ccall("w_gfx_open_panel", window, title, types, dir)
+
+-> gfx_save_panel(window, title, name, types, dir)
+  ccall("w_gfx_save_panel", window, title, name, types, dir)
+
+# The next panel returns `path` (nil: cancelled) without showing: specs and
+# scripted runs.
+-> gfx_panel_answer(window, path)
+  ccall("w_gfx_panel_answer", window, path)
+
+# A modal alert: `buttons` a comma list ("Save,Don't Save,Cancel", the first
+# the default); returns the chosen button's index (-1 on a hidden window).
+-> gfx_alert(window, message, info, buttons)
+  ccall("w_gfx_alert", window, message, info, buttons)
+
+# The next alert returns `index` without showing.
+-> gfx_alert_answer(window, index)
+  ccall("w_gfx_alert_answer", window, index)
+
+# Build a real input event and hand it to the view's handlers, as if the
+# user did it: GFX_EV_MOUSE_* (a = button, b = clicks), GFX_EV_KEY_DOWN/UP
+# (a = keyCode, text = its characters; Command shortcuts reach the menu bar),
+# GFX_EV_SCROLL (a, b = dx, dy points), GFX_EV_MAGNIFY (a), GFX_EV_MENU
+# (a = item id), GFX_EV_CLOSE (the close button).
+-> gfx_post_event(window, kind, x, y, a, b, mods, text)
+  ccall("w_gfx_post_event", window, kind, x, y, a, b, mods, text)
+
 # ---- Hardware keyCode constants (ANSI layout positions) ----
 
 KEY_A     =  0
@@ -88,6 +254,19 @@ KEY_RIGHT = 124
 KEY_DOWN  = 125
 KEY_UP    = 126
 KEY_SHIFT =  56
+KEY_RETURN     = 36
+KEY_TAB        = 48
+KEY_DELETE     = 51
+KEY_FWD_DELETE = 117
+KEY_HOME       = 115
+KEY_END        = 119
+KEY_PAGE_UP    = 116
+KEY_PAGE_DOWN  = 121
+KEY_EQUAL      = 24
+KEY_MINUS      = 27
+KEY_COMMAND    = 55
+KEY_OPTION     = 58
+KEY_CONTROL    = 59
 
 # ---- Camera: position + yaw/pitch, with a quaternion orientation ----
 #

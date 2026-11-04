@@ -76,7 +76,8 @@ points from the content's top-left; multiply by `gfx_scale(win)` for pixels.
 | `GFX_EV_MODS` | `:mods` after a modifier key changed |
 
 Modifier bits: `GFX_MOD_SHIFT`, `GFX_MOD_CTRL`, `GFX_MOD_ALT`, `GFX_MOD_CMD`,
-`GFX_MOD_CAPS`, `GFX_MOD_FN`. Scroll phases: 0 none, 1 began, 2 changed,
+`GFX_MOD_CAPS`, `GFX_MOD_FN` (AppKit sets Fn on the arrows and the other
+function keys; `mods % 16` leaves Caps Lock and Fn out). Scroll phases: 0 none, 1 began, 2 changed,
 3 ended, 4 momentum. Consecutive moves, drags and scrolls coalesce into one
 event, and a full queue (1,024 events) drops its oldest.
 

@@ -74,6 +74,34 @@ INSTALL STORAGE
     unpacking, unsafe member paths are rejected, and optional SSH signatures
     are verified when their metadata is present.
 
+TUNGSTEN BUILD
+
+    `tungsten build` builds what the current folder is part of:
+
+    - in a checkout of the Tungsten repository (any clone or worktree, known by
+      compiler/tungsten.w, core/tungsten.w and bin/commands/build.w at its
+      root): that checkout's compiler, the self-host build. Another checkout
+      than the CLI's own is built by its own bin/tungsten. A bit folder inside
+      the checkout builds that bit, as before.
+    - anywhere else: the nearest folder at or above it with a Bitfile (a
+      project or a bit). Its `executable` lines are built into bin/, and on
+      macOS each `app` line becomes bin/<Name>.app.
+    - with neither, it stops with an error that says what it looked for.
+
+    `tungsten build --which` prints what it would build (self, checkout, bit or
+    none) and the folder.
+
+    An app is declared in the Bitfile, one line, after the executable it wraps:
+
+        executable "arranger", source: "lib/arranger.w"
+        app "Arranger", executable: "arranger", id: "org.example.arranger", icon: "res/icon.png", documents: "arr", version: "0.1"
+
+    The bundle holds Contents/MacOS/<executable> (the built binary),
+    Contents/Info.plist (name, identifier, version, Retina, the document
+    types), Contents/Resources/<Name>.icns (made from the PNG with sips and
+    iconutil) and PkgInfo, and is signed ad hoc. The system frameworks the
+    program links (AppKit, Metal, QuartzCore, CoreGraphics) need no copying.
+
 PROJECT STRUCTURE
 
     bit new pg

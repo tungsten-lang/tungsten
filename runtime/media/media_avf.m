@@ -3938,3 +3938,481 @@ WValue w_media_audio_close(WValue h) {
     free(a);
     return W_TRUE;
 }
+
+/* ======================================================================
+   MIDI (CoreMIDI) and a live sampler (AVAudioEngine) for interactive use
+   ======================================================================
+ *
+ * core/midi: the system's MIDI destinations and sources by name, an output
+ * to one (or a virtual source other programs can listen to), an input from
+ * one (or a virtual destination other programs can send to) whose messages
+ * queue up for the program to read, each with its arrival time.
+ * core/live: a sampler that plays now: zones of PCM (key and velocity
+ * ranges, a root key, a loop) mixed by AVAudioEngine's render thread,
+ * notes started and stopped from the program's thread, each voice
+ * resampled to its pitch and released with a short fade. CoreMIDI is
+ * loaded at the first call (dlopen), so programs that never use MIDI do
+ * not link it. */
+
+#include <CoreMIDI/CoreMIDI.h>
+#include <os/lock.h>
+
+typedef OSStatus (*m_client_create_f)(CFStringRef, MIDINotifyProc, void *, MIDIClientRef *);
+typedef ItemCount (*m_count_f)(void);
+typedef MIDIEndpointRef (*m_get_f)(ItemCount);
+typedef OSStatus (*m_strprop_f)(MIDIObjectRef, CFStringRef, CFStringRef *);
+typedef OSStatus (*m_outport_f)(MIDIClientRef, CFStringRef, MIDIPortRef *);
+typedef OSStatus (*m_inport_f)(MIDIClientRef, CFStringRef, MIDIReadProc, void *, MIDIPortRef *);
+typedef OSStatus (*m_connect_f)(MIDIPortRef, MIDIEndpointRef, void *);
+typedef OSStatus (*m_send_f)(MIDIPortRef, MIDIEndpointRef, const MIDIPacketList *);
+typedef OSStatus (*m_received_f)(MIDIEndpointRef, const MIDIPacketList *);
+typedef OSStatus (*m_source_create_f)(MIDIClientRef, CFStringRef, MIDIEndpointRef *);
+typedef OSStatus (*m_dest_create_f)(MIDIClientRef, CFStringRef, MIDIReadProc, void *, MIDIEndpointRef *);
+typedef OSStatus (*m_dispose_f)(MIDIEndpointRef);
+typedef OSStatus (*m_port_dispose_f)(MIDIPortRef);
+typedef MIDIPacket *(*m_pl_init_f)(MIDIPacketList *);
+typedef MIDIPacket *(*m_pl_add_f)(MIDIPacketList *, ByteCount, MIDIPacket *, MIDITimeStamp, ByteCount, const Byte *);
+
+/* an int argument: a raw literal, a boxed int, or any number (default when nil) */
+static int64_t a_int(WValue v, int64_t dflt, const char *what) {
+    if (v == W_NIL) return dflt;
+    if (w_is_int(v)) return w_as_int(v);
+    if (w_is_double(v) || (v & W_TAG_MASK) == W_TAG_DECIMAL || w_is_rational(v) || w_is_bigint(v))
+        return (int64_t)w_media_num(v, (double)dflt, what);
+    return w_as_int(v);
+}
+
+static struct {
+    int loaded;
+    void *lib;
+    m_client_create_f client_create;
+    m_count_f n_dest, n_src;
+    m_get_f get_dest, get_src;
+    m_strprop_f strprop;
+    m_outport_f outport;
+    m_inport_f inport;
+    m_connect_f connect;
+    m_send_f send;
+    m_received_f received;
+    m_source_create_f source_create;
+    m_dest_create_f dest_create;
+    m_dispose_f ep_dispose;
+    m_port_dispose_f port_dispose;
+    m_pl_init_f pl_init;
+    m_pl_add_f pl_add;
+    CFStringRef *name_key;
+    MIDIClientRef client;
+} g_midi;
+
+static void m_midi_load(const char *what) {
+    if (g_midi.loaded == 1) return;
+    if (g_midi.loaded == -1) w_media_raise("%s: CoreMIDI is not available", what);
+    g_midi.lib = dlopen("/System/Library/Frameworks/CoreMIDI.framework/CoreMIDI", RTLD_LAZY);
+    if (!g_midi.lib) { g_midi.loaded = -1; w_media_raise("%s: CoreMIDI could not be loaded", what); }
+    g_midi.client_create = (m_client_create_f)dlsym(g_midi.lib, "MIDIClientCreate");
+    g_midi.n_dest = (m_count_f)dlsym(g_midi.lib, "MIDIGetNumberOfDestinations");
+    g_midi.n_src = (m_count_f)dlsym(g_midi.lib, "MIDIGetNumberOfSources");
+    g_midi.get_dest = (m_get_f)dlsym(g_midi.lib, "MIDIGetDestination");
+    g_midi.get_src = (m_get_f)dlsym(g_midi.lib, "MIDIGetSource");
+    g_midi.strprop = (m_strprop_f)dlsym(g_midi.lib, "MIDIObjectGetStringProperty");
+    g_midi.outport = (m_outport_f)dlsym(g_midi.lib, "MIDIOutputPortCreate");
+    g_midi.inport = (m_inport_f)dlsym(g_midi.lib, "MIDIInputPortCreate");
+    g_midi.connect = (m_connect_f)dlsym(g_midi.lib, "MIDIPortConnectSource");
+    g_midi.send = (m_send_f)dlsym(g_midi.lib, "MIDISend");
+    g_midi.received = (m_received_f)dlsym(g_midi.lib, "MIDIReceived");
+    g_midi.source_create = (m_source_create_f)dlsym(g_midi.lib, "MIDISourceCreate");
+    g_midi.dest_create = (m_dest_create_f)dlsym(g_midi.lib, "MIDIDestinationCreate");
+    g_midi.ep_dispose = (m_dispose_f)dlsym(g_midi.lib, "MIDIEndpointDispose");
+    g_midi.port_dispose = (m_port_dispose_f)dlsym(g_midi.lib, "MIDIPortDispose");
+    g_midi.name_key = (CFStringRef *)dlsym(g_midi.lib, "kMIDIPropertyDisplayName");
+    g_midi.pl_init = (m_pl_init_f)dlsym(g_midi.lib, "MIDIPacketListInit");
+    g_midi.pl_add = (m_pl_add_f)dlsym(g_midi.lib, "MIDIPacketListAdd");
+    if (!g_midi.client_create || !g_midi.n_dest || !g_midi.get_dest || !g_midi.strprop || !g_midi.outport || !g_midi.inport ||
+        !g_midi.connect || !g_midi.send || !g_midi.received || !g_midi.source_create || !g_midi.dest_create || !g_midi.name_key || !g_midi.pl_init || !g_midi.pl_add) {
+        g_midi.loaded = -1;
+        w_media_raise("%s: CoreMIDI is missing functions", what);
+    }
+    OSStatus st = g_midi.client_create(CFSTR("Tungsten"), NULL, NULL, &g_midi.client);
+    if (st != noErr) { g_midi.loaded = -1; w_media_raise("%s: MIDIClientCreate failed (%d)", what, (int)st); }
+    g_midi.loaded = 1;
+}
+
+static WValue m_midi_name(MIDIEndpointRef e) {
+    CFStringRef s = NULL;
+    char buf[256] = "";
+    if (g_midi.strprop(e, *g_midi.name_key, &s) == noErr && s) {
+        CFStringGetCString(s, buf, sizeof buf, kCFStringEncodingUTF8);
+        CFRelease(s);
+    }
+    return w_string(buf);
+}
+
+WValue w_media_midi_destinations(void) {
+    m_midi_load("midi_destinations");
+    WValue out = w_array_new_empty();
+    ItemCount n = g_midi.n_dest();
+    for (ItemCount i = 0; i < n; i++) out = w_array_push(out, m_midi_name(g_midi.get_dest(i)));
+    return out;
+}
+
+WValue w_media_midi_sources(void) {
+    m_midi_load("midi_sources");
+    WValue out = w_array_new_empty();
+    ItemCount n = g_midi.n_src();
+    for (ItemCount i = 0; i < n; i++) out = w_array_push(out, m_midi_name(g_midi.get_src(i)));
+    return out;
+}
+
+typedef struct AMidiOut {
+    MIDIPortRef port;
+    MIDIEndpointRef dest;      /* a destination, or 0 when virtual */
+    MIDIEndpointRef vsrc;      /* our virtual source (index -1) */
+} AMidiOut;
+
+/* an output: to destination `index`, or (index < 0) a virtual source named `name` other programs can listen to */
+WValue w_media_midi_out_open(WValue indexv, WValue namev) {
+    m_midi_load("midi_out");
+    int64_t idx = a_int(indexv, -1, "index");
+    AMidiOut *o = calloc(1, sizeof *o);
+    if (idx < 0) {
+        char nm[256];
+        if (!w_media_str(namev, nm, sizeof nm) || !nm[0]) strcpy(nm, "Tungsten");
+        CFStringRef s = CFStringCreateWithCString(NULL, nm, kCFStringEncodingUTF8);
+        OSStatus st = g_midi.source_create(g_midi.client, s, &o->vsrc);
+        CFRelease(s);
+        if (st != noErr) { free(o); w_media_raise("midi_out: MIDISourceCreate failed (%d)", (int)st); }
+    } else {
+        if ((ItemCount)idx >= g_midi.n_dest()) { free(o); w_media_raise("midi_out: no destination %lld", (long long)idx); }
+        o->dest = g_midi.get_dest((ItemCount)idx);
+        OSStatus st = g_midi.outport(g_midi.client, CFSTR("out"), &o->port);
+        if (st != noErr) { free(o); w_media_raise("midi_out: MIDIOutputPortCreate failed (%d)", (int)st); }
+    }
+    return w_int(w_media_handle_new(o, W_MEDIA_KIND_MIDIOUT));
+}
+
+/* a message of 1 to 3 bytes now (b1, b2 < 0: left out) */
+WValue w_media_midi_send(WValue hv, WValue b0v, WValue b1v, WValue b2v) {
+    AMidiOut *o = (AMidiOut *)w_media_handle_get(hv, W_MEDIA_KIND_MIDIOUT, "midi_send");
+    Byte msg[3];
+    int n = 0;
+    msg[n++] = (Byte)a_int(b0v, 0, "status");
+    int64_t b1 = a_int(b1v, -1, "data1"), b2 = a_int(b2v, -1, "data2");
+    if (b1 >= 0) msg[n++] = (Byte)b1;
+    if (b2 >= 0) msg[n++] = (Byte)b2;
+    Byte buf[64];
+    MIDIPacketList *pl = (MIDIPacketList *)buf;
+    MIDIPacket *p = g_midi.pl_init(pl);
+    p = g_midi.pl_add(pl, sizeof buf, p, 0, n, msg);
+    if (!p) return W_FALSE;
+    OSStatus st = o->vsrc ? g_midi.received(o->vsrc, pl) : g_midi.send(o->port, o->dest, pl);
+    return st == noErr ? W_TRUE : W_FALSE;
+}
+
+typedef struct AMidiIn {
+    MIDIPortRef port;
+    MIDIEndpointRef vdst;      /* our virtual destination (index -1) */
+    os_unfair_lock lock;
+    int32_t n, cap;
+    struct { uint8_t b[3]; uint8_t len; double t; } *q;
+} AMidiIn;
+
+static void m_midi_read(const MIDIPacketList *pl, void *refcon, void *src) {
+    (void)src;
+    AMidiIn *in = (AMidiIn *)refcon;
+    const MIDIPacket *p = &pl->packet[0];
+    double now = (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9;
+    os_unfair_lock_lock(&in->lock);
+    for (UInt32 i = 0; i < pl->numPackets; i++) {
+        UInt16 k = 0;
+        while (k < p->length) {
+            uint8_t st = p->data[k];
+            if (st < 0x80 || st >= 0xF0) { k++; continue; }   /* running status and system messages are skipped */
+            int len = (st >= 0xC0 && st < 0xE0) ? 2 : 3;
+            if (k + len > p->length) break;
+            if (in->n == in->cap) {
+                int32_t nc = in->cap ? in->cap * 2 : 256;
+                void *nq = realloc(in->q, (size_t)nc * sizeof *in->q);
+                if (!nq) break;
+                in->q = nq;
+                in->cap = nc;
+            }
+            in->q[in->n].b[0] = st;
+            in->q[in->n].b[1] = p->data[k + 1];
+            in->q[in->n].b[2] = len == 3 ? p->data[k + 2] : 0;
+            in->q[in->n].len = (uint8_t)len;
+            in->q[in->n].t = now;
+            in->n++;
+            k += len;
+        }
+        p = MIDIPacketNext(p);
+    }
+    os_unfair_lock_unlock(&in->lock);
+}
+
+/* an input from source `index`, or (index < 0) a virtual destination named `name` other programs can send to */
+WValue w_media_midi_in_open(WValue indexv, WValue namev) {
+    m_midi_load("midi_in");
+    int64_t idx = a_int(indexv, -1, "index");
+    AMidiIn *in = calloc(1, sizeof *in);
+    in->lock = OS_UNFAIR_LOCK_INIT;
+    if (idx < 0) {
+        char nm[256];
+        if (!w_media_str(namev, nm, sizeof nm) || !nm[0]) strcpy(nm, "Tungsten In");
+        CFStringRef s = CFStringCreateWithCString(NULL, nm, kCFStringEncodingUTF8);
+        OSStatus st = g_midi.dest_create(g_midi.client, s, (MIDIReadProc)m_midi_read, in, &in->vdst);
+        CFRelease(s);
+        if (st != noErr) { free(in); w_media_raise("midi_in: MIDIDestinationCreate failed (%d)", (int)st); }
+    } else {
+        if ((ItemCount)idx >= g_midi.n_src()) { free(in); w_media_raise("midi_in: no source %lld", (long long)idx); }
+        OSStatus st = g_midi.inport(g_midi.client, CFSTR("in"), (MIDIReadProc)m_midi_read, in, &in->port);
+        if (st != noErr) { free(in); w_media_raise("midi_in: MIDIInputPortCreate failed (%d)", (int)st); }
+        g_midi.connect(in->port, g_midi.get_src((ItemCount)idx), NULL);
+    }
+    return w_int(w_media_handle_new(in, W_MEDIA_KIND_MIDIIN));
+}
+
+/* the messages received since the last read: [[status, data1, data2, seconds (uptime)], …] */
+WValue w_media_midi_read(WValue hv) {
+    AMidiIn *in = (AMidiIn *)w_media_handle_get(hv, W_MEDIA_KIND_MIDIIN, "midi_read");
+    WValue out = w_array_new_empty();
+    os_unfair_lock_lock(&in->lock);
+    for (int32_t i = 0; i < in->n; i++) {
+        WValue e = w_array_new_empty();
+        e = w_array_push(e, w_int(in->q[i].b[0]));
+        e = w_array_push(e, w_int(in->q[i].b[1]));
+        e = w_array_push(e, w_int(in->q[i].b[2]));
+        e = w_array_push(e, w_float(in->q[i].t));
+        out = w_array_push(out, e);
+    }
+    in->n = 0;
+    os_unfair_lock_unlock(&in->lock);
+    return out;
+}
+
+WValue w_media_midi_close(WValue hv) {
+    void *o = m_avf_peek(hv, W_MEDIA_KIND_MIDIOUT);
+    if (o) {
+        AMidiOut *mo = (AMidiOut *)o;
+        w_media_handle_drop(hv, W_MEDIA_KIND_MIDIOUT);
+        if (mo->vsrc && g_midi.ep_dispose) g_midi.ep_dispose(mo->vsrc);
+        if (mo->port && g_midi.port_dispose) g_midi.port_dispose(mo->port);
+        free(mo);
+        return W_TRUE;
+    }
+    void *i = m_avf_peek(hv, W_MEDIA_KIND_MIDIIN);
+    if (i) {
+        AMidiIn *mi = (AMidiIn *)i;
+        w_media_handle_drop(hv, W_MEDIA_KIND_MIDIIN);
+        if (mi->vdst && g_midi.ep_dispose) g_midi.ep_dispose(mi->vdst);
+        if (mi->port && g_midi.port_dispose) g_midi.port_dispose(mi->port);
+        /* the read proc may still be running once: the queue is left allocated (a few KB) */
+        return W_TRUE;
+    }
+    return W_FALSE;
+}
+
+/* ---- the live sampler ---- */
+
+#define L_ZONES 4096
+#define L_VOICES 96
+
+typedef struct LZone {
+    int lo, hi, vlo, vhi, root;
+    float *l, *r;
+    int64_t frames;
+    double rate, gain;
+    int64_t loop_s, loop_e;    /* loop_e <= loop_s: no loop */
+} LZone;
+
+typedef struct LVoice {
+    int on;                    /* 1 sounding, 2 releasing, 0 free */
+    int key, zone;
+    double pos, step, gain, env, rel;
+} LVoice;
+
+typedef struct ALive {
+    AVAudioEngine *engine;
+    AVAudioSourceNode *node;
+    double rate;
+    os_unfair_lock lock;
+    int nz;
+    LZone z[L_ZONES];
+    LVoice v[L_VOICES];
+    float volume;
+    int64_t rendered;          /* frames rendered so far */
+    double release_s;
+} ALive;
+
+static double a_f64_at(WValue a, int64_t i, const char *what, int64_t *n) {
+    (void)what;
+    WArray *arr = w_as_array(a);
+    *n = arr->size;
+    if (arr->ebits == -64) return ((double *)arr->slots)[arr->start + i];
+    if (arr->ebits == -32) return ((float *)arr->slots)[arr->start + i];
+    return 0;
+}
+
+WValue w_media_live_new(WValue ratev) {
+    @autoreleasepool {
+        ALive *L = calloc(1, sizeof *L);
+        L->lock = OS_UNFAIR_LOCK_INIT;
+        L->volume = 1.0f;
+        L->release_s = 0.25;
+        L->engine = [[AVAudioEngine alloc] init];
+        AVAudioFormat *out = [L->engine.outputNode outputFormatForBus:0];
+        double rate = out.sampleRate > 0 ? out.sampleRate : a_num(ratev);
+        if (rate <= 0) rate = 48000;
+        L->rate = rate;
+        AVAudioFormat *fmt = [[[AVAudioFormat alloc] initStandardFormatWithSampleRate:rate channels:2] autorelease];
+        ALive *Lp = L;
+        L->node = [[AVAudioSourceNode alloc] initWithFormat:fmt renderBlock:^OSStatus(BOOL *silence, const AudioTimeStamp *ts, AVAudioFrameCount n, AudioBufferList *abl) {
+            (void)ts;
+            float *ol = (float *)abl->mBuffers[0].mData;
+            float *orr = abl->mNumberBuffers > 1 ? (float *)abl->mBuffers[1].mData : ol;
+            memset(ol, 0, n * sizeof(float));
+            if (orr != ol) memset(orr, 0, n * sizeof(float));
+            if (!os_unfair_lock_trylock(&Lp->lock)) { *silence = YES; return noErr; }
+            int any = 0;
+            double rel_step = 1.0 / (Lp->release_s * Lp->rate);
+            for (int vi = 0; vi < L_VOICES; vi++) {
+                LVoice *v = &Lp->v[vi];
+                if (!v->on) continue;
+                LZone *z = &Lp->z[v->zone];
+                any = 1;
+                for (AVAudioFrameCount i = 0; i < n; i++) {
+                    int64_t p0 = (int64_t)v->pos;
+                    if (z->loop_e > z->loop_s && p0 >= z->loop_e) { v->pos -= (double)(z->loop_e - z->loop_s); p0 = (int64_t)v->pos; }
+                    if (p0 + 1 >= z->frames) { v->on = 0; break; }
+                    double fr = v->pos - (double)p0;
+                    double a = (z->l[p0] * (1 - fr) + z->l[p0 + 1] * fr) * v->gain * v->env;
+                    double b = (z->r[p0] * (1 - fr) + z->r[p0 + 1] * fr) * v->gain * v->env;
+                    ol[i] += (float)(a * Lp->volume);
+                    if (orr != ol) orr[i] += (float)(b * Lp->volume);
+                    v->pos += v->step;
+                    if (v->on == 2) {
+                        v->env -= rel_step;
+                        if (v->env <= 0) { v->on = 0; break; }
+                    }
+                }
+            }
+            Lp->rendered += n;
+            os_unfair_lock_unlock(&Lp->lock);
+            if (!any) *silence = YES;
+            return noErr;
+        }];
+        [L->engine attachNode:L->node];
+        [L->engine connect:L->node to:L->engine.mainMixerNode format:fmt];
+        NSError *err = nil;
+        if (![L->engine startAndReturnError:&err]) {
+            [L->node release];
+            [L->engine release];
+            free(L);
+            w_media_raise("live_new: the audio engine did not start: %s", err ? [[err localizedDescription] UTF8String] : "?");
+        }
+        return w_int(w_media_handle_new(L, W_MEDIA_KIND_LIVE));
+    }
+}
+
+/* a zone: keys lo…hi, velocities vlo…vhi, the sample's root key, its PCM (f64[] or f32[] left and right, `frames` long, at
+ * `srate`), its loop (loop_e <= loop_s: none) and a linear gain → the zone's index */
+WValue w_media_live_zone(WValue hv, WValue kv, WValue lv, WValue rv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_zone");
+    /* kv = [lo, hi, vlo, vhi, root, frames, srate, loop_s, loop_e, gain] */
+    if (!w_is_array(kv) || !w_is_array(lv) || !w_is_array(rv)) w_media_raise("live_zone: the keys and the two channels are arrays");
+    WArray *k = w_as_array(kv);
+    if (k->size < 10) w_media_raise("live_zone: [lo, hi, vlo, vhi, root, frames, rate, loop start, loop end, gain]");
+    double f[10];
+    for (int i = 0; i < 10; i++) f[i] = w_media_num(k->slots[k->start + i], 0, "live_zone");
+    int64_t frames = (int64_t)f[5];
+    int64_t nl = 0, nr = 0;
+    (void)a_f64_at(lv, 0, "l", &nl);
+    (void)a_f64_at(rv, 0, "r", &nr);
+    if (frames > nl) frames = nl;
+    if (frames > nr) frames = nr;
+    if (frames < 2) w_media_raise("live_zone: no sample data");
+    LZone z;
+    memset(&z, 0, sizeof z);
+    z.lo = (int)f[0]; z.hi = (int)f[1]; z.vlo = (int)f[2]; z.vhi = (int)f[3]; z.root = (int)f[4];
+    z.frames = frames; z.rate = f[6] > 0 ? f[6] : 48000; z.loop_s = (int64_t)f[7]; z.loop_e = (int64_t)f[8]; z.gain = f[9];
+    z.l = malloc((size_t)frames * sizeof(float));
+    z.r = malloc((size_t)frames * sizeof(float));
+    for (int64_t i = 0; i < frames; i++) {
+        int64_t d;
+        z.l[i] = (float)a_f64_at(lv, i, "l", &d);
+        z.r[i] = (float)a_f64_at(rv, i, "r", &d);
+    }
+    os_unfair_lock_lock(&L->lock);
+    if (L->nz >= L_ZONES) { os_unfair_lock_unlock(&L->lock); free(z.l); free(z.r); w_media_raise("live_zone: too many zones"); }
+    int idx = L->nz;
+    L->z[L->nz++] = z;
+    os_unfair_lock_unlock(&L->lock);
+    return w_int(idx);
+}
+
+/* a note: velocity 1…127 starts it (in the zone for that key and velocity), 0 releases the key's sounding voices */
+WValue w_media_live_note(WValue hv, WValue keyv, WValue velv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_note");
+    int key = (int)a_int(keyv, 60, "key"), vel = (int)a_int(velv, 0, "velocity");
+    os_unfair_lock_lock(&L->lock);
+    if (vel <= 0) {
+        for (int i = 0; i < L_VOICES; i++) if (L->v[i].on == 1 && L->v[i].key == key) L->v[i].on = 2;
+        os_unfair_lock_unlock(&L->lock);
+        return W_TRUE;
+    }
+    int zi = -1;
+    for (int i = 0; i < L->nz && zi < 0; i++)
+        if (key >= L->z[i].lo && key <= L->z[i].hi && vel >= L->z[i].vlo && vel <= L->z[i].vhi) zi = i;
+    if (zi < 0) { os_unfair_lock_unlock(&L->lock); return W_FALSE; }
+    int vi = -1;
+    for (int i = 0; i < L_VOICES && vi < 0; i++) if (!L->v[i].on) vi = i;
+    if (vi < 0) {   /* steal the quietest releasing voice, else the first */
+        vi = 0;
+        for (int i = 0; i < L_VOICES; i++) if (L->v[i].on == 2) { vi = i; break; }
+    }
+    LZone *z = &L->z[zi];
+    LVoice *v = &L->v[vi];
+    v->on = 1; v->key = key; v->zone = zi; v->pos = 0; v->env = 1.0;
+    v->step = pow(2.0, (key - z->root) / 12.0) * z->rate / L->rate;
+    v->gain = z->gain * (vel / 127.0) * (vel / 127.0);
+    os_unfair_lock_unlock(&L->lock);
+    return W_TRUE;
+}
+
+WValue w_media_live_volume(WValue hv, WValue vv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_volume");
+    double g = a_num(vv);
+    if (g < 0) g = 0;
+    if (g > 4) g = 4;
+    L->volume = (float)g;
+    return W_TRUE;
+}
+
+/* [voices sounding, zones, the output rate, frames rendered so far] */
+WValue w_media_live_info(WValue hv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_info");
+    int n = 0;
+    os_unfair_lock_lock(&L->lock);
+    for (int i = 0; i < L_VOICES; i++) if (L->v[i].on) n++;
+    int64_t r = L->rendered;
+    int nz = L->nz;
+    os_unfair_lock_unlock(&L->lock);
+    WValue out = w_array_new_empty();
+    out = w_array_push(out, w_int(n));
+    out = w_array_push(out, w_int(nz));
+    out = w_array_push(out, w_float(L->rate));
+    out = w_array_push(out, w_int(r));
+    return out;
+}
+
+WValue w_media_live_close(WValue hv) {
+    ALive *L = m_avf_peek(hv, W_MEDIA_KIND_LIVE);
+    if (!L) return W_FALSE;
+    w_media_handle_drop(hv, W_MEDIA_KIND_LIVE);
+    [L->engine stop];
+    [L->engine detachNode:L->node];
+    [L->node release];
+    [L->engine release];
+    for (int i = 0; i < L->nz; i++) { free(L->z[i].l); free(L->z[i].r); }
+    free(L);
+    return W_TRUE;
+}

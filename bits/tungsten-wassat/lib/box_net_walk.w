@@ -5,7 +5,9 @@
 # corners at6656. Scratch uses64-word cell vectors and128-word edge/hash
 # vectors: mapping/rotation/inverse0/64/128, best192/256, backup320/384,
 # kept edges448/576, degrees704, components768, planar embedding832/896/960,
-# BFS1024, overlap hash1088/1216/1344, patch1472..1855, path1856..2559.
+# BFS1024, overlap hash1088/1216/1344, patch1472..1855, path1856..2559,
+# path-coordinate bucket heads2560..2687 and links2688..2751. Words2752/2753
+# count coordinate lookups and inspected chain entries across restarts.
 # State0..6 describes geometry/anchors;7..15 tracks search;16..23 holds the
 # current score components;24..29 counts candidates, stop, paths, moves,
 # rejected moves and path nodes;30 is the fresh-path restart period.
@@ -246,6 +248,19 @@ use atomic_stop
     m[25] = 2
   m[25]
 
+# Return the path depth at a coordinate, or -1. Bucket chains contain only
+# active path entries; backtracking pops the last insertion in that bucket.
+-> wassat_box_net_path_find(s, x, y) (i64[] i64 i64) i64
+  s[2752] += 1
+  slot = (x * 73 + y * 97) & 127 ## i64
+  item = s[2560+slot] ## i64
+  while item != 0
+    s[2753] += 1
+    k = item-1 ## i64
+    return k if s[2112+k] == x && s[2176+k] == y
+    item = s[2688+k]
+  -1
+
 -> wassat_box_net_path(g, s, m, rng, stop, deadline, depth) (i64[] i64[] i64[] u64[] i64[] i64 i64) i64
   m[11] += 1
   return 0 if m[11] > 20000
@@ -278,26 +293,18 @@ use atomic_stop
     valid = 0 if wassat_box_net_has(rng,1,av) != 0 || wassat_box_net_has(rng,2,bv) != 0 || ((av == 1) != (bv == m[2]))
     x = s[2112+depth] + wassat_box_net_dx(d) ## i64
     y = s[2176+depth] + wassat_box_net_dy(d) ## i64
-    k = 0 ## i64
-    while k <= depth && valid != 0
-      valid = 0 if x == s[2112+k] && y == s[2176+k]
-      if valid != 0
-        # At most one direction reaches an earlier planar square. Derive
-        # it directly instead of testing all four directions at every step.
-        dx = s[2112+k]-x ## i64
-        dy = s[2176+k]-y ## i64
-        q = -1 ## i64
-        if dy == 0
-          q = 0 if dx == 1
-          q = 1 if dx == -1
-        elsif dx == 0
-          q = 2 if dy == 1
-          q = 3 if dy == -1
-        if q >= 0
+    # Only the occupied square and its four planar neighbors can conflict.
+    # Exact coordinates resolve hash collisions; active depths are chained.
+    if valid != 0
+      valid = 0 if wassat_box_net_path_find(s,x,y) >= 0
+      q = 0 ## i64
+      while q < 4 && valid != 0
+        k = wassat_box_net_path_find(s,x+wassat_box_net_dx(q),y+wassat_box_net_dy(q)) ## i64
+        if k >= 0
           aa = wassat_box_net_step(0,av,g[a+1],q) ## i64
           bb = wassat_box_net_step(1,bv,g[b+1],q) ## i64
           valid = 0 if g[aa] != s[1856+k] || g[aa+1] != s[1984+k] || g[bb] != s[1920+k] || g[bb+1] != s[2048+k]
-      k += 1
+        q += 1
     if valid != 0
       s[1857+depth] = av
       s[1921+depth] = bv
@@ -307,7 +314,13 @@ use atomic_stop
       s[2177+depth] = y
       z = wassat_box_net_toggle(rng,1,av) ## i64
       z = wassat_box_net_toggle(rng,2,bv)
+      slot = (x * 73 + y * 97) & 127 ## i64
+      # Recursion inserts and removes entries in stack order, even when
+      # several coordinates share a bucket. A failed branch restores its head.
+      s[2689+depth] = s[2560+slot]
+      s[2560+slot] = depth+2
       return 1 if wassat_box_net_path(g,s,m,rng,stop,deadline,depth+1) != 0
+      s[2560+slot] = s[2689+depth]
       z = wassat_box_net_toggle(rng,1,av)
       z = wassat_box_net_toggle(rng,2,bv)
     dd += 1
@@ -327,6 +340,12 @@ use atomic_stop
     s[2176] = 0
     z = wassat_box_net_single(rng,1,0) ## i64
     z = wassat_box_net_single(rng,2,m[1])
+    bucket = 0 ## i64
+    while bucket < 128
+      s[2560+bucket] = 0
+      bucket += 1
+    s[2560] = 1
+    s[2688] = 0
     m[11] = 0
     m[13] = 15 + wassat_box_net_rand(rng,20)
     found = wassat_box_net_path(g,s,m,rng,stop,deadline,0)

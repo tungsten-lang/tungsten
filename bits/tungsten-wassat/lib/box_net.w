@@ -119,6 +119,8 @@ WASSAT_BOX_NET_AUTO_MIN_SQUARES = 58
     p[20] = m[9]
     p[21] = m[23]
     p[22] = m[15]
+    p[29] = state[2752]
+    p[30] = state[2753]
     hit = wassat_box_net_complete(formula,decoded,state,p,stop,res,base,deadline) if candidate != 0
   else
     p[12] = dm[7]
@@ -139,4 +141,4 @@ WASSAT_BOX_NET_AUTO_MIN_SQUARES = 58
   0
 
 -> wassat_box_net_profile(p)
-  wassat_prof_note("race.box_net status=[p[0]] squares=[p[1]] decode_stage=[p[23]] clause_scans=[p[24]] rotation_clauses=[p[25]] coherence_clauses=[p[26]] steps=[p[13]] evaluations=[p[14]] restarts=[p[15]] fresh_period=[p[28]] path_attempts=[p[16]] path_nodes=[p[17]] moves=[p[18]] rejected_moves=[p[19]] best=[p[20]] connected=[p[21]] polls=[p[22]] candidates=[p[8]] repair_conflicts=[p[9]] replay_clauses=[p[10]] replay_literals=[p[11]] stopped=[p[12]] decode_ms=[p[4]] search_ms=[p[5]] repair_ms=[p[6]] replay_ms=[p[7]] scratch_bytes=[p[27]] worker_ms=[p[3]-p[2]]")
+  wassat_prof_note("race.box_net status=[p[0]] squares=[p[1]] decode_stage=[p[23]] clause_scans=[p[24]] rotation_clauses=[p[25]] coherence_clauses=[p[26]] steps=[p[13]] evaluations=[p[14]] restarts=[p[15]] fresh_period=[p[28]] path_attempts=[p[16]] path_nodes=[p[17]] path_lookups=[p[29]] path_probes=[p[30]] moves=[p[18]] rejected_moves=[p[19]] best=[p[20]] connected=[p[21]] polls=[p[22]] candidates=[p[8]] repair_conflicts=[p[9]] replay_clauses=[p[10]] replay_literals=[p[11]] stopped=[p[12]] decode_ms=[p[4]] search_ms=[p[5]] repair_ms=[p[6]] replay_ms=[p[7]] scratch_bytes=[p[27]] worker_ms=[p[3]-p[2]]")

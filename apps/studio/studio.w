@@ -12,6 +12,7 @@
 #   studio share <episode.json> [--cut full] [--preset share]  -> build/<cut>/share.mp4 (Transcode from the master)
 #   studio gradecheck <episode.json> <from> <to> [--step N]   -> Metal grade vs the CPU reference
 #   studio ncw2wav <in.ncw|dir> <out.wav|dir> [--force] | <in> --check   -> Kontakt NCW samples as PCM WAV (lib/ncw.w)
+#   studio flaccheck <in.flac|dir> [--wav <dir>] [--list f] [--out f] [--shard k/n]   -> decode FLAC, check MD5 / WAV samples (lib/flac.w)
 #
 # Build: bin/tungsten -o apps/studio/bin/studio apps/studio/studio.w (under the heavy lock).
 
@@ -26,6 +27,7 @@ use lib/mixplain
 use lib/mux
 use lib/fcpxml
 use lib/ncw
+use lib/flac
 
 -> opt(args, name, default)
   i = 0
@@ -315,7 +317,7 @@ use lib/ncw
 
 -> main(args)
   if args.size == 0
-    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|share|raw|gc|gradecheck|ncw2wav|selftest ..."
+    << "usage: studio resolve|diff|frame|render|worker|mix|mux|verify|fcpxml|share|raw|gc|gradecheck|ncw2wav|flaccheck|selftest ..."
     return 2
   c = args[0]
   return cmd_resolve(args) if c == "resolve"
@@ -333,6 +335,7 @@ use lib/ncw
   return cmd_gc(args) if c == "gc"
   return cmd_gradecheck(args) if c == "gradecheck"
   return ncw2wav_cli(args) if c == "ncw2wav"
+  return flaccheck_cli(args) if c == "flaccheck"
   << "unknown command " + c
   2
 

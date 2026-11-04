@@ -1083,6 +1083,10 @@ if target[:kind] == "checkout"
   << DIM + "tungsten build: " + target[:dir] + " is a Tungsten checkout: building it with its own bin/tungsten" + RESET
   exit(sh("cd " + shq(target[:dir]) + " && " + delegated))
 
+# a project's Bitfile can name the Tungsten main it needs (tungsten_main): checked before any work
+if target[:kind] == "bit" && target[:dir] != ROOT
+  check_tungsten_main(target[:dir])
+
 << BOLD + "==> Runtime: compiling C sources" + RESET
 t_runtime_start = clock_ms()
 
@@ -1733,8 +1737,6 @@ bit_root_found = target[:kind] == "bit" ? target[:dir] : find_bit_root(CWD)
 bit_only = bit_root_found != nil && bit_root_found != ROOT
 if install_requested && bit_only
   die("tungsten build --install must be run from the Tungsten repository root")
-if bit_only
-  check_tungsten_main(bit_root_found)
 skip_bits = skip_bits_requested || (!bit_only && (!release_mode || stage0_only || stage1_only || stage2_only))
 host_native_cpu = host_cpu_name == "native" || (cpu_name == nil && host_cpu_name == configured_cpu())
 installable_build = !bit_only && release_mode && !debug_enabled && host_native_cpu && target_triple == "" && !portable_mode && !stage0_only && !stage1_only && !stage2_only && !skip_bits

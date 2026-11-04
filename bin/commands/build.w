@@ -1083,6 +1083,10 @@ if target[:kind] == "checkout"
   << DIM + "tungsten build: " + target[:dir] + " is a Tungsten checkout: building it with its own bin/tungsten" + RESET
   exit(sh("cd " + shq(target[:dir]) + " && " + delegated))
 
+# a project's Bitfile can name the Tungsten main it needs (tungsten_main): checked before any work
+if target[:kind] == "bit" && target[:dir] != ROOT
+  check_tungsten_main(target[:dir])
+
 << BOLD + "==> Runtime: compiling C sources" + RESET
 t_runtime_start = clock_ms()
 
@@ -1647,6 +1651,86 @@ if bootstrap_compiler_clang_opt == ""
   if !explicit_release && !explicit_debug && opt_level != ""
     result = result + " -O" + opt_level
   result
+
+# ── the Tungsten a project needs (2026-11-04) ─────────────────
+# A Bitfile can name the oldest Tungsten main it builds correctly with:
+#     tungsten_main "<commit>"                          the runtime/ and core/ this build compiles against (ROOT) must contain it
+#     tungsten_main "<commit>", compiler: "<commit>"    and the compiler must have been built from a tree that contains that one
+#                                                       (its build record, else its file time: built before the commit, it lacks it)
+# A toolchain older than that stops the build before anything is replaced, saying what to run instead (an app built against a
+# runtime without the application-menu fix ran with no Quit and gave no sign of it).
+-> bitfile_tungsten_main(bit_root)
+  text = read_file(bit_root + "/Bitfile")
+  if text == nil
+    return nil
+  lines = text.split("\n")
+  i = 0
+  while i < lines.size
+    line = strip_bitfile_comment(lines[i]).strip
+    i = i + 1
+    if line.starts_with?("tungsten_main ") || line.starts_with?("tungsten_main\t")
+      q = extract_quoted(line)
+      if q.size == 0 || q[0] == ""
+        die("Invalid tungsten_main declaration in " + bit_root + "/Bitfile (tungsten_main \"<commit>\", compiler: \"<commit>\" optional)")
+      c = bit_option_value(line, "compiler")
+      return {main: q[0], compiler: c == nil ? "" : c}
+  nil
+
+-> root_git(args)
+  capture("git -C " + shq(ROOT) + " " + args + " 2>/dev/null").strip
+
+-> root_git_ok(args)
+  sh_ok("git -C " + shq(ROOT) + " " + args + " >/dev/null 2>&1")
+
+# "<short> <date> <subject>" of a commit in ROOT
+-> root_commit_label(c)
+  root_git("log -1 --format=" + shq("%h (%cd, %s)") + " --date=format:" + shq("%Y-%m-%d %H:%M") + " " + shq(c + "^{commit}"))
+
+-> check_tungsten_main(bit_root)
+  need = bitfile_tungsten_main(bit_root)
+  if need == nil
+    return true
+  name = basename_of(bit_root)
+  if !root_git_ok("rev-parse --git-dir")
+    << "    " + DIM + "note" + RESET + "    " + name + " needs Tungsten main " + need[:main] + "; " + ROOT + " is not a git checkout, so this cannot be checked"
+    return true
+  wants = [need[:main]]
+  if need[:compiler] != ""
+    wants.push(need[:compiler])
+  wi = 0
+  while wi < wants.size
+    if !root_git_ok("cat-file -e " + shq(wants[wi] + "^{commit}"))
+      eputs(RED + "tungsten build: " + name + " needs Tungsten main at or after " + wants[wi] + ", a commit " + ROOT + " does not have; nothing was built" + RESET)
+      eputs("  update that checkout to main (git -C " + ROOT + " merge --ff-only main), or build with a Tungsten worktree at main: <worktree>/bin/tungsten build")
+      exit(1)
+    wi = wi + 1
+  if !root_git_ok("merge-base --is-ancestor " + shq(need[:main]) + " HEAD")
+    eputs(RED + "tungsten build: " + name + " needs Tungsten main at or after " + root_commit_label(need[:main]) + "; the runtime and core in " + ROOT + " are at " + root_commit_label("HEAD") + "; nothing was built" + RESET)
+    eputs("  update that checkout to main (git -C " + ROOT + " merge --ff-only main), or build with a Tungsten worktree at main: <worktree>/bin/tungsten build")
+    exit(1)
+  said = "Tungsten " + root_git("rev-parse --short HEAD") + " has " + need[:main]
+  if need[:compiler] != ""
+    rec = ""
+    prof = read_file(BUILD_PROFILE_PATH)
+    if prof != nil && profile_field(prof, "compiler_sha256") == file_sha(COMPILER_BIN)
+      rec = profile_field(prof, "commit")
+    ok = false
+    how = ""
+    if rec != ""
+      ok = root_git_ok("merge-base --is-ancestor " + shq(need[:compiler]) + " " + shq(rec))
+      how = "built from " + root_commit_label(rec)
+    else
+      ct = root_git("log -1 --format=%ct " + shq(need[:compiler] + "^{commit}")).to_i
+      mt = file_mtime_ns(COMPILER_BIN) / 1000000000
+      ok = mt >= ct
+      how = "built " + capture("date -r " + mt.to_s + " " + shq("+%Y-%m-%d %H:%M")).strip
+    if !ok
+      eputs(RED + "tungsten build: " + name + " needs a compiler built at or after " + root_commit_label(need[:compiler]) + "; " + COMPILER_BIN + " was " + how + "; nothing was built" + RESET)
+      eputs("  rebuild that compiler: cd " + ROOT + " && bin/tungsten build")
+      exit(1)
+    said = said + ", its compiler " + need[:compiler]
+  << "    " + GREEN + "ok" + RESET + "      " + said
+  true
 
 CWD = capture("pwd -P").strip
 bit_root_found = target[:kind] == "bit" ? target[:dir] : find_bit_root(CWD)
@@ -2771,6 +2855,10 @@ t6 = clock_ms()
 if !bit_only && !stage0_only && !stage1_only && executable?(COMPILER_BIN)
   is_installable = installable_build && stage_verified && bits_failed == 0
   profile_text = "tungsten-compiler-build-v1\ncompiler_sha256=" + file_sha(COMPILER_BIN) + "\ninstallable=" + (is_installable ? "1" : "0") + "\nverified=" + (stage_verified ? "1" : "0") + "\nrelease=" + (release_mode ? "1" : "0") + "\ncpu=" + host_cpu_name + "\ndebug=" + (debug_enabled ? "1" : "0") + "\npgo=" + (pgo_build ? "1" : "0") + "\n"
+  # the commit the compiler was built from (projects' `tungsten_main ..., compiler:` checks read it)
+  built_from = root_git("rev-parse HEAD")
+  if built_from != ""
+    profile_text = profile_text + "commit=" + built_from + "\n"
   atomic_write(profile_text, BUILD_PROFILE_PATH)
 
 if install_requested

@@ -104,7 +104,13 @@ Settings… (⌘, — a `GFX_EV_MENU` with id `GFX_MENU_SETTINGS`), Services,
 Hide (⌘H), Hide Others (⌥⌘H), Show All and Quit (⌘Q, `terminate:`: a
 `GFX_KEEP_OPEN` program gets it as `GFX_EV_CLOSE` with `:id` 1 to confirm
 — from the Dock and at log out too); Window: Minimize (⌘M), Zoom, Bring All
-to Front; Help: <App> Help (`GFX_MENU_HELP`).
+to Front; Help: <App> Help (`GFX_MENU_HELP`). The bar is made once and
+replaces whatever main menu AppKit already holds: on macOS 27
+`finishLaunching` gives a regular (visible) app without a nib a placeholder,
+an application item with an empty menu (until 2026-11-04 the runtime took that
+for its own bar, so a launched app had no Quit and no Window or Help menus;
+hidden-window runs are accessory apps and never get the placeholder, so the
+spec below cannot see it: check a launched app's menu bar for real).
 
 A menu key is one character or a name: `up`, `down`, `left`, `right`,
 `return`, `tab`, `space`, `delete`, `escape`, `home`, `end`, `pageup`,

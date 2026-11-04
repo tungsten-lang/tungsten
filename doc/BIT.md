@@ -108,6 +108,22 @@ TUNGSTEN BUILD
     iconutil) and PkgInfo, and is signed ad hoc. The system frameworks the
     program links (AppKit, Metal, QuartzCore, CoreGraphics) need no copying.
 
+    A project can name the oldest Tungsten main it builds correctly with, so
+    a stale toolchain stops the build (before anything is replaced) instead
+    of producing an app that silently lacks what it needs:
+
+        tungsten_main "1a2b3c4d5"                      # the runtime/ and core/ built against must contain it
+        tungsten_main "1a2b3c4d5", compiler: "6e7f8a9b0"   # and the compiler must be built from a tree with that one
+
+    The checkout the build compiles against (the CLI's own) must have the
+    commit in its history; `compiler:` also checks bin/tungsten-compiler, by
+    the commit in its build record (build/cache/compiler-build.profile,
+    written by the self-host build since 2026-11-04) or, without one, by its
+    file time (a compiler built before the commit cannot contain it). The
+    message says what to run: update that checkout to main, or rebuild its
+    compiler (`cd <checkout> && bin/tungsten build`). A checkout that is not
+    a git repository cannot be checked, and the build says so.
+
 PROJECT STRUCTURE
 
     bit new pg

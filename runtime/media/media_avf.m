@@ -3831,3 +3831,110 @@ WValue w_media_sync_scan(WValue pathv, WValue maxv, WValue unusedv) {
         return out;
     }
 }
+
+/* ======================================================================
+   Audio out: a minimal player (AVAudioPlayer) for interactive playback
+   ======================================================================
+ *
+ * core/audio: open a sound file (WAV, AIFF, CAF, M4A ...), play it from a
+ * time, pause, stop, read the current time, set the volume. Playback runs on
+ * AVAudioPlayer's own threads, so a program needs no run loop for it; the
+ * time read back is the player's clock (where in the file the output is),
+ * which is what a playhead should follow. Handles are registry handles of
+ * kind W_MEDIA_KIND_PLAYER; a closed handle raises, close is idempotent. */
+
+typedef struct APlayer {
+    AVAudioPlayer *p;   /* retained */
+} APlayer;
+
+/* a number argument: a float, an int (boxed or a raw literal), a decimal or a rational */
+static double a_num(WValue v) {
+    if (w_is_double(v) || w_is_int(v) || w_is_bigint(v) || (v & W_TAG_MASK) == W_TAG_DECIMAL || w_is_rational(v))
+        return w_media_num(v, 0, "audio");
+    return (double)w_as_int(v);
+}
+
+static APlayer *a_player(WValue h, const char *what) {
+    return (APlayer *)w_media_handle_get(h, W_MEDIA_KIND_PLAYER, what);
+}
+
+WValue w_media_audio_open(WValue path) {
+    @autoreleasepool {
+        char s[4096];
+        if (!w_media_str(path, s, sizeof s) || !s[0]) w_media_raise("audio_open: path must be a string");
+        NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:s]];
+        NSError *err = nil;
+        AVAudioPlayer *p = [[AVAudioPlayer alloc] initWithContentsOfURL:url error:&err];
+        if (!p) {
+            char buf[512];
+            snprintf(buf, sizeof buf, "audio_open: %s: %s", s,
+                     err ? [[err localizedDescription] UTF8String] : "cannot open");
+            w_raise(w_string(buf));
+            return W_NIL;
+        }
+        [p prepareToPlay];
+        APlayer *a = calloc(1, sizeof *a);
+        a->p = p;
+        return w_int(w_media_handle_new(a, W_MEDIA_KIND_PLAYER));
+    }
+}
+
+/* play from t seconds (t < 0: from where it is) */
+WValue w_media_audio_play(WValue h, WValue t) {
+    APlayer *a = a_player(h, "audio_play");
+    double at = a_num(t);
+    if (at >= 0) a->p.currentTime = at;
+    return [a->p play] ? W_TRUE : W_FALSE;
+}
+
+WValue w_media_audio_pause(WValue h) {
+    APlayer *a = a_player(h, "audio_pause");
+    [a->p pause];
+    return W_TRUE;
+}
+
+/* stop and rewind to the start */
+WValue w_media_audio_stop(WValue h) {
+    APlayer *a = a_player(h, "audio_stop");
+    [a->p stop];
+    a->p.currentTime = 0;
+    [a->p prepareToPlay];
+    return W_TRUE;
+}
+
+WValue w_media_audio_time(WValue h) {
+    APlayer *a = a_player(h, "audio_time");
+    return w_float(a->p.currentTime);
+}
+
+/* volume 0 … 1 (linear gain on the player's output) */
+WValue w_media_audio_volume(WValue h, WValue v) {
+    APlayer *a = a_player(h, "audio_volume");
+    double g = a_num(v);
+    if (g < 0) g = 0;
+    if (g > 1) g = 1;
+    a->p.volume = (float)g;
+    return W_TRUE;
+}
+
+/* [duration seconds, playing 0/1, sample rate, channels] */
+WValue w_media_audio_info(WValue h) {
+    APlayer *a = a_player(h, "audio_info");
+    NSDictionary *st = a->p.settings;
+    WValue out = w_array_new_empty();
+    out = w_array_push(out, w_float(a->p.duration));
+    out = w_array_push(out, w_int(a->p.playing ? 1 : 0));
+    out = w_array_push(out, w_float([st[AVSampleRateKey] doubleValue]));
+    out = w_array_push(out, w_int((int64_t)a->p.numberOfChannels));
+    return out;
+}
+
+WValue w_media_audio_close(WValue h) {
+    APlayer *a = m_avf_peek(h, W_MEDIA_KIND_PLAYER);
+    if (!a) return W_FALSE;
+    w_media_handle_drop(h, W_MEDIA_KIND_PLAYER);
+    [a->p stop];
+    [a->p release];
+    free(a);
+    return W_TRUE;
+}

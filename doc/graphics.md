@@ -87,12 +87,23 @@ event, and a full queue (1,024 events) drops its oldest.
 | `gfx_next_event(win)`, `gfx_events(win)` | the oldest event (nil when none), or all of them |
 | `gfx_pixel_width/height(win)`, `gfx_point_width/height(win)`, `gfx_scale(win)` | the drawable, the content, the scale between them |
 | `gfx_set_title`, `gfx_set_size(win, w, h)`, `gfx_set_cursor(win, GFX_CURSOR_*)`, `gfx_close` | the window |
-| `gfx_menu_add(win, menu, title, key, mods, id)`, `gfx_menu_separator`, `gfx_menu_set(win, id, enabled, checked)` | the menu bar; an app menu with Hide and Quit comes first |
+| `gfx_menu_add(win, menu, title, key, mods, id)`, `gfx_menu_separator`, `gfx_menu_set(win, id, enabled, checked)` | the menu bar: the program's menus between the standard application menu and Window/Help; `menu` may be a path (`"File/Open Recent"`) for a submenu |
+| `gfx_menu_clear(win, menu)`, `gfx_menu_items(win, menu)` | empty a menu or submenu to refill it; the titles of its items (`""` the bar's menus) |
 | `gfx_open_panel(win, title, types, dir)`, `gfx_save_panel(win, title, name, types, dir)` | modal panels: a path, or nil when cancelled |
 | `gfx_panel_answer(win, path)` | the next panel returns `path` without showing (specs, scripts) |
 | `gfx_alert(win, message, info, "Save,Don't Save,Cancel")`, `gfx_alert_answer(win, i)` | a modal alert: the chosen button's index (-1 on a hidden window); a scripted answer |
 | `gfx_post_event(win, kind, x, y, a, b, mods, text)` | synthesized input through the view's handlers (specs, scripts) |
 | `gfx_present(win, buf, w, h)`, `gfx_present_wait(…)` | blit a buffer to the next drawable (clipped to it) |
+
+The first item a program adds also makes the standard macOS menus around
+its own, wired to AppKit's roles: the application menu, named by the
+bundle's `CFBundleName` (else the process): About (the standard About panel
+with `CFBundleShortVersionString` and the build, `CFBundleVersion`),
+Settings… (⌘, — a `GFX_EV_MENU` with id `GFX_MENU_SETTINGS`), Services,
+Hide (⌘H), Hide Others (⌥⌘H), Show All and Quit (⌘Q, `terminate:`: a
+`GFX_KEEP_OPEN` program gets it as `GFX_EV_CLOSE` with `:id` 1 to confirm
+— from the Dock and at log out too); Window: Minimize (⌘M), Zoom, Bring All
+to Front; Help: <App> Help (`GFX_MENU_HELP`).
 
 A menu key is one character or a name: `up`, `down`, `left`, `right`,
 `return`, `tab`, `space`, `delete`, `escape`, `home`, `end`, `pageup`,

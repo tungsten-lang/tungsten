@@ -165,6 +165,38 @@ while k < es.size
   k += 1
 check("Command-Z and Command-Shift-Z reach their items", ids.size == 2 && ids[0] == 401 && ids[1] == 402)
 
+# ---- the standard menus around the program's own ----
+bar = gfx_menu_items(win, "")
+check("the menu bar: the application menu first, the program's menus, then Window and Help (" + bar.join(",") + ")", bar.size >= 6 && bar[1] == "File" && bar[bar.size - 2] == "Window" && bar[bar.size - 1] == "Help")
+am = gfx_menu_items(win, bar[0])
+check("the application menu: About, Settings, Services, Hide, Hide Others, Show All, Quit (" + am.join(",") + ")", am[0].slice(0, 6) == "About " && am.include?("Settings…") && am.include?("Services") && am.include?("Hide Others") && am.include?("Show All") && am[am.size - 1].slice(0, 5) == "Quit ")
+wm = gfx_menu_items(win, "Window")
+check("the Window menu", wm[0] == "Minimize" && wm.include?("Zoom") && wm.include?("Bring All to Front"))
+gfx_post_event(win, GFX_EV_MENU, 0, 0, GFX_MENU_SETTINGS, 0, 0, "")
+e = gfx_next_event(win)
+check("Settings… posts its id", e != nil && e[:kind] == GFX_EV_MENU && e[:id] == GFX_MENU_SETTINGS)
+gfx_post_event(win, GFX_EV_KEY_DOWN, 0, 0, 43, 0, GFX_MOD_CMD, ",")
+es = gfx_events(win)
+got = false
+k = 0
+while k < es.size
+  got = true if es[k][:kind] == GFX_EV_MENU && es[k][:id] == GFX_MENU_SETTINGS
+  k += 1
+check("Command-comma reaches Settings…", got)
+gfx_post_event(win, GFX_EV_MENU, 0, 0, GFX_MENU_HELP, 0, 0, "")
+e = gfx_next_event(win)
+check("Help posts its id", e != nil && e[:id] == GFX_MENU_HELP)
+gfx_menu_add(win, "File/Open Recent", "a.arr", "", 0, 501)
+gfx_menu_add(win, "File/Open Recent", "b.arr", "", 0, 502)
+check("a submenu by path", gfx_menu_items(win, "File/Open Recent").join(",") == "a.arr,b.arr" && gfx_menu_items(win, "File").include?("Open Recent"))
+gfx_post_event(win, GFX_EV_MENU, 0, 0, 502, 0, 0, "")
+e = gfx_next_event(win)
+check("a submenu item fires", e != nil && e[:id] == 502)
+gfx_menu_clear(win, "File/Open Recent")
+gfx_menu_add(win, "File/Open Recent", "c.arr", "", 0, 503)
+check("menu_clear empties a submenu for refilling", gfx_menu_items(win, "File/Open Recent").join(",") == "c.arr")
+check("a new top-level menu still goes before Window", gfx_menu_items(win, "")[gfx_menu_items(win, "").size - 2] == "Window")
+
 # ---- panels (scripted) ----
 gfx_panel_answer(win, "/tmp/piece.arr")
 check("scripted open panel", gfx_open_panel(win, "Open", "arr,txt", "") == "/tmp/piece.arr")

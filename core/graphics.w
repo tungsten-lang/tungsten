@@ -193,16 +193,42 @@ GFX_CURSOR_RESIZE_UD   = 7
   ccall("w_gfx_close", window)
 
 # Add an item to the top-level menu `menu` (made on first use, left to
-# right in the order first used; an app menu with Hide and Quit comes
-# first). `key` is one character or a name (up, down, left, right, return,
-# tab, space, delete, escape, home, end, pageup, pagedown, f1-f12), "" for
-# none; `mods` GFX_MOD_* bits (0 = Command, -1 = the plain key). Choosing it
-# posts GFX_EV_MENU with `id`.
+# right in the order first used, between the application menu and Window),
+# or to a submenu by path ("File/Open Recent": made on first use at the end
+# of its parent). `key` is one character or a name (up, down, left, right,
+# return, tab, space, delete, escape, home, end, pageup, pagedown, f1-f12),
+# "" for none; `mods` GFX_MOD_* bits (0 = Command, -1 = the plain key).
+# Choosing it posts GFX_EV_MENU with `id`.
+#
+# The first item a program adds also makes the standard menu bar around it,
+# wired to AppKit's own roles: the application menu (named by the bundle's
+# CFBundleName, else the process): About <App> (the standard About panel:
+# CFBundleShortVersionString and the build, CFBundleVersion), Settings…
+# (Command-comma: GFX_EV_MENU with id GFX_MENU_SETTINGS), Services, Hide
+# <App> (Command-H), Hide Others (Option-Command-H), Show All, Quit <App>
+# (Command-Q: terminate:, which a GFX_KEEP_OPEN program receives as
+# GFX_EV_CLOSE with :id 1 to confirm, also from the Dock and at log out);
+# Window: Minimize (Command-M), Zoom, Bring All to Front; Help: <App> Help
+# (Command-?: GFX_EV_MENU with id GFX_MENU_HELP).
 -> gfx_menu_add(window, menu, title, key, mods, id)
   ccall("w_gfx_menu_add", window, menu, title, key, mods, id)
 
 -> gfx_menu_separator(window, menu)
   ccall("w_gfx_menu_add", window, menu, "-", "", 0, 0)
+
+# Remove every item of a menu or submenu (by name or path), to refill it
+# (an Open Recent list); the menu stays in place.
+-> gfx_menu_clear(window, menu)
+  ccall("w_gfx_menu_clear", window, menu)
+
+# The titles of a menu's items ("" a separator); with menu "" the menu bar's
+# menus, left to right.
+-> gfx_menu_items(window, menu)
+  ccall("w_gfx_menu_items", window, menu)
+
+# The menu event ids of the runtime's standard items.
+GFX_MENU_SETTINGS = -2   # <App> > Settings… (Command-comma)
+GFX_MENU_HELP     = -3   # Help > <App> Help
 
 # Enable/disable (1/0) and check/uncheck (1/0) the item `id`; -1 leaves
 # either as it is. False when no item has that id.

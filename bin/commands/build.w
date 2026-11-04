@@ -2464,11 +2464,58 @@ runtime_key = Digest.sha256(runtime_dep_shas.join(":") + "\n" + join_tab(cc_flag
 bit_cache_dir = BUILD_CACHE_DIR + "/bits"
 make_dirs(bit_cache_dir)
 
--> bit_build_sha(bit_path, runtime_key_arg, link_flags_arg, link_libs_arg, bit_clang_opt_arg, compiler_flags_arg)
+# The .w files an entry point reaches through relative or absolute `use` lines that lie outside the bit's own tree (a shared
+# engine next door: `use ../../engine/notation`), transitively: their contents go into the stamp, so editing one rebuilds the
+# executable (the bit's tree is hashed whole already; core/ and bits/ modules come with the compiler and the runtime key).
+-> bit_external_uses(bit_path, entry)
+  out = []
+  seen = {}
+  todo = [entry]
+  root = bit_path + "/"
+  while todo.size > 0
+    f = todo.pop
+    if seen.has_key?(f)
+      next
+    seen[f] = 1
+    text = read_file(f)
+    if text == nil
+      next
+    lines = text.split("\n")
+    li = 0
+    while li < lines.size
+      l = lines[li].strip
+      li = li + 1
+      if l.slice(0, 4) != "use "
+        next
+      t = l.slice(4, l.size - 4).strip
+      sp = t.index(" ")
+      if sp != nil
+        t = t.slice(0, sp)
+      if t.slice(0, 1) != "." && t.slice(0, 1) != "/"
+        next
+      if t.slice(t.size - 2, 2) != ".w"
+        t = t + ".w"
+      if t.slice(0, 1) != "/"
+        t = dirname_of(f) + "/" + t
+      if !regular_file?(t)
+        next
+      t = capture("cd " + shq(dirname_of(t)) + " && pwd -P").strip + "/" + basename_of(t)
+      if t.slice(0, root.size) != root && !out.include?(t)
+        out.push(t)
+      todo.push(t)
+  out
+
+-> bit_build_sha(bit_path, runtime_key_arg, link_flags_arg, link_libs_arg, bit_clang_opt_arg, compiler_flags_arg, entry)
   buf = StringBuffer(1024)
   single = []
   single.push(bit_path)
   buf << tree_sha(single)
+  ext = bit_external_uses(bit_path, entry)
+  xi = 0
+  while xi < ext.size
+    buf << ext[xi]
+    buf << file_sha(ext[xi])
+    xi = xi + 1
   buf << "bit-entrypoints-v4-build-flags"
   buf << file_sha(bit_path + "/Bitfile")
   includes = bitfile_includes(bit_path)
@@ -2546,9 +2593,13 @@ make_dirs(bit_cache_dir)
       version = bit_option_value(line, "version")
       if version == nil || version == ""
         version = "0.1"
+      # CFBundleVersion (the About panel's build): the Bitfile's build:, else the time of this build
+      build = bit_option_value(line, "build")
+      if build == nil || build == ""
+        build = capture("date +%Y%m%d.%H%M").strip
       if !bit_relative_path?(exe) || (icon != "" && !bit_relative_path?(icon))
         die("App executable and icon must be package-relative paths in " + bit_root + "/Bitfile")
-      apps.push({name: name, exe: exe, id: id, icon: icon, documents: docs, version: version})
+      apps.push({name: name, exe: exe, id: id, icon: icon, documents: docs, version: version, build: build})
   apps
 
 -> plist_escape(s)
@@ -2560,7 +2611,7 @@ make_dirs(bit_cache_dir)
   b << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
   b << "<plist version=\"1.0\">\n<dict>\n"
   keys = ["CFBundleName", "CFBundleDisplayName", "CFBundleIdentifier", "CFBundleExecutable", "CFBundlePackageType", "CFBundleShortVersionString", "CFBundleVersion", "CFBundleInfoDictionaryVersion", "LSMinimumSystemVersion"]
-  vals = [app[:name], app[:name], app[:id], basename_of(app[:exe]), "APPL", app[:version], app[:version], "6.0", "13.0"]
+  vals = [app[:name], app[:name], app[:id], basename_of(app[:exe]), "APPL", app[:version], app[:build], "6.0", "13.0"]
   i = 0
   while i < keys.size
     b << "  <key>" + keys[i] + "</key><string>" + plist_escape(vals[i]) + "</string>\n"
@@ -2659,7 +2710,7 @@ elsif bit_only
     entry_flags = bit_native_flags(entry_flags, entries[ei][:native], native_mode || cpu_name != nil || target_triple != "" || portable_mode)
     entry_clang_opt = bit_profile_clang_opt(entries[ei][:profile], bit_clang_opt, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested, fast_mode)
     entry_clang_opt = bit_cflags_opt(entry_clang_opt, entries[ei][:cflags], entries[ei][:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested)
-    bit_sha = bit_build_sha(bit_root_found, runtime_key, link_flags, link_libs, entry_clang_opt, entry_flags)
+    bit_sha = bit_build_sha(bit_root_found, runtime_key, link_flags, link_libs, entry_clang_opt, entry_flags, entry)
     ei = ei + 1
     make_dirs(dirname_of(out_bin))
     stamp = bit_cache_dir + "/" + Digest.sha256(out_bin).slice(0, 16) + ".sha"
@@ -2697,7 +2748,7 @@ else
         entry_flags = bit_native_flags(entry_flags, entries[ei][:native], native_mode || cpu_name != nil || target_triple != "" || portable_mode)
         entry_clang_opt = bit_profile_clang_opt(entries[ei][:profile], bit_clang_opt, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested, fast_mode)
         entry_clang_opt = bit_cflags_opt(entry_clang_opt, entries[ei][:cflags], entries[ei][:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested)
-        bit_sha = bit_build_sha(bit_path, runtime_key, link_flags, link_libs, entry_clang_opt, entry_flags)
+        bit_sha = bit_build_sha(bit_path, runtime_key, link_flags, link_libs, entry_clang_opt, entry_flags, entry)
         ei = ei + 1
         if !regular_file?(entry)
           next

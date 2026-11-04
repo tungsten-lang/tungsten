@@ -80,6 +80,9 @@ enum { GFX_MOD_SHIFT = 1, GFX_MOD_CTRL = 2, GFX_MOD_ALT = 4, GFX_MOD_CMD = 8,
 
 enum { GFX_HIDPI = 1, GFX_HIDDEN = 2, GFX_BGRA = 4, GFX_KEEP_OPEN = 8 };
 
+/* the menu event ids of the standard items the runtime makes (Settings..., <App> Help) */
+enum { GFX_MENU_SETTINGS = -2, GFX_MENU_HELP = -3 };
+
 #define GFX_QUEUE_CAP 1024
 #define GFX_TEXT_CAP 64
 
@@ -882,26 +885,130 @@ WValue w_gfx_close(WValue window_v) {
 
 static TungstenMenuTarget *gfx_menu_target = nil;
 
+/* The application delegate: Quit (the menu's terminate:, the Dock, log out)
+ * on a program that keeps its window open (GFX_KEEP_OPEN) is handed to the
+ * program as a GFX_EV_CLOSE with id 1, which decides (a save-changes alert)
+ * and closes; any other program quits at once. */
+@interface TungstenAppDelegate : NSObject <NSApplicationDelegate>
+@end
+
+@implementation TungstenAppDelegate
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
+    (void)app;
+    if (gfx_menu_target && gfx_menu_target.input) {
+        [gfx_menu_target quit:nil];
+        return NSTerminateCancel;
+    }
+    return NSTerminateNow;
+}
+@end
+
+static TungstenAppDelegate *gfx_app_delegate = nil;
+
+/* The application's name: the bundle's CFBundleName, else the process name. */
+static NSString *gfx_app_name(void) {
+    NSString *n = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+    if ([n isKindOfClass:[NSString class]] && [n length] > 0) return n;
+    return [[NSProcessInfo processInfo] processName];
+}
+
+static NSMenuItem *gfx_add_role(NSMenu *m, NSString *title, SEL action, NSString *key, NSEventModifierFlags f) {
+    NSMenuItem *it = [m addItemWithTitle:title action:action keyEquivalent:key];
+    if ([key length] > 0) [it setKeyEquivalentModifierMask:f];
+    return it;
+}
+
+/* The standard menu bar, made with the first menu item a program adds:
+ *   <App>   About <App> (the standard About panel: CFBundleShortVersionString and the build, CFBundleVersion), Settings...
+ *           (Command-comma; a GFX_EV_MENU with id GFX_MENU_SETTINGS), Services, Hide <App> (Command-H), Hide Others
+ *           (Option-Command-H), Show All, Quit <App> (Command-Q, terminate: through the delegate above)
+ *   Window  Minimize (Command-M), Zoom, Bring All to Front (NSApp's windows menu)
+ *   Help    <App> Help (a GFX_EV_MENU with id GFX_MENU_HELP; NSApp's help menu)
+ * The program's own menus go between the application menu and Window, in the order it names them. */
 static void gfx_menu_bar(WGfxWindow *gw) {
     if (!gfx_menu_target) {
         gfx_menu_target = [[TungstenMenuTarget alloc] init];
     }
     gfx_menu_target.input = &gw->input;
+    if (!gfx_app_delegate && [NSApp delegate] == nil) {
+        gfx_app_delegate = [[TungstenAppDelegate alloc] init];
+        [NSApp setDelegate:gfx_app_delegate];
+    }
     if ([NSApp mainMenu] && [[NSApp mainMenu] numberOfItems] > 0) return;
+    NSEventModifierFlags cmd = NSEventModifierFlagCommand;
     NSMenu *bar = [[[NSMenu alloc] initWithTitle:@""] autorelease];
-    NSString *name = [[NSProcessInfo processInfo] processName];
+    NSString *name = gfx_app_name();
     NSMenuItem *appItem = [[[NSMenuItem alloc] initWithTitle:name action:nil keyEquivalent:@""] autorelease];
     NSMenu *appMenu = [[[NSMenu alloc] initWithTitle:name] autorelease];
-    [appMenu addItemWithTitle:[@"Hide " stringByAppendingString:name] action:@selector(hide:) keyEquivalent:@"h"];
-    NSMenuItem *others = [appMenu addItemWithTitle:@"Hide Others" action:@selector(hideOtherApplications:) keyEquivalent:@"h"];
-    [others setKeyEquivalentModifierMask:(NSEventModifierFlagCommand | NSEventModifierFlagOption)];
-    [appMenu addItemWithTitle:@"Show All" action:@selector(unhideAllApplications:) keyEquivalent:@""];
+    gfx_add_role(appMenu, [@"About " stringByAppendingString:name], @selector(orderFrontStandardAboutPanel:), @"", 0);
     [appMenu addItem:[NSMenuItem separatorItem]];
-    NSMenuItem *quit = [appMenu addItemWithTitle:[@"Quit " stringByAppendingString:name] action:@selector(quit:) keyEquivalent:@"q"];
-    [quit setTarget:gfx_menu_target];
+    NSMenuItem *settings = gfx_add_role(appMenu, @"Settings\u2026", @selector(fire:), @",", cmd);
+    [settings setTarget:gfx_menu_target];
+    [settings setTag:GFX_MENU_SETTINGS];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    NSMenuItem *svc = [appMenu addItemWithTitle:@"Services" action:nil keyEquivalent:@""];
+    NSMenu *svcMenu = [[[NSMenu alloc] initWithTitle:@"Services"] autorelease];
+    [svc setSubmenu:svcMenu];
+    [NSApp setServicesMenu:svcMenu];
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    gfx_add_role(appMenu, [@"Hide " stringByAppendingString:name], @selector(hide:), @"h", cmd);
+    gfx_add_role(appMenu, @"Hide Others", @selector(hideOtherApplications:), @"h", cmd | NSEventModifierFlagOption);
+    gfx_add_role(appMenu, @"Show All", @selector(unhideAllApplications:), @"", 0);
+    [appMenu addItem:[NSMenuItem separatorItem]];
+    gfx_add_role(appMenu, [@"Quit " stringByAppendingString:name], @selector(terminate:), @"q", cmd);
     [appItem setSubmenu:appMenu];
     [bar addItem:appItem];
+
+    NSMenuItem *winItem = [[[NSMenuItem alloc] initWithTitle:@"Window" action:nil keyEquivalent:@""] autorelease];
+    NSMenu *winMenu = [[[NSMenu alloc] initWithTitle:@"Window"] autorelease];
+    gfx_add_role(winMenu, @"Minimize", @selector(performMiniaturize:), @"m", cmd);
+    gfx_add_role(winMenu, @"Zoom", @selector(performZoom:), @"", 0);
+    [winMenu addItem:[NSMenuItem separatorItem]];
+    gfx_add_role(winMenu, @"Bring All to Front", @selector(arrangeInFront:), @"", 0);
+    [winItem setSubmenu:winMenu];
+    [bar addItem:winItem];
+    [NSApp setWindowsMenu:winMenu];
+
+    NSMenuItem *helpItem = [[[NSMenuItem alloc] initWithTitle:@"Help" action:nil keyEquivalent:@""] autorelease];
+    NSMenu *helpMenu = [[[NSMenu alloc] initWithTitle:@"Help"] autorelease];
+    NSMenuItem *help = gfx_add_role(helpMenu, [name stringByAppendingString:@" Help"], @selector(fire:), @"?", cmd);
+    [help setTarget:gfx_menu_target];
+    [help setTag:GFX_MENU_HELP];
+    [helpItem setSubmenu:helpMenu];
+    [bar addItem:helpItem];
+    [NSApp setHelpMenu:helpMenu];
+
     [NSApp setMainMenu:bar];
+}
+
+/* The menu a "Top" or "Top/Sub/..." path names, made on first use: a new top-level menu goes before Window (so
+ * Window and Help stay last), a new submenu at the end of its parent. */
+static NSMenu *gfx_menu_path(NSString *path) {
+    NSArray *parts = [path componentsSeparatedByString:@"/"];
+    NSMenu *bar = [NSApp mainMenu];
+    NSMenu *cur = bar;
+    for (NSUInteger i = 0; i < [parts count]; i++) {
+        NSString *t = parts[i];
+        NSMenuItem *it = nil;
+        for (NSMenuItem *x in [cur itemArray]) {
+            if ([x submenu] && [[x title] isEqualToString:t]) { it = x; break; }
+        }
+        if (!it) {
+            it = [[[NSMenuItem alloc] initWithTitle:t action:nil keyEquivalent:@""] autorelease];
+            NSMenu *sub = [[[NSMenu alloc] initWithTitle:t] autorelease];
+            [sub setAutoenablesItems:NO];
+            [it setSubmenu:sub];
+            NSInteger at = -1;
+            if (cur == bar) {
+                NSInteger wi = [bar indexOfItemWithSubmenu:[NSApp windowsMenu]];
+                if (wi >= 0) at = wi;
+            }
+            if (at >= 0) [cur insertItem:it atIndex:at];
+            else [cur addItem:it];
+        }
+        cur = [it submenu];
+    }
+    return cur;
 }
 
 /* the key equivalent a name gives: one character, or up/down/left/right,
@@ -957,16 +1064,7 @@ WValue w_gfx_menu_add(WValue window_v, WValue menu_v, WValue title_v, WValue key
     /* Shift with a letter: AppKit matches the capital (Command-Shift-Z is "Z") */
     if (mods > 0 && (mods & GFX_MOD_SHIFT) && [key length] == 1) key = [key uppercaseString];
     NSInteger tag = (NSInteger)gfx_int(id_v);
-    NSMenu *bar = [NSApp mainMenu];
-    NSMenuItem *top = [bar itemWithTitle:mname];
-    if (!top) {
-        top = [[[NSMenuItem alloc] initWithTitle:mname action:nil keyEquivalent:@""] autorelease];
-        NSMenu *sub = [[[NSMenu alloc] initWithTitle:mname] autorelease];
-        [sub setAutoenablesItems:NO];
-        [top setSubmenu:sub];
-        [bar addItem:top];
-    }
-    NSMenu *sub = [top submenu];
+    NSMenu *sub = gfx_menu_path(mname);
     if ([title isEqualToString:@"-"]) {
         [sub addItem:[NSMenuItem separatorItem]];
         return W_NIL;
@@ -983,6 +1081,33 @@ WValue w_gfx_menu_add(WValue window_v, WValue menu_v, WValue title_v, WValue key
     }
     [sub addItem:it];
     return W_NIL;
+}
+
+/* w_gfx_menu_clear(window, menu): remove every item of the menu (or "Top/Sub" submenu) that path names, so a program can
+ * refill it (Open Recent); the menu itself stays where it is. */
+WValue w_gfx_menu_clear(WValue window_v, WValue menu_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.menu_clear");
+    gfx_require_main_thread("gfx.menu_clear");
+    gfx_menu_bar(gw);
+    NSMenu *m = gfx_menu_path(gfx_string_or(menu_v, @"Menu"));
+    [m removeAllItems];
+    return W_NIL;
+}
+
+/* w_gfx_menu_items(window, menu): the titles of a menu's items ("" for a separator), or of the menu bar's menus for ""
+ * (introspection for specs and scripted checks) */
+WValue w_gfx_menu_items(WValue window_v, WValue menu_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.menu_items");
+    gfx_require_main_thread("gfx.menu_items");
+    gfx_menu_bar(gw);
+    NSString *path = gfx_string_or(menu_v, @"");
+    NSMenu *m = [path length] == 0 ? [NSApp mainMenu] : gfx_menu_path(path);
+    WValue out = w_array_new_empty();
+    for (NSMenuItem *it in [m itemArray]) {
+        const char *t = [it isSeparatorItem] ? "" : [[it title] UTF8String];
+        out = w_array_push(out, w_string(t ? t : ""));
+    }
+    return out;
 }
 
 /* enabled / checked state of the item with that id (-1 leaves one unchanged) */

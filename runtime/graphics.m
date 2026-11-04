@@ -361,6 +361,10 @@ typedef struct WGfxWindow {
     bool    panel_scripted;
     int     alert_answer;     /* the next alert's scripted answer (w_gfx_alert_answer) */
     bool    alert_scripted;
+    bool    prompt_scripted;  /* the next prompt / choice's scripted answer (w_gfx_prompt_answer) */
+    int     prompt_button;
+    int     prompt_item;
+    char   *prompt_text;
     GfxInput input;
 } WGfxWindow;
 
@@ -1267,6 +1271,115 @@ WValue w_gfx_alert_answer(WValue window_v, WValue index_v) {
     WGfxWindow *gw = gfx_window_arg(window_v, "gfx.alert_answer");
     gw->alert_scripted = true;
     gw->alert_answer = (int)gfx_int(index_v);
+    return W_NIL;
+}
+
+/* ---- prompts: a line of text, or a choice from a list (modal) ----
+ * w_gfx_prompt(window, message, info, default, buttons): an alert with a text
+ * field holding `default`; returns [button index, the text], [-1, default] on a
+ * hidden window with no scripted answer.
+ * w_gfx_choose(window, message, info, items, buttons): an alert with a pop-up
+ * of the comma-separated `items` (a "-" item is a separator); returns [button
+ * index, item index], [-1, -1] on a hidden window with no scripted answer.
+ * w_gfx_prompt_answer(window, button, text, item): the next prompt or choice
+ * returns those without showing (specs, scripted runs). */
+static NSArray *gfx_button_list(WValue buttons_v) {
+    NSMutableArray *out = [NSMutableArray array];
+    NSString *bs = gfx_string_or(buttons_v, @"OK,Cancel");
+    for (NSString *b in [bs componentsSeparatedByString:@","]) {
+        NSString *t = [b stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if ([t length]) [out addObject:t];
+    }
+    return out;
+}
+
+static WValue gfx_pair(int64_t a, WValue b) {
+    WValue r = w_array_new_empty();
+    r = w_array_push(r, w_int(a));
+    r = w_array_push(r, b);
+    return r;
+}
+
+WValue w_gfx_prompt(WValue window_v, WValue message_v, WValue info_v, WValue default_v, WValue buttons_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.prompt");
+    gfx_require_main_thread("gfx.prompt");
+    NSString *dflt = gfx_string_or(default_v, @"");
+    if (gw->prompt_scripted) {
+        gw->prompt_scripted = false;
+        WValue t = gw->prompt_text ? w_string(gw->prompt_text) : w_string([dflt UTF8String]);
+        return gfx_pair(gw->prompt_button, t);
+    }
+    if (gw->flags & GFX_HIDDEN) return gfx_pair(-1, w_string([dflt UTF8String]));
+    NSInteger chosen = -1;
+    WValue text = W_NIL;
+    @autoreleasepool {
+        NSAlert *a = [[[NSAlert alloc] init] autorelease];
+        [a setMessageText:gfx_string_or(message_v, @"")];
+        NSString *info = gfx_string_or(info_v, @"");
+        if ([info length]) [a setInformativeText:info];
+        for (NSString *b in gfx_button_list(buttons_v)) [a addButtonWithTitle:b];
+        NSTextField *f = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 320, 24)] autorelease];
+        [f setStringValue:dflt];
+        [a setAccessoryView:f];
+        [[a window] setInitialFirstResponder:f];
+        [NSApp activateIgnoringOtherApps:YES];
+        NSModalResponse r = [a runModal];
+        chosen = (NSInteger)(r - NSAlertFirstButtonReturn);
+        const char *u = [[f stringValue] UTF8String];
+        text = w_string(u ? u : "");
+        [(NSWindow *)gw->window makeKeyAndOrderFront:nil];
+    }
+    return gfx_pair((int64_t)chosen, text);
+}
+
+WValue w_gfx_choose(WValue window_v, WValue message_v, WValue info_v, WValue items_v, WValue buttons_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.choose");
+    gfx_require_main_thread("gfx.choose");
+    if (gw->prompt_scripted) {
+        gw->prompt_scripted = false;
+        return gfx_pair(gw->prompt_button, w_int(gw->prompt_item));
+    }
+    if (gw->flags & GFX_HIDDEN) return gfx_pair(-1, w_int(-1));
+    NSInteger chosen = -1, item = -1;
+    @autoreleasepool {
+        NSAlert *a = [[[NSAlert alloc] init] autorelease];
+        [a setMessageText:gfx_string_or(message_v, @"")];
+        NSString *info = gfx_string_or(info_v, @"");
+        if ([info length]) [a setInformativeText:info];
+        for (NSString *b in gfx_button_list(buttons_v)) [a addButtonWithTitle:b];
+        NSPopUpButton *p = [[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 320, 26) pullsDown:NO] autorelease];
+        NSArray *its = [gfx_string_or(items_v, @"") componentsSeparatedByString:@","];
+        NSInteger idx = 0;
+        for (NSString *t in its) {
+            if ([t isEqualToString:@"-"]) { [[p menu] addItem:[NSMenuItem separatorItem]]; continue; }
+            [p addItemWithTitle:t];
+            [[p lastItem] setTag:idx];
+            idx++;
+        }
+        [a setAccessoryView:p];
+        [NSApp activateIgnoringOtherApps:YES];
+        NSModalResponse r = [a runModal];
+        chosen = (NSInteger)(r - NSAlertFirstButtonReturn);
+        item = [[p selectedItem] tag];
+        [(NSWindow *)gw->window makeKeyAndOrderFront:nil];
+    }
+    return gfx_pair((int64_t)chosen, w_int((int64_t)item));
+}
+
+WValue w_gfx_prompt_answer(WValue window_v, WValue button_v, WValue text_v, WValue item_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.prompt_answer");
+    gw->prompt_scripted = true;
+    gw->prompt_button = (int)gfx_int(button_v);
+    gw->prompt_item = (int)gfx_int(item_v);
+    if (gw->prompt_text) { free(gw->prompt_text); gw->prompt_text = NULL; }
+    if (w_is_string(text_v)) {
+        char buf[6];
+        const char *s = NULL; size_t len = 0;
+        w_str_data(text_v, buf, &s, &len);
+        gw->prompt_text = (char *)malloc(len + 1);
+        if (s && len) memcpy(gw->prompt_text, s, len);
+        gw->prompt_text[len] = 0;
+    }
     return W_NIL;
 }
 

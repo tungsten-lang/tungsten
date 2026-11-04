@@ -89,6 +89,7 @@ event, and a full queue (1,024 events) drops its oldest.
 | `gfx_set_title`, `gfx_set_size(win, w, h)`, `gfx_set_cursor(win, GFX_CURSOR_*)`, `gfx_close` | the window |
 | `gfx_menu_add(win, menu, title, key, mods, id)`, `gfx_menu_separator`, `gfx_menu_set(win, id, enabled, checked)` | the menu bar: the program's menus between the standard application menu and Window/Help; `menu` may be a path (`"File/Open Recent"`) for a submenu |
 | `gfx_menu_clear(win, menu)`, `gfx_menu_items(win, menu)` | empty a menu or submenu to refill it; the titles of its items (`""` the bar's menus) |
+| `gfx_prompt(win, message, info, default, buttons)`, `gfx_choose(win, message, info, items, buttons)`, `gfx_prompt_answer(win, button, text, item)` | modal: a line of text → `[button, text]`; a pop-up choice → `[button, item]`; the scripted answer for hidden windows |
 | `gfx_open_panel(win, title, types, dir)`, `gfx_save_panel(win, title, name, types, dir)` | modal panels: a path, or nil when cancelled |
 | `gfx_panel_answer(win, path)` | the next panel returns `path` without showing (specs, scripts) |
 | `gfx_alert(win, message, info, "Save,Don't Save,Cancel")`, `gfx_alert_answer(win, i)` | a modal alert: the chosen button's index (-1 on a hidden window); a scripted answer |

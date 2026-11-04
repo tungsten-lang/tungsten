@@ -11,7 +11,7 @@
 # buttons and click counts, drags, scroll deltas, typed text and modifiers,
 # key repeat state for the game-style API, resize and the backing scale, the
 # menu bar (an item chosen directly and by its Command shortcut), scripted
-# open/save panels, the close request of a GFX_KEEP_OPEN window, and a
+# open/save panels, prompts and choices, the close request of a GFX_KEEP_OPEN window, and a
 # present at the drawable's size.
 #
 # Run:
@@ -208,6 +208,19 @@ check("a hidden window never shows a panel", gfx_open_panel(win, "Open", "", "")
 gfx_alert_answer(win, 1)
 check("scripted alert", gfx_alert(win, "Save?", "", "Save,Don't Save,Cancel") == 1)
 check("a hidden window never shows an alert", gfx_alert(win, "Save?", "", "OK") == -1)
+
+# ---- prompts and choices (scripted) ----
+check("a hidden window never shows a prompt", gfx_prompt(win, "Name", "", "Fiddle", "OK,Cancel")[0] == -1 && gfx_prompt(win, "Name", "", "Fiddle", "OK,Cancel")[1] == "Fiddle")
+gfx_prompt_answer(win, 0, "Cello", -1)
+pr = gfx_prompt(win, "Name", "", "Fiddle", "OK,Cancel")
+check("scripted prompt", pr[0] == 0 && pr[1] == "Cello")
+gfx_prompt_answer(win, 1, nil, -1)
+pr = gfx_prompt(win, "Name", "", "Fiddle", "OK,Cancel")
+check("scripted prompt keeps the default without text", pr[0] == 1 && pr[1] == "Fiddle")
+check("a hidden window never shows a choice", gfx_choose(win, "Role", "", "composer,arranger,-,producer", "Add,Cancel")[0] == -1)
+gfx_prompt_answer(win, 0, nil, 2)
+ch = gfx_choose(win, "Role", "", "composer,arranger,-,producer", "Add,Cancel")
+check("scripted choice", ch[0] == 0 && ch[1] == 2)
 
 # ---- a plain-key menu item ----
 gfx_menu_add(win, "Play", "Play", "space", -1, 301)

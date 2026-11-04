@@ -257,6 +257,21 @@ GFX_MENU_HELP     = -3   # Help > <App> Help
 -> gfx_alert_answer(window, index)
   ccall("w_gfx_alert_answer", window, index)
 
+# A modal prompt for a line of text: an alert with a field holding `dflt`;
+# [button index, text] ([-1, dflt] on a hidden window with no scripted answer).
+-> gfx_prompt(window, message, info, dflt, buttons)
+  ccall("w_gfx_prompt", window, message, info, dflt, buttons)
+
+# A modal choice from `items` (a comma list, "-" a separator) in a pop-up:
+# [button index, item index] ([-1, -1] on a hidden window, unscripted).
+-> gfx_choose(window, message, info, items, buttons)
+  ccall("w_gfx_choose", window, message, info, items, buttons)
+
+# The next prompt or choice returns [button, text] / [button, item] without
+# showing (specs, scripted runs).
+-> gfx_prompt_answer(window, button, text, item)
+  ccall("w_gfx_prompt_answer", window, button, text, item)
+
 # Build a real input event and hand it to the view's handlers, as if the
 # user did it: GFX_EV_MOUSE_* (a = button, b = clicks), GFX_EV_KEY_DOWN/UP
 # (a = keyCode, text = its characters; Command shortcuts reach the menu bar),

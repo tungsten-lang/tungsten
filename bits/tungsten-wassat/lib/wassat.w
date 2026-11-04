@@ -1297,6 +1297,17 @@ use lut_congruence
         if scout_cycle_plan != nil
           scout_cycle_res = i64[scout_nv + 8]
           scout_cycle_h = wassat_cycle_start(formula, scout_cycle_plan, scout_stop, scout_cycle_res, 0)
+        scout_naked_plan = nil
+        scout_naked_res = nil
+        scout_naked_h = nil
+        if options["conflicts"] == 0 && raw_probe && env("WASSAT_NAKED_SUDOKU_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil && scout_cycle_plan == nil
+          naked_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
+          naked_cdcl = scout_lucky ? 2 : 1
+          naked_cdcl += 1 if naked_sls > 0 && wassat_sls_repair_eligible?(formula)
+          scout_naked_plan = wassat_naked_plan(formula, cover_workers, naked_cdcl, naked_sls, resident_pre_arenas, 0)
+        if scout_naked_plan != nil
+          scout_naked_res = i64[scout_nv + 8]
+          scout_naked_h = wassat_naked_start(formula, scout_naked_plan, scout_stop, scout_naked_res, 0)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1386,7 +1397,11 @@ use lut_congruence
         capacity_cancel_ms = clock_ms() if scout_capacity_h != nil
         counter_cancel_ms = scout_counter_h == nil ? 0 : clock_ms()
         cycle_cancel_ms = scout_cycle_h == nil ? 0 : clock_ms()
+        naked_cancel_ms = scout_naked_h == nil ? 0 : clock_ms()
         z = wassat_stop_cancel(scout_stop)
+        if scout_naked_h != nil
+          z = scout_naked_h.join
+          wassat_naked_finish_scout(formula, scout_naked_plan)
         z = scout_cycle_h.join if scout_cycle_h != nil
         z = scout_counter_h.join if scout_counter_h != nil
         z = scout_lut_h.join if scout_lut_h != nil
@@ -1414,6 +1429,10 @@ use lut_congruence
           if env("WASSAT_PROFILE") == "1"
             wassat_reconf_profile(scout_reconf_plan, scout_reconf_res[0])
             wassat_prof_note("scout.reconfiguration stop_to_join_ms=[ccall("__w_clock_ms") - reconf_cancel_ms]")
+        if scout_naked_h != nil && env("WASSAT_PROFILE") == "1"
+          wassat_naked_profile(scout_naked_plan, scout_naked_res[0], "scout.naked_sudoku")
+          naked_tail = scout_naked_res[0] == -1 ? clock_ms() - scout_naked_res[scout_nv + 5] : 0
+          wassat_prof_note("scout.naked_sudoku answer_to_join_ms=[naked_tail] stop_to_join_ms=[clock_ms() - naked_cancel_ms]")
         if scout_capacity_h != nil && env("WASSAT_PROFILE") == "1"
           # All scout workers have joined: include every losing arm's tail.
           wassat_capacity_profile(scout_capacity_plan, scout_capacity_res[0], "scout.capacity")
@@ -1449,6 +1468,15 @@ use lut_congruence
           budget_used += scout_res[scout_sls_base + scout_nv + 7] if scout_span > 16
         else
           budget_used += ccall("__w_arr_load_acq", scout_budget, 0)
+        if scout_naked_res != nil && scout_naked_res[0] == -1
+          naked_scout = scout_out[0]
+          budget_used += naked_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          << "s UNSATISFIABLE"
+          << "c mode: fast (clause-checked naked-single progress scout)"
+          << "c conflicts: [budget_used], decisions: [naked_scout["decisions"]], props: [naked_scout["props"]]"
+          << "c stats restarts=[naked_scout["restarts"]] reduces=[naked_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(20)
         if scout_lut_res != nil && scout_lut_res[0] == -1
           lut_scout = scout_out[0]
           budget_used += lut_scout["conflicts"] if scout_budget == nil
@@ -1846,6 +1874,7 @@ use lut_congruence
           arm_tag = "checked resolution-cover arm" if rr["cover_won"] == true
           arm_tag = "exact arithmetic-count arm" if rr["nae_won"] == true
           arm_tag = "verified capacity-clique arm" if rr["capacity_won"] == true
+          arm_tag = "clause-checked naked-single progress" if rr["naked_sudoku_won"] == true
           arm_tag = "keychart repair arm" if rr["keychart_won"] == true
           arm_tag = "finite-domain walk arm" if rr["domain_won"] == true
           arm_tag = "sls frozen-fringe repair" if rr["sls_repair_won"] == true

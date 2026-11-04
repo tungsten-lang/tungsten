@@ -170,7 +170,10 @@ use cyclic_repair
       best_delta = (1 << 60) ## i64
       target = (-1) ## i64
       ties = (0) ## i64
-      updates = (0) ## i64
+      # All v != u contribute degree(v), except the shared (u,v) edge.
+      # The simple undirected graph therefore contributes 2*ne-2*degree(u).
+      # Keep the logical work counter without recounting it per candidate.
+      updates = (use_targets ? 2 * ne - 2 * (heads[u + 1] - heads[u]) : 0) ## i64
       v = 0
       while v < n
         if v != u
@@ -202,10 +205,7 @@ use cyclic_repair
                 delta += d * weights[e]
                 updates += 1
               at += 1
-          if use_targets
-            updates += heads[v + 1] - heads[v]
-            updates -= 1 if adjacent[v] > 0
-          else
+          if !use_targets
             at = heads[v]
             while at < heads[v + 1]
               e = occ[at]

@@ -567,6 +567,18 @@ loop_end, gain], left, right)` (f64[] or f32[] channels, copied), `live_note(s, 
 `live_volume(s, v)`, `live_info(s)` (`{voices:, zones:, rate:, rendered:}`), `live_close(s)`. Voices are resampled from the
 zone's root and rate to the device's rate; 96 voices, the quietest release stolen first. `use core/live`.
 
+### Version 2 (2026-11-04): streaming, scheduling, measurements
+
+`live_zone_file(s, path, head_frames)` makes a zone of a sample file (FLAC, WAV, AIFF through ExtAudioFile: its head decoded
+now, the rest streamed by a reader thread into each voice's ring while it plays) or of a `.twpcm` PCM cache (memory-mapped:
+"TWPCM\0\0\2", rate and frames as i64, int32 stereo) → `[zone, rate, frames, first sound]`. `live_play(s, [zone, key, ratio,
+gain, start, release], at, origin)` schedules a note at a host time (`midi_now()`'s clock: MIDI timestamps are on it) and the
+render thread starts it at that frame; `live_release`, `live_bend` likewise; `live_vibrato(s, depth, rate)`; `live_sinc(s,
+table)` the 64-tap windowed-sinc table (sampler.w's) to interpolate with. `live_info` adds the memory (heads, mapped, rings),
+underruns and the measured latency (cause to first sample, mean and worst) and the output's presentation latency. The output
+runs 256-frame buffers. `midi_send_at(out, at, bytes)` sends with a CoreMIDI timestamp, `midi_flush(out)` drops what is
+scheduled; input messages carry their packets' timestamps.
+
 ## How it is built
 
 - **Runtime:** `runtime/media/media.c` (handle registry, converter,

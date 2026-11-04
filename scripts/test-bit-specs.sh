@@ -138,12 +138,13 @@ run_one() {
     spec_env+=("TUNGSTEN_SPEC_SHARD_COUNT=$shard_count")
   fi
 
-  # Argon relies on compiled option-parser lowering and Hammer exercises a
-  # native string-pointer builtin. The remaining ordinary bit suites are
+  # Argon relies on compiled option-parser lowering, Hammer exercises a
+  # native string-pointer builtin, and Rung spawns processes (Process is
+  # compiled-only). The remaining ordinary bit suites are
   # language/library contracts and run through the interpreter, avoiding a
   # second native build matrix inside the root correctness gate.
   case "$path" in
-    bits/tungsten-argon/spec/argon_spec.w|bits/tungsten-hammer/spec/hammer_spec.w|bits/tungsten-drawille/spec/inspection_spec.w)
+    bits/tungsten-argon/spec/argon_spec.w|bits/tungsten-hammer/spec/hammer_spec.w|bits/tungsten-drawille/spec/inspection_spec.w|bits/tungsten-rung/spec/rung_spec.w)
       if ! run_bounded env TUNGSTEN_INCREMENTAL=0 "$TUNGSTEN" compile "$path" --out "$out" --no-lto >"$log" 2>&1; then
         status=1
       elif ! run_bounded "$out" >>"$log" 2>&1; then

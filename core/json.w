@@ -110,6 +110,11 @@
 
   -> .encode_string(s_in)
     s = s_in ## String
+    # A rope argument (a long concatenation) carries a heap-pointer tag, which
+    # would read as an empty inline string below and skip every escape.
+    # Flatten it first, as String's own methods do for their arguments.
+    if ((s$value >> 48) & 0xFFFF) != 0xFFF9
+      s = s_in.to_s
     sv = (s$value & -2) ## i64
     smode = (sv >> 1) & 7
     has_escape = false
@@ -152,6 +157,9 @@
   -> .encode_string_into(s_in, buf_in)
     s = s_in ## String
     buf = buf_in ## StringBuffer
+    # Flatten a rope argument first (see encode_string).
+    if ((s$value >> 48) & 0xFFFF) != 0xFFF9
+      s = s_in.to_s
     sv = (s$value & -2) ## i64
     smode = (sv >> 1) & 7
     if smode <= 5

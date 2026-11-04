@@ -1,0 +1,12 @@
+tungsten "tungsten-0.0.1"
+
+name        "tungsten-rung"
+version     "0.1.0"
+summary     "Run a prompt file up a ladder of models, with an integrator merging every answer"
+description "rung runs a Markdown task against a standing ladder of model CLIs (codex, agy, grok, muse, claude, ollama:*), one after another or in parallel groups, and after every call asks an integrator model to merge the answer into one evolving state. It stops at a plateau (a full round with no improvement) or a round cap, keeps every input, answer, verdict and timing in a run directory, resumes after interruptions, and writes a report. It only orchestrates text: models get read-only copies, read-only modes, guarded calls, and nothing they propose is executed."
+license     "MIT OR Apache-2.0"
+authors     ["Tungsten Language Project"]
+
+bit "tungsten-argon", local: true
+
+executable  "rung", source: "bin/rung.w"

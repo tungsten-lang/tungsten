@@ -48,7 +48,10 @@ Dir.mktmpdir("tungsten-build-targets-") do |directory|
   checkout(other)
   File.write(File.join(root, "bin/commands/cache_gc.sh"), "exit 0\n")
   File.write(File.join(inner_bit, "Bitfile"), %(name "tungsten-inner"\n))
-  File.write(File.join(package, "lib/main.w"), "<< 1\n")
+  # the entry uses a shared engine outside the project (a sibling folder), as the arranger uses notation.w
+  FileUtils.mkdir_p(File.join(directory, "engine"))
+  File.write(File.join(directory, "engine/shared.w"), "-> shared_one\n  1\n")
+  File.write(File.join(package, "lib/main.w"), "use ../../engine/shared\n<< shared_one\n")
   File.write(File.join(package, "Bitfile"), <<~BITFILE)
     name "demo"
     executable "demo", source: "lib/main.w"
@@ -140,5 +143,16 @@ Dir.mktmpdir("tungsten-build-targets-") do |directory|
   check.call("Info.plist carries the version, Retina and the document type", plist.include?("<string>1.2</string>") && plist.include?("NSHighResolutionCapable") && plist.include?("<string>demo</string></array>"), plist)
   check.call("the icon is made", File.size?(File.join(bundle, "Resources/Demo.icns")).to_i > 0 && plist.include?("<key>CFBundleIconFile</key><string>Demo</string>"), out)
   check.call("plutil reads the Info.plist", system("plutil", "-lint", "-s", File.join(bundle, "Info.plist")), plist)
+  check.call("CFBundleVersion is the build (a time stamp when the Bitfile names none)", plist =~ /<key>CFBundleVersion<\/key><string>\d{8}\.\d{4}<\/string>/, plist)
+
+  out, status = run.call(package)
+  check.call("an unchanged project is skipped", status.success? && out =~ /skip\s+\S*bin\/demo$/, out)
+  File.write(File.join(directory, "engine/shared.w"), "-> shared_one\n  2\n")
+  out, status = run.call(package)
+  check.call("a change in a file the entry uses from outside the project rebuilds it", status.success? && out =~ /built\s+\S*bin\/demo\s/, out)
+  File.write(File.join(package, "Bitfile"), File.read(File.join(package, "Bitfile")).sub('version: "1.2"', 'version: "1.2", build: "77"'))
+  out, status = run.call(package)
+  plist = File.read(File.join(bundle, "Info.plist"))
+  check.call("a Bitfile build: is the CFBundleVersion", status.success? && plist.include?("<key>CFBundleVersion</key><string>77</string>") && plist.include?("<key>CFBundleShortVersionString</key><string>1.2</string>"), plist)
 end
 puts "build targets: #{passed} passed"

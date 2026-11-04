@@ -91,13 +91,19 @@ TUNGSTEN BUILD
     `tungsten build --which` prints what it would build (self, checkout, bit or
     none) and the folder.
 
+    An executable is rebuilt when anything it is built from changes: the
+    project's own tree, its Bitfile, the compiler and runtime, and the .w
+    files its entry reaches through relative or absolute `use` lines outside
+    the project (a shared engine next door: `use ../../engine/notation`).
+
     An app is declared in the Bitfile, one line, after the executable it wraps:
 
         executable "arranger", source: "lib/arranger.w"
         app "Arranger", executable: "arranger", id: "org.example.arranger", icon: "res/icon.png", documents: "arr", version: "0.1"
 
     The bundle holds Contents/MacOS/<executable> (the built binary),
-    Contents/Info.plist (name, identifier, version, Retina, the document
+    Contents/Info.plist (name, identifier, version, the build — `build:`,
+    else the time of the build as YYYYMMDD.HHMM — Retina, the document
     types), Contents/Resources/<Name>.icns (made from the PNG with sips and
     iconutil) and PkgInfo, and is signed ad hoc. The system frameworks the
     program links (AppKit, Metal, QuartzCore, CoreGraphics) need no copying.

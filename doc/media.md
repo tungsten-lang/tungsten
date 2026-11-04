@@ -541,6 +541,17 @@ Studio mux defaults to video edit removal; strict delivery is
 `studio mux episode.json --out master.mov --audio-codec pcm --no-edit-lists`.
 AAC MP4 delivery still needs its priming edit to preserve sample-exact sync.
 
+## Audio out (core/audio)
+
+A minimal player for interactive playback, AVAudioPlayer in the media
+bridge: `p = audio_open("mix.wav")`, `audio_play(p, t)` (from `t` seconds;
+`-1` resumes), `audio_pause(p)`, `audio_stop(p)` (and rewind),
+`audio_time(p)` (seconds: the player's clock, what a playhead should follow),
+`audio_volume(p, v)` (0 … 1), `audio_info(p)` (`{duration:, playing:, rate:,
+channels:}`), `audio_close(p)`. Playback runs on the player's own threads,
+so a program needs no run loop and keeps drawing; `use core/audio`. macOS
+only (other targets raise). Spec: spec/core/audio_spec.w.
+
 ## How it is built
 
 - **Runtime:** `runtime/media/media.c` (handle registry, converter,

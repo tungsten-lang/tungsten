@@ -83131,6 +83131,14 @@ W_BRIDGE_STUB WValue w_gfx_menu_add(WValue window, WValue menu, WValue title,
     (void)window; (void)menu; (void)title; (void)key; (void)mods; (void)id;
     return w_gfx_unavailable();
 }
+W_BRIDGE_STUB WValue w_gfx_menu_items(WValue window, WValue menu) {
+    (void)window; (void)menu;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_menu_clear(WValue window, WValue menu) {
+    (void)window; (void)menu;
+    return w_gfx_unavailable();
+}
 W_BRIDGE_STUB WValue w_gfx_menu_set(WValue window, WValue id, WValue enabled,
                                      WValue checked) {
     (void)window; (void)id; (void)enabled; (void)checked;

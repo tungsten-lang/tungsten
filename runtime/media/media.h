@@ -74,7 +74,15 @@
     X(w_media_transcode_new, 1)        \
     X(w_media_transcode_step, 2)       \
     X(w_media_transcode_finish, 1)     \
-    X(w_media_transcode_free, 1)
+    X(w_media_transcode_free, 1)       \
+    X(w_media_audio_open, 1)           \
+    X(w_media_audio_play, 2)           \
+    X(w_media_audio_pause, 1)          \
+    X(w_media_audio_stop, 1)           \
+    X(w_media_audio_time, 1)           \
+    X(w_media_audio_volume, 2)         \
+    X(w_media_audio_info, 1)           \
+    X(w_media_audio_close, 1)
 
 #define W_MEDIA_CCALLS(X) W_MEDIA_C_CCALLS(X) W_MEDIA_AVF_CCALLS(X)
 
@@ -105,7 +113,7 @@ W_MEDIA_CCALLS(W_MEDIA_PROTOTYPE)
 
 /* Handle kinds in the shared registry. */
 enum { W_MEDIA_KIND_ENCODER = 1, W_MEDIA_KIND_SEGMENT = 2, W_MEDIA_KIND_MUX = 3, W_MEDIA_KIND_SCALER = 4,
-       W_MEDIA_KIND_DECODER = 5, W_MEDIA_KIND_TRANSCODE = 6, W_MEDIA_KIND_COUNT = 7 };
+       W_MEDIA_KIND_DECODER = 5, W_MEDIA_KIND_TRANSCODE = 6, W_MEDIA_KIND_PLAYER = 7, W_MEDIA_KIND_COUNT = 8 };
 
 /* One compressed sample of a segment, in decode order. pts/dts are frame
  * indices relative to the segment's first frame (dts == pts without

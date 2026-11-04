@@ -928,7 +928,13 @@ static NSMenuItem *gfx_add_role(NSMenu *m, NSString *title, SEL action, NSString
  *           (Option-Command-H), Show All, Quit <App> (Command-Q, terminate: through the delegate above)
  *   Window  Minimize (Command-M), Zoom, Bring All to Front (NSApp's windows menu)
  *   Help    <App> Help (a GFX_EV_MENU with id GFX_MENU_HELP; NSApp's help menu)
- * The program's own menus go between the application menu and Window, in the order it names them. */
+ * The program's own menus go between the application menu and Window, in the order it names them.
+ * Made once (a flag, not "is there a main menu yet"): on macOS 27 [NSApp finishLaunching] gives a regular app without a nib a
+ * placeholder main menu, one application item with an empty menu, so a bar that was "already there" left a launched app with an
+ * empty application menu, no Quit and no Window or Help menus (hidden-window runs are accessory apps and get no placeholder).
+ * The placeholder is replaced; any top-level menus after its application item are kept, before Window. */
+static bool gfx_menu_bar_made = false;
+
 static void gfx_menu_bar(WGfxWindow *gw) {
     if (!gfx_menu_target) {
         gfx_menu_target = [[TungstenMenuTarget alloc] init];
@@ -938,7 +944,9 @@ static void gfx_menu_bar(WGfxWindow *gw) {
         gfx_app_delegate = [[TungstenAppDelegate alloc] init];
         [NSApp setDelegate:gfx_app_delegate];
     }
-    if ([NSApp mainMenu] && [[NSApp mainMenu] numberOfItems] > 0) return;
+    if (gfx_menu_bar_made) return;
+    gfx_menu_bar_made = true;
+    NSMenu *previous = [NSApp mainMenu];
     NSEventModifierFlags cmd = NSEventModifierFlagCommand;
     NSMenu *bar = [[[NSMenu alloc] initWithTitle:@""] autorelease];
     NSString *name = gfx_app_name();
@@ -982,6 +990,17 @@ static void gfx_menu_bar(WGfxWindow *gw) {
     [bar addItem:helpItem];
     [NSApp setHelpMenu:helpMenu];
 
+    if (previous && previous != bar) {
+        NSArray *kept = [[previous itemArray] copy];
+        for (NSUInteger i = 1; i < [kept count]; i++) {
+            NSMenuItem *it = [kept objectAtIndex:i];
+            [it retain];
+            [previous removeItem:it];
+            [bar insertItem:it atIndex:[bar indexOfItem:winItem]];
+            [it release];
+        }
+        [kept release];
+    }
     [NSApp setMainMenu:bar];
 }
 

@@ -12,6 +12,7 @@ require "fileutils"
 require "open3"
 require "rbconfig"
 require "tmpdir"
+require "digest"
 
 driver = File.expand_path(ARGV.fetch(0))
 raise "expected a compiled bin/commands/build.w driver" unless File.executable?(driver)
@@ -154,5 +155,49 @@ Dir.mktmpdir("tungsten-build-targets-") do |directory|
   out, status = run.call(package)
   plist = File.read(File.join(bundle, "Info.plist"))
   check.call("a Bitfile build: is the CFBundleVersion", status.success? && plist.include?("<key>CFBundleVersion</key><string>77</string>") && plist.include?("<key>CFBundleShortVersionString</key><string>1.2</string>"), plist)
+
+  # tungsten_main: the Tungsten main a project needs. The fake root becomes a git checkout: c1 (2026-01-01), a side branch's
+  # commit (2026-01-02, never merged) and c2 (2099-01-01, after the fake compiler's file time) on the checked-out branch.
+  git = lambda do |*args, date: "2026-01-01T00:00:00Z"|
+    env = { "GIT_AUTHOR_DATE" => date, "GIT_COMMITTER_DATE" => date }
+    out, st = Open3.capture2e(env, "git", "-C", root, "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", *args)
+    raise "git #{args.join(" ")}: #{out}" unless st.success?
+    out.strip
+  end
+  git.call("init", "-q")
+  git.call("add", "-A")
+  git.call("commit", "-q", "-m", "c1")
+  c1 = git.call("rev-parse", "HEAD")
+  git.call("checkout", "-q", "-b", "side")
+  git.call("commit", "-q", "--allow-empty", "-m", "side", date: "2026-01-02T00:00:00Z")
+  side = git.call("rev-parse", "HEAD")
+  git.call("checkout", "-q", "-")
+  git.call("commit", "-q", "--allow-empty", "-m", "c2", date: "2099-01-01T00:00:00Z")
+  c2 = git.call("rev-parse", "HEAD")
+  base_bitfile = File.read(File.join(package, "Bitfile"))
+  needs = lambda do |line|
+    File.write(File.join(package, "Bitfile"), base_bitfile + line + "\n")
+    before = File.mtime(File.join(package, "bin/demo"))
+    out, status = run.call(package, ["--force"])
+    [out, status.exitstatus, File.mtime(File.join(package, "bin/demo")) != before]
+  end
+  out, code, rebuilt = needs.call(%(tungsten_main "#{c1[0, 9]}"))
+  check.call("tungsten_main: a checkout that has the commit builds", code == 0 && rebuilt && out.include?("has #{c1[0, 9]}"), out)
+  out, code, rebuilt = needs.call(%(tungsten_main "#{side}"))
+  check.call("tungsten_main: a checkout without the commit stops, nothing built", code == 1 && !rebuilt && out.include?("needs Tungsten main at or after") && out.include?("nothing was built"), out)
+  check.call("tungsten_main: the message names the fix", out.include?("merge --ff-only main") && out.include?("bin/tungsten build"), out)
+  out, code, rebuilt = needs.call(%(tungsten_main "0123456789abcdef0123456789abcdef01234567"))
+  check.call("tungsten_main: an unknown commit stops the build", code == 1 && !rebuilt && out.include?("does not have"), out)
+  out, code, rebuilt = needs.call(%(tungsten_main "#{c1}", compiler: "#{c2}"))
+  check.call("tungsten_main compiler: a compiler older than the commit (no build record: its file time) stops the build", code == 1 && !rebuilt && out.include?("needs a compiler built at or after") && out.include?("cd #{root} && bin/tungsten build"), out)
+  out, code, rebuilt = needs.call(%(tungsten_main "#{c1}", compiler: "#{c1}"))
+  check.call("tungsten_main compiler: a compiler built after the commit builds", code == 0 && rebuilt, out)
+  FileUtils.mkdir_p(File.join(root, "build/cache"))
+  sha = Digest::SHA256.file(File.join(root, "bin/tungsten-compiler")).hexdigest
+  File.write(File.join(root, "build/cache/compiler-build.profile"), "tungsten-compiler-build-v1\ncompiler_sha256=#{sha}\ncommit=#{side}\n")
+  out, code, rebuilt = needs.call(%(tungsten_main "#{c1}", compiler: "#{c1}"))
+  check.call("tungsten_main compiler: the build record's commit decides (it contains c1)", code == 0 && rebuilt, out)
+  out, code, rebuilt = needs.call(%(tungsten_main "#{c1}", compiler: "#{c2}"))
+  check.call("tungsten_main compiler: the build record's commit decides (it lacks c2)", code == 1 && !rebuilt && out.include?("built from"), out)
 end
 puts "build targets: #{passed} passed"

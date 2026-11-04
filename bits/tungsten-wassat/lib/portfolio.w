@@ -43,6 +43,7 @@ use permutation_walk
 use cyclic_decode
 use nae_decode
 use capacity_clique
+use naked_sudoku
 use box_net
 use ../../../core/bit_ops
 
@@ -1901,6 +1902,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1),
       sls_arenas + 1, preprocess_arenas, pre_sls_extra)
   wassat_prof_note("race.pre_sls_plan allowed=[pre_sls_allowed] existing_workers=[pre_sls_workers] extra_bytes=[wassat_pre_sls_extra_bytes(formula) + wassat_sls_arena_bytes(formula)]")
+  naked_early_circuit = circuit_plan
   perm_plan = nil
   perm_extra = pre_sls_extra
   perm_extra -= wassat_pre_sls_extra_bytes(formula) unless pre_sls_allowed
@@ -2048,6 +2050,23 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, rectangle_extra)
+  # A separate bounded worker preserves every established arm. Account for
+  # circuit plans admitted after the original memory/worker snapshot above.
+  naked_plan = nil
+  if art["raw"] == true && cycle_plan == nil
+    naked_extra = perm_extra
+    naked_extra += perm_plan["scratch"] if perm_plan != nil
+    naked_extra += nae_plan["scratch"] if nae_plan != nil
+    naked_extra += capacity_plan["scratch"] if capacity_plan != nil
+    if circuit_plan != nil && naked_early_circuit == nil
+      naked_extra += circuit_plan["scratch"] == nil ? 192 * (nv + formula["flat_ncl"] + 1) : circuit_plan["scratch"]
+    naked_workers = threads + pre_workers + sls_worker + (circuit_plan == nil ? 0 : 1)
+    naked_workers += (keychart_plan == nil ? 0 : 1) + (cover_plan == nil ? 0 : 1) + (domain_plan == nil ? 0 : 1)
+    naked_workers += (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1) + (pre_sls_allowed ? 1 : 0)
+    naked_cdcl = cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1)
+    naked_cdcl += 1 if circuit_plan != nil && circuit_plan["box_net"] == true
+    naked_plan = wassat_naked_plan(formula, naked_workers, naked_cdcl,
+      sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, naked_extra)
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -2064,6 +2083,8 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   cap += 1 if nae_plan != nil
   capacity_index = capacity_plan == nil ? -1 : cap
   cap += 1 if capacity_plan != nil
+  naked_index = naked_plan == nil ? -1 : cap
+  cap += 1 if naked_plan != nil
   stop = i64[4]
   res = i64[cap * (nv + 8)]
   tel = i64[cap * WASSAT_TEL_STRIDE]
@@ -2176,6 +2197,7 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     "cycle_plan": cycle_plan, "cycle_index": cycle_index,
     "nae_plan": nae_plan, "nae_index": nae_index,
     "capacity_plan": capacity_plan, "capacity_index": capacity_index,
+    "naked_plan": naked_plan, "naked_index": naked_index,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
     "credit": credit, "offsets": offsets, "sls": [], "prune_info": prune_info,
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
@@ -2749,6 +2771,11 @@ WASSAT_AXIS_SLOTS = 10
   capacity_idx = race["capacity_index"]
   capacity_base = capacity_idx * (nv + 8)
   capacity_handle = nil
+  naked_plan = race["naked_plan"]
+  naked_plan = nil if budget > 0
+  naked_idx = race["naked_index"]
+  naked_base = naked_idx * (nv + 8)
+  naked_handle = nil
   if keychart_plan != nil && conflict_budget != nil
     keychart_plan["solver"].set_shared_conflict_budget(conflict_budget, budget, keychart_idx + 1)
   round_ms = wassat_race_round_ms
@@ -2870,6 +2897,8 @@ WASSAT_AXIS_SLOTS = 10
     nae_handle = wassat_nae_start(formula, nae_plan, stop, res, nae_base)
   if capacity_plan != nil
     capacity_handle = wassat_capacity_start(formula, capacity_plan, stop, res, capacity_base)
+  if naked_plan != nil
+    naked_handle = wassat_naked_start(formula, naked_plan, stop, res, naked_base)
   round = 0
   running = 1
   while running == 1
@@ -2953,6 +2982,7 @@ WASSAT_AXIS_SLOTS = 10
       decisive_now = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) != 0
       decisive_now = 1 if nae_plan != nil && ccall("__w_arr_load_acq", res, nae_base) != 0
       decisive_now = 1 if capacity_plan != nil && ccall("__w_arr_load_acq", res, capacity_base) != 0
+      decisive_now = 1 if naked_plan != nil && ccall("__w_arr_load_acq", res, naked_base) != 0
       cdcl_can_continue = 0
       if decisive_now == 0 && round1 > 0
         a = 0
@@ -2998,6 +3028,7 @@ WASSAT_AXIS_SLOTS = 10
       decided = 1 if cycle_plan != nil && ccall("__w_arr_load_acq", res, cycle_base) != 0
       decided = 1 if nae_plan != nil && ccall("__w_arr_load_acq", res, nae_base) != 0
       decided = 1 if capacity_plan != nil && ccall("__w_arr_load_acq", res, capacity_base) != 0
+      decided = 1 if naked_plan != nil && ccall("__w_arr_load_acq", res, naked_base) != 0
       if decided == 0
         # Score the round every arm just finished, and retire the arms that
         # cannot continue: retired by the solver, stuck (no conflict advanced,
@@ -3148,6 +3179,9 @@ WASSAT_AXIS_SLOTS = 10
   if cycle_handle != nil
     z = wassat_stop_cancel(stop)
     z = cycle_handle.join
+  if naked_handle != nil
+    z = wassat_stop_cancel(stop)
+    z = naked_handle.join
   if capacity_handle != nil
     z = wassat_stop_cancel(stop)
     z = capacity_handle.join
@@ -3257,6 +3291,12 @@ WASSAT_AXIS_SLOTS = 10
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[capacity_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
       wassat_capacity_profile(capacity_plan, res[capacity_base])
+    if naked_plan != nil
+      nm = naked_plan["meta"]
+      ended = nm[34]
+      last_ms = ended if ended > last_ms
+      answer_ms = ended if res[naked_base] != 0 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+      wassat_naked_profile(naked_plan, res[naked_base])
     if answer_ms > 0
       wassat_prof_note("race.stop answer_to_last_arm_ms=[last_ms - answer_ms]")
   a = 0
@@ -3294,6 +3334,9 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && cover_plan != nil && res[cover_base] != 0
     status = res[cover_base]
     winner = cover_idx
+  if status == 0 && naked_plan != nil && res[naked_base] == -1
+    status = -1
+    winner = naked_idx
   if status == 0 && capacity_plan != nil && res[capacity_base] == -1
     status = -1
     winner = capacity_idx
@@ -3373,6 +3416,7 @@ WASSAT_AXIS_SLOTS = 10
     "cyclic_won": cycle_plan != nil && winner == cycle_idx,
     "nae_won": nae_plan != nil && winner == nae_idx,
     "capacity_won": capacity_plan != nil && winner == capacity_idx,
+    "naked_sudoku_won": naked_plan != nil && winner == naked_idx,
     "keychart_conflicts": keychart_conflicts,
     "sls_won": winner == sls_idx,
     "sls_repair_won": winner == sls_idx && res[sls_base + nv + 1] == 1,

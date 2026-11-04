@@ -972,6 +972,9 @@ use lut_congruence
     ais = wassat_ais_unsat(formula)
     tprof = wassat_prof("cli.ais", tprof)
     wassat_prof_note("ais status=[ais["status"]] vertices=[ais["graph_vars"]] lower=[ais["lower_bound"]] upper=[ais["upper_bound"]] triangles=[ais["triangles"]] max_incidence=[ais["triangle_degree"]] pair_visits=[ais["triangle_work"]] stop=[ais["triangle_stop"]]") if tprof != 0
+    if tprof != 0 && ais["clique_meta"] != nil
+      acm = ais["clique_meta"]
+      wassat_prof_note("ais.cliques count=[acm[0]] weight=[acm[1]] max_incidence=[acm[2]] adjacency_reads=[acm[3]] stop=[acm[4]] nonclique_components=[acm[5]]")
     if ais["status"] == -1
       << "s UNSATISFIABLE"
       << "c mode: fast (exact sequential-counter clique-cover certificate)"

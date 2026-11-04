@@ -18,6 +18,8 @@
 # are T checked triangles and no vertex belongs to more than D of them,
 # every cover has at least ceil(2*T/D) vertices. This bound does not require
 # disjoint cliques or any special graph family.
+# More generally, checked cliques C require sum(|C|-1) selections, counted
+# at most D times per graph vertex. Their ceiling quotient is also a bound.
 #
 # Recognition is deliberately strict.  Clause and literal order, variable
 # numbering, counter-row numbering, and counter-column numbering are ignored,
@@ -37,7 +39,7 @@ WASSAT_AIS_MAX_EDGES = 1000000
   { "recognized": false, "status": 0, "graph_vars": 0,
     "upper_bound": 0, "lower_bound": 0, "components": 0,
     "triangles": 0, "triangle_degree": 0, "triangle_work": 0,
-    "triangle_stop": 0 }
+    "triangle_stop": 0, "clique_meta": nil }
 
 # Count each triangle once using the already checked symmetric adjacency
 # matrix. Two fixed buffers suffice; a work-cap miss never certifies a bound.
@@ -83,6 +85,85 @@ WASSAT_AIS_MAX_EDGES = 1000000
     a += 1
   return 0 if meta[1] == 0
   (2 * meta[0] + meta[1] - 1) / meta[1]
+
+# Find cliques among the connected components of each vertex's neighborhood.
+# A component is admitted only when all its internal edges are present; the
+# center is adjacent to every member by construction. Emit at the smallest
+# member only. These need not be all maximal cliques: any checked family gives
+# a sound bound, including for graphs that are not line graphs.
+# The caller supplies a checked symmetric, loop-free adjacency matrix.
+# meta: cliques, sum(size-1), maximum incidence, adjacency reads, cap hit,
+# non-clique neighborhood components. Four fixed buffers are reused.
+-> wassat_ais_clique_bound(adj, n, meta, limit = 2000000) (i8[] i64 i64[] i64) i64
+  return 0 if n < 2 || n > WASSAT_AIS_MAX_GRAPH_VARS || adj.size < n * n || meta.size < 6
+  i = 0
+  while i < 6
+    meta[i] = 0
+    i += 1
+  degree = i32[n]
+  neighbors = i32[n]
+  seen = i32[n]
+  queue = i32[n]
+  a = 0
+  while a < n
+    count = 0
+    b = 0
+    while b < n
+      if meta[3] >= limit
+        meta[4] = 1
+        return 0
+      meta[3] += 1
+      if adj[a * n + b] != 0
+        neighbors[count] = b
+        count += 1
+      b += 1
+    i = 0
+    while i < count
+      b = neighbors[i]
+      if seen[b] != a + 1
+        head = 0
+        tail = 1
+        queue[0] = b
+        seen[b] = a + 1
+        smallest = b
+        edges = 0
+        while head < tail
+          u = queue[head]
+          head += 1
+          smallest = u if u < smallest
+          j = 0
+          while j < count
+            if meta[3] >= limit
+              meta[4] = 1
+              return 0
+            meta[3] += 1
+            v = neighbors[j]
+            if adj[u * n + v] != 0
+              edges += 1
+              if seen[v] != a + 1
+                seen[v] = a + 1
+                queue[tail] = v
+                tail += 1
+            j += 1
+        if edges == tail * (tail - 1)
+          if a < smallest
+            meta[0] += 1
+            meta[1] += tail
+            degree[a] += 1
+            j = 0
+            while j < tail
+              degree[queue[j]] += 1
+              j += 1
+        else
+          meta[5] += 1
+      i += 1
+    a += 1
+  a = 0
+  while a < n
+    meta[2] = degree[a] if degree[a] > meta[2]
+    a += 1
+  return 0 if meta[2] == 0
+  (meta[1] + meta[2] - 1) / meta[2]
 
 # Return status -1 only after reconstructing the exact counter and verifying
 # the clique-cover lower bound.  Status zero is a one-sided fall-through.
@@ -482,12 +563,17 @@ WASSAT_AIS_MAX_EDGES = 1000000
     start += 1
 
   tm = i64[4]
+  cm = i64[6]
   unless cliques
     lower = 0
-    if env("WASSAT_AIS_TRIANGLES") != "0"
-      lower = wassat_ais_triangle_bound(adj, ngraph, tm)
+    if env("WASSAT_AIS_CLIQUES") != "0"
+      lower = wassat_ais_clique_bound(adj, ngraph, cm)
+    if lower <= kbound && env("WASSAT_AIS_TRIANGLES") != "0"
+      triangle_lower = wassat_ais_triangle_bound(adj, ngraph, tm)
+      lower = triangle_lower if triangle_lower > lower
   proved = lower > kbound
   { "recognized": proved, "status": proved ? -1 : 0, "graph_vars": ngraph,
     "upper_bound": kbound, "lower_bound": lower,
     "components": components, "triangles": tm[0],
-    "triangle_degree": tm[1], "triangle_work": tm[2], "triangle_stop": tm[3] }
+    "triangle_degree": tm[1], "triangle_work": tm[2], "triangle_stop": tm[3],
+    "clique_meta": cm }

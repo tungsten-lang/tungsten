@@ -1196,6 +1196,32 @@ WValue w_gfx_post_event(WValue window_v, WValue kind_v, WValue x_v, WValue y_v,
             }
         } else if (kind == GFX_EV_KEY_DOWN || kind == GFX_EV_KEY_UP) {
             NSString *chars = gfx_string_or(text_v, @"");
+            /* no text given: the characters a real key event carries for the
+             * keys that are not letters (arrows and the other function keys
+             * also carry the Function flag, as from a keyboard) */
+            if ([chars length] == 0) {
+                unichar c = 0;
+                bool fn = false;
+                switch ((int)a) {
+                    case 123: c = NSLeftArrowFunctionKey; fn = true; break;
+                    case 124: c = NSRightArrowFunctionKey; fn = true; break;
+                    case 125: c = NSDownArrowFunctionKey; fn = true; break;
+                    case 126: c = NSUpArrowFunctionKey; fn = true; break;
+                    case 115: c = NSHomeFunctionKey; fn = true; break;
+                    case 119: c = NSEndFunctionKey; fn = true; break;
+                    case 116: c = NSPageUpFunctionKey; fn = true; break;
+                    case 121: c = NSPageDownFunctionKey; fn = true; break;
+                    case 117: c = NSDeleteFunctionKey; fn = true; break;
+                    case 36:  c = '\r'; break;
+                    case 48:  c = '\t'; break;
+                    case 49:  c = ' '; break;
+                    case 51:  c = 0x7F; break;
+                    case 53:  c = 0x1B; break;
+                    default: break;
+                }
+                if (c) chars = [NSString stringWithCharacters:&c length:1];
+                if (fn) flags |= NSEventModifierFlagFunction;
+            }
             NSEvent *ev = [NSEvent keyEventWithType:(kind == GFX_EV_KEY_DOWN ? NSEventTypeKeyDown : NSEventTypeKeyUp)
                                            location:wp modifierFlags:flags timestamp:ts
                                        windowNumber:[win windowNumber] context:nil

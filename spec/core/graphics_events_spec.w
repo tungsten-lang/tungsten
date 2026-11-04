@@ -100,7 +100,7 @@ check("key up", e[:kind] == GFX_EV_KEY_UP && e[:key] == KEY_A)
 gfx_post_event(win, GFX_EV_KEY_DOWN, 0, 0, KEY_UP, 0, GFX_MOD_SHIFT, "")
 es = gfx_events(win)
 check("an arrow is a key, not text", es.size == 1 && es[0][:key] == KEY_UP)
-check("arrow modifiers", es[0][:mods] == GFX_MOD_SHIFT)
+check("arrow modifiers (arrows also carry Fn, as from a keyboard)", es[0][:mods] % 16 == GFX_MOD_SHIFT)
 gfx_post_event(win, GFX_EV_KEY_UP, 0, 0, KEY_UP, 0, 0, "")
 gfx_post_event(win, GFX_EV_KEY_DOWN, 0, 0, 9, 0, GFX_MOD_CMD, "v")
 es = gfx_events(win)
@@ -130,6 +130,19 @@ while k < es.size
   got = true if es[k][:kind] == GFX_EV_MENU && es[k][:id] == 101
   k += 1
 check("Command-O reaches its item", got)
+gfx_menu_add(win, "Notes", "Octave Up", "up", 0, 211)
+gfx_post_event(win, GFX_EV_KEY_DOWN, 0, 0, KEY_UP, 0, GFX_MOD_CMD, "")
+es = gfx_events(win)
+got = false
+k = 0
+while k < es.size
+  got = true if es[k][:kind] == GFX_EV_MENU && es[k][:id] == 211
+  k += 1
+check("Command-Up reaches an arrow item (a posted arrow carries its character)", got)
+gfx_post_event(win, GFX_EV_KEY_DOWN, 0, 0, KEY_DOWN, 0, GFX_MOD_CMD, "")
+es = gfx_events(win)
+check("Command-Down with no item is a key event, not a stray menu item", es.size == 1 && es[0][:kind] == GFX_EV_KEY_DOWN && es[0][:key] == KEY_DOWN)
+check("an arrow reports the Function flag", (es[0][:mods] / GFX_MOD_FN) % 2 == 1)
 check("menu_set finds an item", gfx_menu_set(win, 201, 0, 1))
 check("menu_set misses an unknown id", !gfx_menu_set(win, 999, 1, 0))
 gfx_post_event(win, GFX_EV_MENU, 0, 0, 201, 0, 0, "")

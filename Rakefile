@@ -204,6 +204,12 @@ namespace :test do
     run_command "ruby", File.join(ROOT, "scripts/test-build-stage1-cache-identity.rb")
   end
 
+  desc "Verify what `tungsten build` builds from a folder: self-host, another checkout, a project or bit (with an app), none"
+  task :build_targets do
+    run_command "bash", File.join(ROOT, "bin/tungsten"), "build", "--which"
+    run_command "ruby", File.join(ROOT, "scripts/test-build-targets.rb"), File.join(ROOT, "bin/commands/build")
+  end
+
   desc "Differential-fuzz active lexer/parser/execution frontends"
   task frontend_fuzz: :c_vm do
     run_command "ruby", File.join(ROOT, "scripts/fuzz-frontends.rb")

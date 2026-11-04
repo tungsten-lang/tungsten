@@ -424,7 +424,10 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
   << ""
   << "Bootstrap the self-hosted Tungsten compiler and (on --release) build bit entry points."
   << "Default bootstrap: implementations/c (the C bytecode VM)."
-  << "Inside a bit, build its Bitfile executables into bin/ without bootstrapping."
+  << "In a Tungsten checkout (this one or another clone/worktree), bootstrap that checkout's compiler."
+  << "Anywhere else, build the nearest project or bit (its Bitfile): executables into bin/, and on macOS"
+  << "each `app` line as bin/<Name>.app (Info.plist, icon, the executable in Contents/MacOS)."
+  << "  --which   Print what would be built (self, checkout, bit or none) and the folder, then exit"
   << "Executable profile: \"release\" selects an optimized default; --debug overrides it."
   << ""
   << "Options:"
@@ -1058,6 +1061,28 @@ if install_only
 # ── Runtime archive ─────────────────────────────────────────────
 
 << ""
+# what to build from the current directory (before any work: another checkout builds itself, and nothing is built where
+# there is nothing to build)
+TARGET_CWD = capture("pwd -P").strip
+target = {kind: "self", dir: ROOT}
+if !install_requested && !install_only
+  target = build_target(TARGET_CWD, ROOT)
+if array_contains?(args, "--which")
+  << target[:kind] + " " + target[:dir]
+  exit(target[:kind] == "none" ? 1 : 0)
+if target[:kind] == "none"
+  die(build_target_none_message(TARGET_CWD))
+if target[:kind] == "checkout"
+  # another checkout builds itself, with its own CLI and compiler
+  delegated = shq(target[:dir] + "/bin/tungsten") + " build"
+  original = argv()
+  di = 0
+  while di < original.size
+    delegated = delegated + " " + shq(original[di])
+    di = di + 1
+  << DIM + "tungsten build: " + target[:dir] + " is a Tungsten checkout: building it with its own bin/tungsten" + RESET
+  exit(sh("cd " + shq(target[:dir]) + " && " + delegated))
+
 << BOLD + "==> Runtime: compiling C sources" + RESET
 t_runtime_start = clock_ms()
 
@@ -1323,6 +1348,51 @@ if bootstrap_compiler_clang_opt == ""
     d = dirname_of(d)
   nil
 
+# ── What `tungsten build` builds from here (2026-11-04) ────────
+# In a checkout of the Tungsten repository (any clone or worktree, known by
+# its own root markers, not by its path) it is that checkout's self-host
+# build: this checkout's as before, another checkout's through that
+# checkout's own bin/tungsten. Anywhere else it is the nearest project or bit
+# above the current directory (its Bitfile), or a clear error.
+
+-> checkout_markers
+  ["compiler/tungsten.w", "core/tungsten.w", "bin/commands/build.w"]
+
+-> checkout_root?(d)
+  ms = checkout_markers()
+  i = 0
+  while i < ms.size
+    if !regular_file?(d + "/" + ms[i])
+      return false
+    i = i + 1
+  true
+
+-> find_checkout_root(dir)
+  d = dir
+  while d != "/" && d != ""
+    if checkout_root?(d)
+      return d
+    d = dirname_of(d)
+  nil
+
+# {kind: "self" | "checkout" | "bit" | "none", dir:}
+-> build_target(cwd, root)
+  co = find_checkout_root(cwd)
+  if co != nil
+    if co != root
+      return {kind: "checkout", dir: co}
+    bit = find_bit_root(cwd)
+    if bit != nil && bit != root && bit.starts_with?(root + "/")
+      return {kind: "bit", dir: bit}
+    return {kind: "self", dir: root}
+  bit = find_bit_root(cwd)
+  if bit != nil
+    return {kind: "bit", dir: bit}
+  {kind: "none", dir: cwd}
+
+-> build_target_none_message(cwd)
+  "tungsten build: nothing to build in " + cwd + "\n" + "  looked for a Bitfile (a project or bit manifest) in this folder and every folder above it, and for a Tungsten checkout (" + checkout_markers().join(", ") + ")\n" + "  make a project with `bit new NAME` (or add a Bitfile), or run it inside a Tungsten checkout to build the compiler"
+
 # Extract quoted strings from Bitfile include/includes lines.
 -> extract_quoted(text)
   out = []
@@ -1579,7 +1649,7 @@ if bootstrap_compiler_clang_opt == ""
   result
 
 CWD = capture("pwd -P").strip
-bit_root_found = find_bit_root(CWD)
+bit_root_found = target[:kind] == "bit" ? target[:dir] : find_bit_root(CWD)
 bit_only = bit_root_found != nil && bit_root_found != ROOT
 if install_requested && bit_only
   die("tungsten build --install must be run from the Tungsten repository root")
@@ -2444,6 +2514,125 @@ make_dirs(bit_cache_dir)
   << "    " + GREEN + "built" + RESET + "   " + project_relative_path(out_bin) + " " + DIM + ms(clock_ms() - t_bit) + RESET
   true
 
+# ── macOS .app targets: `app "Name", executable: "exe", id: "org.example.name", icon: "res/icon.png",
+#    documents: "ext1 ext2", version: "0.1"` in a Bitfile (2026-11-04) ─────────
+-> bit_apps(bit_root)
+  apps = []
+  manifest = read_file(bit_root + "/Bitfile")
+  if manifest == nil
+    return apps
+  lines = manifest.split("\n")
+  i = 0
+  while i < lines.size
+    line = strip_bitfile_comment(lines[i]).strip
+    i = i + 1
+    if line.starts_with?("app ") || line.starts_with?("app\t")
+      quoted = extract_quoted(line)
+      if quoted.size == 0 || quoted[0] == ""
+        die("Invalid app declaration in " + bit_root + "/Bitfile")
+      name = quoted[0]
+      exe = bit_option_value(line, "executable")
+      if exe == nil || exe == ""
+        die("An app needs executable: in " + bit_root + "/Bitfile")
+      id = bit_option_value(line, "id")
+      if id == nil || id == ""
+        id = "local." + exe
+      icon = bit_option_value(line, "icon")
+      if icon == nil
+        icon = ""
+      docs = bit_option_value(line, "documents")
+      if docs == nil
+        docs = ""
+      version = bit_option_value(line, "version")
+      if version == nil || version == ""
+        version = "0.1"
+      if !bit_relative_path?(exe) || (icon != "" && !bit_relative_path?(icon))
+        die("App executable and icon must be package-relative paths in " + bit_root + "/Bitfile")
+      apps.push({name: name, exe: exe, id: id, icon: icon, documents: docs, version: version})
+  apps
+
+-> plist_escape(s)
+  s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+-> app_info_plist(app, has_icon)
+  b = StringBuffer(2048)
+  b << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+  b << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+  b << "<plist version=\"1.0\">\n<dict>\n"
+  keys = ["CFBundleName", "CFBundleDisplayName", "CFBundleIdentifier", "CFBundleExecutable", "CFBundlePackageType", "CFBundleShortVersionString", "CFBundleVersion", "CFBundleInfoDictionaryVersion", "LSMinimumSystemVersion"]
+  vals = [app[:name], app[:name], app[:id], basename_of(app[:exe]), "APPL", app[:version], app[:version], "6.0", "13.0"]
+  i = 0
+  while i < keys.size
+    b << "  <key>" + keys[i] + "</key><string>" + plist_escape(vals[i]) + "</string>\n"
+    i = i + 1
+  b << "  <key>NSHighResolutionCapable</key><true/>\n"
+  if has_icon
+    b << "  <key>CFBundleIconFile</key><string>" + plist_escape(app[:name]) + "</string>\n"
+  exts = split_ws(app[:documents])
+  if exts.size > 0
+    b << "  <key>CFBundleDocumentTypes</key>\n  <array>\n"
+    i = 0
+    while i < exts.size
+      b << "    <dict><key>CFBundleTypeName</key><string>" + plist_escape(exts[i]) + " document</string>"
+      b << "<key>CFBundleTypeRole</key><string>Editor</string>"
+      b << "<key>CFBundleTypeExtensions</key><array><string>" + plist_escape(exts[i]) + "</string></array></dict>\n"
+      i = i + 1
+    b << "  </array>\n"
+  b << "</dict>\n</plist>\n"
+  b.to_s
+
+# bin/<Name>.app: Contents/MacOS/<exe> (the built executable), Contents/Info.plist, Contents/Resources/<Name>.icns (from a
+# PNG with sips + iconutil), signed ad hoc. The app links the system frameworks it uses (AppKit, Metal, QuartzCore, …), which
+# need no copying; nothing else is embedded.
+-> bundle_app(bit_root, app)
+  if !IS_DARWIN
+    << "    " + DIM + "skip" + RESET + "    " + app[:name] + ".app " + DIM + "(macOS only)" + RESET
+    return true
+  t_app = clock_ms()
+  exe = bit_root + "/bin/" + basename_of(app[:exe])
+  if !executable?(exe)
+    exe = bit_root + "/" + app[:exe]
+  if !executable?(exe)
+    eputs(RED + "app " + app[:name] + ": no executable " + app[:exe] + " (declare it with `executable` in the Bitfile)" + RESET)
+    return false
+  bundle = bit_root + "/bin/" + app[:name] + ".app"
+  contents = bundle + "/Contents"
+  make_dirs(contents + "/MacOS")
+  make_dirs(contents + "/Resources")
+  out_exe = contents + "/MacOS/" + basename_of(app[:exe])
+  if !atomic_copy(exe, out_exe)
+    return false
+  sh_ok("chmod 755 " + shq(out_exe))
+  has_icon = false
+  if app[:icon] != ""
+    src = bit_root + "/" + app[:icon]
+    if !regular_file?(src)
+      eputs(RED + "app " + app[:name] + ": no icon " + app[:icon] + RESET)
+      return false
+    set = "/tmp/tungsten-build-" + PID + "-" + app[:name] + ".iconset"
+    sh_ok("rm -rf " + shq(set))
+    make_dirs(set)
+    sizes = [16, 32, 128, 256, 512]
+    ok = true
+    i = 0
+    while i < sizes.size
+      z = sizes[i]
+      ok = ok && sh_ok("sips -z " + z.to_s + " " + z.to_s + " " + shq(src) + " --out " + shq(set + "/icon_" + z.to_s + "x" + z.to_s + ".png") + " >/dev/null 2>&1")
+      ok = ok && sh_ok("sips -z " + (z * 2).to_s + " " + (z * 2).to_s + " " + shq(src) + " --out " + shq(set + "/icon_" + z.to_s + "x" + z.to_s + "@2x.png") + " >/dev/null 2>&1")
+      i = i + 1
+    ok = ok && sh_ok("iconutil -c icns " + shq(set) + " -o " + shq(contents + "/Resources/" + app[:name] + ".icns") + " >/dev/null 2>&1")
+    if !ok
+      eputs(RED + "app " + app[:name] + ": could not make the icon from " + app[:icon] + RESET)
+      return false
+    has_icon = true
+  atomic_write(app_info_plist(app, has_icon), contents + "/Info.plist")
+  atomic_write("APPL????", contents + "/PkgInfo")
+  if !codesign_ok(bundle)
+    eputs(RED + "codesign failed for " + bundle + RESET)
+    return false
+  << "    " + GREEN + "built" + RESET + "   " + project_relative_path(bundle) + " " + DIM + ms(clock_ms() - t_app) + RESET
+  true
+
 -> bit_short_name(bit_path)
   name = basename_of(bit_path)
   if name.starts_with?("tungsten-")
@@ -2484,6 +2673,12 @@ elsif bit_only
       bits_built = bits_built + 1
     else
       exit(1)
+  apps = bit_apps(bit_root_found)
+  ai = 0
+  while ai < apps.size
+    if !bundle_app(bit_root_found, apps[ai])
+      exit(1)
+    ai = ai + 1
 else
   << BOLD + "==> Bits: compiling entry points" + RESET
   bit_dirs = capture("find " + shq(ROOT + "/bits") + " -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort").split("\n")

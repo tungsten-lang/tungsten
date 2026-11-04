@@ -100,6 +100,10 @@
         if @current_type == T_ASSIGN
           advance()
           value = parse_assignment()
+          # `a[i] = v ## i64` ascribes the stored value, as `x = v ## i64`
+          # does. Left for the statement wrapper, the hint wrapped the whole
+          # `[]=` call instead, so the raw f64 went into the array.
+          value = consume_trailing_type_ascription(value)
           expr = Tungsten:AST:Call.new(expr, "\[]=", [index, value], nil, lbr_loc, make_end_loc())
         else
           expr = Tungsten:AST:Call.new(expr, "\[]", [index], nil, lbr_loc, make_end_loc())

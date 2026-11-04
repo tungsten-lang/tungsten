@@ -530,6 +530,17 @@
   emit_wire_phi_ssa(wfn, incoming, result)
   typed_value(:i64, result)
 
+# A raw f64/f32 stored into an integer typed array. The interpreter and the
+# boxed store path raise "expected int, got double"; the inline store wrote the
+# float's IEEE bits instead (100.0 into a u8[] slot read back 0). Box the float
+# and take the same checked unbox the boxed path uses, so this store raises too.
+-> checked_int_store_of_raw_float(wfn, tv, recv_type)
+  machine_type = recv_type == :typed_array_u64 ? :u64 : :i64
+  ensure_raw_machine_int(wfn, typed_value(:i64, ensure_i64_value(wfn, tv)), machine_type, nil)
+
+-> int_element_typed_array?(t)
+  t in (:typed_array_u4 :typed_array_i4 :typed_array_u8 :typed_array_i8 :typed_array_u16 :typed_array_i16 :typed_array_u32 :typed_array_i32 :typed_array_u64 :typed_array_i64)
+
 -> lower_method_call(ctx, node)
   wfn = ctx[:func]
   method_name = node.name
@@ -2166,6 +2177,8 @@
         if elem_type == :typed_array_u64
           store_machine_type = :u64
         val_reg = ensure_raw_machine_int(wfn, val_expr, store_machine_type, nil)
+      elsif val_expr[:type] in (:raw_f32 :raw_f64) && int_element_typed_array?(elem_type)
+        val_reg = checked_int_store_of_raw_float(wfn, val_expr, elem_type)
       else
         val_reg = ensure_i64_value(wfn, val_expr)
       scratch = []
@@ -2341,6 +2354,10 @@
           # Commutative ops: `arr[i] = X | arr[i]` is the same fused form.
           fused_op = val_node.op
           fused_rhs_node = left
+      # A float operand makes the value a float, not an integer op: leave it
+      # to the plain store, which raises on it like the interpreter does.
+      if fused_op != nil && is_machine_float_type(infer_type(fused_rhs_node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps))
+        fused_op = nil
       if fused_op != nil
         receiver_val = lower_expression(ctx, recv_node)
         receiver_reg = ensure_i64_value(wfn, receiver_val)
@@ -2363,6 +2380,10 @@
           if recv_type == :typed_array_u64
             rhs_machine_type = :u64
           rhs_reg = ensure_raw_machine_int(wfn,rhs_tv,rhs_machine_type,nil)
+        elsif rhs_tv[:type] in (:raw_f64 :raw_f32)
+          # A float operand that inference did not type (see above): never
+          # combine its bits into the slot.
+          rhs_reg = checked_int_store_of_raw_float(wfn, rhs_tv, recv_type)
         else
           rhs_reg = ensure_i64_value(wfn, rhs_tv)
         scratch = []
@@ -2420,6 +2441,8 @@
         if recv_type == :typed_array_u64
           store_machine_type = :u64
         val_reg = ensure_raw_machine_int(wfn,val_expr,store_machine_type,nil)
+      elsif val_expr[:type] in (:raw_f32 :raw_f64) && int_element_typed_array?(recv_type)
+        val_reg = checked_int_store_of_raw_float(wfn, val_expr, recv_type)
       else
         val_reg = ensure_i64_value(wfn, val_expr)
       scratch = []

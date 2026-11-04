@@ -598,7 +598,9 @@
 # proven to use a raw ABI.  The return annotation alone is insufficient:
 # dynamic dispatch and boxed-ABI methods can also be annotated `i64`, but
 # their LLVM register still contains a WValue at this point.
--> resolved_raw_machine_call_return_type(node, mod)
+# declared_types (optional) types the arguments, which a typed-signature
+# callee needs: its raw ABI is registered under the overload key.
+-> resolved_raw_machine_call_return_type(node, mod, declared_types = nil)
   if mod == nil || node == nil || !is_ast_node?(node) || ast_kind(node) != :call
     return nil
   # Attached blocks bypass both direct-static and raw top-level call paths.
@@ -617,6 +619,32 @@
       fn_def = mod[:known_fn_defs] == nil ? nil : mod[:known_fn_defs][node_name]
       if fn_def != nil && !definition_from_core?(fn_def) && node.args != nil && mod[:known_fn_param_counts][node_name] == node.args.size() && !pi_args_have_kwargs?(node.args)
         rt = mod[:fn_return_types] == nil ? nil : mod[:fn_return_types][node_name]
+        if is_machine_int64_type(rt)
+          return rt
+    # A typed-signature fn registers its raw ABI under the overload key
+    # (`name|i64,f64[]`), never the bare name, so resolve that key the way
+    # lower_call's typed-overload arm does. Without this, `x = mix(x)` in a
+    # typed caller kept x in a boxed slot: every raw result was re-boxed
+    # through w_int, a heap BigInt from 2^47 up.
+    nargs_list = node.args
+    if declared_types != nil && nargs_list != nil && nargs_list.size() > 0 && mod[:known_calls] != nil && mod[:raw_callable_fns] != nil && !pi_args_have_kwargs?(nargs_list)
+      arg_types = inferred_arg_types(nargs_list, declared_types, mod[:fn_return_types], lowering_infer_maps)
+      typed_key = typed_call_signature_key(node_name, arg_types)
+      if typed_key == node_name || mod[:known_calls][typed_key] == nil
+        # lower_call's fallback: an argument of unknown type binds the call
+        # to the name's only typed overload of this arity.
+        typed_key = nil
+        has_unknown_arg = false
+        ati = 0
+        while ati < arg_types.size()
+          if arg_types[ati] == nil
+            has_unknown_arg = true
+          ati += 1
+        arity_key = typed_overload_arity_key(node_name, nargs_list.size())
+        if has_unknown_arg && mod[:known_calls][node_name] == nil && mod[:known_typed_overload_counts] != nil && mod[:known_typed_overload_counts][arity_key] == 1
+          typed_key = mod[:known_unique_typed_overload_keys][arity_key]
+      if typed_key != nil && mod[:known_calls][typed_key] != nil && mod[:raw_callable_fns][typed_key] != nil
+        rt = mod[:fn_return_types] == nil ? nil : mod[:fn_return_types][typed_key]
         if is_machine_int64_type(rt)
           return rt
     return nil
@@ -699,7 +727,7 @@
   when :type_ascription
     return assign_int_hint_type(node.type_hint) != nil
   when :call
-    if resolved_raw_machine_call_return_type(node, mod) != nil
+    if resolved_raw_machine_call_return_type(node, mod, declared_types) != nil
       return true
     name = node.name
     if name == "wvalue_bits" && node.receiver == nil && node.args != nil && node.args.size() == 1

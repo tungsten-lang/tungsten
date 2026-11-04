@@ -4253,8 +4253,8 @@ WValue w_media_midi_close(WValue hv) {
 /* ---- the live sampler (version 2, 2026-11-04: streaming, scheduled, sinc-interpolated) ----
  *
  * Zones are samples: an audio file (FLAC, WAV, AIFF … read by ExtAudioFile: its head in memory, the rest streamed by a reader
- * thread into each voice's ring as the voice plays), a raw PCM cache (memory-mapped: "TWPCM\0\0\1", rate (f64), frames (i64),
- * float32 stereo interleaved), or PCM handed over (the first API: live_zone with key ranges). The program chooses the zone,
+ * thread into each voice's ring as the voice plays), a raw PCM cache (memory-mapped: "TWPCM\0\0\2", rate (i64), frames (i64),
+ * int32 stereo interleaved), or PCM handed over (the first API: live_zone with key ranges). The program chooses the zone,
  * pitch ratio and gain of every note (the sound engine's own choice: sampler.w sfz_pick / prr_pick) and schedules it at a host
  * time (the clock MIDI timestamps use); the render thread starts it at that frame. Voices play as sampler.w's play() does: a
  * 64-tap windowed sinc (the table handed over with live_sinc, else linear), a fade-in of 29 samples at 48 kHz, an exponential
@@ -4277,7 +4277,7 @@ static double a_f64_at(WValue a, int64_t i, const char *what, int64_t *n) {
     return 0;
 }
 
-#define LV_RING 65536
+#define LV_RING 32768
 #define LV_HEAD_MAX 262144
 #define LV_EVENTS 4096
 
@@ -4287,7 +4287,7 @@ typedef struct LZoneF {
     double rate;
     int64_t frames, head_n, first;
     float *hl, *hr;            /* kind 1: the head; kind 3: everything */
-    const float *raw;          /* kind 2: interleaved stereo */
+    const int32_t *raw;        /* kind 2: interleaved stereo int32 (x · 2^31 − 1) */
     size_t raw_len;
     int lo, hi, vlo, vhi, root;
     double gain;
@@ -4356,7 +4356,7 @@ static double lv_host_s(uint64_t ht) {
 static inline void lv_frame(ALive *L, LVoiceF *v, LZoneF *z, int64_t q, float *a, float *b) {
     if (q < 0 || q >= z->frames) { *a = 0; *b = 0; return; }
     if (z->kind == 3 || (z->kind == 1 && q < z->head_n)) { *a = z->hl[q]; *b = z->hr[q]; return; }
-    if (z->kind == 2) { *a = z->raw[2 * q]; *b = z->raw[2 * q + 1]; return; }
+    if (z->kind == 2) { *a = (float)z->raw[2 * q] * (1.0f / 2147483647.0f); *b = (float)z->raw[2 * q + 1] * (1.0f / 2147483647.0f); return; }
     int64_t e = atomic_load_explicit(&v->ring_end, memory_order_acquire);
     if (q < e && q >= e - LV_RING) { int64_t i = q & (LV_RING - 1); *a = v->rl[i]; *b = v->rr[i]; return; }
     atomic_fetch_add(&L->underruns, 1);
@@ -4583,6 +4583,12 @@ WValue w_media_live_new(WValue ratev) {
         }];
         [L->engine attachNode:L->node];
         [L->engine connect:L->node to:L->engine.mainMixerNode format:fmt];
+        /* small output buffers for this program's IO (a live instrument): 256 frames (2.7 ms at 96 kHz, 5.3 at 48) */
+        AudioUnit au = L->engine.outputNode.audioUnit;
+        if (au) {
+            UInt32 bf = 256;
+            AudioUnitSetProperty(au, kAudioDevicePropertyBufferFrameSize, kAudioUnitScope_Global, 0, &bf, sizeof bf);
+        }
         NSError *err = nil;
         if (![L->engine startAndReturnError:&err]) {
             [L->node release];
@@ -4673,14 +4679,19 @@ WValue w_media_live_zone_file(WValue hv, WValue pathv, WValue headv) {
         fstat(fd, &sb);
         void *m = mmap(NULL, (size_t)sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
         close(fd);
-        if (m == MAP_FAILED || sb.st_size < 24 || memcmp(m, "TWPCM\0\0\1", 8) != 0) w_media_raise("live_zone_file: %s: not a PCM cache", path);
+        if (m == MAP_FAILED || sb.st_size < 24 || memcmp(m, "TWPCM\0\0\2", 8) != 0) w_media_raise("live_zone_file: %s: not a PCM cache", path);
         z.kind = 2;
-        memcpy(&z.rate, (char *)m + 8, 8);
+        int64_t ir = 0;
+        memcpy(&ir, (char *)m + 8, 8);
+        z.rate = (double)ir;
         memcpy(&z.frames, (char *)m + 16, 8);
-        z.raw = (const float *)((char *)m + 24);
+        z.raw = (const int32_t *)((char *)m + 24);
         z.raw_len = (size_t)sb.st_size;
         z.head_n = z.frames;
-        z.first = lv_first_sound(z.raw, z.raw + 1, z.frames < 48000 ? z.frames : 48000, 2, z.rate);
+        z.first = 0;
+        for (int64_t i = 0; i < z.frames && i < 96000; i++) {
+            if (abs(z.raw[2 * i]) > 3436202 || abs(z.raw[2 * i + 1]) > 3436202) { z.first = i - 48 < 0 ? 0 : i - 48; break; }
+        }
         L->map_bytes += (int64_t)sb.st_size;
     } else {
         CFURLRef u = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)pl, false);

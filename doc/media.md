@@ -552,6 +552,21 @@ channels:}`), `audio_close(p)`. Playback runs on the player's own threads,
 so a program needs no run loop and keeps drawing; `use core/audio`. macOS
 only (other targets raise). Spec: spec/core/audio_spec.w.
 
+## MIDI (core/midi)
+
+CoreMIDI, loaded at the first call: `midi_destinations()` and `midi_sources()` (names), `midi_out(index)` (or
+`midi_out(-1, name)`: a virtual source other programs can listen to), `midi_send(out, status, data1, data2)`,
+`midi_in(index)` (or `midi_in(-1, name)`: a virtual destination other programs can send to), `midi_read(in)` (the channel
+messages received since the last read, `[status, data1, data2, seconds]`), `midi_close(port)`. `use core/midi`. Spec:
+spec/core/midi_live_spec.w (a loopback through a virtual destination).
+
+## The live sampler (core/live)
+
+AVAudioEngine plays zones of PCM now: `live_new(rate)`, `live_zone(s, [lo, hi, vlo, vhi, root, frames, rate, loop_start,
+loop_end, gain], left, right)` (f64[] or f32[] channels, copied), `live_note(s, key, velocity)` (0 releases: a 0.25 s fade),
+`live_volume(s, v)`, `live_info(s)` (`{voices:, zones:, rate:, rendered:}`), `live_close(s)`. Voices are resampled from the
+zone's root and rate to the device's rate; 96 voices, the quietest release stolen first. `use core/live`.
+
 ## How it is built
 
 - **Runtime:** `runtime/media/media.c` (handle registry, converter,

@@ -390,7 +390,11 @@
   # Draw src (a path, a CanvasImage, or another Canvas) into the box x, y, w, h
   # (w/h nil = the image's size). opts: fit (:meet default, :slice, :fill),
   # align ("xMidYMid", "xMinYMin", …), opacity, quality, src ([sx, sy, sw, sh]
-  # crop in image pixels), blend.
+  # crop in image pixels), blend. quality :exact (8-bit canvas, fit :fill, no
+  # src crop, axis-aligned transform) resamples in the runtime at the exact
+  # fractional position (separable cubic, antialiased when reducing) instead of
+  # CoreGraphics, which snaps such draws to the device pixel grid; it ignores
+  # clip paths and blend modes. Other draws fall back to :high.
   -> image(src, x, y, w = nil, h = nil, opts = {})
     snap = nil
     img = src

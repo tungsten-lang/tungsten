@@ -2233,6 +2233,198 @@ static CGImageRef cg_img_for(CGImg *im, CGCanvas *c) {
     return made;
 }
 
+/* ---- quality "exact": a true sub-pixel resample (studio camera moves) -------------------------------
+ * CGContextDrawImage snaps an axis-aligned image draw to the device pixel grid (measured 2026-11-01:
+ * a draw moved by 0.16 px a frame stays put for five frames, then jumps 0.8 px; at unit scale it moves
+ * in ~0.37 px steps), so a slow push or pan steps and a sub-pixel jitter turns into whole-pixel jumps.
+ * "exact" resamples in C instead: separable Keys cubic (a = -0.5, PIL's BICUBIC), widened by the
+ * downscale factor (so a reduction is antialiased), at the exact fractional position the current CTM
+ * gives, composited source-over (premultiplied) at the draw's opacity. It applies to an 8-bit canvas,
+ * a stretched draw ("fill") of the whole image and an axis-aligned CTM (translate/scale/flip); anything
+ * else falls back to CoreGraphics. Clip paths and blend modes are not applied on this path. */
+typedef struct { const CGImg *im; uint32_t gen; CGImageRef key; CFDataRef data; size_t w, h, stride; } CGExactSrc;
+static CGExactSrc g_exact_src[2];
+static int g_exact_next;
+static pthread_mutex_t g_exact_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* RGBA8 premultiplied pixels (R,G,B,A in memory, as the 8-bit canvas) of img, cached for the last two images. */
+static int cg_exact_source(const CGImg *im, CGImageRef img, CGCanvas *c, const uint8_t **px, size_t *stride) {
+    pthread_mutex_lock(&g_exact_lock);
+    for (int i = 0; i < 2; i++) {
+        CGExactSrc *e = &g_exact_src[i];
+        if (e->data && e->im == im && e->gen == im->gen && e->key == img) {
+            *px = CFDataGetBytePtr(e->data);
+            *stride = e->stride;
+            pthread_mutex_unlock(&g_exact_lock);
+            return 1;
+        }
+    }
+    pthread_mutex_unlock(&g_exact_lock);
+    CGImageRef use = img, made = NULL;
+    CGBitmapInfo bi = CGImageGetBitmapInfo(img);
+    int ok = CGImageGetBitsPerComponent(img) == 8 && CGImageGetBitsPerPixel(img) == 32 &&
+             CGImageGetAlphaInfo(img) == kCGImageAlphaPremultipliedLast &&
+             ((bi & kCGBitmapByteOrderMask) == kCGBitmapByteOrder32Big || (bi & kCGBitmapByteOrderMask) == kCGBitmapByteOrderDefault);
+    if (!ok) {
+        made = cg_render_bitmap(img, c->space, 8, 0, NULL);
+        if (!made) return 0;
+        use = made;
+    }
+    CFDataRef data = CGDataProviderCopyData(CGImageGetDataProvider(use));
+    size_t st = CGImageGetBytesPerRow(use);
+    if (made) CGImageRelease(made);
+    if (!data) return 0;
+    pthread_mutex_lock(&g_exact_lock);
+    CGExactSrc *e = &g_exact_src[g_exact_next];
+    g_exact_next = (g_exact_next + 1) % 2;
+    if (e->data) CFRelease(e->data);
+    e->im = im; e->gen = im->gen; e->key = img; e->data = data;
+    e->w = CGImageGetWidth(img); e->h = CGImageGetHeight(img); e->stride = st;
+    *px = CFDataGetBytePtr(data);
+    *stride = st;
+    pthread_mutex_unlock(&g_exact_lock);
+    return 1;
+}
+
+static double cg_keys(double t) {          /* Keys cubic convolution, a = -0.5 */
+    t = fabs(t);
+    if (t < 1) return (1.5 * t - 2.5) * t * t + 1;
+    if (t < 2) return ((-0.5 * t + 2.5) * t - 4) * t + 2;
+    return 0;
+}
+
+/* Weights for n outputs: output o samples the source (length len) at pos0 + o * step (pixel-centre units).
+ * Fills first[o], count[o] and w[o * maxt ..]; returns maxt (taps per output). */
+static int cg_exact_weights(int n, double pos0, double step, int len, int **first_out, int **count_out, float **w_out) {
+    double f = fabs(step) > 1 ? fabs(step) : 1;   /* widen the kernel when reducing */
+    double sup = 2 * f;
+    int maxt = (int)ceil(2 * sup) + 2;
+    int *first = malloc(sizeof(int) * (size_t)n), *count = malloc(sizeof(int) * (size_t)n);
+    float *w = malloc(sizeof(float) * (size_t)n * (size_t)maxt);
+    if (!first || !count || !w) { free(first); free(count); free(w); return 0; }
+    for (int o = 0; o < n; o++) {
+        double p = pos0 + o * step;
+        int i0 = (int)ceil(p - sup), i1 = (int)floor(p + sup);
+        if (i1 - i0 + 1 > maxt) i1 = i0 + maxt - 1;
+        double sum = 0;
+        int k = 0;
+        for (int i = i0; i <= i1; i++, k++) {
+            double v = cg_keys((i - p) / f);
+            w[o * maxt + k] = (float)v;
+            sum += v;
+        }
+        if (sum != 0) for (int j = 0; j < k; j++) w[o * maxt + j] = (float)(w[o * maxt + j] / sum);
+        first[o] = i0;
+        count[o] = k;
+        (void)len;
+    }
+    *first_out = first; *count_out = count; *w_out = w;
+    return maxt;
+}
+
+static inline int cg_clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+/* Draw the whole image stretched over the user rect (dx, dy, dw, dh) (y down, as w_cg_image_draw) at
+ * opacity op. Returns 1 when drawn, 0 to fall back to CoreGraphics. */
+static int cg_image_draw_exact(CGCanvas *c, CGImg *im, CGImageRef img, double dx, double dy, double dw, double dh, double op) {
+    if (c->bpc != 8 || c->is_float || !c->data) return 0;
+    CGAffineTransform m = CGContextGetCTM(c->ctx);          /* user -> device (y up, origin bottom-left) */
+    if (fabs(m.b) > 1e-9 || fabs(m.c) > 1e-9 || m.a == 0 || m.d == 0) return 0;
+    size_t iw = CGImageGetWidth(img), ih = CGImageGetHeight(img);
+    if (iw == 0 || ih == 0) return 0;
+    const uint8_t *src;
+    size_t sst;
+    if (!cg_exact_source(im, img, c, &src, &sst)) return 0;
+    int W = (int)c->pw, H = (int)c->ph;
+    /* device column q (centre q + 0.5) -> user x -> image x; memory row r (device y = H - r - 0.5) -> user y -> image y */
+    double ux0 = (0.5 - m.tx) / m.a, uxs = 1.0 / m.a;              /* user x of column q = ux0 + q * uxs */
+    double uy0 = ((H - 0.5) - m.ty) / m.d, uys = -1.0 / m.d;       /* user y of row r = uy0 + r * uys */
+    double sxs = (double)iw / dw, sys = (double)ih / dh;
+    double px0 = (ux0 - dx) * sxs - 0.5, pxs = uxs * sxs;          /* image sample x of column q */
+    double py0 = (uy0 - dy) * sys - 0.5, pys = uys * sys;          /* image sample y of row r */
+    /* the device columns / rows the image covers */
+    double qa = (dx - ux0) / uxs, qb = (dx + dw - ux0) / uxs;
+    double ra = (dy - uy0) / uys, rb = (dy + dh - uy0) / uys;
+    int q0 = cg_clampi((int)floor(fmin(qa, qb) + 0.5), 0, W), q1 = cg_clampi((int)ceil(fmax(qa, qb) - 0.5), 0, W);
+    int r0 = cg_clampi((int)floor(fmin(ra, rb) + 0.5), 0, H), r1 = cg_clampi((int)ceil(fmax(ra, rb) - 0.5), 0, H);
+    int nq = q1 - q0, nr = r1 - r0;
+    if (nq <= 0 || nr <= 0) return 1;
+    int *hf, *hc, *vf, *vc;
+    float *hw, *vw;
+    int ht = cg_exact_weights(nq, px0 + q0 * pxs, pxs, (int)iw, &hf, &hc, &hw);
+    if (!ht) return 0;
+    int vt = cg_exact_weights(nr, py0 + r0 * pys, pys, (int)ih, &vf, &vc, &vw);
+    if (!vt) { free(hf); free(hc); free(hw); return 0; }
+    /* the source rows the vertical taps read */
+    int sr0 = (int)ih, sr1 = -1;
+    for (int o = 0; o < nr; o++) {
+        int a = cg_clampi(vf[o], 0, (int)ih - 1), b = cg_clampi(vf[o] + vc[o] - 1, 0, (int)ih - 1);
+        if (a < sr0) sr0 = a;
+        if (b > sr1) sr1 = b;
+    }
+    int nsr = sr1 - sr0 + 1;
+    float *tmp = malloc(sizeof(float) * 4 * (size_t)nq * (size_t)(nsr > 0 ? nsr : 1));
+    if (!tmp || nsr <= 0) { free(tmp); free(hf); free(hc); free(hw); free(vf); free(vc); free(vw); return 0; }
+    /* horizontal pass: each needed source row -> nq columns */
+    int maxx = (int)iw - 1;
+    for (int y = 0; y < nsr; y++) {
+        const uint8_t *row = src + (size_t)(sr0 + y) * sst;
+        float *out = tmp + (size_t)y * nq * 4;
+        for (int o = 0; o < nq; o++) {
+            const float *w = hw + (size_t)o * ht;
+            int f0 = hf[o], n = hc[o];
+            float a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+            if (f0 >= 0 && f0 + n - 1 <= maxx) {
+                const uint8_t *s = row + (size_t)f0 * 4;
+                for (int k = 0; k < n; k++, s += 4) {
+                    float wk = w[k];
+                    a0 += wk * s[0]; a1 += wk * s[1]; a2 += wk * s[2]; a3 += wk * s[3];
+                }
+            } else {
+                for (int k = 0; k < n; k++) {
+                    const uint8_t *s = row + (size_t)cg_clampi(f0 + k, 0, maxx) * 4;
+                    float wk = w[k];
+                    a0 += wk * s[0]; a1 += wk * s[1]; a2 += wk * s[2]; a3 += wk * s[3];
+                }
+            }
+            out[o * 4] = a0; out[o * 4 + 1] = a1; out[o * 4 + 2] = a2; out[o * 4 + 3] = a3;
+        }
+    }
+    /* vertical pass, then source-over into the canvas */
+    float opf = (float)(op < 0 ? 0 : op > 1 ? 1 : op);
+    uint8_t *dst = (uint8_t *)c->data;
+    float *acc = malloc(sizeof(float) * 4 * (size_t)nq);
+    if (!acc) { free(tmp); free(hf); free(hc); free(hw); free(vf); free(vc); free(vw); return 0; }
+    for (int o = 0; o < nr; o++) {
+        const float *w = vw + (size_t)o * vt;
+        int f0 = vf[o], n = vc[o];
+        for (int j = 0; j < nq * 4; j++) acc[j] = 0;
+        for (int k = 0; k < n; k++) {
+            int sy = cg_clampi(f0 + k, 0, (int)ih - 1) - sr0;
+            const float *tr = tmp + (size_t)sy * nq * 4;
+            float wk = w[k];
+            for (int j = 0; j < nq * 4; j++) acc[j] += wk * tr[j];
+        }
+        uint8_t *drow = dst + (size_t)(r0 + o) * c->stride + (size_t)q0 * 4;
+        for (int q = 0; q < nq; q++) {
+            float sa = acc[q * 4 + 3] * opf;
+            if (sa > 255.0f) sa = 255.0f;
+            if (sa < 0.0f) sa = 0.0f;
+            float keep = 1.0f - sa / 255.0f;
+            for (int ch = 0; ch < 4; ch++) {
+                float sv = ch == 3 ? sa : acc[q * 4 + ch] * opf;
+                if (sv < 0.0f) sv = 0.0f;
+                if (sv > sa && ch != 3) sv = sa;              /* premultiplied: colour <= alpha */
+                float v = sv + drow[q * 4 + ch] * keep;
+                int iv = (int)(v + 0.5f);
+                drow[q * 4 + ch] = (uint8_t)(iv > 255 ? 255 : iv < 0 ? 0 : iv);
+            }
+        }
+    }
+    free(acc); free(tmp); free(hf); free(hc); free(hw); free(vf); free(vc); free(vw);
+    return 1;
+}
+
 /* w_cg_image_draw(h, img, x, y, w, h, fit, align, opacity, quality, sx, sy, sw, sh)
  *   fit: "meet" (default, SVG's), "slice" (cover, clipped to the box), or
  *   "fill"/"none" (stretch); align: SVG preserveAspectRatio alignment
@@ -2253,9 +2445,11 @@ WValue w_cg_image_draw(WValue hv, WValue imv, WValue xv, WValue yv, WValue wv, W
     char fit[16] = "meet", align[16] = "xMidYMid";
     if (fitv != W_NIL) cg_str(fitv, fit, sizeof fit);
     if (alignv != W_NIL) cg_str(alignv, align, sizeof align);
-    int ok;
+    int ok, exact = 0;
+    char qs[16];
+    if (qv != W_NIL && cg_str(qv, qs, sizeof qs) && cg_eq(qs, "exact")) { exact = 1; qv = W_NIL; }
     CGInterpolationQuality q = cg_quality(qv, &ok);
-    if (!ok) cg_raise("Canvas.image: quality must be none, low, medium, high or default");
+    if (!ok) cg_raise("Canvas.image: quality must be none, low, medium, high, default or exact");
     if (w <= 0 || h <= 0 || op <= 0 || iw <= 0 || ih <= 0) return W_FALSE;
     int slice = 0, stretch = 0;
     if (cg_eq(fit, "slice") || cg_eq(fit, "cover")) slice = 1;
@@ -2278,6 +2472,7 @@ WValue w_cg_image_draw(WValue hv, WValue imv, WValue xv, WValue yv, WValue wv, W
         dy = y + (h - dh) * ay;
     }
     CGImageRef img = cg_img_for(im, c);
+    if (exact && stretch && !crop && cg_image_draw_exact(c, im, img, dx, dy, dw, dh, op * cg_state(c)->alpha)) return W_TRUE;
     CGImageRef part = NULL;
     if (crop) {
         part = CGImageCreateWithImageInRect(img, CGRectMake(sx, sy, sw, sh));

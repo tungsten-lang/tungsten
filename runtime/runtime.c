@@ -83084,4 +83084,83 @@ W_BRIDGE_STUB WValue w_gfx_present_wait(WValue window, WValue buffer,
     (void)window; (void)buffer; (void)width; (void)height;
     return w_gfx_unavailable();
 }
+/* editor-style windows (2026-11-04): flags, the event queue, metrics, menus, panels */
+W_BRIDGE_STUB WValue w_gfx_window_open(WValue device, WValue title, WValue width,
+                                        WValue height, WValue flags) {
+    (void)device; (void)title; (void)width; (void)height; (void)flags;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_wait(WValue window, WValue seconds) {
+    (void)window; (void)seconds;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_next_event(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_event_field(WValue window, WValue field) {
+    (void)window; (void)field;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_event_text(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_metric(WValue window, WValue which) {
+    (void)window; (void)which;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_set_title(WValue window, WValue title) {
+    (void)window; (void)title;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_set_size(WValue window, WValue width, WValue height) {
+    (void)window; (void)width; (void)height;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_set_cursor(WValue window, WValue kind) {
+    (void)window; (void)kind;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_close(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_menu_add(WValue window, WValue menu, WValue title,
+                                     WValue key, WValue mods, WValue id) {
+    (void)window; (void)menu; (void)title; (void)key; (void)mods; (void)id;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_menu_set(WValue window, WValue id, WValue enabled,
+                                     WValue checked) {
+    (void)window; (void)id; (void)enabled; (void)checked;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_open_panel(WValue window, WValue title, WValue types,
+                                       WValue dir) {
+    (void)window; (void)title; (void)types; (void)dir;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_save_panel(WValue window, WValue title, WValue name,
+                                       WValue types, WValue dir) {
+    (void)window; (void)title; (void)name; (void)types; (void)dir;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_panel_answer(WValue window, WValue path) {
+    (void)window; (void)path;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_alert(WValue window, WValue message, WValue info, WValue buttons) {
+    (void)window; (void)message; (void)info; (void)buttons;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_alert_answer(WValue window, WValue index) {
+    (void)window; (void)index;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_post_event(WValue window, WValue kind, WValue x, WValue y,
+                                       WValue a, WValue b, WValue mods, WValue text) {
+    (void)window; (void)kind; (void)x; (void)y; (void)a; (void)b; (void)mods; (void)text;
+    return w_gfx_unavailable();
+}
 /* end windowed graphics bridge stubs (weak) */

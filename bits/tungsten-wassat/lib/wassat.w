@@ -1308,6 +1308,17 @@ use lut_congruence
         if scout_naked_plan != nil
           scout_naked_res = i64[scout_nv + 8]
           scout_naked_h = wassat_naked_start(formula, scout_naked_plan, scout_stop, scout_naked_res, 0)
+        scout_affine_plan = nil
+        scout_affine_res = nil
+        scout_affine_h = nil
+        if options["conflicts"] == 0 && raw_probe && env("WASSAT_AFFINE_CIRCUIT_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil && scout_cycle_plan == nil && scout_naked_plan == nil
+          affine_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
+          affine_cdcl = scout_lucky ? 2 : 1
+          affine_cdcl += 1 if affine_sls > 0 && wassat_sls_repair_eligible?(formula)
+          scout_affine_plan = wassat_affine_circuit_plan(formula, cover_workers, affine_cdcl, affine_sls, resident_pre_arenas, 0)
+        if scout_affine_plan != nil
+          scout_affine_res = i64[scout_nv + 8]
+          scout_affine_h = Thread.new -> wassat_affine_circuit_arm(formula, scout_affine_plan, scout_stop, scout_affine_res, 0, scout_nv)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1397,8 +1408,13 @@ use lut_congruence
         capacity_cancel_ms = clock_ms() if scout_capacity_h != nil
         counter_cancel_ms = scout_counter_h == nil ? 0 : clock_ms()
         cycle_cancel_ms = scout_cycle_h == nil ? 0 : clock_ms()
+        affine_cancel_ms = scout_affine_h == nil ? 0 : clock_ms()
         naked_cancel_ms = scout_naked_h == nil ? 0 : clock_ms()
         z = wassat_stop_cancel(scout_stop)
+        if scout_affine_h != nil
+          z = scout_affine_h.join
+          # An interrupted or found-but-unpublished candidate may retry.
+          wassat_affine_circuit_finish_scout(formula, scout_affine_plan)
         if scout_naked_h != nil
           z = scout_naked_h.join
           wassat_naked_finish_scout(formula, scout_naked_plan)
@@ -1429,6 +1445,10 @@ use lut_congruence
           if env("WASSAT_PROFILE") == "1"
             wassat_reconf_profile(scout_reconf_plan, scout_reconf_res[0])
             wassat_prof_note("scout.reconfiguration stop_to_join_ms=[ccall("__w_clock_ms") - reconf_cancel_ms]")
+        if scout_affine_h != nil && env("WASSAT_PROFILE") == "1"
+          wassat_affine_circuit_profile(scout_affine_plan["meta"], "scout.affine_circuit")
+          affine_tail = scout_affine_res[0] == 1 ? clock_ms() - scout_affine_res[scout_nv + 5] : 0
+          wassat_prof_note("scout.affine_circuit answer_to_join_ms=[affine_tail] stop_to_join_ms=[clock_ms() - affine_cancel_ms]")
         if scout_naked_h != nil && env("WASSAT_PROFILE") == "1"
           wassat_naked_profile(scout_naked_plan, scout_naked_res[0], "scout.naked_sudoku")
           naked_tail = scout_naked_res[0] == -1 ? clock_ms() - scout_naked_res[scout_nv + 5] : 0
@@ -1486,6 +1506,25 @@ use lut_congruence
           << "c conflicts: [budget_used], decisions: [lut_scout["decisions"]], props: [lut_scout["props"]]"
           << "c stats restarts=[lut_scout["restarts"]] reduces=[lut_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
           exit(20)
+        if scout_affine_res != nil && scout_affine_res[0] == 1
+          affine_scout = scout_out[0]
+          budget_used += affine_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          cmodel = i64[scout_nv]
+          v = 1
+          while v <= scout_nv
+            cmodel[v - 1] = scout_affine_res[v] == 1 ? v : 0 - v
+            v += 1
+          cmodel = wassat_project_quad_model(cmodel, quad_shift, orig_nvars) if quad_shift > 0
+          cmodel = cmodel.slice(0, orig_nvars) if ramsey_lex != nil
+          unless wassat_model_satisfies?(orig_formula, cmodel)
+            raise "internal error: affine circuit scout model does not satisfy the input formula"
+          wassat_print_sat_model(cmodel, false)
+          << "c mode: fast (verified affine-circuit scout model)"
+          << "c lane: affine-circuit-scout"
+          << "c conflicts: [budget_used], decisions: [affine_scout["decisions"]], props: [affine_scout["props"]]"
+          << "c stats restarts=[affine_scout["restarts"]] reduces=[affine_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(10)
         if scout_cycle_res != nil && scout_cycle_res[0] == 1
           cycle_scout = scout_out[0]
           budget_used += cycle_scout["conflicts"] if scout_budget == nil
@@ -1800,14 +1839,17 @@ use lut_congruence
         cycle_plan = nil
         if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && options["conflicts"] == 0
           cycle_plan = wassat_cycle_plan(formula, scout_cdcl_arenas, scout_sls_arenas)
-        roster_plan = nil
+        solo_circuit_plan = nil
         if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && options["conflicts"] == 0
           roster_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
-          roster_plan = wassat_roster_plan(formula, 1, roster_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
-        if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil || cycle_plan != nil || roster_plan != nil
+          solo_circuit_plan = wassat_roster_plan(formula, 1, roster_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
+        if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && solo_circuit_plan == nil && options["conflicts"] == 0
+          affine_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
+          solo_circuit_plan = wassat_affine_circuit_plan(formula, 1, affine_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
+        if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil || cycle_plan != nil || solo_circuit_plan != nil
           continuation = config.continue_scout? ? scout_solver : nil
           matrix_arms = arms
-          if arms == 1 && pre_arms == 0 && sls_flips == 0 && (cover_plan != nil || cycle_plan != nil || roster_plan != nil)
+          if arms == 1 && pre_arms == 0 && sls_flips == 0 && (cover_plan != nil || cycle_plan != nil || solo_circuit_plan != nil)
             # Preserve the lone solver's trajectory and memory footprint.
             # The added worker races the already-built scout.
             continuation = scout_solver
@@ -1817,7 +1859,7 @@ use lut_congruence
           race = wassat_race_build(formula["nvars"], art, matrix_arms, formula,
                                    continuation, continuation_spent, pre_arms,
                                    sls_flips > 0 ? 1 : 0, scout_cdcl_arenas,
-                                   scout_sls_arenas, resident_pre_arenas, cover_plan, cycle_plan, roster_plan,
+                                   scout_sls_arenas, resident_pre_arenas, cover_plan, cycle_plan, solo_circuit_plan,
                                    scout_lucky ? 1 : 0)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
           if pre_arms > 0
@@ -1874,6 +1916,7 @@ use lut_congruence
           arm_tag = "checked resolution-cover arm" if rr["cover_won"] == true
           arm_tag = "exact arithmetic-count arm" if rr["nae_won"] == true
           arm_tag = "verified capacity-clique arm" if rr["capacity_won"] == true
+          arm_tag = "verified affine-circuit model" if rr["affine_circuit_won"] == true
           arm_tag = "clause-checked naked-single progress" if rr["naked_sudoku_won"] == true
           arm_tag = "keychart repair arm" if rr["keychart_won"] == true
           arm_tag = "finite-domain walk arm" if rr["domain_won"] == true

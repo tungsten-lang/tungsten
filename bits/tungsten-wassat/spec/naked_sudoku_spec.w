@@ -67,4 +67,13 @@ describe "Clause-checked naked-single progress refutation" ->
     expect(m[6]).to eq(3)
     expect(m[5]).to eq(0)
 
+  it "retries a certificate canceled between validation and publication" ->
+    f = NakedTestFormula.new(2, [0,1,2]).formula; m = i64[64]; stop = i64[2]
+    expect(wassat_naked_refute(f, m, stop)).to eq(-1)
+    # Reproduce cancellation after successful validation but before the
+    # worker's final publication check. The generic race must remain eligible.
+    wassat_stop_cancel(stop)
+    wassat_naked_finish_scout(f, {"meta": m})
+    expect(f["naked_sudoku_done"]).to eq(false)
+
 spec_summary

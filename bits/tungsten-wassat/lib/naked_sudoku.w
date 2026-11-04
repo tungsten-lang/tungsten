@@ -83,7 +83,9 @@ use naked_sudoku/search
 -> wassat_naked_finish_scout(formula, plan)
   # Retry only an interrupted attempt. A complete miss, work cap or deadline
   # is deterministic enough to avoid paying for the same attempt twice.
-  formula["naked_sudoku_done"] = plan["meta"][0] != 1
+  # A certificate can finish just before the coordinator cancels, then be
+  # withheld by the publication stop check. It is not a completed miss.
+  formula["naked_sudoku_done"] = plan["meta"][0] != 1 && plan["meta"][32] != -1
   0
 
 -> wassat_naked_profile(plan, status, label = "race.naked_sudoku")

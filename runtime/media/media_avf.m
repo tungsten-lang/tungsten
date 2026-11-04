@@ -4090,6 +4090,41 @@ WValue w_media_midi_out_open(WValue indexv, WValue namev) {
     return w_int(w_media_handle_new(o, W_MEDIA_KIND_MIDIOUT));
 }
 
+static MIDITimeStamp m_host_ticks(double s) {
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    return (MIDITimeStamp)(s * 1e9 * (double)tb.denom / (double)tb.numer);
+}
+
+/* a message scheduled for a host time (seconds, the clock of midi_now and of input timestamps; 0: now): CoreMIDI delivers
+ * it then, so a sequence sent ahead keeps sample-accurate time */
+WValue w_media_midi_send_at(WValue hv, WValue whenv, WValue bv) {
+    AMidiOut *o = (AMidiOut *)w_media_handle_get(hv, W_MEDIA_KIND_MIDIOUT, "midi_send_at");
+    double when = w_media_num(whenv, 0, "when");
+    if (!w_is_array(bv)) w_media_raise("midi_send_at: the message is an array of 1 to 3 bytes");
+    WArray *a = w_as_array(bv);
+    Byte msg[3];
+    int n = 0;
+    for (int i = 0; i < a->size && i < 3; i++) msg[n++] = (Byte)w_media_num(a->slots[a->start + i], 0, "byte");
+    if (n == 0) return W_FALSE;
+    Byte buf[64];
+    MIDIPacketList *pl = (MIDIPacketList *)buf;
+    MIDIPacket *p = g_midi.pl_init(pl);
+    p = g_midi.pl_add(pl, sizeof buf, p, when > 0 ? m_host_ticks(when) : 0, n, msg);
+    if (!p) return W_FALSE;
+    OSStatus st = o->vsrc ? g_midi.received(o->vsrc, pl) : g_midi.send(o->port, o->dest, pl);
+    return st == noErr ? W_TRUE : W_FALSE;
+}
+
+/* drop what is scheduled and not yet delivered on an output (a stop, a jump) */
+WValue w_media_midi_flush(WValue hv) {
+    AMidiOut *o = (AMidiOut *)w_media_handle_get(hv, W_MEDIA_KIND_MIDIOUT, "midi_flush");
+    typedef OSStatus (*flush_f)(MIDIEndpointRef);
+    flush_f fl = (flush_f)dlsym(g_midi.lib, "MIDIFlushOutput");
+    if (!fl || !o->dest) return W_FALSE;
+    return fl(o->dest) == noErr ? W_TRUE : W_FALSE;
+}
+
 /* a message of 1 to 3 bytes now (b1, b2 < 0: left out) */
 WValue w_media_midi_send(WValue hv, WValue b0v, WValue b1v, WValue b2v) {
     AMidiOut *o = (AMidiOut *)w_media_handle_get(hv, W_MEDIA_KIND_MIDIOUT, "midi_send");
@@ -4121,8 +4156,12 @@ static void m_midi_read(const MIDIPacketList *pl, void *refcon, void *src) {
     AMidiIn *in = (AMidiIn *)refcon;
     const MIDIPacket *p = &pl->packet[0];
     double now = (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9;
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
     os_unfair_lock_lock(&in->lock);
     for (UInt32 i = 0; i < pl->numPackets; i++) {
+        /* the packet's own timestamp (the host clock), else its arrival */
+        double pt = p->timeStamp ? (double)p->timeStamp * (double)tb.numer / (double)tb.denom / 1e9 : now;
         UInt16 k = 0;
         while (k < p->length) {
             uint8_t st = p->data[k];
@@ -4140,7 +4179,7 @@ static void m_midi_read(const MIDIPacketList *pl, void *refcon, void *src) {
             in->q[in->n].b[1] = p->data[k + 1];
             in->q[in->n].b[2] = len == 3 ? p->data[k + 2] : 0;
             in->q[in->n].len = (uint8_t)len;
-            in->q[in->n].t = now;
+            in->q[in->n].t = pt;
             in->n++;
             k += len;
         }
@@ -4211,45 +4250,274 @@ WValue w_media_midi_close(WValue hv) {
     return W_FALSE;
 }
 
-/* ---- the live sampler ---- */
+/* ---- the live sampler (version 2, 2026-11-04: streaming, scheduled, sinc-interpolated) ----
+ *
+ * Zones are samples: an audio file (FLAC, WAV, AIFF … read by ExtAudioFile: its head in memory, the rest streamed by a reader
+ * thread into each voice's ring as the voice plays), a raw PCM cache (memory-mapped: "TWPCM\0\0\2", rate (i64), frames (i64),
+ * int32 stereo interleaved), or PCM handed over (the first API: live_zone with key ranges). The program chooses the zone,
+ * pitch ratio and gain of every note (the sound engine's own choice: sampler.w sfz_pick / prr_pick) and schedules it at a host
+ * time (the clock MIDI timestamps use); the render thread starts it at that frame. Voices play as sampler.w's play() does: a
+ * 64-tap windowed sinc (the table handed over with live_sinc, else linear), a fade-in of 29 samples at 48 kHz, an exponential
+ * release with the zone's time constant, a 20 ms fade before the file ends. Pitch bend and a vibrato apply to every voice. */
 
-#define L_ZONES 4096
+#include <AudioToolbox/ExtendedAudioFile.h>
+#include <stdatomic.h>
+#include <sys/mman.h>
+
 #define L_VOICES 96
 
-typedef struct LZone {
-    int lo, hi, vlo, vhi, root;
-    float *l, *r;
-    int64_t frames;
-    double rate, gain;
-    int64_t loop_s, loop_e;    /* loop_e <= loop_s: no loop */
-} LZone;
+/* element i of an f64[] or f32[] argument, and its length */
+static double a_f64_at(WValue a, int64_t i, const char *what, int64_t *n) {
+    (void)what;
+    WArray *arr = w_as_array(a);
+    *n = arr->size;
+    if (i >= arr->size) return 0;
+    if (arr->ebits == -64) return ((double *)arr->slots)[arr->start + i];
+    if (arr->ebits == -32) return ((float *)arr->slots)[arr->start + i];
+    return 0;
+}
 
-typedef struct LVoice {
-    int on;                    /* 1 sounding, 2 releasing, 0 free */
-    int key, zone;
-    double pos, step, gain, env, rel;
-} LVoice;
+#define LV_RING 32768
+#define LV_HEAD_MAX 262144
+#define LV_EVENTS 4096
+
+typedef struct LZoneF {
+    int kind;                  /* 1 file (streamed), 2 raw mmap, 3 memory */
+    char path[1024];
+    double rate;
+    int64_t frames, head_n, first;
+    float *hl, *hr;            /* kind 1: the head; kind 3: everything */
+    const int32_t *raw;        /* kind 2: interleaved stereo int32 (x · 2^31 − 1) */
+    size_t raw_len;
+    int lo, hi, vlo, vhi, root;
+    double gain;
+    int64_t loop_s, loop_e;
+} LZoneF;
+
+typedef struct LVoiceF {
+    _Atomic int state;         /* 0 free, 1 sounding, 2 releasing */
+    _Atomic int64_t gen;       /* bumped at every start: the reader thread reopens */
+    int zone, key;
+    int64_t tag;
+    double pos, ratio, amp, env, er, origin;
+    int64_t age;
+    int started;
+    /* streaming (kind 1) */
+    float *rl, *rr;
+    _Atomic int64_t ring_end;  /* the file frame after the last one in the ring */
+    _Atomic int64_t rpos;      /* the reader's floor(pos), for the writer */
+    int64_t open_gen;          /* the reader thread's: the generation its file is open for */
+    ExtAudioFileRef ef;
+    int eof;
+} LVoiceF;
+
+typedef struct LEvent {
+    int type;                  /* 1 play, 2 release, 3 bend, 4 all off */
+    double when, origin;
+    int zone, key;
+    int64_t tag;
+    double ratio, amp, start, rel, cents;
+} LEvent;
 
 typedef struct ALive {
     AVAudioEngine *engine;
     AVAudioSourceNode *node;
     double rate;
-    os_unfair_lock lock;
-    int nz;
-    LZone z[L_ZONES];
-    LVoice v[L_VOICES];
+    os_unfair_lock lock;       /* zones and the event queue */
+    int nz, zcap;
+    LZoneF *z;
+    LVoiceF v[L_VOICES];
+    LEvent ev[LV_EVENTS];
+    int nev;
     float volume;
-    int64_t rendered;          /* frames rendered so far */
-    double release_s;
+    _Atomic int64_t rendered;
+    double bend_mult, vib_depth, vib_rate, vib_phase;
+    float *sinc;               /* (512 + 1) * 64 taps, or NULL */
+    int64_t next_tag;
+    /* measurements */
+    _Atomic int64_t underruns;
+    double lat_sum, lat_max, lat_last;
+    int64_t lat_n;
+    int64_t head_bytes, map_bytes;
+    pthread_t reader;
+    _Atomic int quit;
+    int buf_frames;
 } ALive;
 
-static double a_f64_at(WValue a, int64_t i, const char *what, int64_t *n) {
-    (void)what;
-    WArray *arr = w_as_array(a);
-    *n = arr->size;
-    if (arr->ebits == -64) return ((double *)arr->slots)[arr->start + i];
-    if (arr->ebits == -32) return ((float *)arr->slots)[arr->start + i];
+static double lv_now(void) { return (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9; }
+
+static double lv_host_s(uint64_t ht) {
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    return (double)ht * (double)tb.numer / (double)tb.denom / 1e9;
+}
+
+/* frame q of a voice's zone (0 when it is not there yet: an underrun) */
+static inline void lv_frame(ALive *L, LVoiceF *v, LZoneF *z, int64_t q, float *a, float *b) {
+    if (q < 0 || q >= z->frames) { *a = 0; *b = 0; return; }
+    if (z->kind == 3 || (z->kind == 1 && q < z->head_n)) { *a = z->hl[q]; *b = z->hr[q]; return; }
+    if (z->kind == 2) { *a = (float)z->raw[2 * q] * (1.0f / 2147483647.0f); *b = (float)z->raw[2 * q + 1] * (1.0f / 2147483647.0f); return; }
+    int64_t e = atomic_load_explicit(&v->ring_end, memory_order_acquire);
+    if (q < e && q >= e - LV_RING) { int64_t i = q & (LV_RING - 1); *a = v->rl[i]; *b = v->rr[i]; return; }
+    atomic_fetch_add(&L->underruns, 1);
+    *a = 0; *b = 0;
+}
+
+static int lv_voice_free(ALive *L) {
+    for (int i = 0; i < L_VOICES; i++) if (atomic_load(&L->v[i].state) == 0) return i;
+    for (int i = 0; i < L_VOICES; i++) if (atomic_load(&L->v[i].state) == 2) return i;   /* steal a releasing voice */
     return 0;
+}
+
+static void lv_apply(ALive *L, LEvent *e, double t_out) {
+    if (e->type == 1) {
+        if (e->zone < 0 || e->zone >= L->nz) return;
+        int vi = lv_voice_free(L);
+        LVoiceF *v = &L->v[vi];
+        LZoneF *z = &L->z[e->zone];
+        v->zone = e->zone; v->key = e->key; v->tag = e->tag;
+        v->pos = e->start; v->ratio = e->ratio; v->amp = e->amp; v->env = 1.0;
+        v->er = exp(-1.0 / ((e->rel > 0.001 ? e->rel : 0.001) * L->rate));
+        v->origin = e->origin; v->age = 0; v->started = 0;
+        if (z->kind == 1) atomic_store_explicit(&v->ring_end, z->head_n, memory_order_release);
+        atomic_store(&v->rpos, (int64_t)e->start);
+        atomic_fetch_add(&v->gen, 1);
+        atomic_store(&v->state, 1);
+        (void)t_out;
+    } else if (e->type == 2) {
+        for (int i = 0; i < L_VOICES; i++) {
+            LVoiceF *v = &L->v[i];
+            if (atomic_load(&v->state) == 1 && (e->tag == 0 || v->tag == e->tag)) {
+                if (e->rel > 0) v->er = exp(-1.0 / (e->rel * L->rate));
+                atomic_store(&v->state, 2);
+            }
+        }
+    } else if (e->type == 3) {
+        L->bend_mult = pow(2.0, e->cents / 1200.0);
+    } else if (e->type == 4) {
+        for (int i = 0; i < L_VOICES; i++) if (atomic_load(&L->v[i].state) != 0) atomic_store(&L->v[i].state, 2);
+    }
+}
+
+static void lv_render_span(ALive *L, float *ol, float *orr, int i0, int i1, double hs) {
+    double fin_n = 29.0 * L->rate / 48000.0, fe_n = 0.02 * L->rate;
+    for (int vi = 0; vi < L_VOICES; vi++) {
+        LVoiceF *v = &L->v[vi];
+        int st = atomic_load(&v->state);
+        if (st == 0) continue;
+        LZoneF *z = &L->z[v->zone];
+        double base = z->rate / L->rate;
+        for (int i = i0; i < i1; i++) {
+            double p = floor(v->pos);
+            int64_t k = (int64_t)p;
+            if (k + 32 >= z->frames) { atomic_store(&v->state, 0); break; }
+            if (!v->started) {
+                v->started = 1;
+                double lat = hs + (double)i / L->rate - v->origin;
+                if (v->origin > 0 && lat > -1 && lat < 10) {
+                    L->lat_last = lat; L->lat_sum += lat; L->lat_n++;
+                    if (lat > L->lat_max) L->lat_max = lat;
+                }
+            }
+            float yl = 0, yr = 0;
+            if (L->sinc) {
+                double pf = (v->pos - p) * 512.0;
+                double pfl = floor(pf);
+                int b0 = (int)pfl * 64;
+                float u = (float)(pf - pfl);
+                int64_t q0 = k - 31;
+                for (int j = 0; j < 64; j++) {
+                    float a, b;
+                    lv_frame(L, v, z, q0 + j, &a, &b);
+                    float c = L->sinc[b0 + j] + u * (L->sinc[b0 + 64 + j] - L->sinc[b0 + j]);
+                    yl += a * c; yr += b * c;
+                }
+            } else {
+                float a0, b0, a1, b1;
+                lv_frame(L, v, z, k, &a0, &b0);
+                lv_frame(L, v, z, k + 1, &a1, &b1);
+                float fr = (float)(v->pos - p);
+                yl = a0 + (a1 - a0) * fr; yr = b0 + (b1 - b0) * fr;
+            }
+            if (st == 2) {
+                v->env *= v->er;
+                if (v->env < 0.0001) { atomic_store(&v->state, 0); break; }
+            }
+            double fi = v->age < fin_n ? (double)v->age / fin_n : 1.0;
+            double step = v->ratio * base * L->bend_mult;
+            if (L->vib_depth > 0) step *= pow(2.0, L->vib_depth * sin(L->vib_phase) / 1200.0);
+            double fe = 1.0, left = (double)(z->frames - 33) - v->pos;
+            if (left < fe_n * step) { fe = left / (fe_n * step); if (fe < 0) fe = 0; }
+            double w = v->amp * v->env * fi * fe * L->volume;
+            ol[i] += (float)(yl * w);
+            if (orr != ol) orr[i] += (float)(yr * w);
+            v->pos += step;
+            v->age++;
+        }
+        atomic_store(&v->rpos, (int64_t)v->pos);
+    }
+}
+
+static void *lv_reader(void *arg) {
+    ALive *L = (ALive *)arg;
+    float tmp[2 * 4096];
+    while (!atomic_load(&L->quit)) {
+        int busy = 0;
+        for (int vi = 0; vi < L_VOICES; vi++) {
+            LVoiceF *v = &L->v[vi];
+            int st = atomic_load(&v->state);
+            int64_t g = atomic_load(&v->gen);
+            if (v->ef && (st == 0 || v->open_gen != g)) { ExtAudioFileDispose(v->ef); v->ef = NULL; }
+            if (st == 0) continue;
+            os_unfair_lock_lock(&L->lock);
+            LZoneF *z = (v->zone >= 0 && v->zone < L->nz) ? &L->z[v->zone] : NULL;
+            int kind = z ? z->kind : 0;
+            char path[1024];
+            int64_t head_n = z ? z->head_n : 0, frames = z ? z->frames : 0;
+            if (z) memcpy(path, z->path, sizeof path);
+            os_unfair_lock_unlock(&L->lock);
+            if (kind != 1 || head_n >= frames) continue;
+            if (!v->ef) {
+                CFURLRef u = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)strlen(path), false);
+                OSStatus os = ExtAudioFileOpenURL(u, &v->ef);
+                CFRelease(u);
+                if (os != noErr) { v->ef = NULL; continue; }
+                AudioStreamBasicDescription c;
+                memset(&c, 0, sizeof c);
+                c.mSampleRate = z->rate; c.mFormatID = kAudioFormatLinearPCM;
+                c.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+                c.mChannelsPerFrame = 2; c.mBitsPerChannel = 32; c.mBytesPerFrame = 8; c.mFramesPerPacket = 1; c.mBytesPerPacket = 8;
+                ExtAudioFileSetProperty(v->ef, kExtAudioFileProperty_ClientDataFormat, sizeof c, &c);
+                ExtAudioFileSeek(v->ef, head_n);
+                v->open_gen = g;
+                v->eof = 0;
+            }
+            if (v->eof) continue;
+            int64_t e = atomic_load_explicit(&v->ring_end, memory_order_acquire);
+            int64_t rp = atomic_load(&v->rpos);
+            /* keep 64 frames of history behind the reader; fill up to a ring's length ahead */
+            while (!v->eof && e + 4096 - LV_RING <= rp - 64 && e < frames) {
+                UInt32 n = 4096;
+                AudioBufferList abl;
+                abl.mNumberBuffers = 1;
+                abl.mBuffers[0].mNumberChannels = 2;
+                abl.mBuffers[0].mDataByteSize = sizeof tmp;
+                abl.mBuffers[0].mData = tmp;
+                if (ExtAudioFileRead(v->ef, &n, &abl) != noErr || n == 0) { v->eof = 1; break; }
+                for (UInt32 i = 0; i < n; i++) {
+                    int64_t q = (e + i) & (LV_RING - 1);
+                    v->rl[q] = tmp[2 * i];
+                    v->rr[q] = tmp[2 * i + 1];
+                }
+                e += n;
+                atomic_store_explicit(&v->ring_end, e, memory_order_release);
+                busy = 1;
+                if (atomic_load(&v->gen) != g) break;
+            }
+        }
+        if (!busy) usleep(2000);
+    }
+    return NULL;
 }
 
 WValue w_media_live_new(WValue ratev) {
@@ -4257,7 +4525,17 @@ WValue w_media_live_new(WValue ratev) {
         ALive *L = calloc(1, sizeof *L);
         L->lock = OS_UNFAIR_LOCK_INIT;
         L->volume = 1.0f;
-        L->release_s = 0.25;
+        L->bend_mult = 1.0;
+        L->vib_rate = 5.5;
+        L->next_tag = 1;
+        L->zcap = 256;
+        L->z = calloc((size_t)L->zcap, sizeof *L->z);
+        for (int i = 0; i < L_VOICES; i++) {
+            L->v[i].rl = calloc(LV_RING, sizeof(float));
+            L->v[i].rr = calloc(LV_RING, sizeof(float));
+            L->v[i].zone = -1;
+            L->v[i].open_gen = -1;
+        }
         L->engine = [[AVAudioEngine alloc] init];
         AVAudioFormat *out = [L->engine.outputNode outputFormatForBus:0];
         double rate = out.sampleRate > 0 ? out.sampleRate : a_num(ratev);
@@ -4266,115 +4544,312 @@ WValue w_media_live_new(WValue ratev) {
         AVAudioFormat *fmt = [[[AVAudioFormat alloc] initStandardFormatWithSampleRate:rate channels:2] autorelease];
         ALive *Lp = L;
         L->node = [[AVAudioSourceNode alloc] initWithFormat:fmt renderBlock:^OSStatus(BOOL *silence, const AudioTimeStamp *ts, AVAudioFrameCount n, AudioBufferList *abl) {
-            (void)ts;
             float *ol = (float *)abl->mBuffers[0].mData;
             float *orr = abl->mNumberBuffers > 1 ? (float *)abl->mBuffers[1].mData : ol;
             memset(ol, 0, n * sizeof(float));
             if (orr != ol) memset(orr, 0, n * sizeof(float));
-            if (!os_unfair_lock_trylock(&Lp->lock)) { *silence = YES; return noErr; }
-            int any = 0;
-            double rel_step = 1.0 / (Lp->release_s * Lp->rate);
-            for (int vi = 0; vi < L_VOICES; vi++) {
-                LVoice *v = &Lp->v[vi];
-                if (!v->on) continue;
-                LZone *z = &Lp->z[v->zone];
-                any = 1;
-                for (AVAudioFrameCount i = 0; i < n; i++) {
-                    int64_t p0 = (int64_t)v->pos;
-                    if (z->loop_e > z->loop_s && p0 >= z->loop_e) { v->pos -= (double)(z->loop_e - z->loop_s); p0 = (int64_t)v->pos; }
-                    if (p0 + 1 >= z->frames) { v->on = 0; break; }
-                    double fr = v->pos - (double)p0;
-                    double a = (z->l[p0] * (1 - fr) + z->l[p0 + 1] * fr) * v->gain * v->env;
-                    double b = (z->r[p0] * (1 - fr) + z->r[p0 + 1] * fr) * v->gain * v->env;
-                    ol[i] += (float)(a * Lp->volume);
-                    if (orr != ol) orr[i] += (float)(b * Lp->volume);
-                    v->pos += v->step;
-                    if (v->on == 2) {
-                        v->env -= rel_step;
-                        if (v->env <= 0) { v->on = 0; break; }
-                    }
+            Lp->buf_frames = (int)n;
+            double hs = (ts && (ts->mFlags & kAudioTimeStampHostTimeValid)) ? lv_host_s(ts->mHostTime) : lv_now();
+            double he = hs + (double)n / Lp->rate;
+            /* the events due in this buffer, in time order, each at its frame */
+            LEvent due[64];
+            int nd = 0;
+            if (os_unfair_lock_trylock(&Lp->lock)) {
+                int w = 0;
+                for (int i = 0; i < Lp->nev; i++) {
+                    if (Lp->ev[i].when < he && nd < 64) due[nd++] = Lp->ev[i];
+                    else Lp->ev[w++] = Lp->ev[i];
                 }
+                Lp->nev = w;
+                os_unfair_lock_unlock(&Lp->lock);
             }
-            Lp->rendered += n;
-            os_unfair_lock_unlock(&Lp->lock);
-            if (!any) *silence = YES;
+            for (int i = 1; i < nd; i++) { LEvent t = due[i]; int j = i; while (j > 0 && due[j - 1].when > t.when) { due[j] = due[j - 1]; j--; } due[j] = t; }
+            int at = 0;
+            for (int k = 0; k < nd; k++) {
+                int off = (int)((due[k].when - hs) * Lp->rate);
+                if (off < at) off = at;
+                if (off > (int)n) off = (int)n;
+                if (off > at) { lv_render_span(Lp, ol, orr, at, off, hs); at = off; }
+                lv_apply(Lp, &due[k], hs + (double)off / Lp->rate);
+            }
+            if (at < (int)n) lv_render_span(Lp, ol, orr, at, (int)n, hs);
+            if (Lp->vib_depth > 0) {
+                Lp->vib_phase += 2 * M_PI * Lp->vib_rate * (double)n / Lp->rate;
+                if (Lp->vib_phase > 2 * M_PI) Lp->vib_phase -= 2 * M_PI;
+            }
+            atomic_fetch_add(&Lp->rendered, n);
+            (void)silence;
             return noErr;
         }];
         [L->engine attachNode:L->node];
         [L->engine connect:L->node to:L->engine.mainMixerNode format:fmt];
+        /* small output buffers for this program's IO (a live instrument): 256 frames (2.7 ms at 96 kHz, 5.3 at 48) */
+        AudioUnit au = L->engine.outputNode.audioUnit;
+        if (au) {
+            UInt32 bf = 256;
+            AudioUnitSetProperty(au, kAudioDevicePropertyBufferFrameSize, kAudioUnitScope_Global, 0, &bf, sizeof bf);
+        }
         NSError *err = nil;
         if (![L->engine startAndReturnError:&err]) {
             [L->node release];
             [L->engine release];
+            free(L->z);
             free(L);
             w_media_raise("live_new: the audio engine did not start: %s", err ? [[err localizedDescription] UTF8String] : "?");
         }
+        pthread_create(&L->reader, NULL, lv_reader, L);
         return w_int(w_media_handle_new(L, W_MEDIA_KIND_LIVE));
     }
 }
 
-/* a zone: keys lo…hi, velocities vlo…vhi, the sample's root key, its PCM (f64[] or f32[] left and right, `frames` long, at
- * `srate`), its loop (loop_e <= loop_s: none) and a linear gain → the zone's index */
+static int lv_add_zone(ALive *L, LZoneF *z) {
+    os_unfair_lock_lock(&L->lock);
+    if (L->nz == L->zcap) {
+        /* zones only grow while no voice reads them: the render thread takes the lock only to read events */
+        int nc = L->zcap * 2;
+        LZoneF *nzp = calloc((size_t)nc, sizeof *nzp);
+        memcpy(nzp, L->z, (size_t)L->nz * sizeof *nzp);
+        LZoneF *old = L->z;
+        L->z = nzp;
+        L->zcap = nc;
+        os_unfair_lock_unlock(&L->lock);
+        usleep(30000);   /* a render callback in flight finishes with the old array */
+        free(old);
+        os_unfair_lock_lock(&L->lock);
+    }
+    int idx = L->nz;
+    L->z[L->nz++] = *z;
+    os_unfair_lock_unlock(&L->lock);
+    return idx;
+}
+
+static int64_t lv_first_sound(const float *l, const float *r, int64_t n, int64_t stride, double rate) {
+    (void)rate;
+    for (int64_t i = 0; i < n; i++) {
+        float a = fabsf(l[i * stride]), b = fabsf(r[i * stride]);
+        if (a > 0.0016f || b > 0.0016f) return i - 48 < 0 ? 0 : i - 48;
+    }
+    return 0;
+}
+
+/* the first API: PCM handed over with a key mapping (live_note plays it) */
 WValue w_media_live_zone(WValue hv, WValue kv, WValue lv, WValue rv) {
     ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_zone");
-    /* kv = [lo, hi, vlo, vhi, root, frames, srate, loop_s, loop_e, gain] */
     if (!w_is_array(kv) || !w_is_array(lv) || !w_is_array(rv)) w_media_raise("live_zone: the keys and the two channels are arrays");
     WArray *k = w_as_array(kv);
     if (k->size < 10) w_media_raise("live_zone: [lo, hi, vlo, vhi, root, frames, rate, loop start, loop end, gain]");
     double f[10];
     for (int i = 0; i < 10; i++) f[i] = w_media_num(k->slots[k->start + i], 0, "live_zone");
-    int64_t frames = (int64_t)f[5];
     int64_t nl = 0, nr = 0;
     (void)a_f64_at(lv, 0, "l", &nl);
     (void)a_f64_at(rv, 0, "r", &nr);
+    int64_t frames = (int64_t)f[5];
     if (frames > nl) frames = nl;
     if (frames > nr) frames = nr;
     if (frames < 2) w_media_raise("live_zone: no sample data");
-    LZone z;
+    LZoneF z;
     memset(&z, 0, sizeof z);
+    z.kind = 3;
     z.lo = (int)f[0]; z.hi = (int)f[1]; z.vlo = (int)f[2]; z.vhi = (int)f[3]; z.root = (int)f[4];
-    z.frames = frames; z.rate = f[6] > 0 ? f[6] : 48000; z.loop_s = (int64_t)f[7]; z.loop_e = (int64_t)f[8]; z.gain = f[9];
-    z.l = malloc((size_t)frames * sizeof(float));
-    z.r = malloc((size_t)frames * sizeof(float));
-    for (int64_t i = 0; i < frames; i++) {
-        int64_t d;
-        z.l[i] = (float)a_f64_at(lv, i, "l", &d);
-        z.r[i] = (float)a_f64_at(rv, i, "r", &d);
-    }
-    os_unfair_lock_lock(&L->lock);
-    if (L->nz >= L_ZONES) { os_unfair_lock_unlock(&L->lock); free(z.l); free(z.r); w_media_raise("live_zone: too many zones"); }
-    int idx = L->nz;
-    L->z[L->nz++] = z;
-    os_unfair_lock_unlock(&L->lock);
-    return w_int(idx);
+    z.frames = frames; z.head_n = frames; z.rate = f[6] > 0 ? f[6] : 48000; z.loop_s = (int64_t)f[7]; z.loop_e = (int64_t)f[8]; z.gain = f[9];
+    z.hl = malloc((size_t)frames * sizeof(float));
+    z.hr = malloc((size_t)frames * sizeof(float));
+    for (int64_t i = 0; i < frames; i++) { int64_t d; z.hl[i] = (float)a_f64_at(lv, i, "l", &d); z.hr[i] = (float)a_f64_at(rv, i, "r", &d); }
+    z.first = 0;
+    L->head_bytes += frames * 8;
+    return w_int(lv_add_zone(L, &z));
 }
 
-/* a note: velocity 1…127 starts it (in the zone for that key and velocity), 0 releases the key's sounding voices */
+/* a sample file as a zone: its head (head_frames, at most 262144) decoded into memory now, the rest streamed while a voice
+ * plays it → [zone index, the file's rate, its frames, its first sound (sampler.w first_sound)] */
+WValue w_media_live_zone_file(WValue hv, WValue pathv, WValue headv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_zone_file");
+    char path[1024];
+    if (!w_media_str(pathv, path, sizeof path) || !path[0]) w_media_raise("live_zone_file: path must be a string");
+    int64_t hn = a_int(headv, 16384, "head frames");
+    if (hn < 1024) hn = 1024;
+    if (hn > LV_HEAD_MAX) hn = LV_HEAD_MAX;
+    LZoneF z;
+    memset(&z, 0, sizeof z);
+    size_t pl = strlen(path);
+    if (pl > 6 && strcmp(path + pl - 6, ".twpcm") == 0) {
+        int fd = open(path, O_RDONLY);
+        if (fd < 0) w_media_raise("live_zone_file: %s: cannot open", path);
+        struct stat sb;
+        fstat(fd, &sb);
+        void *m = mmap(NULL, (size_t)sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        close(fd);
+        if (m == MAP_FAILED || sb.st_size < 24 || memcmp(m, "TWPCM\0\0\2", 8) != 0) w_media_raise("live_zone_file: %s: not a PCM cache", path);
+        z.kind = 2;
+        int64_t ir = 0;
+        memcpy(&ir, (char *)m + 8, 8);
+        z.rate = (double)ir;
+        memcpy(&z.frames, (char *)m + 16, 8);
+        z.raw = (const int32_t *)((char *)m + 24);
+        z.raw_len = (size_t)sb.st_size;
+        z.head_n = z.frames;
+        z.first = 0;
+        for (int64_t i = 0; i < z.frames && i < 96000; i++) {
+            if (abs(z.raw[2 * i]) > 3436202 || abs(z.raw[2 * i + 1]) > 3436202) { z.first = i - 48 < 0 ? 0 : i - 48; break; }
+        }
+        L->map_bytes += (int64_t)sb.st_size;
+    } else {
+        CFURLRef u = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)pl, false);
+        ExtAudioFileRef ef = NULL;
+        OSStatus os = ExtAudioFileOpenURL(u, &ef);
+        CFRelease(u);
+        if (os != noErr || !ef) w_media_raise("live_zone_file: %s: cannot open (%d)", path, (int)os);
+        AudioStreamBasicDescription f;
+        UInt32 sz = sizeof f;
+        ExtAudioFileGetProperty(ef, kExtAudioFileProperty_FileDataFormat, &sz, &f);
+        SInt64 fr = 0;
+        sz = sizeof fr;
+        ExtAudioFileGetProperty(ef, kExtAudioFileProperty_FileLengthFrames, &sz, &fr);
+        AudioStreamBasicDescription c;
+        memset(&c, 0, sizeof c);
+        c.mSampleRate = f.mSampleRate; c.mFormatID = kAudioFormatLinearPCM;
+        c.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+        c.mChannelsPerFrame = 2; c.mBitsPerChannel = 32; c.mBytesPerFrame = 8; c.mFramesPerPacket = 1; c.mBytesPerPacket = 8;
+        ExtAudioFileSetProperty(ef, kExtAudioFileProperty_ClientDataFormat, sizeof c, &c);
+        if (hn > fr) hn = fr;
+        float *buf = malloc((size_t)hn * 8);
+        UInt32 n = (UInt32)hn;
+        AudioBufferList abl;
+        abl.mNumberBuffers = 1;
+        abl.mBuffers[0].mNumberChannels = 2;
+        abl.mBuffers[0].mDataByteSize = (UInt32)(hn * 8);
+        abl.mBuffers[0].mData = buf;
+        ExtAudioFileRead(ef, &n, &abl);
+        ExtAudioFileDispose(ef);
+        z.kind = 1;
+        snprintf(z.path, sizeof z.path, "%s", path);
+        z.rate = f.mSampleRate;
+        z.frames = fr;
+        z.head_n = n;
+        z.hl = malloc((size_t)n * sizeof(float));
+        z.hr = malloc((size_t)n * sizeof(float));
+        for (UInt32 i = 0; i < n; i++) { z.hl[i] = buf[2 * i]; z.hr[i] = buf[2 * i + 1]; }
+        free(buf);
+        z.first = lv_first_sound(z.hl, z.hr, n, 1, z.rate);
+        L->head_bytes += (int64_t)n * 8;
+    }
+    int idx = lv_add_zone(L, &z);
+    WValue out = w_array_new_empty();
+    out = w_array_push(out, w_int(idx));
+    out = w_array_push(out, w_float(z.rate));
+    out = w_array_push(out, w_int(z.frames));
+    out = w_array_push(out, w_int(z.first));
+    return out;
+}
+
+/* the sinc table sampler.w interpolates with ((512 + 1) × 64 coefficients, f64[]) */
+WValue w_media_live_sinc(WValue hv, WValue tabv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_sinc");
+    int64_t n = 0;
+    (void)a_f64_at(tabv, 0, "table", &n);
+    if (n < 513 * 64) w_media_raise("live_sinc: the table has %lld entries, not 513 x 64", (long long)n);
+    float *t = malloc((size_t)n * sizeof(float));
+    for (int64_t i = 0; i < n; i++) { int64_t d; t[i] = (float)a_f64_at(tabv, i, "table", &d); }
+    os_unfair_lock_lock(&L->lock);
+    float *old = L->sinc;
+    L->sinc = t;
+    os_unfair_lock_unlock(&L->lock);
+    if (old) { usleep(30000); free(old); }
+    return W_TRUE;
+}
+
+static int64_t lv_push(ALive *L, LEvent *e) {
+    os_unfair_lock_lock(&L->lock);
+    if (e->type == 1 && e->tag == 0) e->tag = L->next_tag++;
+    int64_t tag = e->tag;
+    if (L->nev < LV_EVENTS) L->ev[L->nev++] = *e;
+    os_unfair_lock_unlock(&L->lock);
+    return tag;
+}
+
+/* a note scheduled: zone, pitch ratio (1 = the sample's own pitch), linear gain, the file frame it starts at, the release
+ * time constant (s), the host time it sounds at (0: now) and the host time of what caused it (latency) → its tag */
+WValue w_media_live_play(WValue hv, WValue av, WValue whenv, WValue originv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_play");
+    if (!w_is_array(av)) w_media_raise("live_play: [zone, key, ratio, gain, start frame, release s]");
+    WArray *a = w_as_array(av);
+    if (a->size < 6) w_media_raise("live_play: [zone, key, ratio, gain, start frame, release s]");
+    LEvent e;
+    memset(&e, 0, sizeof e);
+    e.type = 1;
+    e.zone = (int)w_media_num(a->slots[a->start], 0, "zone");
+    e.key = (int)w_media_num(a->slots[a->start + 1], 0, "key");
+    e.ratio = w_media_num(a->slots[a->start + 2], 1, "ratio");
+    e.amp = w_media_num(a->slots[a->start + 3], 1, "gain");
+    e.start = w_media_num(a->slots[a->start + 4], 0, "start");
+    e.rel = w_media_num(a->slots[a->start + 5], 0.2, "release");
+    e.when = w_media_num(whenv, 0, "when");
+    if (e.when <= 0) e.when = lv_now();
+    e.origin = w_media_num(originv, 0, "origin");
+    return w_int(lv_push(L, &e));
+}
+
+/* release a note by its tag (0: every note) at a host time (0: now), with its release time constant (s; 0: the note's own) */
+WValue w_media_live_release(WValue hv, WValue tagv, WValue whenv, WValue relv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_release");
+    LEvent e;
+    memset(&e, 0, sizeof e);
+    e.type = 2;
+    e.tag = a_int(tagv, 0, "tag");
+    e.when = w_media_num(whenv, 0, "when");
+    if (e.when <= 0) e.when = lv_now();
+    e.rel = w_media_num(relv, 0, "release");
+    lv_push(L, &e);
+    return W_TRUE;
+}
+
+/* pitch bend in cents for every voice, from a host time (0: now) */
+WValue w_media_live_bend(WValue hv, WValue centsv, WValue whenv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_bend");
+    LEvent e;
+    memset(&e, 0, sizeof e);
+    e.type = 3;
+    e.cents = w_media_num(centsv, 0, "cents");
+    e.when = w_media_num(whenv, 0, "when");
+    if (e.when <= 0) e.when = lv_now();
+    lv_push(L, &e);
+    return W_TRUE;
+}
+
+/* a vibrato on every voice: depth in cents (0: none), rate in Hz */
+WValue w_media_live_vibrato(WValue hv, WValue depthv, WValue ratev) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_vibrato");
+    L->vib_depth = w_media_num(depthv, 0, "depth");
+    double r = w_media_num(ratev, 5.5, "rate");
+    L->vib_rate = r > 0 ? r : 5.5;
+    return W_TRUE;
+}
+
+/* the first API's note: velocity 1…127 starts the key's zone (live_zone's key mapping), 0 releases the key */
 WValue w_media_live_note(WValue hv, WValue keyv, WValue velv) {
     ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_note");
     int key = (int)a_int(keyv, 60, "key"), vel = (int)a_int(velv, 0, "velocity");
-    os_unfair_lock_lock(&L->lock);
     if (vel <= 0) {
-        for (int i = 0; i < L_VOICES; i++) if (L->v[i].on == 1 && L->v[i].key == key) L->v[i].on = 2;
-        os_unfair_lock_unlock(&L->lock);
+        for (int i = 0; i < L_VOICES; i++) {
+            LVoiceF *v = &L->v[i];
+            if (atomic_load(&v->state) == 1 && v->key == key) {
+                LEvent e; memset(&e, 0, sizeof e); e.type = 2; e.tag = v->tag; e.when = lv_now(); lv_push(L, &e);
+            }
+        }
         return W_TRUE;
     }
     int zi = -1;
+    os_unfair_lock_lock(&L->lock);
     for (int i = 0; i < L->nz && zi < 0; i++)
-        if (key >= L->z[i].lo && key <= L->z[i].hi && vel >= L->z[i].vlo && vel <= L->z[i].vhi) zi = i;
-    if (zi < 0) { os_unfair_lock_unlock(&L->lock); return W_FALSE; }
-    int vi = -1;
-    for (int i = 0; i < L_VOICES && vi < 0; i++) if (!L->v[i].on) vi = i;
-    if (vi < 0) {   /* steal the quietest releasing voice, else the first */
-        vi = 0;
-        for (int i = 0; i < L_VOICES; i++) if (L->v[i].on == 2) { vi = i; break; }
-    }
-    LZone *z = &L->z[zi];
-    LVoice *v = &L->v[vi];
-    v->on = 1; v->key = key; v->zone = zi; v->pos = 0; v->env = 1.0;
-    v->step = pow(2.0, (key - z->root) / 12.0) * z->rate / L->rate;
-    v->gain = z->gain * (vel / 127.0) * (vel / 127.0);
+        if (L->z[i].kind == 3 && key >= L->z[i].lo && key <= L->z[i].hi && vel >= L->z[i].vlo && vel <= L->z[i].vhi) zi = i;
+    double ratio = 1, gain = 1;
+    if (zi >= 0) { ratio = pow(2.0, (key - L->z[zi].root) / 12.0); gain = L->z[zi].gain * (vel / 127.0) * (vel / 127.0); }
     os_unfair_lock_unlock(&L->lock);
+    if (zi < 0) return W_FALSE;
+    LEvent e;
+    memset(&e, 0, sizeof e);
+    e.type = 1; e.zone = zi; e.key = key; e.ratio = ratio; e.amp = gain; e.start = 0; e.rel = 0.04; e.when = lv_now();
+    lv_push(L, &e);
     return W_TRUE;
 }
 
@@ -4387,20 +4862,30 @@ WValue w_media_live_volume(WValue hv, WValue vv) {
     return W_TRUE;
 }
 
-/* [voices sounding, zones, the output rate, frames rendered so far] */
+/* [voices, zones, rate, frames rendered, head bytes, mapped bytes, ring bytes, underruns, latency n, mean s, max s, last s,
+ *  the output's presentation latency s, the render buffer's frames, now (host s)] */
 WValue w_media_live_info(WValue hv) {
     ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_info");
     int n = 0;
-    os_unfair_lock_lock(&L->lock);
-    for (int i = 0; i < L_VOICES; i++) if (L->v[i].on) n++;
-    int64_t r = L->rendered;
-    int nz = L->nz;
-    os_unfair_lock_unlock(&L->lock);
+    for (int i = 0; i < L_VOICES; i++) if (atomic_load(&L->v[i].state)) n++;
+    double pres = 0;
+    @autoreleasepool { pres = L->engine.outputNode.presentationLatency; }
     WValue out = w_array_new_empty();
     out = w_array_push(out, w_int(n));
-    out = w_array_push(out, w_int(nz));
+    out = w_array_push(out, w_int(L->nz));
     out = w_array_push(out, w_float(L->rate));
-    out = w_array_push(out, w_int(r));
+    out = w_array_push(out, w_int(atomic_load(&L->rendered)));
+    out = w_array_push(out, w_int(L->head_bytes));
+    out = w_array_push(out, w_int(L->map_bytes));
+    out = w_array_push(out, w_int((int64_t)L_VOICES * LV_RING * 8));
+    out = w_array_push(out, w_int(atomic_load(&L->underruns)));
+    out = w_array_push(out, w_int(L->lat_n));
+    out = w_array_push(out, w_float(L->lat_n > 0 ? L->lat_sum / (double)L->lat_n : 0));
+    out = w_array_push(out, w_float(L->lat_max));
+    out = w_array_push(out, w_float(L->lat_last));
+    out = w_array_push(out, w_float(pres));
+    out = w_array_push(out, w_int(L->buf_frames));
+    out = w_array_push(out, w_float(lv_now()));
     return out;
 }
 
@@ -4409,10 +4894,25 @@ WValue w_media_live_close(WValue hv) {
     if (!L) return W_FALSE;
     w_media_handle_drop(hv, W_MEDIA_KIND_LIVE);
     [L->engine stop];
+    atomic_store(&L->quit, 1);
+    pthread_join(L->reader, NULL);
+    for (int i = 0; i < L_VOICES; i++) {
+        if (L->v[i].ef) ExtAudioFileDispose(L->v[i].ef);
+        free(L->v[i].rl);
+        free(L->v[i].rr);
+    }
     [L->engine detachNode:L->node];
     [L->node release];
     [L->engine release];
-    for (int i = 0; i < L->nz; i++) { free(L->z[i].l); free(L->z[i].r); }
+    for (int i = 0; i < L->nz; i++) {
+        if (L->z[i].kind == 2) munmap((void *)((const char *)L->z[i].raw - 24), L->z[i].raw_len);
+        else { free(L->z[i].hl); free(L->z[i].hr); }
+    }
+    free(L->z);
+    free(L->sinc);
     free(L);
     return W_TRUE;
 }
+
+/* the host clock in seconds (the one MIDI timestamps and live_play's `when` use) */
+WValue w_media_midi_now(void) { return w_float(lv_now()); }

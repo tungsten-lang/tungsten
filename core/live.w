@@ -24,9 +24,35 @@
 -> live_volume(sampler, v)
   ccall("w_media_live_volume", sampler, v)
 
+# version 2: a sample file as a zone (its first head_frames decoded now, the rest streamed while it plays; a ".twpcm" PCM
+# cache is memory-mapped) → [zone, rate, frames, first sound frame]
+-> live_zone_file(sampler, path, head_frames = 16384)
+  ccall("w_media_live_zone_file", sampler, path, head_frames)
+
+# the 64-tap sinc table to interpolate with (sampler.w sinc_get: 513 × 64 coefficients), else linear
+-> live_sinc(sampler, table)
+  ccall("w_media_live_sinc", sampler, table)
+
+# a note scheduled: [zone, key, pitch ratio, gain, start frame, release time constant s] at host time `when` (midi_now's clock;
+# 0 now), `origin` the host time of its cause (the latency is measured from it) → its tag
+-> live_play(sampler, note, at = 0, origin = 0)
+  ccall("w_media_live_play", sampler, note, at, origin)
+
+# release a note by tag (0: all) at a host time (0: now), its release time constant s (0: its own)
+-> live_release(sampler, tag, at = 0, rel = 0)
+  ccall("w_media_live_release", sampler, tag, at, rel)
+
+# pitch bend in cents for every voice from a host time (0: now)
+-> live_bend(sampler, cents, at = 0)
+  ccall("w_media_live_bend", sampler, cents, at)
+
+# a vibrato on every voice: depth cents (0 none), rate Hz
+-> live_vibrato(sampler, depth, rate = 5.5)
+  ccall("w_media_live_vibrato", sampler, depth, rate)
+
 -> live_info(sampler)
   a = ccall("w_media_live_info", sampler)
-  {voices: a[0], zones: a[1], rate: a[2], rendered: a[3]}
+  {voices: a[0], zones: a[1], rate: a[2], rendered: a[3], head_bytes: a[4], mapped_bytes: a[5], ring_bytes: a[6], underruns: a[7], latency_n: a[8], latency: a[9], latency_max: a[10], latency_last: a[11], output_latency: a[12], buffer_frames: a[13], now: a[14]}
 
 -> live_close(sampler)
   ccall("w_media_live_close", sampler)

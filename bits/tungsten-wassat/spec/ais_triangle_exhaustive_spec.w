@@ -32,6 +32,9 @@ describe "Wassat AIS triangle bound exhaustive oracle" ->
       meta = i64[4]
       bound = wassat_ais_triangle_bound(adj, 5, meta)
       expect(bound <= minimum).to eq(true)
+      clique_meta = i64[6]
+      clique_bound = wassat_ais_clique_bound(adj, 5, clique_meta)
+      expect(clique_bound <= minimum).to eq(true)
       mask += 1
 
 spec_summary

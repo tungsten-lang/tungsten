@@ -104,6 +104,7 @@
     X(w_media_live_note, 3)            \
     X(w_media_live_volume, 2)          \
     X(w_media_live_info, 1)            \
+    X(w_media_live_flush, 2)           \
     X(w_media_live_close, 1)
 
 #define W_MEDIA_CCALLS(X) W_MEDIA_C_CCALLS(X) W_MEDIA_AVF_CCALLS(X)

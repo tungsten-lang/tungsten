@@ -2703,14 +2703,36 @@ make_dirs(bit_cache_dir)
   b << "  <key>NSHighResolutionCapable</key><true/>\n"
   if has_icon
     b << "  <key>CFBundleIconFile</key><string>" + plist_escape(app[:name]) + "</string>\n"
+  # each document extension: a document type the app owns (Editor, LSHandlerRank Owner) and an exported type
+  # <id>.<ext> (UTExportedTypeDeclarations) that names the extension, so Finder routes the files to the app (2026-11-04: an
+  # extension alone left Finder's double-click unrouted to the program; the runtime's delegate takes application:openURLs:)
   exts = split_ws(app[:documents])
   if exts.size > 0
     b << "  <key>CFBundleDocumentTypes</key>\n  <array>\n"
     i = 0
     while i < exts.size
-      b << "    <dict><key>CFBundleTypeName</key><string>" + plist_escape(exts[i]) + " document</string>"
+      uti = app[:id] + "." + exts[i]
+      label = app[:name] + " document"
+      if exts.size > 1
+        label = app[:name] + " ." + exts[i] + " document"
+      b << "    <dict><key>CFBundleTypeName</key><string>" + plist_escape(label) + "</string>"
       b << "<key>CFBundleTypeRole</key><string>Editor</string>"
+      b << "<key>LSHandlerRank</key><string>Owner</string>"
+      b << "<key>LSItemContentTypes</key><array><string>" + plist_escape(uti) + "</string></array>"
       b << "<key>CFBundleTypeExtensions</key><array><string>" + plist_escape(exts[i]) + "</string></array></dict>\n"
+      i = i + 1
+    b << "  </array>\n"
+    b << "  <key>UTExportedTypeDeclarations</key>\n  <array>\n"
+    i = 0
+    while i < exts.size
+      uti = app[:id] + "." + exts[i]
+      label = app[:name] + " document"
+      if exts.size > 1
+        label = app[:name] + " ." + exts[i] + " document"
+      b << "    <dict><key>UTTypeIdentifier</key><string>" + plist_escape(uti) + "</string>"
+      b << "<key>UTTypeDescription</key><string>" + plist_escape(label) + "</string>"
+      b << "<key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>"
+      b << "<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>" + plist_escape(exts[i]) + "</string></array></dict></dict>\n"
       i = i + 1
     b << "  </array>\n"
   b << "</dict>\n</plist>\n"
@@ -2765,6 +2787,10 @@ make_dirs(bit_cache_dir)
   if !codesign_ok(bundle)
     eputs(RED + "codesign failed for " + bundle + RESET)
     return false
+  # an app with document types tells Launch Services at once (its Info.plist's types, not the copy it cached at the last
+  # launch), so Finder's double-click routes the files to it; harmless when it fails (it registers at its next launch)
+  if app[:documents] != ""
+    sh_ok("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f " + shq(bundle) + " >/dev/null 2>&1")
   << "    " + GREEN + "built" + RESET + "   " + project_relative_path(bundle) + " " + DIM + ms(clock_ms() - t_app) + RESET
   true
 

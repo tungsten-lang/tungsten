@@ -83108,6 +83108,10 @@ W_BRIDGE_STUB WValue w_gfx_event_text(WValue window) {
     (void)window;
     return w_gfx_unavailable();
 }
+W_BRIDGE_STUB WValue w_gfx_event_path(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
 W_BRIDGE_STUB WValue w_gfx_metric(WValue window, WValue which) {
     (void)window; (void)which;
     return w_gfx_unavailable();

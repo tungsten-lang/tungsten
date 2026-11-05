@@ -72,7 +72,7 @@ enum {
     GFX_EV_MOUSE_DOWN = 4, GFX_EV_MOUSE_UP = 5, GFX_EV_MOUSE_MOVE = 6,
     GFX_EV_MOUSE_DRAG = 7, GFX_EV_SCROLL = 8, GFX_EV_MAGNIFY = 9,
     GFX_EV_RESIZE = 10, GFX_EV_CLOSE = 11, GFX_EV_MENU = 12, GFX_EV_FOCUS = 13,
-    GFX_EV_MODS = 14
+    GFX_EV_MODS = 14, GFX_EV_OPEN = 15
 };
 
 enum { GFX_MOD_SHIFT = 1, GFX_MOD_CTRL = 2, GFX_MOD_ALT = 4, GFX_MOD_CMD = 8,
@@ -498,6 +498,12 @@ static double gfx_num(WValue v, const char *what) {
  * plain CLI binary (no .app bundle). Idempotent. A first window that is
  * hidden (specs, headless runs) makes an accessory app that never takes
  * focus or shows in the Dock; a visible window later promotes it. */
+static void gfx_install_app_delegate(void);
+static void gfx_open_target(WGfxWindow *gw);
+static NSMutableArray *gfx_open_paths = nil;     /* every path an open-documents request named, by event id */
+static NSUInteger gfx_open_queued = 0;           /* how many of them are queued as GFX_EV_OPEN events */
+static WGfxWindow *gfx_open_window = NULL;       /* the window they go to: the first opened that is still open */
+
 static void gfx_ensure_app_visible(bool visible) {
     static bool started = false;
     static bool regular = false;
@@ -506,6 +512,10 @@ static void gfx_ensure_app_visible(bool visible) {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:(visible ? NSApplicationActivationPolicyRegular
                                             : NSApplicationActivationPolicyAccessory)];
+        /* the delegate before finishLaunching: the documents an app is launched with (a double-click in Finder, `open`) come
+         * as an open-documents Apple event during launch, and without a delegate that takes them AppKit hands them to
+         * NSDocumentController, which has no document class and says the app cannot open files of that format */
+        gfx_install_app_delegate();
         [NSApp finishLaunching];
         regular = visible;
         if (visible) [NSApp activateIgnoringOtherApps:YES];
@@ -612,6 +622,7 @@ static WValue gfx_open(WValue device_v, WValue title_v, int w, int h, int flags,
     };
     build();
     gfx_fit_drawable(gw);
+    gfx_open_target(gw);
 
     id<MTLCommandQueue> queue = [dev newCommandQueue];
     if (!queue) {
@@ -732,6 +743,16 @@ WValue w_gfx_event_field(WValue window_v, WValue field_v) {
 WValue w_gfx_event_text(WValue window_v) {
     WGfxWindow *gw = gfx_window_arg(window_v, "gfx.event_text");
     return w_string(gw->input.cur.text);
+}
+
+/* the whole path of the current GFX_EV_OPEN event ("" for any other event) */
+WValue w_gfx_event_path(WValue window_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.event_path");
+    GfxEvent *e = &gw->input.cur;
+    if (e->kind != GFX_EV_OPEN || !gfx_open_paths || e->id < 0 || (NSUInteger)e->id >= [gfx_open_paths count])
+        return w_string("");
+    const char *p = [[gfx_open_paths objectAtIndex:(NSUInteger)e->id] UTF8String];
+    return w_string(p ? p : "");
 }
 
 /* ---- input queries ---- */
@@ -896,6 +917,41 @@ static TungstenMenuTarget *gfx_menu_target = nil;
 @interface TungstenAppDelegate : NSObject <NSApplicationDelegate>
 @end
 
+/* ---- documents to open (Finder, the Dock, `open`, any app sending open-documents) ----
+ * The delegate's application:openURLs: (at launch and while running) records each file URL's path and queues a GFX_EV_OPEN
+ * on the open target: the first window opened that is still open. Paths that arrive before any window (at launch, inside
+ * finishLaunching) wait and are queued when the first window opens. The event's id indexes gfx_open_paths;
+ * w_gfx_event_path returns the whole path (the event's text is only 64 bytes). */
+/* (gfx_open_paths, gfx_open_queued and gfx_open_window are declared with the windows, above) */
+
+static void gfx_open_flush(void) {
+    WGfxWindow *gw = gfx_open_window;
+    if (!gfx_open_paths || !gw || gw->closed) return;
+    while (gfx_open_queued < [gfx_open_paths count]) {
+        GfxEvent e; memset(&e, 0, sizeof e);
+        e.kind = GFX_EV_OPEN;
+        e.id = (int64_t)gfx_open_queued;
+        gfx_push(&gw->input, &e);
+        gfx_open_queued++;
+    }
+}
+
+static void gfx_open_target(WGfxWindow *gw) {
+    if (!gfx_open_window || gfx_open_window->closed) gfx_open_window = gw;
+    gfx_open_flush();
+}
+
+static void gfx_open_received(NSArray *urls) {
+    if (!gfx_open_paths) gfx_open_paths = [[NSMutableArray alloc] init];
+    for (NSURL *u in urls) {
+        if (![u isKindOfClass:[NSURL class]] || ![u isFileURL]) continue;
+        /* standardized (no . or ..) and precomposed (NSURL hands back decomposed accents; text and recent lists are NFC) */
+        NSString *p = [[[u URLByStandardizingPath] path] precomposedStringWithCanonicalMapping];
+        if ([p length] > 0) [gfx_open_paths addObject:p];
+    }
+    gfx_open_flush();
+}
+
 @implementation TungstenAppDelegate
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
     (void)app;
@@ -905,9 +961,20 @@ static TungstenMenuTarget *gfx_menu_target = nil;
     }
     return NSTerminateNow;
 }
+- (void)application:(NSApplication *)app openURLs:(NSArray<NSURL *> *)urls {
+    (void)app;
+    gfx_open_received(urls);
+}
 @end
 
 static TungstenAppDelegate *gfx_app_delegate = nil;
+
+static void gfx_install_app_delegate(void) {
+    if (!gfx_app_delegate && [NSApp delegate] == nil) {
+        gfx_app_delegate = [[TungstenAppDelegate alloc] init];
+        [NSApp setDelegate:gfx_app_delegate];
+    }
+}
 
 /* The application's name: the bundle's CFBundleName, else the process name. */
 static NSString *gfx_app_name(void) {
@@ -940,10 +1007,7 @@ static void gfx_menu_bar(WGfxWindow *gw) {
         gfx_menu_target = [[TungstenMenuTarget alloc] init];
     }
     gfx_menu_target.input = &gw->input;
-    if (!gfx_app_delegate && [NSApp delegate] == nil) {
-        gfx_app_delegate = [[TungstenAppDelegate alloc] init];
-        [NSApp setDelegate:gfx_app_delegate];
-    }
+    gfx_install_app_delegate();
     if (gfx_menu_bar_made) return;
     gfx_menu_bar_made = true;
     NSMenu *previous = [NSApp mainMenu];
@@ -1412,7 +1476,9 @@ WValue w_gfx_prompt_answer(WValue window_v, WValue button_v, WValue text_v, WVal
  *   scroll                   a, b = dx, dy points (precise)
  *   magnify                  a = magnification
  *   menu                     a = the item's id (the item's action runs)
- *   close                    the close button */
+ *   close                    the close button
+ *   open                     text = a file path, through the application delegate's application:openURLs: as Finder's
+ *                            open-documents event goes (a GFX_EV_OPEN on the open target) */
 WValue w_gfx_post_event(WValue window_v, WValue kind_v, WValue x_v, WValue y_v,
                         WValue a_v, WValue b_v, WValue mods_v, WValue text_v) {
     WGfxWindow *gw = gfx_window_arg(window_v, "gfx.post_event");
@@ -1506,6 +1572,13 @@ WValue w_gfx_post_event(WValue window_v, WValue kind_v, WValue x_v, WValue y_v,
             GfxEvent e; memset(&e, 0, sizeof e);
             e.kind = GFX_EV_MAGNIFY; e.x = x; e.y = y; e.dx = a; e.mods = mods;
             gfx_push(&gw->input, &e);
+        } else if (kind == GFX_EV_OPEN) {
+            /* as Finder's open-documents does: through the application delegate */
+            NSString *path = gfx_string_or(text_v, @"");
+            if ([path length] == 0) return w_bool(0);
+            id<NSApplicationDelegate> d = [NSApp delegate];
+            if (![d respondsToSelector:@selector(application:openURLs:)]) return w_bool(0);
+            [d application:NSApp openURLs:@[[NSURL fileURLWithPath:path]]];
         } else if (kind == GFX_EV_MENU) {
             NSMenuItem *it = gfx_find_item([NSApp mainMenu], (NSInteger)a);
             if (!it || ![it isEnabled]) return w_bool(0);   /* a disabled item cannot be chosen */

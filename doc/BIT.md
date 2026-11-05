@@ -107,6 +107,15 @@ TUNGSTEN BUILD
     types), Contents/Resources/<Name>.icns (made from the PNG with sips and
     iconutil) and PkgInfo, and is signed ad hoc. The system frameworks the
     program links (AppKit, Metal, QuartzCore, CoreGraphics) need no copying.
+    Each `documents:` extension becomes a document type the app owns (role
+    Editor, `LSHandlerRank` Owner, `LSItemContentTypes`) and an exported type
+    `<id>.<ext>` (`UTExportedTypeDeclarations`, conforming to `public.data`),
+    and the bundle is registered with Launch Services when it is built, so a
+    double-click in Finder opens the file in the app: the program gets it as
+    a `GFX_EV_OPEN` event with `:path` (doc/graphics.md, "Opening documents"),
+    at launch and while it runs. (Launch Services does not bind document types
+    to apps in temporary folders such as /tmp: check the routing with a bundle
+    elsewhere.)
 
     A project can name the oldest Tungsten main it builds correctly with, so
     a stale toolchain stops the build (before anything is replaced) instead

@@ -116,6 +116,9 @@ GFX_EV_CLOSE      = 11  # :id 1 when it came from Quit
 GFX_EV_MENU       = 12  # :id of the item
 GFX_EV_FOCUS      = 13  # :id 1 gained, 0 lost
 GFX_EV_MODS       = 14  # modifier keys changed: :mods
+GFX_EV_OPEN       = 15  # a file to open (a double-click in Finder, a drop on the Dock icon, `open -a`, at launch or while
+                        # running): :path. It goes to the first window opened that is still open; paths that arrive at
+                        # launch, before any window, are queued when it opens. The app's Bitfile `documents:` types route them.
 
 # Modifier bits (e[:mods]; gfx_menu_add's mods).
 GFX_MOD_SHIFT = 1
@@ -150,7 +153,10 @@ GFX_CURSOR_RESIZE_UD   = 7
   k = ccall("w_gfx_next_event", window)
   if k == 0
     return nil
-  {kind: k, x: ccall("w_gfx_event_field", window, 1), y: ccall("w_gfx_event_field", window, 2), dx: ccall("w_gfx_event_field", window, 3), dy: ccall("w_gfx_event_field", window, 4), button: ccall("w_gfx_event_field", window, 5), clicks: ccall("w_gfx_event_field", window, 6), mods: ccall("w_gfx_event_field", window, 7), key: ccall("w_gfx_event_field", window, 8), repeat: ccall("w_gfx_event_field", window, 9), phase: ccall("w_gfx_event_field", window, 10), precise: ccall("w_gfx_event_field", window, 11), w: ccall("w_gfx_event_field", window, 12), h: ccall("w_gfx_event_field", window, 13), scale: ccall("w_gfx_event_field", window, 14), id: ccall("w_gfx_event_field", window, 15), text: ccall("w_gfx_event_text", window)}
+  e = {kind: k, x: ccall("w_gfx_event_field", window, 1), y: ccall("w_gfx_event_field", window, 2), dx: ccall("w_gfx_event_field", window, 3), dy: ccall("w_gfx_event_field", window, 4), button: ccall("w_gfx_event_field", window, 5), clicks: ccall("w_gfx_event_field", window, 6), mods: ccall("w_gfx_event_field", window, 7), key: ccall("w_gfx_event_field", window, 8), repeat: ccall("w_gfx_event_field", window, 9), phase: ccall("w_gfx_event_field", window, 10), precise: ccall("w_gfx_event_field", window, 11), w: ccall("w_gfx_event_field", window, 12), h: ccall("w_gfx_event_field", window, 13), scale: ccall("w_gfx_event_field", window, 14), id: ccall("w_gfx_event_field", window, 15), text: ccall("w_gfx_event_text", window)}
+  if k == GFX_EV_OPEN
+    e[:path] = ccall("w_gfx_event_path", window)
+  e
 
 # Every queued event, oldest first.
 -> gfx_events(window)
@@ -276,7 +282,8 @@ GFX_MENU_HELP     = -3   # Help > <App> Help
 # user did it: GFX_EV_MOUSE_* (a = button, b = clicks), GFX_EV_KEY_DOWN/UP
 # (a = keyCode, text = its characters; Command shortcuts reach the menu bar),
 # GFX_EV_SCROLL (a, b = dx, dy points), GFX_EV_MAGNIFY (a), GFX_EV_MENU
-# (a = item id), GFX_EV_CLOSE (the close button).
+# (a = item id), GFX_EV_CLOSE (the close button), GFX_EV_OPEN (text = a file
+# path, through the application delegate as Finder's open-documents goes).
 -> gfx_post_event(window, kind, x, y, a, b, mods, text)
   ccall("w_gfx_post_event", window, kind, x, y, a, b, mods, text)
 

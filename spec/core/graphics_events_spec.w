@@ -11,7 +11,7 @@
 # buttons and click counts, drags, scroll deltas, typed text and modifiers,
 # key repeat state for the game-style API, resize and the backing scale, the
 # menu bar (an item chosen directly and by its Command shortcut), scripted
-# open/save panels, prompts and choices, the close request of a GFX_KEEP_OPEN window, and a
+# open/save panels, prompts and choices, open-documents requests (GFX_EV_OPEN), the close request of a GFX_KEEP_OPEN window, and a
 # present at the drawable's size.
 #
 # Run:
@@ -255,6 +255,20 @@ gfx_set_title(win, "renamed")
 gfx_set_cursor(win, GFX_CURSOR_POINTING)
 gfx_set_cursor(win, GFX_CURSOR_ARROW)
 check("title and cursor calls return", true)
+
+# ---- open documents: through the application delegate (Finder's open-documents path), whole paths ----
+long = "/tmp/a folder with a long name for the open-documents spec/and a piece called Les Préludes, the whole arrangement.arr"
+gfx_events(win)
+r = gfx_post_event(win, GFX_EV_OPEN, 0, 0, 0, 0, 0, long)
+e = gfx_next_event(win)
+check("an open request is an event", e != nil && e[:kind] == GFX_EV_OPEN)
+check("its path is whole (" + (e == nil ? "" : e[:path]) + ")", e != nil && e[:path] == long)
+gfx_post_event(win, GFX_EV_OPEN, 0, 0, 0, 0, 0, "/tmp/one.arr")
+gfx_post_event(win, GFX_EV_OPEN, 0, 0, 0, 0, 0, "/tmp/../tmp/two.arr")
+o1 = gfx_next_event(win)
+o2 = gfx_next_event(win)
+check("open requests keep their order", o1 != nil && o2 != nil && o1[:path] == "/tmp/one.arr" && o2[:path] == "/tmp/two.arr")
+check("other events carry no path", gfx_next_event(win) == nil)
 
 # ---- close: a KEEP_OPEN window asks the program ----
 gfx_post_event(win, GFX_EV_CLOSE, 0, 0, 0, 0, 0, "")

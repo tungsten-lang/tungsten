@@ -74,6 +74,7 @@ points from the content's top-left; multiply by `gfx_scale(win)` for pixels.
 | `GFX_EV_MENU` | `:id` of the chosen item |
 | `GFX_EV_FOCUS` | `:id` 1 when the window gained focus, 0 when it lost it |
 | `GFX_EV_MODS` | `:mods` after a modifier key changed |
+| `GFX_EV_OPEN` | `:path`, a file to open: a double-click in Finder, a drop on the Dock icon, `open -a`, at launch or while running |
 
 Modifier bits: `GFX_MOD_SHIFT`, `GFX_MOD_CTRL`, `GFX_MOD_ALT`, `GFX_MOD_CMD`,
 `GFX_MOD_CAPS`, `GFX_MOD_FN` (AppKit sets Fn on the arrows and the other
@@ -111,6 +112,21 @@ an application item with an empty menu (until 2026-11-04 the runtime took that
 for its own bar, so a launched app had no Quit and no Window or Help menus;
 hidden-window runs are accessory apps and never get the placeholder, so the
 spec below cannot see it: check a launched app's menu bar for real).
+
+**Opening documents.** The runtime's application delegate takes
+`application:openURLs:` (installed before `finishLaunching`, so the files an
+app is launched with reach it too, instead of `NSDocumentController`, which
+has no document class and says the app cannot open the format) and queues a
+`GFX_EV_OPEN` per file on the first window opened that is still open; paths
+that arrive at launch, before any window, are queued when the first window
+opens. The program opens the file as File ▸ Open would (asking to save its
+edits first). For Finder to route a type to the app, its Bitfile `app` line
+names it: `documents: "arr"` makes the bundle's `CFBundleDocumentTypes`
+(role Editor, `LSHandlerRank` Owner, `LSItemContentTypes`) and an exported
+type `<id>.<ext>` (`UTExportedTypeDeclarations`, conforming to `public.data`
+and `public.content`, with the extension). `gfx_post_event(win, GFX_EV_OPEN, 0, 0,
+0, 0, 0, path)` sends a path through the same delegate method (scripts,
+specs).
 
 A menu key is one character or a name: `up`, `down`, `left`, `right`,
 `return`, `tab`, `space`, `delete`, `escape`, `home`, `end`, `pageup`,

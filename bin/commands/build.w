@@ -428,7 +428,7 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
   << "Anywhere else, build the nearest project or bit (its Bitfile): executables into bin/, and on macOS"
   << "each `app` line as bin/<Name>.app (Info.plist, icon, the executable in Contents/MacOS)."
   << "  --which   Print what would be built (self, checkout, bit or none) and the folder, then exit"
-  << "Executable profile: \"release\" selects an optimized default; --debug overrides it."
+  << "Executable profile: \"release\" selects an optimized default; --debug overrides it. debug: true keeps it and adds --debug."
   << ""
   << "Options:"
   << "  -1          Build only the stage-1 compiler (never installed)"
@@ -1568,12 +1568,15 @@ if bootstrap_compiler_clang_opt == ""
           cflags_tail = bit_option_tail(line, "cflags")
           if !cflags_tail.starts_with?("\"") && !cflags_tail.starts_with?("'")
             die("Executable cflags must be a quoted whitespace-separated flag string in " + bit_root + "/Bitfile")
-        entries.push({name: name, source: source, profile: profile, native: native == "true", opt_level: opt_level, cflags: cflags})
+        debug = bit_option_value(line, "debug")
+        if debug != nil && debug != "true" && debug != "false"
+          die("Executable debug must be true or false in " + bit_root + "/Bitfile")
+        entries.push({name: name, source: source, profile: profile, native: native == "true", opt_level: opt_level, cflags: cflags, debug: debug == "true"})
   if entries.size == 0
     name = basename_of(bit_root)
     if name.starts_with?("tungsten-")
       name = name.slice(9, name.size - 9)
-    entries.push({name: name, source: "lib/" + name + ".w", profile: "", native: false, opt_level: "", cflags: ""})
+    entries.push({name: name, source: "lib/" + name + ".w", profile: "", native: false, opt_level: "", cflags: "", debug: false})
   entries
 
 -> bit_relative_path?(path)
@@ -1608,6 +1611,21 @@ if bootstrap_compiler_clang_opt == ""
   else
     flags.push("--debug")
   flags
+
+# `debug: true` on an executable line: the profile's optimization is kept and the compiler's --debug is added, so a runtime
+# error's report names the source line and the Tungsten frames (an app's crash log; a release build's report otherwise shows
+# only C frames, the Tungsten ones inlined into main). Explicit --debug or --no-debug on the command line still wins.
+-> bit_debug_flags(flags, debug, explicit_debug)
+  if !debug || explicit_debug
+    return flags
+  out = []
+  i = 0
+  while i < flags.size
+    if flags[i] != "--debug" && flags[i] != "--no-debug"
+      out.push(flags[i])
+    i = i + 1
+  out.push("--debug")
+  out
 
 -> bit_profile_clang_opt(profile, default_opt, configured_opt, explicit_release, explicit_debug, fast)
   if profile == "debug" && configured_opt == "" && !explicit_release && !explicit_debug
@@ -2817,6 +2835,7 @@ elsif bit_only
     entry = bit_root_found + "/" + entries[ei][:source]
     out_bin = bit_root_found + "/bin/" + entries[ei][:name]
     entry_flags = bit_profile_flags(entries[ei][:profile], program_flags, release_mode, debug_requested)
+    entry_flags = bit_debug_flags(entry_flags, entries[ei][:debug], debug_requested || no_debug_requested)
     entry_flags = bit_native_flags(entry_flags, entries[ei][:native], native_mode || cpu_name != nil || target_triple != "" || portable_mode)
     entry_clang_opt = bit_profile_clang_opt(entries[ei][:profile], bit_clang_opt, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested, fast_mode)
     entry_clang_opt = bit_cflags_opt(entry_clang_opt, entries[ei][:cflags], entries[ei][:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested)
@@ -2855,6 +2874,7 @@ else
         entry = bit_path + "/" + entries[ei][:source]
         out_bin = bit_path + "/bin/" + entries[ei][:name]
         entry_flags = bit_profile_flags(entries[ei][:profile], program_flags, release_mode, debug_requested)
+        entry_flags = bit_debug_flags(entry_flags, entries[ei][:debug], debug_requested || no_debug_requested)
         entry_flags = bit_native_flags(entry_flags, entries[ei][:native], native_mode || cpu_name != nil || target_triple != "" || portable_mode)
         entry_clang_opt = bit_profile_clang_opt(entries[ei][:profile], bit_clang_opt, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested, fast_mode)
         entry_clang_opt = bit_cflags_opt(entry_clang_opt, entries[ei][:cflags], entries[ei][:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested)

@@ -117,6 +117,18 @@ TUNGSTEN BUILD
     to apps in temporary folders such as /tmp: check the routing with a bundle
     elsewhere.)
 
+    An executable line can ask for the compiler's debug information without
+    giving up its profile's optimization:
+
+        executable "arranger", source: "lib/arranger.w", profile: "release", debug: true
+
+    The build passes --debug instead of the profile's --no-debug, so a
+    runtime error's report shows the failing source line and the Tungsten
+    frames (`at fn (file:line:col)`) instead of C frames with the Tungsten
+    ones inlined into main: what an app's crash log needs. It costs a few
+    percent (the Arranger's frame times, 2026-11-05). --debug or --no-debug
+    on the command line still decides. `debug:` is true or false.
+
     A project can name the oldest Tungsten main it builds correctly with, so
     a stale toolchain stops the build (before anything is replaced) instead
     of producing an app that silently lacks what it needs:

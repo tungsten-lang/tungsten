@@ -10,7 +10,7 @@ require "tmpdir"
 root = File.expand_path("..", __dir__)
 compiler = ENV.fetch("TUNGSTEN_COMPILER", File.join(root, "bin/tungsten-compiler"))
 source = File.read(File.join(root, "bin/commands/build.w"))
-names = %w[last_slash basename_of shq split_ws extract_quoted strip_bitfile_comment bit_option_tail bit_option_value bit_valid_opt_level bit_entry_points bit_relative_path? bit_profile_release bit_profile_flags bit_profile_clang_opt bit_native_flags bit_cflags_opt]
+names = %w[last_slash basename_of shq split_ws extract_quoted strip_bitfile_comment bit_option_tail bit_option_value bit_valid_opt_level bit_entry_points bit_relative_path? bit_profile_release bit_profile_flags bit_profile_clang_opt bit_debug_flags bit_native_flags bit_cflags_opt]
 helpers = names.map do |name|
   source[/^-> #{Regexp.escape(name)}(?:\(|\s).*?(?=^-> |^CWD =|\z)/m] or raise "missing build helper #{name}"
 end.join("\n")
@@ -19,8 +19,9 @@ Dir.mktmpdir("tungsten-bit-profiles-") do |directory|
   package = File.join(directory, "tungsten-probe")
   FileUtils.mkdir_p(package)
   File.write(File.join(package, "Bitfile"), <<~BITFILE)
-    executable "hot", source: "bin/main.w", cflags: '-DNAME="hot" -Dtext=profile:debug -Dsource=source:bad #literal -O1', profile: "release", native: true, opt_level: "3" # outside comment
+    executable "hot", source: "bin/main.w", cflags: '-DNAME="hot" -Dtext=profile:debug -Dsource=source:bad #literal -O1 debug: true', profile: "release", native: true, opt_level: "3" # outside comment
     executable "ordinary", source: "lib/main.w"
+    executable "traced", source: "lib/traced.w", profile: "release", debug: true
   BITFILE
   probe_source = File.join(directory, "probe.w")
   probe_binary = File.join(directory, "probe")
@@ -39,7 +40,7 @@ Dir.mktmpdir("tungsten-bit-profiles-") do |directory|
       << bit_cflags_opt("-O3", args[1], "", "", false, false)
       exit(0)
     entries = bit_entry_points(args[0])
-    z = expect_profile("entry paths", entries.size == 2 && entries[0][:source] == "bin/main.w" && entries[1][:source] == "lib/main.w")
+    z = expect_profile("entry paths", entries.size == 3 && entries[0][:source] == "bin/main.w" && entries[1][:source] == "lib/main.w" && entries[2][:source] == "lib/traced.w")
     z = expect_profile("entry profiles", entries[0][:profile] == "release" && entries[1][:profile] == "")
     z = expect_profile("entry native and optimization", entries[0][:native] && entries[0][:opt_level] == "3" && !entries[1][:native] && entries[1][:cflags] == "")
     z = expect_profile("quote-aware metadata and comment parsing", entries[0][:cflags].include?("#literal") && entries[0][:cflags].include?("profile:debug") && entries[0][:source] == "bin/main.w")
@@ -67,6 +68,12 @@ Dir.mktmpdir("tungsten-bit-profiles-") do |directory|
     z = expect_profile("explicit release wins", bit_cflags_opt("-O3", flags, "s", "", true, false) == "-O3 '-funroll-loops'")
     z = expect_profile("explicit debug wins", bit_cflags_opt("-O0", flags, "3", "", false, true) == "-O0 '-funroll-loops'")
     z = expect_profile("environment full override", bit_cflags_opt("-O2 -g", flags, "3", "-O2 -g", false, true) == "-O2 -g")
+    z = expect_profile("debug metadata (quoted text is not an option)", !entries[0][:debug] && !entries[1][:debug] && entries[2][:debug] && entries[2][:profile] == "release")
+    traced = bit_debug_flags(bit_profile_flags(entries[2][:profile], defaults, false, false), entries[2][:debug], false)
+    z = expect_profile("debug: true keeps release and adds --debug", traced.include?("--release") && traced.include?("--debug") && !traced.include?("--no-debug") && traced.include?("native"))
+    z = expect_profile("debug: true keeps release optimization", bit_profile_clang_opt(entries[2][:profile], "-O0", "", false, false, false) == "-O3")
+    z = expect_profile("debug absent unchanged", bit_debug_flags(optimized, false, false) == optimized)
+    z = expect_profile("explicit --debug/--no-debug wins over debug: true", bit_debug_flags(optimized, true, true) == optimized)
     << "PASS native bit profile resolution"
   W
   output, status = Open3.capture2e(compiler, "compile", probe_source, "--out", probe_binary, "--no-lto", chdir: root)
@@ -78,6 +85,7 @@ Dir.mktmpdir("tungsten-bit-profiles-") do |directory|
   {
     'profile: "typo"' => "profile must be release or debug",
     'native: "yes"' => "native must be true or false",
+    'debug: yes' => "debug must be true or false",
     'opt_level: "fastest"' => "opt_level must be",
     'cflags: -O3' => "cflags must be a quoted",
     'cflags: "unterminated' => "Missing value"
@@ -104,6 +112,7 @@ raise "compiler lost per-entry flags" unless source.include?("flags_to_cmd(compi
 raise "bit-only compile lost profile" unless source.include?("compile_bit(bit_root_found, entry, out_bin, entry_clang_opt, entry_flags, toolchain_env_prefix)")
 raise "root build lost profile" unless source.include?("compile_bit(bit_path, entry, out_bin, entry_clang_opt, entry_flags, toolchain_env_prefix)")
 raise "profile cache version missing" unless source.include?("bit-entrypoints-v4-build-flags")
+raise "debug: true not applied to both entry builds" unless source.scan("entry_flags = bit_debug_flags(entry_flags, entries[ei][:debug], debug_requested || no_debug_requested)").length == 2
 raise "cache lost resolved entry options" unless source.scan(/bit_sha =.*entry_clang_opt.*entry_flags/).length == 2
 raise "target/portable no longer suppress manifest native" unless source.scan("native_mode || cpu_name != nil || target_triple != \"\" || portable_mode").length == 2
 puts "PASS native build invocation/cache profile wiring"

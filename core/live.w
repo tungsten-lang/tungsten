@@ -42,6 +42,10 @@
 -> live_release(sampler, tag, at = 0, rel = 0)
   ccall("w_media_live_release", sampler, tag, at, rel)
 
+# a transport's stop: every scheduled note, release and bend dropped, what sounds released now (rel s; 0: each voice's own)
+-> live_flush(sampler, rel = 0)
+  ccall("w_media_live_flush", sampler, rel)
+
 # pitch bend in cents for every voice from a host time (0: now)
 -> live_bend(sampler, cents, at = 0)
   ccall("w_media_live_bend", sampler, cents, at)
@@ -50,9 +54,12 @@
 -> live_vibrato(sampler, depth, rate = 5.5)
   ccall("w_media_live_vibrato", sampler, depth, rate)
 
+# {voices:, zones:, rate:, rendered:, head_bytes:, mapped_bytes:, ring_bytes:, underruns:, latency_n:, latency:, latency_max:,
+#  latency_last:, output_latency:, buffer_frames:, now:, cb_s:, audio_s: (cb_s / audio_s is the render callback's mean load),
+#  load_max: (the worst buffer's), voices_max: (the most sounding at once), voice_cap: (256)}
 -> live_info(sampler)
   a = ccall("w_media_live_info", sampler)
-  {voices: a[0], zones: a[1], rate: a[2], rendered: a[3], head_bytes: a[4], mapped_bytes: a[5], ring_bytes: a[6], underruns: a[7], latency_n: a[8], latency: a[9], latency_max: a[10], latency_last: a[11], output_latency: a[12], buffer_frames: a[13], now: a[14]}
+  {voices: a[0], zones: a[1], rate: a[2], rendered: a[3], head_bytes: a[4], mapped_bytes: a[5], ring_bytes: a[6], underruns: a[7], latency_n: a[8], latency: a[9], latency_max: a[10], latency_last: a[11], output_latency: a[12], buffer_frames: a[13], now: a[14], cb_s: a[15], audio_s: a[16], load_max: a[17], voices_max: a[18], voice_cap: a[19]}
 
 -> live_close(sampler)
   ccall("w_media_live_close", sampler)

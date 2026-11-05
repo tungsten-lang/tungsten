@@ -575,8 +575,11 @@ now, the rest streamed by a reader thread into each voice's ring while it plays)
 gain, start, release], at, origin)` schedules a note at a host time (`midi_now()`'s clock: MIDI timestamps are on it) and the
 render thread starts it at that frame; `live_release`, `live_bend` likewise; `live_vibrato(s, depth, rate)`; `live_sinc(s,
 table)` the 64-tap windowed-sinc table (sampler.w's) to interpolate with. `live_info` adds the memory (heads, mapped, rings),
-underruns and the measured latency (cause to first sample, mean and worst) and the output's presentation latency. The output
-runs 256-frame buffers. `midi_send_at(out, at, bytes)` sends with a CoreMIDI timestamp, `midi_flush(out)` drops what is
+underruns and the measured latency (cause to first sample, mean and worst) and the output's presentation latency, and (2026-11-04
+night) the render callback's load: `cb_s` seconds spent in it over `audio_s` seconds of audio it made (the mean load),
+`load_max` the worst buffer's share, `voices_max` the most voices sounding at once of `voice_cap` (256: a whole score plays in
+real time; past it the oldest releasing voice, else the oldest, is taken). `live_flush(s, rel)` is a transport's stop: every
+scheduled note, release and bend dropped, what sounds released now. The output runs 256-frame buffers. `midi_send_at(out, at, bytes)` sends with a CoreMIDI timestamp, `midi_flush(out)` drops what is
 scheduled; input messages carry their packets' timestamps.
 
 ## How it is built

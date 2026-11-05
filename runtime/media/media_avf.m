@@ -4264,7 +4264,8 @@ WValue w_media_midi_close(WValue hv) {
 #include <stdatomic.h>
 #include <sys/mman.h>
 
-#define L_VOICES 96
+/* 256 voices (2026-11-04 night: a whole score in real time, a pedalled piano with an ensemble; 96 was one instrument's) */
+#define L_VOICES 256
 
 /* element i of an f64[] or f32[] argument, and its length */
 static double a_f64_at(WValue a, int64_t i, const char *what, int64_t *n) {
@@ -4336,6 +4337,10 @@ typedef struct ALive {
     int64_t next_tag;
     /* measurements */
     _Atomic int64_t underruns;
+    /* the render callback's own time (its load): seconds spent in it, seconds of audio it made, the worst buffer's share, and
+     * the most voices sounding at once */
+    double cb_sum, buf_sum, cb_max;
+    int voices_max;
     double lat_sum, lat_max, lat_last;
     int64_t lat_n;
     int64_t head_bytes, map_bytes;
@@ -4365,8 +4370,12 @@ static inline void lv_frame(ALive *L, LVoiceF *v, LZoneF *z, int64_t q, float *a
 
 static int lv_voice_free(ALive *L) {
     for (int i = 0; i < L_VOICES; i++) if (atomic_load(&L->v[i].state) == 0) return i;
-    for (int i = 0; i < L_VOICES; i++) if (atomic_load(&L->v[i].state) == 2) return i;   /* steal a releasing voice */
-    return 0;
+    /* steal the oldest releasing voice, else the oldest */
+    int best = -1; int64_t age = -1;
+    for (int i = 0; i < L_VOICES; i++) if (atomic_load(&L->v[i].state) == 2 && L->v[i].age > age) { best = i; age = L->v[i].age; }
+    if (best >= 0) return best;
+    for (int i = 0; i < L_VOICES; i++) if (L->v[i].age > age) { best = i; age = L->v[i].age; }
+    return best >= 0 ? best : 0;
 }
 
 static void lv_apply(ALive *L, LEvent *e, double t_out) {
@@ -4544,6 +4553,7 @@ WValue w_media_live_new(WValue ratev) {
         AVAudioFormat *fmt = [[[AVAudioFormat alloc] initStandardFormatWithSampleRate:rate channels:2] autorelease];
         ALive *Lp = L;
         L->node = [[AVAudioSourceNode alloc] initWithFormat:fmt renderBlock:^OSStatus(BOOL *silence, const AudioTimeStamp *ts, AVAudioFrameCount n, AudioBufferList *abl) {
+            double cb0 = lv_now();
             float *ol = (float *)abl->mBuffers[0].mData;
             float *orr = abl->mNumberBuffers > 1 ? (float *)abl->mBuffers[1].mData : ol;
             memset(ol, 0, n * sizeof(float));
@@ -4578,6 +4588,15 @@ WValue w_media_live_new(WValue ratev) {
                 if (Lp->vib_phase > 2 * M_PI) Lp->vib_phase -= 2 * M_PI;
             }
             atomic_fetch_add(&Lp->rendered, n);
+            {
+                int nv = 0;
+                for (int i = 0; i < L_VOICES; i++) if (atomic_load_explicit(&Lp->v[i].state, memory_order_relaxed)) nv++;
+                if (nv > Lp->voices_max) Lp->voices_max = nv;
+                double dt = lv_now() - cb0, bd = (double)n / Lp->rate;
+                Lp->cb_sum += dt;
+                Lp->buf_sum += bd;
+                if (bd > 0 && dt / bd > Lp->cb_max) Lp->cb_max = dt / bd;
+            }
             (void)silence;
             return noErr;
         }];
@@ -4803,6 +4822,23 @@ WValue w_media_live_release(WValue hv, WValue tagv, WValue whenv, WValue relv) {
     return W_TRUE;
 }
 
+/* a transport's stop (2026-11-04 night): every scheduled event dropped (notes not started yet, releases, bends) and what
+ * sounds released now with time constant rel s (0: each voice's own) */
+WValue w_media_live_flush(WValue hv, WValue relv) {
+    ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_flush");
+    os_unfair_lock_lock(&L->lock);
+    L->nev = 0;
+    os_unfair_lock_unlock(&L->lock);
+    LEvent e;
+    memset(&e, 0, sizeof e);
+    e.type = 2;
+    e.tag = 0;
+    e.when = lv_now();
+    e.rel = w_media_num(relv, 0, "release");
+    lv_push(L, &e);
+    return W_TRUE;
+}
+
 /* pitch bend in cents for every voice, from a host time (0: now) */
 WValue w_media_live_bend(WValue hv, WValue centsv, WValue whenv) {
     ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_bend");
@@ -4863,7 +4899,8 @@ WValue w_media_live_volume(WValue hv, WValue vv) {
 }
 
 /* [voices, zones, rate, frames rendered, head bytes, mapped bytes, ring bytes, underruns, latency n, mean s, max s, last s,
- *  the output's presentation latency s, the render buffer's frames, now (host s)] */
+ *  the output's presentation latency s, the render buffer's frames, now (host s), the callback's seconds, the audio's seconds
+ *  (their ratio is its mean load), the worst buffer's load, the most voices at once, the voices there are] */
 WValue w_media_live_info(WValue hv) {
     ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_info");
     int n = 0;
@@ -4886,6 +4923,11 @@ WValue w_media_live_info(WValue hv) {
     out = w_array_push(out, w_float(pres));
     out = w_array_push(out, w_int(L->buf_frames));
     out = w_array_push(out, w_float(lv_now()));
+    out = w_array_push(out, w_float(L->cb_sum));
+    out = w_array_push(out, w_float(L->buf_sum));
+    out = w_array_push(out, w_float(L->cb_max));
+    out = w_array_push(out, w_int(L->voices_max));
+    out = w_array_push(out, w_int(L_VOICES));
     return out;
 }
 

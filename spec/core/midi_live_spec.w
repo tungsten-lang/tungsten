@@ -87,6 +87,30 @@ live_release(s, tag, 0, 0.02)
 wait_ms(500)
 check("released", live_info(s)[:voices] == 0)
 check("memory: heads " + live_info(s)[:head_bytes].to_s + " bytes", live_info(s)[:head_bytes] > 0)
+# the render callback's load and the voices it ran (2026-11-04 night): measured, a fraction of each buffer, 256 voices
+inf = live_info(s)
+check("the callback's load is measured (mean " + ((inf[:cb_s] / inf[:audio_s]) * 100.0).round.to_s + " %, worst buffer " + (inf[:load_max] * 100.0).round.to_s + " %)", inf[:audio_s] > 0.5 && inf[:cb_s] > 0.0 && inf[:cb_s] < inf[:audio_s] && inf[:load_max] > 0.0)
+check("the most voices at once (" + inf[:voices_max].to_s + " of " + inf[:voice_cap].to_s + ")", inf[:voices_max] >= 1 && inf[:voice_cap] == 256)
+# many voices at once: 200 notes started together all sound, the oldest stolen only past 256
+t1 = midi_now()
+k = 0
+while k < 200
+  live_play(s, [zf[0], 60, 1.0, 0.002, 0, 0.05], t1 + 0.05, t1)
+  k += 1
+wait_ms(250)
+check("200 notes at once sound together (" + live_info(s)[:voices].to_s + " voices)", live_info(s)[:voices] == 200)
+live_release(s, 0, 0, 0.01)
+wait_ms(300)
+check("all released", live_info(s)[:voices] == 0)
+# flush: notes scheduled ahead never start, what sounds stops
+t2 = midi_now()
+live_play(s, [zf[0], 60, 1.0, 0.01, 0, 0.05], t2, t2)
+live_play(s, [zf[0], 64, 1.0, 0.01, 0, 0.05], t2 + 0.3, t2)
+wait_ms(100)
+check("flush: one sounds, one is scheduled", live_info(s)[:voices] == 1)
+live_flush(s, 0.01)
+wait_ms(400)
+check("flush: nothing sounds and the scheduled note never started", live_info(s)[:voices] == 0)
 File.delete(wav)
 check("close", live_close(s))
 bad = 0

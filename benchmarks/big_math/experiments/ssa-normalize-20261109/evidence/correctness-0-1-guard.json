@@ -1,0 +1,67 @@
+{
+  "status": "PASS",
+  "returncode": 0,
+  "reason": null,
+  "peak_sampled_rss_bytes": 106987520,
+  "limit_bytes": 1073741824,
+  "hard_data_limit_bytes": null,
+  "system_reserve_bytes": 17179869184,
+  "system_policy": "macos-filebacked-half-pressure-swap-v1",
+  "system_initial": {
+    "policy": "macos-filebacked-half-pressure-swap-v1",
+    "observed_monotonic": 112019.099970958,
+    "page_bytes": 16384,
+    "pages": {
+      "free": 380054,
+      "speculative": 3745,
+      "purgeable": 94861,
+      "inactive": 3586458,
+      "file_backed": 2193999,
+      "compressed": 264750,
+      "swapouts": 0
+    },
+    "pressure_level": 1,
+    "immediate_bytes": 7842365440,
+    "reclaim_candidate_bytes": 34330918912,
+    "reclaim_credit_bytes": 17165459456,
+    "estimated_headroom_bytes": 25007824896,
+    "swap_used_bytes": 0,
+    "swapout_bytes": 0,
+    "compressed_resident_bytes": 4337664000
+  },
+  "system_final": {
+    "policy": "macos-filebacked-half-pressure-swap-v1",
+    "observed_monotonic": 112022.859237166,
+    "page_bytes": 16384,
+    "pages": {
+      "free": 366932,
+      "speculative": 3737,
+      "purgeable": 105520,
+      "inactive": 3611857,
+      "file_backed": 2192906,
+      "compressed": 264750,
+      "swapouts": 0
+    },
+    "pressure_level": 1,
+    "immediate_bytes": 7801880576,
+    "reclaim_candidate_bytes": 34138505216,
+    "reclaim_credit_bytes": 17069252608,
+    "estimated_headroom_bytes": 24871133184,
+    "swap_used_bytes": 0,
+    "swapout_bytes": 0,
+    "compressed_resident_bytes": 4337664000
+  },
+  "system_samples": 8,
+  "system_sample_seconds": 0.5,
+  "minimum_estimated_headroom_bytes": 24869601280,
+  "minimum_immediate_bytes": 7730659328,
+  "samples": 24,
+  "sample_seconds": 0.1,
+  "seconds": 4.041256750002503,
+  "command": [
+    "/private/tmp/tungsten-ssa-normalize-20261109/check-0"
+  ],
+  "guard_sha256": "fbc55927ddb879e03028c1861512a2a6dfc2c461ad9124f0ad0e320fad362ea5",
+  "signal_errors": [],
+  "identity_check": "PID and ps start time; live group leader and complete member check before group signals"
+}

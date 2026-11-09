@@ -1,0 +1,13 @@
+{
+  "state": "completed",
+  "replication_summary": {
+    "acceptance_eligible": true,
+    "cells": 14,
+    "candidate_wins": 10,
+    "candidate_losses": 4,
+    "candidate_over_baseline_geomean": 0.9932289387768805,
+    "regressions_over_5_percent": 0
+  },
+  "benchmark": "/private/tmp/tungsten-ssa-normalize-20261109/BENCHMARK-REPLICATION.json",
+  "updated_epoch": 1794232406.2111511
+}

@@ -1,0 +1,20 @@
+{
+  "base": "f764abbd3906457b38dd6cfa9f64ddf0470d261b",
+  "draft_sha256": "0082e4688d312d84304cff4b9a2058530ce299088c3232339e62ef560de80759",
+  "original_runtime_sha256": "97dd8af97207e2f19c21d284923c48ce7c9dc107f6582730abb4f2337627718a",
+  "experiment_runtime_sha256": "18aa0cdebbe32c23838174709b4d345810180252770ae6f705ee65fa7cc806d0",
+  "guard_sha256": "fbc55927ddb879e03028c1861512a2a6dfc2c461ad9124f0ad0e320fad362ea5",
+  "guard_rss_gib": 1,
+  "reserve_gib": 16,
+  "sample_seconds": 0.1,
+  "timeout_seconds": 600,
+  "experiment.py_sha256": "57f4adb6c758e8f374ce8ed4aa487cc8a18052bbd3c5f69deb0ea57e68fca70e",
+  "check.c_sha256": "0c7d529195740c01eaf0ec254f09f7ea815a9fdf671bb83cf9d9e518434c396a",
+  "memory_guard.py_sha256": "fbc55927ddb879e03028c1861512a2a6dfc2c461ad9124f0ad0e320fad362ea5",
+  "legacy_guard_sha256": "b4cba54fb3eae4e7f55bd4033b474c88d920d050a8fe304e2b12534170728a02",
+  "memory_policy.py_sha256": "fce8341033049651341c4a02e67495db3bde48c53de53040d9b301dbbcc6352a",
+  "test_memory_policy.py_sha256": "cf75895cc7f0d1c263b6807fa689fae0d3a063ebfce8f031ab6cb667505e8dba",
+  "test_guard_controls.py_sha256": "78ab9ea7bf689d8d3717df9f9398fc3fedbd1450113f338d5d97a296a3631440",
+  "memory_policy": "macos-filebacked-half-pressure-swap-v1",
+  "pressure_constants_source": "https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/event_private.h"
+}

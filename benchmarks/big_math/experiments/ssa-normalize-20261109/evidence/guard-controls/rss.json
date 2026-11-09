@@ -1,0 +1,69 @@
+{
+  "status": "STOPPED",
+  "returncode": -15,
+  "reason": "process tree exceeded resident memory limit",
+  "peak_sampled_rss_bytes": 80412672,
+  "limit_bytes": 42949672,
+  "hard_data_limit_bytes": null,
+  "system_reserve_bytes": 17179869184,
+  "system_policy": "macos-filebacked-half-pressure-swap-v1",
+  "system_initial": {
+    "policy": "macos-filebacked-half-pressure-swap-v1",
+    "observed_monotonic": 111914.758272833,
+    "page_bytes": 16384,
+    "pages": {
+      "free": 386099,
+      "speculative": 1449,
+      "purgeable": 89491,
+      "inactive": 3673539,
+      "file_backed": 2339900,
+      "compressed": 264767,
+      "swapouts": 0
+    },
+    "pressure_level": 1,
+    "immediate_bytes": 7815806976,
+    "reclaim_candidate_bytes": 36846960640,
+    "reclaim_credit_bytes": 18423480320,
+    "estimated_headroom_bytes": 26239287296,
+    "swap_used_bytes": 0,
+    "swapout_bytes": 0,
+    "compressed_resident_bytes": 4337942528
+  },
+  "system_final": {
+    "policy": "macos-filebacked-half-pressure-swap-v1",
+    "observed_monotonic": 111914.817739083,
+    "page_bytes": 16384,
+    "pages": {
+      "free": 379721,
+      "speculative": 1458,
+      "purgeable": 91630,
+      "inactive": 3674095,
+      "file_backed": 2340488,
+      "compressed": 264767,
+      "swapouts": 0
+    },
+    "pressure_level": 1,
+    "immediate_bytes": 7746502656,
+    "reclaim_candidate_bytes": 36821401600,
+    "reclaim_credit_bytes": 18410700800,
+    "estimated_headroom_bytes": 26157203456,
+    "swap_used_bytes": 0,
+    "swapout_bytes": 0,
+    "compressed_resident_bytes": 4337942528
+  },
+  "system_samples": 2,
+  "system_sample_seconds": 0.5,
+  "minimum_estimated_headroom_bytes": 26157203456,
+  "minimum_immediate_bytes": 7746502656,
+  "samples": 2,
+  "sample_seconds": 0.1,
+  "seconds": 0.33930420799879357,
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-c",
+    "import time; x=bytearray(64*2**20); time.sleep(6)"
+  ],
+  "guard_sha256": "fbc55927ddb879e03028c1861512a2a6dfc2c461ad9124f0ad0e320fad362ea5",
+  "signal_errors": [],
+  "identity_check": "PID and ps start time; live group leader and complete member check before group signals"
+}

@@ -1,0 +1,25 @@
+RESERVE stage=release-profile estimated_gib=23.23 stable=1/3 veto=None
+RESERVE stage=release-profile estimated_gib=22.77 stable=3/3 veto=None
+RUN release-profile attempt 2
+FINISH release-profile PASS None
+RESERVE stage=build-check-0 estimated_gib=23.22 stable=1/3 veto=None
+RESERVE stage=build-check-0 estimated_gib=23.42 stable=3/3 veto=None
+RUN build-check-0 attempt 2
+FINISH build-check-0 PASS None
+RESERVE stage=correctness-0 estimated_gib=24.40 stable=1/3 veto=None
+RESERVE stage=correctness-0 estimated_gib=23.30 stable=3/3 veto=None
+RUN correctness-0 attempt 1
+FINISH correctness-0 PASS None
+RESERVE stage=build-check-1 estimated_gib=23.26 stable=1/3 veto=None
+RESERVE stage=build-check-1 estimated_gib=24.03 stable=3/3 veto=None
+RUN build-check-1 attempt 1
+FINISH build-check-1 PASS None
+RESERVE stage=correctness-1 estimated_gib=23.41 stable=1/3 veto=None
+RESERVE stage=correctness-1 estimated_gib=24.30 stable=3/3 veto=None
+RUN correctness-1 attempt 1
+FINISH correctness-1 PASS None
+RESERVE stage=benchmark estimated_gib=23.33 stable=1/3 veto=None
+RESERVE stage=benchmark estimated_gib=22.67 stable=3/3 veto=None
+RUN benchmark attempt 1
+FINISH benchmark PASS None
+COMPLETED {"acceptance_eligible": true, "cells": 20, "candidate_wins": 16, "candidate_losses": 4, "candidate_over_baseline_geomean": 0.9881600232188175, "regressions_over_5_percent": 0}

@@ -1,0 +1,8 @@
+RESERVE stage=release-profile estimated_gib=24.43 stable=1/3 veto=None
+RESERVE stage=release-profile estimated_gib=23.66 stable=3/3 veto=None
+RUN release-profile attempt 1
+FINISH release-profile PASS None
+RESERVE stage=build-check-0 estimated_gib=23.59 stable=1/3 veto=None
+RESERVE stage=build-check-0 estimated_gib=24.09 stable=3/3 veto=None
+RUN build-check-0 attempt 1
+FINISH build-check-0 STOPPED None

@@ -1,0 +1,68 @@
+{
+  "status": "PASS",
+  "returncode": 0,
+  "reason": null,
+  "peak_sampled_rss_bytes": 6995968,
+  "limit_bytes": 1073741824,
+  "hard_data_limit_bytes": null,
+  "system_reserve_bytes": 17179869184,
+  "system_policy": "macos-filebacked-half-pressure-swap-v1",
+  "system_initial": {
+    "policy": "macos-filebacked-half-pressure-swap-v1",
+    "observed_monotonic": 111930.77887425,
+    "page_bytes": 16384,
+    "pages": {
+      "free": 331948,
+      "speculative": 1480,
+      "purgeable": 91075,
+      "inactive": 3674056,
+      "file_backed": 2341009,
+      "compressed": 264767,
+      "swapouts": 0
+    },
+    "pressure_level": 1,
+    "immediate_bytes": 6955057152,
+    "reclaim_candidate_bytes": 36838670336,
+    "reclaim_credit_bytes": 18419335168,
+    "estimated_headroom_bytes": 25374392320,
+    "swap_used_bytes": 0,
+    "swapout_bytes": 0,
+    "compressed_resident_bytes": 4337942528
+  },
+  "system_final": {
+    "policy": "macos-filebacked-half-pressure-swap-v1",
+    "observed_monotonic": 111930.827968125,
+    "page_bytes": 16384,
+    "pages": {
+      "free": 331550,
+      "speculative": 1480,
+      "purgeable": 91993,
+      "inactive": 3674060,
+      "file_backed": 2341014,
+      "compressed": 264767,
+      "swapouts": 0
+    },
+    "pressure_level": 1,
+    "immediate_bytes": 6963576832,
+    "reclaim_candidate_bytes": 36823711744,
+    "reclaim_credit_bytes": 18411855872,
+    "estimated_headroom_bytes": 25375432704,
+    "swap_used_bytes": 0,
+    "swapout_bytes": 0,
+    "compressed_resident_bytes": 4337942528
+  },
+  "system_samples": 2,
+  "system_sample_seconds": 0.5,
+  "minimum_estimated_headroom_bytes": 25374392320,
+  "minimum_immediate_bytes": 6955057152,
+  "samples": 2,
+  "sample_seconds": 0.1,
+  "seconds": 0.3082022080052411,
+  "command": [
+    "/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/run.sh",
+    "--profile"
+  ],
+  "guard_sha256": "fbc55927ddb879e03028c1861512a2a6dfc2c461ad9124f0ad0e320fad362ea5",
+  "signal_errors": [],
+  "identity_check": "PID and ps start time; live group leader and complete member check before group signals"
+}

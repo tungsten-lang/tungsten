@@ -11295,6 +11295,26 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
         WSSAInverseRangeJob inverse = {fa, 0, L, 1, L / 2, m, K, t1, t2};
         ssa_inverse_range(&inverse);
     }
+#ifndef BN_SSA_NORMALIZE_RECOMPOSE_FUSED
+#define BN_SSA_NORMALIZE_RECOMPOSE_FUSED 1
+#endif
+#if BN_SSA_NORMALIZE_RECOMPOSE_FUSED
+    /* Normalize each used coefficient directly into recomposition. The inverse
+     * transform has finished, and no later consumer needs normalized fa. */
+    for (int32_t i = 0; i < outlen; i++) out[i] = 0;
+    static const uint64_t ssa_one = 1;
+    uint64_t normalize_shift = (2 * K - (uint64_t)klog) % (2 * K);
+    for (long i = 0; i < L; i++) {
+        int32_t base = (int32_t)i * w;
+        if (base >= outlen) break;
+        ssa_shl(t1, fa + i * S, normalize_shift, m, K);
+        int32_t room = outlen - base;
+        int32_t cl = m < room ? m : room;
+        bn_addto(out + base, room, t1, cl);
+        if (t1[m] && base + m < outlen)
+            bn_addto(out + base + m, room - m, &ssa_one, 1);
+    }
+#else
     /* scale by 1/L = 2^(2K − klog)  (2^(2K) ≡ 1 in the ring) */
     for (long i = 0; i < L; i++) {
         ssa_shl(t1, fa + i * S, (2 * K - (uint64_t)klog) % (2 * K), m, K);
@@ -11314,6 +11334,7 @@ static void bn_ssa_mul(uint64_t *out, const uint64_t *a, int32_t na,
         if (fa[i * S + m] && base + m < outlen)
             bn_addto(out + base + m, room - m, &ssa_one, 1);
     }
+#endif
 }
 
 /* ====================================================================

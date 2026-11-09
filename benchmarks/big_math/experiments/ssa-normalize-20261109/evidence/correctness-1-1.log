@@ -1,0 +1,21 @@
+DISPATCH limbs=8192 mul=0 sqr=0 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=8193 mul=0 sqr=0 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=16383 mul=0 sqr=0 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=16384 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=16385 mul=0 sqr=0 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=24575 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=24576 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=24577 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=32767 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=32768 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=32769 mul=0 sqr=0 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=65535 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=65536 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=65537 mul=0 sqr=0 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=131071 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=131072 mul=1 sqr=1 (0=Toom,1=SSA,2=NTT)
+DISPATCH limbs=131073 mul=0 sqr=0 (0=Toom,1=SSA,2=NTT)
+PASS_SSA_TAIL_GMP cases=556 fused=1 canaries_and_inputs=PASS
+boxed multiply/square fuzz vs GMP: 96/96 match (max 65537 limbs)
+PASS_SSA_NORMALIZE_RECOMPOSE focused=556 boxed=96 fused=1
+Memory guard: {"status": "PASS", "returncode": 0, "reason": null, "peak_sampled_rss_bytes": 97107968, "limit_bytes": 1073741824, "hard_data_limit_bytes": null, "system_reserve_bytes": 17179869184, "system_policy": "macos-filebacked-half-pressure-swap-v1", "system_initial": {"policy": "macos-filebacked-half-pressure-swap-v1", "observed_monotonic": 112050.097429833, "page_bytes": 16384, "pages": {"free": 439500, "speculative": 3836, "purgeable": 104205, "inactive": 3591276, "file_backed": 2193456, "compressed": 264749, "swapouts": 0}, "pressure_level": 1, "immediate_bytes": 8970911744, "reclaim_candidate_bytes": 34167439360, "reclaim_credit_bytes": 17083719680, "estimated_headroom_bytes": 26054631424, "swap_used_bytes": 0, "swapout_bytes": 0, "compressed_resident_bytes": 4337647616}, "system_final": {"policy": "macos-filebacked-half-pressure-swap-v1", "observed_monotonic": 112053.300014, "page_bytes": 16384, "pages": {"free": 382870, "speculative": 3838, "purgeable": 104325, "inactive": 3616792, "file_backed": 2194290, "compressed": 264749, "swapouts": 0}, "pressure_level": 1, "immediate_bytes": 8045084672, "reclaim_candidate_bytes": 34179104768, "reclaim_credit_bytes": 17089552384, "estimated_headroom_bytes": 25134637056, "swap_used_bytes": 0, "swapout_bytes": 0, "compressed_resident_bytes": 4337647616}, "system_samples": 7, "system_sample_seconds": 0.5, "minimum_estimated_headroom_bytes": 25134637056, "minimum_immediate_bytes": 8045084672, "samples": 23, "sample_seconds": 0.1, "seconds": 3.640765083997394, "command": ["/private/tmp/tungsten-ssa-normalize-20261109/check-1"], "guard_sha256": "fbc55927ddb879e03028c1861512a2a6dfc2c461ad9124f0ad0e320fad362ea5", "signal_errors": [], "identity_check": "PID and ps start time; live group leader and complete member check before group signals"}

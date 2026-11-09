@@ -1,0 +1,35 @@
+Building baseline variant...
+Building candidate variant...
+Round 1/15: baseline then candidate
+Round 2/15: candidate then baseline
+Round 3/15: baseline then candidate
+Round 4/15: candidate then baseline
+Round 5/15: baseline then candidate
+Round 6/15: candidate then baseline
+Round 7/15: baseline then candidate
+Round 8/15: candidate then baseline
+Round 9/15: baseline then candidate
+Round 10/15: candidate then baseline
+Round 11/15: baseline then candidate
+Round 12/15: candidate then baseline
+Round 13/15: baseline then candidate
+Round 14/15: candidate then baseline
+Round 15/15: baseline then candidate
+op	limbs	baseline_ns	candidate_ns	candidate/base	T/GMP candidate
+mul	8192	313377.673	314216.338	1.0027	0.4830
+mul	16384	697707.466	694885.499	0.9871	0.4821
+mul	24576	1512719.927	1467558.288	0.9734	0.5707
+mul	32768	1517178.055	1509389.537	0.9983	0.4341
+mul	32769	1539807.190	1537634.451	0.9955	0.4105
+mul	65536	2898912.330	2902634.537	1.0095	0.3590
+mul	131072	6200719.628	6226036.693	0.9951	0.3237
+sqr	8192	284553.624	284523.865	1.0007	0.6070
+sqr	16384	637018.661	637306.699	0.9959	0.6117
+sqr	24576	1369151.082	1332444.228	0.9678	0.7903
+sqr	32768	1374487.246	1364582.881	0.9926	0.5423
+sqr	32769	1689652.787	1728630.665	1.0098	0.6353
+sqr	65536	2562142.556	2535757.054	0.9889	0.4922
+sqr	131072	5607138.187	5590969.569	0.9886	0.4233
+{"acceptance_eligible": true, "candidate_losses": 4, "candidate_over_baseline_geomean": 0.9932289387768805, "candidate_wins": 10, "cells": 14, "regressions_over_5_percent": 0}
+wrote /private/tmp/tungsten-ssa-normalize-20261109/BENCHMARK-REPLICATION.json
+Memory guard: {"status": "PASS", "returncode": 0, "reason": null, "peak_sampled_rss_bytes": 957710336, "limit_bytes": 1073741824, "hard_data_limit_bytes": null, "system_reserve_bytes": 17179869184, "system_policy": "macos-filebacked-half-pressure-swap-v1", "system_initial": {"policy": "macos-filebacked-half-pressure-swap-v1", "observed_monotonic": 112333.075585416, "page_bytes": 16384, "pages": {"free": 782427, "speculative": 12669, "purgeable": 133436, "inactive": 3411372, "file_backed": 2263777, "compressed": 252590, "swapouts": 0}, "pressure_level": 1, "immediate_bytes": 15213068288, "reclaim_candidate_bytes": 34695938048, "reclaim_credit_bytes": 17347969024, "estimated_headroom_bytes": 32561037312, "swap_used_bytes": 0, "swapout_bytes": 0, "compressed_resident_bytes": 4138434560}, "system_final": {"policy": "macos-filebacked-half-pressure-swap-v1", "observed_monotonic": 112678.655208333, "page_bytes": 16384, "pages": {"free": 661381, "speculative": 13498, "purgeable": 139739, "inactive": 3470065, "file_backed": 2312102, "compressed": 249702, "swapouts": 0}, "pressure_level": 1, "immediate_bytes": 13346701312, "reclaim_candidate_bytes": 35370844160, "reclaim_credit_bytes": 17685422080, "estimated_headroom_bytes": 31032123392, "swap_used_bytes": 0, "swapout_bytes": 0, "compressed_resident_bytes": 4091117568}, "system_samples": 557, "system_sample_seconds": 0.5, "minimum_estimated_headroom_bytes": 29622321152, "minimum_immediate_bytes": 12130369536, "samples": 2221, "sample_seconds": 0.1, "seconds": 346.15081616700627, "command": ["/opt/homebrew/opt/python@3.14/bin/python3.14", "-B", "/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/experiment.py", "--benchmark", "--rounds", "15", "--target-ms", "200", "--sizes", "8192,16384,24576,32768,32769,65536,131072", "--output", "BENCHMARK-REPLICATION.json"], "guard_sha256": "fbc55927ddb879e03028c1861512a2a6dfc2c461ad9124f0ad0e320fad362ea5", "signal_errors": [], "identity_check": "PID and ps start time; live group leader and complete member check before group signals"}

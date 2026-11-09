@@ -1,0 +1,70 @@
+{
+  "status": "PASS",
+  "returncode": 0,
+  "reason": null,
+  "peak_sampled_rss_bytes": 960823296,
+  "limit_bytes": 1073741824,
+  "hard_data_limit_bytes": null,
+  "system_reserve_bytes": 17179869184,
+  "system_policy": "macos-filebacked-half-pressure-swap-v1",
+  "system_initial": {
+    "policy": "macos-filebacked-half-pressure-swap-v1",
+    "observed_monotonic": 112057.833679583,
+    "page_bytes": 16384,
+    "pages": {
+      "free": 364641,
+      "speculative": 3836,
+      "purgeable": 108887,
+      "inactive": 3606612,
+      "file_backed": 2194349,
+      "compressed": 264749,
+      "swapouts": 0
+    },
+    "pressure_level": 1,
+    "immediate_bytes": 7821131776,
+    "reclaim_candidate_bytes": 34105360384,
+    "reclaim_credit_bytes": 17052680192,
+    "estimated_headroom_bytes": 24873811968,
+    "swap_used_bytes": 0,
+    "swapout_bytes": 0,
+    "compressed_resident_bytes": 4337647616
+  },
+  "system_final": {
+    "policy": "macos-filebacked-half-pressure-swap-v1",
+    "observed_monotonic": 112272.203589916,
+    "page_bytes": 16384,
+    "pages": {
+      "free": 783215,
+      "speculative": 12654,
+      "purgeable": 137927,
+      "inactive": 3399765,
+      "file_backed": 2263086,
+      "compressed": 254391,
+      "swapouts": 0
+    },
+    "pressure_level": 1,
+    "immediate_bytes": 15299313664,
+    "reclaim_candidate_bytes": 34611281920,
+    "reclaim_credit_bytes": 17305640960,
+    "estimated_headroom_bytes": 32604954624,
+    "swap_used_bytes": 0,
+    "swapout_bytes": 0,
+    "compressed_resident_bytes": 4167942144
+  },
+  "system_samples": 345,
+  "system_sample_seconds": 0.5,
+  "minimum_estimated_headroom_bytes": 22183510016,
+  "minimum_immediate_bytes": 4954587136,
+  "samples": 1364,
+  "sample_seconds": 0.1,
+  "seconds": 214.48178849999385,
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/experiment.py",
+    "--benchmark"
+  ],
+  "guard_sha256": "fbc55927ddb879e03028c1861512a2a6dfc2c461ad9124f0ad0e320fad362ea5",
+  "signal_errors": [],
+  "identity_check": "PID and ps start time; live group leader and complete member check before group signals"
+}

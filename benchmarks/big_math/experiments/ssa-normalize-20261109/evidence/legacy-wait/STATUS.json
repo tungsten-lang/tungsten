@@ -1,0 +1,9 @@
+{
+  "state": "waiting_for_reserve",
+  "stage": "release-profile",
+  "available_bytes": 3020914688,
+  "launch_reserve_bytes": 19327352832,
+  "guard_reserve_bytes": 17179869184,
+  "stable_samples": 0,
+  "updated_epoch": 1794231513.040056
+}

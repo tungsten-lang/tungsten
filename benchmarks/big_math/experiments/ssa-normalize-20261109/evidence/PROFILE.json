@@ -1,0 +1,4 @@
+{
+  "cc": "/opt/homebrew/opt/llvm/bin/clang",
+  "flags": "-O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64 -Wno-deprecated-declarations"
+}

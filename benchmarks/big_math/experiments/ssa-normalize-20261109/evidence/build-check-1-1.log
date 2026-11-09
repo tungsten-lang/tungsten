@@ -1,0 +1,65 @@
+/opt/homebrew/opt/llvm/bin/clang -O3 -flto -ffast-math -DNDEBUG -mcpu=apple-m5 -falign-functions=64 -Wno-deprecated-declarations -I/opt/homebrew/Cellar/gmp/6.3.0/include -DHAVE_GMP -DBN_SSA_NORMALIZE_RECOMPOSE_FUSED=1 /Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/check.c /Users/erik/tungsten-worktrees/ssa-normalize-20261109/runtime/event_kqueue.c /Users/erik/tungsten-worktrees/ssa-normalize-20261109/runtime/terminal_input.c /Users/erik/tungsten-worktrees/ssa-normalize-20261109/runtime/tls_stub.c /Users/erik/tungsten-worktrees/ssa-normalize-20261109/runtime/aks.c /Users/erik/tungsten-worktrees/ssa-normalize-20261109/runtime/metal.m /Users/erik/tungsten-worktrees/ssa-normalize-20261109/runtime/graphics.m /Users/erik/tungsten-worktrees/ssa-normalize-20261109/runtime/hid_bridge.m -L/opt/homebrew/Cellar/gmp/6.3.0/lib -lgmp -framework Metal -framework Foundation -framework AppKit -framework QuartzCore -framework CoreGraphics -framework IOKit -framework CoreFoundation -framework Accelerate -o /private/tmp/tungsten-ssa-normalize-20261109/check-1
+In file included from /Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/check.c:5:
+In file included from /Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../bench_big_math.c:21:
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70501:16: warning: using static function 'w_method_call_cached_rope' in an inline function with external linkage is a C2y extension [-Wstatic-in-inline]
+ 70501 |         return w_method_call_cached_rope(recv, name, args_ptr, argc, cache);
+       |                ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.h:1404:1: note: use 'static' to give inline function 'w_method_call_cached' internal linkage
+ 1404 | WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc, WInlineCache *cache);
+      | ^
+      | static 
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70482:15: note: 'w_method_call_cached_rope' declared here
+ 70482 | static WValue w_method_call_cached_rope(WValue recv, WValue name, WValue *args_ptr, int argc, WInlineCache *cache) {
+       |               ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70549:24: warning: using static function 'w_construct_cached' in an inline function with external linkage is a C2y extension [-Wstatic-in-inline]
+ 70549 |                 return w_construct_cached(recv, fn, argc, args_ptr);
+       |                        ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.h:1404:1: note: use 'static' to give inline function 'w_method_call_cached' internal linkage
+ 1404 | WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc, WInlineCache *cache);
+      | ^
+      | static 
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70455:15: note: 'w_construct_cached' declared here
+ 70455 | static WValue w_construct_cached(WValue recv, void *fn, int expected, WValue *a) {
+       |               ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70569:16: warning: using static function 'w_method_call_cached_0_rope' in an inline function with external linkage is a C2y extension [-Wstatic-in-inline]
+ 70569 |         return w_method_call_cached_0_rope(recv, name, cache);
+       |                ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.h:1405:1: note: use 'static' to give inline function 'w_method_call_cached_0' internal linkage
+ 1405 | WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache);
+      | ^
+      | static 
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70488:15: note: 'w_method_call_cached_0_rope' declared here
+ 70488 | static WValue w_method_call_cached_0_rope(WValue recv, WValue name, WInlineCache *cache) {
+       |               ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70589:24: warning: using static function 'w_construct_cached' in an inline function with external linkage is a C2y extension [-Wstatic-in-inline]
+ 70589 |                 return w_construct_cached(recv, fn, 0, NULL);
+       |                        ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.h:1405:1: note: use 'static' to give inline function 'w_method_call_cached_0' internal linkage
+ 1405 | WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache);
+      | ^
+      | static 
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70455:15: note: 'w_construct_cached' declared here
+ 70455 | static WValue w_construct_cached(WValue recv, void *fn, int expected, WValue *a) {
+       |               ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70640:12: warning: using static function 'w_method_call_cached_1_compat' in an inline function with external linkage is a C2y extension [-Wstatic-in-inline]
+ 70640 |     return w_method_call_cached_1_compat(recv, name, arg, cache);
+       |            ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.h:1406:1: note: use 'static' to give inline function 'w_method_call_cached_1' internal linkage
+ 1406 | WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg, WInlineCache *cache);
+      | ^
+      | static 
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70615:15: note: 'w_method_call_cached_1_compat' declared here
+ 70615 | static WValue w_method_call_cached_1_compat(
+       |               ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70672:12: warning: using static function 'w_method_call_cached_2_compat' in an inline function with external linkage is a C2y extension [-Wstatic-in-inline]
+ 70672 |     return w_method_call_cached_2_compat(recv, name, arg0, arg1, cache);
+       |            ^
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.h:1407:1: note: use 'static' to give inline function 'w_method_call_cached_2' internal linkage
+ 1407 | WValue w_method_call_cached_2(WValue recv, WValue name, WValue arg0, WValue arg1, WInlineCache *cache);
+      | ^
+      | static 
+/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/../../../../runtime/runtime.c:70644:15: note: 'w_method_call_cached_2_compat' declared here
+ 70644 | static WValue w_method_call_cached_2_compat(
+       |               ^
+6 warnings generated.
+Memory guard: {"status": "PASS", "returncode": 0, "reason": null, "peak_sampled_rss_bytes": 597622784, "limit_bytes": 1073741824, "hard_data_limit_bytes": null, "system_reserve_bytes": 17179869184, "system_policy": "macos-filebacked-half-pressure-swap-v1", "system_initial": {"policy": "macos-filebacked-half-pressure-swap-v1", "observed_monotonic": 112027.221874958, "page_bytes": 16384, "pages": {"free": 411749, "speculative": 3738, "purgeable": 124974, "inactive": 3595534, "file_backed": 2192132, "compressed": 264750, "swapouts": 0}, "pressure_level": 1, "immediate_bytes": 8854913024, "reclaim_candidate_bytes": 33807073280, "reclaim_credit_bytes": 16903536640, "estimated_headroom_bytes": 25758449664, "swap_used_bytes": 0, "swapout_bytes": 0, "compressed_resident_bytes": 4337664000}, "system_final": {"policy": "macos-filebacked-half-pressure-swap-v1", "observed_monotonic": 112045.517178791, "page_bytes": 16384, "pages": {"free": 358426, "speculative": 3842, "purgeable": 103462, "inactive": 3631495, "file_backed": 2194397, "compressed": 264749, "swapouts": 0}, "pressure_level": 1, "immediate_bytes": 7630520320, "reclaim_candidate_bytes": 34194931712, "reclaim_credit_bytes": 17097465856, "estimated_headroom_bytes": 24727986176, "swap_used_bytes": 0, "swapout_bytes": 0, "compressed_resident_bytes": 4337647616}, "system_samples": 31, "system_sample_seconds": 0.5, "minimum_estimated_headroom_bytes": 24360173568, "minimum_immediate_bytes": 7184416768, "samples": 118, "sample_seconds": 0.1, "seconds": 18.71135866700206, "command": ["/opt/homebrew/opt/python@3.14/bin/python3.14", "-B", "/Users/erik/tungsten-worktrees/ssa-normalize-20261109/benchmarks/big_math/experiments/ssa-normalize-20261109/experiment.py", "--build-check", "1"], "guard_sha256": "fbc55927ddb879e03028c1861512a2a6dfc2c461ad9124f0ad0e320fad362ea5", "signal_errors": [], "identity_check": "PID and ps start time; live group leader and complete member check before group signals"}

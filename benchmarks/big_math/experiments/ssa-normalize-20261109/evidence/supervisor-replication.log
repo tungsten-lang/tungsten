@@ -1,0 +1,5 @@
+RESERVE stage=benchmark-replication estimated_gib=30.17 stable=1/3 veto=None
+RESERVE stage=benchmark-replication estimated_gib=30.34 stable=3/3 veto=None
+RUN benchmark-replication attempt 1
+FINISH benchmark-replication PASS None
+COMPLETED_REPLICATION {"acceptance_eligible": true, "cells": 14, "candidate_wins": 10, "candidate_losses": 4, "candidate_over_baseline_geomean": 0.9932289387768805, "regressions_over_5_percent": 0}

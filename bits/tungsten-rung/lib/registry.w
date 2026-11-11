@@ -1,6 +1,6 @@
 # rung — the model registry.
 #
-# Built-in defaults match the standing ladder (codex, agy, grok, claude);
+# Built-in defaults match the standing ladder (codex, agy, grok, carbon, fable, claude);
 # muse and any `ollama:<model>` are available but off the default ladder.
 # ~/.config/rung/models.toml (or --config / $RUNG_CONFIG) is merged over
 # them key by key, so a user file may change one timeout without restating
@@ -54,6 +54,22 @@ RUNG_DEFAULT_GUARD = "~/math/openai/tools/guard.sh"
     "timeout" => 1800,
     "check" => "claude auth status"
   }
+  # (2026-11-10, Erik: "include Fable 5.2 'high' and Gemini 4 Carbon 'high'") two more improvers on the default ladder; each
+  # shares its CLI's concurrency bucket (agy, claude)
+  models["carbon"] = {
+    "command" => "agy -p \"$(cat {prompt_file})\" --model gemini-4-carbon-high --print-timeout {timeout}s",
+    "timeout" => 2400,
+    "provider" => "agy",
+    "bin" => "agy",
+    "check" => "test -s \"$HOME/.gemini/google_accounts.json\""
+  }
+  models["fable"] = {
+    "command" => "claude -p --model claude-fable-5-2 --effort high --permission-mode plan < {prompt_file}",
+    "timeout" => 1800,
+    "provider" => "claude",
+    "bin" => "claude",
+    "check" => "claude auth status"
+  }
   models["ollama:*"] = {
     "command" => "ollama launch claude --model {model} -- -p --permission-mode plan < {prompt_file}",
     "timeout" => 1800,
@@ -63,7 +79,7 @@ RUNG_DEFAULT_GUARD = "~/math/openai/tools/guard.sh"
   }
   reg = {
     "defaults" => {
-      "models" => ["codex", "agy", "grok", "claude"],
+      "models" => ["codex", "agy", "grok", "carbon", "fable", "claude"],
       "integrator" => "claude",
       "timeout" => 2400,
       "retries" => 2,

@@ -7,7 +7,7 @@ verdict: did the state improve, what changed, and which claims still need
 checking. Rounds repeat until one full round brings no improvement.
 
 ```sh
-rung task.md                                    # the default ladder: codex, agy, grok, claude
+rung task.md                                    # the default ladder: codex, agy, grok, carbon, fable, claude
 rung task.md --models "ollama:glm-5.3,claude"   # a different ladder
 rung task.md -m "codex,ollama:glm-5.3|ollama:kimi-k3,claude" -r 3
 rung task.md --dry-run                          # write the plan and the first prompts, call nothing
@@ -87,6 +87,8 @@ The built-in registry matches the standing ladder, with read-only modes on:
 | `codex` | `codex exec -m gpt-6-astra … xhigh -s read-only -C {workdir} -o {answer_file} - < {prompt_file}` | file |
 | `agy` | `agy -p "$(cat {prompt_file})" --model gemini-4-argon-high --print-timeout {timeout}s` | stdout |
 | `grok` | `grok --prompt-file {prompt_file} -m grok-4.7 --reasoning-effort high --permission-mode dontAsk --no-subagents` | stdout |
+| `carbon` | `agy -p "$(cat {prompt_file})" --model gemini-4-carbon-high --print-timeout {timeout}s` | stdout |
+| `fable` | `claude -p --model claude-fable-5-2 --effort high --permission-mode plan < {prompt_file}` | stdout |
 | `muse` | `muse exec --model muse-wonder-full-1.0 --reasoning-effort xhigh --workspace {workdir} --prompt-file {prompt_file}` | stdout |
 | `claude` | `claude -p --permission-mode plan < {prompt_file}` | stdout |
 | `ollama:<model>` | `ollama launch claude --model <model>:cloud -- -p --permission-mode plan < {prompt_file}` | stdout |

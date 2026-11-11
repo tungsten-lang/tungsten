@@ -221,7 +221,7 @@ describe "rung TOML subset" ->
     back = rung_toml_parse(rung_registry_toml(reg))
     expect(back["models"]["codex"]["command"]).to eq(reg["models"]["codex"]["command"])
     expect(back["models"]["ollama:*"]["default_tag"]).to eq("cloud")
-    expect(back["defaults"]["models"]).to eq(["codex", "agy", "grok", "claude"])
+    expect(back["defaults"]["models"]).to eq(["codex", "agy", "grok", "carbon", "fable", "claude"])
 
   it "rejects malformed input with a line number" ->
     msg = ""

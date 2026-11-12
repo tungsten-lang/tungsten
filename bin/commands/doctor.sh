@@ -124,11 +124,12 @@ printf '%s\n\n' "$(c '\033[1m\033[33m' '✶ Tungsten Doctor')"
 
 check "Tungsten" "$VERSION" 1
 
-CACHE="$ROOT/build/cache"
+. "$ROOT/bin/commands/store.sh"
+CACHE="$(tungsten_store_dir "$ROOT")"
 if mkdir -p "$CACHE" 2>/dev/null && [ -d "$CACHE" ] && [ -w "$CACHE" ]; then
-  check "build cache" "$CACHE" 1
+  check "build store" "$CACHE" 1
 else
-  check "build cache" "cannot create or write $CACHE" 0
+  check "build store" "cannot create or write $CACHE (set TUNGSTEN_BUILD_STORE)" 0
 fi
 
 # Missing stage-1 is expected on a fresh clone; bootstrap builds it.
@@ -140,8 +141,9 @@ else
 fi
 
 # `git worktree add` does not copy gitignored bin/tungsten-compiler.
-# Install a shared post-checkout hook that symlinks the primary checkout's
-# compiler into a new worktree. Never overwrite a foreign post-checkout.
+# Install a shared post-checkout hook that gives a new worktree the compiler
+# the build store holds for exactly its sources (.githooks/link-host-compiler.sh).
+# Never overwrite a foreign post-checkout.
 install_worktree_compiler_hook() {
   local src dest common marker
   src="$ROOT/.githooks/post-checkout"

@@ -160,35 +160,60 @@ MANPAGE = manpage_lines.join("\n")
   proc = Process.spawn(spawn_argv)
   exit(proc.wait)
 
-# Compile-on-demand a bit entry (flame/bit use `module` etc. the interpreter
-# does not support — they must be native binaries).
+# A bit's executable (flame/bit use `module` etc. the interpreter does not
+# support: they must be native binaries). bits/<pkg>/bin/<entry> is a copy of
+# an entry in the build store, installed by the build driver with the manifest
+# of sources it was built from (<entry>.deps). It is run as it is while no
+# file in that manifest, and not the compiler, is newer than it; otherwise the
+# driver is asked (`tungsten build` in the bit), which installs the store's
+# executable for the bit's sources as they are now, compiling only when no
+# checkout has built them with this compiler before.
+-> bit_binary_current?(out_bin)
+  if !system("test -x " + sh_quote(out_bin))
+    return false
+  built_at = file_mtime_ns(out_bin)
+  manifest = read_file(out_bin + ".deps")
+  if built_at == nil || manifest == nil
+    return false
+  compiler_at = file_mtime_ns(COMPILER)
+  if compiler_at == nil || compiler_at > built_at
+    return false
+  rows = manifest.split("\n")
+  if rows.size < 2 || !rows[0].starts_with?("tungsten-bit-deps-v1 ")
+    return false
+  i = 1
+  while i < rows.size
+    row = rows[i]
+    i = i + 1
+    if row == ""
+      next
+    parts = row.split("\t")
+    if parts.size != 3
+      return false
+    path = parts[1] == "r" ? ROOT + "/" + parts[2] : parts[2]
+    changed_at = file_mtime_ns(path)
+    if changed_at == nil || changed_at > built_at
+      return false
+  true
+
 -> ensure_bit_binary(bit_pkg, entry_name)
-  bin_dir = ROOT + "/bits/" + bit_pkg + "/bin"
-  out_bin = bin_dir + "/" + entry_name
-  src = ROOT + "/bits/" + bit_pkg + "/lib/" + entry_name + ".w"
-  bin_src = ROOT + "/bits/" + bit_pkg + "/bin/" + entry_name + ".w"
+  bit_root = ROOT + "/bits/" + bit_pkg
+  out_bin = bit_root + "/bin/" + entry_name
+  src = bit_root + "/lib/" + entry_name + ".w"
+  bin_src = bit_root + "/bin/" + entry_name + ".w"
   if system("test -f " + sh_quote(bin_src))
     src = bin_src
   if !system("test -f " + sh_quote(src))
     << "tungsten: missing " + src
     exit(1)
-  # Rebuild if missing or source newer than binary
-  need = true
-  if system("test -x " + sh_quote(out_bin))
-    if system("test " + sh_quote(src) + " -ot " + sh_quote(out_bin))
-      bit_root = ROOT + "/bits/" + bit_pkg
-      newer = "find " + sh_quote(bit_root) + " -type f -name '*.w' -newer " + sh_quote(out_bin) + " -print -quit | grep -q ."
-      if !system(newer)
-        need = false
-  if need
-    system("mkdir -p " + sh_quote(bin_dir))
-    cmd = "BIT_HOME=" + sh_quote(ROOT + "/bits") + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(COMPILER) + " compile " + sh_quote(src) + " --out " + sh_quote(out_bin) + " --no-lto"
-    if !system(cmd + " >/dev/null 2>&1")
-      << "tungsten: failed to compile " + bit_pkg + " (" + entry_name + ")"
-      << "  try: BIT_HOME=bits bin/tungsten-compiler compile " + src + " --out " + out_bin
+  if !bit_binary_current?(out_bin)
+    driver = ensure_command_binary("bin/commands/build.w")
+    log = "/tmp/tungsten-build-" + bit_pkg + "-on-demand.log"
+    cmd = "cd " + sh_quote(bit_root) + " && " + command_env_prefix + sh_quote(driver) + " >" + sh_quote(log) + " 2>&1"
+    if !system(cmd) || !system("test -x " + sh_quote(out_bin))
+      << "tungsten: failed to build " + bit_pkg + " (" + entry_name + "); see " + log
+      << "  try: cd " + bit_root + " && " + ROOT + "/bin/tungsten build"
       exit(1)
-    if system("uname -s | grep -q Darwin")
-      system("codesign --force -s - " + sh_quote(out_bin) + " >/dev/null 2>&1")
   out_bin
 
 -> run_bit_binary(bit_pkg, entry_name, tool_args)
@@ -200,6 +225,22 @@ MANPAGE = manpage_lines.join("\n")
     i = i + 1
   if system(cmd)
     exit(0)
+  exit(1)
+
+# Replace this process with the bit's executable: its exit status, signals
+# and terminal are the caller's, exactly as if it had been run directly.
+-> exec_bit_binary(bit_pkg, entry_name, tool_args)
+  out_bin = ensure_bit_binary(bit_pkg, entry_name)
+  ccall("w_setenv", "BIT_HOME", user_bit_home())
+  ccall("w_setenv", "TUNGSTEN_HOME", user_tungsten_home())
+  ccall("w_setenv", "TUNGSTEN_ROOT", ROOT)
+  exec_args = [out_bin]
+  i = 0
+  while i < tool_args.size
+    exec_args.push(tool_args[i])
+    i = i + 1
+  err = Process.exec(exec_args)
+  << "tungsten: could not run " + out_bin + " (errno " + (0 - err).to_s + ")"
   exit(1)
 
 -> run_bit_binary_status(bit_pkg, entry_name, tool_args)
@@ -503,10 +544,10 @@ when "repl"
   exit(2)
 
 when "bit"
-  run_bit_binary("tungsten-bit", "bit", tool_argv_after_command("bit"))
+  exec_bit_binary("tungsten-bit", "bit", tool_argv_after_command("bit"))
 
 when "rung"
-  run_bit_binary_status("tungsten-rung", "rung", tool_argv_after_command("rung"))
+  exec_bit_binary("tungsten-rung", "rung", tool_argv_after_command("rung"))
 
 when "agent-json"
   << "{\"status\":\"ok\",\"agent_support\":true,\"diagnostics_format\":\"json\",\"capabilities\":\[\"diagnostics\",\"code_frame\",\"agent_payload\",\"spirv_emitter\",\"mutate_if_unique\"\]}"

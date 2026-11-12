@@ -1,5 +1,10 @@
 #!/bin/sh
 # Source-checkout entry point; package commands use the selected toolchain.
+#
+# Runs the tungsten-bit executable through `tungsten bit`, which keeps
+# bits/tungsten-bit/bin/bit a copy of the build store's entry for the bit's
+# sources and this compiler (built once, shared by every checkout that has
+# the same sources) and execs it with the caller's arguments and exit status.
 set -eu
 # Keep explicit package/toolchain environment through noninteractive bash drivers.
 unset BASH_ENV
@@ -14,8 +19,4 @@ while [ -L "$BIT_LAUNCHER" ]; do
 done
 BIT_TOOLCHAIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$BIT_LAUNCHER")/.." && pwd -P)
 export TUNGSTEN_ROOT="$BIT_TOOLCHAIN_ROOT"
-# Keep compiler caches with the selected toolchain, including from a foreign cwd.
-if [ -z "${TUNGSTEN_CACHE_DIR:-}" ]; then
-  export TUNGSTEN_CACHE_DIR="$BIT_TOOLCHAIN_ROOT/build/cache"
-fi
-exec "$BIT_TOOLCHAIN_ROOT/bin/tungsten" "$BIT_TOOLCHAIN_ROOT/bits/tungsten-bit/lib/bit.w" -- "$@"
+exec "$BIT_TOOLCHAIN_ROOT/bin/tungsten" bit "$@"

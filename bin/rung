@@ -1,5 +1,10 @@
 #!/bin/sh
 # Source-checkout entry point; rung commands use the selected toolchain.
+#
+# Runs the tungsten-rung executable through `tungsten rung`, which keeps
+# bits/tungsten-rung/bin/rung a copy of the build store's entry for the bit's
+# sources and this compiler and execs it with the caller's arguments and
+# exit status.
 set -eu
 unset BASH_ENV
 RUNG_LAUNCHER=$0
@@ -13,10 +18,4 @@ while [ -L "$RUNG_LAUNCHER" ]; do
 done
 RUNG_TOOLCHAIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$RUNG_LAUNCHER")/.." && pwd -P)
 export TUNGSTEN_ROOT="$RUNG_TOOLCHAIN_ROOT"
-if [ -z "${TUNGSTEN_CACHE_DIR:-}" ]; then
-  export TUNGSTEN_CACHE_DIR="$RUNG_TOOLCHAIN_ROOT/build/cache"
-fi
-if [ -x "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung" ] && [ "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung" -nt "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/lib/rung.w" ] && [ "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung" -nt "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung.w" ]; then
-  exec "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung" "$@"
-fi
-exec "$RUNG_TOOLCHAIN_ROOT/bin/tungsten" "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung.w" -- "$@"
+exec "$RUNG_TOOLCHAIN_ROOT/bin/tungsten" rung "$@"

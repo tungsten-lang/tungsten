@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
-# If this worktree has no bin/tungsten-compiler, symlink one from another
-# worktree of the same repo (usually the primary checkout). Gitignored
-# build artifacts are not copied by `git worktree add`.
+# Give a checkout that has no compiler the one the build store holds for
+# exactly its sources (bin/commands/store.sh install-compiler). Gitignored
+# build products are not copied by `git worktree add`, so a new worktree
+# starts without bin/tungsten-compiler.
+#
+# This used to symlink whatever compiler another worktree had, which was the
+# wrong compiler as soon as the two worktrees' compiler sources differed (and
+# changed under this worktree whenever the other one rebuilt). Now the
+# worktree's own sources are fingerprinted and looked up in the store: a
+# match installs a copy of that compiler and its images; no match installs
+# nothing, and `bin/tungsten build` (or `bootstrap`) builds one and adds it
+# to the store. The file keeps its old name because hooks already installed
+# in a repository's common .git/hooks call it by that name.
 #
 # Usage: link-host-compiler.sh [worktree-root]
 # Always exits 0: callers are checkout hooks and the CLI fallback.
@@ -12,55 +22,10 @@ if [ -z "$root" ]; then
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 fi
 cd "$root" 2>/dev/null || exit 0
+root="$(pwd)"
 
-dest="$root/bin/tungsten-compiler"
-
-resolve_exec() {
-  local p="$1" n=0 t
-  while [ -L "$p" ] && [ "$n" -lt 20 ]; do
-    t="$(readlink "$p")" || return 1
-    case "$t" in
-      /*) p="$t" ;;
-      *) p="$(cd "$(dirname "$p")" && pwd)/$t" ;;
-    esac
-    n=$((n + 1))
-  done
-  [ -f "$p" ] && [ -x "$p" ] || return 1
-  echo "$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
-}
-
-if resolve_exec "$dest" >/dev/null; then
-  exit 0
-fi
-
-worktrees=()
-while IFS= read -r line; do
-  case "$line" in
-    worktree\ *)
-      worktrees[${#worktrees[@]}]="${line#worktree }"
-      ;;
-  esac
-done <<EOF
-$(git worktree list --porcelain 2>/dev/null)
-EOF
-
-src=""
-i=0
-while [ "$i" -lt "${#worktrees[@]}" ]; do
-  wt="${worktrees[$i]}"
-  i=$((i + 1))
-  [ -n "$wt" ] || continue
-  [ "$wt" != "$root" ] || continue
-  cand="$wt/bin/tungsten-compiler"
-  if resolved="$(resolve_exec "$cand")"; then
-    src="$resolved"
-    break
-  fi
-done
-
-[ -n "$src" ] || exit 0
-mkdir -p "$root/bin" || exit 0
-# Replace a missing or broken dest; never clobber a working compiler.
-rm -f "$dest" 2>/dev/null || exit 0
-ln -s "$src" "$dest" 2>/dev/null || exit 0
+store_sh="$root/bin/commands/store.sh"
+[ -f "$store_sh" ] || exit 0
+. "$store_sh"
+tungsten_install_store_compiler "$root" || true
 exit 0

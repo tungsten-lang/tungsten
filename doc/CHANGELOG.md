@@ -13,6 +13,14 @@
   into the stage-1 runtime as `build.w` always did. The manifest is part of
   the runtime's content key. `scripts/test-runtime-sources.sh` fails when a
   runtime file is missing from it or a build path lists sources itself.
+- **`TUNGSTEN_ROOT` decides `core/` as it decides `runtime/`** — a source
+  inside another checkout, or under an older install's tree (a scratch file
+  under `~/.tungsten` used to compile against the July install's core and
+  the current runtime), is compiled against the core of the toolchain that
+  links it, on the compiler, the interpreter and the Ruby implementation.
+  With `TUNGSTEN_ROOT` unset the source's nearest checkout still wins (nested
+  worktrees), and the compiler warns when that tree is not the one whose
+  runtime it links.
 - **Compiler images no longer leak their mark** — an image read
   `TUNGSTEN_COMPILER_IMAGE` and left it in its environment, so a script run
   by the interpreter image that started `tungsten run --interpret` did not

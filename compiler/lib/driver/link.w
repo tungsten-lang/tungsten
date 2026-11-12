@@ -143,17 +143,6 @@
 
   out
 
-# Resolve the runtime/ directory.
-# An explicitly selected toolchain wins over a different checkout in CWD.
-# Without one, the local runtime remains useful during bootstrap.
--> resolve_runtime_dir
-  root = env("TUNGSTEN_ROOT")
-  if root != nil && root != "" && file?(root + "/runtime/runtime.c")
-    return root + "/runtime/"
-  if file?("runtime/runtime.c")
-    return "runtime/"
-  ccall("w_runtime_dir")
-
 # CPU names accepted by --cpu are passed to clang command strings, so keep the
 # allowed alphabet deliberately small. LLVM target names such as apple-m5,
 # neoverse-v2, znver5, and x86-64-v3 all fit this set.

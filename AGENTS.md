@@ -110,6 +110,13 @@ just slow code down but reorders algorithm rankings: branchless kernels lose
 `TUNGSTEN_FREE=0` disables the `free` calls the compiler inserts for
 non-escaping heap values, which helps rule out ownership bugs.
 
+The toolchain a command uses is one root: `bin/tungsten` sets `TUNGSTEN_ROOT`
+to its checkout, and both `core/` and `runtime/` come from there, even for a
+source inside another checkout (run that checkout's own `bin/tungsten` to use
+its core). With `TUNGSTEN_ROOT` unset, `core/` is the source's nearest
+checkout, and the compiler warns when that is not the tree whose `runtime/`
+it links.
+
 The Ruby implementation has its own tooling, run from `implementations/ruby/`:
 
 ```bash

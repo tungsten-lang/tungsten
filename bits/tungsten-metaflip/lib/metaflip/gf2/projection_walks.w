@@ -115,7 +115,7 @@ use textx
     raw = Fsx.read(path)
     scheme = Metaflip:Gf2:Scheme.parse(raw)
     shape = [scheme.n, scheme.m, scheme.p]
-    ProjectionWalks.check(scheme.exact?, "tensor is not exact: [path]")
+    ProjectionWalks.check(scheme.exact?(:both, raw), "tensor is not exact: [path]")
     digest = Digest.sha256(raw)
     verifier = options["verifier"]
     if verifier != nil

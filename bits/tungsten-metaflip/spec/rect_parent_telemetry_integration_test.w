@@ -1,5 +1,15 @@
 use ../lib/metaflip/rect/portfolio
 
+# The rectangular campaign this test runs in-process starts its refinement
+# workers by re-executing System.executable_path() with `--refine-batch ...`
+# or `--compose-batch ...` (lib/metaflip/rect/campaign.w,
+# lib/metaflip/fleet/refinement.w). In the Metaflip CLI that is the CLI, which
+# serves both. Here it is this test, which takes no arguments: without this
+# guard every worker ran the whole test again and started workers of its own,
+# without bound (2,380 processes within six minutes on 2026-11-12).
+if argv().size() > 0
+  exit(2)
+
 failures_count = 0 ## i64
 
 -> rect_parent_integration_expect(label, condition) (String bool) i64

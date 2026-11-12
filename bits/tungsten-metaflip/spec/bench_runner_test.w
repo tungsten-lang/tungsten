@@ -55,7 +55,15 @@ bench = Bench.open(bench_dir)
 out = root + "/out"
 tasks = bench.select_tasks("2x2x2")
 
-options = {"experiment" => "unit", "out" => out, "jobs" => 3, "runs" => 9, "verifier" => "ruby", "wall_factor" => 3, "wall_slack" => 1, "bit_root" => here + "/.."}
+# Timing. Every budget rule below is stated in CPU time, which a loaded machine
+# does not stretch: `late` burns a calibrated 1.3 CPU-seconds against the
+# budget of 1 (spec/fixtures/bench/fake_adapter.sh), `spin` runs into the
+# runner's `ulimit -t` of 3 CPU-seconds. Wall-clock time is another matter (at
+# a load of 50 on 18 cores one CPU-second took 4 to 9 s here), so the adapters
+# that work get a wall limit only a hang can reach (3 s + 600 s of slack), and
+# the one adapter that does hang, which uses no CPU and so is not slowed by
+# load either, gets its own experiment with a wall limit of 4 s.
+options = {"experiment" => "unit", "out" => out, "jobs" => 3, "runs" => 9, "verifier" => "ruby", "wall_factor" => 3, "wall_slack" => 600, "bit_root" => here + "/.."}
 
 # 1. Fast modes: seeds 1002..1010, every third seed hits.
 fast = bench.select_algos("fake/coin,fake/liar-wrong,fake/liar-big,fake/late,fake/crash")
@@ -134,20 +142,27 @@ expect(counts, "resumed seeds are new", fresh, true)
 retry_plan = Runner.new(bench, options.merge({"retry_errors" => true})).plan(fast, tasks)
 expect(counts, "errors are retried on request", retry_plan.size, 9)
 
-# 3. Budget enforcement: a CPU-bound loop and a hang, two seeds each.
-slow = bench.select_algos("fake/spin,fake/hang")
-slow_options = options.merge({"experiment" => "slow", "runs" => 2, "jobs" => 4})
-slow_runner = Runner.new(bench, slow_options)
-expect(counts, "slow experiment completes", slow_runner.run(slow, tasks), true)
+# 3. Budget enforcement: a CPU-bound loop, ended by the CPU limit, two seeds.
+spin_options = options.merge({"experiment" => "spin", "runs" => 2, "jobs" => 2})
+spin_runner = Runner.new(bench, spin_options)
+expect(counts, "spin experiment completes", spin_runner.run(bench.select_algos("fake/spin"), tasks), true)
 spin = records_of(out, "fake.spin")
 expect(counts, "spin records", spin.size, 2)
 spin.each -> (rec)
   expect(counts, "spin is censored", rec["hit"], false)
   expect(counts, "spin ends by the CPU limit", rec["status"], "ok")
   expect(counts, "spin used at least the budget", rec["cpu_s_total"] >= 1.0, true)
+
+# 4. A hang, ended by the wall-clock limit (3 * 1 s + 1 s of slack), two seeds.
+hang_options = options.merge({"experiment" => "hang", "runs" => 2, "jobs" => 2, "wall_slack" => 1})
+hang_runner = Runner.new(bench, hang_options)
+expect(counts, "hang experiment completes", hang_runner.run(bench.select_algos("fake/hang"), tasks), true)
 hang = records_of(out, "fake.hang")
+expect(counts, "hang records", hang.size, 2)
 expect(counts, "hang is an error", count_where(hang, "error", "wall-clock limit"), 2)
-expect(counts, "hang used no CPU", hang[0]["cpu_s_total"] < 0.5, true)
+hang.each -> (rec)
+  expect(counts, "hang used no CPU", rec["cpu_s_total"] < 0.5, true)
+  expect(counts, "hang ended at the wall limit", rec["wall_s_total"] >= 4.0, true)
 expect(counts, "records file is valid JSONL", Record.encode(Record.parse(Record.encode(spin[0]))), Record.encode(spin[0]))
 
 shell("rm -rf " + Shell.quote(root))

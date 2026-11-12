@@ -142,7 +142,11 @@ run_one() {
   # native string-pointer builtin, and Rung spawns processes (Process is
   # compiled-only). The remaining ordinary bit suites are
   # language/library contracts and run through the interpreter, avoiding a
-  # second native build matrix inside the root correctness gate.
+  # second native build matrix inside the root correctness gate. (Metaflip's
+  # native-only unit tests are compiled all the same: its
+  # metaflip_native_shard<N>_spec.w wrappers run here like any other suite
+  # and each starts `tungsten spec/<name>_test.w` for the tests of its shard;
+  # see bits/tungsten-metaflip/spec/metaflip_unit_harness.w.)
   case "$path" in
     bits/tungsten-argon/spec/argon_spec.w|bits/tungsten-hammer/spec/hammer_spec.w|bits/tungsten-drawille/spec/inspection_spec.w|bits/tungsten-rung/spec/rung_spec.w)
       if ! run_bounded env TUNGSTEN_INCREMENTAL=0 "$TUNGSTEN" compile "$path" --out "$out" --no-lto >"$log" 2>&1; then

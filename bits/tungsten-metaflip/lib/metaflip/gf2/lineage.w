@@ -166,7 +166,8 @@ use catalogue
       shape = scheme.shape
       terms = scheme.terms
       Metaflip:Gf2:Lineage.check(shape.join("x") == row["shape"] && terms.size == row["rank"], file)
-      Metaflip:Gf2:Lineage.check(scheme.exact?, file + ": the terms do not sum to the matrix-multiplication tensor")
+      Metaflip:Gf2:Lineage.check(scheme.exact?(:both, raw), file + ": the terms do not sum to the matrix-multiplication tensor")
+      notes.push(file + ": checked by the packed gates only (beyond the fiber gate's 1,024-bit, 16,384-term slab)") if !Metaflip:Gf2:FiberGate.applicable?(scheme.n, scheme.m, scheme.p, scheme.rank)
       kind = row["kind"]
       details = row["details"] == nil ? {} : row["details"]
       Metaflip:Gf2:Lineage.provenance(kind).each -> (key)

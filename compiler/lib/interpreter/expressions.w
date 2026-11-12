@@ -12,6 +12,12 @@
       hint = ast_get(node, :type_hint)
       if hint != nil
         env.set_hint(name, hint)
+      elsif @machine_hints_seen
+        # `x = v` into a `## i64` slot stores INTO that slot (compiled: a
+        # sticky machine type), so the value takes the recorded width.
+        slot_mt = machine_hint_type(env.slot_hint(name))
+        if slot_mt != nil
+          value = coerce_machine_int(value, slot_mt)
       env.set(name, value)
       return value
 
@@ -111,6 +117,10 @@
       if old == nil
         old = 0
       result = apply_compound_op(op, old, new_val)
+      # Globals and ivars are boxed slots: only an enclosing Math.* block
+      # changes their arithmetic.
+      if @overflow_mode != nil
+        result = maybe_wrap_int_arith(op, result, old, new_val, nil, nil, env)
       @globals[name] = result
       return result
 
@@ -120,6 +130,8 @@
       if old == nil
         old = 0
       result = apply_compound_op(op, old, new_val)
+      if @overflow_mode != nil
+        result = maybe_wrap_int_arith(op, result, old, new_val, nil, nil, env)
       obj[:ivars][ast_get(target, :name)] = result
       return result
 
@@ -682,6 +694,10 @@
       if value_type in ("Int" "BigInt" "Float" "Decimal" "Rational")
         return ccall("w_num_to_float", value)
       return value
+    # A wide machine ascription arms the fixed-width arithmetic mirror (see
+    # maybe_wrap_int_arith); untyped programs never pay for it.
+    if hint in ("u64" "i64" "u128" "i128")
+      @machine_hints_seen = true
     # Every machine-int hint truncates a Float toward zero, as compiled code
     # converts the float value (fptosi); narrow widths are not wrapped here
     # or in compiled code.
@@ -808,31 +824,136 @@
       return false
     explicit_i64_hint?(env.get_hint(ast_get(node, :name)))
 
-  # Match compiled integer policy: untyped +/-/ * wrap at signed i64;
-  # `## int` / block params / Math.promote keep BigInt; untyped << promotes
-  # unless the left side is explicitly `## i64`.
+  # Match compiled integer policy (lowering/ops.w lower_binary_op), applied
+  # to the exact result of every integer operator:
+  #   * `Math.promote` / `Math.trap` govern +,-,* even for machine-typed
+  #     operands (overflow_mode_guards_machine_int_arith?). Promote keeps the
+  #     exact result. Trap aborts through w_int_overflow_trap — the llvm.trap
+  #     the guarded add/sub/mul_i48 arm branches to: SIGTRAP, exit 133, not
+  #     rescuable — once a result on two inline (i48) operands leaves the
+  #     inline range; a BigInt operand promotes. Other operators keep their
+  #     exact result inside either block.
+  #   * A `## i64/u64/i128/u128` operand makes the operator wrap at that
+  #     width (machine_operand_type), unless a promoting operand (`## int`,
+  #     `**`, a beyond-i64 literal) keeps it on the boxed path.
+  #   * Untyped +,-,* wrap at signed i64 when both operands lie within i64
+  #     (literals default to i64); `## int` / block params keep BigInt
+  #     unless `Math.wrap` is in force. Untyped << promotes unless the left
+  #     side is explicitly machine-typed; `Math.wrap` governs +,-,* only.
   -> maybe_wrap_int_arith(op, result, left, right, left_node, right_node, env)
     if !integer_value?(result)
       return result
-    if @overflow_mode == :promote
+    arith = op == :PLUS || op == :MINUS || op == :STAR
+    mode = @overflow_mode
+    if arith && mode == :promote
       return result
-    if @overflow_mode == :trap
-      if integer_fits_i64?(result)
-        return result
-      raise "integer overflow"
+    if arith && mode == :trap
+      if integer_value?(left) && integer_value?(right) && inline_int?(left) && inline_int?(right) && !inline_int?(result)
+        ccall("w_int_overflow_trap")
+      return result
+    promotes = nil
+    if @machine_hints_seen
+      promotes = operand_promotes?(left_node, env) || operand_promotes?(right_node, env)
+      if !promotes
+        mt = machine_operand_type(op, left_node, right_node, env)
+        if mt != nil && fits_machine_width?(left, mt) && fits_machine_width?(right, mt)
+          return coerce_machine_int(result, mt)
+    if mode == :promote || mode == :trap
+      return result
     if op == :LSHIFT || op == :RSHIFT
-      if @overflow_mode == :wrap || wrap_i64_operand?(left_node, env)
+      if wrap_i64_operand?(left_node, env)
         return wrap_signed_bits(result, 64)
       return result
-    if op == :PLUS || op == :MINUS || op == :STAR
-      if @overflow_mode == :wrap
-        return wrap_signed_bits(result, 64)
-      if operand_promotes?(left_node, env) || operand_promotes?(right_node, env)
-        return result
+    if arith
+      if mode != :wrap
+        if promotes == nil
+          promotes = operand_promotes?(left_node, env) || operand_promotes?(right_node, env)
+        if promotes
+          return result
       if integer_value?(left) && integer_value?(right) && integer_fits_i64?(left) && integer_fits_i64?(right)
         return wrap_signed_bits(result, 64)
-      return result
     result
+
+  # Can `value` be an operand of a `mt`-wide machine op? A value outside the
+  # width reached the operator through a promoting (boxed) path, whose static
+  # type keeps compiled code off the machine arm — `big + i` with `big = 1 <<
+  # 200` and `i ## i64` promotes.
+  -> fits_machine_width?(value, mt)
+    if integer_fits_i64?(value)
+      return true
+    if !integer_value?(value)
+      return false
+    bits = 64
+    if mt == "i128" || mt == "u128"
+      bits = 128
+    if wrap_signed_bits(value, bits) == value
+      return true
+    value >= 0 && wrap_unsigned_bits(value, bits) == value
+
+  # Inside the NaN-boxed inline integer range [-2^47, 2^47 - 1]?
+  -> inline_int?(value)
+    value >= -140737488355328 && value <= 140737488355327
+
+  # The machine width an integer operator takes from its operands' static
+  # types: the interpreter's mirror of infer_type for the four wide machine
+  # widths. `LIT << x` is excluded like inference.w does: a bare literal base
+  # shifts through the promoting path.
+  -> machine_operand_type(op, left_node, right_node, env)
+    if !(op in (:PLUS :MINUS :STAR :SLASH :PERCENT :AMPERSAND :PIPE :CARET :LSHIFT :RSHIFT))
+      return nil
+    if op == :LSHIFT && left_node != nil && is_ast_node?(left_node) && ast_kind(left_node) == :int
+      return nil
+    machine_result_type(machine_type_of(left_node, env), machine_type_of(right_node, env))
+
+  # Static machine width of an operand expression, from the AST plus the
+  # recorded `## T` hints. A literal is neutral (it adopts the other
+  # operand's width); a `-x` or a call carries no width for an enclosing
+  # operator (compiled infers those untyped).
+  -> machine_type_of(node, env)
+    if node == nil || !is_ast_node?(node)
+      return nil
+    k = ast_kind(node)
+    if k == :var
+      return machine_hint_type(env.get_hint(ast_get(node, :name)))
+    if k == :binary_op
+      return machine_operand_type(ccall("w_switch_canonical", ast_get(node, :op)), ast_get(node, :left), ast_get(node, :right), env)
+    nil
+
+  # "i64" / "u64" / "i128" / "u128" for a recorded hint, else nil.
+  -> machine_hint_type(hint)
+    if hint == nil
+      return nil
+    h = resolve_interpreted_type_hint(hint)
+    if h == "i64" || h == "u64" || h == "i128" || h == "u128"
+      return h
+    nil
+
+  # Widest wins, unsigned over signed at equal width (machine_int_result_type).
+  -> machine_result_type(l, r)
+    if l == nil
+      return r
+    if r == nil
+      return l
+    if l == "u128" || r == "u128"
+      return "u128"
+    if l == "i128" || r == "i128"
+      return "i128"
+    if l == "u64" || r == "u64"
+      return "u64"
+    "i64"
+
+  -> coerce_machine_int(value, mt)
+    if !integer_value?(value)
+      return value
+    if mt == "i64"
+      return wrap_signed_bits(value, 64)
+    if mt == "u64"
+      return wrap_unsigned_bits(value, 64)
+    if mt == "i128"
+      return wrap_signed_bits(value, 128)
+    if mt == "u128"
+      return wrap_unsigned_bits(value, 128)
+    value
 
   -> eval_and(node, env)
     left = evaluate(ast_get(node, :left), env)
@@ -1125,6 +1246,11 @@
       if !env.defined?("__block__")
         return false
       return env.get("__block__") != nil
+    # `flush` — the compiled no-raise builtin (lowering/no_raise.w) that
+    # drains buffered stdout; the same runtime call, so output ordering
+    # around a fatal stop matches across engines.
+    if name == "flush" && args.size() == 0
+      return ccall("w_flush")
     # `constant_alias "WC"` bit directive. The parser stamped the declaring
     # file's `in` namespace as a second argument (parser.w), so registration
     # needs no file context; the single-arg form (no active namespace at the

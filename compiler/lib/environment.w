@@ -7,6 +7,10 @@
     # "i64"/"u64" wrap. Missing means the compiled default (wrap +/-/*,
     # promote untyped <<).
     @hints = {}
+    # Closure capture set (capture_only): when non-nil, only these names
+    # write through to the parent; any other assignment is a local of this
+    # scope even if an ancestor binds the name by the time the body runs.
+    @captured = nil
 
   -> get(name)
     if @bindings.has_key?(name)
@@ -18,7 +22,7 @@
   -> set(name, value)
     if @bindings.has_key?(name)
       @bindings[name] = value
-    elsif !@barrier && @parent != nil && @parent.defined?(name)
+    elsif writes_through?(name)
       @parent.set(name, value)
     else
       @bindings[name] = value
@@ -26,10 +30,35 @@
   -> define(name, value)
     @bindings[name] = value
 
+  # Does an assignment to a name unbound here land on an ancestor?
+  -> writes_through?(name)
+    if @barrier || @parent == nil
+      return false
+    if @captured != nil && !@captured.has_key?(name)
+      return false
+    @parent.defined?(name)
+
+  # Restrict write-through to `names` (a Hash of name → true): the scope of a
+  # body that runs later than it was written — a `go` goroutine — captures
+  # the variables visible where it was spawned, like a compiled closure
+  # captures the slots in scope at its definition, and treats everything
+  # else as its own local.
+  -> capture_only(names)
+    @captured = names
+    self
+
+  # Every name bound in this scope or an ancestor, added to `into`.
+  -> collect_visible_names(into)
+    @bindings.keys.each -> (k)
+      into[k] = true
+    if @parent != nil
+      @parent.collect_visible_names(into)
+    into
+
   -> set_hint(name, hint)
     if @bindings.has_key?(name)
       @hints[name] = hint
-    elsif !@barrier && @parent != nil && @parent.defined?(name)
+    elsif writes_through?(name)
       @parent.set_hint(name, hint)
     else
       @hints[name] = hint
@@ -41,6 +70,19 @@
       return nil
     if @parent != nil
       return @parent.get_hint(name)
+    nil
+
+  # The hint on the binding an assignment to `name` would write (the slot
+  # `set` resolves to), or nil when that binding is new or unhinted. Unlike
+  # get_hint this stops where `set` stops, so a method-local or goroutine
+  # local never inherits an outer binding's fixed width.
+  -> slot_hint(name)
+    if @bindings.has_key?(name)
+      if @hints.has_key?(name)
+        return @hints[name]
+      return nil
+    if writes_through?(name)
+      return @parent.slot_hint(name)
     nil
 
   # Reuse one invocation scope when the interpreter has proved that no nested

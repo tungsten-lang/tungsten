@@ -672,7 +672,8 @@ builtin_names = [
   "find", "count", "sum", "times", "keys", "values", "has_key?", "abs", "max", "min",
   "respond_to?", "is_a?", "freeze", "frozen?", "argv", "clock", "clock_ms", "runtime_identity", "digest_string64",
   "capture", "system", "env", "ljust", "rjust", "center", "round", "gets", "freeze_slab",
-  "cpu_count", "l1d_cache_bytes", "l2_cache_bytes", "cpus_per_l2", "write_file_bytes_n", "file_rm"
+  "cpu_count", "l1d_cache_bytes", "l2_cache_bytes", "cpus_per_l2", "write_file_bytes_n", "file_rm",
+  "flush"
 ]
 
 -> is_builtin?(name)

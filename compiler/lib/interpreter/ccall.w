@@ -1,6 +1,24 @@
 + Interpreter
 
+  # Source-level `ccall(...)` — the only way interpreted code reaches a
+  # runtime call that can block (Channel#send/receive, sleeps, locks), and
+  # hence the only place the cooperative scheduler can run another goroutine
+  # in the middle of this one's evaluation. Once goroutines exist, reinstall
+  # the caller's interpreter context after the call: whatever ran meanwhile
+  # left its own dispatch stacks and signal record in the ivars (see
+  # spawn_goroutine). Before the first `go` this is a plain forward.
   -> dispatch_interpreted_ccall(args)
+    if !@goroutines_active
+      return dispatch_interpreted_ccall_inner(args)
+    saved = goroutine_context()
+    result = nil
+    begin
+      result = dispatch_interpreted_ccall_inner(args)
+    ensure
+      restore_goroutine_context(saved)
+    result
+
+  -> dispatch_interpreted_ccall_inner(args)
     if args.size() == 0
       raise "ccall requires a runtime function name"
     cname = "" + args[0]

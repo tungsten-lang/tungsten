@@ -1628,6 +1628,9 @@ typedef struct WGoroutine {
     int16_t io_buf_id;        /* provided buffer ID from CQE (-1 = none) */
     uint8_t io_zc_pending;    /* waiting for SEND_ZC notification CQE */
     uint8_t deadline_kind;    /* stable wait domain, even after eager detach */
+    /* The goroutine's parked unwind state (exception, block-return and
+     * cleanup stacks) is cold and lives at the top of its own stack slot,
+     * not here — see WGoroutineUnwind in runtime.c. */
 } WGoroutine;
 
 /* One polling owner per loop. Producers may update deadlines concurrently;

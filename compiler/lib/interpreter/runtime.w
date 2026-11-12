@@ -46,11 +46,12 @@
     # why); :gvar reads/writes go through @globals instead, bypassing
     # the barrier question entirely by never touching Environment.
     @globals = {}
-    # Goroutines spawned via `go ->`: the tree-walker has no scheduler, so
-    # they are queued here and drained at end of the top-level program
-    # (mirrors the compiled path's end-of-main drain). Single-threaded, so
-    # they run to completion in spawn order — cooperative, not preemptive.
-    @goroutines = []
+    # Set by the first `go ->`: from then on every source-level ccall
+    # (dispatch_interpreted_ccall) and the end-of-program drain swap the
+    # per-goroutine interpreter context around the runtime call, because
+    # those are the only points at which the cooperative scheduler can
+    # switch goroutines (see spawn_goroutine).
+    @goroutines_active = false
     # Class currently being defined (for `@@cvar` in class body statements).
     @defining_class = nil
     # `constant_alias "WC"` registrations: alias → namespace
@@ -68,6 +69,11 @@
     # Files whose top level is executing right now, outermost first. A
     # `use` that resolves to one of them closes a cycle (E_LOAD_CYCLE).
     @use_stack = []
+    # Set once any wide machine ascription (`## i64/u64/i128/u128`) has been
+    # applied. Until then integer arithmetic skips the machine-width
+    # inspection (machine_operand_type), so untyped programs pay nothing for
+    # the fixed-width mirror.
+    @machine_hints_seen = false
     seed_primitive_class_stubs()
 
   -> argv
@@ -272,17 +278,105 @@
         i += 1
     nil
 
-  # Run every queued goroutine body to completion, in spawn order. A goroutine
-  # may spawn more, so loop until the queue stays empty (mirrors the compiled
-  # scheduler draining the run queue before main returns).
+  # -- Goroutines --
+  #
+  # `go -> body` spawns a real runtime goroutine (w_goroutine_spawn — the same
+  # primitive lower_go emits), whose closure evaluates the interpreted body.
+  # The runtime's default scheduler is cooperative and single-threaded:
+  # goroutines run on the main thread, on their own stacks, only while main
+  # is blocked in a channel op (w_chan_pause drives one goroutine per spin)
+  # or in the end-of-main drain (w_scheduler_run), and a goroutine gives the
+  # thread up only by blocking itself. So interpreted goroutines never run in
+  # parallel with each other or with main — no interpreter table needs a
+  # lock — but a switch does land in the middle of an evaluation: a
+  # goroutine parked inside Channel#send still owns half a call stack. The
+  # per-goroutine part of the interpreter's state (goroutine_context: the
+  # dispatch stacks, the control-flow signal record, the pending raise, the
+  # lexical overflow mode, the current file) is therefore swapped at every
+  # point a switch can happen: a fresh context is installed when a
+  # goroutine's body starts, and dispatch_interpreted_ccall /
+  # drain_goroutines reinstall the caller's context when the runtime call
+  # returns — whichever goroutine ran in between. Everything else (classes,
+  # methods, environments, the heap) is shared exactly as compiled closures
+  # share it.
+  #
+  # Exit semantics match compiled main: the program ends only after every
+  # goroutine has finished (the drain waits for live goroutines), so a
+  # goroutine that still has work after the main body runs it then.
+  -> spawn_goroutine(body, env)
+    if !@goroutines_active
+      @goroutines_active = true
+      # The evaluator's recursion needs far more stack per source-level
+      # call than compiled code; ask the runtime for 4 MB goroutine stacks
+      # before the arena is sized by this first spawn (address space only).
+      stack_bytes = 4194304
+      ccall("w_goroutine_stack_size_hint", stack_bytes)
+    spawn_self = current_self()
+    spawn_mode = @overflow_mode
+    spawn_file = @current_file
+    # The body's scope: a child of the spawning scope that captures exactly
+    # the variables visible here (a compiled closure captures the slots in
+    # scope at its definition). Names the body assigns that do not exist
+    # yet are its own locals — even if main binds the same name before the
+    # goroutine gets to run — so a worker's loop counter never aliases the
+    # spawner's.
+    genv = Environment.new(env)
+    genv.capture_only(env.collect_visible_names({}))
+    # The explicit (unused) parameter keeps the block from adopting free
+    # variables as implicit parameters; the runtime invokes it with none.
+    runner = -> (go_unused) run_goroutine_body(body, genv, spawn_self, spawn_mode, spawn_file)
+    ccall("w_goroutine_spawn", runner)
+    nil
+
+  -> run_goroutine_body(body, env, spawn_self, spawn_mode, spawn_file)
+    @self_stack = spawn_self == nil ? [nil] : [nil, spawn_self]
+    @method_stack = [nil]
+    @return_frames = [0]
+    @signal = {type: nil, value: nil, frame_id: nil, has_value: false}
+    @raised_value = nil
+    @raised_message = nil
+    @overflow_mode = spawn_mode
+    @current_file = spawn_file
+    begin
+      evaluate_body(body, env)
+    rescue err
+      # `return` / `break` / `next` at the body's top level end the body,
+      # as the compiled closure simply returns. Anything else is an
+      # unhandled error inside the goroutine and propagates to the runtime.
+      if err != "__SIGNAL__"
+        raise err
+      @signal[:type] = nil
+      @signal[:frame_id] = nil
+      @signal[:has_value] = false
+    nil
+
+  # The per-goroutine part of the interpreter's state, in the order
+  # restore_goroutine_context reinstalls it.
+  -> goroutine_context
+    [@self_stack, @method_stack, @return_frames, @signal, @raised_value, @raised_message, @overflow_mode, @current_file]
+
+  -> restore_goroutine_context(saved)
+    @self_stack = saved[0]
+    @method_stack = saved[1]
+    @return_frames = saved[2]
+    @signal = saved[3]
+    @raised_value = saved[4]
+    @raised_message = saved[5]
+    @overflow_mode = saved[6]
+    @current_file = saved[7]
+    nil
+
+  # Run the scheduler until no goroutine is live — the compiled end-of-main
+  # drain (lowering emits w_scheduler_run after the main body).
   -> drain_goroutines
-    while @goroutines.size() > 0
-      pending = @goroutines
-      @goroutines = []
-      i = 0
-      while i < pending.size()
-        evaluate_body(pending[i][:body], pending[i][:env])
-        i += 1
+    if !@goroutines_active
+      return nil
+    saved = goroutine_context()
+    begin
+      ccall("w_scheduler_run_w")
+    ensure
+      restore_goroutine_context(saved)
+    nil
 
   # -- State snapshot (for nested evaluation) --
 
@@ -740,13 +834,9 @@
         @overflow_mode = saved_mode
       return result
 
-    # `go -> …` spawns a goroutine. The tree-walker has no preemptive
-    # scheduler, so queue the body (with its captured env) and drain it at
-    # end of program in drain_goroutines — matching the compiled end-of-main
-    # drain, so `-e` and `-o` produce the same output order.
+    # `go -> …` spawns a real runtime goroutine — see spawn_goroutine.
     if t == :go
-      @goroutines.push({body: ast_get(node, :body), env: env})
-      return nil
+      return spawn_goroutine(ast_get(node, :body), env)
 
     raise "Unknown AST node type: [t]"
 

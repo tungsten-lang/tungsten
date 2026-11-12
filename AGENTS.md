@@ -132,6 +132,11 @@ bits/        bit executables
   in-checkout bits are compiled from the root, by relative path, with
   `TUNGSTEN_ROOT` unset. What embeds absolute paths by design (a program's
   incremental binary, anything using `__DIR__`) is keyed by those paths.
+- A compiler switch in the environment (`TUNGSTEN_FREE=0`, `TUNGSTEN_DEFINES`,
+  any `TUNGSTEN_*` that is not a location or a store/GC knob) is part of the
+  stage, image and bit keys, so a build made under one gets its own entries
+  and is never handed to a plain build (`bin/commands/store.sh
+  tuning-environment` prints what counts).
 - `bin/tungsten-compiler`, `build/compiler-images/` and each bit's `bin/` are
   copies of store entries; `build/compiler-build.profile` records what is
   installed. A new worktree gets the compiler the store holds for exactly its

@@ -26,6 +26,12 @@
     as the entry was spelled. The stage key now hashes
     `compiler/tungsten_driver.w`, which neither `build.w` nor `bootstrap.sh`
     covered;
+  - the stage identity hashed the lexer table's absolute path (the checkout
+    again) and only a handful of the compiler's `TUNGSTEN_*` switches, the bit
+    stamp none: the path is gone, and every switch set in the environment
+    (`TUNGSTEN_FREE=0`, `TUNGSTEN_DEFINES`, ...) is now part of the stage,
+    image and bit keys, so a build made under one is never served to a plain
+    build;
   - per-program artifacts, which embed absolute source paths by design, stay
     keyed by those paths, and the root they resolve against (previously
     implied by the cache directory) is now part of the incremental-binary,

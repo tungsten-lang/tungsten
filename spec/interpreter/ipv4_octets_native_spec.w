@@ -1,20 +1,16 @@
 # Tree-walker parity for source-only IPv4#octets after removing its C IC.
 
-# Surplus arguments are an error on both engines (E_LOWER_ARITY at compile
-# time where the callee is known; the interpreter raises at the call).
+# Surplus arguments are an error on both engines: E_LOWER_ARITY at compile
+# time where the receiver's class is statically known, otherwise a rescuable
+# ArgumentError at the call (the interpreter when it binds parameters, the
+# compiled engine on the inline-cache miss path). This spec runs in both
+# lanes.
 -> surplus_rejected?(f)
   begin
     f.call
     false
   rescue surplus_error
     true
-
-# The interpreter rejects surplus arguments at the call; the compiled engine
-# leaves DYNAMIC dispatch unchecked by design (no runtime arity cost), so on
-# an unknown receiver a surplus call still runs. Compile-time checks apply
-# only where the callee is statically known. This spec runs in both lanes.
--> surplus_rejection_expected
-  env("TUNGSTEN_INTERPRETED_SPEC") == "1"
 
 -> check(name, got, want)
   if got != want
@@ -34,7 +30,7 @@ second_rejected = surplus_rejected?(->() ip.octets(123, "ignored"))
 second = ip.octets
 
 check_octets("octets", first, 192, 0, 2, 1)
-check("surplus arguments rejected", second_rejected, surplus_rejection_expected)
+check("surplus arguments rejected", second_rejected, true)
 # Ordinary (growable, non-view) array: cap covers the 4 octets. The exact
 # value is an allocator detail — array literals allocate EXACT size
 # (cap 4) since the exact-size literal change, where the old empty+push

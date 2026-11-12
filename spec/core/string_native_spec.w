@@ -38,13 +38,20 @@ check("rope", rope.empty?, false)
 check("empty symbol", "".to_sym.empty?, true)
 check("nonempty symbol", "x".to_sym.empty?, false)
 
+-> surplus_rejected?(f)
+  begin
+    f.call
+    false
+  rescue surplus_error
+    true
+
 -> check_byte_length(name, value, want)
   check("[name] size", value.size, want)
   check("[name] length", value.length, want)
-  # The removed native IC ignored surplus arguments; source dispatch retains
-  # that public compatibility behavior.
-  check("[name] size extras", value.size(1, 2), want)
-  check("[name] length extras", value.length(1, 2), want)
+  # String#size/length are runtime builtins with a fixed [0, 0] contract:
+  # surplus arguments are a rescuable ArgumentError, never silently dropped.
+  check("[name] size extras rejected", surplus_rejected?(->() value.size(1, 2)), true)
+  check("[name] length extras rejected", surplus_rejected?(->() value.length(1, 2)), true)
 
 check_byte_length("inline empty", "", 0)
 check_byte_length("inline UTF-8 bytes", "é", 2)

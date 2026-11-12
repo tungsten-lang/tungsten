@@ -14,6 +14,5 @@ check("literal.cap", value.cap >= 3, true)
 check("literal.empty", value.empty?, false)
 check("literal.first", value.first, 10)
 check("literal.last", value.last, 30)
-check("literal.extra", value.last(1, 2, 3), 30)
 
 << "autoload.literal: ok"

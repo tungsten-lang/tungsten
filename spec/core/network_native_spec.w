@@ -57,9 +57,12 @@ check_ipv4_octets("ipv4 octets", ipv4_octets, 192, 0, 2, 1)
 check_ipv4_octets("ipv4 prefixed octets",
                   IPv4.of(255, 128, 1, 0, 17).octets,
                   255, 128, 1, 0)
-check_ipv4_octets("ipv4 octets surplus arguments",
-                  ipv4.octets(123, "ignored"),
-                  192, 0, 2, 1)
+ipv4_surplus_raised = false
+begin
+  ipv4.octets(123, "ignored")
+rescue error
+  ipv4_surplus_raised = true
+check("ipv4 octets surplus arguments raise", ipv4_surplus_raised, true)
 ipv4_octets[0] = 9
 check("ipv4 octets fresh allocation", ipv4.octets[0], 192)
 check("ipv4 of valid prefix", IPv4.of(192, 0, 2, 1, 24).prefix, 24)

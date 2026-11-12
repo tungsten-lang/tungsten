@@ -3,6 +3,7 @@ use ast
 use lexer
 use parser
 use environment
+use builtin_arity
 use builtins
 use target
 

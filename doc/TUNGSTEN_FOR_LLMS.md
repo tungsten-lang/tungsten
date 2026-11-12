@@ -57,6 +57,8 @@ ref = add/2
 
 # Arity is checked at compile time where the callee is known:
 # add(1) or add(1, 2, 3) is E_LOWER_ARITY, never nil-padded or truncated.
+# Runtime builtins have fixed signatures too: [1, 2].push(3, 4) is
+# E_LOWER_ARITY, and on an erased receiver a rescuable ArgumentError.
 
 # Pure function, auto-memoized
 fn fib(n)

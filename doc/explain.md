@@ -108,14 +108,22 @@ types at the call site. Note that the *actual* element width is what matters —
 A call passes more arguments than the callee declares, or fewer than its
 required (non-defaulted, non-keyword) leading parameters, and the callee was
 resolved at compile time: a source function, a constructor, a class static,
-or an instance method on a receiver whose class is exactly known. Tungsten
-never silently drops extra arguments or pads missing ones with nil; the
-interpreter raises the same error when it binds parameters. Dynamic dispatch
-on an unknown receiver is not checked at runtime.
+an instance method on a receiver whose class is exactly known, or a runtime
+builtin on a receiver whose static type names its class (`arr.push(4, 5)`
+on an Array, `s.slice(1, 2, 3)` on a String, `h.keys(1)` on a Hash,
+`n.times(1, 2)` on an Int, `f.to_i(1)` on a Float, …). Tungsten never silently
+drops extra arguments or pads missing ones with nil; the interpreter raises
+the same error when it binds parameters. A builtin's contract is the
+argument count its native handler consumes, a trailing block counted as one
+argument (`compiler/lib/builtin_arity.w` mirrors the runtime's rows). On an
+erased receiver the runtime enforces the same contract once per call site on
+the inline-cache miss path, as a rescuable `ArgumentError` with the same
+message; a cache hit pays nothing.
 
 **Fix:** Fix the call, or give the definition a default (`b = 10`), a `*rest`
-splat, or a block parameter if it is meant to be variadic. `TUNGSTEN_ARITY=off`
-disables the check for triage only.
+splat, or a block parameter if it is meant to be variadic. A builtin's
+signature is fixed: fix the call. `TUNGSTEN_ARITY=off` disables the check
+(compile time, runtime and interpreter) for triage only.
 
 ## E_LOWER_UNKNOWN_TRAIT
 

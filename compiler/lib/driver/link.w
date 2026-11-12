@@ -1,5 +1,8 @@
 
--> runtime_event_source
+# The platform the runtime's event backend is compiled for, as
+# runtime/sources.txt names it: the OS in TUNGSTEN_OS (the build driver's
+# probe) or this host's.
+-> runtime_platform
   cached = env("TUNGSTEN_OS")
   if cached != nil && cached != ""
     os = cached
@@ -10,16 +13,121 @@
     else
       os = capture("uname -s").strip()
       driver_probe_memo[:os] = os
-
   if os == "Darwin"
-    return "event_kqueue.c"
-  elsif os == "Linux"
-    use_uring = env("USE_IOURING")
+    return "darwin"
+  if os == "Linux"
+    return "linux"
+  os.downcase()
 
-    if use_uring != nil && use_uring != ""
-      return "event_iouring.c"
-    return "event_epoll.c"
-  return "event_*.c"
+-> runtime_event_set
+  use_uring = env("USE_IOURING")
+  if runtime_platform() == "linux" && use_uring != nil && use_uring != ""
+    return "event-iouring"
+  "event"
+
+# runtime/sources.txt is the one list of the runtime's translation units;
+# every build of the runtime reads it (runtime/sources.sh is the reader for
+# the shell, make and Ruby builds, scripts/test-runtime-sources.sh keeps the
+# two in step). Rows [file, extra cflags] of the files in any of `sets` on
+# `platform`, in manifest order, each once. A runtime directory without the
+# manifest is older than this compiler and cannot be linked by it.
+-> runtime_manifest_rows(runtime_dir)
+  path = runtime_dir.ends_with?("/") ? runtime_dir + "sources.txt" : runtime_dir + "/sources.txt"
+  key = "rtmanifest:" + path
+  cached = driver_probe_memo[key]
+  if cached != nil
+    return cached
+  text = read_file(path)
+  if text == nil
+    raise "runtime source manifest " + path + " is missing: that runtime directory does not belong to this compiler"
+  rows = []
+  lines = text.split("\n")
+  li = 0
+  while li < lines.size()
+    line = lines[li].gsub("\t", " ").strip()
+    li += 1
+    if line != "" && !line.starts_with?("#")
+      fields = []
+      parts = line.split(" ")
+      pi = 0
+      while pi < parts.size()
+        if parts[pi] != ""
+          fields.push(parts[pi])
+        pi += 1
+      if fields.size() < 3
+        raise "runtime source manifest " + path + ": expected FILE SETS PLATFORM in: " + line
+      cflags = ""
+      fi = 3
+      while fi < fields.size()
+        cflags = cflags == "" ? fields[fi] : cflags + " " + fields[fi]
+        fi += 1
+      rows.push([fields[0], fields[1].split(","), fields[2], cflags])
+  driver_probe_memo[key] = rows
+  rows
+
+-> runtime_manifest_files(runtime_dir, platform, sets)
+  rows = runtime_manifest_rows(runtime_dir)
+  out = []
+  seen = {}
+  ri = 0
+  while ri < rows.size()
+    row = rows[ri]
+    ri += 1
+    hit = false
+    if (row[2] == "any" || row[2] == platform) && seen[row[0]] != true
+      member = row[1]
+      mi = 0
+      while mi < member.size() && !hit
+        si = 0
+        while si < sets.size() && !hit
+          if member[mi] == sets[si]
+            hit = true
+          si += 1
+        mi += 1
+    if hit
+      seen[row[0]] = true
+      out.push([row[0], row[3]])
+  out
+
+# The base translation units of a program's runtime: set `program`, the
+# event backend, TLS or its stub, and the zstd slab codec when the program
+# needs it. The runtime archive and LTO bundle are keyed by this list.
+-> program_runtime_sources(runtime_dir, with_zstd)
+  sets = ["program", runtime_event_set(), tls_requested?() ? "tls" : "tls-stub"]
+  if with_zstd
+    sets.push(zstd_runtime_set())
+  rows = runtime_manifest_files(runtime_dir, runtime_platform(), sets)
+  files = []
+  ri = 0
+  while ri < rows.size()
+    files.push(rows[ri][0])
+    ri += 1
+  files
+
+# The sources' paths under the runtime directory, quoted for a shell.
+-> runtime_source_args(runtime_root, files)
+  out = StringBuffer(files.size() * 64)
+  fi = 0
+  while fi < files.size()
+    if fi > 0
+      out << " "
+    out << dev_runtime_shell_quote(runtime_root + "/" + files[fi])
+    fi += 1
+  out.to_s()
+
+# "a.c b.m" -> "a.o b.o": the objects `clang -c` leaves in its directory.
+-> runtime_object_names(files)
+  out = StringBuffer(files.size() * 24)
+  fi = 0
+  while fi < files.size()
+    name = files[fi].split("/").last()
+    if name.ends_with?(".c") || name.ends_with?(".m")
+      name = name.slice(0, name.size() - 2)
+    if fi > 0
+      out << " "
+    out << dev_runtime_shell_quote(name + ".o")
+    fi += 1
+  out.to_s()
 
 -> extra_c_includes
   raw = env("TUNGSTEN_C_INCLUDES")
@@ -318,43 +426,52 @@
   runtime_dir = resolve_runtime_dir
   target_os = detect_target()[:os]
   gated_dir = runtime_dir
-  companion_reqs = []
+  # Which companion files implement a feature, on which platform and with
+  # which extra flags, is runtime/sources.txt's `companion:<feature>` rows
+  # (e.g. blas is blas_bridge.c with -fno-finite-math-only on macOS, so that
+  # slogdet's singular -Inf survives --fast, and openblas_bridge.c on Linux).
+  companion_gates = []
   if prime_needed
-    companion_reqs.push(["ssmr_witness.c", ""])
+    companion_gates.push("prime")
   if lexchars_needed
-    companion_reqs.push(["lexchar_tables.c", ""])
+    companion_gates.push("lexchars")
   if unicode_needed
-    companion_reqs.push(["unicode_tables.c", ""])
-  if target_os == "macos"
-    if blas_needed
-      # slogdet's singular result is -Inf, including in --fast builds.
-      companion_reqs.push(["blas_bridge.c", "-fno-finite-math-only"])
-    if sparse_needed
-      companion_reqs.push(["sparse_bridge.c", ""])
-    if mlx_needed
-      mlx_inc = mlx_cflags()
-      if mlx_inc == ""
-        raise "this program uses MLX (w_mlx_* / bf16 conversion) but mlx-c is not installed — brew install mlx mlx-c"
-      companion_reqs.push(["mlx_bridge.c", mlx_inc])
-    if bridges_needed
-      companion_reqs.push(["metal.m", ""])
-      companion_reqs.push(["graphics.m", ""])
-      companion_reqs.push(["hid_bridge.m", ""])
+    companion_gates.push("unicode")
+  if blas_needed
+    companion_gates.push("blas")
+  if sparse_needed
+    companion_gates.push("sparse")
+  mlx_inc = ""
+  if mlx_needed && target_os == "macos"
+    mlx_inc = mlx_cflags()
+    if mlx_inc == ""
+      raise "this program uses MLX (w_mlx_* / bf16 conversion) but mlx-c is not installed — brew install mlx mlx-c"
+    companion_gates.push("mlx")
+  if bridges_needed
+    companion_gates.push("bridges")
   if quartz_needed
-    companion_reqs.push(["quartz.c", ""])
+    companion_gates.push("quartz")
   if media_needed
-    companion_reqs.push(["media/media.c", ""])
-    if target_os == "macos"
-      companion_reqs.push(["media/media_avf.m", ""])
+    companion_gates.push("media")
   if sci_io_needed
-    companion_reqs.push(["sci_io_native.c", ""])
+    companion_gates.push("sci_io")
   if wtensor_needed
-    companion_reqs.push(["tensor_bridge.c", ""])
-  if target_os == "linux"
-    if blas_needed
-      companion_reqs.push(["openblas_bridge.c", ""])
+    companion_gates.push("wtensor")
   if cuda_needed
     cuda_needed = cuda_needed
+  companion_platform = target_os == "macos" ? "darwin" : target_os
+  companion_reqs = []
+  gi = 0
+  while gi < companion_gates.size()
+    gate_rows = runtime_manifest_files(runtime_dir, companion_platform, ["companion:" + companion_gates[gi]])
+    gri = 0
+    while gri < gate_rows.size()
+      gate_flags = gate_rows[gri][1]
+      if companion_gates[gi] == "mlx" && mlx_inc != ""
+        gate_flags = gate_flags == "" ? mlx_inc : gate_flags + " " + mlx_inc
+      companion_reqs.push([gate_rows[gri][0], gate_flags])
+      gri += 1
+    gi += 1
 
   companion_cmd = StringBuffer(0)
   companion_compiles_c = false
@@ -395,27 +512,13 @@
     clang_cmd << runtime_objs
     clang_cmd << " "
   else
-    clang_cmd << runtime_dir
-    clang_cmd << "runtime.c "
-
-    clang_cmd << runtime_dir
-    clang_cmd << "terminal_input.c "
-
-    clang_cmd << runtime_dir
-    clang_cmd << runtime_event_source
-
-    clang_cmd << " "
-    clang_cmd << runtime_dir
-    clang_cmd << "aks.c "
-
-    clang_cmd << runtime_dir
-    clang_cmd << tls_runtime_source()
-    clang_cmd << " "
-
-    if needs_zstd
+    base_sources = program_runtime_sources(runtime_dir, needs_zstd)
+    bi = 0
+    while bi < base_sources.size()
       clang_cmd << runtime_dir
-      clang_cmd << zstd_runtime_source()
+      clang_cmd << base_sources[bi]
       clang_cmd << " "
+      bi += 1
 
   clang_cmd << companion_cmd.to_s()
 
@@ -809,7 +912,8 @@
   config << "\n"
 
 # Every C source, header and include fragment under the runtime directory
-# (tests aside), relative and sorted. This is the set the runtime objects are
+# (tests aside), and the source manifest that says which of them a build
+# compiles (sources.txt), relative and sorted. This is the set the runtime objects are
 # keyed and invalidated by: the archive, the LTO objects and each companion
 # object take a content digest of all of it, and the incremental binary
 # manifest records each file's mtime. A hand-kept list of "the files
@@ -821,7 +925,7 @@
   cached = driver_probe_memo[key]
   if cached != nil
     return cached
-  listing = capture("cd " + dev_runtime_shell_quote(runtime_root) + " 2>/dev/null && find . -path ./tests -prune -o -type f \\( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' \\) -print 2>/dev/null | LC_ALL=C sort")
+  listing = capture("cd " + dev_runtime_shell_quote(runtime_root) + " 2>/dev/null && find . -path ./tests -prune -o -type f \\( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' -o -name sources.txt \\) -print 2>/dev/null | LC_ALL=C sort")
   files = []
   rows = listing.split("\n")
   i = 0
@@ -928,9 +1032,9 @@
   system(cmd.to_s())
   nil
 
--> dev_runtime_archive_path(cache_dir, sources_digest, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds, tls_source)
+-> dev_runtime_archive_path(cache_dir, sources_digest, cc_identity, ar_identity, compile_flags, source_list, generated_thresholds)
   config = StringBuffer(0)
-  config << "dev-runtime-archive-v7\n"
+  config << "dev-runtime-archive-v8\n"
   config << sources_digest
   config << "\ncc="
   config << cc_identity
@@ -938,12 +1042,10 @@
   config << ar_identity
   config << "\nflags="
   config << compile_flags
-  config << "\n"
-  config << event_source
+  config << "\nsources="
+  config << source_list
   config << "\nthresholds="
   config << generated_thresholds
-  config << "\ntls="
-  config << tls_source
   config << "\n"
   # Ambient compiler/header selection changes object code even when the clang
   # path and explicit flags are unchanged. Keep this list synchronized with
@@ -960,7 +1062,6 @@
 
 -> dev_runtime_archive(verbose = false)
   runtime_dir = resolve_runtime_dir
-  ev = runtime_event_source
   runtime_kind = runtime_identity()
   runtime_root = dev_runtime_source_identity(runtime_dir, runtime_kind)
   cc_command = host_c_compiler()
@@ -982,12 +1083,11 @@
   generated_thresholds = "absent"
   if file?(thresholds_path)
     generated_thresholds = "present"
-  tls_source = tls_runtime_source()
+  sources = program_runtime_sources(runtime_root, false)
   sources_digest = dev_runtime_sources_digest(runtime_root, runtime_kind)
   if sources_digest == nil
     return nil
-  archive = dev_runtime_archive_path(cache_dir, sources_digest, cc_identity, ar_identity, compile_flags, ev, generated_thresholds, tls_source)
-  evo = ev.replace(".c", ".o")
+  archive = dev_runtime_archive_path(cache_dir, sources_digest, cc_identity, ar_identity, compile_flags, sources.join(" "), generated_thresholds)
 
   # The name is a digest of the sources' contents, the tools and the flags,
   # so an archive that exists is the right one, for any checkout.
@@ -1006,11 +1106,6 @@
   # a complete one, never a partially written ar file, and two builders of
   # the same name publish the same bytes.
   compile_flags += dev_runtime_path_map_flag(runtime_root)
-  event_source_arg = dev_runtime_shell_quote(runtime_root + "/" + ev)
-  event_object_arg = dev_runtime_shell_quote(evo)
-  if ev == "event_*.c"
-    event_source_arg = dev_runtime_shell_quote(runtime_root + "/event_") + "*.c"
-    event_object_arg = "event_*.o"
 
   cc = StringBuffer(0)
   cc << "build_dir="
@@ -1024,22 +1119,11 @@
   cc << " -I"
   cc << dev_runtime_shell_quote(runtime_root)
   cc << " -c "
-  cc << dev_runtime_shell_quote(runtime_root + "/runtime.c")
-  cc << " "
-  cc << dev_runtime_shell_quote(runtime_root + "/terminal_input.c")
-  cc << " "
-  cc << event_source_arg
-  cc << " "
-  cc << dev_runtime_shell_quote(runtime_root + "/aks.c")
-  cc << " "
-  cc << dev_runtime_shell_quote(runtime_root + "/" + tls_source)
+  cc << runtime_source_args(runtime_root, sources)
   cc << " && "
   cc << ar_command
-  cc << " rcs \"$archive_tmp\""
-  cc << " runtime.o terminal_input.o "
-  cc << event_object_arg
-  cc << " aks.o "
-  cc << tls_source.replace(".c", ".o")
+  cc << " rcs \"$archive_tmp\" "
+  cc << runtime_object_names(sources)
   cc << " && mv -f \"$archive_tmp\" "
   cc << dev_runtime_shell_quote(archive)
   cc << "; status=$?; rm -rf \"$build_dir\" \"$archive_tmp\"; exit $status"
@@ -1047,20 +1131,18 @@
     return nil
   archive
 
--> dev_runtime_lto_objects_path(cache_dir, sources_digest, cc_identity, compile_flags, event_source, generated_thresholds, tls_source)
+-> dev_runtime_lto_objects_path(cache_dir, sources_digest, cc_identity, compile_flags, source_list, generated_thresholds)
   config = StringBuffer(0)
-  config << "dev-runtime-lto-v3\n"
+  config << "dev-runtime-lto-v4\n"
   config << sources_digest
   config << "\ncc="
   config << cc_identity
   config << "\nflags="
   config << compile_flags
-  config << "\n"
-  config << event_source
+  config << "\nsources="
+  config << source_list
   config << "\nthresholds="
   config << generated_thresholds
-  config << "\ntls="
-  config << tls_source
   config << "\n"
   dev_runtime_append_env(config, "SDKROOT")
   dev_runtime_append_env(config, "MACOSX_DEPLOYMENT_TARGET")
@@ -1077,7 +1159,6 @@
   if clang_opt != nil && clang_opt.index("-fprofile") != nil
     return nil
   runtime_dir = resolve_runtime_dir
-  ev = runtime_event_source
   runtime_kind = runtime_identity()
   runtime_root = dev_runtime_source_identity(runtime_dir, runtime_kind)
   cc_command = host_c_compiler()
@@ -1101,11 +1182,11 @@
     compile_flags += " " + tcf
   thresholds_path = runtime_root + "/generated/bigint_thresholds.h"
   generated_thresholds = file?(thresholds_path) ? "present" : "absent"
-  tls_source = tls_runtime_source()
+  sources = program_runtime_sources(runtime_root, false)
   sources_digest = dev_runtime_sources_digest(runtime_root, runtime_kind)
   if sources_digest == nil
     return nil
-  bundle_dir = dev_runtime_lto_objects_path(cache_dir, sources_digest, cc_identity, compile_flags, ev, generated_thresholds, tls_source)
+  bundle_dir = dev_runtime_lto_objects_path(cache_dir, sources_digest, cc_identity, compile_flags, sources.join(" "), generated_thresholds)
   # Content-named: a bundle whose .ready marker exists is complete and right.
   if file?(bundle_dir + "/.ready")
     return bundle_dir + "/*.o"
@@ -1117,10 +1198,6 @@
     << "Building LTO runtime objects (one-time)..."
 
   compile_flags += dev_runtime_path_map_flag(runtime_root)
-
-  event_source_arg = dev_runtime_shell_quote(runtime_root + "/" + ev)
-  if ev == "event_*.c"
-    event_source_arg = dev_runtime_shell_quote(runtime_root + "/event_") + "*.c"
 
   cc = StringBuffer(0)
   # Build in a private directory and publish it with one rename. A published
@@ -1137,15 +1214,7 @@
   cc << " -I"
   cc << dev_runtime_shell_quote(runtime_root)
   cc << " -c "
-  cc << dev_runtime_shell_quote(runtime_root + "/runtime.c")
-  cc << " "
-  cc << dev_runtime_shell_quote(runtime_root + "/terminal_input.c")
-  cc << " "
-  cc << event_source_arg
-  cc << " "
-  cc << dev_runtime_shell_quote(runtime_root + "/aks.c")
-  cc << " "
-  cc << dev_runtime_shell_quote(runtime_root + "/" + tls_source)
+  cc << runtime_source_args(runtime_root, sources)
   cc << " && touch .ready && cd / && { test -e \"$bundle/.ready\" || mv \"$build_dir\" \"$bundle\" 2>/dev/null || true; }"
   cc << "; rm -rf \"$build_dir\" \"$bundle/$(basename \"$build_dir\")\"; test -e \"$bundle/.ready\""
   if system(cc.to_s()) != true
@@ -1259,25 +1328,8 @@
   cc << "-I"
   cc << dev_runtime_shell_quote(runtime_dir)
   cc << " -c "
-  cc << dev_runtime_shell_quote(runtime_dir + "/runtime.c")
+  cc << runtime_source_args(runtime_dir, program_runtime_sources(runtime_dir, needs_zstd))
   cc << " "
-  cc << dev_runtime_shell_quote(runtime_dir + "/terminal_input.c")
-  cc << " "
-  event_source = runtime_event_source
-  if event_source == "event_*.c"
-    cc << dev_runtime_shell_quote(runtime_dir + "/event_")
-    cc << "*.c"
-  else
-    cc << dev_runtime_shell_quote(runtime_dir + "/" + event_source)
-  cc << " "
-  cc << dev_runtime_shell_quote(runtime_dir + "/" + tls_runtime_source())
-  cc << " "
-  cc << dev_runtime_shell_quote(runtime_dir + "/aks.c")
-  cc << " "
-
-  if needs_zstd
-    cc << dev_runtime_shell_quote(runtime_dir + "/" + zstd_runtime_source())
-    cc << " "
 
   << "Compiling runtime..."
 

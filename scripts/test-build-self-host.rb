@@ -57,6 +57,8 @@ Dir.mktmpdir("tungsten-stage-identity-") do |directory|
   File.write(File.join(root, "bin/commands/cache_gc.sh"), "exit 0\n")
   # the real location/key policy script (the driver asks it for fingerprints and the tuning environment)
   FileUtils.cp(File.expand_path("../bin/commands/store.sh", __dir__), File.join(root, "bin/commands/store.sh"))
+  # the runtime source manifest and its reader: the driver selects the compiler's runtime sources from them
+  %w[runtime/sources.txt runtime/sources.sh].each { |f| FileUtils.cp(File.expand_path("../#{f}", __dir__), File.join(root, f)) }
   File.write(File.join(root, "languages/tungsten/tungsten.lex64"), "fixture table\n")
   File.write(File.join(root, "VERSION"), "2026.01.01\n")
 

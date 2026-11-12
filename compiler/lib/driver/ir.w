@@ -16,10 +16,12 @@
 -> ll_needs_zstd_path(ll_path)
   ll_needs_zstd_text(read_file(ll_path))
 
--> zstd_runtime_source
+# Which member of runtime/sources.txt's zstd slot a program that needs the
+# codec compiles: the codec, or its stub for a cross target without libzstd.
+-> zstd_runtime_set
   if cross_target != "" && env("TUNGSTEN_CROSS_ZSTD_LDFLAGS") == nil
-    return "slab_zstd_stub.c"
-  "slab_zstd.c"
+    return "zstd-stub"
+  "zstd"
 
 # Does the emitted module reference any Apple GPU/graphics/HID bridge symbol?
 # Only then are metal.m/graphics.m/hid_bridge.m (and, via their ObjC
@@ -272,9 +274,6 @@ driver_probe_memo = {}
   if prefix != "" && file?(prefix + "/lib/libssl.dylib")
     return "-L" + prefix + "/lib -lssl -lcrypto"
   "-lssl -lcrypto"
-
--> tls_runtime_source
-  tls_requested?() ? "tls.c" : "tls_stub.c"
 
 # mimalloc for compiled binaries — OPT-IN via TUNGSTEN_MIMALLOC=1. The
 # runtime is malloc-heavy and mimalloc measured -15.5% on new_string /

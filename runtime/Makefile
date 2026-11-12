@@ -13,25 +13,23 @@ WARN_FLAGS = -Wno-deprecated-declarations
 
 RUNTIME_DIR = $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-# Platform-specific event loop backend
+# The sources come from runtime/sources.txt, the one list of runtime sources
+# (set `tests`, plus the event backend and TLS or its stub), read through
+# runtime/sources.sh. Linking the Apple frameworks unconditionally is
+# harmless for binaries that use no @gpu fn / window: metal.m and graphics.m
+# (Metal compute, windowing), hid_bridge.m (USB-HID for the REPL scrub loop:
+# IOKit, CoreFoundation), blas_bridge.c (Accelerate), quartz.c (CoreGraphics,
+# CoreText, ImageIO).
 UNAME_S := $(shell uname -s)
+SOURCES = sh $(RUNTIME_DIR)sources.sh
+RUNTIME_PLATFORM := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 ifeq ($(UNAME_S),Darwin)
-  EVENT_SRC = event_kqueue.c
-  # Metal compute primitives — runtime/metal.m only on darwin.
-  # graphics.m adds the windowing/present half (NSWindow + CAMetalLayer).
-  # Linking the frameworks unconditionally is harmless for binaries
-  # that don't actually use any @gpu fn / window.
-  # hid_bridge.m: USB-HID input (Elgato Stream Deck + dials) for the REPL scrub
-  # loop. IOKit hosts IOHIDManager; CoreFoundation for CFRunLoop/CFNumber/CFDict.
-  METAL_SRC = metal.m graphics.m hid_bridge.m blas_bridge.c
   METAL_LDFLAGS = -framework Metal -framework Foundation -framework AppKit -framework QuartzCore -framework CoreGraphics -framework IOKit -framework CoreFoundation
   BLAS_LDFLAGS = -framework Accelerate
   # quartz.c: the CoreGraphics/CoreText/ImageIO drawing bridge (core/canvas.w).
   QUARTZ_LDFLAGS = -framework CoreText -framework ImageIO
   PLATFORM_LDFLAGS = $(METAL_LDFLAGS) $(BLAS_LDFLAGS) $(QUARTZ_LDFLAGS)
 else ifeq ($(UNAME_S),Linux)
-  EVENT_SRC = event_epoll.c
-  METAL_SRC =
   METAL_LDFLAGS =
   # libm is a separate library on Linux (macOS bundles it into libSystem);
   # runtime.c uses sqrt/pow/ceil/floor/round, so link it explicitly. Goes in
@@ -49,19 +47,19 @@ ifdef TLS
     TLS_CFLAGS = -DTUNGSTEN_TLS
     TLS_LDFLAGS = -lssl -lcrypto
   endif
-  TLS_IMPL = tls.c
+  TLS_SET = tls
 else
   TLS_CFLAGS =
   TLS_LDFLAGS =
-  TLS_IMPL = tls_stub.c
+  TLS_SET = tls-stub
 endif
 
-# Common runtime sources (core + terminal input + event/TLS + optional companions)
-# quartz.c builds everywhere: the real drawing bridge on darwin, raising
-# "Canvas needs macOS" stubs elsewhere.
-QUARTZ_SRC = quartz.c
-RUNTIME_SRCS = runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c unicode_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(QUARTZ_SRC)
-RUNTIME_DEPS = runtime.c terminal_input.c ssmr_witness.c runtime.h wvalue.h ast_schema_generated.h event_loop.h $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(QUARTZ_SRC) quartz.h
+# The test/benchmark runtime (quartz.c builds everywhere: the real drawing
+# bridge on darwin, raising "Canvas needs macOS" stubs elsewhere).
+RUNTIME_SRCS := $(shell $(SOURCES) $(RUNTIME_PLATFORM) tests event $(TLS_SET))
+# Every runtime source, header and include fragment, as the compiler's runtime
+# archive is keyed (a hand-kept list here had missed the *.inc files).
+RUNTIME_DEPS := $(wildcard $(RUNTIME_DIR)*.c $(RUNTIME_DIR)*.h $(RUNTIME_DIR)*.inc $(RUNTIME_DIR)*.m $(RUNTIME_DIR)media/*.[chm] $(RUNTIME_DIR)generated/*.h) $(RUNTIME_DIR)sources.txt
 RUNTIME_CFLAGS = $(WARN_FLAGS) $(GC_CFLAGS) $(TLS_CFLAGS)
 RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(PLATFORM_LDFLAGS)
 
@@ -69,8 +67,8 @@ RUNTIME_LDFLAGS = $(GC_LDFLAGS) $(TLS_LDFLAGS) $(PLATFORM_LDFLAGS)
 # Produces an executable next to the .ll file
 compile: $(SRC:.ll=)
 
-%: %.ll $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)$(TLS_IMPL) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC) $(QUARTZ_SRC))
-	$(CLANG) -O2 $(RUNTIME_CFLAGS) $(RUNTIME_DIR)runtime.c $(RUNTIME_DIR)terminal_input.c $(RUNTIME_DIR)$(EVENT_SRC) $(RUNTIME_DIR)$(TLS_IMPL) $(RUNTIME_DIR)aks.c $(addprefix $(RUNTIME_DIR),$(METAL_SRC) $(QUARTZ_SRC)) $< $(RUNTIME_LDFLAGS) -o $@
+%: %.ll $(RUNTIME_DEPS)
+	$(CLANG) -O2 $(RUNTIME_CFLAGS) $(addprefix $(RUNTIME_DIR),$(RUNTIME_SRCS)) $< $(RUNTIME_LDFLAGS) -o $@
 
 # Build the split runtime objects for callers that do not use RUNTIME_SRCS.
 runtime-objects: runtime.o terminal_input.o
@@ -102,10 +100,10 @@ bench-powmod: bench_powmod
 	./bench_powmod
 
 bench_powmod: bench_powmod.c $(RUNTIME_DEPS) w_char_table.c
-	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_powmod.c terminal_input.c ssmr_witness.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_powmod
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_powmod.c $(filter-out runtime.c,$(RUNTIME_SRCS)) $(RUNTIME_LDFLAGS) -o bench_powmod
 
 bench_bigint: bench_bigint.c $(RUNTIME_DEPS) w_char_table.c
-	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_bigint.c terminal_input.c ssmr_witness.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_bigint
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_bigint.c $(filter-out runtime.c,$(RUNTIME_SRCS)) $(RUNTIME_LDFLAGS) -o bench_bigint
 
 # Benchmark the Int#prime? trial-division/Montgomery-FJ cutoff. The source
 # includes runtime.c directly so it can exercise the exact private tier helpers;
@@ -114,7 +112,7 @@ bench-prime-sweep: bench_prime_sweep
 	./bench_prime_sweep
 
 bench_prime_sweep: ../benchmarks/primes/prime_sweep.c $(RUNTIME_DEPS) w_char_table.c
-	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) ../benchmarks/primes/prime_sweep.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_prime_sweep
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) ../benchmarks/primes/prime_sweep.c $(filter-out runtime.c,$(RUNTIME_SRCS)) $(RUNTIME_LDFLAGS) -o bench_prime_sweep
 
 # Compare WArray capacity policies against the host allocator and probe
 # whether moved/freed small buffers are immediately recycled by size class.
@@ -158,7 +156,7 @@ bench-runtime-hotpaths: bench_runtime_hotpaths
 	./bench_runtime_hotpaths
 
 bench_runtime_hotpaths: bench_runtime_hotpaths.c $(RUNTIME_DEPS) w_char_table.c
-	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_runtime_hotpaths.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_runtime_hotpaths
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_runtime_hotpaths.c $(filter-out runtime.c,$(RUNTIME_SRCS)) $(RUNTIME_LDFLAGS) -o bench_runtime_hotpaths
 
 # Compare today's dynamic slab/heap String construction with a hypothetical
 # exact-seven-character printable-ASCII immediate encoding.
@@ -166,7 +164,7 @@ bench-string-encoding: bench_string_encoding
 	./bench_string_encoding
 
 bench_string_encoding: bench_string_encoding.c $(RUNTIME_DEPS) w_char_table.c
-	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_string_encoding.c terminal_input.c ssmr_witness.c lexchar_tables.c $(EVENT_SRC) $(TLS_IMPL) aks.c $(METAL_SRC) $(RUNTIME_LDFLAGS) -o bench_string_encoding
+	$(CLANG) $(BENCH_FLAGS) $(RUNTIME_CFLAGS) bench_string_encoding.c $(filter-out runtime.c,$(RUNTIME_SRCS)) $(RUNTIME_LDFLAGS) -o bench_string_encoding
 
 tune-bigint:
 	../benchmarks/big_math/tune_bigint_thresholds.sh

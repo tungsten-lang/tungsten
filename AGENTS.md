@@ -188,7 +188,11 @@ bits/        bit executables
 - `core/`: the standard library. `core/tungsten.w` is its autoload manifest.
 - `runtime/`: the C runtime compiled programs link against: GC, event loops,
   HTTP/2 and HTTP/3, TLS, Metal and MLX bridges, and the SIMD lexer tables
-  (`runtime/SIMD_LEXER.md`).
+  (`runtime/SIMD_LEXER.md`). `runtime/sources.txt` is the one list of its
+  translation units, read by every build of the runtime (the compiler's
+  links, `build.w`, `bootstrap.sh`, `runtime/Makefile`, wasm): a new runtime
+  file is a line there, and `scripts/test-runtime-sources.sh` fails until it
+  is.
 - `implementations/`: the bootstrap hosts `c/`, `ruby/`, and `spinel/`.
 - `languages/`: lexers for other languages, written in Tungsten, with
   precomputed `.lex16`, `.lex32`, and `.lex64` tables.

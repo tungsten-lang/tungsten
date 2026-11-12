@@ -47,6 +47,8 @@ Dir.mktmpdir("tungsten-build-targets-") do |directory|
   FileUtils.mkdir_p([File.join(root, "bin/commands"), File.join(root, "runtime"), File.join(package, "lib"), File.join(package, "res"), File.join(package, "sub/deeper"), empty, File.join(inner_bit, "lib"), tools])
   checkout(root)
   checkout(other)
+  # the runtime source manifest and its reader: the driver selects the compiler's runtime sources from them
+  %w[runtime/sources.txt runtime/sources.sh].each { |f| FileUtils.cp(File.expand_path("../#{f}", __dir__), File.join(root, f)) }
   File.write(File.join(root, "bin/commands/cache_gc.sh"), "exit 0\n")
   File.write(File.join(inner_bit, "Bitfile"), %(name "tungsten-inner"\n))
   # the entry uses a shared engine outside the project (a sibling folder), as the arranger uses notation.w

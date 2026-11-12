@@ -52,25 +52,25 @@ fi
 mkdir -p "$OUT/obj" "$OUT/bin" "$OUT/log"
 cd "$ROOT"
 
-# ── 1. Sanitized runtime archive (same dev source set as build.w) ────────
-srcs=(runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c tls_stub.c aks.c)
-case "$(uname -s)" in
-  Darwin) srcs+=(event_kqueue.c metal.m blas_bridge.c hid_bridge.m) ;;
-  Linux)  srcs+=(event_epoll.c) ;;
-esac
+# ── 1. Sanitized runtime archive (the compiler's source set, as build.w
+#       reads it from runtime/sources.txt) ─────────────────────────────────
+platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
 zstd_cflags=()
+zstd_set=zstd-stub
 homebrew_prefix="$(tungsten_homebrew_prefix || true)"
 if [[ -n "$homebrew_prefix" && -f "$homebrew_prefix/include/zstd.h" ]]; then
   zstd_cflags=("-I$homebrew_prefix/include")
-  srcs+=(slab_zstd.c)
-else
-  srcs+=(slab_zstd_stub.c)
+  zstd_set=zstd
 fi
+srcs=()
+while IFS= read -r src; do srcs+=("$src"); done < <(
+  sh "$ROOT/runtime/sources.sh" "$platform" compiler event tls-stub "$zstd_set"
+)
 
 echo "==> Compiling sanitized runtime archive ($OPT -fsanitize=undefined)"
 objs=()
 for src in "${srcs[@]}"; do
-  obj="$OUT/obj/${src%.*}.o"
+  obj="$OUT/obj/$(basename "${src%.*}").o"
   flags=("${SAN_CFLAGS[@]}")
   [[ "$src" == *.m ]] && flags+=(-x objective-c)
   if ! "$CC" "${flags[@]}" "${zstd_cflags[@]}" \

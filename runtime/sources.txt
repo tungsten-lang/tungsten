@@ -1,0 +1,73 @@
+# runtime/sources.txt: the C runtime's translation units, in one list that
+# every build of the runtime reads. Adding, renaming or regating a runtime
+# source is an edit here and nowhere else.
+#
+#   FILE  SETS  PLATFORM  [EXTRA-CFLAGS...]
+#
+# FILE      relative to runtime/.
+# SETS      comma-separated sets the file belongs to (no spaces):
+#   program        every program's runtime: the store's runtime archive and
+#                  LTO bundle, and a from-source link
+#                  (compiler/lib/driver/link.w)
+#   compiler       the compiler's own runtime archive (bin/commands/build.w,
+#                  bin/commands/bootstrap.sh)
+#   tests          the C tests and benchmarks (runtime/Makefile)
+#   wasm           the wasm32 runtime (wasm/scripts/compile_runtime.sh)
+#   event          the event-loop backend (one per platform)
+#   event-iouring  the io_uring backend, instead of `event` when USE_IOURING
+#   tls, tls-stub  TLS (TLS=1 / TUNGSTEN_TLS) or its stub
+#   zstd, zstd-stub    compressed string slabs (libzstd) or the stub
+#   http2, http3   the opt-in HTTP/2 and HTTP/3 servers
+#   companion:G    linked into a program only when its IR needs feature G
+#                  (link.w decides that from the IR; runtime.c carries weak
+#                  stand-ins for every companion symbol)
+#   optional       opt-in bridges a program names itself (TUNGSTEN_C_INCLUDES)
+#   fragment       #included by another unit, never compiled on its own
+# A build takes its base set plus exactly one member of each slot it needs
+# (event, tls, zstd), chosen from the platform and the configuration.
+# PLATFORM  any, darwin or linux: the platform of the build's target.
+# EXTRA-CFLAGS  added when this file is compiled (any build).
+#
+# Read by runtime/sources.sh (the shell, make and Ruby readers),
+# compiler/lib/driver/link.w (runtime_manifest_files) and
+# scripts/test-runtime-sources.sh, which also fails when a runtime source is
+# missing from this list. Bench and test drivers (runtime/bench_*.c,
+# runtime/test_*.c, runtime/tests/) are not runtime sources.
+
+runtime.c            program,compiler,tests,wasm                 any
+terminal_input.c     program,compiler,tests                      any
+aks.c                program,compiler,tests,wasm                 any
+
+event_kqueue.c       event                                       darwin
+event_epoll.c        event                                       linux
+event_iouring.c      event-iouring                               linux
+
+tls.c                tls                                         any
+tls_stub.c           tls-stub,wasm                               any
+slab_zstd.c          zstd                                        any
+slab_zstd_stub.c     zstd-stub,wasm                              any
+http2.c              http2                                       any
+http3.c              http3                                       any
+
+ssmr_witness.c       compiler,tests,wasm,companion:prime         any
+lexchar_tables.c     compiler,tests,wasm,companion:lexchars      any
+unicode_tables.c     compiler,tests,wasm,companion:unicode       any
+tensor_bridge.c      wasm,companion:wtensor                      any
+quartz.c             tests,companion:quartz                      any
+sci_io_native.c      companion:sci_io                            any
+media/media.c        companion:media                             any
+media/media_avf.m    companion:media                             darwin
+metal.m              compiler,tests,companion:bridges            darwin
+graphics.m           tests,companion:bridges                     darwin
+hid_bridge.m         compiler,tests,companion:bridges            darwin
+blas_bridge.c        compiler,tests,companion:blas               darwin  -fno-finite-math-only
+openblas_bridge.c    companion:blas                              linux
+sparse_bridge.c      companion:sparse                            darwin
+mlx_bridge.c         companion:mlx                               darwin
+
+sci_io_bridge.c      optional                                    any
+mps_bridge.m         optional                                    darwin
+media/media_fuzz.c   optional                                    any
+
+w_char_table.c       fragment                                    any
+w_lexchar_cache.c    fragment                                    any

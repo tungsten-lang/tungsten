@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **One list of runtime sources** — `runtime/sources.txt` names every C
+  translation unit of the runtime with the builds it belongs to (`program`,
+  `compiler`, `tests`, `wasm`), the slot it fills (event backend, TLS or its
+  stub, the zstd codec or its stub) and, for companions, the feature that
+  links it. The compiler's links, `bin/commands/build.w`, `bootstrap.sh`,
+  `runtime/Makefile`, the wasm runtime, the Ruby compile path and the UBSan
+  sweep all read it (`runtime/sources.sh` for shell, make and Ruby); the ten
+  hand-kept lists are gone, and `bootstrap.sh` now builds `unicode_tables.c`
+  into the stage-1 runtime as `build.w` always did. The manifest is part of
+  the runtime's content key. `scripts/test-runtime-sources.sh` fails when a
+  runtime file is missing from it or a build path lists sources itself.
 - **One shared build store** — build artifacts no longer live in each
   checkout's `build/cache`. Every checkout, worktree and installed toolchain
   reads and writes one store, `~/.tungsten/build` (`TUNGSTEN_HOME/build`;

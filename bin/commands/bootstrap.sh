@@ -28,6 +28,7 @@ PORTABLE=0
 DEBUG_REQUESTED=0
 NO_DEBUG_REQUESTED=0
 NO_BITS=0
+STRICT=0
 CPU_ARG=""
 TARGET_TRIPLE=""
 TARGET_SYSROOT=""
@@ -46,6 +47,7 @@ while [ "$#" -gt 0 ]; do
     --debug) DEBUG_REQUESTED=1 ;;
     --no-debug) NO_DEBUG_REQUESTED=1 ;;
     --no-bits) NO_BITS=1 ;;
+    --strict) STRICT=1 ;;
     --native) CPU_ARG=native ;;
     --cpu|--target|--sysroot)
       [ "$#" -ge 2 ] || { printf 'error: %s requires a value\n' "$1" >&2; exit 1; }
@@ -73,6 +75,8 @@ Options:
   --no-bits        Skip compiling bit entry points in the chained build
   --release        -O3, full LTO, no dev checks, reduced metadata
   --pgo            Train and profile-optimize the installed/release compiler
+  --strict         Fail when stage 1 and stage 2 emit different LLVM IR
+                   (implied when CI is set and by --pgo, --target, --portable)
   --debug          Include symbols, safety checks, and runtime metadata
   --no-debug       Omit debug symbols and development checks
   --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)
@@ -619,6 +623,7 @@ if [ "$PGO" -eq 1 ]; then build_flags+=(--pgo); fi
 if [ "$DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--debug); fi
 if [ "$NO_DEBUG_REQUESTED" -eq 1 ]; then build_flags+=(--no-debug); fi
 if [ "$NO_BITS" -eq 1 ]; then build_flags+=(--no-bits); fi
+if [ "$STRICT" -eq 1 ]; then build_flags+=(--strict); fi
 if [ -n "$CPU_ARG" ]; then build_flags+=(--cpu "$CPU_ARG"); fi
 if [ -n "$TARGET_TRIPLE" ]; then build_flags+=(--target "$TARGET_TRIPLE"); fi
 if [ -n "$TARGET_SYSROOT" ]; then build_flags+=(--sysroot "$TARGET_SYSROOT"); fi

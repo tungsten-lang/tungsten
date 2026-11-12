@@ -11,6 +11,7 @@ on:
       - bin/commands/release.sh
       - bin/commands/bootstrap.sh
       - bin/commands/build.w
+      - scripts/install-linux-toolchain.sh
       - scripts/package-release.sh
       - scripts/test-build-stage1-cache-identity.rb
       - scripts/validate-release-package.sh
@@ -38,10 +39,17 @@ jobs:
       - name: Verify tagged PGO build contract
         run: ruby scripts/test-build-stage1-cache-identity.rb
 
+      # The fixture stands in for one release artifact directory: a compiler
+      # and, beside it, the compiler images the package must carry. `type -P`
+      # names the program on disk; `command -v true` answers with the shell
+      # builtin's bare name, which cp cannot copy.
       - name: Build package fixture
         run: |
-          mkdir -p build/cache/release-validation build/packages
-          cp "$(command -v true)" build/cache/release-validation/tungsten-compiler
+          mkdir -p build/cache/release-validation/compiler-images build/packages
+          fixture="$(type -P true)"
+          cp "$fixture" build/cache/release-validation/tungsten-compiler
+          cp "$fixture" build/cache/release-validation/compiler-images/tungsten-repl
+          cp "$fixture" build/cache/release-validation/compiler-images/tungsten-metal
           scripts/package-release.sh \
             build/cache/release-validation/tungsten-compiler \
             validation-linux-x86_64 build/packages
@@ -100,12 +108,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # LLVM from apt.llvm.org at the pinned major, not the distribution's
+      # clang (Ubuntu 24.04 ships LLVM 18); the script puts it first on PATH.
       - name: Install Linux toolchain
         if: runner.os == 'Linux'
-        run: >-
-          sudo apt-get update &&
-          sudo apt-get install -y
-          clang llvm lld pkg-config libonig-dev libzstd-dev
+        run: scripts/install-linux-toolchain.sh 22 libonig-dev libzstd-dev
 
       - name: Install macOS runtime dependencies
         if: runner.os == 'macOS'
@@ -124,8 +131,14 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           CPU: ${{ matrix.cpu }}
+        # --strict: a stage 1 / stage 2 IR mismatch exits non-zero before any
+        # compiler is installed or any artifact is built, so this step is the
+        # release's stage-identity gate. (--pgo, --target and CI imply it; it
+        # is spelled out because the job depends on it.) The same build writes
+        # the artifact's repl and metal compiler images beside the compiler.
         run: |
           args=(--release --pgo --target "$TARGET")
+          args+=(--strict)
           if [[ -n "$CPU" ]]; then args+=(--cpu "$CPU"); fi
           bin/tungsten bootstrap "${args[@]}"
 
@@ -160,6 +173,11 @@ jobs:
           package="tungsten-$(tr -d '[:space:]' < VERSION)-$TARGET_LABEL.tar.gz"
           scripts/validate-release-package.sh "build/packages/$package" "$TARGET_LABEL"
 
+      # The packaged toolchain, end to end, on the profiles a user reaches
+      # first: check, the default run (compile through WIRE, link the native
+      # runtime archive, execute), and a --release build (whole-program LTO
+      # against the runtime bitcode). The example sits inside the package, so
+      # its core/ and runtime/ are the package's own.
       - name: Smoke packaged compiler
         env:
           TARGET_LABEL: ${{ matrix.label }}
@@ -167,8 +185,12 @@ jobs:
           package="tungsten-$(tr -d '[:space:]' < VERSION)-$TARGET_LABEL"
           mkdir build/package-smoke
           tar -xzf "build/packages/$package.tar.gz" -C build/package-smoke
-          "build/package-smoke/$package/bin/tungsten" -c \
-            "build/package-smoke/$package/doc/examples/01-basics/hello.w"
+          tungsten="build/package-smoke/$package/bin/tungsten"
+          hello="build/package-smoke/$package/doc/examples/01-basics/hello.w"
+          "$tungsten" -c "$hello"
+          [[ "$("$tungsten" "$hello")" == "hello world" ]]
+          "$tungsten" -o build/package-smoke/hello-release --release "$hello"
+          [[ "$(build/package-smoke/hello-release)" == "hello world" ]]
 
       - name: Attest package
         uses: actions/attest@v4

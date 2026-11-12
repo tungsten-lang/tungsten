@@ -4,9 +4,10 @@
 #   curl -fsSL https://tungsten-lang.org/install | sh
 #
 # Clones the repo and builds the self-hosted compiler from source. The build
-# proves itself: stage 1 and stage 2 must emit byte-identical LLVM IR — and the
-# binaries come out host-tuned (-march=native). Then `tungsten` is linked onto
-# your PATH. Re-running updates an existing install.
+# proves itself: stage 1 and stage 2 must emit byte-identical LLVM IR (the
+# build runs with --strict, so a mismatch stops the install before anything is
+# linked) — and the binaries come out host-tuned (-march=native). Then
+# `tungsten` is linked onto your PATH. Re-running updates an existing install.
 #
 # Environment:
 #   TUNGSTEN_HOME  install prefix     (default: ~/.tungsten)
@@ -53,8 +54,11 @@ say "building the self-hosted compiler (stage 1 = stage 2 byte-identity is check
 # bootstrap works on the fresh clone (no compiler yet) and chains into the
 # full `tungsten build` pipeline. Run from TUNGSTEN_HOME: the chained build
 # is cwd-sensitive — from inside a directory with a Bitfile it builds that
-# project, not the compiler.
-( cd "$TUNGSTEN_HOME" && bin/tungsten bootstrap --release --native )
+# project, not the compiler. --strict makes a stage-identity mismatch a build
+# failure (exit 1, the new compiler is not installed), and this script stops
+# there instead of linking a compiler that did not reproduce itself.
+( cd "$TUNGSTEN_HOME" && bin/tungsten bootstrap --release --native --strict ) ||
+  fail "the compiler build failed (see above)"
 
 # --- link --------------------------------------------------------------------
 mkdir -p "$TUNGSTEN_BIN"

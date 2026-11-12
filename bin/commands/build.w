@@ -497,6 +497,8 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
   << "  -2          Reuse the existing stage-1 binary and build stage 2"
   << "  --force     Ignore cached stage binaries and rebuild"
   << "  --pgo       Build the compiler with profile-guided optimization"
+  << "  --strict    Fail (exit 1, install nothing) when stage 1 and stage 2 emit different LLVM IR."
+  << "              Implied when CI is set and by --install, --pgo, --target, and --portable."
   << "  --no-bits   Skip compiling bit entry points on --release builds"
   << "  --release   -O3, full LTO, no dev checks, reduced runtime metadata, and build bits"
   << "  --install   Build (--release --native + bits), tick VERSION, and install to TUNGSTEN_HOME"
@@ -642,6 +644,7 @@ force_build = array_contains?(args, "--force")
 skip_bits_requested = array_contains?(args, "--no-bits")
 install_requested = array_contains?(args, "--install")
 install_only = array_contains?(args, "--install-only")
+strict_requested = array_contains?(args, "--strict")
 
 # -0 (Spinel stage0) only makes sense in Spinel mode. Auto-promote.
 if stage0_only
@@ -755,6 +758,41 @@ if install_requested
 
 debug_enabled = debug_requested || (!no_debug_requested && !release_mode && !portable_mode)
 lto_flag = release_mode ? "-flto=full" : "-flto=thin"
+
+# Stage identity (stage 1 .ll == stage 2 .ll) proves the compiler reproduces
+# itself. A plain local build only warns on a mismatch and still installs
+# stage 2: a developer in the middle of a two-step bootstrap change needs a
+# compiler to take the second step with. Every build whose result leaves this
+# checkout, or that nobody is reading, fails instead: an automated run (CI
+# set to anything but empty, 0 or false), --strict, --install, --pgo, and the
+# release artifacts of --target / --portable.
+strict_identity_reason = ""
+ci_value = env_or_empty("CI").strip.downcase
+if strict_requested
+  strict_identity_reason = "--strict"
+elsif ci_value != "" && ci_value != "0" && ci_value != "false"
+  strict_identity_reason = "CI is set"
+elsif install_requested
+  strict_identity_reason = "--install"
+elsif pgo_build
+  strict_identity_reason = "--pgo"
+elsif portable_mode || target_triple != ""
+  strict_identity_reason = "a release artifact build"
+strict_identity = strict_identity_reason != ""
+
+# Called when the two stages' .ll differ (or one is missing). Returns only on
+# the lenient local path.
+-> stage_identity_mismatch(stage1_ll, stage2_ll)
+  eputs("    " + RED + (strict_identity ? "ERROR" : "WARNING") + RESET + " stage 1 and stage 2 .ll differ!")
+  if regular_file?(stage1_ll) && regular_file?(stage2_ll)
+    eputs("    " + DIM + "stage 1 .ll: " + file_sha(stage1_ll) + "  " + stage1_ll + RESET)
+    eputs("    " + DIM + "stage 2 .ll: " + file_sha(stage2_ll) + "  " + stage2_ll + RESET)
+  else
+    eputs("    " + DIM + "missing emitted .ll for one or both stages (a cached stage that kept no .ll: rebuild with --force)" + RESET)
+  if strict_identity
+    eputs("    " + DIM + "stage 2 was not installed: a mismatch is fatal here (" + strict_identity_reason + ")" + RESET)
+    exit(1)
+  eputs("    " + DIM + "installing stage 2 anyway (local build); CI, --strict, --install, --pgo and release artifacts fail here" + RESET)
 
 # resolve_cpu(cpu:, native:, configured:) — no target: passed, so a host
 # CPU always resolves (build.rb behavior; the cross target is handled by
@@ -2348,14 +2386,9 @@ if !bit_only
       if verified
         << "    " + GREEN + "VERIFIED" + RESET + " " + DIM + "stage 1 .ll == stage 2 .ll (" + ms(verify_elapsed) + ")" + RESET
       else
-        # Warn and ship stage 2 anyway (a false negative must not leave
-        # the user with no installed compiler).
-        eputs("    " + RED + "WARNING" + RESET + " stage 1 and stage 2 .ll differ!")
-        if regular_file?(stage1_ll) && regular_file?(stage2_ll)
-          eputs("    " + DIM + "stage 1 .ll: " + file_sha(stage1_ll) + RESET)
-          eputs("    " + DIM + "stage 2 .ll: " + file_sha(stage2_ll) + RESET)
-        else
-          eputs("    " + DIM + "missing emitted .ll for one or both stages" + RESET)
+        # Lenient local builds warn and ship stage 2 anyway (the developer
+        # keeps an installed compiler); strict builds exit here.
+        stage_identity_mismatch(stage1_ll, stage2_ll)
 
       << ""
       if pgo_build && target_triple == "" && !portable_mode
@@ -2569,12 +2602,7 @@ if !bit_only
       if verified
         << "    " + GREEN + "VERIFIED" + RESET + " " + DIM + "stage 1 .ll == stage 2 .ll (" + ms(verify_elapsed) + ")" + RESET
       else
-        eputs("    " + RED + "WARNING" + RESET + " stage 1 and stage 2 .ll differ!")
-        if regular_file?(stage1_ll) && regular_file?(stage2_ll)
-          eputs("    " + DIM + "stage 1 .ll: " + file_sha(stage1_ll) + RESET)
-          eputs("    " + DIM + "stage 2 .ll: " + file_sha(stage2_ll) + RESET)
-        else
-          eputs("    " + DIM + "missing emitted .ll for one or both stages" + RESET)
+        stage_identity_mismatch(stage1_ll, stage2_ll)
 
       if pgo_build && target_triple == "" && !portable_mode
         pgo_binary = run_pgo_post_step(stage2, "PGO", build_scratch_dir, probe_env_prefix, STAGE_FLAGS_CMD, "")
@@ -2652,6 +2680,9 @@ if artifact_targets.size > 0
       artifact_flags = artifact_flags + " --sysroot " + shq(target_sysroot)
     if fast_mode
       artifact_flags = artifact_flags + " --fast"
+    artifact_opt = artifact_release ? "-O3" : "-O0"
+    if fast_mode
+      artifact_opt = artifact_opt + " -ffast-math"
     if pgo_build
       if !pgo_target_matches_host?(artifact_target)
         eputs(RED + "--pgo release artifacts require a matching host OS and architecture: " + artifact_target + RESET)
@@ -2661,9 +2692,6 @@ if artifact_targets.size > 0
       atomic_copy(pgo_binary, out_bin)
       sh_ok("chmod 755 " + shq(out_bin))
     else
-      artifact_opt = artifact_release ? "-O3" : "-O0"
-      if fast_mode
-        artifact_opt = artifact_opt + " -ffast-math"
       art_cmd = STAGE_CD + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' TUNGSTEN_CLANG_OPT=" + shq(artifact_opt) + " " + shq(COMPILER_BIN) + " compile " + shq(STAGE_ENTRY) + " --out " + shq(out_bin) + artifact_flags
       if sh(art_cmd) != 0
         eputs(RED + "Failed to build " + artifact_target + "/" + cpu_label + RESET)
@@ -2678,6 +2706,46 @@ if artifact_targets.size > 0
     else
       sh_ok("rm -f " + shq(pgo_stamp))
     << "    " + GREEN + "built" + RESET + " " + project_relative_path(out_bin)
+
+    # The artifact's compiler images. The host's own (below) are built for
+    # this machine's CPU, so a package cannot ship those: these are the same
+    # sources and the same release/no-LTO profile as `build-image`
+    # (build_compiler_image in compiler/lib/driver/link.w), compiled for the
+    # artifact's target and CPU and written beside it.
+    # scripts/package-release.sh installs them as the package's
+    # build/compiler-images, where the packaged compiler looks. Like the
+    # artifact compiler (and build-image) they are compiled from the root by
+    # relative path with TUNGSTEN_ROOT unset, so a package does not carry the
+    # building checkout's path; their incremental entries live in the build
+    # store under the compiler's usual keys.
+    image_out_dir = out_dir + "/compiler-images"
+    make_dirs(image_out_dir)
+    image_flags = " --release --no-debug --no-lto --target " + shq(artifact_target)
+    if artifact_cpu != ""
+      image_flags = image_flags + " --cpu " + shq(artifact_cpu)
+    if target_sysroot != ""
+      image_flags = image_flags + " --sysroot " + shq(target_sysroot)
+    artifact_image_kinds = ["repl", "metal"]
+    ik = 0
+    while ik < artifact_image_kinds.size
+      image_kind = artifact_image_kinds[ik]
+      ik = ik + 1
+      image_source = compiler_dir_name + "/" + (image_kind == "repl" ? "repl" : "tungsten_" + image_kind) + ".w"
+      image_out = image_out_dir + "/tungsten-" + image_kind
+      image_log = build_scratch_dir + "/artifact-image-" + sanitize_target_label(cpu_label) + "-" + image_kind + ".log"
+      image_cmd = STAGE_CD + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' TUNGSTEN_INCREMENTAL=1 TUNGSTEN_LL_PATH='' TUNGSTEN_CLANG_OPT=" + shq(artifact_opt) + " " + shq(COMPILER_BIN) + " compile " + shq(image_source) + " --out " + shq(image_out) + image_flags + " > " + shq(image_log) + " 2>&1"
+      t_image = clock_ms()
+      if !sh_ok(image_cmd) || !executable?(image_out)
+        log = read_file(image_log)
+        if log != nil
+          eputs(log)
+        eputs(RED + "Failed to build the " + image_kind + " compiler image for " + artifact_target + "/" + cpu_label + RESET)
+        exit(1)
+      if str_has?(artifact_target, "apple")
+        if !codesign_ok(image_out)
+          eputs(RED + "Failed to ad-hoc sign the " + image_kind + " compiler image for " + artifact_target + "/" + cpu_label + RESET)
+          exit(1)
+      << "    " + GREEN + "built" + RESET + " " + project_relative_path(image_out) + " " + DIM + ms(clock_ms() - t_image) + RESET
     ai = ai + 1
 
 # ── Compiler images ─────────────────────────────────────────────

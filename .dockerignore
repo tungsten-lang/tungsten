@@ -1,0 +1,60 @@
+# The image is built from the files a release package ships
+# (scripts/package-release.sh), never from whatever a working checkout has
+# accumulated. A checkout that has been built holds host binaries next to
+# their sources (bin/tungsten-compiler, bin/commands/build, bits/*/bin/*);
+# copied into a Linux image, a macOS one of those is "newer than its source",
+# so the bootstrap reuses it and dies with an exec format error.
+#
+# Everything is excluded, the shipped set is added back, and build products
+# inside it are excluded again. Later lines win.
+*
+
+!Bitfile
+!COPYRIGHT
+!LICENSE-APACHE
+!LICENSE-MIT
+!README.md
+!VERSION
+!bin
+!bits
+!compiler
+!core
+!data
+!doc
+!implementations
+!languages
+!runtime
+!scripts
+!services
+
+# Only the C VM bootstraps the image; the Ruby and Spinel hosts are
+# maintainer options and the image carries no Ruby.
+implementations/ruby
+implementations/spinel
+
+# Compiled programs have no extension; their sources and scripts do.
+bin/tungsten-compiler
+bin/tungsten.wc
+bin/commands/*
+!bin/commands/*.*
+bits/*/bin/*
+!bits/*/bin/*.*
+bits/*/pkg
+
+**/build
+implementations/c/build*
+**/tmp
+**/.venv*
+**/.*-cache
+**/.*_cache
+**/__pycache__
+**/.DS_Store
+**/*.dSYM
+**/*.sidemap
+# a built bit's manifest of the sources it was built from (bits/*/bin/<name>.deps)
+bits/*/bin/*.deps
+**/*.wc
+**/*.ll
+**/*.o
+**/*.a
+**/*.pyc

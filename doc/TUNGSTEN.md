@@ -48,7 +48,12 @@ COMMANDS
                          those artifacts to the full build pipeline.
     build                Full self-host: stage 1 + stage 2 (byte-identical IR).
                          On --release, also builds bit entry points; --install
-                         ticks VERSION and installs to TUNGSTEN_HOME.
+                         ticks VERSION and installs to TUNGSTEN_HOME. A stage
+                         1 / stage 2 IR mismatch is a warning on a local build
+                         and a failure (exit 1, nothing installed) with
+                         --strict, --install, --pgo, --target, --portable, or
+                         when CI is set. --target and --portable also build
+                         each artifact's repl and metal compiler images.
     install              Install the last verified --release --native build and
                          its bits to TUNGSTEN_HOME, ticking VERSION.
     release [VERSION]    Run the root gate, tag, and push a native GitHub

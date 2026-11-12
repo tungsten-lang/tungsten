@@ -2200,9 +2200,10 @@ if !bit_only
     lex_table_path = ROOT + "/languages/tungsten/tungsten.lex64"
 
   if use_c_bootstrap
-    # v4: stages are compiled by relative path (path-independent), the
-    # driver source is hashed, and entries live in the shared build store.
-    c_stage_cache_schema = "c-stage-content-v4"
+    # v5: stages are compiled by relative path (path-independent), the
+    # driver source is hashed, no checkout path enters the identity, and
+    # entries live in the shared build store.
+    c_stage_cache_schema = "c-stage-content-v5"
     c_stage1_sources_sha = tree_sha(compiler_source_paths)
     << ""
     << BOLD + "==> Stage 0: implementations/c VM" + RESET
@@ -2242,9 +2243,14 @@ if !bit_only
     s1_vals.push(stage1_fast_parse)
     s1_keys.push("TUNGSTEN_CLANG_OPT")
     s1_vals.push("-O0")
+    # The identity takes the environment as it stands here: values only. The
+    # lexer table is passed by path, which is this checkout's; its CONTENT is
+    # in the identity (file_sha(lex_table_path)), and the path would make two
+    # checkouts with identical sources build the same stage twice.
+    s1_identity_env = env_kv_join(s1_keys, s1_vals)
     s1_keys.push("TUNGSTEN_LEX64_TABLE")
     s1_vals.push(lex_table_path)
-    c_stage1_identity = Digest.sha256(c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + c_vm_key_for_build + "\n" + file_sha(c_interp_for_build) + "\n" + file_sha(lex_table_path) + "\n" + compiler_dir_name + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + "\n" + AMBIENT_TOOLCHAIN + "\n" + env_kv_join(s1_keys, s1_vals))
+    c_stage1_identity = Digest.sha256(c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + c_vm_key_for_build + "\n" + file_sha(c_interp_for_build) + "\n" + file_sha(lex_table_path) + "\n" + compiler_dir_name + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + "\n" + AMBIENT_TOOLCHAIN + "\n" + s1_identity_env)
     c_stage1_cached = STAGE_STORE_DIR + "/c-vm-stage1-" + c_stage1_identity
     stage1_handoff_ready = handoff_stage1 != "" && executable?(handoff_stage1) && handoff_stage1_ll != "" && regular_file?(handoff_stage1_ll)
     if stage1_handoff_ready
@@ -2289,9 +2295,11 @@ if !bit_only
       s2_vals = probe_vals + []
       s2_keys.push("TUNGSTEN_CLANG_OPT")
       s2_vals.push(bootstrap_compiler_clang_opt)
+      # (as for stage 1: the lexer table's path is not part of the identity)
+      s2_identity_env = env_kv_join(s2_keys, s2_vals)
       s2_keys.push("TUNGSTEN_LEX64_TABLE")
       s2_vals.push(lex_table_path)
-      c_stage2_identity = Digest.sha256(c_stage1_identity + "\n" + file_sha(stage1) + "\n" + c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + AMBIENT_TOOLCHAIN + "\n" + env_kv_join(s2_keys, s2_vals))
+      c_stage2_identity = Digest.sha256(c_stage1_identity + "\n" + file_sha(stage1) + "\n" + c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + AMBIENT_TOOLCHAIN + "\n" + s2_identity_env)
       c_stage2_cached = STAGE_STORE_DIR + "/c-vm-stage2-" + c_stage2_identity
       if !force_build && restore_stage(c_stage2_cached, stage2, stage2_ll)
         t2 = clock_ms()

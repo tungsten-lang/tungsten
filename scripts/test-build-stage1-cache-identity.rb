@@ -27,6 +27,12 @@ required_uses = [
   's1_cmd = STAGE_CD + s1_env + shq(c_interp_for_build) + " " + shq(STAGE_ENTRY) + " compile " + shq(STAGE_ENTRY)',
   's2_cmd = STAGE_CD + s2_env + shq(stage1) + " compile " + shq(STAGE_ENTRY)',
   'if names_this_checkout?(built_bin)',
+  # The lexer table reaches the stages by path; the identity hashes its
+  # content and must not see the path (it is the checkout's).
+  's1_identity_env = env_kv_join(s1_keys, s1_vals) s1_keys.push("TUNGSTEN_LEX64_TABLE")',
+  's2_identity_env = env_kv_join(s2_keys, s2_vals) s2_keys.push("TUNGSTEN_LEX64_TABLE")',
+  'AMBIENT_TOOLCHAIN + "\n" + s1_identity_env)',
+  'AMBIENT_TOOLCHAIN + "\n" + s2_identity_env)',
   'c_stage1_cached = STAGE_STORE_DIR + "/c-vm-stage1-" + c_stage1_identity',
   'c_stage2_cached = STAGE_STORE_DIR + "/c-vm-stage2-" + c_stage2_identity',
   # The Ruby host compiles by absolute path: its stage keys carry the root.

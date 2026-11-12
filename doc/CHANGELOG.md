@@ -23,6 +23,67 @@
   `TUNGSTEN_ARITY=off` still disables every check. Parity spec:
   `spec/parity/builtin_arity_spec.w`.
 
+- **Release packages carry their compiler images and are linked and run
+  before they are published** — the compiler execs prebuilt images for the
+  REPL, `--interpret` and `@gpu` programs and never builds one on launch, but
+  `scripts/package-release.sh` shipped only the compiler, so a packaged
+  `tungsten console` failed and `scripts/validate-release-package.sh` would
+  have failed the next tag at its REPL check. `tungsten build --target` /
+  `--portable` now builds each artifact's `repl` and `metal` images for the
+  artifact's target and CPU, beside it in
+  `build/releases/<triple>/<cpu>/compiler-images/`; the package installs them
+  as `build/cache/compiler-images/`; the validator requires them, starts the
+  Metal image, and compiles, links and runs a program through the packaged
+  launcher from outside any checkout. An image also could not find `core/`,
+  `data/` or `runtime/` when the caller set no `TUNGSTEN_ROOT` (it sits in
+  `build/cache/compiler-images`, not `bin/`): `tungsten-compiler --repl` then
+  died on the unit registry even with the image present. The compiler now
+  hands the image the root that owns it. The release workflow's smoke step now
+  runs a program on the default profile and builds and runs one with
+  `--release` (it only type-checked before). Linux CI and the release matrix
+  install LLVM 22 from apt.llvm.org through
+  `scripts/install-linux-toolchain.sh` (the distribution package is LLVM 18),
+  with compiler-rt for the sanitizer and PGO jobs. The `Dockerfile` uses that
+  script on plain Ubuntu 24.04 (the Ruby base image is gone: the bootstrap
+  needs no Ruby), and a new allowlist `.dockerignore` keeps a checkout's host
+  binaries out of the image, where a macOS `bin/commands/build` newer than its
+  source would be reused and fail to exec. `scripts/test-build-self-host.rb`
+  covers the artifact images (3 checks) and
+  `scripts/test-unit-release-package.rb` (rake `test:release_package`)
+  packages this checkout and validates it in full. The build prints VERIFIED
+  stage1==stage2. The Linux toolchain script, the workflows and the Docker
+  build have not been run: no Linux host or Docker daemon was available.
+- **A stage-identity mismatch fails strict builds** — `tungsten build` printed
+  WARNING, installed stage 2 and exited 0 whenever stage 1 and stage 2 emitted
+  different LLVM IR, so nothing that ran unattended could notice. It now
+  prints ERROR, installs nothing and exits 1 when `CI` is set (to anything but
+  empty, `0` or `false`) or the build was given `--strict` (new; `bootstrap`
+  forwards it), `--install`, `--pgo`, `--target` or `--portable`. A plain
+  local build keeps the warning and the installed compiler, since a two-step
+  bootstrap change needs one. `scripts/install.sh`, the `Dockerfile` and the
+  release workflow pass `--strict`. Both messages now print the two `.ll`
+  paths. `scripts/test-build-self-host.rb` (rake `test:build_self_host`)
+  drives the real build driver over a fake checkout: 13 checks, of which the
+  previous driver fails the first strict one; the same was confirmed in a
+  real checkout by altering the cached stage-2 module.
+- **`--release` is whole-program LTO again** — since 2026-10-25 `--release`
+  linked the cached native runtime archive unless `--lto` was also given (only
+  compiler images kept LTO), while the help text, `AGENTS.md` and the manual
+  all said "full LTO". `--release` again passes `-flto=full` and links the
+  cached runtime bitcode bundle; `--no-lto` opts out. `compile-batch --release`
+  compiled runtime bitcode into a scratch directory for every batch and then
+  linked it without `-flto`; it now takes the same cached bundle (resolved
+  once, before the parallel link workers) and every link carries the flag.
+  The bundle is compiled without the value-changing FP flags `--fast` adds to
+  the module, so `--release --fast` shares it and the C runtime stays IEEE.
+  Instructions retired, apple-m5, clang 23.1.5, same emitted `.ll`: a hello
+  binary 2,040,864 → 54,336 bytes and 21.5M → 15.9M per run; a 25-line
+  array/hash/string loop 441M → 387M per run (−12%), 4,879,056 → 5,042,832
+  bytes. The link costs more: 1.6e9 → 11.6e9 for hello, 77e9 → 240e9 for the
+  loop. `scripts/test-compile-profiles.sh` pins the clang flags of the default
+  profile, `--dev`, `--release`, `--release --no-lto`, `--lto`,
+  `--release --fast` and the batch forms; against the previous compiler it
+  fails on the batch link. The build prints VERIFIED stage1==stage2.
 - **BLAS keeps its non-finite results in fast builds** — both the package
   runtime archive and standalone compiler companion add
   `-fno-finite-math-only` to `blas_bridge.c`. Other fast optimizations remain

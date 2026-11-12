@@ -4292,6 +4292,18 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # UNKNOWN once it has added that many conflicts. Lets the raw-kernel race
   # honour the aggregate --conflicts cap the same way the serial paths do.
   -> solve_shared_budget(res, base, max_conflicts)
+    self.solve_slab(res, base, max_conflicts, true)
+
+  # Worker entry for one case of a complete case split (cover_split.w): this
+  # solver's formula is the input plus that case's unit clauses, so UNSAT here
+  # refutes the case and nothing else. It is written to the slab for the
+  # coordinator, which alone may conclude anything from the set of cases, and
+  # it must NOT raise the shared stop cell. A model is a model of the input
+  # (the case only adds clauses) and stops the other cases as usual.
+  -> solve_case(res, base)
+    self.solve_slab(res, base, 0, false)
+
+  -> solve_slab(res, base, max_conflicts, publish_unsat)
     res[base + @nvars + 6] = ccall("__w_clock_ms")
     if @pending_simplify >= 0
       cong = @pending_simplify
@@ -4319,7 +4331,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     res[base + @nvars + 4] = @conflicts
     res[base + @nvars + 5] = ccall("__w_clock_ms")
     # first decisive answer raises the stop flag for every other arm
-    if (status == 1 || status == 0 - 1) && @stop_cell != nil
+    if (status == 1 || (status == 0 - 1 && publish_unsat)) && @stop_cell != nil
       won = wassat_stop_publish(@stop_cell, status)
     0
 

@@ -47,7 +47,8 @@ if args.size() == 0
   << "  --perf-inspect-json   Emit the AST performance inspection report as JSON"
   << "  --perf-instrument     Instrument AST loops and fetch sites with runtime counters"
   << "  --intern ALGO    Static slab encoding (raw or zstd)"
-  << "  --no-lto         Disable link-time optimization"
+  << "  --no-lto         Disable link-time optimization (--release links the native runtime archive)"
+  << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
   << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
   << "  --release        -O3, full LTO, no dev checks, reduced metadata"
   << "  --debug          Include symbols, safety checks, and runtime metadata"
@@ -156,7 +157,7 @@ while i < args.size()
     << "  --perf-inspect-json   Emit the AST performance inspection report as JSON"
     << "  --perf-instrument     Instrument AST loops and fetch sites with runtime counters"
     << "  --intern ALGO    Static slab encoding (raw or zstd)"
-    << "  --no-lto         Disable link-time optimization"
+    << "  --no-lto         Disable link-time optimization (--release links the native runtime archive)"
     << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
     << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
     << "  --release        -O3, full LTO, no dev checks, reduced metadata"
@@ -738,14 +739,18 @@ elsif command == "compile-batch"
 
   # Runtime objects: link_binary's nil-runtime_objs default already serves a
   # cached native archive for ordinary and frame-pointer debug configurations,
-  # so only pre-build a batch-local runtime when that default cannot (LTO
-  # release links compile the runtime from source per link — amortize it once;
-  # zstd needs the flag-compiled variant). The archive lands in a
-  # private scratch dir, NEVER the first input's directory (the old
-  # `files[0]`-derived path wrote `spec/numeric/runtime.a` into the
-  # source tree and broke outside it).
+  # so only resolve a batch runtime when that default cannot. An LTO batch
+  # (--release / --lto) takes the cached bitcode bundle a single compile
+  # uses, resolved once here so parallel link workers never race to build it
+  # on a cold cache; every link then passes the matching -flto flag. Only a
+  # configuration the bundle cannot represent (zstd, cross target, PGO flags)
+  # compiles a batch-local runtime. That one lands in a private scratch dir,
+  # NEVER the first input's directory (the old `files[0]`-derived path wrote
+  # `spec/numeric/runtime.a` into the source tree and broke outside it).
   batch_lto = (release_mode || explicit_lto) && !no_lto
-  if ll_jobs.size() > 0 && (batch_lto || needs_zstd_runtime)
+  if ll_jobs.size() > 0 && batch_lto && !needs_zstd_runtime && cross_target == ""
+    runtime_objs = dev_runtime_lto_objects(false, verbose)
+  if ll_jobs.size() > 0 && runtime_objs == nil && (batch_lto || needs_zstd_runtime)
     tmp_dir = capture("mktemp -d " + dev_runtime_shell_quote(implicit_ll_root() + "/batch-rt.XXXXXX") + " 2>/dev/null").strip()
     if tmp_dir == ""
       << "Failed to create batch runtime scratch directory"

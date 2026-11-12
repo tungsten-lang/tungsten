@@ -100,6 +100,30 @@
     return "-O0"
   "-O3"
 
+# Optimization flags for the cached LTO runtime bundle. TUNGSTEN_CLANG_OPT is
+# the emitted module's flag set, and `--fast` puts -ffast-math in it; the C
+# runtime keeps IEEE semantics in every profile (its NaN/Inf checks, float
+# parsing and formatting are not the program's fast-FP code), so the value-
+# changing FP flags are dropped here. `--release --fast` therefore shares the
+# bundle of `--release`.
+-> runtime_lto_opt_flag(clang_opt)
+  if clang_opt == nil || clang_opt == ""
+    return profile_opt_flag()
+  kept = []
+  parts = clang_opt.split(" ")
+  i = 0
+  while i < parts.size()
+    part = parts[i]
+    fp_only = part in ("-ffast-math" "-ffinite-math-only" "-funsafe-math-optimizations" "-fassociative-math" "-freciprocal-math" "-fno-signed-zeros" "-fno-honor-nans" "-fno-honor-infinities" "-fapprox-func")
+    if part == "-Ofast"
+      kept.push("-O3")
+    elsif part != "" && !fp_only
+      kept.push(part)
+    i += 1
+  if kept.size() == 0
+    return profile_opt_flag()
+  kept.join(" ")
+
 -> debug_compile_flag
   if debug_enabled
     return "-g"
@@ -147,8 +171,12 @@
   # LTO is opt-in: whole-program LTO (lean binary, slow link) only for
   # --release / --lto; the default is a target-matched object runtime
   # archive (fatter binary, ~0.1s link vs ~5s recompiling the C runtime).
+  # --release means LTO for every program, not only compiler images: the
+  # runtime side is the cached bitcode bundle below, so the per-link cost is
+  # the merged-module optimization alone. --no-lto is the one opt-out.
+  # scripts/test-compile-profiles.sh pins the flags of each profile.
   doing_lto = (release_mode || explicit_lto) && !no_lto
-  full_runtime_lto = (explicit_lto || (release_mode && compiler_image_runtime_profile)) && !no_lto
+  full_runtime_lto = doing_lto
   # Fast native-archive link (default): reuse the cached runtime objects
   # rather than recompiling the ~28k-line runtime every build. runtime.o's weak
   # companion stubs keep the gated ssmr/lexchar/metal/blas adds below valid.
@@ -454,8 +482,8 @@
 # runtime.o keeps weak stubs for the gated companions, so link_binary still adds
 # the strong ssmr/lexchar/metal/blas sources when a program needs them. The
 # archive is rebuilt whenever any base runtime source is newer than it. The
-# whole-program-LTO builds (--release / --lto) skip this and rebuild
-# the runtime from source for a lean, cross-optimized binary.
+# whole-program-LTO builds (--release / --lto) skip this and link the cached
+# bitcode bundle (dev_runtime_lto_objects) for a lean, cross-optimized binary.
 -> dev_runtime_shell_quote(text)
   "'" + text.gsub("'", "'\\''") + "'"
 
@@ -510,10 +538,14 @@
 # artifacts (the spec and parity suites each take their own), and a bit's
 # cwd owns its own build/cache, but neither ever builds an image. Every
 # launch therefore resolves to the one image `bin/tungsten build` produced.
--> compiler_image_dir(kind)
+-> compiler_image_owner_root
   root = env("TUNGSTEN_ROOT")
   if root == nil || root == ""
     root = capture("cd " + dev_runtime_shell_quote(resolve_runtime_dir + "/..") + " && pwd -P 2>/dev/null").strip()
+  root
+
+-> compiler_image_dir(kind)
+  root = compiler_image_owner_root()
   if root == ""
     ccall("w_eputs", "could not locate the checkout that owns the " + kind + " compiler image")
     exit 1
@@ -558,6 +590,16 @@
     ccall("w_eputs", "the " + kind + " compiler image is not built: " + image)
     ccall("w_eputs", "run bin/tungsten build (compiler images are built with the compiler, never on launch)")
     exit 1
+
+  # An image sits in build/cache/compiler-images, not in bin/, so it cannot
+  # find core/, data/ and runtime/ from its own path the way this compiler
+  # does. Unless the caller chose a root, hand it the one that owns the image:
+  # without it a packaged or directly invoked `tungsten-compiler --repl` dies
+  # looking for data/unit_names.txt, and a delegated @gpu compile links
+  # against a runtime directory that does not exist.
+  caller_root = env("TUNGSTEN_ROOT")
+  if caller_root == nil || caller_root == ""
+    ccall("w_setenv", "TUNGSTEN_ROOT", compiler_image_owner_root())
 
   # exec, not spawn: Process.spawn puts the child in its own process group,
   # and an interactive image (bin/wit) is then stopped by the terminal on its
@@ -902,7 +944,7 @@
   cache_dir = compiler_cache_dir()
   if cache_dir == nil
     return nil
-  opt_flag = (clang_opt != nil && clang_opt != "") ? clang_opt : profile_opt_flag()
+  opt_flag = runtime_lto_opt_flag(clang_opt)
   compile_flags = opt_flag + " " + debug_compile_flag() + " " + march_flags() + " -fmerge-all-constants"
   compile_flags += release_mode ? " -flto=full" : " -flto"
   if frame_pointers

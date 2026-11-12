@@ -165,14 +165,19 @@ int w_tls_server_configured(void) {
 const char *w_tls_get_cert_path(void) { return g_cert_path; }
 const char *w_tls_get_key_path(void)  { return g_key_path; }
 
-/* Helper: park goroutine during non-blocking SSL handshake */
-static void tls_park_for_ssl_error(int fd, int ssl_err) {
-    extern void w_socket_park(int fd, int events);
+/* Helper: park goroutine during non-blocking SSL I/O.
+ * Park until the fd is ready for the operation OpenSSL is waiting on.
+ * Returns 0 when deadline_ticks (0 = none) expires first, 1 otherwise.
+ * Without a deadline a park can still come back unready (off the scheduler
+ * it is a bounded poll slice); that is never a timeout, the caller retries. */
+static int tls_park_for_ssl_error(int fd, int ssl_err, int64_t deadline_ticks) {
+    int ready = 1;
     if (ssl_err == SSL_ERROR_WANT_READ) {
-        w_socket_park(fd, W_EVENT_READ);
+        ready = w_socket_park_until(fd, W_EVENT_READ, deadline_ticks);
     } else if (ssl_err == SSL_ERROR_WANT_WRITE) {
-        w_socket_park(fd, W_EVENT_WRITE);
+        ready = w_socket_park_until(fd, W_EVENT_WRITE, deadline_ticks);
     }
+    return ready || deadline_ticks <= 0;
 }
 
 WValue w_tls_wrap(WValue sock) {
@@ -192,14 +197,19 @@ WValue w_tls_wrap(WValue sock) {
 
     SSL_set_fd(ssl, s->fd);
 
-    /* Non-blocking handshake with goroutine parking */
+    /* Non-blocking handshake with goroutine parking; a Socket#set_timeout
+     * read deadline bounds the wait. */
+    int64_t accept_deadline = w_socket_read_deadline_ticks(s);
     while (1) {
         int ret = SSL_accept(ssl);
         if (ret == 1) break;  /* handshake complete */
 
         int err = SSL_get_error(ssl, ret);
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-            tls_park_for_ssl_error(s->fd, err);
+            if (!tls_park_for_ssl_error(s->fd, err, accept_deadline)) {
+                SSL_free(ssl);
+                w_raise(w_string("TLS: handshake timed out"));
+            }
             continue;
         }
 
@@ -230,6 +240,10 @@ WValue w_tls_wrap(WValue sock) {
 
 ssize_t w_tls_read(WSocket *s, char *buf, size_t len) {
     SSL *ssl = (SSL *)s->ssl;
+    /* Socket#set_timeout read deadline, computed once per read call exactly
+     * as w_socket_read does for plain sockets; expiry reads as EOF (0) so
+     * every caller maps it to nil the same way. */
+    int64_t deadline_ticks = w_socket_read_deadline_ticks(s);
     while (1) {
         int n = SSL_read(ssl, buf, (int)len);
         if (n > 0) return n;
@@ -237,7 +251,9 @@ ssize_t w_tls_read(WSocket *s, char *buf, size_t len) {
         int err = SSL_get_error(ssl, n);
         if (err == SSL_ERROR_ZERO_RETURN) return 0;  /* clean shutdown */
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-            tls_park_for_ssl_error(s->fd, err);
+            if (!tls_park_for_ssl_error(s->fd, err, deadline_ticks)) {
+                return 0;  /* read deadline expired (set_timeout) */
+            }
             continue;
         }
         return -1;  /* error */
@@ -252,7 +268,7 @@ ssize_t w_tls_write(WSocket *s, const char *buf, size_t len) {
 
         int err = SSL_get_error(ssl, n);
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-            tls_park_for_ssl_error(s->fd, err);
+            tls_park_for_ssl_error(s->fd, err, 0);
             continue;
         }
         return -1;  /* error */
@@ -352,14 +368,19 @@ WValue w_tls_client_wrap(WValue sock, const char *hostname) {
         w_raise(w_string("TLS: failed to configure hostname verification"));
     }
 
-    /* Non-blocking handshake with goroutine parking */
+    /* Non-blocking handshake with goroutine parking; a Socket#set_timeout
+     * read deadline bounds the wait (HTTP.request sets it before wrapping). */
+    int64_t connect_deadline = w_socket_read_deadline_ticks(s);
     while (1) {
         int ret = SSL_connect(ssl);
         if (ret == 1) break;  /* handshake complete */
 
         int err = SSL_get_error(ssl, ret);
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-            tls_park_for_ssl_error(s->fd, err);
+            if (!tls_park_for_ssl_error(s->fd, err, connect_deadline)) {
+                SSL_free(ssl);
+                w_raise(w_string("TLS: client handshake timed out"));
+            }
             continue;
         }
 

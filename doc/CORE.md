@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(837 total), grouped by area, with its declaration, a one-line
+(838 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -61,6 +61,7 @@ summary from the source header, and a link to the source.
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
 | `HashCustom` | `+ HashCustom` | Custom hash table with selectable hash function. | [`core/hash_custom.w`](../core/hash_custom.w) |
 | `HTTP` | `+ HTTP` | HTTP — HTTP/1.1 requests over event-loop-backed Socket and TLS transports. | [`core/http.w`](../core/http.w) |
+| `HTTPReader` | `+ HTTPReader` | HTTPReader — incremental HTTP/1.1 response framer over a Socket or a String. | [`core/http.w`](../core/http.w) |
 | `HTTPResponse` | `+ HTTPResponse` | HTTPResponse — immutable buffered HTTP response. | [`core/http.w`](../core/http.w) |
 | `IPv4` | `+ IPv4` | IPv4 — packed IPv4 address with optional CIDR prefix. | [`core/ipv4.w`](../core/ipv4.w) |
 | `IPv6` | `+ IPv6` | IPv6 — heap-backed 128-bit address with native CIDR and classification logic. | [`core/ipv6.w`](../core/ipv6.w) |

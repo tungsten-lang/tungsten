@@ -45,6 +45,7 @@
   auto :Hash,         "hash"
   auto :HashCustom,   "hash_custom"
   auto :HTTP,         "http"
+  auto :HTTPReader,   "http"
   auto :HTTPResponse, "http"
   auto :Hypercomplex, "numeric/hypercomplex"
   auto :Interval,     "numeric/interval"

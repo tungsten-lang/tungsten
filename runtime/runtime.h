@@ -1551,6 +1551,7 @@ int64_t w_raw_free(int64_t ptr);
 int64_t w_raw_memmove(int64_t dst, int64_t src, int64_t len);
 void   w_socket_park(int fd, int events);
 int    w_socket_park_until(int fd, int events, int64_t deadline_ticks);
+int64_t w_socket_read_deadline_ticks(WSocket *s);
 
 /* ---- Goroutines ---- */
 

@@ -144,7 +144,10 @@
     interp.w_to_s(recv)
 
   when "to_i"
-    interp.w_to_s(recv).to_i()
+    if args.empty?()
+      interp.w_to_s(recv).to_i()
+    else
+      interp.w_to_s(recv).to_i(args[0])
 
   when "class"
     interp.w_type_name(recv)

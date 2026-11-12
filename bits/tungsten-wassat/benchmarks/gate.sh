@@ -8,7 +8,8 @@
 # and produced fake TIMEOUTs from it.
 #
 # Covers the Wassat library specs, the 200-case differential in BOTH
-# default and WASSAT_RAW_AT=0 modes, and php87 --proof verified by wrat.
+# default and WASSAT_RAW_AT=0 modes, the forced covering case-split
+# differential, and php87 --proof verified by wrat.
 #
 # The spec check parses the "N examples: N passed, M failed" summary and
 # treats a MISSING summary as failure -- a spec that dies before summarising
@@ -46,8 +47,11 @@ python3 bits/tungsten-wassat/benchmarks/parser_large_test.py "$WASSAT_BIN" || fa
 echo "### structural UNSAT soundness"
 WRAT="$WRAT_BIN" python3 bits/tungsten-wassat/benchmarks/structural_unsat_test.py "$WASSAT_BIN" || fail=1
 
+echo "### covering case split, forced differential"
+WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/cover_split_test.py || fail=1
+
 echo "### library specs"
-for spec in solver phase_snapshot shrink_scan ordered_scan heap_sift backjump_cursor clause_alive arena_growth lucky_watch_capacity parser_capacity parser_mmap input_empty inprocess inprocess_cancel flat_units vivification structural_pruning windmill cli preprocess bve_index bve_storage preprocess_scc preprocess_graph congruence_scratch congruence_reuse congruence_capacity congruence_adaptive binary_membership subst_hash incremental sls sls_stop domain_walk domain_walk_native reconfiguration reconfiguration_native scout_walk trim explain portfolio multiplier aig_capacity circuit_certificate par32_units fermat sum_of_three_cubes mdp sgi arithmetic_coloring arithmetic_symmetry arithmetic_scan arithmetic_shape arithmetic_budget ramsey_lex ramsey_bound automata_sync ternary_affine ais coloring coloring_mask coloring_choice covering directed_kernel edge_matching sliding_puzzle stedman hantzsche_wendt knight_tour path_cover local_core latin_csp algebra_certificate router_trainer; do
+for spec in solver phase_snapshot shrink_scan ordered_scan heap_sift backjump_cursor clause_alive arena_growth lucky_watch_capacity parser_capacity parser_mmap input_empty inprocess inprocess_cancel flat_units vivification structural_pruning windmill cli cover_split preprocess bve_index bve_storage preprocess_scc preprocess_graph congruence_scratch congruence_reuse congruence_capacity congruence_adaptive binary_membership subst_hash incremental sls sls_stop domain_walk domain_walk_native reconfiguration reconfiguration_native scout_walk trim explain portfolio multiplier aig_capacity circuit_certificate par32_units fermat sum_of_three_cubes mdp sgi arithmetic_coloring arithmetic_symmetry arithmetic_scan arithmetic_shape arithmetic_budget ramsey_lex ramsey_bound automata_sync ternary_affine ais coloring coloring_mask coloring_choice covering directed_kernel edge_matching sliding_puzzle stedman hantzsche_wendt knight_tour path_cover local_core latin_csp algebra_certificate router_trainer; do
   path="bits/tungsten-wassat/spec/${spec}_spec.w"
   if [[ "$spec" == "router_trainer" ]]; then
     path="bits/tungsten-wassat/benchmarks/router_trainer_spec.w"

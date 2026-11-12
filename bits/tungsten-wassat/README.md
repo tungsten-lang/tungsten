@@ -302,6 +302,27 @@ comparisons; the default is 1. Profiling reports clause scans, path nodes,
 moves, evaluations, restarts, repair conflicts, replay work and stage times.
 Search reuses fixed scratch arrays without allocating on each move.
 
+Dense conflict-constrained covering formulas (positive rows of width three
+and up plus negative binary conflicts, at least 350 variables, twenty
+conflicts per variable, and every variable in eight rows on average) are
+decided by cases instead of by a portfolio. One-row-per-variable CSP
+renderings of the same clause shape stay with the race. A positive row is an
+exact case list: case *i* asserts its *i*-th variable and denies the earlier
+ones. Wassat takes the narrowest row, refines each case once on the narrowest
+row it leaves undecided, and gives every case its own CDCL over the input
+plus that case's unit clauses; up to twelve workers claim cases from the list
+while the local-search arm walks the whole input. A model of any case is
+replayed against the input. UNSAT is published only when every case of the
+list completed its own refutation; a stopped, unclaimed or retired case
+leaves the verdict to the ordinary pipeline. Cases share no learned clauses.
+The lane is fast-only and skipped under a finite `--conflicts` budget.
+`WASSAT_COVER_SPLIT=0` disables it; profiling reports cases, workers, refuted
+and retired cases, total and largest-case conflicts, and build/search times.
+The same family is why trial-propagation branching is admitted only for
+choice formulas whose variables sit in at most eight long clauses on average:
+with every variable in about 120 rows it replaced the branching heuristic of
+every arm by 32 trial propagations per decision.
+
 Lanes that used to hide behind the MDP recognizer's miss now live in their
 own files (`sdp`, `backdoor`, `sgi`, `schooltt`, `symmetry_fix`, `vdwb`)
 behind a fingerprint-gated registry in `lib/specialists.w`, which records

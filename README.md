@@ -215,7 +215,8 @@ Ruby is **not** required for normal use; it is needed for the `--ruby` developer
 | `--target TRIPLE` | Generate code for another target triple. Combine with `--cpu` to mean “runs on this target, optimized for this CPU variant.” A cross target without `--cpu` uses clang's target baseline. |
 | `--portable`      | On `build`/`bootstrap`, emit both documented release binaries: x86-64-v2 and x86-64-v3 under `build/releases/<triple>/<cpu>/`. |
 | `--fast`          | Enable fast, non-IEEE floating-point transformations. |
-| `--no-lto`        | Skip link-time optimization for a direct compile. |
+| `--lto`           | Whole-program LTO on a non-release compile. `--release` already includes it. |
+| `--no-lto`        | Skip link-time optimization for a direct compile: `--release --no-lto` links the cached native runtime archive (faster link, larger binary). |
 
 </small>
 

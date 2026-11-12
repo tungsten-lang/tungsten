@@ -79,7 +79,7 @@ bin/tungsten --lex file.w               # print tokens
 bin/tungsten --ast file.w               # print the AST
 bin/tungsten --ll file.w                # print LLVM IR
 bin/tungsten -o out file.w              # compile a binary (-O3, no LTO)
-bin/tungsten -o out --release file.w    # full LTO, no dev checks
+bin/tungsten -o out --release file.w    # full LTO, no dev checks (--no-lto opts out)
 bin/tungsten --clear-cache              # delete incremental-compile caches
 bin/wit                                 # REPL (same as bin/tungsten console)
 ```

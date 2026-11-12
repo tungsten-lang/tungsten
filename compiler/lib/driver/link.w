@@ -100,6 +100,30 @@
     return "-O0"
   "-O3"
 
+# Optimization flags for the cached LTO runtime bundle. TUNGSTEN_CLANG_OPT is
+# the emitted module's flag set, and `--fast` puts -ffast-math in it; the C
+# runtime keeps IEEE semantics in every profile (its NaN/Inf checks, float
+# parsing and formatting are not the program's fast-FP code), so the value-
+# changing FP flags are dropped here. `--release --fast` therefore shares the
+# bundle of `--release`.
+-> runtime_lto_opt_flag(clang_opt)
+  if clang_opt == nil || clang_opt == ""
+    return profile_opt_flag()
+  kept = []
+  parts = clang_opt.split(" ")
+  i = 0
+  while i < parts.size()
+    part = parts[i]
+    fp_only = part in ("-ffast-math" "-ffinite-math-only" "-funsafe-math-optimizations" "-fassociative-math" "-freciprocal-math" "-fno-signed-zeros" "-fno-honor-nans" "-fno-honor-infinities" "-fapprox-func")
+    if part == "-Ofast"
+      kept.push("-O3")
+    elsif part != "" && !fp_only
+      kept.push(part)
+    i += 1
+  if kept.size() == 0
+    return profile_opt_flag()
+  kept.join(" ")
+
 -> debug_compile_flag
   if debug_enabled
     return "-g"
@@ -147,8 +171,12 @@
   # LTO is opt-in: whole-program LTO (lean binary, slow link) only for
   # --release / --lto; the default is a target-matched object runtime
   # archive (fatter binary, ~0.1s link vs ~5s recompiling the C runtime).
+  # --release means LTO for every program, not only compiler images: the
+  # runtime side is the cached bitcode bundle below, so the per-link cost is
+  # the merged-module optimization alone. --no-lto is the one opt-out.
+  # scripts/test-compile-profiles.sh pins the flags of each profile.
   doing_lto = (release_mode || explicit_lto) && !no_lto
-  full_runtime_lto = (explicit_lto || (release_mode && compiler_image_runtime_profile)) && !no_lto
+  full_runtime_lto = doing_lto
   # Fast native-archive link (default): reuse the cached runtime objects
   # rather than recompiling the ~28k-line runtime every build. runtime.o's weak
   # companion stubs keep the gated ssmr/lexchar/metal/blas adds below valid.
@@ -454,8 +482,8 @@
 # runtime.o keeps weak stubs for the gated companions, so link_binary still adds
 # the strong ssmr/lexchar/metal/blas sources when a program needs them. The
 # archive is rebuilt whenever any base runtime source is newer than it. The
-# whole-program-LTO builds (--release / --lto) skip this and rebuild
-# the runtime from source for a lean, cross-optimized binary.
+# whole-program-LTO builds (--release / --lto) skip this and link the cached
+# bitcode bundle (dev_runtime_lto_objects) for a lean, cross-optimized binary.
 -> dev_runtime_shell_quote(text)
   "'" + text.gsub("'", "'\\''") + "'"
 
@@ -902,7 +930,7 @@
   cache_dir = compiler_cache_dir()
   if cache_dir == nil
     return nil
-  opt_flag = (clang_opt != nil && clang_opt != "") ? clang_opt : profile_opt_flag()
+  opt_flag = runtime_lto_opt_flag(clang_opt)
   compile_flags = opt_flag + " " + debug_compile_flag() + " " + march_flags() + " -fmerge-all-constants"
   compile_flags += release_mode ? " -flto=full" : " -flto"
   if frame_pointers

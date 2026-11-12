@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **`--release` is whole-program LTO again** — since 2026-10-25 `--release`
+  linked the cached native runtime archive unless `--lto` was also given (only
+  compiler images kept LTO), while the help text, `AGENTS.md` and the manual
+  all said "full LTO". `--release` again passes `-flto=full` and links the
+  cached runtime bitcode bundle; `--no-lto` opts out. `compile-batch --release`
+  compiled runtime bitcode into a scratch directory for every batch and then
+  linked it without `-flto`; it now takes the same cached bundle (resolved
+  once, before the parallel link workers) and every link carries the flag.
+  The bundle is compiled without the value-changing FP flags `--fast` adds to
+  the module, so `--release --fast` shares it and the C runtime stays IEEE.
+  Instructions retired, apple-m5, clang 23.1.5, same emitted `.ll`: a hello
+  binary 2,040,864 → 54,336 bytes and 21.5M → 15.9M per run; a 25-line
+  array/hash/string loop 441M → 387M per run (−12%), 4,879,056 → 5,042,832
+  bytes. The link costs more: 1.6e9 → 11.6e9 for hello, 77e9 → 240e9 for the
+  loop. `scripts/test-compile-profiles.sh` pins the clang flags of the default
+  profile, `--dev`, `--release`, `--release --no-lto`, `--lto`,
+  `--release --fast` and the batch forms; against the previous compiler it
+  fails on the batch link. The build prints VERIFIED stage1==stage2.
 - **BLAS keeps its non-finite results in fast builds** — both the package
   runtime archive and standalone compiler companion add
   `-fno-finite-math-only` to `blas_bridge.c`. Other fast optimizations remain

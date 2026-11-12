@@ -86,6 +86,17 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   ordinary = first.find { |item| item["argv"].include?(File.join(package, "bin/ordinary")) }
   raise "other executable defaults changed" unless ordinary && ordinary["clang_opt"] == "-O0" && !ordinary["argv"].include?("--release")
   raise "unchanged build missed cache" unless run.call.empty?
+  # Companion sources are not part of the base runtime archive. Their contents,
+  # including Objective-C, still have to invalidate the outer executable stamp.
+  bridge = File.join(root, "runtime", "graphics.m")
+  File.write(bridge, "// native bridge one\n")
+  raise "new native companion did not invalidate package cache" unless run.call.size == 2
+  raise "unchanged native companion missed cache" unless run.call.empty?
+  bridge_mtime = File.mtime(bridge)
+  File.write(bridge, "// native bridge two\n")
+  File.utime(bridge_mtime, bridge_mtime, bridge)
+  raise "same-size/same-mtime Objective-C edit missed package cache" unless run.call.size == 2
+  raise "rebuilt native companion did not cache" unless run.call.empty?
   write_manifest.call("-fno-omit-frame-pointer -O1")
   changed = hot.call(run.call)
   raise "changed manifest cflags missed cache invalidation" unless changed["clang_opt"].include?("-fno-omit-frame-pointer")

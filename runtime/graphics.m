@@ -78,7 +78,7 @@ enum {
 enum { GFX_MOD_SHIFT = 1, GFX_MOD_CTRL = 2, GFX_MOD_ALT = 4, GFX_MOD_CMD = 8,
        GFX_MOD_CAPS = 16, GFX_MOD_FN = 32 };
 
-enum { GFX_HIDPI = 1, GFX_HIDDEN = 2, GFX_BGRA = 4, GFX_KEEP_OPEN = 8 };
+enum { GFX_HIDPI = 1, GFX_HIDDEN = 2, GFX_BGRA = 4, GFX_KEEP_OPEN = 8, GFX_DROP_FILES = 16 };
 
 /* the menu event ids of the standard items the runtime makes (Settings..., <App> Help) */
 enum { GFX_MENU_SETTINGS = -2, GFX_MENU_HELP = -3 };
@@ -192,11 +192,55 @@ static bool gfx_is_text(NSString *s, int mods) {
 
 /* ---- The content view: first responder for key + mouse events ---- */
 
+static BOOL gfx_drop_received(NSView *view, NSArray *urls);
+
 @interface TungstenView : NSView
 @property (nonatomic, assign) GfxInput *input;
+@property (nonatomic, retain) NSTrackingArea *hoverTracking;
 @end
 
 @implementation TungstenView
+- (NSArray *)gfxDraggedFileURLs:(id<NSDraggingInfo>)sender {
+    if (!self.input || ![[self registeredDraggedTypes] containsObject:NSPasteboardTypeFileURL]) return @[];
+    return [[sender draggingPasteboard] readObjectsForClasses:@[[NSURL class]]
+        options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}] ?: @[];
+}
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+    if (!([sender draggingSourceOperationMask] & NSDragOperationCopy)) return NSDragOperationNone;
+    return [[self gfxDraggedFileURLs:sender] count] ? NSDragOperationCopy : NSDragOperationNone;
+}
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender { return [self draggingEntered:sender]; }
+- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)sender { return [self draggingEntered:sender] != NSDragOperationNone; }
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    if ([self draggingEntered:sender] == NSDragOperationNone) return NO;
+    return gfx_drop_received(self, [self gfxDraggedFileURLs:sender]);
+}
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    if (self.hoverTracking) [self removeTrackingArea:self.hoverTracking];
+    NSTrackingArea *area = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+        options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+        owner:self userInfo:nil];
+    self.hoverTracking = area;
+    [self addTrackingArea:area];
+    [area release];
+}
+- (void)dealloc {
+    if (_hoverTracking) [self removeTrackingArea:_hoverTracking];
+    [_hoverTracking release];
+    [super dealloc];
+}
+- (void)mouseEntered:(NSEvent *)ev {
+    [self gfxMouse:ev kind:GFX_EV_MOUSE_MOVE button:0];
+}
+- (void)mouseExited:(NSEvent *)ev {
+    if (!self.input) return;
+    self.input->mouse_x = -1.0; self.input->mouse_y = -1.0;
+    GfxEvent e; memset(&e, 0, sizeof e);
+    e.kind = GFX_EV_MOUSE_MOVE; e.x = -1.0; e.y = -1.0;
+    e.mods = gfx_mods_of([ev modifierFlags]);
+    gfx_push(self.input, &e);
+}
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)canBecomeKeyView { return YES; }
 - (BOOL)wantsUpdateLayer { return YES; }
@@ -365,6 +409,8 @@ typedef struct WGfxWindow {
     int     prompt_button;
     int     prompt_item;
     char   *prompt_text;
+    NSArray *form_values; /* owned immutable strings: safe across runtime GC */
+    int     form_button;
     GfxInput input;
 } WGfxWindow;
 
@@ -374,6 +420,11 @@ static WGfxWindow *as_gfx_window(WValue v) {
     if (w->type != W_TYPE_GFX_WINDOW) return NULL;
     return w;
 }
+
+static WGfxWindow *gfx_active_window = NULL;
+static void gfx_activate_window(WGfxWindow *gw);
+static GfxInput *gfx_menu_input(GfxInput *fallback);
+static void gfx_retarget_closed(WGfxWindow *gw);
 
 /* Size the drawable from the view (GFX_HIDPI): points x backing scale. */
 static void gfx_fit_drawable(WGfxWindow *gw) {
@@ -388,6 +439,7 @@ static void gfx_fit_drawable(WGfxWindow *gw) {
     if (ph < 1) ph = 1;
     CAMetalLayer *layer = (CAMetalLayer *)gw->layer;
     layer.contentsScale = s;
+    layer.contentsGravity = [layer contentsAreFlipped] ? kCAGravityBottomLeft : kCAGravityTopLeft;
     layer.drawableSize = CGSizeMake(pw, ph);
     gw->width = pw;
     gw->height = ph;
@@ -444,6 +496,7 @@ static void gfx_push_resize(WGfxWindow *gw) {
 }
 - (void)windowDidBecomeKey:(NSNotification *)note {
     (void)note;
+    if (self.gw) gfx_activate_window(self.gw);
     if (!self.input) return;
     GfxEvent e; memset(&e, 0, sizeof e);
     e.kind = GFX_EV_FOCUS; e.id = 1;
@@ -468,6 +521,10 @@ static id<MTLDevice> gfx_device_handle(WValue v) {
 }
 
 static NSString *gfx_string_or(WValue v, NSString *dflt) {
+    /* Concatenated strings can be ropes. AppKit needs their UTF-8 bytes just
+     * as it needs a flat String's; rejecting the representation blanked long
+     * recent-file labels, dialog text and other dynamically built titles. */
+    if (w_is_rope(v)) v = w_rope_flatten(v);
     if (!w_is_string(v)) return dflt;
     char buf[6];
     const char *s = NULL; size_t len = 0;
@@ -502,7 +559,7 @@ static void gfx_install_app_delegate(void);
 static void gfx_open_target(WGfxWindow *gw);
 static NSMutableArray *gfx_open_paths = nil;     /* every path an open-documents request named, by event id */
 static NSUInteger gfx_open_queued = 0;           /* how many of them are queued as GFX_EV_OPEN events */
-static WGfxWindow *gfx_open_window = NULL;       /* the window they go to: the first opened that is still open */
+static WGfxWindow *gfx_open_window = NULL;       /* the active document window, or the first at launch */
 
 static void gfx_ensure_app_visible(bool visible) {
     static bool started = false;
@@ -599,9 +656,16 @@ static WValue gfx_open(WValue device_v, WValue title_v, int w, int h, int flags,
         layer.framebufferOnly = NO;     /* allow blit-into-drawable */
         layer.drawableSize = CGSizeMake(captured->width, captured->height);
         layer.opaque = YES;
+        /* Keep the last presented pixels at their native scale while AppKit
+         * tracks a live resize. The default resize gravity stretches the old
+         * frame, including fixed-width editor sidebars, before the next frame. */
+        layer.contentsGravity = kCAGravityTopLeft;
+        layer.actions = @{ @"bounds": [NSNull null], @"position": [NSNull null],
+                           @"contents": [NSNull null] };
 
         TungstenView *view = [[TungstenView alloc] initWithFrame:frame];
         view.input = &captured->input;
+        if (flags & GFX_DROP_FILES) [view registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
         view.wantsLayer = YES;
         view.layer = layer;
 
@@ -834,6 +898,22 @@ WValue w_gfx_set_title(WValue window_v, WValue title_v) {
 }
 
 /* resize the content to width x height points (a resize event follows) */
+/* Activate a document window; hidden test windows stay hidden. */
+WValue w_gfx_focus(WValue window_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.focus");
+    gfx_require_main_thread("gfx.focus");
+    if (gw->closed) return W_NIL;
+    gfx_activate_window(gw);
+    if (!(gw->flags & GFX_HIDDEN)) {
+        [(NSWindow *)gw->window makeKeyAndOrderFront:nil];
+    } else {
+        GfxEvent e; memset(&e, 0, sizeof e);
+        e.kind = GFX_EV_FOCUS; e.id = 1;
+        gfx_push(&gw->input, &e);
+    }
+    return W_NIL;
+}
+
 WValue w_gfx_set_size(WValue window_v, WValue width_v, WValue height_v) {
     WGfxWindow *gw = gfx_window_arg(window_v, "gfx.set_size");
     gfx_require_main_thread("gfx.set_size");
@@ -874,6 +954,8 @@ WValue w_gfx_close(WValue window_v) {
     gfx_require_main_thread("gfx.close");
     if (gw->closed) return W_NIL;
     gw->closed = true;
+    gfx_retarget_closed(gw);
+    [gw->form_values release]; gw->form_values = nil;
     gw->input.should_close = true;
     NSWindow *win = (NSWindow *)gw->window;
     [win setDelegate:nil];
@@ -890,20 +972,22 @@ WValue w_gfx_close(WValue window_v) {
 
 @implementation TungstenMenuTarget
 - (void)fire:(id)sender {
-    if (!self.input) return;
+    GfxInput *input = gfx_menu_input(self.input);
+    if (!input) return;
     GfxEvent e; memset(&e, 0, sizeof e);
     e.kind = GFX_EV_MENU;
     e.id = (int64_t)[sender tag];
-    gfx_push(self.input, &e);
+    gfx_push(input, &e);
 }
 - (void)quit:(id)sender {
     (void)sender;
-    if (!self.input) return;
-    self.input->should_close = true;
+    GfxInput *input = gfx_menu_input(self.input);
+    if (!input) return;
+    input->should_close = true;
     GfxEvent e; memset(&e, 0, sizeof e);
     e.kind = GFX_EV_CLOSE;
     e.id = 1;
-    gfx_push(self.input, &e);
+    gfx_push(input, &e);
 }
 - (BOOL)validateMenuItem:(NSMenuItem *)item { return [item isEnabled]; }
 @end
@@ -919,7 +1003,7 @@ static TungstenMenuTarget *gfx_menu_target = nil;
 
 /* ---- documents to open (Finder, the Dock, `open`, any app sending open-documents) ----
  * The delegate's application:openURLs: (at launch and while running) records each file URL's path and queues a GFX_EV_OPEN
- * on the open target: the first window opened that is still open. Paths that arrive before any window (at launch, inside
+ * on the open target: the active document window (initially the first opened). Paths that arrive before any window (at launch, inside
  * finishLaunching) wait and are queued when the first window opens. The event's id indexes gfx_open_paths;
  * w_gfx_event_path returns the whole path (the event's text is only 64 bytes). */
 /* (gfx_open_paths, gfx_open_queued and gfx_open_window are declared with the windows, above) */
@@ -941,6 +1025,38 @@ static void gfx_open_target(WGfxWindow *gw) {
     gfx_open_flush();
 }
 
+static void gfx_activate_window(WGfxWindow *gw) {
+    if (!gw || gw->closed) return;
+    gfx_active_window = gw;
+    gfx_open_window = gw;
+    if (gfx_menu_target) gfx_menu_target.input = &gw->input;
+    gfx_open_flush();
+}
+
+static GfxInput *gfx_menu_input(GfxInput *fallback) {
+    NSWindow *key = [NSApp keyWindow];
+    id delegate = [key delegate];
+    if ([delegate isKindOfClass:[TungstenWindowDelegate class]]) {
+        WGfxWindow *gw = [(TungstenWindowDelegate *)delegate gw];
+        if (gw && !gw->closed) return &gw->input;
+    }
+    if (gfx_active_window && !gfx_active_window->closed) return &gfx_active_window->input;
+    return fallback;
+}
+
+static void gfx_retarget_closed(WGfxWindow *closed) {
+    if (gfx_active_window != closed && gfx_open_window != closed) return;
+    if (gfx_active_window == closed) gfx_active_window = NULL;
+    if (gfx_open_window == closed) gfx_open_window = NULL;
+    if (gfx_menu_target && gfx_menu_target.input == &closed->input) gfx_menu_target.input = NULL;
+    for (NSWindow *window in [NSApp windows]) {
+        id delegate = [window delegate];
+        if (![delegate isKindOfClass:[TungstenWindowDelegate class]]) continue;
+        WGfxWindow *gw = [(TungstenWindowDelegate *)delegate gw];
+        if (gw && !gw->closed) { gfx_activate_window(gw); break; }
+    }
+}
+
 static void gfx_open_received(NSArray *urls) {
     if (!gfx_open_paths) gfx_open_paths = [[NSMutableArray alloc] init];
     for (NSURL *u in urls) {
@@ -950,6 +1066,18 @@ static void gfx_open_received(NSArray *urls) {
         if ([p length] > 0) [gfx_open_paths addObject:p];
     }
     gfx_open_flush();
+}
+
+/* A drop belongs to its destination, even when another document is key. */
+static BOOL gfx_drop_received(NSView *view, NSArray *urls) {
+    id delegate = [[view window] delegate];
+    if (![delegate isKindOfClass:[TungstenWindowDelegate class]] || [urls count] == 0) return NO;
+    WGfxWindow *gw = [(TungstenWindowDelegate *)delegate gw];
+    if (!gw || gw->closed || !(gw->flags & GFX_DROP_FILES)) return NO;
+    if (!(gw->flags & GFX_HIDDEN)) [(NSWindow *)gw->window makeKeyWindow];
+    gfx_activate_window(gw);
+    gfx_open_received(urls);
+    return YES;
 }
 
 @implementation TungstenAppDelegate
@@ -1066,6 +1194,12 @@ static void gfx_menu_bar(WGfxWindow *gw) {
         [kept release];
     }
     [NSApp setMainMenu:bar];
+    /* The first visible window predates this menu. AppKit registers later
+     * windows automatically, but that first document needs adding here. */
+    for (NSWindow *window in [NSApp windows]) {
+        if ([window isVisible] && ![window isExcludedFromWindowsMenu])
+            [NSApp addWindowsItem:window title:[window title] filename:NO];
+    }
 }
 
 /* The menu a "Top" or "Top/Sub/..." path names, made on first use: a new top-level menu goes before Window (so
@@ -1415,6 +1549,78 @@ WValue w_gfx_prompt(WValue window_v, WValue message_v, WValue info_v, WValue def
     return gfx_pair((int64_t)chosen, text);
 }
 
+WValue w_gfx_form_answer(WValue window_v, WValue button_v, WValue values_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.form_answer");
+    gfx_require_main_thread("gfx.form_answer");
+    int64_t n = gfx_int(w_array_size(values_v));
+    if (n > 16) w_raise(w_string("gfx.form_answer: at most 16 values"));
+    NSMutableArray *values = [NSMutableArray arrayWithCapacity:(NSUInteger)n];
+    for (int64_t i = 0; i < n; i++)
+        [values addObject:gfx_string_or(w_array_get(values_v, w_int(i)), @"")];
+    [gw->form_values release];
+    gw->form_values = [values copy];
+    gw->form_button = (int)gfx_int(button_v);
+    return W_NIL;
+}
+
+WValue w_gfx_form(WValue window_v, WValue message_v, WValue info_v,
+                   WValue labels_v, WValue defaults_v, WValue buttons_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.form");
+    gfx_require_main_thread("gfx.form");
+    int64_t n = gfx_int(w_array_size(labels_v));
+    if (n > 16 || gfx_int(w_array_size(defaults_v)) != n)
+        w_raise(w_string("gfx.form: labels and defaults must have the same length, at most 16"));
+    WValue values = w_array_new_empty();
+    if (gw->form_values) {
+        if ((int64_t)[gw->form_values count] != n)
+            w_raise(w_string("gfx.form: scripted values must match the number of fields"));
+        for (int64_t i = 0; i < n; i++)
+            values = w_array_push(values, w_string([[gw->form_values objectAtIndex:(NSUInteger)i] UTF8String]));
+        int button = gw->form_button;
+        [gw->form_values release]; gw->form_values = nil;
+        return gfx_pair(button, values);
+    }
+    if (gw->flags & GFX_HIDDEN) {
+        for (int64_t i = 0; i < n; i++)
+            values = w_array_push(values, w_string([gfx_string_or(w_array_get(defaults_v, w_int(i)), @"") UTF8String]));
+        return gfx_pair(-1, values);
+    }
+    NSInteger chosen = -1;
+    @autoreleasepool {
+        NSAlert *a = [[[NSAlert alloc] init] autorelease];
+        [a setMessageText:gfx_string_or(message_v, @"")];
+        [a setInformativeText:gfx_string_or(info_v, @"")];
+        for (NSString *b in gfx_button_list(buttons_v)) [a addButtonWithTitle:b];
+        NSInteger columns = MIN((NSInteger)n, 2);
+        NSInteger rows = n ? ((NSInteger)n + columns - 1) / columns : 0;
+        NSView *accessory = [[[NSView alloc] initWithFrame:NSMakeRect(0, 0, columns * 188, rows * 58)] autorelease];
+        NSMutableArray *fields = [NSMutableArray arrayWithCapacity:(NSUInteger)n];
+        for (int64_t i = 0; i < n; i++) {
+            CGFloat x = (i % columns) * 188, y = (rows - 1 - i / columns) * 58;
+            NSTextField *label = [NSTextField labelWithString:gfx_string_or(w_array_get(labels_v, w_int(i)), @"")];
+            [label setFrame:NSMakeRect(x, y + 30, 180, 20)];
+            [label setFont:[NSFont systemFontOfSize:12 weight:NSFontWeightMedium]];
+            NSTextField *field = [[[NSTextField alloc] initWithFrame:NSMakeRect(x, y + 2, 180, 25)] autorelease];
+            [field setStringValue:gfx_string_or(w_array_get(defaults_v, w_int(i)), @"")];
+            [field setAccessibilityLabel:[label stringValue]];
+            [accessory addSubview:label]; [accessory addSubview:field];
+            [fields addObject:field];
+        }
+        for (NSUInteger i = 0; i < [fields count]; i++)
+            [[fields objectAtIndex:i] setNextKeyView:[fields objectAtIndex:(i + 1) % [fields count]]];
+        if (n) {
+            [a setAccessoryView:accessory];
+            [[a window] setInitialFirstResponder:[fields objectAtIndex:0]];
+        }
+        [NSApp activateIgnoringOtherApps:YES];
+        chosen = [a runModal] - NSAlertFirstButtonReturn;
+        for (NSTextField *f in fields)
+            values = w_array_push(values, w_string([[f stringValue] UTF8String]));
+        [(NSWindow *)gw->window makeKeyAndOrderFront:nil];
+    }
+    return gfx_pair((int64_t)chosen, values);
+}
+
 WValue w_gfx_choose(WValue window_v, WValue message_v, WValue info_v, WValue items_v, WValue buttons_v) {
     WGfxWindow *gw = gfx_window_arg(window_v, "gfx.choose");
     gfx_require_main_thread("gfx.choose");
@@ -1478,7 +1684,18 @@ WValue w_gfx_prompt_answer(WValue window_v, WValue button_v, WValue text_v, WVal
  *   menu                     a = the item's id (the item's action runs)
  *   close                    the close button
  *   open                     text = a file path, through the application delegate's application:openURLs: as Finder's
- *                            open-documents event goes (a GFX_EV_OPEN on the open target) */
+ *                            open-documents event goes (a GFX_EV_OPEN on the open target);
+ *                            a=1 instead simulates a file URL drop onto this specific window */
+/* Scripted file drops still traverse the real pasteboard/drag callbacks. */
+@interface TungstenSyntheticFileDrag : NSObject
+@property (nonatomic, retain) NSPasteboard *pasteboard;
+@end
+@implementation TungstenSyntheticFileDrag
+- (NSPasteboard *)draggingPasteboard { return self.pasteboard; }
+- (NSDragOperation)draggingSourceOperationMask { return NSDragOperationCopy; }
+- (void)dealloc { [_pasteboard release]; [super dealloc]; }
+@end
+
 WValue w_gfx_post_event(WValue window_v, WValue kind_v, WValue x_v, WValue y_v,
                         WValue a_v, WValue b_v, WValue mods_v, WValue text_v) {
     WGfxWindow *gw = gfx_window_arg(window_v, "gfx.post_event");
@@ -1515,7 +1732,11 @@ WValue w_gfx_post_event(WValue window_v, WValue kind_v, WValue x_v, WValue y_v,
                 case NSEventTypeOtherMouseDown:    [view otherMouseDown:ev]; break;
                 case NSEventTypeOtherMouseUp:      [view otherMouseUp:ev]; break;
                 case NSEventTypeOtherMouseDragged: [view otherMouseDragged:ev]; break;
-                default:                           [view mouseMoved:ev]; break;
+                default:
+                    if (x < 0.0 || y < 0.0 || x >= [view bounds].size.width || y >= [view bounds].size.height)
+                        [view mouseExited:ev];
+                    else [view mouseMoved:ev];
+                    break;
             }
         } else if (kind == GFX_EV_KEY_DOWN || kind == GFX_EV_KEY_UP) {
             NSString *chars = gfx_string_or(text_v, @"");
@@ -1576,6 +1797,20 @@ WValue w_gfx_post_event(WValue window_v, WValue kind_v, WValue x_v, WValue y_v,
             /* as Finder's open-documents does: through the application delegate */
             NSString *path = gfx_string_or(text_v, @"");
             if ([path length] == 0) return w_bool(0);
+            if (a == 1) {
+                NSURL *url = [path containsString:@"://"] ? [NSURL URLWithString:path] : [NSURL fileURLWithPath:path];
+                if (!url) return w_bool(0);
+                NSPasteboard *pb = [NSPasteboard pasteboardWithUniqueName];
+                [pb clearContents];
+                [pb writeObjects:@[url]];
+                TungstenSyntheticFileDrag *drag = [[TungstenSyntheticFileDrag alloc] init];
+                drag.pasteboard = pb;
+                BOOL ok = [view prepareForDragOperation:(id<NSDraggingInfo>)drag] &&
+                          [view performDragOperation:(id<NSDraggingInfo>)drag];
+                [drag release];
+                [pb releaseGlobally];
+                return w_bool(ok);
+            }
             id<NSApplicationDelegate> d = [NSApp delegate];
             if (![d respondsToSelector:@selector(application:openURLs:)]) return w_bool(0);
             [d application:NSApp openURLs:@[[NSURL fileURLWithPath:path]]];

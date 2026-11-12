@@ -99,6 +99,7 @@ GFX_HIDPI     = 1   # drawable = content points x backing scale, following resiz
 GFX_HIDDEN    = 2   # never shown or activated (specs, headless runs)
 GFX_BGRA      = 4   # BGRA8 layer: present CoreGraphics/cairo-order pixels as they are
 GFX_KEEP_OPEN = 8   # close button and Quit post GFX_EV_CLOSE; gfx_close closes
+GFX_DROP_FILES = 16 # file URL drops on this window post GFX_EV_OPEN to it
 
 # Event kinds (e[:kind]).
 GFX_EV_NONE       = 0
@@ -187,6 +188,11 @@ GFX_CURSOR_RESIZE_UD   = 7
 -> gfx_set_title(window, title)
   ccall("w_gfx_set_title", window, title)
 
+# Bring a document window forward and route menus/open requests to it.
+# Hidden windows stay hidden; a GFX_EV_FOCUS with id 1 is queued for checks.
+-> gfx_focus(window)
+  ccall("w_gfx_focus", window)
+
 # Resize the content to width x height points (a GFX_EV_RESIZE follows).
 -> gfx_set_size(window, width, height)
   ccall("w_gfx_set_size", window, width, height)
@@ -268,6 +274,16 @@ GFX_MENU_HELP     = -3   # Help > <App> Help
 -> gfx_prompt(window, message, info, dflt, buttons)
   ccall("w_gfx_prompt", window, message, info, dflt, buttons)
 
+# A native form with independent labeled fields. `labels` and `defaults` are
+# arrays of equal length (up to 16). Returns [button index, values array]; a
+# hidden, unscripted window returns [-1, defaults]. Two fields sit side by side.
+-> gfx_form(window, message, info, labels, defaults, buttons)
+  ccall("w_gfx_form", window, message, info, labels, defaults, buttons)
+
+# Script the next form without showing it. Values are copied immediately.
+-> gfx_form_answer(window, button, values)
+  ccall("w_gfx_form_answer", window, button, values)
+
 # A modal choice from `items` (a comma list, "-" a separator) in a pop-up:
 # [button index, item index] ([-1, -1] on a hidden window, unscripted).
 -> gfx_choose(window, message, info, items, buttons)
@@ -283,7 +299,8 @@ GFX_MENU_HELP     = -3   # Help > <App> Help
 # (a = keyCode, text = its characters; Command shortcuts reach the menu bar),
 # GFX_EV_SCROLL (a, b = dx, dy points), GFX_EV_MAGNIFY (a), GFX_EV_MENU
 # (a = item id), GFX_EV_CLOSE (the close button), GFX_EV_OPEN (text = a file
-# path, through the application delegate as Finder's open-documents goes).
+# path, through the application delegate as Finder's open-documents goes;
+# a = 1 traverses the window's file-drop callbacks instead, with GFX_DROP_FILES).
 -> gfx_post_event(window, kind, x, y, a, b, mods, text)
   ccall("w_gfx_post_event", window, kind, x, y, a, b, mods, text)
 

@@ -7,6 +7,12 @@ other targets link weak stubs that raise on the first call. Load it with
 
 There are two input models, and every window supports both.
 
+Native string arguments accept ordinary and concatenated (rope) strings,
+including Unicode menu labels and submenu paths. Metal layers preserve the
+last frame's pixel scale and its top-left position while a resize waits for
+new pixels; `GFX_HIDPI` still updates the drawable to content points times
+the backing scale. Programs must redraw/reflow for the new dimensions.
+
 ## Game style
 
 ```tungsten
@@ -33,6 +39,7 @@ add up (`|` is the unit pipe in Tungsten):
 
 | Flag | Effect |
 | --- | --- |
+| `GFX_DROP_FILES` | file URL drops on the content view post `GFX_EV_OPEN` to this window |
 | `GFX_HIDPI` | the drawable is the content's points times the backing scale, and follows resizes |
 | `GFX_HIDDEN` | never shown or activated: specs, headless and scripted runs |
 | `GFX_BGRA` | a BGRA8 layer, so CoreGraphics or cairo pixels present without a swizzle |
@@ -74,16 +81,20 @@ points from the content's top-left; multiply by `gfx_scale(win)` for pixels.
 | `GFX_EV_MENU` | `:id` of the chosen item |
 | `GFX_EV_FOCUS` | `:id` 1 when the window gained focus, 0 when it lost it |
 | `GFX_EV_MODS` | `:mods` after a modifier key changed |
-| `GFX_EV_OPEN` | `:path`, a file to open: a double-click in Finder, a drop on the Dock icon, `open -a`, at launch or while running |
+| `GFX_EV_OPEN` | `:path`, a file to open: a double-click in Finder, a drop on the Dock icon, `open -a`, at launch or while running; content-view file drops when `GFX_DROP_FILES` is set |
 
 Modifier bits: `GFX_MOD_SHIFT`, `GFX_MOD_CTRL`, `GFX_MOD_ALT`, `GFX_MOD_CMD`,
 `GFX_MOD_CAPS`, `GFX_MOD_FN` (AppKit sets Fn on the arrows and the other
 function keys; `mods % 16` leaves Caps Lock and Fn out). Scroll phases: 0 none, 1 began, 2 changed,
 3 ended, 4 momentum. Consecutive moves, drags and scrolls coalesce into one
 event, and a full queue (1,024 events) drops its oldest.
+Leaving the content view posts a `GFX_EV_MOUSE_MOVE` with `x = y = -1`, so
+hover overlays can clear without polling the system pointer. Normal positions
+resume on re-entry. Tracking follows the visible bounds during resize.
 
 | Call | Does |
 | --- | --- |
+| `gfx_focus(win)` | activates a document window; menu actions and open requests follow the active window |
 | `gfx_wait(win, seconds)` | pumps the OS queue, sleeping up to `seconds` for input; returns the queued count |
 | `gfx_next_event(win)`, `gfx_events(win)` | the oldest event (nil when none), or all of them |
 | `gfx_pixel_width/height(win)`, `gfx_point_width/height(win)`, `gfx_scale(win)` | the drawable, the content, the scale between them |
@@ -134,3 +145,31 @@ A menu key is one character or a name: `up`, `down`, `left`, `right`,
 
 `spec/core/graphics_events_spec.w` (the Metal lane) drives a hidden window
 through all of this.
+
+### Forms with independent fields
+
+`gfx_form(window, message, info, labels, defaults, buttons)` presents a native
+modal form. `labels` and `defaults` are arrays of equal length, with up to sixteen
+fields. Two fields appear side by side; larger forms wrap into rows of two.
+Labels are also accessibility labels, and Tab moves between the fields.
+The result is `[button_index, values]`, with one string per field, including on
+Cancel. A hidden window returns `[-1, defaults]` without showing a dialog.
+
+`gfx_form_answer(window, button_index, values)` scripts the next form. It copies
+the strings immediately, consumes the answer once, and is independent of
+`gfx_prompt_answer`. This avoids encoding structured form values into delimiters.
+
+```tungsten
+r = gfx_form(win, "Expression", "Edit these independently.",
+  ["Expression (0–1)", "Dynamic range"], ["1", "1.25"], "Apply,Cancel")
+if r[0] == 0
+  expression = r[1][0].to_f
+  dynamic_range = r[1][1].to_f
+```
+
+File drops use the destination window even when another document was focused.
+Only file URLs with a copy operation are accepted; the application decides
+which paths/formats it can open. Programs should route `GFX_EV_OPEN` through
+normal document handling so unsaved changes and already-open files remain safe.
+For native regression tests, `gfx_post_event` with `GFX_EV_OPEN`, `a = 1` and a
+path constructs a pasteboard and invokes the same drag callbacks.

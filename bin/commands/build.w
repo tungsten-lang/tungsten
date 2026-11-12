@@ -1309,12 +1309,12 @@ if bootstrap_compiler_clang_opt == ""
 # ── tree_sha / bit helpers ──────────────────────────────────────
 
 # SHA over source files under the given roots (dirs pruned: .git .bundle
-# .cache node_modules tmp; extensions: .rb .w .c .h .gemspec .lock),
+# .cache node_modules tmp; extensions: .rb .w .c .h .m .gemspec .lock),
 # 16 hex chars. find|sort gives a deterministic walk.
 -> tree_sha_files(path)
   full = path.starts_with?("/") ? path : ROOT + "/" + path
   if file_directory?(full)
-    finder = "find " + shq(full) + " \\( -name .git -o -name .bundle -o -name .cache -o -name node_modules -o -name tmp \\) -prune -o -type f \\( -name '*.rb' -o -name '*.w' -o -name '*.c' -o -name '*.h' -o -name '*.gemspec' -o -name '*.lock' \\) -print 2>/dev/null | LC_ALL=C sort"
+    finder = "find " + shq(full) + " \\( -name .git -o -name .bundle -o -name .cache -o -name node_modules -o -name tmp \\) -prune -o -type f \\( -name '*.rb' -o -name '*.w' -o -name '*.c' -o -name '*.h' -o -name '*.m' -o -name '*.gemspec' -o -name '*.lock' \\) -print 2>/dev/null | LC_ALL=C sort"
     listing = capture(finder).split("\n")
     out = []
     i = 0
@@ -2561,7 +2561,12 @@ i = 0
 while i < runtime_dependency_files.size
   runtime_dep_shas.push(file_sha(runtime_dependency_files[i]))
   i = i + 1
-runtime_key = Digest.sha256(runtime_dep_shas.join(":") + "\n" + join_tab(cc_flags) + "\n" + runtime_cc + "\n" + runtime_ar + "\n" + runtime_ranlib + "\n" + join_tab(link_flags) + "\n" + join_tab(link_libs))
+# Optional native companions (graphics, media, sparse, ...) are linked by the
+# compiler on demand, outside the base runtime archive. The package stamp must
+# see their sources too, or a bridge-only edit incorrectly skips compilation.
+companion_roots = [RUNTIME_DIR]
+companion_tree_key = tree_sha(companion_roots)
+runtime_key = Digest.sha256("native-companions-v1\n" + companion_tree_key + "\n" + runtime_dep_shas.join(":") + "\n" + join_tab(cc_flags) + "\n" + runtime_cc + "\n" + runtime_ar + "\n" + runtime_ranlib + "\n" + join_tab(link_flags) + "\n" + join_tab(link_libs))
 
 bit_cache_dir = BUILD_CACHE_DIR + "/bits"
 make_dirs(bit_cache_dir)

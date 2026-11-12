@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Native file drops** — `GFX_DROP_FILES` registers an editor window for file
+  URL pasteboard drops. Real `NSDraggingDestination` callbacks queue `GFX_EV_OPEN`
+  on the destination window, independently of previous focus. Synthetic drops
+  use the same callbacks via `gfx_post_event(..., GFX_EV_OPEN, ..., a=1, ..., path)`.
+  Non-file URLs and non-opted-in windows reject the drop. Graphics events93 pass.
+
+- **Native menu labels retain concatenated strings** — graphics.m's shared
+  string conversion flattens ropes before reading UTF-8. Long Unicode Recent
+  filenames/directories and concatenated submenu paths no longer become blank.
+  graphics_rope_menu_spec.w exercises runtime-built strings (constant-folded
+  strings would miss this bug); native graphics events still pass87 checks.
+- **Native resize preserves cached-frame scale** — CAMetalLayer uses a corner
+  gravity selected for contentsAreFlipped, with implicit bounds/position/contents
+  animations disabled. The old frame keeps its pixel scale while AppKit tracks
+  a resize; Retina drawable dimensions continue to follow the backing scale.
+  Arranger's native resize regression checks fixed sidebar pixels at five sizes.
+  A live mouse-drag visual check remains unverified. No compiler/core change.
+
 - **`(float expression) ## i64` converts the value, not the operands** — the
   compiled engine pushed a machine-int ascription into the operands of float
   arithmetic, so `(a * ~48000.0) ## i64` computed `trunc(a) * 48000` (0 for

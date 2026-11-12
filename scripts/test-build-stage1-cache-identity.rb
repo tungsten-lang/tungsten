@@ -31,12 +31,18 @@ required_uses = [
   # content and must not see the path (it is the checkout's).
   's1_identity_env = env_kv_join(s1_keys, s1_vals) s1_keys.push("TUNGSTEN_LEX64_TABLE")',
   's2_identity_env = env_kv_join(s2_keys, s2_vals) s2_keys.push("TUNGSTEN_LEX64_TABLE")',
-  'AMBIENT_TOOLCHAIN + "\n" + s1_identity_env)',
+  'AMBIENT_TOOLCHAIN + "\n" + s1_identity_env + TUNING_KEY)',
   'AMBIENT_TOOLCHAIN + "\n" + s2_identity_env)',
+  # Compiler switches inherited from the environment (TUNGSTEN_FREE=0, ...)
+  # are part of every shared key: stages, images, bits.
+  'TUNING_ENV = capture("bash " + shq(STORE_SH) + " tuning-environment 2>/dev/null").strip',
+  'tool_identity(runtime_cc) + TUNING_KEY)',
+  'buf << TUNING_KEY',
+  '!portable_mode && TUNING_ENV == ""',
   'c_stage1_cached = STAGE_STORE_DIR + "/c-vm-stage1-" + c_stage1_identity',
   'c_stage2_cached = STAGE_STORE_DIR + "/c-vm-stage2-" + c_stage2_identity',
   # The Ruby host compiles by absolute path: its stage keys carry the root.
-  'env_or_empty("TUNGSTEN_CARRY_UNROLL") + ":" + ROOT).slice(0, 16)',
+  'env_or_empty("TUNGSTEN_CARRY_UNROLL") + ":" + ROOT + TUNING_KEY).slice(0, 16)',
   'compiler_source_paths.push("core")',
   'compiler_source_paths.push("languages/tungsten/lexers")',
   # C-path stage identity hashes the compiler sources.
@@ -78,6 +84,7 @@ helpers_source = File.read(File.join(ROOT, "bin/commands/bootstrap_helpers.sh"))
 ].each do |source|
   raise "bootstrap.sh lost the shared-store stage contract: #{source}" unless bootstrap_source.include?(source)
 end
+raise "bootstrap stage-1 identity must include the tuning environment" unless bootstrap_source.include?("tungsten_tuning_environment bootstrap_stage1_source_manifest")
 unless helpers_source.include?('tungsten_driver.w') && helpers_source.include?('data/units.tsv')
   raise "bootstrap stage-1 source inputs must hash the compiler driver and the unit data"
 end

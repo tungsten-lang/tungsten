@@ -499,6 +499,9 @@ stage1_identity="$({
     "$TOOLCHAIN_ENV_ID" \
     "$(tool_identity "$TUNGSTEN_CC")" "$(tool_identity "$TUNGSTEN_AR")" \
     "$(sha256_file "$C_INTERP")" "$(sha256_file "$RUNTIME_A")"
+  # compiler switches inherited from the environment (TUNGSTEN_FREE=0, ...):
+  # nothing in a plain environment
+  tungsten_tuning_environment
   bootstrap_stage1_source_manifest \
     "$ROOT" "$COMPILER_W" "$TUNGSTEN_LEX64_TABLE"
 } | sha256_stdin)"

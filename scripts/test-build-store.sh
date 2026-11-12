@@ -34,6 +34,19 @@ clean_env() {
 [ "$(clean_env HOME=/h bash "$STORE_SH" cache-dir /root)" = "/h/.tungsten/build/compile" ] || fail "default cache dir"
 [ "$(clean_env HOME=/h TUNGSTEN_BUILD_STORE=/s TUNGSTEN_CACHE_DIR=/c bash "$STORE_SH" cache-dir /root)" = "/c" ] || fail "TUNGSTEN_CACHE_DIR"
 
+# ── 1b. The tuning environment that enters every shared key ─────
+# Plain: nothing (so plain builds share keys). Locations, GC knobs and the
+# values the keys already hash are not switches; anything else is, including
+# a name nobody listed.
+[ -z "$(clean_env HOME=/h TUNGSTEN_ROOT=/r TUNGSTEN_HOME=/th TUNGSTEN_BUILD_STORE=/s TUNGSTEN_CACHE_DIR=/c \
+        TUNGSTEN_VERSION=1 TUNGSTEN_CPU=native TUNGSTEN_CC=clang TUNGSTEN_MARCH_ARGS=-mcpu=native \
+        TUNGSTEN_CACHE_MAX_AGE_DAYS=3 TUNGSTEN_INCREMENTAL=0 bash "$STORE_SH" tuning-environment)" ] ||
+  fail "a plain environment has a tuning environment"
+tuned="$(clean_env HOME=/h TUNGSTEN_ROOT=/r TUNGSTEN_FREE=0 TUNGSTEN_DEFINES='FAST_MATH=true' \
+           TUNGSTEN_SOME_FUTURE_SWITCH=1 bash "$STORE_SH" tuning-environment | tr '\n' ' ')"
+[ "$tuned" = "TUNGSTEN_DEFINES=FAST_MATH=true TUNGSTEN_FREE=0 TUNGSTEN_SOME_FUTURE_SWITCH=1 " ] ||
+  fail "tuning environment: $tuned"
+
 # ── 2. --clear-cache ────────────────────────────────────────────
 make_cache() {
   local dir="$1"

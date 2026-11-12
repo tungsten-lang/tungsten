@@ -859,6 +859,15 @@ if handoff_path != ""
 
 AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
 
+# The compiler switches this build inherited from its environment
+# (TUNGSTEN_FREE=0, TUNGSTEN_DEFINES, the cache and BIGINT toggles, ...: see
+# tungsten_tuning_environment in bin/commands/store.sh, the one list both this
+# driver and bootstrap.sh use). They change what the stages, images and bits
+# contain, so they are part of every key in the shared store. Empty in a
+# plain environment, and then it adds nothing to a key.
+TUNING_ENV = capture("bash " + shq(STORE_SH) + " tuning-environment 2>/dev/null").strip
+TUNING_KEY = TUNING_ENV == "" ? "" : "\ntuning-environment\n" + TUNING_ENV
+
 # ── System-dep probes with a marker-fingerprint cache ───────────
 # (port of cached_system_deps: one text file per probe in the store's
 # stages/, line 1 = fingerprint, remaining lines = the cached value; the
@@ -2254,7 +2263,7 @@ if !bit_only
     s1_identity_env = env_kv_join(s1_keys, s1_vals)
     s1_keys.push("TUNGSTEN_LEX64_TABLE")
     s1_vals.push(lex_table_path)
-    c_stage1_identity = Digest.sha256(c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + c_vm_key_for_build + "\n" + file_sha(c_interp_for_build) + "\n" + file_sha(lex_table_path) + "\n" + compiler_dir_name + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + "\n" + AMBIENT_TOOLCHAIN + "\n" + s1_identity_env)
+    c_stage1_identity = Digest.sha256(c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + c_vm_key_for_build + "\n" + file_sha(c_interp_for_build) + "\n" + file_sha(lex_table_path) + "\n" + compiler_dir_name + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + "\n" + AMBIENT_TOOLCHAIN + "\n" + s1_identity_env + TUNING_KEY)
     c_stage1_cached = STAGE_STORE_DIR + "/c-vm-stage1-" + c_stage1_identity
     stage1_handoff_ready = handoff_stage1 != "" && executable?(handoff_stage1) && handoff_stage1_ll != "" && regular_file?(handoff_stage1_ll)
     if stage1_handoff_ready
@@ -2482,7 +2491,7 @@ if !bit_only
     # The Ruby host compiles by absolute path, so these stages name the
     # checkout they were built in; its path is part of their key and they are
     # not shared between checkouts.
-    stage1_sha = Digest.sha256(stage1_input_sha + ":" + runtime_compile_key + ":" + file_sha(legacy_lex_table) + ":" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + ":" + ROOT).slice(0, 16)
+    stage1_sha = Digest.sha256(stage1_input_sha + ":" + runtime_compile_key + ":" + file_sha(legacy_lex_table) + ":" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + ":" + ROOT + TUNING_KEY).slice(0, 16)
     stage1_cached = STAGE_STORE_DIR + "/ruby-stage1-" + stage1_sha
 
     if !stage2_only
@@ -2728,7 +2737,7 @@ if !stage0_only && !bit_only
     image_store = ""
     image_key = ""
     if source_fp != "" && current_compiler_id() != ""
-      image_key = Digest.sha256("compiler-image-v1\n" + kind + "\n" + current_compiler_id() + "\n" + source_fp + "\n" + bootstrap_compiler_clang_opt + "\n" + probe_env_kv + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + runtime_compile_key + "\n" + AMBIENT_TOOLCHAIN + "\n" + tool_identity(runtime_cc))
+      image_key = Digest.sha256("compiler-image-v1\n" + kind + "\n" + current_compiler_id() + "\n" + source_fp + "\n" + bootstrap_compiler_clang_opt + "\n" + probe_env_kv + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + runtime_compile_key + "\n" + AMBIENT_TOOLCHAIN + "\n" + tool_identity(runtime_cc) + TUNING_KEY)
       image_store = COMPILER_STORE_DIR + "/image-" + kind + "-" + image_key
       image_ids[kind] = image_key
     t_image = clock_ms()
@@ -2924,6 +2933,7 @@ bit_file_sha_memo = {}
   buf << tool_identity(runtime_cc)
   buf << "\n"
   buf << AMBIENT_TOOLCHAIN
+  buf << TUNING_KEY
   Digest.sha256(buf.to_s).slice(0, 32)
 
 # "r TAB path-relative-to-ROOT" or "a TAB absolute-path" for one source file.
@@ -3366,7 +3376,7 @@ if !bit_only && !stage0_only && !stage1_only && executable?(COMPILER_BIN)
   # images it names, so a checkout never runs a compiler built from sources
   # other than its own. Only a verified, ordinary host build is recorded.
   compiler_id = build_state[:compiler_id]
-  plain_build = stage_verified && !fast_mode && sanitize_flags.size == 0 && target_triple == "" && !portable_mode
+  plain_build = stage_verified && !fast_mode && sanitize_flags.size == 0 && target_triple == "" && !portable_mode && TUNING_ENV == ""
   if plain_build && source_fp != "" && compiler_id != nil && !compiler_id.starts_with?("installed:") && executable?(COMPILER_STORE_DIR + "/" + compiler_id)
     record = "tungsten-compiler-record-v1\ncompiler=" + compiler_id + "\n"
     kinds = ["repl", "metal"]

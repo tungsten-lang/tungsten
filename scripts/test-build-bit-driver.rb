@@ -29,6 +29,8 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   log = File.join(directory, "compiler.jsonl")
   store = File.join(directory, "store")
   File.write(File.join(root, "bin/commands/cache_gc.sh"), "exit 0\n")
+  # the real location/key policy script (the driver asks it for the tuning environment)
+  FileUtils.cp(File.expand_path("../bin/commands/store.sh", __dir__), File.join(root, "bin/commands/store.sh"))
   File.write(File.join(package, "lib/main.w"), "<< 1\n")
   write_tool(File.join(root, "bin/tungsten-compiler"), <<~'RUBY')
     require "fileutils"
@@ -113,6 +115,11 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   # ... and going back to the first contents is a hit again (two entries now).
   File.write(File.join(package, "lib/main.w"), "<< 1\n")
   raise "returning to stored contents recompiled" unless run.call.empty?
+  # A compiler switch in the environment changes what is built, so it must
+  # not be served the plain build, nor leave its own build under the plain key.
+  raise "a build under TUNGSTEN_FREE=0 was served the plain executable" unless run.call([], "TUNGSTEN_FREE" => "0").size == 2
+  raise "the TUNGSTEN_FREE=0 build missed its own cache" unless run.call([], "TUNGSTEN_FREE" => "0").empty?
+  raise "the plain build was replaced by the TUNGSTEN_FREE=0 one" unless run.call.empty?
   # A second project with the same sources elsewhere: without a dependency
   # list from the compiler nothing proves the two read the same files, so it
   # builds its own.

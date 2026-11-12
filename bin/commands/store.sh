@@ -26,6 +26,9 @@
 #   store.sh install-compiler ROOT        if ROOT has no compiler of its own,
 #                                         install the one the store holds for
 #                                         exactly its sources (never another)
+#   store.sh tuning-environment           print the TUNGSTEN_* switches in the
+#                                         environment that change what a build
+#                                         produces (part of every shared key)
 #   store.sh clear-cache [ROOT]           what `tungsten --clear-cache` does
 #   store.sh wipe [ROOT]                  what `tungsten cleanup --all` does
 # Sourced, it only defines the functions.
@@ -179,6 +182,27 @@ tungsten_install_store_compiler() {
   return 0
 }
 
+# The compiler has dozens of TUNGSTEN_* switches that change what it emits
+# (TUNGSTEN_FREE, TUNGSTEN_PARAM_INFER, TUNGSTEN_DEFINES, the BIGINT and cache
+# toggles, ...), and a build inherits them from whoever starts it. In a
+# checkout's own cache a compiler built under TUNGSTEN_FREE=0 only fooled its
+# owner; in a store every checkout shares, it would be handed to all of them.
+# This prints, sorted, every TUNGSTEN_* variable that is set, except the ones
+# that only say where things are or how to run (locations, the store, GC and
+# test-harness knobs) and the ones the build keys already hash by value
+# (CPU, C toolchain, probe results, clang optimisation, sanitizer). A plain
+# environment prints nothing, so plain builds share one key; anything else
+# gets a key of its own. New switches need no entry here: unknown names are
+# printed, which is the safe direction.
+tungsten_tuning_environment() {
+  env | LC_ALL=C sort | awk -F= -v skip=" TUNGSTEN_ROOT TUNGSTEN_HOME TUNGSTEN_BUILD_STORE TUNGSTEN_CONFIG TUNGSTEN_VERSION TUNGSTEN_BOOTSTRAP TUNGSTEN_BOOTSTRAP_HANDOFF TUNGSTEN_BUILD_MANIFEST TUNGSTEN_BUILD_JOBS TUNGSTEN_LEX64_TABLE TUNGSTEN_LL_PATH TUNGSTEN_LL_DIR TUNGSTEN_LL_DONE_MARKER TUNGSTEN_DEPFILE TUNGSTEN_STORE_VERBOSE TUNGSTEN_POLYGLOT TUNGSTEN_PREFLIGHT TUNGSTEN_BIN TUNGSTEN_REPO TUNGSTEN_BACKTRACE TUNGSTEN_INCREMENTAL TUNGSTEN_COMPILER_IMAGE TUNGSTEN_MARCH_ARGS TUNGSTEN_CPU TUNGSTEN_CC TUNGSTEN_AR TUNGSTEN_RANLIB TUNGSTEN_OS TUNGSTEN_ZSTD_CFLAGS TUNGSTEN_ZSTD_LDFLAGS TUNGSTEN_HTTP2_LDFLAGS TUNGSTEN_CLANG_OPT TUNGSTEN_BITS_CLANG_OPT TUNGSTEN_C_FAST_PARSE TUNGSTEN_COMPILER TUNGSTEN_SANITIZE " '
+    /^TUNGSTEN_/ {
+      if ($1 ~ /^TUNGSTEN_(CACHE|SPECS)_/) next
+      if (index(skip, " " $1 " ")) next
+      print
+    }'
+}
+
 # `tungsten --clear-cache`: remove every entry of the compiler cache that
 # rests on trust in file times or tool identities, so the next build redoes
 # the work. Removing an entry is always safe: a build that finds one gone
@@ -274,6 +298,9 @@ if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
     install-compiler)
       tungsten_install_store_compiler "${2:-$here_root}"
       ;;
+    tuning-environment)
+      tungsten_tuning_environment
+      ;;
     clear-cache)
       tungsten_clear_cache "${2:-$here_root}"
       ;;
@@ -281,7 +308,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
       tungsten_wipe_store "${2:-$here_root}"
       ;;
     *)
-      printf 'usage: store.sh dir|cache-dir|compiler-fingerprint|install-compiler|clear-cache|wipe [ROOT]\n' >&2
+      printf 'usage: store.sh dir|cache-dir|compiler-fingerprint|install-compiler|tuning-environment|clear-cache|wipe [ROOT]\n' >&2
       exit 2
       ;;
   esac

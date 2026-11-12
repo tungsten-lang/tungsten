@@ -177,10 +177,6 @@ while i < cases.size
   i += 1
 
 extra = [nil, "kept", false, nil]
-check_result("extra.compact.v2", extra.__w_compact_v2("ignored", 99),
-             extra.__w_compact_v1("ignored", 99))
-check_result("extra.dup.v2", extra.__w_dup_v2("ignored", 99),
-             extra.__w_dup_v1("ignored", 99))
 
 block_log = []
 block_compact = extra.__w_compact_v2 -> (item)
@@ -191,4 +187,4 @@ check_result("block.compact", block_compact, extra.__w_compact_v1)
 check_result("block.dup", block_dup, extra.__w_dup_v1)
 check_value("tree-walker ignored block invocation count", block_log.size, 0)
 
-<< "interpreter correctness: ok ([cases.size] polymorphic/typed families, exact compact nil filtering and dup decoding, fresh shallow results, unchanged receivers, and ignored extras; compiled gate covers shifted/view storage and result-iteration blocks)"
+<< "interpreter correctness: ok ([cases.size] polymorphic/typed families, exact compact nil filtering and dup decoding, fresh shallow results, and unchanged receivers; compiled gate covers shifted/view storage and result-iteration blocks)"

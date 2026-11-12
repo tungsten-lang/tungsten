@@ -21,6 +21,18 @@ sidecars without putting feature selection throughout the frontend or
 mid-end. The optional binaries use the existing incremental source-manifest
 cache, so a warm invocation validates rather than rebuilds them.
 
+An image lives in `build/cache/compiler-images/` under the root that owns the
+compiler, not in `bin/`, so it cannot find `core/`, `data/` and `runtime/`
+from its own path the way the default compiler does. The delegating compiler
+passes that root on as `TUNGSTEN_ROOT` unless the caller already set one.
+
+`tungsten build` builds this host's images. `--target` and `--portable` also
+build each release artifact's own pair, for the artifact's target and CPU, in
+`build/releases/<triple>/<cpu>/compiler-images/`; `scripts/package-release.sh`
+installs those as the package's `build/cache/compiler-images/`. Nothing builds
+an image on launch, so a tree without them cannot start the REPL, interpret,
+or compile a `@gpu` program.
+
 The default and Metal launchers also emit a no-op compiler-image marker. When
 the linker is compiling `runtime.c` from source, it converts that marker into a
 single C profile define. The profile removes product-only IC/static-dispatch

@@ -2,21 +2,18 @@
 # reads WHash.count directly through `$count`; the interpreter must mirror that
 # native view-field read instead of treating `$count` as an unset global.
 
-# Surplus arguments are an error on both engines (E_LOWER_ARITY at compile
-# time where the callee is known; the interpreter raises at the call).
+# Surplus arguments are an error on both engines: E_LOWER_ARITY at compile
+# time where the receiver's class is statically known, otherwise a rescuable
+# ArgumentError at the call (the interpreter when it binds parameters, the
+# compiled engine on the inline-cache miss path). The probes below erase the
+# receiver through an untyped container so the call is reached on both
+# engines. This spec runs in both lanes.
 -> surplus_rejected?(f)
   begin
     f.call
     false
   rescue surplus_error
     true
-
-# The interpreter rejects surplus arguments at the call; the compiled engine
-# leaves DYNAMIC dispatch unchecked by design (no runtime arity cost), so on
-# an unknown receiver a surplus call still runs. Compile-time checks apply
-# only where the callee is statically known. This spec runs in both lanes.
--> surplus_rejection_expected
-  env("TUNGSTEN_INTERPRETED_SPEC") == "1"
 
 -> check(name, got, want)
   if got != want
@@ -34,8 +31,8 @@ check("insert", h.size, 2)
 h["a"] = 3
 check("replace", h.size, 2)
 
-# Preserve the former native cached handler's extra-argument truncation.
-check("extra arguments rejected", surplus_rejected?(->() h.size(99, 100)), surplus_rejection_expected)
+erased = [h, nil]
+check("extra arguments rejected", surplus_rejected?(->() erased[0].size(99, 100)), true)
 
 h.delete("b")
 check("delete", h.size, 1)

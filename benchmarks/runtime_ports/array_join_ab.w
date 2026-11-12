@@ -56,9 +56,8 @@ WARMUP_ITERS = 1_000
     "m" + @calls.to_s
 
 + Array
-  # Register arity-1 before arity-0.  Exact-arity lookup handles ordinary
-  # calls; 2+ arguments fall back to the first same-name entry, so this order
-  # makes extras truncate to the separator overload just like the C IC.
+  # Arity-1 and arity-0 are separate overloads; exact-arity lookup handles
+  # every call, and 2+ arguments are an arity error (never truncated).
   # A default parameter is not equivalent because explicit nil would be
   # replaced by the default instead of rejected.
   -> __c_join(separator)
@@ -625,18 +624,6 @@ WARMUP_ITERS = 1_000
     check_value("separator.[path].right calls", right.calls, 0)
     i += 1
 
--> check_extra_argument_paths
-  values = ["a", "b"]
-  c_result = values.__c_join("|", "ignored", 99)
-  check_value("extra args C", c_result, "a|b")
-  check_join_result("extra args v1", values.__w_join_v1("|", "ignored", 99), c_result)
-  check_join_result("extra args v2", values.__w_join_v2("|", "ignored", 99), c_result)
-  check_join_result("extra args v3", values.__w_join_v3("|", "ignored", 99), c_result)
-  check_join_result("extra args v4", values.__w_join_v4("|", "ignored", 99), c_result)
-  check_join_result("extra args v5", values.__w_join_v5("|", "ignored", 99), c_result)
-  check_join_result("extra args v6", values.__w_join_v6("|", "ignored", 99), c_result)
-  check_join_result("extra args public", values.join("|", "ignored", 99), c_result)
-
 -> run_interpreter_correctness
   check_join_result("tree.empty", ([].__tree_join0), "")
   check_join_result("tree.noarg nonempty", ["a", "b"].__tree_join0, "ab")
@@ -786,7 +773,6 @@ WARMUP_ITERS = 1_000
   check_compiled_probe_paths()
   check_compiled_shrink_paths()
   check_invalid_separator_paths()
-  check_extra_argument_paths()
   check_v3_validation_capacity()
   check_v6_raw_length_helper()
 

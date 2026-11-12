@@ -357,13 +357,7 @@ WARMUP_ITERS = 500
     check_case("typed.[i]", typed[i])
     i += 1
 
-  extra_values = ["a", "b", "a"]
-  extra_c = extra_values.__c_uniq("ignored", 99)
-  check_result("extra.v1", extra_values.__w_uniq_v1("ignored", 99), extra_c)
-  check_result("extra.v2", extra_values.__w_uniq_v2("ignored", 99), extra_c)
-  check_result("extra.public", extra_values.uniq("ignored", 99), extra_c)
-
-  << "correctness: ok (C/v1/v2/public order, fresh independent outputs, exact-bit elements, output cap/growth, every text representation and threshold branch, text-only Hash plus mixed fallback, numeric/NaN/rational/bytes/netaddr/object/nested identity semantics, shifted inputs, extra args, and every typed decoder family)"
+  << "correctness: ok (C/v1/v2/public order, fresh independent outputs, exact-bit elements, output cap/growth, every text representation and threshold branch, text-only Hash plus mixed fallback, numeric/NaN/rational/bytes/netaddr/object/nested identity semantics, shifted inputs, and every typed decoder family)"
 
 -> text_tokens
   ["alpha-000", "beta--111", "gamma-222", "delta-333",

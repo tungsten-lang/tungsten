@@ -15,6 +15,5 @@ check("typed.cap", value.cap, 3)
 check("typed.empty", value.empty?, false)
 check("typed.first", value.first, 7)
 check("typed.last", value.last, 249)
-check("typed.extra", value.first(1, 2, 3), 7)
 
 << "autoload.typed: ok"

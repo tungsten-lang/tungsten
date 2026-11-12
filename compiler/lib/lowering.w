@@ -25,6 +25,7 @@ use hashing
 use ../../languages/tungsten/lexers/known_units
 use return_inference
 use content_hash
+use builtin_arity
 use lowering/pass_registry
 use lowering/signatures
 use lowering/types

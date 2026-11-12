@@ -169,8 +169,4 @@ wvalues[4] = nil
 wvalues[5] = false
 check_case("typed-w64", wvalues)
 
-extra_values = ["a", "b", "a"]
-check_result("extra.v2", extra_values.__w_uniq_v2("ignored", 99),
-             extra_values.__w_uniq_v1("ignored", 99))
-
-<< "interpreter correctness: ok (pure tag/rope classifier, guarded Hash bridges, threshold/text representation branches, exact fallback identity/value semantics, typed inputs, and extra arguments; compiled gate covers shifted storage)"
+<< "interpreter correctness: ok (pure tag/rope classifier, guarded Hash bridges, threshold/text representation branches, exact fallback identity/value semantics, and typed inputs; compiled gate covers shifted storage)"

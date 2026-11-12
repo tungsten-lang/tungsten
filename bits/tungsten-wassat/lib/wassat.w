@@ -77,6 +77,7 @@ use portfolio
 use reconfiguration
 use quota_cover
 use lut_congruence
+use cover_split
 
 # Allocate one bounded CDCL stage from the aggregate --conflicts budget.
 # A zero total is the public unlimited value; a zero return for a finite total
@@ -1043,6 +1044,25 @@ use lut_congruence
       << "c cover nodes=[cover["nodes"]], forced=[cover["forced"]]"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(cover["status"] == 1 ? 10 : 20)
+  # Dense covering formulas are refuted by cases, one CDCL per case, instead
+  # of by a portfolio of whole-formula searches (cover_split.w). An unbounded
+  # lane: a finite --conflicts budget keeps the ordinary accounted pipeline.
+  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && options["conflicts"] == 0 && env("WASSAT_COVER_SPLIT") != "0"
+    split = wassat_cover_split_solve(formula)
+    tprof = wassat_prof("cli.cover_split", tprof)
+    if tprof != 0 && split["admitted"]
+      z = wassat_prof_note("cover_split status=[split["status"]] cases=[split["cases"]] workers=[split["workers"]] refuted=[split["refuted"]] retired=[split["retired"]] conflicts=[split["conflicts"]] max_case_conflicts=[split["max_conflicts"]] sls=[split["sls"]] build_ms=[split["build_ms"]] search_ms=[split["search_ms"]]")
+    if split["status"] != 0
+      if split["status"] == 1
+        unless wassat_model_satisfies?(formula, split["model"])
+          raise "internal error: case-split model does not satisfy the input formula"
+        print(wassat_sat_text(split["model"]))
+      else
+        << "s UNSATISFIABLE"
+      << "c mode: fast (covering case split)"
+      << "c split cases=[split["cases"]], workers=[split["workers"]], refuted=[split["refuted"]], largest_case_conflicts=[split["max_conflicts"]]"
+      << "c conflicts: [split["conflicts"]], decisions: 0, props: 0"
+      exit(split["status"] == 1 ? 10 : 20)
   # Ordered directed-kernel formulas decompose over their SCC DAG.  Commit
   # only locally unique components; an exact conditioned SCC refutation can
   # then decide the whole formula while multi-model and capped branches fall

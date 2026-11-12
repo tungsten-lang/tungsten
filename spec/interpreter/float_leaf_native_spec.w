@@ -1,21 +1,18 @@
 # Compiled/tree-walker parity for source-only Float identity/classification
 # leaves.
 
-# Surplus arguments are an error on both engines (E_LOWER_ARITY at compile
-# time where the callee is known; the interpreter raises at the call).
+# Surplus arguments are an error on both engines: E_LOWER_ARITY at compile
+# time where the receiver's class is statically known, otherwise a rescuable
+# ArgumentError at the call (the interpreter when it binds parameters, the
+# compiled engine on the inline-cache miss path). The probes below erase the
+# receiver through an untyped container so the call is reached on both
+# engines. This spec runs in both lanes.
 -> surplus_rejected?(f)
   begin
     f.call
     false
   rescue surplus_error
     true
-
-# The interpreter rejects surplus arguments at the call; the compiled engine
-# leaves DYNAMIC dispatch unchecked by design (no runtime arity cost), so on
-# an unknown receiver a surplus call still runs. Compile-time checks apply
-# only where the callee is statically known. This spec runs in both lanes.
--> surplus_rejection_expected
-  env("TUNGSTEN_INTERPRETED_SPEC") == "1"
 
 -> check(name, got, want)
   if got != want
@@ -26,7 +23,8 @@ check("positive abs", (~3.5).abs, ~3.5)
 check("negative abs", (~-3.5).abs, ~3.5)
 check("subnormal abs", (~-0.00000000000000000001).abs,
       ~0.00000000000000000001)
-check("abs surplus arguments rejected", surplus_rejected?(->() (~-7.25).abs(1, 2)), surplus_rejection_expected)
+erased = [~-7.25, nil]
+check("abs surplus arguments rejected", surplus_rejected?(->() erased[0].abs(1, 2)), true)
 
 positive_infinity = Math.exp(~10000.0)
 negative_infinity = ~0.0 - positive_infinity
@@ -42,7 +40,8 @@ while i < identity_values.size
   if !value.nan?
     check("to_f value identity", value.to_f, value)
   check("to_f bit identity", wvalue_bits(value.to_f), wvalue_bits(value))
-  check("to_f surplus rejected", surplus_rejected?(->() value.to_f(1, 2, 3)), surplus_rejection_expected)
+  erased = [value, nil]
+  check("to_f surplus rejected", surplus_rejected?(->() erased[0].to_f(1, 2, 3)), true)
   i += 1
 
 check("finite nan", (~1.0).nan?, false)

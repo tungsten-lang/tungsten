@@ -1,6 +1,97 @@
 # Built-in method dispatch for boot1's interpreter
 # Called by the interpreter when a method is a builtin.
 # The interp parameter is the Interpreter instance.
+use builtin_arity
+
+# Argument contract of the receiver-method arms below, `[min, max]` with a
+# trailing block counted as one argument (nil = not a receiver method, or an
+# arm that states its own contract). Interpreter#dispatch_method checks it
+# before dispatch_builtin runs, so no arm below drops or pads arguments.
+# Bare-call builtins (puts, type, exit, env, …) are absent on purpose: their
+# receiver is the enclosing self and their arguments are the whole call.
+-> builtin_fallback_arity(name)
+  case name
+    "length"          => [0, 0]
+    "size"            => [0, 0]
+    "chars"           => [0, 0]
+    "split"           => [0, 1]
+    "strip"           => [0, 0]
+    "ltrim"           => [0, 0]
+    "rtrim"           => [0, 0]
+    "ascii?"          => [0, 0]
+    "valid_utf8?"     => [0, 0]
+    "replace"         => [2, 2]
+    "starts_with?"    => [1, 1]
+    "ends_with?"      => [1, 1]
+    "upcase"          => [0, 0]
+    "downcase"        => [0, 0]
+    "swapcase"        => [0, 0]
+    "capitalize"      => [0, 0]
+    "include?"        => [1, 1]
+    "index"           => [1, 2]
+    "rindex"          => [1, 2]
+    "gsub"            => [2, 2]
+    "concat"          => [1, 1]
+    "append"          => [1, 1]
+    "prepend"         => [1, 1]
+    "zip"             => [1, 1]
+    "reverse"         => [0, 0]
+    "slice"           => [1, 2]
+    "copy"            => [1, 2]
+    "push"            => [1, 1]
+    "pop"             => [0, 0]
+    "shift"           => [0, 0]
+    "unshift"         => [1, 1]
+    "first"           => [0, 0]
+    "last"            => [0, 0]
+    "empty?"          => [0, 0]
+    "nil?"            => [0, 0]
+    "join"            => [0, 1]
+    "sort"            => [0, 1]
+    "flatten"         => [0, 0]
+    "uniq"            => [0, 0]
+    "delete"          => [1, 1]
+    "each"            => [0, 1]
+    "map"             => [0, 1]
+    "select"          => [0, 1]
+    "reject"          => [0, 1]
+    "reduce"          => [0, 2]
+    "each_with_index" => [0, 1]
+    "map_with_index"  => [0, 1]
+    "any?"            => [0, 1]
+    "all?"            => [0, 1]
+    "find"            => [0, 1]
+    "count"           => [0, 1]
+    "sum"             => [0, 1]
+    "times"           => [0, 1]
+    "keys"            => [0, 0]
+    "values"          => [0, 0]
+    "has_key?"        => [1, 1]
+    "key?"            => [1, 1]
+    "abs"             => [0, 0]
+    "respond_to?"     => [1, 1]
+    "is_a?"           => [1, 1]
+    "freeze"          => [0, 0]
+    "frozen?"         => [0, 0]
+    "ljust"           => [1, 2]
+    "rjust"           => [1, 2]
+    "center"          => [1, 2]
+    "round"           => [0, 1]
+    "to_i"            => [0, 1]
+    "to_s"            => [0, 0]
+    "class"           => [0, 0]
+    => nil
+
+# For the arms whose contract depends on the receiver (Array#max vs Int#max).
+-> builtin_expect_argc(interp, name, args, block, min_argc, max_argc)
+  if env("TUNGSTEN_ARITY") == "off"
+    return nil
+  argc = args.size()
+  if block != nil
+    argc += 1
+  if !builtin_arity_accepts?([min_argc, max_argc], argc)
+    interp.raise_typed("ArgumentError", arity_contract_message(name, [min_argc, max_argc], argc))
+  nil
 
 -> dispatch_builtin(interp, name, recv, args, block)
   # A lambda passed as the last positional argument to a block-taking
@@ -446,14 +537,16 @@
 
   when "max"
     if type(recv) == "Array"
+      builtin_expect_argc(interp, name, args, block, 0, 0)
       return recv.max()
-
+    builtin_expect_argc(interp, name, args, block, 1, 1)
     recv.max(args[0])
 
   when "min"
     if type(recv) == "Array"
+      builtin_expect_argc(interp, name, args, block, 0, 0)
       return recv.min()
-
+    builtin_expect_argc(interp, name, args, block, 1, 1)
     recv.min(args[0])
 
   # -- Object introspection --

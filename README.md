@@ -215,7 +215,9 @@ Ruby is **not** required for normal use; it is needed for the `--ruby` developer
 | `--target TRIPLE` | Generate code for another target triple. Combine with `--cpu` to mean “runs on this target, optimized for this CPU variant.” A cross target without `--cpu` uses clang's target baseline. |
 | `--portable`      | On `build`/`bootstrap`, emit both documented release binaries: x86-64-v2 and x86-64-v3 under `build/releases/<triple>/<cpu>/`. |
 | `--fast`          | Enable fast, non-IEEE floating-point transformations. |
-| `--no-lto`        | Skip link-time optimization for a direct compile. |
+| `--lto`           | Whole-program LTO on a non-release compile. `--release` already includes it. |
+| `--no-lto`        | Skip link-time optimization for a direct compile: `--release --no-lto` links the cached native runtime archive (faster link, larger binary). |
+| `--strict`        | With `build`/`bootstrap`, fail when stage 1 and stage 2 emit different LLVM IR instead of warning. Implied by `CI`, `--install`, `--pgo`, `--target`, and `--portable`. |
 
 </small>
 
@@ -232,6 +234,12 @@ an annotated version tag, and lets GitHub build and attest the PGO-trained
 native release matrix. ARM64 uses each target's portable baseline; x86_64
 ships both v2 and v3 packages on macOS and Linux. Use `--dry-run` to validate
 without tagging.
+
+Every `--target` or `--portable` artifact is written to
+`build/releases/<triple>/<cpu>/` as `tungsten-compiler` plus
+`compiler-images/tungsten-{repl,metal}` (the REPL/interpreter and `@gpu`
+compilers, built for the same target and CPU). A release package carries all
+three; a stage 1 / stage 2 mismatch fails such a build instead of warning.
 
 Tungsten's documented x86-64 release set is:
 

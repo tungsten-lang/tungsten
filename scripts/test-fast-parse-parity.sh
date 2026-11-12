@@ -51,13 +51,15 @@ VM="$ROOT/implementations/c/build/parity-check/tungsten-c"
 [ -x "$VM" ] || { printf 'FAIL: C VM missing at %s\n' "$VM" >&2; exit 1; }
 
 # ── 2. Runtime archive from the current build manifest ──────────
-MANIFEST="$ROOT/build/cache/runtime-current.manifest"
+# The manifest names this checkout's last runtime archive and its environment
+# file by their absolute paths in the build store, one per line.
+MANIFEST="$ROOT/build/runtime-current.manifest"
 if [ ! -f "$MANIFEST" ]; then
   printf 'ERROR: %s not found.\n' "$MANIFEST" >&2
   printf 'Run `bin/tungsten build --no-bits` first to produce a runtime archive.\n' >&2
   exit 2
 fi
-ARCHIVE="$ROOT/build/cache/$(head -n 1 "$MANIFEST")"
+ARCHIVE="$(head -n 1 "$MANIFEST")"
 if [ ! -f "$ARCHIVE" ]; then
   printf 'ERROR: runtime archive %s (from %s) is missing.\n' "$ARCHIVE" "$MANIFEST" >&2
   printf 'Run `bin/tungsten build --no-bits` first to rebuild it.\n' >&2
@@ -68,14 +70,19 @@ fi
 # was compiled with; exporting them keeps the stage-1 link consistent with
 # the archive and skips the compiler's own pkg-config probes ("set even to
 # empty" means resolved — see compiler/tungsten.w).
-ENV_MANIFEST="$ROOT/build/cache/$(sed -n '2p' "$MANIFEST")"
+ENV_MANIFEST="$(sed -n '2p' "$MANIFEST")"
 if [ -f "$ENV_MANIFEST" ]; then
   export TUNGSTEN_ZSTD_CFLAGS="$(sed -n '2p' "$ENV_MANIFEST")"
   export TUNGSTEN_ZSTD_LDFLAGS="$(sed -n '3p' "$ENV_MANIFEST")"
 fi
 
 # ── 3. Environment (mirrors bin/commands/bootstrap.sh) ──────────
-export TUNGSTEN_ROOT="$ROOT"
+# Stage 1 is compiled as the build compiles it: from the root, by a relative
+# entry, with TUNGSTEN_ROOT unset (so the compiler's bytes do not name the
+# checkout and every worktree can share it through the build store). The
+# unit-name registry is then named explicitly.
+unset TUNGSTEN_ROOT
+export TUNGSTEN_UNIT_NAMES="${TUNGSTEN_UNIT_NAMES:-$ROOT/data/unit_names.txt}"
 export BIT_HOME="$ROOT/bits"
 export TUNGSTEN_LEX64_TABLE="$ROOT/languages/tungsten/tungsten.lex64"
 export TUNGSTEN_CLANG_OPT="-O0"
@@ -120,7 +127,7 @@ emit_stage1() {
   local out="$WORK/stage1-$label" log="$WORK/stage1-$label.log"
   printf '==> Stage 1 (%s parser, TUNGSTEN_C_FAST_PARSE=%s)\n' "$label" "$fast"
   if ! TUNGSTEN_C_FAST_PARSE="$fast" TUNGSTEN_LL_PATH="$out.ll" \
-      "$VM" "$ROOT/compiler/tungsten.w" compile "$ROOT/compiler/tungsten.w" \
+      "$VM" compiler/tungsten.w compile compiler/tungsten.w \
         --out "$out" --runtime "$ARCHIVE" --no-lto \
         >"$log" 2>&1; then
     tail -n 40 "$log" >&2
@@ -151,6 +158,13 @@ normalize() {
 
 if cmp -s "$FAST_LL" "$CANON_LL"; then
   printf 'PASS: stage-1 IR byte-identical (fast == canonical)\n'
+  # The fast loader must name files as the canonical loader does for a
+  # relative entry: relatively. An absolute name here is this checkout's path
+  # in a compiler that other checkouts would be handed.
+  if LC_ALL=C grep -q -F -e "$ROOT/" "$FAST_LL"; then
+    printf 'FAIL: stage-1 IR names the checkout (%s)\n' "$ROOT" >&2
+    exit 1
+  fi
 else
   # diff exits 1 when files differ; keep it out of pipelines (pipefail+set -e).
   diff "$FAST_LL" "$CANON_LL" > "$WORK/raw.diff" || true

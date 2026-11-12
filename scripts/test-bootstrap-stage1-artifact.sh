@@ -43,6 +43,8 @@ mkdir -p \
   "$source_tree/data" \
   "$source_tree/languages/tungsten/lexers"
 printf 'compiler\n' > "$compiler_w"
+printf 'driver\n' > "$source_tree/compiler/tungsten_driver.w"
+printf 'unit table\n' > "$source_tree/data/units.tsv"
 printf 'lexer\n' > "$lex64_table"
 printf 'compiler a\n' > "$source_tree/compiler/lib/a.w"
 printf 'compiler z\n' > "$source_tree/compiler/lib/z.w"
@@ -61,6 +63,8 @@ printf '%s\n' \
   "$compiler_w" \
   "$lex64_table" \
   "$source_tree/data/unit_names.txt" \
+  "$source_tree/data/units.tsv" \
+  "$source_tree/compiler/tungsten_driver.w" \
   "$source_tree/compiler/lib/a.w" \
   "$source_tree/compiler/lib/z.w" \
   "$source_tree/core/a.w" \
@@ -105,6 +109,18 @@ identity_after_unit_change="$(
 )"
 if [ "$identity_after_lexer_change" = "$identity_after_unit_change" ]; then
   printf 'FAIL: a unit-name registry edit did not change stage-1 source identity\n' >&2
+  exit 1
+fi
+
+# compiler/tungsten.w only `use`s the driver beside it: an edit to the driver
+# is an edit to the compiler, and stage 1 is shared between checkouts.
+printf 'driver changed\n' > "$source_tree/compiler/tungsten_driver.w"
+identity_after_driver_change="$(
+  bootstrap_stage1_source_manifest \
+    "$source_tree" "$compiler_w" "$lex64_table"
+)"
+if [ "$identity_after_unit_change" = "$identity_after_driver_change" ]; then
+  printf 'FAIL: a compiler driver edit did not change stage-1 source identity\n' >&2
   exit 1
 fi
 

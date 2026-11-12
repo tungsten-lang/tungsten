@@ -40,6 +40,12 @@ time.
 - stage 2: the compiler stage 1 builds from the same sources, installed as
   `bin/tungsten-compiler`.
 
+The stages are compiled from the checkout root by a relative entry path with
+`TUNGSTEN_ROOT` unset, so the compiler names its own sources relatively
+(`compiler/lib/lexer.w`) and its bytes do not depend on where the checkout is.
+That is what lets every worktree with the same sources share one build of each
+stage through the build store (see "Build store").
+
 `build --ruby` has no stage 0: the Ruby implementation runs
 `compiler/tungsten.w` directly to produce stage 1. `build --spinel` compiles
 the Ruby implementation to C with Spinel and uses that binary as stage 0. Both
@@ -80,7 +86,8 @@ bin/tungsten --ast file.w               # print the AST
 bin/tungsten --ll file.w                # print LLVM IR
 bin/tungsten -o out file.w              # compile a binary (-O3, no LTO)
 bin/tungsten -o out --release file.w    # full LTO, no dev checks
-bin/tungsten --clear-cache              # delete incremental-compile caches
+bin/tungsten --clear-cache              # drop this checkout's incremental binaries and all snapshots
+bin/tungsten cleanup                    # sweep the build store now (`--all` empties it)
 bin/wit                                 # REPL (same as bin/tungsten console)
 ```
 
@@ -102,6 +109,42 @@ bundle exec rubocop                       # lint: double quotes, 120 columns
 
 In Ruby specs, `Tungsten.parse(code)` returns the AST, and
 `spec/support/to_node.rb` builds expected nodes (`.int`, `.var`, `.call`).
+
+## Build store
+
+Reusable build artifacts live in one store shared by every checkout, worktree
+and installed toolchain: `~/.tungsten/build` (`TUNGSTEN_HOME/build`), or
+`TUNGSTEN_BUILD_STORE`. A checkout has no `build/cache` of its own.
+
+```text
+compile/     the compiler's artifacts: runtime archives and companion objects,
+             incremental binaries (irbin, linkbin, run/), parse and Core snapshots
+stages/      stage-0 VMs, stage-1/2 compilers with their .ll, build runtime archives
+compilers/   finished compilers, their repl/metal images, by-source/ index
+bits/        bit executables
+```
+
+- Every entry's name is a fingerprint of what determines its bytes. What is
+  shared between checkouts is keyed by content (runtime objects by every file
+  in `runtime/`, stages and compilers by the compiler sources, bits by a
+  manifest of each source file the compiler read plus the compiler binary) and
+  is built so its bytes do not name the checkout: stages, images and
+  in-checkout bits are compiled from the root, by relative path, with
+  `TUNGSTEN_ROOT` unset. What embeds absolute paths by design (a program's
+  incremental binary, anything using `__DIR__`) is keyed by those paths.
+- `bin/tungsten-compiler`, `build/compiler-images/` and each bit's `bin/` are
+  copies of store entries; `build/compiler-build.profile` records what is
+  installed. A new worktree gets the compiler the store holds for exactly its
+  sources (post-checkout hook, `bin/commands/store.sh install-compiler`), or
+  none: then `bin/tungsten build` builds it, reusing every stage that matches.
+- `TUNGSTEN_CACHE_DIR=DIR` replaces `compile/` for one run (the spec and
+  parity suites isolate themselves this way). `TUNGSTEN_BUILD_STORE=DIR`
+  moves the whole store: use an empty one to verify a build from nothing.
+- Writers publish with a temp file and a rename; readers renew what they use;
+  `bin/commands/cache_gc.sh` removes only entries unused for 7 days, or the
+  least recently used ones above 20 GB.
+- When you add an artifact kind, decide what its name must cover before
+  choosing where it goes, and add it to `scripts/test-build-store.sh`.
 
 ## Testing
 

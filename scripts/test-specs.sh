@@ -823,9 +823,9 @@ run_parallel compiled-reject "${compiled_reject_specs[@]}"
 # `run --interpret` given a BARE filename must resolve that file's `use`
 # lines against the cwd (a bare `main.w` has no directory; joining onto ""
 # used to make `use lib/box` look for /lib/box.w), and it must find the repl
-# compiler image whatever cache a run selects — an isolated
-# TUNGSTEN_CACHE_DIR, or a cwd inside a bit that owns its own build/cache —
-# because images belong to the checkout that built the compiler.
+# compiler image whatever cache a run selects (an isolated
+# TUNGSTEN_CACHE_DIR) and whatever the cwd (inside a bit), because images
+# are installed in the checkout that holds the compiler.
 interp_launch_step() {
   local label="$1"
   local dir="$2"

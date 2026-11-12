@@ -1,6 +1,10 @@
 #!/usr/bin/env ruby
 # End-to-end build-driver contract: real compiled orchestration, isolated fake
 # compiler/toolchain, no bootstrap or expensive native program compilation.
+# Bit executables live in the build store (an isolated one here) under a
+# fingerprint of their sources, compiler, runtime and flags; bin/<name> is a
+# copy. The fake compiler reports no dependency list, so its entries are only
+# ever reused at the location that built them.
 require "fileutils"
 require "json"
 require "open3"
@@ -23,6 +27,7 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   tools = File.join(directory, "tools")
   FileUtils.mkdir_p([File.join(root, "bin/commands"), File.join(root, "runtime"), File.join(root, "bits"), File.join(package, "lib"), tools])
   log = File.join(directory, "compiler.jsonl")
+  store = File.join(directory, "store")
   File.write(File.join(root, "bin/commands/cache_gc.sh"), "exit 0\n")
   File.write(File.join(package, "lib/main.w"), "<< 1\n")
   write_tool(File.join(root, "bin/tungsten-compiler"), <<~'RUBY')
@@ -59,6 +64,7 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   write_tool(File.join(tools, "codesign"), "exit 0\n")
   environment = {
     "TUNGSTEN_ROOT" => root, "TUNGSTEN_CONFIG" => File.join(directory, "no-config"),
+    "TUNGSTEN_BUILD_STORE" => store, "TUNGSTEN_CACHE_DIR" => "",
     "TUNGSTEN_CC" => File.join(tools, "cc"), "TUNGSTEN_AR" => File.join(tools, "ar"),
     "TUNGSTEN_RANLIB" => "/usr/bin/true", "TUNGSTEN_BITS_CLANG_OPT" => "", "TUNGSTEN_CLANG_OPT" => "",
     "TUNGSTEN_BOOTSTRAP_HANDOFF" => "", "TUNGSTEN_CPU" => "", "TUNGSTEN_COMPILER" => "", "FAKE_BUILD_LOG" => log, "NO_COLOR" => "1",
@@ -68,12 +74,12 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   write_manifest = lambda do |flags|
     File.write(manifest, %(executable "hot", source: "lib/main.w", profile: "release", native: true, cflags: "#{flags}"\nexecutable "ordinary", source: "lib/main.w"\n))
   end
-  run = lambda do |arguments = [], overrides = {}|
+  run = lambda do |arguments = [], overrides = {}, where = package|
     before = File.exist?(log) ? File.readlines(log).size : 0
-    out, status = Open3.capture2e(environment.merge(overrides), driver, *arguments, chdir: package)
+    out, status = Open3.capture2e(environment.merge(overrides), driver, *arguments, chdir: where)
     raise "driver failed: #{arguments.inspect}\n#{out}" unless status.success?
     records = File.exist?(log) ? File.readlines(log).drop(before).map { |line| JSON.parse(line) } : []
-    records.select { |entry| entry["argv"].include?(File.join(package, "lib/main.w")) }
+    records.select { |entry| entry["argv"].include?(File.join(where, "lib/main.w")) }
   end
   hot = lambda do |records|
     records.find { |entry| entry["argv"].include?(File.join(package, "bin/hot")) } or raise "missing hot executable invocation"
@@ -86,6 +92,36 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   ordinary = first.find { |item| item["argv"].include?(File.join(package, "bin/ordinary")) }
   raise "other executable defaults changed" unless ordinary && ordinary["clang_opt"] == "-O0" && !ordinary["argv"].include?("--release")
   raise "unchanged build missed cache" unless run.call.empty?
+  # The executables are in the store, each beside the manifest of the sources
+  # it was built from; the package's bin/ holds copies and their manifests.
+  %w[hot ordinary].each do |name|
+    entries = Dir.glob(File.join(store, "bits", "#{name}-*", "*.deps"))
+    raise "#{name} is not in the build store" if entries.empty?
+    deps = File.read(File.join(package, "bin", "#{name}.deps"))
+    raise "bin/#{name}.deps is not the store manifest" unless entries.any? { |entry| File.read(entry) == deps }
+    raise "the manifest does not list the entry source" unless deps.include?("lib/main.w")
+  end
+  raise "the project grew a cache of its own" if File.exist?(File.join(package, "build"))
+  raise "the toolchain root grew a build/cache" if File.exist?(File.join(root, "build", "cache"))
+  # A deleted executable comes back from the store without a compile ...
+  FileUtils.rm_f(File.join(package, "bin/hot"))
+  raise "a store hit recompiled" unless run.call.empty?
+  raise "the store hit did not reinstall bin/hot" unless File.executable?(File.join(package, "bin/hot"))
+  # ... an edited source does not match its manifest any more ...
+  File.write(File.join(package, "lib/main.w"), "<< 2\n")
+  raise "an edited source was served from the store" unless run.call.size == 2
+  # ... and going back to the first contents is a hit again (two entries now).
+  File.write(File.join(package, "lib/main.w"), "<< 1\n")
+  raise "returning to stored contents recompiled" unless run.call.empty?
+  # A second project with the same sources elsewhere: without a dependency
+  # list from the compiler nothing proves the two read the same files, so it
+  # builds its own.
+  twin = File.join(directory, "twin")
+  FileUtils.mkdir_p(File.join(twin, "lib"))
+  FileUtils.cp(File.join(package, "lib/main.w"), File.join(twin, "lib/main.w"))
+  FileUtils.cp(manifest, File.join(twin, "Bitfile"))
+  raise "a project elsewhere was handed another location's executable" unless run.call([], {}, twin).size == 2
+  raise "the twin's own build missed its cache" unless run.call([], {}, twin).empty?
   # Companion sources are not part of the base runtime archive. Their contents,
   # including Objective-C, still have to invalidate the outer executable stamp.
   bridge = File.join(root, "runtime", "graphics.m")

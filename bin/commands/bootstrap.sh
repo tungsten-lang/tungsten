@@ -195,8 +195,19 @@ C_INTERP_DIR="$ROOT/implementations/c"
 C_INTERP_DEFAULT="$C_INTERP_DIR/build/tungsten-c"
 C_INTERP="$C_INTERP_DEFAULT"
 COMPILER_W="$ROOT/compiler/tungsten.w"
+# Stage 1 is compiled by this relative name from $ROOT with TUNGSTEN_ROOT
+# unset, so the source names it embeds are relative and its bytes do not
+# depend on where this checkout is (bin/commands/build.w does the same for
+# every stage; the two must agree or their .ll would differ).
+COMPILER_ENTRY="compiler/tungsten.w"
 COMPILER_BIN="$ROOT/bin/tungsten-compiler"
-CACHE="$ROOT/build/cache"
+# The build store shared by every checkout (bin/commands/store.sh). Bootstrap
+# products are named by content and live in its stages/ directory, so a
+# second checkout with the same sources reuses them.
+. "$ROOT/bin/commands/store.sh"
+STORE="$(tungsten_store_dir "$ROOT")"
+export TUNGSTEN_BUILD_STORE="$STORE"
+CACHE="$STORE/stages"
 RUNTIME_DIR="$ROOT/runtime"
 RUNTIME_A=""
 STAGE1=""
@@ -204,7 +215,7 @@ BOOTSTRAP_CC="${TUNGSTEN_CC:-clang}"
 BOOTSTRAP_AR="${TUNGSTEN_AR:-ar}"
 TOOLCHAIN_ENV_ID="${SDKROOT:-}|${MACOSX_DEPLOYMENT_TARGET:-}|${CPATH:-}|${C_INCLUDE_PATH:-}|${CPLUS_INCLUDE_PATH:-}|${LIBRARY_PATH:-}|${PKG_CONFIG_PATH:-}|${PKG_CONFIG_LIBDIR:-}"
 mkdir -p "$CACHE"
-bash "$ROOT/bin/commands/cache_gc.sh" "$CACHE" || true
+bash "$ROOT/bin/commands/cache_gc.sh" "$STORE" || true
 
 BUILD_JOBS="${TUNGSTEN_BUILD_JOBS:-}"
 if [ -z "$BUILD_JOBS" ]; then
@@ -247,12 +258,12 @@ cvm_identity="$({
     printf '%s\0%s\n' "${path#$ROOT/}" "$(sha256_file "$path")"
   done
 } | sha256_stdin)"
-CVM_CACHE_BUILD_DIR="build/bootstrap-$cvm_identity"
-C_INTERP_CACHE="$C_INTERP_DIR/$CVM_CACHE_BUILD_DIR/tungsten-c"
-CVM_BUILD_DIR="$CVM_CACHE_BUILD_DIR-build-$$"
+C_INTERP_CACHE="$CACHE/bootstrap-c-vm-$cvm_identity"
+CVM_BUILD_DIR="build/bootstrap-$cvm_identity-build-$$"
 C_INTERP="$C_INTERP_DIR/$CVM_BUILD_DIR/tungsten-c"
 if [ "$FORCE" -eq 0 ] && [ -x "$C_INTERP_CACHE" ]; then
   C_INTERP="$C_INTERP_CACHE"
+  touch "$C_INTERP_CACHE" 2>/dev/null || true
   ok "CACHED" "$C_INTERP"
 else
   log_path="/tmp/tungsten-bootstrap-c-vm-$$.log"
@@ -277,6 +288,7 @@ fi
 # Atomically refresh the conventional developer path, but never execute it in
 # this bootstrap; concurrent identities use their own immutable binaries.
 if ! cmp -s "$C_INTERP" "$C_INTERP_DEFAULT" 2>/dev/null; then
+  mkdir -p "$(dirname "$C_INTERP_DEFAULT")"
   cvm_publish="$C_INTERP_DEFAULT.tmp-$$"
   cp "$C_INTERP" "$cvm_publish"
   chmod 755 "$cvm_publish"
@@ -390,16 +402,22 @@ cflags=("$PROFILE_OPT" "$DEBUG_CFLAG" -pthread "${HOST_CPU_FLAGS[@]}" $tls_flags
 if [ "$UNAME_S" = Linux ]; then cflags+=(-D_DEFAULT_SOURCE); fi
 runtime_objc_flags=("$PROFILE_OPT" "$DEBUG_CFLAG" "${HOST_CPU_FLAGS[@]}" -c -x objective-c)
 
+# Keyed by every C/ObjC source, header and include fragment in runtime/
+# (tests aside), by content: the archive is shared between checkouts, and a
+# hand-kept include list had already missed the *.inc files.
 RUNTIME_INPUTS=()
-for src in "${RUNTIME_SRCS[@]}"; do RUNTIME_INPUTS+=("$RUNTIME_DIR/$src"); done
 while IFS= read -r path; do RUNTIME_INPUTS+=("$path"); done < <(
-  find "$RUNTIME_DIR" -maxdepth 1 -type f \
-    \( -name '*.h' -o -name 'w_lexchar_cache.c' \) -print | LC_ALL=C sort
+  find "$RUNTIME_DIR" -path "$RUNTIME_DIR/tests" -prune -o -type f \
+    \( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' \) -print | LC_ALL=C sort
 )
-RUNTIME_INPUTS+=("$RUNTIME_DIR/w_char_table.c" "$RUNTIME_DIR/generated/bigint_thresholds.h")
+# Objects name runtime/... and "." instead of this checkout's path (source
+# names and the compilation directory, which the linker copies into the
+# debug map of everything linked against them).
+RUNTIME_PATH_MAPS=("-ffile-prefix-map=$RUNTIME_DIR=runtime" "-ffile-prefix-map=$PWD=.")
 runtime_identity="$({
-  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-    "bootstrap-runtime-v1" "$UNAME_S" "${cflags[*]}" "${runtime_objc_flags[*]}" \
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    "bootstrap-runtime-v2" "$UNAME_S" "${cflags[*]}" "${runtime_objc_flags[*]}" \
+    "${RUNTIME_SRCS[*]}" \
     "$(tool_identity "$BOOTSTRAP_CC")" "$(tool_identity "$BOOTSTRAP_AR")" \
     "$TOOLCHAIN_ENV_ID"
   for path in "${RUNTIME_INPUTS[@]}"; do
@@ -409,6 +427,7 @@ runtime_identity="$({
 RUNTIME_A="$CACHE/bootstrap-runtime-$runtime_identity.a"
 
 if [ "$FORCE" -eq 0 ] && [ -f "$RUNTIME_A" ]; then
+  touch "$RUNTIME_A" 2>/dev/null || true
   ok "CACHED" "$RUNTIME_A"
 else
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-bootstrap-rt.XXXXXX")"
@@ -423,9 +442,9 @@ else
   for src in "${RUNTIME_SRCS[@]}"; do
     obj="$tmpdir/${src%.*}.o"
     if [[ "$src" == *.m ]]; then
-      "$BOOTSTRAP_CC" "${runtime_objc_flags[@]}" "$RUNTIME_DIR/$src" -o "$obj" &
+      "$BOOTSTRAP_CC" "${runtime_objc_flags[@]}" "${RUNTIME_PATH_MAPS[@]}" "$RUNTIME_DIR/$src" -o "$obj" &
     else
-      "$BOOTSTRAP_CC" "${cflags[@]}" -c "$RUNTIME_DIR/$src" -o "$obj" &
+      "$BOOTSTRAP_CC" "${cflags[@]}" "${RUNTIME_PATH_MAPS[@]}" -c "$RUNTIME_DIR/$src" -o "$obj" &
     fi
     compile_pids+=("$!")
     compile_names+=("$src")
@@ -477,17 +496,24 @@ export TUNGSTEN_LEX64_TABLE="${TUNGSTEN_LEX64_TABLE:-$ROOT/languages/tungsten/tu
 
 stage1_identity="$({
   printf '%s\n' \
-    "bootstrap-stage-content-v3" \
+    "bootstrap-stage-content-v4" \
     "$TUNGSTEN_CLANG_OPT" "$TUNGSTEN_C_FAST_PARSE" \
     "$TUNGSTEN_ZSTD_CFLAGS" "$TUNGSTEN_ZSTD_LDFLAGS" \
     "${TUNGSTEN_MARCH_ARGS:-}" "$TUNGSTEN_OS" \
     "$TOOLCHAIN_ENV_ID" \
     "$(tool_identity "$TUNGSTEN_CC")" "$(tool_identity "$TUNGSTEN_AR")" \
     "$(sha256_file "$C_INTERP")" "$(sha256_file "$RUNTIME_A")"
+  # compiler switches inherited from the environment (TUNGSTEN_FREE=0, ...):
+  # nothing in a plain environment
+  tungsten_tuning_environment
   bootstrap_stage1_source_manifest \
     "$ROOT" "$COMPILER_W" "$TUNGSTEN_LEX64_TABLE"
 } | sha256_stdin)"
 STAGE1="$CACHE/bootstrap-stage1-$stage1_identity"
+# A stage 1 that names this checkout's path after all is only right here: it
+# is kept under a name that includes the path instead of the shared one.
+STAGE1_SHARED="$STAGE1"
+STAGE1_HERE="$STAGE1-at-$(printf '%s' "$ROOT" | sha256_stdin | cut -c1-16)"
 STAGE1_COMPLETE="$STAGE1.complete"
 # The marker records which optional outputs (.ll/.sidemap) the cached stage-1
 # build produced, so a hit is honored only when the same set is still present.
@@ -500,7 +526,16 @@ stage1_cache_complete() {
   [ -x "$STAGE1" ] && [ -f "$STAGE1_COMPLETE" ] || return 1
   [ "$(cat "$STAGE1_COMPLETE")" = "$(stage1_state)" ]
 }
+if [ "$FORCE" -eq 0 ] && ! stage1_cache_complete; then
+  STAGE1="$STAGE1_HERE"
+  STAGE1_COMPLETE="$STAGE1.complete"
+  if ! stage1_cache_complete; then
+    STAGE1="$STAGE1_SHARED"
+    STAGE1_COMPLETE="$STAGE1.complete"
+  fi
+fi
 if [ "$FORCE" -eq 0 ] && stage1_cache_complete; then
+  touch "$STAGE1" "$STAGE1.ll" "$STAGE1.sidemap" "$STAGE1_COMPLETE" 2>/dev/null || true
   ok "CACHED" "$STAGE1"
 else
   stage1_log="/tmp/tungsten-bootstrap-stage1.log"
@@ -512,8 +547,11 @@ else
   if [ "$RELEASE" -ne 1 ]; then
     stage1_link_flags=(--runtime "$RUNTIME_A" --no-lto)
   fi
-  if ! TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
-      "$C_INTERP" "$COMPILER_W" compile "$COMPILER_W" \
+  # (Without TUNGSTEN_ROOT the lexer cannot find its unit-name registry from
+  # the stage-0 VM; name the file. It is read at start, not compiled in.)
+  if ! env -u TUNGSTEN_ROOT TUNGSTEN_UNIT_NAMES="${TUNGSTEN_UNIT_NAMES:-$ROOT/data/unit_names.txt}" \
+      TUNGSTEN_LL_PATH="$stage1_tmp.ll" \
+      "$C_INTERP" "$COMPILER_ENTRY" compile "$COMPILER_ENTRY" \
         --out "$stage1_tmp" "${STAGE_FLAGS[@]}" \
         ${stage1_link_flags[@]+"${stage1_link_flags[@]}"} \
         >"$stage1_log" 2>&1; then
@@ -527,6 +565,11 @@ else
   if [ "$UNAME_S" = Darwin ]; then
     codesign --force -s - "$stage1_tmp" >/dev/null 2>&1 || \
       die "failed to ad-hoc sign stage 1"
+  fi
+  if LC_ALL=C grep -q -F -e "$ROOT/" "$stage1_tmp"; then
+    STAGE1="$STAGE1_HERE"
+    STAGE1_COMPLETE="$STAGE1.complete"
+    log "    note: stage 1 names $ROOT and is not shared through the build store"
   fi
   # Publish the completeness marker last. Concurrent readers will either use
   # the old complete cache or rebuild; they never observe a binary whose

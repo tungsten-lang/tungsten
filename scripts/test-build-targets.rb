@@ -100,6 +100,8 @@ Dir.mktmpdir("tungsten-build-targets-") do |directory|
   write_tool(File.join(tools, "codesign"), "exit 0\n")
   environment = {
     "TUNGSTEN_ROOT" => root, "TUNGSTEN_CONFIG" => File.join(directory, "no-config"),
+    # an isolated build store: the test must not write into the user's
+    "TUNGSTEN_BUILD_STORE" => File.join(directory, "store"), "TUNGSTEN_CACHE_DIR" => "",
     "TUNGSTEN_CC" => File.join(tools, "cc"), "TUNGSTEN_AR" => File.join(tools, "ar"),
     "TUNGSTEN_RANLIB" => "/usr/bin/true", "TUNGSTEN_BITS_CLANG_OPT" => "", "TUNGSTEN_CLANG_OPT" => "",
     "TUNGSTEN_BOOTSTRAP_HANDOFF" => "", "TUNGSTEN_CPU" => "", "TUNGSTEN_COMPILER" => "", "NO_COLOR" => "1",
@@ -192,9 +194,9 @@ Dir.mktmpdir("tungsten-build-targets-") do |directory|
   check.call("tungsten_main compiler: a compiler older than the commit (no build record: its file time) stops the build", code == 1 && !rebuilt && out.include?("needs a compiler built at or after") && out.include?("cd #{root} && bin/tungsten build"), out)
   out, code, rebuilt = needs.call(%(tungsten_main "#{c1}", compiler: "#{c1}"))
   check.call("tungsten_main compiler: a compiler built after the commit builds", code == 0 && rebuilt, out)
-  FileUtils.mkdir_p(File.join(root, "build/cache"))
+  FileUtils.mkdir_p(File.join(root, "build"))
   sha = Digest::SHA256.file(File.join(root, "bin/tungsten-compiler")).hexdigest
-  File.write(File.join(root, "build/cache/compiler-build.profile"), "tungsten-compiler-build-v1\ncompiler_sha256=#{sha}\ncommit=#{side}\n")
+  File.write(File.join(root, "build/compiler-build.profile"), "tungsten-compiler-build-v1\ncompiler_sha256=#{sha}\ncommit=#{side}\n")
   out, code, rebuilt = needs.call(%(tungsten_main "#{c1}", compiler: "#{c1}"))
   check.call("tungsten_main compiler: the build record's commit decides (it contains c1)", code == 0 && rebuilt, out)
   out, code, rebuilt = needs.call(%(tungsten_main "#{c1}", compiler: "#{c2}"))

@@ -212,26 +212,40 @@
   objs.to_s()
 
 # Runtime source (path, mtime_ns) rows for the incremental manifest. The
-# cached binary embeds the runtime archive, whose PATH is stable across
-# runtime-source edits (dev_runtime_archive_path hashes config, not
-# content) and whose rebuild happens AFTER the cache probe — so a touched
-# runtime source must invalidate cached binaries here, over exactly the
-# file set the archive's own freshness check watches.
+# cached binary embeds runtime objects, and their rebuild happens AFTER the
+# cache probe, so a touched runtime source must invalidate cached binaries
+# here, over exactly the file set the runtime objects are keyed by
+# (dev_runtime_tree_files).
 -> incremental_runtime_entries
   runtime_dir = resolve_runtime_dir
-  ev = runtime_event_source
   runtime_root = dev_runtime_source_identity(runtime_dir, runtime_identity())
-  gt = file?(runtime_root + "/generated/bigint_thresholds.h") ? "present" : "absent"
-  bases = dev_runtime_base_files(ev, gt, tls_runtime_source())
+  files = dev_runtime_tree_files(runtime_root)
   entries = []
   bi = 0
-  while bi < bases.size()
-    p = runtime_root + "/" + bases[bi]
+  while bi < files.size()
+    p = runtime_root + "/" + files[bi]
     mt = file_mtime_ns(p)
     if mt != nil
       entries.push([p, mt])
     bi += 1
   entries
+
+# Which toolchain a compile resolves against, when nothing else in the
+# identity says so. Each checkout used to own its cache directory, which made
+# "this checkout" part of every key without anyone writing it down; the build
+# store is shared, so it is written down here. With TUNGSTEN_ROOT unset,
+# core/ and runtime/ are found through the cwd; a Bitfile in the cwd is the
+# project root for programs outside any project; and the runtime directory is
+# the one whose sources get linked in.
+-> incremental_root_context
+  parts = []
+  root = env("TUNGSTEN_ROOT")
+  if root == nil || root == ""
+    parts.push("cwd=" + driver_cwd())
+  if file?("Bitfile")
+    parts.push("project=" + driver_cwd())
+  parts.push("runtime=" + dev_runtime_source_identity(resolve_runtime_dir, runtime_identity()))
+  parts.join(";")
 
 -> incremental_abs_path(p)
   if p.starts_with?("/")
@@ -326,7 +340,7 @@
   if ra != ""
     ramv = file_mtime_ns(ra)
     ram = ramv == nil ? "missing" : ramv.to_s()
-  ["irbin-v6-c-dependencies", c_includes, incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), cc_identity, ar_identity, release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, perf_instrument_mode.to_s(), incremental_env_s("TUNGSTEN_PERF_INSTRUMENT"), incremental_env_s("SDKROOT"), incremental_env_s("MACOSX_DEPLOYMENT_TARGET"), incremental_env_s("CPATH"), incremental_env_s("C_INCLUDE_PATH"), incremental_env_s("CPLUS_INCLUDE_PATH"), incremental_env_s("LIBRARY_PATH"), incremental_env_s("PKG_CONFIG_PATH"), incremental_env_s("PKG_CONFIG_LIBDIR"), incremental_env_s("TLS"), incremental_env_s("TUNGSTEN_TLS"), incremental_env_s("TUNGSTEN_TLS_CFLAGS"), incremental_env_s("TUNGSTEN_TLS_LDFLAGS"), incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_LOOP_RELEASE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_CORE_REACHABILITY"), incremental_env_s("TUNGSTEN_LAZY_CONTENT_HASH"), incremental_env_s("TUNGSTEN_DYNAMIC_EXPORTS"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_AR"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
+  ["irbin-v7-root-context", incremental_root_context(), c_includes, incremental_abs_path(file_path), incremental_abs_path(out_path), exe, em.to_s(), cc_identity, ar_identity, release_mode.to_s(), debug_enabled.to_s(), cpu_target_mode, march_flags(), dev_mode.to_s(), fast_mode.to_s(), math_mode.to_s(), frame_pointers.to_s(), intern_algo, no_lto.to_s(), explicit_lto.to_s(), cross_target, cross_sysroot, ra, ram, perf_instrument_mode.to_s(), incremental_env_s("TUNGSTEN_PERF_INSTRUMENT"), incremental_env_s("SDKROOT"), incremental_env_s("MACOSX_DEPLOYMENT_TARGET"), incremental_env_s("CPATH"), incremental_env_s("C_INCLUDE_PATH"), incremental_env_s("CPLUS_INCLUDE_PATH"), incremental_env_s("LIBRARY_PATH"), incremental_env_s("PKG_CONFIG_PATH"), incremental_env_s("PKG_CONFIG_LIBDIR"), incremental_env_s("TLS"), incremental_env_s("TUNGSTEN_TLS"), incremental_env_s("TUNGSTEN_TLS_CFLAGS"), incremental_env_s("TUNGSTEN_TLS_LDFLAGS"), incremental_env_s("TUNGSTEN_GPU_DIALECTS"), incremental_env_s("TUNGSTEN_CLANG_OPT"), incremental_env_s("TUNGSTEN_MARCH_ARGS"), incremental_env_s("TUNGSTEN_CARRY_UNROLL"), incremental_env_s("TUNGSTEN_FREE"), incremental_env_s("TUNGSTEN_LOOP_RELEASE"), incremental_env_s("TUNGSTEN_PARAM_INFER"), incremental_env_s("TUNGSTEN_DEMOTE_TOP_LEVEL"), incremental_env_s("TUNGSTEN_MIMALLOC"), incremental_env_s("TUNGSTEN_LLVM_FASTCC"), incremental_env_s("TUNGSTEN_PARALLEL_CODEGEN"), incremental_env_s("TUNGSTEN_CORE_REACHABILITY"), incremental_env_s("TUNGSTEN_LAZY_CONTENT_HASH"), incremental_env_s("TUNGSTEN_DYNAMIC_EXPORTS"), incremental_env_s("TUNGSTEN_C_INCLUDES"), incremental_env_s("TUNGSTEN_DEFINES"), incremental_env_s("TUNGSTEN_SERVICE_BINDINGS"), incremental_env_s("BIT_HOME"), incremental_env_s("TUNGSTEN_ROOT"), incremental_env_s("TUNGSTEN_CC"), incremental_env_s("TUNGSTEN_AR"), incremental_env_s("TUNGSTEN_SYMBOL_PREFIX_HEX"), defs].join("|")
 
 # Content-addressed final-link cache. The early irbin cache deliberately keys
 # source and output paths so it can skip every compiler phase. This cache keys
@@ -370,6 +384,11 @@
     # compile-batch creates this private path afresh. Its selected sources,
     # compiler, flags, and mtimes are already represented by the identity.
     return "batch-runtime-objects"
+  # The store's archive is named by its content and has its mtime renewed
+  # while in use, so its path is its identity. A caller-supplied archive
+  # (--runtime) is identified by path and mtime.
+  if runtime_archive == nil || runtime_objs != runtime_archive
+    return incremental_abs_path(runtime_objs)
   mt = file_mtime_ns(runtime_objs)
   incremental_abs_path(runtime_objs) + ":" + (mt == nil ? "missing" : mt.to_s())
 
@@ -456,6 +475,8 @@
   q_tmp = dev_runtime_shell_quote(out_path + ".install.") + "$$"
   if system("cp -p " + dev_runtime_shell_quote(slot + ".bin") + " " + q_tmp + " && mv -f " + q_tmp + " " + q_out) != true
     return false
+  # In use: keep the store's age sweep away (renewed at most once a day).
+  system("(find " + dev_runtime_shell_quote(slot + ".bin") + " " + dev_runtime_shell_quote(slot + ".manifest") + " " + dev_runtime_shell_quote(slot + ".sidemap") + " -type f -mtime +0 -exec touch {} + >/dev/null 2>&1 &)")
   if file?(slot + ".sidemap")
     system("cp -p " + dev_runtime_shell_quote(slot + ".sidemap") + " " + dev_runtime_shell_quote(out_path + ".sidemap"))
   else
@@ -515,6 +536,24 @@
     system("rm -f " + q_tmp + " " + q_mtmp)
   nil
 
+# TUNGSTEN_DEPFILE=PATH: after a successful build, write the absolute path of
+# every source file the loader read (the entry, what it `use`s, and the core
+# and bit modules those pull in), one per line. `tungsten build` asks for it
+# to fingerprint a bit executable by the content of exactly those files. A
+# build restored from the incremental cache read nothing and writes nothing.
+-> write_build_depfile(path)
+  files = g_incremental[:manifest]
+  if files == nil
+    return nil
+  rows = StringBuffer(files.size() * 64)
+  i = 0
+  while i < files.size()
+    rows << incremental_abs_path(files[i][0])
+    rows << "\n"
+    i += 1
+  write_file(path, rows.to_s())
+  nil
+
 -> compile_one(file_path, out_path, emit_wire, verbose, intern_algo, emit_ll_only_arg = false, quiet = false)
   if out_path == nil
     out_path = file_path.ends_with?(".w") ? file_path.replace(".w", ".wc") : (file_path + ".wc")
@@ -557,6 +596,9 @@
       << "Built [out_path]"
     if incr_slot != nil && incr_id != nil
       incremental_store(incr_slot, incr_id, out_path, sidemap_path, file_path)
+    depfile = incremental_env_s("TUNGSTEN_DEPFILE")
+    if depfile != ""
+      write_build_depfile(depfile)
 
   ok
 
@@ -604,13 +646,38 @@
   system("rmdir " + dev_runtime_shell_quote(lock_path) + " 2>/dev/null")
   nil
 
-# The shared cache GC (bin/commands/cache_gc.sh) self-throttles to one sweep
-# per day, so this background kick is almost always a no-op. It keeps
-# run-cache binaries and eval sources bounded for users who only ever `run`.
--> kick_run_cache_gc
+# The store sweep (bin/commands/cache_gc.sh) self-throttles to one pass per
+# day, so this background kick is almost always a no-op. It keeps run-cache
+# binaries and eval sources bounded for users who only ever `run`. The same
+# background shell first renews the mtimes of the run binary and its
+# incremental slot (at most daily), so a program that is run every day is not
+# swept for having been compiled long ago. An isolated TUNGSTEN_CACHE_DIR is
+# swept on its own; otherwise the whole store is.
+-> kick_run_cache_gc(binary)
+  renew = StringBuffer(512)
+  renew << "find "
+  renew << dev_runtime_shell_quote(binary)
+  renew << " "
+  renew << dev_runtime_shell_quote(binary + ".id")
+  renew << " "
+  renew << dev_runtime_shell_quote(binary + ".sidemap")
+  slot = g_incremental[:run_slot]
+  if slot != nil
+    renew << " "
+    renew << dev_runtime_shell_quote(slot + ".bin")
+    renew << " "
+    renew << dev_runtime_shell_quote(slot + ".manifest")
+    renew << " "
+    renew << dev_runtime_shell_quote(slot + ".sidemap")
+  renew << " -type f -mtime +0 -exec touch {} + ; "
+  sweep = "true"
   script = resolve_runtime_dir + "../bin/commands/cache_gc.sh"
   if file?(script)
-    system("(bash " + dev_runtime_shell_quote(script) + " " + dev_runtime_shell_quote(compiler_cache_dir()) + " >/dev/null 2>&1 &)")
+    isolated = env("TUNGSTEN_CACHE_DIR")
+    dir = (isolated != nil && isolated != "") ? isolated : tungsten_build_store_dir()
+    if dir != nil
+      sweep = "bash " + dev_runtime_shell_quote(script) + " " + dev_runtime_shell_quote(dir)
+  system("({ " + renew.to_s() + sweep + "; } >/dev/null 2>&1 &)")
   nil
 
 # Warm-run fast path: when the incremental manifest says the slot is
@@ -628,6 +695,7 @@
   slot = incremental_cache_slot(source_path, stage, id)
   if slot == nil
     return false
+  g_incremental[:run_slot] = slot
   if !incremental_manifest_valid?(slot, id)
     return false
   if !file?(binary)
@@ -637,6 +705,11 @@
 -> publish_run_binary(source_path, stage, binary)
   if system("mv -f " + dev_runtime_shell_quote(stage) + " " + dev_runtime_shell_quote(binary)) != true
     return false
+  # A debug link leaves <stage>.dSYM beside the staging name (clang runs
+  # dsymutil when it compiles and links in one step). It describes a file
+  # that no longer exists under that name, several megabytes per program;
+  # runtime errors are symbolized through the sidemap, so it is not kept.
+  system("rm -rf " + dev_runtime_shell_quote(stage + ".dSYM"))
   system("mv -f " + dev_runtime_shell_quote(stage + ".sidemap") + " " + dev_runtime_shell_quote(binary + ".sidemap") + " 2>/dev/null")
   # Same guard as the compile_one probe: identity needs ccalls the stage-0
   # VM does not provide, and without the cache the .id stamp is useless.
@@ -673,7 +746,7 @@
     release_run_lock(lock_path)
   if !ok
     return 1
-  kick_run_cache_gc()
+  kick_run_cache_gc(binary)
 
   child_argv = [binary]
   i = 0

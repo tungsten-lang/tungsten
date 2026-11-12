@@ -94,16 +94,18 @@ jobs:
 
       # Build artifacts are internally content-addressed. The outer key keeps
       # incompatible host ABIs apart; the rolling restore key lets unchanged
-      # runtime/compiler objects survive an ordinary source commit.
+      # runtime/compiler objects survive an ordinary source commit. The
+      # toolchain's artifacts live in the build store (~/.tungsten/build);
+      # build/cache holds the suites' isolated caches and downloaded tools.
       - name: Restore Tungsten build cache
         uses: actions/cache@v5
         with:
           path: |
+            ~/.tungsten/build
             build/cache
-            implementations/c/build/cache-*
-          key: tungsten-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('VERSION', 'Bitfile', 'bin/commands/build.w', 'bin/commands/bootstrap*.sh', 'bin/commands/config.sh', 'compiler/**', 'core/**', 'data/**', 'scripts/gen_units.rb', 'scripts/lib/unit_registry.rb', 'implementations/c/Makefile', 'implementations/c/include/**', 'implementations/c/src/**', 'languages/tungsten/**', 'runtime/**') }}
+          key: tungsten-build-v4-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('VERSION', 'Bitfile', 'bin/commands/build.w', 'bin/commands/bootstrap*.sh', 'bin/commands/config.sh', 'compiler/**', 'core/**', 'data/**', 'scripts/gen_units.rb', 'scripts/lib/unit_registry.rb', 'implementations/c/Makefile', 'implementations/c/include/**', 'implementations/c/src/**', 'languages/tungsten/**', 'runtime/**') }}
           restore-keys: |
-            tungsten-build-v3-${{ runner.os }}-${{ runner.arch }}-
+            tungsten-build-v4-${{ runner.os }}-${{ runner.arch }}-
 
       # The toolchain the release matrix builds with (LLVM from apt.llvm.org
       # at the pinned major), not the distribution's older clang.

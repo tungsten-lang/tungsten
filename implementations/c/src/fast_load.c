@@ -124,6 +124,51 @@ static int fl_stamp_parser_source_paths(TcAstValue value, TcAstValue source_path
   return 1;
 }
 
+/* How a loaded file is NAMED (in source locations and source_path stamps),
+ * as opposed to how it is identified (the realpath-canonical seen-set).
+ *
+ * The Tungsten loader names files the way the entry was given: an absolute
+ * entry yields absolute names, a cwd-relative entry ("compiler/tungsten.w",
+ * compiled from the checkout root) yields names relative to the cwd
+ * ("compiler/lib/lexer.w", "core/string.w"). The compiler embeds those names
+ * in the programs it emits, so they are part of the stage-1 IR, which must
+ * equal the stage-2 IR that the Tungsten loader produces, and must not
+ * depend on where the checkout lives when the build asks for relative names
+ * (the stage compilers are shared between checkouts through the build
+ * store). For a relative entry this holds "<realpath of cwd>/"; canonical
+ * paths under it are named by their remainder. */
+static char *fl_display_root = NULL;
+static size_t fl_display_root_len = 0;
+
+static void fl_set_display_root(const char *entry_as_given) {
+  free(fl_display_root);
+  fl_display_root = NULL;
+  fl_display_root_len = 0;
+  if (!entry_as_given || entry_as_given[0] == '/') return;
+  char *cwd = realpath(".", NULL);
+  if (!cwd) return;
+  size_t len = strlen(cwd);
+  char *root = (char *)malloc(len + 2);
+  if (!root) {
+    free(cwd);
+    return;
+  }
+  memcpy(root, cwd, len);
+  root[len] = '/';
+  root[len + 1] = '\0';
+  free(cwd);
+  fl_display_root = root;
+  fl_display_root_len = len + 1;
+}
+
+static const char *fl_display_path(const char *canonical) {
+  if (fl_display_root && strncmp(canonical, fl_display_root, fl_display_root_len) == 0 &&
+      canonical[fl_display_root_len] != '\0') {
+    return canonical + fl_display_root_len;
+  }
+  return canonical;
+}
+
 static char *fl_canonicalize_path(const char *path, TcError *err) {
   char *canonical = realpath(path, NULL);
   if (!canonical) {
@@ -240,8 +285,13 @@ static int fl_flatten_program(const char *path, const unsigned char *flags, size
                               FlPathSet *seen, TcAstValue *exprs_out, TcError *err) {
   if (!fl_path_set_add(seen, path, err)) return 0;
 
+  /* `path` identifies the file (canonical); `name` is what it is called in
+   * locations and source_path stamps. A relative name is relative to the
+   * cwd, so it also opens the file. */
+  const char *name = fl_display_path(path);
+
   TcAstValue file_ast;
-  if (!fl_parse_file_ast(path, flags, flags_len, &file_ast, err)) return 0;
+  if (!fl_parse_file_ast(name, flags, flags_len, &file_ast, err)) return 0;
 
   TcAstValue *file_exprs = fl_ast_get(file_ast, "expressions");
   if (!file_exprs || file_exprs->kind != TC_AST_ARRAY) {
@@ -254,7 +304,7 @@ static int fl_flatten_program(const char *path, const unsigned char *flags, size
    * loader bypasses that parser, so mirror the sparse source_path contract on
    * its Hash AST. Share one string value per file, just as the canonical
    * parser shares @file; inline/interned/singleton nodes remain unstamped. */
-  TcAstValue source_path = tc_ast_string_copy(path, strlen(path), err);
+  TcAstValue source_path = tc_ast_string_copy(name, strlen(name), err);
   if (source_path.kind != TC_AST_STRING) {
     tc_ast_free(file_ast);
     return 0;
@@ -403,6 +453,9 @@ static char *fl_core_root_of(const char *file_path) {
 
 int tc_vm_fast_load_program_ast(const char *path, const char *from_file, TcValue *out,
                                 TcValue *loaded_out, TcError *err) {
+  /* The importing file's spelling decides, as it does in the Tungsten
+   * loader (a `use` from an absolutely named file resolves absolutely). */
+  fl_set_display_root(from_file ? from_file : path);
   /* Resolve relative path against from_file if needed. */
   char *resolved = NULL;
   const char *load_path = path;

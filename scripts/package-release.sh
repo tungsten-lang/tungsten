@@ -49,10 +49,10 @@ git -C "$ROOT" archive --format=tar HEAD -- \
 cp "$COMPILER" "$STAGE/$PACKAGE/bin/tungsten-compiler"
 chmod 755 "$STAGE/$PACKAGE/bin/tungsten-compiler" "$STAGE/$PACKAGE/bin/tungsten"
 
-# Images live where the compiler looks for them: build/cache/compiler-images
+# Images live where the compiler looks for them: build/compiler-images
 # under the root that holds its runtime/ (compiler_image_dir in
 # compiler/lib/driver/link.w). The side maps symbolize Tungsten frames.
-PACKAGE_IMAGES="$STAGE/$PACKAGE/build/cache/compiler-images"
+PACKAGE_IMAGES="$STAGE/$PACKAGE/build/compiler-images"
 mkdir -p "$PACKAGE_IMAGES"
 for kind in "${IMAGE_KINDS[@]}"; do
   cp "$IMAGES/tungsten-$kind" "$PACKAGE_IMAGES/tungsten-$kind"

@@ -104,10 +104,17 @@ environment; the job opens a pull request for review. See
 `benchmarks/performance/README.md` for the comparison, environment, and GitHub
 repository-setting contract.
 
-Builds keep reusable artifacts in `build/cache/`. A concurrency-safe sweep runs
-automatically and retains files for seven days by default. To exercise the
-retention contract directly, run `rake test:cache_gc`; do not commit cache or
-build products.
+Builds keep reusable artifacts in the build store, one directory shared by
+every checkout, worktree and installed toolchain (`~/.tungsten/build`, or
+`TUNGSTEN_BUILD_STORE`; see "Build store" in `AGENTS.md`). A concurrency-safe
+sweep runs automatically: it removes entries unused for seven days and, over
+20 GB, the least recently used ones (`TUNGSTEN_CACHE_MAX_AGE_DAYS`,
+`TUNGSTEN_CACHE_MAX_SIZE_MB`). To exercise the retention contract directly, run
+`rake test:cache_gc`; `rake test:cache_location` and
+`scripts/test-build-store.sh` cover where artifacts go and what their names
+cover. Test scripts that compile must isolate themselves (`TUNGSTEN_CACHE_DIR`
+for the compiler's artifacts, `TUNGSTEN_BUILD_STORE` for a whole build) rather
+than write into a developer's store; do not commit cache or build products.
 
 ## Continuous integration
 
@@ -116,13 +123,14 @@ Intel coverage remains on GitHub-hosted hardware. The repository's Blacksmith
 GitHub integration must be enabled before changing a job to a `blacksmith-*`
 label, or GitHub will leave that job queued without a matching runner.
 
-CI persists `build/cache/` and the content-addressed C VM cache with the
-upstream `actions/cache` action. Blacksmith redirects that action to its
+CI persists the build store (`~/.tungsten/build`) and `build/cache/` (the
+suites' isolated caches and downloaded tools) with the upstream
+`actions/cache` action. Blacksmith redirects that action to its
 co-located cache automatically. The outer key separates operating systems and
 architectures and hashes build inputs; its rolling restore prefix deliberately
 allows older entries through because Tungsten validates every restored artifact
 against its own complete content/toolchain identity before reuse. Avoid adding
-a second cache action for a subdirectory of `build/cache/`.
+a second cache action for a subdirectory of either.
 
 ## Pull requests
 

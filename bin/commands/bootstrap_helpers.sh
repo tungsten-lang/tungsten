@@ -10,6 +10,13 @@ bootstrap_stage1_source_inputs() {
   local lex64_table="$3"
 
   printf '%s\n' "$compiler_w" "$lex64_table" "$root/data/unit_names.txt"
+  # compiler/tungsten.w is a dozen lines over the driver beside it; the
+  # stage identity must change when the driver does. (Listed when present:
+  # a compiler directory without one has nothing more to hash.)
+  local extra
+  for extra in "$root/data/units.tsv" "$(dirname "$compiler_w")/tungsten_driver.w"; do
+    if [ -f "$extra" ]; then printf '%s\n' "$extra"; fi
+  done
   find "$root/compiler/lib" -type f -name '*.w' -print | LC_ALL=C sort
   find "$root/core" -type f -name '*.w' -print | LC_ALL=C sort
   find "$root/languages/tungsten/lexers" \

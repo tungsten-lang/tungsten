@@ -57,8 +57,9 @@ done
 ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 COMPILER="$ROOT/bin/tungsten-compiler"
 # Worktrees do not inherit the gitignored compiler. The post-checkout hook
-# usually plants a symlink; this is the same link for checkouts that never
-# ran the hook (existing worktrees, --no-checkout, hooksPath unset).
+# installs the one the build store holds for exactly this checkout's sources;
+# this is the same lookup for checkouts that never ran the hook (existing
+# worktrees, --no-checkout, hooksPath unset). No match installs nothing.
 if [ ! -x "$COMPILER" ] && [ -f "$ROOT/.githooks/link-host-compiler.sh" ]; then
   bash "$ROOT/.githooks/link-host-compiler.sh" "$ROOT" >/dev/null 2>&1 || true
 fi
@@ -125,11 +126,15 @@ case "$1" in
     shift
     exec bash "$ROOT/bin/commands/release.sh" "$@"
     ;;
-  # cleanup: force a build-cache sweep now (the same GC that build/bootstrap
-  # and `run` kick daily). Prunes stale incremental slots, run-cache binaries,
-  # and eval sources older than TUNGSTEN_CACHE_MAX_AGE_DAYS (default 7).
+  # cleanup: force a sweep of the build store now (the same GC that
+  # build/bootstrap and `run` kick daily). Removes entries unused for
+  # TUNGSTEN_CACHE_MAX_AGE_DAYS (default 7) and, over TUNGSTEN_CACHE_MAX_SIZE_MB,
+  # the least recently used ones. `cleanup --all` empties the store.
   cleanup)
     shift
+    if [ "${1:-}" = "--all" ]; then
+      exec bash "$ROOT/bin/commands/store.sh" wipe "$ROOT"
+    fi
     exec env TUNGSTEN_CACHE_GC_FORCE=1 bash "$ROOT/bin/commands/cache_gc.sh" "$@"
     ;;
   wasm)
@@ -659,22 +664,10 @@ case "$1" in
     exit 0
     ;;
   --clear-cache)
-    cache_dir="${TUNGSTEN_CACHE_DIR:-$ROOT/build/cache}"
-    count=0
-    if [ -d "$cache_dir" ]; then
-      for f in "$cache_dir"/*.memo "$cache_dir"/irbin-*; do
-        if [ -f "$f" ]; then
-          rm -f "$f"
-          count=$((count + 1))
-        fi
-      done
-    fi
-    if [ "$count" -eq 1 ]; then
-      echo "Cleared 1 cache file"
-    else
-      echo "Cleared $count cache files"
-    fi
-    exit 0
+    # Removes the cache entries that rest on file times and tool identities:
+    # this toolchain's incremental and compiled-run binaries, and every
+    # parse/Core/link snapshot (bin/commands/store.sh says exactly which).
+    exec bash "$ROOT/bin/commands/store.sh" clear-cache "$ROOT"
     ;;
   --explain)
     shift
@@ -781,13 +774,16 @@ if [ -x "$COMPILER" ]; then
     # A CLI that fails to compile must SAY so: this fallback ran silently
     # for five weeks while bin/tungsten.w did not lex, and every `tungsten`
     # invocation was the Ruby CLI without anyone noticing.
-    WC_LOG="${TMPDIR:-/tmp}/tungsten-cli-build.log"
+    # One log per process: checkouts rebuilding their CLIs at the same time
+    # must not write into one file.
+    WC_LOG="${TMPDIR:-/tmp}/tungsten-cli-build.$$.log"
     if ! BIT_HOME="$ROOT/bits" \
         "$COMPILER" compile "$ROOT/bin/tungsten.w" --out "$WC" --no-lto >"$WC_LOG" 2>&1; then
       echo "tungsten: bin/tungsten.w failed to compile; running the Ruby CLI instead (see $WC_LOG)" >&2
       sed -n '/error/{p;q;}' "$WC_LOG" >&2
       exec "$RUBY" "$RUBY_CLI" "$@"
     fi
+    rm -f "$WC_LOG"
     # Ad-hoc codesign on macOS so a freshly linked CLI is launchable.
     if [ "$(uname -s)" = "Darwin" ]; then
       codesign --force -s - "$WC" >/dev/null 2>&1 || true

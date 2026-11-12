@@ -17,7 +17,32 @@ release_workflow = File.read(File.join(ROOT, ".github/workflows/release.yml")).g
 # <compiler-dir>/tungsten.w, <compiler-dir>/lib, core, languages/tungsten/lexers.
 required_uses = [
   'compiler_source_paths.push(compiler_dir_name + "/tungsten.w")',
+  'compiler_source_paths.push(compiler_dir_name + "/tungsten_driver.w")',
   'compiler_source_paths.push(compiler_dir_name + "/lib")',
+  # Stages are shared between checkouts through the build store, so they are
+  # compiled by relative path with TUNGSTEN_ROOT unset (their bytes must not
+  # name the checkout) and a stage that names it anyway is not published.
+  'STAGE_ENTRY = compiler_dir_name + "/tungsten.w"',
+  'STAGE_CD = "cd " + shq(ROOT) + " && env -u TUNGSTEN_ROOT " + STAGE_UNIT_NAMES',
+  's1_cmd = STAGE_CD + s1_env + shq(c_interp_for_build) + " " + shq(STAGE_ENTRY) + " compile " + shq(STAGE_ENTRY)',
+  's2_cmd = STAGE_CD + s2_env + shq(stage1) + " compile " + shq(STAGE_ENTRY)',
+  'if names_this_checkout?(built_bin)',
+  # The lexer table reaches the stages by path; the identity hashes its
+  # content and must not see the path (it is the checkout's).
+  's1_identity_env = env_kv_join(s1_keys, s1_vals) s1_keys.push("TUNGSTEN_LEX64_TABLE")',
+  's2_identity_env = env_kv_join(s2_keys, s2_vals) s2_keys.push("TUNGSTEN_LEX64_TABLE")',
+  'AMBIENT_TOOLCHAIN + "\n" + s1_identity_env + TUNING_KEY)',
+  'AMBIENT_TOOLCHAIN + "\n" + s2_identity_env)',
+  # Compiler switches inherited from the environment (TUNGSTEN_FREE=0, ...)
+  # are part of every shared key: stages, images, bits.
+  'TUNING_ENV = capture("bash " + shq(STORE_SH) + " tuning-environment 2>/dev/null").strip',
+  'tool_identity(runtime_cc) + TUNING_KEY)',
+  'buf << TUNING_KEY',
+  '!portable_mode && TUNING_ENV == ""',
+  'c_stage1_cached = STAGE_STORE_DIR + "/c-vm-stage1-" + c_stage1_identity',
+  'c_stage2_cached = STAGE_STORE_DIR + "/c-vm-stage2-" + c_stage2_identity',
+  # The Ruby host compiles by absolute path: its stage keys carry the root.
+  'env_or_empty("TUNGSTEN_CARRY_UNROLL") + ":" + ROOT + TUNING_KEY).slice(0, 16)',
   'compiler_source_paths.push("core")',
   'compiler_source_paths.push("languages/tungsten/lexers")',
   # C-path stage identity hashes the compiler sources.
@@ -47,6 +72,21 @@ required_uses = [
 ]
 required_uses.each do |source|
   raise "build.w does not use compiler source contract: #{source}" unless build_source.include?(source)
+end
+
+# bootstrap.sh builds stage 1 the same way (its .ll is compared with the
+# stage 2 that build.w compiles), from the same store, over the same sources.
+helpers_source = File.read(File.join(ROOT, "bin/commands/bootstrap_helpers.sh")).gsub(/\s+/, " ")
+[
+  'COMPILER_ENTRY="compiler/tungsten.w"',
+  'env -u TUNGSTEN_ROOT TUNGSTEN_UNIT_NAMES="${TUNGSTEN_UNIT_NAMES:-$ROOT/data/unit_names.txt}" \\ TUNGSTEN_LL_PATH="$stage1_tmp.ll" \\ "$C_INTERP" "$COMPILER_ENTRY" compile "$COMPILER_ENTRY"',
+  'CACHE="$STORE/stages"',
+].each do |source|
+  raise "bootstrap.sh lost the shared-store stage contract: #{source}" unless bootstrap_source.include?(source)
+end
+raise "bootstrap stage-1 identity must include the tuning environment" unless bootstrap_source.include?("tungsten_tuning_environment bootstrap_stage1_source_manifest")
+unless helpers_source.include?('tungsten_driver.w') && helpers_source.include?('data/units.tsv')
+  raise "bootstrap stage-1 source inputs must hash the compiler driver and the unit data"
 end
 
 unless bootstrap_source.include?('--pgo) PGO=1') && bootstrap_source.include?('build_flags+=(--pgo)')

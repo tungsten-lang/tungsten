@@ -138,8 +138,8 @@ TUNGSTEN BUILD
 
     The checkout the build compiles against (the CLI's own) must have the
     commit in its history; `compiler:` also checks bin/tungsten-compiler, by
-    the commit in its build record (build/cache/compiler-build.profile,
-    written by the self-host build since 2026-11-04) or, without one, by its
+    the commit in its build record (build/compiler-build.profile, written
+    by the self-host build) or, without one, by its
     file time (a compiler built before the commit cannot contain it). The
     message says what to run: update that checkout to main, or rebuild its
     compiler (`cd <checkout> && bin/tungsten build`). A checkout that is not

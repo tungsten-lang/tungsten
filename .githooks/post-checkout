@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # tungsten: symlink host compiler into worktrees
 #
+# (The line above is the marker `bin/tungsten doctor` recognises its own hook
+# by; it is kept word for word so installed hooks keep being updated. What the
+# hook does now: a worktree without a compiler gets the one the build store
+# holds for exactly its sources, as a copy, or none.)
+#
 # Installed to $GIT_COMMON_DIR/hooks/post-checkout by `bin/tungsten doctor`.
 # Git invokes this after checkout and after `git worktree add`. A missing
 # compiler must never fail the checkout.

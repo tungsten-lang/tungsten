@@ -47,6 +47,7 @@ Dir.mktmpdir("tungsten-stage-identity-") do |directory|
   tools = File.join(directory, "tools")
   home = File.join(directory, "home")
   log = File.join(directory, "stages.jsonl")
+  store = File.join(directory, "store")
   FileUtils.mkdir_p([File.join(root, "bin/commands"), File.join(root, "runtime"), File.join(root, "compiler"),
                      File.join(root, "core"), File.join(root, "languages/tungsten"),
                      File.join(root, "implementations/c"), tools, home])
@@ -54,6 +55,8 @@ Dir.mktmpdir("tungsten-stage-identity-") do |directory|
     File.write(File.join(root, marker), "# marker\n")
   end
   File.write(File.join(root, "bin/commands/cache_gc.sh"), "exit 0\n")
+  # the real location/key policy script (the driver asks it for fingerprints and the tuning environment)
+  FileUtils.cp(File.expand_path("../bin/commands/store.sh", __dir__), File.join(root, "bin/commands/store.sh"))
   File.write(File.join(root, "languages/tungsten/tungsten.lex64"), "fixture table\n")
   File.write(File.join(root, "VERSION"), "2026.01.01\n")
 
@@ -116,16 +119,17 @@ Dir.mktmpdir("tungsten-stage-identity-") do |directory|
     "TUNGSTEN_BOOTSTRAP_HANDOFF" => "", "TUNGSTEN_BOOTSTRAP" => "", "TUNGSTEN_CPU" => "", "TUNGSTEN_COMPILER" => "",
     "TUNGSTEN_BUILD_MANIFEST" => "", "TUNGSTEN_C_FAST_PARSE" => "", "TUNGSTEN_LEX64_TABLE" => "",
     "HOME" => home, "TUNGSTEN_HOME" => File.join(home, ".tungsten"), "TUNGSTEN_BIN" => File.join(home, "bin"),
+    "TUNGSTEN_BUILD_STORE" => store, "TUNGSTEN_CACHE_DIR" => "",
     "FAKE_STAGE_LOG" => log, "FAKE_STAGE2_DRIFT" => nil, "CI" => nil, "NO_COLOR" => "1", "MAKEFLAGS" => nil,
     "PATH" => tools + File::PATH_SEPARATOR + ENV.fetch("PATH")
   }
   installed = File.join(root, "bin/tungsten-compiler")
-  profile = File.join(root, "build/cache/compiler-build.profile")
+  profile = File.join(root, "build/compiler-build.profile")
 
-  # Every scenario starts from a checkout with no compiler and no caches, so
-  # "installed" always means "installed by this run".
+  # Every scenario starts from a checkout with no compiler and an empty build
+  # store, so "installed" always means "installed by this run".
   run = lambda do |arguments = [], overrides = {}|
-    FileUtils.rm_rf([File.join(root, "build"), File.join(root, "implementations/c/build")])
+    FileUtils.rm_rf([File.join(root, "build"), File.join(root, "implementations/c/build"), store])
     FileUtils.rm_f([installed, installed + ".sidemap", log])
     out, status = Open3.capture2e(environment.merge(overrides), driver, *arguments, chdir: root)
     records = File.exist?(log) ? File.readlines(log).map { |line| JSON.parse(line)["argv"] } : []
@@ -174,13 +178,14 @@ Dir.mktmpdir("tungsten-stage-identity-") do |directory|
   check.call("the failure names both modules for diffing",
              out =~ %r{stage 1 \.ll: \h{64} +/\S+/ll/stage1-c\.ll} && out =~ %r{stage 2 \.ll: \h{64} +/\S+/ll/stage2-c\.ll}, out)
 
-  # An artifact's images: one compile per kind, of that kind's source, with the
+  # An artifact's images: one compile per kind, of that kind's source (by
+  # relative path from the root, as every shared build is), with the
   # release/no-LTO image profile and the artifact's own target and CPU.
   image_compile = lambda do |records, release_dir, kind, source|
     output = File.join(release_dir, "compiler-images", "tungsten-#{kind}")
     argv = records.find { |candidate| candidate.include?(output) }
     return nil unless argv && File.executable?(output) && argv.include?("compile") &&
-                      argv.include?(File.join(root, "compiler", source))
+                      argv.include?(File.join("compiler", source))
     argv
   end
   images_for = lambda do |records, release_dir, target, cpu|

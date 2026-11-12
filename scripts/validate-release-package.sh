@@ -56,8 +56,8 @@ for path in \
   data/substance_densities.json \
   doc/CORE.md \
   runtime/runtime.c \
-  build/cache/compiler-images/tungsten-repl \
-  build/cache/compiler-images/tungsten-metal
+  build/compiler-images/tungsten-repl \
+  build/compiler-images/tungsten-metal
 do
   if ! grep -Fxq "$PACKAGE/$path" "$LISTING"; then
     printf 'release package is missing %s\n' "$path" >&2
@@ -77,7 +77,7 @@ if [[ ! -x "$PACKAGE_ROOT/bin/tungsten" || ! -x "$PACKAGE_ROOT/bin/tungsten-comp
 fi
 # The compiler execs these for the REPL, --interpret and @gpu programs, and
 # never builds one on launch: a package without them ships those modes broken.
-IMAGES="$PACKAGE_ROOT/build/cache/compiler-images"
+IMAGES="$PACKAGE_ROOT/build/compiler-images"
 for kind in repl metal; do
   if [[ ! -x "$IMAGES/tungsten-$kind" ]]; then
     printf 'release package compiler image is not executable: tungsten-%s\n' "$kind" >&2

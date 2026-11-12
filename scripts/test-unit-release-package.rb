@@ -8,7 +8,7 @@
 # packaged launcher), then reject it when a required file is taken away.
 #
 # The images stand in for a release artifact's: here they are the host's own
-# (build/cache/compiler-images), which is fine for a package that never
+# (build/compiler-images), which is fine for a package that never
 # leaves this machine.
 #
 # Needs a built compiler and images (bin/tungsten build) and a committed tree:
@@ -24,7 +24,7 @@ label = "unit-registry-test"
 version = File.read(File.join(root, "VERSION")).strip
 package = "tungsten-#{version}-#{label}"
 kinds = %w[repl metal]
-host_images = File.join(root, "build/cache/compiler-images")
+host_images = File.join(root, "build/compiler-images")
 compiler = File.join(root, "bin/tungsten-compiler")
 abort "no compiler at #{compiler}: run bin/tungsten build" unless File.executable?(compiler)
 kinds.each do |kind|
@@ -64,7 +64,7 @@ Dir.mktmpdir("tungsten-release-unit-test") do |tmp|
   # cwd, start both images, and build a program that runs. Each required file
   # is then removed in turn; the validator must name it.
   [nil, "data/unit_names.txt", "data/unit_registry.json", "data/unit_metadata.tsv",
-   "build/cache/compiler-images/tungsten-repl", "build/cache/compiler-images/tungsten-metal"].each do |missing|
+   "build/compiler-images/tungsten-repl", "build/compiler-images/tungsten-metal"].each do |missing|
     saved = File.join(tmp, "saved")
     FileUtils.mv(File.join(package_root, missing), saved) if missing
     # The tree is repacked once per case; the fastest gzip level keeps that cheap.

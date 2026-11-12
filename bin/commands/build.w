@@ -9,11 +9,24 @@
 # stage 2 -> byte-identity verify (stage1 .ll == stage2 .ll) -> install
 # through the content-addressed signed cache -> release artifacts -> bits.
 #
-# Cache-key structure mirrors build.rb exactly; per-file digests are
-# SHA-256 via the native crypto extern (fast enough to skip build.rb's
-# persistent digest cache entirely). Key VALUES still differ from the
-# Ruby driver's (joiners/tree-walk order), so the first build after the
-# migration is cold. build/cache layout and artifact names are unchanged.
+# Per-file digests are SHA-256 via the native crypto extern.
+#
+# Everything this build can reuse lives in the build store, one directory
+# shared by every checkout, worktree and installed toolchain of a user
+# (default ~/.tungsten/build; see "Build store" in AGENTS.md):
+#   stages/     stage-0 VMs, stage-1/2 compilers with their .ll, build
+#               runtime archives, system-dependency probes
+#   compilers/  finished compilers by content, the compiler images built
+#               from them, and the index from a source fingerprint to both
+#   bits/       bit executables by a fingerprint of everything they read
+#   compile/    the compiler's own incremental artifacts (TUNGSTEN_CACHE_DIR
+#               replaces this one directory)
+# A store entry's name covers everything that determines its bytes, and the
+# stage compilers, images and in-checkout bits are compiled from the checkout
+# root with relative paths so those bytes do not depend on where the checkout
+# is. What a checkout keeps for itself is state, not cache: bin/tungsten-compiler
+# (a copy of a store entry), build/compiler-build.profile,
+# build/compiler-images/, and each bit's bin/.
 
 # ── Constants ───────────────────────────────────────────────────
 
@@ -26,7 +39,30 @@ C_INTERP = ROOT + "/implementations/c/build/tungsten-c"
 C_INTERP_DIR = ROOT + "/implementations/c"
 SPINEL_BIN = ROOT + "/src/patched/spinel/spinel"
 SPINEL_RUNTIME = ROOT + "/src/patched/spinel/lib/libspinel_rt.a"
-BUILD_CACHE_DIR = ROOT + "/build/cache"
+
+# The build store root: TUNGSTEN_BUILD_STORE, else TUNGSTEN_HOME/build, else
+# HOME/.tungsten/build (the toolchain root stands in for a missing home, as in
+# bin/tungsten). The same policy as compiler_cache_dir in
+# compiler/lib/driver/link.w and bin/commands/store.sh.
+-> build_store_root
+  override = env("TUNGSTEN_BUILD_STORE")
+  if override != nil && override.strip != ""
+    return File.expand_path(override.strip)
+  home = env("TUNGSTEN_HOME")
+  if home != nil && home.strip != ""
+    return File.expand_path(home.strip + "/build")
+  home = env("HOME")
+  if home != nil && home.strip != ""
+    return File.expand_path(home.strip + "/.tungsten/build")
+  ROOT + "/.tungsten/build"
+
+BUILD_STORE_DIR = build_store_root()
+STAGE_STORE_DIR = BUILD_STORE_DIR + "/stages"
+COMPILER_STORE_DIR = BUILD_STORE_DIR + "/compilers"
+BIT_STORE_DIR = BUILD_STORE_DIR + "/bits"
+# Per-checkout state (which compiler is installed here, how it was built).
+CHECKOUT_STATE_DIR = ROOT + "/build"
+STORE_SH = ROOT + "/bin/commands/store.sh"
 
 # ── Small helpers ───────────────────────────────────────────────
 
@@ -99,12 +135,38 @@ build_homebrew_prefix_memo = {}
     return "missing:" + path
   Digest.sha256(bytes)
 
+# Copy through a temp file in the destination's directory and rename it into
+# place: a reader sees the old file or the new one, never part of one, and a
+# destination that is executing keeps its inode. `cp -c` asks APFS for a
+# copy-on-write clone, so installing a store entry into a checkout costs no
+# disk; it falls back to an ordinary copy on other filesystems.
 -> atomic_copy(src, dst)
   tmp = dst + "." + PID + ".tmp"
-  if !sh_ok("cp -p " + shq(src) + " " + shq(tmp) + " && mv -f " + shq(tmp) + " " + shq(dst))
+  if !sh_ok("{ cp -c -p " + shq(src) + " " + shq(tmp) + " 2>/dev/null || cp -p " + shq(src) + " " + shq(tmp) + "; } && mv -f " + shq(tmp) + " " + shq(dst))
     sh_ok("rm -f " + shq(tmp))
     return false
   true
+
+# The store is swept by age (bin/commands/cache_gc.sh), so an entry that is
+# being used must look recent: renew its mtime, at most once a day. Nothing
+# in the store compares an entry's mtime with a source's.
+-> store_renew(paths)
+  if paths.size == 0
+    return true
+  cmd = "find"
+  i = 0
+  while i < paths.size
+    cmd = cmd + " " + shq(paths[i])
+    i = i + 1
+  sh_ok(cmd + " -type f -mtime +0 -exec touch {} + >/dev/null 2>&1")
+
+# True when the file's bytes contain the given path. Store entries shared
+# between checkouts must not: one that names the checkout it was built in
+# (a baked __DIR__, an absolute source name) is only right there.
+-> file_mentions?(path, needle)
+  if needle == "" || !regular_file?(path)
+    return false
+  sh_ok("LC_ALL=C grep -q -F -e " + shq(needle) + " " + shq(path))
 
 -> atomic_write(contents, dst)
   tmp = dst + "." + PID + ".tmp"
@@ -563,7 +625,8 @@ if preflight_missing_names.size > 0
   eputs("Then re-run " + BOLD + "bin/tungsten build" + RESET + ". Full check: " + BOLD + "bin/tungsten doctor" + RESET + ".")
   exit(1)
 
-ccall("w_setenv", "TUNGSTEN_CACHE_DIR", BUILD_CACHE_DIR)
+# Every compiler this build runs uses the same store, however it was named.
+ccall("w_setenv", "TUNGSTEN_BUILD_STORE", BUILD_STORE_DIR)
 
 # ── Mode flags ──────────────────────────────────────────────────
 
@@ -600,14 +663,18 @@ if spinel_requested && !spinel_available
 use_spinel_bootstrap = spinel_requested
 use_c_bootstrap = !ruby_bootstrap_requested && !spinel_requested
 
-make_dirs(BUILD_CACHE_DIR)
-sh_ok("bash " + shq(ROOT + "/bin/commands/cache_gc.sh") + " " + shq(BUILD_CACHE_DIR))
+sh_ok("bash " + shq(ROOT + "/bin/commands/cache_gc.sh") + " " + shq(BUILD_STORE_DIR))
+make_dirs(STAGE_STORE_DIR)
+make_dirs(COMPILER_STORE_DIR)
+make_dirs(BIT_STORE_DIR)
+make_dirs(CHECKOUT_STATE_DIR)
 
 # Per-invocation scratch root (PID-scoped: concurrent builds must not
 # clobber each other's in-flight stage output or emitted .ll).
 build_scratch_dir = "/tmp/tungsten-build-" + PID
 sh_ok("rm -rf " + shq(build_scratch_dir))
 make_dirs(build_scratch_dir)
+BUILD_SCRATCH_DIR = build_scratch_dir
 
 # ── Value flags + validations ───────────────────────────────────
 
@@ -830,9 +897,19 @@ if handoff_path != ""
 
 AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
 
+# The compiler switches this build inherited from its environment
+# (TUNGSTEN_FREE=0, TUNGSTEN_DEFINES, the cache and BIGINT toggles, ...: see
+# tungsten_tuning_environment in bin/commands/store.sh, the one list both this
+# driver and bootstrap.sh use). They change what the stages, images and bits
+# contain, so they are part of every key in the shared store. Empty in a
+# plain environment, and then it adds nothing to a key.
+TUNING_ENV = capture("bash " + shq(STORE_SH) + " tuning-environment 2>/dev/null").strip
+TUNING_KEY = TUNING_ENV == "" ? "" : "\ntuning-environment\n" + TUNING_ENV
+
 # ── System-dep probes with a marker-fingerprint cache ───────────
-# (port of cached_system_deps: one text file per probe under build/cache,
-# line 1 = fingerprint, remaining lines = the cached value)
+# (port of cached_system_deps: one text file per probe in the store's
+# stages/, line 1 = fingerprint, remaining lines = the cached value; the
+# probes describe the host, so every checkout shares them)
 
 -> marker_fingerprint(marker_paths)
   common = []
@@ -871,7 +948,7 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
   Digest.sha256(parts.join("|") + "\n" + probe_env + "\n" + tool_identity("pkg-config") + "\n" + tool_identity("brew"))
 
 -> cached_probe_read(name, fingerprint)
-  path = BUILD_CACHE_DIR + "/system-deps-" + name + ".txt"
+  path = STAGE_STORE_DIR + "/system-deps-" + name + ".txt"
   text = read_file(path)
   if text == nil
     return nil
@@ -886,7 +963,7 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
   out
 
 -> cached_probe_write(name, fingerprint, value_lines)
-  path = BUILD_CACHE_DIR + "/system-deps-" + name + ".txt"
+  path = STAGE_STORE_DIR + "/system-deps-" + name + ".txt"
   atomic_write(fingerprint + "\n" + value_lines.join("\n") + "\n", path)
 
 -> probe_zstd
@@ -946,7 +1023,10 @@ AMBIENT_TOOLCHAIN = ambient_toolchain_identity()
 
 # ── System install helpers (tungsten install / build --install) ─
 
-BUILD_PROFILE_PATH = BUILD_CACHE_DIR + "/compiler-build.profile"
+# How this checkout's bin/tungsten-compiler was built. Per checkout, not in
+# the store: two checkouts can install the same compiler from different
+# commits, with or without their bits.
+BUILD_PROFILE_PATH = CHECKOUT_STATE_DIR + "/compiler-build.profile"
 
 -> version_day_revision(ver_raw, today)
   if ver_raw == nil
@@ -1041,7 +1121,7 @@ BUILD_PROFILE_PATH = BUILD_CACHE_DIR + "/compiler-build.profile"
   << BOLD + "==> Install: system toolchain" + RESET
   if File.expand_path(tungsten_home) != ROOT
     make_dirs(tungsten_home)
-    make_dirs(tungsten_home + "/build/cache")
+    make_dirs(tungsten_home + "/build")
     make_dirs(tungsten_home + "/bits")
     atomic_copy(ROOT + "/VERSION", tungsten_home + "/VERSION")
     if regular_file?(ROOT + "/Bitfile")
@@ -1054,20 +1134,14 @@ BUILD_PROFILE_PATH = BUILD_CACHE_DIR + "/compiler-build.profile"
       if file_directory?(ROOT + "/" + d)
         if !sh_ok("rsync -a --delete --exclude '.DS_Store' --exclude '*.dSYM' " + shq(ROOT + "/" + d + "/") + " " + shq(tungsten_home + "/" + d + "/"))
           die("tungsten install: failed to sync " + d + " to " + tungsten_home)
-    if file_directory?(ROOT + "/build/cache/compiler-images")
-      make_dirs(tungsten_home + "/build/cache/compiler-images")
-      sh_ok("rsync -a --delete --exclude '.DS_Store' --exclude '*.dSYM' " + shq(ROOT + "/build/cache/compiler-images/") + " " + shq(tungsten_home + "/build/cache/compiler-images/"))
-    if regular_file?(BUILD_CACHE_DIR + "/runtime-current.manifest")
-      atomic_copy(BUILD_CACHE_DIR + "/runtime-current.manifest", tungsten_home + "/build/cache/runtime-current.manifest")
-      manifest_text = read_file(BUILD_CACHE_DIR + "/runtime-current.manifest")
-      if manifest_text != nil
-        mlines = manifest_text.split("\n")
-        mi = 0
-        while mi < mlines.size
-          mfile = mlines[mi].strip
-          mi = mi + 1
-          if mfile != "" && regular_file?(BUILD_CACHE_DIR + "/" + mfile)
-            atomic_copy(BUILD_CACHE_DIR + "/" + mfile, tungsten_home + "/build/cache/" + mfile)
+    # The installed toolchain reads the same build store as this checkout
+    # (TUNGSTEN_HOME/build), so runtime objects are not copied; what it needs
+    # of its own is the pair of compiler images that go with its compiler.
+    if file_directory?(CHECKOUT_STATE_DIR + "/compiler-images")
+      make_dirs(tungsten_home + "/build/compiler-images")
+      sh_ok("rsync -a --delete --exclude '.DS_Store' --exclude '*.dSYM' " + shq(CHECKOUT_STATE_DIR + "/compiler-images/") + " " + shq(tungsten_home + "/build/compiler-images/"))
+    if regular_file?(BUILD_PROFILE_PATH)
+      atomic_copy(BUILD_PROFILE_PATH, tungsten_home + "/build/compiler-build.profile")
     bundled_bits = capture("find " + shq(ROOT + "/bits") + " -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort").split("\n")
     bi = 0
     while bi < bundled_bits.size
@@ -1204,7 +1278,9 @@ if runtime_ranlib != ""
 # The BLAS API deliberately writes -Inf for a singular slogdet. Keep all
 # other fast optimizations, but honor non-finite values in this bridge.
 blas_cflags = ["-fno-finite-math-only"]
-runtime_cache_schema = "runtime-cache-v2"
+# v4: objects are compiled with -ffile-prefix-map so they name runtime/...
+# and "." rather than the checkout that compiled them (the archive is shared).
+runtime_cache_schema = "runtime-cache-v4"
 fast_clang_flags = []
 if fast_mode
   fast_clang_flags.push("-ffast-math")
@@ -1226,21 +1302,23 @@ runtime_objc_flags = runtime_objc_flags + sanitize_flags
 if IS_LINUX
   cc_flags.push("-D_DEFAULT_SOURCE")
 
-# w_lexchar_cache.c is #included by runtime.c — must be in the hash inputs.
+# The archive is keyed by the selected sources plus EVERY header, include
+# fragment and C/ObjC file in runtime/ (tests aside), by content. A hand-kept
+# list of what runtime.c includes had fallen behind (the *.inc sort kernels,
+# prime_lut.inc), and in a store shared by every checkout a missed file hands
+# one checkout another's runtime. The compiler keys its own runtime objects
+# by the same set (dev_runtime_tree_files in compiler/lib/driver/link.w).
 runtime_dependency_files = []
 i = 0
 while i < runtime_srcs.size
   runtime_dependency_files.push(RUNTIME_DIR + "/" + runtime_srcs[i])
   i = i + 1
-runtime_headers = capture("ls " + shq(RUNTIME_DIR) + "/*.h 2>/dev/null").split("\n")
+runtime_tree = capture("find " + shq(RUNTIME_DIR) + " -path " + shq(RUNTIME_DIR + "/tests") + " -prune -o -type f \\( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' \\) -print 2>/dev/null").split("\n")
 i = 0
-while i < runtime_headers.size
-  if runtime_headers[i].strip != ""
-    runtime_dependency_files.push(runtime_headers[i].strip)
+while i < runtime_tree.size
+  if runtime_tree[i].strip != ""
+    runtime_dependency_files.push(runtime_tree[i].strip)
   i = i + 1
-runtime_dependency_files.push(RUNTIME_DIR + "/w_lexchar_cache.c")
-runtime_dependency_files.push(RUNTIME_DIR + "/w_char_table.c")
-runtime_dependency_files.push(RUNTIME_DIR + "/generated/bigint_thresholds.h")
 runtime_dependency_files = uniq_strings(runtime_dependency_files)
 runtime_dependency_files = capture("printf '%s\\n' " + flags_to_cmd(runtime_dependency_files) + " | LC_ALL=C sort").split("\n")
 filtered_deps = []
@@ -1264,21 +1342,30 @@ runtime_dependency_files = filtered_deps
 
 runtime_deps_digest = digest_file_list(runtime_dependency_files)
 runtime_compile_key = Digest.sha256(runtime_cache_schema + "\n" + runtime_deps_digest + "\n" + join_tab(blas_cflags) + "\n" + join_tab(cc_flags) + "\n" + join_tab(runtime_objc_flags) + "\n" + PLATFORM + "\n" + tool_identity(runtime_cc) + "\n" + tool_identity(runtime_ar) + "\n" + AMBIENT_TOOLCHAIN)
-runtime_archive = BUILD_CACHE_DIR + "/runtime-" + runtime_compile_key + ".a"
+runtime_archive = STAGE_STORE_DIR + "/runtime-" + runtime_compile_key + ".a"
 runtime_handoff_ready = handoff_runtime != "" && regular_file?(handoff_runtime)
 if runtime_handoff_ready
   runtime_archive = handoff_runtime
 
 runtime_env_contents = "runtime-env-v1\n" + zstd_cflags.join(" ") + "\n" + zstd_libs.join(" ") + "\n\n\n" + (IS_DARWIN ? "Darwin" : (IS_LINUX ? "Linux" : "")) + "\n" + runtime_cc + "\n" + runtime_ar + "\n" + runtime_ranlib + "\n"
-runtime_env_manifest = BUILD_CACHE_DIR + "/runtime-env-" + Digest.sha256(runtime_env_contents) + ".env"
-runtime_current_manifest = BUILD_CACHE_DIR + "/runtime-current.manifest"
+runtime_env_manifest = STAGE_STORE_DIR + "/runtime-env-" + Digest.sha256(runtime_env_contents) + ".env"
+# Which runtime archive and environment this checkout's last build used
+# (absolute store paths, one per line).
+runtime_current_manifest = CHECKOUT_STATE_DIR + "/runtime-current.manifest"
 
 if force_build
   << DIM + "--force: rebuilding all requested phases" + RESET
 
 if runtime_handoff_ready
   << "    " + GREEN + "REUSED" + RESET + " bootstrap runtime " + DIM + aligned_ms(clock_ms() - t_runtime_start) + RESET
+elsif target[:kind] == "bit"
+  # Only the compiler stages link this archive; a bit's executable links the
+  # compiler's own runtime objects. Its key is still what the bit is
+  # fingerprinted by, so it is computed, but nothing is compiled (not even
+  # under --force, which is about the bit).
+  << "    " + DIM + "skip" + RESET + "    runtime archive " + DIM + "(not needed to build a bit)" + RESET
 elsif !force_build && regular_file?(runtime_archive)
+  store_renew([runtime_archive])
   << "    " + GREEN + "CACHED" + RESET + " runtime " + DIM + aligned_ms(clock_ms() - t_runtime_start) + RESET
 else
   runtime_tmp_dir = ccall("__w_mkdtemp", "tungsten-runtime")
@@ -1295,7 +1382,9 @@ else
     flags = src.ends_with?(".m") ? runtime_objc_flags : cc_flags
     if src == "blas_bridge.c"
       flags = flags + blas_cflags
-    cmd = shq(runtime_cc) + flags_to_cmd(flags) + " " + shq(src_path) + " -o " + shq(obj_path)
+    # the two maps: source names and the compilation directory (this driver's cwd), both of which the linker copies
+    # into the debug map of everything linked against the archive
+    cmd = shq(runtime_cc) + flags_to_cmd(flags) + " -ffile-prefix-map=" + shq(RUNTIME_DIR) + "=runtime -ffile-prefix-map=\"$PWD\"=. " + shq(src_path) + " -o " + shq(obj_path)
     sa = []
     sa.push("/bin/sh")
     sa.push("-c")
@@ -1316,12 +1405,15 @@ else
   if !sh_ok(shq(runtime_ar) + " rcs " + shq(tmp_archive) + flags_to_cmd(compile_objs))
     eputs(RED + "Failed to archive runtime" + RESET)
     exit(1)
-  atomic_copy(tmp_archive, runtime_archive)
+  make_dirs(STAGE_STORE_DIR)
+  if !atomic_copy(tmp_archive, runtime_archive)
+    eputs(RED + "Failed to add the runtime archive to the build store (" + STAGE_STORE_DIR + ")" + RESET)
+    exit(1)
   sh_ok("rm -rf " + shq(runtime_tmp_dir))
   << "    " + GREEN + "built" + RESET + "  runtime " + DIM + aligned_ms(clock_ms() - t_runtime_start) + RESET
 
 atomic_write(runtime_env_contents, runtime_env_manifest)
-atomic_write(basename_of(runtime_archive) + "\n" + basename_of(runtime_env_manifest) + "\n", runtime_current_manifest)
+atomic_write(runtime_archive + "\n" + runtime_env_manifest + "\n", runtime_current_manifest)
 
 t_runtime_end = clock_ms()
 
@@ -1809,16 +1901,33 @@ installable_build = !bit_only && release_mode && !debug_enabled && host_native_c
     return true
   sh_ok("codesign --force -s - " + shq(path) + " >/dev/null 2>&1")
 
+-> symlink?(path)
+  system("test -L " + shq(path))
+
+# Facts later phases need from earlier ones. A Hash because a function that
+# assigns a top-level name gets a local instead.
+build_state = {}
+
+# The finished compiler goes into the store's compilers/ under a digest of
+# its bytes and its sidemap's, signed once, and this checkout's
+# bin/tungsten-compiler becomes a copy of that entry (a clone where the
+# filesystem can make one). A copy rather than a link into the store: the
+# compiler finds runtime/ and its images from its own real location, release
+# packaging and `tungsten install` treat it as a file, and sweeping the store
+# can never take a checkout's compiler away. A symlink left by the old
+# worktree hook is always replaced.
 -> install_compiler(src, label, announce)
   sidemap = src + ".sidemap"
   sidemap_sha = regular_file?(sidemap) ? file_sha(sidemap) : "missing:sidemap"
   install_sha = Digest.sha256(file_sha(src) + ":" + sidemap_sha)
-  install_cache_dir = BUILD_CACHE_DIR + "/compiler-installs"
-  make_dirs(install_cache_dir)
-  signed_cache = install_cache_dir + "/" + install_sha
+  build_state[:compiler_id] = install_sha
+  make_dirs(COMPILER_STORE_DIR)
+  signed_cache = COMPILER_STORE_DIR + "/" + install_sha
   signed_sidemap_cache = signed_cache + ".sidemap"
   installed_sidemap = COMPILER_BIN + ".sidemap"
-  if !(executable?(signed_cache) && optional_cache_complete?(signed_sidemap_cache))
+  if executable?(signed_cache) && optional_cache_complete?(signed_sidemap_cache)
+    store_renew([signed_cache, signed_sidemap_cache, signed_sidemap_cache + ".missing"])
+  else
     tmp_cache = signed_cache + "." + PID + ".tmp"
     sh_ok("cp " + shq(src) + " " + shq(tmp_cache) + " && chmod 755 " + shq(tmp_cache))
     if !codesign_ok(tmp_cache)
@@ -1832,10 +1941,14 @@ installable_build = !bit_only && release_mode && !debug_enabled && host_native_c
     sidemap_matches = same_file_content?(signed_sidemap_cache, installed_sidemap)
   else
     sidemap_matches = !regular_file?(installed_sidemap)
-  if executable?(COMPILER_BIN) && same_file_content?(signed_cache, COMPILER_BIN) && sidemap_matches
+  if executable?(COMPILER_BIN) && !symlink?(COMPILER_BIN) && same_file_content?(signed_cache, COMPILER_BIN) && sidemap_matches
     return true
-  atomic_copy(signed_cache, COMPILER_BIN)
-  sh_ok("chmod 755 " + shq(COMPILER_BIN))
+  if !atomic_copy(signed_cache, COMPILER_BIN)
+    eputs(RED + "could not install " + COMPILER_BIN + " from " + signed_cache + RESET)
+    exit(1)
+  # A newly installed compiler is newer than everything built with the last
+  # one (the launchers compare times); the store entry's own time is not.
+  sh_ok("chmod 755 " + shq(COMPILER_BIN) + " && touch " + shq(COMPILER_BIN))
   # Warm macOS's first-exec malware-scan cache for the installed compiler
   # (w_preflight exits at the top of main under TUNGSTEN_PREFLIGHT).
   on macos
@@ -1845,6 +1958,41 @@ installable_build = !bit_only && release_mode && !debug_enabled && host_native_c
     suffix = label == "" ? "" : " " + DIM + "(" + label + ")" + RESET
     mode_note = installable_build ? " " + DIM + "(installable)" + RESET : " " + DIM + "(dev — not installable)" + RESET
     << "    " + GREEN + "staged" + RESET + "    " + COMPILER_BIN + suffix + mode_note
+  true
+
+# ── Stage entries in the store ──────────────────────────────────
+
+# The checkout's physical path, for the "does this artifact name the checkout
+# it was built in?" checks.
+ROOT_REAL = capture("cd " + shq(ROOT) + " && pwd -P").strip
+
+-> names_this_checkout?(path)
+  file_mentions?(path, ROOT + "/") || (ROOT_REAL != "" && ROOT_REAL != ROOT && file_mentions?(path, ROOT_REAL + "/"))
+
+# Copy a complete stage entry (binary, .ll, sidemap or its .missing marker)
+# out of the store. False when a part is missing or vanishes while it is
+# copied; the caller then builds the stage.
+-> restore_stage(cached, out_bin, out_ll)
+  if !(executable?(cached) && regular_file?(cached + ".ll") && optional_cache_complete?(cached + ".sidemap"))
+    return false
+  store_renew([cached, cached + ".ll", cached + ".sidemap", cached + ".sidemap.missing"])
+  if !sh_ok("cp " + shq(cached) + " " + shq(out_bin) + " && cp " + shq(cached + ".ll") + " " + shq(out_ll))
+    return false
+  restore_optional_file(cached + ".sidemap", out_bin + ".sidemap")
+  executable?(out_bin) && regular_file?(out_ll)
+
+# Publish a stage for every checkout whose stage identity matches. Each file
+# is renamed into place whole; the sidemap (or its marker) goes last because
+# readers require all three. A stage that names this checkout's path is not
+# published: its key does not cover the path.
+-> publish_stage(built_bin, built_ll, cached, label)
+  if names_this_checkout?(built_bin) || names_this_checkout?(built_ll) || names_this_checkout?(built_bin + ".sidemap")
+    << "    " + DIM + "note" + RESET + "    " + label + " names " + ROOT + " and is not shared through the build store"
+    return false
+  atomic_copy(built_bin, cached)
+  if regular_file?(built_ll)
+    atomic_copy(built_ll, cached + ".ll")
+  publish_optional_file(built_bin + ".sidemap", cached + ".sidemap")
   true
 
 # ── Stage 0: C VM build key + build ─────────────────────────────
@@ -1909,11 +2057,15 @@ installable_build = !bit_only && release_mode && !debug_enabled && host_native_c
 # Returns [verb, elapsed_ms, identity_binary, key]
 -> ensure_c_interp(force_build)
   key = c_vm_build_key()
-  cached_build_dir = "build/identity-" + key
-  cached_binary = C_INTERP_DIR + "/" + cached_build_dir + "/tungsten-c"
-  scratch_build_dir = cached_build_dir + "-build-" + PID
+  # Keyed by the VM's sources, tools and flags, so every checkout with the
+  # same VM shares one build. Make compiles it in a scratch directory inside
+  # this checkout, by relative source names.
+  cached_binary = STAGE_STORE_DIR + "/c-vm-" + key
+  scratch_build_dir = "build/identity-" + key + "-build-" + PID
   verb = "cached"
   elapsed = 0
+  if !force_build && executable?(cached_binary)
+    store_renew([cached_binary])
   if force_build || !executable?(cached_binary)
     t_start = clock_ms()
     log_path = "/tmp/tungsten-c-vm-build-" + PID + ".log"
@@ -1935,7 +2087,11 @@ installable_build = !bit_only && release_mode && !debug_enabled && host_native_c
   if !executable?(cached_binary)
     eputs("C VM build produced no executable at " + cached_binary)
     exit(1)
+  # The conventional developer path. Its directory used to exist because the
+  # VM was compiled there; a checkout that took the VM from the store has
+  # never run make.
   if !same_file_content?(cached_binary, C_INTERP)
+    make_dirs(dirname_of(C_INTERP))
     atomic_copy(cached_binary, C_INTERP)
     sh_ok("chmod 755 " + shq(C_INTERP))
   r = []
@@ -1963,7 +2119,7 @@ PGO_TRAINING_VERSION = "compiler-pgo-v2"
   pgo_fast_flag = FAST_MODE ? " -ffast-math" : ""
   << "    " + DIM + "instrumenting..." + RESET
   instr_env = probe_prefix + compile_env_prefix + "TUNGSTEN_CLANG_OPT=" + shq("-O3 -fprofile-generate=" + pgo_dir + " -mllvm -vp-counters-per-site=8" + pgo_fast_flag) + " TUNGSTEN_INCREMENTAL=0 "
-  if sh("cd " + shq(ROOT) + " && " + instr_env + shq(stage2_bin) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(pgo_instrumented) + compile_flags_cmd) != 0
+  if sh(STAGE_CD + instr_env + shq(stage2_bin) + " compile " + shq(STAGE_ENTRY) + " --out " + shq(pgo_instrumented) + compile_flags_cmd) != 0
     eputs(RED + "PGO instrumentation build failed" + RESET)
     exit(1)
   sh_ok("rm -f " + shq(pgo_dir) + "/*.profraw")
@@ -2030,7 +2186,7 @@ PGO_TRAINING_VERSION = "compiler-pgo-v2"
     exit(1)
   << "    " + DIM + "optimizing..." + RESET
   opt_env = probe_prefix + compile_env_prefix + "TUNGSTEN_CLANG_OPT=" + shq("-O3 -fprofile-use=" + pgo_profdata + " -Wno-profile-instr-unprofiled -Werror=profile-instr-out-of-date -Werror=backend-plugin" + pgo_fast_flag) + " TUNGSTEN_INCREMENTAL=0 "
-  if sh("cd " + shq(ROOT) + " && " + opt_env + shq(stage2_bin) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(pgo_optimized) + compile_flags_cmd) != 0
+  if sh(STAGE_CD + opt_env + shq(stage2_bin) + " compile " + shq(STAGE_ENTRY) + " --out " + shq(pgo_optimized) + compile_flags_cmd) != 0
     eputs(RED + "PGO optimization build failed" + RESET)
     exit(1)
   << "    " + DIM + "PGO: " + ms(clock_ms() - t_pgo_start) + RESET
@@ -2051,6 +2207,8 @@ toolchain_env_prefix = env_prefix(toolchain_keys, toolchain_vals)
 
 compiler_source_paths = []
 compiler_source_paths.push(compiler_dir_name + "/tungsten.w")
+# tungsten.w is a dozen lines over the driver; the driver is the compiler.
+compiler_source_paths.push(compiler_dir_name + "/tungsten_driver.w")
 compiler_source_paths.push(compiler_dir_name + "/lib")
 compiler_source_paths.push("core")
 compiler_source_paths.push("languages/tungsten/lexers")
@@ -2058,6 +2216,22 @@ compiler_source_paths.push("data/unit_names.txt")
 compiler_source_paths.push("data/units.tsv")
 
 stage_verified = false
+
+# The stage compilers are compiled from the checkout root, with a relative
+# entry path and TUNGSTEN_ROOT unset. The loader then finds core/ and
+# runtime/ through the cwd and every source name the compiler embeds (the
+# file names in its own error locations) is relative: compiler/lib/x.w, not
+# /home/me/worktree-7/compiler/lib/x.w. The stage keys hash contents under
+# relative names, so with this the bytes depend on nothing the keys leave
+# out, and a stage built in one checkout is right for every checkout with
+# the same sources.
+STAGE_ENTRY = compiler_dir_name + "/tungsten.w"
+# Without TUNGSTEN_ROOT the lexer looks for its unit-name registry beside the
+# executable, which the stage-0 VM cannot ask for and a stage binary in /tmp
+# does not have; name the file instead. It is read when a compiler starts,
+# not compiled in (its content is hashed with the compiler sources).
+STAGE_UNIT_NAMES = env_or_empty("TUNGSTEN_UNIT_NAMES") == "" ? "TUNGSTEN_UNIT_NAMES=" + shq(ROOT + "/data/unit_names.txt") + " " : ""
+STAGE_CD = "cd " + shq(ROOT) + " && env -u TUNGSTEN_ROOT " + STAGE_UNIT_NAMES
 
 if !bit_only
   stage1 = build_scratch_dir + "/tungsten.wc"
@@ -2077,7 +2251,10 @@ if !bit_only
     lex_table_path = ROOT + "/languages/tungsten/tungsten.lex64"
 
   if use_c_bootstrap
-    c_stage_cache_schema = "c-stage-content-v3"
+    # v5: stages are compiled by relative path (path-independent), the
+    # driver source is hashed, no checkout path enters the identity, and
+    # entries live in the shared build store.
+    c_stage_cache_schema = "c-stage-content-v5"
     c_stage1_sources_sha = tree_sha(compiler_source_paths)
     << ""
     << BOLD + "==> Stage 0: implementations/c VM" + RESET
@@ -2117,12 +2294,15 @@ if !bit_only
     s1_vals.push(stage1_fast_parse)
     s1_keys.push("TUNGSTEN_CLANG_OPT")
     s1_vals.push("-O0")
+    # The identity takes the environment as it stands here: values only. The
+    # lexer table is passed by path, which is this checkout's; its CONTENT is
+    # in the identity (file_sha(lex_table_path)), and the path would make two
+    # checkouts with identical sources build the same stage twice.
+    s1_identity_env = env_kv_join(s1_keys, s1_vals)
     s1_keys.push("TUNGSTEN_LEX64_TABLE")
     s1_vals.push(lex_table_path)
-    c_stage1_identity = Digest.sha256(c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + c_vm_key_for_build + "\n" + file_sha(c_interp_for_build) + "\n" + file_sha(lex_table_path) + "\n" + compiler_dir_name + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + "\n" + AMBIENT_TOOLCHAIN + "\n" + env_kv_join(s1_keys, s1_vals))
-    c_stage1_cached = BUILD_CACHE_DIR + "/c-vm-stage1-" + c_stage1_identity
-    c_stage1_cached_ll = c_stage1_cached + ".ll"
-    c_stage1_cached_sidemap = c_stage1_cached + ".sidemap"
+    c_stage1_identity = Digest.sha256(c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + c_vm_key_for_build + "\n" + file_sha(c_interp_for_build) + "\n" + file_sha(lex_table_path) + "\n" + compiler_dir_name + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + "\n" + AMBIENT_TOOLCHAIN + "\n" + s1_identity_env + TUNING_KEY)
+    c_stage1_cached = STAGE_STORE_DIR + "/c-vm-stage1-" + c_stage1_identity
     stage1_handoff_ready = handoff_stage1 != "" && executable?(handoff_stage1) && handoff_stage1_ll != "" && regular_file?(handoff_stage1_ll)
     if stage1_handoff_ready
       atomic_copy(handoff_stage1, stage1)
@@ -2133,19 +2313,16 @@ if !bit_only
         sh_ok("rm -f " + shq(stage1 + ".sidemap"))
       t1 = clock_ms()
       << "    " + GREEN + "REUSED" + RESET + " bootstrap stage1 " + DIM + aligned_ms(t1 - stage1_started) + RESET
-    elsif !force_build && executable?(c_stage1_cached) && regular_file?(c_stage1_cached_ll) && optional_cache_complete?(c_stage1_cached_sidemap)
-      sh_ok("cp " + shq(c_stage1_cached) + " " + shq(stage1))
-      sh_ok("cp " + shq(c_stage1_cached_ll) + " " + shq(stage1_ll))
-      restore_optional_file(c_stage1_cached_sidemap, stage1 + ".sidemap")
+    elsif !force_build && restore_stage(c_stage1_cached, stage1, stage1_ll)
       t1 = clock_ms()
       << "    " + GREEN + "CACHED" + RESET + " stage1 " + DIM + aligned_ms(t1 - stage1_started) + " (" + c_stage1_identity.slice(0, 16) + ")" + RESET
     else
       sh_ok("rm -f " + shq(stage1_ll))
       # -O0 stage-1 link: the binary is throwaway (only produces stage 2).
       s1_env = env_prefix(s1_keys, s1_vals) + "TUNGSTEN_LL_DIR=" + shq(stage_ll_dir) + " TUNGSTEN_LL_PATH=" + shq(stage1_ll) + " "
-      stage1_log = "/tmp/tungsten-c-stage1.log"
+      stage1_log = build_scratch_dir + "/stage1.log"
       stage1_link = release_mode ? "" : " --runtime " + shq(runtime_archive) + " --no-lto"
-      s1_cmd = "cd " + shq(ROOT) + " && " + s1_env + shq(c_interp_for_build) + " " + shq(TUNGSTEN_W) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(stage1) + STAGE_FLAGS_CMD + stage1_link + " > " + shq(stage1_log) + " 2>&1"
+      s1_cmd = STAGE_CD + s1_env + shq(c_interp_for_build) + " " + shq(STAGE_ENTRY) + " compile " + shq(STAGE_ENTRY) + " --out " + shq(stage1) + STAGE_FLAGS_CMD + stage1_link + " > " + shq(stage1_log) + " 2>&1"
       if !sh_ok(s1_cmd)
         log = read_file(stage1_log)
         if log != nil
@@ -2155,10 +2332,7 @@ if !bit_only
       if !codesign_ok(stage1)
         eputs(RED + "codesign failed for C VM stage 1" + RESET)
         exit(1)
-      atomic_copy(stage1, c_stage1_cached)
-      if regular_file?(stage1_ll)
-        atomic_copy(stage1_ll, c_stage1_cached_ll)
-      publish_optional_file(stage1 + ".sidemap", c_stage1_cached_sidemap)
+      publish_stage(stage1, stage1_ll, c_stage1_cached, "stage 1")
       t1 = clock_ms()
       << "    " + GREEN + "built " + RESET + " stage1 " + DIM + aligned_ms(t1 - stage1_started) + RESET
 
@@ -2172,24 +2346,21 @@ if !bit_only
       s2_vals = probe_vals + []
       s2_keys.push("TUNGSTEN_CLANG_OPT")
       s2_vals.push(bootstrap_compiler_clang_opt)
+      # (as for stage 1: the lexer table's path is not part of the identity)
+      s2_identity_env = env_kv_join(s2_keys, s2_vals)
       s2_keys.push("TUNGSTEN_LEX64_TABLE")
       s2_vals.push(lex_table_path)
-      c_stage2_identity = Digest.sha256(c_stage1_identity + "\n" + file_sha(stage1) + "\n" + c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + AMBIENT_TOOLCHAIN + "\n" + env_kv_join(s2_keys, s2_vals))
-      c_stage2_cached = BUILD_CACHE_DIR + "/c-vm-stage2-" + c_stage2_identity
-      c_stage2_cached_ll = c_stage2_cached + ".ll"
-      c_stage2_cached_sidemap = c_stage2_cached + ".sidemap"
-      if !force_build && executable?(c_stage2_cached) && regular_file?(c_stage2_cached_ll) && optional_cache_complete?(c_stage2_cached_sidemap)
-        sh_ok("cp " + shq(c_stage2_cached) + " " + shq(stage2))
-        sh_ok("cp " + shq(c_stage2_cached_ll) + " " + shq(stage2_ll))
-        restore_optional_file(c_stage2_cached_sidemap, stage2 + ".sidemap")
+      c_stage2_identity = Digest.sha256(c_stage1_identity + "\n" + file_sha(stage1) + "\n" + c_stage1_sources_sha + "\n" + c_stage_cache_schema + "\n" + runtime_compile_key + "\n" + join_tab(stage_flags) + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + AMBIENT_TOOLCHAIN + "\n" + s2_identity_env)
+      c_stage2_cached = STAGE_STORE_DIR + "/c-vm-stage2-" + c_stage2_identity
+      if !force_build && restore_stage(c_stage2_cached, stage2, stage2_ll)
         t2 = clock_ms()
         << "    " + GREEN + "CACHED" + RESET + " stage2 " + DIM + aligned_ms(t2 - stage2_started) + " (" + c_stage2_identity.slice(0, 16) + ")" + RESET
       else
         sh_ok("rm -f " + shq(stage2_ll))
         s2_env = env_prefix(s2_keys, s2_vals) + "TUNGSTEN_LL_DIR=" + shq(stage_ll_dir) + " TUNGSTEN_LL_PATH=" + shq(stage2_ll) + " "
-        stage2_log = "/tmp/tungsten-c-stage2.log"
+        stage2_log = build_scratch_dir + "/stage2.log"
         stage2_link = release_mode ? "" : " --runtime " + shq(runtime_archive) + " --no-lto"
-        s2_cmd = "cd " + shq(ROOT) + " && " + s2_env + shq(stage1) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(stage2) + STAGE_FLAGS_CMD + stage2_link + " > " + shq(stage2_log) + " 2>&1"
+        s2_cmd = STAGE_CD + s2_env + shq(stage1) + " compile " + shq(STAGE_ENTRY) + " --out " + shq(stage2) + STAGE_FLAGS_CMD + stage2_link + " > " + shq(stage2_log) + " 2>&1"
         s2_status = sh(s2_cmd)
         if s2_status != 0
           log = read_file(stage2_log)
@@ -2204,10 +2375,7 @@ if !bit_only
           eputs("    " + DIM + "likely emit_ir or link_binary in compiler/tungsten.w bottomed out under the" + RESET)
           eputs("    " + DIM + "C VM. Check " + stage2_log + " for clang/runtime errors." + RESET)
           exit(1)
-        atomic_copy(stage2, c_stage2_cached)
-        if regular_file?(stage2_ll)
-          atomic_copy(stage2_ll, c_stage2_cached_ll)
-        publish_optional_file(stage2 + ".sidemap", c_stage2_cached_sidemap)
+        publish_stage(stage2, stage2_ll, c_stage2_cached, "stage 2")
         << "    " + GREEN + "built " + RESET + " stage2 " + DIM + aligned_ms(t2 - stage2_started) + RESET
 
       << ""
@@ -2353,8 +2521,11 @@ if !bit_only
     stage1_input_paths.push("bin/tungsten")
     stage1_input_paths.push("bin/commands/build.w")
     stage1_input_sha = tree_sha(stage1_input_paths)
-    stage1_sha = Digest.sha256(stage1_input_sha + ":" + runtime_compile_key + ":" + file_sha(legacy_lex_table) + ":" + env_or_empty("TUNGSTEN_CARRY_UNROLL")).slice(0, 16)
-    stage1_cached = BUILD_CACHE_DIR + "/stage1-" + stage1_sha
+    # The Ruby host compiles by absolute path, so these stages name the
+    # checkout they were built in; its path is part of their key and they are
+    # not shared between checkouts.
+    stage1_sha = Digest.sha256(stage1_input_sha + ":" + runtime_compile_key + ":" + file_sha(legacy_lex_table) + ":" + env_or_empty("TUNGSTEN_CARRY_UNROLL") + ":" + ROOT + TUNING_KEY).slice(0, 16)
+    stage1_cached = STAGE_STORE_DIR + "/ruby-stage1-" + stage1_sha
 
     if !stage2_only
       if !force_build && executable?(stage1_cached)
@@ -2403,7 +2574,7 @@ if !bit_only
       stage2_input_paths.push("bin/commands/build.w")
       stage2_input_sha = tree_sha(stage2_input_paths)
       stage2_sha = Digest.sha256(stage1_sha + ":" + stage2_input_sha + ":" + bootstrap_compiler_clang_opt).slice(0, 16)
-      stage2_cached = BUILD_CACHE_DIR + "/stage2-" + stage2_sha
+      stage2_cached = STAGE_STORE_DIR + "/ruby-stage2-" + stage2_sha
 
       if !force_build && executable?(stage2_cached)
         sh_ok("cp " + shq(stage2_cached) + " " + shq(stage2))
@@ -2521,7 +2692,7 @@ if artifact_targets.size > 0
       atomic_copy(pgo_binary, out_bin)
       sh_ok("chmod 755 " + shq(out_bin))
     else
-      art_cmd = "cd " + shq(ROOT) + " && " + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' TUNGSTEN_CLANG_OPT=" + shq(artifact_opt) + " " + shq(COMPILER_BIN) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(out_bin) + artifact_flags
+      art_cmd = STAGE_CD + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' TUNGSTEN_CLANG_OPT=" + shq(artifact_opt) + " " + shq(COMPILER_BIN) + " compile " + shq(STAGE_ENTRY) + " --out " + shq(out_bin) + artifact_flags
       if sh(art_cmd) != 0
         eputs(RED + "Failed to build " + artifact_target + "/" + cpu_label + RESET)
         exit(1)
@@ -2542,7 +2713,11 @@ if artifact_targets.size > 0
     # (build_compiler_image in compiler/lib/driver/link.w), compiled for the
     # artifact's target and CPU and written beside it.
     # scripts/package-release.sh installs them as the package's
-    # build/cache/compiler-images, where the packaged compiler looks.
+    # build/compiler-images, where the packaged compiler looks. Like the
+    # artifact compiler (and build-image) they are compiled from the root by
+    # relative path with TUNGSTEN_ROOT unset, so a package does not carry the
+    # building checkout's path; their incremental entries live in the build
+    # store under the compiler's usual keys.
     image_out_dir = out_dir + "/compiler-images"
     make_dirs(image_out_dir)
     image_flags = " --release --no-debug --no-lto --target " + shq(artifact_target)
@@ -2555,10 +2730,10 @@ if artifact_targets.size > 0
     while ik < artifact_image_kinds.size
       image_kind = artifact_image_kinds[ik]
       ik = ik + 1
-      image_source = ROOT + "/" + compiler_dir_name + "/" + (image_kind == "repl" ? "repl" : "tungsten_" + image_kind) + ".w"
+      image_source = compiler_dir_name + "/" + (image_kind == "repl" ? "repl" : "tungsten_" + image_kind) + ".w"
       image_out = image_out_dir + "/tungsten-" + image_kind
       image_log = build_scratch_dir + "/artifact-image-" + sanitize_target_label(cpu_label) + "-" + image_kind + ".log"
-      image_cmd = "cd " + shq(ROOT) + " && TUNGSTEN_ROOT=" + shq(ROOT) + " " + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' TUNGSTEN_INCREMENTAL=1 TUNGSTEN_LL_PATH='' TUNGSTEN_CLANG_OPT=" + shq(artifact_opt) + " " + shq(COMPILER_BIN) + " compile " + shq(image_source) + " --out " + shq(image_out) + image_flags + " > " + shq(image_log) + " 2>&1"
+      image_cmd = STAGE_CD + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' TUNGSTEN_INCREMENTAL=1 TUNGSTEN_LL_PATH='' TUNGSTEN_CLANG_OPT=" + shq(artifact_opt) + " " + shq(COMPILER_BIN) + " compile " + shq(image_source) + " --out " + shq(image_out) + image_flags + " > " + shq(image_log) + " 2>&1"
       t_image = clock_ms()
       if !sh_ok(image_cmd) || !executable?(image_out)
         log = read_file(image_log)
@@ -2575,28 +2750,92 @@ if artifact_targets.size > 0
 
 # ── Compiler images ─────────────────────────────────────────────
 # The REPL (bin/wit) and Metal images are products of this build, never of a
-# launch: delegate_compiler_image only execs what is built here. Each goes
-# through the ordinary incremental compile, so an unchanged image is a
-# link-cache hit (~0.3s) and a changed one is one native compile.
+# launch: delegate_compiler_image only execs what is installed in this
+# checkout's build/compiler-images. Each is the compiler's own sources plus
+# one wrapper, compiled by the compiler just installed, so it is fingerprinted
+# by that compiler and those sources (with the flags and C toolchain) and kept
+# in the store's compilers/: a checkout whose compiler and sources match
+# installs the image instead of compiling it for a minute. A miss goes through
+# the ordinary incremental compile (`build-image`).
 
 t3 = t_runtime_start
 t4 = t_runtime_end
 
+# One fingerprint of every source the compiler and its images are built from,
+# computed by the same script the worktree hook uses to find a compiler for a
+# fresh checkout (bin/commands/store.sh), so the two can never disagree.
+-> compiler_source_fingerprint
+  cached = build_state[:source_fingerprint]
+  if cached != nil
+    return cached
+  fp = ""
+  if compiler_dir_name == "compiler"
+    fp = capture("bash " + shq(STORE_SH) + " compiler-fingerprint " + shq(ROOT) + " 2>/dev/null").strip
+    if fp.size != 64
+      fp = ""
+  build_state[:source_fingerprint] = fp
+  fp
+
+-> current_compiler_id
+  id = build_state[:compiler_id]
+  if id != nil
+    return id
+  if !executable?(COMPILER_BIN)
+    return ""
+  sidemap = COMPILER_BIN + ".sidemap"
+  # an installed compiler is the signed copy; identify it by what is on disk
+  id = "installed:" + file_sha(COMPILER_BIN) + ":" + (regular_file?(sidemap) ? file_sha(sidemap) : "missing:sidemap")
+  build_state[:compiler_id] = id
+  id
+
 images_built = 0
+image_ids = {}
 if !stage0_only && !bit_only
   << ""
   << BOLD + "==> Compiler images" + RESET
+  image_dir = CHECKOUT_STATE_DIR + "/compiler-images"
+  make_dirs(image_dir)
   image_kinds = ["repl", "metal"]
   ii = 0
   while ii < image_kinds.size
     kind = image_kinds[ii]
     ii = ii + 1
-    image_log = "/tmp/tungsten-build-image-" + kind + ".log"
-    image_cmd = "cd " + shq(ROOT) + " && TUNGSTEN_ROOT=" + shq(ROOT) + " " + probe_env_prefix + "TUNGSTEN_CLANG_OPT=" + shq(bootstrap_compiler_clang_opt) + " " + shq(COMPILER_BIN) + " build-image " + kind + " > " + shq(image_log) + " 2>&1"
+    image = image_dir + "/tungsten-" + kind
+    source_fp = compiler_source_fingerprint()
+    image_store = ""
+    image_key = ""
+    if source_fp != "" && current_compiler_id() != ""
+      image_key = Digest.sha256("compiler-image-v1\n" + kind + "\n" + current_compiler_id() + "\n" + source_fp + "\n" + bootstrap_compiler_clang_opt + "\n" + probe_env_kv + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + runtime_compile_key + "\n" + AMBIENT_TOOLCHAIN + "\n" + tool_identity(runtime_cc) + TUNING_KEY)
+      image_store = COMPILER_STORE_DIR + "/image-" + kind + "-" + image_key
+      image_ids[kind] = image_key
     t_image = clock_ms()
+    if image_store != "" && !force_build && executable?(image_store) && optional_cache_complete?(image_store + ".sidemap")
+      store_renew([image_store, image_store + ".sidemap", image_store + ".sidemap.missing"])
+      # an entry that vanishes while it is copied (another process's sweep) is a miss: build the image below
+      installed = same_file_content?(image_store, image) || atomic_copy(image_store, image)
+      if installed
+        if !regular_file?(image_store + ".sidemap") || !same_file_content?(image_store + ".sidemap", image + ".sidemap")
+          restore_optional_file(image_store + ".sidemap", image + ".sidemap")
+        << "    " + GREEN + "CACHED" + RESET + "  build/compiler-images/tungsten-" + kind + " " + DIM + ms(clock_ms() - t_image) + " (" + image_key.slice(0, 16) + ")" + RESET
+        images_built = images_built + 1
+        next
+    image_log = build_scratch_dir + "/image-" + kind + ".log"
+    image_cmd = "cd " + shq(ROOT) + " && TUNGSTEN_ROOT=" + shq(ROOT) + " " + probe_env_prefix + "TUNGSTEN_CLANG_OPT=" + shq(bootstrap_compiler_clang_opt) + " " + shq(COMPILER_BIN) + " build-image " + kind + " > " + shq(image_log) + " 2>&1"
     if sh_ok(image_cmd)
-      << "    " + GREEN + "built" + RESET + "   build/cache/compiler-images/tungsten-" + kind + " " + DIM + ms(clock_ms() - t_image) + RESET
+      << "    " + GREEN + "built" + RESET + "   build/compiler-images/tungsten-" + kind + " " + DIM + ms(clock_ms() - t_image) + RESET
       images_built = images_built + 1
+      if image_store != ""
+        if names_this_checkout?(image) || names_this_checkout?(image + ".sidemap")
+          << "    " + DIM + "note" + RESET + "    the " + kind + " image names " + ROOT + " and is not shared through the build store"
+          image_ids[kind] = ""
+        elsif !force_build && executable?(image_store) && optional_cache_complete?(image_store + ".sidemap")
+          # another build published this image while this one compiled it: the first complete entry stays (see
+          # bit_store_publish), and this checkout keeps its own image and sidemap, which belong together
+          store_renew([image_store, image_store + ".sidemap", image_store + ".sidemap.missing"])
+        else
+          # the image, then its sidemap (or the marker that it has none): a reader requires both
+          atomic_copy(image, image_store)
+          publish_optional_file(image + ".sidemap", image_store + ".sidemap")
     else
       eputs(RED + "failed to build the " + kind + " compiler image (see " + image_log + ")" + RESET)
       exit(1)
@@ -2635,14 +2874,21 @@ while i < runtime_dependency_files.size
 # see their sources too, or a bridge-only edit incorrectly skips compilation.
 companion_roots = [RUNTIME_DIR]
 companion_tree_key = tree_sha(companion_roots)
+BIT_CLANG_OPT = bit_clang_opt
+BIT_LINK_FLAGS = link_flags
+BIT_LINK_LIBS = link_libs
+PROGRAM_FLAGS = program_flags
+RELEASE_MODE = release_mode
+DEBUG_REQUESTED = debug_requested
+NO_DEBUG_REQUESTED = no_debug_requested
+FORCE_BUILD = force_build
+EXPLICIT_TARGET = native_mode || cpu_name != nil || target_triple != "" || portable_mode
 runtime_key = Digest.sha256("native-companions-v1\n" + companion_tree_key + "\n" + runtime_dep_shas.join(":") + "\n" + join_tab(cc_flags) + "\n" + runtime_cc + "\n" + runtime_ar + "\n" + runtime_ranlib + "\n" + join_tab(link_flags) + "\n" + join_tab(link_libs))
-
-bit_cache_dir = BUILD_CACHE_DIR + "/bits"
-make_dirs(bit_cache_dir)
+BIT_RUNTIME_KEY = runtime_key
 
 # The .w files an entry point reaches through relative or absolute `use` lines that lie outside the bit's own tree (a shared
-# engine next door: `use ../../engine/notation`), transitively: their contents go into the stamp, so editing one rebuilds the
-# executable (the bit's tree is hashed whole already; core/ and bits/ modules come with the compiler and the runtime key).
+# engine next door: `use ../../engine/notation`), transitively. Only used when the compiler reports no dependency file (the
+# fallback manifest below); a real compile lists every file it read.
 -> bit_external_uses(bit_path, entry)
   out = []
   seen = {}
@@ -2681,18 +2927,52 @@ make_dirs(bit_cache_dir)
       todo.push(t)
   out
 
--> bit_build_sha(bit_path, runtime_key_arg, link_flags_arg, link_libs_arg, bit_clang_opt_arg, compiler_flags_arg, entry)
+# ── Bit executables in the build store ──────────────────────────
+# A bit executable is stored under two fingerprints.
+#
+# The first (bit_static_key) covers what is known before compiling: the bit's name and entry point, its Bitfile and C
+# includes, the compiler binary, the runtime and companion sources with their flags, the lexer tables and unit data the
+# compiler reads, and every flag that reaches the compiler or clang. It names a directory, bits/<name>-<key>/.
+#
+# The second is a manifest of the sources the compiler actually read to build it: the entry, everything it `use`s, and
+# the core and bit modules those pull in, each with the SHA-256 of its contents. The compiler writes that list
+# (TUNGSTEN_DEPFILE); paths inside the toolchain root are recorded relative to it, so the manifest reads the same in any
+# checkout. In the directory:
+#     <M>.deps      a manifest (M is its digest)
+#     <M>           the executable built from exactly those contents, if it names no checkout path
+#     <M>@<P>       the executable, if it does (a baked __DIR__, a project outside the toolchain): P digests the paths
+# A lookup takes the first manifest whose every row matches the files as they are in THIS checkout, so two worktrees with
+# the same sources and compiler share one build, and a worktree where any file the bit reads differs (an edited
+# core/string.w, a different argon) matches no manifest and builds its own. The bit's bin/<name> is a copy of the entry.
+
+BIT_STORE_SCHEMA = "bit-store-v1"
+bit_file_sha_memo = {}
+
+-> memo_file_sha(path)
+  cached = bit_file_sha_memo[path]
+  if cached != nil
+    return cached
+  sha = file_sha(path)
+  bit_file_sha_memo[path] = sha
+  sha
+
+-> bit_inside_toolchain?(bit_path)
+  bit_path.starts_with?(ROOT + "/")
+
+# Where an executable that names a checkout path is right: this toolchain root and this bit root.
+-> bit_location_tag(bit_path)
+  Digest.sha256(ROOT + "\n" + bit_path).slice(0, 16)
+
+-> bit_static_key(bit_path, entry, name, runtime_key_arg, link_flags_arg, link_libs_arg, bit_clang_opt_arg, compiler_flags_arg)
   buf = StringBuffer(1024)
-  single = []
-  single.push(bit_path)
-  buf << tree_sha(single)
-  ext = bit_external_uses(bit_path, entry)
-  xi = 0
-  while xi < ext.size
-    buf << ext[xi]
-    buf << file_sha(ext[xi])
-    xi = xi + 1
-  buf << "bit-entrypoints-v4-build-flags"
+  buf << BIT_STORE_SCHEMA
+  buf << "\n"
+  buf << name
+  buf << "\n"
+  buf << (entry.starts_with?(bit_path + "/") ? entry.slice(bit_path.size + 1, entry.size - bit_path.size - 1) : entry)
+  buf << "\n"
+  buf << (bit_inside_toolchain?(bit_path) ? "toolchain:" + project_relative_path(bit_path) : "project")
+  buf << "\n"
   buf << file_sha(bit_path + "/Bitfile")
   includes = bitfile_includes(bit_path)
   i = 0
@@ -2701,23 +2981,200 @@ make_dirs(bit_cache_dir)
     inc.push(includes[i])
     buf << tree_sha(inc)
     i = i + 1
-  buf << file_sha(COMPILER_BIN)
+  buf << "\n"
+  buf << memo_file_sha(COMPILER_BIN)
   buf << runtime_key_arg
+  buf << memo_file_sha(ROOT + "/languages/tungsten/tungsten.lex64")
+  buf << memo_file_sha(ROOT + "/data/unit_names.txt")
+  buf << memo_file_sha(ROOT + "/data/units.tsv")
+  buf << "\n"
   buf << join_tab(link_flags_arg)
+  buf << "\n"
   buf << join_tab(link_libs_arg)
+  buf << "\n"
   buf << bit_clang_opt_arg
+  buf << "\n"
   buf << join_tab(compiler_flags_arg)
-  Digest.sha256(buf.to_s).slice(0, 16)
+  buf << "\n"
+  buf << probe_env_kv
+  buf << "\n"
+  buf << env_or_empty("TUNGSTEN_MARCH_ARGS")
+  buf << "\n"
+  buf << PLATFORM
+  buf << "\n"
+  buf << tool_identity(runtime_cc)
+  buf << "\n"
+  buf << AMBIENT_TOOLCHAIN
+  buf << TUNING_KEY
+  Digest.sha256(buf.to_s).slice(0, 32)
 
--> compile_bit(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix)
+# "r TAB path-relative-to-ROOT" or "a TAB absolute-path" for one source file.
+-> bit_manifest_label(path)
+  if path.starts_with?(ROOT + "/")
+    return "r\t" + path.slice(ROOT.size + 1, path.size - ROOT.size - 1)
+  if ROOT_REAL != "" && path.starts_with?(ROOT_REAL + "/")
+    return "r\t" + path.slice(ROOT_REAL.size + 1, path.size - ROOT_REAL.size - 1)
+  "a\t" + path
+
+-> bit_manifest_path(label)
+  tab = label.index("\t")
+  if tab == nil
+    return nil
+  kind = label.slice(0, tab)
+  rest = label.slice(tab + 1, label.size - tab - 1)
+  if kind == "r"
+    return ROOT + "/" + rest
+  if kind == "a"
+    return rest
+  nil
+
+# The manifest text for a list of source files: sorted "sha256 TAB label" rows under a header line.
+-> bit_manifest_text(paths, complete)
+  rows = []
+  seen = {}
+  i = 0
+  while i < paths.size
+    path = paths[i].strip
+    i = i + 1
+    if path == "" || seen.has_key?(path)
+      next
+    seen[path] = 1
+    rows.push(memo_file_sha(path) + "\t" + bit_manifest_label(path))
+  rows = rows.sort
+  (complete ? "tungsten-bit-deps-v1 complete" : "tungsten-bit-deps-v1 partial") + "\n" + rows.join("\n") + "\n"
+
+# Does every file a manifest lists have, here and now, the contents it lists?
+-> bit_manifest_current?(text)
+  lines = text.split("\n")
+  if lines.size < 2 || !lines[0].starts_with?("tungsten-bit-deps-v1 ")
+    return false
+  i = 1
+  while i < lines.size
+    line = lines[i]
+    i = i + 1
+    if line == ""
+      next
+    tab = line.index("\t")
+    if tab == nil
+      return false
+    path = bit_manifest_path(line.slice(tab + 1, line.size - tab - 1))
+    if path == nil || memo_file_sha(path) != line.slice(0, tab)
+      return false
+  true
+
+# The store executable for this bit as its sources are now, or nil. A manifest written without the compiler's
+# dependency list ("partial": it covers only the bit's own tree) is honoured only for the location that wrote it.
+-> bit_store_lookup(dir, bit_path)
+  manifests = capture("ls " + shq(dir) + "/*.deps 2>/dev/null").split("\n")
+  tag = bit_location_tag(bit_path)
+  i = 0
+  while i < manifests.size
+    mpath = manifests[i].strip
+    i = i + 1
+    if mpath == ""
+      next
+    text = read_file(mpath)
+    if text == nil || !bit_manifest_current?(text)
+      next
+    base = mpath.slice(0, mpath.size - 5)
+    shared = text.starts_with?("tungsten-bit-deps-v1 complete\n")
+    if shared && executable?(base) && optional_cache_complete?(base + ".sidemap")
+      store_renew([base, base + ".sidemap", base + ".sidemap.missing", mpath])
+      return base
+    local_entry = base + "@" + tag
+    if executable?(local_entry) && optional_cache_complete?(local_entry + ".sidemap")
+      store_renew([local_entry, local_entry + ".sidemap", local_entry + ".sidemap.missing", mpath])
+      return local_entry
+  nil
+
+# Publish a freshly compiled executable. Returns the store path, or "" when it could not be stored.
+-> bit_store_publish(dir, bit_path, entry, built, depfile)
+  make_dirs(dir)
+  complete = false
+  paths = []
+  dep_text = depfile == "" ? nil : read_file(depfile)
+  if dep_text != nil && dep_text.strip != ""
+    paths = dep_text.split("\n")
+    complete = true
+  else
+    # no dependency list (a compiler that does not write one): the bit's own tree and the files it reaches by path
+    paths = tree_sha_files(bit_path) + bit_external_uses(bit_path, entry)
+    paths.push(entry)
+  text = bit_manifest_text(paths, complete)
+  m = Digest.sha256(text).slice(0, 32)
+  base = dir + "/" + m
+  target = base
+  if !complete || names_this_checkout?(built) || file_mentions?(built, bit_path + "/") || names_this_checkout?(built + ".sidemap") || file_mentions?(built + ".sidemap", bit_path + "/")
+    target = base + "@" + bit_location_tag(bit_path)
+  # The first complete entry stays. Two builders that both missed can produce different bytes for the same inputs
+  # (a warm or a cold Core snapshot changes the code layout, not the behaviour), and replacing one entry under a
+  # reader would pair one build's executable with the other's sidemap. The name already says which sources it was
+  # built from, so a complete entry without its manifest only lacks the manifest. The caller installs the entry.
+  # `--force` replaces it.
+  if !FORCE_BUILD && executable?(target) && optional_cache_complete?(target + ".sidemap")
+    store_renew([target, target + ".sidemap", target + ".sidemap.missing"])
+    if !regular_file?(base + ".deps") && !atomic_write(text, base + ".deps")
+      return ""
+    return target
+  if !atomic_copy(built, target)
+    return ""
+  sh_ok("chmod 755 " + shq(target))
+  publish_optional_file(built + ".sidemap", target + ".sidemap")
+  # the manifest last: a reader that finds it finds the executable and its sidemap
+  if !atomic_write(text, base + ".deps")
+    return ""
+  target
+
+# Beside the installed bin/<name> goes <name>.deps, the manifest of the store entry it is a copy of, and the copy is
+# given the current time. The launchers (bin/tungsten.w ensure_bit_binary) run bin/<name> without asking this driver as
+# long as no file in the manifest, and not the compiler, is newer than it.
+-> bit_install_manifest(store_path, out_bin)
+  # <M> or <M>@<16 hex digits>: the manifest is <M>.deps either way
+  base = store_path
+  if base.size > 17 && base.slice(base.size - 17, 1) == "@"
+    base = base.slice(0, base.size - 17)
+  # The executable and its sidemap come from one entry: when the store kept another builder's entry, install it.
+  if !same_file_content?(store_path, out_bin) && atomic_copy(store_path, out_bin)
+    sh_ok("chmod 755 " + shq(out_bin))
+  if regular_file?(store_path + ".sidemap")
+    if !same_file_content?(store_path + ".sidemap", out_bin + ".sidemap")
+      atomic_copy(store_path + ".sidemap", out_bin + ".sidemap")
+  elsif regular_file?(store_path + ".sidemap.missing")
+    sh_ok("rm -f " + shq(out_bin + ".sidemap"))
+  if regular_file?(base + ".deps")
+    atomic_copy(base + ".deps", out_bin + ".deps")
+  else
+    sh_ok("rm -f " + shq(out_bin + ".deps"))
+  sh_ok("touch " + shq(out_bin) + " " + shq(out_bin + ".deps") + " 2>/dev/null")
+
+-> compile_bit(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile)
   t_bit = clock_ms()
   bit_name = basename_of(this_bit_root)
-  build_env = probe_env_prefix + toolchain_prefix + "TUNGSTEN_ROOT=" + shq(ROOT) + " BIT_HOME=" + shq(ROOT + "/bits") + " TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " "
   includes = bitfile_includes(this_bit_root)
-  if includes.size > 0
-    build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(includes.join(":")) + " "
-  log_path = "/tmp/tungsten-build-" + bit_name + ".log"
-  cmd = "cd " + shq(ROOT) + " && " + build_env + shq(COMPILER_BIN) + " compile " + shq(entry) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
+  # Under this build's own scratch directory: concurrent builds of the same bit in two worktrees must not share a log.
+  log_path = BUILD_SCRATCH_DIR + "/bit-" + bit_name + "-" + basename_of(out_bin) + ".log"
+  # The store holds the result, so the compiler's own incremental copy would be a second one; and it must run the
+  # compile to report what it read.
+  common_env = probe_env_prefix + toolchain_prefix + "TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " TUNGSTEN_INCREMENTAL=0 TUNGSTEN_DEPFILE=" + shq(depfile) + " "
+  sh_ok("rm -f " + shq(depfile))
+  cmd = ""
+  if bit_inside_toolchain?(this_bit_root)
+    # A bit of this toolchain is compiled like the compiler itself: from the root, by relative path, TUNGSTEN_ROOT
+    # unset, so the source names it embeds are relative and its bytes are the same in every checkout.
+    build_env = common_env + "BIT_HOME=bits "
+    if includes.size > 0
+      rel_includes = []
+      ri = 0
+      while ri < includes.size
+        rel_includes.push(project_relative_path(includes[ri]))
+        ri = ri + 1
+      build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(rel_includes.join(":")) + " "
+    cmd = STAGE_CD + build_env + shq(COMPILER_BIN) + " compile " + shq(project_relative_path(entry)) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
+  else
+    build_env = common_env + "TUNGSTEN_ROOT=" + shq(ROOT) + " BIT_HOME=" + shq(ROOT + "/bits") + " "
+    if includes.size > 0
+      build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(includes.join(":")) + " "
+    cmd = "cd " + shq(ROOT) + " && " + build_env + shq(COMPILER_BIN) + " compile " + shq(entry) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
   ok = sh_ok(cmd)
   if !ok || !regular_file?(out_bin)
     reason = ""
@@ -2736,6 +3193,46 @@ make_dirs(bit_cache_dir)
   sh_ok("chmod 755 " + shq(out_bin))
   << "    " + GREEN + "built" + RESET + "   " + project_relative_path(out_bin) + " " + DIM + ms(clock_ms() - t_bit) + RESET
   true
+
+# One executable of one bit: "skip" (bin/<name> is already the store entry for these sources), "store" (installed from
+# the store without compiling), "built", or "failed".
+-> build_bit_entry(bit_path, rec, toolchain_prefix)
+  entry = bit_path + "/" + rec[:source]
+  out_bin = bit_path + "/bin/" + rec[:name]
+  entry_flags = bit_profile_flags(rec[:profile], PROGRAM_FLAGS, RELEASE_MODE, DEBUG_REQUESTED)
+  entry_flags = bit_debug_flags(entry_flags, rec[:debug], DEBUG_REQUESTED || NO_DEBUG_REQUESTED)
+  entry_flags = bit_native_flags(entry_flags, rec[:native], EXPLICIT_TARGET)
+  entry_clang_opt = bit_profile_clang_opt(rec[:profile], BIT_CLANG_OPT, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), RELEASE_MODE, DEBUG_REQUESTED, FAST_MODE)
+  entry_clang_opt = bit_cflags_opt(entry_clang_opt, rec[:cflags], rec[:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), RELEASE_MODE, DEBUG_REQUESTED)
+  if !regular_file?(entry)
+    return "missing"
+  key = bit_static_key(bit_path, entry, rec[:name], BIT_RUNTIME_KEY, BIT_LINK_FLAGS, BIT_LINK_LIBS, entry_clang_opt, entry_flags)
+  dir = BIT_STORE_DIR + "/" + basename_of(rec[:name]) + "-" + key
+  make_dirs(dirname_of(out_bin))
+  if !FORCE_BUILD
+    hit = bit_store_lookup(dir, bit_path)
+    if hit != nil
+      if executable?(out_bin) && !symlink?(out_bin) && same_file_content?(hit, out_bin)
+        bit_install_manifest(hit, out_bin)
+        << "    " + DIM + "skip" + RESET + "    " + project_relative_path(out_bin)
+        return "skip"
+      if atomic_copy(hit, out_bin)
+        sh_ok("chmod 755 " + shq(out_bin))
+        bit_install_manifest(hit, out_bin)
+        << "    " + GREEN + "CACHED" + RESET + "  " + project_relative_path(out_bin) + " " + DIM + "(" + key.slice(0, 16) + ")" + RESET
+        return "store"
+  depfile = BUILD_SCRATCH_DIR + "/bit-" + basename_of(bit_path) + "-" + basename_of(rec[:name]) + ".deps"
+  if !compile_bit(bit_path, entry, out_bin, entry_clang_opt, entry_flags, toolchain_prefix, depfile)
+    sh_ok("rm -f " + shq(depfile))
+    return "failed"
+  stored = bit_store_publish(dir, bit_path, entry, out_bin, depfile)
+  sh_ok("rm -f " + shq(depfile))
+  if stored == ""
+    sh_ok("rm -f " + shq(out_bin + ".deps"))
+    << "    " + DIM + "note" + RESET + "    " + project_relative_path(out_bin) + " could not be added to the build store (" + dir + ")"
+  else
+    bit_install_manifest(stored, out_bin)
+  "built"
 
 # ── macOS .app targets: `app "Name", executable: "exe", id: "org.example.name", icon: "res/icon.png",
 #    documents: "ext1 ext2", version: "0.1"` in a Bitfile (2026-11-04) ─────────
@@ -2906,26 +3403,15 @@ elsif bit_only
   entries = bit_entry_points(bit_root_found)
   ei = 0
   while ei < entries.size
-    entry = bit_root_found + "/" + entries[ei][:source]
-    out_bin = bit_root_found + "/bin/" + entries[ei][:name]
-    entry_flags = bit_profile_flags(entries[ei][:profile], program_flags, release_mode, debug_requested)
-    entry_flags = bit_debug_flags(entry_flags, entries[ei][:debug], debug_requested || no_debug_requested)
-    entry_flags = bit_native_flags(entry_flags, entries[ei][:native], native_mode || cpu_name != nil || target_triple != "" || portable_mode)
-    entry_clang_opt = bit_profile_clang_opt(entries[ei][:profile], bit_clang_opt, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested, fast_mode)
-    entry_clang_opt = bit_cflags_opt(entry_clang_opt, entries[ei][:cflags], entries[ei][:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested)
-    bit_sha = bit_build_sha(bit_root_found, runtime_key, link_flags, link_libs, entry_clang_opt, entry_flags, entry)
+    outcome = build_bit_entry(bit_root_found, entries[ei], toolchain_env_prefix)
     ei = ei + 1
-    make_dirs(dirname_of(out_bin))
-    stamp = bit_cache_dir + "/" + Digest.sha256(out_bin).slice(0, 16) + ".sha"
-    stamp_content = read_file(stamp)
-    stamp_hit = stamp_content != nil && stamp_content.strip == bit_sha
-    if !force_build && executable?(out_bin) && stamp_hit
-      << "    " + DIM + "skip" + RESET + "    " + project_relative_path(out_bin)
+    if outcome == "skip" || outcome == "store"
       bits_skipped = bits_skipped + 1
-    elsif compile_bit(bit_root_found, entry, out_bin, entry_clang_opt, entry_flags, toolchain_env_prefix)
-      write_file(stamp, bit_sha + "\n")
+    elsif outcome == "built"
       bits_built = bits_built + 1
     else
+      if outcome == "missing"
+        eputs(RED + "missing executable source in " + bit_root_found + RESET)
       exit(1)
   apps = bit_apps(bit_root_found)
   ai = 0
@@ -2945,28 +3431,13 @@ else
       entries = bit_entry_points(bit_path)
       ei = 0
       while ei < entries.size
-        entry = bit_path + "/" + entries[ei][:source]
-        out_bin = bit_path + "/bin/" + entries[ei][:name]
-        entry_flags = bit_profile_flags(entries[ei][:profile], program_flags, release_mode, debug_requested)
-        entry_flags = bit_debug_flags(entry_flags, entries[ei][:debug], debug_requested || no_debug_requested)
-        entry_flags = bit_native_flags(entry_flags, entries[ei][:native], native_mode || cpu_name != nil || target_triple != "" || portable_mode)
-        entry_clang_opt = bit_profile_clang_opt(entries[ei][:profile], bit_clang_opt, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested, fast_mode)
-        entry_clang_opt = bit_cflags_opt(entry_clang_opt, entries[ei][:cflags], entries[ei][:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), release_mode, debug_requested)
-        bit_sha = bit_build_sha(bit_path, runtime_key, link_flags, link_libs, entry_clang_opt, entry_flags, entry)
+        outcome = build_bit_entry(bit_path, entries[ei], toolchain_env_prefix)
         ei = ei + 1
-        if !regular_file?(entry)
-          next
-        make_dirs(dirname_of(out_bin))
-        stamp = bit_cache_dir + "/" + Digest.sha256(out_bin).slice(0, 16) + ".sha"
-        stamp_content = read_file(stamp)
-        stamp_hit = stamp_content != nil && stamp_content.strip == bit_sha
-        if !force_build && executable?(out_bin) && stamp_hit
-          << "    " + DIM + "skip" + RESET + "    " + project_relative_path(out_bin)
+        if outcome == "skip" || outcome == "store"
           bits_skipped = bits_skipped + 1
-        elsif compile_bit(bit_path, entry, out_bin, entry_clang_opt, entry_flags, toolchain_env_prefix)
-          write_file(stamp, bit_sha + "\n")
+        elsif outcome == "built"
           bits_built = bits_built + 1
-        else
+        elsif outcome == "failed"
           bits_skipped = bits_skipped + 1
           bits_failed = bits_failed + 1
 
@@ -2979,7 +3450,30 @@ if !bit_only && !stage0_only && !stage1_only && executable?(COMPILER_BIN)
   built_from = root_git("rev-parse HEAD")
   if built_from != ""
     profile_text = profile_text + "commit=" + built_from + "\n"
+  source_fp = compiler_source_fingerprint()
+  if source_fp != ""
+    profile_text = profile_text + "source=" + source_fp + "\n"
   atomic_write(profile_text, BUILD_PROFILE_PATH)
+
+  # Tell other checkouts which compiler these sources build: the worktree
+  # hook and the launcher (bin/commands/store.sh install-compiler) look a
+  # fresh checkout's source fingerprint up here and install the compiler and
+  # images it names, so a checkout never runs a compiler built from sources
+  # other than its own. Only a verified, ordinary host build is recorded.
+  compiler_id = build_state[:compiler_id]
+  plain_build = stage_verified && !fast_mode && sanitize_flags.size == 0 && target_triple == "" && !portable_mode && TUNING_ENV == ""
+  if plain_build && source_fp != "" && compiler_id != nil && !compiler_id.starts_with?("installed:") && executable?(COMPILER_STORE_DIR + "/" + compiler_id)
+    record = "tungsten-compiler-record-v1\ncompiler=" + compiler_id + "\n"
+    kinds = ["repl", "metal"]
+    ki = 0
+    while ki < kinds.size
+      image_id = image_ids[kinds[ki]]
+      if image_id != nil && image_id != "" && executable?(COMPILER_STORE_DIR + "/image-" + kinds[ki] + "-" + image_id) && optional_cache_complete?(COMPILER_STORE_DIR + "/image-" + kinds[ki] + "-" + image_id + ".sidemap")
+        record = record + kinds[ki] + "=" + image_id + "\n"
+      ki = ki + 1
+    record = record + "release=" + (release_mode ? "1" : "0") + "\ncpu=" + host_cpu_name + "\ndebug=" + (debug_enabled ? "1" : "0") + "\npgo=" + (pgo_build ? "1" : "0") + "\n"
+    make_dirs(COMPILER_STORE_DIR + "/by-source")
+    atomic_write(record, COMPILER_STORE_DIR + "/by-source/" + source_fp)
 
 if install_requested
   install_to_system_location()

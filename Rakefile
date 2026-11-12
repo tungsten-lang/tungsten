@@ -117,7 +117,7 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess build_self_host] + RELEASE_PACKAGE_TASKS
+  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location build_store performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess build_self_host] + RELEASE_PACKAGE_TASKS
 
   desc "Verify generated C-call ABI contracts and the WIRE consistency guard"
   task :ccall_contracts do
@@ -190,14 +190,19 @@ namespace :test do
     run_command "python3", File.join(ROOT, "scripts/test-bit-install.py")
   end
 
-  desc "Run build/cache garbage-collection retention contracts"
+  desc "Run build-store garbage-collection retention contracts"
   task :cache_gc do
     run_command "bash", File.join(ROOT, "scripts/test-cache-gc.sh")
   end
 
-  desc "Verify compiler artifacts use the selected content-addressed cache"
+  desc "Verify compiler artifacts go to the shared build store and are keyed by content"
   task :cache_location do
     run_command "bash", File.join(ROOT, "scripts/test-compiler-cache-location.sh")
+  end
+
+  desc "Verify build-store location, clear-cache scope, dependency lists, and path-independent builds"
+  task :build_store do
+    run_command "bash", File.join(ROOT, "scripts/test-build-store.sh")
   end
 
   desc "Verify performance result identity and noise-band comparison"

@@ -21,15 +21,20 @@ sidecars without putting feature selection throughout the frontend or
 mid-end. The optional binaries use the existing incremental source-manifest
 cache, so a warm invocation validates rather than rebuilds them.
 
-An image lives in `build/cache/compiler-images/` under the root that owns the
+An image lives in `build/compiler-images/` under the root that owns the
 compiler, not in `bin/`, so it cannot find `core/`, `data/` and `runtime/`
 from its own path the way the default compiler does. The delegating compiler
 passes that root on as `TUNGSTEN_ROOT` unless the caller already set one.
 
-`tungsten build` builds this host's images. `--target` and `--portable` also
+`tungsten build` builds this host's images, compiled from the checkout root by
+relative path so their bytes do not name the checkout, and keeps a copy of each
+in the build store (`compilers/image-<kind>-<key>`, the key covering the
+compiler binary, every compiler/core/runtime source, the clang flags, CPU and C
+toolchain). Another checkout with the same compiler and sources installs the
+stored image instead of compiling it. `--target` and `--portable` also
 build each release artifact's own pair, for the artifact's target and CPU, in
 `build/releases/<triple>/<cpu>/compiler-images/`; `scripts/package-release.sh`
-installs those as the package's `build/cache/compiler-images/`. Nothing builds
+installs those as the package's `build/compiler-images/`. Nothing builds
 an image on launch, so a tree without them cannot start the REPL, interpret,
 or compile a `@gpu` program.
 

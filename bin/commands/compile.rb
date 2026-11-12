@@ -7,6 +7,27 @@ PRINT_AST   = File.join(ROOT, "compiler/print_ast.w")
 EMIT_IR     = File.join(ROOT, "compiler/print_ir.w")
 RUNTIME_C   = File.join(ROOT, "runtime/runtime.c")
 RUNTIME_DIR = File.join(ROOT, "runtime")
+
+# The build store shared by every checkout, and the compiler cache directory
+# inside it. The same policy as bin/commands/store.sh and the self-hosted
+# compiler (compiler_cache_dir in compiler/lib/driver/link.w):
+# TUNGSTEN_CACHE_DIR replaces the cache directory; the store root is
+# TUNGSTEN_BUILD_STORE, else TUNGSTEN_HOME/build, else ~/.tungsten/build.
+def tungsten_build_store_dir
+  explicit = ENV["TUNGSTEN_BUILD_STORE"]
+  return explicit unless explicit.nil? || explicit.empty?
+  home = ENV["TUNGSTEN_HOME"]
+  return File.join(home, "build") unless home.nil? || home.empty?
+  home = ENV["HOME"]
+  return File.join(home, ".tungsten", "build") unless home.nil? || home.empty?
+  File.join(ROOT, ".tungsten", "build")
+end
+
+def tungsten_cache_dir
+  explicit = ENV["TUNGSTEN_CACHE_DIR"]
+  return explicit unless explicit.nil? || explicit.empty?
+  File.join(tungsten_build_store_dir, "compile")
+end
 TERMINAL_INPUT_C = File.join(RUNTIME_DIR, "terminal_input.c")
 SLAB_ZSTD_C = File.join(RUNTIME_DIR, "slab_zstd.c")
 TLS_C       = File.join(RUNTIME_DIR, "tls.c")
@@ -424,23 +445,16 @@ parser = OptionParser.new do |opts|
     exit 0
   end
 
-  opts.on "--clear-cache", "Clear all .memo and incremental binary (irbin-*) cache files" do
-    cache_dir = ENV["TUNGSTEN_CACHE_DIR"]
-    cache_dir = File.join(ROOT, "build", "cache") if cache_dir.nil? || cache_dir.empty?
-    files = (Dir.glob(File.join(cache_dir, "*.memo")) + Dir.glob(File.join(cache_dir, "irbin-*")))
-            .select { |f| File.file?(f) }
-    files.each { |f| File.delete(f) }
-    puts "Cleared #{files.size} cache file#{"s" unless files.size == 1}"
-    exit 0
+  opts.on "--clear-cache", "Clear this toolchain's incremental binaries and every parse/Core/link snapshot" do
+    # One implementation for every host: bin/commands/store.sh.
+    exit(system("bash", File.join(ROOT, "bin", "commands", "store.sh"), "clear-cache", ROOT) ? 0 : 1)
   end
 
   opts.on "--dump-cache FILE", "Dump a .memo cache file" do |f|
     path = if File.exist?(f)
              f
            else
-             cache_dir = ENV["TUNGSTEN_CACHE_DIR"]
-             cache_dir = File.join(ROOT, "build", "cache") if cache_dir.nil? || cache_dir.empty?
-             File.join(cache_dir, "#{f}.memo")
+             File.join(tungsten_cache_dir, "#{f}.memo")
            end
     unless File.exist?(path)
       $stderr.puts "Cache file not found: #{path}"

@@ -63,10 +63,14 @@ COMMANDS
                          build/cache/gpu-bench.
     debug FILE           Build with symbols/frame pointers and a validated
                          sidemap, then launch LLDB or GDB.
-    cleanup              Force a build-cache sweep now (build, bootstrap, and
-                         run kick the same GC daily). Prunes incremental slots,
-                         run-cache binaries, and eval sources older than
-                         TUNGSTEN_CACHE_MAX_AGE_DAYS (default 7).
+    cleanup              Sweep the build store now (build, bootstrap, and run
+                         kick the same sweep daily). Removes entries unused
+                         for TUNGSTEN_CACHE_MAX_AGE_DAYS (default 7) and, over
+                         TUNGSTEN_CACHE_MAX_SIZE_MB (default 20000), the least
+                         recently used ones. `cleanup --all` empties the store.
+                         `tungsten --clear-cache` removes this toolchain's
+                         incremental binaries and every parse/Core/link
+                         snapshot, so the next build recompiles.
     doctor               Check your toolchain (clang, make, lld, zstd, compiler)
                          Implemented in bash — works without a built compiler.
     fmt FILE             Format .w source
@@ -283,6 +287,25 @@ ENVIRONMENT
     W_HOME
     W_PATH
     W_VERBOSE
+    TUNGSTEN_BUILD_STORE
+        The build store: one directory of reusable build artifacts shared by
+        every checkout, worktree and installed toolchain, so identical work is
+        done once. Default: TUNGSTEN_HOME/build, i.e. ~/.tungsten/build. It
+        holds compile/ (the compiler's runtime objects, incremental binaries
+        and snapshots), stages/ (bootstrap and stage compilers), compilers/
+        (finished compilers and their images) and bits/ (bit executables).
+        Entries are named by fingerprints of everything that determines them,
+        so a checkout is never handed code built from another's sources.
+    TUNGSTEN_CACHE_DIR
+        Replace the compiler's artifact directory (the store's compile/) with
+        this one, for a run that must not share or disturb any other cache.
+    TUNGSTEN_HOME
+        The per-user Tungsten directory (default ~/.tungsten): the installed
+        toolchain, user bits, and the build store.
+    TUNGSTEN_CACHE_MAX_AGE_DAYS, TUNGSTEN_CACHE_MAX_SIZE_MB
+        The store sweep's limits: entries unused for this many days (default
+        7) are removed, and above this size (default 20000; 0 for no limit)
+        the least recently used ones are.
     TUNGSTEN_SANDBOX
         Set to 1 to latch the sandbox gate for the process: file IO, sockets,
         process control, and environment access are blocked or stubbed, and

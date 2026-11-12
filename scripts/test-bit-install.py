@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TUNGSTEN = ROOT / "bin" / "tungsten"
 TEST_COMPILER = ROOT / "build" / "cache" / "bit-install" / "tungsten-compiler"
+BUILD_STORE = os.environ.get("TUNGSTEN_BUILD_STORE") or str(ROOT / "build" / "cache" / "bit-install" / "store")
 
 
 def fail(message: str, result: subprocess.CompletedProcess[str] | None = None) -> None:
@@ -46,6 +47,10 @@ def run(
             "TUNGSTEN_ROOT": str(ROOT),
             "NO_COLOR": "1",
             "HOMEBREW_CACHE": str(ROOT / "build" / "cache" / "bit-install" / "homebrew"),
+            # The test's HOME is a fresh directory, and the build store lives
+            # under TUNGSTEN_HOME: keep one store across runs so each run
+            # does not recompile the runtime, without using the developer's.
+            "TUNGSTEN_BUILD_STORE": BUILD_STORE,
         }
     )
     result = subprocess.run(
@@ -103,6 +108,7 @@ def run_current_compiler(
             "BIT_HOME": str(home / ".tungsten" / "bits"),
             "TUNGSTEN_ROOT": str(ROOT),
             "NO_COLOR": "1",
+            "TUNGSTEN_BUILD_STORE": BUILD_STORE,
         }
     )
     result = subprocess.run(

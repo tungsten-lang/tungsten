@@ -51,6 +51,8 @@ implementations/c/build*
 **/.DS_Store
 **/*.dSYM
 **/*.sidemap
+# a built bit's manifest of the sources it was built from (bits/*/bin/<name>.deps)
+bits/*/bin/*.deps
 **/*.wc
 **/*.ll
 **/*.o

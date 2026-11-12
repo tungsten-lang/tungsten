@@ -2,6 +2,66 @@
 
 ## Unreleased
 
+- **One shared build store** — build artifacts no longer live in each
+  checkout's `build/cache`. Every checkout, worktree and installed toolchain
+  reads and writes one store, `~/.tungsten/build` (`TUNGSTEN_HOME/build`;
+  `TUNGSTEN_BUILD_STORE` moves it): `compile/` for the compiler's artifacts,
+  `stages/` for bootstrap and stage compilers, `compilers/` for finished
+  compilers and their images, `bits/` for bit executables. `TUNGSTEN_CACHE_DIR`
+  still replaces the compiler's directory for an isolated run. Sharing is by
+  fingerprint, not by location, and the keys were audited for it:
+  - runtime archives, LTO objects and companion objects are keyed by the
+    content of every file under `runtime/` (the old mtime check over a
+    hand-kept list missed `prime_lut.inc` and `ast_schema_generated.h`) and
+    compiled with `-ffile-prefix-map` for both the source names and the
+    compilation directory, so one checkout's objects are right for any
+    checkout with the same runtime;
+  - stage compilers, compiler images and a toolchain's own bits are compiled
+    from the checkout root by relative path with `TUNGSTEN_ROOT` unset, so
+    their bytes no longer name the checkout that built them (the compiler
+    used to embed 175 absolute source paths); a binary that still does is
+    kept out of the shared name. The stage-0 VM's fast loader named the files
+    of the `use` closure by realpath whatever the entry's spelling, which
+    made stage 1 differ from stage 2 for a relative entry; it now names them
+    as the entry was spelled. The stage key now hashes
+    `compiler/tungsten_driver.w`, which neither `build.w` nor `bootstrap.sh`
+    covered;
+  - the stage identity hashed the lexer table's absolute path (the checkout
+    again) and only a handful of the compiler's `TUNGSTEN_*` switches, the bit
+    stamp none: the path is gone, and every switch set in the environment
+    (`TUNGSTEN_FREE=0`, `TUNGSTEN_DEFINES`, ...) is now part of the stage,
+    image and bit keys, so a build made under one is never served to a plain
+    build;
+  - per-program artifacts, which embed absolute source paths by design, stay
+    keyed by those paths, and the root they resolve against (previously
+    implied by the cache directory) is now part of the incremental-binary,
+    snapshot and Ruby-host AST identities.
+  `bin/tungsten-compiler` is a copy of a store entry (a clone on APFS), with
+  its record in `build/compiler-build.profile` and its images in
+  `build/compiler-images/`. A new worktree gets the compiler the store holds
+  for exactly its sources, or none: the post-checkout hook no longer links
+  another worktree's compiler. Bit executables are stored under the compiler
+  binary, runtime, flags and a manifest of every source file the compiler
+  read (`TUNGSTEN_DEPFILE`), so worktrees with the same sources share one
+  build and an edited `core/` file can never be served another's;
+  `bin/bit`, `bin/rung` and `tungsten bit|rung|flame` run the store's
+  executable. Writers publish by rename; a complete bit or image entry is
+  kept rather than replaced by a second builder (two builds of one key can
+  differ in code layout, and an executable must keep the sidemap of its own
+  build); readers renew what they use; and the sweep (`tungsten cleanup`)
+  removes only entries unused for 7 days or, above
+  `TUNGSTEN_CACHE_MAX_SIZE_MB` (20000), the least recently used, taking an
+  LTO object bundle only whole (the old size sweep could leave `.ready` over
+  a partial set of objects). Release packages carry their compiler images in
+  `build/compiler-images/`, and release-artifact images are compiled by
+  relative path like the artifact compiler.
+  `--clear-cache` now covers every snapshot kind and, in the shared store,
+  only the calling toolchain's incremental binaries; `cleanup --all` empties
+  the store. Old `build/cache` directories are neither read nor removed:
+  delete them by hand. `scripts/test-build-store.sh`,
+  `test-compiler-cache-location.sh`, `test-worktree-compiler-hook.sh`,
+  `test-cache-gc.sh`, `test-build-bit-driver.rb`.
+
 - **Arity contracts reach runtime builtins** — methods the runtime implements
   natively through its inline-cache rows (Array#push, String#slice,
   Hash#keys, Int#times, StringBuffer#append, Socket#read, … 121 rows in 11
@@ -32,11 +92,11 @@
   `--portable` now builds each artifact's `repl` and `metal` images for the
   artifact's target and CPU, beside it in
   `build/releases/<triple>/<cpu>/compiler-images/`; the package installs them
-  as `build/cache/compiler-images/`; the validator requires them, starts the
+  as `build/compiler-images/`; the validator requires them, starts the
   Metal image, and compiles, links and runs a program through the packaged
   launcher from outside any checkout. An image also could not find `core/`,
   `data/` or `runtime/` when the caller set no `TUNGSTEN_ROOT` (it sits in
-  `build/cache/compiler-images`, not `bin/`): `tungsten-compiler --repl` then
+  `build/compiler-images`, not `bin/`): `tungsten-compiler --repl` then
   died on the unit registry even with the image present. The compiler now
   hands the image the root that owns it. The release workflow's smoke step now
   runs a program on the default profile and builds and runs one with

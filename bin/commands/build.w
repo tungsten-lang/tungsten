@@ -435,6 +435,8 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
   << "  -2          Reuse the existing stage-1 binary and build stage 2"
   << "  --force     Ignore cached stage binaries and rebuild"
   << "  --pgo       Build the compiler with profile-guided optimization"
+  << "  --strict    Fail (exit 1, install nothing) when stage 1 and stage 2 emit different LLVM IR."
+  << "              Implied when CI is set and by --install, --pgo, --target, and --portable."
   << "  --no-bits   Skip compiling bit entry points on --release builds"
   << "  --release   -O3, full LTO, no dev checks, reduced runtime metadata, and build bits"
   << "  --install   Build (--release --native + bits), tick VERSION, and install to TUNGSTEN_HOME"
@@ -579,6 +581,7 @@ force_build = array_contains?(args, "--force")
 skip_bits_requested = array_contains?(args, "--no-bits")
 install_requested = array_contains?(args, "--install")
 install_only = array_contains?(args, "--install-only")
+strict_requested = array_contains?(args, "--strict")
 
 # -0 (Spinel stage0) only makes sense in Spinel mode. Auto-promote.
 if stage0_only
@@ -688,6 +691,41 @@ if install_requested
 
 debug_enabled = debug_requested || (!no_debug_requested && !release_mode && !portable_mode)
 lto_flag = release_mode ? "-flto=full" : "-flto=thin"
+
+# Stage identity (stage 1 .ll == stage 2 .ll) proves the compiler reproduces
+# itself. A plain local build only warns on a mismatch and still installs
+# stage 2: a developer in the middle of a two-step bootstrap change needs a
+# compiler to take the second step with. Every build whose result leaves this
+# checkout, or that nobody is reading, fails instead: an automated run (CI
+# set to anything but empty, 0 or false), --strict, --install, --pgo, and the
+# release artifacts of --target / --portable.
+strict_identity_reason = ""
+ci_value = env_or_empty("CI").strip.downcase
+if strict_requested
+  strict_identity_reason = "--strict"
+elsif ci_value != "" && ci_value != "0" && ci_value != "false"
+  strict_identity_reason = "CI is set"
+elsif install_requested
+  strict_identity_reason = "--install"
+elsif pgo_build
+  strict_identity_reason = "--pgo"
+elsif portable_mode || target_triple != ""
+  strict_identity_reason = "a release artifact build"
+strict_identity = strict_identity_reason != ""
+
+# Called when the two stages' .ll differ (or one is missing). Returns only on
+# the lenient local path.
+-> stage_identity_mismatch(stage1_ll, stage2_ll)
+  eputs("    " + RED + (strict_identity ? "ERROR" : "WARNING") + RESET + " stage 1 and stage 2 .ll differ!")
+  if regular_file?(stage1_ll) && regular_file?(stage2_ll)
+    eputs("    " + DIM + "stage 1 .ll: " + file_sha(stage1_ll) + "  " + stage1_ll + RESET)
+    eputs("    " + DIM + "stage 2 .ll: " + file_sha(stage2_ll) + "  " + stage2_ll + RESET)
+  else
+    eputs("    " + DIM + "missing emitted .ll for one or both stages (a cached stage that kept no .ll: rebuild with --force)" + RESET)
+  if strict_identity
+    eputs("    " + DIM + "stage 2 was not installed: a mismatch is fatal here (" + strict_identity_reason + ")" + RESET)
+    exit(1)
+  eputs("    " + DIM + "installing stage 2 anyway (local build); CI, --strict, --install, --pgo and release artifacts fail here" + RESET)
 
 # resolve_cpu(cpu:, native:, configured:) — no target: passed, so a host
 # CPU always resolves (build.rb behavior; the cross target is handled by
@@ -2180,14 +2218,9 @@ if !bit_only
       if verified
         << "    " + GREEN + "VERIFIED" + RESET + " " + DIM + "stage 1 .ll == stage 2 .ll (" + ms(verify_elapsed) + ")" + RESET
       else
-        # Warn and ship stage 2 anyway (a false negative must not leave
-        # the user with no installed compiler).
-        eputs("    " + RED + "WARNING" + RESET + " stage 1 and stage 2 .ll differ!")
-        if regular_file?(stage1_ll) && regular_file?(stage2_ll)
-          eputs("    " + DIM + "stage 1 .ll: " + file_sha(stage1_ll) + RESET)
-          eputs("    " + DIM + "stage 2 .ll: " + file_sha(stage2_ll) + RESET)
-        else
-          eputs("    " + DIM + "missing emitted .ll for one or both stages" + RESET)
+        # Lenient local builds warn and ship stage 2 anyway (the developer
+        # keeps an installed compiler); strict builds exit here.
+        stage_identity_mismatch(stage1_ll, stage2_ll)
 
       << ""
       if pgo_build && target_triple == "" && !portable_mode
@@ -2398,12 +2431,7 @@ if !bit_only
       if verified
         << "    " + GREEN + "VERIFIED" + RESET + " " + DIM + "stage 1 .ll == stage 2 .ll (" + ms(verify_elapsed) + ")" + RESET
       else
-        eputs("    " + RED + "WARNING" + RESET + " stage 1 and stage 2 .ll differ!")
-        if regular_file?(stage1_ll) && regular_file?(stage2_ll)
-          eputs("    " + DIM + "stage 1 .ll: " + file_sha(stage1_ll) + RESET)
-          eputs("    " + DIM + "stage 2 .ll: " + file_sha(stage2_ll) + RESET)
-        else
-          eputs("    " + DIM + "missing emitted .ll for one or both stages" + RESET)
+        stage_identity_mismatch(stage1_ll, stage2_ll)
 
       if pgo_build && target_triple == "" && !portable_mode
         pgo_binary = run_pgo_post_step(stage2, "PGO", build_scratch_dir, probe_env_prefix, STAGE_FLAGS_CMD, "")

@@ -124,8 +124,13 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           CPU: ${{ matrix.cpu }}
+        # --strict: a stage 1 / stage 2 IR mismatch exits non-zero before any
+        # compiler is installed or any artifact is built, so this step is the
+        # release's stage-identity gate. (--pgo, --target and CI imply it; it
+        # is spelled out because the job depends on it.)
         run: |
           args=(--release --pgo --target "$TARGET")
+          args+=(--strict)
           if [[ -n "$CPU" ]]; then args+=(--cpu "$CPU"); fi
           bin/tungsten bootstrap "${args[@]}"
 

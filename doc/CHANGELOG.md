@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **A stage-identity mismatch fails strict builds** — `tungsten build` printed
+  WARNING, installed stage 2 and exited 0 whenever stage 1 and stage 2 emitted
+  different LLVM IR, so nothing that ran unattended could notice. It now
+  prints ERROR, installs nothing and exits 1 when `CI` is set (to anything but
+  empty, `0` or `false`) or the build was given `--strict` (new; `bootstrap`
+  forwards it), `--install`, `--pgo`, `--target` or `--portable`. A plain
+  local build keeps the warning and the installed compiler, since a two-step
+  bootstrap change needs one. `scripts/install.sh`, the `Dockerfile` and the
+  release workflow pass `--strict`. Both messages now print the two `.ll`
+  paths. `scripts/test-build-self-host.rb` (rake `test:build_self_host`)
+  drives the real build driver over a fake checkout: 13 checks, of which the
+  previous driver fails the first strict one; the same was confirmed in a
+  real checkout by altering the cached stage-2 module.
 - **`--release` is whole-program LTO again** — since 2026-10-25 `--release`
   linked the cached native runtime archive unless `--lto` was also given (only
   compiler images kept LTO), while the help text, `AGENTS.md` and the manual

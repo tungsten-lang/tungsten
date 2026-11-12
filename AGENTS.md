@@ -49,10 +49,21 @@ are maintainer options, and Spinel is experimental and incomplete.
 
 The build compares the `.ll` that stages 1 and 2 emit; matching output proves
 the compiler reproduces itself. A match prints
-`VERIFIED stage 1 .ll == stage 2 .ll`. A mismatch prints `WARNING`, still
-installs stage 2, and still ends with `==> Done`, so read the output, not the
-exit code. The pair usually stays in `/tmp/tungsten-build-<pid>/ll/` for
-diffing.
+`VERIFIED stage 1 .ll == stage 2 .ll`. What a mismatch does depends on who is
+building:
+
+- A plain local build prints `WARNING`, still installs stage 2, and still ends
+  with `==> Done` and exit 0, so read the output, not the exit code. (A
+  two-step bootstrap change needs an installed compiler to take its second
+  step.)
+- A strict build prints `ERROR`, installs nothing, and exits 1. Strict means
+  `CI` is set (to anything but empty, `0` or `false`), or the build was given
+  `--strict`, `--install`, `--pgo`, `--target` or `--portable`.
+  `scripts/install.sh`, the `Dockerfile` and the release workflow pass
+  `--strict`.
+
+Both print the two modules' paths; the pair usually stays in
+`/tmp/tungsten-build-<pid>/ll/` for diffing.
 
 Before changing `compiler/`, `core/`, `languages/tungsten/lexers/`,
 `data/unit_names.txt`, or `data/units.tsv`, build a clean checkout of HEAD and
@@ -68,6 +79,7 @@ bin/tungsten build --force              # ignore cached stages
 bin/tungsten build -1                   # build and install stage 1 only
 bin/tungsten build -2                   # reuse stage 1, build stage 2
 bin/tungsten build --no-bits            # skip bit entry points (implied by -1/-2)
+bin/tungsten build --strict             # a stage-identity mismatch fails the build
 bin/tungsten build --help               # all options, incl. --pgo, --ruby, --spinel
 
 bin/tungsten file.w                     # compile through WIRE and run

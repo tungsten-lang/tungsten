@@ -110,7 +110,7 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess]
+  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess build_self_host]
 
   desc "Verify generated C-call ABI contracts and the WIRE consistency guard"
   task :ccall_contracts do
@@ -208,6 +208,12 @@ namespace :test do
   task :build_targets do
     run_command "bash", File.join(ROOT, "bin/tungsten"), "build", "--which"
     run_command "ruby", File.join(ROOT, "scripts/test-build-targets.rb"), File.join(ROOT, "bin/commands/build")
+  end
+
+  desc "Verify the self-host build's stage-identity exit contract"
+  task :build_self_host do
+    run_command "bash", File.join(ROOT, "bin/tungsten"), "build", "--which"
+    run_command "ruby", File.join(ROOT, "scripts/test-build-self-host.rb"), File.join(ROOT, "bin/commands/build")
   end
 
   desc "Differential-fuzz active lexer/parser/execution frontends"

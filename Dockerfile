@@ -4,8 +4,9 @@
 #   docker run --rm -it tungsten                 # prints `tungsten start`
 #   docker run --rm -it tungsten wit              # the playground REPL
 #
-# Builds the self-hosted compiler from source (stage 1 == stage 2 byte-identity
-# is checked). clang/LLVM is required to compile .w programs, so it stays in the
+# Builds the self-hosted compiler from source. The build runs with --strict:
+# stage 1 and stage 2 must emit byte-identical LLVM IR, or the image build
+# fails. clang/LLVM is required to compile .w programs, so it stays in the
 # image, not just at build time.
 #
 # Base: the official Ruby image (matches .ruby-version; bundles gcc/make/bundler
@@ -25,8 +26,8 @@ COPY . .
 
 # Bootstrap the compiler (no Ruby involved). --no-bits keeps the image lean
 # (bit entry points are optional tools; build them with `bin/tungsten build`
-# later).
-RUN ( ulimit -s 131072 2>/dev/null || true; bin/tungsten bootstrap --no-bits )
+# later). --strict: a stage-identity mismatch fails this step.
+RUN ( ulimit -s 131072 2>/dev/null || true; bin/tungsten bootstrap --no-bits --strict )
 
 # Fail the image build if the freshly built compiler can't run a program.
 RUN bin/tungsten -e '<< 6 * 7'

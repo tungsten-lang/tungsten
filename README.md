@@ -217,6 +217,7 @@ Ruby is **not** required for normal use; it is needed for the `--ruby` developer
 | `--fast`          | Enable fast, non-IEEE floating-point transformations. |
 | `--lto`           | Whole-program LTO on a non-release compile. `--release` already includes it. |
 | `--no-lto`        | Skip link-time optimization for a direct compile: `--release --no-lto` links the cached native runtime archive (faster link, larger binary). |
+| `--strict`        | With `build`/`bootstrap`, fail when stage 1 and stage 2 emit different LLVM IR instead of warning. Implied by `CI`, `--install`, `--pgo`, `--target`, and `--portable`. |
 
 </small>
 

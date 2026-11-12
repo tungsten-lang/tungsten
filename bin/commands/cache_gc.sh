@@ -61,12 +61,36 @@ removed=0
 list="${TMPDIR:-/tmp}/tungsten-cache-gc-$$"
 trap 'rm -f "$list" "$list.sorted"; rmdir "$LOCK" 2>/dev/null || true' EXIT INT TERM
 
-# Delete files first, then empty directories. We intentionally do not remove a
-# directory merely because its own mtime is old: it may contain a fresh cache
-# entry. Related entries can become partial (a binary without its manifest),
-# which is safe: every reader requires the whole set and treats a missing
-# member as a miss.
-find "$CACHE" -type f ! -name '.gc-last-run' -mtime "+$MAX_AGE_DAYS" -print0 > "$list"
+# "mtime-seconds size-bytes path" per file; BSD and GNU stat differ.
+if stat -f '%m %z %N' "$CACHE" >/dev/null 2>&1; then
+  STAT_ROW=(stat -f '%m %z %N')
+  mtime_of() { stat -f '%m' "$1"; }
+else
+  STAT_ROW=(stat -c '%Y %s %n')
+  mtime_of() { stat -c '%Y' "$1"; }
+fi
+
+# A directory holding a .ready marker is ONE entry (an LTO object bundle):
+# its reader trusts the marker for the whole set of objects, so the bundle is
+# removed whole, by the marker's age (a link renews every file in it), marker
+# first, and never file by file. Every other entry is a set of files whose
+# reader requires each member, so removing files one at a time is safe: an
+# entry that lost a member (a binary without its manifest) is a miss.
+remove_bundle() {
+  rm -f -- "$1/.ready"
+  rm -rf -- "$1"
+}
+find "$CACHE" -type f -name .ready -mtime "+$MAX_AGE_DAYS" -print0 > "$list"
+while IFS= read -r -d '' marker; do
+  remove_bundle "$(dirname "$marker")"
+  removed=$((removed + 1))
+done < "$list"
+
+# Then files outside bundles, then empty directories. We intentionally do not
+# remove a directory merely because its own mtime is old: it may contain a
+# fresh cache entry.
+find "$CACHE" -type d -exec test -e '{}/.ready' ';' -prune -o \
+  -type f ! -name '.gc-last-run' -mtime "+$MAX_AGE_DAYS" -print0 > "$list"
 while IFS= read -r -d '' path; do
   rm -f -- "$path"
   removed=$((removed + 1))
@@ -84,23 +108,35 @@ if [ "$MAX_SIZE_MB" -gt 0 ]; then
   total_kb="$(du -sk "$CACHE" 2>/dev/null | awk '{print $1}')"
   limit_kb=$((MAX_SIZE_MB * 1024))
   if [ -n "$total_kb" ] && [ "$total_kb" -gt "$limit_kb" ]; then
-    # "mtime-seconds size-bytes path" per file; BSD and GNU stat differ.
-    if stat -f '%m %z %N' "$CACHE" >/dev/null 2>&1; then
-      find "$CACHE" -type f ! -name '.gc-last-run' -mtime +0 -exec stat -f '%m %z %N' {} + > "$list" 2>/dev/null || true
-    else
-      find "$CACHE" -type f ! -name '.gc-last-run' -mtime +0 -exec stat -c '%Y %s %n' {} + > "$list" 2>/dev/null || true
-    fi
+    # "mtime size kind path": kind f is a file, b a whole bundle (above).
+    {
+      find "$CACHE" -type d -exec test -e '{}/.ready' ';' -prune -o \
+        -type f ! -name '.gc-last-run' -mtime +0 -exec "${STAT_ROW[@]}" {} + 2>/dev/null |
+        sed 's/^\([0-9]*\) \([0-9]*\) /\1 \2 f /'
+      find "$CACHE" -type f -name .ready -mtime +0 -print 2>/dev/null |
+        while IFS= read -r marker; do
+          bundle="$(dirname "$marker")"
+          kb="$(du -sk "$bundle" 2>/dev/null | awk '{ s = $1 } END { print s + 0 }')"
+          printf '%s %s b %s\n' "$(mtime_of "$marker")" "$((kb * 1024))" "$bundle"
+        done
+    } > "$list" || true
     LC_ALL=C sort -n "$list" > "$list.sorted"
     excess_kb=$((total_kb - limit_kb))
     while IFS= read -r row; do
       [ "$excess_kb" -gt 0 ] || break
       rest="${row#* }"
       size="${rest%% *}"
+      rest="${rest#* }"
+      kind="${rest%% *}"
       path="${rest#* }"
       case "$size" in
         ''|*[!0-9]*) continue ;;
       esac
-      rm -f -- "$path"
+      if [ "$kind" = b ]; then
+        remove_bundle "$path"
+      else
+        rm -f -- "$path"
+      fi
       evicted=$((evicted + 1))
       excess_kb=$((excess_kb - (size + 1023) / 1024))
     done < "$list.sorted"

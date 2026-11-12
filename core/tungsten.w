@@ -42,6 +42,8 @@
   auto :FileHandle,   "file"
   auto :Future,       "future"
   auto :FutureState,  "future"
+  auto :Gzip,         "gzip"
+  auto :GzipError,    "gzip"
   auto :Hash,         "hash"
   auto :HashCustom,   "hash_custom"
   auto :HTTP,         "http"

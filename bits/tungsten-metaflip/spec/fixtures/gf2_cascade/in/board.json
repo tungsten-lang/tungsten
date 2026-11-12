@@ -1,0 +1,83 @@
+[
+ {
+  "shape": "3x3x4",
+  "rank": 29,
+  "kind": "below_all",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "$WITNESS/334.mfw"
+ },
+ {
+  "shape": "3x4x4",
+  "rank": 38,
+  "kind": "gf2_valid_only",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "$WITNESS/344.mfw"
+ },
+ {
+  "shape": "2x3x5",
+  "rank": 25,
+  "kind": "tie",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "$WITNESS/235.mfw"
+ },
+ {
+  "shape": "3x3x5",
+  "rank": 36,
+  "kind": "above",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "$WITNESS/335.mfw"
+ },
+ {
+  "shape": "3x3x4",
+  "rank": 31,
+  "kind": "tie",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "$WITNESS/334b.mfw"
+ },
+ {
+  "shape": "3x4x4",
+  "rank": 40,
+  "kind": "above",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "$WITNESS/344b.mfw"
+ },
+ {
+  "shape": "2x2x2",
+  "rank": 7,
+  "kind": "tie",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "$WITNESS/missing-a.mfw"
+ },
+ {
+  "shape": "2x2x3",
+  "rank": 11,
+  "kind": "below_all",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "$WITNESS/missing-b.mfw"
+ },
+ {
+  "shape": "2x2x4",
+  "rank": 14,
+  "kind": "below_all",
+  "lille": null,
+  "best_any": null,
+  "best_gf2_valid": null,
+  "path": "$WITNESS/missing-c.mfw"
+ }
+]

@@ -1,0 +1,57 @@
+derived/s4/2x2x2-r7-derived-0000008.json	ok 2x2x2 r8 d4eea07f565021869a698e1675cc3424a6c098bd43fed2b53f3078bd74a0eb03 [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x2x2-r7-derived-000000f.json	ok 2x2x2 r7 37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/2x2x2-r7-derived-0000013.json	ok 2x2x2 r7 37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/2x2x2-r7-derived-0000018.json	ok 2x2x2 r7 37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3 [["atom", "known/s2/2x2x2-r7-commutative-7777777.json"]]
+derived/s4/2x2x2-r7-derived-0000019.json	error parametric constructor leaf unsupported: TA_sz(n=4)
+derived/s4/2x2x2-r7-derived-000001a.json	error cannot resolve leaf ref no such leaf
+derived/s4/2x2x2-r7-derived-000001b.json	error pinned ref 7x7x7@0000000 does not resolve
+derived/s4/2x2x2-r7-derived-000001c.json	error even denominator coefficient '1/2'
+derived/s4/2x2x2-r7-derived-000001d.json	error GF(2) verification failed for known/s2/2x2x2-r7-broken-5555555.json
+derived/s4/2x2x2-r7-derived-000001e.json	error unsupported op Frobnicate
+derived/s4/2x2x2-r7-derived-000001f.json	error derived/s4/2x2x2-r7-derived-000001f.json: KeyError: KeyError('inner')
+derived/s4/2x2x2-r7-derived-0000020.json	error dangling @ref missing
+derived/s4/2x2x2-r7-derived-0000022.json	error derived/s4/2x2x2-r7-derived-0000022.json replayed to (2, 2, 5), declared (2, 2, 2)
+derived/s4/2x2x2-r7-derived-0000023.json	error derived/s4/2x2x2-r7-derived-0000023.json: ValueError: ValueError('allocation length must equal base dim')
+derived/s4/2x2x2-r7-derived-0000030.json	error stub without lineage derived/s4/2x2x2-r7-derived-0000030.json
+derived/s4/2x2x2-r7-derived-0000031.json	error lineage cycle: derived/s4/2x2x2-r7-derived-0000031.json -> derived/s4/2x2x2-r7-derived-0000031.json
+derived/s4/2x2x2-r7-derived-0000032.json	error lineage cycle: derived/s4/2x2x2-r7-derived-0000032.json -> derived/s4/2x2x2-r7-derived-0000033.json -> derived/s4/2x2x2-r7-derived-0000032.json
+derived/s4/2x2x2-r7-derived-0000033.json	error lineage cycle: derived/s4/2x2x2-r7-derived-0000033.json -> derived/s4/2x2x2-r7-derived-0000032.json -> derived/s4/2x2x2-r7-derived-0000033.json
+derived/s4/2x2x2-r7-derived-0000034.json	ok 2x2x2 r7 37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/2x2x2-r7-derived-0000035.json	error derived/s4/2x2x2-r7-derived-0000035.json: KeyError: KeyError('n')
+derived/s4/2x2x2-r8-derived-0000014.json	ok 2x2x2 r8 0073e265ae2759f8f7e180e225b52a72e68db3953facfc9929e6c9619df7f754 []
+derived/s4/2x2x2-r8-derived-0000017.json	ok 2x2x2 r8 0073e265ae2759f8f7e180e225b52a72e68db3953facfc9929e6c9619df7f754 [["atom", "known/s2/2x2x2-r8-reduced-3333333.json"]]
+derived/s4/2x2x3-r11-derived-0000006.json	ok 2x2x3 r11 b1a4916490dc5475b07fa2e06abb3f41a212fcbd12c03160a753fbc11d773c64 [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x2x3-r11-derived-0000007.json	ok 2x2x3 r11 4a0db28aa97428651cb06d12d9ffee57dee415ec99fb03227c7602f92abddd1e [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x2x3-r11-derived-0000011.json	ok 2x2x3 r11 4a0db28aa97428651cb06d12d9ffee57dee415ec99fb03227c7602f92abddd1e [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x2x3-r11-derived-0000012.json	ok 2x2x3 r11 4a0db28aa97428651cb06d12d9ffee57dee415ec99fb03227c7602f92abddd1e [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x2x3-r11-derived-0000015.json	ok 2x2x3 r11 4a0db28aa97428651cb06d12d9ffee57dee415ec99fb03227c7602f92abddd1e [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x2x5-r18-derived-bbbbbbb.json	ok 2x2x5 r18 96f61e56d6b4bb47be2236dea0aeea2f14c9a88c94ce3a5c67427c7b58d617b3 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"], ["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x3x2-r11-derived-0000001.json	ok 2x3x2 r11 704956ecdfe485a5b698cbcfbe1e8684f4c8063345a4b4e2f8037afd82b950c3 [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x3x2-r11-derived-0000003.json	ok 2x3x2 r11 704956ecdfe485a5b698cbcfbe1e8684f4c8063345a4b4e2f8037afd82b950c3 [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x3x2-r11-derived-0000004.json	ok 3x2x2 r11 78799a0b0c74be4c6e1f2e61ccb664a5e52d5a1b3a53703c319a80a14255441d [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/2x3x2-r11-derived-0000005.json	error OrientAs failed
+derived/s4/2x4x2-r14-derived-ddddddd.json	ok 2x4x2 r14 8576267d8319d9a9af7960997c6227b465743dbe53acbc5f079b2d558f66230f [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/3x2x2-r11-derived-0000002.json	ok 3x2x2 r11 78799a0b0c74be4c6e1f2e61ccb664a5e52d5a1b3a53703c319a80a14255441d [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/3x2x2-r11-derived-0000016.json	ok 3x2x2 r11 78799a0b0c74be4c6e1f2e61ccb664a5e52d5a1b3a53703c319a80a14255441d [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/3x2x2-r11-derived-eeeeeee.json	ok 3x2x2 r11 78799a0b0c74be4c6e1f2e61ccb664a5e52d5a1b3a53703c319a80a14255441d [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/3x2x2-r11-derived-fffffff.json	ok 3x2x2 r11 78799a0b0c74be4c6e1f2e61ccb664a5e52d5a1b3a53703c319a80a14255441d [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/3x2x2-r12-derived-0000010.json	ok 3x2x2 r12 1fc4665373495c116926d46b6f104c3d236ceae8e7306830c8b832178e09ecd5 []
+derived/s4/4x2x2-r14-derived-ccccccc.json	ok 4x2x2 r14 e89f25bf1c9ef329bfacb328c17f5e94e4117e3235cb31be43ddecbfedc8a74d [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/4x4x4-r49-derived-0000009.json	ok 4x4x4 r49 5d0087c71358021bf6c322107e4f979f6031e1fa195ba59872979021fc78cf70 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/4x4x4-r49-derived-000000a.json	ok 4x4x4 r49 5d0087c71358021bf6c322107e4f979f6031e1fa195ba59872979021fc78cf70 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/4x4x4-r49-derived-000000c.json	ok 4x4x4 r49 5d0087c71358021bf6c322107e4f979f6031e1fa195ba59872979021fc78cf70 [["atom", "known/s2/2x2x2-r7-commutative-7777777.json"], ["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/4x4x4-r49-derived-0000021.json	error derived/s4/4x4x4-r49-derived-0000021.json replayed to (4, 4, 4), declared (2, 2, 2)
+derived/s4/4x4x4-r49-derived-aaaaaaa.json	ok 4x4x4 r49 5d0087c71358021bf6c322107e4f979f6031e1fa195ba59872979021fc78cf70 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/5x2x3-r70-derived-000000e.json	ok 5x2x3 r28 7372c8253d79f79230068d58745d8a8f48d4b8bd222415e2c80ccb2459282a74 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+derived/s4/6x3x4-r80-derived-000000d.json	ok 6x3x4 r62 63f728507c6b29afde7375f11c68cd6177b6e9bb2a72b8395eaf772c78fe2bf5 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"], ["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+derived/s4/6x4x4-r98-derived-000000b.json	ok 4x4x6 r77 2337c2183ad7a282919cd4d0ef1119d098a7679b7f2b05bae99117dede777ee7 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"], ["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+known/s2/2x2x2-r5-complex-8888888.json	ok 2x2x2 r7 37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3 [["atom", "known/s2/2x2x2-r5-complex-8888888.json"]]
+known/s2/2x2x2-r7-broken-5555555.json	error GF(2) verification failed for known/s2/2x2x2-r7-broken-5555555.json
+known/s2/2x2x2-r7-commutative-7777777.json	ok 2x2x2 r7 37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3 [["atom", "known/s2/2x2x2-r7-commutative-7777777.json"]]
+known/s2/2x2x2-r7-rational-4444444.json	error even denominator coefficient '1/2'
+known/s2/2x2x2-r7-strassen-abcdef0.json	ok 2x2x2 r7 37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3 [["atom", "known/s2/2x2x2-r7-strassen-abcdef0.json"]]
+known/s2/2x2x2-r8-naive-1111111.json	ok 2x2x2 r8 0073e265ae2759f8f7e180e225b52a72e68db3953facfc9929e6c9619df7f754 [["atom", "known/s2/2x2x2-r8-naive-1111111.json"]]
+known/s2/2x2x2-r8-reduced-3333333.json	ok 2x2x2 r8 0073e265ae2759f8f7e180e225b52a72e68db3953facfc9929e6c9619df7f754 [["atom", "known/s2/2x2x2-r8-reduced-3333333.json"]]
+known/s2/2x2x3-r11-hk-2222222.json	ok 2x2x3 r11 4a0db28aa97428651cb06d12d9ffee57dee415ec99fb03227c7602f92abddd1e [["atom", "known/s2/2x2x3-r11-hk-2222222.json"]]
+known/s2/2x3x2-r11-hkdense-6666666.json	ok 2x3x2 r11 704956ecdfe485a5b698cbcfbe1e8684f4c8063345a4b4e2f8037afd82b950c3 [["atom", "known/s2/2x3x2-r11-hkdense-6666666.json"]]
+known/s2/3x3x3-r27-naive-9999999.json	ok 3x3x3 r27 29e8ff5b6a44368d2cf01f68d0e1d3279774c69fe712606fe58938aa4602e22e [["atom", "known/s2/3x3x3-r27-naive-9999999.json"]]

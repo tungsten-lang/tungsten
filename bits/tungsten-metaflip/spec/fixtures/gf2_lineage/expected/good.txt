@@ -1,0 +1,4 @@
+PASS 4 exact GF(2) tensors (Python); rows: 1 basis, 1 closure, 2 projection, 1 walk
+  3x2x4 rank 22
+  3x3x3 rank 23
+  3x3x4 rank 29

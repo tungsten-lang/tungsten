@@ -1,0 +1,2 @@
+PASS 1 exact GF(2) tensors (Python); rows: 1 recipe-replay+rederived
+  4x4x4 rank 49

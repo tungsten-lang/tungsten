@@ -1,0 +1,56 @@
+#!/bin/sh
+# Adapter for the metaflip directed walker (tools/wide_rect_walk.w).
+#   metaflip [WALKER OPTIONS] TASK_ID SEED BUDGET_CPU_S OUTDIR
+# Leading options are the ablation switches of the walker (--proposal, --guard,
+# --split-period, --split-stall, --split-no-pair, --slack, --restart, --history).
+# The walker binary is $MB_WALKER (built by metabench).
+. "${MB_BENCH:-$(cd "$(dirname "$0")/.." && pwd)}/adapters/common.sh"
+
+count=$(($# - 4))
+options=""
+while [ "$count" -gt 0 ]; do
+  options="$options $1"
+  shift
+  count=$((count - 1))
+done
+task=$1
+seed=$2
+budget=$3
+out=$4
+
+shape=$(mb_task_field "$task" n)x$(mb_task_field "$task" m)x$(mb_task_field "$task" p)
+target=$(mb_task_field "$task" target)
+walker=${MB_WALKER:?MB_WALKER is not set}
+cd "$out" || exit 1
+
+# shellcheck disable=SC2086
+mb_measure walker.time "$walker" "$shape" start.mfw scheme.mfw unlimited "$seed" \
+  --target "$target" --trace --json --cpu-budget "$budget" $options > walker.out 2> walker.err
+status=$?
+if [ "$status" -ne 0 ]; then
+  cat walker.err >&2
+  exit 1
+fi
+
+summary=$(tail -n 1 walker.out)
+field() { printf '%s' "$summary" | sed -n "s/.*\"$1\":\\([^,}]*\\).*/\\1/p"; }
+trace=$(awk '
+  /^TRACE / {
+    for (i = 2; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] }
+    printf "%s[%.6f, %s, %s, %s]", sep, v["cpu_ms"] / 1000, v["proposals"], v["flips"], v["rank"]
+    sep = ", "
+  }' walker.out)
+
+hit=$(field hit)
+if [ "$hit" = "true" ]; then
+  proposals_to_hit=$(field proposals_to_best)
+  flips_to_hit=$(field flips_to_best)
+else
+  proposals_to_hit=null
+  flips_to_hit=null
+fi
+sha=$(field sha256 | tr -d '"')
+cat > result.json <<JSON
+{"schema": 1, "hit": $hit, "best_rank": $(field rank), "proposals_total": $(field proposals), "proposals_to_hit": $proposals_to_hit, "flips_total": $(field flips), "flips_to_hit": $flips_to_hit, "trace": [$trace], "scheme_sha256": "$sha", "tool": "wide_rect_walk", "notes": "proposal = attempted flip or split; flip = accepted proposal", $(mb_json_tail)}
+JSON
+exit 0

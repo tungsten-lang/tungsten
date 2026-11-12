@@ -21,8 +21,8 @@ GF(2) upper bounds.
 > scheme we rebuilt was verified exactly) found **87 of the 795 superseded** by published constructions (80 by GF(2) schemes
 > we rebuilt from published files, 7 by published rank claims) and **112 more matched** by elementary compositions of published
 > schemes; **596 remain**. `4x4x8` at 94 is Perminov's Z2 result and `7x7x7` at 247 is beaten by Medley et al.'s 245. Re-scoring
-> against the latest heads of the four tables changes no class. See `papers/results/sections/persistence.tex`,
-> `papers/results/data/prior_art_flags.tsv` (one flag per record) and `papers/ERRATA.md`.
+> against the latest heads of the four tables changes no class. See `tungsten-lang/papers/results/sections/persistence.tex`,
+> `tungsten-lang/papers/results/data/prior_art_flags.tsv` (one flag per record) and `tungsten-lang/papers/ERRATA.md`.
 
 ## Standing on 2026-09-29
 

@@ -1,0 +1,173 @@
+[
+ {
+  "name": "targets",
+  "args": [
+   "targets",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--lille",
+   "{in}/lille.json",
+   "--extra-repo",
+   "{in}/extra",
+   "--board",
+   "{t}/board.json",
+   "--out",
+   "{t}/targets.json"
+  ]
+ },
+ {
+  "name": "targets-slack",
+  "args": [
+   "targets",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--lille",
+   "{in}/lille.json",
+   "--extra-repo",
+   "{in}/extra",
+   "--board",
+   "{t}/board.json",
+   "--slack",
+   "1",
+   "--out",
+   "{t}/targets-slack.json"
+  ]
+ },
+ {
+  "name": "targets-min-dim",
+  "args": [
+   "targets",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--lille",
+   "{in}/lille.json",
+   "--extra-repo",
+   "{in}/extra",
+   "--board",
+   "{t}/board.json",
+   "--slack",
+   "100",
+   "--min-dim",
+   "3",
+   "--out",
+   "{t}/targets-min-dim.json"
+  ]
+ },
+ {
+  "name": "replay-plain",
+  "args": [
+   "replay",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--targets",
+   "{in}/targets-all.json",
+   "--out",
+   "{t}/out/plain"
+  ]
+ },
+ {
+  "name": "replay-again",
+  "args": [
+   "replay",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--targets",
+   "{in}/targets-all.json",
+   "--out",
+   "{t}/out/plain"
+  ]
+ },
+ {
+  "name": "replay-board",
+  "args": [
+   "replay",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--targets",
+   "{in}/targets-all.json",
+   "--board",
+   "{t}/board.json",
+   "--out",
+   "{t}/out/board"
+  ]
+ },
+ {
+  "name": "replay-wide",
+  "args": [
+   "replay",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--targets",
+   "{in}/targets-all.json",
+   "--allow-nonf2",
+   "--out",
+   "{t}/out/wide"
+  ]
+ },
+ {
+  "name": "replay-retry",
+  "args": [
+   "replay",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--targets",
+   "{in}/targets-all.json",
+   "--board",
+   "{t}/board.json",
+   "--retry-failed",
+   "--out",
+   "{t}/out/plain"
+  ]
+ },
+ {
+  "name": "replay-only",
+  "args": [
+   "replay",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--targets",
+   "{in}/targets-all.json",
+   "--only",
+   "4x4x4",
+   "2x2x5",
+   "known/s2/2x2x3-r11-hk-2222222.json",
+   "--out",
+   "{t}/out/only"
+  ]
+ },
+ {
+  "name": "replay-selected",
+  "args": [
+   "replay",
+   "--clone",
+   "{clone}",
+   "--cache-dir",
+   "{cache}",
+   "--targets",
+   "{t}/targets.json",
+   "--board",
+   "{t}/board.json",
+   "--allow-nonf2",
+   "--out",
+   "{t}/out/selected"
+  ]
+ }
+]

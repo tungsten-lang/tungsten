@@ -1,0 +1,3 @@
+PASS 1 exact GF(2) tensors (Python); rows: 1 recipe-replay
+  note: 4x4x4-r49-5d0087c7.mfw.gz.b64: not re-derived (no --source for https://github.com/solven-eu/matmulcatalog)
+  4x4x4 rank 49

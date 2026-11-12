@@ -1,0 +1,150 @@
+	/base/dir
+.	/base/dir
+..	/base
+/	/
+//	//
+///	/
+a	/base/dir/a
+/a	/a
+//a	//a
+a/	/base/dir/a
+a//b	/base/dir/a/b
+./a/./b	/base/dir/a/b
+x/../y	/base/dir/y
+/a/b/c.txt	/a/b/c.txt
+a.tar.gz	/base/dir/a.tar.gz
+.bashrc	/base/dir/.bashrc
+a.	/base/dir/a.
+a..	/base/dir/a..
+...	/base/dir/...
+.a.	/base/dir/.a.
+..a	/base/dir/..a
+/a/b/.	/a/b
+dir.d/file.txt	/base/dir/dir.d/file.txt
+é/ü.txt	/base/dir/é/ü.txt
+ lead	/base/dir/ lead
+trail 	/base/dir/trail 
+a b/c d	/base/dir/a b/c d
+.hidden/.f	/base/dir/.hidden/.f
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	/base/dir/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+//a../c.tar.gz/..	//a..
+///./é/	/é
+///c.tar.gz/é/c.tar.gz	/c.tar.gz/é/c.tar.gz
+/b	/b
+//../é/é	//é/é
+//..a/b/a/x.	//..a/b/a/x.
+/.x/x.	/.x/x.
+///a//../../	/
+/../b/.x	/b/.x
+/../b	/b
+//q.r/ s/q.r	//q.r/ s/q.r
+/a../q.r/q.r	/a../q.r/q.r
+ s//../q.r/	/base/dir/q.r
+..a/..a	/base/dir/..a/..a
+///a../b/	/a../b
+///.	/
+.//	/base/dir
+é/q.r/x./	/base/dir/é/q.r/x.
+//c.tar.gz/../x.	//x.
+/a/q.r/b	/a/q.r/b
+/a/é/ s	/a/é/ s
+/../.x	/.x
+/a.././..	/
+//q.r/	//q.r
+////	/
+/./q.r/./c.tar.gz	/q.r/c.tar.gz
+c.tar.gz	/base/dir/c.tar.gz
+//.x/ s	//.x/ s
+./b/..	/base/dir
+///c.tar.gz/é/é/c.tar.gz	/c.tar.gz/é/é/c.tar.gz
+///.x/..	/
+/..a/..a/..a	/..a/..a/..a
+//a..	//a..
+b	/base/dir/b
+//c.tar.gz	//c.tar.gz
+// s/ s	// s/ s
+//.x/..a/b	//.x/..a/b
+///b/a/	/b/a
+//a../.x/.	//a../.x
+//q.r/b	//q.r/b
+//..	//
+///é/.x/c.tar.gz/	/é/.x/c.tar.gz
+ s	/base/dir/ s
+//.x/ s/x.	//.x/ s/x.
+/a../ s/ s	/a../ s/ s
+/.x/..a/./	/.x/..a
+/.x	/.x
+/ s	/ s
+/é/a..	/é/a..
+.x/../a../ s	/base/dir/a../ s
+/c.tar.gz/b/.	/c.tar.gz/b
+/..a	/..a
+q.r/c.tar.gz//..a	/base/dir/q.r/c.tar.gz/..a
+///q.r/x./é/	/q.r/x./é
+ s/q.r/é	/base/dir/ s/q.r/é
+./a../q.r/	/base/dir/a../q.r
+/// s/	/ s
+/b/a/a	/b/a/a
+//a../	//a..
+x./c.tar.gz/../.x/	/base/dir/x./.x
+.x//é	/base/dir/.x/é
+///a../q.r/x./../	/a../q.r
+/./x.	/x.
+///.x/é	/.x/é
+/..a/b/..a	/..a/b/..a
+/é	/é
+//.././b	//b
+/c.tar.gz/a	/c.tar.gz/a
+//x./é/../	//x.
+/..a/c.tar.gz/..	/..a
+./ s	/base/dir/ s
+/a../q.r/c.tar.gz/ s	/a../q.r/c.tar.gz/ s
+///c.tar.gz/x./	/c.tar.gz/x.
+//./..a	//..a
+///é/..	/
+/.x/q.r/ s	/.x/q.r/ s
+///..a/..	/
+c.tar.gz/q.r	/base/dir/c.tar.gz/q.r
+//c.tar.gz/b/.	//c.tar.gz/b
+/./x./x.	/x./x.
+/./q.r	/q.r
+x./..	/base/dir
+/a../é/c.tar.gz/c.tar.gz	/a../é/c.tar.gz/c.tar.gz
+a../ s/./.x	/base/dir/a../ s/.x
+/..a/x./q.r/é	/..a/x./q.r/é
+.x/a/c.tar.gz	/base/dir/.x/a/c.tar.gz
+//a../.	//a..
+/q.r/a/x./c.tar.gz	/q.r/a/x./c.tar.gz
+//a../é	//a../é
+/q.r/ s/.x	/q.r/ s/.x
+/a/..a/x./ s	/a/..a/x./ s
+//é/a	//é/a
+///x./../q.r/..	/
+// s/a../a	// s/a../a
+///./a../a/ s	/a../a/ s
+b/.x/ s	/base/dir/b/.x/ s
+/// s/b/x./	/ s/b/x.
+c.tar.gz/b	/base/dir/c.tar.gz/b
+/.././	/
+////c.tar.gz	/c.tar.gz
+/q.r	/q.r
+//b/a/..a	//b/a/..a
+/../a/..a	/a/..a
+///c.tar.gz	/c.tar.gz
+///é/b	/é/b
+q.r/..a/c.tar.gz	/base/dir/q.r/..a/c.tar.gz
+/ s/..a/a	/ s/..a/a
+é	/base/dir/é
+/ s/./c.tar.gz/ s	/ s/c.tar.gz/ s
+///../..a	/..a
+/b/ s	/b/ s
+/b//.	/b
+/a/a//..	/a
+b/..a/..	/base/dir/b
+///./.x/	/.x
+/./a	/a
+/c.tar.gz/../x.	/x.
+/c.tar.gz/b/.x	/c.tar.gz/b/.x
+///.x/x.	/.x/x.
+///a..	/a..
+/b/..a/c.tar.gz/x.	/b/..a/c.tar.gz/x.

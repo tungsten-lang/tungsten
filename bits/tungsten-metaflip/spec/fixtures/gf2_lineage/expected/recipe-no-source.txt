@@ -1,0 +1,3 @@
+PASS 1 exact GF(2) tensors (Python); rows: 1 recipe-replay
+  note: 3x3x4-r29-4bd271ef.mfw.gz.b64: not re-derived (no --source for https://github.com/solven-eu/matmulcatalog)
+  3x3x4 rank 29

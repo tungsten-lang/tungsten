@@ -1,0 +1,52 @@
+[
+ {
+  "mmc_file": "derived/s4/4x4x4-r49-derived-1111111.json",
+  "canonical": "4x4x4",
+  "mmc_rank": 49
+ },
+ {
+  "mmc_file": "derived/s4/4x4x4-r48-derived-2222222.json",
+  "canonical": "4x4x4",
+  "mmc_rank": 48
+ },
+ {
+  "mmc_file": "derived/s4/2x2x5-r18-derived-3333333.json",
+  "canonical": "2x2x5",
+  "mmc_rank": 18
+ },
+ {
+  "mmc_file": "derived/s4/6x6x6-r161-derived-4444444.json",
+  "canonical": "6x6x6",
+  "mmc_rank": 161
+ },
+ {
+  "mmc_file": "derived/s4/4x6x6-r119-derived-5555555.json",
+  "canonical": "4x6x6",
+  "mmc_rank": 119
+ },
+ {
+  "mmc_file": "derived/s4/2x2x4-r14-derived-6666666.json",
+  "canonical": "2x2x4",
+  "mmc_rank": 14
+ },
+ {
+  "mmc_file": "derived/s4/3x3x5-r40-derived-7777777.json",
+  "canonical": "3x3x5",
+  "mmc_rank": 40
+ },
+ {
+  "mmc_file": "known/s2/2x2x2-r7-strassen-abcdef0.json",
+  "canonical": "2x2x2",
+  "mmc_rank": 7
+ },
+ {
+  "mmc_file": "known/s2/2x2x3-r11-hk-2222222.json",
+  "canonical": "2x2x3",
+  "mmc_rank": 11
+ },
+ {
+  "mmc_file": "known/s2/3x3x3-r27-naive-9999999.json",
+  "canonical": "3x3x3",
+  "mmc_rank": 27
+ }
+]

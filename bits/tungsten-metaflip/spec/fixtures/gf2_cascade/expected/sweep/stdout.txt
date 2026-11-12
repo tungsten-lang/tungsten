@@ -1,0 +1,5 @@
+6 walks queued
+DROP 3x3x4 31 -> 29
+DROP 3x4x4 40 -> 38
+DROP 3x3x4 31 -> 29
+DROP 3x4x4 40 -> 38

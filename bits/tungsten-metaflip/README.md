@@ -1138,6 +1138,32 @@ prescribed local replacement and compile a replayable exact setup/flip/cleanup
 word, but they are not production fleet lanes unless matched frontier
 experiments show useful candidates.
 
+### GF(2) scheme library and the Tungsten verifier
+
+`lib/metaflip/gf2/` is the arbitrary-width scheme toolkit that the Tungsten port
+of the Python/Ruby GF(2) tooling builds on: `bits.w` (popcount, set-bit
+iteration, remap/transpose and Integer <-> 64-bit-limb conversion for masks of
+any size), `scheme.w` (`Metaflip:Gf2:Scheme`, a scheme as Integer masks with a
+strict MFW1 reader/writer, SHA-256, orientations and `clean`), and `packed.w`
+(the same scheme as limb arrays plus two independent exactness gates, a dense
+table in the style of `verify_tensor.rb` and a sparse table in the style of the
+Python `exact`, each able to name the first wrong coefficient).
+`tensor_verifier.w` and `tools/verify_tensor.w` port `tools/verify_tensor.rb`
+byte for byte (same records, same messages, same exit status, same certificate
+formats) and add `--gate dense|sparse|both`, `--strict` (canonical MFW1, the
+Python `read_blob` rule), `--batch LIST` and `--keep-going`. Verifying the
+28x32x32, rank 14,271 tensor takes about 0.1 s with both gates:
+
+```bash
+bin/tungsten -o verify_tensor tools/verify_tensor.w --release
+./verify_tensor --shape 28x32x32 tensor.mfw
+./verify_tensor --batch list.txt          # one path (optional TAB shape) per line
+```
+
+Compiled Tungsten has no garbage collector: the library releases its own large
+temporaries, and callers that loop over thousands of schemes use
+`Metaflip:Gf2:Bits.release` (see the header of `lib/metaflip/gf2/bits.w`).
+
 ### Learned residual completion: research only
 
 Useful search strategies belong in the automatic pipeline; experiments without
@@ -1467,6 +1493,10 @@ public rank tables, and `tools/build_gf2_lineage_bundle.py` with
 `tools/verify_gf2_lineage.py` write and check lineage bundles. The
 [campaign write-up](tools/RECORD-HUNT-2026-09-26.md) has the standing and its caveats; the
 tensors are release assets of `tungsten-lang/metaflip-archives`, not part of this package.
+Tungsten ports of these tools (`tools/gf2_record_board.w`, `public_ternary.w`, `mmc_seeds.w`, `build_lineage.w`,
+`verify_lineage.w`, `closure_prices.w`, `projection_walks.w`, `cascade.w`, with their libraries in `lib/metaflip/gf2/`) reproduce the output of the Python
+originals, which stay as the oracles of the specs; the campaign itself ran on the originals.
+The two papers about the campaign are in the private repository `tungsten-lang/papers` (split from this package on 2026-10-02).
 
 Bundled seed files can have licenses or attribution requirements different
 from the engine. Read [THIRD_PARTY.md](THIRD_PARTY.md) before redistributing a

@@ -1,0 +1,17 @@
+# Strassen, with a comment, blank lines and CRLF-free padding
+
+   7   
+  9 9 9  
+
+  12 1 12  
+
+  1 10 10  
+
+  8 5 5  
+
+  3 8 3  
+
+  5 3 8  
+
+  10 12 1  
+

@@ -1,0 +1,22 @@
+{
+ "schema": 1,
+ "field": "GF(2)",
+ "record_claim": false,
+ "rows": [
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "2x2x2",
+   "rank": 7,
+   "sha256": "37aeec2ece7526fe09a367e1fc0484ac2d60aca7b446fc41bd231f9fe1e2c2b3",
+   "file": "2x2x2-r7-37aeec2e.mfw.gz.b64",
+   "details": {
+    "repository": "https://example.invalid/fixture-schemes",
+    "revision": "0f8678617c5c270d80b69613716a9f15bc30b065",
+    "path": "schemes/found/Z/2x2x2_m7_Z.json",
+    "source_sha256": "81273aa1a1d4395cc462d4e8a8793b02a2bc80698481a88106faa98f0b29ad9a",
+    "source_rank": 7
+   }
+  }
+ ]
+}

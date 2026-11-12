@@ -1,0 +1,14 @@
+2x2x2	[2, 2, 2]
+matmul_3x4_rank36	[3, 4]
+a12x34x56b	[12, 34, 56]
+x1y2x3	[2, 3]
+5x	null
+x5	null
+12x3x	[12, 3]
+7x8x9x10	[7, 8, 9]
+1x2xx3	[1, 2]
+abc	null
+33x2_3x4x5	[33, 2]
+best.txt	null
+2x3x4-note	[2, 3, 4]
+100x200x300_m5	[100, 200, 300]

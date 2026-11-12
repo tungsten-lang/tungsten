@@ -1,0 +1,1 @@
+{"n":[6,3,4],"m":80,"lineage":{"op":"Recombination","base":{"op":"Atom","ref":"2x2x2-r7-strassen-abcdef0"},"allocA":[3,3],"allocB":[1,2],"allocC":[2,2]}}

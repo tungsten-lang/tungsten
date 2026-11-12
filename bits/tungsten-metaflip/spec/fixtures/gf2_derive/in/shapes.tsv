@@ -1,0 +1,8 @@
+strassen	2x2x2	7
+s234	2x3x4	20
+s225	2x2x5	18
+s235p2	2x3x5	27
+s256	2x5x6	47
+strassen_split	2x2x2	8
+s234_split	2x3x4	25
+s256_split	2x5x6	62

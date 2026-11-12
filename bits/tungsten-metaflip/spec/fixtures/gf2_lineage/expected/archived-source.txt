@@ -1,0 +1,2 @@
+PASS 1 exact GF(2) tensors (Python); rows: 1 archived+rederived
+  3x3x4 rank 29

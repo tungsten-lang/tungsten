@@ -1,0 +1,87 @@
+[
+ {
+  "shape": "2x2x3",
+  "canonical": "2x2x3",
+  "gf2_rank": 11,
+  "mfw": "$T/out/selected/2x2x3_r11_mmc_4a0db28a.mfw",
+  "mfw_sha256": "4a0db28aa97428651cb06d12d9ffee57dee415ec99fb03227c7602f92abddd1e",
+  "mmc_file": "known/s2/2x2x3-r11-hk-2222222.json",
+  "mmc_rank": 11,
+  "leaf_mode": "pure",
+  "attribution": {
+   "catalogue": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "0ad89a79b9b91427fcf4f8125e96839f38adc512",
+    "file": "known/s2/2x2x3-r11-hk-2222222.json",
+    "source": "Hopcroft-Kerr 1971",
+    "year": 1971,
+    "lineage": null
+   },
+   "atoms": [
+    {
+     "file": "known/s2/2x2x3-r11-hk-2222222.json",
+     "shape": "2x2x3",
+     "rank": 11,
+     "source": "Hopcroft-Kerr 1971",
+     "year": 1971,
+     "fields": [
+      "F2",
+      "Z"
+     ],
+     "source_scheme_url": null,
+     "source_paper_url": null
+    }
+   ],
+   "board_leaves": []
+  }
+ },
+ {
+  "shape": "4x6x6",
+  "canonical": "4x6x6",
+  "gf2_rank": 119,
+  "mfw": "$T/out/selected/4x6x6_r119_mmc_74e637c4.mfw",
+  "mfw_sha256": "74e637c40cd2c6d4c32b7197bd221ef27fbfc0f6c52c2ebfb7787cc54c747c44",
+  "mmc_file": "derived/s4/4x6x6-r119-derived-5555555.json",
+  "mmc_rank": 119,
+  "leaf_mode": "wide",
+  "attribution": {
+   "catalogue": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "0ad89a79b9b91427fcf4f8125e96839f38adc512",
+    "file": "derived/s4/4x6x6-r119-derived-5555555.json",
+    "source": null,
+    "year": null,
+    "lineage": "2x2x2 kron the rank-17 <2,3,3>"
+   },
+   "atoms": [
+    {
+     "file": "known/s2/2x2x2-r7-strassen-abcdef0.json",
+     "shape": "2x2x2",
+     "rank": 7,
+     "source": "Strassen 1969",
+     "year": 1969,
+     "fields": [
+      "F2",
+      "Z",
+      "Q"
+     ],
+     "source_scheme_url": "https://example.invalid/strassen.json",
+     "source_paper_url": "https://example.invalid/strassen"
+    },
+    {
+     "file": "known/s2/2x3x3-r17-integer-aaaaaaa.json",
+     "shape": "2x3x3",
+     "rank": 17,
+     "source": "an integer scheme",
+     "year": 2022,
+     "fields": [
+      "Z"
+     ],
+     "source_scheme_url": null,
+     "source_paper_url": null
+    }
+   ],
+   "board_leaves": []
+  }
+ }
+]

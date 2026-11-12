@@ -1,0 +1,79 @@
+{
+ "schemes": [
+  {
+   "format": [
+    2,
+    2,
+    2
+   ],
+   "rank": 7,
+   "fields": [
+    "F2",
+    "Q"
+   ],
+   "commutative": false
+  },
+  {
+   "format": [
+    3,
+    2,
+    3
+   ],
+   "rank": 15,
+   "fields": [
+    "Q",
+    "R"
+   ],
+   "commutative": false
+  },
+  {
+   "format": [
+    3,
+    3,
+    3
+   ],
+   "rank": 21,
+   "fields": [
+    "F3"
+   ],
+   "commutative": true
+  },
+  {
+   "format": [
+    4,
+    3,
+    3
+   ],
+   "rank": 41,
+   "fields": [
+    "F2"
+   ],
+   "commutative": false
+  },
+  {
+   "format": [
+    4,
+    4,
+    3
+   ],
+   "rank": 50,
+   "fields": [
+    "F2",
+    "Q"
+   ],
+   "commutative": false
+  },
+  {
+   "format": [
+    3,
+    3,
+    3
+   ],
+   "rank": 23,
+   "fields": [
+    "F2",
+    "Q"
+   ]
+  }
+ ]
+}

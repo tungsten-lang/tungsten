@@ -1,0 +1,16 @@
+witnesses/.hidden/2x2x2/best.txt	[[2, 2, 2], 7]
+witnesses/bad/2x2x2/best.txt	None
+witnesses/checkpoints/2x2x2/best.txt	[[2, 2, 2], 7]
+witnesses/gz/strassen.mfw.gz.b64	[[2, 2, 2], 7]
+witnesses/ignored/notes.txt	None
+witnesses/mfw/strassen.mfw	[[2, 2, 2], 7]
+witnesses/mixed/3x4x4/best.txt	[[4, 3, 4], 48]
+witnesses/naive/matmul_2x2_rank8_gf2.txt	[[2, 2, 2], 8]
+witnesses/noshape/best.txt	None
+witnesses/rect/2x3x3/best.txt	[[3, 3, 2], 18]
+witnesses/rect/334.mfw	[[3, 3, 4], 36]
+witnesses/rect/matmul_3x4_naive_gf2.txt	[[3, 4, 3], 36]
+witnesses/rect/matmul_3x5_naive_gf2.txt	[[3, 5, 3], 45]
+witnesses/seeds/matmul_2x2_rank7.txt	[[2, 2, 2], 7]
+witnesses/short/2x2x2/best.txt	None
+witnesses/unsorted/2x2x2.mfw	None

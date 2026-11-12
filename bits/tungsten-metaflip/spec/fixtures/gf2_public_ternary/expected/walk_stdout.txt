@@ -1,0 +1,21 @@
+
+
+
+
+
+
+
+
+18 walks queued
+DROP 2x2x2 8 -> 7
+DROP 2x2x2 8 -> 7
+DROP 2x2x9 36 -> 35
+DROP 2x2x9 36 -> 35
+ERROR 2x2x3 walker: cannot open $TMP/out-alternatives/fail-2x2x3_r12_3ebc5b87.mfw
+ERROR 2x2x3 walker: cannot open $TMP/out-alternatives/fail-2x2x3_r12_3ebc5b87.mfw
+ERROR 2x3x3 walker: cannot open $TMP/out-alternatives/fail-2x3x3_r18_bba59e9b.mfw
+ERROR 2x3x3 walker: cannot open $TMP/out-alternatives/fail-2x3x3_r18_bba59e9b.mfw
+ERROR 2x3x4 done
+ERROR 2x3x4 done
+ERROR 3x2x2 done
+ERROR 3x2x2 done

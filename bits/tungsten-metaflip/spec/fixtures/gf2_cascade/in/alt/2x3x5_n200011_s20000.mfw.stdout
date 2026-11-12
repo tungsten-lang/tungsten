@@ -1,0 +1,1 @@
+WIDE_RECT_RESULT tensor=2x3x5 seed_rank=25 rank=25 moves=20000 accepted=17768 no_pair=0 escapes=9 nonce=200011 output=/private/var/folders/p2/bwjsjvkx1zgbc6lz55_gj97h0000gn/T/gf2-cascade-a-vn6ewdwk/it/iter_mfw/2x3x5_n200011_s20000.mfw

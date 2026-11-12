@@ -1,0 +1,520 @@
+	.			.			false
+.	.			.			false
+..	..	..	..	.	..		false
+/	/	/		/			true
+//	//	//		//			true
+///	/	/		/			true
+a	a	a	a	.	a		false
+/a	/a	/|a	a	/	a		true
+//a	//a	//|a	a	//	a		true
+a/	a	a	a	.	a		false
+a//b	a/b	a|b	b	a	b		false
+./a/./b	a/b	a|b	b	a	b		false
+x/../y	x/../y	x|..|y	y	x/..	y		false
+/a/b/c.txt	/a/b/c.txt	/|a|b|c.txt	c.txt	/a/b	c	.txt	true
+a.tar.gz	a.tar.gz	a.tar.gz	a.tar.gz	.	a.tar	.gz	false
+.bashrc	.bashrc	.bashrc	.bashrc	.	.bashrc		false
+a.	a.	a.	a.	.	a	.	false
+a..	a..	a..	a..	.	a.	.	false
+...	...	...	...	.	...		false
+.a.	.a.	.a.	.a.	.	.a	.	false
+..a	..a	..a	..a	.	..a		false
+/a/b/.	/a/b	/|a|b	b	/a	b		true
+dir.d/file.txt	dir.d/file.txt	dir.d|file.txt	file.txt	dir.d	file	.txt	false
+é/ü.txt	é/ü.txt	é|ü.txt	ü.txt	é	ü	.txt	false
+ lead	 lead	 lead	 lead	.	 lead		false
+trail 	trail 	trail 	trail 	.	trail 		false
+a b/c d	a b/c d	a b|c d	c d	a b	c d		false
+.hidden/.f	.hidden/.f	.hidden|.f	.f	.hidden	.f		false
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	.	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx		false
+//a../c.tar.gz/..	//a../c.tar.gz/..	//|a..|c.tar.gz|..	..	//a../c.tar.gz	..		true
+///./é/	/é	/|é	é	/	é		true
+///c.tar.gz/é/c.tar.gz	/c.tar.gz/é/c.tar.gz	/|c.tar.gz|é|c.tar.gz	c.tar.gz	/c.tar.gz/é	c.tar	.gz	true
+/b	/b	/|b	b	/	b		true
+//../é/é	//../é/é	//|..|é|é	é	//../é	é		true
+//..a/b/a/x.	//..a/b/a/x.	//|..a|b|a|x.	x.	//..a/b/a	x	.	true
+/.x/x.	/.x/x.	/|.x|x.	x.	/.x	x	.	true
+///a//../../	/a/../..	/|a|..|..	..	/a/..	..		true
+/../b/.x	/../b/.x	/|..|b|.x	.x	/../b	.x		true
+/../b	/../b	/|..|b	b	/..	b		true
+//q.r/ s/q.r	//q.r/ s/q.r	//|q.r| s|q.r	q.r	//q.r/ s	q	.r	true
+/a../q.r/q.r	/a../q.r/q.r	/|a..|q.r|q.r	q.r	/a../q.r	q	.r	true
+ s//../q.r/	 s/../q.r	 s|..|q.r	q.r	 s/..	q	.r	false
+..a/..a	..a/..a	..a|..a	..a	..a	..a		false
+///a../b/	/a../b	/|a..|b	b	/a..	b		true
+///.	/	/		/			true
+.//	.			.			false
+é/q.r/x./	é/q.r/x.	é|q.r|x.	x.	é/q.r	x	.	false
+//c.tar.gz/../x.	//c.tar.gz/../x.	//|c.tar.gz|..|x.	x.	//c.tar.gz/..	x	.	true
+/a/q.r/b	/a/q.r/b	/|a|q.r|b	b	/a/q.r	b		true
+/a/é/ s	/a/é/ s	/|a|é| s	 s	/a/é	 s		true
+/../.x	/../.x	/|..|.x	.x	/..	.x		true
+/a.././..	/a../..	/|a..|..	..	/a..	..		true
+//q.r/	//q.r	//|q.r	q.r	//	q	.r	true
+////	/	/		/			true
+/./q.r/./c.tar.gz	/q.r/c.tar.gz	/|q.r|c.tar.gz	c.tar.gz	/q.r	c.tar	.gz	true
+c.tar.gz	c.tar.gz	c.tar.gz	c.tar.gz	.	c.tar	.gz	false
+//.x/ s	//.x/ s	//|.x| s	 s	//.x	 s		true
+./b/..	b/..	b|..	..	b	..		false
+///c.tar.gz/é/é/c.tar.gz	/c.tar.gz/é/é/c.tar.gz	/|c.tar.gz|é|é|c.tar.gz	c.tar.gz	/c.tar.gz/é/é	c.tar	.gz	true
+///.x/..	/.x/..	/|.x|..	..	/.x	..		true
+/..a/..a/..a	/..a/..a/..a	/|..a|..a|..a	..a	/..a/..a	..a		true
+//a..	//a..	//|a..	a..	//	a.	.	true
+b	b	b	b	.	b		false
+//c.tar.gz	//c.tar.gz	//|c.tar.gz	c.tar.gz	//	c.tar	.gz	true
+// s/ s	// s/ s	//| s| s	 s	// s	 s		true
+//.x/..a/b	//.x/..a/b	//|.x|..a|b	b	//.x/..a	b		true
+///b/a/	/b/a	/|b|a	a	/b	a		true
+//a../.x/.	//a../.x	//|a..|.x	.x	//a..	.x		true
+//q.r/b	//q.r/b	//|q.r|b	b	//q.r	b		true
+//..	//..	//|..	..	//	..		true
+///é/.x/c.tar.gz/	/é/.x/c.tar.gz	/|é|.x|c.tar.gz	c.tar.gz	/é/.x	c.tar	.gz	true
+ s	 s	 s	 s	.	 s		false
+//.x/ s/x.	//.x/ s/x.	//|.x| s|x.	x.	//.x/ s	x	.	true
+/a../ s/ s	/a../ s/ s	/|a..| s| s	 s	/a../ s	 s		true
+/.x/..a/./	/.x/..a	/|.x|..a	..a	/.x	..a		true
+/.x	/.x	/|.x	.x	/	.x		true
+/ s	/ s	/| s	 s	/	 s		true
+/é/a..	/é/a..	/|é|a..	a..	/é	a.	.	true
+.x/../a../ s	.x/../a../ s	.x|..|a..| s	 s	.x/../a..	 s		false
+/c.tar.gz/b/.	/c.tar.gz/b	/|c.tar.gz|b	b	/c.tar.gz	b		true
+/..a	/..a	/|..a	..a	/	..a		true
+q.r/c.tar.gz//..a	q.r/c.tar.gz/..a	q.r|c.tar.gz|..a	..a	q.r/c.tar.gz	..a		false
+///q.r/x./é/	/q.r/x./é	/|q.r|x.|é	é	/q.r/x.	é		true
+ s/q.r/é	 s/q.r/é	 s|q.r|é	é	 s/q.r	é		false
+./a../q.r/	a../q.r	a..|q.r	q.r	a..	q	.r	false
+/// s/	/ s	/| s	 s	/	 s		true
+/b/a/a	/b/a/a	/|b|a|a	a	/b/a	a		true
+//a../	//a..	//|a..	a..	//	a.	.	true
+x./c.tar.gz/../.x/	x./c.tar.gz/../.x	x.|c.tar.gz|..|.x	.x	x./c.tar.gz/..	.x		false
+.x//é	.x/é	.x|é	é	.x	é		false
+///a../q.r/x./../	/a../q.r/x./..	/|a..|q.r|x.|..	..	/a../q.r/x.	..		true
+/./x.	/x.	/|x.	x.	/	x	.	true
+///.x/é	/.x/é	/|.x|é	é	/.x	é		true
+/..a/b/..a	/..a/b/..a	/|..a|b|..a	..a	/..a/b	..a		true
+/é	/é	/|é	é	/	é		true
+//.././b	//../b	//|..|b	b	//..	b		true
+/c.tar.gz/a	/c.tar.gz/a	/|c.tar.gz|a	a	/c.tar.gz	a		true
+//x./é/../	//x./é/..	//|x.|é|..	..	//x./é	..		true
+/..a/c.tar.gz/..	/..a/c.tar.gz/..	/|..a|c.tar.gz|..	..	/..a/c.tar.gz	..		true
+./ s	 s	 s	 s	.	 s		false
+/a../q.r/c.tar.gz/ s	/a../q.r/c.tar.gz/ s	/|a..|q.r|c.tar.gz| s	 s	/a../q.r/c.tar.gz	 s		true
+///c.tar.gz/x./	/c.tar.gz/x.	/|c.tar.gz|x.	x.	/c.tar.gz	x	.	true
+//./..a	//..a	//|..a	..a	//	..a		true
+///é/..	/é/..	/|é|..	..	/é	..		true
+/.x/q.r/ s	/.x/q.r/ s	/|.x|q.r| s	 s	/.x/q.r	 s		true
+///..a/..	/..a/..	/|..a|..	..	/..a	..		true
+c.tar.gz/q.r	c.tar.gz/q.r	c.tar.gz|q.r	q.r	c.tar.gz	q	.r	false
+//c.tar.gz/b/.	//c.tar.gz/b	//|c.tar.gz|b	b	//c.tar.gz	b		true
+/./x./x.	/x./x.	/|x.|x.	x.	/x.	x	.	true
+/./q.r	/q.r	/|q.r	q.r	/	q	.r	true
+x./..	x./..	x.|..	..	x.	..		false
+/a../é/c.tar.gz/c.tar.gz	/a../é/c.tar.gz/c.tar.gz	/|a..|é|c.tar.gz|c.tar.gz	c.tar.gz	/a../é/c.tar.gz	c.tar	.gz	true
+a../ s/./.x	a../ s/.x	a..| s|.x	.x	a../ s	.x		false
+/..a/x./q.r/é	/..a/x./q.r/é	/|..a|x.|q.r|é	é	/..a/x./q.r	é		true
+.x/a/c.tar.gz	.x/a/c.tar.gz	.x|a|c.tar.gz	c.tar.gz	.x/a	c.tar	.gz	false
+//a../.	//a..	//|a..	a..	//	a.	.	true
+/q.r/a/x./c.tar.gz	/q.r/a/x./c.tar.gz	/|q.r|a|x.|c.tar.gz	c.tar.gz	/q.r/a/x.	c.tar	.gz	true
+//a../é	//a../é	//|a..|é	é	//a..	é		true
+/q.r/ s/.x	/q.r/ s/.x	/|q.r| s|.x	.x	/q.r/ s	.x		true
+/a/..a/x./ s	/a/..a/x./ s	/|a|..a|x.| s	 s	/a/..a/x.	 s		true
+//é/a	//é/a	//|é|a	a	//é	a		true
+///x./../q.r/..	/x./../q.r/..	/|x.|..|q.r|..	..	/x./../q.r	..		true
+// s/a../a	// s/a../a	//| s|a..|a	a	// s/a..	a		true
+///./a../a/ s	/a../a/ s	/|a..|a| s	 s	/a../a	 s		true
+b/.x/ s	b/.x/ s	b|.x| s	 s	b/.x	 s		false
+/// s/b/x./	/ s/b/x.	/| s|b|x.	x.	/ s/b	x	.	true
+c.tar.gz/b	c.tar.gz/b	c.tar.gz|b	b	c.tar.gz	b		false
+/.././	/..	/|..	..	/	..		true
+////c.tar.gz	/c.tar.gz	/|c.tar.gz	c.tar.gz	/	c.tar	.gz	true
+/q.r	/q.r	/|q.r	q.r	/	q	.r	true
+//b/a/..a	//b/a/..a	//|b|a|..a	..a	//b/a	..a		true
+/../a/..a	/../a/..a	/|..|a|..a	..a	/../a	..a		true
+///c.tar.gz	/c.tar.gz	/|c.tar.gz	c.tar.gz	/	c.tar	.gz	true
+///é/b	/é/b	/|é|b	b	/é	b		true
+q.r/..a/c.tar.gz	q.r/..a/c.tar.gz	q.r|..a|c.tar.gz	c.tar.gz	q.r/..a	c.tar	.gz	false
+/ s/..a/a	/ s/..a/a	/| s|..a|a	a	/ s/..a	a		true
+é	é	é	é	.	é		false
+/ s/./c.tar.gz/ s	/ s/c.tar.gz/ s	/| s|c.tar.gz| s	 s	/ s/c.tar.gz	 s		true
+///../..a	/../..a	/|..|..a	..a	/..	..a		true
+/b/ s	/b/ s	/|b| s	 s	/b	 s		true
+/b//.	/b	/|b	b	/	b		true
+/a/a//..	/a/a/..	/|a|a|..	..	/a/a	..		true
+b/..a/..	b/..a/..	b|..a|..	..	b/..a	..		false
+///./.x/	/.x	/|.x	.x	/	.x		true
+/./a	/a	/|a	a	/	a		true
+/c.tar.gz/../x.	/c.tar.gz/../x.	/|c.tar.gz|..|x.	x.	/c.tar.gz/..	x	.	true
+/c.tar.gz/b/.x	/c.tar.gz/b/.x	/|c.tar.gz|b|.x	.x	/c.tar.gz/b	.x		true
+///.x/x.	/.x/x.	/|.x|x.	x.	/.x	x	.	true
+///a..	/a..	/|a..	a..	/	a.	.	true
+/b/..a/c.tar.gz/x.	/b/..a/c.tar.gz/x.	/|b|..a|c.tar.gz|x.	x.	/b/..a/c.tar.gz	x	.	true
+/b/./	/b	/|b	b	/	b		true
+x./ s/a..	x./ s/a..	x.| s|a..	a..	x./ s	a.	.	false
+//a../ s/c.tar.gz	//a../ s/c.tar.gz	//|a..| s|c.tar.gz	c.tar.gz	//a../ s	c.tar	.gz	true
+//x./q.r//x.	//x./q.r/x.	//|x.|q.r|x.	x.	//x./q.r	x	.	true
+/////	/	/		/			true
+//.x/	//.x	//|.x	.x	//	.x		true
+/..	/..	/|..	..	/	..		true
+////x./ s/	/x./ s	/|x.| s	 s	/x.	 s		true
+////a	/a	/|a	a	/	a		true
+///x./q.r/q.r	/x./q.r/q.r	/|x.|q.r|q.r	q.r	/x./q.r	q	.r	true
+///a/c.tar.gz/	/a/c.tar.gz	/|a|c.tar.gz	c.tar.gz	/a	c.tar	.gz	true
+/é/b/a	/é/b/a	/|é|b|a	a	/é/b	a		true
+///..a/./b	/..a/b	/|..a|b	b	/..a	b		true
+/a../a../c.tar.gz//	/a../a../c.tar.gz	/|a..|a..|c.tar.gz	c.tar.gz	/a../a..	c.tar	.gz	true
+///é/a../	/é/a..	/|é|a..	a..	/é	a.	.	true
+/a/	/a	/|a	a	/	a		true
+/x.	/x.	/|x.	x.	/	x	.	true
+///a	/a	/|a	a	/	a		true
+//a/	//a	//|a	a	//	a		true
+///x.///b	/x./b	/|x.|b	b	/x.	b		true
+//é/.	//é	//|é	é	//	é		true
+//../q.r	//../q.r	//|..|q.r	q.r	//..	q	.r	true
+q.r	q.r	q.r	q.r	.	q	.r	false
+b//q.r	b/q.r	b|q.r	q.r	b	q	.r	false
+/./b	/b	/|b	b	/	b		true
+///c.tar.gz/a/../a..	/c.tar.gz/a/../a..	/|c.tar.gz|a|..|a..	a..	/c.tar.gz/a/..	a.	.	true
+///a../x./é/./	/a../x./é	/|a..|x.|é	é	/a../x.	é		true
+///c.tar.gz/c.tar.gz/.x	/c.tar.gz/c.tar.gz/.x	/|c.tar.gz|c.tar.gz|.x	.x	/c.tar.gz/c.tar.gz	.x		true
+/./	/	/		/			true
+ s/b	 s/b	 s|b	b	 s	b		false
+///a../a	/a../a	/|a..|a	a	/a..	a		true
+//c.tar.gz/a../a..	//c.tar.gz/a../a..	//|c.tar.gz|a..|a..	a..	//c.tar.gz/a..	a.	.	true
+/a..//a../..a/	/a../a../..a	/|a..|a..|..a	..a	/a../a..	..a		true
+//b/q.r/x.	//b/q.r/x.	//|b|q.r|x.	x.	//b/q.r	x	.	true
+//b	//b	//|b	b	//	b		true
+///b/	/b	/|b	b	/	b		true
+// s/b/..	// s/b/..	//| s|b|..	..	// s/b	..		true
+///a/é/	/a/é	/|a|é	é	/a	é		true
+//c.tar.gz/a..	//c.tar.gz/a..	//|c.tar.gz|a..	a..	//c.tar.gz	a.	.	true
+/..a/c.tar.gz	/..a/c.tar.gz	/|..a|c.tar.gz	c.tar.gz	/..a	c.tar	.gz	true
+x./c.tar.gz/	x./c.tar.gz	x.|c.tar.gz	c.tar.gz	x.	c.tar	.gz	false
+/ s/é/a/b	/ s/é/a/b	/| s|é|a|b	b	/ s/é/a	b		true
+/c.tar.gz/./ s	/c.tar.gz/ s	/|c.tar.gz| s	 s	/c.tar.gz	 s		true
+//a../a/x.	//a../a/x.	//|a..|a|x.	x.	//a../a	x	.	true
+ s/a/a/..	 s/a/a/..	 s|a|a|..	..	 s/a/a	..		false
+// s	// s	//| s	 s	//	 s		true
+/ s/c.tar.gz/..	/ s/c.tar.gz/..	/| s|c.tar.gz|..	..	/ s/c.tar.gz	..		true
+///x.	/x.	/|x.	x.	/	x	.	true
+x./c.tar.gz/.x/.x/	x./c.tar.gz/.x/.x	x.|c.tar.gz|.x|.x	.x	x./c.tar.gz/.x	.x		false
+/q.r/q.r	/q.r/q.r	/|q.r|q.r	q.r	/q.r	q	.r	true
+/ s/é/..a	/ s/é/..a	/| s|é|..a	..a	/ s/é	..a		true
+///a../../a..	/a../../a..	/|a..|..|a..	a..	/a../..	a.	.	true
+/a/ s/é	/a/ s/é	/|a| s|é	é	/a/ s	é		true
+//é	//é	//|é	é	//	é		true
+/../../q.r/..a/	/../../q.r/..a	/|..|..|q.r|..a	..a	/../../q.r	..a		true
+///..a/é/.	/..a/é	/|..a|é	é	/..a	é		true
+a../a../	a../a..	a..|a..	a..	a..	a.	.	false
+/a../a/é/x.	/a../a/é/x.	/|a..|a|é|x.	x.	/a../a/é	x	.	true
+/.x/./b/	/.x/b	/|.x|b	b	/.x	b		true
+// s/.x/a/é	// s/.x/a/é	//| s|.x|a|é	é	// s/.x/a	é		true
+///.x//a/..a	/.x/a/..a	/|.x|a|..a	..a	/.x/a	..a		true
+//..a/q.r/.x	//..a/q.r/.x	//|..a|q.r|.x	.x	//..a/q.r	.x		true
+///é/x./.	/é/x.	/|é|x.	x.	/é	x	.	true
+//a../.x	//a../.x	//|a..|.x	.x	//a..	.x		true
+// s/a../é	// s/a../é	//| s|a..|é	é	// s/a..	é		true
+/é/..	/é/..	/|é|..	..	/é	..		true
+/c.tar.gz	/c.tar.gz	/|c.tar.gz	c.tar.gz	/	c.tar	.gz	true
+x.	x.	x.	x.	.	x	.	false
+/x./b/b	/x./b/b	/|x.|b|b	b	/x./b	b		true
+/ s/b/c.tar.gz/..a/	/ s/b/c.tar.gz/..a	/| s|b|c.tar.gz|..a	..a	/ s/b/c.tar.gz	..a		true
+/q.r//.x	/q.r/.x	/|q.r|.x	.x	/q.r	.x		true
+/ s/q.r	/ s/q.r	/| s|q.r	q.r	/ s	q	.r	true
+//.x/a/a../.	//.x/a/a..	//|.x|a|a..	a..	//.x/a	a.	.	true
+////.	/	/		/			true
+/a..	/a..	/|a..	a..	/	a.	.	true
+///..a	/..a	/|..a	..a	/	..a		true
+b/q.r/.	b/q.r	b|q.r	q.r	b	q	.r	false
+///q.r/é/.	/q.r/é	/|q.r|é	é	/q.r	é		true
+///a.././a	/a../a	/|a..|a	a	/a..	a		true
+/q.r/é/.	/q.r/é	/|q.r|é	é	/q.r	é		true
+../x./a../a..	../x./a../a..	..|x.|a..|a..	a..	../x./a..	a.	.	false
+////x.	/x.	/|x.	x.	/	x	.	true
+x./é/ s	x./é/ s	x.|é| s	 s	x./é	 s		false
+a/é	a/é	a|é	é	a	é		false
+/a../x././ s	/a../x./ s	/|a..|x.| s	 s	/a../x.	 s		true
+///b	/b	/|b	b	/	b		true
+///q.r	/q.r	/|q.r	q.r	/	q	.r	true
+/b/../..	/b/../..	/|b|..|..	..	/b/..	..		true
+///a/./..a	/a/..a	/|a|..a	..a	/a	..a		true
+//.	//	//		//			true
+/.x/../.	/.x/..	/|.x|..	..	/.x	..		true
+//.x/a/	//.x/a	//|.x|a	a	//.x	a		true
+///./ s	/ s	/| s	 s	/	 s		true
+///x./x./a..	/x./x./a..	/|x.|x.|a..	a..	/x./x.	a.	.	true
+.x/q.r/a	.x/q.r/a	.x|q.r|a	a	.x/q.r	a		false
+x./x./a/	x./x./a	x.|x.|a	a	x./x.	a		false
+//é/	//é	//|é	é	//	é		true
+a../c.tar.gz/.x	a../c.tar.gz/.x	a..|c.tar.gz|.x	.x	a../c.tar.gz	.x		false
+é/../	é/..	é|..	..	é	..		false
+/q.r/./a/./	/q.r/a	/|q.r|a	a	/q.r	a		true
+///c.tar.gz/b/	/c.tar.gz/b	/|c.tar.gz|b	b	/c.tar.gz	b		true
+//./	//	//		//			true
+/ s/a/é/x.	/ s/a/é/x.	/| s|a|é|x.	x.	/ s/a/é	x	.	true
+//.x/..a	//.x/..a	//|.x|..a	..a	//.x	..a		true
+a../../..a	a../../..a	a..|..|..a	..a	a../..	..a		false
+///a../../	/a../..	/|a..|..	..	/a..	..		true
+q.r/b	q.r/b	q.r|b	b	q.r	b		false
+//é/..a/.	//é/..a	//|é|..a	..a	//é	..a		true
+//é/c.tar.gz/ s/.	//é/c.tar.gz/ s	//|é|c.tar.gz| s	 s	//é/c.tar.gz	 s		true
+//c.tar.gz/a../é	//c.tar.gz/a../é	//|c.tar.gz|a..|é	é	//c.tar.gz/a..	é		true
+é/a../é	é/a../é	é|a..|é	é	é/a..	é		false
+/c.tar.gz/x./ s/	/c.tar.gz/x./ s	/|c.tar.gz|x.| s	 s	/c.tar.gz/x.	 s		true
+//x./b	//x./b	//|x.|b	b	//x.	b		true
+.x/..a	.x/..a	.x|..a	..a	.x	..a		false
+//c.tar.gz/	//c.tar.gz	//|c.tar.gz	c.tar.gz	//	c.tar	.gz	true
+///q.r/..a	/q.r/..a	/|q.r|..a	..a	/q.r	..a		true
+///b/.x/	/b/.x	/|b|.x	.x	/b	.x		true
+/c.tar.gz/..	/c.tar.gz/..	/|c.tar.gz|..	..	/c.tar.gz	..		true
+// s/a..//..a	// s/a../..a	//| s|a..|..a	..a	// s/a..	..a		true
+//a../c.tar.gz/ s	//a../c.tar.gz/ s	//|a..|c.tar.gz| s	 s	//a../c.tar.gz	 s		true
+///./c.tar.gz	/c.tar.gz	/|c.tar.gz	c.tar.gz	/	c.tar	.gz	true
+///c.tar.gz/	/c.tar.gz	/|c.tar.gz	c.tar.gz	/	c.tar	.gz	true
+///a/ s/.x	/a/ s/.x	/|a| s|.x	.x	/a/ s	.x		true
+///é/ s	/é/ s	/|é| s	 s	/é	 s		true
+//x./..	//x./..	//|x.|..	..	//x.	..		true
+////..	/..	/|..	..	/	..		true
+ s// s/.x	 s/ s/.x	 s| s|.x	.x	 s/ s	.x		false
+///x./é/.x/	/x./é/.x	/|x.|é|.x	.x	/x./é	.x		true
+//..a/b	//..a/b	//|..a|b	b	//..a	b		true
+/a..//..a/	/a../..a	/|a..|..a	..a	/a..	..a		true
+c.tar.gz/a	c.tar.gz/a	c.tar.gz|a	a	c.tar.gz	a		false
+/x./ s/a	/x./ s/a	/|x.| s|a	a	/x./ s	a		true
+///.x/a..	/.x/a..	/|.x|a..	a..	/.x	a.	.	true
+/..a/../ s/a	/..a/../ s/a	/|..a|..| s|a	a	/..a/../ s	a		true
+é/q.r/	é/q.r	é|q.r	q.r	é	q	.r	false
+//c.tar.gz/a	//c.tar.gz/a	//|c.tar.gz|a	a	//c.tar.gz	a		true
+/q.r/q.r/c.tar.gz/..	/q.r/q.r/c.tar.gz/..	/|q.r|q.r|c.tar.gz|..	..	/q.r/q.r/c.tar.gz	..		true
+///a/ s/ s	/a/ s/ s	/|a| s| s	 s	/a/ s	 s		true
+/é/x.	/é/x.	/|é|x.	x.	/é	x	.	true
+/é/ s/b/	/é/ s/b	/|é| s|b	b	/é/ s	b		true
+é/b/a../	é/b/a..	é|b|a..	a..	é/b	a.	.	false
+//..a/c.tar.gz/ s	//..a/c.tar.gz/ s	//|..a|c.tar.gz| s	 s	//..a/c.tar.gz	 s		true
+/// s/c.tar.gz/	/ s/c.tar.gz	/| s|c.tar.gz	c.tar.gz	/ s	c.tar	.gz	true
+///é	/é	/|é	é	/	é		true
+é/	é	é	é	.	é		false
+é/c.tar.gz/.x	é/c.tar.gz/.x	é|c.tar.gz|.x	.x	é/c.tar.gz	.x		false
+// s/c.tar.gz/..	// s/c.tar.gz/..	//| s|c.tar.gz|..	..	// s/c.tar.gz	..		true
+/ s/a../ s	/ s/a../ s	/| s|a..| s	 s	/ s/a..	 s		true
+///c.tar.gz/..a	/c.tar.gz/..a	/|c.tar.gz|..a	..a	/c.tar.gz	..a		true
+///../é	/../é	/|..|é	é	/..	é		true
+//a/c.tar.gz/ s/x.	//a/c.tar.gz/ s/x.	//|a|c.tar.gz| s|x.	x.	//a/c.tar.gz/ s	x	.	true
+///.x	/.x	/|.x	.x	/	.x		true
+/.	/	/		/			true
+/q.r/c.tar.gz	/q.r/c.tar.gz	/|q.r|c.tar.gz	c.tar.gz	/q.r	c.tar	.gz	true
+///.x/	/.x	/|.x	.x	/	.x		true
+/.x/..a/q.r/.x	/.x/..a/q.r/.x	/|.x|..a|q.r|.x	.x	/.x/..a/q.r	.x		true
+/./a..	/a..	/|a..	a..	/	a.	.	true
+///q.r// s/..a	/q.r/ s/..a	/|q.r| s|..a	..a	/q.r/ s	..a		true
+///c.tar.gz/c.tar.gz	/c.tar.gz/c.tar.gz	/|c.tar.gz|c.tar.gz	c.tar.gz	/c.tar.gz	c.tar	.gz	true
+/ s/c.tar.gz/.	/ s/c.tar.gz	/| s|c.tar.gz	c.tar.gz	/ s	c.tar	.gz	true
+/// s/x.	/ s/x.	/| s|x.	x.	/ s	x	.	true
+/b/.x/x./	/b/.x/x.	/|b|.x|x.	x.	/b/.x	x	.	true
+///q.r/b	/q.r/b	/|q.r|b	b	/q.r	b		true
+///./ s/q.r/a	/ s/q.r/a	/| s|q.r|a	a	/ s/q.r	a		true
+/.x/b/q.r/.	/.x/b/q.r	/|.x|b|q.r	q.r	/.x/b	q	.r	true
+/../	/..	/|..	..	/	..		true
+..a/../a	..a/../a	..a|..|a	a	..a/..	a		false
+ s/a	 s/a	 s|a	a	 s	a		false
+/a../é/c.tar.gz/b	/a../é/c.tar.gz/b	/|a..|é|c.tar.gz|b	b	/a../é/c.tar.gz	b		true
+///x./.x/x.	/x./.x/x.	/|x.|.x|x.	x.	/x./.x	x	.	true
+/a/x./c.tar.gz/./	/a/x./c.tar.gz	/|a|x.|c.tar.gz	c.tar.gz	/a/x.	c.tar	.gz	true
+//b/a/é	//b/a/é	//|b|a|é	é	//b/a	é		true
+//x.	//x.	//|x.	x.	//	x	.	true
+/q.r//	/q.r	/|q.r	q.r	/	q	.r	true
+ s/x./.x	 s/x./.x	 s|x.|.x	.x	 s/x.	.x		false
+///a../é/b	/a../é/b	/|a..|é|b	b	/a../é	b		true
+./q.r	q.r	q.r	q.r	.	q	.r	false
+a../ s/a../	a../ s/a..	a..| s|a..	a..	a../ s	a.	.	false
+ s/a/ s	 s/a/ s	 s|a| s	 s	 s/a	 s		false
+//../c.tar.gz	//../c.tar.gz	//|..|c.tar.gz	c.tar.gz	//..	c.tar	.gz	true
+//q.r/.	//q.r	//|q.r	q.r	//	q	.r	true
+//.x	//.x	//|.x	.x	//	.x		true
+/../c.tar.gz/ s	/../c.tar.gz/ s	/|..|c.tar.gz| s	 s	/../c.tar.gz	 s		true
+../../é	../../é	..|..|é	é	../..	é		false
+///b/../b	/b/../b	/|b|..|b	b	/b/..	b		true
+./c.tar.gz/..a/x.	c.tar.gz/..a/x.	c.tar.gz|..a|x.	x.	c.tar.gz/..a	x	.	false
+///..	/..	/|..	..	/	..		true
+/../a../..a/	/../a../..a	/|..|a..|..a	..a	/../a..	..a		true
+a/..a	a/..a	a|..a	..a	a	..a		false
+/../..	/../..	/|..|..	..	/..	..		true
+//a../b/.x/a	//a../b/.x/a	//|a..|b|.x|a	a	//a../b/.x	a		true
+/a../.x//é	/a../.x/é	/|a..|.x|é	é	/a../.x	é		true
+///a../a../é	/a../a../é	/|a..|a..|é	é	/a../a..	é		true
+///./a../c.tar.gz/	/a../c.tar.gz	/|a..|c.tar.gz	c.tar.gz	/a..	c.tar	.gz	true
+///é/./..	/é/..	/|é|..	..	/é	..		true
+// s/ s/..a/q.r/	// s/ s/..a/q.r	//| s| s|..a|q.r	q.r	// s/ s/..a	q	.r	true
+/.x/.x/a	/.x/.x/a	/|.x|.x|a	a	/.x/.x	a		true
+//a/b/../..a/	//a/b/../..a	//|a|b|..|..a	..a	//a/b/..	..a		true
+/.x/c.tar.gz/x.	/.x/c.tar.gz/x.	/|.x|c.tar.gz|x.	x.	/.x/c.tar.gz	x	.	true
+//a/é	//a/é	//|a|é	é	//a	é		true
+///x./..a/..a/.x	/x./..a/..a/.x	/|x.|..a|..a|.x	.x	/x./..a/..a	.x		true
+///b/q.r/../	/b/q.r/..	/|b|q.r|..	..	/b/q.r	..		true
+/é/ s/ s/../	/é/ s/ s/..	/|é| s| s|..	..	/é/ s/ s	..		true
+.x/a/q.r/q.r/	.x/a/q.r/q.r	.x|a|q.r|q.r	q.r	.x/a/q.r	q	.r	false
+//x.//a../a..	//x./a../a..	//|x.|a..|a..	a..	//x./a..	a.	.	true
+b/c.tar.gz	b/c.tar.gz	b|c.tar.gz	c.tar.gz	b	c.tar	.gz	false
+//q.r/b/./b/	//q.r/b/b	//|q.r|b|b	b	//q.r/b	b		true
+a../ s/c.tar.gz	a../ s/c.tar.gz	a..| s|c.tar.gz	c.tar.gz	a../ s	c.tar	.gz	false
+//.x/q.r/x.	//.x/q.r/x.	//|.x|q.r|x.	x.	//.x/q.r	x	.	true
+// s/q.r	// s/q.r	//| s|q.r	q.r	// s	q	.r	true
+c.tar.gz/b/	c.tar.gz/b	c.tar.gz|b	b	c.tar.gz	b		false
+ s/..//.	 s/..	 s|..	..	 s	..		false
+/é/b/ s	/é/b/ s	/|é|b| s	 s	/é/b	 s		true
+//..a/c.tar.gz	//..a/c.tar.gz	//|..a|c.tar.gz	c.tar.gz	//..a	c.tar	.gz	true
+//q.r	//q.r	//|q.r	q.r	//	q	.r	true
+//a../q.r/.x	//a../q.r/.x	//|a..|q.r|.x	.x	//a../q.r	.x		true
+///a../	/a..	/|a..	a..	/	a.	.	true
+/ s/q.r/.x	/ s/q.r/.x	/| s|q.r|.x	.x	/ s/q.r	.x		true
+c.tar.gz/a..	c.tar.gz/a..	c.tar.gz|a..	a..	c.tar.gz	a.	.	false
+///a../q.r	/a../q.r	/|a..|q.r	q.r	/a..	q	.r	true
+b/../c.tar.gz	b/../c.tar.gz	b|..|c.tar.gz	c.tar.gz	b/..	c.tar	.gz	false
+/../é/	/../é	/|..|é	é	/..	é		true
+/ s/c.tar.gz	/ s/c.tar.gz	/| s|c.tar.gz	c.tar.gz	/ s	c.tar	.gz	true
+///../b/é/..	/../b/é/..	/|..|b|é|..	..	/../b/é	..		true
+/a../.x/..a/c.tar.gz	/a../.x/..a/c.tar.gz	/|a..|.x|..a|c.tar.gz	c.tar.gz	/a../.x/..a	c.tar	.gz	true
+///a/q.r	/a/q.r	/|a|q.r	q.r	/a	q	.r	true
+./b	b	b	b	.	b		false
+//c.tar.gz/ s/	//c.tar.gz/ s	//|c.tar.gz| s	 s	//c.tar.gz	 s		true
+///..a/.x/..	/..a/.x/..	/|..a|.x|..	..	/..a/.x	..		true
+/x./é/.x	/x./é/.x	/|x.|é|.x	.x	/x./é	.x		true
+///x./../ s	/x./../ s	/|x.|..| s	 s	/x./..	 s		true
+///../é/..a	/../é/..a	/|..|é|..a	..a	/../é	..a		true
+//// s//b	/ s/b	/| s|b	b	/ s	b		true
+/c.tar.gz/b	/c.tar.gz/b	/|c.tar.gz|b	b	/c.tar.gz	b		true
+///..a/q.r	/..a/q.r	/|..a|q.r	q.r	/..a	q	.r	true
+///q.r/..a/x./	/q.r/..a/x.	/|q.r|..a|x.	x.	/q.r/..a	x	.	true
+///b/b/q.r	/b/b/q.r	/|b|b|q.r	q.r	/b/b	q	.r	true
+.x/x.	.x/x.	.x|x.	x.	.x	x	.	false
+///.././é	/../é	/|..|é	é	/..	é		true
+//..a/q.r/../..	//..a/q.r/../..	//|..a|q.r|..|..	..	//..a/q.r/..	..		true
+/// s	/ s	/| s	 s	/	 s		true
+///.x/c.tar.gz/	/.x/c.tar.gz	/|.x|c.tar.gz	c.tar.gz	/.x	c.tar	.gz	true
+.x/ s/a..	.x/ s/a..	.x| s|a..	a..	.x/ s	a.	.	false
+//..a/q.r/q.r	//..a/q.r/q.r	//|..a|q.r|q.r	q.r	//..a/q.r	q	.r	true
+///c.tar.gz/é	/c.tar.gz/é	/|c.tar.gz|é	é	/c.tar.gz	é		true
+é//./b/	é/b	é|b	b	é	b		false
+..a/é/.	..a/é	..a|é	é	..a	é		false
+//..a	//..a	//|..a	..a	//	..a		true
+///b//..a	/b/..a	/|b|..a	..a	/b	..a		true
+//c.tar.gz/./	//c.tar.gz	//|c.tar.gz	c.tar.gz	//	c.tar	.gz	true
+///a//.x	/a/.x	/|a|.x	.x	/a	.x		true
+///c.tar.gz/.	/c.tar.gz	/|c.tar.gz	c.tar.gz	/	c.tar	.gz	true
+///a/.x	/a/.x	/|a|.x	.x	/a	.x		true
+//b/é	//b/é	//|b|é	é	//b	é		true
+//../../c.tar.gz	//../../c.tar.gz	//|..|..|c.tar.gz	c.tar.gz	//../..	c.tar	.gz	true
+.x/a	.x/a	.x|a	a	.x	a		false
+/// s/.x/ s/c.tar.gz	/ s/.x/ s/c.tar.gz	/| s|.x| s|c.tar.gz	c.tar.gz	/ s/.x/ s	c.tar	.gz	true
+/a/..a	/a/..a	/|a|..a	..a	/a	..a		true
+//../../.	//../..	//|..|..	..	//..	..		true
+//q.r/c.tar.gz/a..	//q.r/c.tar.gz/a..	//|q.r|c.tar.gz|a..	a..	//q.r/c.tar.gz	a.	.	true
+//.x/x.	//.x/x.	//|.x|x.	x.	//.x	x	.	true
+/q.r/x.	/q.r/x.	/|q.r|x.	x.	/q.r	x	.	true
+/é/b/..	/é/b/..	/|é|b|..	..	/é/b	..		true
+///..a/../x.	/..a/../x.	/|..a|..|x.	x.	/..a/..	x	.	true
+//../	//..	//|..	..	//	..		true
+é/ s	é/ s	é| s	 s	é	 s		false
+b/a..	b/a..	b|a..	a..	b	a.	.	false
+//b/x./a..	//b/x./a..	//|b|x.|a..	a..	//b/x.	a.	.	true
+///.x/a../.x/..a	/.x/a../.x/..a	/|.x|a..|.x|..a	..a	/.x/a../.x	..a		true
+// s/.x/ s	// s/.x/ s	//| s|.x| s	 s	// s/.x	 s		true
+/.x/a	/.x/a	/|.x|a	a	/.x	a		true
+x./a../	x./a..	x.|a..	a..	x.	a.	.	false
+/b/x.	/b/x.	/|b|x.	x.	/b	x	.	true
+// s/b/c.tar.gz/	// s/b/c.tar.gz	//| s|b|c.tar.gz	c.tar.gz	// s/b	c.tar	.gz	true
+///./q.r/b	/q.r/b	/|q.r|b	b	/q.r	b		true
+x./b/	x./b	x.|b	b	x.	b		false
+//.//x./é/	//x./é	//|x.|é	é	//x.	é		true
+//x./.x	//x./.x	//|x.|.x	.x	//x.	.x		true
+a../c.tar.gz/.	a../c.tar.gz	a..|c.tar.gz	c.tar.gz	a..	c.tar	.gz	false
+///q.r/q.r/	/q.r/q.r	/|q.r|q.r	q.r	/q.r	q	.r	true
+///x./ s//é	/x./ s/é	/|x.| s|é	é	/x./ s	é		true
+/ s/	/ s	/| s	 s	/	 s		true
+a../../x.	a../../x.	a..|..|x.	x.	a../..	x	.	false
+./x.	x.	x.	x.	.	x	.	false
+/./x././a..	/x./a..	/|x.|a..	a..	/x.	a.	.	true
+///..a/.	/..a	/|..a	..a	/	..a		true
+///c.tar.gz/.x	/c.tar.gz/.x	/|c.tar.gz|.x	.x	/c.tar.gz	.x		true
+///./.x	/.x	/|.x	.x	/	.x		true
+/b/	/b	/|b	b	/	b		true
+//b/a	//b/a	//|b|a	a	//b	a		true
+//./.x	//.x	//|.x	.x	//	.x		true
+/é/é/ s	/é/é/ s	/|é|é| s	 s	/é/é	 s		true
+//q.r/./q.r/.x	//q.r/q.r/.x	//|q.r|q.r|.x	.x	//q.r/q.r	.x		true
+///é/b/./	/é/b	/|é|b	b	/é	b		true
+.x/./a	.x/a	.x|a	a	.x	a		false
+a/a/a	a/a/a	a|a|a	a	a/a	a		false
+///a/./a../	/a/a..	/|a|a..	a..	/a	a.	.	true
+/..a/q.r	/..a/q.r	/|..a|q.r	q.r	/..a	q	.r	true
+///a/./a..	/a/a..	/|a|a..	a..	/a	a.	.	true
+./a../a/a/	a../a/a	a..|a|a	a	a../a	a		false
+//a/q.r/.x	//a/q.r/.x	//|a|q.r|.x	.x	//a/q.r	.x		true
+c.tar.gz/.x/.	c.tar.gz/.x	c.tar.gz|.x	.x	c.tar.gz	.x		false
+//../a..	//../a..	//|..|a..	a..	//..	a.	.	true
+.x/../é/.	.x/../é	.x|..|é	é	.x/..	é		false
+//q.r/c.tar.gz/	//q.r/c.tar.gz	//|q.r|c.tar.gz	c.tar.gz	//q.r	c.tar	.gz	true
+../x./..a/..	../x./..a/..	..|x.|..a|..	..	../x./..a	..		false
+/ s/.x	/ s/.x	/| s|.x	.x	/ s	.x		true
+/..//a	/../a	/|..|a	a	/..	a		true
+//c.tar.gz/a../c.tar.gz	//c.tar.gz/a../c.tar.gz	//|c.tar.gz|a..|c.tar.gz	c.tar.gz	//c.tar.gz/a..	c.tar	.gz	true
+///.x/..//.x	/.x/../.x	/|.x|..|.x	.x	/.x/..	.x		true
+//.x/x./q.r/.x	//.x/x./q.r/.x	//|.x|x.|q.r|.x	.x	//.x/x./q.r	.x		true
+b/	b	b	b	.	b		false
+///..a/ s//..	/..a/ s/..	/|..a| s|..	..	/..a/ s	..		true
+///b/..a/ s	/b/..a/ s	/|b|..a| s	 s	/b/..a	 s		true
+/// s/x./é	/ s/x./é	/| s|x.|é	é	/ s/x.	é		true
+/q.r/a	/q.r/a	/|q.r|a	a	/q.r	a		true
+/ s/.x/c.tar.gz/ s	/ s/.x/c.tar.gz/ s	/| s|.x|c.tar.gz| s	 s	/ s/.x/c.tar.gz	 s		true
+///a/x./c.tar.gz	/a/x./c.tar.gz	/|a|x.|c.tar.gz	c.tar.gz	/a/x.	c.tar	.gz	true
+/c.tar.gz/.x	/c.tar.gz/.x	/|c.tar.gz|.x	.x	/c.tar.gz	.x		true
+///x./ s	/x./ s	/|x.| s	 s	/x.	 s		true
+///./x.	/x.	/|x.	x.	/	x	.	true
+/ s/ s	/ s/ s	/| s| s	 s	/ s	 s		true
+//x./	//x.	//|x.	x.	//	x	.	true
+a/.	a	a	a	.	a		false
+//x./a../c.tar.gz/ s	//x./a../c.tar.gz/ s	//|x.|a..|c.tar.gz| s	 s	//x./a../c.tar.gz	 s		true
+///c.tar.gz/../..	/c.tar.gz/../..	/|c.tar.gz|..|..	..	/c.tar.gz/..	..		true
+///c.tar.gz/ s	/c.tar.gz/ s	/|c.tar.gz| s	 s	/c.tar.gz	 s		true
+a../ s/./	a../ s	a..| s	 s	a..	 s		false
+//q.r/b/../.x	//q.r/b/../.x	//|q.r|b|..|.x	.x	//q.r/b/..	.x		true
+///b/ s	/b/ s	/|b| s	 s	/b	 s		true
+é/b/é	é/b/é	é|b|é	é	é/b	é		false
+..a/é/	..a/é	..a|é	é	..a	é		false
+/..a/é	/..a/é	/|..a|é	é	/..a	é		true
+/c.tar.gz/ s/c.tar.gz/	/c.tar.gz/ s/c.tar.gz	/|c.tar.gz| s|c.tar.gz	c.tar.gz	/c.tar.gz/ s	c.tar	.gz	true
+/a/../a../ s	/a/../a../ s	/|a|..|a..| s	 s	/a/../a..	 s		true
+ s/é/x.	 s/é/x.	 s|é|x.	x.	 s/é	x	.	false
+///c.tar.gz/..	/c.tar.gz/..	/|c.tar.gz|..	..	/c.tar.gz	..		true
+//c.tar.gz/..a/	//c.tar.gz/..a	//|c.tar.gz|..a	..a	//c.tar.gz	..a		true
+/a../a../c.tar.gz	/a../a../c.tar.gz	/|a..|a..|c.tar.gz	c.tar.gz	/a../a..	c.tar	.gz	true
+/ s/b/ s	/ s/b/ s	/| s|b| s	 s	/ s/b	 s		true
+/../é/a	/../é/a	/|..|é|a	a	/../é	a		true
+//é/b/.x/x.	//é/b/.x/x.	//|é|b|.x|x.	x.	//é/b/.x	x	.	true
+/b/q.r	/b/q.r	/|b|q.r	q.r	/b	q	.r	true
+/ s/a../b	/ s/a../b	/| s|a..|b	b	/ s/a..	b		true
+//.x/é	//.x/é	//|.x|é	é	//.x	é		true
+//..a/c.tar.gz/b/..	//..a/c.tar.gz/b/..	//|..a|c.tar.gz|b|..	..	//..a/c.tar.gz/b	..		true
+x./..a/b	x./..a/b	x.|..a|b	b	x./..a	b		false
+b/a	b/a	b|a	a	b	a		false
+x./q.r	x./q.r	x.|q.r	q.r	x.	q	.r	false
+q.r/x./	q.r/x.	q.r|x.	x.	q.r	x	.	false
+///c.tar.gz/b	/c.tar.gz/b	/|c.tar.gz|b	b	/c.tar.gz	b		true
+///.x/q.r/ s/a	/.x/q.r/ s/a	/|.x|q.r| s|a	a	/.x/q.r/ s	a		true
+///../q.r/.x	/../q.r/.x	/|..|q.r|.x	.x	/../q.r	.x		true
+///.x/x./ s	/.x/x./ s	/|.x|x.| s	 s	/.x/x.	 s		true
+/// s/./q.r	/ s/q.r	/| s|q.r	q.r	/ s	q	.r	true
+/.x/ s	/.x/ s	/|.x| s	 s	/.x	 s		true
+//./é	//é	//|é	é	//	é		true
+b/x./q.r	b/x./q.r	b|x.|q.r	q.r	b/x.	q	.r	false
+q.r/q.r/..	q.r/q.r/..	q.r|q.r|..	..	q.r/q.r	..		false
+///a../..a	/a../..a	/|a..|..a	..a	/a..	..a		true
+a/a../x./é/	a/a../x./é	a|a..|x.|é	é	a/a../x.	é		false
+//.x/a../..a/.x	//.x/a../..a/.x	//|.x|a..|..a|.x	.x	//.x/a../..a	.x		true
+ s/.x/b	 s/.x/b	 s|.x|b	b	 s/.x	b		false
+//a..//..	//a../..	//|a..|..	..	//a..	..		true
+///x./q.r/é	/x./q.r/é	/|x.|q.r|é	é	/x./q.r	é		true
+/..a/ s/c.tar.gz/..a	/..a/ s/c.tar.gz/..a	/|..a| s|c.tar.gz|..a	..a	/..a/ s/c.tar.gz	..a		true
+///a../é/a/é	/a../é/a/é	/|a..|é|a|é	é	/a../é/a	é		true
+/b/..	/b/..	/|b|..	..	/b	..		true
+///.x/x./é	/.x/x./é	/|.x|x.|é	é	/.x/x.	é		true
+////b/./	/b	/|b	b	/	b		true

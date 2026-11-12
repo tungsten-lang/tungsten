@@ -1,0 +1,182 @@
+[
+ {
+  "name": "list-only",
+  "args": [
+   "--seed",
+   "{t}/seed.mfw",
+   "--digest",
+   "{in}/public.json",
+   "--beam",
+   "3",
+   "--list-only"
+  ],
+  "expect": "ok"
+ },
+ {
+  "name": "walk",
+  "args": [
+   "--seed",
+   "{t}/seed.mfw",
+   "--digest",
+   "{in}/public.json",
+   "--walker",
+   "{t}/walker-alt.sh",
+   "--output-dir",
+   "{t}/out-walk",
+   "--steps",
+   "20000",
+   "--nonce-base",
+   "7",
+   "--depth",
+   "2",
+   "--beam",
+   "2"
+  ],
+  "expect": "ok"
+ },
+ {
+  "name": "walk-shallow",
+  "args": [
+   "--seed",
+   "{t}/seed.mfw",
+   "--digest",
+   "{in}/public.json",
+   "--walker",
+   "{t}/walker-alt.sh",
+   "--output-dir",
+   "{t}/out-shallow",
+   "--steps",
+   "20000",
+   "--nonce-base",
+   "7",
+   "--depth",
+   "1",
+   "--beam",
+   "1"
+  ],
+  "expect": "ok"
+ },
+ {
+  "name": "corrupt",
+  "args": [
+   "--seed",
+   "{t}/seed.mfw",
+   "--digest",
+   "{in}/public.json",
+   "--walker",
+   "{t}/walker-corrupt.sh",
+   "--output-dir",
+   "{t}/out-corrupt",
+   "--steps",
+   "20000",
+   "--nonce-base",
+   "7",
+   "--depth",
+   "2",
+   "--beam",
+   "2"
+  ],
+  "expect": "rejected"
+ },
+ {
+  "name": "other-shape",
+  "args": [
+   "--seed",
+   "{t}/seed.mfw",
+   "--digest",
+   "{in}/public.json",
+   "--walker",
+   "{t}/walker-shape.sh",
+   "--output-dir",
+   "{t}/out-shape",
+   "--steps",
+   "20000",
+   "--nonce-base",
+   "7",
+   "--depth",
+   "2",
+   "--beam",
+   "2"
+  ],
+  "expect": "rejected"
+ },
+ {
+  "name": "failing",
+  "args": [
+   "--seed",
+   "{t}/seed.mfw",
+   "--digest",
+   "{in}/public.json",
+   "--walker",
+   "{t}/walker-fail.sh",
+   "--output-dir",
+   "{t}/out-fail",
+   "--steps",
+   "20000",
+   "--nonce-base",
+   "7",
+   "--depth",
+   "2",
+   "--beam",
+   "2"
+  ],
+  "expect": "rejected"
+ },
+ {
+  "name": "existing-directory",
+  "args": [
+   "--seed",
+   "{t}/seed.mfw",
+   "--digest",
+   "{in}/public.json",
+   "--walker",
+   "{t}/walker-alt.sh",
+   "--output-dir",
+   "{t}/out-walk",
+   "--steps",
+   "20000",
+   "--nonce-base",
+   "7",
+   "--depth",
+   "2",
+   "--beam",
+   "2"
+  ],
+  "expect": "rejected"
+ },
+ {
+  "name": "nonce-range",
+  "args": [
+   "--seed",
+   "{t}/seed.mfw",
+   "--digest",
+   "{in}/public.json",
+   "--walker",
+   "{t}/walker-alt.sh",
+   "--output-dir",
+   "{t}/out-nonce",
+   "--steps",
+   "20000",
+   "--nonce-base",
+   "2147483647",
+   "--depth",
+   "1",
+   "--beam",
+   "2"
+  ],
+  "expect": "rejected"
+ },
+ {
+  "name": "conflicting-public",
+  "args": [
+   "--seed",
+   "{t}/seed.mfw",
+   "--digest",
+   "{in}/conflict.json",
+   "--beam",
+   "2",
+   "--list-only"
+  ],
+  "expect": "rejected"
+ }
+]

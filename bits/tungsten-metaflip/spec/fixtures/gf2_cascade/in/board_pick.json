@@ -1,0 +1,26 @@
+[
+ {
+  "shape": "3x3x3",
+  "rank": 24
+ },
+ {
+  "shape": "2x3x4",
+  "rank": 21
+ },
+ {
+  "shape": "2x4x4",
+  "rank": 27
+ },
+ {
+  "shape": "3x3x4",
+  "rank": 29
+ },
+ {
+  "shape": "2x3x5",
+  "rank": 25
+ },
+ {
+  "shape": "2x4x5",
+  "rank": 33
+ }
+]

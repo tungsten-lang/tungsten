@@ -1,0 +1,102 @@
+--- a/main.cpp
++++ b/main.cpp
+@@ -18,7 +18,27 @@
+ ******************/
+ 
+ # include "scheme.hpp"
++#include <sys/resource.h>
++#include <sys/time.h>
++#include <unistd.h>
++#include <csignal>
+ 
++// metabench instrumentation (see bench/baselines/adapters/README.md): environment KM_SEED, KM_TARGET_RANK, KM_CPU_BUDGET, and
++// KMTRACE / KMDONE / KMTIMEOUT lines on stderr. The search itself is unchanged.
++long long mb_flips = 0;   // steps begun over all paths (randompath.cpp increments it)
++static int mb_rank = 0;   // rank after the last completed path
++static double mb_cpu(){
++  struct rusage ru;
++  getrusage(RUSAGE_SELF, &ru);
++  return (double)(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) + 1e-6 * (double)(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec);
++}
++static void mb_timeout(int){
++  char buf[128];
++  int len = snprintf(buf, sizeof buf, "KMTIMEOUT cpu=%.6f flips=%lld rank=%d\n", mb_cpu(), mb_flips, mb_rank);
++  write(2, buf, len);
++  _exit(3);
++}
++
+ int main(int argc, char* argv[]){
+   debug("debugging enabled");
+ 
+@@ -59,6 +79,15 @@
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   long seed = (long)ts.tv_nsec;
++  if(getenv("KM_SEED")) seed = strtol(getenv("KM_SEED"), NULL, 10);
++  int target = getenv("KM_TARGET_RANK") ? atoi(getenv("KM_TARGET_RANK")) : 0;
++  mb_rank = s.rank;
++  if(getenv("KM_CPU_BUDGET") && atof(getenv("KM_CPU_BUDGET")) > 0){
++    double b = atof(getenv("KM_CPU_BUDGET"));
++    struct itimerval it = {{0, 0}, {(time_t)b, (suseconds_t)((b - (time_t)b) * 1e6)}};
++    signal(SIGPROF, mb_timeout);
++    setitimer(ITIMER_PROF, &it, NULL);
++  }
+ 
+   
+   int steps = -1;
+@@ -66,20 +95,26 @@
+ 
+   if(tries == 0){
+     stepsum = s.randompath(pathlength,seed);
++    mb_rank = s.rank;
++    fprintf(stderr, "KMTRACE cpu=%.6f flips=%lld rank=%d steps=%d\n", mb_cpu(), mb_flips, s.rank, stepsum);
+   }
+   else{
+     do {
+       for(int i = 0; i < tries; ++i){
+ 	steps = s.randompath(pathlength, seed);
++	mb_rank = s.rank;
++	fprintf(stderr, "KMTRACE cpu=%.6f flips=%lld rank=%d steps=%d\n", mb_cpu(), mb_flips, s.rank, steps);
+ 	if(steps >= 0){
+ 	  stepsum += steps;
+ 	  break;
+ 	}
+       }
+     }
+-    while(steps >= 0);
++    while(steps >= 0 && s.rank > target);
+   }
+ 
++  fprintf(stderr, "KMDONE cpu=%.6f flips=%lld rank=%d\n", mb_cpu(), mb_flips, s.rank);
++
+ #ifdef DEBUG
+   if(!s.check()){
+     string newfilename = s.newfilename();
+@@ -101,7 +136,7 @@
+   }
+   #endif
+   
+-  if(stepsum > 0){
++  if(stepsum > 0 || s.rank < oldrank){
+     string newfilename = s.newfilename();
+     s.write(newfilename);
+     cout << newfilename << "," << s.rank << endl;
+--- a/randompath.cpp
++++ b/randompath.cpp
+@@ -19,6 +19,8 @@
+ 
+ #include "scheme.hpp"
+ 
++extern long long mb_flips;   // metabench instrumentation: counts the steps begun
++
+ int Scheme::randompath(int steps, long seed){
+   srand(seed);
+   unordered_multimap<mat,int>* xpos = new unordered_multimap<mat, int> [3];
+@@ -36,6 +38,7 @@
+ 
+   vector<Flip> flips;
+   for(auto step = 1; step <= steps; ++step){
++    ++mb_flips;
+     flips.clear();
+     for(auto a = 0; a < 3; ++a){
+       int b = plus1mod3[a];

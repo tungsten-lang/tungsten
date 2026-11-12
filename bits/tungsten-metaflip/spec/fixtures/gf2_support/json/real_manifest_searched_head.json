@@ -1,0 +1,1552 @@
+{
+ "schema": 1,
+ "field": "GF(2)",
+ "record_claim": false,
+ "rows": [
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x8x10",
+   "rank": 420,
+   "sha256": "0ef8eea6b749f359a05d5082d3581ad676a8ccd1d42b3a3b8563262fad272338",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 420,
+     "left": {
+      "kind": "seed",
+      "rank": 7,
+      "source_shape": [
+       2,
+       2,
+       2
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_d36_gl120_gf2.txt",
+      "source_sha256": "67322d7816f4e93284b07edc1cecd1c1a41e92647d069019e8e44847f6cdfdb2",
+      "shape": [
+       2,
+       2,
+       2
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 60,
+      "source_shape": [
+       4,
+       4,
+       5
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+      "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+      "shape": [
+       4,
+       4,
+       5
+      ]
+     },
+     "shape": [
+      8,
+      8,
+      10
+     ]
+    }
+   },
+   "file": "8x8x10-r420-0ef8eea6.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "0ef8eea6b749f359a05d5082d3581ad676a8ccd1d42b3a3b8563262fad272338",
+   "shape": "8x8x9",
+   "rank": 381,
+   "sha256": "3af3ba71afee6bcacf84440207bd4c0fcb8a625a18fb5a82dc40efb0e8181d18",
+   "details": {
+    "mode": null,
+    "axis": 2,
+    "coordinate": 7
+   },
+   "file": "8x8x9-r381-3af3ba71.mfw.gz.b64"
+  },
+  {
+   "kind": "recipe-replay",
+   "parent": null,
+   "shape": "3x14x18",
+   "rank": 562,
+   "sha256": "9ac161841f6d0e3bf2632cac87d3aa2ca7398f7fc8ef5e2cd6555139dfc83cc9",
+   "details": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "f0c2ba9e379709670672359b33f6ae29a5b8fd6c",
+    "file": "derived/section18/3x14x18-r562-derived-8523d8a.json",
+    "lineage": "3x9x14-r281-perminov_ZT-951dd66\u2192\u27e83,14,9\u27e9 +p 3x9x14-r281-perminov_ZT-951dd66\u2192\u27e83,14,9\u27e9",
+    "catalogue_source": "unknown",
+    "atoms": [
+     {
+      "file": "known/section14/3x9x14-r281-perminov_ZT-951dd66.json",
+      "shape": "3x9x14",
+      "rank": 281,
+      "source": "Perminov 2023",
+      "year": 2023,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": "https://github.com/dronperminov/FastMatrixMultiplication/blob/master/schemes/results/ZT/3x9x14_m281_ZT.json",
+      "source_paper_url": null
+     }
+    ],
+    "board_leaves": [],
+    "rederivable": true,
+    "tool": "tools/mmc_gf2_seeds.py"
+   },
+   "file": "3x14x18-r562-9ac16184.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "9ac161841f6d0e3bf2632cac87d3aa2ca7398f7fc8ef5e2cd6555139dfc83cc9",
+   "shape": "3x14x18",
+   "rank": 561,
+   "sha256": "770c95d89ccdab2d1d69de2b362068fb85fff2e9086fdfc25b8e32698996f108",
+   "details": {
+    "steps": 40000000,
+    "nonce": 262255
+   },
+   "file": "3x14x18-r561-770c95d8.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x8x16",
+   "rank": 658,
+   "sha256": "11b9e6a0c190e1598596dbca673ea4ccea144667250395e967f80634a75304c7",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 658,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 329,
+      "source_shape": [
+       8,
+       8,
+       8
+      ],
+      "state": "15002c67a7e40d618c4506d5bfe6698258f4c8caf35f46b0fd3daf80fd5e1a00",
+      "shape": [
+       8,
+       8,
+       8
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 329,
+      "source_shape": [
+       8,
+       8,
+       8
+      ],
+      "state": "15002c67a7e40d618c4506d5bfe6698258f4c8caf35f46b0fd3daf80fd5e1a00",
+      "shape": [
+       8,
+       8,
+       8
+      ]
+     },
+     "shape": [
+      8,
+      8,
+      16
+     ]
+    }
+   },
+   "file": "8x8x16-r658-11b9e6a0.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "11b9e6a0c190e1598596dbca673ea4ccea144667250395e967f80634a75304c7",
+   "shape": "8x8x15",
+   "rank": 635,
+   "sha256": "089c76587f6830f425a846efc41a6711755e15c96a7f43e68a7b75d4fda7c7f9",
+   "details": {
+    "mode": null,
+    "axis": 2,
+    "coordinate": 15
+   },
+   "file": "8x8x15-r635-089c7658.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "089c76587f6830f425a846efc41a6711755e15c96a7f43e68a7b75d4fda7c7f9",
+   "shape": "8x8x15",
+   "rank": 632,
+   "sha256": "3a0508edba59be20a312e43001f7c469a573ae4b959af9e873a4beec1b4487a2",
+   "details": {
+    "steps": 40000000,
+    "nonce": 644526
+   },
+   "file": "8x8x15-r632-3a0508ed.mfw.gz.b64"
+  },
+  {
+   "kind": "retained",
+   "parent": null,
+   "shape": "12x8x12",
+   "rank": 705,
+   "sha256": "0be68ec10697f580a1569338e00a7f26b933c1de09e195bcfa3f46bfe8872359",
+   "details": {
+    "path": "bits/tungsten-metaflip/tools/certificates/wide-rectangular-walk-20260922/12x8x12-r705.mfw.gz.b64"
+   },
+   "file": "12x8x12-r705-0be68ec1.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "0be68ec10697f580a1569338e00a7f26b933c1de09e195bcfa3f46bfe8872359",
+   "shape": "12x7x12",
+   "rank": 663,
+   "sha256": "52862c3dba1e4d3afc9eccaa39130e0cbfcc76a2ef0088009e0792b2fa1312f7",
+   "details": {
+    "mode": null,
+    "axis": 1,
+    "coordinate": 0
+   },
+   "file": "12x7x12-r663-52862c3d.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "0be68ec10697f580a1569338e00a7f26b933c1de09e195bcfa3f46bfe8872359",
+   "shape": "12x8x11",
+   "rank": 673,
+   "sha256": "459750ede9d6c854959c3708a0d74dd49b03b63f399afb52da53cc2d8b50d032",
+   "details": {
+    "mode": null,
+    "axis": 2,
+    "coordinate": 5
+   },
+   "file": "12x8x11-r673-459750ed.mfw.gz.b64"
+  },
+  {
+   "kind": "recipe-replay",
+   "parent": null,
+   "shape": "4x11x24",
+   "rank": 721,
+   "sha256": "cb438bdd9ea0cf8f7864d91491d96e0097f10ad7c0dd3f7cdb97f211f9e2110e",
+   "details": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "f0c2ba9e379709670672359b33f6ae29a5b8fd6c",
+    "file": "derived/section24/4x11x24-r721-derived-bbb2f6d.json",
+    "lineage": "R[2x3x3; 2,2 | 4,4,3 | 8,8,8]",
+    "catalogue_source": "unknown",
+    "atoms": [
+     {
+      "file": "constructed/section8/2x3x8-r40-hk71-a710bd5.json",
+      "shape": "2x3x8",
+      "rank": 40,
+      "source": "Hopcroft-Kerr 1971 (constructive, this work)",
+      "year": 1971,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section3/2x3x3-r15-alphatensor_Z-497eea7.json",
+      "shape": "2x3x3",
+      "rank": 15,
+      "source": "AlphaTensor",
+      "year": 2022,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section8/2x4x8-r51-alphaevolve-0426307.json",
+      "shape": "2x4x8",
+      "rank": 51,
+      "source": "AlphaEvolve",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     }
+    ],
+    "board_leaves": [],
+    "rederivable": true,
+    "tool": "tools/mmc_gf2_seeds.py"
+   },
+   "file": "4x11x24-r721-cb438bdd.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "cb438bdd9ea0cf8f7864d91491d96e0097f10ad7c0dd3f7cdb97f211f9e2110e",
+   "shape": "4x11x24",
+   "rank": 720,
+   "sha256": "a5dadd31386b8a41b77e04eca94f730f50d373d124a6bdc2bfdb0a7a77ef4311",
+   "details": {
+    "steps": 40000000,
+    "nonce": 422975
+   },
+   "file": "4x11x24-r720-a5dadd31.mfw.gz.b64"
+  },
+  {
+   "kind": "recipe-replay",
+   "parent": null,
+   "shape": "4x14x20",
+   "rank": 755,
+   "sha256": "691cb4037b8678ff47d86d8d186f9870e8ad716c8ba5b7785460f39e50827c7f",
+   "details": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "f0c2ba9e379709670672359b33f6ae29a5b8fd6c",
+    "file": "derived/section20/4x14x20-r755-derived-6b062ba.json",
+    "lineage": "R[2x3x3; 2,2 | 5,5,4 | 7,7,6]",
+    "catalogue_source": "unknown",
+    "atoms": [
+     {
+      "file": "constructed/section6/2x4x6-r39-hk71-bddc04d.json",
+      "shape": "2x4x6",
+      "rank": 39,
+      "source": "Hopcroft-Kerr 1971 (constructive, this work)",
+      "year": 1971,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section3/2x3x3-r15-alphatensor_Z-497eea7.json",
+      "shape": "2x3x3",
+      "rank": 15,
+      "source": "AlphaTensor",
+      "year": 2022,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section6/2x5x6-r47-alphaevolve-7387644.json",
+      "shape": "2x5x6",
+      "rank": 47,
+      "source": "AlphaEvolve",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section7/2x4x7-r45-perminov_ZT-bd4f4b3.json",
+      "shape": "2x4x7",
+      "rank": 45,
+      "source": "AlphaEvolve 2025",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": "https://github.com/dronperminov/FastMatrixMultiplication/blob/master/schemes/known/alpha_evolve/2x4x7_m45_mod0.json",
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section7/2x5x7-r55-perminov_ZT-8c6aace.json",
+      "shape": "2x5x7",
+      "rank": 55,
+      "source": "Kauers & Wood 2025",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": "https://github.com/dronperminov/FastMatrixMultiplication/blob/master/schemes/known/meta_flip_graph/257/k35157e0c0507b768.m",
+      "source_paper_url": null
+     }
+    ],
+    "board_leaves": [],
+    "rederivable": true,
+    "tool": "tools/mmc_gf2_seeds.py"
+   },
+   "file": "4x14x20-r755-691cb403.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "691cb4037b8678ff47d86d8d186f9870e8ad716c8ba5b7785460f39e50827c7f",
+   "shape": "4x14x20",
+   "rank": 753,
+   "sha256": "58645da3bb2a68ae6b4f0930d3f4e8e055234dffcff2d1ecfa0c30747bf746d8",
+   "details": {
+    "steps": 40000000,
+    "nonce": 822286
+   },
+   "file": "4x14x20-r753-58645da3.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "9x10x14",
+   "rank": 820,
+   "sha256": "d419bbeec38a105f0bdbc68d26a41aed56d4c1be80e42f1e2d54970673ae3eca",
+   "details": {
+    "repository": "https://github.com/dronperminov/FastMatrixMultiplication",
+    "revision": "b28490ca14c884c339a9fc69a3bdcba1f6e2c5da",
+    "path": "schemes/results/ZT/9x10x14_m820_ZT.json",
+    "source_sha256": "fad49023cde5dfd792d5ab08d392ba0d896b27fc03e1ddcf3d4e27d99031b3b8",
+    "source_rank": 820,
+    "license": "MIT",
+    "attribution": "Andrew I. Perminov and cited algorithm authors"
+   },
+   "file": "9x10x14-r820-d419bbee.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "d419bbeec38a105f0bdbc68d26a41aed56d4c1be80e42f1e2d54970673ae3eca",
+   "shape": "9x10x14",
+   "rank": 819,
+   "sha256": "823e62eb71889d8f6396275ad21e3de06372be17b55640a13b96a00e7091c713",
+   "details": {
+    "steps": 40000000,
+    "nonce": 427093
+   },
+   "file": "9x10x14-r819-823e62eb.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "9x11x13",
+   "rank": 840,
+   "sha256": "74015061ace1d49aa2db7dd487e127505e17b6e786b4a7d726d45c47495ac3a2",
+   "details": {
+    "repository": "https://github.com/MerlijnW70/fmm-schemes",
+    "revision": "8fa0f2a0b0d3d3ae070acabe24b99774a1c5e1a9",
+    "path": "schemes/9x11x13_m840_ZT.json",
+    "source_sha256": "49bf82adf12cd6549b6b0be57249fbac756c80c655beedf196ffbdf39cb9c906",
+    "source_rank": 840,
+    "license": "CC-BY-4.0",
+    "attribution": "MerlijnW70 (fmm-schemes)"
+   },
+   "file": "9x11x13-r840-74015061.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "74015061ace1d49aa2db7dd487e127505e17b6e786b4a7d726d45c47495ac3a2",
+   "shape": "9x11x13",
+   "rank": 836,
+   "sha256": "b1567c8fc24f29baceb94ce010d6a4ee7c0858ffcbbd75e2afcaf62f72394635",
+   "details": {
+    "steps": 200000000,
+    "nonce": 108653
+   },
+   "file": "9x11x13-r836-b1567c8f.mfw.gz.b64"
+  },
+  {
+   "kind": "recipe-replay",
+   "parent": null,
+   "shape": "3x14x28",
+   "rank": 874,
+   "sha256": "0b651c1322698403532f49e04bce2f90ee5edb4aba085ac8dd14d777a0f18c59",
+   "details": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "f0c2ba9e379709670672359b33f6ae29a5b8fd6c",
+    "file": "derived/section28/3x14x28-r874-derived-5821a66.json",
+    "lineage": "3x9x14-r281-perminov_ZT-951dd66\u2192\u27e83,14,9\u27e9 +p 3x14x19",
+    "catalogue_source": "unknown",
+    "atoms": [
+     {
+      "file": "known/section14/3x10x14-r312-perminov_ZT-14f1415.json",
+      "shape": "3x10x14",
+      "rank": 312,
+      "source": "Perminov 2023",
+      "year": 2023,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": "https://github.com/dronperminov/FastMatrixMultiplication/blob/master/schemes/results/ZT/3x10x14_m312_ZT.json",
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section14/3x9x14-r281-perminov_ZT-951dd66.json",
+      "shape": "3x9x14",
+      "rank": 281,
+      "source": "Perminov 2023",
+      "year": 2023,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": "https://github.com/dronperminov/FastMatrixMultiplication/blob/master/schemes/results/ZT/3x9x14_m281_ZT.json",
+      "source_paper_url": null
+     }
+    ],
+    "board_leaves": [],
+    "rederivable": true,
+    "tool": "tools/mmc_gf2_seeds.py"
+   },
+   "file": "3x14x28-r874-0b651c13.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "0b651c1322698403532f49e04bce2f90ee5edb4aba085ac8dd14d777a0f18c59",
+   "shape": "3x14x28",
+   "rank": 873,
+   "sha256": "4e145e7463dd93a146b3a220ec18530d873aa708f399b637d3585ae0c553e03f",
+   "details": {
+    "steps": 40000000,
+    "nonce": 577238
+   },
+   "file": "3x14x28-r873-4e145e74.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x12x16",
+   "rank": 940,
+   "sha256": "124cb35ae038e7e26e5a9e848781122128aac8087c9c5ea923564186e9414f68",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 940,
+     "left": {
+      "kind": "seed",
+      "rank": 20,
+      "source_shape": [
+       2,
+       3,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x3x4_rank20_d130_global_isotropy_gf2.txt",
+      "source_sha256": "f9e858e97e84052d949e252a88885886146f3839275cbee615f03faf83658b72",
+      "shape": [
+       2,
+       3,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      8,
+      12,
+      16
+     ]
+    }
+   },
+   "file": "8x12x16-r940-124cb35a.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "124cb35ae038e7e26e5a9e848781122128aac8087c9c5ea923564186e9414f68",
+   "shape": "8x11x16",
+   "rank": 895,
+   "sha256": "01be0c936e3c972ee16b4d785217b1756042e0b6bf4c8f73c5fb7b4028a1cdaf",
+   "details": {
+    "mode": null,
+    "axis": 1,
+    "coordinate": 0
+   },
+   "file": "8x11x16-r895-01be0c93.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "01be0c936e3c972ee16b4d785217b1756042e0b6bf4c8f73c5fb7b4028a1cdaf",
+   "shape": "8x11x16",
+   "rank": 889,
+   "sha256": "70620ac92335cdacdf4da5aba2b602a99a905b9b9889b4ee227fff0922e045ce",
+   "details": {
+    "steps": 40000000,
+    "nonce": 654157
+   },
+   "file": "8x11x16-r889-70620ac9.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x13x17",
+   "rank": 1141,
+   "sha256": "dead0e0138f8069b371fbb85ebe62fc852d16236650fc8f4a3ea1e8baaba679d",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1141,
+     "axis": 2,
+     "left": {
+      "kind": "naive",
+      "rank": 104,
+      "shape": [
+       8,
+       13,
+       1
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 1037,
+      "source_shape": [
+       8,
+       16,
+       13
+      ],
+      "source": "bits/tungsten-metaflip/tools/certificates/7x13x16-directed-20260924/8x16x13-r1037.mfw.gz.b64",
+      "source_sha256": "bb75e5b3f3624db217aa6727d37bd8b94e462cee3832b877c9a1ad0dc459160f",
+      "shape": [
+       8,
+       13,
+       16
+      ]
+     },
+     "shape": [
+      8,
+      13,
+      17
+     ]
+    }
+   },
+   "file": "8x13x17-r1141-dead0e01.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "dead0e0138f8069b371fbb85ebe62fc852d16236650fc8f4a3ea1e8baaba679d",
+   "shape": "8x13x16",
+   "rank": 1037,
+   "sha256": "e9552b0e97ef21fb1c257eb1ed1e2bc48fb088cc527ffe2e0f7978f1a817021e",
+   "details": {
+    "mode": 11,
+    "axis": 2,
+    "coordinate": 0
+   },
+   "file": "8x13x16-r1037-e9552b0e.mfw.gz.b64"
+  },
+  {
+   "kind": "recipe-replay",
+   "parent": null,
+   "shape": "15x4x27",
+   "rank": 1068,
+   "sha256": "67e9d7fe4cc62d0e82df5b9c07ca036be0fc4cf1ce209c4237375a388bad8adf",
+   "details": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "f0c2ba9e379709670672359b33f6ae29a5b8fd6c",
+    "file": "derived/section27/15x4x27-r1068-derived-91239d3.json",
+    "lineage": "R[2x3x4^ABC->BAC; 5,5,5 | 2,2 | 7,7,7,6]",
+    "catalogue_source": "unknown",
+    "atoms": [
+     {
+      "file": "constructed/section4/2x3x4-r20-hk71-89186e6.json",
+      "shape": "2x3x4",
+      "rank": 20,
+      "source": "Hopcroft-Kerr 1971 (constructive, this work)",
+      "year": 1971,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section6/2x5x6-r47-alphaevolve-7387644.json",
+      "shape": "2x5x6",
+      "rank": 47,
+      "source": "AlphaEvolve",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section7/2x5x7-r55-perminov_ZT-8c6aace.json",
+      "shape": "2x5x7",
+      "rank": 55,
+      "source": "Kauers & Wood 2025",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": "https://github.com/dronperminov/FastMatrixMultiplication/blob/master/schemes/known/meta_flip_graph/257/k35157e0c0507b768.m",
+      "source_paper_url": null
+     }
+    ],
+    "board_leaves": [],
+    "rederivable": true,
+    "tool": "tools/mmc_gf2_seeds.py"
+   },
+   "file": "15x4x27-r1068-67e9d7fe.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "67e9d7fe4cc62d0e82df5b9c07ca036be0fc4cf1ce209c4237375a388bad8adf",
+   "shape": "15x4x27",
+   "rank": 1065,
+   "sha256": "7ef29e57fb8f4096f17c8aac0f473c113727c66872b0ecd4361573d0a0f2817e",
+   "details": {
+    "steps": 40000000,
+    "nonce": 744162
+   },
+   "file": "15x4x27-r1065-7ef29e57.mfw.gz.b64"
+  },
+  {
+   "kind": "archived",
+   "parent": null,
+   "shape": "8x11x20",
+   "rank": 1119,
+   "sha256": "325273a77c375ab7e20bddc390316c0147ea5c7f5d7c610e59a361f48506178b",
+   "details": {
+    "repository": "https://github.com/tungsten-lang/tungsten",
+    "revision": "b133232426b9e38d273078b511f247267bff5e2f",
+    "path": "benchmarks/matmul/metaflip/matmul_8x11x20_rank1119_block47_smallcross_gf2.txt",
+    "source_sha256": "d21e7d5a409c0715474322d690f1bc613891a44a707ba0639690831b87d2f1f8",
+    "note": "July 2026 block-composition certificate"
+   },
+   "file": "8x11x20-r1119-325273a7.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "325273a77c375ab7e20bddc390316c0147ea5c7f5d7c610e59a361f48506178b",
+   "shape": "8x11x19",
+   "rank": 1091,
+   "sha256": "246e833c109d1a2624f18ae4c09d3d3466effc0fcc285a415ca204b277ebb0ca",
+   "details": {
+    "mode": null,
+    "axis": 2,
+    "coordinate": 2
+   },
+   "file": "8x11x19-r1091-246e833c.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "246e833c109d1a2624f18ae4c09d3d3466effc0fcc285a415ca204b277ebb0ca",
+   "shape": "8x11x19",
+   "rank": 1079,
+   "sha256": "896d545d9dc680f5ee8bb3fc151c81266d09af658a5e9ff807c3e20e23a6d31b",
+   "details": {
+    "steps": 100000000,
+    "nonce": 7888153
+   },
+   "file": "8x11x19-r1079-896d545d.mfw.gz.b64"
+  },
+  {
+   "kind": "recipe-replay",
+   "parent": null,
+   "shape": "4x18x23",
+   "rank": 1084,
+   "sha256": "45a109ea89da71c0ee50d2788c0d9b56c36edb8be05da18be06d8e9783c06066",
+   "details": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "f0c2ba9e379709670672359b33f6ae29a5b8fd6c",
+    "file": "derived/section23/4x18x23-r1084-derived-88afd0b.json",
+    "lineage": "R[2x3x4; 2,2 | 6,6,6 | 6,6,6,5]",
+    "catalogue_source": "unknown",
+    "atoms": [
+     {
+      "file": "constructed/section4/2x3x4-r20-hk71-89186e6.json",
+      "shape": "2x3x4",
+      "rank": 20,
+      "source": "Hopcroft-Kerr 1971 (constructive, this work)",
+      "year": 1971,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section6/2x5x6-r47-alphaevolve-7387644.json",
+      "shape": "2x5x6",
+      "rank": 47,
+      "source": "AlphaEvolve",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section6/2x6x6-r56-flips_mod2-9616f06.json",
+      "shape": "2x6x6",
+      "rank": 56,
+      "source": "Kauers-Moosbauer 2023",
+      "year": 2023,
+      "fields": [
+       "F2"
+      ],
+      "source_scheme_url": "https://github.com/jakobmoosbauer/flips/blob/main/solutions/266-56-mod2.exp",
+      "source_paper_url": "https://arxiv.org/abs/2212.01175"
+     }
+    ],
+    "board_leaves": [],
+    "rederivable": true,
+    "tool": "tools/mmc_gf2_seeds.py"
+   },
+   "file": "4x18x23-r1084-45a109ea.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "45a109ea89da71c0ee50d2788c0d9b56c36edb8be05da18be06d8e9783c06066",
+   "shape": "4x18x23",
+   "rank": 1083,
+   "sha256": "8dbea1d256c6585566ce5dca0d26b966f0416339a794e0b5b212911b2749b805",
+   "details": {
+    "steps": 40000000,
+    "nonce": 335096
+   },
+   "file": "4x18x23-r1083-8dbea1d2.mfw.gz.b64"
+  },
+  {
+   "kind": "archived",
+   "parent": null,
+   "shape": "8x12x20",
+   "rank": 1175,
+   "sha256": "28c917bedf902e8ad76bc2f0be0c7b7d2e93d3f9367d7b98dbdfe9117096ede4",
+   "details": {
+    "repository": "https://github.com/tungsten-lang/tungsten",
+    "revision": "b133232426b9e38d273078b511f247267bff5e2f",
+    "path": "benchmarks/matmul/metaflip/matmul_8x12x20_rank1175_block47_smallcross_gf2.txt",
+    "source_sha256": "4014ed8793e6a2ddc7937d44a1a644bc67b4e113be587e92f8cdbba549c77e3f",
+    "note": "July 2026 block-composition certificate"
+   },
+   "file": "8x12x20-r1175-28c917be.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "28c917bedf902e8ad76bc2f0be0c7b7d2e93d3f9367d7b98dbdfe9117096ede4",
+   "shape": "7x12x20",
+   "rank": 1099,
+   "sha256": "251b2051c39c4b531e054c5160aecca6ba2649ecfbc24acecdcec9c9b14ad5f2",
+   "details": {
+    "mode": null,
+    "axis": 0,
+    "coordinate": 3
+   },
+   "file": "7x12x20-r1099-251b2051.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "251b2051c39c4b531e054c5160aecca6ba2649ecfbc24acecdcec9c9b14ad5f2",
+   "shape": "7x12x20",
+   "rank": 1088,
+   "sha256": "94682ade3605a6e0ffd24621a4198e6fea533dca14841bea1765e38adac243c8",
+   "details": {
+    "steps": 100000000,
+    "nonce": 3188012
+   },
+   "file": "7x12x20-r1088-94682ade.mfw.gz.b64"
+  },
+  {
+   "kind": "recipe-replay",
+   "parent": null,
+   "shape": "4x16x31",
+   "rank": 1294,
+   "sha256": "c13e6b880811e8c447715ebb397cec48edc48290d8631b9f3c12be78f01e1c5b",
+   "details": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "b944258b28fd9cfc644798fe88fb55b2bff2cb0a",
+    "file": "derived/section31/4x16x31-r1294-derived-9f66508.json",
+    "lineage": "4x16x32 \u2193[0,1,2,3|0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15|0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,31]",
+    "catalogue_source": "unknown",
+    "atoms": [
+     {
+      "file": "constructed/section4/2x4x4-r26-hk71-8cad2d9.json",
+      "shape": "2x4x4",
+      "rank": 26,
+      "source": "Hopcroft-Kerr 1971 (constructive, this work)",
+      "year": 1971,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section8/2x4x8-r51-alphaevolve-0426307.json",
+      "shape": "2x4x8",
+      "rank": 51,
+      "source": "AlphaEvolve",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section8/2x4x8-r51-perminov_ZT-4f864e0.json",
+      "shape": "2x4x8",
+      "rank": 51,
+      "source": "AlphaEvolve 2025",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": "https://github.com/dronperminov/FastMatrixMultiplication/blob/master/schemes/known/alpha_evolve/2x4x8_m51_mod0.json",
+      "source_paper_url": null
+     }
+    ],
+    "board_leaves": [],
+    "rederivable": true,
+    "tool": "tools/mmc_gf2_seeds.py"
+   },
+   "file": "4x16x31-r1294-c13e6b88.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "c13e6b880811e8c447715ebb397cec48edc48290d8631b9f3c12be78f01e1c5b",
+   "shape": "4x16x31",
+   "rank": 1288,
+   "sha256": "c8585ef2f7c1a52f1c54addd02d303848ace1c78f2334c6a58ec15a111192631",
+   "details": {
+    "steps": 40000000,
+    "nonce": 716983
+   },
+   "file": "4x16x31-r1288-c8585ef2.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "c8585ef2f7c1a52f1c54addd02d303848ace1c78f2334c6a58ec15a111192631",
+   "shape": "4x16x31",
+   "rank": 1287,
+   "sha256": "2711b66a7414827a8e5622148a4989730bf6da4ae206c391f33b00d0b963e039",
+   "details": {
+    "steps": 100000000,
+    "nonce": 717984
+   },
+   "file": "4x16x31-r1287-2711b66a.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "2711b66a7414827a8e5622148a4989730bf6da4ae206c391f33b00d0b963e039",
+   "shape": "4x16x31",
+   "rank": 1287,
+   "sha256": "a24df6847d0c04b3e0bce67049e09a91907331e983e4133f81bbad803c544418",
+   "details": {
+    "steps": 100000000,
+    "nonce": 1409051
+   },
+   "file": "4x16x31-r1287-a24df684.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "a24df6847d0c04b3e0bce67049e09a91907331e983e4133f81bbad803c544418",
+   "shape": "3x16x31",
+   "rank": 1106,
+   "sha256": "e1b280ba43ce00d8acf20190b721b98e97513b433a7c2d8fa46f9aa5d8981054",
+   "details": {
+    "mode": 15,
+    "axis": 0,
+    "coordinate": 1
+   },
+   "file": "3x16x31-r1106-e1b280ba.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "e1b280ba43ce00d8acf20190b721b98e97513b433a7c2d8fa46f9aa5d8981054",
+   "shape": "3x16x31",
+   "rank": 1100,
+   "sha256": "4a272b77d91e39889b17c5703d613b9637b106e9ac2fbfa972ffe9fcd5df3f3d",
+   "details": {
+    "steps": 40000000,
+    "nonce": 726186
+   },
+   "file": "3x16x31-r1100-4a272b77.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x8x28",
+   "rank": 1134,
+   "sha256": "33c07feedd855c183e6063cbfe5b0559320e67c88f6afa073b3fbdc5bc2146a5",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1134,
+     "axis": 2,
+     "left": {
+      "kind": "seed",
+      "rank": 329,
+      "source_shape": [
+       8,
+       8,
+       8
+      ],
+      "state": "15002c67a7e40d618c4506d5bfe6698258f4c8caf35f46b0fd3daf80fd5e1a00",
+      "shape": [
+       8,
+       8,
+       8
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 805,
+      "left": {
+       "kind": "seed",
+       "rank": 7,
+       "source_shape": [
+        2,
+        2,
+        2
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_d36_gl120_gf2.txt",
+       "source_sha256": "67322d7816f4e93284b07edc1cecd1c1a41e92647d069019e8e44847f6cdfdb2",
+       "shape": [
+        2,
+        2,
+        2
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 115,
+       "source_shape": [
+        4,
+        4,
+        10
+       ],
+       "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+       "shape": [
+        4,
+        4,
+        10
+       ]
+      },
+      "shape": [
+       8,
+       8,
+       20
+      ]
+     },
+     "shape": [
+      8,
+      8,
+      28
+     ]
+    }
+   },
+   "file": "8x8x28-r1134-33c07fee.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "33c07feedd855c183e6063cbfe5b0559320e67c88f6afa073b3fbdc5bc2146a5",
+   "shape": "8x8x27",
+   "rank": 1111,
+   "sha256": "360757245c50d4f7d3447ec6db5401afb994b556b345de3068786fd9d96d975d",
+   "details": {
+    "mode": 7,
+    "axis": 2,
+    "coordinate": 6
+   },
+   "file": "8x8x27-r1111-36075724.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "360757245c50d4f7d3447ec6db5401afb994b556b345de3068786fd9d96d975d",
+   "shape": "8x8x27",
+   "rank": 1108,
+   "sha256": "943dfaadc4209740f55778e29f104aa620980823664ff91b7c118511052b57af",
+   "details": {
+    "steps": 40000000,
+    "nonce": 525417
+   },
+   "file": "8x8x27-r1108-943dfaad.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "943dfaadc4209740f55778e29f104aa620980823664ff91b7c118511052b57af",
+   "shape": "8x8x27",
+   "rank": 1107,
+   "sha256": "4fb28a4a69aff514995ad33b377a08e6c5793d373f47b5e251fb10c5c3757124",
+   "details": {
+    "steps": 100000000,
+    "nonce": 7688147
+   },
+   "file": "8x8x27-r1107-4fb28a4a.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x16x16",
+   "rank": 1222,
+   "sha256": "a544638a99475ecf515ed74f6d838fd6e4d360ad20f86bb1a2a3d6f16315f292",
+   "details": {
+    "recipe": {
+     "kind": "product",
+     "rank": 1222,
+     "left": {
+      "kind": "seed",
+      "rank": 26,
+      "source_shape": [
+       2,
+       4,
+       4
+      ],
+      "state": "326d03d81076cd4478dcaaad9be98e782a5befd26e4d7b4fc10f0975fc721f98",
+      "shape": [
+       2,
+       4,
+       4
+      ]
+     },
+     "right": {
+      "kind": "seed",
+      "rank": 47,
+      "source_shape": [
+       4,
+       4,
+       4
+      ],
+      "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4_rank47_d450_gf2.txt",
+      "source_sha256": "6add1cbdf42a9bf5fda197cdf92a909b98ba64098f353377db608a96b742ab4a",
+      "shape": [
+       4,
+       4,
+       4
+      ]
+     },
+     "shape": [
+      8,
+      16,
+      16
+     ]
+    }
+   },
+   "file": "8x16x16-r1222-a544638a.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "a544638a99475ecf515ed74f6d838fd6e4d360ad20f86bb1a2a3d6f16315f292",
+   "shape": "7x16x16",
+   "rank": 1146,
+   "sha256": "5509b0ff8204a747ba73d841164a239fbb54a8101946c20b9bbeb606a7f1cb29",
+   "details": {
+    "mode": null,
+    "axis": 0,
+    "coordinate": 1
+   },
+   "file": "7x16x16-r1146-5509b0ff.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "5509b0ff8204a747ba73d841164a239fbb54a8101946c20b9bbeb606a7f1cb29",
+   "shape": "7x16x16",
+   "rank": 1135,
+   "sha256": "811b8e9e8593834f06150b68a0aaf06bb05cfa694488f5588c345ca9b7753f18",
+   "details": {
+    "steps": 40000000,
+    "nonce": 678718
+   },
+   "file": "7x16x16-r1135-811b8e9e.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "28c917bedf902e8ad76bc2f0be0c7b7d2e93d3f9367d7b98dbdfe9117096ede4",
+   "shape": "8x12x19",
+   "rank": 1143,
+   "sha256": "a01d284577f204f7d2ff175af4e38a0cd4f8c73684232c0e197e4fc203e7b909",
+   "details": {
+    "mode": null,
+    "axis": 2,
+    "coordinate": 12
+   },
+   "file": "8x12x19-r1143-a01d2845.mfw.gz.b64"
+  },
+  {
+   "kind": "public-mod2",
+   "parent": null,
+   "shape": "10x13x14",
+   "rank": 1152,
+   "sha256": "c93bfb63cd4856d9227dd78f7dc3e65f8c4f9ca16a88153a2c6a08e75236d587",
+   "details": {
+    "repository": "https://github.com/dronperminov/FastMatrixMultiplication",
+    "revision": "b28490ca14c884c339a9fc69a3bdcba1f6e2c5da",
+    "path": "schemes/results/ZT/10x13x14_m1152_ZT.json",
+    "source_sha256": "23f467a8f42aa7d278af61504b200c6806a150adef045425604f70f934fb7d8f",
+    "source_rank": 1152,
+    "license": "MIT",
+    "attribution": "Andrew I. Perminov and cited algorithm authors"
+   },
+   "file": "10x13x14-r1152-c93bfb63.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "c93bfb63cd4856d9227dd78f7dc3e65f8c4f9ca16a88153a2c6a08e75236d587",
+   "shape": "10x13x14",
+   "rank": 1150,
+   "sha256": "e13485abb86ef661c5d19760a9a80e2c5c90260495151f588e115cf55024a150",
+   "details": {
+    "steps": 40000000,
+    "nonce": 975447
+   },
+   "file": "10x13x14-r1150-e13485ab.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "a544638a99475ecf515ed74f6d838fd6e4d360ad20f86bb1a2a3d6f16315f292",
+   "shape": "8x16x15",
+   "rank": 1183,
+   "sha256": "11e1897f5d656e2e704b53f76b1f02400e28154db712e09de8c87d7385eefdc4",
+   "details": {
+    "mode": null,
+    "axis": 2,
+    "coordinate": 14
+   },
+   "file": "8x16x15-r1183-11e1897f.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "11e1897f5d656e2e704b53f76b1f02400e28154db712e09de8c87d7385eefdc4",
+   "shape": "8x16x15",
+   "rank": 1177,
+   "sha256": "7508c83eb4ef7c892d3325e2fc9cd86b15681485b47f7b3de1adac0eb908d6c4",
+   "details": {
+    "steps": 40000000,
+    "nonce": 486499
+   },
+   "file": "8x16x15-r1177-7508c83e.mfw.gz.b64"
+  },
+  {
+   "kind": "closure",
+   "parent": null,
+   "shape": "8x8x30",
+   "rank": 1225,
+   "sha256": "f2a2e90d7a9f615f3a17eb2284120500bbebbe8216d99fa4020eccf56a107e84",
+   "details": {
+    "recipe": {
+     "kind": "split",
+     "rank": 1225,
+     "axis": 2,
+     "left": {
+      "kind": "product",
+      "rank": 420,
+      "left": {
+       "kind": "seed",
+       "rank": 7,
+       "source_shape": [
+        2,
+        2,
+        2
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_d36_gl120_gf2.txt",
+       "source_sha256": "67322d7816f4e93284b07edc1cecd1c1a41e92647d069019e8e44847f6cdfdb2",
+       "shape": [
+        2,
+        2,
+        2
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 60,
+       "source_shape": [
+        4,
+        4,
+        5
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_4x4x5_rank60_d628_gl_frontier_gf2.txt",
+       "source_sha256": "ea5474eecf79c21daccaf29069064f4ed65e9af069a333efc44cf9f18539a66c",
+       "shape": [
+        4,
+        4,
+        5
+       ]
+      },
+      "shape": [
+       8,
+       8,
+       10
+      ]
+     },
+     "right": {
+      "kind": "product",
+      "rank": 805,
+      "left": {
+       "kind": "seed",
+       "rank": 7,
+       "source_shape": [
+        2,
+        2,
+        2
+       ],
+       "source": "bits/tungsten-metaflip/lib/metaflip/seeds/gf2/matmul_2x2_rank7_d36_gl120_gf2.txt",
+       "source_sha256": "67322d7816f4e93284b07edc1cecd1c1a41e92647d069019e8e44847f6cdfdb2",
+       "shape": [
+        2,
+        2,
+        2
+       ]
+      },
+      "right": {
+       "kind": "seed",
+       "rank": 115,
+       "source_shape": [
+        4,
+        4,
+        10
+       ],
+       "state": "e60654005bd03c7cf91a5b351826e09c1fb305005810e78cca9a856ff8d4055b",
+       "shape": [
+        4,
+        4,
+        10
+       ]
+      },
+      "shape": [
+       8,
+       8,
+       20
+      ]
+     },
+     "shape": [
+      8,
+      8,
+      30
+     ]
+    }
+   },
+   "file": "8x8x30-r1225-f2a2e90d.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "f2a2e90d7a9f615f3a17eb2284120500bbebbe8216d99fa4020eccf56a107e84",
+   "shape": "8x8x29",
+   "rank": 1186,
+   "sha256": "12d8b3b6ca79b0207aa0b37e6f4981f9ae9e9f69a317346f5ea042fc01d7a3e2",
+   "details": {
+    "mode": 10,
+    "axis": 2,
+    "coordinate": 7
+   },
+   "file": "8x8x29-r1186-12d8b3b6.mfw.gz.b64"
+  },
+  {
+   "kind": "recipe-replay",
+   "parent": null,
+   "shape": "8x14x20",
+   "rank": 1395,
+   "sha256": "d6287148cb90cf369007c5e9862139bac42e5f9b16fe675657503420136de03f",
+   "details": {
+    "repository": "https://github.com/solven-eu/matmulcatalog",
+    "revision": "b944258b28fd9cfc644798fe88fb55b2bff2cb0a",
+    "file": "derived/section20/8x14x20-r1402-derived-a01c368.json",
+    "lineage": "2x5x7\u2192\u27e82,7,5\u27e9 \u2297\u02e2\u27e84,2,4\u27e9",
+    "catalogue_source": "unknown",
+    "atoms": [
+     {
+      "file": "constructed/section4/2x4x4-r26-hk71-8cad2d9.json",
+      "shape": "2x4x4",
+      "rank": 26,
+      "source": "Hopcroft-Kerr 1971 (constructive, this work)",
+      "year": 1971,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section4/4x4x4-r47-alphatensor_F2-258e5b7.json",
+      "shape": "4x4x4",
+      "rank": 47,
+      "source": "AlphaTensor",
+      "year": 2022,
+      "fields": [
+       "F2"
+      ],
+      "source_scheme_url": null,
+      "source_paper_url": null
+     },
+     {
+      "file": "known/section7/2x5x7-r55-perminov_ZT-8c6aace.json",
+      "shape": "2x5x7",
+      "rank": 55,
+      "source": "Kauers & Wood 2025",
+      "year": 2025,
+      "fields": [
+       "F2",
+       "F3",
+       "Z",
+       "Q",
+       "R",
+       "C"
+      ],
+      "source_scheme_url": "https://github.com/dronperminov/FastMatrixMultiplication/blob/master/schemes/known/meta_flip_graph/257/k35157e0c0507b768.m",
+      "source_paper_url": null
+     }
+    ],
+    "board_leaves": [],
+    "rederivable": false,
+    "tool": "tools/mmc_gf2_seeds.py",
+    "rederivable_note": "equal-rank variant of the tensor a replay from an empty cache gives; made by an earlier version of the replay tool whose result depended on cache history"
+   },
+   "file": "8x14x20-r1395-d6287148.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "d6287148cb90cf369007c5e9862139bac42e5f9b16fe675657503420136de03f",
+   "shape": "7x14x20",
+   "rank": 1297,
+   "sha256": "8335ffb4e249bb3808c3379c9b51da777f2594be198e193252c9b13a1835029b",
+   "details": {
+    "mode": null,
+    "axis": 0,
+    "coordinate": 7
+   },
+   "file": "7x14x20-r1297-8335ffb4.mfw.gz.b64"
+  },
+  {
+   "kind": "walk",
+   "parent": "8335ffb4e249bb3808c3379c9b51da777f2594be198e193252c9b13a1835029b",
+   "shape": "7x14x20",
+   "rank": 1282,
+   "sha256": "212922175eeb5ce6c0343b4656d382498abd9828017c77d2f1ac4a45eb2f6bdb",
+   "details": {
+    "steps": 40000000,
+    "nonce": 663123
+   },
+   "file": "7x14x20-r1282-21292217.mfw.gz.b64"
+  },
+  {
+   "kind": "archived",
+   "parent": null,
+   "shape": "13x13x13",
+   "rank": 1402,
+   "sha256": "b491b7b8fa1af769c9a7a0644bd672b39c1f5cf115bb9ddf4a5988cede2b0195",
+   "details": {
+    "repository": "https://github.com/tungsten-lang/tungsten",
+    "revision": "b133232426b9e38d273078b511f247267bff5e2f",
+    "path": "benchmarks/matmul/metaflip/matmul_13x13_rank1402_block47_gf2.txt",
+    "source_sha256": "f97d8d69de4881a13704901925ef16ec4aac2feb24fb94aed59fce2f391da1d4",
+    "note": "July 2026 block-composition certificate"
+   },
+   "file": "13x13x13-r1402-b491b7b8.mfw.gz.b64"
+  },
+  {
+   "kind": "projection",
+   "parent": "b491b7b8fa1af769c9a7a0644bd672b39c1f5cf115bb9ddf4a5988cede2b0195",
+   "shape": "13x12x13",
+   "rank": 1292,
+   "sha256": "d2ec84811e33ec0094a6deabbcbc382f0b6a1ea175dc1075c85bebd13aa909fa",
+   "details": {
+    "mode": null,
+    "axis": 1,
+    "coordinate": 3
+   },
+   "file": "13x12x13-r1292-d2ec8481.mfw.gz.b64"
+  }
+ ],
+ "walker": "bits/tungsten-metaflip/tools/wide_rect_walk.w"
+}

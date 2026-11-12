@@ -1,0 +1,420 @@
+	/	!
+	//	!
+	///	!
+	.a.	!
+	////	!
+.	.	.
+.	/	!
+.	//	!
+.	///	!
+.	//a	!
+.	a.tar.gz	!
+.	////	!
+..	.	..
+..	..	.
+..	/	!
+..	//	!
+..	///	!
+..	x/../y	!
+..	////	!
+..	/..a/q.r	!
+..	../.	.
+/	/	.
+/	//	!
+/	///	.
+/	a//b	!
+/	////	.
+/	///././b/c.tar.gz	!
+//	/	!
+//	//	.
+//	///	!
+//	a/	!
+//	./a/./b	!
+//	x/../y	!
+//	////	!
+//	/..a/q.r	!
+//	// s/ s/.x	!
+///	/	.
+///	//	!
+///	///	.
+///	// s/	!
+///	////	.
+a	/	!
+a	//	!
+a	///	!
+a	a	.
+a	a/	.
+a	/a/b/c.txt	!
+a	.a.	!
+a	////	!
+a	//b/	!
+/a	/	a
+/a	//	!
+/a	///	a
+/a	a	!
+/a	/a	.
+/a	a.tar.gz	!
+/a	////	a
+//a	..	!
+//a	/	!
+//a	//	a
+//a	///	!
+//a	//a	.
+//a	/a/b/.	!
+//a	////	!
+//a	//..a/x./a../.x/	!
+a/	/	!
+a/	//	!
+a/	///	!
+a/	a	.
+a/	a/	.
+a/	////	!
+a/	///c.tar.gz	!
+a//b	/	!
+a//b	//	!
+a//b	///	!
+a//b	a	b
+a//b	a/	b
+a//b	a//b	.
+a//b	 lead	!
+a//b	////	!
+a//b	../c.tar.gz/x./é	!
+a//b	./a/ s	!
+./a/./b	.	a/b
+./a/./b	/	!
+./a/./b	//	!
+./a/./b	///	!
+./a/./b	a/	b
+./a/./b	./a/./b	.
+./a/./b	a b/c d	!
+./a/./b	////	!
+./a/./b	///.x/..a	!
+./a/./b	//.x	!
+x/../y	/	!
+x/../y	//	!
+x/../y	///	!
+x/../y	a//b	!
+x/../y	x/../y	.
+x/../y	////	!
+x/../y	/c.tar.gz/x./	!
+/a/b/c.txt	/	a/b/c.txt
+/a/b/c.txt	//	!
+/a/b/c.txt	///	a/b/c.txt
+/a/b/c.txt	/a	b/c.txt
+/a/b/c.txt	/a/b/c.txt	.
+/a/b/c.txt	...	!
+/a/b/c.txt	////	a/b/c.txt
+/a/b/c.txt	//../ s/./c.tar.gz/	!
+a.tar.gz	/	!
+a.tar.gz	//	!
+a.tar.gz	///	!
+a.tar.gz	a	!
+a.tar.gz	a/	!
+a.tar.gz	a.tar.gz	.
+a.tar.gz	a.	!
+a.tar.gz	.a.	!
+a.tar.gz	..a	!
+a.tar.gz	////	!
+a.tar.gz	é	!
+a.tar.gz	../.	!
+.bashrc	.	.bashrc
+.bashrc	..	!
+.bashrc	/	!
+.bashrc	//	!
+.bashrc	///	!
+.bashrc	.bashrc	.
+.bashrc	.a.	!
+.bashrc	////	!
+a.	..	!
+a.	/	!
+a.	//	!
+a.	///	!
+a.	a	!
+a.	a/	!
+a.	a//b	!
+a.	/a/b/c.txt	!
+a.	a.	.
+a.	////	!
+a.	/..a/a	!
+a..	/	!
+a..	//	!
+a..	///	!
+a..	a	!
+a..	a/	!
+a..	a.	!
+a..	a..	.
+a..	////	!
+a..	///.x/..a	!
+...		...
+...	.	...
+...	..	!
+...	/	!
+...	//	!
+...	///	!
+...	...	.
+...	é/x./	!
+...	////	!
+...	 s	!
+...	///x./x./.	!
+.a.	.	.a.
+.a.	/	!
+.a.	//	!
+.a.	///	!
+.a.	.a.	.
+.a.	////	!
+..a	.	..a
+..a	..	!
+..a	/	!
+..a	//	!
+..a	///	!
+..a	..a	.
+..a	////	!
+..a	///././b/c.tar.gz	!
+/a/b/.	/	a/b
+/a/b/.	//	!
+/a/b/.	///	a/b
+/a/b/.	/a	b
+/a/b/.	/a/b/c.txt	!
+/a/b/.	/a/b/.	.
+/a/b/.	./x.	!
+/a/b/.	////	a/b
+/a/b/.	é	!
+dir.d/file.txt	/	!
+dir.d/file.txt	//	!
+dir.d/file.txt	///	!
+dir.d/file.txt	dir.d/file.txt	.
+dir.d/file.txt	////	!
+dir.d/file.txt	///x./x./.	!
+dir.d/file.txt	// s/.x	!
+é/ü.txt	..	!
+é/ü.txt	/	!
+é/ü.txt	//	!
+é/ü.txt	///	!
+é/ü.txt	.bashrc	!
+é/ü.txt	dir.d/file.txt	!
+é/ü.txt	é/ü.txt	.
+é/ü.txt	// s/	!
+é/ü.txt	////	!
+é/ü.txt	é	ü.txt
+é/ü.txt	///c.tar.gz	!
+ lead	/	!
+ lead	//	!
+ lead	///	!
+ lead	a//b	!
+ lead	dir.d/file.txt	!
+ lead	é/ü.txt	!
+ lead	 lead	.
+ lead	////	!
+trail 	/	!
+trail 	//	!
+trail 	///	!
+trail 	a.tar.gz	!
+trail 	trail 	.
+trail 	/x./a..//	!
+trail 	é/x./	!
+trail 	////	!
+trail 	//..a/x./a../.x/	!
+trail 	../c.tar.gz/x./é	!
+a b/c d	/	!
+a b/c d	//	!
+a b/c d	///	!
+a b/c d	a	!
+a b/c d	a/	!
+a b/c d	a b/c d	.
+a b/c d	////	!
+a b/c d	../c.tar.gz/x./é	!
+.hidden/.f	.	.hidden/.f
+.hidden/.f	/	!
+.hidden/.f	//	!
+.hidden/.f	///	!
+.hidden/.f	a	!
+.hidden/.f	..a	!
+.hidden/.f	/a/b/.	!
+.hidden/.f	.hidden/.f	.
+.hidden/.f	////	!
+.hidden/.f	//c.tar.gz/ s/c.tar.gz	!
+.hidden/.f	///..a/..	!
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	/	!
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	//	!
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	///	!
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	//a	!
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	.
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	////	!
+/x./a..//	/	x./a..
+/x./a..//	//	!
+/x./a..//	///	x./a..
+/x./a..//	/x./a..//	.
+/x./a..//	////	x./a..
+/x./a..//	///.x/..a	!
+/x./a..//	///././b/c.tar.gz	!
+// s/	/	!
+// s/	//	 s
+// s/	///	!
+// s/	a.	!
+// s/	// s/	.
+// s/	é/x./	!
+// s/	////	!
+./x.	.	x.
+./x.	/	!
+./x.	//	!
+./x.	///	!
+./x.	./x.	.
+./x.	////	!
+./x.	///..a/..	!
+é/x./	/	!
+é/x./	//	!
+é/x./	///	!
+é/x./	é/ü.txt	!
+é/x./	é/x./	.
+é/x./	////	!
+é/x./	é	x.
+/a..	/	a..
+/a..	//	!
+/a..	///	a..
+/a..	/a	!
+/a..	/a..	.
+/a..	////	a..
+/a..	 s	!
+////	/	.
+////	//	!
+////	///	.
+////	/a..	!
+////	////	.
+////	a/./a	!
+é/..	/	!
+é/..	//	!
+é/..	///	!
+é/..	////	!
+é/..	é/..	.
+é/..	//./é	!
+é/..	é	..
+ s	/	!
+ s	//	!
+ s	///	!
+ s	a.	!
+ s	////	!
+ s	 s	.
+//./é	/	!
+//./é	//	é
+//./é	///	!
+//./é	..a	!
+//./é	////	!
+//./é	//./é	.
+//./é	///.x/..a	!
+//./é	///x./x./.	!
+//c.tar.gz/ s/c.tar.gz	/	!
+//c.tar.gz/ s/c.tar.gz	//	c.tar.gz/ s/c.tar.gz
+//c.tar.gz/ s/c.tar.gz	///	!
+//c.tar.gz/ s/c.tar.gz	a//b	!
+//c.tar.gz/ s/c.tar.gz	.hidden/.f	!
+//c.tar.gz/ s/c.tar.gz	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	!
+//c.tar.gz/ s/c.tar.gz	// s/	!
+//c.tar.gz/ s/c.tar.gz	/a..	!
+//c.tar.gz/ s/c.tar.gz	////	!
+//c.tar.gz/ s/c.tar.gz	//c.tar.gz/ s/c.tar.gz	.
+/..a/q.r	/	..a/q.r
+/..a/q.r	//	!
+/..a/q.r	///	..a/q.r
+/..a/q.r	./x.	!
+/..a/q.r	////	..a/q.r
+/..a/q.r	/..a/q.r	.
+///.x/..a	/	.x/..a
+///.x/..a	//	!
+///.x/..a	///	.x/..a
+///.x/..a	a	!
+///.x/..a	x/../y	!
+///.x/..a	é/ü.txt	!
+///.x/..a	 lead	!
+///.x/..a	////	.x/..a
+///.x/..a	///.x/..a	.
+///.x/..a	///././b/c.tar.gz	!
+///.x/..a	// s/ s/.x	!
+é	/	!
+é	//	!
+é	///	!
+é	a..	!
+é	é/ü.txt	!
+é	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	!
+é	/a..	!
+é	////	!
+é	é	.
+/c.tar.gz/x./	.	!
+/c.tar.gz/x./	/	c.tar.gz/x.
+/c.tar.gz/x./	//	!
+/c.tar.gz/x./	///	c.tar.gz/x.
+/c.tar.gz/x./	////	c.tar.gz/x.
+/c.tar.gz/x./	/c.tar.gz/x./	.
+/c.tar.gz/x./	/..a/a	!
+//.x	/	!
+//.x	//	.x
+//.x	///	!
+//.x	/a/b/.	!
+//.x	/x./a..//	!
+//.x	////	!
+//.x	//.x	.
+///././b/c.tar.gz	/	b/c.tar.gz
+///././b/c.tar.gz	//	!
+///././b/c.tar.gz	///	b/c.tar.gz
+///././b/c.tar.gz	////	b/c.tar.gz
+///././b/c.tar.gz	///././b/c.tar.gz	.
+///././b/c.tar.gz	//..a/x./a../.x/	!
+///././b/c.tar.gz	../c.tar.gz/x./é	!
+///././b/c.tar.gz	//a../x./a	!
+//..a/x./a../.x/	/	!
+//..a/x./a../.x/	//	..a/x./a../.x
+//..a/x./a../.x/	///	!
+//..a/x./a../.x/	/a/b/c.txt	!
+//..a/x./a../.x/	////	!
+//..a/x./a../.x/	/c.tar.gz/x./	!
+//..a/x./a../.x/	//..a/x./a../.x/	.
+//../ s/./c.tar.gz/	.	!
+//../ s/./c.tar.gz/	/	!
+//../ s/./c.tar.gz/	//	../ s/c.tar.gz
+//../ s/./c.tar.gz/	///	!
+//../ s/./c.tar.gz/	.bashrc	!
+//../ s/./c.tar.gz/	////	!
+//../ s/./c.tar.gz/	 s	!
+//../ s/./c.tar.gz/	//../ s/./c.tar.gz/	.
+//../ s/./c.tar.gz/	//a../x./a	!
+//../ s/./c.tar.gz/	// s/.x	!
+/..a/a	/	..a/a
+/..a/a	//	!
+/..a/a	///	..a/a
+/..a/a	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	!
+/..a/a	////	..a/a
+/..a/a	/..a/a	.
+/..a/a	///é	!
+../c.tar.gz/x./é	.	../c.tar.gz/x./é
+../c.tar.gz/x./é	..	c.tar.gz/x./é
+../c.tar.gz/x./é	/	!
+../c.tar.gz/x./é	//	!
+../c.tar.gz/x./é	///	!
+../c.tar.gz/x./é	////	!
+../c.tar.gz/x./é	../c.tar.gz/x./é	.
+../c.tar.gz/x./é	///c.tar.gz	!
+///é	/	é
+///é	//	!
+///é	///	é
+///é	a b/c d	!
+///é	////	é
+///é	//../ s/./c.tar.gz/	!
+///é	///é	.
+//a../x./a	/	!
+//a../x./a	//	a../x./a
+//a../x./a	///	!
+//a../x./a	//a	!
+//a../x./a	.a.	!
+//a../x./a	////	!
+//a../x./a	/..a/q.r	!
+//a../x./a	//a../x./a	.
+//a../x./a	///x./x./.	!
+//b/	/	!
+//b/	//	b
+//b/	///	!
+//b/	..a	!
+//b/	////	!
+//b/	//..a/x./a../.x/	!
+//b/	///é	!
+//b/	//b/	.
+// s/ s/.x	/	!
+// s/ s/.x	//	 s/ s/.x

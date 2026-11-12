@@ -1,0 +1,96 @@
+[
+ {
+  "name": "parents-default",
+  "command": "parents",
+  "board": "{t}/board.json",
+  "out": "{t}/parents-default.json",
+  "logs": [
+   "{in}/proj-a.jsonl"
+  ]
+ },
+ {
+  "name": "parents-kinds",
+  "command": "parents",
+  "board": "{t}/board.json",
+  "out": "{t}/parents-kinds.json",
+  "logs": [
+   "{in}/proj-a.jsonl",
+   "{in}/proj-b.jsonl"
+  ],
+  "kinds": "tie,above"
+ },
+ {
+  "name": "screen",
+  "command": "screen",
+  "seeds": "{t}/screen_seeds.json",
+  "out": "{t}/proj.jsonl",
+  "mfw_dir": "{t}/proj_mfw"
+ },
+ {
+  "name": "screen-again",
+  "command": "screen",
+  "seeds": "{t}/screen_seeds.json",
+  "out": "{t}/proj.jsonl",
+  "mfw_dir": "{t}/proj_mfw"
+ },
+ {
+  "name": "pick-003",
+  "command": "pick",
+  "proj": "{t}/proj.jsonl",
+  "board": "{t}/board_pick.json",
+  "out": "{t}/pick-003.json",
+  "tolerance": "0.03"
+ },
+ {
+  "name": "pick-0",
+  "command": "pick",
+  "proj": "{t}/proj.jsonl",
+  "board": "{t}/board_pick.json",
+  "out": "{t}/pick-0.json",
+  "tolerance": "0"
+ },
+ {
+  "name": "pick-big",
+  "command": "pick",
+  "proj": "{t}/proj.jsonl",
+  "board": "{t}/board_pick.json",
+  "out": "{t}/pick-big.json",
+  "tolerance": "0.5"
+ },
+ {
+  "name": "sweep",
+  "command": "sweep",
+  "seeds": "{t}/sweep_seeds.json",
+  "out": "{t}/sw/sweep.jsonl",
+  "walker": "{t}/walker-alt.sh",
+  "steps": 20000,
+  "jobs": 1,
+  "nonce_base": 17,
+  "filter": "{t}/filter.txt",
+  "repeats": 2
+ },
+ {
+  "name": "sweep-again",
+  "command": "sweep",
+  "seeds": "{t}/sweep_seeds.json",
+  "out": "{t}/sw/sweep.jsonl",
+  "walker": "{t}/walker-alt.sh",
+  "steps": 20000,
+  "jobs": 1,
+  "nonce_base": 17,
+  "filter": "{t}/filter.txt",
+  "repeats": 2
+ },
+ {
+  "name": "iterate",
+  "command": "iterate",
+  "seeds": "{t}/iter_seeds.json",
+  "log": "{t}/it/iter.jsonl",
+  "walker": "{t}/walker-alt.sh",
+  "steps": 20000,
+  "walks_per_round": 2,
+  "patience": 2,
+  "jobs": 2,
+  "nonce_base": 5
+ }
+]

@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(838 total), grouped by area, with its declaration, a one-line
+(840 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -58,6 +58,8 @@ summary from the source header, and a link to the source.
 | `FileHandle` | `+ FileHandle` | FileHandle — an open file from File.open, read and written incrementally | [`core/file.w`](../core/file.w) |
 | `Future` | `+ Future` | Future — read-only handle for asynchronous settlement and composition. | [`core/future.w`](../core/future.w) |
 | `FutureState` | `+ FutureState` | Future/Promise shared state and read-only Future facade. | [`core/future.w`](../core/future.w) |
+| `Gzip` | `+ Gzip` | Gzip - gzip (RFC 1952) and DEFLATE (RFC 1951) in Tungsten. | [`core/gzip.w`](../core/gzip.w) |
+| `GzipError` | `+ GzipError < ParseError` | GzipError - a gzip or Base64 stream that cannot be decoded (see Gzip). | [`core/gzip.w`](../core/gzip.w) |
 | `Hash` | `+ Hash` | — | [`core/hash.w`](../core/hash.w) |
 | `HashCustom` | `+ HashCustom` | Custom hash table with selectable hash function. | [`core/hash_custom.w`](../core/hash_custom.w) |
 | `HTTP` | `+ HTTP` | HTTP — HTTP/1.1 requests over event-loop-backed Socket and TLS transports. | [`core/http.w`](../core/http.w) |

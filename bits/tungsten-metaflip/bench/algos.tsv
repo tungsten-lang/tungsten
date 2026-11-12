@@ -1,0 +1,29 @@
+# Algorithms (bench/README.md, section 2): name, adapter command, note.
+algo	command	notes
+metaflip/V0	{bench}/adapters/metaflip {task} {seed} {budget} {out}	campaign walker: directed legal-bucket proposals, nonbacktracking guard, split every 2000 proposals, on 256 consecutive rejections and without a legal pair, slack 8
+metaflip/uniform	{bench}/adapters/metaflip --proposal uniform {task} {seed} {budget} {out}	V0 with proposals drawn uniformly over terms, positions and partners
+metaflip/guard-none	{bench}/adapters/metaflip --guard none {task} {seed} {budget} {out}	V0 without a guard
+metaflip/guard-tabu	{bench}/adapters/metaflip --guard tabu {task} {seed} {budget} {out}	V0 with the tabu history guard (4096 entries)
+metaflip/split-p500	{bench}/adapters/metaflip --split-period 500 {task} {seed} {budget} {out}	V0 with a split every 500 proposals
+metaflip/split-p8000	{bench}/adapters/metaflip --split-period 8000 {task} {seed} {budget} {out}	V0 with a split every 8000 proposals
+metaflip/split-nopair	{bench}/adapters/metaflip --split-period 0 --split-stall 0 {task} {seed} {budget} {out}	V0 splitting only when no legal pair exists
+metaflip/split-nostall	{bench}/adapters/metaflip --split-stall 0 {task} {seed} {budget} {out}	V0 without the 256-rejection split
+metaflip/split-never	{bench}/adapters/metaflip --split-period 0 --split-stall 0 --split-no-pair off {task} {seed} {budget} {out}	V0 without any split
+metaflip/slack-0	{bench}/adapters/metaflip --slack 0 {task} {seed} {budget} {out}	V0 with splits only below best + 0
+metaflip/slack-2	{bench}/adapters/metaflip --slack 2 {task} {seed} {budget} {out}	V0 with splits only below best + 2
+metaflip/slack-4	{bench}/adapters/metaflip --slack 4 {task} {seed} {budget} {out}	V0 with splits only below best + 4
+metaflip/slack-16	{bench}/adapters/metaflip --slack 16 {task} {seed} {budget} {out}	V0 with splits only below best + 16
+metaflip/restart-100k	{bench}/adapters/metaflip --restart 100000 {task} {seed} {budget} {out}	V0 restarted from the seed every 100000 proposals
+metaflip/restart-1M	{bench}/adapters/metaflip --restart 1000000 {task} {seed} {budget} {out}	V0 restarted from the seed every 1000000 proposals
+km2022/default	{bench}/baselines/adapters/km2022 {task} {seed} {budget} {out}	Kauers-Moosbauer 2022 flip, path 10^6 per reduction, restart from the start scheme
+km2022/path1e7	KM_PATH=10000000 {bench}/baselines/adapters/km2022 {task} {seed} {budget} {out}	path 10^7 (paper Sect. 4, single walks on 3x3x3)
+km2022/path1e5	KM_PATH=100000 {bench}/baselines/adapters/km2022 {task} {seed} {budget} {out}	path 10^5
+km2022/best	KM_RESTART=best {bench}/baselines/adapters/km2022 {task} {seed} {budget} {out}	restart from the scheme the failed walk ended on
+km2024/default	{bench}/baselines/adapters/km2024 {task} {seed} {budget} {out}	updated flip with plus transition before the walk, path 10^6, restart from the start scheme
+km2024/path1e7	KM_PATH=10000000 {bench}/baselines/adapters/km2024 {task} {seed} {budget} {out}	path 10^7
+km2024/path1e5	KM_PATH=100000 {bench}/baselines/adapters/km2024 {task} {seed} {budget} {out}	path 10^5
+km2024/nosplit	KM_SPLIT=0 {bench}/baselines/adapters/km2024 {task} {seed} {budget} {out}	no plus transition before the walk
+tfg/default	{bench}/baselines/adapters/tfg {task} {seed} {budget} {out}	Perminov flip_graph over Z2, 128 runners on one thread, tool defaults
+tfg/count1	TFG_COUNT=1 {bench}/baselines/adapters/tfg {task} {seed} {budget} {out}	one runner
+tfg/count8	TFG_COUNT=8 {bench}/baselines/adapters/tfg {task} {seed} {budget} {out}	8 runners
+metaflip/fleet	{bench}/adapters/metaflip --proposal uniform --guard none --split-stall 0 --split-no-pair off {task} {seed} {budget} {out}	the packed fleet walker ffws_work: uniform proposals, no guard, splits only by the period (same decisions as the fleet walker, spec/bench_walker_test.w)

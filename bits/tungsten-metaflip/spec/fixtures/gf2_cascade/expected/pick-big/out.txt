@@ -1,0 +1,15 @@
+[
+ {
+  "shape": "3x3x3",
+  "canonical": "3x3x3",
+  "gf2_rank": 23,
+  "mfw": "$T/proj_mfw/3x3x3_r23_5ae3a386ce.mfw",
+  "mfw_sha256": "5ae3a386ceb6defebcc283870d8d9d8fd2f225ff9fa783c1cd51b4307d8cc415",
+  "public": 23,
+  "board": 24,
+  "parent": "$T/witnesses/334.mfw",
+  "mode": null,
+  "axis": 2,
+  "coordinate": 3
+ }
+]

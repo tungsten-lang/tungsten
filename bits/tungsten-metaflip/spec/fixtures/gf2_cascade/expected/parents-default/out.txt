@@ -1,0 +1,30 @@
+[
+ {
+  "shape": "2x2x3",
+  "canonical": "2x2x3",
+  "gf2_rank": 11,
+  "mfw": "$T/witnesses/missing-b.mfw",
+  "kind": "below_all"
+ },
+ {
+  "shape": "2x2x4",
+  "canonical": "2x2x4",
+  "gf2_rank": 14,
+  "mfw": "$T/witnesses/missing-c.mfw",
+  "kind": "below_all"
+ },
+ {
+  "shape": "3x3x4",
+  "canonical": "3x3x4",
+  "gf2_rank": 29,
+  "mfw": "$T/witnesses/334.mfw",
+  "kind": "below_all"
+ },
+ {
+  "shape": "3x4x4",
+  "canonical": "3x4x4",
+  "gf2_rank": 38,
+  "mfw": "$T/witnesses/344.mfw",
+  "kind": "gf2_valid_only"
+ }
+]

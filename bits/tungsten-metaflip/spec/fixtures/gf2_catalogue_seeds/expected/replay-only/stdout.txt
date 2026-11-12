@@ -1,0 +1,6 @@
+4 targets to replay (0 already recorded)
+ok 2x2x3 11 catalogue 11 
+ok 2x2x5 18 catalogue 18 
+fail 4x4x4  catalogue 48 ReplayError: GF(2) rank 49 above catalogue rank 48
+ok 4x4x4 49 catalogue 49 
+3 exact GF(2) seeds, 1 failures -> $T/out/only/seeds.json

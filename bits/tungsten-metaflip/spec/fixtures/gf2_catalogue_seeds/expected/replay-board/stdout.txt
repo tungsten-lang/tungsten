@@ -1,0 +1,12 @@
+10 targets to replay (0 already recorded)
+ok 2x2x2 7 catalogue 7 
+ok 2x2x3 11 catalogue 11 
+fail 2x2x4  catalogue 14 ReplayError: even denominator coefficient '1/2'
+ok 2x2x5 18 catalogue 18 
+ok 3x3x3 27 catalogue 27 
+fail 3x3x5  catalogue 40 ReplayError: cannot resolve leaf ref no such leaf
+fail 4x4x4  catalogue 48 ReplayError: GF(2) rank 49 above catalogue rank 48
+ok 4x4x4 49 catalogue 49 
+fail 4x6x6  catalogue 119 ReplayError: GF(2) rank 126 above catalogue rank 119
+ok 6x6x6 161 catalogue 161 
+6 exact GF(2) seeds, 4 failures -> $T/out/board/seeds.json

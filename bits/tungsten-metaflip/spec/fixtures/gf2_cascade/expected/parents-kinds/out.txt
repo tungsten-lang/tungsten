@@ -1,0 +1,37 @@
+[
+ {
+  "shape": "2x2x2",
+  "canonical": "2x2x2",
+  "gf2_rank": 7,
+  "mfw": "$T/witnesses/missing-a.mfw",
+  "kind": "tie"
+ },
+ {
+  "shape": "2x3x5",
+  "canonical": "2x3x5",
+  "gf2_rank": 25,
+  "mfw": "$T/witnesses/235.mfw",
+  "kind": "tie"
+ },
+ {
+  "shape": "3x3x4",
+  "canonical": "3x3x4",
+  "gf2_rank": 31,
+  "mfw": "$T/witnesses/334b.mfw",
+  "kind": "tie"
+ },
+ {
+  "shape": "3x3x5",
+  "canonical": "3x3x5",
+  "gf2_rank": 36,
+  "mfw": "$T/witnesses/335.mfw",
+  "kind": "above"
+ },
+ {
+  "shape": "3x4x4",
+  "canonical": "3x4x4",
+  "gf2_rank": 40,
+  "mfw": "$T/witnesses/344b.mfw",
+  "kind": "above"
+ }
+]

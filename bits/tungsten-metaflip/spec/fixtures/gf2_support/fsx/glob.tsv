@@ -1,0 +1,58 @@
+*	all	.dot.txt|.hid|7|a|a-b|a-dir|a.b|a.dir|best.txt|checkpoints|dangling|deep|empty|lnk|loop|mat|mat-x|mat_r1|matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt|r_abs|r_chain1|r_chain2|r_dd|r_loop1|r_loop2|r_rel|r_self|r_tri1|r_tri2|r_tri3|sp ace|é
+*	files	.dot.txt|7|a-b|a.b|best.txt|matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt
+.*	all	.dot.txt|.hid
+*.txt	all	.dot.txt|best.txt|matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt
+a*	all	a|a-b|a-dir|a.b|a.dir
+a?b	all	a-b|a.b
+?	all	7|a|é
+??	all	
+*.md	all	
+é/*	all	é/plain.md|é/ü.txt
+é/?.txt	all	é/ü.txt
+*/*.txt	all	.hid/h.txt|a/g.txt|a-dir/1.txt|a.dir/2.txt|lnk/g.txt|loop/.dot.txt|loop/best.txt|loop/matmul_2x3x5_gf2.txt|loop/matmul_4x4_gf2.txt|r_abs/f.txt|r_chain1/g.txt|r_chain2/g.txt|r_dd/f.txt|r_rel/f.txt|sp ace/3.txt|é/ü.txt
+*/*/*.txt	all	a/b/f.txt|a/up/.dot.txt|a/up/best.txt|a/up/matmul_2x3x5_gf2.txt|a/up/matmul_4x4_gf2.txt|lnk/b/f.txt|lnk/up/.dot.txt|lnk/up/best.txt|lnk/up/matmul_2x3x5_gf2.txt|lnk/up/matmul_4x4_gf2.txt|loop/.hid/h.txt|loop/a/g.txt|loop/a-dir/1.txt|loop/a.dir/2.txt|loop/lnk/g.txt|loop/loop/.dot.txt|loop/loop/best.txt|loop/loop/matmul_2x3x5_gf2.txt|loop/loop/matmul_4x4_gf2.txt|loop/r_abs/f.txt|loop/r_chain1/g.txt|loop/r_chain2/g.txt|loop/r_dd/f.txt|loop/r_rel/f.txt|loop/sp ace/3.txt|loop/é/ü.txt|r_chain1/b/f.txt|r_chain1/up/.dot.txt|r_chain1/up/best.txt|r_chain1/up/matmul_2x3x5_gf2.txt|r_chain1/up/matmul_4x4_gf2.txt|r_chain2/b/f.txt|r_chain2/up/.dot.txt|r_chain2/up/best.txt|r_chain2/up/matmul_2x3x5_gf2.txt|r_chain2/up/matmul_4x4_gf2.txt
+**	all	.|.dot.txt|.hid|.hid/h.txt|7|a|a/b|a/b/f.txt|a/g.txt|a/up|a-b|a-dir|a-dir/1.txt|a.b|a.dir|a.dir/2.txt|best.txt|checkpoints|checkpoints/gf2|checkpoints/gf2/run1|checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2|checkpoints/gf2/run2/best.txt|checkpoints/gf2/run2/other.txt|dangling|deep|deep/top.mfw|deep/x|deep/x/w.mfw|deep/x/y|deep/x/y/z.mfw|deep/x/y/z.mfw.gz.b64|empty|lnk|loop|mat|mat/seeds.json|mat-x|mat-x/seeds.json|mat_r1|mat_r1/seeds.json|matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt|r_abs|r_chain1|r_chain2|r_dd|r_loop1|r_loop2|r_rel|r_self|r_tri1|r_tri2|r_tri3|sp ace|sp ace/3.txt|é|é/plain.md|é/ü.txt
+**	files	.dot.txt|.hid/h.txt|7|a/b/f.txt|a/g.txt|a-b|a-dir/1.txt|a.b|a.dir/2.txt|best.txt|checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2/best.txt|checkpoints/gf2/run2/other.txt|deep/top.mfw|deep/x/w.mfw|deep/x/y/z.mfw|deep/x/y/z.mfw.gz.b64|mat/seeds.json|mat-x/seeds.json|mat_r1/seeds.json|matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt|sp ace/3.txt|é/plain.md|é/ü.txt
+**/*	all	.dot.txt|.hid|.hid/h.txt|7|a|a/b|a/b/f.txt|a/g.txt|a/up|a-b|a-dir|a-dir/1.txt|a.b|a.dir|a.dir/2.txt|best.txt|checkpoints|checkpoints/gf2|checkpoints/gf2/run1|checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2|checkpoints/gf2/run2/best.txt|checkpoints/gf2/run2/other.txt|dangling|deep|deep/top.mfw|deep/x|deep/x/w.mfw|deep/x/y|deep/x/y/z.mfw|deep/x/y/z.mfw.gz.b64|empty|lnk|loop|mat|mat/seeds.json|mat-x|mat-x/seeds.json|mat_r1|mat_r1/seeds.json|matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt|r_abs|r_chain1|r_chain2|r_dd|r_loop1|r_loop2|r_rel|r_self|r_tri1|r_tri2|r_tri3|sp ace|sp ace/3.txt|é|é/plain.md|é/ü.txt
+**/*	files	.dot.txt|.hid/h.txt|7|a/b/f.txt|a/g.txt|a-b|a-dir/1.txt|a.b|a.dir/2.txt|best.txt|checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2/best.txt|checkpoints/gf2/run2/other.txt|deep/top.mfw|deep/x/w.mfw|deep/x/y/z.mfw|deep/x/y/z.mfw.gz.b64|mat/seeds.json|mat-x/seeds.json|mat_r1/seeds.json|matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt|sp ace/3.txt|é/plain.md|é/ü.txt
+**/*.txt	all	.dot.txt|.hid/h.txt|a/b/f.txt|a/g.txt|a-dir/1.txt|a.dir/2.txt|best.txt|checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2/best.txt|checkpoints/gf2/run2/other.txt|matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt|sp ace/3.txt|é/ü.txt
+**/*.txt	files	.dot.txt|.hid/h.txt|a/b/f.txt|a/g.txt|a-dir/1.txt|a.dir/2.txt|best.txt|checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2/best.txt|checkpoints/gf2/run2/other.txt|matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt|sp ace/3.txt|é/ü.txt
+**/*.mfw	all	deep/top.mfw|deep/x/w.mfw|deep/x/y/z.mfw
+**/*.mfw.gz.b64	all	deep/x/y/z.mfw.gz.b64
+**/best.txt	all	best.txt|checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2/best.txt
+checkpoints/gf2/*/best.txt	all	checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2/best.txt
+checkpoints/**/best.txt	all	checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2/best.txt
+mat*/seeds.json	all	mat/seeds.json|mat-x/seeds.json|mat_r1/seeds.json
+*_r1/seeds.json	all	mat_r1/seeds.json
+?at*/seeds.json	all	mat/seeds.json|mat-x/seeds.json|mat_r1/seeds.json
+matmul_*_gf2.txt	all	matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt
+matmul_*x*_gf2.txt	all	matmul_2x3x5_gf2.txt|matmul_4x4_gf2.txt
+lnk/*	all	lnk/b|lnk/g.txt|lnk/up
+lnk/*	files	lnk/g.txt
+lnk/b/*	all	lnk/b/f.txt
+lnk/**	all	lnk|lnk/b|lnk/b/f.txt|lnk/g.txt|lnk/up
+loop/*	all	loop/.dot.txt|loop/.hid|loop/7|loop/a|loop/a-b|loop/a-dir|loop/a.b|loop/a.dir|loop/best.txt|loop/checkpoints|loop/dangling|loop/deep|loop/empty|loop/lnk|loop/loop|loop/mat|loop/mat-x|loop/mat_r1|loop/matmul_2x3x5_gf2.txt|loop/matmul_4x4_gf2.txt|loop/r_abs|loop/r_chain1|loop/r_chain2|loop/r_dd|loop/r_loop1|loop/r_loop2|loop/r_rel|loop/r_self|loop/r_tri1|loop/r_tri2|loop/r_tri3|loop/sp ace|loop/é
+loop/a/*	all	loop/a/b|loop/a/g.txt|loop/a/up
+dangling	all	dangling
+d*	all	dangling|deep
+d*	files	
+nowhere	all	
+a/up/*	all	a/up/.dot.txt|a/up/.hid|a/up/7|a/up/a|a/up/a-b|a/up/a-dir|a/up/a.b|a/up/a.dir|a/up/best.txt|a/up/checkpoints|a/up/dangling|a/up/deep|a/up/empty|a/up/lnk|a/up/loop|a/up/mat|a/up/mat-x|a/up/mat_r1|a/up/matmul_2x3x5_gf2.txt|a/up/matmul_4x4_gf2.txt|a/up/r_abs|a/up/r_chain1|a/up/r_chain2|a/up/r_dd|a/up/r_loop1|a/up/r_loop2|a/up/r_rel|a/up/r_self|a/up/r_tri1|a/up/r_tri2|a/up/r_tri3|a/up/sp ace|a/up/é
+**/z.mfw	all	deep/x/y/z.mfw
+deep/**/*.mfw	all	deep/top.mfw|deep/x/w.mfw|deep/x/y/z.mfw
+deep/**	all	deep|deep/top.mfw|deep/x|deep/x/w.mfw|deep/x/y|deep/x/y/z.mfw|deep/x/y/z.mfw.gz.b64
+**/x	all	deep/x
+**/y/*	all	deep/x/y/z.mfw|deep/x/y/z.mfw.gz.b64
+sp ace/*	all	sp ace/3.txt
+*ace*	all	sp ace
+a/b/f.txt	all	a/b/f.txt
+a/b/nothere.txt	all	
+empty/*	all	
+**/empty	all	empty
+a/**/f.txt	all	a/b/f.txt
+**/**/f.txt	all	a/b/f.txt
+*/**/*.txt	all	.hid/h.txt|a/b/f.txt|a/g.txt|a-dir/1.txt|a.dir/2.txt|checkpoints/gf2/run1/best.txt|checkpoints/gf2/run2/best.txt|checkpoints/gf2/run2/other.txt|lnk/b/f.txt|lnk/g.txt|loop/.dot.txt|loop/.hid/h.txt|loop/a/b/f.txt|loop/a/g.txt|loop/a-dir/1.txt|loop/a.dir/2.txt|loop/best.txt|loop/checkpoints/gf2/run1/best.txt|loop/checkpoints/gf2/run2/best.txt|loop/checkpoints/gf2/run2/other.txt|loop/matmul_2x3x5_gf2.txt|loop/matmul_4x4_gf2.txt|loop/sp ace/3.txt|loop/é/ü.txt|r_abs/f.txt|r_chain1/b/f.txt|r_chain1/g.txt|r_chain2/b/f.txt|r_chain2/g.txt|r_dd/f.txt|r_rel/f.txt|sp ace/3.txt|é/ü.txt
+7	all	7
+r_*	all	r_abs|r_chain1|r_chain2|r_dd|r_loop1|r_loop2|r_rel|r_self|r_tri1|r_tri2|r_tri3
+r_*	files	
+**/r_a*	all	r_abs

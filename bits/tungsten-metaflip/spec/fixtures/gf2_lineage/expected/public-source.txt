@@ -1,0 +1,2 @@
+PASS 1 exact GF(2) tensors (Python); rows: 1 public-mod2+rederived
+  2x2x2 rank 7

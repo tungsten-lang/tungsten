@@ -1,0 +1,24 @@
+seed-file	ok	7	1dd9add6c3e0f8814ba13da300bc716d80bf773b9d5db06936b9fb42213ca726
+seed-file-oriented	ok	20	e9a09351f4adf8fe252393808afe71e47f47e8b691e2bbc2446f29244846c594
+seed-state	ok	7	1dd9add6c3e0f8814ba13da300bc716d80bf773b9d5db06936b9fb42213ca726
+seed-state-oriented	ok	18	6066c3640ed8fd01c0961305d94cb7d0a002f52677f77437b978d759c0c75542
+naive	ok	18	16265a676ecf97e7477722610a16969f4dcfb85986c9ce3e4abfd174aef9b7f4
+split-axis2	ok	14	c7a2613211250ec7f9acc20f45b53eb2fa205600186e6504c2b4437dee1472aa
+split-oriented	ok	14	6d1f10c88c8f78c31db7de674b9012a00df7f61cf26fbf1f22490c42bcc6577d
+split-mixed	ok	32	5f8b32a1288b30d0fe65681653d64262c892564cdb438fb0ed7260abad140b05
+product	ok	49	ec825aaf416c457a819f5c0c2f7e06d6be53bbe17967e0907c2625cedd21a349
+product-mixed	ok	140	7cf2c809f5955ed505ad571b53589a56985422d1237400cfdfaa6964e43d93a3
+projection	ok	16	806670e7b644b32383b4d60fb88273713a0ddbf1f62b66da378549fa4df34819
+projection-two	ok	13	562977a4c3a83c4d8fea50a81b5758313e868db68bfabd69f5d597695583d567
+nested	ok	81	cdcb89517120108da7ce1e28bbe0953fe5d40def60f872e759eab63597839422
+bad-rank	error	composition split mismatch
+bad-cut	error	composition split mismatch
+missing-state	error	missing composition state
+hash-mismatch	error	composition source hash mismatch
+unsafe-source	error	unsafe composition source
+leaf-metadata	error	composition leaf metadata mismatch
+product-rank	error	composition product mismatch
+naive-rank	error	naive composition rank mismatch
+unknown-kind	error	unknown composition recipe
+shape-range	error	invalid composition shape
+projection-growth	error	non-decreasing projection dependency

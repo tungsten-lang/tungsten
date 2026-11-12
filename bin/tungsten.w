@@ -166,6 +166,9 @@ MANPAGE = manpage_lines.join("\n")
   bin_dir = ROOT + "/bits/" + bit_pkg + "/bin"
   out_bin = bin_dir + "/" + entry_name
   src = ROOT + "/bits/" + bit_pkg + "/lib/" + entry_name + ".w"
+  bin_src = ROOT + "/bits/" + bit_pkg + "/bin/" + entry_name + ".w"
+  if system("test -f " + sh_quote(bin_src))
+    src = bin_src
   if !system("test -f " + sh_quote(src))
     << "tungsten: missing " + src
     exit(1)
@@ -198,6 +201,20 @@ MANPAGE = manpage_lines.join("\n")
   if system(cmd)
     exit(0)
   exit(1)
+
+-> run_bit_binary_status(bit_pkg, entry_name, tool_args)
+  out_bin = ensure_bit_binary(bit_pkg, entry_name)
+  cmd = "BIT_HOME=" + sh_quote(user_bit_home()) + " TUNGSTEN_HOME=" + sh_quote(user_tungsten_home()) + " TUNGSTEN_ROOT=" + sh_quote(ROOT) + " " + sh_quote(out_bin)
+  i = 0
+  while i < tool_args.size
+    cmd = cmd + " " + sh_quote(tool_args[i])
+    i = i + 1
+  spawn_argv = []
+  spawn_argv.push("/bin/sh")
+  spawn_argv.push("-c")
+  spawn_argv.push(cmd)
+  proc = Process.spawn(spawn_argv)
+  exit(proc.wait)
 
 # Args after the subcommand token (so flags like -w still reach the tool).
 -> tool_argv_after_command(command_name)
@@ -487,6 +504,9 @@ when "repl"
 
 when "bit"
   run_bit_binary("tungsten-bit", "bit", tool_argv_after_command("bit"))
+
+when "rung"
+  run_bit_binary_status("tungsten-rung", "rung", tool_argv_after_command("rung"))
 
 when "agent-json"
   << "{\"status\":\"ok\",\"agent_support\":true,\"diagnostics_format\":\"json\",\"capabilities\":\[\"diagnostics\",\"code_frame\",\"agent_payload\",\"spirv_emitter\",\"mutate_if_unique\"\]}"

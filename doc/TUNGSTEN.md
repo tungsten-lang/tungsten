@@ -77,6 +77,7 @@ COMMANDS
     wasm                 Build or test the wasm32 interpreter target
     notes                Generate release notes from git history
     bit ...              The Bit package manager (install, new, search, ...)
+    rung ...             Run the Rung model-ladder improver (bits/tungsten-rung)
     ai / symbolicate / forge / flame / fire / profile
                          Additional tools
 

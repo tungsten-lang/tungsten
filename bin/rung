@@ -1,0 +1,22 @@
+#!/bin/sh
+# Source-checkout entry point; rung commands use the selected toolchain.
+set -eu
+unset BASH_ENV
+RUNG_LAUNCHER=$0
+while [ -L "$RUNG_LAUNCHER" ]; do
+  RUNG_LAUNCHER_DIR=$(CDPATH= cd -- "$(dirname -- "$RUNG_LAUNCHER")" && pwd -P)
+  RUNG_LINK_TARGET=$(readlink "$RUNG_LAUNCHER")
+  case "$RUNG_LINK_TARGET" in
+    /*) RUNG_LAUNCHER=$RUNG_LINK_TARGET ;;
+    *) RUNG_LAUNCHER=$RUNG_LAUNCHER_DIR/$RUNG_LINK_TARGET ;;
+  esac
+done
+RUNG_TOOLCHAIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$RUNG_LAUNCHER")/.." && pwd -P)
+export TUNGSTEN_ROOT="$RUNG_TOOLCHAIN_ROOT"
+if [ -z "${TUNGSTEN_CACHE_DIR:-}" ]; then
+  export TUNGSTEN_CACHE_DIR="$RUNG_TOOLCHAIN_ROOT/build/cache"
+fi
+if [ -x "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung" ] && [ "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung" -nt "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/lib/rung.w" ] && [ "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung" -nt "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung.w" ]; then
+  exec "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung" "$@"
+fi
+exec "$RUNG_TOOLCHAIN_ROOT/bin/tungsten" "$RUNG_TOOLCHAIN_ROOT/bits/tungsten-rung/bin/rung.w" -- "$@"

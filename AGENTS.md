@@ -128,15 +128,61 @@ In Ruby specs, `Tungsten.parse(code)` returns the AST, and
 - `implementations/`: the bootstrap hosts `c/`, `ruby/`, and `spinel/`.
 - `languages/`: lexers for other languages, written in Tungsten, with
   precomputed `.lex16`, `.lex32`, and `.lex64` tables.
-- `bits/`: Tungsten packages, such as `tungsten-lsp`, `tungsten-wassat`, and
-  `tungsten-metaflip`.
+- `bits/`: Tungsten packages, such as `tungsten-lsp`, `tungsten-wassat`,
+  `tungsten-metaflip`, and `tungsten-rung`.
 - `bin/`: `tungsten` (the CLI), `tungsten-compiler` (the installed stage 2),
-  `wit` (the REPL), and `commands/` (build and bootstrap).
+  `wit` (the REPL), `bit` (package manager), `rung` (model-ladder improver),
+  and `commands/` (build and bootstrap).
 - `spec/`: `.w` specs. `scripts/`: test and maintenance scripts.
 - `benchmarks/`; `wasm/`, the wasm32 build of the interpreter; `apps/`, the
   docs site and other apps.
 - `doc/`: the language specification (`doc/specification/`), guides, and
   examples.
+
+## Rung (model-ladder improver)
+
+`rung` (`bits/tungsten-rung`, invoked via `bin/rung` or `bin/tungsten rung`;
+full guide in `bits/tungsten-rung/README.md`) runs a Markdown prompt file up a
+ladder of models (`codex`, `agy`, `grok`, `muse`, `claude`, `ollama:<model>`).
+After every step, an integrator model merges the step's answer(s) into
+`state.md` and records a verdict (`improved`, `credit`, `changed`, `verify`)
+until a full round plateaus or reaches `--max-rounds`.
+
+```bash
+bin/rung task.md                              # default ladder: codex, agy, grok, claude
+bin/rung -m "codex | grok" -r 1 task.md       # run codex and grok in parallel + integrator
+bin/rung models                               # check installed / signed-in models
+bin/rung check task.md                        # validate registry, guard, and staged files
+bin/rung --dry-run task.md                    # write plan and first prompts without calling models
+bin/rung --resume task.rung/STAMP             # resume an interrupted or paused run
+```
+
+Prompt files use optional YAML front matter followed by the Markdown task:
+
+```markdown
+---
+models: codex | grok
+integrator: claude
+stage:
+  - README.md
+  - src/**/*.w
+timeout: 1800
+max_rounds: 2
+deliverable: |
+  One Markdown note with concrete improvements, file/line references, and verification steps.
+---
+# Task title
+
+Review the staged files and propose high-leverage improvements...
+```
+
+- **Ladder syntax (`models` / `-m`, `integrator` / `-i`):** `,` separates
+  sequential steps; `|` joins models into one parallel step whose answers are
+  merged together in a single integrator call.
+- **Read-only safety:** `rung` only orchestrates text (`state.md` and
+  `report.md` under `TASK.rung/STAMP/`). Staged files (`stage` / `files`,
+  relative to the prompt file) are copied into each call's workdir with mode
+  `0444`, and all built-in model commands run in read-only/plan mode.
 
 ## Writing `.w` in this repo
 

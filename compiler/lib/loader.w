@@ -17,7 +17,10 @@ loader_parse_cache_state = {
   disk_misses: 0,
   disk_fingerprint_hits: 0,
   disk_stores: 0,
-  disk_bypasses: 0
+  disk_bypasses: 0,
+  # paths of the persistent entries this process restored: the driver renews
+  # their mtimes so the store's age sweep keeps what is in use
+  disk_used: []
 }
 
 -> loader_enable_parse_cache
@@ -237,6 +240,8 @@ loader_parse_cache_state = {
       @persistent_parse_cache_probes[resolved] = false
       return nil
     loader_parse_cache_state[:disk_hits] = loader_parse_cache_state[:disk_hits] + 1
+    loader_parse_cache_state[:disk_used].push(probe[:ast_path])
+    loader_parse_cache_state[:disk_used].push(probe[:manifest_path])
     accept_persistent_parse_cache(resolved, ast, stat, manifest[:fingerprint])
 
   -> read_persistent_parse_cache_fingerprint(resolved, source)
@@ -264,6 +269,7 @@ loader_parse_cache_state = {
     ccall("w_core_cache_write", probe[:manifest_path], manifest)
     loader_parse_cache_state[:disk_hits] = loader_parse_cache_state[:disk_hits] + 1
     loader_parse_cache_state[:disk_fingerprint_hits] = loader_parse_cache_state[:disk_fingerprint_hits] + 1
+    loader_parse_cache_state[:disk_used].push(probe[:ast_path])
     accept_persistent_parse_cache(resolved, ast, stat, fingerprint)
 
   -> write_persistent_parse_cache(resolved, source, ast, file_id)
@@ -1369,21 +1375,35 @@ loader_parse_cache_state = {
     nil
 
   -> cache_version
+    # v28: the cache directory is shared between checkouts, so the key names
+    # the toolchain root and the cwd that relative paths resolve against.
     # v27: installed packages can import bundled toolchain bit APIs.
     # v26: a time literal autoloads Time. v25 caches spliced the packed Date
     # class instead, so a cached program still called Time.parse on nil.
-    "loader-ast-v27"
+    "loader-ast-v28"
 
+  # The compile/ directory of the shared build store, or TUNGSTEN_CACHE_DIR
+  # when a run isolates itself. The same policy as the driver's
+  # compiler_cache_dir (compiler/lib/driver/link.w), restated here because
+  # the Loader also runs alone on the Ruby host. Entries are named by the
+  # resolved source path and the host identity, so checkouts sharing the
+  # directory never read each other's.
   -> cache_dir
     override = env("TUNGSTEN_CACHE_DIR")
     if override != nil && override != ""
       return override
-    project_root = find_project_root("")
-    if project_root != ""
-      return project_root + "/build/cache"
+    store = env("TUNGSTEN_BUILD_STORE")
+    if store != nil && store != ""
+      return store + "/compile"
+    home = env("TUNGSTEN_HOME")
+    if home != nil && home != ""
+      return home + "/build/compile"
+    home = env("HOME")
+    if home != nil && home != ""
+      return home + "/.tungsten/build/compile"
     root = env("TUNGSTEN_ROOT")
     if root != nil && root != ""
-      return root + "/build/cache"
+      return root + "/.tungsten/build/compile"
     nil
 
   -> cache_key(resolved)
@@ -1391,7 +1411,13 @@ loader_parse_cache_state = {
     if bit_home == nil
       bit_home = ""
     project_root = find_project_root("")
-    digest_sha256(cache_version() + "|" + resolved + "|" + bit_home + "|" + project_root + "|" + @runtime_id + "|" + @service_bindings_id)
+    toolchain_root = env("TUNGSTEN_ROOT")
+    if toolchain_root == nil
+      toolchain_root = ""
+    cwd = env("PWD")
+    if cwd == nil
+      cwd = ""
+    digest_sha256(cache_version() + "|" + resolved + "|" + bit_home + "|" + project_root + "|" + @runtime_id + "|" + @service_bindings_id + "|" + toolchain_root + "|" + cwd)
 
   -> ast_cache_path(resolved)
     dir = cache_dir()
@@ -1783,7 +1809,28 @@ loader_parse_cache_state = {
         return namespaced
     nil
 
+  # A source the toolchain writes for itself (the `-e` program) lives in the
+  # compiler cache's run/ directory, inside the build store. The store
+  # belongs to no project and no toolchain, yet by default it sits in
+  # ~/.tungsten, where an installed toolchain keeps its own core/ and
+  # Bitfile: walking up from the source would compile a checkout's `-e`
+  # against the installed toolchain's core while linking the checkout's
+  # runtime. Such a source is resolved as if it lay in the toolchain root
+  # that is running it.
+  -> store_anchor_dir(dir)
+    store = cache_dir()
+    if store == nil || dir == ""
+      return dir
+    store = store + "/run"
+    if !(dir == store || dir.starts_with?(store + "/"))
+      return dir
+    root = env("TUNGSTEN_ROOT")
+    if root != nil && root != ""
+      return root
+    ""
+
   -> find_project_root(dir)
+    dir = store_anchor_dir(dir)
     # Source-ancestry-first: walk up from the source file's directory
     # looking for a Bitfile. If the source file's tree has one,
     # use it — this isolates tmpdir spec fixtures from the repo root
@@ -1814,6 +1861,7 @@ loader_parse_cache_state = {
   # holds core/. find_project_root would stop at the bit's Bitfile and miss
   # it — which silently disabled all core autoload inside bits.
   -> find_core_root(dir)
+    dir = store_anchor_dir(dir)
     if dir != ""
       parts = dir.split("/")
       i = parts.size()

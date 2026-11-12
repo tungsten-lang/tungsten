@@ -574,7 +574,12 @@ driver_probe_memo = {}
 # Persistent lowered-Core snapshots are scoped to the exact compiler
 # executable.  Core source contents and lowering flags live in the cache key;
 # path + nanosecond metadata + size keep two compiler builds from exchanging
-# WIRE without hashing the whole executable on every fresh invocation.
+# WIRE without hashing the whole executable on every fresh invocation. The
+# snapshots embed the absolute paths of the sources they were lowered from,
+# and the store they live in is shared between checkouts, so the toolchain
+# root one compiler was pointed at (incremental_root_context, TUNGSTEN_ROOT)
+# and the cross target are part of the scope too: one compiler executable
+# driven against two checkouts keeps two sets.
 -> configure_persistent_core_cache
   if g_incremental[:core_cache_context_ready] == true
     return nil
@@ -588,8 +593,9 @@ driver_probe_memo = {}
   stat = File.stat(exe)
   if stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
     return nil
-  identity_text = ["core-wire-executable-v1", exe, stat.mtime_ns().to_s(), stat.ctime_ns().to_s(), stat.size().to_s(), incremental_env_s("TUNGSTEN_VERSION")].join("|")
+  identity_text = ["core-wire-executable-v2", exe, stat.mtime_ns().to_s(), stat.ctime_ns().to_s(), stat.size().to_s(), incremental_env_s("TUNGSTEN_VERSION"), incremental_env_s("TUNGSTEN_ROOT"), incremental_root_context(), cross_target, cross_sysroot].join("|")
   identity = wyhash64_hex_string(identity_text)
+  g_incremental[:persistent_identity] = identity
   incremental_core_cache_configure_persistent(dir, identity)
   if env("TUNGSTEN_LIBRARY_WIRE_DISK_CACHE") != "0"
     incremental_library_cache_configure_persistent(dir, identity)

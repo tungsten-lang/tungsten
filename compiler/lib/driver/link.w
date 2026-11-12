@@ -155,8 +155,11 @@
   # Configs the shared archive can't represent (cross-target and zstd) fall
   # through to the from-source path. Frame-pointer mode is part of the archive
   # flags and identity, so debug builds can reuse it without losing backtraces.
+  store_entries = []
   if runtime_objs == nil && !full_runtime_lto && cross_target == "" && !needs_zstd
     runtime_objs = dev_runtime_archive(verbose)
+    if runtime_objs != nil
+      store_entries.push(runtime_objs)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
   if clang_opt == nil || clang_opt == ""
     # --dev: clang -O0 on the emitted module. Measured on the self-hosted
@@ -182,6 +185,8 @@
     return true
   if runtime_objs == nil && full_runtime_lto && cross_target == "" && !needs_zstd
     runtime_objs = dev_runtime_lto_objects(compiler_image_runtime_profile, verbose)
+    if runtime_objs != nil
+      store_entries.push(runtime_objs.slice(0, runtime_objs.size() - 4))
 
   # Parallel codegen — OPT-IN via TUNGSTEN_PARALLEL_CODEGEN=1. -O3 on one
   # big module is single-threaded and ~90% of a large build's wall; with
@@ -332,6 +337,7 @@
     req_cflags = req[1]
     cached_obj = dev_runtime_companion_object(rel_src, false, req_cflags)
     if cached_obj != nil
+      store_entries.push(cached_obj)
       companion_cmd << dev_runtime_shell_quote(cached_obj)
       companion_cmd << " "
     else
@@ -349,6 +355,14 @@
     clang_cmd << "-I"
     clang_cmd << runtime_dir
     clang_cmd << " "
+    # A build that names everything relatively (the stage compilers, compiler
+    # images and bits the build store shares: started from the toolchain root
+    # with TUNGSTEN_ROOT unset, so runtime_dir is "runtime/") must not record
+    # the directory it happened to be compiled in either: clang writes the
+    # cwd into the debug info of every C source compiled here, and the linker
+    # copies it into the executable.
+    if !runtime_dir.starts_with?("/")
+      clang_cmd << "-ffile-prefix-map=\"$PWD\"=. "
   if runtime_objs != nil
     clang_cmd << runtime_objs
     clang_cmd << " "
@@ -447,6 +461,8 @@
       system("TUNGSTEN_PREFLIGHT=1 " + dev_runtime_shell_quote(out_path) + " </dev/null >/dev/null 2>&1 &")
   if result == true && link_cache_slot != nil
     link_artifact_cache_store(link_cache_slot, out_path)
+  if result == true
+    dev_runtime_renew(store_entries)
   result == true
 
 # Persistent NATIVE-object runtime archive for fast dev links. Linking against
@@ -470,27 +486,48 @@
   driver_probe_memo[key] = true
   true
 
-# One selected content-addressed cache for runtime archives, loader artifacts,
-# and incremental binaries. An explicit override wins. Otherwise a project
-# checkout owns its build/cache; installed compilers fall back to their
-# TUNGSTEN_ROOT rather than leaking artifacts into /tmp or an implicit home
-# directory.
+# The build store: one directory shared by every checkout, worktree and
+# installed toolchain of one user, so identical work is done once.
+#   TUNGSTEN_BUILD_STORE   the store root, when set
+#   TUNGSTEN_HOME/build    otherwise (the launcher exports TUNGSTEN_HOME)
+#   HOME/.tungsten/build   otherwise
+# Without a home directory the store sits under the toolchain root, as the
+# launcher's TUNGSTEN_HOME default does. The same policy is implemented by
+# bin/commands/store.sh (launcher, hook, GC), bin/commands/build.w, the
+# Loader's cache_dir, and bin/commands/compile.rb; keep them in step.
+-> tungsten_build_store_dir
+  override = env("TUNGSTEN_BUILD_STORE")
+  if override != nil && override != ""
+    return override
+  home = env("TUNGSTEN_HOME")
+  if home != nil && home != ""
+    return home + "/build"
+  home = env("HOME")
+  if home != nil && home != ""
+    return home + "/.tungsten/build"
+  root = env("TUNGSTEN_ROOT")
+  if root != nil && root != ""
+    return root + "/.tungsten/build"
+  parent = capture("cd " + dev_runtime_shell_quote(resolve_runtime_dir + "/..") + " && pwd -P 2>/dev/null").strip()
+  if parent != ""
+    return parent + "/.tungsten/build"
+  nil
+
+# The compiler's own artifacts (runtime archives and companion objects,
+# incremental binaries, parse and Core snapshots, the compiled-run binaries)
+# live in the store's compile/ directory. Because every checkout shares it, an
+# entry's name must cover everything that determines its bytes: content for
+# what is shared (runtime objects), the absolute paths and the toolchain root
+# for what embeds them (programs). TUNGSTEN_CACHE_DIR replaces the directory
+# outright; the spec and parity suites isolate themselves that way.
 -> compiler_cache_dir
   override = env("TUNGSTEN_CACHE_DIR")
   if override != nil && override != ""
     return override
-  if file?("Bitfile")
-    cwd = driver_cwd()
-    if cwd != ""
-      return cwd + "/build/cache"
-  root = env("TUNGSTEN_ROOT")
-  if root != nil && root != ""
-    return root + "/build/cache"
-  runtime_dir = resolve_runtime_dir
-  parent = capture("cd " + dev_runtime_shell_quote(runtime_dir + "/..") + " && pwd -P 2>/dev/null").strip()
-  if parent != ""
-    return parent + "/build/cache"
-  nil
+  store = tungsten_build_store_dir()
+  if store == nil
+    return nil
+  store + "/compile"
 
 # Optional compiler images (repl for bin/wit, metal for @gpu programs) are
 # products of `bin/tungsten build`, never of a launch: bin/wit must start on
@@ -505,11 +542,13 @@
     exit 1
   root
 
-# Images are owned by the checkout that holds the compiler executable, not by
-# the cache a run selects: TUNGSTEN_CACHE_DIR isolates one run's incremental
-# artifacts (the spec and parity suites each take their own), and a bit's
-# cwd owns its own build/cache, but neither ever builds an image. Every
-# launch therefore resolves to the one image `bin/tungsten build` produced.
+# Images are installed beside the compiler executable they belong to, in its
+# checkout's build/compiler-images: a launch must find the image built for
+# exactly this compiler and these sources, whatever cache a run selects
+# (TUNGSTEN_CACHE_DIR isolates incremental artifacts only). `bin/tungsten
+# build` produces them and keeps a copy in the build store under a
+# fingerprint of the compiler and its sources, so a second checkout with the
+# same compiler installs them instead of compiling them.
 -> compiler_image_dir(kind)
   root = env("TUNGSTEN_ROOT")
   if root == nil || root == ""
@@ -517,7 +556,7 @@
   if root == ""
     ccall("w_eputs", "could not locate the checkout that owns the " + kind + " compiler image")
     exit 1
-  root + "/build/cache/compiler-images"
+  root + "/build/compiler-images"
 
 -> compiler_image_path(kind)
   compiler_image_dir(kind) + "/tungsten-" + kind
@@ -528,13 +567,14 @@
     exit 1
   root = compiler_image_root(kind)
   source_name = kind == "repl" ? "repl" : "tungsten_" + kind
-  source = root + "/compiler/" + source_name + ".w"
+  relative_source = "compiler/" + source_name + ".w"
+  source = root + "/" + relative_source
   if !file?(source)
     ccall("w_eputs", "missing compiler image source: " + source)
     exit 1
   image_dir = compiler_image_dir(kind)
   if system("mkdir -p " + dev_runtime_shell_quote(image_dir)) != true
-    ccall("w_eputs", "could not create compiler image cache: " + image_dir)
+    ccall("w_eputs", "could not create compiler image directory: " + image_dir)
     exit 1
   exe = ccall("w_executable_path")
   if exe == nil || exe == ""
@@ -543,16 +583,20 @@
   image = compiler_image_path(kind)
   # The existing manifest/link caches decide whether the wrapper or any
   # transitive `use` changed; there is no second freshness implementation.
-  build_cmd = "TUNGSTEN_INCREMENTAL=1 TUNGSTEN_LL_PATH='' " + dev_runtime_shell_quote(exe) + " compile " + dev_runtime_shell_quote(source) + " --out " + dev_runtime_shell_quote(image) + " --release --native --no-debug --no-lto >/dev/null"
+  # Compiled from the checkout root with a relative entry and no TUNGSTEN_ROOT,
+  # the image names its sources relatively (core/array.w), as the stage
+  # compilers do: its bytes do not depend on where the checkout lives, which
+  # is what lets the build store share it.
+  build_cmd = "cd " + dev_runtime_shell_quote(root) + " && env -u TUNGSTEN_ROOT TUNGSTEN_INCREMENTAL=1 TUNGSTEN_LL_PATH='' " + dev_runtime_shell_quote(exe) + " compile " + dev_runtime_shell_quote(relative_source) + " --out " + dev_runtime_shell_quote(image) + " --release --native --no-debug --no-lto >/dev/null"
   if system(build_cmd) != true
     ccall("w_eputs", "failed to build the " + kind + " compiler image")
     exit 1
   image
 
 -> delegate_compiler_image(kind)
-  # Running needs only the cache (compiler_cache_dir falls back to the
-  # executable's checkout), so `tungsten-compiler --repl` works from any cwd
-  # and env; TUNGSTEN_ROOT is required only to BUILD an image.
+  # Running needs only the image directory (compiler_image_dir falls back to
+  # the executable's checkout), so `tungsten-compiler --repl` works from any
+  # cwd and env; TUNGSTEN_ROOT is required only to BUILD an image.
   image = compiler_image_path(kind)
   if !file?(image)
     ccall("w_eputs", "the " + kind + " compiler image is not built: " + image)
@@ -721,28 +765,130 @@
   config << value
   config << "\n"
 
-# The runtime sources an archive build reads — shared by the archive's own
-# mtime-freshness check and the incremental compile cache's manifest, so
-# the two invalidation rules can never drift.
--> dev_runtime_base_files(ev, generated_thresholds, tls_source)
-  bases = ["runtime.c", "terminal_input.c", "runtime.h", "wvalue.h",
-           "event_loop.h", "ssmr_witness.h", "w_char_table.c", "aks.c", tls_source,
-           "pdqsort.inc", "ipnsort.inc", "radixsort.inc", "timsort.inc",
-           "skasort.inc", "wolfsort.inc"]
-  if ev == "event_*.c"
-    bases.push("event_kqueue.c")
-    bases.push("event_epoll.c")
-    bases.push("event_iouring.c")
-  else
-    bases.push(ev)
-  if generated_thresholds == "present"
-    bases.push("generated/bigint_thresholds.h")
-  bases
+# Every C source, header and include fragment under the runtime directory
+# (tests aside), relative and sorted. This is the set the runtime objects are
+# keyed and invalidated by: the archive, the LTO objects and each companion
+# object take a content digest of all of it, and the incremental binary
+# manifest records each file's mtime. A hand-kept list of "the files
+# runtime.c includes" had already fallen behind (prime_lut.inc,
+# ast_schema_generated.h), and in a store shared between checkouts a missed
+# file would hand one checkout another's runtime.
+-> dev_runtime_tree_files(runtime_root)
+  key = "rtfiles:" + runtime_root
+  cached = driver_probe_memo[key]
+  if cached != nil
+    return cached
+  listing = capture("cd " + dev_runtime_shell_quote(runtime_root) + " 2>/dev/null && find . -path ./tests -prune -o -type f \\( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' \\) -print 2>/dev/null | LC_ALL=C sort")
+  files = []
+  rows = listing.split("\n")
+  i = 0
+  while i < rows.size()
+    row = rows[i].strip()
+    if row.starts_with?("./")
+      row = row.slice(2, row.size() - 2)
+    if row != ""
+      files.push(row)
+    i += 1
+  driver_probe_memo[key] = files
+  files
 
--> dev_runtime_archive_path(cache_dir, runtime_root, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds, tls_source)
+# Content identity of the runtime sources. nil when it cannot be computed:
+# callers then compile the runtime from source for this one program instead of
+# trusting a shared object. The compiled compiler hashes each file natively;
+# the stage-0 C VM, which has no file digest builtin, asks POSIX cksum.
+-> dev_runtime_sources_digest(runtime_root, runtime_kind)
+  key = "rtdigest:" + runtime_root
+  cached = driver_probe_memo[key]
+  if cached != nil
+    return cached
+  files = dev_runtime_tree_files(runtime_root)
+  if files.size() == 0
+    return nil
+  digest = nil
+  if runtime_kind == "compiled-runtime"
+    text = StringBuffer(files.size() * 48)
+    i = 0
+    while i < files.size()
+      file_digest = digest_file64(runtime_root + "/" + files[i])
+      if file_digest == nil
+        return nil
+      text << files[i]
+      text << "="
+      text << u64_hex(file_digest)
+      text << "\n"
+      i += 1
+    digest = wyhash64_hex_string(text.to_s())
+  else
+    cmd = StringBuffer(files.size() * 32)
+    cmd << "cd "
+    cmd << dev_runtime_shell_quote(runtime_root)
+    cmd << " && cksum"
+    i = 0
+    while i < files.size()
+      cmd << " "
+      cmd << dev_runtime_shell_quote(files[i])
+      i += 1
+    cmd << " 2>/dev/null"
+    sums = capture(cmd.to_s()).strip()
+    # One "crc size name" row per file: a file that vanished mid-listing
+    # prints nothing, and a short answer must not become a key.
+    if sums == "" || sums.split("\n").size() != files.size()
+      return nil
+    digest = wyhash64_hex_string(sums)
+  driver_probe_memo[key] = digest
+  digest
+
+# Runtime objects are compiled with the checkout's absolute runtime path on
+# the command line, in whatever directory the compiler was started from.
+# These two maps make the bytes clang writes (__FILE__ in assert messages,
+# the source names and compilation directory in debug info, which the linker
+# copies into every program's debug map) say `runtime/...` and `.` instead,
+# so an object is the same whichever checkout compiled it, from wherever.
+# "$PWD" is expanded by the shell that runs the compile, after any `cd`.
+-> dev_runtime_path_map_flag(runtime_root)
+  " -ffile-prefix-map=" + dev_runtime_shell_quote(runtime_root) + "=runtime -ffile-prefix-map=\"$PWD\"=."
+
+# Store entries are swept by age (bin/commands/cache_gc.sh), so what a build
+# used must look recent or it is rebuilt every week however often it is used.
+# After a link, one background `find` renews (at most once a day each: only
+# files older than a day are touched) the runtime objects it linked, the
+# parsed-source entries the loader restored, and this compiler's Core,
+# library and function-text snapshots and target probes. Nothing in the
+# store compares these mtimes with a source's, so renewing is always safe.
+-> dev_runtime_renew(paths)
+  cmd = StringBuffer(paths.size() * 96 + 512)
+  cmd << "("
+  used = loader_parse_cache_state[:disk_used]
+  if paths.size() > 0 || used.size() > 0
+    cmd << "find"
+    i = 0
+    while i < paths.size()
+      cmd << " "
+      cmd << dev_runtime_shell_quote(paths[i])
+      i += 1
+    i = 0
+    while i < used.size()
+      cmd << " "
+      cmd << dev_runtime_shell_quote(used[i])
+      i += 1
+    cmd << " -type f -mtime +0 -exec touch {} + ; "
+  cache_dir = compiler_cache_dir()
+  identity = g_incremental[:persistent_identity]
+  if cache_dir != nil
+    cmd << "find "
+    cmd << dev_runtime_shell_quote(cache_dir)
+    cmd << " -maxdepth 1 -type f \\( -name 'target-probe-*' -o -name 'native-arm-cpu-*'"
+    if identity != nil
+      cmd << " -o -name 'core-wire-" + identity + "-*' -o -name 'library-wire-v1-" + identity + "-*' -o -name 'core-render-v1-" + identity + "-*'"
+    cmd << " \\) -mtime +0 -exec touch {} + ; "
+  cmd << "true) >/dev/null 2>&1 &"
+  system(cmd.to_s())
+  nil
+
+-> dev_runtime_archive_path(cache_dir, sources_digest, cc_identity, ar_identity, compile_flags, event_source, generated_thresholds, tls_source)
   config = StringBuffer(0)
-  config << "dev-runtime-archive-v5\n"
-  config << runtime_root
+  config << "dev-runtime-archive-v7\n"
+  config << sources_digest
   config << "\ncc="
   config << cc_identity
   config << "\nar="
@@ -794,22 +940,16 @@
   if file?(thresholds_path)
     generated_thresholds = "present"
   tls_source = tls_runtime_source()
-  archive = dev_runtime_archive_path(cache_dir, runtime_root, cc_identity, ar_identity, compile_flags, ev, generated_thresholds, tls_source)
+  sources_digest = dev_runtime_sources_digest(runtime_root, runtime_kind)
+  if sources_digest == nil
+    return nil
+  archive = dev_runtime_archive_path(cache_dir, sources_digest, cc_identity, ar_identity, compile_flags, ev, generated_thresholds, tls_source)
   evo = ev.replace(".c", ".o")
 
-  # Freshness: reuse the cached archive iff it is newer than every base source.
-  bases = dev_runtime_base_files(ev, generated_thresholds, tls_source)
-  archive_mtime = file_mtime_ns(archive)
-  if archive_mtime != nil
-    fresh = true
-    bi = 0
-    while bi < bases.size() && fresh
-      bm = file_mtime_ns(runtime_root + "/" + bases[bi])
-      if bm == nil || archive_mtime <= bm
-        fresh = false
-      bi += 1
-    if fresh
-      return archive
+  # The name is a digest of the sources' contents, the tools and the flags,
+  # so an archive that exists is the right one, for any checkout.
+  if file?(archive)
+    return archive
 
   if !ensure_driver_dir(cache_dir)
     return nil
@@ -817,10 +957,12 @@
   if verbose
     << "Building native runtime archive (one-time)..."
 
-  # Compile in a per-process directory so concurrent roots/configurations can
-  # never exchange runtime.o files. Build the archive beside its final path and
-  # publish with one same-filesystem rename; linkers see either the complete old
-  # archive or the complete new one, never a partially written ar file.
+  # Compile in a per-process directory so concurrent builders can never
+  # exchange runtime.o files. Build the archive beside its final path and
+  # publish with one same-filesystem rename; linkers see either no archive or
+  # a complete one, never a partially written ar file, and two builders of
+  # the same name publish the same bytes.
+  compile_flags += dev_runtime_path_map_flag(runtime_root)
   event_source_arg = dev_runtime_shell_quote(runtime_root + "/" + ev)
   event_object_arg = dev_runtime_shell_quote(evo)
   if ev == "event_*.c"
@@ -862,10 +1004,10 @@
     return nil
   archive
 
--> dev_runtime_lto_objects_path(cache_dir, runtime_root, cc_identity, compile_flags, event_source, generated_thresholds, tls_source)
+-> dev_runtime_lto_objects_path(cache_dir, sources_digest, cc_identity, compile_flags, event_source, generated_thresholds, tls_source)
   config = StringBuffer(0)
-  config << "dev-runtime-lto-v1\n"
-  config << runtime_root
+  config << "dev-runtime-lto-v3\n"
+  config << sources_digest
   config << "\ncc="
   config << cc_identity
   config << "\nflags="
@@ -917,19 +1059,13 @@
   thresholds_path = runtime_root + "/generated/bigint_thresholds.h"
   generated_thresholds = file?(thresholds_path) ? "present" : "absent"
   tls_source = tls_runtime_source()
-  bundle_dir = dev_runtime_lto_objects_path(cache_dir, runtime_root, cc_identity, compile_flags, ev, generated_thresholds, tls_source)
-  ready_mtime = file_mtime_ns(bundle_dir + "/.ready")
-  bases = dev_runtime_base_files(ev, generated_thresholds, tls_source)
-  if ready_mtime != nil
-    fresh = true
-    bi = 0
-    while bi < bases.size() && fresh
-      bm = file_mtime_ns(runtime_root + "/" + bases[bi])
-      if bm == nil || ready_mtime <= bm
-        fresh = false
-      bi += 1
-    if fresh
-      return bundle_dir + "/*.o"
+  sources_digest = dev_runtime_sources_digest(runtime_root, runtime_kind)
+  if sources_digest == nil
+    return nil
+  bundle_dir = dev_runtime_lto_objects_path(cache_dir, sources_digest, cc_identity, compile_flags, ev, generated_thresholds, tls_source)
+  # Content-named: a bundle whose .ready marker exists is complete and right.
+  if file?(bundle_dir + "/.ready")
+    return bundle_dir + "/*.o"
 
   if !ensure_driver_dir(cache_dir)
     return nil
@@ -937,16 +1073,21 @@
   if verbose
     << "Building LTO runtime objects (one-time)..."
 
+  compile_flags += dev_runtime_path_map_flag(runtime_root)
+
   event_source_arg = dev_runtime_shell_quote(runtime_root + "/" + ev)
   if ev == "event_*.c"
     event_source_arg = dev_runtime_shell_quote(runtime_root + "/event_") + "*.c"
 
   cc = StringBuffer(0)
-  cc << "build_dir="
-  cc << dev_runtime_shell_quote(bundle_dir + ".build.")
-  cc << "$$; old_dir="
-  cc << dev_runtime_shell_quote(bundle_dir + ".old.")
-  cc << "$$; rm -rf \"$build_dir\" \"$old_dir\" && mkdir -p \"$build_dir\" && cd \"$build_dir\" && "
+  # Build in a private directory and publish it with one rename. A published
+  # bundle is never replaced or moved aside: a linker may be reading it, and
+  # a second builder of the same name made the same objects. If that builder
+  # lost the race its rename lands inside the winner's directory (where no
+  # *.o glob sees it) and is removed again.
+  cc << "bundle="
+  cc << dev_runtime_shell_quote(bundle_dir)
+  cc << "; build_dir=\"$bundle.build.$$\"; rm -rf \"$build_dir\" && mkdir -p \"$build_dir\" && cd \"$build_dir\" && "
   cc << cc_command
   cc << " "
   cc << compile_flags
@@ -962,11 +1103,8 @@
   cc << dev_runtime_shell_quote(runtime_root + "/aks.c")
   cc << " "
   cc << dev_runtime_shell_quote(runtime_root + "/" + tls_source)
-  cc << " && touch .ready && (mv -f "
-  cc << dev_runtime_shell_quote(bundle_dir)
-  cc << " \"$old_dir\" 2>/dev/null || true) && mv -f \"$build_dir\" "
-  cc << dev_runtime_shell_quote(bundle_dir)
-  cc << "; status=$?; rm -rf \"$build_dir\" \"$old_dir\"; exit $status"
+  cc << " && touch .ready && cd / && { test -e \"$bundle/.ready\" || mv \"$build_dir\" \"$bundle\" 2>/dev/null || true; }"
+  cc << "; rm -rf \"$build_dir\" \"$bundle/$(basename \"$build_dir\")\"; test -e \"$bundle/.ready\""
   if system(cc.to_s()) != true
     return nil
   bundle_dir + "/*.o"
@@ -1000,9 +1138,12 @@
     compile_flags += " " + tcf
   if extra_cflags != ""
     compile_flags += " " + extra_cflags
+  sources_digest = dev_runtime_sources_digest(runtime_root, runtime_kind)
+  if sources_digest == nil
+    return nil
   config = StringBuffer(256)
-  config << "companion-obj-v1\n"
-  config << runtime_root
+  config << "companion-obj-v3\n"
+  config << sources_digest
   config << "\nsrc="
   config << rel_source
   config << "\ncc="
@@ -1018,28 +1159,14 @@
   safe_name = rel_source.gsub("/", "_").gsub(".", "_")
   obj_path = cache_dir + "/companion-" + safe_name + "-" + wyhash64_hex_string(config.to_s()) + ".o"
   src_path = runtime_root + "/" + rel_source
-  obj_mtime = file_mtime_ns(obj_path)
-  if obj_mtime != nil
-    src_mtime = file_mtime_ns(src_path)
-    hdr1 = file_mtime_ns(runtime_root + "/runtime.h")
-    hdr2 = file_mtime_ns(runtime_root + "/wvalue.h")
-    hdr3 = file_mtime_ns(runtime_root + "/ssmr_witness.h")
-    if src_mtime != nil && obj_mtime > src_mtime && (hdr1 == nil || obj_mtime > hdr1) && (hdr2 == nil || obj_mtime > hdr2) && (hdr3 == nil || obj_mtime > hdr3)
-      extra_ok = true
-      if rel_source == "quartz.c"
-        qh = file_mtime_ns(runtime_root + "/quartz.h")
-        if qh != nil && obj_mtime <= qh
-          extra_ok = false
-      elsif rel_source.starts_with?("media/")
-        mh = file_mtime_ns(runtime_root + "/media/media.h")
-        if mh != nil && obj_mtime <= mh
-          extra_ok = false
-      if extra_ok
-        return obj_path
+  # Content-named (the digest covers the source and every runtime header):
+  # an object that exists is the right one, for any checkout.
+  if file?(obj_path)
+    return obj_path
   if !ensure_driver_dir(cache_dir)
     return nil
   tmp_obj = dev_runtime_shell_quote(obj_path + ".tmp.") + "$$"
-  cmd = cc_command + " " + compile_flags + " -I" + dev_runtime_shell_quote(runtime_root) + " -c " + dev_runtime_shell_quote(src_path) + " -o " + tmp_obj + " && mv -f " + tmp_obj + " " + dev_runtime_shell_quote(obj_path) + "; status=$?; rm -f " + tmp_obj + "; exit $status"
+  cmd = cc_command + " " + compile_flags + dev_runtime_path_map_flag(runtime_root) + " -I" + dev_runtime_shell_quote(runtime_root) + " -c " + dev_runtime_shell_quote(src_path) + " -o " + tmp_obj + " && mv -f " + tmp_obj + " " + dev_runtime_shell_quote(obj_path) + "; status=$?; rm -f " + tmp_obj + "; exit $status"
   if system(cmd) != true
     return nil
   obj_path

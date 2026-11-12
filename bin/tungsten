@@ -90,6 +90,27 @@ export TUNGSTEN_VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
 # runtime, which masked this for simple programs. See loader.w:find_core_root.
 export TUNGSTEN_ROOT="$ROOT"
 
+# Compile the build orchestrator (bin/commands/build.w) when it or the
+# compiler is newer than bin/commands/build. A failure shows why: the
+# compiler's output is kept in a per-process log and its tail is printed.
+tungsten_compile_build_driver() {
+  local verb="$1" build_w="$ROOT/bin/commands/build.w" build_bin="$ROOT/bin/commands/build" log
+  if [ -x "$build_bin" ] && [ ! "$build_w" -nt "$build_bin" ] && [ ! "$COMPILER" -nt "$build_bin" ]; then
+    return 0
+  fi
+  log="${TMPDIR:-/tmp}/tungsten-build-driver-$$.log"
+  if ! BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
+      "$COMPILER" compile "$build_w" --out "$build_bin" --no-lto >"$log" 2>&1; then
+    tail -n 40 "$log" >&2
+    echo "tungsten $verb: failed to compile bin/commands/build.w (full output: $log)" >&2
+    exit 1
+  fi
+  rm -f "$log"
+  case "$(uname -s)" in
+    Darwin) codesign --force -s - "$build_bin" >/dev/null 2>&1 || true ;;
+  esac
+}
+
 # Prefer custom ruby, fall back to system ruby
 if [ -x "$CUSTOM_RUBY" ]; then
   RUBY="$CUSTOM_RUBY"
@@ -177,19 +198,8 @@ case "$1" in
       echo "tungsten build: no compiler at bin/tungsten-compiler — run bin/tungsten bootstrap first" >&2
       exit 1
     fi
-    BUILD_W="$ROOT/bin/commands/build.w"
-    BUILD_BIN="$ROOT/bin/commands/build"
-    if [ ! -x "$BUILD_BIN" ] || [ "$BUILD_W" -nt "$BUILD_BIN" ] || [ "$COMPILER" -nt "$BUILD_BIN" ]; then
-      BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
-        "$COMPILER" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto >/dev/null 2>&1 || {
-        echo "tungsten build: failed to compile bin/commands/build.w" >&2
-        exit 1
-      }
-      case "$(uname -s)" in
-        Darwin) codesign --force -s - "$BUILD_BIN" >/dev/null 2>&1 || true ;;
-      esac
-    fi
-    exec "$BUILD_BIN" "$@"
+    tungsten_compile_build_driver build
+    exec "$ROOT/bin/commands/build" "$@"
     ;;
   install)
     shift
@@ -197,19 +207,8 @@ case "$1" in
       echo "tungsten install: no compiler at bin/tungsten-compiler — run bin/tungsten build --install first" >&2
       exit 1
     fi
-    BUILD_W="$ROOT/bin/commands/build.w"
-    BUILD_BIN="$ROOT/bin/commands/build"
-    if [ ! -x "$BUILD_BIN" ] || [ "$BUILD_W" -nt "$BUILD_BIN" ] || [ "$COMPILER" -nt "$BUILD_BIN" ]; then
-      BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
-        "$COMPILER" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto >/dev/null 2>&1 || {
-        echo "tungsten install: failed to compile bin/commands/build.w" >&2
-        exit 1
-      }
-      case "$(uname -s)" in
-        Darwin) codesign --force -s - "$BUILD_BIN" >/dev/null 2>&1 || true ;;
-      esac
-    fi
-    exec "$BUILD_BIN" --install-only "$@"
+    tungsten_compile_build_driver install
+    exec "$ROOT/bin/commands/build" --install-only "$@"
     ;;
   # bench: Tungsten primitive-op velocity baseline (bin/commands/bench.w).
   # `--suite` switches to the cross-language algorithm suite (bench-suite.w).

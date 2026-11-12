@@ -381,19 +381,38 @@ driver_probe_memo = {}
   ir = ir.replace(old_call, new_call)
   ir.replace("declare void @w_slab_init_static(ptr, i32)", "declare void @w_slab_init_static_zstd(ptr, i32, i32)")
 
-# Ordinary native compiles used to share `/tmp/tungsten/<basename>.ll`.
-# Distinct entry points such as `bin/metaflip.w` and `lib/metaflip.w` could
-# therefore overwrite one another between IR emission and clang opening the
-# file. Give every compiler process an atomically-created private directory;
-# after the link we publish the complete IR back to the historical diagnostic
-# path so existing tooling that reads `/tmp/tungsten/<basename>.ll` keeps
-# working. Explicit TUNGSTEN_LL_PATH and `--ll` paths remain caller-owned.
+# Where an ordinary compile writes its LLVM IR. Every compiler process gets
+# an atomically created private directory (distinct entry points such as
+# `bin/metaflip.w` and `lib/metaflip.w` once overwrote each other's
+# `/tmp/tungsten/<basename>.ll` between emission and clang), under a per-user
+# root: $TMPDIR/tungsten, or /tmp/tungsten-<uid> where TMPDIR is unset (a
+# shared /tmp/tungsten belonged to whichever user created it first). The IR
+# is deleted once the program is linked; it is kept, as <root>/<name>.ll,
+# when it is the product (--emit-ll), when the link failed (and the path is
+# printed), or when TUNGSTEN_LL_DIR names the root (the old behaviour, for
+# tools that read <root>/<name>.ll). Kept IR and abandoned private
+# directories in the default root are swept after a day. `--ll` and
+# TUNGSTEN_LL_PATH write where they say and are the caller's.
 -> implicit_ll_root
+  memo = driver_probe_memo[:implicit_ll_root]
+  if memo != nil
+    return memo
   ll_dir = env("TUNGSTEN_LL_DIR")
-  if ll_dir == nil || ll_dir == ""
-    ll_dir = "/tmp/tungsten"
+  default_root = ll_dir == nil || ll_dir == ""
+  if default_root
+    tmp = env("TMPDIR")
+    if tmp != nil && tmp != ""
+      while tmp.size() > 1 && tmp.ends_with?("/")
+        tmp = tmp.slice(0, tmp.size() - 1)
+      ll_dir = tmp + "/tungsten"
+    else
+      uid = capture("id -u 2>/dev/null").strip()
+      ll_dir = "/tmp/tungsten-" + (uid == "" ? "user" : uid)
   if system("mkdir -p " + dev_runtime_shell_quote(ll_dir)) != true
     raise "Could not create LLVM scratch directory " + ll_dir
+  if default_root
+    system("(find " + dev_runtime_shell_quote(ll_dir) + " -mindepth 1 -maxdepth 1 -mtime +0 \\( -name 'compile.*' -o -name 'batch-*' -o -name '*.ll' -o -name '*.ll.done' \\) -exec rm -rf {} + ) >/dev/null 2>&1 &")
+  driver_probe_memo[:implicit_ll_root] = ll_dir
   ll_dir
 
 -> source_stem_ll_name(file_path)
@@ -413,16 +432,31 @@ driver_probe_memo = {}
   explicit = env("TUNGSTEN_LL_PATH")
   (explicit == nil || explicit == "") && !keep_ll
 
--> publish_implicit_ll_path(ll_path, file_path)
-  stable_path = implicit_ll_root() + "/" + source_stem_ll_name(file_path)
-  ok = system("mv -f " + dev_runtime_shell_quote(ll_path) + " " + dev_runtime_shell_quote(stable_path)) == true
+# Whether a linked program's implicit IR stays: when the link failed, or when
+# the caller named the root (TUNGSTEN_LL_DIR) to read <root>/<name>.ll.
+-> keep_implicit_ll?(link_ok)
+  ll_dir = env("TUNGSTEN_LL_DIR")
+  !link_ok || (ll_dir != nil && ll_dir != "")
+
+# Done with an implicit IR file: keep it as <root>/<name>.ll, or delete it,
+# and remove its private directory either way.
+-> retire_implicit_ll_path(ll_path, file_path, keep)
+  ok = true
   done_path = ll_path + ".done"
-  if file?(done_path)
-    ok = system("mv -f " + dev_runtime_shell_quote(done_path) + " " + dev_runtime_shell_quote(stable_path + ".done")) == true && ok
+  if keep
+    stable_path = implicit_ll_root() + "/" + source_stem_ll_name(file_path)
+    ok = system("mv -f " + dev_runtime_shell_quote(ll_path) + " " + dev_runtime_shell_quote(stable_path)) == true
+    if file?(done_path)
+      ok = system("mv -f " + dev_runtime_shell_quote(done_path) + " " + dev_runtime_shell_quote(stable_path + ".done")) == true && ok
+  else
+    z = system("rm -f " + dev_runtime_shell_quote(ll_path) + " " + dev_runtime_shell_quote(done_path))
   parts = ll_path.split("/")
   parts.pop()
   z = system("rmdir " + dev_runtime_shell_quote(parts.join("/")) + " 2>/dev/null")
   ok
+
+-> implicit_ll_kept_path(file_path)
+  implicit_ll_root() + "/" + source_stem_ll_name(file_path)
 
 -> gpu_dialect_selection(raw, file_path, node)
   if raw == nil

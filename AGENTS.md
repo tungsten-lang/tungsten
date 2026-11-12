@@ -115,7 +115,13 @@ to its checkout, and both `core/` and `runtime/` come from there, even for a
 source inside another checkout (run that checkout's own `bin/tungsten` to use
 its core). With `TUNGSTEN_ROOT` unset, `core/` is the source's nearest
 checkout, and the compiler warns when that is not the tree whose `runtime/`
-it links.
+it links. One C compiler builds everything: `TUNGSTEN_CC` (or `[build] cc`),
+else the first LLVM clang 22+ among `clang-N`, Homebrew `llvm`, `llvm@N`,
+else `clang` (`bin/commands/toolchain.sh cc` prints it; the compiler applies
+the same rule, `scripts/test-host-cc-rule.sh`). A compile's LLVM IR lives in
+a private directory under `$TMPDIR/tungsten` and is deleted after a
+successful link; use `--ll`, or `TUNGSTEN_LL_DIR=DIR` to keep every
+program's IR as `DIR/<name>.ll`.
 
 The Ruby implementation has its own tooling, run from `implementations/ruby/`:
 

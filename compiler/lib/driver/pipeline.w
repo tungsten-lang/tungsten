@@ -554,13 +554,17 @@
     return true
 
   if emit_ll_only_arg
-    if implicit_ll && !publish_implicit_ll_path(ll_path, file_path)
+    if implicit_ll && !retire_implicit_ll_path(ll_path, file_path, true)
       return false
     return true
 
   ok = link_binary(ll_path, out_path, runtime_archive, verbose)
-  if implicit_ll && !publish_implicit_ll_path(ll_path, file_path)
-    ok = false
+  if implicit_ll
+    keep_ll_file = keep_implicit_ll?(ok)
+    if !retire_implicit_ll_path(ll_path, file_path, keep_ll_file)
+      ok = false
+    elsif !ok
+      ccall("w_eputs", "LLVM IR kept at " + implicit_ll_kept_path(file_path))
 
   if ok
     if !quiet

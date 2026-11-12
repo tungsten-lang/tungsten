@@ -33,6 +33,7 @@
 ROOT = File.expand_path(env("TUNGSTEN_ROOT") != nil && env("TUNGSTEN_ROOT") != "" ? env("TUNGSTEN_ROOT") : __DIR__ + "/../..")
 COMPILER_BIN = ROOT + "/bin/tungsten-compiler"
 RUNTIME_DIR = ROOT + "/runtime"
+BUILD_CC_MEMO = {}
 GEM_EXE = ROOT + "/implementations/ruby/exe/ruby-tungsten"
 CUSTOM_RUBY = ROOT + "/src/patched/ruby/ruby"
 C_INTERP = ROOT + "/implementations/c/build/tungsten-c"
@@ -520,6 +521,11 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
 
 # ── Preflight (port of Tungsten::Doctor.build_preflight) ────────
 
+# The C compiler for everything this build compiles and links: the runtime,
+# the stage compilers and the programs they build (it is handed down as
+# TUNGSTEN_CC). TUNGSTEN_CC or ~/.tungsten/config's [build] cc when given,
+# else the rule every program link uses (host_c_compiler in
+# compiler/lib/target.w), as bin/commands/toolchain.sh implements it.
 -> preflight_cc
   cc = env_or_empty("TUNGSTEN_CC").strip
   if cc != ""
@@ -527,7 +533,10 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
   from_config = configured_value("cc")
   if from_config != nil && from_config != ""
     return from_config
-  "clang"
+  if BUILD_CC_MEMO[:cc] == nil
+    chosen = capture("bash " + shq(ROOT + "/bin/commands/toolchain.sh") + " cc 2>/dev/null").strip
+    BUILD_CC_MEMO[:cc] = chosen == "" ? "clang" : chosen
+  BUILD_CC_MEMO[:cc]
 
 -> pgo_profdata_tool
   cc = preflight_cc()
@@ -596,7 +605,7 @@ preflight_missing_hints = []
 pf_cc = preflight_cc()
 if !tool_on_path?(pf_cc)
   preflight_missing_names.push("clang")
-  preflight_missing_hints.push(IS_LINUX ? "sudo apt-get install clang-22 lld-22" : "brew install llvm lld")
+  preflight_missing_hints.push(IS_LINUX ? "sudo apt-get install clang-22 lld-22" : "brew install llvm")
 else
   pf_cpu = configured_cpu()
   if pf_cpu == nil
@@ -607,7 +616,19 @@ else
 if !tool_on_path?("make")
   preflight_missing_names.push("make")
   preflight_missing_hints.push(IS_LINUX ? "sudo apt-get install build-essential" : "xcode-select --install")
-if !linker_ok?(pf_cc)
+# lld links ELF: every Linux program, and a macOS host's --target build for
+# a Linux triple. A native macOS link uses the system linker (ld64), so lld
+# is not required there.
+pf_target = nil
+pi = 0
+while pi < args.size
+  if args[pi] == "--target" && pi + 1 < args.size
+    pf_target = args[pi + 1]
+  elsif args[pi].starts_with?("--target=")
+    pf_target = args[pi].slice(9, args[pi].size - 9)
+  pi = pi + 1
+pf_needs_lld = IS_LINUX || (pf_target != nil && pf_target.index("apple") == nil && pf_target.index("darwin") == nil)
+if pf_needs_lld && !linker_ok?(pf_cc)
   preflight_missing_names.push("lld (clang -fuse-ld=lld)")
   preflight_missing_hints.push(IS_LINUX ? "sudo apt-get install lld-22" : "brew install lld")
 if !header_ok?("zstd.h", zstd_probe_cflags(), pf_cc)
@@ -1257,9 +1278,7 @@ while i < runtime_source_rows.size
 if runtime_srcs.empty? || !array_contains?(runtime_srcs, "runtime.c")
   die(RED + "Could not read the runtime source list (" + RUNTIME_DIR + "/sources.txt via sources.sh)" + RESET)
 
-runtime_cc = env_or_empty("TUNGSTEN_CC")
-if runtime_cc == ""
-  runtime_cc = "clang"
+runtime_cc = preflight_cc()
 runtime_ar = env_or_empty("TUNGSTEN_AR")
 if runtime_ar == ""
   sib = sibling_tool(runtime_cc, "llvm-ar")

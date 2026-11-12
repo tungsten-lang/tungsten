@@ -71,7 +71,7 @@ COMMANDS
                          `tungsten --clear-cache` removes this toolchain's
                          incremental binaries and every parse/Core/link
                          snapshot, so the next build recompiles.
-    doctor               Check your toolchain (clang, make, lld, zstd, compiler)
+    doctor               Check your toolchain (clang, make, zstd, compiler; lld on Linux)
                          Implemented in bash — works without a built compiler.
     fmt FILE             Format .w source
     lint PATH            Run compiler checks and deterministic source linting

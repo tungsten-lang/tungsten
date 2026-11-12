@@ -211,7 +211,11 @@ CACHE="$STORE/stages"
 RUNTIME_DIR="$ROOT/runtime"
 RUNTIME_A=""
 STAGE1=""
-BOOTSTRAP_CC="${TUNGSTEN_CC:-clang}"
+# The C compiler for the VM, the runtime and every link: TUNGSTEN_CC, else the
+# toolchain rule the compiler applies to every program (an LLVM clang >= 22
+# when one is installed; bin/commands/toolchain.sh). Stage 1 inherits it.
+. "$ROOT/bin/commands/toolchain.sh"
+BOOTSTRAP_CC="$(tungsten_select_cc)"
 BOOTSTRAP_AR="${TUNGSTEN_AR:-ar}"
 TOOLCHAIN_ENV_ID="${SDKROOT:-}|${MACOSX_DEPLOYMENT_TARGET:-}|${CPATH:-}|${C_INCLUDE_PATH:-}|${CPLUS_INCLUDE_PATH:-}|${LIBRARY_PATH:-}|${PKG_CONFIG_PATH:-}|${PKG_CONFIG_LIBDIR:-}"
 mkdir -p "$CACHE"
@@ -554,7 +558,7 @@ if [ "$FORCE" -eq 0 ] && stage1_cache_complete; then
   touch "$STAGE1" "$STAGE1.ll" "$STAGE1.sidemap" "$STAGE1_COMPLETE" 2>/dev/null || true
   ok "CACHED" "$STAGE1"
 else
-  stage1_log="/tmp/tungsten-bootstrap-stage1.log"
+  stage1_log="${TMPDIR:-/tmp}/tungsten-bootstrap-stage1-$$.log"
   stage1_tmp="$CACHE/.bootstrap-stage1-$stage1_identity.$$"
   rm -f "$stage1_tmp" "$stage1_tmp.ll" "$stage1_tmp.sidemap"
   # Development bootstrap keeps the fast cached-runtime/no-LTO path. A
@@ -578,6 +582,7 @@ else
     rm -f "$stage1_tmp" "$stage1_tmp.ll" "$stage1_tmp.sidemap"
     exit 1
   fi
+  rm -f "$stage1_log"
   if [ "$UNAME_S" = Darwin ]; then
     codesign --force -s - "$stage1_tmp" >/dev/null 2>&1 || \
       die "failed to ad-hoc sign stage 1"
@@ -622,10 +627,13 @@ step "Build orchestrator: bin/commands/build"
 if [ -x "$BUILD_BIN" ] && [ ! "$BUILD_W" -nt "$BUILD_BIN" ] && [ ! "$STAGE1" -nt "$BUILD_BIN" ]; then
   ok "CACHED" "${BUILD_BIN#$ROOT/}"
 else
-  BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
-    "$STAGE1" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto \
-    >/tmp/tungsten-bootstrap-buildw.log 2>&1 \
-    || die "failed to compile bin/commands/build.w (see /tmp/tungsten-bootstrap-buildw.log)"
+  buildw_log="${TMPDIR:-/tmp}/tungsten-bootstrap-buildw-$$.log"
+  if ! BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
+      "$STAGE1" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto >"$buildw_log" 2>&1; then
+    tail -n 40 "$buildw_log" >&2
+    die "failed to compile bin/commands/build.w (see $buildw_log)"
+  fi
+  rm -f "$buildw_log"
   if [ "$UNAME_S" = Darwin ]; then
     codesign --force -s - "$BUILD_BIN" >/dev/null 2>&1 || true
   fi

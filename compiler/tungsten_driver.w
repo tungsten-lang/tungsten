@@ -749,6 +749,7 @@ elsif command == "compile-batch"
       batch_file_index += 1
 
   runtime_objs = nil
+  batch_runtime_dir = nil
 
   # Runtime objects: link_binary's nil-runtime_objs default already serves a
   # cached native archive for ordinary and frame-pointer debug configurations,
@@ -774,8 +775,10 @@ elsif command == "compile-batch"
       << "Failed to compile runtime"
       ll_jobs -> (job)
         if job[:implicit_ll]
-          z = publish_implicit_ll_path(job[:ll], job[:source])
+          z = retire_implicit_ll_path(job[:ll], job[:source], true)
+      system("rm -rf " + dev_runtime_shell_quote(tmp_dir))
       exit 1
+    batch_runtime_dir = tmp_dir
 
   link_parallel = nil
   if !batch_link_worker && ll_jobs.size() > 1 && env("TUNGSTEN_BATCH_PARALLEL_LINK") != "0"
@@ -789,16 +792,21 @@ elsif command == "compile-batch"
       if link_parallel[:message] != nil
         << "Parallel batch link failed: " + link_parallel[:message]
       fail_count += link_parallel[:failed]
+    keep_parallel_ll = keep_implicit_ll?(link_parallel[:ok] == true)
     ll_jobs -> (job)
-      if job[:implicit_ll] && !publish_implicit_ll_path(job[:ll], job[:source])
+      if job[:implicit_ll] && !retire_implicit_ll_path(job[:ll], job[:source], keep_parallel_ll)
         fail_count += 1
   else
     ll_jobs -> (job)
       ok = link_binary(job[:ll], job[:bin], runtime_objs, verbose)
-      if job[:implicit_ll] && !publish_implicit_ll_path(job[:ll], job[:source])
+      if job[:implicit_ll] && !retire_implicit_ll_path(job[:ll], job[:source], keep_implicit_ll?(ok))
         ok = false
       if !ok
         fail_count += 1
+
+  # The objects compiled for this batch alone (zstd, cross, PGO) are scratch.
+  if batch_runtime_dir != nil
+    system("rm -rf " + dev_runtime_shell_quote(batch_runtime_dir))
 
   if parallel_root != nil
     system("rmdir " + dev_runtime_shell_quote(parallel_root) + " 2>/dev/null")

@@ -79,6 +79,12 @@
 WASSAT_SUBST_DEFAULT = true
 WASSAT_CONGRUENCE_DEFAULT = true
 
+# Rollout branching (lookahead_candidates) is admitted for "one long choice
+# plus many binary exclusions" only while a variable occurs in at most this
+# many long clauses on average. The admitted SC2025/SC2026 members sit at 1-4,
+# the covering formulas it must not take at 120+; see lookahead_candidates.
+WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
+
 # ---- adaptive race allocation (DORMANT: measured null) ------------------------
 #
 # The raw-kernel race allocates its arms from a hard-coded diversity matrix
@@ -1159,10 +1165,29 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # but it multiplies decision work and destroys the tuned CDCL trajectory
     # on uuf100/uuf250-scale random kernels. Keep rollout to the small random
     # class where it wins; select it from shape rather than exposing a knob.
+    #
+    # "One long choice" is part of the shape, not a figure of speech. In the
+    # pigeonhole-like members each variable sits in one or two long clauses
+    # (php, clique, mexam, homer, os_fwalk: 1.0 long-clause occurrences per
+    # variable; count_p2 2.0; Break 3.1; the x9 Hamiltonian rows 4.0). A
+    # covering formula has the same clause-length histogram but every variable
+    # sits in ~120 rows (SCPC-500-*: 3,000 positive rows over 500 variables).
+    # There the rollout is the whole loss: it replaces VSIDS/VMTF on EVERY arm
+    # built from the formula by 32 trial propagations per decision over the
+    # first 16 unassigned variables in index order. SCPC-500-19 measured 1,611
+    # propagations per conflict and no verdict in 120s with it, 72 per conflict
+    # and a refutation in 306k conflicts without it (CaDiCaL: 69 and 566k).
+    # WASSAT_LOOKAHEAD pins the candidate count for A/B measurement.
+    return wassat_decimal_in_range("WASSAT_LOOKAHEAD", env("WASSAT_LOOKAHEAD"), 0, 64) if env("WASSAT_LOOKAHEAD") != nil
     random3 = @nvars >= 20 && @nvars <= 64 && @nclauses >= 80 && @ternary * 4 >= @nclauses * 3
     choice_binary = @nvars >= 20 && @nvars <= 512 && @nclauses >= 100 && @nclauses <= 25000 && @binary * 2 >= @nclauses && @max_clause >= 4 && @max_clause <= 48
+    choice_binary = false if choice_binary && self.long_occurrences > WASSAT_LOOKAHEAD_CHOICE_DENSITY * @nvars
     return 16 if random3 || choice_binary
     0
+
+  # Literal occurrences in clauses of width three and up.
+  -> long_occurrences
+    @nliterals - 2 * @binary - @units
 
   -> continue_scout?
     # Continuation earns an extra runnable arm only on the compact random-3

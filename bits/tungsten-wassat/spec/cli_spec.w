@@ -136,6 +136,55 @@ describe "Tungsten Wassat CLI" ->
       expect(random_policy.continue_scout?).to eq(true)
       expect(medium_random_policy.continue_scout?).to eq(false)
 
+    it "admits rollout branching only for one long choice per variable" ->
+      # Pigeonhole shape: five rows of six over 30 variables, each variable
+      # in exactly one row, the rest binary exclusions.
+      choice = []
+      p = 0
+      while p < 5
+        row = []
+        h = 1
+        while h <= 6
+          row.push(6 * p + h)
+          h += 1
+        choice.push(row)
+        p += 1
+      v = 1
+      while choice.size < 120
+        choice.push([0 - v, 0 - (v % 30 + 1)])
+        v = v % 30 + 1
+      choice_policy = WassatConfig.new(30, choice)
+      expect(choice_policy.long_occurrences).to eq(30)
+      expect(choice_policy.lookahead_candidates).to eq(16)
+      expect(choice_policy.continue_scout?).to eq(true)
+      # Covering shape: the same length histogram, but forty rows of seven
+      # put every variable in nine rows on average.
+      cover = []
+      r = 0
+      while r < 40
+        cover.push([r % 30 + 1, (r * 7) % 30 + 1, (r * 11 + 3) % 30 + 1, (r * 13 + 5) % 30 + 1, (r * 17 + 7) % 30 + 1, (r * 19 + 11) % 30 + 1, (r * 23 + 13) % 30 + 1])
+        r += 1
+      v = 1
+      while cover.size < 120
+        cover.push([0 - v, 0 - (v % 30 + 1)])
+        v = v % 30 + 1
+      cover_policy = WassatConfig.new(30, cover)
+      expect(cover_policy.long_occurrences).to eq(280)
+      expect(cover_policy.lookahead_candidates).to eq(0)
+      expect(cover_policy.continue_scout?).to eq(false)
+      # The boundary is eight occurrences per variable, inclusive.
+      counts = i64[8]
+      counts[0] = 240 + 2 * 115
+      counts[1] = 6
+      counts[3] = 115
+      edge = WassatConfig.new(30, [])
+      edge.adopt_counts(155, counts)
+      expect(edge.long_occurrences).to eq(240)
+      expect(edge.lookahead_candidates).to eq(16)
+      counts[0] = 241 + 2 * 115
+      edge.adopt_counts(155, counts)
+      expect(edge.lookahead_candidates).to eq(0)
+
     it "selects routing and staged fallback from formula shape" ->
       dense = []
       i = 0

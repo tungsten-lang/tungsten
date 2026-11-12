@@ -1311,7 +1311,7 @@ if force_build
 
 if runtime_handoff_ready
   << "    " + GREEN + "REUSED" + RESET + " bootstrap runtime " + DIM + aligned_ms(clock_ms() - t_runtime_start) + RESET
-elsif bit_only
+elsif target[:kind] == "bit"
   # Only the compiler stages link this archive; a bit's executable links the
   # compiler's own runtime objects. Its key is still what the bit is
   # fingerprinted by, so it is computed, but nothing is compiled (not even

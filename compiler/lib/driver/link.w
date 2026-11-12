@@ -294,7 +294,8 @@
     companion_reqs.push(["unicode_tables.c", ""])
   if target_os == "macos"
     if blas_needed
-      companion_reqs.push(["blas_bridge.c", ""])
+      # slogdet's singular result is -Inf, including in --fast builds.
+      companion_reqs.push(["blas_bridge.c", "-fno-finite-math-only"])
     if sparse_needed
       companion_reqs.push(["sparse_bridge.c", ""])
     if mlx_needed

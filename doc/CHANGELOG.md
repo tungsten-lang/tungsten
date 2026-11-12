@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **BLAS keeps its non-finite results in fast builds** — both the package
+  runtime archive and standalone compiler companion add
+  `-fno-finite-math-only` to `blas_bridge.c`. Other fast optimizations remain
+  enabled. This preserves `LinAlg.slogdet`'s `[0, -Inf]` singular result and
+  removes Clang23's `-Wnan-infinity-disabled` warnings. The archive cache keys
+  the per-bridge flags. `runtime/tests/test_blas_slogdet.c`: eight cases in both
+  precise and fast builds; LU/Cholesky19 checks pass with that warning as an
+  error. Clean-HEAD baseline and final compiler both print VERIFIED stage1==stage2.
 - **Native file drops** — `GFX_DROP_FILES` registers an editor window for file
   URL pasteboard drops. Real `NSDraggingDestination` callbacks queue `GFX_EV_OPEN`
   on the destination window, independently of previous focus. Synthetic drops

@@ -1163,6 +1163,9 @@ if runtime_ranlib != ""
   toolchain_keys.push("TUNGSTEN_RANLIB")
   toolchain_vals.push(runtime_ranlib)
 
+# The BLAS API deliberately writes -Inf for a singular slogdet. Keep all
+# other fast optimizations, but honor non-finite values in this bridge.
+blas_cflags = ["-fno-finite-math-only"]
 runtime_cache_schema = "runtime-cache-v2"
 fast_clang_flags = []
 if fast_mode
@@ -1222,7 +1225,7 @@ runtime_dependency_files = filtered_deps
   Digest.sha256(buf.to_s)
 
 runtime_deps_digest = digest_file_list(runtime_dependency_files)
-runtime_compile_key = Digest.sha256(runtime_cache_schema + "\n" + runtime_deps_digest + "\n" + join_tab(cc_flags) + "\n" + join_tab(runtime_objc_flags) + "\n" + PLATFORM + "\n" + tool_identity(runtime_cc) + "\n" + tool_identity(runtime_ar) + "\n" + AMBIENT_TOOLCHAIN)
+runtime_compile_key = Digest.sha256(runtime_cache_schema + "\n" + runtime_deps_digest + "\n" + join_tab(blas_cflags) + "\n" + join_tab(cc_flags) + "\n" + join_tab(runtime_objc_flags) + "\n" + PLATFORM + "\n" + tool_identity(runtime_cc) + "\n" + tool_identity(runtime_ar) + "\n" + AMBIENT_TOOLCHAIN)
 runtime_archive = BUILD_CACHE_DIR + "/runtime-" + runtime_compile_key + ".a"
 runtime_handoff_ready = handoff_runtime != "" && regular_file?(handoff_runtime)
 if runtime_handoff_ready
@@ -1252,6 +1255,8 @@ else
     obj_base = src.replace(".c", "").replace(".m", "")
     obj_path = runtime_tmp_dir + "/" + obj_base + ".o"
     flags = src.ends_with?(".m") ? runtime_objc_flags : cc_flags
+    if src == "blas_bridge.c"
+      flags = flags + blas_cflags
     cmd = shq(runtime_cc) + flags_to_cmd(flags) + " " + shq(src_path) + " -o " + shq(obj_path)
     sa = []
     sa.push("/bin/sh")

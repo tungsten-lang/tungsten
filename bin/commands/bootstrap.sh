@@ -284,6 +284,7 @@ fi
 # Atomically refresh the conventional developer path, but never execute it in
 # this bootstrap; concurrent identities use their own immutable binaries.
 if ! cmp -s "$C_INTERP" "$C_INTERP_DEFAULT" 2>/dev/null; then
+  mkdir -p "$(dirname "$C_INTERP_DEFAULT")"
   cvm_publish="$C_INTERP_DEFAULT.tmp-$$"
   cp "$C_INTERP" "$cvm_publish"
   chmod 755 "$cvm_publish"

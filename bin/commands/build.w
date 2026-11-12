@@ -2040,7 +2040,11 @@ ROOT_REAL = capture("cd " + shq(ROOT) + " && pwd -P").strip
   if !executable?(cached_binary)
     eputs("C VM build produced no executable at " + cached_binary)
     exit(1)
+  # The conventional developer path. Its directory used to exist because the
+  # VM was compiled there; a checkout that took the VM from the store has
+  # never run make.
   if !same_file_content?(cached_binary, C_INTERP)
+    make_dirs(dirname_of(C_INTERP))
     atomic_copy(cached_binary, C_INTERP)
     sh_ok("chmod 755 " + shq(C_INTERP))
   r = []

@@ -306,6 +306,12 @@ Suffix rescue:
 
     Expression "rescue" Expression
 
+After an assignment operator the suffix binds to the assigned value, not to the
+statement: `x = e rescue f` is `x = (e rescue f)`, so `x` is bound to `f` when
+`e` raises. This holds for `=`, the compound operators, `||=`, multi-assign, and
+instance-variable, index and attribute targets. A trailing modifier still wraps
+the whole statement (`x = a rescue b if cond`).
+
 ### 3.6.5 Return, yield, super
 
     Return = "return" [ Expression ] .

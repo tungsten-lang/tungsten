@@ -162,16 +162,19 @@ only a design wish; no alias syntax has been added.
 
 ## Unambiguous postfix rescue precedence
 
-`result = expression rescue fallback` currently parses as a rescue around the
-whole assignment.  If `expression` raises, `fallback` is evaluated but is not
-assigned to `result`.  That is internally consistent, yet it is visually easy
-to read as `result = (expression rescue fallback)`; even a compiler regression
-probe made that mistaken assumption.
+**Fixed.** `result = expression rescue fallback` now parses as
+`result = (expression rescue fallback)` in all three hosts (the self-hosted
+parser, the C VM bootstrap parser and the Ruby tree-walker): when
+`expression` raises, `fallback` is assigned to `result`, matching Ruby's
+`lhs = arg rescue arg`. The same holds for compound assignment
+(`x += e rescue f`), `||=`, multiple assignment, and ivar / index / attribute
+targets, and a trailing modifier still wraps the whole statement
+(`x = a rescue b if cond`). A bare statement keeps the statement-level form:
+`stmt rescue handler` guards the whole statement. Pinned by
+`spec/parity/postfix_rescue_assign_spec.w`.
 
-An explicit expression-level rescue form, or syntax that visibly delimits the
-protected expression and its result, would remove the precedence trap.  Until
-then, code that needs the fallback assigned should spell that assignment in the
-fallback or use a structured `begin`/`rescue` block.
+Previously the rescue wrapped the whole assignment, so a raising `expression`
+left `result` unbound even though the line read as if it were assigned.
 
 ## Explicit low-level field views
 

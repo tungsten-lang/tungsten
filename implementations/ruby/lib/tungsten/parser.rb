@@ -286,7 +286,7 @@ module Tungsten
         skip_space
         if @token.type?(:"=")
           next_token_skip_whitespace
-          value = parse_assignment_no_control
+          value = parse_assignment_value
           targets.each do |t|
             t = t.exp if t.is_a?(Splat)
             push_var(t) if t.is_a?(Var)
@@ -380,6 +380,25 @@ module Tungsten
       parse_assignment(allow_ops:, allow_suffix:)
     end
 
+    # Right-hand side of an assignment. Postfix `rescue` binds tighter than
+    # the assignment operator here (Ruby's `lhs = arg rescue arg`), so
+    # `x = e rescue f` parses as `x = (e rescue f)` and binds x to f when e
+    # raises — mirrors parser.w's parse_assign_value. Statement-level
+    # `stmt rescue handler` still goes through parse_expression_suffix; the
+    # same-row / non-block guards keep an enclosing begin's `rescue` clause
+    # out of reach.
+    def parse_assignment_value
+      start_row = @token.row
+      value = parse_assignment_no_control
+      skip_space
+      return value unless @token.keyword?(:rescue) && @token.row == start_row
+      return value if value.is_a?(If) || value.is_a?(While) || value.is_a?(Begin) || value.is_a?(Case)
+
+      next_token_skip_space
+      fallback = parse_assignment_no_control
+      Begin.new(value, nil, fallback, nil)
+    end
+
     def parse_assignment(allow_ops: true, allow_suffix: true)
       exp = parse_ternary
 
@@ -415,11 +434,11 @@ module Tungsten
             next_token_skip_whitespace
 
             exp.name = "[]="
-            exp.args << parse_assignment_no_control
+            exp.args << parse_assignment_value
           elsif exp.is_a?(Call) && exp.obj && exp.args.empty? && exp.block.nil?
             # Setter call: receiver.name = value → receiver.name=(value)
             next_token_skip_whitespace
-            value = parse_assignment_no_control
+            value = parse_assignment_value
             exp = Call.new(exp.obj, "#{exp.name}=", [value])
           else
             break unless exp.can_assign?
@@ -441,10 +460,10 @@ module Tungsten
 
             if exp.is_a?(Var) && !var?(exp.name)
               @assigning.push exp.name
-              value = parse_assignment_no_control
+              value = parse_assignment_value
               @assigning.pop
             else
-              value = parse_assignment_no_control
+              value = parse_assignment_value
             end
 
             push_var(exp)
@@ -482,7 +501,7 @@ module Tungsten
             # the stage interpreter evaluates them once in total).
             op = @token.type.to_s.chop.to_sym
             next_token_skip_whitespace
-            value = parse_assignment_no_control
+            value = parse_assignment_value
             exp = build_compound_call_assign(exp, op, value)
             allow_ops = true
             next
@@ -508,7 +527,7 @@ module Tungsten
 
           next_token_skip_whitespace
 
-          value = parse_assignment_no_control
+          value = parse_assignment_value
 
           if method == "||" || method == "&&"
             # ||= / &&= desugar to a plain assign of the short-circuit

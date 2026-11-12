@@ -1152,7 +1152,7 @@
 
     if t == T_ASSIGN
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       # Inline type annotation: a = 34 ## i128
       # Inline memory hint:     a = [] ## reuse  /  a = {} ## recycle
       # Inline axis tag:        a = expr ## axis :name [, type]
@@ -1222,67 +1222,67 @@
 
     if t == T_PLUS_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :PLUS, value)
 
     if t == T_MINUS_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :MINUS, value)
 
     if t == T_STAR_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :STAR, value)
 
     if t == T_SLASH_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :SLASH, value)
 
     if t == T_PERCENT_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :PERCENT, value)
 
     if t == T_POW_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :POW, value)
 
     if t == T_AMP_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :AMPERSAND, value)
 
     if t == T_PIPE_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :PIPE, value)
 
     if t == T_CARET_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :CARET, value)
 
     if t == T_LSHIFT_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :LSHIFT, value)
 
     if t == T_RSHIFT_EQ
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       return Tungsten:AST:CompoundAssign.new(target, :RSHIFT, value)
 
@@ -1298,7 +1298,7 @@
 
     if t == T_OR_ASSIGN
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       bind_type_spelled_target(type_spelled, target)
       return Tungsten:AST:Assign.new(target, Tungsten:AST:Or.new(left, value))
@@ -1338,7 +1338,7 @@
           break
       if found_assign
         advance()
-        value = parse_assignment()
+        value = parse_assign_value()
         return Tungsten:AST:MultiAssign.new(targets, value)
       @pos = saved_pos
       sync_current()
@@ -1357,12 +1357,28 @@
       validate_type_hint_spelling(hint)
       advance()
       advance()
-      value = parse_assignment()
+      value = parse_assign_value()
       target = to_assign_target(left)
       bind_type_spelled_target(type_spelled, target)
       return Tungsten:AST:Assign.new(target, value, hint)
 
     left
+
+  # Right-hand side of an assignment. Postfix `rescue` binds TIGHTER than
+  # `=` here (Ruby's `lhs = arg rescue arg`), so `x = e rescue f` parses
+  # as `x = (e rescue f)` and binds x to f when e raises — not as
+  # `(x = e) rescue f`, which left x unbound. Statement-level
+  # `stmt rescue handler` (no assignment) still wraps the whole statement
+  # in parse_statement; the same-line / non-block guards mirror its rules
+  # so a `rescue` clause of an enclosing `begin` is never captured here.
+  -> parse_assign_value
+    start_tok = @current_packed
+    value = parse_assignment()
+    if @current_type == T_KEYWORD && @values[@pos] == "rescue" && current_line() == tok_line(start_tok) && !is_block_node?(value)
+      advance()
+      fallback = parse_assignment()
+      value = Tungsten:AST:RescueExpr.new(value, fallback)
+    value
 
   -> valid_assign_target?(node)
     t = ast_kind(node)

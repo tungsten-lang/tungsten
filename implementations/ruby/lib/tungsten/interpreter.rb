@@ -329,6 +329,9 @@ module Tungsten
       @dispatch = {}.compare_by_identity
 
       @loaded_files = {}
+      # Files whose top level is executing right now, outermost first. A
+      # `use` that resolves to one of them closes a cycle (E_LOAD_CYCLE).
+      @use_stack = []
       @current_file = nil
       @source = nil
       @file_sources = {}  # file_path => source_code
@@ -450,6 +453,7 @@ module Tungsten
 
     def run(source, file_path: nil)
       @current_file = File.expand_path(file_path) if file_path
+      @use_stack = [@current_file] if file_path
       @source = source
       @file_sources[@current_file] = source if @current_file
       ast = parse_with_file(source, @current_file)
@@ -3555,6 +3559,16 @@ module Tungsten
       return nil if SKIP_COMPILER_CORE_USE_PATHS[node.path.to_s]
 
       path = resolve_use_path(node.path)
+
+      # Cycle: the used file is still executing its own top level (a.w ->
+      # b.w -> a.w). Mirrors the self-hosted loader's and interpreter's
+      # E_LOAD_CYCLE; the dedup below would silently drop the use.
+      cycle_start = @use_stack.index(path)
+      if cycle_start
+        chain = @use_stack[cycle_start..] + [path]
+        runtime_error("E_LOAD_CYCLE: circular use: #{chain.join(" -> ")}", node: node)
+      end
+
       return nil if @loaded_files.key?(path)
       @loaded_files[path] = true
 
@@ -3562,11 +3576,13 @@ module Tungsten
       @file_sources[path] = source
       prev_file = @current_file
       @current_file = path
+      @use_stack.push(path)
       begin
         ast = parse_with_file(source, path)
         evaluate(ast)
       ensure
         @current_file = prev_file
+        @use_stack.pop
       end
     end
 

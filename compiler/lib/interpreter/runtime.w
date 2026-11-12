@@ -65,6 +65,9 @@
     # binds the plain message string as before.
     @raised_value = nil
     @raised_message = nil
+    # Files whose top level is executing right now, outermost first. A
+    # `use` that resolves to one of them closes a cycle (E_LOAD_CYCLE).
+    @use_stack = []
     seed_primitive_class_stubs()
 
   -> argv
@@ -169,6 +172,7 @@
     if file_path != nil
       @current_file = file_path
       @entry_file = file_path
+      @use_stack = [file_path]
     ast = parse_source(source)
     prepare_interpreter_contracts(ast, file_path)
     result = execute_program(ast)

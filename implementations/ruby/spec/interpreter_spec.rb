@@ -1576,6 +1576,19 @@ RSpec.describe Tungsten::Interpreter do
     end
   end
 
+  it "rejects a circular use with E_LOAD_CYCLE" do
+    require "tmpdir"
+    Dir.mktmpdir do |dir|
+      main = File.join(dir, "main.w")
+      File.write(main, "use \"other\"\n1")
+      File.write(File.join(dir, "other.w"), "use \"main\"\n")
+
+      interp = Tungsten::Interpreter.new
+      expect { interp.run(File.read(main), file_path: main) }
+        .to raise_error(Tungsten::Error, /E_LOAD_CYCLE: circular use: .*main\.w -> .*other\.w -> .*main\.w/)
+    end
+  end
+
   # %w[] and %i[] word/symbol arrays
 
   it "evaluates %w[] word arrays" do

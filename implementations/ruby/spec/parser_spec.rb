@@ -390,6 +390,42 @@ module Tungsten::AST
       expect(node.body).to be_a(List)
     end
 
+    # postfix rescue binds tighter than assignment: x = (e rescue f)
+    it "binds postfix rescue inside an assignment value" do
+      result = described_class.parse("x = foo rescue nil")
+      node = result.first
+      expect(node).to be_a(Assign)
+      expect(node.name).to eq("x".var)
+      expect(node.value).to be_a(Begin)
+      expect(node.value.body.first).to eq("foo".var)
+      expect(node.value.rescue_body.first).to eq(Nil.new)
+    end
+
+    it "binds postfix rescue inside a compound assignment value" do
+      result = described_class.parse("x = 1\nx += foo rescue 0")
+      node = result.last
+      expect(node).to be_a(AssignOp)
+      expect(node.value).to be_a(Begin)
+      expect(node.value.rescue_body.first).to eq(0.int)
+    end
+
+    it "keeps a trailing if modifier outside the rescued assignment" do
+      result = described_class.parse("x = foo rescue nil if cond")
+      node = result.first
+      expect(node).to be_a(If)
+      expect(node.then_block.first).to be_a(Assign)
+      expect(node.then_block.first.value).to be_a(Begin)
+    end
+
+    it "binds postfix rescue inside a multiple assignment value" do
+      result = described_class.parse("a, b = foo rescue [1, 2]")
+      node = result.first
+      expect(node).to be_a(Assign)
+      expect(node.name).to be_a(ArrayLiteral)
+      expect(node.value).to be_a(Begin)
+      expect(node.value.rescue_body).to eq(ArrayLiteral.new([1.int, 2.int]))
+    end
+
     # magic constants
     it "parses __LINE__" do
       result = described_class.parse("__LINE__")

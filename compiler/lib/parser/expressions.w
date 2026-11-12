@@ -99,7 +99,7 @@
         expect_type(T_RBRACKET)
         if @current_type == T_ASSIGN
           advance()
-          value = parse_assignment()
+          value = parse_assign_value()
           # `a[i] = v ## i64` ascribes the stored value, as `x = v ## i64`
           # does. Left for the statement wrapper, the hint wrapped the whole
           # `[]=` call instead, so the raw f64 went into the array.
@@ -1357,9 +1357,15 @@
     Tungsten:AST:Call.new(nil, "exit", [parse_assignment()])
 
   -> parse_use
+    # Stamp the `use` keyword's location so the loader can point an
+    # E_LOAD_CYCLE at the offending directive (file:line). Use nodes are
+    # spliced out before lowering, so the loc never reaches codegen.
+    use_loc = make_loc_here()
     advance()
     # The lexer scans the use path as a STRING token (bare or quoted)
-    Tungsten:AST:Use.new(advance_value())
+    node = Tungsten:AST:Use.new(advance_value())
+    node.loc = use_loc
+    node
 
   # begin / rescue / ensure. One or more rescue clauses may follow the body:
   #   rescue e            bind any error

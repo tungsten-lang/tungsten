@@ -113,6 +113,8 @@ test: $(BIN)
 		diff -u tests/bit_count_intrinsics.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/compound_assignment_ops.w | \
 		diff -u tests/compound_assignment_ops.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --dump-ast tests/postfix_rescue_assign.w | \
+		diff -u tests/postfix_rescue_assign.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/operand_stack_empty_transition.w | \
 		diff -u tests/operand_stack_empty_transition.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/ascii_string.w | \

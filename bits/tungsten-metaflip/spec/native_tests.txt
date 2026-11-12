@@ -1,86 +1,122 @@
 # Metaflip unit tests the root gate cannot run through the interpreter.
-# Columns: path reason. Reasons:
-#   native  - needs a runtime call the interpreter lacks (named in the comment)
+# Columns: path reason [shard]. Reasons:
+#   native  - cannot run interpreted: needs a runtime call the interpreter
+#             lacks, or exceeds its memory limit (the comment says which)
+#   timeout - compute-heavy: exceeded the 120 s interpreted sweep budget
 #   argv    - needs positional arguments (a parity driver, not a self-test)
 #   gpu     - needs a Metal device
-#   timeout - compute-heavy: exceeded the 120 s interpreted sweep budget
-# Run these natively (bin/tungsten compile) or via their driver scripts.
-spec/archive_admission_test.w timeout  # 120s+ interpreted
-spec/basin_identity_test.w native  # exhaustive bit permutations and live snapshot parity
-spec/axis_sweep_racer_test.w timeout  # 120s+ interpreted
-spec/checkpoint_text_test.w timeout  # 120s+ interpreted
+#   manual  - runs compiled without arguments but is kept out of the shards;
+#             the comment says why (it fails today, or it asserts wall-clock
+#             behaviour that a loaded machine breaks)
+# A native or timeout row names its shard: spec/metaflip_native_shard<N>_spec.w
+# compiles and runs the tests of shard N, one `tungsten spec/<name>_test.w`
+# child at a time from the bit root, so the root gate reaches them as it
+# reaches the interpreted shards. argv, gpu and manual rows have no shard and
+# no automatic runner: run them through their driver scripts or by hand.
+# spec/metaflip_test_manifest_spec.w fails when a native or timeout row lacks
+# a shard, when a shard has no wrapper, and when a wrapper has no tests.
+#
+# The trailing `Ns compiled` is the CPU time (user + system) of one cold
+# `tungsten spec/<name>_test.w` on 2026-11-12 (Apple M5, compile included;
+# the compile is 9 to 14 s of it). Wall time on an idle machine is about the
+# same; on that day's machine, at a load of 50 to 60 on 18 cores, it was 3 to
+# 10 times as long (nine cold tests in a row took 290 to 310 s). The shards
+# are balanced on those seconds at about 80 each, so that a cold shard stays
+# under the gate's 300 s watchdog at such a load too, with room for the
+# runtime archive that the first compile of a cold bit cache builds (about
+# 30 CPU-s). Rebalance, or add a wrapper, when a shard drifts above about 100.
+spec/archive_admission_test.w timeout 4  # 120s+ interpreted; 12s compiled
+spec/basin_identity_test.w native 4  # exhaustive bit permutations and live snapshot parity; 11s compiled
+spec/axis_sweep_racer_test.w timeout 11  # 120s+ interpreted; 10s compiled
+spec/checkpoint_text_test.w timeout 2  # 120s+ interpreted; 9s compiled
 spec/coreml_protocol_test.w argv  # positional arguments required
-spec/cpu_pool_async_test.w timeout  # 120s+ interpreted
-spec/cycle_test.w native  # w_string_byte_ptr
-spec/delta_component_peel_test.w native  # __w_clock_ms
-spec/fixed_rank_pocket_strategy_test.w timeout  # 121s+ interpreted
+spec/cpu_pool_async_test.w timeout 9  # 120s+ interpreted; 13s compiled
+spec/cycle_test.w native 3  # w_string_byte_ptr; 10s compiled
+spec/delta_component_peel_test.w native 7  # __w_clock_ms; 10s compiled
+spec/fixed_rank_pocket_strategy_test.w timeout 3  # 121s+ interpreted; 11s compiled
 spec/group_composition_test.w argv  # positional arguments required
 spec/kxor_gpu_collision_test.w gpu  # w_metal_device_default
-spec/large_host_intake_scheduler_test.w native  # __w_clock_ms
-spec/macro_core_rewrite_test.w timeout  # 120s+ interpreted
-spec/macro_goal_beam_test.w timeout  # 120s+ interpreted
-spec/macro_rankdrop_goal_test.w timeout  # 120s+ interpreted
-spec/macro_resolved_commutator7_test.w timeout  # 121s+ interpreted
+spec/large_host_intake_scheduler_test.w native 4  # __w_clock_ms; 10s compiled
+spec/macro_core_rewrite_test.w timeout 6  # 120s+ interpreted; 10s compiled
+spec/macro_goal_beam_test.w timeout 5  # 120s+ interpreted; 10s compiled
+spec/macro_rankdrop_goal_test.w timeout 7  # 120s+ interpreted; 10s compiled
+spec/macro_resolved_commutator7_test.w timeout 10  # 121s+ interpreted; 10s compiled
 spec/mixed_composition_test.w argv  # positional arguments required
 spec/mixed_group_composition_test.w argv  # positional arguments required
-spec/optimal_parent_test.w native  # __w_clock_ms
-spec/pair_cleanup_test.w native  # w_array_data_ptr
-spec/pareto_owned_storage_test.w timeout  # 121s+ interpreted
-spec/partial_automorphism_intake_test.w timeout  # 120s+ interpreted
-spec/partial_automorphism_schedule_test.w timeout  # 120s+ interpreted
-spec/pooled_exact_moves_test.w native  # __w_clock_ms
-spec/proof_psi_test.w timeout  # 120s+ interpreted
-spec/rect_block_interior_test.w native  # __w_clock_ms
-spec/rect_catalyst_lift2_test.w timeout  # 120s+ interpreted
-spec/rect_catalyst_lift_rect_test.w native  # __w_clock_ms
-spec/rect_child_status_parse_test.w native  # w_string_byte_ptr
-spec/rect_concurrent_command_test.w native  # __w_clock_ms
-spec/rect_cpu_followup_test.w native  # w_string_byte_ptr
-spec/refinement_atomic_test.w native  # concurrent publication and thread joins
-spec/rect_cpu_pool_test.w timeout  # 120s+ interpreted
-spec/rect_default_portfolio_test.w native  # w_string_byte_ptr
-spec/rect_endpoint_path_test.w timeout  # 121s+ interpreted
-spec/rect_endpoint_rankdown2_test.w timeout  # 120s+ interpreted
-spec/rect_endpoint_rankdown_test.w timeout  # 120s+ interpreted
-spec/rect_gpu_split_escape_test.w timeout  # 121s+ interpreted
-spec/rect_parent_mitm_failure_test.w native  # w_string_byte_ptr
-spec/rect_parent_telemetry_integration_test.w native  # __w_clock_ms
-spec/rect_process_isolation_test.w native  # w_string_byte_ptr
-spec/rect_side_archive_diversity_test.w native  # __w_rename
-spec/rect_side_archive_structural_test.w timeout  # 121s+ interpreted
-spec/rect_side_archive_test.w native  # w_array_data_ptr
-spec/scheme_hotpath_test.w native  # w_array_data_ptr
-spec/seven_by_seven_cloud_seed_promotion_test.w timeout  # 120s+ interpreted
-spec/seven_by_seven_low_quota_seed_test.w timeout  # 121s+ interpreted
-spec/seven_by_seven_shoulder_test.w timeout  # 120s+ interpreted
-spec/square_campaign_nonce_diversity_test.w timeout  # 120s+ interpreted
-spec/wide_matrix_cleanup_test.w timeout  # 120s+ interpreted
-spec/wide_square_test.w native  # packed live worker and all nine large-square tensor gates
-spec/wide_rectangular_test.w native  # multiword rectangular pair walks and exact tensor gates
-spec/wide_directed_test.w native  # directed bucket index, history, rollback and packed tensor gates
-spec/wide_density_neutral_test.w native  # density-independent walks and archive-before-history rejection
-spec/wide_tui_test.w native  # native packed telemetry and dashboard renderer
+spec/optimal_parent_test.w native 8  # __w_clock_ms; 13s compiled
+spec/pair_cleanup_test.w native 6  # w_array_data_ptr; 10s compiled
+spec/pareto_owned_storage_test.w timeout 11  # 121s+ interpreted; 9s compiled
+spec/partial_automorphism_intake_test.w timeout 12  # 120s+ interpreted; 11s compiled
+spec/partial_automorphism_schedule_test.w timeout 6  # 120s+ interpreted; 11s compiled
+spec/pooled_exact_moves_test.w native 2  # __w_clock_ms; 10s compiled
+spec/proof_psi_test.w timeout 8  # 120s+ interpreted; 9s compiled
+spec/rect_block_interior_test.w native 1  # __w_clock_ms; 9s compiled
+spec/rect_catalyst_lift2_test.w timeout 10  # 120s+ interpreted; 10s compiled
+spec/rect_catalyst_lift_rect_test.w native 4  # __w_clock_ms; 10s compiled
+spec/rect_child_status_parse_test.w native 9  # w_string_byte_ptr; 15s compiled
+spec/rect_concurrent_command_test.w native 10  # __w_clock_ms; 14s compiled
+spec/rect_cpu_followup_test.w manual  # asserts that the islands are busy 50% of a 400 ms wall-clock window; at a load of 60 on 18 cores it passed 1 run in 5 (2026-11-12); needs w_string_byte_ptr
+spec/refinement_atomic_test.w native 8  # concurrent publication and thread joins; 10s compiled
+spec/rect_cpu_pool_test.w timeout 2  # 120s+ interpreted; 10s compiled
+spec/rect_default_portfolio_test.w native 12  # w_string_byte_ptr; 15s compiled
+spec/rect_endpoint_path_test.w timeout 10  # 121s+ interpreted; 9s compiled
+spec/rect_endpoint_rankdown2_test.w timeout 1  # 120s+ interpreted; 10s compiled
+spec/rect_endpoint_rankdown_test.w timeout 5  # 120s+ interpreted; 10s compiled
+spec/rect_gpu_split_escape_test.w timeout 3  # 121s+ interpreted; 9s compiled
+spec/rect_parent_mitm_failure_test.w native 10  # w_string_byte_ptr; 15s compiled
+spec/rect_parent_telemetry_integration_test.w native 7  # __w_clock_ms; 15s compiled
+spec/rect_process_isolation_test.w native 8  # w_string_byte_ptr; 15s compiled
+spec/rect_side_archive_diversity_test.w native 11  # __w_rename; 15s compiled
+spec/rect_side_archive_structural_test.w timeout 11  # 121s+ interpreted; 15s compiled
+spec/rect_side_archive_test.w native 12  # w_array_data_ptr; 15s compiled
+spec/scheme_hotpath_test.w native 4  # w_array_data_ptr; 9s compiled
+spec/seven_by_seven_cloud_seed_promotion_test.w timeout 1  # 120s+ interpreted; 10s compiled
+spec/seven_by_seven_low_quota_seed_test.w timeout 11  # 121s+ interpreted; 11s compiled
+spec/seven_by_seven_shoulder_test.w timeout 1  # 120s+ interpreted; 11s compiled
+spec/square_campaign_nonce_diversity_test.w timeout 9  # 120s+ interpreted; 10s compiled
+spec/wide_matrix_cleanup_test.w timeout 7  # 120s+ interpreted; 9s compiled
+spec/wide_square_test.w native 11  # packed live worker and all nine large-square tensor gates; 7s compiled
+spec/wide_rectangular_test.w native 5  # multiword rectangular pair walks and exact tensor gates; 6s compiled
+spec/wide_directed_test.w native 3  # directed bucket index, history, rollback and packed tensor gates; 6s compiled
+spec/wide_density_neutral_test.w native 2  # density-independent walks and archive-before-history rejection; 6s compiled
+spec/wide_tui_test.w native 1  # native packed telemetry and dashboard renderer; 6s compiled
 spec/wide_transform_queue_test.w argv  # positional arguments required
-spec/learned_residual_native.w argv  # independent native parity harness supplies model/cases
-spec/rect_public_seed_corpus_test.w timeout  # 186 s interpreted (56 exact door loads); passes, but exceeds a shard budget
+# (spec/learned_residual_native.w, the native oracle that spec/learned_residual_native_test.py
+# drives with a model and a case file, is a driver without the _test.w suffix, not a unit test.)
+spec/rect_public_seed_corpus_test.w timeout 9  # 186 s interpreted (56 exact door loads); passes, but exceeds a shard budget; 9s compiled
+spec/learned_residual_limits_test.w native 6  # __w_clock_ms; 9s compiled
+spec/packed_refinement_test.w argv  # positional arguments required (driven by spec/packed_refinement_test.py)
+spec/wide_closure_test.w argv  # positional arguments required (driven by spec/wide_closure_test.py)
+spec/wide_directed_replay_test.w argv  # positional arguments required (driven by spec/wide_directed_replay_test.py)
+spec/wide_pair_native_test.w argv  # positional arguments required (driven by spec/wide_pair_native_test.py)
 # The GF(2) record-hunt toolchain and the benchmark harness (ports of the Python and Ruby tools; each test is a self-test that prints PASS).
-spec/bench_exec_test.w native  # Procx process calls
-spec/bench_record_test.w native  # compiled file and hash calls
-spec/bench_runner_test.w native  # Procx process calls
-spec/bench_score_test.w native  # Decimal and Float formatting differs interpreted (1 of 55 checks)
-spec/bench_stats_test.w native  # Float statistics differ interpreted (954 of 6452 checks)
-spec/bench_walker_test.w timeout  # 120s+ interpreted
-spec/gf2_catalogue_seeds_test.w native  # Procx and git calls
-spec/gf2_catalogue_test.w native  # Procx and git calls
-spec/gf2_lineage_build_test.w native  # Procx and git calls
-spec/gf2_lineage_test.w native  # Procx and git calls
-spec/gf2_projection_walks_test.w native  # Procx process calls (stand-in walkers, ruby)
-spec/gf2_public_ternary_test.w native  # Procx and git calls
-spec/gf2_recipes_test.w native  # compiled file and hash calls
-spec/gf2_record_board_test.w native  # compiled file, hash and git calls
-spec/gf2_scheme_test.w timeout  # 120s+ interpreted (the two exactness gates)
-spec/gf2_support_test.w native  # Procx, git, file and JSON runtime calls (3,156 checks)
-spec/gzip_test.w native  # compiled byte and CRC calls
-spec/verify_tensor_test.w native  # runs the tool as a process
-spec/gf2_cascade_test.w native  # Procx process calls (stand-in walkers, a child bin/tungsten)
-spec/gf2_mmc_alg_test.w native  # w_value_free_w: interpreted nothing is released and the run passes 24 GiB (TUNGSTEN_MEMORY_LIMIT is 8G)
+spec/bench_exec_test.w native 7  # Procx process calls; 11s compiled
+spec/bench_record_test.w native 3  # compiled file and hash calls; 10s compiled
+spec/bench_runner_test.w native 1  # Procx process calls; 32s compiled
+spec/bench_score_test.w native 10  # Decimal and Float formatting differs interpreted (1 of 55 checks); 12s compiled
+spec/bench_stats_test.w native 8  # Float statistics differ interpreted (954 of 6452 checks); 10s compiled
+spec/bench_walker_test.w timeout 12  # 120s+ interpreted; 10s compiled
+spec/gf2_catalogue_seeds_test.w native 5  # Procx and git calls; 12s compiled
+spec/gf2_catalogue_test.w native 7  # Procx and git calls; 13s compiled
+spec/gf2_lineage_build_test.w native 7  # Procx and git calls; 12s compiled
+spec/gf2_lineage_test.w native 6  # Procx and git calls; 13s compiled
+spec/gf2_projection_walks_test.w native 8  # Procx process calls (stand-in walkers, ruby); 12s compiled
+spec/gf2_public_ternary_test.w native 6  # Procx and git calls; 16s compiled
+spec/gf2_recipes_test.w native 2  # compiled file and hash calls; 11s compiled
+spec/gf2_record_board_test.w native 5  # compiled file, hash and git calls; 11s compiled
+spec/gf2_scheme_test.w timeout 10  # 120s+ interpreted (the two exactness gates); 10s compiled
+spec/gf2_support_test.w native 3  # Procx, git, file and JSON runtime calls (3,156 checks); 29s compiled
+spec/gzip_test.w native 4  # compiled byte and CRC calls; 22s compiled
+spec/verify_tensor_test.w native 5  # runs the tool as a process; 19s compiled
+spec/gf2_cascade_test.w native 2  # Procx process calls (stand-in walkers, a child bin/tungsten); 30s compiled
+spec/gf2_mmc_alg_test.w native 9  # w_value_free_w: interpreted nothing is released and the run passes 24 GiB (TUNGSTEN_MEMORY_LIMIT is 8G); 10s compiled
+# Passed interpreted in September; on 2026-11-12 each is stopped by the interpreter's memory limit (TUNGSTEN_MEMORY_LIMIT, 8G) after the seconds given.
+spec/wide_projection_test.w native 12  # interpreted: 8 GiB memory limit after 12 s; 9s compiled
+spec/rect_gpu_sampler_test.w native 5  # interpreted: 8 GiB memory limit after 17 s; 9s compiled
+spec/macro_double_annihilation_test.w native 9  # interpreted: 8 GiB memory limit after 29 s; 10s compiled
+spec/rect_catalyst_lift_test.w native 12  # interpreted: 8 GiB memory limit after 39 s; 10s compiled
+spec/packed_composition_test.w native 9  # interpreted: 8 GiB memory limit after 18 s; 12s compiled
+spec/bud_holdout_test.w native 6  # interpreted: 8 GiB memory limit after 34 s; 10s compiled
+spec/package_layout_test.w native 12  # interpreted: 8 GiB memory limit after 12 s; 10s compiled
+spec/rank_three_completion_test.w native 8  # interpreted: 8 GiB memory limit after 13 s; 10s compiled
+spec/sat_repair_encoder_test.w native 11  # interpreted: 8 GiB memory limit after 8 s; 10s compiled

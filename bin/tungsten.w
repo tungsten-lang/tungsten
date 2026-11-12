@@ -208,7 +208,9 @@ MANPAGE = manpage_lines.join("\n")
     exit(1)
   if !bit_binary_current?(out_bin)
     driver = ensure_command_binary("bin/commands/build.w")
-    log = "/tmp/tungsten-build-" + bit_pkg + "-on-demand.log"
+    # In this checkout's own build/: on-demand builds in two worktrees must not share one log.
+    system("mkdir -p " + sh_quote(ROOT + "/build"))
+    log = ROOT + "/build/bit-" + bit_pkg + "-" + entry_name + ".log"
     cmd = "cd " + sh_quote(bit_root) + " && " + command_env_prefix + sh_quote(driver) + " >" + sh_quote(log) + " 2>&1"
     if !system(cmd) || !system("test -x " + sh_quote(out_bin))
       << "tungsten: failed to build " + bit_pkg + " (" + entry_name + "); see " + log

@@ -2760,6 +2760,10 @@ if !stage0_only && !bit_only
         if names_this_checkout?(image) || names_this_checkout?(image + ".sidemap")
           << "    " + DIM + "note" + RESET + "    the " + kind + " image names " + ROOT + " and is not shared through the build store"
           image_ids[kind] = ""
+        elsif !force_build && executable?(image_store) && optional_cache_complete?(image_store + ".sidemap")
+          # another build published this image while this one compiled it: the first complete entry stays (see
+          # bit_store_publish), and this checkout keeps its own image and sidemap, which belong together
+          store_renew([image_store, image_store + ".sidemap", image_store + ".sidemap.missing"])
         else
           # the image, then its sidemap (or the marker that it has none): a reader requires both
           atomic_copy(image, image_store)
@@ -3034,6 +3038,16 @@ bit_file_sha_memo = {}
   target = base
   if !complete || names_this_checkout?(built) || file_mentions?(built, bit_path + "/") || names_this_checkout?(built + ".sidemap") || file_mentions?(built + ".sidemap", bit_path + "/")
     target = base + "@" + bit_location_tag(bit_path)
+  # The first complete entry stays. Two builders that both missed can produce different bytes for the same inputs
+  # (a warm or a cold Core snapshot changes the code layout, not the behaviour), and replacing one entry under a
+  # reader would pair one build's executable with the other's sidemap. The name already says which sources it was
+  # built from, so a complete entry without its manifest only lacks the manifest. The caller installs the entry.
+  # `--force` replaces it.
+  if !FORCE_BUILD && executable?(target) && optional_cache_complete?(target + ".sidemap")
+    store_renew([target, target + ".sidemap", target + ".sidemap.missing"])
+    if !regular_file?(base + ".deps") && !atomic_write(text, base + ".deps")
+      return ""
+    return target
   if !atomic_copy(built, target)
     return ""
   sh_ok("chmod 755 " + shq(target))
@@ -3051,6 +3065,9 @@ bit_file_sha_memo = {}
   base = store_path
   if base.size > 17 && base.slice(base.size - 17, 1) == "@"
     base = base.slice(0, base.size - 17)
+  # The executable and its sidemap come from one entry: when the store kept another builder's entry, install it.
+  if !same_file_content?(store_path, out_bin) && atomic_copy(store_path, out_bin)
+    sh_ok("chmod 755 " + shq(out_bin))
   if regular_file?(store_path + ".sidemap")
     if !same_file_content?(store_path + ".sidemap", out_bin + ".sidemap")
       atomic_copy(store_path + ".sidemap", out_bin + ".sidemap")

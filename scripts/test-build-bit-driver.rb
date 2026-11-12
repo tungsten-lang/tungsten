@@ -129,6 +129,26 @@ Dir.mktmpdir("tungsten-bit-driver-") do |directory|
   FileUtils.cp(manifest, File.join(twin, "Bitfile"))
   raise "a project elsewhere was handed another location's executable" unless run.call([], {}, twin).size == 2
   raise "the twin's own build missed its cache" unless run.call([], {}, twin).empty?
+  # Two builders of one entry: the first complete entry stays, and the builder
+  # that compiled it a second time installs that entry, so an executable and
+  # its sidemap always come from one build. Simulated: the stored executable
+  # differs from what this compiler writes (an equally valid build) and its
+  # manifest is not there yet, so the next build misses and compiles. (The
+  # TUNGSTEN_FREE=0 build above left a second key directory with the same
+  # manifest; both are treated alike.)
+  marker = "# the first builder's bytes\n"
+  hot_deps = Dir.glob(File.join(store, "bits", "hot-*", "*.deps")).select { |path| File.read(path) == File.read(File.join(package, "bin/hot.deps")) }
+  hot_stored = hot_deps.flat_map { |deps| Dir.glob(deps.delete_suffix(".deps") + "@*").reject { |path| File.basename(path).include?(".") } }
+  raise "bin/hot has no store entry" if hot_stored.empty?
+  hot_stored.each { |path| File.write(path, File.read(path) + marker) }
+  FileUtils.rm_f(hot_deps)
+  raise "a store entry without its manifest was not a miss" unless run.call.size == 1
+  raise "a second publish replaced the complete store entry" unless hot_stored.all? { |path| File.read(path).end_with?(marker) }
+  raise "the second builder did not install the kept entry" unless File.read(File.join(package, "bin/hot")).end_with?(marker)
+  raise "the kept entry's manifest was not written" unless hot_deps.any? { |path| File.exist?(path) }
+  raise "the kept entry missed afterwards" unless run.call.empty?
+  raise "--force did not rebuild" unless run.call(["--force"]).size == 2
+  raise "--force did not replace the store entry" if File.read(File.join(package, "bin/hot")).end_with?(marker) || hot_stored.all? { |path| File.read(path).end_with?(marker) }
   # Companion sources are not part of the base runtime archive. Their contents,
   # including Objective-C, still have to invalidate the outer executable stamp.
   bridge = File.join(root, "runtime", "graphics.m")

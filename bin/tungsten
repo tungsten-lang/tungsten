@@ -774,13 +774,16 @@ if [ -x "$COMPILER" ]; then
     # A CLI that fails to compile must SAY so: this fallback ran silently
     # for five weeks while bin/tungsten.w did not lex, and every `tungsten`
     # invocation was the Ruby CLI without anyone noticing.
-    WC_LOG="${TMPDIR:-/tmp}/tungsten-cli-build.log"
+    # One log per process: checkouts rebuilding their CLIs at the same time
+    # must not write into one file.
+    WC_LOG="${TMPDIR:-/tmp}/tungsten-cli-build.$$.log"
     if ! BIT_HOME="$ROOT/bits" \
         "$COMPILER" compile "$ROOT/bin/tungsten.w" --out "$WC" --no-lto >"$WC_LOG" 2>&1; then
       echo "tungsten: bin/tungsten.w failed to compile; running the Ruby CLI instead (see $WC_LOG)" >&2
       sed -n '/error/{p;q;}' "$WC_LOG" >&2
       exec "$RUBY" "$RUBY_CLI" "$@"
     fi
+    rm -f "$WC_LOG"
     # Ad-hoc codesign on macOS so a freshly linked CLI is launchable.
     if [ "$(uname -s)" = "Darwin" ]; then
       codesign --force -s - "$WC" >/dev/null 2>&1 || true

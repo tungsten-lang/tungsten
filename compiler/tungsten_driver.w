@@ -24,8 +24,21 @@ use lib/driver/ir
 use lib/driver/link
 use lib/driver/pipeline
 
+# delegate_compiler_image (compiler/lib/driver/link.w) execs an image with its
+# kind in TUNGSTEN_COMPILER_IMAGE. Read it once, then take it out of this
+# process's environment: it describes this executable, not the programs it
+# runs. A child that inherited it (a script run by the interpreter image that
+# starts `tungsten run --interpret`) would not delegate to the image it needs
+# and would build classes this executable does not link (undefined method
+# 'new' for nil).
+compiler_image_kind = env("TUNGSTEN_COMPILER_IMAGE")
+if compiler_image_kind != nil && compiler_image_kind != ""
+  ccall("w_unsetenv", "TUNGSTEN_COMPILER_IMAGE")
+else
+  compiler_image_kind = ""
+
 gpu_emitter = CompilerGPUEmitter.new()
-if env("TUNGSTEN_COMPILER_IMAGE") == "metal"
+if compiler_image_kind == "metal"
   gpu_emitter = MetalCompilerGPUEmitter.new()
 
 args = argv()
@@ -381,7 +394,7 @@ if optimizations_json
 # lines that do not contribute to compile, check, or WIRE-run. Re-enter through
 # the thin feature image, whose wrapper `use`s those classes before loading this
 # driver. The inner process marks its image to prevent recursive delegation.
-if env("TUNGSTEN_COMPILER_IMAGE") != "repl" && (wit_mode || interpret_mode)
+if compiler_image_kind != "repl" && (wit_mode || interpret_mode)
   delegate_compiler_image("repl")
 
 # Process-parallel compile-batch children own independent source shards. Mark

@@ -117,7 +117,7 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location build_store runtime_sources performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess build_self_host] + RELEASE_PACKAGE_TASKS
+  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location build_store runtime_sources compiler_image_env performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess build_self_host] + RELEASE_PACKAGE_TASKS
 
   desc "Verify generated C-call ABI contracts and the WIRE consistency guard"
   task :ccall_contracts do
@@ -208,6 +208,11 @@ namespace :test do
   desc "Verify runtime/sources.txt lists every runtime source and every build reads it"
   task :runtime_sources do
     run_command "bash", File.join(ROOT, "scripts/test-runtime-sources.sh")
+  end
+
+  desc "Verify a compiler image does not pass its TUNGSTEN_COMPILER_IMAGE mark to the programs it runs"
+  task :compiler_image_env do
+    run_command "bash", File.join(ROOT, "scripts/test-compiler-image-env.sh")
   end
 
   desc "Verify performance result identity and noise-band comparison"

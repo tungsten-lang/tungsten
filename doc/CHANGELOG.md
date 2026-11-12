@@ -13,6 +13,13 @@
   into the stage-1 runtime as `build.w` always did. The manifest is part of
   the runtime's content key. `scripts/test-runtime-sources.sh` fails when a
   runtime file is missing from it or a build path lists sources itself.
+- **Compiler images no longer leak their mark** — an image read
+  `TUNGSTEN_COMPILER_IMAGE` and left it in its environment, so a script run
+  by the interpreter image that started `tungsten run --interpret` did not
+  delegate to the interpreter image and failed with "undefined method 'new'
+  for nil". The image now takes the mark out after reading it
+  (`scripts/test-compiler-image-env.sh`).
+
 - **One shared build store** — build artifacts no longer live in each
   checkout's `build/cache`. Every checkout, worktree and installed toolchain
   reads and writes one store, `~/.tungsten/build` (`TUNGSTEN_HOME/build`;

@@ -200,6 +200,7 @@ missing calibration, reference conditions, or physical context.
 | barrel | unit | 2981/25000 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | barrels |
 | basis_point | unit | 1/10000 | 0/1 | 0,0,0,0,0,0,0,0 |  |  | basis point, basis points, basis_points, bp_finance |
 | bath | unit | 27/1250 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | baths |
+| batter | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | batter:1 | dimensionless run-over-rise recession ratio | batters |
 | baud | unit | 1/1 | 0/1 | 0,0,-1,0,0,0,0,0 | symbol:1 | symbols transmitted per second |  |
 | beard second | unit | 1/200000000 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | beard seconds, beard-second, beard-seconds |
 | beat | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | beat:1 |  | beats |
@@ -220,6 +221,7 @@ missing calibration, reference conditions, or physical context.
 | bps | unit | 1/8 | 0/1 | 0,0,-1,0,0,0,0,1 |  |  |  |
 | brad | unit | 18369286/748432043 | 0/1 | 0,0,0,0,0,0,0,0 | angle:1 |  | brads |
 | brinell | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | hardness_brinell:1 |  | HB |
+| bu_cn | unit | 5/3 | 0/1 | 1,0,0,0,0,0,0,0 |  | Chinese shizhi double-pace equal to 5 chi or 1/300 li (5/3 metres) | chinese bu, chinese pace, chinese paces |
 | bushel | unit | 220244188543/6250000000000 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | bu, bushels |
 | cP | unit | 1/1000 | 0/1 | -1,1,-1,0,0,0,0,0 |  |  | centipoise |
 | cSt | unit | 1/1000000 | 0/1 | 2,0,-1,0,0,0,0,0 |  |  | centistokes |
@@ -258,10 +260,11 @@ missing calibration, reference conditions, or physical context.
 | cwt | unit | 1016047/20000 | 0/1 | 0,1,0,0,0,0,0,0 |  |  |  |
 | cycle | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | cycle:1 |  | cyc, cycles |
 | d | unit | 86400/1 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | day, days |
-| dan_cn | unit | 50/1 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | chinese dan, chinese_dan |
+| dan | unit | 50/1 | 0/1 | 0,1,0,0,0,0,0,0 |  | Chinese shizhi mass (picul) equal to 100 jin (50 kilograms) | chinese dan, chinese_dan, dans |
 | darcy | unit | 9869233/10000000000000000000 | 0/1 | 2,0,0,0,0,0,0,0 |  | porous-medium permeability unit | darcies |
 | dash | unit | 122699/199149509426 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | dashes |
 | decade | unit | 315569520/1 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | decades |
+| decan | unit | 864000/1 | 0/1 | 0,0,1,0,0,0,0,0 |  | Ancient Egyptian 10-day civil week (864,000 seconds) | decans |
 | decay | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | decay:1 |  | decays |
 | deciban | unit | 34582415/832827539 | 0/1 | 0,0,0,0,0,0,0,1 |  |  | decibans |
 | decitex | unit | 1/10000000 | 0/1 | 0,0,0,0,0,0,0,0 | linear_density:1 |  | decitex |
@@ -272,6 +275,7 @@ missing calibration, reference conditions, or physical context.
 | diopter | unit | 1/1 | 0/1 | -1,0,0,0,0,0,0,0 |  | reciprocal metre used for optical power | diopters, dioptre, dioptres |
 | dogyear | unit | 4508136/1 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | dog year, dog years |
 | donkeypower | unit | 25013/100 | 0/1 | 2,1,-3,0,0,0,0,0 |  |  | donkey power, donkey-power |
+| dou | unit | 1/100 | 0/1 | 3,0,0,0,0,0,0,0 |  | Chinese shizhi capacity equal to 10 sheng (10 litres) | dous |
 | dozen | unit | 12/1 | 0/1 | 0,0,0,0,0,0,0,0 |  |  | dozens |
 | dpi | unit | 5000/127 | 0/1 | -1,0,0,0,0,0,0,0 |  | dots per inch — spatial resolution | dots per inch |
 | dpm | unit | 1/60 | 0/1 | 0,0,-1,0,0,0,0,0 | decay:1 |  | decays per minute |
@@ -284,7 +288,7 @@ missing calibration, reference conditions, or physical context.
 | earthmass | reference_quantity | 5972200000000000224395264/1 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | M⊕, earth mass |
 | earthradius | reference_quantity | 6371000/1 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | R⊕, earth radius |
 | edge | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | graph_edge:1 |  | edges |
-| egypt_palm | unit | 3/40 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | egyptian palm, egyptian palms |
+| egypt_palm | unit | 3/40 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | egyptian palm, egyptian palms, shesep, sheseps |
 | einstein | unit | 1/1 | 0/1 | 0,0,0,0,0,1,0,0 | photon:1 | one mole of photons | einsteins |
 | electric_horsepower | unit | 746/1 | 0/1 | 2,1,-3,0,0,0,0,0 |  |  | electric horsepower |
 | electron_mass | physical_constant | 1/1097769105757763229651765532459 | 0/1 | 0,1,0,0,0,0,0,0 |  | rest mass of an electron | electron mass, m_e |
@@ -345,11 +349,13 @@ missing calibration, reference conditions, or physical context.
 | h | unit | 3600/1 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | hour, hours |
 | ha | unit | 10000/1 | 0/1 | 2,0,0,0,0,0,0,0 |  |  | hectare, hectares |
 | hand | unit | 127/1250 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | hands |
-| handbreadth | unit | 381/5000 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | handbreadths, tefach, tefachim |
+| handbreadth | unit | 381/5000 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | handbreadths, palm, palms, tefach, tefachim |
+| hao | unit | 1/30000 | 0/1 | 1,0,0,0,0,0,0,0 |  | Chinese shizhi length equal to 1/100 fen or 1/10,000 chi (1/30,000 metre) | haos |
 | hartree | unit | 1/229371227839632473 | 0/1 | 2,1,-2,0,0,0,0,0 |  | atomic unit of energy, approximately 27.211 electronvolts | Eh, hartrees |
 | hath | unit | 1143/2500 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | haths |
 | heap | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | heap:1 |  | heaps |
 | heat_capacity | unit | 1/1 | 0/1 | 2,1,-2,0,-1,0,0,0 | heat_capacity:1 | joules per kelvin tagged as heat capacity | heat capacity |
+| hekat | unit | 3087/640000 | 0/1 | 3,0,0,0,0,0,0,0 |  | Ancient Egyptian capacity unit equal to 1/30 cubic royal cubit (320 ro) | hekats, heqat, heqats |
 | helek | unit | 10/3 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | chelakim, chelek, halakim |
 | hin | unit | 9/2500 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | hins |
 | hogshead | unit | 2981/12500 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | hogsheads |
@@ -394,6 +400,7 @@ missing calibration, reference conditions, or physical context.
 | kgCO₂e | unit | 1/1 | 0/1 | 0,1,0,0,0,0,0,0 | co2e:1 | kilograms of carbon-dioxide equivalent | kg CO2e, kilograms CO2e |
 | kgf | unit | 196133/20000 | 0/1 | 1,1,-2,0,0,0,0,0 |  |  | kilogram force, kilogram-force |
 | kg·m/s | unit | 1/1 | 0/1 | 1,1,-1,0,0,0,0,0 | momentum:1 | kilogram metres per second — momentum | momentum |
+| khar | unit | 3087/32000 | 0/1 | 3,0,0,0,0,0,0,0 |  | Ancient Egyptian sack capacity equal to 20 hekat (2/3 cubic royal cubit) | khars |
 | khet | unit | 105/2 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | khets |
 | kilderkin | unit | 4091481/50000000 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | kilderkins |
 | kiloton | unit | 1000000/1 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | kilotons |
@@ -408,7 +415,7 @@ missing calibration, reference conditions, or physical context.
 | lb | unit | 45359237/100000000 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | lbs, pound, pounds |
 | lbf | unit | 8896443230521/2000000000000 | 0/1 | 1,1,-2,0,0,0,0,0 |  |  | pound force, pound-force |
 | league | unit | 603504/125 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | leagues |
-| li_cn | unit | 500/1 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | chinese li, chinese_li |
+| li | unit | 500/1 | 0/1 | 1,0,0,0,0,0,0,0 |  | Chinese shizhi distance equal to 150 zhang or 1,500 chi (500 metres) | chinese li, chinese_li, lis |
 | liang | unit | 1/20 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | liangs |
 | libra_roma | unit | 16447/50000 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | libra romana, roman libra |
 | lieue_de_poste | unit | 487259/125 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | lieue de poste, lieues de poste |
@@ -511,6 +518,7 @@ missing calibration, reference conditions, or physical context.
 | peanutbutter | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | peanutbutter:1 |  | pb, peanut butter |
 | peck | unit | 220244188543/25000000000000 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | pecks, pk |
 | pennyweight | unit | 155517/100000000 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | dwt, pennyweights |
+| percent_grade | unit | 1/100 | 0/1 | 0,0,0,0,0,0,0,0 | slope:1 | rise-over-run slope expressed in percent (0.01 slope) | percent grade, percent grades |
 | perch | unit | 12573/2500 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | perches |
 | person_hour | unit | 3600/1 | 0/1 | 0,0,1,0,0,0,0,0 | person:1 | one person working for one hour | person hour, person hours |
 | pes | unit | 37/125 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | pedes |
@@ -540,6 +548,8 @@ missing calibration, reference conditions, or physical context.
 | pud | unit | 32761/2000 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | puds |
 | puncheon | unit | 31797/100000 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | puncheons, tertian |
 | px | unit | 127/480000 | 0/1 | 1,0,0,0,0,0,0,0 |  | CSS reference pixel — one ninety-sixth of a CSS inch | pixel, pixels |
+| qian | unit | 1/200 | 0/1 | 0,1,0,0,0,0,0,0 |  | Chinese shizhi mass (mace) equal to 1/10 liang (5 grams) | mace, maces, qians |
+| qing | unit | 200000/3 | 0/1 | 2,0,0,0,0,0,0,0 |  | Chinese shizhi area equal to 100 mu (200,000/3 square metres) | qings |
 | qps | unit | 1/1 | 0/1 | 0,0,-1,0,0,0,0,0 | query:1 |  |  |
 | qquad | unit | 2/1 | 0/1 | 0,0,0,0,0,0,0,0 | em:1 |  |  |
 | qr | unit | 635029/50000 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | quarter, quarters |
@@ -559,11 +569,12 @@ missing calibration, reference conditions, or physical context.
 | revolution | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | revolution:1 |  | rev, revolutions, revs |
 | ri | unit | 4320/11 | 0/1 | 1,0,0,0,0,0,0,0 |  |  |  |
 | richter | reference_scale | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | magnitude:1 |  | Richter, richter scale |
+| ro | unit | 3087/204800000 | 0/1 | 3,0,0,0,0,0,0,0 |  | Ancient Egyptian capacity subunit equal to 1/320 hekat | ros |
 | rockwell | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | hardness_rockwell:1 |  | HRC |
 | rod | unit | 12573/2500 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | rod, rods |
 | rope | unit | 762/125 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | ropes |
 | rotation | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | rotation:1 |  | rot, rotations |
-| royal_cubit | unit | 21/40 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | royal cubit, royal cubits |
+| royal_cubit | unit | 21/40 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | egyptian cubit, egyptian cubits, egyptian_cubit, royal cubit, royal cubits |
 | rpm | unit | 1/60 | 0/1 | 0,0,-1,0,0,0,0,0 | revolution:1 |  | revolutions per minute, rotations per minute |
 | rps | unit | 1/1 | 0/1 | 0,0,-1,0,0,0,0,0 | request:1 |  |  |
 | rundlet | unit | 3407/50000 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | rundlets |
@@ -579,16 +590,20 @@ missing calibration, reference conditions, or physical context.
 | seah | unit | 9/1250 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | seahs, seim |
 | sector | unit | 512/1 | 0/1 | 0,0,0,0,0,0,0,1 |  |  | sectors |
 | seer | unit | 9331/10000 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | seers |
+| seked | unit | 1/7 | 0/1 | 0,0,0,0,0,0,0,0 | batter:1 | Ancient Egyptian inclination of horizontal palms per royal cubit of vertical rise (1/7 batter) | sekeds |
 | semitone | unit | 100/1 | 0/1 | 0,0,0,0,0,0,0,0 | pitch:1 |  | half step, halfstep, semitones |
 | shaftment | unit | 381/2500 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | shaftments |
 | shake | unit | 1/100000000 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | shakes |
 | shaku | unit | 10/33 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | shakus |
 | shed | unit | 1/9999999999999998996536225270321325685027812444704008 | 0/1 | 2,0,0,0,0,0,0,0 |  |  |  |
 | shekel | unit | 23/2000 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | shekalim, shekels |
+| sheng | unit | 1/1000 | 0/1 | 3,0,0,0,0,0,0,0 |  | Chinese shizhi capacity equal to 1 litre | shengs |
 | shmita | unit | 220898664/1 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | sabbatical, shmitas, shmitta |
+| short_cubit | unit | 9/20 | 0/1 | 1,0,0,0,0,0,0,0 |  | Ancient Egyptian short cubit of 6 palms (0.45 metres) | short cubit, short cubits |
 | siderealday | unit | 172328181/2000 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | sidereal day, sidereal days |
 | siderealyear | unit | 3944768688/125 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | sidereal year, sidereal years |
 | sk | unit | 2111208/6632555543 | 0/1 | -2,0,0,0,0,0,1,0 | luminance:1 |  | skot, skots |
+| slope | unit | 1/1 | 0/1 | 0,0,0,0,0,0,0,0 | slope:1 | dimensionless rise-over-run gradient | slopes |
 | slug | unit | 14593903/1000000 | 0/1 | 0,1,0,0,0,0,0,0 |  |  | slugs |
 | smidgen | unit | 61415/398724264139 | 0/1 | 3,0,0,0,0,0,0,0 |  |  | smidgens |
 | smoot | unit | 8509/5000 | 0/1 | 1,0,0,0,0,0,0,0 |  | informal length equal to 1.7018 metres | smoots |
@@ -655,6 +670,7 @@ missing calibration, reference conditions, or physical context.
 | week | unit | 604800/1 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | weeks, wk |
 | yd | unit | 1143/1250 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | yard, yards |
 | year | unit | 31556952/1 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | years, yr |
+| yin | unit | 100/3 | 0/1 | 1,0,0,0,0,0,0,0 |  | Chinese shizhi length equal to 10 zhang or 1/15 li (100/3 metres) | yins |
 | yovel | unit | 1577847600/1 | 0/1 | 0,0,1,0,0,0,0,0 |  |  | jubilee, jubilees, yovels |
 | zhang | unit | 10/3 | 0/1 | 1,0,0,0,0,0,0,0 |  |  | zhangs |
 | °C | unit | 1/1 | 5463/20 | 0,0,0,0,1,0,0,0 |  | degree Celsius — an absolute temperature point with the ice point near zero | celsius, ℃ |

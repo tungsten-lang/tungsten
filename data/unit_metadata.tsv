@@ -459,11 +459,11 @@ chi						exact
 cun						exact
 fen						exact
 zhang						exact
-li_cn						exact
+li	Chinese shizhi distance equal to 150 zhang or 1,500 chi (500 metres)	Mandarin lǐ (里), “village” or standard road mile.	Traditional Chinese distance unit standardized at exactly 500 metres (half a kilometre) in the 1959 shizhi metric system.	PRC State Council	1959	exact
 mu						exact
 jin						exact
 liang						exact
-dan_cn						exact
+dan	Chinese shizhi mass (picul) equal to 100 jin (50 kilograms)	Mandarin dàn (担/石), “shoulder-pole load”.	Traditional bulk weight standardized at 50 kilograms (100 jin) in the 1959 shizhi metric system.	PRC State Council	1959	exact
 verst						exact
 arshin						exact
 sazhen						exact
@@ -618,3 +618,19 @@ moment_magnitude						exact
 apgar						exact
 RBE						exact
 hounsfield_unit						exact
+short_cubit	Ancient Egyptian short cubit of 6 palms (0.45 metres)	Egyptian meh nedjes, “short cubit”.	Used for everyday craft and workshop measurements alongside the 7-palm royal cubit.	Ancient Egyptian metrology	-2100	exact
+hekat	Ancient Egyptian capacity unit equal to 1/30 cubic royal cubit (320 ro)	Egyptian ḥqꜣt, a barrel-shaped grain measure.	Standard Middle Kingdom grain and liquid measure featured throughout the Rhind Mathematical Papyrus.	Rhind Mathematical Papyrus	-1650	exact
+ro	Ancient Egyptian capacity subunit equal to 1/320 hekat	Egyptian r, “mouth” or “part”.	Smallest fractional unit of the hekat, supplementing binary Eye-of-Horus fractions in grain and medical reckonings.	Rhind Mathematical Papyrus	-1650	exact
+khar	Ancient Egyptian sack capacity equal to 20 hekat (2/3 cubic royal cubit)	Egyptian ḫꜣr, “sack”.	Bulk granary capacity unit in Rhind Mathematical Papyrus silo calculations where 1 cubic royal cubit equals 1.5 khar.	Rhind Mathematical Papyrus	-1650	exact
+decan	Ancient Egyptian 10-day civil week (864,000 seconds)	Greek dekanoi, “the tens”, translating the Egyptian star groups marking 10-day intervals.	Thirty-six decans divided the 360-day Egyptian civil year into 10-day periods before the 5 epagomenal days.	Ancient Egyptian calendar	-2100	exact
+slope	dimensionless rise-over-run gradient	From Middle English aslope, “at an incline”.	Semantic gradient unit (vertical rise per unit horizontal run) preventing accidental mixing with angles or concentrations.	Engineering usage	1900	exact
+percent_grade	rise-over-run slope expressed in percent (0.01 slope)	Latin per centum, “by the hundred”, plus grade from gradus, “step”.	Standard civil, road, and railway inclination measure where 100 percent grade equals a 45-degree slope.	Civil engineering	1900	exact
+batter	dimensionless run-over-rise recession ratio	From Old French batre, describing a wall receding backward as it rises.	Civil-engineering and architectural cotangent inclination (horizontal run per unit vertical rise), reciprocal to rise-over-run slope.	Civil engineering	1800	exact
+seked	Ancient Egyptian inclination of horizontal palms per royal cubit of vertical rise (1/7 batter)	Egyptian sqd, “slope” or “inclination”.	Used in Rhind Mathematical Papyrus pyramid problems (56–60) as horizontal run in palms per 7-palm royal cubit of rise.	Rhind Mathematical Papyrus	-1650	exact
+yin	Chinese shizhi length equal to 10 zhang or 1/15 li (100/3 metres)	Mandarin yǐn (引), “drawn-out measuring cord”.	Traditional Chinese surveying length standardized in the 1959 shizhi metric system as 100 chi.	PRC State Council	1959	exact
+bu_cn	Chinese shizhi double-pace equal to 5 chi or 1/300 li (5/3 metres)	Mandarin bù (步), “pace” or “double step”.	Traditional Chinese land-surveying pace standardized as 5 chi; 240 square bu equal one mu and 300 bu equal one li.	PRC State Council	1959	exact
+hao	Chinese shizhi length equal to 1/100 fen or 1/10,000 chi (1/30,000 metre)	Mandarin háo (毫), “fine hair”.	Fine subdivision in the decimal Chinese shizhi length scale.	PRC State Council	1959	exact
+qing	Chinese shizhi area equal to 100 mu (200,000/3 square metres)	Mandarin qǐng (顷), a large tract of cultivated land.	Traditional large agricultural land measure standardized at 100 mu (6 and 2/3 hectares).	PRC State Council	1959	exact
+qian	Chinese shizhi mass (mace) equal to 1/10 liang (5 grams)	Mandarin qián (钱), “coin” weight; English mace via Malay mas.	Standard apothecary and precious-metal tenth of a tael, fixed at 5 grams in the 1959 shizhi system.	PRC State Council	1959	exact
+dou	Chinese shizhi capacity equal to 10 sheng (10 litres)	Mandarin dǒu (斗), a peck-sized grain dipper.	Traditional grain measure fixed at exactly 10 litres in the metricated shizhi system.	PRC State Council	1959	exact
+sheng	Chinese shizhi capacity equal to 1 litre	Mandarin shēng (升), a pint-sized grain vessel.	Base shizhi volume unit fixed equal to the metric litre.	PRC State Council	1959	exact

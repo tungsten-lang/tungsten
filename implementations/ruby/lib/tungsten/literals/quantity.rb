@@ -238,7 +238,8 @@ module Tungsten
     # unit factor (km over m) folds into the value; an inexact Rational
     # becomes a Decimal the way Decimal division does on this engine.
     def self.dimensionless_scalar(value, unit)
-      scalar = value * unit.factor
+      base = (value.is_a?(BigDecimal) && value.finite? && unit.factor.is_a?(Rational)) ? value.to_r : value
+      scalar = base * unit.factor
       return scalar unless scalar.is_a?(Rational)
       return scalar.numerator if scalar.denominator == 1
       BigDecimal(scalar.numerator) / BigDecimal(scalar.denominator)
@@ -323,8 +324,7 @@ module Tungsten
         msg += " — did you mean '#{suggestion}'?" if suggestion
         raise DimensionError, msg
       end
-      si_value = @value * @unit.factor + @unit.offset
-      new_value = (si_value - target.offset) / target.factor
+      new_value = affine_convert(@value, @unit, target)
       result = copy_with(value: new_value, unit: target)
       # Keep the requested spelling (`km/h` not `kph`).
       if target_str && result.unit.canonical_symbol != target_str
@@ -410,7 +410,7 @@ module Tungsten
     end
 
     def delta_value_in(delta, point_unit)
-      delta.value * delta.unit.factor / point_unit.factor
+      scale_rational(delta.value, delta.unit.factor / point_unit.factor)
     end
 
     def ensure_non_affine_arithmetic!(other, operation)
@@ -519,7 +519,8 @@ module Tungsten
     end
 
     def to_si
-      @value * @unit.factor + @unit.offset
+      base = (@value.is_a?(BigDecimal) && @value.finite? && @unit.factor.is_a?(Rational)) ? @value.to_r : @value
+      base * @unit.factor + @unit.offset
     end
 
     # Multi-line introspection of this quantity's unit — description, defining source,
@@ -841,10 +842,30 @@ module Tungsten
       if @unit.symbol == other.unit.symbol
         other.value
       else
-        si = other.value * other.unit.factor + other.unit.offset
-        (si - @unit.offset) / @unit.factor
+        affine_convert(other.value, other.unit, @unit)
       end
     end
+
+    def scale_rational(value, ratio)
+      if value.is_a?(BigDecimal) && value.finite? && ratio.is_a?(Rational)
+        (value * ratio.numerator) / ratio.denominator
+      else
+        value * ratio
+      end
+    end
+    private :scale_rational
+
+    def affine_convert(value, from_unit, to_unit)
+      ratio = from_unit.factor / to_unit.factor
+      return scale_rational(value, ratio) if from_unit.offset.zero? && to_unit.offset.zero?
+      offset_delta = (from_unit.offset - to_unit.offset) / to_unit.factor
+      if value.is_a?(BigDecimal) && value.finite? && offset_delta.is_a?(Rational)
+        scale_rational(value, ratio) + (BigDecimal(offset_delta.numerator) / offset_delta.denominator)
+      else
+        scale_rational(value, ratio) + offset_delta
+      end
+    end
+    private :affine_convert
 
     # Wrapper to enable `3 * 5.m` via coerce
     class CoercedScalar

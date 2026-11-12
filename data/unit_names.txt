@@ -725,6 +725,8 @@ basis_point
 basis_points
 bath
 baths
+batter
+batters
 baud
 beard second
 beard seconds
@@ -772,6 +774,7 @@ brad
 brads
 brinell
 bu
+bu_cn
 bushel
 bushels
 butt
@@ -850,8 +853,11 @@ chelek
 chetvert
 chetverts
 chi
+chinese bu
 chinese dan
 chinese li
+chinese pace
+chinese paces
 chinese_dan
 chinese_li
 chis
@@ -981,7 +987,8 @@ daltons
 dalx
 dam
 damol
-dan_cn
+dan
+dans
 dapc
 darcies
 darcy
@@ -1002,6 +1009,8 @@ debye
 debyes
 decade
 decades
+decan
+decans
 decay
 decays
 decays per minute
@@ -1045,6 +1054,8 @@ donkey-power
 donkeypower
 dots per inch
 dots per pixel
+dou
+dous
 dozen
 dozens
 dpc
@@ -1074,8 +1085,11 @@ earthradius
 edge
 edges
 egypt_palm
+egyptian cubit
+egyptian cubits
 egyptian palm
 egyptian palms
+egyptian_cubit
 einstein
 einsteins
 electric field
@@ -1306,6 +1320,8 @@ hand
 handbreadth
 handbreadths
 hands
+hao
+haos
 hartley
 hartleys
 hartree
@@ -1324,10 +1340,14 @@ heat flux
 heat_capacity
 hectare
 hectares
+hekat
+hekats
 helek
 henries
 henry
 henrys
+heqat
+heqats
 hertz
 hfortnight
 hg
@@ -1487,6 +1507,8 @@ kg/s
 kgCO₂e
 kgf
 kg·m/s
+khar
+khars
 khet
 khets
 kikar
@@ -1543,7 +1565,7 @@ lbf
 lbs
 league
 leagues
-li_cn
+li
 liang
 liangs
 libra romana
@@ -1574,6 +1596,7 @@ linear density
 link
 link_chain
 links
+lis
 liter
 liters
 liters per 100 km
@@ -1638,6 +1661,8 @@ m_n
 m_p
 m_μ
 mac
+mace
+maces
 mach
 mach_air_20C
 macs
@@ -1905,6 +1930,8 @@ packet
 packets
 page
 pages
+palm
+palms
 paragraph
 paragraphs
 parsa
@@ -1941,6 +1968,9 @@ pecks
 pedes
 pennyweight
 pennyweights
+percent grade
+percent grades
+percent_grade
 perch
 perches
 person hour
@@ -2054,6 +2084,10 @@ qcentury
 qeV
 qfortnight
 qg
+qian
+qians
+qing
+qings
 qkat
 ql
 qlm
@@ -2153,6 +2187,7 @@ rlm
 rlx
 rm
 rmol
+ro
 rockwell
 rod
 rods
@@ -2164,6 +2199,7 @@ roman uncia
 romer
 rope
 ropes
+ros
 rot
 rotation
 rotations
@@ -2216,6 +2252,8 @@ sectors
 seer
 seers
 seim
+seked
+sekeds
 semitone
 semitones
 shaftment
@@ -2228,11 +2266,18 @@ shed
 shekalim
 shekel
 shekels
+sheng
+shengs
+shesep
+sheseps
 shmita
 shmitas
 shmitta
+short cubit
+short cubits
 short ton
 short tons
+short_cubit
 sidereal day
 sidereal days
 sidereal year
@@ -2246,6 +2291,8 @@ sieverts
 sk
 skot
 skots
+slope
+slopes
 slug
 slugs
 smidgen
@@ -2504,6 +2551,8 @@ year
 years
 yfortnight
 yg
+yin
+yins
 ykat
 yl
 ylm

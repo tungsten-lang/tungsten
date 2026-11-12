@@ -126,14 +126,17 @@
     trailing_expr = nil
     if @current_type == T_ASSIGN
       advance()
+      @method_sig_end_pos = @pos
       trailing_expr = parse_expression()
     elsif @current_type == T_COLON
       advance()
+      @method_sig_end_pos = @pos
       trailing_expr = parse_expression()
     elsif !annotations_present
       # Untyped back-compat: bare trailing expression becomes accumulator
       # init or inline body, same as before typed signatures existed.
       if !(@current_type in (T_NEWLINE T_DEDENT T_EOF T_SEMICOLON))
+        @method_sig_end_pos = @pos
         trailing_expr = parse_expression()
 
     skip_newlines()
@@ -345,6 +348,7 @@
     elsif @current_type in (T_DEDENT T_EOF T_CLASS_DEF T_ARROW)
       body = []
     else
+      @method_sig_end_pos = @pos
       body = [parse_expression()]
     pop_type_name_scope()
 
@@ -399,6 +403,7 @@
     elsif @current_type in (T_DEDENT T_EOF T_CLASS_DEF T_ARROW)
       body = []
     else
+      @method_sig_end_pos = @pos
       body = [parse_expression()]
     pop_type_name_scope()
     result = Tungsten:AST:GpuKernelDef.new(name, params, body, "gpu", type_hints, make_loc_offset(attr_off), make_end_loc())
@@ -884,6 +889,7 @@
     Tungsten:AST:Nil.new()
 
   -> parse_var_or_call
+    tok_pos = @pos
     tok_packed = @current_packed
     name = advance_value()
     nlen = name.size()
@@ -905,7 +911,8 @@
       return Tungsten:AST:TypedArrayNew.new("bool", size_expr)
 
     if nlen == 2 && (name == "ro" || name == "rw")
-      return parse_accessor_call(name, make_loc_for(tok_packed), tok_line(tok_packed))
+      allow_zero_arg = tok_pos == @method_sig_end_pos || tok_starts_line?(tok_pos)
+      return parse_accessor_call(name, make_loc_for(tok_packed), tok_line(tok_packed), allow_zero_arg)
 
     if next_t == T_LPAREN
       advance()
@@ -959,22 +966,21 @@
       return true
     false
 
-  -> parse_accessor_call(name, tok_loc, tok_line)
+  -> parse_accessor_call(name, tok_loc, tok_line, allow_zero_arg)
     args = nil
     block = nil
     default_expr = nil
+    has_parens = false
 
     if @current_type == T_LPAREN
+      has_parens = true
       advance()
       args = parse_arg_list(:RPAREN)
       expect_type(T_RPAREN)
     elsif !@no_bare_args && (current_line() == tok_line) && bare_arg_start?()
       args = parse_bare_args()
 
-    if args == nil
-      args = []
-
-    if @current_type == T_LBRACE
+    if (args != nil || has_parens || allow_zero_arg) && @current_type == T_LBRACE
       if hash_literal_body_start?()
         default_expr = parse_hash_literal()
       else
@@ -985,6 +991,14 @@
           blk_body = block_body(block)
           if blk_body != nil && blk_body.size() == 1
             default_expr = blk_body[0]
+
+    if args == nil && !has_parens && block == nil && default_expr == nil
+      if !allow_zero_arg
+        return Tungsten:AST:Var.new(name)
+      args = []
+
+    if args == nil
+      args = []
 
     args = math_fn_rewrite(name, args)
     call_node = Tungsten:AST:Call.new(nil, name, args, block, tok_loc, make_end_loc())

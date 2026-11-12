@@ -25,6 +25,11 @@
     # parameter default is parsed (parse_param_default): there the comma
     # separates parameters.
     @no_multi_assign = false
+    # Token position immediately following a method/fn signature, so a
+    # trailing `ro` / `rw` (`-> new(@x) ro`) lowers to a zero-arg accessor
+    # call without turning later `ro` / `rw` tokens on the line (`v | ro`)
+    # into calls.
+    @method_sig_end_pos = -1
     # Per-class-body collection of `with NAME in (typenames)` constraints.
     # nil outside a class/trait body; reset+restored across nested defs.
     @pending_class_constraints = nil
@@ -192,6 +197,20 @@
 
   -> current_offset
     parser_tok_off(@current_packed)
+
+  # True when the token at `tok_pos` is the first real token on its line
+  # (only SP / INDENT / DEDENT intervene after the previous line).
+  -> tok_starts_line?(tok_pos)
+    packed = @packed_tokens
+    i = tok_pos - 1
+    while i >= 0
+      pt = parser_tok_type(packed[i])
+      if pt == T_NEWLINE
+        return true
+      if pt != T_SP && pt != T_INDENT && pt != T_DEDENT
+        return tok_line(packed[i]) != tok_line(packed[tok_pos])
+      i -= 1
+    true
 
   # Compile-error helper — builds the runtime raise dict for a parse
   # error AT THE CURRENT POSITION, deriving file/row/col from @file

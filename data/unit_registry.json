@@ -115,6 +115,21 @@
       ],
       "semantic": {}
     },
+    "BATTER": {
+      "powers": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "semantic": {
+        "batter": 1
+      }
+    },
     "CAPACITANCE": {
       "powers": [
         -2,
@@ -799,6 +814,21 @@
       ],
       "semantic": {}
     },
+    "SLOPE": {
+      "powers": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "semantic": {
+        "slope": 1
+      }
+    },
     "SOLID_ANGLE": {
       "powers": [
         0,
@@ -1045,7 +1075,9 @@
     {"powers":[0,0,0,0,0,1,0,0],"semantic":{"photon":1},"name":"amount of photons"},
     {"powers":[-2,0,-1,0,0,1,0,0],"semantic":{"photon":1},"name":"photon flux density"},
     {"powers":[0,1,-2,0,0,0,0,0],"semantic":{"cycle":-1},"name":"spectral flux density"},
-    {"powers":[0,0,-1,0,0,0,0,0],"semantic":{"symbol":1},"name":"symbol rate"}
+    {"powers":[0,0,-1,0,0,0,0,0],"semantic":{"symbol":1},"name":"symbol rate"},
+    {"powers":[0,0,0,0,0,0,0,0],"semantic":{"slope":1},"name":"slope"},
+    {"powers":[0,0,0,0,0,0,0,0],"semantic":{"batter":1},"name":"batter"}
   ],
   "prefixes": {
     "si": {
@@ -1521,11 +1553,11 @@
     {"symbol":"cun","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"1/30","offset":"0/1","prefixable":"none","kind":"unit"},
     {"symbol":"fen","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"1/300","offset":"0/1","prefixable":"none","kind":"unit"},
     {"symbol":"zhang","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"10/3","offset":"0/1","prefixable":"none","kind":"unit"},
-    {"symbol":"li_cn","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"500/1","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"li","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"500/1","offset":"0/1","prefixable":"none","kind":"unit"},
     {"symbol":"mu","dimension":{"powers":[2,0,0,0,0,0,0,0],"semantic":{}},"factor":"2000/3","offset":"0/1","prefixable":"none","kind":"unit"},
     {"symbol":"jin","dimension":{"powers":[0,1,0,0,0,0,0,0],"semantic":{}},"factor":"1/2","offset":"0/1","prefixable":"none","kind":"unit"},
     {"symbol":"liang","dimension":{"powers":[0,1,0,0,0,0,0,0],"semantic":{}},"factor":"1/20","offset":"0/1","prefixable":"none","kind":"unit"},
-    {"symbol":"dan_cn","dimension":{"powers":[0,1,0,0,0,0,0,0],"semantic":{}},"factor":"50/1","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"dan","dimension":{"powers":[0,1,0,0,0,0,0,0],"semantic":{}},"factor":"50/1","offset":"0/1","prefixable":"none","kind":"unit"},
     {"symbol":"verst","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"5334/5","offset":"0/1","prefixable":"none","kind":"unit"},
     {"symbol":"arshin","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"889/1250","offset":"0/1","prefixable":"none","kind":"unit"},
     {"symbol":"sazhen","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"2667/1250","offset":"0/1","prefixable":"none","kind":"unit"},
@@ -1772,7 +1804,23 @@
     {"symbol":"moment_magnitude","dimension":{"powers":[0,0,0,0,0,0,0,0],"semantic":{"magnitude":1}},"factor":"1/1","offset":"0/1","prefixable":"none","kind":"reference_scale"},
     {"symbol":"apgar","dimension":{"powers":[0,0,0,0,0,0,0,0],"semantic":{"apgar":1}},"factor":"1/1","offset":"0/1","prefixable":"none","kind":"reference_scale"},
     {"symbol":"RBE","dimension":{"powers":[0,0,0,0,0,0,0,0],"semantic":{"rbe":1}},"factor":"1/1","offset":"0/1","prefixable":"none","kind":"reference_scale"},
-    {"symbol":"hounsfield_unit","dimension":{"powers":[0,0,0,0,0,0,0,0],"semantic":{"hounsfield":1}},"factor":"1/1","offset":"0/1","prefixable":"none","kind":"reference_scale"}
+    {"symbol":"hounsfield_unit","dimension":{"powers":[0,0,0,0,0,0,0,0],"semantic":{"hounsfield":1}},"factor":"1/1","offset":"0/1","prefixable":"none","kind":"reference_scale"},
+    {"symbol":"short_cubit","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"9/20","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"hekat","dimension":{"powers":[3,0,0,0,0,0,0,0],"semantic":{}},"factor":"3087/640000","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"ro","dimension":{"powers":[3,0,0,0,0,0,0,0],"semantic":{}},"factor":"3087/204800000","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"khar","dimension":{"powers":[3,0,0,0,0,0,0,0],"semantic":{}},"factor":"3087/32000","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"decan","dimension":{"powers":[0,0,1,0,0,0,0,0],"semantic":{}},"factor":"864000/1","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"slope","dimension":{"powers":[0,0,0,0,0,0,0,0],"semantic":{"slope":1}},"factor":"1/1","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"percent_grade","dimension":{"powers":[0,0,0,0,0,0,0,0],"semantic":{"slope":1}},"factor":"1/100","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"batter","dimension":{"powers":[0,0,0,0,0,0,0,0],"semantic":{"batter":1}},"factor":"1/1","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"seked","dimension":{"powers":[0,0,0,0,0,0,0,0],"semantic":{"batter":1}},"factor":"1/7","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"yin","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"100/3","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"bu_cn","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"5/3","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"hao","dimension":{"powers":[1,0,0,0,0,0,0,0],"semantic":{}},"factor":"1/30000","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"qing","dimension":{"powers":[2,0,0,0,0,0,0,0],"semantic":{}},"factor":"200000/3","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"qian","dimension":{"powers":[0,1,0,0,0,0,0,0],"semantic":{}},"factor":"1/200","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"dou","dimension":{"powers":[3,0,0,0,0,0,0,0],"semantic":{}},"factor":"1/100","offset":"0/1","prefixable":"none","kind":"unit"},
+    {"symbol":"sheng","dimension":{"powers":[3,0,0,0,0,0,0,0],"semantic":{}},"factor":"1/1000","offset":"0/1","prefixable":"none","kind":"unit"}
   ],
   "aliases": {
     "meter": "m",
@@ -2347,13 +2395,13 @@
     "cuns": "cun",
     "fens": "fen",
     "zhangs": "zhang",
-    "chinese li": "li_cn",
-    "chinese_li": "li_cn",
+    "chinese li": "li",
+    "chinese_li": "li",
     "mus": "mu",
     "jins": "jin",
     "liangs": "liang",
-    "chinese dan": "dan_cn",
-    "chinese_dan": "dan_cn",
+    "chinese dan": "dan",
+    "chinese_dan": "dan",
     "versts": "verst",
     "arshins": "arshin",
     "sazhens": "sazhen",
@@ -2713,7 +2761,40 @@
     "operations per joule": "op/J",
     "tokens per joule": "tok/J",
     "traversed edges per second": "TEPS",
-    "giga-updates per second": "GUPS"
+    "giga-updates per second": "GUPS",
+    "palm": "handbreadth",
+    "palms": "handbreadth",
+    "egyptian_cubit": "royal_cubit",
+    "egyptian cubit": "royal_cubit",
+    "egyptian cubits": "royal_cubit",
+    "short cubit": "short_cubit",
+    "short cubits": "short_cubit",
+    "shesep": "egypt_palm",
+    "sheseps": "egypt_palm",
+    "hekats": "hekat",
+    "heqat": "hekat",
+    "heqats": "hekat",
+    "ros": "ro",
+    "khars": "khar",
+    "decans": "decan",
+    "slopes": "slope",
+    "percent grade": "percent_grade",
+    "percent grades": "percent_grade",
+    "batters": "batter",
+    "sekeds": "seked",
+    "lis": "li",
+    "dans": "dan",
+    "yins": "yin",
+    "chinese bu": "bu_cn",
+    "chinese pace": "bu_cn",
+    "chinese paces": "bu_cn",
+    "haos": "hao",
+    "qings": "qing",
+    "qians": "qian",
+    "mace": "qian",
+    "maces": "qian",
+    "dous": "dou",
+    "shengs": "sheng"
   },
   "compounds": [
     {"symbol":"Hz","scale":"1/1","expression":"cycle/s"},

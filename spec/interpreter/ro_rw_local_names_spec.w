@@ -1,11 +1,10 @@
 # Parameters and locals named `ro` / `rw` read as plain variables.
 #
-# The parser always reads a bare `ro` / `rw` as a zero-argument call, so the
-# accessor marker after a constructor (`-> new(@x) rw`) parses. The compiled
-# lowering resolves such a call to the local of that name (lowering/calls.w);
-# the interpreter raised "Undefined method 'rw'" instead, which broke
-# `Raster#fill_rect` (its kernel `raster_rect` takes `rw, rh`) on
-# `bin/tungsten run --interpret`.
+# Bare `ro` / `rw` only parse as zero-argument calls when they start a line
+# or immediately follow a method signature (`-> new(@x) rw`), where accessor
+# markers appear; elsewhere on a line they parse as ordinary `Var` nodes.
+# When a line-starting `ro` / `rw` is actually a local or parameter read
+# (`rw + ro`), both lowering and the interpreter resolve it to the local.
 
 -> check(name, got, want)
   if got != want

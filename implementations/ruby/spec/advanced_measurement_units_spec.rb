@@ -35,6 +35,13 @@ RSpec.describe "Advanced measurements and quantity semantics" do
         .to raise_error(Tungsten::DimensionError)
       expect { Tungsten.run("1 Gy + 1 specific_energy") }
         .to raise_error(Tungsten::DimensionError)
+      expect { Tungsten.run("1 slope + 1 seked") }
+        .to raise_error(Tungsten::DimensionError)
+      expect { Tungsten.run("1 slope + 1 rad") }
+        .to raise_error(Tungsten::DimensionError)
+      expect(Tungsten.run("0.06 slope | percent_grade").to_s).to eq("6 percent_grade")
+      expect(Tungsten.run("7 seked | batter").to_s).to eq("1 batter")
+      expect(Tungsten.run("5.5 seked | batter").value.to_f).to be_within(1e-12).of(11.0 / 14)
     end
 
     it "keeps frequency, rates, and activity compositional" do

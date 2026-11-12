@@ -1144,10 +1144,19 @@ experiments show useful candidates.
 of the Python/Ruby GF(2) tooling builds on: `bits.w` (popcount, set-bit
 iteration, remap/transpose and Integer <-> 64-bit-limb conversion for masks of
 any size), `scheme.w` (`Metaflip:Gf2:Scheme`, a scheme as Integer masks with a
-strict MFW1 reader/writer, SHA-256, orientations and `clean`), and `packed.w`
-(the same scheme as limb arrays plus two independent exactness gates, a dense
-table in the style of `verify_tensor.rb` and a sparse table in the style of the
-Python `exact`, each able to name the first wrong coefficient).
+strict MFW1 reader/writer, SHA-256, orientations and `clean`), `packed.w`
+(the same scheme as limb arrays plus two exactness gates, a dense table in the
+style of `verify_tensor.rb` and a sparse table in the style of the Python
+`exact`, each able to name the first wrong coefficient), and `fiber_gate.w`,
+the independent second path: it reads the certificate's bytes again with its
+own reader (`ffpk_parse` for canonical MFW1, its own reader for the other
+formats; Integer masks go through their hexadecimal text) into 32-bit limbs
+and checks them with `ffpk_exact`, the cold-path gate of the wide walker. The
+two packed gates share one reader and one limb conversion; the fiber gate
+shares neither, and `Scheme#defect(:both)` and the verifier accept a scheme
+only when both paths do (any other combination raises `gate disagreement`).
+The fiber gate's slab holds factors of up to 1,024 bits and 16,384 terms; a
+larger scheme is checked by the packed gates alone.
 `tensor_verifier.w` and `tools/verify_tensor.w` port `tools/verify_tensor.rb`
 byte for byte (same records, same messages, same exit status, same certificate
 formats) and add `--gate dense|sparse|both`, `--strict` (canonical MFW1, the

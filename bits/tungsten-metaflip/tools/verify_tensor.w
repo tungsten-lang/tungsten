@@ -12,8 +12,14 @@
 #
 # Beyond the Ruby original:
 #   --gate G       which exactness gate(s) decide: dense (the Ruby formulation),
-#                  sparse (the Python `exact` formulation) or both (default; they
-#                  must agree). All three give the same records and verdicts.
+#                  sparse (the Python `exact` formulation) or both (default): the
+#                  dense and sparse gates on this reader's limb arrays, which must
+#                  agree, and then the independent fiber gate, which reads the
+#                  certificate's bytes a second time with its own reader into its
+#                  own representation (lib/metaflip/gf2/fiber_gate.w) and must
+#                  reach the same verdict. All three give the same records and
+#                  verdicts; a run in which the two paths differ fails with
+#                  `gate disagreement`.
 #   --strict       accept only canonical MFW1 (Scheme.parse, the Python read_blob
 #                  rule); the shape is then optional.
 #   --batch LIST   also verify every path listed in LIST, one per line, optionally

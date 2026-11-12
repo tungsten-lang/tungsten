@@ -44,13 +44,31 @@
 #   s.release                            frees the masks (no GC; see the note on sharing
 #                                        at the method and Bits.release in bits.w)
 #
-# Exactness (two independent gates, see packed.w; a gate returns nil or the first
-# failing coefficient as a Metaflip:Gf2:Defect with .message/.a/.b/.expected/.actual):
+# Exactness (a gate returns nil or the first failing coefficient as a
+# Metaflip:Gf2:Defect with .message/.a/.b/.expected/.actual). There are two
+# paths that share no reader, no limb conversion and no formulation:
 #
-#   s.defect(gate = :both)               :dense, :sparse or :both (must agree)
-#   s.exact?(gate = :both)               true when defect is nil
-#   s.verify(gate = :both)               self, or raises the defect message
+#   packed gates   packed.w: the masks go through Bits.to_limbs into a Packed,
+#                  which the dense and the sparse gate each check in full
+#   fiber gate     fiber_gate.w: the scheme is read a second time, by another
+#                  reader into another representation (32-bit limbs), and
+#                  checked by ffpk_exact, the cold-path gate of the wide walker
+#
+#   s.defect(gate = :both, text = nil)   :dense or :sparse: that packed gate alone. :both: the
+#                                        two packed gates, which must name the same coefficient,
+#                                        and then the fiber gate, which must give the same
+#                                        verdict ("gate disagreement" is raised otherwise)
+#   s.exact?(gate = :both, text = nil)   true when defect is nil
+#   s.verify(gate = :both, text = nil)   self, or raises the defect message
 #   s.pack                               the Packed limb-array form
+#
+# `text` is for a scheme that came from Scheme.parse: pass the very text it was
+# parsed from and the fiber gate reads those bytes with its own parser
+# (ffpk_parse), so that nothing downstream of the file is common to the two
+# paths. Without it the fiber gate converts the Integer masks itself, through
+# their hexadecimal text. A scheme beyond the fiber gate's slab (a factor wider
+# than 1,024 bits, more than 16,384 terms) is checked by the packed gates alone;
+# Metaflip:Gf2:FiberGate.applicable?(n, m, p, rank) tells which case it is.
 #
 # Scheme.parse is the strict MFW1 reader, exactly the acceptance rule of
 # read_blob in the Python tooling: the text must BE the canonical blob of its
@@ -67,6 +85,7 @@
 # the gates' job.
 
 use packed
+use fiber_gate
 
 + Metaflip:Gf2:Scheme
   ro :n, :m, :p, :us, :vs, :ws
@@ -303,13 +322,23 @@ use packed
   -> pack
     Metaflip:Gf2:Packed.from_masks(@n, @m, @p, @us, @vs, @ws)
 
-  # nil when exact, else the first Defect. gate: :dense, :sparse or :both.
-  -> defect(gate = :both)
+  # nil when exact, else the first Defect. gate: :dense, :sparse or :both
+  # (both packed gates, then the independent fiber gate, which must agree).
+  # text: the canonical MFW1 text this scheme was parsed from, if any; the
+  # fiber gate then parses it itself instead of converting the masks.
+  -> defect(gate = :both, text = nil)
     bad = range_defect
     return bad if bad != nil
     packed = pack
     found = packed.defect(gate)
     packed.release
+    return found if gate != :both
+    verdict = nil
+    if text == nil
+      verdict = Metaflip:Gf2:FiberGate.masks_verdict(@n, @m, @p, @us, @vs, @ws)
+    else
+      verdict = Metaflip:Gf2:FiberGate.text_verdict(text, @n, @m, @p, rank)
+    Metaflip:Gf2:FiberGate.require_agreement(found, verdict)
     found
 
   # Frees the mask Arrays and every BigInt mask in them (compiled Tungsten has no
@@ -326,11 +355,11 @@ use packed
       Metaflip:Gf2:Bits.release(column)
     nil
 
-  -> exact?(gate = :both)
-    defect(gate) == nil
+  -> exact?(gate = :both, text = nil)
+    defect(gate, text) == nil
 
-  -> verify(gate = :both)
-    bad = defect(gate)
+  -> verify(gate = :both, text = nil)
+    bad = defect(gate, text)
     raise bad.message if bad != nil
     self
 

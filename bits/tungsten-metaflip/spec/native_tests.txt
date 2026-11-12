@@ -120,3 +120,4 @@ spec/bud_holdout_test.w native 6  # interpreted: 8 GiB memory limit after 34 s; 
 spec/package_layout_test.w native 12  # interpreted: 8 GiB memory limit after 12 s; 10s compiled
 spec/rank_three_completion_test.w native 8  # interpreted: 8 GiB memory limit after 13 s; 10s compiled
 spec/sat_repair_encoder_test.w native 11  # interpreted: 8 GiB memory limit after 8 s; 10s compiled
+spec/gf2_fiber_gate_test.w native 4  # interpreted: 8 GiB memory limit after 25 s; 11s compiled

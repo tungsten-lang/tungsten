@@ -27,6 +27,15 @@
 # packed.w) and the record is {exact, shape, rank, density, sha256}, the SHA-256
 # being that of the file's bytes exactly as given.
 #
+# With :both (the default) the certificate is verified along two paths that
+# share nothing after the file's bytes: this reader into a Packed and its dense
+# and sparse gates, then the fiber gate (fiber_gate.w), which reads the same
+# bytes again with its own reader (ffpk_parse in strict mode, read_certificate
+# otherwise) into its own representation and checks them with ffpk_exact. A
+# certificate is accepted only when both paths accept it; any other combination
+# raises "gate disagreement". A scheme beyond the fiber gate's slab (a factor
+# wider than 1,024 bits or more than 16,384 terms) has the packed gates alone.
+#
 # With `strict` the certificate must instead be canonical MFW1 (the format of
 # Scheme.parse, the acceptance rule of read_blob in the Python tooling): sorted,
 # duplicate-free, lowercase hex without leading zeros, LF only, no comments.
@@ -395,7 +404,7 @@ use scheme
       expect = [n, m, p] if n != nil
       scheme = Metaflip:Gf2:Scheme.parse(text, expect)
       begin
-        bad = scheme.defect(gate)
+        bad = scheme.defect(gate, text)
         raise bad.message if bad != nil
         Metaflip:Gf2:TensorVerifier.record("[scheme.n]x[scheme.m]x[scheme.p]", scheme.rank, scheme.density, Digest.sha256(text))
       ensure
@@ -404,6 +413,7 @@ use scheme
       packed = Metaflip:Gf2:TensorVerifier.read(text, n, m, p)
       begin
         bad = packed.defect(gate)
+        Metaflip:Gf2:FiberGate.require_agreement(bad, Metaflip:Gf2:FiberGate.certificate_verdict(text, n, m, p, packed.rank)) if gate == :both
         raise bad.message if bad != nil
         Metaflip:Gf2:TensorVerifier.record("[n]x[m]x[p]", packed.rank, packed.density, Digest.sha256(text))
       ensure

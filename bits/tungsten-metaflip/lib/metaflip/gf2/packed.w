@@ -1,5 +1,8 @@
 # A GF(2) matrix-multiplication scheme as flat 64-bit limb arrays, and the two
-# independent exactness gates that run on it.
+# exactness gates that run on it. The two are independent formulations of the
+# check, but they share this one representation and whatever reader and limb
+# conversion filled it; the gate that shares neither is fiber_gate.w, which
+# Scheme#defect(:both) and TensorVerifier.verify_text run after these two.
 #
 # A scheme <n,m,p> is a list of terms (u, v, w): u an n x m mask, v an m x p
 # mask, w an n x p mask, packed row-major (u bit i*m+j = A[i][j], v bit j*p+k =
@@ -40,7 +43,8 @@
 #                   (formulated like the `exact` of the Python tooling).
 #
 # `defect(gate)` selects :dense, :sparse, or :both (run both; they must agree,
-# anything else is an internal error). A gate only reports WHERE it saw a wrong
+# anything else is an internal error; on a Packed, :both is these two gates
+# only, since the fiber gate needs the text or the masks the Packed came from). A gate only reports WHERE it saw a wrong
 # coefficient; the Defect's expected and actual masks are then recomputed from the
 # terms by a third, trivial routine (cell_row), and a report that does not
 # reconstruct raises "internal error" instead of returning a wrong explanation.

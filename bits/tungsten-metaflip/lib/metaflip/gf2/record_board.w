@@ -180,7 +180,7 @@ use tensor_verifier
         scheme = Metaflip:Gf2:Scheme.parse(text)
       rescue failure
         return nil
-      verdict = scheme.exact? ? [scheme.shape, scheme.rank] : nil
+      verdict = scheme.exact?(:both, text) ? [scheme.shape, scheme.rank] : nil
       scheme.release
       return verdict
     hint = Metaflip:Gf2:RecordBoard.shape_hint(path)
@@ -208,7 +208,7 @@ use tensor_verifier
         scheme = Metaflip:Gf2:Scheme.parse(text)
       rescue failure
         return nil
-      return scheme if scheme.exact?
+      return scheme if scheme.exact?(:both, text)
       scheme.release
       return nil
     hint = Metaflip:Gf2:RecordBoard.shape_hint(path)

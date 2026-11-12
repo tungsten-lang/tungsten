@@ -235,6 +235,12 @@ native release matrix. ARM64 uses each target's portable baseline; x86_64
 ships both v2 and v3 packages on macOS and Linux. Use `--dry-run` to validate
 without tagging.
 
+Every `--target` or `--portable` artifact is written to
+`build/releases/<triple>/<cpu>/` as `tungsten-compiler` plus
+`compiler-images/tungsten-{repl,metal}` (the REPL/interpreter and `@gpu`
+compilers, built for the same target and CPU). A release package carries all
+three; a stage 1 / stage 2 mismatch fails such a build instead of warning.
+
 Tungsten's documented x86-64 release set is:
 
 | Artifact | Minimum ISA | Representative minimum CPUs |

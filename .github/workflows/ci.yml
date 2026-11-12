@@ -31,12 +31,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The toolchain the release matrix builds with (LLVM from apt.llvm.org
+      # at the pinned major), not the distribution's older clang.
       - name: Install Linux toolchain
         if: runner.os == 'Linux'
-        run: >-
-          sudo apt-get update &&
-          sudo apt-get install -y
-          clang llvm lld pkg-config libonig-dev libssl-dev libzstd-dev
+        run: scripts/install-linux-toolchain.sh 22 libonig-dev libssl-dev libzstd-dev
 
       - name: Install macOS runtime dependencies
         if: runner.os == 'macOS'
@@ -106,12 +105,11 @@ jobs:
           restore-keys: |
             tungsten-build-v3-${{ runner.os }}-${{ runner.arch }}-
 
+      # The toolchain the release matrix builds with (LLVM from apt.llvm.org
+      # at the pinned major), not the distribution's older clang.
       - name: Install Linux toolchain
         if: runner.os == 'Linux'
-        run: >-
-          sudo apt-get update &&
-          sudo apt-get install -y
-          clang llvm lld pkg-config libonig-dev libssl-dev libzstd-dev
+        run: scripts/install-linux-toolchain.sh 22 libonig-dev libssl-dev libzstd-dev
 
       - name: Install macOS runtime dependencies
         if: runner.os == 'macOS'

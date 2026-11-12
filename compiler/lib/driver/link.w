@@ -538,10 +538,14 @@
 # artifacts (the spec and parity suites each take their own), and a bit's
 # cwd owns its own build/cache, but neither ever builds an image. Every
 # launch therefore resolves to the one image `bin/tungsten build` produced.
--> compiler_image_dir(kind)
+-> compiler_image_owner_root
   root = env("TUNGSTEN_ROOT")
   if root == nil || root == ""
     root = capture("cd " + dev_runtime_shell_quote(resolve_runtime_dir + "/..") + " && pwd -P 2>/dev/null").strip()
+  root
+
+-> compiler_image_dir(kind)
+  root = compiler_image_owner_root()
   if root == ""
     ccall("w_eputs", "could not locate the checkout that owns the " + kind + " compiler image")
     exit 1
@@ -586,6 +590,16 @@
     ccall("w_eputs", "the " + kind + " compiler image is not built: " + image)
     ccall("w_eputs", "run bin/tungsten build (compiler images are built with the compiler, never on launch)")
     exit 1
+
+  # An image sits in build/cache/compiler-images, not in bin/, so it cannot
+  # find core/, data/ and runtime/ from its own path the way this compiler
+  # does. Unless the caller chose a root, hand it the one that owns the image:
+  # without it a packaged or directly invoked `tungsten-compiler --repl` dies
+  # looking for data/unit_names.txt, and a delegated @gpu compile links
+  # against a runtime directory that does not exist.
+  caller_root = env("TUNGSTEN_ROOT")
+  if caller_root == nil || caller_root == ""
+    ccall("w_setenv", "TUNGSTEN_ROOT", compiler_image_owner_root())
 
   # exec, not spawn: Process.spawn puts the child in its own process group,
   # and an interactive image (bin/wit) is then stopped by the terminal on its

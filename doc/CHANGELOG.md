@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **Release packages carry their compiler images and are linked and run
+  before they are published** — the compiler execs prebuilt images for the
+  REPL, `--interpret` and `@gpu` programs and never builds one on launch, but
+  `scripts/package-release.sh` shipped only the compiler, so a packaged
+  `tungsten console` failed and `scripts/validate-release-package.sh` would
+  have failed the next tag at its REPL check. `tungsten build --target` /
+  `--portable` now builds each artifact's `repl` and `metal` images for the
+  artifact's target and CPU, beside it in
+  `build/releases/<triple>/<cpu>/compiler-images/`; the package installs them
+  as `build/cache/compiler-images/`; the validator requires them, starts the
+  Metal image, and compiles, links and runs a program through the packaged
+  launcher from outside any checkout. An image also could not find `core/`,
+  `data/` or `runtime/` when the caller set no `TUNGSTEN_ROOT` (it sits in
+  `build/cache/compiler-images`, not `bin/`): `tungsten-compiler --repl` then
+  died on the unit registry even with the image present. The compiler now
+  hands the image the root that owns it. The release workflow's smoke step now
+  runs a program on the default profile and builds and runs one with
+  `--release` (it only type-checked before). Linux CI and the release matrix
+  install LLVM 22 from apt.llvm.org through
+  `scripts/install-linux-toolchain.sh` (the distribution package is LLVM 18),
+  with compiler-rt for the sanitizer and PGO jobs. The `Dockerfile` uses that
+  script on plain Ubuntu 24.04 (the Ruby base image is gone: the bootstrap
+  needs no Ruby), and a new allowlist `.dockerignore` keeps a checkout's host
+  binaries out of the image, where a macOS `bin/commands/build` newer than its
+  source would be reused and fail to exec. `scripts/test-build-self-host.rb`
+  covers the artifact images (3 checks) and
+  `scripts/test-unit-release-package.rb` (rake `test:release_package`)
+  packages this checkout and validates it in full. The build prints VERIFIED
+  stage1==stage2. The Linux toolchain script, the workflows and the Docker
+  build have not been run: no Linux host or Docker daemon was available.
 - **A stage-identity mismatch fails strict builds** — `tungsten build` printed
   WARNING, installed stage 2 and exited 0 whenever stage 1 and stage 2 emitted
   different LLVM IR, so nothing that ran unattended could notice. It now

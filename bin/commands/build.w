@@ -2509,6 +2509,9 @@ if artifact_targets.size > 0
       artifact_flags = artifact_flags + " --sysroot " + shq(target_sysroot)
     if fast_mode
       artifact_flags = artifact_flags + " --fast"
+    artifact_opt = artifact_release ? "-O3" : "-O0"
+    if fast_mode
+      artifact_opt = artifact_opt + " -ffast-math"
     if pgo_build
       if !pgo_target_matches_host?(artifact_target)
         eputs(RED + "--pgo release artifacts require a matching host OS and architecture: " + artifact_target + RESET)
@@ -2518,9 +2521,6 @@ if artifact_targets.size > 0
       atomic_copy(pgo_binary, out_bin)
       sh_ok("chmod 755 " + shq(out_bin))
     else
-      artifact_opt = artifact_release ? "-O3" : "-O0"
-      if fast_mode
-        artifact_opt = artifact_opt + " -ffast-math"
       art_cmd = "cd " + shq(ROOT) + " && " + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' TUNGSTEN_CLANG_OPT=" + shq(artifact_opt) + " " + shq(COMPILER_BIN) + " compile " + shq(TUNGSTEN_W) + " --out " + shq(out_bin) + artifact_flags
       if sh(art_cmd) != 0
         eputs(RED + "Failed to build " + artifact_target + "/" + cpu_label + RESET)
@@ -2535,6 +2535,42 @@ if artifact_targets.size > 0
     else
       sh_ok("rm -f " + shq(pgo_stamp))
     << "    " + GREEN + "built" + RESET + " " + project_relative_path(out_bin)
+
+    # The artifact's compiler images. The host's own (below) are built for
+    # this machine's CPU, so a package cannot ship those: these are the same
+    # sources and the same release/no-LTO profile as `build-image`
+    # (build_compiler_image in compiler/lib/driver/link.w), compiled for the
+    # artifact's target and CPU and written beside it.
+    # scripts/package-release.sh installs them as the package's
+    # build/cache/compiler-images, where the packaged compiler looks.
+    image_out_dir = out_dir + "/compiler-images"
+    make_dirs(image_out_dir)
+    image_flags = " --release --no-debug --no-lto --target " + shq(artifact_target)
+    if artifact_cpu != ""
+      image_flags = image_flags + " --cpu " + shq(artifact_cpu)
+    if target_sysroot != ""
+      image_flags = image_flags + " --sysroot " + shq(target_sysroot)
+    artifact_image_kinds = ["repl", "metal"]
+    ik = 0
+    while ik < artifact_image_kinds.size
+      image_kind = artifact_image_kinds[ik]
+      ik = ik + 1
+      image_source = ROOT + "/" + compiler_dir_name + "/" + (image_kind == "repl" ? "repl" : "tungsten_" + image_kind) + ".w"
+      image_out = image_out_dir + "/tungsten-" + image_kind
+      image_log = build_scratch_dir + "/artifact-image-" + sanitize_target_label(cpu_label) + "-" + image_kind + ".log"
+      image_cmd = "cd " + shq(ROOT) + " && TUNGSTEN_ROOT=" + shq(ROOT) + " " + probe_env_prefix + "TUNGSTEN_MARCH_ARGS='' TUNGSTEN_INCREMENTAL=1 TUNGSTEN_LL_PATH='' TUNGSTEN_CLANG_OPT=" + shq(artifact_opt) + " " + shq(COMPILER_BIN) + " compile " + shq(image_source) + " --out " + shq(image_out) + image_flags + " > " + shq(image_log) + " 2>&1"
+      t_image = clock_ms()
+      if !sh_ok(image_cmd) || !executable?(image_out)
+        log = read_file(image_log)
+        if log != nil
+          eputs(log)
+        eputs(RED + "Failed to build the " + image_kind + " compiler image for " + artifact_target + "/" + cpu_label + RESET)
+        exit(1)
+      if str_has?(artifact_target, "apple")
+        if !codesign_ok(image_out)
+          eputs(RED + "Failed to ad-hoc sign the " + image_kind + " compiler image for " + artifact_target + "/" + cpu_label + RESET)
+          exit(1)
+      << "    " + GREEN + "built" + RESET + " " + project_relative_path(image_out) + " " + DIM + ms(clock_ms() - t_image) + RESET
     ai = ai + 1
 
 # ── Compiler images ─────────────────────────────────────────────

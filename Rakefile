@@ -103,6 +103,13 @@ namespace :doc do
   end
 end
 
+# test:release_package cuts a release package from this checkout and runs the
+# release validator on it in full. It is part of the default suite on macOS,
+# where that path has been run. The validator has not yet had a confirmed
+# pass on Linux (piped REPL, link and run); until it has, only the tagged
+# release workflow runs it there.
+RELEASE_PACKAGE_TASKS = RUBY_PLATFORM.match?(/darwin/) ? %i[release_package] : []
+
 namespace :test do
   # Ruby compiler specs may create shared runtime archives on a cold checkout,
   # and the Tungsten specs warm the native dev archive. Run those first; only
@@ -110,7 +117,7 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess build_self_host]
+  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess build_self_host] + RELEASE_PACKAGE_TASKS
 
   desc "Verify generated C-call ABI contracts and the WIRE consistency guard"
   task :ccall_contracts do
@@ -210,7 +217,12 @@ namespace :test do
     run_command "ruby", File.join(ROOT, "scripts/test-build-targets.rb"), File.join(ROOT, "bin/commands/build")
   end
 
-  desc "Verify the self-host build's stage-identity exit contract"
+  desc "Package this checkout as a release and validate it: images, unit data, a linked and run program"
+  task :release_package do
+    run_command "ruby", File.join(ROOT, "scripts/test-unit-release-package.rb")
+  end
+
+  desc "Verify the self-host build's stage-identity exit contract and its release-artifact compiler images"
   task :build_self_host do
     run_command "bash", File.join(ROOT, "bin/tungsten"), "build", "--which"
     run_command "ruby", File.join(ROOT, "scripts/test-build-self-host.rb"), File.join(ROOT, "bin/commands/build")

@@ -55,7 +55,9 @@ for path in \
   data/unit_metadata.tsv \
   data/substance_densities.json \
   doc/CORE.md \
-  runtime/runtime.c
+  runtime/runtime.c \
+  build/cache/compiler-images/tungsten-repl \
+  build/cache/compiler-images/tungsten-metal
 do
   if ! grep -Fxq "$PACKAGE/$path" "$LISTING"; then
     printf 'release package is missing %s\n' "$path" >&2
@@ -73,6 +75,15 @@ if [[ ! -x "$PACKAGE_ROOT/bin/tungsten" || ! -x "$PACKAGE_ROOT/bin/tungsten-comp
   printf 'release package launchers are not executable\n' >&2
   exit 1
 fi
+# The compiler execs these for the REPL, --interpret and @gpu programs, and
+# never builds one on launch: a package without them ships those modes broken.
+IMAGES="$PACKAGE_ROOT/build/cache/compiler-images"
+for kind in repl metal; do
+  if [[ ! -x "$IMAGES/tungsten-$kind" ]]; then
+    printf 'release package compiler image is not executable: tungsten-%s\n' "$kind" >&2
+    exit 1
+  fi
+done
 
 # Invoke the extracted compiler directly from an unrelated directory. This
 # exercises executable-relative data discovery without the launcher/root env.
@@ -95,6 +106,39 @@ if [[ "${3:-}" != "--structure-only" ]]; then
      ! grep -Fq 'history' "$REPL_OUTPUT"; then
     printf 'release package external unit metadata smoke test failed\n' >&2
     head -20 "$REPL_OUTPUT" >&2
+    exit 1
+  fi
+  # The Metal image is only exec'd for a @gpu program; prove it starts on
+  # this host (right architecture and CPU level) without needing a GPU. An
+  # image is never a user entry point: the compiler execs it with its kind and
+  # the root that owns it, so this does the same.
+  IMAGE_OUTPUT="$WORK/$TARGET_LABEL.metal-image.out"
+  if ! (cd "$WORK" && env TUNGSTEN_ROOT="$PACKAGE_ROOT" TUNGSTEN_COMPILER_IMAGE=metal \
+      "$IMAGES/tungsten-metal" --help) > "$IMAGE_OUTPUT" 2>&1 ||
+     ! grep -Fq 'compile-batch' "$IMAGE_OUTPUT"; then
+    printf 'release package Metal compiler image does not start\n' >&2
+    head -20 "$IMAGE_OUTPUT" >&2
+    exit 1
+  fi
+
+  # Compile, link and run a program through the packaged launcher. The source
+  # sits outside every checkout, so core/ and runtime/ can only come from the
+  # package. --dev keeps this to one -O0 runtime archive; the release workflow
+  # adds the default and --release (LTO) profiles.
+  SMOKE="$(mktemp -d "${TMPDIR:-/tmp}/tungsten-release-smoke.XXXXXX")"
+  trap 'rm -rf "$SMOKE"' EXIT INT TERM
+  printf '<< "release package " + (6 * 7).to_s\n' > "$SMOKE/smoke.w"
+  LINK_OUTPUT="$WORK/$TARGET_LABEL.link.out"
+  if ! (cd "$SMOKE" && env -u TUNGSTEN_ROOT -u TUNGSTEN_CACHE_DIR -u TUNGSTEN_CLANG_OPT \
+      "$PACKAGE_ROOT/bin/tungsten" -o "$SMOKE/smoke" --dev "$SMOKE/smoke.w") > "$LINK_OUTPUT" 2>&1 ||
+     [[ ! -x "$SMOKE/smoke" ]]; then
+    printf 'release package cannot compile and link a program\n' >&2
+    head -40 "$LINK_OUTPUT" >&2
+    exit 1
+  fi
+  if [[ "$("$SMOKE/smoke" 2>&1)" != "release package 42" ]]; then
+    printf 'release package built a program that does not run correctly\n' >&2
+    "$SMOKE/smoke" 2>&1 | head -20 >&2 || true
     exit 1
   fi
 fi

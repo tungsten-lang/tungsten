@@ -14,6 +14,11 @@
 #     build (--target / --portable): ERROR, nothing installed, no later phase
 #     runs, exit 1.
 #
+# Release artifacts:
+#   - every artifact compiler gets its own repl and metal images beside it,
+#     compiled for the artifact's target and CPU (the host's images are built
+#     for this machine and cannot be packaged).
+#
 # Usage: ruby scripts/test-build-self-host.rb bin/commands/build
 require "fileutils"
 require "json"
@@ -168,6 +173,48 @@ Dir.mktmpdir("tungsten-stage-identity-") do |directory|
   out, status, = run.call(["--strict"], drift)
   check.call("the failure names both modules for diffing",
              out =~ %r{stage 1 \.ll: \h{64} +/\S+/ll/stage1-c\.ll} && out =~ %r{stage 2 \.ll: \h{64} +/\S+/ll/stage2-c\.ll}, out)
+
+  # An artifact's images: one compile per kind, of that kind's source, with the
+  # release/no-LTO image profile and the artifact's own target and CPU.
+  image_compile = lambda do |records, release_dir, kind, source|
+    output = File.join(release_dir, "compiler-images", "tungsten-#{kind}")
+    argv = records.find { |candidate| candidate.include?(output) }
+    return nil unless argv && File.executable?(output) && argv.include?("compile") &&
+                      argv.include?(File.join(root, "compiler", source))
+    argv
+  end
+  images_for = lambda do |records, release_dir, target, cpu|
+    [%w[repl repl.w], %w[metal tungsten_metal.w]].all? do |kind, source|
+      argv = image_compile.call(records, release_dir, kind, source)
+      argv && %w[--release --no-debug --no-lto].all? { |flag| argv.include?(flag) } &&
+        argv.each_cons(2).include?(["--target", target]) &&
+        (cpu ? argv.each_cons(2).include?(["--cpu", cpu]) : !argv.include?("--cpu"))
+    end
+  end
+
+  out, status, records = run.call(["--target", "aarch64-linux-gnu"])
+  release_dir = File.join(root, "build/releases/aarch64-linux-gnu/default")
+  check.call("a --target artifact is built with its repl and metal images",
+             status.success? && out.include?("VERIFIED") && out.include?("==> Release artifacts") &&
+             File.executable?(File.join(release_dir, "tungsten-compiler")) &&
+             images_for.call(records, release_dir, "aarch64-linux-gnu", nil), out + "\n" + records.inspect)
+
+  out, status, records = run.call(["--target", "x86_64-unknown-linux-gnu", "--cpu", "x86-64-v3", "--sysroot", "/fixture/sysroot"])
+  release_dir = File.join(root, "build/releases/x86_64-unknown-linux-gnu/x86-64-v3")
+  sysroot = [%w[repl repl.w], %w[metal tungsten_metal.w]].all? do |kind, source|
+    argv = image_compile.call(records, release_dir, kind, source)
+    argv && argv.each_cons(2).include?(["--sysroot", "/fixture/sysroot"])
+  end
+  check.call("artifact images take the artifact's --cpu and --sysroot",
+             status.success? && images_for.call(records, release_dir, "x86_64-unknown-linux-gnu", "x86-64-v3") && sysroot,
+             out + "\n" + records.inspect)
+
+  out, status, records = run.call(["--portable"])
+  portable = Dir.glob(File.join(root, "build/releases/*/x86-64-v{2,3}")).sort
+  check.call("--portable builds images for both x86-64 levels",
+             status.success? && portable.size == 2 &&
+             portable.all? { |dir| images_for.call(records, dir, File.basename(File.dirname(dir)), File.basename(dir)) },
+             out + "\n" + records.inspect)
 end
 
 puts "self-host build contracts: #{passed} checks passed"

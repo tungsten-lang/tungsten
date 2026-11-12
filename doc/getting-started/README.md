@@ -83,7 +83,7 @@ bin/tungsten compile doc/examples/animations/generative_point_cloud.w \
 ```bash
 bin/tungsten start           # map of the language + next steps
 bin/tungsten start --agent   # same, for coding agents
-bin/tungsten doctor          # check clang, make, lld, zstd, compiler
+bin/tungsten doctor          # check clang, make, zstd, compiler (lld on Linux)
 bin/wit                      # interactive REPL (or: bin/tungsten console)
 ```
 

@@ -33,6 +33,7 @@
 ROOT = File.expand_path(env("TUNGSTEN_ROOT") != nil && env("TUNGSTEN_ROOT") != "" ? env("TUNGSTEN_ROOT") : __DIR__ + "/../..")
 COMPILER_BIN = ROOT + "/bin/tungsten-compiler"
 RUNTIME_DIR = ROOT + "/runtime"
+BUILD_CC_MEMO = {}
 GEM_EXE = ROOT + "/implementations/ruby/exe/ruby-tungsten"
 CUSTOM_RUBY = ROOT + "/src/patched/ruby/ruby"
 C_INTERP = ROOT + "/implementations/c/build/tungsten-c"
@@ -520,6 +521,11 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
 
 # ── Preflight (port of Tungsten::Doctor.build_preflight) ────────
 
+# The C compiler for everything this build compiles and links: the runtime,
+# the stage compilers and the programs they build (it is handed down as
+# TUNGSTEN_CC). TUNGSTEN_CC or ~/.tungsten/config's [build] cc when given,
+# else the rule every program link uses (host_c_compiler in
+# compiler/lib/target.w), as bin/commands/toolchain.sh implements it.
 -> preflight_cc
   cc = env_or_empty("TUNGSTEN_CC").strip
   if cc != ""
@@ -527,7 +533,10 @@ if array_contains?(args, "--help") || array_contains?(args, "-h")
   from_config = configured_value("cc")
   if from_config != nil && from_config != ""
     return from_config
-  "clang"
+  if BUILD_CC_MEMO[:cc] == nil
+    chosen = capture("bash " + shq(ROOT + "/bin/commands/toolchain.sh") + " cc 2>/dev/null").strip
+    BUILD_CC_MEMO[:cc] = chosen == "" ? "clang" : chosen
+  BUILD_CC_MEMO[:cc]
 
 -> pgo_profdata_tool
   cc = preflight_cc()
@@ -596,7 +605,7 @@ preflight_missing_hints = []
 pf_cc = preflight_cc()
 if !tool_on_path?(pf_cc)
   preflight_missing_names.push("clang")
-  preflight_missing_hints.push(IS_LINUX ? "sudo apt-get install clang-22 lld-22" : "brew install llvm lld")
+  preflight_missing_hints.push(IS_LINUX ? "sudo apt-get install clang-22 lld-22" : "brew install llvm")
 else
   pf_cpu = configured_cpu()
   if pf_cpu == nil
@@ -607,7 +616,19 @@ else
 if !tool_on_path?("make")
   preflight_missing_names.push("make")
   preflight_missing_hints.push(IS_LINUX ? "sudo apt-get install build-essential" : "xcode-select --install")
-if !linker_ok?(pf_cc)
+# lld links ELF: every Linux program, and a macOS host's --target build for
+# a Linux triple. A native macOS link uses the system linker (ld64), so lld
+# is not required there.
+pf_target = nil
+pi = 0
+while pi < args.size
+  if args[pi] == "--target" && pi + 1 < args.size
+    pf_target = args[pi + 1]
+  elsif args[pi].starts_with?("--target=")
+    pf_target = args[pi].slice(9, args[pi].size - 9)
+  pi = pi + 1
+pf_needs_lld = IS_LINUX || (pf_target != nil && pf_target.index("apple") == nil && pf_target.index("darwin") == nil)
+if pf_needs_lld && !linker_ok?(pf_cc)
   preflight_missing_names.push("lld (clang -fuse-ld=lld)")
   preflight_missing_hints.push(IS_LINUX ? "sudo apt-get install lld-22" : "brew install lld")
 if !header_ok?("zstd.h", zstd_probe_cflags(), pf_cc)
@@ -1205,22 +1226,6 @@ t_runtime_start = clock_ms()
 tls_enabled = env("TLS") != nil || env("TUNGSTEN_TLS") != nil
 http2_enabled = env("HTTP2") != nil || env("TUNGSTEN_HTTP2") != nil
 
-runtime_srcs = []
-runtime_srcs.push("runtime.c")
-runtime_srcs.push("terminal_input.c")
-runtime_srcs.push("ssmr_witness.c")
-runtime_srcs.push("lexchar_tables.c")
-runtime_srcs.push("unicode_tables.c")
-runtime_srcs.push("aks.c")
-if IS_DARWIN
-  runtime_srcs.push("event_kqueue.c")
-elsif IS_LINUX
-  runtime_srcs.push(env("USE_IOURING") != nil ? "event_iouring.c" : "event_epoll.c")
-if IS_DARWIN
-  runtime_srcs.push("metal.m")
-  runtime_srcs.push("blas_bridge.c")
-  runtime_srcs.push("hid_bridge.m")
-
 openssl_prefix = probe_openssl_prefix()
 tls_flags = []
 if tls_enabled && regular_file?(openssl_prefix + "/include/openssl/ssl.h")
@@ -1228,7 +1233,6 @@ if tls_enabled && regular_file?(openssl_prefix + "/include/openssl/ssl.h")
   tls_flags.push("-I" + openssl_prefix + "/include")
 if tls_enabled && tls_flags.empty?
   raise "Tungsten build: TLS requested but OpenSSL headers were not found"
-runtime_srcs.push(tls_flags.empty? ? "tls_stub.c" : "tls.c")
 
 nghttp2_prefix = build_homebrew_prefix("libnghttp2")
 http2_flags = []
@@ -1238,8 +1242,6 @@ if http2_enabled && regular_file?(nghttp2_prefix + "/include/nghttp2/nghttp2.h")
   http2_flags.push("-I" + nghttp2_prefix + "/include")
   http2_libs.push("-L" + nghttp2_prefix + "/lib")
   http2_libs.push("-lnghttp2")
-if http2_flags.size > 0
-  runtime_srcs.push("http2.c")
 
 zstd_value = probe_zstd()
 zstd_cflags = split_ws(zstd_value[0])
@@ -1251,11 +1253,32 @@ zstd_available = zstd_libs.size > 0 && env_or_empty("TUNGSTEN_BOOTSTRAP_DISABLE_
 if !zstd_available
   zstd_cflags = []
   zstd_libs = []
-runtime_srcs.push(zstd_available ? "slab_zstd.c" : "slab_zstd_stub.c")
 
-runtime_cc = env_or_empty("TUNGSTEN_CC")
-if runtime_cc == ""
-  runtime_cc = "clang"
+# The compiler's runtime: set `compiler` of runtime/sources.txt (the one list
+# of runtime sources; bootstrap.sh reads the same rows for stage 1) plus one
+# member of each slot the configuration chose. Rows are "file<TAB>cflags".
+runtime_platform = IS_DARWIN ? "darwin" : (IS_LINUX ? "linux" : os_name.downcase)
+runtime_sets = ["compiler"]
+runtime_sets.push(IS_LINUX && env_or_empty("USE_IOURING") != "" ? "event-iouring" : "event")
+runtime_sets.push(tls_flags.empty? ? "tls-stub" : "tls")
+runtime_sets.push(zstd_available ? "zstd" : "zstd-stub")
+if http2_flags.size > 0
+  runtime_sets.push("http2")
+runtime_source_rows = capture("sh " + shq(RUNTIME_DIR + "/sources.sh") + " -f " + shq(runtime_platform) + flags_to_cmd(runtime_sets) + " 2>/dev/null").split("\n")
+runtime_srcs = []
+runtime_src_cflags = {}
+i = 0
+while i < runtime_source_rows.size
+  row = runtime_source_rows[i]
+  if row.strip != ""
+    cols = row.split("\t")
+    runtime_srcs.push(cols[0])
+    runtime_src_cflags[cols[0]] = cols.size > 1 ? cols[1].strip : ""
+  i = i + 1
+if runtime_srcs.empty? || !array_contains?(runtime_srcs, "runtime.c")
+  die(RED + "Could not read the runtime source list (" + RUNTIME_DIR + "/sources.txt via sources.sh)" + RESET)
+
+runtime_cc = preflight_cc()
 runtime_ar = env_or_empty("TUNGSTEN_AR")
 if runtime_ar == ""
   sib = sibling_tool(runtime_cc, "llvm-ar")
@@ -1275,9 +1298,6 @@ if runtime_ranlib != ""
   toolchain_keys.push("TUNGSTEN_RANLIB")
   toolchain_vals.push(runtime_ranlib)
 
-# The BLAS API deliberately writes -Inf for a singular slogdet. Keep all
-# other fast optimizations, but honor non-finite values in this bridge.
-blas_cflags = ["-fno-finite-math-only"]
 # v4: objects are compiled with -ffile-prefix-map so they name runtime/...
 # and "." rather than the checkout that compiled them (the archive is shared).
 runtime_cache_schema = "runtime-cache-v4"
@@ -1313,7 +1333,7 @@ i = 0
 while i < runtime_srcs.size
   runtime_dependency_files.push(RUNTIME_DIR + "/" + runtime_srcs[i])
   i = i + 1
-runtime_tree = capture("find " + shq(RUNTIME_DIR) + " -path " + shq(RUNTIME_DIR + "/tests") + " -prune -o -type f \\( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' \\) -print 2>/dev/null").split("\n")
+runtime_tree = capture("find " + shq(RUNTIME_DIR) + " -path " + shq(RUNTIME_DIR + "/tests") + " -prune -o -type f \\( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' -o -name sources.txt \\) -print 2>/dev/null").split("\n")
 i = 0
 while i < runtime_tree.size
   if runtime_tree[i].strip != ""
@@ -1341,7 +1361,7 @@ runtime_dependency_files = filtered_deps
   Digest.sha256(buf.to_s)
 
 runtime_deps_digest = digest_file_list(runtime_dependency_files)
-runtime_compile_key = Digest.sha256(runtime_cache_schema + "\n" + runtime_deps_digest + "\n" + join_tab(blas_cflags) + "\n" + join_tab(cc_flags) + "\n" + join_tab(runtime_objc_flags) + "\n" + PLATFORM + "\n" + tool_identity(runtime_cc) + "\n" + tool_identity(runtime_ar) + "\n" + AMBIENT_TOOLCHAIN)
+runtime_compile_key = Digest.sha256(runtime_cache_schema + "\n" + runtime_deps_digest + "\n" + runtime_source_rows.join("\n") + "\n" + join_tab(cc_flags) + "\n" + join_tab(runtime_objc_flags) + "\n" + PLATFORM + "\n" + tool_identity(runtime_cc) + "\n" + tool_identity(runtime_ar) + "\n" + AMBIENT_TOOLCHAIN)
 runtime_archive = STAGE_STORE_DIR + "/runtime-" + runtime_compile_key + ".a"
 runtime_handoff_ready = handoff_runtime != "" && regular_file?(handoff_runtime)
 if runtime_handoff_ready
@@ -1380,8 +1400,10 @@ else
     obj_base = src.replace(".c", "").replace(".m", "")
     obj_path = runtime_tmp_dir + "/" + obj_base + ".o"
     flags = src.ends_with?(".m") ? runtime_objc_flags : cc_flags
-    if src == "blas_bridge.c"
-      flags = flags + blas_cflags
+    # per-file flags from the manifest (blas_bridge.c: -fno-finite-math-only, so
+    # that slogdet's singular -Inf survives the fast-math profile)
+    if runtime_src_cflags[src] != nil && runtime_src_cflags[src] != ""
+      flags = flags + split_ws(runtime_src_cflags[src])
     # the two maps: source names and the compilation directory (this driver's cwd), both of which the linker copies
     # into the debug map of everything linked against the archive
     cmd = shq(runtime_cc) + flags_to_cmd(flags) + " -ffile-prefix-map=" + shq(RUNTIME_DIR) + "=runtime -ffile-prefix-map=\"$PWD\"=. " + shq(src_path) + " -o " + shq(obj_path)

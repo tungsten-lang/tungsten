@@ -131,8 +131,9 @@ reservation is cut from 512 MiB to 8 MiB (`-DW_SLAB_MAX_SLOTS=262144`; a full
 slab falls back to heap strings).
 
 ### Runtime sources
-Compiled: `runtime.c tensor_bridge.c ssmr_witness.c lexchar_tables.c
-unicode_tables.c aks.c tls_stub.c slab_zstd_stub.c` — **unmodified** apart from
+Compiled: set `wasm` of `runtime/sources.txt` (`runtime.c aks.c tls_stub.c
+slab_zstd_stub.c ssmr_witness.c lexchar_tables.c unicode_tables.c
+tensor_bridge.c`) — **unmodified** apart from
 item 7; `compat/wasi_compat.h` is force-included and `compat/*.h` supply the
 headers wasi-libc lacks (`ucontext.h execinfo.h spawn.h sys/wait.h netdb.h`).
 Left out: event loops, `terminal_input.c`, Metal/BLAS/HID/MLX bridges,

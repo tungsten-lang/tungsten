@@ -150,7 +150,7 @@ Tungsten is an object-oriented language that reads like the pseudocode in your n
 
 ## Usage
 
-**Prerequisites:** `git`, `clang`, `LLVM`, `make` (and `lld` + `libzstd` headers). LLVM/Clang 22 or newer is recommended.
+**Prerequisites:** `git`, `clang`, `LLVM`, `make` and `libzstd` headers, plus `lld` on Linux (macOS links with the system linker; `lld` is needed there only to build Linux binaries). LLVM/Clang 22 or newer is recommended and is used automatically when installed (`clang-N` on `PATH` or Homebrew's `llvm`).
 
 To check your toolchain:
 
@@ -272,7 +272,9 @@ followed by `/bin/clang`; Tungsten does not assume a Homebrew install root.
 | `TUNGSTEN_FREE`       | 1                             | Compile-time free insertion for non-escaped heap values. Set `TUNGSTEN_FREE=0` to disable.                  |
 | `TUNGSTEN_CLANG_OPT`  | `-O3`                         | Optimization flags for clang. `--fast` defaults this to `-O3 -ffast-math`                                   |
 | `TUNGSTEN_CPU`        | `native`                      | CPU name used when `--cpu` is absent; normally loaded from `[build] cpu` in `~/.tungsten/config`. |
-| `TUNGSTEN_CC`         | `clang`                       | C/LLVM driver; normally loaded from `[build] cc` when configured. |
+| `TUNGSTEN_CC`         | newest LLVM clang ≥ 22, else `clang` | C/LLVM driver for the runtime and every link; normally loaded from `[build] cc` when configured. Unset, the first LLVM clang 22+ among `clang-N` on `PATH` (highest first), Homebrew's `llvm` and `llvm@N` is used (`bin/commands/toolchain.sh cc` prints the choice). |
+| `TUNGSTEN_ROOT`       | the launcher's checkout       | The toolchain a compile uses: its `core/` and `runtime/` both come from here (`bin/tungsten` sets it). Unset, `core/` is the source's nearest checkout. |
+| `TUNGSTEN_LL_DIR`     | `$TMPDIR/tungsten`            | Scratch root for the LLVM IR of a compile. Unset, the IR is deleted after a successful link (kept as `<root>/<name>.ll` for `--emit-ll` or a failed link); set, every program's IR is kept there as `<name>.ll`. `--ll` writes it beside the source. |
 | `TUNGSTEN_MARCH_ARGS` | derived from CPU              | Legacy low-level override for clang CPU flags. Prefer `--cpu` or `[build] cpu`. |
 | `TUNGSTEN_CARRY_UNROLL` | 8                           | LLVM unroll count for `addcarry`/`subborrow` loops. Accepts 0 through 64; 0 disables the hint. |
 | `TUNGSTEN_BACKTRACE`  | off                           | Set to `1` to include full C backtrace in error dumps (defaults to only Tungsten-level frames).             |

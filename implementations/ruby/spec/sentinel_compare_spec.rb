@@ -24,16 +24,17 @@ RSpec.describe "sentinel equality fast path" do
       src = File.join(dir, "#{name}.w")
       File.write(src, source)
       out = File.join(dir, name)
+      # TUNGSTEN_LL_DIR keeps the program's IR as <dir>/<name>.ll after the link
       env = {
         "TUNGSTEN_ROOT" => project_root,
-        "TUNGSTEN_EMIT_LL" => "1",
-        "TUNGSTEN_CACHE_DIR" => File.join(project_root, "build/cache")
+        "TUNGSTEN_LL_DIR" => dir,
+        "TUNGSTEN_CACHE_DIR" => File.join(dir, "cache")
       }
       _o, err, status = Open3.capture3(env, compiler_bin, "compile", src, "--out", out)
       raise "compile failed: #{err}" unless status.success?
       @last_sidemap_path = "#{out}.sidemap"
       @last_sidemap = File.exist?(@last_sidemap_path) ? JSON.parse(File.read(@last_sidemap_path)) : nil
-      ll_path = "/tmp/tungsten/#{name}.ll"
+      ll_path = File.join(dir, "#{name}.ll")
       raise "LL not emitted at #{ll_path}" unless File.exist?(ll_path)
       yield File.read(ll_path), ll_path
     end
@@ -144,16 +145,17 @@ RSpec.describe "sentinel equality fast path" do
         src = File.join(dir, "#{name}.w")
         File.write(src, source)
         bin_out = File.join(dir, name)
+        # TUNGSTEN_LL_DIR keeps the program's IR as <dir>/<name>.ll after the link
         env = {
           "TUNGSTEN_ROOT" => project_root,
-          "TUNGSTEN_EMIT_LL" => "1",
-          "TUNGSTEN_CACHE_DIR" => File.join(project_root, "build/cache")
+          "TUNGSTEN_LL_DIR" => dir,
+          "TUNGSTEN_CACHE_DIR" => File.join(dir, "cache")
         }
         _o, err, status = Open3.capture3(env, compiler_bin, "compile", src, "--out", bin_out)
         raise "compile failed: #{err}" unless status.success?
         @last_sidemap_path = "#{bin_out}.sidemap"
         @last_sidemap = File.exist?(@last_sidemap_path) ? JSON.parse(File.read(@last_sidemap_path)) : nil
-        ll_path = "/tmp/tungsten/#{name}.ll"
+        ll_path = File.join(dir, "#{name}.ll")
         raise "LL not emitted" unless File.exist?(ll_path)
         asm_path = File.join(dir, "#{name}.s")
         _o, err, status = Open3.capture3(clang_bin, "-S", "-O3", "--target=arm64-apple-macos", ll_path, "-o", asm_path)

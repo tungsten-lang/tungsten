@@ -5,10 +5,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 . "$ROOT/bin/commands/config.sh"
 . "$ROOT/bin/commands/system_deps.sh"
+. "$ROOT/bin/commands/toolchain.sh"
 tungsten_load_build_config
 VERSION="$(cat "$ROOT/VERSION" 2>/dev/null || echo dev)"
 COMPILER="$ROOT/bin/tungsten-compiler"
-DOCTOR_CC="${TUNGSTEN_CC:-clang}"
+# The C compiler the build and every program link use (TUNGSTEN_CC, else the
+# toolchain rule in bin/commands/toolchain.sh).
+DOCTOR_CC="$(tungsten_select_cc)"
 
 color=0
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -50,26 +53,14 @@ check() { # check NAME DETAIL OK(0/1)
 
 tool_ok() { command -v "$1" >/dev/null 2>&1; }
 
-clang_major() {
-  "$1" --version 2>/dev/null | head -1 | sed -E 's/.*version[[:space:]]+([0-9]+).*/\1/'
-}
-
+# The LLVM 22+ clang the rule would pick when TUNGSTEN_CC did not override it.
 llvm22_candidate() {
-  local candidate major llvm_prefix llvm22_prefix
-  llvm_prefix="$(tungsten_homebrew_prefix llvm || true)"
-  llvm22_prefix="$(tungsten_homebrew_prefix llvm@22 || true)"
-  for candidate in \
-    "${TUNGSTEN_CC:-}" clang-22 \
-    "${llvm_prefix:+$llvm_prefix/bin/clang}" \
-    "${llvm22_prefix:+$llvm22_prefix/bin/clang}"; do
-    [ -n "$candidate" ] || continue
-    command -v "$candidate" >/dev/null 2>&1 || continue
-    major="$(clang_major "$candidate")"
-    case "$major" in
-      ''|*[!0-9]*) ;;
-      *) if [ "$major" -ge 22 ]; then command -v "$candidate"; return 0; fi ;;
-    esac
-  done
+  local candidate
+  candidate="$(TUNGSTEN_CC='' tungsten_select_cc)"
+  if tungsten_clang_ok "$candidate"; then
+    command -v "$candidate"
+    return 0
+  fi
   return 1
 }
 
@@ -82,9 +73,9 @@ llvm_install_hint() {
         llvm_prefix=""
       fi
       if [ -n "$llvm_prefix" ]; then
-        printf 'brew install llvm lld; set [build] cc = %s/bin/clang in ~/.tungsten/config' "$llvm_prefix"
+        printf 'brew install llvm (used automatically; or set [build] cc = %s/bin/clang in ~/.tungsten/config)' "$llvm_prefix"
       else
-        printf '%s' 'install Homebrew, run brew install llvm lld, then configure Homebrew clang under [build]'
+        printf '%s' 'install Homebrew and run brew install llvm'
       fi
       ;;
     Linux)
@@ -180,7 +171,7 @@ else
   check "clang" "$DOCTOR_CC not found" 0
 fi
 
-selected_major="$(clang_major "$DOCTOR_CC")"
+selected_major="$(tungsten_clang_major "$DOCTOR_CC")"
 preferred_clang="$(llvm22_candidate 2>/dev/null || true)"
 case "$selected_major" in
   ''|*[!0-9]*) selected_major=0 ;;
@@ -196,7 +187,7 @@ fi
 
 configured_cpu="${TUNGSTEN_CPU:-native}"
 configured_cpu_flag="$(cpu_flag "$configured_cpu")"
-cpu_tmp="/tmp/tungsten-cpu-check-$$.o"
+cpu_tmp="${TMPDIR:-/tmp}/tungsten-cpu-check-$$.o"
 if printf 'int main(void){return 0;}\n' | "$DOCTOR_CC" "$configured_cpu_flag" -x c - -c -o "$cpu_tmp" >/dev/null 2>&1; then
   rm -f "$cpu_tmp"
   check "configured CPU" "$configured_cpu ($configured_cpu_flag)" 1
@@ -214,14 +205,20 @@ else
   check "make" "not found" 0
 fi
 
-# Functional lld: can clang link with -fuse-ld=lld?
-lld_tmp="/tmp/tungsten-lld-check-$$"
+# Functional lld: can clang link with -fuse-ld=lld? Linux links every
+# program with it. A native macOS link uses the system linker, so there lld
+# matters only for building Linux binaries (--target <linux triple>).
+lld_tmp="${TMPDIR:-/tmp}/tungsten-lld-check-$$"
 if printf 'int main(void){return 0;}' | "$DOCTOR_CC" -fuse-ld=lld -x c - -o "$lld_tmp" >/dev/null 2>&1; then
   rm -f "$lld_tmp"
   check "lld (clang -fuse-ld=lld)" "ok" 1
 else
   rm -f "$lld_tmp"
-  check "lld (clang -fuse-ld=lld)" "not found" 0
+  if [ "$(uname -s)" = Darwin ]; then
+    check "lld (optional)" "not found — needed only to build Linux binaries (--target)" 1
+  else
+    check "lld (clang -fuse-ld=lld)" "not found" 0
+  fi
 fi
 
 zstd_cflags="$(pkg-config --cflags libzstd 2>/dev/null || true)"
@@ -240,7 +237,7 @@ fi
 # OpenBLAS is optional for an ordinary bootstrap but required by those numeric
 # programs. macOS uses Accelerate instead.
 if [ "$(uname -s)" = Linux ]; then
-  cblas_tmp="/tmp/tungsten-cblas-check-$$"
+  cblas_tmp="${TMPDIR:-/tmp}/tungsten-cblas-check-$$"
   if printf '#include <cblas.h>\nint main(void){return cblas_sdot(0, 0, 1, 0, 1) != 0.0f;}\n' \
        | "$DOCTOR_CC" -x c - -lopenblas -o "$cblas_tmp" \
          >/dev/null 2>&1; then

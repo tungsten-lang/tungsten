@@ -57,10 +57,12 @@ esac
 BOOT_LOG=$(mktemp /tmp/stage0-boot-XXXXXX.log)
 SAMPLE_60S=$(mktemp /tmp/stage0-s60-XXXXXX.txt)
 SAMPLE_5M=$(mktemp /tmp/stage0-s5m-XXXXXX.txt)
-rm -f /tmp/tungsten/hello.ll 2>/dev/null
+# TUNGSTEN_LL_DIR keeps the compiled program's IR as $HELLO_LL_DIR/hello.ll.
+HELLO_LL_DIR=/tmp/tungsten
+rm -f "$HELLO_LL_DIR/hello.ll" 2>/dev/null
 
 t0=$(date +%s)
-stdbuf -o0 -e0 "$STAGE0" \
+TUNGSTEN_LL_DIR="$HELLO_LL_DIR" stdbuf -o0 -e0 "$STAGE0" \
   "$ROOT/compiler/tungsten.w" compile "$ROOT/compiler/test/fixtures/hello.w" --verbose \
   > "$BOOT_LOG" 2>&1 &
 BOOT_PID=$!
@@ -110,9 +112,9 @@ t1=$(date +%s)
 BOOT_S=$(( t1 - t0 ))
 
 # 4) Detect outcome
-if [ -f /tmp/tungsten/hello.ll ]; then
+if [ -f "$HELLO_LL_DIR/hello.ll" ]; then
   BOOT_STATUS="OK"
-  HELLO_LL_BYTES=$(stat -f %z /tmp/tungsten/hello.ll 2>/dev/null || stat -c %s /tmp/tungsten/hello.ll || echo 0)
+  HELLO_LL_BYTES=$(stat -f %z "$HELLO_LL_DIR/hello.ll" 2>/dev/null || stat -c %s "$HELLO_LL_DIR/hello.ll" || echo 0)
 else
   if [ "$BOOT_RC" -eq 0 ]; then
     BOOT_STATUS="EXIT0_NO_LL"

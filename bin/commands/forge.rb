@@ -8,13 +8,17 @@ require File.join(ROOT, "implementations/ruby/lib/tungsten/system_dependencies")
 # ── Compile infrastructure (mirrors compile.rb) ──────────────────
 
 PRINT_IR    = File.join(ROOT, "compiler/print_ir.w")
-RUNTIME_C   = File.join(ROOT, "runtime/runtime.c")
 RUNTIME_DIR = File.join(ROOT, "runtime")
-TERMINAL_INPUT_C = File.join(RUNTIME_DIR, "terminal_input.c")
-EVENT_SRCS  = Dir[File.join(RUNTIME_DIR, "event_*.c")]
-TLS_C       = File.join(RUNTIME_DIR, "tls.c")
-TLS_STUB_C  = File.join(RUNTIME_DIR, "tls_stub.c")
 LINUX       = RUBY_PLATFORM =~ /linux/
+
+# runtime/sources.txt is the one list of runtime sources (read through
+# runtime/sources.sh): absolute paths of the files in any of SETS here.
+def forge_runtime_sources(*sets)
+  platform = LINUX ? "linux" : (RUBY_PLATFORM =~ /darwin/ ? "darwin" : RUBY_PLATFORM)
+  out = IO.popen(["sh", File.join(RUNTIME_DIR, "sources.sh"), platform, *sets], &:read)
+  raise "could not read #{File.join(RUNTIME_DIR, "sources.txt")}" unless $?.success?
+  out.split("\n").reject(&:empty?).map { |file| File.join(RUNTIME_DIR, file) }
+end
 
 require File.join(ROOT, "implementations/ruby/lib/tungsten/build_flags")
 # Forge builds a local dev app server (never a distributed artifact), so it is
@@ -54,7 +58,6 @@ NGHTTP2_PREFIX = if HTTP2_ENABLED
                      Tungsten::SystemDependencies.brew_header("libnghttp2", "nghttp2/nghttp2.h"),
                    )
                  end
-HTTP2_C = HTTP2_ENABLED && NGHTTP2_PREFIX ? File.join(RUNTIME_DIR, "http2.c") : nil
 HTTP2_FLAGS = if HTTP2_ENABLED && NGHTTP2_PREFIX
                 f = ["-DTUNGSTEN_HTTP2"]
                 f += ["-I#{NGHTTP2_PREFIX}/include", "-L#{NGHTTP2_PREFIX}/lib"] unless NGHTTP2_PREFIX == "/usr"
@@ -63,10 +66,10 @@ HTTP2_FLAGS = if HTTP2_ENABLED && NGHTTP2_PREFIX
                 []
               end
 
-AKS_C    = File.join(RUNTIME_DIR, "aks.c")
-SSMR_C   = File.join(RUNTIME_DIR, "ssmr_witness.c")
-HAMMER_C = File.join(RUNTIME_DIR, "hammer.c")
-FORGE_EXTRA_SRCS  = [(TLS_ENABLED ? TLS_C : TLS_STUB_C), HTTP2_C, (File.exist?(SSMR_C) ? SSMR_C : nil), (File.exist?(AKS_C) ? AKS_C : nil), (File.exist?(HAMMER_C) ? HAMMER_C : nil)].compact
+FORGE_RUNTIME_SRCS = forge_runtime_sources(
+  "program", "event", (TLS_ENABLED ? "tls" : "tls-stub"),
+  *(HTTP2_ENABLED && NGHTTP2_PREFIX ? ["http2"] : []), "companion:prime",
+).freeze
 FORGE_EXTRA_FLAGS = TLS_FLAGS + HTTP2_FLAGS
 
 # ── Defaults ─────────────────────────────────────────────────────
@@ -120,7 +123,7 @@ def compile_forge_app(source_path, output_path)
     ll_file = output_path + ".ll"
     File.write(ll_file, ir)
     ok = system("clang", *FORGE_CLANG_FLAGS, *FORGE_EXTRA_FLAGS, "-Wno-override-module",
-                RUNTIME_C, TERMINAL_INPUT_C, *EVENT_SRCS, *FORGE_EXTRA_SRCS, ll_file, "-o", output_path,
+                *FORGE_RUNTIME_SRCS, ll_file, "-o", output_path,
                 err: File::NULL)
     File.delete(ll_file) if File.exist?(ll_file)
     ok

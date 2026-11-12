@@ -87,22 +87,12 @@
 # a child interpreter with the spec environment of the root gate. Compiled: a
 # plain `tungsten spec/x_test.w` with that environment removed (the wrapper
 # itself runs under it) and no terminal to read from.
-#
-# Both drop TUNGSTEN_COMPILER_IMAGE. The wrapper runs inside the interpreter
-# image, which marks its own environment with TUNGSTEN_COMPILER_IMAGE=repl so
-# that it does not delegate to itself (compiler/lib/driver/link.w,
-# delegate_compiler_image). A child inherits the mark, and a child
-# `tungsten run --interpret` that carries it does not delegate to the
-# interpreter image either: it dies with "undefined method 'new' for nil" at
-# compiler/tungsten.w, which failed every test of every interpreted shard.
-# TODO: the image should take the mark out of its environment once it has
-# read it (compiler/tungsten_driver.w), after which this `-u` can go.
 -> mfu_command(kind, tungsten, path)
   if kind == "unit"
-    return "env -u TUNGSTEN_COMPILER_IMAGE TUNGSTEN_INTERPRETED_SPEC=1 TUNGSTEN_SPEC_QUIET=1 '" + tungsten + "' run --interpret '" + path + "'"
+    return "env TUNGSTEN_INTERPRETED_SPEC=1 TUNGSTEN_SPEC_QUIET=1 '" + tungsten + "' run --interpret '" + path + "'"
   bound = mfu_native_timeout
   guard = bound > 0 ? "perl -e 'alarm shift; exec @ARGV' " + bound.to_s + " " : ""
-  guard + "env -u TUNGSTEN_INTERPRETED_SPEC -u TUNGSTEN_SPEC_QUIET -u TUNGSTEN_COMPILER_IMAGE '" + tungsten + "' '" + path + "' < /dev/null"
+  guard + "env -u TUNGSTEN_INTERPRETED_SPEC -u TUNGSTEN_SPEC_QUIET '" + tungsten + "' '" + path + "' < /dev/null"
 
 # Runs the tests of one shard, one child process at a time, from the bit
 # root (the tests `use ../lib/...` relative to their file and write only to

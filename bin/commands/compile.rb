@@ -5,7 +5,6 @@ require File.join(ROOT, "implementations/ruby/lib/tungsten/system_dependencies")
 PRINT_IR    = File.join(ROOT, "compiler/print_ir.w")
 PRINT_AST   = File.join(ROOT, "compiler/print_ast.w")
 EMIT_IR     = File.join(ROOT, "compiler/print_ir.w")
-RUNTIME_C   = File.join(ROOT, "runtime/runtime.c")
 RUNTIME_DIR = File.join(ROOT, "runtime")
 
 # The build store shared by every checkout, and the compiler cache directory
@@ -28,12 +27,18 @@ def tungsten_cache_dir
   return explicit unless explicit.nil? || explicit.empty?
   File.join(tungsten_build_store_dir, "compile")
 end
-TERMINAL_INPUT_C = File.join(RUNTIME_DIR, "terminal_input.c")
-SLAB_ZSTD_C = File.join(RUNTIME_DIR, "slab_zstd.c")
-TLS_C       = File.join(RUNTIME_DIR, "tls.c")
-TLS_STUB_C  = File.join(RUNTIME_DIR, "tls_stub.c")
 LINUX = RUBY_PLATFORM =~ /linux/
 MACOS = RUBY_PLATFORM =~ /darwin/
+
+# runtime/sources.txt is the one list of runtime sources; runtime/sources.sh
+# reads it for the shell, make and Ruby builds. Absolute paths of the files
+# in any of SETS on this platform.
+RUNTIME_PLATFORM = if MACOS then "darwin" elsif LINUX then "linux" else RUBY_PLATFORM end
+def runtime_sources(*sets)
+  out, status = Open3.capture2("sh", File.join(RUNTIME_DIR, "sources.sh"), RUNTIME_PLATFORM, *sets)
+  raise "could not read #{File.join(RUNTIME_DIR, "sources.txt")}" unless status.success?
+  out.split("\n").reject(&:empty?).map { |file| File.join(RUNTIME_DIR, file) }
+end
 # Optimized native-object linking by default; full LTO via --release and
 # explicit thin LTO via --lto. The ordinary profile retains debug checks and
 # source metadata, while --dev selects the intentionally unoptimized path.
@@ -208,14 +213,14 @@ NGHTTP2_PREFIX = if HTTP2_ENABLED
                    )
                  end
 if HTTP2_ENABLED && NGHTTP2_PREFIX
-  HTTP2_C = File.join(RUNTIME_DIR, "http2.c")
+  HTTP2_SETS = ["http2"].freeze
   HTTP2_FLAGS = begin
     f = ["-DTUNGSTEN_HTTP2"]
     f += ["-I#{NGHTTP2_PREFIX}/include", "-L#{NGHTTP2_PREFIX}/lib"] unless NGHTTP2_PREFIX == "/usr"
     f + ["-lnghttp2"]
   end
 else
-  HTTP2_C     = nil
+  HTTP2_SETS  = [].freeze
   HTTP2_FLAGS = []
 end
 
@@ -234,7 +239,7 @@ NGHTTP3_PREFIX = if HTTP3_ENABLED
                    )
                  end
 if HTTP3_ENABLED && NGTCP2_PREFIX && NGHTTP3_PREFIX
-  HTTP3_C = File.join(RUNTIME_DIR, "http3.c")
+  HTTP3_SETS = ["http3"].freeze
   HTTP3_FLAGS = begin
     f = ["-DTUNGSTEN_HTTP3"]
     f += ["-I#{NGTCP2_PREFIX}/include", "-L#{NGTCP2_PREFIX}/lib"] unless NGTCP2_PREFIX == "/usr"
@@ -243,7 +248,7 @@ if HTTP3_ENABLED && NGTCP2_PREFIX && NGHTTP3_PREFIX
     f + ["-lnghttp3"]
   end
 else
-  HTTP3_C     = nil
+  HTTP3_SETS  = [].freeze
   HTTP3_FLAGS = []
 end
 
@@ -256,46 +261,25 @@ URING_FLAGS = if LINUX && ENV["USE_IOURING"] && find_header("/usr/include/liburi
                 []
               end
 
-EVENT_SRCS = if MACOS
-               [File.join(RUNTIME_DIR, "event_kqueue.c")]
-             elsif LINUX && URING_FLAGS.any?
-               [File.join(RUNTIME_DIR, "event_iouring.c")]
-             elsif LINUX
-               [File.join(RUNTIME_DIR, "event_epoll.c")]
-             else
-               Dir[File.join(RUNTIME_DIR, "event_*.c")].sort
-             end
-
-AKS_C       = File.join(RUNTIME_DIR, "aks.c")
-SSMR_C      = File.join(RUNTIME_DIR, "ssmr_witness.c")
-HAMMER_C    = File.join(RUNTIME_DIR, "hammer.c")
-METAL_M     = File.join(RUNTIME_DIR, "metal.m")
-GRAPHICS_M  = File.join(RUNTIME_DIR, "graphics.m")
-# hid_bridge.m: USB-HID (Elgato Stream Deck + dials) for the REPL scrub loop.
-# Needed in the compiled compiler binary because repl.w calls w_hid_streamdeck_*.
-HID_M       = File.join(RUNTIME_DIR, "hid_bridge.m")
+# The program runtime: set `program` plus the event backend, TLS or its stub,
+# and the opt-in servers.
+PROGRAM_RUNTIME_SRCS = runtime_sources(
+  "program",
+  (URING_FLAGS.any? ? "event-iouring" : "event"),
+  (TLS_ENABLED && OPENSSL_PREFIX ? "tls" : "tls-stub"),
+  *HTTP2_SETS, *HTTP3_SETS,
+).freeze
 METAL_FRAMEWORK_FLAGS = MACOS ? ["-framework", "Metal", "-framework", "Foundation", "-framework", "IOKit", "-framework", "CoreFoundation"] : []
 GRAPHICS_FRAMEWORK_FLAGS = MACOS ? ["-framework", "AppKit", "-framework", "QuartzCore", "-framework", "CoreGraphics"] : []
 ACCELERATE_FRAMEWORK_FLAGS = MACOS ? ["-framework", "Accelerate"] : []
-EXTRA_SRCS  = [(TLS_ENABLED && OPENSSL_PREFIX ? TLS_C : TLS_STUB_C), HTTP2_C, HTTP3_C, (File.exist?(AKS_C) ? AKS_C : nil), (File.exist?(HAMMER_C) ? HAMMER_C : nil)].compact
-LEXCHAR_TABLES_C = File.join(RUNTIME_DIR, "lexchar_tables.c")
-UNICODE_TABLES_C = File.join(RUNTIME_DIR, "unicode_tables.c")
 EXTRA_FLAGS = TLS_FLAGS + HTTP2_FLAGS + HTTP3_FLAGS + URING_FLAGS
-BLAS_BRIDGE_C = File.join(RUNTIME_DIR, "blas_bridge.c")
-# The Apple GPU/HID bridges (and their frameworks, mostly via ObjC
-# autolinking) are linked ONLY when the program's IR references a bridge
-# symbol; otherwise the runtime's W_NO_APPLE_BRIDGES stubs stand in and the
-# binary skips Metal/Foundation/IOKit/AppKit entirely (~2ms warm and far
-# cheaper first-run dyld closure).
-BRIDGE_SRCS = [
-  (MACOS && File.exist?(METAL_M) ? METAL_M : nil),
-  (MACOS && File.exist?(HID_M) ? HID_M : nil)
-].compact
+# The Apple GPU/HID/graphics bridges (and their frameworks) are linked ONLY
+# when the program's IR references a bridge symbol (companion:bridges in the
+# manifest, as the compiled driver links them); otherwise the runtime's
+# W_NO_APPLE_BRIDGES stubs stand in and the binary skips Metal/Foundation/
+# IOKit/AppKit entirely (~2ms warm and far cheaper first-run dyld closure).
 def ir_needs_apple_bridges?(ir)
   MACOS && ir.match?(/@"?w_(metal|hid|gpu|gfx|fused_gpu)_/)
-end
-def ir_needs_graphics_bridge?(ir)
-  MACOS && ir.match?(/@"?w_gfx_/)
 end
 def ir_needs_blas?(ir)
   MACOS && ir.match?(/@"?w_blas_/)
@@ -766,31 +750,29 @@ when ".w"
     end
 
     clang_flags = CLANG_FLAGS + EXTRA_FLAGS + ["-I#{RUNTIME_DIR}"] + extra_clang_flags
-    clang_sources = [RUNTIME_C, TERMINAL_INPUT_C, *EVENT_SRCS, *EXTRA_SRCS, *extra_c_includes]
+    clang_sources = [*PROGRAM_RUNTIME_SRCS, *extra_c_includes]
+    companions = []
     if ir_needs_apple_bridges?(ir)
-      clang_flags += METAL_FRAMEWORK_FLAGS
-      clang_sources += BRIDGE_SRCS
-      if ir_needs_graphics_bridge?(ir)
-        clang_flags += GRAPHICS_FRAMEWORK_FLAGS
-        clang_sources << GRAPHICS_M if File.exist?(GRAPHICS_M)
-      end
+      clang_flags += METAL_FRAMEWORK_FLAGS + GRAPHICS_FRAMEWORK_FLAGS
+      companions << "companion:bridges"
     end
     if ir_needs_blas?(ir)
       clang_flags += ACCELERATE_FRAMEWORK_FLAGS
-      clang_sources << BLAS_BRIDGE_C
+      companions << "companion:blas"
     end
-    clang_sources << SSMR_C if ir_needs_ssmr?(ir) && File.exist?(SSMR_C)
-    if (ir.include?("w_string_normalize") || ir.include?("w_string_grapheme_next") || ir.include?("w_approx_eq")) && File.exist?(UNICODE_TABLES_C)
-      clang_sources << UNICODE_TABLES_C
+    companions << "companion:prime" if ir_needs_ssmr?(ir)
+    if ir.include?("w_string_normalize") || ir.include?("w_string_grapheme_next") || ir.include?("w_approx_eq")
+      companions << "companion:unicode"
     end
-    clang_sources << LEXCHAR_TABLES_C if ir_needs_lexchars?(ir) && File.exist?(LEXCHAR_TABLES_C)
+    companions << "companion:lexchars" if ir_needs_lexchars?(ir)
+    clang_sources += runtime_sources(*companions) unless companions.empty?
     # (no else: runtime.c's weak bridge stubs stand in when the .m files are
     # not linked — same mechanism as the fast path in compiler/tungsten.w)
     link_flags = extra_link_flags
     if ir_needs_zstd_runtime?(ir)
       zstd_cflags, zstd_libs = zstd_flags
       clang_flags += zstd_cflags + zstd_libs
-      clang_sources << SLAB_ZSTD_C
+      clang_sources += runtime_sources("zstd")
     end
 
     if out_path

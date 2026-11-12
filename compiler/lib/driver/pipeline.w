@@ -346,6 +346,8 @@
 # source and output paths so it can skip every compiler phase. This cache keys
 # the actual emitted LLVM instead, after lowering/emission have established
 # that two builds are semantically the same link input.
+# Every runtime file (dev_runtime_tree_files: the companions a program links
+# only when its IR needs them, and runtime/sources.txt, included) by mtime.
 -> link_artifact_cache_dependency_identity
   rows = []
   runtime = incremental_runtime_entries()
@@ -353,29 +355,7 @@
   while i < runtime.size()
     rows.push(runtime[i][0] + ":" + runtime[i][1].to_s())
     i += 1
-
-  # Companions are linked only when referenced, but including every existing
-  # source is a cheap conservative invalidation rule and avoids duplicating the
-  # feature-gating logic here. Missing optional files are represented too.
-  runtime_dir = resolve_runtime_dir()
-  companions = runtime_companion_sources()
-  i = 0
-  while i < companions.size()
-    path = runtime_dir + companions[i]
-    mt = file_mtime_ns(path)
-    rows.push(path + ":" + (mt == nil ? "missing" : mt.to_s()))
-    i += 1
   rows.join("|")
-
-# Gated runtime sources link_binary adds as explicit sources when a program's
-# IR needs them (plus the headers only they include). Both binary caches key
-# on their mtimes, so editing a bridge rebuilds the programs that link it.
--> runtime_companion_sources
-  ["ssmr_witness.c", "lexchar_tables.c", "unicode_tables.c", "blas_bridge.c",
-   "sparse_bridge.c", "metal.m", "graphics.m", "hid_bridge.m", "quartz.c", "quartz.h",
-   "media/media.c", "media/media_avf.m", "media/media.h",
-   "sci_io_native.c", "tensor_bridge.c", "openblas_bridge.c",
-   zstd_runtime_source()]
 
 -> link_artifact_cache_runtime_identity(runtime_objs)
   if runtime_objs == nil
@@ -494,21 +474,13 @@
   while i < files.size()
     parts.push(files[i][1].to_s() + "\t" + incremental_abs_path(files[i][0]))
     i += 1
+  # Every runtime file, the gated companions (metal.m, quartz.c, ...) that
+  # link_binary compiles into the binary included.
   rt = incremental_runtime_entries
   ri = 0
   while ri < rt.size()
     parts.push(rt[ri][1].to_s() + "\t" + rt[ri][0])
     ri += 1
-  # Gated companions (metal.m, quartz.c, …) are compiled into the binary at
-  # link time, not into the runtime archive the rows above cover.
-  companion_dir = resolve_runtime_dir()
-  companions = runtime_companion_sources()
-  ci = 0
-  while ci < companions.size()
-    cm = file_mtime_ns(companion_dir + companions[ci])
-    if cm != nil
-      parts.push(cm.to_s() + "\t" + companion_dir + companions[ci])
-    ci += 1
   # @gpu sidecars are emitted next to the SOURCE; recording them as rows
   # means a deleted sidecar mtimes to nil at probe time and forces the
   # rebuild that regenerates it.
@@ -582,13 +554,17 @@
     return true
 
   if emit_ll_only_arg
-    if implicit_ll && !publish_implicit_ll_path(ll_path, file_path)
+    if implicit_ll && !retire_implicit_ll_path(ll_path, file_path, true)
       return false
     return true
 
   ok = link_binary(ll_path, out_path, runtime_archive, verbose)
-  if implicit_ll && !publish_implicit_ll_path(ll_path, file_path)
-    ok = false
+  if implicit_ll
+    keep_ll_file = keep_implicit_ll?(ok)
+    if !retire_implicit_ll_path(ll_path, file_path, keep_ll_file)
+      ok = false
+    elsif !ok
+      ccall("w_eputs", "LLVM IR kept at " + implicit_ll_kept_path(file_path))
 
   if ok
     if !quiet

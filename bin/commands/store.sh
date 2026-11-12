@@ -79,7 +79,7 @@ tungsten_compiler_fingerprint() {
       find compiler -maxdepth 1 -type f -name '*.w' -print
       find compiler/lib core languages/tungsten/lexers -type f -name '*.w' -print 2>/dev/null
       find runtime -path runtime/tests -prune -o -type f \
-        \( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' \) -print
+        \( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' -o -name sources.txt \) -print
       find implementations/c/src implementations/c/include -type f \
         \( -name '*.c' -o -name '*.h' -o -name '*.inc' \) -print 2>/dev/null
       for path in implementations/c/Makefile languages/tungsten/tungsten.lex64 \

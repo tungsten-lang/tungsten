@@ -211,7 +211,11 @@ CACHE="$STORE/stages"
 RUNTIME_DIR="$ROOT/runtime"
 RUNTIME_A=""
 STAGE1=""
-BOOTSTRAP_CC="${TUNGSTEN_CC:-clang}"
+# The C compiler for the VM, the runtime and every link: TUNGSTEN_CC, else the
+# toolchain rule the compiler applies to every program (an LLVM clang >= 22
+# when one is installed; bin/commands/toolchain.sh). Stage 1 inherits it.
+. "$ROOT/bin/commands/toolchain.sh"
+BOOTSTRAP_CC="$(tungsten_select_cc)"
 BOOTSTRAP_AR="${TUNGSTEN_AR:-ar}"
 TOOLCHAIN_ENV_ID="${SDKROOT:-}|${MACOSX_DEPLOYMENT_TARGET:-}|${CPATH:-}|${C_INCLUDE_PATH:-}|${CPLUS_INCLUDE_PATH:-}|${LIBRARY_PATH:-}|${PKG_CONFIG_PATH:-}|${PKG_CONFIG_LIBDIR:-}"
 mkdir -p "$CACHE"
@@ -298,10 +302,17 @@ fi
 # ── 3. Runtime archive ──────────────────────────────────────────
 step "Runtime archive"
 UNAME_S="$(uname -s)"
+# runtime/sources.txt is the one list of runtime sources; this build takes
+# set `compiler` (as bin/commands/build.w does) plus one member of each slot.
 case "$UNAME_S" in
-  Darwin) EVENT_SRC=event_kqueue.c; METAL_SRCS="metal.m blas_bridge.c hid_bridge.m" ;;
-  *)      EVENT_SRC=event_epoll.c;  METAL_SRCS="" ;;
+  Darwin) RUNTIME_PLATFORM=darwin ;;
+  Linux)  RUNTIME_PLATFORM=linux ;;
+  *)      RUNTIME_PLATFORM="$(printf '%s' "$UNAME_S" | tr '[:upper:]' '[:lower:]')" ;;
 esac
+RUNTIME_SETS="compiler event"
+if [ "$RUNTIME_PLATFORM" = linux ] && [ -n "${USE_IOURING:-}" ]; then
+  RUNTIME_SETS="compiler event-iouring"
+fi
 
 if [ -n "${TUNGSTEN_ZSTD_CFLAGS+x}" ]; then
   zstd_cflags="$TUNGSTEN_ZSTD_CFLAGS"
@@ -342,7 +353,7 @@ if [ "$disable_zstd" -eq 0 ]; then
 fi
 
 if [ "$zstd_available" -eq 1 ]; then
-  ZSTD_RUNTIME_SRC=slab_zstd.c
+  RUNTIME_SETS="$RUNTIME_SETS zstd"
 else
   # A failed probe silently downgrades to the stub only on the auto-detect
   # path. Explicitly configured zstd flags are a statement of intent: if
@@ -355,7 +366,7 @@ else
     printf '       Fix the flags, unset them for auto-detection, or set TUNGSTEN_BOOTSTRAP_DISABLE_ZSTD=1.\n' >&2
     exit 1
   fi
-  ZSTD_RUNTIME_SRC=slab_zstd_stub.c
+  RUNTIME_SETS="$RUNTIME_SETS zstd-stub"
   zstd_cflags=""
   zstd_libs=""
 fi
@@ -363,7 +374,6 @@ fi
 tls_flags=""
 http2_flags=""
 http2_libs=""
-EXTRA_RUNTIME_SRCS=""
 if [ -n "${TLS+x}" ] || [ -n "${TUNGSTEN_TLS+x}" ]; then
   openssl_cflags="$(pkg-config --cflags openssl 2>/dev/null || true)"
   openssl_prefix="$(tungsten_homebrew_prefix openssl@3 || true)"
@@ -375,26 +385,33 @@ if [ -n "${TLS+x}" ] || [ -n "${TUNGSTEN_TLS+x}" ]; then
     die "TLS requested but OpenSSL headers were not found"
   fi
   tls_flags="-DTUNGSTEN_TLS $openssl_cflags"
-  EXTRA_RUNTIME_SRCS="$EXTRA_RUNTIME_SRCS tls.c"
+  RUNTIME_SETS="$RUNTIME_SETS tls"
 else
-  EXTRA_RUNTIME_SRCS="$EXTRA_RUNTIME_SRCS tls_stub.c"
+  RUNTIME_SETS="$RUNTIME_SETS tls-stub"
 fi
 if [ -n "${HTTP2+x}" ] || [ -n "${TUNGSTEN_HTTP2+x}" ]; then
   nghttp2_prefix="$(tungsten_homebrew_prefix libnghttp2 || true)"
   if [ -n "$nghttp2_prefix" ] && [ -f "$nghttp2_prefix/include/nghttp2/nghttp2.h" ]; then
-    EXTRA_RUNTIME_SRCS="$EXTRA_RUNTIME_SRCS http2.c"
+    RUNTIME_SETS="$RUNTIME_SETS http2"
     http2_flags="-DTUNGSTEN_HTTP2 -I$nghttp2_prefix/include"
     http2_libs="-L$nghttp2_prefix/lib -lnghttp2"
   fi
 fi
 
-RUNTIME_SRCS=(
-  runtime.c terminal_input.c ssmr_witness.c lexchar_tables.c aks.c
-  "$ZSTD_RUNTIME_SRC" "$EVENT_SRC"
-)
-# shellcheck disable=SC2206
-for m in $METAL_SRCS; do RUNTIME_SRCS+=("$m"); done
-for m in $EXTRA_RUNTIME_SRCS; do RUNTIME_SRCS+=("$m"); done
+# "file<TAB>extra cflags" rows, in manifest order.
+RUNTIME_SRCS=()
+RUNTIME_SRC_CFLAGS=()
+# shellcheck disable=SC2086
+runtime_rows="$(sh "$RUNTIME_DIR/sources.sh" -f "$RUNTIME_PLATFORM" $RUNTIME_SETS)" ||
+  die "could not read the runtime source list ($RUNTIME_DIR/sources.txt)"
+while IFS="$(printf '\t')" read -r src extra; do
+  [ -n "$src" ] || continue
+  RUNTIME_SRCS+=("$src")
+  RUNTIME_SRC_CFLAGS+=("$extra")
+done <<EOF_RUNTIME_ROWS
+$runtime_rows
+EOF_RUNTIME_ROWS
+[ "${#RUNTIME_SRCS[@]}" -gt 0 ] || die "the runtime source list is empty"
 
 if [ "$RELEASE" -eq 1 ]; then PROFILE_OPT=-O3; else PROFILE_OPT=-O1; fi
 if [ "$DEBUG_ENABLED" -eq 1 ]; then DEBUG_CFLAG=-g; else DEBUG_CFLAG=-DNDEBUG; fi
@@ -408,7 +425,7 @@ runtime_objc_flags=("$PROFILE_OPT" "$DEBUG_CFLAG" "${HOST_CPU_FLAGS[@]}" -c -x o
 RUNTIME_INPUTS=()
 while IFS= read -r path; do RUNTIME_INPUTS+=("$path"); done < <(
   find "$RUNTIME_DIR" -path "$RUNTIME_DIR/tests" -prune -o -type f \
-    \( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' \) -print | LC_ALL=C sort
+    \( -name '*.c' -o -name '*.h' -o -name '*.inc' -o -name '*.m' -o -name sources.txt \) -print | LC_ALL=C sort
 )
 # Objects name runtime/... and "." instead of this checkout's path (source
 # names and the compilation directory, which the linker copies into the
@@ -417,7 +434,7 @@ RUNTIME_PATH_MAPS=("-ffile-prefix-map=$RUNTIME_DIR=runtime" "-ffile-prefix-map=$
 runtime_identity="$({
   printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
     "bootstrap-runtime-v2" "$UNAME_S" "${cflags[*]}" "${runtime_objc_flags[*]}" \
-    "${RUNTIME_SRCS[*]}" \
+    "${RUNTIME_SRCS[*]}|${RUNTIME_SRC_CFLAGS[*]}" \
     "$(tool_identity "$BOOTSTRAP_CC")" "$(tool_identity "$BOOTSTRAP_AR")" \
     "$TOOLCHAIN_ENV_ID"
   for path in "${RUNTIME_INPUTS[@]}"; do
@@ -439,12 +456,15 @@ else
   objs=()
   compile_pids=()
   compile_names=()
-  for src in "${RUNTIME_SRCS[@]}"; do
-    obj="$tmpdir/${src%.*}.o"
+  for i in "${!RUNTIME_SRCS[@]}"; do
+    src="${RUNTIME_SRCS[$i]}"
+    # shellcheck disable=SC2206
+    extra=(${RUNTIME_SRC_CFLAGS[$i]})
+    obj="$tmpdir/$(basename "${src%.*}").o"
     if [[ "$src" == *.m ]]; then
-      "$BOOTSTRAP_CC" "${runtime_objc_flags[@]}" "${RUNTIME_PATH_MAPS[@]}" "$RUNTIME_DIR/$src" -o "$obj" &
+      "$BOOTSTRAP_CC" "${runtime_objc_flags[@]}" ${extra[@]+"${extra[@]}"} "${RUNTIME_PATH_MAPS[@]}" "$RUNTIME_DIR/$src" -o "$obj" &
     else
-      "$BOOTSTRAP_CC" "${cflags[@]}" "${RUNTIME_PATH_MAPS[@]}" -c "$RUNTIME_DIR/$src" -o "$obj" &
+      "$BOOTSTRAP_CC" "${cflags[@]}" ${extra[@]+"${extra[@]}"} "${RUNTIME_PATH_MAPS[@]}" -c "$RUNTIME_DIR/$src" -o "$obj" &
     fi
     compile_pids+=("$!")
     compile_names+=("$src")
@@ -538,7 +558,7 @@ if [ "$FORCE" -eq 0 ] && stage1_cache_complete; then
   touch "$STAGE1" "$STAGE1.ll" "$STAGE1.sidemap" "$STAGE1_COMPLETE" 2>/dev/null || true
   ok "CACHED" "$STAGE1"
 else
-  stage1_log="/tmp/tungsten-bootstrap-stage1.log"
+  stage1_log="${TMPDIR:-/tmp}/tungsten-bootstrap-stage1-$$.log"
   stage1_tmp="$CACHE/.bootstrap-stage1-$stage1_identity.$$"
   rm -f "$stage1_tmp" "$stage1_tmp.ll" "$stage1_tmp.sidemap"
   # Development bootstrap keeps the fast cached-runtime/no-LTO path. A
@@ -562,6 +582,7 @@ else
     rm -f "$stage1_tmp" "$stage1_tmp.ll" "$stage1_tmp.sidemap"
     exit 1
   fi
+  rm -f "$stage1_log"
   if [ "$UNAME_S" = Darwin ]; then
     codesign --force -s - "$stage1_tmp" >/dev/null 2>&1 || \
       die "failed to ad-hoc sign stage 1"
@@ -606,10 +627,13 @@ step "Build orchestrator: bin/commands/build"
 if [ -x "$BUILD_BIN" ] && [ ! "$BUILD_W" -nt "$BUILD_BIN" ] && [ ! "$STAGE1" -nt "$BUILD_BIN" ]; then
   ok "CACHED" "${BUILD_BIN#$ROOT/}"
 else
-  BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
-    "$STAGE1" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto \
-    >/tmp/tungsten-bootstrap-buildw.log 2>&1 \
-    || die "failed to compile bin/commands/build.w (see /tmp/tungsten-bootstrap-buildw.log)"
+  buildw_log="${TMPDIR:-/tmp}/tungsten-bootstrap-buildw-$$.log"
+  if ! BIT_HOME="$ROOT/bits" TUNGSTEN_ROOT="$ROOT" \
+      "$STAGE1" compile "$BUILD_W" --out "$BUILD_BIN" --no-lto >"$buildw_log" 2>&1; then
+    tail -n 40 "$buildw_log" >&2
+    die "failed to compile bin/commands/build.w (see $buildw_log)"
+  fi
+  rm -f "$buildw_log"
   if [ "$UNAME_S" = Darwin ]; then
     codesign --force -s - "$BUILD_BIN" >/dev/null 2>&1 || true
   fi

@@ -110,6 +110,19 @@ just slow code down but reorders algorithm rankings: branchless kernels lose
 `TUNGSTEN_FREE=0` disables the `free` calls the compiler inserts for
 non-escaping heap values, which helps rule out ownership bugs.
 
+The toolchain a command uses is one root: `bin/tungsten` sets `TUNGSTEN_ROOT`
+to its checkout, and both `core/` and `runtime/` come from there, even for a
+source inside another checkout (run that checkout's own `bin/tungsten` to use
+its core). With `TUNGSTEN_ROOT` unset, `core/` is the source's nearest
+checkout, and the compiler warns when that is not the tree whose `runtime/`
+it links. One C compiler builds everything: `TUNGSTEN_CC` (or `[build] cc`),
+else the first LLVM clang 22+ among `clang-N`, Homebrew `llvm`, `llvm@N`,
+else `clang` (`bin/commands/toolchain.sh cc` prints it; the compiler applies
+the same rule, `scripts/test-host-cc-rule.sh`). A compile's LLVM IR lives in
+a private directory under `$TMPDIR/tungsten` and is deleted after a
+successful link; use `--ll`, or `TUNGSTEN_LL_DIR=DIR` to keep every
+program's IR as `DIR/<name>.ll`.
+
 The Ruby implementation has its own tooling, run from `implementations/ruby/`:
 
 ```bash
@@ -188,7 +201,11 @@ bits/        bit executables
 - `core/`: the standard library. `core/tungsten.w` is its autoload manifest.
 - `runtime/`: the C runtime compiled programs link against: GC, event loops,
   HTTP/2 and HTTP/3, TLS, Metal and MLX bridges, and the SIMD lexer tables
-  (`runtime/SIMD_LEXER.md`).
+  (`runtime/SIMD_LEXER.md`). `runtime/sources.txt` is the one list of its
+  translation units, read by every build of the runtime (the compiler's
+  links, `build.w`, `bootstrap.sh`, `runtime/Makefile`, wasm): a new runtime
+  file is a line there, and `scripts/test-runtime-sources.sh` fails until it
+  is.
 - `implementations/`: the bootstrap hosts `c/`, `ruby/`, and `spinel/`.
 - `languages/`: lexers for other languages, written in Tungsten, with
   precomputed `.lex16`, `.lex32`, and `.lex64` tables.

@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+- **One list of runtime sources** — `runtime/sources.txt` names every C
+  translation unit of the runtime with the builds it belongs to (`program`,
+  `compiler`, `tests`, `wasm`), the slot it fills (event backend, TLS or its
+  stub, the zstd codec or its stub) and, for companions, the feature that
+  links it. The compiler's links, `bin/commands/build.w`, `bootstrap.sh`,
+  `runtime/Makefile`, the wasm runtime, the Ruby compile path and the UBSan
+  sweep all read it (`runtime/sources.sh` for shell, make and Ruby); the ten
+  hand-kept lists are gone, and `bootstrap.sh` now builds `unicode_tables.c`
+  into the stage-1 runtime as `build.w` always did. The manifest is part of
+  the runtime's content key. `scripts/test-runtime-sources.sh` fails when a
+  runtime file is missing from it or a build path lists sources itself.
+- **`TUNGSTEN_ROOT` decides `core/` as it decides `runtime/`** — a source
+  inside another checkout, or under an older install's tree (a scratch file
+  under `~/.tungsten` used to compile against the July install's core and
+  the current runtime), is compiled against the core of the toolchain that
+  links it, on the compiler, the interpreter and the Ruby implementation.
+  With `TUNGSTEN_ROOT` unset the source's nearest checkout still wins (nested
+  worktrees), and the compiler warns when that tree is not the one whose
+  runtime it links.
+- **One C compiler rule** — the compiler's own runtime archive (`build.w`,
+  `bootstrap.sh`) used plain `clang` while programs linked with the newest
+  LLVM clang found; both now use `TUNGSTEN_CC`, else the first LLVM clang of
+  major 22 or newer among `clang-N` on `PATH` (any N, highest first),
+  Homebrew's `llvm` and `llvm@N`, else `clang` (`bin/commands/toolchain.sh`;
+  the version whitelist stopped at 24 and the PATH name at `clang-22`).
+  `lld` is required only where it links (Linux, and `--target` Linux builds
+  on macOS); doctor reports it as optional on macOS.
+- **IR scratch is per user and does not pile up** — a compile's LLVM IR goes
+  to a private directory under `$TMPDIR/tungsten` (`/tmp/tungsten-<uid>`
+  without `TMPDIR`) instead of the shared `/tmp/tungsten`, and is deleted
+  after a successful link instead of being kept as `/tmp/tungsten/<name>.ll`
+  forever (16 GB of it on one development machine). `--emit-ll` and a failed
+  link keep it (the path is printed); `TUNGSTEN_LL_DIR=DIR` keeps every
+  program's IR as `DIR/<name>.ll`. A batch's private runtime objects are
+  removed after its links.
+- **Build failures say why** — `bin/tungsten build` printed only "failed to
+  compile bin/commands/build.w"; it now shows the compiler's output, and
+  bootstrap's stage-1 and build-driver logs are per run instead of fixed
+  `/tmp` names that concurrent bootstraps overwrote.
+- **Compiler images no longer leak their mark** — an image read
+  `TUNGSTEN_COMPILER_IMAGE` and left it in its environment, so a script run
+  by the interpreter image that started `tungsten run --interpret` did not
+  delegate to the interpreter image and failed with "undefined method 'new'
+  for nil". The image now takes the mark out after reading it
+  (`scripts/test-compiler-image-env.sh`).
+
 - **One shared build store** — build artifacts no longer live in each
   checkout's `build/cache`. Every checkout, worktree and installed toolchain
   reads and writes one store, `~/.tungsten/build` (`TUNGSTEN_HOME/build`;

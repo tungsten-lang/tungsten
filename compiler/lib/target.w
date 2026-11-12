@@ -1,11 +1,15 @@
 # Compile-time target detection and predicate matching for platform guards.
 
-# Which C compiler drives the final .ll → binary step. Explicit TUNGSTEN_CC wins.
-# Otherwise prefer a clang whose LLVM is >= 22 when one is installed: its loop
-# vectorizer splits associative reductions (and vectorizes headerless-small-array
-# reductions with natural alignment) where older clang's cost model declines —
-# ~2.3x on such loops, matching rustc's LLVM 22. Falls back to plain `clang`
-# (system default) when no newer clang is found, so other machines are unaffected.
+# Which C compiler drives the final .ll → binary step (and compiles the
+# runtime objects programs link). Explicit TUNGSTEN_CC wins. Otherwise prefer
+# an LLVM clang >= 22 when one is installed: its loop vectorizer splits
+# associative reductions (and vectorizes headerless-small-array reductions
+# with natural alignment) where older clang's cost model declines, ~2.3x on
+# such loops, matching rustc's LLVM 22. Falls back to plain `clang` (system
+# default) when no newer clang is found, so other machines are unaffected.
+# bin/commands/toolchain.sh is the same rule for the shell side of the
+# toolchain (bootstrap, doctor, and build.w's runtime archive for the
+# compiler itself); scripts/test-host-cc-rule.sh keeps the two in step.
 host_cc_memo = {}
 
 # Target layout/attribute probing shells out through clang twice. A compiler
@@ -133,6 +137,32 @@ target_probe_cache_state = {
   host_cc_memo[key] = prefix
   prefix
 
+# LLVM major version from a clang's --version banner ("clang version 23.1.5",
+# "Ubuntu clang version 22.1.8"); 0 for Apple clang, whose numbering is not
+# LLVM's, or anything unrecognised.
+-> host_cc_llvm_major(cc)
+  banner = capture("\"" + cc + "\" --version 2>/dev/null | head -n 1").strip()
+  if banner == "" || banner.starts_with?("Apple")
+    return 0
+  at = banner.index("clang version ")
+  if at == nil
+    return 0
+  i = at + 14
+  digits = ""
+  while i < banner.size() && banner.slice(i, 1) >= "0" && banner.slice(i, 1) <= "9"
+    digits = digits + banner.slice(i, 1)
+    i = i + 1
+  if digits == "" || i >= banner.size() || banner.slice(i, 1) != "."
+    return 0
+  digits.to_i()
+
+-> host_cc_usable?(cc)
+  if capture("test -x \"" + cc + "\" && echo y").strip() != "y"
+    return false
+  host_cc_llvm_major(cc) >= 22
+
+# The first LLVM clang >= 22 among: clang-N on PATH, highest N (up to 40)
+# first; Homebrew's llvm; Homebrew's llvm@N, highest N first. Else `clang`.
 -> host_c_compiler
   cc = env("TUNGSTEN_CC")
   if cc != nil && cc != ""
@@ -141,22 +171,27 @@ target_probe_cache_state = {
   if cached != nil
     return cached
   chosen = "clang"
-  candidates = ["clang-22"]
-  ["llvm", "llvm@22"].each ->(formula)
-    prefix = target_homebrew_formula_prefix(formula)
-    if prefix != ""
-      candidates.push(prefix + "/bin/clang")
-  ci = 0
-  while ci < candidates.size()
-    c = candidates[ci]
-    exists = capture("test -x \"" + c + "\" && echo y").strip()
-    if exists == "y"
-      ver = capture("\"" + c + "\" --version 2>/dev/null | head -1")
-      # major >= 22: match "clang version 22." / 23. / … (two-digit majors)
-      if ver.index("version 22.") != nil || ver.index("version 23.") != nil || ver.index("version 24.") != nil
-        chosen = c
-        ci = candidates.size()
-    ci = ci + 1
+  found = capture("v=40; while test $v -ge 22; do command -v clang-$v 2>/dev/null; v=$((v - 1)); done").split("\n")
+  fi = 0
+  while fi < found.size() && chosen == "clang"
+    c = found[fi].strip()
+    if c != "" && host_cc_usable?(c)
+      chosen = c
+    fi = fi + 1
+  if chosen == "clang"
+    prefix = target_homebrew_formula_prefix("llvm")
+    if prefix != "" && host_cc_usable?(prefix + "/bin/clang")
+      chosen = prefix + "/bin/clang"
+  if chosen == "clang"
+    brew_root = target_homebrew_formula_prefix("")
+    if brew_root != ""
+      versions = capture("ls -d \"" + brew_root + "\"/opt/llvm@* 2>/dev/null | sed 's/.*llvm@//' | grep -E '^\[0-9\]+$' | sort -rn").split("\n")
+      vi = 0
+      while vi < versions.size() && chosen == "clang"
+        v = versions[vi].strip()
+        if v != "" && host_cc_usable?(brew_root + "/opt/llvm@" + v + "/bin/clang")
+          chosen = brew_root + "/opt/llvm@" + v + "/bin/clang"
+        vi = vi + 1
   host_cc_memo[:cc] = chosen
   chosen
 

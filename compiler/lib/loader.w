@@ -27,6 +27,47 @@ loader_parse_cache_state = {
   loader_parse_cache_state[:enabled] = true
   nil
 
+# The toolchain a compile uses is one root: core/ (Loader#find_core_root) and
+# runtime/ (here) are both taken from TUNGSTEN_ROOT when it is set, and the
+# compiler links that runtime (compiler/lib/driver/link.w). Without it the
+# runtime is the cwd's (a checkout building itself, as the stage builds do)
+# or this executable's own, beside its bin/.
+-> resolve_runtime_dir
+  root = env("TUNGSTEN_ROOT")
+  if root != nil && root != "" && file?(root + "/runtime/runtime.c")
+    return root + "/runtime/"
+  if file?("runtime/runtime.c")
+    return "runtime/"
+  ccall("w_runtime_dir")
+
+loader_toolchain_state = {split_checked: false}
+
+# With TUNGSTEN_ROOT unset, core/ is the source's nearest checkout while
+# runtime/ is the cwd's or the compiler's own: two trees when a source in one
+# checkout is compiled from another, which mixes one tree's core with
+# another's runtime. Say so once per process. (With TUNGSTEN_ROOT set both
+# come from it.) Compiled runtime only: the stage-0 C VM has no expand_path,
+# and the stage builds run from the root they build.
+-> loader_warn_split_toolchain(core_root)
+  if loader_toolchain_state[:split_checked] == true || core_root == nil || core_root == ""
+    return nil
+  loader_toolchain_state[:split_checked] = true
+  if runtime_identity() != "compiled-runtime"
+    return nil
+  runtime_dir = resolve_runtime_dir()
+  if !file?(runtime_dir + "/runtime.c")
+    return nil
+  core_abs = File.expand_path(core_root)
+  toolchain_abs = File.expand_path(runtime_dir + "/..")
+  if core_abs == toolchain_abs
+    return nil
+  core_real = capture("cd '" + core_abs.gsub("'", "'\\''") + "' 2>/dev/null && pwd -P").strip()
+  toolchain_real = capture("cd '" + toolchain_abs.gsub("'", "'\\''") + "' 2>/dev/null && pwd -P").strip()
+  if core_real != "" && core_real == toolchain_real
+    return nil
+  ccall("w_eputs", "warning: compiling against core/ in " + core_abs + " but runtime/ in " + toolchain_abs + "; set TUNGSTEN_ROOT (bin/tungsten does) to use one toolchain for both")
+  nil
+
 + Loader
   -> new(@verbose = false)
     @loaded_files = []
@@ -737,6 +778,7 @@ loader_parse_cache_state = {
     if project_root == ""
       return nil
     @core_root = project_root
+    loader_warn_split_toolchain(project_root)
     registry_path = project_root + "/core/tungsten.w"
     if !file?(registry_path)
       return nil
@@ -1862,6 +1904,14 @@ loader_parse_cache_state = {
   # it — which silently disabled all core autoload inside bits.
   -> find_core_root(dir)
     dir = store_anchor_dir(dir)
+    # An explicit toolchain wins, as it does for runtime/ (resolve_runtime_dir):
+    # a source inside another checkout, or under an older install's tree, is
+    # compiled against the core of the toolchain that links it.
+    root = env("TUNGSTEN_ROOT")
+    if root != nil && root != "" && file?(root + "/core/tungsten.w")
+      return root
+    # Unset: the source's nearest checkout, then the cwd's, then the
+    # compiler's own (nested worktrees resolve to themselves).
     if dir != ""
       parts = dir.split("/")
       i = parts.size()
@@ -1877,14 +1927,6 @@ loader_parse_cache_state = {
         i -= 1
     if file?("core/tungsten.w")
       return "."
-    # Install-root fallback: compiling a .w file whose ancestry AND cwd both
-    # lack core/tungsten.w (e.g. `tungsten /tmp/foo.w` run from outside the
-    # repo). The bin/tungsten wrapper exports TUNGSTEN_ROOT = install root, so
-    # stdlib autoload still resolves. Without this, every pure-Tungsten core
-    # class silently autoloads to nil from a foreign directory.
-    root = env("TUNGSTEN_ROOT")
-    if root != nil && root != "" && file?(root + "/core/tungsten.w")
-      return root
     # Self-located install root: a directly-invoked compiler binary (no
     # bin/tungsten wrapper exporting TUNGSTEN_ROOT) compiling a file whose
     # ancestry and cwd both lack core/. The binary knows its own path; walk

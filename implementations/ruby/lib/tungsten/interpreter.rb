@@ -3603,9 +3603,9 @@ module Tungsten
       # `core/` prefix: always resolves to <project_root>/core/<rest>.w.
       # This is the explicit path a bit uses to reach core classes.
       if use_path.start_with?("core/")
-        project_root = find_project_root(base_dir)
-        if project_root
-          explicit_core = File.join(project_root, "#{use_path}.w")
+        core_root = find_core_root(base_dir)
+        if core_root
+          explicit_core = File.join(core_root, "#{use_path}.w")
           return explicit_core if File.exist?(explicit_core)
         end
       end
@@ -3649,8 +3649,9 @@ module Tungsten
           end
         end
 
-        # Core library: core/<path>.w
-        core_path = File.join(project_root, "core", "#{use_path}.w")
+        # Core library: core/<path>.w, from the toolchain's core root
+        core_root = find_core_root(base_dir) || project_root
+        core_path = File.join(core_root, "core", "#{use_path}.w")
         return core_path if File.exist?(core_path)
 
         # Standard library (legacy): lib/<path>.w
@@ -3684,7 +3685,7 @@ module Tungsten
       return (@classes["BigInt"] ||= (@classes["Integer"] || try_autoload_core("Integer"))) if key == "BigInt"
 
       base_dir = @current_file ? ((@dirname_cache ||= {})[@current_file] ||= File.dirname(@current_file)) : Dir.pwd
-      root = find_project_root(base_dir)
+      root = find_core_root(base_dir)
       return nil unless root
 
       failed_for_root = ((@failed_autoloads ||= {})[root] ||= {})
@@ -3743,6 +3744,19 @@ module Tungsten
       name.to_s.split(":").reduce(Tungsten) { |mod, part| mod.const_get(part) }
     rescue NameError
       nil
+    end
+
+    # Where core/ comes from. An explicit TUNGSTEN_ROOT wins, as it does in the
+    # compiled loader (compiler/lib/loader.w find_core_root) and for the
+    # runtime: a source inside another checkout, or under an older install's
+    # tree, runs against the core of the toolchain running it. Without one,
+    # the source's nearest project root.
+    def find_core_root(dir)
+      configured_root = ENV["TUNGSTEN_ROOT"]
+      if configured_root && !configured_root.empty? && File.file?(File.join(configured_root, "core", "tungsten.w"))
+        return File.expand_path(configured_root)
+      end
+      find_project_root(dir)
     end
 
     def find_project_root(dir)

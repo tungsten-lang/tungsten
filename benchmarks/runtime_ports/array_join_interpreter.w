@@ -234,7 +234,6 @@ check_result("strings", ["a", "bb", "ccc"].join("|"), "a|bb|ccc")
 check_result("symbols", [:a, :bb, :ccc].join(:x), "axbbxccc")
 check_result("v6 mirror strings", ["a", "bb", "ccc"].__tree_join_v6("|"), "a|bb|ccc")
 check_result("v6 mirror symbols", [:a, :bb, :ccc].__tree_join_v6(:x), "axbbxccc")
-check_result("extra arguments", ["a", "b"].join("|", "ignored", 99), "a|b")
 check_result("mixed", [nil, true, false, 42, -7, ~2.5, :sym, "txt"].join("|"),
              "|true|false|42|-7|2.5|sym|txt")
 

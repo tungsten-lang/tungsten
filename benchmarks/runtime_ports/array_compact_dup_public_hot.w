@@ -211,26 +211,22 @@ BATCH_SIZE = 128
   extra = [nil, "kept", false, nil]
   block_log = []
   if operation == "compact"
-    extra_result = extra.compact("ignored", 99)
     block_result = extra.compact -> (item)
       block_log.push(item)
     expected = expected_compact(extra)
   else
-    extra_result = extra.dup("ignored", 99)
     block_result = extra.dup -> (item)
       block_log.push(item)
     expected = extra
-  check_result("[operation].extra", extra_result, expected)
   check_result("[operation].block", block_result, expected)
   # A trailing block on a no-block method iterates the returned value. Pin the
   # public C/source behavior through the result size rather than treating the
   # block as an ignored argument.
   check_value("[operation].result-block", block_log.size, expected.size)
-  result_guards.push(extra_result)
   result_guards.push(block_result)
   if operation == "compact"
     result_guards.push(expected)
-  << "correctness: ok ([operation] public source/native shape, fresh exact layout, representative typed/shifted/view decoding, extras and result-iteration block)"
+  << "correctness: ok ([operation] public source/native shape, fresh exact layout, representative typed/shifted/view decoding, and result-iteration block)"
 
 -> result_checksum(result)
   checksum = result.size

@@ -293,24 +293,8 @@ BATCH_SIZE = 128
   wvalues[5] = true
   cases.push(["typed-w64-with-nil", wvalues])
 
--> check_extra_and_block_surface(result_guards)
+-> check_block_surface(result_guards)
   values = [nil, "kept", false, 7, nil]
-
-  c_compact = values.__c_compact("ignored", 99, nil)
-  v1_compact = values.__w_compact_v1("ignored", 99, nil)
-  v2_compact = values.__w_compact_v2("ignored", 99, nil)
-  public_compact = values.compact("ignored", 99, nil)
-  check_result("extra.compact.v1", v1_compact, c_compact)
-  check_result("extra.compact.v2", v2_compact, c_compact)
-  check_result("extra.compact.public", public_compact, c_compact)
-
-  c_dup = values.__c_dup("ignored", 99, nil)
-  v1_dup = values.__w_dup_v1("ignored", 99, nil)
-  v2_dup = values.__w_dup_v2("ignored", 99, nil)
-  public_dup = values.dup("ignored", 99, nil)
-  check_result("extra.dup.v1", v1_dup, c_dup)
-  check_result("extra.dup.v2", v2_dup, c_dup)
-  check_result("extra.dup.public", public_dup, c_dup)
 
   block_log = []
   block_c_compact = values.__c_compact -> (item)
@@ -345,9 +329,7 @@ BATCH_SIZE = 128
   check_value("implicit-each block invocation count", block_log.size,
               block_c_compact.size * 3 + block_c_dup.size * 3)
 
-  [c_compact, v1_compact, v2_compact, public_compact,
-   c_dup, v1_dup, v2_dup, public_dup,
-   block_c_compact, block_v2_compact, block_public_compact,
+  [block_c_compact, block_v2_compact, block_public_compact,
    block_c_dup, block_v2_dup, block_public_dup].each -> (result)
     result_guards.push(result)
 
@@ -403,7 +385,7 @@ BATCH_SIZE = 128
   while i < cases.size
     check_case(cases[i][0], cases[i][1], result_guards)
     i += 1
-  check_extra_and_block_surface(result_guards)
+  check_block_surface(result_guards)
 
   # Mutating one fresh result must not affect its receiver or a sibling path.
   source = [1, nil, 2]
@@ -416,7 +398,7 @@ BATCH_SIZE = 128
   result_guards.push(left)
   result_guards.push(right)
 
-  << "correctness: ok ([cases.size] input families; C/v1/v2/public compact+dup, exact bits/layout/capacity, fresh shallow copies, unchanged receivers, polymorphic/typed/shifted/borrowed arrays, ignored extras, result-iteration blocks, and mutation independence)"
+  << "correctness: ok ([cases.size] input families; C/v1/v2/public compact+dup, exact bits/layout/capacity, fresh shallow copies, unchanged receivers, polymorphic/typed/shifted/borrowed arrays, result-iteration blocks, and mutation independence)"
 
 -> dense_values(count)
   values = []

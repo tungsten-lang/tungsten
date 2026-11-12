@@ -352,12 +352,23 @@ runtime.scan(/^\s*(WN_\w+)\s*=\s*w_string\("([^"]+)"\);/) do |constant, name|
 end
 
 tables = {}
+row_arities = {}
 runtime.scan(/^static WICEntry\s+(w_ic_\w+_table)\[\]\s*=\s*\{(.*?)^\};/m) do |table_name, body|
-  handlers = body.scan(/^\s*\{0,\s*([A-Za-z_][A-Za-z0-9_]*|NULL)\s*\}/).flatten
+  rows = body.scan(/^\s*\{0,\s*([A-Za-z_][A-Za-z0-9_]*|NULL)(?:,\s*(-?\d+),\s*(-?\d+))?\s*\}/)
+  handlers = rows.map(&:first)
   if handlers.empty? || handlers.last != "NULL"
     errors << "#{table_name}: missing terminal NULL handler"
   end
-  tables[table_name] = handlers.take_while { |handler| handler != "NULL" }
+  live = rows.take_while { |row| row[0] != "NULL" }
+  tables[table_name] = live.map(&:first)
+  row_arities[table_name] = live.each_with_index.map do |(handler, min_text, max_text), index|
+    if min_text.nil?
+      errors << "#{table_name}[#{index}] (#{handler}): row lacks an arity contract {name, fn, min, max}"
+      nil
+    else
+      [Integer(min_text, 10), Integer(max_text, 10)]
+    end
+  end
 end
 
 assignments = Hash.new { |hash, key| hash[key] = {} }
@@ -495,19 +506,181 @@ RUNTIME_CLASS_CONTRACTS.each do |class_name, contract|
   errors << "#{class_name}: native IC classification missing runtime rows: #{missing_ic.join(', ')}" unless missing_ic.empty?
   errors << "#{class_name}: runtime IC rows not classified native: #{stale_ic.join(', ')}" unless stale_ic.empty?
   if contract[:table] && contract[:dispatch_key]
-    table_case = /case\s+#{Regexp.escape(contract[:dispatch_key])}:\s*table\s*=\s*#{Regexp.escape(contract[:table])};/
+    table_case = /case\s+#{Regexp.escape(contract[:dispatch_key])}:\s*\*label = "[^"]+";\s*return\s+#{Regexp.escape(contract[:table])};/
     errors << "#{class_name}: runtime dispatch key #{contract[:dispatch_key]} does not select #{contract[:table]}" unless runtime.match?(table_case)
   end
 end
 
-unless dispatch_keys["Quantity"] == "0xC1" && runtime.include?("case 0xC1: table = w_ic_quantity_table;")
+unless dispatch_keys["Quantity"] == "0xC1" && runtime.match?(/case 0xC1:\s*\*label = "Quantity";\s*return w_ic_quantity_table;/)
   errors << "Quantity: compiler/runtime semantic dispatch key must be 0xC1"
+end
+
+# ── Arity contracts ──────────────────────────────────────────────────────────
+# Every runtime IC row carries [min_argc, max_argc] — the argument count the
+# native handler consumes, a trailing block counted as one argument, -1 for
+# variadic. compiler/lib/builtin_arity.w mirrors the rows for the compile-time
+# (E_LOWER_ARITY) and interpreter checks, so the two tables must agree row for
+# row; and where the Core `.w` file declares the same instance method (bodied
+# or bodiless, including alias_method arities), that declaration is the source
+# of truth for both.
+BUILTIN_ARITY_PATH = File.join(ROOT, "compiler", "lib", "builtin_arity.w")
+builtin_arity = File.read(BUILTIN_ARITY_PATH, encoding: "utf-8")
+
+table_labels = {}
+runtime.scan(/\*label\s*=\s*"([^"]+)";\s*return\s+(w_ic_\w+_table);/) do |label, table_name|
+  table_labels[table_name] = label
+end
+
+runtime_arity = Hash.new { |hash, key| hash[key] = {} }
+assignments.each do |table_name, by_index|
+  label = table_labels[table_name]
+  if label.nil?
+    errors << "#{table_name}: no dispatch key selects it in w_ic_table_for_key"
+    next
+  end
+  by_index.each do |index, name|
+    contract = row_arities.fetch(table_name, [])[index]
+    next if contract.nil?
+    previous = runtime_arity[label][name]
+    if previous && previous != contract
+      errors << "#{label}##{name}: runtime rows disagree on arity (#{previous.inspect} vs #{contract.inspect})"
+    end
+    runtime_arity[label][name] = contract
+  end
+end
+
+mirror_dispatch = builtin_arity.scan(/^\s*"([^"]+)"\s*=>\s*(builtin_arity_\w+)\(method_name\)/).to_h
+mirror_fns = Hash.new { |hash, key| hash[key] = {} }
+builtin_arity.scan(/^-> (builtin_arity_\w+)\(name\)\n(.*?)(?=^-> |\z)/m) do |fn, body|
+  body.scan(/^\s*"((?:\\.|[^"\\])+)"\s*=>\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]/) do |name, min_text, max_text|
+    mirror_fns[fn][name.gsub(/\\(.)/, '\1')] = [Integer(min_text, 10), Integer(max_text, 10)]
+  end
+end
+mirror_arity = {}
+mirror_dispatch.each do |label, fn|
+  errors << "builtin_arity.w: #{label} dispatches to undefined #{fn}" unless mirror_fns.key?(fn)
+  mirror_arity[label] = mirror_fns.fetch(fn, {})
+end
+
+(runtime_arity.keys | mirror_arity.keys).sort.each do |label|
+  runtime_rows = runtime_arity.fetch(label, {})
+  mirror_rows = mirror_arity[label]
+  if mirror_rows.nil?
+    errors << "#{label}: runtime IC table has no compiler mirror in builtin_arity.w"
+    next
+  end
+  missing = runtime_rows.keys - mirror_rows.keys
+  stale = mirror_rows.keys - runtime_rows.keys
+  errors << "#{label}: runtime rows missing from builtin_arity.w: #{missing.sort.join(', ')}" unless missing.empty?
+  errors << "#{label}: builtin_arity.w rows without a runtime row: #{stale.sort.join(', ')}" unless stale.empty?
+  (runtime_rows.keys & mirror_rows.keys).sort.each do |name|
+    next if runtime_rows[name] == mirror_rows[name]
+    errors << "#{label}##{name}: runtime row #{runtime_rows[name].inspect} vs builtin_arity.w #{mirror_rows[name].inspect}"
+  end
+end
+
+# [min, max] accepted by one `-> name…` declaration line, in the runtime's
+# convention: leading plain parameters are required, defaults and keyword
+# parameters are optional, a `&` block parameter is one optional trailing
+# slot, a splat makes the maximum open (-1). Returns [name, [min, max]] or
+# nil for lines that are not instance-method declarations.
+def declaration_arity(line)
+  match = line.match(/^  ->\s+(?!\.)(.*)$/)
+  return nil if match.nil?
+  rest = match[1]
+  if rest.start_with?("/")
+    name = "/"
+    rest = rest[1..]
+  else
+    name_match = rest.match(/\A([^\s(\/]+)/)
+    return nil if name_match.nil?
+    name = name_match[1]
+    rest = rest[name.size..]
+  end
+  if (slash = rest.match(/\A\/(\d+)?(&)?/))
+    fixed = slash[1] ? Integer(slash[1], 10) : 0
+    return [name, [fixed, fixed + (slash[2] ? 1 : 0)]]
+  end
+  return [name, [0, 0]] unless rest.start_with?("(")
+  depth = 0
+  params = []
+  current = +""
+  rest[1..].each_char do |char|
+    if depth == 0 && char == ")"
+      params << current
+      break
+    end
+    if depth == 0 && char == ","
+      params << current
+      current = +""
+      next
+    end
+    depth += 1 if "([{".include?(char)
+    depth -= 1 if ")]}".include?(char)
+    current << char
+  end
+  min = 0
+  max = 0
+  params.map(&:strip).reject(&:empty?).each do |param|
+    if param.start_with?("*")
+      max = -1
+    elsif param.start_with?("&") || param.include?("=") || param.match?(/\A\w+:/)
+      max += 1 unless max == -1
+    else
+      min += 1
+      max += 1 unless max == -1
+    end
+  end
+  [name, [min, max]]
+end
+
+def merge_arity(contracts, name, contract)
+  previous = contracts[name]
+  if previous.nil?
+    contracts[name] = contract
+  else
+    low = [previous[0], contract[0]].min
+    high = (previous[1] < 0 || contract[1] < 0) ? -1 : [previous[1], contract[1]].max
+    contracts[name] = [low, high]
+  end
+end
+
+def declared_arity_contracts(class_body)
+  contracts = {}
+  class_body.each_line do |line|
+    if (alias_match = line.match(/^  alias_method\s+:([^\s\/,]+)\/(\d+),/))
+      fixed = Integer(alias_match[2], 10)
+      merge_arity(contracts, alias_match[1], [fixed, fixed])
+      next
+    end
+    decl = declaration_arity(line)
+    merge_arity(contracts, decl[0], decl[1]) if decl
+  end
+  contracts
+end
+
+declaration_sources = RUNTIME_CLASS_CONTRACTS.filter_map do |class_name, contract|
+  next if contract[:table].nil?
+  [table_labels[contract[:table]] || class_name, contract[:path]]
+end
+declaration_sources << ["Quantity", "core/quantity.w"]
+declaration_sources.each do |label, path|
+  source = File.read(File.join(ROOT, path), encoding: "utf-8")
+  sections = source.scan(/^\+ #{Regexp.escape(label)}(?:\s+<[^\n]+)?\s*$\n(.*?)(?=^\+ |\z)/m)
+  next if sections.empty?
+  declared = declared_arity_contracts(sections.flatten.join)
+  runtime_arity.fetch(label, {}).sort.each do |name, contract|
+    decl = declared[name]
+    next if decl.nil? || decl == contract
+    errors << "#{label}##{name}: runtime row #{contract.inspect} disagrees with #{path} declaration #{decl.inspect} (the declaration is the source of truth)"
+  end
 end
 
 if errors.empty?
   initialized = assignments.values.sum(&:size)
   classified = RUNTIME_CLASS_CONTRACTS.size
-  puts "core dispatch contracts: #{tables.size} IC tables, #{initialized} named rows, #{quantity_methods.size} Quantity methods, #{classified} runtime classes consistent"
+  mirrored = mirror_arity.values.sum(&:size)
+  puts "core dispatch contracts: #{tables.size} IC tables, #{initialized} named rows, #{mirrored} arity contracts mirrored, #{quantity_methods.size} Quantity methods, #{classified} runtime classes consistent"
 else
   warn "core dispatch contracts: FAIL (#{errors.size} disagreement#{errors.size == 1 ? '' : 's'})"
   errors.each { |error| warn "  - #{error}" }

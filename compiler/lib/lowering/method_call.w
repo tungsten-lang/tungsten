@@ -350,6 +350,57 @@
     return nil
   raise compile_error_for_node(:E_LOWER_ARITY, classes[0] + "#" + method_name + " does not accept " + argc.to_s() + " argument" + (argc == 1 ? "" : "s") + " — no definition of '" + method_name + "' on " + classes[0] + " or its ancestors has that arity; arguments are never silently dropped or padded", ctx[:source_path], node)
 
+# ── Compile-time arity checks for builtin-typed receivers ─────────────────
+# The runtime class a statically typed receiver dispatches through. Every
+# array tier shares the Array table (typed, bool and byte arrays are WArray
+# variants); machine and small integers box to Int; f64 to Float. A boxed
+# :int may have promoted to a BigInt at runtime, which has no table and whose
+# source methods agree with Int's rows on every shared name, so Int is
+# checked against its rows only — never against Int's source methods.
+-> builtin_receiver_class_name(recv_type)
+  if recv_type == nil
+    return nil
+  if recv_type == :array || recv_type == :bool_array || is_typed_array_type?(recv_type)
+    return "Array"
+  if is_big_array_type?(recv_type)
+    return "BigArray"
+  if is_small_array_type?(recv_type)
+    return "SmallArray"
+  if recv_type == :string
+    return "String"
+  if recv_type == :hash
+    return "Hash"
+  if recv_type == :float || recv_type == :f64
+    return "Float"
+  if recv_type != :char && is_integer_like_type(recv_type)
+    return "Int"
+  if recv_type == :string_buffer
+    return "StringBuffer"
+  if recv_type == :decimal
+    return "Decimal"
+  if recv_type == :quantity
+    return "Quantity"
+  if recv_type == :Date
+    return "Date"
+  nil
+
+-> check_builtin_receiver_arity(ctx, node, method_name)
+  class_name = builtin_receiver_class_name(receiver_static_type(ctx, node.receiver))
+  if class_name == nil
+    return nil
+  argc = node.args.size()
+  contract = builtin_method_arity(class_name, method_name)
+  if contract != nil
+    native_argc = argc
+    if node.block != nil && is_ast_node?(node.block)
+      native_argc += 1
+    if !builtin_arity_accepts?(contract, native_argc)
+      raise compile_error_for_node(:E_LOWER_ARITY, builtin_arity_message(class_name, method_name, contract, native_argc), ctx[:source_path], node)
+    return nil
+  if class_name == "Int"
+    return nil
+  check_instance_method_arity(ctx, node, {class_name: class_name, certainty: :exact}, method_name, argc)
+
 -> locked_class_set_targets(mod, fact, method_name, arg_count)
   if fact == nil
     return nil
@@ -625,6 +676,18 @@
     inner = Tungsten:AST:Call.new(recv_node, method_name, node.args, nil)
     outer = Tungsten:AST:Call.new(inner, "each", [], node.block)
     return lower_method_call(ctx, outer)
+
+  # Arity contract for a receiver whose static type names a runtime-backed
+  # class (Array, String, Hash, Int, Float, …): a native inline-cache row is
+  # checked against compiler/lib/builtin_arity.w (the block counts as the
+  # trailing argument, exactly as the runtime receives it); a Core source
+  # method on the same receiver goes through the exact-class check. Placed
+  # after the passthrough rewrite so a rewritten block is not miscounted, and
+  # before the direct lowerings below, whose `args.size() == N` guards would
+  # otherwise let a mismatched call fall through to dynamic dispatch. Only
+  # ever raises on a proven mismatch.
+  if recv_node != nil && is_ast_node?(recv_node) && node.args != nil && env("TUNGSTEN_ARITY") != "off"
+    check_builtin_receiver_arity(ctx, node, method_name)
 
   # Integer parity/divisibility predicates on an integer-literal receiver
   # (`4.even?`) lower to inline arithmetic. These live on the numeric-tower

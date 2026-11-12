@@ -63,10 +63,7 @@ WARMUP_ITERS = 5_000_000
   check_stratum("heap")
   check_stratum("rope")
   check_stratum("symbol")
-  if !"".empty?(123, "ignored") || "x".empty?(123)
-    << "FAIL public.empty? surplus-argument compatibility"
-    exit(1)
-  << "correctness: ok (80 public representation checks plus surplus arguments)"
+  << "correctness: ok (80 public representation checks)"
 
 -> time_public(values, iters)
   checksum = 0

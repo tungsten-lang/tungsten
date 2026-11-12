@@ -59080,9 +59080,20 @@ void w_node_kind_class_register_wv(int32_t kind, WValue klass) {
     if (c->method_count > 0) g_any_node_kind_has_methods = 1;
 }
 
+/* Forward: the arity-contract helpers live with the IC tables below. */
+static int w_arity_contracts_enabled(void);
+static inline int w_method_accepts_argc(const WMethod *m, int argc);
+static void w_type_class_arity_error(WClass *klass, WValue name, int argc);
+
 static WMethod *w_type_class_method(uint16_t class_id, WValue name, int argc) {
     WMethod *m = w_method_lookup_arity(g_class_table[class_id], name, argc + 1);
     if (!m) m = w_method_lookup(g_class_table[class_id], name);
+    /* The by-name fallback is the padding/dropping case: a Core method that
+     * accepts this count was not found. Reject it here (every type-class
+     * dispatch entry funnels through this lookup) instead of nil-padding
+     * or truncating in w_bind_method_args. */
+    if (m && __builtin_expect(!w_method_accepts_argc(m, argc), 0) && w_arity_contracts_enabled())
+        w_type_class_arity_error(g_class_table[class_id], name, argc);
     return m;
 }
 
@@ -69968,163 +69979,178 @@ WValue w_decimal_round(WValue r, WValue digits_v) {
     return w_decimal(q, (int)-digits);
 }
 
-/* Resolution tables — WValue keys for O(1) integer compare */
-typedef struct { WValue name; WValue (*fn)(WValue, WValue*, int); } WICEntry;
+/* Resolution tables — WValue keys for O(1) integer compare.
+ *
+ * Every row carries its arity contract: [min_argc, max_argc] is the argument
+ * count the handler consumes, a trailing block closure included (blocks reach
+ * a builtin as the last argument); max_argc -1 means variadic. The contract is
+ * checked on the IC-miss path only (w_method_call_slow / w_method_dispatch),
+ * where argc is already in hand, so a cache hit pays nothing. A Core `.w`
+ * declaration for the same method is the source of truth for the row;
+ * compiler/lib/builtin_arity.w mirrors these rows for the compile-time and
+ * interpreter checks, and scripts/check-core-dispatch-contracts.rb keeps the
+ * three in agreement. */
+typedef struct {
+    WValue name;
+    WValue (*fn)(WValue, WValue*, int);
+    int8_t min_argc;
+    int8_t max_argc;
+} WICEntry;
 
 static WICEntry w_ic_wire_table[] = {
-    {0, w_ic_wire_idx},
-    {0, w_ic_wire_idxset},
-    {0, w_ic_wire_size},
-    {0, NULL}
+    {0, w_ic_wire_idx, 1, 1},
+    {0, w_ic_wire_idxset, 2, 2},
+    {0, w_ic_wire_size, 0, 0},
+    {0, NULL, 0, 0}
 };
 
 static WICEntry w_ic_array_table[] = {
-    {0, w_ic_array_push},     /* WN_push — patched at init */
-    {0, w_ic_array_pop},
-    {0, w_ic_array_shift},
-    {0, w_ic_array_idx},      /* WN_idx ([]) — unchecked */
-    {0, w_ic_array_idxset},   /* WN_idxset ([]=) — unchecked */
-    {0, w_ic_array_include},  /* WN_has_q (canonical) — handler still named _include for now */
-    {0, w_ic_array_get},      /* WN_get — bounds-checked */
-    {0, w_ic_array_set},      /* WN_set — bounds-checked */
-    {0, w_ic_array_include},  /* WN_include_q — legacy alias for has? */
-    {0, w_ic_array_unshift},
-    {0, w_ic_array_sort},
-    {0, w_ic_array_stable_sort},
-    {0, w_ic_array_view},
-    {0, w_ic_array_min},
-    {0, w_ic_array_max},
-    {0, w_ic_array_sum},
-    {0, w_ic_array_fastsum},
-    {0, w_ic_array_sumsq},
-    {0, w_ic_array_dot},
-    {0, w_ic_array_cos},
-    {0, w_ic_array_sin},
-    {0, w_ic_array_sqrt},
-    {0, w_ic_array_each},
-    {0, w_ic_array_any_q},
-    {0, w_ic_array_all_q},
-    {0, w_ic_array_none_q},
-    {0, w_ic_array_count},
-    {0, w_ic_array_find_index},   /* WN_find_index */
-    {0, w_ic_array_find_index},   /* WN_index — same handler */
-    {0, w_ic_array_last_index},
-    {0, w_ic_array_replace_byte},
-    {0, w_ic_array_slice},        /* ByteArray .slice — non-bytes Array uses .copy */
-    {0, w_ic_array_exp},
-    {0, w_ic_array_log},
-    {0, w_ic_array_tan},
-    {0, NULL}
+    {0, w_ic_array_push, 1, 1},     /* WN_push — patched at init */
+    {0, w_ic_array_pop, 0, 0},
+    {0, w_ic_array_shift, 0, 0},
+    {0, w_ic_array_idx, 1, 1},      /* WN_idx ([]) — unchecked */
+    {0, w_ic_array_idxset, 2, 2},   /* WN_idxset ([]=) — unchecked */
+    {0, w_ic_array_include, 1, 1},  /* WN_has_q (canonical) — handler still named _include for now */
+    {0, w_ic_array_get, 1, 1},      /* WN_get — bounds-checked */
+    {0, w_ic_array_set, 2, 2},      /* WN_set — bounds-checked */
+    {0, w_ic_array_include, 1, 1},  /* WN_include_q — legacy alias for has? */
+    {0, w_ic_array_unshift, 1, 1},
+    {0, w_ic_array_sort, 0, 1},
+    {0, w_ic_array_stable_sort, 0, 1},
+    {0, w_ic_array_view, 1, 1},
+    {0, w_ic_array_min, 0, 0},
+    {0, w_ic_array_max, 0, 0},
+    {0, w_ic_array_sum, 0, 1},
+    {0, w_ic_array_fastsum, 0, 0},
+    {0, w_ic_array_sumsq, 0, 0},
+    {0, w_ic_array_dot, 1, 1},
+    {0, w_ic_array_cos, 0, 0},
+    {0, w_ic_array_sin, 0, 0},
+    {0, w_ic_array_sqrt, 0, 0},
+    {0, w_ic_array_each, 0, 1},
+    {0, w_ic_array_any_q, 0, 1},
+    {0, w_ic_array_all_q, 0, 1},
+    {0, w_ic_array_none_q, 0, 1},
+    {0, w_ic_array_count, 0, 1},
+    {0, w_ic_array_find_index, 1, 1},   /* WN_find_index */
+    {0, w_ic_array_find_index, 1, 1},   /* WN_index — same handler */
+    {0, w_ic_array_last_index, 1, 1},
+    {0, w_ic_array_replace_byte, 2, 2},
+    {0, w_ic_array_slice, 2, 2},        /* ByteArray .slice — non-bytes Array uses .copy */
+    {0, w_ic_array_exp, 0, 0},
+    {0, w_ic_array_log, 0, 0},
+    {0, w_ic_array_tan, 0, 0},
+    {0, NULL, 0, 0}
 };
 
 static WICEntry w_ic_string_table[] = {
-    {0, w_ic_string_idx},
-    {0, w_ic_string_concat},      /* WN_concat */
-    {0, w_ic_string_concat},      /* WN_append — same handler */
-    {0, w_ic_string_concat},      /* WN_lshift — same handler */
-    {0, w_ic_string_prepend},
-    {0, w_ic_string_include},     /* WN_include_q */
-    {0, w_ic_string_valid_utf8_q},
-    {0, w_ic_string_repeat},
-    {0, w_ic_string_codes},
-    {0, w_ic_string_lchs},
-    {0, w_ic_string_slice},
-    {0, w_ic_string_strip},
-    {0, w_ic_string_ltrim},
-    {0, w_ic_string_rtrim},
-    {0, w_ic_string_to_i},
-    {0, w_ic_string_to_f},
-    {0, w_ic_string_to_sym},
-    {0, w_ic_string_split},
-    {0, w_ic_string_replace},      /* WN_replace */
-    {0, w_ic_string_replace},      /* WN_gsub — same handler */
-    {0, w_ic_string_index},
-    {0, w_ic_string_matchop},   /* WN_matchop */
-    {0, w_ic_string_matchop},   /* WN_match_q — same handler */
-    {0, w_ic_string_rindex},    /* WN_rindex */
-    {0, w_ic_string_size},      /* WN_size — round-5, dynamic-path gap */
-    {0, w_ic_string_size},      /* WN_length — same handler */
-    {0, w_ic_string_to_d},      /* WN_to_d — "42.50".to_d → exact Decimal */
-    {0, NULL}
+    {0, w_ic_string_idx, 1, 1},
+    {0, w_ic_string_concat, 1, 1},      /* WN_concat */
+    {0, w_ic_string_concat, 1, 1},      /* WN_append — same handler */
+    {0, w_ic_string_concat, 1, 1},      /* WN_lshift — same handler */
+    {0, w_ic_string_prepend, 1, 1},
+    {0, w_ic_string_include, 1, 1},     /* WN_include_q */
+    {0, w_ic_string_valid_utf8_q, 0, 0},
+    {0, w_ic_string_repeat, 1, 1},
+    {0, w_ic_string_codes, 0, 0},
+    {0, w_ic_string_lchs, 0, 2},
+    {0, w_ic_string_slice, 1, 2},
+    {0, w_ic_string_strip, 0, 0},
+    {0, w_ic_string_ltrim, 0, 0},
+    {0, w_ic_string_rtrim, 0, 0},
+    {0, w_ic_string_to_i, 0, 1},
+    {0, w_ic_string_to_f, 0, 0},
+    {0, w_ic_string_to_sym, 0, 0},
+    {0, w_ic_string_split, 0, 1},
+    {0, w_ic_string_replace, 2, 2},      /* WN_replace */
+    {0, w_ic_string_replace, 2, 2},      /* WN_gsub — same handler */
+    {0, w_ic_string_index, 1, 2},
+    {0, w_ic_string_matchop, 1, 1},   /* WN_matchop */
+    {0, w_ic_string_matchop, 1, 1},   /* WN_match_q — same handler */
+    {0, w_ic_string_rindex, 1, 2},    /* WN_rindex */
+    {0, w_ic_string_size, 0, 0},      /* WN_size — round-5, dynamic-path gap */
+    {0, w_ic_string_size, 0, 0},      /* WN_length — same handler */
+    {0, w_ic_string_to_d, 0, 0},      /* WN_to_d — "42.50".to_d → exact Decimal */
+    {0, NULL, 0, 0}
 };
 
 static WICEntry w_ic_int_table[] = {
-    {0, w_ic_int_times},
-    {0, w_ic_int_times},       /* each ≡ times for ints: iterate self times. Lets
+    {0, w_ic_int_times, 0, 1},
+    {0, w_ic_int_times, 0, 1},       /* each ≡ times for ints: iterate self times. Lets
                                 * a runtime-dispatched `n.each(block)` (e.g. the
                                 * block-passthrough rewrite `expr.each -> body`)
                                 * work when the int isn't statically known. */
-    {0, w_ic_int_to_d},        /* WN_to_d — Integer → Decimal, scale 0 */
-    {0, NULL}
+    {0, w_ic_int_to_d, 0, 0},        /* WN_to_d — Integer → Decimal, scale 0 */
+    {0, NULL, 0, 0}
 };
 
 static WICEntry w_ic_big_array_table[] = {
-    {0, w_ic_big_array_idx},
-    {0, w_ic_big_array_idxset},
-    {0, w_ic_big_array_get},
-    {0, w_ic_big_array_set},
-    {0, w_ic_big_array_push},
-    {0, w_ic_big_array_subview},
-    {0, NULL}
+    {0, w_ic_big_array_idx, 1, 1},
+    {0, w_ic_big_array_idxset, 2, 2},
+    {0, w_ic_big_array_get, 1, 1},
+    {0, w_ic_big_array_set, 2, 2},
+    {0, w_ic_big_array_push, 1, 1},
+    {0, w_ic_big_array_subview, 2, 2},
+    {0, NULL, 0, 0}
 };
 
 static WICEntry w_ic_small_array_table[] = {
-    {0, w_ic_small_array_idx},
-    {0, w_ic_small_array_idxset},
-    {0, w_ic_small_array_get},
-    {0, w_ic_small_array_set},
-    {0, NULL}
+    {0, w_ic_small_array_idx, 1, 1},
+    {0, w_ic_small_array_idxset, 2, 2},
+    {0, w_ic_small_array_get, 1, 1},
+    {0, w_ic_small_array_set, 2, 2},
+    {0, NULL, 0, 0}
 };
 
 #ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
 static WICEntry w_ic_socket_table[] = {
-    {0, w_ic_socket_accept},
-    {0, w_ic_socket_read},
-    {0, w_ic_socket_read_exact},
-    {0, w_ic_socket_write},
-    {0, w_ic_socket_write_bytes},
-    {0, w_ic_socket_close},
-    {0, w_ic_socket_shutdown},
-    {0, w_ic_socket_set_timeout},
-    {0, w_ic_socket_alpn_protocol},
-    {0, w_ic_socket_serve_http},
-    {0, w_ic_socket_read_into},
-    {0, w_ic_socket_write_slice},
-    {0, NULL}
+    {0, w_ic_socket_accept, 0, 0},
+    {0, w_ic_socket_read, 0, 1},
+    {0, w_ic_socket_read_exact, 1, 1},
+    {0, w_ic_socket_write, 1, 1},
+    {0, w_ic_socket_write_bytes, 1, 1},
+    {0, w_ic_socket_close, 0, 0},
+    {0, w_ic_socket_shutdown, 0, 1},
+    {0, w_ic_socket_set_timeout, 1, 1},
+    {0, w_ic_socket_alpn_protocol, 0, 0},
+    {0, w_ic_socket_serve_http, 0, 2},
+    {0, w_ic_socket_read_into, 3, 3},
+    {0, w_ic_socket_write_slice, 3, 3},
+    {0, NULL, 0, 0}
 };
 
 static WICEntry w_ic_mmap_table[] = {
-    {0, w_ic_mmap_close},
-    {0, w_ic_mmap_byte_at},
-    {0, w_ic_mmap_idx},
-    {0, w_ic_mmap_view_at},
-    {0, NULL}
+    {0, w_ic_mmap_close, 0, 0},
+    {0, w_ic_mmap_byte_at, 1, 1},
+    {0, w_ic_mmap_idx, 1, 1},
+    {0, w_ic_mmap_view_at, 3, 3},
+    {0, NULL, 0, 0}
 };
 #endif
 
 static WICEntry w_ic_strbuf_table[] = {
-    {0, w_ic_strbuf_to_s},
-    {0, w_ic_strbuf_include},
-    {0, w_ic_strbuf_starts_with},
-    {0, w_ic_strbuf_append},
-    {0, w_ic_strbuf_append},
-    {0, w_ic_strbuf_idx},
-    {0, w_ic_strbuf_clear},
-    {0, NULL}
+    {0, w_ic_strbuf_to_s, 0, 0},
+    {0, w_ic_strbuf_include, 1, 1},
+    {0, w_ic_strbuf_starts_with, 1, 1},
+    {0, w_ic_strbuf_append, 1, 1},
+    {0, w_ic_strbuf_append, 1, 1},
+    {0, w_ic_strbuf_idx, 1, 1},
+    {0, w_ic_strbuf_clear, 0, 0},
+    {0, NULL, 0, 0}
 };
 
 static WICEntry w_ic_hash_table[] = {
-    {0, w_ic_hash_has_key},
-    {0, w_ic_hash_keys},
-    {0, w_ic_hash_values},
-    {0, w_ic_hash_merge_bang},
-    {0, w_ic_hash_each},
-    {0, w_ic_hash_delete},
-    {0, w_ic_hash_get},        /* WN_get */
-    {0, w_ic_hash_get},        /* WN_idx — same handler */
-    {0, w_ic_hash_set},        /* WN_set */
-    {0, w_ic_hash_set},        /* WN_idxset — same handler */
-    {0, NULL}
+    {0, w_ic_hash_has_key, 1, 1},
+    {0, w_ic_hash_keys, 0, 0},
+    {0, w_ic_hash_values, 0, 0},
+    {0, w_ic_hash_merge_bang, 1, 1},
+    {0, w_ic_hash_each, 0, 1},
+    {0, w_ic_hash_delete, 1, 1},
+    {0, w_ic_hash_get, 1, 1},        /* WN_get */
+    {0, w_ic_hash_get, 1, 1},        /* WN_idx — same handler */
+    {0, w_ic_hash_set, 2, 2},        /* WN_set */
+    {0, w_ic_hash_set, 2, 2},        /* WN_idxset — same handler */
+    {0, NULL, 0, 0}
 };
 
 /* Quantity methods (0xFFFD tag with a unit; heap-domain form shares the key).
@@ -70181,17 +70207,17 @@ static WValue w_ic_quantity_equivalent_fn(WValue r, WValue *a, int c) {
     return w_quantity_equivalent(r, a[0], a[1]);
 }
 static WICEntry w_ic_quantity_table[] = {
-    {0, w_ic_quantity_point_fn},
-    {0, w_ic_quantity_delta_fn},
-    {0, w_ic_quantity_point_q_fn},
-    {0, w_ic_quantity_delta_q_fn},
-    {0, w_ic_quantity_origin_fn},
-    {0, w_ic_quantity_value_fn},
-    {0, w_ic_quantity_unit_name_fn},
-    {0, w_ic_quantity_to_f_fn},
-    {0, w_ic_quantity_equivalent_fn},
-    {0, w_ic_quantity_equivalent_fn},
-    {0, NULL}
+    {0, w_ic_quantity_point_fn, 0, 1},
+    {0, w_ic_quantity_delta_fn, 0, 1},
+    {0, w_ic_quantity_point_q_fn, 0, 0},
+    {0, w_ic_quantity_delta_q_fn, 0, 0},
+    {0, w_ic_quantity_origin_fn, 0, 0},
+    {0, w_ic_quantity_value_fn, 0, 0},
+    {0, w_ic_quantity_unit_name_fn, 0, 0},
+    {0, w_ic_quantity_to_f_fn, 0, 0},
+    {0, w_ic_quantity_equivalent_fn, 2, 2},
+    {0, w_ic_quantity_equivalent_fn, 2, 2},
+    {0, NULL, 0, 0}
 };
 #endif
 
@@ -70334,33 +70360,135 @@ static void w_init_ic_tables(void) {
 #endif
 }
 
-static WValue (*w_resolve_ic(uint64_t key, WValue name, WValue recv))(WValue, WValue*, int) {
-    (void)recv;
-    const WICEntry *table = NULL;
+/* Dispatch key → IC table, plus the class label the arity diagnostic names. */
+static const WICEntry *w_ic_table_for_key(uint64_t key, const char **label) {
     switch (key) {
-        case 0xE8: table = w_ic_wire_table;    break;
-        case 0x0A: table = w_ic_array_table;   break;
-        case 0xF9: table = w_ic_string_table;  break;
-        case 0xFA: table = w_ic_int_table;     break;
+        case 0xE8: *label = "WIRE";         return w_ic_wire_table;
+        case 0x0A: *label = "Array";        return w_ic_array_table;
+        case 0xF9: *label = "String";       return w_ic_string_table;
+        case 0xFA: *label = "Int";          return w_ic_int_table;
 #ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
-        case 0xC1: table = w_ic_quantity_table; break;
+        case 0xC1: *label = "Quantity";     return w_ic_quantity_table;
 #endif
-        case 0x05: table = w_ic_hash_table;    break;
-        case 0x0B: table = w_ic_strbuf_table;  break;  /* W_SUBTAG_STRBUF */
+        case 0x05: *label = "Hash";         return w_ic_hash_table;
+        case 0x0B: *label = "StringBuffer"; return w_ic_strbuf_table;       /* W_SUBTAG_STRBUF */
 #ifndef TUNGSTEN_RUNTIME_COMPILER_IMAGE
-        case 0x83: table = w_ic_socket_table;  break;  /* 0x80 | W_TYPE_SOCKET=3 */
-        case 0x91: table = w_ic_mmap_table;    break;  /* 0x80 | W_TYPE_MMAP=17 */
+        case 0x83: *label = "Socket";       return w_ic_socket_table;       /* 0x80 | W_TYPE_SOCKET=3 */
+        case 0x91: *label = "Mmap";         return w_ic_mmap_table;         /* 0x80 | W_TYPE_MMAP=17 */
 #endif
-        case 0x92: table = w_ic_big_array_table;   break;  /* 0x80 | W_TYPE_BIG_ARRAY=18 */
-        case 0x09: table = w_ic_small_array_table; break;  /* W_SUBTAG_SMALL_ARRAY=9 */
-        default: return NULL;
+        case 0x92: *label = "BigArray";     return w_ic_big_array_table;    /* 0x80 | W_TYPE_BIG_ARRAY=18 */
+        case 0x09: *label = "SmallArray";   return w_ic_small_array_table;  /* W_SUBTAG_SMALL_ARRAY=9 */
+        default:   *label = NULL;           return NULL;
     }
+}
+
+static const WICEntry *w_resolve_ic(uint64_t key, WValue name, WValue recv) {
+    (void)recv;
+    const char *label;
+    const WICEntry *table = w_ic_table_for_key(key, &label);
+    if (!table) return NULL;
     for (int i = 0; table[i].fn; i++) {
         WValue tn = table[i].name;
         if (tn == name || w_hash_key_eq(tn, name))
-            return table[i].fn;
+            return &table[i];
     }
     return NULL;
+}
+
+/* ── Arity contracts on the dynamic dispatch path ─────────────────────────
+ * Arguments are never silently dropped or padded. Where lowering resolves a
+ * callee statically it raises E_LOWER_ARITY at compile time; the erased
+ * receivers that reach this file are checked HERE, once per call site, on
+ * the IC-miss path (a call site has a fixed argument count, so a cache hit
+ * can only repeat a count that already passed). TUNGSTEN_ARITY=off is the
+ * shared triage switch. With a handler active the failure is a rescuable
+ * ArgumentError; without one it is the same fatal exit as any runtime error.
+ * The message shape is the interpreter's:
+ *   'first' takes 0 arguments, got 1 — arguments are never silently dropped or padded */
+static int w_arity_contracts_enabled(void) {
+    static int state = -1;
+    if (__builtin_expect(state < 0, 0)) {
+        const char *v = getenv("TUNGSTEN_ARITY");
+        state = (v && strcmp(v, "off") == 0) ? 0 : 1;
+    }
+    return state;
+}
+
+static void w_arity_expected_text(char *buf, size_t cap, int min_argc, int max_argc) {
+    if (max_argc < 0)
+        snprintf(buf, cap, "at least %d arguments", min_argc);
+    else if (max_argc == min_argc)
+        snprintf(buf, cap, "%d argument%s", min_argc, min_argc == 1 ? "" : "s");
+    else
+        snprintf(buf, cap, "%d..%d arguments", min_argc, max_argc);
+}
+
+__attribute__((noinline, cold))
+static void w_arity_contract_error(const char *method, int min_argc, int max_argc,
+                                   int argc, const char *tail) {
+    char expected[64];
+    w_arity_expected_text(expected, sizeof expected, min_argc, max_argc);
+    char buf[512];
+    snprintf(buf, sizeof buf,
+             "'%s' takes %s, got %d — arguments are never silently dropped or padded%s",
+             method, expected, argc, tail ? tail : "");
+    die_as("ArgumentError", buf);
+}
+
+/* Builtin (IC row) contract: the row's [min_argc, max_argc]. */
+__attribute__((noinline, cold))
+static void w_builtin_arity_error(uint64_t key, WValue name, const WICEntry *row, int argc) {
+    const char *label;
+    w_ic_table_for_key(key, &label);
+    char tail[160];
+    snprintf(tail, sizeof tail, "; %s#%s is a runtime builtin with a fixed signature, so fix the call",
+             label ? label : "builtin", as_str(name));
+    w_arity_contract_error(as_str(name), row->min_argc, row->max_argc, argc, tail);
+}
+
+static inline void w_check_builtin_arity(uint64_t key, WValue name, const WICEntry *row, int argc) {
+    if (__builtin_expect(argc < row->min_argc || (row->max_argc >= 0 && argc > row->max_argc), 0)) {
+        if (w_arity_contracts_enabled())
+            w_builtin_arity_error(key, name, row, argc);
+    }
+}
+
+/* Universal dispatcher arms (to_s, hash, nil?, respond_to?, <=>, is_a?, the
+ * file builtins, middle-dot multiply) have no row; they state their contract
+ * inline and reject surplus arguments they used to ignore. */
+static inline void w_check_universal_arity(WValue name, int argc, int min_argc, int max_argc) {
+    if (__builtin_expect(argc < min_argc || argc > max_argc, 0) && w_arity_contracts_enabled())
+        w_arity_contract_error(as_str(name), min_argc, max_argc, argc, NULL);
+}
+
+/* Source-method contract for a Core type class (Array#first, String#lines,
+ * …): the registered WMethod's [min_arity, arity] (self included; a splat
+ * makes the maximum open). The diagnostic reports the union of every
+ * overload of the name on the class chain, like the compile-time check. */
+static inline int w_method_accepts_argc(const WMethod *m, int argc) {
+    int arity = argc + 1; /* + self */
+    if (arity < m->min_arity) return 0;
+    if (m->splat_index_plus_one == 0 && arity > m->arity) return 0;
+    return 1;
+}
+
+__attribute__((noinline, cold))
+static void w_type_class_arity_error(WClass *klass, WValue name, int argc) {
+    int min_argc = INT32_MAX, max_argc = -2;
+    for (WClass *k = klass; k; k = k->superclass) {
+        for (int i = 0; i < k->method_capacity; i++) {
+            const WMethod *m = &k->methods[i];
+            if (m->name == 0) continue;
+            if (!(m->name == name || w_hash_key_eq(m->name, name))) continue;
+            int lo = m->min_arity - 1;
+            if (lo < min_argc) min_argc = lo;
+            if (m->splat_index_plus_one != 0) max_argc = -1;
+            else if (max_argc != -1 && m->arity - 1 > max_argc) max_argc = m->arity - 1;
+        }
+    }
+    if (min_argc == INT32_MAX) min_argc = 0;
+    if (max_argc == -2) max_argc = min_argc;
+    w_arity_contract_error(as_str(name), min_argc, max_argc, argc, NULL);
 }
 
 /* Forward declarations for slow-path lazy init (definitions live below
@@ -70464,10 +70592,11 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
      * dispatch directly to their handler — no cascade walk on the
      * first call, just a populate-and-return. Methods not in any IC
      * table fall through to the cascade as before. */
-    WValue (*builtin)(WValue, WValue*, int) = w_resolve_ic(key, name, recv);
-    if (builtin) {
-        w_ic_publish(cache, key, (void *)builtin, -1);
-        return builtin(recv, args_ptr, argc);
+    const WICEntry *row = w_resolve_ic(key, name, recv);
+    if (row) {
+        w_check_builtin_arity(key, name, row, argc);
+        w_ic_publish(cache, key, (void *)row->fn, -1);
+        return row->fn(recv, args_ptr, argc);
     }
 
     WArray stack_args;
@@ -70488,10 +70617,12 @@ WValue w_method_call_slow(WValue recv, WValue name, WValue *args_ptr, int argc,
 
     if (key < 0x100 && argc >= 1) {
         if (name == WN_is_a_q || w_hash_key_eq(name, WN_is_a_q)) {
+            w_check_universal_arity(name, argc, 1, 1);
             w_ic_publish(cache, key, (void *)w_ic_universal_is_a, -1);
             return w_value_is_a(recv, args_ptr[0]);
         }
         if (name == WN_spaceship || w_hash_key_eq(name, WN_spaceship)) {
+            w_check_universal_arity(name, argc, 1, 1);
             w_ic_publish(cache, key, (void *)w_ic_universal_spaceship, -1);
             return w_spaceship(recv, args_ptr[0]);
         }
@@ -71036,8 +71167,11 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
      * IC handlers without falling through to a stale cascade entry. */
     {
         uint64_t key = w_dispatch_key(recv);
-        WValue (*builtin)(WValue, WValue*, int) = w_resolve_ic(key, name, recv);
-        if (builtin) return builtin(recv, args->slots, args->size);
+        const WICEntry *row = w_resolve_ic(key, name, recv);
+        if (row) {
+            w_check_builtin_arity(key, name, row, args->size);
+            return row->fn(recv, args->slots, args->size);
+        }
     }
 
     /* Array storage and numeric kernels live in w_ic_array_table. Header and
@@ -71129,7 +71263,10 @@ static WValue w_method_dispatch(WValue recv, WValue name, WArray *args, WValue a
             }
             return w_method_invoke(m, recv, args->slots, args->size);
         }
-        if (name == WN_to_s) return w_to_s(recv);
+        if (name == WN_to_s) {
+            w_check_universal_arity(name, args->size, 0, 0);
+            return w_to_s(recv);
+        }
     }
 
     /* Class method dispatch */
@@ -71318,25 +71455,39 @@ invoke_static_method:
      * byte-exact operations through the inline cache. */
 
     /* Universal to_s fallback for any type */
-    if (name == WN_to_s) return w_to_s(recv);
+    if (name == WN_to_s) {
+        w_check_universal_arity(name, args->size, 0, 0);
+        return w_to_s(recv);
+    }
 
     /* Universal public hash fallback. User-defined `hash` methods and typed
      * source methods win through normal lookup above; builtin containers use
      * the structural algorithm while hash-table keys keep identity hashing. */
-    if (name == WN_hash && args->size == 0) return w_public_hash(recv);
+    if (name == WN_hash) {
+        w_check_universal_arity(name, args->size, 0, 0);
+        return w_public_hash(recv);
+    }
 
     /* nil? is available even when Object's source methods were not loaded.
      * Test the value tag directly, independently of user-defined equality. */
-    if (w_hash_key_eq(name, WN_nil_q) && args->size == 0)
+    if (w_hash_key_eq(name, WN_nil_q)) {
+        w_check_universal_arity(name, args->size, 0, 0);
         return w_bool(w_is_nil(recv));
+    }
 
     /* Global builtins callable from any context (bootstrapping fallback) */
-    if ((w_hash_key_eq(name, WN_file_exists_q) || w_hash_key_eq(name, WN_file_q)) && args->size >= 1)
+    if (w_hash_key_eq(name, WN_file_exists_q) || w_hash_key_eq(name, WN_file_q)) {
+        w_check_universal_arity(name, args->size, 1, 1);
         return __w_file_exists(args->slots[0]);
-    if (w_hash_key_eq(name, WN_read_file) && args->size >= 1)
+    }
+    if (w_hash_key_eq(name, WN_read_file)) {
+        w_check_universal_arity(name, args->size, 1, 1);
         return __w_read_file(args->slots[0]);
-    if (w_hash_key_eq(name, WN_write_file) && args->size >= 2)
+    }
+    if (w_hash_key_eq(name, WN_write_file)) {
+        w_check_universal_arity(name, args->size, 2, 2);
         return __w_write_file(args->slots[0], args->slots[1]);
+    }
 
     /* Middle-dot multiply (mÂ·cÂ²): Â· on numeric-domain receivers is
      * multiplication. Vec/Mat classes define their own Â· (dot product),
@@ -71344,8 +71495,10 @@ invoke_static_method:
     if (args->size >= 1) {
         const char *nm = as_str(name);
         if (nm[0] == (char)0xC2 && nm[1] == (char)0xB7 && nm[2] == 0 &&
-            (w_is_int(recv) || w_is_double(recv) || w_is_numeric_tag(recv) || w_is_domain_obj(recv)))
+            (w_is_int(recv) || w_is_double(recv) || w_is_numeric_tag(recv) || w_is_domain_obj(recv))) {
+            w_check_universal_arity(name, args->size, 1, 1);
             return w_mul(recv, args->slots[0]);
+        }
     }
 
     /* Universal respond_to? — reflective method-existence check. Declared
@@ -71354,6 +71507,7 @@ invoke_static_method:
      * Instances consult their class's instance methods (walking inheritance);
      * classes consult static methods; builtin-typed receivers answer false. */
     if (w_hash_key_eq(name, WN_respond_to_q) && args->size >= 1) {
+        w_check_universal_arity(name, args->size, 1, 1);
         WValue mname = args->slots[0];
         if (w_is_instance(recv))
             return w_bool(w_method_lookup(g_class_table[((WObject *)w_as_ptr(recv))->class_id], mname) != NULL);
@@ -71370,6 +71524,7 @@ invoke_static_method:
      * hit "undefined method '<=>'". */
     if (w_hash_key_eq(name, WN_spaceship) && args->size >= 1
         && !w_is_instance(recv) && !w_is_class(recv)) {
+        w_check_universal_arity(name, args->size, 1, 1);
         return w_spaceship(recv, args->slots[0]);
     }
 
@@ -71378,6 +71533,7 @@ invoke_static_method:
      * Backs the synthesized operator-overload dispatcher and is useful on its
      * own. A non-class argument or unrelated receiver answers false. */
     if (w_hash_key_eq(name, WN_is_a_q) && args->size >= 1) {
+        w_check_universal_arity(name, args->size, 1, 1);
         return w_value_is_a(recv, args->slots[0]);
     }
 

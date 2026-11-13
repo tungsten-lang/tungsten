@@ -91,5 +91,8 @@ begin
   runner = Av:Runner.new(1)
   Checks.assert("native argv preserves literals", runner.run(["/usr/bin/printf", "%s", "$(false) ; literal"])["stdout"] == "$(false) ; literal")
   Checks.reject("bounded stage deadline", -> runner.run(["/bin/sleep", "5"]))
+  ep = {"schema": "studio.episode/2", "id": "spec", "seed": 1, "cuts": {"main": {"w": 1920, "h": 1080, "rate": [24, 1], "sr": 48000, "tc_start": "01:00:00:00", "end": {"ref": "start", "ms": 1000}}}, "assets": {"bg": {"kind": "image", "path": "bg.png"}}, "styles": {"s": {"grade": {"gain": 0.85}}}, "shots": [{"id": "s0", "kind": "still", "src": "bg", "style": "s", "at": {"ref": "start", "ms": 0}}], "lines": [], "cues": [], "captions": [], "markers": [{"id": "m0", "kind": "chapter", "title": "Intro", "at": "s0"}]}
+  tl = Av:TimelineResolver.resolve_episode(ep, "main")
+  Checks.assert("in-process studio.episode/2 resolver", tl["frames"] == 24 && tl["samples"] == 48000 && tl["segments"].size == 1)
 ensure
   Av:Util.remove_tree(root)

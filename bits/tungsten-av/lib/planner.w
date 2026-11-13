@@ -55,13 +55,13 @@ in Av
       paths.push(Util.absolute(program["source"], root))
       Util.get(program, "data", []).each ->(entry)
         paths.push(Util.absolute(type(entry) == "String" ? entry : entry["path"], root))
-    {"document": document, "root": root, "paths": paths}
+    {"path": path, "document": document, "root": root, "paths": paths}
 
-  -> resolve_timeline(path = nil, cut = nil)
+  -> resolve_timeline(path = nil, cut = nil, document = nil)
     path = path || @project.path(@project.settings["timeline"])
     cut = cut || Util.get(@project.settings, "cut", "full")
-    av_plan_bin = Timeline.cached_binary(@media.toolchain, @media.runner, "av_plan", "apps/studio/tools/av_plan.w")
-    @media.runner.json([av_plan_bin, path, cut])
+    doc = document != nil ? document : JSON.parse(File.read(path))
+    TimelineResolver.resolve_episode(doc, cut)
 
   -> chapters(name, rate, frames)
     declarations = @project.associated("chapters", name)
@@ -110,6 +110,7 @@ in Av
     inputs = [project.file]
     source = nil
     timeline = nil
+    timeline_info = nil
     probe = nil
     facts = {}
     if project.settings["source"]
@@ -120,11 +121,11 @@ in Av
       facts["has_audio"] = (probe["streams"].select ->(s) s["codec_type"] == "audio").size > 0
       inputs.push(source)
     else
-      info = timeline_inputs()
-      info["paths"].each ->(p)
+      timeline_info = timeline_inputs()
+      timeline_info["paths"].each ->(p)
         inputs.push(p)
-      timeline = resolve_timeline()
-      cut = info["document"]["cuts"][Util.get(project.settings, "cut", "full")]
+      timeline = resolve_timeline(timeline_info["path"], nil, timeline_info["document"])
+      cut = timeline_info["document"]["cuts"][Util.get(project.settings, "cut", "full")]
       raise "timeline colour must be bt709" if Util.get(cut, "colour", "bt709") != "bt709"
       facts = timeline_facts(timeline)
       inputs.push(project.path(project.settings["mix"])) if project.settings["mix"]
@@ -158,7 +159,7 @@ in Av
         raise "timeline colour must be bt709" if Util.get(alternate_cut, "colour", "bt709") != "bt709"
         info["paths"].each ->(v)
           inputs.push(v)
-        alternate = resolve_timeline(path, Util.get(p, "cut", "full"))
+        alternate = resolve_timeline(path, Util.get(p, "cut", "full"), info["document"])
         base = timeline_facts(alternate)
         estimated += alternate["w"] * alternate["h"] * alternate["frames"] * ~1.5
         inputs.push(project.path(p["mix"])) if p["mix"]
@@ -226,4 +227,6 @@ in Av
     documents = {}
     inputs.each ->(path)
       documents[path] = Util.sha_cached(path) if File.file?(path) && (path == project.file || [".json", ".srt", ".txt"].include?(File.extname(path).downcase))
-    {"ready": disk["ok"], "schema": 1, "project": project.name, "root": project.root, "bitfile": project.file, "toolchain": project.toolchain, "capabilities": caps, "inputs": inputs, "documents": documents, "source": source, "timeline": timeline, "profiles": plans, "disk": disk, "stages": ["prepare", "snapshot", timeline == nil ? "decode source" : "render timeline", "encode profiles", "verify candidates", "audio/text/anomaly/banding QC", "activate verified release"]}
+    res = {"ready": disk["ok"], "schema": 1, "project": project.name, "root": project.root, "bitfile": project.file, "toolchain": project.toolchain, "capabilities": caps, "inputs": inputs, "documents": documents, "source": source, "timeline": timeline, "profiles": plans, "disk": disk, "stages": ["prepare", "snapshot", timeline == nil ? "decode source" : "render timeline", "encode profiles", "verify candidates", "audio/text/anomaly/banding QC", "activate verified release"]}
+    res["timeline_inputs"] = {"path": timeline_info["path"], "root": timeline_info["root"], "paths": timeline_info["paths"]} if timeline_info != nil
+    res

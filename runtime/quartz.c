@@ -60,6 +60,10 @@
 #include <CoreGraphics/CoreGraphics.h>
 #include <CoreText/CoreText.h>
 #include <ImageIO/ImageIO.h>
+#include <dispatch/dispatch.h>
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 #include <ctype.h>
 #include <math.h>
 #include <pthread.h>
@@ -2242,15 +2246,16 @@ static CGImageRef cg_img_for(CGImg *im, CGCanvas *c) {
  * gives, composited source-over (premultiplied) at the draw's opacity. It applies to an 8-bit canvas,
  * a stretched draw ("fill") of the whole image and an axis-aligned CTM (translate/scale/flip); anything
  * else falls back to CoreGraphics. Clip paths and blend modes are not applied on this path. */
+#define CG_EXACT_CACHE 8
 typedef struct { const CGImg *im; uint32_t gen; CGImageRef key; CFDataRef data; size_t w, h, stride; } CGExactSrc;
-static CGExactSrc g_exact_src[2];
+static CGExactSrc g_exact_src[CG_EXACT_CACHE];
 static int g_exact_next;
 static pthread_mutex_t g_exact_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* RGBA8 premultiplied pixels (R,G,B,A in memory, as the 8-bit canvas) of img, cached for the last two images. */
+/* RGBA8 premultiplied pixels (R,G,B,A in memory, as the 8-bit canvas) of img, cached for recent images. */
 static int cg_exact_source(const CGImg *im, CGImageRef img, CGCanvas *c, const uint8_t **px, size_t *stride) {
     pthread_mutex_lock(&g_exact_lock);
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < CG_EXACT_CACHE; i++) {
         CGExactSrc *e = &g_exact_src[i];
         if (e->data && e->im == im && e->gen == im->gen && e->key == img) {
             *px = CFDataGetBytePtr(e->data);
@@ -2276,7 +2281,7 @@ static int cg_exact_source(const CGImg *im, CGImageRef img, CGCanvas *c, const u
     if (!data) return 0;
     pthread_mutex_lock(&g_exact_lock);
     CGExactSrc *e = &g_exact_src[g_exact_next];
-    g_exact_next = (g_exact_next + 1) % 2;
+    g_exact_next = (g_exact_next + 1) % CG_EXACT_CACHE;
     if (e->data) CFRelease(e->data);
     e->im = im; e->gen = im->gen; e->key = img; e->data = data;
     e->w = CGImageGetWidth(img); e->h = CGImageGetHeight(img); e->stride = st;
@@ -2324,6 +2329,151 @@ static int cg_exact_weights(int n, double pos0, double step, int len, int **firs
 
 static inline int cg_clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+typedef struct {
+    const uint8_t *src;
+    uint8_t *dst;
+    size_t sst, dst_stride;
+    int iw, ih, q0, r0, nq, nr, ht, vt;
+    const int *hf, *hc, *vf, *vc;
+    const float *hw, *vw;
+    float opf;
+} CGExactJob;
+
+static _Thread_local float *g_exact_tls;
+static _Thread_local size_t g_exact_tls_cap;
+
+static void cg_exact_band(void *ctx, size_t bi) {
+    const CGExactJob *j = (const CGExactJob *)ctx;
+    int ro0 = (int)(bi * 16), ro1 = ro0 + 16;
+    if (ro0 >= j->nr) return;
+    if (ro1 > j->nr) ro1 = j->nr;
+    int nq = j->nq, ht = j->ht, vt = j->vt, maxx = j->iw - 1, maxy = j->ih - 1;
+    int sr0 = j->ih, sr1 = -1;
+    for (int o = ro0; o < ro1; o++) {
+        int a = cg_clampi(j->vf[o], 0, maxy), b = cg_clampi(j->vf[o] + j->vc[o] - 1, 0, maxy);
+        if (a < sr0) sr0 = a;
+        if (b > sr1) sr1 = b;
+    }
+    int nsr = sr1 - sr0 + 1;
+    if (nsr <= 0) return;
+    size_t need = (size_t)(nsr + 1) * (size_t)nq * 4;
+    float *buf = g_exact_tls;
+    if (need > g_exact_tls_cap) {
+        float *nb = realloc(buf, need * sizeof(float));
+        if (!nb) return;
+        g_exact_tls = buf = nb;
+        g_exact_tls_cap = need;
+    }
+    float *tmp = buf;
+    float *acc = buf + (size_t)nsr * (size_t)nq * 4;
+    for (int y = 0; y < nsr; y++) {
+        const uint8_t *row = j->src + (size_t)(sr0 + y) * j->sst;
+        float *out = tmp + (size_t)y * (size_t)nq * 4;
+        for (int o = 0; o < nq; o++) {
+            const float *w = j->hw + (size_t)o * (size_t)ht;
+            int f0 = j->hf[o], n = j->hc[o];
+#if defined(__aarch64__)
+            float32x4_t av = vdupq_n_f32(0.0f);
+            if (f0 >= 0 && f0 + n - 1 <= maxx) {
+                const uint8_t *s = row + (size_t)f0 * 4;
+                for (int k = 0; k < n; k++, s += 4) {
+                    uint32_t raw;
+                    memcpy(&raw, s, 4);
+                    uint8x8_t u8 = vreinterpret_u8_u32(vdup_n_u32(raw));
+                    uint16x4_t u16 = vget_low_u16(vmovl_u8(u8));
+                    float32x4_t px = vcvtq_f32_u32(vmovl_u16(u16));
+                    av = vmlaq_n_f32(av, px, w[k]);
+                }
+            } else {
+                for (int k = 0; k < n; k++) {
+                    const uint8_t *s = row + (size_t)cg_clampi(f0 + k, 0, maxx) * 4;
+                    uint32_t raw;
+                    memcpy(&raw, s, 4);
+                    uint8x8_t u8 = vreinterpret_u8_u32(vdup_n_u32(raw));
+                    uint16x4_t u16 = vget_low_u16(vmovl_u8(u8));
+                    float32x4_t px = vcvtq_f32_u32(vmovl_u16(u16));
+                    av = vmlaq_n_f32(av, px, w[k]);
+                }
+            }
+            vst1q_f32(out + o * 4, av);
+#else
+            float a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+            if (f0 >= 0 && f0 + n - 1 <= maxx) {
+                const uint8_t *s = row + (size_t)f0 * 4;
+                for (int k = 0; k < n; k++, s += 4) {
+                    float wk = w[k];
+                    a0 += wk * s[0]; a1 += wk * s[1]; a2 += wk * s[2]; a3 += wk * s[3];
+                }
+            } else {
+                for (int k = 0; k < n; k++) {
+                    const uint8_t *s = row + (size_t)cg_clampi(f0 + k, 0, maxx) * 4;
+                    float wk = w[k];
+                    a0 += wk * s[0]; a1 += wk * s[1]; a2 += wk * s[2]; a3 += wk * s[3];
+                }
+            }
+            out[o * 4] = a0; out[o * 4 + 1] = a1; out[o * 4 + 2] = a2; out[o * 4 + 3] = a3;
+#endif
+        }
+    }
+    float opf = j->opf;
+    int n4 = nq * 4;
+    for (int o = ro0; o < ro1; o++) {
+        const float *w = j->vw + (size_t)o * (size_t)vt;
+        int f0 = j->vf[o], n = j->vc[o];
+        if (n <= 0) {
+            memset(acc, 0, (size_t)n4 * sizeof(float));
+        } else {
+            int sy0 = cg_clampi(f0, 0, maxy) - sr0;
+            const float *tr0 = tmp + (size_t)sy0 * (size_t)n4;
+            float w0 = w[0];
+#if defined(__aarch64__)
+            for (int c = 0; c < n4; c += 4) vst1q_f32(acc + c, vmulq_n_f32(vld1q_f32(tr0 + c), w0));
+            for (int k = 1; k < n; k++) {
+                int sy = cg_clampi(f0 + k, 0, maxy) - sr0;
+                const float *tr = tmp + (size_t)sy * (size_t)n4;
+                float wk = w[k];
+                for (int c = 0; c < n4; c += 4) {
+                    vst1q_f32(acc + c, vmlaq_n_f32(vld1q_f32(acc + c), vld1q_f32(tr + c), wk));
+                }
+            }
+#else
+            for (int c = 0; c < n4; c++) acc[c] = w0 * tr0[c];
+            for (int k = 1; k < n; k++) {
+                int sy = cg_clampi(f0 + k, 0, maxy) - sr0;
+                const float *tr = tmp + (size_t)sy * (size_t)n4;
+                float wk = w[k];
+                for (int c = 0; c < n4; c++) acc[c] += wk * tr[c];
+            }
+#endif
+        }
+        uint8_t *drow = j->dst + (size_t)(j->r0 + o) * j->dst_stride + (size_t)j->q0 * 4;
+        for (int q = 0; q < nq; q++) {
+            float sa = acc[q * 4 + 3] * opf;
+            if (sa > 255.0f) sa = 255.0f;
+            if (sa < 0.0f) sa = 0.0f;
+            if (sa >= 254.999f) {
+                for (int ch = 0; ch < 3; ch++) {
+                    float sv = acc[q * 4 + ch] * opf;
+                    if (sv < 0.0f) sv = 0.0f;
+                    if (sv > 255.0f) sv = 255.0f;
+                    drow[q * 4 + ch] = (uint8_t)(int)(sv + 0.5f);
+                }
+                drow[q * 4 + 3] = 255;
+            } else {
+                float keep = 1.0f - sa / 255.0f;
+                for (int ch = 0; ch < 4; ch++) {
+                    float sv = ch == 3 ? sa : acc[q * 4 + ch] * opf;
+                    if (sv < 0.0f) sv = 0.0f;
+                    if (sv > sa && ch != 3) sv = sa;              /* premultiplied: colour <= alpha */
+                    float v = sv + drow[q * 4 + ch] * keep;
+                    int iv = (int)(v + 0.5f);
+                    drow[q * 4 + ch] = (uint8_t)(iv > 255 ? 255 : iv < 0 ? 0 : iv);
+                }
+            }
+        }
+    }
+}
+
 /* Draw the whole image stretched over the user rect (dx, dy, dw, dh) (y down, as w_cg_image_draw) at
  * opacity op. Returns 1 when drawn, 0 to fall back to CoreGraphics. */
 static int cg_image_draw_exact(CGCanvas *c, CGImg *im, CGImageRef img, double dx, double dy, double dw, double dh, double op) {
@@ -2355,73 +2505,19 @@ static int cg_image_draw_exact(CGCanvas *c, CGImg *im, CGImageRef img, double dx
     if (!ht) return 0;
     int vt = cg_exact_weights(nr, py0 + r0 * pys, pys, (int)ih, &vf, &vc, &vw);
     if (!vt) { free(hf); free(hc); free(hw); return 0; }
-    /* the source rows the vertical taps read */
-    int sr0 = (int)ih, sr1 = -1;
-    for (int o = 0; o < nr; o++) {
-        int a = cg_clampi(vf[o], 0, (int)ih - 1), b = cg_clampi(vf[o] + vc[o] - 1, 0, (int)ih - 1);
-        if (a < sr0) sr0 = a;
-        if (b > sr1) sr1 = b;
+    CGExactJob job = {
+        .src = src, .dst = (uint8_t *)c->data, .sst = sst, .dst_stride = c->stride,
+        .iw = (int)iw, .ih = (int)ih, .q0 = q0, .r0 = r0, .nq = nq, .nr = nr,
+        .ht = ht, .vt = vt, .hf = hf, .hc = hc, .vf = vf, .vc = vc, .hw = hw, .vw = vw,
+        .opf = (float)(op < 0 ? 0 : op > 1 ? 1 : op)
+    };
+    size_t nbands = (size_t)((nr + 15) / 16);
+    if ((int64_t)nq * (int64_t)nr >= 16384 && nbands > 1) {
+        dispatch_apply_f(nbands, DISPATCH_APPLY_AUTO, &job, cg_exact_band);
+    } else {
+        for (size_t bi = 0; bi < nbands; bi++) cg_exact_band(&job, bi);
     }
-    int nsr = sr1 - sr0 + 1;
-    float *tmp = malloc(sizeof(float) * 4 * (size_t)nq * (size_t)(nsr > 0 ? nsr : 1));
-    if (!tmp || nsr <= 0) { free(tmp); free(hf); free(hc); free(hw); free(vf); free(vc); free(vw); return 0; }
-    /* horizontal pass: each needed source row -> nq columns */
-    int maxx = (int)iw - 1;
-    for (int y = 0; y < nsr; y++) {
-        const uint8_t *row = src + (size_t)(sr0 + y) * sst;
-        float *out = tmp + (size_t)y * nq * 4;
-        for (int o = 0; o < nq; o++) {
-            const float *w = hw + (size_t)o * ht;
-            int f0 = hf[o], n = hc[o];
-            float a0 = 0, a1 = 0, a2 = 0, a3 = 0;
-            if (f0 >= 0 && f0 + n - 1 <= maxx) {
-                const uint8_t *s = row + (size_t)f0 * 4;
-                for (int k = 0; k < n; k++, s += 4) {
-                    float wk = w[k];
-                    a0 += wk * s[0]; a1 += wk * s[1]; a2 += wk * s[2]; a3 += wk * s[3];
-                }
-            } else {
-                for (int k = 0; k < n; k++) {
-                    const uint8_t *s = row + (size_t)cg_clampi(f0 + k, 0, maxx) * 4;
-                    float wk = w[k];
-                    a0 += wk * s[0]; a1 += wk * s[1]; a2 += wk * s[2]; a3 += wk * s[3];
-                }
-            }
-            out[o * 4] = a0; out[o * 4 + 1] = a1; out[o * 4 + 2] = a2; out[o * 4 + 3] = a3;
-        }
-    }
-    /* vertical pass, then source-over into the canvas */
-    float opf = (float)(op < 0 ? 0 : op > 1 ? 1 : op);
-    uint8_t *dst = (uint8_t *)c->data;
-    float *acc = malloc(sizeof(float) * 4 * (size_t)nq);
-    if (!acc) { free(tmp); free(hf); free(hc); free(hw); free(vf); free(vc); free(vw); return 0; }
-    for (int o = 0; o < nr; o++) {
-        const float *w = vw + (size_t)o * vt;
-        int f0 = vf[o], n = vc[o];
-        for (int j = 0; j < nq * 4; j++) acc[j] = 0;
-        for (int k = 0; k < n; k++) {
-            int sy = cg_clampi(f0 + k, 0, (int)ih - 1) - sr0;
-            const float *tr = tmp + (size_t)sy * nq * 4;
-            float wk = w[k];
-            for (int j = 0; j < nq * 4; j++) acc[j] += wk * tr[j];
-        }
-        uint8_t *drow = dst + (size_t)(r0 + o) * c->stride + (size_t)q0 * 4;
-        for (int q = 0; q < nq; q++) {
-            float sa = acc[q * 4 + 3] * opf;
-            if (sa > 255.0f) sa = 255.0f;
-            if (sa < 0.0f) sa = 0.0f;
-            float keep = 1.0f - sa / 255.0f;
-            for (int ch = 0; ch < 4; ch++) {
-                float sv = ch == 3 ? sa : acc[q * 4 + ch] * opf;
-                if (sv < 0.0f) sv = 0.0f;
-                if (sv > sa && ch != 3) sv = sa;              /* premultiplied: colour <= alpha */
-                float v = sv + drow[q * 4 + ch] * keep;
-                int iv = (int)(v + 0.5f);
-                drow[q * 4 + ch] = (uint8_t)(iv > 255 ? 255 : iv < 0 ? 0 : iv);
-            }
-        }
-    }
-    free(acc); free(tmp); free(hf); free(hc); free(hw); free(vf); free(vc); free(vw);
+    free(hf); free(hc); free(hw); free(vf); free(vc); free(vw);
     return 1;
 }
 
@@ -2503,23 +2599,176 @@ static void cg_unpremultiply8(uint8_t *p, size_t npix) {
     }
 }
 
+static int cg_image_try_direct_rgba8(CGImageRef img, size_t w, size_t h, uint8_t *dst_rgba, uint8_t *dst_rgb8, uint8_t *dst_rgb16, int bg_black) {
+    if (CGImageGetBitsPerComponent(img) != 8) return 0;
+    size_t bpp = CGImageGetBitsPerPixel(img), st = CGImageGetBytesPerRow(img);
+    if (bpp != 24 && bpp != 32) return 0;
+    CGColorSpaceRef cs = CGImageGetColorSpace(img);
+    if (cs && CGColorSpaceGetModel(cs) != kCGColorSpaceModelRGB) return 0;
+    CGBitmapInfo bi = CGImageGetBitmapInfo(img);
+    if (bi & kCGBitmapFloatComponents) return 0;
+    CGBitmapInfo ord = bi & kCGBitmapByteOrderMask;
+    CGImageAlphaInfo ai = CGImageGetAlphaInfo(img);
+    int r_off = 0, g_off = 1, b_off = 2, a_off = -1, premul = 0, step = (int)(bpp / 8);
+    if (bpp == 24) {
+        if (ai != kCGImageAlphaNone || ord == kCGBitmapByteOrder32Little) return 0;
+    } else if (ord == kCGBitmapByteOrderDefault || ord == kCGBitmapByteOrder32Big) {
+        if (ai == kCGImageAlphaNoneSkipLast) { r_off = 0; g_off = 1; b_off = 2; a_off = -1; }
+        else if (ai == kCGImageAlphaLast) { r_off = 0; g_off = 1; b_off = 2; a_off = 3; }
+        else if (ai == kCGImageAlphaPremultipliedLast) { r_off = 0; g_off = 1; b_off = 2; a_off = 3; premul = 1; }
+        else if (ai == kCGImageAlphaNoneSkipFirst) { r_off = 1; g_off = 2; b_off = 3; a_off = -1; }
+        else if (ai == kCGImageAlphaFirst) { r_off = 1; g_off = 2; b_off = 3; a_off = 0; }
+        else if (ai == kCGImageAlphaPremultipliedFirst) { r_off = 1; g_off = 2; b_off = 3; a_off = 0; premul = 1; }
+        else return 0;
+    } else if (ord == kCGBitmapByteOrder32Little) {
+        if (ai == kCGImageAlphaNoneSkipFirst) { r_off = 2; g_off = 1; b_off = 0; a_off = -1; }
+        else if (ai == kCGImageAlphaFirst) { r_off = 2; g_off = 1; b_off = 0; a_off = 3; }
+        else if (ai == kCGImageAlphaPremultipliedFirst) { r_off = 2; g_off = 1; b_off = 0; a_off = 3; premul = 1; }
+        else if (ai == kCGImageAlphaNoneSkipLast) { r_off = 3; g_off = 2; b_off = 1; a_off = -1; }
+        else if (ai == kCGImageAlphaLast) { r_off = 3; g_off = 2; b_off = 1; a_off = 0; }
+        else if (ai == kCGImageAlphaPremultipliedLast) { r_off = 3; g_off = 2; b_off = 1; a_off = 0; premul = 1; }
+        else return 0;
+    } else {
+        return 0;
+    }
+    CGDataProviderRef prov = CGImageGetDataProvider(img);
+    CFDataRef data = prov ? CGDataProviderCopyData(prov) : NULL;
+    if (!data) return 0;
+    size_t need = h > 0 ? (h - 1) * st + w * (size_t)step : 0;
+    if ((size_t)CFDataGetLength(data) < need) { CFRelease(data); return 0; }
+    const uint8_t *src = CFDataGetBytePtr(data);
+    if (dst_rgb8) {
+        if (step == 3 && r_off == 0 && st == w * 3) {
+            memcpy(dst_rgb8, src, w * h * 3);
+        } else if (a_off < 0 || (bg_black && premul)) {
+            for (size_t y = 0; y < h; y++) {
+                const uint8_t *s = src + y * st;
+                uint8_t *d = dst_rgb8 + y * w * 3;
+                for (size_t x = 0; x < w; x++, s += step, d += 3) {
+                    d[0] = s[r_off]; d[1] = s[g_off]; d[2] = s[b_off];
+                }
+            }
+        } else {
+            for (size_t y = 0; y < h; y++) {
+                const uint8_t *s = src + y * st;
+                uint8_t *d = dst_rgb8 + y * w * 3;
+                for (size_t x = 0; x < w; x++, s += step, d += 3) {
+                    unsigned a = s[a_off];
+                    if (bg_black) {
+                        d[0] = (uint8_t)((s[r_off] * a + 127u) / 255u);
+                        d[1] = (uint8_t)((s[g_off] * a + 127u) / 255u);
+                        d[2] = (uint8_t)((s[b_off] * a + 127u) / 255u);
+                    } else if (!premul || a == 0 || a == 255) {
+                        d[0] = s[r_off]; d[1] = s[g_off]; d[2] = s[b_off];
+                    } else {
+                        unsigned vr = (s[r_off] * 255u + a / 2) / a;
+                        unsigned vg = (s[g_off] * 255u + a / 2) / a;
+                        unsigned vb = (s[b_off] * 255u + a / 2) / a;
+                        d[0] = (uint8_t)(vr > 255 ? 255 : vr);
+                        d[1] = (uint8_t)(vg > 255 ? 255 : vg);
+                        d[2] = (uint8_t)(vb > 255 ? 255 : vb);
+                    }
+                }
+            }
+        }
+    } else if (dst_rgb16) {
+        for (size_t y = 0; y < h; y++) {
+            const uint8_t *s = src + y * st;
+            uint8_t *d = dst_rgb16 + y * w * 6;
+            for (size_t x = 0; x < w; x++, s += step, d += 6) {
+                unsigned r = s[r_off], g = s[g_off], b = s[b_off];
+                if (a_off >= 0 && bg_black && !premul) {
+                    unsigned a = s[a_off];
+                    r = (r * a + 127u) / 255u;
+                    g = (g * a + 127u) / 255u;
+                    b = (b * a + 127u) / 255u;
+                }
+                unsigned r16 = r * 257u, g16 = g * 257u, b16 = b * 257u;
+                d[0] = (uint8_t)(r16 & 255u); d[1] = (uint8_t)(r16 >> 8);
+                d[2] = (uint8_t)(g16 & 255u); d[3] = (uint8_t)(g16 >> 8);
+                d[4] = (uint8_t)(b16 & 255u); d[5] = (uint8_t)(b16 >> 8);
+            }
+        }
+    } else if (dst_rgba) {
+        if (step == 4 && r_off == 0 && g_off == 1 && b_off == 2 && a_off == 3 && !premul && st == w * 4) {
+            memcpy(dst_rgba, src, w * h * 4);
+        } else {
+            for (size_t y = 0; y < h; y++) {
+                const uint8_t *s = src + y * st;
+                uint8_t *d = dst_rgba + y * w * 4;
+                for (size_t x = 0; x < w; x++, s += step, d += 4) {
+                    unsigned a = a_off >= 0 ? s[a_off] : 255u;
+                    d[0] = s[r_off]; d[1] = s[g_off]; d[2] = s[b_off]; d[3] = (uint8_t)a;
+                }
+            }
+            if (premul) cg_unpremultiply8(dst_rgba, w * h);
+        }
+    }
+    CFRelease(data);
+    return 1;
+}
+
 /* w_cg_image_bytes(img) -> ByteArray of RGBA8, unpremultiplied, in the
  * image's own colour space (row-major, no padding). */
 WValue w_cg_image_bytes(WValue imv) {
     CGImg *im = cg_image(imv, "image_bytes");
     size_t w = im->w, h = im->h;
-    CGColorSpaceRef cs = CGImageGetColorSpace(im->image);
-    if (!cs || CGColorSpaceGetModel(cs) != kCGColorSpaceModelRGB) cs = cg_srgb();
-    uint8_t *buf = calloc(w * h, 4);
+    uint8_t *buf = malloc(w * h * 4 > 0 ? w * h * 4 : 1);
     if (!buf) cg_raise("Canvas.image_bytes: out of memory");
-    CGContextRef ctx = CGBitmapContextCreate(buf, w, h, 8, w * 4, cs, (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-    if (!ctx) { free(buf); cg_raise("Canvas.image_bytes: no RGBA8 format for this image's colour space"); }
-    CGContextSetBlendMode(ctx, kCGBlendModeCopy);
-    CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);
-    CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), im->image);
-    CGContextRelease(ctx);
-    cg_unpremultiply8(buf, w * h);
+    if (!cg_image_try_direct_rgba8(im->image, w, h, buf, NULL, NULL, 0)) {
+        memset(buf, 0, w * h * 4);
+        CGColorSpaceRef cs = CGImageGetColorSpace(im->image);
+        if (!cs || CGColorSpaceGetModel(cs) != kCGColorSpaceModelRGB) cs = cg_srgb();
+        CGContextRef ctx = CGBitmapContextCreate(buf, w, h, 8, w * 4, cs, (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+        if (!ctx) { free(buf); cg_raise("Canvas.image_bytes: no RGBA8 format for this image's colour space"); }
+        CGContextSetBlendMode(ctx, kCGBlendModeCopy);
+        CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);
+        CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), im->image);
+        CGContextRelease(ctx);
+        cg_unpremultiply8(buf, w * h);
+    }
     WValue out = w_bytes_from_data(buf, (int64_t)(w * h * 4));
+    free(buf);
+    return out;
+}
+
+/* w_cg_image_rgb(img, depth) -> ByteArray of RGB24 (depth=8) or RGB48LE (depth=16)
+ * composited over black in sRGB/source RGB without allocating a Canvas when possible. */
+WValue w_cg_image_rgb(WValue imv, WValue depthv) {
+    CGImg *im = cg_image(imv, "image_rgb");
+    int depth = (int)cg_num_or(depthv, 8, "depth");
+    if (depth != 8 && depth != 16) cg_raise("Canvas.image_rgb: depth must be 8 or 16");
+    size_t w = im->w, h = im->h;
+    size_t bpp = depth == 16 ? 6 : 3;
+    uint8_t *buf = malloc(w * h * bpp > 0 ? w * h * bpp : 1);
+    if (!buf) cg_raise("Canvas.image_rgb: out of memory");
+    int ok = depth == 16
+        ? cg_image_try_direct_rgba8(im->image, w, h, NULL, NULL, buf, 1)
+        : cg_image_try_direct_rgba8(im->image, w, h, NULL, buf, NULL, 1);
+    if (!ok) {
+        uint8_t *rgba = calloc(w * h > 0 ? w * h : 1, 4);
+        if (!rgba) { free(buf); cg_raise("Canvas.image_rgb: out of memory"); }
+        CGContextRef ctx = CGBitmapContextCreate(rgba, w, h, 8, w * 4, cg_srgb(), (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+        if (!ctx) { free(rgba); free(buf); cg_raise("Canvas.image_rgb: CGBitmapContextCreate failed"); }
+        CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), im->image);
+        CGContextRelease(ctx);
+        if (depth == 16) {
+            for (size_t i = 0; i < w * h; i++) {
+                unsigned r16 = rgba[i * 4] * 257u, g16 = rgba[i * 4 + 1] * 257u, b16 = rgba[i * 4 + 2] * 257u;
+                buf[i * 6] = (uint8_t)(r16 & 255u); buf[i * 6 + 1] = (uint8_t)(r16 >> 8);
+                buf[i * 6 + 2] = (uint8_t)(g16 & 255u); buf[i * 6 + 3] = (uint8_t)(g16 >> 8);
+                buf[i * 6 + 4] = (uint8_t)(b16 & 255u); buf[i * 6 + 5] = (uint8_t)(b16 >> 8);
+            }
+        } else {
+            for (size_t i = 0; i < w * h; i++) {
+                buf[i * 3] = rgba[i * 4];
+                buf[i * 3 + 1] = rgba[i * 4 + 1];
+                buf[i * 3 + 2] = rgba[i * 4 + 2];
+            }
+        }
+        free(rgba);
+    }
+    WValue out = w_bytes_from_data(buf, (int64_t)(w * h * bpp));
     free(buf);
     return out;
 }
@@ -2798,7 +3047,37 @@ static CFStringRef cg_uti(const char *type) {
     return NULL;
 }
 
-static CFDictionaryRef cg_dest_props(double quality) {
+/* Borrow a CGImage view of c->data for immediate encoding (caller must release
+ * the returned CGImage while c remains live and unmutated). Falls back to
+ * cg_snapshot for non-8-bit canvases. */
+static CGImageRef cg_borrow_for_encode(CGCanvas *c, int alpha) {
+    if (c->bpc != 8 || c->is_float || !c->data) return cg_snapshot(c, alpha);
+    CGContextFlush(c->ctx);
+    CGDataProviderRef prov = CGDataProviderCreateWithData(NULL, c->data, c->ph * c->stride, NULL);
+    if (!prov) return cg_snapshot(c, alpha);
+    CGBitmapInfo info = (CGBitmapInfo)(alpha ? kCGImageAlphaPremultipliedLast : kCGImageAlphaNoneSkipLast) | kCGBitmapByteOrder32Big;
+    CGImageRef img = CGImageCreate(c->pw, c->ph, 8, 32, c->stride, c->space, info, prov, NULL, false, kCGRenderingIntentDefault);
+    CGDataProviderRelease(prov);
+    return img ? img : cg_snapshot(c, alpha);
+}
+
+static CFDictionaryRef cg_dest_props(const char *type, double quality) {
+#ifdef IMAGEIO_PNG_NO_FILTERS
+    if (type && cg_eq(type, "png") && quality >= 0 && quality < 0.5) {
+        int flt = IMAGEIO_PNG_NO_FILTERS;
+        CFNumberRef fn = CFNumberCreate(NULL, kCFNumberIntType, &flt);
+        const void *pk[] = {kCGImagePropertyPNGCompressionFilter};
+        const void *pv[] = {fn};
+        CFDictionaryRef pd = CFDictionaryCreate(NULL, pk, pv, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFRelease(fn);
+        const void *k[] = {kCGImagePropertyPNGDictionary};
+        const void *v[] = {pd};
+        CFDictionaryRef d = CFDictionaryCreate(NULL, k, v, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFRelease(pd);
+        return d;
+    }
+#endif
+    (void)type;
     if (!(quality >= 0 && quality <= 1)) return NULL;
     CGFloat q = quality;
     CFNumberRef qn = CFNumberCreate(NULL, kCFNumberCGFloatType, &q);
@@ -2825,8 +3104,8 @@ WValue w_cg_write(WValue hv, WValue pathv, WValue typev, WValue qv, WValue alpha
     CGImageDestinationRef dest = url ? CGImageDestinationCreateWithURL(url, uti, 1, NULL) : NULL;
     if (url) CFRelease(url);
     if (!dest) cg_raise("Canvas.write: cannot create %s", path);
-    CGImageRef img = cg_snapshot(c, alpha);
-    CFDictionaryRef props = cg_dest_props(q);
+    CGImageRef img = cg_borrow_for_encode(c, alpha);
+    CFDictionaryRef props = cg_dest_props(type, q);
     CGImageDestinationAddImage(dest, img, props);
     bool ok = CGImageDestinationFinalize(dest);
     if (props) CFRelease(props);
@@ -2848,8 +3127,8 @@ WValue w_cg_encode(WValue hv, WValue typev, WValue qv, WValue alphav) {
     CFMutableDataRef data = CFDataCreateMutable(NULL, 0);
     CGImageDestinationRef dest = CGImageDestinationCreateWithData(data, uti, 1, NULL);
     if (!dest) { CFRelease(data); cg_raise("Canvas.encode: ImageIO has no %s encoder", type); }
-    CGImageRef img = cg_snapshot(c, alpha);
-    CFDictionaryRef props = cg_dest_props(q);
+    CGImageRef img = cg_borrow_for_encode(c, alpha);
+    CFDictionaryRef props = cg_dest_props(type, q);
     CGImageDestinationAddImage(dest, img, props);
     bool ok = CGImageDestinationFinalize(dest);
     if (props) CFRelease(props);

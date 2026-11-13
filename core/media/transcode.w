@@ -325,10 +325,23 @@
     bitrate = Transcode.opt(o, :bitrate, nil)
     quality = Transcode.opt(o, :quality, nil)
     bitrate = nil if quality != nil && !opts.has_key?(:bitrate)
-    level = Transcode.opt(o, :level, nil)
-    if level == nil && (codec == "h264" || ((codec == "hevc" || codec == "hevc10") && bitrate != nil))
-      row = Transcode.min_level(codec, w, h, rate, bitrate)
-      level = row == nil ? "auto" : row[0]
+    explicit_level = Transcode.opt(o, :level, nil)
+    level = explicit_level
+    if level == nil
+      if codec == "h264" || ((codec == "hevc" || codec == "hevc10") && bitrate != nil)
+        row = Transcode.min_level(codec, w, h, rate, bitrate)
+        level = row == nil ? "auto" : row[0]
+      elsif codec == "hevc" || codec == "hevc10"
+        q = quality == nil ? ~0.75 : quality.to_f
+        bpp = q >= ~0.8 ? ~0.35 : (q >= ~0.6 ? ~0.25 : ~0.12)
+        est = (w.to_f * h.to_f * rate[0].to_f * bpp / rate[1].to_f).to_i
+        row = Transcode.min_level(codec, w, h, rate, est)
+        cap_opt = Transcode.opt(o, :level_cap, nil)
+        cap_r = cap_opt == nil ? nil : Transcode.level_row(codec, cap_opt)
+        min_r = Transcode.min_level(codec, w, h, rate, nil)
+        if row != nil && cap_r != nil && min_r != nil && row[1] > cap_r[1] && min_r[1] <= cap_r[1]
+          row = cap_r
+        level = row == nil ? "auto" : row[0]
     # chapters and timecode
     chapters = Transcode.opt(o, :chapters, "copy")
     chs = []
@@ -422,13 +435,13 @@
     # AutoLevel on some VT quality encoders advertises a level whose bitrate
     # limit is below the produced stream. Choose from measured video bytes,
     # then re-encode with that explicit level (one bounded correction).
-    if level == nil && (codec == "hevc" || codec == "hevc10")
-      facts = MediaVerify.facts(dst, false, false)
-      vbytes = res[:video_bytes]
-      if vbytes != nil && facts[:level] != nil
-        bits = vbytes * 8 * rate[0] / (total * rate[1])
-        needed = Transcode.min_level(codec, w, h, rate, bits)
-        if needed != nil && facts[:level] < needed[1]
+    if explicit_level == nil && (codec == "hevc" || codec == "hevc10") && res[:video_bytes] != nil
+      bits = res[:video_bytes] * 8 * rate[0] / (total * rate[1])
+      needed = Transcode.min_level(codec, w, h, rate, bits)
+      pinned = level == "auto" ? nil : Transcode.level_row(codec, level)
+      if needed != nil && (pinned == nil || pinned[1] < needed[1])
+        facts = MediaVerify.facts(dst, false, false)
+        if facts[:level] != nil && facts[:level] < needed[1]
           corrected = o.dup
           corrected[:level] = needed[0]
           return Transcode.run_once(src, dst, corrected)

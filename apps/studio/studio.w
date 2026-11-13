@@ -66,15 +66,6 @@ use lib/flac
     << "  render \[" + rg[0].to_s + ", " + rg[1].to_s + ") " + (rg[1] - rg[0]).to_s + " frames: " + rg[2].join(" ")
   0
 
--> run_token
-  Crypto.sha256(clock().to_s + ":" + Crypto.random_bytes(8).to_s).slice(0, 10)
-
-# Workers are this binary (STUDIO_BIN overrides).
--> studio_bin
-  b = env("STUDIO_BIN")
-  return System.executable_path if b == nil || b == ""
-  b
-
 # studio frame <episode.json> <f> [--png out] [--yuv out] [--fresh]: one frame, from its stored segment (decoded)
 # or rendered fresh.
 -> cmd_frame(args)
@@ -120,6 +111,9 @@ use lib/flac
   p.verify_assets(true)
   r = p.resolve
   p.write_resolved(p.resolved_path)
+  if flag?(args, "--write-captions")
+    write_text(p.out_path("captions.srt"), srt_text(r))
+    write_text(p.out_path("chapters.txt"), chapters_text(r))
   jobs = opt(args, "--jobs", "1").to_i
   budget = opt(args, "--max-frames", "400").to_i
   lo = opt(args, "--from", "0").to_i
@@ -147,39 +141,31 @@ use lib/flac
   mkdir_p(p.build + "/tmp")
   # program frames these segments need, rendered first (the programs run `jobs` at a time)
   p.ensure_program_frames(r, take, opt(args, "--animation-jobs", jobs.to_s).to_i)
-  if jobs <= 1
+  if jobs <= 1 || take.size <= 1
     eng = Engine.new(p, r)
     enc = make_encoder(r, p.encoder, p.build + "/tmp/fifo." + run_token())
     render_segments(eng, enc, r, p.build, take)
     eng.close
   else
-    lists = []
-    loads = []
-    j = 0
-    while j < jobs
-      lists.push([])
-      loads.push(0)
-      j += 1
-    take.each ->(i3)
-      best = 0
-      j2 = 1
-      while j2 < jobs
-        best = j2 if loads[j2] < loads[best]
-        j2 += 1
-      lists[best].push(i3)
-      loads[best] = loads[best] + segs[i3]["n"]
-    procs = []
+    nw = jobs < take.size ? jobs : take.size
     tok = run_token()
+    jf = p.build + "/tmp/job." + tok + ".txt"
+    claim_dir = p.build + "/tmp/claim." + tok
+    mkdir_p(claim_dir)
+    File.write(jf, take.join(","))
+    procs = []
     j = 0
-    while j < jobs
-      if lists[j].size > 0
-        jf = p.build + "/tmp/job." + tok + "." + j.to_s + ".txt"
-        File.write(jf, lists[j].join(","))
-        procs.push(Process.spawn([studio_bin(), "worker", p.path, p.cut, jf]))
+    while j < nw
+      procs.push(Process.spawn([studio_bin(), "worker", p.path, p.cut, jf, claim_dir]))
       j += 1
     bad = 0
     procs.each ->(pr)
       bad += 1 if pr.wait != 0
+    File.delete(jf) if File.exist?(jf)
+    File.entries(claim_dir).each ->(nm)
+      if nm != "." && nm != ".."
+        Dir.rmdir(claim_dir + "/" + nm)
+    Dir.rmdir(claim_dir)
     die("render: " + bad.to_s + " worker(s) failed") if bad > 0
   dt = clock_ms() - t0
   << "render: " + tf.to_s + " frames in " + take.size.to_s + " segments, " + dt.to_s + " ms (" + ((tf * 1000) / [dt, 1].max).to_s + " fps); " + (missing_frames - tf).to_s + " frames (" + (missing.size - take.size).to_s + " segments) still missing"
@@ -234,18 +220,19 @@ use lib/flac
   << "gc: " + keep.size.to_s + " segments referenced, " + gone.to_s + " unreferenced (" + (bytes / 1048576).to_s + " MB) " + (flag?(args, "--dry") ? "found" : "deleted")
   0
 
-# studio worker <episode.json> <cut> <jobfile>: render the listed segments (spawned by render).
+# studio worker <episode.json> <cut> <jobfile> [claim_dir]: render the listed segments (spawned by render).
 -> cmd_worker(args)
   p = Project.new(args[1], args[2])
   r = JSON.parse(File.read(p.resolved_path))
   idxs = []
   File.read(args[3]).split(",").each ->(x)
     idxs.push(x.to_i)
+  claim_dir = args.size > 4 ? args[4] : nil
   eng = Engine.new(p, r)
   enc = make_encoder(r, p.encoder, args[3] + ".fifo")
-  render_segments(eng, enc, r, p.build, idxs)
+  render_segments(eng, enc, r, p.build, idxs, claim_dir)
   eng.close
-  File.delete(args[3])
+  File.delete(args[3]) if claim_dir == nil && File.exist?(args[3])
   0
 
 # studio gradecheck <episode.json> <from> <to> [--step N]: frames rendered by the CPU reference grade and by the
@@ -326,6 +313,7 @@ use lib/flac
   return cmd_render(args) if c == "render"
   return cmd_worker(args) if c == "worker"
   return cmd_mix_any(args) if c == "mix"
+  return cmd_mix_takes(args) if c == "mix-takes"
   return cmd_mux(args) if c == "mux"
   return cmd_verify(args) if c == "verify"
   return cmd_fcpxml(args) if c == "fcpxml"

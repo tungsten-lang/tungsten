@@ -35,14 +35,20 @@ in Av
     opts["chapters"] = plan["chapters"] if plan["chapters"] != nil
     opts
 
-  -> verify(project, path, plan, directory, reference = nil, timeline = nil, subtitles = nil)
+  -> verify(project, path, plan, directory, reference = nil, timeline = nil, subtitles = nil, known_sha = nil)
     File.mkdir_p(directory)
     p = plan["profile"]
+    pre_audio = nil
+    if p["loudness"]["enabled"] && p["audio"]["codec"] != "none"
+      disk = Budget.new(project.resources).disk(directory, 0)
+      raise "insufficient disk for decoded audio QC" if !disk["ok"]
+      pre_audio = QC.audio(path, p["loudness"], @media, directory)
     opts = {"tc_start": plan["timecode"], "width": plan["width"], "height": plan["height"], "rate": plan["rate"], "frames": plan["frames"], "codec": p["video"]["codec"], "audio": p["audio"]["codec"] != "none", "edit_lists": p["edit_lists"]}
     opts["chapters"] = plan["chapters"] if plan["chapters"] != nil
     opts["level"] = p["video"]["level"] if p["video"]["level"]
-    native = @media.request("verify", path, opts, directory)
-    probe = @media.probe(path)
+    extra = pre_audio != nil ? {"audio_decoded_frames": pre_audio["decoded_frames"]} : nil
+    native = @media.request("verify", path, opts, directory, nil, extra)
+    probe = @media.last_verify_probe || @media.probe(path)
     Planner.colour_guard(probe, p["colour"].merge({"untagged": "reject"}))
     audios = probe["streams"].select ->(s) s["codec_type"] == "audio"
     a = p["audio"]
@@ -53,7 +59,7 @@ in Av
     else
       want = a["codec"] == "aac" ? "aac" : "pcm_" + a["sample_format"]
       audio_ok = audios.size == 1 && audios[0]["codec_name"] == want && audios[0]["sample_rate"].to_i == a["sample_rate"] && audios[0]["channels"] == a["channels"]
-    result = QC.run(project, @media, path, plan, directory, reference, timeline, subtitles)
+    result = QC.run(project, @media, path, plan, directory, reference, timeline, subtitles, pre_audio, known_sha)
     result["ok"] = result["ok"] && native["ok"] && audio_ok
     result["native"] = native
     result["audio_contract"] = audio_ok
@@ -223,8 +229,8 @@ in Av
           subtitles = project.associated("subtitles", name).map ->(i) Util.get(current_mapping, project.path(i["name"]), project.path(i["name"]))
           subtitles_by_name[name] = subtitles
           checks_dir = directory + "/checks"
-          verification = verify(context, destination, p, checks_dir, origin, current_timeline, subtitles)
-          dest_sha = Util.sha(destination)
+          verification = verify(context, destination, p, checks_dir, origin, current_timeline, subtitles, sealed["sha256"])
+          dest_sha = verification["sha256"]
           state["outputs"][name] = {"path": destination, "sha256": dest_sha, "result": result, "verification": verification, "reference": origin, "timeline": current_timeline, "project_settings": context.settings, "subtitle_paths": subtitles}
           Util.json(job + "/job.json", state)
           target = project.output_path(p["profile"]["path"])

@@ -29,14 +29,15 @@ use render
       @active_quality = @quality
     @pending = nil
     @pending_path = nil
+    @rgb_scratch = nil
     @path = nil
     @n = 0
 
   -> new_session
-    return VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], bitrate: @bitrate, input: :rgb24}) if @bitrate != nil
+    return VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], bitrate: @bitrate, input: :rgba}) if @bitrate != nil
     q = @quality
     q = @seg_quality if @seg_quality != nil
-    VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], quality: q, input: :rgb24})
+    VideoEncoder.new(@w, @h, {codec: @codec, rate: [@num, @den], quality: q, input: :rgba})
 
   -> name
     "videotoolbox-" + @codec.to_s
@@ -57,8 +58,13 @@ use render
       @active_quality = want_q
     self
 
+  -> write_rgba(ptr, stride)
+    @enc.encode(ptr, stride)
+
   -> write(rgb)
-    @enc.encode(rgb, @w * 3)
+    @rgb_scratch = u8[@w * @h * 4] if @rgb_scratch == nil
+    rs_rgb_to_rgba_buf(rgb, @w, @h, @rgb_scratch)
+    @enc.encode(@rgb_scratch, @w * 4)
 
   # The GOP closes now; its samples are saved after the next segment's frames have gone in (the first use of a
   # segment waits for the hardware), or at finish.
@@ -125,7 +131,7 @@ use render
 SEGMENT_EXT = {"ext" => "hevc"}
 
 # Render a list of segments (indices into r["segments"]) through an encoder. Returns frames rendered.
--> render_segments(eng, enc, r, build, idxs)
+-> render_segments(eng, enc, r, build, idxs, claim_dir = nil)
   segs = r["segments"]
   mkdir_p(segment_dir(build))
   total = 0
@@ -133,14 +139,16 @@ SEGMENT_EXT = {"ext" => "hevc"}
     s = segs[i]
     path = segment_path(build, s["key"])
     if !File.exist?(path)
-      enc.open(path, s["n"], s["q"])
-      f = s["f0"]
-      e = s["f0"] + s["n"]
-      while f < e
-        enc.write(eng.frame_into(f))
-        f += 1
-      die("segment " + s["key"] + " failed") if !enc.close
-      total += s["n"]
+      claimed = claim_dir == nil || ccall("w_media_hardlink", "", claim_dir + "/" + i.to_s)
+      if claimed && !File.exist?(path)
+        enc.open(path, s["n"], s["q"])
+        f = s["f0"]
+        e = s["f0"] + s["n"]
+        while f < e
+          enc.write_rgba(eng.frame_rgba(f), eng.lstride)
+          f += 1
+        die("segment " + s["key"] + " failed") if !enc.close
+        total += s["n"]
   enc.finish
   total
 

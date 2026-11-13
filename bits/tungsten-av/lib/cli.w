@@ -88,7 +88,12 @@ in Av
       exit(1)
 
   -> .root
-    Env.get("TUNGSTEN_ROOT") || Util.absolute("../../..", __DIR__)
+    return Env.get("TUNGSTEN_ROOT") if Env.get("TUNGSTEN_ROOT") != nil && Env.get("TUNGSTEN_ROOT") != ""
+    pkg = Env.get("BIT_PACKAGE_ROOT")
+    if pkg != nil && pkg != ""
+      candidate = Util.absolute("../..", pkg)
+      return candidate if File.file?(candidate + "/bin/tungsten")
+    Util.absolute("../../..", __DIR__)
 
   -> .files(as_json = false)
     paths = {
@@ -269,3 +274,5 @@ in Av
       {"apply": @apply, "paths": paths}
     ensure
       Util.unlock(lock)
+
+use commands

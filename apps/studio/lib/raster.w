@@ -816,6 +816,53 @@
     i += 1
   0
 
+-> rs_mix_rgba_inplace(a, b, stride, w, h, t) (i64 i64 i64 i64 i64 f64) i64
+  s = ~1.0 - t
+  y = 0
+  while y < h
+    row = y * stride
+    x = 0
+    while x < w
+      p = row + x * 4
+      c = 0
+      while c < 3
+        v = (raw_load_u8(a, p + c) ## f64) * s + (raw_load_u8(b, p + c) ## f64) * t
+        raw_store_u8(b, p + c, Math.floor(v + ~0.5) ## i64)
+        c += 1
+      raw_store_u8(b, p + 3, 255)
+      x += 1
+    y += 1
+  0
+
+-> rs_scale_rgba_inplace(dst, stride, w, h, s) (i64 i64 i64 i64 f64) i64
+  y = 0
+  while y < h
+    row = y * stride
+    x = 0
+    while x < w
+      p = row + x * 4
+      c = 0
+      while c < 3
+        v = (raw_load_u8(dst, p + c) ## f64) * s
+        raw_store_u8(dst, p + c, Math.floor(v + ~0.5) ## i64)
+        c += 1
+      x += 1
+    y += 1
+  0
+
+-> rs_rgb_to_rgba_buf(rgb, w, h, dst) (u8[] i64 i64 u8[]) i64
+  n = w * h
+  i = 0
+  while i < n
+    s = i * 3
+    d = i * 4
+    dst[d] = rgb[s]
+    dst[d + 1] = rgb[s + 1]
+    dst[d + 2] = rgb[s + 2]
+    dst[d + 3] = 255
+    i += 1
+  0
+
 -> rs_copy_rows(src, dst, stride, y0, y1) (i64 i64 i64 i64 i64) i64
   i = y0 * stride
   e = y1 * stride

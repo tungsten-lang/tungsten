@@ -1,7 +1,7 @@
 # studio/audio — `studio mix`: the soundtrack as a pure function of the resolved audio tracks (TIMELINE.md §3.4).
 #
-# Port of the episode's tools/mix.py without ffmpeg: MP3s are decoded once by macOS afconvert into
-# build/audio/<sha256>.wav (48 kHz float), then every filter of the legacy chains runs here — RBJ biquads (the
+# Port of the episode's tools/mix.py without external CLI tools: sources are decoded in-process via native
+# ExtAudioFile + AudioConverter into build/audio/<sha256>.wav (48 kHz float), then every filter of the legacy chains runs here — RBJ biquads (the
 # ffmpeg highpass/lowpass/equalizer/treble designs), ffmpeg's deesser and acompressor algorithms, the split-band
 # de-esser (a linear-phase FIR by block convolution), noise-IR reverb by FFT convolution, looping with crossfades,
 # sample-exact placement, block ducking — then EBU R128 normalisation (BS.1770-4 integrated loudness, linear gain to
@@ -135,7 +135,7 @@ Q28 = ~268435456.0
   while i < 44
     hdr[i] = bytes[i]
     i += 1
-  tmp = path + ".part"
+  tmp = path + ".part." + ccall("w_media_pid").to_s
   fh = FileHandle.new(tmp, "wb")
   fh.write(hdr)
   blk = 174762
@@ -726,6 +726,7 @@ Q28 = ~268435456.0
   0
 
 -> fft4_forward(re, im, n, tw) (f64[] f64[] i64 f64[]) i64
+  return 0 if ccall("w_media_vdsp_fft", re, im, [n], [1])
   span = n
   to = 0
   while span >= 8
@@ -740,6 +741,7 @@ Q28 = ~268435456.0
 
 # Inverse of fft4_forward times n.
 -> fft4_inverse(re, im, n, tw) (f64[] f64[] i64 f64[]) i64
+  return 0 if ccall("w_media_vdsp_fft", re, im, [n], [-1])
   span = n
   to = 0
   while span >= 8
@@ -1077,7 +1079,7 @@ Q28 = ~268435456.0
   while i < 44
     hdr[i] = bytes[i]
     i += 1
-  tmp = path + ".part"
+  tmp = path + ".part." + ccall("w_media_pid").to_s
   fh = FileHandle.new(tmp, "wb")
   fh.write(hdr)
   blk = 131072
@@ -1440,33 +1442,26 @@ Q28 = ~268435456.0
     @cues_made = 0
     @tw_d = nil
 
-  # Decode an asset once into build/audio/<sha>.wav (48 kHz float). MP3s are gapless-trimmed first: afconvert
-  # ignores the LAME/Info header, so the native-rate decode keeps the encoder delay (576 samples on these files,
-  # 13 ms) and the padding; they are cut here from the header's values, then afconvert resamples (bats SRC).
+  # Decode an asset once into build/audio/<sha>.wav (48 kHz float) via CoreAudio ExtAudioFile + AudioConverter
+  # ('bats' mastering SRC, quality 127), trimming LAME/Info gapless head/tail frames in memory on MP3s.
   -> decoded(key)
-    sha = @proj.asset_sha[key]
-    sha = @proj.ep["assets"][key]["sha256"] if sha == nil
+    sha = asset_sha(key)
     out = @dir + "/" + sha + ".wav"
     if !File.exist?(out)
       src = @proj.asset_path(key)
       gap = nil
       gap = mp3_gapless(src) if src.downcase.ends_with?(".mp3")
-      if gap != nil
-        raw = out + ".raw.wav"
-        trim = out + ".trim.wav"
-        die("afconvert failed on " + src) if !OS.system("afconvert -f WAVE -d LEF32 " + shq(src) + " " + shq(raw))
-        wav_trim(raw, trim, gap[0], gap[1])
-        die("afconvert failed on " + trim) if !OS.system("afconvert -f WAVE -d LEF32@" + @sr.to_s + " -r 127 --src-complexity bats " + shq(trim) + " " + shq(out + ".part"))
-        File.delete(raw)
-        File.delete(trim)
-      else
-        die("afconvert failed on " + src) if !OS.system("afconvert -f WAVE -d LEF32@" + @sr.to_s + " -r 127 --src-complexity bats " + shq(src) + " " + shq(out + ".part"))
-      File.rename(out + ".part", out)
+      head = gap != nil ? gap[0] : 0
+      tail = gap != nil ? gap[1] : 0
+      ccall("w_media_audio_decode_f32", src, out, [@sr, head, tail])
     out
 
   -> asset_sha(key)
     sha = @proj.asset_sha[key]
     sha = @proj.ep["assets"][key]["sha256"] if sha == nil
+    if sha == nil
+      sha = Crypto.sha256(File.read_bytes(@proj.asset_path(key)))
+      @proj.asset_sha[key] = sha
     sha
 
   # A narration take's whole chain is cached under this key: the take's content and every parameter its
@@ -1509,12 +1504,36 @@ Q28 = ~268435456.0
     @dkspec = {}
     nil
 
+  -> prepare_for_takes(idxs)
+    cap = @sr * 4
+    lines = @r["tracks"][2]["items"]
+    idxs.each ->(idx)
+      it = lines[idx]
+      if !File.exist?(take_path(it))
+        fr = frames_of(it["src"])
+        cap = [cap, fr + @sr * 2].max
+    @cap = cap
+    @l = f64[cap]
+    @rr = f64[cap]
+    @tl = f64[cap]
+    @tr = f64[cap]
+    @env = f64[cap / 32 + 2]
+    @ir = f64[@sr * 2]
+    @irspec = {}
+    @dkspec = {}
+    nil
+
   # The FFT plan and work arrays, made on the first take that is not cached.
   -> ensure_fft
     if @tw_d == nil
       die("DEESS_FFT and REVERB_FFT share one plan") if DEESS_FFT != REVERB_FFT
-      @tw_d = f64[fft4_table_size(DEESS_FFT)]
-      fft4_twiddles(DEESS_FFT, @tw_d)
+      pr = f64[2]
+      pi = f64[2]
+      if ccall("w_media_vdsp_fft", pr, pi, [2], [1])
+        @tw_d = f64[1]
+      else
+        @tw_d = f64[fft4_table_size(DEESS_FFT)]
+        fft4_twiddles(DEESS_FFT, @tw_d)
       @tw_r = @tw_d
       @zr = f64[REVERB_FFT]
       @zi = f64[REVERB_FFT]
@@ -1753,10 +1772,44 @@ Q28 = ~268435456.0
   # The whole soundtrack: returns the report hash; writes out (24-bit WAV, exactly the picture's length).
   -> mix(out)
     t0 = clock_ms()
+    lines = @r["tracks"][2]["items"]
+    uncached = []
+    seen_tk = {}
+    li = 0
+    while li < lines.size
+      it = lines[li]
+      tk = take_key(it)
+      if seen_tk[tk] == nil && !File.exist?(@dir + "/take_" + tk + ".wav")
+        seen_tk[tk] = 1
+        uncached.push(li)
+      li += 1
+    if uncached.size >= 2 && env("STUDIO_MIX_WORKERS") != "0"
+      @proj.write_resolved(@proj.resolved_path) if !File.exist?(@proj.resolved_path)
+      nw = uncached.size < 4 ? uncached.size : 4
+      lists = []
+      wi = 0
+      while wi < nw
+        lists.push([])
+        wi += 1
+      ui = 0
+      while ui < uncached.size
+        lists[ui % nw].push(uncached[ui].to_s)
+        ui += 1
+      procs = []
+      wi = 0
+      while wi < nw
+        if lists[wi].size > 0
+          procs.push(Process.spawn([studio_bin(), "mix-takes", @proj.path, @r["cut"], lists[wi].join(",")]))
+        wi += 1
+      bad_w = 0
+      procs.each ->(pr)
+        bad_w += 1 if pr.wait != 0
+      die("mix: " + bad_w.to_s + " take worker(s) failed") if bad_w > 0
+      @takes_made += uncached.size
+      @takes_cached -= uncached.size
     prepare()
     n = @n
     bus = f32[n * 2]
-    lines = @r["tracks"][2]["items"]
     lines.each ->(it)
       place_line(it, bus)
     t1 = clock_ms()
@@ -1854,6 +1907,19 @@ Q28 = ~268435456.0
   hash_of({"v" => 4, "dsp" => DSP_VERSION, "sr" => r["sr"], "samples" => r["samples"], "a1" => r["tracks"][2]["items"], "a3" => r["tracks"][3]["items"],
            "mix" => p.ep["mix"], "loudness" => p.ep["cuts"][r["cut"]]["loudness"], "assets" => shas, "seed" => r["seed"]})
 
+-> cmd_mix_takes(args)
+  p = Project.new(args[1], args[2])
+  r = File.exist?(p.resolved_path) ? JSON.parse(File.read(p.resolved_path)) : p.resolve
+  idxs = []
+  args[3].split(",").each ->(s)
+    idxs.push(s.to_i) if s != ""
+  m = Mixer.new(p, r)
+  m.prepare_for_takes(idxs)
+  lines = r["tracks"][2]["items"]
+  idxs.each ->(idx)
+    m.take_file(lines[idx])
+  0
+
 -> cmd_mix(args)
   p = Project.new(args[1], (args.size > 3 && args[2] == "--cut") ? args[3] : "full")
   p.verify_assets(true)
@@ -1862,14 +1928,14 @@ Q28 = ~268435456.0
   key = mix_key(p, r)
   cached = p.build + "/audio/mix_" + key + ".wav"
   if File.exist?(cached) && File.exist?(cached + ".json")
-    OS.system("rm -f " + shq(out) + " && ln " + shq(cached) + " " + shq(out))
+    replace_hardlink(cached, out)
     write_text(p.out_path("mix_report.json"), File.read(cached + ".json"))
     << "mix: unchanged audio (" + key.slice(0, 12) + "), reused " + cached
     return 0
   m = Mixer.new(p, r)
   rep = m.mix(cached)
   write_text(cached + ".json", JSON.encode(rep))
-  OS.system("rm -f " + shq(out) + " && ln " + shq(cached) + " " + shq(out))
+  replace_hardlink(cached, out)
   write_text(p.out_path("mix_report.json"), JSON.encode(rep))
   << "mix: " + rep["samples"].to_s + " samples (" + timecode(r["frames"], r["rate"][0], r["rate"][1]) + "), " + rep["lines"].to_s + " lines, " + rep["cues"].to_s + " cues; " + fixed6(rep["lufs_premaster"]) + " LUFS + " + fixed6(rep["gain_db"]) + " dB -> " + fixed6(rep["lufs"]) + " LUFS, true peak " + fixed6(rep["true_peak_dbtp"]) + " dBTP -> " + out
   << "mix timing ms: " + JSON.encode(rep["ms"]) + "; takes " + rep["takes"]["cached"].to_s + " cached, " + rep["takes"]["made"].to_s + " made; " + JSON.encode(rep["detail_ms"])

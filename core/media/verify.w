@@ -74,8 +74,7 @@
 
   # Stream descriptors with String keys (video/audio/data) from AVFoundation
   # header facts (no sample scan, no external subprocess).
-  -> .probe_streams(path)
-    f = MediaVerify.facts(path, false, false)
+  -> .probe_from_facts(f)
     streams = []
     if f[:video_tracks] != nil && f[:video_tracks] > 0
       fourcc = f[:codec] == nil ? "" : f[:codec].to_s
@@ -113,6 +112,9 @@
       streams << {"index": streams.size, "codec_type": "data", "codec_tag_string": "tmcd",
                   "disposition": {"attached_pic": 0}}
     {"streams": streams, "facts": f}
+
+  -> .probe_streams(path)
+    MediaVerify.probe_from_facts(MediaVerify.facts(path, false, false))
 
   # Single-pass BS.1770-4 integrated loudness, 4x polyphase true peak,
   # clipping, silence, and channel energy over the first audio track.
@@ -173,6 +175,14 @@
     rden = rate == nil ? 0 : rate[1]
     ccall("w_media_extract_frames", src, frames, [w == nil ? 0 : w, h == nil ? 0 : h, fit, depth, rnum, rden])
 
+  # In-memory quality binary search across candidate bitrates over reference clips.
+  -> .quality_search(src, rates, spec)
+    ccall("w_media_quality_search", src, rates, spec)
+
+  # Fused single-pass hardware decode: luma anomaly scan + multi-resolution frame extraction.
+  -> .video_scan(src, opts, frames_spec)
+    ccall("w_media_video_scan", src, opts, frames_spec)
+
   # 75% colour bars of sync_test, bottom third, left to right.
   -> .bars
     [[191, 191, 191], [191, 191, 0], [0, 191, 191], [0, 191, 0], [191, 0, 191], [191, 0, 0], [0, 0, 191], [0, 0, 0]]
@@ -182,7 +192,10 @@
 
   -> .check(path, opts = {})
     want_audio = MediaVerify.opt(opts, :audio, true)
-    f = MediaVerify.facts(path, true, want_audio)
+    pre_af = MediaVerify.opt(opts, :audio_decoded_frames, nil)
+    f = MediaVerify.facts(path, true, want_audio && pre_af == nil)
+    if pre_af != nil && f[:audio_decoded_frames] == nil
+      f[:audio_decoded_frames] = pre_af
     checks = []
     rate = nil
     if opts != nil && opts.has_key?(:rate) && opts[:rate] != nil

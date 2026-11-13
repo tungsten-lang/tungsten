@@ -94,6 +94,43 @@ in Tungsten:Bit
       << "  bit [name] [command]"
     true
 
+  -> .binary_current?(bin_path, toolchain)
+    return false if !File.file?(bin_path)
+    deps_path = bin_path + ".deps"
+    return executable_file?(bin_path) if !File.file?(deps_path)
+    built_at = File.mtime_ns(bin_path)
+    return false if built_at == nil
+    if toolchain != nil && toolchain != ""
+      compiler_at = File.mtime_ns(toolchain + "/bin/tungsten-compiler")
+      return false if compiler_at != nil && compiler_at > built_at
+    rows = File.read(deps_path).split("\n")
+    return false if rows.size < 2 || !rows[0].starts_with?("tungsten-bit-deps-v1 ")
+    i = 1
+    while i < rows.size
+      row = rows[i]
+      i += 1
+      if row != ""
+        parts = row.split("\t")
+        return false if parts.size != 3
+        dep = parts[1] == "r" ? (toolchain != nil && toolchain != "" ? toolchain + "/" + parts[2] : parts[2]) : parts[2]
+        changed_at = File.mtime_ns(dep)
+        return false if changed_at == nil || changed_at > built_at
+    true
+
+  -> .package_binary(root, name)
+    toolchain = env("TUNGSTEN_ROOT")
+    bin_path = root + "/bin/" + name
+    return bin_path if binary_current?(bin_path, toolchain)
+    if toolchain != nil && toolchain != "" && File.file?(root + "/bin/" + name + ".w")
+      real_root = File.realpath(root)
+      real_tc = File.realpath(toolchain)
+      if real_root.starts_with?(real_tc + "/bits/") && File.file?(real_tc + "/bin/tungsten")
+        File.mkdir_p(real_tc + "/build")
+        log = real_tc + "/build/bit-" + File.basename(real_root) + "-" + name + ".log"
+        cmd = "cd " + shell_quote(real_root) + " && BIT_HOME=" + shell_quote(real_tc + "/bits") + " TUNGSTEN_ROOT=" + shell_quote(real_tc) + " " + shell_quote(real_tc + "/bin/tungsten") + " build >" + shell_quote(log) + " 2>&1"
+        return bin_path if system(cmd) && File.file?(bin_path)
+    nil
+
   -> .dispatch(name, args)
     root = resolve(name)
     return false if root == nil
@@ -114,6 +151,17 @@ in Tungsten:Bit
       << "bit: unknown [name] command: [args[0]]"
       help(name, root)
       exit(2)
+    Env.set("BIT_PACKAGE_ROOT", root)
+    Env.set("BIT_COMMAND_NAME", name)
+    bin_path = package_binary(root, name)
+    if bin_path != nil
+      exec_args = [bin_path, args.slice(0, consumed).join(" ")]
+      while consumed < args.size
+        exec_args.push(args[consumed])
+        consumed += 1
+      status = Process.exec(exec_args)
+      << "bit: cannot execute [bin_path] ([status])"
+      exit(126)
     compiler = tungsten_compiler_command()
     if compiler == nil
       << "bit: a Tungsten driver is required to execute package commands"
@@ -125,8 +173,6 @@ in Tungsten:Bit
     while consumed < args.size
       run.push(args[consumed])
       consumed += 1
-    Env.set("BIT_PACKAGE_ROOT", root)
-    Env.set("BIT_COMMAND_NAME", name)
     status = Process.exec(run)
     << "bit: cannot execute [source] ([status])"
     exit(126)

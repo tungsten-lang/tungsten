@@ -50,13 +50,11 @@ in Av
       remaining = next_ranges
     remaining
 
-  -> .anomalies(path, settings, media, plan, timeline = nil)
+  -> .anomalies_from_events(raw_events, settings, plan, timeline = nil)
     black = Util.get(settings, "black_min", 1)
     freeze = Util.get(settings, "freeze_min", 3)
-    noise = Util.get(settings, "noise", ~0.001)
-    scan = media.anomalies(path, black_min: black, freeze_min: freeze, noise: noise, rate: plan["rate"])
     events = []
-    scan[:events].each ->(ev)
+    raw_events.each ->(ev)
       events.push({"kind": ev[0], "start": ev[1], "end": ev[2]})
     allowed = {"black": Util.get(settings, "allow_black", []).dup, "freeze": Util.get(settings, "allow_freeze", []).dup}
     if timeline != nil
@@ -73,16 +71,28 @@ in Av
     unexpected = events.select ->(e) e["unexpected"].size > 0
     {"ok": unexpected.size == 0 || Util.get(settings, "policy", "fail") == "report", "events": events, "unexpected": unexpected.size, "decoded_entire_video": true, "scope": "320-pixel detection; all output pictures decoded"}
 
-  -> .run(project, media, path, plan, directory, reference = nil, timeline = nil, subtitles = nil)
+  -> .anomalies(path, settings, media, plan, timeline = nil)
+    black = Util.get(settings, "black_min", 1)
+    freeze = Util.get(settings, "freeze_min", 3)
+    noise = Util.get(settings, "noise", ~0.001)
+    scan = media.anomalies(path, black_min: black, freeze_min: freeze, noise: noise, rate: plan["rate"])
+    anomalies_from_events(scan[:events], settings, plan, timeline)
+
+  -> .run(project, media, path, plan, directory, reference = nil, timeline = nil, subtitles = nil, pre_audio = nil, pre_sha = nil)
     File.mkdir_p(directory)
-    before = Util.sha(path)
+    before = pre_sha != nil ? pre_sha : Util.sha(path)
     p = plan["profile"]
     results = {}
     results["source_gates"] = source_gates(plan["gates"]) if plan["gates"].size > 0
     if p["loudness"]["enabled"]
-      disk = Budget.new(project.resources).disk(directory, 0)
-      raise "insufficient disk for decoded audio QC" if !disk["ok"]
-      results["audio"] = audio(path, p["loudness"], media, directory)
+      if pre_audio != nil
+        results["audio"] = pre_audio
+      else
+        disk = Budget.new(project.resources).disk(directory, 0)
+        raise "insufficient disk for decoded audio QC" if !disk["ok"]
+        results["audio"] = audio(path, p["loudness"], media, directory)
+    cues = nil
+    text_frames = []
     if p["text"]["enabled"]
       paths = subtitles || project.associated("subtitles", p["name"]).map ->(i) project.path(i["name"])
       cues = []
@@ -93,9 +103,43 @@ in Av
       results["text_layout"] = Text.layout(cues, p["text"], plan["width"], plan["height"], project.path(p["text"]["font"]))
       if p["text"]["burned"]
         raise "burned text QC requires a reference source" if reference == nil
-        results["encoded_text"] = Pixels.encoded_text(path, reference, cues, p["text"], plan, media)
-    results["anomalies"] = anomalies(path, p["anomalies"], media, plan, timeline) if p["anomalies"]["enabled"]
-    results["banding"] = Banding.run(project, media, path, plan, directory, timeline) if p["banding"].size > 0
+        text_frames = Pixels.encoded_text_frames(cues, plan)
+    want_anom = p["anomalies"]["enabled"] == true
+    want_band = p["banding"].size > 0
+    band_spec = nil
+    band_frames = []
+    if want_band
+      bp = Banding.prepare_frames(project, plan, timeline)
+      band_spec = bp[0]
+      band_frames = bp[1]
+    if want_anom || text_frames.size > 0 || band_frames.size > 0
+      reqs = []
+      text_frames.each ->(f)
+        reqs.push([f, plan["width"], plan["height"], 0, 8])
+      band_frames.each ->(f)
+        reqs.push([f, plan["width"], plan["height"], 0, 16])
+      anom_cfg = p["anomalies"]
+      black = Util.get(anom_cfg, "black_min", 1)
+      freeze = Util.get(anom_cfg, "freeze_min", 3)
+      noise = Util.get(anom_cfg, "noise", ~0.001)
+      scan = media.video_scan(path, [want_anom, black, freeze, noise, ~0.10, plan["rate"][0], plan["rate"][1]], reqs)
+      extracted = scan[2]
+      if text_frames.size > 0
+        text_by_frame = {}
+        ti = 0
+        while ti < text_frames.size
+          text_by_frame[text_frames[ti]] = extracted[ti]
+          ti += 1
+        results["encoded_text"] = Pixels.encoded_text(path, reference, cues, p["text"], plan, media, text_by_frame)
+      results["anomalies"] = anomalies_from_events(scan[1], anom_cfg, plan, timeline) if want_anom
+      if want_band
+        band_by_frame = {}
+        bi = 0
+        base_i = text_frames.size
+        while bi < band_frames.size
+          band_by_frame[band_frames[bi]] = extracted[base_i + bi]
+          bi += 1
+        results["banding"] = Banding.run(project, media, path, plan, directory, timeline, band_by_frame, band_spec, before)
     raise "output changed during QC" if Util.sha(path) != before
     result = {"ok": Util.all(results.values.map ->(r) r["ok"]), "sha256": before, "checks": results}
     Util.json(directory + "/qc.json", result)

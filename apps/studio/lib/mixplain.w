@@ -111,14 +111,14 @@ use audio
   key = sha(mix_key(p, r) + ":plain-mix-2")
   cached = p.build + "/audio/mix_" + key + ".wav"
   if File.exist?(cached) && File.exist?(cached + ".json")
-    OS.system("rm -f " + shq(out) + " && ln " + shq(cached) + " " + shq(out))
+    replace_hardlink(cached, out)
     write_text(p.out_path("mix_report.json"), File.read(cached + ".json"))
     << "mix: unchanged audio (" + key.slice(0, 12) + "), reused " + cached
     return 0
   m = PlainMixer.new(p, r)
   rep = m.mix(cached)
   write_text(cached + ".json", JSON.encode(rep))
-  OS.system("rm -f " + shq(out) + " && ln " + shq(cached) + " " + shq(out))
+  replace_hardlink(cached, out)
   write_text(p.out_path("mix_report.json"), JSON.encode(rep))
   << "mix (plain): " + rep["samples"].to_s + " samples (" + timecode(r["frames"], r["rate"][0], r["rate"][1]) + "), " + rep["lines"].to_s + " lines, " + rep["cues"].to_s + " cues; " + fixed6(rep["lufs_premaster"]) + " LUFS + " + fixed6(rep["gain_db"]) + " dB -> " + fixed6(rep["lufs"]) + " LUFS, true peak " + fixed6(rep["true_peak_dbtp"]) + " dBTP -> " + out
   << "mix timing ms: " + JSON.encode(rep["ms"])

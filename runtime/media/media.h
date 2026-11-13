@@ -70,7 +70,13 @@
     X(w_media_audio_prepare, 3)        \
     X(w_media_anomalies, 2)            \
     X(w_media_quality, 3)              \
+    X(w_media_quality_search, 3)       \
     X(w_media_extract_frames, 3)       \
+    X(w_media_video_scan, 3)           \
+    X(w_media_banding_op, 4)           \
+    X(w_media_audio_decode_f32, 3)     \
+    X(w_media_vdsp_fft, 4)             \
+    X(w_media_hardlink, 2)             \
     X(w_media_decoder_open, 3)         \
     X(w_media_decoder_read, 3)         \
     X(w_media_decoder_info, 2)         \

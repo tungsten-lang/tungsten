@@ -15,69 +15,12 @@ in Av
       k += 1
     kernel
 
-  -> .blur_into(input, temporary, result, kernel, width, height) (f64[] f64[] f64[] f64[] i64 i64) f64[]
-    k0 = kernel[0]
-    k1 = kernel[1]
-    k2 = kernel[2]
-    k3 = kernel[3]
-    k4 = kernel[4]
-    k5 = kernel[5]
-    k6 = kernel[6]
-    y = 0 ## i64
-    while y < height
-      row = y * width
-      x = 0 ## i64
-      while x < width
-        if x >= 6 && x < width - 6
-          p = row + x
-          v = input[p] * k6 + (input[p - 1] + input[p + 1]) * k5 + (input[p - 2] + input[p + 2]) * k4 + (input[p - 3] + input[p + 3]) * k3 + (input[p - 4] + input[p + 4]) * k2 + (input[p - 5] + input[p + 5]) * k1 + (input[p - 6] + input[p + 6]) * k0
-          temporary[p] = v
-        else
-          v = ~0.0
-          k = -6 ## i64
-          while k <= 6
-            at = x + k
-            at = 0 if at < 0
-            at = width - 1 if at >= width
-            v += input[row + at] * kernel[k + 6]
-            k += 1
-          temporary[row + x] = v
-        x += 1
-      y += 1
-    y = 0
-    while y < height
-      row = y * width
-      if y >= 6 && y < height - 6
-        w1 = width
-        w2 = width * 2
-        w3 = width * 3
-        w4 = width * 4
-        w5 = width * 5
-        w6 = width * 6
-        x = 0 ## i64
-        while x < width
-          p = row + x
-          result[p] = temporary[p] * k6 + (temporary[p - w1] + temporary[p + w1]) * k5 + (temporary[p - w2] + temporary[p + w2]) * k4 + (temporary[p - w3] + temporary[p + w3]) * k3 + (temporary[p - w4] + temporary[p + w4]) * k2 + (temporary[p - w5] + temporary[p + w5]) * k1 + (temporary[p - w6] + temporary[p + w6]) * k0
-          x += 1
-      else
-        x = 0 ## i64
-        while x < width
-          v = ~0.0
-          k = -6 ## i64
-          while k <= 6
-            at = y + k
-            at = 0 if at < 0
-            at = height - 1 if at >= height
-            v += temporary[at * width + x] * kernel[k + 6]
-            k += 1
-          result[row + x] = v
-          x += 1
-      y += 1
-    result
+  -> .blur_into(input, _temporary, result, kernel, width, height) (f64[] f64[] f64[] f64[] i64 i64) f64[]
+    ccall("w_media_banding_op", "blur", [input, result], kernel, [width, height])
 
   -> .blur(input, width, height) (f64[] i64 i64) f64[]
     n = width * height
-    blur_into(input, f64[n], f64[n], gaussian_kernel(), width, height)
+    blur_into(input, f64[1], f64[n], gaussian_kernel(), width, height)
 
   -> .ideal_luma(width, height, gradient) (i64 i64 Hash) f64[]
     cx = gradient["cx"].to_f
@@ -98,257 +41,28 @@ in Av
       l2 = lv if i == 2
       i += 1
     ideal = f64[width * height]
-    cx_px = cx * width
-    cy_px = cy * height
-    inv_rx = ~1.0 / (radius * width)
-    inv_ry = ~1.0 / (radius * height)
-    slope0 = (l1 - l0) / mid
-    slope1 = (l2 - l1) / (~1.0 - mid)
-    y = 0 ## i64
-    while y < height
-      dy = (y + ~0.5 - cy_px) * inv_ry
-      dy2 = dy * dy
-      row = y * width
-      x = 0 ## i64
-      while x < width
-        dx = (x + ~0.5 - cx_px) * inv_rx
-        t = Math.sqrt(dx * dx + dy2)
-        t = ~1.0 if t > ~1.0
-        ideal[row + x] = t <= mid ? l0 + slope0 * t : l1 + slope1 * (t - mid)
-        x += 1
-      y += 1
-    ideal
+    ccall("w_media_banding_op", "ideal", [width, height], [cx, cy, radius, mid, l0, l1, l2], ideal)
 
-  -> .residual_with_ideal(bytes, ideal, raw_buf, tmp_buf, out_buf, kernel, width, height, depth) (u8[] f64[] f64[] f64[] f64[] f64[] i64 i64 i64) f64[]
-    n = width * height
-    if depth == 16
-      scale16 = ~219.0 / (~255.0 * ~257.0)
-      i = 0 ## i64
-      while i < n
-        p = i * 6
-        r = bytes[p] + 256 * bytes[p + 1]
-        g = bytes[p + 2] + 256 * bytes[p + 3]
-        b = bytes[p + 4] + 256 * bytes[p + 5]
-        raw_buf[i] = (~16.0 + (~0.2126 * r + ~0.7152 * g + ~0.0722 * b) * scale16) - ideal[i]
-        i += 1
-    else
-      scale8 = ~219.0 / ~255.0
-      i = 0 ## i64
-      while i < n
-        p = i * 3
-        raw_buf[i] = (~16.0 + (~0.2126 * bytes[p] + ~0.7152 * bytes[p + 1] + ~0.0722 * bytes[p + 2]) * scale8) - ideal[i]
-        i += 1
-    blur_into(raw_buf, tmp_buf, out_buf, kernel, width, height)
+  -> .residual_with_ideal(bytes, ideal, _raw_buf, _tmp_buf, out_buf, kernel, width, height, depth) (u8[] f64[] f64[] f64[] f64[] f64[] i64 i64 i64) f64[]
+    ccall("w_media_banding_op", "residual", [bytes, ideal, out_buf], kernel, [width, height, depth])
 
   -> .residual(bytes, width, height, depth, gradient) (u8[] i64 i64 i64 Hash) f64[]
     n = width * height
     ideal = ideal_luma(width, height, gradient)
-    residual_with_ideal(bytes, ideal, f64[n], f64[n], f64[n], gaussian_kernel(), width, height, depth)
+    residual_with_ideal(bytes, ideal, f64[1], f64[1], f64[n], gaussian_kernel(), width, height, depth)
 
   -> .mask(source, background, width, height, excludes, margin = 8, border = 20) (u8[] u8[] i64 i64 Array i64 i64) u8[]
-    n = width * height
-    diff = u8[n]
-    i = 0 ## i64
-    while i < n
-      p = i * 3
-      diff[i] = 1 if source[p] != background[p] || source[p + 1] != background[p + 1] || source[p + 2] != background[p + 2]
-      i += 1
-    ri = 0
-    while ri < excludes.size
-      r = excludes[ri]
-      rx0 = r[0].to_i ## i64
-      ry0 = r[1].to_i ## i64
-      rx1 = rx0 + r[2].to_i
-      ry1 = ry0 + r[3].to_i
-      rx0 = 0 if rx0 < 0
-      ry0 = 0 if ry0 < 0
-      rx1 = width if rx1 > width
-      ry1 = height if ry1 > height
-      ry = ry0
-      while ry < ry1
-        row = ry * width
-        rx = rx0
-        while rx < rx1
-          diff[row + rx] = 1
-          rx += 1
-        ry += 1
-      ri += 1
-    stride = width + 1
-    blocked = i32[stride * (height + 1)]
-    y = 0 ## i64
-    while y < height
-      row_sum = 0 ## i64
-      src_row = y * width
-      prev_row = y * stride
-      cur_row = (y + 1) * stride
-      x = 0 ## i64
-      while x < width
-        row_sum += diff[src_row + x]
-        blocked[cur_row + x + 1] = blocked[prev_row + x + 1] + row_sum
-        x += 1
-      y += 1
-    result = u8[n]
-    y = border
-    while y < height - border
-      y0 = y - margin
-      y1 = y + margin + 1
-      y0 = 0 if y0 < 0
-      y1 = height if y1 > height
-      r0 = y0 * stride
-      r1 = y1 * stride
-      out_row = y * width
-      x = border
-      while x < width - border
-        x0 = x - margin
-        x1 = x + margin + 1
-        x0 = 0 if x0 < 0
-        x1 = width if x1 > width
-        count = blocked[r1 + x1] - blocked[r0 + x1] - blocked[r1 + x0] + blocked[r0 + x0]
-        result[out_row + x] = 1 if count == 0
-        x += 1
-      y += 1
-    result
+    result = u8[width * height]
+    ccall("w_media_banding_op", "mask", [source, background, result], excludes, [width, height, margin, border])
 
-  -> .select_kth(vals, n, k) (f64[] i64 i64) f64
-    lo = 0 ## i64
-    hi = n - 1
-    while lo < hi
-      mid = (lo + hi) >> 1
-      a = vals[lo]
-      b = vals[mid]
-      c = vals[hi]
-      pivot = b
-      if (a <= b && b <= c) || (c <= b && b <= a)
-        pivot = b
-      elsif (b <= a && a <= c) || (c <= a && a <= b)
-        pivot = a
-      else
-        pivot = c
-      lt = lo
-      idx = lo
-      gt = hi
-      while idx <= gt
-        v = vals[idx]
-        if v < pivot
-          tmp = vals[lt]
-          vals[lt] = v
-          vals[idx] = tmp
-          lt += 1
-          idx += 1
-        elsif v > pivot
-          tmp = vals[gt]
-          vals[gt] = v
-          vals[idx] = tmp
-          gt -= 1
-        else
-          idx += 1
-      if k < lt
-        hi = lt - 1
-      elsif k > gt
-        lo = gt + 1
-      else
-        return pivot
-    vals[lo]
-
-  -> .p99_exact(vals, count) (f64[] i64) f64
-    hist = i32[65536]
-    i = 0 ## i64
-    while i < count
-      b = (vals[i] * ~2048.0).to_i
-      b = 65535 if b > 65535
-      hist[b] += 1
-      i += 1
-    q = ~0.99 * (count - 1)
-    lo_rank = q.to_i ## i64
-    hi_rank = lo_rank + 1 < count ? lo_rank + 1 : lo_rank
-    prefix = 0 ## i64
-    b_lo = 0 ## i64
-    while b_lo < 65536
-      c = hist[b_lo]
-      break if prefix + c > lo_rank
-      prefix += c
-      b_lo += 1
-    bucket_n = hist[b_lo] ## i64
-    bucket = f64[bucket_n]
-    bi = 0 ## i64
-    next_min = ~1e300
-    need_next = hi_rank >= prefix + bucket_n
-    i = 0
-    while i < count
-      v = vals[i]
-      b = (v * ~2048.0).to_i
-      b = 65535 if b > 65535
-      if b == b_lo
-        bucket[bi] = v
-        bi += 1
-      elsif need_next && b > b_lo && v < next_min
-        next_min = v
-      i += 1
-    local_lo = lo_rank - prefix
-    v_lo = select_kth(bucket, bi, local_lo)
-    v_hi = v_lo
-    if hi_rank != lo_rank
-      if need_next
-        v_hi = next_min
-      else
-        j = local_lo + 1
-        m = bucket[j]
-        j += 1
-        while j < bi
-          m = bucket[j] if bucket[j] < m
-          j += 1
-        v_hi = m
-    v_lo + (v_hi - v_lo) * (q - lo_rank)
-
-  -> .metrics_into(error, mask, vals_buf, width, height) (f64[] u8[] f64[] i64 i64)
-    total = ~0.0
-    squared = ~0.0
-    count = 0 ## i64
-    boundaries = ~0.0
-    interiors = ~0.0
-    nb = 0 ## i64
-    ni = 0 ## i64
-    y = 0 ## i64
-    while y < height
-      row = y * width
-      y_boundary = y > 0 && (y & 15) == 0
-      x = 0 ## i64
-      while x < width
-        p = row + x
-        if mask[p] != 0
-          e = error[p]
-          total += e
-          squared += e * e
-          vals_buf[count] = e < ~0.0 ? ~0.0 - e : e
-          count += 1
-          if x > 0 && mask[p - 1] != 0
-            d = e - error[p - 1]
-            d = ~0.0 - d if d < ~0.0
-            if (x & 15) == 0
-              boundaries += d
-              nb += 1
-            else
-              interiors += d
-              ni += 1
-          if y > 0 && mask[p - width] != 0
-            d = e - error[p - width]
-            d = ~0.0 - d if d < ~0.0
-            if y_boundary
-              boundaries += d
-              nb += 1
-            else
-              interiors += d
-              ni += 1
-        x += 1
-      y += 1
-    raise "less than 1% usable background after masks" if count < width * height / 100
-    raise "insufficient block boundaries after masks" if nb == 0 || ni == 0
-    p99 = p99_exact(vals_buf, count)
-    mean = total / count
-    {"bg_frac": count / (width * height + ~0.0), "rms": Math.sqrt(squared / count), "mean_err": mean, "rms_detrended": Math.sqrt(Util.max(~0.0, squared / count - mean * mean)), "p99": p99, "blk16": (boundaries / nb) / Util.max(interiors / ni, ~1e-9)}
+  -> .metrics_into(error, mask, _vals_buf, width, height) (f64[] u8[] f64[] i64 i64)
+    r = ccall("w_media_banding_op", "metrics", error, mask, [width, height])
+    raise "less than 1% usable background after masks" if r[0] < width * height / 100
+    raise "insufficient block boundaries after masks" if r[1] == 0 || r[2] == 0
+    {"bg_frac": r[3], "rms": r[4], "mean_err": r[5], "rms_detrended": r[6], "p99": r[7], "blk16": r[8]}
 
   -> .metrics(error, mask, width, height, temporal = nil) (f64[] u8[] i64 i64 Object)
-    metrics_into(error, mask, f64[width * height], width, height)
+    metrics_into(error, mask, f64[1], width, height)
 
   -> .gradient(root, short)
     path = root + (short ? "/short/short.w" : "/anim/core.w")
@@ -433,9 +147,27 @@ in Av
     spec["exclude_normalized"] = short ? [[0, 0, 1, ~0.395833333333], [0, ~0.713541666667, 1, ~0.083333333333]] : [] if !spec.has_key?("exclude_normalized")
     spec
 
-  -> .run(project, media, path, plan, directory, timeline)
+  -> .prepare_frames(project, plan, timeline)
     spec = plan["profile"]["banding"]
+    return [nil, []] if spec == nil || spec.size == 0
     spec = automatic(project, plan, timeline) if spec["auto"]
+    samples = Util.get(spec, "samples", [])
+    raise "banding requires at least one sample" if samples.size == 0
+    needed = []
+    samples.each ->(sample)
+      f = sample["frame"]
+      Schema.integer(f, "banding frame", 0, plan["frames"] - 1)
+      needed.push(f)
+      if sample["next_source"]
+        Schema.integer(f + 1, "banding next frame", 0, plan["frames"] - 1)
+        needed.push(f + 1)
+    [spec, Util.unique(needed)]
+
+  -> .run(project, media, path, plan, directory, timeline, pre_decoded_by_frame = nil, pre_spec = nil, known_sha = nil)
+    spec = pre_spec
+    if spec == nil
+      spec = plan["profile"]["banding"]
+      spec = automatic(project, plan, timeline) if spec["auto"]
     width = plan["width"]
     height = plan["height"]
     rate = plan["rate"]
@@ -457,32 +189,34 @@ in Av
     ideal = ideal_luma(width, height, gradient)
     kernel = gaussian_kernel()
     npix = width * height
-    raw_buf = f64[npix]
-    tmp_buf = f64[npix]
+    dummy_buf = f64[1]
     err_buf = f64[npix]
     src_err_buf = f64[npix]
     next_err_buf = f64[npix]
     delta_buf = f64[npix]
     valid_buf = u8[npix]
-    vals_buf = f64[npix]
     rectangles = Util.get(spec, "exclude", []).dup
     Util.get(spec, "exclude_normalized", []).each ->(r)
       rectangles.push([Math.round(r[0] * width).to_i, Math.round(r[1] * height).to_i, Math.round(r[2] * width).to_i, Math.round(r[3] * height).to_i])
-    needed_frames = []
-    samples.each ->(sample)
-      f = sample["frame"]
-      Schema.integer(f, "banding frame", 0, plan["frames"] - 1)
-      needed_frames.push(f)
-      if sample["next_source"]
-        Schema.integer(f + 1, "banding next frame", 0, plan["frames"] - 1)
-        needed_frames.push(f + 1)
-    unique_frames = Util.unique(needed_frames)
-    extracted = Pixels.frames(media, path, unique_frames, width, height, rate, "stretch", 16)
-    decoded_by_frame = {}
-    fi = 0
-    while fi < unique_frames.size
-      decoded_by_frame[unique_frames[fi]] = extracted[fi]
-      fi += 1
+    decoded_by_frame = pre_decoded_by_frame
+    if decoded_by_frame == nil
+      needed_frames = []
+      samples.each ->(sample)
+        f = sample["frame"]
+        Schema.integer(f, "banding frame", 0, plan["frames"] - 1)
+        needed_frames.push(f)
+        if sample["next_source"]
+          Schema.integer(f + 1, "banding next frame", 0, plan["frames"] - 1)
+          needed_frames.push(f + 1)
+      unique_frames = Util.unique(needed_frames)
+      extracted = Pixels.frames(media, path, unique_frames, width, height, rate, "stretch", 16)
+      decoded_by_frame = {}
+      fi = 0
+      while fi < unique_frames.size
+        decoded_by_frame[unique_frames[fi]] = extracted[fi]
+        fi += 1
+    mask_cache = {}
+    src_orig_cache = {}
     rows = []
     visuals = directory + "/banding"
     File.mkdir_p(visuals)
@@ -498,12 +232,20 @@ in Av
       Util.get(sample, "exclude", []).each ->(r) exclusions.push(r)
       exclusions.each ->(r)
         raise "invalid banding exclusion rectangle" if type(r) != "Array" || r.size != 4 || r[2] <= 0 || r[3] <= 0
-      mask = Banding.mask(src, bg, width, height, exclusions)
+      ex_json = JSON.encode(exclusions)
+      mkey = source + "|" + ex_json
+      mask = mask_cache[mkey]
+      if mask == nil
+        mask = Banding.mask(src, bg, width, height, exclusions)
+        mask_cache[mkey] = mask
       decoded = decoded_by_frame[sample["frame"]]
-      error = residual_with_ideal(decoded, ideal, raw_buf, tmp_buf, err_buf, kernel, width, height, 16)
-      row = metrics_into(error, mask, vals_buf, width, height)
-      src_err = residual_with_ideal(src, ideal, raw_buf, tmp_buf, src_err_buf, kernel, width, height, 8)
-      original = metrics_into(src_err, mask, vals_buf, width, height)
+      error = residual_with_ideal(decoded, ideal, dummy_buf, dummy_buf, err_buf, kernel, width, height, 16)
+      row = metrics_into(error, mask, dummy_buf, width, height)
+      original = src_orig_cache[mkey]
+      if original == nil
+        src_err = residual_with_ideal(src, ideal, dummy_buf, dummy_buf, src_err_buf, kernel, width, height, 8)
+        original = metrics_into(src_err, mask, dummy_buf, width, height)
+        src_orig_cache[mkey] = original
       row["rms_8bit_source"] = original["rms"]
       row["rms_detrended_8bit_source"] = original["rms_detrended"]
       if sample["next_source"]
@@ -512,17 +254,21 @@ in Av
         if !still_cache.has_key?(next_source)
           still_cache[next_source] = Pixels.frame(media, next_source, -1, width, height, rate)
         next_src = still_cache[next_source]
-        next_mask = Banding.mask(next_src, bg, width, height, exclusions)
+        nmkey = next_source + "|" + ex_json
+        next_mask = mask_cache[nmkey]
+        if next_mask == nil
+          next_mask = Banding.mask(next_src, bg, width, height, exclusions)
+          mask_cache[nmkey] = next_mask
         next_decoded = decoded_by_frame[sample["frame"] + 1]
-        next_error = residual_with_ideal(next_decoded, ideal, raw_buf, tmp_buf, next_err_buf, kernel, width, height, 16)
+        next_error = residual_with_ideal(next_decoded, ideal, dummy_buf, dummy_buf, next_err_buf, kernel, width, height, 16)
         temporal_delta_into(error, next_error, mask, next_mask, delta_buf, valid_buf, npix)
-        temporal_metrics = metrics_into(delta_buf, valid_buf, vals_buf, width, height)
+        temporal_metrics = metrics_into(delta_buf, valid_buf, dummy_buf, width, height)
         row["temporal_rms"] = temporal_metrics["rms"]
         row["temporal_p99"] = temporal_metrics["p99"]
       diagnostic = visuals + "/frame-" + sample["frame"].to_s + "-" + rows.size.to_s + ".png"
       tile = Banding.diagnostic(src, decoded, error, mask, width, height, sample["frame"])
       begin
-        tile.write_png(diagnostic)
+        tile.write(diagnostic, quality: ~0.1, alpha: false)
         sheet.image(tile, 0, rows.size * 264, 960, 264)
       ensure
         tile.close
@@ -530,11 +276,12 @@ in Av
       row["frame"] = sample["frame"]
       row["ok"] = Util.all(limits.keys.map ->(key) row.has_key?(key) && row[key] <= limits[key])
       rows.push(row)
-    sheet.write(visuals + "/contact-sheet.jpg")
+    sheet.write(visuals + "/contact-sheet.jpg", alpha: false)
     sheet.close
     references.keys.each ->(file)
       raise "banding reference changed" if Util.sha(file) != references[file]
-    result = {"ok": Util.all(rows.map ->(r) r["ok"]), "sha256": Util.sha(path), "geometry": [width, height], "rate": rate, "references": references, "limits": limits, "frames": rows, "contact_sheet": "banding/contact-sheet.jpg"}
+    out_sha = known_sha != nil ? known_sha : Util.sha(path)
+    result = {"ok": Util.all(rows.map ->(r) r["ok"]), "sha256": out_sha, "geometry": [width, height], "rate": rate, "references": references, "limits": limits, "frames": rows, "contact_sheet": "banding/contact-sheet.jpg"}
     result["worst_frames"] = (rows.sort_by ->(r) -r["p99"]).slice(0, 5).map ->(r) r["frame"]
     ["rms", "rms_detrended", "p99", "blk16", "temporal_rms", "temporal_p99"].each ->(key)
       if Util.all(rows.map ->(r) r.has_key?(key))
@@ -546,11 +293,7 @@ in Av
     result
 
   -> .temporal_delta_into(first, second, mask, next_mask, delta, valid, n) (f64[] f64[] u8[] u8[] f64[] u8[] i64) i64
-    i = 0 ## i64
-    while i < n
-      delta[i] = second[i] - first[i]
-      valid[i] = mask[i] & next_mask[i]
-      i += 1
+    ccall("w_media_banding_op", "temporal", [first, second, delta], [mask, next_mask, valid], [n])
     n
 
   -> .temporal_delta(first, second, mask, next_mask, n) (f64[] f64[] u8[] u8[] i64)
@@ -560,61 +303,7 @@ in Av
     [delta, valid]
 
   -> .paint_panels(tile_ptr, stride, source, decoded, error, mask, width, height, rx, ry, rw, rh) (i64 i64 u8[] u8[] f64[] u8[] i64 i64 i64 i64 i64 i64) i64
-    py = 0 ## i64
-    while py < 240
-      dst_row = (24 + py) * stride
-      px = 0 ## i64
-      while px < 320
-        d0 = dst_row + px * 4
-        d1 = dst_row + (320 + px) * 4
-        d2 = dst_row + (640 + px) * 4
-        raw_store_u8(tile_ptr, d0, 0)
-        raw_store_u8(tile_ptr, d0 + 1, 0)
-        raw_store_u8(tile_ptr, d0 + 2, 0)
-        raw_store_u8(tile_ptr, d0 + 3, 255)
-        raw_store_u8(tile_ptr, d1, 0)
-        raw_store_u8(tile_ptr, d1 + 1, 0)
-        raw_store_u8(tile_ptr, d1 + 2, 0)
-        raw_store_u8(tile_ptr, d1 + 3, 255)
-        raw_store_u8(tile_ptr, d2, 0)
-        raw_store_u8(tile_ptr, d2 + 1, 0)
-        raw_store_u8(tile_ptr, d2 + 2, 0)
-        raw_store_u8(tile_ptr, d2 + 3, 255)
-        px += 1
-      py += 1
-    dy = 0 ## i64
-    while dy < rh
-      sy = (dy * 2 + 1) * height / (rh * 2)
-      sy = height - 1 if sy >= height
-      src_row = sy * width
-      dst_row = (24 + ry + dy) * stride
-      dx = 0 ## i64
-      while dx < rw
-        sx = (dx * 2 + 1) * width / (rw * 2)
-        sx = width - 1 if sx >= width
-        p = src_row + sx
-        p3 = p * 3
-        p6 = p * 6
-        heat = mask[p] == 0 ? 128 : Math.round(~128.0 + ~7.0 * error[p]).to_i
-        heat = 0 if heat < 0
-        heat = 255 if heat > 255
-        o0 = dst_row + (rx + dx) * 4
-        o1 = dst_row + (320 + rx + dx) * 4
-        o2 = dst_row + (640 + rx + dx) * 4
-        raw_store_u8(tile_ptr, o0, source[p3])
-        raw_store_u8(tile_ptr, o0 + 1, source[p3 + 1])
-        raw_store_u8(tile_ptr, o0 + 2, source[p3 + 2])
-        raw_store_u8(tile_ptr, o0 + 3, 255)
-        raw_store_u8(tile_ptr, o1, (decoded[p6] + 256 * decoded[p6 + 1]) / 257)
-        raw_store_u8(tile_ptr, o1 + 1, (decoded[p6 + 2] + 256 * decoded[p6 + 3]) / 257)
-        raw_store_u8(tile_ptr, o1 + 2, (decoded[p6 + 4] + 256 * decoded[p6 + 5]) / 257)
-        raw_store_u8(tile_ptr, o1 + 3, 255)
-        raw_store_u8(tile_ptr, o2, heat)
-        raw_store_u8(tile_ptr, o2 + 1, heat)
-        raw_store_u8(tile_ptr, o2 + 2, heat)
-        raw_store_u8(tile_ptr, o2 + 3, 255)
-        dx += 1
-      dy += 1
+    ccall("w_media_banding_op", "paint_panels", [tile_ptr, stride, width, height, rx, ry, rw, rh], [source, decoded, mask], error)
     rw * rh
 
   -> .diagnostic(source, decoded, error, mask, width, height, frame) (u8[] u8[] f64[] u8[] i64 i64 i64)

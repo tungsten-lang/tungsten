@@ -99,6 +99,7 @@ int w_cg_canvas_buffer(int64_t handle, WCGBufferInfo *out);
     X(w_cg_image_info, 2)         \
     X(w_cg_image_draw, 14)        \
     X(w_cg_image_bytes, 1)        \
+    X(w_cg_image_rgb, 2)          \
     X(w_cg_image_release, 1)      \
     X(w_cg_image_purge, 0)        \
     X(w_cg_clear, 2)              \

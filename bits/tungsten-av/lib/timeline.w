@@ -28,9 +28,9 @@ in Av
     bin_path
 
   -> .source(project, media, plan, job, snapshots, identity)
-    planner = Planner.new(project, media)
-    info = planner.timeline_inputs
-    document = info["document"]
+    tl_path = project.path(project.settings["timeline"])
+    cached_in = plan["timeline_inputs"]
+    info = cached_in != nil && cached_in["path"] == tl_path ? cached_in : Planner.new(project, media).timeline_inputs(tl_path)
     root = info["root"]
     paths = info["paths"].dup
     paths.push(project.file)
@@ -93,12 +93,12 @@ in Av
       args.slice(1, args.size).each ->(a)
         command.push(a.to_s)
       media.runner.run(command, project.root, environment, job + "/studio-" + args[0] + ".log")
-    studio.call(["resolve"])
-    resolved = JSON.parse(File.read(directory + "/build/" + cut + "/timeline.resolved.json"))
-    resolved["av_episode"] = episode
     primary = plan["profiles"][name]
     budget = Budget.new(project.resources).choose(primary["width"], primary["height"])
-    studio.call(["render", "--jobs", budget["jobs"], "--animation-jobs", budget["animation_jobs"], "--max-frames", resolved["frames"]])
+    max_frames = plan["timeline"] != nil ? plan["timeline"]["frames"] : 1000000000
+    studio.call(["render", "--jobs", budget["jobs"], "--animation-jobs", budget["animation_jobs"], "--max-frames", max_frames, "--write-captions"])
+    resolved = JSON.parse(File.read(directory + "/build/" + cut + "/timeline.resolved.json"))
+    resolved["av_episode"] = episode
     mix_target = directory + "/build/" + cut + "/mix.wav"
     if project.settings["mix"]
       raise "insufficient disk for timeline audio preparation" if !Budget.new(project.resources).disk(mix_target, resolved["samples"] * 6)["ok"]

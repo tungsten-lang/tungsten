@@ -107,7 +107,7 @@ use grade
   [(c[0] + ~0.0) / ~255.0, (c[1] + ~0.0) / ~255.0, (c[2] + ~0.0) / ~255.0]
 
 + Engine
-  ro :out, :w, :h, :frames_rendered
+  ro :out, :w, :h, :lstride, :frames_rendered
 
   -> new(@proj, @r)
     @w = @r["w"]
@@ -137,15 +137,8 @@ use grade
     @astride = @act_a.stride
     @lstride = @layer0.stride
     n = @aw * @ah
-    @wb = f32[n * 3]
-    @lb = f32[n]
-    @pbuf = f32[n]
-    @bbuf = f32[n]
     @gw = @aw / 8
     @gh = @ah / 8
-    @grid = f64[@gw * @gh]
-    @gcnt = f64[@gw * @gh]
-    @gtmp = f64[@gw * @gh]
     @gp = f64[16]
     @gk = f64[49]
     gs = ~0.0
@@ -160,10 +153,19 @@ use grade
     while j < 49
       @gk[j] = @gk[j] / gs
       j += 1
-    @out = u8[@w * @h * 3]
+    @out = nil
     # the per-pixel look (lib/grade.w): the CPU reference or the Metal kernels, as GRADE says
-    @fx = CpuGrade.new(@aw, @ah, @wb, @lb, @grid, @gcnt, @gtmp, @gp, @pbuf, @bbuf, @gk)
-    @fx = MetalGrade.new(@aw, @ah, @gk, @gp) if GRADE["id"] != "cpu"
+    if GRADE["id"] == "cpu"
+      @wb = f32[n * 3]
+      @lb = f32[n]
+      @pbuf = f32[n]
+      @bbuf = f32[n]
+      @grid = f64[@gw * @gh]
+      @gcnt = f64[@gw * @gh]
+      @gtmp = f64[@gw * @gh]
+      @fx = CpuGrade.new(@aw, @ah, @wb, @lb, @grid, @gcnt, @gtmp, @gp, @pbuf, @bbuf, @gk)
+    else
+      @fx = MetalGrade.new(@aw, @ah, @gk, @gp)
     @planes = {}
     @fields = {}
     @parts = {}
@@ -178,8 +180,6 @@ use grade
     @item_keys = {}
     @prog_pipes = {}
     @pipe_seq = 0
-    @caption_canvas = nil
-    @caption_canvas = Canvas.new(@w, @h) if @proj.ep["burned_captions"] != nil
     @frames_rendered = 0
 
   -> close_prog_pipe(st)
@@ -195,7 +195,6 @@ use grade
     @prog_pipes.values.each ->(st)
       close_prog_pipe(st)
     @prog_pipes = {}
-    @caption_canvas.close if @caption_canvas != nil
     @act_a.close
     @act_b.close
     @layer0.close
@@ -837,8 +836,8 @@ use grade
 
   # ------------------------------------------------------------------------------------------ frame
 
-  # Composite frame f into @out (RGB24, rows packed). Returns @out.
-  -> frame_into(f)
+  # Composite frame f into @layer0 (@l0, RGBA8 with stride @lstride). Returns @l0.
+  -> frame_rgba(f)
     x = interval_at(f)
     ents = x[2]
     v1e = []
@@ -853,45 +852,46 @@ use grade
     k = f - it["f0"]
     render_item(it, k, @layer0, @l0)
     role = main[2]
-    n3 = @w * @h * 3
     if v1e.size == 2
       pe = v1e[0]
       pit = @v1[pe[0]]
       render_item(pit, f - pit["f0"], @layer1, @l1)
       nd = role.split(":")[1].to_i
       a = smooth((k + ~0.0) / (nd + ~0.0))
-      rs_mix_rgb(@l1, @l0, @lstride, @w, @h, a, @out)
-    else
-      rs_copy_rgb(@l0, @lstride, @w, @h, @out)
-      if role.starts_with?("fadein:")
-        nd = role.split(":")[1].to_i
-        q = (k + ~0.0) / (nd + ~0.0)
-        rs_scale_rgb(@out, n3, q * Math.sqrt(q))
+      rs_mix_rgba_inplace(@l1, @l0, @lstride, @w, @h, a)
+    elsif role.starts_with?("fadein:")
+      nd = role.split(":")[1].to_i
+      q = (k + ~0.0) / (nd + ~0.0)
+      rs_scale_rgba_inplace(@l0, @lstride, @w, @h, q * Math.sqrt(q))
     fades.each ->(e)
       fit = @v4[e[0]]
       nd = fit["params"]["frames"]
       rem = (fit["f1"] - f + ~0.0) / (nd + ~0.0)
       pw = to_f(fit["params"]["power"])
-      rs_scale_rgb(@out, n3, Math.exp(pw * Math.log(rem)))
-    if @caption_canvas != nil
+      rs_scale_rgba_inplace(@l0, @lstride, @w, @h, Math.exp(pw * Math.log(rem)))
+    if @proj.ep["burned_captions"] != nil
       ms = f * @r["rate"][1] * 1000 / @r["rate"][0]
+      drew_cap = false
       @proj.ep["burned_captions"].each ->(cue)
         if cue["start_ms"] <= ms && ms < cue["end_ms"]
-          c = @caption_canvas
           b = cue["box"]
-          by0 = [to_f(b[1]).floor.to_i - 8, 0].max
-          by1 = [(to_f(b[1]) + to_f(b[3])).ceil.to_i + 8, @h].min
-          if by0 < by1
-            rs_rgb_rows_to_canvas(@out, @w, by0, by1, c.data_pointer, c.stride)
-            c.rect(b[0], b[1], b[2], b[3], fill: cue["background"])
-            cue["lines"].each ->(line)
-              c.save
-              c.translate(line["x"], line["y"])
-              line["paths"].each ->(path)
-                c.path(path, fill: cue["foreground"])
-              c.restore
-            rs_copy_rgb_rows(c.data_pointer, c.stride, @w, by0, by1, @out)
+          @layer0.rect(b[0], b[1], b[2], b[3], fill: cue["background"])
+          cue["lines"].each ->(line)
+            @layer0.save
+            @layer0.translate(line["x"], line["y"])
+            line["paths"].each ->(path)
+              @layer0.path(path, fill: cue["foreground"])
+            @layer0.restore
+          drew_cap = true
+      @l0 = @layer0.data_pointer if drew_cap
     @frames_rendered += 1
+    @l0
+
+  # Composite frame f into @out (RGB24, rows packed). Returns @out.
+  -> frame_into(f)
+    @out = u8[@w * @h * 3] if @out == nil
+    ptr = frame_rgba(f)
+    rs_copy_rgb(ptr, @lstride, @w, @h, @out)
     @out
 
   # The current @out as a PNG (through a canvas, so the file carries the sRGB chunk).

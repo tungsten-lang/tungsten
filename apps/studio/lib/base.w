@@ -295,7 +295,22 @@ P_IR = 8
 
 # Write text atomically (tmp + rename).
 -> write_text(path, text)
-  tmp = path + ".tmp"
+  tmp = path + ".tmp." + ccall("w_media_pid").to_s
   File.write(tmp, text)
   File.rename(tmp, path)
   path
+
+-> run_token
+  Crypto.sha256(clock().to_s + ":" + Crypto.random_bytes(8).to_s).slice(0, 10)
+
+# Workers are this binary (STUDIO_BIN overrides).
+-> studio_bin
+  b = env("STUDIO_BIN")
+  return System.executable_path if b == nil || b == ""
+  b
+
+-> replace_hardlink(src, dst)
+  return true if ccall("w_media_hardlink", src, dst)
+  File.delete(dst) if File.exist?(dst)
+  File.write_bytes(dst, File.read_bytes(src))
+  true

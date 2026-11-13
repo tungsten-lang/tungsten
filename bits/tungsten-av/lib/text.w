@@ -32,9 +32,17 @@ in Av
       result.push({"start": start, "end": finish, "text": lines.join("\n")})
     result
 
+  SHAPE_CACHE = {}
+
   -> .shape(text, font, size)
+    mtime = File.mtime_ns(font) || 0
+    key = font + "\x00" + mtime.to_s + "\x00" + size.to_s + "\x00" + text
+    cached = SHAPE_CACHE[key]
+    return cached if cached != nil
     shaped = ccall("w_cg_font_shape", font, text, size)
-    {"advance": shaped[0], "bounds": shaped[1], "paths": shaped[2]}
+    res = {"advance": shaped[0], "bounds": shaped[1], "paths": shaped[2]}
+    SHAPE_CACHE[key] = res
+    res
 
   -> .luminance(colour)
     raise "text colours require #rrggbb" if !Regex.new("\\A#\[0-9a-fA-F]{6}\\z").match?(colour)

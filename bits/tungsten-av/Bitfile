@@ -5,3 +5,4 @@ license "MIT OR Apache-2.0"
 
 includes ["native/platform.c"]
 asset "native"
+executable "av", source: "bin/av.w", profile: "release"

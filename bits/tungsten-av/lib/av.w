@@ -7,6 +7,7 @@ use text
 use pixels
 use banding
 use qc
+use timeline_resolver
 use planner
 use quality
 use release

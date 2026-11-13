@@ -1,10 +1,11 @@
 in Av
 
 + Media
-  ro :toolchain, :package, :runner
+  ro :toolchain, :package, :runner, :last_verify_probe
   -> new(@toolchain, @package, @runner)
     @caps = nil
     @encoder_checks = {}
+    @last_verify_probe = nil
 
   -> .json_keys(value)
     JSON.parse(JSON.encode(value))
@@ -49,6 +50,12 @@ in Av
   -> extract_frames(src, frames, opts = {})
     MediaVerify.extract_frames(src, frames, opts)
 
+  -> quality_search(src, rates, spec)
+    MediaVerify.quality_search(src, rates, spec)
+
+  -> video_scan(src, opts, reqs)
+    MediaVerify.video_scan(src, opts, reqs)
+
   -> call(command, args = [])
     return capabilities() if command == "capabilities"
     return facts(args[0].to_s) if command == "facts"
@@ -75,16 +82,21 @@ in Av
       return out
     raise "unknown native AV command: [command]"
 
-  -> request(command, path, options, directory, destination = nil)
+  -> request(command, path, options, directory, destination = nil, extra = nil)
     if directory != nil
       File.mkdir_p(directory)
       Util.json(directory + "/" + command + ".json", {"source": path, "destination": destination, "options": options})
     opts = Util.symbols(options)
+    if extra != nil
+      ex = Util.symbols(extra)
+      ex.keys.each ->(k)
+        opts[k] = ex[k]
     if command == "transcode"
       result = Transcode.run(path, destination, opts)
       return Media.json_keys(result)
     if command == "verify"
       result = Transcode.check(path, opts)
+      @last_verify_probe = MediaVerify.probe_from_facts(result[:facts])
       out = Media.json_keys({"ok": result[:ok], "checks": result[:checks]})
       raise "native media verification failed for [path]" if !out["ok"]
       return out

@@ -31,45 +31,68 @@ in Av
       i += 1
     rates = Util.unique(rates)
     trials_by_rate = {}
-    eval_rate = ->(bits)
-      return trials_by_rate[bits] if trials_by_rate.has_key?(bits)
-      checks = []
-      passed = true
-      si = 0
-      while si < frames.size && passed
-        frame = frames[si]
-        path = directory + "/" + bits.to_s + "-" + si.to_s + ".mov"
-        opts = base.merge({"start": start_offset + frame, "bitrate": bits})
-        media.request("transcode", source, opts, nil, path)
-        q = media.quality(source, path, ref_start: start_offset + frame, cand_start: 0, frames: count, fit: fit, rate: plan["rate"])
-        ssim = q[:ssim]
-        ms_ssim = q[:ms_ssim]
-        ok = ssim >= min_ssim && (!has_ms || ms_ssim >= min_ms_ssim)
-        score = {"frame": frame, "ssim": ssim, "min_ssim": q[:min_ssim], "ms_ssim": ms_ssim, "min_ms_ssim": q[:min_ms_ssim], "psnr_y": q[:psnr_y], "ok": ok}
-        if ok && burned_text
-          local = plan.merge({"start": start_offset + frame, "frames": count})
-          cues = [{"start": 0, "end": count * plan["rate"][1] / plan["rate"][0].to_f, "text": "probe"}]
-          score["text"] = Pixels.encoded_text(path, source, cues, plan["profile"]["text"], local, media)
-          score["ok"] = score["ok"] && score["text"]["ok"]
-        Util.unlink(path)
-        checks.push(score)
-        passed = false if !score["ok"]
-        si += 1
-      trial = {"bitrate": bits, "ok": passed, "samples": checks}
-      trials_by_rate[bits] = trial
-      trial
     winner = nil
-    lo = 0
-    hi = rates.size - 1
-    while lo <= hi
-      mid = (lo + hi) / 2
-      bits = rates[mid]
-      trial = eval_rate.call(bits)
-      if trial["ok"]
-        winner = bits
-        hi = mid - 1
-      else
-        lo = mid + 1
+    if !burned_text
+      codec = Util.get(options, "codec", "hevc10").to_s
+      req_level = options["level"]
+      rates_with_levels = rates.map ->(bits)
+        lvl = ""
+        if req_level != nil && req_level.to_s != "auto"
+          lvl = req_level.to_s
+        else
+          row = Transcode.min_level(codec, plan["width"], plan["height"], plan["rate"], bits)
+          lvl = row[0] if row != nil
+        [bits, lvl]
+      clips = frames.map ->(f) [start_offset + f, count]
+      spec = [["rate", plan["rate"]], ["width", plan["width"]], ["height", plan["height"]], ["fit", MediaVerify.fit_code(fit)], ["filter", Util.get(options, "filter", "lanczos3").to_s], ["codec", codec], ["gop", Util.get(options, "gop", 48)], ["reorder", Util.get(options, "reorder", true)], ["speed", Util.get(options, "speed", false)], ["clips", clips], ["min_ssim", min_ssim], ["min_ms_ssim", has_ms ? min_ms_ssim : ~0.0], ["min_psnr", Util.get(settings, "minimum_psnr", ~0.0)]]
+      sr = media.quality_search(source, rates_with_levels, spec)
+      chosen_idx = sr[0]
+      sr[1].each ->(tr)
+        bits = tr[1]
+        checks = []
+        tr[3].each ->(cr)
+          checks.push({"frame": frames[cr[0]], "ssim": cr[2], "min_ssim": cr[3], "ms_ssim": cr[4], "min_ms_ssim": cr[5], "psnr_y": cr[6], "ok": cr[7]})
+        trials_by_rate[bits] = {"bitrate": bits, "ok": tr[2], "samples": checks}
+      winner = chosen_idx >= 0 ? rates[chosen_idx] : nil
+    else
+      eval_rate = ->(bits)
+        return trials_by_rate[bits] if trials_by_rate.has_key?(bits)
+        checks = []
+        passed = true
+        si = 0
+        while si < frames.size && passed
+          frame = frames[si]
+          path = directory + "/" + bits.to_s + "-" + si.to_s + ".mov"
+          opts = base.merge({"start": start_offset + frame, "bitrate": bits})
+          media.request("transcode", source, opts, nil, path)
+          q = media.quality(source, path, ref_start: start_offset + frame, cand_start: 0, frames: count, fit: fit, rate: plan["rate"])
+          ssim = q[:ssim]
+          ms_ssim = q[:ms_ssim]
+          ok = ssim >= min_ssim && (!has_ms || ms_ssim >= min_ms_ssim)
+          score = {"frame": frame, "ssim": ssim, "min_ssim": q[:min_ssim], "ms_ssim": ms_ssim, "min_ms_ssim": q[:min_ms_ssim], "psnr_y": q[:psnr_y], "ok": ok}
+          if ok && burned_text
+            local = plan.merge({"start": start_offset + frame, "frames": count})
+            cues = [{"start": 0, "end": count * plan["rate"][1] / plan["rate"][0].to_f, "text": "probe"}]
+            score["text"] = Pixels.encoded_text(path, source, cues, plan["profile"]["text"], local, media)
+            score["ok"] = score["ok"] && score["text"]["ok"]
+          Util.unlink(path)
+          checks.push(score)
+          passed = false if !score["ok"]
+          si += 1
+        trial = {"bitrate": bits, "ok": passed, "samples": checks}
+        trials_by_rate[bits] = trial
+        trial
+      lo = 0
+      hi = rates.size - 1
+      while lo <= hi
+        mid = (lo + hi) / 2
+        bits = rates[mid]
+        trial = eval_rate.call(bits)
+        if trial["ok"]
+          winner = bits
+          hi = mid - 1
+        else
+          lo = mid + 1
     trials = (trials_by_rate.keys.sort).map ->(b) trials_by_rate[b]
     result = {"ok": winner != nil, "bitrate": winner, "trials": trials, "selection": "lowest tested passing bitrate; final-file QC still required"}
     Util.json(directory + "/quality.json", result)

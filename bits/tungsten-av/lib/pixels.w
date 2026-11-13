@@ -78,18 +78,18 @@ in Av
 
   -> .still_frame(path, width, height, fit = "stretch", depth = 8)
     img = Canvas.load_image(path)
+    mode = fit == nil ? "stretch" : fit.to_s
+    if img.width == width && img.height == height && mode == "stretch"
+      return ccall("w_cg_image_rgb", img.handle, depth)
     src_canvas = Canvas.new(img.width, img.height, background: "#000000")
     scaler = nil
     begin
       src_canvas.image(img, 0, 0, img.width, img.height)
-      mode = fit == nil ? "stretch" : fit.to_s
-      if img.width == width && img.height == height && mode == "stretch"
-        return pack_rgba_ptr(src_canvas.data_pointer, src_canvas.stride, width, height, depth)
       scaler = Scaler.new(img.width, img.height, width, height, filter: :lanczos3, fit: mode, alpha: :opaque)
       scaled = scaler.scale(src_canvas)
       pack_rgba_bytes(scaled, width, height, depth)
     ensure
-      scaler.close if scaler != nil
+      scaler.free if scaler != nil
       src_canvas.close
 
   -> .frames(media, path, frame_list, width, height, rate, fit = "stretch", depth = 8)
@@ -175,13 +175,16 @@ in Av
       ry += 1
     [edges > 0 ? retained / (edges + ~0.0) : ~0.0, count > 0 ? (err_sum / ~255.0) / count : ~1.0, edges]
 
-  -> .encoded_text(path, reference, cues, settings, plan, media)
+  -> .encoded_text_frames(cues, plan)
     frames = cues.map ->(c) Util.min(plan["frames"] - 1, ((c["start"] + c["end"]) / 2 * plan["rate"][0] / plan["rate"][1]).to_i)
-    unique = Util.unique(frames)
+    Util.unique(frames)
+
+  -> .encoded_text(path, reference, cues, settings, plan, media, pre_cand_by_frame = nil)
+    unique = encoded_text_frames(cues, plan)
     fit = Util.get(plan["profile"], "fit", "stretch")
     ref_frames = unique.map ->(f) f + plan["start"]
     ref_imgs = Pixels.frames(media, reference, ref_frames, plan["width"], plan["height"], plan["rate"], fit, 8)
-    cand_imgs = Pixels.frames(media, path, unique, plan["width"], plan["height"], plan["rate"], "stretch", 8)
+    cand_imgs = pre_cand_by_frame != nil ? (unique.map ->(f) pre_cand_by_frame[f]) : Pixels.frames(media, path, unique, plan["width"], plan["height"], plan["rate"], "stretch", 8)
     box = Util.get(settings, "box", [~0.05, ~0.7, ~0.9, ~0.25])
     min_recall = Util.get(settings, "minimum_edge_recall", ~0.85)
     max_err = Util.get(settings, "max_error", ~0.06)

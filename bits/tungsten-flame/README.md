@@ -26,9 +26,10 @@ bin/tungsten flame --counters file.w      # PMC counter mode (macOS): IPC + miss
   bleed-in from other processes. PMI sampling exports many XML rows per
   busy core (measured on one busy thread: ~23K rows/s, ~17 MB of XML and
   about 1 s of `xctrace export` per recorded second). `-d` is recorded in
-  full; a long recording of a many-core program exports accordingly more
-  (the rates converge within a couple of seconds, so a short `-d` is enough
-  for them). When the trace carries no counters table
+  full up to 120 s (about 2 GB of XML per busy core); a longer `-d` is
+  capped at 120 s. A many-core program exports accordingly more (the rates
+  converge within a couple of seconds, so a short `-d` is enough for
+  them). When the trace carries no counters table
   (Developer mode off — `sudo DevToolsSecurity -enable` — or an event the
   chip lacks), the sampler falls back to the stock Time Profiler template:
   stacks only, no PMC metrics.

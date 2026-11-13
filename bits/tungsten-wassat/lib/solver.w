@@ -621,6 +621,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Lucky phases run at most once per solver, on the first solve_query.
     @lucky_cancel_rebuild = false
     @lucky_pending = @config.use_lucky
+    # Absolute propagation count at which a bounded search hands back
+    # (0 = none). See set_prop_stop.
+    @stop_props = 0
     self.prepare_walk
 
   # ---- literal encoding ---------------------------------------------------
@@ -1963,6 +1966,18 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # implementations of one logical arm reuse the same arm_slot and therefore
   # preserve its accounting. Configuration happens on the coordinator before
   # spawning a worker; the conflict loop performs no allocation.
+  # A deterministic work bound for a bounded search: once this solver has
+  # propagated `more` further literals, the next conflict ends the query as
+  # UNKNOWN exactly as an exhausted conflict budget does. A conflict cap alone
+  # does not bound a search whose conflicts each cost thousands of decisions.
+  # Zero removes the bound.
+  -> set_prop_stop(more)
+    @stop_props = more > 0 ? @pstate[4] + more : 0
+    0
+
+  -> prop_stop_reached?
+    @stop_props > 0 && @pstate[4] >= @stop_props
+
   -> set_shared_conflict_budget(state, limit, arm_slot)
     if state == nil
       @conflict_budget_state = nil
@@ -3365,6 +3380,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                   result = -1
             if stop_conflicts > 0 && @conflicts >= stop_conflicts
               limited = true
+            limited = true if @stop_props > 0 && @pstate[4] >= @stop_props
         # The owner of the final aggregate ticket processes that conflict
         # completely. If it did not decide the formula, publish cooperative
         # budget exhaustion only afterwards; every other arm either observes

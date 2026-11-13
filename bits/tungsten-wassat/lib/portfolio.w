@@ -1697,6 +1697,9 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
       mask += 1
   0
 
+WASSAT_SCOUT_PROP_BASE = 2000000
+WASSAT_SCOUT_PROP_PER_CLAUSE = 2
+
 # The bounded CDCL scout, as an arm. It is the same search the coordinator used
 # to run inline: its own solver over the same artifact, stopped by conflict cap
 # (and, off the raw path, by wall clock). It runs beside the lucky arm so that
@@ -1719,6 +1722,11 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     s.enable_lucky_once
     lr = s.lucky_probe(wassat_scout_lucky_prop_budget(nv))
     spr = s.result_for(lr) if lr != 0
+  # The conflict cap does not bound a raw scout on large circuit formulas,
+  # where one conflict costs thousands of decisions (veer_axi: 128 conflicts,
+  # 28M propagations, 7.7s before the race could start). Bound its work too,
+  # in propagations so the handoff stays independent of machine load.
+  s.set_prop_stop(WASSAT_SCOUT_PROP_BASE + WASSAT_SCOUT_PROP_PER_CLAUSE * art["fncl"]) if raw && env("WASSAT_SCOUT_PROPS") != "0"
   if spr == nil
     slice = cap < 512 ? cap : 512
     spr = s.solve_budget(slice)
@@ -1727,10 +1735,11 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
   # decides at 1,733 conflicts when quiet and falls off a cliff to a full
   # 11k-conflict main solve when busy. A raw kernel's scout is already bounded
   # by its conflict cap, so it runs on conflicts alone and is reproducible.
-  while spr["status"] == 0 && spr["conflicts"] < cap && !wassat_stop_requested?(stop) && (raw || ccall("__w_clock_ms") - t0 < wall)
+  while spr["status"] == 0 && spr["conflicts"] < cap && !s.prop_stop_reached? && !wassat_stop_requested?(stop) && (raw || ccall("__w_clock_ms") - t0 < wall)
     rem = cap - spr["conflicts"]
     slice = rem < 512 ? rem : 512
     spr = s.solve_budget(slice)
+  s.set_prop_stop(0)
   out.push(spr)
   # Keep the live solver beside the detached result. A scout miss has already
   # paid construction, propagation, conflicts, learned clauses and heuristic

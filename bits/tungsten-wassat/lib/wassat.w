@@ -40,6 +40,7 @@ use symmetry_fix
 use block_csp
 use arithmetic_coloring
 use ramsey_lex
+use gate_closure
 use ramsey_bound
 use windmill
 use specialists
@@ -1097,6 +1098,32 @@ use cover_split
         wassat_prof_note("ramsey_lex vertices=[lex_work[2]] checked_clauses=[lex_work[3]] literal_reads=[lex_work[4]] groups=[lex_work[5]] unique=[lex_work[6]] duplicates=[lex_work[7]] rank_terms=[lex_work[8]] output_clauses=[lex_work[9]] output_literals=[lex_work[10]] auxiliaries=[lex_work[11]] transpositions=[lex_work[12]] comparisons=[lex_work[13]] copied_literals=[lex_work[14]] polls=[lex_work[15]]")
   tprof = wassat_prof("cli.ramsey_lex", tprof)
 
+  # Gate congruence closure (gate_closure.w): append the units and literal
+  # equivalences that the input's own AND/XOR/ITE gates imply. Fast mode
+  # only. The extended formula feeds the generic search (scout, raw race,
+  # preprocessing arms, final solve); every structural recognizer and the
+  # routing policy keep reading the input as written, since they match exact
+  # shapes. Models are still replayed against the original clauses.
+  cdcl_formula = formula
+  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && ramsey_lex == nil && env("WASSAT_GATE_CLOSURE") != "0"
+    gate_closure = wassat_gate_closure_lift(formula, clock_ms() + WASSAT_GATE_CLOSURE_MS)
+    if gate_closure != nil
+      gc_work = gate_closure["work"]
+      if env("WASSAT_GATE_CLOSURE_DUMP") == "1"
+        gc_f = gate_closure["formula"]
+        gc_i = gate_closure["added_from"]
+        while gc_i < gc_f["flat_ncl"]
+          gc_o = gc_f["flat_offs"][gc_i]
+          if gc_f["flat_lens"][gc_i] == 1
+            << "c gate-closure-clause [gc_f["flat_lits"][gc_o]]"
+          else
+            << "c gate-closure-clause [gc_f["flat_lits"][gc_o]] [gc_f["flat_lits"][gc_o + 1]]"
+          gc_i += 1
+      cdcl_formula = gate_closure["formula"]
+      << "c gate closure: [gc_work[16]] units, [gc_work[17]] equivalences from [gc_work[18]] gates"
+      wassat_prof_note("gate_closure units=[gc_work[16]] equivalences=[gc_work[17]] conflict=[gc_work[1]] and=[gc_work[8]] xor=[gc_work[9]] ite=[gc_work[10]] gates=[gc_work[18]] installs=[gc_work[12]] ticks=[gc_work[11]] stopped=[gc_work[5]] binaries=[gc_work[13]] indexed=[gc_work[14]]") if env("WASSAT_PROFILE") == "1"
+  tprof = wassat_prof("cli.gate_closure", tprof)
+
   # Preprocess once, above solver construction. The artifact carries the
   # reduced clauses with their global proof ids, the elimination stack for
   # model reconstruction, and the certificate prefix for every derivation.
@@ -1116,10 +1143,10 @@ use cover_split
     # need the preprocessor: hand the parser's flat arrays straight to the
     # solver (see wassat_raw_artifact).
     if config.race_route?
-      art = wassat_raw_artifact(formula, formula["nvars"])
+      art = wassat_raw_artifact(cdcl_formula, formula["nvars"])
     else
-      pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula)
-      art = pre.run_light_flat(formula)
+      pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, cdcl_formula)
+      art = pre.run_light_flat(cdcl_formula)
     # Raw routing borrows parser arrays and constructs no initial preprocessor.
     resident_pre_arenas = pre == nil ? 0 : 1
     tprof = wassat_prof("cli.light", tprof)
@@ -1175,7 +1202,7 @@ use cover_split
         # scout races a preprocessed rendering. This is built once on the
         # coordinator and shared by the scout and later race walkers.
         walk_art = art
-        walk_art = wassat_raw_artifact(formula, scout_nv) unless art["raw"] == true
+        walk_art = wassat_raw_artifact(cdcl_formula, scout_nv) unless art["raw"] == true
         scout_stop = i64[4]
         # Finite --conflicts work in the scout stage uses the same exact
         # lock-free ticket discipline as the later race: ordinary scout CDCL
@@ -1918,13 +1945,13 @@ use cover_split
             # race on its arena. Constructed HERE, on the main thread, because
             # construction is the one part that touches the parsed formula's
             # boxed clauses while another arm might be reading them.
-            plight = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, formula)
+            plight = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, cdcl_formula)
             plight.set_budget(wassat_pre_light_ticks)
             plight.set_deadline_ms(wassat_pre_stage_ms)
             plight.force_full_pipeline
             wassat_race_add_pre(race, plight, false, "light")
             if pre_arms > 1
-              pheavy_f = quad_shift > 0 ? orig_formula : formula
+              pheavy_f = quad_shift > 0 ? orig_formula : cdcl_formula
               pheavy = WassatPreprocess.new(pheavy_f["nvars"], [], WASSAT_PROOF_NONE, pheavy_f)
               pheavy.set_budget(wassat_pre_light_ticks)
               pheavy.set_deadline_ms(wassat_pre_stage_ms)
@@ -2000,9 +2027,9 @@ use cover_split
           # it when reporting UNKNOWN instead of allocating another arena.
           race = nil if matrix_arms == 0
       if staged_pre
-        pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula) if pre == nil
+        pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, cdcl_formula) if pre == nil
         pre.force_full_pipeline
-        art = pre.run_light_flat(formula)
+        art = pre.run_light_flat(cdcl_formula)
         art = pre.run_heavy if art["status"] == 0
         tprof = wassat_prof("cli.staged_pre", tprof)
       elsif !config.race_route?

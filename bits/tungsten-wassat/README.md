@@ -323,6 +323,34 @@ choice formulas whose variables sit in at most eight long clauses on average:
 with every variable in about 120 rows it replaced the branching heuristic of
 every arm by 32 trial propagations per decision.
 
+Circuit formulas (hardware model checking, equivalence checking) repeat the
+same sub-circuit many times, and two gates of one kind over the same inputs
+have the same output. In fast mode Wassat reads AND gates of up to 64 inputs,
+XOR constraints over three to five variables and if-then-else gates from the
+input clauses, hashes them by kind and inputs, and merges the outputs of
+equal gates in a union-find over literals. Every gate that mentions a merged
+variable is rewritten through the representative map, simplified through
+constants and repeated or complementary inputs, and hashed again, so a merge
+walks up the circuit a layer at a time. A gate is a set of input clauses
+equivalent to "output = kind(inputs)", so each unit and equivalence found
+holds in every model of the input. The lane only appends those units and
+equivalence binaries to the formula given to the generic search (scout, raw
+race, preprocessing arms); it removes nothing, publishes no verdict of its
+own (a clash is appended as one more equivalence and refuted by propagation),
+and the structural recognizers and routing policy keep reading the input as
+written. Extraction is bounded by a work allowance proportional to the input
+and a two-second deadline; stopping early only loses merges. A `c gate
+closure` line reports what was appended. `WASSAT_GATE_CLOSURE=0` disables the
+lane and `WASSAT_GATE_CLOSURE_DUMP=1` prints every appended clause, which
+`benchmarks/gate_closure_test.py` checks against all models of small random
+circuits.
+
+A raw-kernel scout is bounded by propagations as well as by conflicts (two
+million plus two per clause). On large circuit formulas one conflict can cost
+thousands of decisions, and a conflict cap alone let the scout run for many
+seconds before the race started. `WASSAT_SCOUT_PROPS=0` restores the
+conflict-only bound.
+
 Lanes that used to hide behind the MDP recognizer's miss now live in their
 own files (`sdp`, `backdoor`, `sgi`, `schooltt`, `symmetry_fix`, `vdwb`)
 behind a fingerprint-gated registry in `lib/specialists.w`, which records

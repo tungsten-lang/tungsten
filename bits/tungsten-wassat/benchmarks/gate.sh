@@ -53,8 +53,23 @@ WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/cover_split_test.py
 echo "### gate congruence closure, exhaustive models"
 WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/gate_closure_test.py || fail=1
 
+echo "### bounded variable addition, exhaustive models"
+WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/bva_test.py || fail=1
+
+echo "### parity sum, exhaustive verdicts"
+WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/parity_sum_test.py || fail=1
+
+echo "### demand against room, covering bound, relayed count and clique coloring, differential"
+if command -v cadical >/dev/null 2>&1; then
+  WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/threshold_cover_test.py || fail=1
+  WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/relay_count_test.py || fail=1
+  WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/clique_coloring_test.py || fail=1
+else
+  echo "skipped: no cadical on PATH (the tests compare verdicts with a reference solver)"
+fi
+
 echo "### library specs"
-for spec in solver phase_snapshot shrink_scan ordered_scan heap_sift backjump_cursor clause_alive arena_growth lucky_watch_capacity parser_capacity parser_mmap input_empty inprocess inprocess_cancel flat_units vivification structural_pruning windmill cli cover_split gate_closure preprocess bve_index bve_storage preprocess_scc preprocess_graph congruence_scratch congruence_reuse congruence_capacity congruence_adaptive binary_membership subst_hash incremental sls sls_stop domain_walk domain_walk_native reconfiguration reconfiguration_native scout_walk trim explain portfolio multiplier aig_capacity circuit_certificate par32_units fermat sum_of_three_cubes mdp sgi arithmetic_coloring arithmetic_symmetry arithmetic_scan arithmetic_shape arithmetic_budget ramsey_lex ramsey_bound automata_sync ternary_affine ais coloring coloring_mask coloring_choice covering directed_kernel edge_matching sliding_puzzle stedman hantzsche_wendt knight_tour path_cover local_core latin_csp algebra_certificate router_trainer; do
+for spec in solver phase_snapshot shrink_scan ordered_scan heap_sift backjump_cursor clause_alive arena_growth lucky_watch_capacity parser_capacity parser_mmap input_empty inprocess inprocess_cancel flat_units vivification structural_pruning windmill cli cover_split gate_closure counting_lanes preprocess bve_index bve_storage preprocess_scc preprocess_graph congruence_scratch congruence_reuse congruence_capacity congruence_adaptive binary_membership subst_hash incremental sls sls_stop domain_walk domain_walk_native reconfiguration reconfiguration_native scout_walk trim explain portfolio multiplier aig_capacity circuit_certificate par32_units fermat sum_of_three_cubes mdp sgi arithmetic_coloring arithmetic_symmetry arithmetic_scan arithmetic_shape arithmetic_budget ramsey_lex ramsey_bound automata_sync ternary_affine ais coloring coloring_mask coloring_choice covering directed_kernel edge_matching sliding_puzzle stedman hantzsche_wendt knight_tour path_cover local_core latin_csp algebra_certificate router_trainer; do
   path="bits/tungsten-wassat/spec/${spec}_spec.w"
   if [[ "$spec" == "router_trainer" ]]; then
     path="bits/tungsten-wassat/benchmarks/router_trainer_spec.w"

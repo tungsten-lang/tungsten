@@ -351,6 +351,59 @@ thousands of decisions, and a conflict cap alone let the scout run for many
 seconds before the race started. `WASSAT_SCOUT_PROPS=0` restores the
 conflict-only bound.
 
+Five fast-mode counting certificates read the input before any search. Each
+uses only clauses that are present, so extra clauses cannot make one wrong,
+and each declines in well under a second when its shape is absent.
+
+- Parity sum (`lib/parity_sum.w`). Parity constraints over one to five
+  variables are read from their clauses, and exact cardinality constraints in
+  the binomial encoding are reduced mod 2. A connected set of them in which
+  every variable occurs an even number of times and the right-hand sides sum
+  to 1 is contradictory. This decides Tseitin formulas on any graph in one
+  pass. It is the sum of a whole component, not Gaussian elimination.
+  `WASSAT_PARITY_SUM=0` disables it.
+- Demand against room (`lib/threshold_cover.w`). From a variable asserted by
+  a unit clause, implication-only definitions (conjunctions, two-way choices
+  and if-then-else nodes, as in a MiniSat+ decision diagram of a cardinality
+  constraint) give a lower bound on the number of true leaf variables;
+  disjointness is checked on explicit support sets. The leaves are split
+  greedily into pairwise exclusive groups, at most one true each. More
+  demanded than groups is a contradiction (K rooks on fewer than K rows).
+- Covering bound (same file). The variables of the all-positive clauses are
+  split into exclusive groups; a model covers every positive clause with at
+  most one variable a group, and the Hunter-Worsley bound caps what such a set
+  covers at the groups' largest degrees minus the least pairwise overlap per
+  extra group. With no overlap this is the pigeonhole count.
+  `WASSAT_THRESHOLD_COVER=0` disables both.
+- Relayed pigeonhole count (`lib/relay_count.w`). A choice clause is one
+  whose every literal implies a relay literal, and a relay has a clause
+  offering it tokens; two (relay, token) pairs are exclusive when the
+  four-literal clause forbidding both is present. Choice clauses that cannot
+  share a relay must land in different exclusive classes, so more of them
+  than classes is a contradiction. This is the relativized pigeonhole
+  principle with any number of resting places, read over literals, so
+  scrambled signs change nothing. `WASSAT_RELAY_COUNT=0` disables it.
+- The clique-coloring check in `lib/coloring.w` now also accepts the formula
+  with unit clauses added and up to 2000 vertices. It counts distinct slot
+  pairs in byte tables: it used to hash the pairs of a column into one word,
+  where two pairs share a bit from 11 slots on, and to count edge clauses
+  rather than distinct pairs, so a formula with one needed clause missing
+  (and another written twice) was reported unsatisfiable.
+  `benchmarks/clique_coloring_test.py` builds exactly those.
+
+Bounded variable addition (`lib/bva.w`, SimpleBVA) factors products of binary
+and ternary clauses: all clauses `(Ri | mj)` become `(mj | x)` and `(Ri | -x)`
+for one fresh `x`. The rewritten formula has other variables than the input,
+so it does not feed the race. When a dense formula (24 small clauses a
+variable or more) shrinks at least eightfold, one bounded CDCL run decides the
+factored formula; a model is cut back to the input's variables and replayed,
+and a miss falls through to the ordinary route. `WASSAT_BVA=0` disables it;
+`WASSAT_BVA_DUMP=1` prints the factored formula and keeps every reduction,
+which `benchmarks/bva_test.py` checks against all assignments of the input.
+`benchmarks/parity_sum_test.py`, `benchmarks/threshold_cover_test.py` and
+`benchmarks/relay_count_test.py` test the certificates by enumeration and
+against a reference solver.
+
 Lanes that used to hide behind the MDP recognizer's miss now live in their
 own files (`sdp`, `backdoor`, `sgi`, `schooltt`, `symmetry_fix`, `vdwb`)
 behind a fingerprint-gated registry in `lib/specialists.w`, which records

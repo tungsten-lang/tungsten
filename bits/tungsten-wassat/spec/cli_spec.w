@@ -443,7 +443,7 @@ describe "Tungsten Wassat CLI" ->
   # solve) may push the total past the requested budget. PHP(6,5) is decided
   # only after ~143 conflicts, so a small cap must return UNKNOWN with a
   # conflict count that never exceeds the cap. Disable the automatic
-  # pigeonhole/coloring and exact-cover certificates here: this test is
+  # pigeonhole/coloring, exact-cover and counting certificates here: this test is
   # specifically about aggregate CDCL accounting, while their own specs cover
   # those zero-conflict verdict paths.
   context "aggregate conflict budget" ->
@@ -453,17 +453,17 @@ describe "Tungsten Wassat CLI" ->
       cnf = "/tmp/wassat-cli-budget.cnf"
       expect(write_file(cnf, text)).to eq(true)
 
-      expect(cli_exits("WASSAT_COLORING=0 WASSAT_COVERING=0 " + bin + " " + cnf + " --fast --conflicts 0 > /tmp/wassat-cli-budget0.out 2>&1", 20)).to eq(true)
+      expect(cli_exits("WASSAT_COLORING=0 WASSAT_COVERING=0 WASSAT_THRESHOLD_COVER=0 " + bin + " " + cnf + " --fast --conflicts 0 > /tmp/wassat-cli-budget0.out 2>&1", 20)).to eq(true)
       expect(read_file("/tmp/wassat-cli-budget0.out").index("s UNSATISFIABLE") != nil).to eq(true)
 
       # a bounded run that stops UNKNOWN is exit 0, not a verdict code
-      expect(cli_exits("WASSAT_COLORING=0 WASSAT_COVERING=0 " + bin + " " + cnf + " --fast --conflicts 1 > /tmp/wassat-cli-budget1.out 2>&1", 0)).to eq(true)
+      expect(cli_exits("WASSAT_COLORING=0 WASSAT_COVERING=0 WASSAT_THRESHOLD_COVER=0 " + bin + " " + cnf + " --fast --conflicts 1 > /tmp/wassat-cli-budget1.out 2>&1", 0)).to eq(true)
       out1 = read_file("/tmp/wassat-cli-budget1.out")
       expect(out1.index("s UNKNOWN") != nil).to eq(true)
       # aggregate conflicts reported must not exceed the cap of 1
       expect(out1.index("c conflicts: 1,") != nil || out1.index("c conflicts: 0,") != nil).to eq(true)
 
-      expect(cli_exits("WASSAT_COLORING=0 WASSAT_COVERING=0 " + bin + " " + cnf + " --fast --conflicts 2 > /tmp/wassat-cli-budget2.out 2>&1", 0)).to eq(true)
+      expect(cli_exits("WASSAT_COLORING=0 WASSAT_COVERING=0 WASSAT_THRESHOLD_COVER=0 " + bin + " " + cnf + " --fast --conflicts 2 > /tmp/wassat-cli-budget2.out 2>&1", 0)).to eq(true)
       out2 = read_file("/tmp/wassat-cli-budget2.out")
       expect(out2.index("s UNKNOWN") != nil).to eq(true)
       expect(out2.index("c conflicts: 3,") == nil).to eq(true)

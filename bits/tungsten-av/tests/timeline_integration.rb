@@ -5,12 +5,25 @@ require "open3"
 ROOT = File.realpath(File.join(__dir__, "../../.."))
 Dir.mktmpdir("av-native-timeline-") do |dir|
   root = File.realpath(dir)
+  tools = File.join(root, "tools")
+  Dir.mkdir(tools)
+  ENV.fetch("PATH").split(":").concat(["/usr/bin", "/bin"]).uniq.each do |pdir|
+    next unless File.directory?(pdir)
+    Dir.children(pdir).each do |name|
+      next if name =~ /python|pyenv|ffmpeg|ffprobe/i
+      path = File.join(pdir, name)
+      link = File.join(tools, name)
+      File.symlink(path, link) if File.file?(path) && File.executable?(path) && !File.exist?(link)
+    end
+  end
+  raise "Python or FFmpeg visible in test PATH" if Dir.children(tools).any? { |n| n =~ /python|pyenv|ffmpeg|ffprobe/i }
   run = lambda do |*args|
-    out, err, status = Open3.capture3({"BASH_ENV" => nil, "TW_PYTHON" => "/no/python"}, *args.map(&:to_s), chdir: root)
+    out, err, status = Open3.capture3({"PATH" => tools, "BASH_ENV" => nil, "TW_PYTHON" => "/no/python"}, *args.map(&:to_s), chdir: root)
     raise "#{args.join(' ')} failed: #{out}\n#{err}" unless status.success?
     out
   end
-  run.call("ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "2", "-c:a", "pcm_s16le", File.join(root, "mix.wav"))
+  pcm_bytes = 48_000 * 2 * 2 * 2
+  File.binwrite(File.join(root, "mix.wav"), "RIFF" + [36 + pcm_bytes].pack("V") + "WAVEfmt " + [16, 1, 2, 48_000, 48_000 * 4, 4, 16].pack("VvvVVvv") + "data" + [pcm_bytes].pack("V") + ("\x00" * pcm_bytes))
   cut = {w: 160, h: 90, rate: [24, 1], sr: 48000, tc_start: "01:00:00:00", colour: "bt709", end: {ref: "start", ms: 2000}, picture: {active: [0, 0, 160, 90]}}
   document = {schema: "studio.episode/2", id: "caption-test", root: ".", cuts: {preview: cut}, assets: {}, styles: {}, lines: [], cues: [], captions: [], markers: []}
   File.write(File.join(root, "scene.w"), <<~W)
@@ -24,8 +37,26 @@ Dir.mktmpdir("av-native-timeline-") do |dir|
       i += 1
     c.close
   W
+  File.write(File.join(root, "scene_pipe.w"), <<~W)
+    a = argv()
+    raise "wrong clock" if env("TW_RATE_NUM") != "24" || env("TW_RATE_DEN") != "1"
+    fh = FileHandle.new(a[2], "wb")
+    frame = u8[160 * 90 * 4]
+    p = 0
+    while p < 160 * 90
+      frame[p * 4 + 3] = 255
+      p += 1
+    i = a[0].to_i
+    while i <= a[1].to_i
+      fh.write(frame)
+      i += 1
+    fh.close
+  W
   document[:shots] = [{id: "program", kind: "program", at: {ref: "start", ms: 0}, trans_in: {kind: "cut", frames: 0}, program: {source: "scene.w", data: [], run: ["{first}", "{last}", "{dir}"], frames: "{dir}/%05d.png", count: "dur"}}, {id: "black", kind: "black", at: {ref: "start", ms: 1000}, trans_in: {kind: "cut", frames: 0}}]
-  %w[edit short].each { |name| File.write(File.join(root, "#{name}.json"), JSON.generate(document)) }
+  File.write(File.join(root, "edit.json"), JSON.generate(document))
+  short_doc = Marshal.load(Marshal.dump(document))
+  short_doc[:shots][0][:program] = {source: "scene_pipe.w", data: [], run: ["{first}", "{last}", "{fifo}"], frames: "pipe:rgba", count: "dur"}
+  File.write(File.join(root, "short.json"), JSON.generate(short_doc))
   File.write(File.join(root, "captions.srt"), "1\n00:00:00,250 --> 00:00:01,750\nHello\n")
   File.write(File.join(root, "Bitfile"), <<~BIT)
     name "caption-test"

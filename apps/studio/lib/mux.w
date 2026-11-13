@@ -8,6 +8,7 @@
 use base
 use project
 use encode
+use audio
 
 -> mux_master(p, r, out, opts)
   segs = r["segments"]
@@ -43,44 +44,27 @@ use encode
   audio = File.exist?(wav) && get(opts, "audio", true)
   mov = out.downcase.ends_with?(".mov")
   part = out + (mov ? ".part.mov" : ".part.mp4")
-  if p.encoder["backend"] == "ffmpeg" && get(opts, "edit_lists", true) == false
-    die("strict edit-list-free delivery requires the native mux")
-  if p.encoder["backend"] != "ffmpeg"
-    t0 = clock_ms()
-    mo = {rate: r["rate"], tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr}
-    mo[:edit_lists] = get(opts, "edit_lists", "audio")
-    if audio
-      mo[:audio_codec] = get(opts, "audio_codec", nil)
-      mo[:audio] = wav
-      kb = get(p.cut_cfg(p.cut), "audio_kbps", nil)
-      mo[:audio_kbps] = kb if kb != nil
-    # chapters: a QuickTime chapter track (and Nero chpl) at each chapter's first frame
-    chs = chapter_list(r, fbase, nfr)
-    mo[:chapters] = chs if chs.size > 0
-    m = Mux.new(part, mo)
-    segs.each ->(s)
-      m.append_file(segment_path(p.build, s["key"])) if s["f0"] < limit && s["f0"] + s["n"] > lo
-    res = m.close
-    File.rename(part, out)
-    write_text(p.out_path("captions.srt"), srt_text(r))
-    write_text(p.out_path("chapters.txt"), chapters_text(r))
-    return [res[:frames], clock_ms() - t0, res]
-  cmd = "ffmpeg -nostdin -y -v error -f concat -safe 0 -i " + shq(lst)
-  cmd = cmd + " -i " + shq(wav) if audio
-  cmd = cmd + " -f ffmetadata -i " + shq(mfile)
-  cmd = cmd + " -map 0:v"
-  if audio
-    cmd = cmd + " -map 1:a -map_metadata 2 -map_chapters 2 -c:a aac -b:a 320k"
-  else
-    cmd = cmd + " -map_metadata 1 -map_chapters 1"
-  cmd = cmd + " -c:v copy -timecode " + get(r, "tc_start", "00:00:00:00") + " -write_tmcd 1 -video_track_timescale 12288"
-  cmd = cmd + " -movflags +faststart -f " + (mov ? "mov" : "mp4") + " " + shq(part)
+  if p.encoder["backend"] == "ffmpeg"
+    die("ffmpeg mux backend removed; use native videotoolbox")
   t0 = clock_ms()
-  die("mux failed") if !OS.system(cmd)
+  mo = {rate: r["rate"], tc_start: get(r, "tc_start", "00:00:00:00"), frames: nfr}
+  mo[:edit_lists] = get(opts, "edit_lists", "audio")
+  if audio
+    mo[:audio_codec] = get(opts, "audio_codec", nil)
+    mo[:audio] = wav
+    kb = get(p.cut_cfg(p.cut), "audio_kbps", nil)
+    mo[:audio_kbps] = kb if kb != nil
+  # chapters: a QuickTime chapter track (and Nero chpl) at each chapter's first frame
+  chs = chapter_list(r, fbase, nfr)
+  mo[:chapters] = chs if chs.size > 0
+  m = Mux.new(part, mo)
+  segs.each ->(s)
+    m.append_file(segment_path(p.build, s["key"])) if s["f0"] < limit && s["f0"] + s["n"] > lo
+  res = m.close
   File.rename(part, out)
   write_text(p.out_path("captions.srt"), srt_text(r))
   write_text(p.out_path("chapters.txt"), chapters_text(r))
-  [nfr, clock_ms() - t0]
+  [res[:frames], clock_ms() - t0, res]
 
 # The resolved chapters as [[title, frame], ...] for a master covering frames [lo, lo + n).
 -> chapter_list(r, lo, n)
@@ -199,53 +183,54 @@ use encode
   << MediaVerify.format(mv)
   mv[:checks].each ->(c)
     res.push(["media:" + c[:name].to_s, c[:ok], c[:detail]])
-  << "studio checks (ffprobe):"
-  v = OS.capture("ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,avg_frame_rate,time_base,nb_frames,color_range,color_space,color_transfer,color_primaries,chroma_location -of default=nw=1 " + shq(master))
-  check(res, "video stream", (probe_val(v, "codec_name") == "h264" || probe_val(v, "codec_name") == "hevc" || probe_val(v, "codec_name") == "prores") && probe_val(v, "width") == r["w"].to_s && probe_val(v, "height") == r["h"].to_s, probe_val(v, "codec_name").to_s + " " + probe_val(v, "width").to_s + "x" + probe_val(v, "height").to_s)
+  << "studio checks (native MediaVerify):"
+  probe = MediaVerify.probe_streams(master)
+  facts = mv[:facts]
+  vstream = nil
+  astream = nil
+  tstream = nil
+  probe["streams"].each ->(st)
+    vstream = st if st["codec_type"] == "video" && vstream == nil
+    astream = st if st["codec_type"] == "audio" && astream == nil
+    tstream = st if st["codec_tag_string"] == "tmcd" && tstream == nil
+  vcname = vstream == nil ? "" : vstream["codec_name"].to_s
+  vw = vstream == nil ? 0 : vstream["width"]
+  vh = vstream == nil ? 0 : vstream["height"]
+  check(res, "video stream", (vcname == "h264" || vcname == "hevc" || vcname == "prores") && vw == r["w"] && vh == r["h"], vcname + " " + vw.to_s + "x" + vh.to_s)
   rate = num.to_s + "/" + den.to_s
-  check(res, "CFR " + rate, probe_val(v, "r_frame_rate") == rate && probe_val(v, "avg_frame_rate") == rate, "r_frame_rate " + probe_val(v, "r_frame_rate").to_s + ", avg " + probe_val(v, "avg_frame_rate").to_s)
-  check(res, "frame count", probe_val(v, "nb_frames") == nfr.to_s, probe_val(v, "nb_frames").to_s + " of " + nfr.to_s)
-  # PTS: every frame exactly at f * den/num, every duration exactly one frame
-  tb = probe_val(v, "time_base")
-  tbd = tb.split("/")[1].to_i
+  rfr = vstream == nil ? "" : vstream["r_frame_rate"].to_s
+  afr = vstream == nil ? "" : vstream["avg_frame_rate"].to_s
+  check(res, "CFR " + rate, rfr == rate && afr == rate, "r_frame_rate " + rfr + ", avg " + afr)
+  vframes = facts[:video_frames]
+  check(res, "frame count", vframes == nfr, vframes.to_s + " of " + nfr.to_s)
+  bad_pts = facts[:pts_off] == nil ? 0 : facts[:pts_off]
+  bad_dur = facts[:dur_off] == nil ? 0 : facts[:dur_off]
+  tbd = facts[:video_timescale] == nil ? num : facts[:video_timescale]
   step = tbd * den / num
-  pk = OS.capture("ffprobe -v error -select_streams v:0 -show_entries packet=pts,duration -of csv=p=0 " + shq(master))
-  pts = []
-  bad_dur = 0
-  pk.split("\n").each ->(ln)
-    if ln != ""
-      f = ln.split(",")
-      pts.push(f[0].to_i)
-      bad_dur += 1 if f[1].to_i != step
-  pts = pts.sort
-  bad_pts = 0
-  i = 0
-  while i < pts.size
-    bad_pts += 1 if pts[i] != i * step
-    i += 1
-  check(res, "exact PTS", bad_pts == 0 && bad_dur == 0 && pts.size == nfr, pts.size.to_s + " packets, PTS = f * " + step.to_s + "/" + tbd.to_s + " s: " + bad_pts.to_s + " off, " + bad_dur.to_s + " durations != " + step.to_s)
-  # tmcd
-  t = OS.capture("ffprobe -v error -show_entries stream=codec_type,codec_tag_string:stream_tags=timecode -of default=nw=1 " + shq(master))
-  tc = probe_val(t, "TAG:timecode")
-  check(res, "tmcd " + r["tc_start"], t.include?("codec_tag_string=tmcd") && tc == r["tc_start"], "tmcd track " + (t.include?("codec_tag_string=tmcd") ? "present" : "missing") + ", timecode " + tc.to_s)
-  # colour
-  ok = probe_val(v, "color_space") == "bt709" && probe_val(v, "color_primaries") == "bt709" && probe_val(v, "color_transfer") == "bt709" && probe_val(v, "color_range") == "tv"
-  check(res, "BT.709 tags", ok, "matrix " + probe_val(v, "color_space").to_s + ", primaries " + probe_val(v, "color_primaries").to_s + ", transfer " + probe_val(v, "color_transfer").to_s + ", range " + probe_val(v, "color_range").to_s + ", chroma " + probe_val(v, "chroma_location").to_s)
-  # audio length = video length, in samples, after the container's priming/edit list
-  a = OS.capture("ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels -of default=nw=1 " + shq(master))
-  if probe_val(a, "codec_name") == nil
+  check(res, "exact PTS", bad_pts == 0 && bad_dur == 0 && vframes == nfr, vframes.to_s + " packets, PTS = f * " + step.to_s + "/" + tbd.to_s + " s: " + bad_pts.to_s + " off, " + bad_dur.to_s + " durations != " + step.to_s)
+  tc = tstream == nil ? facts[:tmcd_string] : get(tstream, "tags", {})["timecode"]
+  has_tmcd = tstream != nil || facts[:tmcd] == true
+  check(res, "tmcd " + r["tc_start"], has_tmcd && tc == r["tc_start"], "tmcd track " + (has_tmcd ? "present" : "missing") + ", timecode " + tc.to_s)
+  csp = vstream == nil ? "" : vstream["color_space"].to_s
+  cpr = vstream == nil ? "" : vstream["color_primaries"].to_s
+  ctr = vstream == nil ? "" : vstream["color_transfer"].to_s
+  crg = vstream == nil ? "" : vstream["color_range"].to_s
+  cloc = vstream == nil ? "" : vstream["chroma_location"].to_s
+  ok = csp == "bt709" && cpr == "bt709" && ctr == "bt709" && crg == "tv"
+  check(res, "BT.709 tags", ok, "matrix " + csp + ", primaries " + cpr + ", transfer " + ctr + ", range " + crg + ", chroma " + cloc)
+  if astream == nil
     check(res, "audio", false, "no audio stream")
   else
-    pcm = p_tmp(master) + ".verify.f32"
-    OS.system("ffmpeg -nostdin -y -v error -i " + shq(master) + " -map 0:a:0 -f f32le -ac 2 " + shq(pcm))
-    na = File.size(pcm) / 8
+    na = facts[:audio_samples] == nil ? 0 : facts[:audio_samples]
     want = nfr * sr * den / num
     check(res, "audio length = video length", na == want, na.to_s + " samples decoded, " + want.to_s + " expected (" + nfr.to_s + " frames x " + (sr * den / num).to_s + ")")
     mixp = opt_arg(args, "--mix", nil)
     if mixp != nil
-      lag = sync_lag(pcm, mixp, sr)
+      wav_tmp = p_tmp(master) + ".verify.wav"
+      MediaVerify.prepare_audio(master, wav_tmp, sample_rate: sr, channels: 2)
+      lag = sync_lag(wav_tmp, mixp, sr)
+      File.delete(wav_tmp) if File.exist?(wav_tmp)
       check(res, "sync marker", lag[0] == 0 || lag[0] == 1 || lag[0] == -1, "decoded audio vs the mix at " + lag[1].to_s + " onsets: lag " + lag[0].to_s + " samples (picture frame 0 = audio sample 0)")
-    File.delete(pcm)
   fails = 0
   res.each ->(x)
     fails += 1 if !x[1]
@@ -261,9 +246,9 @@ use encode
 # The sync marker: the narration onsets in the mix (the loudest attack per minute) located again in the decoded
 # master by cross-correlation over +-2000 samples. The lag is the same at every onset when the container's priming
 # and edit list are right; 0 means audio sample 0 sits on picture frame 0.
--> sync_lag(pcm_path, mix_path, sr)
-  dec = File.mmap(pcm_path)
-  dv = dec.as_f32
+-> sync_lag(wav_path, mix_path, sr)
+  dec = read_wav_f32(wav_path)
+  dv = dec[0]
   mix = read_wav_f32(mix_path)
   n = [dv.size, mix[0].size].min
   lags = {}
@@ -286,7 +271,6 @@ use encode
       lags[lag] = get(lags, lag, 0) + 1
       count += 1
     t += sr * 180
-  dec.close
   top = 0
   topn = -1
   lags.keys.each ->(k)

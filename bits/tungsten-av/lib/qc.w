@@ -15,32 +15,28 @@ in Av
       reports.push({"file": path, "sha256": Util.sha(path), "pattern": gate["pattern"], "ok": ok})
     {"ok": Util.all(reports.map ->(r) r["ok"]), "reports": reports}
 
-  -> .audio(path, settings, media, directory)
-    meter_result = media.ffmpeg(["-v", "info", "-i", path, "-map", "0:a:0", "-af", "loudnorm=I=-23:TP=-1:LRA=7:print_format=json", "-f", "null", "-"])
-    log = meter_result["stderr"]
-    position = log.index("{\n\t\"input_i\"")
-    raise "audio meter returned no measurements" if position == nil
-    tail = log.slice(position, log.size)
-    meter = JSON.parse(tail.slice(0, tail.index("}") + 1))
-    integrated = meter["input_i"].to_f
-    peak = meter["input_tp"].to_f
-    probe = media.probe(path)
-    stream = probe["streams"].select ->(s) s["codec_type"] == "audio"
-    raise "audio QC source has no audio" if stream.size != 1
-    channels = stream[0]["channels"]
-    sr = stream[0]["sample_rate"].to_i
-    raw = directory + "/audio.f32"
-    begin
-      media.ffmpeg(["-v", "error", "-y", "-i", path, "-map", "0:a:0", "-c:a", "pcm_f32le", "-f", "f32le", raw])
-      stats = ccall("w_av_pcm_stats", raw, channels, Math.pow(10, Util.get(settings, "silence_threshold", -60) / ~20.0))
-    ensure
-      Util.unlink(raw)
-    frames = stats[0]
+  -> .audio(path, settings, media, _directory = nil)
+    m = media.audio_qc(path, Util.get(settings, "silence_threshold", -60))
+    integrated = m[:integrated_lufs]
+    peak = m[:true_peak_dbtp]
+    clipped = m[:clipped_samples]
+    longest = m[:longest_silence_frames]
+    frames = m[:decoded_frames]
+    sr = m[:sample_rate]
+    channels = m[:channels]
+    energy = m[:energy]
     difference = ~0.0
-    if channels > 1 && Util.max(stats[3], stats[4]) > 0
-      difference = 10 * Math.log10(Util.max(stats[3], stats[4]) / Util.max(Util.min(stats[3], stats[4]), ~1e-24))
-    checks = {"loudness": !integrated.nan? && !integrated.infinite? && (integrated - Util.get(settings, "target", -16)).abs <= Util.get(settings, "tolerance", 1), "true_peak": !peak.nan? && !peak.infinite? && peak <= Util.get(settings, "true_peak", -1), "clipped_samples": stats[1] <= Util.get(settings, "max_clipped_samples", 0), "silence": stats[2] / sr.to_f <= Util.get(settings, "max_silence", 10), "channel_balance": difference <= Util.get(settings, "max_channel_difference", 6)}
-    {"ok": Util.all(checks.values), "checks": checks, "integrated_lufs": integrated.infinite? ? nil : integrated, "true_peak_dbtp": peak.infinite? ? nil : peak, "clipped_samples": stats[1], "longest_silence_seconds": stats[2] / sr.to_f, "channel_difference_db": difference, "decoded_frames": frames, "sample_rate": sr, "channels": channels}
+    if channels > 1
+      e0 = energy[0]
+      e1 = energy[1]
+      hi = Util.max(e0, e1)
+      lo = Util.min(e0, e1)
+      if hi > ~0.0
+        difference = ~10.0 * Math.log10(hi / Util.max(lo, ~1e-24))
+    loud_ok = integrated != nil && !integrated.nan? && !integrated.infinite? && (integrated - Util.get(settings, "target", -16)).abs <= Util.get(settings, "tolerance", 1)
+    tp_ok = peak != nil && !peak.nan? && !peak.infinite? && peak <= Util.get(settings, "true_peak", -1)
+    checks = {"loudness": loud_ok, "true_peak": tp_ok, "clipped_samples": clipped <= Util.get(settings, "max_clipped_samples", 0), "silence": longest / sr.to_f <= Util.get(settings, "max_silence", 10), "channel_balance": difference <= Util.get(settings, "max_channel_difference", 6)}
+    {"ok": Util.all(checks.values), "checks": checks, "integrated_lufs": integrated, "true_peak_dbtp": peak, "clipped_samples": clipped, "longest_silence_seconds": longest / sr.to_f, "channel_difference_db": difference, "decoded_frames": frames, "sample_rate": sr, "channels": channels}
 
   -> .uncovered(start, finish, allowed)
     remaining = [[start, finish]]
@@ -58,21 +54,10 @@ in Av
     black = Util.get(settings, "black_min", 1)
     freeze = Util.get(settings, "freeze_min", 3)
     noise = Util.get(settings, "noise", ~0.001)
-    result = media.ffmpeg(["-v", "info", "-xerror", "-i", path, "-an", "-vf", "scale=320:-2,blackdetect=d=[black]:pix_th=0.10,freezedetect=n=[noise]:d=[freeze]", "-f", "null", "-"])
-    duration = plan["frames"] * plan["rate"][1] / plan["rate"][0].to_f
+    scan = media.anomalies(path, black_min: black, freeze_min: freeze, noise: noise, rate: plan["rate"])
     events = []
-    starts = []
-    result["stderr"].split("\n").each ->(line)
-      m = Regex.new("black_start:(\[0-9.]+) black_end:(\[0-9.]+)").match_data(line)
-      events.push({"kind": "black", "start": m[1].to_f, "end": m[2].to_f}) if m != nil
-      m = Regex.new("freeze_(start|end):\\s*(\[0-9.]+)").match_data(line)
-      if m != nil
-        if m[1] == "start"
-          starts.push(m[2].to_f)
-        elsif starts.size > 0
-          events.push({"kind": "freeze", "start": starts.shift, "end": m[2].to_f})
-    starts.each ->(start)
-      events.push({"kind": "freeze", "start": start, "end": duration})
+    scan[:events].each ->(ev)
+      events.push({"kind": ev[0], "start": ev[1], "end": ev[2]})
     allowed = {"black": Util.get(settings, "allow_black", []).dup, "freeze": Util.get(settings, "allow_freeze", []).dup}
     if timeline != nil
       fps = plan["rate"][0] / plan["rate"][1].to_f
@@ -95,7 +80,7 @@ in Av
     results = {}
     results["source_gates"] = source_gates(plan["gates"]) if plan["gates"].size > 0
     if p["loudness"]["enabled"]
-      disk = Budget.new(project.resources).disk(directory, plan["samples"] * p["audio"]["channels"] * 4)
+      disk = Budget.new(project.resources).disk(directory, 0)
       raise "insufficient disk for decoded audio QC" if !disk["ok"]
       results["audio"] = audio(path, p["loudness"], media, directory)
     if p["text"]["enabled"]

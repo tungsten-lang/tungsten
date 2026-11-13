@@ -16,7 +16,7 @@ in Av
       "text": "enabled font size minimum_size box safe_area foreground background minimum_contrast burned minimum_edge_recall max_error",
       "anomalies": "enabled black_min freeze_min noise allow_black allow_freeze policy",
       "resources": "memory_mb disk_reserve_mb jobs animation_jobs decode_ahead segments_ahead timeout native_timeout_ms retries cache_days",
-      "quality": "mode minimum_bitrate maximum_bitrate max_probes probe_frames minimum_ssim minimum_vmaf sample_frames",
+      "quality": "mode minimum_bitrate maximum_bitrate max_probes probe_frames minimum_ssim minimum_ms_ssim minimum_vmaf sample_frames",
       "banding": "auto background gradient samples limits exclude exclude_normalized shots max_samples asset_prefix program_id",
       "publish": "root layout profiles files release_dir", "prepare": "argv cwd", "input": "path generated", "gate": "pattern equal profile"
     }
@@ -281,9 +281,9 @@ in Av
     Schema.integer(q["probe_frames"], "probe_frames", 1, 240) if q.has_key?("probe_frames")
     if q.has_key?("sample_frames")
       raise "quality sample_frames needs 1..16 frames" if type(q["sample_frames"]) != "Array" || q["sample_frames"].size < 1 || q["sample_frames"].size > 16
-    ["minimum_ssim", "minimum_vmaf"].each ->(key)
-      maximum = key == "minimum_ssim" ? 1 : 100
-      raise "[key] is outside metric range" if q.has_key?(key) && (!Schema.number?(q[key]) || q[key] < 0 || q[key] > maximum)
+    raise "minimum_vmaf is unsupported without FFmpeg; use minimum_ms_ssim or minimum_ssim" if q.has_key?("minimum_vmaf")
+    ["minimum_ssim", "minimum_ms_ssim"].each ->(key)
+      raise "[key] is outside metric range" if q.has_key?(key) && (!Schema.number?(q[key]) || q[key] <= 0 || q[key] > 1)
 
   -> validate
     raise "invalid project name" if !Schema.name?(@name)

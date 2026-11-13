@@ -23,8 +23,10 @@
 #ifdef __APPLE__
 #include <CommonCrypto/CommonDigest.h>
 #include <sys/clonefile.h>
+#include <sys/event.h>
 #include <mach/mach.h>
 #include <sys/sysctl.h>
+#include <pthread.h>
 #endif
 extern double w_num_to_f64(WValue);
 static const char *av_str(WValue v) {
@@ -57,6 +59,78 @@ WValue w_av_sha256(WValue path) {
   int saved=errno; close(fd); errno=saved; if(n<0) return av_error("read SHA256 input"); CC_SHA256_Final(digest,&ctx); char hex[65]; for(int i=0;i<32;i++) snprintf(hex+2*i,3,"%02x",digest[i]); return w_string(hex);
 #else
   w_raise(w_string("native AV file hashing requires macOS")); return W_NIL;
+#endif
+}
+#ifdef __APPLE__
+typedef struct {
+  int used;
+  dev_t dev;
+  ino_t ino;
+  off_t size;
+  time_t msec, csec;
+  long mnsec, cnsec;
+  uint64_t path_hash;
+  char hex[65];
+} AvShaEntry;
+static AvShaEntry g_sha_cache[4096];
+static pthread_mutex_t g_sha_mu = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t av_fnv1a(const char *s) {
+  uint64_t h = 1469598103934665603ULL;
+  while (*s) { h ^= (uint8_t)*s++; h *= 1099511628211ULL; }
+  return h;
+}
+#endif
+WValue w_av_sha256_cached(WValue path) {
+#ifdef __APPLE__
+  const char *p = av_str(path);
+  struct stat st;
+  if (stat(p, &st) < 0) return av_error("stat SHA256 input");
+  uint64_t ph = av_fnv1a(p);
+  uint64_t key = ph ^ ((uint64_t)st.st_ino * 11400714819323198485ULL) ^ (uint64_t)st.st_mtimespec.tv_nsec;
+  size_t slot = (size_t)(key & 4095);
+  pthread_mutex_lock(&g_sha_mu);
+  AvShaEntry *e = &g_sha_cache[slot];
+  if (e->used && e->path_hash == ph && e->dev == st.st_dev && e->ino == st.st_ino && e->size == st.st_size &&
+      e->msec == st.st_mtimespec.tv_sec && e->mnsec == st.st_mtimespec.tv_nsec &&
+      e->csec == st.st_ctimespec.tv_sec && e->cnsec == st.st_ctimespec.tv_nsec) {
+    char hex[65];
+    memcpy(hex, e->hex, 65);
+    pthread_mutex_unlock(&g_sha_mu);
+    return w_string(hex);
+  }
+  pthread_mutex_unlock(&g_sha_mu);
+  int fd = open(p, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return av_error("open SHA256 input");
+  struct stat st2;
+  if (fstat(fd, &st2) < 0) { int sv = errno; close(fd); errno = sv; return av_error("fstat SHA256 input"); }
+  CC_SHA256_CTX ctx;
+  CC_SHA256_Init(&ctx);
+  unsigned char block[65536], digest[32];
+  ssize_t n;
+  while ((n = read(fd, block, sizeof block)) > 0) CC_SHA256_Update(&ctx, block, (CC_LONG)n);
+  int saved = errno;
+  close(fd);
+  errno = saved;
+  if (n < 0) return av_error("read SHA256 input");
+  CC_SHA256_Final(digest, &ctx);
+  char hex[65];
+  for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", digest[i]);
+  struct stat st3;
+  if (stat(p, &st3) == 0 && st3.st_dev == st2.st_dev && st3.st_ino == st2.st_ino && st3.st_size == st2.st_size &&
+      st3.st_mtimespec.tv_sec == st2.st_mtimespec.tv_sec && st3.st_mtimespec.tv_nsec == st2.st_mtimespec.tv_nsec &&
+      st3.st_ctimespec.tv_sec == st2.st_ctimespec.tv_sec && st3.st_ctimespec.tv_nsec == st2.st_ctimespec.tv_nsec) {
+    size_t slot2 = (size_t)((ph ^ ((uint64_t)st2.st_ino * 11400714819323198485ULL) ^ (uint64_t)st2.st_mtimespec.tv_nsec) & 4095);
+    pthread_mutex_lock(&g_sha_mu);
+    AvShaEntry *w = &g_sha_cache[slot2];
+    w->used = 1; w->path_hash = ph; w->dev = st2.st_dev; w->ino = st2.st_ino; w->size = st2.st_size;
+    w->msec = st2.st_mtimespec.tv_sec; w->mnsec = st2.st_mtimespec.tv_nsec;
+    w->csec = st2.st_ctimespec.tv_sec; w->cnsec = st2.st_ctimespec.tv_nsec;
+    memcpy(w->hex, hex, 65);
+    pthread_mutex_unlock(&g_sha_mu);
+  }
+  return w_string(hex);
+#else
+  return w_av_sha256(path);
 #endif
 }
 WValue w_av_copy(WValue src,WValue dst) {
@@ -113,7 +187,62 @@ WValue w_av_run(WValue args,WValue cwd,WValue environment,WValue outpath,WValue 
   for(int i=0;i<a->size;i++)free(argv[i]);free(argv);for(size_t i=0;i<envn;i++)free(envp[i]);free(envp);
   if(spawn_error){sigaction(SIGINT,&oldint,NULL);sigaction(SIGTERM,&oldterm,NULL);errno=spawn_error;return av_error("spawn");}
   double start=av_clock(),seconds=w_num_to_f64(timeout);int status=0,timed=0; struct rusage usage={0};
-  for(;;) { pid_t r=wait4(pid,&status,WNOHANG,&usage); if(r==pid)break; if(r<0&&errno!=EINTR){status=127<<8;break;} if(av_cancel||(seconds>0&&av_clock()-start>seconds)) { timed=!av_cancel; kill(-pid,SIGTERM); struct timespec pause={0,20000000}; double until=av_clock()+0.5; while(av_clock()<until)nanosleep(&pause,NULL);kill(-pid,SIGKILL);while(wait4(pid,&status,0,&usage)<0&&errno==EINTR){}break;} struct timespec pause={0,20000000};nanosleep(&pause,NULL); }
+#ifdef __APPLE__
+  int kq=kqueue();
+  if(kq>=0){
+    fcntl(kq,F_SETFD,FD_CLOEXEC);
+    struct kevent reg;
+    EV_SET(&reg,pid,EVFILT_PROC,EV_ADD|EV_ONESHOT,NOTE_EXIT,0,NULL);
+    if(kevent(kq,&reg,1,NULL,0,NULL)<0&&errno!=ESRCH){close(kq);kq=-1;}
+  }
+#endif
+  for(;;) {
+    pid_t r=wait4(pid,&status,WNOHANG,&usage);
+    if(r==pid)break;
+    if(r<0&&errno!=EINTR){status=127<<8;break;}
+    double now=av_clock();
+    if(av_cancel||(seconds>0&&now-start>seconds)) {
+      timed=!av_cancel;
+      kill(-pid,SIGTERM);
+      double until=av_clock()+0.5;
+      for(;;) {
+        pid_t r2=wait4(pid,&status,WNOHANG,&usage);
+        if(r2==pid)goto reaped;
+        if(r2<0&&errno!=EINTR)break;
+        double rem=until-av_clock();
+        if(rem<=0)break;
+#ifdef __APPLE__
+        if(kq>=0){
+          struct kevent ev;
+          long ns=(long)(rem*1e9);
+          struct timespec ts={0,ns>50000000L?50000000L:ns};
+          kevent(kq,NULL,0,&ev,1,&ts);
+          continue;
+        }
+#endif
+        struct timespec pause={0,10000000};nanosleep(&pause,NULL);
+      }
+      kill(-pid,SIGKILL);
+      while(wait4(pid,&status,0,&usage)<0&&errno==EINTR){}
+    reaped:
+      break;
+    }
+#ifdef __APPLE__
+    if(kq>=0){
+      struct kevent ev;
+      double slice=0.1;
+      if(seconds>0){double rem=seconds-(now-start);if(rem<0)rem=0;if(rem<slice)slice=rem;}
+      struct timespec ts={(time_t)slice,(long)((slice-(double)(time_t)slice)*1e9)};
+      int nev=kevent(kq,NULL,0,&ev,1,&ts);
+      if(nev<0&&errno!=EINTR){close(kq);kq=-1;}
+      continue;
+    }
+#endif
+    struct timespec pause={0,10000000};nanosleep(&pause,NULL);
+  }
+#ifdef __APPLE__
+  if(kq>=0)close(kq);
+#endif
   /* Reap/stop any background descendants even after their leader exited. */
   kill(-pid,SIGKILL);sigaction(SIGINT,&oldint,NULL);sigaction(SIGTERM,&oldterm,NULL);
   int code=timed?124:av_cancel?128+av_cancel:WIFEXITED(status)?WEXITSTATUS(status):128+WTERMSIG(status);

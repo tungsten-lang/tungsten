@@ -1,20 +1,30 @@
 in Av
 
 + Inputs
-  -> .implementation(toolchain, package)
+  -> .implementation(toolchain, package, workspace = nil)
     paths = [toolchain + "/bin/tungsten", toolchain + "/bin/tungsten-compiler"]
+    test_prefix = toolchain + "/compiler/test/"
     ["runtime", "core", "compiler", "apps/studio", "bits/tungsten-av", "bits/tungsten-bit"].each ->(tree)
       File.walk(toolchain + "/" + tree, ->(path)
-        paths.push(path) if File.file?(path) && [".w", ".c", ".m", ".h"].include?(File.extname(path))
+        paths.push(path) if !path.starts_with?(test_prefix) && File.file?(path) && [".w", ".c", ".m", ".h"].include?(File.extname(path))
       )
     File.walk(package, ->(path)
       paths.push(path) if File.file?(path) && [".w", ".c", ".m", ".h"].include?(File.extname(path))
     )
     files = {}
+    entries = []
     Util.unique(paths).each ->(path)
       key = path.starts_with?(toolchain + "/") ? path.slice(toolchain.size + 1, path.size) : "package/" + path.slice(package.size + 1, path.size)
-      files[key] = Util.sha(path)
-    {"sha256": Crypto.sha256(JSON.encode(files)), "files": files, "runtime": ccall("w_media_runtime_identity")}
+      sha = Util.sha_cached(path)
+      files[key] = sha
+      entries.push([key, sha])
+    digest = Crypto.sha256(JSON.encode(entries))
+    runtime = ccall("w_media_runtime_identity")
+    if workspace != nil
+      manifest = workspace + "/implementations/" + digest + ".json"
+      Util.json(manifest, {"sha256": digest, "runtime": runtime, "files": files}) if !File.file?(manifest)
+      return {"sha256": digest, "runtime": runtime, "manifest": manifest}
+    {"sha256": digest, "files": files, "runtime": runtime}
 
 + Snapshots
   -> new(@directory, @reserve = 0)
@@ -82,7 +92,7 @@ in Av
     identity = {}
     files.keys.sort.each ->(path)
       identity[path] = files[path]["sha256"]
-    destination = directory + "/" + Crypto.sha256(JSON.encode(identity))
+    destination = directory + "/" + Crypto.sha256(Util.canonical_json(identity))
     mapping = {}
     files.keys.sort.each ->(path)
       relative = Util.inside?(path, root) ? path.slice(root.size + 1, path.size) : ".external/" + Crypto.sha256(File.dirname(path)).slice(0, 16) + "/" + File.basename(path)

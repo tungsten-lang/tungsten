@@ -14,6 +14,17 @@ in Av
   -> .copy(value)
     JSON.parse(JSON.encode(value))
 
+  -> .canonical_json(value)
+    t = type(value)
+    if t == "Hash"
+      parts = []
+      value.keys.sort.each ->(k)
+        parts.push(JSON.encode(k.to_s) + ":" + canonical_json(value[k]))
+      return 123.chr + parts.join(",") + 125.chr
+    if t == "Array"
+      return 91.chr + (value.map ->(v) canonical_json(v)).join(",") + 93.chr
+    JSON.encode(value)
+
   -> .symbols(hash)
     result = {}
     hash.keys.each ->(k)
@@ -38,8 +49,31 @@ in Av
   -> .id
     Random.uuid.to_s.replace("-", "").slice(0, 20)
 
+  -> .pad(value, width)
+    s = value.to_i.to_s
+    while s.size < width
+      s = "0" + s
+    s
+
+  -> .format_frame(pattern, index)
+    m = Regex.new("%0?(\[0-9]*)d").match_data(pattern)
+    return pattern if m == nil
+    width = m[1] == "" ? 1 : m[1].to_i
+    pattern.replace(m[0], pad(index, width))
+
   -> .sha(path)
     ccall("w_av_sha256", path)
+
+  -> .sha_cached(path)
+    ccall("w_av_sha256_cached", path)
+
+  -> .copy_tree_files(src, dst)
+    if File.directory?(src) && !File.symlink?(src)
+      File.mkdir_p(dst)
+      File.children(src).each ->(name)
+        copy_tree_files(File.join(src, name), File.join(dst, name))
+    elsif File.file?(src)
+      copy_file(src, dst)
 
   -> .json(path, value)
     File.mkdir_p(File.dirname(path))

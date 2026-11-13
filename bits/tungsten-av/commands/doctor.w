@@ -14,9 +14,7 @@ in Av:Commands
     context = CLI.new(@raw_args, "doctor")
     context.load
     plan = Planner.new(context.project, context.media).build(context.profiles, false)
-    versions = {}
-    ["ffmpeg", "ffprobe"].each ->(tool)
-      versions[tool] = context.media.runner.run([tool, "-version"])["stdout"].split("\n")[0]
+    versions = {"tungsten": context.project.toolchain, "media_runtime": plan["capabilities"]["implementation"]}
     context.emit({"ok": plan["ready"], "project": context.project.name, "toolchain": context.project.toolchain, "capabilities": plan["capabilities"], "tool_versions": versions, "inputs": plan["inputs"].size, "profiles": plan["profiles"].keys, "disk": plan["disk"], "implementation": "native Tungsten"})
     exit(1) if !plan["ready"]
 

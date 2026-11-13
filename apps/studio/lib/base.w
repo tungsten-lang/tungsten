@@ -288,7 +288,7 @@ P_IR = 8
   p.slice(i + 1, p.size - i - 1)
 
 -> mkdir_p(d)
-  OS.system("mkdir -p '" + d + "'")
+  File.mkdir_p(d)
 
 -> shq(s)
   "'" + s.gsub("'", "'\\''") + "'"

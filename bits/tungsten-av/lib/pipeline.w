@@ -61,22 +61,26 @@ in Av
     raise "verification/QC failed for [path]; see [directory]" if !result["ok"]
     result
 
-  -> prepared_audio(project, source, plan, opts, snapshots, mapping)
+  -> prepared_audio(project, source, plan, opts, snapshots, mapping, timeline_audio = nil)
     a = plan["profile"]["audio"]
     return nil if a["codec"] == "none" || a["codec"] == "copy"
     external_audio = a["source"]
-    audio_source = external_audio ? Util.get(mapping, project.path(external_audio), project.path(external_audio)) : source
+    if !external_audio && type(source) == "Array"
+      return nil if timeline_audio == nil
+      audio_source = timeline_audio
+    else
+      audio_source = external_audio ? Util.get(mapping, project.path(external_audio), project.path(external_audio)) : source
     streams = @media.probe(audio_source)["streams"].select ->(s) s["codec_type"] == "audio"
     raise "profile requires audio but source has none" if streams.size == 0
     stream = streams[0]
-    return nil if !external_audio && stream["sample_rate"].to_i == a["sample_rate"] && stream["channels"] == a["channels"]
-    key = Crypto.sha256(JSON.encode([Util.sha(audio_source), a["sample_rate"], a["channels"]]))
+    if stream["sample_rate"].to_i == a["sample_rate"] && stream["channels"] == a["channels"]
+      opts["audio_src"] = audio_source if type(source) == "Array" && !external_audio
+      return nil if !external_audio
+    key = Crypto.sha256(JSON.encode([Util.sha_cached(audio_source), a["sample_rate"], a["channels"]]))
     output = project.workspace + "/audio/" + key + ".wav"
     File.mkdir_p(File.dirname(output))
     if !File.file?(output)
-      part = output + ".part.wav"
-      @media.ffmpeg(["-v", "error", "-y", "-i", audio_source, "-map", "0:a:0", "-ar", a["sample_rate"], "-ac", a["channels"], "-c:a", "pcm_s24le", part])
-      File.atomic_replace(part, output)
+      @media.prepare_audio(audio_source, output, sample_rate: a["sample_rate"], channels: a["channels"])
     opts["audio_src"] = snapshots.seal(output)["path"]
 
   -> delivery_context(name, path)
@@ -114,7 +118,7 @@ in Av
     project.declarations["prepare"].each ->(hook)
       @media.runner.run(hook["argv"], project.path(Util.get(hook, "cwd", ".")), prepare_env, project.workspace + "/prepare-" + hook["name"] + ".log")
     plan = Planner.new(project, @media).build(names)
-    identity = Inputs.implementation(project.toolchain, @media.package)
+    identity = Inputs.implementation(project.toolchain, @media.package, project.workspace)
     job = project.workspace + "/jobs/" + Util.id()
     File.mkdir_p(job)
     state = {"schema": 1, "status": "running", "started": Util.now, "plan": plan, "implementation": identity, "outputs": {}, "quality": {}}
@@ -125,6 +129,8 @@ in Av
     mapping = {}
     timeline = plan["timeline"]
     source = nil
+    source_audio = nil
+    source_hash = nil
     begin
       if plan["source"]
         sealed = snapshots.seal(plan["source"])
@@ -142,6 +148,8 @@ in Av
         if primary.size > 0
           frozen = Timeline.source(project, @media, plan.merge({"profiles": primary}), job, snapshots, identity["sha256"])
           source = frozen["source"]
+          source_audio = frozen["audio_source"]
+          source_hash = frozen["source_hash"]
           records = frozen["records"]
           mapping = frozen["mapping"]
           timeline = frozen["timeline"]
@@ -152,6 +160,8 @@ in Av
       probe_targets = names if names != nil && names.size > 0
       entries = []
       sources = {}
+      source_audios = {}
+      source_hashes = {}
       references = {}
       subtitles_by_name = {}
       contexts = {}
@@ -161,6 +171,8 @@ in Av
         p = plan["profiles"][name]
         parent = p["profile"]["from"]
         origin = Util.get(sources, parent, source)
+        current_audio = parent != nil ? source_audios[parent] : source_audio
+        current_hash = parent != nil ? source_hashes[parent] : source_hash
         context = Util.get(contexts, parent, project)
         current_timeline = Util.get(timelines, parent, timeline)
         current_mapping = Util.get(mappings, parent, mapping)
@@ -174,6 +186,8 @@ in Av
           alternate_profiles[name] = p
           frozen = Timeline.source(context, @media, plan.merge({"profiles": alternate_profiles}), job, snapshots, identity["sha256"])
           origin = frozen["source"]
+          current_audio = frozen["audio_source"]
+          current_hash = frozen["source_hash"]
           current_mapping = frozen["mapping"]
           current_timeline = frozen["timeline"]
           frozen["records"].each ->(r)
@@ -186,7 +200,10 @@ in Av
           raise "resolved timeline clock differs from plan" if current_timeline["rate"] != p["rate"] || current_timeline["frames"] < p["start"] + p["frames"]
         Pipeline.freeze_profile(project, p, current_mapping)
         opts = options(p, identity["sha256"])
-        prepared_audio(context, origin, p, opts, snapshots, current_mapping)
+        if type(origin) == "Array"
+          opts["source_hash"] = current_hash if current_hash != nil
+          opts["tc"] = p["timecode"] == nil ? false : p["timecode"]
+        prepared_audio(context, origin, p, opts, snapshots, current_mapping, current_audio)
         directory = job + "/" + name
         File.mkdir_p(directory)
         destination = directory + "/output." + p["profile"]["format"]
@@ -205,11 +222,13 @@ in Av
           references[name] = origin
           subtitles = project.associated("subtitles", name).map ->(i) Util.get(current_mapping, project.path(i["name"]), project.path(i["name"]))
           subtitles_by_name[name] = subtitles
-          verification = verify(context, destination, p, directory + "/checks", origin, current_timeline, subtitles)
-          state["outputs"][name] = {"path": destination, "sha256": Util.sha(destination), "result": result, "verification": verification, "reference": origin, "timeline": current_timeline, "project_settings": context.settings, "subtitle_paths": subtitles}
+          checks_dir = directory + "/checks"
+          verification = verify(context, destination, p, checks_dir, origin, current_timeline, subtitles)
+          dest_sha = Util.sha(destination)
+          state["outputs"][name] = {"path": destination, "sha256": dest_sha, "result": result, "verification": verification, "reference": origin, "timeline": current_timeline, "project_settings": context.settings, "subtitle_paths": subtitles}
           Util.json(job + "/job.json", state)
           target = project.output_path(p["profile"]["path"])
-          entries.push({"source": destination, "destination": target, "role": name, "plan": p})
+          entries.push({"source": destination, "destination": target, "role": name, "plan": p, "verified_sha256": dest_sha, "verified_checks_dir": checks_dir, "verified_result": verification})
           index = 0
           subtitles.each ->(subtitle)
             language = project.associated("subtitles", name)[index]["language"]
@@ -221,7 +240,7 @@ in Av
             file = Util.get(current_mapping, path, path)
             entries.push({"source": file, "destination": target.slice(0, target.size - File.extname(target).size) + ".chapters" + File.extname(file), "role": "chapters"})
       if !quality_only
-        raise "toolchain changed during job" if Inputs.implementation(project.toolchain, @media.package)["sha256"] != identity["sha256"]
+        raise "toolchain changed during job" if Inputs.implementation(project.toolchain, @media.package, project.workspace)["sha256"] != identity["sha256"]
         raise "Bitfile changed during job" if Util.sha(project.file) != project.content_sha256
         check = ->(path, entry, reports)
           role = entry["role"]

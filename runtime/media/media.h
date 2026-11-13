@@ -34,6 +34,7 @@
 /* X(name, arity). Implemented in media.c. w_media_available is not listed: it
  * exists on every target and answers false instead of raising. */
 #define W_MEDIA_C_CCALLS(X)            \
+    X(w_media_pid, 0)                  \
     X(w_media_codecs, 0)               \
     X(w_media_stats, 0)                \
     X(w_media_encoder_new, 12)         \
@@ -65,6 +66,11 @@
     X(w_media_probe, 3)                \
     X(w_media_frame_probe, 4)          \
     X(w_media_sync_scan, 3)            \
+    X(w_media_audio_qc, 2)             \
+    X(w_media_audio_prepare, 3)        \
+    X(w_media_anomalies, 2)            \
+    X(w_media_quality, 3)              \
+    X(w_media_extract_frames, 3)       \
     X(w_media_decoder_open, 3)         \
     X(w_media_decoder_read, 3)         \
     X(w_media_decoder_info, 2)         \
@@ -311,6 +317,7 @@ WMediaSegment *w_media_enc_cut(MEncoder *e);
 /* Wait for a segment's frames; 0, or -1 with a message. */
 int   w_media_seg_finish(WMediaSegment *s, char *err, size_t cap);
 int   w_media_seg_save(WMediaSegment *s, const char *path, char *err, size_t cap);
+int   w_media_seg_save_hashed(WMediaSegment *s, const char *path, char hex_out[65], char *err, size_t cap);
 void  w_media_seg_free(WMediaSegment *s);
 /* Load a segment file (TWMS); NULL with a message. */
 WMediaSegment *w_media_seg_load(const char *path, char *err, size_t cap);

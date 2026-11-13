@@ -1,6 +1,32 @@
 in Av
 
 + Timeline
+  -> .studio_identity(toolchain)
+    paths = [toolchain + "/bin/tungsten", toolchain + "/bin/tungsten-compiler"]
+    ["runtime", "core", "apps/studio"].each ->(tree)
+      File.walk(toolchain + "/" + tree, ->(path)
+        paths.push(path) if File.file?(path) && [".w", ".c", ".m", ".h"].include?(File.extname(path))
+      )
+    entries = []
+    Util.unique(paths).each ->(path)
+      entries.push([path.slice(toolchain.size + 1, path.size), Util.sha_cached(path)])
+    Crypto.sha256(JSON.encode([entries, Env.get("TUNGSTEN_FREE") || "", Env.get("TUNGSTEN_DEFINES") || ""]))
+
+  -> .cached_binary(toolchain, runner, name, entry_rel, log = nil)
+    cache_base = Env.get("TUNGSTEN_CACHE_DIR")
+    if cache_base == nil || cache_base == ""
+      thome = Env.get("TUNGSTEN_HOME")
+      thome = (Env.get("HOME") || "/tmp") + "/.tungsten" if thome == nil || thome == ""
+      cache_base = thome + "/build/compile"
+    studio_dir = cache_base + "/av-studio-" + studio_identity(toolchain)
+    bin_path = studio_dir + "/" + name
+    if !File.file?(bin_path)
+      File.mkdir_p(studio_dir)
+      part = bin_path + "." + Util.id() + ".part"
+      runner.run([toolchain + "/bin/tungsten", "-o", part, toolchain + "/" + entry_rel], toolchain, {"TUNGSTEN_ROOT": toolchain}, log)
+      File.atomic_replace(part, bin_path)
+    bin_path
+
   -> .source(project, media, plan, job, snapshots, identity)
     planner = Planner.new(project, media)
     info = planner.timeline_inputs
@@ -55,14 +81,15 @@ in Av
       raise "timeline subtitles require an explicit font" if !text["font"]
       font = mapping[project.path(text["font"])]
       document["burned_captions"] = Text.outlines(cues, text, settings["w"], settings["h"], font)
-    recipe = Crypto.sha256(JSON.encode([document, identity, records.map ->(r) [r["source"], r["sha256"]]]))
+    recipe = Crypto.sha256(Util.canonical_json([document, identity, records.map ->(r) [r["source"], r["sha256"]]]))
     directory = project.workspace + "/timelines/" + recipe
     File.mkdir_p(directory)
     episode = directory + "/episode.json"
     Util.json(episode, document)
-    environment = {"TW_RATE_NUM": settings["rate"][0].to_s, "TW_RATE_DEN": settings["rate"][1].to_s, "TW_WIDTH": settings["w"].to_s, "TW_HEIGHT": settings["h"].to_s, "STUDIO_TUNGSTEN": project.toolchain + "/bin/tungsten", "STUDIO_IMPLEMENTATION_ID": identity, "STUDIO_ENCODER": "videotoolbox"}
+    studio_bin = cached_binary(project.toolchain, media.runner, "studio", "apps/studio/studio.w", job + "/studio-compile.log")
+    environment = {"TW_RATE_NUM": settings["rate"][0].to_s, "TW_RATE_DEN": settings["rate"][1].to_s, "TW_WIDTH": settings["w"].to_s, "TW_HEIGHT": settings["h"].to_s, "TUNGSTEN_ROOT": project.toolchain, "STUDIO_TUNGSTEN": project.toolchain + "/bin/tungsten", "STUDIO_BIN": studio_bin, "STUDIO_IMPLEMENTATION_ID": identity, "STUDIO_ENCODER": "videotoolbox"}
     studio = ->(args)
-      command = [project.toolchain + "/bin/tungsten", project.toolchain + "/apps/studio/studio.w", "--", args[0], episode, "--cut", cut]
+      command = [studio_bin, args[0], episode, "--cut", cut]
       args.slice(1, args.size).each ->(a)
         command.push(a.to_s)
       media.runner.run(command, project.root, environment, job + "/studio-" + args[0] + ".log")
@@ -72,16 +99,24 @@ in Av
     primary = plan["profiles"][name]
     budget = Budget.new(project.resources).choose(primary["width"], primary["height"])
     studio.call(["render", "--jobs", budget["jobs"], "--animation-jobs", budget["animation_jobs"], "--max-frames", resolved["frames"]])
+    mix_target = directory + "/build/" + cut + "/mix.wav"
     if project.settings["mix"]
-      target = directory + "/build/" + cut + "/mix.wav"
-      raise "insufficient disk for timeline audio preparation" if !Budget.new(project.resources).disk(target, resolved["samples"] * 6)["ok"]
-      media.ffmpeg(["-v", "error", "-y", "-i", mapping[project.path(project.settings["mix"])], "-ar", "48000", "-ac", "2", "-af", "apad,atrim=end_sample=" + resolved["samples"].to_s, "-c:a", "pcm_s24le", "-rf64", "auto", target])
+      raise "insufficient disk for timeline audio preparation" if !Budget.new(project.resources).disk(mix_target, resolved["samples"] * 6)["ok"]
+      media.prepare_audio(mapping[project.path(project.settings["mix"])], mix_target, sample_rate: 48000, channels: 2, samples: resolved["samples"])
     else
       studio.call(["mix"])
-    picture = directory + "/picture.mov"
-    manifest = directory + "/picture.json"
-    reusable = File.file?(picture) && File.file?(manifest) && JSON.parse(File.read(manifest))["sha256"] == Util.sha(picture)
-    studio.call(["mux", "--out", picture, "--no-edit-lists", "--audio-codec", "pcm"]) if !reusable
-    sealed = snapshots.seal(picture)
-    Util.json(manifest, {"sha256": sealed["sha256"], "frames": resolved["frames"], "rate": resolved["rate"]})
-    {"source": sealed["path"], "records": records, "mapping": mapping, "timeline": resolved}
+    if Env.get("AV_MATERIALIZE_TIMELINE_MOV") == "1"
+      picture = directory + "/picture.mov"
+      manifest = directory + "/picture.json"
+      reusable = File.file?(picture) && File.file?(manifest) && JSON.parse(File.read(manifest))["sha256"] == Util.sha(picture)
+      studio.call(["mux", "--out", picture, "--no-edit-lists", "--audio-codec", "pcm"]) if !reusable
+      sealed = snapshots.seal(picture)
+      Util.json(manifest, {"sha256": sealed["sha256"], "frames": resolved["frames"], "rate": resolved["rate"]})
+      return {"source": sealed["path"], "records": records, "mapping": mapping, "timeline": resolved}
+    seg_paths = []
+    resolved["segments"].each ->(seg)
+      sp = directory + "/build/segments/" + seg["key"] + ".prores422hq"
+      raise "missing rendered timeline segment [sp]" if !File.file?(sp)
+      seg_paths.push(sp)
+    sealed_mix = snapshots.seal(mix_target)
+    {"source": seg_paths, "audio_source": sealed_mix["path"], "source_hash": recipe, "records": records, "mapping": mapping, "timeline": resolved}

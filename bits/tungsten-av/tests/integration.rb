@@ -11,7 +11,7 @@ Dir.mktmpdir("av-native-integration-") do |root|
   ENV.fetch("PATH").split(":").concat(["/usr/bin", "/bin"]).uniq.each do |dir|
     next unless File.directory?(dir)
     Dir.children(dir).each do |name|
-      next if name =~ /python|pyenv/i
+      next if name =~ /python|pyenv|ffmpeg|ffprobe/i
       path = File.join(dir, name)
       link = File.join(tools, name)
       File.symlink(path, link) if File.file?(path) && File.executable?(path) && !File.exist?(link)
@@ -27,9 +27,43 @@ Dir.mktmpdir("av-native-integration-") do |root|
     text = run.call(File.join(ROOT, "bin/bit"), "av", command, "--project", root, "--json", *args)
     JSON.parse(text.lines.reverse.find { |line| line.start_with?("{") })
   end
-  raise "Python visible in test PATH" if Dir.children(tools).any? { |n| n =~ /python|pyenv/i }
+  raise "Python or FFmpeg visible in test PATH" if Dir.children(tools).any? { |n| n =~ /python|pyenv|ffmpeg|ffprobe/i }
   source = File.join(root, "source.mov")
-  run.call("ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24:duration=2", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2", "-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv", "-movflags", "+write_colr", "-c:a", "pcm_s24le", "-ac", "2", source)
+  tone_wav = File.join(root, "tone.wav")
+  samples = 48_000 * 2
+  pcm = Array.new(samples * 2) { |i| (Math.sin(2.0 * Math::PI * 440.0 * (i / 2) / 48_000.0) * 8000).round }.pack("s<*")
+  File.binwrite(tone_wav, "RIFF" + [36 + pcm.bytesize].pack("V") + "WAVEfmt " + [16, 1, 2, 48_000, 48_000 * 4, 4, 16].pack("VvvVVvv") + "data" + [pcm.bytesize].pack("V") + pcm)
+  fixture_w = File.join(root, "make_source.w")
+  File.write(fixture_w, <<~W)
+    a = argv()
+    enc = VideoEncoder.new(160, 90, {codec: :prores422hq, rate: [24, 1], quality: ~1.0, input: :rgb24})
+    rgb = u8[160 * 90 * 3]
+    f = 0
+    while f < 48
+      y = 0
+      while y < 90
+        x = 0
+        while x < 160
+          i = (y * 160 + x) * 3
+          rgb[i] = ((x * 3 + f * 5) % 220) + 16
+          rgb[i + 1] = ((y * 2 + f * 3) % 220) + 16
+          rgb[i + 2] = (((x + y + f * 7)) % 220) + 16
+          x += 1
+        y += 1
+      enc.encode(rgb, 160 * 3)
+      f += 1
+    seg = enc.segment
+    enc.close
+    seg_path = a[0] + ".seg"
+    seg.save(seg_path)
+    seg.release
+    mux = Mux.new(a[0], {rate: [24, 1], frames: 48, tc_start: "00:00:00:00", audio: a[1], audio_codec: :pcm, edit_lists: false})
+    mux.append_file(seg_path)
+    mux.close
+    File.delete(seg_path)
+  W
+  run.call(File.join(ROOT, "bin/tungsten"), fixture_w, "--", source, tone_wav)
+  FileUtils.rm_f([tone_wav, fixture_w])
   base = "name \"fixture\"\nav.project \"fixture\", source: \"source.mov\", toolchain: #{ROOT.to_json}\nav.colour \"all\", untagged: :bt709\nav.resources memory_mb: 1024, jobs: 1, disk_reserve_mb: 0, timeout: 300\n"
   declarations = "av.output \"master\"\nav.video \"master\", codec: :prores422hq\nav.output \"share\", from: \"master\", format: :mp4\nav.video \"share\", codec: :h264, bitrate: \"1000k\"\nav.audio \"share\", codec: :aac, bitrate: \"192k\"\nav.publish \"upload\", root: \"upload\", profiles: [\"master\", \"share\"]\n"
   File.write(File.join(root, "Bitfile"), base + declarations)

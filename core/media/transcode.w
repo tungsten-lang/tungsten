@@ -248,7 +248,7 @@
     raise "Transcode: retries must be in 0..5" if retries < 0 || retries > 5
     raise "Transcode: retry_delay must be in 0..60 seconds" if delay < 0 || delay > 60
     ext = dst.to_s.downcase.ends_with?(".mov") ? ".mov" : ".mp4"
-    tmp = dst.to_s + ".transcode-[OS.capture("echo $PPID").strip()]-[(clock() * ~1000000.0).to_i]" + ext
+    tmp = dst.to_s + ".transcode-[ccall("w_media_pid")]-[(clock() * ~1000000.0).to_i]" + ext
     attempt = 0
     begin
       while true
@@ -375,17 +375,27 @@
             ["segments_ahead", Transcode.opt(o, :segments_ahead, 3)], ["disk_reserve_bytes", Transcode.opt(o, :disk_reserve_bytes, 0)]]
     resume = Transcode.opt(o, :resume_dir, nil)
     if resume != nil
-      raise "Transcode: resumable sources must be a movie" if !movie
-      inputs = [ccall("w_media_source_hash", src)]
-      inputs << ccall("w_media_source_hash", audio_src) if audio_src != nil
+      inputs = []
+      if movie
+        inputs << ccall("w_media_source_hash", src)
+      else
+        explicit_hash = Transcode.opt(o, :source_hash, nil)
+        if explicit_hash != nil
+          inputs << explicit_hash.to_s
+        else
+          src.each ->(s)
+            inputs << ccall("w_media_source_hash", s)
+      audio_digest = audio_src == nil ? nil : ccall("w_media_source_hash", audio_src)
+      inputs << audio_digest if audio_digest != nil
       identity = []
       spec.each ->(pair)
-        identity << pair if pair[0] != "dst" && pair[0] != "timeout_ms" && pair[0] != "cancel_file"
+        if pair[0] != "dst" && pair[0] != "timeout_ms" && pair[0] != "cancel_file" && (movie || pair[0] != "src")
+          identity << pair
       # Bind checkpoints to the actual loaded binary, OS/encoder platform and caller implementation.
       implementation = [ccall("w_media_runtime_identity"), Transcode.opt(o, :implementation_id, nil)]
       key = Crypto.sha256(JSON.encode(["av-resume-v3", implementation, identity, inputs]))
-      spec << ["source_hash", inputs[0]]
-      spec << ["audio_hash", inputs[1]] if audio_src != nil
+      spec << ["source_hash", inputs[0]] if movie
+      spec << ["audio_hash", audio_digest] if audio_digest != nil
       directory = File.expand_path(resume.to_s) + "/" + key
       Dir.mkdir_p(directory)
       spec << ["resume_dir", directory]
@@ -413,9 +423,10 @@
     # limit is below the produced stream. Choose from measured video bytes,
     # then re-encode with that explicit level (one bounded correction).
     if level == nil && (codec == "hevc" || codec == "hevc10")
-      facts = MediaVerify.facts(dst, true, false)
-      if facts[:video_bytes] != nil && facts[:level] != nil
-        bits = facts[:video_bytes] * 8 * rate[0] / (total * rate[1])
+      facts = MediaVerify.facts(dst, false, false)
+      vbytes = res[:video_bytes]
+      if vbytes != nil && facts[:level] != nil
+        bits = vbytes * 8 * rate[0] / (total * rate[1])
         needed = Transcode.min_level(codec, w, h, rate, bits)
         if needed != nil && facts[:level] < needed[1]
           corrected = o.dup

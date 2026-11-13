@@ -46,6 +46,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreMedia/CoreMedia.h>
+#include <CommonCrypto/CommonDigest.h>
 #include <CoreVideo/CoreVideo.h>
 #include <VideoToolbox/VideoToolbox.h>
 #include <dispatch/dispatch.h>
@@ -2075,7 +2076,7 @@ static void m_put64(uint8_t *p, uint64_t v) { m_put32(p, (uint32_t)v); m_put32(p
 static uint32_t m_get32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
 static uint64_t m_get64(const uint8_t *p) { return (uint64_t)m_get32(p) | ((uint64_t)m_get32(p + 4) << 32); }
 
-int w_media_seg_save(WMediaSegment *s, const char *path, char *err, size_t cap) {
+int w_media_seg_save_hashed(WMediaSegment *s, const char *path, char hex_out[65], char *err, size_t cap) {
     char tmp[4200];
     if (!s->format) { snprintf(err, cap, "segment has no frames"); return -1; }
     CFDictionaryRef ext = CMFormatDescriptionGetExtensions((CMFormatDescriptionRef)s->format);
@@ -2105,6 +2106,20 @@ int w_media_seg_save(WMediaSegment *s, const char *path, char *err, size_t cap) 
         m_put32(r + 16, (uint32_t)s->s[i].dts);
         r[20] = s->s[i].sync;
     }
+    CC_SHA256_CTX sha;
+    if (hex_out) {
+        CC_SHA256_Init(&sha);
+        CC_SHA256_Update(&sha, hdr, 64);
+        if (flen) CC_SHA256_Update(&sha, CFDataGetBytePtr(fmt), (CC_LONG)flen);
+        if (s->n) CC_SHA256_Update(&sha, rec, (CC_LONG)(24 * (size_t)s->n));
+        size_t rem = s->len, off = 0;
+        while (rem > 0) {
+            size_t chunk = rem > (size_t)0x40000000u ? (size_t)0x40000000u : rem;
+            CC_SHA256_Update(&sha, s->data + off, (CC_LONG)chunk);
+            off += chunk;
+            rem -= chunk;
+        }
+    }
     snprintf(tmp, sizeof tmp, "%s.tmp%d", path, (int)getpid());
     FILE *f = fopen(tmp, "wb");
     if (!f) { if (fmt) CFRelease(fmt); free(rec); snprintf(err, cap, "cannot write %s: %s", tmp, strerror(errno)); return -1; }
@@ -2120,7 +2135,16 @@ int w_media_seg_save(WMediaSegment *s, const char *path, char *err, size_t cap) 
         unlink(tmp);
         snprintf(err, cap, "writing %s failed: %s", path, strerror(errno)); return -1;
     }
+    if (hex_out) {
+        uint8_t digest[CC_SHA256_DIGEST_LENGTH];
+        CC_SHA256_Final(digest, &sha);
+        for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) snprintf(hex_out + 2 * i, 3, "%02x", digest[i]);
+    }
     return 0;
+}
+
+int w_media_seg_save(WMediaSegment *s, const char *path, char *err, size_t cap) {
+    return w_media_seg_save_hashed(s, path, NULL, err, cap);
 }
 
 WValue w_media_segment_save(WValue sv, WValue pathv) {
@@ -2248,6 +2272,10 @@ WValue w_media_segment_release(WValue sv) {
 }
 
 /* ---- capabilities and stats ---- */
+
+WValue w_media_pid(void) {
+    return w_int((int64_t)getpid());
+}
 
 static void m_probe_output(void *a, void *b, OSStatus st, VTEncodeInfoFlags f, CMSampleBufferRef sb) {
     (void)a; (void)b; (void)st; (void)f; (void)sb;

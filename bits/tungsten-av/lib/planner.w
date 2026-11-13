@@ -60,7 +60,8 @@ in Av
   -> resolve_timeline(path = nil, cut = nil)
     path = path || @project.path(@project.settings["timeline"])
     cut = cut || Util.get(@project.settings, "cut", "full")
-    @media.runner.json([@media.toolchain + "/bin/tungsten", @media.toolchain + "/apps/studio/tools/av_plan.w", "--", path, cut])
+    av_plan_bin = Timeline.cached_binary(@media.toolchain, @media.runner, "av_plan", "apps/studio/tools/av_plan.w")
+    @media.runner.json([av_plan_bin, path, cut])
 
   -> chapters(name, rate, frames)
     declarations = @project.associated("chapters", name)
@@ -106,11 +107,6 @@ in Av
     profiles = Planner.selected(project.profiles, names)
     caps = @media.capabilities
     raise "native AV requires macOS VideoToolbox" if !caps["available"]
-    @media.runner.run(["ffmpeg", "-version"])
-    @media.runner.run(["ffprobe", "-version"])
-    if (profiles.values.select ->(p) p["quality"].has_key?("minimum_vmaf")).size > 0
-      filters = @media.runner.run(["ffmpeg", "-hide_banner", "-filters"])["stdout"]
-      raise "minimum_vmaf requires an FFmpeg build with libvmaf" if !filters.include?("libvmaf")
     inputs = [project.file]
     source = nil
     timeline = nil
@@ -229,5 +225,5 @@ in Av
     raise "insufficient disk space for estimated job and reserve" if !disk["ok"] && require_space
     documents = {}
     inputs.each ->(path)
-      documents[path] = Util.sha(path) if File.file?(path) && (path == project.file || [".json", ".srt", ".txt"].include?(File.extname(path).downcase))
+      documents[path] = Util.sha_cached(path) if File.file?(path) && (path == project.file || [".json", ".srt", ".txt"].include?(File.extname(path).downcase))
     {"ready": disk["ok"], "schema": 1, "project": project.name, "root": project.root, "bitfile": project.file, "toolchain": project.toolchain, "capabilities": caps, "inputs": inputs, "documents": documents, "source": source, "timeline": timeline, "profiles": plans, "disk": disk, "stages": ["prepare", "snapshot", timeline == nil ? "decode source" : "render timeline", "encode profiles", "verify candidates", "audio/text/anomaly/banding QC", "activate verified release"]}

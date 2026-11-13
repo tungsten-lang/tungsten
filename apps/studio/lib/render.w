@@ -176,11 +176,25 @@ use grade
     @seq = {}
     @seq_order = []
     @item_keys = {}
+    @prog_pipes = {}
+    @pipe_seq = 0
     @caption_canvas = nil
     @caption_canvas = Canvas.new(@w, @h) if @proj.ep["burned_captions"] != nil
     @frames_rendered = 0
 
+  -> close_prog_pipe(st)
+    return nil if st == nil
+    st["fh"].close if st["fh"] != nil && !st["fh"].closed?
+    if st["proc"] != nil
+      st["proc"].kill
+      st["proc"].wait
+    File.delete(st["fifo"]) if st["fifo"] != nil && File.lstat(st["fifo"]) != nil
+    nil
+
   -> close
+    @prog_pipes.values.each ->(st)
+      close_prog_pipe(st)
+    @prog_pipes = {}
     @caption_canvas.close if @caption_canvas != nil
     @act_a.close
     @act_b.close
@@ -428,21 +442,69 @@ use grade
       rs_fill_rows(lptr, @lstride, @w, 0, @h, 0, 0, 0)
     nil
 
+  -> read_pipe_exact(fh, want)
+    buf = fh.read(want)
+    die("program pipe EOF before full frame") if buf == nil
+    while buf.size < want
+      more = fh.read(want - buf.size)
+      die("program pipe truncated frame (" + buf.size.to_s + " of " + want.to_s + " bytes)") if more == nil || more.size == 0
+      buf = buf + more
+    buf
+
+  -> stream_program_frame(p, idx, cnt, mode)
+    key = p["source_sha"] + "|" + get(p, "dur_ms", "").to_s
+    st = @prog_pipes[key]
+    return st["last_frame"] if st != nil && st["last_idx"] == idx
+    if st != nil && idx < st["next_idx"]
+      close_prog_pipe(st)
+      st = nil
+    fbytes = mode == "rgba" ? @w * @h * 4 : @w * @h * 3
+    if st == nil
+      @pipe_seq += 1
+      mkdir_p(@proj.build + "/tmp")
+      fifo = @proj.build + "/tmp/prog." + ccall("w_media_pid").to_s + "." + @pipe_seq.to_s + ".fifo"
+      File.delete(fifo) if File.lstat(fifo) != nil
+      mk = Process.spawn(["mkfifo", fifo])
+      die("mkfifo failed: " + fifo) if mk.wait != 0
+      argv = @proj.program_stream_argv(p, idx, cnt - 1, fifo)
+      proc = Process.spawn(argv)
+      fh = FileHandle.new(fifo, "rb")
+      File.delete(fifo) if File.lstat(fifo) != nil
+      st = {"proc" => proc, "fh" => fh, "fifo" => fifo, "next_idx" => idx, "last_idx" => -1, "last_frame" => nil}
+      @prog_pipes[key] = st
+    while st["next_idx"] <= idx
+      st["last_frame"] = read_pipe_exact(st["fh"], fbytes)
+      st["last_idx"] = st["next_idx"]
+      st["next_idx"] = st["next_idx"] + 1
+    if st["next_idx"] >= cnt
+      close_prog_pipe(st)
+      @prog_pipes.delete(key)
+    st["last_frame"]
+
   -> draw_frames(it, k, layer, lptr)
     p = it["params"]
     cnt = p["count"]
     idx = k + get(p, "in", 0)
     idx = 0 if idx < 0
     idx = cnt - 1 if idx > cnt - 1
-    path = ""
-    if it["kind"] == "program"
-      path = @proj.program_frame(p, idx)
+    pipe_mode = nil
+    pipe_mode = @proj.program_pipe_mode(p) if it["kind"] == "program"
+    if pipe_mode != nil
+      raw = stream_program_frame(p, idx, cnt, pipe_mode)
+      if pipe_mode == "rgba"
+        rs_str_rgba_to_canvas(raw, @w, @h, lptr, @lstride)
+      else
+        rs_str_rgb_to_canvas(raw, @w, @h, lptr, @lstride)
     else
-      path = asset_seq_path(p["src"], idx)
-    img = seq_image(path)
-    rs_fill_rows(lptr, @lstride, @w, 0, @h, 0, 0, 0) if img.width != @w || img.height != @h
-    layer.image(img, 0, 0, @w, @h, {fit: :fill, quality: :high})
-    layer.data_pointer
+      path = ""
+      if it["kind"] == "program"
+        path = @proj.program_frame(p, idx)
+      else
+        path = asset_seq_path(p["src"], idx)
+      img = seq_image(path)
+      rs_fill_rows(lptr, @lstride, @w, 0, @h, 0, 0, 0) if img.width != @w || img.height != @h
+      layer.image(img, 0, 0, @w, @h, {fit: :fill, quality: :high})
+      layer.data_pointer
     rp = p["replace"]
     if rp != nil
       m = plate_canvas(rp["match"])
@@ -816,16 +878,19 @@ use grade
       @proj.ep["burned_captions"].each ->(cue)
         if cue["start_ms"] <= ms && ms < cue["end_ms"]
           c = @caption_canvas
-          rs_rgb_to_canvas(@out, @w, @h, c.data_pointer, c.stride)
           b = cue["box"]
-          c.rect(b[0], b[1], b[2], b[3], fill: cue["background"])
-          cue["lines"].each ->(line)
-            c.save
-            c.translate(line["x"], line["y"])
-            line["paths"].each ->(path)
-              c.path(path, fill: cue["foreground"])
-            c.restore
-          rs_copy_rgb(c.data_pointer, c.stride, @w, @h, @out)
+          by0 = [to_f(b[1]).floor.to_i - 8, 0].max
+          by1 = [(to_f(b[1]) + to_f(b[3])).ceil.to_i + 8, @h].min
+          if by0 < by1
+            rs_rgb_rows_to_canvas(@out, @w, by0, by1, c.data_pointer, c.stride)
+            c.rect(b[0], b[1], b[2], b[3], fill: cue["background"])
+            cue["lines"].each ->(line)
+              c.save
+              c.translate(line["x"], line["y"])
+              line["paths"].each ->(path)
+                c.path(path, fill: cue["foreground"])
+              c.restore
+            rs_copy_rgb_rows(c.data_pointer, c.stride, @w, by0, by1, @out)
     @frames_rendered += 1
     @out
 
@@ -873,6 +938,51 @@ use grade
       raw_store_u8(dst, p + 1, src[i + 1])
       raw_store_u8(dst, p + 2, src[i + 2])
       raw_store_u8(dst, p + 3, 255)
+      x += 1
+    y += 1
+  0
+
+-> rs_rgb_rows_to_canvas(src, w, y0, y1, dst, stride) (u8[] i64 i64 i64 i64 i64) i64
+  y = y0
+  while y < y1
+    x = 0
+    while x < w
+      i = (y * w + x) * 3
+      p = y * stride + x * 4
+      raw_store_u8(dst, p, src[i])
+      raw_store_u8(dst, p + 1, src[i + 1])
+      raw_store_u8(dst, p + 2, src[i + 2])
+      raw_store_u8(dst, p + 3, 255)
+      x += 1
+    y += 1
+  0
+
+-> rs_str_rgb_to_canvas(src, w, h, dst, stride) (String i64 i64 i64 i64) i64
+  y = 0
+  while y < h
+    x = 0
+    while x < w
+      i = (y * w + x) * 3
+      p = y * stride + x * 4
+      raw_store_u8(dst, p, src.byte_at(i))
+      raw_store_u8(dst, p + 1, src.byte_at(i + 1))
+      raw_store_u8(dst, p + 2, src.byte_at(i + 2))
+      raw_store_u8(dst, p + 3, 255)
+      x += 1
+    y += 1
+  0
+
+-> rs_str_rgba_to_canvas(src, w, h, dst, stride) (String i64 i64 i64 i64) i64
+  y = 0
+  while y < h
+    x = 0
+    while x < w
+      i = (y * w + x) * 4
+      p = y * stride + x * 4
+      raw_store_u8(dst, p, src.byte_at(i))
+      raw_store_u8(dst, p + 1, src.byte_at(i + 1))
+      raw_store_u8(dst, p + 2, src.byte_at(i + 2))
+      raw_store_u8(dst, p + 3, src.byte_at(i + 3))
       x += 1
     y += 1
   0

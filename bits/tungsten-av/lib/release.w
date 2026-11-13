@@ -53,7 +53,7 @@ in Av
       entries.each ->(entry)
         src = entry["source"]
         raise "missing release source [src]" if !File.file?(src) || File.stat(src).size == 0
-        name = "%02d" % i + "-" + File.basename(entry["destination"])
+        name = Util.pad(i, 2) + "-" + File.basename(entry["destination"])
         path = candidate + "/" + name
         before = Util.sha(src)
         raise "source differs from its release manifest" if entry.has_key?("expected_sha256") && entry["expected_sha256"] != before
@@ -64,9 +64,15 @@ in Av
       i = 0
       entries.each ->(entry)
         item = files[i]
+        cand_path = candidate + "/" + item["name"]
         reports = candidate + "/" + item["name"] + ".checks"
         File.mkdir_p(reports)
-        result = @verify.call(candidate + "/" + item["name"], entry, reports)
+        if entry["verified_sha256"] != nil && entry["verified_result"] != nil && Util.sha(cand_path) == entry["verified_sha256"]
+          if entry["verified_checks_dir"] != nil && File.directory?(entry["verified_checks_dir"])
+            Util.copy_tree_files(entry["verified_checks_dir"], reports)
+          result = entry["verified_result"]
+        else
+          result = @verify.call(cand_path, entry, reports)
         raise "candidate verification failed: [entry["source"]]" if result == nil || !result["ok"]
         item["verification"] = result
         i += 1

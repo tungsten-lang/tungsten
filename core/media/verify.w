@@ -49,6 +49,130 @@
       h[p[0].to_sym] = p[1]
     h
 
+  -> .fit_code(mode)
+    m = mode == nil ? "stretch" : mode.to_s
+    return 1 if m == "contain" || m == "fit" || m == "pad"
+    return 2 if m == "cover" || m == "fill" || m == "crop"
+    raise "MediaVerify: unknown fit '[m]' (stretch, contain, cover)" if m != "stretch"
+    0
+
+  -> .map_colour_tag(tag, vui_code, present)
+    if tag != nil
+      s = tag.to_s
+      return "bt709" if s == "ITU_R_709_2"
+      return "bt2020" if s == "ITU_R_2020"
+      return "smpte170m" if s == "SMPTE_C" || s == "ITU_R_601_4"
+      return "bt470bg" if s == "EBU_3213"
+      return "smpte2084" if s == "SMPTE_ST_2084_PQ"
+      return "arib-std-b67" if s == "ITU_R_2100_HLG"
+      return s
+    if present == true && vui_code != nil
+      return "bt709" if vui_code == 1
+      return "unspecified" if vui_code == 2
+      return "vui_" + vui_code.to_s if vui_code > 0
+    "unknown"
+
+  # Stream descriptors with String keys (video/audio/data) from AVFoundation
+  # header facts (no sample scan, no external subprocess).
+  -> .probe_streams(path)
+    f = MediaVerify.facts(path, false, false)
+    streams = []
+    if f[:video_tracks] != nil && f[:video_tracks] > 0
+      fourcc = f[:codec] == nil ? "" : f[:codec].to_s
+      cname = fourcc
+      cname = "h264" if fourcc == "avc1" || fourcc == "avc3"
+      cname = "hevc" if fourcc == "hvc1" || fourcc == "hev1"
+      cname = "prores" if fourcc == "apcn" || fourcc == "apch" || fourcc == "apcs" || fourcc == "apco" || fourcc == "ap4h" || fourcc == "ap4x"
+      prim = MediaVerify.map_colour_tag(f[:primaries], f[:vui_primaries], f[:vui_present])
+      trc = MediaVerify.map_colour_tag(f[:transfer], f[:vui_transfer], f[:vui_present])
+      spc = MediaVerify.map_colour_tag(f[:matrix], f[:vui_matrix], f[:vui_present])
+      rng = "unknown"
+      if f[:full_range] == true || f[:vui_full_range] == 1
+        rng = "pc"
+      elsif f[:full_range] == false || f[:vui_full_range] == 0 || (prim == "bt709" && trc == "bt709" && spc == "bt709")
+        rng = "tv"
+      md = f[:min_frame_duration]
+      rate_str = md != nil && md[0] > 0 ? "[md[1]]/[md[0]]" : "0/0"
+      vd = f[:video_duration]
+      dur_s = vd != nil && vd[1] > 0 ? (vd[0].to_f / vd[1].to_f).to_s : nil
+      streams << {"index": streams.size, "codec_type": "video", "codec_name": cname, "codec_tag_string": fourcc,
+                  "width": f[:width], "height": f[:height], "r_frame_rate": rate_str, "avg_frame_rate": rate_str,
+                  "duration": dur_s, "bit_depth": f[:bit_depth], "color_primaries": prim, "color_transfer": trc,
+                  "color_space": spc, "color_range": rng, "chroma_location": f[:chroma_location],
+                  "disposition": {"attached_pic": 0}}
+    if f[:audio_tracks] != nil && f[:audio_tracks] > 0
+      ac = f[:audio_codec_name] != nil ? f[:audio_codec_name].to_s : (f[:audio_codec] == nil ? "unknown" : f[:audio_codec].to_s.strip)
+      ad = f[:audio_duration]
+      adur_s = ad != nil && ad[1] > 0 ? (ad[0].to_f / ad[1].to_f).to_s : nil
+      sr = f[:audio_rate]
+      streams << {"index": streams.size, "codec_type": "audio", "codec_name": ac,
+                  "codec_tag_string": f[:audio_codec], "sample_rate": sr == nil ? "0" : sr.to_s,
+                  "channels": f[:audio_channels], "bits_per_sample": f[:audio_bits], "duration": adur_s,
+                  "disposition": {"attached_pic": 0}}
+    if f[:timecode_tracks] != nil && f[:timecode_tracks] > 0
+      streams << {"index": streams.size, "codec_type": "data", "codec_tag_string": "tmcd",
+                  "disposition": {"attached_pic": 0}}
+    {"streams": streams, "facts": f}
+
+  # Single-pass BS.1770-4 integrated loudness, 4x polyphase true peak,
+  # clipping, silence, and channel energy over the first audio track.
+  -> .audio_qc(path, silence_db = -60)
+    thresh = (~10.0) ** (silence_db.to_f / ~20.0)
+    pairs = ccall("w_media_audio_qc", path, thresh)
+    h = {}
+    pairs.each ->(p)
+      h[p[0].to_sym] = p[1]
+    h
+
+  # Decode, resample, channel-map, and pad/trim the first audio track of src
+  # to a 24-bit PCM RIFF/RF64 WAV at dst.
+  -> .prepare_audio(src, dst, opts = {})
+    sr = MediaVerify.opt(opts, :sample_rate, 48000)
+    ch = MediaVerify.opt(opts, :channels, 2)
+    samples = MediaVerify.opt(opts, :samples, 0)
+    r = ccall("w_media_audio_prepare", src, dst, [sr, ch, samples == nil ? 0 : samples])
+    {path: dst, frames: r[0], sample_rate: r[1], channels: r[2]}
+
+  # Hardware decode luma anomaly scan (~320px width) for black and frozen runs.
+  -> .anomalies(src, opts = {})
+    black = MediaVerify.opt(opts, :black_min, ~1.0)
+    freeze = MediaVerify.opt(opts, :freeze_min, ~3.0)
+    noise = MediaVerify.opt(opts, :noise, ~0.001)
+    pix_th = MediaVerify.opt(opts, :pix_th, ~0.10)
+    rate = MediaVerify.opt(opts, :rate, nil)
+    rnum = rate == nil ? 0 : rate[0]
+    rden = rate == nil ? 0 : rate[1]
+    r = ccall("w_media_anomalies", src, [black, freeze, noise, pix_th, rnum, rden])
+    {frames: r[0], events: r[1]}
+
+  # Windowed SSIM, 5-scale MS-SSIM, and PSNR-Y on luma Y' in memory.
+  -> .quality(ref_src, cand_src, opts = {})
+    ref_start = MediaVerify.opt(opts, :ref_start, 0)
+    cand_start = MediaVerify.opt(opts, :cand_start, 0)
+    frames = MediaVerify.opt(opts, :frames, 0)
+    fit = MediaVerify.fit_code(MediaVerify.opt(opts, :fit, "stretch"))
+    rate = MediaVerify.opt(opts, :rate, nil)
+    rnum = rate == nil ? 0 : rate[0]
+    rden = rate == nil ? 0 : rate[1]
+    pairs = ccall("w_media_quality", ref_src, cand_src, [ref_start, cand_start, frames == nil ? 0 : frames, fit, rnum, rden])
+    h = {}
+    pairs.each ->(p)
+      h[p[0].to_sym] = p[1]
+    h
+
+  # Extract one or more frames (RGB24 for depth 8, RGB48LE for depth 16) in a
+  # single sequential hardware decode pass (with automatic keyframe seeking on
+  # large frame gaps).
+  -> .extract_frames(src, frames, opts = {})
+    w = MediaVerify.opt(opts, :width, 0)
+    h = MediaVerify.opt(opts, :height, 0)
+    fit = MediaVerify.fit_code(MediaVerify.opt(opts, :fit, "stretch"))
+    depth = MediaVerify.opt(opts, :depth, 8)
+    rate = MediaVerify.opt(opts, :rate, nil)
+    rnum = rate == nil ? 0 : rate[0]
+    rden = rate == nil ? 0 : rate[1]
+    ccall("w_media_extract_frames", src, frames, [w == nil ? 0 : w, h == nil ? 0 : h, fit, depth, rnum, rden])
+
   # 75% colour bars of sync_test, bottom third, left to right.
   -> .bars
     [[191, 191, 191], [191, 191, 0], [0, 191, 191], [0, 191, 0], [191, 0, 191], [191, 0, 0], [0, 0, 191], [0, 0, 0]]

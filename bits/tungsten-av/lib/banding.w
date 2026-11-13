@@ -1,7 +1,7 @@
 in Av
 
 + Banding
-  -> .blur(input, width, height) (f64[] i64 i64) f64[]
+  -> .gaussian_kernel () f64[]
     kernel = f64[13]
     sum = ~0.0
     k = -6 ## i64
@@ -13,101 +13,294 @@ in Av
     while k < 13
       kernel[k] /= sum
       k += 1
-    temporary = f64[width * height]
-    result = f64[width * height]
+    kernel
+
+  -> .blur_into(input, temporary, result, kernel, width, height) (f64[] f64[] f64[] f64[] i64 i64) f64[]
+    k0 = kernel[0]
+    k1 = kernel[1]
+    k2 = kernel[2]
+    k3 = kernel[3]
+    k4 = kernel[4]
+    k5 = kernel[5]
+    k6 = kernel[6]
     y = 0 ## i64
     while y < height
+      row = y * width
       x = 0 ## i64
       while x < width
-        v = ~0.0
-        k = -6
-        while k <= 6
-          at = x + k
-          at = 0 if at < 0
-          at = width - 1 if at >= width
-          v += input[y * width + at] * kernel[k + 6]
-          k += 1
-        temporary[y * width + x] = v
+        if x >= 6 && x < width - 6
+          p = row + x
+          v = input[p] * k6 + (input[p - 1] + input[p + 1]) * k5 + (input[p - 2] + input[p + 2]) * k4 + (input[p - 3] + input[p + 3]) * k3 + (input[p - 4] + input[p + 4]) * k2 + (input[p - 5] + input[p + 5]) * k1 + (input[p - 6] + input[p + 6]) * k0
+          temporary[p] = v
+        else
+          v = ~0.0
+          k = -6 ## i64
+          while k <= 6
+            at = x + k
+            at = 0 if at < 0
+            at = width - 1 if at >= width
+            v += input[row + at] * kernel[k + 6]
+            k += 1
+          temporary[row + x] = v
         x += 1
       y += 1
     y = 0
     while y < height
-      x = 0
-      while x < width
-        v = ~0.0
-        k = -6
-        while k <= 6
-          at = y + k
-          at = 0 if at < 0
-          at = height - 1 if at >= height
-          v += temporary[at * width + x] * kernel[k + 6]
-          k += 1
-        result[y * width + x] = v
-        x += 1
+      row = y * width
+      if y >= 6 && y < height - 6
+        w1 = width
+        w2 = width * 2
+        w3 = width * 3
+        w4 = width * 4
+        w5 = width * 5
+        w6 = width * 6
+        x = 0 ## i64
+        while x < width
+          p = row + x
+          result[p] = temporary[p] * k6 + (temporary[p - w1] + temporary[p + w1]) * k5 + (temporary[p - w2] + temporary[p + w2]) * k4 + (temporary[p - w3] + temporary[p + w3]) * k3 + (temporary[p - w4] + temporary[p + w4]) * k2 + (temporary[p - w5] + temporary[p + w5]) * k1 + (temporary[p - w6] + temporary[p + w6]) * k0
+          x += 1
+      else
+        x = 0 ## i64
+        while x < width
+          v = ~0.0
+          k = -6 ## i64
+          while k <= 6
+            at = y + k
+            at = 0 if at < 0
+            at = height - 1 if at >= height
+            v += temporary[at * width + x] * kernel[k + 6]
+            k += 1
+          result[row + x] = v
+          x += 1
       y += 1
     result
 
-  -> .residual(bytes, width, height, depth, gradient) (u8[] i64 i64 i64 Hash) f64[]
+  -> .blur(input, width, height) (f64[] i64 i64) f64[]
+    n = width * height
+    blur_into(input, f64[n], f64[n], gaussian_kernel(), width, height)
+
+  -> .ideal_luma(width, height, gradient) (i64 i64 Hash) f64[]
     cx = gradient["cx"].to_f
     cy = gradient["cy"].to_f
     radius = gradient["r"].to_f
     mid = gradient["mid"].to_f
     raise "gradient requires positive radius and mid in 0..1" if radius <= 0 || mid <= 0 || mid >= 1
     colours = Util.get(gradient, "colors", [[19, 27, 44], [9, 13, 21], [4, 6, 10]])
-    lumas = f64[3]
+    l0 = ~0.0
+    l1 = ~0.0
+    l2 = ~0.0
     i = 0 ## i64
     while i < 3
       c = colours[i]
-      lumas[i] = ~16.0 + ~219.0 * (~0.2126 * c[0] + ~0.7152 * c[1] + ~0.0722 * c[2]) / ~255.0
+      lv = ~16.0 + ~219.0 * (~0.2126 * c[0] + ~0.7152 * c[1] + ~0.0722 * c[2]) / ~255.0
+      l0 = lv if i == 0
+      l1 = lv if i == 1
+      l2 = lv if i == 2
       i += 1
-    raw = f64[width * height]
+    ideal = f64[width * height]
+    cx_px = cx * width
+    cy_px = cy * height
+    inv_rx = ~1.0 / (radius * width)
+    inv_ry = ~1.0 / (radius * height)
+    slope0 = (l1 - l0) / mid
+    slope1 = (l2 - l1) / (~1.0 - mid)
     y = 0 ## i64
     while y < height
+      dy = (y + ~0.5 - cy_px) * inv_ry
+      dy2 = dy * dy
+      row = y * width
       x = 0 ## i64
       while x < width
-        t = Math.hypot((x + ~0.5 - cx * width) / (radius * width), (y + ~0.5 - cy * height) / (radius * height))
+        dx = (x + ~0.5 - cx_px) * inv_rx
+        t = Math.sqrt(dx * dx + dy2)
         t = ~1.0 if t > ~1.0
-        ideal = t <= mid ? lumas[0] + (lumas[1] - lumas[0]) * t / mid : lumas[1] + (lumas[2] - lumas[1]) * (t - mid) / (~1.0 - mid)
-        raw[y * width + x] = Pixels.luma(bytes, y * width + x, depth) - ideal
+        ideal[row + x] = t <= mid ? l0 + slope0 * t : l1 + slope1 * (t - mid)
         x += 1
       y += 1
-    blur(raw, width, height)
+    ideal
+
+  -> .residual_with_ideal(bytes, ideal, raw_buf, tmp_buf, out_buf, kernel, width, height, depth) (u8[] f64[] f64[] f64[] f64[] f64[] i64 i64 i64) f64[]
+    n = width * height
+    if depth == 16
+      scale16 = ~219.0 / (~255.0 * ~257.0)
+      i = 0 ## i64
+      while i < n
+        p = i * 6
+        r = bytes[p] + 256 * bytes[p + 1]
+        g = bytes[p + 2] + 256 * bytes[p + 3]
+        b = bytes[p + 4] + 256 * bytes[p + 5]
+        raw_buf[i] = (~16.0 + (~0.2126 * r + ~0.7152 * g + ~0.0722 * b) * scale16) - ideal[i]
+        i += 1
+    else
+      scale8 = ~219.0 / ~255.0
+      i = 0 ## i64
+      while i < n
+        p = i * 3
+        raw_buf[i] = (~16.0 + (~0.2126 * bytes[p] + ~0.7152 * bytes[p + 1] + ~0.0722 * bytes[p + 2]) * scale8) - ideal[i]
+        i += 1
+    blur_into(raw_buf, tmp_buf, out_buf, kernel, width, height)
+
+  -> .residual(bytes, width, height, depth, gradient) (u8[] i64 i64 i64 Hash) f64[]
+    n = width * height
+    ideal = ideal_luma(width, height, gradient)
+    residual_with_ideal(bytes, ideal, f64[n], f64[n], f64[n], gaussian_kernel(), width, height, depth)
 
   -> .mask(source, background, width, height, excludes, margin = 8, border = 20) (u8[] u8[] i64 i64 Array i64 i64) u8[]
-    blocked = i64[(width + 1) * (height + 1)]
+    n = width * height
+    diff = u8[n]
+    i = 0 ## i64
+    while i < n
+      p = i * 3
+      diff[i] = 1 if source[p] != background[p] || source[p + 1] != background[p + 1] || source[p + 2] != background[p + 2]
+      i += 1
+    ri = 0
+    while ri < excludes.size
+      r = excludes[ri]
+      rx0 = r[0].to_i ## i64
+      ry0 = r[1].to_i ## i64
+      rx1 = rx0 + r[2].to_i
+      ry1 = ry0 + r[3].to_i
+      rx0 = 0 if rx0 < 0
+      ry0 = 0 if ry0 < 0
+      rx1 = width if rx1 > width
+      ry1 = height if ry1 > height
+      ry = ry0
+      while ry < ry1
+        row = ry * width
+        rx = rx0
+        while rx < rx1
+          diff[row + rx] = 1
+          rx += 1
+        ry += 1
+      ri += 1
+    stride = width + 1
+    blocked = i32[stride * (height + 1)]
     y = 0 ## i64
     while y < height
-      row = 0 ## i64
+      row_sum = 0 ## i64
+      src_row = y * width
+      prev_row = y * stride
+      cur_row = (y + 1) * stride
       x = 0 ## i64
       while x < width
-        p = (y * width + x) * 3
-        different = source[p] != background[p] || source[p + 1] != background[p + 1] || source[p + 2] != background[p + 2]
-        excludes.each ->(r)
-          different = true if x >= r[0] && y >= r[1] && x < r[0] + r[2] && y < r[1] + r[3]
-        row += 1 if different
-        blocked[(y + 1) * (width + 1) + x + 1] = blocked[y * (width + 1) + x + 1] + row
+        row_sum += diff[src_row + x]
+        blocked[cur_row + x + 1] = blocked[prev_row + x + 1] + row_sum
         x += 1
       y += 1
-    result = u8[width * height]
+    result = u8[n]
     y = border
     while y < height - border
+      y0 = y - margin
+      y1 = y + margin + 1
+      y0 = 0 if y0 < 0
+      y1 = height if y1 > height
+      r0 = y0 * stride
+      r1 = y1 * stride
+      out_row = y * width
       x = border
       while x < width - border
         x0 = x - margin
         x1 = x + margin + 1
-        y0 = y - margin
-        y1 = y + margin + 1
         x0 = 0 if x0 < 0
-        y0 = 0 if y0 < 0
         x1 = width if x1 > width
-        y1 = height if y1 > height
-        count = blocked[y1 * (width + 1) + x1] - blocked[y0 * (width + 1) + x1] - blocked[y1 * (width + 1) + x0] + blocked[y0 * (width + 1) + x0]
-        result[y * width + x] = 1 if count == 0
+        count = blocked[r1 + x1] - blocked[r0 + x1] - blocked[r1 + x0] + blocked[r0 + x0]
+        result[out_row + x] = 1 if count == 0
         x += 1
       y += 1
     result
 
-  -> .metrics(error, mask, width, height, temporal = nil) (f64[] u8[] i64 i64 Object)
+  -> .select_kth(vals, n, k) (f64[] i64 i64) f64
+    lo = 0 ## i64
+    hi = n - 1
+    while lo < hi
+      mid = (lo + hi) >> 1
+      a = vals[lo]
+      b = vals[mid]
+      c = vals[hi]
+      pivot = b
+      if (a <= b && b <= c) || (c <= b && b <= a)
+        pivot = b
+      elsif (b <= a && a <= c) || (c <= a && a <= b)
+        pivot = a
+      else
+        pivot = c
+      lt = lo
+      idx = lo
+      gt = hi
+      while idx <= gt
+        v = vals[idx]
+        if v < pivot
+          tmp = vals[lt]
+          vals[lt] = v
+          vals[idx] = tmp
+          lt += 1
+          idx += 1
+        elsif v > pivot
+          tmp = vals[gt]
+          vals[gt] = v
+          vals[idx] = tmp
+          gt -= 1
+        else
+          idx += 1
+      if k < lt
+        hi = lt - 1
+      elsif k > gt
+        lo = gt + 1
+      else
+        return pivot
+    vals[lo]
+
+  -> .p99_exact(vals, count) (f64[] i64) f64
+    hist = i32[65536]
+    i = 0 ## i64
+    while i < count
+      b = (vals[i] * ~2048.0).to_i
+      b = 65535 if b > 65535
+      hist[b] += 1
+      i += 1
+    q = ~0.99 * (count - 1)
+    lo_rank = q.to_i ## i64
+    hi_rank = lo_rank + 1 < count ? lo_rank + 1 : lo_rank
+    prefix = 0 ## i64
+    b_lo = 0 ## i64
+    while b_lo < 65536
+      c = hist[b_lo]
+      break if prefix + c > lo_rank
+      prefix += c
+      b_lo += 1
+    bucket_n = hist[b_lo] ## i64
+    bucket = f64[bucket_n]
+    bi = 0 ## i64
+    next_min = ~1e300
+    need_next = hi_rank >= prefix + bucket_n
+    i = 0
+    while i < count
+      v = vals[i]
+      b = (v * ~2048.0).to_i
+      b = 65535 if b > 65535
+      if b == b_lo
+        bucket[bi] = v
+        bi += 1
+      elsif need_next && b > b_lo && v < next_min
+        next_min = v
+      i += 1
+    local_lo = lo_rank - prefix
+    v_lo = select_kth(bucket, bi, local_lo)
+    v_hi = v_lo
+    if hi_rank != lo_rank
+      if need_next
+        v_hi = next_min
+      else
+        j = local_lo + 1
+        m = bucket[j]
+        j += 1
+        while j < bi
+          m = bucket[j] if bucket[j] < m
+          j += 1
+        v_hi = m
+    v_lo + (v_hi - v_lo) * (q - lo_rank)
+
+  -> .metrics_into(error, mask, vals_buf, width, height) (f64[] u8[] f64[] i64 i64)
     total = ~0.0
     squared = ~0.0
     count = 0 ## i64
@@ -115,41 +308,47 @@ in Av
     interiors = ~0.0
     nb = 0 ## i64
     ni = 0 ## i64
-    absolute = []
-    p = 0 ## i64
-    while p < width * height
-      if mask[p] != 0
-        e = error[p]
-        total += e
-        squared += e * e
-        count += 1
-        absolute.push(Math.abs(e))
-        if p % width > 0 && mask[p - 1] != 0
-          d = Math.abs(e - error[p - 1])
-          if p % width % 16 == 0
-            boundaries += d
-            nb += 1
-          else
-            interiors += d
-            ni += 1
-        if p >= width && mask[p - width] != 0
-          d = Math.abs(e - error[p - width])
-          if (p / width) % 16 == 0
-            boundaries += d
-            nb += 1
-          else
-            interiors += d
-            ni += 1
-      p += 1
+    y = 0 ## i64
+    while y < height
+      row = y * width
+      y_boundary = y > 0 && (y & 15) == 0
+      x = 0 ## i64
+      while x < width
+        p = row + x
+        if mask[p] != 0
+          e = error[p]
+          total += e
+          squared += e * e
+          vals_buf[count] = e < ~0.0 ? ~0.0 - e : e
+          count += 1
+          if x > 0 && mask[p - 1] != 0
+            d = e - error[p - 1]
+            d = ~0.0 - d if d < ~0.0
+            if (x & 15) == 0
+              boundaries += d
+              nb += 1
+            else
+              interiors += d
+              ni += 1
+          if y > 0 && mask[p - width] != 0
+            d = e - error[p - width]
+            d = ~0.0 - d if d < ~0.0
+            if y_boundary
+              boundaries += d
+              nb += 1
+            else
+              interiors += d
+              ni += 1
+        x += 1
+      y += 1
     raise "less than 1% usable background after masks" if count < width * height / 100
     raise "insufficient block boundaries after masks" if nb == 0 || ni == 0
-    sorted = absolute.sort
-    q = ~0.99 * (count - 1)
-    lo = q.to_i
-    hi = lo + 1 < count ? lo + 1 : lo
-    p99 = sorted[lo] + (sorted[hi] - sorted[lo]) * (q - lo)
+    p99 = p99_exact(vals_buf, count)
     mean = total / count
     {"bg_frac": count / (width * height + ~0.0), "rms": Math.sqrt(squared / count), "mean_err": mean, "rms_detrended": Math.sqrt(Util.max(~0.0, squared / count - mean * mean)), "p99": p99, "blk16": (boundaries / nb) / Util.max(interiors / ni, ~1e-9)}
+
+  -> .metrics(error, mask, width, height, temporal = nil) (f64[] u8[] i64 i64 Object)
+    metrics_into(error, mask, f64[width * height], width, height)
 
   -> .gradient(root, short)
     path = root + (short ? "/short/short.w" : "/anim/core.w")
@@ -206,7 +405,7 @@ in Av
         raise "banding requires adjacent source frames" if i < 0
         pattern = Util.get(asset, "pattern", "%05d.png")
         first = Util.get(asset, "first", 0)
-        samples.push({"frame": shot["f0"] + i, "source": directory + "/" + (pattern % (i + offset + first)), "next_source": directory + "/" + (pattern % (i + offset + first + 1))})
+        samples.push({"frame": shot["f0"] + i, "source": directory + "/" + Util.format_frame(pattern, i + offset + first), "next_source": directory + "/" + Util.format_frame(pattern, i + offset + first + 1)})
     if short && samples.size == 0
       # Program Shorts author exact beat start/duration in their data document.
       beats = JSON.parse(File.read(root + "/short/timeline.json"))["beats"]
@@ -222,7 +421,7 @@ in Av
           frame = origin + i
           if i >= 0 && frame >= program["f0"] && frame + 1 < program["f1"]
             directory = root + "/short/frames/" + beat["id"]
-            samples.push({"frame": frame, "source": directory + "/" + ("%05d.png" % i), "next_source": directory + "/" + ("%05d.png" % (i + 1))})
+            samples.push({"frame": frame, "source": directory + "/" + Util.format_frame("%05d.png", i), "next_source": directory + "/" + Util.format_frame("%05d.png", i + 1)})
     samples = samples.map ->(sample) sample.merge({"frame": sample["frame"] - plan["start"]})
     samples = samples.select ->(sample) sample["frame"] >= 0 && sample["frame"] + 1 < plan["frames"]
     spec["samples"] = samples
@@ -250,42 +449,74 @@ in Av
     background = project.path(spec["background"])
     references = {}
     references[background] = Util.sha(background)
+    still_cache = {}
     bg = Pixels.frame(media, background, -1, width, height, rate)
+    still_cache[background] = bg
     gradient = spec["gradient"]
     raise "banding requires an analytical gradient" if gradient == nil
+    ideal = ideal_luma(width, height, gradient)
+    kernel = gaussian_kernel()
+    npix = width * height
+    raw_buf = f64[npix]
+    tmp_buf = f64[npix]
+    err_buf = f64[npix]
+    src_err_buf = f64[npix]
+    next_err_buf = f64[npix]
+    delta_buf = f64[npix]
+    valid_buf = u8[npix]
+    vals_buf = f64[npix]
     rectangles = Util.get(spec, "exclude", []).dup
     Util.get(spec, "exclude_normalized", []).each ->(r)
       rectangles.push([Math.round(r[0] * width).to_i, Math.round(r[1] * height).to_i, Math.round(r[2] * width).to_i, Math.round(r[3] * height).to_i])
+    needed_frames = []
+    samples.each ->(sample)
+      f = sample["frame"]
+      Schema.integer(f, "banding frame", 0, plan["frames"] - 1)
+      needed_frames.push(f)
+      if sample["next_source"]
+        Schema.integer(f + 1, "banding next frame", 0, plan["frames"] - 1)
+        needed_frames.push(f + 1)
+    unique_frames = Util.unique(needed_frames)
+    extracted = Pixels.frames(media, path, unique_frames, width, height, rate, "stretch", 16)
+    decoded_by_frame = {}
+    fi = 0
+    while fi < unique_frames.size
+      decoded_by_frame[unique_frames[fi]] = extracted[fi]
+      fi += 1
     rows = []
     visuals = directory + "/banding"
     File.mkdir_p(visuals)
     sheet = Canvas.new(960, 264 * samples.size)
     sheet.clear("#171b22")
     samples.each ->(sample)
-      Schema.integer(sample["frame"], "banding frame", 0, plan["frames"] - 1)
       source = project.path(sample["source"])
-      references[source] = Util.sha(source)
-      src = Pixels.frame(media, source, -1, width, height, rate)
+      references[source] = Util.sha(source) if !references.has_key?(source)
+      if !still_cache.has_key?(source)
+        still_cache[source] = Pixels.frame(media, source, -1, width, height, rate)
+      src = still_cache[source]
       exclusions = rectangles.dup
       Util.get(sample, "exclude", []).each ->(r) exclusions.push(r)
       exclusions.each ->(r)
         raise "invalid banding exclusion rectangle" if type(r) != "Array" || r.size != 4 || r[2] <= 0 || r[3] <= 0
       mask = Banding.mask(src, bg, width, height, exclusions)
-      decoded = Pixels.frame(media, path, sample["frame"], width, height, rate, "stretch", 16)
-      error = residual(decoded, width, height, 16, gradient)
-      row = metrics(error, mask, width, height)
-      original = metrics(residual(src, width, height, 8, gradient), mask, width, height)
+      decoded = decoded_by_frame[sample["frame"]]
+      error = residual_with_ideal(decoded, ideal, raw_buf, tmp_buf, err_buf, kernel, width, height, 16)
+      row = metrics_into(error, mask, vals_buf, width, height)
+      src_err = residual_with_ideal(src, ideal, raw_buf, tmp_buf, src_err_buf, kernel, width, height, 8)
+      original = metrics_into(src_err, mask, vals_buf, width, height)
       row["rms_8bit_source"] = original["rms"]
       row["rms_detrended_8bit_source"] = original["rms_detrended"]
       if sample["next_source"]
         next_source = project.path(sample["next_source"])
-        references[next_source] = Util.sha(next_source)
-        next_src = Pixels.frame(media, next_source, -1, width, height, rate)
+        references[next_source] = Util.sha(next_source) if !references.has_key?(next_source)
+        if !still_cache.has_key?(next_source)
+          still_cache[next_source] = Pixels.frame(media, next_source, -1, width, height, rate)
+        next_src = still_cache[next_source]
         next_mask = Banding.mask(next_src, bg, width, height, exclusions)
-        next_decoded = Pixels.frame(media, path, sample["frame"] + 1, width, height, rate, "stretch", 16)
-        next_error = residual(next_decoded, width, height, 16, gradient)
-        temporal = temporal_delta(error, next_error, mask, next_mask, width * height)
-        temporal_metrics = metrics(temporal[0], temporal[1], width, height)
+        next_decoded = decoded_by_frame[sample["frame"] + 1]
+        next_error = residual_with_ideal(next_decoded, ideal, raw_buf, tmp_buf, next_err_buf, kernel, width, height, 16)
+        temporal_delta_into(error, next_error, mask, next_mask, delta_buf, valid_buf, npix)
+        temporal_metrics = metrics_into(delta_buf, valid_buf, vals_buf, width, height)
         row["temporal_rms"] = temporal_metrics["rms"]
         row["temporal_p99"] = temporal_metrics["p99"]
       diagnostic = visuals + "/frame-" + sample["frame"].to_s + "-" + rows.size.to_s + ".png"
@@ -314,55 +545,86 @@ in Av
     Util.json(directory + "/banding.json", result)
     result
 
-  -> .temporal_delta(first, second, mask, next_mask, n) (f64[] f64[] u8[] u8[] i64)
-    delta = f64[n]
-    valid = u8[n]
+  -> .temporal_delta_into(first, second, mask, next_mask, delta, valid, n) (f64[] f64[] u8[] u8[] f64[] u8[] i64) i64
     i = 0 ## i64
     while i < n
       delta[i] = second[i] - first[i]
       valid[i] = mask[i] & next_mask[i]
       i += 1
+    n
+
+  -> .temporal_delta(first, second, mask, next_mask, n) (f64[] f64[] u8[] u8[] i64)
+    delta = f64[n]
+    valid = u8[n]
+    temporal_delta_into(first, second, mask, next_mask, delta, valid, n)
     [delta, valid]
 
+  -> .paint_panels(tile_ptr, stride, source, decoded, error, mask, width, height, rx, ry, rw, rh) (i64 i64 u8[] u8[] f64[] u8[] i64 i64 i64 i64 i64 i64) i64
+    py = 0 ## i64
+    while py < 240
+      dst_row = (24 + py) * stride
+      px = 0 ## i64
+      while px < 320
+        d0 = dst_row + px * 4
+        d1 = dst_row + (320 + px) * 4
+        d2 = dst_row + (640 + px) * 4
+        raw_store_u8(tile_ptr, d0, 0)
+        raw_store_u8(tile_ptr, d0 + 1, 0)
+        raw_store_u8(tile_ptr, d0 + 2, 0)
+        raw_store_u8(tile_ptr, d0 + 3, 255)
+        raw_store_u8(tile_ptr, d1, 0)
+        raw_store_u8(tile_ptr, d1 + 1, 0)
+        raw_store_u8(tile_ptr, d1 + 2, 0)
+        raw_store_u8(tile_ptr, d1 + 3, 255)
+        raw_store_u8(tile_ptr, d2, 0)
+        raw_store_u8(tile_ptr, d2 + 1, 0)
+        raw_store_u8(tile_ptr, d2 + 2, 0)
+        raw_store_u8(tile_ptr, d2 + 3, 255)
+        px += 1
+      py += 1
+    dy = 0 ## i64
+    while dy < rh
+      sy = (dy * 2 + 1) * height / (rh * 2)
+      sy = height - 1 if sy >= height
+      src_row = sy * width
+      dst_row = (24 + ry + dy) * stride
+      dx = 0 ## i64
+      while dx < rw
+        sx = (dx * 2 + 1) * width / (rw * 2)
+        sx = width - 1 if sx >= width
+        p = src_row + sx
+        p3 = p * 3
+        p6 = p * 6
+        heat = mask[p] == 0 ? 128 : Math.round(~128.0 + ~7.0 * error[p]).to_i
+        heat = 0 if heat < 0
+        heat = 255 if heat > 255
+        o0 = dst_row + (rx + dx) * 4
+        o1 = dst_row + (320 + rx + dx) * 4
+        o2 = dst_row + (640 + rx + dx) * 4
+        raw_store_u8(tile_ptr, o0, source[p3])
+        raw_store_u8(tile_ptr, o0 + 1, source[p3 + 1])
+        raw_store_u8(tile_ptr, o0 + 2, source[p3 + 2])
+        raw_store_u8(tile_ptr, o0 + 3, 255)
+        raw_store_u8(tile_ptr, o1, (decoded[p6] + 256 * decoded[p6 + 1]) / 257)
+        raw_store_u8(tile_ptr, o1 + 1, (decoded[p6 + 2] + 256 * decoded[p6 + 3]) / 257)
+        raw_store_u8(tile_ptr, o1 + 2, (decoded[p6 + 4] + 256 * decoded[p6 + 5]) / 257)
+        raw_store_u8(tile_ptr, o1 + 3, 255)
+        raw_store_u8(tile_ptr, o2, heat)
+        raw_store_u8(tile_ptr, o2 + 1, heat)
+        raw_store_u8(tile_ptr, o2 + 2, heat)
+        raw_store_u8(tile_ptr, o2 + 3, 255)
+        dx += 1
+      dy += 1
+    rw * rh
+
   -> .diagnostic(source, decoded, error, mask, width, height, frame) (u8[] u8[] f64[] u8[] i64 i64 i64)
-    src_canvas = Canvas.new(width, height)
-    dec_canvas = Canvas.new(width, height)
-    heat_canvas = Canvas.new(width, height)
-    src_ptr = src_canvas.data_pointer ## i64
-    dec_ptr = dec_canvas.data_pointer ## i64
-    heat_ptr = heat_canvas.data_pointer ## i64
-    stride = src_canvas.stride ## i64
-    y = 0 ## i64
-    while y < height
-      x = 0 ## i64
-      while x < width
-        p = y * width + x
-        dest = y * stride + x * 4
-        value = mask[p] == 0 ? 128 : Math.round(~128.0 + ~7.0 * error[p]).to_i
-        value = 0 if value < 0
-        value = 255 if value > 255
-        c = 0 ## i64
-        while c < 3
-          raw_store_u8(src_ptr, dest + c, source[3 * p + c])
-          raw_store_u8(dec_ptr, dest + c, (decoded[6 * p + 2 * c] + 256 * decoded[6 * p + 2 * c + 1]) / 257)
-          raw_store_u8(heat_ptr, dest + c, value)
-          c += 1
-        raw_store_u8(src_ptr, dest + 3, 255)
-        raw_store_u8(dec_ptr, dest + 3, 255)
-        raw_store_u8(heat_ptr, dest + 3, 255)
-        x += 1
-      y += 1
     tile = Canvas.new(960, 264)
     tile.clear("#171b22")
-    begin
-      i = 0
-      [src_canvas, dec_canvas, heat_canvas].each ->(canvas)
-        tile.image(canvas, i * 320, 24, 320, 240, fit: "contain")
-        label = ["Source", "Decoded", "Residual x7"][i]
-        tile.text(i * 320 + 4, 17, frame.to_s + ": " + label, size: 12, fill: "#ffffff")
-        i += 1
-    ensure
-      src_canvas.close
-      dec_canvas.close
-      heat_canvas.close
+    rect = Scaler.fit(width, height, 320, 240, "contain")[:rect]
+    paint_panels(tile.data_pointer, tile.stride, source, decoded, error, mask, width, height, rect[0], rect[1], rect[2], rect[3])
+    labels = ["Source", "Decoded", "Residual x7"]
+    i = 0
+    while i < 3
+      tile.text(i * 320 + 4, 17, frame.to_s + ": " + labels[i], size: 12, fill: "#ffffff")
+      i += 1
     tile

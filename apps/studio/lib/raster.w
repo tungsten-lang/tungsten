@@ -729,6 +729,66 @@
     y += 1
   0
 
+-> rs_copy_rgb_rows(src, stride, w, y0, y1, out) (i64 i64 i64 i64 i64 u8[]) i64
+  y = y0
+  while y < y1
+    row = y * stride
+    o = y * w * 3
+    x = 0
+    while x < w
+      p = row + x * 4
+      out[o] = raw_load_u8(src, p)
+      out[o + 1] = raw_load_u8(src, p + 1)
+      out[o + 2] = raw_load_u8(src, p + 2)
+      o += 3
+      x += 1
+    y += 1
+  0
+
+-> rs_rgb_to_yuv420p(rgb, w, h, buf) (u8[] i64 i64 u8[]) i64
+  u_off = w * h
+  cw = w / 2
+  ch = h / 2
+  v_off = u_off + cw * ch
+  y = 0
+  while y < h
+    x = 0
+    while x < w
+      i = (y * w + x) * 3
+      r = rgb[i] ## i64
+      g = rgb[i + 1] ## i64
+      b = rgb[i + 2] ## i64
+      yv = ((47 * r + 157 * g + 16 * b + 128) >> 8) + 16
+      yv = 16 if yv < 16
+      yv = 235 if yv > 235
+      buf[y * w + x] = yv
+      x += 1
+    y += 1
+  cy = 0
+  while cy < ch
+    cx = 0
+    while cx < cw
+      y0 = cy * 2
+      x0 = cx * 2
+      i00 = (y0 * w + x0) * 3
+      i01 = i00 + 3
+      i10 = ((y0 + 1) * w + x0) * 3
+      i11 = i10 + 3
+      r = ((rgb[i00] ## i64) + (rgb[i01] ## i64) + (rgb[i10] ## i64) + (rgb[i11] ## i64) + 2) >> 2
+      g = ((rgb[i00 + 1] ## i64) + (rgb[i01 + 1] ## i64) + (rgb[i10 + 1] ## i64) + (rgb[i11 + 1] ## i64) + 2) >> 2
+      b = ((rgb[i00 + 2] ## i64) + (rgb[i01 + 2] ## i64) + (rgb[i10 + 2] ## i64) + (rgb[i11 + 2] ## i64) + 2) >> 2
+      uv = (((0 - 26) * r - 87 * g + 112 * b + 128) >> 8) + 128
+      vv = ((112 * r - 102 * g - 10 * b + 128) >> 8) + 128
+      uv = 16 if uv < 16
+      uv = 240 if uv > 240
+      vv = 16 if vv < 16
+      vv = 240 if vv > 240
+      buf[u_off + cy * cw + cx] = uv
+      buf[v_off + cy * cw + cx] = vv
+      cx += 1
+    cy += 1
+  0
+
 -> rs_mix_rgb(a, b, stride, w, h, t, out) (i64 i64 i64 i64 i64 f64 u8[]) i64
   s = ~1.0 - t
   y = 0

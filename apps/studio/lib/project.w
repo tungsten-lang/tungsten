@@ -60,17 +60,11 @@ use grade
         if c == nil || c[0] != sk
           cache[fp] = [sk, nil]
           todo.push(fp)
-    # hash the changed files in one streaming pass (shasum reads in blocks; no file is held in memory)
+    # hash the changed files in-process via CommonCrypto SHA-256 (streaming 64 KiB reads, zero subprocesses)
     if todo.size > 0
-      lst = @build + "/hash_todo.txt"
-      File.write(lst, todo.join("\n") + "\n")
-      outp = OS.capture("tr '\\n' '\\0' < " + shq(lst) + " | xargs -0 shasum -a 256")
-      outp.split("\n").each ->(ln)
-        if ln.size > 66
-          h = ln.slice(0, 64)
-          fp = ln.slice(66, ln.size - 66)
-          c = cache[fp]
-          c[1] = h if c != nil
+      todo.each ->(fp)
+        c = cache[fp]
+        c[1] = ccall("w_media_source_hash", fp) if c != nil
     changed = 0
     @ep["assets"].keys.each ->(key)
       a = @ep["assets"][key]
@@ -223,7 +217,7 @@ use grade
     out
 
   -> file_sha(path)
-    OS.capture("shasum -a 256 " + shq(path)).slice(0, 64)
+    ccall("w_media_source_hash", path)
 
   -> program_bin_dir(ph)
     @build + "/programs/bin/" + ph
@@ -263,16 +257,40 @@ use grade
       src = File.expand_path(path_join(@root, get(lk, "from", ".")))
       File.entries(src).each ->(nm)
         if nm != "." && nm != ".." && !ex.include?(nm)
-          OS.system("ln -sfn " + shq(src + "/" + nm) + " " + shq(w + "/" + nm))
+          dst = w + "/" + nm
+          File.delete(dst) if File.lstat(dst) != nil
+          File.symlink(src + "/" + nm, dst)
       write_text(w + "/.linked", "")
     w
 
-  -> expand(t, h, dur_ms, first, last)
-    s = t.gsub("{root}", @root).gsub("{dir}", run_dir(h, dur_ms))
+  -> expand(t, h, dur_ms, first, last, fifo = nil)
+    dir_val = fifo != nil ? fifo : run_dir(h, dur_ms)
+    s = t.gsub("{root}", @root).gsub("{dir}", dir_val)
+    s = s.gsub("{fifo}", fifo) if fifo != nil
     s = s.gsub("{work}", work_dir(h, dur_ms)) if s.index("{work}") != nil
     s = s.gsub("{dur}", ((dur_ms + ~0.0) / ~1000.0).to_s) if dur_ms != nil
     s = s.gsub("{first}", first.to_s).gsub("{last}", last.to_s) if first != nil
     s
+
+  -> program_pipe_mode(p)
+    h = p["source_sha"]
+    prepare_programs() if @programs == nil
+    pr = @programs[h]
+    die("unknown program " + h.to_s) if pr == nil
+    fr = get(pr["spec"], "frames", "")
+    return "rgb24" if fr == "pipe:rgb24"
+    return "rgba" if fr == "pipe:rgba"
+    nil
+
+  -> program_stream_argv(p, first, last, fifo)
+    h = p["source_sha"]
+    prepare_programs() if @programs == nil
+    pr = @programs[h]
+    die("unknown program " + h.to_s) if pr == nil
+    argv = [program_bin(h)]
+    pr["spec"]["run"].each ->(a)
+      argv.push(expand(a, h, p["dur_ms"], first, last, fifo))
+    argv
 
   -> program_count(h, cs)
     bin = program_bin(h)
@@ -307,7 +325,8 @@ use grade
     ok
 
   # Render the frames of program items that the given segments need and that are not cached: the missing frame
-  # indices of each run, in contiguous ranges split over up to `jobs` processes.
+  # indices of each run, in contiguous ranges split over up to `jobs` processes. Programs with `"frames": "pipe:rgb24"`
+  # or `"pipe:rgba"` compile their binary once here and stream frames directly in memory without writing PNGs.
   -> ensure_program_frames(r, seg_idxs, jobs)
     v1 = r["tracks"][0]["items"]
     need = {}
@@ -344,26 +363,29 @@ use grade
       p = need[key][0]
       h = p["source_sha"]
       dm = p["dur_ms"]
-      miss = []
-      need[key][1].keys.sort.each ->(idx)
-        miss.push(idx) if !frame_complete?(program_frame(p, idx))
-      if miss.size > 0
-        mkdir_p(dir_of(program_frame(p, 0)))
-        # contiguous runs, then cut into about `jobs` pieces
-        runs = []
-        miss.each ->(x)
-          if runs.size > 0 && runs[runs.size - 1][1] == x - 1
-            runs[runs.size - 1][1] = x
-          else
-            runs.push([x, x])
-        per = (miss.size + jobs - 1) / jobs
-        per = 1 if per < 1
-        runs.each ->(rg)
-          a = rg[0]
-          while a <= rg[1]
-            b = [rg[1], a + per - 1].min
-            tasks.push([h, dm, a, b])
-            a = b + 1
+      if program_pipe_mode(p) != nil
+        program_bin(h)
+      else
+        miss = []
+        need[key][1].keys.sort.each ->(idx)
+          miss.push(idx) if !frame_complete?(program_frame(p, idx))
+        if miss.size > 0
+          mkdir_p(dir_of(program_frame(p, 0)))
+          # contiguous runs, then cut into about `jobs` pieces
+          runs = []
+          miss.each ->(x)
+            if runs.size > 0 && runs[runs.size - 1][1] == x - 1
+              runs[runs.size - 1][1] = x
+            else
+              runs.push([x, x])
+          per = (miss.size + jobs - 1) / jobs
+          per = 1 if per < 1
+          runs.each ->(rg)
+            a = rg[0]
+            while a <= rg[1]
+              b = [rg[1], a + per - 1].min
+              tasks.push([h, dm, a, b])
+              a = b + 1
     return 0 if tasks.size == 0
     t0 = clock_ms()
     nfr = 0

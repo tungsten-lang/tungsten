@@ -14,7 +14,7 @@ in Tungsten:Bit
     !text.ends_with?("-") && !text.ends_with?("_")
 
   -> .project_root
-    root = capture("pwd -P").strip()
+    root = File.realpath(Dir.pwd)
     while root != "" && root != "/"
       return root if File.exists?(root + "/Bitfile")
       root = path_parent(root)
@@ -67,16 +67,21 @@ in Tungsten:Bit
     nil
 
   -> .names(root)
-    out = capture("find " + shell_quote(root + "/commands") + " -type f -name '*.w' -print | sort")
+    commands_dir = root + "/commands"
+    return [] if !Dir.exists?(commands_dir)
+    found = []
+    File.walk(commands_dir, ->(path)
+      found.push(path) if File.file?(path) && path.ends_with?(".w")
+    )
+    found.sort!
     names = []
     prefix = root.size + 10
-    out.split("\n").each ->(path)
-      if path.ends_with?(".w")
-        relative = path.slice(prefix, path.size - prefix - 2)
-        valid = true
-        relative.split("/").each ->(part)
-          valid = false if !valid_name?(part)
-        names.push(relative.replace("/", " ")) if valid
+    found.each ->(path)
+      relative = path.slice(prefix, path.size - prefix - 2)
+      valid = true
+      relative.split("/").each ->(part)
+        valid = false if !valid_name?(part)
+      names.push(relative.replace("/", " ")) if valid
     names
 
   -> .help(name, root = nil)

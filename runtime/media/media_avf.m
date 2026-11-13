@@ -1383,7 +1383,7 @@ static int a_feed_audio(AMux *m, int64_t upto) {
     while (m->audio_fed < upto) {
         if (!m->audio.readyForMoreMediaData) return 0;
         int64_t n = upto - m->audio_fed;
-        if (n > 4800) n = 4800;
+        if (n > 24000) n = 24000;
         size_t bytes = (size_t)n * 4 * (size_t)ch;
         CMBlockBufferRef bb = NULL;
         OSStatus st = CMBlockBufferCreateWithMemoryBlock(NULL, NULL, bytes, kCFAllocatorDefault, NULL, 0, bytes, kCMBlockBufferAssureMemoryNowFlag, &bb);
@@ -1406,11 +1406,11 @@ static int a_feed_audio(AMux *m, int64_t upto) {
 
 /* Wait until the video input takes a sample. AVAssetWriter interleaves in
  * about one-second chunks and holds the video back until the audio is ahead
- * of it, so audio leads by a second and, while the video is still held,
+ * of it, so audio leads by two seconds and, while the video is still held,
  * grows in 250 ms steps up to the cap. */
 static void a_wait_video(AMux *m, int64_t frame) {
     int spins = 0;
-    int64_t lead = m->has_audio ? m->arate : 0;
+    int64_t lead = m->has_audio ? 2 * (int64_t)m->arate : 0;
     a_feed_audio(m, MIN(a_audio_for(m, frame + 1) + lead, a_audio_cap(m, frame + 1)));
     while (!m->video.readyForMoreMediaData) {
         if (m->has_audio && !m->audio_done && m->total_frames > 0 && m->audio_fed >= a_audio_for(m, m->total_frames)) {
@@ -1424,7 +1424,7 @@ static void a_wait_video(AMux *m, int64_t frame) {
             a_feed_audio(m, MIN(m->audio_fed + m->arate / 4, cap));
         }
         if (m->writer.status != AVAssetWriterStatusWriting) a_mux_fail(m, "the writer stopped");
-        usleep(200);
+        usleep(spins < 20 ? 50 : 200);
         if (++spins > 100000)
             a_mux_fail(m, "the writer stalled at frame %lld (video input not ready for 20 s; audio fed %lld, audio ready %d)",
                        (long long)frame, (long long)m->audio_fed, m->has_audio ? (int)m->audio.readyForMoreMediaData : -1);
@@ -2226,7 +2226,7 @@ static void a_dec_release(ADec *d, int64_t limit, int all) {
         ADecFrame f = d->pend[0];
         memmove(d->pend, d->pend + 1, sizeof(ADecFrame) * (size_t)(d->npend - 1));
         d->npend--;
-        if (!d->segs && f.pts < d->start_pts) { CVBufferRelease(f.pb); continue; }
+        if (f.pts < d->start_pts) { CVBufferRelease(f.pb); continue; }
         while (d->qn == d->qcap && !d->stop) pthread_cond_wait(&d->cv, &d->mu);
         if (d->stop) { CVBufferRelease(f.pb); break; }
         d->q[(d->qh + d->qn) % d->qcap] = f;
@@ -2248,7 +2248,11 @@ static CMSampleBufferRef a_dec_next_sample(ADec *d, int64_t *dts) {
         }
         CMTime t = CMSampleBufferGetOutputDecodeTimeStamp(sb);
         if (!CMTIME_IS_VALID(t)) t = CMSampleBufferGetOutputPresentationTimeStamp(sb);
-        *dts = a_dec_time(d, t);
+        int reorder = (d->codec == kCMVideoCodecType_AppleProRes422 || d->codec == kCMVideoCodecType_AppleProRes422HQ ||
+                       d->codec == kCMVideoCodecType_AppleProRes422LT || d->codec == kCMVideoCodecType_AppleProRes422Proxy ||
+                       d->codec == kCMVideoCodecType_AppleProRes4444 || d->codec == kCMVideoCodecType_AppleProRes4444XQ) ? 0 : (W_MEDIA_REORDER_DELAY * 2);
+        int64_t margin = d->num > 0 ? (int64_t)((__int128)reorder * d->den * d->ts / d->num) : 0;
+        *dts = a_dec_time(d, t) - margin;
         return sb;
     }
     for (;;) {
@@ -2262,6 +2266,16 @@ static CMSampleBufferRef a_dec_next_sample(ADec *d, int64_t *dts) {
             d->seg = NULL;
             free(d->seg_sorted);
             d->seg_sorted = NULL;
+        }
+        while (d->seg_i < d->nseg && d->start_pts > d->seg_base) {
+            int sfd = open(d->segs[d->seg_i], O_RDONLY);
+            uint8_t shdr[64];
+            if (sfd < 0 || read(sfd, shdr, 64) != 64 || memcmp(shdr, "TWMS", 4) != 0) { if (sfd >= 0) close(sfd); break; }
+            close(sfd);
+            uint32_t sn = (uint32_t)shdr[32] | ((uint32_t)shdr[33] << 8) | ((uint32_t)shdr[34] << 16) | ((uint32_t)shdr[35] << 24);
+            if (!sn || d->seg_base + (int64_t)sn > d->start_pts) break;
+            d->seg_base += (int64_t)sn;
+            d->seg_i++;
         }
         if (d->seg_i >= d->nseg) return NULL;
         char err[512];
@@ -2326,10 +2340,11 @@ static void *a_dec_thread(void *arg) {
                 if (sb) CFRelease(sb);
                 break;
             }
-            a_dec_release(d, dts, 0);
+            int64_t sample_pts = CMSampleBufferGetNumSamples(sb) > 0 ? a_dec_time(d, CMSampleBufferGetOutputPresentationTimeStamp(sb)) : INT64_MAX;
+            a_dec_release(d, sample_pts < dts ? sample_pts : dts, 0);
             int64_t id = ++d->next_id;
             if (CMSampleBufferGetNumSamples(sb) > 0) {
-                int64_t p = a_dec_time(d, CMSampleBufferGetOutputPresentationTimeStamp(sb));
+                int64_t p = sample_pts;
                 if (d->nfly == d->cfly) {
                     d->cfly = d->cfly ? d->cfly * 2 : 16;
                     d->fly = realloc(d->fly, 2 * sizeof(int64_t) * (size_t)d->cfly);
@@ -2500,6 +2515,7 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
         CFDictionaryRef ext = CMFormatDescriptionGetExtensions((CMFormatDescriptionRef)s0->format);
         d->siting = a_siting_of(ext ? CFDictionaryGetValue(ext, kCMFormatDescriptionExtension_ChromaLocationTopField) : NULL);
         w_media_seg_free(s0);
+        d->start_pts = start_frame > 0 ? start_frame : 0;
         d->frames_hint = -1;
     }
     __atomic_add_fetch(&d->refs, 1, __ATOMIC_RELAXED);
@@ -2598,7 +2614,7 @@ WValue w_media_decoder_open(WValue srcv, WValue fmtv, WValue optv) {
         if (w_is_array(srcv)) {
             int n = 0;
             char **segs = a_paths(srcv, &n);
-            d = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, queue_cap, err, sizeof err);
+            d = a_dec_open(NULL, segs, n, num, den, pix, start, timeout_ms, queue_cap, err, sizeof err);
             a_paths_free(segs, n);
         } else {
             if (!w_media_str(srcv, path, sizeof path) || !path[0]) w_media_raise("VideoDecoder: source must be a path or an array of segment paths");
@@ -2915,7 +2931,7 @@ static void a_cache_save(ATrans *t, WMediaSegment *segment) {
     char path[4200], meta[4200], tmp[4220], hash[65], err[512] = "cannot hash checkpoint";
     a_cache_path(t, t->next_checkpoint, path, "twms");
     a_cache_path(t, t->next_checkpoint, meta, "sha256");
-    if (w_media_seg_save(segment, path, err, sizeof err) || a_file_hash(path, hash)) a_trans_raise(t, "checkpoint: %s", err);
+    if (w_media_seg_save_hashed(segment, path, hash, err, sizeof err)) a_trans_raise(t, "checkpoint: %s", err);
     a_test_barrier("segment-synced");
     snprintf(tmp, sizeof tmp, "%s.part", meta);
     FILE *f = fopen(tmp, "w");
@@ -3066,9 +3082,8 @@ WValue w_media_transcode_new(WValue spec) {
         if (w_is_array(srcv)) {
             int n = 0;
             char **segs = a_paths(srcv, &n);
-            t->dec = a_dec_open(NULL, segs, n, num, den, pix, 0, timeout_ms, queue_cap, err, sizeof err);
+            t->dec = a_dec_open(NULL, segs, n, num, den, pix, t->start + t->resumed, timeout_ms, queue_cap, err, sizeof err);
             a_paths_free(segs, n);
-            if (t->start > 0 && t->dec) { a_trans_free(t); w_media_raise("Transcode: start: is for movie sources (pass the segments you want)"); }
         } else {
             if (!w_media_str(srcv, src, sizeof src) || !src[0]) { a_trans_free(t); w_media_raise("Transcode: src must be a path or an array of segment paths"); }
             if (access(src, R_OK) != 0) { int e = errno; a_trans_free(t); w_media_raise("Transcode: cannot read %s: %s", src, strerror(e)); }
@@ -3581,8 +3596,32 @@ WValue w_media_probe(WValue pathv, WValue samplesv, WValue audiov) {
             AVAssetTrack *a = at[0];
             CMFormatDescriptionRef fd = (__bridge CMFormatDescriptionRef)a.formatDescriptions.firstObject;
             const AudioStreamBasicDescription *asbd = fd ? CMAudioFormatDescriptionGetStreamBasicDescription(fd) : NULL;
-            out = w_array_push(out, a_pair("audio_codec", a_fourcc(fd ? CMFormatDescriptionGetMediaSubType(fd) : 0)));
-            out = w_array_push(out, a_pair("audio_rate", asbd ? w_int((int64_t)asbd->mSampleRate) : W_NIL));
+            uint32_t sub = fd ? CMFormatDescriptionGetMediaSubType(fd) : 0;
+            out = w_array_push(out, a_pair("audio_codec", a_fourcc(sub)));
+            if (asbd) {
+                char cname[32] = "";
+                uint32_t fid = asbd->mFormatID, flags = asbd->mFormatFlags, bits = asbd->mBitsPerChannel;
+                if (fid == kAudioFormatMPEG4AAC || sub == A_FOURCC('a','a','c',' ')) snprintf(cname, sizeof cname, "aac");
+                else if (fid == kAudioFormatAppleLossless || sub == A_FOURCC('a','l','a','c')) snprintf(cname, sizeof cname, "alac");
+                else if (fid == kAudioFormatFLAC || sub == A_FOURCC('f','l','a','c')) snprintf(cname, sizeof cname, "flac");
+                else if (fid == kAudioFormatMPEGLayer3 || sub == A_FOURCC('.','m','p','3')) snprintf(cname, sizeof cname, "mp3");
+                else if (fid == kAudioFormatOpus || sub == A_FOURCC('o','p','u','s')) snprintf(cname, sizeof cname, "opus");
+                else if (fid == kAudioFormatAC3 || sub == A_FOURCC('a','c','-','3')) snprintf(cname, sizeof cname, "ac3");
+                else if (fid == kAudioFormatEnhancedAC3 || sub == A_FOURCC('e','c','-','3')) snprintf(cname, sizeof cname, "eac3");
+                else if (fid == kAudioFormatLinearPCM) {
+                    int be = (flags & kAudioFormatFlagIsBigEndian) != 0;
+                    if ((flags & kAudioFormatFlagIsFloat) || sub == A_FOURCC('f','l','3','2') || sub == A_FOURCC('f','l','6','4'))
+                        snprintf(cname, sizeof cname, "pcm_f%u%s", bits ? bits : 32u, be ? "be" : "le");
+                    else if (bits == 8)
+                        snprintf(cname, sizeof cname, "%s", (flags & kAudioFormatFlagIsSignedInteger) ? "pcm_s8" : "pcm_u8");
+                    else
+                        snprintf(cname, sizeof cname, "pcm_s%u%s", bits ? bits : 16u, be ? "be" : "le");
+                }
+                if (cname[0]) out = w_array_push(out, a_pair("audio_codec_name", w_string(cname)));
+                out = w_array_push(out, a_pair("audio_bits", w_int(bits)));
+                out = w_array_push(out, a_pair("audio_float", (flags & kAudioFormatFlagIsFloat) ? W_TRUE : W_FALSE));
+            }
+            out = w_array_push(out, a_pair("audio_rate", asbd ? w_int((int64_t)llround(asbd->mSampleRate)) : W_NIL));
             out = w_array_push(out, a_pair("audio_channels", asbd ? w_int(asbd->mChannelsPerFrame) : W_NIL));
             out = w_array_push(out, a_pair("audio_start", a_time(a.timeRange.start)));
             out = w_array_push(out, a_pair("audio_duration", a_time(a.timeRange.duration)));
@@ -3612,6 +3651,33 @@ WValue w_media_probe(WValue pathv, WValue samplesv, WValue audiov) {
                 out = w_array_push(out, a_pair("audio_first_pts", a_time(first)));
                 [o release];
                 [r release];
+            }
+        } else if (!vt.count) {
+            WMediaWav wav;
+            char werr[256];
+            if (w_media_wav_open(path.UTF8String, &wav, werr, sizeof werr) == 0) {
+                char cname[32];
+                if (wav.is_float) snprintf(cname, sizeof cname, "pcm_f%dle", wav.bits);
+                else snprintf(cname, sizeof cname, "pcm_s%dle", wav.bits);
+                WValue dur = w_array_new_empty();
+                dur = w_array_push(dur, w_int(wav.frames));
+                dur = w_array_push(dur, w_int(wav.rate));
+                WValue zero = w_array_new_empty();
+                zero = w_array_push(zero, w_int(0));
+                zero = w_array_push(zero, w_int(wav.rate));
+                out = w_array_push(out, a_pair("audio_tracks", w_int(1)));
+                out = w_array_push(out, a_pair("audio_codec", w_string("lpcm")));
+                out = w_array_push(out, a_pair("audio_codec_name", w_string(cname)));
+                out = w_array_push(out, a_pair("audio_bits", w_int(wav.bits)));
+                out = w_array_push(out, a_pair("audio_float", wav.is_float ? W_TRUE : W_FALSE));
+                out = w_array_push(out, a_pair("audio_rate", w_int(wav.rate)));
+                out = w_array_push(out, a_pair("audio_channels", w_int(wav.channels)));
+                out = w_array_push(out, a_pair("audio_start", zero));
+                out = w_array_push(out, a_pair("audio_duration", dur));
+                out = w_array_push(out, a_pair("duration", dur));
+                out = w_array_push(out, a_pair("audio_edits", w_int(0)));
+                if (audiov > 1) out = w_array_push(out, a_pair("audio_decoded_frames", w_int(wav.frames)));
+                w_media_wav_close(&wav);
             }
         }
         return out;
@@ -3828,6 +3894,1165 @@ WValue w_media_sync_scan(WValue pathv, WValue maxv, WValue unusedv) {
         out = w_array_push(out, clicks);
         out = w_array_push(out, w_int(rate));
         out = w_array_push(out, w_float(first_pts));
+        return out;
+    }
+}
+
+/* ======================================================================
+   Native Audio QC, Audio Prep, Video Anomalies, Quality (SSIM/MS-SSIM),
+   and Multi-Frame Extraction (zero FFmpeg)
+   ====================================================================== */
+
+static void a_fit_geometry(int sw, int sh, int dw, int dh, int fit_code, double crop[4], int rect[4]) {
+    crop[0] = 0; crop[1] = 0; crop[2] = sw; crop[3] = sh;
+    rect[0] = 0; rect[1] = 0; rect[2] = dw; rect[3] = dh;
+    if (fit_code == 1) { /* contain */
+        int rw, rh;
+        if ((int64_t)dw * sh <= (int64_t)dh * sw) {
+            rw = dw;
+            rh = (int)((((int64_t)dw * sh * 2 + (int64_t)sw * 2) / ((int64_t)sw * 4)) * 2);
+        } else {
+            rh = dh;
+            rw = (int)((((int64_t)dh * sw * 2 + (int64_t)sh * 2) / ((int64_t)sh * 4)) * 2);
+        }
+        if (rw > dw) rw = dw;
+        if (rh > dh) rh = dh;
+        rect[0] = ((dw - rw) / 4) * 2;
+        rect[1] = ((dh - rh) / 4) * 2;
+        rect[2] = rw;
+        rect[3] = rh;
+    } else if (fit_code == 2) { /* cover */
+        double cw, ch;
+        if ((int64_t)dw * sh >= (int64_t)dh * sw) {
+            cw = (double)sw;
+            ch = ((double)sw * (double)dh) / (double)dw;
+        } else {
+            ch = (double)sh;
+            cw = ((double)sh * (double)dw) / (double)dh;
+        }
+        crop[0] = ((double)sw - cw) * 0.5;
+        crop[1] = ((double)sh - ch) * 0.5;
+        crop[2] = cw;
+        crop[3] = ch;
+    }
+}
+
+typedef struct AAudioQC {
+    int32_t sr, ch, sub, sub_pos;
+    double  sb0, sb1, sb2, sa1, sa2;
+    double  hb0, hb1, hb2, ha1, ha2;
+    double  x1[8], x2[8], y1[8], y2[8], u1[8], u2[8], v1[8], v2[8];
+    double  taps[48], tp_bound, tp_max;
+    double  hist[8][12];
+    int     hist_fill;
+    double  sub_sum, total_kw_sum;
+    double *zs;
+    size_t  nb, zcap;
+    double  energy[8], silence_thresh;
+    int64_t frames, clipped, silence_run, longest_silence;
+} AAudioQC;
+
+static void a_audio_qc_init(AAudioQC *q, int32_t sr, int32_t ch, double silence_thresh) {
+    memset(q, 0, sizeof *q);
+    q->sr = sr;
+    q->ch = ch;
+    q->sub = sr >= 10 ? sr / 10 : 1;
+    q->silence_thresh = silence_thresh;
+    if (sr == 48000) {
+        q->sb0 =  1.53512485958697; q->sb1 = -2.69169618940638; q->sb2 = 1.19839281085285;
+        q->sa1 = -1.69065929318241; q->sa2 =  0.73248077421585;
+        q->hb0 =  1.0;              q->hb1 = -2.0;              q->hb2 = 1.0;
+        q->ha1 = -1.99004745483398; q->ha2 =  0.99007225036621;
+    } else {
+        const double pi = 3.14159265358979323846;
+        double f0 = 1681.974450955533, G = 3.999843853973347, Q = 0.7071752369554196;
+        double K = tan(pi * f0 / (double)sr), Vh = pow(10.0, G / 20.0), Vb = pow(Vh, 0.4996667741545416);
+        double a0 = 1.0 + K / Q + K * K;
+        q->sb0 = (Vh + Vb * K / Q + K * K) / a0;
+        q->sb1 = 2.0 * (K * K - Vh) / a0;
+        q->sb2 = (Vh - Vb * K / Q + K * K) / a0;
+        q->sa1 = 2.0 * (K * K - 1.0) / a0;
+        q->sa2 = (1.0 - K / Q + K * K) / a0;
+        double hf0 = 38.13547087602444, hQ = 0.5003270373238773;
+        double hK = tan(pi * hf0 / (double)sr);
+        double ha0 = 1.0 + hK / hQ + hK * hK;
+        q->hb0 =  1.0 / ha0;
+        q->hb1 = -2.0 / ha0;
+        q->hb2 =  1.0 / ha0;
+        q->ha1 = 2.0 * (hK * hK - 1.0) / ha0;
+        q->ha2 = (1.0 - hK / hQ + hK * hK) / ha0;
+    }
+    const double pi = 3.14159265358979323846;
+    double best = 0.0;
+    for (int p = 0; p < 4; p++) {
+        double s = 0.0;
+        for (int k = 0; k < 12; k++) {
+            double x = (double)(k - 5) - (double)p * 0.25;
+            double v = x == 0.0 ? 1.0 : sin(pi * x) / (pi * x);
+            double wv = 0.5 + 0.5 * cos(pi * x / 7.0);
+            q->taps[p * 12 + k] = v * wv;
+            s += v * wv;
+        }
+        double as = 0.0;
+        for (int k = 0; k < 12; k++) {
+            q->taps[p * 12 + k] /= s;
+            as += fabs(q->taps[p * 12 + k]);
+        }
+        if (as > best) best = as;
+    }
+    q->tp_bound = best * (1.0 + 1e-9);
+}
+
+static void a_audio_qc_tp_step(AAudioQC *q, int c, double sample) {
+    double *h = q->hist[c];
+    memmove(h, h + 1, 11 * sizeof(double));
+    h[11] = sample;
+    double a0 = fabs(sample);
+    if (a0 > q->tp_max) q->tp_max = a0;
+    if (q->hist_fill < 12) return;
+    double wmax = 0.0;
+    for (int k = 0; k < 12; k++) {
+        double v = fabs(h[k]);
+        if (v > wmax) wmax = v;
+    }
+    if (wmax * q->tp_bound <= q->tp_max) return;
+    for (int p = 1; p < 4; p++) {
+        const double *t = q->taps + p * 12;
+        double acc = 0.0;
+        for (int k = 0; k < 12; k++) acc += h[k] * t[k];
+        double av = fabs(acc);
+        if (av > q->tp_max) q->tp_max = av;
+    }
+}
+
+static int a_audio_qc_feed(AAudioQC *q, const float *pcm, size_t nframes) {
+    int ch = q->ch;
+    for (size_t i = 0; i < nframes; i++) {
+        double peak = 0.0, kw_frame = 0.0;
+        if (q->hist_fill < 12) q->hist_fill++;
+        for (int c = 0; c < ch; c++) {
+            double x = (double)pcm[i * (size_t)ch + (size_t)c];
+            if (!isfinite(x)) return -1;
+            double ax = fabs(x);
+            q->energy[c] += x * x;
+            if (ax >= 1.0 - 1.0 / 32768.0) q->clipped++;
+            if (ax > peak) peak = ax;
+            double y = q->sb0 * x + q->sb1 * q->x1[c] + q->sb2 * q->x2[c] - q->sa1 * q->y1[c] - q->sa2 * q->y2[c];
+            q->x2[c] = q->x1[c]; q->x1[c] = x; q->y2[c] = q->y1[c]; q->y1[c] = y;
+            double v = q->hb0 * y + q->hb1 * q->u1[c] + q->hb2 * q->u2[c] - q->ha1 * q->v1[c] - q->ha2 * q->v2[c];
+            q->u2[c] = q->u1[c]; q->u1[c] = y; q->v2[c] = q->v1[c]; q->v1[c] = v;
+            double g = (ch > 3 && (c == 3 || c == 4)) ? 1.41 : 1.0;
+            if (ch > 3 && c == 3 && ch >= 6) g = 0.0; /* LFE excluded in 5.1+ */
+            if (ch >= 6 && (c == 4 || c == 5)) g = 1.41;
+            kw_frame += g * v * v;
+            a_audio_qc_tp_step(q, c, x);
+        }
+        q->frames++;
+        if (peak < q->silence_thresh) {
+            q->silence_run++;
+            if (q->silence_run > q->longest_silence) q->longest_silence = q->silence_run;
+        } else {
+            q->silence_run = 0;
+        }
+        q->sub_sum += kw_frame;
+        q->total_kw_sum += kw_frame;
+        if (++q->sub_pos == q->sub) {
+            if (q->nb == q->zcap) {
+                q->zcap = q->zcap ? q->zcap * 2 : 256;
+                q->zs = realloc(q->zs, q->zcap * sizeof(double));
+            }
+            q->zs[q->nb++] = q->sub_sum / (double)q->sub;
+            q->sub_sum = 0.0;
+            q->sub_pos = 0;
+        }
+    }
+    return 0;
+}
+
+/* w_media_audio_qc(path, silence_thresh_linear) -> [[key, val], ...] */
+WValue w_media_audio_qc(WValue pathv, WValue threshv) {
+    @autoreleasepool {
+        NSString *path = a_nspath(pathv, "MediaVerify.audio_qc");
+        double thresh = w_media_num(threshv, 0.001, "silence_threshold");
+        AAudioQC q;
+        WMediaWav wav;
+        char werr[256];
+        int used_wav = 0;
+        if (w_media_wav_open(path.UTF8String, &wav, werr, sizeof werr) == 0) {
+            if (wav.channels < 1 || wav.channels > 8) {
+                w_media_wav_close(&wav);
+                w_media_raise("MediaVerify.audio_qc: unsupported channel count %d", wav.channels);
+            }
+            a_audio_qc_init(&q, wav.rate, wav.channels, thresh);
+            float *buf = malloc(8192 * (size_t)wav.channels * sizeof(float));
+            int64_t pos = 0;
+            int bad = 0;
+            while (pos < wav.frames) {
+                int64_t n = wav.frames - pos > 8192 ? 8192 : wav.frames - pos;
+                w_media_wav_read_f32(&wav, pos, n, buf);
+                if (a_audio_qc_feed(&q, buf, (size_t)n) != 0) { bad = 1; break; }
+                pos += n;
+            }
+            free(buf);
+            w_media_wav_close(&wav);
+            if (bad) { free(q.zs); w_media_raise("MediaVerify.audio_qc: nonfinite decoded audio"); }
+            used_wav = 1;
+        }
+        if (!used_wav) {
+            AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:path] options:@{AVURLAssetPreferPreciseDurationAndTimingKey: @YES}];
+            NSArray *at = [asset tracksWithMediaType:AVMediaTypeAudio];
+            if (!at.count) w_media_raise("MediaVerify.audio_qc: no audio track");
+            AVAssetTrack *a = at[0];
+            CMFormatDescriptionRef fd = (__bridge CMFormatDescriptionRef)a.formatDescriptions.firstObject;
+            const AudioStreamBasicDescription *asbd = fd ? CMAudioFormatDescriptionGetStreamBasicDescription(fd) : NULL;
+            int32_t sr = asbd ? (int32_t)llround(asbd->mSampleRate) : 48000;
+            int32_t ch = asbd ? (int32_t)asbd->mChannelsPerFrame : 2;
+            if (ch < 1 || ch > 8 || sr <= 0) w_media_raise("MediaVerify.audio_qc: invalid audio format (%d Hz x %d)", (int)sr, (int)ch);
+            a_audio_qc_init(&q, sr, ch, thresh);
+            NSError *err = nil;
+            AVAssetReader *r = [[AVAssetReader alloc] initWithAsset:asset error:&err];
+            if (!r) { free(q.zs); w_media_raise("MediaVerify.audio_qc: %s", err.localizedDescription.UTF8String ?: "cannot read"); }
+            NSDictionary *pcm = @{AVFormatIDKey: @(kAudioFormatLinearPCM), AVLinearPCMBitDepthKey: @32,
+                                  AVLinearPCMIsFloatKey: @YES, AVLinearPCMIsBigEndianKey: @NO, AVLinearPCMIsNonInterleaved: @NO};
+            AVAssetReaderTrackOutput *o = [[AVAssetReaderTrackOutput alloc] initWithTrack:a outputSettings:pcm];
+            [r addOutput:o];
+            if (![r startReading]) {
+                NSString *ed = r.error.localizedDescription;
+                [o release]; [r release]; free(q.zs);
+                w_media_raise("MediaVerify.audio_qc: %s", ed.UTF8String ?: "cannot start reading");
+            }
+            float *tmp = NULL;
+            size_t tcap = 0;
+            int bad = 0;
+            CMSampleBufferRef sb;
+            while ((sb = [o copyNextSampleBuffer])) {
+                CMItemCount k = CMSampleBufferGetNumSamples(sb);
+                CMBlockBufferRef bb = CMSampleBufferGetDataBuffer(sb);
+                if (bb && k > 0) {
+                    size_t need = (size_t)k * (size_t)ch;
+                    size_t bytes = CMBlockBufferGetDataLength(bb);
+                    if (bytes < need * sizeof(float)) k = (CMItemCount)(bytes / ((size_t)ch * sizeof(float)));
+                    if (k > 0) {
+                        if ((size_t)k * (size_t)ch > tcap) {
+                            tcap = (size_t)k * (size_t)ch;
+                            tmp = realloc(tmp, tcap * sizeof(float));
+                        }
+                        CMBlockBufferCopyDataBytes(bb, 0, (size_t)k * (size_t)ch * sizeof(float), tmp);
+                        if (a_audio_qc_feed(&q, tmp, (size_t)k) != 0) { bad = 1; CFRelease(sb); break; }
+                    }
+                }
+                CFRelease(sb);
+            }
+            AVAssetReaderStatus rst = r.status;
+            NSString *red = r.error.localizedDescription;
+            free(tmp);
+            [o release];
+            [r release];
+            if (bad) { free(q.zs); w_media_raise("MediaVerify.audio_qc: nonfinite decoded audio"); }
+            if (rst == AVAssetReaderStatusFailed) { free(q.zs); w_media_raise("MediaVerify.audio_qc: %s", red.UTF8String ?: "decode failed"); }
+        }
+        /* Flush 6 zero frames through true-peak FIR so trailing inter-sample peaks are measured. */
+        if (q.frames > 0) {
+            for (int pad = 0; pad < 6; pad++) {
+                if (q.hist_fill < 12) q.hist_fill++;
+                for (int c = 0; c < q.ch; c++) a_audio_qc_tp_step(&q, c, 0.0);
+            }
+        }
+        double lufs = -INFINITY;
+        if (q.nb >= 4) {
+            double sum = 0.0;
+            size_t cnt = 0;
+            for (size_t b = 0; b + 3 < q.nb; b++) {
+                double z = (q.zs[b] + q.zs[b + 1] + q.zs[b + 2] + q.zs[b + 3]) * 0.25;
+                double l = -0.691 + 10.0 * log10(z + 1e-20);
+                if (l > -70.0) { sum += z; cnt++; }
+            }
+            if (cnt > 0) {
+                double rel = -0.691 + 10.0 * log10(sum / (double)cnt) - 10.0;
+                sum = 0.0; cnt = 0;
+                for (size_t b = 0; b + 3 < q.nb; b++) {
+                    double z = (q.zs[b] + q.zs[b + 1] + q.zs[b + 2] + q.zs[b + 3]) * 0.25;
+                    double l = -0.691 + 10.0 * log10(z + 1e-20);
+                    if (l > -70.0 && l > rel) { sum += z; cnt++; }
+                }
+                if (cnt > 0 && sum > 0.0) lufs = -0.691 + 10.0 * log10(sum / (double)cnt);
+            }
+        } else if (q.frames > 0) {
+            double z = q.total_kw_sum / (double)q.frames;
+            double l = -0.691 + 10.0 * log10(z + 1e-20);
+            if (l > -70.0 && z > 0.0) lufs = -0.691 + 10.0 * log10(z);
+        }
+        free(q.zs);
+        double dbtp = q.tp_max > 0.0 ? 20.0 * log10(q.tp_max) : -INFINITY;
+        WValue energy = w_array_new_empty();
+        for (int c = 0; c < q.ch; c++) energy = w_array_push(energy, w_float(q.energy[c]));
+        WValue out = w_array_new_empty();
+        out = w_array_push(out, a_pair("integrated_lufs", isfinite(lufs) ? w_float(lufs) : W_NIL));
+        out = w_array_push(out, a_pair("true_peak_dbtp", isfinite(dbtp) ? w_float(dbtp) : W_NIL));
+        out = w_array_push(out, a_pair("clipped_samples", w_int(q.clipped)));
+        out = w_array_push(out, a_pair("longest_silence_frames", w_int(q.longest_silence)));
+        out = w_array_push(out, a_pair("decoded_frames", w_int(q.frames)));
+        out = w_array_push(out, a_pair("sample_rate", w_int(q.sr)));
+        out = w_array_push(out, a_pair("channels", w_int(q.ch)));
+        out = w_array_push(out, a_pair("energy", energy));
+        return out;
+    }
+}
+
+static void a_le16_put(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void a_le32_put(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
+static void a_le64_put(uint8_t *p, uint64_t v) { a_le32_put(p, (uint32_t)v); a_le32_put(p + 4, (uint32_t)(v >> 32)); }
+
+/* Write a 44-byte RIFF header (rf64 == 0) or an 80-byte RF64 + ds64 header (rf64 == 1). */
+static size_t a_wav24_header(uint8_t hdr[80], int rf64, int64_t frames, int32_t sr, int32_t ch) {
+    uint64_t data_bytes = (uint64_t)frames * (uint64_t)ch * 3ULL;
+    memset(hdr, 0, 80);
+    if (!rf64) {
+        memcpy(hdr + 0, "RIFF", 4);
+        a_le32_put(hdr + 4, (uint32_t)(36ULL + data_bytes));
+        memcpy(hdr + 8, "WAVEfmt ", 8);
+        a_le32_put(hdr + 16, 16);
+        a_le16_put(hdr + 20, 1);
+        a_le16_put(hdr + 22, (uint16_t)ch);
+        a_le32_put(hdr + 24, (uint32_t)sr);
+        a_le32_put(hdr + 28, (uint32_t)(sr * ch * 3));
+        a_le16_put(hdr + 32, (uint16_t)(ch * 3));
+        a_le16_put(hdr + 34, 24);
+        memcpy(hdr + 36, "data", 4);
+        a_le32_put(hdr + 40, (uint32_t)data_bytes);
+        return 44;
+    }
+    uint64_t riff_bytes = 72ULL + data_bytes;
+    memcpy(hdr + 0, "RF64", 4);
+    a_le32_put(hdr + 4, 0xFFFFFFFFu);
+    memcpy(hdr + 8, "WAVEds64", 8);
+    a_le32_put(hdr + 16, 28);
+    a_le64_put(hdr + 20, riff_bytes);
+    a_le64_put(hdr + 28, data_bytes);
+    a_le64_put(hdr + 36, (uint64_t)frames);
+    a_le32_put(hdr + 44, 0);
+    memcpy(hdr + 48, "fmt ", 4);
+    a_le32_put(hdr + 52, 16);
+    a_le16_put(hdr + 56, 1);
+    a_le16_put(hdr + 58, (uint16_t)ch);
+    a_le32_put(hdr + 60, (uint32_t)sr);
+    a_le32_put(hdr + 64, (uint32_t)(sr * ch * 3));
+    a_le16_put(hdr + 68, (uint16_t)(ch * 3));
+    a_le16_put(hdr + 70, 24);
+    memcpy(hdr + 72, "data", 4);
+    a_le32_put(hdr + 76, 0xFFFFFFFFu);
+    return 80;
+}
+
+/* w_media_audio_prepare(src_path, dst_wav_path, [sample_rate, channels, exact_samples]) -> [frames, sr, ch] */
+WValue w_media_audio_prepare(WValue srcv, WValue dstv, WValue optv) {
+    @autoreleasepool {
+        NSString *src = a_nspath(srcv, "MediaVerify.prepare_audio");
+        char dst[4096], tmp[4200];
+        if (!w_media_str(dstv, dst, sizeof dst) || !dst[0]) w_media_raise("MediaVerify.prepare_audio: dst must be a path");
+        int32_t sr = (int32_t)w_media_num(m_avf_arr(optv, 0), 48000, "sample_rate");
+        int32_t ch = (int32_t)w_media_num(m_avf_arr(optv, 1), 2, "channels");
+        int64_t exact = (int64_t)w_media_num(m_avf_arr(optv, 2), 0, "samples");
+        if (sr < 8000 || sr > 192000 || ch < 1 || ch > 8)
+            w_media_raise("MediaVerify.prepare_audio: invalid target format (%d Hz x %d)", (int)sr, (int)ch);
+        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:src] options:@{AVURLAssetPreferPreciseDurationAndTimingKey: @YES}];
+        NSArray *at = [asset tracksWithMediaType:AVMediaTypeAudio];
+        if (!at.count) w_media_raise("MediaVerify.prepare_audio: %s has no audio track", src.UTF8String);
+        AVAssetTrack *a = at[0];
+        CMFormatDescriptionRef fd = (__bridge CMFormatDescriptionRef)a.formatDescriptions.firstObject;
+        const AudioStreamBasicDescription *asbd = fd ? CMAudioFormatDescriptionGetStreamBasicDescription(fd) : NULL;
+        int32_t src_sr = asbd ? (int32_t)llround(asbd->mSampleRate) : 0;
+        int32_t src_ch = asbd ? (int32_t)asbd->mChannelsPerFrame : 0;
+        NSError *err = nil;
+        AVAssetReader *r = [[AVAssetReader alloc] initWithAsset:asset error:&err];
+        if (!r) w_media_raise("MediaVerify.prepare_audio: %s", err.localizedDescription.UTF8String ?: "cannot read");
+        NSDictionary *pcm = @{AVFormatIDKey: @(kAudioFormatLinearPCM), AVSampleRateKey: @(sr), AVNumberOfChannelsKey: @(ch),
+                              AVLinearPCMBitDepthKey: @32, AVLinearPCMIsFloatKey: @YES,
+                              AVLinearPCMIsBigEndianKey: @NO, AVLinearPCMIsNonInterleaved: @NO};
+        AVAssetReaderOutput *o = nil;
+        if (src_sr == sr && src_ch == ch) {
+            NSDictionary *direct = @{AVFormatIDKey: @(kAudioFormatLinearPCM), AVLinearPCMBitDepthKey: @32,
+                                     AVLinearPCMIsFloatKey: @YES, AVLinearPCMIsBigEndianKey: @NO, AVLinearPCMIsNonInterleaved: @NO};
+            o = [[AVAssetReaderTrackOutput alloc] initWithTrack:a outputSettings:direct];
+        } else {
+            o = [[AVAssetReaderAudioMixOutput alloc] initWithAudioTracks:@[a] audioSettings:pcm];
+        }
+        o.alwaysCopiesSampleData = NO;
+        [r addOutput:o];
+        if (![r startReading]) {
+            NSString *ed = r.error.localizedDescription;
+            [o release]; [r release];
+            w_media_raise("MediaVerify.prepare_audio: %s", ed.UTF8String ?: "cannot start reading");
+        }
+        double est_dur = CMTimeGetSeconds(asset.duration);
+        uint64_t est_frames = exact > 0 ? (uint64_t)exact : (est_dur > 0 ? (uint64_t)(est_dur * sr + 1024) : 0);
+        int rf64 = (est_frames * (uint64_t)ch * 3ULL) >= 0xFFFFFF00ULL;
+        snprintf(tmp, sizeof tmp, "%s.tmp%d", dst, (int)getpid());
+        FILE *f = fopen(tmp, "wb");
+        if (!f) {
+            [r cancelReading]; [o release]; [r release];
+            w_media_raise("MediaVerify.prepare_audio: cannot write %s: %s", tmp, strerror(errno));
+        }
+        uint8_t hdr[80];
+        size_t hlen = a_wav24_header(hdr, rf64, exact > 0 ? exact : 0, sr, ch);
+        int wok = fwrite(hdr, 1, hlen, f) == hlen;
+        float *inbuf = NULL;
+        uint8_t *outbuf = NULL;
+        size_t cap_frames = 0;
+        int64_t written = 0;
+        CMSampleBufferRef sb;
+        while (wok && (exact <= 0 || written < exact) && (sb = [o copyNextSampleBuffer])) {
+            CMItemCount k = CMSampleBufferGetNumSamples(sb);
+            CMBlockBufferRef bb = CMSampleBufferGetDataBuffer(sb);
+            if (bb && k > 0) {
+                size_t bytes = CMBlockBufferGetDataLength(bb);
+                size_t maxf = bytes / ((size_t)ch * sizeof(float));
+                if ((size_t)k > maxf) k = (CMItemCount)maxf;
+                if (exact > 0 && written + k > exact) k = (CMItemCount)(exact - written);
+                if (k > 0) {
+                    if ((size_t)k > cap_frames) {
+                        cap_frames = (size_t)k;
+                        inbuf = realloc(inbuf, cap_frames * (size_t)ch * sizeof(float));
+                        outbuf = realloc(outbuf, cap_frames * (size_t)ch * 3);
+                    }
+                    CMBlockBufferCopyDataBytes(bb, 0, (size_t)k * (size_t)ch * sizeof(float), inbuf);
+                    size_t nsamp = (size_t)k * (size_t)ch;
+                    for (size_t i = 0; i < nsamp; i++) {
+                        double x = (double)inbuf[i];
+                        if (!isfinite(x)) x = 0.0;
+                        if (x > 8388607.0 / 8388608.0) x = 8388607.0 / 8388608.0;
+                        else if (x < -1.0) x = -1.0;
+                        int32_t v = (int32_t)llround(x * 8388608.0);
+                        outbuf[3 * i + 0] = (uint8_t)(v & 0xFF);
+                        outbuf[3 * i + 1] = (uint8_t)((v >> 8) & 0xFF);
+                        outbuf[3 * i + 2] = (uint8_t)((v >> 16) & 0xFF);
+                    }
+                    size_t wbytes = nsamp * 3;
+                    wok = fwrite(outbuf, 1, wbytes, f) == wbytes;
+                    written += k;
+                }
+            }
+            CFRelease(sb);
+        }
+        AVAssetReaderStatus rst = r.status;
+        NSString *red = r.error.localizedDescription;
+        if (exact > 0 && written == exact && rst == AVAssetReaderStatusReading) [r cancelReading];
+        free(inbuf);
+        free(outbuf);
+        [o release];
+        [r release];
+        if (rst == AVAssetReaderStatusFailed) {
+            fclose(f); unlink(tmp);
+            w_media_raise("MediaVerify.prepare_audio: %s", red.UTF8String ?: "audio decode failed");
+        }
+        if (wok && exact > 0 && written < exact) {
+            uint8_t zeros[24576];
+            memset(zeros, 0, sizeof zeros);
+            size_t zcap = sizeof(zeros) / ((size_t)ch * 3);
+            while (wok && written < exact) {
+                int64_t n = exact - written > (int64_t)zcap ? (int64_t)zcap : exact - written;
+                size_t nb = (size_t)n * (size_t)ch * 3;
+                wok = fwrite(zeros, 1, nb, f) == nb;
+                written += n;
+            }
+        }
+        uint64_t total_data = (uint64_t)written * (uint64_t)ch * 3ULL;
+        if (wok && !rf64 && total_data >= 0xFFFFFF00ULL) {
+            fclose(f); unlink(tmp);
+            w_media_raise("MediaVerify.prepare_audio: output exceeded 4 GiB without RF64 reservation");
+        }
+        if (wok) {
+            a_wav24_header(hdr, rf64, written, sr, ch);
+            wok = fseeko(f, 0, SEEK_SET) == 0 && fwrite(hdr, 1, hlen, f) == hlen && fflush(f) == 0 && fsync(fileno(f)) == 0;
+        }
+        wok = (fclose(f) == 0) && wok;
+        if (!wok || rename(tmp, dst) != 0) {
+            unlink(tmp);
+            w_media_raise("MediaVerify.prepare_audio: writing %s failed: %s", dst, strerror(errno));
+        }
+        WValue res = w_array_new_empty();
+        res = w_array_push(res, w_int(written));
+        res = w_array_push(res, w_int(sr));
+        res = w_array_push(res, w_int(ch));
+        return res;
+    }
+}
+
+static ADec *a_open_any_source(WValue srcv, int32_t num, int32_t den, OSType pix, int64_t start, const char *what) {
+    char path[4096], err[512];
+    ADec *d = NULL;
+    if (w_is_array(srcv)) {
+        int n = 0;
+        char **segs = a_paths(srcv, &n);
+        d = a_dec_open(NULL, segs, n, num, den, pix, start, 30000, 16, err, sizeof err);
+        a_paths_free(segs, n);
+    } else {
+        if (!w_media_str(srcv, path, sizeof path) || !path[0]) w_media_raise("%s: source must be a path or segment array", what);
+        if (access(path, R_OK) != 0) w_media_raise("%s: cannot read %s: %s", what, path, strerror(errno));
+        d = a_dec_open(path, NULL, 0, num, den, pix, start, 30000, 16, err, sizeof err);
+    }
+    if (!d) w_media_raise("%s: %s", what, err);
+    return d;
+}
+
+typedef struct ALumaDownCtx {
+    const uint8_t *yp;
+    size_t         ys;
+    int            sw, sh, dw, dh, ten;
+    const int     *x_lo, *x_hi;
+    float         *dst;
+} ALumaDownCtx;
+
+static void a_downsample_luma_band(void *ctxp, size_t bi) {
+    ALumaDownCtx *c = ctxp;
+    int dy0 = (int)((int64_t)c->dh * (int64_t)bi / 4);
+    int dy1 = (int)((int64_t)c->dh * (int64_t)(bi + 1) / 4);
+    uint32_t acc[320];
+    for (int dy = dy0; dy < dy1; dy++) {
+        int y0 = (int)((int64_t)dy * c->sh / c->dh), y1 = (int)((int64_t)(dy + 1) * c->sh / c->dh);
+        if (y1 <= y0) y1 = y0 + 1;
+        int hcnt = y1 - y0;
+        memset(acc, 0, (size_t)c->dw * sizeof(uint32_t));
+        if (c->ten) {
+            for (int y = y0; y < y1; y++) {
+                const uint16_t *row = (const uint16_t *)(const void *)(c->yp + (size_t)y * c->ys);
+                for (int dx = 0; dx < c->dw; dx++) {
+                    int x0 = c->x_lo[dx], x1 = c->x_hi[dx];
+                    uint32_t s = 0;
+                    for (int x = x0; x < x1; x++) s += (uint32_t)(row[x] >> 6);
+                    acc[dx] += s;
+                }
+            }
+            for (int dx = 0; dx < c->dw; dx++) {
+                float cnt = (float)(hcnt * (c->x_hi[dx] - c->x_lo[dx]));
+                float yn = ((float)acc[dx] / cnt - 64.0f) * (1.0f / 876.0f);
+                c->dst[dy * c->dw + dx] = yn < 0.0f ? 0.0f : (yn > 1.0f ? 1.0f : yn);
+            }
+        } else {
+            for (int y = y0; y < y1; y++) {
+                const uint8_t *row = c->yp + (size_t)y * c->ys;
+                for (int dx = 0; dx < c->dw; dx++) {
+                    int x0 = c->x_lo[dx], x1 = c->x_hi[dx];
+                    uint32_t s = 0;
+                    for (int x = x0; x < x1; x++) s += (uint32_t)row[x];
+                    acc[dx] += s;
+                }
+            }
+            for (int dx = 0; dx < c->dw; dx++) {
+                float cnt = (float)(hcnt * (c->x_hi[dx] - c->x_lo[dx]));
+                float yn = ((float)acc[dx] / cnt - 16.0f) * (1.0f / 219.0f);
+                c->dst[dy * c->dw + dx] = yn < 0.0f ? 0.0f : (yn > 1.0f ? 1.0f : yn);
+            }
+        }
+    }
+}
+
+/* Downsample luma Y' of pb into dst[dw * dh] in limited-range [0, 1] units (dw <= 320). */
+static void a_downsample_luma_tv(CVPixelBufferRef pb, int dw, int dh, const int *x_lo, const int *x_hi, float *dst) {
+    CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+    int sw = (int)CVPixelBufferGetWidth(pb), sh = (int)CVPixelBufferGetHeight(pb);
+    size_t ys = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
+    const uint8_t *yp = CVPixelBufferGetBaseAddressOfPlane(pb, 0);
+    OSType fmt = CVPixelBufferGetPixelFormatType(pb);
+    int ten = fmt != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+    ALumaDownCtx ctx = {yp, ys, sw, sh, dw, dh, ten, x_lo, x_hi, dst};
+    if ((int64_t)sw * sh >= 131072 && dh >= 8)
+        dispatch_apply_f(4, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), &ctx, a_downsample_luma_band);
+    else
+        for (size_t b = 0; b < 4; b++) a_downsample_luma_band(&ctx, b);
+    CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+}
+
+static WValue a_anom_event(const char *kind, double s0, double s1) {
+    WValue e = w_array_new_empty();
+    e = w_array_push(e, w_string(kind));
+    e = w_array_push(e, w_float(s0));
+    e = w_array_push(e, w_float(s1));
+    return e;
+}
+
+/* w_media_anomalies(src, [black_min, freeze_min, noise, pix_th, rate_num, rate_den]) -> [frames, events] */
+WValue w_media_anomalies(WValue srcv, WValue optv) {
+    @autoreleasepool {
+        double black_min = w_media_num(m_avf_arr(optv, 0), 1.0, "black_min");
+        double freeze_min = w_media_num(m_avf_arr(optv, 1), 3.0, "freeze_min");
+        double noise = w_media_num(m_avf_arr(optv, 2), 0.001, "noise");
+        double pix_th = w_media_num(m_avf_arr(optv, 3), 0.10, "pix_th");
+        int32_t num = (int32_t)w_media_num(m_avf_arr(optv, 4), 0, "rate"), den = (int32_t)w_media_num(m_avf_arr(optv, 5), 0, "rate");
+        ADec *d = a_open_any_source(srcv, num, den, 0, 0, "MediaVerify.anomalies");
+        double dt = (double)d->den / (double)d->num;
+        int dw = d->w < 320 ? d->w : 320;
+        int dh = (int)(((int64_t)d->h * dw / (d->w ? d->w : 1)) & ~1LL);
+        if (dh < 2) dh = 2;
+        int npix = dw * dh;
+        int x_lo[320], x_hi[320];
+        for (int dx = 0; dx < dw; dx++) {
+            int x0 = (int)((int64_t)dx * d->w / dw), x1 = (int)((int64_t)(dx + 1) * d->w / dw);
+            if (x1 <= x0) x1 = x0 + 1;
+            x_lo[dx] = x0;
+            x_hi[dx] = x1;
+        }
+        int black_req = (int)ceil(0.98 * (double)npix);
+        float *cur = malloc((size_t)npix * sizeof(float));
+        float *ref = malloc((size_t)npix * sizeof(float));
+        WValue events = w_array_new_empty();
+        int64_t n = 0, black_start = -1, ref_frame = 0;
+        int frozen = 0;
+        char err[512];
+        for (;;) {
+            CVPixelBufferRef pb = NULL;
+            int64_t frame = 0;
+            int r = a_dec_next(d, &pb, &frame, err, sizeof err);
+            if (r < 0) {
+                free(cur); free(ref); a_dec_free(d);
+                w_media_raise("MediaVerify.anomalies: %s", err);
+            }
+            if (r == 0) break;
+            a_downsample_luma_tv(pb, dw, dh, x_lo, x_hi, cur);
+            CVBufferRelease(pb);
+            int bcnt = 0;
+            float pth = (float)pix_th;
+            for (int i = 0; i < npix; i++) if (cur[i] <= pth) bcnt++;
+            if (bcnt >= black_req) {
+                if (black_start < 0) black_start = n;
+            } else if (black_start >= 0) {
+                double s0 = (double)black_start * dt, s1 = (double)n * dt;
+                if (s1 - s0 >= black_min) events = w_array_push(events, a_anom_event("black", s0, s1));
+                black_start = -1;
+            }
+            if (n == 0) {
+                memcpy(ref, cur, (size_t)npix * sizeof(float));
+                ref_frame = 0;
+                frozen = 0;
+            } else {
+                double diff = 0.0;
+                for (int i = 0; i < npix; i++) diff += (double)fabsf(cur[i] - ref[i]);
+                double mad = diff / (double)npix;
+                if (mad < noise) {
+                    frozen = 1;
+                } else {
+                    if (frozen) {
+                        double s0 = (double)ref_frame * dt, s1 = (double)n * dt;
+                        if (s1 - s0 >= freeze_min) events = w_array_push(events, a_anom_event("freeze", s0, s1));
+                    }
+                    memcpy(ref, cur, (size_t)npix * sizeof(float));
+                    ref_frame = n;
+                    frozen = 0;
+                }
+            }
+            n++;
+        }
+        if (black_start >= 0) {
+            double s0 = (double)black_start * dt, s1 = (double)n * dt;
+            if (s1 - s0 >= black_min) events = w_array_push(events, a_anom_event("black", s0, s1));
+        }
+        if (frozen) {
+            double s0 = (double)ref_frame * dt, s1 = (double)n * dt;
+            if (s1 - s0 >= freeze_min) events = w_array_push(events, a_anom_event("freeze", s0, s1));
+        }
+        free(cur);
+        free(ref);
+        a_dec_free(d);
+        WValue out = w_array_new_empty();
+        out = w_array_push(out, w_int(n));
+        out = w_array_push(out, events);
+        return out;
+    }
+}
+
+/* 11-tap normalized 1D Gaussian (sigma = 1.5) from Wang et al. SSIM / MS-SSIM. */
+static const float a_ssim_g11[11] = {
+    0.0010283801f, 0.0075987582f, 0.0360007733f, 0.1093606874f, 0.2130055279f,
+    0.2660117149f, 0.2130055279f, 0.1093606874f, 0.0360007733f, 0.0075987582f, 0.0010283801f
+};
+
+typedef struct ASSIMCtx {
+    const float *a, *b;
+    float       *tmp; /* 5 * w * h floats */
+    int          w, h;
+    double       part_l[8], part_cs[8], part_ssim[8];
+} ASSIMCtx;
+
+static void a_ssim_hpass(void *ctxp, size_t bi) {
+    ASSIMCtx *c = ctxp;
+    int w = c->w, h = c->h;
+    int y0 = (int)((int64_t)h * (int64_t)bi / 8), y1 = (int)((int64_t)h * (int64_t)(bi + 1) / 8);
+    size_t plane = (size_t)w * (size_t)h;
+    float *ta = c->tmp, *tb = ta + plane, *taa = tb + plane, *tbb = taa + plane, *tab = tbb + plane;
+    for (int y = y0; y < y1; y++) {
+        const float *ra = c->a + (size_t)y * (size_t)w, *rb = c->b + (size_t)y * (size_t)w;
+        size_t ro = (size_t)y * (size_t)w;
+        for (int x = 0; x < w; x++) {
+            float sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+            if (x >= 5 && x + 5 < w) {
+                for (int k = -5; k <= 5; k++) {
+                    float g = a_ssim_g11[k + 5], va = ra[x + k], vb = rb[x + k];
+                    sa += g * va; sb += g * vb;
+                    saa += g * va * va; sbb += g * vb * vb; sab += g * va * vb;
+                }
+            } else {
+                for (int k = -5; k <= 5; k++) {
+                    int xx = x + k;
+                    if (xx < 0) xx = 0;
+                    else if (xx >= w) xx = w - 1;
+                    float g = a_ssim_g11[k + 5], va = ra[xx], vb = rb[xx];
+                    sa += g * va; sb += g * vb;
+                    saa += g * va * va; sbb += g * vb * vb; sab += g * va * vb;
+                }
+            }
+            ta[ro + (size_t)x] = sa;
+            tb[ro + (size_t)x] = sb;
+            taa[ro + (size_t)x] = saa;
+            tbb[ro + (size_t)x] = sbb;
+            tab[ro + (size_t)x] = sab;
+        }
+    }
+}
+
+static void a_ssim_vpass(void *ctxp, size_t bi) {
+    ASSIMCtx *c = ctxp;
+    int w = c->w, h = c->h;
+    int y0 = (int)((int64_t)h * (int64_t)bi / 8), y1 = (int)((int64_t)h * (int64_t)(bi + 1) / 8);
+    size_t plane = (size_t)w * (size_t)h;
+    const float *ta = c->tmp, *tb = ta + plane, *taa = tb + plane, *tbb = taa + plane, *tab = tbb + plane;
+    const float C1 = 0.0001f, C2 = 0.0009f;
+    double sum_l = 0.0, sum_cs = 0.0, sum_ssim = 0.0;
+    for (int y = y0; y < y1; y++) {
+        int rows[11];
+        for (int k = -5; k <= 5; k++) {
+            int yy = y + k;
+            if (yy < 0) yy = 0;
+            else if (yy >= h) yy = h - 1;
+            rows[k + 5] = yy;
+        }
+        for (int x = 0; x < w; x++) {
+            float mux = 0, muy = 0, exx = 0, eyy = 0, exy = 0;
+            for (int k = 0; k < 11; k++) {
+                float g = a_ssim_g11[k];
+                size_t idx = (size_t)rows[k] * (size_t)w + (size_t)x;
+                mux += g * ta[idx];
+                muy += g * tb[idx];
+                exx += g * taa[idx];
+                eyy += g * tbb[idx];
+                exy += g * tab[idx];
+            }
+            float mx2 = mux * mux, my2 = muy * muy, mxy = mux * muy;
+            float sx2 = exx - mx2, sy2 = eyy - my2, sxy = exy - mxy;
+            if (sx2 < 0.0f) sx2 = 0.0f;
+            if (sy2 < 0.0f) sy2 = 0.0f;
+            float l = (2.0f * mxy + C1) / (mx2 + my2 + C1);
+            float cs = (2.0f * sxy + C2) / (sx2 + sy2 + C2);
+            sum_l += (double)l;
+            sum_cs += (double)cs;
+            sum_ssim += (double)(l * cs);
+        }
+    }
+    c->part_l[bi] = sum_l;
+    c->part_cs[bi] = sum_cs;
+    c->part_ssim[bi] = sum_ssim;
+}
+
+static void a_ssim_scale(const float *a, const float *b, float *tmp, int w, int h, double *out_l, double *out_cs, double *out_ssim) {
+    ASSIMCtx ctx;
+    memset(&ctx, 0, sizeof ctx);
+    ctx.a = a; ctx.b = b; ctx.tmp = tmp; ctx.w = w; ctx.h = h;
+    if ((int64_t)w * h >= 32768) {
+        dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
+        dispatch_apply_f(8, q, &ctx, a_ssim_hpass);
+        dispatch_apply_f(8, q, &ctx, a_ssim_vpass);
+    } else {
+        for (size_t i = 0; i < 8; i++) a_ssim_hpass(&ctx, i);
+        for (size_t i = 0; i < 8; i++) a_ssim_vpass(&ctx, i);
+    }
+    double sl = 0, scs = 0, ss = 0;
+    for (int i = 0; i < 8; i++) { sl += ctx.part_l[i]; scs += ctx.part_cs[i]; ss += ctx.part_ssim[i]; }
+    double inv = 1.0 / ((double)w * (double)h);
+    *out_l = sl * inv;
+    *out_cs = scs * inv;
+    *out_ssim = ss * inv;
+}
+
+static void a_yplane_to_f32(const uint8_t *yp, size_t ys, int w, int h, int ten, float *dst) {
+    if (ten) {
+        const float inv = 1.0f / 1023.0f;
+        for (int y = 0; y < h; y++) {
+            const uint16_t *r = (const uint16_t *)(const void *)(yp + (size_t)y * ys);
+            float *o = dst + (size_t)y * (size_t)w;
+            for (int x = 0; x < w; x++) o[x] = (float)(r[x] >> 6) * inv;
+        }
+    } else {
+        const float inv = 1.0f / 255.0f;
+        for (int y = 0; y < h; y++) {
+            const uint8_t *r = yp + (size_t)y * ys;
+            float *o = dst + (size_t)y * (size_t)w;
+            for (int x = 0; x < w; x++) o[x] = (float)r[x] * inv;
+        }
+    }
+}
+
+/* w_media_quality(ref_src, cand_src, [ref_start, cand_start, max_frames, fit_code, rate_num, rate_den]) -> [[key, val], ...] */
+WValue w_media_quality(WValue refv, WValue candv, WValue optv) {
+    @autoreleasepool {
+        int64_t ref_start = (int64_t)w_media_num(m_avf_arr(optv, 0), 0, "ref_start");
+        int64_t cand_start = (int64_t)w_media_num(m_avf_arr(optv, 1), 0, "cand_start");
+        int64_t max_frames = (int64_t)w_media_num(m_avf_arr(optv, 2), 0, "frames");
+        int fit_code = (int)w_media_num(m_avf_arr(optv, 3), 0, "fit");
+        int32_t num = (int32_t)w_media_num(m_avf_arr(optv, 4), 0, "rate"), den = (int32_t)w_media_num(m_avf_arr(optv, 5), 0, "rate");
+        ADec *dr = a_open_any_source(refv, num, den, 0, ref_start, "MediaVerify.quality(reference)");
+        ADec *dc = a_open_any_source(candv, num, den, 0, cand_start, "MediaVerify.quality(candidate)");
+        int w = dc->w, h = dc->h;
+        int need_scale = dr->w != w || dr->h != h || fit_code != 0;
+        WMediaScale py;
+        memset(&py, 0, sizeof py);
+        uint16_t *scaled_y = NULL;
+        char err[512];
+        if (need_scale) {
+            double crop[4]; int rect[4];
+            a_fit_geometry(dr->w, dr->h, w, h, fit_code, crop, rect);
+            uint8_t fy[4] = {16, 0, 0, 0};
+            if (w_media_scale_plan(&py, 1, W_MEDIA_ALPHA_NONE, W_MEDIA_FILTER_LANCZOS3, dr->w, dr->h, w, h,
+                                   crop, rect, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, fy, 10, err, sizeof err) != 0) {
+                a_dec_free(dr); a_dec_free(dc);
+                w_media_raise("MediaVerify.quality: %s", err);
+            }
+            py.in_bits = 10;
+            py.vimage_ok = 0;
+            scaled_y = malloc((size_t)w * (size_t)h * sizeof(uint16_t));
+        }
+        size_t npix = (size_t)w * (size_t)h;
+        float *fa = malloc(npix * sizeof(float)), *fb = malloc(npix * sizeof(float));
+        float *da = malloc((npix / 4 + 16) * sizeof(float)), *db = malloc((npix / 4 + 16) * sizeof(float));
+        float *scratch = malloc(5 * npix * sizeof(float));
+        static const double w_ms[5] = {0.0448, 0.2856, 0.3001, 0.2363, 0.1333};
+        double sum_ssim = 0.0, min_ssim = 1.0, sum_ms = 0.0, min_ms = 1.0, sum_mse = 0.0;
+        int64_t n = 0;
+        while (max_frames <= 0 || n < max_frames) {
+            CVPixelBufferRef pbr = NULL, pbc = NULL;
+            int64_t fr = 0, fc = 0;
+            int rr = a_dec_next(dr, &pbr, &fr, err, sizeof err);
+            if (rr < 0) {
+                free(fa); free(fb); free(da); free(db); free(scratch); free(scaled_y);
+                if (need_scale) w_media_scale_free(&py);
+                a_dec_free(dr); a_dec_free(dc);
+                w_media_raise("MediaVerify.quality: %s", err);
+            }
+            int rc = a_dec_next(dc, &pbc, &fc, err, sizeof err);
+            if (rc < 0) {
+                if (pbr) CVBufferRelease(pbr);
+                free(fa); free(fb); free(da); free(db); free(scratch); free(scaled_y);
+                if (need_scale) w_media_scale_free(&py);
+                a_dec_free(dr); a_dec_free(dc);
+                w_media_raise("MediaVerify.quality: %s", err);
+            }
+            if (rr == 0 || rc == 0) {
+                if (pbr) CVBufferRelease(pbr);
+                if (pbc) CVBufferRelease(pbc);
+                break;
+            }
+            CVPixelBufferLockBaseAddress(pbr, kCVPixelBufferLock_ReadOnly);
+            CVPixelBufferLockBaseAddress(pbc, kCVPixelBufferLock_ReadOnly);
+            const uint8_t *ry = CVPixelBufferGetBaseAddressOfPlane(pbr, 0);
+            size_t rys = CVPixelBufferGetBytesPerRowOfPlane(pbr, 0);
+            int rten = CVPixelBufferGetPixelFormatType(pbr) != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+            if (need_scale) {
+                if (!rten) {
+                    CVPixelBufferUnlockBaseAddress(pbc, kCVPixelBufferLock_ReadOnly);
+                    CVPixelBufferUnlockBaseAddress(pbr, kCVPixelBufferLock_ReadOnly);
+                    CVBufferRelease(pbr); CVBufferRelease(pbc);
+                    free(fa); free(fb); free(da); free(db); free(scratch); free(scaled_y);
+                    w_media_scale_free(&py); a_dec_free(dr); a_dec_free(dc);
+                    w_media_raise("MediaVerify.quality: expected 10-bit decoder plane");
+                }
+                if (w_media_scale_run(&py, W_MEDIA_BACKEND_CPU, ry, rys, rys * (size_t)dr->h,
+                                      (uint8_t *)scaled_y, (size_t)w * 2, (size_t)w * 2 * (size_t)h, err, sizeof err) < 0) {
+                    CVPixelBufferUnlockBaseAddress(pbc, kCVPixelBufferLock_ReadOnly);
+                    CVPixelBufferUnlockBaseAddress(pbr, kCVPixelBufferLock_ReadOnly);
+                    CVBufferRelease(pbr); CVBufferRelease(pbc);
+                    free(fa); free(fb); free(da); free(db); free(scratch); free(scaled_y);
+                    w_media_scale_free(&py); a_dec_free(dr); a_dec_free(dc);
+                    w_media_raise("MediaVerify.quality: %s", err);
+                }
+                a_yplane_to_f32((const uint8_t *)scaled_y, (size_t)w * 2, w, h, 1, fa);
+            } else {
+                a_yplane_to_f32(ry, rys, w, h, rten, fa);
+            }
+            const uint8_t *cy = CVPixelBufferGetBaseAddressOfPlane(pbc, 0);
+            size_t cys = CVPixelBufferGetBytesPerRowOfPlane(pbc, 0);
+            int cten = CVPixelBufferGetPixelFormatType(pbc) != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+            a_yplane_to_f32(cy, cys, w, h, cten, fb);
+            CVPixelBufferUnlockBaseAddress(pbc, kCVPixelBufferLock_ReadOnly);
+            CVPixelBufferUnlockBaseAddress(pbr, kCVPixelBufferLock_ReadOnly);
+            CVBufferRelease(pbr);
+            CVBufferRelease(pbc);
+
+            double mse = 0.0;
+            for (size_t i = 0; i < npix; i++) {
+                double d0 = (double)fa[i] - (double)fb[i];
+                mse += d0 * d0;
+            }
+            sum_mse += mse / (double)npix;
+
+            double l_s[5], cs_s[5], ssim0 = 0.0;
+            int sw_cur = w, sh_cur = h, scales = 0;
+            const float *ca = fa, *cb = fb;
+            for (int s = 0; s < 5; s++) {
+                double l_val = 0, cs_val = 0, ss_val = 0;
+                a_ssim_scale(ca, cb, scratch, sw_cur, sh_cur, &l_val, &cs_val, &ss_val);
+                if (s == 0) ssim0 = ss_val;
+                l_s[s] = l_val < 1e-10 ? 1e-10 : l_val;
+                cs_s[s] = cs_val < 1e-10 ? 1e-10 : cs_val;
+                scales = s + 1;
+                if (s == 4 || sw_cur < 4 || sh_cur < 4) break;
+                int nw = sw_cur / 2, nh = sh_cur / 2;
+                float *na = (s == 0) ? da : (float *)fa; /* fa/fb safe to reuse after s >= 1 */
+                float *nb = (s == 0) ? db : (float *)fb;
+                for (int yy = 0; yy < nh; yy++) {
+                    const float *r0 = ca + (size_t)(2 * yy) * (size_t)sw_cur, *r1 = r0 + sw_cur;
+                    const float *q0 = cb + (size_t)(2 * yy) * (size_t)sw_cur, *q1 = q0 + sw_cur;
+                    float *oa = na + (size_t)yy * (size_t)nw, *ob = nb + (size_t)yy * (size_t)nw;
+                    for (int xx = 0; xx < nw; xx++) {
+                        oa[xx] = 0.25f * (r0[2 * xx] + r0[2 * xx + 1] + r1[2 * xx] + r1[2 * xx + 1]);
+                        ob[xx] = 0.25f * (q0[2 * xx] + q0[2 * xx + 1] + q1[2 * xx] + q1[2 * xx + 1]);
+                    }
+                }
+                ca = na; cb = nb; sw_cur = nw; sh_cur = nh;
+            }
+            double wsum = 0.0;
+            for (int s = 0; s < scales; s++) wsum += w_ms[s];
+            double ms = 1.0;
+            for (int s = 0; s < scales - 1; s++) ms *= pow(cs_s[s], w_ms[s] / wsum);
+            ms *= pow(l_s[scales - 1] * cs_s[scales - 1], w_ms[scales - 1] / wsum);
+
+            sum_ssim += ssim0;
+            if (ssim0 < min_ssim) min_ssim = ssim0;
+            sum_ms += ms;
+            if (ms < min_ms) min_ms = ms;
+            n++;
+        }
+        free(fa); free(fb); free(da); free(db); free(scratch); free(scaled_y);
+        if (need_scale) w_media_scale_free(&py);
+        a_dec_free(dr);
+        a_dec_free(dc);
+        if (n <= 0) w_media_raise("MediaVerify.quality: zero overlapping frames decoded");
+        double mean_mse = sum_mse / (double)n;
+        double psnr = mean_mse <= 1e-12 ? 99.0 : -10.0 * log10(mean_mse);
+        WValue out = w_array_new_empty();
+        out = w_array_push(out, a_pair("frames", w_int(n)));
+        out = w_array_push(out, a_pair("ssim", w_float(sum_ssim / (double)n)));
+        out = w_array_push(out, a_pair("min_ssim", w_float(min_ssim)));
+        out = w_array_push(out, a_pair("ms_ssim", w_float(sum_ms / (double)n)));
+        out = w_array_push(out, a_pair("min_ms_ssim", w_float(min_ms)));
+        out = w_array_push(out, a_pair("psnr_y", w_float(psnr)));
+        return out;
+    }
+}
+
+typedef struct AYuvRgbCtx {
+    const uint8_t *yp, *cp;
+    size_t         ys, cs;
+    uint8_t       *dst;
+    int            w, h, vsub, depth;
+} AYuvRgbCtx;
+
+static void a_yuv10_to_rgb_band(void *ctxp, size_t bi) {
+    AYuvRgbCtx *c = ctxp;
+    int w = c->w, h = c->h, vsub = c->vsub, depth = c->depth;
+    int y0 = (int)((int64_t)h * (int64_t)bi / 8), y1 = (int)((int64_t)h * (int64_t)(bi + 1) / 8);
+    int ch_h = (h + vsub - 1) / vsub, cw_pairs = (w + 1) / 2;
+    for (int y = y0; y < y1; y++) {
+        const uint16_t *yr = (const uint16_t *)(const void *)(c->yp + (size_t)y * c->ys);
+        int cy0 = y / vsub, cy1 = cy0;
+        double wy = 0.0;
+        if (vsub == 2) {
+            /* Left chroma siting (0.5, 1.0 in luma units): chroma row k sits between luma rows 2k and 2k+1. */
+            double pos = ((double)y + 0.5 - 1.0) * 0.5;
+            int base = (int)floor(pos);
+            wy = pos - (double)base;
+            cy0 = base < 0 ? 0 : (base >= ch_h ? ch_h - 1 : base);
+            cy1 = base + 1 < 0 ? 0 : (base + 1 >= ch_h ? ch_h - 1 : base + 1);
+        }
+        const uint16_t *cr0 = (const uint16_t *)(const void *)(c->cp + (size_t)cy0 * c->cs);
+        const uint16_t *cr1 = (const uint16_t *)(const void *)(c->cp + (size_t)cy1 * c->cs);
+        uint8_t *out = c->dst + (size_t)y * (size_t)w * (size_t)(depth == 16 ? 6 : 3);
+        for (int x = 0; x < w; x++) {
+            double y10 = (double)(yr[x] >> 6);
+            int cx0 = x / 2, cx1 = (x & 1) ? (cx0 + 1 < cw_pairs ? cx0 + 1 : cx0) : cx0;
+            double cb0, crv0;
+            if (x & 1) {
+                double b00 = (double)(cr0[2 * cx0] >> 6), b01 = (double)(cr0[2 * cx1] >> 6);
+                double r00 = (double)(cr0[2 * cx0 + 1] >> 6), r01 = (double)(cr0[2 * cx1 + 1] >> 6);
+                if (vsub == 2) {
+                    double b10 = (double)(cr1[2 * cx0] >> 6), b11 = (double)(cr1[2 * cx1] >> 6);
+                    double r10 = (double)(cr1[2 * cx0 + 1] >> 6), r11 = (double)(cr1[2 * cx1 + 1] >> 6);
+                    cb0 = (1.0 - wy) * 0.5 * (b00 + b01) + wy * 0.5 * (b10 + b11);
+                    crv0 = (1.0 - wy) * 0.5 * (r00 + r01) + wy * 0.5 * (r10 + r11);
+                } else {
+                    cb0 = 0.5 * (b00 + b01);
+                    crv0 = 0.5 * (r00 + r01);
+                }
+            } else if (vsub == 2) {
+                cb0 = (1.0 - wy) * (double)(cr0[2 * cx0] >> 6) + wy * (double)(cr1[2 * cx0] >> 6);
+                crv0 = (1.0 - wy) * (double)(cr0[2 * cx0 + 1] >> 6) + wy * (double)(cr1[2 * cx0 + 1] >> 6);
+            } else {
+                cb0 = (double)(cr0[2 * cx0] >> 6);
+                crv0 = (double)(cr0[2 * cx0 + 1] >> 6);
+            }
+            double yn = (y10 - 64.0) * (1.0 / 876.0);
+            double cbn = (cb0 - 512.0) * (1.0 / 896.0);
+            double crn = (crv0 - 512.0) * (1.0 / 896.0);
+            double rf = yn + 1.5748 * crn;
+            double gf = yn - 0.18732427293064876 * cbn - 0.46812427293064876 * crn;
+            double bf = yn + 1.8556 * cbn;
+            if (rf < 0.0) rf = 0.0; else if (rf > 1.0) rf = 1.0;
+            if (gf < 0.0) gf = 0.0; else if (gf > 1.0) gf = 1.0;
+            if (bf < 0.0) bf = 0.0; else if (bf > 1.0) bf = 1.0;
+            if (depth == 16) {
+                uint16_t ru = (uint16_t)llround(rf * 65535.0);
+                uint16_t gu = (uint16_t)llround(gf * 65535.0);
+                uint16_t bu = (uint16_t)llround(bf * 65535.0);
+                size_t o = (size_t)x * 6;
+                out[o + 0] = (uint8_t)(ru & 0xFF); out[o + 1] = (uint8_t)(ru >> 8);
+                out[o + 2] = (uint8_t)(gu & 0xFF); out[o + 3] = (uint8_t)(gu >> 8);
+                out[o + 4] = (uint8_t)(bu & 0xFF); out[o + 5] = (uint8_t)(bu >> 8);
+            } else {
+                size_t o = (size_t)x * 3;
+                out[o + 0] = (uint8_t)llround(rf * 255.0);
+                out[o + 1] = (uint8_t)llround(gf * 255.0);
+                out[o + 2] = (uint8_t)llround(bf * 255.0);
+            }
+        }
+    }
+}
+
+/* w_media_extract_frames(src, sorted_frames, [width, height, fit_code, depth, rate_num, rate_den]) -> [u8[], ...] */
+WValue w_media_extract_frames(WValue srcv, WValue framesv, WValue optv) {
+    @autoreleasepool {
+        if (!w_is_array(framesv)) w_media_raise("MediaVerify.extract_frames: frames must be an Array");
+        int64_t nf = w_as_array(framesv)->size;
+        if (nf == 0) return w_array_new_empty();
+        int req_w = (int)w_media_num(m_avf_arr(optv, 0), 0, "width");
+        int req_h = (int)w_media_num(m_avf_arr(optv, 1), 0, "height");
+        int fit_code = (int)w_media_num(m_avf_arr(optv, 2), 0, "fit");
+        int depth = (int)w_media_num(m_avf_arr(optv, 3), 8, "depth");
+        int32_t num = (int32_t)w_media_num(m_avf_arr(optv, 4), 0, "rate"), den = (int32_t)w_media_num(m_avf_arr(optv, 5), 0, "rate");
+        if (depth != 8 && depth != 16) w_media_raise("MediaVerify.extract_frames: depth must be 8 or 16");
+        int64_t first_want = (int64_t)w_media_num(w_array_get(framesv, w_int(0)), 0, "frame");
+        if (first_want < 0) first_want = 0;
+        ADec *d = a_open_any_source(srcv, num, den, 0, first_want, "MediaVerify.extract_frames");
+        int dw = req_w > 0 ? req_w : d->w;
+        int dh = req_h > 0 ? req_h : d->h;
+        int src_vsub = a_dec_vsub(d);
+        int need_scale = dw != d->w || dh != d->h || fit_code != 0;
+        WMediaScale py, pc;
+        memset(&py, 0, sizeof py);
+        memset(&pc, 0, sizeof pc);
+        uint16_t *sy_buf = NULL, *sc_buf = NULL;
+        int dst_vsub = src_vsub;
+        char err[512];
+        if (need_scale) {
+            dst_vsub = 1; /* preserve 4:2:2 vertical chroma resolution on scaled extracts */
+            double crop[4]; int rect[4];
+            a_fit_geometry(d->w, d->h, dw, dh, fit_code, crop, rect);
+            uint8_t fy[4] = {16, 0, 0, 0}, fc[4] = {128, 128, 0, 0};
+            double osx = d->siting == 1 ? 1.0 : 0.5, osy = src_vsub == 1 || d->siting == 2 ? 0.5 : 1.0;
+            int rc = w_media_scale_plan(&py, 1, W_MEDIA_ALPHA_NONE, W_MEDIA_FILTER_LANCZOS3, d->w, d->h, dw, dh,
+                                        crop, rect, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, fy, 10, err, sizeof err);
+            if (rc == 0) {
+                rc = w_media_scale_plan(&pc, 2, W_MEDIA_ALPHA_NONE, W_MEDIA_FILTER_LANCZOS3,
+                                        (d->w + 1) / 2, (d->h + src_vsub - 1) / src_vsub, (dw + 1) / 2, dh,
+                                        crop, rect, 2, src_vsub, osx, osy, 2, 1, 0.5, 0.5, fc, 10, err, sizeof err);
+                if (rc != 0) w_media_scale_free(&py);
+            }
+            if (rc != 0) {
+                a_dec_free(d);
+                w_media_raise("MediaVerify.extract_frames: %s", err);
+            }
+            py.in_bits = pc.in_bits = 10;
+            py.vimage_ok = pc.vimage_ok = 0;
+            sy_buf = malloc((size_t)dw * (size_t)dh * sizeof(uint16_t));
+            sc_buf = malloc((size_t)((dw + 1) / 2) * 2 * (size_t)dh * sizeof(uint16_t));
+        }
+        WValue out = w_array_new_empty();
+        CVPixelBufferRef cur_pb = NULL;
+        int64_t cur_frame = -1;
+        size_t out_bytes = (size_t)dw * (size_t)dh * (size_t)(depth == 16 ? 6 : 3);
+        for (int64_t i = 0; i < nf; i++) {
+            int64_t want = (int64_t)w_media_num(w_array_get(framesv, w_int(i)), 0, "frame");
+            if (want < 0) want = 0;
+            if (i > 0 && want < cur_frame) {
+                if (cur_pb) { CVBufferRelease(cur_pb); cur_pb = NULL; }
+                a_dec_free(d);
+                d = a_open_any_source(srcv, num, den, 0, want, "MediaVerify.extract_frames");
+                cur_frame = -1;
+            } else if (cur_frame >= 0 && want - cur_frame > 300) {
+                if (cur_pb) { CVBufferRelease(cur_pb); cur_pb = NULL; }
+                a_dec_free(d);
+                d = a_open_any_source(srcv, num, den, 0, want, "MediaVerify.extract_frames");
+                cur_frame = -1;
+            }
+            while (cur_frame < want) {
+                CVPixelBufferRef next_pb = NULL;
+                int64_t f = 0;
+                int r = a_dec_next(d, &next_pb, &f, err, sizeof err);
+                if (r < 0) {
+                    if (cur_pb) CVBufferRelease(cur_pb);
+                    free(sy_buf); free(sc_buf);
+                    if (need_scale) { w_media_scale_free(&py); w_media_scale_free(&pc); }
+                    a_dec_free(d);
+                    w_media_raise("MediaVerify.extract_frames: %s", err);
+                }
+                if (r == 0) break; /* hold last frame if want is at/past end */
+                if (cur_pb) CVBufferRelease(cur_pb);
+                cur_pb = next_pb;
+                cur_frame = f;
+            }
+            if (!cur_pb) {
+                free(sy_buf); free(sc_buf);
+                if (need_scale) { w_media_scale_free(&py); w_media_scale_free(&pc); }
+                a_dec_free(d);
+                w_media_raise("MediaVerify.extract_frames: could not decode frame %lld", (long long)want);
+            }
+            WValue bytes = w_bytes_new((int64_t)out_bytes);
+            uint8_t *dst_ptr = (uint8_t *)w_as_array(bytes)->slots;
+            CVPixelBufferLockBaseAddress(cur_pb, kCVPixelBufferLock_ReadOnly);
+            const uint8_t *yp = CVPixelBufferGetBaseAddressOfPlane(cur_pb, 0);
+            const uint8_t *cp = CVPixelBufferGetBaseAddressOfPlane(cur_pb, 1);
+            size_t ys = CVPixelBufferGetBytesPerRowOfPlane(cur_pb, 0);
+            size_t cs = CVPixelBufferGetBytesPerRowOfPlane(cur_pb, 1);
+            if (need_scale) {
+                size_t dys = (size_t)dw * 2, dcs = (size_t)((dw + 1) / 2) * 4;
+                int b1 = w_media_scale_run(&py, W_MEDIA_BACKEND_CPU, yp, ys, ys * (size_t)d->h,
+                                           (uint8_t *)sy_buf, dys, dys * (size_t)dh, err, sizeof err);
+                int b2 = b1 < 0 ? b1 : w_media_scale_run(&pc, W_MEDIA_BACKEND_CPU, cp, cs, cs * (size_t)((d->h + src_vsub - 1) / src_vsub),
+                                                         (uint8_t *)sc_buf, dcs, dcs * (size_t)dh, err, sizeof err);
+                CVPixelBufferUnlockBaseAddress(cur_pb, kCVPixelBufferLock_ReadOnly);
+                if (b2 < 0) {
+                    CVBufferRelease(cur_pb);
+                    free(sy_buf); free(sc_buf);
+                    w_media_scale_free(&py); w_media_scale_free(&pc);
+                    a_dec_free(d);
+                    w_media_raise("MediaVerify.extract_frames: %s", err);
+                }
+                AYuvRgbCtx ctx = {(const uint8_t *)sy_buf, (const uint8_t *)sc_buf, dys, dcs, dst_ptr, dw, dh, dst_vsub, depth};
+                if ((int64_t)dw * dh >= 32768)
+                    dispatch_apply_f(8, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), &ctx, a_yuv10_to_rgb_band);
+                else
+                    for (size_t b = 0; b < 8; b++) a_yuv10_to_rgb_band(&ctx, b);
+            } else {
+                AYuvRgbCtx ctx = {yp, cp, ys, cs, dst_ptr, dw, dh, src_vsub, depth};
+                if ((int64_t)dw * dh >= 32768)
+                    dispatch_apply_f(8, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), &ctx, a_yuv10_to_rgb_band);
+                else
+                    for (size_t b = 0; b < 8; b++) a_yuv10_to_rgb_band(&ctx, b);
+                CVPixelBufferUnlockBaseAddress(cur_pb, kCVPixelBufferLock_ReadOnly);
+            }
+            out = w_array_push(out, bytes);
+        }
+        if (cur_pb) CVBufferRelease(cur_pb);
+        free(sy_buf);
+        free(sc_buf);
+        if (need_scale) { w_media_scale_free(&py); w_media_scale_free(&pc); }
+        a_dec_free(d);
         return out;
     }
 }

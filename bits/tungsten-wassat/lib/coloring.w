@@ -669,7 +669,9 @@ WASSAT_COLORING_NODE_CAP = 200000
   ci = 0
   while ci < ncl
     n = fcl[ci]
-    return 0 if n < 2
+    # Unit clauses are not part of the certificate: every check below asks
+    # only whether a needed clause is PRESENT, and an extra clause can only
+    # strengthen the formula (cliquecoloring_n14_k7_c6 fixes one slot variable).
     if n > 3
       if w1 == 0 || n == w1
         w1 = n
@@ -697,7 +699,10 @@ WASSAT_COLORING_NODE_CAP = 200000
     c_colors = w1
   else
     return 0
-  return 0 if n_verts > 62 || k_slots > 30 || c_colors < 3 || c_colors >= k_slots
+  # Colors are bits of one word; vertices and slots index byte tables.
+  return 0 if n_verts > 2000 || k_slots > 30 || c_colors < 3 || c_colors >= k_slots
+  kk = k_slots * k_slots
+  return 0 if n_verts * n_verts * kk > 64000000
 
   q_role = i64[nv + 1] # 1..k_slots for clique-slot vars, -1..-n_verts for coloring vars
   q_col = i64[nv + 1]  # 0..n_verts-1 for clique-slot vars, 0..c_colors-1 for coloring vars
@@ -769,7 +774,10 @@ WASSAT_COLORING_NODE_CAP = 200000
 
   # Check that each vertex column u in 0..n_verts-1 has all k*(k-1)/2 binary
   # exclusions (-q[i,u] | -q[j,u]) so the k slots must choose k distinct vertices.
-  col_pairs = i64[n_verts]
+  # col_seen marks each (column, slot pair) once: a clause written twice must
+  # not stand in for a missing one, and two pairs must not share a mark.
+  col_seen = i8[n_verts * kk + 1]
+  col_cnt = i64[n_verts]
   ci = 0
   while ci < ncl
     if fcl[ci] == 2
@@ -787,30 +795,31 @@ WASSAT_COLORING_NODE_CAP = 200000
               t = sa
               sa = sb
               sb = t
-            pair_bit = 1 << ((sa * k_slots + sb) % 62)
-            col_pairs[q_col[va]] = col_pairs[q_col[va]] | pair_bit
+            pi = q_col[va] * kk + sa * k_slots + sb
+            if col_seen[pi] == 0
+              col_seen[pi] = 1
+              col_cnt[q_col[va]] += 1
     ci += 1
 
-  want_col_mask = 0
-  sa = 0
-  while sa < k_slots
-    sb = sa + 1
-    while sb < k_slots
-      want_col_mask = want_col_mask | (1 << ((sa * k_slots + sb) % 62))
-      sb += 1
-    sa += 1
+  want_col = k_slots * (k_slots - 1) / 2
   u = 0
   while u < n_verts
-    return 0 unless col_pairs[u] == want_col_mask
+    return 0 unless col_cnt[u] == want_col
     u += 1
 
   # Track for each edge variable e:
   # - which vertex pair (u < v) it connects (edge_pair[e] = u * n_verts + v + 1, or -1 on mismatch)
-  # - bitmask of ordered slot pairs (sa != sb) forcing +e via (-q[sa,u] | -q[sb,v] | e)
+  # - how many DISTINCT ordered slot pairs (sa != sb) force +e via
+  #   (-q[sa,u] | -q[sb,v] | e); slot_seen marks each (edge variable, slot at
+  #   the lower vertex, slot at the higher vertex) once
   # - bitmask of colors r in 0..c_colors-1 forbidden by (-e | -c[u,r] | -c[v,r])
   edge_pair = i64[nv + 1]
   edge_slot_cnt = i64[nv + 1]
   edge_col_mask = i64[nv + 1]
+  edge_id = i64[nv + 1]
+  ne = 0
+  max_edges = n_verts * n_verts
+  slot_seen = i8[max_edges * kk + 1]
   ci = 0
   while ci < ncl
     if fcl[ci] == 3
@@ -847,7 +856,16 @@ WASSAT_COLORING_NODE_CAP = 200000
             if edge_pair[e_var] == 0
               edge_pair[e_var] = pcode
             if edge_pair[e_var] == pcode
-              edge_slot_cnt[e_var] = edge_slot_cnt[e_var] + 1
+              if edge_id[e_var] == 0
+                return 0 if ne >= max_edges
+                ne += 1
+                edge_id[e_var] = ne
+              s_lo = ua < ub ? sa : sb
+              s_hi = ua < ub ? sb : sa
+              si = (edge_id[e_var] - 1) * kk + s_lo * k_slots + s_hi
+              if slot_seen[si] == 0
+                slot_seen[si] = 1
+                edge_slot_cnt[e_var] = edge_slot_cnt[e_var] + 1
             else
               edge_pair[e_var] = -1
       elsif l0 < 0 && l1 < 0 && l2 < 0
@@ -892,7 +910,7 @@ WASSAT_COLORING_NODE_CAP = 200000
   e = 1
   while e <= nv
     pcode = edge_pair[e]
-    if pcode > 0 && edge_slot_cnt[e] >= want_slots && edge_col_mask[e] == want_cols
+    if pcode > 0 && edge_slot_cnt[e] == want_slots && edge_col_mask[e] == want_cols
       pair_ok[pcode - 1] = 1
     e += 1
 
@@ -1085,6 +1103,13 @@ WASSAT_COLORING_NODE_CAP = 200000
     res = wassat_rpoc_bin_unsat(fla, fcs, fcl, nv, ncl)
     return res if res > 0
     res = wassat_stconn_grid_unsat(fla, fcs, fcl, nv, ncl)
+    return res if res > 0
+  if (min_len == 1 || nv > 4096 || ncl > 250000) && nv <= 2000000 && ncl <= 8000000
+    # The clique-coloring check reads presence only, so it also accepts the
+    # formula with unit clauses added; the other checks stay unit-free. It is
+    # one pass with its own table caps, so it also takes the larger inputs
+    # the other checks leave alone (100 vertices have 4950 edge variables).
+    res = wassat_clique_coloring_unsat(fla, fcs, fcl, nv, ncl)
     return res if res > 0
   0
 

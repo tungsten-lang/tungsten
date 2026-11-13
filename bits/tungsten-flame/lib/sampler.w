@@ -199,11 +199,13 @@ in Tungsten:Flame
       names.push(tb != nil ? line.slice(0, tb) : line)
     names.size() > 0 ? names : fallback
 
+  # The requested duration is recorded in full (the 3 s cap is gone, 2026-11-13). The export grows with the recording:
+  # measured on one busy thread (M3 Max), ~23K rows/s, ~17 MB of XML per second recorded, and xctrace export taking about
+  # 1 s of time and ~55 MB of memory per second recorded. A program that keeps N cores busy costs about N times that.
   -> .counters_duration(duration)
-    if duration <= 3
-      return duration
-    << "sampler: capping the counters recording at 3s (requested " + duration.to_s() + "s; PMI sampling exports ~50-100K rows/s per busy core)"
-    3
+    if duration > 10
+      << "sampler: recording " + duration.to_s() + "s of PMI samples; the export costs about 1 s and ~17 MB of XML per recorded second per busy core"
+    duration
 
   -> .has_xctrace?()
     system("xcrun --find xctrace >/dev/null 2>&1")

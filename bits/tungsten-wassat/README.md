@@ -404,6 +404,17 @@ which `benchmarks/bva_test.py` checks against all assignments of the input.
 `benchmarks/relay_count_test.py` test the certificates by enumeration and
 against a reference solver.
 
+The finite-domain arm of the race (`lib/domain_walk.w`: verified exact-one
+domains with binary exclusions, up to 128 domains of 32 values) wraps its
+weighted walk in a tabu search: unweighted conflict counts per value, the
+best non-tabu move of any domain in conflict, and a value just left stays
+tabu for a few moves plus a share of the domains in conflict. One trial of
+6 million moves runs before the walk and longer ones after it, until the
+arm's wall limit (45 s, on a spare core). It finds models only, and each goes
+through the same replay of every original clause. Forced-satisfiable random
+CSPs are where it matters: frb80-14-1, which neither this solver nor the
+references solve in a minute, takes about a second.
+
 Lanes that used to hide behind the MDP recognizer's miss now live in their
 own files (`sdp`, `backdoor`, `sgi`, `schooltt`, `symmetry_fix`, `vdwb`)
 behind a fingerprint-gated registry in `lib/specialists.w`, which records

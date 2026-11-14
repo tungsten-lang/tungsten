@@ -207,18 +207,23 @@ fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_sta
   return result unless formula.has_key?("flat_ncl")
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
-  return result unless (nv == 660 && ncl >= 50000 && ncl <= 60000) || (nv == 105 && ncl >= 40000 && ncl <= 45000)
+  # The direct encoding has one variable per (pattern vertex, host vertex)
+  # with 30 host vertices: 4 to 22 pattern vertices. It used to be admitted
+  # for 22 only. Admission is a cost gate; the decoding below checks the
+  # structure clause by clause.
+  direct = nv % 30 == 0 && nv >= 120 && nv <= 660
+  return result unless (direct && ncl >= 1000 && ncl <= 120000) || (nv == 105 && ncl >= 40000 && ncl <= 45000)
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
-  np = nv == 660 ? 22 : 21
+  np = direct ? nv / 30 : 21
   full30 = 1073741823 ## i64
   full32 = 4294967295 ## i64
   one = 1 ## i64
   fb_mask = i64[22 * 22 * 30]
   fb_cnt = i64[22 * 22]
 
-  if nv == 660
+  if direct
     lit_p = i64[2 * nv + 4]
     lit_h = i64[2 * nv + 4]
     seen_vars = i8[nv + 1]
@@ -231,7 +236,7 @@ fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_sta
     ci = 0
     while ci < ncl
       if fcl[ci] == 30
-        return result if p_idx >= 22
+        return result if p_idx >= np
         off = fcs[ci]
         h = 0
         while h < 30
@@ -246,7 +251,7 @@ fn wassat_sgi_mcsplit_dfs(np, p_adj, h_adj, pair_h_adj, unassigned_p_in, dom_sta
           h += 1
         p_idx += 1
       ci += 1
-    return result unless p_idx == 22
+    return result unless p_idx == np
     ci = 0
     while ci < ncl
       if fcl[ci] == 2

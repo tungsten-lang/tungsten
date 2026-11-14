@@ -6,7 +6,10 @@ use box_net_decode
 WASSAT_BOX_NET_WALL_MS = 60000
 WASSAT_BOX_NET_FIRST_STEPS = 20000000
 WASSAT_BOX_NET_REPAIR_CONFLICTS = 4096
-WASSAT_BOX_NET_AUTO_MIN_SQUARES = 58
+# 54 is the surface of 1x1x13 and 1x3x6. With the worker those formulas of
+# SAT Competition 2026 give 3 models out of 7 in a minute (3.6, 10 and 31 s);
+# without it none in any run. It used to start at 58.
+WASSAT_BOX_NET_AUTO_MIN_SQUARES = 54
 
 -> wassat_box_net_shape(nv, nc, n) (i64 i64 i64) i64
   return 0 if n < 8 || n > 64 || (n & 1) != 0
@@ -26,8 +29,9 @@ WASSAT_BOX_NET_AUTO_MIN_SQUARES = 58
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return nil if wassat_box_net_shape(nv,nc,config.max_clause_size) == 0
-  # Smaller surfaces did not benefit in paired portfolio controls. Keep
-  # their existing workers unchanged unless this lane is explicitly enabled.
+  # Surfaces below the threshold did not benefit in paired portfolio
+  # controls. Keep their existing workers unchanged unless this lane is
+  # explicitly enabled.
   return nil if config.max_clause_size < WASSAT_BOX_NET_AUTO_MIN_SQUARES && mode != "1"
   scratch = wassat_box_net_bytes(nv,nc)
   # Include one private completion solver as well as decoder/search scratch.

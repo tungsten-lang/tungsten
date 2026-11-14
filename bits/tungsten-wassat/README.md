@@ -433,6 +433,23 @@ are measured (not assumed) value: `WASSAT_BACKDOOR_TABLES=0` disables
 exactly them for on/off corpus comparison, per
 `docs/backdoor-tables-audit-2026-10-27.md`.
 
+The subgraph-isomorphism lane (`lib/sgi.w`) reads the direct encoding with
+one variable per (pattern vertex, host vertex) over 30 host vertices and
+decides it by an exact graph search, after checking that every restriction
+the search uses has its clause. It was admitted for 22 pattern vertices
+only; it now takes 4 to 22 (SGI_30_60_20_50_3-dir, 20 pattern vertices: about
+a second, undecided by every solver here in a minute).
+`benchmarks/sgi_test.py` compares it with a reference solver on random and
+damaged formulas.
+
+The rectangle-coloring certificate (`lib/rectangle_bound.w`: color a grid so
+that no rectangle has four corners of one color) recognized square grids
+only. It now reads R x C grids too and counts along rows and along columns:
+a line of L cells holds a minimum number of same-colored pairs, and each
+(pair of positions, color) can serve one line. 289-unsat-13x32 of SAT
+Competition 2026 (13 x 32, four colors: 480 pairs needed, 312 available) is
+refuted in 0.3 s.
+
 Another recognizer accepts only a complete, topologically ordered 32-bit
 xorshift/fold circuit: variables 1--32 are its sole inputs, every later
 variable has the expected XOR/AND/OR definition, and exactly one accumulator

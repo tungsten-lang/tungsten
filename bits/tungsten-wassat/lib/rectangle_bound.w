@@ -1,5 +1,15 @@
-# Complete square-grid coloring clauses, invariant under signed variable,
-# cell, color, clause and literal permutations. Fast-only counting certificate.
+# Complete grid coloring clauses (no rectangle with four corners of one
+# color), invariant under signed variable, cell, color, clause and literal
+# permutations. Fast-only counting certificate.
+#
+# The grid may be square or R x C with R < C. The count: in a line of L cells
+# colored with k colors, at least rem*C(q+1,2) + (k-rem)*C(q,2) pairs of cells
+# share a color (q = L/k, rem = L%k). Two parallel lines that share a color
+# on the same pair of positions make a rectangle, so each (pair of positions,
+# color) serves one line at most: lines * that minimum may not exceed
+# k * C(L,2). For R x C both directions are tried (13 x 32 with four colors:
+# 32 columns of 13 cells need 15 pairs each, 480 in all, and 4 * C(13,2) = 312
+# are there).
 use atomic_stop
 
 # Exact header admission is only a cheap candidate test, never a certificate.
@@ -11,8 +21,20 @@ use atomic_stop
     while n <= 32
       cells = n*n
       pairs = n*(n-1)/2
-      return n*16+k if nv == cells*k && nc == cells*(1+k*(k-1)/2)+k*pairs*pairs
+      return (n*128+n)*16+k if nv == cells*k && nc == cells*(1+k*(k-1)/2)+k*pairs*pairs
       n += 1
+    k += 1
+  k = 2
+  while k <= 8
+    rows = 3
+    while rows <= 32
+      cols = rows + 1
+      while cols <= 96 && rows*cols*k <= nv
+        cells = rows*cols
+        if nv == cells*k && nc == cells*(1+k*(k-1)/2)+k*(rows*(rows-1)/2)*(cols*(cols-1)/2)
+          return (rows*128+cols)*16+k
+        cols += 1
+      rows += 1
     k += 1
   0
 
@@ -21,7 +43,9 @@ use atomic_stop
 # 12 pair updates,13 grid pair checks,14 checked rectangle/color tuples,
 # 15 minimum row pairs,16 total minimum,17 capacity,18 per-color baseline,
 # 19 per-color capacity,20 increment,21 residue,22 bound kind,
-# 23 conservative scratch bytes,24 ms,25 complete recognition,26 phase.
+# 23 conservative scratch bytes,24 ms,25 complete recognition,26 phase,
+# 27 columns (5 holds the rows; equal for a square), 28 direction of the
+# bound on an R x C grid (1 rows as lines, 2 columns as lines).
 -> wassat_rectangle_stop(m, stop, deadline) (i64[] i64[] i64) i64
   m[2] += 1
   if wassat_stop_load(stop) != 0
@@ -40,10 +64,11 @@ use atomic_stop
 
 -> wassat_rectangle_check(lits, offs, lens, nv, nc, shape, m, stop, deadline) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64) i64
   return 0 if shape == 0 || wassat_rectangle_stop(m,stop,deadline) != 0
-  n = shape/16; k = shape%16; cells = n*n; npairs = n*(n-1)/2
-  nrect = k*npairs*npairs
-  m[5] = n; m[6] = k; m[7] = cells
-  m[23] = 131072 + 64*(nv+cells+n) + 8*nrect + 4*cells*cells
+  dims = shape/16; k = shape%16; n = dims/128; ncols = dims%128; cells = n*ncols
+  npairs = n*(n-1)/2; cpairs = ncols*(ncols-1)/2
+  nrect = k*npairs*cpairs
+  m[5] = n; m[6] = k; m[7] = cells; m[27] = ncols
+  m[23] = 131072 + 64*(nv+cells+n+ncols) + 8*nrect + 4*cells*cells
   return 0 if offs.size < nc || lens.size < nc
   pol = i8[nv+1]
   degree = i8[nv+1]
@@ -59,7 +84,7 @@ use atomic_stop
   row = i16[cells]
   col = i16[cells]
   grid = i32[cells]
-  row0 = i32[n]
+  row0 = i32[ncols]
   col0 = i32[n]
   covered = i8[nrect]
   vs = i32[8]
@@ -184,41 +209,62 @@ use atomic_stop
       return 0 if (mask & bit) != 0
       mask |= bit; j += 1
     g += 1
-  m[26] = 6; frequent = k*(n-1); a = 0
+  # Two cells of one row lie on k*(rows-1) rectangle clauses, two of one
+  # column on k*(columns-1), any other two on k.
+  m[26] = 6; frequent = k*(n-1); frequent_col = k*(ncols-1); a = 0
   while a < cells
     return 0 if (a & 7) == 0 && wassat_rectangle_stop(m,stop,deadline) != 0
-    degree_a = 0; b = 0
+    degree_a = 0; degree_c = 0; b = 0
     while b < cells
       if a != b
         count = pairs[a*cells+b]
-        return 0 if count != k && count != frequent
+        return 0 if count != k && count != frequent && count != frequent_col
         degree_a += 1 if count == frequent
+        degree_c += 1 if count == frequent_col
         m[13] += 1
       b += 1
-    return 0 if degree_a != 2*(n-1)
+    if n == ncols
+      return 0 if degree_a != 2*(n-1)
+    else
+      return 0 if degree_a != ncols-1 || degree_c != n-1
     a += 1
-  neighbor = -1; a = 1
-  while a < cells && neighbor < 0
-    neighbor = a if pairs[a] == frequent
-    a += 1
-  return 0 if neighbor < 0
-  row0[0] = 0; col0[0] = 0; rn = 1; cn = 1; a = 1
-  while a < cells
-    if pairs[a] == frequent
-      if a == neighbor || pairs[neighbor*cells+a] == frequent
-        return 0 if rn >= n
+  row0[0] = 0; col0[0] = 0; rn = 1; cn = 1
+  if n == ncols
+    neighbor = -1; a = 1
+    while a < cells && neighbor < 0
+      neighbor = a if pairs[a] == frequent
+      a += 1
+    return 0 if neighbor < 0
+    a = 1
+    while a < cells
+      if pairs[a] == frequent
+        if a == neighbor || pairs[neighbor*cells+a] == frequent
+          return 0 if rn >= n
+          row0[rn] = a; rn += 1
+        else
+          return 0 if cn >= n
+          col0[cn] = a; cn += 1
+      a += 1
+  else
+    a = 1
+    while a < cells
+      if pairs[a] == frequent
+        return 0 if rn >= ncols
         row0[rn] = a; rn += 1
-      else
+      elsif pairs[a] == frequent_col
         return 0 if cn >= n
         col0[cn] = a; cn += 1
-    a += 1
-  return 0 if rn != n || cn != n
+      a += 1
+  return 0 if rn != ncols || cn != n
   a = 0
   while a < cells
     return 0 if (a & 31) == 0 && wassat_rectangle_stop(m,stop,deadline) != 0
     rr = -1; cc = -1; j = 0
-    while j < n
+    while j < ncols
       cc = j if row0[j] == a
+      j += 1
+    j = 0
+    while j < n
       rr = j if col0[j] == a
       j += 1
     if cc >= 0
@@ -226,22 +272,27 @@ use atomic_stop
     elsif rr >= 0
       cc = 0
     else
+      # The column of a is that of the cell of row 0 it shares a column
+      # with; its row that of the cell of column 0 it shares a row with.
       j = 0
-      while j < n
-        if pairs[a*cells+row0[j]] == frequent
+      while j < ncols
+        if pairs[a*cells+row0[j]] == frequent_col
           return 0 if cc >= 0
           cc = j
+        j += 1
+      j = 0
+      while j < n
         if pairs[a*cells+col0[j]] == frequent
           return 0 if rr >= 0
           rr = j
         j += 1
-    return 0 if rr < 0 || cc < 0 || grid[rr*n+cc] != 0
-    row[a] = rr; col[a] = cc; grid[rr*n+cc] = a+1
+    return 0 if rr < 0 || cc < 0 || grid[rr*ncols+cc] != 0
+    row[a] = rr; col[a] = cc; grid[rr*ncols+cc] = a+1
     a += 1
   m[26] = 7; at = 0
   while at < nr
     return 0 if (at & 511) == 0 && wassat_rectangle_stop(m,stop,deadline) != 0
-    ci = rects[at]; off = offs[ci]; rlo = n; rhi = -1; clo = n; chi = -1; c = 0; j = 0
+    ci = rects[at]; off = offs[ci]; rlo = n; rhi = -1; clo = ncols; chi = -1; c = 0; j = 0
     while j < 4
       l = lits[off+j]; v = l < 0 ? 0-l : l; g = owner[v]-1
       return 0 if j > 0 && colors[v] != c
@@ -259,13 +310,28 @@ use atomic_stop
       mask |= bit; j += 1
     return 0 if mask != 15
     rp = rlo*(2*n-rlo-1)/2+rhi-rlo-1
-    cp = clo*(2*n-clo-1)/2+chi-clo-1
-    idx = (rp*npairs+cp)*k+c-1
+    cp = clo*(2*ncols-clo-1)/2+chi-clo-1
+    idx = (rp*cpairs+cp)*k+c-1
     return 0 if idx < 0 || idx >= nrect || covered[idx] != 0
     covered[idx] = 1; m[14] += 1; at += 1
   # Cardinality plus injectivity above establishes complete coverage.
   return 0 if m[14] != nrect || wassat_rectangle_stop(m,stop,deadline) != 0
   m[25] = 1; m[26] = 8
+  if n != ncols
+    # Rows as lines of `ncols` cells, then columns as lines of `n` cells.
+    q = ncols / k; rem = ncols % k
+    lower = rem*q*(q+1)/2+(k-rem)*q*(q-1)/2
+    m[15] = lower; m[16] = n*lower; m[17] = k*cpairs; m[28] = 1
+    if m[16] > m[17]
+      m[22] = 1
+      return -1
+    q = n / k; rem = n % k
+    lower = rem*q*(q+1)/2+(k-rem)*q*(q-1)/2
+    if ncols*lower > k*npairs
+      m[15] = lower; m[16] = ncols*lower; m[17] = k*npairs; m[28] = 2
+      m[22] = 1
+      return -1
+    return 0
   q = n / k; rem = n % k
   lower = rem*q*(q+1)/2+(k-rem)*q*(q-1)/2
   m[15] = lower; m[16] = n*lower; m[17] = k*npairs

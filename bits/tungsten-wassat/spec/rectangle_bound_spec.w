@@ -27,6 +27,40 @@ describe "Complete rectangle-coloring counting certificates" ->
       m = i64[32]
       expect(wassat_rectangle_refute(rectangle_test_formula(n,2),m,i64[2])).to eq(0)
       expect(m[25]).to eq(1)
+  it "refutes a 3 by 7 grid with two colors through its columns" ->
+    # Seven columns of three cells each hold a pair of one color; three rows
+    # offer 2 * C(3,2) = 6 (row pair, color) slots.
+    m = i64[32]
+    expect(wassat_rectangle_refute(rectangle_grid_formula(3,7,2),m,i64[2])).to eq(-1)
+    expect(m[25]).to eq(1)
+    expect(m[5]).to eq(3)
+    expect(m[27]).to eq(7)
+    expect(m[28]).to eq(2)
+    expect(m[16]).to eq(7)
+    expect(m[17]).to eq(6)
+  it "recognizes a 3 by 6 grid with two colors and leaves it alone" ->
+    # It has a coloring: the six columns take the six ways to place a pair.
+    m = i64[32]
+    expect(wassat_rectangle_refute(rectangle_grid_formula(3,6,2),m,i64[2])).to eq(0)
+    expect(m[25]).to eq(1)
+  it "refutes 13 by 32 with four colors" ->
+    m = i64[32]
+    expect(wassat_rectangle_refute(rectangle_grid_formula(13,32,4),m,i64[2])).to eq(-1)
+    expect(m[16]).to eq(480)
+    expect(m[17]).to eq(312)
+  it "reads a renamed, reversed and sign-scrambled R by C grid" ->
+    m = i64[32]
+    expect(wassat_rectangle_refute(rectangle_grid_formula(4,9,3,true),m,i64[2])).to eq(0)
+    expect(m[25]).to eq(1)
+    m2 = i64[32]
+    expect(wassat_rectangle_refute(rectangle_grid_formula(3,7,2,true),m2,i64[2])).to eq(-1)
+  it "declines an R by C grid with a rectangle clause missing" ->
+    m = i64[32]
+    expect(wassat_rectangle_refute(rectangle_grid_formula(3,7,2,false,0),m,i64[2])).to eq(0)
+    expect(m[25]).to eq(0)
+    m2 = i64[32]
+    expect(wassat_rectangle_refute(rectangle_grid_formula(3,7,2,true,17),m2,i64[2])).to eq(0)
+    expect(m2[25]).to eq(0)
   it "handles signed variable, literal and clause permutations" ->
     m = i64[32]
     expect(wassat_rectangle_refute(rectangle_test_formula(5,2,"",true),m,i64[2])).to eq(-1)

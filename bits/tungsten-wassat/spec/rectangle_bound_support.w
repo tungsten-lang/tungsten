@@ -55,3 +55,60 @@ use ../lib/wassat
       lits[at] = l; at += 1
     ci += 1
   {"nvars": nv, "flat_ncl": ci, "flat_nlits": nl, "flat_lits": lits, "flat_offs": offs, "flat_lens": lens}
+
+# An R x C grid with k colors, cells row by row. With rename, variables are
+# renumbered backwards, every third one is negated, and clause and literal
+# order are reversed.
+-> rectangle_grid_formula(rows, cols, k, rename = false, drop = -1)
+  nv = rows*cols*k; cs = []; r = 0
+  while r < rows
+    c = 0
+    while c < cols
+      cell = []; a = 0
+      while a < k
+        cell.push((r*cols+c)*k+a+1); a += 1
+      cs.push(cell)
+      a = 0
+      while a < k
+        b = a+1
+        while b < k
+          cs.push([-((r*cols+c)*k+a+1), -((r*cols+c)*k+b+1)])
+          b += 1
+        a += 1
+      c += 1
+    r += 1
+  first_rect = cs.size; r = 0
+  while r < rows
+    s = r+1
+    while s < rows
+      c = 0
+      while c < cols
+        d = c+1
+        while d < cols
+          a = 0
+          while a < k
+            cs.push([-((r*cols+c)*k+a+1),-((r*cols+d)*k+a+1),-((s*cols+c)*k+a+1),-((s*cols+d)*k+a+1)])
+            a += 1
+          d += 1
+        c += 1
+      s += 1
+    r += 1
+  # A missing rectangle clause is replaced by a copy of another, so the
+  # header counts still fit.
+  cs[first_rect + drop] = cs[-1] if drop >= 0
+  nl = 0; cs.each -> (row) nl += row.size
+  lits = i64[nl]; offs = i64[cs.size]; lens = i64[cs.size]; at = 0; ci = 0
+  cs = cs.reverse if rename
+  cs.each -> (row)
+    row = row.reverse if rename
+    offs[ci] = at; lens[ci] = row.size
+    row.each -> (lit)
+      l = lit
+      if rename
+        v = l.abs; sign = l < 0 ? -1 : 1
+        sign = -sign if (v % 3) == 0
+        l = sign*(nv-v+1)
+      lits[at] = l; at += 1
+    ci += 1
+  {"nvars": nv, "flat_ncl": ci, "flat_nlits": nl, "flat_lits": lits, "flat_offs": offs, "flat_lens": lens}
+

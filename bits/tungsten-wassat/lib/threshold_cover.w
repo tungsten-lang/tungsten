@@ -33,6 +33,25 @@
 #   up alone in its group (the diagram's "nothing more" terminal is one) adds
 #   a group and at most one to the demand, so a second evaluation drops them.
 #
+#   A counter can also be written as one node per (position, count), each
+#   tied to its neighbours in both directions (the 1-ET inputs of SAT
+#   Competition 2025: an independent set of K words in a graph on 256 or 512
+#   binary words). Three additions read it:
+#     - its definitions depend on themselves, so they are read one way only,
+#       down or up the variable numbering (leaves are exempt, any subset of
+#       the definitions gives a valid bound);
+#     - a node ruled out by a unit clause (-v) is never true, so a branch
+#       through it is discarded;
+#     - such a counter starts with a positive clause (a | b) over the nodes of
+#       its first position, not with a unit: a fresh variable r with (r) and
+#       (-r | a | b) says the same and is a root.
+#   And when the greedy groups leave room, the room is counted exactly: the
+#   true leaves are pairwise non-exclusive, so there are at most as many as
+#   the independence number of the exclusion graph, which is the sum over
+#   its connected components and is found by branch and bound (a 512-word
+#   graph falls into components of at most 126 words). 1-ET-256-K-65 demands
+#   65 and holds 50; 1-ET-512 demands 102 or 120 and holds 100.
+#
 # Soundness. Every rule reads only clauses that are present, and each is a
 # case analysis on those clauses, so need[] is a lower bound whatever else the
 # formula contains; a variable classified one way or the other only changes
@@ -48,16 +67,41 @@ WASSAT_THRESHOLD_COVER_MAX_CLAUSES = 16000000
 # Support bitsets: nodes times words (62 leaves a word).
 WASSAT_THRESHOLD_COVER_MAX_WORDS = 24000000
 WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
+# Exact independence number: search nodes over all components, and the
+# largest component taken on.
+WASSAT_THRESHOLD_COVER_MIS_NODES = 3000000
+WASSAT_THRESHOLD_COVER_MIS_VERTICES = 1240
+# "Never true": the demand of a variable a negative unit clause rules out.
+WASSAT_THRESHOLD_COVER_DEAD = 1099511627776
+# Two-literal positive clauses tried as a root when no unit clause works,
+# and the largest formula that is copied for it.
+WASSAT_THRESHOLD_COVER_PAIR_ROOTS = 2
+WASSAT_THRESHOLD_COVER_PAIR_CLAUSES = 6000000
+# Roots whose definitions are tried again one way after depending on
+# themselves.
+WASSAT_THRESHOLD_COVER_DIRECTED_ROOTS = 2
 
 # st slots.
 #  0 status (1 refuted)   1 root variable   2 need   3 groups   4 nodes   5 leaves
-#  6 roots tried   7 stop (1 cycle, 2 capacity, 3 deadline)   8 words a set
+#  6 roots tried   7 stop (2 capacity, 3 deadline)   8 words a set
+#  9 room is an exact independence number (1) instead of a group count
+# 10 independence search nodes   11 definition order used (0 any, 1 down, 2 up)
+# 12, 13 the positive clause (a | b) that served as the root, if one did
+# 14 roots given up because their definitions depend on themselves
 
 # Literal code c (2v + sign) as the clause's stored literal.
 # Is the definition clause at ci usable for head h, and how? Returns
 #   0 not usable, 1 binary h -> p, 2 ternary both tails positive,
 #   3 ternary with one negative tail.  out[0..1]: tail literals (signed).
--> wassat_tc_kind(fla, fcs, fcl, ci, h, out) (i64[] i64[] i64[] i64 i64 i64[]) i64
+# dir restricts the definitions to one direction of the variable numbering:
+# 1 keeps a clause only when its tail variables are below h, 2 only when they
+# are above it (0 keeps all). Only tails that can be nodes themselves
+# (cand = 1: some clause defines them) are held to that; a variable no
+# clause defines is a leaf wherever it is numbered. `free` names one head
+# exempt from the rule, the root. Any subset of the definitions gives a
+# valid lower bound, and a one-directional subset cannot depend on itself
+# except through the root, which the traversal detects.
+-> wassat_tc_kind(fla, fcs, fcl, ci, h, out, dir, free, cand) (i64[] i64[] i64[] i64 i64 i64[] i64 i64 i8[]) i64
   n = fcl[ci] ## i64
   off = fcs[ci] ## i64
   m = 0 ## i64
@@ -74,13 +118,23 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
     j += 1
   return 0 if heads != 1 || m != n - 1
   if n == 2
-    return 1 if out[0] > 0
-    return 0
+    return 0 if out[0] <= 0
+    if dir != 0 && h != free && cand[out[0]] == 1
+      return 0 if dir == 1 && out[0] >= h
+      return 0 if dir == 2 && out[0] <= h
+    return 1
   a = out[0] ## i64
   b = out[1] ## i64
   va = a < 0 ? 0 - a : a ## i64
   vb = b < 0 ? 0 - b : b ## i64
   return 0 if va == vb
+  if dir != 0 && h != free
+    if cand[va] == 1
+      return 0 if dir == 1 && va >= h
+      return 0 if dir == 2 && va <= h
+    if cand[vb] == 1
+      return 0 if dir == 1 && vb >= h
+      return 0 if dir == 2 && vb <= h
   return 2 if a > 0 && b > 0
   return 3 if a > 0 || b > 0
   0
@@ -94,6 +148,193 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
     ci += 1
   n
 
+fn wassat_tc_pop(x) (i64) i64
+  ccall_nobox("__w_bit_ctpop_u64", x) ## i64
+
+fn wassat_tc_ctz(x) (i64) i64
+  ccall_nobox("__w_bit_cttz_u64", x) ## i64
+
+# The exact independence number of a graph, for the room side of the count.
+# Vertex sets are bitsets of w words, 62 vertices a word; nb[v * w ..] is the
+# neighbourhood of v (without v).
+#
+# A greedy clique cover of the set at pst[base ..): an upper bound on its
+# independence number. tmp holds 2 w words of scratch.
+-> wassat_tc_cover(nb, w, pst, base, tmp) (i64[] i64 i64[] i64 i64[]) i64
+  one = 1 ## i64
+  i = 0 ## i64
+  while i < w
+    tmp[i] = pst[base + i]
+    i += 1
+  c = 0 ## i64
+  wi = 0 ## i64
+  while wi < w
+    if tmp[wi] == 0
+      wi += 1
+    else
+      b = wassat_tc_ctz(tmp[wi])
+      v = wi * 62 + b ## i64
+      tmp[wi] = tmp[wi] ^ (one << b)
+      any = 0 ## i64
+      i = 0
+      while i < w
+        q = tmp[i] & nb[v * w + i] ## i64
+        tmp[w + i] = q
+        any = 1 if q != 0
+        i += 1
+      while any == 1
+        i = 0
+        while tmp[w + i] == 0
+          i += 1
+        b = wassat_tc_ctz(tmp[w + i])
+        u = i * 62 + b ## i64
+        tmp[i] = tmp[i] ^ (one << b)
+        any = 0
+        j = 0 ## i64
+        while j < w
+          q = tmp[w + j] & nb[u * w + j]
+          tmp[w + j] = q
+          any = 1 if q != 0
+          j += 1
+      c += 1
+  c
+
+# Branch and bound on the set at pst[depth * w ..): take the vertex of
+# largest degree in or out. ms: 0 best size found, 1 nodes, 2 node budget,
+# 3 stopped (budget or deadline), 4 deadline.
+-> wassat_tc_mis(nb, w, pst, depth, size, ms, tmp) (i64[] i64 i64[] i64 i64 i64[] i64[]) i64
+  ms[1] += 1
+  if ms[1] > ms[2]
+    ms[3] = 1
+    return 0
+  if (ms[1] & 4095) == 0 && ms[4] > 0 && clock_ms() >= ms[4]
+    ms[3] = 1
+    return 0
+  base = depth * w ## i64
+  cnt = 0 ## i64
+  i = 0 ## i64
+  while i < w
+    cnt += wassat_tc_pop(pst[base + i])
+    i += 1
+  if cnt == 0
+    ms[0] = size if size > ms[0]
+    return 0
+  return 0 if size + cnt <= ms[0]
+  return 0 if size + wassat_tc_cover(nb, w, pst, base, tmp) <= ms[0]
+  bv = 0 - 1 ## i64
+  bd = 0 - 1 ## i64
+  i = 0
+  while i < w
+    bits = pst[base + i] ## i64
+    while bits != 0
+      b = wassat_tc_ctz(bits)
+      bits = bits & (bits - 1)
+      v = i * 62 + b ## i64
+      d = 0 ## i64
+      j = 0 ## i64
+      while j < w
+        d += wassat_tc_pop(pst[base + j] & nb[v * w + j])
+        j += 1
+      if d > bd
+        bd = d
+        bv = v
+    i += 1
+  if bd == 0
+    # No edges left: every vertex of the set can be taken.
+    ms[0] = size + cnt if size + cnt > ms[0]
+    return 0
+  one = 1 ## i64
+  full = (one << 62) - one ## i64
+  nbase = base + w ## i64
+  wi = bv / 62 ## i64
+  out_bit = full ^ (one << (bv - wi * 62)) ## i64
+  i = 0
+  while i < w
+    pst[nbase + i] = pst[base + i] & (full ^ nb[bv * w + i])
+    i += 1
+  pst[nbase + wi] = pst[nbase + wi] & out_bit
+  z = wassat_tc_mis(nb, w, pst, depth + 1, size + 1, ms, tmp)
+  return 0 if ms[3] != 0
+  i = 0
+  while i < w
+    pst[nbase + i] = pst[base + i]
+    i += 1
+  pst[nbase + wi] = pst[nbase + wi] & out_bit
+  z = wassat_tc_mis(nb, w, pst, depth + 1, size, ms, tmp)
+  0
+
+# The independence number of the exclusion graph on the leaves with
+# inroot = 1 (ast/adj: adjacency over leaf ids 1..nleaf), as the sum over its
+# connected components. Returns -1 when it was not computed (a component too
+# large, the node budget, the deadline) and also as soon as the sum reaches
+# `need`, since no refutation follows then. work[0]: search nodes.
+-> wassat_tc_alpha(ast, adj, inroot, nleaf, need, work, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64) i64
+  one = 1 ## i64
+  comp = i64[nleaf + 2]
+  queue = i64[nleaf + 2]
+  local = i64[nleaf + 2]
+  ms = i64[6]
+  total = 0 ## i64
+  s = 1 ## i64
+  while s <= nleaf
+    if inroot[s] == 1 && comp[s] == 0
+      queue[0] = s
+      comp[s] = s
+      qh = 0 ## i64
+      qt = 1 ## i64
+      while qh < qt
+        u = queue[qh] ## i64
+        qh += 1
+        t = ast[u] ## i64
+        while t < ast[u + 1]
+          x = adj[t] ## i64
+          if comp[x] == 0
+            comp[x] = s
+            queue[qt] = x
+            qt += 1
+          t += 1
+      n = qt ## i64
+      if n == 1
+        total += 1
+      else
+        return 0 - 1 if n > WASSAT_THRESHOLD_COVER_MIS_VERTICES
+        w = (n + 61) / 62 ## i64
+        nb = i64[n * w + 1]
+        i = 0 ## i64
+        while i < n
+          local[queue[i]] = i
+          i += 1
+        i = 0
+        while i < n
+          u = queue[i]
+          t = ast[u]
+          while t < ast[u + 1]
+            j = local[adj[t]] ## i64
+            if j != i
+              wj = j / 62 ## i64
+              nb[i * w + wj] = nb[i * w + wj] | (one << (j - wj * 62))
+            t += 1
+          i += 1
+        pst = i64[(n + 3) * w + 1]
+        tmp = i64[2 * w + 2]
+        i = 0
+        while i < n
+          wj = i / 62
+          pst[wj] = pst[wj] | (one << (i - wj * 62))
+          i += 1
+        ms[0] = 0
+        ms[1] = 0
+        ms[2] = WASSAT_THRESHOLD_COVER_MIS_NODES - work[0]
+        ms[3] = 0
+        ms[4] = deadline
+        z = wassat_tc_mis(nb, w, pst, 0, 0, ms, tmp)
+        work[0] += ms[1]
+        return 0 - 1 if ms[3] != 0
+        total += ms[0]
+      return 0 - 1 if total >= need
+    s += 1
+  total
+
 # Returns { "status": 0 or -1, "work": st }.
 -> wassat_threshold_cover_unsat(formula, deadline = 0)
   st = i64[16]
@@ -105,26 +346,121 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
   fla = formula["flat_lits"]
   fcs = formula["flat_offs"]
   fcl = formula["flat_lens"]
+  hit = wassat_tc_run(fla, fcs, fcl, nv, nc, st, deadline)
+  return { "status": 0 - 1, "work": st } if hit == 1
+  # No unit clause gave a count. A positive clause (a | b) can stand in for
+  # one: with a fresh variable r, the clauses (r) and (-r | a | b) say the
+  # same thing, and r is a root whose demand is the smaller of the two. A
+  # path counter written as one node per (position, count) starts this way.
+  return miss if st[7] == 3 || nc > WASSAT_THRESHOLD_COVER_PAIR_CLAUSES
+  nlits = formula["flat_nlits"]
+  # A candidate is a clause (a | b) that comes with (-a | -b), the two nodes
+  # of a counter's first position, and whose variables each head some
+  # definition (occur negated in a three-literal clause that has a positive
+  # literal). Most formulas have none and stop here after two passes.
+  heads = i8[nv + 2]
+  ci = 0
+  while ci < nc
+    if fcl[ci] == 3
+      off = fcs[ci]
+      x = fla[off]
+      y = fla[off + 1]
+      z = fla[off + 2]
+      if x > 0 || y > 0 || z > 0
+        heads[0 - x] = 1 if x < 0
+        heads[0 - y] = 1 if y < 0
+        heads[0 - z] = 1 if z < 0
+    ci += 1
+  mate = i64[nv + 2]
+  found = 0
+  ci = 0
+  while ci < nc
+    if fcl[ci] == 2
+      x = fla[fcs[ci]]
+      y = fla[fcs[ci] + 1]
+      if x > 0 && y > 0 && x != y && heads[x] == 1 && heads[y] == 1 && mate[x] == 0 && mate[y] == 0
+        mate[x] = y
+        mate[y] = x
+        found += 1
+    ci += 1
+  return miss if found == 0
+  exact = i8[nv + 2]
+  ci = 0
+  while ci < nc
+    if fcl[ci] == 2
+      x = fla[fcs[ci]]
+      y = fla[fcs[ci] + 1]
+      exact[0 - x] = 1 if x < 0 && y < 0 && mate[0 - x] == 0 - y
+    ci += 1
+  tried = 0
+  ci = 0
+  while ci < nc && tried < WASSAT_THRESHOLD_COVER_PAIR_ROOTS
+    if fcl[ci] == 2 && fla[fcs[ci]] > 0 && fla[fcs[ci] + 1] > 0 && mate[fla[fcs[ci]]] == fla[fcs[ci] + 1] && (exact[fla[fcs[ci]]] == 1 || exact[fla[fcs[ci] + 1]] == 1)
+      tried += 1
+      a = fla[fcs[ci]]
+      b = fla[fcs[ci] + 1]
+      xl = i64[nlits + 5]
+      xo = i64[nc + 3]
+      xn = i64[nc + 3]
+      i = 0
+      while i < nlits
+        xl[i] = fla[i]
+        i += 1
+      i = 0
+      while i < nc
+        xo[i] = fcs[i]
+        xn[i] = fcl[i]
+        i += 1
+      r = nv + 1
+      xo[nc] = nlits
+      xn[nc] = 1
+      xl[nlits] = r
+      xo[nc + 1] = nlits + 1
+      xn[nc + 1] = 3
+      xl[nlits + 1] = 0 - r
+      xl[nlits + 2] = a
+      xl[nlits + 3] = b
+      st2 = i64[16]
+      hit = wassat_tc_run(xl, xo, xn, nv + 1, nc + 2, st2, deadline)
+      if hit == 1
+        st2[12] = a
+        st2[13] = b
+        return { "status": 0 - 1, "work": st2 }
+      return miss if st2[7] == 3
+    ci += 1
+  miss
+
+# One pass over the unit-asserted roots of the clauses given. Fills st and
+# returns 1 when a root's demand exceeds the room.
+-> wassat_tc_run(fla, fcs, fcl, nv, nc, st, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64) i64
   # Roots: variables asserted by a positive unit clause. No unit, no lane.
   nroot = wassat_tc_units(fla, fcs, fcl, nc)
-  return miss if nroot == 0 || nroot > 64
+  return 0 if nroot == 0 || nroot > 64
   roots = i64[nroot + 1]
   nroot = 0
   # Negative occurrences in clauses of two or three literals, per variable.
   nst = i64[nv + 3]
+  # dead[v]: a unit clause (-v) is present, so v is true in no model and a
+  # branch through it can be discarded (its demand is "never").
+  dead = i8[nv + 2]
   ci = 0
   while ci < nc
     n = fcl[ci]
     if n == 1 && fla[fcs[ci]] > 0
       roots[nroot] = fla[fcs[ci]]
       nroot += 1
+    elsif n == 1
+      dead[0 - fla[fcs[ci]]] = 1
     elsif n == 2 || n == 3
+      # A clause without a positive literal defines nothing (the at-most-one
+      # binaries of a counter's layer would otherwise crowd the lists).
       off = fcs[ci]
-      j = 0
-      while j < n
-        l = fla[off + j]
-        nst[1 - l] += 1 if l < 0
-        j += 1
+      if fla[off] > 0 || fla[off + 1] > 0 || (n == 3 && fla[off + 2] > 0)
+        j = 0
+        while j < n
+          l = fla[off + j]
+          nst[1 - l] += 1 if l < 0
+          j += 1
     ci += 1
   # A root must have a definition at all.
   anydef = 0
@@ -132,7 +468,7 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
   while i < nroot
     anydef = 1 if nst[roots[i] + 1] > 0
     i += 1
-  return miss if anydef == 0
+  return 0 if anydef == 0
   v = 0
   while v <= nv
     nst[v + 1] += nst[v]
@@ -144,14 +480,15 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
     n = fcl[ci]
     if n == 2 || n == 3
       off = fcs[ci]
-      j = 0
-      while j < n
-        l = fla[off + j]
-        if l < 0
-          x = 0 - l
-          nocc[nst[x] + nfill[x]] = ci
-          nfill[x] += 1
-        j += 1
+      if fla[off] > 0 || fla[off + 1] > 0 || (n == 3 && fla[off + 2] > 0)
+        j = 0
+        while j < n
+          l = fla[off + j]
+          if l < 0
+            x = 0 - l
+            nocc[nst[x] + nfill[x]] = ci
+            nfill[x] += 1
+          j += 1
     ci += 1
   out = i64[4]
   # kind[v]: 0 unseen, 1 node, 2 leaf.  A node has a binary definition with a
@@ -163,10 +500,27 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
   stack = i64[nv + 2]
   spos = i64[nv + 2]
   ri = 0
+  # A definition graph that depends on itself (a counter written with
+  # equivalences reads forward and backward) is tried again one way only.
+  dir = 0
+  directed = 0
+  defd = i8[nv + 2]
+  defd_done = 0
   while ri < nroot && st[0] == 0 && st[7] == 0
     root = roots[ri]
-    ri += 1
-    st[6] += 1
+    if dir != 0 && defd_done == 0
+      # Which variables can be nodes at all, whatever the direction.
+      defd_done = 1
+      v = 1
+      while v <= nv
+        t = nst[v]
+        while t < nst[v + 1] && defd[v] == 0
+          k = wassat_tc_kind(fla, fcs, fcl, nocc[t], v, out, 0, 0, defd)
+          defd[v] = 1 if k == 1 || k == 2
+          t += 1
+        v += 1
+    st[6] += 1 if dir == 0
+    st[11] = dir
     # Fresh traversal per root (roots are few).
     v = 0
     while v <= nv
@@ -183,22 +537,33 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
     cyc = 0
     while sp > 0 && cyc == 0
       h = stack[sp - 1]
-      if kind[h] == 0
+      if kind[h] == 0 && dead[h] == 1 && h != root
+        # A node without children; its demand is set to "never" below.
+        kind[h] = 1
+        order[nnode] = h
+        nnode += 1
+        nid[h] = nnode
+        state[h] = 2
+        sp -= 1
+      elsif kind[h] == 0
         isn = 0
         t = nst[h]
         cap = nst[h + 1] - nst[h]
         if cap <= WASSAT_THRESHOLD_COVER_MAX_DEFS
           while t < nst[h + 1]
-            k = wassat_tc_kind(fla, fcs, fcl, nocc[t], h, out)
+            k = wassat_tc_kind(fla, fcs, fcl, nocc[t], h, out, dir, root, defd)
             isn = 1 if k == 1 || k == 2
             t += 1
         else
           # Many negative occurrences: look for binary definitions only.
           while t < nst[h + 1]
-            isn = 1 if fcl[nocc[t]] == 2 && wassat_tc_kind(fla, fcs, fcl, nocc[t], h, out) == 1
+            isn = 1 if fcl[nocc[t]] == 2 && wassat_tc_kind(fla, fcs, fcl, nocc[t], h, out, dir, root, defd) == 1
             t += 1
         kind[h] = isn == 1 ? 1 : 2
-      if kind[h] == 2
+      if state[h] == 2
+        # The dead node above: already placed.
+        z = 0
+      elsif kind[h] == 2
         nleaf += 1
         nid[h] = nleaf
         state[h] = 2
@@ -209,7 +574,7 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
         pushed = 0
         while t < nst[h + 1] && pushed == 0 && cyc == 0
           ci = nocc[t]
-          k = wassat_tc_kind(fla, fcs, fcl, ci, h, out)
+          k = wassat_tc_kind(fla, fcs, fcl, ci, h, out, dir, root, defd)
           if k != 0
             j = 0
             while j < fcl[ci] - 1 && pushed == 0
@@ -233,8 +598,15 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
           nid[h] = nnode
           state[h] = 2
           sp -= 1
-    if cyc == 1
-      st[7] = 1
+    retry = 0
+    if cyc == 1 && dir == 0 && directed < WASSAT_THRESHOLD_COVER_DIRECTED_ROOTS
+      directed += 1
+      retry = 1
+    elsif cyc == 1 && dir == 1
+      retry = 1
+    elsif cyc == 1
+      # This root is given up; the others still get their turn.
+      st[14] += 1
     elsif kind[root] == 1 && nleaf >= 2
       st[4] = nnode
       st[5] = nleaf
@@ -279,11 +651,12 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
             # Gather the usable definitions (bounded) and build the support.
             nd = 0
             t = nst[h]
+            t = nst[h + 1] if dead[h] == 1 && h != root
             many = (nst[h + 1] - nst[h]) > WASSAT_THRESHOLD_COVER_MAX_DEFS
             while t < nst[h + 1]
               ci = nocc[t]
               k = 0
-              k = wassat_tc_kind(fla, fcs, fcl, ci, h, out) if !many || fcl[ci] == 2
+              k = wassat_tc_kind(fla, fcs, fcl, ci, h, out, dir, root, defd) if !many || fcl[ci] == 2
               k = 0 if many && k != 1
               if k != 0 && nd < WASSAT_THRESHOLD_COVER_MAX_DEFS
                 tk[nd] = k
@@ -371,6 +744,8 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
                       best = cand if cand > best
                   e += 1
               d += 1
+            best = WASSAT_THRESHOLD_COVER_DEAD if best > WASSAT_THRESHOLD_COVER_DEAD
+            best = WASSAT_THRESHOLD_COVER_DEAD if dead[h] == 1 && h != root
             need[oi + 1] = best
             oi += 1
             if (oi & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
@@ -477,6 +852,17 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
                 i += 1
               st[3] = groups
               st[0] = 1 if k_need > groups
+              # The groups are only a greedy cover. When they leave room, the
+              # exact independence number of the exclusion graph may not:
+              # at most that many leaves are true together.
+              if st[0] == 0 && k_need >= 2
+                mwork = i64[2]
+                alpha = wassat_tc_alpha(ast, adj, inroot, nleaf, k_need, mwork, deadline)
+                st[10] += mwork[0]
+                if alpha >= 0 && k_need > alpha
+                  st[3] = alpha
+                  st[9] = 1
+                  st[0] = 1
               # Leaves alone in their group add one to the room and at most one
               # to the demand: stop counting them and evaluate once more.
               if st[0] == 0
@@ -494,8 +880,15 @@ WASSAT_THRESHOLD_COVER_MAX_DEFS = 12
                 groups1 = groups
           tcpass += 1
           tcpass = 2 if singles == 0
-  return { "status": 0 - 1, "work": st } if st[0] == 1
-  miss
+    # Once the definitions are read one way only, both ways get a turn: a
+    # counter laid out position by position counts in one direction.
+    retry = 1 if dir == 1 && st[0] == 0 && st[7] == 0
+    if retry == 1
+      dir += 1
+    else
+      dir = 0
+      ri += 1
+  st[0]
 
 # A covering bound with overlaps.
 #

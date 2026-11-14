@@ -5,7 +5,16 @@
 
 Generates formulas over 5..12 leaf variables and compares
 every verdict with a reference solver (CaDiCaL by default); a reported model
-is replayed. Three kinds of case:
+is replayed. Four kinds of case:
+
+  * a path counter "exactly K of the leaves": one node per (position, count),
+    exactly one node true per position, each node tied to its neighbours in
+    both directions, the last position pinned by unit clauses (the encoding
+    of the 1-ET inputs of SAT Competition 2025). The leaves carry a random
+    exclusion graph whose independence number the generator knows, and K is
+    taken around it, so the exact bound is tested on both sides of the line.
+    Clauses are dropped, nodes are killed or revived by unit clauses, and
+    stray clauses are added;
 
   * a proper threshold diagram "at least K of the leaves" in the MiniSat+
     style (if-then-else nodes with or without the third clause, conjunctions
@@ -34,7 +43,76 @@ TMP = tempfile.mkdtemp(prefix='threshold-cover-')
 rng = random.Random(SEED)
 env = dict(os.environ, WASSAT_BACKDOOR_TABLES='0')
 
+def alpha(n, edges):
+    best = 0
+    for m in range(1 << n):
+        if all(not ((m >> a) & 1 and (m >> b) & 1) for a, b in edges):
+            best = max(best, bin(m).count('1'))
+    return best
+
+def gen_path():
+    n = rng.randint(4, 10); cl = []; nv = n
+    # Exclusion graph: random edges, or odd cycles.
+    edges = set()
+    if rng.random() < 0.5:
+        # Odd cycles: a cycle of 5 holds 2, of 7 holds 3, but no cover by
+        # exclusive groups gets below 3 and 4. Only the exact bound sees it.
+        n = 0
+        for _ in range(rng.randint(1, 2)):
+            k = rng.choice((5, 5, 7))
+            for i in range(k): edges.add((n + i, n + (i + 1) % k) if i + 1 < k else (n, n + k - 1))
+            n += k
+        n += rng.randint(0, 2); nv = n
+        if rng.random() < 0.3:
+            a, b = rng.sample(range(n), 2); edges.add((min(a, b), max(a, b)))
+    else:
+        for _ in range(rng.randint(n // 2, 2 * n)):
+            a, b = rng.sample(range(n), 2); edges.add((min(a, b), max(a, b)))
+    al = alpha(n, edges)
+    K = max(1, min(n, al + rng.choice((-1, 0, 0, 1, 1, 2))))
+    for a, b in edges: cl.append([-(a + 1), -(b + 1)])
+    node = {}
+    for i in range(1, n + 1):
+        for j in range(0, min(i, K) + 1):
+            nv += 1; node[(i, j)] = nv
+    damaged = rng.random() < 0.5
+    def put(c):
+        if not damaged or rng.random() < 0.97: cl.append(c)
+    # Position 1.
+    put([1, node[(1, 0)]]); put([node[(1, 0)], node[(1, 1)]]); put([-node[(1, 0)], -node[(1, 1)]])
+    for i in range(2, n + 1):
+        x = i
+        layer = [node[(i, j)] for j in range(0, min(i, K) + 1)]
+        put(layer[:])
+        for a in range(len(layer)):
+            for b in range(a + 1, len(layer)): put([-layer[a], -layer[b]])
+        for j in range(0, min(i - 1, K) + 1):
+            p = node[(i - 1, j)]
+            lo = node[(i, j)]
+            put([-p, x, lo]); put([-lo, x, p]); put([-lo, -p, -x])
+            if (i, j + 1) in node:
+                hi = node[(i, j + 1)]
+                put([-p, -x, hi]); put([-hi, -x, p]); put([-hi, -p, x])
+            else:
+                put([-p, -x])                      # the count may not pass K
+    # The last position: exactly K.
+    for j in range(0, min(n, K) + 1):
+        put([node[(n, j)]] if j == K else [-node[(n, j)]])
+    # Nodes from which K is out of reach.
+    for (i, j), v in node.items():
+        if j + (n - i) < K and rng.random() < 0.8: put([-v])
+    if damaged:
+        for _ in range(rng.randint(0, 2)):
+            v = rng.choice(list(node.values())); cl.append([v * rng.choice((1, -1))])
+        for _ in range(rng.randint(0, 2)):
+            cl.append([rng.randint(1, nv) * rng.choice((1, -1)) for _ in range(rng.randint(2, 3))])
+        if rng.random() < 0.3: cl.append(list(rng.choice(cl)))
+    for c in cl: rng.shuffle(c)
+    if rng.random() < 0.5: rng.shuffle(cl)
+    return nv, cl
+
 def gen():
+    if rng.random() < 0.3: return gen_path()
     nl = rng.randint(5, 12); leaves = list(range(1, nl + 1)); nv = nl; cl = []
     def new():
         nonlocal nv

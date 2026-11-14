@@ -116,7 +116,7 @@
       if res["status"] != 0
         res["lane"] = "schooltt"
         return res
-    if (nv == 660 && ncl >= 50000 && ncl <= 60000) || (nv == 105 && ncl >= 40000 && ncl <= 45000)
+    if (nv % 30 == 0 && nv >= 120 && nv <= 660 && ncl >= 1000 && ncl <= 120000) || (nv == 105 && ncl >= 40000 && ncl <= 45000)
       res = wassat_sgi_mcsplit_solve(formula, result)
       tprof = wassat_prof("lane.sgi_mcsplit", tprof)
       if res["status"] != 0

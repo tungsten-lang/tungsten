@@ -79,6 +79,74 @@ use ../lib/wassat
     v += 1
   cl_formula(qbase + nr * nh, lines)
 
+# "Exactly k of the leaves 1..n" as a path counter: node (i, j) says that j of
+# the first i leaves are true. One node per position, each tied to its
+# neighbours in both directions, the last position pinned by units.
+-> cl_path_counter(n, k)
+  lines = []
+  base = n
+  ids = []
+  i = 1
+  while i <= n
+    row = []
+    j = 0
+    while j <= i && j <= k
+      base += 1
+      row.push(base)
+      j += 1
+    ids.push(row)
+    i += 1
+  lines.push("1 [ids[0][0]] 0")
+  lines.push("[ids[0][0]] [ids[0][1]] 0")
+  lines.push("[0 - ids[0][0]] [0 - ids[0][1]] 0")
+  i = 2
+  while i <= n
+    row = ids[i - 1]
+    prev = ids[i - 2]
+    lines.push(row.join(" ") + " 0")
+    a = 0
+    while a < row.size
+      b = a + 1
+      while b < row.size
+        lines.push("[0 - row[a]] [0 - row[b]] 0")
+        b += 1
+      a += 1
+    j = 0
+    while j < prev.size
+      p = prev[j]
+      lo = row[j]
+      lines.push("[0 - p] [i] [lo] 0")
+      lines.push("[0 - lo] [i] [p] 0")
+      lines.push("[0 - lo] [0 - p] [0 - i] 0")
+      if j + 1 < row.size
+        hi = row[j + 1]
+        lines.push("[0 - p] [0 - i] [hi] 0")
+        lines.push("[0 - hi] [0 - i] [p] 0")
+        lines.push("[0 - hi] [0 - p] [i] 0")
+      else
+        lines.push("[0 - p] [0 - i] 0")
+      j += 1
+    i += 1
+  last = ids[n - 1]
+  j = 0
+  while j < last.size
+    if j == k
+      lines.push("[last[j]] 0")
+    else
+      lines.push("[0 - last[j]] 0")
+    j += 1
+  { "lines": lines, "nvars": base }
+
+# The leaves from..upto on a cycle: neighbours exclude each other.
+-> cl_cycle(from, upto)
+  lines = []
+  i = from
+  while i <= upto
+    nxt = i == upto ? from : i + 1
+    lines.push("[0 - i] [0 - nxt] 0")
+    i += 1
+  lines
+
 describe "Wassat parity sum" ->
   it "refutes a Tseitin triangle with an odd total charge" ->
     # Vertices a, b, c; edges 1 = ab, 2 = bc, 3 = ca. Charges 1, 0, 0.
@@ -148,6 +216,47 @@ describe "Wassat demand against room" ->
     r = wassat_threshold_cover_unsat(f)
     expect(r["status"]).to eq(0)
     expect(r["work"][2]).to eq(1)
+    expect(r["work"][3]).to eq(1)
+
+describe "Wassat demand against an exact independence number" ->
+  it "refutes four of a free leaf and a five-cycle through a path counter" ->
+    # Leaf 1 is free and leaves 2..6 form a five-cycle, which holds two: three
+    # in all. No cover by exclusive groups gets the cycle below three; the
+    # exact bound does. The counter has no unit root that reads forward, so
+    # the clause over its first position stands in for one. The count runs
+    # from the second position on, and the last node counts as a leaf on
+    # both sides: 3 + 1 demanded, 2 + 1 at most.
+    pc = cl_path_counter(6, 4)
+    f = cl_formula(pc["nvars"], cl_join([cl_cycle(2, 6), pc["lines"]]))
+    r = wassat_threshold_cover_unsat(f)
+    expect(r["status"]).to eq(0 - 1)
+    expect(r["work"][2]).to eq(4)
+    expect(r["work"][3]).to eq(3)
+    expect(r["work"][9]).to eq(1)
+    expect(r["work"][12] != 0).to eq(true)
+
+  it "keeps quiet when the cycle can hold the demand" ->
+    pc = cl_path_counter(6, 3)
+    f = cl_formula(pc["nvars"], cl_join([cl_cycle(2, 6), pc["lines"]]))
+    expect(wassat_threshold_cover_unsat(f)["status"]).to eq(0)
+
+  it "counts a seven-cycle as three" ->
+    pc = cl_path_counter(8, 5)
+    f = cl_formula(pc["nvars"], cl_join([cl_cycle(2, 8), pc["lines"]]))
+    r = wassat_threshold_cover_unsat(f)
+    expect(r["status"]).to eq(0 - 1)
+    expect(r["work"][2]).to eq(5)
+    expect(r["work"][3]).to eq(4)
+    pc4 = cl_path_counter(8, 4)
+    g = cl_formula(pc4["nvars"], cl_join([cl_cycle(2, 8), pc4["lines"]]))
+    expect(wassat_threshold_cover_unsat(g)["status"]).to eq(0)
+
+  it "treats a variable ruled out by a unit clause as never true" ->
+    # 6 -> (1 ? 7 : 8) with 8 ruled out: 6 needs 1 and whatever 7 needs.
+    f = cl_formula(9, ["6 0", "-8 0", "-6 1 8 0", "-6 -1 7 0", "-7 2 0", "-7 3 0", "-1 -2 0", "-1 -3 0", "-2 -3 0", "4 5 9 0"])
+    r = wassat_threshold_cover_unsat(f)
+    expect(r["status"]).to eq(0 - 1)
+    expect(r["work"][2]).to eq(3)
     expect(r["work"][3]).to eq(1)
 
 describe "Wassat covering bound" ->

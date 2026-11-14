@@ -333,17 +333,36 @@ variable is rewritten through the representative map, simplified through
 constants and repeated or complementary inputs, and hashed again, so a merge
 walks up the circuit a layer at a time. A gate is a set of input clauses
 equivalent to "output = kind(inputs)", so each unit and equivalence found
-holds in every model of the input. The lane only appends those units and
-equivalence binaries to the formula given to the generic search (scout, raw
-race, preprocessing arms); it removes nothing, publishes no verdict of its
-own (a clash is appended as one more equivalence and refuted by propagation),
-and the structural recognizers and routing policy keep reading the input as
-written. Extraction is bounded by a work allowance proportional to the input
-and a two-second deadline; stopping early only loses merges. A `c gate
-closure` line reports what was appended. `WASSAT_GATE_CLOSURE=0` disables the
-lane and `WASSAT_GATE_CLOSURE_DUMP=1` prints every appended clause, which
-`benchmarks/gate_closure_test.py` checks against all models of small random
-circuits.
+holds in every model of the input.
+
+The generic search (scout, raw race, preprocessing arms) is then given the
+formula rewritten through that map: constants are evaluated, every literal
+becomes its representative, a clause that shrinks to one literal makes a new
+constant (followed to a fixpoint), clauses that became equal are written
+once, and each merged variable keeps one unit or two binaries that give it
+its value, so the result has exactly the models of the input. Closure and
+rewriting alternate while the rewriting uncovers units. On
+veer_axi-p06 (521,158 variables) this merges 261,833 variables, of which
+65,952 are constants, and drops 547,070 duplicate clauses in about a second;
+the search that follows takes 10 s instead of 29 s. The nine arles_thres10
+inputs of SAT Competition 2025 rewrite to an empty clause. The rewritten
+formula replaces the input only when it is at least a tenth shorter: a
+formula that is nearly the input in other words only moves the search onto
+another trajectory, which measured as a net loss on satisfiable inputs. In
+that case, for a large input whose closure merges under one variable in 200,
+and for a closure that ends in a clash, the search gets the earlier form:
+the input with the units and equivalence binaries appended (a clash becomes
+one more equivalence and is refuted by propagation). The lane publishes no verdict of its own, and the
+structural recognizers and routing policy keep reading the input as written.
+
+Extraction is bounded by a work allowance proportional to the input; the
+8-second wall limit is a backstop (a 2-second limit made the lane come back
+empty on a busy machine), and stopping early only loses merges. A `c gate
+closure` line reports what was done. `WASSAT_GATE_CLOSURE=0` disables the
+lane, `WASSAT_GATE_CLOSURE_REWRITE=0` keeps the appending form, and
+`WASSAT_GATE_CLOSURE_DUMP=1` prints the rewritten formula or the appended
+clauses, which `benchmarks/gate_closure_test.py` checks against all models
+of small random circuits.
 
 A raw-kernel scout is bounded by propagations as well as by conflicts (two
 million plus two per clause). On large circuit formulas one conflict can cost
@@ -369,6 +388,15 @@ and each declines in well under a second when its shape is absent.
   disjointness is checked on explicit support sets. The leaves are split
   greedily into pairwise exclusive groups, at most one true each. More
   demanded than groups is a contradiction (K rooks on fewer than K rows).
+  When the groups leave room, the room is counted exactly, as the
+  independence number of the exclusion graph (branch and bound over its
+  connected components). A counter written as one node per (position, count)
+  is read too: its definitions are taken in one direction of the variable
+  numbering, nodes ruled out by unit clauses are discarded, and the clause
+  over its first position serves as the root. 1-ET-256-K-65 (an independent
+  set of 65 among 256 binary words where 50 is the most) and both 1-ET-512
+  inputs (102 and 120 demanded, 100 possible) take 0.2 to 0.7 s; no solver
+  here decided them in a minute.
 - Covering bound (same file). The variables of the all-positive clauses are
   split into exclusive groups; a model covers every positive clause with at
   most one variable a group, and the Hunter-Worsley bound caps what such a set
@@ -423,6 +451,23 @@ SC2026 harness. The per-instance SAT backdoor tables in `lib/backdoor.w`
 are measured (not assumed) value: `WASSAT_BACKDOOR_TABLES=0` disables
 exactly them for on/off corpus comparison, per
 `docs/backdoor-tables-audit-2026-10-27.md`.
+
+The subgraph-isomorphism lane (`lib/sgi.w`) reads the direct encoding with
+one variable per (pattern vertex, host vertex) over 30 host vertices and
+decides it by an exact graph search, after checking that every restriction
+the search uses has its clause. It was admitted for 22 pattern vertices
+only; it now takes 4 to 22 (SGI_30_60_20_50_3-dir, 20 pattern vertices: about
+a second, undecided by every solver here in a minute).
+`benchmarks/sgi_test.py` compares it with a reference solver on random and
+damaged formulas.
+
+The rectangle-coloring certificate (`lib/rectangle_bound.w`: color a grid so
+that no rectangle has four corners of one color) recognized square grids
+only. It now reads R x C grids too and counts along rows and along columns:
+a line of L cells holds a minimum number of same-colored pairs, and each
+(pair of positions, color) can serve one line. 289-unsat-13x32 of SAT
+Competition 2026 (13 x 32, four colors: 480 pairs needed, 312 available) is
+refuted in 0.3 s.
 
 Another recognizer accepts only a complete, topologically ordered 32-bit
 xorshift/fold circuit: variables 1--32 are its sole inputs, every later

@@ -112,6 +112,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   # its counts from the flat mirrors and never touches the boxed clause list --
   # only `intake` (the certificate path) genuinely needs boxed clauses, and it
   # materializes them on demand.
+  # The flat formula this preprocessor's buffers were sized for (or nil).
+  ro :flat
+
   -> new(@nvars, @input_clauses, @proof_mode, flat_in)
     # Only a formula that actually carries the parser's flat mirrors counts as
     # a flat source; the boxed parser produces neither. Checking here rather

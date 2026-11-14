@@ -64,6 +64,7 @@ if command -v cadical >/dev/null 2>&1; then
   WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/threshold_cover_test.py || fail=1
   WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/relay_count_test.py || fail=1
   WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/clique_coloring_test.py || fail=1
+  WASSAT="$WASSAT_BIN" python3 bits/tungsten-wassat/benchmarks/sgi_test.py || fail=1
 else
   echo "skipped: no cadical on PATH (the tests compare verdicts with a reference solver)"
 fi

@@ -1010,10 +1010,13 @@ use cover_split
     threshold_cover = wassat_threshold_cover_unsat(formula, clock_ms() + 3000)
     tprof = wassat_prof("cli.threshold_cover", tc_prof)
     tc_work = threshold_cover["work"]
-    wassat_prof_note("threshold_cover status=[threshold_cover["status"]] root=[tc_work[1]] need=[tc_work[2]] groups=[tc_work[3]] nodes=[tc_work[4]] leaves=[tc_work[5]] roots=[tc_work[6]] stop=[tc_work[7]] words=[tc_work[8]]") if tprof != 0
+    wassat_prof_note("threshold_cover status=[threshold_cover["status"]] root=[tc_work[1]] need=[tc_work[2]] groups=[tc_work[3]] nodes=[tc_work[4]] leaves=[tc_work[5]] roots=[tc_work[6]] stop=[tc_work[7]] words=[tc_work[8]] exact=[tc_work[9]] search_nodes=[tc_work[10]] direction=[tc_work[11]] pair_root=[tc_work[12]],[tc_work[13]] self_dependent=[tc_work[14]]") if tprof != 0
     if threshold_cover["status"] == 0 - 1
       << "s UNSATISFIABLE"
-      << "c mode: fast (verified count: [tc_work[2]] true variables required, [tc_work[3]] exclusive groups)"
+      if tc_work[9] == 1
+        << "c mode: fast (verified count: [tc_work[2]] true variables required, at most [tc_work[3]] can hold together)"
+      else
+        << "c mode: fast (verified count: [tc_work[2]] true variables required, [tc_work[3]] exclusive groups)"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
     cb_prof = wassat_prof_clock
@@ -1212,8 +1215,42 @@ use cover_split
   # shapes. Models are still replayed against the original clauses.
   cdcl_formula = formula
   if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && ramsey_lex == nil && env("WASSAT_GATE_CLOSURE") != "0"
-    gate_closure = wassat_gate_closure_lift(formula, clock_ms() + WASSAT_GATE_CLOSURE_MS)
-    if gate_closure != nil
+    # First choice: closure and rewriting to a fixpoint, which hands the
+    # search a formula over the representatives only (plus the units and
+    # equivalences that give every merged variable its value). A closure that
+    # ends in a clash or merges very little comes back in the appended form.
+    gate_closure = nil
+    gc_rewritten = false
+    if env("WASSAT_GATE_CLOSURE_REWRITE") != "0"
+      gate_closure = wassat_gate_closure_reduce(formula, clock_ms() + WASSAT_GATE_CLOSURE_MS)
+      gc_rewritten = gate_closure != nil && gate_closure["rewritten"] == true
+    else
+      gate_closure = wassat_gate_closure_lift(formula, clock_ms() + WASSAT_GATE_CLOSURE_MS)
+    if gc_rewritten
+      gc_work = gate_closure["work"]
+      if env("WASSAT_GATE_CLOSURE_DUMP") == "1"
+        gc_f = gate_closure["formula"]
+        << "c gate-closure-cnf-begin [gc_f["nvars"]] [gc_f["flat_ncl"]]"
+        gc_i = 0
+        while gc_i < gc_f["flat_ncl"]
+          gc_o = gc_f["flat_offs"][gc_i]
+          gc_parts = []
+          gc_j = 0
+          while gc_j < gc_f["flat_lens"][gc_i]
+            gc_parts.push(gc_f["flat_lits"][gc_o + gc_j])
+            gc_j += 1
+          << "c gate-closure-cnf " + gc_parts.join(" ") + " 0"
+          gc_i += 1
+      cdcl_formula = gate_closure["formula"]
+      << "c gate closure: [gate_closure["units"]] units, [gate_closure["clauses_in"]] clauses rewritten to [gate_closure["clauses_out"]] in [gate_closure["rounds"]] rounds, [gc_work[18]] gates"
+      wassat_prof_note("gate_closure rewritten rounds=[gate_closure["rounds"]] units=[gate_closure["units"]] clauses_in=[gate_closure["clauses_in"]] clauses_out=[gate_closure["clauses_out"]] refuted=[gate_closure["refuted"]] merges=[gc_work[0]] and=[gc_work[8]] xor=[gc_work[9]] ite=[gc_work[10]] gates=[gc_work[18]] installs=[gc_work[12]] ticks=[gc_work[11]] stopped=[gc_work[5]] rewrite_units=[gc_work[22]] passes=[gc_work[23]]") if env("WASSAT_PROFILE") == "1"
+      if env("WASSAT_PROFILE") == "1"
+        gc_h = gate_closure["history"]
+        gc_i = 0
+        while gc_i < gate_closure["rounds"]
+          wassat_prof_note("gate_closure round=[gc_i + 1] known=[gc_h[4 * gc_i]] rewrite_units=[gc_h[4 * gc_i + 1]] duplicates=[gc_h[4 * gc_i + 2]] clauses=[gc_h[4 * gc_i + 3]]")
+          gc_i += 1
+    if gate_closure != nil && !gc_rewritten
       gc_work = gate_closure["work"]
       if env("WASSAT_GATE_CLOSURE_DUMP") == "1"
         gc_f = gate_closure["formula"]
@@ -2055,7 +2092,11 @@ use cover_split
             plight.set_budget(wassat_pre_light_ticks)
             plight.set_deadline_ms(wassat_pre_stage_ms)
             plight.force_full_pipeline
-            wassat_race_add_pre(race, plight, false, "light")
+            # The arm renders the formula its buffers were sized for. Left
+            # to the default it rendered the race's formula (the input as
+            # written), which ignored the gate closure and overran the
+            # buffers once the closure's formula became the smaller one.
+            wassat_race_add_pre(race, plight, false, "light", cdcl_formula)
             if pre_arms > 1
               pheavy_f = quad_shift > 0 ? orig_formula : cdcl_formula
               pheavy = WassatPreprocess.new(pheavy_f["nvars"], [], WASSAT_PROOF_NONE, pheavy_f)

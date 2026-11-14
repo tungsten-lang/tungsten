@@ -6,15 +6,20 @@
 Generates small Tseitin circuits (AND, OR, XOR and if-then-else gates with
 repeated and perturbed structure, negated outputs, random units, binary
 equivalences and stray clauses), at most 15 variables each, and runs the
-binary with WASSAT_GATE_CLOSURE_DUMP=1 so the lane prints every clause it
-appends. For each formula, against ALL models found by enumeration:
+binary with WASSAT_GATE_CLOSURE_DUMP=1 so the lane prints what it hands to
+the search: the whole formula when it rewrote the input through the merged
+variables, or the clauses it appended when a closure ended in a clash. For
+each formula, against ALL models found by enumeration:
 
+  * a rewritten formula must have exactly the models of the input (it keeps
+    a unit or an equivalence for every variable it removed from the clauses);
   * every appended clause must hold in every model of the input;
   * the verdict must be the enumerated one;
   * a reported model must be one of the enumerated models.
 
+REWRITE=0 runs the lane with WASSAT_GATE_CLOSURE_REWRITE=0 (appending only).
 A run in which the lane never fires proves nothing, so the test also fails
-when fewer than half of the formulas were extended.
+when fewer than half of the formulas were extended or rewritten.
 """
 import os, random, subprocess, sys, itertools, tempfile
 W = os.environ.get('WASSAT') or sys.exit('set WASSAT=<binary>')
@@ -22,6 +27,7 @@ N = int(os.environ.get('CASES', '600')); SEED = int(os.environ.get('SEED', '1'))
 TMP = tempfile.mkdtemp(prefix='gate-closure-')
 rng = random.Random(SEED)
 env = dict(os.environ, WASSAT_BACKDOOR_TABLES='0', WASSAT_GATE_CLOSURE_DUMP='1')
+if os.environ.get('REWRITE') == '0': env['WASSAT_GATE_CLOSURE_REWRITE'] = '0'
 def gen():
     nin = rng.randint(2, 5); nv = nin; cl = []
     sigs = []
@@ -74,7 +80,7 @@ def models(nv, cl):
             if not any(((m >> (abs(x) - 1)) & 1) == (1 if x > 0 else 0) for x in c): ok = False; break
         if ok: out.append(m)
     return out
-stats = dict(runs=0, lifted=0, clauses=0, sat=0, unsat=0)
+stats = dict(runs=0, lifted=0, rewritten=0, clauses=0, shorter=0, sat=0, unsat=0)
 for it in range(N):
     nv, cl = gen()
     if nv > 15: continue
@@ -94,9 +100,20 @@ for it in range(N):
     added = [[int(x) for x in l.split()[2:]] for l in o.splitlines() if l.startswith('c gate-closure-clause')]
     stats['runs'] += 1; stats['sat' if ms else 'unsat'] += 1
     if added: stats['lifted'] += 1; stats['clauses'] += len(added)
+    lines = o.splitlines()
+    if any(l.startswith('c gate-closure-cnf-begin') for l in lines):
+        head = [l for l in lines if l.startswith('c gate-closure-cnf-begin')][0].split()
+        new = [[int(x) for x in l.split()[2:-1]] for l in lines if l.startswith('c gate-closure-cnf ')]
+        if int(head[2]) != nv or int(head[3]) != len(new):
+            print('DUMP HEADER MISMATCH', it, head, len(new)); print('kept:', path); sys.exit(1)
+        if any(abs(x) < 1 or abs(x) > nv for c in new for x in c):
+            print('DUMP LITERAL OUT OF RANGE', it); print('kept:', path); sys.exit(1)
+        if models(nv, new) != ms:
+            print('REWRITTEN FORMULA HAS OTHER MODELS', it); print('kept:', path); sys.exit(1)
+        stats['rewritten'] += 1; stats['shorter'] += 1 if len(new) < len(cl) else 0
     for c in added:
         for m in ms:
             if not any(((m >> (abs(x) - 1)) & 1) == (1 if x > 0 else 0) for x in c):
                 print('NOT IMPLIED', it, c); print('kept:', path); sys.exit(1)
-if stats['lifted'] * 2 < stats['runs']: print('FAIL: lane rarely fired', stats); sys.exit(1)
+if (stats['lifted'] + stats['rewritten']) * 2 < stats['runs']: print('FAIL: lane rarely fired', stats); sys.exit(1)
 print('gate closure: OK', stats)

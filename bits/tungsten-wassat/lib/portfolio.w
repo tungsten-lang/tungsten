@@ -2391,7 +2391,12 @@ WASSAT_TEL_STRIDE = 8
 # arm, so a ring would be unsound AND useless.
 -> wassat_race_add_pre(race, pre, heavy, label, pre_formula = nil)
   raise "race capacity exceeded" if race["threads"] + race["pre"].size >= race["cap"]
-  pf = pre_formula == nil ? race["formula"] : pre_formula
+  # Without an explicit formula the arm renders the one its preprocessor was
+  # built for: its buffers are sized from that formula, and the race's own
+  # formula may be a larger rendering of the same problem.
+  pf = pre_formula
+  pf = pre.flat if pf == nil
+  pf = race["formula"] if pf == nil
   race["pre"].push({ "pre": pre, "heavy": heavy, "label": label, "out": [], "formula": pf })
   0
 

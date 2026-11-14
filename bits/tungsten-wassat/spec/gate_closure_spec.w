@@ -51,6 +51,17 @@ use ../lib/wassat
     mask += 1
   ok && models > 0
 
+# Exactly the same assignments satisfy both formulas.
+-> gc_same_models?(f, g, nvars)
+  same = true
+  mask = 0
+  while mask < (1 << nvars)
+    a = gc_holds?(f, 0, f["flat_ncl"], mask)
+    b = gc_holds?(g, 0, g["flat_ncl"], mask)
+    same = false if a != b
+    mask += 1
+  same
+
 -> gc_has_binary?(lifted, from, a, b)
   lits = lifted["flat_lits"]
   offs = lifted["flat_offs"]
@@ -127,3 +138,71 @@ describe "Wassat gate congruence closure" ->
     expect(wassat_gate_closure_lift(f) == nil).to eq(true)
     small = wassat_parse_cnf_native("p cnf 3 3\n1 -2 -3 0\n-1 2 0\n-1 3 0\n")
     expect(wassat_gate_closure_lift(small) == nil).to eq(true)
+
+describe "Wassat gate closure rewriting" ->
+  it "rewrites the clauses through the merged gates and drops the copies" ->
+    f = gc_formula(8, [gc_and(5, 1, 2), gc_and(6, 2, 1), gc_and(7, 5, 3), gc_and(8, 3, 6)])
+    r = wassat_gate_closure_reduce(f)
+    expect(r != nil).to eq(true)
+    expect(r["refuted"]).to eq(false)
+    # Two of the four gates are copies: 6 clauses stay, and 6 and 8 keep two
+    # binaries each that tie them to 5 and 7.
+    expect(r["clauses_in"]).to eq(12)
+    expect(r["clauses_out"]).to eq(10)
+    expect(r["units"]).to eq(0)
+    expect(gc_same_models?(f, r["formula"], 8)).to eq(true)
+
+  it "follows a unit that the rewriting uncovers" ->
+    # 5 and 6 are one gate, so (5 | 6) says 5, and 5 says 1 and 2.
+    f = gc_formula(8, [gc_and(5, 1, 2), gc_and(6, 1, 2), ["5 6 0"], gc_xor(7, 3, 4), gc_xor(8, 4, 3)])
+    r = wassat_gate_closure_reduce(f)
+    expect(r != nil).to eq(true)
+    expect(r["refuted"]).to eq(false)
+    expect(r["units"]).to eq(4)
+    expect(gc_same_models?(f, r["formula"], 8)).to eq(true)
+
+  it "writes two clashing units when a clause becomes empty" ->
+    f = gc_formula(8, [gc_and(5, 1, 2), gc_and(6, 1, 2), ["5 6 0", "-5 0"], gc_xor(7, 3, 4), gc_xor(8, 4, 3)])
+    r = wassat_gate_closure_reduce(f)
+    expect(r != nil).to eq(true)
+    expect(r["refuted"]).to eq(true)
+    expect(r["formula"]["flat_ncl"]).to eq(2)
+    expect(gc_same_models?(f, r["formula"], 8)).to eq(true)
+
+  it "returns the appended form for a clash inside the closure" ->
+    f = gc_formula(8, [gc_and(5, 1, 2), gc_and(6, 1, 2), ["5 6 0", "-5 -6 0", "7 8 0", "7 -8 0"]])
+    r = wassat_gate_closure_reduce(f)
+    expect(r != nil).to eq(true)
+    expect(r["rewritten"]).to eq(false)
+    expect(r["work"][1]).to eq(1)
+    expect(r["added_from"]).to eq(f["flat_ncl"])
+    expect(gc_same_models?(f, r["formula"], 8)).to eq(true)
+
+  it "appends instead of rewriting when few variables merge" ->
+    # One merged pair among 20,001 variables is under one in 200.
+    f = gc_formula(20001, [gc_and(5, 1, 2), gc_and(6, 2, 1), ["7 8 20001 0", "9 10 11 0", "-9 12 13 0"]])
+    r = wassat_gate_closure_reduce(f)
+    expect(r != nil).to eq(true)
+    expect(r["rewritten"]).to eq(false)
+    expect(r["formula"]["flat_ncl"]).to eq(f["flat_ncl"] + 2)
+
+  it "appends when the rewritten formula is not a tenth shorter" ->
+    # One merged pair saves one clause of 46. (Binary clauses, because the
+    # gate scan is skipped when binaries are under an eighth of the clauses.)
+    extra = []
+    i = 0
+    while i < 40
+      extra.push("[7 + i] [8 + i] 0")
+      i += 1
+    f = gc_formula(50, [gc_and(5, 1, 2), gc_and(6, 2, 1), extra])
+    r = wassat_gate_closure_reduce(f)
+    expect(r != nil).to eq(true)
+    expect(r["rewritten"]).to eq(false)
+    expect(r["formula"]["flat_ncl"]).to eq(f["flat_ncl"] + 2)
+
+  it "declines formulas without gates" ->
+    f = wassat_parse_cnf_native("p cnf 8 8\n1 2 3 0\n-1 4 5 0\n2 -6 7 0\n-3 -7 8 0\n4 6 -8 0\n-2 5 -7 0\n1 -4 8 0\n-5 6 7 0\n")
+    expect(wassat_gate_closure_reduce(f) == nil).to eq(true)
+
+spec_summary
+

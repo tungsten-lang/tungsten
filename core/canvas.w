@@ -71,6 +71,18 @@
   -> .font_name(family, weight = nil, style = nil)
     ccall("w_cg_font_name", family, weight, style)
 
+  # Register a font file (.otf/.ttf/.ttc) for the current process so its family
+  # name resolves in Canvas#text and Canvas#glyphs.
+  -> .register_font(path)
+    ccall("w_cg_register_font", path)
+
+  # Write a raw 8-bit RGBA or BGRA pixel buffer (ByteArray or data_pointer Int)
+  # directly to disk via ImageIO without allocating a Canvas. Passing quality
+  # in 0...0.5 writes PNG with IMAGEIO_PNG_NO_FILTERS.
+  -> .write_pixels(buf, w, h, path, opts = {})
+    ccall("w_cg_write_pixels", buf, w, h, opts[:stride], path, opts[:bgra], opts[:quality])
+    path
+
   # Decode an image file once (PNG, JPEG, HEIC, TIFF, GIF, OpenEXR, …); loading
   # the same unchanged path again returns the cached pixels.
   -> .load_image(path)
@@ -368,6 +380,12 @@
     ccall("w_cg_line_to", @handle, x2, y2)
     draw_current(opts, nil)
 
+  # Batch-stroke `count` independent line segments from `coords` ([x1, y1, x2, y2, ...]
+  # as f64[] or Array) in a single CoreGraphics call.
+  -> segments(coords, count = nil, stroke = "#000", width = nil)
+    ccall("w_cg_segments", @handle, coords, count, stroke, width)
+    self
+
   # Open polyline, unfilled by default (as Svg#polyline).
   -> polyline(pts, opts = {})
     ccall("w_cg_path_begin", @handle)
@@ -509,6 +527,13 @@
   -> text_width(s, opts = {})
     text_style(opts)
     ccall("w_cg_text_measure", @handle, s.to_s)[0]
+
+  # Batch-draw `count` positioned Unicode codepoints (`cps` as i64[]/i32[]/Array,
+  # `xy` as [x0, y0, x1, y1, ...] f64[]/Array) via CTFontDrawGlyphs with cached
+  # ASCII and SMuFL (U+E000..U+F7FF) glyph tables.
+  -> glyphs(cps, xy, count = nil, family = nil, size = nil, fill = "#000")
+    ccall("w_cg_glyphs", @handle, cps, xy, count, family, size, fill)
+    self
 
   # ---- internals ----
 

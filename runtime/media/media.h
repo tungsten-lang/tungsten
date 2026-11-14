@@ -119,6 +119,7 @@
     X(w_media_live_info, 1)            \
     X(w_media_live_flush, 2)           \
     X(w_media_live_close, 1)           \
+    X(w_media_live_pcm_write, 5)       \
     X(w_media_studio_op, 4)
 
 #define W_MEDIA_CCALLS(X) W_MEDIA_C_CCALLS(X) W_MEDIA_AVF_CCALLS(X)
@@ -128,6 +129,7 @@
 #define W_MEDIA_PARAMS_2 WValue, WValue
 #define W_MEDIA_PARAMS_3 WValue, WValue, WValue
 #define W_MEDIA_PARAMS_4 WValue, WValue, WValue, WValue
+#define W_MEDIA_PARAMS_5 W_MEDIA_PARAMS_4, WValue
 #define W_MEDIA_PARAMS_7 W_MEDIA_PARAMS_4, WValue, WValue, WValue
 #define W_MEDIA_PARAMS_11 W_MEDIA_PARAMS_7, WValue, WValue, WValue, WValue
 #define W_MEDIA_PARAMS_12 W_MEDIA_PARAMS_11, WValue

@@ -388,6 +388,8 @@ static int gfx_phase_of(NSEventPhase ph, NSEventPhase mom) {
 
 /* ---- Boxed window handle (same convention as runtime/metal.m) ---- */
 
+#define GFX_MAX_TEX 1024
+
 typedef struct WGfxWindow {
     uint8_t type;             /* W_TYPE_GFX_WINDOW */
     void   *window;           /* NSWindow*           (retained) */
@@ -411,6 +413,19 @@ typedef struct WGfxWindow {
     char   *prompt_text;
     NSArray *form_values; /* owned immutable strings: safe across runtime GC */
     int     form_button;
+    /* GPU layer/quad compositor state */
+    void   *pso_tile;         /* id<MTLRenderPipelineState> programmable tile blend */
+    void   *pso_alpha;        /* id<MTLRenderPipelineState> fixed-function fallback */
+    void   *sampler;          /* id<MTLSamplerState> linear/nearest clamp */
+    void   *dummy_tex;        /* 1x1 white MTLTexture bound when a quad has no tex */
+    void   *quad_buf[3];      /* triple-buffered shared GfxQuad instance buffers */
+    size_t  quad_cap[3];
+    dispatch_semaphore_t frame_sem;
+    uint64_t next_cb_seq;
+    uint64_t done_cb_seq;
+    void    *tex[GFX_MAX_TEX];
+    uint64_t tex_used_seq[GFX_MAX_TEX];
+    uint8_t  tex_bgra[GFX_MAX_TEX];
     GfxInput input;
 } WGfxWindow;
 
@@ -958,6 +973,12 @@ WValue w_gfx_close(WValue window_v) {
     [gw->form_values release]; gw->form_values = nil;
     gw->input.should_close = true;
     NSWindow *win = (NSWindow *)gw->window;
+    for (int i = 0; i < GFX_MAX_TEX; i++) {
+        if (gw->tex[i]) {
+            [(id<MTLTexture>)gw->tex[i] release];
+            gw->tex[i] = NULL;
+        }
+    }
     [win setDelegate:nil];
     [win orderOut:nil];
     [win close];
@@ -1916,4 +1937,491 @@ WValue w_gfx_present(WValue window_v, WValue buffer_v,
 WValue w_gfx_present_wait(WValue window_v, WValue buffer_v,
                           WValue width_v, WValue height_v) {
     return gfx_present_impl(window_v, buffer_v, width_v, height_v, true);
+}
+
+/* ---- Retained MTLTexture & 2D Quad/Layer GPU Compositor ---- */
+
+typedef struct GfxQuad {
+    float dst[4];   /* x0_ndc, y0_ndc, x1_ndc, y1_ndc */
+    float uv[4];    /* u0, v0, u1, v1 */
+    float col[4];   /* r, g, b, a */
+    float aux[4];   /* paper_r, paper_g, paper_b, mode */
+} GfxQuad;
+
+static NSString * const kGfxLayerMSL =
+    @"#include <metal_stdlib>\n"
+     "using namespace metal;\n"
+     "struct GfxQuad {\n"
+     "    float4 dst;\n"
+     "    float4 uv;\n"
+     "    float4 col;\n"
+     "    float4 aux;\n"
+     "};\n"
+     "struct VSOut {\n"
+     "    float4 pos [[position]];\n"
+     "    float2 uv;\n"
+     "    float4 col;\n"
+     "    float4 aux;\n"
+     "};\n"
+     "vertex VSOut gfx_layer_vs(uint vid [[vertex_id]], uint iid [[instance_id]],\n"
+     "                          device const GfxQuad *quads [[buffer(0)]]) {\n"
+     "    GfxQuad q = quads[iid];\n"
+     "    float2 c = float2((vid & 1u) ? q.dst.z : q.dst.x,\n"
+     "                      (vid & 2u) ? q.dst.w : q.dst.y);\n"
+     "    float2 t = float2((vid & 1u) ? q.uv.z  : q.uv.x,\n"
+     "                      (vid & 2u) ? q.uv.w  : q.uv.y);\n"
+     "    VSOut o;\n"
+     "    o.pos = float4(c, 0.0f, 1.0f);\n"
+     "    o.uv  = t;\n"
+     "    o.col = q.col;\n"
+     "    o.aux = q.aux;\n"
+     "    return o;\n"
+     "}\n"
+     "fragment float4 gfx_layer_fs_tile(VSOut in [[stage_in]],\n"
+     "                                  texture2d<float> tex [[texture(0)]],\n"
+     "                                  sampler smp [[sampler(0)]],\n"
+     "                                  float4 dst [[color(0)]]) {\n"
+     "    int mode = int(rint(in.aux.w));\n"
+     "    if (mode == 0) {\n"
+     "        float4 s = tex.sample(smp, in.uv) * in.col.a;\n"
+     "        return float4(s.rgb + dst.rgb * (1.0f - s.a), 1.0f);\n"
+     "    } else if (mode == 1) {\n"
+     "        float4 s = tex.sample(smp, in.uv);\n"
+     "        float a = s.a * in.col.a;\n"
+     "        return float4(s.rgb * a + dst.rgb * (1.0f - a), 1.0f);\n"
+     "    } else if (mode == 2) {\n"
+     "        return float4(mix(dst.rgb, in.col.rgb, in.col.a), 1.0f);\n"
+     "    } else if (mode == 3) {\n"
+     "        bool exposed = all(abs(dst.rgb - in.aux.rgb) < (0.5f / 255.0f));\n"
+     "        return exposed ? float4(mix(in.aux.rgb, in.col.rgb, in.col.a), 1.0f) : dst;\n"
+     "    } else {\n"
+     "        float m = tex.sample(smp, in.uv).b;\n"
+     "        float a = m * in.col.a;\n"
+     "        return float4(mix(dst.rgb, in.col.rgb, a), 1.0f);\n"
+     "    }\n"
+     "}\n"
+     "fragment float4 gfx_layer_fs_alpha(VSOut in [[stage_in]],\n"
+     "                                   texture2d<float> tex [[texture(0)]],\n"
+     "                                   sampler smp [[sampler(0)]]) {\n"
+     "    int mode = int(rint(in.aux.w));\n"
+     "    if (mode == 0) {\n"
+     "        return tex.sample(smp, in.uv) * in.col.a;\n"
+     "    } else if (mode == 1) {\n"
+     "        float4 s = tex.sample(smp, in.uv);\n"
+     "        float a = s.a * in.col.a;\n"
+     "        return float4(s.rgb * a, a);\n"
+     "    } else if (mode == 4) {\n"
+     "        float a = tex.sample(smp, in.uv).b * in.col.a;\n"
+     "        return float4(in.col.rgb * a, a);\n"
+     "    } else {\n"
+     "        return float4(in.col.rgb * in.col.a, in.col.a);\n"
+     "    }\n"
+     "}\n";
+
+static void gfx_ensure_compositor(WGfxWindow *gw) {
+    if (gw->pso_tile || gw->pso_alpha) return;
+    id<MTLDevice> dev = (id<MTLDevice>)gw->device;
+    CAMetalLayer *layer = (CAMetalLayer *)gw->layer;
+    MTLPixelFormat pf = layer.pixelFormat;
+
+    if (!gw->frame_sem) gw->frame_sem = dispatch_semaphore_create(3);
+
+    if (!gw->sampler) {
+        MTLSamplerDescriptor *sd = [[MTLSamplerDescriptor alloc] init];
+        sd.minFilter = MTLSamplerMinMagFilterNearest;
+        sd.magFilter = MTLSamplerMinMagFilterNearest;
+        sd.sAddressMode = MTLSamplerAddressModeClampToEdge;
+        sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
+        gw->sampler = (void *)[dev newSamplerStateWithDescriptor:sd];
+        [sd release];
+    }
+    if (!gw->dummy_tex) {
+        MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                      width:1 height:1 mipmapped:NO];
+        td.usage = MTLTextureUsageShaderRead;
+        td.storageMode = MTLStorageModeShared;
+        id<MTLTexture> dt = [dev newTextureWithDescriptor:td];
+        uint32_t white = 0xFFFFFFFFu;
+        [dt replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&white bytesPerRow:4];
+        gw->dummy_tex = (void *)dt;
+    }
+
+    NSError *err = nil;
+    MTLCompileOptions *opts = [[MTLCompileOptions alloc] init];
+    id<MTLLibrary> lib = [dev newLibraryWithSource:kGfxLayerMSL options:opts error:&err];
+    [opts release];
+    if (!lib) {
+        const char *msg = err ? [[err localizedDescription] UTF8String] : "shader compile error";
+        char buf[512];
+        snprintf(buf, sizeof buf, "gfx.present_layers: %s", msg);
+        w_raise(w_string(buf));
+    }
+    id<MTLFunction> vs = [lib newFunctionWithName:@"gfx_layer_vs"];
+    if ([dev supportsFamily:MTLGPUFamilyApple1]) {
+        id<MTLFunction> fs_tile = [lib newFunctionWithName:@"gfx_layer_fs_tile"];
+        MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor alloc] init];
+        pd.vertexFunction = vs;
+        pd.fragmentFunction = fs_tile;
+        pd.colorAttachments[0].pixelFormat = pf;
+        pd.colorAttachments[0].blendingEnabled = NO;
+        NSError *perr = nil;
+        id<MTLRenderPipelineState> pso = [dev newRenderPipelineStateWithDescriptor:pd error:&perr];
+        [pd release];
+        [fs_tile release];
+        if (pso) gw->pso_tile = (void *)pso;
+    }
+    if (!gw->pso_tile) {
+        id<MTLFunction> fs_a = [lib newFunctionWithName:@"gfx_layer_fs_alpha"];
+        MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor alloc] init];
+        pd.vertexFunction = vs;
+        pd.fragmentFunction = fs_a;
+        pd.colorAttachments[0].pixelFormat = pf;
+        pd.colorAttachments[0].blendingEnabled = YES;
+        pd.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
+        pd.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+        pd.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+        pd.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+        NSError *perr = nil;
+        id<MTLRenderPipelineState> pso = [dev newRenderPipelineStateWithDescriptor:pd error:&perr];
+        [pd release];
+        [fs_a release];
+        if (!pso) {
+            [vs release];
+            [lib release];
+            w_raise(w_string("gfx.present_layers: failed to create render pipeline"));
+        }
+        gw->pso_alpha = (void *)pso;
+    }
+    [vs release];
+    [lib release];
+}
+
+static id<MTLTexture> gfx_make_tex(id<MTLDevice> dev, int w, int h, int bgra) {
+    MTLPixelFormat pf = bgra ? MTLPixelFormatBGRA8Unorm : MTLPixelFormatRGBA8Unorm;
+    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pf
+                                                                                  width:(NSUInteger)w
+                                                                                 height:(NSUInteger)h
+                                                                              mipmapped:NO];
+    td.usage = MTLTextureUsageShaderRead;
+    td.storageMode = MTLStorageModeShared;
+    return [dev newTextureWithDescriptor:td];
+}
+
+WValue w_gfx_tex_new(WValue window_v, WValue width_v, WValue height_v, WValue bgra_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.tex_new");
+    int w = (int)gfx_int(width_v);
+    int h = (int)gfx_int(height_v);
+    if (w <= 0 || h <= 0 || w > 16384 || h > 16384)
+        w_raise(w_string("gfx.tex_new: width/height must be in 1..16384"));
+    int bgra = (bgra_v != W_NIL && bgra_v != W_FALSE && !(w_is_int(bgra_v) && w_as_int(bgra_v) == 0)) ? 1 : 0;
+    int slot = -1;
+    for (int i = 0; i < GFX_MAX_TEX; i++) {
+        if (!gw->tex[i]) { slot = i; break; }
+    }
+    if (slot < 0) w_raise(w_string("gfx.tex_new: texture table full (1024)"));
+    @autoreleasepool {
+        id<MTLTexture> t = gfx_make_tex((id<MTLDevice>)gw->device, w, h, bgra);
+        if (!t) w_raise(w_string("gfx.tex_new: Metal texture allocation failed"));
+        gw->tex[slot] = (void *)t;
+        gw->tex_used_seq[slot] = 0;
+        gw->tex_bgra[slot] = (uint8_t)bgra;
+    }
+    return w_int(slot + 1);
+}
+
+WValue w_gfx_tex_upload(WValue window_v, WValue tex_id_v, WValue src_v, WValue stride_v,
+                        WValue x_v, WValue y_v, WValue w_v, WValue h_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.tex_upload");
+    int slot = (int)gfx_int(tex_id_v) - 1;
+    if (slot < 0 || slot >= GFX_MAX_TEX || !gw->tex[slot]) return w_bool(0);
+    id<MTLTexture> tex = (id<MTLTexture>)gw->tex[slot];
+    int tw = (int)tex.width, th = (int)tex.height;
+    int x = x_v == W_NIL ? 0 : (int)gfx_int(x_v);
+    int y = y_v == W_NIL ? 0 : (int)gfx_int(y_v);
+    int w = w_v == W_NIL ? (tw - x) : (int)gfx_int(w_v);
+    int h = h_v == W_NIL ? (th - y) : (int)gfx_int(h_v);
+    if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > tw || y + h > th) return w_bool(0);
+    int stride = stride_v == W_NIL ? (w * 4) : (int)gfx_int(stride_v);
+    if (stride < w * 4) w_raise(w_string("gfx.tex_upload: stride < width * 4"));
+
+    const void *ptr = NULL;
+    size_t min_bytes = (size_t)(h - 1) * (size_t)stride + (size_t)w * 4;
+    if (w_is_int(src_v)) {
+        ptr = (const void *)(uintptr_t)w_as_int(src_v);
+    } else if (w_is_array(src_v)) {
+        WArray *a = w_as_array(src_v);
+        size_t elem = a->ebits == 8 ? 1 : ((a->ebits == 32 || a->ebits == 33) ? 4 : 0);
+        if (elem == 0) w_raise(w_string("gfx.tex_upload: array must be ByteArray or u32[]/i32[]"));
+        if ((size_t)a->size * elem < min_bytes) w_raise(w_string("gfx.tex_upload: array smaller than upload region"));
+        ptr = (const uint8_t *)a->slots + (size_t)a->start * elem;
+    } else if (w_is_obj(src_v) && w_subtag(src_v) == W_SUBTAG_GENERIC) {
+        WMetalBuffer *b = (WMetalBuffer *)w_as_ptr(src_v);
+        if (b->type == W_TYPE_METAL_BUFFER && (size_t)b->size >= min_bytes) {
+            ptr = (const uint8_t *)[(id<MTLBuffer>)b->handle contents] + b->offset;
+        }
+    }
+    if (!ptr) w_raise(w_string("gfx.tex_upload: invalid pixel source"));
+
+    @autoreleasepool {
+        uint64_t done = __atomic_load_n(&gw->done_cb_seq, __ATOMIC_ACQUIRE);
+        if (gw->tex_used_seq[slot] > done && x == 0 && y == 0 && w == tw && h == th) {
+            /* In-flight CB still references `tex`: swap in a fresh shared texture so
+             * CPU upload never races GPU sampling, and let Metal release the old one. */
+            id<MTLTexture> fresh = gfx_make_tex((id<MTLDevice>)gw->device, tw, th, gw->tex_bgra[slot]);
+            if (fresh) {
+                [tex release];
+                tex = fresh;
+                gw->tex[slot] = (void *)tex;
+                gw->tex_used_seq[slot] = 0;
+            }
+        }
+        [tex replaceRegion:MTLRegionMake2D((NSUInteger)x, (NSUInteger)y, (NSUInteger)w, (NSUInteger)h)
+               mipmapLevel:0
+                 withBytes:ptr
+               bytesPerRow:(NSUInteger)stride];
+    }
+    return w_bool(1);
+}
+
+WValue w_gfx_tex_free(WValue window_v, WValue tex_id_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.tex_free");
+    int slot = (int)gfx_int(tex_id_v) - 1;
+    if (slot < 0 || slot >= GFX_MAX_TEX || !gw->tex[slot]) return w_bool(0);
+    @autoreleasepool {
+        [(id<MTLTexture>)gw->tex[slot] release];
+        gw->tex[slot] = NULL;
+        gw->tex_used_seq[slot] = 0;
+    }
+    return w_bool(1);
+}
+
+/* w_gfx_present_layers(window, bg_u32, cmds_f64, n_cmds, wait_flag):
+ * Each command is 16 doubles in `cmds_f64`:
+ *   [0] kind: 0 = premul tex, 1 = fill/blend color, 2 = under-paper blend,
+ *             3 = mask-blend tex, 4 = straight-alpha tex
+ *   [1] tex_id (for kind 0,3,4) or color_u32 0xAARRGGBB (for kind 1,2)
+ *   [2..5]  dx, dy, dw, dh (drawable pixels, top-left origin)
+ *   [6..9]  sx, sy, sw, sh (source texture pixels; <=0 means full texture)
+ *   [10..13] clip_x, clip_y, clip_w, clip_h (scissor; <=0 means full drawable)
+ *   [14] param0: alpha (0..1) for kind 0,4; paper_u32 for kind 2; color_u32 for kind 3
+ *   [15] param1: alpha (0..1) for kind 3 (or reserved) */
+WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue n_cmds_v, WValue wait_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.present_layers");
+    if (gw->closed) return w_bool(0);
+    gfx_require_main_thread("gfx.present_layers");
+
+    int64_t n_cmds = n_cmds_v == W_NIL ? 0 : gfx_int(n_cmds_v);
+    const double *raw = NULL;
+    if (n_cmds > 0) {
+        if (!w_is_array(cmds_v)) w_raise(w_string("gfx.present_layers: cmds must be an f64[] or Array"));
+        WArray *a = w_as_array(cmds_v);
+        int64_t avail = (int64_t)a->size / 16;
+        if (n_cmds > avail) n_cmds = avail;
+        if (a->ebits == -64) raw = (const double *)a->slots + a->start;
+    }
+
+    bool wait_done = (wait_v != W_NIL && wait_v != W_FALSE && !(w_is_int(wait_v) && w_as_int(wait_v) == 0));
+
+    @autoreleasepool {
+        gfx_ensure_compositor(gw);
+        CAMetalLayer *layer = (CAMetalLayer *)gw->layer;
+        if (!wait_done) {
+            dispatch_semaphore_wait(gw->frame_sem, dispatch_time(DISPATCH_TIME_NOW, 32 * NSEC_PER_MSEC));
+        }
+        id<CAMetalDrawable> drawable = [layer nextDrawable];
+        if (!drawable) {
+            if (!wait_done) dispatch_semaphore_signal(gw->frame_sem);
+            return w_bool(0);
+        }
+
+        NSUInteger dw = drawable.texture.width;
+        NSUInteger dh = drawable.texture.height;
+        if (dw == 0 || dh == 0) {
+            if (!wait_done) dispatch_semaphore_signal(gw->frame_sem);
+            return w_bool(0);
+        }
+        float inv_dw = 2.0f / (float)dw;
+        float inv_dh = 2.0f / (float)dh;
+
+        uint64_t seq = ++gw->next_cb_seq;
+        int ring = (int)(seq % 3);
+
+        size_t need_bytes = (size_t)(n_cmds > 0 ? n_cmds : 1) * sizeof(GfxQuad);
+        if (need_bytes > gw->quad_cap[ring]) {
+            size_t cap = gw->quad_cap[ring] ? gw->quad_cap[ring] * 2 : 16384;
+            while (cap < need_bytes) cap *= 2;
+            if (gw->quad_buf[ring]) [(id<MTLBuffer>)gw->quad_buf[ring] release];
+            id<MTLBuffer> nb = [(id<MTLDevice>)gw->device newBufferWithLength:cap options:MTLResourceStorageModeShared];
+            if (!nb) {
+                if (!wait_done) dispatch_semaphore_signal(gw->frame_sem);
+                w_raise(w_string("gfx.present_layers: quad buffer allocation failed"));
+            }
+            gw->quad_buf[ring] = (void *)nb;
+            gw->quad_cap[ring] = cap;
+        }
+        GfxQuad *quads = (GfxQuad *)[(id<MTLBuffer>)gw->quad_buf[ring] contents];
+
+        typedef struct { int tex_slot; MTLScissorRect sc; } GfxCmdMeta;
+        GfxCmdMeta stack_meta[256];
+        GfxCmdMeta *meta = n_cmds <= 256 ? stack_meta : (GfxCmdMeta *)malloc((size_t)n_cmds * sizeof(GfxCmdMeta));
+        int out_n = 0;
+
+        for (int64_t i = 0; i < n_cmds; i++) {
+            double c[16];
+            if (raw) {
+                memcpy(c, raw + i * 16, 16 * sizeof(double));
+            } else {
+                for (int j = 0; j < 16; j++) c[j] = gfx_num(w_array_get(cmds_v, w_int(i * 16 + j)), "cmd");
+            }
+            int kind = (int)c[0];
+            double qx = c[2], qy = c[3], qw = c[4], qh = c[5];
+            if (qw <= 0.0 || qh <= 0.0) continue;
+
+            int sc_x = 0, sc_y = 0, sc_w = (int)dw, sc_h = (int)dh;
+            if (c[12] > 0.0 && c[13] > 0.0) {
+                int cx0 = (int)llround(c[10]), cy0 = (int)llround(c[11]);
+                int cx1 = (int)llround(c[10] + c[12]), cy1 = (int)llround(c[11] + c[13]);
+                if (cx0 < 0) cx0 = 0;
+                if (cy0 < 0) cy0 = 0;
+                if (cx1 > (int)dw) cx1 = (int)dw;
+                if (cy1 > (int)dh) cy1 = (int)dh;
+                if (cx1 <= cx0 || cy1 <= cy0) continue;
+                sc_x = cx0; sc_y = cy0; sc_w = cx1 - cx0; sc_h = cy1 - cy0;
+            }
+            if (qx + qw <= sc_x || qx >= sc_x + sc_w || qy + qh <= sc_y || qy >= sc_y + sc_h) continue;
+
+            GfxQuad q;
+            q.dst[0] = (float)qx * inv_dw - 1.0f;
+            q.dst[1] = 1.0f - (float)qy * inv_dh;
+            q.dst[2] = (float)(qx + qw) * inv_dw - 1.0f;
+            q.dst[3] = 1.0f - (float)(qy + qh) * inv_dh;
+
+            int tex_slot = -1;
+            if (kind == 0 || kind == 3 || kind == 4) {
+                int slot = (int)llround(c[1]) - 1;
+                if (slot < 0 || slot >= GFX_MAX_TEX || !gw->tex[slot]) continue;
+                id<MTLTexture> t = (id<MTLTexture>)gw->tex[slot];
+                gw->tex_used_seq[slot] = seq;
+                tex_slot = slot;
+                double tw = (double)t.width, th = (double)t.height;
+                double sx = c[6], sy = c[7], sw = c[8], sh = c[9];
+                if (sw <= 0.0 || sh <= 0.0) { sx = 0.0; sy = 0.0; sw = tw; sh = th; }
+                q.uv[0] = (float)(sx / tw);
+                q.uv[1] = (float)(sy / th);
+                q.uv[2] = (float)((sx + sw) / tw);
+                q.uv[3] = (float)((sy + sh) / th);
+                if (kind == 3) {
+                    uint32_t u = (uint32_t)(int64_t)c[14];
+                    float a = (float)(c[15] > 0.0 ? c[15] : 1.0);
+                    q.col[0] = ((u >> 16) & 0xFF) / 255.0f;
+                    q.col[1] = ((u >> 8)  & 0xFF) / 255.0f;
+                    q.col[2] = (u & 0xFF)         / 255.0f;
+                    q.col[3] = a;
+                    q.aux[0] = q.aux[1] = q.aux[2] = 0.0f;
+                    q.aux[3] = 4.0f;
+                } else {
+                    float a = (float)(c[14] > 0.0 ? c[14] : 1.0);
+                    q.col[0] = q.col[1] = q.col[2] = 1.0f;
+                    q.col[3] = a;
+                    q.aux[0] = q.aux[1] = q.aux[2] = 0.0f;
+                    q.aux[3] = (kind == 4) ? 1.0f : 0.0f;
+                }
+            } else {
+                q.uv[0] = 0.0f; q.uv[1] = 0.0f; q.uv[2] = 1.0f; q.uv[3] = 1.0f;
+                uint32_t u = (uint32_t)(int64_t)c[1];
+                uint32_t ua = (u >> 24) & 0xFF;
+                q.col[0] = ((u >> 16) & 0xFF) / 255.0f;
+                q.col[1] = ((u >> 8)  & 0xFF) / 255.0f;
+                q.col[2] = (u & 0xFF)         / 255.0f;
+                q.col[3] = ua / 255.0f;
+                if (kind == 2 && gw->pso_tile) {
+                    uint32_t pu = (uint32_t)(int64_t)c[14];
+                    q.aux[0] = ((pu >> 16) & 0xFF) / 255.0f;
+                    q.aux[1] = ((pu >> 8)  & 0xFF) / 255.0f;
+                    q.aux[2] = (pu & 0xFF)         / 255.0f;
+                    q.aux[3] = 3.0f;
+                } else {
+                    q.aux[0] = q.aux[1] = q.aux[2] = 0.0f;
+                    q.aux[3] = 2.0f;
+                }
+            }
+
+            quads[out_n] = q;
+            meta[out_n].tex_slot = tex_slot;
+            meta[out_n].sc = (MTLScissorRect){ (NSUInteger)sc_x, (NSUInteger)sc_y, (NSUInteger)sc_w, (NSUInteger)sc_h };
+            out_n++;
+        }
+
+        uint32_t bg = (uint32_t)gfx_int(bg_v);
+        double bgr = ((bg >> 16) & 0xFF) / 255.0;
+        double bgg = ((bg >> 8)  & 0xFF) / 255.0;
+        double bgb = (bg & 0xFF)         / 255.0;
+
+        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = drawable.texture;
+        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        rp.colorAttachments[0].clearColor = MTLClearColorMake(bgr, bgg, bgb, 1.0);
+
+        id<MTLCommandQueue> queue = (id<MTLCommandQueue>)gw->queue;
+        id<MTLCommandBuffer> cb = [queue commandBuffer];
+        id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+        [enc setRenderPipelineState:(id<MTLRenderPipelineState>)(gw->pso_tile ? gw->pso_tile : gw->pso_alpha)];
+        [enc setVertexBuffer:(id<MTLBuffer>)gw->quad_buf[ring] offset:0 atIndex:0];
+        [enc setFragmentSamplerState:(id<MTLSamplerState>)gw->sampler atIndex:0];
+
+        id<MTLTexture> cur_tex = (id<MTLTexture>)gw->dummy_tex;
+        [enc setFragmentTexture:cur_tex atIndex:0];
+        MTLScissorRect cur_sc = { 0, 0, dw, dh };
+        [enc setScissorRect:cur_sc];
+
+        int i = 0;
+        while (i < out_n) {
+            int ts = meta[i].tex_slot;
+            id<MTLTexture> want_tex = ts >= 0 ? (id<MTLTexture>)gw->tex[ts] : cur_tex;
+            MTLScissorRect sc = meta[i].sc;
+            int j = i + 1;
+            while (j < out_n &&
+                   sc.x == meta[j].sc.x && sc.y == meta[j].sc.y &&
+                   sc.width == meta[j].sc.width && sc.height == meta[j].sc.height &&
+                   (meta[j].tex_slot < 0 || meta[j].tex_slot == ts || ts < 0)) {
+                if (ts < 0 && meta[j].tex_slot >= 0) {
+                    ts = meta[j].tex_slot;
+                    want_tex = (id<MTLTexture>)gw->tex[ts];
+                }
+                j++;
+            }
+            if (want_tex != cur_tex) {
+                cur_tex = want_tex;
+                [enc setFragmentTexture:cur_tex atIndex:0];
+            }
+            if (sc.x != cur_sc.x || sc.y != cur_sc.y || sc.width != cur_sc.width || sc.height != cur_sc.height) {
+                cur_sc = sc;
+                [enc setScissorRect:cur_sc];
+            }
+            [enc drawPrimitives:MTLPrimitiveTypeTriangleStrip
+                    vertexStart:0
+                    vertexCount:4
+                  instanceCount:(NSUInteger)(j - i)
+                   baseInstance:(NSUInteger)i];
+            i = j;
+        }
+
+        [enc endEncoding];
+        [cb presentDrawable:drawable];
+
+        WGfxWindow *gw_ptr = gw;
+        dispatch_semaphore_t sem = gw->frame_sem;
+        bool sig_sem = !wait_done;
+        [cb addCompletedHandler:^(id<MTLCommandBuffer> _cb) {
+            (void)_cb;
+            uint64_t prev = __atomic_load_n(&gw_ptr->done_cb_seq, __ATOMIC_RELAXED);
+            while (seq > prev && !__atomic_compare_exchange_n(&gw_ptr->done_cb_seq, &prev, seq, true, __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {}
+            if (sig_sem) dispatch_semaphore_signal(sem);
+        }];
+        [cb commit];
+        if (wait_done) [cb waitUntilCompleted];
+        if (meta != stack_meta) free(meta);
+    }
+    return w_bool(1);
 }

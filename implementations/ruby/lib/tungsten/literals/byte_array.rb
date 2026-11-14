@@ -8,6 +8,13 @@ module Tungsten
     attr_reader :bytes
     attr_accessor :encoding_id
 
+    def self.uninit(length)
+      n = length.to_i
+      raise Tungsten::Error, "ByteArray.uninit: negative size" if n.negative?
+
+      new(Array.new(n, 0))
+    end
+
     def initialize(bytes = [], encoding_id: 0)
       @bytes = bytes.dup
       @bytes.each { |b| validate_byte!(b) }

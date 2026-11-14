@@ -2457,7 +2457,12 @@ module Tungsten
           when 2
             return dispatch_slab_alloc_init(evaluate_args(node.args))
           when 3
-            return node.args && !node.args.empty? ? node.args[0].eval_in(self) : nil
+            val = node.args && !node.args.empty? ? node.args[0].eval_in(self) : nil
+            if node.name == "wvalue_from_bits" && val.is_a?(Integer) &&
+               ((val >> 48) & 0xFFFF) == 0xFFFE && ((val >> 45) & 0x7).zero? && (val & 1).zero?
+              return Tungsten::Color.new((val >> 36) & 0xFF, (val >> 28) & 0xFF, (val >> 20) & 0xFF, (val >> 12) & 0xFF)
+            end
+            return val
           when 4
             return eval_sigma(node)
           end

@@ -79,6 +79,9 @@ fn ncw_unpack(b, p, n, vals, v0) (u8[] i64 i64 i64[] i64) i64
     %nm1 = sub i64 %n, 1
     %half = shl i64 1, %nm1
     %mask = sub i64 %full, 1
+    %nbytes = mul i64 %n, 64
+    %endq = add i64 %p, %nbytes
+    %endq4 = sub i64 %endq, 4
     br label %outer
   outer:
     %i = phi i64 [0, %entry], [%i1, %emit]
@@ -87,17 +90,29 @@ fn ncw_unpack(b, p, n, vals, v0) (u8[] i64 i64 i64[] i64) i64
     %q0 = phi i64 [%p, %entry], [%q, %emit]
     br label %fill
   fill:
-    %acc = phi i64 [%acc0, %outer], [%accn, %load]
-    %na = phi i64 [%na0, %outer], [%nan, %load]
-    %q = phi i64 [%q0, %outer], [%qn, %load]
+    %acc = phi i64 [%acc0, %outer], [%accw, %load4], [%accn, %load1]
+    %na = phi i64 [%na0, %outer], [%naw, %load4], [%nan, %load1]
+    %q = phi i64 [%q0, %outer], [%qw, %load4], [%qn, %load1]
     %need = icmp slt i64 %na, %n
-    br i1 %need, label %load, label %emit
-  load:
+    br i1 %need, label %refill_chk, label %emit
+  refill_chk:
+    %can4 = icmp sle i64 %q, %endq4
+    br i1 %can4, label %load4, label %load1
+  load4:
+    %wp = getelementptr i8, ptr %pb, i64 %q
+    %w32 = load i32, ptr %wp, align 1
+    %wz = zext i32 %w32 to i64
+    %wsh = shl i64 %wz, %na
+    %accw = or i64 %acc, %wsh
+    %qw = add i64 %q, 4
+    %naw = add i64 %na, 32
+    br label %fill
+  load1:
     %bp = getelementptr i8, ptr %pb, i64 %q
     %byte = load i8, ptr %bp, align 1
     %bz = zext i8 %byte to i64
     %sh = shl i64 %bz, %na
-    %accn = add i64 %acc, %sh
+    %accn = or i64 %acc, %sh
     %qn = add i64 %q, 1
     %nan = add i64 %na, 8
     br label %fill
@@ -116,6 +131,29 @@ fn ncw_unpack(b, p, n, vals, v0) (u8[] i64 i64 i64[] i64) i64
     br i1 %more, label %outer, label %done
   done:
     ret i64 %q
+  IR
+
+fn ncw_midside_512_ir(vals) (i64[]) i64
+  ll <<~IR
+  entry:
+    %pv0 = inttoptr i64 %vals to ptr
+    %pv1 = getelementptr i64, ptr %pv0, i64 512
+    br label %loop
+  loop:
+    %i = phi i64 [ 0, %entry ], [ %inext, %loop ]
+    %p0 = getelementptr i64, ptr %pv0, i64 %i
+    %p1 = getelementptr i64, ptr %pv1, i64 %i
+    %vm = load <4 x i64>, ptr %p0, align 8
+    %vs = load <4 x i64>, ptr %p1, align 8
+    %vl = add <4 x i64> %vm, %vs
+    %vr = sub <4 x i64> %vm, %vs
+    store <4 x i64> %vl, ptr %p0, align 8
+    store <4 x i64> %vr, ptr %p1, align 8
+    %inext = add i64 %i, 4
+    %more = icmp slt i64 %inext, 512
+    br i1 %more, label %loop, label %done
+  done:
+    ret i64 0
   IR
 
 # One channel's block at byte `at` (data ends at `fin`) into vals[v0 .. v0 + 511]. Returns the byte after it, or a negative
@@ -166,12 +204,17 @@ fn ncw_unpack(b, p, n, vals, v0) (u8[] i64 i64 i64[] i64) i64
 
 # the same with the caller's scratch: vals (≥ 512 · ch values) and meta (3), for batches that must not allocate per file
 -> ncw_decode_scratch(b, ch, bits, frames, tab, dat, fin, out, err, vals, meta) (u8[] i64 i64 i64 i64 i64 i64 i32[] i64[] i64[] i64[]) i64
+  ncw_decode_from(b, ch, bits, 0, frames, tab, dat, fin, out, err, vals, meta)
+
+# (2026-11-13, b67168c1) the same from block k0 on: out[(frame − 512 k0) · ch + c] for the frames 512 k0 .. frames − 1 (blocks are
+# found through the offset table, so any block can be first). k0 = 0 is ncw_decode_scratch.
+-> ncw_decode_from(b, ch, bits, k0, frames, tab, dat, fin, out, err, vals, meta) (u8[] i64 i64 i64 i64 i64 i64 i64 i32[] i64[] i64[] i64[]) i64
   nblk = (frames + 511) / 512
   meta[0] = 0
   meta[1] = 0
   meta[2] = 0
   lim = 1 << (bits - 1)
-  k = 0
+  k = k0 ## i64
   while k < nblk
     at = dat + ncw_u32(b, tab + 4 * k)
     fl = 0
@@ -193,13 +236,7 @@ fn ncw_unpack(b, p, n, vals, v0) (u8[] i64 i64 i64[] i64) i64
       c += 1
     if fl == 1 && ch == 2
       err[4] = err[4] + 1
-      i = 0
-      while i < 512
-        m = vals[i]
-        s = vals[512 + i]
-        vals[i] = m + s
-        vals[512 + i] = m - s
-        i += 1
+      ncw_midside_512_ir(vals)
     elsif fl != 0
       err[0] = -4
       err[1] = k
@@ -218,7 +255,7 @@ fn ncw_unpack(b, p, n, vals, v0) (u8[] i64 i64 i64[] i64) i64
           err[1] = k
           err[2] = c
           return -5
-        out[(k * 512 + i) * ch + c] = v
+        out[((k - k0) * 512 + i) * ch + c] = v
         c += 1
       i += 1
     k += 1

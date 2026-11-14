@@ -2,8 +2,28 @@
 
 module Tungsten
   class Color < Literal
-    def self.rgb(r, g, b) = new(r.to_i, g.to_i, b.to_i)
-    def self.from(arr) = new(arr[0].to_i, arr[1].to_i, arr[2].to_i)
+    def self.rgb(r, g, b) = new(r.to_i & 0xFF, g.to_i & 0xFF, b.to_i & 0xFF)
+    def self.rgba(r, g, b, a) = new(r.to_i & 0xFF, g.to_i & 0xFF, b.to_i & 0xFF, a.to_i & 0xFF)
+    def self.from(arr)
+      arr.size >= 4 ? rgba(arr[0], arr[1], arr[2], arr[3]) : rgb(arr[0], arr[1], arr[2])
+    end
+    def self.hex(str)
+      s = str.to_s
+      s = s[1..] if s.start_with?("#")
+      raise RuntimeError, "invalid hex color digit" unless s.match?(/\A[0-9a-fA-F]+\z/)
+      case s.bytesize
+      when 3
+        rgb(s[0].to_i(16) * 17, s[1].to_i(16) * 17, s[2].to_i(16) * 17)
+      when 4
+        rgba(s[0].to_i(16) * 17, s[1].to_i(16) * 17, s[2].to_i(16) * 17, s[3].to_i(16) * 17)
+      when 6
+        rgb(s[0, 2].to_i(16), s[2, 2].to_i(16), s[4, 2].to_i(16))
+      when 8
+        rgba(s[0, 2].to_i(16), s[2, 2].to_i(16), s[4, 2].to_i(16), s[6, 2].to_i(16))
+      else
+        raise RuntimeError, "invalid hex color length"
+      end
+    end
     def self.hue_rgb(h) = from(hue_to_rgb(h.to_i))
     def self.desat(rgb, pct)
       rgb = rgb.is_a?(Color) ? [rgb.r, rgb.g, rgb.b] : rgb
@@ -42,6 +62,14 @@ module Tungsten
     end
 
     def inspect = to_s
+
+    def to_rgba_u32
+      ((@a & 0xFF) << 24) | ((@b & 0xFF) << 16) | ((@g & 0xFF) << 8) | (@r & 0xFF)
+    end
+
+    def to_bgra_u32
+      ((@a & 0xFF) << 24) | ((@r & 0xFF) << 16) | ((@g & 0xFF) << 8) | (@b & 0xFF)
+    end
 
     # ANSI true-color rendering for REPL display
     def ansi_swatch(text = "  ")

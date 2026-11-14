@@ -1287,6 +1287,8 @@ loader_toolchain_state = {split_checked: false}
     # live in core/numeric/rational.w.
     if t == :rational
       consider_autoload_name("Rational", defined, registry, seen, pending)
+    if t == :color
+      consider_autoload_name("Color", defined, registry, seen, pending)
     # UUID literals carry the runtime subtag without a class reference. Once
     # byte is source-defined, literal-only programs must register UUID's type
     # class before public dispatch.
@@ -1354,6 +1356,8 @@ loader_toolchain_state = {split_checked: false}
   -> native_ccall_result_class(name)
     if name in ("w_date" "w_date_parse")
       return "Date"
+    if name in ("w_color" "w_color_raw")
+      return "Color"
     if name in ("w_ipv4" "w_ipv4_parse" "w_ipv4_from_octets")
       return "IPv4"
     if name in ("w_ipv6" "w_ipv6_from_string" "w_ipv6_parse" "w_ipv6_storage_clone" "w_ipv6_storage_from_words")

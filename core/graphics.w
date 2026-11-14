@@ -73,6 +73,30 @@ use core/metal
 -> gfx_present_wait(window, buffer, width, height)
   ccall("w_gfx_present_wait", window, buffer, width, height)
 
+# ---- Retained 2D MTLTexture & Layer/Quad Compositor ----
+#
+# Upload strips/chrome once as retained MTLTextures and composite frames on the
+# GPU via instanced 2D quads (with Apple Silicon tile-memory under-paper blend)
+# without full-window CPU pixel copies or synchronous waitUntilCompleted stalls.
+
+GFX_LAYER_TEX          = 0   # premultiplied RGBA/BGRA texture quad
+GFX_LAYER_FILL         = 1   # flat/alpha-blended colour quad (0xAARRGGBB)
+GFX_LAYER_UNDER        = 2   # blend colour only over exposed paper_u32 (param0)
+GFX_LAYER_MASK         = 3   # tint white-on-black mask texture with colour (param0)
+GFX_LAYER_TEX_STRAIGHT = 4   # unpremultiplied RGBA/BGRA texture quad
+
+-> gfx_tex_new(window, width, height, bgra = false)
+  ccall("w_gfx_tex_new", window, width, height, bgra)
+
+-> gfx_tex_upload(window, tex_id, src, stride = nil, x = nil, y = nil, w = nil, h = nil)
+  ccall("w_gfx_tex_upload", window, tex_id, src, stride, x, y, w, h)
+
+-> gfx_tex_free(window, tex_id)
+  ccall("w_gfx_tex_free", window, tex_id)
+
+-> gfx_present_layers(window, bg_u32, cmds, n_cmds, wait_done = false)
+  ccall("w_gfx_present_layers", window, bg_u32, cmds, n_cmds, wait_done)
+
 # ---- Editor-style windows: flags, events, menus, panels ----
 #
 # An editor wants more than held keys and mouse deltas: where the pointer

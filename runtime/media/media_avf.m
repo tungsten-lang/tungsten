@@ -2474,7 +2474,7 @@ typedef struct ADec {
     CMFormatDescriptionRef fmt;
     VTDecompressionSessionRef vt;
     OSType           pix;
-    int              w, h;
+    int              w, h, scale_max_w;
     int32_t          num, den;         /* frame rate */
     int32_t          ts;               /* file: track timescale */
     int64_t          edit;             /* file: presentation = media pts + edit (ticks) */
@@ -2555,9 +2555,22 @@ static int a_dec_session(ADec *d, CMFormatDescriptionRef fmt) {
     }
     CFMutableDictionaryRef spec = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     CFDictionarySetValue(spec, kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder, kCFBooleanTrue);
-    NSDictionary *attrs = @{(id)kCVPixelBufferPixelFormatTypeKey: @(d->pix), (id)kCVPixelBufferIOSurfacePropertiesKey: @{}};
     VTDecompressionOutputCallbackRecord cb = {a_dec_output, d};
-    OSStatus st = VTDecompressionSessionCreate(NULL, fmt, spec, (__bridge CFDictionaryRef)attrs, &cb, &d->vt);
+    OSStatus st = -1;
+    if (d->scale_max_w > 0 && d->w > d->scale_max_w) {
+        int ow = d->scale_max_w;
+        int oh = (int)(((int64_t)d->h * ow / (d->w ? d->w : 1)) & ~1LL);
+        if (oh < 2) oh = 2;
+        NSDictionary *sattrs = @{(id)kCVPixelBufferPixelFormatTypeKey: @(d->pix),
+                                 (id)kCVPixelBufferWidthKey: @(ow),
+                                 (id)kCVPixelBufferHeightKey: @(oh),
+                                 (id)kCVPixelBufferIOSurfacePropertiesKey: @{}};
+        st = VTDecompressionSessionCreate(NULL, fmt, spec, (__bridge CFDictionaryRef)sattrs, &cb, &d->vt);
+    }
+    if (st != noErr) {
+        NSDictionary *attrs = @{(id)kCVPixelBufferPixelFormatTypeKey: @(d->pix), (id)kCVPixelBufferIOSurfacePropertiesKey: @{}};
+        st = VTDecompressionSessionCreate(NULL, fmt, spec, (__bridge CFDictionaryRef)attrs, &cb, &d->vt);
+    }
     CFRelease(spec);
     if (st != noErr) {
         snprintf(d->err, sizeof d->err, "VideoToolbox cannot decode this stream (OSStatus %d)", (int)st);
@@ -2804,14 +2817,15 @@ static int a_siting_of(CFTypeRef loc) {
 /* Open a decoder: path (a movie file) or segs (segment files, with rate),
  * output pixel format pix ('420v' or 'BGRA'), frames before start_frame
  * dropped (files). NULL with a message. */
-static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, int32_t den, OSType pix, int64_t start_frame, int timeout_ms, int queue_cap,
-                        char *err, size_t cap) {
+static ADec *a_dec_open_ex(const char *path, char **segs, int nseg, int32_t num, int32_t den, OSType pix, int64_t start_frame,
+                           int timeout_ms, int queue_cap, int scale_max_w, char *err, size_t cap) {
     ADec *d = calloc(1, sizeof *d);
     d->refs = 1;
     d->timeout_ms = timeout_ms > 0 ? timeout_ms : 30000;
     pthread_mutex_init(&d->mu, NULL);
     pthread_cond_init(&d->cv, NULL);
     d->pix = pix;
+    d->scale_max_w = scale_max_w;
     d->debug = getenv("TUNGSTEN_MEDIA_DEBUG") != NULL;
     d->serial = getenv("TUNGSTEN_MEDIA_DECODER_SERIAL") != NULL;
     if (queue_cap < 1 || queue_cap > 32) { snprintf(err, cap, "decode_ahead must be in 1..32"); a_dec_free(d); return NULL; }
@@ -2887,6 +2901,11 @@ static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, in
     d->th_started = 1;
     pthread_detach(d->th);
     return d;
+}
+
+static ADec *a_dec_open(const char *path, char **segs, int nseg, int32_t num, int32_t den, OSType pix, int64_t start_frame, int timeout_ms, int queue_cap,
+                        char *err, size_t cap) {
+    return a_dec_open_ex(path, segs, nseg, num, den, pix, start_frame, timeout_ms, queue_cap, 0, err, cap);
 }
 
 /* Open a decoder over finished in-memory WMediaSegment* (takes ownership of segs array and elements). */
@@ -3231,13 +3250,55 @@ typedef struct ATrans {
     char           path[4096];
     AChapter      *chap;            /* until handed to the mux */
     int            nchap;
+
+    /* Async checkpoint/finish pipeline + parallel closed-GOP encoders */
+    int                  test_sync;
+    int                  jobs, par_nw;
+    MEncoder            *par_enc[3];
+    uint8_t             *par_rgb[3];
+    dispatch_semaphore_t par_slot_sem[3];
+    int                  par_slot_held[3];
+    dispatch_queue_t     io_q;
+    dispatch_group_t     par_grp;
+    int                  io_in_flight;
+    int64_t              next_submit_seq, next_retire_seq;
+    WMediaSegment       *retire_ring[8];
+    int                  retire_has[8];
+    pthread_mutex_t      mux_q_mu;
+    pthread_cond_t       mux_q_cv;
+    int                  mux_q_mu_init;
+    WMediaSegment       *mux_q[16];
+    int                  mux_qn;
+    CVPixelBufferRef    *gop_batch;
+    int                  gop_batch_n;
+    int                  bg_failed;
+    char                 bg_err[512];
 } ATrans;
 
 static void a_trans_free(ATrans *t) {
     if (!t) return;
+    if (t->par_grp) {
+        __atomic_store_n(&t->bg_failed, 1, __ATOMIC_RELEASE);
+        dispatch_group_wait(t->par_grp, DISPATCH_TIME_FOREVER);
+    }
+    if (t->gop_batch) {
+        for (int i = 0; i < t->gop_batch_n; i++)
+            if (t->gop_batch[i]) CVBufferRelease(t->gop_batch[i]);
+        free(t->gop_batch);
+    }
+    for (int i = 0; i < 8; i++) {
+        if (t->retire_has[i] && t->retire_ring[i]) w_media_seg_free(t->retire_ring[i]);
+    }
+    for (int i = 0; i < t->mux_qn; i++) {
+        if (t->mux_q[i]) w_media_seg_free(t->mux_q[i]);
+    }
     if (t->dec) a_dec_free(t->dec);
     if (t->prev) CVBufferRelease(t->prev);
     for (int i = 0; i < t->nq; i++) w_media_seg_free(t->q[i]);
+    for (int i = 1; i < t->par_nw; i++) {
+        if (t->par_enc[i]) w_media_enc_free(t->par_enc[i]);
+        free(t->par_rgb[i]);
+    }
     if (t->enc) w_media_enc_free(t->enc);
     if (t->mux) {
         char tmp[4200];
@@ -3248,6 +3309,18 @@ static void a_trans_free(ATrans *t) {
     if (t->planned) {
         if (t->via_rgb) w_media_scale_free(&t->prgb);
         else { w_media_scale_free(&t->py); w_media_scale_free(&t->pc); }
+    }
+    for (int i = 0; i < 3; i++) {
+        if (t->par_slot_sem[i]) {
+            if (t->par_slot_held[i]) dispatch_semaphore_signal(t->par_slot_sem[i]);
+            dispatch_release(t->par_slot_sem[i]);
+        }
+    }
+    if (t->par_grp) dispatch_release(t->par_grp);
+    if (t->io_q) dispatch_release(t->io_q);
+    if (t->mux_q_mu_init) {
+        pthread_cond_destroy(&t->mux_q_cv);
+        pthread_mutex_destroy(&t->mux_q_mu);
     }
     if (t->resume_dir_fd >= 0) close(t->resume_dir_fd);
     if (t->cache_fd >= 0) close(t->cache_fd);
@@ -3379,13 +3452,165 @@ static void a_trans_flush_one(ATrans *t) {
     w_media_seg_free(s);
 }
 
+static int a_trans_check_inputs_bg(ATrans *t, char *err, size_t errcap) {
+    if (t->disk_reserve) {
+        char directory[4096]; snprintf(directory, sizeof directory, "%s", t->path);
+        char *slash = strrchr(directory, '/');
+        if (slash) { if (slash == directory) slash[1] = 0; else *slash = 0; }
+        else snprintf(directory, sizeof directory, ".");
+        struct statvfs space;
+        if (statvfs(directory, &space) || (long double)space.f_bavail * space.f_frsize < t->disk_reserve) {
+            snprintf(err, errcap, "configured free-disk reserve reached; delivery preserved");
+            return -1;
+        }
+    }
+    struct stat current;
+    int changed = (t->source_checked && (stat(t->source_path, &current) || !a_same_file(&current, &t->source_stat))) ||
+                  (t->audio_checked && (stat(t->audio_path, &current) || !a_same_file(&current, &t->audio_stat)));
+    if (!changed) return 0;
+    if (t->resume[0]) for (int i = 0; i < t->next_checkpoint; i++) {
+        char path[4200]; a_cache_path(t, i, path, "sha256"); unlink(path);
+    }
+    snprintf(err, errcap, "source changed during the job; checkpoints invalidated");
+    return -1;
+}
+
+static int a_cache_save_bg(ATrans *t, WMediaSegment *segment, char *err, size_t errcap) {
+    if (a_trans_check_inputs_bg(t, err, errcap) != 0) return -1;
+    if (!t->resume[0]) return 0;
+    char path[4200], meta[4200], tmp[4220], hash[65], serr[512] = "cannot hash checkpoint";
+    a_cache_path(t, t->next_checkpoint, path, "twms");
+    a_cache_path(t, t->next_checkpoint, meta, "sha256");
+    if (w_media_seg_save_hashed(segment, path, hash, serr, sizeof serr)) {
+        snprintf(err, errcap, "checkpoint: %s", serr);
+        return -1;
+    }
+    snprintf(tmp, sizeof tmp, "%s.part", meta);
+    FILE *f = fopen(tmp, "w");
+    if (!f) { snprintf(err, errcap, "cannot write checkpoint digest"); return -1; }
+    int ok = fprintf(f, "%s\n", hash) > 0 && fflush(f) == 0 && fsync(fileno(f)) == 0;
+    ok = fclose(f) == 0 && ok;
+    if (!ok || rename(tmp, meta)) { unlink(tmp); snprintf(err, errcap, "checkpoint digest commit failed"); return -1; }
+    if (t->resume_dir_fd >= 0) {
+        if (fsync(t->resume_dir_fd)) { snprintf(err, errcap, "checkpoint directory sync failed"); return -1; }
+    }
+    t->next_checkpoint++;
+    return 0;
+}
+
+static void a_trans_bg_fail(ATrans *t, const char *msg) {
+    pthread_mutex_lock(&t->mux_q_mu);
+    if (!__atomic_load_n(&t->bg_failed, __ATOMIC_RELAXED)) {
+        snprintf(t->bg_err, sizeof t->bg_err, "%s", msg);
+        __atomic_store_n(&t->bg_failed, 1, __ATOMIC_RELEASE);
+    }
+    pthread_cond_broadcast(&t->mux_q_cv);
+    pthread_mutex_unlock(&t->mux_q_mu);
+}
+
+/* Must be called on the main Tungsten thread. */
+static void a_trans_drain_mux_ready(ATrans *t, int wait_all) {
+    if (wait_all && t->par_grp) dispatch_group_wait(t->par_grp, DISPATCH_TIME_FOREVER);
+    if (__atomic_load_n(&t->bg_failed, __ATOMIC_ACQUIRE)) a_trans_raise(t, "%s", t->bg_err);
+    for (;;) {
+        WMediaSegment *s = NULL;
+        pthread_mutex_lock(&t->mux_q_mu);
+        if (t->mux_qn > 0) {
+            s = t->mux_q[0];
+            memmove(t->mux_q, t->mux_q + 1, sizeof(t->mux_q[0]) * (size_t)(t->mux_qn - 1));
+            t->mux_qn--;
+            t->io_in_flight--;
+        }
+        pthread_mutex_unlock(&t->mux_q_mu);
+        if (!s) break;
+        uint64_t b = m_avf_now_ns();
+        a_mux_append(t->mux, s);
+        t->mux_ns += m_avf_now_ns() - b;
+        w_media_seg_free(s);
+    }
+    if (__atomic_load_n(&t->bg_failed, __ATOMIC_ACQUIRE)) a_trans_raise(t, "%s", t->bg_err);
+}
+
+/* Must be called on the main Tungsten thread to reserve one of the 6 bounded
+ * in-flight segment slots, draining any completed mux_q segments while waiting. */
+static void a_trans_acquire_io_slot(ATrans *t) {
+    for (;;) {
+        a_trans_drain_mux_ready(t, 0);
+        pthread_mutex_lock(&t->mux_q_mu);
+        if (t->io_in_flight < 6) {
+            t->io_in_flight++;
+            pthread_mutex_unlock(&t->mux_q_mu);
+            return;
+        }
+        while (t->io_in_flight >= 6 && t->mux_qn == 0 && !__atomic_load_n(&t->bg_failed, __ATOMIC_ACQUIRE))
+            pthread_cond_wait(&t->mux_q_cv, &t->mux_q_mu);
+        pthread_mutex_unlock(&t->mux_q_mu);
+    }
+}
+
+static void a_trans_retire_on_ioq(ATrans *t, int64_t seq, WMediaSegment *s) {
+    if (__atomic_load_n(&t->bg_failed, __ATOMIC_ACQUIRE)) {
+        w_media_seg_free(s);
+        pthread_mutex_lock(&t->mux_q_mu);
+        t->io_in_flight--;
+        pthread_cond_broadcast(&t->mux_q_cv);
+        pthread_mutex_unlock(&t->mux_q_mu);
+        return;
+    }
+    int slot = (int)(seq & 7);
+    t->retire_ring[slot] = s;
+    t->retire_has[slot] = 1;
+    while (t->retire_has[t->next_retire_seq & 7]) {
+        int rs = (int)(t->next_retire_seq & 7);
+        WMediaSegment *cur = t->retire_ring[rs];
+        t->retire_ring[rs] = NULL;
+        t->retire_has[rs] = 0;
+        t->next_retire_seq++;
+        char err[512];
+        if (a_cache_save_bg(t, cur, err, sizeof err) != 0) {
+            a_trans_bg_fail(t, err);
+            w_media_seg_free(cur);
+            pthread_mutex_lock(&t->mux_q_mu);
+            t->io_in_flight--;
+            pthread_cond_broadcast(&t->mux_q_cv);
+            pthread_mutex_unlock(&t->mux_q_mu);
+        } else {
+            pthread_mutex_lock(&t->mux_q_mu);
+            t->mux_q[t->mux_qn++] = cur;
+            pthread_cond_broadcast(&t->mux_q_cv);
+            pthread_mutex_unlock(&t->mux_q_mu);
+        }
+    }
+}
+
 static void a_trans_cut(ATrans *t) {
     WMediaSegment *s = w_media_enc_cut(t->enc);
     t->seg_frames = 0;
     if (!s) return;
-    t->q[t->nq++] = s;
-    if (t->nq > t->peak_segments) t->peak_segments = t->nq;
-    if (t->nq >= t->queue_segments) a_trans_flush_one(t);
+    if (t->test_sync || !t->io_q) {
+        t->q[t->nq++] = s;
+        if (t->nq > t->peak_segments) t->peak_segments = t->nq;
+        if (t->nq >= t->queue_segments) a_trans_flush_one(t);
+        return;
+    }
+    a_trans_acquire_io_slot(t);
+    int64_t seq = t->next_submit_seq++;
+    if (t->peak_segments < 3) t->peak_segments = 3;
+    dispatch_group_async(t->par_grp, t->io_q, ^{
+        char err[512];
+        uint64_t a = m_avf_now_ns();
+        if (w_media_seg_finish(s, err, sizeof err) != 0) {
+            a_trans_bg_fail(t, err);
+            w_media_seg_free(s);
+            pthread_mutex_lock(&t->mux_q_mu);
+            t->io_in_flight--;
+            pthread_cond_broadcast(&t->mux_q_cv);
+            pthread_mutex_unlock(&t->mux_q_mu);
+            return;
+        }
+        __atomic_add_fetch(&t->wait_ns, m_avf_now_ns() - a, __ATOMIC_RELAXED);
+        a_trans_retire_on_ioq(t, seq, s);
+    });
 }
 
 /* Bit-exact 1:1 plane copy from MSB-aligned 10-bit words (P010/P210) to 10-bit
@@ -3431,87 +3656,169 @@ static void a_plane_copy_10(const uint8_t *src, size_t sstride, uint8_t *dst, si
     }
 }
 
-/* Scale one decoded frame into the encoder and submit it. */
-static void a_trans_encode(ATrans *t, CVPixelBufferRef src) {
-    char err[256];
+/* Scale one decoded frame into `enc` and submit it (0 on success, -1 with message in err). */
+static int a_encode_frame_to(ATrans *t, MEncoder *enc, uint8_t *rgb_buf, CVPixelBufferRef src, int64_t fidx,
+                             uint64_t *scale_ns_out, int *used_out, char *err, size_t errcap) {
+    char serr[256];
     uint64_t t0 = m_avf_now_ns();
-    if ((int)CVPixelBufferGetWidth(src) != t->sw || (int)CVPixelBufferGetHeight(src) != t->sh)
-        a_trans_raise(t, "frame %lld is %dx%d, the source began at %dx%d", (long long)t->done, (int)CVPixelBufferGetWidth(src), (int)CVPixelBufferGetHeight(src), t->sw, t->sh);
+    if ((int)CVPixelBufferGetWidth(src) != t->sw || (int)CVPixelBufferGetHeight(src) != t->sh) {
+        snprintf(err, errcap, "frame %lld is %dx%d, the source began at %dx%d",
+                 (long long)fidx, (int)CVPixelBufferGetWidth(src), (int)CVPixelBufferGetHeight(src), t->sw, t->sh);
+        return -1;
+    }
     CVPixelBufferLockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
     if (t->via_rgb) {
         const uint8_t *p = CVPixelBufferGetBaseAddress(src);
         size_t ps = CVPixelBufferGetBytesPerRow(src);
-        int b = w_media_scale_run(&t->prgb, t->backend, p, ps, ps * CVPixelBufferGetHeight(src), t->rgb, (size_t)t->w * 4, t->rgb_len, err, sizeof err);
+        int b = w_media_scale_run(&t->prgb, t->backend, p, ps, ps * CVPixelBufferGetHeight(src), rgb_buf, (size_t)t->w * 4, t->rgb_len, serr, sizeof serr);
         CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
-        if (b < 0) a_trans_raise(t, "scaling: %s", err);
-        t->used = b;
-        uint64_t t1 = m_avf_now_ns();
-        t->scale_ns += t1 - t0;
-        int st = w_media_enc_encode_rgb(t->enc, t->rgb, (size_t)t->w * 4);
-        if (st != 0) a_trans_raise(t, "VideoToolbox could not encode frame %lld (%d)", (long long)t->done, st);
-    } else {
-        CVPixelBufferRef out = w_media_enc_buffer(t->enc);
-        if (!out) { CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly); a_trans_raise(t, "no pixel buffer from the encoder"); }
-        CVPixelBufferLockBaseAddress(out, 0);
-        const uint8_t *sy = CVPixelBufferGetBaseAddressOfPlane(src, 0), *sc = CVPixelBufferGetBaseAddressOfPlane(src, 1);
-        size_t sys = CVPixelBufferGetBytesPerRowOfPlane(src, 0), scs = CVPixelBufferGetBytesPerRowOfPlane(src, 1);
-        uint8_t *dy = CVPixelBufferGetBaseAddressOfPlane(out, 0), *dc = CVPixelBufferGetBaseAddressOfPlane(out, 1);
-        size_t dys = CVPixelBufferGetBytesPerRowOfPlane(out, 0), dcs = CVPixelBufferGetBytesPerRowOfPlane(out, 1);
-        size_t syl = sys * CVPixelBufferGetHeightOfPlane(src, 0), scl = scs * CVPixelBufferGetHeightOfPlane(src, 1);
-        size_t dyl = dys * CVPixelBufferGetHeightOfPlane(out, 0), dcl = dcs * CVPixelBufferGetHeightOfPlane(out, 1);
-        int b = 0, b2 = 0;
-        int be = t->backend == W_MEDIA_BACKEND_AUTO ? w_media_scale_default_backend(1, t->py.filter) : t->backend;
-        if (t->y_copy && t->c_copy && !(t->backend == W_MEDIA_BACKEND_METAL && !w_media_metal_available())) {
-            a_plane_copy_10(sy, sys, dy, dys, t->w, t->h, t->out_bits);
-            a_plane_copy_10(sc, scs, dc, dcs, t->pc.dst_w * 2, t->pc.dst_h, t->out_bits);
-            b = b2 = be;
-        } else if (t->y_copy && !(t->backend == W_MEDIA_BACKEND_METAL && !w_media_metal_available())) {
-            a_plane_copy_10(sy, sys, dy, dys, t->w, t->h, t->out_bits);
-            if (be == W_MEDIA_BACKEND_METAL) {
-                WMediaJob job = {&t->pc, sc, scs, scl, dc, dcs, dcl, src, out, 1, 1};
-                b = b2 = w_media_scale_metal_jobs(&job, 1, err, sizeof err) == 0 ? W_MEDIA_BACKEND_METAL : -1;
-                if (b < 0 && t->backend == W_MEDIA_BACKEND_METAL) {
-                    CVPixelBufferUnlockBaseAddress(out, 0);
-                    CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
-                    CVPixelBufferRelease(out);
-                    a_trans_raise(t, "Metal scaling: %s", err);
-                }
-                if (b < 0) {
-                    t->backend = W_MEDIA_BACKEND_CPU;
-                    b = b2 = w_media_scale_run(&t->pc, t->backend, sc, scs, scl, dc, dcs, dcl, err, sizeof err);
-                }
-            } else {
-                b = b2 = w_media_scale_run(&t->pc, t->backend, sc, scs, scl, dc, dcs, dcl, err, sizeof err);
-            }
-        } else if (be == W_MEDIA_BACKEND_METAL) {
-            /* both planes in one command buffer */
-            WMediaJob jobs[2] = {{&t->py, sy, sys, syl, dy, dys, dyl, src, out, 0, 0},
-                                 {&t->pc, sc, scs, scl, dc, dcs, dcl, src, out, 1, 1}};
-            b = b2 = w_media_scale_metal_jobs(jobs, 2, err, sizeof err) == 0 ? W_MEDIA_BACKEND_METAL : -1;
-            if (b < 0 && t->backend == W_MEDIA_BACKEND_METAL) {
+        if (b < 0) { snprintf(err, errcap, "scaling: %s", serr); return -1; }
+        *used_out = b;
+        *scale_ns_out += m_avf_now_ns() - t0;
+        int st = w_media_enc_encode_rgb(enc, rgb_buf, (size_t)t->w * 4);
+        if (st != 0) { snprintf(err, errcap, "VideoToolbox could not encode frame %lld (%d)", (long long)fidx, st); return -1; }
+        return 0;
+    }
+    CVPixelBufferRef out = w_media_enc_buffer(enc);
+    if (!out) {
+        CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
+        snprintf(err, errcap, "no pixel buffer from the encoder");
+        return -1;
+    }
+    CVPixelBufferLockBaseAddress(out, 0);
+    const uint8_t *sy = CVPixelBufferGetBaseAddressOfPlane(src, 0), *sc = CVPixelBufferGetBaseAddressOfPlane(src, 1);
+    size_t sys = CVPixelBufferGetBytesPerRowOfPlane(src, 0), scs = CVPixelBufferGetBytesPerRowOfPlane(src, 1);
+    uint8_t *dy = CVPixelBufferGetBaseAddressOfPlane(out, 0), *dc = CVPixelBufferGetBaseAddressOfPlane(out, 1);
+    size_t dys = CVPixelBufferGetBytesPerRowOfPlane(out, 0), dcs = CVPixelBufferGetBytesPerRowOfPlane(out, 1);
+    size_t syl = sys * CVPixelBufferGetHeightOfPlane(src, 0), scl = scs * CVPixelBufferGetHeightOfPlane(src, 1);
+    size_t dyl = dys * CVPixelBufferGetHeightOfPlane(out, 0), dcl = dcs * CVPixelBufferGetHeightOfPlane(out, 1);
+    int b = 0, b2 = 0;
+    int req_be = __atomic_load_n(&t->backend, __ATOMIC_RELAXED);
+    int be = req_be == W_MEDIA_BACKEND_AUTO ? w_media_scale_default_backend(1, t->py.filter) : req_be;
+    if (t->y_copy && t->c_copy && !(req_be == W_MEDIA_BACKEND_METAL && !w_media_metal_available())) {
+        a_plane_copy_10(sy, sys, dy, dys, t->w, t->h, t->out_bits);
+        a_plane_copy_10(sc, scs, dc, dcs, t->pc.dst_w * 2, t->pc.dst_h, t->out_bits);
+        b = b2 = be;
+    } else if (t->y_copy && !(req_be == W_MEDIA_BACKEND_METAL && !w_media_metal_available())) {
+        a_plane_copy_10(sy, sys, dy, dys, t->w, t->h, t->out_bits);
+        if (be == W_MEDIA_BACKEND_METAL) {
+            WMediaJob job = {&t->pc, sc, scs, scl, dc, dcs, dcl, src, out, 1, 1};
+            b = b2 = w_media_scale_metal_jobs(&job, 1, serr, sizeof serr) == 0 ? W_MEDIA_BACKEND_METAL : -1;
+            if (b < 0 && req_be == W_MEDIA_BACKEND_METAL) {
                 CVPixelBufferUnlockBaseAddress(out, 0);
                 CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
                 CVPixelBufferRelease(out);
-                a_trans_raise(t, "Metal scaling: %s", err);
+                snprintf(err, errcap, "Metal scaling: %s", serr);
+                return -1;
             }
             if (b < 0) {
-                /* AUTO may fall back when Metal cannot take the buffers. */
-                t->backend = W_MEDIA_BACKEND_CPU;
-                b = w_media_scale_run(&t->py, t->backend, sy, sys, syl, dy, dys, dyl, err, sizeof err);
-                b2 = b < 0 ? b : w_media_scale_run(&t->pc, t->backend, sc, scs, scl, dc, dcs, dcl, err, sizeof err);
+                __atomic_store_n(&t->backend, W_MEDIA_BACKEND_CPU, __ATOMIC_RELAXED);
+                b = b2 = w_media_scale_run(&t->pc, W_MEDIA_BACKEND_CPU, sc, scs, scl, dc, dcs, dcl, serr, sizeof serr);
             }
         } else {
-            b = w_media_scale_run(&t->py, t->backend, sy, sys, syl, dy, dys, dyl, err, sizeof err);
-            b2 = b < 0 ? b : w_media_scale_run(&t->pc, t->backend, sc, scs, scl, dc, dcs, dcl, err, sizeof err);
+            b = b2 = w_media_scale_run(&t->pc, req_be, sc, scs, scl, dc, dcs, dcl, serr, sizeof serr);
         }
-        CVPixelBufferUnlockBaseAddress(out, 0);
-        CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
-        if (b2 < 0) { CVPixelBufferRelease(out); a_trans_raise(t, "scaling: %s", err); }
-        t->used = b;
-        t->scale_ns += m_avf_now_ns() - t0;
-        int st = w_media_enc_submit(t->enc, out);
-        if (st != 0) a_trans_raise(t, "VideoToolbox could not encode frame %lld (OSStatus %d)", (long long)t->done, st);
+    } else if (be == W_MEDIA_BACKEND_METAL) {
+        WMediaJob jobs[2] = {{&t->py, sy, sys, syl, dy, dys, dyl, src, out, 0, 0},
+                             {&t->pc, sc, scs, scl, dc, dcs, dcl, src, out, 1, 1}};
+        b = b2 = w_media_scale_metal_jobs(jobs, 2, serr, sizeof serr) == 0 ? W_MEDIA_BACKEND_METAL : -1;
+        if (b < 0 && req_be == W_MEDIA_BACKEND_METAL) {
+            CVPixelBufferUnlockBaseAddress(out, 0);
+            CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
+            CVPixelBufferRelease(out);
+            snprintf(err, errcap, "Metal scaling: %s", serr);
+            return -1;
+        }
+        if (b < 0) {
+            __atomic_store_n(&t->backend, W_MEDIA_BACKEND_CPU, __ATOMIC_RELAXED);
+            b = w_media_scale_run(&t->py, W_MEDIA_BACKEND_CPU, sy, sys, syl, dy, dys, dyl, serr, sizeof serr);
+            b2 = b < 0 ? b : w_media_scale_run(&t->pc, W_MEDIA_BACKEND_CPU, sc, scs, scl, dc, dcs, dcl, serr, sizeof serr);
+        }
+    } else {
+        b = w_media_scale_run(&t->py, req_be, sy, sys, syl, dy, dys, dyl, serr, sizeof serr);
+        b2 = b < 0 ? b : w_media_scale_run(&t->pc, req_be, sc, scs, scl, dc, dcs, dcl, serr, sizeof serr);
     }
+    CVPixelBufferUnlockBaseAddress(out, 0);
+    CVPixelBufferUnlockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
+    if (b2 < 0) { CVPixelBufferRelease(out); snprintf(err, errcap, "scaling: %s", serr); return -1; }
+    *used_out = b;
+    *scale_ns_out += m_avf_now_ns() - t0;
+    int st = w_media_enc_submit(enc, out);
+    if (st != 0) { snprintf(err, errcap, "VideoToolbox could not encode frame %lld (OSStatus %d)", (long long)fidx, st); return -1; }
+    return 0;
+}
+
+/* Flush the buffered GOP batch (`t->gop_batch[0..gop_batch_n-1]`) to parallel encoder slot `seq % par_nw`. */
+static void a_trans_submit_gop_batch(ATrans *t) {
+    int count = t->gop_batch_n;
+    if (count <= 0) return;
+    int wi = (int)(t->next_submit_seq % t->par_nw);
+    dispatch_semaphore_wait(t->par_slot_sem[wi], DISPATCH_TIME_FOREVER);
+    t->par_slot_held[wi] = 1;
+    a_trans_acquire_io_slot(t);
+    CVPixelBufferRef *pbs = malloc((size_t)count * sizeof(CVPixelBufferRef));
+    memcpy(pbs, t->gop_batch, (size_t)count * sizeof(CVPixelBufferRef));
+    t->gop_batch_n = 0;
+    int64_t seq = t->next_submit_seq++;
+    int64_t base_fidx = t->done - count;
+    if (t->peak_segments < t->par_nw + 1) t->peak_segments = t->par_nw + 1;
+    dispatch_group_async(t->par_grp, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        @autoreleasepool {
+            char err[512];
+            uint64_t w_scale = 0;
+            int w_used = 0, failed = __atomic_load_n(&t->bg_failed, __ATOMIC_ACQUIRE);
+            MEncoder *enc = t->par_enc[wi];
+            uint8_t *rgb_buf = t->par_rgb[wi];
+            for (int i = 0; i < count; i++) {
+                if (!failed && a_encode_frame_to(t, enc, rgb_buf, pbs[i], base_fidx + i, &w_scale, &w_used, err, sizeof err) != 0) {
+                    a_trans_bg_fail(t, err);
+                    failed = 1;
+                }
+                CVBufferRelease(pbs[i]);
+            }
+            free(pbs);
+            WMediaSegment *s = w_media_enc_cut(enc);
+            t->par_slot_held[wi] = 0;
+            dispatch_semaphore_signal(t->par_slot_sem[wi]);
+            __atomic_add_fetch(&t->scale_ns, w_scale, __ATOMIC_RELAXED);
+            if (w_used) __atomic_store_n(&t->used, w_used, __ATOMIC_RELAXED);
+            if (failed || !s) {
+                if (s) w_media_seg_free(s);
+                pthread_mutex_lock(&t->mux_q_mu);
+                t->io_in_flight--;
+                pthread_cond_broadcast(&t->mux_q_cv);
+                pthread_mutex_unlock(&t->mux_q_mu);
+                return;
+            }
+            uint64_t a = m_avf_now_ns();
+            if (w_media_seg_finish(s, err, sizeof err) != 0) {
+                a_trans_bg_fail(t, err);
+                w_media_seg_free(s);
+                pthread_mutex_lock(&t->mux_q_mu);
+                t->io_in_flight--;
+                pthread_cond_broadcast(&t->mux_q_cv);
+                pthread_mutex_unlock(&t->mux_q_mu);
+                return;
+            }
+            __atomic_add_fetch(&t->wait_ns, m_avf_now_ns() - a, __ATOMIC_RELAXED);
+            dispatch_group_async(t->par_grp, t->io_q, ^{
+                a_trans_retire_on_ioq(t, seq, s);
+            });
+        }
+    });
+}
+
+/* Scale one decoded frame into the encoder and submit it. */
+static void a_trans_encode(ATrans *t, CVPixelBufferRef src) {
+    if (t->par_nw > 1) {
+        t->gop_batch[t->gop_batch_n++] = (CVPixelBufferRef)CVBufferRetain(src);
+        t->done++;
+        if (t->gop_batch_n == t->gop) a_trans_submit_gop_batch(t);
+        return;
+    }
+    char err[512];
+    if (a_encode_frame_to(t, t->enc, t->rgb, src, t->done, &t->scale_ns, &t->used, err, sizeof err) != 0)
+        a_trans_raise(t, "%s", err);
     t->done++;
     if (++t->seg_frames == t->gop) a_trans_cut(t);
 }
@@ -3575,7 +3882,8 @@ WValue w_media_transcode_new(WValue spec) {
             struct stat before;
             char expected[65], actual[65];
             w_media_str(a_spec(spec, "source_hash"), expected, sizeof expected);
-            if (stat(src, &before) || (expected[0] && (a_file_hash(src, actual) || strcmp(expected, actual))) ||
+            int src_verified = a_spec(spec, "source_verified") > 1;
+            if (stat(src, &before) || (expected[0] && !src_verified && (a_file_hash(src, actual) || strcmp(expected, actual))) ||
                 stat(src, &t->source_stat) || !a_same_file(&before, &t->source_stat)) {
                 a_trans_free(t); w_media_raise("Transcode: source changed before decoding");
             }
@@ -3664,7 +3972,8 @@ WValue w_media_transcode_new(WValue spec) {
                 struct stat before;
                 char expected[65], actual[65];
                 w_media_str(a_spec(spec, "audio_hash"), expected, sizeof expected);
-                if (stat(apath, &before) || (expected[0] && (a_file_hash(apath, actual) || strcmp(expected, actual))) ||
+                int aud_verified = a_spec(spec, "audio_verified") > 1;
+                if (stat(apath, &before) || (expected[0] && !aud_verified && (a_file_hash(apath, actual) || strcmp(expected, actual))) ||
                     stat(apath, &t->audio_stat) || !a_same_file(&before, &t->audio_stat)) {
                     a_trans_free(t); w_media_raise("Transcode: audio source changed before decoding");
                 }
@@ -3700,6 +4009,44 @@ WValue w_media_transcode_new(WValue spec) {
             if (!cached) { a_trans_free(t); w_media_raise("Transcode: checkpoint changed during reuse"); }
             a_mux_append(t->mux, cached); w_media_seg_free(cached);
         }
+        t->test_sync = (getenv("TUNGSTEN_MEDIA_TEST_BARRIER") != NULL ||
+                        getenv("TUNGSTEN_MEDIA_TEST_FAIL_AFTER") != NULL ||
+                        getenv("TUNGSTEN_MEDIA_TEST_STALL_DECODER") != NULL);
+        t->jobs = (int)w_media_num(a_spec(spec, "jobs"), 1, "jobs");
+        if (!t->test_sync) {
+            pthread_mutex_init(&t->mux_q_mu, NULL);
+            pthread_cond_init(&t->mux_q_cv, NULL);
+            t->mux_q_mu_init = 1;
+            t->io_q = dispatch_queue_create("tungsten.transcode.io", DISPATCH_QUEUE_SERIAL);
+            t->par_grp = dispatch_group_create();
+            int want_nw = (t->jobs > 1 && (t->total - t->resumed) >= (int64_t)t->gop * 2) ? (t->jobs > 3 ? 3 : t->jobs) : 1;
+            t->par_enc[0] = t->enc;
+            t->par_rgb[0] = t->rgb;
+            t->par_nw = 1;
+            if (want_nw > 1) {
+                for (int i = 1; i < want_nw; i++) {
+                    MEncoder *ew = w_media_enc_open(codec[0] ? codec : "h264", t->w, t->h, num, den,
+                                                    w_media_num(a_spec(spec, "quality"), -1.0, "quality"),
+                                                    (int64_t)w_media_num(a_spec(spec, "bitrate"), 0, "bitrate"),
+                                                    t->gop, t->via_rgb ? "bgra" : "rgba", "left",
+                                                    reorderv == W_NIL ? 1 : reorderv > 1, a_spec(spec, "speed") > 1, level, err, sizeof err);
+                    if (!ew) break;
+                    if (t->via_rgb) {
+                        if (posix_memalign((void **)&t->par_rgb[i], 16384, (t->rgb_len + 16383) & ~(size_t)16383) != 0) {
+                            t->par_rgb[i] = NULL;
+                            w_media_enc_free(ew);
+                            break;
+                        }
+                    }
+                    t->par_enc[i] = ew;
+                    t->par_nw++;
+                }
+                if (t->par_nw > 1) {
+                    for (int i = 0; i < t->par_nw; i++) t->par_slot_sem[i] = dispatch_semaphore_create(1);
+                    t->gop_batch = calloc((size_t)t->gop, sizeof(CVPixelBufferRef));
+                }
+            }
+        }
         a_chapters_free(t->chap, t->nchap);
         t->chap = NULL;
         t->nchap = 0;
@@ -3715,6 +4062,7 @@ WValue w_media_transcode_step(WValue hv, WValue nv) {
         char err[512];
         int64_t k = 0;
         a_trans_check_inputs(t);
+        if (t->io_q) a_trans_drain_mux_ready(t, 0);
         if (t->cancel_file[0] && access(t->cancel_file, F_OK) == 0) a_trans_raise(t, "transcode cancelled");
         while (t->done < t->total && k < n) {
             if (t->cancel_file[0] && access(t->cancel_file, F_OK) == 0) a_trans_raise(t, "transcode cancelled");
@@ -3741,6 +4089,7 @@ WValue w_media_transcode_step(WValue hv, WValue nv) {
             t->prev = pb;
             k++;
         }
+        if (t->io_q) a_trans_drain_mux_ready(t, 0);
         WValue out = w_array_new_empty();
         out = w_array_push(out, w_int(t->done));
         out = w_array_push(out, w_int(t->total));
@@ -3755,12 +4104,24 @@ WValue w_media_transcode_finish(WValue hv) {
     @autoreleasepool {
         a_trans_check_inputs(t);
         if (t->done < t->total) a_trans_raise(t, "finish after %lld of %lld frames (step until done)", (long long)t->done, (long long)t->total);
+        if (t->par_nw > 1 && t->gop_batch_n > 0) a_trans_submit_gop_batch(t);
         if (t->seg_frames > 0) {
-            WMediaSegment *s = w_media_enc_cut(t->enc);
-            t->seg_frames = 0;
-            if (s) t->q[t->nq++] = s;
+            if (t->io_q && !t->test_sync) {
+                a_trans_cut(t);
+            } else {
+                WMediaSegment *s = w_media_enc_cut(t->enc);
+                t->seg_frames = 0;
+                if (s) t->q[t->nq++] = s;
+            }
         }
         while (t->nq > 0) a_trans_flush_one(t);
+        if (t->io_q) a_trans_drain_mux_ready(t, 1);
+        double conv_s = w_media_enc_seconds(t->enc, 0), sub_s = w_media_enc_seconds(t->enc, 1), ewait_s = w_media_enc_seconds(t->enc, 2);
+        for (int i = 1; i < t->par_nw; i++) {
+            conv_s += w_media_enc_seconds(t->par_enc[i], 0);
+            sub_s += w_media_enc_seconds(t->par_enc[i], 1);
+            ewait_s += w_media_enc_seconds(t->par_enc[i], 2);
+        }
         int64_t out[5];
         uint64_t a = m_avf_now_ns();
         a_mux_finish(t->mux, out);
@@ -3778,9 +4139,9 @@ WValue w_media_transcode_finish(WValue hv) {
         r = w_array_push(r, a_pair("seconds", w_float((double)(m_avf_now_ns() - t->t0) / 1e9)));
         r = w_array_push(r, a_pair("decode_s", w_float((double)t->dec->dec_ns / 1e9)));
         r = w_array_push(r, a_pair("scale_s", w_float((double)t->scale_ns / 1e9)));
-        r = w_array_push(r, a_pair("convert_s", w_float(w_media_enc_seconds(t->enc, 0))));
-        r = w_array_push(r, a_pair("submit_s", w_float(w_media_enc_seconds(t->enc, 1))));
-        r = w_array_push(r, a_pair("encode_wait_s", w_float(t->wait_ns / 1e9 + w_media_enc_seconds(t->enc, 2))));
+        r = w_array_push(r, a_pair("convert_s", w_float(conv_s)));
+        r = w_array_push(r, a_pair("submit_s", w_float(sub_s)));
+        r = w_array_push(r, a_pair("encode_wait_s", w_float(t->wait_ns / 1e9 + ewait_s)));
         r = w_array_push(r, a_pair("mux_s", w_float((double)t->mux_ns / 1e9)));
         r = w_array_push(r, a_pair("scale_backend", w_string(w_media_backend_name(t->used))));
         r = w_array_push(r, a_pair("decode_bits", w_int(t->via_rgb ? 8 : 10)));
@@ -4921,21 +5282,25 @@ WValue w_media_audio_prepare(WValue srcv, WValue dstv, WValue optv) {
     }
 }
 
-static ADec *a_open_any_source(WValue srcv, int32_t num, int32_t den, OSType pix, int64_t start, const char *what) {
+static ADec *a_open_any_source_scaled(WValue srcv, int32_t num, int32_t den, OSType pix, int64_t start, int scale_max_w, const char *what) {
     char path[4096], err[512];
     ADec *d = NULL;
     if (w_is_array(srcv)) {
         int n = 0;
         char **segs = a_paths(srcv, &n);
-        d = a_dec_open(NULL, segs, n, num, den, pix, start, 30000, 16, err, sizeof err);
+        d = a_dec_open_ex(NULL, segs, n, num, den, pix, start, 30000, 16, scale_max_w, err, sizeof err);
         a_paths_free(segs, n);
     } else {
         if (!w_media_str(srcv, path, sizeof path) || !path[0]) w_media_raise("%s: source must be a path or segment array", what);
         if (access(path, R_OK) != 0) w_media_raise("%s: cannot read %s: %s", what, path, strerror(errno));
-        d = a_dec_open(path, NULL, 0, num, den, pix, start, 30000, 16, err, sizeof err);
+        d = a_dec_open_ex(path, NULL, 0, num, den, pix, start, 30000, 16, scale_max_w, err, sizeof err);
     }
     if (!d) w_media_raise("%s: %s", what, err);
     return d;
+}
+
+static ADec *a_open_any_source(WValue srcv, int32_t num, int32_t den, OSType pix, int64_t start, const char *what) {
+    return a_open_any_source_scaled(srcv, num, den, pix, start, 0, what);
 }
 
 typedef struct ALumaDownCtx {
@@ -4991,13 +5356,45 @@ static void a_downsample_luma_band(void *ctxp, size_t bi) {
 }
 
 /* Downsample luma Y' of pb into dst[dw * dh] in limited-range [0, 1] units (dw <= 320). */
-static void a_downsample_luma_tv(CVPixelBufferRef pb, int dw, int dh, const int *x_lo, const int *x_hi, float *dst) {
+static void a_downsample_luma_tv(CVPixelBufferRef pb, int dw, int dh, const int *unused_lo, const int *unused_hi, float *dst) {
+    (void)unused_lo; (void)unused_hi;
     CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
     int sw = (int)CVPixelBufferGetWidth(pb), sh = (int)CVPixelBufferGetHeight(pb);
     size_t ys = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
     const uint8_t *yp = CVPixelBufferGetBaseAddressOfPlane(pb, 0);
     OSType fmt = CVPixelBufferGetPixelFormatType(pb);
     int ten = fmt != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+    if (sw == dw && sh == dh && !ten) {
+        const float sc = 1.0f / 219.0f;
+        for (int y = 0; y < dh; y++) {
+            const uint8_t *row = yp + (size_t)y * ys;
+            float *out = dst + (size_t)y * (size_t)dw;
+            int x = 0;
+#if defined(__aarch64__)
+            float32x4_t v16 = vdupq_n_f32(16.0f), vsc = vdupq_n_f32(sc), v0 = vdupq_n_f32(0.0f), v1 = vdupq_n_f32(1.0f);
+            for (; x + 8 <= dw; x += 8) {
+                uint16x8_t u16 = vmovl_u8(vld1_u8(row + x));
+                float32x4_t f0 = vmulq_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(vget_low_u16(u16))), v16), vsc);
+                float32x4_t f1 = vmulq_f32(vsubq_f32(vcvtq_f32_u32(vmovl_u16(vget_high_u16(u16))), v16), vsc);
+                vst1q_f32(out + x, vminq_f32(vmaxq_f32(f0, v0), v1));
+                vst1q_f32(out + x + 4, vminq_f32(vmaxq_f32(f1, v0), v1));
+            }
+#endif
+            for (; x < dw; x++) {
+                float yn = ((float)row[x] - 16.0f) * sc;
+                out[x] = yn < 0.0f ? 0.0f : (yn > 1.0f ? 1.0f : yn);
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+        return;
+    }
+    int x_lo[320], x_hi[320];
+    for (int dx = 0; dx < dw; dx++) {
+        int x0 = (int)((int64_t)dx * sw / dw), x1 = (int)((int64_t)(dx + 1) * sw / dw);
+        if (x1 <= x0) x1 = x0 + 1;
+        x_lo[dx] = x0;
+        x_hi[dx] = x1;
+    }
     ALumaDownCtx ctx = {yp, ys, sw, sh, dw, dh, ten, x_lo, x_hi, dst};
     if ((int64_t)sw * sh >= 131072 && dh >= 8)
         dispatch_apply_f(4, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), &ctx, a_downsample_luma_band);
@@ -5022,7 +5419,7 @@ WValue w_media_anomalies(WValue srcv, WValue optv) {
         double noise = w_media_num(m_avf_arr(optv, 2), 0.001, "noise");
         double pix_th = w_media_num(m_avf_arr(optv, 3), 0.10, "pix_th");
         int32_t num = (int32_t)w_media_num(m_avf_arr(optv, 4), 0, "rate"), den = (int32_t)w_media_num(m_avf_arr(optv, 5), 0, "rate");
-        ADec *d = a_open_any_source(srcv, num, den, 0, 0, "MediaVerify.anomalies");
+        ADec *d = a_open_any_source_scaled(srcv, num, den, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, 0, 320, "MediaVerify.anomalies");
         double dt = (double)d->den / (double)d->num;
         int dw = d->w < 320 ? d->w : 320;
         int dh = (int)(((int64_t)d->h * dw / (d->w ? d->w : 1)) & ~1LL);
@@ -6416,7 +6813,9 @@ WValue w_media_video_scan(WValue srcv, WValue optv, WValue reqsv) {
         }
 
         int64_t start_f = (!want_anom && nreq > 0) ? reqs[0].frame : 0;
-        ADec *d = a_open_any_source(srcv, num, den, 0, start_f, "MediaVerify.video_scan");
+        ADec *d = (want_anom && nreq == 0)
+            ? a_open_any_source_scaled(srcv, num, den, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, start_f, 320, "MediaVerify.video_scan")
+            : a_open_any_source(srcv, num, den, 0, start_f, "MediaVerify.video_scan");
         double dt = (double)d->den / (double)d->num;
         int dw = d->w < 320 ? d->w : 320;
         int dh = (int)(((int64_t)d->h * dw / (d->w ? d->w : 1)) & ~1LL);
@@ -6999,15 +7398,22 @@ static double a_f64_at(WValue a, int64_t i, const char *what, int64_t *n) {
 }
 
 #define LV_RING 32768
+#define LV_RING_PAD 64
 #define LV_HEAD_MAX 262144
 #define LV_EVENTS 4096
+#define LV_DUE_MAX 512
+#define LV_ZONE_PAGE_SHIFT 8
+#define LV_ZONE_PAGE_SIZE (1 << LV_ZONE_PAGE_SHIFT)
+#define LV_ZONE_MAX_PAGES 256
+#define LV_READERS 2
 
 typedef struct LZoneF {
     int kind;                  /* 1 file (streamed), 2 raw mmap, 3 memory */
     char path[1024];
     double rate;
     int64_t frames, head_n, first;
-    float *hl, *hr;            /* kind 1: the head; kind 3: everything */
+    float *hl, *hr;            /* kind 1: the head (+64 overlap); kind 3: everything; [-32..-1] and [end..end+63] zero-padded */
+    float *hl_alloc, *hr_alloc;
     const int32_t *raw;        /* kind 2: interleaved stereo int32 (x · 2^31 − 1) */
     size_t raw_len;
     int lo, hi, vlo, vhi, root;
@@ -7024,7 +7430,7 @@ typedef struct LVoiceF {
     int64_t age;
     int started;
     /* streaming (kind 1) */
-    float *rl, *rr;
+    float *rl, *rr;            /* LV_RING + LV_RING_PAD: [LV_RING..LV_RING+63] mirrors [0..63] */
     _Atomic int64_t ring_end;  /* the file frame after the last one in the ring */
     _Atomic int64_t rpos;      /* the reader's floor(pos), for the writer */
     int64_t open_gen;          /* the reader thread's: the generation its file is open for */
@@ -7033,27 +7439,39 @@ typedef struct LVoiceF {
 } LVoiceF;
 
 typedef struct LEvent {
-    int type;                  /* 1 play, 2 release, 3 bend, 4 all off */
+    int type;                  /* 1 play, 2 release, 3 bend, 4 all off, 5 flush+release */
     double when, origin;
     int zone, key;
     int64_t tag;
     double ratio, amp, start, rel, cents;
 } LEvent;
 
+struct ALive;
+typedef struct LVReaderArg {
+    struct ALive *L;
+    int tid;
+} LVReaderArg;
+
 typedef struct ALive {
     AVAudioEngine *engine;
     AVAudioSourceNode *node;
     double rate;
-    os_unfair_lock lock;       /* zones and the event queue */
-    int nz, zcap;
-    LZoneF *z;
+    os_unfair_lock prod_lock;  /* producer-only lock (never acquired by render callback or reader threads) */
+    _Atomic int nz;
+    _Atomic(LZoneF *) z_pages[LV_ZONE_MAX_PAGES];
     LVoiceF v[L_VOICES];
-    LEvent ev[LV_EVENTS];
-    int nev;
+    /* Lock-free producer -> render-callback FIFO + render-callback-owned scheduled list */
+    LEvent ev_ring[LV_EVENTS];
+    _Atomic uint32_t ev_w;
+    _Atomic uint32_t ev_r;
+    LEvent sched[LV_EVENTS];
+    int nsched;
     float volume;
     _Atomic int64_t rendered;
     double bend_mult, vib_depth, vib_rate, vib_phase;
-    float *sinc;               /* (512 + 1) * 64 taps, or NULL */
+    _Atomic(float *) sinc;     /* (512 + 1) * 64 taps, or NULL */
+    float *sinc_retired[16];
+    int n_sinc_retired;
     int64_t next_tag;
     /* measurements */
     _Atomic int64_t underruns;
@@ -7064,7 +7482,8 @@ typedef struct ALive {
     double lat_sum, lat_max, lat_last;
     int64_t lat_n;
     int64_t head_bytes, map_bytes;
-    pthread_t reader;
+    pthread_t readers[LV_READERS];
+    LVReaderArg reader_args[LV_READERS];
     _Atomic int quit;
     int buf_frames;
 } ALive;
@@ -7075,6 +7494,14 @@ static double lv_host_s(uint64_t ht) {
     static mach_timebase_info_data_t tb;
     if (tb.denom == 0) mach_timebase_info(&tb);
     return (double)ht * (double)tb.numer / (double)tb.denom / 1e9;
+}
+
+static inline LZoneF *lv_zone_at(ALive *L, int idx) {
+    if (idx < 0) return NULL;
+    int p = idx >> LV_ZONE_PAGE_SHIFT;
+    if (p >= LV_ZONE_MAX_PAGES) return NULL;
+    LZoneF *pg = atomic_load_explicit(&L->z_pages[p], memory_order_acquire);
+    return pg ? &pg[idx & (LV_ZONE_PAGE_SIZE - 1)] : NULL;
 }
 
 /* frame q of a voice's zone (0 when it is not there yet: an underrun) */
@@ -7100,10 +7527,12 @@ static int lv_voice_free(ALive *L) {
 
 static void lv_apply(ALive *L, LEvent *e, double t_out) {
     if (e->type == 1) {
-        if (e->zone < 0 || e->zone >= L->nz) return;
+        int cur_nz = atomic_load_explicit(&L->nz, memory_order_acquire);
+        if (e->zone < 0 || e->zone >= cur_nz) return;
+        LZoneF *z = lv_zone_at(L, e->zone);
+        if (!z) return;
         int vi = lv_voice_free(L);
         LVoiceF *v = &L->v[vi];
-        LZoneF *z = &L->z[e->zone];
         v->zone = e->zone; v->key = e->key; v->tag = e->tag;
         v->pos = e->start; v->ratio = e->ratio; v->amp = e->amp; v->env = 1.0;
         v->er = exp(-1.0 / ((e->rel > 0.001 ? e->rel : 0.001) * L->rate));
@@ -7132,11 +7561,13 @@ static void lv_render_span(ALive *L, float *ol, float *orr, int i0, int i1, doub
     double fin_n = 29.0 * L->rate / 48000.0, fe_n = 0.02 * L->rate;
     double pitch_mod = L->bend_mult;
     if (L->vib_depth > 0) pitch_mod *= pow(2.0, L->vib_depth * sin(L->vib_phase) / 1200.0);
+    const float *sinc_tab = atomic_load_explicit(&L->sinc, memory_order_acquire);
     for (int vi = 0; vi < L_VOICES; vi++) {
         LVoiceF *v = &L->v[vi];
-        int st = atomic_load(&v->state);
+        int st = atomic_load_explicit(&v->state, memory_order_acquire);
         if (st == 0) continue;
-        LZoneF *z = &L->z[v->zone];
+        LZoneF *z = lv_zone_at(L, v->zone);
+        if (!z) continue;
         double base = z->rate / L->rate;
         double step = v->ratio * base * pitch_mod;
         double fe_span = fe_n * step;
@@ -7155,17 +7586,18 @@ static void lv_render_span(ALive *L, float *ol, float *orr, int i0, int i1, doub
                 }
             }
             float yl = 0, yr = 0;
-            if (L->sinc) {
+            if (sinc_tab) {
                 double pf = (v->pos - p) * 512.0;
                 double pfl = floor(pf);
                 int b0 = (int)pfl * 64;
                 float u = (float)(pf - pfl);
                 int64_t q0 = k - 31;
-                const float *s0 = L->sinc + b0;
+                const float *s0 = sinc_tab + b0;
                 const float *s1 = s0 + 64;
 #if defined(__aarch64__)
                 float32x4_t vu = vdupq_n_f32(u);
-                if (q0 >= 0 && (z->kind == 3 || (z->kind == 1 && q0 + 64 <= z->head_n))) {
+                if (q0 >= -32 && (z->kind == 3 || (z->kind == 1 && (q0 < z->head_n || z->head_n >= z->frames)))) {
+                    /* Guard-padded head/memory buffer covers [-32..-1] (zeros) and [head_n..head_n+63] (64-frame overlap or zeros) */
                     const float *hl = z->hl + q0, *hr = z->hr + q0;
                     float32x4_t al0 = vdupq_n_f32(0.0f), ar0 = vdupq_n_f32(0.0f);
                     float32x4_t al1 = vdupq_n_f32(0.0f), ar1 = vdupq_n_f32(0.0f);
@@ -7181,29 +7613,19 @@ static void lv_render_span(ALive *L, float *ol, float *orr, int i0, int i1, doub
                     }
                     yl = vaddvq_f32(vaddq_f32(al0, al1));
                     yr = vaddvq_f32(vaddq_f32(ar0, ar1));
-                } else if (q0 >= 0 && z->kind == 2) {
-                    const int32_t *rp = z->raw + 2 * q0;
-                    float32x4_t vsc = vdupq_n_f32(1.0f / 2147483647.0f);
-                    float32x4_t al0 = vdupq_n_f32(0.0f), ar0 = vdupq_n_f32(0.0f);
-                    float32x4_t al1 = vdupq_n_f32(0.0f), ar1 = vdupq_n_f32(0.0f);
-                    for (int j = 0; j < 64; j += 8) {
-                        float32x4_t t0 = vld1q_f32(s0 + j), t1 = vld1q_f32(s1 + j);
-                        float32x4_t c0 = vmulq_f32(vfmaq_f32(t0, vsubq_f32(t1, t0), vu), vsc);
-                        float32x4_t u0 = vld1q_f32(s0 + j + 4), u1 = vld1q_f32(s1 + j + 4);
-                        float32x4_t c1 = vmulq_f32(vfmaq_f32(u0, vsubq_f32(u1, u0), vu), vsc);
-                        int32x4x2_t p0 = vld2q_s32(rp + 2 * j);
-                        int32x4x2_t p1 = vld2q_s32(rp + 2 * (j + 4));
-                        al0 = vfmaq_f32(al0, vcvtq_f32_s32(p0.val[0]), c0);
-                        ar0 = vfmaq_f32(ar0, vcvtq_f32_s32(p0.val[1]), c0);
-                        al1 = vfmaq_f32(al1, vcvtq_f32_s32(p1.val[0]), c1);
-                        ar1 = vfmaq_f32(ar1, vcvtq_f32_s32(p1.val[1]), c1);
+                } else if (z->kind == 2) {
+                    int32_t pad[128];
+                    const int32_t *rp;
+                    if (q0 >= 0 && q0 + 64 <= z->frames) {
+                        rp = z->raw + 2 * q0;
+                    } else {
+                        memset(pad, 0, sizeof pad);
+                        int64_t a = q0 < 0 ? -q0 : 0;
+                        int64_t b = (z->frames - q0) < 64 ? (z->frames - q0) : 64;
+                        if (a < 0) a = 0;
+                        if (b > a) memcpy(pad + 2 * a, z->raw + 2 * (q0 + a), (size_t)(b - a) * 8);
+                        rp = pad;
                     }
-                    yl = vaddvq_f32(vaddq_f32(al0, al1));
-                    yr = vaddvq_f32(vaddq_f32(ar0, ar1));
-                } else if (z->kind == 1 && q0 >= z->head_n && q0 >= ring_e - LV_RING && q0 + 64 <= ring_e &&
-                           ((q0 & (LV_RING - 1)) + 64 <= LV_RING)) {
-                    int64_t ri = q0 & (LV_RING - 1);
-                    const float *rl = v->rl + ri, *rr = v->rr + ri;
                     float32x4_t al0 = vdupq_n_f32(0.0f), ar0 = vdupq_n_f32(0.0f);
                     float32x4_t al1 = vdupq_n_f32(0.0f), ar1 = vdupq_n_f32(0.0f);
                     for (int j = 0; j < 64; j += 8) {
@@ -7211,13 +7633,43 @@ static void lv_render_span(ALive *L, float *ol, float *orr, int i0, int i1, doub
                         float32x4_t c0 = vfmaq_f32(t0, vsubq_f32(t1, t0), vu);
                         float32x4_t u0 = vld1q_f32(s0 + j + 4), u1 = vld1q_f32(s1 + j + 4);
                         float32x4_t c1 = vfmaq_f32(u0, vsubq_f32(u1, u0), vu);
-                        al0 = vfmaq_f32(al0, vld1q_f32(rl + j), c0);
-                        ar0 = vfmaq_f32(ar0, vld1q_f32(rr + j), c0);
-                        al1 = vfmaq_f32(al1, vld1q_f32(rl + j + 4), c1);
-                        ar1 = vfmaq_f32(ar1, vld1q_f32(rr + j + 4), c1);
+                        int32x4x2_t p0 = vld2q_s32(rp + 2 * j);
+                        int32x4x2_t p1 = vld2q_s32(rp + 2 * (j + 4));
+                        al0 = vfmaq_f32(al0, vcvtq_f32_s32(p0.val[0]), c0);
+                        ar0 = vfmaq_f32(ar0, vcvtq_f32_s32(p0.val[1]), c0);
+                        al1 = vfmaq_f32(al1, vcvtq_f32_s32(p1.val[0]), c1);
+                        ar1 = vfmaq_f32(ar1, vcvtq_f32_s32(p1.val[1]), c1);
                     }
-                    yl = vaddvq_f32(vaddq_f32(al0, al1));
-                    yr = vaddvq_f32(vaddq_f32(ar0, ar1));
+                    yl = vaddvq_f32(vaddq_f32(al0, al1)) * (1.0f / 2147483647.0f);
+                    yr = vaddvq_f32(vaddq_f32(ar0, ar1)) * (1.0f / 2147483647.0f);
+                } else if (z->kind == 1 && q0 >= z->head_n) {
+                    if (q0 + 64 > ring_e) ring_e = atomic_load_explicit(&v->ring_end, memory_order_acquire);
+                    if (q0 >= ring_e - LV_RING && q0 + 64 <= ring_e) {
+                        /* v->rl / v->rr mirror [0..63] into [LV_RING..LV_RING+63], so 64-tap NEON never wraps */
+                        int64_t ri = q0 & (LV_RING - 1);
+                        const float *rl = v->rl + ri, *rr = v->rr + ri;
+                        float32x4_t al0 = vdupq_n_f32(0.0f), ar0 = vdupq_n_f32(0.0f);
+                        float32x4_t al1 = vdupq_n_f32(0.0f), ar1 = vdupq_n_f32(0.0f);
+                        for (int j = 0; j < 64; j += 8) {
+                            float32x4_t t0 = vld1q_f32(s0 + j), t1 = vld1q_f32(s1 + j);
+                            float32x4_t c0 = vfmaq_f32(t0, vsubq_f32(t1, t0), vu);
+                            float32x4_t u0 = vld1q_f32(s0 + j + 4), u1 = vld1q_f32(s1 + j + 4);
+                            float32x4_t c1 = vfmaq_f32(u0, vsubq_f32(u1, u0), vu);
+                            al0 = vfmaq_f32(al0, vld1q_f32(rl + j), c0);
+                            ar0 = vfmaq_f32(ar0, vld1q_f32(rr + j), c0);
+                            al1 = vfmaq_f32(al1, vld1q_f32(rl + j + 4), c1);
+                            ar1 = vfmaq_f32(ar1, vld1q_f32(rr + j + 4), c1);
+                        }
+                        yl = vaddvq_f32(vaddq_f32(al0, al1));
+                        yr = vaddvq_f32(vaddq_f32(ar0, ar1));
+                    } else {
+                        for (int j = 0; j < 64; j++) {
+                            float a, b;
+                            lv_frame(L, v, z, q0 + j, &a, &b);
+                            float c = s0[j] + u * (s1[j] - s0[j]);
+                            yl += a * c; yr += b * c;
+                        }
+                    }
                 } else
 #endif
                 {
@@ -7254,75 +7706,95 @@ static void lv_render_span(ALive *L, float *ol, float *orr, int i0, int i1, doub
 }
 
 static void *lv_reader(void *arg) {
-    ALive *L = (ALive *)arg;
+    LVReaderArg *ra = (LVReaderArg *)arg;
+    ALive *L = ra->L;
+    int tid = ra->tid;
     float tmp[2 * 4096];
-    while (!atomic_load(&L->quit)) {
-        int busy = 0;
-        for (int vi = 0; vi < L_VOICES; vi++) {
+    while (!atomic_load_explicit(&L->quit, memory_order_acquire)) {
+        int cur_nz = atomic_load_explicit(&L->nz, memory_order_acquire);
+        int best_vi = -1;
+        int64_t best_slack = INT64_MAX;
+        int64_t best_g = 0;
+        for (int vi = tid; vi < L_VOICES; vi += LV_READERS) {
             LVoiceF *v = &L->v[vi];
-            int st = atomic_load(&v->state);
-            int64_t g = atomic_load(&v->gen);
+            int st = atomic_load_explicit(&v->state, memory_order_acquire);
+            int64_t g = atomic_load_explicit(&v->gen, memory_order_acquire);
             if (v->ef && (st == 0 || v->open_gen != g)) { ExtAudioFileDispose(v->ef); v->ef = NULL; }
             if (st == 0) continue;
-            os_unfair_lock_lock(&L->lock);
-            LZoneF *z = (v->zone >= 0 && v->zone < L->nz) ? &L->z[v->zone] : NULL;
-            int kind = z ? z->kind : 0;
-            char path[1024];
-            double zrate = z ? z->rate : 48000.0;
-            int64_t head_n = z ? z->head_n : 0, frames = z ? z->frames : 0;
-            if (z) memcpy(path, z->path, sizeof path);
-            os_unfair_lock_unlock(&L->lock);
-            if (kind != 1 || head_n >= frames) continue;
+            int zi = v->zone;
+            LZoneF *z = (zi >= 0 && zi < cur_nz) ? lv_zone_at(L, zi) : NULL;
+            if (!z || z->kind != 1 || z->head_n >= z->frames) continue;
             if (!v->ef) {
-                CFURLRef u = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)strlen(path), false);
+                CFURLRef u = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)z->path, (CFIndex)strlen(z->path), false);
                 OSStatus os = ExtAudioFileOpenURL(u, &v->ef);
                 CFRelease(u);
                 if (os != noErr) { v->ef = NULL; continue; }
                 AudioStreamBasicDescription c;
                 memset(&c, 0, sizeof c);
-                c.mSampleRate = zrate; c.mFormatID = kAudioFormatLinearPCM;
+                c.mSampleRate = z->rate; c.mFormatID = kAudioFormatLinearPCM;
                 c.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
                 c.mChannelsPerFrame = 2; c.mBitsPerChannel = 32; c.mBytesPerFrame = 8; c.mFramesPerPacket = 1; c.mBytesPerPacket = 8;
                 ExtAudioFileSetProperty(v->ef, kExtAudioFileProperty_ClientDataFormat, sizeof c, &c);
-                ExtAudioFileSeek(v->ef, head_n);
+                ExtAudioFileSeek(v->ef, z->head_n);
                 v->open_gen = g;
                 v->eof = 0;
             }
             if (v->eof) continue;
             int64_t e = atomic_load_explicit(&v->ring_end, memory_order_acquire);
-            int64_t rp = atomic_load(&v->rpos);
-            /* keep 64 frames of history behind the reader; fill up to a ring's length ahead */
-            while (!v->eof && e + 4096 - LV_RING <= rp - 64 && e < frames) {
+            if (e >= z->frames) { v->eof = 1; continue; }
+            int64_t rp = atomic_load_explicit(&v->rpos, memory_order_relaxed);
+            /* Frames below head_n are served from z->hl, so the ring only needs history >= max(head_n, rp - 64) */
+            int64_t floor_q = (rp - 64 > z->head_n) ? (rp - 64) : z->head_n;
+            if (e + 4096 - LV_RING <= floor_q) {
+                int64_t play_q = rp > z->head_n ? rp : z->head_n;
+                int64_t slack = e - play_q;
+                if (slack < best_slack) {
+                    best_slack = slack;
+                    best_vi = vi;
+                    best_g = g;
+                }
+            }
+        }
+        if (best_vi >= 0) {
+            LVoiceF *v = &L->v[best_vi];
+            if (atomic_load_explicit(&v->gen, memory_order_acquire) == best_g && v->ef && !v->eof) {
+                int64_t e = atomic_load_explicit(&v->ring_end, memory_order_acquire);
                 UInt32 n = 4096;
                 AudioBufferList abl;
                 abl.mNumberBuffers = 1;
                 abl.mBuffers[0].mNumberChannels = 2;
                 abl.mBuffers[0].mDataByteSize = sizeof tmp;
                 abl.mBuffers[0].mData = tmp;
-                if (ExtAudioFileRead(v->ef, &n, &abl) != noErr || n == 0) { v->eof = 1; break; }
-                UInt32 i = 0;
+                if (ExtAudioFileRead(v->ef, &n, &abl) != noErr || n == 0) {
+                    v->eof = 1;
+                } else {
+                    UInt32 i = 0;
+                    int64_t q0 = e & (LV_RING - 1);
 #if defined(__aarch64__)
-                int64_t q0 = e & (LV_RING - 1);
-                if (q0 + (int64_t)n <= LV_RING) {
-                    for (; i + 4 <= n; i += 4) {
-                        float32x4x2_t lr = vld2q_f32(tmp + 2 * i);
-                        vst1q_f32(v->rl + q0 + i, lr.val[0]);
-                        vst1q_f32(v->rr + q0 + i, lr.val[1]);
+                    if (q0 + (int64_t)n <= LV_RING) {
+                        for (; i + 4 <= n; i += 4) {
+                            float32x4x2_t lr = vld2q_f32(tmp + 2 * i);
+                            vst1q_f32(v->rl + q0 + i, lr.val[0]);
+                            vst1q_f32(v->rr + q0 + i, lr.val[1]);
+                        }
                     }
-                }
 #endif
-                for (; i < n; i++) {
-                    int64_t q = (e + i) & (LV_RING - 1);
-                    v->rl[q] = tmp[2 * i];
-                    v->rr[q] = tmp[2 * i + 1];
+                    for (; i < n; i++) {
+                        int64_t q = (e + i) & (LV_RING - 1);
+                        v->rl[q] = tmp[2 * i];
+                        v->rr[q] = tmp[2 * i + 1];
+                    }
+                    if (q0 < LV_RING_PAD || q0 + (int64_t)n > LV_RING) {
+                        memcpy(v->rl + LV_RING, v->rl, LV_RING_PAD * sizeof(float));
+                        memcpy(v->rr + LV_RING, v->rr, LV_RING_PAD * sizeof(float));
+                    }
+                    e += n;
+                    atomic_store_explicit(&v->ring_end, e, memory_order_release);
                 }
-                e += n;
-                atomic_store_explicit(&v->ring_end, e, memory_order_release);
-                busy = 1;
-                if (atomic_load(&v->gen) != g) break;
             }
+        } else {
+            usleep(1000);
         }
-        if (!busy) usleep(2000);
     }
     return NULL;
 }
@@ -7330,16 +7802,14 @@ static void *lv_reader(void *arg) {
 WValue w_media_live_new(WValue ratev) {
     @autoreleasepool {
         ALive *L = calloc(1, sizeof *L);
-        L->lock = OS_UNFAIR_LOCK_INIT;
+        L->prod_lock = OS_UNFAIR_LOCK_INIT;
         L->volume = 1.0f;
         L->bend_mult = 1.0;
         L->vib_rate = 5.5;
         L->next_tag = 1;
-        L->zcap = 4096;
-        L->z = calloc((size_t)L->zcap, sizeof *L->z);
         for (int i = 0; i < L_VOICES; i++) {
-            L->v[i].rl = calloc(LV_RING, sizeof(float));
-            L->v[i].rr = calloc(LV_RING, sizeof(float));
+            L->v[i].rl = calloc(LV_RING + LV_RING_PAD, sizeof(float));
+            L->v[i].rr = calloc(LV_RING + LV_RING_PAD, sizeof(float));
             L->v[i].zone = -1;
             L->v[i].open_gen = -1;
         }
@@ -7359,18 +7829,28 @@ WValue w_media_live_new(WValue ratev) {
             Lp->buf_frames = (int)n;
             double hs = (ts && (ts->mFlags & kAudioTimeStampHostTimeValid)) ? lv_host_s(ts->mHostTime) : lv_now();
             double he = hs + (double)n / Lp->rate;
-            /* the events due in this buffer, in time order, each at its frame */
-            LEvent due[64];
-            int nd = 0;
-            if (os_unfair_lock_trylock(&Lp->lock)) {
-                int w = 0;
-                for (int i = 0; i < Lp->nev; i++) {
-                    if (Lp->ev[i].when < he && nd < 64) due[nd++] = Lp->ev[i];
-                    else Lp->ev[w++] = Lp->ev[i];
+            /* Drain lock-free producer ring in FIFO order */
+            uint32_t r = atomic_load_explicit(&Lp->ev_r, memory_order_relaxed);
+            uint32_t w = atomic_load_explicit(&Lp->ev_w, memory_order_acquire);
+            while (r != w) {
+                LEvent ev = Lp->ev_ring[r & (LV_EVENTS - 1)];
+                r++;
+                if (ev.type == 5) {
+                    Lp->nsched = 0;
+                    ev.type = 2;
+                    ev.tag = 0;
                 }
-                Lp->nev = w;
-                os_unfair_lock_unlock(&Lp->lock);
+                if (Lp->nsched < LV_EVENTS) Lp->sched[Lp->nsched++] = ev;
             }
+            atomic_store_explicit(&Lp->ev_r, r, memory_order_release);
+            /* Partition events due in this buffer, in time order, each at its frame */
+            LEvent due[LV_DUE_MAX];
+            int nd = 0, sw = 0;
+            for (int i = 0; i < Lp->nsched; i++) {
+                if (Lp->sched[i].when < he && nd < LV_DUE_MAX) due[nd++] = Lp->sched[i];
+                else Lp->sched[sw++] = Lp->sched[i];
+            }
+            Lp->nsched = sw;
             for (int i = 1; i < nd; i++) { LEvent t = due[i]; int j = i; while (j > 0 && due[j - 1].when > t.when) { due[j] = due[j - 1]; j--; } due[j] = t; }
             int at = 0;
             for (int k = 0; k < nd; k++) {
@@ -7408,48 +7888,40 @@ WValue w_media_live_new(WValue ratev) {
         }
         NSError *err = nil;
         if (![L->engine startAndReturnError:&err]) {
+            for (int i = 0; i < L_VOICES; i++) { free(L->v[i].rl); free(L->v[i].rr); }
             [L->node release];
             [L->engine release];
-            free(L->z);
             free(L);
             w_media_raise("live_new: the audio engine did not start: %s", err ? [[err localizedDescription] UTF8String] : "?");
         }
-        pthread_create(&L->reader, NULL, lv_reader, L);
+        for (int t = 0; t < LV_READERS; t++) {
+            L->reader_args[t].L = L;
+            L->reader_args[t].tid = t;
+            pthread_create(&L->readers[t], NULL, lv_reader, &L->reader_args[t]);
+        }
         return w_int(w_media_handle_new(L, W_MEDIA_KIND_LIVE));
     }
 }
 
-static int lv_any_voice_active(ALive *L) {
-    if (L->nev > 0) return 1;
-    for (int i = 0; i < L_VOICES; i++)
-        if (atomic_load_explicit(&L->v[i].state, memory_order_acquire) != 0) return 1;
-    return 0;
-}
-
 static int lv_add_zones_batch(ALive *L, LZoneF *zs, int count) {
-    os_unfair_lock_lock(&L->lock);
-    if (L->nz + count > L->zcap) {
-        int nc = L->zcap;
-        while (nc < L->nz + count) nc *= 2;
-        LZoneF *nzp = calloc((size_t)nc, sizeof *nzp);
-        memcpy(nzp, L->z, (size_t)L->nz * sizeof *nzp);
-        LZoneF *old = L->z;
-        int need_wait = lv_any_voice_active(L);
-        L->z = nzp;
-        L->zcap = nc;
-        if (need_wait) {
-            os_unfair_lock_unlock(&L->lock);
-            usleep(30000); /* a render callback in flight finishes with the old array */
-            free(old);
-            os_unfair_lock_lock(&L->lock);
-        } else {
-            free(old);
-        }
+    os_unfair_lock_lock(&L->prod_lock);
+    int base_idx = atomic_load_explicit(&L->nz, memory_order_relaxed);
+    if (base_idx + count > LV_ZONE_MAX_PAGES * LV_ZONE_PAGE_SIZE) {
+        os_unfair_lock_unlock(&L->prod_lock);
+        w_media_raise("live_zone: zone limit (%d) exceeded", LV_ZONE_MAX_PAGES * LV_ZONE_PAGE_SIZE);
     }
-    int base_idx = L->nz;
-    memcpy(L->z + L->nz, zs, (size_t)count * sizeof *zs);
-    L->nz += count;
-    os_unfair_lock_unlock(&L->lock);
+    for (int i = 0; i < count; i++) {
+        int idx = base_idx + i;
+        int p = idx >> LV_ZONE_PAGE_SHIFT;
+        LZoneF *pg = atomic_load_explicit(&L->z_pages[p], memory_order_relaxed);
+        if (!pg) {
+            pg = calloc(LV_ZONE_PAGE_SIZE, sizeof(LZoneF));
+            atomic_store_explicit(&L->z_pages[p], pg, memory_order_release);
+        }
+        pg[idx & (LV_ZONE_PAGE_SIZE - 1)] = zs[i];
+    }
+    atomic_store_explicit(&L->nz, base_idx + count, memory_order_release);
+    os_unfair_lock_unlock(&L->prod_lock);
     return base_idx;
 }
 
@@ -7495,8 +7967,10 @@ WValue w_media_live_zone(WValue hv, WValue kv, WValue lv, WValue rv) {
     z.kind = 3;
     z.lo = (int)f[0]; z.hi = (int)f[1]; z.vlo = (int)f[2]; z.vhi = (int)f[3]; z.root = (int)f[4];
     z.frames = frames; z.head_n = frames; z.rate = f[6] > 0 ? f[6] : 48000; z.loop_s = (int64_t)f[7]; z.loop_e = (int64_t)f[8]; z.gain = f[9];
-    z.hl = malloc((size_t)frames * sizeof(float));
-    z.hr = malloc((size_t)frames * sizeof(float));
+    z.hl_alloc = calloc((size_t)(32 + frames + 64), sizeof(float));
+    z.hr_alloc = calloc((size_t)(32 + frames + 64), sizeof(float));
+    z.hl = z.hl_alloc + 32;
+    z.hr = z.hr_alloc + 32;
     for (int64_t i = 0; i < frames; i++) { int64_t d; z.hl[i] = (float)a_f64_at(lv, i, "l", &d); z.hr[i] = (float)a_f64_at(rv, i, "r", &d); }
     z.first = 0;
     L->head_bytes += frames * 8;
@@ -7526,6 +8000,9 @@ static int lv_load_zone_one(const char *path, int64_t hn, LZoneF *z, int64_t *he
             memcpy(&ir, (char *)m + 8, 8);
             z->rate = (double)ir;
             memcpy(&z->frames, (char *)m + 16, 8);
+            int64_t max_fr = ((int64_t)sb.st_size - 24) / 8;
+            if (z->frames > max_fr) z->frames = max_fr;
+            if (z->frames < 0) z->frames = 0;
             z->raw = (const int32_t *)((char *)m + 24);
             z->raw_len = (size_t)sb.st_size;
             z->head_n = z->frames;
@@ -7567,14 +8044,15 @@ static int lv_load_zone_one(const char *path, int64_t hn, LZoneF *z, int64_t *he
             c.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
             c.mChannelsPerFrame = 2; c.mBitsPerChannel = 32; c.mBytesPerFrame = 8; c.mFramesPerPacket = 1; c.mBytesPerPacket = 8;
             ExtAudioFileSetProperty(ef, kExtAudioFileProperty_ClientDataFormat, sizeof c, &c);
-            int64_t take = hn > fr ? fr : hn;
-            if (take < 0) take = 0;
-            float *buf = malloc((size_t)(take > 0 ? take : 1) * 8);
-            UInt32 n = (UInt32)take;
+            /* Decode up to hn + 64 frames so 64-tap NEON sinc across [head_n - 63 .. head_n - 1] never stalls or falls back */
+            int64_t read_take = (hn + 64 > fr) ? fr : (hn + 64);
+            if (read_take < 0) read_take = 0;
+            float *buf = malloc((size_t)(read_take > 0 ? read_take : 1) * 8);
+            UInt32 n = (UInt32)read_take;
             AudioBufferList abl;
             abl.mNumberBuffers = 1;
             abl.mBuffers[0].mNumberChannels = 2;
-            abl.mBuffers[0].mDataByteSize = (UInt32)(take * 8);
+            abl.mBuffers[0].mDataByteSize = (UInt32)(read_take * 8);
             abl.mBuffers[0].mData = buf;
             if (n > 0) ExtAudioFileRead(ef, &n, &abl);
             ExtAudioFileDispose(ef);
@@ -7582,9 +8060,12 @@ static int lv_load_zone_one(const char *path, int64_t hn, LZoneF *z, int64_t *he
             snprintf(z->path, sizeof z->path, "%s", path);
             z->rate = f.mSampleRate;
             z->frames = fr;
-            z->head_n = n;
-            z->hl = malloc((size_t)(n > 0 ? n : 1) * sizeof(float));
-            z->hr = malloc((size_t)(n > 0 ? n : 1) * sizeof(float));
+            z->head_n = (int64_t)n > hn ? hn : (int64_t)n;
+            size_t alloc_n = (size_t)(n > (UInt32)hn ? n : (UInt32)(hn > 0 ? hn : 1));
+            z->hl_alloc = calloc(32 + alloc_n + 64, sizeof(float));
+            z->hr_alloc = calloc(32 + alloc_n + 64, sizeof(float));
+            z->hl = z->hl_alloc + 32;
+            z->hr = z->hr_alloc + 32;
             UInt32 i = 0;
 #if defined(__aarch64__)
             for (; i + 4 <= n; i += 4) {
@@ -7595,8 +8076,8 @@ static int lv_load_zone_one(const char *path, int64_t hn, LZoneF *z, int64_t *he
 #endif
             for (; i < n; i++) { z->hl[i] = buf[2 * i]; z->hr[i] = buf[2 * i + 1]; }
             free(buf);
-            z->first = lv_first_sound(z->hl, z->hr, n, 1, z->rate);
-            *head_b = (int64_t)n * 8;
+            z->first = lv_first_sound(z->hl, z->hr, z->head_n, 1, z->rate);
+            *head_b = (int64_t)z->head_n * 8;
         }
         return 0;
     }
@@ -7683,7 +8164,7 @@ WValue w_media_live_zone_files(WValue hv, WValue pathsv, WValue headv) {
         snprintf(msg, sizeof msg, "%s", emsg[bad]);
         for (int i = 0; i < n; i++) {
             if (!errs[i]) {
-                free(zs[i].hl); free(zs[i].hr);
+                free(zs[i].hl_alloc); free(zs[i].hr_alloc);
                 if (zs[i].kind == 2 && zs[i].raw) munmap((void *)((char *)zs[i].raw - 24), zs[i].raw_len);
             }
         }
@@ -7718,20 +8199,29 @@ WValue w_media_live_sinc(WValue hv, WValue tabv) {
     if (n < 513 * 64) w_media_raise("live_sinc: the table has %lld entries, not 513 x 64", (long long)n);
     float *t = malloc((size_t)n * sizeof(float));
     for (int64_t i = 0; i < n; i++) { int64_t d; t[i] = (float)a_f64_at(tabv, i, "table", &d); }
-    os_unfair_lock_lock(&L->lock);
-    float *old = L->sinc;
-    L->sinc = t;
-    os_unfair_lock_unlock(&L->lock);
+    os_unfair_lock_lock(&L->prod_lock);
+    float *old = atomic_exchange_explicit(&L->sinc, t, memory_order_acq_rel);
+    if (old && L->n_sinc_retired < 16) {
+        L->sinc_retired[L->n_sinc_retired++] = old;
+        old = NULL;
+    }
+    os_unfair_lock_unlock(&L->prod_lock);
     if (old) { usleep(30000); free(old); }
     return W_TRUE;
 }
 
 static int64_t lv_push(ALive *L, LEvent *e) {
-    os_unfair_lock_lock(&L->lock);
+    os_unfair_lock_lock(&L->prod_lock);
     if (e->type == 1 && e->tag == 0) e->tag = L->next_tag++;
     int64_t tag = e->tag;
-    if (L->nev < LV_EVENTS) L->ev[L->nev++] = *e;
-    os_unfair_lock_unlock(&L->lock);
+    uint32_t w = atomic_load_explicit(&L->ev_w, memory_order_relaxed);
+    uint32_t r = atomic_load_explicit(&L->ev_r, memory_order_acquire);
+    uint32_t cap = e->type == 5 ? LV_EVENTS : (LV_EVENTS - 1);
+    if (w - r < cap) {
+        L->ev_ring[w & (LV_EVENTS - 1)] = *e;
+        atomic_store_explicit(&L->ev_w, w + 1, memory_order_release);
+    }
+    os_unfair_lock_unlock(&L->prod_lock);
     return tag;
 }
 
@@ -7775,12 +8265,9 @@ WValue w_media_live_release(WValue hv, WValue tagv, WValue whenv, WValue relv) {
  * sounds released now with time constant rel s (0: each voice's own) */
 WValue w_media_live_flush(WValue hv, WValue relv) {
     ALive *L = (ALive *)w_media_handle_get(hv, W_MEDIA_KIND_LIVE, "live_flush");
-    os_unfair_lock_lock(&L->lock);
-    L->nev = 0;
-    os_unfair_lock_unlock(&L->lock);
     LEvent e;
     memset(&e, 0, sizeof e);
-    e.type = 2;
+    e.type = 5;
     e.tag = 0;
     e.when = lv_now();
     e.rel = w_media_num(relv, 0, "release");
@@ -7824,12 +8311,16 @@ WValue w_media_live_note(WValue hv, WValue keyv, WValue velv) {
         return W_TRUE;
     }
     int zi = -1;
-    os_unfair_lock_lock(&L->lock);
-    for (int i = 0; i < L->nz && zi < 0; i++)
-        if (L->z[i].kind == 3 && key >= L->z[i].lo && key <= L->z[i].hi && vel >= L->z[i].vlo && vel <= L->z[i].vhi) zi = i;
+    int cur_nz = atomic_load_explicit(&L->nz, memory_order_acquire);
     double ratio = 1, gain = 1;
-    if (zi >= 0) { ratio = pow(2.0, (key - L->z[zi].root) / 12.0); gain = L->z[zi].gain * (vel / 127.0) * (vel / 127.0); }
-    os_unfair_lock_unlock(&L->lock);
+    for (int i = 0; i < cur_nz && zi < 0; i++) {
+        LZoneF *z = lv_zone_at(L, i);
+        if (z && z->kind == 3 && key >= z->lo && key <= z->hi && vel >= z->vlo && vel <= z->vhi) {
+            zi = i;
+            ratio = pow(2.0, (key - z->root) / 12.0);
+            gain = z->gain * (vel / 127.0) * (vel / 127.0);
+        }
+    }
     if (zi < 0) return W_FALSE;
     LEvent e;
     memset(&e, 0, sizeof e);
@@ -7858,7 +8349,7 @@ WValue w_media_live_info(WValue hv) {
     @autoreleasepool { pres = L->engine.outputNode.presentationLatency; }
     WValue out = w_array_new_empty();
     out = w_array_push(out, w_int(n));
-    out = w_array_push(out, w_int(L->nz));
+    out = w_array_push(out, w_int(atomic_load_explicit(&L->nz, memory_order_acquire)));
     out = w_array_push(out, w_float(L->rate));
     out = w_array_push(out, w_int(atomic_load(&L->rendered)));
     out = w_array_push(out, w_int(L->head_bytes));
@@ -7885,8 +8376,8 @@ WValue w_media_live_close(WValue hv) {
     if (!L) return W_FALSE;
     w_media_handle_drop(hv, W_MEDIA_KIND_LIVE);
     [L->engine stop];
-    atomic_store(&L->quit, 1);
-    pthread_join(L->reader, NULL);
+    atomic_store_explicit(&L->quit, 1, memory_order_release);
+    for (int t = 0; t < LV_READERS; t++) pthread_join(L->readers[t], NULL);
     for (int i = 0; i < L_VOICES; i++) {
         if (L->v[i].ef) ExtAudioFileDispose(L->v[i].ef);
         free(L->v[i].rl);
@@ -7895,14 +8386,117 @@ WValue w_media_live_close(WValue hv) {
     [L->engine detachNode:L->node];
     [L->node release];
     [L->engine release];
-    for (int i = 0; i < L->nz; i++) {
-        if (L->z[i].kind == 2) munmap((void *)((const char *)L->z[i].raw - 24), L->z[i].raw_len);
-        else { free(L->z[i].hl); free(L->z[i].hr); }
+    int cur_nz = atomic_load_explicit(&L->nz, memory_order_relaxed);
+    for (int i = 0; i < cur_nz; i++) {
+        LZoneF *z = lv_zone_at(L, i);
+        if (!z) continue;
+        if (z->kind == 2) munmap((void *)((const char *)z->raw - 24), z->raw_len);
+        else { free(z->hl_alloc); free(z->hr_alloc); }
     }
-    free(L->z);
-    free(L->sinc);
+    for (int p = 0; p < LV_ZONE_MAX_PAGES; p++) {
+        LZoneF *pg = atomic_load_explicit(&L->z_pages[p], memory_order_relaxed);
+        if (pg) free(pg);
+    }
+    float *sc = atomic_load_explicit(&L->sinc, memory_order_relaxed);
+    free(sc);
+    for (int i = 0; i < L->n_sinc_retired; i++) free(L->sinc_retired[i]);
     free(L);
     return W_TRUE;
+}
+
+/* Native NEON .twpcm writer: writes 24-byte header ("TWPCM\0\0\2" + LE int64 rate, frames) + clamped int32 stereo interleaved
+ * samples (round-half-up: floor(clamp(x,-1,1) * 2147483647.0 + 0.5)) via atomic tmp-file + rename. */
+WValue w_media_live_pcm_write(WValue pathv, WValue ratev, WValue nv, WValue lv, WValue rv) {
+    char path[1024];
+    if (!w_media_str(pathv, path, sizeof path) || !path[0]) w_media_raise("live_pcm_write: path must be a string");
+    if (!w_is_array(lv) || !w_is_array(rv)) w_media_raise("live_pcm_write: left and right must be arrays");
+    int64_t rate = a_int(ratev, 48000, "rate");
+    int64_t n = a_int(nv, 0, "frames");
+    WArray *la = w_as_array(lv), *ra = w_as_array(rv);
+    if (n > la->size) n = la->size;
+    if (n > ra->size) n = ra->size;
+    if (n < 0) n = 0;
+
+    char tmp[1152];
+    static _Atomic uint64_t s_seq = 0;
+    uint64_t seq = atomic_fetch_add_explicit(&s_seq, 1, memory_order_relaxed);
+    snprintf(tmp, sizeof tmp, "%s.tmp.%d.%llu", path, (int)getpid(), (unsigned long long)seq);
+
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) w_media_raise("live_pcm_write: cannot open %s (%s)", tmp, strerror(errno));
+
+    uint8_t hdr[24];
+    memcpy(hdr, "TWPCM\0\0\2", 8);
+    for (int b = 0; b < 8; b++) {
+        hdr[8 + b] = (uint8_t)(((uint64_t)rate >> (8 * b)) & 0xFFu);
+        hdr[16 + b] = (uint8_t)(((uint64_t)n >> (8 * b)) & 0xFFu);
+    }
+    if (write(fd, hdr, 24) != 24) {
+        close(fd);
+        unlink(tmp);
+        w_media_raise("live_pcm_write: short header write to %s", tmp);
+    }
+
+    int32_t chunk[16384]; /* 8192 stereo frames = 64 KiB */
+    const int64_t blk = 8192;
+    int is_f64 = (la->ebits == -64 && ra->ebits == -64);
+    const double *lp = is_f64 ? ((const double *)la->slots + la->start) : NULL;
+    const double *rp = is_f64 ? ((const double *)ra->slots + ra->start) : NULL;
+
+    for (int64_t base = 0; base < n; base += blk) {
+        int64_t cnt = (n - base) < blk ? (n - base) : blk;
+        int64_t i = 0;
+#if defined(__aarch64__)
+        if (is_f64) {
+            float64x2_t vmin = vdupq_n_f64(-1.0);
+            float64x2_t vmax = vdupq_n_f64(1.0);
+            float64x2_t vsc = vdupq_n_f64(2147483647.0);
+            float64x2_t vhalf = vdupq_n_f64(0.5);
+            for (; i + 2 <= cnt; i += 2) {
+                float64x2_t xl = vld1q_f64(lp + base + i);
+                float64x2_t xr = vld1q_f64(rp + base + i);
+                /* NaN check: if any lane is NaN, fall back to scalar for this pair */
+                uint64x2_t ok = vandq_u64(vceqq_f64(xl, xl), vceqq_f64(xr, xr));
+                if (vgetq_lane_u64(ok, 0) != ~0ULL || vgetq_lane_u64(ok, 1) != ~0ULL) break;
+                float64x2_t cl = vmaxq_f64(vminq_f64(xl, vmax), vmin);
+                float64x2_t cr = vmaxq_f64(vminq_f64(xr, vmax), vmin);
+                int64x2_t il = vcvtmq_s64_f64(vaddq_f64(vmulq_f64(cl, vsc), vhalf));
+                int64x2_t ir = vcvtmq_s64_f64(vaddq_f64(vmulq_f64(cr, vsc), vhalf));
+                int32x2_t sl = vmovn_s64(il);
+                int32x2_t sr = vmovn_s64(ir);
+                int32x2x2_t zp = vzip_s32(sl, sr);
+                vst1q_s32(chunk + 2 * i, vcombine_s32(zp.val[0], zp.val[1]));
+            }
+        }
+#endif
+        for (; i < cnt; i++) {
+            int64_t dm;
+            double xl = is_f64 ? lp[base + i] : a_f64_at(lv, base + i, "l", &dm);
+            double xr = is_f64 ? rp[base + i] : a_f64_at(rv, base + i, "r", &dm);
+            if (!(xl == xl)) xl = 0.0;
+            if (!(xr == xr)) xr = 0.0;
+            if (xl > 1.0) xl = 1.0; else if (xl < -1.0) xl = -1.0;
+            if (xr > 1.0) xr = 1.0; else if (xr < -1.0) xr = -1.0;
+            chunk[2 * i] = (int32_t)(int64_t)floor(xl * 2147483647.0 + 0.5);
+            chunk[2 * i + 1] = (int32_t)(int64_t)floor(xr * 2147483647.0 + 0.5);
+        }
+        size_t need = (size_t)cnt * 8;
+        size_t off = 0;
+        while (off < need) {
+            ssize_t wr = write(fd, (const char *)chunk + off, need - off);
+            if (wr <= 0) {
+                close(fd);
+                unlink(tmp);
+                w_media_raise("live_pcm_write: write failed on %s", tmp);
+            }
+            off += (size_t)wr;
+        }
+    }
+    if (close(fd) != 0 || rename(tmp, path) != 0) {
+        unlink(tmp);
+        w_media_raise("live_pcm_write: rename failed to %s (%s)", path, strerror(errno));
+    }
+    return w_int(n);
 }
 
 /* the host clock in seconds (the one MIDI timestamps and live_play's `when` use) */

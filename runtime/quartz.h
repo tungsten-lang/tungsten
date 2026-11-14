@@ -108,7 +108,11 @@ int w_cg_canvas_buffer(int64_t handle, WCGBufferInfo *out);
     X(w_cg_to_raster, 3)          \
     X(w_cg_data_ptr, 1)           \
     X(w_cg_write, 5)              \
-    X(w_cg_encode, 4)
+    X(w_cg_encode, 4)             \
+    X(w_cg_write_pixels, 7)       \
+    X(w_cg_register_font, 1)      \
+    X(w_cg_segments, 5)           \
+    X(w_cg_glyphs, 7)
 
 #define W_CG_PARAMS_0 void
 #define W_CG_PARAMS_1 WValue

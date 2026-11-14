@@ -34,6 +34,14 @@
       u8[2] _header
       u8    encoding_id
 
+  # Allocate an uninitialized u8[n] / ByteArray without calloc page-zeroing,
+  # for large pixel/audio buffers that the caller immediately overwrites.
+  -> .uninit(n)
+    raw_n = ccall_nobox("w_numeric_to_i64", n) ## i64
+    if raw_n < 0
+      raise "ByteArray.uninit: negative size"
+    ccall_rawargs("w_array_new_uninit_sized", 8 ## i64, raw_n) ## u8[]
+
   @@tbl_cp932 = nil
   @@tbl_euc_jp = nil
   @@tbl_gb18030 = nil

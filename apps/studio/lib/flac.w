@@ -464,32 +464,103 @@ fn flac_fill(s, o0, n, v) (i64[] i64 i64 i64) i64
 fn flac_decorr(s, st, n, mode) (i64[] i64 i64 i64) i64
   ll <<~IR
   entry:
-    %ps = inttoptr i64 %s to ptr
-    %i = alloca i64
-    store i64 0, ptr %i
-    br label %loop
-  loop:
-    %iv = load i64, ptr %i
-    %more = icmp slt i64 %iv, %n
-    br i1 %more, label %body, label %done
-  body:
-    %p0 = getelementptr i64, ptr %ps, i64 %iv
-    %k1 = add i64 %st, %iv
-    %p1 = getelementptr i64, ptr %ps, i64 %k1
-    %a = load i64, ptr %p0
-    %b = load i64, ptr %p1
-    switch i64 %mode, label %next [ i64 8, label %ls
-                                    i64 9, label %sr
-                                    i64 10, label %ms ]
-  ls:
-    %r8 = sub i64 %a, %b
-    store i64 %r8, ptr %p1
-    br label %next
-  sr:
-    %l9 = add i64 %a, %b
-    store i64 %l9, ptr %p0
-    br label %next
-  ms:
+    %empty = icmp sle i64 %n, 0
+    br i1 %empty, label %done, label %init
+  init:
+    %ps0 = inttoptr i64 %s to ptr
+    %ps1 = getelementptr i64, ptr %ps0, i64 %st
+    %n4 = and i64 %n, -4
+    switch i64 %mode, label %done [ i64 8, label %ls_pre
+                                    i64 9, label %sr_pre
+                                    i64 10, label %ms_pre ]
+  ls_pre:
+    %ls_has4 = icmp sgt i64 %n4, 0
+    br i1 %ls_has4, label %ls_vloop, label %ls_tail_chk
+  ls_vloop:
+    %iv8 = phi i64 [ 0, %ls_pre ], [ %iv8_next, %ls_vloop ]
+    %p0_8 = getelementptr i64, ptr %ps0, i64 %iv8
+    %p1_8 = getelementptr i64, ptr %ps1, i64 %iv8
+    %va8 = load <4 x i64>, ptr %p0_8, align 8
+    %vb8 = load <4 x i64>, ptr %p1_8, align 8
+    %vr8 = sub <4 x i64> %va8, %vb8
+    store <4 x i64> %vr8, ptr %p1_8, align 8
+    %iv8_next = add i64 %iv8, 4
+    %ls_vmore = icmp slt i64 %iv8_next, %n4
+    br i1 %ls_vmore, label %ls_vloop, label %ls_tail_chk
+  ls_tail_chk:
+    %ls_tmore0 = icmp slt i64 %n4, %n
+    br i1 %ls_tmore0, label %ls_tloop, label %done
+  ls_tloop:
+    %it8 = phi i64 [ %n4, %ls_tail_chk ], [ %it8_next, %ls_tloop ]
+    %tp0_8 = getelementptr i64, ptr %ps0, i64 %it8
+    %tp1_8 = getelementptr i64, ptr %ps1, i64 %it8
+    %ta8 = load i64, ptr %tp0_8, align 8
+    %tb8 = load i64, ptr %tp1_8, align 8
+    %tr8 = sub i64 %ta8, %tb8
+    store i64 %tr8, ptr %tp1_8, align 8
+    %it8_next = add i64 %it8, 1
+    %ls_tmore = icmp slt i64 %it8_next, %n
+    br i1 %ls_tmore, label %ls_tloop, label %done
+
+  sr_pre:
+    %sr_has4 = icmp sgt i64 %n4, 0
+    br i1 %sr_has4, label %sr_vloop, label %sr_tail_chk
+  sr_vloop:
+    %iv9 = phi i64 [ 0, %sr_pre ], [ %iv9_next, %sr_vloop ]
+    %p0_9 = getelementptr i64, ptr %ps0, i64 %iv9
+    %p1_9 = getelementptr i64, ptr %ps1, i64 %iv9
+    %va9 = load <4 x i64>, ptr %p0_9, align 8
+    %vb9 = load <4 x i64>, ptr %p1_9, align 8
+    %vl9 = add <4 x i64> %va9, %vb9
+    store <4 x i64> %vl9, ptr %p0_9, align 8
+    %iv9_next = add i64 %iv9, 4
+    %sr_vmore = icmp slt i64 %iv9_next, %n4
+    br i1 %sr_vmore, label %sr_vloop, label %sr_tail_chk
+  sr_tail_chk:
+    %sr_tmore0 = icmp slt i64 %n4, %n
+    br i1 %sr_tmore0, label %sr_tloop, label %done
+  sr_tloop:
+    %it9 = phi i64 [ %n4, %sr_tail_chk ], [ %it9_next, %sr_tloop ]
+    %tp0_9 = getelementptr i64, ptr %ps0, i64 %it9
+    %tp1_9 = getelementptr i64, ptr %ps1, i64 %it9
+    %ta9 = load i64, ptr %tp0_9, align 8
+    %tb9 = load i64, ptr %tp1_9, align 8
+    %tl9 = add i64 %ta9, %tb9
+    store i64 %tl9, ptr %tp0_9, align 8
+    %it9_next = add i64 %it9, 1
+    %sr_tmore = icmp slt i64 %it9_next, %n
+    br i1 %sr_tmore, label %sr_tloop, label %done
+
+  ms_pre:
+    %ms_has4 = icmp sgt i64 %n4, 0
+    br i1 %ms_has4, label %ms_vloop, label %ms_tail_chk
+  ms_vloop:
+    %iv10 = phi i64 [ 0, %ms_pre ], [ %iv10_next, %ms_vloop ]
+    %p0_10 = getelementptr i64, ptr %ps0, i64 %iv10
+    %p1_10 = getelementptr i64, ptr %ps1, i64 %iv10
+    %va10 = load <4 x i64>, ptr %p0_10, align 8
+    %vb10 = load <4 x i64>, ptr %p1_10, align 8
+    %vm2 = shl <4 x i64> %va10, <i64 1, i64 1, i64 1, i64 1>
+    %vsb = and <4 x i64> %vb10, <i64 1, i64 1, i64 1, i64 1>
+    %vm = or <4 x i64> %vm2, %vsb
+    %vlsum = add <4 x i64> %vm, %vb10
+    %vl10 = ashr <4 x i64> %vlsum, <i64 1, i64 1, i64 1, i64 1>
+    %vrdif = sub <4 x i64> %vm, %vb10
+    %vr10 = ashr <4 x i64> %vrdif, <i64 1, i64 1, i64 1, i64 1>
+    store <4 x i64> %vl10, ptr %p0_10, align 8
+    store <4 x i64> %vr10, ptr %p1_10, align 8
+    %iv10_next = add i64 %iv10, 4
+    %ms_vmore = icmp slt i64 %iv10_next, %n4
+    br i1 %ms_vmore, label %ms_vloop, label %ms_tail_chk
+  ms_tail_chk:
+    %ms_tmore0 = icmp slt i64 %n4, %n
+    br i1 %ms_tmore0, label %ms_tloop, label %done
+  ms_tloop:
+    %it10 = phi i64 [ %n4, %ms_tail_chk ], [ %it10_next, %ms_tloop ]
+    %tp0_10 = getelementptr i64, ptr %ps0, i64 %it10
+    %tp1_10 = getelementptr i64, ptr %ps1, i64 %it10
+    %a = load i64, ptr %tp0_10, align 8
+    %b = load i64, ptr %tp1_10, align 8
     %m2 = shl i64 %a, 1
     %sb = and i64 %b, 1
     %m = or i64 %m2, %sb
@@ -497,13 +568,11 @@ fn flac_decorr(s, st, n, mode) (i64[] i64 i64 i64) i64
     %l10 = ashr i64 %lsum, 1
     %rdif = sub i64 %m, %b
     %r10 = ashr i64 %rdif, 1
-    store i64 %l10, ptr %p0
-    store i64 %r10, ptr %p1
-    br label %next
-  next:
-    %i1 = add i64 %iv, 1
-    store i64 %i1, ptr %i
-    br label %loop
+    store i64 %l10, ptr %tp0_10, align 8
+    store i64 %r10, ptr %tp1_10, align 8
+    %it10_next = add i64 %it10, 1
+    %ms_tmore = icmp slt i64 %it10_next, %n
+    br i1 %ms_tmore, label %ms_tloop, label %done
   done:
     ret i64 %n
   IR
@@ -543,30 +612,47 @@ fn flac_put_i32(out, f0, ch, c, s, s0, n) (i32[] i64 i64 i64 i64[] i64 i64) i64
 fn flac_put_f64(dst, f0, s, s0, n, bits) (f64[] i64 i64[] i64 i64 i64) i64
   ll <<~IR
   entry:
-    %pd = inttoptr i64 %dst to ptr
-    %ps = inttoptr i64 %s to ptr
-    %i = alloca i64
+    %empty = icmp sle i64 %n, 0
+    br i1 %empty, label %done, label %init
+  init:
+    %pd0 = inttoptr i64 %dst to ptr
+    %pd = getelementptr double, ptr %pd0, i64 %f0
+    %ps0 = inttoptr i64 %s to ptr
+    %ps = getelementptr i64, ptr %ps0, i64 %s0
     %b1 = sub i64 %bits, 1
     %one = shl i64 1, %b1
     %sc = sitofp i64 %one to double
-    store i64 0, ptr %i
-    br label %loop
-  loop:
-    %iv = load i64, ptr %i
-    %more = icmp slt i64 %iv, %n
-    br i1 %more, label %body, label %done
-  body:
-    %k = add i64 %s0, %iv
-    %sp = getelementptr i64, ptr %ps, i64 %k
-    %v = load i64, ptr %sp
-    %fv = sitofp i64 %v to double
-    %x = fdiv double %fv, %sc
-    %o = add i64 %f0, %iv
-    %dp = getelementptr double, ptr %pd, i64 %o
-    store double %x, ptr %dp
-    %i1 = add i64 %iv, 1
-    store i64 %i1, ptr %i
-    br label %loop
+    %inv = fdiv double 1.0, %sc
+    %vinv0 = insertelement <2 x double> poison, double %inv, i32 0
+    %vinv = shufflevector <2 x double> %vinv0, <2 x double> poison, <2 x i32> zeroinitializer
+    %n2 = and i64 %n, -2
+    %has2 = icmp sgt i64 %n2, 0
+    br i1 %has2, label %vloop, label %tail_chk
+  vloop:
+    %iv = phi i64 [ 0, %init ], [ %iv_next, %vloop ]
+    %sp = getelementptr i64, ptr %ps, i64 %iv
+    %vi = load <2 x i64>, ptr %sp, align 8
+    %vf = sitofp <2 x i64> %vi to <2 x double>
+    %vx = fmul <2 x double> %vf, %vinv
+    %dp = getelementptr double, ptr %pd, i64 %iv
+    store <2 x double> %vx, ptr %dp, align 8
+    %iv_next = add i64 %iv, 2
+    %vmore = icmp slt i64 %iv_next, %n2
+    br i1 %vmore, label %vloop, label %tail_chk
+  tail_chk:
+    %tmore0 = icmp slt i64 %n2, %n
+    br i1 %tmore0, label %tloop, label %done
+  tloop:
+    %it = phi i64 [ %n2, %tail_chk ], [ %it_next, %tloop ]
+    %tsp = getelementptr i64, ptr %ps, i64 %it
+    %tv = load i64, ptr %tsp, align 8
+    %tfv = sitofp i64 %tv to double
+    %tx = fmul double %tfv, %inv
+    %tdp = getelementptr double, ptr %pd, i64 %it
+    store double %tx, ptr %tdp, align 8
+    %it_next = add i64 %it, 1
+    %tmore = icmp slt i64 %it_next, %n
+    br i1 %tmore, label %tloop, label %done
   done:
     ret i64 %n
   IR
@@ -1190,7 +1276,7 @@ fn flac_crc(b, from, to, tab, wide) (u8[] i64 i64 i64[] i64) i64
   q = (pos + 7) / 8
   if q + 2 > nb
     return -7
-  if flac_crc(b, at, q, t16, 1) != b[q] * 256 + b[q + 1]
+  if t16.size > 0 && flac_crc(b, at, q, t16, 1) != b[q] * 256 + b[q + 1]
     return -6
   if cha >= 8
     flac_decorr(s, stride, bs, cha)

@@ -35,10 +35,95 @@
     Color.from([r, g, b])
 
   -> .rgb(r, g, b)
-    ccall("w_color_raw", r, g, b, 255)
+    ri = (ccall_nobox("w_numeric_to_i64", r) & 0xFF) ## i64
+    gi = (ccall_nobox("w_numeric_to_i64", g) & 0xFF) ## i64
+    bi = (ccall_nobox("w_numeric_to_i64", b) & 0xFF) ## i64
+    tag = -562949953421312 ## i64
+    wvalue_from_bits((tag | (ri << 36) | (gi << 28) | (bi << 20) | (255 << 12)) ## i64)
+
+  -> .rgba(r, g, b, a)
+    ri = (ccall_nobox("w_numeric_to_i64", r) & 0xFF) ## i64
+    gi = (ccall_nobox("w_numeric_to_i64", g) & 0xFF) ## i64
+    bi = (ccall_nobox("w_numeric_to_i64", b) & 0xFF) ## i64
+    ai = (ccall_nobox("w_numeric_to_i64", a) & 0xFF) ## i64
+    tag = -562949953421312 ## i64
+    wvalue_from_bits((tag | (ri << 36) | (gi << 28) | (bi << 20) | (ai << 12)) ## i64)
 
   -> .from(arr)
-    ccall("w_color_raw", arr[0], arr[1], arr[2], 255)
+    if arr.size() >= 4
+      return Color.rgba(arr[0], arr[1], arr[2], arr[3])
+    Color.rgb(arr[0], arr[1], arr[2])
+
+  -> .hex_nibble(b)
+    if b >= 48 && b <= 57
+      return b - 48
+    if b >= 65 && b <= 70
+      return b - 55
+    if b >= 97 && b <= 102
+      return b - 87
+    raise "invalid hex color digit"
+
+  -> .hex(s)
+    bs = s.bytes
+    off = 0
+    if bs.size() > 0 && bs[0] == 35
+      off = 1
+    n = bs.size() - off
+    if n == 3
+      r = Color.hex_nibble(bs[off]) * 17
+      g = Color.hex_nibble(bs[off + 1]) * 17
+      b = Color.hex_nibble(bs[off + 2]) * 17
+      return Color.rgb(r, g, b)
+    if n == 4
+      r = Color.hex_nibble(bs[off]) * 17
+      g = Color.hex_nibble(bs[off + 1]) * 17
+      b = Color.hex_nibble(bs[off + 2]) * 17
+      a = Color.hex_nibble(bs[off + 3]) * 17
+      return Color.rgba(r, g, b, a)
+    if n == 6
+      r = (Color.hex_nibble(bs[off]) << 4) | Color.hex_nibble(bs[off + 1])
+      g = (Color.hex_nibble(bs[off + 2]) << 4) | Color.hex_nibble(bs[off + 3])
+      b = (Color.hex_nibble(bs[off + 4]) << 4) | Color.hex_nibble(bs[off + 5])
+      return Color.rgb(r, g, b)
+    if n == 8
+      r = (Color.hex_nibble(bs[off]) << 4) | Color.hex_nibble(bs[off + 1])
+      g = (Color.hex_nibble(bs[off + 2]) << 4) | Color.hex_nibble(bs[off + 3])
+      b = (Color.hex_nibble(bs[off + 4]) << 4) | Color.hex_nibble(bs[off + 5])
+      a = (Color.hex_nibble(bs[off + 6]) << 4) | Color.hex_nibble(bs[off + 7])
+      return Color.rgba(r, g, b, a)
+    raise "invalid hex color length"
+
+  -> to_s
+    ccall("w_to_s", self)
+
+  -> inspect
+    self.to_s
+
+  # Color is a packed WValue (0xFFFE, subtype 0): SDR mode 0 stores 8-bit
+  # RGBA channels in bits 43..12; HDR mode 1 stores 10-bit channels in 43..4.
+  -> r
+    (($value & 1) == 0) ? (($value >> 36) & 0xFF) : (($value >> 34) & 0x3FF)
+
+  -> g
+    (($value & 1) == 0) ? (($value >> 28) & 0xFF) : (($value >> 24) & 0x3FF)
+
+  -> b
+    (($value & 1) == 0) ? (($value >> 20) & 0xFF) : (($value >> 14) & 0x3FF)
+
+  -> a
+    (($value & 1) == 0) ? (($value >> 12) & 0xFF) : (($value >> 4) & 0x3FF)
+
+  -> to_rgba_u32
+    bits = $value ## i64
+    if (bits & 1) == 0
+      return (((bits >> 12) & 0xFF) << 24) | (((bits >> 20) & 0xFF) << 16) | (((bits >> 28) & 0xFF) << 8) | ((bits >> 36) & 0xFF)
+    ((self.a & 0xFF) << 24) | ((self.b & 0xFF) << 16) | ((self.g & 0xFF) << 8) | (self.r & 0xFF)
+
+  -> to_bgra_u32
+    bits = $value ## i64
+    if (bits & 1) == 0
+      return (((bits >> 12) & 0xFF) << 24) | (((bits >> 36) & 0xFF) << 16) | (((bits >> 28) & 0xFF) << 8) | ((bits >> 20) & 0xFF)
+    ((self.a & 0xFF) << 24) | ((self.r & 0xFF) << 16) | ((self.g & 0xFF) << 8) | (self.b & 0xFF)
 
   -> .bg(r, g, b)
     "\e[48;2;[r];[g];[b]m \e[0m"

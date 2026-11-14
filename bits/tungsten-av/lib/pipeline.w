@@ -90,7 +90,9 @@ in Av
     File.mkdir_p(File.dirname(output))
     if !File.file?(output)
       @media.prepare_audio(audio_source, output, sample_rate: a["sample_rate"], channels: a["channels"])
-    opts["audio_src"] = snapshots.seal(output)["path"]
+    aud_sealed = snapshots.seal(output)
+    opts["audio_src"] = aud_sealed["path"]
+    aud_sealed["sha256"]
 
   -> delivery_context(name, path)
     pinned = File.realpath(path)
@@ -140,11 +142,13 @@ in Av
     source = nil
     source_audio = nil
     source_hash = nil
-    pending_verify = nil
+    pending_verifies = []
+    pre_quality = {}
     begin
       if plan["source"]
         sealed = snapshots.seal(plan["source"])
         source = sealed["path"]
+        source_hash = sealed["sha256"]
         records.push(sealed)
         other = plan["inputs"].select ->(path) path != plan["source"]
         frozen = snapshots.tree(other, project.root, project.workspace + "/trees")
@@ -217,22 +221,61 @@ in Av
         if type(origin) == "Array"
           opts["source_hash"] = current_hash if current_hash != nil
           opts["tc"] = p["timecode"] == nil ? false : p["timecode"]
-        prepared_audio(context, origin, p, opts, snapshots, current_mapping, current_audio)
+        prep_aud_hash = prepared_audio(context, origin, p, opts, snapshots, current_mapping, current_audio)
         directory = job + "/" + name
         File.mkdir_p(directory)
         destination = directory + "/output." + p["profile"]["format"]
         probe_only = quality_only && probe_targets.include?(name)
         if p["profile"]["quality"]["mode"] == "search" || probe_only
           raise "quality probes require H.264 or HEVC" if p["profile"]["video"]["codec"].starts_with?("prores")
-          choice = Quality.search(context, @media, origin, p, opts, directory + "/quality")
+          choice = nil
+          if pre_quality.has_key?(name)
+            q_th = pre_quality[name]
+            pre_quality.delete(name)
+            q_res = q_th.join
+            raise q_res[1] if q_res[0] == "err"
+            choice = q_res[1]
+          else
+            choice = Quality.search(context, @media, origin, p, opts, directory + "/quality")
           opts.delete("quality")
           opts["bitrate"] = choice["bitrate"]
           state["quality"][name] = choice
         if !probe_only
-          result = @media.request("transcode", origin, opts, directory, destination)
+          # Overlap child Quality.search on lossless ProRes parent's input while parent transcodes
+          if !quality_only && p["resources"]["jobs"] > 1 && p["profile"]["video"]["codec"].starts_with?("prores") && !p["profile"]["video"].has_key?("crop") && !p["profile"]["video"].has_key?("rect") && Util.get(p["profile"], "fit", "stretch") == "stretch" && !(p["profile"]["text"]["enabled"] && p["profile"]["text"]["burned"]) && p["start"] == 0
+            pj = pi + 1
+            while pj < profile_names.size
+              cname = profile_names[pj]
+              cp = plan["profiles"][cname]
+              if cp["profile"]["from"] == name && !cp["profile"]["timeline"] && cp["profile"]["quality"]["mode"] == "search" && !cp["profile"]["video"]["codec"].starts_with?("prores") && !(cp["profile"]["text"]["enabled"] && cp["profile"]["text"]["burned"]) && cp["frames"] <= p["frames"] && cp["rate"] == p["rate"] && !pre_quality.has_key?(cname)
+                cp_copy = Util.copy(cp)
+                cp_copy["resources"] = Budget.new(project.resources).choose(cp_copy["width"], cp_copy["height"])
+                Pipeline.freeze_profile(project, cp_copy, current_mapping)
+                q_opts = options(cp_copy, identity["sha256"])
+                q_dir = job + "/" + cname + "/quality"
+                q_ctx = context
+                q_origin = origin
+                q_pkg = @media.package
+                q_runner = @media.runner
+                q_th = Thread.new ->
+                  qr = nil
+                  begin
+                    qm = Media.new(q_ctx.toolchain, q_pkg, q_runner)
+                    qr = ["ok", Quality.search(q_ctx, qm, q_origin, cp_copy, q_opts, q_dir)]
+                  rescue qe
+                    qr = ["err", qe]
+                  qr
+                pre_quality[cname] = q_th
+              pj += 1
+          tx_extra = {"jobs": p["resources"]["jobs"]}
+          tx_extra["source_verified_hash"] = current_hash if type(origin) != "Array" && current_hash != nil
+          if opts["audio_src"] != nil
+            tx_extra["audio_verified_hash"] = prep_aud_hash != nil ? prep_aud_hash : Util.sha_cached(opts["audio_src"])
+          result = @media.request("transcode", origin, opts, directory, destination, tx_extra)
           p["timecode"] = result["tc_start"] if result["tc_start"]
           sealed = snapshots.seal(destination)
           sources[name] = sealed["path"]
+          source_hashes[name] = sealed["sha256"]
           references[name] = origin
           subtitles = project.associated("subtitles", name).map ->(i) Util.get(current_mapping, project.path(i["name"]), project.path(i["name"]))
           subtitles_by_name[name] = subtitles
@@ -250,10 +293,11 @@ in Av
             path = project.path(chapter["name"])
             file = Util.get(current_mapping, path, path)
             entries.push({"source": file, "destination": target.slice(0, target.size - File.extname(target).size) + ".chapters" + File.extname(file), "role": "chapters"})
-          if pending_verify != nil
-            pv_res = pending_verify[0].join
-            pv_info = pending_verify[1]
-            pending_verify = nil
+          if p["resources"]["jobs"] <= 1 && pending_verifies.size > 0
+            pv_item = pending_verifies[0]
+            pending_verifies = pending_verifies.slice(1, pending_verifies.size)
+            pv_res = pv_item[0].join
+            pv_info = pv_item[1]
             raise pv_res[1] if pv_res[0] == "err"
             pv_ver = pv_res[1]
             pv_sha = pv_ver["sha256"]
@@ -281,7 +325,7 @@ in Av
               rescue v_err
                 v_res = ["err", v_err]
               v_res
-            pending_verify = [v_thread, {"name": name, "destination": destination, "result": result, "origin": origin, "timeline": current_timeline, "settings": context.settings, "subtitles": subtitles, "entry": entry_record}]
+            pending_verifies.push([v_thread, {"name": name, "destination": destination, "result": result, "origin": origin, "timeline": current_timeline, "settings": context.settings, "subtitles": subtitles, "entry": entry_record}])
           else
             verification = verify(context, destination, p, checks_dir, origin, current_timeline, subtitles, sealed["sha256"])
             dest_sha = verification["sha256"]
@@ -290,17 +334,22 @@ in Av
             state["outputs"][name] = {"path": destination, "sha256": dest_sha, "result": result, "verification": verification, "reference": origin, "timeline": current_timeline, "project_settings": context.settings, "subtitle_paths": subtitles}
             Util.json(job + "/job.json", state)
         pi += 1
-      if pending_verify != nil
-        pv_res = pending_verify[0].join
-        pv_info = pending_verify[1]
-        pending_verify = nil
-        raise pv_res[1] if pv_res[0] == "err"
+      pvi = 0
+      while pvi < pending_verifies.size
+        pv_item = pending_verifies[pvi]
+        pv_res = pv_item[0].join
+        pv_info = pv_item[1]
+        if pv_res[0] == "err"
+          pending_verifies = pending_verifies.slice(pvi + 1, pending_verifies.size)
+          raise pv_res[1]
         pv_ver = pv_res[1]
         pv_sha = pv_ver["sha256"]
         pv_info["entry"]["verified_sha256"] = pv_sha
         pv_info["entry"]["verified_result"] = pv_ver
         state["outputs"][pv_info["name"]] = {"path": pv_info["destination"], "sha256": pv_sha, "result": pv_info["result"], "verification": pv_ver, "reference": pv_info["origin"], "timeline": pv_info["timeline"], "project_settings": pv_info["settings"], "subtitle_paths": pv_info["subtitles"]}
         Util.json(job + "/job.json", state)
+        pvi += 1
+      pending_verifies = []
       if !quality_only
         raise "toolchain changed during job" if Inputs.implementation(project.toolchain, @media.package, project.workspace)["sha256"] != identity["sha256"]
         raise "Bitfile changed during job" if Util.sha(project.file) != project.content_sha256
@@ -321,10 +370,13 @@ in Av
       Util.json(job + "/job.json", state)
       state
     rescue error
-      if pending_verify != nil
-        pv_res = pending_verify[0].join
-        pending_verify = nil
+      pre_quality.keys.each ->(qk)
+        pre_quality[qk].join
+      pre_quality = {}
+      pending_verifies.each ->(pv_item)
+        pv_res = pv_item[0].join
         error = pv_res[1] if pv_res[0] == "err"
+      pending_verifies = []
       state["status"] = "failed"
       state["finished"] = Util.now
       state["error"] = error.to_s

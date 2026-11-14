@@ -385,30 +385,45 @@
             ["tc", tc_frame], ["drop", drop], ["quanta", Timecode.quanta(rate)], ["chapters", chs],
             ["faststart", Transcode.opt(o, :faststart, true)], ["edit_lists", Transcode.opt(o, :edit_lists, true)], ["timeout_ms", Transcode.opt(o, :timeout_ms, 30000)],
             ["cancel_file", Transcode.opt(o, :cancel_file, nil)], ["decode_ahead", Transcode.opt(o, :decode_ahead, 6)],
-            ["segments_ahead", Transcode.opt(o, :segments_ahead, 3)], ["disk_reserve_bytes", Transcode.opt(o, :disk_reserve_bytes, 0)]]
+            ["segments_ahead", Transcode.opt(o, :segments_ahead, 3)], ["disk_reserve_bytes", Transcode.opt(o, :disk_reserve_bytes, 0)],
+            ["jobs", Transcode.opt(o, :jobs, 1)]]
     resume = Transcode.opt(o, :resume_dir, nil)
     if resume != nil
       inputs = []
+      src_vhash = Transcode.opt(o, :source_verified_hash, nil)
+      aud_vhash = Transcode.opt(o, :audio_verified_hash, nil)
       if movie
-        inputs << ccall("w_media_source_hash", src)
+        if src_vhash != nil
+          inputs << src_vhash.to_s
+        else
+          inputs << ccall("w_media_source_hash", src)
       else
         explicit_hash = Transcode.opt(o, :source_hash, nil)
         if explicit_hash != nil
           inputs << explicit_hash.to_s
+        elsif src_vhash != nil
+          inputs << src_vhash.to_s
         else
           src.each ->(s)
             inputs << ccall("w_media_source_hash", s)
-      audio_digest = audio_src == nil ? nil : ccall("w_media_source_hash", audio_src)
+      audio_digest = nil
+      if audio_src != nil
+        audio_digest = aud_vhash != nil ? aud_vhash.to_s : ccall("w_media_source_hash", audio_src)
       inputs << audio_digest if audio_digest != nil
       identity = []
       spec.each ->(pair)
-        if pair[0] != "dst" && pair[0] != "timeout_ms" && pair[0] != "cancel_file" && (movie || pair[0] != "src")
+        k0 = pair[0]
+        if k0 != "dst" && k0 != "timeout_ms" && k0 != "cancel_file" && k0 != "jobs" && (movie || k0 != "src")
           identity << pair
       # Bind checkpoints to the actual loaded binary, OS/encoder platform and caller implementation.
       implementation = [ccall("w_media_runtime_identity"), Transcode.opt(o, :implementation_id, nil)]
       key = Crypto.sha256(JSON.encode(["av-resume-v3", implementation, identity, inputs]))
-      spec << ["source_hash", inputs[0]] if movie
-      spec << ["audio_hash", audio_digest] if audio_digest != nil
+      if movie
+        spec << ["source_hash", inputs[0]]
+        spec << ["source_verified", true] if src_vhash != nil
+      if audio_digest != nil
+        spec << ["audio_hash", audio_digest]
+        spec << ["audio_verified", true] if aud_vhash != nil
       directory = File.expand_path(resume.to_s) + "/" + key
       Dir.mkdir_p(directory)
       spec << ["resume_dir", directory]

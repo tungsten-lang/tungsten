@@ -1233,7 +1233,7 @@
     true
 
   -> dispatch_bare_call(name, args, block, env)
-    if name == "ccall"
+    if name == "ccall" || name == "ccall_rawargs"
       return dispatch_interpreted_ccall(args)
     if name == "ccall_nobox"
       return dispatch_interpreted_ccall_nobox(args)
@@ -1311,6 +1311,13 @@
       # arm; native lowering is still an instruction-free identity.
       if ((bits >> 48) & 0xFFFF) == 0xFFFB
         return ccall("w_bigint_from_bits", bits)
+      # Decode packed Color (subtype 0, SDR mode 0) for Color.rgb / Color.rgba.
+      if ((bits >> 48) & 0xFFFF) == 0xFFFE && ((bits >> 45) & 0x7) == 0 && (bits & 1) == 0
+        return ccall_rawargs("w_color_raw",
+                             ((bits >> 36) & 0xFF) ## i64,
+                             ((bits >> 28) & 0xFF) ## i64,
+                             ((bits >> 20) & 0xFF) ## i64,
+                             ((bits >> 12) & 0xFF) ## i64)
       # Decode packed IPv4 through the existing interpreter ccall allowlist;
       # native code remains a zero-call i64 bit cast.
       if ((bits >> 48) & 0xFFFF) == 0xFFFE && ((bits >> 45) & 0x7) == 5

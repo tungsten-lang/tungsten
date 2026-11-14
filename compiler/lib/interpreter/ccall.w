@@ -785,6 +785,12 @@
     # runtime/runtime.h are listed here.
     when "w_array_new_aligned"
       return ccall("w_array_new_aligned", args[1], args[2])
+    when "w_array_new_uninit_sized"
+      if args.size() != 3
+        raise "w_array_new_uninit_sized expects ebits and length"
+      ebits = ccall_nobox("w_numeric_to_i64", args[1]) ## i64
+      length = ccall_nobox("w_numeric_to_i64", args[2]) ## i64
+      return ccall_rawargs("w_array_zeros", ebits, length)
     when "w_array_memmove_f64"
       return ccall("w_array_memmove_f64", args[1], args[2], args[3])
     when "w_tensor_zeros_f32"

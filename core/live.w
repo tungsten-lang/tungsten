@@ -67,3 +67,7 @@
 
 -> live_close(sampler)
   ccall("w_media_live_close", sampler)
+
+# write left/right f64[] PCM to a ".twpcm" stereo int32 cache file atomically
+-> live_pcm_write(path, rate, frames, left, right)
+  ccall("w_media_live_pcm_write", path, rate, frames, left, right)

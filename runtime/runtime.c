@@ -58530,6 +58530,8 @@ static int w_primitive_is_a_type_name(WValue recv, const char *tn, size_t tn_len
         if (w_type_name_eq_lit(tn, tn_len, "Char")) return w_char_is_ascii(recv);
         return 0;
     }
+    if (w_is_color(recv))
+        return w_type_name_eq_lit(tn, tn_len, "Color");
     if (w_is_ipv4(recv))
         return w_type_name_eq_lit(tn, tn_len, "IPv4");
     if (w_is_ipv6(recv))
@@ -83622,6 +83624,23 @@ W_BRIDGE_STUB WValue w_gfx_prompt_answer(WValue window, WValue button, WValue te
 W_BRIDGE_STUB WValue w_gfx_post_event(WValue window, WValue kind, WValue x, WValue y,
                                        WValue a, WValue b, WValue mods, WValue text) {
     (void)window; (void)kind; (void)x; (void)y; (void)a; (void)b; (void)mods; (void)text;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_tex_new(WValue window, WValue width, WValue height, WValue bgra) {
+    (void)window; (void)width; (void)height; (void)bgra;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_tex_upload(WValue window, WValue tex_id, WValue src, WValue stride,
+                                       WValue x, WValue y, WValue w, WValue h) {
+    (void)window; (void)tex_id; (void)src; (void)stride; (void)x; (void)y; (void)w; (void)h;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_tex_free(WValue window, WValue tex_id) {
+    (void)window; (void)tex_id;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_present_layers(WValue window, WValue bg, WValue cmds, WValue n_cmds, WValue wait_flag) {
+    (void)window; (void)bg; (void)cmds; (void)n_cmds; (void)wait_flag;
     return w_gfx_unavailable();
 }
 /* end windowed graphics bridge stubs (weak) */

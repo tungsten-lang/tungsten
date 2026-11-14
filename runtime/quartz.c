@@ -226,13 +226,29 @@ static CGColorSpaceRef cg_srgb(void) {
 #define CG_MAX_CANVASES 4096
 #define CG_MAX_DEPTH    256
 #define CG_GRAD_CACHE   32
-#define CG_LINE_CACHE   128
+#define CG_LINE_SETS    256
+#define CG_LINE_WAYS    4
+#define CG_LINE_CACHE   (CG_LINE_SETS * CG_LINE_WAYS)
 
 typedef struct {
     double alpha;       /* global alpha (CGContextSetAlpha has no getter) */
     double line_width;  /* for layer bounds of stroked shapes */
     double miter;
+    int    has_fill_cache;
+    int    has_stroke_cache;
+    int    is_solid_butt;
+    double fill[4];
+    double stroke[4];
 } CGStateEntry;
+
+typedef struct {
+    CTFontRef font;
+    uint32_t  stamp;
+    uint8_t   ascii_ok;
+    uint8_t   smufl_ok;
+    CGGlyph   ascii[256];
+    CGGlyph  *smufl;    /* lazy 0x1800 slots for U+E000..U+F7FF */
+} CGGlyphMap;
 
 typedef struct {
     uint64_t        hash;
@@ -243,17 +259,20 @@ typedef struct {
 
 typedef struct {
     uint64_t        hash;
+    uint32_t        stamp;
+    uint8_t         has_ink;
     CTFontRef       font;     /* retained: pins the pointer used as key */
     double          spacing;
     char           *text;
     size_t          len;
     CTLineRef       line;
     double          width, ascent, descent, leading;
-    CGRect          ink;      /* glyph-path bounds, y up, relative to origin */
+    CGRect          ink;      /* glyph-path bounds, y up, relative to origin (lazy) */
 } CGLineEntry;
 
 typedef struct CGCanvas {
     uint32_t          gen;
+    uint32_t          line_clock;
     CGContextRef      ctx;
     CGColorSpaceRef   space;        /* canvas space (retained) */
     CGColorSpaceRef   color_space;  /* space input colours are in (retained) */
@@ -275,6 +294,7 @@ typedef struct CGCanvas {
     double            spacing;
     CGGradEntry       grads[CG_GRAD_CACHE];
     CGLineEntry       lines[CG_LINE_CACHE];
+    CGGlyphMap        gmaps[4];
 } CGCanvas;
 
 static CGCanvas *g_canvases[CG_MAX_CANVASES];
@@ -316,6 +336,10 @@ static void cg_line_entry_clear(CGLineEntry *e) {
 }
 
 static void cg_canvas_free(CGCanvas *c) {
+    for (int i = 0; i < 4; i++) {
+        if (c->gmaps[i].font) CFRelease(c->gmaps[i].font);
+        free(c->gmaps[i].smufl);
+    }
     for (int i = 0; i < CG_LINE_CACHE; i++) cg_line_entry_clear(&c->lines[i]);
     cg_grad_cache_clear(c);
     if (c->font) CFRelease(c->font);
@@ -347,6 +371,11 @@ static void cg_apply_defaults(CGCanvas *c) {
     const CGFloat black[4] = {0, 0, 0, 1};
     CGContextSetFillColor(ctx, black);
     CGContextSetStrokeColor(ctx, black);
+    c->st[0].has_fill_cache = 1;
+    c->st[0].has_stroke_cache = 1;
+    c->st[0].is_solid_butt = 1;
+    c->st[0].fill[0] = 0; c->st[0].fill[1] = 0; c->st[0].fill[2] = 0; c->st[0].fill[3] = 1;
+    c->st[0].stroke[0] = 0; c->st[0].stroke[1] = 0; c->st[0].stroke[2] = 0; c->st[0].stroke[3] = 1;
 }
 
 /* w_cg_canvas_new(width, height, scale, space, depth, manage) -> handle */
@@ -606,6 +635,11 @@ WValue w_cg_reset(WValue hv) {
     c->st[0].alpha = 1.0;
     c->st[0].line_width = 1.0;
     c->st[0].miter = 4.0;
+    c->st[0].has_fill_cache = 1;
+    c->st[0].has_stroke_cache = 1;
+    c->st[0].is_solid_butt = 1;
+    c->st[0].fill[0] = 0; c->st[0].fill[1] = 0; c->st[0].fill[2] = 0; c->st[0].fill[3] = 1;
+    c->st[0].stroke[0] = 0; c->st[0].stroke[1] = 0; c->st[0].stroke[2] = 0; c->st[0].stroke[3] = 1;
     CGPathRelease(c->path);
     c->path = CGPathCreateMutable();
     return W_NIL;
@@ -1279,15 +1313,29 @@ static int cg_color(WValue v, double out[4], const char *what) {
 }
 
 static void cg_set_fill(CGCanvas *c, const double rgba[4]) {
+    CGStateEntry *st = cg_state(c);
+    if (st->has_fill_cache &&
+        st->fill[0] == rgba[0] && st->fill[1] == rgba[1] &&
+        st->fill[2] == rgba[2] && st->fill[3] == rgba[3]) {
+        return;
+    }
     const CGFloat comps[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
-    CGContextSetFillColorSpace(c->ctx, c->color_space);
     CGContextSetFillColor(c->ctx, comps);
+    memcpy(st->fill, rgba, sizeof st->fill);
+    st->has_fill_cache = 1;
 }
 
 static void cg_set_stroke(CGCanvas *c, const double rgba[4]) {
+    CGStateEntry *st = cg_state(c);
+    if (st->has_stroke_cache &&
+        st->stroke[0] == rgba[0] && st->stroke[1] == rgba[1] &&
+        st->stroke[2] == rgba[2] && st->stroke[3] == rgba[3]) {
+        return;
+    }
     const CGFloat comps[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
-    CGContextSetStrokeColorSpace(c->ctx, c->color_space);
     CGContextSetStrokeColor(c->ctx, comps);
+    memcpy(st->stroke, rgba, sizeof st->stroke);
+    st->has_stroke_cache = 1;
 }
 
 /* ======================================================================
@@ -1363,6 +1411,7 @@ WValue w_cg_set_line(WValue hv, WValue wv, WValue capv, WValue joinv, WValue mit
     CGContextSetLineDash(c->ctx, off, nd ? dash : NULL, (size_t)nd);
     cg_state(c)->line_width = w;
     cg_state(c)->miter = miter;
+    cg_state(c)->is_solid_butt = (lc == kCGLineCapButt && nd == 0);
     return W_NIL;
 }
 
@@ -1387,6 +1436,8 @@ static void cg_layer_begin_rect(CGCanvas *c, double opacity, CGRect rect, int wh
     else CGContextBeginTransparencyLayerWithRect(c->ctx, rect, NULL);
     /* Inside a layer CG resets alpha to 1 and blend to normal. */
     cg_state(c)->alpha = 1.0;
+    cg_state(c)->has_fill_cache = 0;
+    cg_state(c)->has_stroke_cache = 0;
 }
 
 static void cg_layer_end(CGCanvas *c) {
@@ -1844,7 +1895,15 @@ WValue w_cg_text_style(WValue hv, WValue famv, WValue sizev, WValue weightv, WVa
 }
 
 /* A laid-out line for text in the canvas's current font, cached per canvas
- * (videos draw the same strings frame after frame). */
+ * in a 1,024-slot 4-way set-associative cache with lazy ink-bounds computation. */
+static CGRect cg_line_ink(CGLineEntry *e) {
+    if (!e->has_ink) {
+        e->ink = CTLineGetBoundsWithOptions(e->line, kCTLineBoundsUseGlyphPathBounds);
+        e->has_ink = 1;
+    }
+    return e->ink;
+}
+
 static CGLineEntry *cg_line(CGCanvas *c, WValue sv, const char *fn) {
     char sso[6];
     const char *s;
@@ -1853,10 +1912,22 @@ static CGLineEntry *cg_line(CGCanvas *c, WValue sv, const char *fn) {
     uint64_t h = cg_fnv(s, n, 14695981039346656037ULL);
     h = cg_fnv(&c->font, sizeof c->font, h);
     h = cg_fnv(&c->spacing, sizeof c->spacing, h);
-    CGLineEntry *e = &c->lines[h % CG_LINE_CACHE];
-    if (e->line && e->hash == h && e->font == c->font && e->spacing == c->spacing && e->len == n &&
-        memcmp(e->text, s, n) == 0)
-        return e;
+    CGLineEntry *set = &c->lines[(h % CG_LINE_SETS) * CG_LINE_WAYS];
+    CGLineEntry *victim = &set[0];
+    for (int w = 0; w < CG_LINE_WAYS; w++) {
+        CGLineEntry *cand = &set[w];
+        if (cand->line && cand->hash == h && cand->font == c->font &&
+            cand->spacing == c->spacing && cand->len == n && memcmp(cand->text, s, n) == 0) {
+            cand->stamp = ++c->line_clock;
+            return cand;
+        }
+        if (!cand->line) {
+            victim = cand;
+            break;
+        }
+        if (cand->stamp < victim->stamp) victim = cand;
+    }
+    CGLineEntry *e = victim;
     cg_line_entry_clear(e);
     CFStringRef str = cg_cfstring(s, n);
     CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(NULL, 3, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -1875,6 +1946,8 @@ static CGLineEntry *cg_line(CGCanvas *c, WValue sv, const char *fn) {
     CFRelease(str);
     if (!line) cg_raise("Canvas.%s: CoreText could not lay out the text", fn);
     e->hash = h;
+    e->stamp = ++c->line_clock;
+    e->has_ink = 0;
     e->font = (CTFontRef)CFRetain(c->font);
     e->spacing = c->spacing;
     e->text = malloc(n ? n : 1);
@@ -1886,7 +1959,6 @@ static CGLineEntry *cg_line(CGCanvas *c, WValue sv, const char *fn) {
     e->ascent = asc;
     e->descent = desc;
     e->leading = lead;
-    e->ink = CTLineGetBoundsWithOptions(line, kCTLineBoundsUseGlyphPathBounds);
     return e;
 }
 
@@ -1939,15 +2011,15 @@ WValue w_cg_text(WValue hv, WValue xv, WValue yv, WValue sv, WValue anchorv, WVa
     if (op <= 0 || (!has_fill && !has_stroke) || e->len == 0) return w_float(e->width);
     int group = has_fill && has_stroke && op < 1;
     if (group) {
+        CGRect ink = cg_line_ink(e);
         double m = cg_state(c)->line_width * fmax(1.0, cg_state(c)->miter) + 2;
-        CGRect r = CGRectMake(x + e->ink.origin.x - m, y - (e->ink.origin.y + e->ink.size.height) - m,
-                              e->ink.size.width + 2 * m, e->ink.size.height + 2 * m);
+        CGRect r = CGRectMake(x + ink.origin.x - m, y - (ink.origin.y + ink.size.height) - m,
+                              ink.size.width + 2 * m, ink.size.height + 2 * m);
         cg_layer_begin_rect(c, op, r, 0);
     } else {
         fc[3] *= op;
         sc[3] *= op;
     }
-    CGContextSaveGState(c->ctx);
     if (has_stroke) {
         cg_set_stroke(c, sc);
         cg_draw_line_at(c, e, x, y, kCGTextStroke);
@@ -1955,8 +2027,9 @@ WValue w_cg_text(WValue hv, WValue xv, WValue yv, WValue sv, WValue anchorv, WVa
     if (has_fill) {
         cg_set_fill(c, fc);
         cg_draw_line_at(c, e, x, y, kCGTextFill);
+    } else {
+        CGContextSetTextDrawingMode(c->ctx, kCGTextFill);
     }
-    CGContextRestoreGState(c->ctx);
     if (group) cg_layer_end(c);
     return w_float(e->width);
 }
@@ -1983,10 +2056,11 @@ WValue w_cg_text_clip(WValue hv, WValue xv, WValue yv, WValue sv, WValue anchorv
 WValue w_cg_text_measure(WValue hv, WValue sv) {
     CGCanvas *c = cg_canvas(hv, "measure_text");
     CGLineEntry *e = cg_line(c, sv, "measure_text");
+    CGRect ink = cg_line_ink(e);
     double v[8] = {e->width, e->ascent, e->descent, e->leading,
-                   e->ink.origin.x, -(e->ink.origin.y + e->ink.size.height),
-                   e->ink.origin.x + e->ink.size.width, -e->ink.origin.y};
-    if (CGRectIsNull(e->ink) || CGRectIsEmpty(e->ink)) v[4] = v[5] = v[6] = v[7] = 0;
+                   ink.origin.x, -(ink.origin.y + ink.size.height),
+                   ink.origin.x + ink.size.width, -ink.origin.y};
+    if (CGRectIsNull(ink) || CGRectIsEmpty(ink)) v[4] = v[5] = v[6] = v[7] = 0;
     return cg_float_array(v, 8);
 }
 
@@ -3308,6 +3382,320 @@ WValue w_cg_encode(WValue hv, WValue typev, WValue qv, WValue alphav) {
     WValue out = w_bytes_from_data(CFDataGetBytePtr(data), (int64_t)CFDataGetLength(data));
     CFRelease(data);
     return out;
+}
+
+/* ---- Batch primitives & direct pixel/font helpers ---------------------- */
+
+typedef struct CGRegFont {
+    struct CGRegFont *next;
+    char             *path;
+} CGRegFont;
+
+static CGRegFont *g_reg_fonts;
+
+/* w_cg_register_font(path): process-scoped CTFontManager registration with
+ * path deduplication so custom score/UI fonts (e.g. Bravura.otf) resolve by
+ * family name in Canvas#text and Canvas#glyphs. */
+WValue w_cg_register_font(WValue pathv) {
+    char path[4096];
+    if (!cg_str(pathv, path, sizeof path) || path[0] == 0)
+        cg_raise("Canvas.register_font: path must be a non-empty String");
+    pthread_mutex_lock(&g_font_lock);
+    for (CGRegFont *r = g_reg_fonts; r; r = r->next) {
+        if (strcmp(r->path, path) == 0) {
+            pthread_mutex_unlock(&g_font_lock);
+            return W_TRUE;
+        }
+    }
+    pthread_mutex_unlock(&g_font_lock);
+
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)strlen(path), false);
+    if (!url) return W_FALSE;
+    CFErrorRef err = NULL;
+    bool ok = CTFontManagerRegisterFontsForURL(url, kCTFontManagerScopeProcess, &err);
+    if (!ok && err) {
+        CFIndex code = CFErrorGetCode(err);
+        if (code == kCTFontManagerErrorAlreadyRegistered) ok = true;
+    }
+    if (err) CFRelease(err);
+    CFRelease(url);
+    if (!ok) return W_FALSE;
+
+    pthread_mutex_lock(&g_font_lock);
+    int seen = 0;
+    for (CGRegFont *r = g_reg_fonts; r; r = r->next) {
+        if (strcmp(r->path, path) == 0) { seen = 1; break; }
+    }
+    if (!seen) {
+        CGRegFont *r = calloc(1, sizeof *r);
+        if (r) {
+            r->path = strdup(path);
+            r->next = g_reg_fonts;
+            g_reg_fonts = r;
+        }
+        /* Flush cached lookups so any earlier fallback for this family resolves
+         * to the newly registered font; live canvases hold their own retains. */
+        for (int i = 0; i < CG_FONT_BUCKETS; i++) {
+            CGFontEntry *e = g_fonts[i];
+            while (e) { CGFontEntry *nx = e->next; CFRelease(e->font); free(e->key); free(e); e = nx; }
+            g_fonts[i] = NULL;
+        }
+        g_font_count = 0;
+    }
+    pthread_mutex_unlock(&g_font_lock);
+    return W_TRUE;
+}
+
+/* w_cg_segments(h, coords, count, stroke, width): stroke `count` independent
+ * line segments from `coords` ([x1, y1, x2, y2, ...] as f64[] or Array) in one
+ * CGContextStrokeLineSegments call. */
+WValue w_cg_segments(WValue hv, WValue coordsv, WValue countv, WValue strokev, WValue widthv) {
+    _Static_assert(sizeof(CGPoint) == 2 * sizeof(double), "CGPoint must be 2 doubles");
+    CGCanvas *c = cg_canvas(hv, "segments");
+    int64_t count = countv == W_NIL ? -1 : (int64_t)cg_num(countv, "count");
+    if (!w_is_array(coordsv)) cg_raise("Canvas.segments: coords must be an Array or f64[]");
+    WArray *a = w_as_array(coordsv);
+    int64_t avail = (int64_t)a->size / 4;
+    if (count < 0 || count > avail) count = avail;
+    if (count <= 0) return W_FALSE;
+
+    double sc[4];
+    if (!cg_color(strokev, sc, "stroke") || sc[3] <= 0) return W_FALSE;
+    double w = widthv == W_NIL ? cg_state(c)->line_width : cg_num(widthv, "width");
+    if (w <= 0) return W_FALSE;
+
+    CGStateEntry *st = cg_state(c);
+    if (!st->is_solid_butt) {
+        CGContextSetLineCap(c->ctx, kCGLineCapButt);
+        CGContextSetLineDash(c->ctx, 0, NULL, 0);
+        st->is_solid_butt = 1;
+    }
+    if (w != st->line_width) {
+        CGContextSetLineWidth(c->ctx, w);
+        st->line_width = w;
+    }
+    cg_set_stroke(c, sc);
+
+    if (a->ebits == -64) {
+        const CGPoint *pts = (const CGPoint *)((const double *)a->slots + a->start);
+        CGContextStrokeLineSegments(c->ctx, pts, (size_t)(2 * count));
+        return W_TRUE;
+    }
+    CGPoint stack_pts[256];
+    CGPoint *pts = count <= 128 ? stack_pts : (CGPoint *)malloc((size_t)(2 * count) * sizeof(CGPoint));
+    if (!pts) cg_raise("Canvas.segments: out of memory");
+    for (int64_t i = 0; i < 2 * count; i++) {
+        pts[i].x = cg_num(cg_array_at(coordsv, 2 * i), "x");
+        pts[i].y = cg_num(cg_array_at(coordsv, 2 * i + 1), "y");
+    }
+    CGContextStrokeLineSegments(c->ctx, pts, (size_t)(2 * count));
+    if (pts != stack_pts) free(pts);
+    return W_TRUE;
+}
+
+static CGGlyphMap *cg_glyph_map_for(CGCanvas *c, CTFontRef font) {
+    CGGlyphMap *victim = &c->gmaps[0];
+    for (int i = 0; i < 4; i++) {
+        CGGlyphMap *gm = &c->gmaps[i];
+        if (gm->font == font) {
+            gm->stamp = ++c->line_clock;
+            return gm;
+        }
+        if (!gm->font) { victim = gm; break; }
+        if (gm->stamp < victim->stamp) victim = gm;
+    }
+    if (victim->font) CFRelease(victim->font);
+    free(victim->smufl);
+    memset(victim, 0, sizeof *victim);
+    victim->font = (CTFontRef)CFRetain(font);
+    victim->stamp = ++c->line_clock;
+    return victim;
+}
+
+static CGGlyph cg_map_codepoint(CGGlyphMap *gm, uint32_t cp) {
+    if (cp < 256) {
+        if (!gm->ascii_ok) {
+            UniChar uc[256];
+            for (int i = 0; i < 256; i++) uc[i] = (UniChar)i;
+            CTFontGetGlyphsForCharacters(gm->font, uc, gm->ascii, 256);
+            gm->ascii_ok = 1;
+        }
+        return gm->ascii[cp];
+    }
+    if (cp >= 0xE000 && cp < 0xF800) {
+        if (!gm->smufl_ok) {
+            gm->smufl = calloc(0x1800, sizeof(CGGlyph));
+            if (gm->smufl) {
+                UniChar *uc = malloc(0x1800 * sizeof(UniChar));
+                if (uc) {
+                    for (int i = 0; i < 0x1800; i++) uc[i] = (UniChar)(0xE000 + i);
+                    CTFontGetGlyphsForCharacters(gm->font, uc, gm->smufl, 0x1800);
+                    free(uc);
+                }
+            }
+            gm->smufl_ok = 1;
+        }
+        return gm->smufl ? gm->smufl[cp - 0xE000] : 0;
+    }
+    if (cp <= 0xFFFF) {
+        UniChar u = (UniChar)cp;
+        CGGlyph g = 0;
+        CTFontGetGlyphsForCharacters(gm->font, &u, &g, 1);
+        return g;
+    }
+    if (cp <= 0x10FFFF) {
+        uint32_t v = cp - 0x10000;
+        UniChar u[2] = { (UniChar)(0xD800 | (v >> 10)), (UniChar)(0xDC00 | (v & 0x3FF)) };
+        CGGlyph g[2] = {0, 0};
+        CTFontGetGlyphsForCharacters(gm->font, u, g, 2);
+        return g[0];
+    }
+    return 0;
+}
+
+/* w_cg_glyphs(h, cps, xy, count, family, size, fill): draw `count` positioned
+ * Unicode codepoints directly via CTFontDrawGlyphs with cached ASCII + SMuFL
+ * (U+E000..U+F7FF) CGGlyph tables, bypassing string allocation and shaping. */
+WValue w_cg_glyphs(WValue hv, WValue cpsv, WValue xyv, WValue countv, WValue famv, WValue sizev, WValue fillv) {
+    CGCanvas *c = cg_canvas(hv, "glyphs");
+    if (!w_is_array(cpsv) || !w_is_array(xyv))
+        cg_raise("Canvas.glyphs: cps and xy must be Arrays");
+    WArray *ca = w_as_array(cpsv);
+    WArray *xa = w_as_array(xyv);
+    int64_t count = countv == W_NIL ? (int64_t)ca->size : (int64_t)cg_num(countv, "count");
+    if (count > (int64_t)ca->size) count = (int64_t)ca->size;
+    if (count > (int64_t)xa->size / 2) count = (int64_t)xa->size / 2;
+    if (count <= 0) return W_FALSE;
+
+    double fc[4];
+    if (!cg_color(fillv, fc, "fill") || fc[3] <= 0) return W_FALSE;
+
+    CTFontRef font = NULL;
+    int release_font = 0;
+    if (famv == W_NIL && sizev == W_NIL) {
+        font = c->font;
+    } else {
+        char sso[6];
+        const char *fs = "Bravura";
+        size_t fn = 7;
+        if (famv != W_NIL && !cg_str_view(famv, sso, &fs, &fn))
+            cg_raise("Canvas.glyphs: family must be a String");
+        double sz = cg_num_or(sizev, c->font_size, "size");
+        if (!(sz > 0)) cg_raise("Canvas.glyphs: size must be positive");
+        font = cg_font_lookup(fs, fn, 400, 0, sz);
+        release_font = 1;
+    }
+
+    CGGlyphMap *gm = cg_glyph_map_for(c, font);
+    CGGlyph stack_g[256];
+    CGPoint stack_p[256];
+    CGGlyph *glyphs = count <= 256 ? stack_g : (CGGlyph *)malloc((size_t)count * sizeof(CGGlyph));
+    CGPoint *pts    = count <= 256 ? stack_p : (CGPoint *)malloc((size_t)count * sizeof(CGPoint));
+    if (!glyphs || !pts) {
+        if (glyphs != stack_g) free(glyphs);
+        if (pts != stack_p) free(pts);
+        if (release_font) CFRelease(font);
+        cg_raise("Canvas.glyphs: out of memory");
+    }
+
+    const int64_t *cp_i64 = (ca->ebits == 66 || ca->ebits == 64) ? ((const int64_t *)ca->slots + ca->start) : NULL;
+    const int32_t *cp_i32 = (ca->ebits == 33 || ca->ebits == 32) ? ((const int32_t *)ca->slots + ca->start) : NULL;
+    const double  *xy_f64 = (xa->ebits == -64) ? ((const double *)xa->slots + xa->start) : NULL;
+
+    int64_t out_n = 0;
+    for (int64_t i = 0; i < count; i++) {
+        uint32_t cp;
+        if (cp_i64) cp = (uint32_t)cp_i64[i];
+        else if (cp_i32) cp = (uint32_t)cp_i32[i];
+        else cp = (uint32_t)cg_num(cg_array_at(cpsv, i), "codepoint");
+        CGGlyph g = cg_map_codepoint(gm, cp);
+        if (g == 0) continue;
+        double ux = xy_f64 ? xy_f64[2 * i]     : cg_num(cg_array_at(xyv, 2 * i), "x");
+        double uy = xy_f64 ? xy_f64[2 * i + 1] : cg_num(cg_array_at(xyv, 2 * i + 1), "y");
+        glyphs[out_n] = g;
+        pts[out_n] = CGPointMake(ux, -uy);
+        out_n++;
+    }
+
+    if (out_n > 0) {
+        cg_set_fill(c, fc);
+        CGContextSetTextDrawingMode(c->ctx, kCGTextFill);
+        CGContextSetTextMatrix(c->ctx, CGAffineTransformMakeScale(1.0, -1.0));
+        CTFontDrawGlyphs(font, glyphs, pts, (size_t)out_n, c->ctx);
+    }
+
+    if (glyphs != stack_g) free(glyphs);
+    if (pts != stack_p) free(pts);
+    if (release_font) CFRelease(font);
+    return out_n > 0 ? W_TRUE : W_FALSE;
+}
+
+/* w_cg_write_pixels(buf, w, h, stride, path, bgra, quality): write a raw 8-bit
+ * RGBA or BGRA pixel buffer (either a pointer Integer or a ByteArray/u32[])
+ * directly via ImageIO without allocating a Canvas or copying rows. Passing
+ * quality in [0, 0.5) writes PNG with IMAGEIO_PNG_NO_FILTERS. */
+WValue w_cg_write_pixels(WValue bufv, WValue wv, WValue hv, WValue stridev, WValue pathv, WValue bgrav, WValue qv) {
+    int64_t w = (int64_t)cg_num(wv, "width");
+    int64_t h = (int64_t)cg_num(hv, "height");
+    if (w <= 0 || h <= 0) cg_raise("Canvas.write_pixels: width and height must be positive");
+    int64_t stride = stridev == W_NIL ? w * 4 : (int64_t)cg_num(stridev, "stride");
+    if (stride < w * 4) cg_raise("Canvas.write_pixels: stride (%lld) < width * 4 (%lld)", (long long)stride, (long long)(w * 4));
+
+    const void *ptr = NULL;
+    size_t min_bytes = (size_t)(h - 1) * (size_t)stride + (size_t)w * 4;
+    if (w_is_int(bufv)) {
+        ptr = (const void *)(uintptr_t)w_as_int(bufv);
+        if (!ptr) cg_raise("Canvas.write_pixels: null data pointer");
+    } else if (w_is_array(bufv)) {
+        WArray *a = w_as_array(bufv);
+        size_t elem = a->ebits == 8 ? 1 : ((a->ebits == 32 || a->ebits == 33) ? 4 : 0);
+        if (elem == 0) cg_raise("Canvas.write_pixels: buffer array must be ByteArray (u8[]) or u32[]/i32[]");
+        size_t have = (size_t)a->size * elem;
+        if (have < min_bytes) cg_raise("Canvas.write_pixels: buffer has %zu bytes, need %zu", have, min_bytes);
+        ptr = (const uint8_t *)a->slots + (size_t)a->start * elem;
+    } else {
+        cg_raise("Canvas.write_pixels: buffer must be a ByteArray or data pointer Integer");
+    }
+
+    char path[4096];
+    if (!cg_str(pathv, path, sizeof path) || path[0] == 0)
+        cg_raise("Canvas.write_pixels: path must be a non-empty String");
+    const char *ext = strrchr(path, '.');
+    const char *type = "png";
+    if (ext) {
+        if (cg_eq(ext, ".jpg") || cg_eq(ext, ".jpeg")) type = "jpeg";
+        else if (cg_eq(ext, ".tif") || cg_eq(ext, ".tiff")) type = "tiff";
+        else if (cg_eq(ext, ".heic")) type = "heic";
+    }
+    CFStringRef uti = cg_uti(type);
+    double q = cg_num_or(qv, -1.0, "quality");
+    int bgra = cg_truthy(bgrav);
+    CGBitmapInfo info = bgra
+        ? ((CGBitmapInfo)kCGBitmapByteOrder32Little | (CGBitmapInfo)kCGImageAlphaPremultipliedFirst)
+        : ((CGBitmapInfo)kCGBitmapByteOrder32Big    | (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+
+    CGDataProviderRef prov = CGDataProviderCreateWithData(NULL, ptr, (size_t)h * (size_t)stride, NULL);
+    if (!prov) cg_raise("Canvas.write_pixels: CGDataProviderCreateWithData failed");
+    CGImageRef img = CGImageCreate((size_t)w, (size_t)h, 8, 32, (size_t)stride, cg_srgb(), info,
+                                   prov, NULL, false, kCGRenderingIntentDefault);
+    CGDataProviderRelease(prov);
+    if (!img) cg_raise("Canvas.write_pixels: CGImageCreate failed");
+
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)strlen(path), false);
+    CGImageDestinationRef dest = url ? CGImageDestinationCreateWithURL(url, uti, 1, NULL) : NULL;
+    if (url) CFRelease(url);
+    if (!dest) {
+        CGImageRelease(img);
+        cg_raise("Canvas.write_pixels: cannot create %s", path);
+    }
+    CFDictionaryRef props = cg_dest_props(type, q);
+    CGImageDestinationAddImage(dest, img, props);
+    bool ok = CGImageDestinationFinalize(dest);
+    if (props) CFRelease(props);
+    CGImageRelease(img);
+    CFRelease(dest);
+    if (!ok) cg_raise("Canvas.write_pixels: ImageIO failed to write %s", path);
+    return W_TRUE;
 }
 
 /* ---- C API ------------------------------------------------------------- */

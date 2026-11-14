@@ -228,11 +228,6 @@ in Av
     kernel = gaussian_kernel()
     npix = width * height
     dummy_buf = f64[1]
-    err_buf = f64[npix]
-    src_err_buf = f64[npix]
-    next_err_buf = f64[npix]
-    delta_buf = f64[npix]
-    valid_buf = u8[npix]
     rectangles = Util.get(spec, "exclude", []).dup
     Util.get(spec, "exclude_normalized", []).each ->(r)
       rectangles.push([Math.round(r[0] * width).to_i, Math.round(r[1] * height).to_i, Math.round(r[2] * width).to_i, Math.round(r[3] * height).to_i])
@@ -253,13 +248,12 @@ in Av
       while fi < unique_frames.size
         decoded_by_frame[unique_frames[fi]] = extracted[fi]
         fi += 1
-    mask_cache = {}
-    src_orig_cache = {}
-    rows = []
     visuals = directory + "/banding"
     File.mkdir_p(visuals)
-    sheet = Canvas.new(960, 264 * samples.size)
-    sheet.clear("#171b22")
+    sample_infos = []
+    mask_jobs = []
+    mask_seen = {}
+    orig_needed = {}
     samples.each ->(sample)
       source = project.path(sample["source"])
       references[source] = Util.sha(source) if !references.has_key?(source)
@@ -272,20 +266,12 @@ in Av
         raise "invalid banding exclusion rectangle" if type(r) != "Array" || r.size != 4 || r[2] <= 0 || r[3] <= 0
       ex_json = JSON.encode(exclusions)
       mkey = source + "|" + ex_json
-      mask = mask_cache[mkey]
-      if mask == nil
-        mask = Banding.mask(src, bg, width, height, exclusions)
-        mask_cache[mkey] = mask
-      decoded = decoded_by_frame[sample["frame"]]
-      error = residual_with_ideal(decoded, ideal, dummy_buf, dummy_buf, err_buf, kernel, width, height, 16)
-      row = metrics_into(error, mask, dummy_buf, width, height)
-      original = src_orig_cache[mkey]
-      if original == nil
-        src_err = residual_with_ideal(src, ideal, dummy_buf, dummy_buf, src_err_buf, kernel, width, height, 8)
-        original = metrics_into(src_err, mask, dummy_buf, width, height)
-        src_orig_cache[mkey] = original
-      row["rms_8bit_source"] = original["rms"]
-      row["rms_detrended_8bit_source"] = original["rms_detrended"]
+      orig_needed[mkey] = true
+      if !mask_seen.has_key?(mkey)
+        mask_seen[mkey] = true
+        mask_jobs.push([mkey, src, exclusions])
+      next_src = nil
+      nmkey = nil
       if sample["next_source"]
         next_source = project.path(sample["next_source"])
         references[next_source] = Util.sha(next_source) if !references.has_key?(next_source)
@@ -293,27 +279,166 @@ in Av
           still_cache[next_source] = Pixels.frame(media, next_source, -1, width, height, rate)
         next_src = still_cache[next_source]
         nmkey = next_source + "|" + ex_json
+        if !mask_seen.has_key?(nmkey)
+          mask_seen[nmkey] = true
+          mask_jobs.push([nmkey, next_src, exclusions])
+      sample_infos.push([sample, src, mkey, next_src, nmkey])
+    mask_cache = {}
+    src_orig_cache = {}
+    if mask_jobs.size <= 1
+      src_err_buf = f64[npix]
+      mask_jobs.each ->(mj)
+        mk = mj[0]
+        msrc = mj[1]
+        mex = mj[2]
+        msk = Banding.mask(msrc, bg, width, height, mex)
+        mask_cache[mk] = msk
+        if orig_needed.has_key?(mk)
+          se = residual_with_ideal(msrc, ideal, dummy_buf, dummy_buf, src_err_buf, kernel, width, height, 8)
+          src_orig_cache[mk] = metrics_into(se, msk, dummy_buf, width, height)
+    else
+      mnw = Util.min(4, mask_jobs.size)
+      mthreads = []
+      mwi = 0
+      while mwi < mnw
+        mw_idx = mwi
+        mth = Thread.new ->
+          mw_res = nil
+          begin
+            mout = []
+            local_se = f64[npix]
+            local_dm = f64[1]
+            mi = mw_idx
+            while mi < mask_jobs.size
+              mj = mask_jobs[mi]
+              mk = mj[0]
+              msrc = mj[1]
+              mex = mj[2]
+              msk = Banding.mask(msrc, bg, width, height, mex)
+              orig = nil
+              if orig_needed.has_key?(mk)
+                se = residual_with_ideal(msrc, ideal, local_dm, local_dm, local_se, kernel, width, height, 8)
+                orig = metrics_into(se, msk, local_dm, width, height)
+              mout.push([mk, msk, orig])
+              mi += mnw
+            mw_res = ["ok", mout]
+          rescue merr
+            mw_res = ["err", merr]
+          mw_res
+        mthreads.push(mth)
+        mwi += 1
+      m_err = nil
+      mthreads.each ->(mth)
+        mres = mth.join
+        if mres[0] == "err"
+          m_err = mres[1] if m_err == nil
+        else
+          mres[1].each ->(item)
+            mask_cache[item[0]] = item[1]
+            src_orig_cache[item[0]] = item[2] if item[2] != nil
+      raise m_err if m_err != nil
+    rows = []
+    sheet = Canvas.new(960, 264 * samples.size)
+    sheet.clear("#171b22")
+    eval_sample = ->(si, bufs)
+      err_buf = bufs[0]
+      next_err_buf = bufs[1]
+      delta_buf = bufs[2]
+      valid_buf = bufs[3]
+      local_dm = bufs[4]
+      info = sample_infos[si]
+      sample = info[0]
+      src = info[1]
+      mkey = info[2]
+      next_src = info[3]
+      nmkey = info[4]
+      mask = mask_cache[mkey]
+      decoded = decoded_by_frame[sample["frame"]]
+      error = residual_with_ideal(decoded, ideal, local_dm, local_dm, err_buf, kernel, width, height, 16)
+      row = metrics_into(error, mask, local_dm, width, height)
+      original = src_orig_cache[mkey]
+      row["rms_8bit_source"] = original["rms"]
+      row["rms_detrended_8bit_source"] = original["rms_detrended"]
+      if sample["next_source"]
         next_mask = mask_cache[nmkey]
-        if next_mask == nil
-          next_mask = Banding.mask(next_src, bg, width, height, exclusions)
-          mask_cache[nmkey] = next_mask
         next_decoded = decoded_by_frame[sample["frame"] + 1]
-        next_error = residual_with_ideal(next_decoded, ideal, dummy_buf, dummy_buf, next_err_buf, kernel, width, height, 16)
+        next_error = residual_with_ideal(next_decoded, ideal, local_dm, local_dm, next_err_buf, kernel, width, height, 16)
         temporal_delta_into(error, next_error, mask, next_mask, delta_buf, valid_buf, npix)
-        temporal_metrics = metrics_into(delta_buf, valid_buf, dummy_buf, width, height)
+        temporal_metrics = metrics_into(delta_buf, valid_buf, local_dm, width, height)
         row["temporal_rms"] = temporal_metrics["rms"]
-        row["temporal_p99"] = temporal_metrics["p99"]
-      diagnostic = visuals + "/frame-" + sample["frame"].to_s + "-" + rows.size.to_s + ".png"
+        row["temporal_p99"] = temporal_metrics["temporal_p99"] == nil ? temporal_metrics["p99"] : temporal_metrics["temporal_p99"]
+      diagnostic = visuals + "/frame-" + sample["frame"].to_s + "-" + si.to_s + ".png"
       tile = Banding.diagnostic(src, decoded, error, mask, width, height, sample["frame"])
       begin
         tile.write(diagnostic, quality: ~0.1, alpha: false)
-        sheet.image(tile, 0, rows.size * 264, 960, 264)
-      ensure
+      rescue werr
         tile.close
+        raise werr
       row["diagnostic"] = "banding/" + File.basename(diagnostic)
       row["frame"] = sample["frame"]
       row["ok"] = Util.all(limits.keys.map ->(key) row.has_key?(key) && row[key] <= limits[key])
-      rows.push(row)
+      [row, tile]
+    if samples.size <= 1
+      sbufs = [f64[npix], f64[npix], f64[npix], ByteArray.uninit(npix), dummy_buf]
+      si = 0
+      while si < samples.size
+        pair = eval_sample.call(si, sbufs)
+        tile = pair[1]
+        begin
+          sheet.image(tile, 0, si * 264, 960, 264)
+        ensure
+          tile.close
+        rows.push(pair[0])
+        si += 1
+    else
+      snw = Util.min(4, samples.size)
+      sthreads = []
+      swi = 0
+      while swi < snw
+        sw_idx = swi
+        sth = Thread.new ->
+          sw_res = nil
+          begin
+            sout = []
+            wbufs = [f64[npix], f64[npix], f64[npix], ByteArray.uninit(npix), f64[1]]
+            si = sw_idx
+            while si < samples.size
+              pair = eval_sample.call(si, wbufs)
+              sout.push([si, pair[0], pair[1]])
+              si += snw
+            sw_res = ["ok", sout]
+          rescue serr
+            sw_res = ["err", serr, sout]
+          sw_res
+        sthreads.push(sth)
+        swi += 1
+      by_idx = {}
+      s_err = nil
+      sthreads.each ->(sth)
+        sres = sth.join
+        if sres[0] == "err"
+          s_err = sres[1] if s_err == nil
+          if sres.size > 2 && sres[2] != nil
+            sres[2].each ->(it)
+              it[2].close
+        else
+          sres[1].each ->(it)
+            by_idx[it[0]] = [it[1], it[2]]
+      if s_err != nil
+        by_idx.keys.each ->(k)
+          by_idx[k][1].close
+        sheet.close
+        raise s_err
+      si = 0
+      while si < samples.size
+        pair = by_idx[si]
+        tile = pair[1]
+        begin
+          sheet.image(tile, 0, si * 264, 960, 264)
+        ensure
+          tile.close
+        rows.push(pair[0])
+        si += 1
     sheet.write(visuals + "/contact-sheet.jpg", alpha: false)
     sheet.close
     references.keys.each ->(file)

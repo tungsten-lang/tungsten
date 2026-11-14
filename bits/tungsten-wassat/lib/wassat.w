@@ -1010,10 +1010,13 @@ use cover_split
     threshold_cover = wassat_threshold_cover_unsat(formula, clock_ms() + 3000)
     tprof = wassat_prof("cli.threshold_cover", tc_prof)
     tc_work = threshold_cover["work"]
-    wassat_prof_note("threshold_cover status=[threshold_cover["status"]] root=[tc_work[1]] need=[tc_work[2]] groups=[tc_work[3]] nodes=[tc_work[4]] leaves=[tc_work[5]] roots=[tc_work[6]] stop=[tc_work[7]] words=[tc_work[8]]") if tprof != 0
+    wassat_prof_note("threshold_cover status=[threshold_cover["status"]] root=[tc_work[1]] need=[tc_work[2]] groups=[tc_work[3]] nodes=[tc_work[4]] leaves=[tc_work[5]] roots=[tc_work[6]] stop=[tc_work[7]] words=[tc_work[8]] exact=[tc_work[9]] search_nodes=[tc_work[10]] direction=[tc_work[11]] pair_root=[tc_work[12]],[tc_work[13]] self_dependent=[tc_work[14]]") if tprof != 0
     if threshold_cover["status"] == 0 - 1
       << "s UNSATISFIABLE"
-      << "c mode: fast (verified count: [tc_work[2]] true variables required, [tc_work[3]] exclusive groups)"
+      if tc_work[9] == 1
+        << "c mode: fast (verified count: [tc_work[2]] true variables required, at most [tc_work[3]] can hold together)"
+      else
+        << "c mode: fast (verified count: [tc_work[2]] true variables required, [tc_work[3]] exclusive groups)"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
     cb_prof = wassat_prof_clock

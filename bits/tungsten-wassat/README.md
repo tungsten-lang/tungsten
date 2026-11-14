@@ -369,6 +369,15 @@ and each declines in well under a second when its shape is absent.
   disjointness is checked on explicit support sets. The leaves are split
   greedily into pairwise exclusive groups, at most one true each. More
   demanded than groups is a contradiction (K rooks on fewer than K rows).
+  When the groups leave room, the room is counted exactly, as the
+  independence number of the exclusion graph (branch and bound over its
+  connected components). A counter written as one node per (position, count)
+  is read too: its definitions are taken in one direction of the variable
+  numbering, nodes ruled out by unit clauses are discarded, and the clause
+  over its first position serves as the root. 1-ET-256-K-65 (an independent
+  set of 65 among 256 binary words where 50 is the most) and both 1-ET-512
+  inputs (102 and 120 demanded, 100 possible) take 0.2 to 0.7 s; no solver
+  here decided them in a minute.
 - Covering bound (same file). The variables of the all-positive clauses are
   split into exclusive groups; a model covers every positive clause with at
   most one variable a group, and the Hunter-Worsley bound caps what such a set

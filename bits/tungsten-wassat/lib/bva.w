@@ -25,7 +25,9 @@
 # formula carries no proof steps, and the caller replays a model against the
 # input clauses.
 
-WASSAT_BVA_MS = 1500
+# A backstop only: the tick allowance bounds the work, and a wall limit near
+# the usual cost (0.5 s) made the lane miss on a busy machine.
+WASSAT_BVA_MS = 8000
 WASSAT_BVA_MIN_SMALL = 256
 # Admission. Measured over the 800 inputs of SAT Competition 2025 and 2026
 # (60 s, before these gates): the lane halved 35 formulas, decided two (the

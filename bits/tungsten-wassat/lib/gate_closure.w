@@ -32,7 +32,18 @@
 #
 # Fast mode only: the appended clauses carry no proof steps.
 
-WASSAT_GATE_CLOSURE_MS = 2000
+# The wall limit is a backstop: extraction runs on tick allowances, and a
+# limit close to the usual cost (0.4 s for half a million gates) made the
+# lane come back empty whenever the machine was busy.
+WASSAT_GATE_CLOSURE_MS = 8000
+# Closure and rewriting alternate at most this often.
+WASSAT_GATE_CLOSURE_ROUNDS = 8
+# A closure without gates rewrites inputs of at most this many clauses.
+WASSAT_GATE_CLOSURE_PLAIN_CLAUSES = 4000000
+# Inputs up to this many variables are rewritten whatever the closure merged.
+WASSAT_GATE_CLOSURE_REWRITE_ALWAYS = 20000
+# Passes of one rewriting: a clause that shrinks to a unit starts another.
+WASSAT_GATE_CLOSURE_PASSES = 40
 WASSAT_GATE_CLOSURE_MAX_VARS = 6000000
 WASSAT_GATE_CLOSURE_MAX_CLAUSES = 24000000
 WASSAT_GATE_CLOSURE_MAX_AND = 64
@@ -798,6 +809,16 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   rep = i64[nv + 4]
   return nil unless wassat_gc_close(fla, fcs, fcl, nc, nv, rep, st, deadline) == 1
   return nil if st[0] == 0 && st[1] == 0
+  wassat_gate_closure_append(formula, rep, st)
+
+# The input with the closure's units and equivalences appended.
+-> wassat_gate_closure_append(formula, rep, st)
+  nv = formula["nvars"]
+  nc = formula["flat_ncl"]
+  fla = formula["flat_lits"]
+  fcs = formula["flat_offs"]
+  fcl = formula["flat_lens"]
+  nlits = formula["flat_nlits"]
   tcon = nv + 1
   # Count, then fill.
   units = 0
@@ -898,4 +919,279 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   lifted = { "nvars": nv, "nclauses": c, "clauses": [], "boxed": false,
     "flat_lits": out, "flat_offs": off, "flat_lens": len,
     "flat_ncl": c, "flat_nlits": p }
-  { "formula": lifted, "work": st, "added_from": nc }
+  { "formula": lifted, "work": st, "added_from": nc, "rewritten": false }
+
+# Rewrite every clause through the representative map: constants are
+# evaluated, a literal becomes its representative, repeated literals are
+# written once, and a clause holding a true constant or a complementary pair
+# is dropped. A clause that shrinks to one literal makes that literal a
+# constant, and the rewriting starts over (at most PASSES times; a later unit
+# that is not followed up only leaves a clause longer than it could be).
+# Then one unit clause for every constant variable and two binaries for every
+# other merged variable are appended, so a model of the result gives the
+# merged variables their values and is a model of the input as it stands.
+#
+# Soundness: the map holds in every model of the input (closure) or follows
+# by unit propagation from clauses rewritten under it, so each clause
+# written is equivalent to its original under facts the input implies, and
+# the appended clauses state exactly those facts. Input and result have the
+# same models.
+#
+# st: 16 duplicate clauses dropped  17 variables merged or constant
+#     20 clauses written  21 literals written  22 units found  23 passes
+#     1 is set when a clause becomes empty (the input is unsatisfiable).
+# Returns the number of clauses in off/len, or -1 on an empty clause.
+-> wassat_gc_rewrite(fla, fcs, fcl, nc, nv, rep, out, off, len, mark, st) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
+  tcon = nv + 1 ## i64
+  stamp = 0 ## i64
+  c = 0
+  p = 0
+  passes = 0
+  again = 1
+  while again == 1
+    again = 0
+    passes += 1
+    c = 0
+    p = 0
+    ci = 0
+    while ci < nc
+      n = fcl[ci] ## i64
+      o = fcs[ci] ## i64
+      start = p
+      stamp += 1
+      sat = 0
+      j = 0
+      while j < n && sat == 0
+        x = fla[o + j] ## i64
+        code = x > 0 ? x << 1 : ((0 - x) << 1) | 1 ## i64
+        r = wassat_gc_find(rep, code)
+        rv = r >> 1 ## i64
+        if rv == tcon
+          sat = 1 if (r & 1) == 0
+        elsif mark[r] != stamp
+          if mark[r ^ 1] == stamp
+            sat = 1
+          else
+            mark[r] = stamp
+            out[p] = (r & 1) == 0 ? rv : 0 - rv
+            p += 1
+        j += 1
+      if sat == 1
+        p = start
+      else
+        k = p - start
+        if k == 0
+          st[1] = 1
+          return 0 - 1
+        if k == 1
+          # The literal is a root of the map: bind it to the true constant.
+          x = out[start]
+          if x > 0
+            rep[x] = tcon << 1
+          else
+            rep[0 - x] = (tcon << 1) | 1
+          st[22] += 1
+          again = 1 if passes < WASSAT_GATE_CLOSURE_PASSES
+          p = start
+        else
+          off[c] = start
+          len[c] = k
+          c += 1
+      ci += 1
+  st[23] = passes
+  # Clauses that became equal are written once: the defining clauses of two
+  # merged gates are the same clauses now. An order-free hash finds the
+  # candidates and the stamps compare them as sets (a rewritten clause has
+  # no repeated literal, so equal length and containment is equality).
+  hcap = 16 ## i64
+  while hcap < c * 2
+    hcap = hcap << 1
+  hmask = hcap - 1 ## i64
+  heads = i64[hcap]
+  nextc = i64[c + 1]
+  hval = i64[c + 1]
+  q = 0
+  wp = 0
+  ci = 0
+  while ci < c
+    o = off[ci] ## i64
+    n = len[ci] ## i64
+    h = 0 ## i64
+    stamp += 1
+    j = 0
+    while j < n
+      x = out[o + j] ## i64
+      code = x > 0 ? x << 1 : ((0 - x) << 1) | 1 ## i64
+      mark[code] = stamp
+      h = (h + ((code * 40503) & 1073741823)) & 1073741823
+      j += 1
+    dup = 0
+    e = heads[h & hmask]
+    while e != 0 && dup == 0
+      k = e - 1
+      if hval[k] == h && len[k] == n
+        same = 1
+        ko = off[k]
+        j = 0
+        while j < n && same == 1
+          y = out[ko + j] ## i64
+          cy = y > 0 ? y << 1 : ((0 - y) << 1) | 1 ## i64
+          same = 0 if mark[cy] != stamp
+          j += 1
+        dup = 1 if same == 1
+      e = nextc[k]
+    if dup == 0
+      j = 0
+      while j < n
+        out[wp + j] = out[o + j]
+        j += 1
+      off[q] = wp
+      len[q] = n
+      hval[q] = h
+      nextc[q] = heads[h & hmask]
+      heads[h & hmask] = q + 1
+      wp += n
+      q += 1
+    else
+      st[16] += 1
+    ci += 1
+  c = q
+  p = wp
+  merged = 0
+  v = 1
+  while v <= nv
+    r = wassat_gc_find(rep, v << 1)
+    if r != (v << 1)
+      merged += 1
+      if (r >> 1) == tcon
+        off[c] = p
+        len[c] = 1
+        out[p] = (r & 1) == 0 ? v : 0 - v
+        p += 1
+        c += 1
+      else
+        rl = (r & 1) == 0 ? r >> 1 : 0 - (r >> 1)
+        off[c] = p
+        len[c] = 2
+        out[p] = 0 - v
+        out[p + 1] = rl
+        off[c + 1] = p + 2
+        len[c + 1] = 2
+        out[p + 2] = v
+        out[p + 3] = 0 - rl
+        p += 4
+        c += 2
+    v += 1
+  st[17] = merged
+  st[20] = c
+  st[21] = p
+  c
+
+# Closure, then rewriting, repeated while the rewriting still uncovers units
+# for the next closure to work with. Returns nil when the first closure
+# declines or merges nothing. When that closure ends in a clash, or merges
+# too little to pay for rewriting a large input (under one variable in 200),
+# or the first rewriting is not a tenth shorter than the input, the result is
+# the appending lift's: "rewritten" is false. Otherwise
+#   { "rewritten": true, "formula", "work" (the first round's st), "rounds",
+#     "units", "clauses_in", "clauses_out", "refuted", "history" }.
+# The result has the same models as the input. "refuted" is true when a
+# clause became empty; the formula then holds the two units (1) and (-1).
+-> wassat_gate_closure_reduce(formula, deadline = 0)
+  return nil unless formula.has_key?("flat_ncl")
+  nv = formula["nvars"]
+  nc = formula["flat_ncl"]
+  return nil if nv < 8 || nv > WASSAT_GATE_CLOSURE_MAX_VARS || nc < 8 || nc > WASSAT_GATE_CLOSURE_MAX_CLAUSES
+  fla = formula["flat_lits"]
+  fcs = formula["flat_offs"]
+  fcl = formula["flat_lens"]
+  nlits = formula["flat_nlits"]
+  first = i64[24]
+  # Per round: variables merged or constant, units found while rewriting,
+  # duplicate clauses dropped, clauses out.
+  hist = i64[4 * WASSAT_GATE_CLOSURE_ROUNDS + 4]
+  known = 0
+  rounds = 0
+  refuted = false
+  mark = i64[(nv + 3) * 2]
+  tcon = nv + 1
+  going = true
+  while going
+    st = i64[24]
+    rep = i64[nv + 4]
+    ran = wassat_gc_close(fla, fcs, fcl, nc, nv, rep, st, deadline)
+    going = false
+    if rounds == 0 && ran == 1 && st[1] == 0 && st[0] != 0 && nv > WASSAT_GATE_CLOSURE_REWRITE_ALWAYS && st[0] * 200 < nv
+      return wassat_gate_closure_append(formula, rep, st)
+    # Without gates the closure only chains units and equivalences; on a very
+    # large input that is not worth two passes over every clause.
+    if rounds == 0 && ran == 1 && st[1] == 0 && st[0] != 0 && st[18] == 0 && nc > WASSAT_GATE_CLOSURE_PLAIN_CLAUSES
+      return wassat_gate_closure_append(formula, rep, st)
+    if ran == 1 && st[1] == 0 && st[0] != 0
+      out = i64[nlits + 4 * nv + 8]
+      off = i64[nc + 2 * nv + 8]
+      len = i64[nc + 2 * nv + 8]
+      i = 0
+      while i < mark.size
+        mark[i] = 0
+        i += 1
+      kept = wassat_gc_rewrite(fla, fcs, fcl, nc, nv, rep, out, off, len, mark, st)
+      # The rewritten formula replaces the input only when it is at least a
+      # tenth shorter. A formula that is nearly the input in other words
+      # buys the search nothing and moves it onto another trajectory, which
+      # measured as a net loss on satisfiable inputs. The map, with the
+      # units the rewriting found, is appended instead.
+      if rounds == 0 && kept >= 0 && kept * 10 > nc * 9
+        return wassat_gate_closure_append(formula, rep, st)
+      if rounds == 0
+        i = 0
+        while i < 24
+          first[i] = st[i]
+          i += 1
+      hist[4 * rounds] = st[17]
+      hist[4 * rounds + 1] = st[22]
+      hist[4 * rounds + 2] = st[16]
+      hist[4 * rounds + 3] = kept
+      rounds += 1
+      if kept < 0
+        refuted = true
+        out[0] = 1
+        out[1] = 0 - 1
+        off[0] = 0
+        len[0] = 1
+        off[1] = 1
+        len[1] = 1
+        fla = out
+        fcs = off
+        fcl = len
+        nc = 2
+        nlits = 2
+      else
+        fla = out
+        fcs = off
+        fcl = len
+        nc = kept
+        nlits = st[21]
+        # The closure leaves the gates at a fixpoint, so only units that
+        # the rewriting found in other clauses give the next one anything to
+        # do (and without gates there is nothing to close). The appended
+        # units and equivalences are read back by the next closure, so a
+        # round that knows no more variables than the last found nothing.
+        going = rounds < WASSAT_GATE_CLOSURE_ROUNDS && st[5] == 0 && st[17] > known && st[22] > 0 && st[18] > 0
+        known = st[17]
+    elsif rounds == 0
+      return nil if ran != 1 || (st[0] == 0 && st[1] == 0)
+      # A clash inside the closure: the appending lift writes it out.
+      return wassat_gate_closure_append(formula, rep, st)
+  # Count what the final formula says about the variables.
+  units = 0
+  ci = 0
+  while ci < nc
+    units += 1 if fcl[ci] == 1
+    ci += 1
+  reduced = { "nvars": nv, "nclauses": nc, "clauses": [], "boxed": false,
+    "flat_lits": fla, "flat_offs": fcs, "flat_lens": fcl,
+    "flat_ncl": nc, "flat_nlits": nlits }
+  { "rewritten": true, "formula": reduced, "work": first, "rounds": rounds, "units": units, "history": hist,
+    "clauses_in": formula["flat_ncl"], "clauses_out": nc, "refuted": refuted }
+

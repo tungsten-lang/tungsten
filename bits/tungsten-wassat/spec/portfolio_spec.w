@@ -598,6 +598,29 @@ describe "Wassat portfolio (process race)" ->
       check = wrat_verify(read_file("/tmp/pspec_triv.cnf"), read_file("/tmp/pspec_triv.wrat"))
       expect(check["verified"]).to eq(true)
 
+  context "preprocessing arm" ->
+    it "renders the formula its preprocessor was sized for" ->
+      # The race holds the input; the arm's preprocessor was built for a
+      # much smaller formula with the same models (what the gate closure
+      # hands over). Rendering the input into those buffers overran them.
+      small_rows = ["1 2 0", "-1 2 0", "1 -2 0", "3 4 0"]
+      big_rows = ["1 2 0", "-1 2 0", "1 -2 0", "3 4 0"]
+      i = 0
+      while i < 3000
+        big_rows.push("1 [3 + (i % 2)] [0 - (3 + ((i + 1) % 2))] 0")
+        i += 1
+      small = wassat_parse_cnf_native("p cnf 4 [small_rows.size]\n" + small_rows.join("\n") + "\n")
+      big = wassat_parse_cnf_native("p cnf 4 [big_rows.size]\n" + big_rows.join("\n") + "\n")
+      art = wassat_raw_artifact(big, 4)
+      race = wassat_race_build(4, art, 1, big, nil, 0, 1)
+      pre = WassatPreprocess.new(4, [], WASSAT_PROOF_NONE, small)
+      pre.force_full_pipeline
+      wassat_race_add_pre(race, pre, false, "light")
+      expect(race["pre"][0]["formula"]["flat_ncl"]).to eq(small_rows.size)
+      result = wassat_race_run(race, 0)
+      expect(result["status"]).to eq(1)
+      expect(wassat_model_satisfies?(big, result["model"])).to eq(true)
+
   context "deadline" ->
     it "returns UNKNOWN and publishes no partial proof" ->
       cnf_path = "/tmp/pspec_deadline.cnf"

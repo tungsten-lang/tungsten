@@ -333,17 +333,36 @@ variable is rewritten through the representative map, simplified through
 constants and repeated or complementary inputs, and hashed again, so a merge
 walks up the circuit a layer at a time. A gate is a set of input clauses
 equivalent to "output = kind(inputs)", so each unit and equivalence found
-holds in every model of the input. The lane only appends those units and
-equivalence binaries to the formula given to the generic search (scout, raw
-race, preprocessing arms); it removes nothing, publishes no verdict of its
-own (a clash is appended as one more equivalence and refuted by propagation),
-and the structural recognizers and routing policy keep reading the input as
-written. Extraction is bounded by a work allowance proportional to the input
-and a two-second deadline; stopping early only loses merges. A `c gate
-closure` line reports what was appended. `WASSAT_GATE_CLOSURE=0` disables the
-lane and `WASSAT_GATE_CLOSURE_DUMP=1` prints every appended clause, which
-`benchmarks/gate_closure_test.py` checks against all models of small random
-circuits.
+holds in every model of the input.
+
+The generic search (scout, raw race, preprocessing arms) is then given the
+formula rewritten through that map: constants are evaluated, every literal
+becomes its representative, a clause that shrinks to one literal makes a new
+constant (followed to a fixpoint), clauses that became equal are written
+once, and each merged variable keeps one unit or two binaries that give it
+its value, so the result has exactly the models of the input. Closure and
+rewriting alternate while the rewriting uncovers units. On
+veer_axi-p06 (521,158 variables) this merges 261,833 variables, of which
+65,952 are constants, and drops 547,070 duplicate clauses in about a second;
+the search that follows takes 10 s instead of 29 s. The nine arles_thres10
+inputs of SAT Competition 2025 rewrite to an empty clause. The rewritten
+formula replaces the input only when it is at least a tenth shorter: a
+formula that is nearly the input in other words only moves the search onto
+another trajectory, which measured as a net loss on satisfiable inputs. In
+that case, for a large input whose closure merges under one variable in 200,
+and for a closure that ends in a clash, the search gets the earlier form:
+the input with the units and equivalence binaries appended (a clash becomes
+one more equivalence and is refuted by propagation). The lane publishes no verdict of its own, and the
+structural recognizers and routing policy keep reading the input as written.
+
+Extraction is bounded by a work allowance proportional to the input; the
+8-second wall limit is a backstop (a 2-second limit made the lane come back
+empty on a busy machine), and stopping early only loses merges. A `c gate
+closure` line reports what was done. `WASSAT_GATE_CLOSURE=0` disables the
+lane, `WASSAT_GATE_CLOSURE_REWRITE=0` keeps the appending form, and
+`WASSAT_GATE_CLOSURE_DUMP=1` prints the rewritten formula or the appended
+clauses, which `benchmarks/gate_closure_test.py` checks against all models
+of small random circuits.
 
 A raw-kernel scout is bounded by propagations as well as by conflicts (two
 million plus two per clause). On large circuit formulas one conflict can cost

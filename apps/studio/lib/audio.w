@@ -489,17 +489,20 @@ Q28 = ~268435456.0
 
 # tools/mix.py fade: squared linear ramps over k samples at each end.
 -> fade_run(x, n, kin, kout) (f64[] i64 i64 i64) i64
+  # (typed loop counters: `[a, b].min` and a bare `i = 0` kept this loop on boxed integers)
   if kin > 0
-    k = [kin, n].min
-    i = 0
+    k = kin
+    k = n if n < k
+    i = 0 ## i64
     while i < k
       r = (i ## f64) / ((k - 1) ## f64)
       r = ~1.0 if k == 1
       x[i] = x[i] * r * r
       i += 1
   if kout > 0
-    k = [kout, n].min
-    i = 0
+    k = kout
+    k = n if n < k
+    i = 0 ## i64
     while i < k
       r = ~1.0 - (i ## f64) / ((k - 1) ## f64)
       r = ~0.0 if k == 1
@@ -858,19 +861,25 @@ Q28 = ~268435456.0
 
 # tools/mix.py deess_dynamic: the high band (above) and the body, block RMS (32 samples) with attack/release, and
 # the high band clamped against the body.
+# [~1.0, v].max (Array#max keeps the first element unless a later one is greater)
+-> max1(v) (f64) f64
+  return v if v > ~1.0
+  ~1.0
+
 -> deess_apply(x, hi, n, sr, max_ratio, abs_lim, env_a, env_b) (f64[] f64[] i64 i64 f64 f64 f64[] f64[]) i64
   step = 32
   m = n / step
   srb = (sr ## f64) / (step ## f64)
-  hau = Math.exp((~0.0 - ~1.0) / [~1.0, ~0.0015 * srb].max)
-  had = Math.exp((~0.0 - ~1.0) / [~1.0, ~0.035 * srb].max)
-  lau = Math.exp((~0.0 - ~1.0) / [~1.0, ~0.005 * srb].max)
-  lad = Math.exp((~0.0 - ~1.0) / [~1.0, ~0.060 * srb].max)
+  # [~1.0, v].max as max1(v): no array, no dynamic division
+  hau = Math.exp((~0.0 - ~1.0) / max1(~0.0015 * srb))
+  had = Math.exp((~0.0 - ~1.0) / max1(~0.035 * srb))
+  lau = Math.exp((~0.0 - ~1.0) / max1(~0.005 * srb))
+  lad = Math.exp((~0.0 - ~1.0) / max1(~0.060 * srb))
   ha = ~0.0
   la = ~0.0
   floor44 = Math.exp((~0.0 - ~44.0) * ~0.11512925464970229)
   floor18 = Math.exp((~0.0 - ~18.0) * ~0.11512925464970229)
-  b = 0
+  b = 0 ## i64
   while b < m
     hs = ~0.0
     ls = ~0.0
@@ -891,7 +900,12 @@ Q28 = ~268435456.0
       la = lau * la + (~1.0 - lau) * lv
     else
       la = lad * la + (~1.0 - lad) * lv
-    allowed = [abs_lim, [la * max_ratio, floor44].max].min
+    # [abs_lim, [la · max_ratio, floor44].max].min without building two arrays per block (Array#max/#min keep the first
+    # element unless a later one compares greater/less: the same order here)
+    mx = la * max_ratio
+    mx = floor44 if floor44 > mx
+    allowed = abs_lim
+    allowed = mx if mx < allowed
     g = ~1.0
     g = allowed / (ha + ~1.0e-12) if ha > allowed
     g = floor18 if g < floor18
@@ -900,7 +914,7 @@ Q28 = ~268435456.0
     b += 1
   last = ~1.0
   last = env_a[m - 1] if m > 0
-  i = 0
+  i = 0 ## i64
   while i < n
     bi = i / step
     g = last
@@ -914,12 +928,12 @@ Q28 = ~268435456.0
 -> make_ir(key, n, seconds, damp, sr, out) (i64 i64 f64 f64 i64 f64[]) i64
   srf = sr ## f64
   a = Math.exp((~0.0 - ~6.283185307179586) * damp / srf)
-  i = 0
+  i = 0 ## i64
   while i < n
     t = (i ## f64) / srf
     out[i] = rng_n(key, i) * Math.exp((~0.0 - ~6.9) * t / seconds)
     i += 1
-  p = 0
+  p = 0 ## i64
   while p < 2
     acc = ~0.0
     i = 0
@@ -1334,17 +1348,17 @@ Q28 = ~268435456.0
   nb = n / 256 + 1
   bm = f64[nb]
   sm = f64[36]
-  i = 0
+  i = 0 ## i64
   while i < n
     v = bus[i * 2] ## f64
     v = ~0.0 - v if v < ~0.0
     w = bus[i * 2 + 1] ## f64
     w = ~0.0 - w if w < ~0.0
     v = w if w > v
-    b = i / 256
-    bm[b] = v if v > bm[b]
+    bk = i / 256
+    bm[bk] = v if v > bm[bk]
     i += 1
-  b = 0
+  b = 0 ## i64
   while b < nb
     lo = b * 256
     hi = lo + 256
@@ -1364,7 +1378,7 @@ Q28 = ~268435456.0
       i = lo
       while i < hi
         gi = ~1.0
-        c = 0
+        c = 0 ## i64
         while c < 2
           tp = bus[i * 2 + c] ## f64
           tp = ~0.0 - tp if tp < ~0.0
@@ -1374,7 +1388,18 @@ Q28 = ~268435456.0
             wm = w2 if w2 > wm
             lim = ceil
             lim = maxtp if maxtp < lim
-            tp = tp_at(bus, i, c, h) if wm * bound > lim
+            if wm * bound > lim
+              # tp_at, inline (called, its i64 arguments went through boxed values on every evaluated sample)
+              p = 0 ## i64
+              while p < 4
+                acc = ~0.0
+                k = 0 ## i64
+                while k < 12
+                  acc = acc + (bus[(i + k - 5) * 2 + c] ## f64) * h[p * 12 + k]
+                  k += 1
+                acc = ~0.0 - acc if acc < ~0.0
+                tp = acc if acc > tp
+                p += 1
           maxtp = tp if tp > maxtp
           q = ~1.0
           q = ceil / tp if tp > ceil
@@ -1867,16 +1892,16 @@ Q28 = ~268435456.0
   bound = tp_bound(h)
   maxtp = ~0.0
   sm = f64[36]
-  lo = 0
+  lo = 0 ## i64
   while lo < n
     hi = lo + 256
     hi = n if hi > n
     base = lo - 16
-    have = 0
+    have = 0 ## i64
     i = lo
     i = 6 if i < 6
     while i < hi && i + 6 < n
-      c = 0
+      c = 0 ## i64
       while c < 2
         x0 = bus[i * 2 + c] ## f64
         x0 = ~0.0 - x0 if x0 < ~0.0
@@ -1890,7 +1915,18 @@ Q28 = ~268435456.0
           w2 = sm[c * 18 + (i + 6 - base) / 16]
           wm = w2 if w2 > wm
           if wm * bound > maxtp
-            tp = tp_at(bus, i, c, h)
+            # tp_at, inline (see tp_gain)
+            tp = x0
+            p = 0 ## i64
+            while p < 4
+              acc = ~0.0
+              k = 0 ## i64
+              while k < 12
+                acc = acc + (bus[(i + k - 5) * 2 + c] ## f64) * h[p * 12 + k]
+                k += 1
+              acc = ~0.0 - acc if acc < ~0.0
+              tp = acc if acc > tp
+              p += 1
             maxtp = tp if tp > maxtp
         c += 1
       i += 1

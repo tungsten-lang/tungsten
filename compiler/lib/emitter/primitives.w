@@ -769,6 +769,7 @@
   out << declare_fn("w_array_copy_range", wv, wv4)
   out << declare_fn("__w_file_link", wv, wv2)
   out << declare_fn("__w_file_chmod", wv, wv2)
+  out << declare_fn("__w_file_touch", wv, wv)
   out << declare_fn("__w_rename", wv, wv2)
   out << declare_fn("__w_temp_file_for", wv, wv)
   out << declare_fn("__w_fsync_path", wv, wv)

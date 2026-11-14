@@ -52,14 +52,17 @@ in Av
       i = 0
       entries.each ->(entry)
         src = entry["source"]
-        raise "missing release source [src]" if !File.file?(src) || File.stat(src).size == 0
+        raise "missing release source [src]" if !File.file?(src)
+        src_stamp = Util.stamp(src)
+        raise "missing release source [src]" if src_stamp[2] == 0
         name = Util.pad(i, 2) + "-" + File.basename(entry["destination"])
         path = candidate + "/" + name
-        before = Util.sha(src)
+        before = entry["verified_sha256"] != nil ? Util.sha_cached(src) : Util.sha(src)
         raise "source differs from its release manifest" if entry.has_key?("expected_sha256") && entry["expected_sha256"] != before
-        Util.copy_file(src, path)
-        raise "source changed during release copy" if Util.sha(src) != before || Util.sha(path) != before
-        files.push({"name": name, "source": src, "destination": entry["destination"], "role": entry["role"], "sha256": before, "bytes": File.stat(path).size, "source_release": entry["source_release"]})
+        copy_method = Util.copy_file(src, path)
+        raise "source changed during release copy" if Util.stamp(src) != src_stamp || (copy_method != "clone" && Util.sha(path) != before)
+        cand_stamp = Util.stamp(path)
+        files.push({"name": name, "source": src, "destination": entry["destination"], "role": entry["role"], "sha256": before, "bytes": cand_stamp[2], "source_release": entry["source_release"], "_stamp": cand_stamp, "_cloned": copy_method == "clone"})
         i += 1
       i = 0
       entries.each ->(entry)
@@ -67,7 +70,8 @@ in Av
         cand_path = candidate + "/" + item["name"]
         reports = candidate + "/" + item["name"] + ".checks"
         File.mkdir_p(reports)
-        if entry["verified_sha256"] != nil && entry["verified_result"] != nil && Util.sha(cand_path) == entry["verified_sha256"]
+        cand_unchanged = item["_cloned"] && Util.stamp(cand_path) == item["_stamp"] && item["sha256"] == entry["verified_sha256"]
+        if entry["verified_sha256"] != nil && entry["verified_result"] != nil && (cand_unchanged || Util.sha(cand_path) == entry["verified_sha256"])
           if entry["verified_checks_dir"] != nil && File.directory?(entry["verified_checks_dir"])
             Util.copy_tree_files(entry["verified_checks_dir"], reports)
           result = entry["verified_result"]
@@ -78,7 +82,11 @@ in Av
         i += 1
       report_hashes = {}
       files.each ->(item)
-        raise "candidate changed during verification" if Util.sha(candidate + "/" + item["name"]) != item["sha256"]
+        cand_path = candidate + "/" + item["name"]
+        unchanged = item["_cloned"] && Util.stamp(cand_path) == item["_stamp"]
+        item.delete("_stamp")
+        item.delete("_cloned")
+        raise "candidate changed during verification" if !unchanged && Util.sha(cand_path) != item["sha256"]
       visitor = ->(path)
         if File.file?(path)
           Util.sync(path)

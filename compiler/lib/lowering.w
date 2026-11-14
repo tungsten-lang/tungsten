@@ -245,6 +245,7 @@ use lowering/definitions
   mod[:known_calls]["file_unlink_strict"] = "__w_file_unlink_strict"
   mod[:known_calls]["file_link"] = "__w_file_link"
   mod[:known_calls]["file_chmod"] = "__w_file_chmod"
+  mod[:known_calls]["file_touch"] = "__w_file_touch"
   mod[:known_calls]["file_pwd"] = "__w_file_pwd"
   mod[:known_calls]["file_chdir"] = "__w_file_chdir"
   mod[:known_calls]["file_mkdir"] = "__w_file_mkdir"

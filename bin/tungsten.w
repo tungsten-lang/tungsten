@@ -36,6 +36,10 @@ MANPAGE = manpage_lines.join("\n")
 -> tool_on_path?(name)
   system("command -v " + sh_quote(name) + " > /dev/null 2>&1")
 
+-> executable_file?(p)
+  st = File.stat(p)
+  st != nil && st.file? && (st.permissions & 0o111) != 0
+
 -> color_on?
   if env("NO_COLOR") != nil
     return false
@@ -50,27 +54,24 @@ MANPAGE = manpage_lines.join("\n")
   text
 
 -> exec_compiler(extra_args)
-  if !tool_on_path?(COMPILER) && !system("test -x " + sh_quote(COMPILER))
+  if !executable_file?(COMPILER) && !tool_on_path?(COMPILER)
     << "tungsten: bin/tungsten-compiler not found — run `bin/tungsten build` first"
     exit(1)
-  cmd = sh_quote(COMPILER)
+  exec_args = [COMPILER]
   i = 0
   while i < extra_args.size
-    cmd = cmd + " " + sh_quote(extra_args[i])
+    exec_args.push(extra_args[i])
     i = i + 1
-  spawn_argv = []
-  spawn_argv.push("/bin/sh")
-  spawn_argv.push("-c")
-  spawn_argv.push(cmd)
-  proc = Process.spawn(spawn_argv)
-  exit(proc.wait)
+  err = Process.exec(exec_args)
+  << "tungsten: could not run " + COMPILER + " (errno " + (0 - err).to_s + ")"
+  exit(1)
 
 # Legacy bootstrap only: --ruby / --spinel / `build` still use the Ruby driver.
 -> exec_ruby_driver
   ruby_cli = ROOT + "/bin/tungsten.rb"
   ruby = "ruby"
   custom = ROOT + "/src/patched/ruby/ruby"
-  if system("test -x " + sh_quote(custom))
+  if executable_file?(custom)
     ruby = custom
   cmd = sh_quote(ruby) + " " + sh_quote(ruby_cli)
   args = argv()
@@ -88,14 +89,17 @@ MANPAGE = manpage_lines.join("\n")
 # Compile a bin/commands/*.w entry on demand and return the native binary path.
 # Binaries are cached next to the source: bin/commands/fmt.w → bin/commands/fmt.
 -> ensure_command_binary(rel_path)
-  if !system("test -x " + sh_quote(COMPILER))
+  if !executable_file?(COMPILER)
     << "tungsten: bin/tungsten-compiler not found — run `bin/tungsten build` first"
     exit(1)
   entry = ROOT + "/" + rel_path
   out_bin = entry.replace(".w", "")
   need = true
-  if system("test -x " + sh_quote(out_bin))
-    if system("test " + sh_quote(entry) + " -ot " + sh_quote(out_bin)) && system("test " + sh_quote(COMPILER) + " -ot " + sh_quote(out_bin))
+  if executable_file?(out_bin)
+    out_mt = file_mtime_ns(out_bin)
+    in_mt = file_mtime_ns(entry)
+    cc_mt = file_mtime_ns(COMPILER)
+    if out_mt != nil && in_mt != nil && cc_mt != nil && in_mt < out_mt && cc_mt < out_mt
       # This is deliberately conservative until the loader exposes a complete
       # `use` dependency graph. Command tools commonly import compiler/lib and
       # Core source directly; checking only the entry file served stale fmt,
@@ -169,7 +173,7 @@ MANPAGE = manpage_lines.join("\n")
 # executable for the bit's sources as they are now, compiling only when no
 # checkout has built them with this compiler before.
 -> bit_binary_current?(out_bin)
-  if !system("test -x " + sh_quote(out_bin))
+  if !executable_file?(out_bin)
     return false
   built_at = file_mtime_ns(out_bin)
   manifest = read_file(out_bin + ".deps")
@@ -201,18 +205,18 @@ MANPAGE = manpage_lines.join("\n")
   out_bin = bit_root + "/bin/" + entry_name
   src = bit_root + "/lib/" + entry_name + ".w"
   bin_src = bit_root + "/bin/" + entry_name + ".w"
-  if system("test -f " + sh_quote(bin_src))
+  if File.file?(bin_src)
     src = bin_src
-  if !system("test -f " + sh_quote(src))
+  if !File.file?(src)
     << "tungsten: missing " + src
     exit(1)
   if !bit_binary_current?(out_bin)
     driver = ensure_command_binary("bin/commands/build.w")
     # In this checkout's own build/: on-demand builds in two worktrees must not share one log.
-    system("mkdir -p " + sh_quote(ROOT + "/build"))
+    File.mkdir_p(ROOT + "/build")
     log = ROOT + "/build/bit-" + bit_pkg + "-" + entry_name + ".log"
     cmd = "cd " + sh_quote(bit_root) + " && " + command_env_prefix + sh_quote(driver) + " >" + sh_quote(log) + " 2>&1"
-    if !system(cmd) || !system("test -x " + sh_quote(out_bin))
+    if !system(cmd) || !executable_file?(out_bin)
       << "tungsten: failed to build " + bit_pkg + " (" + entry_name + "); see " + log
       << "  try: cd " + bit_root + " && " + ROOT + "/bin/tungsten build"
       exit(1)
@@ -359,7 +363,7 @@ MANPAGE = manpage_lines.join("\n")
 
   if agent
     primer = ROOT + "/doc/TUNGSTEN_FOR_LLMS.md"
-    if system("test -f " + sh_quote(primer))
+    if File.file?(primer)
       << read_file(primer)
     << ""
     << "More for agents:"
@@ -395,7 +399,7 @@ MANPAGE = manpage_lines.join("\n")
   << "  " + c(use_color, "\e[32m", "bin/tungsten -e '<< 1 + 1'") + "   " + c(use_color, "\e[2m", "#=> 2")
   << ""
 
-  has_compiler = system("test -x " + sh_quote(COMPILER))
+  has_compiler = executable_file?(COMPILER)
   if has_compiler
     << c(use_color, "\e[1m", "Next")
     << ""
@@ -415,7 +419,7 @@ MANPAGE = manpage_lines.join("\n")
     << "Usage: tungsten new <project-name>"
     exit(1)
   name = args[0]
-  if system("test -e " + sh_quote(name))
+  if File.exist?(name)
     << "tungsten new: `" + name + "` already exists"
     exit(1)
   if !system("mkdir " + sh_quote(name))
@@ -561,7 +565,7 @@ when nil
   if args.size > 0
     # First arg may be a .w file → run it
     first = args[0]
-    if first.ends_with?(".w") || system("test -f " + sh_quote(first))
+    if first.ends_with?(".w") || File.file?(first)
       forwarded = ["run"]
       i = 0
       while i < args.size

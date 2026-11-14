@@ -106,10 +106,75 @@ use grade
 -> rgb(c)
   [(c[0] + ~0.0) / ~255.0, (c[1] + ~0.0) / ~255.0, (c[2] + ~0.0) / ~255.0]
 
+-> compute_style_planes(aw, ah, seed, st, upload_metal = false)
+  sk = hash_of(st)
+  n = aw * ah
+  vg = st["vignette"]
+  vig = f32[n]
+  rs_vignette(aw, ah, to_f(vg["amount"]), to_f(vg["x"]), to_f(vg["y"]), to_f(vg["clip"]), to_f(vg["power"]), vig)
+  gr = st["grain"]
+  cnt = gr["count"]
+  var = to_f(get(gr, "blur_var", ~0.49))
+  gkey = id60("grain:" + hash_of(gr))
+  grains = []
+  if cnt >= 2
+    tmps = []
+    g = 0
+    while g < cnt
+      grains.push(f32[n])
+      tmps.push(f32[n])
+      g += 1
+    ths = []
+    g = 0
+    while g < cnt
+      gi = g
+      rk = rng_key(seed, gkey, gi, P_GRAIN)
+      gb = grains[gi]
+      tb = tmps[gi]
+      gth = Thread.new ->
+        rs_grain_tex(rk, aw, ah, var, gb, tb)
+      ths.push(gth)
+      g += 1
+    ths.each ->(t) t.join
+  else
+    tmp = f32[n]
+    g = 0
+    while g < cnt
+      buf = f32[n]
+      rs_grain_tex(rng_key(seed, gkey, g, P_GRAIN), aw, ah, var, buf, tmp)
+      grains.push(buf)
+      g += 1
+  mpb = nil
+  if upload_metal
+    dev = metal_grade_pipes()[0]
+    gb = []
+    grains.each ->(gg)
+      gb.push(metal_buffer_for(dev, gg))
+    mpb = [metal_buffer_for(dev, vig), gb]
+  [vig, grains, sk, mpb]
+
+-> build_shared_planes(proj, r)
+  act = [0, 0, r["w"], r["h"]]
+  pic = proj.cut_cfg(r["cut"])["picture"]
+  act = pic["active"] if pic != nil && pic["active"] != nil
+  aw = act[2]
+  ah = act[3]
+  seed = r["seed"]
+  upload = GRADE["id"] != "cpu"
+  metal_grade_pipes() if upload
+  shared = {}
+  r["tracks"][0]["items"].each ->(it)
+    st = it["style"]
+    if st != nil
+      sk = hash_of(st)
+      if shared[sk] == nil
+        shared[sk] = compute_style_planes(aw, ah, seed, st, upload)
+  shared
+
 + Engine
   ro :out, :w, :h, :lstride, :frames_rendered
 
-  -> new(@proj, @r)
+  -> new(@proj, @r, @shared_planes = nil, @in_pool = false)
     @w = @r["w"]
     @h = @r["h"]
     @num = @r["rate"][0]
@@ -177,6 +242,8 @@ use grade
     @image_order = []
     @seq = {}
     @seq_order = []
+    @cap_strips = {}
+    @cap_order = []
     @item_keys = {}
     @prog_pipes = {}
     @pipe_seq = 0
@@ -207,7 +274,11 @@ use grade
       c.close
     @plates.values.each ->(c)
       c.close
-    Canvas.purge_images
+    @cap_strips.values.each ->(st)
+      st[0].release
+    @cap_strips = {}
+    @cap_order = []
+    Canvas.purge_images if !@in_pool
 
   # ------------------------------------------------------------------------------------------ lookup
 
@@ -236,27 +307,27 @@ use grade
       img = Canvas.load_image(@proj.asset_path(key))
       @images[key] = img
       @image_order.push(key)
-      if @image_order.size > 6
+      if @image_order.size > 8
         old = @image_order[0]
         @image_order = @image_order.drop(1)
-        @images[old].release
+        @images[old].release if !@in_pool
         @images.delete(old)
     img
 
   -> overlay_image(key)
     still(key)
 
-  # Frame-sequence images (clips, animations, program caches): an LRU of 4, released as they fall out.
+  # Frame-sequence images (clips, animations, program caches): an LRU of 32, released as they fall out.
   -> seq_image(path)
     img = @seq[path]
     if img == nil
       img = Canvas.load_image(path)
       @seq[path] = img
       @seq_order.push(path)
-      if @seq_order.size > 4
+      if @seq_order.size > 32
         old = @seq_order[0]
         @seq_order = @seq_order.drop(1)
-        @seq[old].release
+        @seq[old].release if !@in_pool
         @seq.delete(old)
     img
 
@@ -270,25 +341,12 @@ use grade
   # parameters, so an unrelated change to the style (a camera curve) leaves it alone.
   -> planes(st)
     sk = hash_of(st)
+    if @shared_planes != nil
+      spl = @shared_planes[sk]
+      return spl if spl != nil
     pl = @planes[sk]
     if pl == nil
-      n = @aw * @ah
-      vg = st["vignette"]
-      vig = f32[n]
-      rs_vignette(@aw, @ah, to_f(vg["amount"]), to_f(vg["x"]), to_f(vg["y"]), to_f(vg["clip"]), to_f(vg["power"]), vig)
-      gr = st["grain"]
-      cnt = gr["count"]
-      var = to_f(get(gr, "blur_var", ~0.49))
-      gkey = id60("grain:" + hash_of(gr))
-      tmp = f32[n]
-      grains = []
-      g = 0
-      while g < cnt
-        buf = f32[n]
-        rs_grain_tex(rng_key(@seed, gkey, g, P_GRAIN), @aw, @ah, var, buf, tmp)
-        grains.push(buf)
-        g += 1
-      pl = [vig, grains, sk]
+      pl = compute_style_planes(@aw, @ah, @seed, st, GRADE["id"] != "cpu")
       @planes[sk] = pl
     pl
 
@@ -836,6 +894,36 @@ use grade
 
   # ------------------------------------------------------------------------------------------ frame
 
+  -> draw_caption_cue(ci, cue)
+    st = @cap_strips[ci]
+    if st == nil
+      b = cue["box"]
+      sy = [b[1] - 16, 0].max
+      ey = [b[1] + b[3] + 16, @h].min
+      sh = [ey - sy, 1].max
+      c = Canvas.new(@w, sh)
+      c.save
+      c.translate(0, 0 - sy)
+      c.rect(b[0], b[1], b[2], b[3], fill: cue["background"])
+      cue["lines"].each ->(line)
+        c.save
+        c.translate(line["x"], line["y"])
+        line["paths"].each ->(path)
+          c.path(path, fill: cue["foreground"])
+        c.restore
+      c.restore
+      snap = c.snapshot
+      c.close
+      st = [snap, sy, sh]
+      @cap_strips[ci] = st
+      @cap_order.push(ci)
+      if @cap_order.size > 8
+        old = @cap_order[0]
+        @cap_order = @cap_order.drop(1)
+        @cap_strips[old][0].release
+        @cap_strips.delete(old)
+    @layer0.image(st[0], 0, st[1], @w, st[2])
+
   # Composite frame f into @layer0 (@l0, RGBA8 with stride @lstride). Returns @l0.
   -> frame_rgba(f)
     x = interval_at(f)
@@ -872,17 +960,14 @@ use grade
     if @proj.ep["burned_captions"] != nil
       ms = f * @r["rate"][1] * 1000 / @r["rate"][0]
       drew_cap = false
-      @proj.ep["burned_captions"].each ->(cue)
+      cues = @proj.ep["burned_captions"]
+      ci = 0
+      while ci < cues.size
+        cue = cues[ci]
         if cue["start_ms"] <= ms && ms < cue["end_ms"]
-          b = cue["box"]
-          @layer0.rect(b[0], b[1], b[2], b[3], fill: cue["background"])
-          cue["lines"].each ->(line)
-            @layer0.save
-            @layer0.translate(line["x"], line["y"])
-            line["paths"].each ->(path)
-              @layer0.path(path, fill: cue["foreground"])
-            @layer0.restore
+          draw_caption_cue(ci, cue)
           drew_cap = true
+        ci += 1
       @l0 = @layer0.data_pointer if drew_cap
     @frames_rendered += 1
     @l0
@@ -928,33 +1013,11 @@ use grade
   dir + "/" + pad_int(first + idx, digits) + ext
 
 -> rs_rgb_to_canvas(src, w, h, dst, stride) (u8[] i64 i64 i64 i64) i64
-  y = 0
-  while y < h
-    x = 0
-    while x < w
-      i = (y * w + x) * 3
-      p = y * stride + x * 4
-      raw_store_u8(dst, p, src[i])
-      raw_store_u8(dst, p + 1, src[i + 1])
-      raw_store_u8(dst, p + 2, src[i + 2])
-      raw_store_u8(dst, p + 3, 255)
-      x += 1
-    y += 1
+  ccall("w_media_studio_op", "rgb_to_canvas", src, [w, 0, h, dst, stride], 0)
   0
 
 -> rs_rgb_rows_to_canvas(src, w, y0, y1, dst, stride) (u8[] i64 i64 i64 i64 i64) i64
-  y = y0
-  while y < y1
-    x = 0
-    while x < w
-      i = (y * w + x) * 3
-      p = y * stride + x * 4
-      raw_store_u8(dst, p, src[i])
-      raw_store_u8(dst, p + 1, src[i + 1])
-      raw_store_u8(dst, p + 2, src[i + 2])
-      raw_store_u8(dst, p + 3, 255)
-      x += 1
-    y += 1
+  ccall("w_media_studio_op", "rgb_to_canvas", src, [w, y0, y1, dst, stride], 0)
   0
 
 -> rs_str_rgb_to_canvas(src, w, h, dst, stride) (String i64 i64 i64 i64) i64

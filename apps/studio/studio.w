@@ -103,8 +103,8 @@ use lib/flac
   eng.close
   0
 
-# studio render <episode.json> [--jobs N] [--max-frames N] [--from F] [--to F]: render the missing segments, at
-# most max-frames per call (one heavy-lock hold), split across N worker processes.
+# studio render <episode.json> [--jobs N] [--max-frames N] [--from F] [--to F] [--also-mix]: render the missing
+# segments, at most max-frames per call, split across N in-process worker threads (and optionally mix audio concurrently).
 -> cmd_render(args)
   t0 = clock_ms()
   p = Project.new(args[1], opt(args, "--cut", "full"))
@@ -114,6 +114,15 @@ use lib/flac
   if flag?(args, "--write-captions")
     write_text(p.out_path("captions.srt"), srt_text(r))
     write_text(p.out_path("chapters.txt"), chapters_text(r))
+  mix_th = nil
+  if flag?(args, "--also-mix")
+    mix_th = Thread.new ->
+      m_res = nil
+      begin
+        m_res = ["ok", run_mix_for(p, r)]
+      rescue err
+        m_res = ["err", err.to_s]
+      m_res
   jobs = opt(args, "--jobs", "1").to_i
   budget = opt(args, "--max-frames", "400").to_i
   lo = opt(args, "--from", "0").to_i
@@ -136,6 +145,9 @@ use lib/flac
     tf += segs[missing[mi]]["n"]
     mi += 1
   if take.size == 0
+    if mix_th != nil
+      mr = mix_th.join
+      die("mix failed: " + mr[1]) if mr[0] != "ok"
     << "render: nothing to do (" + segs.size.to_s + " segments in place)"
     return 0
   mkdir_p(p.build + "/tmp")
@@ -149,24 +161,42 @@ use lib/flac
   else
     nw = jobs < take.size ? jobs : take.size
     tok = run_token()
-    jf = p.build + "/tmp/job." + tok + ".txt"
     claim_dir = p.build + "/tmp/claim." + tok
     mkdir_p(claim_dir)
-    File.write(jf, take.join(","))
-    procs = []
+    shared_planes = build_shared_planes(p, r)
+    ths = []
     j = 0
     while j < nw
-      procs.push(Process.spawn([studio_bin(), "worker", p.path, p.cut, jf, claim_dir]))
+      wj = j
+      wth = Thread.new ->
+        w_rc = 0
+        begin
+          weng = Engine.new(p, r, shared_planes, true)
+          wenc = make_encoder(r, p.encoder, p.build + "/tmp/fifo." + tok + "." + wj.to_s)
+          render_segments(weng, wenc, r, p.build, take, claim_dir)
+          weng.close
+        rescue err
+          << "studio worker error: " + err.to_s
+          w_rc = 1
+        w_rc
+      ths.push(wth)
       j += 1
     bad = 0
-    procs.each ->(pr)
-      bad += 1 if pr.wait != 0
-    File.delete(jf) if File.exist?(jf)
+    ths.each ->(t)
+      bad += 1 if t.join != 0
+    Canvas.purge_images
     File.entries(claim_dir).each ->(nm)
       if nm != "." && nm != ".."
         Dir.rmdir(claim_dir + "/" + nm)
     Dir.rmdir(claim_dir)
+    if mix_th != nil
+      mr = mix_th.join
+      die("mix failed: " + mr[1]) if mr[0] != "ok"
+      mix_th = nil
     die("render: " + bad.to_s + " worker(s) failed") if bad > 0
+  if mix_th != nil
+    mr = mix_th.join
+    die("mix failed: " + mr[1]) if mr[0] != "ok"
   dt = clock_ms() - t0
   << "render: " + tf.to_s + " frames in " + take.size.to_s + " segments, " + dt.to_s + " ms (" + ((tf * 1000) / [dt, 1].max).to_s + " fps); " + (missing_frames - tf).to_s + " frames (" + (missing.size - take.size).to_s + " segments) still missing"
   0

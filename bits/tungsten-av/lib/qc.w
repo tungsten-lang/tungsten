@@ -80,7 +80,8 @@ in Av
 
   -> .run(project, media, path, plan, directory, reference = nil, timeline = nil, subtitles = nil, pre_audio = nil, pre_sha = nil)
     File.mkdir_p(directory)
-    before = pre_sha != nil ? pre_sha : Util.sha(path)
+    before_stamp = Util.stamp(path)
+    before = pre_sha != nil ? pre_sha : Util.sha_cached(path)
     p = plan["profile"]
     results = {}
     results["source_gates"] = source_gates(plan["gates"]) if plan["gates"].size > 0
@@ -140,7 +141,7 @@ in Av
           band_by_frame[band_frames[bi]] = extracted[base_i + bi]
           bi += 1
         results["banding"] = Banding.run(project, media, path, plan, directory, timeline, band_by_frame, band_spec, before)
-    raise "output changed during QC" if Util.sha(path) != before
+    raise "output changed during QC" if Util.stamp(path) != before_stamp || Util.sha_cached(path) != before
     result = {"ok": Util.all(results.values.map ->(r) r["ok"]), "sha256": before, "checks": results}
     Util.json(directory + "/qc.json", result)
     result

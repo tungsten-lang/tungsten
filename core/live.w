@@ -29,6 +29,10 @@
 -> live_zone_file(sampler, path, head_frames = 16384)
   ccall("w_media_live_zone_file", sampler, path, head_frames)
 
+# batch parallel loader for sample files → [[zone, rate, frames, first sound frame], ...]
+-> live_zone_files(sampler, paths, head_frames = 16384)
+  ccall("w_media_live_zone_files", sampler, paths, head_frames)
+
 # the 64-tap sinc table to interpolate with (sampler.w sinc_get: 513 × 64 coefficients), else linear
 -> live_sinc(sampler, table)
   ccall("w_media_live_sinc", sampler, table)

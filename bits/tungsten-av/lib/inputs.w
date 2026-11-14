@@ -1,16 +1,22 @@
 in Av
 
 + Inputs
+  LAST_IMPL_ENTRIES = {}
+
+  -> .last_entries(toolchain)
+    LAST_IMPL_ENTRIES[toolchain]
+
   -> .implementation(toolchain, package, workspace = nil)
     paths = [toolchain + "/bin/tungsten", toolchain + "/bin/tungsten-compiler"]
     test_prefix = toolchain + "/compiler/test/"
     ["runtime", "core", "compiler", "apps/studio", "bits/tungsten-av", "bits/tungsten-bit"].each ->(tree)
       File.walk(toolchain + "/" + tree, ->(path)
-        paths.push(path) if !path.starts_with?(test_prefix) && File.file?(path) && [".w", ".c", ".m", ".h"].include?(File.extname(path))
+        paths.push(path) if [".w", ".c", ".m", ".h"].include?(File.extname(path)) && !path.starts_with?(test_prefix) && File.file?(path)
       )
-    File.walk(package, ->(path)
-      paths.push(path) if File.file?(path) && [".w", ".c", ".m", ".h"].include?(File.extname(path))
-    )
+    if package != toolchain + "/bits/tungsten-av"
+      File.walk(package, ->(path)
+        paths.push(path) if [".w", ".c", ".m", ".h"].include?(File.extname(path)) && File.file?(path)
+      )
     files = {}
     entries = []
     Util.unique(paths).each ->(path)
@@ -18,6 +24,7 @@ in Av
       sha = Util.sha_cached(path)
       files[key] = sha
       entries.push([key, sha])
+    LAST_IMPL_ENTRIES[toolchain] = entries
     digest = Crypto.sha256(JSON.encode(entries))
     runtime = ccall("w_media_runtime_identity")
     if workspace != nil
@@ -32,7 +39,7 @@ in Av
   -> seal(source)
     source = File.realpath(source)
     before = Util.stamp(source)
-    digest = Util.sha(source)
+    digest = Util.sha_cached(source)
     raise "input changed while hashing: [source]" if before != Util.stamp(source)
     File.mkdir_p(@directory)
     destination = @directory + "/" + digest + File.extname(source).downcase
@@ -41,12 +48,12 @@ in Av
     method = "reused"
     begin
       if File.exist?(destination)
-        raise "sealed input is corrupt: [destination]" if Util.sha(destination) != digest
+        raise "sealed input is corrupt: [destination]" if Util.sha_cached(destination) != digest
       else
         free = ccall("w_av_free", @directory)
         raise "insufficient disk for input snapshot and reserve" if free < before[2] + @reserve
         method = Util.copy_file(source, temporary)
-        raise "input changed during snapshot: [source]" if before != Util.stamp(source) || Util.sha(temporary) != digest
+        raise "input changed during snapshot: [source]" if before != Util.stamp(source) || (method != "clone" && Util.sha(temporary) != digest)
         File.chmod(temporary, 0o444)
         Util.sync(temporary)
         File.atomic_replace(temporary, destination)
@@ -111,7 +118,7 @@ in Av
           data = data.replace(item[0], "use \"" + replacement.slice(0, replacement.size - 2) + "\"") if replacement != nil
         expected = Crypto.sha256(data)
       if File.exist?(target)
-        raise "frozen input tree is corrupt: [target]" if Util.sha(target) != expected
+        raise "frozen input tree is corrupt: [target]" if Util.sha_cached(target) != expected
       else
         File.mkdir_p(File.dirname(target))
         tmp = target + ".part-" + Util.id()

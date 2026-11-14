@@ -710,6 +710,8 @@ module Tungsten
 
           FileUtils.touch(path_string(args[0]))
           true
+        rescue SystemCallError
+          false
         end
 
         interpreter.define_builtin("file_symlink") do |_recv, args, _block|

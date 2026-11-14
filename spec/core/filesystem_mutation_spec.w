@@ -39,6 +39,11 @@ begin
   check("atomic_write.new_permissions", File.stat(fresh).permissions == 0o600)
   File.unlink(fresh)
 
+  touched = base + ".touched"
+  check("touch.create", File.touch(touched) && File.exist?(touched) && File.size(touched) == 0)
+  check("touch.existing", File.touch(touched) && File.mtime_ns(touched) != nil)
+  File.unlink(touched)
+
   begin
     File.chmod(atomic, 0o10000)
     check("chmod.invalid", false)

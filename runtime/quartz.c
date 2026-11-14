@@ -2356,7 +2356,14 @@ static void cg_exact_band(void *ctx, size_t bi) {
     }
     int nsr = sr1 - sr0 + 1;
     if (nsr <= 0) return;
-    size_t need = (size_t)(nsr + 1) * (size_t)nq * 4;
+    int sx0 = j->iw, sx1 = -1;
+    for (int o = 0; o < nq; o++) {
+        int a = cg_clampi(j->hf[o], 0, maxx), b = cg_clampi(j->hf[o] + j->hc[o] - 1, 0, maxx);
+        if (a < sx0) sx0 = a;
+        if (b > sx1) sx1 = b;
+    }
+    int nsx = sx1 >= sx0 ? sx1 - sx0 + 1 : 0;
+    size_t need = (size_t)(nsr + 1) * (size_t)nq * 4 + (size_t)(nsx + 4) * 4;
     float *buf = g_exact_tls;
     if (need > g_exact_tls_cap) {
         float *nb = realloc(buf, need * sizeof(float));
@@ -2366,37 +2373,45 @@ static void cg_exact_band(void *ctx, size_t bi) {
     }
     float *tmp = buf;
     float *acc = buf + (size_t)nsr * (size_t)nq * 4;
+    float *srow = acc + (size_t)nq * 4;
     for (int y = 0; y < nsr; y++) {
         const uint8_t *row = j->src + (size_t)(sr0 + y) * j->sst;
         float *out = tmp + (size_t)y * (size_t)nq * 4;
+#if defined(__aarch64__)
+        int xi = 0;
+        const uint8_t *sp0 = row + (size_t)sx0 * 4;
+        for (; xi + 4 <= nsx; xi += 4) {
+            uint8x16_t u = vld1q_u8(sp0 + (size_t)xi * 4);
+            uint16x8_t lo = vmovl_u8(vget_low_u8(u)), hi = vmovl_u8(vget_high_u8(u));
+            vst1q_f32(srow + (size_t)xi * 4,      vcvtq_f32_u32(vmovl_u16(vget_low_u16(lo))));
+            vst1q_f32(srow + (size_t)xi * 4 + 4,  vcvtq_f32_u32(vmovl_u16(vget_high_u16(lo))));
+            vst1q_f32(srow + (size_t)xi * 4 + 8,  vcvtq_f32_u32(vmovl_u16(vget_low_u16(hi))));
+            vst1q_f32(srow + (size_t)xi * 4 + 12, vcvtq_f32_u32(vmovl_u16(vget_high_u16(hi))));
+        }
+        for (; xi < nsx; xi++) {
+            const uint8_t *p = sp0 + (size_t)xi * 4;
+            float *d = srow + (size_t)xi * 4;
+            d[0] = p[0]; d[1] = p[1]; d[2] = p[2]; d[3] = p[3];
+        }
         for (int o = 0; o < nq; o++) {
             const float *w = j->hw + (size_t)o * (size_t)ht;
             int f0 = j->hf[o], n = j->hc[o];
-#if defined(__aarch64__)
             float32x4_t av = vdupq_n_f32(0.0f);
             if (f0 >= 0 && f0 + n - 1 <= maxx) {
-                const uint8_t *s = row + (size_t)f0 * 4;
-                for (int k = 0; k < n; k++, s += 4) {
-                    uint32_t raw;
-                    memcpy(&raw, s, 4);
-                    uint8x8_t u8 = vreinterpret_u8_u32(vdup_n_u32(raw));
-                    uint16x4_t u16 = vget_low_u16(vmovl_u8(u8));
-                    float32x4_t px = vcvtq_f32_u32(vmovl_u16(u16));
-                    av = vmlaq_n_f32(av, px, w[k]);
-                }
+                const float *sf = srow + (size_t)(f0 - sx0) * 4;
+                for (int k = 0; k < n; k++, sf += 4) av = vmlaq_n_f32(av, vld1q_f32(sf), w[k]);
             } else {
                 for (int k = 0; k < n; k++) {
-                    const uint8_t *s = row + (size_t)cg_clampi(f0 + k, 0, maxx) * 4;
-                    uint32_t raw;
-                    memcpy(&raw, s, 4);
-                    uint8x8_t u8 = vreinterpret_u8_u32(vdup_n_u32(raw));
-                    uint16x4_t u16 = vget_low_u16(vmovl_u8(u8));
-                    float32x4_t px = vcvtq_f32_u32(vmovl_u16(u16));
-                    av = vmlaq_n_f32(av, px, w[k]);
+                    const float *sf = srow + (size_t)(cg_clampi(f0 + k, 0, maxx) - sx0) * 4;
+                    av = vmlaq_n_f32(av, vld1q_f32(sf), w[k]);
                 }
             }
             vst1q_f32(out + o * 4, av);
+        }
 #else
+        for (int o = 0; o < nq; o++) {
+            const float *w = j->hw + (size_t)o * (size_t)ht;
+            int f0 = j->hf[o], n = j->hc[o];
             float a0 = 0, a1 = 0, a2 = 0, a3 = 0;
             if (f0 >= 0 && f0 + n - 1 <= maxx) {
                 const uint8_t *s = row + (size_t)f0 * 4;
@@ -2412,8 +2427,8 @@ static void cg_exact_band(void *ctx, size_t bi) {
                 }
             }
             out[o * 4] = a0; out[o * 4 + 1] = a1; out[o * 4 + 2] = a2; out[o * 4 + 3] = a3;
-#endif
         }
+#endif
     }
     float opf = j->opf;
     int n4 = nq * 4;
@@ -2447,7 +2462,55 @@ static void cg_exact_band(void *ctx, size_t bi) {
 #endif
         }
         uint8_t *drow = j->dst + (size_t)(j->r0 + o) * j->dst_stride + (size_t)j->q0 * 4;
-        for (int q = 0; q < nq; q++) {
+        int q = 0;
+#if defined(__aarch64__)
+        float32x4_t vzero = vdupq_n_f32(0.0f), vmax8 = vdupq_n_f32(255.0f), vhalf = vdupq_n_f32(0.5f);
+        uint32x4_t valpha_ff = vdupq_n_u32(0xFF000000u);
+        for (; q + 4 <= nq; q += 4) {
+            float32x4_t p0 = vmulq_n_f32(vld1q_f32(acc + q * 4), opf);
+            float32x4_t p1 = vmulq_n_f32(vld1q_f32(acc + q * 4 + 4), opf);
+            float32x4_t p2 = vmulq_n_f32(vld1q_f32(acc + q * 4 + 8), opf);
+            float32x4_t p3 = vmulq_n_f32(vld1q_f32(acc + q * 4 + 12), opf);
+            if (vgetq_lane_f32(p0, 3) >= 254.999f && vgetq_lane_f32(p1, 3) >= 254.999f &&
+                vgetq_lane_f32(p2, 3) >= 254.999f && vgetq_lane_f32(p3, 3) >= 254.999f) {
+                uint16x8_t u01 = vcombine_u16(
+                    vmovn_u32(vcvtq_u32_f32(vaddq_f32(vminq_f32(vmaxq_f32(p0, vzero), vmax8), vhalf))),
+                    vmovn_u32(vcvtq_u32_f32(vaddq_f32(vminq_f32(vmaxq_f32(p1, vzero), vmax8), vhalf))));
+                uint16x8_t u23 = vcombine_u16(
+                    vmovn_u32(vcvtq_u32_f32(vaddq_f32(vminq_f32(vmaxq_f32(p2, vzero), vmax8), vhalf))),
+                    vmovn_u32(vcvtq_u32_f32(vaddq_f32(vminq_f32(vmaxq_f32(p3, vzero), vmax8), vhalf))));
+                uint8x16_t b8 = vcombine_u8(vmovn_u16(u01), vmovn_u16(u23));
+                vst1q_u8(drow + q * 4, vreinterpretq_u8_u32(vorrq_u32(vreinterpretq_u32_u8(b8), valpha_ff)));
+                continue;
+            }
+            for (int sub = 0; sub < 4; sub++) {
+                int qq = q + sub;
+                float sa = acc[qq * 4 + 3] * opf;
+                if (sa > 255.0f) sa = 255.0f;
+                if (sa < 0.0f) sa = 0.0f;
+                if (sa >= 254.999f) {
+                    for (int ch = 0; ch < 3; ch++) {
+                        float sv = acc[qq * 4 + ch] * opf;
+                        if (sv < 0.0f) sv = 0.0f;
+                        if (sv > 255.0f) sv = 255.0f;
+                        drow[qq * 4 + ch] = (uint8_t)(int)(sv + 0.5f);
+                    }
+                    drow[qq * 4 + 3] = 255;
+                } else {
+                    float keep = 1.0f - sa / 255.0f;
+                    for (int ch = 0; ch < 4; ch++) {
+                        float sv = ch == 3 ? sa : acc[qq * 4 + ch] * opf;
+                        if (sv < 0.0f) sv = 0.0f;
+                        if (sv > sa && ch != 3) sv = sa;
+                        float v = sv + drow[qq * 4 + ch] * keep;
+                        int iv = (int)(v + 0.5f);
+                        drow[qq * 4 + ch] = (uint8_t)(iv > 255 ? 255 : iv < 0 ? 0 : iv);
+                    }
+                }
+            }
+        }
+#endif
+        for (; q < nq; q++) {
             float sa = acc[q * 4 + 3] * opf;
             if (sa > 255.0f) sa = 255.0f;
             if (sa < 0.0f) sa = 0.0f;
@@ -2499,6 +2562,61 @@ static int cg_image_draw_exact(CGCanvas *c, CGImg *im, CGImageRef img, double dx
     int r0 = cg_clampi((int)floor(fmin(ra, rb) + 0.5), 0, H), r1 = cg_clampi((int)ceil(fmax(ra, rb) - 0.5), 0, H);
     int nq = q1 - q0, nr = r1 - r0;
     if (nq <= 0 || nr <= 0) return 1;
+    /* Exact 1:1 integer-aligned copy/blend fast path (avoids 6x6 Keys cubic convolution). */
+    if (op >= 0.999999 && fabs(pxs - 1.0) < 1e-9 && fabs(pys - 1.0) < 1e-9 &&
+        fabs((px0 + q0 * pxs) - floor(px0 + q0 * pxs + 0.5)) < 1e-6 &&
+        fabs((py0 + r0 * pys) - floor(py0 + r0 * pys + 0.5)) < 1e-6) {
+        int sx_start = (int)floor(px0 + q0 * pxs + 0.5);
+        int sy_start = (int)floor(py0 + r0 * pys + 0.5);
+        if (sx_start >= 0 && sy_start >= 0 && sx_start + nq <= (int)iw && sy_start + nr <= (int)ih) {
+            CGImageAlphaInfo ai = CGImageGetAlphaInfo(img);
+            int opaque_src = (ai == kCGImageAlphaNone || ai == kCGImageAlphaNoneSkipLast || ai == kCGImageAlphaNoneSkipFirst);
+            for (int o = 0; o < nr; o++) {
+                const uint8_t *srow = src + (size_t)(sy_start + o) * sst + (size_t)sx_start * 4;
+                uint8_t *drow = (uint8_t *)c->data + (size_t)(r0 + o) * c->stride + (size_t)q0 * 4;
+                if (opaque_src) {
+                    memcpy(drow, srow, (size_t)nq * 4);
+                } else {
+                    int q = 0;
+#if defined(__aarch64__)
+                    for (; q + 4 <= nq; q += 4) {
+                        uint32x4_t spx = vld1q_u32((const uint32_t *)(const void *)(srow + q * 4));
+                        if (vminvq_u32(vshrq_n_u32(spx, 24)) == 255u) {
+                            vst1q_u32((uint32_t *)(void *)(drow + q * 4), spx);
+                            continue;
+                        }
+                        for (int sub = 0; sub < 4; sub++) {
+                            int qq = q + sub;
+                            uint8_t sa = srow[qq * 4 + 3];
+                            if (sa == 255) { memcpy(drow + qq * 4, srow + qq * 4, 4); }
+                            else if (sa > 0) {
+                                float keep = 1.0f - (float)sa / 255.0f;
+                                for (int ch = 0; ch < 4; ch++) {
+                                    float v = (float)srow[qq * 4 + ch] + (float)drow[qq * 4 + ch] * keep;
+                                    int iv = (int)(v + 0.5f);
+                                    drow[qq * 4 + ch] = (uint8_t)(iv > 255 ? 255 : iv < 0 ? 0 : iv);
+                                }
+                            }
+                        }
+                    }
+#endif
+                    for (; q < nq; q++) {
+                        uint8_t sa = srow[q * 4 + 3];
+                        if (sa == 255) { memcpy(drow + q * 4, srow + q * 4, 4); }
+                        else if (sa > 0) {
+                            float keep = 1.0f - (float)sa / 255.0f;
+                            for (int ch = 0; ch < 4; ch++) {
+                                float v = (float)srow[q * 4 + ch] + (float)drow[q * 4 + ch] * keep;
+                                int iv = (int)(v + 0.5f);
+                                drow[q * 4 + ch] = (uint8_t)(iv > 255 ? 255 : iv < 0 ? 0 : iv);
+                            }
+                        }
+                    }
+                }
+            }
+            return 1;
+        }
+    }
     int *hf, *hc, *vf, *vc;
     float *hw, *vw;
     int ht = cg_exact_weights(nq, px0 + q0 * pxs, pxs, (int)iw, &hf, &hc, &hw);
@@ -2644,7 +2762,17 @@ static int cg_image_try_direct_rgba8(CGImageRef img, size_t w, size_t h, uint8_t
             for (size_t y = 0; y < h; y++) {
                 const uint8_t *s = src + y * st;
                 uint8_t *d = dst_rgb8 + y * w * 3;
-                for (size_t x = 0; x < w; x++, s += step, d += 3) {
+                size_t x = 0;
+#if defined(__aarch64__)
+                if (step == 4) {
+                    for (; x + 16 <= w; x += 16, s += 64, d += 48) {
+                        uint8x16x4_t p = vld4q_u8(s);
+                        uint8x16x3_t o = {{p.val[r_off], p.val[g_off], p.val[b_off]}};
+                        vst3q_u8(d, o);
+                    }
+                }
+#endif
+                for (; x < w; x++, s += step, d += 3) {
                     d[0] = s[r_off]; d[1] = s[g_off]; d[2] = s[b_off];
                 }
             }
@@ -2652,7 +2780,38 @@ static int cg_image_try_direct_rgba8(CGImageRef img, size_t w, size_t h, uint8_t
             for (size_t y = 0; y < h; y++) {
                 const uint8_t *s = src + y * st;
                 uint8_t *d = dst_rgb8 + y * w * 3;
-                for (size_t x = 0; x < w; x++, s += step, d += 3) {
+                size_t x = 0;
+#if defined(__aarch64__)
+                if (step == 4 && bg_black) {
+                    uint16x8_t v127 = vdupq_n_u16(127), v1 = vdupq_n_u16(1);
+                    for (; x + 16 <= w; x += 16, s += 64, d += 48) {
+                        uint8x16x4_t p = vld4q_u8(s);
+                        uint8x16_t a = p.val[a_off];
+                        if (vminvq_u8(a) == 255) {
+                            uint8x16x3_t o = {{p.val[r_off], p.val[g_off], p.val[b_off]}};
+                            vst3q_u8(d, o);
+                        } else {
+                            uint8x8_t al = vget_low_u8(a), ah = vget_high_u8(a);
+                            uint16x8_t rl = vaddq_u16(vmull_u8(vget_low_u8(p.val[r_off]), al), v127);
+                            uint16x8_t rh = vaddq_u16(vmull_u8(vget_high_u8(p.val[r_off]), ah), v127);
+                            uint16x8_t gl = vaddq_u16(vmull_u8(vget_low_u8(p.val[g_off]), al), v127);
+                            uint16x8_t gh = vaddq_u16(vmull_u8(vget_high_u8(p.val[g_off]), ah), v127);
+                            uint16x8_t bl = vaddq_u16(vmull_u8(vget_low_u8(p.val[b_off]), al), v127);
+                            uint16x8_t bh = vaddq_u16(vmull_u8(vget_high_u8(p.val[b_off]), ah), v127);
+                            uint8x16x3_t o = {{
+                                vcombine_u8(vshrn_n_u16(vaddq_u16(vaddq_u16(rl, vshrq_n_u16(rl, 8)), v1), 8),
+                                            vshrn_n_u16(vaddq_u16(vaddq_u16(rh, vshrq_n_u16(rh, 8)), v1), 8)),
+                                vcombine_u8(vshrn_n_u16(vaddq_u16(vaddq_u16(gl, vshrq_n_u16(gl, 8)), v1), 8),
+                                            vshrn_n_u16(vaddq_u16(vaddq_u16(gh, vshrq_n_u16(gh, 8)), v1), 8)),
+                                vcombine_u8(vshrn_n_u16(vaddq_u16(vaddq_u16(bl, vshrq_n_u16(bl, 8)), v1), 8),
+                                            vshrn_n_u16(vaddq_u16(vaddq_u16(bh, vshrq_n_u16(bh, 8)), v1), 8))
+                            }};
+                            vst3q_u8(d, o);
+                        }
+                    }
+                }
+#endif
+                for (; x < w; x++, s += step, d += 3) {
                     unsigned a = s[a_off];
                     if (bg_black) {
                         d[0] = (uint8_t)((s[r_off] * a + 127u) / 255u);
@@ -2675,7 +2834,21 @@ static int cg_image_try_direct_rgba8(CGImageRef img, size_t w, size_t h, uint8_t
         for (size_t y = 0; y < h; y++) {
             const uint8_t *s = src + y * st;
             uint8_t *d = dst_rgb16 + y * w * 6;
-            for (size_t x = 0; x < w; x++, s += step, d += 6) {
+            size_t x = 0;
+#if defined(__aarch64__)
+            if (step == 4 && (a_off < 0 || !bg_black || premul)) {
+                for (; x + 8 <= w; x += 8, s += 32, d += 48) {
+                    uint8x8x4_t p = vld4_u8(s);
+                    uint16x8x3_t o = {{
+                        vorrq_u16(vmovl_u8(p.val[r_off]), vshll_n_u8(p.val[r_off], 8)),
+                        vorrq_u16(vmovl_u8(p.val[g_off]), vshll_n_u8(p.val[g_off], 8)),
+                        vorrq_u16(vmovl_u8(p.val[b_off]), vshll_n_u8(p.val[b_off], 8))
+                    }};
+                    vst3q_u16((uint16_t *)(void *)d, o);
+                }
+            }
+#endif
+            for (; x < w; x++, s += step, d += 6) {
                 unsigned r = s[r_off], g = s[g_off], b = s[b_off];
                 if (a_off >= 0 && bg_black && !premul) {
                     unsigned a = s[a_off];
@@ -3062,7 +3235,6 @@ static CGImageRef cg_borrow_for_encode(CGCanvas *c, int alpha) {
 }
 
 static CFDictionaryRef cg_dest_props(const char *type, double quality) {
-#ifdef IMAGEIO_PNG_NO_FILTERS
     if (type && cg_eq(type, "png") && quality >= 0 && quality < 0.5) {
         int flt = IMAGEIO_PNG_NO_FILTERS;
         CFNumberRef fn = CFNumberCreate(NULL, kCFNumberIntType, &flt);
@@ -3076,8 +3248,6 @@ static CFDictionaryRef cg_dest_props(const char *type, double quality) {
         CFRelease(pd);
         return d;
     }
-#endif
-    (void)type;
     if (!(quality >= 0 && quality <= 1)) return NULL;
     CGFloat q = quality;
     CFNumberRef qn = CFNumberCreate(NULL, kCFNumberCGFloatType, &q);

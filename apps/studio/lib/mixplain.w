@@ -99,13 +99,9 @@ use audio
     i += 1
   0
 
-# studio mix: the plain mix for episodes that ask for it, else lib/audio.w's chain (cmd_mix).
--> cmd_mix_any(args)
-  cut = (args.size > 3 && args[2] == "--cut") ? args[3] : "full"
-  p = Project.new(args[1], cut)
-  return cmd_mix(args) if get(p.ep["mix"], "mode", "chain") != "plain"
-  p.verify_assets(true)
-  r = p.resolve
+# Run the plain or chain mix on an already-verified and resolved (p, r).
+-> run_mix_for(p, r)
+  return run_chain_mix(p, r) if get(p.ep["mix"], "mode", "chain") != "plain"
   out = p.out_path("mix.wav")
   # the plain mixer's own version is part of its cache key
   key = sha(mix_key(p, r) + ":plain-mix-2")
@@ -123,3 +119,11 @@ use audio
   << "mix (plain): " + rep["samples"].to_s + " samples (" + timecode(r["frames"], r["rate"][0], r["rate"][1]) + "), " + rep["lines"].to_s + " lines, " + rep["cues"].to_s + " cues; " + fixed6(rep["lufs_premaster"]) + " LUFS + " + fixed6(rep["gain_db"]) + " dB -> " + fixed6(rep["lufs"]) + " LUFS, true peak " + fixed6(rep["true_peak_dbtp"]) + " dBTP -> " + out
   << "mix timing ms: " + JSON.encode(rep["ms"])
   0
+
+# studio mix: the plain mix for episodes that ask for it, else lib/audio.w's chain (cmd_mix).
+-> cmd_mix_any(args)
+  cut = (args.size > 3 && args[2] == "--cut") ? args[3] : "full"
+  p = Project.new(args[1], cut)
+  p.verify_assets(true)
+  r = p.resolve
+  run_mix_for(p, r)

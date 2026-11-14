@@ -295,7 +295,7 @@ P_IR = 8
 
 # Write text atomically (tmp + rename).
 -> write_text(path, text)
-  tmp = path + ".tmp." + ccall("w_media_pid").to_s
+  tmp = path + ".tmp." + run_token()
   File.write(tmp, text)
   File.rename(tmp, path)
   path

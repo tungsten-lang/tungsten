@@ -2,14 +2,21 @@ in Av
 
 + Timeline
   -> .studio_identity(toolchain)
-    paths = [toolchain + "/bin/tungsten", toolchain + "/bin/tungsten-compiler"]
-    ["runtime", "core", "apps/studio"].each ->(tree)
-      File.walk(toolchain + "/" + tree, ->(path)
-        paths.push(path) if File.file?(path) && [".w", ".c", ".m", ".h"].include?(File.extname(path))
-      )
     entries = []
-    Util.unique(paths).each ->(path)
-      entries.push([path.slice(toolchain.size + 1, path.size), Util.sha_cached(path)])
+    cached = Inputs.last_entries(toolchain)
+    if cached != nil
+      cached.each ->(pair)
+        rel = pair[0]
+        if rel == "bin/tungsten" || rel == "bin/tungsten-compiler" || rel.starts_with?("runtime/") || rel.starts_with?("core/") || rel.starts_with?("apps/studio/")
+          entries.push(pair)
+    else
+      paths = [toolchain + "/bin/tungsten", toolchain + "/bin/tungsten-compiler"]
+      ["runtime", "core", "apps/studio"].each ->(tree)
+        File.walk(toolchain + "/" + tree, ->(path)
+          paths.push(path) if [".w", ".c", ".m", ".h"].include?(File.extname(path)) && File.file?(path)
+        )
+      Util.unique(paths).each ->(path)
+        entries.push([path.slice(toolchain.size + 1, path.size), Util.sha_cached(path)])
     Crypto.sha256(JSON.encode([entries, Env.get("TUNGSTEN_FREE") || "", Env.get("TUNGSTEN_DEFINES") || ""]))
 
   -> .cached_binary(toolchain, runner, name, entry_rel, log = nil)
@@ -96,15 +103,18 @@ in Av
     primary = plan["profiles"][name]
     budget = Budget.new(project.resources).choose(primary["width"], primary["height"])
     max_frames = plan["timeline"] != nil ? plan["timeline"]["frames"] : 1000000000
-    studio.call(["render", "--jobs", budget["jobs"], "--animation-jobs", budget["animation_jobs"], "--max-frames", max_frames, "--write-captions"])
-    resolved = JSON.parse(File.read(directory + "/build/" + cut + "/timeline.resolved.json"))
-    resolved["av_episode"] = episode
-    mix_target = directory + "/build/" + cut + "/mix.wav"
     if project.settings["mix"]
+      studio.call(["render", "--jobs", budget["jobs"], "--animation-jobs", budget["animation_jobs"], "--max-frames", max_frames, "--write-captions"])
+      resolved = JSON.parse(File.read(directory + "/build/" + cut + "/timeline.resolved.json"))
+      resolved["av_episode"] = episode
+      mix_target = directory + "/build/" + cut + "/mix.wav"
       raise "insufficient disk for timeline audio preparation" if !Budget.new(project.resources).disk(mix_target, resolved["samples"] * 6)["ok"]
       media.prepare_audio(mapping[project.path(project.settings["mix"])], mix_target, sample_rate: 48000, channels: 2, samples: resolved["samples"])
     else
-      studio.call(["mix"])
+      studio.call(["render", "--jobs", budget["jobs"], "--animation-jobs", budget["animation_jobs"], "--max-frames", max_frames, "--write-captions", "--also-mix"])
+      resolved = JSON.parse(File.read(directory + "/build/" + cut + "/timeline.resolved.json"))
+      resolved["av_episode"] = episode
+      mix_target = directory + "/build/" + cut + "/mix.wav"
     if Env.get("AV_MATERIALIZE_TIMELINE_MOV") == "1"
       picture = directory + "/picture.mov"
       manifest = directory + "/picture.json"

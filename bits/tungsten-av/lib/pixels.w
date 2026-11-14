@@ -1,6 +1,8 @@
 in Av
 
 + Pixels
+  REF_TEXT_CACHE = {}
+
   -> .still?(path, frame)
     return true if frame < 0
     return false if type(path) != "String"
@@ -8,73 +10,16 @@ in Av
     [".png", ".jpg", ".jpeg", ".webp", ".heic", ".tif", ".tiff", ".bmp", ".gif"].include?(ext)
 
   -> .pack_rgba_ptr(ptr, stride, width, height, depth) (i64 i64 i64 i64 i64) u8[]
-    if depth == 16
-      out16 = u8[width * height * 6]
-      y = 0 ## i64
-      while y < height
-        row = y * stride
-        dst_row = y * width * 6
-        x = 0 ## i64
-        while x < width
-          s = row + x * 4
-          d = dst_row + x * 6
-          r = raw_load_u8(ptr, s) * 257
-          g = raw_load_u8(ptr, s + 1) * 257
-          b = raw_load_u8(ptr, s + 2) * 257
-          out16[d] = r & 255
-          out16[d + 1] = r >> 8
-          out16[d + 2] = g & 255
-          out16[d + 3] = g >> 8
-          out16[d + 4] = b & 255
-          out16[d + 5] = b >> 8
-          x += 1
-        y += 1
-      return out16
-    out8 = u8[width * height * 3]
-    y = 0 ## i64
-    while y < height
-      row = y * stride
-      dst_row = y * width * 3
-      x = 0 ## i64
-      while x < width
-        s = row + x * 4
-        d = dst_row + x * 3
-        out8[d] = raw_load_u8(ptr, s)
-        out8[d + 1] = raw_load_u8(ptr, s + 1)
-        out8[d + 2] = raw_load_u8(ptr, s + 2)
-        x += 1
-      y += 1
-    out8
+    bpp = depth == 16 ? 6 : 3
+    out = u8[width * height * bpp]
+    ccall("w_media_studio_op", "copy_rgb", [ptr, stride, width, 0, height, depth], out, 0)
+    out
 
   -> .pack_rgba_bytes(rgba, width, height, depth) (u8[] i64 i64 i64) u8[]
-    n = width * height
-    if depth == 16
-      out16 = u8[n * 6]
-      i = 0 ## i64
-      while i < n
-        s = i * 4
-        d = i * 6
-        r = rgba[s] * 257
-        g = rgba[s + 1] * 257
-        b = rgba[s + 2] * 257
-        out16[d] = r & 255
-        out16[d + 1] = r >> 8
-        out16[d + 2] = g & 255
-        out16[d + 3] = g >> 8
-        out16[d + 4] = b & 255
-        out16[d + 5] = b >> 8
-        i += 1
-      return out16
-    out8 = u8[n * 3]
-    i = 0 ## i64
-    while i < n
-      s = i * 4
-      d = i * 3
-      out8[d] = rgba[s]
-      out8[d + 1] = rgba[s + 1]
-      out8[d + 2] = rgba[s + 2]
-      i += 1
-    out8
+    bpp = depth == 16 ? 6 : 3
+    out = u8[width * height * bpp]
+    ccall("w_media_studio_op", "copy_rgb", [0, width * 4, width, 0, height, depth], out, rgba)
+    out
 
   -> .still_frame(path, width, height, fit = "stretch", depth = 8)
     img = Canvas.load_image(path)
@@ -125,55 +70,7 @@ in Av
     y0 = Math.round(rect[1] * height).to_i ## i64
     x1 = Math.round((rect[0] + rect[2]) * width).to_i ## i64
     y1 = Math.round((rect[1] + rect[3]) * height).to_i ## i64
-    x0 = 0 if x0 < 0
-    y0 = 0 if y0 < 0
-    x1 = width if x1 > width
-    y1 = height if y1 > height
-    rw = x1 - x0
-    rh = y1 - y0
-    return [~0.0, ~1.0, 0] if rw <= 2 || rh <= 2
-    la = f64[rw * rh]
-    lb = f64[rw * rh]
-    ry = 0 ## i64
-    while ry < rh
-      y = y0 + ry
-      rx = 0 ## i64
-      while rx < rw
-        p = (y * width + x0 + rx) * 3
-        la[ry * rw + rx] = ~16.0 + ~219.0 * (~0.2126 * a[p] + ~0.7152 * a[p + 1] + ~0.0722 * a[p + 2]) / ~255.0
-        lb[ry * rw + rx] = ~16.0 + ~219.0 * (~0.2126 * b[p] + ~0.7152 * b[p + 1] + ~0.0722 * b[p + 2]) / ~255.0
-        rx += 1
-      ry += 1
-    edges = 0 ## i64
-    retained = 0 ## i64
-    err_sum = 0 ## i64
-    count = 0 ## i64
-    inv438 = ~1.0 / ~438.0
-    ry = 1 ## i64
-    while ry < rh - 1
-      y = y0 + ry
-      rx = 1 ## i64
-      while rx < rw - 1
-        idx = ry * rw + rx
-        ax = (la[idx + 1] - la[idx - 1]) * inv438
-        ay = (la[idx + rw] - la[idx - rw]) * inv438
-        bx = (lb[idx + 1] - lb[idx - 1]) * inv438
-        by = (lb[idx + rw] - lb[idx - rw]) * inv438
-        if ax * ax + ay * ay > ~0.0064
-          edges += 1
-          retained += 1 if bx * bx + by * by > ~0.0016
-        p3 = (y * width + x0 + rx) * 3
-        d0 = a[p3] - b[p3]
-        d0 = 0 - d0 if d0 < 0
-        d1 = a[p3 + 1] - b[p3 + 1]
-        d1 = 0 - d1 if d1 < 0
-        d2 = a[p3 + 2] - b[p3 + 2]
-        d2 = 0 - d2 if d2 < 0
-        err_sum += d0 + d1 + d2
-        count += 3
-        rx += 1
-      ry += 1
-    [edges > 0 ? retained / (edges + ~0.0) : ~0.0, count > 0 ? (err_sum / ~255.0) / count : ~1.0, edges]
+    ccall("w_media_banding_op", "text_metrics", [a, b], [width, height], [x0, y0, x1, y1])
 
   -> .encoded_text_frames(cues, plan)
     frames = cues.map ->(c) Util.min(plan["frames"] - 1, ((c["start"] + c["end"]) / 2 * plan["rate"][0] / plan["rate"][1]).to_i)
@@ -183,7 +80,13 @@ in Av
     unique = encoded_text_frames(cues, plan)
     fit = Util.get(plan["profile"], "fit", "stretch")
     ref_frames = unique.map ->(f) f + plan["start"]
-    ref_imgs = Pixels.frames(media, reference, ref_frames, plan["width"], plan["height"], plan["rate"], fit, 8)
+    ref_sig = type(reference) == "String" ? [reference, Util.stamp(reference)] : [reference, reference.size > 0 ? Util.stamp(reference[0]) : nil]
+    ref_key = JSON.encode([ref_sig, ref_frames, plan["width"], plan["height"], fit])
+    ref_imgs = REF_TEXT_CACHE[ref_key]
+    if ref_imgs == nil
+      ref_imgs = Pixels.frames(media, reference, ref_frames, plan["width"], plan["height"], plan["rate"], fit, 8)
+      REF_TEXT_CACHE.clear if REF_TEXT_CACHE.size >= 8
+      REF_TEXT_CACHE[ref_key] = ref_imgs
     cand_imgs = pre_cand_by_frame != nil ? (unique.map ->(f) pre_cand_by_frame[f]) : Pixels.frames(media, path, unique, plan["width"], plan["height"], plan["rate"], "stretch", 8)
     box = Util.get(settings, "box", [~0.05, ~0.7, ~0.9, ~0.25])
     min_recall = Util.get(settings, "minimum_edge_recall", ~0.85)

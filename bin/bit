@@ -19,4 +19,51 @@ while [ -L "$BIT_LAUNCHER" ]; do
 done
 BIT_TOOLCHAIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$BIT_LAUNCHER")/.." && pwd -P)
 export TUNGSTEN_ROOT="$BIT_TOOLCHAIN_ROOT"
+
+BIT_BIN="$BIT_TOOLCHAIN_ROOT/bits/tungsten-bit/bin/bit"
+BIT_DEPS="$BIT_BIN.deps"
+BIT_COMPILER="$BIT_TOOLCHAIN_ROOT/bin/tungsten-compiler"
+BIT_CURRENT=1
+for _arg in "$@"; do
+  case "$_arg" in
+    --) break ;;
+    --ruby|-D|-D*|--fast-math|--no-fast-math|--fast|-fast) BIT_CURRENT=0; break ;;
+  esac
+done
+if [ "$BIT_CURRENT" -eq 1 ] && [ -x "$BIT_BIN" ] && [ -f "$BIT_DEPS" ] && [ -x "$BIT_COMPILER" ] && [ "$BIT_BIN" -nt "$BIT_COMPILER" ]; then
+  _has_rows=0
+  {
+    IFS= read -r _hdr || _hdr=""
+    case "$_hdr" in
+      "tungsten-bit-deps-v1 "*)
+        while IFS='	' read -r _sha _kind _rel || [ -n "${_sha:-}" ]; do
+          [ -z "$_sha" ] && continue
+          _has_rows=1
+          case "$_kind" in
+            r) _dep="$BIT_TOOLCHAIN_ROOT/$_rel" ;;
+            a) _dep="$_rel" ;;
+            *) BIT_CURRENT=0; break ;;
+          esac
+          if [ ! -e "$_dep" ] || [ ! "$BIT_BIN" -nt "$_dep" ]; then
+            BIT_CURRENT=0
+            break
+          fi
+        done
+        ;;
+      *) BIT_CURRENT=0 ;;
+    esac
+  } < "$BIT_DEPS"
+  if [ "$BIT_CURRENT" -eq 1 ] && [ "$_has_rows" -eq 1 ]; then
+    export TUNGSTEN_HOME="${TUNGSTEN_HOME:-${HOME:-$BIT_TOOLCHAIN_ROOT}/.tungsten}"
+    export BIT_HOME="${BIT_HOME:-$TUNGSTEN_HOME/bits}"
+    if [ -r "$BIT_TOOLCHAIN_ROOT/VERSION" ]; then
+      IFS= read -r TUNGSTEN_VERSION < "$BIT_TOOLCHAIN_ROOT/VERSION" || TUNGSTEN_VERSION=dev
+    else
+      TUNGSTEN_VERSION=dev
+    fi
+    export TUNGSTEN_VERSION
+    exec "$BIT_BIN" "$@"
+  fi
+fi
+
 exec "$BIT_TOOLCHAIN_ROOT/bin/tungsten" bit "$@"

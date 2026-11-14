@@ -24,15 +24,7 @@
 
 # Copy a w x h window starting at column x0 of one RGBA8 buffer into another (the picture-framed triptych pane).
 -> rs_copy_window(src, sstride, x0, dst, dstride, w, h) (i64 i64 i64 i64 i64 i64 i64) i64
-  y = 0
-  while y < h
-    a = y * sstride + x0 * 4
-    b = y * dstride
-    i = 0
-    while i < w * 4
-      raw_store_u8(dst, b + i, raw_load_u8(src, a + i))
-      i += 1
-    y += 1
+  ccall("w_media_studio_op", "copy_rows", [src, sstride, x0 * 4, dst, dstride, w * 4, h], 0, 0)
   0
 
 # wb = a * (1 - t) + b * t
@@ -714,35 +706,11 @@
 # ---------------------------------------------------------------------------------------------- compose
 
 -> rs_copy_rgb(src, stride, w, h, out) (i64 i64 i64 i64 u8[]) i64
-  y = 0
-  while y < h
-    row = y * stride
-    o = y * w * 3
-    x = 0
-    while x < w
-      p = row + x * 4
-      out[o] = raw_load_u8(src, p)
-      out[o + 1] = raw_load_u8(src, p + 1)
-      out[o + 2] = raw_load_u8(src, p + 2)
-      o += 3
-      x += 1
-    y += 1
+  ccall("w_media_studio_op", "copy_rgb", [src, stride, w, 0, h, 8], out, 0)
   0
 
 -> rs_copy_rgb_rows(src, stride, w, y0, y1, out) (i64 i64 i64 i64 i64 u8[]) i64
-  y = y0
-  while y < y1
-    row = y * stride
-    o = y * w * 3
-    x = 0
-    while x < w
-      p = row + x * 4
-      out[o] = raw_load_u8(src, p)
-      out[o + 1] = raw_load_u8(src, p + 1)
-      out[o + 2] = raw_load_u8(src, p + 2)
-      o += 3
-      x += 1
-    y += 1
+  ccall("w_media_studio_op", "copy_rgb", [src, stride, w, y0, y1, 8], out, 0)
   0
 
 -> rs_rgb_to_yuv420p(rgb, w, h, buf) (u8[] i64 i64 u8[]) i64
@@ -817,37 +785,11 @@
   0
 
 -> rs_mix_rgba_inplace(a, b, stride, w, h, t) (i64 i64 i64 i64 i64 f64) i64
-  s = ~1.0 - t
-  y = 0
-  while y < h
-    row = y * stride
-    x = 0
-    while x < w
-      p = row + x * 4
-      c = 0
-      while c < 3
-        v = (raw_load_u8(a, p + c) ## f64) * s + (raw_load_u8(b, p + c) ## f64) * t
-        raw_store_u8(b, p + c, Math.floor(v + ~0.5) ## i64)
-        c += 1
-      raw_store_u8(b, p + 3, 255)
-      x += 1
-    y += 1
+  ccall("w_media_studio_op", "mix_rgba", [a, b, stride, w, h], [t], 0)
   0
 
 -> rs_scale_rgba_inplace(dst, stride, w, h, s) (i64 i64 i64 i64 f64) i64
-  y = 0
-  while y < h
-    row = y * stride
-    x = 0
-    while x < w
-      p = row + x * 4
-      c = 0
-      while c < 3
-        v = (raw_load_u8(dst, p + c) ## f64) * s
-        raw_store_u8(dst, p + c, Math.floor(v + ~0.5) ## i64)
-        c += 1
-      x += 1
-    y += 1
+  ccall("w_media_studio_op", "scale_rgba", [dst, stride, w, h], [s], 0)
   0
 
 -> rs_rgb_to_rgba_buf(rgb, w, h, dst) (u8[] i64 i64 u8[]) i64
@@ -864,26 +806,11 @@
   0
 
 -> rs_copy_rows(src, dst, stride, y0, y1) (i64 i64 i64 i64 i64) i64
-  i = y0 * stride
-  e = y1 * stride
-  while i < e
-    raw_store_u8(dst, i, raw_load_u8(src, i))
-    i += 1
+  ccall("w_media_studio_op", "copy_rows", [src + y0 * stride, stride, 0, dst + y0 * stride, stride, stride, y1 - y0], 0, 0)
   0
 
 -> rs_fill_rows(dst, stride, w, y0, y1, r, g, b) (i64 i64 i64 i64 i64 i64 i64 i64) i64
-  y = y0
-  while y < y1
-    p = y * stride
-    x = 0
-    while x < w
-      raw_store_u8(dst, p, r)
-      raw_store_u8(dst, p + 1, g)
-      raw_store_u8(dst, p + 2, b)
-      raw_store_u8(dst, p + 3, 255)
-      p += 4
-      x += 1
-    y += 1
+  ccall("w_media_studio_op", "fill_rows", [dst, stride, w, y0, y1, r, g, b], 0, 0)
   0
 
 # A card background: base colour (br, bg, bb) + paper * amount * tint, written opaque into a canvas.

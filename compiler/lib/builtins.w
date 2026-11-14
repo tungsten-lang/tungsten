@@ -193,6 +193,9 @@ use builtin_arity
   when "file_chmod"
     ccall("__w_file_chmod", args[0], args[1])
 
+  when "file_touch"
+    ccall("__w_file_touch", args[0])
+
   when "file_rename"
     ccall("__w_rename", args[0], args[1])
 
@@ -660,7 +663,7 @@ use builtin_arity
 builtin_names = [
   "puts", "print", "read_file", "read_file_bytes", "file?", "file_exists?", "file_directory?", "read_dir",
   "file_size", "file_mtime_ns", "file_expand_path", "file_expand_path_base", "file_join", "file_basename", "file_dirname", "file_extname", "file_realpath", "file_readlink", "file_symlink", "write_file", "write_file_bytes", "file_stat_data", "tempfile_create", "file_unlink", "file_unlink_strict",
-  "file_link", "file_chmod", "file_rename", "file_temp_for", "file_fsync", "file_fsync_parent",
+  "file_link", "file_chmod", "file_touch", "file_rename", "file_temp_for", "file_fsync", "file_fsync_parent",
   "cache_read", "cache_write",
   "exit", "type", "to_s", "to_i", "class",
   "length", "size", "chars", "split", "strip", "ltrim", "rtrim", "ascii?", "valid_utf8?", "replace", "starts_with?",

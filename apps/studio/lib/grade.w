@@ -308,16 +308,33 @@ METAL_GRADE_ID = "metal1"
   n ## i64 = nbytes
   ccall("w_array_view_raw", p, 8, n)
 
+METAL_GRADE_PIPES = {}
+
+-> metal_grade_pipes
+  p = METAL_GRADE_PIPES["pipes"]
+  if p == nil
+    dev = metal_device()
+    lib = metal_compile_source(dev, GRADE_SHADER, true)
+    p = [dev,
+         metal_pipeline(lib, "k_src"),
+         metal_pipeline(lib, "k_disc"),
+         metal_pipeline(lib, "k_screen"),
+         metal_pipeline(lib, "k_grid"),
+         metal_pipeline(lib, "k_blur"),
+         metal_pipeline(lib, "k_grade")]
+    METAL_GRADE_PIPES["pipes"] = p
+  p
+
 + MetalGrade
   -> new(@aw, @ah, @gk, @gp)
-    @dev = metal_device()
-    @lib = metal_compile_source(@dev, GRADE_SHADER, true)
-    @k_src = metal_pipeline(@lib, "k_src")
-    @k_disc = metal_pipeline(@lib, "k_disc")
-    @k_screen = metal_pipeline(@lib, "k_screen")
-    @k_grid = metal_pipeline(@lib, "k_grid")
-    @k_blur = metal_pipeline(@lib, "k_blur")
-    @k_grade = metal_pipeline(@lib, "k_grade")
+    pipes = metal_grade_pipes()
+    @dev = pipes[0]
+    @k_src = pipes[1]
+    @k_disc = pipes[2]
+    @k_screen = pipes[3]
+    @k_grid = pipes[4]
+    @k_blur = pipes[5]
+    @k_grade = pipes[6]
     @q = metal_queue(@dev)
     n = @aw * @ah
     @wb = metal_buffer(@dev, n * 16)
@@ -458,6 +475,7 @@ METAL_GRADE_ID = "metal1"
     nil
 
   -> plane_buffers(pl)
+    return pl[3] if pl.size > 3 && pl[3] != nil
     key = pl[2]
     b = @planes[key]
     if b == nil

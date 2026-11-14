@@ -179,11 +179,49 @@ in Av
       Schema.one_of(key, ["rms_detrended", "p99", "blk16", "temporal_rms", "temporal_p99"], "banding metric")
       Schema.positive(limits[key], "banding " + key)
     background = project.path(spec["background"])
+    still_paths = [background]
+    samples.each ->(sample)
+      still_paths.push(project.path(sample["source"]))
+      still_paths.push(project.path(sample["next_source"])) if sample["next_source"]
+    unique_stills = Util.unique(still_paths)
     references = {}
-    references[background] = Util.sha(background)
     still_cache = {}
-    bg = Pixels.frame(media, background, -1, width, height, rate)
-    still_cache[background] = bg
+    if unique_stills.size <= 1
+      unique_stills.each ->(sp)
+        references[sp] = Util.sha_cached(sp)
+        still_cache[sp] = Pixels.still_frame(sp, width, height, "stretch", 8)
+    else
+      nw = Util.min(4, unique_stills.size)
+      threads = []
+      wi = 0
+      while wi < nw
+        w_idx = wi
+        th = Thread.new ->
+          w_res = nil
+          begin
+            out = []
+            si = w_idx
+            while si < unique_stills.size
+              sp = unique_stills[si]
+              out.push([sp, Util.sha_cached(sp), Pixels.still_frame(sp, width, height, "stretch", 8)])
+              si += nw
+            w_res = ["ok", out]
+          rescue err
+            w_res = ["err", err]
+          w_res
+        threads.push(th)
+        wi += 1
+      first_err = nil
+      threads.each ->(th)
+        res = th.join
+        if res[0] == "err"
+          first_err = res[1] if first_err == nil
+        else
+          res[1].each ->(item)
+            references[item[0]] = item[1]
+            still_cache[item[0]] = item[2]
+      raise first_err if first_err != nil
+    bg = still_cache[background]
     gradient = spec["gradient"]
     raise "banding requires an analytical gradient" if gradient == nil
     ideal = ideal_luma(width, height, gradient)

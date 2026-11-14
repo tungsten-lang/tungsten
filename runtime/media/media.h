@@ -105,6 +105,7 @@
     X(w_media_live_new, 1)             \
     X(w_media_live_zone, 4)            \
     X(w_media_live_zone_file, 3)       \
+    X(w_media_live_zone_files, 3)      \
     X(w_media_live_sinc, 2)            \
     X(w_media_live_play, 4)            \
     X(w_media_live_release, 4)         \
@@ -117,7 +118,8 @@
     X(w_media_live_volume, 2)          \
     X(w_media_live_info, 1)            \
     X(w_media_live_flush, 2)           \
-    X(w_media_live_close, 1)
+    X(w_media_live_close, 1)           \
+    X(w_media_studio_op, 4)
 
 #define W_MEDIA_CCALLS(X) W_MEDIA_C_CCALLS(X) W_MEDIA_AVF_CCALLS(X)
 
@@ -245,7 +247,7 @@ enum { W_MEDIA_BACKEND_AUTO = 0, W_MEDIA_BACKEND_CPU = 1, W_MEDIA_BACKEND_VIMAGE
 /* One axis: output sample j reads source samples start[j] .. start[j] + taps
  * with weights w[j * taps ...] (normalised, edges clamped and folded). */
 typedef struct WMediaAxis {
-    int      n, taps, nsrc;
+    int      n, taps, nsrc, id;
     int32_t *start;
     float   *w;
     int      lo, hi;          /* source samples read: [lo, hi) */
@@ -300,6 +302,8 @@ typedef struct WMediaJob {
     size_t         sstride, src_len;
     uint8_t       *dst;
     size_t         dstride, dst_len;
+    void          *src_pb, *dst_pb;
+    int            src_plane, dst_plane;
 } WMediaJob;
 /* Several plans in one Metal command buffer (wrapped buffers only after the first). */
 int  w_media_scale_metal_jobs(WMediaJob *jobs, int n, char *err, size_t cap);

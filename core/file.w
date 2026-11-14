@@ -272,7 +272,9 @@ use core/mmap
     file_cp(source, dest, *opts)
 
   -> .touch(path)
-    file_touch(path)
+    ok = file_touch(path)
+    raise "File.touch failed: " + path unless ok
+    true
 
   -> .symlink(target, link_name)
     file_symlink(target, link_name)

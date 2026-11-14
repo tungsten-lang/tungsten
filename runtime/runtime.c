@@ -56375,6 +56375,25 @@ WValue __w_file_chmod(WValue path_val, WValue mode_val) {
     return chmod(path, (mode_t)raw_mode) == 0 ? W_TRUE : W_FALSE;
 }
 
+WValue __w_file_touch(WValue path_val) {
+    const char *path = as_str(path_val);
+    w_sandbox_gate("file_touch", path);
+#ifdef AT_FDCWD
+    if (utimensat(AT_FDCWD, path, NULL, 0) == 0) return W_TRUE;
+#else
+    if (utimes(path, NULL) == 0) return W_TRUE;
+#endif
+    if (errno != ENOENT) return W_FALSE;
+#ifdef O_CLOEXEC
+    int fd = open(path, O_WRONLY | O_CREAT | O_CLOEXEC, 0666);
+#else
+    int fd = open(path, O_WRONLY | O_CREAT, 0666);
+#endif
+    if (fd < 0) return W_FALSE;
+    close(fd);
+    return W_TRUE;
+}
+
 WValue __w_digest_bytes64(WValue bytes_val) {
     if (w_is_bytes(bytes_val)) {
         WArray *a = w_as_array(bytes_val);

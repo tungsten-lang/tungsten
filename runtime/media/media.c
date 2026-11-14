@@ -59,7 +59,11 @@
 #include <strings.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 extern double w_num_to_f64(WValue v);
 
@@ -355,32 +359,90 @@ static void m_fix_init(const MConv *c, int D, MFix *f) {
 /* 1 when v's fraction lies within guard of a multiple of 2^M_FIX. */
 #define M_TIE(v, guard) ((uint8_t)((((v) & M_FIX_MASK) - (guard)) > (M_FIX_MASK - 2 * (guard))))
 
-/* The fixed-point luma loop for one layout; the constant byte offsets let
- * the compiler vectorize it. tie[x] flags the pixels to redo exactly. */
-#define M_LUMA_LOOP(NAME, BPP, RO, GO, BO)                                                            \
-    static void NAME(const uint8_t *s, int w, const MFix *f, uint8_t *o8, uint16_t *o16, uint8_t *tie) { \
-        uint32_t yr = f->yr, yg = f->yg, yb = f->yb, yo = f->yo;                                      \
+/* The fixed-point luma loop for one layout; ARM NEON processes 16 pixels per
+ * iteration and returns nonzero only when at least one pixel lies near a tie. */
+#if defined(__aarch64__)
+#define M_LUMA_NEON_BODY(LOAD_RGB, BPP)                                                               \
+    uint32x4_t vyo = vdupq_n_u32(yo), vmask = vdupq_n_u32(M_FIX_MASK);                                \
+    uint32x4_t vguard = vdupq_n_u32(M_YGUARD), vlim = vdupq_n_u32(M_FIX_MASK - 2u * M_YGUARD);        \
+    uint8x16_t vzero = vdupq_n_u8(0);                                                                 \
+    for (; x + 16 <= w; x += 16) {                                                                    \
+        uint8x16_t r8, g8, b8;                                                                        \
+        LOAD_RGB(s + (size_t)x * BPP, r8, g8, b8);                                                    \
+        uint16x8_t rl = vmovl_u8(vget_low_u8(r8)), rh = vmovl_u8(vget_high_u8(r8));                   \
+        uint16x8_t gl = vmovl_u8(vget_low_u8(g8)), gh = vmovl_u8(vget_high_u8(g8));                   \
+        uint16x8_t bl = vmovl_u8(vget_low_u8(b8)), bh = vmovl_u8(vget_high_u8(b8));                   \
+        uint32x4_t v0 = vmlaq_n_u32(vyo, vmovl_u16(vget_low_u16(rl)), yr);                            \
+        v0 = vmlaq_n_u32(v0, vmovl_u16(vget_low_u16(gl)), yg);                                        \
+        v0 = vmlaq_n_u32(v0, vmovl_u16(vget_low_u16(bl)), yb);                                        \
+        uint32x4_t v1 = vmlaq_n_u32(vyo, vmovl_u16(vget_high_u16(rl)), yr);                           \
+        v1 = vmlaq_n_u32(v1, vmovl_u16(vget_high_u16(gl)), yg);                                       \
+        v1 = vmlaq_n_u32(v1, vmovl_u16(vget_high_u16(bl)), yb);                                       \
+        uint32x4_t v2 = vmlaq_n_u32(vyo, vmovl_u16(vget_low_u16(rh)), yr);                            \
+        v2 = vmlaq_n_u32(v2, vmovl_u16(vget_low_u16(gh)), yg);                                        \
+        v2 = vmlaq_n_u32(v2, vmovl_u16(vget_low_u16(bh)), yb);                                        \
+        uint32x4_t v3 = vmlaq_n_u32(vyo, vmovl_u16(vget_high_u16(rh)), yr);                           \
+        v3 = vmlaq_n_u32(v3, vmovl_u16(vget_high_u16(gh)), yg);                                       \
+        v3 = vmlaq_n_u32(v3, vmovl_u16(vget_high_u16(bh)), yb);                                       \
+        uint16x8_t y01 = vcombine_u16(vmovn_u32(vshrq_n_u32(v0, M_FIX)), vmovn_u32(vshrq_n_u32(v1, M_FIX))); \
+        uint16x8_t y23 = vcombine_u16(vmovn_u32(vshrq_n_u32(v2, M_FIX)), vmovn_u32(vshrq_n_u32(v3, M_FIX))); \
         if (o8) {                                                                                     \
-            for (int x = 0; x < w; x++) {                                                             \
+            vst1q_u8(o8 + x, vcombine_u8(vmovn_u16(y01), vmovn_u16(y23)));                            \
+        } else {                                                                                      \
+            vst1q_u16(o16 + x, vshlq_n_u16(y01, 6));                                                  \
+            vst1q_u16(o16 + x + 8, vshlq_n_u16(y23, 6));                                              \
+        }                                                                                             \
+        uint32x4_t t0 = vcgtq_u32(vsubq_u32(vandq_u32(v0, vmask), vguard), vlim);                     \
+        uint32x4_t t1 = vcgtq_u32(vsubq_u32(vandq_u32(v1, vmask), vguard), vlim);                     \
+        uint32x4_t t2 = vcgtq_u32(vsubq_u32(vandq_u32(v2, vmask), vguard), vlim);                     \
+        uint32x4_t t3 = vcgtq_u32(vsubq_u32(vandq_u32(v3, vmask), vguard), vlim);                     \
+        if (vmaxvq_u32(vorrq_u32(vorrq_u32(t0, t1), vorrq_u32(t2, t3))) == 0) {                       \
+            vst1q_u8(tie + x, vzero);                                                                 \
+        } else {                                                                                      \
+            any = 1;                                                                                  \
+            uint16x8_t t01 = vcombine_u16(vmovn_u32(t0), vmovn_u32(t1));                              \
+            uint16x8_t t23 = vcombine_u16(vmovn_u32(t2), vmovn_u32(t3));                              \
+            vst1q_u8(tie + x, vcombine_u8(vmovn_u16(t01), vmovn_u16(t23)));                           \
+        }                                                                                             \
+    }
+#define M_LD_RGBA(ptr, r, g, b) do { uint8x16x4_t _p = vld4q_u8(ptr); r = _p.val[0]; g = _p.val[1]; b = _p.val[2]; } while (0)
+#define M_LD_BGRA(ptr, r, g, b) do { uint8x16x4_t _p = vld4q_u8(ptr); r = _p.val[2]; g = _p.val[1]; b = _p.val[0]; } while (0)
+#define M_LD_ARGB(ptr, r, g, b) do { uint8x16x4_t _p = vld4q_u8(ptr); r = _p.val[1]; g = _p.val[2]; b = _p.val[3]; } while (0)
+#define M_LD_RGB3(ptr, r, g, b) do { uint8x16x3_t _p = vld3q_u8(ptr); r = _p.val[0]; g = _p.val[1]; b = _p.val[2]; } while (0)
+#define M_LD_BGR3(ptr, r, g, b) do { uint8x16x3_t _p = vld3q_u8(ptr); r = _p.val[2]; g = _p.val[1]; b = _p.val[0]; } while (0)
+#else
+#define M_LUMA_NEON_BODY(LOAD_RGB, BPP)
+#endif
+
+#define M_LUMA_LOOP(NAME, BPP, RO, GO, BO, LOAD_RGB)                                                  \
+    static int NAME(const uint8_t *s, int w, const MFix *f, uint8_t *o8, uint16_t *o16, uint8_t *tie) { \
+        uint32_t yr = f->yr, yg = f->yg, yb = f->yb, yo = f->yo;                                      \
+        int x = 0, any = 0;                                                                           \
+        M_LUMA_NEON_BODY(LOAD_RGB, BPP)                                                               \
+        if (o8) {                                                                                     \
+            for (; x < w; x++) {                                                                      \
                 const uint8_t *p = s + (size_t)x * BPP;                                               \
                 uint32_t v = yr * p[RO] + yg * p[GO] + yb * p[BO] + yo;                               \
                 o8[x] = (uint8_t)(v >> M_FIX);                                                        \
-                tie[x] = M_TIE(v, M_YGUARD);                                                          \
+                uint8_t tf = M_TIE(v, M_YGUARD);                                                      \
+                tie[x] = tf; any |= tf;                                                               \
             }                                                                                         \
         } else {                                                                                      \
-            for (int x = 0; x < w; x++) {                                                             \
+            for (; x < w; x++) {                                                                      \
                 const uint8_t *p = s + (size_t)x * BPP;                                               \
                 uint32_t v = yr * p[RO] + yg * p[GO] + yb * p[BO] + yo;                               \
                 o16[x] = (uint16_t)((v >> M_FIX) << 6);                                               \
-                tie[x] = M_TIE(v, M_YGUARD);                                                          \
+                uint8_t tf = M_TIE(v, M_YGUARD);                                                      \
+                tie[x] = tf; any |= tf;                                                               \
             }                                                                                         \
         }                                                                                             \
+        return any;                                                                                   \
     }
-M_LUMA_LOOP(m_luma_rgba, 4, 0, 1, 2)
-M_LUMA_LOOP(m_luma_bgra, 4, 2, 1, 0)
-M_LUMA_LOOP(m_luma_argb, 4, 1, 2, 3)
-M_LUMA_LOOP(m_luma_rgb24, 3, 0, 1, 2)
-M_LUMA_LOOP(m_luma_bgr24, 3, 2, 1, 0)
+M_LUMA_LOOP(m_luma_rgba, 4, 0, 1, 2, M_LD_RGBA)
+M_LUMA_LOOP(m_luma_bgra, 4, 2, 1, 0, M_LD_BGRA)
+M_LUMA_LOOP(m_luma_argb, 4, 1, 2, 3, M_LD_ARGB)
+M_LUMA_LOOP(m_luma_rgb24, 3, 0, 1, 2, M_LD_RGB3)
+M_LUMA_LOOP(m_luma_bgr24, 3, 2, 1, 0, M_LD_BGR3)
 #undef M_LUMA_LOOP
 
 /* Index of the next nonzero flag at or after x (n when none), 8 at a time. */
@@ -399,14 +461,15 @@ static inline int m_next_flag(const uint8_t *t, int x, int n) {
 /* One luma row: fixed point, then the rare near-tie pixels exactly. */
 static void m_luma_row(const MConv *c, const MFix *f, int y, uint8_t *tie) {
     const uint8_t *s = c->src + (size_t)y * c->sstride;
-    int w = c->w;
+    int w = c->w, any;
     uint8_t *o8 = c->bits == 8 ? c->yp + (size_t)y * c->ystride : NULL;
     uint16_t *o16 = c->bits == 8 ? NULL : (uint16_t *)(void *)(c->yp + (size_t)y * c->ystride);
-    if (c->bpp == 4 && c->ro == 0) m_luma_rgba(s, w, f, o8, o16, tie);
-    else if (c->bpp == 4 && c->ro == 2) m_luma_bgra(s, w, f, o8, o16, tie);
-    else if (c->bpp == 4) m_luma_argb(s, w, f, o8, o16, tie);
-    else if (c->ro == 0) m_luma_rgb24(s, w, f, o8, o16, tie);
-    else m_luma_bgr24(s, w, f, o8, o16, tie);
+    if (c->bpp == 4 && c->ro == 0) any = m_luma_rgba(s, w, f, o8, o16, tie);
+    else if (c->bpp == 4 && c->ro == 2) any = m_luma_bgra(s, w, f, o8, o16, tie);
+    else if (c->bpp == 4) any = m_luma_argb(s, w, f, o8, o16, tie);
+    else if (c->ro == 0) any = m_luma_rgb24(s, w, f, o8, o16, tie);
+    else any = m_luma_bgr24(s, w, f, o8, o16, tie);
+    if (!any) return;
     for (int x = m_next_flag(tie, 0, w); x < w; x = m_next_flag(tie, x + 1, w)) {
         int code = m_luma_exact(c, s + (size_t)x * (size_t)c->bpp);
         if (o8) o8[x] = (uint8_t)code;
@@ -434,6 +497,15 @@ static int m_int_taps(const MTaps *t, int *iw) {
     return sum;
 }
 
+#if defined(__aarch64__)
+static inline uint16x8_t m_tap121_u8(uint8x16_t v, uint8_t left_prev) {
+    uint8x8_t ev = vuzp1_u8(vget_low_u8(v), vget_high_u8(v));
+    uint8x8_t od = vuzp2_u8(vget_low_u8(v), vget_high_u8(v));
+    uint8x8_t al = vext_u8(vdup_n_u8(left_prev), od, 7);
+    return vaddw_u8(vaddw_u8(vshll_n_u8(ev, 1), al), od);
+}
+#endif
+
 /* A band of chroma rows and the luma rows under them. */
 static void m_conv_band(void *ctx, size_t band) {
     const MConv *c = ctx;
@@ -451,8 +523,11 @@ static void m_conv_band(void *ctx, size_t band) {
     m_fix_init(c, D, &f);
     int bpp = c->bpp, ro = c->ro, go = c->go, bo = c->bo, w = c->w;
     int left420 = vt.n == 2 && ht.n == 3, left422 = vt.n == 1 && ht.n == 3;
-    uint32_t *Sr = malloc(sizeof(uint32_t) * (size_t)cw * 3), *Sg = Sr + cw, *Sb = Sg + cw;
-    uint8_t *tie = malloc((size_t)w + 16);
+    uint32_t s_stack[2048 * 3];
+    uint8_t tie_stack[4096 + 16];
+    uint32_t *Sr = cw <= 2048 ? s_stack : malloc(sizeof(uint32_t) * (size_t)cw * 3);
+    uint32_t *Sg = Sr + cw, *Sb = Sg + cw;
+    uint8_t *tie = w <= 4096 ? tie_stack : malloc((size_t)w + 16);
     for (int j = j0; j < j1; j++) {
         for (int k = 0; k < c->vsub; k++) {
             int y = j * c->vsub + k;
@@ -463,8 +538,54 @@ static void m_conv_band(void *ctx, size_t band) {
             const uint8_t *r0 = c->src + (size_t)(j * c->vsub) * c->sstride;
             int y1 = j * c->vsub + 1;
             const uint8_t *r1 = left420 ? c->src + (size_t)(y1 > c->h - 1 ? c->h - 1 : y1) * c->sstride : r0;
-            /* first and last columns clamp; the rest run straight */
-            for (int i = 0; i < cw; i++) {
+            int i = 0;
+            if (cw > 0) {
+                int xr = 1 < w ? 1 : 0;
+                const uint8_t *b0 = r0, *c0 = r0 + (size_t)xr * bpp;
+                uint32_t sr = 3u * b0[ro] + c0[ro], sg = 3u * b0[go] + c0[go], sb = 3u * b0[bo] + c0[bo];
+                if (left420) {
+                    const uint8_t *b1 = r1, *c1 = r1 + (size_t)xr * bpp;
+                    sr += 3u * b1[ro] + c1[ro]; sg += 3u * b1[go] + c1[go]; sb += 3u * b1[bo] + c1[bo];
+                }
+                Sr[0] = sr; Sg[0] = sg; Sb[0] = sb;
+                i = 1;
+            }
+#if defined(__aarch64__)
+            for (; i + 8 <= cw && 2 * i + 15 < w; i += 8) {
+                size_t off = (size_t)(2 * i) * (size_t)bpp, prev = (size_t)(2 * i - 1) * (size_t)bpp;
+                uint8x16_t r0v, g0v, b0v;
+                if (bpp == 4) {
+                    uint8x16x4_t p0 = vld4q_u8(r0 + off);
+                    r0v = p0.val[ro]; g0v = p0.val[go]; b0v = p0.val[bo];
+                } else {
+                    uint8x16x3_t p0 = vld3q_u8(r0 + off);
+                    r0v = p0.val[ro]; g0v = p0.val[go]; b0v = p0.val[bo];
+                }
+                uint16x8_t sr16 = m_tap121_u8(r0v, r0[prev + ro]);
+                uint16x8_t sg16 = m_tap121_u8(g0v, r0[prev + go]);
+                uint16x8_t sb16 = m_tap121_u8(b0v, r0[prev + bo]);
+                if (left420) {
+                    uint8x16_t r1v, g1v, b1v;
+                    if (bpp == 4) {
+                        uint8x16x4_t p1 = vld4q_u8(r1 + off);
+                        r1v = p1.val[ro]; g1v = p1.val[go]; b1v = p1.val[bo];
+                    } else {
+                        uint8x16x3_t p1 = vld3q_u8(r1 + off);
+                        r1v = p1.val[ro]; g1v = p1.val[go]; b1v = p1.val[bo];
+                    }
+                    sr16 = vaddq_u16(sr16, m_tap121_u8(r1v, r1[prev + ro]));
+                    sg16 = vaddq_u16(sg16, m_tap121_u8(g1v, r1[prev + go]));
+                    sb16 = vaddq_u16(sb16, m_tap121_u8(b1v, r1[prev + bo]));
+                }
+                vst1q_u32(Sr + i, vmovl_u16(vget_low_u16(sr16)));
+                vst1q_u32(Sr + i + 4, vmovl_u16(vget_high_u16(sr16)));
+                vst1q_u32(Sg + i, vmovl_u16(vget_low_u16(sg16)));
+                vst1q_u32(Sg + i + 4, vmovl_u16(vget_high_u16(sg16)));
+                vst1q_u32(Sb + i, vmovl_u16(vget_low_u16(sb16)));
+                vst1q_u32(Sb + i + 4, vmovl_u16(vget_high_u16(sb16)));
+            }
+#endif
+            for (; i < cw; i++) {
                 int x = 2 * i, xl = x > 0 ? x - 1 : 0, xr = x + 1 < w ? x + 1 : w - 1;
                 const uint8_t *a0 = r0 + (size_t)xl * bpp, *b0 = r0 + (size_t)x * bpp, *c0 = r0 + (size_t)xr * bpp;
                 const uint8_t *a1 = r1 + (size_t)xl * bpp, *b1 = r1 + (size_t)x * bpp, *c1 = r1 + (size_t)xr * bpp;
@@ -504,32 +625,69 @@ static void m_conv_band(void *ctx, size_t band) {
         }
         uint8_t *o8 = c->cp + (size_t)j * c->cstride;
         uint32_t co = f.co, cbb = f.cbb, cbr = f.cbr, cbg = f.cbg, crr = f.crr, crg = f.crg, crb = f.crb;
+        int ci = 0, c_any = 0;
+#if defined(__aarch64__)
+        uint32x4_t vco = vdupq_n_u32(co), vmask = vdupq_n_u32(M_FIX_MASK);
+        uint32x4_t vcguard = vdupq_n_u32(M_CGUARD), vclim = vdupq_n_u32(M_FIX_MASK - 2u * M_CGUARD);
+        for (; ci + 8 <= cw; ci += 8) {
+            uint32x4_t sr0 = vld1q_u32(Sr + ci), sr1 = vld1q_u32(Sr + ci + 4);
+            uint32x4_t sg0 = vld1q_u32(Sg + ci), sg1 = vld1q_u32(Sg + ci + 4);
+            uint32x4_t sb0 = vld1q_u32(Sb + ci), sb1 = vld1q_u32(Sb + ci + 4);
+            uint32x4_t vb0 = vmlsq_n_u32(vmlsq_n_u32(vmlaq_n_u32(vco, sb0, cbb), sr0, cbr), sg0, cbg);
+            uint32x4_t vr0 = vmlsq_n_u32(vmlsq_n_u32(vmlaq_n_u32(vco, sr0, crr), sg0, crg), sb0, crb);
+            uint32x4_t vb1 = vmlsq_n_u32(vmlsq_n_u32(vmlaq_n_u32(vco, sb1, cbb), sr1, cbr), sg1, cbg);
+            uint32x4_t vr1 = vmlsq_n_u32(vmlsq_n_u32(vmlaq_n_u32(vco, sr1, crr), sg1, crg), sb1, crb);
+            uint16x8_t b16 = vcombine_u16(vmovn_u32(vshrq_n_u32(vb0, M_FIX)), vmovn_u32(vshrq_n_u32(vb1, M_FIX)));
+            uint16x8_t r16 = vcombine_u16(vmovn_u32(vshrq_n_u32(vr0, M_FIX)), vmovn_u32(vshrq_n_u32(vr1, M_FIX)));
+            if (c->bits == 8) {
+                uint8x8x2_t pair = {{vmovn_u16(b16), vmovn_u16(r16)}};
+                vst2_u8(o8 + 2 * ci, pair);
+            } else {
+                uint16x8x2_t pair = {{vshlq_n_u16(b16, 6), vshlq_n_u16(r16, 6)}};
+                vst2q_u16((uint16_t *)(void *)o8 + 2 * ci, pair);
+            }
+            uint32x4_t t0 = vorrq_u32(vcgtq_u32(vsubq_u32(vandq_u32(vb0, vmask), vcguard), vclim),
+                                      vcgtq_u32(vsubq_u32(vandq_u32(vr0, vmask), vcguard), vclim));
+            uint32x4_t t1 = vorrq_u32(vcgtq_u32(vsubq_u32(vandq_u32(vb1, vmask), vcguard), vclim),
+                                      vcgtq_u32(vsubq_u32(vandq_u32(vr1, vmask), vcguard), vclim));
+            if (vmaxvq_u32(vorrq_u32(t0, t1)) == 0) {
+                vst1_u8(tie + ci, vdup_n_u8(0));
+            } else {
+                c_any = 1;
+                vst1_u8(tie + ci, vmovn_u16(vcombine_u16(vmovn_u32(t0), vmovn_u32(t1))));
+            }
+        }
+#endif
         if (c->bits == 8) {
-            for (int i = 0; i < cw; i++) {
-                uint32_t vb = co + cbb * Sb[i] - cbr * Sr[i] - cbg * Sg[i];
-                uint32_t vr = co + crr * Sr[i] - crg * Sg[i] - crb * Sb[i];
-                o8[2 * i] = (uint8_t)(vb >> M_FIX);
-                o8[2 * i + 1] = (uint8_t)(vr >> M_FIX);
-                tie[i] = M_TIE(vb, M_CGUARD) | M_TIE(vr, M_CGUARD);
+            for (; ci < cw; ci++) {
+                uint32_t vb = co + cbb * Sb[ci] - cbr * Sr[ci] - cbg * Sg[ci];
+                uint32_t vr = co + crr * Sr[ci] - crg * Sg[ci] - crb * Sb[ci];
+                o8[2 * ci] = (uint8_t)(vb >> M_FIX);
+                o8[2 * ci + 1] = (uint8_t)(vr >> M_FIX);
+                uint8_t tf = M_TIE(vb, M_CGUARD) | M_TIE(vr, M_CGUARD);
+                tie[ci] = tf; c_any |= tf;
             }
         } else {
             uint16_t *o16 = (uint16_t *)(void *)o8;
-            for (int i = 0; i < cw; i++) {
-                uint32_t vb = co + cbb * Sb[i] - cbr * Sr[i] - cbg * Sg[i];
-                uint32_t vr = co + crr * Sr[i] - crg * Sg[i] - crb * Sb[i];
-                o16[2 * i] = (uint16_t)((vb >> M_FIX) << 6);
-                o16[2 * i + 1] = (uint16_t)((vr >> M_FIX) << 6);
-                tie[i] = M_TIE(vb, M_CGUARD) | M_TIE(vr, M_CGUARD);
+            for (; ci < cw; ci++) {
+                uint32_t vb = co + cbb * Sb[ci] - cbr * Sr[ci] - cbg * Sg[ci];
+                uint32_t vr = co + crr * Sr[ci] - crg * Sg[ci] - crb * Sb[ci];
+                o16[2 * ci] = (uint16_t)((vb >> M_FIX) << 6);
+                o16[2 * ci + 1] = (uint16_t)((vr >> M_FIX) << 6);
+                uint8_t tf = M_TIE(vb, M_CGUARD) | M_TIE(vr, M_CGUARD);
+                tie[ci] = tf; c_any |= tf;
             }
         }
-        for (int i = m_next_flag(tie, 0, cw); i < cw; i = m_next_flag(tie, i + 1, cw)) {
-            int cb, cr;
-            m_chroma_exact(c, &ht, &vt, i, j, &cb, &cr);
-            m_put_c(c, o8, i, cb, cr);
+        if (c_any) {
+            for (int i = m_next_flag(tie, 0, cw); i < cw; i = m_next_flag(tie, i + 1, cw)) {
+                int cb, cr;
+                m_chroma_exact(c, &ht, &vt, i, j, &cb, &cr);
+                m_put_c(c, o8, i, cb, cr);
+            }
         }
     }
-    free(tie);
-    free(Sr);
+    if (tie != tie_stack) free(tie);
+    if (Sr != s_stack) free(Sr);
 }
 
 static void m_convert(MConv *c) {
@@ -616,15 +774,13 @@ WValue w_media_convert(WValue srcv, WValue wv, WValue hv, WValue stridev, WValue
     int bps = c.bits == 8 ? 1 : 2;
     int cw = (c.w + 1) / 2, ch = (c.h + c.vsub - 1) / c.vsub;
     size_t ysz = (size_t)c.w * (size_t)c.h * bps, csz = (size_t)cw * 2 * (size_t)ch * bps;
-    uint8_t *buf = malloc(ysz + csz);
-    if (!buf) w_media_raise("media.convert: out of memory");
+    WValue r = w_bytes_new((int64_t)(ysz + csz));
+    uint8_t *buf = (uint8_t *)w_as_array(r)->slots;
     c.yp = buf;
     c.ystride = (size_t)c.w * bps;
     c.cp = buf + ysz;
     c.cstride = (size_t)cw * 2 * bps;
     m_convert(&c);
-    WValue r = w_bytes_from_data(buf, (int64_t)(ysz + csz));
-    free(buf);
     return r;
 }
 
@@ -714,6 +870,13 @@ static int m_axis_build(WMediaAxis *ax, int n, int nsrc, double a, double b, int
         for (int i = 0; i < count[j]; i++) ax->w[(size_t)j * T + (size_t)(first[j] - st + i)] = (float)wk[(size_t)j * span + i];
         if (st < ax->lo) ax->lo = st;
         if (st + T > ax->hi) ax->hi = st + T;
+    }
+    if (T == 1 && ax->lo >= 0 && ax->lo + n <= nsrc) {
+        int id_ok = 1;
+        for (int j = 0; j < n; j++) {
+            if (ax->start[j] != ax->lo + j || fabsf(ax->w[j] - 1.0f) > 1e-7f) { id_ok = 0; break; }
+        }
+        ax->id = id_ok;
     }
     free(first);
     free(count);
@@ -832,11 +995,22 @@ static inline int m_u8(float v) { v = v < 0.0f ? 0.0f : v > 255.0f ? 255.0f : v;
 
 /* One output row (rect part) from the vertical accumulator. */
 static void m_store_row(const WMediaScale *s, const float *acc, uint8_t *row) {
-    int C = s->ch, n = s->rw;
+    int C = s->ch, n = s->rw, total = n * C;
     uint8_t *o = row + (size_t)s->rx * C * (s->out_bits > 8 ? 2 : 1);
     if (s->out_bits > 8) {
         uint16_t *o16 = (uint16_t *)(void *)o;
-        for (int i = 0; i < n * C; i++) {
+        int i = 0;
+#if defined(__aarch64__)
+        float32x4_t vzero = vdupq_n_f32(0.0f), vmax10 = vdupq_n_f32(1023.0f), vhalf = vdupq_n_f32(0.5f);
+        for (; i + 8 <= total; i += 8) {
+            float32x4_t v0 = vminq_f32(vmaxq_f32(vmulq_n_f32(vld1q_f32(acc + i), 4.0f), vzero), vmax10);
+            float32x4_t v1 = vminq_f32(vmaxq_f32(vmulq_n_f32(vld1q_f32(acc + i + 4), 4.0f), vzero), vmax10);
+            uint32x4_t u0 = vcvtq_u32_f32(vaddq_f32(v0, vhalf));
+            uint32x4_t u1 = vcvtq_u32_f32(vaddq_f32(v1, vhalf));
+            vst1q_u16(o16 + i, vshlq_n_u16(vcombine_u16(vmovn_u32(u0), vmovn_u32(u1)), 6));
+        }
+#endif
+        for (; i < total; i++) {
             float v = acc[i] * 4.0f;
             v = v < 0.0f ? 0.0f : v > 1023.0f ? 1023.0f : v;
             o16[i] = (uint16_t)(((uint32_t)(v + 0.5f)) << 6);
@@ -844,7 +1018,20 @@ static void m_store_row(const WMediaScale *s, const float *acc, uint8_t *row) {
         return;
     }
     if (C != 4 || s->alpha == W_MEDIA_ALPHA_NONE) {
-        for (int i = 0; i < n * C; i++) o[i] = (uint8_t)m_u8(acc[i]);
+        int i = 0;
+#if defined(__aarch64__)
+        float32x4_t vzero = vdupq_n_f32(0.0f), vmax8 = vdupq_n_f32(255.0f), vhalf = vdupq_n_f32(0.5f);
+        for (; i + 16 <= total; i += 16) {
+            uint16x8_t u01 = vcombine_u16(
+                vmovn_u32(vcvtq_u32_f32(vaddq_f32(vminq_f32(vmaxq_f32(vld1q_f32(acc + i), vzero), vmax8), vhalf))),
+                vmovn_u32(vcvtq_u32_f32(vaddq_f32(vminq_f32(vmaxq_f32(vld1q_f32(acc + i + 4), vzero), vmax8), vhalf))));
+            uint16x8_t u23 = vcombine_u16(
+                vmovn_u32(vcvtq_u32_f32(vaddq_f32(vminq_f32(vmaxq_f32(vld1q_f32(acc + i + 8), vzero), vmax8), vhalf))),
+                vmovn_u32(vcvtq_u32_f32(vaddq_f32(vminq_f32(vmaxq_f32(vld1q_f32(acc + i + 12), vzero), vmax8), vhalf))));
+            vst1q_u8(o + i, vcombine_u8(vmovn_u16(u01), vmovn_u16(u23)));
+        }
+#endif
+        for (; i < total; i++) o[i] = (uint8_t)m_u8(acc[i]);
         return;
     }
     for (int x = 0; x < n; x++) {
@@ -877,12 +1064,31 @@ static void m_load_row(const WMediaScale *s, const uint8_t *row, float *line) {
     int C = s->ch, lo = s->ax.lo, n = (s->ax.hi - lo) * C;
     if (s->in_bits == 10) {
         const uint16_t *p16 = (const uint16_t *)(const void *)row + (size_t)lo * C;
-        for (int i = 0; i < n; i++) line[i] = (float)(p16[i] >> 6) * 0.25f;
+        int i = 0;
+#if defined(__aarch64__)
+        for (; i + 8 <= n; i += 8) {
+            uint16x8_t v = vshrq_n_u16(vld1q_u16(p16 + i), 6);
+            vst1q_f32(line + i, vmulq_n_f32(vcvtq_f32_u32(vmovl_u16(vget_low_u16(v))), 0.25f));
+            vst1q_f32(line + i + 4, vmulq_n_f32(vcvtq_f32_u32(vmovl_u16(vget_high_u16(v))), 0.25f));
+        }
+#endif
+        for (; i < n; i++) line[i] = (float)(p16[i] >> 6) * 0.25f;
         return;
     }
     const uint8_t *p = row + (size_t)lo * C;
     if (C != 4 || s->alpha == W_MEDIA_ALPHA_NONE || s->alpha == W_MEDIA_ALPHA_PREMUL) {
-        for (int i = 0; i < n; i++) line[i] = (float)p[i];
+        int i = 0;
+#if defined(__aarch64__)
+        for (; i + 16 <= n; i += 16) {
+            uint8x16_t u = vld1q_u8(p + i);
+            uint16x8_t u_lo = vmovl_u8(vget_low_u8(u)), u_hi = vmovl_u8(vget_high_u8(u));
+            vst1q_f32(line + i, vcvtq_f32_u32(vmovl_u16(vget_low_u16(u_lo))));
+            vst1q_f32(line + i + 4, vcvtq_f32_u32(vmovl_u16(vget_high_u16(u_lo))));
+            vst1q_f32(line + i + 8, vcvtq_f32_u32(vmovl_u16(vget_low_u16(u_hi))));
+            vst1q_f32(line + i + 12, vcvtq_f32_u32(vmovl_u16(vget_high_u16(u_hi))));
+        }
+#endif
+        for (; i < n; i++) line[i] = (float)p[i];
         return;
     }
     for (int i = 0; i < n; i += 4) {
@@ -920,7 +1126,19 @@ static void m_hpass(const WMediaScale *s, const float *line, float *out) {
             O[x] = acc;
         }
     } else {
-        for (int x = 0; x < n; x++) {
+        int x = 0;
+        for (; x + 4 <= n; x += 4) {
+            const float *w0 = ax->w + (size_t)x * T, *w1 = w0 + T, *w2 = w1 + T, *w3 = w2 + T;
+            const float *p0 = line + (ax->start[x] - lo), *p1 = line + (ax->start[x + 1] - lo);
+            const float *p2 = line + (ax->start[x + 2] - lo), *p3 = line + (ax->start[x + 3] - lo);
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            for (int t = 0; t < T; t++) {
+                a0 += w0[t] * p0[t]; a1 += w1[t] * p1[t];
+                a2 += w2[t] * p2[t]; a3 += w3[t] * p3[t];
+            }
+            out[x] = a0; out[x + 1] = a1; out[x + 2] = a2; out[x + 3] = a3;
+        }
+        for (; x < n; x++) {
             const float *w = ax->w + (size_t)x * T;
             const float *p = line + (ax->start[x] - lo);
             float acc = 0.0f;
@@ -946,20 +1164,40 @@ static void m_scale_band(void *ctx, size_t band) {
     float *H = s->scratch + s->scratch_band * band;
     float *line = H + rowf * (size_t)(hi - lo);
     float *acc = line + (size_t)(s->ax.hi - s->ax.lo) * C + 4;
-    for (int r = lo; r < hi; r++) {
-        m_load_row(s, j->src + (size_t)r * j->ss, line);
-        m_hpass(s, line, H + rowf * (size_t)(r - lo));
+    if (s->ax.id) {
+        for (int r = lo; r < hi; r++) {
+            m_load_row(s, j->src + (size_t)r * j->ss, H + rowf * (size_t)(r - lo));
+        }
+    } else {
+        for (int r = lo; r < hi; r++) {
+            m_load_row(s, j->src + (size_t)r * j->ss, line);
+            m_hpass(s, line, H + rowf * (size_t)(r - lo));
+        }
     }
     for (int r = r0; r < r1; r++) {
         const float *w = ay->w + (size_t)r * T;
         const float *h0 = H + rowf * (size_t)(ay->start[r] - lo);
         float w0 = w[0];
-        for (size_t i = 0; i < rowf; i++) acc[i] = w0 * h0[i];
+        size_t i = 0;
+#if defined(__aarch64__)
+        for (; i + 8 <= rowf; i += 8) {
+            vst1q_f32(acc + i, vmulq_n_f32(vld1q_f32(h0 + i), w0));
+            vst1q_f32(acc + i + 4, vmulq_n_f32(vld1q_f32(h0 + i + 4), w0));
+        }
+#endif
+        for (; i < rowf; i++) acc[i] = w0 * h0[i];
         for (int t = 1; t < T; t++) {
             float wt = w[t];
             if (wt == 0.0f) continue;
             const float *h = h0 + rowf * (size_t)t;
-            for (size_t i = 0; i < rowf; i++) acc[i] += wt * h[i];
+            i = 0;
+#if defined(__aarch64__)
+            for (; i + 8 <= rowf; i += 8) {
+                vst1q_f32(acc + i, vaddq_f32(vld1q_f32(acc + i), vmulq_n_f32(vld1q_f32(h + i), wt)));
+                vst1q_f32(acc + i + 4, vaddq_f32(vld1q_f32(acc + i + 4), vmulq_n_f32(vld1q_f32(h + i + 4), wt)));
+            }
+#endif
+            for (; i < rowf; i++) acc[i] += wt * h[i];
         }
         m_store_row(s, acc, j->dst + (size_t)(r + s->ry) * j->ds);
     }
@@ -2281,24 +2519,78 @@ static void m_probe_output(void *a, void *b, OSStatus st, VTEncodeInfoFlags f, C
     (void)a; (void)b; (void)st; (void)f; (void)sb;
 }
 
+static void m_codecs_cache_key(char *key, size_t key_cap, char *path, size_t path_cap) {
+    char model[128] = "", osv[128] = "";
+    size_t ml = sizeof model - 1, ol = sizeof osv - 1;
+    sysctlbyname("hw.model", model, &ml, NULL, 0);
+    sysctlbyname("kern.osversion", osv, &ol, NULL, 0);
+    snprintf(key, key_cap, "v1:%d:%s:%s", M_NCODECS, model, osv);
+    const char *cd = getenv("TUNGSTEN_CACHE_DIR");
+    const char *bs = getenv("TUNGSTEN_BUILD_STORE");
+    const char *th = getenv("TUNGSTEN_HOME");
+    const char *hm = getenv("HOME");
+    if (cd && cd[0]) snprintf(path, path_cap, "%s/media-codecs-v1.cache", cd);
+    else if (bs && bs[0]) snprintf(path, path_cap, "%s/compile/media-codecs-v1.cache", bs);
+    else if (th && th[0]) snprintf(path, path_cap, "%s/build/compile/media-codecs-v1.cache", th);
+    else if (hm && hm[0]) snprintf(path, path_cap, "%s/.tungsten/build/compile/media-codecs-v1.cache", hm);
+    else path[0] = 0;
+}
+
 WValue w_media_codecs(void) {
     static int probed = 0;
     static int ok[M_NCODECS];
     static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
     pthread_mutex_lock(&mu);
     if (!probed) {
-        for (int i = 0; i < M_NCODECS; i++) {
-            VTCompressionSessionRef s = NULL;
-            CFMutableDictionaryRef spec = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-            CFDictionarySetValue(spec, kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder, kCFBooleanTrue);
-            OSStatus st = VTCompressionSessionCreate(NULL, 1920, 1080, g_codecs[i].type, spec, NULL, NULL, m_probe_output, NULL, &s);
-            CFRelease(spec);
-            ok[i] = st == noErr && s;
-            if (s) {
-                if (ok[i] && g_codecs[i].profile)
-                    ok[i] = VTSessionSetProperty(s, kVTCompressionPropertyKey_ProfileLevel, *g_codecs[i].profile) == noErr;
-                VTCompressionSessionInvalidate(s);
-                CFRelease(s);
+        char key[320], cpath[1024];
+        m_codecs_cache_key(key, sizeof key, cpath, sizeof cpath);
+        int hit = 0;
+        if (cpath[0]) {
+            FILE *fp = fopen(cpath, "r");
+            if (fp) {
+                char line[512];
+                if (fgets(line, sizeof line, fp)) {
+                    size_t kl = strlen(key);
+                    if (strncmp(line, key, kl) == 0 && line[kl] == ' ') {
+                        const char *bits = line + kl + 1;
+                        int valid = 1;
+                        for (int i = 0; i < M_NCODECS; i++) {
+                            if (bits[i] == '0' || bits[i] == '1') ok[i] = bits[i] - '0';
+                            else { valid = 0; break; }
+                        }
+                        if (valid) hit = 1;
+                    }
+                }
+                fclose(fp);
+            }
+        }
+        if (!hit) {
+            for (int i = 0; i < M_NCODECS; i++) {
+                VTCompressionSessionRef s = NULL;
+                CFMutableDictionaryRef spec = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+                CFDictionarySetValue(spec, kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder, kCFBooleanTrue);
+                OSStatus st = VTCompressionSessionCreate(NULL, 1920, 1080, g_codecs[i].type, spec, NULL, NULL, m_probe_output, NULL, &s);
+                CFRelease(spec);
+                ok[i] = st == noErr && s;
+                if (s) {
+                    if (ok[i] && g_codecs[i].profile)
+                        ok[i] = VTSessionSetProperty(s, kVTCompressionPropertyKey_ProfileLevel, *g_codecs[i].profile) == noErr;
+                    VTCompressionSessionInvalidate(s);
+                    CFRelease(s);
+                }
+            }
+            if (cpath[0]) {
+                char tmp[1088];
+                snprintf(tmp, sizeof tmp, "%s.%d.tmp", cpath, (int)getpid());
+                FILE *fp = fopen(tmp, "w");
+                if (fp) {
+                    fputs(key, fp);
+                    fputc(' ', fp);
+                    for (int i = 0; i < M_NCODECS; i++) fputc(ok[i] ? '1' : '0', fp);
+                    fputc('\n', fp);
+                    if (fclose(fp) == 0) rename(tmp, cpath);
+                    else unlink(tmp);
+                }
             }
         }
         probed = 1;
@@ -2725,7 +3017,50 @@ void w_media_wav_close(WMediaWav *w) {
 }
 
 void w_media_wav_read_f32(const WMediaWav *w, int64_t first, int64_t n, float *out) {
+    if (n <= 0) return;
     int ch = w->channels;
+    if (first >= 0 && first + n <= w->frames) {
+        const uint8_t *s = w->data + first * w->block;
+        int64_t total = n * ch;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        if (w->is_float && w->bits == 32) {
+            memcpy(out, s, (size_t)total * sizeof(float));
+            return;
+        }
+#if defined(__aarch64__)
+        if (!w->is_float && w->bits == 16) {
+            const int16_t *s16 = (const int16_t *)(const void *)s;
+            int64_t i = 0;
+            const float inv16 = 1.0f / 32768.0f;
+            for (; i + 8 <= total; i += 8) {
+                int16x8_t v = vld1q_s16(s16 + i);
+                vst1q_f32(out + i, vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(v))), inv16));
+                vst1q_f32(out + i + 4, vmulq_n_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(v))), inv16));
+            }
+            for (; i < total; i++) out[i] = (float)s16[i] * inv16;
+            return;
+        }
+        if (!w->is_float && w->bits == 24) {
+            int64_t i = 0;
+            const float inv24 = 1.0f / 8388608.0f;
+            for (; i + 8 <= total; i += 8, s += 24) {
+                uint8x8x3_t b = vld3_u8(s);
+                uint16x8_t lo = vshll_n_u8(b.val[0], 8);
+                uint16x8_t hi = vorrq_u16(vmovl_u8(b.val[1]), vshll_n_u8(b.val[2], 8));
+                int32x4_t x0 = vshrq_n_s32(vreinterpretq_s32_u32(vorrq_u32(vmovl_u16(vget_low_u16(lo)), vshlq_n_u32(vmovl_u16(vget_low_u16(hi)), 16))), 8);
+                int32x4_t x1 = vshrq_n_s32(vreinterpretq_s32_u32(vorrq_u32(vmovl_u16(vget_high_u16(lo)), vshlq_n_u32(vmovl_u16(vget_high_u16(hi)), 16))), 8);
+                vst1q_f32(out + i, vmulq_n_f32(vcvtq_f32_s32(x0), inv24));
+                vst1q_f32(out + i + 4, vmulq_n_f32(vcvtq_f32_s32(x1), inv24));
+            }
+            for (; i < total; i++, s += 3) {
+                int32_t x = (int32_t)((uint32_t)s[0] << 8 | (uint32_t)s[1] << 16 | (uint32_t)s[2] << 24) >> 8;
+                out[i] = (float)x * inv24;
+            }
+            return;
+        }
+#endif
+#endif
+    }
     for (int64_t i = 0; i < n; i++) {
         int64_t f = first + i;
         float *o = out + i * ch;

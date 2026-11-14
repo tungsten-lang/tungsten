@@ -83,16 +83,7 @@ Q28 = ~268435456.0
   frames
 
 -> wav_deinterleave(fv, frames, ch, left, right) (f32[] i64 i64 f64[] f64[]) i64
-  i = 0
-  while i < frames
-    if ch == 1
-      v = fv[i] ## f64
-      left[i] = v
-      right[i] = v
-    else
-      left[i] = fv[i * ch] ## f64
-      right[i] = fv[i * ch + 1] ## f64
-    i += 1
+  ccall("w_media_studio_op", "wav_deinterleave", fv, [left, right], [frames, ch])
   frames
 
 # Interleaved stereo f32 view of a float WAV (for the sync check): [view, frames, mmap].
@@ -135,7 +126,7 @@ Q28 = ~268435456.0
   while i < 44
     hdr[i] = bytes[i]
     i += 1
-  tmp = path + ".part." + ccall("w_media_pid").to_s
+  tmp = path + ".part." + run_token()
   fh = FileHandle.new(tmp, "wb")
   fh.write(hdr)
   blk = 174762
@@ -153,17 +144,7 @@ Q28 = ~268435456.0
   path
 
 -> pack_s24(bus, f0, n, buf) (f32[] i64 i64 u8[]) i64
-  i = 0
-  while i < n * 2
-    v = (bus[f0 * 2 + i] ## f64) * ~8388607.0
-    v = ~8388607.0 if v > ~8388607.0
-    v = (~0.0 - ~8388608.0) if v < (~0.0 - ~8388608.0)
-    q = Math.floor(v + ~0.5) ## i64
-    q = q + 16777216 if q < 0
-    buf[i * 3] = q & 255
-    buf[i * 3 + 1] = (q >> 8) & 255
-    buf[i * 3 + 2] = (q >> 16) & 255
-    i += 1
+  ccall("w_media_studio_op", "pack_s24", bus, buf, [f0, n])
   0
 
 # Encoder delay and padding from an MP3's Xing/Info frame and LAME tag: [delay, padding] samples, or nil.
@@ -795,13 +776,7 @@ Q28 = ~268435456.0
 
 # out[p0 + j] += y[j] for j in [0, m), clipped to [0, n).
 -> add_run(out, n, y, p0, m) (f64[] i64 f64[] i64 i64) i64
-  j = 0
-  j = 0 - p0 if p0 < 0
-  e = m
-  e = n - p0 if p0 + m > n
-  while j < e
-    out[p0 + j] = out[p0 + j] + y[j]
-    j += 1
+  ccall("w_media_studio_op", "add_run", [out, y], [n, p0, m], 0)
   0
 
 # The split-band de-esser's high band filter: tools/mix.py weighted the whole take's spectrum by
@@ -948,26 +923,12 @@ Q28 = ~268435456.0
 
 # complex multiply re/im by the spectrum hr/hi
 -> cmul_run(re, im, hr, hi, n) (f64[] f64[] f64[] f64[] i64) i64
-  i = 0
-  while i < n
-    r = re[i] * hr[i] - im[i] * hi[i]
-    q = re[i] * hi[i] + im[i] * hr[i]
-    re[i] = r
-    im[i] = q
-    i += 1
+  ccall("w_media_studio_op", "cmul1", [re, im], [hr, hi], [n])
   0
 
 # (ar, ai) = (re, im) * (h1r, h1i); (re, im) *= (h0r, h0i): one spectrum times two kernels.
 -> cmul2_run(re, im, h0r, h0i, h1r, h1i, ar, ai, n) (f64[] f64[] f64[] f64[] f64[] f64[] f64[] f64[] i64) i64
-  i = 0
-  while i < n
-    xr = re[i]
-    xi = im[i]
-    ar[i] = xr * h1r[i] - xi * h1i[i]
-    ai[i] = xr * h1i[i] + xi * h1r[i]
-    re[i] = xr * h0r[i] - xi * h0i[i]
-    im[i] = xr * h0i[i] + xi * h0r[i]
-    i += 1
+  ccall("w_media_studio_op", "cmul2", [re, im, ar, ai], [h0r, h0i, h1r, h1i], [n])
   0
 
 # Reverb by overlap-add (tools/mix.py: dry * (1 - wet / 2) + wet * x (*) ir_c, times pan_c): blocks of
@@ -998,14 +959,7 @@ Q28 = ~268435456.0
       add_run(outl, total, zi, sb, lb + irn - 1)
       add_run(outr, total, ai, sb, lb + irn - 1)
     st += 2 * blk
-  dry = ~1.0 - wet * ~0.5
-  i = 0
-  while i < total
-    d = ~0.0
-    d = x[i] if i < n
-    outl[i] = (d * dry + outl[i] * wet) * pl
-    outr[i] = (d * dry + outr[i] * wet) * pr
-    i += 1
+  ccall("w_media_studio_op", "reverb_mix", [x, outl, outr], [n, total], [wet, pl, pr])
   0
 
 # ---------------------------------------------------------------------------------------------- bus
@@ -1013,38 +967,12 @@ Q28 = ~268435456.0
 # Add (left, right) * gain into the interleaved bus at sample s0 (clipped to the bus), with an optional duck:
 # the gain is multiplied by db(depth * duck[sample / 64]) when depth != 0 (computed once per 64-sample block).
 -> place_run(bus, nbus, left, right, n, s0, gain, duck, nduck, depth) (f32[] i64 f64[] f64[] i64 i64 f64 f64[] i64 f64) i64
-  i = 0
-  if s0 < 0
-    i = 0 - s0
-  cb = -1
-  g = gain
-  while i < n && s0 + i < nbus
-    p = s0 + i
-    if depth != ~0.0
-      b = p / 64
-      if b != cb
-        cb = b
-        d = ~0.0
-        d = duck[b] if b < nduck
-        g = gain * Math.exp(depth * d * ~0.11512925464970229)
-    bus[p * 2] = ((bus[p * 2] ## f64) + left[i] * g) ## f32
-    bus[p * 2 + 1] = ((bus[p * 2 + 1] ## f64) + right[i] * g) ## f32
-    i += 1
+  ccall("w_media_studio_op", "place_run", [bus, left, right], [nbus, n, s0, nduck], [gain, depth, duck])
   0
 
 # Add n stereo frames of Q3.28 audio (interleaved i32, a cached take) into the bus at sample s0.
 -> place_q28(bus, nbus, src, n, s0) (f32[] i64 i32[] i64 i64) i64
-  sc = ~1.0 / ~268435456.0
-  i = 0
-  if s0 < 0
-    i = 0 - s0
-  while i < n && s0 + i < nbus
-    p = s0 + i
-    a = src[i * 2]
-    b = src[i * 2 + 1]
-    bus[p * 2] = ((bus[p * 2] ## f64) + (a ## f64) * sc) ## f32
-    bus[p * 2 + 1] = ((bus[p * 2 + 1] ## f64) + (b ## f64) * sc) ## f32
-    i += 1
+  ccall("w_media_studio_op", "place_q28", bus, src, [nbus, n, s0])
   0
 
 # Q3.28 interleaved stereo -> planar f64 (exact).
@@ -1062,27 +990,7 @@ Q28 = ~268435456.0
 # Planar f64 frames [f0, f0 + n) -> interleaved little-endian Q3.28 bytes (rounded, saturated); returns the
 # number of saturated samples.
 -> pack_q28(left, right, f0, n, buf) (f64[] f64[] i64 i64 u8[]) i64
-  sat = 0
-  i = 0
-  while i < n * 2
-    v = left[f0 + i / 2]
-    v = right[f0 + i / 2] if i % 2 == 1
-    v = v * ~268435456.0
-    if v > ~2147483647.0
-      v = ~2147483647.0
-      sat += 1
-    if v < (~0.0 - ~2147483648.0)
-      v = ~0.0 - ~2147483648.0
-      sat += 1
-    q = Math.floor(v + ~0.5) ## i64
-    q = 2147483647 if q > 2147483647
-    q = q + 4294967296 if q < 0
-    buf[i * 4] = q & 255
-    buf[i * 4 + 1] = (q >> 8) & 255
-    buf[i * 4 + 2] = (q >> 16) & 255
-    buf[i * 4 + 3] = (q >> 24) & 255
-    i += 1
-  sat
+  ccall("w_media_studio_op", "pack_q28", [left, right], buf, [f0, n]) ## i64
 
 # A stereo 32-bit PCM WAV of Q3.28 samples from planar f64 (the take and cue caches), written atomically.
 -> write_wav_q28(path, left, right, frames, rate)
@@ -1093,7 +1001,7 @@ Q28 = ~268435456.0
   while i < 44
     hdr[i] = bytes[i]
     i += 1
-  tmp = path + ".part." + ccall("w_media_pid").to_s
+  tmp = path + ".part." + run_token()
   fh = FileHandle.new(tmp, "wb")
   fh.write(hdr)
   blk = 131072
@@ -1122,31 +1030,7 @@ Q28 = ~268435456.0
 
 # tools/mix.py ducking: block max of mean |vo| over 64 samples, attack/release follower, duck = clip(env / full).
 -> duck_env(bus, nbus, out, nb, attack, release, full, sr) (f32[] i64 f64[] i64 f64 f64 f64 i64) i64
-  au = Math.exp((~0.0 - ~1.0) / (attack * (sr ## f64) / ~64.0))
-  ad = Math.exp((~0.0 - ~1.0) / (release * (sr ## f64) / ~64.0))
-  acc = ~0.0
-  b = 0
-  while b < nb
-    mx = ~0.0
-    i = b * 64
-    e = i + 64
-    e = nbus if e > nbus
-    while i < e
-      a = bus[i * 2] ## f64
-      a = ~0.0 - a if a < ~0.0
-      c = bus[i * 2 + 1] ## f64
-      c = ~0.0 - c if c < ~0.0
-      v = (a + c) * ~0.5
-      mx = v if v > mx
-      i += 1
-    if mx > acc
-      acc = au * acc + (~1.0 - au) * mx
-    else
-      acc = ad * acc + (~1.0 - ad) * mx
-    d = acc / full
-    d = ~1.0 if d > ~1.0
-    out[b] = d
-    b += 1
+  ccall("w_media_studio_op", "duck_env", bus, out, [nbus, nb, attack, release, full, sr])
   0
 
 -> bus_peak(bus, n) (f32[] i64) f64
@@ -1171,69 +1055,7 @@ Q28 = ~268435456.0
 # BS.1770-4 K-weighted mean square per 100 ms sub-block (both channels summed), into zs. The two channels' filter
 # recursions run interleaved (independent dependency chains), each summed per sub-block, then added.
 -> k_weight_blocks(bus, n, zs, sub) (f32[] i64 f64[] i64) i64
-  # 48 kHz coefficients from the recommendation (stage 1 shelf, stage 2 high-pass)
-  sb0 = ~1.53512485958697
-  sb1 = (~0.0 - ~2.69169618940638)
-  sb2 = ~1.19839281085285
-  sa1 = (~0.0 - ~1.69065929318241)
-  sa2 = ~0.73248077421585
-  hb0 = ~1.0
-  hb1 = (~0.0 - ~2.0)
-  hb2 = ~1.0
-  ha1 = (~0.0 - ~1.99004745483398)
-  ha2 = ~0.99007225036621
-  nb = n / sub
-  ax1 = ~0.0
-  ax2 = ~0.0
-  ay1 = ~0.0
-  ay2 = ~0.0
-  au1 = ~0.0
-  au2 = ~0.0
-  av1 = ~0.0
-  av2 = ~0.0
-  bx1 = ~0.0
-  bx2 = ~0.0
-  by1 = ~0.0
-  by2 = ~0.0
-  bu1 = ~0.0
-  bu2 = ~0.0
-  bv1 = ~0.0
-  bv2 = ~0.0
-  b = 0
-  while b < nb
-    s0 = ~0.0
-    s1 = ~0.0
-    i = b * sub
-    e = i + sub
-    while i < e
-      xa = bus[i * 2] ## f64
-      xb = bus[i * 2 + 1] ## f64
-      ya = sb0 * xa + sb1 * ax1 + sb2 * ax2 - sa1 * ay1 - sa2 * ay2
-      yb = sb0 * xb + sb1 * bx1 + sb2 * bx2 - sa1 * by1 - sa2 * by2
-      ax2 = ax1
-      ax1 = xa
-      ay2 = ay1
-      ay1 = ya
-      bx2 = bx1
-      bx1 = xb
-      by2 = by1
-      by1 = yb
-      va = hb0 * ya + hb1 * au1 + hb2 * au2 - ha1 * av1 - ha2 * av2
-      vb = hb0 * yb + hb1 * bu1 + hb2 * bu2 - ha1 * bv1 - ha2 * bv2
-      au2 = au1
-      au1 = ya
-      av2 = av1
-      av1 = va
-      bu2 = bu1
-      bu1 = yb
-      bv2 = bv1
-      bv1 = vb
-      s0 = s0 + va * va
-      s1 = s1 + vb * vb
-      i += 1
-    zs[b] = (s0 + s1) / (sub ## f64)
-    b += 1
-  nb
+  ccall("w_media_studio_op", "k_weight", bus, zs, [n, sub]) ## i64
 
 # Integrated loudness (LUFS) from 100 ms sub-blocks: 400 ms blocks, 75% overlap, gates -70 LUFS and -10 LU.
 -> integrated_lufs(zs, nb) (f64[] i64) f64
@@ -1342,111 +1164,12 @@ Q28 = ~268435456.0
 # min(ceil, the running maximum) (tp_bound): a skipped sample would have gain 1 and could not raise the maximum,
 # so the gains and the maximum equal those of evaluating every sample of those blocks.
 -> tp_gain(bus, n, h, ceil, g) (f32[] i64 f64[] f64 f32[]) f64
-  bound = tp_bound(h)
-  maxtp = ~0.0
-  safe = ceil / ~1.7
-  nb = n / 256 + 1
-  bm = f64[nb]
-  sm = f64[36]
-  i = 0 ## i64
-  while i < n
-    v = bus[i * 2] ## f64
-    v = ~0.0 - v if v < ~0.0
-    w = bus[i * 2 + 1] ## f64
-    w = ~0.0 - w if w < ~0.0
-    v = w if w > v
-    bk = i / 256
-    bm[bk] = v if v > bm[bk]
-    i += 1
-  b = 0 ## i64
-  while b < nb
-    lo = b * 256
-    hi = lo + 256
-    hi = n if hi > n
-    near = bm[b]
-    near = bm[b - 1] if b > 0 && bm[b - 1] > near
-    near = bm[b + 1] if b + 1 < nb && bm[b + 1] > near
-    if near <= safe
-      i = lo
-      while i < hi
-        g[i] = ~1.0 ## f32
-        i += 1
-    else
-      base = lo - 16
-      sub_max(bus, n, 0, base, 18, sm, 0)
-      sub_max(bus, n, 1, base, 18, sm, 18)
-      i = lo
-      while i < hi
-        gi = ~1.0
-        c = 0 ## i64
-        while c < 2
-          tp = bus[i * 2 + c] ## f64
-          tp = ~0.0 - tp if tp < ~0.0
-          if i >= 6 && i + 6 < n
-            wm = sm[c * 18 + (i - 5 - base) / 16]
-            w2 = sm[c * 18 + (i + 6 - base) / 16]
-            wm = w2 if w2 > wm
-            lim = ceil
-            lim = maxtp if maxtp < lim
-            if wm * bound > lim
-              # tp_at, inline (called, its i64 arguments went through boxed values on every evaluated sample)
-              p = 0 ## i64
-              while p < 4
-                acc = ~0.0
-                k = 0 ## i64
-                while k < 12
-                  acc = acc + (bus[(i + k - 5) * 2 + c] ## f64) * h[p * 12 + k]
-                  k += 1
-                acc = ~0.0 - acc if acc < ~0.0
-                tp = acc if acc > tp
-                p += 1
-          maxtp = tp if tp > maxtp
-          q = ~1.0
-          q = ceil / tp if tp > ceil
-          gi = q if q < gi
-          c += 1
-        g[i] = gi ## f32
-        i += 1
-    b += 1
-  maxtp
+  ccall("w_media_studio_op", "tp_gain", bus, h, [n, ceil, g]) ## f64
 
 # Look-ahead limiter: gain = running min over the next 2w samples, averaged over w (so it is down by the peak),
 # with an exponential release; applied in place.
 -> limit_apply(bus, n, g, w, release_coef) (f32[] i64 f32[] i64 f64) i64
-  # forward min over [i, i + 2w] (in place, from the end, with a monotone deque emulated by a block scan)
-  m = f32[n]
-  i = n - 1
-  while i >= 0
-    lo = g[i] ## f64
-    e = i + 2 * w
-    e = n - 1 if e > n - 1
-    if lo < ~1.0 || (i + 1 < n && (m[i + 1] ## f64) < ~1.0)
-      k = i
-      while k <= e
-        v = g[k] ## f64
-        lo = v if v < lo
-        k += 1
-    m[i] = lo ## f32
-    i -= 1
-  acc = ~0.0
-  i = 0
-  while i < w && i < n
-    acc = acc + (m[i] ## f64)
-    i += 1
-  gcur = ~1.0
-  i = 0
-  while i < n
-    avg = ~1.0
-    if i >= w
-      acc = acc + (m[i] ## f64) - (m[i - w] ## f64)
-      avg = acc / (w ## f64)
-    else
-      avg = (m[i] ## f64)
-    gcur = gcur + (~1.0 - gcur) * release_coef
-    gcur = avg if avg < gcur
-    bus[i * 2] = ((bus[i * 2] ## f64) * gcur) ## f32
-    bus[i * 2 + 1] = ((bus[i * 2 + 1] ## f64) * gcur) ## f32
-    i += 1
+  ccall("w_media_studio_op", "limit_apply", bus, g, [n, w, release_coef])
   0
 
 # ---------------------------------------------------------------------------------------------- the mix
@@ -1466,6 +1189,7 @@ Q28 = ~268435456.0
     @takes_made = 0
     @cues_made = 0
     @tw_d = nil
+    @local_sha = {}
 
   # Decode an asset once into build/audio/<sha>.wav (48 kHz float) via CoreAudio ExtAudioFile + AudioConverter
   # ('bats' mastering SRC, quality 127), trimming LAME/Info gapless head/tail frames in memory on MP3s.
@@ -1483,10 +1207,11 @@ Q28 = ~268435456.0
 
   -> asset_sha(key)
     sha = @proj.asset_sha[key]
+    sha = @local_sha[key] if sha == nil
     sha = @proj.ep["assets"][key]["sha256"] if sha == nil
     if sha == nil
       sha = Crypto.sha256(File.read_bytes(@proj.asset_path(key)))
-      @proj.asset_sha[key] = sha
+      @local_sha[key] = sha
     sha
 
   # A narration take's whole chain is cached under this key: the take's content and every parameter its
@@ -1809,7 +1534,6 @@ Q28 = ~268435456.0
         uncached.push(li)
       li += 1
     if uncached.size >= 2 && env("STUDIO_MIX_WORKERS") != "0"
-      @proj.write_resolved(@proj.resolved_path) if !File.exist?(@proj.resolved_path)
       nw = uncached.size < 4 ? uncached.size : 4
       lists = []
       wi = 0
@@ -1818,17 +1542,31 @@ Q28 = ~268435456.0
         wi += 1
       ui = 0
       while ui < uncached.size
-        lists[ui % nw].push(uncached[ui].to_s)
+        lists[ui % nw].push(uncached[ui])
         ui += 1
-      procs = []
+      ths = []
+      mp = @proj
+      mr = @r
       wi = 0
       while wi < nw
-        if lists[wi].size > 0
-          procs.push(Process.spawn([studio_bin(), "mix-takes", @proj.path, @r["cut"], lists[wi].join(",")]))
+        idxs = lists[wi]
+        if idxs.size > 0
+          mth = Thread.new ->
+            w_rc = 0
+            begin
+              wm = Mixer.new(mp, mr)
+              wm.prepare_for_takes(idxs)
+              wlines = mr["tracks"][2]["items"]
+              idxs.each ->(idx)
+                wm.take_file(wlines[idx])
+            rescue _e
+              w_rc = 1
+            w_rc
+          ths.push(mth)
         wi += 1
       bad_w = 0
-      procs.each ->(pr)
-        bad_w += 1 if pr.wait != 0
+      ths.each ->(t)
+        bad_w += 1 if t.join != 0
       die("mix: " + bad_w.to_s + " take worker(s) failed") if bad_w > 0
       @takes_made += uncached.size
       @takes_cached -= uncached.size
@@ -1956,10 +1694,7 @@ Q28 = ~268435456.0
     m.take_file(lines[idx])
   0
 
--> cmd_mix(args)
-  p = Project.new(args[1], (args.size > 3 && args[2] == "--cut") ? args[3] : "full")
-  p.verify_assets(true)
-  r = p.resolve
+-> run_chain_mix(p, r)
   out = p.out_path("mix.wav")
   key = mix_key(p, r)
   cached = p.build + "/audio/mix_" + key + ".wav"
@@ -1976,3 +1711,9 @@ Q28 = ~268435456.0
   << "mix: " + rep["samples"].to_s + " samples (" + timecode(r["frames"], r["rate"][0], r["rate"][1]) + "), " + rep["lines"].to_s + " lines, " + rep["cues"].to_s + " cues; " + fixed6(rep["lufs_premaster"]) + " LUFS + " + fixed6(rep["gain_db"]) + " dB -> " + fixed6(rep["lufs"]) + " LUFS, true peak " + fixed6(rep["true_peak_dbtp"]) + " dBTP -> " + out
   << "mix timing ms: " + JSON.encode(rep["ms"]) + "; takes " + rep["takes"]["cached"].to_s + " cached, " + rep["takes"]["made"].to_s + " made; " + JSON.encode(rep["detail_ms"])
   0
+
+-> cmd_mix(args)
+  p = Project.new(args[1], (args.size > 3 && args[2] == "--cut") ? args[3] : "full")
+  p.verify_assets(true)
+  r = p.resolve
+  run_chain_mix(p, r)

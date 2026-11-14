@@ -36,19 +36,22 @@ in Av
     opts
 
   -> verify(project, path, plan, directory, reference = nil, timeline = nil, subtitles = nil, known_sha = nil)
+    verify_with_media(@media, project, path, plan, directory, reference, timeline, subtitles, known_sha)
+
+  -> verify_with_media(v_media, project, path, plan, directory, reference = nil, timeline = nil, subtitles = nil, known_sha = nil)
     File.mkdir_p(directory)
     p = plan["profile"]
     pre_audio = nil
     if p["loudness"]["enabled"] && p["audio"]["codec"] != "none"
       disk = Budget.new(project.resources).disk(directory, 0)
       raise "insufficient disk for decoded audio QC" if !disk["ok"]
-      pre_audio = QC.audio(path, p["loudness"], @media, directory)
+      pre_audio = QC.audio(path, p["loudness"], v_media, directory)
     opts = {"tc_start": plan["timecode"], "width": plan["width"], "height": plan["height"], "rate": plan["rate"], "frames": plan["frames"], "codec": p["video"]["codec"], "audio": p["audio"]["codec"] != "none", "edit_lists": p["edit_lists"]}
     opts["chapters"] = plan["chapters"] if plan["chapters"] != nil
     opts["level"] = p["video"]["level"] if p["video"]["level"]
     extra = pre_audio != nil ? {"audio_decoded_frames": pre_audio["decoded_frames"]} : nil
-    native = @media.request("verify", path, opts, directory, nil, extra)
-    probe = @media.last_verify_probe || @media.probe(path)
+    native = v_media.request("verify", path, opts, directory, nil, extra)
+    probe = v_media.last_verify_probe || v_media.probe(path)
     Planner.colour_guard(probe, p["colour"].merge({"untagged": "reject"}))
     audios = probe["streams"].select ->(s) s["codec_type"] == "audio"
     a = p["audio"]
@@ -59,7 +62,7 @@ in Av
     else
       want = a["codec"] == "aac" ? "aac" : "pcm_" + a["sample_format"]
       audio_ok = audios.size == 1 && audios[0]["codec_name"] == want && audios[0]["sample_rate"].to_i == a["sample_rate"] && audios[0]["channels"] == a["channels"]
-    result = QC.run(project, @media, path, plan, directory, reference, timeline, subtitles, pre_audio, known_sha)
+    result = QC.run(project, v_media, path, plan, directory, reference, timeline, subtitles, pre_audio, known_sha)
     result["ok"] = result["ok"] && native["ok"] && audio_ok
     result["native"] = native
     result["audio_contract"] = audio_ok
@@ -137,6 +140,7 @@ in Av
     source = nil
     source_audio = nil
     source_hash = nil
+    pending_verify = nil
     begin
       if plan["source"]
         sealed = snapshots.seal(plan["source"])
@@ -173,7 +177,11 @@ in Av
       contexts = {}
       timelines = {}
       mappings = {}
-      plan["profiles"].keys.each ->(name)
+      profile_names = plan["profiles"].keys
+      pi = 0
+      while pi < profile_names.size
+        name = profile_names[pi]
+        has_more_profiles = pi + 1 < profile_names.size
         p = plan["profiles"][name]
         parent = p["profile"]["from"]
         origin = Util.get(sources, parent, source)
@@ -229,12 +237,9 @@ in Av
           subtitles = project.associated("subtitles", name).map ->(i) Util.get(current_mapping, project.path(i["name"]), project.path(i["name"]))
           subtitles_by_name[name] = subtitles
           checks_dir = directory + "/checks"
-          verification = verify(context, destination, p, checks_dir, origin, current_timeline, subtitles, sealed["sha256"])
-          dest_sha = verification["sha256"]
-          state["outputs"][name] = {"path": destination, "sha256": dest_sha, "result": result, "verification": verification, "reference": origin, "timeline": current_timeline, "project_settings": context.settings, "subtitle_paths": subtitles}
-          Util.json(job + "/job.json", state)
           target = project.output_path(p["profile"]["path"])
-          entries.push({"source": destination, "destination": target, "role": name, "plan": p, "verified_sha256": dest_sha, "verified_checks_dir": checks_dir, "verified_result": verification})
+          entry_record = {"source": destination, "destination": target, "role": name, "plan": p, "verified_sha256": sealed["sha256"], "verified_checks_dir": checks_dir, "verified_result": nil}
+          entries.push(entry_record)
           index = 0
           subtitles.each ->(subtitle)
             language = project.associated("subtitles", name)[index]["language"]
@@ -245,6 +250,57 @@ in Av
             path = project.path(chapter["name"])
             file = Util.get(current_mapping, path, path)
             entries.push({"source": file, "destination": target.slice(0, target.size - File.extname(target).size) + ".chapters" + File.extname(file), "role": "chapters"})
+          if pending_verify != nil
+            pv_res = pending_verify[0].join
+            pv_info = pending_verify[1]
+            pending_verify = nil
+            raise pv_res[1] if pv_res[0] == "err"
+            pv_ver = pv_res[1]
+            pv_sha = pv_ver["sha256"]
+            pv_info["entry"]["verified_sha256"] = pv_sha
+            pv_info["entry"]["verified_result"] = pv_ver
+            state["outputs"][pv_info["name"]] = {"path": pv_info["destination"], "sha256": pv_sha, "result": pv_info["result"], "verification": pv_ver, "reference": pv_info["origin"], "timeline": pv_info["timeline"], "project_settings": pv_info["settings"], "subtitle_paths": pv_info["subtitles"]}
+            Util.json(job + "/job.json", state)
+          if has_more_profiles
+            v_ctx = context
+            v_dest = destination
+            v_plan = p
+            v_checks = checks_dir
+            v_origin = origin
+            v_tl = current_timeline
+            v_subs = subtitles
+            v_sha = sealed["sha256"]
+            v_pkg = @media.package
+            v_runner = @media.runner
+            v_self = self
+            v_thread = Thread.new ->
+              v_res = nil
+              begin
+                v_media = Media.new(v_ctx.toolchain, v_pkg, v_runner)
+                v_res = ["ok", v_self.verify_with_media(v_media, v_ctx, v_dest, v_plan, v_checks, v_origin, v_tl, v_subs, v_sha)]
+              rescue v_err
+                v_res = ["err", v_err]
+              v_res
+            pending_verify = [v_thread, {"name": name, "destination": destination, "result": result, "origin": origin, "timeline": current_timeline, "settings": context.settings, "subtitles": subtitles, "entry": entry_record}]
+          else
+            verification = verify(context, destination, p, checks_dir, origin, current_timeline, subtitles, sealed["sha256"])
+            dest_sha = verification["sha256"]
+            entry_record["verified_sha256"] = dest_sha
+            entry_record["verified_result"] = verification
+            state["outputs"][name] = {"path": destination, "sha256": dest_sha, "result": result, "verification": verification, "reference": origin, "timeline": current_timeline, "project_settings": context.settings, "subtitle_paths": subtitles}
+            Util.json(job + "/job.json", state)
+        pi += 1
+      if pending_verify != nil
+        pv_res = pending_verify[0].join
+        pv_info = pending_verify[1]
+        pending_verify = nil
+        raise pv_res[1] if pv_res[0] == "err"
+        pv_ver = pv_res[1]
+        pv_sha = pv_ver["sha256"]
+        pv_info["entry"]["verified_sha256"] = pv_sha
+        pv_info["entry"]["verified_result"] = pv_ver
+        state["outputs"][pv_info["name"]] = {"path": pv_info["destination"], "sha256": pv_sha, "result": pv_info["result"], "verification": pv_ver, "reference": pv_info["origin"], "timeline": pv_info["timeline"], "project_settings": pv_info["settings"], "subtitle_paths": pv_info["subtitles"]}
+        Util.json(job + "/job.json", state)
       if !quality_only
         raise "toolchain changed during job" if Inputs.implementation(project.toolchain, @media.package, project.workspace)["sha256"] != identity["sha256"]
         raise "Bitfile changed during job" if Util.sha(project.file) != project.content_sha256
@@ -265,6 +321,10 @@ in Av
       Util.json(job + "/job.json", state)
       state
     rescue error
+      if pending_verify != nil
+        pv_res = pending_verify[0].join
+        pending_verify = nil
+        error = pv_res[1] if pv_res[0] == "err"
       state["status"] = "failed"
       state["finished"] = Util.now
       state["error"] = error.to_s

@@ -7,6 +7,15 @@
 # and fixed buffers avoid rebuilding scores or allocating during the walk.
 # Eight signed-shift trajectories run first. On a miss, eight logical-shift
 # trajectories follow with the same seed sequence, reusing every buffer.
+#
+# The worker arm wraps that walk in a tabu search over the same domains
+# (wassat_domain_tabu): unweighted conflict counts kept per value, the best
+# non-tabu move of any domain in conflict, and a value just left stays tabu
+# for a few iterations plus a share of the domains in conflict. One short
+# tabu trial runs before the walk and longer ones after it until the wall
+# deadline. On forced-satisfiable random CSPs (Model RB: frb80-14, rbsat)
+# it needs a few million cheap moves where the weighted walk and CDCL need
+# most of a minute or more.
 use atomic_stop
 
 WASSAT_DOMAIN_MAX_VARS = 2048
@@ -16,7 +25,10 @@ WASSAT_DOMAIN_MAX_CLAUSES = 400000
 WASSAT_DOMAIN_RESTART_STEPS = 100000
 WASSAT_DOMAIN_BASE_RESTARTS = 8
 WASSAT_DOMAIN_RESTARTS = 2 * WASSAT_DOMAIN_BASE_RESTARTS
-WASSAT_DOMAIN_WALL_MS = 15000
+WASSAT_DOMAIN_WALL_MS = 45000
+WASSAT_DOMAIN_TABU_FIRST = 6000000
+WASSAT_DOMAIN_TABU_TRIAL = 16000000
+WASSAT_DOMAIN_TABU_TRIALS = 64
 
 # m: status, recognized, stop(1 cancel/2 deadline/3 exhausted), blocks,
 # prepared clauses/literals, restarts, iterations, flips, weight bumps,
@@ -311,11 +323,192 @@ fn wassat_domain_ctz(x) (i64) i64
       m[8] += 1
   0
 
+# Domains c != b that some value of b has an exclusion against.
+-> wassat_domain_neighbors(block_vars, block_len, forbid, noff, nlist, nb) (i64[] i64[] i64[] i64[] i64[] i64) i64
+  stride = WASSAT_DOMAIN_MAX_SIZE
+  used = 0
+  b = 0
+  while b < nb
+    noff[b] = used
+    c = 0
+    while c < nb
+      if c != b
+        hit = 0
+        j = 0
+        while j < block_len[b] && hit == 0
+          hit = 1 if forbid[block_vars[b * stride + j] * WASSAT_DOMAIN_MAX_BLOCKS + c] != 0
+          j += 1
+        if hit == 1
+          nlist[used] = c
+          used += 1
+      c += 1
+    b += 1
+  noff[nb] = used
+  used
+
+# One tabu trial of at most `steps` moves from a random assignment.
+# counts[b, j]: neighbors whose selected value excludes value j of domain b.
+# Returns 1 with sol conflict-free (the caller replays the original clauses).
+-> wassat_domain_tabu(block_vars, block_len, forbid, dom, sol, counts, tabu,
+                       noff, nlist, conf, m, stop, nb, seed, steps, deadline) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64) i64
+  stride = WASSAT_DOMAIN_MAX_SIZE
+  one = 1 ## i64
+  shift_mask = (one << 57) - one ## i64
+  i = 0
+  while i < nb * stride
+    tabu[i] = 0
+    i += 1
+  rng = seed
+  rng = 88172645463325252 if rng == 0
+  # Spread small seeds before the first draw.
+  i = 0
+  while i < 8
+    rng ^= rng << 13
+    rng ^= (rng >> 7) & shift_mask
+    rng ^= rng << 17
+    i += 1
+  b = 0
+  while b < nb
+    return 0 if dom[b] == 0
+    rng ^= rng << 13
+    rng ^= (rng >> 7) & shift_mask
+    rng ^= rng << 17
+    offset = (rng & 2147483647) % wassat_domain_pop(dom[b])
+    remaining = dom[b]
+    while offset > 0
+      remaining &= remaining - 1
+      offset -= 1
+    sol[b] = wassat_domain_ctz(remaining)
+    b += 1
+  b = 0
+  while b < nb
+    return 0 if wassat_domain_stop(m, stop, deadline) != 0
+    j = 0
+    while j < block_len[b]
+      u = block_vars[b * stride + j]
+      score = 0
+      t = noff[b]
+      while t < noff[b + 1]
+        c = nlist[t]
+        score += 1 if ((forbid[u * WASSAT_DOMAIN_MAX_BLOCKS + c] >> sol[c]) & 1) != 0
+        t += 1
+      counts[b * stride + j] = score
+      j += 1
+    b += 1
+  best = nb * nb
+  iteration = 0
+  while iteration < steps
+    return 0 if (iteration & 1023) == 0 && wassat_domain_stop(m, stop, deadline) != 0
+    iteration += 1
+    m[7] += 1
+    nconf = 0
+    total = 0
+    b = 0
+    while b < nb
+      g = counts[b * stride + sol[b]]
+      if g > 0
+        conf[nconf] = b
+        nconf += 1
+        total += g
+      b += 1
+    f = total / 2
+    m[13] = f if f < m[13]
+    return 1 if nconf == 0
+    best = f if f < best
+    best_b = 0 - 1
+    best_value = 0 - 1
+    best_delta = nb + 1
+    ties = 0
+    i = 0
+    while i < nconf
+      b = conf[i]
+      current = counts[b * stride + sol[b]]
+      values = dom[b] ^ (one << sol[b])
+      while values != 0
+        j = wassat_domain_ctz(values)
+        values &= values - 1
+        delta = counts[b * stride + j] - current
+        m[10] += 1
+        # A tabu value is still taken when it beats the best total so far.
+        if tabu[b * stride + j] <= iteration || f + delta < best
+          if delta < best_delta
+            best_delta = delta
+            best_b = b
+            best_value = j
+            ties = 1
+          elsif delta == best_delta
+            ties += 1
+            rng ^= rng << 13
+            rng ^= (rng >> 7) & shift_mask
+            rng ^= rng << 17
+            if (rng & 2147483647) % ties == 0
+              best_b = b
+              best_value = j
+      i += 1
+    if best_b < 0
+      # Every move is tabu: a random value of a random domain in conflict.
+      rng ^= rng << 13
+      rng ^= (rng >> 7) & shift_mask
+      rng ^= rng << 17
+      b = conf[(rng & 2147483647) % nconf]
+      values = dom[b] ^ (one << sol[b])
+      if values != 0
+        rng ^= rng << 13
+        rng ^= (rng >> 7) & shift_mask
+        rng ^= rng << 17
+        offset = (rng & 2147483647) % wassat_domain_pop(values)
+        while offset > 0
+          values &= values - 1
+          offset -= 1
+        best_b = b
+        best_value = wassat_domain_ctz(values)
+    if best_b >= 0
+      b = best_b
+      old = sol[b]
+      u = block_vars[b * stride + old]
+      v = block_vars[b * stride + best_value]
+      t = noff[b]
+      while t < noff[b + 1]
+        c = nlist[t]
+        new_mask = forbid[v * WASSAT_DOMAIN_MAX_BLOCKS + c]
+        changed = forbid[u * WASSAT_DOMAIN_MAX_BLOCKS + c] ^ new_mask
+        while changed != 0
+          j = wassat_domain_ctz(changed)
+          changed &= changed - 1
+          if ((new_mask >> j) & 1) != 0
+            counts[c * stride + j] += 1
+          else
+            counts[c * stride + j] -= 1
+          m[11] += 1
+        t += 1
+      sol[b] = best_value
+      rng ^= rng << 13
+      rng ^= (rng >> 7) & shift_mask
+      rng ^= rng << 17
+      tabu[b * stride + old] = iteration + (rng & 2147483647) % 10 + (nconf * 6) / 10
+      m[8] += 1
+  0
+
+# Replay the original clauses and write the model. Returns 1 when published.
+-> wassat_domain_report(lits, offs, lens, nv, nc, var_block, var_bit, sol, m, stop, res, base, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+  return 0 unless wassat_domain_verify(lits, offs, lens, nc, var_block, var_bit, sol, m, stop, deadline) == 1
+  v = 1
+  while v <= nv
+    res[base + v] = sol[var_block[v] - 1] == var_bit[v] ? 1 : 0
+    v += 1
+  1
+
 # Includes every worker buffer and conservative descriptor/alignment headroom.
 -> wassat_domain_bytes(nv, nc) (i64 i64) i64
-  (8 * ((nv + 1) * (nv + 1) + WASSAT_DOMAIN_MAX_BLOCKS * (nv + 1) + 4 * (nv + 1) + 3 * WASSAT_DOMAIN_MAX_BLOCKS * WASSAT_DOMAIN_MAX_SIZE + 3 * WASSAT_DOMAIN_MAX_BLOCKS)) + nc + 1048576
+  (8 * ((nv + 1) * (nv + 1) + WASSAT_DOMAIN_MAX_BLOCKS * (nv + 1) + 4 * (nv + 1) + 4 * WASSAT_DOMAIN_MAX_BLOCKS * WASSAT_DOMAIN_MAX_SIZE + WASSAT_DOMAIN_MAX_BLOCKS * WASSAT_DOMAIN_MAX_BLOCKS + 5 * WASSAT_DOMAIN_MAX_BLOCKS)) + nc + 1048576
 
+# The weighted walk alone: `restarts` trajectories of `steps` moves.
 -> wassat_domain_search(lits, offs, lens, nv, nc, m, stop, res, base, restarts, steps, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64 i64 i64 i64) i64
+  wassat_domain_search_phased(lits, offs, lens, nv, nc, m, stop, res, base, restarts, steps, 0, deadline)
+
+# tabu_first > 0 runs one tabu trial of that many moves before the walk and
+# further tabu trials after it, until the deadline or the trial cap.
+-> wassat_domain_search_phased(lits, offs, lens, nv, nc, m, stop, res, base, restarts, steps, tabu_first, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64 i64 i64 i64 i64) i64
   return 0 if wassat_domain_stop(m, stop, deadline) != 0
   return 0 if nv < 4 || nv > WASSAT_DOMAIN_MAX_VARS || nc < 1 || nc > WASSAT_DOMAIN_MAX_CLAUSES
   return 0 if restarts < 1 || restarts > 64 || steps < 1 || steps > 1000000
@@ -341,6 +534,21 @@ fn wassat_domain_ctz(x) (i64) i64
   counts = i64[WASSAT_DOMAIN_MAX_BLOCKS * WASSAT_DOMAIN_MAX_SIZE]
   weights = i64[(nv + 1) * (nv + 1)]
   m[13] = nb * nb
+  tabu = i64[1]
+  noff = i64[1]
+  nlist = i64[1]
+  conf = i64[1]
+  if tabu_first > 0
+    tabu = i64[WASSAT_DOMAIN_MAX_BLOCKS * WASSAT_DOMAIN_MAX_SIZE]
+    noff = i64[WASSAT_DOMAIN_MAX_BLOCKS + 1]
+    nlist = i64[WASSAT_DOMAIN_MAX_BLOCKS * WASSAT_DOMAIN_MAX_BLOCKS]
+    conf = i64[WASSAT_DOMAIN_MAX_BLOCKS]
+    edges = wassat_domain_neighbors(block_vars, block_len, forbid, noff, nlist, nb)
+    hit = wassat_domain_tabu(block_vars, block_len, forbid, dom, sol, counts, tabu,
+      noff, nlist, conf, m, stop, nb, 1, tabu_first, deadline)
+    if hit == 1
+      return wassat_domain_report(lits, offs, lens, nv, nc, var_block, var_bit, sol, m, stop, res, base, deadline)
+    return 0 if m[2] != 0
   attempt = 1
   while attempt <= restarts
     return 0 if wassat_domain_stop(m, stop, deadline) != 0
@@ -357,21 +565,25 @@ fn wassat_domain_ctz(x) (i64) i64
     hit = wassat_domain_trial(block_vars, block_len, forbid, dom, sol,
       costs, counts, weights, seen, m, stop, nb, nv + 1, seed, shift_mask, steps, deadline)
     if hit == 1
-      return 0 unless wassat_domain_verify(lits, offs, lens, nc, var_block, var_bit, sol, m, stop, deadline) == 1
-      v = 1
-      while v <= nv
-        res[base + v] = sol[var_block[v] - 1] == var_bit[v] ? 1 : 0
-        v += 1
-      return 1
+      return wassat_domain_report(lits, offs, lens, nv, nc, var_block, var_bit, sol, m, stop, res, base, deadline)
     return 0 if m[2] != 0
     attempt += 1
+  if tabu_first > 0
+    trial = 1
+    while trial <= WASSAT_DOMAIN_TABU_TRIALS
+      hit = wassat_domain_tabu(block_vars, block_len, forbid, dom, sol, counts, tabu,
+        noff, nlist, conf, m, stop, nb, trial + 1, WASSAT_DOMAIN_TABU_TRIAL, deadline)
+      if hit == 1
+        return wassat_domain_report(lits, offs, lens, nv, nc, var_block, var_bit, sol, m, stop, res, base, deadline)
+      return 0 if m[2] != 0
+      trial += 1
   m[2] = 3
   0
 
 -> wassat_domain_arm(lits, offs, lens, nv, nc, m, stop, res, base, restarts, steps, wall_ms) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64 i64 i64 i64) i64
   m[17] = clock_ms()
   deadline = wall_ms > 0 ? m[17] + wall_ms : 0
-  found = wassat_domain_search(lits, offs, lens, nv, nc, m, stop, res, base, restarts, steps, deadline)
+  found = wassat_domain_search_phased(lits, offs, lens, nv, nc, m, stop, res, base, restarts, steps, WASSAT_DOMAIN_TABU_FIRST, deadline)
   m[18] = clock_ms()
   res[base + nv + 6] = m[17]
   res[base + nv + 5] = m[18]

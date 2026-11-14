@@ -40,6 +40,11 @@ use symmetry_fix
 use block_csp
 use arithmetic_coloring
 use ramsey_lex
+use gate_closure
+use bva
+use parity_sum
+use threshold_cover
+use relay_count
 use ramsey_bound
 use windmill
 use specialists
@@ -982,6 +987,45 @@ use cover_split
       << "c ais graph_vars=[ais["graph_vars"]], components=[ais["components"]], lower=[ais["lower_bound"]], upper=[ais["upper_bound"]]"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
+  # Parity-sum certificate (parity_sum.w): a connected set of the input's own
+  # parity equations whose sum is 0 = 1. One pass over the clauses.
+  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PARITY_SUM") != "0"
+    parity_prof = wassat_prof_clock
+    parity_sum = wassat_parity_sum_unsat(formula, clock_ms() + 2000)
+    tprof = wassat_prof("cli.parity_sum", parity_prof)
+    ps_work = parity_sum["work"]
+    wassat_prof_note("parity_sum status=[parity_sum["status"]] var_sets=[ps_work[0]] xors=[ps_work[1]] cardinality=[ps_work[7]] after_peel=[ps_work[2]] components=[ps_work[3]] refuting=[ps_work[4]] local=[ps_work[6]] stop=[ps_work[8]]") if tprof != 0
+    if parity_sum["status"] == 0 - 1
+      << "s UNSATISFIABLE"
+      if ps_work[6] == 1
+        << "c mode: fast (every assignment of one small variable set is forbidden)"
+      else
+        << "c mode: fast (verified parity sum over [ps_work[5]] equations)"
+      << "c conflicts: [budget_used], decisions: 0, props: 0"
+      exit(20)
+  # Demand against room (threshold_cover.w): a root asserted by a unit clause
+  # implies more true variables than the at-most-one clauses allow.
+  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_THRESHOLD_COVER") != "0"
+    tc_prof = wassat_prof_clock
+    threshold_cover = wassat_threshold_cover_unsat(formula, clock_ms() + 3000)
+    tprof = wassat_prof("cli.threshold_cover", tc_prof)
+    tc_work = threshold_cover["work"]
+    wassat_prof_note("threshold_cover status=[threshold_cover["status"]] root=[tc_work[1]] need=[tc_work[2]] groups=[tc_work[3]] nodes=[tc_work[4]] leaves=[tc_work[5]] roots=[tc_work[6]] stop=[tc_work[7]] words=[tc_work[8]]") if tprof != 0
+    if threshold_cover["status"] == 0 - 1
+      << "s UNSATISFIABLE"
+      << "c mode: fast (verified count: [tc_work[2]] true variables required, [tc_work[3]] exclusive groups)"
+      << "c conflicts: [budget_used], decisions: 0, props: 0"
+      exit(20)
+    cb_prof = wassat_prof_clock
+    cover_bound = wassat_cover_bound_unsat(formula)
+    tprof = wassat_prof("cli.cover_bound", cb_prof)
+    cb_work = cover_bound["work"]
+    wassat_prof_note("cover_bound status=[cover_bound["status"]] clauses=[cb_work[1]] bound=[cb_work[2]] groups=[cb_work[3]] variables=[cb_work[4]] overlap=[cb_work[5]]") if tprof != 0
+    if cover_bound["status"] == 0 - 1
+      << "s UNSATISFIABLE"
+      << "c mode: fast (verified cover count: [cb_work[1]] clauses to cover, at most [cb_work[2]] from [cb_work[3]] exclusive groups)"
+      << "c conflicts: [budget_used], decisions: 0, props: 0"
+      exit(20)
   # Internal A/B opt-out; the automatic fast path is enabled by default.
   orig_nvars = formula["nvars"]
   quad_shift = 0
@@ -996,6 +1040,19 @@ use cover_split
       << "c mode: fast (verified [clique_size]-clique / [clique_size - 1]-color obstruction)"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
+    # A pigeonhole count through relays (relay_count.w): choice clauses whose
+    # literals lead, by way of relay literals, to fewer exclusive classes.
+    if env("WASSAT_RELAY_COUNT") != "0"
+      relay_prof = wassat_prof_clock
+      relay_count = wassat_relay_count_unsat(formula)
+      tprof = wassat_prof("cli.relay_count", relay_prof)
+      rc_work = relay_count["work"]
+      wassat_prof_note("relay_count status=[relay_count["status"]] accepted=[rc_work[1]] classes=[rc_work[2]] relays=[rc_work[3]] nodes=[rc_work[4]] candidates=[rc_work[5]] stop=[rc_work[6]]") if tprof != 0
+      if relay_count["status"] == 0 - 1
+        << "s UNSATISFIABLE"
+        << "c mode: fast (verified relayed count: [rc_work[1]] choices need distinct classes, [rc_work[2]] exist)"
+        << "c conflicts: [budget_used], decisions: 0, props: 0"
+        exit(20)
     lifted_quad = wassat_try_quad_block_lift(formula)
     if lifted_quad != nil
       orig_formula = {
@@ -1097,6 +1154,82 @@ use cover_split
         wassat_prof_note("ramsey_lex vertices=[lex_work[2]] checked_clauses=[lex_work[3]] literal_reads=[lex_work[4]] groups=[lex_work[5]] unique=[lex_work[6]] duplicates=[lex_work[7]] rank_terms=[lex_work[8]] output_clauses=[lex_work[9]] output_literals=[lex_work[10]] auxiliaries=[lex_work[11]] transpositions=[lex_work[12]] comparisons=[lex_work[13]] copied_literals=[lex_work[14]] polls=[lex_work[15]]")
   tprof = wassat_prof("cli.ramsey_lex", tprof)
 
+  # Bounded variable addition (bva.w). When the input's binary and ternary
+  # clauses are almost all products that one fresh variable each can factor
+  # (the formula shrinks eightfold or more), the factored formula is a
+  # different, much smaller problem: solve THAT with one bounded CDCL run. A verdict is published from here (a model is cut back to
+  # the input's variables and replayed against the input clauses); a miss
+  # leaves every later stage reading the input as written.
+  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && ramsey_lex == nil && env("WASSAT_BVA") != "0"
+    # The dump switch (benchmarks/bva_test.py) also keeps every reduction,
+    # however small, so the test reaches the lane on formulas it can enumerate.
+    bva_dump = env("WASSAT_BVA_DUMP") == "1"
+    bva = wassat_bva_lift(formula, clock_ms() + WASSAT_BVA_MS, bva_dump ? 1 : WASSAT_BVA_MIN_RATIO, bva_dump ? 8 : WASSAT_BVA_MIN_SMALL, bva_dump ? 0 : WASSAT_BVA_MIN_DENSITY)
+    wassat_prof_note("bva declined") if bva == nil && env("WASSAT_PROFILE") == "1"
+    if bva != nil && bva["formula"] == nil && env("WASSAT_PROFILE") == "1"
+      bva_work = bva["work"]
+      wassat_prof_note("bva kept=0 added=[bva_work[4]] clauses=[bva_work[10]] out=[bva_work[9]] small=[bva_work[8]] steps=[bva_work[6]] ticks=[bva_work[5]] stop=[bva_work[7]] heap=[bva_work[0]]")
+    if bva != nil && bva["formula"] != nil
+      bva_f = bva["formula"]
+      bva_work = bva["work"]
+      if bva_dump
+        << "c bva-cnf p cnf [bva_f["nvars"]] [bva_f["flat_ncl"]]"
+        bva_i = 0
+        while bva_i < bva_f["flat_ncl"]
+          bva_line = "c bva-cnf"
+          bva_j = 0
+          while bva_j < bva_f["flat_lens"][bva_i]
+            bva_line = bva_line + " [bva_f["flat_lits"][bva_f["flat_offs"][bva_i] + bva_j]]"
+            bva_j += 1
+          << bva_line + " 0"
+          bva_i += 1
+      wassat_prof_note("bva added=[bva_work[4]] clauses=[bva_work[10]] out=[bva_work[9]] small=[bva_work[8]] steps=[bva_work[6]] ticks=[bva_work[5]] stop=[bva_work[7]]") if env("WASSAT_PROFILE") == "1"
+      bva_nv = bva_f["nvars"]
+      bva_s = Wassat.from_flat(bva_nv, wassat_raw_artifact(bva_f, bva_nv), 0)
+      bva_s.simplify_raw
+      bva_s.set_prop_stop(WASSAT_BVA_SOLVE_PROPS)
+      bva_r = bva_s.solve_budget(WASSAT_BVA_SOLVE_CONFLICTS)
+      bva_s.set_prop_stop(0)
+      wassat_prof_note("bva solve status=[bva_r["status"]] conflicts=[bva_r["conflicts"]] decisions=[bva_r["decisions"]] props=[bva_r["props"]]") if env("WASSAT_PROFILE") == "1"
+      if bva_r["status"] == 1
+        bva_model = bva_r["model"].slice(0, orig_nvars)
+        unless wassat_model_satisfies?(orig_formula, bva_model)
+          raise "internal error: variable-addition model does not satisfy the input formula"
+        wassat_print_sat_model(bva_model, false)
+      elsif bva_r["status"] == 0 - 1
+        << "s UNSATISFIABLE"
+      if bva_r["status"] != 0
+        << "c mode: fast (bounded variable addition, [bva_work[4]] variables added, [bva_work[10]] clauses to [bva_work[9]])"
+        << "c conflicts: [budget_used + bva_r["conflicts"]], decisions: [bva_r["decisions"]], props: [bva_r["props"]]"
+        exit(bva_r["status"] == 1 ? 10 : 20)
+  tprof = wassat_prof("cli.bva", tprof)
+
+  # Gate congruence closure (gate_closure.w): append the units and literal
+  # equivalences that the input's own AND/XOR/ITE gates imply. Fast mode
+  # only. The extended formula feeds the generic search (scout, raw race,
+  # preprocessing arms, final solve); every structural recognizer and the
+  # routing policy keep reading the input as written, since they match exact
+  # shapes. Models are still replayed against the original clauses.
+  cdcl_formula = formula
+  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && ramsey_lex == nil && env("WASSAT_GATE_CLOSURE") != "0"
+    gate_closure = wassat_gate_closure_lift(formula, clock_ms() + WASSAT_GATE_CLOSURE_MS)
+    if gate_closure != nil
+      gc_work = gate_closure["work"]
+      if env("WASSAT_GATE_CLOSURE_DUMP") == "1"
+        gc_f = gate_closure["formula"]
+        gc_i = gate_closure["added_from"]
+        while gc_i < gc_f["flat_ncl"]
+          gc_o = gc_f["flat_offs"][gc_i]
+          if gc_f["flat_lens"][gc_i] == 1
+            << "c gate-closure-clause [gc_f["flat_lits"][gc_o]]"
+          else
+            << "c gate-closure-clause [gc_f["flat_lits"][gc_o]] [gc_f["flat_lits"][gc_o + 1]]"
+          gc_i += 1
+      cdcl_formula = gate_closure["formula"]
+      << "c gate closure: [gc_work[16]] units, [gc_work[17]] equivalences from [gc_work[18]] gates"
+      wassat_prof_note("gate_closure units=[gc_work[16]] equivalences=[gc_work[17]] conflict=[gc_work[1]] and=[gc_work[8]] xor=[gc_work[9]] ite=[gc_work[10]] gates=[gc_work[18]] installs=[gc_work[12]] ticks=[gc_work[11]] stopped=[gc_work[5]] binaries=[gc_work[13]] indexed=[gc_work[14]]") if env("WASSAT_PROFILE") == "1"
+  tprof = wassat_prof("cli.gate_closure", tprof)
+
   # Preprocess once, above solver construction. The artifact carries the
   # reduced clauses with their global proof ids, the elimination stack for
   # model reconstruction, and the certificate prefix for every derivation.
@@ -1116,10 +1249,10 @@ use cover_split
     # need the preprocessor: hand the parser's flat arrays straight to the
     # solver (see wassat_raw_artifact).
     if config.race_route?
-      art = wassat_raw_artifact(formula, formula["nvars"])
+      art = wassat_raw_artifact(cdcl_formula, formula["nvars"])
     else
-      pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula)
-      art = pre.run_light_flat(formula)
+      pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, cdcl_formula)
+      art = pre.run_light_flat(cdcl_formula)
     # Raw routing borrows parser arrays and constructs no initial preprocessor.
     resident_pre_arenas = pre == nil ? 0 : 1
     tprof = wassat_prof("cli.light", tprof)
@@ -1175,7 +1308,7 @@ use cover_split
         # scout races a preprocessed rendering. This is built once on the
         # coordinator and shared by the scout and later race walkers.
         walk_art = art
-        walk_art = wassat_raw_artifact(formula, scout_nv) unless art["raw"] == true
+        walk_art = wassat_raw_artifact(cdcl_formula, scout_nv) unless art["raw"] == true
         scout_stop = i64[4]
         # Finite --conflicts work in the scout stage uses the same exact
         # lock-free ticket discipline as the later race: ordinary scout CDCL
@@ -1918,13 +2051,13 @@ use cover_split
             # race on its arena. Constructed HERE, on the main thread, because
             # construction is the one part that touches the parsed formula's
             # boxed clauses while another arm might be reading them.
-            plight = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, formula)
+            plight = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, cdcl_formula)
             plight.set_budget(wassat_pre_light_ticks)
             plight.set_deadline_ms(wassat_pre_stage_ms)
             plight.force_full_pipeline
             wassat_race_add_pre(race, plight, false, "light")
             if pre_arms > 1
-              pheavy_f = quad_shift > 0 ? orig_formula : formula
+              pheavy_f = quad_shift > 0 ? orig_formula : cdcl_formula
               pheavy = WassatPreprocess.new(pheavy_f["nvars"], [], WASSAT_PROOF_NONE, pheavy_f)
               pheavy.set_budget(wassat_pre_light_ticks)
               pheavy.set_deadline_ms(wassat_pre_stage_ms)
@@ -2000,9 +2133,9 @@ use cover_split
           # it when reporting UNKNOWN instead of allocating another arena.
           race = nil if matrix_arms == 0
       if staged_pre
-        pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula) if pre == nil
+        pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, cdcl_formula) if pre == nil
         pre.force_full_pipeline
-        art = pre.run_light_flat(formula)
+        art = pre.run_light_flat(cdcl_formula)
         art = pre.run_heavy if art["status"] == 0
         tprof = wassat_prof("cli.staged_pre", tprof)
       elsif !config.race_route?

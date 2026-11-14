@@ -344,4 +344,39 @@ describe "Wassat bounded finite-domain walk" ->
     expect(r["meta"][7]).to eq(20)
     expect(r["meta"][23]).to eq(r["meta"][9])
 
+  it "finds a model in the tabu trial that precedes the walk" ->
+    rows = dw_base(4, 3)
+    rows.push([-1, -4])
+    rows.push([-1, -7])
+    rows.push([-4, -7])
+    rows.push([-2, -5])
+    rows.push([-2, -8])
+    rows.push([-5, -8])
+    f = dw_flat(12, rows)
+    m = i64[24]; stop = i64[4]; res = i64[20]
+    status = wassat_domain_search_phased(f["flat_lits"], f["flat_offs"], f["flat_lens"], 12,
+      f["flat_ncl"], m, stop, res, 0, 8, 100, 1000, 0)
+    expect(status).to eq(1)
+    # No walk trajectory was started, and the model went through the replay.
+    expect(m[6]).to eq(0)
+    expect(m[16]).to eq(1)
+    expect(m[14]).to eq(rows.size)
+    expect(dw_replay(rows, res)).to eq(true)
+
+  it "never refutes when the tabu trials run into the deadline" ->
+    rows = dw_base(3, 2)
+    rows.push([-1, -3])
+    rows.push([-1, -4])
+    rows.push([-2, -3])
+    rows.push([-2, -4])
+    f = dw_flat(6, rows)
+    m = i64[24]; stop = i64[4]; res = i64[14]
+    status = wassat_domain_search_phased(f["flat_lits"], f["flat_offs"], f["flat_lens"], 6,
+      f["flat_ncl"], m, stop, res, 0, 2, 20, 50, clock_ms() + 40)
+    expect(status).to eq(0)
+    expect(m[1]).to eq(1)
+    expect(m[2]).to eq(2)
+    expect(m[16]).to eq(0)
+    expect(res[1] + res[2] + res[3] + res[4] + res[5] + res[6]).to eq(0)
+
 spec_summary

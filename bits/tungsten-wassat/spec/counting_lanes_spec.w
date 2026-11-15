@@ -316,3 +316,5 @@ describe "Wassat bounded variable addition" ->
       [5, 6, 7, 8, 9].each -> (r)
         lines.push("[r] [m] 0")
     expect(wassat_bva_lift(cl_formula(9, lines), 0, 2, 8, 24)).to eq(nil)
+
+spec_summary

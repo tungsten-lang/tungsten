@@ -314,6 +314,18 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
 -> wassat_flat_sls_arena_bytes(formula)
   1048576 + 12 * formula["flat_nlits"] + 48 * formula["flat_ncl"] + 96 * (formula["nvars"] + 4)
 
+# Unit clauses among the first `ncl` clause lengths. Here rather than beside
+# the loader that also calls it, because the arena estimate below needs it
+# and this file has to stand on its own (spec/input_empty_spec.w loads it
+# without the solver).
+-> wassat_flat_unit_count(lens, ncl) (i64[] i64) i64
+  count = 0
+  i = 0
+  while i < ncl
+    count += 1 if lens[i] == 1
+    i += 1
+  count
+
 # A completed propagation-only lucky arm retains its lean loader, not a CDCL
 # learner or inprocessor. Count its actual layout conservatively: 8 bytes per
 # arena word, 41 per clause slot, two packed pools, up to 288 bytes per variable
@@ -515,6 +527,13 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
 -> wassat_pre_heavy_ticks
   return wassat_decimal_in_range("WASSAT_PRE_HEAVY_TICKS", env("WASSAT_PRE_HEAVY_TICKS"), 1, 2000000000) if env("WASSAT_PRE_HEAVY_TICKS") != nil
   64000000
+
+# Resolvent growth allowed per eliminated variable on inputs above 20,000
+# clauses in the heavy rendering (WassatPreprocess#heavy_rounds). Smaller
+# inputs step 0, 4, .. 16 over their passes as before.
+-> wassat_pre_big_margin
+  return wassat_decimal_in_range("WASSAT_PRE_BIG_MARGIN", env("WASSAT_PRE_BIG_MARGIN"), 0, 64) if env("WASSAT_PRE_BIG_MARGIN") != nil
+  8
 
 # Wall-clock stop for each rendering, in milliseconds. A backstop for the
 # tick budgets above, not a replacement: ticks are the reproducible currency

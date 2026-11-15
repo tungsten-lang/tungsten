@@ -8369,14 +8369,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   pm[0] src clause count      pm[1] dst arena cap   pm[2] dst clause cap
 #   pm[3] out: clauses stored   pm[4] out: arena used pm[5] out: unit count
 #   pm[6] out: 1 = saw empty clause
--> wassat_flat_unit_count(lens, ncl) (i64[] i64) i64
-  count = 0
-  i = 0
-  while i < ncl
-    count += 1 if lens[i] == 1
-    i += 1
-  count
-
 -> wassat_load_flat(sfla, sfcs, sfcl, salive, staut, spgid, dar, dcm, dal, dlbd, dgid, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[])
   sncl = pm[0]
   acap = pm[1]

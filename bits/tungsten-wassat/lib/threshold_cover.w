@@ -343,9 +343,9 @@ fn wassat_tc_ctz(x) (i64) i64
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return miss if nv < 4 || nv > WASSAT_THRESHOLD_COVER_MAX_VARS || nc < 4 || nc > WASSAT_THRESHOLD_COVER_MAX_CLAUSES
-  fla = formula["flat_lits"]
-  fcs = formula["flat_offs"]
-  fcl = formula["flat_lens"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
   hit = wassat_tc_run(fla, fcs, fcl, nv, nc, st, deadline)
   return { "status": 0 - 1, "work": st } if hit == 1
   # No unit clause gave a count. A positive clause (a | b) can stand in for
@@ -928,9 +928,9 @@ WASSAT_COVER_BOUND_MAX_PAIRS = 8000000
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return miss if nv < 3 || nv > WASSAT_THRESHOLD_COVER_MAX_VARS || nc < 3 || nc > WASSAT_THRESHOLD_COVER_MAX_CLAUSES
-  fla = formula["flat_lits"]
-  fcs = formula["flat_offs"]
-  fcl = formula["flat_lens"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
   idx = i64[nv + 2]
   nvp = 0
   npos = 0

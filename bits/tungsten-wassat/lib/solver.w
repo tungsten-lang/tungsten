@@ -733,6 +733,30 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @wp_state[2] = 0
     0
 
+  # The learned-clause store. `buf` is one of the solver's own i64 buffers,
+  # so the header, the literals, the table entries and the two watches (or
+  # the binary pair) are written by one native call instead of an element at
+  # a time through this method. Same result as store_clause; units and the
+  # WRAT replay bookkeeping stay on that path.
+  -> store_flat(buf, n)
+    return self.store_clause(buf, n) if n < 2 || @proof_mode == WASSAT_PROOF_WRAT
+    raise "clause index exceeds signed 32-bit packed representation" if @ncl > WASSAT_MAX_CLAUSE_INDEX
+    self.grow_clause_tables
+    self.grow_arena(n + 1)
+    ci = @ncl
+    @ncl += 1
+    wassat_store_flat(@arena, @cmeta, @alive, @clbd, buf, @wsdir, @wpool,
+                      @wp_state, @bldir, @bl_pool, @bl_state, @asize, ci, n)
+    @asize += n + 1
+    @gid[ci] = @next_gid if @gid.size > ci
+    @next_gid += 1
+    # an overflowed append dropped its entry; the repack re-creates both
+    if n == 2
+      self.rebuild_binaries if @bl_state[2] == 1
+    else
+      self.rebuild_watches if @wp_state[2] == 1
+    ci
+
   # Store a clause and return its index; watches the first two literals.
   -> store_clause(lits_arr, n)
     raise "clause index exceeds signed 32-bit packed representation" if @ncl > WASSAT_MAX_CLAUSE_INDEX
@@ -880,16 +904,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # level over the conflicting clause's literals. Can sit BELOW @dlevel,
   # in which case analysis must happen there.
   -> conflict_level(confl)
-    stx = @cmeta[2 * confl]
-    n = @cmeta[2 * confl + 1]
-    m = 0
-    i = 0
-    while i < n
-      lit_i = @arena[stx + i]
-      lv = @level[lit_i < 0 ? 0 - lit_i : lit_i]
-      m = lv if lv > m
-      i += 1
-    m
+    wassat_conflict_level(@arena, @cmeta, @level, confl)
 
   # ---- propagation --------------------------------------------------------
 
@@ -1059,8 +1074,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     bestscore = -1
     tried = 0
     v = 1
-    while v <= @nvars
-      if @assign[v] == 0 && tried < @lookahead
+    while v <= @nvars && tried < @lookahead
+      if @assign[v] == 0
         tried += 1
         pos = self.trial(v)
         neg = self.trial(0 - v)
@@ -2426,11 +2441,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       budget = @walk_mult * span
       budget = 2000000 if budget > 2000000
       @walk_min = @walker.walk_from_phase(@phase, budget, 1 + @walks * 7919)
-      v = 1
-      while v <= @nvars
-        @bphase[v] = @phase[v]
-        @best_phase[v] = @phase[v]
-        v += 1
+      wassat_copy_vivify_phases(@phase, @bphase, @nvars)
+      wassat_copy_vivify_phases(@phase, @best_phase, @nvars)
     @walk_last = @conflicts
     @walks += 1
     0
@@ -2818,11 +2830,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       self.substitute_equivalences
       self.clean_root_clauses if @ok
     t7 = wassat_prof_clock
-    @nlearned = 0
-    ci = 0
-    while ci < @ncl
-      @nlearned += 1 if @alive[ci] == 1 && @clbd[ci] > 0
-      ci += 1
+    @nlearned = wassat_count_learned(@alive, @clbd, @ncl)
     @inp_props_at = @pstate[4]
     # Eliminated variables are parked on the trail; they are not forced units.
     units = @tsize - fixed0 - (@nsubst - subst0)
@@ -2878,11 +2886,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @nlearned = selected
       wassat_reduce_count_note(@rhist, @ncl, 1)
     else
-      @nlearned = 0
-      ci = 0
-      while ci < @ncl
-        @nlearned += 1 if @alive[ci] == 1 && @clbd[ci] > 0
-        ci += 1
+      @nlearned = wassat_count_learned(@alive, @clbd, @ncl)
       wassat_reduce_count_note(@rhist, @ncl, 0)
     0
 
@@ -3290,7 +3294,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                 while i < n
                   @obuf[i] = @lbuf[i]
                   i += 1
-                ci = self.store_clause(@obuf, n)
+                ci = self.store_flat(@obuf, n)
                 @clbd[ci] = lbd
             else
               # Chronological backtracking: a far backjump discards a deep,
@@ -3336,7 +3340,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                     @obuf[j] = @lbuf[i]
                     j += 1
                   i += 1
-                ci = self.store_clause(@obuf, n)
+                ci = self.store_flat(@obuf, n)
                 @clbd[ci] = lbd
                 self.enqueue_lvl(asserting, ci, target)
             if @astate[6] > 0
@@ -3524,11 +3528,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               @rel_at = @rel_base
               @since_restart = 0
             # enter stable under the best phases seen so far
-            v2 = 1
-            while v2 <= @nvars
-              @phase[v2] = @best_phase[v2]
-              @bphase[v2] = @best_phase[v2]
-              v2 += 1
+            wassat_copy_vivify_phases(@best_phase, @phase, @nvars)
+            wassat_copy_vivify_phases(@best_phase, @bphase, @nvars)
           else
             @mode_at = @conflicts + @mode_len
             @since_restart = 0 if @use_reluctant
@@ -4712,6 +4713,68 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # Native because a boxed `ci << 32` leaves the small-int range.
 # Keep packed temporaries explicitly i64, including at inlined call sites:
 # typed array parameters alone still allowed BigInt allocation per word.
+# Native body of Wassat#store_flat: clause `ci` of `n` >= 2 literals from
+# `src` goes to the arena at `at` (header word, then literals), its table
+# entries are filled, and it is attached through its first two literals in
+# the order store_clause attaches them.
+-> wassat_store_flat(ar, cm, alive, clbd, src, wd, wp, wst, bd, blp, blst, at, ci, n) (i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
+  word = (ci << 32) | n ## i64
+  ar[at] = word
+  stx = at + 1 ## i64
+  cm[2 * ci] = stx
+  cm[2 * ci + 1] = n
+  alive[ci] = 1
+  clbd[ci] = 0
+  i = 0 ## i64
+  while i < n
+    ar[stx + i] = src[i]
+    i += 1
+  a = src[0] ## i64
+  b = src[1] ## i64
+  la = 0 ## i64
+  if a > 0
+    la = a << 1
+  else
+    la = ((0 - a) << 1) + 1
+  lb = 0 ## i64
+  if b > 0
+    lb = b << 1
+  else
+    lb = ((0 - b) << 1) + 1
+  if n == 2
+    z = wassat_bl_add(bd, blp, blst, la, ci, lb)
+    z = wassat_bl_add(bd, blp, blst, lb, ci, la)
+  else
+    z = wassat_ws_add(wd, wp, wst, la, stx, b)
+    z = wassat_ws_add(wd, wp, wst, lb, stx, a)
+  0
+
+# Highest decision level among the literals of clause `confl`.
+-> wassat_conflict_level(ar, cm, lvl, confl) (i64[] i64[] i64[] i64) i64
+  stx = cm[2 * confl] ## i64
+  n = cm[2 * confl + 1] ## i64
+  m = 0 ## i64
+  i = 0 ## i64
+  while i < n
+    v = ar[stx + i] ## i64
+    if v < 0
+      v = 0 - v
+    lv = lvl[v] ## i64
+    if lv > m
+      m = lv
+    i += 1
+  m
+
+# Live learned clauses: a learned clause carries a positive LBD.
+-> wassat_count_learned(alive, clbd, ncl) (i8[] i64[] i64) i64
+  n = 0 ## i64
+  ci = 0 ## i64
+  while ci < ncl
+    if alive[ci] == 1 && clbd[ci] > 0
+      n += 1
+    ci += 1
+  n
+
 -> wassat_hdr_put(ar, at, ci, n) (i64[] i64 i64 i64) i64
   word = (ci << 32) | n ## i64
   ar[at] = word

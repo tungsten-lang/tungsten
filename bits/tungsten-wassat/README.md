@@ -37,6 +37,26 @@ wassat problem.cnf --drat out.drat
 wassat problem.cnf --proof out.wrat --drat out.drat
 ```
 
+`--sequential` (or `WASSAT_SEQUENTIAL=1`) keeps one thread running at a time,
+so the process uses a single core:
+
+```sh
+wassat problem.cnf --fast --sequential
+```
+
+The pipeline is the same; the waiting moves. The lucky dives and the bounded
+scout run on the main thread. Each scout-stage side worker then gets a turn as
+long as the scout took (at least 200 ms), which is the time it would have had
+beside it. In the race, the structural workers take their turn first, each to
+its own bound; then one raw search, the light and heavy preprocessed
+renderings, and the walker run round-robin. A CDCL turn is a number of
+propagated literals, four million at first and doubling to 128 million, so an
+arm whose conflicts are expensive cannot hold the round and the schedule does
+not depend on machine load. The cover-split lane needs concurrent workers and
+is skipped. Workers are still started as threads and waited for one at a
+time, and several stages keep their wall-clock deadlines, so runs are
+single-core but not yet reproducible to the conflict.
+
 `--fast` enables the full trusted engine. Proof modes use only transformations
 whose certificate obligations are implemented. `--conflicts` is a resource
 limit, not a strategy knob: it caps the *aggregate* conflicts across every

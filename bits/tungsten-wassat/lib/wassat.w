@@ -130,6 +130,8 @@ use cover_split
   << ""
   << "MAIN OPTIONS"
   << "--conflicts <n> returns s UNKNOWN after n conflicts (default unlimited)."
+  << "--sequential keeps one thread running at a time: every worker the"
+  << "pipeline names takes its turn, so the process uses a single core."
   << "Search techniques and branching policy are selected automatically from"
   << "the parsed formula shape; there are no algorithm-tuning switches."
   << ""
@@ -158,6 +160,7 @@ use cover_split
     "drat": nil,
     "lrat": nil,
     "fast": false,
+    "sequential": false,
     "conflicts": 0
   }
   seen = {}
@@ -165,12 +168,15 @@ use cover_split
   while i < args.size
     flag = args[i]
     if flag.starts_with?("--")
-      unless flag == "--proof" || flag == "--drat" || flag == "--lrat" || flag == "--conflicts" || flag == "--fast"
+      unless flag == "--proof" || flag == "--drat" || flag == "--lrat" || flag == "--conflicts" || flag == "--fast" || flag == "--sequential"
         raise "unknown Wassat option: [flag]"
       raise "duplicate Wassat option: [flag]" if seen[flag] == true
       seen[flag] = true
       if flag == "--fast"
         out["fast"] = true
+        i += 1
+      elsif flag == "--sequential"
+        out["sequential"] = true
         i += 1
       else
         raise "missing value after [flag]" if i + 1 >= args.size
@@ -311,6 +317,9 @@ use cover_split
 
 -> wassat_run_file_checked(args)
   options = wassat_cli_options(args)
+  # The stages read the mode where they start their workers, across several
+  # files; the environment is the one channel they all already consult.
+  Env.set("WASSAT_SEQUENTIAL", "1") if options["sequential"]
   probe_p = nil
   probe_out = nil
   light_stack = nil
@@ -1107,7 +1116,7 @@ use cover_split
   # Dense covering formulas are refuted by cases, one CDCL per case, instead
   # of by a portfolio of whole-formula searches (cover_split.w). An unbounded
   # lane: a finite --conflicts budget keeps the ordinary accounted pipeline.
-  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && options["conflicts"] == 0 && env("WASSAT_COVER_SPLIT") != "0"
+  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && options["conflicts"] == 0 && env("WASSAT_COVER_SPLIT") != "0" && !wassat_sequential?
     split = wassat_cover_split_solve(formula)
     tprof = wassat_prof("cli.cover_split", tprof)
     if tprof != 0 && split["admitted"]
@@ -1367,6 +1376,21 @@ use cover_split
         scout_path_out = nil
         scout_path_out = i64[12] if scout_path_enabled
         scout_out = []
+        # Sequential mode: the lucky dives and the bounded scout run first,
+        # on this thread. Each side worker below then takes a turn as long as
+        # the scout took, which is the time it would have had beside it; a
+        # verdict from any of them raises the cell and the rest return at once.
+        seq = wassat_sequential?
+        seq_window = 0
+        if seq
+          seq_t0 = clock_ms()
+          z = wassat_lucky_arm_body(scout_nv, art, scout_res, 0, scout_stop) if scout_lucky
+          z = wassat_scout_arm_body(
+            scout_nv, art, scout_stop, probe_cap, probe_wall, raw_probe,
+            scout_simplify, scout_out, scout_budget, probe_cap, 1
+          )
+          seq_window = clock_ms() - seq_t0
+          seq_window = wassat_seq_scout_floor_ms if seq_window < wassat_seq_scout_floor_ms
         # Wide resolution chains may stall the initial scout. Offer the same
         # bounded native arm here, with no grace wait after a scout miss.
         # The established width-four route remains in the post-scout race.
@@ -1378,6 +1402,7 @@ use cover_split
         if scout_cover_plan != nil
           scout_cover_res = i64[scout_nv + 8]
           scout_cover_h = wassat_cover_start(formula, scout_cover_plan, scout_stop, scout_cover_res, 0)
+          scout_cover_h = wassat_seq_turn(scout_cover_h, scout_stop, seq_window) if seq
         # Checked matching parity runs beside the scout, using original flat
         # clauses and private scratch. A miss has no grace period: cancellation
         # below ends it with the scout. Proof modes never enter this branch.
@@ -1386,6 +1411,7 @@ use cover_split
         scout_parity_h = nil
         if scout_parity != nil
           scout_parity_h = wassat_matching_parity_start(parity_source, scout_parity, scout_stop)
+          scout_parity_h = wassat_seq_turn(scout_parity_h, scout_stop, seq_window) if seq
         # Search a recovered reconfiguration graph beside the ordinary
         # scout. A miss gets no grace period or extra CDCL conflicts.
         scout_reconf_plan = nil
@@ -1398,6 +1424,7 @@ use cover_split
         if scout_reconf_plan != nil
           scout_reconf_res = i64[scout_nv + 8]
           scout_reconf_h = wassat_reconf_start(formula, scout_reconf_plan, scout_stop, scout_reconf_res)
+          scout_reconf_h = wassat_seq_turn(scout_reconf_h, scout_stop, seq_window) if seq
         # Discover bounded circuit backdoors beside the first scout. The
         # clause indexing and topological planning stay inside the worker;
         # a miss has no grace wait and can resume in the later circuit arm.
@@ -1415,6 +1442,7 @@ use cover_split
         if scout_dep_plan != nil
           scout_dep_res = i64[scout_nv + 8]
           scout_dep_h = wassat_dependency_circuit_start(formula, scout_dep_plan, scout_stop, scout_dep_res)
+          scout_dep_h = wassat_seq_turn(scout_dep_h, scout_stop, seq_window) if seq
         # The resource-capacity certificate can finish while scout CDCL is
         # still constructing or searching. Admission reserves the established
         # scout workers and scratch; a miss gets no grace wait. A cancelled
@@ -1439,6 +1467,7 @@ use cover_split
         if scout_capacity_plan != nil
           scout_capacity_res = i64[scout_nv + 8]
           scout_capacity_h = wassat_capacity_start(formula, scout_capacity_plan, scout_stop, scout_capacity_res, 0)
+          scout_capacity_h = wassat_seq_turn(scout_capacity_h, scout_stop, seq_window) if seq
         scout_lut = nil
         scout_lut_res = nil
         scout_lut_h = nil
@@ -1450,6 +1479,7 @@ use cover_split
         if scout_lut != nil
           scout_lut_res = i64[scout_nv + 8]
           scout_lut_h = Thread.new -> wassat_lut_run(formula, scout_lut, scout_stop, scout_lut_res)
+          scout_lut_h = wassat_seq_turn(scout_lut_h, scout_stop, seq_window) if seq
         scout_quota = nil
         scout_quota_res = nil
         scout_quota_h = nil
@@ -1458,6 +1488,7 @@ use cover_split
         if scout_quota != nil
           scout_quota_res = i64[scout_nv + 8]
           scout_quota_h = Thread.new -> wassat_quota_run(formula, scout_quota, scout_stop, scout_quota_res)
+          scout_quota_h = wassat_seq_turn(scout_quota_h, scout_stop, seq_window) if seq
         # Counter-encoded cover choices can finish before a generic scout.
         # Keep decoding/search in a bounded parallel worker and cancel it with
         # the scout, without a grace wait. Preserve other specialist slots.
@@ -1475,6 +1506,7 @@ use cover_split
           scout_counter_res = i64[scout_nv + 8]
           counter_meta = scout_counter_plan["meta"]
           scout_counter_h = Thread.new -> wassat_counter_cover_arm(formula, counter_meta, scout_stop, scout_counter_res, 0, scout_nv)
+          scout_counter_h = wassat_seq_turn(scout_counter_h, scout_stop, seq_window) if seq
         # A compact circular-label proposal can finish while the scout loads
         # the Boolean encoding. Keep other specialist slots and finite budgets
         # intact. The early arm only constructs and checks a model; walks,
@@ -1487,6 +1519,7 @@ use cover_split
         if scout_cycle_plan != nil
           scout_cycle_res = i64[scout_nv + 8]
           scout_cycle_h = wassat_cycle_start(formula, scout_cycle_plan, scout_stop, scout_cycle_res, 0)
+          scout_cycle_h = wassat_seq_turn(scout_cycle_h, scout_stop, seq_window) if seq
         scout_naked_plan = nil
         scout_naked_res = nil
         scout_naked_h = nil
@@ -1498,6 +1531,7 @@ use cover_split
         if scout_naked_plan != nil
           scout_naked_res = i64[scout_nv + 8]
           scout_naked_h = wassat_naked_start(formula, scout_naked_plan, scout_stop, scout_naked_res, 0)
+          scout_naked_h = wassat_seq_turn(scout_naked_h, scout_stop, seq_window) if seq
         scout_affine_plan = nil
         scout_affine_res = nil
         scout_affine_h = nil
@@ -1509,6 +1543,7 @@ use cover_split
         if scout_affine_plan != nil
           scout_affine_res = i64[scout_nv + 8]
           scout_affine_h = Thread.new -> wassat_affine_circuit_arm(formula, scout_affine_plan, scout_stop, scout_affine_res, 0, scout_nv)
+          scout_affine_h = wassat_seq_turn(scout_affine_h, scout_stop, seq_window) if seq
         scout_tree_plan = nil
         scout_tree_res = nil
         scout_tree_h = nil
@@ -1520,6 +1555,7 @@ use cover_split
         if scout_tree_plan != nil
           scout_tree_res = i64[scout_nv + 8]
           scout_tree_h = Thread.new -> wassat_treewidth_arm(formula, scout_tree_plan, scout_stop, scout_tree_res, 0, scout_nv)
+          scout_tree_h = wassat_seq_turn(scout_tree_h, scout_stop, seq_window) if seq
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1534,15 +1570,21 @@ use cover_split
           scout_path_h = Thread.new -> wassat_path_cover_arm_body(
             formula, scout_path_width, scout_path_out, scout_stop
           )
+          scout_path_h = wassat_seq_turn(scout_path_h, scout_stop, seq_window) if seq
         lucky_h = nil
-        if scout_lucky
-          lucky_h = Thread.new -> wassat_lucky_arm_body(scout_nv, art, scout_res, 0, scout_stop)
-        scout_h = Thread.new -> wassat_scout_arm_body(
-          scout_nv, art, scout_stop, probe_cap, probe_wall, raw_probe,
-          scout_simplify, scout_out, scout_budget, probe_cap, 1
-        )
+        scout_h = nil
+        unless seq
+          if scout_lucky
+            lucky_h = Thread.new -> wassat_lucky_arm_body(scout_nv, art, scout_res, 0, scout_stop)
+          scout_h = Thread.new -> wassat_scout_arm_body(
+            scout_nv, art, scout_stop, probe_cap, probe_wall, raw_probe,
+            scout_simplify, scout_out, scout_budget, probe_cap, 1
+          )
         scout_sls_h = nil
         scout_sls_flips = wassat_sls_arm_flips
+        # The race's walker starts from the same seed on the same artifact, so
+        # a sequential scout walk would only be repeated there.
+        scout_sls_flips = 0 if seq
         scout_sls_arenas = 0
         # Memory ceiling: a walker whose arena would be enormous costs every
         # OTHER arm more than it can win back. See wassat_sls_max_arena_mb.
@@ -1576,8 +1618,9 @@ use cover_split
           scout_nv, formula, scout_res, scout_xor_base, scout_stop, nil,
           scout_circuit, scout_xor_deadline
         )
+        scout_xor_h = wassat_seq_turn(scout_xor_h, scout_stop, 0) if seq
         z = lucky_h.join if lucky_h != nil
-        z = scout_h.join
+        z = scout_h.join if scout_h != nil
         # Exact-shape xorshift rows get one bounded full-domain preimage pass.
         # The measured family completes this in less time than generic search,
         # and a no-hit scan remains model-only/non-decisive. Other formulas
@@ -2090,7 +2133,12 @@ use cover_split
             # boxed clauses while another arm might be reading them.
             plight = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, cdcl_formula)
             plight.set_budget(wassat_pre_light_ticks)
-            plight.set_deadline_ms(wassat_pre_stage_ms)
+            # Stamped here, a wall deadline would run out during the turns
+            # taken before this arm's: sequential renderings are bounded by
+            # their tick budgets alone.
+            pre_stage_ms = wassat_pre_stage_ms
+            pre_stage_ms = 0 if wassat_sequential?
+            plight.set_deadline_ms(pre_stage_ms)
             plight.force_full_pipeline
             # The arm renders the formula its buffers were sized for. Left
             # to the default it rendered the race's formula (the input as
@@ -2101,8 +2149,8 @@ use cover_split
               pheavy_f = quad_shift > 0 ? orig_formula : cdcl_formula
               pheavy = WassatPreprocess.new(pheavy_f["nvars"], [], WASSAT_PROOF_NONE, pheavy_f)
               pheavy.set_budget(wassat_pre_light_ticks)
-              pheavy.set_deadline_ms(wassat_pre_stage_ms)
-              pheavy.set_heavy_budget(wassat_pre_heavy_ticks, wassat_pre_stage_ms)
+              pheavy.set_deadline_ms(pre_stage_ms)
+              pheavy.set_heavy_budget(wassat_pre_heavy_ticks, pre_stage_ms)
               pheavy.force_full_pipeline
               wassat_race_add_pre(race, pheavy, true, "heavy", pheavy_f)
         # Every CDCL arm shares one lock-free ticket pool containing what

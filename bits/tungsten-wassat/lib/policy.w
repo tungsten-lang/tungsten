@@ -161,6 +161,30 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
 # slowest arm every round. Same reason metaflip's pool sizes its next round
 # from measured elapsed time (ffcp_adapt_round_steps) rather than from a fixed
 # step count.
+# Sequential mode runs the race's arms one after another, each for the same
+# number of propagated literals. Propagations, not conflicts: arms differ by
+# two orders of magnitude in what a conflict costs (veer_axi: 2,048 conflicts
+# are 60 ms on the raw formula and 11 s on its light rendering), and a
+# conflict slice hands the round to the slowest arm. Not milliseconds either,
+# so the schedule does not depend on machine load. The first slice is short,
+# so an input any arm answers quickly is answered before the others are paid
+# for; each later slice doubles up to the cap, so switching stays rare on a
+# long search.
+-> wassat_seq_round1_props
+  return wassat_decimal_in_range("WASSAT_SEQ_ROUND1_PROPS", env("WASSAT_SEQ_ROUND1_PROPS"), 1, 2000000000) if env("WASSAT_SEQ_ROUND1_PROPS") != nil
+  4000000
+
+-> wassat_seq_props_cap
+  return wassat_decimal_in_range("WASSAT_SEQ_PROPS_CAP", env("WASSAT_SEQ_PROPS_CAP"), 1, 2000000000) if env("WASSAT_SEQ_PROPS_CAP") != nil
+  128000000
+
+# Floor, in milliseconds, of the turn a scout-stage side worker gets in
+# sequential mode. Its turn is otherwise as long as the scout itself took,
+# which is the time it would have had beside the scout.
+-> wassat_seq_scout_floor_ms
+  return wassat_decimal_in_range("WASSAT_SEQ_SCOUT_FLOOR_MS", env("WASSAT_SEQ_SCOUT_FLOOR_MS"), 1, 3600000) if env("WASSAT_SEQ_SCOUT_FLOOR_MS") != nil
+  200
+
 -> wassat_race_round_ms
   return wassat_decimal_in_range("WASSAT_ROUND_MS", env("WASSAT_ROUND_MS"), 10, 3600000) if env("WASSAT_ROUND_MS") != nil
   400
@@ -1131,6 +1155,10 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # the principled rule is total race width (raw + preprocessing arms)
     # against that number.
     return env("WASSAT_ARMS").to_i if env("WASSAT_ARMS") != nil
+    # One core: one raw search. Diversity across raw configurations is bought
+    # with cores this mode does not have; the preprocessed renderings stay,
+    # because they solve a different formula.
+    return 1 if wassat_sequential?
     # Fill no more than the cores left after the two representation arms,
     # capped at the breadth-set winner (four). This preserves four raw + two
     # preprocessed arms on the development host, but does not oversubscribe a

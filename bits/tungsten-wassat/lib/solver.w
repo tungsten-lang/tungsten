@@ -127,11 +127,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @heappos = i32[nv + 1]       # variable -> heap slot, -1 when absent
     @hstate = i64[2]              # heap size / EVSIDS increment
     @rassign = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 1] : i64[1]
-    @pstate = i64[12]            # qhead / tsize / conflict / bail / props / chrono
+    @pstate = i64[14]            # qhead / tsize / conflict / bail / props / chrono; [12] ticks, [13] saved positions
     # Native snapshot counters: phase saves/copied/skipped at 6..8, and
     # spine saves/scanned/skipped at 9..11. Keep wide work counts unboxed:
     # avoided quadratic work can exceed the small-integer range in a worker.
-    @astate = i64[21]            # analysis / OTFS scalars and minimization work
+    @astate = i64[26]            # analysis / OTFS scalars, minimization work, bump mode
     # Large circuits can spend most analysis time minimizing along long
     # reason graphs. Keep smaller kernels exhaustive: even rare truncation
     # perturbs productive QWH and bit-vector searches. Zero is the control.
@@ -595,7 +595,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # then prefix recycles / recycled copies / reclaimed slots.
     # Each arm owns its counters; only the slow pool-maintenance paths write
     # them, with no atomics or extra work in the literal-scanning loops.
-    @wp_state = i64[12]
+    @wp_state = i64[14]
     @wp_state[1] = @wp_cap
 
     @input_clauses.each -> (c)
@@ -624,7 +624,29 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Absolute propagation count at which a bounded search hands back
     # (0 = none). See set_prop_stop.
     @stop_props = 0
+    @stop_ticks = 0
+    # Kissat's search schedule (see enable_kissat_search): bias-corrected
+    # glue averages, one bumped heuristic per mode, reason-side bumping.
+    # @amark flags the variables of the conflict being analyzed.
+    @ksearch = false
+    @kst = i64[16]
+    @krhist = i64[1]
+    @kreduce_at = 0
+    @ktrail = env("WASSAT_KTRAIL") != "0"
+    @kreduce = false
+    @kpromote = false
+    @kfuse = false
+    @krun = i64[8]
+    @kviv = nil
+    @kviv_at = 0
+    @kviv_effort = 10
+    @kwant = false
+    @kdiv = 1
+    @amark = i8[nv + 1]
     self.prepare_walk
+    # A solver built from clause lists (the certificate modes, the library
+    # API) takes the profile here; flat loads decide in load_flat.
+    self.enable_kissat_search if !flat_shell && @config.use_kissat_search
 
   # ---- literal encoding ---------------------------------------------------
 
@@ -871,20 +893,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if @mode_stable || !@use_vmtf
       a = wassat_heap_peek_act(@assign, @heap, @heappos, @activity, @hstate)
       return 0 if a < 0
-      return self.reuse_trail_scan(@activity, a)
+      return wassat_reuse_trail_level(@trail, @trail_lim, @activity, @dlevel, a)
     a = wassat_vmtf_peek_stamp(@assign, @vq_next, @vq_stamp, @vq_state)
     return 0 if a < 0
-    self.reuse_trail_scan(@vq_stamp, a)
-
-  # Deepest prefix of decisions that still outrank `a` under `key`.
-  -> reuse_trail_scan(key, a)
-    t = 0
-    while t < @dlevel
-      lit_t = @trail[@trail_lim[t]]
-      v = lit_t < 0 ? 0 - lit_t : lit_t
-      break if key[v] < a
-      t += 1
-    t
+    wassat_reuse_trail_level(@trail, @trail_lim, @vq_stamp, @dlevel, a)
 
   # Native pop loop: backjump runs per conflict over the whole popped
   # suffix — boxed it was ~5% of the uuf250 profile (flame, 2026-07-24).
@@ -953,11 +965,32 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @astate[5] = @conflicts
     @astate[6] = 0
     @astate[9] = @use_otfs ? 1 : 0
+    # Which heuristic this conflict bumps, and whether reason-side literals
+    # join it: not while backing off, and not when decisions outnumber
+    # conflicts tenfold (then the reasons are mostly irrelevant to them).
+    @astate[21] = 0
+    @astate[22] = 0
+    @astate[24] = 0
+    if @ksearch
+      @astate[24] = @kpromote ? 1 : 0
+      @astate[25] = @lbd_stamp
+      @astate[21] = @mode_stable ? 2 : 1
+      if @kst[12] > 0
+        @kst[12] -= 1
+      elsif @kst[10] < 655360
+        @astate[22] = 1
     wassat_analyze(@arena, @assign, @level, @reason, @seen, @cmeta,
                    @trail, @lbuf, @mbuf, @mstk, @mclr, @activity, @heap,
                    @heappos, @hstate, @astate, @nvars, @cused,
                    @vq_next, @vq_prev, @vq_stamp, @vq_state,
-                   @pwork, @rassign)
+                   @pwork, @rassign, @obuf, @amark, @clbd, @lbd_seen)
+    @lbd_stamp = @astate[25] if @ksearch
+    if @astate[23] == 1
+      @kst[13] += 1
+      @kst[12] = @kst[13]
+    elsif @astate[23] == 2 && @kst[13] > 0
+      @kst[13] = @kst[13] / 2
+      @kst[12] = @kst[13]
     @lsize = @astate[3]
     if @astate[6] > 0
       @otfs_hits += 1
@@ -1483,6 +1516,64 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # VMTF branching + fast 64-conflict EMA restarts + target phases). Rapidly
   # samples and escapes dead top-level control basins while snapping back to
   # the deepest conflict-free trail (@bphase / @best_phase).
+  # Kissat's search schedule in place of the Glucose-derived one:
+  #   focused mode restarts when the fast glue average (window 33) is 10%
+  #   above the slow one (window 100,000), both bias-corrected, with no
+  #   trail-size veto and no 64-conflict floor; it decides from the VMTF
+  #   queue and bumps only that queue;
+  #   stable mode restarts on reluctant doubling (1024, capped at 2^20),
+  #   decides from the EVSIDS heap and bumps only those scores;
+  #   the two alternate in phases of 1000 * n * log10(n + 9)^4 conflicts.
+  -> want_kissat_search
+    @kwant = true
+    0
+
+  -> kissat_search?
+    @ksearch
+
+  -> enable_kissat_search
+    @ksearch = true
+    @use_vmtf = true
+    @use_reluctant = true
+    @rel_base = 1024
+    @rel_u = 1
+    @rel_v = 1
+    @rel_at = 1024
+    @mode_at = @conflicts + 1000 unless @no_stable
+    @reuse_trail = true if @reuse_force >= 0
+    # Frontier escalation would pin this search to focused mode after 250k
+    # conflicts; the alternation is the schedule.
+    @escalate_at = 0 if env("WASSAT_ESCALATE_AT") == nil
+    @use_chrono = true if env("WASSAT_KCHRONO") == "1"
+    @use_chrono = false if env("WASSAT_KCHRONO") == "0"
+    # Validation hook, like WASSAT_ESCALATE_AT: mode switches and reductions
+    # come this many times sooner, so searches of a few thousand conflicts
+    # go through every phase and reduce above the root many times over.
+    @kdiv = wassat_decimal_in_range("WASSAT_KSTRESS", env("WASSAT_KSTRESS"), 1, 1000) if env("WASSAT_KSTRESS") != nil
+    @mode_at = @conflicts + 1000 / @kdiv + 1 unless @no_stable
+    wassat_kema_init(@kst)
+    @kst[11] = @decisions_made
+    @kst[6] = 0
+    # Reductions by conflict interval, 1000 * sqrt(n); see reduce_db.
+    @kreduce = env("WASSAT_KREDUCE") != "0"
+    @kpromote = env("WASSAT_KPROMOTE") != "0"
+    # Rollout lookahead replaces the queue and the heap on every decision;
+    # with this schedule the plain heuristics need a tenth of the conflicts
+    # on the inputs it was admitted for (homer11: 446k against 5M+).
+    @lookahead = 0 if env("WASSAT_LOOKAHEAD") == nil
+    @pstate[13] = 1 if env("WASSAT_SAVED_POS") != "0"
+    @kfuse = env("WASSAT_KFUSE") != "0"
+    # Scalars of the conflict-analysing vivifier; [4] probes, [5] literals
+    # removed, [6] learned clauses found implied. nil keeps the prefix form.
+    @kviv = i64[8] if env("WASSAT_KVIVIFY") != "0"
+    @kviv_effort = 10
+    @kviv_effort = env("WASSAT_KVIVIFY_EFFORT").to_i if env("WASSAT_KVIVIFY_EFFORT") != nil
+    @vivify_phase = i8[@nvars + 1] if @vivify_phase == nil
+    @wp_state[12] = 1 if env("WASSAT_WATCH_ROOMY") != "0"
+    @krhist = i64[1088]
+    @kreduce_at = @conflicts + 1000 / @kdiv + 1
+    0
+
   -> enable_focused_only
     @focused_only = true
     @no_stable = true
@@ -1990,6 +2081,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @stop_props = more > 0 ? @pstate[4] + more : 0
     0
 
+  # The same hand-back in ticks (wassat_propagate): `more` further ticks,
+  # 0 = none. Checked where the propagation stop is, at a conflict.
+  -> set_tick_stop(more)
+    @stop_ticks = more > 0 ? @pstate[12] + more : 0
+    0
+
+  -> ticks
+    @pstate[12]
+
   -> prop_stop_reached?
     @stop_props > 0 && @pstate[4] >= @stop_props
 
@@ -2379,6 +2479,115 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       ci += 1
       scanned += 1
     @vivify_cursor = ci if wide
+    wassat_copy_vivify_phases(saved_phase, @phase, @nvars)
+    0
+
+  # Vivification with conflict analysis (wassat_vivify_probe), for the
+  # Kissat profile. Two passes share the propagation budget: learned clauses
+  # of LBD at most 7 that were learned or resolved on since the previous
+  # round, newest first, take up to two thirds; the irredundant clauses,
+  # from a cursor that rotates across rounds, take the rest. A shortened
+  # clause is stored as a new one and the old one retired, as vivify_round
+  # does. A learned clause whose own literal is implied by other clauses is
+  # redundant under propagation and goes.
+  -> vivify_strong(prop_budget)
+    return 0 if wassat_stop_requested?(@stop_cell)
+    raise "vivification requires root level" unless @dlevel == 0
+    return 0 unless @proof_mode == WASSAT_PROOF_NONE && @vivify_phase != nil && @kviv != nil
+    saved_phase = @vivify_phase
+    wassat_copy_vivify_phases(@phase, saved_phase, @nvars)
+    root_conflict = self.propagate
+    if root_conflict >= 0
+      @ok = false
+      @formula_unsat = true
+      wassat_copy_vivify_phases(saved_phase, @phase, @nvars)
+      return 0
+    props0 = @pstate[4]
+    since = @kviv_at
+    @kviv_at = @conflicts
+    end_ci = @ncl
+    pass = 0
+    while pass < 2 && @ok
+      limit = pass == 0 ? (prop_budget * 2) / 3 : prop_budget
+      ci = pass == 0 ? end_ci - 1 : @vivify_cursor
+      ci = 0 if pass == 1 && ci >= end_ci
+      scanned = 0
+      while scanned < end_ci && @ok && @pstate[4] - props0 < limit
+        break if wassat_stop_requested?(@stop_cell)
+        n = @cmeta[2 * ci + 1]
+        lb = @clbd[ci]
+        cand = false
+        if @alive[ci] == 1 && n >= 3
+          if pass == 0
+            cand = lb >= 1 && lb <= 7 && @cused[ci] > since
+          else
+            cand = lb == 0
+        if cand
+          @kviv[4] += 1
+          @lbd_stamp += 1
+          @kviv[3] = @lbd_stamp
+          @pstate[0] = @qhead
+          @pstate[1] = @tsize
+          @pstate[5] = 0
+          status = wassat_vivify_probe(@arena, @assign, @lassign, @level, @reason, @phase,
+                                       @wsdir, @wpool, @wp_state, @trail, @trail_lim, @pstate,
+                                       @bldir, @bl_pool, @cmeta, @seen, @obuf, @mbuf,
+                                       @lbd_seen, @kviv, ci)
+          @qhead = @pstate[0]
+          @tsize = @pstate[1]
+          @dlevel = @kviv[0]
+          kept = @kviv[1]
+          self.backjump(0) if @dlevel > 0
+          if status == 4
+            # The interrupted literal is back at the root; repack and move on.
+            self.rebuild_watches
+            rc = self.propagate
+            if rc >= 0
+              @ok = false
+              @formula_unsat = true
+          elsif status != 5
+            if kept == 0
+              @ok = false
+              @formula_unsat = true
+            elsif kept < n
+              fits = !@fixed_caps || (@asize + kept + 4 <= @acap && @ncl + 2 < @ccap)
+              if fits
+                nci = self.store_clause(@mbuf, kept)
+                if lb == 0
+                  @clbd[nci] = 0
+                else
+                  lbdv = lb
+                  lbdv = kept - 1 if kept - 1 < lbdv
+                  lbdv = 1 if lbdv < 1
+                  @clbd[nci] = lbdv
+                  @cused[nci] = since
+                @alive[ci] = 0
+                @vivified += 1
+                @kviv[5] += n - kept
+                if kept == 1
+                  l0 = @mbuf[0]
+                  lv = self.value(l0)
+                  if lv < 0
+                    @ok = false
+                    @formula_unsat = true
+                  elsif lv == 0
+                    self.enqueue(l0, nci)
+                    confl2 = self.propagate
+                    if confl2 >= 0
+                      @ok = false
+                      @formula_unsat = true
+            elsif status == 2 && @kviv[2] == 1 && lb > 0
+              @alive[ci] = 0
+              @kviv[6] += 1
+        scanned += 1
+        if pass == 0
+          ci -= 1
+          scanned = end_ci if ci < 0
+        else
+          ci += 1
+          ci = 0 if ci >= end_ci
+      @vivify_cursor = ci if pass == 1
+      pass += 1
     wassat_copy_vivify_phases(saved_phase, @phase, @nvars)
     0
 
@@ -2815,7 +3024,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       self.probe_round(budget / 2)
     t3 = wassat_prof_clock
     if @ok && !wassat_stop_requested?(@stop_cell) && (@inprocess_passes & 2) != 0
-      self.vivify_round(@ncl, true, budget)
+      if @kviv != nil
+        # Kissat gives vivification a tenth of the search effort; the
+        # round's general budget is a twentieth, shared.
+        vb = (work * @kviv_effort) / 100
+        vb = 500000 if vb < 500000
+        self.vivify_strong(vb)
+      else
+        self.vivify_round(@ncl, true, budget)
     t4 = wassat_prof_clock
     if @ok && !wassat_stop_requested?(@stop_cell) && (@inprocess_passes & 4) != 0
       # An index visit costs the same order as a propagated literal (qwh:
@@ -2842,8 +3058,16 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> reduce_db
     self.subsume_learned
-    selected = wassat_reduce_select(@cmeta, @alive, @clbd, @cused, @rhist,
-                           @ncl, @last_reduce_at)
+    selected = 0
+    if @kreduce
+      # Above the root the trail's reason clauses are marked as just used,
+      # which is what lets this run without discarding the trail.
+      selected = wassat_kreduce_select(@cmeta, @alive, @clbd, @cused, @krhist,
+                                       @ncl, @last_reduce_at, @trail, @reason,
+                                       @level, @tsize, @conflicts)
+    else
+      selected = wassat_reduce_select(@cmeta, @alive, @clbd, @cused, @rhist,
+                             @ncl, @last_reduce_at)
     @last_reduce_at = @conflicts
 
     # Proof-free mode reclaims the arena in place: live clauses slide
@@ -2877,8 +3101,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Subsumption rewrote clause bodies in place, or root units arrived since
     # inprocessing last cleaned: strip root-false literals, drop root-satisfied
     # clauses, and repack both watch structures from a consistent database.
-    cleaned = @need_clean || (@inprocessings > 0 && @tsize > @last_clean_tsize)
-    self.clean_root_clauses if cleaned
+    cleaned = self.root_clean_due?
+    self.clean_root_clauses if cleaned && @dlevel == 0
     # Selection already counted every live learned clause and every deletion.
     # Compaction and watch rebuilding preserve that count. Root cleaning may
     # remove more clauses, so retain the independent recount on that path.
@@ -2889,6 +3113,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @nlearned = wassat_count_learned(@alive, @clbd, @ncl)
       wassat_reduce_count_note(@rhist, @ncl, 0)
     0
+
+  # Root cleaning is owed when a pass rewrote clause bodies in place, or when
+  # the root trail has grown since inprocessing last cleaned.
+  -> root_clean_due?
+    root = @dlevel > 0 ? @trail_lim[0] : @tsize
+    @need_clean || (@inprocessings > 0 && root > @last_clean_tsize)
 
   # Allocation-free recovery for a proof-free @fixed_caps arm whose arena filled
   # with LBD-2 learned/imported clauses: drop all non-binary redundant clauses
@@ -3241,7 +3471,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           # can only abort or misfire there — measured on bmc-ibm-12
           # (chrono arm) it nearly doubled the conflict count for zero
           # removal, while plain arms are unaffected.
-          if @use_shrink
+          # The Kissat profile takes the note above at its word: with
+          # chronological backtracking on, it does not shrink. On the heavy
+          # arm, which sets both, clique_n2_k10 went from unrefuted at 5.8M
+          # conflicts to refuted at 689k and homer11 from 4.5M+ to 330k.
+          if @use_shrink && !(@ksearch && @use_chrono)
             target = self.shrink_learned(n)
             n = @lsize
           if @at_epoch_best == 1
@@ -3271,6 +3505,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             best_prefix = 0
             self.backjump(0)
             self.reduce_db
+            # The Kissat reduction spares every clause used since the last
+            # one, which a full arena cannot afford: when it leaves the
+            # arena or the clause table more than three quarters full, the
+            # glue-median cut runs behind it.
+            if @kreduce && (@asize * 4 > @acap * 3 || @ncl * 4 > @ccap * 3)
+              @kreduce = false
+              self.reduce_db
+              @kreduce = true
             compacted = true
             if @asize + n + 4 > @acap || @ncl + 2 >= @ccap
               @retired = true
@@ -3296,6 +3538,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                   i += 1
                 ci = self.store_flat(@obuf, n)
                 @clbd[ci] = lbd
+                @cused[ci] = @conflicts if @kreduce
             else
               # Chronological backtracking: a far backjump discards a deep,
               # largely-consistent trail. Step back a single level instead
@@ -3321,27 +3564,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               else
                 # store learned clause, watching the asserting literal and a
                 # literal from the backjump level
-                best = 1
-                bl = -1
-                i = 1
-                while i < n
-                  lit_i = @lbuf[i]
-                  lv = @level[lit_i < 0 ? 0 - lit_i : lit_i]
-                  if lv > bl
-                    bl = lv
-                    best = i
-                  i += 1
-                @obuf[0] = asserting
-                @obuf[1] = @lbuf[best]
-                j = 2
-                i = 1
-                while i < n
-                  unless i == best
-                    @obuf[j] = @lbuf[i]
-                    j += 1
-                  i += 1
+                wassat_watch_order(@lbuf, @obuf, @level, n)
                 ci = self.store_flat(@obuf, n)
                 @clbd[ci] = lbd
+                @cused[ci] = @conflicts if @kreduce
                 self.enqueue_lvl(asserting, ci, target)
             if @astate[6] > 0
               if self.otfs_dominated?(n, @astate[6])
@@ -3354,7 +3580,16 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             @nlearned += 1 if n > 1
             wassat_ema_conflict(@estate, lbd, @tsize)
             @lbd_gcount += 1
-            wassat_evsids_advance(@hstate)
+            if @ksearch
+              # No score is bumped in focused mode, so nothing would ever
+              # rescale a growing increment there.
+              # Kissat's glue leaves out the asserting literal's level: one
+              # less than the LBD kept here. The restart test is a ratio, so
+              # the offset matters (3 against 4 is 1.33, 2 against 3 is 1.5).
+              wassat_kema_conflict(@kst, lbd > 0 ? lbd - 1 : 0, @decisions_made, @mode_stable ? 0 : 1)
+              wassat_evsids_advance(@hstate) if @mode_stable
+            else
+              wassat_evsids_advance(@hstate)
             # Assignment snapshot for batched filtering. Taken HERE, right
             # after a conflict has been learned from and backjumped, because
             # that is a deep, representative trail — the import safe point
@@ -3385,6 +3620,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             if stop_conflicts > 0 && @conflicts >= stop_conflicts
               limited = true
             limited = true if @stop_props > 0 && @pstate[4] >= @stop_props
+            limited = true if @stop_ticks > 0 && @pstate[12] >= @stop_ticks
         # The owner of the final aggregate ticket processes that conflict
         # completely. If it did not decide the formula, publish cooperative
         # budget exhaustion only afterwards; every other arm either observes
@@ -3448,14 +3684,26 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         # from restarts — coupling it to accepted restarts left long
         # searches dragging an ever-larger database (measured on both the
         # psi tensor cells and the k=5 Lonely Runner class).
-        if @nlearned > @reduce_limit
-          phase_prefix = 0
-          best_prefix = 0
-          spine_level = @nassump
-          spine_size = 0
-          self.backjump(0)
+        reduce_due = @nlearned > @reduce_limit
+        reduce_due = @conflicts >= @kreduce_at && @nlearned > 0 if @kreduce
+        if reduce_due
+          # The Kissat profile reduces above the root, keeping the trail,
+          # unless something that needs a root trail is due with it.
+          to_root = true
+          if @kreduce && @ktrail && @dlevel > 0
+            to_root = self.root_clean_due?
+            to_root = true if @inprocess_at > 0 && @conflicts >= @inprocess_at
+            to_root = true if @auto_vivify || @subsume_every > 0 || @proof_mode != WASSAT_PROOF_NONE
+            to_root = true if !to_root && wassat_trail_reasons_alive(@trail, @reason, @level, @alive, @tsize) == 0
+          if to_root
+            phase_prefix = 0
+            best_prefix = 0
+            spine_level = @nassump
+            spine_size = 0
+            self.backjump(0)
           self.reduce_db
           @reductions += 1
+          @kreduce_at = @conflicts + wassat_kreduce_interval(@reductions) / @kdiv + 1 if @kreduce
           next_limit = @reduce_limit + @reduce_step
           @rhist[70] += 1 if @nlearned >= next_limit
           if @reduce_floor
@@ -3519,7 +3767,21 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           spine_level = @nassump
           spine_size = 0
           @mode_stable = !@mode_stable
-          if @mode_stable
+          if @ksearch
+            # Kissat: the n-th focused and the n-th stable phase each last
+            # 1000 * n * log10(n + 9)^4 conflicts.
+            @kst[14] += 1
+            @mode_at = @conflicts + wassat_kmode_interval((@kst[14] + 1) / 2) / @kdiv + 1
+            if @mode_stable
+              @rel_u = 1
+              @rel_v = 1
+              @rel_at = @rel_base
+              @since_restart = 0
+              wassat_copy_vivify_phases(@best_phase, @phase, @nvars)
+              wassat_copy_vivify_phases(@best_phase, @bphase, @nvars)
+            else
+              @kst[6] = @conflicts + wassat_krestart_delay(@restart_count)
+          elsif @mode_stable
             @mode_len = @mode_len * 2
             @mode_at = @conflicts + 3 * @mode_len
             if @use_reluctant
@@ -3534,7 +3796,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             @mode_at = @conflicts + @mode_len
             @since_restart = 0 if @use_reluctant
         want_restart = false
-        if @mode_stable && @use_reluctant
+        if @ksearch && !@mode_stable
+          want_restart = wassat_krestart_hot(@kst, @conflicts) == 1 if @dlevel > 0
+        elsif @mode_stable && @use_reluctant
           want_restart = @since_restart >= @rel_at
         else
           floor = @mode_stable ? 16384 : @focused_floor
@@ -3558,11 +3822,18 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               rv = 1
             else
               rv = rv << 1
+            # Kissat caps the doubled interval at 2^20 conflicts and starts
+            # the sequence over.
+            rb = @rel_base ## i64
+            if @ksearch && rb * rv > 1048576
+              ru = 1
+              rv = 1
             @rel_u = ru
             @rel_v = rv
             @rel_at = @rel_base * rv
           @since_restart = 0
           @restart_count += 1
+          @kst[6] = @conflicts + wassat_krestart_delay(@restart_count) if @ksearch && !@mode_stable
           # A due rephase rewrites every saved phase, so it wants the clean
           # slate a full restart gives it; reuse the trail only otherwise.
           rt = 0
@@ -3603,6 +3874,30 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               spine_level = @nassump
               spine_size = 0
               v = self.pick_branch_rollout
+            elsif @kfuse && @nassump == 0 && @spine_active == 0
+              # Every test above this point reads conflict counts, except
+              # the best-trail snapshot. So decisions and propagations run
+              # natively from here until a conflict, a trail deeper than the
+              # best, a full assignment or 64 decisions (the stop cell is
+              # polled at the top of this loop).
+              @pstate[0] = @qhead
+              @pstate[1] = @tsize
+              @pstate[5] = @use_chrono ? 1 : 0
+              @krun[0] = @dlevel
+              @krun[1] = (@mode_stable || !@use_vmtf) ? 1 : 0
+              @krun[2] = (@use_target && (!@target_stable_only || @mode_stable)) ? 1 : 0
+              @krun[3] = @best_tsize
+              @krun[4] = 64
+              status = wassat_search_run(@arena, @assign, @lassign, @level, @reason, @phase, @bphase,
+                                         @wsdir, @wpool, @wp_state, @trail, @trail_lim, @pstate,
+                                         @bldir, @bl_pool, @heap, @heappos, @activity, @hstate,
+                                         @vq_next, @vq_stamp, @vq_state, @krun)
+              @qhead = @pstate[0]
+              @tsize = @pstate[1]
+              @dlevel = @krun[0]
+              @decisions_made += @krun[5]
+              @pending_conflict = @pstate[2] if status == 2
+              v = status == 1 ? 0 : -1
             else
               v = self.pick_branch
             if v == 0
@@ -3634,6 +3929,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # natively (arena copy + watches + binary lists + proof ids in one pass).
   -> .from_flat(nvars, art, lookahead)
     s = Wassat.new(nvars, [], WASSAT_PROOF_NONE, lookahead, true)
+    s.load_flat(art)
+    s
+
+  # The same, on Kissat's search schedule (enable_kissat_search) whatever the
+  # formula's policy says: the race gives it to some arms and not others.
+  -> .from_flat_kissat(nvars, art)
+    s = Wassat.new(nvars, [], WASSAT_PROOF_NONE, 0, true)
+    s.want_kissat_search
     s.load_flat(art)
     s
 
@@ -3701,6 +4004,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # The measured default covers ordinary raw loading. Explicit overrides
     # also exercise lean and preprocessed loaders for controlled checks.
     watch_extra = 0 if (lean || art["raw"] != true) && env("WASSAT_WATCH_EXTRA") == nil
+    kprofile = !lean && (@kwant || @config.use_kissat_search)
     sncl = art["fncl"]
     raise "clause count exceeds signed 32-bit packed representation" if sncl > WASSAT_MAX_CLAUSE_INDEX + 1
     # size the arena and tables for the live clauses plus learning headroom
@@ -3807,6 +4111,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @ncl = pm[3]
       @asize = pm[4]
       @wp_cap = 2 * maxcl + 4 * @nvars + 72
+      # The Kissat profile lays watch lists out with headroom (wst[12]),
+      # which needs a pool to take it from; below four million clauses
+      # twice the entries is a few megabytes.
+      @wp_cap = 4 * maxcl + 4 * @nvars + 72 if kprofile && sncl < 4000000
       @wp_cap = wassat_lucky_watch_capacity(@cmeta, @ncl, @nvars, @wp_cap) if lean
       @wp_cap = wassat_watch_reserve_capacity(@wp_cap, watch_extra)
       @wpool = i64[@wp_cap]
@@ -3867,6 +4175,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         v += 1
     @raw_flat = art["raw"] == true
     self.prepare_walk unless lean
+    self.enable_kissat_search if kprofile
     0
 
   # Inprocessing for raw kernels, which bypass the preprocessor entirely:
@@ -4528,7 +4837,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       "core": core, "proof": proof, "drat": drat,
       "proof_mode": @proof_mode,
       "conflicts": @conflicts, "decisions": @decisions_made,
-      "props": @pstate[4],
+      "props": @pstate[4], "ticks": @pstate[12],
       "phase_snapshots": @pstate[6],
       "phase_copied": @pstate[7], "phase_skipped": @pstate[8],
       "spine_snapshots": @pstate[9], "spine_scanned": @pstate[10],
@@ -6214,6 +6523,129 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   hist[66] += 2 * ncl
   total
 
+# Kissat's reduction. A learned clause survives when it was resolved on, or
+# is the reason of an assignment above the root, since the previous
+# reduction; when its glue is at most 2 in Kissat's count, which is an LBD
+# of at most 3 here; or when it has at most 6 literals.
+# Of the rest the longest go first (ties: highest glue) until 70% of their
+# literals are gone. Three passes over the clause table and no sort buffer:
+#   hist[0..1023]     candidate literals per clause length (1023 = longer)
+#   hist[1024..1087]  the same per glue, within the one partial length
+# Returns the number of learned clauses left alive.
+-> wassat_kreduce_select(cm, alive, lbd, used, hist, ncl, last, tr, rsn, lvl, tsize, now) (i64[] i8[] i64[] i64[] i64[] i64 i64 i32[] i32[] i64[] i64 i64) i64
+  i = 0
+  while i < tsize
+    l = tr[i] ## i64
+    v = l
+    v = 0 - l if l < 0
+    r = rsn[v] ## i64
+    # one past `now`: never at or below `last`, whatever the two are
+    used[r] = now + 1 if r >= 0 && lvl[v] > 0
+    i += 1
+  i = 0
+  while i < 1088
+    hist[i] = 0
+    i += 1
+  learned = 0
+  mass = 0
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && lbd[ci] > 0
+      learned += 1
+      n = cm[2 * ci + 1]
+      if n > 6 && lbd[ci] > 3 && used[ci] <= last
+        b = n
+        b = 1023 if b > 1023
+        hist[b] += n
+        mass += n
+    ci += 1
+  target = mass * 7 / 10
+  return learned if target < 1
+  # lengths >= cutn go entirely; length `part` goes by glue
+  acc = 0
+  cutn = 1024
+  b = 1023
+  while b >= 7 && acc + hist[b] <= target
+    acc += hist[b]
+    cutn = b
+    b -= 1
+  part = b
+  part = 0 if part < 7
+  rest = target - acc
+  cutg = 64
+  pg = -1
+  grest = 0
+  if part > 0 && rest > 0
+    ci = 0
+    while ci < ncl
+      if alive[ci] == 1 && lbd[ci] > 3 && used[ci] <= last
+        n = cm[2 * ci + 1]
+        nb = n
+        nb = 1023 if nb > 1023
+        if nb == part
+          g = lbd[ci]
+          g = 63 if g > 63
+          hist[1024 + g] += n
+      ci += 1
+    gacc = 0
+    g = 63
+    while g >= 4 && gacc + hist[1024 + g] <= rest
+      gacc += hist[1024 + g]
+      cutg = g
+      g -= 1
+    pg = g
+    pg = -1 if pg < 4
+    grest = rest - gacc
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && lbd[ci] > 3 && used[ci] <= last
+      n = cm[2 * ci + 1]
+      if n > 6
+        nb = n
+        nb = 1023 if nb > 1023
+        drop = 0
+        if nb >= cutn
+          drop = 1
+        elsif nb == part
+          g = lbd[ci]
+          g = 63 if g > 63
+          if g >= cutg
+            drop = 1
+          elsif g == pg && grest > 0
+            drop = 1
+            grest -= n
+        if drop == 1
+          alive[ci] = 0
+          learned -= 1
+    ci += 1
+  learned
+
+# 1 when every reason clause above the root is alive. Vivification retires
+# a clause it has replaced without unhooking its watches, so until the next
+# repack a retired clause can still imply a literal; compacting the arena
+# under such a trail would leave that literal with no antecedents.
+-> wassat_trail_reasons_alive(tr, rsn, lvl, alive, tsize) (i32[] i32[] i64[] i8[] i64) i64
+  i = 0 ## i64
+  while i < tsize
+    l = tr[i] ## i64
+    v = l
+    v = 0 - l if l < 0
+    r = rsn[v] ## i64
+    return 0 if r >= 0 && lvl[v] > 0 && alive[r] != 1
+    i += 1
+  1
+
+# floor(1000 * sqrt(n)): conflicts between reductions n and n + 1.
+-> wassat_kreduce_interval(n) (i64) i64
+  x = n * 1000000 ## i64
+  r = 1000 ## i64
+  i = 0
+  while i < 40
+    r = (r + x / r) / 2
+    i += 1
+  r = r - 1 if r * r > x
+  r
+
 -> wassat_reduce_count_note(state, ncl, reused) (i64[] i64 i64)
   slot = reused == 1 ? 74 : 73
   state[slot] += ncl
@@ -6355,6 +6787,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   conflict = -1
   bail = 0
   visits = 0
+  # Ticks: a load-independent measure of the work done here, in the manner
+  # of Kissat's — one per dequeued literal, one per eight entries of the
+  # two lists it scans, one per long clause it has to open. Budgets and
+  # benchmark limits in ticks do not depend on what else the machine runs.
+  ticks = 0
   while qhead < tsize && conflict < 0 && bail == 0
     p = tr[qhead] ## i64
     qhead += 1
@@ -6379,6 +6816,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     bdi = li << 2 ## i64
     blo = bd[bdi]
     b = blo + bd[bdi + 1] - 1
+    ticks += 1 + ((bd[bdi + 1] + 7) >> 3)
     while b >= blo && conflict < 0
       pay = blp[b] ## i64
       b -= 1
@@ -6416,6 +6854,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wdi = li << 2 ## i64
     lo = wd[wdi]
     j = lo + wd[wdi + 1] - 1
+    ticks += (wd[wdi + 1] + 7) >> 3
     while j >= lo && conflict < 0 && bail == 0
       e = wp[j] ## i64
       # entries carry the blocker's LIT-INDEX (always positive), so one
@@ -6438,8 +6877,17 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         # dependent miss per inspected clause instead of two, and no
         # clause-table descriptor on this path at all.
         stx = e >> 32 ## i64
+        ticks += 1
         hdr = ar[stx - 1] ## i64
         n = hdr & word_mask ## i64
+        # Bit 31 of the length word marks a saved replacement position:
+        # then the length is the low 15 bits and the position the next 16.
+        # Only this loop writes or reads the mark; every other writer of a
+        # header stores a plain length, which clears it.
+        pos = 2 ## i64
+        if n >= 2147483648
+          pos = (n >> 15) & 65535
+          n = n & 32767
         cbase = stx << 32 ## i64
         if ar[stx] == neg
           ar[stx] = ar[stx + 1]
@@ -6454,7 +6902,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           wp[j] = cbase | oli
           j -= 1
         else
-          k = 2
+          # A long clause is searched from where the last replacement was
+          # found (CaDiCaL's `pos`), wrapping once: the literals before it
+          # were false then and mostly still are, and rescanning them on
+          # every visit is quadratic in the clause length.
+          k = pos
           while k < n
             lk = ar[stx + k]
             sk = lk >> 63
@@ -6463,7 +6915,19 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             vk = lasg[kli]
             break if vk >= 0
             k += 1
+          if k >= n && pos > 2
+            k = 2
+            while k < pos
+              lk = ar[stx + k]
+              sk = lk >> 63
+              kli = (((lk ^ sk) - sk) << 1) + (sk & 1)
+              vk = lasg[kli]
+              break if vk >= 0
+              k += 1
+            k = n if k >= pos
           if k < n
+            if st[13] == 1 && n > 8 && n < 32768
+              ar[stx - 1] = ((hdr >> 32) << 32) | 2147483648 | (k << 15) | n
             repl = ar[stx + k]
             ar[stx + k] = neg
             ar[stx + 1] = repl
@@ -6552,6 +7016,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   st[2] = conflict
   st[3] = bail
   st[4] = st[4] + visits
+  st[12] = st[12] + ticks
   0
 
 # Reclaim a substantial dead prefix before allocating another watch block.
@@ -6663,6 +7128,19 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   slack = (wst[1] - entries - nlits) / 2
   slack = 0 if slack < 0
   slack = reserve_entries / 4 if slack > reserve_entries / 4
+  # wst[12] = 1: every list gets headroom in proportion to its length, out
+  # of three quarters of the spare pool and up to twice its length. A tight
+  # repack makes each list that grows afterwards move to the pool top, at a
+  # cost of twice its length in fresh slots; on a few hundred variables with
+  # a learned database of tens of thousands of clauses that refilled the
+  # pool, and forced the next repack, every thousand conflicts or so.
+  roomy = wst[12] == 1
+  if roomy
+    sparse = false
+    reserve_entries = entries
+    slack = (wst[1] - entries - nlits) * 3 / 4
+    slack = 0 if slack < 0
+    slack = entries * 2 if slack > entries * 2
   top = 0
   li = 0
   while li < nlits
@@ -6720,8 +7198,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[12..20] = cumulative pre-scan/resume visits, probes, failed probes,
 #     removed literals, maximum reason length, frames, input literals, skipped
 #     probes. The maximum is a high-water mark; all other counts accumulate.
--> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark) (i64[] i8[] i64[] i32[] i8[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark, ab, am, clbd, lseen) (i64[] i8[] i64[] i32[] i8[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64[])
   confl = st[0]
+  na = 0
+  promote = st[24] == 1
   tsize = st[1]
   dl = st[2]
   counter = 0
@@ -6737,6 +7217,26 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     cused[cl] = st[5]
     stx = cm[cl << 1] ## i64
     n = cm[(cl << 1) + 1] ## i64
+    # Promotion (Kissat): a learned clause resolved on again has its glue
+    # recounted under the current assignment and keeps the lower value.
+    if promote
+      og = clbd[cl]
+      if og > 2
+        st[25] += 1
+        stamp = st[25]
+        ng = 0
+        j = 0
+        while j < n && ng < og
+          q = ar[stx + j]
+          vq = q
+          if q < 0
+            vq = 0 - q
+          lv = lvl[vq]
+          if lseen[lv] != stamp
+            lseen[lv] = stamp
+            ng += 1
+          j += 1
+        clbd[cl] = ng if ng < og
     # Skip the literal being RESOLVED by variable, not by slot: watch-based
     # propagation swaps the propagated literal to slot 0, but binary-list
     # propagation never touches the arena, so the slot invariant is gone.
@@ -6760,10 +7260,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         antecedent += 1 if vq != pv && lvl[vq] > 0
         if vq != pv && sn[vq] == 0 && lvl[vq] > 0
           sn[vq] = 1
-          # MiniSat-style EVSIDS bumps the whole conflict graph as it is first
-          # discovered, not merely the literals surviving minimisation.
-          z = wassat_evsids_bump(act, heap, hpos, hst, vq, nv)
-          z = wassat_vmtf_front(vqn, vqp, vqs, vst, vq)
+          # The whole conflict graph is bumped, not merely the literals
+          # surviving minimisation: collected here, bumped once at the end.
+          ab[na] = vq
+          na += 1
+          am[vq] = 1
           if lvl[vq] >= dl
             counter += 1
           else
@@ -6806,8 +7307,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           vq = 0 - q
         if vq != pv && sn[vq] == 0 && lvl[vq] > 0
           sn[vq] = 1
-          z = wassat_evsids_bump(act, heap, hpos, hst, vq, nv)
-          z = wassat_vmtf_front(vqn, vqp, vqs, vst, vq)
+          ab[na] = vq
+          na += 1
+          am[vq] = 1
           if lvl[vq] >= dl
             counter += 1
           else
@@ -7004,6 +7506,70 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       target = lv
     i += 1
 
+  # Reason-side literals (Kissat's bumpreasons): the antecedents of the
+  # learned clause's own literals are one resolution away from it, so they
+  # join the bumped set — unless that would grow it more than tenfold, in
+  # which case none do and the caller backs off for a few conflicts.
+  st[23] = 0
+  if st[22] == 1
+    saved = na
+    limit = saved * 10
+    i = 0
+    while i < keep && na <= limit
+      q = out[i]
+      vq = q
+      if q < 0
+        vq = 0 - q
+      rc = rsn[vq]
+      if rc >= 0
+        rstx = cm[rc << 1] ## i64
+        rlen = cm[(rc << 1) + 1] ## i64
+        k = 0
+        while k < rlen && na <= limit
+          lk = ar[rstx + k]
+          vk = lk
+          if lk < 0
+            vk = 0 - lk
+          if vk != vq && lvl[vk] > 0 && am[vk] == 0
+            am[vk] = 1
+            ab[na] = vk
+            na += 1
+          k += 1
+      i += 1
+    if na > limit
+      while na > saved
+        na -= 1
+        am[ab[na]] = 0
+      st[23] = 1
+    else
+      st[23] = 2
+
+  # Bump. Mode 1 (focused) moves the analyzed variables to the front of the
+  # VMTF queue in ascending stamp order, so their relative order survives;
+  # mode 2 (stable) raises their EVSIDS scores; mode 0 does both in
+  # discovery order, as every arm did before the two were separated.
+  bmode = st[21]
+  if bmode == 1
+    z = wassat_sort_by_key(ab, vqs, na)
+    i = 0
+    while i < na
+      z = wassat_vmtf_front(vqn, vqp, vqs, vst, ab[i])
+      am[ab[i]] = 0
+      i += 1
+  elsif bmode == 2
+    i = 0
+    while i < na
+      z = wassat_evsids_bump(act, heap, hpos, hst, ab[i], nv)
+      am[ab[i]] = 0
+      i += 1
+  else
+    i = 0
+    while i < na
+      z = wassat_evsids_bump(act, heap, hpos, hst, ab[i], nv)
+      z = wassat_vmtf_front(vqn, vqp, vqs, vst, ab[i])
+      am[ab[i]] = 0
+      i += 1
+
   st[12] += prescan_lits
   st[13] += resume_lits
   st[14] += probes
@@ -7016,6 +7582,349 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   st[3] = keep
   st[4] = target
   0
+
+# Ascending Shell sort of the variables in a[0..n) by key[variable]. The
+# analyzed set is a few dozen variables on most conflicts and a few thousand
+# on the worst; this needs no second buffer.
+-> wassat_sort_by_key(a, key, n) (i64[] i64[] i64) i64
+  gap = 1 ## i64
+  while gap * 3 + 1 < n
+    gap = gap * 3 + 1
+  while gap >= 1
+    i = gap
+    while i < n
+      v = a[i]
+      kv = key[v]
+      j = i
+      while j >= gap && key[a[j - gap]] > kv
+        a[j] = a[j - gap]
+        j -= gap
+      a[j] = v
+      i += 1
+    gap = gap / 3
+  0
+
+# The learned clause lb[0..n) in watch order in ob: the asserting literal,
+# the literal of the highest remaining level, then the rest as they came.
+-> wassat_watch_order(lb, ob, lvl, n) (i64[] i64[] i64[] i64) i64
+  best = 1 ## i64
+  bl = 0 - 1 ## i64
+  i = 1 ## i64
+  while i < n
+    q = lb[i]
+    v = q
+    v = 0 - q if q < 0
+    lv = lvl[v]
+    if lv > bl
+      bl = lv
+      best = i
+    i += 1
+  ob[0] = lb[0]
+  ob[1] = lb[best]
+  j = 2 ## i64
+  i = 1
+  while i < n
+    if i != best
+      ob[j] = lb[i]
+      j += 1
+    i += 1
+  0
+
+# Vivify one clause from a root trail. Its literals are assumed false one
+# at a time, in order, with propagation after each. Three ways to finish:
+#   3  a conflict: the clause shrinks to the assumptions the conflict
+#      depends on, found by walking the trail down through the reasons;
+#   2  a literal comes out true: the clause shrinks to that literal plus the
+#      assumptions its reason depends on;
+#   1  every literal is assumed or already false: the false ones go.
+# 5 = a literal is true at the root (nothing to do), 4 = the watch pool
+# needs a repack (the caller retries later).
+# `cl` receives the clause as it was (propagation reorders the arena copy),
+# `out` the kept literals. `vs`: [0] decision level reached  [1] kept count
+# [2] 1 when the true literal was implied by a different clause  [3] level
+# stamp (in). `lev` is a per-level stamp array, `sn` the all-zero seen marks.
+# The caller owns the backjump to the root and the restore of saved phases.
+-> wassat_vivify_probe(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, tlim, st, bd, blp, cm, sn, cl, out, lev, vs, ci) (i64[] i8[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i32[] i32[] i64[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64) i64
+  stx = cm[ci << 1] ## i64
+  n = cm[(ci << 1) + 1] ## i64
+  i = 0 ## i64
+  while i < n
+    l = ar[stx + i]
+    cl[i] = l
+    v = l
+    v = 0 - l if l < 0
+    a = asg[v] ## i64
+    a = 0 - a if l < 0
+    if a > 0
+      vs[0] = 0
+      vs[1] = n
+      vs[2] = 0
+      return 5
+    i += 1
+  dl = 0 ## i64
+  status = 1 ## i64
+  hit = 0 ## i64
+  i = 0
+  while i < n && status == 1
+    l = cl[i]
+    v = l
+    v = 0 - l if l < 0
+    a = asg[v] ## i64
+    a = 0 - a if l < 0
+    if a > 0
+      status = 2
+      hit = l
+    elsif a == 0
+      ts = st[1]
+      tlim[dl] = ts
+      dl += 1
+      pol = 0 - 1 ## i64
+      pol = 1 if l < 0
+      asg[v] = pol
+      lasg[v << 1] = pol
+      lasg[(v << 1) + 1] = 0 - pol
+      lvl[v] = dl
+      rsn[v] = 0 - 1
+      phs[v] = pol
+      tr[ts] = 0 - l
+      st[1] = ts + 1
+      st[2] = 0 - 1
+      st[3] = 0
+      z = wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp)
+      if st[3] == 1
+        status = 4
+      elsif st[2] >= 0
+        status = 3
+    i += 1
+  kept = 0 ## i64
+  other = 0 ## i64
+  if status == 2 || status == 3
+    stamp = vs[3]
+    seed = st[2]
+    hv = 0 ## i64
+    if status == 2
+      hv = hit
+      hv = 0 - hit if hit < 0
+      seed = rsn[hv]
+      other = 1 if seed != ci
+    if seed >= 0
+      sx = cm[seed << 1] ## i64
+      sl = cm[(seed << 1) + 1] ## i64
+      k = 0 ## i64
+      while k < sl
+        q = ar[sx + k]
+        w = q
+        w = 0 - q if q < 0
+        sn[w] = 1 if w != hv && lvl[w] > 0
+        k += 1
+      idx = st[1] - 1
+      root = tlim[0] ## i64
+      while idx >= root
+        q = tr[idx] ## i64
+        w = q
+        w = 0 - q if q < 0
+        if sn[w] != 0
+          sn[w] = 0
+          r = rsn[w] ## i64
+          if r < 0
+            lev[lvl[w]] = stamp
+          else
+            rx = cm[r << 1] ## i64
+            rl = cm[(r << 1) + 1] ## i64
+            k = 0
+            while k < rl
+              x = ar[rx + k]
+              u = x
+              u = 0 - x if x < 0
+              sn[u] = 1 if u != w && lvl[u] > 0
+              k += 1
+        idx -= 1
+      t = 1 ## i64
+      while t <= dl
+        if lev[t] == stamp
+          d = tr[tlim[t - 1]] ## i64
+          out[kept] = 0 - d
+          kept += 1
+        t += 1
+      if status == 2
+        out[kept] = hit
+        kept += 1
+    else
+      # a true literal with no reason clause: only a clause holding both a
+      # literal and its negation gets here; leave it alone
+      kept = n
+  elsif status == 1
+    t = 1 ## i64
+    while t <= dl
+      d = tr[tlim[t - 1]] ## i64
+      out[kept] = 0 - d
+      kept += 1
+      t += 1
+  else
+    kept = n
+  vs[0] = dl
+  vs[1] = kept
+  vs[2] = other
+  status
+
+# Decide and propagate, repeatedly, without returning to the search loop
+# for each decision. `rs`: [0] decision level (in/out)  [1] 1 = EVSIDS heap,
+# 0 = VMTF queue  [2] 1 = target phases apply  [3] best trail size so far
+# [4] decision limit  [5] decisions made (out). `st` is the propagation
+# state of wassat_propagate. Returns 0 at the limit, 1 when no variable is
+# left (a model), 2 on a conflict (in st[2]), 3 when the watch pool needs a
+# repack (the caller's next propagate does it), 4 when the conflict-free
+# trail is deeper than the best one.
+-> wassat_search_run(ar, asg, lasg, lvl, rsn, phs, bph, wd, wp, wst, tr, tlim, st, bd, blp, heap, hpos, act, hst, vqn, vqs, vst, rs) (i64[] i8[] i8[] i64[] i32[] i8[] i8[] i64[] i64[] i64[] i32[] i32[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
+  dl = rs[0]
+  limit = rs[4]
+  made = 0 ## i64
+  status = 0 ## i64
+  while status == 0 && made < limit
+    v = 0 ## i64
+    if rs[1] == 1
+      v = wassat_heap_pick(asg, heap, hpos, act, hst)
+    else
+      v = wassat_vmtf_pick(asg, vqn, vqs, vst)
+    if v == 0
+      status = 1
+    else
+      ts = st[1]
+      tlim[dl] = ts
+      dl += 1
+      pol = phs[v] ## i64
+      if rs[2] == 1
+        tp = bph[v] ## i64
+        pol = tp if tp != 0
+      l = v
+      if pol > 0
+        pol = 1
+      else
+        pol = 0 - 1
+        l = 0 - v
+      asg[v] = pol
+      lasg[v << 1] = pol
+      lasg[(v << 1) + 1] = 0 - pol
+      lvl[v] = dl
+      rsn[v] = 0 - 1
+      phs[v] = pol
+      tr[ts] = l
+      st[1] = ts + 1
+      st[2] = 0 - 1
+      st[3] = 0
+      made += 1
+      z = wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp)
+      if st[3] == 1
+        status = 3
+      elsif st[2] >= 0
+        status = 2
+      elsif st[1] > rs[3]
+        status = 4
+  rs[0] = dl
+  rs[5] = made
+  status
+
+# Deepest prefix of decisions that still outrank `a` under `key`: the level a
+# restart can stop at. The Kissat schedule restarts every few conflicts, so
+# this runs about as often as conflict analysis does.
+-> wassat_reuse_trail_level(tr, tlim, key, dl, a) (i32[] i32[] i64[] i64 i64) i64
+  t = 0 ## i64
+  while t < dl
+    l = tr[tlim[t]] ## i64
+    v = l
+    v = 0 - l if l < 0
+    return t if key[v] < a
+    t += 1
+  t
+
+# Bias-corrected exponential moving averages for the Kissat restart
+# schedule. The running (biased) values carry 32 fractional bits, because
+# the slow window divides every step by 100,000 and anything coarser stops
+# moving once it is within a glue unit of its target; the corrected values
+# the tests read carry 16. `kst` layout:
+#   [0] fast glue (biased)   [1] slow glue (biased)
+#   [2] fast beta^t          [3] slow beta^t          (both scaled 2^40)
+#   [4] fast glue (corrected)[5] slow glue (corrected)
+#   [6] conflict count the next focused restart must wait for
+#   [8] decisions per conflict (biased) [9] its beta^t [10] corrected
+#   [11] decision count at the previous conflict
+#   [12] reason-side bumping: conflicts still to skip  [13] current delay
+#   [14] mode switches so far
+# A plain EMA started at zero reads low for about a window; the slow one has
+# a window of 100,000 conflicts, so uncorrected it sits far below the fast
+# one for most of a short search and the ratio test means nothing.
+-> wassat_kema_step(kst, slot, eslot, vslot, y, window) (i64[] i64 i64 i64 i64 i64) i64
+  b = kst[slot]
+  b = b + (y - b) / window
+  kst[slot] = b
+  e = kst[eslot]
+  e = e - e / window
+  kst[eslot] = e
+  d = (1099511627776 - e) >> 16 ## i64
+  d = 1 if d < 1
+  kst[vslot] = ((b >> 8) << 16) / d
+  0
+
+-> wassat_kema_init(kst) (i64[]) i64
+  kst[2] = 1099511627776
+  kst[3] = 1099511627776
+  kst[9] = 1099511627776
+  0
+
+-> wassat_kema_conflict(kst, lbd, decisions, focused) (i64[] i64 i64 i64) i64
+  if focused == 1
+    g = lbd ## i64
+    g = 32767 if g > 32767
+    z = wassat_kema_step(kst, 0, 2, 4, g << 32, 33)
+    z = wassat_kema_step(kst, 1, 3, 5, g << 32, 100000)
+  dd = decisions - kst[11] ## i64
+  kst[11] = decisions
+  dd = 32767 if dd > 32767
+  z = wassat_kema_step(kst, 8, 9, 10, dd << 32, 100000)
+  0
+
+# Focused restart: the fast glue average is at least 10% above the slow one,
+# and the per-restart conflict interval has passed.
+-> wassat_krestart_hot(kst, conflicts) (i64[] i64) i64
+  return 0 if conflicts < kst[6]
+  return 0 if kst[4] * 10 < kst[5] * 11
+  1
+
+# Conflicts before the next focused restart may fire: 1, growing with the
+# decimal logarithm of the restart count (2 from 91 restarts, 3 from 991...).
+-> wassat_krestart_delay(restarts) (i64) i64
+  d = 1 ## i64
+  lim = 91 ## i64
+  while restarts >= lim && d < 12
+    d += 1
+    lim = lim * 10 + 81
+  d
+
+# 1000 * n * log10(n + 9)^4: the length in conflicts of the n-th focused
+# phase and of the n-th stable phase.
+-> wassat_kmode_interval(n) (i64) i64
+  x = n + 9 ## i64
+  # log2(x) in 16-bit fixed point: integer part, then 16 squarings
+  ip = 0 ## i64
+  t = x
+  while t > 1
+    t = t >> 1
+    ip += 1
+  y = (x << 30) >> ip ## i64
+  fr = 0 ## i64
+  i = 0
+  while i < 16
+    y = (y * y) >> 30
+    fr = fr << 1
+    if y >= 2147483648
+      y = y >> 1
+      fr = fr | 1
+    i += 1
+  l2 = (ip << 16) | fr ## i64
+  l10 = (l2 * 19728) >> 16 ## i64
+  sq = (l10 * l10) >> 16 ## i64
+  q4 = (sq * sq) >> 16 ## i64
+  (1000 * n * q4) >> 16
 
 # Sort the occupied top of the shared scratch stack in ascending physical
 # order, so shrinking still visits decision levels from lowest to highest.

@@ -429,10 +429,10 @@ WASSAT_ARM_SLS = 2             # local search, models only
 # exposure denominator the allocator divides reward by — the "one pull is a
 # resource-time quantum" rule, so a fast arm and a slow arm are compared on
 # what they returned per millisecond rather than per invocation.
--> wassat_fast_arm_body_round(solver, res, base, budget, tel, tbase, prop_slice = 0)
+-> wassat_fast_arm_body_round(solver, res, base, budget, tel, tbase, tick_slice = 0)
   t0 = ccall("__w_clock_ms")
-  # A sequential turn ends at the first conflict past this many propagations.
-  solver.set_prop_stop(prop_slice) if prop_slice > 0
+  # A sequential turn ends at the first conflict past this many ticks.
+  solver.set_tick_stop(tick_slice) if tick_slice > 0
   solver.solve_shared_budget(res, base, budget)
   solver.export_telemetry(tel, tbase)
   tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
@@ -2154,7 +2154,10 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     # final slot is still the scout continuation.
     continued = incumbent != nil && a == threads - 1
     specialist = a >= otfs_index && a < otfs_index + otfs_specialists
-    s = continued ? incumbent : Wassat.from_flat(nv, art, 0)
+    # An arm the matrix will put on the Kissat schedule is loaded for it, so
+    # its watch pool is sized for that layout.
+    kraw = !continued && matrix_threads > 1 && ((art["config"].kissat_search_mask >> (specialist ? 1 : a)) & 1) == 1
+    s = continued ? incumbent : (kraw ? Wassat.from_flat_kissat(nv, art) : Wassat.from_flat(nv, art, 0))
     offsets[a] = incumbent_conflicts if continued
     s.enable_otfs if specialist
     # INPROCESSING axis (policy inprocess_arm_mask). Cleared before
@@ -2206,6 +2209,8 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       #   arm 3: reluctant-restart stable-only + target phases
       cfgs[a * WASSAT_CFG_STRIDE + 8] = (art["config"].stable_only_mask >> source) & 1
       cfgs[a * WASSAT_CFG_STRIDE + 9] = (art["config"].focused_only_mask >> source) & 1
+      # KISSAT SCHEDULE axis (policy kissat_search_mask).
+      cfgs[a * WASSAT_CFG_STRIDE + 10] = (art["config"].kissat_search_mask >> source) & 1
       wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE,
                                art["config"].force_simplify?,
                                art["config"].use_vmtf(art["raw"] == true))
@@ -2255,6 +2260,8 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
 #   6 subsume     0 off, 1 subsumption+SSR every 3k conflicts, 2 every 10k
 #   7 trail reuse  0 off, 1 on (policy trail_reuse_mask, set in the build loop)
 #   8 stable-only  0 off, 1 never leave stable mode (policy stable_only_mask)
+#   9 focused-only 0 off, 1 never leave focused mode (policy focused_only_mask)
+#  10 schedule     0 = the Glucose-derived one, 1 = Kissat's (kissat_search_mask)
 #
 # Widened from 8 to 16 when the stable-only axis was added. Every access is
 # relative to `a * WASSAT_CFG_STRIDE`, so the stride is free to grow.
@@ -2370,6 +2377,8 @@ WASSAT_TEL_STRIDE = 8
   s.enable_trail_reuse if cfgs[b + 7] == 1
   s.enable_stable_only if cfgs[b + 8] == 1
   s.enable_focused_only if cfgs[b + 9] == 1
+  # Last: it reads what the two mode axes above decided.
+  s.enable_kissat_search if cfgs[b + 10] == 1
   0
 
 # Register the SLS arm. Occupies the fixed slot threads+2 so it never collides
@@ -2432,7 +2441,7 @@ WASSAT_TEL_STRIDE = 8
 -> wassat_pre_arm_body(pre, formula, nv, res, base, heavy, stop, out, budget,
                        tel, tbase, round, budget_state = nil,
                        budget_limit = 0, budget_slot = 0, pre_sls_allowed = false,
-                       prop_slice = 0)
+                       tick_slice = 0)
   t0 = ccall("__w_clock_ms")
   pnv = formula["nvars"]
   if round > 0
@@ -2441,7 +2450,7 @@ WASSAT_TEL_STRIDE = 8
     return 0 if out.size < 3
     sr = out[2]
     pnv = out[1]["solver_nvars"]
-    sr.set_prop_stop(prop_slice) if prop_slice > 0
+    sr.set_tick_stop(tick_slice) if tick_slice > 0
     sr.solve_shared_budget(res, base, budget)
     wassat_pre_arm_copy_telemetry(res, base, pnv, nv)
     sr.export_telemetry(tel, tbase)
@@ -2450,7 +2459,7 @@ WASSAT_TEL_STRIDE = 8
   pre.set_stop_cell(stop)
   # A sequential turn carries a conflict slice that bounds nothing; it is a
   # continuous race in every sense this rewrite cares about.
-  rewrite_counter = !heavy && (budget == 0 || prop_slice > 0) && budget_limit == 0 && env("WASSAT_COUNTER_REWRITE") != "0"
+  rewrite_counter = !heavy && (budget == 0 || tick_slice > 0) && budget_limit == 0 && env("WASSAT_COUNTER_REWRITE") != "0"
   rewrite_counter = false if env("WASSAT_ARMS") != nil && env("WASSAT_COUNTER_REWRITE") != "1"
   rendered = pre.run_light_flat(formula, rewrite_counter)
   return 0 if rendered == nil
@@ -2473,7 +2482,9 @@ WASSAT_TEL_STRIDE = 8
   # rendering. Across 154 measured races it produced no answer and only added
   # startup/memory pressure, while the early lucky arm already covers the
   # original formula. Go directly from the prepared rendering to useful CDCL.
-  s = Wassat.from_flat(pnv, rendered, 0)
+  kmask = rendered["config"].kissat_search_pre_mask
+  kpre = ((kmask >> (heavy ? 1 : 0)) & 1) == 1
+  s = kpre ? Wassat.from_flat_kissat(pnv, rendered) : Wassat.from_flat(pnv, rendered, 0)
   if heavy
     s.enable_chrono
     s.enable_shrink
@@ -2493,7 +2504,7 @@ WASSAT_TEL_STRIDE = 8
       out.push(projected_meta)
       projected_meta[11] = wassat_pre_sls_extra_bytes(formula) + wassat_sls_arena_bytes(formula)
       projected_handle = Thread.new -> wassat_pre_sls_body(formula, rendered, stop, projected_result, projected_meta)
-  s.set_prop_stop(prop_slice) if prop_slice > 0
+  s.set_tick_stop(tick_slice) if tick_slice > 0
   s.solve_shared_budget(res, base, budget)
   wassat_pre_arm_copy_telemetry(res, base, pnv, nv)
   s.export_telemetry(tel, tbase)
@@ -2845,14 +2856,14 @@ WASSAT_AXIS_SLOTS = 10
   # below take their turn before the first round: the scout stage has already
   # been the cheap first shot at the formula.
   seq = wassat_sequential?
-  seq_props = 0
-  seq_props_cap = wassat_seq_props_cap
+  seq_ticks = 0
+  seq_ticks_cap = wassat_seq_ticks_cap
   if seq
     realloc = 0
-    # A turn is measured in propagations (see wassat_seq_round1_props); the
+    # A turn is measured in ticks (see wassat_seq_round1_ticks); the
     # conflict slice only has to stay out of its way.
     round1 = 1073741824 if round1 == 0
-    seq_props = wassat_seq_round1_props
+    seq_ticks = wassat_seq_round1_ticks
   credit = race["credit"] ## i64[]
   metric = wassat_race_reward_metric
   realloc_every = wassat_race_realloc_every
@@ -2984,8 +2995,8 @@ WASSAT_AXIS_SLOTS = 10
         base = a * (nv + 8)
         tbase = a * WASSAT_TEL_STRIDE
         arm_slice = slice[a]
-        arm_props = seq_props
-        arm_handle = Thread.new -> wassat_fast_arm_body_round(solver, res, base, arm_slice, tel, tbase, arm_props)
+        arm_ticks = seq_ticks
+        arm_handle = Thread.new -> wassat_fast_arm_body_round(solver, res, base, arm_slice, tel, tbase, arm_ticks)
         arm_handle = wassat_seq_turn(arm_handle, stop, 0) if seq
         handles.push(arm_handle)
       a += 1
@@ -3005,11 +3016,15 @@ WASSAT_AXIS_SLOTS = 10
         # Reserve only one extra arena, even if a library caller registers
         # two light renderings instead of the CLI's light/heavy pair.
         pre_sls_allowed = race["pre_sls_allowed"] && p == 0 && budget == 0 && round1 == 0
-        pre_props = seq_props
+        pre_ticks = seq_ticks
+        # One core, so the turns are a schedule rather than a race: the
+        # heavily preprocessed search answers most inputs any arm answers
+        # (see wassat_seq_heavy_weight) and gets that many turns' worth.
+        pre_ticks = seq_ticks * wassat_seq_heavy_weight if seq && heavy
         pre_handle = Thread.new -> wassat_pre_arm_body(
           pp, pformula, nv, res, base, heavy, stop, out, pre_slice, tel,
           tbase, pre_round, conflict_budget, budget, pre_slot, pre_sls_allowed,
-          pre_props
+          pre_ticks
         )
         pre_handle = wassat_seq_turn(pre_handle, stop, 0) if seq
         handles.push(pre_handle)
@@ -3028,7 +3043,19 @@ WASSAT_AXIS_SLOTS = 10
         starget = WASSAT_SLS_REPAIR_PREFIX_FLIPS * (round + 1)
         # The conflict slices double, so the walker's share of a sequential
         # round would otherwise shrink to nothing: double its ceiling too.
-        starget = WASSAT_SLS_REPAIR_PREFIX_FLIPS << (round < 20 ? round : 20) if seq
+        # ... and stop doubling it when they stop (wassat_seq_ticks_cap), or
+        # the walker's turn keeps doubling against CDCL turns that no longer
+        # do. From there its cumulative target grows by a fixed step.
+        if seq
+          flat = 0
+          grown = wassat_seq_round1_ticks
+          while grown < wassat_seq_ticks_cap && flat < 20
+            grown = grown * 2
+            flat += 1
+          if round <= flat
+            starget = WASSAT_SLS_REPAIR_PREFIX_FLIPS << round
+          else
+            starget = (WASSAT_SLS_REPAIR_PREFIX_FLIPS << flat) * (1 + round - flat)
         starget = sflips if starget > sflips || starget < 0
       repair_allowed = race["sls_repair_allowed"] == true
       repair_cap = 0
@@ -3258,8 +3285,8 @@ WASSAT_AXIS_SLOTS = 10
               z = ccall("__w_eprint", "c trace r[round] REALLOC arm[worst] score=[score[worst]] med=[med] -> vmtf=[cfgs[cb]] ph=[cfgs[cb + 1]]/[cfgs[cb + 2]] chrono=[cfgs[cb + 3]] simp=[cfgs[cb + 4]]\n")
     round += 1
     if seq
-      seq_props = seq_props * 2
-      seq_props = seq_props_cap if seq_props > seq_props_cap
+      seq_ticks = seq_ticks * 2
+      seq_ticks = seq_ticks_cap if seq_ticks > seq_ticks_cap
   if circuit_handle != nil
     z = wassat_stop_cancel(stop)
     z = circuit_handle.join

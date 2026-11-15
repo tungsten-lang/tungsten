@@ -162,21 +162,29 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
 # from measured elapsed time (ffcp_adapt_round_steps) rather than from a fixed
 # step count.
 # Sequential mode runs the race's arms one after another, each for the same
-# number of propagated literals. Propagations, not conflicts: arms differ by
-# two orders of magnitude in what a conflict costs (veer_axi: 2,048 conflicts
-# are 60 ms on the raw formula and 11 s on its light rendering), and a
-# conflict slice hands the round to the slowest arm. Not milliseconds either,
-# so the schedule does not depend on machine load. The first slice is short,
-# so an input any arm answers quickly is answered before the others are paid
-# for; each later slice doubles up to the cap, so switching stays rare on a
-# long search.
--> wassat_seq_round1_props
-  return wassat_decimal_in_range("WASSAT_SEQ_ROUND1_PROPS", env("WASSAT_SEQ_ROUND1_PROPS"), 1, 2000000000) if env("WASSAT_SEQ_ROUND1_PROPS") != nil
-  4000000
+# number of ticks (wassat_propagate's work measure: a dequeued literal, eight
+# scanned watch or binary entries, an opened long clause). Not conflicts:
+# arms differ by two orders of magnitude in what a conflict costs (veer_axi:
+# 2,048 conflicts are 60 ms on the raw formula and 11 s on its light
+# rendering), and a conflict slice hands the round to the slowest arm. Not
+# propagated literals, which the first version used: one costs 3 ticks on
+# b21 and 50 on clique_n2_k10. Not milliseconds either, so the schedule does
+# not depend on machine load. The first slice is short, so an input any arm
+# answers quickly is answered before the others are paid for; each later
+# slice doubles up to the cap, so switching stays rare on a long search.
+-> wassat_seq_round1_ticks
+  return wassat_decimal_in_range("WASSAT_SEQ_ROUND1_TICKS", env("WASSAT_SEQ_ROUND1_TICKS"), 1, 2000000000) if env("WASSAT_SEQ_ROUND1_TICKS") != nil
+  16000000
 
--> wassat_seq_props_cap
-  return wassat_decimal_in_range("WASSAT_SEQ_PROPS_CAP", env("WASSAT_SEQ_PROPS_CAP"), 1, 2000000000) if env("WASSAT_SEQ_PROPS_CAP") != nil
-  128000000
+-> wassat_seq_ticks_cap
+  return wassat_decimal_in_range("WASSAT_SEQ_TICKS_CAP", env("WASSAT_SEQ_TICKS_CAP"), 1, 2000000000) if env("WASSAT_SEQ_TICKS_CAP") != nil
+  512000000
+
+# How many turns' worth of ticks the heavily preprocessed arm gets
+# per sequential round. 1 is the plain rotation.
+-> wassat_seq_heavy_weight
+  return wassat_decimal_in_range("WASSAT_SEQ_HEAVY_WEIGHT", env("WASSAT_SEQ_HEAVY_WEIGHT"), 1, 64) if env("WASSAT_SEQ_HEAVY_WEIGHT") != nil
+  3
 
 # Floor, in milliseconds, of the turn a scout-stage side worker gets in
 # sequential mode. Its turn is otherwise as long as the scout itself took,
@@ -715,6 +723,30 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
 
   -> use_vmtf(raw)
     raw
+
+  # Kissat's search schedule (Wassat#enable_kissat_search) in place of the
+  # Glucose-derived one. WASSAT_KSEARCH=0/1 pins it for measurement.
+  -> use_kissat_search
+    return env("WASSAT_KSEARCH") == "1" if env("WASSAT_KSEARCH") != nil
+    false
+
+  # Raw race arms on the Kissat schedule, as a bitmask over the arm index:
+  # arms 1 and 5, two of the three that alternate modes. The focused-only
+  # and stable-only arms (focused_only_mask, stable_only_mask) keep the
+  # older schedule: put on this one, arms 4 and 7 stopped being the first
+  # to a model on 544707209399nc and intel047.
+  -> kissat_search_mask
+    return 0 if env("WASSAT_KSEARCH") == "0"
+    return 65535 if env("WASSAT_KSEARCH") == "1"
+    return wassat_decimal_in_range("WASSAT_KSEARCH_ARMS", env("WASSAT_KSEARCH_ARMS"), 0, 65535) if env("WASSAT_KSEARCH_ARMS") != nil
+    34
+
+  # The preprocessing arms: 1 = light, 2 = heavy, as a bitmask.
+  -> kissat_search_pre_mask
+    return 0 if env("WASSAT_KSEARCH") == "0"
+    return 3 if env("WASSAT_KSEARCH") == "1"
+    return wassat_decimal_in_range("WASSAT_KSEARCH_PRE", env("WASSAT_KSEARCH_PRE"), 0, 3) if env("WASSAT_KSEARCH_PRE") != nil
+    2
 
   -> use_target_phases(raw)
     # ON everywhere since 2026-07-28. The light path used to run without

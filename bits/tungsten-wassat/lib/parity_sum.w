@@ -469,9 +469,9 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return miss if nv < 1 || nv > WASSAT_PARITY_SUM_MAX_VARS || nc < 1 || nc > WASSAT_PARITY_SUM_MAX_CLAUSES
-  fla = formula["flat_lits"]
-  fcs = formula["flat_offs"]
-  fcl = formula["flat_lens"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
   nsmall = 0
   ci = 0
   while ci < nc

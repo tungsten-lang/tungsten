@@ -43,6 +43,16 @@ use ../../tungsten-wrat/lib/wrat
   bin = env("WASSAT_TEST_BIN")
   bin == nil || bin == "" ? "bits/tungsten-wassat/bin/wassat" : bin
 
+# Workers for the sequential-turn examples: one runs until the cell is raised,
+# one answers at once.
+-> cli_seq_spin(cell)
+  while !wassat_stop_requested?(cell)
+    z = 0
+  7
+
+-> cli_seq_answer(cell)
+  wassat_stop_publish(cell, 1)
+
 # SAT Competition exit codes: 10 = SATISFIABLE, 20 = UNSATISFIABLE, 0 =
 # anything else. `system` collapses the wait status to "was it zero", which
 # cannot tell 10 from 20 from a crash, so the expected code is asserted by
@@ -467,5 +477,55 @@ describe "Tungsten Wassat CLI" ->
       out2 = read_file("/tmp/wassat-cli-budget2.out")
       expect(out2.index("s UNKNOWN") != nil).to eq(true)
       expect(out2.index("c conflicts: 3,") == nil).to eq(true)
+
+  # --sequential: the same pipeline with one thread running at a time. The
+  # counting and colouring certificates are switched off so that PHP reaches
+  # the scout stage and the race, which is where the turns are taken.
+  context "sequential mode" ->
+    it "parses --sequential in either position and defaults it off" ->
+      expect(wassat_cli_options(["p.cnf", "--fast"])["sequential"]).to eq(false)
+      expect(wassat_cli_options(["p.cnf", "--fast", "--sequential"])["sequential"]).to eq(true)
+      expect(wassat_cli_options(["--sequential", "--fast", "p.cnf"])["sequential"]).to eq(true)
+      expect(-> () wassat_cli_options(["p.cnf", "--fast", "--sequential", "--sequential"])).to raise_error
+
+    it "gives a waiting worker its window, then re-arms the cell" ->
+      cell = i64[4]
+      h = Thread.new -> cli_seq_spin(cell)
+      h = wassat_seq_turn(h, cell, 20)
+      expect(h.join).to eq(7)
+      expect(wassat_stop_requested?(cell)).to eq(false)
+      expect(wassat_stop_status(cell)).to eq(0)
+
+    it "keeps the cell raised when the worker answered" ->
+      cell = i64[4]
+      h = Thread.new -> cli_seq_answer(cell)
+      h = wassat_seq_turn(h, cell, 5000)
+      expect(wassat_stop_requested?(cell)).to eq(true)
+      expect(wassat_stop_status(cell)).to eq(1)
+
+    it "refutes and satisfies through the scout stage and the race" ->
+      bin = cli_test_bin
+      off = "WASSAT_COLORING=0 WASSAT_COVERING=0 WASSAT_THRESHOLD_COVER=0 WASSAT_RELAY_COUNT=0 "
+      unsat = "/tmp/wassat-cli-seq-unsat.cnf"
+      expect(write_file(unsat, cli_php_cnf(7, 6))).to eq(true)
+      expect(cli_exits(off + bin + " " + unsat + " --fast --sequential > /tmp/wassat-cli-seq-unsat.out 2>&1", 20)).to eq(true)
+      expect(read_file("/tmp/wassat-cli-seq-unsat.out").index("s UNSATISFIABLE") != nil).to eq(true)
+      # the environment switch is the same mode
+      expect(cli_exits(off + "WASSAT_SEQUENTIAL=1 " + bin + " " + unsat + " --fast > /tmp/wassat-cli-seq-env.out 2>&1", 20)).to eq(true)
+
+      sat = "/tmp/wassat-cli-seq-sat.cnf"
+      expect(write_file(sat, cli_php_cnf(6, 6))).to eq(true)
+      expect(cli_exits(off + bin + " " + sat + " --fast --sequential > /tmp/wassat-cli-seq-sat.out 2>&1", 10)).to eq(true)
+      expect(read_file("/tmp/wassat-cli-seq-sat.out").index("s SATISFIABLE") != nil).to eq(true)
+
+    it "honours the aggregate conflict cap" ->
+      bin = cli_test_bin
+      off = "WASSAT_COLORING=0 WASSAT_COVERING=0 WASSAT_THRESHOLD_COVER=0 WASSAT_RELAY_COUNT=0 "
+      cnf = "/tmp/wassat-cli-seq-budget.cnf"
+      expect(write_file(cnf, cli_php_cnf(6, 5))).to eq(true)
+      expect(cli_exits(off + bin + " " + cnf + " --fast --sequential --conflicts 2 > /tmp/wassat-cli-seq-budget.out 2>&1", 0)).to eq(true)
+      out = read_file("/tmp/wassat-cli-seq-budget.out")
+      expect(out.index("s UNKNOWN") != nil).to eq(true)
+      expect(out.index("c conflicts: 3,") == nil).to eq(true)
 
 spec_summary

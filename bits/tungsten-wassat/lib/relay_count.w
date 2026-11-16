@@ -94,9 +94,9 @@ WASSAT_RELAY_BUDGET = 40000000
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return miss if nv < 4 || nv > WASSAT_RELAY_MAX_VARS || nc < 4 || nc > WASSAT_RELAY_MAX_CLAUSES
-  fla = formula["flat_lits"]
-  fcs = formula["flat_offs"]
-  fcl = formula["flat_lens"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
   top = 2 * nv + 4
   # Literals of four-literal clauses, and binary occurrences per literal.
   cnt4 = i64[top]

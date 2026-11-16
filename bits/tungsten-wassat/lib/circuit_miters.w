@@ -293,6 +293,7 @@ use circuit_certificate
       th = Thread.new ->
         wval = i64[nv + 1]
         wassat_klieber_eval_packed(wval, p_masks, program, stage_off, targets, found, p, ntargets, b_lo, b_hi, work, slot)
+      th = wassat_seq_wait(th)
       handles.push(th)
       wi += 1
     wi = 0
@@ -729,6 +730,7 @@ use circuit_certificate
     th = Thread.new ->
       wval = i64[max_eval + 1]
       wassat_satcoin_eval_chunk(wval, p_masks, assign_i64, free_arr, n_free, pos_cnt, clause_off, cl_lit_off, cl_lit_len, cl_lits, sink_arr, n_sinks, max_eval, any_sat, b_lo, b_hi)
+    th = wassat_seq_wait(th)
     handles.push(th)
     wi += 1
   wi = 0
@@ -1680,6 +1682,7 @@ WASSAT_AIG_NO_NODE = 400001
       w2 = i64[n_words]
       sval = i64[nv + 1]
       wassat_word_sort_eval_chunk(w0, w1, w2, sval, batches_w0, batches_w1, batches_w2, batch_valid, op_type, op_dst, op_a, op_b, op_c, n_ops, out_wa, out_wb, n, any_sat, b_lo, b_hi)
+    th = wassat_seq_wait(th)
     handles.push(th)
     wi += 1
   wi = 0
@@ -2163,6 +2166,7 @@ WASSAT_AIG_NO_NODE = 400001
                                   g_op, g_in0, g_in1, g_inva, g_invb, g_invo,
                                   g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits, g_inv_res,
                                   out_var, any_sat, b_lo, b_hi)
+      th = wassat_seq_wait(th)
       handles.push(th)
     else
       th = Thread.new ->
@@ -2173,6 +2177,7 @@ WASSAT_AIG_NO_NODE = 400001
                                   gates, program,
                                   g_cl_off, g_cl_cnt, cl_l_off, cl_l_len, cl_lits,
                                   out_var, any_sat, b_lo, b_hi)
+      th = wassat_seq_wait(th)
       handles.push(th)
     wi += 1
   profile = env("WASSAT_PROFILE") == "1"

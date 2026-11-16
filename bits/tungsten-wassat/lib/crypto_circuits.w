@@ -309,6 +309,7 @@ use circuit_certificate
     th = Thread.new ->
       wval = i64[max_eval + 1]
       wassat_ascon_eval_chunk(wval, p_masks, assign, is_sink, free_arr, n_free, eval_gates, n_gates1, n_gates2, clause_off, cl_lit_off, cl_lit_len, cl_lits, max_eval, any_sat, b_lo, b_hi)
+    th = wassat_seq_wait(th)
     handles.push(th)
     wi += 1
   wi = 0
@@ -641,6 +642,7 @@ use circuit_certificate
                              b_nout, b_gv, b_k, b_tt, b_ins,
                              sink_v, sink_val, n_sinks,
                              found_inp, w_id, n_workers, n_batches)
+    th = wassat_seq_wait(th)
     handles.push(th)
     wi += 1
   wi = 0

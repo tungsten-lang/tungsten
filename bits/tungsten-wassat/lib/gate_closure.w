@@ -801,9 +801,9 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return nil if nv < 8 || nv > WASSAT_GATE_CLOSURE_MAX_VARS || nc < 8 || nc > WASSAT_GATE_CLOSURE_MAX_CLAUSES
-  fla = formula["flat_lits"]
-  fcs = formula["flat_offs"]
-  fcl = formula["flat_lens"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
   nlits = formula["flat_nlits"]
   st = i64[24]
   rep = i64[nv + 4]
@@ -815,9 +815,9 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
 -> wassat_gate_closure_append(formula, rep, st)
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
-  fla = formula["flat_lits"]
-  fcs = formula["flat_offs"]
-  fcl = formula["flat_lens"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
   nlits = formula["flat_nlits"]
   tcon = nv + 1
   # Count, then fill.
@@ -1102,9 +1102,9 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return nil if nv < 8 || nv > WASSAT_GATE_CLOSURE_MAX_VARS || nc < 8 || nc > WASSAT_GATE_CLOSURE_MAX_CLAUSES
-  fla = formula["flat_lits"]
-  fcs = formula["flat_offs"]
-  fcl = formula["flat_lens"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
   nlits = formula["flat_nlits"]
   first = i64[24]
   # Per round: variables merged or constant, units found while rewriting,

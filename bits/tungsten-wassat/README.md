@@ -37,6 +37,27 @@ wassat problem.cnf --drat out.drat
 wassat problem.cnf --proof out.wrat --drat out.drat
 ```
 
+`--sequential` (or `WASSAT_SEQUENTIAL=1`) keeps one thread running at a time,
+so the process uses a single core:
+
+```sh
+wassat problem.cnf --fast --sequential
+```
+
+The pipeline is the same; the waiting moves. The lucky dives and the bounded
+scout run on the main thread. Each scout-stage side worker then gets a turn as
+long as the scout took (at least 200 ms), which is the time it would have had
+beside it. In the race, the structural workers take their turn first, each to
+its own bound; then one raw search, the light and heavy preprocessed
+renderings, and the walker run round-robin. A CDCL turn is a number of ticks
+of propagation work, sixteen million at first and doubling to 512 million, so
+an arm whose conflicts or propagations are expensive cannot hold the round
+and the schedule does not depend on machine load. The heavily preprocessed
+arm gets three turns' worth. The cover-split lane needs concurrent workers and
+is skipped. Workers are still started as threads and waited for one at a
+time, and several stages keep their wall-clock deadlines, so runs are
+single-core but not yet reproducible to the conflict.
+
 `--fast` enables the full trusted engine. Proof modes use only transformations
 whose certificate obligations are implemented. `--conflicts` is a resource
 limit, not a strategy knob: it caps the *aggregate* conflicts across every
@@ -53,6 +74,23 @@ target phases, trial-propagation lookahead, learned-clause vivification, and
 database reduction. Policy selection is deterministic for a formula. Concurrent
 races intentionally sample several search trajectories, however, so the winning
 arm and wall time can vary with scheduling.
+
+Two search schedules exist in the core. The older one restarts on a
+Glucose-style glue test with a trail-size veto, bumps both branching
+heuristics on every conflict and reduces the clause database by glue when
+it passes a size limit. The other follows Kissat (`Wassat#enable_kissat_search`):
+bias-corrected glue averages decide focused restarts every few conflicts,
+stable mode restarts on reluctant doubling, the two alternate in growing
+phases, each mode bumps only the heuristic it decides with (plus
+reason-side literals), reductions come at conflict intervals and keep the
+trail, and inprocessing vivifies clauses with conflict analysis. In a race
+the heavily preprocessed arm and two of the raw arms run the Kissat schedule
+and the rest keep the older one, which reaches a model sooner on several
+satisfiable families. The `--drat` solver, which the Main-track
+entry point runs, uses the Kissat schedule with target phases and
+chronological backtracking. `WASSAT_KSEARCH=0` or `1` forces one schedule
+everywhere; like the other `WASSAT_*` variables it is a measurement hook, not
+a solver mode.
 
 Structural detour probes without monotone chains reuse a packed short-clause
 occurrence index and native assignment scratch. They preserve clause order,
@@ -557,6 +595,16 @@ Hinted search steps record antecedents from the first-UIP conflict cone in
 dependency order. Preprocessing additions carry their own RUP chains.
 Deletions use clause IDs in the hinted stream and literal content in DRAT.
 
+A `--drat` search writes every clause it drops in a database reduction as a
+deletion (except clauses that are still the reason of an assignment), then
+reclaims their arena space, so neither the solver nor the checker carries
+the dead clauses. Lines are formatted into a reusable byte buffer and
+appended to the proof a megabyte at a time through a scratch file beside it
+(`<proof>.chunk`, removed after each append), so the memory a long search
+uses does not grow with the proof. On AProVE07-21 that took the proof from
+1.37M additions with 14.8k deletions (drat-trim: 470 s) to 0.93M additions
+with 0.91M deletions (drat-trim: 15 s), and peak memory from 1.7 GB to 51 MB.
+
 The trimmer validates the entire hinted grammar before pruning:
 
 ```sh
@@ -743,6 +791,31 @@ pass the separately built `tungsten-wrat` checker:
 ```sh
 CASES=300 WASSAT=/path/to/wassat WRAT=/path/to/wrat \
   CADICAL=/path/to/cadical python3 bits/tungsten-wassat/benchmarks/differential.py
+```
+
+The Kissat search profile has its own differential. It forces the profile
+onto every arm, compresses its schedule so that short searches switch modes,
+reduce above the root and vivify many times, and checks the threaded race,
+the sequential pipeline and the DRAT path (proofs through `tungsten-wrat`)
+against CaDiCaL:
+
+```sh
+CASES=60 WASSAT=/path/to/wassat WRAT=/path/to/wrat \
+  python3 bits/tungsten-wassat/benchmarks/kissat_search_test.py
+```
+
+`benchmarks/prop_bench.w` runs one solver on one thread, as written (`raw`)
+or rendered the way the race's preprocessing arms render it (`light`,
+`heavy`), under a conflict, wall-clock or tick limit. A tick is a unit of
+propagation work (one per dequeued literal, one per eight watch or binary
+entries scanned, one per long clause opened), so a tick limit gives the same
+answer on a loaded machine as on an idle one:
+
+```sh
+bin/tungsten compile bits/tungsten-wassat/benchmarks/prop_bench.w \
+  --out /tmp/prop-bench --release --lto --fast
+/tmp/prop-bench problem.cnf 0 0 heavy 600      # 600 million ticks
+WASSAT_KSEARCH=1 /tmp/prop-bench problem.cnf 0 0 heavy 600
 ```
 
 The portable performance corpus is generated locally:

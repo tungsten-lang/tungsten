@@ -1901,6 +1901,15 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     # 59,502 variables there in a 321ms heavy round; three interleaved solves
     # moved the median from 117.32s to 83.62s (all new runs 82.14--84.07s).
     self.run_and2_bve if @status == 0 && self.within_budget
+    # Inputs above 20,000 clauses get two passes, and used to get both at
+    # zero growth. With eight clauses of growth per pivot the heavy arm's
+    # search propagates half as much on b21, takes 23M ticks instead of 99M
+    # on Wallace_Bits_Fast_8, and reaches SC21_Timetable_C_527 inside 600M
+    # ticks; over 56 inputs at that budget it solved 16 at zero growth, 20
+    # at eight and 19 at sixteen. The certificate path keeps zero growth:
+    # not measured there.
+    if @ncl_in > 20000 && @proof_mode == WASSAT_PROOF_NONE && @bve_margin < wassat_pre_big_margin
+      @bve_margin = wassat_pre_big_margin
     passes = 0
     progress = true
     while progress && @status == 0 && self.within_budget && passes < WASSAT_PRE_MAX_PASSES

@@ -1568,6 +1568,8 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
 # Size parallel --sat arms safely against BOTH System.physical_memory_bytes and
 # Tungsten's runtime memory ceiling (default 8.0 GiB TUNGSTEN_MEMORY_LIMIT).
 -> wassat_windmill_arm_count(nv, ncl, extra_arenas)
+  # One arm runs inline on the coordinator, with no thread at all.
+  return 1 if wassat_sequential?
   wanted = System.cpu_count
   wanted = 8 if wanted > 8
   wanted = 1 if wanted < 1

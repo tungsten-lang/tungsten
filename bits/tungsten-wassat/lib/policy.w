@@ -161,6 +161,38 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
 # slowest arm every round. Same reason metaflip's pool sizes its next round
 # from measured elapsed time (ffcp_adapt_round_steps) rather than from a fixed
 # step count.
+# Sequential mode runs the race's arms one after another, each for the same
+# number of ticks (wassat_propagate's work measure: a dequeued literal, eight
+# scanned watch or binary entries, an opened long clause). Not conflicts:
+# arms differ by two orders of magnitude in what a conflict costs (veer_axi:
+# 2,048 conflicts are 60 ms on the raw formula and 11 s on its light
+# rendering), and a conflict slice hands the round to the slowest arm. Not
+# propagated literals, which the first version used: one costs 3 ticks on
+# b21 and 50 on clique_n2_k10. Not milliseconds either, so the schedule does
+# not depend on machine load. The first slice is short, so an input any arm
+# answers quickly is answered before the others are paid for; each later
+# slice doubles up to the cap, so switching stays rare on a long search.
+-> wassat_seq_round1_ticks
+  return wassat_decimal_in_range("WASSAT_SEQ_ROUND1_TICKS", env("WASSAT_SEQ_ROUND1_TICKS"), 1, 2000000000) if env("WASSAT_SEQ_ROUND1_TICKS") != nil
+  16000000
+
+-> wassat_seq_ticks_cap
+  return wassat_decimal_in_range("WASSAT_SEQ_TICKS_CAP", env("WASSAT_SEQ_TICKS_CAP"), 1, 2000000000) if env("WASSAT_SEQ_TICKS_CAP") != nil
+  512000000
+
+# How many turns' worth of ticks the heavily preprocessed arm gets
+# per sequential round. 1 is the plain rotation.
+-> wassat_seq_heavy_weight
+  return wassat_decimal_in_range("WASSAT_SEQ_HEAVY_WEIGHT", env("WASSAT_SEQ_HEAVY_WEIGHT"), 1, 64) if env("WASSAT_SEQ_HEAVY_WEIGHT") != nil
+  3
+
+# Floor, in milliseconds, of the turn a scout-stage side worker gets in
+# sequential mode. Its turn is otherwise as long as the scout itself took,
+# which is the time it would have had beside the scout.
+-> wassat_seq_scout_floor_ms
+  return wassat_decimal_in_range("WASSAT_SEQ_SCOUT_FLOOR_MS", env("WASSAT_SEQ_SCOUT_FLOOR_MS"), 1, 3600000) if env("WASSAT_SEQ_SCOUT_FLOOR_MS") != nil
+  200
+
 -> wassat_race_round_ms
   return wassat_decimal_in_range("WASSAT_ROUND_MS", env("WASSAT_ROUND_MS"), 10, 3600000) if env("WASSAT_ROUND_MS") != nil
   400
@@ -281,6 +313,18 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
 # intake stamp. Retain the older broad estimate above for established gates.
 -> wassat_flat_sls_arena_bytes(formula)
   1048576 + 12 * formula["flat_nlits"] + 48 * formula["flat_ncl"] + 96 * (formula["nvars"] + 4)
+
+# Unit clauses among the first `ncl` clause lengths. Here rather than beside
+# the loader that also calls it, because the arena estimate below needs it
+# and this file has to stand on its own (spec/input_empty_spec.w loads it
+# without the solver).
+-> wassat_flat_unit_count(lens, ncl) (i64[] i64) i64
+  count = 0
+  i = 0
+  while i < ncl
+    count += 1 if lens[i] == 1
+    i += 1
+  count
 
 # A completed propagation-only lucky arm retains its lean loader, not a CDCL
 # learner or inprocessor. Count its actual layout conservatively: 8 bytes per
@@ -483,6 +527,13 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
 -> wassat_pre_heavy_ticks
   return wassat_decimal_in_range("WASSAT_PRE_HEAVY_TICKS", env("WASSAT_PRE_HEAVY_TICKS"), 1, 2000000000) if env("WASSAT_PRE_HEAVY_TICKS") != nil
   64000000
+
+# Resolvent growth allowed per eliminated variable on inputs above 20,000
+# clauses in the heavy rendering (WassatPreprocess#heavy_rounds). Smaller
+# inputs step 0, 4, .. 16 over their passes as before.
+-> wassat_pre_big_margin
+  return wassat_decimal_in_range("WASSAT_PRE_BIG_MARGIN", env("WASSAT_PRE_BIG_MARGIN"), 0, 64) if env("WASSAT_PRE_BIG_MARGIN") != nil
+  8
 
 # Wall-clock stop for each rendering, in milliseconds. A backstop for the
 # tick budgets above, not a replacement: ticks are the reproducible currency
@@ -691,6 +742,54 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
 
   -> use_vmtf(raw)
     raw
+
+  # Kissat's search schedule (Wassat#enable_kissat_search) in place of the
+  # Glucose-derived one. WASSAT_KSEARCH=0/1 pins it for measurement.
+  -> use_kissat_search
+    return env("WASSAT_KSEARCH") == "1" if env("WASSAT_KSEARCH") != nil
+    false
+
+  # Raw race arms on the Kissat schedule, as a bitmask over the arm index:
+  # arms 1 and 5, two of the three that alternate modes. The focused-only
+  # and stable-only arms (focused_only_mask, stable_only_mask) keep the
+  # older schedule: put on this one, arms 4 and 7 stopped being the first
+  # to a model on 544707209399nc and intel047.
+  -> kissat_search_mask
+    return 0 if env("WASSAT_KSEARCH") == "0"
+    return 65535 if env("WASSAT_KSEARCH") == "1"
+    return wassat_decimal_in_range("WASSAT_KSEARCH_ARMS", env("WASSAT_KSEARCH_ARMS"), 0, 65535) if env("WASSAT_KSEARCH_ARMS") != nil
+    34
+
+  # The preprocessing arms: 1 = light, 2 = heavy, as a bitmask.
+  -> kissat_search_pre_mask
+    return 0 if env("WASSAT_KSEARCH") == "0"
+    return 3 if env("WASSAT_KSEARCH") == "1"
+    return wassat_decimal_in_range("WASSAT_KSEARCH_PRE", env("WASSAT_KSEARCH_PRE"), 0, 3) if env("WASSAT_KSEARCH_PRE") != nil
+    2
+
+  # The certificate (DRAT) solver, which the Main-track entry point runs:
+  # Kissat's search schedule, target phases and chronological backtracking
+  # together. It is built from clause lists and takes none of the three from
+  # the flat-load policies above. Over 55 SC2025/SC2026 inputs Kissat solves
+  # within a minute, at 1M conflicts each, the three solved 34 against 25
+  # for the old configuration, in 2,983 CPU-s against 3,730, and more under
+  # every CPU cap from 30 s up (lost: Wallace_Bits_Fast_8, ntil-90d-37,
+  # clique_n2_k10; gained 12). The schedule without chronological
+  # backtracking solved 32. WASSAT_PROOF_KSEARCH, WASSAT_PROOF_TARGET and
+  # WASSAT_PROOF_CHRONO pin them; WASSAT_KSEARCH=0 turns the schedule off
+  # here too.
+  -> use_proof_kissat_search
+    return false if env("WASSAT_KSEARCH") == "0"
+    return env("WASSAT_PROOF_KSEARCH") == "1" if env("WASSAT_PROOF_KSEARCH") != nil
+    true
+
+  -> use_proof_target_phases
+    return env("WASSAT_PROOF_TARGET") == "1" if env("WASSAT_PROOF_TARGET") != nil
+    true
+
+  -> use_proof_chrono
+    return env("WASSAT_PROOF_CHRONO") == "1" if env("WASSAT_PROOF_CHRONO") != nil
+    true
 
   -> use_target_phases(raw)
     # ON everywhere since 2026-07-28. The light path used to run without
@@ -1131,6 +1230,10 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # the principled rule is total race width (raw + preprocessing arms)
     # against that number.
     return env("WASSAT_ARMS").to_i if env("WASSAT_ARMS") != nil
+    # One core: one raw search. Diversity across raw configurations is bought
+    # with cores this mode does not have; the preprocessed renderings stay,
+    # because they solve a different formula.
+    return 1 if wassat_sequential?
     # Fill no more than the cores left after the two representation arms,
     # capped at the breadth-set winner (four). This preserves four raw + two
     # preprocessed arms on the development host, but does not oversubscribe a

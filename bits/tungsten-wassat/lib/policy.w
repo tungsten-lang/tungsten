@@ -767,16 +767,29 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     return wassat_decimal_in_range("WASSAT_KSEARCH_PRE", env("WASSAT_KSEARCH_PRE"), 0, 3) if env("WASSAT_KSEARCH_PRE") != nil
     2
 
-  # The certificate (DRAT) solver is built from clause lists and takes
-  # neither of these from use_target_phases / use_chronological_backtracking.
-  # WASSAT_PROOF_TARGET and WASSAT_PROOF_CHRONO pin them for measurement.
+  # The certificate (DRAT) solver, which the Main-track entry point runs:
+  # Kissat's search schedule, target phases and chronological backtracking
+  # together. It is built from clause lists and takes none of the three from
+  # the flat-load policies above. Over 55 SC2025/SC2026 inputs Kissat solves
+  # within a minute, at 1M conflicts each, the three solved 34 against 25
+  # for the old configuration, in 2,983 CPU-s against 3,730, and more under
+  # every CPU cap from 30 s up (lost: Wallace_Bits_Fast_8, ntil-90d-37,
+  # clique_n2_k10; gained 12). The schedule without chronological
+  # backtracking solved 32. WASSAT_PROOF_KSEARCH, WASSAT_PROOF_TARGET and
+  # WASSAT_PROOF_CHRONO pin them; WASSAT_KSEARCH=0 turns the schedule off
+  # here too.
+  -> use_proof_kissat_search
+    return false if env("WASSAT_KSEARCH") == "0"
+    return env("WASSAT_PROOF_KSEARCH") == "1" if env("WASSAT_PROOF_KSEARCH") != nil
+    true
+
   -> use_proof_target_phases
     return env("WASSAT_PROOF_TARGET") == "1" if env("WASSAT_PROOF_TARGET") != nil
-    false
+    true
 
   -> use_proof_chrono
     return env("WASSAT_PROOF_CHRONO") == "1" if env("WASSAT_PROOF_CHRONO") != nil
-    false
+    true
 
   -> use_target_phases(raw)
     # ON everywhere since 2026-07-28. The light path used to run without

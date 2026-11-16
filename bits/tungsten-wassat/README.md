@@ -86,7 +86,9 @@ reason-side literals), reductions come at conflict intervals and keep the
 trail, and inprocessing vivifies clauses with conflict analysis. In a race
 the heavily preprocessed arm and two of the raw arms run the Kissat schedule
 and the rest keep the older one, which reaches a model sooner on several
-satisfiable families. `WASSAT_KSEARCH=0` or `1` forces one schedule
+satisfiable families. The `--drat` solver, which the Main-track
+entry point runs, uses the Kissat schedule with target phases and
+chronological backtracking. `WASSAT_KSEARCH=0` or `1` forces one schedule
 everywhere; like the other `WASSAT_*` variables it is a measurement hook, not
 a solver mode.
 

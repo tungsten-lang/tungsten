@@ -36,7 +36,7 @@ compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_a.w stor
 rg -q 'library WIRE cache: miss .*disk stored' "$TMP/store.log"
 TUNGSTEN_GRAPH_MMAP=1 \
   compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_a.w hit
-rg -q 'library WIRE cache: hit .+ \([0-9]+ functions, 3 files\)' "$TMP/hit.log"
+rg -q 'library WIRE cache: hit .+ \([0-9]+ functions, 6 files\)' "$TMP/hit.log"
 TUNGSTEN_GRAPH_MMAP=0 \
   compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_a.w fread-hit
 
@@ -66,7 +66,7 @@ TUNGSTEN_LIBRARY_REACHABILITY=0 \
   compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_lexer.w lexer-reach-off
 TUNGSTEN_LIBRARY_REACHABILITY=1 \
   compile_ll "$TMP/cache" compiler/test/fixtures/library_wire_cache/entry_lexer.w lexer-reach-on
-rg -q 'core reachability: .*; library [1-9][0-9]*/111 kept \([0-9][0-9]* pruned\)' \
+rg -q 'core reachability: .*; library [1-9][0-9]*/121 kept \([0-9][0-9]* pruned\)' \
   "$TMP/lexer-reach-on.log"
 TUNGSTEN_LIBRARY_REACHABILITY=0 \
   "$TUNGSTEN" compile compiler/test/fixtures/library_wire_cache/entry_lexer.w \

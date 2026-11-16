@@ -7,6 +7,9 @@
     # slots as numeric i64[] boxes the negative 0xFFFC... word as a BigInt.
     set_lexchars(@source.lchs("tungsten"))
     @char_count = @chars.size()
+    @ascii_only = @source.size() == @char_count
+    @byte_at = nil
+    @byte_valid = false
     @pos = 0
     @line = 1
     @col = 1

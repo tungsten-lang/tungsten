@@ -116,9 +116,19 @@
                 vm.stack[vm.sp++] = w_ast_analysis_set(receiver, args[0]);
                 CNEXT();
               } else if (name_len > 1 && name[name_len - 1] == '=') {
-                const char *interned = tc_intern(name, name_len - 1);
-                if (interned) {
-                  TcValue field_sym = tc_box_symbol_bytes(interned, name_len - 1, 0);
+                TcChunk *mchunk = (TcChunk *)chunk;
+                if (!mchunk->setter_sym_for_const) {
+                  mchunk->setter_sym_for_const = (TcValue *)calloc(chunk->const_count, sizeof(TcValue));
+                }
+                TcValue field_sym = mchunk->setter_sym_for_const ? mchunk->setter_sym_for_const[name_id] : 0;
+                if (field_sym == 0) {
+                  const char *interned = tc_intern(name, name_len - 1);
+                  if (interned) {
+                    field_sym = tc_box_symbol_bytes(interned, name_len - 1, 0);
+                    if (mchunk->setter_sym_for_const) mchunk->setter_sym_for_const[name_id] = field_sym;
+                  }
+                }
+                if (field_sym != 0) {
                   vm.stack[vm.sp++] = tc_packed_node_set(receiver, field_sym, args[0]);
                   CNEXT();
                 }
@@ -145,10 +155,20 @@
                 vm.stack[vm.sp++] = out;
                 CNEXT();
               } else if (argc == 1 && name_len > 1 && name[name_len - 1] == '=') {
-                size_t field_len = name_len - 1;
-                const char *interned = tc_intern(name, field_len);
-                if (interned) {
-                  TcValue key_v = tc_box_symbol_bytes(interned, field_len, 0);
+                TcChunk *mchunk = (TcChunk *)chunk;
+                if (!mchunk->setter_sym_for_const) {
+                  mchunk->setter_sym_for_const = (TcValue *)calloc(chunk->const_count, sizeof(TcValue));
+                }
+                TcValue key_v = mchunk->setter_sym_for_const ? mchunk->setter_sym_for_const[name_id] : 0;
+                if (key_v == 0) {
+                  size_t field_len = name_len - 1;
+                  const char *interned = tc_intern(name, field_len);
+                  if (interned) {
+                    key_v = tc_box_symbol_bytes(interned, field_len, 0);
+                    if (mchunk->setter_sym_for_const) mchunk->setter_sym_for_const[name_id] = key_v;
+                  }
+                }
+                if (key_v != 0) {
                   TcValue set_val = args[0];
                   if (!hash_set_value(h, key_v, set_val, err)) goto cleanup_fail;
                   vm.stack[vm.sp++] = set_val;
@@ -1297,6 +1317,32 @@
         }
         if (!has_receiver && name_len > 4 && memcmp(name + name_len - 4, ".new", 4) == 0) {
           size_t class_len = name_len - 4;
+          if (class_len == 5 && memcmp(name, "Array", 5) == 0 && argc <= 2) {
+            int64_t n = 0;
+            if (argc >= 1) {
+              if (!value_is_int(args[0])) {
+                tc_error_set(err, "Array.new size must be integer");
+                FREE_ARGS();
+                goto cleanup_fail;
+              }
+              n = value_as_int(args[0]);
+              if (n < 0) n = 0;
+            }
+            TcValue fill = (argc >= 2) ? args[1] : tc_box_nil();
+            TcRuntimeArray *array = runtime_array_new((size_t)n, err);
+            FREE_ARGS();
+            if (!array) {
+              goto cleanup_fail;
+            }
+            for (size_t i = 0; i < (size_t)n; i++) {
+              array->slots[i] = fill;
+            }
+            if (!push(&vm, tc_box_array(array), err)) {
+              runtime_array_free(array);
+              goto cleanup_fail;
+            }
+            CNEXT();
+          }
           // Slab role: skip the auto-allocated TcRuntimeObject. The
           // body's return value (e.g. a W_PACKED_NODE from
           // slab_alloc_init) becomes the result. Lets compiler's slab

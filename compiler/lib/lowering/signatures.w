@@ -102,17 +102,45 @@
     lowering_infer_maps[:typed_fn_return_names][node.name] = true
   typed_call_signature_key(node.name, node.param_types)
 
+-> rebuild_known_fn_defs_by_name(mod)
+  known = mod[:known_fn_defs]
+  by_name = {}
+  keys = known.keys()
+  i = 0
+  while i < keys.size()
+    key = keys[i]
+    definition = known[key]
+    if definition != nil && definition.name != nil && definition.param_types != nil
+      bucket = by_name[definition.name]
+      if bucket == nil
+        bucket = []
+        by_name[definition.name] = bucket
+      bucket.push([key, definition])
+    i += 1
+  mod[:known_fn_defs_by_name] = by_name
+  mod[:known_fn_defs_by_name_count] = known.size()
+  by_name
+
 # A typed free function's physical signature includes trailing defaults. Match
 # a shorter source call against the provided prefix, then let its entry guards
 # supply missing arguments before unboxing.
 -> typed_default_call_key(mod, name, arg_types)
+  known = mod[:known_fn_defs]
+  if known == nil || known.size() == 0
+    return nil
+  by_name = mod[:known_fn_defs_by_name]
+  if by_name == nil || mod[:known_fn_defs_by_name_count] != known.size()
+    by_name = rebuild_known_fn_defs_by_name(mod)
+  bucket = by_name[name]
+  if bucket == nil
+    return nil
   found = nil
-  keys = mod[:known_fn_defs].keys()
   i = 0
-  while i < keys.size()
-    key = keys[i]
-    definition = mod[:known_fn_defs][key]
-    if definition != nil && definition.name == name && definition.param_types != nil && arg_types.size() < definition.params.size()
+  while i < bucket.size()
+    entry = bucket[i]
+    key = entry[0]
+    definition = entry[1]
+    if arg_types.size() < definition.params.size()
       matches = true
       j = 0
       while j < definition.params.size()

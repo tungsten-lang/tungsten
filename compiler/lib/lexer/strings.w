@@ -651,7 +651,6 @@
 
     packed_tokens = @packed_tokens
     values = @values
-    chars = @chars
     i = 0
     while i < count
       # Every field lives in bits 0-45, so descriptors remain inline Ints
@@ -663,11 +662,7 @@
         if off >= @sup_skip_to
           @current_packed_tok = bits
           packed_tokens.push(bits)
-          len = (bits >> 26) & 0xFFF
-          if len == 1
-            values.push(chars[off])
-          else
-            values.push(slice_chars(off, len))
+          values.push(nil)
           @token_count += 1
       elsif type_id == 8
         off = (bits >> 2) & 0xFFFFFF
@@ -715,15 +710,41 @@
     i = 0 ## i64
     if @lc != nil
       lc = @lc ## i64[]
-      while i < n
-        line_at[i] = line
-        col_at[i] = col
-        if ((lc[i] >> 18) & 0x1FFFFF) == 10
-          line += 1
-          col = 1
-        else
-          col += 1
-        i += 1
+      if @ascii_only
+        while i < n
+          line_at[i] = line
+          col_at[i] = col
+          if ((lc[i] >> 18) & 0x1FFFFF) == 10
+            line += 1
+            col = 1
+          else
+            col += 1
+          i += 1
+      else
+        byte_at = w64[n + 1]
+        byte_off = 0 ## i64
+        while i < n
+          line_at[i] = line
+          col_at[i] = col
+          byte_at[i] = byte_off
+          cp = (lc[i] >> 18) & 0x1FFFFF
+          if cp == 10
+            line += 1
+            col = 1
+          else
+            col += 1
+          if cp < 0x80
+            byte_off += 1
+          elsif cp < 0x800
+            byte_off += 2
+          elsif cp < 0x10000
+            byte_off += 3
+          else
+            byte_off += 4
+          i += 1
+        byte_at[n] = byte_off
+        @byte_at = byte_at
+        @byte_valid = byte_off == @source.size()
     else
       while i < n
         line_at[i] = line
@@ -754,17 +775,24 @@
   -> slice_chars(off, len)
     if len <= 0
       return ""
-    chars = @chars
     n = @char_count
-    if len == 1 && off < n
+    if off >= n
+      return ""
+    chars = @chars
+    if len == 1
       return chars[off]
-    if len == 2 && off + 1 < n
-      return chars[off] + chars[off + 1]
-    out = StringBuffer(len) ## reuse
-    i = off
     limit = off + len
     if limit > n
       limit = n
+    if @ascii_only
+      return @source.slice(off, limit - off)
+    if @byte_valid
+      b0 = @byte_at[off]
+      return @source.slice(b0, @byte_at[limit] - b0)
+    if limit - off == 2
+      return chars[off] + chars[off + 1]
+    out = StringBuffer(limit - off) ## reuse
+    i = off
     while i < limit
       out << chars[i]
       i += 1

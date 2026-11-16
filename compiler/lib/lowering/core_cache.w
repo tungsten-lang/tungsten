@@ -168,14 +168,102 @@ incremental_core_cache_state = {
     value = ""
   core_abi_field(name) + core_abi_field(value)
 
--> incremental_core_cache_prepare(ast, source_manifest, fast_mode, build_defines, math_mode, no_static_slab, release_mode)
+-> auto_closed_world_node_safe?(node, top_level)
+  if node == nil
+    return true
+  if type(node) == "Array"
+    i = 0
+    while i < node.size()
+      if !auto_closed_world_node_safe?(node[i], false)
+        return false
+      i += 1
+    return true
+  if !is_ast_node?(node)
+    return true
+  kind = ast_kind(node)
+  if kind in (:class_def :module_def :trait_def)
+    if !top_level
+      return false
+    body = ast_get(node, :body)
+    if body != nil
+      i = 0
+      while i < body.size()
+        if !auto_closed_world_node_safe?(body[i], true)
+          return false
+        i += 1
+    return true
+  if kind == :on_guard && top_level
+    body = ast_get(node, :body)
+    if body != nil
+      i = 0
+      while i < body.size()
+        if !auto_closed_world_node_safe?(body[i], true)
+          return false
+        i += 1
+    return true
+  if kind in (:fn_def :method_def :gpu_kernel_def)
+    if !top_level
+      return false
+    return auto_closed_world_node_safe?(ast_get(node, :body), false)
+  if kind == :call
+    cname = ast_get(node, :name)
+    if cname in ("eval" "define_method" "class_eval" "module_eval" "instance_eval")
+      return false
+    if ast_get(node, :receiver) == nil && cname in ("ccall" "ccall_nobox" "ccall_rawargs")
+      cargs = ast_get(node, :args)
+      if cargs != nil && cargs.size() > 0 && is_ast_node?(cargs[0]) && ast_kind(cargs[0]) == :string
+        target = ast_get(cargs[0], :value)
+        if target != nil && (target.starts_with?("w_class_add_") || target.starts_with?("w_define_") || target.starts_with?("w_eval"))
+          return false
+  children = ast_children_nested(node)
+  i = 0
+  while i < children.size()
+    if !auto_closed_world_node_safe?(children[i], false)
+      return false
+    i += 1
+  true
+
+-> auto_closed_world_enabled?(ast)
+  if env("TUNGSTEN_AUTO_CLOSED_WORLD") == "0" || ast == nil || ast.expressions == nil
+    return false
+  c_inc = env("TUNGSTEN_C_INCLUDES")
+  if c_inc != nil && c_inc != ""
+    return false
+  expressions = ast.expressions
+  contracts = incremental_core_cache_contracts(expressions)
+  if contracts[:protect] || contracts[:types] || contracts[:methods]
+    return false
+  core_keys = {}
+  has_core = false
+  i = 0
+  while i < expressions.size()
+    node = expressions[i]
+    key = lowering_definition_key(node)
+    if key != nil && definition_from_core?(node)
+      core_keys[key] = true
+      has_core = true
+    i += 1
+  if !has_core
+    return false
+  i = 0
+  while i < expressions.size()
+    node = expressions[i]
+    key = lowering_definition_key(node)
+    if key != nil && !definition_from_core?(node) && core_keys[key] == true
+      return false
+    if !definition_from_core?(node) && !auto_closed_world_node_safe?(node, true)
+      return false
+    i += 1
+  true
+
+-> incremental_core_cache_prepare(ast, source_manifest, fast_mode, build_defines, math_mode, no_static_slab, release_mode, auto_closed_world = false)
   retain_mark = incremental_core_cache_state[:retain_mark]
   disabled = env("TUNGSTEN_CORE_LOWER_CACHE") == "0"
   if disabled || ast == nil || ast.expressions == nil
     return {enabled: false, retain_mark: retain_mark, reason: "disabled or missing AST"}
 
   contracts = incremental_core_cache_contracts(ast.expressions)
-  if contracts[:protect] != true
+  if contracts[:protect] != true && !auto_closed_world
     return {enabled: false, retain_mark: retain_mark, reason: "PROTECT_THE_CORE! is absent"}
 
   rows = incremental_core_cache_manifest_rows(source_manifest)

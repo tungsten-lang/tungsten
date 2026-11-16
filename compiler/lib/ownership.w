@@ -751,7 +751,7 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
     if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       own = func[:ownership]
       insert_frees(func)
-      if loop_rel && (own == nil || (!own[:has_setjmp] && own[:has_store_i64] && own[:has_loop_arith]))
+      if loop_rel && func[:blocks].size() > 1 && (own == nil || (!own[:has_setjmp] && own[:has_store_i64] && own[:has_loop_arith]))
         ignored = loop_carried_releases(func)
       if int_temps == nil
         int_temps = env("TUNGSTEN_INT_TEMP_RELEASE") != "0" && mod[:integer_contract_intact] == true
@@ -2471,7 +2471,7 @@ int_temp_reader_map = init_int_temp_reader_map()
 -> write_only_globals(mod)
   stored = {}
   loaded = {}
-  funcs = mod[:functions]
+  funcs = mod[:content_hash_info_functions] != nil ? mod[:content_hash_info_functions] : mod[:functions]
   fi = 0
   while fi < funcs.size()
     blocks = funcs[fi][:blocks]

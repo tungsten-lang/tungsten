@@ -2,12 +2,13 @@
 # metadata numbering, attribute groups, and final concatenation remain serial;
 # workers only render immutable WIRE functions into private buffers.
 
--> emitter_parallel_job_count(mod, cache_bucket)
+-> emitter_parallel_job_count_for_work(work_count)
   # compile-batch already shards work across processes. Do not multiply each
   # child by another worker team and oversubscribe the host.
-  if cache_bucket != nil || env("TUNGSTEN_BATCH_WORKER_PROCESS") == "1" || env("TUNGSTEN_PARALLEL_FUNCTION_EMIT") == "0" || runtime_identity() != "compiled-runtime"
+  if env("TUNGSTEN_BATCH_WORKER_PROCESS") == "1" || env("TUNGSTEN_PARALLEL_FUNCTION_EMIT") == "0" || runtime_identity() != "compiled-runtime"
     return 1
-  if mod[:functions].size() < 64
+  min_work = env("TUNGSTEN_PARALLEL_FUNCTION_EMIT") == "1" ? 8 : 64
+  if work_count < min_work
     return 1
   requested = 0
   configured = env("TUNGSTEN_EMITTER_JOBS")
@@ -19,11 +20,14 @@
       requested = 8
   if requested < 1
     requested = 1
-  if requested > mod[:functions].size()
-    requested = mod[:functions].size()
+  if requested > work_count
+    requested = work_count
   if requested > 32
     requested = 32
   requested
+
+-> emitter_parallel_job_count(mod, cache_bucket = nil)
+  emitter_parallel_job_count_for_work(mod[:functions].size())
 
 -> emitter_prepare_parallel_metadata(functions, fp_flags, attr_groups = nil, base_attr_text = nil)
   fi = 0
@@ -83,12 +87,12 @@
   while index < functions.size()
     f = functions[index]
     local_ptr_ids = {}
-    texts[index] = emit_function(f, state[:string_wvs], state[:slab_info], local_ptr_ids, state[:frame_pointers], state[:host_fn_attrs], state[:attr_groups], state[:arm64_target], state[:windows_target], state[:preserve_debug_frames])
+    texts[index] = emit_function(f, state[:string_wvs], state[:slab_info], local_ptr_ids, state[:frame_pointers], state[:host_fn_attrs], state[:attr_groups], state[:arm64_target], state[:windows_target], state[:preserve_debug_frames], state[:emit_blockaddress_sites])
     ptr_ids[index] = local_ptr_ids.keys()
     index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
   true
 
--> emitter_render_functions_parallel(functions, string_wvs, slab_info, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, jobs)
+-> emitter_render_functions_parallel(functions, string_wvs, slab_info, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, jobs, emit_blockaddress_sites = false)
   texts = Array.new(functions.size())
   ptr_ids = Array.new(functions.size())
   cursor = ccall("w_atomic_new", u0xFFFA000000000000)
@@ -108,7 +112,8 @@
       attr_groups: attr_groups,
       arm64_target: arm64_target,
       windows_target: windows_target,
-      preserve_debug_frames: preserve_debug_frames
+      preserve_debug_frames: preserve_debug_frames,
+      emit_blockaddress_sites: emit_blockaddress_sites
     }
     workers.push(Thread.new ->
       emitter_parallel_worker(state))

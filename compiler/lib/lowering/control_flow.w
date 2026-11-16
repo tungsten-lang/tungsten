@@ -1095,17 +1095,10 @@
   # Find variables safe to keep unboxed (only compound-assigned ints, no full assigns)
   unboxable = find_unboxable_loop_vars(node.body, node.condition, ctx[:var_types])
   loop_assigned = find_loop_assigned_vars(node.body, node.condition)
-  # Wraparound array indexing (`tab[i & 1023]`) defeats LLVM's loop
-  # vectorizer — it mis-peels the loop ~2.6x slower than its own unroller.
-  # Stamp the latch to opt just this loop out; see loop_masked_array_index?.
-  loop_novec = loop_masked_array_index?(node.body, loop_assigned)
-  # Carry-chain kernels (addcarry/subborrow in the body) get an explicit
-  # `llvm.loop.unroll.count` — LLVM won't unroll them on its own and the carry
-  # flag spills across the back-edge; see loop_has_carry_intrinsic?. Keep the
-  # measured default at 8 while allowing benchmark campaigns to tune or
-  # disable it without rebuilding the compiler.
+  loop_flags = scan_loop_body_flags(node.body, loop_assigned)
+  loop_novec = loop_flags[0]
   loop_unroll_count = 0
-  if loop_has_carry_intrinsic?(node.body)
+  if loop_flags[1]
     loop_unroll_count = carry_chain_unroll_count(ctx, node)
   # Inside a `Math.promote` / `Math.trap` block, suppress loop-var unboxing so
   # accumulators stay boxed WValues: their +/-/* then route through the

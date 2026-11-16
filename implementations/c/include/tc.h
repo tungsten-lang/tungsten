@@ -827,6 +827,7 @@ typedef struct {
   // first AstNode dispatch.
   TcFunction **astnode_fn_cache;
   uint8_t *astnode_fn_state;
+  TcValue *setter_sym_for_const;
   // Compiled class → declared superclass table. Populated by
   // compile_class_definitions; consumed by typed-overload dispatch to
   // walk ancestry chains (see tc_select_overload).

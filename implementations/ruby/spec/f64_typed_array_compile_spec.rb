@@ -57,6 +57,9 @@ RSpec.describe "f64[] compile path" do
       ok = system(
         *clang_args,
         File.join(RUNTIME_DIR, "runtime.c"),
+        File.join(RUNTIME_DIR, "runtime_crypto.c"),
+        File.join(RUNTIME_DIR, "runtime_gmp.c"),
+        File.join(RUNTIME_DIR, "runtime_http.c"),
         File.join(RUNTIME_DIR, "terminal_input.c"),
         event_source,
         File.join(RUNTIME_DIR, "aks.c"),

@@ -547,6 +547,75 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
     precomputed[fi] = local_escs[func[:name]]
   nil
 
+-> escape_tarjan_sccs_bottom_up(n, adj)
+  index_of = Array.new(n)
+  lowlink = Array.new(n)
+  on_stack = Array.new(n)
+  tarjan_stack = []
+  call_v = []
+  call_ei = []
+  next_index = 0
+  sccs = []
+  root = 0
+  while root < n
+    if index_of[root] == nil
+      index_of[root] = next_index
+      lowlink[root] = next_index
+      next_index += 1
+      on_stack[root] = true
+      tarjan_stack.push(root)
+      call_v.push(root)
+      call_ei.push(0)
+      while call_v.size() > 0
+        top = call_v.size() - 1
+        v = call_v[top]
+        ei = call_ei[top]
+        edges = adj[v]
+        n_edges = edges == nil ? 0 : edges.size()
+        if ei < n_edges
+          w = edges[ei]
+          call_ei[top] = ei + 1
+          if index_of[w] == nil
+            index_of[w] = next_index
+            lowlink[w] = next_index
+            next_index += 1
+            on_stack[w] = true
+            tarjan_stack.push(w)
+            call_v.push(w)
+            call_ei.push(0)
+          elsif on_stack[w] == true
+            if index_of[w] < lowlink[v]
+              lowlink[v] = index_of[w]
+        else
+          call_v.pop()
+          call_ei.pop()
+          if lowlink[v] == index_of[v]
+            scc = []
+            popping = true
+            while popping
+              w = tarjan_stack.pop()
+              on_stack[w] = false
+              scc.push(w)
+              if w == v
+                popping = false
+            if scc.size() > 1
+              si = 1
+              while si < scc.size()
+                cur = scc[si]
+                sj = si
+                while sj > 0 && cur < scc[sj - 1]
+                  scc[sj] = scc[sj - 1]
+                  sj -= 1
+                scc[sj] = cur
+                si += 1
+            sccs.push(scc)
+          if call_v.size() > 0
+            parent = call_v[call_v.size() - 1]
+            if lowlink[v] < lowlink[parent]
+              lowlink[parent] = lowlink[v]
+    root += 1
+  sccs
+
 -> escape_parallel_worker(state)
   functions = state[:functions]
   fn_map = state[:fn_map]
@@ -614,62 +683,47 @@ escape_consuming_builtins_map = init_escape_consuming_builtins_map()
       escape_scan_one(fi, functions, fn_map, mod, strings, calls_to, precomputed)
       fi += 1
 
-  processed = []
+  pending_slot = Array.new(n_funcs)
   pending = []
   fi = 0
   while fi < n_funcs
     pre = precomputed[fi]
     if pre != nil
       fn_escs[functions[fi][:name]] = pre
-      processed.push(true)
-    elsif functions[fi][:blocks].size() == 0 || functions[fi][:params] == nil
-      processed.push(true)
-    else
-      processed.push(false)
+    elsif functions[fi][:blocks].size() > 0 && functions[fi][:params] != nil
+      pending_slot[fi] = pending.size()
       pending.push(fi)
     fi += 1
 
-  # Topological sort on remaining non-leaf functions
-  order = []
-  remaining = pending.size()
   n_pending = pending.size()
-  while remaining > 0
-    progress = false
+  if n_pending > 0
+    pending_adj = Array.new(n_pending)
     pi = 0
     while pi < n_pending
       fi = pending[pi]
-      if !processed[fi]
-        edges = calls_to[fi]
-        all_done = true
+      edges = calls_to[fi]
+      sub_edges = nil
+      if edges != nil
         ei = 0
         while ei < edges.size()
-          if !processed[edges[ei]]
-            all_done = false
-            break
+          ps = pending_slot[edges[ei]]
+          if ps != nil
+            if sub_edges == nil
+              sub_edges = []
+            sub_edges.push(ps)
           ei += 1
-        if all_done
-          order.push(fi)
-          processed[fi] = true
-          remaining = remaining - 1
-          progress = true
+      pending_adj[pi] = sub_edges
       pi += 1
-    if !progress
-      # Cycle detected (recursion): process remaining in any order
-      pi = 0
-      while pi < n_pending
-        fi = pending[pi]
-        if !processed[fi]
-          order.push(fi)
-          processed[fi] = true
-          remaining = remaining - 1
-        pi += 1
-
-  # Analyze remaining non-leaf functions in topological order
-  oi = 0
-  while oi < order.size()
-    func = functions[order[oi]]
-    if func[:blocks].size() > 0
-      escape_analyze(func, mod, fn_escs, strings)
-    oi += 1
+    sccs = escape_tarjan_sccs_bottom_up(n_pending, pending_adj)
+    si = 0
+    while si < sccs.size()
+      scc = sccs[si]
+      ci = 0
+      while ci < scc.size()
+        func = functions[pending[scc[ci]]]
+        if func[:blocks].size() > 0
+          escape_analyze(func, mod, fn_escs, strings)
+        ci += 1
+      si += 1
 
   mod[:fn_escs] = fn_escs

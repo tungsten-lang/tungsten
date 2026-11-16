@@ -1458,7 +1458,7 @@ while i < toolchain_keys.size
 
 bootstrap_compiler_clang_opt = env_or_empty("TUNGSTEN_CLANG_OPT")
 if bootstrap_compiler_clang_opt == ""
-  opt_level = release_mode ? "-O3" : "-O1"
+  opt_level = release_mode ? "-O3" : "-O2"
   debug_part = debug_enabled ? " -g" : ""
   fast_part = fast_mode ? " -ffast-math" : ""
   bootstrap_compiler_clang_opt = opt_level + debug_part + fast_part
@@ -2335,7 +2335,7 @@ if !bit_only
         sh_ok("rm -f " + shq(stage1 + ".sidemap"))
       t1 = clock_ms()
       << "    " + GREEN + "REUSED" + RESET + " bootstrap stage1 " + DIM + aligned_ms(t1 - stage1_started) + RESET
-    elsif !force_build && restore_stage(c_stage1_cached, stage1, stage1_ll)
+    elsif (!force_build || stage2_only) && restore_stage(c_stage1_cached, stage1, stage1_ll)
       t1 = clock_ms()
       << "    " + GREEN + "CACHED" + RESET + " stage1 " + DIM + aligned_ms(t1 - stage1_started) + " (" + c_stage1_identity.slice(0, 16) + ")" + RESET
     else
@@ -2343,7 +2343,7 @@ if !bit_only
       # -O0 stage-1 link: the binary is throwaway (only produces stage 2).
       s1_env = env_prefix(s1_keys, s1_vals) + "TUNGSTEN_LL_DIR=" + shq(stage_ll_dir) + " TUNGSTEN_LL_PATH=" + shq(stage1_ll) + " "
       stage1_log = build_scratch_dir + "/stage1.log"
-      stage1_link = release_mode ? "" : " --runtime " + shq(runtime_archive) + " --no-lto"
+      stage1_link = " --runtime " + shq(runtime_archive) + " --no-lto"
       s1_cmd = STAGE_CD + s1_env + shq(c_interp_for_build) + " " + shq(STAGE_ENTRY) + " compile " + shq(STAGE_ENTRY) + " --out " + shq(stage1) + STAGE_FLAGS_CMD + stage1_link + " > " + shq(stage1_log) + " 2>&1"
       if !sh_ok(s1_cmd)
         log = read_file(stage1_log)
@@ -2360,6 +2360,8 @@ if !bit_only
 
     if stage1_only
       t2 = t1
+      << ""
+      install_compiler(stage1, "C VM stage 1", true)
     else
       << ""
       << BOLD + "==> Stage 2: Stage-1 binary compiles tungsten.w" + RESET
@@ -2379,7 +2381,8 @@ if !bit_only
         << "    " + GREEN + "CACHED" + RESET + " stage2 " + DIM + aligned_ms(t2 - stage2_started) + " (" + c_stage2_identity.slice(0, 16) + ")" + RESET
       else
         sh_ok("rm -f " + shq(stage2_ll))
-        s2_env = env_prefix(s2_keys, s2_vals) + "TUNGSTEN_LL_DIR=" + shq(stage_ll_dir) + " TUNGSTEN_LL_PATH=" + shq(stage2_ll) + " "
+        s2_force_env = force_build ? "TUNGSTEN_SHARD_CACHE=0 " : ""
+        s2_env = env_prefix(s2_keys, s2_vals) + s2_force_env + "TUNGSTEN_LL_DIR=" + shq(stage_ll_dir) + " TUNGSTEN_LL_PATH=" + shq(stage2_ll) + " "
         stage2_log = build_scratch_dir + "/stage2.log"
         stage2_link = release_mode ? "" : " --runtime " + shq(runtime_archive) + " --no-lto"
         s2_cmd = STAGE_CD + s2_env + shq(stage1) + " compile " + shq(STAGE_ENTRY) + " --out " + shq(stage2) + STAGE_FLAGS_CMD + stage2_link + " > " + shq(stage2_log) + " 2>&1"
@@ -2812,12 +2815,22 @@ t4 = t_runtime_end
 
 images_built = 0
 image_ids = {}
-if !stage0_only && !bit_only
+if !stage0_only && !stage1_only && !bit_only
   << ""
   << BOLD + "==> Compiler images" + RESET
   image_dir = CHECKOUT_STATE_DIR + "/compiler-images"
   make_dirs(image_dir)
+  # `build-image` always passes `--release --native --no-debug --no-lto`, so do
+  # not leak `-g` from the default compiler stage flags into image links unless
+  # the caller explicitly requested `--debug` or `TUNGSTEN_CLANG_OPT`.
+  image_clang_opt = env_or_empty("TUNGSTEN_CLANG_OPT")
+  if image_clang_opt == ""
+    image_opt_level = release_mode ? "-O3" : "-O2"
+    image_debug_part = debug_requested ? " -g" : ""
+    image_fast_part = fast_mode ? " -ffast-math" : ""
+    image_clang_opt = image_opt_level + image_debug_part + image_fast_part
   image_kinds = ["repl", "metal"]
+  pending_images = []
   ii = 0
   while ii < image_kinds.size
     kind = image_kinds[ii]
@@ -2827,13 +2840,12 @@ if !stage0_only && !bit_only
     image_store = ""
     image_key = ""
     if source_fp != "" && current_compiler_id() != ""
-      image_key = Digest.sha256("compiler-image-v1\n" + kind + "\n" + current_compiler_id() + "\n" + source_fp + "\n" + bootstrap_compiler_clang_opt + "\n" + probe_env_kv + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + runtime_compile_key + "\n" + AMBIENT_TOOLCHAIN + "\n" + tool_identity(runtime_cc) + TUNING_KEY)
+      image_key = Digest.sha256("compiler-image-v1\n" + kind + "\n" + current_compiler_id() + "\n" + source_fp + "\n" + image_clang_opt + "\n" + probe_env_kv + "\n" + env_or_empty("TUNGSTEN_MARCH_ARGS") + "\n" + runtime_compile_key + "\n" + AMBIENT_TOOLCHAIN + "\n" + tool_identity(runtime_cc) + TUNING_KEY)
       image_store = COMPILER_STORE_DIR + "/image-" + kind + "-" + image_key
       image_ids[kind] = image_key
     t_image = clock_ms()
     if image_store != "" && !force_build && executable?(image_store) && optional_cache_complete?(image_store + ".sidemap")
       store_renew([image_store, image_store + ".sidemap", image_store + ".sidemap.missing"])
-      # an entry that vanishes while it is copied (another process's sweep) is a miss: build the image below
       installed = same_file_content?(image_store, image) || atomic_copy(image_store, image)
       if installed
         if !regular_file?(image_store + ".sidemap") || !same_file_content?(image_store + ".sidemap", image + ".sidemap")
@@ -2841,26 +2853,45 @@ if !stage0_only && !bit_only
         << "    " + GREEN + "CACHED" + RESET + "  build/compiler-images/tungsten-" + kind + " " + DIM + ms(clock_ms() - t_image) + " (" + image_key.slice(0, 16) + ")" + RESET
         images_built = images_built + 1
         next
-    image_log = build_scratch_dir + "/image-" + kind + ".log"
-    image_cmd = "cd " + shq(ROOT) + " && TUNGSTEN_ROOT=" + shq(ROOT) + " " + probe_env_prefix + "TUNGSTEN_CLANG_OPT=" + shq(bootstrap_compiler_clang_opt) + " " + shq(COMPILER_BIN) + " build-image " + kind + " > " + shq(image_log) + " 2>&1"
-    if sh_ok(image_cmd)
-      << "    " + GREEN + "built" + RESET + "   build/compiler-images/tungsten-" + kind + " " + DIM + ms(clock_ms() - t_image) + RESET
-      images_built = images_built + 1
-      if image_store != ""
-        if names_this_checkout?(image) || names_this_checkout?(image + ".sidemap")
-          << "    " + DIM + "note" + RESET + "    the " + kind + " image names " + ROOT + " and is not shared through the build store"
-          image_ids[kind] = ""
-        elsif !force_build && executable?(image_store) && optional_cache_complete?(image_store + ".sidemap")
-          # another build published this image while this one compiled it: the first complete entry stays (see
-          # bit_store_publish), and this checkout keeps its own image and sidemap, which belong together
-          store_renew([image_store, image_store + ".sidemap", image_store + ".sidemap.missing"])
-        else
-          # the image, then its sidemap (or the marker that it has none): a reader requires both
-          atomic_copy(image, image_store)
-          publish_optional_file(image + ".sidemap", image_store + ".sidemap")
-    else
-      eputs(RED + "failed to build the " + kind + " compiler image (see " + image_log + ")" + RESET)
-      exit(1)
+    pending_images.push({kind: kind, image: image, image_store: image_store, image_log: build_scratch_dir + "/image-" + kind + ".log"})
+
+  if pending_images.size > 0
+    image_force_env = force_build ? "TUNGSTEN_SHARD_CACHE=0 " : ""
+    image_shard_env = pending_images.size > 1 ? "TUNGSTEN_SHARD_JOBS=8 " : ""
+    image_procs = []
+    image_starts = []
+    pi = 0
+    while pi < pending_images.size
+      item = pending_images[pi]
+      image_cmd = "cd " + shq(ROOT) + " && TUNGSTEN_ROOT=" + shq(ROOT) + " " + probe_env_prefix + image_force_env + image_shard_env + "TUNGSTEN_CLANG_OPT=" + shq(image_clang_opt) + " " + shq(COMPILER_BIN) + " build-image " + item[:kind] + " > " + shq(item[:image_log]) + " 2>&1"
+      sa = ["/bin/sh", "-c", image_cmd]
+      image_starts.push(clock_ms())
+      image_procs.push(Process.spawn(sa))
+      pi = pi + 1
+    pi = 0
+    while pi < pending_images.size
+      item = pending_images[pi]
+      kind = item[:kind]
+      image = item[:image]
+      image_store = item[:image_store]
+      image_log = item[:image_log]
+      status = image_procs[pi].wait
+      if status == 0
+        << "    " + GREEN + "built" + RESET + "   build/compiler-images/tungsten-" + kind + " " + DIM + ms(clock_ms() - image_starts[pi]) + RESET
+        images_built = images_built + 1
+        if image_store != "" && regular_file?(image)
+          if names_this_checkout?(image) || names_this_checkout?(image + ".sidemap")
+            << "    " + DIM + "note" + RESET + "    the " + kind + " image names " + ROOT + " and is not shared through the build store"
+            image_ids[kind] = ""
+          elsif !force_build && executable?(image_store) && optional_cache_complete?(image_store + ".sidemap")
+            store_renew([image_store, image_store + ".sidemap", image_store + ".sidemap.missing"])
+          else
+            atomic_copy(image, image_store)
+            publish_optional_file(image + ".sidemap", image_store + ".sidemap")
+      else
+        eputs(RED + "failed to build the " + kind + " compiler image (see " + image_log + ")" + RESET)
+        exit(1)
+      pi = pi + 1
 
 # ── Bits ────────────────────────────────────────────────────────
 
@@ -3150,7 +3181,7 @@ bit_file_sha_memo = {}
 # Beside the installed bin/<name> goes <name>.deps, the manifest of the store entry it is a copy of, and the copy is
 # given the current time. The launchers (bin/tungsten.w ensure_bit_binary) run bin/<name> without asking this driver as
 # long as no file in the manifest, and not the compiler, is newer than it.
--> bit_install_manifest(store_path, out_bin)
+-> bit_install_manifest(store_path, out_bin, renew_mtime = true)
   # <M> or <M>@<16 hex digits>: the manifest is <M>.deps either way
   base = store_path
   if base.size > 17 && base.slice(base.size - 17, 1) == "@"
@@ -3158,31 +3189,25 @@ bit_file_sha_memo = {}
   # The executable and its sidemap come from one entry: when the store kept another builder's entry, install it.
   if !same_file_content?(store_path, out_bin) && atomic_copy(store_path, out_bin)
     sh_ok("chmod 755 " + shq(out_bin))
+    renew_mtime = true
   if regular_file?(store_path + ".sidemap")
     if !same_file_content?(store_path + ".sidemap", out_bin + ".sidemap")
       atomic_copy(store_path + ".sidemap", out_bin + ".sidemap")
   elsif regular_file?(store_path + ".sidemap.missing")
     sh_ok("rm -f " + shq(out_bin + ".sidemap"))
   if regular_file?(base + ".deps")
-    atomic_copy(base + ".deps", out_bin + ".deps")
+    if !same_file_content?(base + ".deps", out_bin + ".deps")
+      atomic_copy(base + ".deps", out_bin + ".deps")
   else
     sh_ok("rm -f " + shq(out_bin + ".deps"))
-  sh_ok("touch " + shq(out_bin) + " " + shq(out_bin + ".deps") + " 2>/dev/null")
+  if renew_mtime
+    sh_ok("touch " + shq(out_bin) + " " + shq(out_bin + ".deps") + " 2>/dev/null")
 
--> compile_bit(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile)
-  t_bit = clock_ms()
-  bit_name = basename_of(this_bit_root)
+-> bit_compile_command(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile, log_path, extra_env = "")
   includes = bitfile_includes(this_bit_root)
-  # Under this build's own scratch directory: concurrent builds of the same bit in two worktrees must not share a log.
-  log_path = BUILD_SCRATCH_DIR + "/bit-" + bit_name + "-" + basename_of(out_bin) + ".log"
-  # The store holds the result, so the compiler's own incremental copy would be a second one; and it must run the
-  # compile to report what it read.
-  common_env = probe_env_prefix + toolchain_prefix + "TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " TUNGSTEN_INCREMENTAL=0 TUNGSTEN_DEPFILE=" + shq(depfile) + " "
+  common_env = probe_env_prefix + toolchain_prefix + extra_env + "TUNGSTEN_CLANG_OPT=" + shq(bit_clang_opt_arg) + " TUNGSTEN_INCREMENTAL=0 TUNGSTEN_LINK_CACHE=1 TUNGSTEN_DEPFILE=" + shq(depfile) + " "
   sh_ok("rm -f " + shq(depfile))
-  cmd = ""
   if bit_inside_toolchain?(this_bit_root)
-    # A bit of this toolchain is compiled like the compiler itself: from the root, by relative path, TUNGSTEN_ROOT
-    # unset, so the source names it embeds are relative and its bytes are the same in every checkout.
     build_env = common_env + "BIT_HOME=bits "
     if includes.size > 0
       rel_includes = []
@@ -3191,13 +3216,14 @@ bit_file_sha_memo = {}
         rel_includes.push(project_relative_path(includes[ri]))
         ri = ri + 1
       build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(rel_includes.join(":")) + " "
-    cmd = STAGE_CD + build_env + shq(COMPILER_BIN) + " compile " + shq(project_relative_path(entry)) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
-  else
-    build_env = common_env + "TUNGSTEN_ROOT=" + shq(ROOT) + " BIT_HOME=" + shq(ROOT + "/bits") + " "
-    if includes.size > 0
-      build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(includes.join(":")) + " "
-    cmd = "cd " + shq(ROOT) + " && " + build_env + shq(COMPILER_BIN) + " compile " + shq(entry) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
-  ok = sh_ok(cmd)
+    return STAGE_CD + build_env + shq(COMPILER_BIN) + " compile " + shq(project_relative_path(entry)) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
+  build_env = common_env + "TUNGSTEN_ROOT=" + shq(ROOT) + " BIT_HOME=" + shq(ROOT + "/bits") + " "
+  if includes.size > 0
+    build_env = build_env + "TUNGSTEN_C_INCLUDES=" + shq(includes.join(":")) + " "
+  "cd " + shq(ROOT) + " && " + build_env + shq(COMPILER_BIN) + " compile " + shq(entry) + " --out " + shq(out_bin) + flags_to_cmd(compiler_flags_arg) + " > " + shq(log_path) + " 2>&1"
+
+-> finish_bit_compile_result(this_bit_root, out_bin, log_path, ok, t_bit)
+  bit_name = basename_of(this_bit_root)
   if !ok || !regular_file?(out_bin)
     reason = ""
     log = read_file(log_path)
@@ -3215,6 +3241,15 @@ bit_file_sha_memo = {}
   sh_ok("chmod 755 " + shq(out_bin))
   << "    " + GREEN + "built" + RESET + "   " + project_relative_path(out_bin) + " " + DIM + ms(clock_ms() - t_bit) + RESET
   true
+
+-> compile_bit(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile)
+  t_bit = clock_ms()
+  bit_name = basename_of(this_bit_root)
+  log_path = BUILD_SCRATCH_DIR + "/bit-" + bit_name + "-" + basename_of(out_bin) + ".log"
+  extra_env = FORCE_BUILD ? "TUNGSTEN_SHARD_CACHE=0 " : ""
+  cmd = bit_compile_command(this_bit_root, entry, out_bin, bit_clang_opt_arg, compiler_flags_arg, toolchain_prefix, depfile, log_path, extra_env)
+  ok = sh_ok(cmd)
+  finish_bit_compile_result(this_bit_root, out_bin, log_path, ok, t_bit)
 
 # One executable of one bit: "skip" (bin/<name> is already the store entry for these sources), "store" (installed from
 # the store without compiling), "built", or "failed".
@@ -3235,7 +3270,7 @@ bit_file_sha_memo = {}
     hit = bit_store_lookup(dir, bit_path)
     if hit != nil
       if executable?(out_bin) && !symlink?(out_bin) && same_file_content?(hit, out_bin)
-        bit_install_manifest(hit, out_bin)
+        bit_install_manifest(hit, out_bin, false)
         << "    " + DIM + "skip" + RESET + "    " + project_relative_path(out_bin)
         return "skip"
       if atomic_copy(hit, out_bin)
@@ -3444,6 +3479,7 @@ elsif bit_only
 else
   << BOLD + "==> Bits: compiling entry points" + RESET
   bit_dirs = capture("find " + shq(ROOT + "/bits") + " -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort").split("\n")
+  pending_bits = []
   bi = 0
   while bi < bit_dirs.size
     bit_path = bit_dirs[bi].strip
@@ -3453,15 +3489,75 @@ else
       entries = bit_entry_points(bit_path)
       ei = 0
       while ei < entries.size
-        outcome = build_bit_entry(bit_path, entries[ei], toolchain_env_prefix)
+        rec = entries[ei]
         ei = ei + 1
-        if outcome == "skip" || outcome == "store"
-          bits_skipped = bits_skipped + 1
-        elsif outcome == "built"
-          bits_built = bits_built + 1
-        elsif outcome == "failed"
+        entry = bit_path + "/" + rec[:source]
+        out_bin = bit_path + "/bin/" + rec[:name]
+        entry_flags = bit_profile_flags(rec[:profile], PROGRAM_FLAGS, RELEASE_MODE, DEBUG_REQUESTED)
+        entry_flags = bit_debug_flags(entry_flags, rec[:debug], DEBUG_REQUESTED || NO_DEBUG_REQUESTED)
+        entry_flags = bit_native_flags(entry_flags, rec[:native], EXPLICIT_TARGET)
+        entry_clang_opt = bit_profile_clang_opt(rec[:profile], BIT_CLANG_OPT, env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), RELEASE_MODE, DEBUG_REQUESTED, FAST_MODE)
+        entry_clang_opt = bit_cflags_opt(entry_clang_opt, rec[:cflags], rec[:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), RELEASE_MODE, DEBUG_REQUESTED)
+        if !regular_file?(entry)
           bits_skipped = bits_skipped + 1
           bits_failed = bits_failed + 1
+        else
+          key = bit_static_key(bit_path, entry, rec[:name], BIT_RUNTIME_KEY, BIT_LINK_FLAGS, BIT_LINK_LIBS, entry_clang_opt, entry_flags)
+          dir = BIT_STORE_DIR + "/" + basename_of(rec[:name]) + "-" + key
+          make_dirs(dirname_of(out_bin))
+          cached_done = false
+          if !FORCE_BUILD
+            hit = bit_store_lookup(dir, bit_path)
+            if hit != nil
+              if executable?(out_bin) && !symlink?(out_bin) && same_file_content?(hit, out_bin)
+                bit_install_manifest(hit, out_bin, false)
+                << "    " + DIM + "skip" + RESET + "    " + project_relative_path(out_bin)
+                bits_skipped = bits_skipped + 1
+                cached_done = true
+              elsif atomic_copy(hit, out_bin)
+                sh_ok("chmod 755 " + shq(out_bin))
+                bit_install_manifest(hit, out_bin)
+                << "    " + GREEN + "CACHED" + RESET + "  " + project_relative_path(out_bin) + " " + DIM + "(" + key.slice(0, 16) + ")" + RESET
+                bits_skipped = bits_skipped + 1
+                cached_done = true
+          if !cached_done
+            depfile = BUILD_SCRATCH_DIR + "/bit-" + basename_of(bit_path) + "-" + basename_of(rec[:name]) + ".deps"
+            log_path = BUILD_SCRATCH_DIR + "/bit-" + basename_of(bit_path) + "-" + basename_of(out_bin) + ".log"
+            pending_bits.push({bit_path: bit_path, entry: entry, out_bin: out_bin, entry_clang_opt: entry_clang_opt, entry_flags: entry_flags, dir: dir, depfile: depfile, log_path: log_path})
+
+  if pending_bits.size > 0
+    max_bit_jobs = 4
+    if pending_bits.size < max_bit_jobs
+      max_bit_jobs = pending_bits.size
+    bit_extra_env = (FORCE_BUILD ? "TUNGSTEN_SHARD_CACHE=0 " : "") + (max_bit_jobs > 1 ? "TUNGSTEN_SHARD_JOBS=2 " : "")
+    bit_procs = Array.new(pending_bits.size)
+    bit_starts = Array.new(pending_bits.size)
+    next_launch = 0
+    next_retire = 0
+    while next_retire < pending_bits.size
+      while next_launch < pending_bits.size && (next_launch - next_retire) < max_bit_jobs
+        jb = pending_bits[next_launch]
+        bcmd = bit_compile_command(jb[:bit_path], jb[:entry], jb[:out_bin], jb[:entry_clang_opt], jb[:entry_flags], toolchain_env_prefix, jb[:depfile], jb[:log_path], bit_extra_env)
+        bit_starts[next_launch] = clock_ms()
+        bit_procs[next_launch] = Process.spawn(["/bin/sh", "-c", bcmd])
+        next_launch = next_launch + 1
+      rb = pending_bits[next_retire]
+      rstatus = bit_procs[next_retire].wait
+      ok = finish_bit_compile_result(rb[:bit_path], rb[:out_bin], rb[:log_path], rstatus == 0, bit_starts[next_retire])
+      if !ok
+        sh_ok("rm -f " + shq(rb[:depfile]))
+        bits_skipped = bits_skipped + 1
+        bits_failed = bits_failed + 1
+      else
+        stored = bit_store_publish(rb[:dir], rb[:bit_path], rb[:entry], rb[:out_bin], rb[:depfile])
+        sh_ok("rm -f " + shq(rb[:depfile]))
+        if stored == ""
+          sh_ok("rm -f " + shq(rb[:out_bin] + ".deps"))
+          << "    " + DIM + "note" + RESET + "    " + project_relative_path(rb[:out_bin]) + " could not be added to the build store (" + rb[:dir] + ")"
+        else
+          bit_install_manifest(stored, rb[:out_bin])
+        bits_built = bits_built + 1
+      next_retire = next_retire + 1
 
 t6 = clock_ms()
 

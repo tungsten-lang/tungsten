@@ -2601,7 +2601,8 @@ static int ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
         // builds these hashes with symbol-keyed literals like {node: ...},
         // so promote the cstring to an interned symbol value.
         const char *key_bytes = ast->as.hash->items[i].key;
-        size_t key_len = key_bytes ? strlen(key_bytes) : 0;
+        if (!key_bytes) key_bytes = "";
+        size_t key_len = strlen(key_bytes);
         /* `loc_bits` carries a fully tagged W_PACKED_LOCATION bit pattern
          * (FileOffset mode) that parse_ast.c stamped on call/raise nodes.
          * Surface it as `:loc` holding the RAW WValue — TcValue IS WValue,
@@ -2609,17 +2610,20 @@ static int ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
          * ccalls see exactly what a canon-parsed slab node's :loc holds. */
         if (key_len == 8 && memcmp(key_bytes, "loc_bits", 8) == 0 &&
             ast->as.hash->items[i].value.kind == TC_AST_INT) {
-          const char *loc_key = tc_intern("loc", 3);
-          if (!loc_key) {
-            tc_error_set(err, "ast_to_runtime: symbol intern failed");
-            return 0;
+          TcValue loc_key_v = SYM_LOC;
+          if (loc_key_v == W_NIL) {
+            const char *loc_key = tc_intern("loc", 3);
+            if (!loc_key) {
+              tc_error_set(err, "ast_to_runtime: symbol intern failed");
+              return 0;
+            }
+            loc_key_v = tc_box_symbol_bytes(loc_key, 3, 0);
           }
-          TcValue loc_key_v = tc_box_symbol_bytes(loc_key, 3, 0);
           TcValue loc_val = (TcValue)(uint64_t)ast->as.hash->items[i].value.as.integer;
           if (!hash_set_value(h, loc_key_v, loc_val, err)) return 0;
           continue;
         }
-        const char *interned = tc_intern(key_bytes ? key_bytes : "", key_len);
+        const char *interned = tc_intern(key_bytes, key_len);
         if (!interned) {
           tc_error_set(err, "ast_to_runtime: symbol intern failed");
           return 0;

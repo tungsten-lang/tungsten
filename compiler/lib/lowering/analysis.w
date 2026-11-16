@@ -2236,6 +2236,27 @@
   self_calls = mod[:pi_self_calls]
   if self_calls != nil
     skeys = self_calls.keys()
+    param_names_by_fn = {}
+    reassigned_by_fn = {}
+    ski = 0
+    while ski < skeys.size()
+      snm = skeys[ski]
+      def_node = candidates[snm]
+      if def_node != nil && def_node.params != nil
+        param_names = []
+        pi = 0
+        while pi < def_node.params.size()
+          param_names.push(param_runtime_name(def_node.params[pi]))
+          pi += 1
+        param_names_by_fn[snm] = param_names
+        reassigned = find_reassigned_params(def_node.body, param_names)
+        reassigned_set = {}
+        ri = 0
+        while ri < reassigned.size()
+          reassigned_set[reassigned[ri]] = true
+          ri += 1
+        reassigned_by_fn[snm] = reassigned_set
+      ski += 1
     round = 0
     while round < 2
       ski = 0
@@ -2244,18 +2265,9 @@
         ski += 1
         def_node = candidates[snm]
         obs = mod[:observed_param_types][snm]
-        if def_node != nil && def_node.params != nil
-          param_names = []
-          pi = 0
-          while pi < def_node.params.size()
-            param_names.push(param_runtime_name(def_node.params[pi]))
-            pi += 1
-          reassigned = find_reassigned_params(def_node.body, param_names)
-          reassigned_set = {}
-          ri = 0
-          while ri < reassigned.size()
-            reassigned_set[reassigned[ri]] = true
-            ri += 1
+        param_names = param_names_by_fn[snm]
+        if def_node != nil && param_names != nil
+          reassigned_set = reassigned_by_fn[snm]
           inner = {}
           if param_infer_bailed[snm] != true && obs != nil && obs.size() == def_node.params.size()
             pi = 0
@@ -2277,7 +2289,21 @@
             sci += 1
       round += 1
   mod[:pi_self_calls] = nil
-  nil
+  any_seeded = false
+  user_seeded = false
+  obs_map = mod[:observed_param_types]
+  if obs_map != nil && obs_map.size() > 0
+    okeys = obs_map.keys()
+    oi = 0
+    while oi < okeys.size()
+      oname = okeys[oi]
+      if param_infer_bailed[oname] != true
+        any_seeded = true
+        if user_candidates[oname] != nil
+          user_seeded = true
+          break
+      oi += 1
+  {any: any_seeded, user: user_seeded}
 
 -> pi_walk_stmts(stmts, local, candidates, mod, enclosing_fn = nil)
   if stmts == nil
@@ -2674,6 +2700,59 @@
         j += 1
     return false
   false
+
+-> scan_loop_expr_flags(node, assigned, state, check_mask)
+  if node == nil || (state[0] && state[1])
+    return nil
+  case ast_kind(node)
+  when :call
+    nm = node.name
+    nrecv = node.receiver
+    args = node.args
+    if !state[1] && nrecv == nil && (nm == "addcarry" || nm == "subborrow")
+      state[1] = true
+    if check_mask && !state[0] && (nm == "[]" || nm == "[]=")
+      if args != nil && args.size() > 0 && index_masks_loop_var?(args[0], assigned)
+        state[0] = true
+    if nrecv != nil && is_ast_node?(nrecv)
+      scan_loop_expr_flags(nrecv, assigned, state, check_mask)
+    scan_loop_nodes_flags(args, assigned, state, check_mask)
+  when :assign, :compound_assign
+    scan_loop_expr_flags(node.value, assigned, state, check_mask)
+  when :binary_op
+    scan_loop_expr_flags(node.left, assigned, state, check_mask)
+    if !(state[0] && state[1])
+      scan_loop_expr_flags(node.right, assigned, state, check_mask)
+  when :if
+    scan_loop_expr_flags(node.condition, assigned, state, check_mask)
+    scan_loop_nodes_flags(node.then_body, assigned, state, check_mask)
+    scan_loop_nodes_flags(node.else_body, assigned, state, check_mask)
+    ec = node.elsif_clauses
+    if ec != nil
+      n_ec = ec.size()
+      j = 0
+      while j < n_ec && !(state[0] && state[1])
+        clause = ec[j]
+        scan_loop_expr_flags(clause[0], assigned, state, check_mask)
+        scan_loop_nodes_flags(clause[1], assigned, state, check_mask)
+        j += 1
+  nil
+
+-> scan_loop_nodes_flags(nodes, assigned, state, check_mask)
+  if nodes == nil || (state[0] && state[1])
+    return nil
+  n_nodes = nodes.size()
+  i = 0
+  while i < n_nodes && !(state[0] && state[1])
+    scan_loop_expr_flags(nodes[i], assigned, state, check_mask)
+    i += 1
+  nil
+
+-> scan_loop_body_flags(nodes, assigned)
+  state = [false, false]
+  check_mask = assigned != nil && assigned.size() > 0
+  scan_loop_nodes_flags(nodes, assigned, state, check_mask)
+  state
 
 # ── Loop versioning for untyped-array element loops ────────────────────
 # `while i < a.size` / `while i < n` bodies whose array accesses go through

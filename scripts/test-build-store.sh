@@ -65,6 +65,7 @@ make_cache() {
   printf '<< 1\n' >"$dir/run/eval-0123.w"
   # snapshots nobody can attribute
   : >"$dir/linkbin-1.bin"
+  : >"$dir/irshard-v1-1.o"
   : >"$dir/loader-parse-1.twc"
   : >"$dir/loader-parse-1-manifest.twc"
   : >"$dir/core-wire-1-2.twc"
@@ -84,13 +85,13 @@ SHARED="$TMP/shared-store"
 make_cache "$SHARED/compile"
 out="$(clean_env HOME="$TMP/nohome" TUNGSTEN_BUILD_STORE="$SHARED" bash "$STORE_SH" clear-cache /roots/mine)"
 case "$out" in
-  "Cleared 14 cache files ("*) ;;
+  "Cleared 15 cache files ("*) ;;
   *) fail "shared clear-cache reported: $out" ;;
 esac
 c="$SHARED/compile"
 # this root's incremental and run binaries are gone ...
 for gone in irbin-aaaa.manifest irbin-aaaa.bin irbin-aaaa.sidemap run/1111.wc run/1111.wc.id \
-            linkbin-1.bin loader-parse-1.twc loader-parse-1-manifest.twc core-wire-1-2.twc \
+            linkbin-1.bin irshard-v1-1.o loader-parse-1.twc loader-parse-1-manifest.twc core-wire-1-2.twc \
             library-wire-v1-1-2.twc core-render-v1-1-2.twc target-probe-v1-1.twc \
             native-arm-cpu-v1-1.twc loader-ast-1.memo; do
   [ ! -e "$c/$gone" ] || fail "shared clear-cache left $gone"

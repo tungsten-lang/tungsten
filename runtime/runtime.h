@@ -24,13 +24,17 @@
 #define W_STRING_LEN_MASK   UINT32_C(0x7fffffff)
 
 typedef struct WString {
+    /* Lazily cached 64-bit wyhash over data[0..len), cleared whenever
+     * w_heap_string_set_meta writes new length/ASCII metadata. */
+    _Atomic uint64_t cached_hash;
     /* The high bit records that every payload byte is ASCII. The remaining
-     * 31 bits are the byte length, preserving the existing four-byte header. */
+     * 31 bits are the byte length. */
     uint32_t len_flags;
+    _Atomic uint32_t hash_ready;
     char data[];  /* UTF-8 bytes, null-terminated */
 } WString;
 
-_Static_assert(offsetof(WString, data) == 4, "WString payload must follow its 4-byte header");
+_Static_assert(offsetof(WString, data) == 16, "WString payload must follow its 16-byte header");
 
 static inline uint32_t w_heap_string_len(const WString *s) {
     return s->len_flags & W_STRING_LEN_MASK;
@@ -42,6 +46,13 @@ static inline int w_heap_string_ascii_p(const WString *s) {
 
 static inline void w_heap_string_set_meta(WString *s, uint32_t len, int ascii) {
     s->len_flags = len | (ascii ? W_STRING_ASCII_FLAG : 0);
+    atomic_store_explicit(&s->hash_ready, 0, memory_order_relaxed);
+}
+
+static inline void w_heap_string_set_meta_hash(WString *s, uint32_t len, int ascii, uint64_t h) {
+    s->len_flags = len | (ascii ? W_STRING_ASCII_FLAG : 0);
+    atomic_store_explicit(&s->cached_hash, h, memory_order_relaxed);
+    atomic_store_explicit(&s->hash_ready, 1, memory_order_release);
 }
 
 /* Mutable append — declared in runtime.c */
@@ -174,6 +185,7 @@ int64_t w_wire_store_reset(int64_t reserved);
 int64_t w_wire_store_mark(void);
 WValue  w_wire_clone(WValue wire);
 WValue  w_wire_temp_operands(WValue wire);
+WValue  w_wire_apply_subst(WValue inst, WValue subst);
 
 typedef struct WAstSparseRecord {
     int64_t  sym;
@@ -2605,5 +2617,9 @@ static inline int w_is_rope(WValue v) {
 }
 
 WValue w_rope_flatten(WValue v);
+
+int bigint_perfect_square_p_c(WValue a);
+int bigint_jacobi_c(WValue a, WValue n);
+int bigint_kronecker_c(WValue a, WValue b);
 
 #endif /* TUNGSTEN_RUNTIME_H */

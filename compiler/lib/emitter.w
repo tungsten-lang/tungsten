@@ -18,3 +18,4 @@ use emitter/numeric_instructions
 use emitter/runtime_instructions
 use emitter/instructions
 use emitter/parallel
+use emitter/sharded

@@ -20,7 +20,8 @@ loader_parse_cache_state = {
   disk_bypasses: 0,
   # paths of the persistent entries this process restored: the driver renews
   # their mtimes so the store's age sweep keeps what is in use
-  disk_used: []
+  disk_used: [],
+  exe_identity: nil
 }
 
 -> loader_enable_parse_cache
@@ -177,13 +178,24 @@ loader_toolchain_state = {split_checked: false}
       return nil
     if @persistent_parse_cache_identity != nil
       return @persistent_parse_cache_identity
-    exe = ccall("w_executable_path")
-    stat = File.stat(exe)
-    if exe == nil || exe == "" || stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
+    cached = loader_parse_cache_state[:exe_identity]
+    if cached == false
       @persistent_parse_cache_identity = false
       return nil
-    @persistent_parse_cache_identity = [exe, stat.mtime_ns().to_s(), stat.ctime_ns().to_s(), stat.size().to_s()].join("|")
-    @persistent_parse_cache_identity
+    if cached != nil
+      @persistent_parse_cache_identity = cached
+      return cached
+    exe = ccall("w_executable_path")
+    stat = File.stat(exe)
+    digest = exe != nil && exe != "" ? digest_file64(exe) : nil
+    if exe == nil || exe == "" || stat == nil || stat.size() == nil || digest == nil
+      loader_parse_cache_state[:exe_identity] = false
+      @persistent_parse_cache_identity = false
+      return nil
+    identity = ["compiler-bytes-v1", digest.to_s(), stat.size().to_s()].join("|")
+    loader_parse_cache_state[:exe_identity] = identity
+    @persistent_parse_cache_identity = identity
+    identity
 
   -> persistent_parse_cache_key(resolved)
     identity = persistent_parse_compiler_identity()
@@ -694,8 +706,16 @@ loader_toolchain_state = {split_checked: false}
     # a single pass over each expression — the autoload walker was the hottest
     # function in a compile.
     walked = 0
+    defined = {}
+    defined_walked = 0
     while iteration < 64
-      defined = collect_defined_names(expressions)
+      while defined_walked < expressions.size()
+        de = expressions[defined_walked]
+        if ast_kind(de) == :class_def && de.name != nil
+          defined[de.name] = true
+        elsif ast_kind(de) == :trait_def && de.name != nil
+          defined[de.name] = true
+        defined_walked += 1
       pending = collect_unresolved_autoload_names(expressions, walked, defined, registry)
       walked = expressions.size()
       if env("DEBUG_AUTOLOAD") == "1"
@@ -839,7 +859,10 @@ loader_toolchain_state = {split_checked: false}
     # SOUND-by-overapproximation: it returns false ONLY when every array
     # literal is provably used in that inlined-iterator-only shape, and true
     # for anything it can't prove (unknown node, escape, non-safe method).
-    @array_needed = array_class_needed?(exprs)
+    if defined["Array"] == true || @autoload_loaded["Array"] == true || registry["Array"] == nil
+      @array_needed = false
+    else
+      @array_needed = array_class_needed?(exprs)
     # Source-defined Array methods have no runtime fallback, and an Array can
     # enter through argv/a parameter without any literal or class reference.
     # Scan call names only until the first such method schedules Array. Later

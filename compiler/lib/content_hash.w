@@ -18,11 +18,15 @@ use naming
   # Hash, avoiding repeated string hashing in canonical-content walks.
   ccall("w_content_temp_norm", name, temp_map)
 
-canonical_op_tokens = [nil]
-canonical_op_token_i = 1
-while canonical_op_token_i < 280
-  canonical_op_tokens.push("o" + canonical_op_token_i.to_s())
-  canonical_op_token_i += 1
+-> init_canonical_op_tokens()
+  out = [nil]
+  i = 1
+  while i < 280
+    out.push("o" + i.to_s())
+    i += 1
+  out
+
+canonical_op_tokens = init_canonical_op_tokens()
 
 -> canonical_op_code(op, op_codes)
   # Packed WIRE gives every opcode a generated, process-independent ordinal.
@@ -192,11 +196,15 @@ content_hash_codegen_fields = [
   :scalar_source_argc1, :scalar_source_argc2, :shift, :slot, :slot_id, :slot_type, :splat_index,
   :super_reg, :table, :total_bytes, :trap, :type, :unroll_count, :val
 ]
-content_hash_codegen_field_set = {}
-content_hash_codegen_field_i = 0
-while content_hash_codegen_field_i < content_hash_codegen_fields.size()
-  content_hash_codegen_field_set[content_hash_codegen_fields[content_hash_codegen_field_i]] = true
-  content_hash_codegen_field_i += 1
+-> init_content_hash_codegen_field_set(fields)
+  out = {}
+  i = 0
+  while i < fields.size()
+    out[fields[i]] = true
+    i += 1
+  out
+
+content_hash_codegen_field_set = init_content_hash_codegen_field_set(content_hash_codegen_fields)
 
 -> encode_codegen_metadata(inst, buf, temp_map, mod)
   # Constructor fields are stored in lexical schema order. Walk the packed
@@ -305,13 +313,21 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     devirt_fn = wire_get(inst, :devirt_fn)
     if devirt_fn != nil
       buf << "dv:"
-      buf << devirt_fn
+      if devirt_fn == self_name
+        buf << "@R"
+      else
+        dh = fn_hash_get(fn_hashes, devirt_fn)
+        buf << (dh != nil ? dh : devirt_fn)
       buf << ":"
       buf << wire_get(inst, :devirt_class)
     construct_fn = wire_get(inst, :construct_fn)
     if construct_fn != nil
       buf << "ctor:"
-      buf << construct_fn
+      if construct_fn == self_name
+        buf << "@R"
+      else
+        cth = fn_hash_get(fn_hashes, construct_fn)
+        buf << (cth != nil ? cth : construct_fn)
       buf << ":"
       buf << wire_get(inst, :construct_class)
       if wire_get(inst, :construct_recycle) == true
@@ -1498,6 +1514,75 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     i += 1
   nil
 
+-> content_hash_tarjan_sccs_bottom_up(n, adj)
+  index_of = Array.new(n)
+  lowlink = Array.new(n)
+  on_stack = Array.new(n)
+  tarjan_stack = []
+  call_v = []
+  call_ei = []
+  next_index = 0
+  sccs = []
+  root = 0
+  while root < n
+    if index_of[root] == nil
+      index_of[root] = next_index
+      lowlink[root] = next_index
+      next_index += 1
+      on_stack[root] = true
+      tarjan_stack.push(root)
+      call_v.push(root)
+      call_ei.push(0)
+      while call_v.size() > 0
+        top = call_v.size() - 1
+        v = call_v[top]
+        ei = call_ei[top]
+        edges = adj[v]
+        n_edges = edges == nil ? 0 : edges.size()
+        if ei < n_edges
+          w = edges[ei]
+          call_ei[top] = ei + 1
+          if index_of[w] == nil
+            index_of[w] = next_index
+            lowlink[w] = next_index
+            next_index += 1
+            on_stack[w] = true
+            tarjan_stack.push(w)
+            call_v.push(w)
+            call_ei.push(0)
+          elsif on_stack[w] == true
+            if index_of[w] < lowlink[v]
+              lowlink[v] = index_of[w]
+        else
+          call_v.pop()
+          call_ei.pop()
+          if lowlink[v] == index_of[v]
+            scc = []
+            popping = true
+            while popping
+              w = tarjan_stack.pop()
+              on_stack[w] = false
+              scc.push(w)
+              if w == v
+                popping = false
+            if scc.size() > 1
+              si = 1
+              while si < scc.size()
+                cur = scc[si]
+                sj = si
+                while sj > 0 && cur < scc[sj - 1]
+                  scc[sj] = scc[sj - 1]
+                  sj -= 1
+                scc[sj] = cur
+                si += 1
+            sccs.push(scc)
+          if call_v.size() > 0
+            parent = call_v[call_v.size() - 1]
+            if lowlink[v] < lowlink[parent]
+              lowlink[parent] = lowlink[v]
+    root += 1
+  sccs
+
 # Main pass: hash functions without a cached hash, dedup, rewrite references.
 -> content_hash_pass(mod, verbose = false, release_mode = false)
   functions = mod[:functions]
@@ -1539,18 +1624,19 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
     si += 1
   mod[:string_index] = str_idx
 
-  # Build call graph for topo sort
-  fn_set = {}
+  # Build integer-indexed call graph for O(V + E) Tarjan SCC topological sort
+  n_hash = hash_functions.size()
+  fn_idx = {}
   fi = 0
-  while fi < hash_functions.size()
-    fn_set[hash_functions[fi][:name]] = true
+  while fi < n_hash
+    fn_idx[hash_functions[fi][:name]] = fi
     fi += 1
 
-  calls_to = {}
+  adj = Array.new(n_hash)
   fi = 0
-  while fi < hash_functions.size()
+  while fi < n_hash
     func = hash_functions[fi]
-    edges = []
+    edges = nil
     bi = 0
     while bi < func[:blocks].size()
       instrs = func[:blocks][bi][:instructions]
@@ -1558,63 +1644,36 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
       while ii < instrs.size()
         inst = instrs[ii]
         callee = nil
-        if wire_kind(inst) in (:call_direct_i64 :call_direct_void :call_direct_ptr)
+        ikind = wire_kind(inst)
+        if ikind in (:call_direct_i64 :call_direct_void :call_direct_ptr)
           callee = wire_get(inst, :name)
-        elsif wire_kind(inst) == :closure_new
+        elsif ikind == :closure_new
           callee = wire_get(inst, :fn_name)
-        if callee != nil && fn_set[callee] == true && callee != func[:name]
-          edges.push(callee)
+        elsif ikind == :call_method_i64
+          dv_callee = wire_get(inst, :devirt_fn)
+          if dv_callee != nil
+            dv_idx = fn_idx[dv_callee]
+            if dv_idx != nil && dv_idx != fi
+              if edges == nil
+                edges = []
+              edges.push(dv_idx)
+          callee = wire_get(inst, :construct_fn)
+        if callee != nil
+          cidx = fn_idx[callee]
+          if cidx != nil && cidx != fi
+            if edges == nil
+              edges = []
+            edges.push(cidx)
         ii += 1
       bi += 1
-    calls_to[func[:name]] = edges
+    adj[fi] = edges
     fi += 1
 
-  # Topo sort (leaf functions first)
-  processed = {}
-  order = []
-  pending = []
-  fi = 0
-  while fi < hash_functions.size()
-    pending.push(fi)
-    fi += 1
-  while pending.size() > 0
-    progress = false
-    next_pending = []
-    pi = 0
-    while pi < pending.size()
-      fi = pending[pi]
-      fname = hash_functions[fi][:name]
-      edges = calls_to[fname]
-      all_done = true
-      if edges != nil
-        ei = 0
-        while ei < edges.size()
-          if processed[edges[ei]] != true
-            all_done = false
-            break
-          ei += 1
-      if all_done
-        order.push(fi)
-        processed[fname] = true
-        progress = true
-      else
-        next_pending.push(fi)
-      pi += 1
-    if !progress
-      # Cycle: process remaining with __CYCLE__ sentinel
-      pi = 0
-      while pi < next_pending.size()
-        fi = next_pending[pi]
-        order.push(fi)
-        processed[hash_functions[fi][:name]] = true
-        pi += 1
-      pending = []
-    else
-      pending = next_pending
+  sccs = content_hash_tarjan_sccs_bottom_up(n_hash, adj)
 
   # Pre-warm llvm_param_reg cache on the main thread before parallel wave hashing.
   fi = 0
-  while fi < hash_functions.size()
+  while fi < n_hash
     fparams = hash_functions[fi][:params]
     if fparams != nil
       pi = 0
@@ -1623,31 +1682,40 @@ while content_hash_codegen_field_i < content_hash_codegen_fields.size()
         pi += 1
     fi += 1
 
-  # Hash each function in topo order, grouping independent waves for parallel hashing.
+  # Hash each function in bottom-up SCC topological order, grouping independent waves.
   batch = []
-  batch_names = {}
-  oi = 0
-  while oi < order.size()
-    func = hash_functions[order[oi]]
-    # Skip main and empty functions
-    if func[:is_toplevel] != true && func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
-      fname = func[:name]
-      edges = calls_to[fname]
-      depends_on_batch = false
-      if edges != nil
-        ei = 0
-        while ei < edges.size()
-          if batch_names[edges[ei]] == true
-            depends_on_batch = true
-            break
-          ei += 1
-      if depends_on_batch
-        content_hash_flush_batch(batch, mod, fn_hashes, fn_contents, hash_contents, op_codes, release_mode)
-        batch = []
-        batch_names = {}
-      batch.push(func)
-      batch_names[fname] = true
-    oi += 1
+  in_batch = Array.new(n_hash)
+  batch_indices = []
+  si = 0
+  while si < sccs.size()
+    scc = sccs[si]
+    ci = 0
+    while ci < scc.size()
+      fidx = scc[ci]
+      func = hash_functions[fidx]
+      if func[:is_toplevel] != true && func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+        edges = adj[fidx]
+        depends_on_batch = false
+        if edges != nil
+          ei = 0
+          while ei < edges.size()
+            if in_batch[edges[ei]] == true
+              depends_on_batch = true
+              break
+            ei += 1
+        if depends_on_batch
+          content_hash_flush_batch(batch, mod, fn_hashes, fn_contents, hash_contents, op_codes, release_mode)
+          bi = 0
+          while bi < batch_indices.size()
+            in_batch[batch_indices[bi]] = false
+            bi += 1
+          batch = []
+          batch_indices = []
+        batch.push(func)
+        in_batch[fidx] = true
+        batch_indices.push(fidx)
+      ci += 1
+    si += 1
   content_hash_flush_batch(batch, mod, fn_hashes, fn_contents, hash_contents, op_codes, release_mode)
 
   # Group by hash

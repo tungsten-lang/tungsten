@@ -1,10 +1,9 @@
 # Emitter artifact orchestration — module and function rendering.
 
 -> emit_artifact(mod, frame_pointers = false)
-  wire_contract_error = verify_wire_call_contracts(mod)
-  if wire_contract_error != nil
-    << "error: " + wire_contract_error
-    exit(1)
+  emitter_last_artifact_state[:link_features] = nil
+  emitter_last_artifact_state[:shard_plan] = nil
+  emit_blockaddress_sites = mod[:no_static_slab] == true || env("TUNGSTEN_BLOCKADDRESS_CALLSITES") == "1"
 
   # Per-module metadata state MUST reset here: both containers are
   # process-global (top-level rebinding from a function would shadow, so
@@ -44,7 +43,16 @@
   while fi < mod[:functions].size()
     known_fns[mod[:functions][fi][:name]] = true
     fi += 1
-  # Collect all call targets that need declarations, and track used runtime functions
+  # Single fused pre-scan: verify WIRE direct-call contracts, collect foreign
+  # declarations + used runtime functions, collect IC/call-site metadata, and
+  # record `.lchs` inline method dispatches for link-feature gating.
+  wire_contracts = {}
+  collect_sites = mod[:enhanced_stacktraces] != false
+  cs_sites = []
+  cs_files = {}
+  cs_file_list = []
+  saw_lchs_mcall = false
+  lchs_mcall_lit = inline_name_text("lchs")
   ccall_needed = {}
   used_runtime_fns = {}
   max_ascope_slots = 0
@@ -55,6 +63,12 @@
   fi = 0
   while fi < mod[:functions].size()
     wfunc = mod[:functions][fi]
+    wfunc_orig_name = wfunc[:original_name]
+    if wfunc_orig_name == nil
+      wfunc_orig_name = wfunc[:name]
+    wfunc_path = wfunc[:source_path]
+    if wfunc_path == nil
+      wfunc_path = "<unknown>"
     if wfunc[:embedded_ll] != nil
       embedded_ir_text << wfunc[:embedded_ll]
     bi = 0
@@ -68,6 +82,14 @@
         if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop
           ii += 1
           next
+        wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
+        if wire_contract_error != nil
+          << "error: " + wire_contract_error
+          exit(1)
+        if collect_sites
+          record_call_site_for_inst(inst, wfunc[:name], wfunc_path, cs_sites, cs_files, cs_file_list, emit_blockaddress_sites)
+        if op == :call_method_i64 && !saw_lchs_mcall && wire_get(inst, :method_name_val) == lchs_mcall_lit
+          saw_lchs_mcall = true
         if op == :call_direct_i64
           iname = wire_get(inst, :name)
           if iname != nil
@@ -319,34 +341,108 @@
   function_emit_cache_bucket_value = nil
   function_emit_library_cache_bucket_value = nil
   if function_emit_cache_enabled
-    function_emit_cache_bucket_value = function_emit_cache_bucket(mod, frame_pointers, mod[:llvm_fn_attrs], arm64_target, windows_target, mod[:preserve_debug_frames] == true, fp_flags)
-    function_emit_library_cache_bucket_value = function_emit_library_cache_bucket(mod, frame_pointers, mod[:llvm_fn_attrs], arm64_target, windows_target, mod[:preserve_debug_frames] == true, fp_flags)
+    function_emit_cache_bucket_value = function_emit_cache_bucket(mod, frame_pointers, mod[:llvm_fn_attrs], arm64_target, windows_target, mod[:preserve_debug_frames] == true, fp_flags, emit_blockaddress_sites)
+    function_emit_library_cache_bucket_value = function_emit_library_cache_bucket(mod, frame_pointers, mod[:llvm_fn_attrs], arm64_target, windows_target, mod[:preserve_debug_frames] == true, fp_flags, emit_blockaddress_sites)
 
-  # Functions. A cached rendered-Core bucket already removes most work and is
-  # process-global, so it stays on its proven serial path. Otherwise frozen
-  # functions may render on private worker buffers after metadata ids are
-  # assigned deterministically in source order.
-  parallel_function_jobs = emitter_parallel_job_count(mod, function_emit_cache_bucket_value)
-  if parallel_function_jobs > 1
-    base_attr_text = function_attr_text(frame_pointers, mod[:llvm_fn_attrs], mod[:preserve_debug_frames] == true)
-    emitter_prepare_parallel_metadata(mod[:functions], fp_flags, attr_groups, base_attr_text)
-    parallel_rendered = emitter_render_functions_parallel(mod[:functions], mod[:string_wvalues], slab_info, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, parallel_function_jobs)
+  nfns_emit = mod[:functions].size()
+  rendered_fn_texts = Array.new(nfns_emit)
+  base_attr_text = function_attr_text(frame_pointers, mod[:llvm_fn_attrs], mod[:preserve_debug_frames] == true)
+  if function_emit_cache_bucket_value != nil
+    work_fns = []
+    work_indices = []
+    work_buckets = []
     i = 0
-    while i < parallel_rendered[:texts].size()
-      fn_out << parallel_rendered[:texts][i]
-      fn_out << "\n"
-      function_emit_cache_merge_ptr_ids(used_ptr_ids, parallel_rendered[:ptr_ids][i])
+    while i < nfns_emit
+      f_cur = mod[:functions][i]
+      f_cur[:fp_flags] = fp_flags
+      selected_emit_bucket = function_emit_cache_select_bucket(f_cur, function_emit_cache_bucket_value, function_emit_library_cache_bucket_value)
+      if selected_emit_bucket != nil
+        if f_cur[:embedded_ll] == nil && f_cur[:embedded_asm] == nil
+          function_attr_group_id(attr_groups, base_attr_text)
+        cached_entry = selected_emit_bucket[:functions][f_cur[:name]]
+        if cached_entry != nil && cached_entry[:name] == f_cur[:name]
+          function_emit_cache_merge_ptr_ids(used_ptr_ids, cached_entry[:ptr_ids])
+          function_emit_cache_state[:hits] = function_emit_cache_state[:hits] + 1
+          rendered_fn_texts[i] = cached_entry[:text]
+        elsif function_emit_cache_safe?(f_cur)
+          work_fns.push(f_cur)
+          work_indices.push(i)
+          work_buckets.push(selected_emit_bucket)
+        else
+          work_fns.push(f_cur)
+          work_indices.push(i)
+          work_buckets.push(nil)
+      else
+        work_fns.push(f_cur)
+        work_indices.push(i)
+        work_buckets.push(nil)
       i += 1
-    function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + mod[:functions].size()
-    mod[:parallel_function_emit_jobs] = parallel_function_jobs
-
+    parallel_function_jobs = emitter_parallel_job_count_for_work(work_fns.size())
+    if parallel_function_jobs > 1
+      emitter_prepare_parallel_metadata(work_fns, fp_flags, attr_groups, base_attr_text)
+      parallel_rendered = emitter_render_functions_parallel(work_fns, mod[:string_wvalues], slab_info, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, parallel_function_jobs, emit_blockaddress_sites)
+      wi = 0
+      while wi < work_fns.size()
+        orig_i = work_indices[wi]
+        txt = parallel_rendered[:texts][wi]
+        pids = parallel_rendered[:ptr_ids][wi]
+        rendered_fn_texts[orig_i] = txt
+        function_emit_cache_merge_ptr_ids(used_ptr_ids, pids)
+        wb = work_buckets[wi]
+        if wb != nil
+          wb[:functions][work_fns[wi][:name]] = {name: work_fns[wi][:name], text: txt, ptr_ids: pids}
+          wb[:dirty] = true
+          function_emit_cache_state[:misses] = function_emit_cache_state[:misses] + 1
+        else
+          function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + 1
+        wi += 1
+      mod[:parallel_function_emit_jobs] = parallel_function_jobs
+    else
+      wi = 0
+      while wi < work_fns.size()
+        orig_i = work_indices[wi]
+        wf = work_fns[wi]
+        wb = work_buckets[wi]
+        if wb != nil
+          local_ptr_ids = {}
+          txt = emit_function(wf, mod[:string_wvalues], slab_info, local_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, emit_blockaddress_sites)
+          pids = local_ptr_ids.keys()
+          function_emit_cache_merge_ptr_ids(used_ptr_ids, pids)
+          wb[:functions][wf[:name]] = {name: wf[:name], text: txt, ptr_ids: pids}
+          wb[:dirty] = true
+          function_emit_cache_state[:misses] = function_emit_cache_state[:misses] + 1
+          rendered_fn_texts[orig_i] = txt
+        else
+          function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + 1
+          rendered_fn_texts[orig_i] = emit_function(wf, mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, emit_blockaddress_sites)
+        wi += 1
+  else
+    parallel_function_jobs = emitter_parallel_job_count(mod, nil)
+    if parallel_function_jobs > 1
+      emitter_prepare_parallel_metadata(mod[:functions], fp_flags, attr_groups, base_attr_text)
+      parallel_rendered = emitter_render_functions_parallel(mod[:functions], mod[:string_wvalues], slab_info, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, parallel_function_jobs, emit_blockaddress_sites)
+      i = 0
+      while i < parallel_rendered[:texts].size()
+        rendered_fn_texts[i] = parallel_rendered[:texts][i]
+        function_emit_cache_merge_ptr_ids(used_ptr_ids, parallel_rendered[:ptr_ids][i])
+        i += 1
+      function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + nfns_emit
+      mod[:parallel_function_emit_jobs] = parallel_function_jobs
+    else
+      i = 0
+      while i < nfns_emit
+        mod[:functions][i][:fp_flags] = fp_flags
+        function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + 1
+        rendered_fn_texts[i] = emit_function(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, emit_blockaddress_sites)
+        i += 1
   i = 0
-  while parallel_function_jobs == 1 && i < mod[:functions].size()
-    mod[:functions][i][:fp_flags] = fp_flags
-    selected_emit_bucket = function_emit_cache_select_bucket(mod[:functions][i], function_emit_cache_bucket_value, function_emit_library_cache_bucket_value)
-    fn_out << emit_function_with_cache(mod[:functions][i], mod[:string_wvalues], slab_info, used_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, selected_emit_bucket)
+  while i < nfns_emit
+    fn_out << rendered_fn_texts[i]
     fn_out << "\n"
     i += 1
+  body_fn_out = fn_out
+  seams_out = StringBuffer(1024)
+  fn_out = seams_out
   function_emit_cache_publish(function_emit_cache_bucket_value)
   function_emit_cache_publish(function_emit_library_cache_bucket_value)
   mod[:function_emit_cache_hits] = function_emit_cache_state[:hits] - function_emit_hits_start
@@ -609,6 +705,9 @@
       seam_decls << "declare i64 @" + big_op_wrappers[bop] + "(i64, i64) nounwind\n"
 
   emit_bigint_exact_seams(mod, fn_out, known_fns, used_runtime_fns, seam_decls, bigint_minus_reopened_fn, bigint_times_reopened_fn)
+  seams_str = seams_out.to_s()
+  fn_out = body_fn_out
+  fn_out << seams_str
 
   # String constants that still need raw ptr access; slab emitted as constant array
   strings_out = emit_string_constants(mod[:strings], slab_info, used_ptr_ids)
@@ -852,6 +951,9 @@
     decls_out = decls_out + num_to_f64_fast_helper_ir() + "\n"
   if ccall_needed.has_key?("__w_array_lit_store")
     decls_out = decls_out + array_lit_store_helper_ir() + "\n"
+    if decls_out.index("@llvm.memcpy.p0.p0.i64(") == nil && embedded_ir_str.index("@llvm.memcpy.p0.p0.i64(") == nil
+      decls_out = decls_out + "declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg)\n"
+    decls_out = decls_out + array_lit_copy_helper_ir() + "\n"
 
   bit_count_intrinsic_specs = [
     ["__w_bit_ctpop_u32", "ctpop", 32, false],
@@ -914,9 +1016,10 @@
   call_site_out = ""
   llvm_used_out = ""
   if mod[:enhanced_stacktraces] != false
-    fn_meta_out = emit_fn_meta_table(mod)
-    call_site_out = emit_call_site_table(mod)
-    llvm_used_out = emit_stacktrace_llvm_used(call_site_out.index("@__w_ic_site") != nil)
+    precollected_sites = {sites: cs_sites, files: cs_files, file_list: cs_file_list}
+    fn_meta_out = emit_fn_meta_table(mod, emit_blockaddress_sites)
+    call_site_out = emit_call_site_table(mod, precollected_sites, emit_blockaddress_sites)
+    llvm_used_out = emit_stacktrace_llvm_used(call_site_out.index("@__w_ic_site") != nil, !emit_blockaddress_sites)
 
   attr_groups_out = emit_function_attr_groups(attr_groups)
   tbaa_out = tbaa_metadata_defs()
@@ -925,6 +1028,23 @@
   ascope_out = alias_scope_md_defs(max_ascope_slots)
   globals_str = globals_out.to_s()
   fn_str = fn_out.to_s()
+
+  emitter_last_artifact_state[:link_features] = compute_module_link_features(declared_names, known_fns, mod[:strings], saw_lchs_mcall, embedded_ir_str)
+  strings_str = strings_out
+  if !emit_blockaddress_sites && mod[:no_static_slab] != true && !emit_target_is_wasm(mod) && !windows_target
+    emitter_last_artifact_state[:shard_plan] = {
+      header: header,
+      decls_out: decls_out,
+      globals_str: globals_str,
+      strings_str: strings_str,
+      functions: mod[:functions],
+      rendered_fn_texts: rendered_fn_texts,
+      seams_str: seams_str,
+      fn_meta_out: fn_meta_out,
+      call_site_out: call_site_out,
+      llvm_used_out: llvm_used_out,
+      tail_md_str: attr_groups_out + tbaa_out + novec_out + ewscope_out + ascope_out
+    }
 
   final_out = StringBuffer(header.size() + decls_out.size() + globals_str.size() + strings_out.size() + fn_str.size() + fn_meta_out.size() + call_site_out.size() + llvm_used_out.size() + attr_groups_out.size() + tbaa_out.size() + novec_out.size() + ewscope_out.size() + ascope_out.size() + 64)
   final_out << header
@@ -944,18 +1064,18 @@
 
 # -- Emit a single function --
 
--> hidden_exit_label_for_inst(inst, arm64_target = true)
+-> hidden_exit_label_for_inst(inst, arm64_target = true, emit_blockaddress_sites = true)
   op = wire_kind(inst)
   if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :call_loc_set_col || op == :ret_i64 || op == :phi_ssa || op == :alloca_i64 || op == :icmp_i64 || op == :truthy_inline || op == :add_i64 || op == :sub_i64 || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :scope_push || op == :scope_pop
     return nil
   if op == :call_direct_i64 || op == :call_direct_void
-    if wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
+    if emit_blockaddress_sites && wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
       return "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
     return nil
   if op == :call_method_i64
     if wire_get(inst, :devirt_fn) != nil || wire_get(inst, :construct_fn) != nil
       return "dv." + wire_get(inst, :ic_id).to_s() + ".done"
-    if wire_get(inst, :src_line) != nil
+    if emit_blockaddress_sites && wire_get(inst, :src_line) != nil
       return "cs." + wire_get(inst, :ic_id).to_s() + ".ret"
     return nil
   # Portable (non-arm64) lowering of the asm-backed carry ops renders a
@@ -974,7 +1094,7 @@
     return "g.done." + wire_get(inst, :block_id).to_s()
   nil
 
--> build_phi_label_redirects(f, arm64_target = true)
+-> build_phi_label_redirects(f, arm64_target = true, emit_blockaddress_sites = true)
   redirect = {}
   bi = 0
   while bi < f[:blocks].size()
@@ -982,7 +1102,7 @@
     exit_label = blk[:label]
     ii = 0
     while ii < blk[:instructions].size()
-      hidden = hidden_exit_label_for_inst(blk[:instructions][ii], arm64_target)
+      hidden = hidden_exit_label_for_inst(blk[:instructions][ii], arm64_target, emit_blockaddress_sites)
       if hidden != nil
         exit_label = hidden
       ii += 1
@@ -1083,12 +1203,39 @@
     return false
   triple.index("windows") != nil || triple.index("mingw") != nil || triple.index("msvc") != nil
 
--> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true, windows_target = false, preserve_debug_frames = false)
+-> const_array_lit_step(instrs, j, ninstrs, string_wvs)
+  inst = instrs[j]
+  op = wire_kind(inst)
+  if op == :call_direct_i64 && wire_get(inst, :name) == "__w_array_lit_store" && wire_get(inst, :src_line) == nil
+    args = wire_get(inst, :args)
+    if wire_sequence_size(args) == 3
+      idx_str = wire_sequence_get(args, 1)
+      val_str = wire_sequence_get(args, 2)
+      if idx_str != nil && idx_str.size() > 0 && idx_str[0] != "%" && val_str != nil && val_str.size() > 0 && val_str[0] != "%"
+        return {arr: wire_sequence_get(args, 0), idx: idx_str.to_i(), val: val_str, temp: wire_get(inst, :temp), step: 1}
+    return nil
+  if (op == :string_i64 || op == :symbol_i64) && string_wvs != nil && j + 1 < ninstrs
+    swv = string_wvs[wire_get(inst, :string_id)]
+    if swv != nil
+      next_inst = instrs[j + 1]
+      if wire_kind(next_inst) == :call_direct_i64 && wire_get(next_inst, :name) == "__w_array_lit_store" && wire_get(next_inst, :src_line) == nil
+        args = wire_get(next_inst, :args)
+        if wire_sequence_size(args) == 3 && wire_sequence_get(args, 2) == wire_get(inst, :temp)
+          idx_str = wire_sequence_get(args, 1)
+          if idx_str != nil && idx_str.size() > 0 && idx_str[0] != "%"
+            lit = op == :symbol_i64 ? llvm_wvalue_literal(swv + 1) : llvm_wvalue_literal(swv)
+            return {arr: wire_sequence_get(args, 0), idx: idx_str.to_i(), val: lit, temp: wire_get(next_inst, :temp), step: 2}
+  nil
+
+-> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true, windows_target = false, preserve_debug_frames = false, emit_blockaddress_sites = true)
   if f[:embedded_ll] != nil
     return emit_embedded_ll_function(f)
   if f[:embedded_asm] != nil
     return emit_embedded_asm_function(f)
   out = StringBuffer(4096)
+  pool_globals = nil
+  pool_id = 0
+  enable_const_pool = string_wvs != nil && env("TUNGSTEN_CONST_ARRAY_LIT_POOL") != "0"
   ret_ty = f[:return_type]
   base_attr_text = function_attr_text(frame_pointers, host_fn_attrs, preserve_debug_frames)
   if attr_groups != nil
@@ -1125,17 +1272,15 @@
   # Entry block: allocas for all var slots, then instructions
   lbr = "\["
   rbr = "]"
-  # Pre-scan for max method call arg count (needed for scratch alloca), and
-  # for a setjmp — a landing pad this function can be resumed at by longjmp
-  # from anywhere inside the region it guards. Var-slot traffic then has to be
-  # volatile so LLVM's mem2reg/SROA leave the slots in memory and a rescue
-  # clause observes the writes its try body made (cfg.w#has_setjmp skips the
-  # in-house mem2reg for the same reason).
+  # Fused pre-scan for max method call arg count, setjmp volatile requirement,
+  # and hidden exit-label phi redirects.
   max_mcall_argc = 0
   volatile_slots = false
+  phi_label_redirects = {}
   bi = 0
   while bi < f[:blocks].size()
     blk = f[:blocks][bi]
+    exit_label = blk[:label]
     instrs = blk[:instructions]
     ji = 0
     while ji < instrs.size()
@@ -1149,16 +1294,18 @@
           argc = wire_sequence_size(args)
           if argc > max_mcall_argc && !scalar_source_call?(inst)
             max_mcall_argc = argc
+      hidden = hidden_exit_label_for_inst(inst, arm64_target, emit_blockaddress_sites)
+      if hidden != nil
+        exit_label = hidden
       ji += 1
+    if exit_label != blk[:label]
+      phi_label_redirects[blk[:label]] = exit_label
     bi += 1
 
   fp_flags = f[:fp_flags]
   if fp_flags == nil
     fp_flags = ""
   direct_buffer_emit = env("TUNGSTEN_DIRECT_BUFFER_EMIT") != "0"
-  # The direct buffer path renders the fixed load/store shapes with no
-  # volatile marker; route this function's instructions through the ordinary
-  # renderer instead of duplicating the marker in the hot fast path.
   if volatile_slots
     direct_buffer_emit = false
 
@@ -1166,7 +1313,6 @@
   slots = f[:var_slots]
   slot_types = f[:var_slot_types]
   promoted = f[:promoted_vars]
-  phi_label_redirects = build_phi_label_redirects(f, arm64_target)
   i = 0
   while i < f[:blocks].size()
     blk = f[:blocks][i]
@@ -1182,9 +1328,6 @@
           ptr = slots[slot_names[j]]
           if ptr.starts_with?("%v") && (promoted == nil || promoted[ptr] == nil)
             if heap_slots != nil && heap_slots[slot_names[j]] == true
-              # Slot captured by an escaping closure: heap cell, not alloca,
-              # so the capture's by-reference pointer outlives this frame.
-              # The 16-byte zeroed cell covers every slot type incl. i128.
               out << "  "
               out << ptr
               out << " = call ptr @w_closure_cell_new()\n"
@@ -1205,32 +1348,78 @@
         out << "  %__mcall_args = alloca i64, i32 "
         out << max_mcall_argc.to_s()
         out << ", align 8\n"
-      # w_preflight is the first instruction of main: under TUNGSTEN_PREFLIGHT
-      # it _exit(0)s, which lets the link step exec the fresh binary once so
-      # macOS's first-exec malware scan (~200 ms, keyed by vnode) runs during
-      # the build instead of on the user's first run. See runtime/runtime.c.
       if f[:name] == "main"
         out << "  call void @w_preflight()\n"
-      # Inject static slab init at start of main, before any string ops
       if f[:name] == "main" && slab_info != nil && slab_info[:slab_entries].size() > 0
         out << "  call void @w_slab_init_static(ptr @__static_slab, i32 "
         out << slab_info[:total_slots].to_s()
         out << ")\n"
-      # (The AST-node arena init call is gone: the arena is lazy — offset 0
-      # is reserved on first growth inside w_node_alloc, so a NULL base just
-      # routes the first inline alloc through the slow path.)
     # Emit instructions in block
+    instrs = blk[:instructions]
+    ninstrs = instrs.size()
     j = 0
-    while j < blk[:instructions].size()
+    while j < ninstrs
+      if enable_const_pool
+        first_step = const_array_lit_step(instrs, j, ninstrs, string_wvs)
+        if first_step != nil
+          run_vals = [first_step[:val]]
+          last_temp = first_step[:temp]
+          cur_j = j + first_step[:step]
+          expect_idx = first_step[:idx] + 1
+          while cur_j < ninstrs
+            next_step = const_array_lit_step(instrs, cur_j, ninstrs, string_wvs)
+            if next_step == nil || next_step[:arr] != first_step[:arr] || next_step[:idx] != expect_idx
+              break
+            run_vals.push(next_step[:val])
+            last_temp = next_step[:temp]
+            cur_j = cur_j + next_step[:step]
+            expect_idx = expect_idx + 1
+          if run_vals.size() >= 8
+            if pool_globals == nil
+              pool_globals = StringBuffer(512)
+            pool_sym = "@.arr_pool." + f[:name] + "." + pool_id.to_s()
+            pool_id = pool_id + 1
+            pool_globals << pool_sym
+            pool_globals << " = private unnamed_addr constant "
+            pool_globals << lbr
+            pool_globals << run_vals.size().to_s()
+            pool_globals << " x i64"
+            pool_globals << rbr
+            pool_globals << " "
+            pool_globals << lbr
+            rvi = 0
+            while rvi < run_vals.size()
+              if rvi > 0
+                pool_globals << ", "
+              pool_globals << "i64 "
+              pool_globals << run_vals[rvi]
+              rvi += 1
+            pool_globals << rbr
+            pool_globals << ", align 8\n"
+            out << "  "
+            out << last_temp
+            out << " = call i64 @__w_array_lit_copy(i64 "
+            out << first_step[:arr]
+            out << ", i64 "
+            out << first_step[:idx].to_s()
+            out << ", ptr "
+            out << pool_sym
+            out << ", i64 "
+            out << (run_vals.size() * 8).to_s()
+            out << ")\n"
+            j = cur_j
+            next
       out << "  "
-      inst = blk[:instructions][j]
-      if !direct_buffer_emit || !append_instruction_direct(out, inst, phi_label_redirects, string_wvs, used_ptr_ids)
-        out << render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots)
+      inst = instrs[j]
+      if !direct_buffer_emit || !append_instruction_direct(out, inst, phi_label_redirects, string_wvs, used_ptr_ids, emit_blockaddress_sites)
+        out << render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots, emit_blockaddress_sites)
       out << "\n"
       j += 1
     i += 1
 
   out << "}\n"
+  if pool_globals != nil
+    return pool_globals.to_s() + out.to_s()
   out.to_s()
 
 -> emit_param_signature(f)

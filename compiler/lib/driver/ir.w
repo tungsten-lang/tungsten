@@ -624,9 +624,10 @@ driver_probe_memo = {}
     return nil
   exe = ccall("w_executable_path")
   stat = File.stat(exe)
-  if stat == nil || stat.mtime_ns() == nil || stat.ctime_ns() == nil || stat.size() == nil
+  exe_digest = exe != nil ? digest_file64(exe) : nil
+  if stat == nil || exe_digest == nil || stat.size() == nil
     return nil
-  identity_text = ["core-wire-executable-v2", exe, stat.mtime_ns().to_s(), stat.ctime_ns().to_s(), stat.size().to_s(), incremental_env_s("TUNGSTEN_VERSION"), incremental_env_s("TUNGSTEN_ROOT"), incremental_root_context(), cross_target, cross_sysroot].join("|")
+  identity_text = ["core-wire-executable-v3", u64_hex(exe_digest), stat.size().to_s(), incremental_env_s("TUNGSTEN_VERSION"), incremental_env_s("TUNGSTEN_ROOT"), incremental_root_context(), cross_target, cross_sysroot].join("|")
   identity = wyhash64_hex_string(identity_text)
   g_incremental[:persistent_identity] = identity
   incremental_core_cache_configure_persistent(dir, identity)
@@ -738,6 +739,9 @@ driver_probe_memo = {}
   ir = compile(ast, display_source_path(file_path), verbose, frame_pointers, sidemap_path, strip_runtime_metadata, fast_mode, build_defines, math_mode, no_static_slab, loader.manifest_files())
   if intern_algo == "zstd"
     ir = rewrite_ir_static_slab_zstd(ir)
+    emitter_last_artifact_state[:shard_plan] = nil
+    if emitter_last_artifact_state[:link_features] != nil
+      emitter_last_artifact_state[:link_features][:needs_zstd] = true
 
   explicit_ll_path = env("TUNGSTEN_LL_PATH")
   if explicit_ll_path != nil && explicit_ll_path != ""
@@ -746,6 +750,10 @@ driver_probe_memo = {}
     ll_path = file_path.replace(".w", ".ll")
   else
     ll_path = implicit_ll_path(file_path)
+
+  g_incremental[:last_emitted_ll_path] = ll_path
+  g_incremental[:last_emitted_ll_text] = ir
+  g_incremental[:last_emitted_link_features] = emitter_last_artifact_state[:link_features]
 
   write_started_at = clock
   write_file(ll_path, ir)

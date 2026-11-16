@@ -299,6 +299,35 @@ use wire
     requested = 32
   requested
 
+-> ssa_prune_promotables(func, promotable, cfg_analysis)
+  if func[:blocks].size() <= 1 || promotable.size() == 0
+    return promotable
+  scan_info = find_var_defs_and_ue_loads(func, promotable)
+  if !scan_info[:has_non_entry_def]
+    return promotable
+  phi_placements = place_phi_nodes(func, promotable, scan_info[:defs], cfg_analysis[:dominance_frontiers], scan_info[:ue_loads], cfg_analysis[:cfg])
+  if phi_placements.size() == 0
+    return promotable
+  phi_ptrs = {}
+  phi_blocks = phi_placements.keys()
+  pbi = 0
+  while pbi < phi_blocks.size()
+    pptrs = phi_placements[phi_blocks[pbi]]
+    ppi = 0
+    while ppi < pptrs.size()
+      phi_ptrs[pptrs[ppi]] = true
+      ppi += 1
+    pbi += 1
+  pruned = {}
+  pkeys = promotable.keys()
+  pi = 0
+  while pi < pkeys.size()
+    ptr = pkeys[pi]
+    if phi_ptrs[ptr] != true
+      pruned[ptr] = promotable[ptr]
+    pi += 1
+  pruned
+
 -> cfg_parallel_prepare_worker(state)
   functions = state[:functions]
   index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
@@ -307,8 +336,10 @@ use wire
     if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       promotable = find_promotable_vars(func)
       if promotable.size() > 0
+        analysis = analyze_function(func)
         state[:promotables][index] = promotable
-        state[:analyses][index] = analyze_function(func)
+        state[:analyses][index] = analysis
+        state[:pruned_promotables][index] = ssa_prune_promotables(func, promotable, analysis)
     index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
   true
 
@@ -317,6 +348,7 @@ use wire
     functions: mod[:functions],
     analyses: Array.new(mod[:functions].size()),
     promotables: Array.new(mod[:functions].size()),
+    pruned_promotables: Array.new(mod[:functions].size()),
     cursor: ccall("w_atomic_new", u0xFFFA000000000000)
   }
   workers = []
@@ -330,7 +362,7 @@ use wire
   while worker < workers.size()
     ccall("w_thread_join_release", workers[worker])
     worker += 1
-  {analyses: state[:analyses], promotables: state[:promotables]}
+  {analyses: state[:analyses], promotables: state[:promotables], pruned_promotables: state[:pruned_promotables]}
 
 # ── SSA Conversion (mem2reg) ──────────────────────────────────────────
 
@@ -865,7 +897,7 @@ use wire
 
 # Top-level SSA conversion entry point.
 
--> ssa_convert(func, cfg_analysis, profile = nil, precomputed_promotable = nil)
+-> ssa_convert(func, cfg_analysis, profile = nil, precomputed_promotable = nil, pre_pruned_promotable = nil)
   promotable = precomputed_promotable
   if promotable == nil
     promotable_started_at = nil
@@ -887,66 +919,71 @@ use wire
     if profile != nil
       profile[:rename_secs] = profile[:rename_secs] + (clock() - rename_started_at)
     return nil
-  var_defs_started_at = nil
-  if profile != nil
-    var_defs_started_at = clock()
-  scan_info = find_var_defs_and_ue_loads(func, promotable)
-  var_defs = scan_info[:defs]
-  ue_loads = scan_info[:ue_loads]
-  if profile != nil
-    profile[:var_defs_secs] = profile[:var_defs_secs] + (clock() - var_defs_started_at)
-  df = cfg_analysis[:dominance_frontiers]
-  phi_started_at = nil
-  if profile != nil
-    phi_started_at = clock()
   phi_placements = {}
-  if scan_info[:has_non_entry_def]
-    phi_placements = place_phi_nodes(func, promotable, var_defs, df, ue_loads, cfg_analysis[:cfg])
-
-  # This mem2reg pass substitutes dominating load/store traffic directly and
-  # uses live-in pruned phi placement to detect variables that genuinely merge
-  # across control-flow joins. Variables that require a live merge phi stay in
-  # memory (allowing loop_carried_releases / owned_slot_releases to manage heap
-  # lifetimes and LLVM's mem2reg to construct typed phis), while branch-local
-  # or loop-body-local variables that are dead at joins are promoted.
-  if phi_placements.size() > 0
-    phi_ptrs = {}
-    phi_blocks = phi_placements.keys()
-    pbi = 0
-    while pbi < phi_blocks.size()
-      pptrs = phi_placements[phi_blocks[pbi]]
-      ppi = 0
-      while ppi < pptrs.size()
-        phi_ptrs[pptrs[ppi]] = true
-        ppi += 1
-      pbi += 1
-
-    pruned = {}
-    pkeys = promotable.keys()
-    pi = 0
-    while pi < pkeys.size()
-      ptr = pkeys[pi]
-      if phi_ptrs[ptr] != true
-        pruned[ptr] = promotable[ptr]
-      pi += 1
-
-    promotable = pruned
+  if pre_pruned_promotable != nil
+    promotable = pre_pruned_promotable
     if promotable.size() == 0
       return nil
+  else
+    var_defs_started_at = nil
+    if profile != nil
+      var_defs_started_at = clock()
+    scan_info = find_var_defs_and_ue_loads(func, promotable)
+    var_defs = scan_info[:defs]
+    ue_loads = scan_info[:ue_loads]
+    if profile != nil
+      profile[:var_defs_secs] = profile[:var_defs_secs] + (clock() - var_defs_started_at)
+    df = cfg_analysis[:dominance_frontiers]
+    phi_started_at = nil
+    if profile != nil
+      phi_started_at = clock()
+    if scan_info[:has_non_entry_def]
+      phi_placements = place_phi_nodes(func, promotable, var_defs, df, ue_loads, cfg_analysis[:cfg])
 
-    # Phi placement is independent per variable. Every variable with a phi
-    # was just removed, so the retained set cannot acquire a new placement;
-    # rescanning definitions/frontiers only rediscovers the empty set.
-    phi_placements = {}
+    # This mem2reg pass substitutes dominating load/store traffic directly and
+    # uses live-in pruned phi placement to detect variables that genuinely merge
+    # across control-flow joins. Variables that require a live merge phi stay in
+    # memory (allowing loop_carried_releases / owned_slot_releases to manage heap
+    # lifetimes and LLVM's mem2reg to construct typed phis), while branch-local
+    # or loop-body-local variables that are dead at joins are promoted.
+    if phi_placements.size() > 0
+      phi_ptrs = {}
+      phi_blocks = phi_placements.keys()
+      pbi = 0
+      while pbi < phi_blocks.size()
+        pptrs = phi_placements[phi_blocks[pbi]]
+        ppi = 0
+        while ppi < pptrs.size()
+          phi_ptrs[pptrs[ppi]] = true
+          ppi += 1
+        pbi += 1
 
-  if profile != nil
-    profile[:phi_secs] = profile[:phi_secs] + (clock() - phi_started_at)
-    phi_blocks = phi_placements.keys()
-    profile[:phi_block_count] = profile[:phi_block_count] + phi_blocks.size()
-    pbi = 0
-    while pbi < phi_blocks.size()
-      profile[:phi_count] = profile[:phi_count] + phi_placements[phi_blocks[pbi]].size()
-      pbi += 1
+      pruned = {}
+      pkeys = promotable.keys()
+      pi = 0
+      while pi < pkeys.size()
+        ptr = pkeys[pi]
+        if phi_ptrs[ptr] != true
+          pruned[ptr] = promotable[ptr]
+        pi += 1
+
+      promotable = pruned
+      if promotable.size() == 0
+        return nil
+
+      # Phi placement is independent per variable. Every variable with a phi
+      # was just removed, so the retained set cannot acquire a new placement;
+      # rescanning definitions/frontiers only rediscovers the empty set.
+      phi_placements = {}
+
+    if profile != nil
+      profile[:phi_secs] = profile[:phi_secs] + (clock() - phi_started_at)
+      phi_blocks = phi_placements.keys()
+      profile[:phi_block_count] = profile[:phi_block_count] + phi_blocks.size()
+      pbi = 0
+      while pbi < phi_blocks.size()
+        profile[:phi_count] = profile[:phi_count] + phi_placements[phi_blocks[pbi]].size()
+        pbi += 1
   # Debug: log phi placements for functions with promotable vars
   rename_started_at = nil
   if profile != nil

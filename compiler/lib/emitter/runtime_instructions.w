@@ -1,6 +1,6 @@
 # Emitter runtime instructions — constants, calls, control flow, and objects.
 
--> render_runtime_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false, volatile_slots = false)
+-> render_runtime_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false, volatile_slots = false, emit_blockaddress_sites = true)
   op = wire_kind(inst)
 
   case op
@@ -387,7 +387,7 @@
     else
       args_str = render_call_args(wire_get(inst, :args), wire_get(inst, :arg_types))
     base = narrow_setup + wire_get(inst, :temp) + " = " + call_prefix(inst) + " i64 @" + wire_get(inst, :name) + "(" + args_str + ")" + known_call_range_metadata_suffix(inst, "i64")
-    if wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
+    if emit_blockaddress_sites && wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
       ret_lbl = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
       base + "\n  br label %" + ret_lbl + "\n" + ret_lbl + ":"
     else
@@ -428,7 +428,7 @@
   when :call_direct_void
     args_str = render_call_args(wire_get(inst, :args), wire_get(inst, :arg_types))
     base = call_prefix(inst) + " void @" + wire_get(inst, :name) + "(" + args_str + ")"
-    if wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
+    if emit_blockaddress_sites && wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
       ret_lbl = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
       base + "\n  br label %" + ret_lbl + "\n" + ret_lbl + ":"
     else
@@ -603,7 +603,7 @@
         parts << "store i64 " + wire_sequence_get(args, i) + ", ptr " + slot + ", align 8\n  "
         i += 1
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", ptr " + stack_arr + ", i32 " + argc.to_s() + ic_arg + ")"
-    if wire_get(inst, :src_line) != nil
+    if emit_blockaddress_sites && wire_get(inst, :src_line) != nil
       ret_lbl = "cs." + ic_id + ".ret"
       parts << "\n  br label %"
       parts << ret_lbl
@@ -617,7 +617,7 @@
       # left us in: the cs.N.ret continuation when a call-site table entry
       # was emitted, else the dv.N.s block itself.
       slow_pred = lbl + ".s"
-      if wire_get(inst, :src_line) != nil
+      if emit_blockaddress_sites && wire_get(inst, :src_line) != nil
         slow_pred = "cs." + ic_id + ".ret"
       parts << "\n  br label %" + lbl + ".done\n"
       parts << lbl + ".done:\n  "

@@ -393,9 +393,9 @@ function_emit_cache_state = {
   text = value == nil ? "" : value.to_s()
   text.size().to_s() + ":" + text
 
--> function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
+-> function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags, emit_blockaddress_sites = false)
   out = StringBuffer(256)
-  out << "rendered-core-function-v2"
+  out << "rendered-core-function-v3"
   fields = [
     mod[:incremental_core_cache_key],
     mod[:llvm_datalayout],
@@ -406,7 +406,9 @@ function_emit_cache_state = {
     windows_target,
     preserve_debug_frames,
     mod[:no_static_slab] == true,
-    fp_flags
+    fp_flags,
+    emit_blockaddress_sites,
+    env("TUNGSTEN_CONST_ARRAY_LIT_POOL") != "0"
   ]
   nfields = fields.size()
   i = 0
@@ -415,8 +417,8 @@ function_emit_cache_state = {
     i += 1
   out.to_s()
 
--> function_emit_cache_bucket(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
-  key = function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
+-> function_emit_cache_bucket(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags, emit_blockaddress_sites = false)
+  key = function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags, emit_blockaddress_sites)
   function_emit_cache_bucket_for_key(key, :core, nil)
 
 -> function_emit_cache_bucket_for_key(key, scope, library_paths)
@@ -449,7 +451,7 @@ function_emit_cache_state = {
     i += 1
   wyhash64_hex_string(out.to_s())
 
--> function_emit_library_cache_bucket(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags)
+-> function_emit_library_cache_bucket(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags, emit_blockaddress_sites = false)
   paths = mod[:library_reachability_paths]
   if paths == nil || paths.size() == 0 || env("TUNGSTEN_LIBRARY_FUNCTION_EMIT_CACHE") == "0"
     return nil
@@ -458,8 +460,8 @@ function_emit_cache_state = {
   if string_count == nil || string_count == 0 || strings_digest == nil
     return nil
   out = StringBuffer(320)
-  out << "rendered-library-function-v2"
-  out << function_emit_cache_field(function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags))
+  out << "rendered-library-function-v3"
+  out << function_emit_cache_field(function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags, emit_blockaddress_sites))
   out << function_emit_cache_field(mod[:incremental_library_cache_key])
   out << function_emit_cache_field(string_count)
   out << function_emit_cache_field(strings_digest)
@@ -512,10 +514,10 @@ function_emit_cache_state = {
     used_ptr_ids[ptr_ids[i]] = true
     i += 1
   nil
--> emit_function_with_cache(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, cache_bucket)
+-> emit_function_with_cache(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, cache_bucket, emit_blockaddress_sites = false)
   if cache_bucket == nil || !function_emit_cache_candidate?(f, cache_bucket)
     function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + 1
-    return emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames)
+    return emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, emit_blockaddress_sites)
 
   # All ordinary functions in one module use the same attribute text. On a
   # cache hit emit_function does not get a chance to intern it, so do that
@@ -531,10 +533,10 @@ function_emit_cache_state = {
 
   if !function_emit_cache_safe?(f)
     function_emit_cache_state[:bypasses] = function_emit_cache_state[:bypasses] + 1
-    return emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames)
+    return emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, emit_blockaddress_sites)
 
   local_ptr_ids = {}
-  rendered = emit_function(f, string_wvs, slab_info, local_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames)
+  rendered = emit_function(f, string_wvs, slab_info, local_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, emit_blockaddress_sites)
   ptr_ids = local_ptr_ids.keys()
   function_emit_cache_merge_ptr_ids(used_ptr_ids, ptr_ids)
   cache_bucket[:functions][f[:name]] = {name: f[:name], text: rendered, ptr_ids: ptr_ids}
@@ -812,10 +814,45 @@ function_emit_cache_state = {
 # after) that block's first instruction, so the runtime can resolve
 # the exact dispatch that failed.
 
--> collect_call_sites(mod)
+-> record_call_site_for_inst(inst, fn_name, fn_path, sites, files, file_list, emit_blockaddress_sites = true)
+  op = wire_kind(inst)
+  if op != :call_method_i64 && (!emit_blockaddress_sites || (op != :call_direct_i64 && op != :call_direct_void))
+    return nil
+  src_line = wire_get(inst, :src_line)
+  if src_line == nil
+    return nil
+  ret_label = nil
+  site_ic_id = nil
+  if op == :call_method_i64
+    site_ic_id = wire_get(inst, :ic_id)
+    if emit_blockaddress_sites
+      ret_label = "cs." + site_ic_id.to_s() + ".ret"
+  elsif emit_blockaddress_sites && wire_get(inst, :loc_site_id) != nil
+    ret_label = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
+  if ret_label == nil && site_ic_id == nil
+    return nil
+  file_id = files[fn_path]
+  if file_id == nil
+    file_id = file_list.size()
+    files[fn_path] = file_id
+    file_list.push(fn_path)
+  col_val = wire_get(inst, :src_col)
+  if col_val == nil
+    col_val = 0
+  sites.push({
+    fn_name: fn_name,
+    ret_label: ret_label,
+    ic_id: site_ic_id,
+    file_id: file_id,
+    line: src_line,
+    col: col_val
+  })
+  nil
+
+-> collect_call_sites(mod, emit_blockaddress_sites = true)
   sites = []
   files = {}
-  next_file_id = 0
+  file_list = []
   fns = mod[:functions]
   nfns = fns.size()
   fi = 0
@@ -833,56 +870,28 @@ function_emit_cache_state = {
       ninstrs = instrs.size()
       ii = 0
       while ii < ninstrs
-        inst = instrs[ii]
-        op = wire_kind(inst)
-        if op == :call_method_i64 || op == :call_direct_i64 || op == :call_direct_void
-          src_line = wire_get(inst, :src_line)
-          if src_line != nil
-            ret_label = nil
-            site_ic_id = nil
-            if op == :call_method_i64
-              site_ic_id = wire_get(inst, :ic_id)
-              ret_label = "cs." + site_ic_id.to_s() + ".ret"
-            elsif wire_get(inst, :loc_site_id) != nil
-              ret_label = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
-            if ret_label != nil
-              file_id = files[fn_path]
-              if file_id == nil
-                file_id = next_file_id
-                files[fn_path] = file_id
-                next_file_id = next_file_id + 1
-              col_val = wire_get(inst, :src_col)
-              if col_val == nil
-                col_val = 0
-              sites.push({
-                fn_name: f[:name],
-                ret_label: ret_label,
-                ic_id: site_ic_id,
-                file_id: file_id,
-                line: src_line,
-                col: col_val
-              })
+        record_call_site_for_inst(instrs[ii], f[:name], fn_path, sites, files, file_list, emit_blockaddress_sites)
         ii += 1
       bi += 1
     fi += 1
-  {sites: sites, files: files}
+  {sites: sites, files: files, file_list: file_list}
 
--> emit_call_site_table(mod)
-  info = collect_call_sites(mod)
+-> emit_call_site_table(mod, precollected = nil, emit_blockaddress_sites = true)
+  info = precollected != nil ? precollected : collect_call_sites(mod, emit_blockaddress_sites)
   sites = info[:sites]
   nsites = sites.size()
-  files = info[:files]
-  out = StringBuffer(nsites * 120 + 512)
+  file_list = info[:file_list]
+  if file_list == nil
+    file_list = info[:files].keys()
+  out = StringBuffer(nsites * 80 + 512)
   lbr = "\["
   rbr = "]"
 
-  # One private constant per unique source file path. Ids are assigned
-  # first-seen, so the hash's insertion order IS id order (spec §4.2.3).
-  file_keys = files.keys()
-  nfkeys = file_keys.size()
+  # One private constant per unique source file path in first-seen order.
+  nfkeys = file_list.size()
   fi = 0
   while fi < nfkeys
-    k = file_keys[fi]
+    k = file_list[fi]
     bl = utf8_byte_length(k) + 1
     out << "@.wcs.file."
     out << fi.to_s()
@@ -898,13 +907,14 @@ function_emit_cache_state = {
   if nfkeys > 0
     out << "\n"
 
-  # The call-site array.
+  # The call-site array (populated only when blockaddress sites are enabled).
+  cs_count = emit_blockaddress_sites ? nsites : 0
   out << "@__w_call_site = constant "
   out << lbr
-  out << nsites.to_s()
+  out << cs_count.to_s()
   out << " x { ptr, ptr, i32, i32 }"
   out << rbr
-  if nsites == 0
+  if cs_count == 0
     out << " zeroinitializer\n"
   else
     out << " "
@@ -931,7 +941,7 @@ function_emit_cache_state = {
     out << rbr
     out << "\n"
   out << "@__w_call_site_count = constant i32 "
-  out << nsites.to_s()
+  out << cs_count.to_s()
   out << "\n\n"
 
   # IC-site companion table, indexed by IC slot id. The blockaddress keys
@@ -1042,24 +1052,69 @@ function_emit_cache_state = {
   else
     name
 
--> emit_fn_meta_table(mod)
+-> emit_fn_meta_table(mod, emit_blockaddress_sites = true)
   fns = mod[:functions]
   nfns = fns.size()
-  out = StringBuffer(nfns * 200 + 256)
+  out = StringBuffer(nfns * 160 + 512)
   lbr = "\["
   rbr = "]"
 
-  # Per-fn private string constants for display name + source file.
+  # Deduplicate source file path constants across all functions in first-seen order.
+  fn_files = {}
+  fn_file_list = []
+  fn_file_ids = Array.new(nfns)
+  i = 0
+  while i < nfns
+    f = fns[i]
+    file_str = f[:source_path]
+    if file_str == nil
+      file_str = "<unknown>"
+    fid = fn_files[file_str]
+    if fid == nil
+      fid = fn_file_list.size()
+      fn_files[file_str] = fid
+      fn_file_list.push(file_str)
+    fn_file_ids[i] = fid
+    i += 1
+
+  fi = 0
+  while fi < fn_file_list.size()
+    file_str = fn_file_list[fi]
+    file_bl = utf8_byte_length(file_str) + 1
+    out << "@.wfm.file."
+    out << fi.to_s()
+    out << " = private unnamed_addr constant "
+    out << lbr
+    out << file_bl.to_s()
+    out << " x i8"
+    out << rbr
+    out << " c\""
+    out << escape_llvm_string(file_str)
+    out << "\\00\", align 1\n"
+    fi += 1
+
+  # Per-fn private string constants for display name (and symbol name when
+  # unpinned from @__w_fn_meta).
   i = 0
   while i < nfns
     f = fns[i]
     istr = i.to_s()
     display = fn_meta_display_name(f)
-    file_str = f[:source_path]
-    if file_str == nil
-      file_str = "<unknown>"
     name_bl = utf8_byte_length(display) + 1
-    file_bl = utf8_byte_length(file_str) + 1
+
+    if !emit_blockaddress_sites
+      sym_str = f[:name]
+      sym_bl = utf8_byte_length(sym_str) + 1
+      out << "@.wfm."
+      out << istr
+      out << ".s = private unnamed_addr constant "
+      out << lbr
+      out << sym_bl.to_s()
+      out << " x i8"
+      out << rbr
+      out << " c\""
+      out << escape_llvm_string(sym_str)
+      out << "\\00\", align 1\n"
 
     out << "@.wfm."
     out << istr
@@ -1071,69 +1126,102 @@ function_emit_cache_state = {
     out << " c\""
     out << escape_llvm_string(display)
     out << "\\00\", align 1\n"
-
-    out << "@.wfm."
-    out << istr
-    out << ".f = private unnamed_addr constant "
-    out << lbr
-    out << file_bl.to_s()
-    out << " x i8"
-    out << rbr
-    out << " c\""
-    out << escape_llvm_string(file_str)
-    out << "\\00\", align 1\n"
     i += 1
   if nfns > 0
     out << "\n"
 
-  # The meta table itself.
-  out << "@__w_fn_meta = constant "
-  out << lbr
-  out << nfns.to_s()
-  out << " x { ptr, ptr, ptr, i32, i32 }"
-  out << rbr
-  if nfns == 0
-    out << " zeroinitializer\n"
-  else
-    out << " "
+  if emit_blockaddress_sites
+    out << "@__w_fn_meta = constant "
     out << lbr
-    out << "\n"
-    i = 0
-    while i < nfns
-      f = fns[i]
-      istr = i.to_s()
-      skind = f[:source_kind]
-      line = f[:source_line]
-      if line == nil
-        if skind == :entry
-          line = 1
-        else
-          line = 0
-      kind_int = fn_meta_kind_to_int(skind)
-      out << "  { ptr, ptr, ptr, i32, i32 } { ptr @"
-      out << f[:name]
-      out << ", ptr @.wfm."
-      out << istr
-      out << ".f, ptr @.wfm."
-      out << istr
-      out << ".n, i32 "
-      out << line.to_s()
-      out << ", i32 "
-      out << kind_int.to_s()
-      out << " }"
-      if i < nfns - 1
-        out << ","
-      out << "\n"
-      i += 1
+    out << nfns.to_s()
+    out << " x { ptr, ptr, ptr, i32, i32 }"
     out << rbr
-    out << "\n"
-  out << "@__w_fn_meta_count = constant i32 "
-  out << nfns.to_s()
-  out << "\n\n"
+    if nfns == 0
+      out << " zeroinitializer\n"
+    else
+      out << " "
+      out << lbr
+      out << "\n"
+      i = 0
+      while i < nfns
+        f = fns[i]
+        istr = i.to_s()
+        skind = f[:source_kind]
+        line = f[:source_line]
+        if line == nil
+          line = skind == :entry ? 1 : 0
+        kind_int = fn_meta_kind_to_int(skind)
+        out << "  { ptr, ptr, ptr, i32, i32 } { ptr @"
+        out << f[:name]
+        out << ", ptr @.wfm.file."
+        out << fn_file_ids[i].to_s()
+        out << ", ptr @.wfm."
+        out << istr
+        out << ".n, i32 "
+        out << line.to_s()
+        out << ", i32 "
+        out << kind_int.to_s()
+        out << " }"
+        if i < nfns - 1
+          out << ","
+        out << "\n"
+        i += 1
+      out << rbr
+      out << "\n"
+    out << "@__w_fn_meta_count = constant i32 "
+    out << nfns.to_s()
+    out << "\n\n"
+  else
+    out << "@__w_fn_meta = constant \[0 x { ptr, ptr, ptr, i32, i32 }] zeroinitializer\n"
+    out << "@__w_fn_meta_count = constant i32 0\n\n"
+    out << "@__w_fn_sym_meta = constant "
+    out << lbr
+    out << nfns.to_s()
+    out << " x { ptr, ptr, ptr, i32, i32 }"
+    out << rbr
+    if nfns == 0
+      out << " zeroinitializer\n"
+    else
+      out << " "
+      out << lbr
+      out << "\n"
+      i = 0
+      while i < nfns
+        f = fns[i]
+        istr = i.to_s()
+        skind = f[:source_kind]
+        line = f[:source_line]
+        if line == nil
+          line = skind == :entry ? 1 : 0
+        kind_int = fn_meta_kind_to_int(skind)
+        out << "  { ptr, ptr, ptr, i32, i32 } { ptr @.wfm."
+        out << istr
+        out << ".s, ptr @.wfm.file."
+        out << fn_file_ids[i].to_s()
+        out << ", ptr @.wfm."
+        out << istr
+        out << ".n, i32 "
+        out << line.to_s()
+        out << ", i32 "
+        out << kind_int.to_s()
+        out << " }"
+        if i < nfns - 1
+          out << ","
+        out << "\n"
+        i += 1
+      out << rbr
+      out << "\n"
+    out << "@__w_fn_sym_meta_count = constant i32 "
+    out << nfns.to_s()
+    out << "\n\n"
 
   out.to_s()
 
--> emit_stacktrace_llvm_used(has_ic_site = false)
+-> emit_stacktrace_llvm_used(has_ic_site = false, has_sym_meta = false)
+  if has_sym_meta
+    if has_ic_site
+      return "@llvm.used = appending global \[8 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_fn_sym_meta, ptr @__w_fn_sym_meta_count, ptr @__w_call_site, ptr @__w_call_site_count, ptr @__w_ic_site, ptr @__w_ic_site_count], section \"llvm.metadata\"\n\n"
+    return "@llvm.used = appending global \[6 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_fn_sym_meta, ptr @__w_fn_sym_meta_count, ptr @__w_call_site, ptr @__w_call_site_count], section \"llvm.metadata\"\n\n"
   if has_ic_site
     return "@llvm.used = appending global \[6 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_call_site, ptr @__w_call_site_count, ptr @__w_ic_site, ptr @__w_ic_site_count], section \"llvm.metadata\"\n\n"
   "@llvm.used = appending global \[4 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_call_site, ptr @__w_call_site_count], section \"llvm.metadata\"\n\n"
@@ -1311,6 +1399,46 @@ wire_void_call_contracts = ["void()", "void(i64)", "void(i64,i64)", "void(i64,i6
     i += 1
   out
 
+-> check_wire_inst_call_contract(mod, contracts, current_name, inst)
+  contract = wire_direct_call_contract(inst)
+  if contract == nil
+    return nil
+  iname = wire_get(inst, :name)
+  if iname == nil
+    return nil
+  prior = contracts[iname]
+  if prior != nil
+    prior_contract = prior[:contract]
+    if prior_contract != contract
+      fns = mod[:functions]
+      nfns = fns.size()
+      target_details = {}
+      tfi = 0
+      while tfi < nfns
+        target_func = fns[tfi]
+        tf_name = target_func[:name]
+        target_name = target_func[:original_name]
+        if target_name == nil
+          target_name = tf_name
+        target_arity = 0
+        tf_params = target_func[:params]
+        if tf_params != nil
+          target_arity = tf_params.size()
+        target_details[tf_name] = target_name + "/" + target_arity.to_s()
+        tfi += 1
+      prior_name = prior[:function]
+      target_detail = target_details[iname]
+      if target_detail == nil
+        target_detail = "external"
+      origins = wire_symbol_origins(mod, iname)
+      origin_detail = ""
+      if origins.size() > 0
+        origin_detail = "; origins " + origins.join(", ")
+      return "WIRE call contract mismatch for @" + iname + " (" + target_detail + origin_detail + "): " + prior_contract + " in @" + prior_name + " vs " + contract + " in @" + current_name
+  else
+    contracts[iname] = {contract: contract, function: current_name}
+  nil
+
 -> verify_wire_call_contracts(mod)
   contracts = {}
   fns = mod[:functions]
@@ -1329,41 +1457,117 @@ wire_void_call_contracts = ["void()", "void(i64)", "void(i64,i64)", "void(i64,i6
       ninstrs = instructions.size()
       ii = 0
       while ii < ninstrs
-        inst = instructions[ii]
-        contract = wire_direct_call_contract(inst)
-        if contract != nil
-          iname = wire_get(inst, :name)
-          if iname != nil
-            prior = contracts[iname]
-            if prior != nil
-              prior_contract = prior[:contract]
-              if prior_contract != contract
-                target_details = {}
-                tfi = 0
-                while tfi < nfns
-                  target_func = fns[tfi]
-                  tf_name = target_func[:name]
-                  target_name = target_func[:original_name]
-                  if target_name == nil
-                    target_name = tf_name
-                  target_arity = 0
-                  tf_params = target_func[:params]
-                  if tf_params != nil
-                    target_arity = tf_params.size()
-                  target_details[tf_name] = target_name + "/" + target_arity.to_s()
-                  tfi += 1
-                prior_name = prior[:function]
-                target_detail = target_details[iname]
-                if target_detail == nil
-                  target_detail = "external"
-                origins = wire_symbol_origins(mod, iname)
-                origin_detail = ""
-                if origins.size() > 0
-                  origin_detail = "; origins " + origins.join(", ")
-                return "WIRE call contract mismatch for @" + iname + " (" + target_detail + origin_detail + "): " + prior_contract + " in @" + prior_name + " vs " + contract + " in @" + current_name
-            else
-              contracts[iname] = {contract: contract, function: current_name}
+        err = check_wire_inst_call_contract(mod, contracts, current_name, instructions[ii])
+        if err != nil
+          return err
         ii += 1
       bi += 1
     fi += 1
   nil
+
+emitter_last_artifact_state = {
+  link_features: nil,
+  shard_plan: nil
+}
+
+-> mark_symbol_link_features(sym, feat)
+  if sym == "w_compiler_image_lean_profile"
+    feat[:compiler_image_runtime_profile] = true
+  elsif sym == "w_jit_load_object"
+    feat[:dynamic_exports_needed] = true
+  elsif sym == "w_slab_init_static_zstd" || sym == "w_zstd_compress_llvm_escaped"
+    feat[:needs_zstd] = true
+  if sym.starts_with?("w_metal_") || sym.starts_with?("w_gfx_") || sym.starts_with?("w_hid_") || sym.starts_with?("w_fused_gpu_run") || sym.starts_with?("w_gpu_")
+    feat[:bridges_needed] = true
+  if sym.starts_with?("w_blas_") || sym.starts_with?("w_array_cos_") || sym.starts_with?("w_array_sin_") || sym.starts_with?("w_array_sqrt_") || sym.starts_with?("w_array_exp_") || sym.starts_with?("w_array_log_") || sym.starts_with?("w_array_tan_")
+    feat[:blas_needed] = true
+  if sym.starts_with?("w_sparse_")
+    feat[:sparse_needed] = true
+  if sym.starts_with?("w_cg_")
+    feat[:quartz_needed] = true
+  if sym.starts_with?("w_media_")
+    feat[:media_needed] = true
+  if sym.starts_with?("w_sci_")
+    feat[:sci_io_needed] = true
+  if sym.starts_with?("w_tensor_")
+    feat[:wtensor_needed] = true
+  if sym.starts_with?("w_cuda_")
+    feat[:cuda_needed] = true
+  if sym.starts_with?("w_mlx_") || sym.starts_with?("w_f32_to_")
+    feat[:mlx_needed] = true
+  if sym.starts_with?("w_prime_") || sym.starts_with?("w_primes_") || sym.starts_with?("w_bigint_prime")
+    feat[:prime_needed] = true
+  if sym.starts_with?("w_string_normalize") || sym.starts_with?("w_string_grapheme_next") || sym.starts_with?("w_approx_eq")
+    feat[:unicode_needed] = true
+  if sym.index("lchs") != nil || sym.index("lexchars") != nil
+    feat[:lexchars_needed] = true
+  nil
+
+-> compute_module_link_features(declared_names, known_fns, strings, saw_lchs_mcall, embedded_ir_str)
+  feat = {
+    compiler_image_runtime_profile: false,
+    dynamic_exports_needed: false,
+    bridges_needed: false,
+    blas_needed: false,
+    sparse_needed: false,
+    quartz_needed: false,
+    media_needed: false,
+    sci_io_needed: false,
+    wtensor_needed: false,
+    cuda_needed: false,
+    mlx_needed: false,
+    prime_needed: false,
+    lexchars_needed: saw_lchs_mcall == true,
+    unicode_needed: false,
+    needs_zstd: false
+  }
+  dkeys = declared_names.keys()
+  i = 0
+  while i < dkeys.size()
+    mark_symbol_link_features(dkeys[i], feat)
+    i += 1
+  kkeys = known_fns.keys()
+  i = 0
+  while i < kkeys.size()
+    mark_symbol_link_features(kkeys[i], feat)
+    i += 1
+  if embedded_ir_str != nil && embedded_ir_str != ""
+    if embedded_ir_str.index("@w_compiler_image_lean_profile(") != nil
+      feat[:compiler_image_runtime_profile] = true
+    if embedded_ir_str.index("@w_jit_load_object(") != nil
+      feat[:dynamic_exports_needed] = true
+    if embedded_ir_str.index("@w_slab_init_static_zstd(") != nil || embedded_ir_str.index("@w_zstd_compress_llvm_escaped(") != nil
+      feat[:needs_zstd] = true
+    if embedded_ir_str.index("@w_metal_") != nil || embedded_ir_str.index("@w_gfx_") != nil || embedded_ir_str.index("@w_hid_") != nil || embedded_ir_str.index("@w_fused_gpu_run") != nil || embedded_ir_str.index("@w_gpu_") != nil
+      feat[:bridges_needed] = true
+    if embedded_ir_str.index("@w_blas_") != nil || embedded_ir_str.index("@w_array_cos_") != nil || embedded_ir_str.index("@w_array_sin_") != nil || embedded_ir_str.index("@w_array_sqrt_") != nil || embedded_ir_str.index("@w_array_exp_") != nil || embedded_ir_str.index("@w_array_log_") != nil || embedded_ir_str.index("@w_array_tan_") != nil
+      feat[:blas_needed] = true
+    if embedded_ir_str.index("@w_sparse_") != nil
+      feat[:sparse_needed] = true
+    if embedded_ir_str.index("@w_cg_") != nil
+      feat[:quartz_needed] = true
+    if embedded_ir_str.index("@w_media_") != nil
+      feat[:media_needed] = true
+    if embedded_ir_str.index("@w_sci_") != nil
+      feat[:sci_io_needed] = true
+    if embedded_ir_str.index("@w_tensor_") != nil
+      feat[:wtensor_needed] = true
+    if embedded_ir_str.index("@w_cuda_") != nil
+      feat[:cuda_needed] = true
+    if embedded_ir_str.index("@w_mlx_") != nil || embedded_ir_str.index("@w_f32_to_") != nil
+      feat[:mlx_needed] = true
+    if embedded_ir_str.index("@w_prime_") != nil || embedded_ir_str.index("@w_primes_") != nil || embedded_ir_str.index("@w_bigint_prime") != nil
+      feat[:prime_needed] = true
+    if embedded_ir_str.index("@w_string_normalize") != nil || embedded_ir_str.index("@w_string_grapheme_next") != nil || embedded_ir_str.index("@w_approx_eq") != nil
+      feat[:unicode_needed] = true
+    if embedded_ir_str.index("lchs") != nil || embedded_ir_str.index("lexchars") != nil
+      feat[:lexchars_needed] = true
+  if !feat[:lexchars_needed] && strings != nil
+    i = 0
+    while i < strings.size()
+      txt = strings[i][:text]
+      if txt != nil && (txt.index("lchs") != nil || txt.index("lexchars") != nil)
+        feat[:lexchars_needed] = true
+        break
+      i += 1
+  feat

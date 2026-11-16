@@ -80,13 +80,9 @@
     case type_id
     when 25
       # :SP token — one-or-more spaces/tabs between non-whitespace
-      # tokens. Value carries the raw source span so the parser /
-      # error formatter can see the exact whitespace if needed.
+      # tokens. Span lives in packed_tokens; --lex reconstructs text on demand.
       @packed_tokens.push(bits)
-      if len == 1
-        @values.push(@chars[off])
-      else
-        @values.push(slice_chars(off, len))
+      @values.push(nil)
       @token_count += 1
     when 1
       materialize_id(slice_chars(off, len), off)

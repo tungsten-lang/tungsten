@@ -567,6 +567,7 @@
   out << declare_fn("w_wire_store_mark", "i64", "")
   out << declare_fn("w_wire_clone", wv, wv)
   out << declare_fn("w_wire_temp_operands", wv, wv)
+  out << declare_fn("w_wire_apply_subst", wv, wv2)
   out << declare_fn("w_wire_sequence_from_array", wv, wv)
   out << declare_fn_attrs("w_wire_sequence_size", "i64", wv,
                           "nounwind willreturn memory(read)")
@@ -1590,6 +1591,22 @@
   out << "  %slots = load ptr, ptr %sp\n"
   out << "  %ep = getelementptr inbounds i64, ptr %slots, i64 %i\n"
   out << "  store i64 %val, ptr %ep\n"
+  out << "  ret i64 %arr\n"
+  out << "}\n"
+  out.to_s()
+
+# Bulk constant array-literal population: copies a compile-time constant i64
+# slice straight into a fresh WArray's slots buffer via llvm.memcpy.
+-> array_lit_copy_helper_ir()
+  out = StringBuffer(520)
+  out << "define private i64 @__w_array_lit_copy(i64 %arr, i64 %start_idx, ptr %src, i64 %bytes) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  out << "  %m = and i64 %arr, 140737488355312\n"
+  out << "  %ap = inttoptr i64 %m to ptr\n"
+  out << "  %sp = getelementptr inbounds i8, ptr %ap, i64 16\n"
+  out << "  %slots = load ptr, ptr %sp\n"
+  out << "  %dst = getelementptr inbounds i64, ptr %slots, i64 %start_idx\n"
+  out << "  call void @llvm.memcpy.p0.p0.i64(ptr align 8 %dst, ptr align 8 %src, i64 %bytes, i1 false)\n"
   out << "  ret i64 %arr\n"
   out << "}\n"
   out.to_s()

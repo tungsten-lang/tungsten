@@ -129,6 +129,38 @@
     fi += 1
   out.to_s()
 
+-> parallel_runtime_compile_shell(cc_prefix, runtime_root, sources)
+  out = StringBuffer(sources.size() * 192 + 64)
+  out << "{ "
+  fi = 0
+  while fi < sources.size()
+    name = sources[fi].split("/").last()
+    if name.ends_with?(".c") || name.ends_with?(".m")
+      name = name.slice(0, name.size() - 2)
+    obj = name + ".o"
+    ok = obj + ".ok"
+    out << "( "
+    out << cc_prefix
+    out << " -c "
+    out << dev_runtime_shell_quote(runtime_root + "/" + sources[fi])
+    out << " -o "
+    out << dev_runtime_shell_quote(obj)
+    out << " && touch "
+    out << dev_runtime_shell_quote(ok)
+    out << " ) & "
+    fi += 1
+  out << "wait; }"
+  fi = 0
+  while fi < sources.size()
+    name = sources[fi].split("/").last()
+    if name.ends_with?(".c") || name.ends_with?(".m")
+      name = name.slice(0, name.size() - 2)
+    out << " && test -f "
+    out << dev_runtime_shell_quote(name + ".o.ok")
+    fi += 1
+  out << " && rm -f *.o.ok"
+  out.to_s()
+
 -> extra_c_includes
   raw = env("TUNGSTEN_C_INCLUDES")
 
@@ -242,29 +274,42 @@
   flags == nil ? "" : flags
 
 -> link_binary(ll_path, out_path, runtime_objs, verbose = false)
-  ll_probe_text = read_file(ll_path)
-  compiler_image_runtime_profile = ll_code_has(ll_probe_text, "@w_compiler_image_lean_profile(")
-  dynamic_exports_needed = ll_needs_dynamic_exports(ll_probe_text)
-  bridges_needed = ll_needs_apple_bridges(ll_probe_text)
-  blas_needed = ll_needs_blas(ll_probe_text)
-  sparse_needed = ll_needs_sparse(ll_probe_text)
-  quartz_needed = ll_needs_quartz(ll_probe_text)
-  media_needed = ll_needs_media(ll_probe_text)
-  sci_io_needed = ll_needs_sci_io(ll_probe_text)
-  wtensor_needed = ll_needs_wtensor(ll_probe_text)
-  cuda_needed = ll_needs_cuda(ll_probe_text)
-  mlx_needed = ll_needs_mlx(ll_probe_text)
-  # Data-table gating (weak twins in runtime.c make absence safe):
-  #   prime    → ssmr_witness.c (512KB witness table; absent = exact 4-base
-  #              fallback over its range)
-  #   lexchars → lexchar_tables.c (348KB SIMD-lexer tables; absent = clear
-  #              raise if ever reached)
-  prime_needed = ll_code_has(ll_probe_text, "@w_prime_") || ll_code_has(ll_probe_text, "@w_primes_") || ll_code_has(ll_probe_text, "@w_bigint_prime")
-  # The String API is `.lchs`; direct lexchars runtime calls are covered too.
-  lexchars_needed = ll_needs_lexchars(ll_probe_text)
-  unicode_needed = ll_needs_unicode(ll_probe_text)
+  same_process_ir = g_incremental[:last_emitted_ll_path] == ll_path && g_incremental[:last_emitted_ll_text] != nil
+  ll_probe_text = same_process_ir ? g_incremental[:last_emitted_ll_text] : read_file(ll_path)
+  precomputed_lf = same_process_ir ? g_incremental[:last_emitted_link_features] : nil
+  if precomputed_lf != nil
+    compiler_image_runtime_profile = precomputed_lf[:compiler_image_runtime_profile] == true
+    dynamic_exports_needed = precomputed_lf[:dynamic_exports_needed] == true || env("TUNGSTEN_DYNAMIC_EXPORTS") == "1"
+    bridges_needed = precomputed_lf[:bridges_needed] == true
+    blas_needed = precomputed_lf[:blas_needed] == true
+    sparse_needed = precomputed_lf[:sparse_needed] == true
+    quartz_needed = precomputed_lf[:quartz_needed] == true
+    media_needed = precomputed_lf[:media_needed] == true
+    sci_io_needed = precomputed_lf[:sci_io_needed] == true
+    wtensor_needed = precomputed_lf[:wtensor_needed] == true
+    cuda_needed = precomputed_lf[:cuda_needed] == true
+    mlx_needed = precomputed_lf[:mlx_needed] == true
+    prime_needed = precomputed_lf[:prime_needed] == true
+    lexchars_needed = precomputed_lf[:lexchars_needed] == true
+    unicode_needed = precomputed_lf[:unicode_needed] == true
+    needs_zstd = precomputed_lf[:needs_zstd] == true
+  else
+    compiler_image_runtime_profile = ll_code_has(ll_probe_text, "@w_compiler_image_lean_profile(")
+    dynamic_exports_needed = ll_needs_dynamic_exports(ll_probe_text)
+    bridges_needed = ll_needs_apple_bridges(ll_probe_text)
+    blas_needed = ll_needs_blas(ll_probe_text)
+    sparse_needed = ll_needs_sparse(ll_probe_text)
+    quartz_needed = ll_needs_quartz(ll_probe_text)
+    media_needed = ll_needs_media(ll_probe_text)
+    sci_io_needed = ll_needs_sci_io(ll_probe_text)
+    wtensor_needed = ll_needs_wtensor(ll_probe_text)
+    cuda_needed = ll_needs_cuda(ll_probe_text)
+    mlx_needed = ll_needs_mlx(ll_probe_text)
+    prime_needed = ll_code_has(ll_probe_text, "@w_prime_") || ll_code_has(ll_probe_text, "@w_primes_") || ll_code_has(ll_probe_text, "@w_bigint_prime")
+    lexchars_needed = ll_needs_lexchars(ll_probe_text)
+    unicode_needed = ll_needs_unicode(ll_probe_text)
+    needs_zstd = ll_needs_zstd_text(ll_probe_text)
   link_started_at = clock
-  needs_zstd = ll_needs_zstd_text(ll_probe_text)
   # LTO is opt-in: whole-program LTO (lean binary, slow link) only for
   # --release / --lto; the default is a target-matched object runtime
   # archive (fatter binary, ~0.1s link vs ~5s recompiling the C runtime).
@@ -281,8 +326,8 @@
   # through to the from-source path. Frame-pointer mode is part of the archive
   # flags and identity, so debug builds can reuse it without losing backtraces.
   store_entries = []
-  if runtime_objs == nil && !full_runtime_lto && cross_target == "" && !needs_zstd
-    runtime_objs = dev_runtime_archive(verbose)
+  if runtime_objs == nil && !full_runtime_lto && cross_target == ""
+    runtime_objs = dev_runtime_archive(verbose, needs_zstd)
     if runtime_objs != nil
       store_entries.push(runtime_objs)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
@@ -302,33 +347,24 @@
   # user C includes are deliberately ineligible because their transitive header
   # graph is opaque to this driver.
   link_cache_slot = nil
-  if doing_lto || env("TUNGSTEN_LINK_CACHE") == "1"
+  if doing_lto || (ll_probe_text != nil && ll_probe_text.size() >= 4194304) || env("TUNGSTEN_LINK_CACHE") == "1"
     link_cache_slot = link_artifact_cache_slot(ll_probe_text, runtime_objs, needs_zstd)
   if link_cache_slot != nil && link_artifact_cache_try_reuse(link_cache_slot, out_path)
     if verbose
       << fmt_elapsed(phase_elapsed(link_started_at)) + " clang (link cache)"
     return true
-  if runtime_objs == nil && full_runtime_lto && cross_target == "" && !needs_zstd
-    runtime_objs = dev_runtime_lto_objects(compiler_image_runtime_profile, verbose)
+  if runtime_objs == nil && full_runtime_lto && cross_target == ""
+    runtime_objs = dev_runtime_lto_objects(compiler_image_runtime_profile, verbose, needs_zstd)
     if runtime_objs != nil
       store_entries.push(runtime_objs.slice(0, runtime_objs.size() - 4))
 
-  # Parallel codegen — OPT-IN via TUNGSTEN_PARALLEL_CODEGEN=1. -O3 on one
-  # big module is single-threaded and ~90% of a large build's wall; with
-  # homebrew LLVM present, llvm-split the module ~14 ways and compile the
-  # parts with parallel clang -c (self-compile codegen 13.5s -> ~5s, -o
-  # wall 23.5s -> 17.2s). NOT the default: the parts must be compiled by
-  # HOMEBREW clang (Apple clang can't read llvm-split's newer bitcode, and
-  # its textual IR carries newer-only attributes), and brew LLVM 22's
-  # arm64 codegen measured 1.54x MORE instructions on nbody's hot fp loop
-  # than Apple clang on identical IR — a silent runtime-quality trade is
-  # unacceptable, so the build-speed win is explicit. Any failure falls
-  # back to the single-TU path. Plain -O3 native builds only (dev -O0
-  # doesn't need it; PGO must not mix brew instrumentation with Apple's
-  # profile runtime).
+  g_incremental[:temp_shard_dir] = nil
   parallel_objs = nil
-  if clang_opt == "-O3" && cross_target == "" && !full_runtime_lto && !frame_pointers && env("TUNGSTEN_PARALLEL_CODEGEN") == "1"
-    parallel_objs = parallel_codegen_objects(ll_path, verbose)
+  if cross_target == "" && !full_runtime_lto
+    if clang_opt == "-O3" && !frame_pointers && env("TUNGSTEN_PARALLEL_CODEGEN") == "1"
+      parallel_objs = parallel_codegen_objects(ll_path, verbose)
+    if parallel_objs == nil
+      parallel_objs = native_sharded_codegen_objects(ll_path, clang_opt, store_entries, verbose)
 
   clang_cmd = StringBuffer(0)
   clang_cmd << host_c_compiler()
@@ -572,6 +608,9 @@
   clang_cmd << " -o "
   clang_cmd << out_path
   result = system(clang_cmd.to_s())
+  if g_incremental[:temp_shard_dir] != nil
+    system("rm -rf " + dev_runtime_shell_quote(g_incremental[:temp_shard_dir]))
+    g_incremental[:temp_shard_dir] = nil
   log_phase(verbose, "clang", link_started_at)
   # Warm macOS's first-exec malware-scan cache now rather than on the user's
   # first run (see w_preflight in runtime/runtime.c): exec the fresh binary
@@ -1049,7 +1088,7 @@
   dev_runtime_append_env(config, "PKG_CONFIG_LIBDIR")
   cache_dir + "/runtime-native-" + wyhash64_hex_string(config.to_s()) + ".a"
 
--> dev_runtime_archive(verbose = false)
+-> dev_runtime_archive(verbose = false, needs_zstd = false)
   runtime_dir = resolve_runtime_dir
   runtime_kind = runtime_identity()
   runtime_root = dev_runtime_source_identity(runtime_dir, runtime_kind)
@@ -1068,11 +1107,15 @@
   tcf = tls_cflags
   if tcf != ""
     compile_flags += " " + tcf
+  if needs_zstd
+    zcf = zstd_cflags
+    if zcf != ""
+      compile_flags += " " + zcf
   thresholds_path = runtime_root + "/generated/bigint_thresholds.h"
   generated_thresholds = "absent"
   if file?(thresholds_path)
     generated_thresholds = "present"
-  sources = program_runtime_sources(runtime_root, false)
+  sources = program_runtime_sources(runtime_root, needs_zstd)
   sources_digest = dev_runtime_sources_digest(runtime_root, runtime_kind)
   if sources_digest == nil
     return nil
@@ -1096,19 +1139,14 @@
   # the same name publish the same bytes.
   compile_flags += dev_runtime_path_map_flag(runtime_root)
 
+  cc_prefix = cc_command + " " + compile_flags + " -I" + dev_runtime_shell_quote(runtime_root)
   cc = StringBuffer(0)
   cc << "build_dir="
   cc << dev_runtime_shell_quote(archive + ".build.")
   cc << "$$; archive_tmp="
   cc << dev_runtime_shell_quote(archive + ".tmp.")
   cc << "$$; rm -rf \"$build_dir\" \"$archive_tmp\" && mkdir -p \"$build_dir\" && cd \"$build_dir\" && "
-  cc << cc_command
-  cc << " "
-  cc << compile_flags
-  cc << " -I"
-  cc << dev_runtime_shell_quote(runtime_root)
-  cc << " -c "
-  cc << runtime_source_args(runtime_root, sources)
+  cc << parallel_runtime_compile_shell(cc_prefix, runtime_root, sources)
   cc << " && "
   cc << ar_command
   cc << " rcs \"$archive_tmp\" "
@@ -1143,7 +1181,7 @@
   dev_runtime_append_env(config, "PKG_CONFIG_LIBDIR")
   cache_dir + "/runtime-lto-" + wyhash64_hex_string(config.to_s())
 
--> dev_runtime_lto_objects(compiler_image_runtime_profile = false, verbose = false)
+-> dev_runtime_lto_objects(compiler_image_runtime_profile = false, verbose = false, needs_zstd = false)
   clang_opt = env("TUNGSTEN_CLANG_OPT")
   if clang_opt != nil && clang_opt.index("-fprofile") != nil
     return nil
@@ -1169,9 +1207,13 @@
   tcf = tls_cflags
   if tcf != ""
     compile_flags += " " + tcf
+  if needs_zstd
+    zcf = zstd_cflags
+    if zcf != ""
+      compile_flags += " " + zcf
   thresholds_path = runtime_root + "/generated/bigint_thresholds.h"
   generated_thresholds = file?(thresholds_path) ? "present" : "absent"
-  sources = program_runtime_sources(runtime_root, false)
+  sources = program_runtime_sources(runtime_root, needs_zstd)
   sources_digest = dev_runtime_sources_digest(runtime_root, runtime_kind)
   if sources_digest == nil
     return nil
@@ -1188,6 +1230,7 @@
 
   compile_flags += dev_runtime_path_map_flag(runtime_root)
 
+  cc_prefix = cc_command + " " + compile_flags + " -I" + dev_runtime_shell_quote(runtime_root)
   cc = StringBuffer(0)
   # Build in a private directory and publish it with one rename. A published
   # bundle is never replaced or moved aside: a linker may be reading it, and
@@ -1197,13 +1240,7 @@
   cc << "bundle="
   cc << dev_runtime_shell_quote(bundle_dir)
   cc << "; build_dir=\"$bundle.build.$$\"; rm -rf \"$build_dir\" && mkdir -p \"$build_dir\" && cd \"$build_dir\" && "
-  cc << cc_command
-  cc << " "
-  cc << compile_flags
-  cc << " -I"
-  cc << dev_runtime_shell_quote(runtime_root)
-  cc << " -c "
-  cc << runtime_source_args(runtime_root, sources)
+  cc << parallel_runtime_compile_shell(cc_prefix, runtime_root, sources)
   cc << " && touch .ready && cd / && { test -e \"$bundle/.ready\" || mv \"$build_dir\" \"$bundle\" 2>/dev/null || true; }"
   cc << "; rm -rf \"$build_dir\" \"$bundle/$(basename \"$build_dir\")\"; test -e \"$bundle/.ready\""
   if system(cc.to_s()) != true
@@ -1282,43 +1319,43 @@
   runtime_dir = File.expand_path(resolve_runtime_dir)
   object_glob = tmp_dir + "/*.o"
 
-  cc = StringBuffer(0)
-  cc << "cd "
-  cc << dev_runtime_shell_quote(tmp_dir)
-  cc << " && "
-  cc << host_c_compiler()
-  cc << " "
-  cc << cross_compile_flags()
-  cc << profile_opt_flag()
-  cc << " "
-  cc << debug_compile_flag()
-  cc << " "
-  cc << march_flags()
-  cc << " "
+  cc_prefix = StringBuffer(0)
+  cc_prefix << host_c_compiler()
+  cc_prefix << " "
+  cc_prefix << cross_compile_flags()
+  cc_prefix << profile_opt_flag()
+  cc_prefix << " "
+  cc_prefix << debug_compile_flag()
+  cc_prefix << " "
+  cc_prefix << march_flags()
+  cc_prefix << " "
 
   if needs_zstd
     zcf = zstd_cflags
 
     if zcf != ""
-      cc << zcf
-      cc << " "
+      cc_prefix << zcf
+      cc_prefix << " "
 
   tcf = tls_cflags
   if tcf != ""
-    cc << tcf
-    cc << " "
+    cc_prefix << tcf
+    cc_prefix << " "
 
   if (release_mode || explicit_lto) && !no_lto
-    cc << (release_mode ? "-flto=full " : "-flto ")
+    cc_prefix << (release_mode ? "-flto=full " : "-flto ")
 
   if frame_pointers
-    cc << "-fno-omit-frame-pointer "
+    cc_prefix << "-fno-omit-frame-pointer "
 
-  cc << "-I"
-  cc << dev_runtime_shell_quote(runtime_dir)
-  cc << " -c "
-  cc << runtime_source_args(runtime_dir, program_runtime_sources(runtime_dir, needs_zstd))
-  cc << " "
+  cc_prefix << "-I"
+  cc_prefix << dev_runtime_shell_quote(runtime_dir)
+
+  cc = StringBuffer(0)
+  cc << "cd "
+  cc << dev_runtime_shell_quote(tmp_dir)
+  cc << " && "
+  cc << parallel_runtime_compile_shell(cc_prefix.to_s(), runtime_dir, program_runtime_sources(runtime_dir, needs_zstd))
 
   << "Compiling runtime..."
 

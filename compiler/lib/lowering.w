@@ -995,12 +995,15 @@ use lowering/definitions
   mod[:require_bigint_mul1_8_src] = true
   nil
 
--> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false, source_manifest = nil, release_mode = false)
-  cache_probe = incremental_core_cache_prepare(ast, source_manifest, fast_mode, build_defines, math_mode, no_static_slab, release_mode)
+-> lower_ast(ast, source_path, verbose = false, fast_mode = false, build_defines = nil, math_mode = :precise, no_static_slab = false, source_manifest = nil, release_mode = false, auto_closed_world = false)
+  cache_probe = incremental_core_cache_prepare(ast, source_manifest, fast_mode, build_defines, math_mode, no_static_slab, release_mode, auto_closed_world)
   mod = init_lowering_module(source_path, fast_mode, math_mode, no_static_slab, build_defines, cache_probe[:retain_mark])
   mod[:incremental_core_cache_probe] = cache_probe
   require_bigint_source_seams(mod, ast.expressions)
   collect_lowering_contracts(mod, ast.expressions, source_path)
+  if auto_closed_world
+    mod[:protect_core] = true
+    mod[:auto_closed_world_reachability] = true
 
   # Generic class monomorphization runs BEFORE the main expressions walk
   # so specialized classes are visible to every downstream pass.
@@ -1065,11 +1068,12 @@ use lowering/definitions
   # (typed arrays / floats only, no ABI change, no clone). Needs the
   # top-level static types just collected; consumed in
   # populate_definition_var_types when each body is lowered below.
-  collect_param_type_observations(mod, ast.expressions, core_expressions, mod[:core_top_level_static_types])
+  obs_summary = collect_param_type_observations(mod, ast.expressions, core_expressions, mod[:core_top_level_static_types])
   if core_expressions != nil
-    infer_return_types_fixed_point(mod, user_inferable)
-    preregister_top_level_raw_abis(mod, user_expressions)
-  else
+    if obs_summary != nil && obs_summary[:user] == true
+      infer_return_types_fixed_point(mod, user_inferable)
+      preregister_top_level_raw_abis(mod, user_expressions)
+  elsif obs_summary != nil && obs_summary[:any] == true
     infer_return_types_fixed_point(mod, inferable_methods)
     preregister_top_level_raw_abis(mod, ast.expressions)
 
@@ -1233,59 +1237,89 @@ use lowering/definitions
 # -- Emit WIRE flag: dump WIRE as text --
 
 -> emit_wire_text(mod)
-  out = "=== WIRE IR ===\n"
-  out = out + "source: " + mod[:source_path] + "\n"
-  out = out + "strings: " + mod[:strings].size().to_s() + "\n"
-  out = out + "functions: " + mod[:functions].size().to_s() + "\n\n"
+  out = StringBuffer(65536)
+  out << "=== WIRE IR ===\n"
+  out << "source: "
+  out << mod[:source_path]
+  out << "\nstrings: "
+  out << mod[:strings].size().to_s()
+  out << "\nfunctions: "
+  out << mod[:functions].size().to_s()
+  out << "\n\n"
   if mod[:core_abi_hash] != nil
-    out = out + "core abi: " + mod[:core_abi_hash] + " (" + mod[:core_abi_function_count].to_s() + " functions, " + mod[:core_abi_class_count].to_s() + " classes, " + mod[:core_abi_global_count].to_s() + " globals)\n"
+    out << "core abi: "
+    out << mod[:core_abi_hash]
+    out << " ("
+    out << mod[:core_abi_function_count].to_s()
+    out << " functions, "
+    out << mod[:core_abi_class_count].to_s()
+    out << " classes, "
+    out << mod[:core_abi_global_count].to_s()
+    out << " globals)\n"
     if mod[:core_reuse_contract] == :stable
-      out = out + "core reuse: stable\n\n"
+      out << "core reuse: stable\n\n"
     else
-      out = out + "core reuse: monolithic fallback (" + mod[:core_reuse_fallback_reason] + ")\n\n"
+      out << "core reuse: monolithic fallback ("
+      out << mod[:core_reuse_fallback_reason]
+      out << ")\n\n"
 
   mod_fns = mod[:functions]
   n_mod_fns = mod_fns.size()
   i = 0
   while i < n_mod_fns
     wfn = mod_fns[i]
-    out = out + "function " + wfn[:name] + "("
-    out = out + wfn[:params].join(", ")
-    out = out + ") -> " + wfn[:return_type] + "\n"
+    out << "function "
+    out << wfn[:name]
+    out << "("
+    out << wfn[:params].join(", ")
+    out << ") -> "
+    out << wfn[:return_type]
+    out << "\n"
 
     wfn_blocks = wfn[:blocks]
     n_wfn_blocks = wfn_blocks.size()
     j = 0
     while j < n_wfn_blocks
       blk = wfn_blocks[j]
-      out = out + "  " + blk[:label] + ":\n"
+      out << "  "
+      out << blk[:label]
+      out << ":\n"
       blk_instrs = blk[:instructions]
       n_blk_instrs = blk_instrs.size()
       k = 0
       while k < n_blk_instrs
         inst = blk_instrs[k]
-        out = out + "    " + wire_kind(inst).to_s()
+        out << "    "
+        out << wire_kind(inst).to_s()
         # Print key fields
         if wire_get(inst, :temp) != nil
-          out = out + " " + wire_get(inst, :temp)
+          out << " "
+          out << wire_get(inst, :temp)
         if wire_get(inst, :name) != nil
-          out = out + " @" + wire_get(inst, :name)
+          out << " @"
+          out << wire_get(inst, :name)
         if wire_get(inst, :devirt_fn) != nil
-          out = out + " devirt=@" + wire_get(inst, :devirt_fn)
-          out = out + " class=" + wire_get(inst, :devirt_class)
+          out << " devirt=@"
+          out << wire_get(inst, :devirt_fn)
+          out << " class="
+          out << wire_get(inst, :devirt_class)
         if wire_get(inst, :construct_fn) != nil
-          out = out + " construct=@" + wire_get(inst, :construct_fn)
-          out = out + " class=" + wire_get(inst, :construct_class)
+          out << " construct=@"
+          out << wire_get(inst, :construct_fn)
+          out << " class="
+          out << wire_get(inst, :construct_class)
         if wire_get(inst, :value) != nil
-          out = out + " " + wire_get(inst, :value).to_s()
+          out << " "
+          out << wire_get(inst, :value).to_s()
         if wire_get(inst, :label) != nil
-          out = out + " %" + wire_get(inst, :label)
-        out = out + "\n"
+          out << " %"
+          out << wire_get(inst, :label)
+        out << "\n"
         k += 1
       j += 1
-    out = out + "\n"
+    out << "\n"
     i += 1
-  out
+  out.to_s()
 
 # `use math/globals` alias detection: true when a top-level fn def is an
 # exact delegation to the same-named Math intrinsic — a single-expression

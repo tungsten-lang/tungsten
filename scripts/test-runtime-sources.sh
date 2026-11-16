@@ -45,14 +45,14 @@ expect() {
   got="$(sel "$@")"
   [ "$got" = "$want" ] || fail "sources.sh $*: expected '$want', got '$got'"
 }
-expect "runtime.c terminal_input.c aks.c event_kqueue.c tls_stub.c" darwin program event tls-stub
-expect "runtime.c terminal_input.c aks.c event_epoll.c tls.c slab_zstd.c" linux program event tls zstd
-expect "runtime.c terminal_input.c aks.c event_iouring.c tls_stub.c" linux program event-iouring tls-stub
-expect "runtime.c terminal_input.c aks.c event_kqueue.c tls_stub.c slab_zstd.c ssmr_witness.c lexchar_tables.c unicode_tables.c metal.m hid_bridge.m blas_bridge.c" \
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_kqueue.c tls_stub.c" darwin program event tls-stub
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_epoll.c tls.c slab_zstd.c" linux program event tls zstd
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_iouring.c tls_stub.c" linux program event-iouring tls-stub
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_kqueue.c tls_stub.c slab_zstd.c ssmr_witness.c lexchar_tables.c unicode_tables.c metal.m hid_bridge.m blas_bridge.c" \
   darwin compiler event tls-stub zstd
-expect "runtime.c terminal_input.c aks.c event_epoll.c tls_stub.c slab_zstd_stub.c http2.c ssmr_witness.c lexchar_tables.c unicode_tables.c" \
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_epoll.c tls_stub.c slab_zstd_stub.c http2.c ssmr_witness.c lexchar_tables.c unicode_tables.c" \
   linux compiler event tls-stub zstd-stub http2
-expect "runtime.c aks.c tls_stub.c slab_zstd_stub.c ssmr_witness.c lexchar_tables.c unicode_tables.c tensor_bridge.c" wasm wasm
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c aks.c tls_stub.c slab_zstd_stub.c ssmr_witness.c lexchar_tables.c unicode_tables.c tensor_bridge.c" wasm wasm
 expect "metal.m graphics.m hid_bridge.m" darwin companion:bridges
 expect "" linux companion:bridges
 expect "openblas_bridge.c" linux companion:blas
@@ -102,10 +102,13 @@ runtime_files() {
   # the runtime/ sources on one traced command line, relative, in order
   tr ' ' '\n' | tr -d "'" | sed -n 's|.*/runtime//*||p' | grep -E '\.(c|m)$' | tr '\n' ' ' | sed 's/ $//'
 }
-archive_cmd="$(grep -- ' -c ' "$TMP/prime.trace" | grep '/runtime/runtime\.c' | head -1 || true)"
-[ -n "$archive_cmd" ] || fail "no runtime archive compile in the trace: $(cat "$TMP/prime.trace" | head -5)"
-want="$(sel "$HOST" program event tls-stub)"
-got="$(printf '%s\n' "$archive_cmd" | runtime_files)"
+sorted_words() {
+  tr ' ' '\n' | grep -v '^$' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'
+}
+archive_cmds="$(grep -- ' -c ' "$TMP/prime.trace" | grep -v '/companion-' || true)"
+[ -n "$archive_cmds" ] || fail "no runtime archive compile in the trace: $(cat "$TMP/prime.trace" | head -5)"
+want="$(sel "$HOST" program event tls-stub | sorted_words)"
+got="$(printf '%s\n' "$archive_cmds" | runtime_files | sorted_words)"
 [ "$got" = "$want" ] || fail "runtime archive compiles '$got', the manifest says '$want'"
 companion_cmd="$(grep -- ' -c ' "$TMP/prime.trace" | grep 'ssmr_witness\.c' | head -1 || true)"
 [ -n "$companion_cmd" ] || fail "no companion compile for 7.prime? in the trace"
@@ -114,7 +117,7 @@ got="$(printf '%s\n' "$companion_cmd" | runtime_files)"
 # The from-source link: the program set, then each companion the driver
 # tried to compile on its own (in that order; 7.prime? needs the prime
 # companion and whatever else its IR references).
-companions="$(grep -- ' -c ' "$TMP/prime.trace" | grep -v '/runtime/runtime\.c' | runtime_files | tr '\n' ' ' | sed 's/ $//')"
+companions="$(grep -- ' -c ' "$TMP/prime.trace" | grep '/companion-' | runtime_files | tr '\n' ' ' | sed 's/ $//')"
 link_cmd="$(tail -n 1 "$TMP/prime.trace")"
 got="$(printf '%s\n' "$link_cmd" | runtime_files)"
 want="$(sel "$HOST" program event tls-stub) $companions"

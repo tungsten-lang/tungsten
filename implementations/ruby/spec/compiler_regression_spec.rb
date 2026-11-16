@@ -16,9 +16,15 @@ RSpec.describe "Compiler regressions" do
     skip "compiled compiler not available" unless File.executable?(TUNGSTEN_BOOTSTRAP)
 
     runtime_c = File.join(PROJECT_ROOT, "runtime/runtime.c")
+    runtime_crypto_c = File.join(PROJECT_ROOT, "runtime/runtime_crypto.c")
+    runtime_gmp_c = File.join(PROJECT_ROOT, "runtime/runtime_gmp.c")
+    runtime_http_c = File.join(PROJECT_ROOT, "runtime/runtime_http.c")
     terminal_input_c = File.join(PROJECT_ROOT, "runtime/terminal_input.c")
     metal_m   = File.join(PROJECT_ROOT, "runtime/metal.m")
     needs_rebuild = !File.exist?(RUNTIME_ARCHIVE) || File.mtime(runtime_c) > File.mtime(RUNTIME_ARCHIVE)
+    needs_rebuild ||= File.mtime(runtime_crypto_c) > File.mtime(RUNTIME_ARCHIVE)
+    needs_rebuild ||= File.mtime(runtime_gmp_c) > File.mtime(RUNTIME_ARCHIVE)
+    needs_rebuild ||= File.mtime(runtime_http_c) > File.mtime(RUNTIME_ARCHIVE)
     needs_rebuild ||= File.mtime(terminal_input_c) > File.mtime(RUNTIME_ARCHIVE)
     needs_rebuild ||= File.exist?(metal_m) && File.mtime(metal_m) > File.mtime(RUNTIME_ARCHIVE)
     if needs_rebuild
@@ -32,7 +38,9 @@ RSpec.describe "Compiler regressions" do
       # (kqueue is #ifdef __APPLE__, so it compiles to an empty object there),
       # breaking every link with "undefined symbol: w_event_register/init".
       event_src = RUBY_PLATFORM =~ /darwin/ ? "event_kqueue.c" : "event_epoll.c"
-      system("cd #{PROJECT_ROOT}/runtime && clang -O3 -DNDEBUG #{zstd_cflags} -c runtime.c terminal_input.c #{event_src} tls_stub.c aks.c slab_zstd.c#{metal_cmd} && ar rcs runtime.a *.o && rm -f *.o")
+      rt_srcs = "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c " \
+                "terminal_input.c #{event_src} tls_stub.c aks.c slab_zstd.c"
+      system("cd #{PROJECT_ROOT}/runtime && clang -O3 -DNDEBUG #{zstd_cflags} -c #{rt_srcs}#{metal_cmd} && ar rcs runtime.a *.o && rm -f *.o")
     end
   end
 

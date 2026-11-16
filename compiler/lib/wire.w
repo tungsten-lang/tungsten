@@ -909,6 +909,8 @@ wire_var_slot_names = build_wire_var_slot_names()
     subst_count = subst.size()
   if subst_count == 0
     return inst
+  if runtime_identity() == "compiled-runtime" && ccall_nobox("w_is_wire_extern", inst) == 1
+    return ccall_rawargs("w_wire_apply_subst", inst, subst)
   op = wire_kind(inst)
   # Fast-path the hottest opcodes in frequency order.
   if op == :call_direct_i64 || op == :call_direct_void || op == :call_direct_ptr || op == :call_direct_i128

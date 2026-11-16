@@ -46,6 +46,7 @@ void tc_chunk_free(TcChunk *chunk) {
   free(chunk->method_ic_fn);
   free(chunk->astnode_fn_cache);
   free(chunk->astnode_fn_state);
+  free(chunk->setter_sym_for_const);
   for (size_t i = 0; i < chunk->case_table_count; i++) {
     // keys point into the global intern table; do not free.
     free(chunk->case_tables[i].keys);

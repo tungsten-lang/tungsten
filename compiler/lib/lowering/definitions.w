@@ -683,7 +683,7 @@
 # across stores to other arrays. A rebound param drops out; fewer than two
 # array params means nothing to separate. TUNGSTEN_NO_ALIAS_SCOPES=1
 # disables the whole feature. Returns {param name → slot} or nil.
--> alias_scope_slots(node, var_types)
+-> alias_scope_slots(node, var_types, assign_counts = nil)
   if node.param_types == nil || node.params == nil || env("TUNGSTEN_NO_ALIAS_SCOPES") == "1"
     return nil
   slots = {}
@@ -692,7 +692,8 @@
   while pti < node.param_types.size() && pti < node.params.size() && nslots < 32
     pname = param_runtime_name(node.params[pti])
     ptv = var_types[pname]
-    if ptv != nil && ptv.to_s().starts_with?("typed_array_") && !alias_name_reassigned?(node.body, pname)
+    reassigned = assign_counts != nil ? (assign_counts[pname] != nil && assign_counts[pname] > 0) : alias_name_reassigned?(node.body, pname)
+    if ptv != nil && ptv.to_s().starts_with?("typed_array_") && !reassigned
       slots[pname] = nslots
       nslots += 1
     pti += 1
@@ -931,6 +932,9 @@
         else
           rt = infer_fn_return_type(node, lowering_infer_maps)
         flags = definition_raw_abi_flags(node, true, mod[:fn_return_types], rt, child_var_types)
+        if mod[:raw_abi_flags_memo] == nil
+          mod[:raw_abi_flags_memo] = {}
+        mod[:raw_abi_flags_memo][node] = [rt, flags]
         if flags[0] || flags[1]
           call_key = method_call_key_for_def(node)
           mod[:raw_callable_fns][call_key] = function_name_for_def(node)
@@ -1090,7 +1094,7 @@
   # the array_load/store_u64 intrinsics on a slotted param carry its slot
   # (stamp_alias_scope), and the emitter tags their payload accesses with
   # !alias.scope / !noalias (alias_scope_suffix).
-  alias_slots = alias_scope_slots(node, child_var_types)
+  alias_slots = alias_scope_slots(node, child_var_types, child_ctx[:local_assignment_counts])
   if alias_slots != nil
     child_ctx[:alias_slots] = alias_slots
     new_fn[:alias_nslots] = alias_slots.size()
@@ -1117,7 +1121,13 @@
   # and TRUNCATING values >2^48. When rt is nil, rely on body_int_ok below, which
   # is param-type-aware (walks returns via child_var_types). A non-nil rt must
   # still be machine-int.
-  raw_abi_flags = definition_raw_abi_flags(node, ctx[:class_name] == nil, mod[:fn_return_types], rt, child_var_types)
+  raw_abi_flags = nil
+  if ctx[:class_name] == nil && mod[:raw_abi_flags_memo] != nil
+    memo_entry = mod[:raw_abi_flags_memo][node]
+    if memo_entry != nil && memo_entry[0] == rt
+      raw_abi_flags = memo_entry[1]
+  if raw_abi_flags == nil
+    raw_abi_flags = definition_raw_abi_flags(node, ctx[:class_name] == nil, mod[:fn_return_types], rt, child_var_types)
   raw_i64_sig = raw_abi_flags[0]
   raw_int_sig = raw_abi_flags[1]
   # Decided after the raw ABI: a raw-i64 fn returns its value unboxed, so a

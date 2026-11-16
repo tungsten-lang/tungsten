@@ -239,32 +239,149 @@ incremental_library_cache_state = {
     i += 1
   wyhash64_hex_string(text.to_s())
 
-# Function-producing expressions outside a definition would be lowered again
-# on a hit, duplicating cached workers. Definition bodies are opaque here: all
-# functions they create carry the declaring path and are part of the snapshot.
--> incremental_library_cache_nondef_safe?(value)
+-> incremental_library_cache_fast_text?(node, mod)
+  if node == nil || !is_ast_node?(node)
+    return false
+  k = ast_kind(node)
+  if k != :string && k != :symbol
+    return false
+  v = ast_get(node, :value)
+  if v == nil
+    return false
+  s = v.to_s()
+  n = s.size()
+  max_len = (mod != nil && mod[:no_static_slab] != true) ? 61 : 5
+  if n > max_len
+    return false
+  i = 0
+  while i < n
+    if s.byte_at(i) >= 128
+      return false
+    i += 1
+  true
+
+# Function-producing or module-counter-mutating expressions outside a definition
+# would be lowered again on a hit, desynchronizing cached symbols/counters.
+# Definition bodies are opaque here: all functions they create carry the
+# declaring path and are part of the snapshot.
+-> incremental_library_cache_nondef_safe?(value, mod = nil, in_machine_int = false)
   if value == nil
     return true
   if type(value) == "Array"
     i = 0
     while i < value.size()
-      if !incremental_library_cache_nondef_safe?(value[i])
+      if !incremental_library_cache_nondef_safe?(value[i], mod, in_machine_int)
         return false
       i += 1
     return true
   if !is_ast_node?(value)
     return true
   kind = ast_kind(value)
-  if kind in (:block :go :call :hash_literal :array :if :while :until :case :begin :rescue_expr :for :with :parallel_with)
+  if kind in (:block :go :if :while :until :case :case_value :begin :rescue_expr :for :with :parallel_with :and :or :quantity :string_interp :byte_array_interp :compound_assign :index_assign :attr_assign :multi_assign :splat :hash_splat)
     return false
   if kind in (:fn_def :method_def :gpu_kernel_def)
     return true
-  if kind == :binary_op && ast_get(value, :op) in (:DOT_PLUS :DOT_MINUS :DOT_STAR :DOT_SLASH)
+  if kind == :int
+    iv = ast_get(value, :value)
+    return type(iv) == "Int" && iv >= -140737488355328 && iv <= 140737488355327
+  if kind == :assign
+    target = ast_get(value, :target)
+    if target == nil || !is_ast_node?(target) || !(ast_kind(target) in (:var :cvar :gvar))
+      return false
+    return incremental_library_cache_nondef_safe?(ast_get(value, :value), mod, false)
+  if kind == :type_ascription
+    hint = normalize_type_symbol(ast_get(value, :type_hint))
+    expr = ast_get(value, :expression)
+    if is_machine_int_type(hint) && expr != nil && is_ast_node?(expr) && ast_kind(expr) != :if
+      return incremental_library_cache_nondef_safe?(expr, mod, true)
     return false
-  children = ast_children(value)
+  if kind == :unary_op
+    uop = ast_get(value, :op)
+    uarg = ast_get(value, :operand)
+    if uop in (:MINUS :PLUS) && uarg != nil && is_ast_node?(uarg) && ast_kind(uarg) == :int
+      iv = ast_get(uarg, :value)
+      return type(iv) == "Int" && iv >= -140737488355327 && iv <= 140737488355327
+    return false
+  if kind == :binary_op
+    bop = ast_get(value, :op)
+    lhs = ast_get(value, :left)
+    rhs = ast_get(value, :right)
+    if in_machine_int && bop in (:PLUS :MINUS :STAR :LSHIFT :RSHIFT :AMPERSAND :PIPE :CARET)
+      return incremental_library_cache_nondef_safe?(lhs, mod, true) && incremental_library_cache_nondef_safe?(rhs, mod, true)
+    if bop in (:EQ :NEQ)
+      lhs_fast = (lhs != nil && is_ast_node?(lhs) && ast_kind(lhs) in (:nil_lit :bool)) || incremental_library_cache_fast_text?(lhs, mod)
+      rhs_fast = (rhs != nil && is_ast_node?(rhs) && ast_kind(rhs) in (:nil_lit :bool)) || incremental_library_cache_fast_text?(rhs, mod)
+      if lhs_fast || rhs_fast
+        return incremental_library_cache_nondef_safe?(lhs, mod, false) && incremental_library_cache_nondef_safe?(rhs, mod, false)
+    return false
+  if kind == :in_test
+    lhs = ast_get(value, :value)
+    elems = ast_get(value, :elements)
+    if elems == nil || elems.size() == 0 || !incremental_library_cache_nondef_safe?(lhs, mod, false)
+      return false
+    i = 0
+    while i < elems.size()
+      el = elems[i]
+      if el == nil || !is_ast_node?(el)
+        return false
+      ek = ast_kind(el)
+      if ek == :int
+        iv = ast_get(el, :value)
+        if type(iv) != "Int" || iv < -140737488355328 || iv > 140737488355327
+          return false
+      elsif !incremental_library_cache_fast_text?(el, mod)
+        return false
+      i += 1
+    return true
+  if kind == :array
+    if ast_get(value, :const_safe) == true || ast_get(value, :reuse_safe) == true || ast_get(value, :recycle_safe) == true
+      return false
+    return incremental_library_cache_nondef_safe?(ast_get(value, :elements), mod, false)
+  if kind == :hash_literal
+    if ast_get(value, :reuse_safe) == true || ast_get(value, :recycle_safe) == true || ast_get(value, :drain_safe) == true
+      return false
+    entries = ast_get(value, :entries)
+    if entries == nil
+      return true
+    i = 0
+    while i < entries.size()
+      pair = entries[i]
+      if type(pair) != "Array" || pair.size() != 2 || pair[0] == nil
+        return false
+      if !incremental_library_cache_nondef_safe?(pair[0], mod, false) || !incremental_library_cache_nondef_safe?(pair[1], mod, false)
+        return false
+      i += 1
+    return true
+  if kind == :call
+    if mod == nil || ast_get(value, :receiver) != nil || ast_get(value, :block) != nil || ast_get(value, :reuse_safe) == true || ast_get(value, :recycle_safe) == true
+      return false
+    cname = ast_get(value, :name)
+    if cname == nil || cname in ("ccall" "ccall_nobox" "ccall_rawargs" "eval" "constant_alias" "wymix" "StringBuffer" "slab_offset_for_id" "raw_load_u8" "raw_store_u8" "raw_load_u32" "raw_load_u64" "l1d_cache_bytes" "l2_cache_bytes" "cpus_per_l2" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch" "slab_alloc_init")
+      return false
+    if mod[:known_calls][cname] == nil || mod[:known_fn_overloads][cname] == true || mod[:known_fn_splat_info][cname] != nil || mod[:raw_callable_fns][cname] != nil
+      return false
+    if mod[:math_alias_fns] != nil && mod[:math_alias_fns][cname] == true
+      return false
+    if mod[:fn_memo_tables] != nil && mod[:fn_memo_tables][mod[:known_calls][cname]] != nil
+      return false
+    cargs = ast_get(value, :args)
+    arity = cargs == nil ? 0 : cargs.size()
+    if mod[:known_typed_overload_counts][typed_overload_arity_key(cname, arity)] != nil
+      return false
+    if cargs != nil
+      i = 0
+      while i < cargs.size()
+        carg = cargs[i]
+        if carg != nil && is_ast_node?(carg) && ast_kind(carg) == :hash_literal && ast_get(carg, :from_kwargs) == true
+          return false
+        if !incremental_library_cache_nondef_safe?(carg, mod, false)
+          return false
+        i += 1
+    return true
+  children = ast_children_nested(value)
   i = 0
   while i < children.size()
-    if !incremental_library_cache_nondef_safe?(children[i])
+    if !incremental_library_cache_nondef_safe?(children[i], mod, false)
       return false
     i += 1
   true
@@ -288,11 +405,11 @@ incremental_library_cache_state = {
         nil
       elsif is_ast_node?(child) && ast_kind(child) == :call && (ast_get(child, :name) == "ro" || ast_get(child, :name) == "rw")
         nil
-      elsif !incremental_library_cache_nondef_safe?(child)
+      elsif !incremental_library_cache_nondef_safe?(child, mod, false)
         return false
       i += 1
     return true
-  incremental_library_cache_nondef_safe?(expr)
+  incremental_library_cache_nondef_safe?(expr, mod, false)
 
 -> incremental_library_cache_partition(expressions, source_manifest)
   if source_manifest == nil || source_manifest.size() == 0 || type(source_manifest[0]) != "Array"
@@ -351,7 +468,8 @@ incremental_library_cache_state = {
   # cannot change the emitted program. A cold Core build still waits for the
   # stable Core namespace before pruning imported definitions.
   reachability_partition = nil
-  if mod[:protect_core] == true && mod[:method_tables_locked] == true && mod[:core_reuse_contract] == :stable && mod[:incremental_core_cache_hit] == true
+  closed_world_methods = mod[:method_tables_locked] == true || mod[:auto_closed_world_reachability] == true
+  if mod[:protect_core] == true && closed_world_methods && mod[:core_reuse_contract] == :stable && mod[:incremental_core_cache_hit] == true
     candidate = incremental_library_cache_partition(expressions, source_manifest)
     if candidate[:ok] == true
       reachability_partition = candidate
@@ -360,7 +478,7 @@ incremental_library_cache_state = {
     return incremental_library_cache_set_bypass(mod, "disabled")
   if incremental_library_cache_state[:persistent_dir] == nil || incremental_library_cache_state[:persistent_identity] == nil
     return incremental_library_cache_set_bypass(mod, "persistent cache is unavailable")
-  if mod[:protect_core] != true || mod[:method_tables_locked] != true || mod[:core_reuse_contract] != :stable
+  if mod[:protect_core] != true || !closed_world_methods || mod[:core_reuse_contract] != :stable
     return incremental_library_cache_set_bypass(mod, "protected Core and locked method tables are required")
   # A cold Core build has a different pre-canonical string/counter history.
   # Prime that exact artifact first, then bind libraries to its stable boundary.

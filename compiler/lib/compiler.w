@@ -314,7 +314,8 @@ use target
   compile_started_at = clock()
 
   lower_started_at = clock()
-  mod = lower_ast(ast, source_path, verbose, fast_mode, build_defines, math_mode, no_static_slab, source_manifest, release_mode)
+  auto_closed_world = auto_closed_world_enabled?(ast)
+  mod = lower_ast(ast, source_path, verbose, fast_mode, build_defines, math_mode, no_static_slab, source_manifest, release_mode, auto_closed_world)
   incremental_core_cache_prepare_names(mod)
   t_lower = clock() - lower_started_at
 
@@ -366,7 +367,7 @@ use target
           if ssa_report != nil && ssa_report != ""
             ssa_converted.push(func[:name])
           func[:cfg_analysis] = analysis
-          ssa_convert(func, analysis, nil, promotable)
+          ssa_convert(func, analysis, nil, promotable, cfg_prepared[:pruned_promotables][fi])
       else
         promotable = find_promotable_vars(func)
         if promotable.size() > 0

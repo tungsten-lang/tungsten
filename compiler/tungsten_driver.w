@@ -21,6 +21,7 @@ use lib/hashing
 use lib/optimization_report
 use lib/perf_inspect
 use lib/driver/ir
+use lib/driver/shard_codegen
 use lib/driver/link
 use lib/driver/pipeline
 
@@ -503,7 +504,10 @@ if eval_code != nil
       while i < token_count
         p = packed[i]
         type_id = (p >> 38) & 0xFF
-        << type_id.to_s() + " " + values[i].to_s()
+        val = values[i]
+        if type_id == 25 && val == nil
+          val = lexer.slice_chars((p >> 2) & 0xFFFFFF, (p >> 26) & 0xFFF)
+        << type_id.to_s() + " " + val.to_s()
         i += 1
     rescue err
       if report_frontend_error(err, "(eval)")
@@ -586,7 +590,10 @@ if show_lex
     while i < token_count
       p = packed[i]
       type_id = (p >> 38) & 0xFF
-      << type_id.to_s() + " " + values[i].to_s()
+      val = values[i]
+      if type_id == 25 && val == nil
+        val = lexer.slice_chars((p >> 2) & 0xFFFFFF, (p >> 26) & 0xFFF)
+      << type_id.to_s() + " " + val.to_s()
       i += 1
   rescue err
     if report_frontend_error(err, file_path)

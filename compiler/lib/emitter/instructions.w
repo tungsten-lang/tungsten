@@ -1,8 +1,8 @@
 # Emitter instruction dispatcher — keeps opcode-family workers independently
 # reviewable while preserving one render_instruction entry point.
 
--> render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false, volatile_slots = false)
-  rendered = render_runtime_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots)
+-> render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects = nil, fp_flags = "", arm64_target = true, windows_target = false, volatile_slots = false, emit_blockaddress_sites = true)
+  rendered = render_runtime_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots, emit_blockaddress_sites)
   if rendered != nil
     return rendered
   rendered = render_numeric_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots)
@@ -39,7 +39,7 @@
   out << wire_get(inst, :rhs)
   true
 
--> append_instruction_direct(out, inst, phi_label_redirects = nil, string_wvs = nil, used_ptr_ids = nil)
+-> append_instruction_direct(out, inst, phi_label_redirects = nil, string_wvs = nil, used_ptr_ids = nil, emit_blockaddress_sites = true)
   op = wire_kind(inst)
 
   # `case` lowers to equality checks, not a jump table. Keep the direct
@@ -62,7 +62,7 @@
     append_call_args(out, wire_get(inst, :args), wire_get(inst, :arg_types))
     out << ")"
     out << known_call_range_metadata_suffix(inst, "i64")
-    if wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
+    if emit_blockaddress_sites && wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
       ret_lbl = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
       out << "\n  br label %"
       out << ret_lbl
@@ -274,7 +274,7 @@
     out << "("
     append_call_args(out, wire_get(inst, :args), wire_get(inst, :arg_types))
     out << ")"
-    if wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
+    if emit_blockaddress_sites && wire_get(inst, :src_line) != nil && wire_get(inst, :loc_site_id) != nil
       ret_lbl = "csd." + wire_get(inst, :loc_site_id).to_s() + ".ret"
       out << "\n  br label %"
       out << ret_lbl

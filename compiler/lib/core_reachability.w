@@ -204,7 +204,7 @@
     return nil
   if mod[:incremental_core_cache_key] == nil || mod[:protect_core] != true
     return core_reachability_fallback(mod, "PROTECT_THE_CORE! is absent")
-  if mod[:method_tables_locked] != true
+  if mod[:method_tables_locked] != true && mod[:auto_closed_world_reachability] != true
     return core_reachability_fallback(mod, "LOCK_THE_DOORS! is absent")
 
   functions_by_name = {}

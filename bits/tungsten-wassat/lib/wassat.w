@@ -2291,6 +2291,12 @@ use cover_split
   else
     s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, 0)
     s.seed_proof_ids(art["gids"], art["next_gid"])
+    # Target phases and chronological backtracking change only which clauses
+    # get learned, and each learned clause is RUP whatever the trail order.
+    # DRAT only: WRAT hints are collected along the trail.
+    if proof_mode == WASSAT_PROOF_DRAT
+      s.enable_target_phases if config.use_proof_target_phases
+      s.enable_chrono if config.use_proof_chrono
 
   # File destinations stream during search so certificate memory stays flat;
   # `-` destinations render from the in-memory arrays after the fact. When

@@ -625,6 +625,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # (0 = none). See set_prop_stop.
     @stop_props = 0
     @stop_ticks = 0
+    @drat_deleted = 0
     # Kissat's search schedule (see enable_kissat_search): bias-corrected
     # glue averages, one bumped heuristic per mode, reason-side bumping.
     # @amark flags the variables of the conflict being analyzed.
@@ -643,6 +644,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @kwant = false
     @kdiv = 1
     @amark = i8[nv + 1]
+    # A streamed DRAT-only proof is formatted natively into @dbytes and
+    # written through @dchunk (see drat_put). Building a string per line
+    # cost about 1.7 KB of unreclaimed memory per conflict: the runtime has
+    # no collector, so the lines outlived their flush.
+    @dbytes = nil
+    @dbpos = 0
+    @dbcap = 0
+    @dchunk = nil
+    @dkeep = i8[1]
     self.prepare_walk
     # A solver built from clause lists (the certificate modes, the library
     # API) takes the profile here; flat loads decide in load_flat.
@@ -1827,6 +1837,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @use_chrono = true
     0
 
+  -> enable_target_phases
+    @use_target = true
+    0
+
   -> enable_target_stable_only
     @target_stable_only = true
     0
@@ -2241,6 +2255,32 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> stream_proofs(wrat_path, drat_path)
     @wrat_sink = wrat_path
     @drat_sink = drat_path
+    if drat_path != nil && @proof_mode == WASSAT_PROOF_DRAT
+      @dbcap = 1048576
+      @dbytes = u8[@dbcap]
+      @dbpos = 0
+      @dchunk = drat_path + ".chunk"
+    0
+
+  # One DRAT line for src[start..start + n), a deletion when `del` is 1,
+  # into the byte buffer. A line that does not fit an empty buffer goes out
+  # as a string after the buffer is flushed, which keeps the order.
+  -> drat_put(src, start, n, del)
+    pos = wassat_drat_put(@dbytes, @dbpos, @dbcap, src, start, n, del)
+    if pos < 0
+      self.flush_proof_sinks
+      pos = wassat_drat_put(@dbytes, @dbpos, @dbcap, src, start, n, del)
+    if pos < 0
+      parts = []
+      i = 0
+      while i < n
+        parts.push(src[start + i])
+        i += 1
+      body = n == 0 ? "0" : parts.join(" ") + " 0"
+      body = "d " + body if del == 1
+      self.log_drat_line(body)
+    else
+      @dbpos = pos
     0
 
   # In WRAT mode, additionally emit each step in plain DRAT. Emitting both
@@ -2267,6 +2307,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> log_drat_line(line)
     if @drat_sink == nil
       @drat.push(line)
+    elsif @dbytes != nil
+      self.flush_proof_sinks
+      raise "proof write failed at '[@drat_sink]'" unless wassat_append_text(@drat_sink, line + "\n")
     else
       @drat_pend.push(line + "\n")
       @pend_bytes += line.size + 1
@@ -2277,6 +2320,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # short write surfaces here, at fault time, not as a checker rejection two
   # commands later.
   -> flush_proof_sinks
+    if @dbytes != nil && @dbpos > 0
+      raise "proof write failed at '[@dchunk]'" unless write_file_bytes_n(@dchunk, @dbytes, @dbpos)
+      raise "proof write failed at '[@drat_sink]'" unless ccall("__w_append_file_to", @drat_sink, @dchunk)
+      z = ccall("__w_unlink", @dchunk)
+      @dbpos = 0
     unless @wrat_pend.empty?
       text = @wrat_pend.join("")
       raise "proof write failed at '[@wrat_sink]'" unless wassat_append_text(@wrat_sink, text)
@@ -2294,6 +2342,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @wrat_pend = []
     @drat_pend = []
     @pend_bytes = 0
+    @dbpos = 0
+    z = ccall("__w_unlink", @dchunk) unless @dchunk == nil
     z = write_file(@wrat_sink, "") unless @wrat_sink == nil
     z = write_file(@drat_sink, "") unless @drat_sink == nil
     0
@@ -2320,6 +2370,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # cone by closure, so their falsifications derive too.
   -> log_learned_direct(n, confl)
     return 0 if @proof_mode == WASSAT_PROOF_NONE
+    if @proof_mode == WASSAT_PROOF_DRAT && @dbytes != nil
+      self.drat_put(@lbuf, 0, n, 0)
+      @refuted = true if n == 0
+      return 0
     lits = self.buf_to_array(n)
     if @proof_mode == WASSAT_PROOF_DRAT
       self.log_drat_line(lits.empty? ? "0" : lits.join(" ") + " 0")
@@ -3073,9 +3127,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Proof-free mode reclaims the arena in place: live clauses slide
     # down over dead space (dest <= src, in index order), clause INDICES
     # stay stable (reasons, watch slots), dead clauses zero their length.
-    # Only sound without proof logging — proof replay would still need the
-    # dead literals; --fast is PROOF_NONE by contract.
-    if @proof_mode == WASSAT_PROOF_NONE
+    # WRAT replay still needs the dead literals, so that mode keeps them.
+    # DRAT names a clause by its literals, never by index: the reduction's
+    # deletions go into the proof first, and then the space is reclaimed
+    # exactly as without a proof. Without that, a DRAT search kept every
+    # clause it ever learned, in its arena and in the checker's database
+    # (AProVE07-21: 1.37M lemmas, 14.8k deletions, 1.7 GB after 54 s).
+    self.log_drat_deletions if @proof_mode == WASSAT_PROOF_DRAT
+    if @proof_mode == WASSAT_PROOF_NONE || @proof_mode == WASSAT_PROOF_DRAT
       remap = @fixed_caps && @gid.size >= @ncl
       wassat_reduce_compact(@cmeta, @alive, @arena, @clbd, @cused,
                              @gid, @reason, @rhist, @ncl, @nvars, remap ? 1 : 0)
@@ -3112,6 +3171,34 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     else
       @nlearned = wassat_count_learned(@alive, @clbd, @ncl)
       wassat_reduce_count_note(@rhist, @ncl, 0)
+    0
+
+  # A DRAT deletion line for every clause that has died since the last
+  # compaction (dead, length not yet zeroed), so the checker drops it too.
+  # A clause that is still the reason of an assignment stays in the
+  # checker's database: drat-trim ignores such deletions anyway, and keeping
+  # an implied clause is always sound. Compaction zeroes the length of every
+  # dead clause, so none is written twice.
+  -> log_drat_deletions
+    @dkeep = i8[@ccap + 1] if @dkeep.size < @ncl + 1
+    wassat_mark_reasons(@trail, @reason, @dkeep, @tsize, @ncl, 1)
+    ci = 0
+    while ci < @ncl
+      n = @cmeta[2 * ci + 1]
+      if @alive[ci] == 0 && n > 0 && @dkeep[ci] == 0
+        st = @cmeta[2 * ci]
+        if @dbytes != nil
+          self.drat_put(@arena, st, n, 1)
+        else
+          parts = []
+          i = 0
+          while i < n
+            parts.push(@arena[st + i])
+            i += 1
+          self.log_drat_line("d " + parts.join(" ") + " 0")
+        @drat_deleted += 1
+      ci += 1
+    wassat_mark_reasons(@trail, @reason, @dkeep, @tsize, @ncl, 0)
     0
 
   # Root cleaning is owed when a pass rewrote clause bodies in place, or when
@@ -7823,6 +7910,58 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   rs[0] = dl
   rs[5] = made
   status
+
+# Set mark[r] to `flag` (1 to mark, 0 to clear) for the reason clause r of
+# every assignment on the trail.
+-> wassat_mark_reasons(tr, rsn, mark, tsize, ncl, flag) (i32[] i32[] i8[] i64 i64 i64) i64
+  t = 0 ## i64
+  while t < tsize
+    l = tr[t] ## i64
+    v = l
+    v = 0 - l if l < 0
+    r = rsn[v] ## i64
+    mark[r] = flag if r >= 0 && r < ncl
+    t += 1
+  0
+
+# One ASCII DRAT line for src[start..start + n) at buf[pos..), "d " first
+# when `del` is 1. Returns the position after it, or -1 when the line might
+# not fit in `cap` (11 characters and a space per literal at most).
+-> wassat_drat_put(buf, pos, cap, src, start, n, del) (u8[] i64 i64 i64[] i64 i64 i64) i64
+  return 0 - 1 if pos + 12 * n + 6 > cap
+  p = pos ## i64
+  if del == 1
+    buf[p] = 100
+    buf[p + 1] = 32
+    p += 2
+  i = 0 ## i64
+  while i < n
+    l = src[start + i] ## i64
+    if l < 0
+      buf[p] = 45
+      p += 1
+      l = 0 - l
+    s = p ## i64
+    buf[p] = 48 + l % 10
+    p += 1
+    l = l / 10
+    while l > 0
+      buf[p] = 48 + l % 10
+      p += 1
+      l = l / 10
+    e = p - 1 ## i64
+    while s < e
+      c = buf[s] ## i64
+      buf[s] = buf[e]
+      buf[e] = c
+      s += 1
+      e -= 1
+    buf[p] = 32
+    p += 1
+    i += 1
+  buf[p] = 48
+  buf[p + 1] = 10
+  p + 2
 
 # Deepest prefix of decisions that still outrank `a` under `key`: the level a
 # restart can stop at. The Kissat schedule restarts every few conflicts, so

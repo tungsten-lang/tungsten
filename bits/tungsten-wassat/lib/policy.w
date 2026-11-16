@@ -767,6 +767,17 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     return wassat_decimal_in_range("WASSAT_KSEARCH_PRE", env("WASSAT_KSEARCH_PRE"), 0, 3) if env("WASSAT_KSEARCH_PRE") != nil
     2
 
+  # The certificate (DRAT) solver is built from clause lists and takes
+  # neither of these from use_target_phases / use_chronological_backtracking.
+  # WASSAT_PROOF_TARGET and WASSAT_PROOF_CHRONO pin them for measurement.
+  -> use_proof_target_phases
+    return env("WASSAT_PROOF_TARGET") == "1" if env("WASSAT_PROOF_TARGET") != nil
+    false
+
+  -> use_proof_chrono
+    return env("WASSAT_PROOF_CHRONO") == "1" if env("WASSAT_PROOF_CHRONO") != nil
+    false
+
   -> use_target_phases(raw)
     # ON everywhere since 2026-07-28. The light path used to run without
     # target phases at all -- the assignment sat under `if art["raw"]` in

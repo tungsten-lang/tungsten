@@ -593,6 +593,16 @@ Hinted search steps record antecedents from the first-UIP conflict cone in
 dependency order. Preprocessing additions carry their own RUP chains.
 Deletions use clause IDs in the hinted stream and literal content in DRAT.
 
+A `--drat` search writes every clause it drops in a database reduction as a
+deletion (except clauses that are still the reason of an assignment), then
+reclaims their arena space, so neither the solver nor the checker carries
+the dead clauses. Lines are formatted into a reusable byte buffer and
+appended to the proof a megabyte at a time through a scratch file beside it
+(`<proof>.chunk`, removed after each append), so the memory a long search
+uses does not grow with the proof. On AProVE07-21 that took the proof from
+1.37M additions with 14.8k deletions (drat-trim: 470 s) to 0.93M additions
+with 0.91M deletions (drat-trim: 15 s), and peak memory from 1.7 GB to 51 MB.
+
 The trimmer validates the entire hinted grammar before pruning:
 
 ```sh

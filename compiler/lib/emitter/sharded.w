@@ -168,6 +168,151 @@
   others_slab = "@__static_slab = external hidden constant " + lbr + "0 x i8" + rbr + ", align 8\n\n"
   {ptr_strings: ptr_part, shard0_slab: shard0_slab, others_slab: others_slab}
 
+-> shard_first_at_name(line)
+  at = line.index("@")
+  if at == nil
+    return nil
+  n = line.size()
+  k = at + 1
+  if k >= n
+    return nil
+  if line.byte_at(k) == 34
+    qend = line.index("\"", k + 1)
+    if qend == nil
+      return nil
+    return line.slice(k + 1, qend - k - 1)
+  e = k
+  while e < n
+    b = line.byte_at(e)
+    if b <= 32 || b == 40 || b == 41 || b == 44 || b == 59 || b == 91 || b == 93 || b == 123 || b == 125 || b == 34
+      break
+    e += 1
+  e > k ? line.slice(k, e - k) : nil
+
+-> shard_collect_at_refs(text, out_set)
+  if text == nil || text == ""
+    return out_set
+  n = text.size()
+  cur = 0
+  while cur < n
+    pos = text.index("@", cur)
+    if pos == nil
+      break
+    k = pos + 1
+    if k >= n
+      break
+    if text.byte_at(k) == 34
+      qend = text.index("\"", k + 1)
+      if qend == nil
+        cur = k + 1
+      else
+        if qend > k + 1
+          out_set[text.slice(k + 1, qend - k - 1)] = true
+        cur = qend + 1
+    else
+      e = k
+      while e < n
+        b = text.byte_at(e)
+        if b <= 32 || b == 40 || b == 41 || b == 44 || b == 59 || b == 91 || b == 93 || b == 123 || b == 125 || b == 34
+          break
+        e += 1
+      if e > k
+        out_set[text.slice(k, e - k)] = true
+      cur = e
+  out_set
+
+-> shard_merge_ref_sets(dst, src)
+  if src == nil
+    return dst
+  keys = src.keys()
+  i = 0
+  while i < keys.size()
+    dst[keys[i]] = true
+    i += 1
+  dst
+
+-> shard_parse_named_lines(block_str)
+  items = []
+  if block_str == nil || block_str == ""
+    return items
+  lines = block_str.split("\n")
+  li = 0
+  while li < lines.size()
+    ln = lines[li]
+    if ln != "" && !ln.starts_with?(";")
+      nm = shard_first_at_name(ln)
+      if nm != nil
+        items.push({name: nm, line: ln + "\n"})
+    li += 1
+  items
+
+-> shard_parse_shared_decls(decls_str)
+  items = []
+  if decls_str == nil || decls_str == ""
+    return items
+  lines = decls_str.split("\n")
+  n = lines.size()
+  li = 0
+  while li < n
+    ln = lines[li]
+    if ln == "" || ln.starts_with?(";")
+      li += 1
+    elsif ln.starts_with?("define ")
+      nm = shard_first_at_name(ln)
+      buf = StringBuffer(512)
+      buf << ln
+      buf << "\n"
+      li += 1
+      while li < n
+        bln = lines[li]
+        buf << bln
+        buf << "\n"
+        li += 1
+        if bln == "}"
+          break
+      btxt = buf.to_s()
+      brefs = {}
+      shard_collect_at_refs(btxt, brefs)
+      if nm != nil
+        brefs[nm] = nil
+      items.push({kind: :def, name: nm, text: btxt, refs: brefs})
+    else
+      nm = shard_first_at_name(ln)
+      # Intrinsic declarations preceding a private helper (e.g. @llvm.ctpop) are
+      # ordinary single-line declarations and are kept when referenced by a kept helper.
+      items.push({kind: :decl, name: nm, text: ln + "\n", refs: nil})
+      li += 1
+  items
+
+-> shard_canonical_source_key(path)
+  if path == nil || path == ""
+    return "<unknown>"
+  s1 = path.rindex("/")
+  if s1 == nil
+    return path
+  if s1 == 0
+    return path
+  s2 = path.rindex("/", s1 - 1)
+  if s2 == nil
+    return path
+  path.slice(s2 + 1, path.size() - s2 - 1)
+
+-> shard_hex4_value(hex)
+  v = 0
+  i = 0
+  while i < 4 && i < hex.size()
+    b = hex.byte_at(i)
+    d = 0
+    if b >= 48 && b <= 57
+      d = b - 48
+    elsif b >= 97 && b <= 102
+      d = b - 87
+    elsif b >= 65 && b <= 70
+      d = b - 55
+    v = (v << 4) + d
+    i += 1
+  v
+
 -> emit_sharded_ir_modules(shard_plan, requested_shards = 0)
   if shard_plan == nil || requested_shards < 2
     return nil
@@ -199,105 +344,214 @@
   fn_meta_out = shard_plan[:fn_meta_out]
   call_site_out = shard_plan[:call_site_out]
   llvm_used_out = shard_plan[:llvm_used_out]
-  shard0_weight = (seams_str.size() + fn_meta_out.size() + call_site_out.size()) / 4
-  target_per_shard = (total_fn_bytes + shard0_weight) / nshards
-  if target_per_shard < 32768
-    target_per_shard = 32768
+  worker_shards = nshards - 1
 
   owner_shard = Array.new(nfns)
   fn_decl_lines = Array.new(nfns)
-  alwaysinline_bodies = StringBuffer(1024)
-  cur_shard = 0
-  cur_bytes = shard0_weight
+  alwaysinline_entries = []
+  file_running_bytes = {}
+  bucket_memo = {}
+  shard_fn_bytes = Array.new(nshards, 0)
   i = 0
   while i < nfns
     f = fns[i]
     txt = texts[i]
     if f[:embedded_asm] != nil
       owner_shard[i] = 0
+      shard_fn_bytes[0] = shard_fn_bytes[0] + txt.size()
       fn_decl_lines[i] = "declare " + f[:return_type] + " @" + f[:name] + "(" + shard_decl_param_types(f) + ") nounwind\n"
     elsif shard_embedded_ll_alwaysinline?(f)
       owner_shard[i] = -1
       fn_decl_lines[i] = nil
-      alwaysinline_bodies << shard_rewrite_define_linkage(txt, "define linkonce_odr hidden ")
-      alwaysinline_bodies << "\n"
+      rewritten_ai = shard_rewrite_define_linkage(txt, "define linkonce_odr hidden ") + "\n"
+      ai_refs = {}
+      shard_collect_at_refs(rewritten_ai, ai_refs)
+      ai_refs[f[:name]] = nil
+      alwaysinline_entries.push({name: f[:name], text: rewritten_ai, refs: ai_refs})
+    elsif f[:name] == "main" || f[:is_toplevel] == true
+      owner_shard[i] = 0
+      shard_fn_bytes[0] = shard_fn_bytes[0] + txt.size()
+      if f[:name] == "main"
+        fn_decl_lines[i] = nil
+      else
+        cc0 = (f[:call_conv] != nil && f[:call_conv] != "") ? (f[:call_conv] + " ") : ""
+        vis0 = f[:llvm_internal] == true ? "hidden " : ""
+        fn_decl_lines[i] = "declare " + vis0 + cc0 + f[:return_type] + " @" + f[:name] + "(" + shard_decl_param_types(f) + ") nounwind\n"
     else
-      owner_shard[i] = cur_shard
-      cur_bytes = cur_bytes + txt.size()
-      if cur_shard < nshards - 1 && cur_bytes >= target_per_shard
-        cur_shard = cur_shard + 1
-        cur_bytes = 0
+      sp_key = shard_canonical_source_key(f[:source_path])
+      prev_b = file_running_bytes[sp_key]
+      if prev_b == nil
+        prev_b = 0
+      file_running_bytes[sp_key] = prev_b + txt.size()
+      chunk_idx = prev_b / 196608
+      bkey = chunk_idx == 0 ? sp_key : (sp_key + "#" + chunk_idx.to_s())
+      assigned = bucket_memo[bkey]
+      if assigned == nil
+        assigned = 1 + (shard_hex4_value(wyhash64_hex_string(bkey)) % worker_shards)
+        bucket_memo[bkey] = assigned
+      owner_shard[i] = assigned
+      shard_fn_bytes[assigned] = shard_fn_bytes[assigned] + txt.size()
       cc = ""
       if f[:call_conv] != nil && f[:call_conv] != ""
         cc = f[:call_conv] + " "
       if f[:llvm_internal] == true
         fn_decl_lines[i] = "declare hidden " + cc + f[:return_type] + " @" + f[:name] + "(" + shard_decl_param_types(f) + ") nounwind\n"
-      elsif f[:name] == "main"
-        fn_decl_lines[i] = nil
       else
         fn_decl_lines[i] = "declare " + cc + f[:return_type] + " @" + f[:name] + "(" + shard_decl_param_types(f) + ") nounwind\n"
     i += 1
 
-  actual_shards = cur_shard + 1
-  if actual_shards < 2
+  nonempty_workers = 0
+  s = 1
+  while s < nshards
+    if shard_fn_bytes[s] > 0
+      nonempty_workers += 1
+    s += 1
+  if nonempty_workers == 0
     return nil
 
   header = shard_plan[:header]
-  seams_decls = shard_extract_seams_decls(seams_str)
-  shared_decls = shard_rewrite_shared_decls(shard_plan[:decls_out])
+  seams_decl_items = shard_parse_named_lines(shard_extract_seams_decls(seams_str))
+  shared_decl_items = shard_parse_shared_decls(shard_rewrite_shared_decls(shard_plan[:decls_out]))
   globals_pair = shard_split_globals(shard_plan[:globals_str])
+  other_global_items = shard_parse_named_lines(globals_pair[:others])
   strings_parts = shard_split_strings_out(shard_plan[:strings_str])
-  ptr_strings = strings_parts[:ptr_strings]
+  ptr_string_items = shard_parse_named_lines(strings_parts[:ptr_strings])
   shard0_slab = strings_parts[:shard0_slab]
   others_slab = strings_parts[:others_slab]
 
-  alwaysinline_str = alwaysinline_bodies.to_s()
-  tail_md_str = shard_plan[:tail_md_str]
+  base_md_str = shard_plan[:base_md_str] != nil ? shard_plan[:base_md_str] : shard_plan[:tail_md_str]
+  novec_out = shard_plan[:novec_out] != nil ? shard_plan[:novec_out] : ""
+  ewscope_out = shard_plan[:ewscope_out] != nil ? shard_plan[:ewscope_out] : ""
+  ascope_out = shard_plan[:ascope_out] != nil ? shard_plan[:ascope_out] : ""
 
   modules = []
   s = 0
-  while s < actual_shards
-    est = (total_fn_bytes / actual_shards) + shared_decls.size() + globals_pair[:others].size() + tail_md_str.size() + 65536
-    if s == 0
-      est = est + shard0_slab.size() + seams_str.size() + fn_meta_out.size() + call_site_out.size()
-    buf = StringBuffer(est)
-    buf << header
-    if s > 0 && seams_decls != ""
-      buf << seams_decls
-    buf << shared_decls
-    if s == 0
-      buf << globals_pair[:shard0]
-      buf << ptr_strings
-      buf << shard0_slab
-    else
-      buf << globals_pair[:others]
-      buf << ptr_strings
-      buf << others_slab
-    i = 0
-    while i < nfns
-      if owner_shard[i] != s && owner_shard[i] >= 0 && fn_decl_lines[i] != nil
-        buf << fn_decl_lines[i]
-      i += 1
-    buf << "\n"
-    if alwaysinline_str != ""
-      buf << alwaysinline_str
+  while s < nshards
+    if s > 0 && shard_fn_bytes[s] == 0
+      s += 1
+      next
+    body_buf = StringBuffer(shard_fn_bytes[s] + 4096)
     i = 0
     while i < nfns
       if owner_shard[i] == s
         f = fns[i]
         txt = texts[i]
         if f[:embedded_asm] == nil && (f[:llvm_internal] == true || f[:embedded_ll] != nil)
-          buf << shard_rewrite_define_linkage(txt, "define hidden ")
+          body_buf << shard_rewrite_define_linkage(txt, "define hidden ")
         else
-          buf << txt
-        buf << "\n"
+          body_buf << txt
+        body_buf << "\n"
       i += 1
+    body_str = body_buf.to_s()
+
+    refs = {}
+    shard_collect_at_refs(body_str, refs)
+    if s == 0
+      shard_collect_at_refs(seams_str, refs)
+      shard_collect_at_refs(fn_meta_out, refs)
+      shard_collect_at_refs(call_site_out, refs)
+
+    kept_ai_buf = nil
+    if alwaysinline_entries.size() > 0
+      ai_idx = 0
+      while ai_idx < alwaysinline_entries.size()
+        ai_entry = alwaysinline_entries[ai_idx]
+        if refs[ai_entry[:name]] == true
+          if kept_ai_buf == nil
+            kept_ai_buf = StringBuffer(1024)
+          kept_ai_buf << ai_entry[:text]
+          shard_merge_ref_sets(refs, ai_entry[:refs])
+        ai_idx += 1
+
+    # Two-pass closure over shared inline helper definitions (e.g. sqr5 -> sqr4 -> runtime).
+    sdi_keep = Array.new(shared_decl_items.size())
+    pass = 0
+    while pass < 2
+      di = 0
+      while di < shared_decl_items.size()
+        item = shared_decl_items[di]
+        if item[:kind] == :def && sdi_keep[di] != true && (item[:name] == nil || refs[item[:name]] == true)
+          sdi_keep[di] = true
+          shard_merge_ref_sets(refs, item[:refs])
+        di += 1
+      pass += 1
+
+    est = body_str.size() + 32768
+    if s == 0
+      est = est + globals_pair[:shard0].size() + shard0_slab.size() + seams_str.size() + fn_meta_out.size() + call_site_out.size()
+    buf = StringBuffer(est)
+    buf << header
+
+    if s > 0 && seams_decl_items.size() > 0
+      si = 0
+      while si < seams_decl_items.size()
+        sitem = seams_decl_items[si]
+        if refs[sitem[:name]] == true
+          buf << sitem[:line]
+        si += 1
+
+    di = 0
+    while di < shared_decl_items.size()
+      item = shared_decl_items[di]
+      if item[:kind] == :def
+        if sdi_keep[di] == true
+          buf << item[:text]
+      elsif item[:name] == nil || refs[item[:name]] == true
+        buf << item[:text]
+      di += 1
+    buf << "\n"
+
+    if s == 0
+      buf << globals_pair[:shard0]
+    else
+      gi = 0
+      while gi < other_global_items.size()
+        gitem = other_global_items[gi]
+        if refs[gitem[:name]] == true
+          buf << gitem[:line]
+        gi += 1
+      buf << "\n"
+
+    psi = 0
+    any_ptr_str = false
+    while psi < ptr_string_items.size()
+      pitem = ptr_string_items[psi]
+      if refs[pitem[:name]] == true
+        buf << pitem[:line]
+        any_ptr_str = true
+      psi += 1
+    if any_ptr_str
+      buf << "\n"
+
+    if s == 0
+      buf << shard0_slab
+    elsif others_slab != "" && refs["__static_slab"] == true
+      buf << others_slab
+
+    i = 0
+    while i < nfns
+      if owner_shard[i] != s && owner_shard[i] >= 0 && fn_decl_lines[i] != nil && refs[fns[i][:name]] == true
+        buf << fn_decl_lines[i]
+      i += 1
+    buf << "\n"
+
+    if kept_ai_buf != nil
+      buf << kept_ai_buf.to_s()
+    buf << body_str
+
     if s == 0
       buf << seams_str
       buf << fn_meta_out
       buf << call_site_out
       buf << llvm_used_out
-    buf << tail_md_str
+
+    buf << base_md_str
+    if novec_out != "" && (body_str.index("!llvm.loop") != nil || body_str.index("!3142") != nil)
+      buf << novec_out
+    if ewscope_out != "" && (body_str.index("!alias.scope !30") != nil || body_str.index("!noalias !30") != nil)
+      buf << ewscope_out
+    if ascope_out != "" && body_str.index("!30000") != nil
+      buf << ascope_out
     modules.push(buf.to_s())
     s += 1
 

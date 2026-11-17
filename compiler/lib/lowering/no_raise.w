@@ -192,7 +192,7 @@
   true
 
 -> infer_no_raise_fixed_point(mod, expressions, ordered_class_exprs)
-  if mod[:method_tables_locked] != true
+  if mod[:method_tables_locked] != true && mod[:auto_closed_world_devirt] != true
     return nil
   collected = collect_return_class_definitions(mod, expressions, ordered_class_exprs)
   definitions = collected[:definitions]
@@ -200,12 +200,20 @@
   candidates = {}
   dependencies_by_key = {}
   promised = {}
+  core_prepass = mod[:incremental_core_cache_hit] == true && mod[:incremental_core_cache_entry] != nil ? mod[:incremental_core_cache_entry][:core_prepass] : nil
+  cached_nr = core_prepass != nil ? core_prepass[:no_raise_candidates] : nil
   i = 0
   while i < keys.size()
     key = keys[i]
     definition = definitions[key]
     node = definition[:node]
-    if definition_declares_no_raise?(node)
+    if cached_nr != nil && definition_from_core?(node)
+      is_safe = cached_nr[key] == true
+      candidates[key] = is_safe
+      if is_safe
+        promised[key] = true
+      dependencies_by_key[key] = {}
+    elsif definition_declares_no_raise?(node)
       candidates[key] = true
       promised[key] = true
       dependencies_by_key[key] = {}
@@ -245,6 +253,17 @@
       result[worker] = true
     i += 1
   mod[:no_raise_workers] = result
+  if mod[:incremental_core_cache_status] == :miss
+    if mod[:core_prepass_snapshot] == nil
+      mod[:core_prepass_snapshot] = {}
+    core_nr = {}
+    i = 0
+    while i < keys.size()
+      key = keys[i]
+      if candidates[key] == true && definition_from_core?(definitions[key][:node])
+        core_nr[key] = true
+      i += 1
+    mod[:core_prepass_snapshot][:no_raise_candidates] = core_nr
   nil
 
 -> body_cannot_raise?(ctx, body)

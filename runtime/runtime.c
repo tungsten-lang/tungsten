@@ -38355,13 +38355,8 @@ int64_t w_loc_register_file(WValue path, WValue line_at_arr, WValue col_at_arr) 
  * intentionally match String#chars and the LexChar builders: malformed or
  * truncated UTF-8 still consumes one apparent codepoint rather than making a
  * valid cached parse unreadable under stricter validation here. */
-int64_t w_loc_register_source_text(WValue path, WValue source) {
-    char path_buf[6], source_buf[6];
-    const char *path_bytes, *source_bytes;
-    size_t path_len, source_len;
-    w_str_data(path, path_buf, &path_bytes, &path_len);
-    w_str_data(source, source_buf, &source_bytes, &source_len);
-
+static void w_loc_populate_from_bytes(const char *source_bytes, size_t source_len,
+                                      int32_t **line_out, int32_t **col_out, uint32_t *len_out) {
     size_t codepoints = 0;
     for (size_t off = 0; off < source_len; codepoints++) {
         unsigned char c = (unsigned char)source_bytes[off];
@@ -38369,7 +38364,12 @@ int64_t w_loc_register_source_text(WValue path, WValue source) {
         if (step > source_len - off) step = source_len - off;
         off += step;
     }
-    if (codepoints >= UINT32_MAX) return -1;
+    if (codepoints >= UINT32_MAX) {
+        *line_out = NULL;
+        *col_out = NULL;
+        *len_out = 0;
+        return;
+    }
     uint32_t n = (uint32_t)codepoints + 1;
     int32_t *line_buf = (int32_t *)malloc(sizeof(int32_t) * n);
     int32_t *col_buf = (int32_t *)malloc(sizeof(int32_t) * n);
@@ -38398,17 +38398,115 @@ int64_t w_loc_register_source_text(WValue path, WValue source) {
     }
     line_buf[index] = line;
     col_buf[index] = col;
+    *line_out = line_buf;
+    *col_out = col_buf;
+    *len_out = n;
+}
+
+static void w_loc_ensure_loaded(WLocFileTable *t) {
+    if (!t || t->line_at != NULL || !t->path) return;
+    FILE *f = fopen(t->path, "rb");
+    if (!f) return;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return; }
+    long fsz = ftell(f);
+    if (fsz < 0 || fseek(f, 0, SEEK_SET) != 0) { fclose(f); return; }
+    char *raw = (char *)malloc((size_t)fsz + 2);
+    if (!raw) { fclose(f); return; }
+    size_t rd = fsz > 0 ? fread(raw, 1, (size_t)fsz, f) : 0;
+    fclose(f);
+    WValue src_wv = w_string_n(raw, rd);
+    free(raw);
+    src_wv = w_algebra_rewrite_source(src_wv);
+    char sbuf[6];
+    const char *sbytes = NULL;
+    size_t slen = 0;
+    w_str_data(src_wv, sbuf, &sbytes, &slen);
+    char *patched = NULL;
+    if (slen >= 7 && sbytes[0] == '#' && sbytes[1] == '!') {
+        const char *nl = (const char *)memchr(sbytes, '\n', slen);
+        if (nl != NULL) {
+            size_t nl_idx = (size_t)(nl - sbytes);
+            int has_bash = 0;
+            for (size_t bi = 0; bi + 4 <= nl_idx; bi++) {
+                if (memcmp(sbytes + bi, "bash", 4) == 0) { has_bash = 1; break; }
+            }
+            if (has_bash && nl_idx + 6 <= slen &&
+                memcmp(sbytes + nl_idx + 1, "exec ", 5) == 0) {
+                patched = (char *)malloc(slen + 1);
+                if (patched) {
+                    memcpy(patched, sbytes, nl_idx + 1);
+                    patched[nl_idx + 1] = '#';
+                    memcpy(patched + nl_idx + 2, sbytes + nl_idx + 1, slen - (nl_idx + 1));
+                    sbytes = patched;
+                    slen += 1;
+                }
+            }
+        }
+    }
+    int32_t *line_buf = NULL, *col_buf = NULL;
+    uint32_t n = 0;
+    w_loc_populate_from_bytes(sbytes, slen, &line_buf, &col_buf, &n);
+    free(patched);
+    if (line_buf && col_buf) {
+        t->line_at = line_buf;
+        t->col_at = col_buf;
+        t->len = n;
+    }
+}
+
+int64_t w_loc_register_source_text(WValue path, WValue source) {
+    char path_buf[6], source_buf[6];
+    const char *path_bytes, *source_bytes;
+    size_t path_len, source_len;
+    w_str_data(path, path_buf, &path_bytes, &path_len);
+    if (source == W_NIL) {
+        for (uint32_t i = 0; i < g_loc_file_count; i++) {
+            if (strlen(g_loc_files[i].path) == path_len &&
+                memcmp(g_loc_files[i].path, path_bytes, path_len) == 0) {
+                return (int64_t)(i + 1);
+            }
+        }
+        if (g_loc_file_count >= 0x3FFFu)
+            die("source location file/layout table exhausted");
+        if (g_loc_file_count == g_loc_file_cap) {
+            g_loc_file_cap = g_loc_file_cap == 0 ? 8 : g_loc_file_cap * 2;
+            g_loc_files = realloc(g_loc_files, g_loc_file_cap * sizeof(WLocFileTable));
+        }
+        char *path_copy = (char *)malloc(path_len + 1);
+        if (!path_copy) die("source location path allocation failed");
+        memcpy(path_copy, path_bytes, path_len);
+        path_copy[path_len] = '\0';
+        g_loc_files[g_loc_file_count].path = path_copy;
+        g_loc_files[g_loc_file_count].line_at = NULL;
+        g_loc_files[g_loc_file_count].col_at = NULL;
+        g_loc_files[g_loc_file_count].len = 0;
+        g_loc_file_count++;
+        return (int64_t)g_loc_file_count;
+    }
+    w_str_data(source, source_buf, &source_bytes, &source_len);
+
+    int32_t *line_buf = NULL, *col_buf = NULL;
+    uint32_t n = 0;
+    w_loc_populate_from_bytes(source_bytes, source_len, &line_buf, &col_buf, &n);
+    if (!line_buf || !col_buf) return -1;
 
     for (uint32_t i = 0; i < g_loc_file_count; i++) {
         WLocFileTable *existing = &g_loc_files[i];
         if (strlen(existing->path) == path_len &&
-            memcmp(existing->path, path_bytes, path_len) == 0 &&
-            existing->len == n &&
-            memcmp(existing->line_at, line_buf, sizeof(int32_t) * n) == 0 &&
-            memcmp(existing->col_at, col_buf, sizeof(int32_t) * n) == 0) {
-            free(line_buf);
-            free(col_buf);
-            return (int64_t)(i + 1);
+            memcmp(existing->path, path_bytes, path_len) == 0) {
+            if (existing->line_at == NULL) {
+                existing->line_at = line_buf;
+                existing->col_at = col_buf;
+                existing->len = n;
+                return (int64_t)(i + 1);
+            }
+            if (existing->len == n &&
+                memcmp(existing->line_at, line_buf, sizeof(int32_t) * n) == 0 &&
+                memcmp(existing->col_at, col_buf, sizeof(int32_t) * n) == 0) {
+                free(line_buf);
+                free(col_buf);
+                return (int64_t)(i + 1);
+            }
         }
     }
     if (g_loc_file_count >= 0x3FFFu)
@@ -38434,9 +38532,11 @@ int64_t w_loc_line_for_offset(int64_t file_id, int64_t offset) {
      * both those boxed inline Ints and already-raw machine integers. */
     if (w_is_int((WValue)file_id)) file_id = w_as_int((WValue)file_id);
     if (w_is_int((WValue)offset)) offset = w_as_int((WValue)offset);
+    if (file_id == -99 && offset == 0) return 1;
     if (file_id < 1 || (uint32_t)file_id > g_loc_file_count) return -1;
     WLocFileTable *t = &g_loc_files[file_id - 1];
-    if (offset < 0 || (uint32_t)offset >= t->len) return -1;
+    if (t->line_at == NULL) w_loc_ensure_loaded(t);
+    if (!t->line_at || offset < 0 || (uint32_t)offset >= t->len) return -1;
     return t->line_at[offset];
 }
 
@@ -38445,7 +38545,8 @@ int64_t w_loc_col_for_offset(int64_t file_id, int64_t offset) {
     if (w_is_int((WValue)offset)) offset = w_as_int((WValue)offset);
     if (file_id < 1 || (uint32_t)file_id > g_loc_file_count) return -1;
     WLocFileTable *t = &g_loc_files[file_id - 1];
-    if (offset < 0 || (uint32_t)offset >= t->len) return -1;
+    if (t->line_at == NULL) w_loc_ensure_loaded(t);
+    if (!t->col_at || offset < 0 || (uint32_t)offset >= t->len) return -1;
     return t->col_at[offset];
 }
 
@@ -38455,7 +38556,8 @@ WValue w_location_line(WValue raw) {
     uint32_t offset = (uint32_t)w_unbox_location_offset(raw);
     if (file_id < 1 || file_id > g_loc_file_count) return w_box_int(-1);
     WLocFileTable *t = &g_loc_files[file_id - 1];
-    if (offset >= t->len) return w_box_int(-1);
+    if (t->line_at == NULL) w_loc_ensure_loaded(t);
+    if (!t->line_at || offset >= t->len) return w_box_int(-1);
     return w_box_int((int64_t)t->line_at[offset]);
 }
 
@@ -38465,7 +38567,8 @@ WValue w_location_col(WValue raw) {
     uint32_t offset = (uint32_t)w_unbox_location_offset(raw);
     if (file_id < 1 || file_id > g_loc_file_count) return w_box_int(-1);
     WLocFileTable *t = &g_loc_files[file_id - 1];
-    if (offset >= t->len) return w_box_int(-1);
+    if (t->line_at == NULL) w_loc_ensure_loaded(t);
+    if (!t->col_at || offset >= t->len) return w_box_int(-1);
     return w_box_int((int64_t)t->col_at[offset]);
 }
 
@@ -38522,8 +38625,22 @@ W_OPTIONAL_SYMBOL int32_t __w_fn_meta_count = 0;
 W_OPTIONAL_SYMBOL WFnMeta __w_fn_sym_meta[1] = {{0}};
 W_OPTIONAL_SYMBOL int32_t __w_fn_sym_meta_count = 0;
 
+typedef struct {
+    uint32_t sym_off;
+    uint32_t name_off;
+    int32_t  file_id;
+    int32_t  line;
+    int32_t  kind;
+} WFnSymCompact;
+
+W_OPTIONAL_SYMBOL const char __w_fn_sym_strtab[1] = {0};
+W_OPTIONAL_SYMBOL const char *const __w_fn_sym_files[1] = {NULL};
+W_OPTIONAL_SYMBOL WFnSymCompact __w_fn_sym_compact[1] = {{0}};
+W_OPTIONAL_SYMBOL int32_t __w_fn_sym_compact_count = 0;
+
 static WFnMeta *g_wfm_sorted = NULL;
 static WFnMeta *g_wfs_sorted = NULL;
+static int g_wfs_count = 0;
 static pthread_once_t g_wfm_once = PTHREAD_ONCE_INIT;
 
 static int wfm_cmp(const void *a, const void *b) {
@@ -38551,12 +38668,30 @@ static void w_fn_meta_init(void) {
             qsort(g_wfm_sorted, (size_t)n, sizeof(WFnMeta), wfm_cmp);
         }
     }
-    if (&__w_fn_sym_meta_count != NULL && __w_fn_sym_meta_count > 0) {
+    if (&__w_fn_sym_compact_count != NULL && __w_fn_sym_compact_count > 0) {
+        int n = __w_fn_sym_compact_count;
+        g_wfs_sorted = (WFnMeta *)malloc(sizeof(WFnMeta) * (size_t)n);
+        if (g_wfs_sorted) {
+            for (int i = 0; i < n; i++) {
+                const WFnSymCompact *c = &__w_fn_sym_compact[i];
+                g_wfs_sorted[i].fn_addr = (void *)(uintptr_t)(__w_fn_sym_strtab + c->sym_off);
+                g_wfs_sorted[i].file = (c->file_id >= 0 && &__w_fn_sym_files[0] != NULL)
+                                           ? __w_fn_sym_files[c->file_id]
+                                           : NULL;
+                g_wfs_sorted[i].name = __w_fn_sym_strtab + c->name_off;
+                g_wfs_sorted[i].line = c->line;
+                g_wfs_sorted[i].kind = c->kind;
+            }
+            qsort(g_wfs_sorted, (size_t)n, sizeof(WFnMeta), wfs_cmp);
+            g_wfs_count = n;
+        }
+    } else if (&__w_fn_sym_meta_count != NULL && __w_fn_sym_meta_count > 0) {
         int n = __w_fn_sym_meta_count;
         g_wfs_sorted = (WFnMeta *)malloc(sizeof(WFnMeta) * (size_t)n);
         if (g_wfs_sorted) {
             memcpy(g_wfs_sorted, __w_fn_sym_meta, sizeof(WFnMeta) * (size_t)n);
             qsort(g_wfs_sorted, (size_t)n, sizeof(WFnMeta), wfs_cmp);
+            g_wfs_count = n;
         }
     }
 }
@@ -38708,9 +38843,9 @@ static const char *w_elf_sym(void *pc, uintptr_t *start_out) {
 #endif /* __linux__ */
 
 static const WFnMeta *w_resolve_fn_sym_exact(const char *sym_name) {
-    if (!sym_name || !g_wfs_sorted || &__w_fn_sym_meta_count == NULL || __w_fn_sym_meta_count <= 0)
+    if (!sym_name || !g_wfs_sorted || g_wfs_count <= 0)
         return NULL;
-    int lo = 0, hi = __w_fn_sym_meta_count - 1;
+    int lo = 0, hi = g_wfs_count - 1;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
         const char *cand = g_wfs_sorted[mid].fn_addr ? (const char *)g_wfs_sorted[mid].fn_addr : "";
@@ -38773,7 +38908,7 @@ static const WFnMeta *w_resolve_fn(void *pc) {
             }
         }
     }
-    if (g_wfs_sorted && &__w_fn_sym_meta_count != NULL && __w_fn_sym_meta_count > 0) {
+    if (g_wfs_sorted && g_wfs_count > 0) {
         const char *sym_name = NULL;
 #if defined(__linux__)
         uintptr_t elf_start = 0;
@@ -38823,6 +38958,17 @@ typedef struct {
 
 W_OPTIONAL_SYMBOL WIcSite __w_ic_site[1] = {{0}};
 W_OPTIONAL_SYMBOL int32_t __w_ic_site_count = 0;
+
+typedef struct {
+    int32_t ic_id;
+    int32_t file_id;
+    int32_t line;
+    int32_t col;
+} WIcSiteSparse;
+
+W_OPTIONAL_SYMBOL const char *const __w_ic_site_files[1] = {NULL};
+W_OPTIONAL_SYMBOL WIcSiteSparse __w_ic_site_sparse[1] = {{0}};
+W_OPTIONAL_SYMBOL int32_t __w_ic_site_sparse_count = 0;
 W_OPTIONAL_SYMBOL void *__w_ic_base(void) { return NULL; }
 
 /* Slot of the dispatch currently in its IC-miss slow path. Set around the
@@ -38830,15 +38976,37 @@ W_OPTIONAL_SYMBOL void *__w_ic_base(void) { return NULL; }
  * return, so at the no-method die site it names exactly the dispatch that
  * failed (24 = the emitter's [24 x i8] IC slot stride). */
 static __thread void *g_last_miss_slot = NULL;
+static __thread WIcSite g_resolved_sparse_ic_site = {0};
 
 static const WIcSite *w_resolve_ic_site(void *slot) {
-    if (!slot || &__w_ic_site_count == NULL || __w_ic_site_count <= 0) return NULL;
+    if (!slot) return NULL;
     char *base = (char *)__w_ic_base();
     if (!base) return NULL;
     ptrdiff_t off = (char *)slot - base;
     if (off < 0 || off % 24 != 0) return NULL;
     ptrdiff_t idx = off / 24;
-    if (idx >= __w_ic_site_count) return NULL;
+    if (&__w_ic_site_sparse_count != NULL && __w_ic_site_sparse_count > 0) {
+        int lo = 0, hi = __w_ic_site_sparse_count - 1;
+        while (lo <= hi) {
+            int mid = lo + (hi - lo) / 2;
+            const WIcSiteSparse *sp = &__w_ic_site_sparse[mid];
+            if ((ptrdiff_t)sp->ic_id == idx) {
+                const char *f = (sp->file_id >= 0 && &__w_ic_site_files[0] != NULL)
+                                    ? __w_ic_site_files[sp->file_id]
+                                    : NULL;
+                if (!f) return NULL;
+                g_resolved_sparse_ic_site.file = f;
+                g_resolved_sparse_ic_site.line = sp->line;
+                g_resolved_sparse_ic_site.col = sp->col;
+                return &g_resolved_sparse_ic_site;
+            }
+            if ((ptrdiff_t)sp->ic_id < idx) lo = mid + 1;
+            else hi = mid - 1;
+        }
+        return NULL;
+    }
+    if (&__w_ic_site_count == NULL || __w_ic_site_count <= 0 || idx >= __w_ic_site_count)
+        return NULL;
     const WIcSite *site = &__w_ic_site[idx];
     return site->file ? site : NULL;
 }
@@ -65273,9 +65441,9 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
      * if type_key matches BOTH before and after reading them (see the
      * publication contract in runtime.h). */
     uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
-    void *fn = cache->fn_ptr;
-    int32_t car = cache->arity;
-    if (__builtin_expect(key == tk && fn != NULL &&
+    void *fn = atomic_load_explicit(&cache->fn_ptr, memory_order_relaxed);
+    int32_t car = atomic_load_explicit(&cache->arity, memory_order_relaxed);
+    if (__builtin_expect(key != 0 && key == tk && fn != NULL &&
             key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
         if (__builtin_expect(car == -1, 1)) {
             return ((WValue(*)(WValue, WValue*, int))fn)(recv, args_ptr, argc);
@@ -65339,9 +65507,9 @@ WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache) {
 
     /* Seqlock-lite read — see the publication contract in runtime.h. */
     uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
-    void *fn = cache->fn_ptr;
-    int32_t car = cache->arity;
-    if (__builtin_expect(key == tk && fn != NULL &&
+    void *fn = atomic_load_explicit(&cache->fn_ptr, memory_order_relaxed);
+    int32_t car = atomic_load_explicit(&cache->arity, memory_order_relaxed);
+    if (__builtin_expect(key != 0 && key == tk && fn != NULL &&
             key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
         if (__builtin_expect(car == 0, 1)) {
             typedef WValue (*fn0)(WValue);
@@ -65397,8 +65565,8 @@ WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg,
         WObject *obj = (WObject *)w_as_ptr(recv);
         uint64_t key = 0x100000000ULL | (uint64_t)obj->class_id;
         uint64_t tk = atomic_load_explicit(&cache->type_key, memory_order_acquire);
-        void *fn = cache->fn_ptr;
-        int32_t car = cache->arity;
+        void *fn = atomic_load_explicit(&cache->fn_ptr, memory_order_relaxed);
+        int32_t car = atomic_load_explicit(&cache->arity, memory_order_relaxed);
         if (__builtin_expect(key == tk && fn != NULL && car == 1 &&
                 key == atomic_load_explicit(&cache->type_key, memory_order_acquire), 1)) {
             return ((WValue(*)(WValue, WValue))fn)(recv, arg);
@@ -65427,8 +65595,8 @@ WValue w_method_call_cached_2(WValue recv, WValue name, WValue arg0,
         uint64_t key = 0x100000000ULL | (uint64_t)obj->class_id;
         uint64_t tk = atomic_load_explicit(&cache->type_key,
                                            memory_order_acquire);
-        void *fn = cache->fn_ptr;
-        int32_t car = cache->arity;
+        void *fn = atomic_load_explicit(&cache->fn_ptr, memory_order_relaxed);
+        int32_t car = atomic_load_explicit(&cache->arity, memory_order_relaxed);
         if (__builtin_expect(key == tk && fn != NULL && car == 2 &&
                 key == atomic_load_explicit(&cache->type_key,
                                             memory_order_acquire), 1)) {
@@ -65437,6 +65605,62 @@ WValue w_method_call_cached_2(WValue recv, WValue name, WValue arg0,
         }
     }
     return w_method_call_cached_2_compat(recv, name, arg0, arg1, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_sym_get_fallback(WValue recv, WValue sym, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    return w_method_call_cached(recv, WN_idx, &sym, 1, cache);
+}
+
+__attribute__((noinline, cold))
+static WValue w_fast_sym_set_fallback(WValue recv, WValue sym, WValue val, WInlineCache *cache) {
+    if (__builtin_expect(!atomic_load_explicit(&w_dispatch_ready, memory_order_acquire), 0))
+        w_dispatch_init();
+    WValue args[2] = {sym, val};
+    return w_method_call_cached(recv, WN_idxset, args, 2, cache);
+}
+
+inline
+WValue w_fast_sym_get(WValue recv, WValue sym, WInlineCache *cache) {
+    if (__builtin_expect(w_is_hash(recv), 1)) {
+        WHash *hash = (WHash *)w_as_ptr(recv);
+        uint32_t d = atomic_load_explicit(&cache->slot_hint, memory_order_relaxed);
+        if (__builtin_expect(d < hash->used && hash->keys[d] == sym, 1))
+            return hash->values[d];
+        int64_t dense = w_hash_probe(hash, sym);
+        if (dense < 0) return W_NIL;
+        atomic_store_explicit(&cache->slot_hint, (uint32_t)dense, memory_order_relaxed);
+        return hash->values[dense];
+    }
+    if (__builtin_expect(w_is_wire(recv) && !w_is_wire_sequence(recv), 1)) {
+        return w_wire_field_load_inline(recv, sym, W_NIL);
+    }
+    return w_fast_sym_get_fallback(recv, sym, cache);
+}
+
+inline
+WValue w_fast_sym_set(WValue recv, WValue sym, WValue val, WInlineCache *cache) {
+    if (__builtin_expect(w_is_hash(recv), 1)) {
+        WHash *hash = (WHash *)w_as_ptr(recv);
+        if (__builtin_expect((hash->flags & W_HASH_FLAG_FROZEN) == 0 && hash->iter_depth == 0, 1)) {
+            uint32_t d = atomic_load_explicit(&cache->slot_hint, memory_order_relaxed);
+            if (__builtin_expect(d < hash->used && hash->keys[d] == sym, 1)) {
+                hash->values[d] = val;
+                return val;
+            }
+        }
+        WValue out = w_hash_set(recv, sym, val);
+        int64_t dense = w_hash_probe(hash, sym);
+        if (dense >= 0)
+            atomic_store_explicit(&cache->slot_hint, (uint32_t)dense, memory_order_relaxed);
+        return out;
+    }
+    if (__builtin_expect(w_is_wire(recv) && !w_is_wire_sequence(recv), 1)) {
+        return w_wire_field_store(recv, sym, val);
+    }
+    return w_fast_sym_set_fallback(recv, sym, val, cache);
 }
 
 /* Direct-call string builtins (bypass method dispatch) */

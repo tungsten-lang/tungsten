@@ -395,7 +395,7 @@ function_emit_cache_state = {
 
 -> function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags, emit_blockaddress_sites = false)
   out = StringBuffer(256)
-  out << "rendered-core-function-v3"
+  out << "rendered-core-function-v4"
   fields = [
     mod[:incremental_core_cache_key],
     mod[:llvm_datalayout],
@@ -408,6 +408,7 @@ function_emit_cache_state = {
     mod[:no_static_slab] == true,
     fp_flags,
     emit_blockaddress_sites,
+    mod[:enhanced_stacktraces] != false,
     env("TUNGSTEN_CONST_ARRAY_LIT_POOL") != "0"
   ]
   nfields = fields.size()
@@ -456,11 +457,13 @@ function_emit_cache_state = {
   if paths == nil || paths.size() == 0 || env("TUNGSTEN_LIBRARY_FUNCTION_EMIT_CACHE") == "0"
     return nil
   string_count = mod[:incremental_library_cache_compact_string_count]
+  if string_count == nil
+    string_count = mod[:incremental_library_cache_string_count]
   strings_digest = function_emit_cache_strings_digest(mod, string_count)
   if string_count == nil || string_count == 0 || strings_digest == nil
     return nil
   out = StringBuffer(320)
-  out << "rendered-library-function-v3"
+  out << "rendered-library-function-v4"
   out << function_emit_cache_field(function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags, emit_blockaddress_sites))
   out << function_emit_cache_field(mod[:incremental_library_cache_key])
   out << function_emit_cache_field(string_count)
@@ -593,6 +596,15 @@ function_emit_cache_state = {
 
 -> scalar_source_call?(inst)
   scalar_source_one_call?(inst) || scalar_source_two_call?(inst)
+
+-> sym_idx_get_call?(inst)
+  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_sequence_size(wire_get(inst, :args)) == 1 && wire_get(inst, :sym_idx_get) == true
+
+-> sym_idx_set_call?(inst)
+  wire_kind(inst) == :call_method_i64 && wire_get(inst, :args) != nil && wire_sequence_size(wire_get(inst, :args)) == 2 && wire_get(inst, :sym_idx_set) == true
+
+-> sym_idx_call?(inst)
+  sym_idx_get_call?(inst) || sym_idx_set_call?(inst)
 
 # Return the runtime function names that an instruction will reference when rendered.
 -> runtime_fns_for_inst(inst, string_wvs = nil)
@@ -732,12 +744,18 @@ function_emit_cache_state = {
       argc = wire_sequence_size(wire_get(inst, :args))
     if argc == 0
       runtime_fns.push("w_method_call_cached_0")
+    elsif sym_idx_get_call?(inst)
+      runtime_fns.push("w_fast_sym_get")
+    elsif sym_idx_set_call?(inst)
+      runtime_fns.push("w_fast_sym_set")
     elsif scalar_source_one_call?(inst)
       runtime_fns.push("w_method_call_cached_1")
     elsif scalar_source_two_call?(inst)
       runtime_fns.push("w_method_call_cached_2")
     else
       runtime_fns.push("w_method_call_cached")
+    if wire_get(inst, :devirt_fn) != nil
+      runtime_fns.push("__w_guard_class")
     if wire_get(inst, :construct_fn) != nil
       if wire_get(inst, :construct_recycle) == true
         runtime_fns.push("w_object_recycle_or_new")
@@ -958,11 +976,7 @@ function_emit_cache_state = {
       max_ic = s_ic
     si += 1
   if max_ic >= 0
-    rows = []
-    ri = 0
-    while ri <= max_ic
-      rows.push(nil)
-      ri += 1
+    rows = Array.new(max_ic + 1)
     si = 0
     while si < nsites
       s = sites[si]
@@ -970,41 +984,63 @@ function_emit_cache_state = {
       if s_ic != nil
         rows[s_ic] = s
       si += 1
-    nrows = rows.size()
-    out << "@__w_ic_site = constant "
-    out << lbr
-    out << nrows.to_s()
-    out << " x { ptr, i32, i32 }"
-    out << rbr
-    out << " "
-    out << lbr
-    out << "\n"
+    sparse_rows = []
     ri = 0
-    while ri < nrows
-      r = rows[ri]
-      if r == nil
-        out << "  { ptr, i32, i32 } { ptr null, i32 0, i32 0 }"
+    while ri <= max_ic
+      if rows[ri] != nil
+        sparse_rows.push(rows[ri])
+      ri += 1
+    nsparse = sparse_rows.size()
+    if nsparse > 0
+      out << "@__w_ic_site_files = constant "
+      out << lbr
+      out << nfkeys.to_s()
+      out << " x ptr"
+      out << rbr
+      if nfkeys == 0
+        out << " zeroinitializer\n"
       else
-        out << "  { ptr, i32, i32 } { ptr @.wcs.file."
+        out << " "
+        out << lbr
+        fi2 = 0
+        while fi2 < nfkeys
+          if fi2 > 0
+            out << ", "
+          out << "ptr @.wcs.file."
+          out << fi2.to_s()
+          fi2 += 1
+        out << rbr
+        out << "\n"
+      out << "@__w_ic_site_sparse = constant "
+      out << lbr
+      out << nsparse.to_s()
+      out << " x { i32, i32, i32, i32 }"
+      out << rbr
+      out << " "
+      out << lbr
+      out << "\n"
+      ri = 0
+      while ri < nsparse
+        r = sparse_rows[ri]
+        out << "  { i32, i32, i32, i32 } { i32 "
+        out << r[:ic_id].to_s()
+        out << ", i32 "
         out << r[:file_id].to_s()
         out << ", i32 "
         out << r[:line].to_s()
         out << ", i32 "
         out << r[:col].to_s()
         out << " }"
-      if ri < nrows - 1
-        out << ","
+        if ri < nsparse - 1
+          out << ","
+        out << "\n"
+        ri += 1
+      out << rbr
       out << "\n"
-      ri += 1
-    out << rbr
-    out << "\n"
-    out << "@__w_ic_site_count = constant i32 "
-    out << nrows.to_s()
-    out << "\n\n"
-    # Per-thread IC base accessor: @.ic is thread_local, so slot ADDRESSES
-    # cannot appear in a constant initializer and differ per thread. The
-    # runtime subtracts this thread's base to recover the slot index.
-    out << "define ptr @__w_ic_base() nounwind {\nentry:\n  ret ptr @.ic\n}\n\n"
+      out << "@__w_ic_site_sparse_count = constant i32 "
+      out << nsparse.to_s()
+      out << "\n\n"
+      out << "define ptr @__w_ic_base() nounwind {\nentry:\n  ret ptr @.ic\n}\n\n"
 
   out.to_s()
 
@@ -1093,44 +1129,28 @@ function_emit_cache_state = {
     out << "\\00\", align 1\n"
     fi += 1
 
-  # Per-fn private string constants for display name (and symbol name when
-  # unpinned from @__w_fn_meta).
-  i = 0
-  while i < nfns
-    f = fns[i]
-    istr = i.to_s()
-    display = fn_meta_display_name(f)
-    name_bl = utf8_byte_length(display) + 1
-
-    if !emit_blockaddress_sites
-      sym_str = f[:name]
-      sym_bl = utf8_byte_length(sym_str) + 1
+  if emit_blockaddress_sites
+    # Per-fn private string constants for display name when pinned in @__w_fn_meta.
+    i = 0
+    while i < nfns
+      f = fns[i]
+      istr = i.to_s()
+      display = fn_meta_display_name(f)
+      name_bl = utf8_byte_length(display) + 1
       out << "@.wfm."
       out << istr
-      out << ".s = private unnamed_addr constant "
+      out << ".n = private unnamed_addr constant "
       out << lbr
-      out << sym_bl.to_s()
+      out << name_bl.to_s()
       out << " x i8"
       out << rbr
       out << " c\""
-      out << escape_llvm_string(sym_str)
+      out << escape_llvm_string(display)
       out << "\\00\", align 1\n"
+      i += 1
+    if nfns > 0
+      out << "\n"
 
-    out << "@.wfm."
-    out << istr
-    out << ".n = private unnamed_addr constant "
-    out << lbr
-    out << name_bl.to_s()
-    out << " x i8"
-    out << rbr
-    out << " c\""
-    out << escape_llvm_string(display)
-    out << "\\00\", align 1\n"
-    i += 1
-  if nfns > 0
-    out << "\n"
-
-  if emit_blockaddress_sites
     out << "@__w_fn_meta = constant "
     out << lbr
     out << nfns.to_s()
@@ -1172,12 +1192,71 @@ function_emit_cache_state = {
     out << nfns.to_s()
     out << "\n\n"
   else
+    if fn_file_list.size() > 0
+      out << "\n"
+    strtab_escaped = StringBuffer(nfns * 28 + 16)
+    strtab_escaped << "\\00"
+    strtab_bytes = 1
+    strtab_offsets = {"" => 0}
+    sym_offs = Array.new(nfns)
+    name_offs = Array.new(nfns)
+    i = 0
+    while i < nfns
+      f = fns[i]
+      sym_str = f[:name]
+      soff = strtab_offsets[sym_str]
+      if soff == nil
+        soff = strtab_bytes
+        strtab_offsets[sym_str] = soff
+        strtab_escaped << escape_llvm_string(sym_str)
+        strtab_escaped << "\\00"
+        strtab_bytes = strtab_bytes + utf8_byte_length(sym_str) + 1
+      sym_offs[i] = soff
+      display = fn_meta_display_name(f)
+      noff = strtab_offsets[display]
+      if noff == nil
+        noff = strtab_bytes
+        strtab_offsets[display] = noff
+        strtab_escaped << escape_llvm_string(display)
+        strtab_escaped << "\\00"
+        strtab_bytes = strtab_bytes + utf8_byte_length(display) + 1
+      name_offs[i] = noff
+      i += 1
+
     out << "@__w_fn_meta = constant \[0 x { ptr, ptr, ptr, i32, i32 }] zeroinitializer\n"
     out << "@__w_fn_meta_count = constant i32 0\n\n"
-    out << "@__w_fn_sym_meta = constant "
+    out << "@__w_fn_sym_strtab = constant "
+    out << lbr
+    out << strtab_bytes.to_s()
+    out << " x i8"
+    out << rbr
+    out << " c\""
+    out << strtab_escaped.to_s()
+    out << "\", align 1\n"
+    nfiles = fn_file_list.size()
+    out << "@__w_fn_sym_files = constant "
+    out << lbr
+    out << nfiles.to_s()
+    out << " x ptr"
+    out << rbr
+    if nfiles == 0
+      out << " zeroinitializer\n"
+    else
+      out << " "
+      out << lbr
+      fi2 = 0
+      while fi2 < nfiles
+        if fi2 > 0
+          out << ", "
+        out << "ptr @.wfm.file."
+        out << fi2.to_s()
+        fi2 += 1
+      out << rbr
+      out << "\n"
+    out << "@__w_fn_sym_compact = constant "
     out << lbr
     out << nfns.to_s()
-    out << " x { ptr, ptr, ptr, i32, i32 }"
+    out << " x { i32, i32, i32, i32, i32 }"
     out << rbr
     if nfns == 0
       out << " zeroinitializer\n"
@@ -1188,19 +1267,18 @@ function_emit_cache_state = {
       i = 0
       while i < nfns
         f = fns[i]
-        istr = i.to_s()
         skind = f[:source_kind]
         line = f[:source_line]
         if line == nil
           line = skind == :entry ? 1 : 0
         kind_int = fn_meta_kind_to_int(skind)
-        out << "  { ptr, ptr, ptr, i32, i32 } { ptr @.wfm."
-        out << istr
-        out << ".s, ptr @.wfm.file."
+        out << "  { i32, i32, i32, i32, i32 } { i32 "
+        out << sym_offs[i].to_s()
+        out << ", i32 "
+        out << name_offs[i].to_s()
+        out << ", i32 "
         out << fn_file_ids[i].to_s()
-        out << ", ptr @.wfm."
-        out << istr
-        out << ".n, i32 "
+        out << ", i32 "
         out << line.to_s()
         out << ", i32 "
         out << kind_int.to_s()
@@ -1211,7 +1289,7 @@ function_emit_cache_state = {
         i += 1
       out << rbr
       out << "\n"
-    out << "@__w_fn_sym_meta_count = constant i32 "
+    out << "@__w_fn_sym_compact_count = constant i32 "
     out << nfns.to_s()
     out << "\n\n"
 
@@ -1220,10 +1298,10 @@ function_emit_cache_state = {
 -> emit_stacktrace_llvm_used(has_ic_site = false, has_sym_meta = false)
   if has_sym_meta
     if has_ic_site
-      return "@llvm.used = appending global \[8 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_fn_sym_meta, ptr @__w_fn_sym_meta_count, ptr @__w_call_site, ptr @__w_call_site_count, ptr @__w_ic_site, ptr @__w_ic_site_count], section \"llvm.metadata\"\n\n"
-    return "@llvm.used = appending global \[6 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_fn_sym_meta, ptr @__w_fn_sym_meta_count, ptr @__w_call_site, ptr @__w_call_site_count], section \"llvm.metadata\"\n\n"
+      return "@llvm.used = appending global \[11 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_fn_sym_strtab, ptr @__w_fn_sym_files, ptr @__w_fn_sym_compact, ptr @__w_fn_sym_compact_count, ptr @__w_call_site, ptr @__w_call_site_count, ptr @__w_ic_site_files, ptr @__w_ic_site_sparse, ptr @__w_ic_site_sparse_count], section \"llvm.metadata\"\n\n"
+    return "@llvm.used = appending global \[8 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_fn_sym_strtab, ptr @__w_fn_sym_files, ptr @__w_fn_sym_compact, ptr @__w_fn_sym_compact_count, ptr @__w_call_site, ptr @__w_call_site_count], section \"llvm.metadata\"\n\n"
   if has_ic_site
-    return "@llvm.used = appending global \[6 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_call_site, ptr @__w_call_site_count, ptr @__w_ic_site, ptr @__w_ic_site_count], section \"llvm.metadata\"\n\n"
+    return "@llvm.used = appending global \[7 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_call_site, ptr @__w_call_site_count, ptr @__w_ic_site_files, ptr @__w_ic_site_sparse, ptr @__w_ic_site_sparse_count], section \"llvm.metadata\"\n\n"
   "@llvm.used = appending global \[4 x ptr] \[ptr @__w_fn_meta, ptr @__w_fn_meta_count, ptr @__w_call_site, ptr @__w_call_site_count], section \"llvm.metadata\"\n\n"
 
 -> address_taken_function_for_inst(inst)

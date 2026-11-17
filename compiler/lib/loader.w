@@ -227,7 +227,7 @@ loader_toolchain_state = {split_checked: false}
     if stat == nil
       return false
     configured = env("TUNGSTEN_FRONTEND_DISK_CACHE_MIN_BYTES")
-    minimum = 16384
+    minimum = 2048
     if configured != nil && configured != ""
       minimum = configured.to_i()
       if minimum < 0
@@ -236,15 +236,19 @@ loader_toolchain_state = {split_checked: false}
 
   -> persistent_parse_restore(probe, source = nil)
     manifest = probe[:manifest]
-    if source == nil
-      source = read_file(manifest[:path])
+    file_id = 0
+    if source == nil && runtime_identity() == "compiled-runtime" && ccall_nobox("w_loc_line_for_offset", -99, 0) == 1
+      file_id = ccall_nobox("w_loc_register_source_text", manifest[:path], nil)
+    else
       if source == nil
-        return nil
-      source = ccall("w_algebra_rewrite_source", source)
-    # Parser registers the post-shebang-rewrite source layout. Reconstruct the
-    # same codepoint-indexed table in this process before restoring locations.
-    location_source = strip_bash_shebang(source)
-    file_id = ccall_nobox("w_loc_register_source_text", manifest[:path], location_source)
+        source = read_file(manifest[:path])
+        if source == nil
+          return nil
+        source = ccall("w_algebra_rewrite_source", source)
+      # Parser registers the post-shebang-rewrite source layout. Reconstruct the
+      # same codepoint-indexed table in this process before restoring locations.
+      location_source = strip_bash_shebang(source)
+      file_id = ccall_nobox("w_loc_register_source_text", manifest[:path], location_source)
     if file_id <= 0
       return nil
     entry = ccall("w_core_cache_read_rebase_locations", probe[:ast_path], manifest[:file_id], file_id)

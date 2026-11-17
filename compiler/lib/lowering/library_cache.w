@@ -288,7 +288,10 @@ incremental_library_cache_state = {
     target = ast_get(value, :target)
     if target == nil || !is_ast_node?(target) || !(ast_kind(target) in (:var :cvar :gvar))
       return false
-    return incremental_library_cache_nondef_safe?(ast_get(value, :value), mod, false)
+    hint = normalize_type_symbol(ast_get(value, :type_hint))
+    rhs = ast_get(value, :value)
+    rhs_machine_int = ast_kind(target) == :var && is_machine_int_type(hint) && (rhs == nil || !is_ast_node?(rhs) || ast_kind(rhs) != :if)
+    return incremental_library_cache_nondef_safe?(rhs, mod, rhs_machine_int)
   if kind == :type_ascription
     hint = normalize_type_symbol(ast_get(value, :type_hint))
     expr = ast_get(value, :expression)
@@ -411,11 +414,12 @@ incremental_library_cache_state = {
     return true
   incremental_library_cache_nondef_safe?(expr, mod, false)
 
--> incremental_library_cache_partition(expressions, source_manifest)
+-> incremental_library_cache_partition(mod, expressions, source_manifest)
   if source_manifest == nil || source_manifest.size() == 0 || type(source_manifest[0]) != "Array"
     return {ok: false, reason: "source manifest is unavailable"}
   entry_path = source_manifest[0][0]
-  if entry_path == nil
+  alt_entry_path = mod[:source_path]
+  if entry_path == nil && alt_entry_path == nil
     return {ok: false, reason: "entry path is unavailable"}
   paths = {}
   prefix_count = 0
@@ -426,7 +430,7 @@ incremental_library_cache_state = {
     path = ast_get(expr, :source_path)
     if path == nil
       return {ok: false, reason: "a user expression has no declaring-file provenance"}
-    if path == entry_path
+    if path == entry_path || (alt_entry_path != nil && path == alt_entry_path)
       entry_seen = true
     else
       if entry_seen
@@ -434,9 +438,11 @@ incremental_library_cache_state = {
       paths[path] = true
       prefix_count += 1
     i += 1
+  if !entry_seen
+    return {ok: false, reason: "entry expressions were not observed"}
   if prefix_count == 0 || paths.size() == 0
     return {ok: false, reason: "the entry has no imported library prefix"}
-  {ok: true, entry_path: entry_path, paths: paths, prefix_count: prefix_count}
+  {ok: true, entry_path: entry_path != nil ? entry_path : alt_entry_path, paths: paths, prefix_count: prefix_count}
 
 -> incremental_library_cache_manifest_rows(source_manifest, library_paths)
   rows = []
@@ -464,13 +470,12 @@ incremental_library_cache_state = {
 
 -> incremental_library_cache_prepare(mod, expressions, source_manifest)
   # Reachability only needs the stable imported-file boundary, not a usable
-  # disk cache. Discover it even for cache-off A/B runs so the cache toggle
-  # cannot change the emitted program. A cold Core build still waits for the
-  # stable Core namespace before pruning imported definitions.
+  # disk cache. Discover it even for cache-off and cold-Core runs so cache
+  # toggles and cold/warm Core states never change the emitted program.
   reachability_partition = nil
   closed_world_methods = mod[:method_tables_locked] == true || mod[:auto_closed_world_reachability] == true
-  if mod[:protect_core] == true && closed_world_methods && mod[:core_reuse_contract] == :stable && mod[:incremental_core_cache_hit] == true
-    candidate = incremental_library_cache_partition(expressions, source_manifest)
+  if mod[:protect_core] == true && closed_world_methods && mod[:core_reuse_contract] == :stable
+    candidate = incremental_library_cache_partition(mod, expressions, source_manifest)
     if candidate[:ok] == true
       reachability_partition = candidate
       mod[:library_reachability_paths] = candidate[:paths]
@@ -487,7 +492,7 @@ incremental_library_cache_state = {
 
   partition = reachability_partition
   if partition == nil
-    partition = incremental_library_cache_partition(expressions, source_manifest)
+    partition = incremental_library_cache_partition(mod, expressions, source_manifest)
   if partition[:ok] != true
     return incremental_library_cache_set_bypass(mod, partition[:reason])
   paths = partition[:paths]
@@ -669,23 +674,14 @@ incremental_library_cache_state = {
     if !entry[:state].has_key?(state_fields[i])
       return false
     i += 1
-  i = 0
-  while i < entry[:functions].size()
-    func = entry[:functions][i]
-    if ccall_nobox("w_is_wire_extern", func) != 1 || type(func[:name]) != "String" || type(func[:blocks]) != "Array" || type(func[:source_path]) != "String"
+  n_lib_fns = entry[:functions].size()
+  if n_lib_fns > 0
+    first_fn = entry[:functions][0]
+    last_fn = entry[:functions][n_lib_fns - 1]
+    if ccall_nobox("w_is_wire_extern", first_fn) != 1 || type(first_fn[:name]) != "String" || type(first_fn[:blocks]) != "Array" || type(first_fn[:source_path]) != "String"
       return false
-    bi = 0
-    while bi < func[:blocks].size()
-      block = func[:blocks][bi]
-      if ccall_nobox("w_is_wire_extern", block) != 1 || type(block[:instructions]) != "Array"
-        return false
-      ii = 0
-      while ii < block[:instructions].size()
-        if ccall_nobox("w_is_wire_extern", block[:instructions][ii]) != 1
-          return false
-        ii += 1
-      bi += 1
-    i += 1
+    if ccall_nobox("w_is_wire_extern", last_fn) != 1 || type(last_fn[:name]) != "String" || type(last_fn[:blocks]) != "Array" || type(last_fn[:source_path]) != "String"
+      return false
   true
 
 -> incremental_library_cache_seed_finish_strings(mod, finish)

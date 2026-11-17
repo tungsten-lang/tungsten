@@ -44,6 +44,8 @@ void tc_chunk_free(TcChunk *chunk) {
   free(chunk->method_ic_class);
   free(chunk->method_ic_class_len);
   free(chunk->method_ic_fn);
+  free(chunk->method_hash_slots);
+  free(chunk->method_hash_hashes);
   free(chunk->astnode_fn_cache);
   free(chunk->astnode_fn_state);
   free(chunk->setter_sym_for_const);
@@ -793,6 +795,41 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
   free(bitmap);
   free(order);
 
+  // Build open-addressed (Class#method) lookup table once in reverse definition
+  // order so last-defined method wins, matching tc_chunk_find_method semantics.
+  if (chunk->function_count > 0) {
+    uint32_t mcap = 64;
+    while ((size_t)mcap < chunk->function_count * 2u) mcap *= 2u;
+    chunk->method_hash_slots = (uint32_t *)calloc(mcap, sizeof(uint32_t));
+    chunk->method_hash_hashes = (uint64_t *)calloc(mcap, sizeof(uint64_t));
+    if (chunk->method_hash_slots && chunk->method_hash_hashes) {
+      chunk->method_hash_mask = mcap - 1u;
+      for (size_t fi = chunk->function_count; fi > 0; fi--) {
+        const TcFunction *mf = &chunk->functions[fi - 1];
+        if (!memchr(mf->name, '#', mf->name_len)) continue;
+        uint64_t mh = 14695981039346656037ULL;
+        for (size_t bi = 0; bi < mf->name_len; bi++) {
+          mh ^= (uint8_t)mf->name[bi];
+          mh *= 1099511628211ULL;
+        }
+        uint32_t mslot = (uint32_t)mh & chunk->method_hash_mask;
+        while (chunk->method_hash_slots[mslot] != 0) {
+          const TcFunction *ef = &chunk->functions[chunk->method_hash_slots[mslot] - 1];
+          if (chunk->method_hash_hashes[mslot] == mh &&
+              ef->name_len == mf->name_len &&
+              memcmp(ef->name, mf->name, mf->name_len) == 0) {
+            break;
+          }
+          mslot = (mslot + 1u) & chunk->method_hash_mask;
+        }
+        if (chunk->method_hash_slots[mslot] == 0) {
+          chunk->method_hash_slots[mslot] = (uint32_t)fi;
+          chunk->method_hash_hashes[mslot] = mh;
+        }
+      }
+    }
+  }
+
   // CALL fast path: precompute name_id → TcFunction*. Each chunk const
   // that's a SYMBOL gets matched against the function name table; on
   // hit, fn_for_const[id] is the resolved function. The L_CALL handler
@@ -840,11 +877,11 @@ void tc_chunk_compute_touched(TcChunk *chunk) {
         }
       }
     }
-    // Implicit-self method dispatch IC. One slot per name_id, populated
-    // on first call. Class pointer of NULL means "empty / never hit".
-    chunk->method_ic_class = (const char **)calloc(chunk->const_count, sizeof(const char *));
-    chunk->method_ic_class_len = (size_t *)calloc(chunk->const_count, sizeof(size_t));
-    chunk->method_ic_fn = (TcFunction **)calloc(chunk->const_count, sizeof(TcFunction *));
+    // Per-call-site method dispatch IC (sized to max(call_site_count, const_count)).
+    size_t ic_count = chunk->call_site_count > chunk->const_count ? chunk->call_site_count : chunk->const_count;
+    chunk->method_ic_class = (const char **)calloc(ic_count, sizeof(const char *));
+    chunk->method_ic_class_len = (size_t *)calloc(ic_count, sizeof(size_t));
+    chunk->method_ic_fn = (TcFunction **)calloc(ic_count, sizeof(TcFunction *));
   }
 
   for (size_t i = 0; i < chunk->case_table_count; i++) {
@@ -1049,13 +1086,39 @@ TcFunction *tc_chunk_find_method(const TcChunk *chunk,
   size_t current_len = class_len;
   for (int guard = 0; guard < 64; guard++) {
     size_t full_len = current_len + 1 + method_len;
-    for (size_t i = chunk->function_count; i > 0; i--) {
-      TcFunction *f = &((TcChunk *)chunk)->functions[i - 1];
-      if (f->name_len != full_len) continue;
-      if (f->name[current_len] != '#') continue;
-      if (memcmp(f->name, current_name, current_len) != 0) continue;
-      if (memcmp(f->name + current_len + 1, method_name, method_len) != 0) continue;
-      return f;
+    if (chunk->method_hash_slots && chunk->method_hash_hashes) {
+      uint64_t mh = 14695981039346656037ULL;
+      for (size_t bi = 0; bi < current_len; bi++) {
+        mh ^= (uint8_t)current_name[bi];
+        mh *= 1099511628211ULL;
+      }
+      mh ^= (uint8_t)'#';
+      mh *= 1099511628211ULL;
+      for (size_t bi = 0; bi < method_len; bi++) {
+        mh ^= (uint8_t)method_name[bi];
+        mh *= 1099511628211ULL;
+      }
+      uint32_t mslot = (uint32_t)mh & chunk->method_hash_mask;
+      while (chunk->method_hash_slots[mslot] != 0) {
+        if (chunk->method_hash_hashes[mslot] == mh) {
+          TcFunction *f = &((TcChunk *)chunk)->functions[chunk->method_hash_slots[mslot] - 1];
+          if (f->name_len == full_len && f->name[current_len] == '#' &&
+              memcmp(f->name, current_name, current_len) == 0 &&
+              memcmp(f->name + current_len + 1, method_name, method_len) == 0) {
+            return f;
+          }
+        }
+        mslot = (mslot + 1u) & chunk->method_hash_mask;
+      }
+    } else {
+      for (size_t i = chunk->function_count; i > 0; i--) {
+        TcFunction *f = &((TcChunk *)chunk)->functions[i - 1];
+        if (f->name_len != full_len) continue;
+        if (f->name[current_len] != '#') continue;
+        if (memcmp(f->name, current_name, current_len) != 0) continue;
+        if (memcmp(f->name + current_len + 1, method_name, method_len) != 0) continue;
+        return f;
+      }
     }
     const TcClassSuper *entry = find_class_super(chunk, current_name, current_len);
     if (!entry || !entry->super) return NULL;
@@ -1208,7 +1271,8 @@ void tc_dump_bytecode(const TcChunk *chunk) {
     } else if (op == TC_OP_CALL || op == TC_OP_CALL_DISCARD) {
       uint32_t name = read_u32(chunk->code, &ip);
       uint32_t argc = read_u32(chunk->code, &ip);
-      uint32_t has_receiver = read_u32(chunk->code, &ip);
+      uint32_t call_flags = read_u32(chunk->code, &ip);
+      uint32_t has_receiver = call_flags >> 31;
       printf(" name=%u argc=%u recv=%u", name, argc, has_receiver);
       if (name < chunk->const_count && tc_kind(chunk->consts[name]) == TC_VAL_STRING) {
         printf(" ; %.*s", (int)tc_str_len(chunk->consts[name]), tc_str_bytes_only(chunk->consts[name]));

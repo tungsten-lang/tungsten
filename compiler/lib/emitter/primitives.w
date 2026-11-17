@@ -496,6 +496,8 @@
   out << declare_fn("w_method_call_cached_0", wv, join_arg_types3(wv, wv, "ptr"))
   out << declare_fn("w_method_call_cached_1", wv, join_arg_types4(wv, wv, wv, "ptr"))
   out << declare_fn("w_method_call_cached_2", wv, join_arg_types5(wv, wv, wv, wv, "ptr"))
+  out << declare_fn("w_fast_sym_get", wv, join_arg_types3(wv, wv, "ptr"))
+  out << declare_fn("w_fast_sym_set", wv, join_arg_types4(wv, wv, wv, "ptr"))
   out << declare_fn("w_value_is_a", wv, wv2)
 
   # Classes / objects
@@ -1673,5 +1675,33 @@
     out << "  ret i64 %result\n"
   else
     out << "  ret i64 %count\n"
+  out << "}\n"
+  out.to_s()
+
+-> guard_class_helper_ir()
+  out = StringBuffer(512)
+  out << "define private i1 @__w_guard_class(i64 %r, ptr %cg) alwaysinline nounwind willreturn memory(read) {\n"
+  out << "entry:\n"
+  out << "  %hi = lshr i64 %r, 48\n"
+  out << "  %z = icmp eq i64 %hi, 0\n"
+  out << "  %ge = icmp uge i64 %r, 16\n"
+  out << "  %o = and i1 %z, %ge\n"
+  out << "  %sb = and i64 %r, 15\n"
+  out << "  %isi = icmp eq i64 %sb, 4\n"
+  out << "  %oi = and i1 %o, %isi\n"
+  out << "  br i1 %oi, label %ck, label %no\n"
+  out << "ck:\n"
+  out << "  %om = and i64 %r, -16\n"
+  out << "  %op = inttoptr i64 %om to ptr\n"
+  out << "  %oc = load i16, ptr %op, align 2\n"
+  out << "  %cw = load i64, ptr %cg, align 8\n"
+  out << "  %cm = and i64 %cw, -16\n"
+  out << "  %cp = inttoptr i64 %cm to ptr\n"
+  out << "  %cip = getelementptr i8, ptr %cp, i64 16\n"
+  out << "  %cc = load i16, ptr %cip, align 2\n"
+  out << "  %same = icmp eq i16 %oc, %cc\n"
+  out << "  ret i1 %same\n"
+  out << "no:\n"
+  out << "  ret i1 false\n"
   out << "}\n"
   out.to_s()

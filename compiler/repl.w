@@ -4,6 +4,7 @@
 # a program with @gpu definitions delegates to the metal image like any
 # other compile. This image is a product of `bin/tungsten build`
 # (see delegate_compiler_image), so it must stay cheap to rebuild.
+use lib/driver_modules
 use lib/interpreter
 use lib/repl
 use lib/wit/scenes/date

@@ -725,6 +725,7 @@ BUILD_SCRATCH_DIR = build_scratch_dir
   r
 
 release_mode = array_contains?(args, "--release")
+full_lto_requested = array_contains?(args, "--full-lto")
 native_mode = array_contains?(args, "--native")
 portable_mode = array_contains?(args, "--portable")
 debug_requested = array_contains?(args, "--debug")
@@ -778,7 +779,7 @@ if install_requested
   release_mode = true
 
 debug_enabled = debug_requested || (!no_debug_requested && !release_mode && !portable_mode)
-lto_flag = release_mode ? "-flto=full" : "-flto=thin"
+lto_flag = full_lto_requested ? "-flto=full" : "-flto=thin"
 
 # Stage identity (stage 1 .ll == stage 2 .ll) proves the compiler reproduces
 # itself. A plain local build only warns on a mismatch and still installs
@@ -2341,7 +2342,8 @@ if !bit_only
     else
       sh_ok("rm -f " + shq(stage1_ll))
       # -O0 stage-1 link: the binary is throwaway (only produces stage 2).
-      s1_env = env_prefix(s1_keys, s1_vals) + "TUNGSTEN_LL_DIR=" + shq(stage_ll_dir) + " TUNGSTEN_LL_PATH=" + shq(stage1_ll) + " "
+      s1_force_env = force_build ? "TUNGSTEN_SHARD_CACHE=0 " : ""
+      s1_env = env_prefix(s1_keys, s1_vals) + s1_force_env + "TUNGSTEN_LL_DIR=" + shq(stage_ll_dir) + " TUNGSTEN_LL_PATH=" + shq(stage1_ll) + " "
       stage1_log = build_scratch_dir + "/stage1.log"
       stage1_link = " --runtime " + shq(runtime_archive) + " --no-lto"
       s1_cmd = STAGE_CD + s1_env + shq(c_interp_for_build) + " " + shq(STAGE_ENTRY) + " compile " + shq(STAGE_ENTRY) + " --out " + shq(stage1) + STAGE_FLAGS_CMD + stage1_link + " > " + shq(stage1_log) + " 2>&1"
@@ -2829,7 +2831,7 @@ if !stage0_only && !stage1_only && !bit_only
     image_debug_part = debug_requested ? " -g" : ""
     image_fast_part = fast_mode ? " -ffast-math" : ""
     image_clang_opt = image_opt_level + image_debug_part + image_fast_part
-  image_kinds = ["repl", "metal"]
+  image_kinds = ["metal", "repl"]
   pending_images = []
   ii = 0
   while ii < image_kinds.size
@@ -2857,7 +2859,7 @@ if !stage0_only && !stage1_only && !bit_only
 
   if pending_images.size > 0
     image_force_env = force_build ? "TUNGSTEN_SHARD_CACHE=0 " : ""
-    image_shard_env = pending_images.size > 1 ? "TUNGSTEN_SHARD_JOBS=8 " : ""
+    image_shard_env = pending_images.size > 1 ? "TUNGSTEN_SHARD_JOBS=8 TUNGSTEN_MIDEND_JOBS=4 " : ""
     image_procs = []
     image_starts = []
     pi = 0

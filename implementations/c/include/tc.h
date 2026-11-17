@@ -808,6 +808,10 @@ typedef struct {
   const char **method_ic_class;
   size_t      *method_ic_class_len;
   TcFunction **method_ic_fn;
+  uint32_t     call_site_count;
+  uint32_t    *method_hash_slots;
+  uint64_t    *method_hash_hashes;
+  uint32_t     method_hash_mask;
   // Cached `self` slot index. find_local_slot(chunk, "self", 4) showed up
   // in profile as ~5% of stage 1 — every method dispatch (CALL with a
   // TC_VAL_OBJECT in the self slot) and every IVAR_GET/SET ran the linear

@@ -41,23 +41,14 @@ incremental_core_cache_state = {
     if type(item) != "Hash" || item[:id] != i || type(item[:text]) != "String"
       return false
     i += 1
-  i = 0
-  while i < entry[:functions].size()
-    func = entry[:functions][i]
-    if ccall_nobox("w_is_wire_extern", func) != 1 || type(func[:name]) != "String" || type(func[:original_name]) != "String" || type(func[:params]) != "Array" || type(func[:extra_params]) != "Array" || type(func[:return_type]) != "String" || type(func[:blocks]) != "Array" || type(func[:dynamic_method_calls]) != "Array" || type(func[:dynamic_method_call_keys]) != "Hash"
+  n_core_fns = entry[:functions].size()
+  if n_core_fns > 0
+    first_fn = entry[:functions][0]
+    last_fn = entry[:functions][n_core_fns - 1]
+    if ccall_nobox("w_is_wire_extern", first_fn) != 1 || type(first_fn[:name]) != "String" || type(first_fn[:original_name]) != "String" || type(first_fn[:params]) != "Array" || type(first_fn[:extra_params]) != "Array" || type(first_fn[:return_type]) != "String" || type(first_fn[:blocks]) != "Array" || type(first_fn[:dynamic_method_calls]) != "Array" || type(first_fn[:dynamic_method_call_keys]) != "Hash"
       return false
-    bi = 0
-    while bi < func[:blocks].size()
-      block = func[:blocks][bi]
-      if ccall_nobox("w_is_wire_extern", block) != 1 || type(block[:label]) != "String" || type(block[:instructions]) != "Array"
-        return false
-      ii = 0
-      while ii < block[:instructions].size()
-        if ccall_nobox("w_is_wire_extern", block[:instructions][ii]) != 1
-          return false
-        ii += 1
-      bi += 1
-    i += 1
+    if ccall_nobox("w_is_wire_extern", last_fn) != 1 || type(last_fn[:name]) != "String" || type(last_fn[:original_name]) != "String" || type(last_fn[:params]) != "Array" || type(last_fn[:extra_params]) != "Array" || type(last_fn[:return_type]) != "String" || type(last_fn[:blocks]) != "Array" || type(last_fn[:dynamic_method_calls]) != "Array" || type(last_fn[:dynamic_method_call_keys]) != "Hash"
+      return false
   true
 
 # Keep the cache key independent of loader/autoload traversal order. Use an
@@ -283,8 +274,8 @@ incremental_core_cache_state = {
   key_text << core_abi_field(math_mode)
   key_text << core_abi_field(no_static_slab)
   key_text << core_abi_field(release_mode)
-  key_text << core_abi_field(contracts[:types])
-  key_text << core_abi_field(contracts[:methods])
+  key_text << core_abi_field(contracts[:types] || auto_closed_world)
+  key_text << core_abi_field(contracts[:methods] || auto_closed_world)
   key_text << incremental_core_cache_defines_row(build_defines)
   # Embedders may perform several compiles in one process while changing
   # tuning variables between calls. Include every switch that can affect
@@ -391,6 +382,8 @@ incremental_core_cache_state = {
   incremental_core_cache_seed_strings(mod, entry)
   mod[:incremental_core_cache_entry] = entry
   mod[:incremental_core_fn_hashes] = entry[:fn_hashes]
+  mod[:core_stored_globals] = entry[:core_stored_globals]
+  mod[:core_loaded_globals] = entry[:core_loaded_globals]
   mod[:incremental_core_cache_status] = :hit
   mod[:incremental_core_cache_hit] = true
   incremental_core_cache_state[:hits] = incremental_core_cache_state[:hits] + 1
@@ -709,6 +702,8 @@ incremental_core_cache_state = {
   functions = []
   final_name_map = {}
   core_fn_hashes = {}
+  core_stored_set = {}
+  core_loaded_set = {}
   i = 0
   while i < mod[:functions].size()
     func = mod[:functions][i]
@@ -724,6 +719,19 @@ incremental_core_cache_state = {
       hash_value = fn_hash_get(mod[:fn_hashes], hash_source)
       if hash_value != nil
         fn_hash_put(core_fn_hashes, func[:name], hash_value)
+      fblocks = func[:blocks]
+      bi = 0
+      while bi < fblocks.size()
+        binstrs = fblocks[bi][:instructions]
+        ii = 0
+        while ii < binstrs.size()
+          gk = wire_kind(binstrs[ii])
+          if gk == :store_global
+            core_stored_set[wire_get(binstrs[ii], :name)] = true
+          elsif gk == :load_global
+            core_loaded_set[wire_get(binstrs[ii], :name)] = true
+          ii += 1
+        bi += 1
       func[:incremental_core_candidate] = nil
       func[:incremental_core_frozen] = true
       functions.push(func)
@@ -738,6 +746,13 @@ incremental_core_cache_state = {
   entry = {
     key: mod[:incremental_core_cache_key],
     core_abi_hash: mod[:core_abi_hash],
+    core_abi_function_count: mod[:core_abi_function_count],
+    core_abi_class_count: mod[:core_abi_class_count],
+    core_abi_global_count: mod[:core_abi_global_count],
+    core_prepass: mod[:core_prepass_snapshot],
+    core_ic_sites: mod[:core_ic_sites_snapshot],
+    core_stored_globals: core_stored_set.keys(),
+    core_loaded_globals: core_loaded_set.keys(),
     functions: functions,
     strings: strings,
     name_map: final_name_map,

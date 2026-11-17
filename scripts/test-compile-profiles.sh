@@ -103,8 +103,8 @@ expect 'dev link' "$(link_of dev)" +-O0 +-g --O3 "-$ANY_LTO" "+~$ARCHIVE" "-~$BU
 expect 'dev runtime' "$(runtime_compile_of dev)" +-O0 "-$ANY_LTO"
 runs "$TMP/dev"
 
-# --release: -O3, no dev checks, and whole-program LTO. The runtime side is a
-# cached bitcode bundle compiled with the same -flto=full the link passes: a
+# --release: -O3, no dev checks, and whole-program ThinLTO. The runtime side is
+# a cached bitcode bundle compiled with the same -flto=thin the link passes: a
 # link without the flag would quietly codegen that bitcode without LTO, and
 # bitcode without an LTO link is paid for and never used.
 #
@@ -117,20 +117,26 @@ batch_release_links="$(grep -E -- '/probe2?\.wc$' "$TMP/batch-release.trace")"
 [[ "$(wc -l <<<"$batch_release_links" | tr -d ' ')" == 2 ]] ||
   { printf 'batch --release: expected two links:\n%s\n' "$batch_release_links" >&2; exit 1; }
 while IFS= read -r batch_link; do
-  expect 'batch --release link' "$batch_link" +-O3 +-DNDEBUG +-flto=full --g "+~$BUNDLE" "-~$ARCHIVE"
+  expect 'batch --release link' "$batch_link" +-O3 +-DNDEBUG +-flto=thin --flto=full --g "+~$BUNDLE" "-~$ARCHIVE"
 done <<<"$batch_release_links"
 batch_release_runtime="$(runtime_compile_of batch-release)"
 [[ "$(wc -l <<<"$batch_release_runtime" | tr -d ' ')" == 1 ]] ||
   { printf 'batch --release: expected one runtime compile:\n%s\n' "$batch_release_runtime" >&2; exit 1; }
-expect 'batch --release runtime' "$batch_release_runtime" +-O3 +-DNDEBUG +-flto=full
+expect 'batch --release runtime' "$batch_release_runtime" +-O3 +-DNDEBUG +-flto=thin
 runs "$TMP/probe.wc"
 runs "$TMP/probe2.wc"
 
 # A single --release compile is the same contract and shares that bundle.
 traced release lto compile --release --out "$TMP/release" "$TMP/probe.w"
-expect 'release link' "$(link_of release)" +-O3 +-DNDEBUG +-flto=full --g --O0 "+~$BUNDLE" "-~$ARCHIVE"
+expect 'release link' "$(link_of release)" +-O3 +-DNDEBUG +-flto=thin --flto=full --g --O0 "+~$BUNDLE" "-~$ARCHIVE"
 no_runtime_compile release 'the batch bundle'
 runs "$TMP/release"
+
+# --release --full-lto: opt-in monolithic full LTO with its own full-LTO bundle.
+traced release-full-lto full-lto compile --release --full-lto --out "$TMP/release-full-lto" "$TMP/probe.w"
+expect 'release --full-lto link' "$(link_of release-full-lto)" +-O3 +-DNDEBUG +-flto=full --flto=thin --g --O0 "+~$BUNDLE" "-~$ARCHIVE"
+expect 'release --full-lto runtime' "$(runtime_compile_of release-full-lto)" +-O3 +-DNDEBUG +-flto=full
+runs "$TMP/release-full-lto"
 
 # --release --no-lto: the release profile on the native archive; no bitcode is
 # built anywhere.
@@ -149,7 +155,7 @@ runs "$TMP/lto"
 # is the IEEE one --release already built, so nothing is recompiled here.
 TUNGSTEN_CLANG_OPT='-O3 -ffast-math' \
   traced release-fast lto compile --release --fast --out "$TMP/release-fast" "$TMP/probe.w"
-expect 'release --fast link' "$(link_of release-fast)" +-O3 +-ffast-math +-flto=full "+~$BUNDLE"
+expect 'release --fast link' "$(link_of release-fast)" +-O3 +-ffast-math +-flto=thin "+~$BUNDLE"
 no_runtime_compile release-fast 'the release bundle'
 runs "$TMP/release-fast"
 

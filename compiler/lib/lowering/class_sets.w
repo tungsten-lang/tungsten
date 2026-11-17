@@ -565,15 +565,31 @@
   out
 
 -> infer_return_class_sets_fixed_point(mod, expressions, ordered_class_exprs)
-  if mod[:method_tables_locked] != true
+  if mod[:method_tables_locked] != true && mod[:auto_closed_world_devirt] != true
     return nil
   collected = collect_return_class_definitions(mod, expressions, ordered_class_exprs)
   definitions = collected[:definitions]
   mod[:return_class_set_workers] = collected[:workers]
+  core_prepass = mod[:incremental_core_cache_hit] == true && mod[:incremental_core_cache_entry] != nil ? mod[:incremental_core_cache_entry][:core_prepass] : nil
+  core_seeded = false
+  if core_prepass != nil && core_prepass[:return_class_sets] != nil
+    cached_rcs = core_prepass[:return_class_sets]
+    rkeys = cached_rcs.keys()
+    ri = 0
+    while ri < rkeys.size()
+      rk = rkeys[ri]
+      mod[:return_class_sets][rk] = cached_rcs[rk]
+      ri += 1
+    core_seeded = true
   components = return_class_scc_plan(mod, definitions)
   ci = 0
   while ci < components.size()
     component = components[ci]
+    if core_seeded && component.size() == 1
+      only_def = definitions[component[0]]
+      if only_def != nil && definition_from_core?(only_def[:node])
+        ci += 1
+        next
     component_set = {}
     i = 0
     while i < component.size()
@@ -600,6 +616,19 @@
         i += 1
       iter += 1
     ci += 1
+  if mod[:incremental_core_cache_status] == :miss
+    if mod[:core_prepass_snapshot] == nil
+      mod[:core_prepass_snapshot] = {}
+    core_rcs = {}
+    dkeys = definitions.keys()
+    di = 0
+    while di < dkeys.size()
+      dk = dkeys[di]
+      dnode = definitions[dk][:node]
+      if definition_from_core?(dnode) && mod[:return_class_sets][dk] != nil
+        core_rcs[dk] = mod[:return_class_sets][dk]
+      di += 1
+    mod[:core_prepass_snapshot][:return_class_sets] = core_rcs
   nil
 
 -> return_class_set_call_fact(ctx, node, receiver_fact)
@@ -1104,7 +1133,7 @@
   ctx[:class_set_call_facts] = {}
   # Open-world programs cannot consume an unguarded class-set proof. Avoid
   # paying for analysis whose only possible result is the existing IC path.
-  if ctx[:mod][:method_tables_locked] != true
+  if ctx[:mod][:method_tables_locked] != true && ctx[:mod][:auto_closed_world_devirt] != true
     return nil
   class_set_analyze_body(ctx, body, class_set_seed_env(ctx))
   nil

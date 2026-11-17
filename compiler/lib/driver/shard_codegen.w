@@ -27,8 +27,28 @@
   dev_runtime_append_env(cfg, "CPLUS_INCLUDE_PATH")
   cfg.to_s()
 
--> native_sharded_codegen_objects(ll_path, clang_opt, store_entries, verbose = false)
-  if runtime_identity() != "compiled-runtime"
+-> shard_sort_indices_desc(indices, shard_irs)
+  n = indices.size()
+  out = []
+  i = 0
+  while i < n
+    out.push(indices[i])
+    i += 1
+  i = 1
+  while i < n
+    cur = out[i]
+    cur_sz = shard_irs[cur].size()
+    j = i
+    while j > 0 && shard_irs[out[j - 1]].size() < cur_sz
+      out[j] = out[j - 1]
+      j -= 1
+    out[j] = cur
+    i += 1
+  out
+
+-> native_sharded_codegen_objects(ll_path, clang_opt, store_entries, verbose = false, lto_flag = "")
+  rt_id = runtime_identity()
+  if rt_id != "compiled-runtime" && rt_id != "tungsten-c"
     return nil
   if env("TUNGSTEN_SHARD_CODEGEN") == "0" || env("TUNGSTEN_BATCH_WORKER_PROCESS") == "1"
     return nil
@@ -53,6 +73,8 @@
   if march_flags() != ""
     compile_flags = compile_flags + " " + march_flags()
   compile_flags = compile_flags + " -fmerge-all-constants"
+  if lto_flag != nil && lto_flag != ""
+    compile_flags = compile_flags + " " + lto_flag
   if frame_pointers
     compile_flags = compile_flags + " -fno-omit-frame-pointer"
   if detect_target()[:os] == "macos"
@@ -60,7 +82,7 @@
   path_map_flag = !resolve_runtime_dir().starts_with?("/") ? " -ffile-prefix-map=\"$PWD\"=." : ""
 
   cache_dir = compiler_cache_dir()
-  cc_identity = dev_runtime_cc_identity(cc_command, "compiled-runtime")
+  cc_identity = dev_runtime_cc_identity(cc_command, rt_id)
   use_cache = env("TUNGSTEN_SHARD_CACHE") != "0" && cache_dir != nil && cc_identity != nil && ensure_driver_dir(cache_dir)
 
   nshards = shard_irs.size()
@@ -92,10 +114,11 @@
     work_dir = capture("mktemp -d \"${TMPDIR:-/tmp}/tungsten-shards.XXXXXX\" 2>/dev/null").strip()
     if work_dir == ""
       return nil
-    cmd = StringBuffer(miss_indices.size() * 256 + 64)
+    ordered_misses = shard_sort_indices_desc(miss_indices, shard_irs)
+    cmd = StringBuffer(ordered_misses.size() * 256 + 64)
     mi = 0
-    while mi < miss_indices.size()
-      s = miss_indices[mi]
+    while mi < ordered_misses.size()
+      s = ordered_misses[mi]
       ll_file = work_dir + "/shard" + s.to_s() + ".ll"
       tmp_obj = work_dir + "/shard" + s.to_s() + ".o"
       ok_file = work_dir + "/shard" + s.to_s() + ".ok"
@@ -125,6 +148,8 @@
         s = miss_indices[mi]
         if !file?(work_dir + "/shard" + s.to_s() + ".ok") || !file?(obj_paths[s])
           ok = false
+        else
+          store_entries.push(obj_paths[s])
         mi += 1
     system("rm -rf " + dev_runtime_shell_quote(work_dir))
     if !ok
@@ -140,13 +165,20 @@
   work_dir = capture("mktemp -d \"${TMPDIR:-/tmp}/tungsten-shards.XXXXXX\" 2>/dev/null").strip()
   if work_dir == ""
     return nil
-  cmd = StringBuffer(nshards * 256 + 64)
+  all_indices = []
   s = 0
   while s < nshards
+    obj_paths.push(work_dir + "/shard" + s.to_s() + ".o")
+    all_indices.push(s)
+    s += 1
+  ordered_all = shard_sort_indices_desc(all_indices, shard_irs)
+  cmd = StringBuffer(nshards * 256 + 64)
+  oi = 0
+  while oi < ordered_all.size()
+    s = ordered_all[oi]
     ll_file = work_dir + "/shard" + s.to_s() + ".ll"
-    obj_file = work_dir + "/shard" + s.to_s() + ".o"
+    obj_file = obj_paths[s]
     ok_file = work_dir + "/shard" + s.to_s() + ".ok"
-    obj_paths.push(obj_file)
     write_file(ll_file, shard_irs[s])
     cmd << "( "
     cmd << cc_command
@@ -160,7 +192,7 @@
     cmd << " && touch "
     cmd << dev_runtime_shell_quote(ok_file)
     cmd << " ) & "
-    s += 1
+    oi += 1
   cmd << "wait"
   ok = system(cmd.to_s()) == true
   if ok

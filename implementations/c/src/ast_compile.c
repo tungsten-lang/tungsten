@@ -90,10 +90,12 @@ static int emit_call_op(TcChunk *chunk, const char *name, size_t name_len, size_
   int name_id = tc_chunk_add_const(
       chunk, tc_box_symbol_bytes(interned, name_len, 0), err);
   if (name_id < 0) return 0;
+  uint32_t site_id = chunk->call_site_count++;
+  uint32_t call_flags = (has_receiver ? 0x80000000u : 0u) | (site_id & 0x7FFFFFFFu);
   return tc_emit_op(chunk, TC_OP_CALL, err) &&
          tc_emit_u32(chunk, (uint32_t)name_id, err) &&
          tc_emit_u32(chunk, (uint32_t)argc, err) &&
-         tc_emit_u32(chunk, (uint32_t)has_receiver, err);
+         tc_emit_u32(chunk, call_flags, err);
 }
 
 static char *copy_unquoted_string(TcAstValue value, size_t *len_out, TcError *err) {

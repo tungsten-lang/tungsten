@@ -244,9 +244,9 @@ core_source_root_memo = {}
   row = StringBuffer(192)
   row << "X;"
   row << core_abi_field("types")
-  row << core_abi_field(core_abi_bool(mod[:type_tables_locked]))
+  row << core_abi_field(core_abi_bool(mod[:type_tables_locked] == true || mod[:auto_closed_world_devirt] == true))
   row << core_abi_field("doors")
-  row << core_abi_field(core_abi_bool(mod[:method_tables_locked]))
+  row << core_abi_field(core_abi_bool(mod[:method_tables_locked] == true || mod[:auto_closed_world_devirt] == true))
   row << core_abi_field("fast")
   row << core_abi_field(core_abi_bool(mod[:fast_mode]))
   row << core_abi_field("math")
@@ -271,6 +271,15 @@ core_source_root_memo = {}
 # inputs; this digest specifically catches callable signature, class-layout,
 # global-export, and executable-contract drift.
 -> finalize_stable_core_abi(mod, core_exprs)
+  report_path = env("TUNGSTEN_CORE_ABI_REPORT")
+  if mod[:incremental_core_cache_hit] == true && mod[:incremental_core_cache_entry] != nil && (report_path == nil || report_path == "")
+    cached = mod[:incremental_core_cache_entry]
+    if cached[:core_abi_function_count] != nil
+      mod[:core_abi_hash] = cached[:core_abi_hash]
+      mod[:core_abi_function_count] = cached[:core_abi_function_count]
+      mod[:core_abi_class_count] = cached[:core_abi_class_count]
+      mod[:core_abi_global_count] = cached[:core_abi_global_count]
+      return nil
   rows = []
   function_count = 0
   i = 0
@@ -310,7 +319,6 @@ core_source_root_memo = {}
   mod[:core_abi_class_count] = class_count
   mod[:core_abi_global_count] = global_count
   mod[:core_abi_canonical] = canonical
-  report_path = env("TUNGSTEN_CORE_ABI_REPORT")
   if report_path != nil && report_path != ""
     write_file(report_path, canonical)
   nil

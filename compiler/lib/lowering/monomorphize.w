@@ -289,13 +289,13 @@
 # Collect stackable candidates in this scope. Skips anything inside a loop or
 # block body (alloca-in-loop would grow the stack). Does not descend into nested
 # method/fn definitions — those are separate scopes.
--> collect_ta_candidates(node, in_loop, out, nested_scopes, skip_core = false)
+-> collect_ta_candidates(node, in_loop, out, nested_scopes, skip_core = false, skip_paths = nil)
   if node == nil
     return nil
   if type(node) == "Array"
     i = 0
     while i < node.size()
-      collect_ta_candidates(node[i], in_loop, out, nested_scopes, skip_core)
+      collect_ta_candidates(node[i], in_loop, out, nested_scopes, skip_core, skip_paths)
       i += 1
     return nil
   if !is_ast_node?(node)
@@ -304,11 +304,15 @@
   if k in (:int :string :symbol :bool :nil_val :float :var :ivar :cvar :gvar :self_ref :class_ref :break :next :param)
     return nil
   if k == :method_def || k == :fn_def
-    if !(skip_core && definition_from_core?(node))
+    sp = skip_paths != nil ? ast_get(node, :source_path) : nil
+    if !(skip_core && definition_from_core?(node)) && !(sp != nil && skip_paths[sp] == true)
       nested_scopes.push(ast_get(node, :body))
     return nil
-  if skip_core && k in (:class_def :module_def :trait_def) && definition_from_core?(node)
-    return nil
+  if k in (:class_def :module_def :trait_def)
+    if skip_core && definition_from_core?(node)
+      return nil
+    if skip_paths != nil && skip_paths[ast_get(node, :source_path)] == true
+      return nil
   if !in_loop && is_stackable_ta_assign?(node)
     out.push({var: node.target.name, node: node.value})
   child_loop = in_loop
@@ -321,7 +325,7 @@
     ci_loop = child_loop
     if is_ast_node?(c) && ast_kind(c) == :block
       ci_loop = true
-    collect_ta_candidates(c, ci_loop, out, nested_scopes, skip_core)
+    collect_ta_candidates(c, ci_loop, out, nested_scopes, skip_core, skip_paths)
     j += 1
   nil
 
@@ -435,14 +439,14 @@
   nil
 
 # Entry: process a scope's statement list, then recurse into nested fn bodies.
--> mark_stackable_typed_arrays(scope_body, skip_core = false)
+-> mark_stackable_typed_arrays(scope_body, skip_core = false, skip_paths = nil)
   if scope_body == nil
     return nil
   if type(scope_body) != "Array"
     return nil
   cands = []
   nested_scopes = []
-  collect_ta_candidates(scope_body, false, cands, nested_scopes, skip_core)
+  collect_ta_candidates(scope_body, false, cands, nested_scopes, skip_core, skip_paths)
   ci = 0
   while ci < cands.size()
     c = cands[ci]
@@ -451,9 +455,30 @@
     ci += 1
   si = 0
   while si < nested_scopes.size()
-    mark_stackable_typed_arrays(nested_scopes[si], false)
+    mark_stackable_typed_arrays(nested_scopes[si], false, nil)
     si += 1
   nil
+
+-> clone_two_level_hash(src)
+  out = {}
+  if src == nil
+    return out
+  outer = src.keys()
+  oi = 0
+  while oi < outer.size()
+    ok = outer[oi]
+    sub = src[ok]
+    sub_copy = {}
+    if sub != nil
+      inner = sub.keys()
+      ii = 0
+      while ii < inner.size()
+        ik = inner[ii]
+        sub_copy[ik] = sub[ik]
+        ii += 1
+    out[ok] = sub_copy
+    oi += 1
+  out
 
 # Gap #2: walk every method body of every class, find ivar
 # assignments, and record the inferred RHS type into mod[:ivar_types]
@@ -461,8 +486,10 @@
 # unknown (recorded as nil so dispatch bails to runtime). Pre-pass: runs
 # AFTER all class methods are registered, BEFORE the lowering pass starts.
 -> collect_ivar_types(mod)
-  ivar_types = {}
-  ivar_conflicts = {}
+  core_prepass = mod[:incremental_core_cache_hit] == true && mod[:incremental_core_cache_entry] != nil ? mod[:incremental_core_cache_entry][:core_prepass] : nil
+  ivar_types = core_prepass != nil && core_prepass[:ivar_types] != nil ? clone_two_level_hash(core_prepass[:ivar_types]) : {}
+  ivar_conflicts = core_prepass != nil && core_prepass[:ivar_conflicts] != nil ? clone_two_level_hash(core_prepass[:ivar_conflicts]) : {}
+  skip_core_methods = core_prepass != nil && core_prepass[:ivar_types] != nil
   ast_keys = mod[:class_method_asts].keys()
   prev_cname = nil
   prev_ast = nil
@@ -475,7 +502,7 @@
     if ivar_types[cname] == nil
       ivar_types[cname] = {}
       ivar_conflicts[cname] = {}
-    if !(cname == prev_cname && method_ast == prev_ast)
+    if !(skip_core_methods && definition_from_core?(method_ast)) && !(cname == prev_cname && method_ast == prev_ast)
       prev_cname = cname
       prev_ast = method_ast
       record_ivar_param_types(method_ast, cname, ivar_types, ivar_conflicts)
@@ -493,6 +520,24 @@
       ik += 1
     ck += 1
   mod[:ivar_types] = ivar_types
+  if mod[:incremental_core_cache_status] == :miss
+    if mod[:core_prepass_snapshot] == nil
+      mod[:core_prepass_snapshot] = {}
+    core_it = {}
+    core_ic = {}
+    ckeys = mod[:known_classes].keys()
+    ci = 0
+    while ci < ckeys.size()
+      cn = ckeys[ci]
+      cnode = mod[:known_classes][cn]
+      if cnode != nil && is_ast_node?(cnode) && definition_from_core?(cnode)
+        if ivar_types[cn] != nil
+          core_it[cn] = ivar_types[cn]
+        if ivar_conflicts[cn] != nil
+          core_ic[cn] = ivar_conflicts[cn]
+      ci += 1
+    mod[:core_prepass_snapshot][:ivar_types] = clone_two_level_hash(core_it)
+    mod[:core_prepass_snapshot][:ivar_conflicts] = clone_two_level_hash(core_ic)
   collect_exact_source_ivar_types(mod)
 
 # Return the fully-qualified class name when `node` constructs an ordinary
@@ -544,15 +589,10 @@
 # for values recovered from containers (for example Interpreter's own saved
 # Environment snapshot).
 -> collect_exact_source_ivar_types(mod)
-  exact_types = {}
-  conflicts = {}
-  # A method compiled for a parent may execute with a subclass receiver, so a
-  # subclass-only writer can invalidate the parent's ivar fact. Conversely, a
-  # child method can observe writes performed by inherited parent methods.
-  # Until the proof is hierarchy-aware, conservatively exclude every class on
-  # either end of an inheritance edge. `class_super_names` records the
-  # namespace-resolved, first-declaration relationship used to create the
-  # runtime class; later reopens cannot hide it.
+  core_prepass = mod[:incremental_core_cache_hit] == true && mod[:incremental_core_cache_entry] != nil ? mod[:incremental_core_cache_entry][:core_prepass] : nil
+  exact_types = core_prepass != nil && core_prepass[:exact_ivar_types] != nil ? clone_two_level_hash(core_prepass[:exact_ivar_types]) : {}
+  conflicts = core_prepass != nil && core_prepass[:exact_ivar_conflicts] != nil ? clone_two_level_hash(core_prepass[:exact_ivar_conflicts]) : {}
+  skip_core_methods = core_prepass != nil && core_prepass[:exact_ivar_types] != nil
   inheritance_classes = {}
   super_names = mod[:class_super_names]
   if super_names != nil
@@ -576,14 +616,13 @@
     if exact_types[cname] == nil
       exact_types[cname] = {}
       conflicts[cname] = {}
+    if inheritance_classes[cname] == true && exact_types[cname] != nil
+      exact_types[cname] = {}
     if inheritance_classes[cname] != true
       method_ast = mod[:class_method_asts][key]
-      if !(cname == prev_cname && method_ast == prev_ast)
+      if !(skip_core_methods && definition_from_core?(method_ast)) && !(cname == prev_cname && method_ast == prev_ast)
         prev_cname = cname
         prev_ast = method_ast
-        # `-> new(@field)` is an implicit arbitrary caller-to-ivar write and has
-        # no assignment node in the body. It must invalidate an exact-class fact
-        # just like an explicit `@field = value`.
         params = method_ast.params
         if params != nil
           pi = 0
@@ -595,6 +634,22 @@
         walk_exact_source_ivar_writes(method_ast.body, cname, exact_types, conflicts, mod)
     ki += 1
   mod[:exact_source_ivar_types] = exact_types
+  if mod[:incremental_core_cache_status] == :miss && mod[:core_prepass_snapshot] != nil
+    core_et = {}
+    core_ec = {}
+    ckeys = mod[:known_classes].keys()
+    ci = 0
+    while ci < ckeys.size()
+      cn = ckeys[ci]
+      cnode = mod[:known_classes][cn]
+      if cnode != nil && is_ast_node?(cnode) && definition_from_core?(cnode)
+        if exact_types[cn] != nil
+          core_et[cn] = exact_types[cn]
+        if conflicts[cn] != nil
+          core_ec[cn] = conflicts[cn]
+      ci += 1
+    mod[:core_prepass_snapshot][:exact_ivar_types] = clone_two_level_hash(core_et)
+    mod[:core_prepass_snapshot][:exact_ivar_conflicts] = clone_two_level_hash(core_ec)
 
 -> record_exact_source_ivar_write(cname, iname, exact_class, exact_types, conflicts)
   if conflicts[cname][iname] == true
@@ -1976,12 +2031,34 @@
         mod[:generic_specialization_order].push(spec)
     ki += 1
   if mod[:generic_specialization_order].size() > 0
+    entry_path = mod[:source_path]
+    place_in_delta = entry_path != nil && entry_path != "" && !core_source_path?(entry_path)
+    if place_in_delta
+      spi = 0
+      while spi < mod[:generic_specialization_order].size()
+        spec_node = mod[:generic_specialization_order][spi]
+        ast_set(spec_node, :source_path, entry_path)
+        sbody = spec_node.body
+        if sbody != nil
+          sbi = 0
+          while sbi < sbody.size()
+            if is_ast_node?(sbody[sbi])
+              ast_set(sbody[sbi], :source_path, entry_path)
+            sbi += 1
+        spi += 1
     new_expressions = []
     inserted = false
     si = 0
     while si < ast.expressions.size()
       expr = ast.expressions[si]
-      if !inserted && ast_kind(expr) == :class_def && expr.type_params != nil
+      should_insert = false
+      if !inserted
+        if place_in_delta
+          if ast_get(expr, :source_path) == entry_path
+            should_insert = true
+        elsif ast_kind(expr) == :class_def && expr.type_params != nil
+          should_insert = true
+      if should_insert
         spi = 0
         while spi < mod[:generic_specialization_order].size()
           new_expressions.push(mod[:generic_specialization_order][spi])

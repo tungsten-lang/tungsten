@@ -76,6 +76,8 @@
   {ok: true, by_name: by_name}
 
 -> core_reachability_library_function?(mod, func)
+  if func[:is_toplevel] == true || func[:name] == "main"
+    return false
   if env("TUNGSTEN_LIBRARY_REACHABILITY") == "0"
     return false
   paths = mod[:library_reachability_paths]
@@ -270,8 +272,10 @@
   # content-addressed internal helpers, so retaining every registered Core
   # method (and then its ordinary direct-call closure) is the conservative FFI
   # boundary while still allowing unregistered helper pruning.
+  rooted_all_registrations = false
   c_includes = env("TUNGSTEN_C_INCLUDES")
   if c_includes != nil && c_includes != ""
+    rooted_all_registrations = true
     method_names = registrations_by_name.keys()
     i = 0
     while i < method_names.size()
@@ -304,8 +308,15 @@
         inst = instructions[ii]
         target = core_reachability_direct_target(inst)
         if core_reachability_unsafe_runtime_call?(target)
-          return core_reachability_fallback(mod, "live dynamic runtime dispatch in " + func[:name])
-        core_reachability_add_function(target, functions_by_name, live, queue)
+          if !rooted_all_registrations
+            rooted_all_registrations = true
+            method_names = registrations_by_name.keys()
+            mi = 0
+            while mi < method_names.size()
+              core_reachability_root_method(registrations_by_name, method_names[mi], nil, functions_by_name, live, queue)
+              mi += 1
+        else
+          core_reachability_add_function(target, functions_by_name, live, queue)
         if wire_kind(inst) == :call_method_i64
           core_reachability_add_function(wire_get(inst, :devirt_fn), functions_by_name, live, queue)
           core_reachability_add_function(wire_get(inst, :construct_fn), functions_by_name, live, queue)

@@ -82,10 +82,11 @@
         if op == :load_i64 || op == :store_i64 || op == :br || op == :cond_br || op == :ret_i64 || op == :ret_void || op == :alloca_i64 || op == :icmp_i64 || op == :add_i64 || op == :sub_i64 || op == :truthy_inline || op == :nanbox_int || op == :nanunbox_int || op == :nanbox_bool || op == :phi_ssa || op == :scope_push || op == :scope_pop
           ii += 1
           next
-        wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
-        if wire_contract_error != nil
-          << "error: " + wire_contract_error
-          exit(1)
+        if wfunc[:incremental_core_frozen] != true
+          wire_contract_error = check_wire_inst_call_contract(mod, wire_contracts, wfunc_orig_name, inst)
+          if wire_contract_error != nil
+            << "error: " + wire_contract_error
+            exit(1)
         if collect_sites
           record_call_site_for_inst(inst, wfunc[:name], wfunc_path, cs_sites, cs_files, cs_file_list, emit_blockaddress_sites)
         if op == :call_method_i64 && !saw_lchs_mcall && wire_get(inst, :method_name_val) == lchs_mcall_lit
@@ -266,10 +267,9 @@
     if cvg_keys.size() > 0
       globals_out << "\n"
 
-  # Inline cache: one 24-byte slot per method call site and native thread.
-  # A shared cache races during first-use publication (type/fn/arity are three
-  # independent fields), which can send a concurrent Thread.new call through
-  # the wrong ABI.  Per-thread ICs also avoid polymorphic cache ping-pong.
+  # Inline cache: one 24-byte slot per method call site, thread-local so
+  # multi-threaded polymorphic dispatch never suffers ABA or cache-line
+  # contention across worker threads.
   ic_count = mod[:next_ic]
   if ic_count > 0
     globals_out << "@.ic = internal thread_local global \["
@@ -322,9 +322,9 @@
   function_emit_hits_start = function_emit_cache_state[:hits]
   function_emit_misses_start = function_emit_cache_state[:misses]
   function_emit_bypasses_start = function_emit_cache_state[:bypasses]
-  # Release-only by design. Debug builds retain the direct rendering path so
-  # frame/backtrace metadata remains independent of this optimization.
-  function_emit_cache_enabled = env("TUNGSTEN_FUNCTION_EMIT_CACHE") != "0" && mod[:enhanced_stacktraces] == false && mod[:incremental_core_cache_key] != nil
+  # Cached rendered bodies are valid whenever blockaddress call-site tables and
+  # explicit debug-frame attributes are inactive.
+  function_emit_cache_enabled = env("TUNGSTEN_FUNCTION_EMIT_CACHE") != "0" && !emit_blockaddress_sites && mod[:preserve_debug_frames] != true && mod[:incremental_core_cache_key] != nil
   arm64_target = emit_target_is_arm64(mod)
   windows_target = emit_target_is_windows(mod)
 
@@ -729,6 +729,8 @@
     decls_out = decls_out + "declare void @w_int_alias_seal(i64, i64) nounwind\n" + int_alias_seal_helper_ir() + "\n"
   if used_runtime_fns["__w_int_result_seal"] == true
     decls_out = decls_out + "declare void @w_int_result_seal(i64, i64, i64) nounwind\n" + int_result_seal_helper_ir() + "\n"
+  if used_runtime_fns["__w_guard_class"] == true
+    decls_out = decls_out + guard_class_helper_ir() + "\n"
   if ccall_needed.has_key?("__w_bigint_sqr4_locked_exact") || ccall_needed.has_key?("__w_bigint_sqr5_locked_exact")
     # Keep the large exact sqr@4 worker and its size test behind one outlined
     # default-path call. Inlining either into the locked caller makes LLVM
@@ -1019,7 +1021,7 @@
     precollected_sites = {sites: cs_sites, files: cs_files, file_list: cs_file_list}
     fn_meta_out = emit_fn_meta_table(mod, emit_blockaddress_sites)
     call_site_out = emit_call_site_table(mod, precollected_sites, emit_blockaddress_sites)
-    llvm_used_out = emit_stacktrace_llvm_used(call_site_out.index("@__w_ic_site") != nil, !emit_blockaddress_sites)
+    llvm_used_out = emit_stacktrace_llvm_used(call_site_out.index("@__w_ic_site_sparse") != nil, !emit_blockaddress_sites)
 
   attr_groups_out = emit_function_attr_groups(attr_groups)
   tbaa_out = tbaa_metadata_defs()
@@ -1043,6 +1045,10 @@
       fn_meta_out: fn_meta_out,
       call_site_out: call_site_out,
       llvm_used_out: llvm_used_out,
+      base_md_str: attr_groups_out + tbaa_out,
+      novec_out: novec_out,
+      ewscope_out: ewscope_out,
+      ascope_out: ascope_out,
       tail_md_str: attr_groups_out + tbaa_out + novec_out + ewscope_out + ascope_out
     }
 
@@ -1225,6 +1231,19 @@
           if idx_str != nil && idx_str.size() > 0 && idx_str[0] != "%"
             lit = op == :symbol_i64 ? llvm_wvalue_literal(swv + 1) : llvm_wvalue_literal(swv)
             return {arr: wire_sequence_get(args, 0), idx: idx_str.to_i(), val: lit, temp: wire_get(next_inst, :temp), step: 2}
+  if op == :nanbox_int && j + 1 < ninstrs
+    raw_str = wire_get(inst, :raw).to_s()
+    ch = raw_str.slice(0, 1)
+    if ch != nil && (ch == "-" || (ch >= "0" && ch <= "9"))
+      next_inst = instrs[j + 1]
+      if wire_kind(next_inst) == :call_direct_i64 && wire_get(next_inst, :name) == "__w_array_lit_store" && wire_get(next_inst, :src_line) == nil
+        args = wire_get(next_inst, :args)
+        if wire_sequence_size(args) == 3 && wire_sequence_get(args, 2) == wire_get(inst, :temp)
+          idx_str = wire_sequence_get(args, 1)
+          if idx_str != nil && idx_str.size() > 0 && idx_str[0] != "%"
+            wval = (raw_str.to_i() & 281474976710655) | -1688849860263936
+            lit = llvm_wvalue_literal(wval)
+            return {arr: wire_sequence_get(args, 0), idx: idx_str.to_i(), val: lit, temp: wire_get(next_inst, :temp), step: 2}
   nil
 
 -> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true, windows_target = false, preserve_debug_frames = false, emit_blockaddress_sites = true)
@@ -1292,7 +1311,7 @@
         args = wire_get(inst, :args)
         if args != nil
           argc = wire_sequence_size(args)
-          if argc > max_mcall_argc && !scalar_source_call?(inst)
+          if argc > max_mcall_argc && !scalar_source_call?(inst) && !sym_idx_call?(inst)
             max_mcall_argc = argc
       hidden = hidden_exit_label_for_inst(inst, arm64_target, emit_blockaddress_sites)
       if hidden != nil
@@ -1409,8 +1428,11 @@
             out << ")\n"
             j = cur_j
             next
-      out << "  "
       inst = instrs[j]
+      if wire_kind(inst) in (:scope_push :scope_pop)
+        j += 1
+        next
+      out << "  "
       if !direct_buffer_emit || !append_instruction_direct(out, inst, phi_label_redirects, string_wvs, used_ptr_ids, emit_blockaddress_sites)
         out << render_instruction(inst, string_wvs, used_ptr_ids, phi_label_redirects, fp_flags, arm64_target, windows_target, volatile_slots, emit_blockaddress_sites)
       out << "\n"

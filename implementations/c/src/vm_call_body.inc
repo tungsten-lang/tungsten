@@ -7,7 +7,9 @@
         // this body, every reference is the same regardless of variant.
         uint32_t name_id = read_u32_at(&chunk->code[vm.ip]);
         uint32_t argc = read_u32_at(&chunk->code[vm.ip + 4]);
-        uint32_t has_receiver = read_u32_at(&chunk->code[vm.ip + 8]);
+        uint32_t call_flags = read_u32_at(&chunk->code[vm.ip + 8]);
+        uint32_t has_receiver = call_flags >> 31;
+        uint32_t call_site_id = call_flags & 0x7FFFFFFFu;
         // CALL_DISCARD has a single NOP byte of padding right after the
         // operands. The label-prelude defines DISCARD_NOP_BYTES as 0
         // (CALL) or 1 (CALL_DISCARD); the compiler folds the addition.
@@ -63,15 +65,15 @@
               size_t cn_len = tc_as_object(self)->class_name_len;
               TcFunction *fn = NULL;
               if (chunk->method_ic_class &&
-                  chunk->method_ic_class[name_id] == cn &&
-                  chunk->method_ic_class_len[name_id] == cn_len) {
-                fn = chunk->method_ic_fn[name_id];
+                  chunk->method_ic_class[call_site_id] == cn &&
+                  chunk->method_ic_class_len[call_site_id] == cn_len) {
+                fn = chunk->method_ic_fn[call_site_id];
               } else {
                 fn = tc_chunk_find_method(chunk, cn, cn_len, name, name_len);
                 if (fn && chunk->method_ic_class) {
-                  chunk->method_ic_class[name_id] = cn;
-                  chunk->method_ic_class_len[name_id] = cn_len;
-                  chunk->method_ic_fn[name_id] = fn;
+                  chunk->method_ic_class[call_site_id] = cn;
+                  chunk->method_ic_class_len[call_site_id] = cn_len;
+                  chunk->method_ic_fn[call_site_id] = fn;
                 }
               }
               if (fn && fn->overloaded) fn = tc_select_overload(chunk, fn, args, argc);
@@ -98,8 +100,17 @@
               } else if (name == NAME_LOC_END) {
                 TcValue raw = tc_packed_node_get(receiver, SYM_LOC_END);
                 out = (raw == W_NIL || raw == 0 || raw == w_box_int(0)) ? W_NIL : raw;
-              } else if (name != NAME_LINE && name != NAME_COL &&
-                         name != NAME_END_LINE && name != NAME_END_COL &&
+              } else if (name == NAME_LINE) {
+                TcValue raw = tc_packed_node_get(receiver, SYM_LOC);
+                if (raw == W_NIL || raw == 0 || raw == w_box_int(0)) {
+                  out = w_ast_sparse_get(receiver, (int64_t)SYM_LINE);
+                }
+              } else if (name == NAME_COL) {
+                TcValue raw = tc_packed_node_get(receiver, SYM_LOC);
+                if (raw == W_NIL || raw == 0 || raw == w_box_int(0)) {
+                  out = w_ast_sparse_get(receiver, (int64_t)SYM_COL);
+                }
+              } else if (name != NAME_END_LINE && name != NAME_END_COL &&
                          name != NAME_SPAN_LENGTH && name != NAME_TO_S &&
                          name != NAME_TYPE) {
                 out = tc_packed_node_get(receiver, name_sym);
@@ -185,15 +196,15 @@
               size_t cn_len = obj->class_name_len;
               TcFunction *fn = NULL;
               if (chunk->method_ic_class &&
-                  chunk->method_ic_class[name_id] == cn &&
-                  chunk->method_ic_class_len[name_id] == cn_len) {
-                fn = chunk->method_ic_fn[name_id];
+                  chunk->method_ic_class[call_site_id] == cn &&
+                  chunk->method_ic_class_len[call_site_id] == cn_len) {
+                fn = chunk->method_ic_fn[call_site_id];
               } else {
                 fn = tc_chunk_find_method(chunk, cn, cn_len, name, name_len);
                 if (fn && chunk->method_ic_class) {
-                  chunk->method_ic_class[name_id] = cn;
-                  chunk->method_ic_class_len[name_id] = cn_len;
-                  chunk->method_ic_fn[name_id] = fn;
+                  chunk->method_ic_class[call_site_id] = cn;
+                  chunk->method_ic_class_len[call_site_id] = cn_len;
+                  chunk->method_ic_fn[call_site_id] = fn;
                 }
               }
               if (fn && fn->overloaded) fn = tc_select_overload(chunk, fn, args, argc);
@@ -1085,6 +1096,16 @@
           if (!push(&vm, result, err)) goto cleanup_fail;
           CNEXT();
         }
+        if (!has_receiver && name_len == 5 && memcmp(name, "ccall", 5) == 0 &&
+            argc == 1 && tc_kind(args[0]) == TC_VAL_STRING &&
+            tc_str_len(args[0]) == 11 &&
+            memcmp(tc_str_bytes_only(args[0]), "w_cpu_count", 11) == 0) {
+          long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+          if (ncpu < 1) ncpu = 1;
+          FREE_ARGS();
+          if (!push(&vm, int_value((int64_t)ncpu), err)) goto cleanup_fail;
+          CNEXT();
+        }
         /* Foreground child for `run` / `-e` under the stage-0 VM (native
          * stages call runtime.c's __w_run_argv). Same contract: argv array
          * of strings, direct exec (no shell), everything inherited; returns
@@ -1419,15 +1440,15 @@
             // is exact (no memcmp).
             TcFunction *fn = NULL;
             if (chunk->method_ic_class &&
-                chunk->method_ic_class[name_id] == cn &&
-                chunk->method_ic_class_len[name_id] == cn_len) {
-              fn = chunk->method_ic_fn[name_id];
+                chunk->method_ic_class[call_site_id] == cn &&
+                chunk->method_ic_class_len[call_site_id] == cn_len) {
+              fn = chunk->method_ic_fn[call_site_id];
             } else {
               fn = tc_chunk_find_method(chunk, cn, cn_len, name, name_len);
               if (fn && chunk->method_ic_class) {
-                chunk->method_ic_class[name_id] = cn;
-                chunk->method_ic_class_len[name_id] = cn_len;
-                chunk->method_ic_fn[name_id] = fn;
+                chunk->method_ic_class[call_site_id] = cn;
+                chunk->method_ic_class_len[call_site_id] = cn_len;
+                chunk->method_ic_fn[call_site_id] = fn;
               }
             }
             // The IC caches the name resolution (first match); typed

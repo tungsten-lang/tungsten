@@ -1,5 +1,6 @@
 # GPU-capable compiler image. Ordinary compile/check/WIRE-run stays lean; a
 # program containing @gpu definitions delegates here after its first AST scan.
+use lib/driver_modules
 use lib/compiler_gpu_emitter_metal
 use tungsten_driver
 

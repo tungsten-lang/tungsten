@@ -14,6 +14,7 @@
 #include <sys/sysctl.h>
 #endif
 #include <time.h>
+#include <unistd.h>
 
 extern char **environ;
 
@@ -241,6 +242,8 @@ static TcValue SYM_IVAR_OFFSETS = W_NIL;
 static TcValue SYM_IVAR_COUNT = W_NIL;
 static TcValue SYM_LOC = W_NIL;
 static TcValue SYM_LOC_END = W_NIL;
+static TcValue SYM_LINE = W_NIL;
+static TcValue SYM_COL = W_NIL;
 static TcValue SYM_OP = W_NIL;
 static TcValue SYM_TYPE = W_NIL;
 static TcValue SYM_BLOCKS = W_NIL;
@@ -268,6 +271,8 @@ static TcValue TYPE_STR_OBJECT = W_NIL;
 
 static TcValue g_ast_kind_sym[W_AST_KIND_MAX + 1];
 static TcValue g_ast_field_sym[W_AST_KIND_MAX + 1][10];
+static const char *g_ast_kind_hash_keys[512];
+static uint16_t g_ast_kind_hash_ids[512];
 static TcValue g_temp_strs[1024];
 
 static int make_static_type_str(const char *lit, TcValue *out, TcError *err) {
@@ -344,6 +349,8 @@ static int intern_builtin_names(TcError *err) {
   }
   SYM_LOC = tc_box_symbol_bytes(NAME_LOC, 3, 0);
   SYM_LOC_END = tc_box_symbol_bytes(NAME_LOC_END, 7, 0);
+  SYM_LINE = tc_box_symbol_bytes(NAME_LINE, 4, 0);
+  SYM_COL = tc_box_symbol_bytes(NAME_COL, 3, 0);
 
   for (int ti = 0; ti < 1024; ti++) {
     char tbuf[16];
@@ -364,6 +371,8 @@ static int intern_builtin_names(TcError *err) {
     return 0;
   }
 
+  memset(g_ast_kind_hash_keys, 0, sizeof(g_ast_kind_hash_keys));
+  memset(g_ast_kind_hash_ids, 0, sizeof(g_ast_kind_hash_ids));
   for (int k = 1; k <= (int)W_AST_KIND_MAX; k++) {
     const char *kname = W_AST_KIND_NAME[k];
     if (kname) {
@@ -371,6 +380,17 @@ static int intern_builtin_names(TcError *err) {
       const char *ki = tc_intern(kname, klen);
       if (!ki) return 0;
       g_ast_kind_sym[k] = tc_box_symbol_bytes(ki, klen, 0);
+      uint64_t kh = 14695981039346656037ULL;
+      for (size_t bi = 0; bi < klen; bi++) {
+        kh ^= (uint8_t)kname[bi];
+        kh *= 1099511628211ULL;
+      }
+      uint32_t kslot = (uint32_t)kh & 511u;
+      while (g_ast_kind_hash_keys[kslot] != NULL) {
+        kslot = (kslot + 1u) & 511u;
+      }
+      g_ast_kind_hash_keys[kslot] = kname;
+      g_ast_kind_hash_ids[kslot] = (uint16_t)k;
     }
     for (uint8_t fi = 0; fi < W_AST_KIND_FIELD_COUNT[k]; fi++) {
       const char *fname = W_AST_KIND_FIELDS[k][fi];
@@ -385,6 +405,24 @@ static int intern_builtin_names(TcError *err) {
 
   builtin_names_ready = 1;
   return 1;
+}
+
+static inline int ast_schema_kind_for_name(const char *bytes, size_t len) {
+  if (!bytes || len == 0) return 0;
+  uint64_t kh = 14695981039346656037ULL;
+  for (size_t bi = 0; bi < len; bi++) {
+    kh ^= (uint8_t)bytes[bi];
+    kh *= 1099511628211ULL;
+  }
+  uint32_t kslot = (uint32_t)kh & 511u;
+  while (g_ast_kind_hash_keys[kslot] != NULL) {
+    const char *cand = g_ast_kind_hash_keys[kslot];
+    if (strlen(cand) == len && memcmp(cand, bytes, len) == 0) {
+      return (int)g_ast_kind_hash_ids[kslot];
+    }
+    kslot = (kslot + 1u) & 511u;
+  }
+  return 0;
 }
 static int value_text_eq(TcValue value, const char *text) {
   size_t len = strlen(text);
@@ -771,19 +809,29 @@ static int tc_loc_register_file(TcValue path, TcValue line_at_arr, TcValue col_a
   char buf[6];
   size_t len;
   const char *s = tc_str_bytes(path, buf, &len);
+  TcRuntimeArray *line_a = tc_as_array(line_at_arr);
+  TcRuntimeArray *col_a = tc_as_array(col_at_arr);
+  uint32_t n = (uint32_t)line_a->size;
   for (uint32_t i = 0; i < g_tc_loc_file_count; i++) {
     size_t plen = strlen(g_tc_loc_files[i].path);
-    if (plen == len && memcmp(g_tc_loc_files[i].path, s, len) == 0) {
-      return (int)(i + 1);
+    if (plen == len && memcmp(g_tc_loc_files[i].path, s, len) == 0 &&
+        g_tc_loc_files[i].len == n) {
+      int same = 1;
+      for (uint32_t j = 0; j < n; j++) {
+        int32_t line = (int32_t)tc_as_int(line_a->slots[line_a->start + j]);
+        int32_t col = (int32_t)tc_as_int(col_a->slots[col_a->start + j]);
+        if (g_tc_loc_files[i].line_at[j] != line || g_tc_loc_files[i].col_at[j] != col) {
+          same = 0;
+          break;
+        }
+      }
+      if (same) return (int)(i + 1);
     }
   }
   if (g_tc_loc_file_count == g_tc_loc_file_cap) {
     g_tc_loc_file_cap = g_tc_loc_file_cap == 0 ? 8 : g_tc_loc_file_cap * 2;
     g_tc_loc_files = realloc(g_tc_loc_files, g_tc_loc_file_cap * sizeof(TcLocFileTable));
   }
-  TcRuntimeArray *line_a = tc_as_array(line_at_arr);
-  TcRuntimeArray *col_a = tc_as_array(col_at_arr);
-  uint32_t n = (uint32_t)line_a->size;
   int32_t *line_buf = malloc(sizeof(int32_t) * (n > 0 ? n : 1));
   int32_t *col_buf = malloc(sizeof(int32_t) * (n > 0 ? n : 1));
   for (uint32_t i = 0; i < n; i++) {
@@ -803,23 +851,32 @@ static int tc_loc_register_file(TcValue path, TcValue line_at_arr, TcValue col_a
 
 // Register a fast-parsed source's per-codepoint line/col tables directly
 // (no TcValue arrays) — the C-side twin of tc_loc_register_file, sharing
-// its registry and first-wins-per-path dedupe. Returns the 1-based file_id
-// that parse_ast.c stamps into FileOffset-mode `:loc` values, so the
-// compiler's location_line/location_col ccalls resolve fast-parsed nodes
-// exactly like canon-parsed ones.
+// its registry and exact-layout dedupe (matching runtime.c:w_loc_register_file
+// so repeated "<interp>" sub-parses never alias a shorter snippet's table).
 int tc_vm_loc_register_source(const char *path, const TcSource *source) {
   size_t len = strlen(path);
+  uint32_t n = (uint32_t)source->cp_count + 1; /* mirror build_line_index's trailing entry */
   for (uint32_t i = 0; i < g_tc_loc_file_count; i++) {
     size_t plen = strlen(g_tc_loc_files[i].path);
-    if (plen == len && memcmp(g_tc_loc_files[i].path, path, len) == 0) {
-      return (int)(i + 1);
+    if (plen == len && memcmp(g_tc_loc_files[i].path, path, len) == 0 &&
+        g_tc_loc_files[i].len == n) {
+      int same = 1;
+      for (uint32_t j = 0; j < n; j++) {
+        uint32_t byte = source->byte_offsets[j];
+        int32_t line = (int32_t)source->byte_lines[byte];
+        int32_t col = (int32_t)source->cp_cols[j];
+        if (g_tc_loc_files[i].line_at[j] != line || g_tc_loc_files[i].col_at[j] != col) {
+          same = 0;
+          break;
+        }
+      }
+      if (same) return (int)(i + 1);
     }
   }
   if (g_tc_loc_file_count == g_tc_loc_file_cap) {
     g_tc_loc_file_cap = g_tc_loc_file_cap == 0 ? 8 : g_tc_loc_file_cap * 2;
     g_tc_loc_files = realloc(g_tc_loc_files, g_tc_loc_file_cap * sizeof(TcLocFileTable));
   }
-  uint32_t n = (uint32_t)source->cp_count + 1; /* mirror build_line_index's trailing entry */
   int32_t *line_buf = malloc(sizeof(int32_t) * n);
   int32_t *col_buf = malloc(sizeof(int32_t) * n);
   if (!line_buf || !col_buf) {
@@ -2592,6 +2649,151 @@ static int ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
       void *cache_key = ast->as.hash;
       if (ast_rt_cache_lookup(cache_key, out)) return 1;
       size_t n = ast->as.hash ? ast->as.hash->count : 0;
+
+      // Materialize schema AST nodes directly as W_PACKED_NODE handles so the
+      // C VM's O(1) w_is_node fast paths apply to TUNGSTEN_C_FAST_PARSE trees.
+      if (builtin_names_ready && n >= 1) {
+        int kid = 0;
+        int has_loc_bits = 0;
+        for (size_t i = 0; i < n; i++) {
+          const char *kb = ast->as.hash->items[i].key;
+          if (!kb) continue;
+          if (kb[0] == 'n' && strcmp(kb, "node") == 0) {
+            TcAstValue *nv = &ast->as.hash->items[i].value;
+            if (nv->kind == TC_AST_SYMBOL || nv->kind == TC_AST_STRING) {
+              const char *nb = nv->as.string.bytes;
+              size_t nl = nv->as.string.len;
+              if (nv->kind == TC_AST_SYMBOL && nl > 0 && nb[0] == ':') {
+                nb++;
+                nl--;
+              }
+              kid = ast_schema_kind_for_name(nb, nl);
+            }
+          } else if (kb[0] == 'l' && strcmp(kb, "loc_bits") == 0 &&
+                     ast->as.hash->items[i].value.kind == TC_AST_INT) {
+            has_loc_bits = 1;
+          }
+        }
+        if (kid >= 1 && kid <= (int)W_AST_KIND_MAX) {
+          uint8_t storage = W_AST_KIND_STORAGE[kid];
+          if (storage == W_AST_STORAGE_SLAB) {
+            uint32_t width = W_AST_KIND_WIDTH[kid];
+            int sc = width <= 2 ? 0 : (width == 3 ? 1 : 2);
+            WValue pnode = w_node_alloc(kid, sc);
+            for (uint32_t s = 0; s < width; s++) {
+              w_node_field_store(pnode, (int64_t)s, W_NIL);
+            }
+            *out = (TcValue)pnode;
+            if (!ast_rt_cache_store(cache_key, *out, err)) return 0;
+            for (size_t i = 0; i < n; i++) {
+              const char *key_bytes = ast->as.hash->items[i].key;
+              if (!key_bytes) continue;
+              size_t key_len = strlen(key_bytes);
+              if (key_len == 4 && memcmp(key_bytes, "node", 4) == 0) continue;
+              if (key_len == 8 && memcmp(key_bytes, "loc_bits", 8) == 0 &&
+                  ast->as.hash->items[i].value.kind == TC_AST_INT) {
+                TcValue loc_val = (TcValue)(uint64_t)ast->as.hash->items[i].value.as.integer;
+                tc_packed_node_set(pnode, SYM_LOC, loc_val);
+                continue;
+              }
+              if (has_loc_bits &&
+                  ((key_len == 4 && memcmp(key_bytes, "line", 4) == 0) ||
+                   (key_len == 3 && memcmp(key_bytes, "col", 3) == 0))) {
+                continue;
+              }
+              const char *interned = tc_intern(key_bytes, key_len);
+              if (!interned) {
+                tc_error_set(err, "ast_to_runtime: symbol intern failed");
+                return 0;
+              }
+              TcValue key_v = tc_box_symbol_bytes(interned, key_len, 0);
+              TcValue val_v;
+              TcAstValue *item = &ast->as.hash->items[i].value;
+              if (key_len == 10 && memcmp(key_bytes, "type_hints", 10) == 0 &&
+                  item->kind == TC_AST_HASH && item->as.hash) {
+                void *hint_cache_key = item->as.hash;
+                if (!ast_rt_cache_lookup(hint_cache_key, &val_v)) {
+                  size_t hn = item->as.hash->count;
+                  TcRuntimeHash *hh = runtime_hash_new(hn, err);
+                  if (!hh) return 0;
+                  val_v = tc_box_hash(hh);
+                  if (!ast_rt_cache_store(hint_cache_key, val_v, err)) return 0;
+                  for (size_t hi = 0; hi < hn; hi++) {
+                    const char *hk = item->as.hash->items[hi].key;
+                    size_t hk_len = hk ? strlen(hk) : 0;
+                    TcValue hkey;
+                    if (!make_string_value(hk ? hk : "", hk_len, &hkey, err)) return 0;
+                    TcValue hval;
+                    if (!ast_to_runtime(&item->as.hash->items[hi].value, &hval, err)) return 0;
+                    if (!hash_set_value(hh, hkey, hval, err)) return 0;
+                  }
+                }
+                tc_packed_node_set(pnode, key_v, val_v);
+                continue;
+              }
+              if (!ast_to_runtime(item, &val_v, err)) return 0;
+              tc_packed_node_set(pnode, key_v, val_v);
+            }
+            return 1;
+          } else if (storage == W_AST_STORAGE_INTERN && W_AST_KIND_FIELD_COUNT[kid] == 1) {
+            const char *fname = W_AST_KIND_FIELDS[kid][0];
+            TcAstValue *fval = NULL;
+            int pure = 1;
+            for (size_t i = 0; i < n; i++) {
+              const char *kb = ast->as.hash->items[i].key;
+              if (!kb) continue;
+              if (strcmp(kb, "node") == 0 || strcmp(kb, "line") == 0) continue;
+              if (fname && strcmp(kb, fname) == 0 &&
+                  ast->as.hash->items[i].value.kind == TC_AST_STRING) {
+                fval = &ast->as.hash->items[i].value;
+              } else {
+                pure = 0;
+                break;
+              }
+            }
+            if (pure && fval) {
+              TcValue str_v;
+              if (!ast_to_value(*fval, &str_v, err) || tc_kind(str_v) != TC_VAL_STRING) return 0;
+              *out = (TcValue)w_ast_intern_node_bytes(
+                  kid, tc_str_bytes_only(str_v), tc_str_len(str_v), (uint64_t)str_v);
+              return ast_rt_cache_store(cache_key, *out, err);
+            }
+          } else if (storage == W_AST_STORAGE_SINGLETON) {
+            int pure = 1;
+            for (size_t i = 0; i < n; i++) {
+              const char *kb = ast->as.hash->items[i].key;
+              if (!kb || (strcmp(kb, "node") != 0 && strcmp(kb, "line") != 0)) {
+                pure = 0;
+                break;
+              }
+            }
+            if (pure) {
+              *out = (TcValue)w_box_node(kid, 0, 0);
+              return ast_rt_cache_store(cache_key, *out, err);
+            }
+          } else if (storage == W_AST_STORAGE_CACHED && kid == 39) {
+            TcAstValue *bval = NULL;
+            int pure = 1;
+            for (size_t i = 0; i < n; i++) {
+              const char *kb = ast->as.hash->items[i].key;
+              if (!kb) continue;
+              if (strcmp(kb, "node") == 0 || strcmp(kb, "line") == 0) continue;
+              if (strcmp(kb, "value") == 0 &&
+                  ast->as.hash->items[i].value.kind == TC_AST_BOOL) {
+                bval = &ast->as.hash->items[i].value;
+              } else {
+                pure = 0;
+                break;
+              }
+            }
+            if (pure && bval) {
+              *out = (TcValue)w_ast_bool_cached(bval->as.boolean ? 1 : 0);
+              return ast_rt_cache_store(cache_key, *out, err);
+            }
+          }
+        }
+      }
+
       TcRuntimeHash *h = runtime_hash_new(n, err);
       if (!h) return 0;
       *out = tc_box_hash(h);
@@ -2675,6 +2877,7 @@ static int ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
 
 /* Public wrapper for fast_load.c (TUNGSTEN_C_FAST_PARSE bootstrap path). */
 int tc_vm_ast_to_runtime(TcAstValue *ast, TcValue *out, TcError *err) {
+  if (!builtin_names_ready && !intern_builtin_names(err)) return 0;
   return ast_to_runtime(ast, out, err);
 }
 

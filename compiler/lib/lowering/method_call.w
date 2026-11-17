@@ -2714,7 +2714,8 @@
   # compatible `self` facts retain the hierarchy-wide same-target proof.
   # Unknown/widened incompatible facts keep ordinary IC dispatch.
   core_guard = nil
-  if ctx[:mod][:method_tables_locked] == true && node.block == nil
+  closed_world_methods = ctx[:mod][:method_tables_locked] == true || ctx[:mod][:auto_closed_world_devirt] == true
+  if closed_world_methods && node.block == nil
     core_fact = receiver_core_tagged_class_fact(ctx, recv_type)
     if core_fact != nil
       core_fn = locked_direct_method_fn(ctx[:mod], core_fact[:class_name], method_name, n_call_args)
@@ -2725,7 +2726,7 @@
         if core_fact[:class_name] == "BigInt" && method_name == "abs" && n_call_args == 0 && env("TUNGSTEN_BIGINT_TYPED_ABS") != "0" && core_operator_untouched?(ctx[:mod], "BigInt", "abs")
           core_fn = "w_bigint_abs_alias"
         core_guard = emit_core_tag_guard_fast_arm(ctx, node, receiver_reg, arg_regs, core_fn, core_fact[:entry], core_intrinsic)
-  if core_guard == nil && ctx[:mod][:method_tables_locked] == true && node.block == nil
+  if core_guard == nil && closed_world_methods && node.block == nil
     locked_fact = receiver_flow_class_fact(ctx, node)
     if locked_fact == nil
       locked_fact = receiver_source_class_fact(ctx, recv_node)
@@ -2867,7 +2868,13 @@
         guard += 1
 
   wire_record_dynamic_method_call(wfn, method_name, arg_regs.size())
-  emit_wire_call_method_i64(wfn, arg_regs, construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver_reg, scalar_source_argc1, scalar_source_argc2, node.col, node.line, temp, temp_args_val)
+  call_inst = wire_make_call_method_i64(arg_regs, construct_class, construct_fn, devirt_class, devirt_fn, ic_id, method_name_val, receiver_reg, scalar_source_argc1, scalar_source_argc2, node.col, node.line, temp, temp_args_val)
+  if closed_world_methods && node.block == nil && construct_fn == nil && devirt_fn == nil && !scalar_source_argc1 && !scalar_source_argc2 && node.args != nil && node.args.size() > 0 && is_ast_node?(node.args[0]) && ast_kind(node.args[0]) == :symbol
+    if method_name == "\[]" && arg_regs.size() == 1 && core_operator_untouched?(ctx[:mod], "Hash", method_name)
+      wire_set(call_inst, :sym_idx_get, true)
+    elsif method_name == "\[]=" && arg_regs.size() == 2 && core_operator_untouched?(ctx[:mod], "Hash", method_name)
+      wire_set(call_inst, :sym_idx_set, true)
+  current_block(wfn)[:instructions].push(call_inst)
   # A generated `- data` array accessor has a representation-preserving
   # contract. The send remains overridable, so verify the returned storage
   # width once before carrying that declared type into `b = @1.elements;

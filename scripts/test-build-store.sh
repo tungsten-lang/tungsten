@@ -74,6 +74,8 @@ make_cache() {
   : >"$dir/target-probe-v1-1.twc"
   : >"$dir/native-arm-cpu-v1-1.twc"
   : >"$dir/loader-ast-1.memo"
+  mkdir -p "$dir/thinlto-cache"
+  : >"$dir/thinlto-cache/llvmcache-1"
   # content-named runtime objects
   : >"$dir/runtime-native-1.a"
   : >"$dir/companion-metal_m-1.o"
@@ -85,7 +87,7 @@ SHARED="$TMP/shared-store"
 make_cache "$SHARED/compile"
 out="$(clean_env HOME="$TMP/nohome" TUNGSTEN_BUILD_STORE="$SHARED" bash "$STORE_SH" clear-cache /roots/mine)"
 case "$out" in
-  "Cleared 15 cache files ("*) ;;
+  "Cleared 16 cache files ("*) ;;
   *) fail "shared clear-cache reported: $out" ;;
 esac
 c="$SHARED/compile"
@@ -93,7 +95,7 @@ c="$SHARED/compile"
 for gone in irbin-aaaa.manifest irbin-aaaa.bin irbin-aaaa.sidemap run/1111.wc run/1111.wc.id \
             linkbin-1.bin irshard-v1-1.o loader-parse-1.twc loader-parse-1-manifest.twc core-wire-1-2.twc \
             library-wire-v1-1-2.twc core-render-v1-1-2.twc target-probe-v1-1.twc \
-            native-arm-cpu-v1-1.twc loader-ast-1.memo; do
+            native-arm-cpu-v1-1.twc loader-ast-1.memo thinlto-cache; do
   [ ! -e "$c/$gone" ] || fail "shared clear-cache left $gone"
 done
 # ... another root's are not, nor is anything named by content.

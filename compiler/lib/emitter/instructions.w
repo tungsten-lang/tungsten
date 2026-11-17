@@ -201,6 +201,27 @@
     out << t
     out << ".s)"
     true
+  when :nanbox_int
+    raw_str = wire_get(inst, :raw).to_s()
+    ch = raw_str.slice(0, 1)
+    if ch != nil && (ch == "-" || (ch >= "0" && ch <= "9"))
+      wval = (raw_str.to_i() & 281474976710655) | -1688849860263936
+      out << wire_get(inst, :temp)
+      out << " = or i64 0, "
+      out << llvm_wvalue_literal(wval)
+      return true
+    out << wire_get(inst, :temp_masked)
+    out << " = and i64 "
+    out << raw_str
+    out << ", "
+    out << machine_i64_text(w_payload_mask)
+    out << "\n  "
+    out << wire_get(inst, :temp)
+    out << " = or i64 "
+    out << wire_get(inst, :temp_masked)
+    out << ", "
+    out << machine_i64_text(w_tag_int)
+    true
   when :gep_array
     out << wire_get(inst, :temp)
     out << " = getelementptr inbounds \["

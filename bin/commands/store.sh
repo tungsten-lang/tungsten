@@ -228,6 +228,12 @@ tungsten_clear_cache() {
     done < <(find "$dir" -maxdepth 1 -type f \( -name '*.memo' -o -name 'linkbin-*' -o -name 'irshard-*' \
                -o -name 'loader-parse-*' -o -name 'core-wire-*' -o -name 'library-wire-*' \
                -o -name 'core-render-*' -o -name 'target-probe-*' -o -name 'native-arm-cpu-*' \) -print0 2>/dev/null)
+    if [ -d "$dir/thinlto-cache" ]; then
+      while IFS= read -r -d '' f; do
+        rm -f -- "$f" && count=$((count + 1))
+      done < <(find "$dir/thinlto-cache" -type f -print0 2>/dev/null)
+      rm -rf -- "$dir/thinlto-cache" 2>/dev/null || true
+    fi
     if [ -n "${TUNGSTEN_CACHE_DIR:-}" ]; then
       while IFS= read -r -d '' f; do
         rm -f -- "$f" && count=$((count + 1))

@@ -1398,18 +1398,30 @@ WValue w_method_call_fast(WValue recv, WValue name, WValue *args_ptr, int argc);
  * wassat's thread race read {key, fn} with a stale arity of 0 and call
  * an arity-1 method with no argument — garbage register, SIGBUS inside
  * Wassat#analyze (13 crash reports, 2026-07-24). */
+#define W_IC_WRITING UINT64_MAX
+
 typedef struct {
-    _Atomic uint64_t type_key; /* w_dispatch_key(recv); 0 = empty/mid-write */
-    int32_t  arity;        /* -1 = builtin wrapper, >= 0 = user method arity
-                            * (a spread entry, <= W_METHOD_SPREAD_MAX),
-                            * <= -2 = cached constructor, -(2 + argc) */
-    void    *fn_ptr;       /* cached function pointer */
+    _Atomic uint64_t type_key;  /* w_dispatch_key(recv); 0 = empty, W_IC_WRITING = mid-write */
+    _Atomic int32_t  arity;     /* -1 = builtin wrapper, >= 0 = user method arity
+                                 * (a spread entry, <= W_METHOD_SPREAD_MAX),
+                                 * <= -2 = cached constructor, -(2 + argc) */
+    _Atomic uint32_t slot_hint; /* dense Hash/WIRE slot hint for w_fast_sym_get/set */
+    _Atomic(void *)  fn_ptr;    /* cached function pointer */
 } WInlineCache;
 
+_Static_assert(sizeof(WInlineCache) == 24, "WInlineCache must match [24 x i8] stride");
+
 static inline void w_ic_publish(WInlineCache *cache, uint64_t key, void *fn, int32_t arity) {
-    atomic_store_explicit(&cache->type_key, 0, memory_order_release);
-    cache->fn_ptr = fn;
-    cache->arity  = arity;
+    if (__builtin_expect(key == 0 || key == W_IC_WRITING, 0)) return;
+    uint64_t cur = atomic_load_explicit(&cache->type_key, memory_order_relaxed);
+    if (cur == W_IC_WRITING) return;
+    if (!atomic_compare_exchange_strong_explicit(
+            &cache->type_key, &cur, W_IC_WRITING,
+            memory_order_acq_rel, memory_order_relaxed)) {
+        return;
+    }
+    atomic_store_explicit(&cache->fn_ptr, fn, memory_order_relaxed);
+    atomic_store_explicit(&cache->arity, arity, memory_order_relaxed);
     atomic_store_explicit(&cache->type_key, key, memory_order_release);
 }
 
@@ -1417,6 +1429,8 @@ WValue w_method_call_cached(WValue recv, WValue name, WValue *args_ptr, int argc
 WValue w_method_call_cached_0(WValue recv, WValue name, WInlineCache *cache);
 WValue w_method_call_cached_1(WValue recv, WValue name, WValue arg, WInlineCache *cache);
 WValue w_method_call_cached_2(WValue recv, WValue name, WValue arg0, WValue arg1, WInlineCache *cache);
+WValue w_fast_sym_get(WValue recv, WValue sym, WInlineCache *cache);
+WValue w_fast_sym_set(WValue recv, WValue sym, WValue val, WInlineCache *cache);
 WValue w_string_chars(WValue r);
 WValue w_value_is_a(WValue recv, WValue target);
 

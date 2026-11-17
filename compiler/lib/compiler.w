@@ -416,7 +416,7 @@ use target
     t_free = clock() - free_started_at
 
   hash_started_at = clock()
-  content_hash_pass(mod, verbose, release_mode)
+  content_hash_pass(mod, verbose, release_mode, sidemap_path != nil && env("TUNGSTEN_SIDEMAP") != "0")
   mod[:content_hash_info_functions] = nil
   t_hash = clock() - hash_started_at
 

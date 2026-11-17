@@ -2605,7 +2605,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # exact sqr@1 checkpoint now makes identity safe here as well: one-limb
   # squares enter the same raw leaf, while every wider square goes to the
   # unchanged exact C dispatcher.
-  closed_bigint_mul = env("TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
+  closed_bigint_mul = env("TUNGSTEN_BIGINT_MUL_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && (ctx[:mod][:method_tables_locked] == true || ctx[:mod][:auto_closed_world_devirt] == true)
   if op in (:PLUS :MINUS :STAR :AMPERSAND :PIPE :CARET :SLASH :PERCENT)
     bidir_report = :polymorphic
     inferred_bigint_pair = is_bigint_type(lt) && is_bigint_type(rt)
@@ -2824,7 +2824,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
     emit_wire_load_i64(wfn, cm_slot, cm_result)
     return typed_value(:i64, cm_result)
 
-  closed_mul1_1 = !closed_bigint_mul && env("TUNGSTEN_BIGINT_MUL1_1_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && !closed_mul1_square && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && ctx[:mod][:method_tables_locked] == true
+  closed_mul1_1 = !closed_bigint_mul && env("TUNGSTEN_BIGINT_MUL1_1_LOCKED_DIRECT") != "0" && op == :STAR && !bidir_mut && !closed_mul1_square && lt == :BigInt && rt == :BigInt && ctx[:mod][:protect_core] == true && (ctx[:mod][:method_tables_locked] == true || ctx[:mod][:auto_closed_world_devirt] == true)
   if closed_mul1_1
     cm_entry = overload_exact_tag_entry("BigInt")
     cm_left_shape_label = next_label(wfn, "mul1_1.left_shape")

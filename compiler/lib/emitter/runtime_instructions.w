@@ -530,24 +530,7 @@
     if wire_get(inst, :devirt_fn) != nil
       t = wire_get(inst, :temp)
       lbl = "dv." + ic_id
-      parts << t + ".hi = lshr i64 " + wire_get(inst, :receiver) + ", 48\n  "
-      parts << t + ".z = icmp eq i64 " + t + ".hi, 0\n  "
-      parts << t + ".ge = icmp uge i64 " + wire_get(inst, :receiver) + ", 16\n  "
-      parts << t + ".o = and i1 " + t + ".z, " + t + ".ge\n  "
-      parts << t + ".sb = and i64 " + wire_get(inst, :receiver) + ", 15\n  "
-      parts << t + ".isi = icmp eq i64 " + t + ".sb, 4\n  "
-      parts << t + ".oi = and i1 " + t + ".o, " + t + ".isi\n  "
-      parts << "br i1 " + t + ".oi, label %" + lbl + ".ck, label %" + lbl + ".s\n"
-      parts << lbl + ".ck:\n  "
-      parts << t + ".om = and i64 " + wire_get(inst, :receiver) + ", -16\n  "
-      parts << t + ".op = inttoptr i64 " + t + ".om to ptr\n  "
-      parts << t + ".oc = load i16, ptr " + t + ".op, align 2\n  "
-      parts << t + ".cw = load i64, ptr @class." + llvm_safe_name(wire_get(inst, :devirt_class).gsub(":", "__")) + "\n  "
-      parts << t + ".cm = and i64 " + t + ".cw, -16\n  "
-      parts << t + ".cp = inttoptr i64 " + t + ".cm to ptr\n  "
-      parts << t + ".cip = getelementptr i8, ptr " + t + ".cp, i64 16\n  "
-      parts << t + ".cc = load i16, ptr " + t + ".cip, align 2\n  "
-      parts << t + ".same = icmp eq i16 " + t + ".oc, " + t + ".cc\n  "
+      parts << t + ".same = call i1 @__w_guard_class(i64 " + wire_get(inst, :receiver) + ", ptr @class." + llvm_safe_name(wire_get(inst, :devirt_class).gsub(":", "__")) + ")\n  "
       parts << "br i1 " + t + ".same, label %" + lbl + ".d, label %" + lbl + ".s\n"
       parts << lbl + ".d:\n  "
       parts << t + ".dv = call i64 @" + wire_get(inst, :devirt_fn) + "(i64 " + wire_get(inst, :receiver)
@@ -587,6 +570,10 @@
       call_keyword = "notail call"
     if argc == 0
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_0(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ic_arg + ")"
+    elsif sym_idx_get_call?(inst)
+      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_sym_get(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
+    elsif sym_idx_set_call?(inst)
+      parts << dv_temp + " = " + call_keyword + " i64 @w_fast_sym_set(i64 " + wire_get(inst, :receiver) + ", i64 " + wire_sequence_get(args, 0) + ", i64 " + wire_sequence_get(args, 1) + ic_arg + ")"
     elsif scalar_source_one_call?(inst)
       parts << dv_temp + " = " + call_keyword + " i64 @w_method_call_cached_1(i64 " + wire_get(inst, :receiver) + ", i64 " + name_val + ", i64 " + wire_sequence_get(args, 0) + ic_arg + ")"
     elsif scalar_source_two_call?(inst)
@@ -872,9 +859,6 @@
     parts << s5 + ".raw32 = load i32, ptr " + s4 + ", align 4" + tbaa_header_suffix() + "\n  "  # start (i32) — re-read: shift/unshift move it. TBAA=header, same rationale.
     parts << s5 + " = sext i32 " + s5 + ".raw32 to i64\n  "    # start (i64 for GEP arithmetic)
     if idx_raw == true
-      # Raw index — use directly, fill unused scratch with dummy values
-      parts << s6 + " = add i64 0, 0\n  "
-      parts << s7 + " = add i64 0, 0\n  "
       parts << s8 + " = add i64 " + s5 + ", " + idx + "\n  "
     else
       parts << s6 + " = shl i64 " + idx + ", 16\n  "
@@ -1082,8 +1066,6 @@
     parts << s5 + ".raw32 = load i32, ptr " + s4 + ", align 4" + tbaa_header_suffix() + "\n  "
     parts << s5 + " = sext i32 " + s5 + ".raw32 to i64\n  "
     if idx_raw == true
-      parts << s6 + " = add i64 0, 0\n  "
-      parts << s7 + " = add i64 0, 0\n  "
       parts << s8 + " = add i64 " + s5 + ", " + idx + "\n  "
     else
       parts << s6 + " = shl i64 " + idx + ", 16\n  "

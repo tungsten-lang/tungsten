@@ -1701,53 +1701,65 @@
   target = detect_target()
   body = expand_on_guards(body, target)
   old_raw_int_candidates = ctx[:raw_int_candidates]
-  class_raw_int_candidates = raw_int_candidate_map(body, ctx[:var_types], mod)
-  if old_raw_int_candidates != nil
-    merged_raw_int_candidates = {}
-    old_keys = old_raw_int_candidates.keys()
-    ok = 0
-    while ok < old_keys.size()
-      merged_raw_int_candidates[old_keys[ok]] = true
-      ok += 1
-    class_keys = class_raw_int_candidates.keys()
-    ck = 0
-    while ck < class_keys.size()
-      merged_raw_int_candidates[class_keys[ck]] = true
-      ck += 1
-    ctx[:raw_int_candidates] = merged_raw_int_candidates
-  else
-    ctx[:raw_int_candidates] = class_raw_int_candidates
+  need_raw_int_candidates = false
+  bi_chk = 0
+  while bi_chk < body.size()
+    bexpr = body[bi_chk]
+    bkind = ast_kind(bexpr)
+    if bkind == :assign
+      need_raw_int_candidates = true
+      break
+    if bkind == :method_def || (bkind == :call && (ast_get(bexpr, :name) == "ro" || ast_get(bexpr, :name) == "rw")) || (bkind == :view_decl && ast_get(bexpr, :kind) == "struct")
+      bsp = ast_get(bexpr, :source_path)
+      if bsp == nil || bsp == ""
+        bsp = ctx[:source_path]
+      if !(incremental_core_cache_skip_definition?(mod, bsp) || incremental_library_cache_skip_definition?(mod, bsp))
+        need_raw_int_candidates = true
+        break
+    bi_chk += 1
+  if need_raw_int_candidates
+    class_raw_int_candidates = raw_int_candidate_map(body, ctx[:var_types], mod)
+    if old_raw_int_candidates != nil
+      merged_raw_int_candidates = {}
+      old_keys = old_raw_int_candidates.keys()
+      ok = 0
+      while ok < old_keys.size()
+        merged_raw_int_candidates[old_keys[ok]] = true
+        ok += 1
+      class_keys = class_raw_int_candidates.keys()
+      ck = 0
+      while ck < class_keys.size()
+        merged_raw_int_candidates[class_keys[ck]] = true
+        ck += 1
+      ctx[:raw_int_candidates] = merged_raw_int_candidates
+    else
+      ctx[:raw_int_candidates] = class_raw_int_candidates
   i = 0
   while i < body.size()
     expr = body[i]
+    expr_sp = ast_get(expr, :source_path)
+    if expr_sp == nil || expr_sp == ""
+      expr_sp = ctx[:source_path]
+    expr_skipped = incremental_core_cache_skip_definition?(mod, expr_sp) || incremental_library_cache_skip_definition?(mod, expr_sp)
     if ast_kind(expr) == :method_def
-      lower_class_method(ctx, class_name, desugar_trailing_accessors(ctx, class_name, expr))
+      if !expr_skipped
+        lower_class_method(ctx, class_name, desugar_trailing_accessors(ctx, class_name, expr))
     elsif ast_kind(expr) == :call && (ast_get(expr, :name) == "ro" || ast_get(expr, :name) == "rw")
-      lower_accessors(ctx, class_name, expr)
+      if !expr_skipped
+        lower_accessors(ctx, class_name, expr)
     elsif ast_kind(expr) == :view_decl && ast_get(expr, :kind) == "struct"
-      # Data block (`- data; T components[4]`) auto-creates an
-      # `ro`-style getter per field — bare `components` inside method
-      # bodies routes to the synthesized `@components` ivar load. The
-      # view-layout side (offset/type for `$components` heap access)
-      # is tracked separately in collect_view_fields.
-      vd_layout = ast_get(expr, :count)
-      if vd_layout != nil && type(vd_layout) == "Hash" && vd_layout[:fields] != nil
-        df = 0
-        while df < vd_layout[:fields].size()
-          fname = vd_layout[:fields][df][:name]
-          # BigInt's view mirrors the C WBigint header purely for internal
-          # `$field` reads/writes; its raw signed limb count must not leak
-          # as a public `size` accessor (duck-typed `.size` callers would
-          # silently get limb counts). The view-layout side in
-          # collect_view_fields is untouched, so `$size` keeps working.
-          # Mirrors the interpreter suppression in
-          # register_data_field_accessors.
-          if class_name != "BigInt"
-            getter_body = data_field_getter_body(class_name, fname, vd_layout[:fields][df][:type])
-            if getter_body != nil
-              getter = Tungsten:AST:MethodDef.new(fname, [], [getter_body])
-              lower_class_method(ctx, class_name, getter)
-          df += 1
+      if !expr_skipped
+        vd_layout = ast_get(expr, :count)
+        if vd_layout != nil && type(vd_layout) == "Hash" && vd_layout[:fields] != nil
+          df = 0
+          while df < vd_layout[:fields].size()
+            fname = vd_layout[:fields][df][:name]
+            if class_name != "BigInt"
+              getter_body = data_field_getter_body(class_name, fname, vd_layout[:fields][df][:type])
+              if getter_body != nil
+                getter = Tungsten:AST:MethodDef.new(fname, [], [getter_body])
+                lower_class_method(ctx, class_name, getter)
+            df += 1
     elsif ast_kind(expr) == :assign && expr.target != nil && ast_kind(expr.target) == :cvar
       # Class variable initialization (@@all = []) — runs at class definition time
       cvar_ctx = {
@@ -2171,10 +2183,10 @@
 -> lower_class_method(ctx, class_name, node, override = nil)
   mod = ctx[:mod]
   name = node.name
-  definition_path = ast_get(node, :source_path)
-  if definition_path == nil
+  definition_path = override != nil ? ctx[:source_path] : ast_get(node, :source_path)
+  if definition_path == nil || definition_path == ""
     definition_path = ctx[:source_path]
-  if incremental_core_cache_skip_definition?(mod, definition_path) || incremental_library_cache_skip_definition?(mod, definition_path)
+  if override == nil && (incremental_core_cache_skip_definition?(mod, definition_path) || incremental_library_cache_skip_definition?(mod, definition_path))
     return nil
   if ctx[:verbose]
     <- "."

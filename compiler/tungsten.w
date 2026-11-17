@@ -1,6 +1,7 @@
 # Default compiler image. The shared driver contains the normal compile,
 # check, batch, and WIRE-run paths; optional product surfaces opt in through
 # their own launchers.
+use lib/driver_modules
 use tungsten_driver
 
 # Link-time profile marker. The driver recognizes the emitted call and compiles

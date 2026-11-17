@@ -53,6 +53,7 @@ end
 # Strip those here (OptionParser would reject --lto) and forward them verbatim to
 # the fast path so `tungsten -o file.w --release` reaches the backend's LTO path.
 LTO_MODE      = ARGV.delete("--lto") ? true : false
+FULL_LTO_MODE = ARGV.delete("--full-lto") ? true : false
 NATIVE_MODE   = ARGV.delete("--native") ? true : false
 if ARGV.delete("--portable")
   warn "--portable builds the release matrix; use `tungsten build --portable` or select one binary with --cpu"
@@ -96,12 +97,13 @@ BACKEND_FLAGS = []
 BACKEND_FLAGS << "--release" if RELEASE_MODE
 BACKEND_FLAGS << "--dev" if DEV_MODE
 BACKEND_FLAGS << "--lto" if LTO_MODE
+BACKEND_FLAGS << "--full-lto" if FULL_LTO_MODE
 BACKEND_FLAGS << "--native" if NATIVE_MODE
 BACKEND_FLAGS.concat(["--cpu", CPU_NAME]) if CPU_NAME
 BACKEND_FLAGS << (DEBUG_ENABLED ? "--debug" : "--no-debug")
-LTO_FLAGS = if RELEASE_MODE
+LTO_FLAGS = if FULL_LTO_MODE
               ["-flto=full"]
-            elsif LTO_MODE
+            elsif RELEASE_MODE || LTO_MODE
               ["-flto=thin"]
             else
               []

@@ -1,29 +1,4 @@
-use core/integer
-use core/numeric/int
-use core/numeric/float
-use core/numeric/big_int
-# String/Symbol#size and #length are source methods on the shared 0xF9 facade.
-# Keep the self-host registration explicit for stage-0 loaders predating the
-# broad dynamic-receiver autoload gate.
-use core/string
-# The self-host uses StringBuffer pervasively. Keep this explicit so a stage-0
-# compiler whose loader predates the constructor-autoload trigger can build the
-# first source-size stage after the native IC is removed.
-use core/string_buffer
-use lib/lexer
-use lib/parser
-use lib/compiler
-use lib/loader
-use lib/error_formatter
-use lib/return_inference
-use lib/compiler_gpu_emitter
-use lib/hashing
-use lib/optimization_report
-use lib/perf_inspect
-use lib/driver/ir
-use lib/driver/shard_codegen
-use lib/driver/link
-use lib/driver/pipeline
+use lib/driver_modules
 
 # delegate_compiler_image (compiler/lib/driver/link.w) execs an image with its
 # kind in TUNGSTEN_COMPILER_IMAGE. Read it once, then take it out of this
@@ -63,8 +38,9 @@ if args.size() == 0
   << "  --intern ALGO    Static slab encoding (raw or zstd)"
   << "  --no-lto         Disable link-time optimization (--release links the native runtime archive)"
   << "  --lto            Whole-program LTO (leaner binary; default links a fast native runtime archive)"
+  << "  --full-lto       Monolithic full LTO (with --release; default --release uses parallel ThinLTO)"
   << "  --frame-pointers Keep frame pointers (for profiling/debugging)"
-  << "  --release        -O3, full LTO, no dev checks, reduced metadata"
+  << "  --release        -O3, ThinLTO, no dev checks, reduced metadata"
   << "  --debug          Include symbols, safety checks, and runtime metadata"
   << "  --no-debug       Omit debug symbols and development checks"
   << "  --cpu CPU        Target CPU (v1/v2/v3/v4/native aliases accepted)"
@@ -107,6 +83,7 @@ interpret_mode = false
 eval_source_alias = nil
 no_lto         = false
 explicit_lto   = false
+full_lto       = false
 frame_pointers = false
 keep_ll        = false
 emit_ll_only   = false
@@ -221,6 +198,8 @@ while i < args.size()
     no_lto = true
   elsif arg == "--lto"
     explicit_lto = true
+  elsif arg == "--full-lto"
+    full_lto = true
   elsif arg == "--intern"
     i += 1
     intern_algo = args[i]
@@ -768,7 +747,7 @@ elsif command == "compile-batch"
   # compiles a batch-local runtime. That one lands in a private scratch dir,
   # NEVER the first input's directory (the old `files[0]`-derived path wrote
   # `spec/numeric/runtime.a` into the source tree and broke outside it).
-  batch_lto = (release_mode || explicit_lto) && !no_lto
+  batch_lto = (release_mode || explicit_lto || full_lto) && !no_lto
   if ll_jobs.size() > 0 && batch_lto && !needs_zstd_runtime && cross_target == ""
     runtime_objs = dev_runtime_lto_objects(false, verbose)
   if ll_jobs.size() > 0 && runtime_objs == nil && (batch_lto || needs_zstd_runtime)

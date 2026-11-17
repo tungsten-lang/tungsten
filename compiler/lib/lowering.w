@@ -1004,6 +1004,7 @@ use lowering/definitions
   if auto_closed_world
     mod[:protect_core] = true
     mod[:auto_closed_world_reachability] = true
+    mod[:auto_closed_world_devirt] = true
 
   # Generic class monomorphization runs BEFORE the main expressions walk
   # so specialized classes are visible to every downstream pass.
@@ -1166,14 +1167,6 @@ use lowering/definitions
   # annotation default to "on" for safe top-level patterns.
   mark_nonescaping_small_arrays(ast.expressions)
 
-  # Promote non-escaping, non-resized `i32[N]` (N<=255) locals to
-  # stack WSmallArrays. Recurses into every function/method body (unlike the
-  # top-level-only SmallArray.new pass above). ~5.7x faster alloc + (with the
-  # small-array rvalue reads routed through small_array_get_inline, lowering/ops.w)
-  # vectorizing element loops — a promoted 128-elem fill+sum is ~5x faster than
-  # the heap form. Always on.
-  mark_stackable_typed_arrays(ast.expressions, mod[:incremental_core_cache_hit] == true)
-
   # Bind an unchanged imported-library prefix to the exact warmed Core and
   # whole-program ABI/type-fact context. The raw functions remain in the
   # ordinary mid-end; only their source body lowering can be restored.
@@ -1184,9 +1177,13 @@ use lowering/definitions
     << "  lowering..."
   incremental_core_cache_attach_functions(mod)
   if core_expressions != nil && mod[:core_reuse_contract] == :stable && mod[:incremental_core_cache_key] != nil
+    if mod[:incremental_core_cache_hit] != true
+      mark_stackable_typed_arrays(core_expressions, false, nil)
     lower_program(ctx, core_expressions)
     incremental_core_cache_finish_core_partition(mod)
     incremental_library_cache_begin(mod)
+    skip_lib_paths = mod[:incremental_library_cache_hit] == true ? mod[:incremental_library_cache_paths] : nil
+    mark_stackable_typed_arrays(user_expressions, true, skip_lib_paths)
     if mod[:incremental_library_cache_status] in (:hit :miss)
       ctx[:incremental_library_cache_statements] = user_expressions
       ctx[:incremental_library_cache_prefix_count] = mod[:incremental_library_cache_prefix_count]
@@ -1198,6 +1195,7 @@ use lowering/definitions
     ctx[:incremental_library_cache_statements] = nil
     ctx[:incremental_library_cache_prefix_count] = nil
   else
+    mark_stackable_typed_arrays(ast.expressions, mod[:incremental_core_cache_hit] == true, nil)
     lower_program(ctx, ast.expressions)
 
   # Give cached Core functions stable module position and stable string ids;

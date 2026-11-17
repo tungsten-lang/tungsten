@@ -2218,6 +2218,9 @@
     visible_local = top_local
     if core_expressions != nil
       if core_set[expr_ci] == true
+        if mod[:incremental_core_cache_hit] == true
+          ci += 1
+          next
         visible_candidates = core_candidates
         if core_top_local != nil
           visible_local = core_top_local

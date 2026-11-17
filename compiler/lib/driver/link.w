@@ -224,6 +224,13 @@
     return m
   ""
 
+-> lto_mode_flag
+  if full_lto
+    return "-flto=full"
+  if release_mode
+    return "-flto=thin"
+  "-flto"
+
 -> profile_opt_flag
   if dev_mode
     return "-O0"
@@ -317,7 +324,7 @@
   # runtime side is the cached bitcode bundle below, so the per-link cost is
   # the merged-module optimization alone. --no-lto is the one opt-out.
   # scripts/test-compile-profiles.sh pins the flags of each profile.
-  doing_lto = (release_mode || explicit_lto) && !no_lto
+  doing_lto = (release_mode || explicit_lto || full_lto) && !no_lto
   full_runtime_lto = doing_lto
   # Fast native-archive link (default): reuse the cached runtime objects
   # rather than recompiling the ~28k-line runtime every build. runtime.o's weak
@@ -365,6 +372,8 @@
       parallel_objs = parallel_codegen_objects(ll_path, verbose)
     if parallel_objs == nil
       parallel_objs = native_sharded_codegen_objects(ll_path, clang_opt, store_entries, verbose)
+  elsif cross_target == "" && full_runtime_lto && !full_lto && release_mode && env("TUNGSTEN_SHARD_THINLTO") != "0"
+    parallel_objs = native_sharded_codegen_objects(ll_path, clang_opt, store_entries, verbose, "-flto=thin")
 
   clang_cmd = StringBuffer(0)
   clang_cmd << host_c_compiler()
@@ -381,7 +390,21 @@
   clang_cmd << " -fmerge-all-constants "
 
   if full_runtime_lto
-    clang_cmd << (release_mode ? "-flto=full " : "-flto ")
+    clang_cmd << lto_mode_flag()
+    clang_cmd << " "
+    if !full_lto && release_mode && cross_target == "" && env("TUNGSTEN_THINLTO_CACHE") != "0"
+      tlto_cache_root = compiler_cache_dir()
+      if tlto_cache_root != nil
+        tlto_cache_dir = tlto_cache_root + "/thinlto-cache"
+        if ensure_driver_dir(tlto_cache_dir)
+          if detect_target()[:os] == "macos"
+            clang_cmd << "-Wl,-cache_path_lto,"
+            clang_cmd << dev_runtime_shell_quote(tlto_cache_dir)
+            clang_cmd << " "
+          elsif detect_target()[:os] == "linux"
+            clang_cmd << "-Wl,--thinlto-cache-dir="
+            clang_cmd << dev_runtime_shell_quote(tlto_cache_dir)
+            clang_cmd << " "
 
   if frame_pointers
     clang_cmd << "-fno-omit-frame-pointer "
@@ -1197,7 +1220,7 @@
     return nil
   opt_flag = runtime_lto_opt_flag(clang_opt)
   compile_flags = opt_flag + " " + debug_compile_flag() + " " + march_flags() + " -fmerge-all-constants"
-  compile_flags += release_mode ? " -flto=full" : " -flto"
+  compile_flags += " " + lto_mode_flag()
   if frame_pointers
     compile_flags += " -fno-omit-frame-pointer"
   if compiler_image_runtime_profile
@@ -1266,7 +1289,7 @@
   opt_flag = (clang_opt != nil && clang_opt != "") ? clang_opt : profile_opt_flag()
   compile_flags = opt_flag + " " + debug_compile_flag() + " " + march_flags() + " -fmerge-all-constants"
   if doing_lto
-    compile_flags += release_mode ? " -flto=full" : " -flto"
+    compile_flags += " " + lto_mode_flag()
   if frame_pointers
     compile_flags += " -fno-omit-frame-pointer"
   if detect_target()[:os] == "macos"
@@ -1342,8 +1365,9 @@
     cc_prefix << tcf
     cc_prefix << " "
 
-  if (release_mode || explicit_lto) && !no_lto
-    cc_prefix << (release_mode ? "-flto=full " : "-flto ")
+  if (release_mode || explicit_lto || full_lto) && !no_lto
+    cc_prefix << lto_mode_flag()
+    cc_prefix << " "
 
   if frame_pointers
     cc_prefix << "-fno-omit-frame-pointer "

@@ -738,45 +738,103 @@ nonretaining_consumers_map = init_nonretaining_consumers_map()
       blocks[bi][:instructions] = new_instrs
     bi += 1
 
+-> free_insertion_parallel_worker(state)
+  functions = state[:functions]
+  slot_plans = state[:slot_plans]
+  mod = state[:mod]
+  fresh = state[:fresh]
+  strings = state[:strings]
+  index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  while index < functions.size()
+    func = functions[index]
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+      own = func[:ownership]
+      run_slot = false
+      if own == nil || own[:int_fresh_known] != true
+        if own == nil || (!own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_direct_call]))
+          run_slot = true
+      elsif !own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_heap_producer])
+        run_slot = true
+      if run_slot
+        slot_plans[index] = owned_slot_compute_plan(func, mod, fresh, strings)
+    index = ccall("w_atomic_add", state[:cursor], u0xFFFA000000000001)
+  true
+
 # Entry point for free insertion across all functions.
 -> free_insertion_pass(mod)
   loop_rel = env("TUNGSTEN_LOOP_RELEASE") != "0"
   slot_rel = env("TUNGSTEN_SLOT_RELEASE") != "0"
-  int_temps = nil
-  strings = nil
-  fresh = nil
+  funcs = mod[:functions]
+  n_funcs = funcs.size()
+  has_work = false
   fi = 0
-  while fi < mod[:functions].size()
-    func = mod[:functions][fi]
+  while fi < n_funcs
+    func = funcs[fi]
     if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+      has_work = true
       own = func[:ownership]
       insert_frees(func)
       if loop_rel && func[:blocks].size() > 1 && (own == nil || (!own[:has_setjmp] && own[:has_store_i64] && own[:has_loop_arith]))
         ignored = loop_carried_releases(func)
-      if int_temps == nil
-        int_temps = env("TUNGSTEN_INT_TEMP_RELEASE") != "0" && mod[:integer_contract_intact] == true
-        if int_temps
-          strings = mod[:string_texts]
-          if strings == nil
-            strings = int_temp_string_texts(mod)
-          mod[:method_table] = module_method_table(mod, strings)
-          if mod[:int_fresh_fns] != nil
-            fresh = mod[:int_fresh_fns]
-            int_fresh_apply_seals(mod[:int_fresh_cands], fresh)
-          else
-            fresh = int_fresh_returns(mod)
-      if int_temps && slot_rel
-        if own == nil || own[:int_fresh_known] != true
-          if own == nil || (!own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_direct_call]))
+    fi += 1
+  if !has_work
+    return nil
+  int_temps = env("TUNGSTEN_INT_TEMP_RELEASE") != "0" && mod[:integer_contract_intact] == true
+  if !int_temps
+    return nil
+  strings = mod[:string_texts]
+  if strings == nil
+    strings = int_temp_string_texts(mod)
+  mod[:method_table] = module_method_table(mod, strings)
+  fresh = nil
+  if mod[:int_fresh_fns] != nil
+    fresh = mod[:int_fresh_fns]
+    int_fresh_apply_seals(mod[:int_fresh_cands], fresh)
+  else
+    fresh = int_fresh_returns(mod)
+  jobs = slot_rel ? ownership_parallel_job_count(mod) : 1
+  slot_plans = nil
+  if slot_rel && jobs > 1
+    slot_plans = Array.new(n_funcs)
+    state = {
+      functions: funcs,
+      slot_plans: slot_plans,
+      mod: mod,
+      fresh: fresh,
+      strings: strings,
+      cursor: ccall("w_atomic_new", u0xFFFA000000000000)
+    }
+    workers = []
+    worker = 1
+    while worker < jobs
+      workers.push(Thread.new ->
+        free_insertion_parallel_worker(state))
+      worker += 1
+    free_insertion_parallel_worker(state)
+    worker = 0
+    while worker < workers.size()
+      ccall("w_thread_join_release", workers[worker])
+      worker += 1
+  fi = 0
+  while fi < n_funcs
+    func = funcs[fi]
+    if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
+      own = func[:ownership]
+      if slot_rel
+        if slot_plans != nil
+          if slot_plans[fi] != nil
+            ignored = owned_slot_apply_plan(func, slot_plans[fi])
+        else
+          if own == nil || own[:int_fresh_known] != true
+            if own == nil || (!own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_direct_call]))
+              ignored = owned_slot_releases(func, mod, fresh, strings)
+          elsif !own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_heap_producer])
             ignored = owned_slot_releases(func, mod, fresh, strings)
-        elsif !own[:has_setjmp] && own[:has_store_i64] && (own[:has_int_arith] || own[:has_heap_producer])
-          ignored = owned_slot_releases(func, mod, fresh, strings)
-      if int_temps
-        if own == nil || own[:int_fresh_known] != true
-          if own == nil || (!own[:has_setjmp] && (own[:has_int_arith] || (fresh.size() > 0 && own[:has_direct_call])))
-            ignored = int_temp_releases(func, strings, fresh, mod)
-        elsif !own[:has_setjmp] && own[:has_int_arith]
+      if own == nil || own[:int_fresh_known] != true
+        if own == nil || (!own[:has_setjmp] && (own[:has_int_arith] || (fresh.size() > 0 && own[:has_direct_call])))
           ignored = int_temp_releases(func, strings, fresh, mod)
+      elsif !own[:has_setjmp] && own[:has_int_arith]
+        ignored = int_temp_releases(func, strings, fresh, mod)
     fi += 1
 
 # ---------------------------------------------------------------------------
@@ -1592,6 +1650,50 @@ int_temp_reader_map = init_int_temp_reader_map()
 # a BigInt result shared in that case; the release then only drops the mark.
 # Returns name -> true.  Memoized calls go through memo_call_*, never a
 # direct call, so a cached result is never taken for a fresh one.
+-> int_fresh_quick_callees(func, fn_names)
+  blocks = func[:blocks]
+  has_ret = false
+  unknown = false
+  callees = []
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    n = instrs.size()
+    if n > 0
+      last = instrs[n - 1]
+      lk = wire_kind(last)
+      if lk == :ret_void || lk == :ret_i32 || lk == :setjmp
+        return nil
+      if lk == :ret_i64
+        has_ret = true
+        rv = wire_get(last, :value)
+        if rv == nil || rv.size() < 3 || rv.byte_at(0) != 37 || rv.byte_at(1) != 116
+          return nil
+        found = false
+        pi = n - 2
+        while pi >= 0
+          pinst = instrs[pi]
+          if wire_get(pinst, :temp) == rv
+            if wire_kind(pinst) != :call_direct_i64
+              return nil
+            dname = wire_get(pinst, :name)
+            if dname == func[:name]
+              return nil
+            if !int_temp_arith?(dname)
+              if fn_names != nil && fn_names[dname] != true
+                return nil
+              if !callees.include?(dname)
+                callees.push(dname)
+            found = true
+            break
+          pi -= 1
+        if !found
+          unknown = true
+    bi += 1
+  if !has_ret
+    return nil
+  {func: func, name: func[:name], callees: callees, unknown: unknown}
+
 -> int_fresh_discover(mod)
   fresh = {}
   cands = []
@@ -1603,14 +1705,42 @@ int_temp_reader_map = init_int_temp_reader_map()
     fi += 1
     if func[:blocks].size() > 0 && func[:incremental_core_frozen] != true
       fn_names[func[:name]] = true
+  quick = []
   fi = 0
   while fi < funcs.size()
     func = funcs[fi]
     fi += 1
     next if func[:blocks].size() == 0 || func[:incremental_core_frozen] == true
-    cand = int_fresh_candidate(func, fn_names)
-    if cand != nil
-      cands.push(cand)
+    q = int_fresh_quick_callees(func, fn_names)
+    if q != nil
+      quick.push(q)
+  reachable = {}
+  qchanged = true
+  while qchanged
+    qchanged = false
+    qi = 0
+    while qi < quick.size()
+      q = quick[qi]
+      qi += 1
+      if reachable[q[:name]] != true
+        qok = true
+        if !q[:unknown]
+          ki = 0
+          while qok && ki < q[:callees].size()
+            if reachable[q[:callees][ki]] != true
+              qok = false
+            ki += 1
+        if qok
+          reachable[q[:name]] = true
+          qchanged = true
+  qi = 0
+  while qi < quick.size()
+    q = quick[qi]
+    qi += 1
+    if reachable[q[:name]] == true
+      cand = int_fresh_candidate(q[:func], reachable)
+      if cand != nil
+        cands.push(cand)
   # Optimistic fixed point would admit mutual recursion with no base case;
   # grow from nothing instead, a callee at a time.
   changed = true
@@ -1849,14 +1979,14 @@ int_temp_reader_map = init_int_temp_reader_map()
 # TUNGSTEN_SLOT_RELEASE=0 disables the pass.
 # ---------------------------------------------------------------------------
 
--> owned_slot_releases(func, mod, fresh, strings)
+-> owned_slot_compute_plan(func, mod, fresh, strings)
   blocks = func[:blocks]
   slots = func[:var_slots]
-  return 0 if slots == nil || slots.size() == 0 || blocks.size() < 1
+  return nil if slots == nil || slots.size() == 0 || blocks.size() < 1
   own = func[:ownership]
-  return 0 if own != nil && own[:has_setjmp]
+  return nil if own != nil && own[:has_setjmp]
   promoted = func[:promoted_vars]
-  return 0 if promoted != nil && promoted.size() == slots.size()
+  return nil if promoted != nil && promoted.size() == slots.size()
   heap_cells = func[:heap_slot_names]
   cand = {}
   has_cand = false
@@ -1868,7 +1998,7 @@ int_temp_reader_map = init_int_temp_reader_map()
       cand[ptr] = true
       has_cand = true
     ni += 1
-  return 0 if !has_cand
+  return nil if !has_cand
   producer_temps = nil
   has_producer = false
   stored_vals = nil
@@ -1881,7 +2011,7 @@ int_temp_reader_map = init_int_temp_reader_map()
       inst = instrs[ii]
       k = wire_kind(inst)
       if k == :setjmp
-        return 0
+        return nil
       if k == :store_i64 && cand[wire_get(inst, :ptr)] == true
         sv = wire_get(inst, :value)
         if stored_vals == nil
@@ -1909,7 +2039,7 @@ int_temp_reader_map = init_int_temp_reader_map()
           has_producer = true
       ii += 1
     bi += 1
-  return 0 if !has_producer || stored_vals == nil || stored_vals.size() == 0
+  return nil if !has_producer || stored_vals == nil || stored_vals.size() == 0
   has_producer_store = false
   svi = 0
   while svi < stored_vals.size()
@@ -1917,7 +2047,7 @@ int_temp_reader_map = init_int_temp_reader_map()
       has_producer_store = true
       break
     svi += 1
-  return 0 if !has_producer_store
+  return nil if !has_producer_store
   wo = mod[:write_only_globals]
   wo = {} if wo == nil
 
@@ -1956,7 +2086,7 @@ int_temp_reader_map = init_int_temp_reader_map()
             stores[sp] = [] if stores[sp] == nil
             stores[sp].push([bi, ii, wire_get(inst, :value)])
       refs = loop_release_operands(inst)
-      return 0 if refs == nil
+      return nil if refs == nil
       ri = 0
       while ri < refs.size()
         r = refs[ri]
@@ -1967,7 +2097,7 @@ int_temp_reader_map = init_int_temp_reader_map()
         ri += 1
       ii += 1
     bi += 1
-  return 0 if rets.size() == 0
+  return nil if rets.size() == 0
 
   ctx = {blocks: blocks, defs: defs, uses: uses, cand: cand, wo: wo, known_int: known_int, fresh: fresh, strings: strings, mod: mod}
   info = {}
@@ -2003,7 +2133,16 @@ int_temp_reader_map = init_int_temp_reader_map()
   while ki < ik.size()
     owned.push(ik[ki]) if info[ik[ki]] != nil
     ki += 1
-  return 0 if owned.size() == 0
+  return nil if owned.size() == 0
+  {owned: owned, info: info, stores: stores, rets: rets, defs: defs}
+
+-> owned_slot_apply_plan(func, bundle)
+  blocks = func[:blocks]
+  owned = bundle[:owned]
+  info = bundle[:info]
+  stores = bundle[:stores]
+  rets = bundle[:rets]
+  defs = bundle[:defs]
 
   # Edits, keyed (block << 20) + index: before[] / after[] lists of instructions.
   before = {}
@@ -2020,7 +2159,8 @@ int_temp_reader_map = init_int_temp_reader_map()
     owned_slot_edit(before, 0, wire_make_store_i64(ptr, "0"))
     pm = 0
     while pm < plan[:pre_marks].size()
-      owned_slot_edit(before, plan[:pre_marks][pm][0], plan[:pre_marks][pm][1])
+      pm_item = plan[:pre_marks][pm]
+      owned_slot_edit(before, pm_item[0], wire_make_call_direct_void(pm_item[1], pm_item[2]))
       pm += 1
     sl = stores[ptr]
     sj = 0
@@ -2059,7 +2199,7 @@ int_temp_reader_map = init_int_temp_reader_map()
     while ci < plan[:marks].size()
       m = plan[:marks][ci]
       ci += 1
-      owned_slot_edit(after, m[0], m[1])
+      owned_slot_edit(after, m[0], wire_make_call_direct_void(m[1], m[2]))
 
   bi = 0
   while bi < blocks.size()
@@ -2089,6 +2229,12 @@ int_temp_reader_map = init_int_temp_reader_map()
   if env("TUNGSTEN_SLOT_RELEASE_DEBUG") == "1"
     ignored = ccall("w_eputs", "slot-release " + func[:name].to_s() + " owned " + owned.size().to_s())
   owned.size()
+
+-> owned_slot_releases(func, mod, fresh, strings)
+  bundle = owned_slot_compute_plan(func, mod, fresh, strings)
+  if bundle == nil
+    return 0
+  owned_slot_apply_plan(func, bundle)
 
 -> owned_slot_edit(table, key, inst)
   table[key] = [] if table[key] == nil
@@ -2149,7 +2295,7 @@ int_temp_reader_map = init_int_temp_reader_map()
       vkind = :int
       deps[wire_get(dinst, :ptr)] = true
       lkey = d
-      marks.push([lkey, wire_make_call_direct_void([v, v], "__w_int_alias_seal")])
+      marks.push([lkey, [v, v], "__w_int_alias_seal"])
       return nil if kind != :nil && kind != vkind
       kind = vkind
       next
@@ -2196,12 +2342,12 @@ int_temp_reader_map = init_int_temp_reader_map()
         if how != nil
           vkey = uloc
           if how != true
-            marks.push([vkey, wire_make_call_direct_void([v, how, how], "__w_int_result_seal")])
+            marks.push([vkey, [v, how, how], "__w_int_result_seal"])
           if wire_get(uinst, :temp) != nil
-            marks.push([vkey, wire_make_call_direct_void([v, wire_get(uinst, :temp)], "__w_int_alias_seal")])
+            marks.push([vkey, [v, wire_get(uinst, :temp)], "__w_int_alias_seal"])
       elsif kind == :int && wire_kind(uinst) == :call_direct_i64 && wire_get(uinst, :temp) != nil && !int_temp_arith?(wire_get(uinst, :name)) && !int_temp_reader?(wire_get(uinst, :name))
         vkey = uloc
-        marks.push([vkey, wire_make_call_direct_void([v, wire_get(uinst, :temp)], "__w_int_alias_seal")])
+        marks.push([vkey, [v, wire_get(uinst, :temp)], "__w_int_alias_seal"])
     return nil if n < 1 || (kind == :heap && n != 1)
     cells_of[v] = n
   return nil if kind == :nil
@@ -2209,7 +2355,7 @@ int_temp_reader_map = init_int_temp_reader_map()
     return nil if kind != :int
     bi2 = 0
     while bi2 < borrowed.size()
-      pre_marks.push([borrowed[bi2][0], wire_make_call_direct_void([borrowed[bi2][1], borrowed[bi2][1]], "__w_int_alias_seal")])
+      pre_marks.push([borrowed[bi2][0], [borrowed[bi2][1], borrowed[bi2][1]], "__w_int_alias_seal"])
       bi2 += 1
   li = 0
   while ll != nil && li < ll.size()
@@ -2250,22 +2396,22 @@ int_temp_reader_map = init_int_temp_reader_map()
             wj += 1
           if others.size() > 0
             b = others.size() > 1 ? others[1] : others[0]
-            marks.push([key, wire_make_call_direct_void([l, others[0], b], "__w_int_result_seal")])
+            marks.push([key, [l, others[0], b], "__w_int_result_seal"])
           next
         next if int_temp_reader?(uname)
       if !owned_slot_plain_read?(uinst, l, kind, ctx[:strings], defs, blocks, ctx[:mod])
         return nil
       if uk == :call_direct_i64 && wire_get(uinst, :temp) != nil && !(kind == :int && int_temp_reader?(wire_get(uinst, :name)))
         if kind == :int
-          marks.push([key, wire_make_call_direct_void([l, wire_get(uinst, :temp)], "__w_int_alias_seal")])
+          marks.push([key, [l, wire_get(uinst, :temp)], "__w_int_alias_seal"])
       if uk == :call_method_i64 && kind == :int
         how = int_method_read?(uinst, l, ctx[:mod], ctx[:strings], defs, blocks)
         if how != nil
           if how != true
             # an argument: kept only if the receiver was not an Integer
-            marks.push([key, wire_make_call_direct_void([l, how, how], "__w_int_result_seal")])
+            marks.push([key, [l, how, how], "__w_int_result_seal"])
           if wire_get(uinst, :temp) != nil
-            marks.push([key, wire_make_call_direct_void([l, wire_get(uinst, :temp)], "__w_int_alias_seal")])
+            marks.push([key, [l, wire_get(uinst, :temp)], "__w_int_alias_seal"])
   {kind: kind, seals: seals, marks: marks, pre_marks: pre_marks, deps: deps, cells_of: cells_of, transfers: transfers}
 
 # Does `inst` only read `v` (a value of a slot of `kind`) without keeping it?
@@ -2321,6 +2467,48 @@ int_temp_reader_map = init_int_temp_reader_map()
 # nothing, so recursion without a base case never qualifies.  Memoized calls
 # go through memo_call_*, never a direct call.  Sets mod[:fresh_heap_fns].
 # ---------------------------------------------------------------------------
+-> fresh_heap_quick_callees(func, mod)
+  blocks = func[:blocks]
+  has_ret = false
+  unknown = false
+  callees = []
+  bi = 0
+  while bi < blocks.size()
+    instrs = blocks[bi][:instructions]
+    n = instrs.size()
+    if n > 0
+      last = instrs[n - 1]
+      lk = wire_kind(last)
+      if lk == :ret_void || lk == :ret_i32 || lk == :setjmp
+        return nil
+      if lk == :ret_i64
+        has_ret = true
+        rv = wire_get(last, :value)
+        if rv == nil || rv.size() < 3 || rv.byte_at(0) != 37 || rv.byte_at(1) != 116
+          return nil
+        found = false
+        pi = n - 2
+        while pi >= 0
+          pinst = instrs[pi]
+          if wire_get(pinst, :temp) == rv
+            if wire_kind(pinst) != :call_direct_i64
+              return nil
+            if !is_heap_producer(pinst)
+              dname = wire_get(pinst, :name)
+              if dname == func[:name] || fn_escape_summary(mod, dname) == nil
+                return nil
+              if !callees.include?(dname)
+                callees.push(dname)
+            found = true
+            break
+          pi -= 1
+        if !found
+          unknown = true
+    bi += 1
+  if !has_ret
+    return nil
+  {func: func, name: func[:name], callees: callees, unknown: unknown}
+
 -> fresh_heap_returns(mod)
   fresh = {}
   kinds = {}
@@ -2329,13 +2517,41 @@ int_temp_reader_map = init_int_temp_reader_map()
   return fresh if env("TUNGSTEN_FREE") == "0" || env("TUNGSTEN_FRESH_HEAP") == "0"
   cands = []
   funcs = mod[:functions]
+  quick = []
   fi = 0
   while fi < funcs.size()
     func = funcs[fi]
     fi += 1
     next if func[:blocks].size() == 0 || func[:incremental_core_frozen] == true
-    cand = fresh_heap_candidate(func, mod)
-    cands.push(cand) if cand != nil
+    q = fresh_heap_quick_callees(func, mod)
+    if q != nil
+      quick.push(q)
+  reachable = {}
+  qchanged = true
+  while qchanged
+    qchanged = false
+    qi = 0
+    while qi < quick.size()
+      q = quick[qi]
+      qi += 1
+      if reachable[q[:name]] != true
+        qok = true
+        if !q[:unknown]
+          ki = 0
+          while qok && ki < q[:callees].size()
+            if reachable[q[:callees][ki]] != true
+              qok = false
+            ki += 1
+        if qok
+          reachable[q[:name]] = true
+          qchanged = true
+  qi = 0
+  while qi < quick.size()
+    q = quick[qi]
+    qi += 1
+    if reachable[q[:name]] == true
+      cand = fresh_heap_candidate(q[:func], mod)
+      cands.push(cand) if cand != nil
   changed = true
   while changed
     changed = false
@@ -2471,11 +2687,25 @@ int_temp_reader_map = init_int_temp_reader_map()
 -> write_only_globals(mod)
   stored = {}
   loaded = {}
+  skip_core = mod[:core_loaded_globals] != nil && mod[:core_stored_globals] != nil
+  if skip_core
+    csg = mod[:core_stored_globals]
+    csi = 0
+    while csi < csg.size()
+      stored[csg[csi]] = true
+      csi += 1
+    clg = mod[:core_loaded_globals]
+    cli = 0
+    while cli < clg.size()
+      loaded[clg[cli]] = true
+      cli += 1
   funcs = mod[:content_hash_info_functions] != nil ? mod[:content_hash_info_functions] : mod[:functions]
   fi = 0
   while fi < funcs.size()
-    blocks = funcs[fi][:blocks]
+    func = funcs[fi]
     fi += 1
+    next if skip_core && func[:incremental_core_frozen] == true
+    blocks = func[:blocks]
     bi = 0
     while bi < blocks.size()
       instrs = blocks[bi][:instructions]
@@ -2523,6 +2753,7 @@ int_temp_reader_map = init_int_temp_reader_map()
   while fi < funcs.size()
     func = funcs[fi]
     fi += 1
+    next if func[:incremental_core_frozen] == true
     own = func[:ownership]
     next if own != nil && own[:has_method_reg] == false
     blocks = func[:blocks]

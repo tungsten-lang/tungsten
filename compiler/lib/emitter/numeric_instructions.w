@@ -752,7 +752,7 @@
     if ch != nil && (ch == "-" || (ch >= "0" && ch <= "9"))
       wval = (raw_str.to_i() & 281474976710655) | -1688849860263936
       lit = llvm_wvalue_literal(wval)
-      wire_get(inst, :temp_masked) + " = or i64 0, " + lit + "\n  " + wire_get(inst, :temp) + " = or i64 0, " + lit
+      wire_get(inst, :temp) + " = or i64 0, " + lit
     else
       wire_get(inst, :temp_masked) + " = and i64 " + raw_str + ", " + machine_i64_text(w_payload_mask) + "\n  " + wire_get(inst, :temp) + " = or i64 " + wire_get(inst, :temp_masked) + ", " + machine_i64_text(w_tag_int)
   when :nanunbox_int

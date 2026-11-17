@@ -984,9 +984,32 @@ module Tungsten
       end
     end
 
+    # A line whose last token is a binary operator continues on the next line: the
+    # newline lexes as :SP and the next line's indentation is not block structure.
+    # Kept in lockstep with Lexer#continues_line? (same operator list).
+    CONTINUATION_OPS = %i[+ - * / % ** == != < > <= >= && || & ^].freeze
+
+    def continues_line?
+      @bracket_depth.zero? && CONTINUATION_OPS.include?(@last_significant_token_type)
+    end
+
+    # after a continued newline: consume the next line's indentation (as the open-bracket case of handle_indentation)
+    def skip_continuation_indent
+      cp = @pos
+      cp += 1 while cp < @length && @source.getbyte(cp) == 32
+      @col += (cp - @pos)
+      @pos = cp
+    end
+
     def scan_space_or_newline
       start_col = @col
-      if (count = consume_newlines)
+      if continues_line? && (count = consume_newlines)
+        profile_path(:newline) if @profile_enabled
+        set_token(:SP, nil, @row, start_col)
+        @row += count
+        @col = 1
+        skip_continuation_indent
+      elsif (count = consume_newlines)
         profile_path(:newline) if @profile_enabled
         set_token(:NL, count, @row, start_col)
         @row += count
@@ -1144,7 +1167,14 @@ module Tungsten
     def scan_comment
       start_col = @col
       advance until eof? || newline_byte?(byte)
-      if newline_byte?(byte)
+      if newline_byte?(byte) && continues_line?
+        # a comment after a trailing operator: the line still continues
+        advance
+        set_token(:SP, nil, @row, start_col)
+        @row += 1
+        @col = 1
+        skip_continuation_indent
+      elsif newline_byte?(byte)
         advance
         set_token(:NL, 1, @row, start_col)
         @row += 1

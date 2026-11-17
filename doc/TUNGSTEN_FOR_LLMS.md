@@ -316,7 +316,10 @@ tightly than `∪`. Set operations produce new sets.
 2. `+` defines classes (not `class`)
 3. `->` defines methods (not `def`)
 4. `[ ]` for interpolation (not `#{ }`)
-5. No `end` keywords — indentation-based
+5. No `end` keywords — indentation-based. A long expression continues onto the
+   next line inside open brackets, or after a line that ends with a binary
+   operator (`+ - * / % ** == != < > <= >= && || & ^`); the continuation line's
+   indentation is free
 6. Bare decimals are exact; floats are opt-in with `~`
 7. `fn` for pure, memoized functions
 8. Built-in currency, units, dates, quantities

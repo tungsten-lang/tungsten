@@ -80,7 +80,13 @@ use regex_base
     # Newline
     if ch == "\n"
       if @paren_depth == 0
-        emit(:NEWLINE, nil)
+        # A trailing binary operator continues the line (as the packed
+        # lexer, compiler/lib/lexer/fast64.w): no NEWLINE, and the next
+        # line's indentation is not block structure.
+        if [:PLUS, :MINUS, :STAR, :SLASH, :PERCENT, :POW, :EQ, :NEQ, :LT, :GT, :LTE, :GTE, :AND, :OR, :AMPERSAND, :CARET].include?(@last_token_type)
+          @cont_line = true
+        else
+          emit(:NEWLINE, nil)
       @regex_capture_scope = false
       @pos += 1
       @line += 1
@@ -1089,6 +1095,9 @@ use regex_base
     # Inside parens/brackets: suppress INDENT/DEDENT, just update column
     @col = indent + 1
     if @paren_depth > 0
+      return nil
+    if @cont_line
+      @cont_line = false
       return nil
 
     # Real content — process indentation

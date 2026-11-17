@@ -92,6 +92,18 @@ module Tungsten
       end
     end
 
+    # A line whose last token is a binary operator cannot end a statement, so it
+    # continues on the next line: the newline lexes as :SP (keeping `a -⏎b` apart as
+    # `a - b`) and the next line's indentation is not block structure, as inside an
+    # open bracket. | (block params), -> (definitions), << (print), = and , do not
+    # continue. Kept in lockstep with CodepointLexer#continues_line? and the packed
+    # compiler lexer (compiler/lib/lexer/fast64.w tungsten_fast64_continues).
+    CONTINUATION_OPS = %i[+ - * / % ** == != < > <= >= && || & ^].freeze
+
+    def continues_line?
+      @bracket_depth.zero? && CONTINUATION_OPS.include?(@last_significant_token_type)
+    end
+
     def handle_indentation
       # Inside an open bracket (...)/[...]/{...} a newline is a line
       # continuation, not block structure: a continuation line indented deeper
@@ -304,6 +316,12 @@ module Tungsten
 
       elsif (text = scan(/[\t\r\f]/))
         error "unexpected character: #{text.inspect}"
+
+      # a line ending in a binary operator continues: the newline is whitespace (see continues_line?)
+      elsif continues_line? && (count = skip_newlines)
+        token :SP
+        @row += count
+        skip_scan(/^[ ]*/)
 
       # trailing whitespace followed by newline(s) — ignore the space and emit a single NL token
       elsif (count = skip_newlines)
@@ -739,7 +757,13 @@ module Tungsten
     end
 
     def scan_comment
-      if skip_scan(/.*\n/)
+      if continues_line? && skip_scan(/.*\n/)
+        # a comment after a trailing operator: the line still continues
+        token :SP
+        @row += 1
+        @cols = nil
+        skip_scan(/^[ ]*/)
+      elsif skip_scan(/.*\n/)
         token :NL, 1
         @row += 1
         @cols = nil

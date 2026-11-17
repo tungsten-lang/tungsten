@@ -1,3 +1,38 @@
+# Line continuation after a trailing binary operator: 1 when the last
+# non-:SP token before tc is one of + - * / % ** == != < > <= >= && || & ^.
+# Such a line cannot end a statement, so its newline is whitespace and the
+# next line's indentation is not block structure (as inside brackets).
+# Not continuing: | (block params), -> (definitions), << (print), = and ,.
+## i64[]: lc, tokens
+## i64: tc, cp_mask
+-> tungsten_fast64_continues(lc, tokens, tc, cp_mask)
+  i = tc - 1
+  while i >= 0 && ((tokens[i] >> 38) & 0xFF) == 0x19
+    i -= 1
+  if i < 0
+    return 0
+  tok = tokens[i]
+  if ((tok >> 38) & 0xFF) != 0x0B
+    return 0
+  off = (tok >> 2) & 0xFFFFFF
+  n = (tok >> 26) & 0xFFF
+  c1 = (lc[off] >> 18) & cp_mask
+  if n == 1
+    if c1 in (43 45 42 47 37 60 62 38 94)
+      return 1
+    return 0
+  if n == 2
+    c2 = (lc[off + 1] >> 18) & cp_mask
+    if c1 == 42 && c2 == 42
+      return 1
+    if c2 == 61 && c1 in (61 33 60 62)
+      return 1
+    if c1 == 38 && c2 == 38
+      return 1
+    if c1 == 124 && c2 == 124
+      return 1
+  0
+
 ## i64[]: lc, tokens, indents
 ## i64: count
 -> tungsten_tokenize_fast64(lc, count, tokens, indents)
@@ -6,6 +41,7 @@
   data_ptr = ccall_nobox("w_array_data_ptr", lc)
   at_line_start = 1
   paren_depth = 0
+  cont_line = 0
   indent_top = 0
   indents[0] = 0
 
@@ -104,7 +140,7 @@
         at_line_start = 1
         next
 
-      if paren_depth == 0
+      if paren_depth == 0 && cont_line == 0
         current_indent = indents[indent_top]
         if indent > current_indent
           indent_top++
@@ -116,6 +152,7 @@
             indent_top -= 1
             tokens[tc] = t_dedent | (0 << 26) | (pos << 2)
             tc++
+      cont_line = 0
 
     v = lc[pos]
     c = (v >> 18) & cp_mask
@@ -146,8 +183,15 @@
 
     when 0x80
       if paren_depth == 0
-        tokens[tc] = t_newline | (1 << 26) | (pos << 2)
-        tc++
+        if tungsten_fast64_continues(lc, tokens, tc, cp_mask) == 1
+          # a trailing operator: the newline is whitespace (:SP keeps the
+          # operator and the next operand apart, as `a - b`, not `a -b`)
+          tokens[tc] = t_sp | (1 << 26) | (pos << 2)
+          tc++
+          cont_line = 1
+        else
+          tokens[tc] = t_newline | (1 << 26) | (pos << 2)
+          tc++
       pos++
       if c == 13 && pos < count && ((lc[pos] >> 18) & cp_mask) == 10
         pos++

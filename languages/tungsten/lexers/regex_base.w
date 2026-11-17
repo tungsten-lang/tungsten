@@ -17,6 +17,7 @@ use known_units
     @indent_stack = [0]
     @at_line_start = true
     @paren_depth = 0
+    @cont_line = false
     @regex_capture_scope = false
 
   -> push_token(tok)

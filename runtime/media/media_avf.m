@@ -2795,6 +2795,21 @@ static void a_dec_destroy(ADec *d) {
     free(d);
 }
 
+static OSType a_native_format(CMFormatDescriptionRef fd);
+
+/* A decoder pix request meaning "Y'CbCr at the source's own depth": 8-bit
+ * sources decode to NV12, 10-bit to P010, ProRes 422 to P210. Transcode and
+ * MediaVerify.quality_search use it: VideoToolbox's 8- to 10-bit conversion
+ * resamples chroma, so a same-size copy of an 8-bit master through P010 was not
+ * exact (v3 Shorts master: PSNR U 49 dB against the source, 77 dB before
+ * 4c131512). Every other caller keeps the 10-bit default (pix 0). */
+#define A_PIX_NATIVE ((OSType)'natv')
+
+/* Bits per sample of a decoder's Y'CbCr output: 8 for NV12, else 10 (P010/P210, MSB-aligned). */
+static int a_dec_bits(ADec *d) {
+    return d->pix == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ? 8 : 10;
+}
+
 static int a_dec_vsub(ADec *d) {
     return d->pix == kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange ? 1 : 2;
 }
@@ -2846,6 +2861,7 @@ static ADec *a_dec_open_ex(const char *path, char **segs, int nseg, int32_t num,
         d->h = dim.height;
         d->codec = CMFormatDescriptionGetMediaSubType(fd);
         if (!d->pix) d->pix = a_dec_yuv_pixel(d->codec);
+        else if (d->pix == A_PIX_NATIVE) d->pix = a_native_format(fd);
         d->ts = t.naturalTimeScale;
         CMTime md = t.minFrameDuration;
         if (num > 0 && den > 0) { d->num = num; d->den = den; }
@@ -2890,6 +2906,7 @@ static ADec *a_dec_open_ex(const char *path, char **segs, int nseg, int32_t num,
         d->den = s0->rate_den;
         d->codec = s0->fourcc;
         if (!d->pix) d->pix = a_dec_yuv_pixel(d->codec);
+        else if (d->pix == A_PIX_NATIVE) d->pix = s0->format ? a_native_format((CMFormatDescriptionRef)s0->format) : a_dec_yuv_pixel(d->codec);
         CFDictionaryRef ext = CMFormatDescriptionGetExtensions((CMFormatDescriptionRef)s0->format);
         d->siting = a_siting_of(ext ? CFDictionaryGetValue(ext, kCMFormatDescriptionExtension_ChromaLocationTopField) : NULL);
         w_media_seg_free(s0);
@@ -2938,6 +2955,7 @@ static ADec *a_dec_open_mem(WMediaSegment **segs, int nseg, OSType pix, int64_t 
     d->den = s0->rate_den;
     d->codec = s0->fourcc;
     if (!d->pix) d->pix = a_dec_yuv_pixel(d->codec);
+    else if (d->pix == A_PIX_NATIVE) d->pix = s0->format ? a_native_format((CMFormatDescriptionRef)s0->format) : a_dec_yuv_pixel(d->codec);
     CFDictionaryRef ext = CMFormatDescriptionGetExtensions((CMFormatDescriptionRef)s0->format);
     d->siting = a_siting_of(ext ? CFDictionaryGetValue(ext, kCMFormatDescriptionExtension_ChromaLocationTopField) : NULL);
     d->start_pts = start_frame > 0 ? start_frame : 0;
@@ -3234,7 +3252,7 @@ typedef struct ATrans {
     int            via_rgb;
     WMediaScale    py, pc, prgb;
     int            planned;
-    int            y_copy, c_copy, out_bits;
+    int            y_copy, c_copy, out_bits, in_bits;
     int            backend, used;
     uint8_t       *rgb;
     size_t         rgb_len;
@@ -3656,6 +3674,30 @@ static void a_plane_copy_10(const uint8_t *src, size_t sstride, uint8_t *dst, si
     }
 }
 
+/* Bit-exact 1:1 plane copy from a decoder plane of in_bits (8: NV12 bytes; 10:
+ * MSB-aligned P010/P210 words) to an 8- or 10-bit encoder plane. */
+static void a_plane_copy(const uint8_t *src, size_t sstride, uint8_t *dst, size_t dstride,
+                         int nsamples, int rows, int in_bits, int out_bits) {
+    if (in_bits > 8) {
+        a_plane_copy_10(src, sstride, dst, dstride, nsamples, rows, out_bits);
+        return;
+    }
+    if (out_bits <= 8) {
+        if (sstride == (size_t)nsamples && dstride == (size_t)nsamples) {
+            a_pcopy(dst, src, (size_t)nsamples * (size_t)rows);
+            return;
+        }
+        for (int y = 0; y < rows; y++) memcpy(dst + (size_t)y * dstride, src + (size_t)y * sstride, (size_t)nsamples);
+        return;
+    }
+    /* 8 -> 10 bits, MSB-aligned: the 10-bit code is v << 2, stored << 6 */
+    for (int y = 0; y < rows; y++) {
+        const uint8_t *sr = src + (size_t)y * sstride;
+        uint16_t *dr = (uint16_t *)(void *)(dst + (size_t)y * dstride);
+        for (int x = 0; x < nsamples; x++) dr[x] = (uint16_t)((uint16_t)sr[x] << 8);
+    }
+}
+
 /* Scale one decoded frame into `enc` and submit it (0 on success, -1 with message in err). */
 static int a_encode_frame_to(ATrans *t, MEncoder *enc, uint8_t *rgb_buf, CVPixelBufferRef src, int64_t fidx,
                              uint64_t *scale_ns_out, int *used_out, char *err, size_t errcap) {
@@ -3696,11 +3738,11 @@ static int a_encode_frame_to(ATrans *t, MEncoder *enc, uint8_t *rgb_buf, CVPixel
     int req_be = __atomic_load_n(&t->backend, __ATOMIC_RELAXED);
     int be = req_be == W_MEDIA_BACKEND_AUTO ? w_media_scale_default_backend(1, t->py.filter) : req_be;
     if (t->y_copy && t->c_copy && !(req_be == W_MEDIA_BACKEND_METAL && !w_media_metal_available())) {
-        a_plane_copy_10(sy, sys, dy, dys, t->w, t->h, t->out_bits);
-        a_plane_copy_10(sc, scs, dc, dcs, t->pc.dst_w * 2, t->pc.dst_h, t->out_bits);
+        a_plane_copy(sy, sys, dy, dys, t->w, t->h, t->in_bits, t->out_bits);
+        a_plane_copy(sc, scs, dc, dcs, t->pc.dst_w * 2, t->pc.dst_h, t->in_bits, t->out_bits);
         b = b2 = be;
     } else if (t->y_copy && !(req_be == W_MEDIA_BACKEND_METAL && !w_media_metal_available())) {
-        a_plane_copy_10(sy, sys, dy, dys, t->w, t->h, t->out_bits);
+        a_plane_copy(sy, sys, dy, dys, t->w, t->h, t->in_bits, t->out_bits);
         if (be == W_MEDIA_BACKEND_METAL) {
             WMediaJob job = {&t->pc, sc, scs, scl, dc, dcs, dcl, src, out, 1, 1};
             b = b2 = w_media_scale_metal_jobs(&job, 1, serr, sizeof serr) == 0 ? W_MEDIA_BACKEND_METAL : -1;
@@ -3870,7 +3912,7 @@ WValue w_media_transcode_new(WValue spec) {
         }
         w_media_str(a_spec(spec, "via"), buf, sizeof buf);
         t->via_rgb = !strcasecmp(buf, "rgb") || !strcasecmp(buf, "rgba");
-        OSType pix = t->via_rgb ? kCVPixelFormatType_32BGRA : 0;
+        OSType pix = t->via_rgb ? kCVPixelFormatType_32BGRA : A_PIX_NATIVE;
         if (w_is_array(srcv)) {
             int n = 0;
             char **segs = a_paths(srcv, &n);
@@ -3940,7 +3982,8 @@ WValue w_media_transcode_new(WValue spec) {
         }
         if (rc != 0) { a_trans_free(t); w_media_raise("Transcode: %s", err); }
         if (!t->via_rgb) {
-            t->py.in_bits = t->pc.in_bits = 10;
+            t->in_bits = a_dec_bits(t->dec);
+            t->py.in_bits = t->pc.in_bits = t->in_bits;
             t->py.vimage_ok = t->pc.vimage_ok = 0;
             t->out_bits = bits;
             int s = t->dec->siting;

@@ -154,6 +154,14 @@ use audio
     i += 1
   nil
 
+# true when a probe's "a/b" frame-rate string equals num/den as a rational (30000/1000 == 30/1)
+-> rate_is?(s, num, den)
+  parts = s.split("/")
+  return false if parts.size != 2
+  a = parts[0].to_i
+  b = parts[1].to_i
+  b > 0 && a * den == b * num
+
 -> check(results, name, ok, detail)
   results.push([name, ok, detail])
   tag = "  FAIL  "
@@ -200,8 +208,11 @@ use audio
   rate = num.to_s + "/" + den.to_s
   rfr = vstream == nil ? "" : vstream["r_frame_rate"].to_s
   afr = vstream == nil ? "" : vstream["avg_frame_rate"].to_s
-  check(res, "CFR " + rate, rfr == rate && afr == rate, "r_frame_rate " + rfr + ", avg " + afr)
-  vframes = facts[:video_frames]
+  # probe_streams reports the rate unreduced (30000/1000), so compare as rationals
+  check(res, "CFR " + rate, rate_is?(rfr, num, den) && rate_is?(afr, num, den), "r_frame_rate " + rfr + ", avg " + afr)
+  # MediaVerify's facts (core/media/verify.w): the frame count is mv[:frames], decoded audio
+  # is :audio_decoded_frames, the tmcd start is :timecode_frame (the older keys still read)
+  vframes = mv[:frames] != nil ? mv[:frames] : facts[:video_frames]
   check(res, "frame count", vframes == nfr, vframes.to_s + " of " + nfr.to_s)
   bad_pts = facts[:pts_off] == nil ? 0 : facts[:pts_off]
   bad_dur = facts[:dur_off] == nil ? 0 : facts[:dur_off]
@@ -209,7 +220,9 @@ use audio
   step = tbd * den / num
   check(res, "exact PTS", bad_pts == 0 && bad_dur == 0 && vframes == nfr, vframes.to_s + " packets, PTS = f * " + step.to_s + "/" + tbd.to_s + " s: " + bad_pts.to_s + " off, " + bad_dur.to_s + " durations != " + step.to_s)
   tc = tstream == nil ? facts[:tmcd_string] : get(tstream, "tags", {})["timecode"]
-  has_tmcd = tstream != nil || facts[:tmcd] == true
+  if tc == nil && facts[:timecode_frame] != nil
+    tc = Timecode.to_smpte(facts[:timecode_frame], [num, den], (facts[:timecode_flags] == nil ? 0 : facts[:timecode_flags]) % 2 == 1)
+  has_tmcd = tstream != nil || facts[:tmcd] == true || (facts[:timecode_tracks] != nil && facts[:timecode_tracks] >= 1)
   check(res, "tmcd " + r["tc_start"], has_tmcd && tc == r["tc_start"], "tmcd track " + (has_tmcd ? "present" : "missing") + ", timecode " + tc.to_s)
   csp = vstream == nil ? "" : vstream["color_space"].to_s
   cpr = vstream == nil ? "" : vstream["color_primaries"].to_s
@@ -221,7 +234,7 @@ use audio
   if astream == nil
     check(res, "audio", false, "no audio stream")
   else
-    na = facts[:audio_samples] == nil ? 0 : facts[:audio_samples]
+    na = facts[:audio_samples] != nil ? facts[:audio_samples] : (facts[:audio_decoded_frames] != nil ? facts[:audio_decoded_frames] : 0)
     want = nfr * sr * den / num
     check(res, "audio length = video length", na == want, na.to_s + " samples decoded, " + want.to_s + " expected (" + nfr.to_s + " frames x " + (sr * den / num).to_s + ")")
     mixp = opt_arg(args, "--mix", nil)

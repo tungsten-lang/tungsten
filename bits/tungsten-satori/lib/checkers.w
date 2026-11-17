@@ -5,7 +5,7 @@
 # no code with any SAT solver: it replays each hinted unit-propagation chain.
 
 # ---------------------------------------------------------------------------
-# Canonical structural key of a term (used to identify ring atoms).
+# Canonical structural key of a term (kept for diagnostic/external callers).
 
 -> tm_key(t)
   case t.tag
@@ -23,76 +23,183 @@
     "(" + tm_key(t.a) + " " + tm_key(t.b) + ")"
 
 # ---------------------------------------------------------------------------
-# Polynomials: Hash monomial-key -> rational [num, den]; a monomial key is a
-# sorted "atom^exp" list joined by "*" ("" is the constant monomial).
+# Polynomials: Hash(Int mono_id -> rational [num, den]).
+# mono_id == 0 is the constant monomial `1`.
+# Every non-constant monomial is interned inside RingCtx as a flat sorted array
+# [atom_id_0, exp_0, atom_id_1, exp_1, ...] with integer hash-consing and
+# pair-multiplication caching, avoiding all string formatting and splitting.
 
 + RingCtx
   ro :atoms
   -> new(@kind)
     @atoms = {}
+    @atom_count = 0
+    # monos[0] = [] (constant 1); monos[id] = [aid0, exp0, ...]
+    @monos = [[]]
+    @mono_buckets = {}
+    @mul_cache = {}
+    @atom_monos = [0]
 
   -> atom(t)
-    k = tm_key(t)
-    if !@atoms.has_key?(k)
-      @atoms[k] = "a" + (1000000 + @atoms.size).to_s
-    @atoms[k]
+    bucket = @atoms[t.h]
+    if bucket != nil
+      nb = bucket.size
+      i = 0
+      while i < nb
+        pr = bucket[i]
+        if tm_eq(pr[0], t)
+          return pr[1]
+        i += 1
+    else
+      bucket = []
+      @atoms[t.h] = bucket
+    @atom_count += 1
+    aid = @atom_count
+    bucket.push([t, aid])
+    mid = intern_mono([aid, 1])
+    @atom_monos.push(mid)
+    aid
+
+  -> atom_mono(t)
+    aid = atom(t)
+    @atom_monos[aid]
+
+  -> intern_mono(vec)
+    n = vec.size
+    if n == 0
+      return 0
+    h = 17
+    i = 0
+    while i < n
+      h = (h * 131 + vec[i]) % HASH_MOD
+      i += 1
+    bucket = @mono_buckets[h]
+    if bucket != nil
+      nb = bucket.size
+      bi = 0
+      while bi < nb
+        mid = bucket[bi]
+        cand = @monos[mid]
+        if cand.size == n
+          same = true
+          k = 0
+          while k < n
+            if cand[k] != vec[k]
+              same = false
+              break
+            k += 1
+          if same
+            return mid
+        bi += 1
+    else
+      bucket = []
+      @mono_buckets[h] = bucket
+    mid = @monos.size
+    @monos.push(vec)
+    bucket.push(mid)
+    mid
+
+  -> mono_mul(a, b)
+    if a == 0
+      return b
+    if b == 0
+      return a
+    lo = a
+    hi = b
+    if lo > hi
+      lo = b
+      hi = a
+    ck = (lo << 20) + hi
+    cached = @mul_cache[ck]
+    if cached != nil
+      return cached
+    va = @monos[a]
+    vb = @monos[b]
+    na = va.size
+    nb = vb.size
+    ia = 0
+    ib = 0
+    merged = []
+    while ia < na && ib < nb
+      ka = va[ia]
+      kb = vb[ib]
+      if ka < kb
+        merged.push(ka)
+        merged.push(va[ia + 1])
+        ia += 2
+      elsif kb < ka
+        merged.push(kb)
+        merged.push(vb[ib + 1])
+        ib += 2
+      else
+        merged.push(ka)
+        merged.push(va[ia + 1] + vb[ib + 1])
+        ia += 2
+        ib += 2
+    while ia < na
+      merged.push(va[ia])
+      merged.push(va[ia + 1])
+      ia += 2
+    while ib < nb
+      merged.push(vb[ib])
+      merged.push(vb[ib + 1])
+      ib += 2
+    res = intern_mono(merged)
+    if @mul_cache.size < 65536
+      @mul_cache[ck] = res
+    res
 
 -> poly_const(q)
   p = {}
   if q[0] != 0
-    p[""] = q
+    p[0] = q
   p
 
 -> poly_add(p, r)
+  if p.size == 0
+    return r
+  if r.size == 0
+    return p
   out = {}
-  p.keys.each -> (k)
-    out[k] = p[k]
-  r.keys.each -> (k)
-    if out.has_key?(k)
-      s = q_add(out[k], r[k])
+  p.each -> (k, v)
+    out[k] = v
+  r.each -> (k, v)
+    prev = out[k]
+    if prev != nil
+      s = q_add(prev, v)
       if s[0] == 0
         out.delete(k)
       else
         out[k] = s
     else
-      out[k] = r[k]
+      out[k] = v
   out
 
 -> poly_scale(p, q)
   out = {}
-  if q[0] == 0
+  if q[0] == 0 || p.size == 0
     return out
-  p.keys.each -> (k)
-    out[k] = q_mul(p[k], q)
+  if q[0] == 1 && q[1] == 1
+    return p
+  if q[0] == -1 && q[1] == 1
+    p.each -> (k, v)
+      out[k] = q_neg(v)
+    return out
+  p.each -> (k, v)
+    out[k] = q_mul(v, q)
   out
 
--> mono_mul(a, b)
-  if a == ""
-    return b
-  if b == ""
-    return a
-  exps = {}
-  (a.split("*") + b.split("*")).each -> (f)
-    parts = f.split("^")
-    e = parts[1].to_i
-    if exps.has_key?(parts[0])
-      exps[parts[0]] = exps[parts[0]] + e
-    else
-      exps[parts[0]] = e
-  names = exps.keys.sort
-  out = []
-  names.each -> (nm)
-    out.push(nm + "^" + exps[nm].to_s)
-  out.join("*")
-
--> poly_mul(p, r)
+-> poly_mul(p, r, ctx)
   out = {}
-  p.keys.each -> (a)
-    r.keys.each -> (b)
-      m = mono_mul(a, b)
-      c = q_mul(p[a], r[b])
-      if out.has_key?(m)
-        s = q_add(out[m], c)
+  if p.size == 0 || r.size == 0
+    return out
+  p.each -> (a, pa)
+    r.each -> (b, rb)
+      m = ctx.mono_mul(a, b)
+      c = q_mul(pa, rb)
+      prev = out[m]
+      if prev != nil
+        s = q_add(prev, c)
         if s[0] == 0
           out.delete(m)
         else
@@ -101,11 +208,22 @@
         out[m] = c
   out
 
+-> poly_eq?(a, b)
+  if a.size != b.size
+    return false
+  ok = true
+  a.each -> (k, qa)
+    if ok
+      qb = b[k]
+      if qb == nil || qa[0] != qb[0] || qa[1] != qb[1]
+        ok = false
+  ok
+
 -> poly_key(p)
   ks = p.keys.sort
   parts = []
   ks.each -> (k)
-    parts.push(k + "=" + lit_key(p[k]))
+    parts.push(k.to_s + "=" + lit_key(p[k]))
   parts.join(";")
 
 # Normal form of an expression of the given numeric kind, or nil.
@@ -121,34 +239,43 @@
 -> ring_norm(t, kind, ctx)
   if t.tag == :lit
     return poly_const(ring_lit_q(t, kind))
-  b = dest_binop(t, "+")
-  if b != nil
-    return poly_add(ring_norm(b[0], kind, ctx), ring_norm(b[1], kind, ctx))
-  b = dest_binop(t, "*")
-  if b != nil
-    return poly_mul(ring_norm(b[0], kind, ctx), ring_norm(b[1], kind, ctx))
-  if kind != "nat"
-    b = dest_binop(t, "-")
-    if b != nil
-      return poly_add(ring_norm(b[0], kind, ctx), poly_scale(ring_norm(b[1], kind, ctx), [-1, 1]))
-    u = dest_unop(t, "neg")
-    if u != nil
-      return poly_scale(ring_norm(u, kind, ctx), [-1, 1])
-  b = dest_binop(t, "^")
-  if b != nil && b[1].tag == :lit
-    base = ring_norm(b[0], kind, ctx)
-    r = poly_const([1, 1])
-    i = 0
-    while i < b[1].val
-      r = poly_mul(r, base)
-      i += 1
-    return r
-  if kind == "rat" || kind == "real"
-    b = dest_binop(t, "/")
-    if b != nil && b[1].tag == :lit && b[1].val[0] != 0
-      return poly_scale(ring_norm(b[0], kind, ctx), q_div([1, 1], b[1].val))
+  if t.tag == :app
+    ta = t.a
+    if ta.tag == :app && ta.a.tag == :const
+      op = ta.a.op
+      lhs = ta.b
+      rhs = t.b
+      if op == OP_ADD
+        return poly_add(ring_norm(lhs, kind, ctx), ring_norm(rhs, kind, ctx))
+      if op == OP_MUL
+        return poly_mul(ring_norm(lhs, kind, ctx), ring_norm(rhs, kind, ctx), ctx)
+      if op == OP_SUB && kind != "nat"
+        return poly_add(ring_norm(lhs, kind, ctx), poly_scale(ring_norm(rhs, kind, ctx), Q_NEG_ONE))
+      if op == OP_POW && rhs.tag == :lit
+        exp = rhs.val
+        if exp == 0
+          return poly_const(Q_ONE)
+        base = ring_norm(lhs, kind, ctx)
+        if exp == 1
+          return base
+        if exp == 2
+          return poly_mul(base, base, ctx)
+        res = poly_const(Q_ONE)
+        cur = base
+        e = exp
+        while e > 0
+          if (e & 1) == 1
+            res = poly_mul(res, cur, ctx)
+          e = e >> 1
+          if e > 0
+            cur = poly_mul(cur, cur, ctx)
+        return res
+      if op == OP_DIV && (kind == "rat" || kind == "real") && rhs.tag == :lit && rhs.val[0] != 0
+        return poly_scale(ring_norm(lhs, kind, ctx), q_div(Q_ONE, rhs.val))
+    elsif ta.tag == :const && ta.op == OP_NEG && kind != "nat"
+      return poly_scale(ring_norm(t.b, kind, ctx), Q_NEG_ONE)
   p = {}
-  p[ctx.atom(t) + "^1"] = [1, 1]
+  p[ctx.atom_mono(t)] = Q_ONE
   p
 
 # ---------------------------------------------------------------------------
@@ -158,114 +285,271 @@
 -> list_literal_items(t)
   out = []
   while true
-    sp = strip_app(t)
-    h = sp[0]
-    if h.tag != :const
-      return nil
-    if h.name == "nil" && sp[1].size == 0
+    if t.tag == :const && t.name == "nil"
       return out
-    if h.name != "cons" || sp[1].size != 2
+    if t.tag == :app && t.a.tag == :app && t.a.a.tag == :const && t.a.a.name == "cons"
+      out.push(t.a.b)
+      t = t.b
+    else
       return nil
-    out.push(sp[1][0])
-    t = sp[1][1]
 
 -> cnf_literal_value(t)
-  cls = list_literal_items(t)
-  if cls == nil
+  raw_clauses = list_literal_items(t)
+  if raw_clauses == nil
     return nil
-  out = []
-  cls.each -> (c)
-    lits = list_literal_items(c)
-    if lits == nil
+  clauses = []
+  raw_clauses.each -> (rc)
+    items = list_literal_items(rc)
+    if items == nil
       return nil
-    row = []
-    lits.each -> (l)
-      if l.tag != :lit || l.ty.name != "int" || l.val == 0
+    cl = []
+    items.each -> (it)
+      if it.tag != :lit || it.val == 0
         return nil
-      row.push(l.val)
-    out.push(row)
-  out
+      cl.push(it.val)
+    clauses.push(cl)
+  clauses
 
 # ---------------------------------------------------------------------------
 # LRAT checking (RUP steps with hints). Clause ids 1..m are the input clauses.
+# Single-pass byte scanner + flat clause array + generation-stamped assignment
+# array (zero String#split or per-clause Hash allocations).
 
--> lrat_check(clauses, text)
-  db = {}
+-> lrat_lit_idx(l)
+  if l > 0
+    l * 2
+  else
+    (0 - l) * 2 + 1
+
+-> lrat_ensure_stamp(stamp, idx)
+  while stamp.size <= idx
+    stamp.push(0)
+
+-> lrat_ensure_db(db, id)
+  while db.size <= id
+    db.push(nil)
+
+-> lrat_rup_fast(db, lits, hints, stamp, gen)
+  nl = lits.size
   i = 0
-  while i < clauses.size
-    db[i + 1] = clauses[i]
+  while i < nl
+    nl_idx = lrat_lit_idx(0 - lits[i])
+    if nl_idx >= stamp.size
+      lrat_ensure_stamp(stamp, nl_idx + 64)
+    stamp[nl_idx] = gen
     i += 1
-  lines = text.split("\n")
-  derived_empty = false
-  lines.each -> (line)
-    if !derived_empty
-      toks = []
-      line.split(" ").each -> (w)
-        if w != ""
-          toks.push(w)
-      if toks.size > 0 && toks[0] != "c"
-        id = toks[0].to_i
-        if toks.size > 1 && toks[1] == "d"
-          j = 2
-          while j < toks.size && toks[j] != "0"
-            db.delete(toks[j].to_i)
-            j += 1
-        else
-          lits = []
-          j = 1
-          while j < toks.size && toks[j] != "0"
-            lits.push(toks[j].to_i)
-            j += 1
-          j += 1
-          hints = []
-          while j < toks.size && toks[j] != "0"
-            hints.push(toks[j].to_i)
-            j += 1
-          if !lrat_rup(db, lits, hints)
-            return false
-          db[id] = lits
-          if lits.size == 0
-            derived_empty = true
-  derived_empty
-
-# Assign the negation of `lits`, then each hint must be unit or conflicting.
--> lrat_rup(db, lits, hints)
-  val = {}
-  lits.each -> (l)
-    val[0 - l] = true
-  hints.each -> (hid)
-    if hid <= 0 || !db.has_key?(hid)
+  db_len = db.size
+  nh = hints.size
+  hi = 0
+  while hi < nh
+    hid = hints[hi]
+    if hid <= 0 || hid >= db_len
       return false
     cl = db[hid]
+    if cl == nil
+      return false
     unassigned = 0
     unit = 0
-    sat = false
-    cl.each -> (l)
-      if val.has_key?(l)
-        sat = true
-      elsif !val.has_key?(0 - l)
+    ncl = cl.size
+    ci = 0
+    while ci < ncl
+      l = cl[ci]
+      pidx = l > 0 ? l * 2 : (0 - l) * 2 + 1
+      nidx = l > 0 ? l * 2 + 1 : (0 - l) * 2
+      if pidx >= stamp.size || nidx >= stamp.size
+        mx = pidx > nidx ? pidx : nidx
+        lrat_ensure_stamp(stamp, mx + 64)
+      if stamp[pidx] == gen
+        return false
+      if stamp[nidx] != gen
         unassigned += 1
+        if unassigned > 1
+          return false
         unit = l
-    if sat
-      return false
+      ci += 1
     if unassigned == 0
       return true
-    if unassigned > 1
-      return false
-    val[unit] = true
+    u_idx = unit > 0 ? unit * 2 : (0 - unit) * 2 + 1
+    stamp[u_idx] = gen
+    hi += 1
+  false
+
+-> lrat_check(clauses, text)
+  m = clauses.size
+  max_v = 16
+  i = 0
+  while i < m
+    cl = clauses[i]
+    nc = cl.size
+    j = 0
+    while j < nc
+      v = cl[j]
+      if v < 0
+        v = 0 - v
+      if v > max_v
+        max_v = v
+      j += 1
+    i += 1
+  db = Array.new(m + 256)
+  i = 0
+  while i < m
+    db[i + 1] = clauses[i]
+    i += 1
+  stamp = Array.new(max_v * 2 + 64, 0)
+  hints = []
+  gen = 0
+  n = text.size
+  pos = 0
+  while pos < n
+    # skip leading horizontal whitespace / blank lines
+    while pos < n
+      b = text.byte_at(pos)
+      if b == 32 || b == 9 || b == 13 || b == 10
+        pos += 1
+      else
+        break
+    if pos >= n
+      break
+    b = text.byte_at(pos)
+    if b == 99
+      # comment line 'c ...'
+      while pos < n && text.byte_at(pos) != 10
+        pos += 1
+    else
+      # parse step id
+      neg = false
+      if b == 45
+        neg = true
+        pos += 1
+      id = 0
+      has_dig = false
+      while pos < n
+        bd = text.byte_at(pos)
+        if bd >= 48 && bd <= 57
+          id = id * 10 + (bd - 48)
+          has_dig = true
+          pos += 1
+        else
+          break
+      if !has_dig
+        while pos < n && text.byte_at(pos) != 10
+          pos += 1
+      else
+        if neg
+          id = 0 - id
+        while pos < n
+          bs = text.byte_at(pos)
+          if bs == 32 || bs == 9
+            pos += 1
+          else
+            break
+        if pos < n && text.byte_at(pos) == 100
+          # deletion line: `<id> d <cid...> 0`
+          pos += 1
+          while pos < n
+            while pos < n && (text.byte_at(pos) == 32 || text.byte_at(pos) == 9 || text.byte_at(pos) == 13)
+              pos += 1
+            if pos >= n || text.byte_at(pos) == 10
+              break
+            dneg = false
+            if text.byte_at(pos) == 45
+              dneg = true
+              pos += 1
+            did = 0
+            dh = false
+            while pos < n
+              bd = text.byte_at(pos)
+              if bd >= 48 && bd <= 57
+                did = did * 10 + (bd - 48)
+                dh = true
+                pos += 1
+              else
+                break
+            if !dh
+              break
+            if dneg
+              did = 0 - did
+            if did == 0
+              while pos < n && text.byte_at(pos) != 10
+                pos += 1
+              break
+            if did > 0 && did < db.size
+              db[did] = nil
+        else
+          # RUP addition line: `<id> <lits...> 0 <hints...> 0`
+          lits = []
+          while pos < n
+            while pos < n && (text.byte_at(pos) == 32 || text.byte_at(pos) == 9 || text.byte_at(pos) == 13)
+              pos += 1
+            if pos >= n || text.byte_at(pos) == 10
+              break
+            lneg = false
+            if text.byte_at(pos) == 45
+              lneg = true
+              pos += 1
+            lv = 0
+            lh = false
+            while pos < n
+              bd = text.byte_at(pos)
+              if bd >= 48 && bd <= 57
+                lv = lv * 10 + (bd - 48)
+                lh = true
+                pos += 1
+              else
+                break
+            if !lh
+              break
+            if lneg
+              lv = 0 - lv
+            if lv == 0
+              break
+            lits.push(lv)
+          hints.clear
+          while pos < n
+            while pos < n && (text.byte_at(pos) == 32 || text.byte_at(pos) == 9 || text.byte_at(pos) == 13)
+              pos += 1
+            if pos >= n || text.byte_at(pos) == 10
+              break
+            hneg = false
+            if text.byte_at(pos) == 45
+              hneg = true
+              pos += 1
+            hv = 0
+            hh = false
+            while pos < n
+              bd = text.byte_at(pos)
+              if bd >= 48 && bd <= 57
+                hv = hv * 10 + (bd - 48)
+                hh = true
+                pos += 1
+              else
+                break
+            if !hh
+              break
+            if hneg
+              hv = 0 - hv
+            if hv == 0
+              while pos < n && text.byte_at(pos) != 10
+                pos += 1
+              break
+            hints.push(hv)
+          gen += 1
+          if !lrat_rup_fast(db, lits, hints, stamp, gen)
+            return false
+          if lits.size == 0
+            return true
+          if id >= db.size
+            lrat_ensure_db(db, id + 256)
+          db[id] = lits
   false
 
 # ---------------------------------------------------------------------------
 # Tseitin encoding of a propositional formula over opaque atoms.
-# Atoms are maximal subterms that are not ⊤ ⊥ ¬ ∧ ∨ ⇒, = on Prop, or
-# Prop-valued ite; equal atoms (structurally) share a variable. Returns
-# [clauses, root_literal, atom_count]. Equisatisfiable with the formula.
 
 + Tseitin
   ro :clauses, :nvars
   -> new
     @clauses = []
-    @atoms = {}
     @nvars = 0
     @true_var = 0
     @memo = {}
@@ -281,18 +565,22 @@
     @true_var
 
   -> enc(t)
-    if t.tag == :const && t.name == "⊤"
-      return truth_lit
-    if t.tag == :const && t.name == "⊥"
-      return 0 - truth_lit
-    u = dest_unop(t, "¬")
-    if u != nil
-      return 0 - enc(u)
+    if t.tag == :const
+      if t.op == OP_TRUE
+        return truth_lit
+      if t.op == OP_FALSE
+        return 0 - truth_lit
+    if t.tag == :app && t.a.tag == :const && t.a.op == OP_NOT
+      return 0 - enc(t.b)
     bucket = @memo[t.h]
     if bucket != nil
-      bucket.each -> (pr)
+      nb = bucket.size
+      bi = 0
+      while bi < nb
+        pr = bucket[bi]
         if tm_eq(pr[0], t)
           return pr[1]
+        bi += 1
     else
       bucket = []
       @memo[t.h] = bucket
@@ -301,62 +589,60 @@
     lit
 
   -> enc_gate(t)
-    b = dest_binop(t, "∧")
-    if b != nil
-      x = enc(b[0])
-      y = enc(b[1])
-      v = fresh
-      @clauses.push([0 - v, x])
-      @clauses.push([0 - v, y])
-      @clauses.push([v, 0 - x, 0 - y])
-      return v
-    b = dest_binop(t, "∨")
-    if b != nil
-      x = enc(b[0])
-      y = enc(b[1])
-      v = fresh
-      @clauses.push([0 - v, x, y])
-      @clauses.push([v, 0 - x])
-      @clauses.push([v, 0 - y])
-      return v
-    b = dest_binop(t, "⇒")
-    if b != nil
-      x = enc(b[0])
-      y = enc(b[1])
-      v = fresh
-      @clauses.push([0 - v, 0 - x, y])
-      @clauses.push([v, x])
-      @clauses.push([v, 0 - y])
-      return v
-    b = dest_binop(t, "=")
-    if b != nil && type_of(b[0]).tag == :c && type_of(b[0]).name == "bool"
-      x = enc(b[0])
-      y = enc(b[1])
-      v = fresh
-      @clauses.push([0 - v, 0 - x, y])
-      @clauses.push([0 - v, x, 0 - y])
-      @clauses.push([v, x, y])
-      @clauses.push([v, 0 - x, 0 - y])
-      return v
-    sp = strip_app(t)
-    if sp[0].tag == :const && sp[0].name == "ite" && sp[1].size == 3 && ty_eq(type_of(t), ty_bool)
-      c = enc(sp[1][0])
-      x = enc(sp[1][1])
-      y = enc(sp[1][2])
-      v = fresh
-      @clauses.push([0 - v, 0 - c, x])
-      @clauses.push([0 - v, c, y])
-      @clauses.push([v, 0 - c, 0 - x])
-      @clauses.push([v, c, 0 - y])
-      return v
-    # atom
+    if t.tag == :app
+      ta = t.a
+      if ta.tag == :app && ta.a.tag == :const
+        op = ta.a.op
+        lhs = ta.b
+        rhs = t.b
+        if op == OP_AND
+          x = enc(lhs)
+          y = enc(rhs)
+          v = fresh
+          @clauses.push([0 - v, x])
+          @clauses.push([0 - v, y])
+          @clauses.push([v, 0 - x, 0 - y])
+          return v
+        if op == OP_OR
+          x = enc(lhs)
+          y = enc(rhs)
+          v = fresh
+          @clauses.push([0 - v, x, y])
+          @clauses.push([v, 0 - x])
+          @clauses.push([v, 0 - y])
+          return v
+        if op == OP_IMP
+          x = enc(lhs)
+          y = enc(rhs)
+          v = fresh
+          @clauses.push([0 - v, 0 - x, y])
+          @clauses.push([v, x])
+          @clauses.push([v, 0 - y])
+          return v
+        if op == OP_EQ && ty_eq(type_of(lhs), TY_BOOL_SINGLETON)
+          x = enc(lhs)
+          y = enc(rhs)
+          v = fresh
+          @clauses.push([0 - v, 0 - x, y])
+          @clauses.push([0 - v, x, 0 - y])
+          @clauses.push([v, x, y])
+          @clauses.push([v, 0 - x, 0 - y])
+          return v
+      if ta.tag == :app && ta.a.tag == :app && ta.a.a.tag == :const && ta.a.a.op == OP_ITE && ty_eq(type_of(t), TY_BOOL_SINGLETON)
+        c = enc(ta.a.b)
+        x = enc(ta.b)
+        y = enc(t.b)
+        v = fresh
+        @clauses.push([0 - v, 0 - c, x])
+        @clauses.push([0 - v, c, y])
+        @clauses.push([v, 0 - c, 0 - x])
+        @clauses.push([v, c, 0 - y])
+        return v
     fresh
 
 -> tseitin_refutation_cnf(phi)
   ts = Tseitin.new
   root = ts.enc(phi)
-  cls = []
-  ts.clauses.each -> (c)
-    cls.push(c)
+  cls = ts.clauses
   cls.push([root])
   cls

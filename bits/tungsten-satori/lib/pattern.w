@@ -106,7 +106,7 @@
     lam = mk_lams(params + avs, body)
     lam = @e.fix_lits(lam)
     @e.check(lam)
-    @k.define(c.name, lam)
+    @s.define_const(c.name, lam)
     prove_equations(params, arg_tys, nargs)
 
   -> compile_simple(params, arg_tys, res_ty, full_ty)
@@ -130,7 +130,7 @@
     body = @e.finalize(body, false)
     lam = mk_lams(params + vs, body)
     @e.check(lam)
-    @k.define(@c.name, lam)
+    @s.define_const(@c.name, lam)
     prove_equations(params, arg_tys, eq[0].size)
 
   -> var_pattern?(p)
@@ -521,7 +521,7 @@
         out.push(thg)
     @s.set_eqns(name, out)
     out.each -> (t)
-      @s.simp_rules.push(make_rule(@s.d, t, name))
+      @s.add_simp_thm(name, t)
     out
 
   # does some argument of this equation use a variable or `_` pattern?
@@ -553,7 +553,3 @@
     if p.name == v.name && ty_eq(p.ty, v.ty)
       return true
   false
-
-+ Session
-  -> set_eqns(name, eqs)
-    @eqns[name] = eqs

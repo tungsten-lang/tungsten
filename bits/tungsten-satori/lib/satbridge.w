@@ -59,12 +59,13 @@
   # the lock directory records its holder's PID; a waiter breaks a lock whose
   # holder is dead (a SIGKILLed holder never runs its EXIT trap)
   guard = "while ! mkdir \"$5\" 2>/dev/null; do h=$(cat \"$5/pid\" 2>/dev/null); "
-  guard = guard + "if test -n \"$h\" && ! kill -0 \"$h\" 2>/dev/null; then rm -rf \"$5\"; else sleep 0.5; fi; done; "
-  guard = guard + "echo $$ > \"$5/pid\"; trap 'rm -rf \"$5\"' EXIT; "
-  guard = guard + "\"$0\" \"$1\" --lrat \"$2\" > \"$3\" 2>&1 & pid=$!; t=0; "
+  guard = guard + "if test -n \"$h\" && ! kill -0 \"$h\" 2>/dev/null; then rm -rf \"$5\"; else sleep 0.05; fi; done; "
+  guard = guard + "echo $$ > \"$5/pid\"; trap 'rm -rf \"$5\"' EXIT INT TERM; "
+  guard = guard + "\"$0\" \"$1\" --lrat \"$2\" > \"$3\" 2>&1 & pid=$!; "
+  guard = guard + "for _fast in 1 2 3 4 5; do kill -0 $pid 2>/dev/null || break; sleep 0.01; done; t=0; "
   guard = guard + "while kill -0 $pid 2>/dev/null; do r=$(ps -o rss= -p $pid 2>/dev/null | tr -d ' '); "
-  guard = guard + "if test -n \"$r\" && test \"$r\" -gt $(( $4 * 1024 )); then kill -9 $pid; echo 'c satori: solver exceeded memory limit' >> \"$3\"; fi; "
-  guard = guard + "if test $t -gt $(( $6 * 4 )); then kill -9 $pid; echo 'c satori: solver exceeded time limit' >> \"$3\"; fi; "
+  guard = guard + "if test -n \"$r\" && test \"$r\" -gt $(( $4 * 1024 )); then kill -9 $pid; echo 'c satori: solver exceeded memory limit' >> \"$3\"; break; fi; "
+  guard = guard + "if test $t -gt $(( $6 * 4 )); then kill -9 $pid; echo 'c satori: solver exceeded time limit' >> \"$3\"; break; fi; "
   guard = guard + "sleep 0.25; t=$((t+1)); done; wait $pid"
   p = Process.spawn(["/bin/sh", "-c", guard, solver, cnf, proof, out, mem, lock, secs])
   p.wait

@@ -1,21 +1,25 @@
 # Pretty-printing of Satori terms in surface notation.
 
+INFIX_TABLE = {
+  "⇒" => ["→", 25, :right], "∨" => ["∨", 30, :right], "∧" => ["∧", 35, :right],
+  "=" => ["=", 50, :none], "<" => ["<", 50, :none], "≤" => ["≤", 50, :none],
+  "+" => ["+", 65, :left], "-" => ["-", 65, :left], "*" => ["*", 70, :left],
+  "/" => ["/", 70, :left], "%" => ["%", 70, :left], "^" => ["^", 75, :right],
+  "cons" => ["::", 67, :right], "append" => ["++", 66, :right],
+  "mem" => ["∈", 50, :none], "dvd" => ["∣", 50, :none]
+}
+
+PP_BOUNDED_RELS = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
+
 -> infix_table
-  {
-    "⇒" => ["→", 25, :right], "∨" => ["∨", 30, :right], "∧" => ["∧", 35, :right],
-    "=" => ["=", 50, :none], "<" => ["<", 50, :none], "≤" => ["≤", 50, :none],
-    "+" => ["+", 65, :left], "-" => ["-", 65, :left], "*" => ["*", 70, :left],
-    "/" => ["/", 70, :left], "%" => ["%", 70, :left], "^" => ["^", 75, :right],
-    "cons" => ["::", 67, :right], "append" => ["++", 66, :right],
-    "mem" => ["∈", 50, :none], "dvd" => ["∣", 50, :none]
-  }
+  INFIX_TABLE
 
 -> tm_show(t)
   tm_pp(t, [], 0)
 
 -> show_lit(t)
   v = t.val
-  if v.class_name == "Array"
+  if type(v) == "Array"
     if v[1] == 1
       v[0].to_s
     else
@@ -119,9 +123,8 @@
     if nm == "ite" && args.size == 3
       s = "if " + tm_pp(args[0], names, 0) + " then " + tm_pp(args[1], names, 0) + " else " + tm_pp(args[2], names, 0)
       return paren_if(s, prec > 0)
-    tbl = infix_table
-    if args.size == 2 && tbl.has_key?(nm)
-      info = tbl[nm]
+    info = INFIX_TABLE[nm]
+    if args.size == 2 && info != nil
       op = info[0]
       if nm == "=" && type_of(args[0]).name == "bool"
         op = "↔"
@@ -149,9 +152,8 @@
   g = dest_binop(lam.b, conn)
   if g == nil
     return nil
-  rels = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
   out = nil
-  rels.each -> (r)
+  PP_BOUNDED_RELS.each -> (r)
     if out == nil
       d = dest_binop(g[0], r[0])
       if d != nil && d[0].tag == :bnd && d[0].idx == 0 && !lam_count_bound(d[1], 0)

@@ -599,7 +599,10 @@
     # telescope: walk ∀ and ⇒, creating pattern vars
     steps = []
     pvars = {}
-    avoid = goal.all_terms + [t.concl]
+    used_names = {}
+    goal.all_terms.each -> (gt)
+      tm_free_names_into(gt, used_names)
+    tm_free_names_into(t.concl, used_names)
     cur = t.concl
     th_cur = t
     curs = [cur]
@@ -609,9 +612,8 @@
         nm = q.name
         if nm == nil || nm == ""
           nm = "x"
-        v = mk_var(fresh_name("?" + nm, avoid), q.ty)
-        avoid.push(v)
-        pvars[var_key(v)] = true
+        v = mk_var(fresh_name_from_set("?" + nm, used_names), q.ty)
+        pvars[v.vkey] = true
         steps.push([:all, v])
         cur = tm_instantiate(q.b, v, 0)
         curs.push(cur)
@@ -1468,62 +1470,76 @@
 
   # Rewrites all occurrences of the first instance of the rule found in term.
   -> rewrite_once(rule, term, goal)
-    inst = find_instance(rule, term, goal)
+    s = Simp.new(@d, [rule])
+    s.hyp_rules = hyp_thms(goal)
+    inst = find_instance_with_simp(s, rule, term)
     if inst == nil
       return nil
     lhs = dest_binop(inst.concl, "=")[0]
-    replace_conv(term, lhs, inst)
+    conv = replace_conv_opt(term, lhs, inst)
+    if conv == nil
+      return @k.refl(term)
+    conv
 
-  -> find_instance(rule, t, goal)
-    s = Simp.new(@d, [rule])
-    s.hyp_rules = hyp_thms(goal)
+  -> find_instance_with_simp(s, rule, t)
     th = s.apply_rule(rule, t, 0)
     if th != nil
       return th
     case t.tag
     when :app
-      r = find_instance(rule, t.a, goal)
+      r = find_instance_with_simp(s, rule, t.a)
       if r != nil
         return r
-      return find_instance(rule, t.b, goal)
+      return find_instance_with_simp(s, rule, t.b)
     when :lam
       if lam_count_bound(t.b, 0)
         return nil
-      return find_instance(rule, t.b, goal)
+      return find_instance_with_simp(s, rule, t.b)
     nil
 
-  # ⊢ t = t[rhs/lhs] for all occurrences of lhs (not under binders that capture it).
-  -> replace_conv(t, lhs, eqth)
+  # Returns nil when lhs does not occur in t, else ⊢ t = t[rhs/lhs].
+  -> replace_conv_opt(t, lhs, eqth)
     if tm_eq(t, lhs)
       return eqth
     case t.tag
     when :app
-      a = replace_conv(t.a, lhs, eqth)
-      b = replace_conv(t.b, lhs, eqth)
-      return @k.mk_comb(a, b)
+      a = replace_conv_opt(t.a, lhs, eqth)
+      b = replace_conv_opt(t.b, lhs, eqth)
+      if a == nil && b == nil
+        return nil
+      ath = a == nil ? @k.refl(t.a) : a
+      bth = b == nil ? @k.refl(t.b) : b
+      return @k.mk_comb(ath, bth)
     when :lam
       p = dest_lam_fresh(t, [t, lhs])
-      inner = replace_conv(p[1], lhs, eqth)
+      inner = replace_conv_opt(p[1], lhs, eqth)
+      if inner == nil
+        return nil
       bad = false
       inner.hyps.each -> (h)
         if tm_free_in?(p[0], h)
           bad = true
       if bad
-        return @k.refl(t)
+        return nil
       return @k.abs_rule(p[0], inner)
-    @k.refl(t)
+    nil
+
+  -> replace_conv(t, lhs, eqth)
+    conv = replace_conv_opt(t, lhs, eqth)
+    if conv == nil
+      return @k.refl(t)
+    conv
 
   -> hyp_thms(goal)
-    out = []
-    goal.hyps.each -> (h)
-      out.push(@k.assume(h[1]))
+    out = Array.new(goal.hyps.size)
+    i = 0
+    while i < goal.hyps.size
+      out[i] = @k.assume(goal.hyps[i][1])
+      i += 1
     out
 
-  -> simp_rules_from(goal, toks, only)
+  -> simp_extra_rules_from(goal, toks)
     rules = []
-    if !only
-      @session.simp_rules.each -> (r)
-        rules.push(r)
     if toks.size > 0
       inner = toks
       if inner[0].text == "\["
@@ -1579,29 +1595,35 @@
     if rs.size > 0 && rs[0].text == "only"
       only = true
       rs = arr_sub(rs, 1, rs.size - 1)
-    rules = simp_rules_from(goal, rs, only)
+    rules = simp_extra_rules_from(goal, rs)
     if all
       goal.hyps.each -> (h)
         rules.push(make_rule(@d, @k.assume(h[1]), h[0]))
-    s = Simp.new(@d, rules)
+    s = only ? Simp.new(@d, rules) : Simp.new(@d, rules, @session.simp_by_head, @session.simp_general)
     s.hyp_rules = hyp_thms(goal)
     prover = self
     s.discharger = ->(c) prover.try_arith_discharge(goal, c)
     if target_h != nil
       old = hyp_or_fail(goal, target_h)
-      eqth = s.simp_conv(old, 0)
+      eqth = s.simp_conv_opt(old, 0)
+      if eqth == nil
+        return [g]
       newp = dest_binop(eqth.concl, "=")[1]
-      if is_const?(newp, "⊥")
+      if newp.op == OP_FALSE
         f = @k.eq_mp(eqth, @k.assume(old))
         return close(g, @k.false_elim(f, goal.concl))
       ng = goal.without_hyp(target_h).add_hyp(target_h, newp)
       return refine(g, [ng], ->(ts) @d.prove_hyp(@k.eq_mp(eqth, @k.assume(old)), ts[0]))
-    eqth = s.simp_conv(goal.concl, 0)
+    eqth = s.simp_conv_opt(goal.concl, 0)
+    if eqth == nil
+      th = find_assumption(goal)
+      if th != nil
+        return close(g, th)
+      fail("simp made no progress")
     rhs = dest_binop(eqth.concl, "=")[1]
-    if is_const?(rhs, "⊤")
+    if rhs.op == OP_TRUE
       return close(g, @d.eqt_elim(eqth))
     if tm_eq(rhs, goal.concl)
-      # try closing with assumptions / decide
       th = find_assumption(goal)
       if th != nil
         return close(g, th)
@@ -1817,43 +1839,46 @@
 
   # x / k and x % k with a literal k > 0 (ℕ, ℤ): k * (x / k) + x % k = x, 0 ≤ x % k < k
   -> divmod_facts(goal, extra)
-    ts = [goal.concl]
-    goal.hyps.each -> (h)
-      ts.push(h[1])
-    extra.each -> (t)
-      ts.push(t.concl)
     seen = {}
     out = []
-    ts.each -> (t)
-      collect_divmod(t, seen, out)
+    collect_divmod(goal.concl, seen, out)
+    nh = goal.hyps.size
+    i = 0
+    while i < nh
+      collect_divmod(goal.hyps[i][1], seen, out)
+      i += 1
+    ne = extra.size
+    i = 0
+    while i < ne
+      collect_divmod(extra[i].concl, seen, out)
+      i += 1
     out
 
   -> collect_divmod(t, seen, out)
     if t.tag != :app
       return 0
-    sp = strip_app(t)
-    h = sp[0]
-    sp[1].each -> (a)
-      collect_divmod(a, seen, out)
-    if h.tag == :const && (h.name == "/" || h.name == "%") && sp[1].size == 2
-      ty = type_of(t)
-      k = sp[1][1]
-      x = sp[1][0]
-      if (ty_eq(ty, ty_nat) || ty_eq(ty, ty_int)) && k.tag == :lit && k.val > 0
-        key = tm_key(x) + "/" + tm_key(k)
-        if !seen.has_key?(key)
-          seen[key] = true
-          begin
-            dam = @session.lemma_at("div_add_mod", ty)
-            mnn = @session.lemma_at("mod_nonneg", ty)
-            mlt = @session.lemma_at("mod_lt", ty)
-            lt = @k.mk_const("<", ty_funs([ty, ty], ty_bool))
-            kpos = arith_prove_core(Goal.new([], [], mk_apps(lt, [mk_lit(0, ty), k])), [])
-            out.push(@k.spec(k, @k.spec(x, dam)))
-            out.push(@k.mp(@k.spec(k, @k.spec(x, mnn)), kpos))
-            out.push(@k.mp(@k.spec(k, @k.spec(x, mlt)), kpos))
-          rescue e
-            0
+    collect_divmod(t.a, seen, out)
+    collect_divmod(t.b, seen, out)
+    if t.a.tag == :app && t.a.a.tag == :const
+      op = t.a.a.op
+      if op == OP_DIV || op == OP_MOD
+        ty = type_of(t)
+        k = t.b
+        x = t.a.b
+        if (ty == TY_NAT_SINGLETON || ty == TY_INT_SINGLETON) && k.tag == :lit && k.val > 0
+          canon = mk_app_raw(mk_app_raw(mk_const_raw("/", ty_fun(ty, ty_fun(ty, ty))), x), k)
+          if tm_set_add?(seen, canon)
+            begin
+              dam = @session.lemma_at("div_add_mod", ty)
+              mnn = @session.lemma_at("mod_nonneg", ty)
+              mlt = @session.lemma_at("mod_lt", ty)
+              lt = mk_const_raw("<", ty_fun(ty, ty_fun(ty, TY_BOOL_SINGLETON)))
+              kpos = arith_prove_core(Goal.new([], [], mk_apps(lt, [mk_lit(0, ty), k])), [])
+              out.push(@k.spec(k, @k.spec(x, dam)))
+              out.push(@k.mp(@k.spec(k, @k.spec(x, mnn)), kpos))
+              out.push(@k.mp(@k.spec(k, @k.spec(x, mlt)), kpos))
+            rescue e
+              0
     0
 
   -> arith_prove_core(goal, extra)
@@ -1865,26 +1890,28 @@
     extra.each -> (t)
       hyps.push(t)
     neg = nil
-    if is_const?(c, "⊥")
+    if c.op == OP_FALSE
       neg = nil
     else
       neg = @k.neg_tm(c)
       hyps.push(@k.assume(neg))
-    # fold closed numeric subterms (1 / 2 ^ 4 ↦ 1/16) with simp's literal evaluation
+    # fold closed numeric subterms (1 / 2 ^ 4 ↦ 1/16) with simp's zero-alloc fast path
     folder = Simp.new(@d, [])
     folded = []
     bottom = nil
     hyps.each -> (h)
       begin
-        eqth = folder.simp_conv(h.concl, 0)
-        rhs = dest_binop(eqth.concl, "=")[1]
-        if tm_eq(rhs, h.concl)
+        eqth = folder.simp_conv_opt(h.concl, 0)
+        if eqth == nil
           folded.push(h)
-        elsif is_const?(rhs, "⊥")
-          # a closed hypothesis (or negated closed goal) that evaluates to false
-          bottom = @k.eq_mp(eqth, h)
-        elsif !is_const?(rhs, "⊤")
-          folded.push(@k.eq_mp(eqth, h))
+        else
+          rhs = dest_binop(eqth.concl, "=")[1]
+          if tm_eq(rhs, h.concl)
+            folded.push(h)
+          elsif rhs.op == OP_FALSE
+            bottom = @k.eq_mp(eqth, h)
+          elsif rhs.op != OP_TRUE
+            folded.push(@k.eq_mp(eqth, h))
       rescue e
         folded.push(h)
     if bottom != nil
@@ -1898,25 +1925,23 @@
     # group by type
     by_type = {}
     comps.each -> (t)
-      d = nil
-      ["<", "≤", "="].each -> (r)
-        if d == nil
-          d = dest_binop(t.concl, r)
-      ty = type_of(d[0])
-      if !by_type.has_key?(ty.key)
-        by_type[ty.key] = []
-      by_type[ty.key].push(t)
-    by_type.keys.each -> (key)
-      ts = by_type[key]
+      cmp = dest_cmp_rel(t.concl)
+      ty = type_of(cmp[1])
+      arr = by_type[ty.id]
+      if arr == nil
+        arr = []
+        by_type[ty.id] = arr
+      arr.push(t)
+    by_type.each -> (_tid, ts)
       ty = type_of(first_side(ts[0]))
       ts2 = ts
-      if ty.name == "nat"
+      if ty == TY_NAT_SINGLETON
         ts2 = ts + nat_nonneg(ts)
-      if @nl_mode && ty.name != "nat"
+      if @nl_mode && ty != TY_NAT_SINGLETON
         ts2 = ts2 + nl_products(ts, ty)
-      if @nl_mode && ty.name == "nat"
+      if @nl_mode && ty == TY_NAT_SINGLETON
         ts2 = ts2 + nl_products_nat(integer_strengthen(ts, ty))
-      if ty.name == "nat" || ty.name == "int"
+      if ty == TY_NAT_SINGLETON || ty == TY_INT_SINGLETON
         ts2 = integer_strengthen(ts2, ty)
       coeffs = fm_certificate(ts2, ty.name)
       if coeffs != nil
@@ -1946,13 +1971,12 @@
     h = sp[0]
     sp[1].each -> (a)
       pos_facts(a, out, seen)
-    if h.tag != :const || seen.has_key?(tm_key(t))
+    if h.tag != :const || !tm_set_add?(seen, t)
       return 0
-    seen[tm_key(t)] = true
     ty = type_of(t)
     args = sp[1]
     begin
-      if h.name == "abs" && args.size == 1
+      if h.op == OP_ABS && args.size == 1
         l = @session.lemma_at("abs_nonneg", ty)
         if l != nil
           out.push(@k.spec(args[0], l))
@@ -1964,33 +1988,42 @@
         l = @session.theorem("sqrt_nonneg")
         if l != nil
           out.push(@k.spec(args[0], l))
-      elsif h.name == "^" && args.size == 2 && args[1].tag == :lit
+      elsif h.op == OP_POW && args.size == 2 && args[1].tag == :lit
         n = args[1].val
         l = @session.lemma_at("sq_nonneg", ty)
-        if l != nil && n.class_name == "Int" && n >= 2 && n % 2 == 0
+        if l != nil && n.is_a?(Integer) && n >= 2 && n % 2 == 0
           base = args[0]
           if n > 2
-            base = mk_apps(@k.mk_const("^", ty_funs([ty, ty_nat], ty)), [args[0], mk_lit(n / 2, ty_nat)])
+            base = mk_apps(@k.mk_const("^", ty_funs([ty, TY_NAT_SINGLETON], ty)), [args[0], mk_lit(n / 2, TY_NAT_SINGLETON)])
           out.push(@k.spec(base, l))
     rescue e
       0
     0
 
+  # Direct 2-premise Farkas helper: proves `0 ≤ dt` (or `0 < dt` when want_strict) from `t : a ≤ b` / `a < b`.
+  -> prove_diff_sign(t, dt, zero, le_c, lt_c, not_le, not_lt, want_strict)
+    goal_tm = mk_app_raw(mk_app_raw(want_strict ? lt_c : le_c, zero), dt)
+    lem = want_strict ? not_lt : not_le
+    if lem != nil
+      neg_g = @k.neg_tm(goal_tm)
+      flipped = @k.mp(@k.spec(dt, @k.spec(zero, lem)), @k.assume(neg_g))
+      bot = @k.farkas([flipped, t], [Q_ONE, Q_ONE])
+      return classical_by_contra(goal_tm, bot)
+    arith_prove_core(Goal.new([], [], goal_tm), [t])
+
   # nlinarith: for each hypothesis a ≤ b (a < b) the fact 0 ≤ b - a (0 < b - a), then every pairwise product of those
   # differences, proved with mul_nonneg / mul_pos. Linear arithmetic then treats the expanded monomials as atoms.
   -> nl_products(ts, ty)
-    zero = nil
-    if ty.name == "int"
-      zero = mk_lit(0, ty)
-    else
-      zero = mk_lit([0, 1], ty)
+    zero = ty == TY_INT_SINGLETON ? mk_lit(0, ty) : mk_lit(Q_ZERO, ty)
     minus = @k.mk_const("-", ty_funs([ty, ty], ty))
-    le = @k.mk_const("≤", ty_funs([ty, ty], ty_bool))
-    lt = @k.mk_const("<", ty_funs([ty, ty], ty_bool))
+    le = @k.mk_const("≤", ty_funs([ty, ty], TY_BOOL_SINGLETON))
+    lt = @k.mk_const("<", ty_funs([ty, ty], TY_BOOL_SINGLETON))
     mn = @session.lemma_at("mul_nonneg", ty)
     mp = @session.lemma_at("mul_pos", ty)
     if mn == nil || mp == nil
       return []
+    not_le = @session.lemma_at("not_le", ty)
+    not_lt = @session.lemma_at("not_lt", ty)
     terms = []
     nns = []
     poss = []
@@ -2004,15 +2037,27 @@
           d = dest_binop(t.concl, "<")
           strict = true
         if d != nil
-          dt = mk_apps(minus, [d[1], d[0]])
           begin
-            nn = arith_prove_core(Goal.new([], [], mk_apps(le, [zero, dt])), [t])
-            ps = nil
-            if strict
-              ps = arith_prove_core(Goal.new([], [], mk_apps(lt, [zero, dt])), [t])
-            terms.push(dt)
-            nns.push(nn)
-            poss.push(ps)
+            if tm_eq(d[0], zero)
+              dt = d[1]
+              if !strict
+                terms.push(dt)
+                nns.push(t)
+                poss.push(nil)
+              else
+                nn = prove_diff_sign(t, dt, zero, le, lt, not_le, not_lt, false)
+                terms.push(dt)
+                nns.push(nn)
+                poss.push(t)
+            else
+              dt = mk_app_raw(mk_app_raw(minus, d[1]), d[0])
+              nn = prove_diff_sign(t, dt, zero, le, lt, not_le, not_lt, false)
+              ps = nil
+              if strict
+                ps = prove_diff_sign(t, dt, zero, le, lt, not_le, not_lt, true)
+              terms.push(dt)
+              nns.push(nn)
+              poss.push(ps)
           rescue e
             0
     @nl_mode = saved
@@ -2090,7 +2135,6 @@
     l = @session.lemma_at("zero_le", ty_nat)
     if l == nil
       return []
-    ctx = RingCtx.new("nat")
     seen = {}
     out = []
     ts.each -> (t)
@@ -2162,9 +2206,7 @@
     0
 
   -> add_nat_atom(t, seen, out, l)
-    key = tm_key(t)
-    if !seen.has_key?(key)
-      seen[key] = true
+    if tm_set_add?(seen, t)
       out.push(@k.spec(t, l))
 
   # integers: a < b  ~>  a + 1 ≤ b

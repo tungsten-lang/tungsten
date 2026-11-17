@@ -5,6 +5,12 @@
   ro :k
   -> new(@k)
     @fresh = 0
+    @bool_lemmas = nil
+
+  -> bool_lemmas
+    if @bool_lemmas == nil
+      @bool_lemmas = BoolLemmas.new(self)
+    @bool_lemmas
 
   -> fresh_name(base)
     @fresh += 1
@@ -46,6 +52,16 @@
     @k.mp(th, @k.assume(pq[0]))
 
   -> spec_all(th)
+    q0 = dest_unop(th.concl, "∀")
+    if q0 == nil || q0.tag != :lam
+      return th
+    used = {}
+    tm_free_names_into(th.concl, used)
+    nh = th.hyps.size
+    hi = 0
+    while hi < nh
+      tm_free_names_into(th.hyps[hi], used)
+      hi += 1
     t = th
     while true
       q = dest_unop(t.concl, "∀")
@@ -54,8 +70,7 @@
       nm = q.name
       if nm == nil || nm == ""
         nm = "x"
-      avoid = [t.concl] + t.hyps
-      v = mk_var(fresh_name_avoiding(nm, avoid), q.ty)
+      v = mk_var(fresh_name_from_set(nm, used), q.ty)
       t = @k.spec(v, t)
 
   -> fresh_name_avoiding(base, terms)
@@ -76,26 +91,50 @@
   -> imp_intro(p, th)
     @k.disch(p, th)
 
-  # Beta-normalizes every redex in t: ⊢ t = t'
-  -> beta_norm_conv(t)
+  # Beta-normalizes every redex in t: returns nil when t is already beta-normal, else ⊢ t = t'
+  -> beta_norm_opt(t)
     case t.tag
     when :app
-      f = beta_norm_conv(t.a)
-      x = beta_norm_conv(t.b)
-      th = @k.mk_comb(f, x)
+      f = beta_norm_opt(t.a)
+      x = beta_norm_opt(t.b)
+      if f == nil && x == nil
+        if t.a.tag == :lam
+          th = @k.beta(t)
+          r2 = dest_binop(th.concl, "=")[1]
+          nxt = beta_norm_opt(r2)
+          if nxt == nil
+            return th
+          return @k.trans(th, nxt)
+        return nil
+      fth = f == nil ? @k.refl(t.a) : f
+      xth = x == nil ? @k.refl(t.b) : x
+      th = @k.mk_comb(fth, xth)
       r = dest_binop(th.concl, "=")[1]
       if r.tag == :app && r.a.tag == :lam
         th2 = @k.trans(th, @k.beta(r))
         r2 = dest_binop(th2.concl, "=")[1]
-        return @k.trans(th2, beta_norm_conv(r2))
+        nxt = beta_norm_opt(r2)
+        if nxt == nil
+          return th2
+        return @k.trans(th2, nxt)
       th
     when :lam
+      if !has_beta_redex?(t.b)
+        return nil
       p = dest_lam_fresh(t, [t])
-      v = p[0]
-      inner = beta_norm_conv(p[1])
-      @k.abs_rule(v, inner)
+      inner = beta_norm_opt(p[1])
+      if inner == nil
+        return nil
+      @k.abs_rule(p[0], inner)
     else
-      @k.refl(t)
+      nil
+
+  # Beta-normalizes every redex in t: ⊢ t = t'
+  -> beta_norm_conv(t)
+    th = beta_norm_opt(t)
+    if th == nil
+      return @k.refl(t)
+    th
 
   -> has_beta_redex?(t)
     case t.tag
@@ -110,14 +149,16 @@
 
   # Rewrites a theorem's conclusion to beta-normal form.
   -> beta_norm_thm(th)
-    if !has_beta_redex?(th.concl)
+    conv = beta_norm_opt(th.concl)
+    if conv == nil
       return th
-    @k.eq_mp(beta_norm_conv(th.concl), th)
+    @k.eq_mp(conv, th)
 
   -> beta_norm_term(t)
-    if !has_beta_redex?(t)
+    conv = beta_norm_opt(t)
+    if conv == nil
       return t
-    dest_binop(beta_norm_conv(t).concl, "=")[1]
+    dest_binop(conv.concl, "=")[1]
 
 -> fresh_name_global(base, terms)
   fresh_name(base, terms)
@@ -142,17 +183,21 @@
     match_ty(pt2, t)
 
   -> match_ty(p, t)
+    if !p.has_var
+      return ty_eq(p, t)
     if p.tag == :v
       if @tvs.has_key?(p.name)
-        if @ty.has_key?(p.name)
-          return ty_eq(@ty[p.name], t)
+        prev = @ty[p.name]
+        if prev != nil
+          return ty_eq(prev, t)
         @ty[p.name] = t
         return true
       return ty_eq(p, t)
     if t.tag == :v || p.name != t.name || p.args.size != t.args.size
       return false
     i = 0
-    while i < p.args.size
+    n = p.args.size
+    while i < n
       if !match_ty(p.args[i], t.args[i])
         return false
       i += 1
@@ -160,12 +205,12 @@
 
   # depth: number of binders entered (for higher-order patterns).
   -> m(p, t, depth)
-    if p.tag == :var && @pvars.has_key?(var_key(p))
-      if lam_count_bound(t, 0)
+    if p.tag == :var && @pvars.has_key?(p.vkey)
+      if t.mx > 0
         return false
       return bind(p, t)
     # higher-order pattern: P (bnd i) with P a pattern variable
-    if p.tag == :app && p.a.tag == :var && @pvars.has_key?(var_key(p.a)) && p.b.tag == :bnd
+    if p.tag == :app && p.a.tag == :var && p.b.tag == :bnd && @pvars.has_key?(p.a.vkey)
       return bind_ho(p.a, p.b.idx, t)
     if p.tag != t.tag
       return false
@@ -177,16 +222,17 @@
     when :bnd
       p.idx == t.idx
     when :lit
-      lit_key(p.val) == lit_key(t.val) && match_ty(p.ty, t.ty)
+      lit_val_eq(p.val, t.val) && match_ty(p.ty, t.ty)
     when :app
       m(p.a, t.a, depth) && m(p.b, t.b, depth)
     else
       match_ty(p.ty, t.ty) && m(p.b, t.b, depth + 1)
 
   -> bind(p, t)
-    k = var_key(p)
-    if @tm.has_key?(k)
-      return tm_eq(@tm[k], t)
+    k = p.vkey
+    prev = @tm[k]
+    if prev != nil
+      return tm_eq(prev, t)
     if !match_ty(p.ty, type_of(t))
       return false
     @tm[k] = t
@@ -209,18 +255,21 @@
     lam = eta_contract(mk_lam_raw("x", bty.dom, body))
     if !match_ty(pv.ty, type_of(lam))
       return false
-    k = var_key(pv)
-    if @tm.has_key?(k)
-      return tm_eq(eta_contract(@tm[k]), lam)
+    k = pv.vkey
+    prev = @tm[k]
+    if prev != nil
+      return tm_eq(eta_contract(prev), lam)
     @tm[k] = lam
     @pvar_objs[k] = pv
     true
 
   -> pairs
-    out = []
-    @tm.keys.each -> (k)
+    out = Array.new(@tm.size)
+    idx = 0
+    @tm.each -> (k, val)
       v = @pvar_objs[k]
-      out.push([mk_var(v.name, ty_subst(v.ty, @ty)), @tm[k]])
+      out[idx] = [mk_var(v.name, ty_subst(v.ty, @ty)), val]
+      idx += 1
     out
 
 -> fresh_ty_placeholder
@@ -228,6 +277,8 @@
 
 # True when every loose bound index in t (relative to `depth`) equals i.
 -> only_loose(t, i, depth)
+  if t.mx <= depth
+    return true
   case t.tag
   when :bnd
     t.idx < depth || t.idx - depth == i
@@ -240,6 +291,8 @@
 
 # Replace loose index i (at relative depth) by index 0 (relative), for building λ.
 -> reindex(t, i, depth)
+  if t.mx <= depth
+    return t
   case t.tag
   when :bnd
     if t.idx >= depth && t.idx - depth == i
@@ -247,9 +300,16 @@
     else
       t
   when :app
-    mk_app_raw(reindex(t.a, i, depth), reindex(t.b, i, depth))
+    a = reindex(t.a, i, depth)
+    b = reindex(t.b, i, depth)
+    if a == t.a && b == t.b
+      return t
+    mk_app_raw(a, b)
   when :lam
-    mk_lam_raw(t.name, t.ty, reindex(t.b, i, depth + 1))
+    b = reindex(t.b, i, depth + 1)
+    if b == t.b
+      return t
+    mk_lam_raw(t.name, t.ty, b)
   else
     t
 
@@ -257,15 +317,20 @@
 # Rewrite rules: a theorem `hyps ⊢ ∀xs. c1 → ... → l = r` prepared for matching.
 
 + RewriteRule
-  ro :th, :lhs, :rhs, :conds, :pvars, :tvs, :name
+  ro :th, :lhs, :rhs, :conds, :pvars, :tvs, :name, :head_name, :is_eq
   # th: spec'd theorem (free pattern vars) with conclusion `conds → l = r`
-  -> new(@th, @lhs, @rhs, @conds, @pvars, @tvs, @name)
+  -> new(@th, @lhs, @rhs, @conds, @pvars, @tvs, @name, @head_name, @is_eq)
+
+-> rule_head_const_name(t)
+  while t.tag == :app
+    t = t.a
+  if t.tag == :const
+    return t.name
+  nil
 
 -> make_rule(d, th, name)
   k = d.k
-  # rename generic type variables to avoid clashes with goal type variables
   tvs = {}
-  tm = {}
   tyvars = tm_tyvars(th.concl)
   th.hyps.each -> (h)
     tm_tyvars_into(h, tyvars)
@@ -281,11 +346,9 @@
   t = th
   if ren.size > 0
     t = k.inst_type(th, ren)
-  # variables already free before spec_all are constants of the context (e.g. `rw [pow_succ y n]` with local y, n);
-  # only the ∀-bound variables become pattern variables
   fixed = {}
   tm_frees(t.concl).each -> (v)
-    fixed[var_key(v)] = true
+    fixed[v.vkey] = true
   t = d.spec_all(t)
   pvars = {}
   tm_frees(t.concl).each -> (v)
@@ -293,23 +356,25 @@
     t.hyps.each -> (h)
       if tm_free_in?(v, h)
         free_in_hyp = true
-    if !free_in_hyp && !fixed.has_key?(var_key(v))
-      pvars[var_key(v)] = true
+    if !free_in_hyp && !fixed.has_key?(v.vkey)
+      pvars[v.vkey] = true
   conds = []
   c = t.concl
-  while dest_binop(c, "⇒") != nil
+  while true
     pq = dest_binop(c, "⇒")
+    if pq == nil
+      break
     conds.push(pq[0])
     c = pq[1]
   e = dest_binop(c, "=")
+  is_eq = e != nil
   if e == nil
-    # P  ~>  P = True ;  ¬P  ~>  P = False
     u = dest_unop(c, "¬")
     if u != nil
       e = [u, k.false_tm]
     else
       e = [c, k.truth_tm]
-  RewriteRule.new(t, e[0], e[1], conds, pvars, tvs, name)
+  RewriteRule.new(t, e[0], e[1], conds, pvars, tvs, name, rule_head_const_name(e[0]), is_eq)
 
 
 # λx. f x  ~>  f   (when x does not occur in f)
@@ -325,9 +390,9 @@
     c
 
   -> copy_from(tm, ty, objs)
-    tm.keys.each -> (k)
-      @tm[k] = tm[k]
-    ty.keys.each -> (k)
-      @ty[k] = ty[k]
-    objs.keys.each -> (k)
-      @pvar_objs[k] = objs[k]
+    tm.each -> (k, v)
+      @tm[k] = v
+    ty.each -> (k, v)
+      @ty[k] = v
+    objs.each -> (k, v)
+      @pvar_objs[k] = v

@@ -37,23 +37,43 @@
     @counter += 1
     ty_var("?" + @counter.to_s)
 
+  -> reset_counter
+    @counter = 0
+
   -> meta?(t)
-    t.tag == :v && t.name.starts_with?("?")
+    t.tag == :v && t.name.size > 0 && t.name.byte_at(0) == 63
 
   # ---- types -------------------------------------------------------------------
 
   -> resolve(t)
+    if !t.has_var || @subst.size == 0
+      return t
     if t.tag == :v
-      if @subst.has_key?(t.name)
-        r = resolve(@subst[t.name])
+      sv = @subst[t.name]
+      if sv != nil
+        r = resolve(sv)
         @subst[t.name] = r
         return r
       return t
-    if t.args.size == 0
+    na = t.args.size
+    if na == 2 && t.name == "fun"
+      a0 = resolve(t.args[0])
+      a1 = resolve(t.args[1])
+      if a0 == t.args[0] && a1 == t.args[1]
+        return t
+      return ty_fun(a0, a1)
+    changed = false
+    args = Array.new(na)
+    i = 0
+    while i < na
+      a = t.args[i]
+      b = resolve(a)
+      if b != a
+        changed = true
+      args[i] = b
+      i += 1
+    if !changed
       return t
-    args = []
-    t.args.each -> (a)
-      args.push(resolve(a))
     ty_con(t.name, args)
 
   -> unify(a, b)
@@ -650,15 +670,22 @@
   -> fix_lits(t)
     case t.tag
     when :lit
-      if (t.ty.name == "rat" || t.ty.name == "real") && t.val.class_name != "Array"
+      if (t.ty == TY_RAT_SINGLETON || t.ty == TY_REAL_SINGLETON) && type(t.val) != "Array"
         return mk_lit([t.val, 1], t.ty)
-      if (t.ty.name == "nat" || t.ty.name == "int") && t.val.class_name == "Array"
+      if (t.ty == TY_NAT_SINGLETON || t.ty == TY_INT_SINGLETON) && type(t.val) == "Array"
         raise "fractional literal used at an integer type"
       t
     when :app
-      mk_app_raw(fix_lits(t.a), fix_lits(t.b))
+      a = fix_lits(t.a)
+      b = fix_lits(t.b)
+      if a == t.a && b == t.b
+        return t
+      mk_app_raw(a, b)
     when :lam
-      mk_lam_raw(t.name, t.ty, fix_lits(t.b))
+      b = fix_lits(t.b)
+      if b == t.b
+        return t
+      mk_lam_raw(t.name, t.ty, b)
     else
       t
 
@@ -668,7 +695,11 @@
     when :app
       check(t.a)
       check(t.b)
-      mk_app(t.a, t.b)
+      ft = type_of(t.a)
+      if !ft.fun?
+        raise "mk_app: not a function: " + tm_show(t.a) + " : " + ty_show(ft)
+      if !ty_eq(ft.dom, type_of(t.b))
+        raise "mk_app: type mismatch applying " + tm_show(t.a) + " : " + ty_show(ft) + " to " + tm_show(t.b) + " : " + ty_show(type_of(t.b))
     when :lam
       check(t.b)
     when :const

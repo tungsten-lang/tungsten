@@ -8,12 +8,13 @@
 
 -> lin_combine(a, qa, b, qb)
   coef = {}
-  a.coef.keys.each -> (v)
-    coef[v] = q_mul(a.coef[v], qa)
-  b.coef.keys.each -> (v)
-    x = q_mul(b.coef[v], qb)
-    if coef.has_key?(v)
-      s = q_add(coef[v], x)
+  a.coef.each -> (v, cv)
+    coef[v] = q_mul(cv, qa)
+  b.coef.each -> (v, cv)
+    x = q_mul(cv, qb)
+    prev = coef[v]
+    if prev != nil
+      s = q_add(prev, x)
       if s[0] == 0
         coef.delete(v)
       else
@@ -22,12 +23,13 @@
       coef[v] = x
   c0 = q_add(q_mul(a.c0, qa), q_mul(b.c0, qb))
   deriv = {}
-  a.deriv.keys.each -> (i)
-    deriv[i] = q_mul(a.deriv[i], qa)
-  b.deriv.keys.each -> (i)
-    x = q_mul(b.deriv[i], qb)
-    if deriv.has_key?(i)
-      deriv[i] = q_add(deriv[i], x)
+  a.deriv.each -> (i, dv)
+    deriv[i] = q_mul(dv, qa)
+  b.deriv.each -> (i, dv)
+    x = q_mul(dv, qb)
+    prev_d = deriv[i]
+    if prev_d != nil
+      deriv[i] = q_add(prev_d, x)
     else
       deriv[i] = x
   rel = :ge
@@ -46,173 +48,236 @@
     return c.c0[0] <= 0
   c.c0[0] < 0
 
+# Extracts [rel_str, lhs, rhs] for <, ≤, = without intermediate arrays.
+-> dest_cmp_rel(t)
+  if t.tag == :app && t.a.tag == :app && t.a.a.tag == :const
+    op = t.a.a.op
+    if op == OP_LT
+      return ["<", t.a.b, t.b]
+    if op == OP_LE
+      return ["≤", t.a.b, t.b]
+    if op == OP_EQ
+      return ["=", t.a.b, t.b]
+  nil
+
 # thms: comparison theorems at one type. Returns coefficient array or nil.
 -> fm_certificate(thms, kind)
   ctx = RingCtx.new("rat")
-  cons = []
+  n = thms.size
+  cons = Array.new(n)
   i = 0
-  while i < thms.size
+  while i < n
     th = thms[i]
-    rel = nil
-    ab = nil
-    ["<", "≤", "="].each -> (r)
-      if rel == nil
-        d = dest_binop(th.concl, r)
-        if d != nil
-          rel = r
-          ab = d
-    pa = ring_norm(ab[0], kind, ctx)
-    pb = ring_norm(ab[1], kind, ctx)
-    diff = poly_add(pb, poly_scale(pa, [-1, 1]))
+    cmp = dest_cmp_rel(th.concl)
+    rel = cmp[0]
+    pa = ring_norm(cmp[1], kind, ctx)
+    pb = ring_norm(cmp[2], kind, ctx)
+    diff = poly_add(pb, poly_scale(pa, Q_NEG_ONE))
     coef = {}
-    c0 = [0, 1]
-    diff.keys.each -> (m)
-      if m == ""
-        c0 = diff[m]
+    c0 = Q_ZERO
+    diff.each -> (m, qv)
+      if m == 0
+        c0 = qv
       else
-        coef[m] = diff[m]
+        coef[m] = qv
     deriv = {}
-    deriv[i] = [1, 1]
+    deriv[i] = Q_ONE
     r = :ge
     if rel == "<"
       r = :gt
-    if rel == "="
+    elsif rel == "="
       r = :eq
-    cons.push(LinCon.new(coef, c0, r, deriv))
+    cons[i] = LinCon.new(coef, c0, r, deriv)
     i += 1
   res = fm_solve(cons, 0)
   if res == nil
     return lp_certificate(cons)
-  out = []
+  out = Array.new(n)
   i = 0
-  while i < thms.size
-    if res.deriv.has_key?(i)
-      out.push(res.deriv[i])
+  while i < n
+    dv = res.deriv[i]
+    if dv != nil
+      out[i] = dv
     else
-      out.push([0, 1])
+      out[i] = Q_ZERO
     i += 1
   # an equality-only contradiction with positive constant: flip sign
   if res.rel == :eq && res.c0[0] > 0
     j = 0
-    while j < out.size
+    while j < n
       out[j] = q_neg(out[j])
       j += 1
   out
 
 -> fm_solve(cons, rounds)
-  cons.each -> (c)
-    if lin_contradiction?(c)
-      return c
-  if rounds > 12 || cons.size > 600
+  nc = cons.size
+  ci = 0
+  while ci < nc
+    if lin_contradiction?(cons[ci])
+      return cons[ci]
+    ci += 1
+  if rounds > 12 || nc > 600
     return nil
-  # choose a variable: prefer one appearing in an equality, else fewest products
+  # Single pass over sparse nonzeros to count pos/neg/equality occurrences per variable.
+  pos_cnt = {}
+  neg_cnt = {}
+  eq_vars = {}
   vars = {}
-  cons.each -> (c)
-    c.coef.keys.each -> (v)
+  ci = 0
+  while ci < nc
+    c = cons[ci]
+    is_eq = c.rel == :eq
+    c.coef.each -> (v, qv)
       vars[v] = true
+      if is_eq
+        eq_vars[v] = true
+      if qv[0] > 0
+        p = pos_cnt[v]
+        pos_cnt[v] = p == nil ? 1 : p + 1
+      else
+        ng = neg_cnt[v]
+        neg_cnt[v] = ng == nil ? 1 : ng + 1
+    ci += 1
   if vars.size == 0
     return nil
   best = nil
   best_cost = 0
-  vars.keys.sort.each -> (v)
-    pos = 0
-    neg = 0
-    has_eq = false
-    cons.each -> (c)
-      if c.coef.has_key?(v)
-        if c.rel == :eq
-          has_eq = true
-        if c.coef[v][0] > 0
-          pos += 1
-        else
-          neg += 1
-    cost = pos * neg
-    if has_eq
+  vkeys = vars.keys.sort
+  vk_len = vkeys.size
+  vi = 0
+  while vi < vk_len
+    v = vkeys[vi]
+    cost = 0
+    if eq_vars.has_key?(v)
       cost = -1
+    else
+      pc = pos_cnt[v] || 0
+      nc2 = neg_cnt[v] || 0
+      cost = pc * nc2
     if best == nil || cost < best_cost
       best = v
       best_cost = cost
+      if cost == -1
+        break
+    vi += 1
   v = best
   eqc = nil
-  cons.each -> (c)
-    if eqc == nil && c.rel == :eq && c.coef.has_key?(v)
-      eqc = c
+  if eq_vars.has_key?(v)
+    ci = 0
+    while ci < nc
+      c = cons[ci]
+      if c.rel == :eq && c.coef.has_key?(v)
+        eqc = c
+        break
+      ci += 1
   out = []
   if eqc != nil
     a = eqc.coef[v]
-    cons.each -> (c)
+    ci = 0
+    while ci < nc
+      c = cons[ci]
       if !(c == eqc)
-        if c.coef.has_key?(v)
+        cv = c.coef[v]
+        if cv != nil
           # c - (c_v / a) * eqc
-          q = q_neg(q_div(c.coef[v], a))
-          out.push(lin_combine(c, [1, 1], eqc, q))
+          q = q_neg(q_div(cv, a))
+          out.push(lin_combine(c, Q_ONE, eqc, q))
         else
           out.push(c)
+      ci += 1
     return fm_solve(out, rounds + 1)
   pos = []
   neg = []
-  cons.each -> (c)
-    if c.coef.has_key?(v)
-      if c.coef[v][0] > 0
+  ci = 0
+  while ci < nc
+    c = cons[ci]
+    cv = c.coef[v]
+    if cv != nil
+      if cv[0] > 0
         pos.push(c)
       else
         neg.push(c)
     else
       out.push(c)
-  pos.each -> (p)
-    neg.each -> (n)
-      # p * (-n_v) + n * p_v eliminates v
-      out.push(lin_combine(p, q_neg(n.coef[v]), n, p.coef[v]))
+    ci += 1
+  np = pos.size
+  nn = neg.size
+  pi = 0
+  while pi < np
+    p = pos[pi]
+    pv = p.coef[v]
+    ni = 0
+    while ni < nn
+      n = neg[ni]
+      out.push(lin_combine(p, q_neg(n.coef[v]), n, pv))
+      ni += 1
+    pi += 1
   fm_solve(out, rounds + 1)
 
 # ---------------------------------------------------------------------------
 # Complete fallback: the Farkas multipliers as a linear program, solved by an exact two-phase simplex (Bland's rule).
-# Constraint i reads Σ coef·v + c0 (rel) 0. We look for weights y (≥ 0 on ≥/>, free on =) whose combination has no
-# variables and a contradictory constant: Σ y c0 < 0, or = 0 with positive weight on a strict constraint. The kernel
-# re-checks the weights (KKernel.farkas), so this search is untrusted.
 
 -> q0()
-  [0, 1]
+  Q_ZERO
 
 -> q1()
-  [1, 1]
+  Q_ONE
+
+-> simplex_init_rc(t, basis, cost, ncol)
+  m = t.size
+  rc = Array.new(ncol)
+  j = 0
+  while j < ncol
+    rc[j] = cost[j]
+    j += 1
+  i = 0
+  while i < m
+    cb = cost[basis[i]]
+    if cb[0] != 0
+      row = t[i]
+      k = 0
+      while k < ncol
+        rk = row[k]
+        if rk[0] != 0
+          rc[k] = q_sub(rc[k], q_mul(cb, rk))
+        k += 1
+    i += 1
+  i = 0
+  while i < m
+    rc[basis[i]] = Q_ZERO
+    i += 1
+  rc
 
 # min c·x  s.t.  A x = b, x ≥ 0 (b ≥ 0). Returns [x, value] or nil (infeasible, or too many pivots).
 -> simplex_min(a, b, c, nv)
   m = a.size
   ncol = nv + m
-  t = []
-  rhs = []
-  basis = []
+  t = Array.new(m)
+  rhs = Array.new(m)
+  basis = Array.new(m)
+  in_basis = Array.new(ncol, false)
   i = 0
   while i < m
-    row = []
+    row = Array.new(ncol, Q_ZERO)
+    ai = a[i]
     j = 0
     while j < nv
-      row.push(a[i][j])
+      row[j] = ai[j]
       j += 1
-    k = 0
-    while k < m
-      if k == i
-        row.push(q1())
-      else
-        row.push(q0())
-      k += 1
-    t.push(row)
-    rhs.push(b[i])
-    basis.push(nv + i)
+    row[nv + i] = Q_ONE
+    t[i] = row
+    rhs[i] = b[i]
+    basis[i] = nv + i
+    in_basis[nv + i] = true
     i += 1
-  cost1 = []
-  j = 0
+  cost1 = Array.new(ncol, Q_ZERO)
+  j = nv
   while j < ncol
-    if j < nv
-      cost1.push(q0())
-    else
-      cost1.push(q1())
+    cost1[j] = Q_ONE
     j += 1
-  if !simplex_run(t, rhs, basis, cost1, ncol, ncol)
+  if !simplex_run(t, rhs, basis, in_basis, cost1, ncol, ncol)
     return nil
-  v1 = q0()
+  v1 = Q_ZERO
   i = 0
   while i < m
     v1 = q_add(v1, q_mul(cost1[basis[i]], rhs[i]))
@@ -223,83 +288,88 @@
   i = 0
   while i < m
     if basis[i] >= nv
+      row_i = t[i]
       j = 0
-      done = false
-      while j < nv && !done
-        if t[i][j][0] != 0
-          simplex_pivot(t, rhs, basis, i, j, ncol)
-          done = true
+      while j < nv
+        if row_i[j][0] != 0
+          simplex_pivot(t, rhs, basis, in_basis, nil, i, j, ncol)
+          break
         j += 1
     i += 1
-  cost2 = []
-  j = 0
-  while j < ncol
-    if j < nv
-      cost2.push(c[j])
-    else
-      cost2.push(q0())
-    j += 1
-  if !simplex_run(t, rhs, basis, cost2, ncol, nv)
-    return nil
-  x = []
+  cost2 = Array.new(ncol, Q_ZERO)
   j = 0
   while j < nv
-    x.push(q0())
+    cost2[j] = c[j]
     j += 1
-  val = q0()
+  if !simplex_run(t, rhs, basis, in_basis, cost2, ncol, nv)
+    return nil
+  x = Array.new(nv, Q_ZERO)
+  val = Q_ZERO
   i = 0
   while i < m
-    if basis[i] < nv
-      x[basis[i]] = rhs[i]
-      val = q_add(val, q_mul(c[basis[i]], rhs[i]))
+    bi = basis[i]
+    if bi < nv
+      x[bi] = rhs[i]
+      val = q_add(val, q_mul(c[bi], rhs[i]))
     i += 1
   [x, val]
 
--> simplex_pivot(t, rhs, basis, r, j, ncol)
-  p = t[r][j]
-  k = 0
-  while k < ncol
-    t[r][k] = q_div(t[r][k], p)
-    k += 1
-  rhs[r] = q_div(rhs[r], p)
+-> simplex_pivot(t, rhs, basis, in_basis, rc, r, j, ncol)
+  row_r = t[r]
+  p = row_r[j]
+  if !(p[0] == 1 && p[1] == 1)
+    k = 0
+    while k < ncol
+      if row_r[k][0] != 0
+        row_r[k] = q_div(row_r[k], p)
+      k += 1
+    if rhs[r][0] != 0
+      rhs[r] = q_div(rhs[r], p)
+  m = t.size
   i = 0
-  while i < t.size
-    if i != r && t[i][j][0] != 0
-      f = t[i][j]
+  while i < m
+    if i != r
+      row_i = t[i]
+      f = row_i[j]
+      if f[0] != 0
+        k = 0
+        while k < ncol
+          rk = row_r[k]
+          if rk[0] != 0
+            row_i[k] = q_sub(row_i[k], q_mul(f, rk))
+          k += 1
+        if rhs[r][0] != 0
+          rhs[i] = q_sub(rhs[i], q_mul(f, rhs[r]))
+    i += 1
+  if rc != nil
+    rcj = rc[j]
+    if rcj[0] != 0
       k = 0
       while k < ncol
-        if t[r][k][0] != 0
-          t[i][k] = q_sub(t[i][k], q_mul(f, t[r][k]))
+        rk = row_r[k]
+        if rk[0] != 0
+          rc[k] = q_sub(rc[k], q_mul(rcj, rk))
         k += 1
-      rhs[i] = q_sub(rhs[i], q_mul(f, rhs[r]))
-    i += 1
+      rc[j] = Q_ZERO
+  old_b = basis[r]
+  in_basis[old_b] = false
   basis[r] = j
+  in_basis[j] = true
   0
 
 # Bland's rule; columns ≥ allowed may not enter. Returns false when unbounded or out of pivots.
--> simplex_run(t, rhs, basis, cost, ncol, allowed)
+-> simplex_run(t, rhs, basis, in_basis, cost, ncol, allowed)
   m = t.size
+  rc = simplex_init_rc(t, basis, cost, ncol)
   iter = 0
   while iter < 5000
     iter += 1
     enter = -1
     j = 0
-    while j < allowed && enter < 0
-      inb = false
-      i = 0
-      while i < m
-        if basis[i] == j
-          inb = true
-        i += 1
-      if !inb
-        rc = cost[j]
-        i = 0
-        while i < m
-          if t[i][j][0] != 0
-            rc = q_sub(rc, q_mul(cost[basis[i]], t[i][j]))
-          i += 1
-        if rc[0] < 0
-          enter = j
+    while j < allowed
+      if !in_basis[j] && rc[j][0] < 0
+        enter = j
+        break
       j += 1
     if enter < 0
       return true
@@ -307,8 +377,9 @@
     best = nil
     i = 0
     while i < m
-      if t[i][enter][0] > 0
-        ratio = q_div(rhs[i], t[i][enter])
+      te = t[i][enter]
+      if te[0] > 0
+        ratio = q_div(rhs[i], te)
         if leave < 0
           leave = i
           best = ratio
@@ -320,21 +391,24 @@
       i += 1
     if leave < 0
       return false
-    simplex_pivot(t, rhs, basis, leave, enter, ncol)
+    simplex_pivot(t, rhs, basis, in_basis, rc, leave, enter, ncol)
   false
 
 # cons: LinCon list. Returns per-constraint weights or nil.
 -> lp_certificate(cons)
   atoms = {}
-  cons.each -> (c)
-    c.coef.keys.each -> (v)
+  nc = cons.size
+  ci = 0
+  while ci < nc
+    cons[ci].coef.each -> (v, _qv)
       atoms[v] = true
+    ci += 1
   vlist = atoms.keys.sort
   # columns: one per ≥/> constraint, two (y⁺, y⁻) per equality
   colcon = []
   colsign = []
   i = 0
-  while i < cons.size
+  while i < nc
     colcon.push(i)
     colsign.push(1)
     if cons[i].rel == :eq
@@ -342,37 +416,34 @@
       colsign.push(-1)
     i += 1
   nv = colcon.size
-  rows = []
-  b = []
-  vlist.each -> (v)
-    row = []
+  nv_vars = vlist.size
+  rows = Array.new(nv_vars + 1)
+  b = Array.new(nv_vars + 1, Q_ZERO)
+  vi = 0
+  while vi < nv_vars
+    v = vlist[vi]
+    row = Array.new(nv, Q_ZERO)
     j = 0
     while j < nv
       cf = cons[colcon[j]].coef[v]
-      if cf == nil
-        row.push(q0())
-      elsif colsign[j] > 0
-        row.push(cf)
-      else
-        row.push(q_neg(cf))
+      if cf != nil
+        if colsign[j] > 0
+          row[j] = cf
+        else
+          row[j] = q_neg(cf)
       j += 1
-    rows.push(row)
-    b.push(q0())
-  norm = []
-  j = 0
-  while j < nv
-    norm.push(q1())
-    j += 1
-  rows.push(norm)
-  b.push(q1())
-  c0 = []
+    rows[vi] = row
+    vi += 1
+  rows[nv_vars] = Array.new(nv, Q_ONE)
+  b[nv_vars] = Q_ONE
+  c0 = Array.new(nv)
   j = 0
   while j < nv
     k0 = cons[colcon[j]].c0
     if colsign[j] > 0
-      c0.push(k0)
+      c0[j] = k0
     else
-      c0.push(q_neg(k0))
+      c0[j] = q_neg(k0)
     j += 1
   res = simplex_min(rows, b, c0, nv)
   if res == nil
@@ -381,29 +452,24 @@
   if res[1][0] >= 0
     # constant can only reach 0: maximise the weight on strict constraints with Σ y c0 = 0
     rows2 = rows + [c0]
-    b2 = b + [q0()]
-    cg = []
+    b2 = b + [Q_ZERO]
+    cg = Array.new(nv, Q_ZERO)
     j = 0
     while j < nv
       if cons[colcon[j]].rel == :gt
-        cg.push([-1, 1])
-      else
-        cg.push(q0())
+        cg[j] = Q_NEG_ONE
       j += 1
     res2 = simplex_min(rows2, b2, cg, nv)
     if res2 == nil || res2[1][0] >= 0
       return nil
     y = res2[0]
-  w = []
-  i = 0
-  while i < cons.size
-    w.push(q0())
-    i += 1
+  w = Array.new(nc, Q_ZERO)
   j = 0
   while j < nv
+    idx = colcon[j]
     if colsign[j] > 0
-      w[colcon[j]] = q_add(w[colcon[j]], y[j])
+      w[idx] = q_add(w[idx], y[j])
     else
-      w[colcon[j]] = q_sub(w[colcon[j]], y[j])
+      w[idx] = q_sub(w[idx], y[j])
     j += 1
   w

@@ -31,6 +31,10 @@
     s + "⊢ " + tm_show(@concl)
 
 -> hyps_union(a, b)
+  if b.size == 0
+    return a
+  if a.size == 0
+    return b
   out = []
   a.each -> (t)
     out.push(t)
@@ -66,12 +70,12 @@
   out.sort
 
 + KInductive
-  ro :name, :params, :ctors, :rec_name
+  ro :name, :params, :ctors, :rec_name, :rec_pos, :is_enum
   # ctors: array of [name, arg_types (with the type itself as ty_con(name, params))]
-  -> new(@name, @params, @ctors, @rec_name)
+  -> new(@name, @params, @ctors, @rec_name, @rec_pos, @is_enum)
 
 + KKernel
-  ro :consts, :types, :axioms, :defs, :inductives, :foundational, :ctor_of
+  ro :consts, :types, :axioms, :defs, :inductives, :foundational, :ctor_of, :rec_of, :defcache
 
   -> new
     @types = {}
@@ -81,6 +85,12 @@
     @defs = {}
     @inductives = {}
     @ctor_of = {}
+    @rec_of = {}
+    @defcache = {}
+    @truth_c = mk_const_raw("⊤", TY_BOOL_SINGLETON)
+    @false_c = mk_const_raw("⊥", TY_BOOL_SINGLETON)
+    @neg_c = mk_const_raw("¬", ty_fun(TY_BOOL_SINGLETON, TY_BOOL_SINGLETON))
+    @bool_bin_ty = ty_fun(TY_BOOL_SINGLETON, ty_fun(TY_BOOL_SINGLETON, TY_BOOL_SINGLETON))
     @types["bool"] = 0
     @types["fun"] = 2
     @types["nat"] = 0
@@ -153,23 +163,24 @@
 
   -> eq_tm(l, r)
     t = type_of(l)
-    mk_app_raw(mk_app_raw(mk_const_raw("=", ty_funs([t, t], ty_bool)), l), r)
+    eq_ty = ty_fun(t, ty_fun(t, TY_BOOL_SINGLETON))
+    mk_app_raw(mk_app_raw(mk_const_raw("=", eq_ty), l), r)
 
   -> bin(name, l, r)
-    mk_app_raw(mk_app_raw(mk_const_raw(name, ty_funs([ty_bool, ty_bool], ty_bool)), l), r)
+    mk_app_raw(mk_app_raw(mk_const_raw(name, @bool_bin_ty), l), r)
 
   -> neg_tm(p)
-    mk_app_raw(mk_const_raw("¬", ty_fun(ty_bool, ty_bool)), p)
+    mk_app_raw(@neg_c, p)
 
   -> truth_tm
-    mk_const_raw("⊤", ty_bool)
+    @truth_c
 
   -> false_tm
-    mk_const_raw("⊥", ty_bool)
+    @false_c
 
   -> quant(name, v, body)
     lam = mk_lam(v, body)
-    mk_app_raw(mk_const_raw(name, ty_fun(ty_fun(v.ty, ty_bool), ty_bool)), lam)
+    mk_app_raw(mk_const_raw(name, ty_fun(ty_fun(v.ty, TY_BOOL_SINGLETON), TY_BOOL_SINGLETON)), lam)
 
   -> dest_eq(t)
     dest_binop(t, "=")
@@ -494,10 +505,42 @@
       case_tys.push(ty_funs(args, r))
     rec_name = name + "_rec"
     @consts[rec_name] = ty_funs(case_tys + [self_ty], r)
-    info = KInductive.new(name, params, ctors, rec_name)
+    rec_pos = Array.new(ctors.size)
+    is_enum = params.size == 0
+    ci = 0
+    while ci < ctors.size
+      decl = ctors[ci][1]
+      if decl.size > 0
+        is_enum = false
+      rp = []
+      dj = 0
+      while dj < decl.size
+        if ty_eq(decl[dj], self_ty)
+          rp.push(dj)
+        dj += 1
+      rec_pos[ci] = rp
+      ci += 1
+    info = KInductive.new(name, params, ctors, rec_name, rec_pos, is_enum)
     @inductives[name] = info
+    @rec_of[rec_name] = info
     kernel_inductive_axioms(self, info, self_ty, r, case_tys)
     info
+
+  # Restore a verified definition from a content-addressed .satc cache.
+  -> restore_define(name, rhs)
+    if @consts.has_key?(name)
+      raise "constant " + name + " already exists"
+    ty = type_of(rhs)
+    @consts[name] = ty
+    c = mk_const_raw(name, ty)
+    th = thm([], eq_tm(c, rhs), [])
+    @defs[name] = th
+    th
+
+  # Restore a verified closed theorem from a content-addressed .satc cache.
+  -> restore_thm(concl, tags)
+    need_bool(concl, "cache")
+    thm([], concl, tags)
 
   -> inductive_of_type(ty)
     if ty.tag == :c && @inductives.has_key?(ty.name)
@@ -530,13 +573,14 @@
   # ⊢ lhs = rhs when both sides have the same commutative-ring normal form.
   -> ring_eq(lhs, rhs)
     ty = type_of(lhs)
-    if !["int", "rat", "real", "nat"].include?(ty.name)
+    kn = ty.name
+    if !(kn == "int" || kn == "rat" || kn == "real" || kn == "nat")
       raise "ring: unsupported type " + ty_show(ty)
     # one atom context for both sides: atoms must be numbered consistently
-    ctx = RingCtx.new(ty.name)
-    a = ring_norm(lhs, ty.name, ctx)
-    b = ring_norm(rhs, ty.name, ctx)
-    if a == nil || b == nil || poly_key(a) != poly_key(b)
+    ctx = RingCtx.new(kn)
+    a = ring_norm(lhs, kn, ctx)
+    b = ring_norm(rhs, kn, ctx)
+    if a == nil || b == nil || !poly_eq?(a, b)
       raise "ring: sides are not equal as polynomials"
     thm([], eq_tm(lhs, rhs), ["oracle:ring"])
 
@@ -566,7 +610,8 @@
   # Σ q_i (b_i - a_i) a constant c where c < 0, or c = 0 and some strict
   # inequality has q_i > 0. Concludes ⊥ from the union of hypotheses.
   -> farkas(thms, coeffs)
-    if thms.size == 0 || thms.size != coeffs.size
+    nth = thms.size
+    if nth == 0 || nth != coeffs.size
       raise "farkas: bad certificate shape"
     kind = nil
     total = {}
@@ -575,42 +620,40 @@
     tags = ["oracle:arith"]
     ctx = RingCtx.new("rat")
     i = 0
-    while i < thms.size
+    while i < nth
       th = thms[i]
       q = coeffs[i]
-      rel = nil
-      ab = nil
-      ["<", "≤", "="].each -> (r)
-        if rel == nil
-          d = dest_binop(th.concl, r)
-          if d != nil
-            rel = r
-            ab = d
-      if rel == nil
+      if q[1] <= 0
+        raise "farkas: non-positive coefficient denominator"
+      cmp = dest_cmp_rel(th.concl)
+      if cmp == nil
         raise "farkas: not a comparison: " + tm_show(th.concl)
-      ty = type_of(ab[0])
-      if !["nat", "int", "rat", "real"].include?(ty.name)
+      rel = cmp[0]
+      ty = type_of(cmp[1])
+      tn = ty.name
+      if !(tn == "nat" || tn == "int" || tn == "rat" || tn == "real")
         raise "farkas: not an ordered numeric type"
       if kind == nil
-        kind = ty.name
-      if kind != ty.name
+        kind = tn
+      elsif kind != tn
         raise "farkas: mixed numeric types"
-      if rel != "=" && q[0] < 0
-        raise "farkas: negative coefficient on an inequality"
-      if rel == "<" && q[0] > 0
-        strict_used = true
-      pa = ring_norm(ab[0], kind, ctx)
-      pb = ring_norm(ab[1], kind, ctx)
-      diff = poly_add(pb, poly_scale(pa, [-1, 1]))
-      total = poly_add(total, poly_scale(diff, q))
-      hs = hyps_union(hs, th.hyps)
-      tags = tags_union(tags, th.tags)
+      if q[0] != 0
+        if rel != "=" && q[0] < 0
+          raise "farkas: negative coefficient on an inequality"
+        if rel == "<" && q[0] > 0
+          strict_used = true
+        pa = ring_norm(cmp[1], kind, ctx)
+        pb = ring_norm(cmp[2], kind, ctx)
+        diff = poly_add(pb, poly_scale(pa, Q_NEG_ONE))
+        total = poly_add(total, poly_scale(diff, q))
+        hs = hyps_union(hs, th.hyps)
+        tags = tags_union(tags, th.tags)
       i += 1
-    c = [0, 1]
-    total.keys.each -> (m)
-      if m != ""
+    c = Q_ZERO
+    total.each -> (m, qv)
+      if m != 0
         raise "farkas: combination is not constant"
-      c = total[m]
+      c = qv
     if !(c[0] < 0 || (c[0] == 0 && strict_used))
       raise "farkas: combination is not contradictory"
     thm(hs, false_tm, tags)

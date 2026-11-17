@@ -10,6 +10,37 @@
 # Lengths are stored in lengths[tc]. This keeps the hot token cell to one
 # compact 32-bit store plus one byte store.
 
+# Line continuation after a trailing binary operator (as compiler/lib/lexer/fast64.w
+# tungsten_fast64_continues): 1 when the token before tc is one of
+# + - * / % ** == != < > <= >= && || & ^.
+## u32[]: lc, tokens
+## u8[]: lengths
+## i64: tc, cp_mask
+-> tungsten_wtoken32_continues(lc, tokens, lengths, tc, cp_mask)
+  if tc < 1
+    return 0
+  tok = tokens[tc - 1]
+  if ((tok >> 2) & 0x3F) != 0x0B
+    return 0
+  off = (tok >> 8) & 0xFFFFFF
+  n = lengths[tc - 1]
+  c1 = (lc[off] >> 11) & cp_mask
+  if n == 1
+    if c1 in (43 45 42 47 37 60 62 38 94)
+      return 1
+    return 0
+  if n == 2
+    c2 = (lc[off + 1] >> 11) & cp_mask
+    if c1 == 42 && c2 == 42
+      return 1
+    if c2 == 61 && c1 in (61 33 60 62)
+      return 1
+    if c1 == 38 && c2 == 38
+      return 1
+    if c1 == 124 && c2 == 124
+      return 1
+  0
+
 ## u32[]: lc, tokens
 ## u8[]: lengths
 ## i64[]: indents
@@ -19,6 +50,7 @@
   tc = 0
   at_line_start = 1
   paren_depth = 0
+  cont_line = 0
   indent_top = 0
   indents[0] = 0
   data_ptr = ccall_nobox("w_typed_array_data_ptr", lc)
@@ -108,7 +140,7 @@
         at_line_start = 1
         next
 
-      if paren_depth == 0
+      if paren_depth == 0 && cont_line == 0
         current_indent = indents[indent_top]
         if indent > current_indent
           indent_top++
@@ -122,6 +154,7 @@
             tokens[tc] = t_dedent | (pos << 8)
             lengths[tc] = 0
             tc++
+      cont_line = 0
 
     v = lc[pos]
     c = (v >> 11) & cp_mask
@@ -143,9 +176,12 @@
 
     when 0x80
       if paren_depth == 0
-        tokens[tc] = t_newline | (pos << 8)
-        lengths[tc] = 1
-        tc++
+        if tungsten_wtoken32_continues(lc, tokens, lengths, tc, cp_mask) == 1
+          cont_line = 1
+        else
+          tokens[tc] = t_newline | (pos << 8)
+          lengths[tc] = 1
+          tc++
       pos++
       if c == 13 && pos < count && ((lc[pos] >> 11) & cp_mask) == 10
         pos++

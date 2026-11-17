@@ -90,10 +90,14 @@ make specialization rules much clearer.
 
 ## Expression continuation
 
-Long formulas cannot begin a continuation line with an operator, which forces
-determinants and similar expressions onto one long line or into temporary
-assignments. A visually explicit continuation form would improve mathematical
-code without making whitespace ambiguous.
+A line that ENDS with a binary operator (`+ - * / % ** == != < > <= >= && || & ^`)
+now continues on the next line (2026-11-16): its newline is whitespace and the
+next line's indentation is not block structure, in every lexer and engine
+(spec/compiler/line_continuation_spec.w). Still wished for: BEGINNING a
+continuation line with an operator, which today ends the statement before it,
+so determinants and similar expressions must put the operator at the end of the
+line. A visually explicit leading form would improve mathematical code without
+making whitespace ambiguous.
 
 Continuation inside parentheses should also be unconditional and consistent;
 indentation should not terminate an expression while a delimiter remains open.

@@ -212,3 +212,52 @@ bin/tungsten -o /tmp/prop-counts --release bits/tungsten-wassat/benchmarks/prop_
 | clique-kissat | `clique_n2_k10--cb2e8b7fada4.cnf` | 20000 | UNKNOWN |
 
 The two Kissat rows set `WASSAT_KSEARCH=1`.
+
+## Counting bits in original clauses
+
+Watches took less time on all eight propagation-snapshot workloads below.
+The alternative uses one positive and one negative mask per long clause per
+64-variable block, including empty blocks. Two solver-wide bitsets hold the
+current true and false variables. Once a clause is reached, the arm64 inner
+loop tests satisfaction, counts free bits with `cnt`, and locates a sole free
+bit with `ctz`. Its per-block arithmetic runs in registers.
+
+Finding clauses is a separate cost. The alternative follows every occurrence
+of a newly false literal in the original long clauses, deduplicates clause IDs
+within a binary-propagation wave, then examines their masks. Watches subscribe
+only two literals per clause and can skip a clause body on a blocker hit.
+On DivS 568 all 553,495 original long clauses have 8–11 literals, yet each
+touches at least three aligned 64-variable blocks. On clique eight of ten
+fit one block. On ordering-320 all 320 touch all five blocks.
+
+Each row uses six paired release timings on arm64 macOS with solver sources
+from `6b3cf17d` and compiler SHA-256
+`130d8b6f18f34dd99fadc45a2230adb85b4f77a2848505897a78e066385a5d60`.
+Both arms use Wassat's binary implications and the same deterministic streams
+of assumptions. An untimed pass checked conflict status on all 83,320 queries
+and every variable's value on successful queries. Timed queries include
+rollback, restoration of the root assignment masks, and discovery of affected
+clauses. Input loading, index construction, and copying the final assignment
+are outside the timers. The arms alternate order in successive repetitions.
+The times are medians per batch. The ratio is the median of paired ratios.
+
+| Input | Queries | Max assumptions | Watches (ms) | Masks (ms) | Masks / watches |
+|---|---:|---:|---:|---:|---:|
+| PHP 11/10 | 16,000 | 65 | 17.0 | 18.9 | 1.11× |
+| homer | 22,000 | 74 | 22.6 | 26.1 | 1.15× |
+| clique | 20,000 | 60 | 20.6 | 26.7 | 1.30× |
+| ordering-320 | 12,000 | 160 | 125.4 | 203.7 | 1.62× |
+| ordering-384 (`n384p5q2_vh.af_138`) | 10,000 | 192 | 129.6 | 229.0 | 1.78× |
+| random500 | 3,200 | 160 | 24.1 | 57.8 | 2.41× |
+| ntil-41 | 60 | 50 | 3.6 | 21.2 | 6.02× |
+| DivS 568 | 60 | 64 | 79.2 | 562.4 | 7.09× |
+
+The benchmark measures propagation under assumptions on a fixed formula.
+Learned clauses, decisions, and full-solve timing are outside its scope.
+Mask storage alone takes `16 × long_clauses × ceil(nvars / 64)` bytes.
+Use the query count and maximum assumption count from the desired row.
+
+```sh
+bin/tungsten -o /tmp/word-propagation --release bits/tungsten-wassat/benchmarks/word_propagation.w
+/tmp/word-propagation DivS_568_11--0c9da400944b.cnf 60 64 6
+```

@@ -34,6 +34,6 @@ use proof_source
     previous = session.failures
     session.run_source("opaque hidden_f : ℕ → ℝ\nopaque hidden_g : ℕ → ℝ\nopaque hidden_k : ℕ → ℝ\naxiom hidden_sub : ∀ i, hidden_f i = hidden_g i - hidden_k i\n+ marked_sub (n : ℕ) : (∑ i < n, hidden_f i) = (∑ i < n, hidden_g i) - (∑ i < n, hidden_k i) := by auto \[hidden_sub]\n")
     th = session.theorems["marked_sub"]
-    if session.failures != previous || th == nil || th.hyps.size != 0 || th.tags != ["axiom:hidden_sub", "oracle:arith", "oracle:ring"]
+    if session.failures != previous || th == nil || th.hyps.size != 0 || th.tags != ["axiom:hidden_sub", "oracle:ring"]
       raise "automatic subtraction lost its pointwise assumption tag"
   << "Automatic sum subtraction passed: " + suffix

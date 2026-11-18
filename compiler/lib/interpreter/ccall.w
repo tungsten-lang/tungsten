@@ -66,6 +66,14 @@
       if args.size() != 4
         raise "w_atomic_cas expects one receiver, expected, and desired"
       return ccall("w_atomic_cas", args[1], args[2], args[3])
+    when "__w_proc_spawn"
+      if args.size() != 2 || type(args[1]) != "Array"
+        raise "__w_proc_spawn expects an argv array"
+      return ccall("__w_proc_spawn", args[1])
+    when "__w_proc_wait"
+      if args.size() != 3
+        raise "__w_proc_wait expects a pid and blocking flag"
+      return ccall("__w_proc_wait", args[1], args[2])
     when "w_setenv"
       if args.size() != 3
         raise "w_setenv expects a name and value"

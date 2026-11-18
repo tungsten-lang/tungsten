@@ -19,4 +19,8 @@ if first.call(nil) != 11 || second.call(nil) != 22 || old != [1, 2] || newer != 
 partial = digits(1, _, 3, _)
 if partial.call(2, 4) != 1234
   raise "partial application lost argument order"
+closures = [11, 22].map -> (value)
+  -> (unused) value
+if closures[0].call(nil) != 11 || closures[1].call(nil) != 22
+  raise "later block invocation overwrote a captured parameter"
 << "method frame lifetime passed"

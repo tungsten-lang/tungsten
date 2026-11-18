@@ -57,9 +57,10 @@ use ../lib/satori
   skipped = 0
   names.each -> (nm)
     ax = k.axioms[nm]
+    small = tm_show(ax.concl).include?("^")
     trial = 0
     while trial < 25
-      t = instantiate_random(ax.concl, rng, tm_show(ax.concl).include?("^"))
+      t = instantiate_random(ax.concl, rng, small)
       if t == nil
         skipped += 1
         trial = 25

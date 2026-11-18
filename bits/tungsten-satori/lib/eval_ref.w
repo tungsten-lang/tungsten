@@ -302,7 +302,7 @@
       mk_lit(zadd(v, 1), ty_nat)
     when "neg"
       if rt.name == "int"
-        mk_lit(0 - v, rt)
+        mk_lit(zsub(0, v), rt)
       elsif rt.name == "rat" || rt.name == "real"
         mk_lit(q_neg(v), rt)
       else
@@ -310,7 +310,7 @@
     when "abs"
       if rt.name == "int" || rt.name == "nat"
         if v < 0
-          mk_lit(0 - v, rt)
+          mk_lit(zsub(0, v), rt)
         else
           x
       elsif rt.name == "rat" || rt.name == "real"
@@ -346,7 +346,7 @@
       when "+"
         return mk_lit(zadd(a, b), at)
       when "*"
-        return mk_lit(a * b, at)
+        return mk_lit(zmul(a, b), at)
       when "-"
         r = zsub(a, b)
         if kind == "nat" && r < 0
@@ -391,8 +391,8 @@
   base = a
   while e > 0
     if e % 2 == 1
-      r = r * base
-    base = base * base
+      r = zmul(r, base)
+    base = zmul(base, base)
     e = e / 2
   r
 
@@ -403,6 +403,7 @@
     ty = lam.ty
     body = lam.b
     dom = nil
+    range_end = nil
     rest = nil
     conn = "⇒"
     if q == "∃"
@@ -414,30 +415,22 @@
       if d != nil && d[0].tag == :bnd && d[0].idx == 0 && tm_closed_bound?(d[1]) && ty.name == "nat"
         n = eval(d[1])
         if n.tag == :lit
-          dom = []
-          i = 0
-          while i < n.val
-            dom.push(mk_nat(i))
-            i += 1
+          range_end = n.val
           rest = g[1]
       d = dest_binop(guard, "≤")
-      if dom == nil && d != nil && d[0].tag == :bnd && d[0].idx == 0 && tm_closed_bound?(d[1]) && ty.name == "nat"
+      if dom == nil && range_end == nil && d != nil && d[0].tag == :bnd && d[0].idx == 0 && tm_closed_bound?(d[1]) && ty.name == "nat"
         n = eval(d[1])
         if n.tag == :lit
-          dom = []
-          i = 0
-          while i <= n.val
-            dom.push(mk_nat(i))
-            i += 1
+          range_end = zadd(n.val, 1)
           rest = g[1]
       d = dest_binop(guard, "mem")
-      if dom == nil && d != nil && d[0].tag == :bnd && d[0].idx == 0 && tm_closed_bound?(d[1])
+      if dom == nil && range_end == nil && d != nil && d[0].tag == :bnd && d[0].idx == 0 && tm_closed_bound?(d[1])
         lst = eval(d[1])
         items = list_literal_items(lst)
         if items != nil
           dom = items
           rest = g[1]
-    if dom == nil
+    if dom == nil && range_end == nil
       # whole finite types: Prop and enumeration inductives
       if ty.name == "bool" && ty.tag == :c
         dom = [tt, ff]
@@ -455,10 +448,14 @@
             dom.push(mk_const_raw(c[0], ty))
           rest = body
           conn = nil
-    if dom == nil
+    if dom == nil && range_end == nil
       return nil
     residue = []
-    dom.each -> (x)
+    count = range_end == nil ? dom.size : range_end
+    i = 0
+    while i < count
+      x = range_end == nil ? dom[i] : mk_nat(i)
+      i += 1
       v = eval(tm_instantiate(rest, x, 0))
       if q == "∀"
         if false?(v)

@@ -31,6 +31,6 @@ use proof_source
     previous = session.failures
     session.run_source("opaque hidden : ℕ → ℝ\naxiom hidden_zero : ∀ i, hidden i = 0\n+ marked (n : ℕ) : (∑ i < n, hidden i) = 0 := by auto \[hidden_zero]\n")
     th = session.theorems["marked"]
-    if session.failures != previous || th == nil || th.hyps.size != 0 || th.tags != ["axiom:hidden_zero", "oracle:arith"]
+    if session.failures != previous || th == nil || th.hyps.size != 0 || th.tags != ["axiom:hidden_zero"]
       raise "automatic zero sum lost the supplied zero assumption tag"
   << "Automatic zero sums passed: " + suffix

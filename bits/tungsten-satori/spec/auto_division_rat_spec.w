@@ -21,7 +21,7 @@ examples.each -> (name)
   if name == "self"
     expected = []
   if name == "explicit_bound"
-    expected = ["axiom:supplied_cross", "oracle:arith", "oracle:ring"]
+    expected = ["axiom:supplied_cross", "oracle:arith"]
   if th == nil || th.hyps.size != 0 || th.tags != expected
     raise "division proof missing, open or has unexpected trust: " + name
 bad = ["missing_positive", "zero_strict", "missing_denominator", "negative_denominator", "weak_denominator", "missing_second_denominator", "weak_strict", "wrong_numerator", "wrong_reciprocal", "missing_numerator_sign", "zero_cancel", "unguarded_self", "unguarded_equality", "branch_leak", "no_global_bound"]

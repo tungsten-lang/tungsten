@@ -58,6 +58,6 @@ use proof_source
     session.run_source("+ marked_hint (n : ℕ) : accum (fun j => accum (marked_f j) 3) n = (n : ℝ)*2 := by auto \[marked_inner]\n+ marked_local (n : ℕ) : accum (fun j => accum (marked_f j) 3) n = (n : ℝ)*2 := by have h := marked_inner; auto \[h]\n")
     ["marked_hint", "marked_local"].each -> (name)
       th = session.theorems[name]
-      if th == nil || th.hyps.size != 0 || th.tags != ["axiom:marked_inner", "oracle:arith", "oracle:ring"]
+      if th == nil || th.hyps.size != 0 || th.tags != ["axiom:marked_inner", "oracle:ring"]
         raise "custom sum lost a supplied or local proof's hypothesis tag"
   << "Automatic custom sums passed: " + suffix

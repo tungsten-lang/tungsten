@@ -102,6 +102,13 @@
     if type(recv) == "Hash" && recv.has_key?(:rt) && recv[:rt] == :class
       m = lookup_class_method(recv, name, args.size(), block != nil, args)
       if m != nil
+        if recv[:name] == "Digest" && args.size() == 1 && block == nil && m[:body].empty?()
+          if name == "file64"
+            return ccall("__w_digest_file64", args[0])
+          if name == "bytes64"
+            return ccall("__w_digest_bytes64", args[0])
+          if name == "string64"
+            return ccall("__w_digest_string64", args[0])
         return call_w_method(recv, m, args, block, env)
 
     # Class.new constructor
@@ -184,7 +191,15 @@
         builtin_class = primitive_class[:name]
         if builtin_class == "Symbol"
           builtin_class = "String"
-        builtin_contract = builtin_method_arity(builtin_class, name)
+        arities = @primitive_arities[builtin_class]
+        if arities == nil
+          arities = {}
+          @primitive_arities[builtin_class] = arities
+        builtin_contract = arities[name]
+        if builtin_contract == nil
+          builtin_contract = builtin_method_arity(builtin_class, name)
+          if builtin_contract != nil
+            arities[name] = builtin_contract
         if builtin_contract != nil
           native_argc = args.size()
           if block != nil
@@ -223,6 +238,30 @@
       m = lookup_method(primitive_class, name, args.size(), block != nil, args)
       if m == nil && primitive_class[:name] == "ByteArray" && @classes.has_key?("Array")
         m = lookup_method(@classes["Array"], name, args.size(), block != nil, args)
+      if block == nil && args.size() == 0 && m != nil && m[:core_storage_class] == "Array"
+        if name == "size" || name == "cap"
+          return ccall("w_native_data_field", recv, name)
+      # These leaves unpack the native String representation. Invoke the
+      # host's compiled Core body so its raw words stay machine integers.
+      # Resolve overrides and block/argument contracts before taking this path.
+      if block == nil && m != nil && m[:core_storage_class] == "String"
+        if args.size() == 0
+          if name == "size" || name == "length"
+            return recv.size()
+          if name == "empty?"
+            return recv.empty?()
+          if name == "to_s"
+            return recv.to_s()
+          if name == "ord"
+            return recv.ord()
+        if args.size() == 1
+          if name == "byte_at" && type(args[0]) == "Int"
+            return recv.byte_at(args[0])
+          if type(args[0]) == "String"
+            if name == "starts_with?"
+              return recv.starts_with?(args[0])
+            if name == "ends_with?"
+              return recv.ends_with?(args[0])
       # BigInt#isqrt's one/two-limb native leaf is an embedded LLVM function,
       # which the tree walker cannot execute. Delegate only the Core-owned
       # body to its exact retained C boundary; a user reopen has another file
@@ -1394,11 +1433,26 @@
       return nil
     [blk_env, name, delta]
 
+  # Only invocation frames without a captured child may go back in the pool.
+  # Detach their lexical parent while idle. Recursive calls take another frame.
+  -> take_block_frame(parent)
+    frame = @idle_block_frames.pop()
+    if frame == nil
+      return Environment.new(parent)
+    frame.set_block_parent(parent)
+    frame
+
+  -> release_block_frame(frame)
+    if !frame.has_children && @idle_block_frames.size() < 128
+      frame.clear_bindings()
+      frame.set_block_parent(nil)
+      @idle_block_frames.push(frame)
+
   -> call_block0(block_data)
     if type(block_data) == "Array"
       blk_env = block_data[0]
       blk_node = block_data[1]
-      block_env = Environment.new(blk_env)
+      block_env = take_block_frame(blk_env)
       params = ast_get(blk_node, :params)
       i = 0
       while i < params.size()
@@ -1419,6 +1473,7 @@
           pending_error = err
       ensure
         @self_stack.pop()
+        release_block_frame(block_env)
       if pending_error != nil
         raise pending_error
       return result
@@ -1437,7 +1492,7 @@
       blk_node = block_data[1]
       block_env = reuse_env
       if block_env == nil
-        block_env = Environment.new(blk_env)
+        block_env = take_block_frame(blk_env)
       else
         block_env.clear_bindings()
       params = ast_get(blk_node, :params)
@@ -1480,6 +1535,8 @@
           pending_error = err
       ensure
         @self_stack.pop()
+        if reuse_env == nil
+          release_block_frame(block_env)
       if pending_error != nil
         raise pending_error
       return result
@@ -1489,7 +1546,7 @@
     if type(block_data) == "Array"
       blk_env = block_data[0]
       blk_node = block_data[1]
-      block_env = Environment.new(blk_env)
+      block_env = take_block_frame(blk_env)
       params = ast_get(blk_node, :params)
       if params.size() == 0 && args.size() > 0
         if ast_get(blk_node, :_free_vars) == nil
@@ -1543,6 +1600,7 @@
           pending_error = err
       ensure
         @self_stack.pop()
+        release_block_frame(block_env)
       if pending_error != nil
         raise pending_error
       return result

@@ -15,8 +15,8 @@
 #   p.alive?
 #
 # Exit codes pass through unchanged — SAT-conventional 10/20 work directly.
-# Compiled programs only: the runtime externs are not in the interpreter's
-# ccall whitelist.
+# The tree walker supports spawn, poll, wait and alive?. Replacing the
+# current process and signalling process groups require a compiled program.
 
 + Process
   -> new(@pid)

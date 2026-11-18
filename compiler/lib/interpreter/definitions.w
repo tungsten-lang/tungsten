@@ -163,7 +163,9 @@
       i += 1
     if !replaced
       overloads.push(w_method)
-    @env.define("__method__" + method_name, w_method)
+    key = "__method__" + method_name
+    @global_method_keys[method_name] = key
+    @env.define(key, w_method)
     w_method
 
   -> eval_class_def(node, env)
@@ -235,6 +237,8 @@
       if ast_kind(expr) == :method_def
         mbody = register_trailing_accessors(expr, ast_get(expr, :body), w_class)
         w_method = {rt: :method, name: ast_get(expr, :name), params: ast_get(expr, :params), body: mbody, w_class: w_class, file: @current_file, trait_default: from_trait, param_types: ast_get(expr, :param_types)}
+        if !from_trait && core_path != nil && @current_file == core_path && (class_name == "Array" || class_name == "String")
+          w_method[:core_storage_class] = class_name
         if ast_get(expr, :is_class_method) == true
           register_interpreted_class_method(w_class, w_method)
         else

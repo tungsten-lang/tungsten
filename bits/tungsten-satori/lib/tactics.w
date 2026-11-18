@@ -84,13 +84,14 @@
 
 + Prover
   ro :k, :d, :session
-  rw :goals, :auto_defaults, :sum_aliases_allowed, :registered_search
+  rw :goals, :auto_defaults, :sum_aliases_allowed, :registered_search, :auto_rule_path
 
   -> new(@session)
     @k = @session.k
     @d = @session.d
     @goals = []
     @auto_defaults = nil
+    @auto_rule_path = []
     @registered_search = false
     @registered_index = nil
     @registered_version = -1
@@ -938,6 +939,8 @@
     th
 
   -> application_square_normalization(t)
+    if (t.search_ops & TERM_SQUARE_PRODUCT) == 0
+      return nil
     bucket = @application_square_cache[t.h]
     if bucket != nil
       bucket.each -> (entry)
@@ -2366,7 +2369,7 @@
     out
 
   -> collect_divmod(t, seen, out)
-    if t.tag != :app
+    if (t.search_ops & TERM_DIVMOD) == 0 || t.tag != :app
       return 0
     collect_divmod(t.a, seen, out)
     collect_divmod(t.b, seen, out)
@@ -3497,6 +3500,8 @@
   # a comparison. Closed-term collection and the existing fact cap bound this
   # enrichment; no new min/max applications or branch assumptions are invented.
   -> auto_minmax_facts(conclusion, facts)
+    if (conclusion.search_ops & TERM_MINMAX) == 0
+      return false
     cmp = dest_cmp_rel(conclusion)
     if cmp == nil
       return false
@@ -5685,8 +5690,25 @@
     seen.each -> (previous)
       if tm_eq(previous, goal.concl)
         return nil
+    # A quantified guard can introduce a fresh i on every application of the
+    # same rule, recreating the same pointwise goal under a different name.
+    # Abstract just the binders introduced by this premise. Outer variables
+    # stay fixed, and the other rules and direct tactics remain available.
+    pointwise = nil
+    if @auto_rule_path.size > 0
+      first = @auto_rule_path.last[2]
+      i = goal.fixes.size - 1
+      if i >= first
+        pointwise = goal.concl
+        while i >= first
+          pointwise = mk_lam(goal.fixes[i][1], pointwise)
+          i -= 1
     candidates.each -> (hint)
-      if budget[0] > 0
+      repeated = false
+      if pointwise != nil
+        repeated = @auto_rule_path.any? -> (entry)
+          entry[1] != nil && tm_eq(entry[0], hint.concl) && tm_eq(entry[1], pointwise)
+      if !repeated && budget[0] > 0
         budget[0] -= 1
         begin
           applied = instantiate_to(goal, hint, [], goal.concl, true)
@@ -5698,12 +5720,20 @@
             sub = Prover.new(@session)
             sub.auto_defaults = @auto_defaults
             sub.registered_search = @registered_search
+            sub.auto_rule_path = @auto_rule_path + [[hint.concl, pointwise, goal.fixes.size]]
             ref = GoalRef.new(goal.with_concl(normalized), nil, 0)
             sub.goals = [ref]
             sub.tac_auto(ref, 3, hints, budget, seen + [goal.concl])
             if ref.thm == nil || sub.goals.size != 0
               fail("auto: a lemma premise remains open")
             proof = sub.fit(ref, ref.thm)
+            # Matching x*x against x² may add a ring conversion to a premise.
+            # Reuse the rule's arithmetic oracle if its certificate suffices.
+            if proof.tags.include?("oracle:ring") && !result.tags.include?("oracle:ring") && result.tags.include?("oracle:arith") && comparison?(normalized)
+              facts = goal.hyps.map -> (h) @k.assume(h[1])
+              direct = auto_arithmetic_proof(ref.goal, facts, [1])
+              if direct != nil && direct.tags.all?(-> (tag) result.tags.include?(tag))
+                proof = direct
             result = @d.prove_hyp(fit_concl(proof, premise), result)
           return fit_concl(result, goal.concl)
         rescue e

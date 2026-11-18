@@ -8,6 +8,7 @@
   -> new(argv_values = nil)
     @env = Environment.new()
     @idle_method_frames = []
+    @idle_block_frames = []
     @classes = {}
     @traits = {}
     # Top-level methods share the same overload rules as class methods, but
@@ -15,6 +16,7 @@
     # definition groups here so typed siblings are not collapsed to the last
     # `__method__NAME` binding before a call can inspect its arguments.
     @function_overloads = {}
+    @global_method_keys = {}
     @self_stack = [nil]
     @method_stack = [nil]
     # Parallel to @method_stack: each call_w_method frame gets a unique id
@@ -29,6 +31,8 @@
     @loaded_files = []
     @current_file = nil
     @autoload_registry = nil
+    @autoloaded_classes = {}
+    @primitive_arities = {}
     @entry_file = nil
     @core_protected = false
     @type_tables_locked = false
@@ -154,6 +158,8 @@
   # .class_name dispatch still works. Returns true if the name was
   # registered (real or stub), false if not in the registry at all.
   -> try_autoload_class(name)
+    if @autoloaded_classes.has_key?(name)
+      return true
     reg = autoload_registry()
     path = reg[name]
     if path == nil
@@ -173,6 +179,7 @@
         @current_file = prev_file
     if !@classes.has_key?(name)
       @classes[name] = {rt: :class, name: name, methods: {}, method_overloads: {}, parent: nil}
+    @autoloaded_classes[name] = true
     true
 
   -> run(source, file_path = nil)
@@ -406,6 +413,8 @@
     @self_stack = snapshot[:self_stack]
     @method_stack = snapshot[:method_stack]
     @loaded_files = snapshot[:loaded_files]
+    # Isolated evaluation may have loaded classes absent from this snapshot.
+    @autoloaded_classes = {}
     @current_file = snapshot[:current_file]
 
   -> evaluate_isolated(source, file_path = nil)
@@ -460,6 +469,8 @@
   # i64 max is 19 digits, so >19 always overflows and ==19 compares lexically.
   -> interp_decimal_exceeds_i64?(raw)
     if raw == nil
+      return false
+    if raw.size() < 19
       return false
     if raw.starts_with?("0x") || raw.starts_with?("0X")
       return false

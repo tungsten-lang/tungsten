@@ -351,6 +351,7 @@
     work_fns = []
     work_indices = []
     work_buckets = []
+    layouts = Array.new(nfns_emit)
     i = 0
     while i < nfns_emit
       f_cur = mod[:functions][i]
@@ -359,8 +360,10 @@
       if selected_emit_bucket != nil
         if f_cur[:embedded_ll] == nil && f_cur[:embedded_asm] == nil
           function_attr_group_id(attr_groups, base_attr_text)
+        layout = function_emit_cache_ic_layout(f_cur)
+        layouts[i] = layout
         cached_entry = selected_emit_bucket[:functions][f_cur[:name]]
-        if cached_entry != nil && cached_entry[:name] == f_cur[:name]
+        if cached_entry != nil && cached_entry[:name] == f_cur[:name] && cached_entry[:ic_layout] == layout
           function_emit_cache_merge_ptr_ids(used_ptr_ids, cached_entry[:ptr_ids])
           function_emit_cache_state[:hits] = function_emit_cache_state[:hits] + 1
           rendered_fn_texts[i] = cached_entry[:text]
@@ -390,7 +393,7 @@
         function_emit_cache_merge_ptr_ids(used_ptr_ids, pids)
         wb = work_buckets[wi]
         if wb != nil
-          wb[:functions][work_fns[wi][:name]] = {name: work_fns[wi][:name], text: txt, ptr_ids: pids}
+          wb[:functions][work_fns[wi][:name]] = {name: work_fns[wi][:name], text: txt, ptr_ids: pids, ic_layout: layouts[orig_i]}
           wb[:dirty] = true
           function_emit_cache_state[:misses] = function_emit_cache_state[:misses] + 1
         else
@@ -408,7 +411,7 @@
           txt = emit_function(wf, mod[:string_wvalues], slab_info, local_ptr_ids, frame_pointers, mod[:llvm_fn_attrs], attr_groups, arm64_target, windows_target, mod[:preserve_debug_frames] == true, emit_blockaddress_sites)
           pids = local_ptr_ids.keys()
           function_emit_cache_merge_ptr_ids(used_ptr_ids, pids)
-          wb[:functions][wf[:name]] = {name: wf[:name], text: txt, ptr_ids: pids}
+          wb[:functions][wf[:name]] = {name: wf[:name], text: txt, ptr_ids: pids, ic_layout: layouts[orig_i]}
           wb[:dirty] = true
           function_emit_cache_state[:misses] = function_emit_cache_state[:misses] + 1
           rendered_fn_texts[orig_i] = txt

@@ -490,6 +490,25 @@ function_emit_cache_state = {
     return library_bucket
   nil
 
+# The symbol identifies the function's behavior. Rendered LLVM also names
+# module-local dispatch slots. Reusing a slot occupied by a different method
+# lets the runtime's receiver-type fast path call the wrong implementation.
+-> function_emit_cache_ic_layout(f)
+  layout = StringBuffer(32)
+  blocks = f[:blocks]
+  bi = 0
+  while bi < blocks.size()
+    instructions = blocks[bi][:instructions]
+    ii = 0
+    while ii < instructions.size()
+      inst = instructions[ii]
+      if wire_kind(inst) == :call_method_i64
+        layout << wire_get(inst, :ic_id).to_s()
+        layout << ","
+      ii += 1
+    bi += 1
+  layout.to_s()
+
 -> function_emit_cache_safe?(f)
   blocks = f[:blocks]
   nblocks = blocks.size()
@@ -528,8 +547,9 @@ function_emit_cache_state = {
   if f[:embedded_ll] == nil && f[:embedded_asm] == nil && attr_groups != nil
     function_attr_group_id(attr_groups, function_attr_text(frame_pointers, host_fn_attrs, preserve_debug_frames))
 
+  layout = function_emit_cache_ic_layout(f)
   entry = cache_bucket[:functions][f[:name]]
-  if entry != nil && entry[:name] == f[:name]
+  if entry != nil && entry[:name] == f[:name] && entry[:ic_layout] == layout
     function_emit_cache_merge_ptr_ids(used_ptr_ids, entry[:ptr_ids])
     function_emit_cache_state[:hits] = function_emit_cache_state[:hits] + 1
     return entry[:text]
@@ -542,7 +562,7 @@ function_emit_cache_state = {
   rendered = emit_function(f, string_wvs, slab_info, local_ptr_ids, frame_pointers, host_fn_attrs, attr_groups, arm64_target, windows_target, preserve_debug_frames, emit_blockaddress_sites)
   ptr_ids = local_ptr_ids.keys()
   function_emit_cache_merge_ptr_ids(used_ptr_ids, ptr_ids)
-  cache_bucket[:functions][f[:name]] = {name: f[:name], text: rendered, ptr_ids: ptr_ids}
+  cache_bucket[:functions][f[:name]] = {name: f[:name], text: rendered, ptr_ids: ptr_ids, ic_layout: layout}
   cache_bucket[:dirty] = true
   function_emit_cache_state[:misses] = function_emit_cache_state[:misses] + 1
   rendered

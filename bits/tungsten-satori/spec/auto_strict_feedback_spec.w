@@ -3,7 +3,7 @@ use ../lib/satori
 session = Session.new(".")
 session.quiet = true
 session.no_cache = true
-session.run_import("prelude")
+session.run_import("core")
 proved = {"squares" => "b ^ 2 ≤ d", "reversed" => "y ≤ x", "supplied" => "score x ≤ x", "focused" => "x ≤ y"}
 ordinary = ["no_bound", "wrong_direction", "unrelated", "alternative"]
 commands = parse_program(File.read("bits/tungsten-satori/spec/auto_strict_feedback.sat"))

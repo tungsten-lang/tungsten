@@ -58,7 +58,7 @@ SAT_SYMBOLS_LIST = ["<;>", "⊢", ":=", "=>", "->", "<->", "<=", ">=", "!=", "/\
     h[w] = true
   h
 
-# Per-first-byte dispatch table: b0 -> [[raw_sym, byte_len, char_len, norm_text, is_lam_kw], ...]
+# Per-first-byte dispatch table: b0 -> [[bytes, byte_len, char_len, norm_text, is_lam_kw], ...]
 -> build_sym_by_b0
   tbl = Array.new(256)
   i = 0
@@ -66,9 +66,10 @@ SAT_SYMBOLS_LIST = ["<;>", "⊢", ":=", "=>", "->", "<->", "<=", ">=", "!=", "/\
     tbl[i] = []
     i += 1
   SAT_SYMBOLS_LIST.each -> (s)
-    b0 = s.byte_at(0)
+    bytes = ccall("w_string_bytes_view", s) ## u8[]
+    b0 = bytes[0]
     clen = s.chars.size
-    tbl[b0].push([s, s.size, clen, normalize_sym(s), s == "λ"])
+    tbl[b0].push([bytes, bytes.size, clen, normalize_sym(s), s == "λ"])
   tbl
 
 SAT_KW_SET = build_kw_set()
@@ -93,20 +94,22 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
     return 3
   4
 
--> decode_cp(src, i, limit)
-  b0 = src.byte_at(i)
+-> decode_cp(src, i, limit, bytes = nil)
+  if bytes == nil
+    bytes = ccall("w_string_bytes_view", src)
+  b0 = bytes[i]
   if b0 < 128
     return b0
   if b0 < 224
     if i + 1 < limit
-      return ((b0 & 31) << 6) | (src.byte_at(i + 1) & 63)
+      return ((b0 & 31) << 6) | (bytes[i + 1] & 63)
     return b0
   if b0 < 240
     if i + 2 < limit
-      return ((b0 & 15) << 12) | ((src.byte_at(i + 1) & 63) << 6) | (src.byte_at(i + 2) & 63)
+      return ((b0 & 15) << 12) | ((bytes[i + 1] & 63) << 6) | (bytes[i + 2] & 63)
     return b0
   if i + 3 < limit
-    return ((b0 & 7) << 18) | ((src.byte_at(i + 1) & 63) << 12) | ((src.byte_at(i + 2) & 63) << 6) | (src.byte_at(i + 3) & 63)
+    return ((b0 & 7) << 18) | ((bytes[i + 1] & 63) << 12) | ((bytes[i + 2] & 63) << 6) | (bytes[i + 3] & 63)
   b0
 
 -> ident_start_cp?(o)
@@ -133,12 +136,14 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
   b >= 48 && b <= 57
 
 # Lexes bytes [line_start, limit) of src for physical line `lineno`.
--> lex_line_bytes(src, line_start, limit, lineno)
+-> lex_line_bytes(src, line_start, limit, lineno, bytes = nil)
+  if bytes == nil
+    bytes = ccall("w_string_bytes_view", src)
   toks = []
   i = line_start
   col = 0
   while i < limit
-    b = src.byte_at(i)
+    b = bytes[i]
     if b == 32 || b == 9
       i += 1
       col += 1
@@ -146,17 +151,17 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
       break
   indent = col
   while i < limit
-    b = src.byte_at(i)
+    b = bytes[i]
     if b == 32 || b == 9 || b == 13
       i += 1
       col += 1
-    elsif b == 45 && i + 1 < limit && src.byte_at(i + 1) == 45
+    elsif b == 45 && i + 1 < limit && bytes[i + 1] == 45
       i = limit
     elsif digit_byte?(b)
       j = i + 1
       has_us = false
       while j < limit
-        bj = src.byte_at(j)
+        bj = bytes[j]
         if digit_byte?(bj)
           j += 1
         elsif bj == 95
@@ -165,9 +170,9 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
         else
           break
       kind = :num
-      if j + 1 < limit && src.byte_at(j) == 46 && digit_byte?(src.byte_at(j + 1))
+      if j + 1 < limit && bytes[j] == 46 && digit_byte?(bytes[j + 1])
         j += 2
-        while j < limit && digit_byte?(src.byte_at(j))
+        while j < limit && digit_byte?(bytes[j])
           j += 1
         kind = :dec
       num_txt = src.slice(i, j - i)
@@ -179,8 +184,8 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
     elsif b == 34
       j = i + 1
       scol = col + 1
-      while j < limit && src.byte_at(j) != 34
-        step = utf8_len(src.byte_at(j))
+      while j < limit && bytes[j] != 34
+        step = utf8_len(bytes[j])
         j += step
         scol += 1
       toks.push(Tok.new(:str, src.slice(i + 1, j - i - 1), lineno, col))
@@ -190,22 +195,22 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
       else
         i = j
         col = scol
-    elsif (b < 128 && ((b >= 97 && b <= 122) || (b >= 65 && b <= 90) || b == 95)) || (b >= 128 && ident_start_cp?(decode_cp(src, i, limit)))
+    elsif (b < 128 && ((b >= 97 && b <= 122) || (b >= 65 && b <= 90) || b == 95)) || (b >= 128 && ident_start_cp?(decode_cp(src, i, limit, bytes)))
       j = i
       jcol = col
       while j < limit
-        bj = src.byte_at(j)
+        bj = bytes[j]
         if bj < 128
           if (bj >= 97 && bj <= 122) || (bj >= 65 && bj <= 90) || (bj >= 48 && bj <= 57) || bj == 95 || bj == 39 || bj == 33 || bj == 63
             j += 1
             jcol += 1
           elsif bj == 46 && j > i && j + 1 < limit
-            bn = src.byte_at(j + 1)
+            bn = bytes[j + 1]
             ok_next = false
             if bn < 128
               ok_next = (bn >= 97 && bn <= 122) || (bn >= 65 && bn <= 90) || (bn >= 48 && bn <= 57) || bn == 95
             else
-              ok_next = ident_start_cp?(decode_cp(src, j + 1, limit))
+              ok_next = ident_start_cp?(decode_cp(src, j + 1, limit, bytes))
             if ok_next
               j += 1
               jcol += 1
@@ -214,7 +219,7 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
           else
             break
         else
-          cp = decode_cp(src, j, limit)
+          cp = decode_cp(src, j, limit, bytes)
           if ident_char_cp?(cp)
             j += utf8_len(bj)
             jcol += 1
@@ -236,11 +241,11 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
         ent = cands[ci]
         blen = ent[1]
         if i + blen <= limit
-          sraw = ent[0]
+          sym_bytes = ent[0]
           ok = true
           k = 1
           while k < blen
-            if src.byte_at(i + k) != sraw.byte_at(k)
+            if bytes[i + k] != sym_bytes[k]
               ok = false
               break
             k += 1
@@ -302,6 +307,8 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
 
 # Source text -> array of LLine (logical lines, comments and blanks removed).
 -> lex_source(src)
+  # Scan one read-only UTF-8 view. Keep src for slicing original token text.
+  bytes = ccall("w_string_bytes_view", src) ## u8[]
   out = []
   cur = nil
   depth = 0
@@ -312,15 +319,15 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
   pos = 0
   while pos <= total
     line_end = pos
-    while line_end < total && src.byte_at(line_end) != 10
+    while line_end < total && bytes[line_end] != 10
       line_end += 1
     lineno += 1
     r = nil
     begin
-      r = lex_line_bytes(src, pos, line_end, lineno)
+      r = lex_line_bytes(src, pos, line_end, lineno, bytes)
     rescue err
       ind = 0
-      while pos + ind < line_end && src.byte_at(pos + ind) == 32
+      while pos + ind < line_end && bytes[pos + ind] == 32
         ind += 1
       r = [ind, [Tok.new(:lexerr, err.to_s, lineno, ind)]]
     toks = r[1]

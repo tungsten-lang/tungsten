@@ -104,10 +104,11 @@ SATC_LIB_FILES = [
   n = src.size
   if n == 0
     return 0
+  bytes = ccall("w_string_bytes_view", src) ## u8[]
   cnt = 1
   i = 0
   while i < n
-    if src.byte_at(i) == 10
+    if bytes[i] == 10
       cnt += 1
     i += 1
   cnt

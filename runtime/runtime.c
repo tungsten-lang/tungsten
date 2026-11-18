@@ -612,6 +612,7 @@ static inline void w_allocprof(int kind, long long bytes) {
 #if defined(__APPLE__) || defined(__linux__)
 #ifdef __APPLE__
 #include <mach/mach.h>
+extern int memorystatus_get_level(int *) __attribute__((weak_import));
 #endif
 
 #define W_MEMWATCH_DEFAULT_LIMIT ((uint64_t)8 << 30)
@@ -660,9 +661,15 @@ static uint64_t w_memwatch_footprint(void) {
 /* Percent of system memory still available, or -1 if unknown. */
 static int w_memwatch_system_available_pct(void) {
 #ifdef __APPLE__
-    int level = 0;
+    int level = -1;
+    /* Some sandboxes deny the sysctl while allowing the same kernel gauge
+     * through memorystatus_get_level. Older systems can use the sysctl. */
+    if (memorystatus_get_level && memorystatus_get_level(&level) == 0 &&
+        level >= 0 && level <= 100)
+        return level;
     size_t len = sizeof(level);
-    if (sysctlbyname("kern.memorystatus_level", &level, &len, NULL, 0) != 0)
+    if (sysctlbyname("kern.memorystatus_level", &level, &len, NULL, 0) != 0 ||
+        len != sizeof(level) || level < 0 || level > 100)
         return -1;
     return level;
 #else

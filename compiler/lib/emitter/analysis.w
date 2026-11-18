@@ -452,6 +452,51 @@ function_emit_cache_state = {
     i += 1
   wyhash64_hex_string(out.to_s())
 
+# Lowering's library boundary precedes optimization. Inlining and later
+# transformations can introduce references beyond that prefix into a cached
+# library body. Its emitted slab offsets depend on every preceding string,
+# including those between the old boundary and the last referenced id.
+-> function_emit_library_string_count(mod, paths, count)
+  return nil if count == nil || count < 0 || count > mod[:strings].size()
+  fi = 0
+  while fi < mod[:functions].size()
+    func = mod[:functions][fi]
+    if paths[func[:source_path]] == true && func[:is_toplevel] != true && func[:name] != "main"
+      bi = 0
+      while bi < func[:blocks].size()
+        instrs = func[:blocks][bi][:instructions]
+        ii = 0
+        while ii < instrs.size()
+          inst = instrs[ii]
+          op = wire_kind(inst)
+          field = nil
+          if op in (:string_i64 :symbol_i64 :bigint_literal_i64 :const_uuid :const_ipv6)
+            field = :string_id
+          elsif op in (:ivar_get :ivar_set :register_unit)
+            field = :str_id
+          elsif op in (:class_new :builtin_class_init)
+            field = :name_str_id
+          elsif op in (:class_add_method :class_add_static_method)
+            field = :method_str_id
+          elsif op == :class_add_ivar
+            field = :ivar_str_id
+          elsif op == :call_loc_set_col
+            field = :file_str_id
+          if field != nil
+            sid = wire_get(inst, field)
+            count = sid + 1 if sid != nil && sid >= count
+          elsif op == :switch_i64
+            cases = wire_get(inst, :cases)
+            ci = 0
+            while cases != nil && ci < wire_sequence_size(cases)
+              sid = wire_sequence_get(cases, ci)[:string_id]
+              count = sid + 1 if sid != nil && sid >= count
+              ci += 1
+          ii += 1
+        bi += 1
+    fi += 1
+  count
+
 -> function_emit_library_cache_bucket(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags, emit_blockaddress_sites = false)
   paths = mod[:library_reachability_paths]
   if paths == nil || paths.size() == 0 || env("TUNGSTEN_LIBRARY_FUNCTION_EMIT_CACHE") == "0"
@@ -459,11 +504,12 @@ function_emit_cache_state = {
   string_count = mod[:incremental_library_cache_compact_string_count]
   if string_count == nil
     string_count = mod[:incremental_library_cache_string_count]
+  string_count = function_emit_library_string_count(mod, paths, string_count)
   strings_digest = function_emit_cache_strings_digest(mod, string_count)
   if string_count == nil || string_count == 0 || strings_digest == nil
     return nil
   out = StringBuffer(320)
-  out << "rendered-library-function-v4"
+  out << "rendered-library-function-v5"
   out << function_emit_cache_field(function_emit_cache_module_key(mod, frame_pointers, host_fn_attrs, arm64_target, windows_target, preserve_debug_frames, fp_flags, emit_blockaddress_sites))
   out << function_emit_cache_field(mod[:incremental_library_cache_key])
   out << function_emit_cache_field(string_count)

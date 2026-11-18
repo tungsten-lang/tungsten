@@ -156,15 +156,13 @@ If you see RSS climb:
    `TUNGSTEN_SLOT_RELEASE=0` and `TUNGSTEN_FRESH_HEAP=0` switch off the newer
    releases one at a time.
 
-A compiled program never grows without bound: past 8 GiB of physical memory
-(compressed pages included) the runtime prints
-`tungsten: memory limit exceeded` and exits with status 137. It also exits
-once it holds 1 GiB or more and the system has under 5% of its memory left.
-A program that really needs more raises the limit:
+By default, the runtime exits with status 137 when a compiled program holds
+1 GiB or more and the system has under 5% of its memory left. To also set a
+per-process physical-memory limit (including compressed pages):
 
 ```bash
 TUNGSTEN_MEMORY_LIMIT=32G ./out      # K/M/G/T suffix; a bare number is MiB
-TUNGSTEN_MEMORY_LIMIT=off ./out      # no ceiling
+TUNGSTEN_MEMORY_LIMIT=off ./out      # disable the watchdog, including the system check
 ```
 
 ---

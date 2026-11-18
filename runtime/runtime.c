@@ -603,19 +603,20 @@ static inline void w_allocprof(int kind, long long bytes) {
  * memory, and on macOS that ends in a watchdog kernel panic rather than an
  * OOM kill. A detached thread samples this process's physical footprint
  * (compressed pages included, unlike RSS) every 100 ms and exits with status
- * 137 once it passes the limit: 8 GiB by default; TUNGSTEN_MEMORY_LIMIT=32G
- * raises it (K/M/G/T suffix, a bare number is MiB) and =off disables the
- * watch. A process holding at least 1 GiB also exits when the whole system is
+ * 137 once it passes an explicitly configured TUNGSTEN_MEMORY_LIMIT (K/M/G/T
+ * suffix, a bare number is MiB). There is no default per-process limit;
+ * =off disables the watch. A process holding at least 1 GiB also exits when the whole system is
  * down to its last 5% of memory, so many processes that each stay under the
  * limit cannot exhaust the machine together. Nothing on the allocation paths
  * changes. */
 #if defined(__APPLE__) || defined(__linux__)
 #ifdef __APPLE__
 #include <mach/mach.h>
+/* libSystem exports this query used by macOS memory_pressure -Q. */
 extern int memorystatus_get_level(int *) __attribute__((weak_import));
 #endif
 
-#define W_MEMWATCH_DEFAULT_LIMIT ((uint64_t)8 << 30)
+#define W_MEMWATCH_DEFAULT_LIMIT ((uint64_t)0)
 #define W_MEMWATCH_SYSTEM_FLOOR_PCT 5
 #define W_MEMWATCH_SYSTEM_MIN_FOOTPRINT ((uint64_t)1 << 30)
 #define W_MEMWATCH_PERIOD_US 100000
@@ -765,8 +766,8 @@ static void w_memwatch_start(void) {
             limit = parsed;
         } else {
             fprintf(stderr, "tungsten: ignoring malformed TUNGSTEN_MEMORY_LIMIT"
-                            "=%s (want e.g. 16G, 512M or off); limit stays "
-                            "8G\n", e);
+                            "=%s (want e.g. 16G, 512M or off); no "
+                            "per-process limit is set\n", e);
         }
     }
     g_memwatch_limit = limit;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check the compiled runtime's per-process watchdog and system pressure checks.
+# Check the compiled runtime's optional per-process watchdog limit.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,7 +17,7 @@ grep -q 'watchdog test completed' "$tmp/default.out"
 env TUNGSTEN_MEMORY_LIMIT=off "$tmp/watch" >"$tmp/off.out" 2>"$tmp/off.err"
 grep -q 'watchdog test completed' "$tmp/off.out"
 env TUNGSTEN_MEMORY_LIMIT=invalid "$tmp/watch" >"$tmp/invalid.out" 2>"$tmp/invalid.err"
-grep -q 'limit stays 8G' "$tmp/invalid.err"
+grep -q 'no per-process limit is set' "$tmp/invalid.err"
 
 set +e
 env TUNGSTEN_MEMORY_LIMIT=1M "$tmp/watch" >"$tmp/limited.out" 2>"$tmp/limited.err"
@@ -28,7 +28,7 @@ if [ "$status" -ne 137 ] || ! grep -q 'memory limit exceeded' "$tmp/limited.err"
   cat "$tmp/limited.err" >&2
   exit 1
 fi
-printf 'PASS: process memory watchdog limit\n'
+printf 'PASS: optional memory watchdog limit\n'
 
 if [ "$(uname -s)" = Darwin ]; then
   # Exercise the real watchdog with synthetic process readings. Neither this
@@ -59,7 +59,7 @@ static kern_return_t sample_task(task_name_t task, task_flavor_t flavor,
                                  task_info_t out, mach_msg_type_number_t *count) {
     kern_return_t result = task_info(task, flavor, out, count);
     if (result == KERN_SUCCESS && flavor == TASK_VM_INFO)
-        ((task_vm_info_t)out)->phys_footprint = (uint64_t)2 << 30;
+        ((task_vm_info_t)out)->phys_footprint = (uint64_t)9 << 30;
     return result;
 }
 __attribute__((used, section("__DATA,__interpose")))
@@ -85,6 +85,7 @@ EOF
     fi
   }
   run_pressure 137 TEST_AVAILABLE_PCT=4
+  # Above the former 8 GiB ceiling, system headroom alone permits this run.
   run_pressure 0 TEST_AVAILABLE_PCT=5
   run_pressure 137 TEST_AVAILABLE_PCT=4 TEST_USE_SYSCTL=1
   printf 'PASS: macOS memory pressure with restricted and fallback queries\n'

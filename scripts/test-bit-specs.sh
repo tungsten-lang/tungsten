@@ -148,6 +148,11 @@ run_one() {
   # and each starts `tungsten spec/<name>_test.w` for the tests of its shard;
   # see bits/tungsten-metaflip/spec/metaflip_unit_harness.w.)
   case "$path" in
+    bits/tungsten-satori/spec/*)
+      if ! env "${spec_env[@]}" python3 "$ROOT/scripts/run-satori-spec.py" "$path" >"$log" 2>&1; then
+        status=1
+      fi
+      ;;
     bits/tungsten-argon/spec/argon_spec.w|bits/tungsten-hammer/spec/hammer_spec.w|bits/tungsten-drawille/spec/inspection_spec.w|bits/tungsten-rung/spec/rung_spec.w)
       if ! run_bounded env TUNGSTEN_INCREMENTAL=0 "$TUNGSTEN" compile "$path" --out "$out" --no-lto >"$log" 2>&1; then
         status=1

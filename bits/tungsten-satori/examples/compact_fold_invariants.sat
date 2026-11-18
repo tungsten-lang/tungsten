@@ -1,0 +1,13 @@
+-- A recursive traversal keeps its initial lower bound as the state changes.
+-> advance : list α → ℚ → ℚ
+  | [], s => s
+  | x :: xs, s => advance xs (s+1)
++ bounded (xs : list α) (s : ℚ) (h : 0 ≤ s) : 0 ≤ advance xs s
+  auto
+
+-- Two dependent properties travel together; the step proof is the only hint.
++ stable (step : α → β → β) (p q : β → Prop)
+    (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s))
+    (xs : list α) (s : β) (hp : p s) (hq : q s)
+    : p (list.foldl step xs s) ∧ q (list.foldl step xs s)
+  auto

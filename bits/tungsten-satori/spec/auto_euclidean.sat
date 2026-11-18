@@ -1,0 +1,50 @@
+import euclidean
+
++ list_cauchy (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) :
+    |sum_list xs (fun i => w i*(f i*g i))| ≤ sqrt (sum_list xs (fun i => w i*(f i*f i))) * sqrt (sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ list_triangle (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) : sqrt (sum_list xs (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_list xs (fun i => w i*(f i*f i))) + sqrt (sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ list_unweighted (xs : list α) (f g : α → ℝ) : sqrt (sum_list xs (fun i => (f i+g i)*(f i+g i))) ≤ sqrt (sum_list xs (fun i => f i*f i)) + sqrt (sum_list xs (fun i => g i*g i))
+  auto
+
++ list_unweighted_cauchy (xs : list α) (f g : α → ℝ) :
+    |sum_list xs (fun i => f i*g i)| ≤ sqrt (sum_list xs (fun i => f i*f i)) * sqrt (sum_list xs (fun i => g i*g i))
+  auto
+
++ list_zero_weights (xs : list α) (f g : α → ℝ) : sqrt (sum_list xs (fun i => 0*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_list xs (fun i => 0*(f i*f i))) + sqrt (sum_list xs (fun i => 0*(g i*g i)))
+  auto
+
++ range_cauchy (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) :
+    |sum_below n (fun i => w i*(f i*g i))| ≤ sqrt (sum_below n (fun i => w i*(f i*f i))) * sqrt (sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ range_triangle (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) : sqrt (sum_below n (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_below n (fun i => w i*(f i*f i))) + sqrt (sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ range_unweighted (n : ℕ) (f g : ℕ → ℝ) : sqrt (sum_below n (fun i => (f i+g i)*(f i+g i))) ≤ sqrt (sum_below n (fun i => f i*f i)) + sqrt (sum_below n (fun i => g i*g i))
+  auto
+
++ range_unweighted_cauchy (n : ℕ) (f g : ℕ → ℝ) :
+    |sum_below n (fun i => f i*g i)| ≤ sqrt (sum_below n (fun i => f i*f i)) * sqrt (sum_below n (fun i => g i*g i))
+  auto
+
++ range_zero_weights (n : ℕ) (f g : ℕ → ℝ) : sqrt (sum_below n (fun i => 0*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_below n (fun i => 0*(f i*f i))) + sqrt (sum_below n (fun i => 0*(g i*g i)))
+  auto
+
++ planar_triangle (a b c d : ℝ) : sqrt ((a+c)^2+(b+d)^2) ≤ sqrt (a^2+b^2)+sqrt (c^2+d^2)
+  auto
+
++ planar_reverse (a b c d : ℝ) : sqrt (a^2+b^2)-sqrt (c^2+d^2) ≤ sqrt ((a-c)^2+(b-d)^2)
+  auto
+
++ empty_triangle (f g : ℕ → ℝ) : sqrt (sum_list ([] : list ℕ) (fun i => (f i+g i)*(f i+g i))) ≤ sqrt (sum_list ([] : list ℕ) (fun i => f i*f i))+sqrt (sum_list ([] : list ℕ) (fun i => g i*g i))
+  auto
+
++ repeated_triangle (x : α) (f g : α → ℝ) : sqrt (sum_list (x :: x :: []) (fun i => (f i+g i)*(f i+g i))) ≤ sqrt (sum_list (x :: x :: []) (fun i => f i*f i))+sqrt (sum_list (x :: x :: []) (fun i => g i*g i))
+  auto
+
++ scalar_bound (x a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) (h : x^2 ≤ a*b) : |x| ≤ sqrt a * sqrt b
+  auto

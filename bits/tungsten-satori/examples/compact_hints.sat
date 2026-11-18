@@ -1,0 +1,25 @@
+import realx
+
+-- Norm facts supplied by the surrounding mathematical development.
+opaque nu : (ℕ → ℝ) → ℝ
+opaque nv : (ℕ → ℝ) → ℝ
+axiom nu_nonneg (x : ℕ → ℝ) : 0 ≤ nu x
+axiom nv_nonneg (x : ℕ → ℝ) : 0 ≤ nv x
+-> norm (x : (ℕ → ℝ) × (ℕ → ℝ)) : ℝ := sqrt ((nu (fst x))^2+(nv (snd x))^2)
+
++ upper (x : (ℕ → ℝ) × (ℕ → ℝ)) : norm x ≤ nu (fst x)+nv (snd x)
+  auto [nu_nonneg, nv_nonneg]
+
++ lower (x : (ℕ → ℝ) × (ℕ → ℝ)) : nv (snd x) ≤ norm x
+  auto [nv_nonneg]
+
++ pointwise (f g : ℕ → ℝ) (hf : ∀ i, 0 ≤ f i) (hg : ∀ i, 0 ≤ g i) (x : ℕ) :
+    sqrt ((f x)^2+(g x)^2) ≤ f x+g x
+  auto
+
+opaque measure : α → ℝ
+axiom measure_nonneg (x : α) : 0 ≤ measure x
+
++ measured_norm (x : ℚ) (y : ℤ) :
+    sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg]

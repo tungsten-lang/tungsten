@@ -1,0 +1,29 @@
+opaque score : ℤ → ℤ
+axiom score_bound (x : ℤ) : score x ≤ x
+
++ squares (b c d : ℚ) (h : b^2 ≤ c) (k : c ≤ d) : b^2 < d
+  auto
+
++ reversed (x y : ℕ) (h : y ≤ x) : x > y
+  auto
+
++ supplied (x : ℤ) : score x < x
+  auto [score_bound]
+
++ focused (x y : ℝ) (p : Prop) (hp : p) (h : x ≤ y) : p ∧ x < y
+  auto
+
++ no_bound (x : ℤ) : score x < x
+  auto
+
++ wrong_direction (x y : ℚ) (h : y ≤ x) : x < y
+  auto
+
++ unrelated (p : Prop) : p
+  auto
+
++ alternative (x y : ℚ) (h : x ≤ y) (p : Prop) : x < y ∨ p
+  auto
+
++ strict (a b c : ℚ) (h : a ≤ b) (k : b < c) : a < c
+  auto

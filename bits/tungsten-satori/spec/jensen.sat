@@ -1,0 +1,41 @@
+import convex
+
++ real_jensen (lo hi : ℝ) (f : ℝ → ℝ) (hf : concave_interval.real lo hi f) (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℝ)*m = (∑ j < n, p j)) : (∑ j < n, f (p j)) ≤ (n : ℝ)*f m := sum_below.concave_jensen.real lo hi f hf n p m hp hm
+
++ real_convex (lo hi : ℝ) (f : ℝ → ℝ) (hf : convex_interval.real lo hi f) (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℝ)*m = (∑ j < n, p j)) : (n : ℝ)*f m ≤ ∑ j < n, f (p j) := sum_below.convex_jensen.real lo hi f hf n p m hp hm
+
++ real_succ (lo hi : ℝ) (f : ℝ → ℝ) (hf : concave_interval.real lo hi f) (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (hp : ∀ j < n+1, lo ≤ p j ∧ p j ≤ hi) (hm : ((n : ℝ)+1)*m = (∑ j < n+1, p j)) : (∑ j < n+1, f (p j)) ≤ ((n : ℝ)+1)*f m := sum_below.concave_jensen_succ.real lo hi n f p m hf hp hm
+
++ real_sub (lo hi : ℝ) (f : ℝ → ℝ) (g : ℝ → ℝ) (hf : concave_interval.real lo hi f) (hg : convex_interval.real lo hi g) : concave_interval.real lo hi (fun x => f x-g x) := concave_interval.sub_convex.real lo hi f g hf hg
+
++ real_empty (lo hi : ℝ) (f : ℝ → ℝ) (hf : concave_interval.real lo hi f) (p : ℕ → ℝ) (m : ℝ) : (∑ j < 0, f (p j)) ≤ ((0 : ℕ) : ℝ)*f m
+  exact sum_below.concave_jensen.real lo hi f hf 0 p m (by intro j hj; omega) (by simp [cast_zero.real])
+
++ real_shifted (f : ℝ → ℝ) (hf : concave_interval.real (-3) 2 f) (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (hp : ∀ j < n, -3 ≤ p j ∧ p j ≤ 2) (hm : (n : ℝ)*m = (∑ j < n, p j)) : (∑ j < n, f (p j)) ≤ (n : ℝ)*f m := sum_below.concave_jensen.real (-3) 2 f hf n p m hp hm
+
++ real_monotone (lo hi : ℝ) (f : ℝ → ℝ) (x y peak : ℝ) (hf : concave_interval.real lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : y ≤ peak) (hpeak : peak ≤ hi) (hmax : ∀ z : ℝ, lo ≤ z → z ≤ hi → f z ≤ f peak) : f x ≤ f y := concave_interval.mono_below_max.real lo hi f x y peak hf hx hxy hy hpeak hmax
+
++ real_constant (lo hi c : ℝ) : concave_interval.real lo hi (fun x => c)
+  unfold concave_interval.real
+  intro x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  nlinarith
+
++ rat_jensen (lo hi : ℚ) (f : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (n : ℕ) (p : ℕ → ℚ) (m : ℚ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℚ)*m = (∑ j < n, p j)) : (∑ j < n, f (p j)) ≤ (n : ℚ)*f m := sum_below.concave_jensen.rat lo hi f hf n p m hp hm
+
++ rat_convex (lo hi : ℚ) (f : ℚ → ℚ) (hf : convex_interval.rat lo hi f) (n : ℕ) (p : ℕ → ℚ) (m : ℚ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℚ)*m = (∑ j < n, p j)) : (n : ℚ)*f m ≤ ∑ j < n, f (p j) := sum_below.convex_jensen.rat lo hi f hf n p m hp hm
+
++ rat_succ (lo hi : ℚ) (f : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (n : ℕ) (p : ℕ → ℚ) (m : ℚ) (hp : ∀ j < n+1, lo ≤ p j ∧ p j ≤ hi) (hm : ((n : ℚ)+1)*m = (∑ j < n+1, p j)) : (∑ j < n+1, f (p j)) ≤ ((n : ℚ)+1)*f m := sum_below.concave_jensen_succ.rat lo hi n f p m hf hp hm
+
++ rat_sub (lo hi : ℚ) (f : ℚ → ℚ) (g : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (hg : convex_interval.rat lo hi g) : concave_interval.rat lo hi (fun x => f x-g x) := concave_interval.sub_convex.rat lo hi f g hf hg
+
++ rat_empty (lo hi : ℚ) (f : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (p : ℕ → ℚ) (m : ℚ) : (∑ j < 0, f (p j)) ≤ ((0 : ℕ) : ℚ)*f m
+  exact sum_below.concave_jensen.rat lo hi f hf 0 p m (by intro j hj; omega) (by simp [cast_zero.rat])
+
++ rat_shifted (f : ℚ → ℚ) (hf : concave_interval.rat (-3) 2 f) (n : ℕ) (p : ℕ → ℚ) (m : ℚ) (hp : ∀ j < n, -3 ≤ p j ∧ p j ≤ 2) (hm : (n : ℚ)*m = (∑ j < n, p j)) : (∑ j < n, f (p j)) ≤ (n : ℚ)*f m := sum_below.concave_jensen.rat (-3) 2 f hf n p m hp hm
+
++ rat_monotone (lo hi : ℚ) (f : ℚ → ℚ) (x y peak : ℚ) (hf : concave_interval.rat lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : y ≤ peak) (hpeak : peak ≤ hi) (hmax : ∀ z : ℚ, lo ≤ z → z ≤ hi → f z ≤ f peak) : f x ≤ f y := concave_interval.mono_below_max.rat lo hi f x y peak hf hx hxy hy hpeak hmax
+
++ rat_constant (lo hi c : ℚ) : concave_interval.rat lo hi (fun x => c)
+  unfold concave_interval.rat
+  intro x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  nlinarith

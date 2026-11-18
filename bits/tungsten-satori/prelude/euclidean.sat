@@ -1,0 +1,107 @@
+-- Euclidean norm bounds for finite lists and bounded sums.
+import cauchy
+import realx
+
++ list_sum.weighted_cauchy_sqrt.real (xs : list α) (w f g : α → ℝ) (nonneg : ∀ i ∈ xs, 0 ≤ w i) :
+    |sum_list xs (fun i => w i * (f i*g i))| ≤ sqrt (sum_list xs (fun i => w i * (f i*f i))) * sqrt (sum_list xs (fun i => w i * (g i*g i)))
+  apply abs_le_sqrt_mul
+  · apply sum_list_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) (f i*f i) (nonneg i hi) (by nlinarith)
+  · apply sum_list_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) (g i*g i) (nonneg i hi) (by nlinarith)
+  · exact list_sum.weighted_cauchy.real xs w f g nonneg
+
++ list_sum.cauchy_sqrt.real (xs : list α) (f g : α → ℝ) :
+    |sum_list xs (fun i => f i*g i)| ≤ sqrt (sum_list xs (fun i => f i*f i)) * sqrt (sum_list xs (fun i => g i*g i))
+  simpa using list_sum.weighted_cauchy_sqrt.real xs (fun i => 1) f g (by intro i hi; linarith)
+
++ list_sum.weighted_add_square_expand.real (xs : list α) (w f g : α → ℝ) :
+    sum_list xs (fun i => w i * ((f i+g i)*(f i+g i))) = (sum_list xs (fun i => w i * (f i*f i))) + 2*(sum_list xs (fun i => w i * (f i*g i))) + (sum_list xs (fun i => w i * (g i*g i)))
+  induction xs with i xs ih
+  · simp
+  · rw [list_sum.cons, list_sum.cons, list_sum.cons, list_sum.cons, ih]
+    ring
+
++ list_sum.weighted_minkowski.real (xs : list α) (w f g : α → ℝ) (nonneg : ∀ i ∈ xs, 0 ≤ w i) :
+    sqrt (sum_list xs (fun i => w i * ((f i+g i)*(f i+g i)))) ≤ sqrt (sum_list xs (fun i => w i * (f i*f i))) + sqrt (sum_list xs (fun i => w i * (g i*g i)))
+  have pa : 0 ≤ sum_list xs (fun i => w i * (f i*f i))
+    apply sum_list_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) (f i*f i) (nonneg i hi) (by nlinarith)
+  have pc : 0 ≤ sum_list xs (fun i => w i * (g i*g i))
+    apply sum_list_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) (g i*g i) (nonneg i hi) (by nlinarith)
+  have ps : 0 ≤ sum_list xs (fun i => w i * ((f i+g i)*(f i+g i)))
+    apply sum_list_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) ((f i+g i)*(f i+g i)) (nonneg i hi) (by nlinarith)
+  have e := list_sum.weighted_add_square_expand.real xs w f g
+  have cs := list_sum.weighted_cauchy_sqrt.real xs w f g nonneg
+  have abs := le_abs_self.real (sum_list xs (fun i => w i * (f i*g i)))
+  have sa := sq_sqrt (sum_list xs (fun i => w i * (f i*f i))) pa
+  have sc := sq_sqrt (sum_list xs (fun i => w i * (g i*g i))) pc
+  exact (sqrt_le_iff (sum_list xs (fun i => w i * ((f i+g i)*(f i+g i)))) (sqrt (sum_list xs (fun i => w i * (f i*f i))) + sqrt (sum_list xs (fun i => w i * (g i*g i)))) ps (by linarith [sqrt_nonneg (sum_list xs (fun i => w i * (f i*f i))), sqrt_nonneg (sum_list xs (fun i => w i * (g i*g i)))])).mpr (by nlinarith)
+
++ list_sum.minkowski.real (xs : list α) (f g : α → ℝ) :
+    sqrt (sum_list xs (fun i => (f i+g i)*(f i+g i))) ≤ sqrt (sum_list xs (fun i => f i*f i)) + sqrt (sum_list xs (fun i => g i*g i))
+  simpa using list_sum.weighted_minkowski.real xs (fun i => 1) f g (by intro i hi; linarith)
+
++ sum_below.weighted_cauchy_sqrt.real (n : ℕ) (w f g : ℕ → ℝ) (nonneg : ∀ i < n, 0 ≤ w i) :
+    |sum_below n (fun i => w i * (f i*g i))| ≤ sqrt (sum_below n (fun i => w i * (f i*f i))) * sqrt (sum_below n (fun i => w i * (g i*g i)))
+  apply abs_le_sqrt_mul
+  · apply sum_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) (f i*f i) (nonneg i hi) (by nlinarith)
+  · apply sum_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) (g i*g i) (nonneg i hi) (by nlinarith)
+  · exact sum_below.weighted_cauchy.real n w f g nonneg
+
++ sum_below.cauchy_sqrt.real (n : ℕ) (f g : ℕ → ℝ) :
+    |sum_below n (fun i => f i*g i)| ≤ sqrt (sum_below n (fun i => f i*f i)) * sqrt (sum_below n (fun i => g i*g i))
+  simpa using sum_below.weighted_cauchy_sqrt.real n (fun i => 1) f g (by intro i hi; linarith)
+
++ sum_below.weighted_add_square_expand.real (n : ℕ) (w f g : ℕ → ℝ) :
+    sum_below n (fun i => w i * ((f i+g i)*(f i+g i))) = (sum_below n (fun i => w i * (f i*f i))) + 2*(sum_below n (fun i => w i * (f i*g i))) + (sum_below n (fun i => w i * (g i*g i)))
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
+
++ sum_below.weighted_minkowski.real (n : ℕ) (w f g : ℕ → ℝ) (nonneg : ∀ i < n, 0 ≤ w i) :
+    sqrt (sum_below n (fun i => w i * ((f i+g i)*(f i+g i)))) ≤ sqrt (sum_below n (fun i => w i * (f i*f i))) + sqrt (sum_below n (fun i => w i * (g i*g i)))
+  have pa : 0 ≤ sum_below n (fun i => w i * (f i*f i))
+    apply sum_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) (f i*f i) (nonneg i hi) (by nlinarith)
+  have pc : 0 ≤ sum_below n (fun i => w i * (g i*g i))
+    apply sum_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) (g i*g i) (nonneg i hi) (by nlinarith)
+  have ps : 0 ≤ sum_below n (fun i => w i * ((f i+g i)*(f i+g i)))
+    apply sum_nonneg.real
+    intro i hi
+    exact mul_nonneg.real (w i) ((f i+g i)*(f i+g i)) (nonneg i hi) (by nlinarith)
+  have e := sum_below.weighted_add_square_expand.real n w f g
+  have cs := sum_below.weighted_cauchy_sqrt.real n w f g nonneg
+  have abs := le_abs_self.real (sum_below n (fun i => w i * (f i*g i)))
+  have sa := sq_sqrt (sum_below n (fun i => w i * (f i*f i))) pa
+  have sc := sq_sqrt (sum_below n (fun i => w i * (g i*g i))) pc
+  exact (sqrt_le_iff (sum_below n (fun i => w i * ((f i+g i)*(f i+g i)))) (sqrt (sum_below n (fun i => w i * (f i*f i))) + sqrt (sum_below n (fun i => w i * (g i*g i)))) ps (by linarith [sqrt_nonneg (sum_below n (fun i => w i * (f i*f i))), sqrt_nonneg (sum_below n (fun i => w i * (g i*g i)))])).mpr (by nlinarith)
+
++ sum_below.minkowski.real (n : ℕ) (f g : ℕ → ℝ) :
+    sqrt (sum_below n (fun i => (f i+g i)*(f i+g i))) ≤ sqrt (sum_below n (fun i => f i*f i)) + sqrt (sum_below n (fun i => g i*g i))
+  simpa using sum_below.weighted_minkowski.real n (fun i => 1) f g (by intro i hi; linarith)
+
++ norm2.add_le (a b c d : ℝ) : sqrt ((a+c)^2+(b+d)^2) ≤ sqrt (a^2+b^2) + sqrt (c^2+d^2)
+  simpa [sum_list, pow_two.real] using list_sum.minkowski.real (0 :: 1 :: []) (fun i => if i = 0 then a else b) (fun i => if i = 0 then c else d)
+
++ norm2.sub_le (a b c d : ℝ) : sqrt (a^2+b^2) - sqrt (c^2+d^2) ≤ sqrt ((a-c)^2+(b-d)^2)
+  have bound := norm2.add_le c d (a-c) (b-d)
+  have ea : c+(a-c) = a := by ring
+  have eb : d+(b-d) = b := by ring
+  rw [ea, eb] at bound
+  linarith

@@ -1,0 +1,37 @@
+import square_matching
+
++ unequal_factors (P : ℝ → Prop) (x y : ℝ) (h : P (x^2)) : P (x*y)
+  h
+
++ wrong_exponent (P : ℝ → Prop) (x : ℝ) (h : P (x^3)) : P (x*x)
+  h
+
++ wrong_sign (x : ℝ) : sqrt (x*x) = x
+  auto
+
++ missing_domain (x : ℝ) : sqrt x*sqrt x = x
+  auto
+
++ missing_guard (P : ℝ → Prop) (x : ℝ) (step : ∀ t : ℝ, P (t^2) → accepted t) : accepted x
+  auto [step]
+
++ wrong_guard (P : ℝ → Prop) (x y : ℝ) (h : P (y*y)) (step : ∀ t : ℝ, P (t^2) → accepted t) : accepted x
+  step x h
+
++ capture_leak (F : (ℝ → ℝ) → Prop) (square : ℝ) (h : F (fun x => (x+square)^2)) : F (fun square => square*square)
+  h
+
++ wrong_argument (P : ℕ → Prop) (x : ℕ) (h : P ((x+1)^2)) : P (x*x)
+  h
+
++ no_cancellation (P : ℕ → Prop) (x y : ℕ) (h : P ((x-y)^2)) : P (x*x-2*x*y+y*y)
+  h
+
++ no_global_hint (x : ℝ) : accepted (x*x)
+  auto
+
++ automatic_wrong_factor (P : ℝ → Prop) (x y : ℝ) (h : P (x^2)) : P (x*y)
+  auto
+
++ automatic_wrong_guard (P : ℝ → Prop) (x y : ℝ) (h : P (y*y)) (step : ∀ t : ℝ, P (t^2) → accepted t) : accepted x
+  auto

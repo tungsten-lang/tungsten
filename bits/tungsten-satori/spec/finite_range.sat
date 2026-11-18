@@ -1,0 +1,60 @@
+import finite_range
+
++ php (m : ℕ) : ∀ d : ℕ, ∀ f : ℕ → ℕ, (∀ x < m, f x < d) → (∀ x < m, ∀ y < m, f x = f y → x = y) → m ≤ d
+  exact nat.inj_bound m
+
++ php_inclusive (L : ℕ) : ∀ M : ℕ, ∀ p : ℕ → ℕ, (∀ i ≤ L, p i ≤ M) → (∀ i ≤ L, ∀ j ≤ L, i ≠ j → p i ≠ p j) → L ≤ M
+  exact nat.inj_bound_le L
+
++ empty_injection (f : ℕ → ℕ) : 0 ≤ (0 : ℕ)
+  exact nat.inj_bound 0 0 f (by intro x hx; omega) (by intro x hx y hy e; omega)
+
+-- A left inverse supplies injectivity; the decoder need not be bounded.
++ encoding_size (m n : ℕ) (encode decode : ℕ → ℕ) (bound : ∀ x < m, encode x < n)
+    (left : ∀ x < m, decode (encode x) = x) : m ≤ n
+  apply nat.inj_bound m n encode bound
+  intro x hx y hy e
+  have dx := left x hx
+  rw [e, left y hy] at dx
+  symm
+  exact dx
+
++ five_into_two (f : ℕ → ℕ) (bound : ∀ x < 5, f x < 2) : ∃ x < 5, ∃ y < 5, x < y ∧ f x = f y
+  exact nat.pigeonhole 5 2 f (by decide) bound
+
++ inclusive_collision (f : ℕ → ℕ) (bound : ∀ x ≤ 2, f x ≤ 1) : ∃ x ≤ 2, ∃ y ≤ 2, x < y ∧ f x = f y
+  exact nat.pigeonhole_le 2 1 f (by decide) bound
+
++ singleton_target (f : ℕ → ℕ) (bound : ∀ x < 1, f x < 1) : ∃ x < 1, f x = 0
+  exact nat.surjective_of_injective 1 f bound (by intro x hx y hy e; omega) 0 (by decide)
+
++ empty_target (f : ℕ → ℕ) : ∀ y < 0, ∃ x < 0, f x = y
+  exact nat.surjective_of_injective 0 f (by intro x hx; omega) (by intro x hx y hy e; omega)
+
++ missing_last (m n : ℕ) (f : ℕ → ℕ) (bound : ∀ x < m, f x < n + 1)
+    (inj : ∀ x < m, ∀ y < m, f x = f y → x = y) (missing : ∀ x < m, f x ≠ n) : m < n + 1
+  exact nat.inj_bound_of_missing m (n + 1) f bound inj n (by omega) missing
+
++ empty_missing : 0 < (1 : ℕ)
+  exact nat.inj_bound_of_missing 0 1 (fun x => x + 9) (by intro x hx; omega) (by intro x hx y hy e; omega) 0 (by decide) (by intro x hx; omega)
+
+-- A permutation on the finite range may behave arbitrarily outside it.
+-> rotate3 (x : ℕ) : ℕ := if x < 3 then (x + 1) % 3 else 100
++ permutation_preimage : ∃ x < 3, rotate3 x = 0 ∧ ∀ z < 3, rotate3 z = 0 → z = x
+  exact nat.unique_preimage 3 rotate3 (by decide) (by decide) 0 (by decide)
+
++ permutation_endpoint : ∃ x < 3, rotate3 x = 2
+  exact nat.surjective_of_injective 3 rotate3 (by decide) (by decide) 2 (by decide)
+
+#axioms php
+#axioms php_inclusive
+#axioms empty_injection
+#axioms encoding_size
+#axioms five_into_two
+#axioms inclusive_collision
+#axioms singleton_target
+#axioms empty_target
+#axioms missing_last
+#axioms empty_missing
+#axioms permutation_preimage
+#axioms permutation_endpoint

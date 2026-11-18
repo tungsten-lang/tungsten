@@ -1,0 +1,38 @@
+import core
+
++ adjacent.nat (P : ℕ → Prop) (x : ℕ) (h : P x) (k : P (x+1)) : P x ∧ P (x+1) := ⟨h, k⟩
+
++ nat_literal (P : ℕ → Prop) (h : P (3)) (k : P (4)) : P (3) ∧ P (4)
+  apply adjacent.nat
+  · exact h
+  · exact k
+
++ adjacent.int (P : ℤ → Prop) (x : ℤ) (h : P x) (k : P (x+1)) : P x ∧ P (x+1) := ⟨h, k⟩
+
++ int_literal (P : ℤ → Prop) (h : P (-3)) (k : P (-2)) : P (-3) ∧ P (-2)
+  apply adjacent.int
+  · exact h
+  · exact k
+
++ adjacent.rat (P : ℚ → Prop) (x : ℚ) (h : P x) (k : P (x+1)) : P x ∧ P (x+1) := ⟨h, k⟩
+
++ rat_literal (P : ℚ → Prop) (h : P (1/2)) (k : P (3/2)) : P (1/2) ∧ P (3/2)
+  apply adjacent.rat
+  · exact h
+  · exact k
+
++ adjacent.real (P : ℝ → Prop) (x : ℝ) (h : P x) (k : P (x+1)) : P x ∧ P (x+1) := ⟨h, k⟩
+
++ real_literal (P : ℝ → Prop) (h : P (-1/2)) (k : P (1/2)) : P (-1/2) ∧ P (1/2)
+  apply adjacent.real
+  · exact h
+  · exact k
+
++ adjacent_binder (P : ℕ → ℕ → Prop) (n : ℕ) (h : ∀ j, P n j) (k : ∀ j, P (n+1) j) : ∀ j, P n j ∧ P (n+1) j
+  intro j
+  exact ⟨h j, k j⟩
+
++ binder_literal (P : ℕ → ℕ → Prop) (h : ∀ j, P 3 j) (k : ∀ j, P 4 j) : ∀ j, P 3 j ∧ P 4 j
+  apply adjacent_binder
+  · exact h
+  · exact k

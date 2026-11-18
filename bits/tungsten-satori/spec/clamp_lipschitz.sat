@@ -1,0 +1,11 @@
+import arith
+
+-- The two benchmark clamp/ramp patterns no longer need four nested case splits.
+-> ramp_test (u : ℝ) : ℝ := min 1 (max 0 (u - 3))
++ clamp_test (u v : ℝ) : |max 0 (min 1 u) - max 0 (min 1 v)| ≤ |u - v| := clamp_max_min_lipschitz.real 0 1 u v
++ ramp_lipschitz_test (u v : ℝ) : |ramp_test u - ramp_test v| ≤ |u - v|
+  have h := clamp_min_max_lipschitz.real 0 1 (u - 3) (v - 3)
+  simp [ramp_test, sub_sub_sub_cancel_right.real] at h ⊢
++ reversed_bounds (x y : ℝ) : |max 5 (min 1 x) - max 5 (min 1 y)| ≤ |x - y| := clamp_max_min_lipschitz.real 5 1 x y
+#axioms clamp_test
+#axioms ramp_lipschitz_test

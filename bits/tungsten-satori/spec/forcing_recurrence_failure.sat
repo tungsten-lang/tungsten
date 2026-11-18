@@ -1,0 +1,77 @@
+import recurrence
+
++ real_wrong_exponent (f : ℕ → ℝ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ (i + 1)) :
+    2 * f n = (2 * f 0 + 3 * (n : ℝ)) * 2 ^ n
+  exact recurrence.geometric_linear.real f 2 3 step n
++ real_discard_initial (f : ℕ → ℝ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ i) :
+    2 * f n = (2 * 0 + 3 * (n : ℝ)) * 2 ^ n
+  exact recurrence.geometric_linear.real f 2 3 step n
++ real_wrong_index (f : ℕ → ℝ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ i) :
+    f (n + 1) = (2 * f 0 + 3 * (n : ℝ)) * 2 ^ n
+  exact recurrence.geometric_linear_succ.real f 2 3 step n
+
++ real_wrong_multiplier (f : ℕ → ℝ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 4 ^ i) :
+    (4 - 2) * f n = (4 - 2) * f 0 * 2 ^ n + 2 * (4 ^ n - 2 ^ n)
+  exact recurrence.geometric_forcing_eq.real f 2 4 2 step n
++ real_wrong_sum_base (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 1)
+    (step : ∀ i, f (i + 1) = f i + 2 ^ i) : (1 - 2) * f n = 1 - 2 ^ n
+  exact recurrence.geometric_sum.real f 2 base step n
+
++ rat_wrong_exponent (f : ℕ → ℚ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ (i + 1)) :
+    2 * f n = (2 * f 0 + 3 * (n : ℚ)) * 2 ^ n
+  exact recurrence.geometric_linear.rat f 2 3 step n
++ rat_discard_initial (f : ℕ → ℚ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ i) :
+    2 * f n = (2 * 0 + 3 * (n : ℚ)) * 2 ^ n
+  exact recurrence.geometric_linear.rat f 2 3 step n
++ rat_wrong_index (f : ℕ → ℚ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ i) :
+    f (n + 1) = (2 * f 0 + 3 * (n : ℚ)) * 2 ^ n
+  exact recurrence.geometric_linear_succ.rat f 2 3 step n
+
++ rat_wrong_multiplier (f : ℕ → ℚ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 4 ^ i) :
+    (4 - 2) * f n = (4 - 2) * f 0 * 2 ^ n + 2 * (4 ^ n - 2 ^ n)
+  exact recurrence.geometric_forcing_eq.rat f 2 4 2 step n
++ rat_wrong_sum_base (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 1)
+    (step : ∀ i, f (i + 1) = f i + 2 ^ i) : (1 - 2) * f n = 1 - 2 ^ n
+  exact recurrence.geometric_sum.rat f 2 base step n
+
++ int_wrong_exponent (f : ℕ → ℤ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ (i + 1)) :
+    2 * f n = (2 * f 0 + 3 * (n : ℤ)) * 2 ^ n
+  exact recurrence.geometric_linear.int f 2 3 step n
++ int_discard_initial (f : ℕ → ℤ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ i) :
+    2 * f n = (2 * 0 + 3 * (n : ℤ)) * 2 ^ n
+  exact recurrence.geometric_linear.int f 2 3 step n
++ int_wrong_index (f : ℕ → ℤ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ i) :
+    f (n + 1) = (2 * f 0 + 3 * (n : ℤ)) * 2 ^ n
+  exact recurrence.geometric_linear_succ.int f 2 3 step n
+
++ int_wrong_multiplier (f : ℕ → ℤ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 4 ^ i) :
+    (4 - 2) * f n = (4 - 2) * f 0 * 2 ^ n + 2 * (4 ^ n - 2 ^ n)
+  exact recurrence.geometric_forcing_eq.int f 2 4 2 step n
++ int_wrong_sum_base (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 1)
+    (step : ∀ i, f (i + 1) = f i + 2 ^ i) : (1 - 2) * f n = 1 - 2 ^ n
+  exact recurrence.geometric_sum.int f 2 base step n
+
++ nat_wrong_exponent (f : ℕ → ℕ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ (i + 1)) :
+    2 * f n = (2 * f 0 + 3 * n) * 2 ^ n
+  exact recurrence.geometric_linear.nat f 2 3 step n
++ nat_discard_initial (f : ℕ → ℕ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ i) :
+    2 * f n = (2 * 0 + 3 * n) * 2 ^ n
+  exact recurrence.geometric_linear.nat f 2 3 step n
++ nat_wrong_index (f : ℕ → ℕ) (n : ℕ)
+    (step : ∀ i, f (i + 1) = 2 * f i + 3 * 2 ^ i) :
+    f (n + 1) = (2 * f 0 + 3 * n) * 2 ^ n
+  exact recurrence.geometric_linear_succ.nat f 2 3 step n

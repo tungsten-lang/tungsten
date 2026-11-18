@@ -1,0 +1,43 @@
+import auto_roots
+
++ missing_domain (x y : ℝ) (h : x ≤ y) : sqrt x ≤ sqrt y
+  auto
+
++ weak_positive (x : ℝ) (h : 0 ≤ x) : 0 < sqrt x
+  auto
+
++ weak_strict_order (x y : ℝ) (hx : 0 ≤ x) (h : x ≤ y) : sqrt x < sqrt y
+  auto
+
++ missing_order (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : sqrt x ≤ sqrt y
+  auto
+
++ missing_square_domain (x : ℝ) : (sqrt x)^2 = x
+  auto
+
++ negative_root_square (x : ℝ) (h : x ≤ 0) : sqrt (x^2) = x
+  auto
+
++ wrong_root_value (x y : ℝ) (hy : y ≤ 0) (h : y*y = x) : sqrt x = y
+  auto
+
++ missing_product_domain (x y : ℝ) : sqrt (x*y) = sqrt x*sqrt y
+  auto
+
++ weak_upper (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) (h : x ≤ y*y) : sqrt x < y
+  auto
+
++ negative_upper (x y : ℝ) (hx : 0 ≤ x) (hy : y < 0) (h : x < y*y) : sqrt x < y
+  auto
+
++ weak_lower (x y : ℝ) (hy : 0 ≤ y) (h : y*y ≤ x) : y < sqrt x
+  auto
+
++ reversed_lower (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) (h : x ≤ y*y) : y < sqrt x
+  auto
+
++ no_global_bound (hx : 0 ≤ lo) : sqrt lo < sqrt hi
+  auto
+
++ strict_missing_domain (x y : ℝ) (hy : 0 ≤ y) (h : x < y*y) : sqrt x < y
+  auto

@@ -1,0 +1,21 @@
+import power
++ nat_sum_base (a b : ℕ) (m n : ℕ) : (a+b)^n = a^n+b^n := by auto
++ nat_wrong_add (a b : ℕ) (m n : ℕ) : a^(m+n) = a^m+a^n := by auto
++ nat_wrong_multiply (a b : ℕ) (m n : ℕ) : a^(m*n) = a^m*a^n := by auto
++ nat_wrong_index (a b : ℕ) (m n : ℕ) : (a*b)^n = a^n*b^m := by auto
++ nat_wrong_nesting (a b : ℕ) (m n : ℕ) : (a^m)^n = a^(m+n) := by auto
++ int_sum_base (a b : ℤ) (m n : ℕ) : (a+b)^n = a^n+b^n := by auto
++ int_wrong_add (a b : ℤ) (m n : ℕ) : a^(m+n) = a^m+a^n := by auto
++ int_wrong_multiply (a b : ℤ) (m n : ℕ) : a^(m*n) = a^m*a^n := by auto
++ int_wrong_index (a b : ℤ) (m n : ℕ) : (a*b)^n = a^n*b^m := by auto
++ int_wrong_nesting (a b : ℤ) (m n : ℕ) : (a^m)^n = a^(m+n) := by auto
++ rat_sum_base (a b : ℚ) (m n : ℕ) : (a+b)^n = a^n+b^n := by auto
++ rat_wrong_add (a b : ℚ) (m n : ℕ) : a^(m+n) = a^m+a^n := by auto
++ rat_wrong_multiply (a b : ℚ) (m n : ℕ) : a^(m*n) = a^m*a^n := by auto
++ rat_wrong_index (a b : ℚ) (m n : ℕ) : (a*b)^n = a^n*b^m := by auto
++ rat_wrong_nesting (a b : ℚ) (m n : ℕ) : (a^m)^n = a^(m+n) := by auto
++ real_sum_base (a b : ℝ) (m n : ℕ) : (a+b)^n = a^n+b^n := by auto
++ real_wrong_add (a b : ℝ) (m n : ℕ) : a^(m+n) = a^m+a^n := by auto
++ real_wrong_multiply (a b : ℝ) (m n : ℕ) : a^(m*n) = a^m*a^n := by auto
++ real_wrong_index (a b : ℝ) (m n : ℕ) : (a*b)^n = a^n*b^m := by auto
++ real_wrong_nesting (a b : ℝ) (m n : ℕ) : (a^m)^n = a^(m+n) := by auto

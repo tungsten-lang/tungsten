@@ -1,0 +1,91 @@
+import arith
+
++ nat_pair (f : ℕ → ℕ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ nat_offset (f : ℕ → ℕ) (n a b : ℕ) (v : ℕ) (ha : a < n) (hb : b < n) (h : f a+f b+1 = v) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)))+1 = v
+  auto
+
++ nat_repeated (f : ℕ → ℕ) (n a : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=a then 1 else 0))) = 2*f a
+  auto
+
++ nat_outside (f : ℕ → ℕ) (n a b : ℕ) (ha : n ≤ a) (hb : n ≤ b) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = 0
+  auto
+
++ nat_mixed (f : ℕ → ℕ) (n a b : ℕ) (ha : a < n) (hb : n ≤ b) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a
+  auto
+
++ nat_boundary (f : ℕ → ℕ) (n a : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=n then 1 else 0))) = f a
+  auto
+
++ int_pair (f : ℕ → ℤ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ int_offset (f : ℕ → ℤ) (n a b : ℕ) (v : ℤ) (ha : a < n) (hb : b < n) (h : f a+f b+1 = v) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)))+1 = v
+  auto
+
++ int_repeated (f : ℕ → ℤ) (n a : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=a then 1 else 0))) = 2*f a
+  auto
+
++ int_outside (f : ℕ → ℤ) (n a b : ℕ) (ha : n ≤ a) (hb : n ≤ b) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = 0
+  auto
+
++ int_mixed (f : ℕ → ℤ) (n a b : ℕ) (ha : a < n) (hb : n ≤ b) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a
+  auto
+
++ int_boundary (f : ℕ → ℤ) (n a : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=n then 1 else 0))) = f a
+  auto
+
++ int_difference (f : ℕ → ℤ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)-(if i=b then 1 else 0))) = f a-f b
+  auto
+
++ int_triangle (f : ℕ → ℤ) (n a b c : ℕ) (ha : a < n) (hb : b < n) (hc : c < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)-(if i=c then 1 else 0))) = f a+f b-f c
+  auto
+
++ rat_pair (f : ℕ → ℚ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ rat_offset (f : ℕ → ℚ) (n a b : ℕ) (v : ℚ) (ha : a < n) (hb : b < n) (h : f a+f b+1 = v) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)))+1 = v
+  auto
+
++ rat_repeated (f : ℕ → ℚ) (n a : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=a then 1 else 0))) = 2*f a
+  auto
+
++ rat_outside (f : ℕ → ℚ) (n a b : ℕ) (ha : n ≤ a) (hb : n ≤ b) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = 0
+  auto
+
++ rat_mixed (f : ℕ → ℚ) (n a b : ℕ) (ha : a < n) (hb : n ≤ b) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a
+  auto
+
++ rat_boundary (f : ℕ → ℚ) (n a : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=n then 1 else 0))) = f a
+  auto
+
++ rat_difference (f : ℕ → ℚ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)-(if i=b then 1 else 0))) = f a-f b
+  auto
+
++ rat_triangle (f : ℕ → ℚ) (n a b c : ℕ) (ha : a < n) (hb : b < n) (hc : c < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)-(if i=c then 1 else 0))) = f a+f b-f c
+  auto
+
++ real_pair (f : ℕ → ℝ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ real_offset (f : ℕ → ℝ) (n a b : ℕ) (v : ℝ) (ha : a < n) (hb : b < n) (h : f a+f b+1 = v) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)))+1 = v
+  auto
+
++ real_repeated (f : ℕ → ℝ) (n a : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=a then 1 else 0))) = 2*f a
+  auto
+
++ real_outside (f : ℕ → ℝ) (n a b : ℕ) (ha : n ≤ a) (hb : n ≤ b) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = 0
+  auto
+
++ real_mixed (f : ℕ → ℝ) (n a b : ℕ) (ha : a < n) (hb : n ≤ b) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a
+  auto
+
++ real_boundary (f : ℕ → ℝ) (n a : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=n then 1 else 0))) = f a
+  auto
+
++ real_difference (f : ℕ → ℝ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)-(if i=b then 1 else 0))) = f a-f b
+  auto
+
++ real_triangle (f : ℕ → ℝ) (n a b c : ℕ) (ha : a < n) (hb : b < n) (hc : c < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)-(if i=c then 1 else 0))) = f a+f b-f c
+  auto

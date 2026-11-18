@@ -1,0 +1,67 @@
+-- Shortened sum arguments from Vlasov–Maxwell, Yau and edit-distance proofs.
+import sum_range
+
++ sz (g : ℕ → ℝ) : sum_below 0 g = 0 := by rfl
++ ss (g : ℕ → ℝ) (k : ℕ) : sum_below (k + 1) g = sum_below k g + g k := by rfl
+-> shifted (d : ℕ → ℝ) (a i : ℕ) : ℝ := d (a + i)
+-> scaled (e : ℕ → ℝ) (s : ℝ) (i : ℕ) : ℝ := s * e i
++ sum_split (d : ℕ → ℝ) (a b : ℕ) : sum_below (a + b) d = sum_below a d + sum_below b (shifted d a)
+  exact sum_below.split.real d a b
++ sum_scaled (e : ℕ → ℝ) (s : ℝ) (n : ℕ) : sum_below n (scaled e s) = s * sum_below n e
+  exact sum_const_mul.real s e n
++ sum_nonneg_all (g : ℕ → ℝ) (n : ℕ) (h : ∀ i : ℕ, 0 ≤ g i) : 0 ≤ sum_below n g
+  apply sum_nonneg.real; auto
+-- a lower (upper) bound lo (hi) on the first nn terms gives n·lo ≤ Σ (Σ ≤ n·hi) for every n ≤ nn
++ sum_lo (g : ℕ → ℝ) (lo : ℝ) (nn : ℕ) (h : ∀ i < nn, lo ≤ g i) (n : ℕ) : n ≤ nn → (n : ℝ) * lo ≤ sum_below n g
+  intro hn
+  exact sum_below.const_le.real g lo n (by intro i hi; exact h i (by omega))
++ sum_hi (g : ℕ → ℝ) (hi : ℝ) (nn : ℕ) (h : ∀ i < nn, g i ≤ hi) (n : ℕ) : n ≤ nn → sum_below n g ≤ (n : ℝ) * hi
+  intro hn
+  exact sum_below.le_const.real g hi n (by intro i hi; exact h i (by omega))
+-- partial sums of a nonnegative sequence increase
++ sum_mono (d : ℕ → ℝ) (a b : ℕ) (h : ∀ i : ℕ, 0 ≤ d i) (hab : a ≤ b) : sum_below a d ≤ sum_below b d
+  have e : b = a + (b - a) := by omega
+  rw [e, sum_split d a (b - a)]
+  have hs : ∀ i : ℕ, 0 ≤ shifted d a i
+    intro i
+    unfold shifted
+    exact h (a + i)
+  have k := sum_nonneg_all (shifted d a) (b - a) hs
+  linarith
+
+
+-> gsh (g : ℕ → ℝ) (a r : ℕ) : ℝ := g (a + r)
+-> cst (c : ℝ) (r : ℕ) : ℝ := c
++ s1.nat (n : ℕ) (f : ℕ → ℕ) : ∑ i < n + 1, f i = (∑ i < n, f i) + f n := by rfl
++ s1.real (n : ℕ) (f : ℕ → ℝ) : ∑ i < n + 1, f i = (∑ i < n, f i) + f n := by rfl
++ sum_split.nat (f : ℕ → ℕ) (a c : ℕ) : ∑ i < a + c, f i = (∑ i < a, f i) + ∑ r < c, f (a + r)
+  exact sum_below.split.nat f a c
++ sum_split.real (f : ℕ → ℝ) (a c : ℕ) : ∑ i < a + c, f i = (∑ i < a, f i) + ∑ r < c, gsh f a r
+  exact sum_below.split.real f a c
++ sum_congr.real (f g : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i) : ∑ i < n, f i = ∑ i < n, g i
+  exact sum_below.congr f g n h
++ sum_cst (c : ℝ) (n : ℕ) : ∑ i < n, cst c i = (n : ℝ) * c
+  exact sum_const.real c n
++ sum_lt_const (f : ℕ → ℝ) (c : ℝ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, f i < c) : ∑ i < n, f i < (n : ℝ) * c
+  exact sum_below.lt_const.real f c n hn h
+
+#axioms sum_split
+#axioms sum_scaled
+#axioms sum_lo
+#axioms sum_hi
+#axioms sum_split.real
+#axioms sum_cst
+#axioms sum_lt_const
+
+-- The Alt_N cut identity from family 099: identify the cumulative difference.
+-> qtw (t : ℚ) : ℚ := t * (2 - t)
+-> zalt (x : ℕ → ℚ) (n : ℕ) : ℚ := x 0 + (∑ i < n, (2 * x i + 2 * x (i + 1) - 2 * x i * x (i + 1)))
+-> yalt (x : ℕ → ℚ) (n : ℕ) : ℚ := x n + qtw (x n) - qtw (x 0) + 2 * (∑ i < n, qtw (x i))
+-> tel (x : ℕ → ℚ) (i : ℕ) : ℚ := (x (i + 1) - x i) * (x (i + 1) - x i - 1)
++ alt_telescope (x : ℕ → ℚ) (n : ℕ) : zalt x n - yalt x n = (∑ i < n, tel x i)
+  apply sum_below.eq_of_recurrence (tel x) (fun n => zalt x n - yalt x n)
+  · simp [zalt, yalt]; ring
+  · intro i
+    simp only [zalt, yalt, sum_below_succ, qtw, tel]
+    ring
+#axioms alt_telescope

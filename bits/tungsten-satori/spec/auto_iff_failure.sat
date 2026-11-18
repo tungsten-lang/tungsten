@@ -1,0 +1,14 @@
+import auto_iff
+
++ no_premise (x : ℝ) : iff_right x := by auto [iff_rule]
++ no_guard (x : ℝ) (h : iff_left x) : iff_last x := by auto [iff_guarded]
++ false_guard (x : ℝ) (hx : x < 0) (h : iff_left x) : iff_last x := by auto [iff_guarded]
++ interleaved_no_guard (a x : ℝ) (ha : 0 ≤ a) (h : iff_last x) : iff_left x := by auto [iff_interleaved a]
++ circular_guard (x : ℝ) (h : iff_last x) : iff_left x := by auto [iff_guard_is_left]
++ wrong_instance (x y : ℝ) (h : iff_left x) : iff_right y := by auto [iff_rule x]
++ wrong_type (x : ℝ) (n : ℕ) (h : iff_left x) : iff_right x := by auto [iff_rule n]
++ leaked_binder (h : iff_left (0 : ℝ)) : ∀ x : ℝ, iff_right x := by auto [iff_rule]
++ root_no_sign (B m c : ℝ) (hB : 0 < B) (hc : 0 < c) (h : c*c ≤ m*m*B) : 1/sqrt B ≤ m/c := by auto [one_div_sqrt_le_div_iff]
++ root_zero_denominator (B m : ℝ) (hB : 0 < B) (hm : 0 ≤ m) : 1/sqrt B ≤ m/0 := by auto [one_div_sqrt_le_div_iff]
++ root_weak_to_strict (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : c*c ≤ m*m*B) : 1/sqrt B < m/c := by auto [one_div_sqrt_le_div_iff]
++ root_wrong_direction (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : c*c ≤ m*m*B) : m/c ≤ 1/sqrt B := by auto [one_div_sqrt_le_div_iff]

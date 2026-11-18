@@ -1,0 +1,35 @@
+import finite_range
+
++ unbounded_injection (m n : ℕ) (f : ℕ → ℕ) (inj : ∀ x < m, ∀ y < m, f x = f y → x = y) : m ≤ n
+  exact nat.inj_bound m n f inj
+
++ not_injective (m n : ℕ) (f : ℕ → ℕ) (bound : ∀ x < m, f x < n) : m ≤ n
+  exact nat.inj_bound m n f bound
+
++ inclusive_off_by_one (m n : ℕ) (f : ℕ → ℕ) (bound : ∀ x < m, f x ≤ n)
+    (inj : ∀ x < m, ∀ y < m, f x = f y → x = y) : m ≤ n
+  exact nat.inj_bound m n f bound inj
+
++ equal_sizes_collide (n : ℕ) (f : ℕ → ℕ) (bound : ∀ x < n, f x < n) : ∃ x < n, ∃ y < n, x < y ∧ f x = f y
+  exact nat.pigeonhole n n f (by omega) bound
+
++ empty_collision (f : ℕ → ℕ) : ∃ x < 0, ∃ y < 0, x < y ∧ f x = f y
+  exact nat.pigeonhole 0 0 f (by omega) (by intro x hx; omega)
+
++ missing_value_outside (n : ℕ) : n < n
+  exact nat.inj_bound_of_missing n n (fun x => x) (by intro x hx; exact hx) (by intro x hx y hy e; exact e) n (by omega) (by intro x hx; omega)
+
++ missing_not_proved (m n : ℕ) (f : ℕ → ℕ) (bound : ∀ x < m, f x < n)
+    (inj : ∀ x < m, ∀ y < m, f x = f y → x = y) (b : ℕ) (hb : b < n) : m < n
+  exact nat.inj_bound_of_missing m n f bound inj b hb
+
++ constant_is_surjective : ∃ x < 2, (fun i => 0) x = 1
+  exact nat.surjective_of_injective 2 (fun i => 0) (by decide) (by decide) 1 (by decide)
+
++ outside_preimage (n : ℕ) (f : ℕ → ℕ) (bound : ∀ x < n, f x < n)
+    (inj : ∀ x < n, ∀ y < n, f x = f y → x = y) : ∃ x < n, f x = n
+  exact nat.surjective_of_injective n f bound inj n (by omega)
+
++ global_uniqueness (n : ℕ) (f : ℕ → ℕ) (bound : ∀ x < n, f x < n)
+    (inj : ∀ x < n, ∀ y < n, f x = f y → x = y) (y : ℕ) (hy : y < n) : ∃ x < n, f x = y ∧ ∀ z, f z = y → z = x
+  exact nat.unique_preimage n f bound inj y hy

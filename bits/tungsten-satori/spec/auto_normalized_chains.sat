@@ -1,0 +1,61 @@
+import arith
+
++ balanced_shift (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c+1 ≤ b^n+1) : c ≤ x^n
+  auto
+
++ variable_shift (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c+d ≤ b^n+d) : c ≤ x^n
+  auto
+
++ positive_scale (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c ≤ 2*b^n) : c ≤ x^n
+  auto
+
++ negative_scale (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : -2*b^n ≤ -2*c) : c ≤ x^n
+  auto
+
++ fraction_scale (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c/3 ≤ b^n/3) : c ≤ x^n
+  auto
+
++ strict_bound (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c+1 < 2*b^n+1) : c < x^n
+  auto
+
++ strict_monotone (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b < x) (hn : 0 < n) (hc : 2*c ≤ 2*b^n) : c < x^n
+  auto
+
++ upper (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ x) (hb : x ≤ b) (hc : 2*b^n ≤ 2*c) : x^n ≤ c
+  auto
+
++ strict_upper (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ x) (hb : x ≤ b) (hc : 2*b^n < 2*c) : x^n < c
+  auto
+
++ margin (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c+1 ≤ 2*b^n) : c < x^n
+  auto
+
++ conjunction (x b c : ℚ) (n : ℕ) (h : 0 ≤ b ∧ b ≤ x ∧ 2*c ≤ 2*b^n) : c ≤ x^n
+  auto
+
++ equality (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c = 2*b^n) : c ≤ x^n
+  auto
+
++ generic (f : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v) (x b c : ℚ) (hb : b ≤ x) (hc : 2*c ≤ 2*f b) : c ≤ f x
+  auto
+
++ maximum (a b c d u : ℚ) (ha : a ≤ c) (hb : b ≤ d) (hu : 2*u ≤ 2*max a b) : u ≤ max c d
+  auto
+
++ natural (x b c : ℕ) (n : ℕ) (hb : b ≤ x) (hc : 2*c ≤ 2*b^n) : c ≤ x^n
+  auto
+
++ integer (x b c : ℤ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c ≤ 2*b^n) : c ≤ x^n
+  auto
+
++ real_value (x b c : ℝ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c ≤ 2*b^n) : c ≤ x^n
+  auto
+
+opaque a : ℚ
+opaque b : ℚ
+opaque c : ℚ
+opaque n : ℕ
+axiom supplied_bound : 2*c ≤ 2*b^n
+
++ explicit_bound (h0 : 0 ≤ b) (hb : b ≤ a) : c ≤ a^n
+  auto [supplied_bound]

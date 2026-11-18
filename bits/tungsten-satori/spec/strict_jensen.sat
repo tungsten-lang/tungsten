@@ -1,0 +1,19 @@
+import log_convex
+
++ exp_lower (x : ℝ) (h : x ≠ 0) : 1+x < exp x := one_add_lt_exp x h
++ exp_negative : 1+(-3) < exp (-3) := one_add_lt_exp (-3) (by linarith)
++ exp_support (x y : ℝ) (h : x ≠ y) : exp x+exp x*(y-x) < exp y := exp_tangent_lt x y h
++ exp_weighted (x y z a b : ℝ) (ha : 0 < a) (hb : 0 < b) (h : x ≠ y) (mean : (a+b)*z = a*x+b*y) : (a+b)*exp z < a*exp x+b*exp y := exp_weighted_jensen_lt x y z a b ha hb h mean
++ exp_middle (x y : ℝ) (h : x ≠ y) : 2*exp ((x+y)/2) < exp x+exp y := exp_midpoint_lt x y h
++ exp_zero_weights (x y z : ℝ) : (0+0)*exp z ≤ 0*exp x+0*exp y := exp_weighted_jensen x y z 0 0 (by linarith) (by linarith) (by ring)
+
++ log_support (x y : ℝ) (hx : 0 < x) (hy : 0 < y) : x*log y ≤ x*log x+y-x := log_tangent_le x y hx hy
++ log_support_strict (x y : ℝ) (hx : 0 < x) (hy : 0 < y) (h : x ≠ y) : x*log y < x*log x+y-x := log_tangent_lt x y hx hy h
++ log_weighted (x y z a b : ℝ) (hx : 0 < x) (hy : 0 < y) (hz : 0 < z) (ha : 0 ≤ a) (hb : 0 ≤ b) (mean : (a+b)*z = a*x+b*y) : a*log x+b*log y ≤ (a+b)*log z := log_weighted_jensen x y z a b hx hy hz ha hb mean
++ log_weighted_strict (x y z a b : ℝ) (hx : 0 < x) (hy : 0 < y) (ha : 0 < a) (hb : 0 < b) (h : x ≠ y) (mean : (a+b)*z = a*x+b*y) : a*log x+b*log y < (a+b)*log z := log_weighted_jensen_lt x y z a b hx hy ha hb h mean
++ log_middle (x y : ℝ) (hx : 0 < x) (hy : 0 < y) : log x+log y ≤ 2*log ((x+y)/2) := log_midpoint_le x y hx hy
++ log_middle_strict (x y : ℝ) (hx : 0 < x) (hy : 0 < y) (h : x ≠ y) : log x+log y < 2*log ((x+y)/2) := log_midpoint_lt x y hx hy h
++ log_equal (x : ℝ) (hx : 0 < x) : x*log x ≤ x*log x+x-x := log_tangent_le x x hx hx
++ log_zero_weights (x y z : ℝ) (hx : 0 < x) (hy : 0 < y) (hz : 0 < z) : 0*log x+0*log y ≤ (0+0)*log z := log_weighted_jensen x y z 0 0 hx hy hz (by linarith) (by linarith) (by ring)
++ log_one_zero_weight (x y : ℝ) (hx : 0 < x) (hy : 0 < y) : 0*log x+1*log y ≤ (0+1)*log y := log_weighted_jensen x y y 0 1 hx hy hy (by linarith) (by linarith) (by ring)
++ log_scaled (x y : ℝ) (hx : 0 < x) (hy : 0 < y) (h : x ≠ y) : 2*log x+3*log y < (2+3)*log ((2*x+3*y)/5) := log_weighted_jensen_lt x y ((2*x+3*y)/5) 2 3 hx hy (by linarith) (by linarith) h (by ring)

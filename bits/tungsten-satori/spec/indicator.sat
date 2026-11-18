@@ -1,0 +1,15 @@
+import indicator
+
+-- The benchmark's indicator laws are direct applications for every numeric type.
++ real_nonneg (p : Prop) : 0 ≤ indicator.real p := indicator.nonneg.real p
++ real_mono (p q : Prop) (h : p → q) : indicator.real p ≤ indicator.real q := indicator.mono.real p q h
++ real_complement (p : Prop) : indicator.real (¬p) = 1 - indicator.real p := indicator.not.real p
++ real_intersection (p q : Prop) : indicator.real (p ∧ q) = indicator.real p * indicator.real q := indicator.and.real p q
++ real_union_bound (p q : Prop) : indicator.real (p ∨ q) ≤ indicator.real p + indicator.real q := indicator.or_le.real p q
++ integer_union_identity (p q : Prop) : indicator.int (p ∨ q) + indicator.int (p ∧ q) = indicator.int p + indicator.int q := indicator.or_add_and.int p q
++ rational_one (p : Prop) : indicator.rat p = 1 ↔ p := indicator.eq_one_iff.rat p
++ natural_zero (p : Prop) : indicator.nat p = 0 ↔ ¬p := indicator.eq_zero_iff.nat p
++ true_value : indicator.real True = 1 := by decide
++ false_value : indicator.nat False = 0 := by decide
+#axioms real_union_bound
+#axioms integer_union_identity

@@ -1,0 +1,28 @@
+import auto_polymorphic_facts
+
++ local_type_fixed (x y : ℚ) (h : ∀ z : α, 0 ≤ measure z) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [h]
+
++ partial_type_fixed (a : α) (x : ℤ) (y : ℚ) : sqrt ((paired x y)^2+(paired x y)^2) ≤ paired x y+paired x y
+  auto [paired_nonneg a]
+
++ no_global_search (x y : ℚ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto
+
++ wrong_instance (x y : ℚ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg x]
+
++ guard_missing (x y : ℚ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [guarded_measure]
+
++ strict_bound (x y : ℚ) : sqrt ((measure x)^2+(measure y)^2) < measure x+measure y
+  auto [measure_nonneg]
+
++ wrong_result (x y : ℚ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x
+  auto [measure_nonneg]
+
++ branch_leak (x y : ℚ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [either_measure]
+
++ wrong_guard (x y : ℚ) (hx : allowed x) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [guarded_measure]

@@ -1,0 +1,84 @@
+
+-> blend.nat (x y : ℕ) : ℕ := x+2*y
+-> nested.nat (x y : ℕ) : ℕ := blend.nat (blend.nat x y) y
+-> fourth.nat (x y : ℕ) : ℕ := (x+y)^4
+-> pair.nat (x y : ℕ) : ℕ × ℕ := (x+y, x*y)
+-> total.nat : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => x+total.nat xs
+-> pick.nat (p : Prop) (x y : ℕ) : ℕ := if p then x else y
+
+-> blend.int (x y : ℤ) : ℤ := x+2*y
+-> nested.int (x y : ℤ) : ℤ := blend.int (blend.int x y) y
+-> fourth.int (x y : ℤ) : ℤ := (x+y)^4
+-> pair.int (x y : ℤ) : ℤ × ℤ := (x+y, x*y)
+-> total.int : list ℤ → ℤ
+  | [] => 0
+  | x :: xs => x+total.int xs
+-> pick.int (p : Prop) (x y : ℤ) : ℤ := if p then x else y
+
+-> blend.rat (x y : ℚ) : ℚ := x+2*y
+-> nested.rat (x y : ℚ) : ℚ := blend.rat (blend.rat x y) y
+-> fourth.rat (x y : ℚ) : ℚ := (x+y)^4
+-> pair.rat (x y : ℚ) : ℚ × ℚ := (x+y, x*y)
+-> total.rat : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => x+total.rat xs
+-> pick.rat (p : Prop) (x y : ℚ) : ℚ := if p then x else y
+
+-> blend.real (x y : ℝ) : ℝ := x+2*y
+-> nested.real (x y : ℝ) : ℝ := blend.real (blend.real x y) y
+-> fourth.real (x y : ℝ) : ℝ := (x+y)^4
+-> pair.real (x y : ℝ) : ℝ × ℝ := (x+y, x*y)
+-> total.real : list ℝ → ℝ
+  | [] => 0
+  | x :: xs => x+total.real xs
+-> pick.real (p : Prop) (x y : ℝ) : ℝ := if p then x else y
++ nat_nested (x y : ℕ) : nested.nat x y = x+4*y
+  ring
++ nat_fourth (x y : ℕ) : fourth.nat x y = x^4+4*x^3*y+6*x^2*y^2+4*x*y^3+y^4
+  ring
++ nat_projection (x y : ℕ) : fst (pair.nat x y)^2 = x*x+2*snd (pair.nat x y)+y*y
+  ring
++ nat_list_head (x y : ℕ) (xs : list ℕ) : total.nat (x :: y :: xs) = x+y+total.nat xs
+  ring
++ nat_opaque_arguments (f : α → ℕ) (a b : α) : nested.nat (f a) (f b) = f a+4*f b
+  ring
++ nat_closed_condition (x y : ℕ) : pick.nat (1 = (1 : ℕ)) x y = x
+  ring
++ int_nested (x y : ℤ) : nested.int x y = x+4*y
+  ring
++ int_fourth (x y : ℤ) : fourth.int x y = x^4+4*x^3*y+6*x^2*y^2+4*x*y^3+y^4
+  ring
++ int_projection (x y : ℤ) : fst (pair.int x y)^2 = x*x+2*snd (pair.int x y)+y*y
+  ring
++ int_list_head (x y : ℤ) (xs : list ℤ) : total.int (x :: y :: xs) = x+y+total.int xs
+  ring
++ int_opaque_arguments (f : α → ℤ) (a b : α) : nested.int (f a) (f b) = f a+4*f b
+  ring
++ int_closed_condition (x y : ℤ) : pick.int (1 = (1 : ℕ)) x y = x
+  ring
++ rat_nested (x y : ℚ) : nested.rat x y = x+4*y
+  ring
++ rat_fourth (x y : ℚ) : fourth.rat x y = x^4+4*x^3*y+6*x^2*y^2+4*x*y^3+y^4
+  ring
++ rat_projection (x y : ℚ) : fst (pair.rat x y)^2 = x*x+2*snd (pair.rat x y)+y*y
+  ring
++ rat_list_head (x y : ℚ) (xs : list ℚ) : total.rat (x :: y :: xs) = x+y+total.rat xs
+  ring
++ rat_opaque_arguments (f : α → ℚ) (a b : α) : nested.rat (f a) (f b) = f a+4*f b
+  ring
++ rat_closed_condition (x y : ℚ) : pick.rat (1 = (1 : ℕ)) x y = x
+  ring
++ real_nested (x y : ℝ) : nested.real x y = x+4*y
+  ring
++ real_fourth (x y : ℝ) : fourth.real x y = x^4+4*x^3*y+6*x^2*y^2+4*x*y^3+y^4
+  ring
++ real_projection (x y : ℝ) : fst (pair.real x y)^2 = x*x+2*snd (pair.real x y)+y*y
+  ring
++ real_list_head (x y : ℝ) (xs : list ℝ) : total.real (x :: y :: xs) = x+y+total.real xs
+  ring
++ real_opaque_arguments (f : α → ℝ) (a b : α) : nested.real (f a) (f b) = f a+4*f b
+  ring
++ real_closed_condition (x y : ℝ) : pick.real (1 = (1 : ℕ)) x y = x
+  ring

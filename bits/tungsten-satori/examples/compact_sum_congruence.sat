@@ -1,0 +1,17 @@
+import arith
+
++ same_terms (f g : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i) :
+    (∑ i < n, f i) = (∑ i < n, g i)
+  auto
+
++ same_prefix (f g : ℕ → ℚ) (n m : ℕ)
+    (h : ∀ i < m, f i = g i) (hn : n ≤ m) : (∑ i < n, f i) = (∑ i < n, g i)
+  auto
+
++ nested_sums (f g : ℕ → ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, f i j = g i j) :
+    (∑ i < n, (∑ j < m, f i j)) = (∑ i < n, (∑ j < m, g i j))
+  auto
+
++ swap_terms (f g : ℕ → ℝ) (n : ℕ) :
+    (∑ i < n, f i + g i) = (∑ i < n, g i + f i)
+  auto

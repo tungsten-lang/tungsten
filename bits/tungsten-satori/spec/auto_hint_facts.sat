@@ -1,0 +1,62 @@
+import realx
+
+opaque u : ℕ → ℝ
+opaque v : ℕ → ℝ
+opaque w : ℕ → ℝ
+opaque ready : ℕ → Prop
+-> norm (x : ℕ) : ℝ := sqrt ((u x)^2+(v x)^2)
+axiom u_sign (x : ℕ) : 0 ≤ u x
+axiom v_sign (x : ℕ) : 0 ≤ v x
+axiom w_sign (x : ℕ) : 0 ≤ w x
+axiom guarded_sign (x : ℕ) (h : 2 ≤ x) : 0 ≤ u x
+axiom both_signs (x : ℕ) : 0 ≤ u x ∧ 0 ≤ v x
+axiom ready_at (x : ℕ) : ready x
+axiom ready_sign (x : ℕ) (h : ready x) : 0 ≤ u x
+axiom either_sign (x : ℕ) : 0 ≤ u x ∨ 0 ≤ v x
+
++ upper (x : ℕ) : norm x ≤ u x+v x
+  auto [u_sign, v_sign]
+
++ lower (x : ℕ) : v x ≤ norm x
+  auto [v_sign]
+
++ linear (x : ℕ) : 0 ≤ u x+v x
+  auto [u_sign, v_sign]
+
++ guarded (x : ℕ) (h : 3 ≤ x) : norm x ≤ u x+v x
+  auto [guarded_sign, v_sign]
+
++ bundled (x : ℕ) : norm x ≤ u x+v x
+  auto [both_signs]
+
++ chained (x : ℕ) : norm x ≤ u x+v x
+  auto [ready_at, ready_sign, v_sign]
+
++ specialized (x : ℕ) : norm x ≤ u x+v x
+  auto [u_sign x, v_sign x]
+
++ quantified : ∀ x : ℕ, norm x ≤ u x+v x
+  auto [u_sign, v_sign]
+
++ irrelevant_hint (x : ℕ) : norm x ≤ u x+v x
+  auto [u_sign, v_sign, w_sign]
+
+opaque accepted : ℝ → Prop
+axiom accepted_rule (r : ℝ) (h : 0 < r*r) : accepted r
++ mixed_contradiction (x : ℤ) (r : ℝ) (h : x*x < 0) : accepted r
+  auto [accepted_rule]
+
+opaque nu : (ℕ → ℝ) → ℝ
+opaque nv : (ℕ → ℝ) → ℝ
+axiom nu_sign (x : ℕ → ℝ) : 0 ≤ nu x
+axiom nv_sign (x : ℕ → ℝ) : 0 ≤ nv x
+-> pair_norm (x : (ℕ → ℝ) × (ℕ → ℝ)) : ℝ := sqrt ((nu (fst x))^2+(nv (snd x))^2)
+
++ function_arguments (a b : ℕ → ℝ) : sqrt ((nu a)^2+(nv b)^2) ≤ nu a+nv b
+  auto [nu_sign, nv_sign]
+
++ pair_arguments (x : (ℕ → ℝ) × (ℕ → ℝ)) : pair_norm x ≤ nu (fst x)+nv (snd x)
+  auto [nu_sign, nv_sign]
+
++ local_quantified (f g : ℕ → ℝ) (hf : ∀ i, 0 ≤ f i) (hg : ∀ i, 0 ≤ g i) (x : ℕ) : sqrt ((f x)^2+(g x)^2) ≤ f x+g x
+  auto

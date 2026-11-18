@@ -1,0 +1,68 @@
+import realx
+
++ nonnegative (x : ℝ) : 0 ≤ sqrt x
+  auto
+
++ positive (x : ℝ) (h : 1 ≤ x) : 0 < sqrt x
+  auto
+
++ order (x y : ℝ) (hx : 0 ≤ x) (h : x ≤ y) : sqrt x ≤ sqrt y
+  auto
+
++ strict_order (x y : ℝ) (hx : 0 ≤ x) (h : x+1 ≤ y) : sqrt x < sqrt y
+  auto
+
++ quadratic_order (x y : ℝ) (hx : 0 ≤ x) (h : x ≤ y) : sqrt (1+x*x) ≤ sqrt (1+y*y)
+  auto
+
++ strict_upper (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) (h : x < y*y) : sqrt x < y
+  auto
+
++ strict_lower (x y : ℝ) (hy : 0 ≤ y) (h : y*y < x) : y < sqrt x
+  auto
+
++ strict_upper_zero : sqrt 0 < 1
+  auto
+
++ strict_lower_zero (x : ℝ) (h : 0 < x) : 0 < sqrt x
+  auto
+
++ square_root (x : ℝ) (hx : 0 ≤ x) : (sqrt x)^2 = x
+  auto
+
++ root_square (x : ℝ) (hx : 0 ≤ x) : sqrt (x^2) = x
+  auto
+
++ root_abs (x : ℝ) : sqrt (x^2) = |x|
+  auto
+
++ product (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : sqrt (x*y) = sqrt x*sqrt y
+  auto
+
++ root_value (x y : ℝ) (hy : 0 ≤ y) (h : y*y = x) : sqrt x = y
+  auto
+
+-> rate (x : ℝ) : ℝ := sqrt (0-2*x)
++ rate_square (x : ℝ) (h : x ≤ 0) : 0 ≤ rate x ∧ (rate x)^2 = 0-2*x
+  auto
+
++ rate_bound (x b : ℝ) (h : b ≤ x) (hx : x ≤ 0) (hb : 0-2*b < 10201/10000) : rate x < 101/100
+  auto
+
++ nested_positive (x : ℝ) (h : 0 < x) : 0 < sqrt (sqrt x)
+  auto
+
++ nested_order (x y : ℝ) (hx : 0 ≤ x) (h : x ≤ y) : sqrt (sqrt x) ≤ sqrt (sqrt y)
+  auto
+
+opaque lo : ℝ
+opaque hi : ℝ
+axiom supplied_bound : lo < hi
++ explicit_bound (hx : 0 ≤ lo) : sqrt lo < sqrt hi
+  auto [supplied_bound]
+
++ upper_squared (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) (h : sqrt x < y) : x < y^2
+  auto
+
++ lower_squared (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) (h : y < sqrt x) : y^2 < x
+  auto

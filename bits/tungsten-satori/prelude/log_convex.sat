@@ -1,0 +1,41 @@
+-- Logarithmic supporting lines and weighted Jensen, with strict variants.
+import exp_convex
+
++ log_tangent_le (x y : ℝ) (hx : 0 < x) (hy : 0 < y) : x*log y ≤ x*log x+y-x
+  have bound := exp_tangent_le (log x) (log y)
+  rw [exp_log x hx, exp_log y hy] at bound
+  linarith
+
++ log_tangent_lt (x y : ℝ) (hx : 0 < x) (hy : 0 < y) (hne : x ≠ y) : x*log y < x*log x+y-x
+  have distinct : log x ≠ log y
+    intro h
+    have e := exp_log x hx
+    rw [h, exp_log y hy] at e
+    exact hne e.symm
+  have bound := exp_tangent_lt (log x) (log y) distinct
+  rw [exp_log x hx, exp_log y hy] at bound
+  linarith
+
++ log_weighted_jensen (x y z a b : ℝ) (hx : 0 < x) (hy : 0 < y) (hz : 0 < z) (ha : 0 ≤ a) (hb : 0 ≤ b) (mean : (a+b)*z = a*x+b*y) : a*log x+b*log y ≤ (a+b)*log z
+  have left := mul_nonneg.real a (z*log z+x-z-z*log x) ha (by linarith [log_tangent_le z x hz hx])
+  have right := mul_nonneg.real b (z*log z+y-z-z*log y) hb (by linarith [log_tangent_le z y hz hy])
+  nlinarith
+
++ log_weighted_jensen_lt (x y z a b : ℝ) (hx : 0 < x) (hy : 0 < y) (ha : 0 < a) (hb : 0 < b) (hne : x ≠ y) (mean : (a+b)*z = a*x+b*y) : a*log x+b*log y < (a+b)*log z
+  have hz : 0 < z := by nlinarith
+  by_cases same : z = x
+  · have distinct : z ≠ y := by intro h; apply hne; linarith
+    have left := mul_nonneg.real a (z*log z+x-z-z*log x) (by linarith) (by linarith [log_tangent_le z x hz hx])
+    have right := mul_pos.real b (z*log z+y-z-z*log y) hb (by linarith [log_tangent_lt z y hz hy distinct])
+    nlinarith
+  · have left := mul_pos.real a (z*log z+x-z-z*log x) ha (by linarith [log_tangent_lt z x hz hx same])
+    have right := mul_nonneg.real b (z*log z+y-z-z*log y) (by linarith) (by linarith [log_tangent_le z y hz hy])
+    nlinarith
+
++ log_midpoint_le (x y : ℝ) (hx : 0 < x) (hy : 0 < y) : log x+log y ≤ 2*log ((x+y)/2)
+  have bound := log_weighted_jensen x y ((x+y)/2) 1 1 hx hy (by linarith) (by linarith) (by linarith) (by ring)
+  linarith
+
++ log_midpoint_lt (x y : ℝ) (hx : 0 < x) (hy : 0 < y) (hne : x ≠ y) : log x+log y < 2*log ((x+y)/2)
+  have bound := log_weighted_jensen_lt x y ((x+y)/2) 1 1 hx hy (by linarith) (by linarith) hne (by ring)
+  linarith

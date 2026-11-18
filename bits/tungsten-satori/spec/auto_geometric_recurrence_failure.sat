@@ -1,0 +1,55 @@
+import recurrence
+
++ int_sum_missing_base (s : ℕ → ℤ) (r : ℤ) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ int_sum_missing_step (s : ℕ → ℤ) (r : ℤ) (base : s 0 = 0) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ int_sum_wrong_index (s : ℕ → ℤ) (r : ℤ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^(i+1)) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ int_forcing_missing_rate (s : ℕ → ℤ) (b q c : ℤ) (gap : b ≤ q) (base : s 0 ≤ 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ int_forcing_missing_gap (s : ℕ → ℤ) (b q c : ℤ) (rate : 0 ≤ b) (base : s 0 ≤ 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ int_forcing_missing_base (s : ℕ → ℤ) (b q c : ℤ) (rate : 0 ≤ b) (gap : b ≤ q) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ rat_sum_missing_base (s : ℕ → ℚ) (r : ℚ) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ rat_sum_missing_step (s : ℕ → ℚ) (r : ℚ) (base : s 0 = 0) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ rat_sum_wrong_index (s : ℕ → ℚ) (r : ℚ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^(i+1)) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ rat_forcing_missing_rate (s : ℕ → ℚ) (b q c : ℚ) (gap : b ≤ q) (base : s 0 ≤ 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ rat_forcing_missing_gap (s : ℕ → ℚ) (b q c : ℚ) (rate : 0 ≤ b) (base : s 0 ≤ 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ rat_forcing_missing_base (s : ℕ → ℚ) (b q c : ℚ) (rate : 0 ≤ b) (gap : b ≤ q) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ real_sum_missing_base (s : ℕ → ℝ) (r : ℝ) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ real_sum_missing_step (s : ℕ → ℝ) (r : ℝ) (base : s 0 = 0) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ real_sum_wrong_index (s : ℕ → ℝ) (r : ℝ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^(i+1)) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ real_forcing_missing_rate (s : ℕ → ℝ) (b q c : ℝ) (gap : b ≤ q) (base : s 0 ≤ 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ real_forcing_missing_gap (s : ℕ → ℝ) (b q c : ℝ) (rate : 0 ≤ b) (base : s 0 ≤ 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ real_forcing_missing_base (s : ℕ → ℝ) (b q c : ℝ) (rate : 0 ≤ b) (gap : b ≤ q) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto

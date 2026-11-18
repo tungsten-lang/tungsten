@@ -1,0 +1,129 @@
+import recurrence
+
+-> count.nat : ℕ → ℕ
+  | 0 => 0
+  | i+1 => count.nat i+1
+-> walk.nat : ℕ → ℕ → ℕ
+  | 0, a => a
+  | i+1, a => walk.nat i (a+1)
+-> scaled.nat : ℕ → ℕ → ℕ
+  | 0, a => a
+  | i+1, a => scaled.nat i (2*a)
+-> forced.nat : ℕ → ℕ → ℕ
+  | 0, a => a+1
+  | i+1, a => 2*forced.nat i (a+1)
+-> first.nat : ℕ → ℕ → ℕ
+  | a, 0 => a
+  | a, i+1 => first.nat (a+1) i
++ nat_walk (n : ℕ) (a : ℕ) : walk.nat n a = a+count.nat n := by auto
++ nat_reverse (n : ℕ) (a : ℕ) : a+count.nat n = walk.nat n a := by auto
++ nat_scaled (n : ℕ) (a : ℕ) : scaled.nat n a = 2^n*a := by auto
++ nat_forced (n : ℕ) (a : ℕ) : forced.nat n a = (a+count.nat n+1)*2^n := by auto
++ nat_first (n : ℕ) (a : ℕ) : first.nat a n = a+count.nat n := by auto
++ nat_supplied (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ)
+    (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.nat n
+  auto
++ nat_same_call (f g : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ)
+    (base : ∀ b, f 0 b = g 0 b) (fs : ∀ i b, f (i+1) b = f i (b+1))
+    (gs : ∀ i b, g (i+1) b = g i (b+1)) : f n a = g n a
+  auto
++ nat_product (f g : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ)
+    (base : ∀ b, f 0 b = 2*g 0 b) (fs : ∀ i b, f (i+1) b = f i (b+1))
+    (gs : ∀ i b, g (i+1) b = g i (b+1)) : f n a = 2*g n a
+  auto
+
+-> count.int : ℕ → ℤ
+  | 0 => 0
+  | i+1 => count.int i+1
+-> walk.int : ℕ → ℤ → ℤ
+  | 0, a => a
+  | i+1, a => walk.int i (a+1)
+-> scaled.int : ℕ → ℤ → ℤ
+  | 0, a => a
+  | i+1, a => scaled.int i (2*a)
+-> forced.int : ℕ → ℤ → ℤ
+  | 0, a => a+1
+  | i+1, a => 2*forced.int i (a+1)
+-> first.int : ℤ → ℕ → ℤ
+  | a, 0 => a
+  | a, i+1 => first.int (a+1) i
++ int_walk (n : ℕ) (a : ℤ) : walk.int n a = a+count.int n := by auto
++ int_reverse (n : ℕ) (a : ℤ) : a+count.int n = walk.int n a := by auto
++ int_scaled (n : ℕ) (a : ℤ) : scaled.int n a = 2^n*a := by auto
++ int_forced (n : ℕ) (a : ℤ) : forced.int n a = (a+count.int n+1)*2^n := by auto
++ int_first (n : ℕ) (a : ℤ) : first.int a n = a+count.int n := by auto
++ int_supplied (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ)
+    (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.int n
+  auto
++ int_same_call (f g : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ)
+    (base : ∀ b, f 0 b = g 0 b) (fs : ∀ i b, f (i+1) b = f i (b+1))
+    (gs : ∀ i b, g (i+1) b = g i (b+1)) : f n a = g n a
+  auto
++ int_product (f g : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ)
+    (base : ∀ b, f 0 b = 2*g 0 b) (fs : ∀ i b, f (i+1) b = f i (b+1))
+    (gs : ∀ i b, g (i+1) b = g i (b+1)) : f n a = 2*g n a
+  auto
+
+-> count.rat : ℕ → ℚ
+  | 0 => 0
+  | i+1 => count.rat i+1
+-> walk.rat : ℕ → ℚ → ℚ
+  | 0, a => a
+  | i+1, a => walk.rat i (a+1)
+-> scaled.rat : ℕ → ℚ → ℚ
+  | 0, a => a
+  | i+1, a => scaled.rat i (2*a)
+-> forced.rat : ℕ → ℚ → ℚ
+  | 0, a => a+1
+  | i+1, a => 2*forced.rat i (a+1)
+-> first.rat : ℚ → ℕ → ℚ
+  | a, 0 => a
+  | a, i+1 => first.rat (a+1) i
++ rat_walk (n : ℕ) (a : ℚ) : walk.rat n a = a+count.rat n := by auto
++ rat_reverse (n : ℕ) (a : ℚ) : a+count.rat n = walk.rat n a := by auto
++ rat_scaled (n : ℕ) (a : ℚ) : scaled.rat n a = 2^n*a := by auto
++ rat_forced (n : ℕ) (a : ℚ) : forced.rat n a = (a+count.rat n+1)*2^n := by auto
++ rat_first (n : ℕ) (a : ℚ) : first.rat a n = a+count.rat n := by auto
++ rat_supplied (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ)
+    (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.rat n
+  auto
++ rat_same_call (f g : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ)
+    (base : ∀ b, f 0 b = g 0 b) (fs : ∀ i b, f (i+1) b = f i (b+1))
+    (gs : ∀ i b, g (i+1) b = g i (b+1)) : f n a = g n a
+  auto
++ rat_product (f g : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ)
+    (base : ∀ b, f 0 b = 2*g 0 b) (fs : ∀ i b, f (i+1) b = f i (b+1))
+    (gs : ∀ i b, g (i+1) b = g i (b+1)) : f n a = 2*g n a
+  auto
+
+-> count.real : ℕ → ℝ
+  | 0 => 0
+  | i+1 => count.real i+1
+-> walk.real : ℕ → ℝ → ℝ
+  | 0, a => a
+  | i+1, a => walk.real i (a+1)
+-> scaled.real : ℕ → ℝ → ℝ
+  | 0, a => a
+  | i+1, a => scaled.real i (2*a)
+-> forced.real : ℕ → ℝ → ℝ
+  | 0, a => a+1
+  | i+1, a => 2*forced.real i (a+1)
+-> first.real : ℝ → ℕ → ℝ
+  | a, 0 => a
+  | a, i+1 => first.real (a+1) i
++ real_walk (n : ℕ) (a : ℝ) : walk.real n a = a+count.real n := by auto
++ real_reverse (n : ℕ) (a : ℝ) : a+count.real n = walk.real n a := by auto
++ real_scaled (n : ℕ) (a : ℝ) : scaled.real n a = 2^n*a := by auto
++ real_forced (n : ℕ) (a : ℝ) : forced.real n a = (a+count.real n+1)*2^n := by auto
++ real_first (n : ℕ) (a : ℝ) : first.real a n = a+count.real n := by auto
++ real_supplied (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ)
+    (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.real n
+  auto
++ real_same_call (f g : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ)
+    (base : ∀ b, f 0 b = g 0 b) (fs : ∀ i b, f (i+1) b = f i (b+1))
+    (gs : ∀ i b, g (i+1) b = g i (b+1)) : f n a = g n a
+  auto
++ real_product (f g : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ)
+    (base : ∀ b, f 0 b = 2*g 0 b) (fs : ∀ i b, f (i+1) b = f i (b+1))
+    (gs : ∀ i b, g (i+1) b = g i (b+1)) : f n a = 2*g n a
+  auto

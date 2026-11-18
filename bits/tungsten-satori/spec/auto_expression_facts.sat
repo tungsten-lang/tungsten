@@ -1,0 +1,97 @@
+import arith
+
++ nat_offset (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ nat_bound (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j < n) (h : f j ≤ v) : (∑ i < n, f i*(if i=j then 1 else 0))+2 ≤ v+2
+  auto
+
++ nat_strict (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j < n) (h : f j < v) : (∑ i < n, f i*(if i=j then 1 else 0))+1 < v+1
+  auto
+
++ nat_outside (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : n ≤ j) : (∑ i < n, f i*(if i=j then 1 else 0))+v = v
+  auto
+
++ nat_add (f g : ℕ → ℕ) (n : ℕ) (v : ℕ) (h : (∑ i < n, f i)+(∑ i < n, g i) = v) : (∑ i < n, f i+g i)+1 = v+1
+  auto
+
++ nat_scale (f : ℕ → ℕ) (c v : ℕ) (n : ℕ) (h : c*(∑ i < n, f i) = v) : (∑ i < n, c*f i)+1 = v+1
+  auto
+
++ nat_split (f : ℕ → ℕ) (n m : ℕ) (v : ℕ) (h : (∑ i < n, f i)+(∑ i < m, f (n+i)) = v) : (∑ i < n+m, f i)+1 = v+1
+  auto
+
++ nat_swap (f : ℕ → ℕ → ℕ) (n m : ℕ) (v : ℕ) (h : (∑ j < m, (∑ i < n, f i j)) = v) : (∑ i < n, (∑ j < m, f i j))+1 = v+1
+  auto
+
++ int_offset (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ int_bound (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j < n) (h : f j ≤ v) : (∑ i < n, f i*(if i=j then 1 else 0))+2 ≤ v+2
+  auto
+
++ int_strict (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j < n) (h : f j < v) : (∑ i < n, f i*(if i=j then 1 else 0))+1 < v+1
+  auto
+
++ int_outside (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : n ≤ j) : (∑ i < n, f i*(if i=j then 1 else 0))+v = v
+  auto
+
++ int_add (f g : ℕ → ℤ) (n : ℕ) (v : ℤ) (h : (∑ i < n, f i)+(∑ i < n, g i) = v) : (∑ i < n, f i+g i)+1 = v+1
+  auto
+
++ int_scale (f : ℕ → ℤ) (c v : ℤ) (n : ℕ) (h : c*(∑ i < n, f i) = v) : (∑ i < n, c*f i)+1 = v+1
+  auto
+
++ int_split (f : ℕ → ℤ) (n m : ℕ) (v : ℤ) (h : (∑ i < n, f i)+(∑ i < m, f (n+i)) = v) : (∑ i < n+m, f i)+1 = v+1
+  auto
+
++ int_swap (f : ℕ → ℕ → ℤ) (n m : ℕ) (v : ℤ) (h : (∑ j < m, (∑ i < n, f i j)) = v) : (∑ i < n, (∑ j < m, f i j))+1 = v+1
+  auto
+
++ rat_offset (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ rat_bound (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j < n) (h : f j ≤ v) : (∑ i < n, f i*(if i=j then 1 else 0))+2 ≤ v+2
+  auto
+
++ rat_strict (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j < n) (h : f j < v) : (∑ i < n, f i*(if i=j then 1 else 0))+1 < v+1
+  auto
+
++ rat_outside (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : n ≤ j) : (∑ i < n, f i*(if i=j then 1 else 0))+v = v
+  auto
+
++ rat_add (f g : ℕ → ℚ) (n : ℕ) (v : ℚ) (h : (∑ i < n, f i)+(∑ i < n, g i) = v) : (∑ i < n, f i+g i)+1 = v+1
+  auto
+
++ rat_scale (f : ℕ → ℚ) (c v : ℚ) (n : ℕ) (h : c*(∑ i < n, f i) = v) : (∑ i < n, c*f i)+1 = v+1
+  auto
+
++ rat_split (f : ℕ → ℚ) (n m : ℕ) (v : ℚ) (h : (∑ i < n, f i)+(∑ i < m, f (n+i)) = v) : (∑ i < n+m, f i)+1 = v+1
+  auto
+
++ rat_swap (f : ℕ → ℕ → ℚ) (n m : ℕ) (v : ℚ) (h : (∑ j < m, (∑ i < n, f i j)) = v) : (∑ i < n, (∑ j < m, f i j))+1 = v+1
+  auto
+
++ real_offset (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ real_bound (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j < n) (h : f j ≤ v) : (∑ i < n, f i*(if i=j then 1 else 0))+2 ≤ v+2
+  auto
+
++ real_strict (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j < n) (h : f j < v) : (∑ i < n, f i*(if i=j then 1 else 0))+1 < v+1
+  auto
+
++ real_outside (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : n ≤ j) : (∑ i < n, f i*(if i=j then 1 else 0))+v = v
+  auto
+
++ real_add (f g : ℕ → ℝ) (n : ℕ) (v : ℝ) (h : (∑ i < n, f i)+(∑ i < n, g i) = v) : (∑ i < n, f i+g i)+1 = v+1
+  auto
+
++ real_scale (f : ℕ → ℝ) (c v : ℝ) (n : ℕ) (h : c*(∑ i < n, f i) = v) : (∑ i < n, c*f i)+1 = v+1
+  auto
+
++ real_split (f : ℕ → ℝ) (n m : ℕ) (v : ℝ) (h : (∑ i < n, f i)+(∑ i < m, f (n+i)) = v) : (∑ i < n+m, f i)+1 = v+1
+  auto
+
++ real_swap (f : ℕ → ℕ → ℝ) (n m : ℕ) (v : ℝ) (h : (∑ j < m, (∑ i < n, f i j)) = v) : (∑ i < n, (∑ j < m, f i j))+1 = v+1
+  auto

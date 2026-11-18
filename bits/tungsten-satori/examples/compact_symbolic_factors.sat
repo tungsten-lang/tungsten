@@ -1,0 +1,13 @@
+import arith
+
++ cancel_factor (b c d : ℚ) (n : ℕ) (hd : 0 < d) (hc : d*c ≤ d*b^n) : c ≤ b^n
+  auto
+
++ scaled_power_bound (x b c d : ℝ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hd : 0 < d) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ reverse_negative (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hd : d < 0) (hc : d*b^n ≤ d*c) : c ≤ x^n
+  auto
+
++ rounding_recurrence (t N V : ℚ) (ht : 22 ≤ t) (hV : 0 ≤ V) (h : t*N ≤ (4*t+2)*V+N) : N ≤ 30/7*V
+  auto

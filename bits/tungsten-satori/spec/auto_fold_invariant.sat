@@ -1,0 +1,66 @@
+-> traverse_l (step : α → β → β) : list α → β → β
+  | [], s => s
+  | x :: xs, s => traverse_l step xs (step x s)
+-> alias_l (step : α → β → β) (xs : list α) (s : β) : β := traverse_l step xs s
+
++ l_direct (step : α → β → β) (p : β → Prop) (h : ∀ x s, p s → p (step x s)) (xs : list α) (s : β) (hs : p s) : p (list.foldl step xs s) := by auto
++ l_direct_paired (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (list.foldl step xs s) ∧ q (list.foldl step xs s) := by auto
++ l_direct_members (step : α → β → β) (p : β → Prop) (xs : list α) (h : ∀ x ∈ xs, ∀ s, p s → p (step x s)) (s : β) (hs : p s) : p (list.foldl step xs s) := by auto
+
++ l_recursive (step : α → β → β) (p : β → Prop) (h : ∀ x s, p s → p (step x s)) (xs : list α) (s : β) (hs : p s) : p (traverse_l step xs s) := by auto
++ l_recursive_paired (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (traverse_l step xs s) ∧ q (traverse_l step xs s) := by auto
++ l_recursive_members (step : α → β → β) (p : β → Prop) (xs : list α) (h : ∀ x ∈ xs, ∀ s, p s → p (step x s)) (s : β) (hs : p s) : p (traverse_l step xs s) := by auto
+
++ l_alias (step : α → β → β) (p : β → Prop) (h : ∀ x s, p s → p (step x s)) (xs : list α) (s : β) (hs : p s) : p (alias_l step xs s) := by auto
++ l_alias_paired (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (alias_l step xs s) ∧ q (alias_l step xs s) := by auto
++ l_alias_members (step : α → β → β) (p : β → Prop) (xs : list α) (h : ∀ x ∈ xs, ∀ s, p s → p (step x s)) (s : β) (hs : p s) : p (alias_l step xs s) := by auto
+
++ l_history (p : α → Prop) (xs : list α) (h : ∀ x ∈ xs, p x) (s : α × α) (hs : p (fst s) ∧ p (snd s)) : p (fst (list.foldl (fun x v => (x, fst v)) xs s)) ∧ p (snd (list.foldl (fun x v => (x, fst v)) xs s)) := by auto
++ l_swap (xs : list α) (p : β → Prop) (a b : β) (ha : p a) (hb : p b) : p (fst (list.foldl (fun x v => (snd v, fst v)) xs (a, b))) ∧ p (snd (list.foldl (fun x v => (snd v, fst v)) xs (a, b))) := by auto
++ l_unchanged (step : α → β → β) (xs : list α) (s : β × γ) : snd (list.foldl (fun x v => (step x (fst v), snd v)) xs s) = snd s := by auto
++ l_fixed (xs : list α) (a : β) : list.foldl (fun x v => (snd v, fst v)) xs (a, a) = (a, a) := by auto
+
+-> traverse_r (step : α → β → β) : list α → β → β
+  | [], s => s
+  | x :: xs, s => step x (traverse_r step xs s)
+-> alias_r (step : α → β → β) (xs : list α) (s : β) : β := traverse_r step xs s
+
++ r_direct (step : α → β → β) (p : β → Prop) (h : ∀ x s, p s → p (step x s)) (xs : list α) (s : β) (hs : p s) : p (list.foldr step xs s) := by auto
++ r_direct_paired (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (list.foldr step xs s) ∧ q (list.foldr step xs s) := by auto
++ r_direct_members (step : α → β → β) (p : β → Prop) (xs : list α) (h : ∀ x ∈ xs, ∀ s, p s → p (step x s)) (s : β) (hs : p s) : p (list.foldr step xs s) := by auto
+
++ r_recursive (step : α → β → β) (p : β → Prop) (h : ∀ x s, p s → p (step x s)) (xs : list α) (s : β) (hs : p s) : p (traverse_r step xs s) := by auto
++ r_recursive_paired (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (traverse_r step xs s) ∧ q (traverse_r step xs s) := by auto
++ r_recursive_members (step : α → β → β) (p : β → Prop) (xs : list α) (h : ∀ x ∈ xs, ∀ s, p s → p (step x s)) (s : β) (hs : p s) : p (traverse_r step xs s) := by auto
+
++ r_alias (step : α → β → β) (p : β → Prop) (h : ∀ x s, p s → p (step x s)) (xs : list α) (s : β) (hs : p s) : p (alias_r step xs s) := by auto
++ r_alias_paired (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (alias_r step xs s) ∧ q (alias_r step xs s) := by auto
++ r_alias_members (step : α → β → β) (p : β → Prop) (xs : list α) (h : ∀ x ∈ xs, ∀ s, p s → p (step x s)) (s : β) (hs : p s) : p (alias_r step xs s) := by auto
+
++ r_history (p : α → Prop) (xs : list α) (h : ∀ x ∈ xs, p x) (s : α × α) (hs : p (fst s) ∧ p (snd s)) : p (fst (list.foldr (fun x v => (x, fst v)) xs s)) ∧ p (snd (list.foldr (fun x v => (x, fst v)) xs s)) := by auto
++ r_swap (xs : list α) (p : β → Prop) (a b : β) (ha : p a) (hb : p b) : p (fst (list.foldr (fun x v => (snd v, fst v)) xs (a, b))) ∧ p (snd (list.foldr (fun x v => (snd v, fst v)) xs (a, b))) := by auto
++ r_unchanged (step : α → β → β) (xs : list α) (s : β × γ) : snd (list.foldr (fun x v => (step x (fst v), snd v)) xs s) = snd s := by auto
++ r_fixed (xs : list α) (a : β) : list.foldr (fun x v => (snd v, fst v)) xs (a, a) = (a, a) := by auto
+
+-> advance.nat : list α → ℕ → ℕ
+  | [], s => s
+  | x :: xs, s => advance.nat xs (s+1)
++ nat_advance (xs : list α) (s : ℕ) (h : 3 ≤ s) : 3 ≤ advance.nat xs s := by auto
+
+-> advance.int : list α → ℤ → ℤ
+  | [], s => s
+  | x :: xs, s => advance.int xs (s+1)
++ int_advance (xs : list α) (s : ℤ) (h : 3 ≤ s) : 3 ≤ advance.int xs s := by auto
+
+-> advance.rat : list α → ℚ → ℚ
+  | [], s => s
+  | x :: xs, s => advance.rat xs (s+1)
++ rat_advance (xs : list α) (s : ℚ) (h : 3 ≤ s) : 3 ≤ advance.rat xs s := by auto
+
+-> advance.real : list α → ℝ → ℝ
+  | [], s => s
+  | x :: xs, s => advance.real xs (s+1)
++ real_advance (xs : list α) (s : ℝ) (h : 3 ≤ s) : 3 ≤ advance.real xs s := by auto
+
++ capture_names (step : α → β → β) (p : β → Prop) (fold_list : list α) (fold_state : β) (h : ∀ x s, p s → p (step x s)) (hs : p fold_state) : p (list.foldl step fold_list fold_state) := by auto
++ three_properties (step : α → β → β) (p q r : β → Prop) (xs : list α) (s : β) (h : ∀ x s, p s ∧ q s ∧ r s → p (step x s) ∧ q (step x s) ∧ r (step x s)) (hs : p s ∧ q s ∧ r s) : p (list.foldl step xs s) ∧ q (list.foldl step xs s) ∧ r (list.foldl step xs s) := by auto

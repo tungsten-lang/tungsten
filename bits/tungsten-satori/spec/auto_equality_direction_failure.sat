@@ -1,0 +1,61 @@
+import arith
+
++ nat_missing (f : ℕ → ℕ) (n : ℕ) (c : ℕ) : n*c = (∑ i < n, f i)
+  auto
+
++ nat_wrong_value (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i=c+1) : n*c = (∑ i < n, f i)
+  auto
+
++ nat_short_range (f : ℕ → ℕ) (n m : ℕ) (c : ℕ) (hn : m < n) (h : ∀ i < m, f i=c) : n*c = (∑ i < n, f i)
+  auto
+
++ nat_upper_only (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i ≤ c) : n*c = (∑ i < n, f i)
+  auto
+
++ nat_cycle (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : n*c = (∑ i < n, f i) → (∑ i < n, f i) = n*c) : n*c = (∑ i < n, f i)
+  auto
+
++ int_missing (f : ℕ → ℤ) (n : ℕ) (c : ℤ) : (n : ℤ)*c = (∑ i < n, f i)
+  auto
+
++ int_wrong_value (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i=c+1) : (n : ℤ)*c = (∑ i < n, f i)
+  auto
+
++ int_short_range (f : ℕ → ℤ) (n m : ℕ) (c : ℤ) (hn : m < n) (h : ∀ i < m, f i=c) : (n : ℤ)*c = (∑ i < n, f i)
+  auto
+
++ int_upper_only (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i ≤ c) : (n : ℤ)*c = (∑ i < n, f i)
+  auto
+
++ int_cycle (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : (n : ℤ)*c = (∑ i < n, f i) → (∑ i < n, f i) = (n : ℤ)*c) : (n : ℤ)*c = (∑ i < n, f i)
+  auto
+
++ rat_missing (f : ℕ → ℚ) (n : ℕ) (c : ℚ) : (n : ℚ)*c = (∑ i < n, f i)
+  auto
+
++ rat_wrong_value (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i=c+1) : (n : ℚ)*c = (∑ i < n, f i)
+  auto
+
++ rat_short_range (f : ℕ → ℚ) (n m : ℕ) (c : ℚ) (hn : m < n) (h : ∀ i < m, f i=c) : (n : ℚ)*c = (∑ i < n, f i)
+  auto
+
++ rat_upper_only (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i ≤ c) : (n : ℚ)*c = (∑ i < n, f i)
+  auto
+
++ rat_cycle (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : (n : ℚ)*c = (∑ i < n, f i) → (∑ i < n, f i) = (n : ℚ)*c) : (n : ℚ)*c = (∑ i < n, f i)
+  auto
+
++ real_missing (f : ℕ → ℝ) (n : ℕ) (c : ℝ) : (n : ℝ)*c = (∑ i < n, f i)
+  auto
+
++ real_wrong_value (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i=c+1) : (n : ℝ)*c = (∑ i < n, f i)
+  auto
+
++ real_short_range (f : ℕ → ℝ) (n m : ℕ) (c : ℝ) (hn : m < n) (h : ∀ i < m, f i=c) : (n : ℝ)*c = (∑ i < n, f i)
+  auto
+
++ real_upper_only (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i ≤ c) : (n : ℝ)*c = (∑ i < n, f i)
+  auto
+
++ real_cycle (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : (n : ℝ)*c = (∑ i < n, f i) → (∑ i < n, f i) = (n : ℝ)*c) : (n : ℝ)*c = (∑ i < n, f i)
+  auto

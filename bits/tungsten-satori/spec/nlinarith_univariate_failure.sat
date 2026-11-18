@@ -1,0 +1,12 @@
++ real_wrong_strict (x : ℝ) : 2*x < 1+x^2 := by nlinarith
++ real_wrong_constant (x : ℝ) : 12*x ≤ 4*x*x+7 := by nlinarith
++ real_wrong_negative (x : ℝ) : -3*x ≤ 1+x*x := by nlinarith
++ real_wrong_concave (x : ℝ) : 0 ≤ -x*x+2*x+1 := by nlinarith
++ rat_wrong_strict (x : ℚ) : 2*x < 1+x^2 := by nlinarith
++ rat_wrong_constant (x : ℚ) : 12*x ≤ 4*x*x+7 := by nlinarith
++ rat_wrong_negative (x : ℚ) : -3*x ≤ 1+x*x := by nlinarith
++ rat_wrong_concave (x : ℚ) : 0 ≤ -x*x+2*x+1 := by nlinarith
++ int_wrong_strict (x : ℤ) : 2*x < 1+x^2 := by nlinarith
++ int_wrong_constant (x : ℤ) : 12*x ≤ 4*x*x+7 := by nlinarith
++ int_wrong_negative (x : ℤ) : -3*x ≤ 1+x*x := by nlinarith
++ int_wrong_concave (x : ℤ) : 0 ≤ -x*x+2*x+1 := by nlinarith

@@ -1,0 +1,31 @@
+import list_product
+
+-- Original Jiang–Su recursive definitions, checked against the replacements.
+-> nonneg_all : list ℚ → Prop
+  | [] => True
+  | x :: xs => 0 ≤ x ∧ nonneg_all xs
+-> lsum : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => x + lsum xs
+-> lprod1 : list ℚ → ℚ
+  | [] => 1
+  | x :: xs => (1 + x) * lprod1 xs
+
++ old_nonneg_all (l : list ℚ) : nonneg_all l = all (fun x => 0 ≤ x) l
+  induction l with x xs ih
+  · rfl
+  · simp [nonneg_all, all, ih]
++ old_nonneg_members (l : list ℚ) : nonneg_all l = (∀ x ∈ l, 0 ≤ x)
+  rw [old_nonneg_all, list.all_iff]
++ old_sum (l : list ℚ) : lsum l = sum_list l (fun x => x)
+  induction l with x xs ih
+  · rfl
+  · simp [lsum, sum_list, ih]
++ old_product (l : list ℚ) : lprod1 l = prod_list l (fun x => 1 + x)
+  induction l with x xs ih
+  · rfl
+  · simp [lprod1, prod_list, ih]
+
+#axioms old_nonneg_members
+#axioms old_sum
+#axioms old_product

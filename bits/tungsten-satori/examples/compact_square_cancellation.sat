@@ -1,0 +1,7 @@
+-- A supplied bound cancels the cubic terms; square nonnegativity handles the rest.
++ weighted_bound (x y v w : ℚ) (h : v*x^2 ≤ w*x^2) :
+    2*x*y+v*x^2 ≤ (w+1)*x^2+y^2
+  auto
+
++ reordered (x y k : ℝ) : y*x*2+x*k*x ≤ y^2+x^2+k*x^2
+  auto

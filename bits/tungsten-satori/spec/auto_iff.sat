@@ -1,0 +1,31 @@
+import realx
+
+opaque iff_left : α → Prop
+opaque iff_right : α → Prop
+opaque iff_last : α → Prop
+axiom iff_rule (x : α) : iff_left x ↔ iff_right x
+axiom iff_next (x : α) : iff_right x ↔ iff_last x
+axiom iff_guarded (x : ℝ) : 0 ≤ x → (iff_left x ↔ iff_last x)
+axiom iff_interleaved (a : ℝ) : 0 ≤ a → ∀ x : ℝ, x ≤ a → (iff_left x ↔ iff_last x)
+axiom iff_guard_is_left (x : ℝ) : iff_left x → (iff_left x ↔ iff_last x)
+
++ forward (x : ℝ) (h : iff_left x) : iff_right x := by auto [iff_rule]
++ backward (x : ℝ) (h : iff_right x) : iff_left x := by auto [iff_rule]
++ natural (x : ℕ) (h : iff_right x) : iff_left x := by auto [iff_rule]
++ chained (x : ℝ) (h : iff_left x) : iff_last x := by auto [iff_rule, iff_next]
++ reverse_chain (x : ℝ) (h : iff_last x) : iff_left x := by auto [iff_rule, iff_next]
++ guarded (x : ℝ) (hx : 1 ≤ x) (h : iff_left x) : iff_last x := by auto [iff_guarded]
++ partial_guard (x : ℝ) (hx : 0 ≤ x) (h : iff_last x) : iff_left x := by auto [iff_guarded x hx]
++ interleaved (a x : ℝ) (ha : 0 ≤ a) (hx : x ≤ a) (h : iff_last x) : iff_left x := by auto [iff_interleaved a]
++ same_guard (x : ℝ) (h : iff_left x) : iff_last x := by auto [iff_guard_is_left]
++ introduced : ∀ x : ℝ, iff_left x → iff_right x := by auto [iff_rule]
++ whole_equivalence (x : ℝ) : iff_left x ↔ iff_right x := by auto [iff_rule]
++ under_forall (h : ∀ x : ℝ, iff_left x) : ∀ x : ℝ, iff_right x := by auto [iff_rule]
+
++ root_lower (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : c*c ≤ m*m*B) : 1/sqrt B ≤ m/c := by auto [one_div_sqrt_le_div_iff]
++ root_certificate (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : 1/sqrt B ≤ m/c) : c*c ≤ m*m*B := by auto [one_div_sqrt_le_div_iff]
++ root_strict (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : c*c < m*m*B) : 1/sqrt B < m/c := by auto [one_div_sqrt_lt_div_iff]
++ root_upper (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : m*m*B ≤ c*c) : m/c ≤ 1/sqrt B := by auto [div_le_one_div_sqrt_iff]
+
++ fresh_binder (hint : ℝ) (h : iff_left hint) : iff_right hint := by auto [iff_rule]
++ fixed_local_type (x : α) (h : iff_right x) : iff_left x := by auto [iff_rule x]

@@ -1,0 +1,144 @@
+import recurrence
+
+-> driven.real (r c A : ℝ) : ℕ → ℝ
+  | 0 => A
+  | i + 1 => r * driven.real r c A i + c * r ^ i
+
++ real_zero_first : driven.real 0 3 7 1 = 3
+  exact recurrence.geometric_linear_succ.real (driven.real 0 3 7) 0 3 (by intro i; rfl) 0
++ real_zero_later (n : ℕ) : driven.real 0 3 7 (n + 1 + 1) = 0
+  rw [recurrence.geometric_linear_succ.real (driven.real 0 3 7) 0 3 (by intro i; rfl) (n + 1), pow_succ.real]
+  ring
++ real_unit_rate (n : ℕ) : 1 * driven.real 1 3 7 n = (1 * 7 + 3 * (n : ℝ)) * 1 ^ n
+  exact recurrence.geometric_linear.real (driven.real 1 3 7) 1 3 (by intro i; rfl) n
+
+-> mixed.real (r q c A : ℝ) : ℕ → ℝ
+  | 0 => A
+  | i + 1 => r * mixed.real r q c A i + c * q ^ i
+-> sum_powers.real (r : ℝ) : ℕ → ℝ
+  | 0 => 0
+  | i + 1 => sum_powers.real r i + r ^ i
+
++ real_negative_rate (n : ℕ) : (-2) * driven.real (-2) (-3) 5 n = ((-2) * 5 + (-3) * (n : ℝ)) * (-2) ^ n
+  exact recurrence.geometric_linear.real (driven.real (-2) (-3) 5) (-2) (-3) (by intro i; rfl) n
++ real_mixed_rates (n : ℕ) :
+    ((-2) - 3) * mixed.real 3 (-2) (-4) 7 n = ((-2) - 3) * 7 * 3 ^ n + (-4) * ((-2) ^ n - 3 ^ n)
+  exact recurrence.geometric_forcing_eq.real (mixed.real 3 (-2) (-4) 7) 3 (-2) (-4) (by intro i; rfl) n
++ real_forcing_zero_rate (n : ℕ) :
+    (0 - 2) * mixed.real 2 0 (-3) 7 n = (0 - 2) * 7 * 2 ^ n + (-3) * (0 ^ n - 2 ^ n)
+  exact recurrence.geometric_forcing_eq.real (mixed.real 2 0 (-3) 7) 2 0 (-3) (by intro i; rfl) n
++ real_negative_sum (n : ℕ) : (1 - (-2)) * sum_powers.real (-2) n = 1 - (-2) ^ n
+  exact recurrence.geometric_sum.real (sum_powers.real (-2)) (-2) (by rfl) (by intro i; rfl) n
++ real_empty_sum (r : ℝ) : (1 - r) * sum_powers.real r 0 = 1 - r ^ 0
+  exact recurrence.geometric_sum.real (sum_powers.real r) r (by rfl) (by intro i; rfl) 0
+
+-> driven.rat (r c A : ℚ) : ℕ → ℚ
+  | 0 => A
+  | i + 1 => r * driven.rat r c A i + c * r ^ i
+
++ rat_zero_first : driven.rat 0 3 7 1 = 3
+  exact recurrence.geometric_linear_succ.rat (driven.rat 0 3 7) 0 3 (by intro i; rfl) 0
++ rat_zero_later (n : ℕ) : driven.rat 0 3 7 (n + 1 + 1) = 0
+  rw [recurrence.geometric_linear_succ.rat (driven.rat 0 3 7) 0 3 (by intro i; rfl) (n + 1), pow_succ.rat]
+  ring
++ rat_unit_rate (n : ℕ) : 1 * driven.rat 1 3 7 n = (1 * 7 + 3 * (n : ℚ)) * 1 ^ n
+  exact recurrence.geometric_linear.rat (driven.rat 1 3 7) 1 3 (by intro i; rfl) n
+
+-> mixed.rat (r q c A : ℚ) : ℕ → ℚ
+  | 0 => A
+  | i + 1 => r * mixed.rat r q c A i + c * q ^ i
+-> sum_powers.rat (r : ℚ) : ℕ → ℚ
+  | 0 => 0
+  | i + 1 => sum_powers.rat r i + r ^ i
+
++ rat_negative_rate (n : ℕ) : (-2) * driven.rat (-2) (-3) 5 n = ((-2) * 5 + (-3) * (n : ℚ)) * (-2) ^ n
+  exact recurrence.geometric_linear.rat (driven.rat (-2) (-3) 5) (-2) (-3) (by intro i; rfl) n
++ rat_mixed_rates (n : ℕ) :
+    ((-2) - 3) * mixed.rat 3 (-2) (-4) 7 n = ((-2) - 3) * 7 * 3 ^ n + (-4) * ((-2) ^ n - 3 ^ n)
+  exact recurrence.geometric_forcing_eq.rat (mixed.rat 3 (-2) (-4) 7) 3 (-2) (-4) (by intro i; rfl) n
++ rat_forcing_zero_rate (n : ℕ) :
+    (0 - 2) * mixed.rat 2 0 (-3) 7 n = (0 - 2) * 7 * 2 ^ n + (-3) * (0 ^ n - 2 ^ n)
+  exact recurrence.geometric_forcing_eq.rat (mixed.rat 2 0 (-3) 7) 2 0 (-3) (by intro i; rfl) n
++ rat_negative_sum (n : ℕ) : (1 - (-2)) * sum_powers.rat (-2) n = 1 - (-2) ^ n
+  exact recurrence.geometric_sum.rat (sum_powers.rat (-2)) (-2) (by rfl) (by intro i; rfl) n
++ rat_empty_sum (r : ℚ) : (1 - r) * sum_powers.rat r 0 = 1 - r ^ 0
+  exact recurrence.geometric_sum.rat (sum_powers.rat r) r (by rfl) (by intro i; rfl) 0
+
+-> driven.int (r c A : ℤ) : ℕ → ℤ
+  | 0 => A
+  | i + 1 => r * driven.int r c A i + c * r ^ i
+
++ int_zero_first : driven.int 0 3 7 1 = 3
+  exact recurrence.geometric_linear_succ.int (driven.int 0 3 7) 0 3 (by intro i; rfl) 0
++ int_zero_later (n : ℕ) : driven.int 0 3 7 (n + 1 + 1) = 0
+  rw [recurrence.geometric_linear_succ.int (driven.int 0 3 7) 0 3 (by intro i; rfl) (n + 1), pow_succ.int]
+  ring
++ int_unit_rate (n : ℕ) : 1 * driven.int 1 3 7 n = (1 * 7 + 3 * (n : ℤ)) * 1 ^ n
+  exact recurrence.geometric_linear.int (driven.int 1 3 7) 1 3 (by intro i; rfl) n
+
+-> mixed.int (r q c A : ℤ) : ℕ → ℤ
+  | 0 => A
+  | i + 1 => r * mixed.int r q c A i + c * q ^ i
+-> sum_powers.int (r : ℤ) : ℕ → ℤ
+  | 0 => 0
+  | i + 1 => sum_powers.int r i + r ^ i
+
++ int_negative_rate (n : ℕ) : (-2) * driven.int (-2) (-3) 5 n = ((-2) * 5 + (-3) * (n : ℤ)) * (-2) ^ n
+  exact recurrence.geometric_linear.int (driven.int (-2) (-3) 5) (-2) (-3) (by intro i; rfl) n
++ int_mixed_rates (n : ℕ) :
+    ((-2) - 3) * mixed.int 3 (-2) (-4) 7 n = ((-2) - 3) * 7 * 3 ^ n + (-4) * ((-2) ^ n - 3 ^ n)
+  exact recurrence.geometric_forcing_eq.int (mixed.int 3 (-2) (-4) 7) 3 (-2) (-4) (by intro i; rfl) n
++ int_forcing_zero_rate (n : ℕ) :
+    (0 - 2) * mixed.int 2 0 (-3) 7 n = (0 - 2) * 7 * 2 ^ n + (-3) * (0 ^ n - 2 ^ n)
+  exact recurrence.geometric_forcing_eq.int (mixed.int 2 0 (-3) 7) 2 0 (-3) (by intro i; rfl) n
++ int_negative_sum (n : ℕ) : (1 - (-2)) * sum_powers.int (-2) n = 1 - (-2) ^ n
+  exact recurrence.geometric_sum.int (sum_powers.int (-2)) (-2) (by rfl) (by intro i; rfl) n
++ int_empty_sum (r : ℤ) : (1 - r) * sum_powers.int r 0 = 1 - r ^ 0
+  exact recurrence.geometric_sum.int (sum_powers.int r) r (by rfl) (by intro i; rfl) 0
+
+-> driven.nat (r c A : ℕ) : ℕ → ℕ
+  | 0 => A
+  | i + 1 => r * driven.nat r c A i + c * r ^ i
+
++ nat_zero_first : driven.nat 0 3 7 1 = 3
+  exact recurrence.geometric_linear_succ.nat (driven.nat 0 3 7) 0 3 (by intro i; rfl) 0
++ nat_zero_later (n : ℕ) : driven.nat 0 3 7 (n + 1 + 1) = 0
+  rw [recurrence.geometric_linear_succ.nat (driven.nat 0 3 7) 0 3 (by intro i; rfl) (n + 1), pow_succ.nat]
+  ring
++ nat_unit_rate (n : ℕ) : 1 * driven.nat 1 3 7 n = (1 * 7 + 3 * n) * 1 ^ n
+  exact recurrence.geometric_linear.nat (driven.nat 1 3 7) 1 3 (by intro i; rfl) n
+
++ nat_nonzero_initial (n : ℕ) : 3 * driven.nat 3 2 5 n = (3 * 5 + 2 * n) * 3 ^ n
+  exact recurrence.geometric_linear.nat (driven.nat 3 2 5) 3 2 (by intro i; rfl) n
+
+-> kmuls : ℕ → ℕ
+  | 0 => 1
+  | k + 1 => 3 * kmuls k
+
++ kmuls_closed (k : ℕ) : kmuls k = 3 ^ k
+  have h := recurrence.geometric_eq.nat kmuls 3 (by intro i; rfl) k
+  simp [kmuls] at h
+  exact h
+
+-> bfly : ℕ → ℕ
+  | 0 => 0
+  | k + 1 => 2 * bfly k + 2 ^ k
+
++ bfly_closed (k : ℕ) : 2 * bfly k = k * 2 ^ k
+  have h := recurrence.geometric_linear.nat bfly 2 1 (by intro i; unfold bfly; ring) k
+  simp [bfly] at h
+  exact h
+
+-> gsum (q : ℚ) : ℕ → ℚ
+  | 0 => 0
+  | n + 1 => gsum q n + q ^ n
+
++ gsum_closed (q : ℚ) (n : ℕ) : (1 - q) * gsum q n = 1 - q ^ n
+  exact recurrence.geometric_sum.rat (gsum q) q (by rfl) (by intro i; rfl) n
+
+-> gs (x : ℚ) : ℕ → ℚ
+  | 0 => 0
+  | n + 1 => gs x n + x ^ n
+
++ geometric (x : ℚ) (n : ℕ) : (1 - x) * gs x n = 1 - x ^ n
+  exact recurrence.geometric_sum.rat (gs x) x (by rfl) (by intro i; rfl) n

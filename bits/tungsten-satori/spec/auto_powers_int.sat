@@ -1,0 +1,46 @@
+import arith
+
++ nonnegative (a : ℤ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a^n
+  auto
+
++ positive (a : ℤ) (n : ℕ) (h : 0 < a) : 0 < a^n
+  auto
+
++ unit_lower (a : ℤ) (n : ℕ) (h : 1 ≤ a) : 1 ≤ a^n
+  auto
+
++ unit_upper (a : ℤ) (n : ℕ) (h0 : 0 ≤ a) (h1 : a ≤ 1) : a^n ≤ 1
+  auto
+
++ base_order (a b : ℤ) (n : ℕ) (h0 : 0 ≤ a) (h : a ≤ b) : a^n ≤ b^n
+  auto
+
++ base_strict (a b : ℤ) (n : ℕ) (h0 : 0 ≤ a) (h : a < b) (hn : 0 < n) : a^n < b^n
+  auto
+
++ exponent_order (a : ℤ) (m n : ℕ) (h : 1 ≤ a) (hmn : m ≤ n) : a^m ≤ a^n
+  auto
+
++ exponent_strict (a : ℤ) (m n : ℕ) (h : 1 < a) (hmn : m < n) : a^m < a^n
+  auto
+
++ derived_sign (x : ℤ) (n : ℕ) (hx : 3 ≤ x) : 0 < (x-1)^n
+  auto
+
++ nested (a b : ℤ) (m n : ℕ) (h0 : 0 ≤ a) (h : a ≤ b) : (a^m)^n ≤ (b^m)^n
+  auto
+
++ pointwise (f g : ℕ → ℤ) (h0 : ∀ i, 0 ≤ f i) (h : ∀ i, f i ≤ g i) (i n : ℕ) : f i ^ n ≤ g i ^ n
+  auto
+
++ large_exponent (a : ℤ) (h : 0 < a) : 0 < a^64
+  auto
+
++ decay (a : ℤ) (m n : ℕ) (h0 : 0 ≤ a) (h1 : a ≤ 1) (h : m ≤ n) : a^n ≤ a^m
+  auto
+
+opaque a : ℤ
+axiom supplied_positive : 0 < a
+
++ explicit_bound (n : ℕ) : 0 < a^n
+  auto [supplied_positive]

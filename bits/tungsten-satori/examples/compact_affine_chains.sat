@@ -1,0 +1,11 @@
+import arith
+
++ lower_with_margin (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c+1 ≤ b^n) : c < x^n
+  auto
+
++ upper_with_margin (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ x) (hb : x ≤ b) (hc : b^n ≤ c-1) : x^n < c
+  auto
+
++ monotone_with_margin (f : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v)
+    (x b c e : ℚ) (hb : b ≤ x) (he : 0 < e) (hc : c+e ≤ f b) : c < f x
+  auto

@@ -1,0 +1,137 @@
+import recurrence
+-> count.nat : ℕ → ℕ
+  | 0 => 0
+  | i+1 => count.nat i+1
+-> count.int : ℕ → ℤ
+  | 0 => 0
+  | i+1 => count.int i+1
+-> count.rat : ℕ → ℚ
+  | 0 => 0
+  | i+1 => count.rat i+1
+-> count.real : ℕ → ℝ
+  | 0 => 0
+  | i+1 => count.real i+1
+
++ nat_point_base (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ) (base : f 0 a = a) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.nat n
+  auto
+
++ nat_point_step (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ) (base : ∀ b, f 0 b = b) (step : ∀ i, f (i+1) a = f i (a+1)) : f n a = a+count.nat n
+  auto
+
++ nat_missing_base (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.nat n
+  auto
+
++ nat_missing_step (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ) (base : ∀ b, f 0 b = b) : f n a = a+count.nat n
+  auto
+
++ nat_wrong_base (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ) (base : ∀ b, f 0 b = b+1) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.nat n
+  auto
+
++ nat_wrong_shift (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+2)) : f n a = a+count.nat n
+  auto
+
++ nat_late_step (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+2) b = f (i+1) (b+1)) : f n a = a+count.nat n
+  auto
+
++ nat_guarded_step (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ) (base : ∀ b, f 0 b = b) (step : ∀ i b, b = a → f (i+1) b = f i (b+1)) : f n a = a+count.nat n
+  auto
+
++ nat_next_index (f : ℕ → ℕ → ℕ) (n : ℕ) (a : ℕ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f (i+1) b) : f n a = a+count.nat n
+  auto
+
++ nat_wrong_parameter (f : ℕ → ℕ → ℕ) (n : ℕ) (a c : ℕ)
+    (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = c+count.nat n
+  auto
+
++ int_point_base (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ) (base : f 0 a = a) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.int n
+  auto
+
++ int_point_step (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ) (base : ∀ b, f 0 b = b) (step : ∀ i, f (i+1) a = f i (a+1)) : f n a = a+count.int n
+  auto
+
++ int_missing_base (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.int n
+  auto
+
++ int_missing_step (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ) (base : ∀ b, f 0 b = b) : f n a = a+count.int n
+  auto
+
++ int_wrong_base (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ) (base : ∀ b, f 0 b = b+1) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.int n
+  auto
+
++ int_wrong_shift (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+2)) : f n a = a+count.int n
+  auto
+
++ int_late_step (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+2) b = f (i+1) (b+1)) : f n a = a+count.int n
+  auto
+
++ int_guarded_step (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ) (base : ∀ b, f 0 b = b) (step : ∀ i b, b = a → f (i+1) b = f i (b+1)) : f n a = a+count.int n
+  auto
+
++ int_next_index (f : ℕ → ℤ → ℤ) (n : ℕ) (a : ℤ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f (i+1) b) : f n a = a+count.int n
+  auto
+
++ int_wrong_parameter (f : ℕ → ℤ → ℤ) (n : ℕ) (a c : ℤ)
+    (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = c+count.int n
+  auto
+
++ rat_point_base (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ) (base : f 0 a = a) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.rat n
+  auto
+
++ rat_point_step (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ) (base : ∀ b, f 0 b = b) (step : ∀ i, f (i+1) a = f i (a+1)) : f n a = a+count.rat n
+  auto
+
++ rat_missing_base (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.rat n
+  auto
+
++ rat_missing_step (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ) (base : ∀ b, f 0 b = b) : f n a = a+count.rat n
+  auto
+
++ rat_wrong_base (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ) (base : ∀ b, f 0 b = b+1) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.rat n
+  auto
+
++ rat_wrong_shift (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+2)) : f n a = a+count.rat n
+  auto
+
++ rat_late_step (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+2) b = f (i+1) (b+1)) : f n a = a+count.rat n
+  auto
+
++ rat_guarded_step (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ) (base : ∀ b, f 0 b = b) (step : ∀ i b, b = a → f (i+1) b = f i (b+1)) : f n a = a+count.rat n
+  auto
+
++ rat_next_index (f : ℕ → ℚ → ℚ) (n : ℕ) (a : ℚ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f (i+1) b) : f n a = a+count.rat n
+  auto
+
++ rat_wrong_parameter (f : ℕ → ℚ → ℚ) (n : ℕ) (a c : ℚ)
+    (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = c+count.rat n
+  auto
+
++ real_point_base (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ) (base : f 0 a = a) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.real n
+  auto
+
++ real_point_step (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ) (base : ∀ b, f 0 b = b) (step : ∀ i, f (i+1) a = f i (a+1)) : f n a = a+count.real n
+  auto
+
++ real_missing_base (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.real n
+  auto
+
++ real_missing_step (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ) (base : ∀ b, f 0 b = b) : f n a = a+count.real n
+  auto
+
++ real_wrong_base (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ) (base : ∀ b, f 0 b = b+1) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = a+count.real n
+  auto
+
++ real_wrong_shift (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+2)) : f n a = a+count.real n
+  auto
+
++ real_late_step (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+2) b = f (i+1) (b+1)) : f n a = a+count.real n
+  auto
+
++ real_guarded_step (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ) (base : ∀ b, f 0 b = b) (step : ∀ i b, b = a → f (i+1) b = f i (b+1)) : f n a = a+count.real n
+  auto
+
++ real_next_index (f : ℕ → ℝ → ℝ) (n : ℕ) (a : ℝ) (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f (i+1) b) : f n a = a+count.real n
+  auto
+
++ real_wrong_parameter (f : ℕ → ℝ → ℝ) (n : ℕ) (a c : ℝ)
+    (base : ∀ b, f 0 b = b) (step : ∀ i b, f (i+1) b = f i (b+1)) : f n a = c+count.real n
+  auto

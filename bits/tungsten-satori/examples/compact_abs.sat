@@ -1,0 +1,16 @@
+import arith
+
++ interval (x e : ℝ) (lo : 0-e ≤ x) (hi : x ≤ e) : |x| ≤ e
+  auto
+
++ distance (x y e : ℝ) (h : |x-y| < e) : y-e < x ∧ x < y+e
+  auto
+
++ reverse_triangle (x y : ℚ) : | |x|-|y| | ≤ |x-y|
+  auto
+
++ squared_bound (x c : ℝ) (h : x*x ≤ c*c) (hc : 0 ≤ c) : |x| ≤ c
+  auto
+
++ pointwise (f : ℕ → ℤ) (c : ℤ) (h : ∀ i, |f i| ≤ c) (n : ℕ) : f n ≤ c
+  auto

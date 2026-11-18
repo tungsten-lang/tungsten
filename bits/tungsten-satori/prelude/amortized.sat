@@ -1,0 +1,144 @@
+-- Costs along a stateful run; next and cost take the state before the request.
+import fold
+
+-> run.final (next : β → α → β) (xs : list α) (s : β) : β := list.foldl (fun x v => next v x) xs s
+-> run.total (next : β → α → β) (cost : β → α → γ) : list α → β → γ
+  | [], s => 0
+  | x :: xs, s => cost s x + run.total next cost xs (next s x)
+
+@[simp] + run.final_nil (next : β → α → β) (s : β) : run.final next [] s = s := by rfl
+@[simp] + run.final_cons (next : β → α → β) (x : α) (xs : list α) (s : β) : run.final next (x :: xs) s = run.final next xs (next s x) := by rfl
+@[simp] + run.total_nil (next : β → α → β) (cost : β → α → γ) (s : β) : run.total next cost [] s = 0 := by rfl
+@[simp] + run.total_cons (next : β → α → β) (cost : β → α → γ) (x : α) (xs : list α) (s : β) : run.total next cost (x :: xs) s = cost s x + run.total next cost xs (next s x) := by rfl
+
++ run.total_scale.rat (next : β → α → β) (cost : β → α → ℚ) (c : ℚ) (xs : list α) : ∀ s, run.total next (fun v x => c * cost v x) xs s = c * run.total next cost xs s
+  induction xs with s x xs ih s
+  · simp
+  · rw [run.total_cons, run.total_cons, ih]
+    ring
+
+-- Only allowed requests and valid states need to satisfy the step bound.
++ run.potential.rat (next : β → α → β) (cost budget : β → α → ℚ) (phi : β → ℚ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) ≤ phi s + budget s x)
+    (xs : list α) : ∀ s, P s → all Q xs → P (run.final next xs s) ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + run.total next budget xs s
+  induction xs with s hs hx x xs ih s hs hx
+  · simp [all, hs]
+  · simp [all] at hx
+    have h := step s hs x hx.1
+    have tail := ih (next s x) h.1 hx.2
+    rw [run.final_cons, run.total_cons, run.total_cons]
+    exact ⟨tail.1, by linarith [h.2, tail.2]⟩
+
+-- The multiplier may have either sign: no inequality is multiplied by it.
++ run.ratio.rat (next : β → α → β) (cost opt : β → α → ℚ) (phi : β → ℚ) (c : ℚ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (xs : list α) : ∀ s, P s → all Q xs → P (run.final next xs s) ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + c * run.total next opt xs s
+  induction xs with s hs hx x xs ih s hs hx
+  · simp [all, hs]
+  · simp [all] at hx
+    have h := step s hs x hx.1
+    have tail := ih (next s x) h.1 hx.2
+    rw [run.final_cons, run.total_cons, run.total_cons]
+    exact ⟨tail.1, by linarith [h.2, tail.2]⟩
+
++ run.ratio_bound.rat (next : β → α → β) (cost opt : β → α → ℚ) (phi : β → ℚ) (c : ℚ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (nonneg : ∀ s, P s → 0 ≤ phi s) (xs : list α) (s : β) (hs : P s) (hx : all Q xs) : run.total next cost xs s ≤ phi s + c * run.total next opt xs s
+  have h := run.ratio.rat next cost opt phi c P Q step xs s hs hx
+  linarith [h.2, nonneg (run.final next xs s) h.1]
+
++ run.total_scale.real (next : β → α → β) (cost : β → α → ℝ) (c : ℝ) (xs : list α) : ∀ s, run.total next (fun v x => c * cost v x) xs s = c * run.total next cost xs s
+  induction xs with s x xs ih s
+  · simp
+  · rw [run.total_cons, run.total_cons, ih]
+    ring
+
+-- Only allowed requests and valid states need to satisfy the step bound.
++ run.potential.real (next : β → α → β) (cost budget : β → α → ℝ) (phi : β → ℝ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) ≤ phi s + budget s x)
+    (xs : list α) : ∀ s, P s → all Q xs → P (run.final next xs s) ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + run.total next budget xs s
+  induction xs with s hs hx x xs ih s hs hx
+  · simp [all, hs]
+  · simp [all] at hx
+    have h := step s hs x hx.1
+    have tail := ih (next s x) h.1 hx.2
+    rw [run.final_cons, run.total_cons, run.total_cons]
+    exact ⟨tail.1, by linarith [h.2, tail.2]⟩
+
+-- The multiplier may have either sign: no inequality is multiplied by it.
++ run.ratio.real (next : β → α → β) (cost opt : β → α → ℝ) (phi : β → ℝ) (c : ℝ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (xs : list α) : ∀ s, P s → all Q xs → P (run.final next xs s) ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + c * run.total next opt xs s
+  induction xs with s hs hx x xs ih s hs hx
+  · simp [all, hs]
+  · simp [all] at hx
+    have h := step s hs x hx.1
+    have tail := ih (next s x) h.1 hx.2
+    rw [run.final_cons, run.total_cons, run.total_cons]
+    exact ⟨tail.1, by linarith [h.2, tail.2]⟩
+
++ run.ratio_bound.real (next : β → α → β) (cost opt : β → α → ℝ) (phi : β → ℝ) (c : ℝ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (nonneg : ∀ s, P s → 0 ≤ phi s) (xs : list α) (s : β) (hs : P s) (hx : all Q xs) : run.total next cost xs s ≤ phi s + c * run.total next opt xs s
+  have h := run.ratio.real next cost opt phi c P Q step xs s hs hx
+  linarith [h.2, nonneg (run.final next xs s) h.1]
+
++ run.total_scale.int (next : β → α → β) (cost : β → α → ℤ) (c : ℤ) (xs : list α) : ∀ s, run.total next (fun v x => c * cost v x) xs s = c * run.total next cost xs s
+  induction xs with s x xs ih s
+  · simp
+  · rw [run.total_cons, run.total_cons, ih]
+    ring
+
+-- Only allowed requests and valid states need to satisfy the step bound.
++ run.potential.int (next : β → α → β) (cost budget : β → α → ℤ) (phi : β → ℤ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) ≤ phi s + budget s x)
+    (xs : list α) : ∀ s, P s → all Q xs → P (run.final next xs s) ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + run.total next budget xs s
+  induction xs with s hs hx x xs ih s hs hx
+  · simp [all, hs]
+  · simp [all] at hx
+    have h := step s hs x hx.1
+    have tail := ih (next s x) h.1 hx.2
+    rw [run.final_cons, run.total_cons, run.total_cons]
+    exact ⟨tail.1, by linarith [h.2, tail.2]⟩
+
+-- The multiplier may have either sign: no inequality is multiplied by it.
++ run.ratio.int (next : β → α → β) (cost opt : β → α → ℤ) (phi : β → ℤ) (c : ℤ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (xs : list α) : ∀ s, P s → all Q xs → P (run.final next xs s) ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + c * run.total next opt xs s
+  induction xs with s hs hx x xs ih s hs hx
+  · simp [all, hs]
+  · simp [all] at hx
+    have h := step s hs x hx.1
+    have tail := ih (next s x) h.1 hx.2
+    rw [run.final_cons, run.total_cons, run.total_cons]
+    exact ⟨tail.1, by linarith [h.2, tail.2]⟩
+
++ run.ratio_bound.int (next : β → α → β) (cost opt : β → α → ℤ) (phi : β → ℤ) (c : ℤ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (nonneg : ∀ s, P s → 0 ≤ phi s) (xs : list α) (s : β) (hs : P s) (hx : all Q xs) : run.total next cost xs s ≤ phi s + c * run.total next opt xs s
+  have h := run.ratio.int next cost opt phi c P Q step xs s hs hx
+  linarith [h.2, nonneg (run.final next xs s) h.1]
+
++ run.ratio_zero.rat (next : β → α → β) (cost opt : β → α → ℚ) (phi : β → ℚ) (c : ℚ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (nonneg : ∀ s, P s → 0 ≤ phi s) (xs : list α) (s : β) (hs : P s) (hx : all Q xs) (zero : phi s = 0) : run.total next cost xs s ≤ c * run.total next opt xs s
+  have h := run.ratio_bound.rat next cost opt phi c P Q step nonneg xs s hs hx
+  rw [zero] at h
+  simp at h
+  exact h
+
++ run.ratio_zero.real (next : β → α → β) (cost opt : β → α → ℝ) (phi : β → ℝ) (c : ℝ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (nonneg : ∀ s, P s → 0 ≤ phi s) (xs : list α) (s : β) (hs : P s) (hx : all Q xs) (zero : phi s = 0) : run.total next cost xs s ≤ c * run.total next opt xs s
+  have h := run.ratio_bound.real next cost opt phi c P Q step nonneg xs s hs hx
+  rw [zero] at h
+  simp at h
+  exact h
+
++ run.ratio_zero.int (next : β → α → β) (cost opt : β → α → ℤ) (phi : β → ℤ) (c : ℤ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (nonneg : ∀ s, P s → 0 ≤ phi s) (xs : list α) (s : β) (hs : P s) (hx : all Q xs) (zero : phi s = 0) : run.total next cost xs s ≤ c * run.total next opt xs s
+  have h := run.ratio_bound.int next cost opt phi c P Q step nonneg xs s hs hx
+  rw [zero] at h
+  simp at h
+  exact h

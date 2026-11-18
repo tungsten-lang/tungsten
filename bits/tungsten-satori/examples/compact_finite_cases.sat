@@ -1,0 +1,14 @@
+inductive direction
+  | backward
+  | forward
+-> opposite : direction → direction
+  | backward => forward
+  | forward => backward
+-> move : direction → ℚ → ℚ
+  | backward, x => x-1
+  | forward, x => x+1
+
++ undo (d : direction) (x : ℚ) : move (opposite d) (move d x) = x
+  auto
++ positive (d : direction) (x : ℚ) (h : 2 ≤ x) : 0 < move d x
+  auto

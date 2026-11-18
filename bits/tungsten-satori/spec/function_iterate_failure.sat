@@ -1,0 +1,3 @@
++ wrong_invariant (p : α → α) (facet : α → β) (x : α) (n : ℕ) : facet (function.iterate p n x) = facet x := function.iterate_preserves p facet n x
++ too_many_arguments (p : α → α) (facet : α → β) (h : ∀ x, facet (p x) = facet x) (x : α) (n : ℕ) : facet (function.iterate p n x) = facet x := function.iterate_preserves p facet h n x n
++ missing_fixed_point (f : α → α) (x : α) (n : ℕ) : function.iterate f n x = x := function.iterate_fixed f x n

@@ -1,0 +1,8 @@
+axiom dubious : 1 = 1
+#axioms dubious
++ same : 1 = 1 := dubious
+#axioms same
++ before : 1 = 1 := same
++ same : 1 = 1 := by rfl
+#axioms same
++ after : 1 = 1 := same

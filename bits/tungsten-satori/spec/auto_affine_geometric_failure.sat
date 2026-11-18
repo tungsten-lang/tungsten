@@ -1,0 +1,149 @@
+import recurrence
+
+-> affine.nat : ℕ → ℕ
+  | 0 => 0
+  | i+1 => 3*affine.nat i+2
+
++ nat_missing_base (f : ℕ → ℕ) (n : ℕ) (step : ∀ i, f (i+1) = 3*f i) : f n = 5*3^n
+  auto
+
++ nat_missing_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 5) : f n = 5*3^n
+  auto
+
++ nat_wrong_base (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 4) (step : ∀ i, f (i+1) = 3*f i) : f n = 5*3^n
+  auto
+
++ nat_wrong_rate (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i+1) = 2*f i) : f n = 5*3^n
+  auto
+
++ nat_wrong_index (f : ℕ → ℕ) (n m : ℕ) (base : f 0 = 5) (step : ∀ i, f (i+1) = 3*f i) : f m = 5*3^n
+  auto
+
++ nat_point_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 5) (step : f (n+1) = 3*f n) : f n = 5*3^n
+  auto
+
++ nat_two_rates (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = 3^n+2^n
+  auto
+
++ nat_wrong_offset (n : ℕ) : affine.nat n = 3^n-2
+  auto
+
+-> affine.int : ℕ → ℤ
+  | 0 => 0
+  | i+1 => 3*affine.int i+2
+
++ int_missing_base (f : ℕ → ℤ) (n : ℕ) (step : ∀ i, f (i+1) = 3*f i) : f n = 5*3^n
+  auto
+
++ int_missing_step (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 5) : f n = 5*3^n
+  auto
+
++ int_wrong_base (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 4) (step : ∀ i, f (i+1) = 3*f i) : f n = 5*3^n
+  auto
+
++ int_wrong_rate (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i+1) = 2*f i) : f n = 5*3^n
+  auto
+
++ int_wrong_index (f : ℕ → ℤ) (n m : ℕ) (base : f 0 = 5) (step : ∀ i, f (i+1) = 3*f i) : f m = 5*3^n
+  auto
+
++ int_point_step (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 5) (step : f (n+1) = 3*f n) : f n = 5*3^n
+  auto
+
++ int_two_rates (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = 3^n+2^n
+  auto
+
++ int_wrong_offset (n : ℕ) : affine.int n = 3^n-2
+  auto
+
+-> affine.rat : ℕ → ℚ
+  | 0 => 0
+  | i+1 => 3*affine.rat i+2
+
++ rat_missing_base (f : ℕ → ℚ) (n : ℕ) (step : ∀ i, f (i+1) = 3*f i) : f n = 5*3^n
+  auto
+
++ rat_missing_step (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 5) : f n = 5*3^n
+  auto
+
++ rat_wrong_base (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 4) (step : ∀ i, f (i+1) = 3*f i) : f n = 5*3^n
+  auto
+
++ rat_wrong_rate (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i+1) = 2*f i) : f n = 5*3^n
+  auto
+
++ rat_wrong_index (f : ℕ → ℚ) (n m : ℕ) (base : f 0 = 5) (step : ∀ i, f (i+1) = 3*f i) : f m = 5*3^n
+  auto
+
++ rat_point_step (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 5) (step : f (n+1) = 3*f n) : f n = 5*3^n
+  auto
+
++ rat_two_rates (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = 3^n+2^n
+  auto
+
++ rat_wrong_offset (n : ℕ) : affine.rat n = 3^n-2
+  auto
+
+-> affine.real : ℕ → ℝ
+  | 0 => 0
+  | i+1 => 3*affine.real i+2
+
++ real_missing_base (f : ℕ → ℝ) (n : ℕ) (step : ∀ i, f (i+1) = 3*f i) : f n = 5*3^n
+  auto
+
++ real_missing_step (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 5) : f n = 5*3^n
+  auto
+
++ real_wrong_base (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 4) (step : ∀ i, f (i+1) = 3*f i) : f n = 5*3^n
+  auto
+
++ real_wrong_rate (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i+1) = 2*f i) : f n = 5*3^n
+  auto
+
++ real_wrong_index (f : ℕ → ℝ) (n m : ℕ) (base : f 0 = 5) (step : ∀ i, f (i+1) = 3*f i) : f m = 5*3^n
+  auto
+
++ real_point_step (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 5) (step : f (n+1) = 3*f n) : f n = 5*3^n
+  auto
+
++ real_two_rates (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = 3^n+2^n
+  auto
+
++ real_wrong_offset (n : ℕ) : affine.real n = 3^n-2
+  auto
+
++ nat_shifted_exponent (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = 3^(n+1)
+  auto
+
++ nat_indexed_rate (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = (n : ℕ)^n
+  auto
+
++ nat_squared_power (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = (3^n)^2
+  auto
+
++ int_shifted_exponent (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = 3^(n+1)
+  auto
+
++ int_indexed_rate (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = (n : ℤ)^n
+  auto
+
++ int_squared_power (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = (3^n)^2
+  auto
+
++ rat_shifted_exponent (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = 3^(n+1)
+  auto
+
++ rat_indexed_rate (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = (n : ℚ)^n
+  auto
+
++ rat_squared_power (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = (3^n)^2
+  auto
+
++ real_shifted_exponent (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = 3^(n+1)
+  auto
+
++ real_indexed_rate (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = (n : ℝ)^n
+  auto
+
++ real_squared_power (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 3*f i) : f n = (3^n)^2
+  auto

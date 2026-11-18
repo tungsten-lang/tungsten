@@ -1,0 +1,23 @@
++ nat_cancel (x y : ℕ) (h : x*y = 0) (hy : y ≠ 0) : x = 0
+  auto
+
++ nat_symmetric (x y : ℕ) (h : x*y = 0) (hx : x ≠ 0) : y = 0
+  auto
+
++ int_cancel (x y : ℤ) (h : x*y = 0) (hy : y ≠ 0) : x = 0
+  auto
+
++ int_symmetric (x y : ℤ) (h : x*y = 0) (hx : x ≠ 0) : y = 0
+  auto
+
++ rat_cancel (x y : ℚ) (h : x*y = 0) (hy : y ≠ 0) : x = 0
+  auto
+
++ rat_symmetric (x y : ℚ) (h : x*y = 0) (hx : x ≠ 0) : y = 0
+  auto
+
++ real_cancel (x y : ℝ) (h : x*y = 0) (hy : y ≠ 0) : x = 0
+  auto
+
++ real_symmetric (x y : ℝ) (h : x*y = 0) (hx : x ≠ 0) : y = 0
+  auto

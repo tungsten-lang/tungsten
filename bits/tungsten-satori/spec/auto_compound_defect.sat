@@ -1,0 +1,9 @@
+-> defect4 (a b : ℝ) : ℝ := (a + b) ^ 4 + (a - b) ^ 4 - 2 * a ^ 4 - 2 * b ^ 4
++ defect4_formula (a b : ℝ) : defect4 a b = 12 * (a * b) * (a * b)
+  unfold defect4
+  ring
+
++ disjoint_criterion4 (u1 u2 u3 v1 v2 v3 : ℝ) (h : defect4 u1 v1 + defect4 u2 v2 + defect4 u3 v3 = 0) :
+    u1 * v1 = 0 ∧ u2 * v2 = 0 ∧ u3 * v3 = 0
+  simp only [defect4_formula] at h
+  auto

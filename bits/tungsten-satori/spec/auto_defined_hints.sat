@@ -1,0 +1,12 @@
+opaque permitted : ℚ × ℚ → Prop
+-> ready (v : ℚ × ℚ) : Prop := permitted v
+-> ordered (v : ℚ × ℚ) : Prop := fst v ≤ snd v
+-> shifted (v : ℚ × ℚ) : ℚ × ℚ := (fst v+1, snd v+2)
+axiom ordered_if : ∀ v, ready v → ordered v
++ supplied (v : ℚ × ℚ) (h : ready v) : fst (shifted v) < snd (shifted v)
+  auto [ordered_if]
++ applied (v : ℚ × ℚ) (h : ready v) : fst (shifted v) < snd (shifted v)
+  auto [ordered_if v h]
++ local_supplied (v : ℚ × ℚ) (h : ready v) : fst (shifted v) < snd (shifted v)
+  have r := ordered_if v h
+  auto

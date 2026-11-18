@@ -1,0 +1,72 @@
+import amortized
+
+-- Preserve the recursive definitions used by the six family-110 certificates.
+-> original_allowed (Q : α → Prop) : list α → Prop
+  | [] => True
+  | x :: xs => Q x ∧ original_allowed Q xs
+-> original_final (next : β → α → β) : list α → β → β
+  | [], s => s
+  | x :: xs, s => original_final next xs (next s x)
+-> original_total (next : β → α → β) (cost : β → α → γ) : list α → β → γ
+  | [], s => 0
+  | x :: xs, s => cost s x + original_total next cost xs (next s x)
++ allowed_equivalent (Q : α → Prop) (xs : list α) : original_allowed Q xs = all Q xs
+  induction xs with x xs ih
+  · rfl
+  · simp [original_allowed, all, ih]
++ final_equivalent (next : β → α → β) (xs : list α) : ∀ s, original_final next xs s = run.final next xs s
+  induction xs with s x xs ih s
+  · rfl
+  · simp [original_final, ih]
++ total_equivalent (next : β → α → β) (cost : β → α → γ) (xs : list α) : ∀ s, original_total next cost xs s = run.total next cost xs s
+  induction xs with s x xs ih s
+  · rfl
+  · simp [original_total, ih]
++ final_order : run.final (fun (s x : ℕ) => 10 * s + x) [1, 2, 3] 0 = 123 := by decide
++ costs_before_step : run.total (fun (s x : ℕ) => 10 * s + x) (fun s x => s) [1, 2, 3] 0 = 13 := by decide
++ pair_state : run.final (fun (s : ℤ × ℤ) (x : ℤ) => (x, fst s)) [4, 7] (0, 0) = (7, 4) := by decide
+
+-> finite_next (s r : ℕ) : ℕ := 1 - s
+-> finite_cost (s r : ℕ) : ℚ := if s = 0 then 2 else 0
+-> finite_opt (s r : ℕ) : ℚ := 1
+-> finite_phi (s : ℕ) : ℚ := if s = 0 then 0 else 1
++ finite_step : ∀ s < 2, ∀ r < 1, finite_next s r < 2 ∧ finite_cost s r + finite_phi (finite_next s r) - finite_phi s ≤ 3 * finite_opt s r := by decide
++ finite_nonneg : ∀ s < 2, 0 ≤ finite_phi s := by decide
+-> finite_requests (xs : list ℕ) : Prop := all (fun r => r < 1) xs
++ finite_telescope (xs : list ℕ) : ∀ s, s < 2 → finite_requests xs → run.final finite_next xs s < 2 ∧ run.total finite_next finite_cost xs s + finite_phi (run.final finite_next xs s) ≤ finite_phi s + 3 * run.total finite_next finite_opt xs s
+  exact run.ratio.rat finite_step xs
++ finite_ratio (xs : list ℕ) (h : finite_requests xs) : run.total finite_next finite_cost xs 0 ≤ 3 * run.total finite_next finite_opt xs 0
+  exact run.ratio_zero.rat finite_step finite_nonneg xs 0 (by decide) h (by decide)
++ finite_ratio_empty : run.total finite_next finite_cost [] 0 ≤ 3 * run.total finite_next finite_opt [] 0
+  exact run.ratio_zero.rat finite_step finite_nonneg [] 0 (by decide) (by trivial) (by decide)
++ finite_ratio_positive_start (xs : list ℕ) (h : finite_requests xs) : run.total finite_next finite_cost xs 1 ≤ 1 + 3 * run.total finite_next finite_opt xs 1
+  exact run.ratio_bound.rat finite_step finite_nonneg xs 1 (by decide) h
+
+-> real_advance (s x : ℝ) : ℝ := s + x
++ real_step : ∀ s : ℝ, 0 ≤ s → ∀ x : ℝ, 0 ≤ x → 0 ≤ real_advance s x ∧ 2 * x + real_advance s x - s ≤ 3 * x
+  intro s hs x hx
+  unfold real_advance
+  constructor <;> linarith
++ real_growth (xs : list ℝ) (h : all (fun x => 0 ≤ x) xs) : run.total real_advance (fun s x => 2 * x) xs 0 ≤ 3 * run.total real_advance (fun s x => x) xs 0
+  exact run.ratio_zero.real real_advance (fun s x => 2 * x) (fun s x => x) (fun s => s) 3 (fun s => 0 ≤ s) (fun x => 0 ≤ x) real_step (by intro s hs; exact hs) xs 0 (by decide) h (by rfl)
++ real_potential (xs : list ℝ) : ∀ s, True → all (fun x => True) xs → True ∧ run.total real_advance (fun s x => -x) xs s + run.final real_advance xs s ≤ s + run.total real_advance (fun s x => 0) xs s
+  exact run.potential.real real_advance (fun s x => -x) (fun s x => 0) (fun s => s) (fun s => True) (fun x => True) (by intro s hs x hx; constructor; trivial; unfold real_advance; linarith) xs
++ integer_signed (xs : list ℤ) (h : all (fun x => True) xs) : True ∧ run.total (fun (s : list ℕ) x => s) (fun s x => -2 * x) xs [] + (-3) ≤ (-3) + (-2) * run.total (fun (s : list ℕ) x => s) (fun s x => x) xs []
+  exact run.ratio.int (fun (s : list ℕ) (x : ℤ) => s) (fun s x => -2 * x) (fun s x => x) (fun s => -3) (-2) (fun s => True) (fun x => True) (by intro s hs x hx; constructor; trivial; linarith) xs [] (by trivial) h
++ integer_refund : run.total (fun (s x : ℤ) => s + x) (fun s x => -x) [2, -5] 0 = 3 := by decide
++ rational_scaled (next : β → α → β) (cost : β → α → ℚ) (xs : list α) (s : β) : run.total next (fun s x => (-3) * cost s x) xs s = (-3) * run.total next cost xs s := run.total_scale.rat next cost (-3) xs s
++ real_scaled (next : β → α → β) (cost : β → α → ℝ) (xs : list α) (s : β) : run.total next (fun s x => 0 * cost s x) xs s = 0 * run.total next cost xs s := run.total_scale.real next cost 0 xs s
++ integer_scaled (next : β → α → β) (cost : β → α → ℤ) (xs : list α) (s : β) : run.total next (fun s x => 2 * cost s x) xs s = 2 * run.total next cost xs s := run.total_scale.int next cost 2 xs s
+#axioms allowed_equivalent
+#axioms final_equivalent
+#axioms total_equivalent
+#axioms finite_telescope
+#axioms finite_ratio
+#axioms finite_ratio_empty
+#axioms finite_ratio_positive_start
+#axioms real_growth
+#axioms real_potential
+#axioms integer_signed
+#axioms rational_scaled
+#axioms real_scaled
+#axioms integer_scaled

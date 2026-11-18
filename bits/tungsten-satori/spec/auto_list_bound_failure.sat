@@ -1,0 +1,144 @@
+-> subtotal.nat : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => x+subtotal.nat xs
+-> count.nat : list α → ℕ
+  | [] => 0
+  | x :: xs => 1+count.nat xs
+-> nonnegative.nat : list ℕ → Prop
+  | [] => True
+  | x :: xs => 0 ≤ x ∧ nonnegative.nat xs
+-> product.nat : list ℕ → ℕ
+  | [] => 1
+  | x :: xs => (1+x)*product.nat xs
+-> big.nat (K : ℕ) : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => (if K ≤ x then x else 0)+big.nat K xs
+-> subtotal.int : list ℤ → ℤ
+  | [] => 0
+  | x :: xs => x+subtotal.int xs
+-> count.int : list α → ℤ
+  | [] => 0
+  | x :: xs => 1+count.int xs
+-> nonnegative.int : list ℤ → Prop
+  | [] => True
+  | x :: xs => 0 ≤ x ∧ nonnegative.int xs
+-> product.int : list ℤ → ℤ
+  | [] => 1
+  | x :: xs => (1+x)*product.int xs
+-> big.int (K : ℤ) : list ℤ → ℤ
+  | [] => 0
+  | x :: xs => (if K ≤ x then x else 0)+big.int K xs
+-> subtotal.rat : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => x+subtotal.rat xs
+-> count.rat : list α → ℚ
+  | [] => 0
+  | x :: xs => 1+count.rat xs
+-> nonnegative.rat : list ℚ → Prop
+  | [] => True
+  | x :: xs => 0 ≤ x ∧ nonnegative.rat xs
+-> product.rat : list ℚ → ℚ
+  | [] => 1
+  | x :: xs => (1+x)*product.rat xs
+-> big.rat (K : ℚ) : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => (if K ≤ x then x else 0)+big.rat K xs
+-> subtotal.real : list ℝ → ℝ
+  | [] => 0
+  | x :: xs => x+subtotal.real xs
+-> count.real : list α → ℝ
+  | [] => 0
+  | x :: xs => 1+count.real xs
+-> nonnegative.real : list ℝ → Prop
+  | [] => True
+  | x :: xs => 0 ≤ x ∧ nonnegative.real xs
+-> product.real : list ℝ → ℝ
+  | [] => 1
+  | x :: xs => (1+x)*product.real xs
+-> big.real (K : ℝ) : list ℝ → ℝ
+  | [] => 0
+  | x :: xs => (if K ≤ x then x else 0)+big.real K xs
+
++ nat_empty_strict (xs : list ℕ) (h : nonnegative.nat xs) : 0 < subtotal.nat xs := by auto
++ nat_missing_upper (xs : list ℕ) (C : ℕ) : subtotal.nat xs ≤ count.nat xs*C := by auto
++ nat_wrong_upper (xs : list ℕ) (C : ℕ) (h : ∀ x ∈ xs, C ≤ x) : subtotal.nat xs ≤ count.nat xs*C := by auto
++ nat_point_member (xs : list ℕ) (a C : ℕ) (h : a ∈ xs → a ≤ C) : subtotal.nat xs ≤ count.nat xs*C := by auto
++ nat_wrong_list (xs ys : list ℕ) (C : ℕ) (h : ∀ x ∈ ys, x ≤ C) : subtotal.nat xs ≤ count.nat xs*C := by auto
++ nat_missing_base (f g : list α → ℕ) (xs : list α)
+    (fs : ∀ x ys, f (x :: ys) ≤ f ys+1) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ nat_missing_step (f g : list α → ℕ) (xs : list α) (base : f [] ≤ g [])
+    (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ nat_wrong_step (f g : list α → ℕ) (xs : list α) (base : f [] ≤ g [])
+    (fs : ∀ x ys, f (x :: ys) ≤ f ys+2) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ nat_missing_guard (f : list α → ℕ) (p : α → Prop) (A c : ℕ) (xs : list α)
+    (base : f [] ≤ A) (step : ∀ x ys, p x → f (x :: ys) ≤ f ys+c) : f xs ≤ A+count.nat xs*c
+  auto
++ nat_point_step (f g : list ℕ → ℕ) (a : ℕ) (xs : list ℕ) (base : f [] ≤ g [])
+    (fs : ∀ ys, f (a :: ys) ≤ f ys+1) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
+
++ int_empty_strict (xs : list ℤ) (h : nonnegative.int xs) : 0 < subtotal.int xs := by auto
++ int_missing_upper (xs : list ℤ) (C : ℤ) : subtotal.int xs ≤ count.int xs*C := by auto
++ int_wrong_upper (xs : list ℤ) (C : ℤ) (h : ∀ x ∈ xs, C ≤ x) : subtotal.int xs ≤ count.int xs*C := by auto
++ int_point_member (xs : list ℤ) (a C : ℤ) (h : a ∈ xs → a ≤ C) : subtotal.int xs ≤ count.int xs*C := by auto
++ int_wrong_list (xs ys : list ℤ) (C : ℤ) (h : ∀ x ∈ ys, x ≤ C) : subtotal.int xs ≤ count.int xs*C := by auto
++ int_missing_base (f g : list α → ℤ) (xs : list α)
+    (fs : ∀ x ys, f (x :: ys) ≤ f ys+1) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ int_missing_step (f g : list α → ℤ) (xs : list α) (base : f [] ≤ g [])
+    (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ int_wrong_step (f g : list α → ℤ) (xs : list α) (base : f [] ≤ g [])
+    (fs : ∀ x ys, f (x :: ys) ≤ f ys+2) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ int_missing_guard (f : list α → ℤ) (p : α → Prop) (A c : ℤ) (xs : list α)
+    (base : f [] ≤ A) (step : ∀ x ys, p x → f (x :: ys) ≤ f ys+c) : f xs ≤ A+count.int xs*c
+  auto
++ int_point_step (f g : list ℤ → ℤ) (a : ℤ) (xs : list ℤ) (base : f [] ≤ g [])
+    (fs : ∀ ys, f (a :: ys) ≤ f ys+1) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
+
++ rat_empty_strict (xs : list ℚ) (h : nonnegative.rat xs) : 0 < subtotal.rat xs := by auto
++ rat_missing_upper (xs : list ℚ) (C : ℚ) : subtotal.rat xs ≤ count.rat xs*C := by auto
++ rat_wrong_upper (xs : list ℚ) (C : ℚ) (h : ∀ x ∈ xs, C ≤ x) : subtotal.rat xs ≤ count.rat xs*C := by auto
++ rat_point_member (xs : list ℚ) (a C : ℚ) (h : a ∈ xs → a ≤ C) : subtotal.rat xs ≤ count.rat xs*C := by auto
++ rat_wrong_list (xs ys : list ℚ) (C : ℚ) (h : ∀ x ∈ ys, x ≤ C) : subtotal.rat xs ≤ count.rat xs*C := by auto
++ rat_missing_base (f g : list α → ℚ) (xs : list α)
+    (fs : ∀ x ys, f (x :: ys) ≤ f ys+1) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ rat_missing_step (f g : list α → ℚ) (xs : list α) (base : f [] ≤ g [])
+    (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ rat_wrong_step (f g : list α → ℚ) (xs : list α) (base : f [] ≤ g [])
+    (fs : ∀ x ys, f (x :: ys) ≤ f ys+2) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ rat_missing_guard (f : list α → ℚ) (p : α → Prop) (A c : ℚ) (xs : list α)
+    (base : f [] ≤ A) (step : ∀ x ys, p x → f (x :: ys) ≤ f ys+c) : f xs ≤ A+count.rat xs*c
+  auto
++ rat_point_step (f g : list ℚ → ℚ) (a : ℚ) (xs : list ℚ) (base : f [] ≤ g [])
+    (fs : ∀ ys, f (a :: ys) ≤ f ys+1) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
+
++ real_empty_strict (xs : list ℝ) (h : nonnegative.real xs) : 0 < subtotal.real xs := by auto
++ real_missing_upper (xs : list ℝ) (C : ℝ) : subtotal.real xs ≤ count.real xs*C := by auto
++ real_wrong_upper (xs : list ℝ) (C : ℝ) (h : ∀ x ∈ xs, C ≤ x) : subtotal.real xs ≤ count.real xs*C := by auto
++ real_point_member (xs : list ℝ) (a C : ℝ) (h : a ∈ xs → a ≤ C) : subtotal.real xs ≤ count.real xs*C := by auto
++ real_wrong_list (xs ys : list ℝ) (C : ℝ) (h : ∀ x ∈ ys, x ≤ C) : subtotal.real xs ≤ count.real xs*C := by auto
++ real_missing_base (f g : list α → ℝ) (xs : list α)
+    (fs : ∀ x ys, f (x :: ys) ≤ f ys+1) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ real_missing_step (f g : list α → ℝ) (xs : list α) (base : f [] ≤ g [])
+    (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ real_wrong_step (f g : list α → ℝ) (xs : list α) (base : f [] ≤ g [])
+    (fs : ∀ x ys, f (x :: ys) ≤ f ys+2) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto
++ real_missing_guard (f : list α → ℝ) (p : α → Prop) (A c : ℝ) (xs : list α)
+    (base : f [] ≤ A) (step : ∀ x ys, p x → f (x :: ys) ≤ f ys+c) : f xs ≤ A+count.real xs*c
+  auto
++ real_point_step (f g : list ℝ → ℝ) (a : ℝ) (xs : list ℝ) (base : f [] ≤ g [])
+    (fs : ∀ ys, f (a :: ys) ≤ f ys+1) (gs : ∀ x ys, g ys+1 ≤ g (x :: ys)) : f xs ≤ g xs
+  auto

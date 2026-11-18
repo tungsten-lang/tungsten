@@ -1,0 +1,18 @@
+import quadratic
+
++ invalid_remove_square (a b : ℝ) (h : a * a ≤ b * b) : a ≤ b
+  apply le_of_mul_self_le_mul_self.real <;> auto
++ invalid_square_forward (a b : ℤ) (h : a ≤ b) : a * a ≤ b * b
+  rw [mul_self_le_mul_self_iff.int a b (by auto) (by auto)]
++ invalid_strict_bound (a b : ℕ) (h : a * a ≤ b * b) : a < b
+  apply lt_of_mul_self_lt_mul_self.nat; exact h
++ invalid_product_sign (c w a b : ℝ) (hw : 0 ≤ w) (ha : c ≤ w * (a * a)) (hb : c ≤ w * (b * b)) : c ≤ w * (a * b)
+  apply le_mul_of_le_mul_self.real <;> auto
++ invalid_upper_weight (c w a b : ℚ) (ha : w * (a * a) ≤ c) (hb : w * (b * b) ≤ c) : w * (a * b) ≤ c
+  apply mul_le_of_mul_self_le.rat <;> auto
++ invalid_one_square (c w a b : ℤ) (hw : 0 ≤ w) (hab : 0 ≤ a * b) (ha : c ≤ w * (a * a)) : c ≤ w * (a * b)
+  apply le_mul_of_le_mul_self.int <;> auto
++ invalid_strict_product (c w a b : ℕ) (ha : c ≤ w * (a * a)) (hb : c ≤ w * (b * b)) : c < w * (a * b)
+  exact le_mul_of_le_mul_self.nat c w a b ha hb
++ invalid_weight_changed (c w v a b : ℕ) (ha : w * (a * a) ≤ c) (hb : w * (b * b) ≤ c) : v * (a * b) ≤ c
+  apply mul_le_of_mul_self_le.nat <;> auto

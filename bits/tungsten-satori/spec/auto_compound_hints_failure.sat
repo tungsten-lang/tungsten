@@ -1,0 +1,8 @@
++ unsupplied (a b c d : ℚ) (h : approved a b c d) : a*b = 0
+  auto
++ missing_guard (a b c d : ℚ) : a*b = 0
+  auto [zero_when a b c d]
++ wrong_guard (a b c d e : ℚ) (h : approved e b c d) : a*b = 0
+  auto [zero_when a b c d]
++ wrong_component (a b c d : ℚ) (h : approved a b c d) : a = 0
+  auto [zero_when a b c d h]

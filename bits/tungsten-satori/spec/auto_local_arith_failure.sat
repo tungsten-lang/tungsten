@@ -1,0 +1,3 @@
++ missing_guard (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i, 0 < i → i < n → f i ≤ 7) (hi : m+1 ≤ n) : f m ≤ 7 := by auto
++ unused_axiom (f : ℕ → ℝ) (n m : ℕ) (hm : m+1 ≤ n) : f m ≤ 7 := by auto
++ wrong_alias (f : ℕ → ℝ) (c : ℝ) (i : ℕ) : add_instead f c i = c*f i := by auto

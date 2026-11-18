@@ -1,0 +1,13 @@
+opaque move : ℕ → ℚ → ℚ
+opaque update : ℕ → ℚ → ℚ
+opaque first : ℚ → ℚ
+opaque second : ℚ → ℚ
+opaque allowed : ℕ → Prop
+axiom guarded : ∀ x, allowed x → ∀ s, first (move x s) = update x (first s) ∧ second (move x s) = update x (second s)
++ first_part (x : ℕ) (s : ℚ) (h : allowed x) : first (move x s) = update x (first s) := (guarded x h s).1
++ second_part (x : ℕ) (s : ℚ) (h : allowed x) : second (move x s) = update x (second s) := (guarded x h s).2
++ supplied (xs : list ℕ) (s : ℚ) (h : ∀ x, allowed x) : first (list.foldl move xs s) = list.foldl update xs (first s) ∧ second (list.foldl move xs s) = list.foldl update xs (second s)
+  auto [guarded]
++ local_supplied (xs : list ℕ) (s : ℚ) (h : ∀ x, allowed x) : first (list.foldl move xs s) = list.foldl update xs (first s) ∧ second (list.foldl move xs s) = list.foldl update xs (second s)
+  have step := guarded
+  auto

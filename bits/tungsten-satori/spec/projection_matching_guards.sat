@@ -1,0 +1,12 @@
+structure record := (first : ℚ) (second : ℚ)
+opaque pretend : record → ℚ
+@[simp] axiom fake_projection (x y : ℚ) : pretend (record.mk x y) = x
+
++ reflexive_rule (x : ℚ) : x = x
+  rfl
+
++ actual_projection (x y : ℚ) : record.first (record.mk x y) = x
+  exact reflexive_rule
+
++ explicit_projection (x y : ℚ) : pretend (record.mk x y) = x
+  exact fake_projection

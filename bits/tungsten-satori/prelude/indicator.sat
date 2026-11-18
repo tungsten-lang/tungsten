@@ -1,0 +1,54 @@
+-- Numeric indicators of propositions. Each indicator is 1 when its
+-- proposition holds and 0 otherwise; all laws below are kernel-checked.
+
+-> indicator.nat (p : Prop) : ℕ := if p then 1 else 0
++ indicator.nonneg.nat (p : Prop) : 0 ≤ indicator.nat p := by by_cases h : p <;> simp [indicator.nat, h]
++ indicator.le_one.nat (p : Prop) : indicator.nat p ≤ 1 := by by_cases h : p <;> simp [indicator.nat, h]
++ indicator.not.nat (p : Prop) : indicator.nat (¬p) = 1 - indicator.nat p := by by_cases h : p <;> simp [indicator.nat, h]
++ indicator.and.nat (p q : Prop) : indicator.nat (p ∧ q) = indicator.nat p * indicator.nat q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.nat, h, k]
++ indicator.or_add_and.nat (p q : Prop) : indicator.nat (p ∨ q) + indicator.nat (p ∧ q) = indicator.nat p + indicator.nat q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.nat, h, k]
++ indicator.mono.nat (p q : Prop) (h : p → q) : indicator.nat p ≤ indicator.nat q
+  by_cases b : q <;> by_cases a : p <;> simp [indicator.nat, a, b]
+  exact b (h a)
++ indicator.eq_one_iff.nat (p : Prop) : indicator.nat p = 1 ↔ p := by by_cases h : p <;> simp [indicator.nat, h]
++ indicator.or_le.nat (p q : Prop) : indicator.nat (p ∨ q) ≤ indicator.nat p + indicator.nat q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.nat, h, k]
++ indicator.eq_zero_iff.nat (p : Prop) : indicator.nat p = 0 ↔ ¬p := by by_cases h : p <;> simp [indicator.nat, h]
+
+-> indicator.int (p : Prop) : ℤ := if p then 1 else 0
++ indicator.nonneg.int (p : Prop) : 0 ≤ indicator.int p := by by_cases h : p <;> simp [indicator.int, h]
++ indicator.le_one.int (p : Prop) : indicator.int p ≤ 1 := by by_cases h : p <;> simp [indicator.int, h]
++ indicator.not.int (p : Prop) : indicator.int (¬p) = 1 - indicator.int p := by by_cases h : p <;> simp [indicator.int, h]
++ indicator.and.int (p q : Prop) : indicator.int (p ∧ q) = indicator.int p * indicator.int q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.int, h, k]
++ indicator.or_add_and.int (p q : Prop) : indicator.int (p ∨ q) + indicator.int (p ∧ q) = indicator.int p + indicator.int q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.int, h, k]
++ indicator.mono.int (p q : Prop) (h : p → q) : indicator.int p ≤ indicator.int q
+  by_cases b : q <;> by_cases a : p <;> simp [indicator.int, a, b]
+  exact b (h a)
++ indicator.eq_one_iff.int (p : Prop) : indicator.int p = 1 ↔ p := by by_cases h : p <;> simp [indicator.int, h]
++ indicator.or_le.int (p q : Prop) : indicator.int (p ∨ q) ≤ indicator.int p + indicator.int q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.int, h, k]
++ indicator.eq_zero_iff.int (p : Prop) : indicator.int p = 0 ↔ ¬p := by by_cases h : p <;> simp [indicator.int, h]
+
+-> indicator.rat (p : Prop) : ℚ := if p then 1 else 0
++ indicator.nonneg.rat (p : Prop) : 0 ≤ indicator.rat p := by by_cases h : p <;> simp [indicator.rat, h]
++ indicator.le_one.rat (p : Prop) : indicator.rat p ≤ 1 := by by_cases h : p <;> simp [indicator.rat, h]
++ indicator.not.rat (p : Prop) : indicator.rat (¬p) = 1 - indicator.rat p := by by_cases h : p <;> simp [indicator.rat, h]
++ indicator.and.rat (p q : Prop) : indicator.rat (p ∧ q) = indicator.rat p * indicator.rat q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.rat, h, k]
++ indicator.or_add_and.rat (p q : Prop) : indicator.rat (p ∨ q) + indicator.rat (p ∧ q) = indicator.rat p + indicator.rat q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.rat, h, k]
++ indicator.mono.rat (p q : Prop) (h : p → q) : indicator.rat p ≤ indicator.rat q
+  by_cases b : q <;> by_cases a : p <;> simp [indicator.rat, a, b]
+  exact b (h a)
++ indicator.eq_one_iff.rat (p : Prop) : indicator.rat p = 1 ↔ p := by by_cases h : p <;> simp [indicator.rat, h]
++ indicator.or_le.rat (p q : Prop) : indicator.rat (p ∨ q) ≤ indicator.rat p + indicator.rat q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.rat, h, k]
++ indicator.eq_zero_iff.rat (p : Prop) : indicator.rat p = 0 ↔ ¬p := by by_cases h : p <;> simp [indicator.rat, h]
+
+-> indicator.real (p : Prop) : ℝ := if p then 1 else 0
++ indicator.nonneg.real (p : Prop) : 0 ≤ indicator.real p := by by_cases h : p <;> simp [indicator.real, h]
++ indicator.le_one.real (p : Prop) : indicator.real p ≤ 1 := by by_cases h : p <;> simp [indicator.real, h]
++ indicator.not.real (p : Prop) : indicator.real (¬p) = 1 - indicator.real p := by by_cases h : p <;> simp [indicator.real, h]
++ indicator.and.real (p q : Prop) : indicator.real (p ∧ q) = indicator.real p * indicator.real q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.real, h, k]
++ indicator.or_add_and.real (p q : Prop) : indicator.real (p ∨ q) + indicator.real (p ∧ q) = indicator.real p + indicator.real q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.real, h, k]
++ indicator.mono.real (p q : Prop) (h : p → q) : indicator.real p ≤ indicator.real q
+  by_cases b : q <;> by_cases a : p <;> simp [indicator.real, a, b]
+  exact b (h a)
++ indicator.eq_one_iff.real (p : Prop) : indicator.real p = 1 ↔ p := by by_cases h : p <;> simp [indicator.real, h]
++ indicator.or_le.real (p q : Prop) : indicator.real (p ∨ q) ≤ indicator.real p + indicator.real q := by by_cases h : p <;> by_cases k : q <;> simp [indicator.real, h, k]
++ indicator.eq_zero_iff.real (p : Prop) : indicator.real p = 0 ↔ ¬p := by by_cases h : p <;> simp [indicator.real, h]

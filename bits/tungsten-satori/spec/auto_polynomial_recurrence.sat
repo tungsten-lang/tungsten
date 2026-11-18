@@ -1,0 +1,186 @@
+import recurrence
+
+-> line.real : ℕ → ℝ
+  | 0 => 5
+  | i + 1 => line.real i + (-2)
+-> curve.real : ℕ → ℝ
+  | 0 => 7
+  | i + 1 => curve.real i + 2 * (i : ℝ) + 4
+-> cube.real : ℕ → ℝ
+  | 0 => 3
+  | i + 1 => cube.real i + (-3) * (i : ℝ) * (i : ℝ) + (-3) * (i : ℝ) + (-1)
+-> flat.real : ℕ → ℝ
+  | 0 => 9
+  | i + 1 => flat.real i
++ real_linear (n : ℕ) : line.real n = 5 - 2 * (n : ℝ)
+  auto
++ real_quadratic (n : ℕ) : curve.real n = (n : ℝ) * (n : ℝ) + 3 * (n : ℝ) + 7
+  auto
++ real_cubic (n : ℕ) : cube.real n = 3 - (n : ℝ) * (n : ℝ) * (n : ℝ)
+  auto
++ real_constant (n : ℕ) : flat.real n = 9
+  auto
++ real_values : line.real 0 = 5 ∧ line.real 3 = (-1) ∧ curve.real 2 = 17 ∧ cube.real 2 = (-5) ∧ flat.real 2 = 9 := by decide
+
+-> line.rat : ℕ → ℚ
+  | 0 => 5
+  | i + 1 => line.rat i + (-2)
+-> curve.rat : ℕ → ℚ
+  | 0 => 7
+  | i + 1 => curve.rat i + 2 * (i : ℚ) + 4
+-> cube.rat : ℕ → ℚ
+  | 0 => 3
+  | i + 1 => cube.rat i + (-3) * (i : ℚ) * (i : ℚ) + (-3) * (i : ℚ) + (-1)
+-> flat.rat : ℕ → ℚ
+  | 0 => 9
+  | i + 1 => flat.rat i
++ rat_linear (n : ℕ) : line.rat n = 5 - 2 * (n : ℚ)
+  auto
++ rat_quadratic (n : ℕ) : curve.rat n = (n : ℚ) * (n : ℚ) + 3 * (n : ℚ) + 7
+  auto
++ rat_cubic (n : ℕ) : cube.rat n = 3 - (n : ℚ) * (n : ℚ) * (n : ℚ)
+  auto
++ rat_constant (n : ℕ) : flat.rat n = 9
+  auto
++ rat_values : line.rat 0 = 5 ∧ line.rat 3 = (-1) ∧ curve.rat 2 = 17 ∧ cube.rat 2 = (-5) ∧ flat.rat 2 = 9 := by decide
+
+-> line.int : ℕ → ℤ
+  | 0 => 5
+  | i + 1 => line.int i + (-2)
+-> curve.int : ℕ → ℤ
+  | 0 => 7
+  | i + 1 => curve.int i + 2 * (i : ℤ) + 4
+-> cube.int : ℕ → ℤ
+  | 0 => 3
+  | i + 1 => cube.int i + (-3) * (i : ℤ) * (i : ℤ) + (-3) * (i : ℤ) + (-1)
+-> flat.int : ℕ → ℤ
+  | 0 => 9
+  | i + 1 => flat.int i
++ int_linear (n : ℕ) : line.int n = 5 - 2 * (n : ℤ)
+  auto
++ int_quadratic (n : ℕ) : curve.int n = (n : ℤ) * (n : ℤ) + 3 * (n : ℤ) + 7
+  auto
++ int_cubic (n : ℕ) : cube.int n = 3 - (n : ℤ) * (n : ℤ) * (n : ℤ)
+  auto
++ int_constant (n : ℕ) : flat.int n = 9
+  auto
++ int_values : line.int 0 = 5 ∧ line.int 3 = (-1) ∧ curve.int 2 = 17 ∧ cube.int 2 = (-5) ∧ flat.int 2 = 9 := by decide
+
+-> line.nat : ℕ → ℕ
+  | 0 => 5
+  | i + 1 => line.nat i + 2
+-> curve.nat : ℕ → ℕ
+  | 0 => 7
+  | i + 1 => curve.nat i + 2 * i + 4
+-> cube.nat : ℕ → ℕ
+  | 0 => 3
+  | i + 1 => cube.nat i + 3 * i * i + 3 * i + 1
+-> flat.nat : ℕ → ℕ
+  | 0 => 9
+  | i + 1 => flat.nat i
++ nat_linear (n : ℕ) : line.nat n = 5 + 2 * n
+  auto
++ nat_quadratic (n : ℕ) : curve.nat n = n * n + 3 * n + 7
+  auto
++ nat_cubic (n : ℕ) : cube.nat n = 3 + n * n * n
+  auto
++ nat_constant (n : ℕ) : flat.nat n = 9
+  auto
++ nat_values : line.nat 0 = 5 ∧ line.nat 3 = 11 ∧ curve.nat 2 = 17 ∧ cube.nat 2 = 11 ∧ flat.nat 2 = 9 := by decide
+
+-> plen : ℕ → ℕ
+  | 0 => 0
+  | j + 1 => plen j + 2 * j + 4
++ plen_closed (j : ℕ) : plen j = j * j + 3 * j
+  auto
+
+-> cr : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => cr n + 1
+-> kr : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => kr n + 2 * cr n + 3
++ cr_closed (j : ℕ) : cr j = j
+  auto
+
++ kr_closed (j : ℕ) : kr j = j * (j + 2)
+  auto [cr_closed]
+
+-> cexp : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => cexp n + 1
+-> kexp : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => kexp n + 2 * cexp n + 3
++ cexp_closed (j : ℕ) : cexp j = j
+  auto
+
++ kexp_closed (j : ℕ) : kexp j = j * (j + 2)
+  auto [cexp_closed]
+
+-> sj : ℕ → ℤ
+  | 0 => 0
+  | k + 1 => sj k + (k : ℤ)
+-> sj2 : ℕ → ℤ
+  | 0 => 0
+  | k + 1 => sj2 k + (k : ℤ) * (k : ℤ)
++ sj_closed (r : ℕ) : 2 * sj r = (r : ℤ) * ((r : ℤ) - 1)
+  auto
+
++ sj2_closed (r : ℕ) : 6 * sj2 r = (r : ℤ) * ((r : ℤ) - 1) * (2 * (r : ℤ) - 1)
+  auto
+
+
++ nat_symbolic (f : ℕ → ℕ) (a b c : ℕ) (n : ℕ) (base : f 0 = c) (step : ∀ i, f (i+1) = f i + 2*a*i + a+b) : f n = (a*n+b)*n+c
+  auto
+
++ nat_reverse (n : ℕ) : n^2+3*n+7 = curve.nat n
+  auto
+
++ nat_power (n : ℕ) : curve.nat n = n^2+3*n+7
+  auto
+
++ nat_quantified (f : ℕ → ℕ) (base : f 0 = 7) (step : ∀ i, f (i+1) = f i+2*i+4) : ∀ n, f n = n*(n+3)+7
+  auto
+
++ int_symbolic (f : ℕ → ℤ) (a b c : ℤ) (n : ℕ) (base : f 0 = c) (step : ∀ i, f (i+1) = f i + 2*a*(i : ℤ) + a+b) : f n = (a*(n : ℤ)+b)*(n : ℤ)+c
+  auto
+
++ int_reverse (n : ℕ) : (n : ℤ)^2+3*(n : ℤ)+7 = curve.int n
+  auto
+
++ int_power (n : ℕ) : curve.int n = (n : ℤ)^2+3*(n : ℤ)+7
+  auto
+
++ int_quantified (f : ℕ → ℤ) (base : f 0 = 7) (step : ∀ i, f (i+1) = f i+2*(i : ℤ)+4) : ∀ n, f n = (n : ℤ)*((n : ℤ)+3)+7
+  auto
+
++ rat_symbolic (f : ℕ → ℚ) (a b c : ℚ) (n : ℕ) (base : f 0 = c) (step : ∀ i, f (i+1) = f i + 2*a*(i : ℚ) + a+b) : f n = (a*(n : ℚ)+b)*(n : ℚ)+c
+  auto
+
++ rat_reverse (n : ℕ) : (n : ℚ)^2+3*(n : ℚ)+7 = curve.rat n
+  auto
+
++ rat_power (n : ℕ) : curve.rat n = (n : ℚ)^2+3*(n : ℚ)+7
+  auto
+
++ rat_quantified (f : ℕ → ℚ) (base : f 0 = 7) (step : ∀ i, f (i+1) = f i+2*(i : ℚ)+4) : ∀ n, f n = (n : ℚ)*((n : ℚ)+3)+7
+  auto
+
++ rat_half (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = f i+(2*(i : ℚ)+1)/2) : f n = (n : ℚ)^2/2
+  auto
+
++ real_symbolic (f : ℕ → ℝ) (a b c : ℝ) (n : ℕ) (base : f 0 = c) (step : ∀ i, f (i+1) = f i + 2*a*(i : ℝ) + a+b) : f n = (a*(n : ℝ)+b)*(n : ℝ)+c
+  auto
+
++ real_reverse (n : ℕ) : (n : ℝ)^2+3*(n : ℝ)+7 = curve.real n
+  auto
+
++ real_power (n : ℕ) : curve.real n = (n : ℝ)^2+3*(n : ℝ)+7
+  auto
+
++ real_quantified (f : ℕ → ℝ) (base : f 0 = 7) (step : ∀ i, f (i+1) = f i+2*(i : ℝ)+4) : ∀ n, f n = (n : ℝ)*((n : ℝ)+3)+7
+  auto
+
++ real_half (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = f i+(2*(i : ℝ)+1)/2) : f n = (n : ℝ)^2/2
+  auto

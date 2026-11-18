@@ -1,0 +1,11 @@
+import recurrence
+
+-> partial (r : ℕ) : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => partial r n + r ^ n
+
++ powers_of_four (n : ℕ) : 3 * partial 4 n + 1 = 4 ^ n
+  auto
+
++ positive_rate (r n : ℕ) (positive : 1 ≤ r) : (r - 1) * partial r n + 1 = r ^ n
+  auto

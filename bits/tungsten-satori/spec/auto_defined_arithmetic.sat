@@ -1,0 +1,100 @@
+
+-> shift.nat (v : ℕ × ℕ) : ℕ × ℕ := (fst v+1, snd v+2)
+-> total.nat (v : ℕ × ℕ) : ℕ := fst v+snd v
+-> ordered.nat (v : ℕ × ℕ) : Prop := fst v ≤ snd v
+-> positive.nat (v : ℕ × ℕ) : Prop := 0 < fst v ∧ 0 < snd v
+-> pairwise.nat (v w : ℕ × ℕ) : Prop := fst v = fst w ∧ snd v = snd w
+-> allowance.nat (x : ℕ) : Prop := 2 ≤ x
+-> record.nat (f : α → ℕ) (x : α) : ℕ × ℕ := (f x, f x+1)
+
+-> shift.int (v : ℤ × ℤ) : ℤ × ℤ := (fst v+1, snd v+2)
+-> total.int (v : ℤ × ℤ) : ℤ := fst v+snd v
+-> ordered.int (v : ℤ × ℤ) : Prop := fst v ≤ snd v
+-> positive.int (v : ℤ × ℤ) : Prop := 0 < fst v ∧ 0 < snd v
+-> pairwise.int (v w : ℤ × ℤ) : Prop := fst v = fst w ∧ snd v = snd w
+-> allowance.int (x : ℤ) : Prop := 2 ≤ x
+-> record.int (f : α → ℤ) (x : α) : ℤ × ℤ := (f x, f x+1)
+
+-> shift.rat (v : ℚ × ℚ) : ℚ × ℚ := (fst v+1, snd v+2)
+-> total.rat (v : ℚ × ℚ) : ℚ := fst v+snd v
+-> ordered.rat (v : ℚ × ℚ) : Prop := fst v ≤ snd v
+-> positive.rat (v : ℚ × ℚ) : Prop := 0 < fst v ∧ 0 < snd v
+-> pairwise.rat (v w : ℚ × ℚ) : Prop := fst v = fst w ∧ snd v = snd w
+-> allowance.rat (x : ℚ) : Prop := 2 ≤ x
+-> record.rat (f : α → ℚ) (x : α) : ℚ × ℚ := (f x, f x+1)
+
+-> shift.real (v : ℝ × ℝ) : ℝ × ℝ := (fst v+1, snd v+2)
+-> total.real (v : ℝ × ℝ) : ℝ := fst v+snd v
+-> ordered.real (v : ℝ × ℝ) : Prop := fst v ≤ snd v
+-> positive.real (v : ℝ × ℝ) : Prop := 0 < fst v ∧ 0 < snd v
+-> pairwise.real (v w : ℝ × ℝ) : Prop := fst v = fst w ∧ snd v = snd w
+-> allowance.real (x : ℝ) : Prop := 2 ≤ x
+-> record.real (f : α → ℝ) (x : α) : ℝ × ℝ := (f x, f x+1)
++ nat_shift_bound (v : ℕ × ℕ) (h : 0 ≤ total.nat v) : 3 ≤ total.nat (shift.nat v)
+  auto
++ nat_ordered (v : ℕ × ℕ) (h : ordered.nat v) : fst (shift.nat v) < snd (shift.nat v)
+  auto
++ nat_positive (v : ℕ × ℕ) (h : positive.nat v) : 0 < total.nat v
+  auto
++ nat_equal_totals (v w : ℕ × ℕ) (h : pairwise.nat v w) : total.nat (shift.nat v) = total.nat (shift.nat w)
+  auto
++ nat_record (f : α → ℕ) (x : α) (h : 0 ≤ f x) : 1 ≤ total.nat (record.nat f x)
+  auto
++ nat_guarded (v : ℕ × ℕ) (h : allowance.nat (fst v)) (rule : allowance.nat (fst v) → ordered.nat v) : fst (shift.nat v) < snd (shift.nat v)
+  auto
++ nat_hint (f : α → ℕ × ℕ) (x : α) (rule : ∀ y, ordered.nat (f y)) : fst (shift.nat (f x)) < snd (shift.nat (f x))
+  auto [rule x]
++ nat_local_hint (f : α → ℕ × ℕ) (x : α) (rule : ∀ y, ordered.nat (f y)) : fst (shift.nat (f x)) < snd (shift.nat (f x))
+  have r := rule x
+  auto
++ int_shift_bound (v : ℤ × ℤ) (h : 0 ≤ total.int v) : 3 ≤ total.int (shift.int v)
+  auto
++ int_ordered (v : ℤ × ℤ) (h : ordered.int v) : fst (shift.int v) < snd (shift.int v)
+  auto
++ int_positive (v : ℤ × ℤ) (h : positive.int v) : 0 < total.int v
+  auto
++ int_equal_totals (v w : ℤ × ℤ) (h : pairwise.int v w) : total.int (shift.int v) = total.int (shift.int w)
+  auto
++ int_record (f : α → ℤ) (x : α) (h : 0 ≤ f x) : 1 ≤ total.int (record.int f x)
+  auto
++ int_guarded (v : ℤ × ℤ) (h : allowance.int (fst v)) (rule : allowance.int (fst v) → ordered.int v) : fst (shift.int v) < snd (shift.int v)
+  auto
++ int_hint (f : α → ℤ × ℤ) (x : α) (rule : ∀ y, ordered.int (f y)) : fst (shift.int (f x)) < snd (shift.int (f x))
+  auto [rule x]
++ int_local_hint (f : α → ℤ × ℤ) (x : α) (rule : ∀ y, ordered.int (f y)) : fst (shift.int (f x)) < snd (shift.int (f x))
+  have r := rule x
+  auto
++ rat_shift_bound (v : ℚ × ℚ) (h : 0 ≤ total.rat v) : 3 ≤ total.rat (shift.rat v)
+  auto
++ rat_ordered (v : ℚ × ℚ) (h : ordered.rat v) : fst (shift.rat v) < snd (shift.rat v)
+  auto
++ rat_positive (v : ℚ × ℚ) (h : positive.rat v) : 0 < total.rat v
+  auto
++ rat_equal_totals (v w : ℚ × ℚ) (h : pairwise.rat v w) : total.rat (shift.rat v) = total.rat (shift.rat w)
+  auto
++ rat_record (f : α → ℚ) (x : α) (h : 0 ≤ f x) : 1 ≤ total.rat (record.rat f x)
+  auto
++ rat_guarded (v : ℚ × ℚ) (h : allowance.rat (fst v)) (rule : allowance.rat (fst v) → ordered.rat v) : fst (shift.rat v) < snd (shift.rat v)
+  auto
++ rat_hint (f : α → ℚ × ℚ) (x : α) (rule : ∀ y, ordered.rat (f y)) : fst (shift.rat (f x)) < snd (shift.rat (f x))
+  auto [rule x]
++ rat_local_hint (f : α → ℚ × ℚ) (x : α) (rule : ∀ y, ordered.rat (f y)) : fst (shift.rat (f x)) < snd (shift.rat (f x))
+  have r := rule x
+  auto
++ real_shift_bound (v : ℝ × ℝ) (h : 0 ≤ total.real v) : 3 ≤ total.real (shift.real v)
+  auto
++ real_ordered (v : ℝ × ℝ) (h : ordered.real v) : fst (shift.real v) < snd (shift.real v)
+  auto
++ real_positive (v : ℝ × ℝ) (h : positive.real v) : 0 < total.real v
+  auto
++ real_equal_totals (v w : ℝ × ℝ) (h : pairwise.real v w) : total.real (shift.real v) = total.real (shift.real w)
+  auto
++ real_record (f : α → ℝ) (x : α) (h : 0 ≤ f x) : 1 ≤ total.real (record.real f x)
+  auto
++ real_guarded (v : ℝ × ℝ) (h : allowance.real (fst v)) (rule : allowance.real (fst v) → ordered.real v) : fst (shift.real v) < snd (shift.real v)
+  auto
++ real_hint (f : α → ℝ × ℝ) (x : α) (rule : ∀ y, ordered.real (f y)) : fst (shift.real (f x)) < snd (shift.real (f x))
+  auto [rule x]
++ real_local_hint (f : α → ℝ × ℝ) (x : α) (rule : ∀ y, ordered.real (f y)) : fst (shift.real (f x)) < snd (shift.real (f x))
+  have r := rule x
+  auto

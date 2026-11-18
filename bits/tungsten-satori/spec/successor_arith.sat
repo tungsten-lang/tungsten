@@ -1,0 +1,19 @@
++ successor_eq (n : ℕ) : succ n = n+1 := by linarith
++ successor_gt (n : ℕ) : n < succ n := by omega
++ successor_twice (n : ℕ) : succ (succ n) = n+2 := by linarith
++ successor_square (n : ℕ) : succ n*succ n = n*n+2*n+1 := by nlinarith
++ successor_contra (n : ℕ) (h : succ n ≤ n) : False := by linarith
++ successor_lower (f : ℕ → ℕ) (n : ℕ) (h : n ≤ f n) (step : f n < f (n+1)) : succ n ≤ f (succ n) := by auto
++ successor_induction (f : ℕ → ℕ) (h : ∀ i, f i < f (i+1)) : ∀ i, i ≤ f i
+  intro i
+    induction i with n ih
+      linarith
+      auto
++ nat_function (f : ℕ → ℕ) (n : ℕ) (h : f (n+1) ≤ 7) : f (succ n) ≤ 8 := by linarith
++ nat_guarded (f : ℕ → ℕ) (n m : ℕ) (h : ∀ i < m, f (i+1) ≤ 7) (hn : succ n ≤ m) : f (succ n) ≤ 8 := by auto
++ int_function (f : ℕ → ℤ) (n : ℕ) (h : f (n+1) ≤ 7) : f (succ n) ≤ 8 := by linarith
++ int_guarded (f : ℕ → ℤ) (n m : ℕ) (h : ∀ i < m, f (i+1) ≤ 7) (hn : succ n ≤ m) : f (succ n) ≤ 8 := by auto
++ rat_function (f : ℕ → ℚ) (n : ℕ) (h : f (n+1) ≤ 7) : f (succ n) ≤ 8 := by linarith
++ rat_guarded (f : ℕ → ℚ) (n m : ℕ) (h : ∀ i < m, f (i+1) ≤ 7) (hn : succ n ≤ m) : f (succ n) ≤ 8 := by auto
++ real_function (f : ℕ → ℝ) (n : ℕ) (h : f (n+1) ≤ 7) : f (succ n) ≤ 8 := by linarith
++ real_guarded (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < m, f (i+1) ≤ 7) (hn : succ n ≤ m) : f (succ n) ≤ 8 := by auto

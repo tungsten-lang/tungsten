@@ -1,0 +1,60 @@
++ direct (p : Prop) (hp : p) : p
+  hp
+
++ projected (p q : Prop) (h : p ∧ q) : q
+  h.2
+
++ nested_projection (p q r : Prop) (h : p ∧ (q ∧ r)) : r
+  h.2.2
+
++ pair (p q : Prop) (hp : p) (hq : q) : p ∧ q
+  constructor
+    hp
+    hq
+
++ tuple (p q : Prop) (hp : p) (hq : q) : p ∧ q
+  ⟨hp, hq⟩
+
++ witness (p : α → Prop) (x : α) (h : p x) : ∃ y, p y
+  ⟨x, h⟩
+
++ applied (p q : Prop) (hp : p) (h : p → q) : q
+  h hp
+
++ instantiate (p : α → Prop) (x : α) (h : ∀ y, p y) : p x
+  h x
+
++ symmetry (x y : α) (h : x = y) : y = x
+  h.symm
+
++ flipped (x y : α) : x = y ↔ y = x
+  constructor
+    intro h
+      h.symm
+    intro h
+      h.symm
+
++ projected_application (x y : α) (h : x = y) : y = x
+  (flipped x y).mp h
+
++ saved_application (x y : α) (h : y = x) : x = y
+  have k := flipped x y
+  k.mpr h
+
++ implication (p : Prop) : p → p
+  intro hp; hp
+
++ parenthesized (p : Prop) (hp : p) : p
+  (hp)
+
++ explicit_keyword (p : Prop) (rfl : p) : p
+  exact rfl
+
++ nested_have (p q : Prop) (h : p ∧ q) : q ∧ p
+  have hp : p
+    h.1
+  constructor
+    h.2
+    hp
+
++ global_fact : True := by trivial

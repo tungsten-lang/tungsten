@@ -1,0 +1,228 @@
+
++ nat_missing_base (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ nat_missing_left_step (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ nat_missing_right_step (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys) : f xs = g xs
+  auto
+
++ nat_wrong_base (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g []+1)
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ nat_wrong_step (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 2+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ nat_point_head (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ ys, f (a :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ nat_point_tail (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x, f (x :: zs) = 1+f zs)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ nat_singleton_step (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x, f (x :: []) = 1+f [])
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ nat_wrong_list (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g zs
+  auto
+
++ nat_guarded_step (f g : list ℕ → ℕ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, p ys → f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ int_missing_base (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ int_missing_left_step (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ int_missing_right_step (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys) : f xs = g xs
+  auto
+
++ int_wrong_base (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g []+1)
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ int_wrong_step (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 2+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ int_point_head (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ ys, f (a :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ int_point_tail (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x, f (x :: zs) = 1+f zs)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ int_singleton_step (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x, f (x :: []) = 1+f [])
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ int_wrong_list (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g zs
+  auto
+
++ int_guarded_step (f g : list ℕ → ℤ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, p ys → f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ rat_missing_base (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ rat_missing_left_step (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ rat_missing_right_step (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys) : f xs = g xs
+  auto
+
++ rat_wrong_base (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g []+1)
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ rat_wrong_step (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 2+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ rat_point_head (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ ys, f (a :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ rat_point_tail (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x, f (x :: zs) = 1+f zs)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ rat_singleton_step (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x, f (x :: []) = 1+f [])
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ rat_wrong_list (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g zs
+  auto
+
++ rat_guarded_step (f g : list ℕ → ℚ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, p ys → f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ real_missing_base (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ real_missing_left_step (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ real_missing_right_step (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys) : f xs = g xs
+  auto
+
++ real_wrong_base (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g []+1)
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ real_wrong_step (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 2+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ real_point_head (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ ys, f (a :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ real_point_tail (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x, f (x :: zs) = 1+f zs)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ real_singleton_step (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x, f (x :: []) = 1+f [])
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto
+
++ real_wrong_list (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g zs
+  auto
+
++ real_guarded_step (f g : list ℕ → ℝ) (xs zs : list ℕ) (a : ℕ) (p : list ℕ → Prop)
+    (base : f [] = g [])
+    (fs : ∀ x ys, p ys → f (x :: ys) = 1+f ys)
+    (gs : ∀ x ys, g (x :: ys) = 1+g ys) : f xs = g xs
+  auto

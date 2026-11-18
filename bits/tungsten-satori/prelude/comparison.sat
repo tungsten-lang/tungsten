@@ -1,0 +1,30 @@
+-- Compare affine recurrences with time-varying coefficients on a finite prefix.
+import sequence_order
+
++ recurrence.compare.real (f g a b : ℕ → ℝ) (n : ℕ) (rate : ∀ i < n, 0 ≤ a i)
+    (base : f 0 ≤ g 0) (upper : ∀ i < n, f (i + 1) ≤ a i * f i + b i)
+    (lower : ∀ i < n, a i * g i + b i ≤ g (i + 1)) : f n ≤ g n
+  apply nat.interval_induct (fun i => f i ≤ g i) 0 n (by omega) base
+  intro i hi hn ih
+  nlinarith [rate i hn, upper i hn, lower i hn]
+
++ recurrence.compare.rat (f g a b : ℕ → ℚ) (n : ℕ) (rate : ∀ i < n, 0 ≤ a i)
+    (base : f 0 ≤ g 0) (upper : ∀ i < n, f (i + 1) ≤ a i * f i + b i)
+    (lower : ∀ i < n, a i * g i + b i ≤ g (i + 1)) : f n ≤ g n
+  apply nat.interval_induct (fun i => f i ≤ g i) 0 n (by omega) base
+  intro i hi hn ih
+  nlinarith [rate i hn, upper i hn, lower i hn]
+
++ recurrence.compare.int (f g a b : ℕ → ℤ) (n : ℕ) (rate : ∀ i < n, 0 ≤ a i)
+    (base : f 0 ≤ g 0) (upper : ∀ i < n, f (i + 1) ≤ a i * f i + b i)
+    (lower : ∀ i < n, a i * g i + b i ≤ g (i + 1)) : f n ≤ g n
+  apply nat.interval_induct (fun i => f i ≤ g i) 0 n (by omega) base
+  intro i hi hn ih
+  nlinarith [rate i hn, upper i hn, lower i hn]
+
++ recurrence.compare.nat (f g a b : ℕ → ℕ) (n : ℕ)
+    (base : f 0 ≤ g 0) (upper : ∀ i < n, f (i + 1) ≤ a i * f i + b i)
+    (lower : ∀ i < n, a i * g i + b i ≤ g (i + 1)) : f n ≤ g n
+  apply nat.interval_induct (fun i => f i ≤ g i) 0 n (by omega) base
+  intro i hi hn ih
+  linarith [mul_le_mul_left.nat (a i) (f i) (g i) ih, upper i hn, lower i hn]

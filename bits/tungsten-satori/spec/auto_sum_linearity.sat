@@ -1,0 +1,73 @@
+import arith
+
++ nat_scale (f g : ℕ → ℕ) (c : ℕ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ nat_scale_larger (f g : ℕ → ℕ) (c : ℕ) (n : ℕ) (m : ℕ) (h : ∀ i < m, f i = c * g i) (hn : n ≤ m) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ nat_scale_algebra (f g : ℕ → ℕ) (c : ℕ) (n : ℕ) (h : ∀ i < n, f i = g i) : (∑ i < n, c * (f i + f i)) = (2 * c) * (∑ i < n, g i) := by auto
+
++ nat_scale_reverse (f g : ℕ → ℕ) (c : ℕ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : c * (∑ i < n, g i) = (∑ i < n, f i) := by auto
+
++ nat_add (f g k : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ nat_add_larger (f g k : ℕ → ℕ) (n : ℕ) (m : ℕ) (h : ∀ i < m, f i = g i + k i) (hn : n ≤ m) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ nat_add_algebra (f : ℕ → ℕ) (a b : ℕ) (n : ℕ) : (∑ i < n, f i * (a+b)) = (∑ i < n, f i * a) + (∑ i < n, f i * b) := by auto
+
+-> nat_combine (f g : ℕ → ℕ) (i : ℕ) : ℕ := f i + g i
+
++ nat_alias (f g : ℕ → ℕ) (n : ℕ) : (∑ i < n, nat_combine f g i) = (∑ i < n, g i) + (∑ i < n, f i) := by unfold nat_combine; auto
+
++ int_scale (f g : ℕ → ℤ) (c : ℤ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ int_scale_larger (f g : ℕ → ℤ) (c : ℤ) (n : ℕ) (m : ℕ) (h : ∀ i < m, f i = c * g i) (hn : n ≤ m) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ int_scale_algebra (f g : ℕ → ℤ) (c : ℤ) (n : ℕ) (h : ∀ i < n, f i = g i) : (∑ i < n, c * (f i + f i)) = (2 * c) * (∑ i < n, g i) := by auto
+
++ int_scale_reverse (f g : ℕ → ℤ) (c : ℤ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : c * (∑ i < n, g i) = (∑ i < n, f i) := by auto
+
++ int_add (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ int_add_larger (f g k : ℕ → ℤ) (n : ℕ) (m : ℕ) (h : ∀ i < m, f i = g i + k i) (hn : n ≤ m) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ int_add_algebra (f : ℕ → ℤ) (a b : ℤ) (n : ℕ) : (∑ i < n, f i * (a+b)) = (∑ i < n, f i * a) + (∑ i < n, f i * b) := by auto
+
+-> int_combine (f g : ℕ → ℤ) (i : ℕ) : ℤ := f i + g i
+
++ int_alias (f g : ℕ → ℤ) (n : ℕ) : (∑ i < n, int_combine f g i) = (∑ i < n, g i) + (∑ i < n, f i) := by unfold int_combine; auto
+
++ rat_scale (f g : ℕ → ℚ) (c : ℚ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ rat_scale_larger (f g : ℕ → ℚ) (c : ℚ) (n : ℕ) (m : ℕ) (h : ∀ i < m, f i = c * g i) (hn : n ≤ m) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ rat_scale_algebra (f g : ℕ → ℚ) (c : ℚ) (n : ℕ) (h : ∀ i < n, f i = g i) : (∑ i < n, c * (f i + f i)) = (2 * c) * (∑ i < n, g i) := by auto
+
++ rat_scale_reverse (f g : ℕ → ℚ) (c : ℚ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : c * (∑ i < n, g i) = (∑ i < n, f i) := by auto
+
++ rat_add (f g k : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ rat_add_larger (f g k : ℕ → ℚ) (n : ℕ) (m : ℕ) (h : ∀ i < m, f i = g i + k i) (hn : n ≤ m) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ rat_add_algebra (f : ℕ → ℚ) (a b : ℚ) (n : ℕ) : (∑ i < n, f i * (a+b)) = (∑ i < n, f i * a) + (∑ i < n, f i * b) := by auto
+
+-> rat_combine (f g : ℕ → ℚ) (i : ℕ) : ℚ := f i + g i
+
++ rat_alias (f g : ℕ → ℚ) (n : ℕ) : (∑ i < n, rat_combine f g i) = (∑ i < n, g i) + (∑ i < n, f i) := by unfold rat_combine; auto
+
++ real_scale (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ real_scale_larger (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (m : ℕ) (h : ∀ i < m, f i = c * g i) (hn : n ≤ m) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ real_scale_algebra (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i = g i) : (∑ i < n, c * (f i + f i)) = (2 * c) * (∑ i < n, g i) := by auto
+
++ real_scale_reverse (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : c * (∑ i < n, g i) = (∑ i < n, f i) := by auto
+
++ real_add (f g k : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ real_add_larger (f g k : ℕ → ℝ) (n : ℕ) (m : ℕ) (h : ∀ i < m, f i = g i + k i) (hn : n ≤ m) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ real_add_algebra (f : ℕ → ℝ) (a b : ℝ) (n : ℕ) : (∑ i < n, f i * (a+b)) = (∑ i < n, f i * a) + (∑ i < n, f i * b) := by auto
+
+-> real_combine (f g : ℕ → ℝ) (i : ℕ) : ℝ := f i + g i
+
++ real_alias (f g : ℕ → ℝ) (n : ℕ) : (∑ i < n, real_combine f g i) = (∑ i < n, g i) + (∑ i < n, f i) := by unfold real_combine; auto

@@ -1,0 +1,58 @@
+import arith
+
++ transport_nat (f : ℕ → ℕ) (i k : ℕ) (x : ℕ) (e : i = k) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto
+
++ transport_int (f : ℕ → ℤ) (i k : ℕ) (x : ℤ) (e : i = k) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto
+
++ transport_rat (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i = k) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto
+
++ transport_real (f : ℕ → ℝ) (i k : ℕ) (x : ℝ) (e : i = k) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto
+
++ reverse (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : k = i) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto
+
++ transitive (f : ℕ → ℚ) (i j k : ℕ) (x : ℚ) (e : i = j) (d : j = k) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto
+
++ nested (f : ℕ → ℚ) (g : ℕ → ℕ) (i k : ℕ) (x : ℚ) (e : i = k) (h : f (g k)+x ≤ 7) : f (g i)+x+1 ≤ 8
+  auto
+
++ two_arguments (f : ℕ → ℕ → ℚ) (i j k l : ℕ) (x : ℚ) (e : i = k) (d : j = l) (h : f k l+x ≤ 7) : f i j+x+1 ≤ 8
+  auto
+
++ strict (f : ℕ → ℝ) (i k : ℕ) (x : ℝ) (e : i = k) (h : f k+x < 7) : f i+x+1 < 8
+  auto
+
++ two_functions (f g : ℕ → ℚ) (i k : ℕ) (e : i = k) (h : f k+g k ≤ 7) : f i+g i+1 ≤ 8
+  auto
+
++ abstract_domain (f : α → ℚ) (i k : α) (x : ℚ) (e : i = k) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto
+
++ guarded (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i = k) (h : f k+x ≤ 7) (step : f i+x+1 ≤ 8 → 0 ≤ x) : 0 ≤ x+1
+  auto
+
++ cancellation (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i = k) (h : x+f k = 0) (hx : 0 ≤ x) (hk : 0 ≤ f k) : f i = 0
+  auto
+
+opaque f : ℕ → ℚ
+opaque i : ℕ
+opaque k : ℕ
+axiom supplied_index : i = k
+axiom supplied_bound : f k ≤ 7
+
++ hinted (x : ℚ) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto [supplied_index]
+
++ hinted_terms (e : i = k) : f i+1 ≤ 8
+  auto [supplied_bound]
+
++ bundled (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (h : i = k ∧ f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto
+
++ conditional_equality (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (p : Prop) (hp : p) (e : p → i = k) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto

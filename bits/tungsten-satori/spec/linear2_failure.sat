@@ -1,0 +1,14 @@
+import linear2
+
++ real_singular_unique : (0 : ℝ)=1 ∧ (1 : ℝ)=0 := linear2.unique.real 1 1 1 1 0 1 1 0 (by decide) (by decide) (by decide)
++ real_weak_det : (1 : ℝ)=0 ∧ (0 : ℝ)=0 := linear2.zero.real 0 0 0 0 1 0 (by decide) (by decide) (by decide)
++ real_wrong_row (x y : ℝ) (h : x+y=0) : x=0 ∧ y=0 := linear2.zero.real 1 1 1 2 x y (by decide) (by simpa using h) (by simpa using h)
++ real_wrong_output (a b c d x y u v : ℝ) (h : a*x+b*y=u) (j : c*x+d*y=v) : (a*d-b*c)*x=d*u+b*v ∧ (a*d-b*c)*y=a*v-c*u := linear2.eliminate.real a b c d x y u v h j
++ rat_singular_unique : (0 : ℚ)=1 ∧ (1 : ℚ)=0 := linear2.unique.rat 1 1 1 1 0 1 1 0 (by decide) (by decide) (by decide)
++ rat_weak_det : (1 : ℚ)=0 ∧ (0 : ℚ)=0 := linear2.zero.rat 0 0 0 0 1 0 (by decide) (by decide) (by decide)
++ rat_wrong_row (x y : ℚ) (h : x+y=0) : x=0 ∧ y=0 := linear2.zero.rat 1 1 1 2 x y (by decide) (by simpa using h) (by simpa using h)
++ rat_wrong_output (a b c d x y u v : ℚ) (h : a*x+b*y=u) (j : c*x+d*y=v) : (a*d-b*c)*x=d*u+b*v ∧ (a*d-b*c)*y=a*v-c*u := linear2.eliminate.rat a b c d x y u v h j
++ int_singular_unique : (0 : ℤ)=1 ∧ (1 : ℤ)=0 := linear2.unique.int 1 1 1 1 0 1 1 0 (by decide) (by decide) (by decide)
++ int_weak_det : (1 : ℤ)=0 ∧ (0 : ℤ)=0 := linear2.zero.int 0 0 0 0 1 0 (by decide) (by decide) (by decide)
++ int_wrong_row (x y : ℤ) (h : x+y=0) : x=0 ∧ y=0 := linear2.zero.int 1 1 1 2 x y (by decide) (by simpa using h) (by simpa using h)
++ int_wrong_output (a b c d x y u v : ℤ) (h : a*x+b*y=u) (j : c*x+d*y=v) : (a*d-b*c)*x=d*u+b*v ∧ (a*d-b*c)*y=a*v-c*u := linear2.eliminate.int a b c d x y u v h j

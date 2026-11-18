@@ -1,0 +1,8 @@
+-> total (v : ℚ × ℚ) : ℚ := fst v+snd v
+-> grow (v : ℚ × ℚ) : ℚ × ℚ := (fst v+1, snd v+2)
+-> ordered (v : ℚ × ℚ) : Prop := fst v ≤ snd v
+
++ growth (v : ℚ × ℚ) (h : 0 ≤ total v) : 3 ≤ total (grow v)
+  auto
++ separated (v : ℚ × ℚ) (h : ordered v) : fst (grow v) < snd (grow v)
+  auto

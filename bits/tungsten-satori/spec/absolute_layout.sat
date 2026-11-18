@@ -1,0 +1,26 @@
++ continued_abs (x : ℝ) :
+    |x| = |x|
+  rfl
+
+-> continued_value (x : ℚ) : ℚ :=
+  |x|
++ continued_value_eq (x : ℚ) : continued_value x = |x| := by rfl
+
++ continued_sum (x y : ℤ) : |x| +
+    |y| = |x| + |y|
+  rfl
+
+-> layout_pattern : ℕ → ℕ
+  | 0 => 7
+  | n + 1 => layout_pattern n + 1
++ layout_pattern_ok : layout_pattern 2 = 9 := by decide
+
+inductive LayoutChoice
+  | layout_left
+  | layout_right
++ layout_choice_ok : layout_left = layout_left := by rfl
+
+-> layout_pattern_abs : ℤ → ℤ
+  | x =>
+    |x|
++ layout_pattern_abs_ok : layout_pattern_abs (-3) = 3 := by decide

@@ -1,0 +1,73 @@
+import arith
+
++ nat_constant (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i=c) : n*c = (∑ i < n, f i)
+  auto
+
++ nat_one (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i=1) : n = (∑ i < n, f i)
+  auto
+
++ nat_scale (f g : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i=c*g i) : c*(∑ i < n, g i) = (∑ i < n, f i)
+  auto
+
++ nat_add (f g k : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i=g i+k i) : (∑ i < n, g i)+(∑ i < n, k i) = (∑ i < n, f i)
+  auto
+
++ nat_larger (f : ℕ → ℕ) (n m : ℕ) (c : ℕ) (hn : n ≤ m) (h : ∀ i < m, f i=c) : n*c = (∑ i < n, f i)
+  auto
+
++ nat_zero (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i=0) : 0 = (∑ i < n, f i)
+  auto
+
++ int_constant (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i=c) : (n : ℤ)*c = (∑ i < n, f i)
+  auto
+
++ int_one (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i=1) : (n : ℤ) = (∑ i < n, f i)
+  auto
+
++ int_scale (f g : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i=c*g i) : c*(∑ i < n, g i) = (∑ i < n, f i)
+  auto
+
++ int_add (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i=g i+k i) : (∑ i < n, g i)+(∑ i < n, k i) = (∑ i < n, f i)
+  auto
+
++ int_larger (f : ℕ → ℤ) (n m : ℕ) (c : ℤ) (hn : n ≤ m) (h : ∀ i < m, f i=c) : (n : ℤ)*c = (∑ i < n, f i)
+  auto
+
++ int_zero (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i=0) : 0 = (∑ i < n, f i)
+  auto
+
++ rat_constant (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i=c) : (n : ℚ)*c = (∑ i < n, f i)
+  auto
+
++ rat_one (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i=1) : (n : ℚ) = (∑ i < n, f i)
+  auto
+
++ rat_scale (f g : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i=c*g i) : c*(∑ i < n, g i) = (∑ i < n, f i)
+  auto
+
++ rat_add (f g k : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i=g i+k i) : (∑ i < n, g i)+(∑ i < n, k i) = (∑ i < n, f i)
+  auto
+
++ rat_larger (f : ℕ → ℚ) (n m : ℕ) (c : ℚ) (hn : n ≤ m) (h : ∀ i < m, f i=c) : (n : ℚ)*c = (∑ i < n, f i)
+  auto
+
++ rat_zero (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i=0) : 0 = (∑ i < n, f i)
+  auto
+
++ real_constant (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i=c) : (n : ℝ)*c = (∑ i < n, f i)
+  auto
+
++ real_one (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i=1) : (n : ℝ) = (∑ i < n, f i)
+  auto
+
++ real_scale (f g : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i=c*g i) : c*(∑ i < n, g i) = (∑ i < n, f i)
+  auto
+
++ real_add (f g k : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i=g i+k i) : (∑ i < n, g i)+(∑ i < n, k i) = (∑ i < n, f i)
+  auto
+
++ real_larger (f : ℕ → ℝ) (n m : ℕ) (c : ℝ) (hn : n ≤ m) (h : ∀ i < m, f i=c) : (n : ℝ)*c = (∑ i < n, f i)
+  auto
+
++ real_zero (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i=0) : 0 = (∑ i < n, f i)
+  auto

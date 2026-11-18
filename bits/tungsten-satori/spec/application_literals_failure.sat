@@ -1,0 +1,64 @@
+import core
+
++ adjacent.nat (P : ℕ → Prop) (x : ℕ) (h : P x) (k : P (x+1)) : P x ∧ P (x+1) := ⟨h, k⟩
+
+
++ adjacent.int (P : ℤ → Prop) (x : ℤ) (h : P x) (k : P (x+1)) : P x ∧ P (x+1) := ⟨h, k⟩
+
+
++ adjacent.rat (P : ℚ → Prop) (x : ℚ) (h : P x) (k : P (x+1)) : P x ∧ P (x+1) := ⟨h, k⟩
+
+
++ adjacent.real (P : ℝ → Prop) (x : ℝ) (h : P x) (k : P (x+1)) : P x ∧ P (x+1) := ⟨h, k⟩
+
+
++ adjacent_binder (P : ℕ → ℕ → Prop) (n : ℕ) (h : ∀ j, P n j) (k : ∀ j, P (n+1) j) : ∀ j, P n j ∧ P (n+1) j
+  intro j
+  exact ⟨h j, k j⟩
+
+
+
++ nat_wrong (P : ℕ → Prop) (h : P (3)) (k : P (4)) : P (3) ∧ P (5)
+  apply adjacent.nat
+  · exact h
+  · exact k
+
++ nat_missing (P : ℕ → Prop) (h : P (3)) : P (3) ∧ P (4)
+  apply adjacent.nat
+  · exact h
+  · auto
+
++ int_wrong (P : ℤ → Prop) (h : P (-3)) (k : P (-2)) : P (-3) ∧ P (-1)
+  apply adjacent.int
+  · exact h
+  · exact k
+
++ int_missing (P : ℤ → Prop) (h : P (-3)) : P (-3) ∧ P (-2)
+  apply adjacent.int
+  · exact h
+  · auto
+
++ rat_wrong (P : ℚ → Prop) (h : P (1/2)) (k : P (3/2)) : P (1/2) ∧ P (5/2)
+  apply adjacent.rat
+  · exact h
+  · exact k
+
++ rat_missing (P : ℚ → Prop) (h : P (1/2)) : P (1/2) ∧ P (3/2)
+  apply adjacent.rat
+  · exact h
+  · auto
+
++ real_wrong (P : ℝ → Prop) (h : P (-1/2)) (k : P (1/2)) : P (-1/2) ∧ P (3/2)
+  apply adjacent.real
+  · exact h
+  · exact k
+
++ real_missing (P : ℝ → Prop) (h : P (-1/2)) : P (-1/2) ∧ P (1/2)
+  apply adjacent.real
+  · exact h
+  · auto
+
++ binder_capture (P : ℕ → ℕ → Prop) (h : ∀ j, P 3 j) (k : ∀ j, P 4 j) : ∀ j, P j 3 ∧ P j 4
+  apply adjacent_binder
+  · exact h
+  · exact k

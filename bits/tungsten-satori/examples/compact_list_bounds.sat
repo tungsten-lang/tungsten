@@ -1,0 +1,16 @@
+-> total : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => x+total xs
+-> count : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => 1+count xs
+-> large (K : ℚ) : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => (if K ≤ x then x else 0)+large K xs
+
++ nonnegative (xs : list ℚ) (h : ∀ x ∈ xs, 0 ≤ x) : 0 ≤ total xs
+  auto
++ upper (xs : list ℚ) (C : ℚ) (h : ∀ x ∈ xs, x ≤ C) : total xs ≤ count xs*C
+  auto
++ threshold (xs : list ℚ) (K : ℚ) (hK : 0 ≤ K) : total xs ≤ large K xs+count xs*K
+  auto

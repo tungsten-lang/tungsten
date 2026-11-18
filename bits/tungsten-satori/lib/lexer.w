@@ -269,6 +269,13 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
 -> continues_before?(t)
   t.kind == :sym && SAT_CONT_BEFORE.has_key?(t.text)
 
+-> line_continues_after?(toks)
+  n = toks.size
+  # A wildcard tactic location is complete; its star is not multiplication.
+  if n >= 2 && toks[n - 2].text == "at" && toks[n - 1].text == "*"
+    return false
+  continues_after?(toks[n - 1])
+
 -> header_start_tok?(indent, t)
   if indent != 0
     return false
@@ -321,7 +328,9 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
     if nt > 0
       t0 = toks[0]
       is_pipe = t0.kind == :sym && t0.text == "|" && depth == 0
-      if cur != nil && !is_pipe && (depth > 0 || continues_after?(cur.toks[cur.toks.size - 1]) || (r[0] > 0 && (continues_before?(t0) || (hdr_cand && !hdr_closed))))
+      # After an operator, a leading bar starts an absolute-value operand.
+      # Otherwise keep pattern clauses and inductive constructors separate.
+      if cur != nil && (depth > 0 || line_continues_after?(cur.toks) || (!is_pipe && r[0] > 0 && (continues_before?(t0) || (hdr_cand && !hdr_closed))))
         j = 0
         while j < nt
           cur.toks.push(toks[j])

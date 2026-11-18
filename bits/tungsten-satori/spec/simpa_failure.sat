@@ -1,0 +1,20 @@
++ wrong_proposition (p q : Prop) (h : p) : q := by simpa using h
++ wrong_numeric (x y : ℕ) (h : x + 1 = y) : x = y := by simpa using h
++ false_goal : False := by simpa
++ not_finished (p : Prop) : True ∧ p := by simpa
++ missing_using (p : Prop) (h : p) : p := by simpa using
++ unknown_using : True := by simpa using unknown_proof
++ unknown_rule : True := by simpa [unknown_rule_name]
++ forbid_location (p : Prop) (h : p) : p := by simpa at h using h
++ wrong_rule (p q r : Prop) (e : p = q) (h : p) : r := by simpa only [e] using h
++ missing_condition (f g : α → β) (p : α → Prop) (x : α) (y : β)
+    (rule : ∀ z, p z → f z = g z) (h : f x = y) : g x = y
+  simpa only [rule] using h
++ capture_bound (p : α → α → Prop) (_simp1 : α) (h : ∀ x, p _simp1 x ∧ True) : ∀ x, p x x := by simpa using h
++ forall_to_exists (p : α → Prop) (h : ∃ x, p x ∧ True) : ∀ x, p x := by simpa using h
++ wrong_projection (p q : Prop) (h : (p ∧ True) ∧ q) : q := by simpa using h.1
+opaque simpa_opaque : ℕ → ℕ
+@[simp] axiom suppressed_default (n : ℕ) : simpa_opaque n = n
++ only_suppresses_default (n : ℕ) (h : simpa_opaque n = 0) : n = 0 := by simpa only [] using h
++ function_fixed_argument (f g : α → β) (x : α) (y : β) (e : f = g) (h : f x = y) : ∀ z, g z = y := by simpa only [e] using h
++ function_argument_order (f g : α → α → β) (x y : α) (z : β) (e : f = g) (h : f x y = z) : g y x = z := by simpa only [e] using h

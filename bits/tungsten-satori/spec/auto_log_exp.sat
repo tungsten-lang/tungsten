@@ -1,0 +1,68 @@
+import realx
+
++ logarithm (x y : ℝ) (hx : 0 < x) (h : x ≤ y) : log x ≤ log y
+  auto
+
++ logarithm_strict (x y : ℝ) (hx : 0 < x) (h : x+1 ≤ y) : log x < log y
+  auto
+
++ logarithm_affine (u p : ℝ) (hu : 0 ≤ u) (hp : 1024*u ≤ p) : log (2+1024*u) ≤ log (2+p)
+  auto
+
++ logarithm_quadratic (x y : ℝ) (hx : 0 ≤ x) (h : x ≤ y) : log (1+x*x) ≤ log (1+y*y)
+  auto
+
++ logarithm_nonnegative (x : ℝ) (h : 2 ≤ x) : 0 ≤ log x
+  auto
+
++ logarithm_positive (x : ℝ) (h : 2 ≤ x) : 0 < log x
+  auto
+
++ logarithm_negative (x : ℝ) (hx : 0 < x) (h : x ≤ 1/2) : log x < 0
+  auto
+
++ logarithm_tangent (x : ℝ) (h : 0 < x) : log x ≤ x-1
+  auto
+
++ exponential (x y : ℝ) (h : x ≤ y) : exp x ≤ exp y
+  auto
+
++ exponential_strict (x y : ℝ) (h : x+1 ≤ y) : exp x < exp y
+  auto
+
++ exponential_positive (x : ℝ) : 0 < exp x
+  auto
+
++ exponential_nonnegative (x : ℝ) : 0 ≤ exp x
+  auto
+
++ exponential_upper (x : ℝ) (h : x ≤ 0) : exp x ≤ 1
+  auto
+
++ exponential_upper_strict (x : ℝ) (h : x ≤ 0-1) : exp x < 1
+  auto
+
++ exponential_lower (x : ℝ) (h : 0 ≤ x) : 1 ≤ exp x
+  auto
+
++ exponential_lower_strict (x : ℝ) (h : 1 ≤ x) : 1 < exp x
+  auto
+
++ exponential_tangent (x : ℝ) : 1+x ≤ exp x
+  auto
+
+-> decay (a x : ℝ) : ℝ := exp (0-a*x)
++ decay_order (a x y : ℝ) (ha : 0 ≤ a) (h : x ≤ y) : decay a y ≤ decay a x
+  auto
+
++ nested_order (x y : ℝ) (h : x ≤ y) : log (exp x) ≤ log (exp y)
+  auto
+
++ nested_strict (x y : ℝ) (hx : 0 < x) (h : x < y) : exp (log x) < exp (log y)
+  auto
+
+opaque lo : ℝ
+opaque hi : ℝ
+axiom supplied_order : lo ≤ hi
++ explicit_order (hx : 0 < lo) : log lo ≤ log hi
+  auto [supplied_order]

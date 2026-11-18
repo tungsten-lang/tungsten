@@ -1,0 +1,26 @@
+import recurrence
+
+-> partial_nat (r : ℕ) : ℕ → ℕ
+  | 0 => 0
+  | n+1 => partial_nat r n+r^n
+
++ nat_geometric_generic (s : ℕ → ℕ) (r : ℕ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+(r+1)^i) (n : ℕ) : r*s n+1 = (r+1)^n
+  auto
+
++ nat_geometric_reverse (s : ℕ → ℕ) (r : ℕ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+(r+1)^i) (n : ℕ) : (r+1)^n = r*s n+1
+  auto
+
++ nat_geometric_positive (s : ℕ → ℕ) (r : ℕ) (positive : 1 ≤ r) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : (r-1)*s n+1 = r^n
+  auto
+
++ nat_geometric_four (n : ℕ) : 3*partial_nat 4 n+1 = 4^n
+  auto
+
++ nat_geometric_eight (n : ℕ) : 7*partial_nat 8 n+1 = 8^n
+  auto
+
++ nat_geometric_defined (r n : ℕ) : r*partial_nat (r+1) n+1 = (r+1)^n
+  auto
+
++ nat_geometric_quantified (s : ℕ → ℕ) (r : ℕ) (positive : 1 ≤ r) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^i) : ∀ n, (r-1)*s n+1 = r^n
+  auto

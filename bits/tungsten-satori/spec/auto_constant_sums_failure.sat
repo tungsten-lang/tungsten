@@ -1,0 +1,85 @@
+import arith
+
++ nat_missing (f : ℕ → ℕ) (n : ℕ) (c : ℕ) : (∑ i < n, f i) = n*c
+  auto
+
++ nat_wrong_value (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i=c+1) : (∑ i < n, f i) = n*c
+  auto
+
++ nat_short_range (f : ℕ → ℕ) (n m : ℕ) (c : ℕ) (hn : m < n) (h : ∀ i < m, f i=c) : (∑ i < n, f i) = n*c
+  auto
+
++ nat_upper_only (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i ≤ c) : (∑ i < n, f i) = n*c
+  auto
+
++ nat_lower_only (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, c ≤ f i) : (∑ i < n, f i) = n*c
+  auto
+
++ nat_wrong_length (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n+1, f i=c) : (∑ i < n+1, f i) = n*c
+  auto
+
++ nat_one_missing (f : ℕ → ℕ) (n : ℕ) : (∑ i < n, f i) = n
+  auto
+
++ int_missing (f : ℕ → ℤ) (n : ℕ) (c : ℤ) : (∑ i < n, f i) = (n : ℤ)*c
+  auto
+
++ int_wrong_value (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i=c+1) : (∑ i < n, f i) = (n : ℤ)*c
+  auto
+
++ int_short_range (f : ℕ → ℤ) (n m : ℕ) (c : ℤ) (hn : m < n) (h : ∀ i < m, f i=c) : (∑ i < n, f i) = (n : ℤ)*c
+  auto
+
++ int_upper_only (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i ≤ c) : (∑ i < n, f i) = (n : ℤ)*c
+  auto
+
++ int_lower_only (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, c ≤ f i) : (∑ i < n, f i) = (n : ℤ)*c
+  auto
+
++ int_wrong_length (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n+1, f i=c) : (∑ i < n+1, f i) = (n : ℤ)*c
+  auto
+
++ int_one_missing (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i) = (n : ℤ)
+  auto
+
++ rat_missing (f : ℕ → ℚ) (n : ℕ) (c : ℚ) : (∑ i < n, f i) = (n : ℚ)*c
+  auto
+
++ rat_wrong_value (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i=c+1) : (∑ i < n, f i) = (n : ℚ)*c
+  auto
+
++ rat_short_range (f : ℕ → ℚ) (n m : ℕ) (c : ℚ) (hn : m < n) (h : ∀ i < m, f i=c) : (∑ i < n, f i) = (n : ℚ)*c
+  auto
+
++ rat_upper_only (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i ≤ c) : (∑ i < n, f i) = (n : ℚ)*c
+  auto
+
++ rat_lower_only (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, c ≤ f i) : (∑ i < n, f i) = (n : ℚ)*c
+  auto
+
++ rat_wrong_length (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n+1, f i=c) : (∑ i < n+1, f i) = (n : ℚ)*c
+  auto
+
++ rat_one_missing (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i) = (n : ℚ)
+  auto
+
++ real_missing (f : ℕ → ℝ) (n : ℕ) (c : ℝ) : (∑ i < n, f i) = (n : ℝ)*c
+  auto
+
++ real_wrong_value (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i=c+1) : (∑ i < n, f i) = (n : ℝ)*c
+  auto
+
++ real_short_range (f : ℕ → ℝ) (n m : ℕ) (c : ℝ) (hn : m < n) (h : ∀ i < m, f i=c) : (∑ i < n, f i) = (n : ℝ)*c
+  auto
+
++ real_upper_only (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i ≤ c) : (∑ i < n, f i) = (n : ℝ)*c
+  auto
+
++ real_lower_only (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, c ≤ f i) : (∑ i < n, f i) = (n : ℝ)*c
+  auto
+
++ real_wrong_length (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n+1, f i=c) : (∑ i < n+1, f i) = (n : ℝ)*c
+  auto
+
++ real_one_missing (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i) = (n : ℝ)
+  auto

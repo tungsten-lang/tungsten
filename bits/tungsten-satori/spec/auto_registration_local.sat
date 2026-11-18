@@ -1,0 +1,27 @@
++ local_discriminant (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a - 2*x*y*b + y^2*c) : b^2 ≤ a*c
+  have pa := q 1 0
+  have pc := q 0 1
+  have q1 := q c b
+  have q2 := q b a
+  have q3 := q 1 b
+  by_cases hc : 0 < c
+  · nlinarith
+  · by_cases ha : 0 < a
+    · nlinarith
+    · have za : a = 0 := by nlinarith
+      have zc : c = 0 := by nlinarith
+      rw [za, zc] at q3
+      rw [za, zc]
+      nlinarith
+
+@[auto] + registered_pair (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c ∧ 0 ≤ a
+  constructor
+  · exact local_discriminant a b c q
+  · have h := q 1 0
+    linarith
+
+@[auto] + classical_pattern (P : Prop) : P ∨ ¬P
+  sat
+
++ registered_use (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto

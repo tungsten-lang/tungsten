@@ -1,0 +1,45 @@
+import arith
+opaque a : ℚ
+opaque b : ℚ
+opaque c : ℚ
+opaque n : ℕ
+axiom supplied_bound : 2*c ≤ 2*b^n
+
++ weak_strict (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c ≤ 2*b^n) : c < x^n
+  auto
+
++ negative_direction (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : -2*c ≤ -2*b^n) : c ≤ x^n
+  auto
+
++ zero_scale (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 0*c ≤ 0*b^n) : c ≤ x^n
+  auto
+
++ wrong_offset (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c+1 ≤ b^n+2) : c ≤ x^n
+  auto
+
++ missing_guard (x b c : ℚ) (n : ℕ) (hb : b ≤ x) (hc : 2*c ≤ 2*b^n) : c ≤ x^n
+  auto
+
++ zero_exponent (x b c : ℚ) (h0 : 0 ≤ b) (hb : b < x) (hc : 2*c ≤ 2*b^0) : c < x^0
+  auto
+
++ wrong_upper (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ x) (hb : x ≤ b) (hc : 2*c ≤ 2*b^n) : x^n ≤ c
+  auto
+
++ unknown_scale (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ branch_leak (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c ≤ 2*b^n ∨ c = x^n+1) : c ≤ x^n
+  auto
+
++ wrong_function (f g : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v) (x b c : ℚ) (hb : b ≤ x) (hc : 2*c ≤ 2*g b) : c ≤ f x
+  auto
+
++ natural_truncation (x b c : ℕ) (n : ℕ) (hb : b ≤ x) (hc : c-1 ≤ b^n-1) : c ≤ x^n
+  auto
+
++ cycle (x c d : ℚ) (n : ℕ) (hc : 2*c ≤ 2*d) (hd : 3*d ≤ 3*c) : c ≤ x^n
+  auto
+
++ no_global_bound (h0 : 0 ≤ b) (hb : b ≤ a) : c ≤ a^n
+  auto

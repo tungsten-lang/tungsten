@@ -1,0 +1,14 @@
+-> accumulate : list ℚ → ℚ → ℚ
+  | [], s => s
+  | x :: xs, s => accumulate xs (s+x)
+-> subtotal : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => x+subtotal xs
++ total (xs : list ℚ) (s : ℚ) : accumulate xs s = s+subtotal xs
+  auto
+
+-- A transformation that respects each step respects the entire traversal.
++ transformed (step : α → β → β) (update : α → γ → γ) (f : β → γ)
+    (h : ∀ x s, f (step x s) = update x (f s)) (xs : list α) (s : β)
+    : f (list.foldl step xs s) = list.foldl update xs (f s)
+  auto

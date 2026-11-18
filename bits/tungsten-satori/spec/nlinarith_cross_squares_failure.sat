@@ -1,0 +1,12 @@
++ real_strict (a b : ℝ) : 2*a*b < a*a+b*b := by nlinarith
++ real_wrong_constant (a b : ℝ) : 3*a*b ≤ a*a+b*b := by nlinarith
++ real_wrong_negative (a b : ℝ) : -3*a*b ≤ a*a+b*b := by nlinarith
++ real_wrong_three (a b c : ℝ) : (a+b+c)^2 ≤ 2*(a*a+b*b+c*c) := by nlinarith
++ rat_strict (a b : ℚ) : 2*a*b < a*a+b*b := by nlinarith
++ rat_wrong_constant (a b : ℚ) : 3*a*b ≤ a*a+b*b := by nlinarith
++ rat_wrong_negative (a b : ℚ) : -3*a*b ≤ a*a+b*b := by nlinarith
++ rat_wrong_three (a b c : ℚ) : (a+b+c)^2 ≤ 2*(a*a+b*b+c*c) := by nlinarith
++ int_strict (a b : ℤ) : 2*a*b < a*a+b*b := by nlinarith
++ int_wrong_constant (a b : ℤ) : 3*a*b ≤ a*a+b*b := by nlinarith
++ int_wrong_negative (a b : ℤ) : -3*a*b ≤ a*a+b*b := by nlinarith
++ int_wrong_three (a b c : ℤ) : (a+b+c)^2 ≤ 2*(a*a+b*b+c*c) := by nlinarith

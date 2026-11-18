@@ -1,0 +1,31 @@
++ project (p q : Prop) (h : p ∧ q) : q := by auto
++ chain (p q r : Prop) (h : p ∧ (p → q)) (k : q → r) : r := by auto
++ curried (p q r : Prop) (h : p → q → r) (hp : p) (hq : q) : r := by auto
++ impossible (p q : Prop) (h : p ∧ ¬p) : q := by auto
++ equality_contradiction (P : α → Prop) (a b : α) (h : a = b ∧ P a ∧ ¬P b) (q : Prop) : q := by auto
++ quantified (P Q : ℕ → Prop) (x : ℕ) (h : (∀ n : ℕ, P n → Q n) ∧ P x) : Q x := by auto
++ quantified_numeral (P Q : ℕ → Prop) (h : (∀ n : ℕ, P n → Q n) ∧ P 3) : Q 3 := by auto
++ equality_chain (a b c : α) (h : a = b ∧ b = c) : a = c := by auto
++ equality_symmetry (a b : α) (h : a = b ∧ True) : b = a := by auto
++ equality_congruence (f : α → α) (a b : α) (h : a = b ∧ True) : f a = f b := by auto
++ equality_substitution (P : α → Prop) (a b : α) (h : a = b ∧ P a) : P b := by auto
++ equality_apply (P : α → Prop) (a b : α) (q : Prop) (h : a = b ∧ P a) (k : P b → q) : q := by auto
++ equality_apply_chain (P Q : α → Prop) (a b : α) (h : a = b ∧ P a) (k : P b → Q b) : Q a := by auto
++ equality_apply_twice (P Q : α → Prop) (a b : α) (r : Prop) (h : a = b ∧ P a) (k : P b → Q b) (l : Q a → r) : r := by auto
++ cases (p q r : Prop) (h : p ∨ q) (hp : p → r) (hq : q → r) : r := by auto
++ nested_cases (p q r s : Prop) (h : (p ∨ q) ∧ (p → r)) (hq : q → r) (k : r → s) : s := by auto
++ or_swap (p q : Prop) (h : p ∨ q) : q ∨ p := by auto
++ two_cases (p q r s t : Prop) (h : p ∨ q) (k : r ∨ s)
+    (pr : p → r → t) (ps : p → s → t) (qr : q → r → t) (qs : q → s → t) : t := by auto
++ exists_local (P : α → Prop) (x : α) (h : P x) : ∃ y : α, P y := by auto
++ exists_pair (P Q : α → Prop) (x : α) (h : P x ∧ Q x) : ∃ y : α, P y ∧ Q y := by auto
++ exists_numeral (P : ℕ → Prop) (h : P 3) : ∃ n : ℕ, P n := by auto
++ exists_projection (P Q : α → Prop) (h : ∃ x : α, P x ∧ Q x) : ∃ x : α, P x := by auto
++ apply_exists (P : α → Prop) (x : α) (hx : P x) (r : Prop) (h : (∃ y : α, P y) → r) : r := by auto
++ apply_exists_chain (P : α → Prop) (x : α) (hx : P x) (r s : Prop) (h : (∃ y : α, P y) → r) (k : r → s) : s := by auto
++ apply_forall_identity (P : α → Prop) (r : Prop) (h : (∀ x : α, P x → P x) → r) : r := by auto
++ apply_negation (p r : Prop) (h : ¬p → r) (np : p → False) : r := by auto
++ classical_double_negation (p : Prop) (h : ¬¬p) : p := by auto
++ classical_excluded_middle (p : Prop) : p ∨ ¬p := by auto
++ classical_de_morgan (p q : Prop) (h : ¬(p ∧ q)) : ¬p ∨ ¬q := by auto
++ classical_peirce (p q : Prop) : ((p → q) → p) → p := by auto

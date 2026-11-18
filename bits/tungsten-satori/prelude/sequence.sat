@@ -1,0 +1,83 @@
+-- Recurrence and periodicity rules for existing sequence definitions.
+import function
+import nat
+
++ sequence.shift (f : α → α) (s : ℕ → α) (rec : ∀ n, s (n + 1) = f (s n)) (m n : ℕ) : s (m + n) = function.iterate f m (s n)
+  induction m with m ih
+  · simp
+  · have e : m + 1 + n = m + n + 1 := by rw [add_assoc.nat, add_comm.nat 1 n, ← add_assoc.nat]
+    rw [succ_eq_add_one.nat, e, rec, function.iterate_succ, ih]
+
++ sequence.eq_iterate (f : α → α) (s : ℕ → α) (rec : ∀ n, s (n + 1) = f (s n)) (n : ℕ) : s n = function.iterate f n (s 0)
+  simpa using sequence.shift f s rec n 0
+
++ sequence.invariant (f : α → α) (s : ℕ → α) (rec : ∀ n, s (n + 1) = f (s n))
+    (P : α → Prop) (step : ∀ x, P x → P (f x)) (base : P (s 0)) (n : ℕ) : P (s n)
+  rw [sequence.eq_iterate f s rec n]
+  exact function.iterate_invariant f P step n (s 0) base
+
++ sequence.stable (f : α → α) (s : ℕ → α) (rec : ∀ n, s (n + 1) = f (s n))
+    (k j : ℕ) (fixed : f (s k) = s k) (after : k ≤ j) : s j = s k
+  have e : j = j - k + k := by omega
+  rw [e, sequence.shift, function.iterate_fixed f (s k) fixed (j - k)]
+
+-- A finite prefix suffices once the sequence has reached a fixed point.
++ sequence.forall_of_stable (f : α → α) (s : ℕ → α) (rec : ∀ n, s (n + 1) = f (s n))
+    (k : ℕ) (P : α → Prop) (fixed : f (s k) = s k) (prefix : ∀ j ≤ k, P (s j)) : ∀ j, P (s j)
+  intro j
+  by_cases before : j ≤ k
+  · exact prefix j before
+  · rw [sequence.stable f s rec k j fixed (by omega)]
+    exact prefix k (by omega)
+
++ sequence.not_reachable_of_stable (f : α → α) (s : ℕ → α) (rec : ∀ n, s (n + 1) = f (s n))
+    (k : ℕ) (P : α → Prop) (fixed : f (s k) = s k) (prefix : ∀ j ≤ k, ¬ P (s j)) : ¬ (∃ j, P (s j))
+  intro h
+  obtain ⟨j, hj⟩ := h
+  exact sequence.forall_of_stable f s rec k (fun x => ¬ P x) fixed prefix j hj
+
+-- Equal states have equal futures under the same autonomous recurrence.
++ sequence.repeat_after_equal (f : α → α) (s : ℕ → α) (rec : ∀ n, s (n + 1) = f (s n))
+    (i j : ℕ) (same : s i = s j) (k : ℕ) : s (k + i) = s (k + j)
+  rw [sequence.shift f s rec k i, sequence.shift f s rec k j, same]
+
+-- A positive period repeats every value beyond any chosen bound.
++ sequence.periodic_repeats (s : ℕ → α) (p : ℕ) (positive : 0 < p) (period : ∀ n, s (n + p) = s n) (j d : ℕ) : ∃ n, d ≤ n ∧ s n = s j
+  induction d with d ih
+  · use j
+    constructor
+    · omega
+    · rfl
+  · rw [succ_eq_add_one.nat]
+    obtain ⟨n, hn, e⟩ := ih
+    use n + p
+    constructor
+    · omega
+    · rw [period n]
+      exact e
+
+-- A property on one full period propagates to every later index.
++ sequence.periodic_tail (s : ℕ → α) (p i : ℕ) (P : α → Prop) (positive : 0 < p)
+    (period : ∀ n, s (n + p) = s n) (block : ∀ k < p, P (s (i + k))) (n : ℕ) (after : i ≤ n) : P (s n)
+  have all : ∀ k, P (s (i + k))
+    apply nat.strong_induct (fun k => P (s (i + k)))
+    intro k ih
+    by_cases before : k < p
+    · exact block k before
+    · have e : i + k = (i + (k - p)) + p := by omega
+      have prev := ih (k - p) (by omega)
+      rw [e, period]
+      exact prev
+  have e : n = i + (n - i) := by omega
+  rw [e]
+  exact all (n - i)
+
+-- A nonconstant periodic sequence cannot have a constant run as long as its period.
++ sequence.periodic_run_bound (s : ℕ → α) (p k i : ℕ) (a : α) (positive : 0 < p)
+    (period : ∀ n, s (n + p) = s n) (block : ∀ x < k, s (i + x) = a) (other : ∃ j, s j ≠ a) : k < p
+  by_contra h
+  obtain ⟨j, hj⟩ := other
+  obtain ⟨n, hn, e⟩ := sequence.periodic_repeats s p positive period j i
+  have at_n : s n = a := sequence.periodic_tail s p i (fun x => x = a) positive period (by intro x hx; exact block x (by omega)) n hn
+  rw [e] at at_n
+  exact hj at_n

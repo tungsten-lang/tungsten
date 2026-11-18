@@ -1,0 +1,49 @@
+import euclidean
+
++ list_missing_cauchy_sign (xs : list α) (w f g : α → ℝ) :
+    |sum_list xs (fun i => w i*(f i*g i))| ≤ sqrt (sum_list xs (fun i => w i*(f i*f i))) * sqrt (sum_list xs (fun i => w i*(g i*g i)))
+  apply list_sum.weighted_cauchy_sqrt.real xs w f g
+  intro i hi
+  linarith
+
++ list_missing_triangle_sign (xs : list α) (w f g : α → ℝ) :
+    sqrt (sum_list xs (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_list xs (fun i => w i*(f i*f i))) + sqrt (sum_list xs (fun i => w i*(g i*g i)))
+  apply list_sum.weighted_minkowski.real xs w f g
+  intro i hi
+  linarith
+
++ list_strict_triangle (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) : sqrt (sum_list xs (fun i => w i*((f i+g i)*(f i+g i)))) < sqrt (sum_list xs (fun i => w i*(f i*f i))) + sqrt (sum_list xs (fun i => w i*(g i*g i))) := list_sum.weighted_minkowski.real xs w f g hw
+
++ list_strict_cauchy (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) :
+    |sum_list xs (fun i => w i*(f i*g i))| < sqrt (sum_list xs (fun i => w i*(f i*f i))) * sqrt (sum_list xs (fun i => w i*(g i*g i)))
+  exact list_sum.weighted_cauchy_sqrt.real xs w f g hw
+
++ list_wrong_vector (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) : sqrt (sum_list xs (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_list xs (fun i => w i*(f i*f i))) + sqrt (sum_list xs (fun i => w i*(f i*f i))) := list_sum.weighted_minkowski.real xs w f g hw
+
++ range_missing_cauchy_sign (n : ℕ) (w f g : ℕ → ℝ) :
+    |sum_below n (fun i => w i*(f i*g i))| ≤ sqrt (sum_below n (fun i => w i*(f i*f i))) * sqrt (sum_below n (fun i => w i*(g i*g i)))
+  apply sum_below.weighted_cauchy_sqrt.real n w f g
+  intro i hi
+  linarith
+
++ range_missing_triangle_sign (n : ℕ) (w f g : ℕ → ℝ) :
+    sqrt (sum_below n (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_below n (fun i => w i*(f i*f i))) + sqrt (sum_below n (fun i => w i*(g i*g i)))
+  apply sum_below.weighted_minkowski.real n w f g
+  intro i hi
+  linarith
+
++ range_strict_triangle (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) : sqrt (sum_below n (fun i => w i*((f i+g i)*(f i+g i)))) < sqrt (sum_below n (fun i => w i*(f i*f i))) + sqrt (sum_below n (fun i => w i*(g i*g i))) := sum_below.weighted_minkowski.real n w f g hw
+
++ range_strict_cauchy (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) :
+    |sum_below n (fun i => w i*(f i*g i))| < sqrt (sum_below n (fun i => w i*(f i*f i))) * sqrt (sum_below n (fun i => w i*(g i*g i)))
+  exact sum_below.weighted_cauchy_sqrt.real n w f g hw
+
++ range_wrong_vector (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) : sqrt (sum_below n (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_below n (fun i => w i*(f i*f i))) + sqrt (sum_below n (fun i => w i*(f i*f i))) := sum_below.weighted_minkowski.real n w f g hw
+
++ scalar_missing_signs (x a b : ℝ) (h : x^2 ≤ a*b) : |x| ≤ sqrt a * sqrt b
+  apply abs_le_sqrt_mul x a b
+  · nlinarith
+  · nlinarith
+  · exact h
+
++ planar_wrong_direction (a b c d : ℝ) : sqrt ((a+c)^2+(b+d)^2) ≥ sqrt (a^2+b^2)+sqrt (c^2+d^2) := norm2.add_le a b c d

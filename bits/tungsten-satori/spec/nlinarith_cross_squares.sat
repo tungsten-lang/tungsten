@@ -1,0 +1,15 @@
++ real_amgm (a b : ℝ) : 2*a*b ≤ a^2+b^2 := by nlinarith
++ real_negative (a b : ℝ) : -2*a*b ≤ a*a+b*b := by nlinarith
++ real_three (a b c : ℝ) : (a+b+c)^2 ≤ 3*(a^2+b^2+c^2) := by nlinarith
++ real_scaled (a b : ℝ) : 4*a*b ≤ 4*a*a+b*b := by nlinarith
++ real_midpoint (a b : ℝ) : ((a+b)/2)^2 ≤ (a^2+b^2)/2 := by nlinarith
++ rat_amgm (a b : ℚ) : 2*a*b ≤ a^2+b^2 := by nlinarith
++ rat_negative (a b : ℚ) : -2*a*b ≤ a*a+b*b := by nlinarith
++ rat_three (a b c : ℚ) : (a+b+c)^2 ≤ 3*(a^2+b^2+c^2) := by nlinarith
++ rat_scaled (a b : ℚ) : 4*a*b ≤ 4*a*a+b*b := by nlinarith
++ rat_midpoint (a b : ℚ) : ((a+b)/2)^2 ≤ (a^2+b^2)/2 := by nlinarith
++ int_amgm (a b : ℤ) : 2*a*b ≤ a^2+b^2 := by nlinarith
++ int_negative (a b : ℤ) : -2*a*b ≤ a*a+b*b := by nlinarith
++ int_three (a b c : ℤ) : (a+b+c)^2 ≤ 3*(a^2+b^2+c^2) := by nlinarith
++ int_scaled (a b : ℤ) : 4*a*b ≤ 4*a*a+b*b := by nlinarith
++ functions (f g : ℕ → ℚ) (n : ℕ) : 2*f n*g n ≤ f n^2+g n^2 := by nlinarith

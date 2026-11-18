@@ -1,0 +1,2 @@
+use auto_polynomial_recurrence_check
+check_auto_polynomial_recurrence("real")

@@ -1,0 +1,79 @@
+import arith
+
+-> int_difference (f g : ℕ → ℤ) (i : ℕ) : ℤ := f i - g i
+
+-> rat_difference (f g : ℕ → ℚ) (i : ℕ) : ℚ := f i - g i
+
+-> real_difference (f g : ℕ → ℝ) (i : ℕ) : ℝ := f i - g i
+
++ int_direct (f g : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i - g i) = (∑ i < n, f i) - (∑ i < n, g i)
+  auto
+
++ int_termwise (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i - k i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ int_larger (f g k : ℕ → ℤ) (n m : ℕ) (hm : n ≤ m) (h : ∀ i < m, f i = g i - k i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ int_algebra (f g : ℕ → ℤ) (n : ℕ) : (∑ i < n, 3*(f i-g i)) = (∑ i < n, 3*f i) - (∑ i < n, 3*g i)
+  auto
+
++ int_alias (f g : ℕ → ℤ) (n : ℕ) : (∑ i < n, int_difference f g i) = (∑ i < n, f i) - (∑ i < n, g i)
+  auto
+
++ int_reverse (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, g i - k i = f i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ int_weighted (f g k : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i*(g i-k i)) = (∑ i < n, f i*g i) - (∑ i < n, f i*k i)
+  auto
+
++ int_nested (f g : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j-g i j)) = (∑ i < n, (∑ j < m, f i j)) - (∑ i < n, (∑ j < m, g i j))
+  auto
+
++ rat_direct (f g : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i - g i) = (∑ i < n, f i) - (∑ i < n, g i)
+  auto
+
++ rat_termwise (f g k : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i - k i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ rat_larger (f g k : ℕ → ℚ) (n m : ℕ) (hm : n ≤ m) (h : ∀ i < m, f i = g i - k i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ rat_algebra (f g : ℕ → ℚ) (n : ℕ) : (∑ i < n, 3*(f i-g i)) = (∑ i < n, 3*f i) - (∑ i < n, 3*g i)
+  auto
+
++ rat_alias (f g : ℕ → ℚ) (n : ℕ) : (∑ i < n, rat_difference f g i) = (∑ i < n, f i) - (∑ i < n, g i)
+  auto
+
++ rat_reverse (f g k : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, g i - k i = f i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ rat_weighted (f g k : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i*(g i-k i)) = (∑ i < n, f i*g i) - (∑ i < n, f i*k i)
+  auto
+
++ rat_nested (f g : ℕ → ℕ → ℚ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j-g i j)) = (∑ i < n, (∑ j < m, f i j)) - (∑ i < n, (∑ j < m, g i j))
+  auto
+
++ real_direct (f g : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i - g i) = (∑ i < n, f i) - (∑ i < n, g i)
+  auto
+
++ real_termwise (f g k : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i - k i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ real_larger (f g k : ℕ → ℝ) (n m : ℕ) (hm : n ≤ m) (h : ∀ i < m, f i = g i - k i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ real_algebra (f g : ℕ → ℝ) (n : ℕ) : (∑ i < n, 3*(f i-g i)) = (∑ i < n, 3*f i) - (∑ i < n, 3*g i)
+  auto
+
++ real_alias (f g : ℕ → ℝ) (n : ℕ) : (∑ i < n, real_difference f g i) = (∑ i < n, f i) - (∑ i < n, g i)
+  auto
+
++ real_reverse (f g k : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, g i - k i = f i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ real_weighted (f g k : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i*(g i-k i)) = (∑ i < n, f i*g i) - (∑ i < n, f i*k i)
+  auto
+
++ real_nested (f g : ℕ → ℕ → ℝ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j-g i j)) = (∑ i < n, (∑ j < m, f i j)) - (∑ i < n, (∑ j < m, g i j))
+  auto

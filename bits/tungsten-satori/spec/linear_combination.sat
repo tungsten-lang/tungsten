@@ -1,0 +1,32 @@
++ scaled_int (x y c : ℤ) (h : x = y) : c * x = y * c := by linear_combination c * h
++ scaled_rat (x y c : ℚ) (h : x = y) : c * x = y * c := by linear_combination h * c
++ scaled_real (x y c : ℝ) (h : x = y) : c * x = y * c := by linear_combination c * h
++ scaled_nat (x y c : ℕ) (h : x = y) : c * x = y * c := by linear_combination c * h
++ sum_int (a b c d : ℤ) (h : a = b) (k : c = d) : a + c = b + d := by linear_combination h + k
++ subtract_int (a b c d : ℤ) (h : a = b) (k : c = d) : a - c = b - d := by linear_combination h - k
++ reverse_int (a b : ℤ) (h : a = b) : b = a := by linear_combination -h
++ cancel_nat (a b c : ℕ) (h : a + c = b + c) : a = b := by linear_combination h
++ difference_nat (a b c : ℕ) (h : a = c) (k : b = c) : a = b := by linear_combination h - k
++ reverse_nat (a b : ℕ) (h : a = b) : b = a := by linear_combination -h
++ nested_real (a b c d z : ℝ) (h : a = b) (k : c = d) : z * (a - c) = z * (b - d) := by linear_combination z * (h - k)
++ scaled_twice (a b x y : ℤ) (h : a = b) : x * a * y = y * b * x := by linear_combination x * h * y
++ fraction_rat (a b : ℚ) (h : 3 * a = b) : a = b / 3 := by linear_combination (1 / 3) * h
++ cast_coefficient (a b : ℤ) (n : ℕ) (h : a = b) : (n : ℤ) * a = (n : ℤ) * b := by linear_combination (n : ℤ) * h
++ opaque_coefficient (f : ℝ → ℝ) (a b z : ℝ) (h : a = b) : f z * a = f z * b := by linear_combination f z * h
++ projection (a b : ℤ) (h : a = b ∧ True) : a + 1 = b + 1 := by linear_combination h.1
++ beta_eta (F : (ℕ → ℕ) → ℤ) (f : ℕ → ℕ) (z : ℤ) (h : F (fun n => f n) = z) : F f + 1 = z + 1 := by linear_combination h
++ coefficient_beta (a b z : ℤ) (h : a = b) : z * a = z * b := by linear_combination ((fun x => x) z) * h
++ under_binder (f g : ℕ → ℤ) (h : ∀ n, f n = g n) : ∀ n, 2 * f n = 2 * g n := by intro n; linear_combination 2 * (h n)
++ identity (a b : ℤ) : (a + b) ^ 2 = a ^ 2 + 2 * a * b + b ^ 2 := by linear_combination
++ identity_nat (a b : ℕ) : (a + b) ^ 2 = a ^ 2 + 2 * a * b + b ^ 2 := by linear_combination
++ large_coefficient (a b : ℤ) (h : a = b) : 123456789012345678901 * a = 123456789012345678901 * b := by linear_combination 123456789012345678901 * h
++ lc_identity (x : ℤ) : x + 0 = x := by ring
++ applied_theorem (a : ℤ) : 2 * (a + 0) = 2 * a := by linear_combination 2 * (lc_identity a)
++ local_coefficient (lc_identity a b : ℤ) (h : a = b) : lc_identity * a = lc_identity * b := by linear_combination lc_identity * h
++ centred_squares (r s1 s2 : ℤ) (h1 : 2 * s1 = r * (r - 1)) (h2 : 6 * s2 = r * (r - 1) * (2 * r - 1)) :
+    3 * (4 * s2 - 4 * (r - 1) * s1 + r * (r - 1) * (r - 1)) = r * (r * r - 1)
+  linear_combination 2 * h2 - 6 * (r - 1) * h1
++ blaschke_modulus (a x y : ℚ) (h : x * x + y * y = 1) : (a - x) * (a - x) + y * y = (1 - a * x) * (1 - a * x) + (a * y) * (a * y)
+  linear_combination (1 - a * a) * h
++ koebe_q_circle (a b c : ℝ) (ha : a * (1 + c ^ 2) = 0 - 1) (hb : b * (1 + c ^ 2) = c) : (a + (a ^ 2 + b ^ 2)) * (1 + c ^ 2) ^ 2 = 0
+  linear_combination (a * (1 + c ^ 2) + c ^ 2) * ha + (b * (1 + c ^ 2) + c) * hb

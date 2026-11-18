@@ -1,0 +1,34 @@
+import auto_quadratic_premises
+
++ missing_sum_sign (a b : ℝ) : norm a b ≤ a+b
+  auto
+
++ missing_one_sign (a b : ℝ) (ha : 0 ≤ a) : norm a b ≤ a+b
+  auto
+
++ strict_sum (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : norm a b < a+b
+  auto
+
++ wrong_lower (a b : ℝ) (hb : 0 ≤ b) : norm a b ≤ b
+  auto
+
++ wrong_scale (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hba : b ≤ a) : norm a b ≤ a
+  auto
+
++ missing_scale_bound (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : norm a b ≤ 2*a
+  auto
+
++ wrong_function (f g : α → ℝ) (x y : α) (hf : 0 ≤ f x) (hg : 0 ≤ g x) : norm (f x) (g y) ≤ f x+g x
+  auto
+
++ wrong_shift (a b c : ℝ) (ha : c ≤ a) (hb : c ≤ b) : norm (a-c) (b-c) ≤ a+b-3*c
+  auto
+
++ weak_product (x y : ℤ) (hx : 0 ≤ x) (hy : 0 ≤ y) : accepted_int x y
+  auto [int_product_rule]
+
++ missing_product_sign (x y : ℤ) (hx : 0 < x) : accepted_int x y
+  auto [int_product_rule]
+
++ wrong_instance (x y : ℚ) : accepted_rat x y
+  auto [rat_square_rule]

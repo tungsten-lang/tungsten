@@ -1,0 +1,24 @@
+import euclidean
+
+structure cx := (re : ℝ) (im : ℝ)
+-> cadd (z w : cx) : cx := cx.mk (z.re+w.re) (z.im+w.im)
+-> csub (z w : cx) : cx := cx.mk (z.re-w.re) (z.im-w.im)
+-> norm (z : cx) : ℝ := sqrt (z.re^2+z.im^2)
+
++ nonnegative (z : cx) : 0 ≤ norm z
+  auto
+
++ square (z : cx) : (norm z)^2 = z.re^2+z.im^2
+  auto
+
++ triangle (z w : cx) : norm (cadd z w) ≤ norm z + norm w
+  auto
+
++ reverse_triangle (z w : cx) : norm z - norm w ≤ norm (csub z w)
+  auto
+
++ coordinate_upper (z : cx) (hr : 0 ≤ z.re) (hi : 0 ≤ z.im) : norm z ≤ z.re+z.im
+  auto
+
++ coordinate_lower (z : cx) (hi : 0 ≤ z.im) : z.im ≤ norm z
+  auto

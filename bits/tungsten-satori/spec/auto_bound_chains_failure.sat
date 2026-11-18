@@ -1,0 +1,36 @@
+import arith
+opaque a : ℚ
+opaque b : ℚ
+opaque c : ℚ
+opaque n : ℕ
+axiom supplied_bound : c ≤ b^n
+
++ weak_strict (x b c : ℚ) (k : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c ≤ b^k) : c < x^k
+  auto
+
++ zero_exponent (x b c : ℚ) (h0 : 0 ≤ b) (hb : b < x) (hc : c ≤ b^0) : c < x^0
+  auto
+
++ negative_base (x b c : ℚ) (k : ℕ) (hb : b < x) (hc : c ≤ b^k) : c ≤ x^k
+  auto
+
++ missing_edge (x b c d : ℚ) (k : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c ≤ d) : c ≤ x^k
+  auto
+
++ reversed_edge (x b c : ℚ) (k : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : b^k ≤ c) : c ≤ x^k
+  auto
+
++ cycle (x c d : ℚ) (k : ℕ) (hc : c ≤ d) (hd : d ≤ c) : c ≤ x^k
+  auto
+
++ branch_leak (x b c d : ℚ) (k : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c ≤ b^k ∨ c ≤ d) : c ≤ x^k
+  auto
+
++ weak_function (f : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v) (x b c : ℚ) (hb : b ≤ x) (hc : c ≤ f b) : c < f x
+  auto
+
++ wrong_function (f g : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v) (x b c : ℚ) (hb : b ≤ x) (hc : c ≤ g b) : c ≤ f x
+  auto
+
++ no_global_bound (h0 : 0 ≤ b) (hb : b ≤ a) : c ≤ a^n
+  auto

@@ -1,0 +1,11 @@
+opaque score : ℚ → ℚ
+axiom bound (x : ℚ) : score x ≤ x
++ checked (x : ℚ) : score x ≤ x := bound x
++ from_checked (a : ℚ) : score a < a := by auto [checked]
+
++ unfinished (x : ℚ) : score x ≤ x := by sorry
++ from_unfinished (b : ℚ) : score b < b := by auto [unfinished]
+
++ failed (x : ℚ) : score x ≤ x := by assumption
++ copied (x : ℚ) : score x ≤ x := failed x
++ from_failed (c : ℚ) : score c < c := by auto [copied]

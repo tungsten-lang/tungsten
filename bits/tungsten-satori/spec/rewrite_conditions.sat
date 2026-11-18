@@ -1,0 +1,18 @@
++ from_guard (f : ℕ → ℕ) (n : ℕ) (h : f n = n+1) : n+1 = f n
+  symm; exact h
+
++ same_guard_names (f : ℕ → ℕ) (n : ℕ) (h : f n = n+1) : n+1 = f n
+  rw [from_guard]
+
++ renamed_guard (next : ℕ → ℕ) (index : ℕ) (step : next index = index+1) : index+1 = next index
+  rw [from_guard]
+
++ guard_in_hyp (next : ℕ → ℕ) (index value : ℕ) (step : next index = index+1) (h : index+1 = value) : next index = value
+  rw [from_guard] at h
+  exact h
+
++ guard_after_decoy (f g : ℕ → ℕ) (n m : ℕ) (decoy : g m = m+1) (step : f n = n+1) : n+1 = f n
+  rw [from_guard]
+
++ explicit_guard (next : ℕ → ℕ) (index : ℕ) (step : next index = index+1) : index+1 = next index
+  rw [from_guard next]

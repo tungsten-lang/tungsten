@@ -6,7 +6,7 @@ SATC_TOOLCHAIN_CACHE = {}
 SATC_LIB_FILES = [
   "term.w", "printer.w", "checkers.w", "eval.w", "kernel.w", "derived.w",
   "lexer.w", "parser.w", "elab.w", "simp.w", "arith.w", "satbridge.w",
-  "tactics.w", "pattern.w", "session.w", "satori.w"
+  "polynomial.w", "tactics.w", "pattern.w", "session.w", "satori.w"
 ]
 
 -> satc_toolchain_sig(root)
@@ -399,6 +399,11 @@ SATC_LIB_FILES = [
       @op_sb.append(satc_esc(tg))
     @op_sb.append("\n")
 
+  -> add_auto(name)
+    @op_sb.append("O_AUTO\t")
+    @op_sb.append(satc_esc(name))
+    @op_sb.append("\n")
+
   -> add_say(msg)
     @op_sb.append("O_SAY\t")
     @op_sb.append(satc_esc(msg))
@@ -430,7 +435,7 @@ SATC_LIB_FILES = [
 
 
 + Session
-  ro :k, :d, :elab, :theorems, :simp_rules, :simp_by_head, :simp_general, :messages, :stats, :root, :failures
+  ro :k, :d, :elab, :theorems, :simp_rules, :simp_by_head, :simp_general, :messages, :stats, :root, :failures, :auto_rules, :auto_rule_version
   rw :prelude_mode, :quiet, :only, :no_cache, :keep_messages
 
   -> new(@root)
@@ -439,6 +444,8 @@ SATC_LIB_FILES = [
     @d = Derived.new(@k)
     @elab = Elab.new(@k)
     @theorems = {}
+    @auto_rules = {}
+    @auto_rule_version = 0
     @order = []
     @simp_rules = []
     @simp_by_head = {}
@@ -518,6 +525,20 @@ SATC_LIB_FILES = [
     @order.push(name)
     if @rec != nil
       @rec.add_thm(name, th)
+
+  -> check_auto_rule(th)
+    if th == nil || th.hyps.size != 0 || tm_frees(th.concl).size != 0
+      raise "auto registration requires a closed proved theorem"
+    th.tags.each -> (tag)
+      if !["oracle:arith", "oracle:ring", "oracle:sat"].include?(tag) && !(@only != nil && tag.starts_with?("split:"))
+        raise "auto registration excludes " + tag + "; use an explicit auto hint instead"
+
+  -> register_auto_rule(name, th)
+    check_auto_rule(th)
+    @auto_rules[name] = th
+    @auto_rule_version += 1
+    if @rec != nil
+      @rec.add_auto(name)
 
   # Monomorphic lemma lookup: "name.int", "name.nat", ... or polymorphic "name".
   -> lemma_at(base, ty)
@@ -747,6 +768,9 @@ SATC_LIB_FILES = [
               cursor = cursor + 2 + ntg
               j += 1
             @eqns[nm] = eqs
+          elsif tag == "O_AUTO"
+            nm = flds[1]
+            register_auto_rule(nm, @theorems[nm])
           elsif tag == "O_SIMP"
             nm = flds[1]
             concl = tms[flds[2].to_i]
@@ -822,7 +846,9 @@ SATC_LIB_FILES = [
       target = false
       if @only != nil && !@prelude_mode
         if c.kind == :theorem || (c.kind == :attr && c.body != nil && c.body.kind == :theorem)
-          target = @thm_index + 1 == @only
+          # Count declarations before elaboration, which itself may fail.
+          @thm_index += 1
+          target = @thm_index == @only
       if target
         << "⟦" + @only.to_s + "⟧"
       begin
@@ -842,6 +868,8 @@ SATC_LIB_FILES = [
   # ---- commands ------------------------------------------------------------------------
 
   -> exec(c)
+    if c.text == "auto" && c.kind != :theorem
+      raise "auto registration requires a proved theorem declaration"
     case c.kind
     when :import
       if @rec != nil
@@ -1030,14 +1058,15 @@ SATC_LIB_FILES = [
     names = r[1]
     th = nil
     if @only != nil && !@prelude_mode
-      @thm_index += 1
       if @thm_index != @only
-        th = @k.admit_split(stmt, c.name)
+        th = @k.admit_split(stmt, @thm_index.to_s)
         add_theorem(c.name, th)
         if c.text == "simp"
           add_simp_thm(c.name, th)
+        if c.text == "auto"
+          register_auto_rule(c.name, th)
         @stats["theorems"] = @stats["theorems"] + 1
-        say("⋯ split " + c.name)
+        say("⋯ split " + @thm_index.to_s + " " + c.name)
         return
     if c.tactics != nil
       th = prove_with_tactics(stmt, names, c.tactics)
@@ -1072,9 +1101,13 @@ SATC_LIB_FILES = [
       raise "proof leaves assumptions: " + tm_show(th.hyps[0])
     if !tm_eq(th.concl, stmt)
       raise "proved statement differs from the claim"
+    if c.text == "auto"
+      check_auto_rule(th)
     add_theorem(c.name, th)
     if c.text == "simp"
       add_simp_thm(c.name, th)
+    if c.text == "auto"
+      register_auto_rule(c.name, th)
     @stats["theorems"] = @stats["theorems"] + 1
     if @rec != nil
       @rec.thm_count = @rec.thm_count + 1
@@ -1115,7 +1148,12 @@ SATC_LIB_FILES = [
     when "axioms"
       nm = c.body[0].text
       th = theorem(nm)
-      if th.tags.size == 0
+      if th == nil
+        raise "unknown theorem '" + nm + "'"
+      if @only == 0 && !@prelude_mode
+        # Preserve the tags visible at this point, including split declaration IDs.
+        say("⋯ axioms " + nm + "   \[" + th.tags.join(", ") + "\]")
+      elsif th.tags.size == 0
         say(nm + " depends only on the foundational kernel")
       else
         say(nm + " depends on: " + th.tags.join(", "))

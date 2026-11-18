@@ -1,0 +1,36 @@
+import logic
+
++ missing_fact (p : Prop) : p
+  simp at *
+
++ unrelated (p q : Prop) (h : True ∧ p) : q
+  simp at *
+  auto
+
++ unsupplied_rule (p q : Prop) (e : p = q) (h : p) : q
+  simp only [] at *
+
++ missing_location (p : Prop) (h : p) : p
+  simp at
+
++ mixed_location (p : Prop) (h : p) : p
+  simp at * h
+
++ mixed_goal (p : Prop) (h : p) : p
+  simp at * ⊢
+
++ unknown_rule (p : Prop) (h : p) : p
+  simp [not_a_rule] at *
+
++ branch_escape (p q : Prop) (h : (True ∧ p) ∨ (True ∧ q)) : p
+  cases h with hp hq
+    simp at *
+    simp at *
+    auto
+
++ unclosed (p q : Prop) (h : True ∧ p) : p ∧ q
+  simp at *
+
++ plain_no_progress (p q : Prop) (h : p) (k : q) : q ∧ p
+  simp only []
+  auto

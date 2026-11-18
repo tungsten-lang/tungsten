@@ -1,0 +1,14 @@
+import arith
+
+-> total (f : ℕ → ℚ) : ℕ → ℚ
+  | 0 => 0
+  | n + 1 => total f n + f n
+
++ total_nonneg (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ total f n
+  induction n
+    simp [total]
+    simp [total]; auto
+
++ restricted (f : ℕ → ℚ) (n : ℕ) (x : ℚ)
+    (step : (∀ i < n, 0 ≤ f i) → 0 ≤ x) (h : ∀ i < n+1, 0 ≤ f i) : 0 ≤ x+f n
+  auto

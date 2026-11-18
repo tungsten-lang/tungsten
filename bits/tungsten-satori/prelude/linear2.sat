@@ -1,0 +1,74 @@
+-- Two-equation elimination and uniqueness without division.
+import arith
+
++ linear2.eliminate.real (a b c d x y u v : ℝ) (first : a * x + b * y = u) (second : c * x + d * y = v) :
+    (a * d - b * c) * x = d * u - b * v ∧ (a * d - b * c) * y = a * v - c * u
+  constructor
+  · linear_combination d * first - b * second
+  · linear_combination a * second - c * first
+
++ linear2.unique.real (a b c d x y z w : ℝ) (det : a * d - b * c ≠ 0)
+    (first : a * x + b * y = a * z + b * w) (second : c * x + d * y = c * z + d * w) : x = z ∧ y = w
+  have ex : (a * d - b * c) * (x - z) = 0 := by linear_combination d * first - b * second
+  have ey : (a * d - b * c) * (y - w) = 0 := by linear_combination a * second - c * first
+  constructor
+  · have h := (mul_eq_zero.real (a * d - b * c) (x - z)).mp ex
+    obtain h | h := h
+    · exfalso; exact det h
+    · linarith
+  · have h := (mul_eq_zero.real (a * d - b * c) (y - w)).mp ey
+    obtain h | h := h
+    · exfalso; exact det h
+    · linarith
+
++ linear2.zero.real (a b c d x y : ℝ) (det : a * d - b * c ≠ 0)
+    (first : a * x + b * y = 0) (second : c * x + d * y = 0) : x = 0 ∧ y = 0
+  exact linear2.unique.real a b c d x y 0 0 det (by simpa using first) (by simpa using second)
+
++ linear2.eliminate.rat (a b c d x y u v : ℚ) (first : a * x + b * y = u) (second : c * x + d * y = v) :
+    (a * d - b * c) * x = d * u - b * v ∧ (a * d - b * c) * y = a * v - c * u
+  constructor
+  · linear_combination d * first - b * second
+  · linear_combination a * second - c * first
+
++ linear2.unique.rat (a b c d x y z w : ℚ) (det : a * d - b * c ≠ 0)
+    (first : a * x + b * y = a * z + b * w) (second : c * x + d * y = c * z + d * w) : x = z ∧ y = w
+  have ex : (a * d - b * c) * (x - z) = 0 := by linear_combination d * first - b * second
+  have ey : (a * d - b * c) * (y - w) = 0 := by linear_combination a * second - c * first
+  constructor
+  · have h := (mul_eq_zero.rat (a * d - b * c) (x - z)).mp ex
+    obtain h | h := h
+    · exfalso; exact det h
+    · linarith
+  · have h := (mul_eq_zero.rat (a * d - b * c) (y - w)).mp ey
+    obtain h | h := h
+    · exfalso; exact det h
+    · linarith
+
++ linear2.zero.rat (a b c d x y : ℚ) (det : a * d - b * c ≠ 0)
+    (first : a * x + b * y = 0) (second : c * x + d * y = 0) : x = 0 ∧ y = 0
+  exact linear2.unique.rat a b c d x y 0 0 det (by simpa using first) (by simpa using second)
+
++ linear2.eliminate.int (a b c d x y u v : ℤ) (first : a * x + b * y = u) (second : c * x + d * y = v) :
+    (a * d - b * c) * x = d * u - b * v ∧ (a * d - b * c) * y = a * v - c * u
+  constructor
+  · linear_combination d * first - b * second
+  · linear_combination a * second - c * first
+
++ linear2.unique.int (a b c d x y z w : ℤ) (det : a * d - b * c ≠ 0)
+    (first : a * x + b * y = a * z + b * w) (second : c * x + d * y = c * z + d * w) : x = z ∧ y = w
+  have ex : (a * d - b * c) * (x - z) = 0 := by linear_combination d * first - b * second
+  have ey : (a * d - b * c) * (y - w) = 0 := by linear_combination a * second - c * first
+  constructor
+  · have h := (mul_eq_zero.int (a * d - b * c) (x - z)).mp ex
+    obtain h | h := h
+    · exfalso; exact det h
+    · linarith
+  · have h := (mul_eq_zero.int (a * d - b * c) (y - w)).mp ey
+    obtain h | h := h
+    · exfalso; exact det h
+    · linarith
+
++ linear2.zero.int (a b c d x y : ℤ) (det : a * d - b * c ≠ 0)
+    (first : a * x + b * y = 0) (second : c * x + d * y = 0) : x = 0 ∧ y = 0
+  exact linear2.unique.int a b c d x y 0 0 det (by simpa using first) (by simpa using second)

@@ -1,0 +1,149 @@
+import recurrence
+
+-> butterfly.nat : ℕ → ℕ
+  | 0 => 0
+  | i+1 => 2*butterfly.nat i+2^i
+-> weighted.nat : ℕ → ℕ
+  | 0 => 0
+  | i+1 => weighted.nat i+(i+1)*2^i
+
++ nat_missing_base (f : ℕ → ℕ) (n : ℕ) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = n*2^n
+  auto
+
++ nat_missing_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) : 2*f n = n*2^n
+  auto
+
++ nat_wrong_base (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = n*2^n
+  auto
+
++ nat_wrong_forcing (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+3^i) : 2*f n = n*2^n
+  auto
+
++ nat_point_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : f (n+1) = 2*f n+2^n) : 2*f n = n*2^n
+  auto
+
++ nat_wrong_index (f : ℕ → ℕ) (n m : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f m = n*2^n
+  auto
+
++ nat_wrong_exponent (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = n*2^(n+1)
+  auto
+
++ nat_late_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+2) = 2*f (i+1)+2^(i+1)) : 2*f n = n*2^n
+  auto
+
++ nat_wrong_parameter (f : ℕ → ℕ → ℕ) (n a b : ℕ) (base : f 0 a = 0) (step : ∀ i, f (i+1) a = 2*f i a+2^i) : 2*f n b = n*2^n
+  auto
+
++ nat_guarded_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, 0<i → f (i+1) = 2*f i+2^i) : 2*f n = n*2^n
+  auto
+
+-> butterfly.int : ℕ → ℤ
+  | 0 => 0
+  | i+1 => 2*butterfly.int i+2^i
+-> weighted.int : ℕ → ℤ
+  | 0 => 0
+  | i+1 => weighted.int i+((i : ℤ)+1)*2^i
+
++ int_missing_base (f : ℕ → ℤ) (n : ℕ) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = (n : ℤ)*2^n
+  auto
+
++ int_missing_step (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 0) : 2*f n = (n : ℤ)*2^n
+  auto
+
++ int_wrong_base (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = (n : ℤ)*2^n
+  auto
+
++ int_wrong_forcing (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+3^i) : 2*f n = (n : ℤ)*2^n
+  auto
+
++ int_point_step (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 0) (step : f (n+1) = 2*f n+2^n) : 2*f n = (n : ℤ)*2^n
+  auto
+
++ int_wrong_index (f : ℕ → ℤ) (n m : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f m = (n : ℤ)*2^n
+  auto
+
++ int_wrong_exponent (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = (n : ℤ)*2^(n+1)
+  auto
+
++ int_late_step (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+2) = 2*f (i+1)+2^(i+1)) : 2*f n = (n : ℤ)*2^n
+  auto
+
++ int_wrong_parameter (f : ℕ → ℕ → ℤ) (n a b : ℕ) (base : f 0 a = 0) (step : ∀ i, f (i+1) a = 2*f i a+2^i) : 2*f n b = (n : ℤ)*2^n
+  auto
+
++ int_guarded_step (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, 0<i → f (i+1) = 2*f i+2^i) : 2*f n = (n : ℤ)*2^n
+  auto
+
+-> butterfly.rat : ℕ → ℚ
+  | 0 => 0
+  | i+1 => 2*butterfly.rat i+2^i
+-> weighted.rat : ℕ → ℚ
+  | 0 => 0
+  | i+1 => weighted.rat i+((i : ℚ)+1)*2^i
+
++ rat_missing_base (f : ℕ → ℚ) (n : ℕ) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = (n : ℚ)*2^n
+  auto
+
++ rat_missing_step (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 0) : 2*f n = (n : ℚ)*2^n
+  auto
+
++ rat_wrong_base (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = (n : ℚ)*2^n
+  auto
+
++ rat_wrong_forcing (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+3^i) : 2*f n = (n : ℚ)*2^n
+  auto
+
++ rat_point_step (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 0) (step : f (n+1) = 2*f n+2^n) : 2*f n = (n : ℚ)*2^n
+  auto
+
++ rat_wrong_index (f : ℕ → ℚ) (n m : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f m = (n : ℚ)*2^n
+  auto
+
++ rat_wrong_exponent (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = (n : ℚ)*2^(n+1)
+  auto
+
++ rat_late_step (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+2) = 2*f (i+1)+2^(i+1)) : 2*f n = (n : ℚ)*2^n
+  auto
+
++ rat_wrong_parameter (f : ℕ → ℕ → ℚ) (n a b : ℕ) (base : f 0 a = 0) (step : ∀ i, f (i+1) a = 2*f i a+2^i) : 2*f n b = (n : ℚ)*2^n
+  auto
+
++ rat_guarded_step (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, 0<i → f (i+1) = 2*f i+2^i) : 2*f n = (n : ℚ)*2^n
+  auto
+
+-> butterfly.real : ℕ → ℝ
+  | 0 => 0
+  | i+1 => 2*butterfly.real i+2^i
+-> weighted.real : ℕ → ℝ
+  | 0 => 0
+  | i+1 => weighted.real i+((i : ℝ)+1)*2^i
+
++ real_missing_base (f : ℕ → ℝ) (n : ℕ) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = (n : ℝ)*2^n
+  auto
+
++ real_missing_step (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 0) : 2*f n = (n : ℝ)*2^n
+  auto
+
++ real_wrong_base (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = (n : ℝ)*2^n
+  auto
+
++ real_wrong_forcing (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+3^i) : 2*f n = (n : ℝ)*2^n
+  auto
+
++ real_point_step (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 0) (step : f (n+1) = 2*f n+2^n) : 2*f n = (n : ℝ)*2^n
+  auto
+
++ real_wrong_index (f : ℕ → ℝ) (n m : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f m = (n : ℝ)*2^n
+  auto
+
++ real_wrong_exponent (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = 2*f i+2^i) : 2*f n = (n : ℝ)*2^(n+1)
+  auto
+
++ real_late_step (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+2) = 2*f (i+1)+2^(i+1)) : 2*f n = (n : ℝ)*2^n
+  auto
+
++ real_wrong_parameter (f : ℕ → ℕ → ℝ) (n a b : ℕ) (base : f 0 a = 0) (step : ∀ i, f (i+1) a = 2*f i a+2^i) : 2*f n b = (n : ℝ)*2^n
+  auto
+
++ real_guarded_step (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, 0<i → f (i+1) = 2*f i+2^i) : 2*f n = (n : ℝ)*2^n
+  auto

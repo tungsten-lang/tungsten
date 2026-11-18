@@ -1,0 +1,167 @@
+import progression
+import recurrence
+
+-> shift_linear.real (d : ℝ) : ℕ → ℝ → ℝ
+  | 0, a => 0
+  | n + 1, a => a + shift_linear.real d n (a + d)
+-> shift_square.real (d : ℝ) : ℕ → ℝ → ℝ
+  | 0, a => 0
+  | n + 1, a => a * a + shift_square.real d n (a + d)
+
++ real_direct_linear (n : ℕ) : (∑ i < n, 3 + (-2) * (i : ℝ)) = (n : ℝ) * 3 + (-2) * (n : ℝ) * ((n : ℝ) - 1) / 2
+  exact sum_below.arithmetic.real 3 (-2) n
+
++ real_shift_linear (a : ℝ) (n : ℕ) : shift_linear.real (-2) n a = (n : ℝ) * a + (-2) * (n : ℝ) * ((n : ℝ) - 1) / 2
+  exact recurrence.arithmetic_shift.real (shift_linear.real (-2)) (-2) (by intro a; rfl) (by intro i a; rfl) n a
+
++ real_direct_square (n : ℕ) : (∑ i < n, (3 + (-2) * (i : ℝ)) ^ 2) = (n : ℝ) * 3 ^ 2 + 3 * (-2) * (n : ℝ) * ((n : ℝ) - 1) + (-2) ^ 2 * (n : ℝ) * ((n : ℝ) - 1) * (2 * (n : ℝ) - 1) / 6
+  exact sum_below.arithmetic_squares.real 3 (-2) n
+
++ real_shift_square (a : ℝ) (n : ℕ) : shift_square.real (-2) n a = (n : ℝ) * a ^ 2 + a * (-2) * (n : ℝ) * ((n : ℝ) - 1) + (-2) ^ 2 * (n : ℝ) * ((n : ℝ) - 1) * (2 * (n : ℝ) - 1) / 6
+  exact recurrence.square_shift.real (shift_square.real (-2)) (-2) (by intro a; rfl) (by intro i a; unfold shift_square.real; ring) n a
+
++ real_constant (a : ℝ) (n : ℕ) : (∑ i < n, (a + 0 * (i : ℝ)) ^ 2) = (n : ℝ) * a ^ 2
+  rw [sum_below.arithmetic_squares.real a 0 n]
+  ring
++ real_empty_shift (d a : ℝ) : shift_linear.real d 0 a = 0
+  have h := recurrence.arithmetic_shift.real (shift_linear.real d) d (by intro a; rfl) (by intro i a; rfl) 0 a
+  rw [h, cast_zero.real]; ring
++ real_values : shift_linear.real (-2) 4 3 = 0 ∧ shift_square.real (-2) 4 3 = 20 ∧ shift_square.real 0 3 7 = 147
+  decide
+
+-> shift_linear.rat (d : ℚ) : ℕ → ℚ → ℚ
+  | 0, a => 0
+  | n + 1, a => a + shift_linear.rat d n (a + d)
+-> shift_square.rat (d : ℚ) : ℕ → ℚ → ℚ
+  | 0, a => 0
+  | n + 1, a => a * a + shift_square.rat d n (a + d)
+
++ rat_direct_linear (n : ℕ) : (∑ i < n, 3 + (-2) * (i : ℚ)) = (n : ℚ) * 3 + (-2) * (n : ℚ) * ((n : ℚ) - 1) / 2
+  exact sum_below.arithmetic.rat 3 (-2) n
+
++ rat_shift_linear (a : ℚ) (n : ℕ) : shift_linear.rat (-2) n a = (n : ℚ) * a + (-2) * (n : ℚ) * ((n : ℚ) - 1) / 2
+  exact recurrence.arithmetic_shift.rat (shift_linear.rat (-2)) (-2) (by intro a; rfl) (by intro i a; rfl) n a
+
++ rat_direct_square (n : ℕ) : (∑ i < n, (3 + (-2) * (i : ℚ)) ^ 2) = (n : ℚ) * 3 ^ 2 + 3 * (-2) * (n : ℚ) * ((n : ℚ) - 1) + (-2) ^ 2 * (n : ℚ) * ((n : ℚ) - 1) * (2 * (n : ℚ) - 1) / 6
+  exact sum_below.arithmetic_squares.rat 3 (-2) n
+
++ rat_shift_square (a : ℚ) (n : ℕ) : shift_square.rat (-2) n a = (n : ℚ) * a ^ 2 + a * (-2) * (n : ℚ) * ((n : ℚ) - 1) + (-2) ^ 2 * (n : ℚ) * ((n : ℚ) - 1) * (2 * (n : ℚ) - 1) / 6
+  exact recurrence.square_shift.rat (shift_square.rat (-2)) (-2) (by intro a; rfl) (by intro i a; unfold shift_square.rat; ring) n a
+
++ rat_constant (a : ℚ) (n : ℕ) : (∑ i < n, (a + 0 * (i : ℚ)) ^ 2) = (n : ℚ) * a ^ 2
+  rw [sum_below.arithmetic_squares.rat a 0 n]
+  ring
++ rat_empty_shift (d a : ℚ) : shift_linear.rat d 0 a = 0
+  have h := recurrence.arithmetic_shift.rat (shift_linear.rat d) d (by intro a; rfl) (by intro i a; rfl) 0 a
+  rw [h, cast_zero.rat]; ring
++ rat_values : shift_linear.rat (-2) 4 3 = 0 ∧ shift_square.rat (-2) 4 3 = 20 ∧ shift_square.rat 0 3 7 = 147
+  decide
+
+-> shift_linear.int (d : ℤ) : ℕ → ℤ → ℤ
+  | 0, a => 0
+  | n + 1, a => a + shift_linear.int d n (a + d)
+-> shift_square.int (d : ℤ) : ℕ → ℤ → ℤ
+  | 0, a => 0
+  | n + 1, a => a * a + shift_square.int d n (a + d)
+
++ int_direct_linear (n : ℕ) : 2 * (∑ i < n, 3 + (-2) * (i : ℤ)) = (n : ℤ) * (2 * 3 + (-2) * ((n : ℤ) - 1))
+  exact sum_below.arithmetic.int 3 (-2) n
+
++ int_shift_linear (a : ℤ) (n : ℕ) : 2 * shift_linear.int (-2) n a = (n : ℤ) * (2 * a + (-2) * ((n : ℤ) - 1))
+  exact recurrence.arithmetic_shift.int (shift_linear.int (-2)) (-2) (by intro a; rfl) (by intro i a; rfl) n a
+
++ int_direct_square (n : ℕ) : 6 * (∑ i < n, (3 + (-2) * (i : ℤ)) ^ 2) = 6 * (n : ℤ) * 3 ^ 2 + 6 * 3 * (-2) * (n : ℤ) * ((n : ℤ) - 1) + (-2) ^ 2 * (n : ℤ) * ((n : ℤ) - 1) * (2 * (n : ℤ) - 1)
+  exact sum_below.arithmetic_squares.int 3 (-2) n
+
++ int_shift_square (a : ℤ) (n : ℕ) : 6 * shift_square.int (-2) n a = 6 * (n : ℤ) * a ^ 2 + 6 * a * (-2) * (n : ℤ) * ((n : ℤ) - 1) + (-2) ^ 2 * (n : ℤ) * ((n : ℤ) - 1) * (2 * (n : ℤ) - 1)
+  exact recurrence.square_shift.int (shift_square.int (-2)) (-2) (by intro a; rfl) (by intro i a; unfold shift_square.int; ring) n a
+
++ int_constant (a : ℤ) (n : ℕ) : 6 * (∑ i < n, (a + 0 * (i : ℤ)) ^ 2) = 6 * (n : ℤ) * a ^ 2
+  rw [sum_below.arithmetic_squares.int a 0 n]
+  ring
++ int_empty_shift (d a : ℤ) : 2 * shift_linear.int d 0 a = 0
+  have h := recurrence.arithmetic_shift.int (shift_linear.int d) d (by intro a; rfl) (by intro i a; rfl) 0 a
+  rw [h, cast_zero.int]; ring
++ int_values : shift_linear.int (-2) 4 3 = 0 ∧ shift_square.int (-2) 4 3 = 20 ∧ shift_square.int 0 3 7 = 147
+  decide
+
+-> shift_linear.nat (d : ℕ) : ℕ → ℕ → ℕ
+  | 0, a => 0
+  | n + 1, a => a + shift_linear.nat d n (a + d)
+-> shift_square.nat (d : ℕ) : ℕ → ℕ → ℕ
+  | 0, a => 0
+  | n + 1, a => a * a + shift_square.nat d n (a + d)
+
++ nat_direct_linear (n : ℕ) : 2 * (∑ i < n, 3 + 2 * i) + 2 * n = n * (2 * 3 + 2 * n)
+  exact sum_below.arithmetic.nat 3 2 n
+
++ nat_shift_linear (a : ℕ) (n : ℕ) : 2 * shift_linear.nat 2 n a + 2 * n = n * (2 * a + 2 * n)
+  exact recurrence.arithmetic_shift.nat (shift_linear.nat 2) 2 (by intro a; rfl) (by intro i a; rfl) n a
+
++ nat_direct_square (n : ℕ) : 6 * (∑ i < n, (3 + 2 * i) ^ 2) + 6 * 3 * 2 * n + 3 * 2 ^ 2 * n ^ 2 = 6 * n * 3 ^ 2 + 6 * 3 * 2 * n ^ 2 + 2 * 2 ^ 2 * n ^ 3 + 2 ^ 2 * n
+  exact sum_below.arithmetic_squares.nat 3 2 n
+
++ nat_shift_square (a : ℕ) (n : ℕ) : 6 * shift_square.nat 2 n a + 6 * a * 2 * n + 3 * 2 ^ 2 * n ^ 2 = 6 * n * a ^ 2 + 6 * a * 2 * n ^ 2 + 2 * 2 ^ 2 * n ^ 3 + 2 ^ 2 * n
+  exact recurrence.square_shift.nat (shift_square.nat 2) 2 (by intro a; rfl) (by intro i a; unfold shift_square.nat; ring) n a
+
++ nat_constant (a : ℕ) (n : ℕ) : 6 * (∑ i < n, (a + 0 * i) ^ 2) = 6 * n * a ^ 2
+  calc
+    6 * (∑ i < n, (a + 0 * i) ^ 2) = 6 * (∑ i < n, (a + 0 * i) ^ 2) + 6 * a * 0 * n + 3 * 0 ^ 2 * n ^ 2 := by ring
+    _ = 6 * n * a ^ 2 := by rw [sum_below.arithmetic_squares.nat a 0 n]; ring
++ nat_empty_shift (d a : ℕ) : 2 * shift_linear.nat d 0 a + d * 0 = 0
+  have h := recurrence.arithmetic_shift.nat (shift_linear.nat d) d (by intro a; rfl) (by intro i a; rfl) 0 a
+  rw [h]; ring
++ nat_values : shift_linear.nat 2 4 3 = 24 ∧ shift_square.nat 2 4 3 = 164 ∧ shift_square.nat 0 3 7 = 147
+  decide
+
+-> ssum : ℕ → (ℕ → ℚ) → ℚ
+  | 0, w => 0
+  | k + 1, w => ssum k w + w k
+
+-> nq : ℕ → ℚ
+  | 0 => 0
+  | k + 1 => nq k + 1
+
++ nq_eq : nq = (fun (n : ℕ) => (n : ℚ))
+  funext n
+  have h := recurrence.linear_eq.rat nq 0 1 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
+
++ sum_id : ∀ n, ssum n nq = nq n * (nq n - 1) / 2
+  intro n
+  rw [nq_eq]
+  exact sum_below.index.rat n
+
++ sum_sq : ∀ n, ssum n (fun i => nq i * nq i) = nq n * (nq n - 1) * (2 * nq n - 1) / 6
+  intro n
+  rw [nq_eq]
+  exact sum_below.index_squares.rat n
+
+-> csum : ℕ → ℚ → ℚ
+  | 0, c => 0
+  | k + 1, c => c + csum k (c + 1)
+
+-> c2sum : ℕ → ℚ → ℚ
+  | 0, c => 0
+  | k + 1, c => c ^ 2 + c2sum k (c + 1)
+
+-> cnt : ℕ → ℚ
+  | 0 => 0
+  | k + 1 => 1 + cnt k
+
++ cnt_eq (k : ℕ) : cnt k = (k : ℚ)
+  have h := recurrence.linear_eq.rat cnt 0 1 (by rfl) (by intro i; unfold cnt; ring) k
+  rw [h]; ring
+
++ csum_closed (k : ℕ) : ∀ c : ℚ, csum k c = cnt k * c + cnt k * (cnt k - 1) / 2
+  intro c
+  rw [cnt_eq, recurrence.arithmetic_shift.rat csum 1 (by intro a; rfl) (by intro i a; rfl) k c]
+  ring
+
++ c2sum_closed (k : ℕ) : ∀ c : ℚ, c2sum k c = cnt k * c ^ 2 + c * cnt k * (cnt k - 1) + cnt k * (cnt k - 1) * (2 * cnt k - 1) / 6
+  intro c
+  rw [cnt_eq, recurrence.square_shift.rat c2sum 1 (by intro a; rfl) (by intro i a; rfl) k c]
+  ring
+
++ real_index_sums (n : ℕ) : (∑ i < n, (i : ℝ)) = (n : ℝ) * ((n : ℝ) - 1) / 2 ∧ (∑ i < n, (i : ℝ) * (i : ℝ)) = (n : ℝ) * ((n : ℝ) - 1) * (2 * (n : ℝ) - 1) / 6
+  exact ⟨sum_below.index.real n, sum_below.index_squares.real n⟩

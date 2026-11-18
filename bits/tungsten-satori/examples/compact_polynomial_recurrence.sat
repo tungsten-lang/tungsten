@@ -1,0 +1,19 @@
+import recurrence
+
+-> cr : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => cr n + 1
+-> kr : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => kr n + 2 * cr n + 3
++ cr_closed (j : ℕ) : cr j = j
+  auto
+
++ kr_closed (j : ℕ) : kr j = j * (j + 2)
+  auto [cr_closed]
+
+-> sj2 : ℕ → ℤ
+  | 0 => 0
+  | k + 1 => sj2 k + (k : ℤ) * (k : ℤ)
++ sj2_closed (r : ℕ) : 6 * sj2 r = (r : ℤ) * ((r : ℤ) - 1) * (2 * (r : ℤ) - 1)
+  auto

@@ -1,0 +1,55 @@
+import cauchy
+
++ real_missing_list_sign (xs : list α) (w f g : α → ℝ) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ real_strict_list (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 < (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ real_missing_range_sign (n : ℕ) (w f g : ℕ → ℝ) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ real_strict_range (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 < (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ real_weak_form (a b c : ℝ) (q : ∀ x : ℝ, 0 ≤ x^2*a-2*x*x*b+x^2*c) : b^2 ≤ a*c
+  auto
+
++ real_wrong_diagonal (a b c : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*a
+  auto
+
++ rat_missing_list_sign (xs : list α) (w f g : α → ℚ) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ rat_strict_list (xs : list α) (w f g : α → ℚ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 < (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ rat_missing_range_sign (n : ℕ) (w f g : ℕ → ℚ) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ rat_strict_range (n : ℕ) (w f g : ℕ → ℚ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 < (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ rat_weak_form (a b c : ℚ) (q : ∀ x : ℚ, 0 ≤ x^2*a-2*x*x*b+x^2*c) : b^2 ≤ a*c
+  auto
+
++ rat_wrong_diagonal (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*a
+  auto
+
++ int_missing_list_sign (xs : list α) (w f g : α → ℤ) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ int_strict_list (xs : list α) (w f g : α → ℤ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 < (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ int_missing_range_sign (n : ℕ) (w f g : ℕ → ℤ) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ int_strict_range (n : ℕ) (w f g : ℕ → ℤ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 < (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ int_weak_form (a b c : ℤ) (q : ∀ x : ℤ, 0 ≤ x^2*a-2*x*x*b+x^2*c) : b^2 ≤ a*c
+  auto
+
++ int_wrong_diagonal (a b c : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*a
+  auto

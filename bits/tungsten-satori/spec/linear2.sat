@@ -1,0 +1,23 @@
+import linear2
+
++ real_eliminate (a b c d x y u v : ℝ) (h : a*x+b*y=u) (j : c*x+d*y=v) : (a*d-b*c)*x=d*u-b*v ∧ (a*d-b*c)*y=a*v-c*u := linear2.eliminate.real a b c d x y u v h j
++ real_unique (a b c d x y z w : ℝ) (det : a*d-b*c ≠ 0) (h : a*x+b*y=a*z+b*w) (j : c*x+d*y=c*z+d*w) : x=z ∧ y=w := linear2.unique.real a b c d x y z w det h j
++ real_zero (a b c d x y : ℝ) (det : a*d-b*c ≠ 0) (h : a*x+b*y=0) (j : c*x+d*y=0) : x=0 ∧ y=0 := linear2.zero.real a b c d x y det h j
++ real_swap (x y z w : ℝ) (hx : x=z) (hy : y=w) : x=z ∧ y=w := linear2.unique.real 0 1 1 0 x y z w (by decide) (by simpa using hy) (by simpa using hx)
++ real_nonunit (x y : ℝ) (h : 2*x+y=0) (j : x+2*y=0) : x=0 ∧ y=0 := linear2.zero.real 2 1 1 2 x y (by decide) (by simpa using h) (by simpa using j)
++ real_singular_elimination (x y : ℝ) (h : x+y=1) : (0 : ℝ)=0 ∧ (0 : ℝ)=0
+  simpa using linear2.eliminate.real 1 1 1 1 x y 1 1 (by simpa using h) (by simpa using h)
++ rat_eliminate (a b c d x y u v : ℚ) (h : a*x+b*y=u) (j : c*x+d*y=v) : (a*d-b*c)*x=d*u-b*v ∧ (a*d-b*c)*y=a*v-c*u := linear2.eliminate.rat a b c d x y u v h j
++ rat_unique (a b c d x y z w : ℚ) (det : a*d-b*c ≠ 0) (h : a*x+b*y=a*z+b*w) (j : c*x+d*y=c*z+d*w) : x=z ∧ y=w := linear2.unique.rat a b c d x y z w det h j
++ rat_zero (a b c d x y : ℚ) (det : a*d-b*c ≠ 0) (h : a*x+b*y=0) (j : c*x+d*y=0) : x=0 ∧ y=0 := linear2.zero.rat a b c d x y det h j
++ rat_swap (x y z w : ℚ) (hx : x=z) (hy : y=w) : x=z ∧ y=w := linear2.unique.rat 0 1 1 0 x y z w (by decide) (by simpa using hy) (by simpa using hx)
++ rat_nonunit (x y : ℚ) (h : 2*x+y=0) (j : x+2*y=0) : x=0 ∧ y=0 := linear2.zero.rat 2 1 1 2 x y (by decide) (by simpa using h) (by simpa using j)
++ rat_singular_elimination (x y : ℚ) (h : x+y=1) : (0 : ℚ)=0 ∧ (0 : ℚ)=0
+  simpa using linear2.eliminate.rat 1 1 1 1 x y 1 1 (by simpa using h) (by simpa using h)
++ int_eliminate (a b c d x y u v : ℤ) (h : a*x+b*y=u) (j : c*x+d*y=v) : (a*d-b*c)*x=d*u-b*v ∧ (a*d-b*c)*y=a*v-c*u := linear2.eliminate.int a b c d x y u v h j
++ int_unique (a b c d x y z w : ℤ) (det : a*d-b*c ≠ 0) (h : a*x+b*y=a*z+b*w) (j : c*x+d*y=c*z+d*w) : x=z ∧ y=w := linear2.unique.int a b c d x y z w det h j
++ int_zero (a b c d x y : ℤ) (det : a*d-b*c ≠ 0) (h : a*x+b*y=0) (j : c*x+d*y=0) : x=0 ∧ y=0 := linear2.zero.int a b c d x y det h j
++ int_swap (x y z w : ℤ) (hx : x=z) (hy : y=w) : x=z ∧ y=w := linear2.unique.int 0 1 1 0 x y z w (by decide) (by simpa using hy) (by simpa using hx)
++ int_nonunit (x y : ℤ) (h : 2*x+y=0) (j : x+2*y=0) : x=0 ∧ y=0 := linear2.zero.int 2 1 1 2 x y (by decide) (by simpa using h) (by simpa using j)
++ int_singular_elimination (x y : ℤ) (h : x+y=1) : (0 : ℤ)=0 ∧ (0 : ℤ)=0
+  simpa using linear2.eliminate.int 1 1 1 1 x y 1 1 (by simpa using h) (by simpa using h)

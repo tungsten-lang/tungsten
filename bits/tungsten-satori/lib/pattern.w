@@ -16,6 +16,7 @@
   -> new(@s, @c)
     @k = @s.k
     @e = @s.elab
+    @parameter_patterns = []
 
   -> fail(msg)
     raise "def " + @c.name + ": " + msg
@@ -27,7 +28,8 @@
       fail("pattern definitions need a type")
     fty = @e.elab_type(c.ty)
     # Parameters before the colon become ordinary (variable) pattern arguments,
-    # so recursive calls may change them (e.g. accumulators).
+    # so recursive calls may change them (e.g. accumulators). Keep their binding
+    # identity: an explicit parameter shadows even a global constructor name.
     if c.binders.size > 0
       ptys = []
       c.binders.each -> (b)
@@ -37,7 +39,9 @@
       c.eqns.each -> (eq)
         pats = []
         c.binders.each -> (b)
-          pats.push(ast(:id, b.name, []))
+          p = ast(:id, b.name, [])
+          pats.push(p)
+          @parameter_patterns.push(p)
         eq[0].each -> (q)
           pats.push(q)
         neweqs.push([pats, eq[1]])
@@ -134,7 +138,7 @@
     prove_equations(params, arg_tys, eq[0].size)
 
   -> var_pattern?(p)
-    p.kind == :hole || (p.kind == :id && !@k.has_const?(p.s) && !@k.ctor_of.has_key?(p.s))
+    @parameter_patterns.include?(p) || p.kind == :hole || (p.kind == :id && !@k.has_const?(p.s) && !@k.ctor_of.has_key?(p.s))
 
   # [ctor-name, arg types (instantiated)] for the recursion type
   -> ctor_table(ty)
@@ -176,7 +180,7 @@
   # Which ctor does pattern p (at the recursion position) denote? Returns
   # [ctor_name, [var names]] or nil for a variable pattern.
   -> classify(p, rty)
-    if p.kind == :hole || (p.kind == :id && !@k.ctor_of.has_key?(p.s) && !(p.s == "zero" && rty.name == "nat"))
+    if @parameter_patterns.include?(p) || p.kind == :hole || (p.kind == :id && !@k.ctor_of.has_key?(p.s) && !(p.s == "zero" && rty.name == "nat"))
       return nil
     if rty.name == "nat"
       if p.kind == :num && p.s == "0"
@@ -402,7 +406,7 @@
   # Like classify, but returns the argument patterns themselves (which may nest):
   # nil for a variable or `_`, else [constructor name, [argument patterns]].
   -> classify_args(p, rty)
-    if p.kind == :hole || (p.kind == :id && !@k.ctor_of.has_key?(p.s) && !(p.s == "zero" && rty.tag == :c && rty.name == "nat"))
+    if @parameter_patterns.include?(p) || p.kind == :hole || (p.kind == :id && !@k.ctor_of.has_key?(p.s) && !(p.s == "zero" && rty.tag == :c && rty.name == "nat"))
       return nil
     if rty.tag == :c && rty.name == "nat"
       if p.kind == :num
@@ -484,8 +488,14 @@
     @c.eqns.each -> (eq)
       @e.reset
       @e.allow_auto = true
+      # Keep the definition's declared type variables rigid. Freshening this
+      # constant would let numeric literals specialize its equations to ℕ.
+      @e.push_local(name, const)
       params.each -> (p)
         @e.push_local(p.name, p)
+      eq[0].each_with_index -> (p, i)
+        if @parameter_patterns.include?(p)
+          @e.push_local(p.s, mk_var(p.s, arg_tys[i]))
       pnames = []
       eq[0].each -> (p)
         pat_names(p, pnames)
@@ -534,7 +544,7 @@
   # variable names bound by a pattern (identifiers that are not constructors or constants)
   -> pat_names(p, out)
     if p.kind == :id
-      if !@k.has_const?(p.s) && !@k.ctor_of.has_key?(p.s)
+      if var_pattern?(p)
         out.push(p.s)
       return out
     if p.kids != nil

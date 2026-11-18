@@ -1,0 +1,21 @@
+opaque case_ready : ℚ → Prop
+axiom case_upper (a x : ℚ) (h : case_ready a) : a*x < 1
+axiom case_nonzero (x : ℚ) (h : case_ready x) : x ≠ 0
+axiom case_other_nonzero (y : ℚ) (h : case_ready y) : y ≠ 0
+axiom unused_case_fact : True
+
++ supplied_bound (a x y : ℚ) (h : case_ready a) (hx : 0 < x) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto [case_upper a x h]
++ local_bound (a x y : ℚ) (h : case_ready a) (hx : 0 < x) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  have upper := case_upper a x h
+  auto
++ supplied_nonzero (x y : ℚ) (h : case_ready x) (hxy : x*y = 0) : y = 0
+  auto [case_nonzero x h]
++ local_nonzero (x y : ℚ) (h : case_ready x) (hxy : x*y = 0) : y = 0
+  have nonzero := case_nonzero x h
+  auto
++ unused_hint (x y : ℚ) (h : case_ready x) (hxy : x*y = 0) : y = 0
+  auto [case_nonzero x h, unused_case_fact]
+
++ two_supplied (x y z : ℚ) (hx : case_ready x) (hy : case_ready y) (hxy : x*y = 0) : z = 0
+  auto [case_nonzero x hx, case_other_nonzero y hy]

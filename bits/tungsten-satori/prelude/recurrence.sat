@@ -1,0 +1,522 @@
+-- Linear drift and geometric comparison, with explicit rate signs.
+import arith
+
+-- A closed-form sequence identity: check its initial value and one step.
++ recurrence.identity (f g : ℕ → α) (base : f 0 = g 0)
+    (step : ∀ i, f i = g i → f (i+1) = g (i+1)) (n : ℕ) : f n = g n
+  induction n with i ih
+  · exact base
+  · exact step i ih
+
+-- Keep the parameter universally quantified when a recursive call changes it.
++ recurrence.family (f g : ℕ → α → β) (base : ∀ a, f 0 a = g 0 a)
+    (step : ∀ i, (∀ a, f i a = g i a) → ∀ a, f (i+1) a = g (i+1) a)
+    (n : ℕ) : ∀ a, f n a = g n a
+  induction n with a i ih a
+  · exact base a
+  · exact step i ih a
+
++ recurrence.linear_lower.real (f : ℕ → ℝ) (d A : ℝ) (base : A ≤ f 0)
+    (step : ∀ i, f i + d ≤ f (i + 1)) (n : ℕ) : A + (n : ℝ) * d ≤ f n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, cast_succ.real]
+    linarith [step n]
++ recurrence.linear_upper.real (f : ℕ → ℝ) (d A : ℝ) (base : f 0 ≤ A)
+    (step : ∀ i, f (i + 1) ≤ f i + d) (n : ℕ) : f n ≤ A + (n : ℝ) * d
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, cast_succ.real]
+    linarith [step n]
+
+-- Equality permits negative rates; comparison requires a nonnegative rate.
++ recurrence.geometric_eq.real (f : ℕ → ℝ) (r : ℝ) (step : ∀ i, f (i + 1) = r * f i) (n : ℕ) : f n = f 0 * r ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, step, pow_succ.real, ih]
+    ring
++ recurrence.geometric_upper.real (f : ℕ → ℝ) (r A : ℝ) (rate : 0 ≤ r) (base : f 0 ≤ A)
+    (step : ∀ i, f (i + 1) ≤ r * f i) (n : ℕ) : f n ≤ A * r ^ n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, pow_succ.real]
+    have h := mul_le_mul_of_nonneg_left.real (f n) (A * r ^ n) r ih rate
+    linarith [step n]
++ recurrence.geometric_lower.real (f : ℕ → ℝ) (r A : ℝ) (rate : 0 ≤ r) (base : A ≤ f 0)
+    (step : ∀ i, r * f i ≤ f (i + 1)) (n : ℕ) : A * r ^ n ≤ f n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, pow_succ.real]
+    have h := mul_le_mul_of_nonneg_left.real (A * r ^ n) (f n) r ih rate
+    linarith [step n]
+
++ recurrence.linear_lower.rat (f : ℕ → ℚ) (d A : ℚ) (base : A ≤ f 0)
+    (step : ∀ i, f i + d ≤ f (i + 1)) (n : ℕ) : A + (n : ℚ) * d ≤ f n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, cast_succ.rat]
+    linarith [step n]
++ recurrence.linear_upper.rat (f : ℕ → ℚ) (d A : ℚ) (base : f 0 ≤ A)
+    (step : ∀ i, f (i + 1) ≤ f i + d) (n : ℕ) : f n ≤ A + (n : ℚ) * d
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, cast_succ.rat]
+    linarith [step n]
+
+-- Equality permits negative rates; comparison requires a nonnegative rate.
++ recurrence.geometric_eq.rat (f : ℕ → ℚ) (r : ℚ) (step : ∀ i, f (i + 1) = r * f i) (n : ℕ) : f n = f 0 * r ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, step, pow_succ.rat, ih]
+    ring
++ recurrence.geometric_upper.rat (f : ℕ → ℚ) (r A : ℚ) (rate : 0 ≤ r) (base : f 0 ≤ A)
+    (step : ∀ i, f (i + 1) ≤ r * f i) (n : ℕ) : f n ≤ A * r ^ n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, pow_succ.rat]
+    have h := mul_le_mul_of_nonneg_left.rat (f n) (A * r ^ n) r ih rate
+    linarith [step n]
++ recurrence.geometric_lower.rat (f : ℕ → ℚ) (r A : ℚ) (rate : 0 ≤ r) (base : A ≤ f 0)
+    (step : ∀ i, r * f i ≤ f (i + 1)) (n : ℕ) : A * r ^ n ≤ f n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, pow_succ.rat]
+    have h := mul_le_mul_of_nonneg_left.rat (A * r ^ n) (f n) r ih rate
+    linarith [step n]
+
++ recurrence.linear_lower.int (f : ℕ → ℤ) (d A : ℤ) (base : A ≤ f 0)
+    (step : ∀ i, f i + d ≤ f (i + 1)) (n : ℕ) : A + (n : ℤ) * d ≤ f n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, cast_succ.int]
+    linarith [step n]
++ recurrence.linear_upper.int (f : ℕ → ℤ) (d A : ℤ) (base : f 0 ≤ A)
+    (step : ∀ i, f (i + 1) ≤ f i + d) (n : ℕ) : f n ≤ A + (n : ℤ) * d
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, cast_succ.int]
+    linarith [step n]
+
+-- Equality permits negative rates; comparison requires a nonnegative rate.
++ recurrence.geometric_eq.int (f : ℕ → ℤ) (r : ℤ) (step : ∀ i, f (i + 1) = r * f i) (n : ℕ) : f n = f 0 * r ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, step, pow_succ.int, ih]
+    ring
++ recurrence.geometric_upper.int (f : ℕ → ℤ) (r A : ℤ) (rate : 0 ≤ r) (base : f 0 ≤ A)
+    (step : ∀ i, f (i + 1) ≤ r * f i) (n : ℕ) : f n ≤ A * r ^ n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, pow_succ.int]
+    have h := mul_le_mul_of_nonneg_left.int (f n) (A * r ^ n) r ih rate
+    linarith [step n]
++ recurrence.geometric_lower.int (f : ℕ → ℤ) (r A : ℤ) (rate : 0 ≤ r) (base : A ≤ f 0)
+    (step : ∀ i, r * f i ≤ f (i + 1)) (n : ℕ) : A * r ^ n ≤ f n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, pow_succ.int]
+    have h := mul_le_mul_of_nonneg_left.int (A * r ^ n) (f n) r ih rate
+    linarith [step n]
+
++ recurrence.linear_lower.nat (f : ℕ → ℕ) (d A : ℕ) (base : A ≤ f 0)
+    (step : ∀ i, f i + d ≤ f (i + 1)) (n : ℕ) : A + n * d ≤ f n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat]
+    linarith [step n]
++ recurrence.linear_upper.nat (f : ℕ → ℕ) (d A : ℕ) (base : f 0 ≤ A)
+    (step : ∀ i, f (i + 1) ≤ f i + d) (n : ℕ) : f n ≤ A + n * d
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat]
+    linarith [step n]
+
+-- Equality permits negative rates; comparison requires a nonnegative rate.
++ recurrence.geometric_eq.nat (f : ℕ → ℕ) (r : ℕ) (step : ∀ i, f (i + 1) = r * f i) (n : ℕ) : f n = f 0 * r ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, step, pow_succ.nat, ih]
+    ring
++ recurrence.geometric_upper.nat (f : ℕ → ℕ) (r A : ℕ) (rate : 0 ≤ r) (base : f 0 ≤ A)
+    (step : ∀ i, f (i + 1) ≤ r * f i) (n : ℕ) : f n ≤ A * r ^ n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    have h := mul_le_mul_of_nonneg_left.nat (f n) (A * r ^ n) r ih rate
+    linarith [step n]
++ recurrence.geometric_lower.nat (f : ℕ → ℕ) (r A : ℕ) (rate : 0 ≤ r) (base : A ≤ f 0)
+    (step : ∀ i, r * f i ≤ f (i + 1)) (n : ℕ) : A * r ^ n ≤ f n
+  induction n with n ih
+  · linarith
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    have h := mul_le_mul_of_nonneg_left.nat (A * r ^ n) (f n) r ih rate
+    linarith [step n]
+
+-- Denominator-cleared forcing bound; c may be signed and q = b is allowed.
++ recurrence.geometric_forcing.real (f : ℕ → ℝ) (b q c : ℝ) (rate : 0 ≤ b) (gap : b ≤ q) (base : f 0 ≤ 0)
+    (step : ∀ i, f (i + 1) ≤ b * f i + c * q ^ i) : ∀ n, (q - b) * f n ≤ c * (q ^ n - b ^ n)
+  intro n
+  induction n with n ih
+  · have h := mul_le_mul_of_nonneg_left.real (f 0) 0 (q - b) base (by linarith)
+    linarith
+  · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real]
+    have h1 := mul_le_mul_of_nonneg_left.real (f (n + 1)) (b * f n + c * q ^ n) (q - b) (step n) (by linarith)
+    have h2 := mul_le_mul_of_nonneg_left.real ((q - b) * f n) (c * (q ^ n - b ^ n)) b ih rate
+    linarith
+
+-- Denominator-cleared forcing bound; c may be signed and q = b is allowed.
++ recurrence.geometric_forcing.rat (f : ℕ → ℚ) (b q c : ℚ) (rate : 0 ≤ b) (gap : b ≤ q) (base : f 0 ≤ 0)
+    (step : ∀ i, f (i + 1) ≤ b * f i + c * q ^ i) : ∀ n, (q - b) * f n ≤ c * (q ^ n - b ^ n)
+  intro n
+  induction n with n ih
+  · have h := mul_le_mul_of_nonneg_left.rat (f 0) 0 (q - b) base (by linarith)
+    linarith
+  · rw [succ_eq_add_one.nat, pow_succ.rat, pow_succ.rat]
+    have h1 := mul_le_mul_of_nonneg_left.rat (f (n + 1)) (b * f n + c * q ^ n) (q - b) (step n) (by linarith)
+    have h2 := mul_le_mul_of_nonneg_left.rat ((q - b) * f n) (c * (q ^ n - b ^ n)) b ih rate
+    linarith
+
+-- Denominator-cleared forcing bound; c may be signed and q = b is allowed.
++ recurrence.geometric_forcing.int (f : ℕ → ℤ) (b q c : ℤ) (rate : 0 ≤ b) (gap : b ≤ q) (base : f 0 ≤ 0)
+    (step : ∀ i, f (i + 1) ≤ b * f i + c * q ^ i) : ∀ n, (q - b) * f n ≤ c * (q ^ n - b ^ n)
+  intro n
+  induction n with n ih
+  · have h := mul_le_mul_of_nonneg_left.int (f 0) 0 (q - b) base (by linarith)
+    linarith
+  · rw [succ_eq_add_one.nat, pow_succ.int, pow_succ.int]
+    have h1 := mul_le_mul_of_nonneg_left.int (f (n + 1)) (b * f n + c * q ^ n) (q - b) (step n) (by linarith)
+    have h2 := mul_le_mul_of_nonneg_left.int ((q - b) * f n) (c * (q ^ n - b ^ n)) b ih rate
+    linarith
+
+-- Scaling and shifting an affine recurrence into a geometric one.
++ recurrence.affine_transform.real (f : ℕ → ℝ) (r c A B : ℝ)
+    (balance : A * c + B = r * B) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    A * f n + B = (A * f 0 + B) * r ^ n
+  apply recurrence.geometric_eq.real (fun i => A * f i + B) r
+  intro i
+  rw [step]
+  calc
+    A * (r * f i + c) + B = r * (A * f i) + (A * c + B) := by ring
+    _ = r * (A * f i + B) := by rw [balance]; ring
+
++ recurrence.affine_transform.rat (f : ℕ → ℚ) (r c A B : ℚ)
+    (balance : A * c + B = r * B) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    A * f n + B = (A * f 0 + B) * r ^ n
+  apply recurrence.geometric_eq.rat (fun i => A * f i + B) r
+  intro i
+  rw [step]
+  calc
+    A * (r * f i + c) + B = r * (A * f i) + (A * c + B) := by ring
+    _ = r * (A * f i + B) := by rw [balance]; ring
+
++ recurrence.affine_transform.int (f : ℕ → ℤ) (r c A B : ℤ)
+    (balance : A * c + B = r * B) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    A * f n + B = (A * f 0 + B) * r ^ n
+  apply recurrence.geometric_eq.int (fun i => A * f i + B) r
+  intro i
+  rw [step]
+  calc
+    A * (r * f i + c) + B = r * (A * f i) + (A * c + B) := by ring
+    _ = r * (A * f i + B) := by rw [balance]; ring
+
++ recurrence.affine_transform.nat (f : ℕ → ℕ) (r c A B : ℕ)
+    (balance : A * c + B = r * B) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    A * f n + B = (A * f 0 + B) * r ^ n
+  apply recurrence.geometric_eq.nat (fun i => A * f i + B) r
+  intro i
+  rw [step]
+  calc
+    A * (r * f i + c) + B = r * (A * f i) + (A * c + B) := by ring
+    _ = r * (A * f i + B) := by rw [balance]; ring
+
++ recurrence.affine_closed.real (f : ℕ → ℝ) (r c A : ℝ)
+    (offset : c = (r - 1) * A) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    f n = (f 0 + A) * r ^ n - A
+  induction n with n ih
+  · ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.real, ih, offset]
+    ring
+
++ recurrence.affine_zero.real (f : ℕ → ℝ) (r c A : ℝ) (base : f 0 = 0)
+    (offset : c = (r - 1) * A) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    f n = (r ^ n - 1) * A
+  rw [recurrence.affine_closed.real f r c A offset step n, base]
+  ring
+
++ recurrence.affine_closed.rat (f : ℕ → ℚ) (r c A : ℚ)
+    (offset : c = (r - 1) * A) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    f n = (f 0 + A) * r ^ n - A
+  induction n with n ih
+  · ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.rat, ih, offset]
+    ring
+
++ recurrence.affine_zero.rat (f : ℕ → ℚ) (r c A : ℚ) (base : f 0 = 0)
+    (offset : c = (r - 1) * A) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    f n = (r ^ n - 1) * A
+  rw [recurrence.affine_closed.rat f r c A offset step n, base]
+  ring
+
++ recurrence.affine_closed.int (f : ℕ → ℤ) (r c A : ℤ)
+    (offset : c = (r - 1) * A) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    f n = (f 0 + A) * r ^ n - A
+  induction n with n ih
+  · ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.int, ih, offset]
+    ring
+
++ recurrence.affine_zero.int (f : ℕ → ℤ) (r c A : ℤ) (base : f 0 = 0)
+    (offset : c = (r - 1) * A) (step : ∀ i, f (i + 1) = r * f i + c) (n : ℕ) :
+    f n = (r ^ n - 1) * A
+  rw [recurrence.affine_closed.int f r c A offset step n, base]
+  ring
+
+-- Polynomial sequences recognized by their first differences.
++ recurrence.count (f : ℕ → ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 1) (n : ℕ) : f n = n
+  induction n with n ih
+  · exact base
+  · rw [succ_eq_add_one.nat, step, ih]
+
++ recurrence.linear_eq.real (f : ℕ → ℝ) (A d : ℝ) (base : f 0 = A)
+    (step : ∀ i, f (i + 1) = f i + d) (n : ℕ) : f n = A + (n : ℝ) * d
+  induction n with n ih
+  · rw [base, cast_zero.real]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.real]
+    ring
+
++ recurrence.quadratic.real (f : ℕ → ℝ) (a b c : ℝ) (base : f 0 = c)
+    (step : ∀ i, f (i + 1) = f i + 2 * a * (i : ℝ) + (a + b)) (n : ℕ) :
+    f n = a * (n : ℝ) * (n : ℝ) + b * (n : ℝ) + c
+  induction n with n ih
+  · rw [base, cast_zero.real]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.real]
+    ring
+
++ recurrence.cubic.real (f : ℕ → ℝ) (a b c d : ℝ) (base : f 0 = d)
+    (step : ∀ i, f (i + 1) = f i + 3 * a * (i : ℝ) * (i : ℝ) + (3 * a + 2 * b) * (i : ℝ) + (a + b + c)) (n : ℕ) :
+    f n = a * (n : ℝ) * (n : ℝ) * (n : ℝ) + b * (n : ℝ) * (n : ℝ) + c * (n : ℝ) + d
+  induction n with n ih
+  · rw [base, cast_zero.real]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.real]
+    ring
+
++ recurrence.linear_eq.rat (f : ℕ → ℚ) (A d : ℚ) (base : f 0 = A)
+    (step : ∀ i, f (i + 1) = f i + d) (n : ℕ) : f n = A + (n : ℚ) * d
+  induction n with n ih
+  · rw [base, cast_zero.rat]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.rat]
+    ring
+
++ recurrence.quadratic.rat (f : ℕ → ℚ) (a b c : ℚ) (base : f 0 = c)
+    (step : ∀ i, f (i + 1) = f i + 2 * a * (i : ℚ) + (a + b)) (n : ℕ) :
+    f n = a * (n : ℚ) * (n : ℚ) + b * (n : ℚ) + c
+  induction n with n ih
+  · rw [base, cast_zero.rat]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.rat]
+    ring
+
++ recurrence.cubic.rat (f : ℕ → ℚ) (a b c d : ℚ) (base : f 0 = d)
+    (step : ∀ i, f (i + 1) = f i + 3 * a * (i : ℚ) * (i : ℚ) + (3 * a + 2 * b) * (i : ℚ) + (a + b + c)) (n : ℕ) :
+    f n = a * (n : ℚ) * (n : ℚ) * (n : ℚ) + b * (n : ℚ) * (n : ℚ) + c * (n : ℚ) + d
+  induction n with n ih
+  · rw [base, cast_zero.rat]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.rat]
+    ring
+
++ recurrence.linear_eq.int (f : ℕ → ℤ) (A d : ℤ) (base : f 0 = A)
+    (step : ∀ i, f (i + 1) = f i + d) (n : ℕ) : f n = A + (n : ℤ) * d
+  induction n with n ih
+  · rw [base, cast_zero.int]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.int]
+    ring
+
++ recurrence.quadratic.int (f : ℕ → ℤ) (a b c : ℤ) (base : f 0 = c)
+    (step : ∀ i, f (i + 1) = f i + 2 * a * (i : ℤ) + (a + b)) (n : ℕ) :
+    f n = a * (n : ℤ) * (n : ℤ) + b * (n : ℤ) + c
+  induction n with n ih
+  · rw [base, cast_zero.int]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.int]
+    ring
+
++ recurrence.cubic.int (f : ℕ → ℤ) (a b c d : ℤ) (base : f 0 = d)
+    (step : ∀ i, f (i + 1) = f i + 3 * a * (i : ℤ) * (i : ℤ) + (3 * a + 2 * b) * (i : ℤ) + (a + b + c)) (n : ℕ) :
+    f n = a * (n : ℤ) * (n : ℤ) * (n : ℤ) + b * (n : ℤ) * (n : ℤ) + c * (n : ℤ) + d
+  induction n with n ih
+  · rw [base, cast_zero.int]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.int]
+    ring
+
++ recurrence.linear_eq.nat (f : ℕ → ℕ) (A d : ℕ) (base : f 0 = A)
+    (step : ∀ i, f (i + 1) = f i + d) (n : ℕ) : f n = A + n * d
+  induction n with n ih
+  · rw [base]; ring
+  · rw [succ_eq_add_one.nat, step, ih]
+    ring
+
++ recurrence.quadratic.nat (f : ℕ → ℕ) (a b c : ℕ) (base : f 0 = c)
+    (step : ∀ i, f (i + 1) = f i + 2 * a * i + (a + b)) (n : ℕ) :
+    f n = a * n * n + b * n + c
+  induction n with n ih
+  · rw [base]; ring
+  · rw [succ_eq_add_one.nat, step, ih]
+    ring
+
++ recurrence.cubic.nat (f : ℕ → ℕ) (a b c d : ℕ) (base : f 0 = d)
+    (step : ∀ i, f (i + 1) = f i + 3 * a * i * i + (3 * a + 2 * b) * i + (a + b + c)) (n : ℕ) :
+    f n = a * n * n * n + b * n * n + c * n + d
+  induction n with n ih
+  · rw [base]; ring
+  · rw [succ_eq_add_one.nat, step, ih]
+    ring
+
+
+-- Equal-rate forcing produces a linear factor; the successor form also resolves rate zero.
++ recurrence.geometric_linear.real (f : ℕ → ℝ) (r c : ℝ)
+    (step : ∀ i, f (i + 1) = r * f i + c * r ^ i) (n : ℕ) :
+    r * f n = (r * f 0 + c * (n : ℝ)) * r ^ n
+  induction n with n ih
+  · rw [cast_zero.real]; ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.real, cast_succ.real]
+    calc
+      r * (r * f n + c * r ^ n) = r * (r * f n) + r * c * r ^ n := by ring
+      _ = (r * f 0 + c * ((n : ℝ) + 1)) * (r ^ n * r) := by rw [ih]; ring
+
++ recurrence.geometric_linear_succ.real (f : ℕ → ℝ) (r c : ℝ)
+    (step : ∀ i, f (i + 1) = r * f i + c * r ^ i) (n : ℕ) :
+    f (n + 1) = (r * f 0 + c * ((n + 1 : ℕ) : ℝ)) * r ^ n
+  have h := recurrence.geometric_linear.real f r c step n
+  rw [step]
+  calc
+    r * f n + c * r ^ n = (r * f 0 + c * (n : ℝ)) * r ^ n + c * r ^ n := by rw [h]
+    _ = (r * f 0 + c * ((n + 1 : ℕ) : ℝ)) * r ^ n := by rw [cast_succ.real]; ring
+
++ recurrence.geometric_linear.rat (f : ℕ → ℚ) (r c : ℚ)
+    (step : ∀ i, f (i + 1) = r * f i + c * r ^ i) (n : ℕ) :
+    r * f n = (r * f 0 + c * (n : ℚ)) * r ^ n
+  induction n with n ih
+  · rw [cast_zero.rat]; ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.rat, cast_succ.rat]
+    calc
+      r * (r * f n + c * r ^ n) = r * (r * f n) + r * c * r ^ n := by ring
+      _ = (r * f 0 + c * ((n : ℚ) + 1)) * (r ^ n * r) := by rw [ih]; ring
+
++ recurrence.geometric_linear_succ.rat (f : ℕ → ℚ) (r c : ℚ)
+    (step : ∀ i, f (i + 1) = r * f i + c * r ^ i) (n : ℕ) :
+    f (n + 1) = (r * f 0 + c * ((n + 1 : ℕ) : ℚ)) * r ^ n
+  have h := recurrence.geometric_linear.rat f r c step n
+  rw [step]
+  calc
+    r * f n + c * r ^ n = (r * f 0 + c * (n : ℚ)) * r ^ n + c * r ^ n := by rw [h]
+    _ = (r * f 0 + c * ((n + 1 : ℕ) : ℚ)) * r ^ n := by rw [cast_succ.rat]; ring
+
++ recurrence.geometric_linear.int (f : ℕ → ℤ) (r c : ℤ)
+    (step : ∀ i, f (i + 1) = r * f i + c * r ^ i) (n : ℕ) :
+    r * f n = (r * f 0 + c * (n : ℤ)) * r ^ n
+  induction n with n ih
+  · rw [cast_zero.int]; ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.int, cast_succ.int]
+    calc
+      r * (r * f n + c * r ^ n) = r * (r * f n) + r * c * r ^ n := by ring
+      _ = (r * f 0 + c * ((n : ℤ) + 1)) * (r ^ n * r) := by rw [ih]; ring
+
++ recurrence.geometric_linear_succ.int (f : ℕ → ℤ) (r c : ℤ)
+    (step : ∀ i, f (i + 1) = r * f i + c * r ^ i) (n : ℕ) :
+    f (n + 1) = (r * f 0 + c * ((n + 1 : ℕ) : ℤ)) * r ^ n
+  have h := recurrence.geometric_linear.int f r c step n
+  rw [step]
+  calc
+    r * f n + c * r ^ n = (r * f 0 + c * (n : ℤ)) * r ^ n + c * r ^ n := by rw [h]
+    _ = (r * f 0 + c * ((n + 1 : ℕ) : ℤ)) * r ^ n := by rw [cast_succ.int]; ring
+
++ recurrence.geometric_linear.nat (f : ℕ → ℕ) (r c : ℕ)
+    (step : ∀ i, f (i + 1) = r * f i + c * r ^ i) (n : ℕ) :
+    r * f n = (r * f 0 + c * n) * r ^ n
+  induction n with n ih
+  · ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.nat]
+    calc
+      r * (r * f n + c * r ^ n) = r * (r * f n) + r * c * r ^ n := by ring
+      _ = (r * f 0 + c * (n + 1)) * (r ^ n * r) := by rw [ih]; ring
+
++ recurrence.geometric_linear_succ.nat (f : ℕ → ℕ) (r c : ℕ)
+    (step : ∀ i, f (i + 1) = r * f i + c * r ^ i) (n : ℕ) :
+    f (n + 1) = (r * f 0 + c * (n + 1)) * r ^ n
+  have h := recurrence.geometric_linear.nat f r c step n
+  rw [step]
+  calc
+    r * f n + c * r ^ n = (r * f 0 + c * n) * r ^ n + c * r ^ n := by rw [h]
+    _ = (r * f 0 + c * (n + 1)) * r ^ n := by ring
+
++ recurrence.geometric_forcing_eq.real (f : ℕ → ℝ) (r q c : ℝ)
+    (step : ∀ i, f (i + 1) = r * f i + c * q ^ i) (n : ℕ) :
+    (q - r) * f n = (q - r) * f 0 * r ^ n + c * (q ^ n - r ^ n)
+  induction n with n ih
+  · ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.real r n, pow_succ.real q n]
+    calc
+      (q - r) * (r * f n + c * q ^ n) = r * ((q - r) * f n) + c * (q - r) * q ^ n := by ring
+      _ = (q - r) * f 0 * (r ^ n * r) + c * (q ^ n * q - r ^ n * r) := by rw [ih]; ring
+
++ recurrence.geometric_sum.real (f : ℕ → ℝ) (r : ℝ) (base : f 0 = 0)
+    (step : ∀ i, f (i + 1) = f i + r ^ i) (n : ℕ) : (1 - r) * f n = 1 - r ^ n
+  induction n with n ih
+  · rw [base]; ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.real]
+    calc
+      (1 - r) * (f n + r ^ n) = (1 - r) * f n + (1 - r) * r ^ n := by ring
+      _ = 1 - r ^ n * r := by rw [ih]; ring
+
++ recurrence.geometric_forcing_eq.rat (f : ℕ → ℚ) (r q c : ℚ)
+    (step : ∀ i, f (i + 1) = r * f i + c * q ^ i) (n : ℕ) :
+    (q - r) * f n = (q - r) * f 0 * r ^ n + c * (q ^ n - r ^ n)
+  induction n with n ih
+  · ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.rat r n, pow_succ.rat q n]
+    calc
+      (q - r) * (r * f n + c * q ^ n) = r * ((q - r) * f n) + c * (q - r) * q ^ n := by ring
+      _ = (q - r) * f 0 * (r ^ n * r) + c * (q ^ n * q - r ^ n * r) := by rw [ih]; ring
+
++ recurrence.geometric_sum.rat (f : ℕ → ℚ) (r : ℚ) (base : f 0 = 0)
+    (step : ∀ i, f (i + 1) = f i + r ^ i) (n : ℕ) : (1 - r) * f n = 1 - r ^ n
+  induction n with n ih
+  · rw [base]; ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.rat]
+    calc
+      (1 - r) * (f n + r ^ n) = (1 - r) * f n + (1 - r) * r ^ n := by ring
+      _ = 1 - r ^ n * r := by rw [ih]; ring
+
++ recurrence.geometric_forcing_eq.int (f : ℕ → ℤ) (r q c : ℤ)
+    (step : ∀ i, f (i + 1) = r * f i + c * q ^ i) (n : ℕ) :
+    (q - r) * f n = (q - r) * f 0 * r ^ n + c * (q ^ n - r ^ n)
+  induction n with n ih
+  · ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.int r n, pow_succ.int q n]
+    calc
+      (q - r) * (r * f n + c * q ^ n) = r * ((q - r) * f n) + c * (q - r) * q ^ n := by ring
+      _ = (q - r) * f 0 * (r ^ n * r) + c * (q ^ n * q - r ^ n * r) := by rw [ih]; ring
+
++ recurrence.geometric_sum.int (f : ℕ → ℤ) (r : ℤ) (base : f 0 = 0)
+    (step : ∀ i, f (i + 1) = f i + r ^ i) (n : ℕ) : (1 - r) * f n = 1 - r ^ n
+  induction n with n ih
+  · rw [base]; ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.int]
+    calc
+      (1 - r) * (f n + r ^ n) = (1 - r) * f n + (1 - r) * r ^ n := by ring
+      _ = 1 - r ^ n * r := by rw [ih]; ring
+
+
+-- Natural sums retain the constant term instead of subtracting from a power.
++ recurrence.geometric_sum.nat (s : ℕ → ℕ) (r : ℕ) (base : s 0 = 0)
+    (step : ∀ i, s (i + 1) = s i + (r + 1) ^ i) (n : ℕ) : r * s n + 1 = (r + 1) ^ n
+  induction n with n ih
+  · rw [base]; ring
+  · rw [succ_eq_add_one.nat, step, pow_succ.nat]
+    have e : r * (s n + (r + 1) ^ n) + 1 = (r * s n + 1) + r * (r + 1) ^ n := by ring
+    rw [e, ih]
+    ring
+
++ recurrence.geometric_sum_of_pos.nat (s : ℕ → ℕ) (r : ℕ) (positive : 1 ≤ r)
+    (base : s 0 = 0) (step : ∀ i, s (i + 1) = s i + r ^ i) (n : ℕ) : (r - 1) * s n + 1 = r ^ n
+  have e : r - 1 + 1 = r := by omega
+  have h := recurrence.geometric_sum.nat s (r - 1) base (by intro i; rw [e]; exact step i) n
+  simpa [e] using h

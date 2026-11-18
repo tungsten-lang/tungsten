@@ -1,0 +1,35 @@
+import sum_squares
+
++ real_weak_weights (xs : list α) (w f : α → ℝ) (p : ∀ x ∈ xs, 0 ≤ w x) (h : sum_list xs (fun x => w x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.real xs w f p).mp h
++ real_zero_weight : (1 : ℝ) = 0 := (list_sum.weighted_squares_eq_zero_iff.real [(1 : ℝ)] (fun x => 0) (fun x => x) (by intro x hx; decide)).mp (by decide) 1 (by simp)
++ real_outside_member (xs : list α) (f : α → ℝ) (h : sum_list xs (fun x => f x * f x) = 0) (x : α) : f x = 0 := (list_sum.squares_eq_zero_iff.real xs f).mp h x (by simp)
++ real_wrong_total (xs : list α) (f : α → ℝ) (h : sum_list xs (fun x => f x * f x) = 1) : ∀ x ∈ xs, f x = 0 := (list_sum.squares_eq_zero_iff.real xs f).mp h
++ real_one_zero (xs : list α) (f : α → ℝ) (x : α) (h : f x = 0) : sum_list xs (fun x => f x * f x) = 0 := (list_sum.squares_eq_zero_iff.real xs f).mpr h
++ real_changed_weight (xs : list α) (w v f : α → ℝ) (p : ∀ x ∈ xs, 0 < w x) (h : sum_list xs (fun x => v x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.real xs w f p).mp h
++ real_missing_sign (xs : list α) (w f : α → ℝ) : 0 ≤ sum_list xs (fun x => w x * (f x * f x)) := list_sum.weighted_squares_nonneg.real xs w f (by auto)
++ real_negative_weight : 0 ≤ sum_list [-1] (fun (x : ℝ) => x * (1 * 1)) := list_sum.weighted_squares_nonneg.real [(-1 : ℝ)] (fun x => x) (fun x => 1) (by intro x hx; simp at hx; rw [hx]; decide)
+
++ rat_weak_weights (xs : list α) (w f : α → ℚ) (p : ∀ x ∈ xs, 0 ≤ w x) (h : sum_list xs (fun x => w x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.rat xs w f p).mp h
++ rat_zero_weight : (1 : ℚ) = 0 := (list_sum.weighted_squares_eq_zero_iff.rat [(1 : ℚ)] (fun x => 0) (fun x => x) (by intro x hx; decide)).mp (by decide) 1 (by simp)
++ rat_outside_member (xs : list α) (f : α → ℚ) (h : sum_list xs (fun x => f x * f x) = 0) (x : α) : f x = 0 := (list_sum.squares_eq_zero_iff.rat xs f).mp h x (by simp)
++ rat_wrong_total (xs : list α) (f : α → ℚ) (h : sum_list xs (fun x => f x * f x) = 1) : ∀ x ∈ xs, f x = 0 := (list_sum.squares_eq_zero_iff.rat xs f).mp h
++ rat_one_zero (xs : list α) (f : α → ℚ) (x : α) (h : f x = 0) : sum_list xs (fun x => f x * f x) = 0 := (list_sum.squares_eq_zero_iff.rat xs f).mpr h
++ rat_changed_weight (xs : list α) (w v f : α → ℚ) (p : ∀ x ∈ xs, 0 < w x) (h : sum_list xs (fun x => v x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.rat xs w f p).mp h
++ rat_missing_sign (xs : list α) (w f : α → ℚ) : 0 ≤ sum_list xs (fun x => w x * (f x * f x)) := list_sum.weighted_squares_nonneg.rat xs w f (by auto)
++ rat_negative_weight : 0 ≤ sum_list [-1] (fun (x : ℚ) => x * (1 * 1)) := list_sum.weighted_squares_nonneg.rat [(-1 : ℚ)] (fun x => x) (fun x => 1) (by intro x hx; simp at hx; rw [hx]; decide)
+
++ int_weak_weights (xs : list α) (w f : α → ℤ) (p : ∀ x ∈ xs, 0 ≤ w x) (h : sum_list xs (fun x => w x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.int xs w f p).mp h
++ int_zero_weight : (1 : ℤ) = 0 := (list_sum.weighted_squares_eq_zero_iff.int [(1 : ℤ)] (fun x => 0) (fun x => x) (by intro x hx; decide)).mp (by decide) 1 (by simp)
++ int_outside_member (xs : list α) (f : α → ℤ) (h : sum_list xs (fun x => f x * f x) = 0) (x : α) : f x = 0 := (list_sum.squares_eq_zero_iff.int xs f).mp h x (by simp)
++ int_wrong_total (xs : list α) (f : α → ℤ) (h : sum_list xs (fun x => f x * f x) = 1) : ∀ x ∈ xs, f x = 0 := (list_sum.squares_eq_zero_iff.int xs f).mp h
++ int_one_zero (xs : list α) (f : α → ℤ) (x : α) (h : f x = 0) : sum_list xs (fun x => f x * f x) = 0 := (list_sum.squares_eq_zero_iff.int xs f).mpr h
++ int_changed_weight (xs : list α) (w v f : α → ℤ) (p : ∀ x ∈ xs, 0 < w x) (h : sum_list xs (fun x => v x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.int xs w f p).mp h
++ int_missing_sign (xs : list α) (w f : α → ℤ) : 0 ≤ sum_list xs (fun x => w x * (f x * f x)) := list_sum.weighted_squares_nonneg.int xs w f (by auto)
++ int_negative_weight : 0 ≤ sum_list [-1] (fun (x : ℤ) => x * (1 * 1)) := list_sum.weighted_squares_nonneg.int [(-1 : ℤ)] (fun x => x) (fun x => 1) (by intro x hx; simp at hx; rw [hx]; decide)
+
++ nat_weak_weights (xs : list α) (w f : α → ℕ) (p : ∀ x ∈ xs, 0 ≤ w x) (h : sum_list xs (fun x => w x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.nat xs w f p).mp h
++ nat_zero_weight : (1 : ℕ) = 0 := (list_sum.weighted_squares_eq_zero_iff.nat [(1 : ℕ)] (fun x => 0) (fun x => x) (by intro x hx; decide)).mp (by decide) 1 (by simp)
++ nat_outside_member (xs : list α) (f : α → ℕ) (h : sum_list xs (fun x => f x * f x) = 0) (x : α) : f x = 0 := (list_sum.squares_eq_zero_iff.nat xs f).mp h x (by simp)
++ nat_wrong_total (xs : list α) (f : α → ℕ) (h : sum_list xs (fun x => f x * f x) = 1) : ∀ x ∈ xs, f x = 0 := (list_sum.squares_eq_zero_iff.nat xs f).mp h
++ nat_one_zero (xs : list α) (f : α → ℕ) (x : α) (h : f x = 0) : sum_list xs (fun x => f x * f x) = 0 := (list_sum.squares_eq_zero_iff.nat xs f).mpr h
++ nat_changed_weight (xs : list α) (w v f : α → ℕ) (p : ∀ x ∈ xs, 0 < w x) (h : sum_list xs (fun x => v x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.nat xs w f p).mp h

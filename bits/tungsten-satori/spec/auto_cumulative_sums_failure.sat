@@ -1,0 +1,64 @@
+import arith
+
++ generic_missing_base (f s : ℕ → α) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ generic_missing_step (f s : ℕ → α) (base : s 0=0) (n : ℕ) : s n = sum_below n f
+  auto
+
++ generic_wrong_index (f s : ℕ → α) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f (i+1)) (n : ℕ) : s n = sum_below n f
+  auto
+
++ nat_missing_base (f s : ℕ → ℕ) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ nat_missing_step (f s : ℕ → ℕ) (base : s 0=0) (n : ℕ) : s n = sum_below n f
+  auto
+
++ int_missing_base (f s : ℕ → ℤ) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ int_missing_step (f s : ℕ → ℤ) (base : s 0=0) (n : ℕ) : s n = sum_below n f
+  auto
+
++ int_wrong_sign (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f 0-f n
+  auto
+
++ int_wrong_endpoint (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f (n+1)-f 0
+  auto
+
++ int_wrong_stride (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f (i+2)-f i) = f n-f 0
+  auto
+
++ rat_missing_base (f s : ℕ → ℚ) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ rat_missing_step (f s : ℕ → ℚ) (base : s 0=0) (n : ℕ) : s n = sum_below n f
+  auto
+
++ rat_wrong_sign (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f 0-f n
+  auto
+
++ rat_wrong_endpoint (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f (n+1)-f 0
+  auto
+
++ rat_wrong_stride (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f (i+2)-f i) = f n-f 0
+  auto
+
++ real_missing_base (f s : ℕ → ℝ) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ real_missing_step (f s : ℕ → ℝ) (base : s 0=0) (n : ℕ) : s n = sum_below n f
+  auto
+
++ real_wrong_sign (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f 0-f n
+  auto
+
++ real_wrong_endpoint (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f (n+1)-f 0
+  auto
+
++ real_wrong_stride (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f (i+2)-f i) = f n-f 0
+  auto
+
++ natural_telescope (f : ℕ → ℕ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f n-f 0
+  auto

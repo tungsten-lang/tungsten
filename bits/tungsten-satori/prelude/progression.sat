@@ -1,0 +1,144 @@
+-- Arithmetic progressions and their squared sums, including shifted recursive definitions.
+import arith
+
++ sum_below.arithmetic.real (a d : ℝ) (n : ℕ) :
+    (∑ i < n, a + d * (i : ℝ)) = (n : ℝ) * a + d * (n : ℝ) * ((n : ℝ) - 1) / 2
+  induction n with n ih
+  · rw [sum_below_zero, cast_zero.real]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, cast_succ.real]
+    ring
+
++ sum_below.arithmetic_squares.real (a d : ℝ) (n : ℕ) :
+    (∑ i < n, (a + d * (i : ℝ)) ^ 2) = (n : ℝ) * a ^ 2 + a * d * (n : ℝ) * ((n : ℝ) - 1) + d ^ 2 * (n : ℝ) * ((n : ℝ) - 1) * (2 * (n : ℝ) - 1) / 6
+  induction n with n ih
+  · rw [sum_below_zero, cast_zero.real]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, cast_succ.real]
+    ring
+
++ recurrence.arithmetic_shift.real (s : ℕ → ℝ → ℝ) (d : ℝ)
+    (base : ∀ a, s 0 a = 0) (step : ∀ i a, s (i + 1) a = a + s i (a + d)) (n : ℕ) : ∀ a : ℝ,
+    s n a = (n : ℝ) * a + d * (n : ℝ) * ((n : ℝ) - 1) / 2
+  induction n with a n ih a
+  · rw [base, cast_zero.real]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.real]
+    ring
+
++ recurrence.square_shift.real (s : ℕ → ℝ → ℝ) (d : ℝ)
+    (base : ∀ a, s 0 a = 0) (step : ∀ i a, s (i + 1) a = a ^ 2 + s i (a + d)) (n : ℕ) : ∀ a : ℝ,
+    s n a = (n : ℝ) * a ^ 2 + a * d * (n : ℝ) * ((n : ℝ) - 1) + d ^ 2 * (n : ℝ) * ((n : ℝ) - 1) * (2 * (n : ℝ) - 1) / 6
+  induction n with a n ih a
+  · rw [base, cast_zero.real]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.real]
+    ring
+
++ sum_below.arithmetic.rat (a d : ℚ) (n : ℕ) :
+    (∑ i < n, a + d * (i : ℚ)) = (n : ℚ) * a + d * (n : ℚ) * ((n : ℚ) - 1) / 2
+  induction n with n ih
+  · rw [sum_below_zero, cast_zero.rat]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, cast_succ.rat]
+    ring
+
++ sum_below.arithmetic_squares.rat (a d : ℚ) (n : ℕ) :
+    (∑ i < n, (a + d * (i : ℚ)) ^ 2) = (n : ℚ) * a ^ 2 + a * d * (n : ℚ) * ((n : ℚ) - 1) + d ^ 2 * (n : ℚ) * ((n : ℚ) - 1) * (2 * (n : ℚ) - 1) / 6
+  induction n with n ih
+  · rw [sum_below_zero, cast_zero.rat]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, cast_succ.rat]
+    ring
+
++ recurrence.arithmetic_shift.rat (s : ℕ → ℚ → ℚ) (d : ℚ)
+    (base : ∀ a, s 0 a = 0) (step : ∀ i a, s (i + 1) a = a + s i (a + d)) (n : ℕ) : ∀ a : ℚ,
+    s n a = (n : ℚ) * a + d * (n : ℚ) * ((n : ℚ) - 1) / 2
+  induction n with a n ih a
+  · rw [base, cast_zero.rat]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.rat]
+    ring
+
++ recurrence.square_shift.rat (s : ℕ → ℚ → ℚ) (d : ℚ)
+    (base : ∀ a, s 0 a = 0) (step : ∀ i a, s (i + 1) a = a ^ 2 + s i (a + d)) (n : ℕ) : ∀ a : ℚ,
+    s n a = (n : ℚ) * a ^ 2 + a * d * (n : ℚ) * ((n : ℚ) - 1) + d ^ 2 * (n : ℚ) * ((n : ℚ) - 1) * (2 * (n : ℚ) - 1) / 6
+  induction n with a n ih a
+  · rw [base, cast_zero.rat]; ring
+  · rw [succ_eq_add_one.nat, step, ih, cast_succ.rat]
+    ring
+
++ sum_below.arithmetic.int (a d : ℤ) (n : ℕ) :
+    2 * (∑ i < n, a + d * (i : ℤ)) = (n : ℤ) * (2 * a + d * ((n : ℤ) - 1))
+  induction n with n ih
+  · rw [sum_below_zero, cast_zero.int]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ, cast_succ.int]
+    linear_combination ih
+
++ sum_below.arithmetic_squares.int (a d : ℤ) (n : ℕ) :
+    6 * (∑ i < n, (a + d * (i : ℤ)) ^ 2) = 6 * (n : ℤ) * a ^ 2 + 6 * a * d * (n : ℤ) * ((n : ℤ) - 1) + d ^ 2 * (n : ℤ) * ((n : ℤ) - 1) * (2 * (n : ℤ) - 1)
+  induction n with n ih
+  · rw [sum_below_zero, cast_zero.int]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ, cast_succ.int]
+    linear_combination ih
+
++ recurrence.arithmetic_shift.int (s : ℕ → ℤ → ℤ) (d : ℤ)
+    (base : ∀ a, s 0 a = 0) (step : ∀ i a, s (i + 1) a = a + s i (a + d)) (n : ℕ) : ∀ a : ℤ,
+    2 * s n a = (n : ℤ) * (2 * a + d * ((n : ℤ) - 1))
+  induction n with a n ih a
+  · rw [base, cast_zero.int]; ring
+  · rw [succ_eq_add_one.nat, step, cast_succ.int]
+    linear_combination ih (a + d)
+
++ recurrence.square_shift.int (s : ℕ → ℤ → ℤ) (d : ℤ)
+    (base : ∀ a, s 0 a = 0) (step : ∀ i a, s (i + 1) a = a ^ 2 + s i (a + d)) (n : ℕ) : ∀ a : ℤ,
+    6 * s n a = 6 * (n : ℤ) * a ^ 2 + 6 * a * d * (n : ℤ) * ((n : ℤ) - 1) + d ^ 2 * (n : ℤ) * ((n : ℤ) - 1) * (2 * (n : ℤ) - 1)
+  induction n with a n ih a
+  · rw [base, cast_zero.int]; ring
+  · rw [succ_eq_add_one.nat, step, cast_succ.int]
+    linear_combination ih (a + d)
+
++ sum_below.arithmetic.nat (a d : ℕ) (n : ℕ) :
+    2 * (∑ i < n, a + d * i) + d * n = n * (2 * a + d * n)
+  induction n with n ih
+  · rw [sum_below_zero]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ]
+    calc
+      2 * ((∑ i < n, a + d * i) + (a + d * n)) + d * (n + 1) = (2 * (∑ i < n, a + d * i) + d * n) + 2 * a + 2 * d * n + d := by ring
+      _ = (n + 1) * (2 * a + d * (n + 1)) := by rw [ih]; ring
+
++ sum_below.arithmetic_squares.nat (a d : ℕ) (n : ℕ) :
+    6 * (∑ i < n, (a + d * i) ^ 2) + 6 * a * d * n + 3 * d ^ 2 * n ^ 2 = 6 * n * a ^ 2 + 6 * a * d * n ^ 2 + 2 * d ^ 2 * n ^ 3 + d ^ 2 * n
+  induction n with n ih
+  · rw [sum_below_zero]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ]
+    calc
+      6 * ((∑ i < n, (a + d * i) ^ 2) + (a + d * n) ^ 2) + 6 * a * d * (n + 1) + 3 * d ^ 2 * (n + 1) ^ 2 = (6 * (∑ i < n, (a + d * i) ^ 2) + 6 * a * d * n + 3 * d ^ 2 * n ^ 2) + 6 * (a + d * n) ^ 2 + 6 * a * d + 6 * d ^ 2 * n + 3 * d ^ 2 := by ring
+      _ = 6 * (n + 1) * a ^ 2 + 6 * a * d * (n + 1) ^ 2 + 2 * d ^ 2 * (n + 1) ^ 3 + d ^ 2 * (n + 1) := by rw [ih]; ring
+
++ recurrence.arithmetic_shift.nat (s : ℕ → ℕ → ℕ) (d : ℕ)
+    (base : ∀ a, s 0 a = 0) (step : ∀ i a, s (i + 1) a = a + s i (a + d)) (n : ℕ) : ∀ a : ℕ,
+    2 * s n a + d * n = n * (2 * a + d * n)
+  induction n with a n ih a
+  · rw [base]; ring
+  · rw [succ_eq_add_one.nat, step]
+    calc
+      2 * (a + s n (a + d)) + d * (n + 1) = (2 * s n (a + d) + d * n) + 2 * a + d := by ring
+      _ = (n + 1) * (2 * a + d * (n + 1)) := by rw [ih (a + d)]; ring
+
++ recurrence.square_shift.nat (s : ℕ → ℕ → ℕ) (d : ℕ)
+    (base : ∀ a, s 0 a = 0) (step : ∀ i a, s (i + 1) a = a ^ 2 + s i (a + d)) (n : ℕ) : ∀ a : ℕ,
+    6 * s n a + 6 * a * d * n + 3 * d ^ 2 * n ^ 2 = 6 * n * a ^ 2 + 6 * a * d * n ^ 2 + 2 * d ^ 2 * n ^ 3 + d ^ 2 * n
+  induction n with a n ih a
+  · rw [base]; ring
+  · rw [succ_eq_add_one.nat, step]
+    calc
+      6 * (a ^ 2 + s n (a + d)) + 6 * a * d * (n + 1) + 3 * d ^ 2 * (n + 1) ^ 2 = (6 * s n (a + d) + 6 * (a + d) * d * n + 3 * d ^ 2 * n ^ 2) + 6 * a ^ 2 + 6 * a * d + 3 * d ^ 2 := by ring
+      _ = 6 * (n + 1) * a ^ 2 + 6 * a * d * (n + 1) ^ 2 + 2 * d ^ 2 * (n + 1) ^ 3 + d ^ 2 * (n + 1) := by rw [ih (a + d)]; ring
+
++ sum_below.index.real (n : ℕ) : (∑ i < n, (i : ℝ)) = (n : ℝ) * ((n : ℝ) - 1) / 2
+  simpa using sum_below.arithmetic.real 0 1 n
+
++ sum_below.index_squares.real (n : ℕ) :
+    (∑ i < n, (i : ℝ) * (i : ℝ)) = (n : ℝ) * ((n : ℝ) - 1) * (2 * (n : ℝ) - 1) / 6
+  simpa [pow_two.real] using sum_below.arithmetic_squares.real 0 1 n
+
++ sum_below.index.rat (n : ℕ) : (∑ i < n, (i : ℚ)) = (n : ℚ) * ((n : ℚ) - 1) / 2
+  simpa using sum_below.arithmetic.rat 0 1 n
+
++ sum_below.index_squares.rat (n : ℕ) :
+    (∑ i < n, (i : ℚ) * (i : ℚ)) = (n : ℚ) * ((n : ℚ) - 1) * (2 * (n : ℚ) - 1) / 6
+  simpa [pow_two.rat] using sum_below.arithmetic_squares.rat 0 1 n

@@ -1,0 +1,9 @@
++ false_simp (p : Prop) (h : False) : p
+  simp at h
++ false_norm_num (p : Prop) (h : False) : p
+  norm_num at h
++ false_all (p : Prop) (h : False) : p
+  simp at *
++ true_kept (p : Prop) (h : True) (hp : p) : p
+  simp at h
+  exact hp

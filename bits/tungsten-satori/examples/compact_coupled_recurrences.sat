@@ -1,0 +1,17 @@
+import recurrence
+
+-> half : ℕ → ℚ
+  | 0 => 1
+  | n+1 => half n/2
+-> odd_weight : ℕ → ℚ
+  | 0 => 1
+  | n+1 => odd_weight n+2
+-> total : ℕ → ℚ
+  | 0 => 0
+  | n+1 => total n+odd_weight n*half n
+
++ closed (n : ℕ) : total n = 6-(2*odd_weight n+4)*half n := by auto
+
++ parallel (f g : ℕ → ℝ) (c : ℝ) (n : ℕ)
+    (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+c)
+    (gs : ∀ i, g (i+1) = g i+c) : f n = g n := by auto

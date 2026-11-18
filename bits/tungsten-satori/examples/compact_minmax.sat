@@ -1,0 +1,16 @@
+import arith
+
++ interval (a b c : ℤ) (ha : c ≤ a) (hb : c ≤ b) : c ≤ min a b
+  auto
+
++ clamp (lo hi x : ℝ) (h : lo ≤ hi) : lo ≤ max lo (min hi x) ∧ max lo (min hi x) ≤ hi
+  auto
+
++ scale (a b c d k : ℚ) (hk : 0 ≤ k) (ha : c ≤ k*a) (hb : d ≤ k*b) : max c d ≤ k*max a b
+  auto
+
++ endpoints (a b c : ℕ) (h : max a b < c) : a < c ∧ b < c
+  auto
+
++ pointwise (f g : ℕ → ℝ) (c : ℝ) (h : ∀ i, max (f i) (g i) ≤ c) (n : ℕ) : f n ≤ c
+  auto

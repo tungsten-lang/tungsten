@@ -1,0 +1,25 @@
+import arith
+
++ scale_terms (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i = c * g i) :
+    (∑ i < n, f i) = c * (∑ i < n, g i)
+  auto
+
++ add_terms (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) :
+    (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i)
+  auto
+
++ distribute (f : ℕ → ℚ) (a b : ℚ) (n : ℕ) :
+    (∑ i < n, f i * (a+b)) = (∑ i < n, f i * a) + (∑ i < n, f i * b)
+  auto
+
++ expand_terms (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i = c * g i) :
+    c * (∑ i < n, g i) = (∑ i < n, f i)
+  auto
+
++ subtract_terms (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i-k i) :
+    (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ distribute_difference (f g k : ℕ → ℝ) (n : ℕ) :
+    (∑ i < n, f i*(g i-k i)) = (∑ i < n, f i*g i) - (∑ i < n, f i*k i)
+  auto

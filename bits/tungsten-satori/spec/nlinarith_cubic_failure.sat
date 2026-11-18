@@ -1,0 +1,8 @@
++ weak_strict (a b c : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hc : 0 ≤ c) : 0 < a*b*c := by nlinarith
++ missing_factor (a b c : ℝ) (ha : 0 < a) (hb : 0 < b) : 0 < a*b*c := by nlinarith
++ wrong_sign (a b c : ℤ) (ha : 0 < a) (hb : 0 < b) (hc : c < 0) : 0 < a*b*c := by nlinarith
++ unrelated_equality (x y a b : ℚ) (e : x = y) (hx : 0 < x) (ha : 0 < a) : 0 < y*a*b := by nlinarith
++ zero_factor (a b : ℚ) (ha : 0 < a) (hb : 0 < b) : 0 < a*b*0 := by nlinarith
++ weak_chord (P X S Y c Fx Gy : ℚ) (hP : 0 < P) (hPX : P ≤ X) (hY : 0 ≤ Y) (hYS : Y ≤ S) (hS : 0 < S) (hc : 1 < c)
+    (hF : (c - 1) * X ≤ (Fx - 1) * P) (hG : (Gy - 1) * S ≤ (c - 1) * Y) (heq : Fx = Gy) : False
+  nlinarith

@@ -1,0 +1,187 @@
+import recurrence
+
+-> line.real : ℕ → ℝ
+  | 0 => 5
+  | i + 1 => line.real i + (-2)
+-> curve.real : ℕ → ℝ
+  | 0 => 7
+  | i + 1 => curve.real i + 2 * (i : ℝ) + 4
+-> cube.real : ℕ → ℝ
+  | 0 => 3
+  | i + 1 => cube.real i + (-3) * (i : ℝ) * (i : ℝ) + (-3) * (i : ℝ) + (-1)
+-> flat.real : ℕ → ℝ
+  | 0 => 9
+  | i + 1 => flat.real i
+-> line.rat : ℕ → ℚ
+  | 0 => 5
+  | i + 1 => line.rat i + (-2)
+-> curve.rat : ℕ → ℚ
+  | 0 => 7
+  | i + 1 => curve.rat i + 2 * (i : ℚ) + 4
+-> cube.rat : ℕ → ℚ
+  | 0 => 3
+  | i + 1 => cube.rat i + (-3) * (i : ℚ) * (i : ℚ) + (-3) * (i : ℚ) + (-1)
+-> flat.rat : ℕ → ℚ
+  | 0 => 9
+  | i + 1 => flat.rat i
+-> line.int : ℕ → ℤ
+  | 0 => 5
+  | i + 1 => line.int i + (-2)
+-> curve.int : ℕ → ℤ
+  | 0 => 7
+  | i + 1 => curve.int i + 2 * (i : ℤ) + 4
+-> cube.int : ℕ → ℤ
+  | 0 => 3
+  | i + 1 => cube.int i + (-3) * (i : ℤ) * (i : ℤ) + (-3) * (i : ℤ) + (-1)
+-> flat.int : ℕ → ℤ
+  | 0 => 9
+  | i + 1 => flat.int i
+-> line.nat : ℕ → ℕ
+  | 0 => 5
+  | i + 1 => line.nat i + 2
+-> curve.nat : ℕ → ℕ
+  | 0 => 7
+  | i + 1 => curve.nat i + 2 * i + 4
+-> cube.nat : ℕ → ℕ
+  | 0 => 3
+  | i + 1 => cube.nat i + 3 * i * i + 3 * i + 1
+-> flat.nat : ℕ → ℕ
+  | 0 => 9
+  | i + 1 => flat.nat i
+-> plen : ℕ → ℕ
+  | 0 => 0
+  | j + 1 => plen j + 2 * j + 4
+-> cr : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => cr n + 1
+-> kr : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => kr n + 2 * cr n + 3
+-> cexp : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => cexp n + 1
+-> kexp : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => kexp n + 2 * cexp n + 3
+-> sj : ℕ → ℤ
+  | 0 => 0
+  | k + 1 => sj k + (k : ℤ)
+-> sj2 : ℕ → ℤ
+  | 0 => 0
+  | k + 1 => sj2 k + (k : ℤ) * (k : ℤ)
+
++ real_missing_base (f : ℕ → ℝ) (n : ℕ) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℝ) + 3) :
+    f n = 1 * (n : ℝ) * (n : ℝ) + 2 * (n : ℝ) + 5
+  auto
++ real_wrong_linear (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2) : f n = 5 + (n : ℝ) * 3
+  auto
++ real_wrong_quadratic (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℝ) + 2) :
+    f n = 1 * (n : ℝ) * (n : ℝ) + 2 * (n : ℝ) + 5
+  auto
++ real_wrong_cubic (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 3 * (i : ℝ) * (i : ℝ) + 1) :
+    f n = 1 * (n : ℝ) * (n : ℝ) * (n : ℝ) + 0 * (n : ℝ) * (n : ℝ) + 0 * (n : ℝ) + 0
+  auto
+
++ rat_missing_base (f : ℕ → ℚ) (n : ℕ) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℚ) + 3) :
+    f n = 1 * (n : ℚ) * (n : ℚ) + 2 * (n : ℚ) + 5
+  auto
++ rat_wrong_linear (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2) : f n = 5 + (n : ℚ) * 3
+  auto
++ rat_wrong_quadratic (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℚ) + 2) :
+    f n = 1 * (n : ℚ) * (n : ℚ) + 2 * (n : ℚ) + 5
+  auto
++ rat_wrong_cubic (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 3 * (i : ℚ) * (i : ℚ) + 1) :
+    f n = 1 * (n : ℚ) * (n : ℚ) * (n : ℚ) + 0 * (n : ℚ) * (n : ℚ) + 0 * (n : ℚ) + 0
+  auto
+
++ int_missing_base (f : ℕ → ℤ) (n : ℕ) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℤ) + 3) :
+    f n = 1 * (n : ℤ) * (n : ℤ) + 2 * (n : ℤ) + 5
+  auto
++ int_wrong_linear (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2) : f n = 5 + (n : ℤ) * 3
+  auto
++ int_wrong_quadratic (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℤ) + 2) :
+    f n = 1 * (n : ℤ) * (n : ℤ) + 2 * (n : ℤ) + 5
+  auto
++ int_wrong_cubic (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 3 * (i : ℤ) * (i : ℤ) + 1) :
+    f n = 1 * (n : ℤ) * (n : ℤ) * (n : ℤ) + 0 * (n : ℤ) * (n : ℤ) + 0 * (n : ℤ) + 0
+  auto
+
++ nat_missing_base (f : ℕ → ℕ) (n : ℕ) (step : ∀ i, f (i + 1) = f i + 2 * i + 3) :
+    f n = 1 * n * n + 2 * n + 5
+  auto
++ nat_wrong_linear (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2) : f n = 5 + n * 3
+  auto
++ nat_wrong_quadratic (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2 * i + 2) :
+    f n = 1 * n * n + 2 * n + 5
+  auto
++ nat_wrong_cubic (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 3 * i * i + 1) :
+    f n = 1 * n * n * n + 0 * n * n + 0 * n + 0
+  auto
+
++ counter_wrong_base (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i + 1) = f i + 1) : f n = n
+  auto
++ counter_wrong_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 2) : f n = n
+  auto
+
++ nat_missing_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 7) : f n = n^2+3*n+7
+  auto
+
++ nat_wrong_index (f : ℕ → ℕ) (n m : ℕ) (base : f 0 = 7) (step : ∀ i, f (i+1) = f i+2*i+4) : f m = n^2+3*n+7
+  auto
+
++ nat_point_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 7) (step : f (n+1) = f n+2*n+4) : f n = n^2+3*n+7
+  auto
+
++ nat_wrong_base (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 8) (step : ∀ i, f (i+1) = f i+2*i+4) : f n = n^2+3*n+7
+  auto
+
++ nat_wrong_power (n : ℕ) : curve.nat n = n^4+3*n+7
+  auto
+
++ int_missing_step (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 7) : f n = (n : ℤ)^2+3*(n : ℤ)+7
+  auto
+
++ int_wrong_index (f : ℕ → ℤ) (n m : ℕ) (base : f 0 = 7) (step : ∀ i, f (i+1) = f i+2*(i : ℤ)+4) : f m = (n : ℤ)^2+3*(n : ℤ)+7
+  auto
+
++ int_point_step (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 7) (step : f (n+1) = f n+2*(n : ℤ)+4) : f n = (n : ℤ)^2+3*(n : ℤ)+7
+  auto
+
++ int_wrong_base (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 8) (step : ∀ i, f (i+1) = f i+2*(i : ℤ)+4) : f n = (n : ℤ)^2+3*(n : ℤ)+7
+  auto
+
++ int_wrong_power (n : ℕ) : curve.int n = (n : ℤ)^4+3*(n : ℤ)+7
+  auto
+
++ rat_missing_step (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 7) : f n = (n : ℚ)^2+3*(n : ℚ)+7
+  auto
+
++ rat_wrong_index (f : ℕ → ℚ) (n m : ℕ) (base : f 0 = 7) (step : ∀ i, f (i+1) = f i+2*(i : ℚ)+4) : f m = (n : ℚ)^2+3*(n : ℚ)+7
+  auto
+
++ rat_point_step (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 7) (step : f (n+1) = f n+2*(n : ℚ)+4) : f n = (n : ℚ)^2+3*(n : ℚ)+7
+  auto
+
++ rat_wrong_base (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 8) (step : ∀ i, f (i+1) = f i+2*(i : ℚ)+4) : f n = (n : ℚ)^2+3*(n : ℚ)+7
+  auto
+
++ rat_wrong_power (n : ℕ) : curve.rat n = (n : ℚ)^4+3*(n : ℚ)+7
+  auto
+
++ real_missing_step (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 7) : f n = (n : ℝ)^2+3*(n : ℝ)+7
+  auto
+
++ real_wrong_index (f : ℕ → ℝ) (n m : ℕ) (base : f 0 = 7) (step : ∀ i, f (i+1) = f i+2*(i : ℝ)+4) : f m = (n : ℝ)^2+3*(n : ℝ)+7
+  auto
+
++ real_point_step (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 7) (step : f (n+1) = f n+2*(n : ℝ)+4) : f n = (n : ℝ)^2+3*(n : ℝ)+7
+  auto
+
++ real_wrong_base (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 8) (step : ∀ i, f (i+1) = f i+2*(i : ℝ)+4) : f n = (n : ℝ)^2+3*(n : ℝ)+7
+  auto
+
++ real_wrong_power (n : ℕ) : curve.real n = (n : ℝ)^4+3*(n : ℝ)+7
+  auto
+
++ nat_truncated (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = f i+1) : f n = n-1
+  auto

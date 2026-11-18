@@ -1,0 +1,9 @@
+import arith
++ min_abs_identity (x y : ℝ) : 2 * min x y + |x - y| = x + y := two_min_add_abs.real x y
++ max_abs_identity (x y : ℝ) : 2 * max x y - |x - y| = x + y := two_max_sub_abs.real x y
++ rational_distance (x y : ℚ) : max x y - min x y = |x - y| := max_sub_min_eq_abs.rat x y
++ integer_distance (x y : ℤ) : max x y - min x y = |x - y| := max_sub_min_eq_abs.int x y
++ equal_endpoints (x : ℝ) : max x x - min x x = |x - x| := max_sub_min_eq_abs.real x x
++ false_sign_counterexample : ¬ (2 * min (-3 : ℤ) 2 - |(-3 : ℤ) - 2| = (-3 : ℤ) + 2) := by decide
+#axioms min_abs_identity
+#axioms integer_distance

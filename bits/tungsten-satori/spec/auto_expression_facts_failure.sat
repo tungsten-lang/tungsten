@@ -1,0 +1,109 @@
+import arith
+
++ nat_missing_guard (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ nat_closed_guard (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j ≤ n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ nat_wrong_index (f : ℕ → ℕ) (n j k : ℕ) (v : ℕ) (hj : j < n) (h : f k+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ nat_wrong_scale (f : ℕ → ℕ) (c v : ℕ) (n : ℕ) (h : c*(∑ i < n, f i) = v) : (∑ i < n, (c+1)*f i)+1 = v+1
+  auto
+
++ nat_wrong_sum (f g : ℕ → ℕ) (n : ℕ) (v : ℕ) (h : (∑ i < n, f i)+(∑ i < n, g i) = v) : (∑ i < n, f i+f i)+1 = v+1
+  auto
+
++ nat_weak_strict (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j < n) (h : f j ≤ v) : (∑ i < n, f i*(if i=j then 1 else 0))+1 < v+1
+  auto
+
++ nat_reversed_outside (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j ≤ n) : (∑ i < n, f i*(if i=j then 1 else 0))+v = v
+  auto
+
++ nat_conditional_leak (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (p : Prop) (hj : p → j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ nat_branch_leak (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (p : Prop) (hj : j < n ∨ p) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ int_missing_guard (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ int_closed_guard (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j ≤ n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ int_wrong_index (f : ℕ → ℤ) (n j k : ℕ) (v : ℤ) (hj : j < n) (h : f k+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ int_wrong_scale (f : ℕ → ℤ) (c v : ℤ) (n : ℕ) (h : c*(∑ i < n, f i) = v) : (∑ i < n, (c+1)*f i)+1 = v+1
+  auto
+
++ int_wrong_sum (f g : ℕ → ℤ) (n : ℕ) (v : ℤ) (h : (∑ i < n, f i)+(∑ i < n, g i) = v) : (∑ i < n, f i+f i)+1 = v+1
+  auto
+
++ int_weak_strict (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j < n) (h : f j ≤ v) : (∑ i < n, f i*(if i=j then 1 else 0))+1 < v+1
+  auto
+
++ int_reversed_outside (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j ≤ n) : (∑ i < n, f i*(if i=j then 1 else 0))+v = v
+  auto
+
++ int_conditional_leak (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (p : Prop) (hj : p → j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ int_branch_leak (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (p : Prop) (hj : j < n ∨ p) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ rat_missing_guard (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ rat_closed_guard (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j ≤ n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ rat_wrong_index (f : ℕ → ℚ) (n j k : ℕ) (v : ℚ) (hj : j < n) (h : f k+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ rat_wrong_scale (f : ℕ → ℚ) (c v : ℚ) (n : ℕ) (h : c*(∑ i < n, f i) = v) : (∑ i < n, (c+1)*f i)+1 = v+1
+  auto
+
++ rat_wrong_sum (f g : ℕ → ℚ) (n : ℕ) (v : ℚ) (h : (∑ i < n, f i)+(∑ i < n, g i) = v) : (∑ i < n, f i+f i)+1 = v+1
+  auto
+
++ rat_weak_strict (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j < n) (h : f j ≤ v) : (∑ i < n, f i*(if i=j then 1 else 0))+1 < v+1
+  auto
+
++ rat_reversed_outside (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j ≤ n) : (∑ i < n, f i*(if i=j then 1 else 0))+v = v
+  auto
+
++ rat_conditional_leak (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (p : Prop) (hj : p → j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ rat_branch_leak (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (p : Prop) (hj : j < n ∨ p) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ real_missing_guard (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ real_closed_guard (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j ≤ n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ real_wrong_index (f : ℕ → ℝ) (n j k : ℕ) (v : ℝ) (hj : j < n) (h : f k+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ real_wrong_scale (f : ℕ → ℝ) (c v : ℝ) (n : ℕ) (h : c*(∑ i < n, f i) = v) : (∑ i < n, (c+1)*f i)+1 = v+1
+  auto
+
++ real_wrong_sum (f g : ℕ → ℝ) (n : ℕ) (v : ℝ) (h : (∑ i < n, f i)+(∑ i < n, g i) = v) : (∑ i < n, f i+f i)+1 = v+1
+  auto
+
++ real_weak_strict (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j < n) (h : f j ≤ v) : (∑ i < n, f i*(if i=j then 1 else 0))+1 < v+1
+  auto
+
++ real_reversed_outside (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j ≤ n) : (∑ i < n, f i*(if i=j then 1 else 0))+v = v
+  auto
+
++ real_conditional_leak (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (p : Prop) (hj : p → j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto
+
++ real_branch_leak (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (p : Prop) (hj : j < n ∨ p) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  auto

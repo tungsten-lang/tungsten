@@ -1,0 +1,71 @@
++ l_no_step (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β)  : f (list.foldl step xs s) = list.foldl update xs (f s) := by auto
+
++ l_point_step (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (h : ∀ x, f (step x s) = update x (f s)) : f (list.foldl step xs s) = list.foldl update xs (f s) := by auto
+
++ l_wrong_update (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (other : α → γ → γ) (h : ∀ x s, f (step x s) = other x (f s)) : f (list.foldl step xs s) = list.foldl update xs (f s) := by auto
+
++ l_missing_guard (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (p : α → Prop) (h : ∀ x, p x → ∀ s, f (step x s) = update x (f s)) : f (list.foldl step xs s) = list.foldl update xs (f s) := by auto
+
++ l_wrong_initial (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (t : β) (h : ∀ x s, f (step x s) = update x (f s)) : f (list.foldl step xs s) = list.foldl update xs (f t) := by auto
+
++ l_missing_second (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (g : β → γ) (h : ∀ x s, f (step x s) = update x (f s)) : f (list.foldl step xs s) = list.foldl update xs (f s) ∧ g (list.foldl step xs s) = list.foldl update xs (g s) := by auto
+
++ r_no_step (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β)  : f (list.foldr step xs s) = list.foldr update xs (f s) := by auto
+
++ r_point_step (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (h : ∀ x, f (step x s) = update x (f s)) : f (list.foldr step xs s) = list.foldr update xs (f s) := by auto
+
++ r_wrong_update (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (other : α → γ → γ) (h : ∀ x s, f (step x s) = other x (f s)) : f (list.foldr step xs s) = list.foldr update xs (f s) := by auto
+
++ r_missing_guard (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (p : α → Prop) (h : ∀ x, p x → ∀ s, f (step x s) = update x (f s)) : f (list.foldr step xs s) = list.foldr update xs (f s) := by auto
+
++ r_wrong_initial (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (t : β) (h : ∀ x s, f (step x s) = update x (f s)) : f (list.foldr step xs s) = list.foldr update xs (f t) := by auto
+
++ r_missing_second (step : α → β → β) (update : α → γ → γ) (f : β → γ) (xs : list α) (s : β) (g : β → γ) (h : ∀ x s, f (step x s) = update x (f s)) : f (list.foldr step xs s) = list.foldr update xs (f s) ∧ g (list.foldr step xs s) = list.foldr update xs (g s) := by auto
+
+-> accumulate.nat : list ℕ → ℕ → ℕ
+  | [], s => s
+  | x :: xs, s => accumulate.nat xs (s+x)
+-> subtotal.nat : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => x+subtotal.nat xs
++ nat_missing_initial (xs : list ℕ) (s : ℕ) : accumulate.nat xs s = subtotal.nat xs := by auto
++ nat_wrong_scale (xs : list ℕ) (s : ℕ) : accumulate.nat xs s = s+2*subtotal.nat xs := by auto
++ nat_wrong_coordinate (xs : list ℕ) (s : ℕ) : accumulate.nat xs s = s+subtotal.nat xs ∧ s+subtotal.nat xs+1 = accumulate.nat xs s := by auto
++ nat_wrong_base (xs : list ℕ) (s : ℕ) : accumulate.nat xs s = s+subtotal.nat xs+1 := by auto
++ nat_wrong_state (xs : list ℕ) (s t : ℕ) : accumulate.nat xs s = t+subtotal.nat xs := by auto
+
+-> accumulate.int : list ℤ → ℤ → ℤ
+  | [], s => s
+  | x :: xs, s => accumulate.int xs (s+x)
+-> subtotal.int : list ℤ → ℤ
+  | [] => 0
+  | x :: xs => x+subtotal.int xs
++ int_missing_initial (xs : list ℤ) (s : ℤ) : accumulate.int xs s = subtotal.int xs := by auto
++ int_wrong_scale (xs : list ℤ) (s : ℤ) : accumulate.int xs s = s+2*subtotal.int xs := by auto
++ int_wrong_coordinate (xs : list ℤ) (s : ℤ) : accumulate.int xs s = s+subtotal.int xs ∧ s+subtotal.int xs+1 = accumulate.int xs s := by auto
++ int_wrong_base (xs : list ℤ) (s : ℤ) : accumulate.int xs s = s+subtotal.int xs+1 := by auto
++ int_wrong_state (xs : list ℤ) (s t : ℤ) : accumulate.int xs s = t+subtotal.int xs := by auto
+
+-> accumulate.rat : list ℚ → ℚ → ℚ
+  | [], s => s
+  | x :: xs, s => accumulate.rat xs (s+x)
+-> subtotal.rat : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => x+subtotal.rat xs
++ rat_missing_initial (xs : list ℚ) (s : ℚ) : accumulate.rat xs s = subtotal.rat xs := by auto
++ rat_wrong_scale (xs : list ℚ) (s : ℚ) : accumulate.rat xs s = s+2*subtotal.rat xs := by auto
++ rat_wrong_coordinate (xs : list ℚ) (s : ℚ) : accumulate.rat xs s = s+subtotal.rat xs ∧ s+subtotal.rat xs+1 = accumulate.rat xs s := by auto
++ rat_wrong_base (xs : list ℚ) (s : ℚ) : accumulate.rat xs s = s+subtotal.rat xs+1 := by auto
++ rat_wrong_state (xs : list ℚ) (s t : ℚ) : accumulate.rat xs s = t+subtotal.rat xs := by auto
+
+-> accumulate.real : list ℝ → ℝ → ℝ
+  | [], s => s
+  | x :: xs, s => accumulate.real xs (s+x)
+-> subtotal.real : list ℝ → ℝ
+  | [] => 0
+  | x :: xs => x+subtotal.real xs
++ real_missing_initial (xs : list ℝ) (s : ℝ) : accumulate.real xs s = subtotal.real xs := by auto
++ real_wrong_scale (xs : list ℝ) (s : ℝ) : accumulate.real xs s = s+2*subtotal.real xs := by auto
++ real_wrong_coordinate (xs : list ℝ) (s : ℝ) : accumulate.real xs s = s+subtotal.real xs ∧ s+subtotal.real xs+1 = accumulate.real xs s := by auto
++ real_wrong_base (xs : list ℝ) (s : ℝ) : accumulate.real xs s = s+subtotal.real xs+1 := by auto
++ real_wrong_state (xs : list ℝ) (s t : ℝ) : accumulate.real xs s = t+subtotal.real xs := by auto

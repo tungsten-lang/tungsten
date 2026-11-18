@@ -1,0 +1,29 @@
+import auto_head_aliases
+
+opaque unknown_norm : ℝ → ℝ → ℝ
+-> offset_norm (a b : ℝ) : ℝ := plane_norm a b - 1
+
++ wrong_vector (n : ℕ) (f g : ℕ → ℝ) : norm n (fun i => f i+g i) ≤ norm n f + norm n f
+  auto
+
++ missing_weight_sign (n : ℕ) (w f g : ℕ → ℝ) :
+    weighted_norm n w (fun i => f i+g i) ≤ weighted_norm n w f + weighted_norm n w g
+  auto
+
++ strict_triangle (a b c d : ℝ) : plane_norm (a+c) (b+d) < norm_total a b c d
+  auto
+
++ wrong_direction (a b c d : ℝ) : norm_total a b c d ≤ plane_norm (a+c) (b+d)
+  auto
+
++ misleading_definition (a b c d : ℝ) : offset_norm (a+c) (b+d) ≤ offset_norm a b + offset_norm c d
+  auto
+
++ opaque_definition (a b c d : ℝ) : unknown_norm (a+c) (b+d) ≤ unknown_norm a b + unknown_norm c d
+  auto
+
++ local_shadow (plane_norm : ℝ → ℝ → ℝ) (a b c d : ℝ) : plane_norm (a+c) (b+d) ≤ plane_norm a b + plane_norm c d
+  auto
+
++ false_alias_equality (a b : ℝ) : plane_norm a b = a+b
+  auto

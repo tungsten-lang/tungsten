@@ -1,0 +1,5 @@
+-> area (x y : ℚ) : ℚ := x*y
+-> square (x : ℚ) : ℚ := area x x
+
++ square_sum (x y : ℚ) : square (x+y) = square x+2*area x y+square y
+  ring

@@ -1,0 +1,61 @@
+import arith
+
++ nat_scale_missing (f g : ℕ → ℕ) (c : ℕ) (n : ℕ) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ nat_scale_outside (f g : ℕ → ℕ) (c : ℕ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n+1, f i) = c * (∑ i < n+1, g i) := by auto
+
++ nat_wrong_scalar (f g : ℕ → ℕ) (c : ℕ) (n : ℕ) (d : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n, f i) = d * (∑ i < n, g i) := by auto
+
++ nat_scale_cycle (f g : ℕ → ℕ) (c : ℕ) (n : ℕ) (h : (∑ i < n, f i) = c * (∑ i < n, g i) → ∀ i < n, f i = c * g i) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ nat_add_missing (f g k : ℕ → ℕ) (n : ℕ) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ nat_add_outside (f g k : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n+1, f i) = (∑ i < n+1, g i) + (∑ i < n+1, k i) := by auto
+
++ nat_wrong_summand (f g k : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, g i) := by auto
+
++ int_scale_missing (f g : ℕ → ℤ) (c : ℤ) (n : ℕ) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ int_scale_outside (f g : ℕ → ℤ) (c : ℤ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n+1, f i) = c * (∑ i < n+1, g i) := by auto
+
++ int_wrong_scalar (f g : ℕ → ℤ) (c : ℤ) (n : ℕ) (d : ℤ) (h : ∀ i < n, f i = c * g i) : (∑ i < n, f i) = d * (∑ i < n, g i) := by auto
+
++ int_scale_cycle (f g : ℕ → ℤ) (c : ℤ) (n : ℕ) (h : (∑ i < n, f i) = c * (∑ i < n, g i) → ∀ i < n, f i = c * g i) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ int_add_missing (f g k : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ int_add_outside (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n+1, f i) = (∑ i < n+1, g i) + (∑ i < n+1, k i) := by auto
+
++ int_wrong_summand (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, g i) := by auto
+
++ rat_scale_missing (f g : ℕ → ℚ) (c : ℚ) (n : ℕ) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ rat_scale_outside (f g : ℕ → ℚ) (c : ℚ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n+1, f i) = c * (∑ i < n+1, g i) := by auto
+
++ rat_wrong_scalar (f g : ℕ → ℚ) (c : ℚ) (n : ℕ) (d : ℚ) (h : ∀ i < n, f i = c * g i) : (∑ i < n, f i) = d * (∑ i < n, g i) := by auto
+
++ rat_scale_cycle (f g : ℕ → ℚ) (c : ℚ) (n : ℕ) (h : (∑ i < n, f i) = c * (∑ i < n, g i) → ∀ i < n, f i = c * g i) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ rat_add_missing (f g k : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ rat_add_outside (f g k : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n+1, f i) = (∑ i < n+1, g i) + (∑ i < n+1, k i) := by auto
+
++ rat_wrong_summand (f g k : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, g i) := by auto
+
++ real_scale_missing (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ real_scale_outside (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n+1, f i) = c * (∑ i < n+1, g i) := by auto
+
++ real_wrong_scalar (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (d : ℝ) (h : ∀ i < n, f i = c * g i) : (∑ i < n, f i) = d * (∑ i < n, g i) := by auto
+
++ real_scale_cycle (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : (∑ i < n, f i) = c * (∑ i < n, g i) → ∀ i < n, f i = c * g i) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ real_add_missing (f g k : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto
+
++ real_add_outside (f g k : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n+1, f i) = (∑ i < n+1, g i) + (∑ i < n+1, k i) := by auto
+
++ real_wrong_summand (f g k : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, g i) := by auto
+
++ generic_scale (f g : ℕ → α) (c : α) (n : ℕ) (h : ∀ i < n, f i = c * g i) : (∑ i < n, f i) = c * (∑ i < n, g i) := by auto
+
++ generic_add (f g k : ℕ → α) (n : ℕ) (h : ∀ i < n, f i = g i + k i) : (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i) := by auto

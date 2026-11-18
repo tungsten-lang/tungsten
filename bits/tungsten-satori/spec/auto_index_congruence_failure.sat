@@ -1,0 +1,49 @@
+import arith
+
++ wrong_shift (f : ℕ → α) (s i : ℕ) : f (s+(i+1)) = f ((s+2)+i)
+  auto
+
++ wrong_function (f g : ℕ → α) (s i : ℕ) : f (s+(i+1)) = g ((s+1)+i)
+  auto
+
++ one_bound (f : ℕ → α) (i j : ℕ) (h : i ≤ j) : f i = f j
+  auto
+
++ wrong_balance (f : ℤ → α) (i j : ℤ) (h : i+3 = j+2) : f (i+2) = f j
+  auto
+
++ missing_argument (f : ℕ → ℕ → α) (s i x y : ℕ) : f (s+(i+1)) x = f ((s+1)+i) y
+  auto
+
++ missing_guard (f : ℕ → α) (i j : ℕ) : f (i-j+j) = f i
+  auto
+
++ truncated_subtraction (f : ℕ → α) : f (0-1+1) = f 0
+  auto
+
++ ordered_images (f : ℕ → ℚ) (i j : ℕ) (h : i ≤ j) : f i ≤ f j
+  auto
+
++ strict_from_weak (f : ℕ → ℝ) (s i : ℕ) (h : f ((s+1)+i) ≤ 7) : f (s+(i+1))+1 < 8
+  auto
+
++ branch_leak (f : ℕ → ℚ) (i j : ℕ) (p : Prop) (e : i+1 = j ∨ p) (h : f j ≤ 7) : f (i+1)+1 ≤ 8
+  auto
+
++ unproved_condition (f : ℕ → ℚ) (i j : ℕ) (p : Prop) (e : p → i+1 = j) (h : f j ≤ 7) : f (i+1)+1 ≤ 8
+  auto
+
++ wrong_nested (f : ℕ → α) (g h : ℕ → ℕ) (s i : ℕ) : f (g (s+(i+1))) = f (h ((s+1)+i))
+  auto
+
++ missing_index_fact : indexed (first_index+1) = indexed second_index
+  auto
+
++ int_wrong_shift (f : ℤ → α) (s i : ℤ) : f (s+(i+1)) = f ((s+2)+i)
+  auto
+
++ rat_wrong_shift (f : ℚ → α) (s i : ℚ) : f (s+(i+1)) = f ((s+2)+i)
+  auto
+
++ real_wrong_shift (f : ℝ → α) (s i : ℝ) : f (s+(i+1)) = f ((s+2)+i)
+  auto

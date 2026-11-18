@@ -1,0 +1,35 @@
+import quadratic
+
++ remove_square (a b : ℝ) (hb : 0 ≤ b) (h : a * a ≤ b * b) : a ≤ b := le_of_mul_self_le_mul_self.real a b hb h
++ remove_strict_square (a b : ℚ) (hb : 0 ≤ b) (h : a * a < b * b) : a < b := lt_of_mul_self_lt_mul_self.rat a b hb h
++ natural_square_order (a b : ℕ) : a * a ≤ b * b ↔ a ≤ b := mul_self_le_mul_self_iff.nat a b
++ signed_square_order (a b : ℤ) (ha : 0 ≤ a) (hb : 0 ≤ b) : a * a < b * b ↔ a < b := mul_self_lt_mul_self_iff.int a b ha hb
++ product_lower (c w a b : ℝ) (hw : 0 ≤ w) (hab : 0 ≤ a * b) (ha : c ≤ w * (a * a)) (hb : c ≤ w * (b * b)) : c ≤ w * (a * b) := le_mul_of_le_mul_self.real c w a b hw hab ha hb
++ product_upper (c w a b : ℚ) (hw : 0 ≤ w) (ha : w * (a * a) ≤ c) (hb : w * (b * b) ≤ c) : w * (a * b) ≤ c := mul_le_of_mul_self_le.rat c w a b hw ha hb
++ natural_product_lower (c w a b : ℕ) (ha : c ≤ w * (a * a)) (hb : c ≤ w * (b * b)) : c ≤ w * (a * b) := le_mul_of_le_mul_self.nat c w a b ha hb
++ natural_product_upper (c w a b : ℕ) (ha : w * (a * a) ≤ c) (hb : w * (b * b) ≤ c) : w * (a * b) ≤ c := mul_le_of_mul_self_le.nat c w a b ha hb
+
+-- The lower bound may be negative; the factors may both be negative.
++ negative_bound : (-3 : ℤ) ≤ 2 * (0 * -2)
+  apply le_mul_of_le_mul_self.int <;> decide
++ negative_factors : (4 : ℝ) ≤ 1 * (-2 * -3)
+  apply le_mul_of_le_mul_self.real <;> decide
++ opposite_factors_upper : (2 : ℚ) * (-2 * 3) ≤ 18
+  apply mul_le_of_mul_self_le.rat <;> decide
++ zero_weight (a b : ℝ) : 0 * (a * b) ≤ 0
+  apply mul_le_of_mul_self_le.real <;> nlinarith
++ negative_left_value : (-2 : ℝ) ≤ 3
+  apply le_of_mul_self_le_mul_self.real <;> decide
+
+#axioms remove_square
+#axioms remove_strict_square
+#axioms natural_square_order
+#axioms signed_square_order
+#axioms product_lower
+#axioms product_upper
+#axioms natural_product_lower
+#axioms natural_product_upper
+#axioms negative_bound
+#axioms negative_factors
+#axioms opposite_factors_upper
+#axioms zero_weight

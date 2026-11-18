@@ -1,0 +1,65 @@
+import arith
+
++ nat_bilinear (f : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, f i j * v j)) = (∑ j < m, v j * (∑ i < n, u i * f i j)) := by auto
+
++ nat_left_weights (f : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, v j * f i j)) = (∑ j < m, v j * (∑ i < n, u i * f i j)) := by auto
+
++ nat_guarded (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ nat_reverse (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ j < m, v j * (∑ i < n, g j i)) = (∑ i < n, u i * (∑ j < m, f i j)) := by auto
+
++ nat_larger (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) (N M : ℕ) (h : ∀ i < N, ∀ j < M, u i * f i j = v j * g j i) (hn : n ≤ N) (hm : m ≤ M) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
+-> nat_row (f : ℕ → ℕ → ℕ) (v : ℕ → ℕ) (m i : ℕ) : ℕ := ∑ j < m, f i j * v j
+
+-> nat_col (f : ℕ → ℕ → ℕ) (u : ℕ → ℕ) (n j : ℕ) : ℕ := ∑ i < n, u i * f i j
+
++ nat_alias (f : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) : (∑ i < n, u i * nat_row f v m i) = (∑ j < m, v j * nat_col f u n j) := by auto
+
++ int_bilinear (f : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, f i j * v j)) = (∑ j < m, v j * (∑ i < n, u i * f i j)) := by auto
+
++ int_left_weights (f : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, v j * f i j)) = (∑ j < m, v j * (∑ i < n, u i * f i j)) := by auto
+
++ int_guarded (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ int_reverse (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ j < m, v j * (∑ i < n, g j i)) = (∑ i < n, u i * (∑ j < m, f i j)) := by auto
+
++ int_larger (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) (N M : ℕ) (h : ∀ i < N, ∀ j < M, u i * f i j = v j * g j i) (hn : n ≤ N) (hm : m ≤ M) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
+-> int_row (f : ℕ → ℕ → ℤ) (v : ℕ → ℤ) (m i : ℕ) : ℤ := ∑ j < m, f i j * v j
+
+-> int_col (f : ℕ → ℕ → ℤ) (u : ℕ → ℤ) (n j : ℕ) : ℤ := ∑ i < n, u i * f i j
+
++ int_alias (f : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) : (∑ i < n, u i * int_row f v m i) = (∑ j < m, v j * int_col f u n j) := by auto
+
++ rat_bilinear (f : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, f i j * v j)) = (∑ j < m, v j * (∑ i < n, u i * f i j)) := by auto
+
++ rat_left_weights (f : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, v j * f i j)) = (∑ j < m, v j * (∑ i < n, u i * f i j)) := by auto
+
++ rat_guarded (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ rat_reverse (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ j < m, v j * (∑ i < n, g j i)) = (∑ i < n, u i * (∑ j < m, f i j)) := by auto
+
++ rat_larger (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) (N M : ℕ) (h : ∀ i < N, ∀ j < M, u i * f i j = v j * g j i) (hn : n ≤ N) (hm : m ≤ M) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
+-> rat_row (f : ℕ → ℕ → ℚ) (v : ℕ → ℚ) (m i : ℕ) : ℚ := ∑ j < m, f i j * v j
+
+-> rat_col (f : ℕ → ℕ → ℚ) (u : ℕ → ℚ) (n j : ℕ) : ℚ := ∑ i < n, u i * f i j
+
++ rat_alias (f : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) : (∑ i < n, u i * rat_row f v m i) = (∑ j < m, v j * rat_col f u n j) := by auto
+
++ real_bilinear (f : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, f i j * v j)) = (∑ j < m, v j * (∑ i < n, u i * f i j)) := by auto
+
++ real_left_weights (f : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, v j * f i j)) = (∑ j < m, v j * (∑ i < n, u i * f i j)) := by auto
+
++ real_guarded (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ real_reverse (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ j < m, v j * (∑ i < n, g j i)) = (∑ i < n, u i * (∑ j < m, f i j)) := by auto
+
++ real_larger (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) (N M : ℕ) (h : ∀ i < N, ∀ j < M, u i * f i j = v j * g j i) (hn : n ≤ N) (hm : m ≤ M) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
+-> real_row (f : ℕ → ℕ → ℝ) (v : ℕ → ℝ) (m i : ℕ) : ℝ := ∑ j < m, f i j * v j
+
+-> real_col (f : ℕ → ℕ → ℝ) (u : ℕ → ℝ) (n j : ℕ) : ℝ := ∑ i < n, u i * f i j
+
++ real_alias (f : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) : (∑ i < n, u i * real_row f v m i) = (∑ j < m, v j * real_col f u n j) := by auto

@@ -1,0 +1,110 @@
+-- Finite geometric sums and bounds, without division or excluded rates.
+import arith
+
++ sum_below.geometric_step.real (r A : ℝ) (n : ℕ) :
+    (∑ i < n, (r - 1) * A * r ^ i) = A * (r ^ n - 1)
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, pow_succ.real]
+    ring
+
++ sum_below.arithmetic_geometric.real (r : ℝ) (n : ℕ) :
+    (∑ i < n, ((i : ℝ) + 1) * r ^ i) * (1 - r) ^ 2 = 1 - r ^ n * (1 + (n : ℝ) * (1 - r))
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, pow_succ.real, cast_succ.real]
+    linarith
+
++ sum_below.geometric_bound.real (f : ℕ → ℝ) (r A : ℝ) (n : ℕ)
+    (bound : ∀ i < n, f i ≤ (r - 1) * A * r ^ i) : sum_below n f ≤ A * (r ^ n - 1)
+  have h := sum_le.real f (fun i => (r - 1) * A * r ^ i) n bound
+  rw [sum_below.geometric_step.real] at h
+  exact h
+
++ sum_below.geometric_bound_add.real (f : ℕ → ℝ) (r s A B : ℝ) (n : ℕ)
+    (bound : ∀ i < n, f i ≤ (r - 1) * A * r ^ i + (s - 1) * B * s ^ i) :
+    sum_below n f ≤ A * (r ^ n - 1) + B * (s ^ n - 1)
+  have h := sum_le.real f (fun i => (r - 1) * A * r ^ i + (s - 1) * B * s ^ i) n bound
+  rw [sum_add.real, sum_below.geometric_step.real, sum_below.geometric_step.real] at h
+  exact h
+
++ sum_below.weighted_geometric_bound.real (f : ℕ → ℝ) (w r A B : ℝ) (n : ℕ) (weight : 0 ≤ w)
+    (bound : ∀ i < n, f i ≤ (w * r - 1) * A * r ^ i + (w - 1) * B) :
+    (∑ i < n, w ^ i * f i) ≤ A * ((w * r) ^ n - 1) + B * (w ^ n - 1)
+  apply sum_below.geometric_bound_add.real (fun i => w ^ i * f i) (w * r) w A B n
+  intro i hi
+  have h := mul_le_mul_of_nonneg_left.real (f i) ((w * r - 1) * A * r ^ i + (w - 1) * B) (w ^ i) (bound i hi) (pow_nonneg.real w i weight)
+  rw [mul_pow.real]
+  linarith
+
++ sum_below.geometric_step.rat (r A : ℚ) (n : ℕ) :
+    (∑ i < n, (r - 1) * A * r ^ i) = A * (r ^ n - 1)
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, pow_succ.rat]
+    ring
+
++ sum_below.arithmetic_geometric.rat (r : ℚ) (n : ℕ) :
+    (∑ i < n, ((i : ℚ) + 1) * r ^ i) * (1 - r) ^ 2 = 1 - r ^ n * (1 + (n : ℚ) * (1 - r))
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, pow_succ.rat, cast_succ.rat]
+    linarith
+
++ sum_below.geometric_bound.rat (f : ℕ → ℚ) (r A : ℚ) (n : ℕ)
+    (bound : ∀ i < n, f i ≤ (r - 1) * A * r ^ i) : sum_below n f ≤ A * (r ^ n - 1)
+  have h := sum_le.rat f (fun i => (r - 1) * A * r ^ i) n bound
+  rw [sum_below.geometric_step.rat] at h
+  exact h
+
++ sum_below.geometric_bound_add.rat (f : ℕ → ℚ) (r s A B : ℚ) (n : ℕ)
+    (bound : ∀ i < n, f i ≤ (r - 1) * A * r ^ i + (s - 1) * B * s ^ i) :
+    sum_below n f ≤ A * (r ^ n - 1) + B * (s ^ n - 1)
+  have h := sum_le.rat f (fun i => (r - 1) * A * r ^ i + (s - 1) * B * s ^ i) n bound
+  rw [sum_add.rat, sum_below.geometric_step.rat, sum_below.geometric_step.rat] at h
+  exact h
+
++ sum_below.weighted_geometric_bound.rat (f : ℕ → ℚ) (w r A B : ℚ) (n : ℕ) (weight : 0 ≤ w)
+    (bound : ∀ i < n, f i ≤ (w * r - 1) * A * r ^ i + (w - 1) * B) :
+    (∑ i < n, w ^ i * f i) ≤ A * ((w * r) ^ n - 1) + B * (w ^ n - 1)
+  apply sum_below.geometric_bound_add.rat (fun i => w ^ i * f i) (w * r) w A B n
+  intro i hi
+  have h := mul_le_mul_of_nonneg_left.rat (f i) ((w * r - 1) * A * r ^ i + (w - 1) * B) (w ^ i) (bound i hi) (pow_nonneg.rat w i weight)
+  rw [mul_pow.rat]
+  linarith
+
++ sum_below.geometric_step.int (r A : ℤ) (n : ℕ) :
+    (∑ i < n, (r - 1) * A * r ^ i) = A * (r ^ n - 1)
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, pow_succ.int]
+    ring
+
++ sum_below.arithmetic_geometric.int (r : ℤ) (n : ℕ) :
+    (∑ i < n, ((i : ℤ) + 1) * r ^ i) * (1 - r) ^ 2 = 1 - r ^ n * (1 + (n : ℤ) * (1 - r))
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, pow_succ.int, cast_succ.int]
+    linarith
+
++ sum_below.geometric_bound.int (f : ℕ → ℤ) (r A : ℤ) (n : ℕ)
+    (bound : ∀ i < n, f i ≤ (r - 1) * A * r ^ i) : sum_below n f ≤ A * (r ^ n - 1)
+  have h := sum_le.int f (fun i => (r - 1) * A * r ^ i) n bound
+  rw [sum_below.geometric_step.int] at h
+  exact h
+
++ sum_below.geometric_bound_add.int (f : ℕ → ℤ) (r s A B : ℤ) (n : ℕ)
+    (bound : ∀ i < n, f i ≤ (r - 1) * A * r ^ i + (s - 1) * B * s ^ i) :
+    sum_below n f ≤ A * (r ^ n - 1) + B * (s ^ n - 1)
+  have h := sum_le.int f (fun i => (r - 1) * A * r ^ i + (s - 1) * B * s ^ i) n bound
+  rw [sum_add.int, sum_below.geometric_step.int, sum_below.geometric_step.int] at h
+  exact h
+
++ sum_below.weighted_geometric_bound.int (f : ℕ → ℤ) (w r A B : ℤ) (n : ℕ) (weight : 0 ≤ w)
+    (bound : ∀ i < n, f i ≤ (w * r - 1) * A * r ^ i + (w - 1) * B) :
+    (∑ i < n, w ^ i * f i) ≤ A * ((w * r) ^ n - 1) + B * (w ^ n - 1)
+  apply sum_below.geometric_bound_add.int (fun i => w ^ i * f i) (w * r) w A B n
+  intro i hi
+  have h := mul_le_mul_of_nonneg_left.int (f i) ((w * r - 1) * A * r ^ i + (w - 1) * B) (w ^ i) (bound i hi) (pow_nonneg.int w i weight)
+  rw [mul_pow.int]
+  linarith

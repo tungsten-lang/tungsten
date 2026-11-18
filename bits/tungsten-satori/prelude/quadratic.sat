@@ -1,0 +1,146 @@
+-- Order comparisons through squares and weighted products. No new axioms.
+import core
+import order
+
+-- Only the right-hand value needs to be nonnegative when removing squares.
++ le_of_mul_self_le_mul_self.real (a b : ℝ) (hb : 0 ≤ b) (h : a * a ≤ b * b) : a ≤ b
+  nlinarith
++ lt_of_mul_self_lt_mul_self.real (a b : ℝ) (hb : 0 ≤ b) (h : a * a < b * b) : a < b
+  nlinarith
++ mul_self_le_mul_self_iff.real (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : a * a ≤ b * b ↔ a ≤ b
+  constructor <;> intro h <;> nlinarith
++ mul_self_lt_mul_self_iff.real (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : a * a < b * b ↔ a < b
+  constructor <;> intro h <;> nlinarith
+
+-- Two weighted square bounds give a bound on the weighted product.
+-- A lower bound needs a nonnegative product, but may itself be negative.
++ le_mul_of_le_mul_self.real (c w a b : ℝ) (hw : 0 ≤ w) (hab : 0 ≤ a * b) (ha : c ≤ w * (a * a)) (hb : c ≤ w * (b * b)) : c ≤ w * (a * b)
+  have hp : 0 ≤ w * (a * b) := mul_nonneg.real w (a * b) hw hab
+  by_cases hc : c ≤ 0
+  · linarith
+  · apply le_of_mul_self_le_mul_self.real c (w * (a * b)) hp
+    nlinarith
+
+-- An upper bound does not need a sign condition on either factor.
++ mul_le_of_mul_self_le.real (c w a b : ℝ) (hw : 0 ≤ w) (ha : w * (a * a) ≤ c) (hb : w * (b * b) ≤ c) : w * (a * b) ≤ c
+  have ha0 : 0 ≤ w * (a * a) := by nlinarith [sq_nonneg.real a]
+  have hb0 : 0 ≤ w * (b * b) := by nlinarith [sq_nonneg.real b]
+  apply le_of_mul_self_le_mul_self.real (w * (a * b)) c (by linarith)
+  nlinarith
+
++ le_of_mul_self_le_mul_self.rat (a b : ℚ) (hb : 0 ≤ b) (h : a * a ≤ b * b) : a ≤ b
+  nlinarith
++ lt_of_mul_self_lt_mul_self.rat (a b : ℚ) (hb : 0 ≤ b) (h : a * a < b * b) : a < b
+  nlinarith
++ mul_self_le_mul_self_iff.rat (a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) : a * a ≤ b * b ↔ a ≤ b
+  constructor <;> intro h <;> nlinarith
++ mul_self_lt_mul_self_iff.rat (a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) : a * a < b * b ↔ a < b
+  constructor <;> intro h <;> nlinarith
+
+-- Two weighted square bounds give a bound on the weighted product.
+-- A lower bound needs a nonnegative product, but may itself be negative.
++ le_mul_of_le_mul_self.rat (c w a b : ℚ) (hw : 0 ≤ w) (hab : 0 ≤ a * b) (ha : c ≤ w * (a * a)) (hb : c ≤ w * (b * b)) : c ≤ w * (a * b)
+  have hp : 0 ≤ w * (a * b) := mul_nonneg.rat w (a * b) hw hab
+  by_cases hc : c ≤ 0
+  · linarith
+  · apply le_of_mul_self_le_mul_self.rat c (w * (a * b)) hp
+    nlinarith
+
+-- An upper bound does not need a sign condition on either factor.
++ mul_le_of_mul_self_le.rat (c w a b : ℚ) (hw : 0 ≤ w) (ha : w * (a * a) ≤ c) (hb : w * (b * b) ≤ c) : w * (a * b) ≤ c
+  have ha0 : 0 ≤ w * (a * a) := by nlinarith [sq_nonneg.rat a]
+  have hb0 : 0 ≤ w * (b * b) := by nlinarith [sq_nonneg.rat b]
+  apply le_of_mul_self_le_mul_self.rat (w * (a * b)) c (by linarith)
+  nlinarith
+
++ le_of_mul_self_le_mul_self.int (a b : ℤ) (hb : 0 ≤ b) (h : a * a ≤ b * b) : a ≤ b
+  nlinarith
++ lt_of_mul_self_lt_mul_self.int (a b : ℤ) (hb : 0 ≤ b) (h : a * a < b * b) : a < b
+  nlinarith
++ mul_self_le_mul_self_iff.int (a b : ℤ) (ha : 0 ≤ a) (hb : 0 ≤ b) : a * a ≤ b * b ↔ a ≤ b
+  constructor <;> intro h <;> nlinarith
++ mul_self_lt_mul_self_iff.int (a b : ℤ) (ha : 0 ≤ a) (hb : 0 ≤ b) : a * a < b * b ↔ a < b
+  constructor <;> intro h <;> nlinarith
+
+-- Two weighted square bounds give a bound on the weighted product.
+-- A lower bound needs a nonnegative product, but may itself be negative.
++ le_mul_of_le_mul_self.int (c w a b : ℤ) (hw : 0 ≤ w) (hab : 0 ≤ a * b) (ha : c ≤ w * (a * a)) (hb : c ≤ w * (b * b)) : c ≤ w * (a * b)
+  have hp : 0 ≤ w * (a * b) := mul_nonneg.int w (a * b) hw hab
+  by_cases hc : c ≤ 0
+  · linarith
+  · apply le_of_mul_self_le_mul_self.int c (w * (a * b)) hp
+    nlinarith
+
+-- An upper bound does not need a sign condition on either factor.
++ mul_le_of_mul_self_le.int (c w a b : ℤ) (hw : 0 ≤ w) (ha : w * (a * a) ≤ c) (hb : w * (b * b) ≤ c) : w * (a * b) ≤ c
+  have ha0 : 0 ≤ w * (a * a) := by nlinarith [sq_nonneg.int a]
+  have hb0 : 0 ≤ w * (b * b) := by nlinarith [sq_nonneg.int b]
+  apply le_of_mul_self_le_mul_self.int (w * (a * b)) c (by linarith)
+  nlinarith
+
+-- Natural values need no sign premises.
++ le_of_mul_self_le_mul_self.nat (a b : ℕ) (h : a * a ≤ b * b) : a ≤ b
+  nlinarith
++ lt_of_mul_self_lt_mul_self.nat (a b : ℕ) (h : a * a < b * b) : a < b
+  nlinarith
++ mul_self_le_mul_self_iff.nat (a b : ℕ) : a * a ≤ b * b ↔ a ≤ b
+  constructor <;> intro h <;> nlinarith
++ mul_self_lt_mul_self_iff.nat (a b : ℕ) : a * a < b * b ↔ a < b
+  constructor <;> intro h <;> nlinarith
++ le_mul_of_le_mul_self.nat (c w a b : ℕ) (ha : c ≤ w * (a * a)) (hb : c ≤ w * (b * b)) : c ≤ w * (a * b)
+  apply le_of_mul_self_le_mul_self.nat c (w * (a * b))
+  nlinarith
++ mul_le_of_mul_self_le.nat (c w a b : ℕ) (ha : w * (a * a) ≤ c) (hb : w * (b * b) ≤ c) : w * (a * b) ≤ c
+  apply le_of_mul_self_le_mul_self.nat (w * (a * b)) c
+  nlinarith
+
+-- A nonnegative binary quadratic form has a nonnegative determinant.
+@[auto] + quadratic_form.bound.real (a b c : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a - 2*x*y*b + y^2*c) : b^2 ≤ a*c
+  have pa := q 1 0
+  have pc := q 0 1
+  have q1 := q c b
+  have q2 := q b a
+  have q3 := q 1 b
+  by_cases hc : 0 < c
+  · nlinarith
+  · by_cases ha : 0 < a
+    · nlinarith
+    · have za : a = 0 := by nlinarith
+      have zc : c = 0 := by nlinarith
+      rw [za, zc] at q3
+      rw [za, zc]
+      nlinarith
+
+-- A nonnegative binary quadratic form has a nonnegative determinant.
+@[auto] + quadratic_form.bound.rat (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a - 2*x*y*b + y^2*c) : b^2 ≤ a*c
+  have pa := q 1 0
+  have pc := q 0 1
+  have q1 := q c b
+  have q2 := q b a
+  have q3 := q 1 b
+  by_cases hc : 0 < c
+  · nlinarith
+  · by_cases ha : 0 < a
+    · nlinarith
+    · have za : a = 0 := by nlinarith
+      have zc : c = 0 := by nlinarith
+      rw [za, zc] at q3
+      rw [za, zc]
+      nlinarith
+
+-- A nonnegative binary quadratic form has a nonnegative determinant.
+@[auto] + quadratic_form.bound.int (a b c : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a - 2*x*y*b + y^2*c) : b^2 ≤ a*c
+  have pa := q 1 0
+  have pc := q 0 1
+  have q1 := q c b
+  have q2 := q b a
+  have q3 := q 1 b
+  by_cases hc : 0 < c
+  · nlinarith
+  · by_cases ha : 0 < a
+    · nlinarith
+    · have za : a = 0 := by nlinarith
+      have zc : c = 0 := by nlinarith
+      rw [za, zc] at q3
+      rw [za, zc]
+      nlinarith

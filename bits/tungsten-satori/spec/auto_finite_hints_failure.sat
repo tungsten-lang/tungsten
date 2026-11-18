@@ -1,0 +1,4 @@
++ unsupplied (p : phase) (h : enabled p) : 0 < score p := by auto
++ missing_case (p : phase) (h : enabled p) : 0 < score p := by auto [score_a]
++ missing_guard (p : phase) : 0 < score p := by auto [score_a, score_b]
++ wrong_guard (p : phase) (h : enabled phase_a) : 0 < score p := by auto [score_a, score_b]

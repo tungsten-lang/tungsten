@@ -1,0 +1,43 @@
+import arith
+
++ coupling_rat (a D Ap Am A0 Y Pp Pm : ℚ) (ha : 0 ≤ a) (hA : Ap+Am+A0 = 2*D) (hAm : Y ≤ Am) (hA0 : 0 ≤ A0) (hPm : Pm ≤ 2*a*Ap) (hPp : Pp ≤ a*Y) : Pp+Pm+a*Y ≤ 4*a*D
+  auto
+
++ coupling_int (a D Ap Am A0 Y Pp Pm : ℤ) (ha : 0 ≤ a) (hA : Ap+Am+A0 = 2*D) (hAm : Y ≤ Am) (hA0 : 0 ≤ A0) (hPm : Pm ≤ 2*a*Ap) (hPp : Pp ≤ a*Y) : Pp+Pm+a*Y ≤ 4*a*D
+  auto
+
++ coupling_real (a D Ap Am A0 Y Pp Pm : ℝ) (ha : 0 ≤ a) (hA : Ap+Am+A0 = 2*D) (hAm : Y ≤ Am) (hA0 : 0 ≤ A0) (hPm : Pm ≤ 2*a*Ap) (hPp : Pp ≤ a*Y) : Pp+Pm+a*Y ≤ 4*a*D
+  auto
+
++ coupling_nat (a D Ap Am A0 Y Pp Pm : ℕ) (ha : 0 ≤ a) (hA : Ap+Am+A0 = 2*D) (hAm : Y ≤ Am) (hA0 : 0 ≤ A0) (hPm : Pm ≤ 2*a*Ap) (hPp : Pp ≤ a*Y) : Pp+Pm+a*Y ≤ 4*a*D
+  auto
+
++ distribute (a x y z : ℚ) (h : x+y = z) : a*x+a*y = a*z
+  auto
+
++ right_factor (a x y z : ℚ) (h : x+y = z) : x*a+y*a = z*a
+  auto
+
++ negative_factor (a x y z : ℚ) (h : x+y = z) : (0-a)*x+(0-a)*y = (0-a)*z
+  auto
+
++ affine_factor (a x y z : ℚ) (h : x+y = z) : (a+1)*x+(a+1)*y = (a+1)*z
+  auto
+
++ two_equalities (a x y z w u : ℚ) (h : x+y = z) (k : z+w = u) : a*x+a*y+a*w = a*u
+  auto
+
++ conjunction (a D Ap Am A0 Y Pp Pm : ℚ) (h : 0 ≤ a ∧ Ap+Am+A0 = 2*D ∧ Y ≤ Am ∧ 0 ≤ A0 ∧ Pm ≤ 2*a*Ap ∧ Pp ≤ a*Y) : Pp+Pm+a*Y ≤ 4*a*D
+  auto
+
++ strict_bound (a D Ap Am A0 Y Pp Pm : ℚ) (ha : 0 ≤ a) (hA : Ap+Am+A0 = 2*D) (hAm : Y ≤ Am) (hA0 : 0 ≤ A0) (hPm : Pm ≤ 2*a*Ap) (hPp : Pp < a*Y) : Pp+Pm+a*Y < 4*a*D
+  auto
+
+opaque a : ℚ
+opaque x : ℚ
+opaque y : ℚ
+opaque z : ℚ
+axiom supplied_balance : x+y = z
+
++ explicit_balance : a*x+a*y = a*z
+  auto [supplied_balance]

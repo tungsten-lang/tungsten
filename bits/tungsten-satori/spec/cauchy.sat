@@ -1,0 +1,61 @@
+import cauchy
+
++ real_form (a b c : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c := quadratic_form.bound.real a b c q
+
++ real_degenerate (b c : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*0-2*x*y*b+y^2*c) : b = 0
+  have bound := quadratic_form.bound.real 0 b c q
+  nlinarith
+
++ real_list_weighted (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i))) := list_sum.weighted_cauchy.real xs w f g hw
+
++ real_list (xs : list α) (f g : α → ℝ) : (sum_list xs (fun i => f i*g i))^2 ≤ (sum_list xs (fun i => f i*f i))*(sum_list xs (fun i => g i*g i)) := list_sum.cauchy.real xs f g
+
++ real_range_weighted (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i))) := sum_below.weighted_cauchy.real n w f g hw
+
++ real_range (n : ℕ) (f g : ℕ → ℝ) : (sum_below n (fun i => f i*g i))^2 ≤ (sum_below n (fun i => f i*f i))*(sum_below n (fun i => g i*g i)) := sum_below.cauchy.real n f g
+
++ real_empty (f g : ℕ → ℝ) : (sum_list ([] : list ℕ) (fun i => f i*g i))^2 ≤ (sum_list ([] : list ℕ) (fun i => f i*f i))*(sum_list ([] : list ℕ) (fun i => g i*g i)) := list_sum.cauchy.real ([] : list ℕ) f g
+
++ real_repeated (x : α) (f g : α → ℝ) : (sum_list (x :: x :: []) (fun i => f i*g i))^2 ≤ (sum_list (x :: x :: []) (fun i => f i*f i))*(sum_list (x :: x :: []) (fun i => g i*g i)) := list_sum.cauchy.real (x :: x :: []) f g
+
++ real_zero_weights (n : ℕ) (f g : ℕ → ℝ) : (sum_below n (fun i => 0*(f i*g i)))^2 ≤ (sum_below n (fun i => 0*(f i*f i)))*(sum_below n (fun i => 0*(g i*g i))) := sum_below.weighted_cauchy.real n (fun i => 0) f g (by intro i hi; linarith)
+
++ rat_form (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c := quadratic_form.bound.rat a b c q
+
++ rat_degenerate (b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*0-2*x*y*b+y^2*c) : b = 0
+  have bound := quadratic_form.bound.rat 0 b c q
+  nlinarith
+
++ rat_list_weighted (xs : list α) (w f g : α → ℚ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i))) := list_sum.weighted_cauchy.rat xs w f g hw
+
++ rat_list (xs : list α) (f g : α → ℚ) : (sum_list xs (fun i => f i*g i))^2 ≤ (sum_list xs (fun i => f i*f i))*(sum_list xs (fun i => g i*g i)) := list_sum.cauchy.rat xs f g
+
++ rat_range_weighted (n : ℕ) (w f g : ℕ → ℚ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i))) := sum_below.weighted_cauchy.rat n w f g hw
+
++ rat_range (n : ℕ) (f g : ℕ → ℚ) : (sum_below n (fun i => f i*g i))^2 ≤ (sum_below n (fun i => f i*f i))*(sum_below n (fun i => g i*g i)) := sum_below.cauchy.rat n f g
+
++ rat_empty (f g : ℕ → ℚ) : (sum_list ([] : list ℕ) (fun i => f i*g i))^2 ≤ (sum_list ([] : list ℕ) (fun i => f i*f i))*(sum_list ([] : list ℕ) (fun i => g i*g i)) := list_sum.cauchy.rat ([] : list ℕ) f g
+
++ rat_repeated (x : α) (f g : α → ℚ) : (sum_list (x :: x :: []) (fun i => f i*g i))^2 ≤ (sum_list (x :: x :: []) (fun i => f i*f i))*(sum_list (x :: x :: []) (fun i => g i*g i)) := list_sum.cauchy.rat (x :: x :: []) f g
+
++ rat_zero_weights (n : ℕ) (f g : ℕ → ℚ) : (sum_below n (fun i => 0*(f i*g i)))^2 ≤ (sum_below n (fun i => 0*(f i*f i)))*(sum_below n (fun i => 0*(g i*g i))) := sum_below.weighted_cauchy.rat n (fun i => 0) f g (by intro i hi; linarith)
+
++ int_form (a b c : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c := quadratic_form.bound.int a b c q
+
++ int_degenerate (b c : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*0-2*x*y*b+y^2*c) : b = 0
+  have bound := quadratic_form.bound.int 0 b c q
+  nlinarith
+
++ int_list_weighted (xs : list α) (w f g : α → ℤ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i))) := list_sum.weighted_cauchy.int xs w f g hw
+
++ int_list (xs : list α) (f g : α → ℤ) : (sum_list xs (fun i => f i*g i))^2 ≤ (sum_list xs (fun i => f i*f i))*(sum_list xs (fun i => g i*g i)) := list_sum.cauchy.int xs f g
+
++ int_range_weighted (n : ℕ) (w f g : ℕ → ℤ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i))) := sum_below.weighted_cauchy.int n w f g hw
+
++ int_range (n : ℕ) (f g : ℕ → ℤ) : (sum_below n (fun i => f i*g i))^2 ≤ (sum_below n (fun i => f i*f i))*(sum_below n (fun i => g i*g i)) := sum_below.cauchy.int n f g
+
++ int_empty (f g : ℕ → ℤ) : (sum_list ([] : list ℕ) (fun i => f i*g i))^2 ≤ (sum_list ([] : list ℕ) (fun i => f i*f i))*(sum_list ([] : list ℕ) (fun i => g i*g i)) := list_sum.cauchy.int ([] : list ℕ) f g
+
++ int_repeated (x : α) (f g : α → ℤ) : (sum_list (x :: x :: []) (fun i => f i*g i))^2 ≤ (sum_list (x :: x :: []) (fun i => f i*f i))*(sum_list (x :: x :: []) (fun i => g i*g i)) := list_sum.cauchy.int (x :: x :: []) f g
+
++ int_zero_weights (n : ℕ) (f g : ℕ → ℤ) : (sum_below n (fun i => 0*(f i*g i)))^2 ≤ (sum_below n (fun i => 0*(f i*f i)))*(sum_below n (fun i => 0*(g i*g i))) := sum_below.weighted_cauchy.int n (fun i => 0) f g (by intro i hi; linarith)

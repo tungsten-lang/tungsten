@@ -1,0 +1,102 @@
+inductive mode
+  | mild
+  | medium
+  | strong
+inductive quarter
+  | north
+  | east
+  | south
+  | west
+-> cycle : mode → mode
+  | mild => medium
+  | medium => strong
+  | strong => mild
+-> choose : mode → α → α → α → α
+  | mild, a, b, c => a
+  | medium, a, b, c => b
+  | strong, a, b, c => c
+-> code : quarter → ℕ
+  | north => 0
+  | east => 1
+  | south => 2
+  | west => 3
+-> blend : quarter → quarter → ℕ
+  | north, b => code b
+  | east, b => code b+1
+  | south, b => code b+2
+  | west, b => code b+3
+-> mark : mode → ℤ
+  | mild => 0
+  | medium => 1
+  | strong => 2
++ cycle_fixed (m : mode) : cycle m = m := by auto
++ cycle_twice (m : mode) : cycle (cycle m) = m := by auto
++ choose_unrestricted (m : mode) (a b c : α) : choose m a b c = a := by auto
++ choose_wrong_projection (m : mode) (a b c x y z : α) : fst (choose m (a,x) (b,y) (c,z)) = choose m x y z := by auto
++ choose_missing_guard (m : mode) (a b c d : ℤ) (ha : a ≤ d) (hb : b ≤ d) : choose m a b c ≤ d := by auto
++ forgotten_case (m : mode) (h : m ≠ mild) : choose m (1 : ℤ) 2 9 ≤ 2 := by auto
++ possible_mark (m : mode) (h : mark m = 1) : False := by auto
++ blend_too_small (a b : quarter) : blend a b ≤ 5 := by auto
++ blend_wrong_formula (a b : quarter) : blend a b = code a+code b+1 := by auto
++ blend_point (a b : quarter) (h : a = north) : blend a b = 0 := by auto
+
+-> weight.nat : mode → ℕ
+  | mild => 1
+  | medium => 2
+  | strong => 3
+-> scale.nat : mode → ℕ → ℕ
+  | mild, x => x+1
+  | medium, x => 2*x+1
+  | strong, x => 3*x+1
++ nat_wrong_formula (m : mode) (x : ℕ) : scale.nat m x = weight.nat m*x := by auto
++ nat_wrong_add (m : mode) (x y : ℕ) : scale.nat m (x+y) = scale.nat m x+weight.nat m*y+1 := by auto
++ nat_too_large (m : mode) (x : ℕ) (h : 0 ≤ x) : 2 ≤ scale.nat m x := by auto
++ nat_wrong_monotone (m : mode) (x y : ℕ) (h : x ≤ y) : scale.nat m y ≤ scale.nat m x := by auto
++ nat_wrong_pair (m : mode) (x y : ℕ) : scale.nat m x = weight.nat m*x+1 ∧ scale.nat m (x+y) = scale.nat m x+weight.nat m*y+1 := by auto
+
+-> weight.int : mode → ℤ
+  | mild => 1
+  | medium => 2
+  | strong => 3
+-> scale.int : mode → ℤ → ℤ
+  | mild, x => x+1
+  | medium, x => 2*x+1
+  | strong, x => 3*x+1
++ int_wrong_formula (m : mode) (x : ℤ) : scale.int m x = weight.int m*x := by auto
++ int_wrong_add (m : mode) (x y : ℤ) : scale.int m (x+y) = scale.int m x+weight.int m*y+1 := by auto
++ int_too_large (m : mode) (x : ℤ) (h : 0 ≤ x) : 2 ≤ scale.int m x := by auto
++ int_wrong_monotone (m : mode) (x y : ℤ) (h : x ≤ y) : scale.int m y ≤ scale.int m x := by auto
++ int_wrong_pair (m : mode) (x y : ℤ) : scale.int m x = weight.int m*x+1 ∧ scale.int m (x+y) = scale.int m x+weight.int m*y+1 := by auto
+
+-> weight.rat : mode → ℚ
+  | mild => 1
+  | medium => 2
+  | strong => 3
+-> scale.rat : mode → ℚ → ℚ
+  | mild, x => x+1
+  | medium, x => 2*x+1
+  | strong, x => 3*x+1
++ rat_wrong_formula (m : mode) (x : ℚ) : scale.rat m x = weight.rat m*x := by auto
++ rat_wrong_add (m : mode) (x y : ℚ) : scale.rat m (x+y) = scale.rat m x+weight.rat m*y+1 := by auto
++ rat_too_large (m : mode) (x : ℚ) (h : 0 ≤ x) : 2 ≤ scale.rat m x := by auto
++ rat_wrong_monotone (m : mode) (x y : ℚ) (h : x ≤ y) : scale.rat m y ≤ scale.rat m x := by auto
++ rat_wrong_pair (m : mode) (x y : ℚ) : scale.rat m x = weight.rat m*x+1 ∧ scale.rat m (x+y) = scale.rat m x+weight.rat m*y+1 := by auto
+
+-> weight.real : mode → ℝ
+  | mild => 1
+  | medium => 2
+  | strong => 3
+-> scale.real : mode → ℝ → ℝ
+  | mild, x => x+1
+  | medium, x => 2*x+1
+  | strong, x => 3*x+1
++ real_wrong_formula (m : mode) (x : ℝ) : scale.real m x = weight.real m*x := by auto
++ real_wrong_add (m : mode) (x y : ℝ) : scale.real m (x+y) = scale.real m x+weight.real m*y+1 := by auto
++ real_too_large (m : mode) (x : ℝ) (h : 0 ≤ x) : 2 ≤ scale.real m x := by auto
++ real_wrong_monotone (m : mode) (x y : ℝ) (h : x ≤ y) : scale.real m y ≤ scale.real m x := by auto
++ real_wrong_pair (m : mode) (x y : ℝ) : scale.real m x = weight.real m*x+1 ∧ scale.real m (x+y) = scale.real m x+weight.real m*y+1 := by auto
+
+inductive packet
+  | packet_empty
+  | packet_load (n : ℕ)
++ payload_is_not_empty (p : packet) : p = packet_empty := by auto

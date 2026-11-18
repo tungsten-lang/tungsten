@@ -1,0 +1,38 @@
+import euclidean
+
+-> inner (n : ℕ) (f g : ℕ → ℝ) : ℝ := sum_below n (fun i => f i*g i)
+-> norm (n : ℕ) (f : ℕ → ℝ) : ℝ := sqrt (inner n f f)
+-> norm_again (n : ℕ) (f : ℕ → ℝ) : ℝ := norm n f
+-> norm_third (n : ℕ) (f : ℕ → ℝ) : ℝ := norm_again n f
+-> weighted_norm (n : ℕ) (w f : ℕ → ℝ) : ℝ := sqrt (sum_below n (fun i => w i*(f i*f i)))
+-> plane_norm (a b : ℝ) : ℝ := sqrt (a^2+b^2)
+-> norm_total (a b c d : ℝ) : ℝ := plane_norm a b + plane_norm c d
+-> identity (x : α) : α := x
+
++ range_triangle (n : ℕ) (f g : ℕ → ℝ) : norm n (fun i => f i+g i) ≤ norm n f + norm n g
+  auto
+
++ weighted_triangle (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) :
+    weighted_norm n w (fun i => f i+g i) ≤ weighted_norm n w f + weighted_norm n w g
+  auto
+
++ chain_triangle (n : ℕ) (f g : ℕ → ℝ) : norm_third n (fun i => f i+g i) ≤ norm_third n f + norm_third n g
+  auto
+
++ left_alias (a b c d : ℝ) : plane_norm (a+c) (b+d) ≤ sqrt (a^2+b^2) + sqrt (c^2+d^2)
+  auto
+
++ right_alias (a b c d : ℝ) : sqrt ((a+c)^2+(b+d)^2) ≤ norm_total a b c d
+  auto
+
++ both_aliases (a b c d : ℝ) : plane_norm (a+c) (b+d) ≤ norm_total a b c d
+  auto
+
++ polymorphic_alias (a b c d : ℝ) : identity (plane_norm (a+c) (b+d)) ≤ identity (norm_total a b c d)
+  auto
+
++ repeated_alias (a b c d : ℝ) : identity (identity (plane_norm (a+c) (b+d))) ≤ norm_total a b c d
+  auto
+
++ reverse_alias (a b c d : ℝ) : plane_norm a b - plane_norm c d ≤ plane_norm (a-c) (b-d)
+  auto

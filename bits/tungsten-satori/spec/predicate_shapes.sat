@@ -1,0 +1,32 @@
++ lambda_left (p q : Prop) (h : (fun r => r ∧ q) p) : p := h.1
++ lambda_right (p q : Prop) (h : (fun r => p ∧ r) q) : q := h.right
++ lambda_nested (p q r : Prop) (h : (fun x => p ∧ (fun y => y ∧ r) x) q) : q := h.2.1
++ lambda_mp (p q : Prop) (h : (fun r => r ↔ q) p) (hp : p) : q := h.mp hp
++ lambda_mpr (p q : Prop) (h : (fun r => p ↔ r) q) (hq : q) : p := h.mpr hq
++ lambda_symm (a b : α) (h : (fun x => a = x) b) : b = a := h.symm
++ lambda_rfl (a : α) : (fun x => x = x) a := by rfl
++ lambda_rfl_term (a : α) : (fun x => x = x) a := rfl
++ lambda_constructor (p : Prop) (hp : p) : (fun q => q ∧ q) p := by constructor <;> exact hp
++ lambda_intro (p : Prop) : (fun q => q → q) p := by intro h; exact h
++ lambda_tuple (p q : Prop) (hp : p) (hq : q) : (fun r => r ∧ q) p := ⟨hp, hq⟩
++ lambda_witness (p : α → Prop) (a : α) (h : p a) : (fun q => ∃ x, q x) p := ⟨a, h⟩
++ lambda_equivalence (p : Prop) : (fun q => q ↔ p) p := ⟨(by intro h; exact h), (by intro h; exact h)⟩
++ lambda_obtain (p q : Prop) (h : (fun r => r ∧ q) p) : q ∧ p
+  obtain ⟨hp, hq⟩ := h
+  exact ⟨hq, hp⟩
++ lambda_obtain_witness (p q : α → Prop) (h : (fun r => ∃ x, r x ∧ q x) p) : ∃ x, q x ∧ p x
+  obtain ⟨x, hp, hq⟩ := h
+  exact ⟨x, hq, hp⟩
++ lambda_obtain_or (p q : Prop) (h : (fun r => r ∨ q) p) : q ∨ p
+  obtain hp | hq := h
+  · right; exact hp
+  · left; exact hq
++ lambda_obtain_iff (p q : Prop) (h : (fun r => r ↔ q) p) (hp : p) : q
+  obtain ⟨forward, backward⟩ := h
+  exact forward hp
++ lambda_subst (a b : α) (p : α → Prop) (h : (fun x => a = x) b) (hp : p a) : p b
+  obtain rfl := h
+  exact hp
+#axioms lambda_nested
+#axioms lambda_tuple
+#axioms lambda_obtain_witness

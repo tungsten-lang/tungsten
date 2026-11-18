@@ -1,0 +1,58 @@
+import recurrence
+
+-> partial_int (r : ℤ) : ℕ → ℤ
+  | 0 => 0
+  | n+1 => partial_int r n + r ^ n
+
++ int_sum (s : ℕ → ℤ) (r : ℤ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ int_sum_reverse (s : ℕ → ℤ) (r : ℤ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : 1-r^n = (1-r)*s n
+  auto
+
++ int_defined_sum (r : ℤ) (n : ℕ) : (1-r)*partial_int r n = 1-r^n
+  auto
+
++ int_forcing (s : ℕ → ℤ) (b q c : ℤ) (rate : 0 ≤ b) (gap : b ≤ q) (base : s 0 ≤ 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ int_quantified_forcing (s : ℕ → ℤ) (b q c : ℤ) (rate : 0 ≤ b) (gap : b < q) (base : s 0 = 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) : ∀ n, (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
+-> partial_rat (r : ℚ) : ℕ → ℚ
+  | 0 => 0
+  | n+1 => partial_rat r n + r ^ n
+
++ rat_sum (s : ℕ → ℚ) (r : ℚ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ rat_sum_reverse (s : ℕ → ℚ) (r : ℚ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : 1-r^n = (1-r)*s n
+  auto
+
++ rat_defined_sum (r : ℚ) (n : ℕ) : (1-r)*partial_rat r n = 1-r^n
+  auto
+
++ rat_forcing (s : ℕ → ℚ) (b q c : ℚ) (rate : 0 ≤ b) (gap : b ≤ q) (base : s 0 ≤ 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ rat_quantified_forcing (s : ℕ → ℚ) (b q c : ℚ) (rate : 0 ≤ b) (gap : b < q) (base : s 0 = 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) : ∀ n, (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
+-> partial_real (r : ℝ) : ℕ → ℝ
+  | 0 => 0
+  | n+1 => partial_real r n + r ^ n
+
++ real_sum (s : ℕ → ℝ) (r : ℝ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : (1-r)*s n = 1-r^n
+  auto
+
++ real_sum_reverse (s : ℕ → ℝ) (r : ℝ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : 1-r^n = (1-r)*s n
+  auto
+
++ real_defined_sum (r : ℝ) (n : ℕ) : (1-r)*partial_real r n = 1-r^n
+  auto
+
++ real_forcing (s : ℕ → ℝ) (b q c : ℝ) (rate : 0 ≤ b) (gap : b ≤ q) (base : s 0 ≤ 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) (n : ℕ) : (q-b)*s n ≤ c*(q^n-b^n)
+  auto
+
++ real_quantified_forcing (s : ℕ → ℝ) (b q c : ℝ) (rate : 0 ≤ b) (gap : b < q) (base : s 0 = 0) (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) : ∀ n, (q-b)*s n ≤ c*(q^n-b^n)
+  auto

@@ -8,6 +8,88 @@ theorem nat.induct (P : ℕ → Prop) : P 0 → (∀ n, P n → P (n + 1)) → �
     exact hs n hn
   exact nat_induct P h0 h
 
+-- Strong induction supplies every smaller case, without a separate bound.
++ nat.strong_induct (P : ℕ → Prop) (step : ∀ n, (∀ m < n, P m) → P n) : ∀ n, P n
+  intro n
+  have bounded : ∀ k, ∀ m < k, P m
+    intro k
+    induction k with m0 hm0 k ih m hm
+    · exfalso
+      linarith
+    · rw [succ_eq_add_one.nat] at hm
+      apply step m
+      intro j hj
+      exact ih j (by linarith)
+  exact bounded (n + 1) n (by linarith)
+
+-- Descend from a finite upper endpoint, using all the already proved levels.
++ nat.reverse_induct (P : ℕ → Prop) (bound : ℕ) (base : P bound)
+    (step : ∀ n, n < bound → (∀ m, n < m → m ≤ bound → P m) → P n) (n : ℕ) (hn : n ≤ bound) : P n
+  have all : ∀ d, ∀ n, n + d = bound → P n
+    apply nat.strong_induct (fun d => ∀ n, n + d = bound → P n)
+    intro d ih n h
+    by_cases at_top : n = bound
+    · rw [at_top]
+      exact base
+    · apply step n
+      · linarith
+      · intro m hm hmb
+        have diff := sub_add_cancel.nat bound m hmb
+        exact ih (bound - m) (by linarith) m (by linarith)
+  have diff := sub_add_cancel.nat bound n hn
+  exact all (bound - n) n (by linarith)
+
+-- A witness yields a least witness; no decidability assumption is needed.
++ nat.exists_least_of (P : ℕ → Prop) (n : ℕ) (hn : P n) : ∃ m, P m ∧ ∀ k < m, ¬ P k
+  have all : ∀ n, P n → ∃ m, P m ∧ ∀ k < m, ¬ P k
+    apply nat.strong_induct (fun n => P n → ∃ m, P m ∧ ∀ k < m, ¬ P k)
+    intro n ih pn
+    by_cases smaller : ∃ k, k < n ∧ P k
+    · obtain ⟨k, hk, pk⟩ := smaller
+      exact ih k hk pk
+    · use n
+      constructor
+      · exact pn
+      · intro k hk pk
+        exact smaller ⟨k, hk, pk⟩
+  exact all n hn
+
++ nat.exists_least (P : ℕ → Prop) (h : ∃ n, P n) : ∃ n, P n ∧ ∀ m < n, ¬ P m
+  obtain ⟨n, hn⟩ := h
+  exact nat.exists_least_of P n hn
+
++ nat.least_le (P : ℕ → Prop) (n m : ℕ) (least : ∀ k < n, ¬ P k) (hm : P m) : n ≤ m
+  by_contra h
+  exact least m (by linarith) hm
+
++ nat.least_unique (P : ℕ → Prop) (n m : ℕ) (hn : P n ∧ ∀ k < n, ¬ P k) (hm : P m ∧ ∀ k < m, ¬ P k) : n = m
+  have a := nat.least_le P n m hn.2 hm.1
+  have b := nat.least_le P m n hm.2 hn.1
+  linarith
+
+-- Infinite descent can be phrased directly on a property of natural numbers.
++ nat.infinite_descent (P : ℕ → Prop) (step : ∀ n, P n → ∃ m, m < n ∧ P m) (n : ℕ) : ¬ P n
+  intro hn
+  obtain ⟨m, pm, least⟩ := nat.exists_least_of P n hn
+  obtain ⟨k, hk, pk⟩ := step m pm
+  exact least k hk pk
+
+-- A finite descending prefix loses at least one unit at each step.
++ nat.descent_bound (f : ℕ → ℕ) (n : ℕ) (step : ∀ k < n, f (k + 1) < f k) : f n + n ≤ f 0
+  induction n with h0 n ih step
+  · simp
+  · simp only [succ_eq_add_one.nat] at step ⊢
+    have prev : ∀ k < n, f (k + 1) < f k
+      intro k hk
+      exact step k (by linarith)
+    have bound := ih prev
+    have last := step n (by linarith)
+    linarith
+
++ nat.no_infinite_descent (f : ℕ → ℕ) (step : ∀ n, f (n + 1) < f n) : False
+  have bound := nat.descent_bound f (f 0 + 1) (by intro k hk; exact step k)
+  linarith
+
 -- divisibility, primes, gcd, min/max (decidable on literals)
 -> dvd (a b : α) : Prop := b % a = 0
 -> even (n : α) : Prop := n % 2 = 0

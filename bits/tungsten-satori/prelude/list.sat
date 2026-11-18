@@ -58,3 +58,66 @@ theorem length_append (xs ys : list α) : length (xs ++ ys) = length xs + length
   rfl
 @[simp] + mem_nil (x : α) : (x ∈ ([] : list α)) = False
   rfl
+
+-- Transfer predicates between recursive `all` and memberwise statements.
++ list.all_mem (p : α → Prop) (xs : list α) : ∀ x, x ∈ xs → all p xs → p x
+  induction xs with x0 hx0 h0 y ys ih x hx hall
+  · simp at hx0
+  · simp [all] at hall
+    simp at hx
+    obtain e | e := hx
+    · rw [e]; exact hall.1
+    · exact ih x e hall.2
+
++ list.all_of_mem (p : α → Prop) (xs : list α) : (∀ x ∈ xs, p x) → all p xs
+  induction xs with h0 y ys ih h
+  · simp [all]
+  · have head : p y := h y (by simp)
+    have tail : ∀ x ∈ ys, p x
+      intro x hx
+      exact h x (by simp [hx])
+    simp [all]
+    exact ⟨head, ih tail⟩
+
++ list.all_iff (p : α → Prop) (xs : list α) : all p xs ↔ ∀ x ∈ xs, p x
+  constructor
+  · intro h x hx; exact list.all_mem p xs x hx h
+  · exact list.all_of_mem p xs
+
++ list.all_imp (p q : α → Prop) (xs : list α) (h : ∀ x ∈ xs, p x → q x) (hp : all p xs) : all q xs
+  apply list.all_of_mem q xs
+  intro x hx
+  exact h x hx (list.all_mem p xs x hx hp)
+
++ list.all_map (p : β → Prop) (f : α → β) (xs : list α) : all p (map f xs) ↔ all (fun x => p (f x)) xs
+  induction xs with x xs ih
+  · simp [all, map]
+  · simp [all, map, ih]
+
++ list.all_append (p : α → Prop) (xs ys : list α) : all p (xs ++ ys) ↔ all p xs ∧ all p ys
+  induction xs with x xs ih
+  · simp [all, append]
+  · simp [all, append, ih]
+    auto
+
+-- Numeric folds can be compared by their empty value and one checked cell.
++ list.recursive_identity (f g : list α → β) (base : f [] = g [])
+    (step : ∀ x xs, f xs = g xs → f (x :: xs) = g (x :: xs)) (xs : list α) : f xs = g xs
+  induction xs with x xs ih
+  · exact base
+  · exact step x xs ih
+
+-- A memberwise condition gives precisely the head fact and the tail condition.
+@[simp] + list.forall_cons (p : α → Prop) (x : α) (xs : list α) :
+    (∀ y ∈ x :: xs, p y) = (p x ∧ ∀ y ∈ xs, p y)
+  constructor
+  · intro h
+    constructor
+    · exact h x (by simp)
+    · intro y hy; exact h y (by simp [hy])
+  · intro h y hy
+    obtain ⟨hx, ht⟩ := h
+    simp at hy
+    obtain e | e := hy
+    · rw [e]; exact hx
+    · exact ht y e

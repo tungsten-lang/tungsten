@@ -1,0 +1,57 @@
+import convex
+
++ real_strict (lo hi : ℝ) (f : ℝ → ℝ) (hf : concave_interval.real lo hi f) (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℝ)*m = (∑ j < n, p j)) : (∑ j < n, f (p j)) < (n : ℝ)*f m := sum_below.concave_jensen.real lo hi f hf n p m hp hm
+
++ real_wrong_mean (lo hi : ℝ) (f : ℝ → ℝ) (hf : concave_interval.real lo hi f) (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (∑ j < n, p j) = m) : (∑ j < n, f (p j)) ≤ (n : ℝ)*f m
+  apply sum_below.concave_jensen.real lo hi f hf n p m hp
+  linarith
+
++ real_missing_domain (lo hi : ℝ) (f : ℝ → ℝ) (hf : concave_interval.real lo hi f) (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (hm : (n : ℝ)*m = (∑ j < n, p j)) : (∑ j < n, f (p j)) ≤ (n : ℝ)*f m
+  apply sum_below.concave_jensen.real lo hi f hf n p m
+  · intro j hj; constructor <;> linarith
+  · exact hm
+
++ real_wrong_direction (lo hi : ℝ) (f : ℝ → ℝ) (hf : concave_interval.real lo hi f) (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℝ)*m = (∑ j < n, p j)) : (n : ℝ)*f m ≤ ∑ j < n, f (p j) := sum_below.concave_jensen.real lo hi f hf n p m hp hm
+
++ real_wrong_difference (lo hi : ℝ) (f : ℝ → ℝ) (g : ℝ → ℝ) (hf : concave_interval.real lo hi f) (hg : convex_interval.real lo hi g) : concave_interval.real lo hi (fun x => g x-f x) := concave_interval.sub_convex.real lo hi f g hf hg
+
++ real_strict_monotone (lo hi : ℝ) (f : ℝ → ℝ) (x y peak : ℝ) (hf : concave_interval.real lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : y ≤ peak) (hpeak : peak ≤ hi) (hmax : ∀ z : ℝ, lo ≤ z → z ≤ hi → f z ≤ f peak) : f x < f y := concave_interval.mono_below_max.real lo hi f x y peak hf hx hxy hy hpeak hmax
+
++ real_past_peak (lo hi : ℝ) (f : ℝ → ℝ) (x y peak : ℝ) (hf : concave_interval.real lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : peak ≤ y) (hpeak : peak ≤ hi) (hmax : ∀ z : ℝ, lo ≤ z → z ≤ hi → f z ≤ f peak) : f x ≤ f y
+  apply concave_interval.mono_below_max.real lo hi f x y peak hf hx hxy
+  · linarith
+  · exact hpeak
+  · exact hmax
+
++ real_missing_max (lo hi : ℝ) (f : ℝ → ℝ) (x y peak : ℝ) (hf : concave_interval.real lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : y ≤ peak) (hpeak : peak ≤ hi) : f x ≤ f y
+  apply concave_interval.mono_below_max.real lo hi f x y peak hf hx hxy hy hpeak
+  intro z hz0 hz1
+  linarith
+
++ rat_strict (lo hi : ℚ) (f : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (n : ℕ) (p : ℕ → ℚ) (m : ℚ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℚ)*m = (∑ j < n, p j)) : (∑ j < n, f (p j)) < (n : ℚ)*f m := sum_below.concave_jensen.rat lo hi f hf n p m hp hm
+
++ rat_wrong_mean (lo hi : ℚ) (f : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (n : ℕ) (p : ℕ → ℚ) (m : ℚ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (∑ j < n, p j) = m) : (∑ j < n, f (p j)) ≤ (n : ℚ)*f m
+  apply sum_below.concave_jensen.rat lo hi f hf n p m hp
+  linarith
+
++ rat_missing_domain (lo hi : ℚ) (f : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (n : ℕ) (p : ℕ → ℚ) (m : ℚ) (hm : (n : ℚ)*m = (∑ j < n, p j)) : (∑ j < n, f (p j)) ≤ (n : ℚ)*f m
+  apply sum_below.concave_jensen.rat lo hi f hf n p m
+  · intro j hj; constructor <;> linarith
+  · exact hm
+
++ rat_wrong_direction (lo hi : ℚ) (f : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (n : ℕ) (p : ℕ → ℚ) (m : ℚ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℚ)*m = (∑ j < n, p j)) : (n : ℚ)*f m ≤ ∑ j < n, f (p j) := sum_below.concave_jensen.rat lo hi f hf n p m hp hm
+
++ rat_wrong_difference (lo hi : ℚ) (f : ℚ → ℚ) (g : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (hg : convex_interval.rat lo hi g) : concave_interval.rat lo hi (fun x => g x-f x) := concave_interval.sub_convex.rat lo hi f g hf hg
+
++ rat_strict_monotone (lo hi : ℚ) (f : ℚ → ℚ) (x y peak : ℚ) (hf : concave_interval.rat lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : y ≤ peak) (hpeak : peak ≤ hi) (hmax : ∀ z : ℚ, lo ≤ z → z ≤ hi → f z ≤ f peak) : f x < f y := concave_interval.mono_below_max.rat lo hi f x y peak hf hx hxy hy hpeak hmax
+
++ rat_past_peak (lo hi : ℚ) (f : ℚ → ℚ) (x y peak : ℚ) (hf : concave_interval.rat lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : peak ≤ y) (hpeak : peak ≤ hi) (hmax : ∀ z : ℚ, lo ≤ z → z ≤ hi → f z ≤ f peak) : f x ≤ f y
+  apply concave_interval.mono_below_max.rat lo hi f x y peak hf hx hxy
+  · linarith
+  · exact hpeak
+  · exact hmax
+
++ rat_missing_max (lo hi : ℚ) (f : ℚ → ℚ) (x y peak : ℚ) (hf : concave_interval.rat lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : y ≤ peak) (hpeak : peak ≤ hi) : f x ≤ f y
+  apply concave_interval.mono_below_max.rat lo hi f x y peak hf hx hxy hy hpeak
+  intro z hz0 hz1
+  linarith

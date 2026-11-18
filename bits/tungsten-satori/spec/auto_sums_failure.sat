@@ -1,0 +1,25 @@
+import sum_range
+
++ nat_missing_range (f : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) : f m ≤ 7 := by auto
++ nat_wrong_upper (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, 7 ≤ f i) : sum_below n f ≤ (n : ℕ)*7 := by auto
++ nat_wrong_shift (f : ℕ → ℕ) (a b : ℕ) : sum_below (a+b) f = sum_below a f+sum_below b f := by auto
++ nat_wrong_scale (f : ℕ → ℕ) (c : ℕ) (n : ℕ) : sum_below n (fun i => c*f i) = c+sum_below n f := by auto
++ nat_cycle (x : ℕ) (h : x ≤ 0 → x ≤ 1) (k : x ≤ 1 → x ≤ 0) : x ≤ 0 := by auto
+
++ int_missing_range (f : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) : f m ≤ 7 := by auto
++ int_wrong_upper (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, 7 ≤ f i) : sum_below n f ≤ (n : ℤ)*7 := by auto
++ int_wrong_shift (f : ℕ → ℤ) (a b : ℕ) : sum_below (a+b) f = sum_below a f+sum_below b f := by auto
++ int_wrong_scale (f : ℕ → ℤ) (c : ℤ) (n : ℕ) : sum_below n (fun i => c*f i) = c+sum_below n f := by auto
++ int_cycle (x : ℤ) (h : x ≤ 0 → x ≤ 1) (k : x ≤ 1 → x ≤ 0) : x ≤ 0 := by auto
+
++ rat_missing_range (f : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) : f m ≤ 7 := by auto
++ rat_wrong_upper (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, 7 ≤ f i) : sum_below n f ≤ (n : ℚ)*7 := by auto
++ rat_wrong_shift (f : ℕ → ℚ) (a b : ℕ) : sum_below (a+b) f = sum_below a f+sum_below b f := by auto
++ rat_wrong_scale (f : ℕ → ℚ) (c : ℚ) (n : ℕ) : sum_below n (fun i => c*f i) = c+sum_below n f := by auto
++ rat_cycle (x : ℚ) (h : x ≤ 0 → x ≤ 1) (k : x ≤ 1 → x ≤ 0) : x ≤ 0 := by auto
+
++ real_missing_range (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) : f m ≤ 7 := by auto
++ real_wrong_upper (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, 7 ≤ f i) : sum_below n f ≤ (n : ℝ)*7 := by auto
++ real_wrong_shift (f : ℕ → ℝ) (a b : ℕ) : sum_below (a+b) f = sum_below a f+sum_below b f := by auto
++ real_wrong_scale (f : ℕ → ℝ) (c : ℝ) (n : ℕ) : sum_below n (fun i => c*f i) = c+sum_below n f := by auto
++ real_cycle (x : ℝ) (h : x ≤ 0 → x ≤ 1) (k : x ≤ 1 → x ≤ 0) : x ≤ 0 := by auto

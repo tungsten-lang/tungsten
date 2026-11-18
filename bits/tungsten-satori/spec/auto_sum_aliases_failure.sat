@@ -1,0 +1,94 @@
+import arith
+
+-> accum (f : ℕ → α) : ℕ → α
+  | 0 => 0
+  | n + 1 => accum f n + f n
+
+-> wrapped (n : ℕ) (f : ℕ → α) : α := accum f n
+
+-> bad_seed (f : ℕ → ℤ) : ℕ → ℤ
+  | 0 => 1
+  | n + 1 => bad_seed f n + f n
+
+-> bad_index (f : ℕ → ℤ) : ℕ → ℤ
+  | 0 => 0
+  | n + 1 => bad_index f n + f (n+1)
+
+-> bad_weight (f : ℕ → ℤ) : ℕ → ℤ
+  | 0 => 0
+  | n + 1 => bad_weight f n + 2*f n
+
++ nat_missing (f : ℕ → ℕ) (n : ℕ) (c : ℕ) : accum f n=n*c
+  auto
+
++ nat_wrong_value (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i=c+1) : accum f n=n*c
+  auto
+
++ nat_short_range (f : ℕ → ℕ) (n m : ℕ) (c : ℕ) (hm : m<n) (h : ∀ i < m, f i=c) : accum f n=n*c
+  auto
+
++ nat_wrong_guard (f : ℕ → ℕ → ℕ) (n m k : ℕ) (c : ℕ) (hk : k=m) (h : ∀ j < m, accum (f j) n=c) : (∑ i < n, f k i)=c
+  auto
+
++ nat_cycle (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : (∑ i < n, f i)=n*c → accum f n=n*c) : accum f n=n*c
+  auto
+
++ int_missing (f : ℕ → ℤ) (n : ℕ) (c : ℤ) : accum f n=(n : ℤ)*c
+  auto
+
++ int_wrong_value (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i=c+1) : accum f n=(n : ℤ)*c
+  auto
+
++ int_short_range (f : ℕ → ℤ) (n m : ℕ) (c : ℤ) (hm : m<n) (h : ∀ i < m, f i=c) : accum f n=(n : ℤ)*c
+  auto
+
++ int_wrong_guard (f : ℕ → ℕ → ℤ) (n m k : ℕ) (c : ℤ) (hk : k=m) (h : ∀ j < m, accum (f j) n=c) : (∑ i < n, f k i)=c
+  auto
+
++ int_cycle (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : (∑ i < n, f i)=(n : ℤ)*c → accum f n=(n : ℤ)*c) : accum f n=(n : ℤ)*c
+  auto
+
++ rat_missing (f : ℕ → ℚ) (n : ℕ) (c : ℚ) : accum f n=(n : ℚ)*c
+  auto
+
++ rat_wrong_value (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i=c+1) : accum f n=(n : ℚ)*c
+  auto
+
++ rat_short_range (f : ℕ → ℚ) (n m : ℕ) (c : ℚ) (hm : m<n) (h : ∀ i < m, f i=c) : accum f n=(n : ℚ)*c
+  auto
+
++ rat_wrong_guard (f : ℕ → ℕ → ℚ) (n m k : ℕ) (c : ℚ) (hk : k=m) (h : ∀ j < m, accum (f j) n=c) : (∑ i < n, f k i)=c
+  auto
+
++ rat_cycle (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : (∑ i < n, f i)=(n : ℚ)*c → accum f n=(n : ℚ)*c) : accum f n=(n : ℚ)*c
+  auto
+
++ real_missing (f : ℕ → ℝ) (n : ℕ) (c : ℝ) : accum f n=(n : ℝ)*c
+  auto
+
++ real_wrong_value (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i=c+1) : accum f n=(n : ℝ)*c
+  auto
+
++ real_short_range (f : ℕ → ℝ) (n m : ℕ) (c : ℝ) (hm : m<n) (h : ∀ i < m, f i=c) : accum f n=(n : ℝ)*c
+  auto
+
++ real_wrong_guard (f : ℕ → ℕ → ℝ) (n m k : ℕ) (c : ℝ) (hk : k=m) (h : ∀ j < m, accum (f j) n=c) : (∑ i < n, f k i)=c
+  auto
+
++ real_cycle (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : (∑ i < n, f i)=(n : ℝ)*c → accum f n=(n : ℝ)*c) : accum f n=(n : ℝ)*c
+  auto
+
++ bad_seed_reject (f : ℕ → ℤ) (n : ℕ) : bad_seed f n = (∑ i < n, f i)
+  auto
+
++ bad_index_reject (f : ℕ → ℤ) (n : ℕ) : bad_index f n = (∑ i < n, f i)
+  auto
+
++ bad_weight_reject (f : ℕ → ℤ) (n : ℕ) : bad_weight f n = (∑ i < n, f i)
+  auto
+
++ natural_telescope (f : ℕ → ℕ) (n : ℕ) : accum (fun i => f (i+1)-f i) n=f n-f 0
+  auto
+
++ generic_missing (f g : ℕ → α) (n : ℕ) : accum f n=accum g n
+  auto

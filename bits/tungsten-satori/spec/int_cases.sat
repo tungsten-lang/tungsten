@@ -1,0 +1,6 @@
+import arith
++ degree_cases (e : ℤ) : (∃ n : ℕ, e = 0 - ((n : ℤ) + 1)) ∨ (∃ n : ℕ, e = 2 * (n : ℤ)) ∨ (∃ n : ℕ, e = 2 * (n : ℤ) + 1) := int_negative_or_even_or_odd e
++ negative_four : ∃ n : ℕ, (-4 : ℤ) = 0 - ((n : ℤ) + 1) := int_negative_succ (-4) (by decide)
++ zero_is_nonnegative : ∃ n : ℕ, (0 : ℤ) = (n : ℤ) := int_nonnegative_nat 0 (by decide)
++ odd_seven : (∃ n : ℕ, (7 : ℤ) = 2 * (n : ℤ)) ∨ (∃ n : ℕ, (7 : ℤ) = 2 * (n : ℤ) + 1) := int_nonnegative_even_or_odd 7 (by decide)
+#axioms degree_cases

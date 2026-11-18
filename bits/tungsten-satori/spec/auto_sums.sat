@@ -1,0 +1,125 @@
+import arith
+
+-> nat_shifted (d : ℕ → ℕ) (a i : ℕ) : ℕ := d (a + i)
+-> nat_scaled (e : ℕ → ℕ) (s : ℕ) (i : ℕ) : ℕ := s * e i
+
++ nat_sum_split (d : ℕ → ℕ) (a b : ℕ) : sum_below (a + b) d = sum_below a d + sum_below b (nat_shifted d a)
+  auto
+
++ nat_sum_scaled (e : ℕ → ℕ) (s : ℕ) (n : ℕ) : sum_below n (nat_scaled e s) = s * sum_below n e
+  auto
+
++ nat_sum_nonneg_all (g : ℕ → ℕ) (n : ℕ) (h : ∀ i : ℕ, 0 ≤ g i) : 0 ≤ sum_below n g
+  auto
+
++ nat_sum_lo (g : ℕ → ℕ) (lo : ℕ) (nn : ℕ) (h : ∀ i < nn, lo ≤ g i) (n : ℕ) : n ≤ nn → (n : ℕ) * lo ≤ sum_below n g
+  auto
+
++ nat_sum_hi (g : ℕ → ℕ) (hi : ℕ) (nn : ℕ) (h : ∀ i < nn, g i ≤ hi) (n : ℕ) : n ≤ nn → sum_below n g ≤ (n : ℕ) * hi
+  auto
+
++ nat_sum_mono (d : ℕ → ℕ) (a b : ℕ) (h : ∀ i : ℕ, 0 ≤ d i) (hab : a ≤ b) : sum_below a d ≤ sum_below b d
+  auto
+
++ nat_add (f g : ℕ → ℕ) (n : ℕ) : sum_below n (fun i => f i+g i) = sum_below n f+sum_below n g := by auto
++ nat_right_scale (f : ℕ → ℕ) (n : ℕ) (c : ℕ) : sum_below n (fun i => f i*c) = sum_below n f*c := by auto
++ nat_pointwise (f g : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) : sum_below n f ≤ sum_below n g := by auto
++ nat_guarded (f : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m ≤ 7 := by auto
+
+-> int_shifted (d : ℕ → ℤ) (a i : ℕ) : ℤ := d (a + i)
+-> int_scaled (e : ℕ → ℤ) (s : ℤ) (i : ℕ) : ℤ := s * e i
+
++ int_sum_split (d : ℕ → ℤ) (a b : ℕ) : sum_below (a + b) d = sum_below a d + sum_below b (int_shifted d a)
+  auto
+
++ int_sum_scaled (e : ℕ → ℤ) (s : ℤ) (n : ℕ) : sum_below n (int_scaled e s) = s * sum_below n e
+  auto
+
++ int_sum_nonneg_all (g : ℕ → ℤ) (n : ℕ) (h : ∀ i : ℕ, 0 ≤ g i) : 0 ≤ sum_below n g
+  auto
+
++ int_sum_lo (g : ℕ → ℤ) (lo : ℤ) (nn : ℕ) (h : ∀ i < nn, lo ≤ g i) (n : ℕ) : n ≤ nn → (n : ℤ) * lo ≤ sum_below n g
+  auto
+
++ int_sum_hi (g : ℕ → ℤ) (hi : ℤ) (nn : ℕ) (h : ∀ i < nn, g i ≤ hi) (n : ℕ) : n ≤ nn → sum_below n g ≤ (n : ℤ) * hi
+  auto
+
++ int_sum_mono (d : ℕ → ℤ) (a b : ℕ) (h : ∀ i : ℕ, 0 ≤ d i) (hab : a ≤ b) : sum_below a d ≤ sum_below b d
+  auto
+
++ int_add (f g : ℕ → ℤ) (n : ℕ) : sum_below n (fun i => f i+g i) = sum_below n f+sum_below n g := by auto
++ int_right_scale (f : ℕ → ℤ) (n : ℕ) (c : ℤ) : sum_below n (fun i => f i*c) = sum_below n f*c := by auto
++ int_pointwise (f g : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) : sum_below n f ≤ sum_below n g := by auto
++ int_guarded (f : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m ≤ 7 := by auto
+
+-> rat_shifted (d : ℕ → ℚ) (a i : ℕ) : ℚ := d (a + i)
+-> rat_scaled (e : ℕ → ℚ) (s : ℚ) (i : ℕ) : ℚ := s * e i
+
++ rat_sum_split (d : ℕ → ℚ) (a b : ℕ) : sum_below (a + b) d = sum_below a d + sum_below b (rat_shifted d a)
+  auto
+
++ rat_sum_scaled (e : ℕ → ℚ) (s : ℚ) (n : ℕ) : sum_below n (rat_scaled e s) = s * sum_below n e
+  auto
+
++ rat_sum_nonneg_all (g : ℕ → ℚ) (n : ℕ) (h : ∀ i : ℕ, 0 ≤ g i) : 0 ≤ sum_below n g
+  auto
+
++ rat_sum_lo (g : ℕ → ℚ) (lo : ℚ) (nn : ℕ) (h : ∀ i < nn, lo ≤ g i) (n : ℕ) : n ≤ nn → (n : ℚ) * lo ≤ sum_below n g
+  auto
+
++ rat_sum_hi (g : ℕ → ℚ) (hi : ℚ) (nn : ℕ) (h : ∀ i < nn, g i ≤ hi) (n : ℕ) : n ≤ nn → sum_below n g ≤ (n : ℚ) * hi
+  auto
+
++ rat_sum_mono (d : ℕ → ℚ) (a b : ℕ) (h : ∀ i : ℕ, 0 ≤ d i) (hab : a ≤ b) : sum_below a d ≤ sum_below b d
+  auto
+
++ rat_add (f g : ℕ → ℚ) (n : ℕ) : sum_below n (fun i => f i+g i) = sum_below n f+sum_below n g := by auto
++ rat_right_scale (f : ℕ → ℚ) (n : ℕ) (c : ℚ) : sum_below n (fun i => f i*c) = sum_below n f*c := by auto
++ rat_pointwise (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) : sum_below n f ≤ sum_below n g := by auto
++ rat_guarded (f : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m ≤ 7 := by auto
+
+-> real_shifted (d : ℕ → ℝ) (a i : ℕ) : ℝ := d (a + i)
+-> real_scaled (e : ℕ → ℝ) (s : ℝ) (i : ℕ) : ℝ := s * e i
+
++ real_sum_split (d : ℕ → ℝ) (a b : ℕ) : sum_below (a + b) d = sum_below a d + sum_below b (real_shifted d a)
+  auto
+
++ real_sum_scaled (e : ℕ → ℝ) (s : ℝ) (n : ℕ) : sum_below n (real_scaled e s) = s * sum_below n e
+  auto
+
++ real_sum_nonneg_all (g : ℕ → ℝ) (n : ℕ) (h : ∀ i : ℕ, 0 ≤ g i) : 0 ≤ sum_below n g
+  auto
+
++ real_sum_lo (g : ℕ → ℝ) (lo : ℝ) (nn : ℕ) (h : ∀ i < nn, lo ≤ g i) (n : ℕ) : n ≤ nn → (n : ℝ) * lo ≤ sum_below n g
+  auto
+
++ real_sum_hi (g : ℕ → ℝ) (hi : ℝ) (nn : ℕ) (h : ∀ i < nn, g i ≤ hi) (n : ℕ) : n ≤ nn → sum_below n g ≤ (n : ℝ) * hi
+  auto
+
++ real_sum_mono (d : ℕ → ℝ) (a b : ℕ) (h : ∀ i : ℕ, 0 ≤ d i) (hab : a ≤ b) : sum_below a d ≤ sum_below b d
+  auto
+
++ real_add (f g : ℕ → ℝ) (n : ℕ) : sum_below n (fun i => f i+g i) = sum_below n f+sum_below n g := by auto
++ real_right_scale (f : ℕ → ℝ) (n : ℕ) (c : ℝ) : sum_below n (fun i => f i*c) = sum_below n f*c := by auto
++ real_pointwise (f g : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) : sum_below n f ≤ sum_below n g := by auto
++ real_guarded (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m ≤ 7 := by auto
+
+-> nat_scaled_again (f : ℕ → ℕ) (c : ℕ) : ℕ → ℕ := nat_scaled f c
++ nat_alias_chain (f : ℕ → ℕ) (c : ℕ) (n : ℕ) : sum_below n (nat_scaled_again f c) = c*sum_below n f := by auto
++ nat_alias_exact (f : ℕ → ℕ) (c : ℕ) (n : ℕ) : sum_below n (nat_scaled f c) = c*sum_below n f := by exact sum_const_mul.nat
++ nat_alias_apply (f : ℕ → ℕ) (c : ℕ) (n : ℕ) : sum_below n (nat_scaled f c) = c*sum_below n f := by apply sum_const_mul.nat
+
+-> int_scaled_again (f : ℕ → ℤ) (c : ℤ) : ℕ → ℤ := int_scaled f c
++ int_alias_chain (f : ℕ → ℤ) (c : ℤ) (n : ℕ) : sum_below n (int_scaled_again f c) = c*sum_below n f := by auto
++ int_alias_exact (f : ℕ → ℤ) (c : ℤ) (n : ℕ) : sum_below n (int_scaled f c) = c*sum_below n f := by exact sum_const_mul.int
++ int_alias_apply (f : ℕ → ℤ) (c : ℤ) (n : ℕ) : sum_below n (int_scaled f c) = c*sum_below n f := by apply sum_const_mul.int
+
+-> rat_scaled_again (f : ℕ → ℚ) (c : ℚ) : ℕ → ℚ := rat_scaled f c
++ rat_alias_chain (f : ℕ → ℚ) (c : ℚ) (n : ℕ) : sum_below n (rat_scaled_again f c) = c*sum_below n f := by auto
++ rat_alias_exact (f : ℕ → ℚ) (c : ℚ) (n : ℕ) : sum_below n (rat_scaled f c) = c*sum_below n f := by exact sum_const_mul.rat
++ rat_alias_apply (f : ℕ → ℚ) (c : ℚ) (n : ℕ) : sum_below n (rat_scaled f c) = c*sum_below n f := by apply sum_const_mul.rat
+
+-> real_scaled_again (f : ℕ → ℝ) (c : ℝ) : ℕ → ℝ := real_scaled f c
++ real_alias_chain (f : ℕ → ℝ) (c : ℝ) (n : ℕ) : sum_below n (real_scaled_again f c) = c*sum_below n f := by auto
++ real_alias_exact (f : ℕ → ℝ) (c : ℝ) (n : ℕ) : sum_below n (real_scaled f c) = c*sum_below n f := by exact sum_const_mul.real
++ real_alias_apply (f : ℕ → ℝ) (c : ℝ) (n : ℕ) : sum_below n (real_scaled f c) = c*sum_below n f := by apply sum_const_mul.real

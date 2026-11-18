@@ -1,0 +1,4 @@
+-- A free replacement must not become a bound variable with the same name.
++ invalid_capture (a y : α) (h : a = y) (p : α → α → Prop) (hp : ∀ y, p y y) : ∀ y, p a y := by rw [h]; exact hp
++ invalid_bound_replacement (a b : α) (h : a = b) (p : α → Prop) (hp : p b) : ∀ a, p a := by rw [h]; exact hp
++ invalid_bound_witness (a b : α) (h : a = b) (p : α → Prop) (hp : ∃ b, p b) : p a := by rw [h]; exact hp

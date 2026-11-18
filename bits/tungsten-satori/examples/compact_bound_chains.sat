@@ -1,0 +1,13 @@
+import arith
+
++ power_bound (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c ≤ b^n) : c ≤ x^n
+  auto
+
++ strict_bound (x b c : ℝ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c < b^n) : c < x^n
+  auto
+
++ monotone_bound (f : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v) (x b c : ℚ) (hb : b ≤ x) (hc : c ≤ f b) : c ≤ f x
+  auto
+
++ max_bound (a b c d u : ℚ) (ha : a ≤ c) (hb : b ≤ d) (hu : u ≤ max a b) : u ≤ max c d
+  auto

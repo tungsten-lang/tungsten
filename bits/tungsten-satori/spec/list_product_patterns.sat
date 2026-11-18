@@ -1,0 +1,45 @@
+import list_product
+
++ memberwise_product (xs : list α) (f g : α → β) (h : ∀ x ∈ xs, f x = g x) : (∏ x ∈ xs, f x) = ∏ x ∈ xs, g x := list_product.congr xs f g h
++ product_map (xs : list α) (f : α → β) (g : β → γ) : (∏ x ∈ map f xs, g x) = ∏ x ∈ xs, g (f x) := list_product.map xs f g
++ multiplicative_invariant (p : β → Prop) (xs : list α) (f : α → β) (h1 : p (1 : β)) (hmul : ∀ a b, p a → p b → p (a * b)) (h : ∀ x ∈ xs, p (f x)) : p (∏ x ∈ xs, f x) := list_product.closed p xs f h1 hmul h
++ real_nonnegative (xs : list α) (f : α → ℝ) (h : ∀ x ∈ xs, 0 ≤ f x) : 0 ≤ ∏ x ∈ xs, f x := prod_list_nonneg.real xs f h
++ rational_comparison (xs : list α) (f g : α → ℚ) (hf : ∀ x ∈ xs, 0 ≤ f x) (h : ∀ x ∈ xs, f x ≤ g x) : (∏ x ∈ xs, f x) ≤ ∏ x ∈ xs, g x := prod_list_le.rat xs f g hf h
++ integer_unit_bound (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, 1 ≤ f x) : 1 ≤ ∏ x ∈ xs, f x := prod_list_one_le.int xs f h
++ natural_comparison (xs : list α) (f g : α → ℕ) (h : ∀ x ∈ xs, f x ≤ g x) : (∏ x ∈ xs, f x) ≤ ∏ x ∈ xs, g x := prod_list_le.nat xs f g h
++ real_bernoulli (xs : list α) (f : α → ℝ) (h : ∀ x ∈ xs, 0 ≤ f x) : 1 + (∑ x ∈ xs, f x) ≤ ∏ x ∈ xs, 1 + f x := one_add_sum_list_le_prod_list.real xs f h
++ integer_bernoulli (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, 0 ≤ f x) : 1 + (∑ x ∈ xs, f x) ≤ ∏ x ∈ xs, 1 + f x := one_add_sum_list_le_prod_list.int xs f h
++ natural_bernoulli (xs : list α) (f : α → ℕ) : 1 + (∑ x ∈ xs, f x) ≤ ∏ x ∈ xs, 1 + f x := one_add_sum_list_le_prod_list.nat xs f
++ append_product (xs ys : list α) (f : α → ℝ) : (∏ x ∈ xs ++ ys, f x) = (∏ x ∈ xs, f x) * ∏ x ∈ ys, f x := prod_list_append.real xs ys f
++ multiply_products (xs : list α) (f g : α → ℤ) : (∏ x ∈ xs, f x * g x) = (∏ x ∈ xs, f x) * ∏ x ∈ xs, g x := prod_list_mul.int xs f g
++ empty_product (f : α → β) : prod_list [] f = (1 : β) := list_product.nil f
++ repeated_factors : (∏ x ∈ [2, 2, 2], x) = 8 := by decide
++ zero_factor : (∏ x ∈ [2, 0, 2], x) = 0 := by decide
++ zero_increments : 1 + sum_list [0, 0] (fun (x : ℚ) => x) ≤ prod_list [0, 0] (fun (x : ℚ) => 1 + x)
+  apply one_add_sum_list_le_prod_list.rat
+  intro x hx; simp at hx; rw [hx]; decide
+
+-- Jiang–Su's product bound using standard operators.
+-> nonneg_all (l : list ℚ) : Prop := ∀ x ∈ l, 0 ≤ x
+-> lsum (l : list ℚ) : ℚ := sum_list l (fun x => x)
+-> lprod1 (l : list ℚ) : ℚ := prod_list l (fun x => 1 + x)
++ lsum_nonneg (l : list ℚ) : nonneg_all l → 0 ≤ lsum l
+  unfold nonneg_all lsum
+  exact sum_list_nonneg.rat l (fun x => x)
++ prod_ge_one_add_sum (l : list ℚ) : nonneg_all l → 1 + lsum l ≤ lprod1 l
+  unfold nonneg_all lsum lprod1
+  exact one_add_sum_list_le_prod_list.rat l (fun x => x)
+
+#axioms memberwise_product
+#axioms product_map
+#axioms multiplicative_invariant
+#axioms real_nonnegative
+#axioms rational_comparison
+#axioms integer_unit_bound
+#axioms natural_comparison
+#axioms real_bernoulli
+#axioms integer_bernoulli
+#axioms natural_bernoulli
+#axioms append_product
+#axioms multiply_products
+#axioms prod_ge_one_add_sum

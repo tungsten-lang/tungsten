@@ -1,0 +1,107 @@
+-- List folds share an element-first step: step element state.
+-- foldl executes from left to right; foldr combines from right to left.
+import list
+
+-> list.foldl (step : α → β → β) : list α → β → β
+  | [], state => state
+  | x :: xs, state => list.foldl step xs (step x state)
+-> list.foldr (step : α → β → β) : list α → β → β
+  | [], state => state
+  | x :: xs, state => step x (list.foldr step xs state)
+
+@[simp] + list.foldl_nil (step : α → β → β) (state : β) : list.foldl step [] state = state := by rfl
+@[simp] + list.foldl_cons (step : α → β → β) (x : α) (xs : list α) (state : β) : list.foldl step (x :: xs) state = list.foldl step xs (step x state) := by rfl
+@[simp] + list.foldr_nil (step : α → β → β) (state : β) : list.foldr step [] state = state := by rfl
+@[simp] + list.foldr_cons (step : α → β → β) (x : α) (xs : list α) (state : β) : list.foldr step (x :: xs) state = step x (list.foldr step xs state) := by rfl
+
++ list.foldl_append (step : α → β → β) (xs ys : list α) : ∀ state, list.foldl step (xs ++ ys) state = list.foldl step ys (list.foldl step xs state)
+  induction xs with state x xs ih state
+  · simp [append]
+  · simp [append, ih]
++ list.foldr_append (step : α → β → β) (xs ys : list α) (state : β) : list.foldr step (xs ++ ys) state = list.foldr step xs (list.foldr step ys state)
+  induction xs with x xs ih
+  · simp [append]
+  · simp [append, ih]
++ list.foldl_map (step : β → γ → γ) (f : α → β) (xs : list α) : ∀ state, list.foldl step (map f xs) state = list.foldl (fun x s => step (f x) s) xs state
+  induction xs with state x xs ih state
+  · simp [map]
+  · simp [map, ih]
++ list.foldr_map (step : β → γ → γ) (f : α → β) (xs : list α) (state : γ) : list.foldr step (map f xs) state = list.foldr (fun x s => step (f x) s) xs state
+  induction xs with x xs ih
+  · simp [map]
+  · simp [map, ih]
+
+-- An invariant need only survive steps whose elements occur in the list.
++ list.foldl_invariant_on (step : α → β → β) (p : β → Prop) (xs : list α) : (∀ x ∈ xs, ∀ s, p s → p (step x s)) → ∀ s, p s → p (list.foldl step xs s)
+  induction xs with h s hs x xs ih h s hs
+  · simp
+  · have head := h x (by simp) s hs
+    have tail : ∀ y ∈ xs, ∀ v, p v → p (step y v)
+      intro y hy; exact h y (by simp [hy])
+    rw [list.foldl_cons]
+    exact ih tail (step x s) head
++ list.foldr_invariant_on (step : α → β → β) (p : β → Prop) (xs : list α) : (∀ x ∈ xs, ∀ s, p s → p (step x s)) → ∀ s, p s → p (list.foldr step xs s)
+  induction xs with h s hs x xs ih h s hs
+  · simp
+  · have tail : ∀ y ∈ xs, ∀ v, p v → p (step y v)
+      intro y hy; exact h y (by simp [hy])
+    rw [list.foldr_cons]
+    exact h x (by simp) (list.foldr step xs s) (ih tail s hs)
++ list.foldl_invariant (step : α → β → β) (p : β → Prop) (h : ∀ x s, p s → p (step x s)) (xs : list α) (s : β) (hs : p s) : p (list.foldl step xs s)
+  apply list.foldl_invariant_on step p xs
+  · intro x hx; exact h x
+  · exact hs
++ list.foldr_invariant (step : α → β → β) (p : β → Prop) (h : ∀ x s, p s → p (step x s)) (xs : list α) (s : β) (hs : p s) : p (list.foldr step xs s)
+  apply list.foldr_invariant_on step p xs
+  · intro x hx; exact h x
+  · exact hs
+
+-- Keep two mutually dependent facts without repackaging the step rule.
++ list.foldl_invariants (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (list.foldl step xs s) ∧ q (list.foldl step xs s)
+  exact list.foldl_invariant step (fun s => p s ∧ q s) (by intro x v hv; exact h x v hv.1 hv.2) xs s ⟨hp, hq⟩
++ list.foldr_invariants (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (list.foldr step xs s) ∧ q (list.foldr step xs s)
+  exact list.foldr_invariant step (fun s => p s ∧ q s) (by intro x v hv; exact h x v hv.1 hv.2) xs s ⟨hp, hq⟩
+
+-- A map intertwining individual steps also intertwines complete runs.
++ list.foldl_commutes (step : α → β → β) (next : α → γ → γ) (f : β → γ) (h : ∀ x s, f (step x s) = next x (f s)) (xs : list α) : ∀ s, f (list.foldl step xs s) = list.foldl next xs (f s)
+  induction xs with s x xs ih s
+  · simp
+  · simp [ih, h]
++ list.foldr_commutes (step : α → β → β) (next : α → γ → γ) (f : β → γ) (h : ∀ x s, f (step x s) = next x (f s)) (xs : list α) (s : β) : f (list.foldr step xs s) = list.foldr next xs (f s)
+  induction xs with x xs ih
+  · simp
+  · simp [h, ih]
++ list.foldl_preserves (step : α → β → β) (f : β → γ) (h : ∀ x s, f (step x s) = f s) (xs : list α) : ∀ s, f (list.foldl step xs s) = f s
+  induction xs with s x xs ih s
+  · simp
+  · simp [ih, h]
++ list.foldr_preserves (step : α → β → β) (f : β → γ) (h : ∀ x s, f (step x s) = f s) (xs : list α) (s : β) : f (list.foldr step xs s) = f s
+  induction xs with x xs ih
+  · simp
+  · simp [h, ih]
++ list.foldl_fixed (step : α → β → β) (s : β) (h : ∀ x, step x s = s) (xs : list α) : list.foldl step xs s = s
+  induction xs with x xs ih
+  · simp
+  · simp [h, ih]
++ list.foldr_fixed (step : α → β → β) (s : β) (h : ∀ x, step x s = s) (xs : list α) : list.foldr step xs s = s
+  induction xs with x xs ih
+  · simp
+  · simp [ih, h]
+
+-- A recursive traversal may carry a different state into its tail call.
++ list.recursive_invariant (run : list α → β → β) (p : β → Prop)
+    (base : ∀ s, p s → p (run [] s))
+    (step : ∀ x xs, (∀ s, p s → p (run xs s)) → ∀ s, p s → p (run (x :: xs) s))
+    (xs : list α) : ∀ s, p s → p (run xs s)
+  induction xs with s hs x xs ih s hs
+  · exact base s hs
+  · exact step x xs ih s hs
+
+-- Coordinate relations keep the state general in the tail hypothesis.
++ list.recursive_relation (p : list α → β → Prop)
+    (base : ∀ s, p [] s)
+    (step : ∀ x xs, (∀ s, p xs s) → ∀ s, p (x :: xs) s)
+    (xs : list α) : ∀ s, p xs s
+  induction xs with s x xs ih s
+  · exact base s
+  · exact step x xs ih s

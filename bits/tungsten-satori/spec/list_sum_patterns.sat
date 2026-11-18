@@ -1,0 +1,15 @@
+import list_sum
+
+-- The sum comparisons in the Borsuk development are direct applications.
++ vector_sum_le (G : list (list ℝ)) (f k : list ℝ → ℝ) (h : ∀ x ∈ G, f x ≤ k x) : sum_list G f ≤ sum_list G k := sum_list_le.real G f k h
++ vector_sum_nonneg (G : list (list ℝ)) (f : list ℝ → ℝ) (h : ∀ x, 0 ≤ f x) : 0 ≤ sum_list G f := sum_list_nonneg.real G f (by intro x hx; exact h x)
++ vector_sum_scale (G : list (list ℝ)) (f : list ℝ → ℝ) (c : ℝ) : sum_list G (fun x => c * f x) = c * sum_list G f := sum_list_const_mul.real G f c
++ list_member_bound (xs : list ℕ) (x : ℕ) (h : x ∈ xs) : x ≤ sum xs := member_le_sum.nat xs x h
++ mapped_member_bound (xs : list α) (f : α → ℚ) (x : α) (h : x ∈ xs) (hn : ∀ y ∈ xs, 0 ≤ f y) : f x ≤ sum_list xs f := sum_list_member_le.rat xs f x h hn
++ mapped_member_notation (xs : list α) (f : α → ℚ) (x : α) (h : x ∈ xs) (hn : ∀ y ∈ xs, 0 ≤ f y) : f x ≤ ∑ y ∈ xs, f y := sum_list_member_le.rat xs f x h hn
++ sum_le_notation (xs : list α) (f g : α → ℝ) (h : ∀ x ∈ xs, f x ≤ g x) : (∑ x ∈ xs, f x) ≤ ∑ x ∈ xs, g x := sum_list_le.real xs f g h
++ eta_hypothesis (xs : list α) (f : α → ℕ) (h : sum_list xs f = 1) : (∑ x ∈ xs, f x) = 1 := h
++ duplicates_count : (∑ x ∈ [2, 2, 3], x) = 7 := by decide
++ negative_tail_counterexample : ¬ ((2 : ℤ) ≤ ∑ x ∈ [(2 : ℤ), -5], x) := by decide
+#axioms vector_sum_le
+#axioms vector_sum_scale

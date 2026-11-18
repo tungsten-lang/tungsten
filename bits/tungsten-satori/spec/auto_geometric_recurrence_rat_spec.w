@@ -1,0 +1,2 @@
+use auto_geometric_recurrence_check
+check_auto_geometric_recurrence("rat")

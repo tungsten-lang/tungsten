@@ -1,0 +1,31 @@
+-- Import only this tactic's prerequisites so both engines can replay the
+-- complete proof search without loading unrelated arithmetic libraries.
+import core
+import order
+
++ natural_scale (a b c : ℕ) (h : a ≤ b) : c * a ≤ c * b := by nlinarith
++ natural_scale_right (a b c : ℕ) (h : a ≤ b) : a * c ≤ b * c := by nlinarith
++ natural_function_weight (f w : α → ℕ) (x : α) (c : ℕ) (h : c ≤ f x) : c * w x ≤ w x * f x := by nlinarith
++ natural_product_weight (a b c d : ℕ) (h : a ≤ b) : (c * d) * a ≤ (c * d) * b := by nlinarith
++ natural_square_weight (a b c : ℕ) (h : a ≤ b) : c ^ 2 * a ≤ c ^ 2 * b := by nlinarith
++ natural_sub_weight (a b c d : ℕ) (h : a ≤ b) : (c - d) * a ≤ (c - d) * b := by nlinarith
++ natural_product_mono (a b c d : ℕ) (h : a ≤ b) (k : c ≤ d) : a * c ≤ b * d := by nlinarith
++ natural_strict_scale (a b c : ℕ) (h : a < b) (hc : 0 < c) : a * c < b * c := by nlinarith
++ natural_weak_scale (a b c : ℕ) (h : a < b) : a * c ≤ b * c := by nlinarith
++ natural_zero_weight (a b : ℕ) (h : a < b) : 0 * a ≤ 0 * b := by nlinarith
++ signed_scale (a b c : ℤ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b := by nlinarith
+
+-- Same statement as the Chai invariant-ideals example's dimension argument.
++ dimension_gap (d e : ℕ) (hd : 2 ≤ d) (he : 1 ≤ e) : d * e * e < (d * e) * (d * e) - 1 ∨ (d = 2 ∧ e = 1)
+  left
+  have lo : 2 ≤ d * e * e := by nlinarith
+  have hi : 2 * (d * e * e) ≤ (d * e) * (d * e) := by nlinarith
+  omega
+
+#axioms natural_scale
+#axioms natural_function_weight
+#axioms natural_product_weight
+#axioms natural_sub_weight
+#axioms natural_product_mono
+#axioms signed_scale
+#axioms dimension_gap

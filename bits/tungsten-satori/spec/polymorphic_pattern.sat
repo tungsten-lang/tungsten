@@ -1,0 +1,28 @@
+-- The literal branches must keep their declared generic result types.
+-> poly_sum : list α → (α → β) → β
+  | [], f => 0
+  | x :: xs, f => f x + poly_sum xs f
+-> poly_product : list α → (α → β) → β
+  | [], f => 1
+  | x :: xs, f => f x * poly_product xs f
+-> poly_first (d : α) : list α → α
+  | [] => d
+  | x :: xs => x
+  | xs => d
+-> poly_twice : α → α
+  | x => x + x
+
++ nil_generic (f : α → β) : poly_sum [] f = (0 : β) := by simp [poly_sum]
++ cons_generic (x : α) (xs : list α) (f : α → β) : poly_sum (x :: xs) f = f x + poly_sum xs f := by simp [poly_sum]
++ nil_real (f : α → ℝ) : poly_sum [] f = 0 := by simp [poly_sum]
++ cons_rat (x : α) (xs : list α) (f : α → ℚ) : poly_sum (x :: xs) f = f x + poly_sum xs f := by simp [poly_sum]
++ product_nil_generic (f : α → β) : poly_product [] f = (1 : β) := by simp [poly_product]
++ product_cons_int (x : α) (xs : list α) (f : α → ℤ) : poly_product (x :: xs) f = f x * poly_product xs f := by simp [poly_product]
++ literal_nat : poly_sum [2, 3] (fun x => x) = 5 := by simp [poly_sum]
++ literal_rat : poly_sum [(1 / 2 : ℚ), (1 / 3 : ℚ)] (fun x => x) = 5 / 6 := by simp [poly_sum]
++ first_correct (a b : α) (xs : list α) : poly_first a (b :: xs) = b := by simp [poly_first]
++ twice_generic (x : α) : poly_twice x = x + x := by simp [poly_twice]
+#axioms nil_generic
+#axioms cons_generic
+#axioms product_nil_generic
+#axioms literal_rat

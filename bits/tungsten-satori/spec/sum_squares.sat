@@ -1,0 +1,52 @@
+import sum_squares
+
++ real_nonneg (xs : list α) (f : α → ℝ) : 0 ≤ sum_list xs (fun x => f x * f x) := list_sum.squares_nonneg.real xs f
++ real_terms (xs : list α) (f : α → ℝ) (h : sum_list xs (fun x => f x * f x) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.squares_eq_zero_iff.real xs f).mp h
++ real_zero (xs : list α) (f : α → ℝ) (h : ∀ x ∈ xs, f x = 0) : sum_list xs (fun x => f x * f x) = 0 := (list_sum.squares_eq_zero_iff.real xs f).mpr h
++ real_weighted_nonneg (xs : list α) (w f : α → ℝ) (h : ∀ x ∈ xs, 0 ≤ w x) : 0 ≤ sum_list xs (fun x => w x * (f x * f x)) := list_sum.weighted_squares_nonneg.real xs w f h
++ real_weighted_terms (xs : list α) (w f : α → ℝ) (p : ∀ x ∈ xs, 0 < w x) (h : sum_list xs (fun x => w x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.real xs w f p).mp h
++ real_weighted_zero (xs : list α) (w f : α → ℝ) (p : ∀ x ∈ xs, 0 < w x) (h : ∀ x ∈ xs, f x = 0) : sum_list xs (fun x => w x * (f x * f x)) = 0 := (list_sum.weighted_squares_eq_zero_iff.real xs w f p).mpr h
++ real_powers (xs : list α) (f : α → ℝ) : sum_list xs (fun x => f x ^ 2) = 0 ↔ ∀ x ∈ xs, f x = 0
+  simpa [pow_two.real] using list_sum.squares_eq_zero_iff.real xs f
++ real_empty (f : ℕ → ℝ) : sum_list [] (fun x => f x * f x) = 0 := by rfl
++ real_repeated (x : ℝ) (h : sum_list [x, x] (fun y => y * y) = 0) : x = 0 := (list_sum.squares_eq_zero_iff.real [x, x] (fun y => y)).mp h x (by simp)
++ real_zero_weights : sum_list [1] (fun (x : ℝ) => 0 * (x * x)) = 0 ∧ ¬ (∀ x ∈ [1], (x : ℝ) = 0) := by decide
++ real_signed_cancellation : sum_list [-1, 1] (fun (x : ℝ) => x * (1 * 1)) = 0 ∧ ¬ (∀ x ∈ [-1, 1], (1 : ℝ) = 0) := by decide
+
++ rat_nonneg (xs : list α) (f : α → ℚ) : 0 ≤ sum_list xs (fun x => f x * f x) := list_sum.squares_nonneg.rat xs f
++ rat_terms (xs : list α) (f : α → ℚ) (h : sum_list xs (fun x => f x * f x) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.squares_eq_zero_iff.rat xs f).mp h
++ rat_zero (xs : list α) (f : α → ℚ) (h : ∀ x ∈ xs, f x = 0) : sum_list xs (fun x => f x * f x) = 0 := (list_sum.squares_eq_zero_iff.rat xs f).mpr h
++ rat_weighted_nonneg (xs : list α) (w f : α → ℚ) (h : ∀ x ∈ xs, 0 ≤ w x) : 0 ≤ sum_list xs (fun x => w x * (f x * f x)) := list_sum.weighted_squares_nonneg.rat xs w f h
++ rat_weighted_terms (xs : list α) (w f : α → ℚ) (p : ∀ x ∈ xs, 0 < w x) (h : sum_list xs (fun x => w x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.rat xs w f p).mp h
++ rat_weighted_zero (xs : list α) (w f : α → ℚ) (p : ∀ x ∈ xs, 0 < w x) (h : ∀ x ∈ xs, f x = 0) : sum_list xs (fun x => w x * (f x * f x)) = 0 := (list_sum.weighted_squares_eq_zero_iff.rat xs w f p).mpr h
++ rat_powers (xs : list α) (f : α → ℚ) : sum_list xs (fun x => f x ^ 2) = 0 ↔ ∀ x ∈ xs, f x = 0
+  simpa [pow_two.rat] using list_sum.squares_eq_zero_iff.rat xs f
++ rat_empty (f : ℕ → ℚ) : sum_list [] (fun x => f x * f x) = 0 := by rfl
++ rat_repeated (x : ℚ) (h : sum_list [x, x] (fun y => y * y) = 0) : x = 0 := (list_sum.squares_eq_zero_iff.rat [x, x] (fun y => y)).mp h x (by simp)
++ rat_zero_weights : sum_list [1] (fun (x : ℚ) => 0 * (x * x)) = 0 ∧ ¬ (∀ x ∈ [1], (x : ℚ) = 0) := by decide
++ rat_signed_cancellation : sum_list [-1, 1] (fun (x : ℚ) => x * (1 * 1)) = 0 ∧ ¬ (∀ x ∈ [-1, 1], (1 : ℚ) = 0) := by decide
+
++ int_nonneg (xs : list α) (f : α → ℤ) : 0 ≤ sum_list xs (fun x => f x * f x) := list_sum.squares_nonneg.int xs f
++ int_terms (xs : list α) (f : α → ℤ) (h : sum_list xs (fun x => f x * f x) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.squares_eq_zero_iff.int xs f).mp h
++ int_zero (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, f x = 0) : sum_list xs (fun x => f x * f x) = 0 := (list_sum.squares_eq_zero_iff.int xs f).mpr h
++ int_weighted_nonneg (xs : list α) (w f : α → ℤ) (h : ∀ x ∈ xs, 0 ≤ w x) : 0 ≤ sum_list xs (fun x => w x * (f x * f x)) := list_sum.weighted_squares_nonneg.int xs w f h
++ int_weighted_terms (xs : list α) (w f : α → ℤ) (p : ∀ x ∈ xs, 0 < w x) (h : sum_list xs (fun x => w x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.int xs w f p).mp h
++ int_weighted_zero (xs : list α) (w f : α → ℤ) (p : ∀ x ∈ xs, 0 < w x) (h : ∀ x ∈ xs, f x = 0) : sum_list xs (fun x => w x * (f x * f x)) = 0 := (list_sum.weighted_squares_eq_zero_iff.int xs w f p).mpr h
++ int_powers (xs : list α) (f : α → ℤ) : sum_list xs (fun x => f x ^ 2) = 0 ↔ ∀ x ∈ xs, f x = 0
+  simpa [pow_two.int] using list_sum.squares_eq_zero_iff.int xs f
++ int_empty (f : ℕ → ℤ) : sum_list [] (fun x => f x * f x) = 0 := by rfl
++ int_repeated (x : ℤ) (h : sum_list [x, x] (fun y => y * y) = 0) : x = 0 := (list_sum.squares_eq_zero_iff.int [x, x] (fun y => y)).mp h x (by simp)
++ int_zero_weights : sum_list [1] (fun (x : ℤ) => 0 * (x * x)) = 0 ∧ ¬ (∀ x ∈ [1], (x : ℤ) = 0) := by decide
++ int_signed_cancellation : sum_list [-1, 1] (fun (x : ℤ) => x * (1 * 1)) = 0 ∧ ¬ (∀ x ∈ [-1, 1], (1 : ℤ) = 0) := by decide
+
++ nat_nonneg (xs : list α) (f : α → ℕ) : 0 ≤ sum_list xs (fun x => f x * f x) := list_sum.squares_nonneg.nat xs f
++ nat_terms (xs : list α) (f : α → ℕ) (h : sum_list xs (fun x => f x * f x) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.squares_eq_zero_iff.nat xs f).mp h
++ nat_zero (xs : list α) (f : α → ℕ) (h : ∀ x ∈ xs, f x = 0) : sum_list xs (fun x => f x * f x) = 0 := (list_sum.squares_eq_zero_iff.nat xs f).mpr h
++ nat_weighted_nonneg (xs : list α) (w f : α → ℕ) : 0 ≤ sum_list xs (fun x => w x * (f x * f x)) := list_sum.weighted_squares_nonneg.nat xs w f
++ nat_weighted_terms (xs : list α) (w f : α → ℕ) (p : ∀ x ∈ xs, 0 < w x) (h : sum_list xs (fun x => w x * (f x * f x)) = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.weighted_squares_eq_zero_iff.nat xs w f p).mp h
++ nat_weighted_zero (xs : list α) (w f : α → ℕ) (p : ∀ x ∈ xs, 0 < w x) (h : ∀ x ∈ xs, f x = 0) : sum_list xs (fun x => w x * (f x * f x)) = 0 := (list_sum.weighted_squares_eq_zero_iff.nat xs w f p).mpr h
++ nat_powers (xs : list α) (f : α → ℕ) : sum_list xs (fun x => f x ^ 2) = 0 ↔ ∀ x ∈ xs, f x = 0
+  simpa [pow_two.nat] using list_sum.squares_eq_zero_iff.nat xs f
++ nat_empty (f : ℕ → ℕ) : sum_list [] (fun x => f x * f x) = 0 := by rfl
++ nat_repeated (x : ℕ) (h : sum_list [x, x] (fun y => y * y) = 0) : x = 0 := (list_sum.squares_eq_zero_iff.nat [x, x] (fun y => y)).mp h x (by simp)
++ nat_zero_weights : sum_list [1] (fun (x : ℕ) => 0 * (x * x)) = 0 ∧ ¬ (∀ x ∈ [1], (x : ℕ) = 0) := by decide

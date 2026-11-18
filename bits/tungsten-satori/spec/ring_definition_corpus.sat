@@ -1,0 +1,45 @@
+-> om (a1 a2 a3 a4 b1 b2 b3 b4 : ℚ) : ℚ := a1 * b3 + a2 * b4 - a3 * b1 - a4 * b2
++ veronese_identity (a1 a2 a3 a4 b1 b2 b3 b4 z w : ℚ) :
+    om (a1 + z * b1) (a2 + z * b2) (a3 + z * b3) (a4 + z * b4) (a1 + w * b1) (a2 + w * b2) (a3 + w * b3) (a4 + w * b4) ^ 2
+    = (z - w) ^ 2 * om (a1 + z * b1) (a2 + z * b2) (a3 + z * b3) (a4 + z * b4) b1 b2 b3 b4
+      * om (a1 + w * b1) (a2 + w * b2) (a3 + w * b3) (a4 + w * b4) b1 b2 b3 b4 := by
+  ring
++ diagonal_zero (a1 a2 a3 a4 : ℚ) : om a1 a2 a3 a4 a1 a2 a3 a4 = 0 := by
+  ring
+
+-> lw (x1 x2 y1 y2 : ℚ) : ℚ := x1 * y2 - x2 * y1
++ bch_contact (x1 x2 x3 v1 v2 v3 e : ℚ) :
+    (x3 + e * v3) - x3 - (1 / 2) * lw x1 x2 (x1 + e * v1) (x2 + e * v2) = e * (v3 - (1 / 2) * lw x1 x2 v1 v2) := by
+  ring
+
+-> p3 (k : ℚ) : ℚ := (2 * k + 1) * (2 * k + 2) * (2 * k + 3) / 6
++ p3_serre (k : ℚ) : p3 (-2 - k) = -(p3 k) := by
+  ring
+-> pg2 (k : ℚ) : ℚ := (k + 1) * (3 * k + 4) * (3 * k + 5) * (k + 2) * (2 * k + 3) / 120
++ g2_serre (k : ℚ) : pg2 (-3 - k) = -(pg2 k) := by
+  ring
+-> trcomm (a b c d e f g h : ℤ) : ℤ :=
+    ((a * e + b * g) * d + (a * f + b * h) * (0 - c)) * h + ((a * e + b * g) * (0 - b) + (a * f + b * h) * a) * (0 - g)
+    + ((c * e + d * g) * d + (c * f + d * h) * (0 - c)) * (0 - f) + ((c * e + d * g) * (0 - b) + (c * f + d * h) * a) * e
+-> frhs (a b c d e f g h : ℤ) : ℤ := (a + d) ^ 2 * (e * h - f * g) + (e + h) ^ 2 * (a * d - b * c) + (a * e + b * g + c * f + d * h) ^ 2 - (a + d) * (e + h) * (a * e + b * g + c * f + d * h) - 2 * (a * d - b * c) * (e * h - f * g)
++ fricke_identity (a b c d e f g h : ℤ) : trcomm a b c d e f g h = frhs a b c d e f g h := by
+  ring
+
+-> fr (x y z : ℤ) : ℤ := x ^ 2 + y ^ 2 + z ^ 2 - x * y * z
++ vieta_x (x y z : ℤ) : fr (y * z - x) y z = fr x y z := by
+  ring
++ vieta_z (x y z : ℤ) : fr x y (x * y - z) = fr x y z := by
+  ring
+
+-> E (r y c : ℝ) : ℝ := 1 + (r - 2) * y + (r - 2) * (r - 3) / 2 * c
+
++ e_three (y c : ℝ) : E 3 y c = 1 + y
+  ring
+
++ eleven_forms (y c : ℝ) : 55 * E 11 y c = 55 + 495 * y + 1980 * c ∧ 10 * E 5 y c + 15 * E 6 y c - 300 * c = 25 + 90 * y - 180 * c
+  constructor
+  · ring
+  · ring
+
++ eleven_farkas (y c : ℝ) : y + 2 / 9 = (55 * E 11 y c) / 1485 + (10 * E 5 y c + 15 * E 6 y c - 300 * c) / 135
+  ring

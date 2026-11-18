@@ -16,6 +16,7 @@ use elab
 use simp
 use arith
 use satbridge
+use polynomial
 use tactics
 use pattern
 use session
@@ -40,6 +41,16 @@ SATORI_VERSION = "0.1.0"
   << "    SATORI_SOLVER     external SAT solver emitting LRAT (default: wassat)"
   << "    SATORI_NO_CACHE   set to 1 to bypass .satc verified module cache"
 
+-> satori_digits?(s)
+  if s.size == 0
+    return false
+  i = 0
+  while i < s.size
+    if !"0123456789".include?(s.slice(i, 1))
+      return false
+    i += 1
+  true
+
 -> satori_main(args)
   if args.size == 0 || args[0] == "help" || args[0] == "--help"
     satori_usage
@@ -60,14 +71,28 @@ SATORI_VERSION = "0.1.0"
     elsif a == "--no-cache"
       no_cache = true
     elsif a == "--only" && i + 1 < args.size
+      if !satori_digits?(args[i + 1])
+        << "error: --only requires a nonnegative theorem index"
+        return 1
       only = args[i + 1].to_i
       i += 1
     elsif a == "-j" && i + 1 < args.size
       jobs = args[i + 1].to_i
+      if !satori_digits?(args[i + 1]) || jobs <= 0
+        << "error: -j requires a positive job count"
+        return 1
       i += 1
+    elsif a == "-j" || a == "--only"
+      << "error: " + a + " requires an argument"
+      return 1
     else
       files.push(a)
     i += 1
+  if files.size == 0
+    << "error: no input files"
+    return 1
+  if only == 0
+    << "⋯ satori split protocol 3"
   root = Env.get("SATORI_ROOT")
   if root == nil || root == ""
     root = Dir.pwd
@@ -133,7 +158,7 @@ SATORI_VERSION = "0.1.0"
   body.split(", ").each -> (t)
     if t.starts_with?("split:")
       deps.push(t.slice(6, t.size - 6))
-    else
+    elsif t != ""
       own.push(t)
   [base, own, deps]
 
@@ -149,8 +174,8 @@ SATORI_VERSION = "0.1.0"
     stack.push(name)
     deps[name].each -> (d)
       if failed.has_key?(d)
-        if !out.include?("uses-failed:" + d)
-          out.push("uses-failed:" + d)
+        if !out.include?("uses-failed:" + failed[d])
+          out.push("uses-failed:" + failed[d])
       split_resolve(d, own, deps, memo, failed, stack).each -> (t)
         if !out.include?(t)
           out.push(t)
@@ -158,11 +183,26 @@ SATORI_VERSION = "0.1.0"
   memo[name] = out
   out
 
+-> split_bound_note(line, own, deps, memo, failed)
+  st = split_tags(line)
+  parts = st[0].split("\t")
+  if parts.size != 3 || st[2].size == 0
+    return nil
+  st[2].each -> (id)
+    if !own.has_key?(id)
+      return nil
+    tags = split_resolve(id, own, deps, memo, failed, [])
+    if tags.any?(-> (tag) tag == "sorry" || tag.starts_with?("uses-failed:"))
+      return nil
+  strict_bound_note(parts[1], parts[2])
+
 -> split_check(root, f, jobs, no_cache = false)
   t0 = ccall("__w_clock")
   bin = Env.get("SATORI_BIN")
   if bin == nil || bin == ""
-    bin = root + "/bits/tungsten-satori/bin/satori"
+    bin = System.executable_path
+    if bin == ""
+      bin = root + "/bits/tungsten-satori/bin/satori"
   mem = Env.get("SATORI_JOB_MEM_MB")
   if mem == nil || mem == ""
     mem = "6144"
@@ -181,13 +221,20 @@ SATORI_VERSION = "0.1.0"
       p = Process.spawn(["/bin/sh", "-c", "SATORI_ROOT=\"$3\" \"$0\" --only 0 \"$1\" > \"$2\" 2>&1", bin, f, dir + "/out.0", root])
       p.wait
     skel = split_lines(dir + "/out.0")
+    if !skel.include?("⋯ satori split protocol 3")
+      << "✗ " + f + ": split worker is incompatible or failed to start; use a matching Satori binary (SATORI_BIN)"
+      return 1
     names = []
+    indices = []
     skel.each -> (l)
       if l.starts_with?("⋯ split ")
-        names.push(l.split("⋯ split ")[1])
+        parts = l.split("⋯ split ")[1].split(" ")
+        indices.push(parts[0])
+        names.push(parts[1])
     if names.size > 0
+      File.write(dir + "/indices", indices.join("\n") + "\n")
       # Fast-exit loop checks child completion every 10 ms for the first 50 ms before entering 250 ms RSS watchdog.
-      job = "out=\"$4/out.$3\"; if test -n \"$8\"; then SATORI_ROOT=\"$5\" \"$0\" \"$8\" --only \"$3\" \"$1\" > \"$out\" 2>&1 & else SATORI_ROOT=\"$5\" \"$0\" --only \"$3\" \"$1\" > \"$out\" 2>&1 & fi; pid=$!; "
+      job = "out=\"$4/out.$3\"; idx=$(sed -n \"${3}p\" \"$4/indices\"); if test -n \"$7\"; then SATORI_ROOT=\"$5\" \"$0\" \"$7\" --only \"$idx\" \"$1\" > \"$out\" 2>&1 & else SATORI_ROOT=\"$5\" \"$0\" --only \"$idx\" \"$1\" > \"$out\" 2>&1 & fi; pid=$!; "
       job = job + "for _fast in 1 2 3 4 5; do kill -0 $pid 2>/dev/null || break; sleep 0.01; done; t=0; "
       job = job + "while kill -0 $pid 2>/dev/null; do r=$(ps -o rss= -p $pid 2>/dev/null | tr -d ' '); "
       job = job + "if test -n \"$r\" && test \"$r\" -gt $(( $2 * 1024 )); then kill -9 $pid; echo 'satori-split: memory limit' >> \"$out\"; break; fi; "
@@ -203,10 +250,11 @@ SATORI_VERSION = "0.1.0"
     k = 0
     while k < names.size
       nm = names[k]
+      id = indices[k]
       lines = split_lines(dir + "/out." + (k + 1).to_s)
-      b = split_block(lines, k + 1)
+      b = split_block(lines, indices[k].to_i)
       if b.size == 0 || !b[0].starts_with?("✓ ")
-        failed[nm] = true
+        failed[id] = nm
         if b.size == 0
           tail = []
           lines.each -> (l)
@@ -215,29 +263,51 @@ SATORI_VERSION = "0.1.0"
           b = ["✗ theorem " + nm + ": its checking process stopped " + tail.join(" ")]
       else
         st = split_tags(b[0])
-        own[nm] = st[1]
-        deps[nm] = st[2]
-      blocks[nm] = b
+        own[id] = st[1]
+        deps[id] = st[2]
+      blocks[id] = b
       k += 1
     memo = {}
     skel.each -> (l)
       if l.starts_with?("⋯ split ")
-        nm = l.split("⋯ split ")[1]
-        b = blocks[nm]
-        if failed.has_key?(nm)
+        id = l.split("⋯ split ")[1].split(" ")[0]
+        b = blocks[id]
+        if failed.has_key?(id)
           nfail += 1
           b.each -> (x)
-            << x
+            if x.starts_with?("⋯ strict-bound\t")
+              note = split_bound_note(x, own, deps, memo, failed)
+              if note != nil
+                << note
+            else
+              << x
         else
           st = split_tags(b[0])
-          tags = split_resolve(nm, own, deps, memo, failed, [])
+          tags = split_resolve(id, own, deps, memo, failed, [])
           line = st[0]
           if tags.size > 0
             line = line + "   \[" + tags.join(", ") + "\]"
           << line
           arr_sub(b, 1, b.size - 1).each -> (x)
             << x
+      elsif l.starts_with?("⋯ axioms ")
+        st = split_tags(l)
+        prefix = "⋯ axioms "
+        nm = st[0].slice(prefix.size, st[0].size - prefix.size)
+        tags = st[1]
+        st[2].each -> (d)
+          if failed.has_key?(d) && !tags.include?("uses-failed:" + failed[d])
+            tags.push("uses-failed:" + failed[d])
+          split_resolve(d, own, deps, memo, failed, []).each -> (t)
+            if !tags.include?(t)
+              tags.push(t)
+        if tags.size == 0
+          << nm + " depends only on the foundational kernel"
+        else
+          << nm + " depends on: " + tags.join(", ")
       elsif l.starts_with?("── ")
+        0
+      elsif l == "⋯ satori split protocol 3"
         0
       else
         if l.starts_with?("✗")

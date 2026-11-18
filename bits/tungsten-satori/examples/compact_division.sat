@@ -1,0 +1,16 @@
+import arith
+
++ unit_fraction (x : ℝ) (hx : 0 < x) : 0 < x/(x+1) ∧ x/(x+1) < 1
+  auto
+
++ cross (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) (h : a*d ≤ b*c) : a/c ≤ b/d
+  auto
+
++ reciprocal (a b : ℝ) (ha : 0 < a) (h : a < b) : 1/b < 1/a
+  auto
+
++ cancel (x y : ℚ) (hy : y ≠ 0) : x*y/y = x
+  auto
+
++ solve (a b c : ℝ) (hc : c ≠ 0) (h : a*c = b) : a = b/c
+  auto

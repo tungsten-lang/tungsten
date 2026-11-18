@@ -1,0 +1,145 @@
+import arith
+
+-> nat_pick (f : ℕ → ℕ) (j i : ℕ) : ℕ := f i * (if i = j then 1 else 0)
+
+-> int_pick (f : ℕ → ℤ) (j i : ℕ) : ℤ := f i * (if i = j then 1 else 0)
+
+-> rat_pick (f : ℕ → ℚ) (j i : ℕ) : ℚ := f i * (if i = j then 1 else 0)
+
+-> real_pick (f : ℕ → ℝ) (j i : ℕ) : ℝ := f i * (if i = j then 1 else 0)
+
++ nat_inside (f : ℕ → ℕ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ nat_outside (f : ℕ → ℕ) (n j : ℕ) (h : n ≤ j) : (∑ i < n, f i*(if i=j then 1 else 0)) = 0
+  auto
+
++ nat_boundary (f : ℕ → ℕ) (n : ℕ) : (∑ i < n, f i*(if i=n then 1 else 0)) = 0
+  auto
+
++ nat_last (f : ℕ → ℕ) (n : ℕ) : (∑ i < n+1, f i*(if i=n then 1 else 0)) = f n
+  auto
+
++ nat_larger (f : ℕ → ℕ) (n m j : ℕ) (h : j < n) (hm : n ≤ m) : (∑ i < m, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ nat_alias (f : ℕ → ℕ) (n j : ℕ) (h : j < n) : (∑ i < n, nat_pick f j i) = f j
+  auto
+
++ nat_product (f g : ℕ → ℕ) (n j : ℕ) (h : j < n) : (∑ i < n, (f i*g i)*(if i=j then 1 else 0)) = f j*g j
+  auto
+
++ nat_nested (f : ℕ → ℕ → ℕ) (n m j k : ℕ) (hj : j < n) (hk : k < m) : (∑ i < n, (∑ l < m, f i l*(if l=k then 1 else 0))*(if i=j then 1 else 0)) = f j k
+  auto
+
++ int_inside (f : ℕ → ℤ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ int_outside (f : ℕ → ℤ) (n j : ℕ) (h : n ≤ j) : (∑ i < n, f i*(if i=j then 1 else 0)) = 0
+  auto
+
++ int_boundary (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i*(if i=n then 1 else 0)) = 0
+  auto
+
++ int_last (f : ℕ → ℤ) (n : ℕ) : (∑ i < n+1, f i*(if i=n then 1 else 0)) = f n
+  auto
+
++ int_larger (f : ℕ → ℤ) (n m j : ℕ) (h : j < n) (hm : n ≤ m) : (∑ i < m, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ int_alias (f : ℕ → ℤ) (n j : ℕ) (h : j < n) : (∑ i < n, int_pick f j i) = f j
+  auto
+
++ int_product (f g : ℕ → ℤ) (n j : ℕ) (h : j < n) : (∑ i < n, (f i*g i)*(if i=j then 1 else 0)) = f j*g j
+  auto
+
++ int_nested (f : ℕ → ℕ → ℤ) (n m j k : ℕ) (hj : j < n) (hk : k < m) : (∑ i < n, (∑ l < m, f i l*(if l=k then 1 else 0))*(if i=j then 1 else 0)) = f j k
+  auto
+
++ rat_inside (f : ℕ → ℚ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ rat_outside (f : ℕ → ℚ) (n j : ℕ) (h : n ≤ j) : (∑ i < n, f i*(if i=j then 1 else 0)) = 0
+  auto
+
++ rat_boundary (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i*(if i=n then 1 else 0)) = 0
+  auto
+
++ rat_last (f : ℕ → ℚ) (n : ℕ) : (∑ i < n+1, f i*(if i=n then 1 else 0)) = f n
+  auto
+
++ rat_larger (f : ℕ → ℚ) (n m j : ℕ) (h : j < n) (hm : n ≤ m) : (∑ i < m, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ rat_alias (f : ℕ → ℚ) (n j : ℕ) (h : j < n) : (∑ i < n, rat_pick f j i) = f j
+  auto
+
++ rat_product (f g : ℕ → ℚ) (n j : ℕ) (h : j < n) : (∑ i < n, (f i*g i)*(if i=j then 1 else 0)) = f j*g j
+  auto
+
++ rat_nested (f : ℕ → ℕ → ℚ) (n m j k : ℕ) (hj : j < n) (hk : k < m) : (∑ i < n, (∑ l < m, f i l*(if l=k then 1 else 0))*(if i=j then 1 else 0)) = f j k
+  auto
+
++ real_inside (f : ℕ → ℝ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ real_outside (f : ℕ → ℝ) (n j : ℕ) (h : n ≤ j) : (∑ i < n, f i*(if i=j then 1 else 0)) = 0
+  auto
+
++ real_boundary (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i*(if i=n then 1 else 0)) = 0
+  auto
+
++ real_last (f : ℕ → ℝ) (n : ℕ) : (∑ i < n+1, f i*(if i=n then 1 else 0)) = f n
+  auto
+
++ real_larger (f : ℕ → ℝ) (n m j : ℕ) (h : j < n) (hm : n ≤ m) : (∑ i < m, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ real_alias (f : ℕ → ℝ) (n j : ℕ) (h : j < n) : (∑ i < n, real_pick f j i) = f j
+  auto
+
++ real_product (f g : ℕ → ℝ) (n j : ℕ) (h : j < n) : (∑ i < n, (f i*g i)*(if i=j then 1 else 0)) = f j*g j
+  auto
+
++ real_nested (f : ℕ → ℕ → ℝ) (n m j k : ℕ) (hj : j < n) (hk : k < m) : (∑ i < n, (∑ l < m, f i l*(if l=k then 1 else 0))*(if i=j then 1 else 0)) = f j k
+  auto
+
++ nat_known_value (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j < n) (h : f j = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ nat_calculated_value (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  have e : (∑ i < n, f i*(if i=j then 1 else 0)) = f j := by auto
+  linarith
+
++ int_known_value (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j < n) (h : f j = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ int_calculated_value (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  have e : (∑ i < n, f i*(if i=j then 1 else 0)) = f j := by auto
+  linarith
+
++ rat_known_value (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j < n) (h : f j = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ rat_calculated_value (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  have e : (∑ i < n, f i*(if i=j then 1 else 0)) = f j := by auto
+  linarith
+
++ real_known_value (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j < n) (h : f j = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ real_calculated_value (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j < n) (h : f j+3 = v+2) : (∑ i < n, f i*(if i=j then 1 else 0))+1 = v
+  have e : (∑ i < n, f i*(if i=j then 1 else 0)) = f j := by auto
+  linarith
+
++ nat_value_from_arithmetic (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j < n) (h : f j+3 = v+3) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ int_value_from_arithmetic (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j < n) (h : f j+3 = v+3) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ rat_value_from_arithmetic (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j < n) (h : f j+3 = v+3) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ real_value_from_arithmetic (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j < n) (h : f j+3 = v+3) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto

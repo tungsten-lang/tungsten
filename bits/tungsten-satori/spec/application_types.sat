@@ -1,0 +1,21 @@
++ flip_eq (x y : α) : x = y ↔ y = x
+  constructor
+  · intro h; exact h.symm
+  · intro h; exact h.symm
++ flip_forward (x y : α) (h : x = y) : y = x := (flip_eq x y).mp h
++ flip_backward (x y : α) (h : y = x) : x = y := (flip_eq x y).mpr h
++ flip_tactic (x y : α) (h : x = y) : y = x := by exact (flip_eq x y).mp h
++ flip_saved (x y : α) (h : x = y) : y = x
+  have e := flip_eq x y
+  exact e.mp h
++ predicate_iff (p : α → Prop) (x : α) : p x ↔ p x := by rfl
++ predicate_forward (p : α → Prop) (x : α) (h : p x) : p x := (predicate_iff p x).mp h
++ relation_iff (p : α → β → Prop) (x : α) (y : β) : p x y ↔ p x y := by rfl
++ relation_forward (p : α → β → Prop) (x : α) (y : β) (h : p x y) : p x y := (relation_iff p x y).mp h
++ exists_iff (p : α → Prop) : (∃ x, p x) ↔ (∃ x, p x) := by rfl
++ exists_backward (p : α → Prop) (x : α) (h : p x) : ∃ y, p y := (exists_iff p).mpr ⟨x, h⟩
++ quantified_iff (p : α → Prop) : (∀ x, p x) ↔ (∀ x, p x) := by rfl
++ quantified_forward (p : α → Prop) (h : ∀ x, p x) : ∀ x, p x := (quantified_iff p).mp h
++ closed_then_applied (x y : ℕ) (h : x = y) : y = x := (flip_eq x y).mp h
++ map_forward (F : (α → β) → γ) (f g : α → β) (h : F f = F g) : F g = F f := (flip_eq (F f) (F g)).mp h
++ nested_application (p : α → Prop) (x : α) (h : p x) : p x := (predicate_iff p x).mp ((predicate_iff p x).mpr h)

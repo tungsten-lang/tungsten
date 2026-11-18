@@ -1,0 +1,37 @@
+import quadratic
+
++ int_missing (a b c : ℤ) : b^2 ≤ a*c
+  auto
+
++ int_strict (a b c : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 < a*c
+  auto
+
++ int_wrong_cross (a b c : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
+
++ int_missing_guard (P : Prop) (a b c : ℤ) (q : P → ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
+
++ rat_missing (a b c : ℚ) : b^2 ≤ a*c
+  auto
+
++ rat_strict (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 < a*c
+  auto
+
++ rat_wrong_cross (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
+
++ rat_missing_guard (P : Prop) (a b c : ℚ) (q : P → ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
+
++ real_missing (a b c : ℝ) : b^2 ≤ a*c
+  auto
+
++ real_strict (a b c : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 < a*c
+  auto
+
++ real_wrong_cross (a b c : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
+
++ real_missing_guard (P : Prop) (a b c : ℝ) (q : P → ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto

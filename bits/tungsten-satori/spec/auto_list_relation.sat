@@ -1,0 +1,85 @@
+-> traverse_l (step : α → β → β) : list α → β → β
+  | [], s => s
+  | x :: xs, s => traverse_l step xs (step x s)
++ l_equivalent (step : α → β → β) (xs : list α) (s : β) : traverse_l step xs s = list.foldl step xs s := by auto
++ l_projection (step : α → β → β) (xs : list α) (s : β × γ) : fst (list.foldl (fun x v => (step x (fst v), snd v)) xs s) = list.foldl step xs (fst s) := by auto
++ l_commutes (step : α → β → β) (update : α → γ → γ) (f : β → γ) (h : ∀ x s, f (step x s) = update x (f s)) (xs : list α) (s : β) : f (list.foldl step xs s) = list.foldl update xs (f s) := by auto
++ l_commutes_reverse (step : α → β → β) (update : α → γ → γ) (f : β → γ) (h : ∀ x s, f (step x s) = update x (f s)) (xs : list α) (s : β) : list.foldl update xs (f s) = f (list.foldl step xs s) := by auto
++ l_paired (step : α → β → β) (update : α → γ → γ) (xs : list α) (s : β × γ) : fst (list.foldl (fun x v => (step x (fst v), update x (snd v))) xs s) = list.foldl step xs (fst s) ∧ snd (list.foldl (fun x v => (step x (fst v), update x (snd v))) xs s) = list.foldl update xs (snd s) := by auto
+
+-> traverse_r (step : α → β → β) : list α → β → β
+  | [], s => s
+  | x :: xs, s => step x (traverse_r step xs s)
++ r_equivalent (step : α → β → β) (xs : list α) (s : β) : traverse_r step xs s = list.foldr step xs s := by auto
++ r_projection (step : α → β → β) (xs : list α) (s : β × γ) : fst (list.foldr (fun x v => (step x (fst v), snd v)) xs s) = list.foldr step xs (fst s) := by auto
++ r_commutes (step : α → β → β) (update : α → γ → γ) (f : β → γ) (h : ∀ x s, f (step x s) = update x (f s)) (xs : list α) (s : β) : f (list.foldr step xs s) = list.foldr update xs (f s) := by auto
++ r_commutes_reverse (step : α → β → β) (update : α → γ → γ) (f : β → γ) (h : ∀ x s, f (step x s) = update x (f s)) (xs : list α) (s : β) : list.foldr update xs (f s) = f (list.foldr step xs s) := by auto
++ r_paired (step : α → β → β) (update : α → γ → γ) (xs : list α) (s : β × γ) : fst (list.foldr (fun x v => (step x (fst v), update x (snd v))) xs s) = list.foldr step xs (fst s) ∧ snd (list.foldr (fun x v => (step x (fst v), update x (snd v))) xs s) = list.foldr update xs (snd s) := by auto
+
+-> accumulate.nat : list ℕ → ℕ → ℕ
+  | [], s => s
+  | x :: xs, s => accumulate.nat xs (s+x)
+-> weighted.nat (k : ℕ) : list ℕ → ℕ → ℕ
+  | [], s => s
+  | x :: xs, s => weighted.nat k xs (s+k*x)
+-> subtotal.nat : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => x+subtotal.nat xs
++ nat_total (xs : list ℕ) (s : ℕ) : accumulate.nat xs s = s+subtotal.nat xs := by auto
++ nat_reverse (xs : list ℕ) (s : ℕ) : s+subtotal.nat xs = accumulate.nat xs s := by auto
++ nat_weighted (xs : list ℕ) (s k : ℕ) : weighted.nat k xs s = s+k*subtotal.nat xs := by auto
++ nat_paired (xs : list ℕ) (s k : ℕ) : accumulate.nat xs s = s+subtotal.nat xs ∧ weighted.nat k xs s = s+k*subtotal.nat xs := by auto
+
+-> accumulate.int : list ℤ → ℤ → ℤ
+  | [], s => s
+  | x :: xs, s => accumulate.int xs (s+x)
+-> weighted.int (k : ℤ) : list ℤ → ℤ → ℤ
+  | [], s => s
+  | x :: xs, s => weighted.int k xs (s+k*x)
+-> subtotal.int : list ℤ → ℤ
+  | [] => 0
+  | x :: xs => x+subtotal.int xs
++ int_total (xs : list ℤ) (s : ℤ) : accumulate.int xs s = s+subtotal.int xs := by auto
++ int_reverse (xs : list ℤ) (s : ℤ) : s+subtotal.int xs = accumulate.int xs s := by auto
++ int_weighted (xs : list ℤ) (s k : ℤ) : weighted.int k xs s = s+k*subtotal.int xs := by auto
++ int_paired (xs : list ℤ) (s k : ℤ) : accumulate.int xs s = s+subtotal.int xs ∧ weighted.int k xs s = s+k*subtotal.int xs := by auto
+
+-> accumulate.rat : list ℚ → ℚ → ℚ
+  | [], s => s
+  | x :: xs, s => accumulate.rat xs (s+x)
+-> weighted.rat (k : ℚ) : list ℚ → ℚ → ℚ
+  | [], s => s
+  | x :: xs, s => weighted.rat k xs (s+k*x)
+-> subtotal.rat : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => x+subtotal.rat xs
++ rat_total (xs : list ℚ) (s : ℚ) : accumulate.rat xs s = s+subtotal.rat xs := by auto
++ rat_reverse (xs : list ℚ) (s : ℚ) : s+subtotal.rat xs = accumulate.rat xs s := by auto
++ rat_weighted (xs : list ℚ) (s k : ℚ) : weighted.rat k xs s = s+k*subtotal.rat xs := by auto
++ rat_paired (xs : list ℚ) (s k : ℚ) : accumulate.rat xs s = s+subtotal.rat xs ∧ weighted.rat k xs s = s+k*subtotal.rat xs := by auto
+
+-> accumulate.real : list ℝ → ℝ → ℝ
+  | [], s => s
+  | x :: xs, s => accumulate.real xs (s+x)
+-> weighted.real (k : ℝ) : list ℝ → ℝ → ℝ
+  | [], s => s
+  | x :: xs, s => weighted.real k xs (s+k*x)
+-> subtotal.real : list ℝ → ℝ
+  | [] => 0
+  | x :: xs => x+subtotal.real xs
++ real_total (xs : list ℝ) (s : ℝ) : accumulate.real xs s = s+subtotal.real xs := by auto
++ real_reverse (xs : list ℝ) (s : ℝ) : s+subtotal.real xs = accumulate.real xs s := by auto
++ real_weighted (xs : list ℝ) (s k : ℝ) : weighted.real k xs s = s+k*subtotal.real xs := by auto
++ real_paired (xs : list ℝ) (s k : ℝ) : accumulate.real xs s = s+subtotal.real xs ∧ weighted.real k xs s = s+k*subtotal.real xs := by auto
+
++ nat_four_coordinates (xs : list ℕ) (s k : ℕ) : accumulate.nat xs s = s+subtotal.nat xs ∧ s+k*subtotal.nat xs = weighted.nat k xs s ∧ weighted.nat (k+1) xs s = s+(k+1)*subtotal.nat xs ∧ accumulate.nat xs s+weighted.nat k xs s = 2*s+(k+1)*subtotal.nat xs := by auto
+
++ int_four_coordinates (xs : list ℤ) (s k : ℤ) : accumulate.int xs s = s+subtotal.int xs ∧ s+k*subtotal.int xs = weighted.int k xs s ∧ weighted.int (k+1) xs s = s+(k+1)*subtotal.int xs ∧ accumulate.int xs s+weighted.int k xs s = 2*s+(k+1)*subtotal.int xs := by auto
+
++ rat_four_coordinates (xs : list ℚ) (s k : ℚ) : accumulate.rat xs s = s+subtotal.rat xs ∧ s+k*subtotal.rat xs = weighted.rat k xs s ∧ weighted.rat (k+1) xs s = s+(k+1)*subtotal.rat xs ∧ accumulate.rat xs s+weighted.rat k xs s = 2*s+(k+1)*subtotal.rat xs := by auto
+
++ real_four_coordinates (xs : list ℝ) (s k : ℝ) : accumulate.real xs s = s+subtotal.real xs ∧ s+k*subtotal.real xs = weighted.real k xs s ∧ weighted.real (k+1) xs s = s+(k+1)*subtotal.real xs ∧ accumulate.real xs s+weighted.real k xs s = 2*s+(k+1)*subtotal.real xs := by auto
+
++ l_guarded (step : α → β → β) (update : α → γ → γ) (f : β → γ) (p : α → Prop) (h : ∀ x, p x → ∀ s, f (step x s) = update x (f s)) (hp : ∀ x, p x) (xs : list α) (s : β) : f (list.foldl step xs s) = list.foldl update xs (f s) := by auto
+
++ r_guarded (step : α → β → β) (update : α → γ → γ) (f : β → γ) (p : α → Prop) (h : ∀ x, p x → ∀ s, f (step x s) = update x (f s)) (hp : ∀ x, p x) (xs : list α) (s : β) : f (list.foldr step xs s) = list.foldr update xs (f s) := by auto

@@ -1,0 +1,37 @@
+import realx
+
+-> norm (a b : ℝ) : ℝ := sqrt (a^2+b^2)
+opaque accepted_int : ℤ → ℤ → Prop
+opaque accepted_rat : ℚ → ℚ → Prop
+axiom int_product_rule (x y : ℤ) (h : 0 < x*y) : accepted_int x y
+axiom rat_square_rule (x : ℚ) (h : 0 ≤ (x-1)*(x-1)) : accepted_rat x x
+
++ norm_sum (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : sqrt (a^2+b^2) ≤ a+b
+  auto
+
++ norm_lower (a b : ℝ) (hb : 0 ≤ b) : b ≤ sqrt (a^2+b^2)
+  auto
+
++ alias_sum (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : norm a b ≤ a+b
+  auto
+
++ alias_lower (a b : ℝ) (hb : 0 ≤ b) : b ≤ norm a b
+  auto
+
++ scaled_bound (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hba : b ≤ a) : norm a b ≤ 2*a
+  auto
+
++ function_bound (f g : α → ℝ) (x : α) (hf : 0 ≤ f x) (hg : 0 ≤ g x) : norm (f x) (g x) ≤ f x+g x
+  auto
+
++ shifted_bound (a b c : ℝ) (ha : c ≤ a) (hb : c ≤ b) : norm (a-c) (b-c) ≤ a+b-2*c
+  auto
+
++ degenerate_bound (a : ℝ) (ha : 0 ≤ a) : norm a 0 ≤ a
+  auto
+
++ int_product (x y : ℤ) (hx : 0 < x) (hy : 0 < y) : accepted_int x y
+  auto [int_product_rule]
+
++ rat_square (x : ℚ) : accepted_rat x x
+  auto [rat_square_rule]

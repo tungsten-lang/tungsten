@@ -1,0 +1,72 @@
+import recurrence
+
++ real_drift (f : ℕ → ℝ) (base : 0 ≤ f 0) (step : ∀ i, f i + 1 / 2 ≤ f (i + 1)) (n : ℕ) : (n : ℝ) / 2 ≤ f n
+  linarith [recurrence.linear_lower.real f (1 / 2) 0 base step n]
++ real_negative_bound (f : ℕ → ℝ) (base : f 0 ≤ -3) (step : ∀ i, f (i + 1) ≤ 2 * f i) (n : ℕ) : f n ≤ -3 * 2 ^ n
+  exact recurrence.geometric_upper.real f 2 (-3) (by decide) base step n
++ real_geometric_lower (f : ℕ → ℝ) (base : 3 ≤ f 0) (step : ∀ i, 2 * f i ≤ f (i + 1)) (n : ℕ) : 3 * 2 ^ n ≤ f n
+  exact recurrence.geometric_lower.real f 2 3 (by decide) base step n
++ faa_recurrence (a : ℕ → ℝ) (b q c : ℝ) (hb : 0 ≤ b) (hbq : b < q) (h0 : a 0 = 0)
+    (hs : ∀ n : ℕ, a (n + 1) ≤ b * a n + c * q ^ n) : ∀ n : ℕ, (q - b) * a n ≤ c * (q ^ n - b ^ n)
+  exact recurrence.geometric_forcing.real a b q c hb (by linarith) (by linarith) hs
++ real_equal_rates (f : ℕ → ℝ) (c : ℝ) (base : f 0 ≤ 0) (step : ∀ i, f (i + 1) ≤ 2 * f i + c * 2 ^ i) (n : ℕ) : (2 - 2) * f n ≤ c * (2 ^ n - 2 ^ n)
+  exact recurrence.geometric_forcing.real f 2 2 c (by decide) (by decide) base step n
+
++ rational_zero_rate (f : ℕ → ℚ) (A : ℚ) (base : f 0 ≤ A) (step : ∀ i, f (i + 1) ≤ 0 * f i) : f 0 ≤ A ∧ f 1 ≤ 0
+  constructor
+  · linarith [recurrence.geometric_upper.rat f 0 A (by decide) base step 0]
+  · linarith [recurrence.geometric_upper.rat f 0 A (by decide) base step 1]
++ rational_negative_drift (f : ℕ → ℚ) (base : f 0 ≤ 5) (step : ∀ i, f (i + 1) ≤ f i - 2) (n : ℕ) : f n ≤ 5 - 2 * (n : ℚ)
+  have h := recurrence.linear_upper.rat f (-2) 5 base (by intro i; linarith [step i]) n
+  linarith
++ rational_signed_forcing (f : ℕ → ℚ) (base : f 0 ≤ -5) (step : ∀ i, f (i + 1) ≤ f i - 3 * 2 ^ i) (n : ℕ) : f n ≤ -3 * (2 ^ n - 1 ^ n)
+  have h := recurrence.geometric_forcing.rat f 1 2 (-3) (by decide) (by decide) (by linarith) (by intro i; linarith [step i]) n
+  linarith
++ rational_unit_rate (f : ℕ → ℚ) (base : f 0 ≤ 7) (step : ∀ i, f (i + 1) ≤ f i) (n : ℕ) : f n ≤ 7 * 1 ^ n
+  exact recurrence.geometric_upper.rat f 1 7 (by decide) base (by intro i; linarith [step i]) n
++ rational_zero_forcing (f : ℕ → ℚ) (base : f 0 ≤ 0) (step : ∀ i, f (i + 1) ≤ 0 * f i + 3 * 2 ^ i) (n : ℕ) : 2 * f n ≤ 3 * (2 ^ n - 0 ^ n)
+  exact recurrence.geometric_forcing.rat f 0 2 3 (by decide) (by decide) base step n
+
+-> oscillating : ℕ → ℤ
+  | 0 => 3
+  | n + 1 => (-2) * oscillating n
++ integer_oscillation (n : ℕ) : oscillating n = 3 * (-2) ^ n
+  exact recurrence.geometric_eq.int oscillating (-2) (by intro i; rfl) n
++ integer_falling (f : ℕ → ℤ) (base : f 0 ≤ 10) (step : ∀ i, f (i + 1) ≤ f i - 2) (n : ℕ) : f n ≤ 10 - 2 * (n : ℤ)
+  have h := recurrence.linear_upper.int f (-2) 10 base (by intro i; linarith [step i]) n
+  linarith
++ integer_lower_zero (f : ℕ → ℤ) (base : -2 ≤ f 0) (step : ∀ i, 0 * f i ≤ f (i + 1)) (n : ℕ) : (-2) * 0 ^ n ≤ f n
+  exact recurrence.geometric_lower.int f 0 (-2) (by decide) base step n
++ integer_forcing (f : ℕ → ℤ) (base : f 0 ≤ 0) (step : ∀ i, f (i + 1) ≤ 2 * f i + 4 * 3 ^ i) (n : ℕ) : f n ≤ 4 * (3 ^ n - 2 ^ n)
+  have h := recurrence.geometric_forcing.int f 2 3 4 (by decide) (by decide) base step n
+  linarith
+
+-> triple_steps : ℕ → ℕ
+  | 0 => 5
+  | n + 1 => 3 * triple_steps n
++ natural_exact (n : ℕ) : triple_steps n = 5 * 3 ^ n
+  exact recurrence.geometric_eq.nat triple_steps 3 (by intro i; rfl) n
++ natural_drift (f : ℕ → ℕ) (base : 3 ≤ f 0) (step : ∀ i, f i + 2 ≤ f (i + 1)) (n : ℕ) : 3 + 2 * n ≤ f n
+  linarith [recurrence.linear_lower.nat f 2 3 base step n]
++ natural_geometric (f : ℕ → ℕ) (base : f 0 ≤ 4) (step : ∀ i, f (i + 1) ≤ 2 * f i) (n : ℕ) : f n ≤ 4 * 2 ^ n
+  exact recurrence.geometric_upper.nat f 2 4 (by decide) base step n
++ natural_zero_rate (f : ℕ → ℕ) (A : ℕ) (base : f 0 ≤ A) (step : ∀ i, f (i + 1) ≤ 0 * f i) : f 1 ≤ 0
+  linarith [recurrence.geometric_upper.nat f 0 A (by decide) base step 1]
+#axioms real_drift
+#axioms real_negative_bound
+#axioms real_geometric_lower
+#axioms faa_recurrence
+#axioms real_equal_rates
+#axioms rational_zero_rate
+#axioms rational_negative_drift
+#axioms rational_signed_forcing
+#axioms rational_unit_rate
+#axioms rational_zero_forcing
+#axioms integer_oscillation
+#axioms integer_falling
+#axioms integer_lower_zero
+#axioms integer_forcing
+#axioms natural_exact
+#axioms natural_drift
+#axioms natural_geometric
+#axioms natural_zero_rate

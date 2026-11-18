@@ -1,0 +1,17 @@
++ real_square (x : ℝ) : 0 ≤ x*x := by nlinarith
++ real_power (x y : ℝ) : 0 ≤ x^2+y^2 := by nlinarith
++ real_shift (x y : ℝ) : 0 ≤ (x-y)*(x-y) := by nlinarith
++ real_nonlinear (x y : ℝ) : 0 ≤ (x*y)*(x*y) := by nlinarith
++ real_impossible (x : ℝ) (h : x*x < 0) : False := by nlinarith
++ rat_square (x : ℚ) : 0 ≤ x*x := by nlinarith
++ rat_power (x y : ℚ) : 0 ≤ x^2+y^2 := by nlinarith
++ rat_shift (x y : ℚ) : 0 ≤ (x-y)*(x-y) := by nlinarith
++ rat_nonlinear (x y : ℚ) : 0 ≤ (x*y)*(x*y) := by nlinarith
++ rat_impossible (x : ℚ) (h : x*x < 0) : False := by nlinarith
++ int_square (x : ℤ) : 0 ≤ x*x := by nlinarith
++ int_power (x y : ℤ) : 0 ≤ x^2+y^2 := by nlinarith
++ int_shift (x y : ℤ) : 0 ≤ (x-y)*(x-y) := by nlinarith
++ int_nonlinear (x y : ℤ) : 0 ≤ (x*y)*(x*y) := by nlinarith
++ int_impossible (x : ℤ) (h : x*x < 0) : False := by nlinarith
++ mixed_types (f : ℚ → ℝ) (x : ℚ) (y : ℝ) (h : 0 ≤ f (x*x)) : 0 ≤ f (x*x) + y*y := by nlinarith
++ function_square (f : ℚ → ℝ) (x : ℚ) : 0 ≤ f x * f x := by nlinarith

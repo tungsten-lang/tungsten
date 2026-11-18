@@ -1,0 +1,37 @@
++ left_order : list.foldl (fun (x s : ℕ) => 10 * s + x) [1, 2, 3] 0 = 123 := by decide
++ right_order : list.foldr (fun (x s : ℕ) => 10 * s + x) [1, 2, 3] 0 = 321 := by decide
++ left_empty (step : α → β → β) (s : β) : list.foldl step [] s = s := by simp
++ right_empty (step : α → β → β) (s : β) : list.foldr step [] s = s := by simp
++ left_segments (step : α → β → β) (xs ys : list α) (s : β) : list.foldl step (xs ++ ys) s = list.foldl step ys (list.foldl step xs s) := list.foldl_append step xs ys s
++ right_segments (step : α → β → β) (xs ys : list α) (s : β) : list.foldr step (xs ++ ys) s = list.foldr step xs (list.foldr step ys s) := list.foldr_append step xs ys s
++ left_mapped (step : β → γ → γ) (f : α → β) (xs : list α) (s : γ) : list.foldl step (map f xs) s = list.foldl (fun x v => step (f x) v) xs s := list.foldl_map step f xs s
++ right_mapped (step : β → γ → γ) (f : α → β) (xs : list α) (s : γ) : list.foldr step (map f xs) s = list.foldr (fun x v => step (f x) v) xs s := list.foldr_map step f xs s
+
+-- Only the visited elements need to satisfy p; the state remembers two of them.
++ left_history (p : α → Prop) (xs : list α) (h : ∀ x ∈ xs, p x) (s : α × α) (hs : p (fst s) ∧ p (snd s)) : p (fst (list.foldl (fun x v => (x, fst v)) xs s)) ∧ p (snd (list.foldl (fun x v => (x, fst v)) xs s))
+  exact list.foldl_invariant_on (fun (x : α) (v : α × α) => (x, fst v)) (fun v => p (fst v) ∧ p (snd v)) xs (by intro x hx v hv; exact ⟨h x hx, hv.1⟩) s hs
++ right_history (p : α → Prop) (xs : list α) (h : ∀ x ∈ xs, p x) (s : α × α) (hs : p (fst s) ∧ p (snd s)) : p (fst (list.foldr (fun x v => (x, fst v)) xs s)) ∧ p (snd (list.foldr (fun x v => (x, fst v)) xs s))
+  exact list.foldr_invariant_on (fun (x : α) (v : α × α) => (x, fst v)) (fun v => p (fst v) ∧ p (snd v)) xs (by intro x hx v hv; exact ⟨h x hx, hv.1⟩) s hs
++ left_swap (xs : list α) (p : β → Prop) (a b : β) (ha : p a) (hb : p b) : p (fst (list.foldl (fun x v => (snd v, fst v)) xs (a, b))) ∧ p (snd (list.foldl (fun x v => (snd v, fst v)) xs (a, b)))
+  exact list.foldl_invariant (fun (x : α) (v : β × β) => (snd v, fst v)) (fun v => p (fst v) ∧ p (snd v)) (by intro x v h; exact ⟨h.2, h.1⟩) xs (a, b) ⟨ha, hb⟩
++ right_swap (xs : list α) (p : β → Prop) (a b : β) (ha : p a) (hb : p b) : p (fst (list.foldr (fun x v => (snd v, fst v)) xs (a, b))) ∧ p (snd (list.foldr (fun x v => (snd v, fst v)) xs (a, b)))
+  exact list.foldr_invariant (fun (x : α) (v : β × β) => (snd v, fst v)) (fun v => p (fst v) ∧ p (snd v)) (by intro x v h; exact ⟨h.2, h.1⟩) xs (a, b) ⟨ha, hb⟩
++ left_projection (step : α → β → β) (xs : list α) (s : β × γ) : fst (list.foldl (fun x v => (step x (fst v), snd v)) xs s) = list.foldl step xs (fst s)
+  exact list.foldl_commutes (fun (x : α) (v : β × γ) => (step x (fst v), snd v)) step fst (by intro x v; rfl) xs s
++ right_projection (step : α → β → β) (xs : list α) (s : β × γ) : fst (list.foldr (fun x v => (step x (fst v), snd v)) xs s) = list.foldr step xs (fst s)
+  exact list.foldr_commutes (fun (x : α) (v : β × γ) => (step x (fst v), snd v)) step fst (by intro x v; rfl) xs s
++ left_unchanged (step : α → β → β) (xs : list α) (s : β × γ) : snd (list.foldl (fun x v => (step x (fst v), snd v)) xs s) = snd s
+  exact list.foldl_preserves (fun (x : α) (v : β × γ) => (step x (fst v), snd v)) snd (by intro x v; rfl) xs s
++ right_unchanged (step : α → β → β) (xs : list α) (s : β × γ) : snd (list.foldr (fun x v => (step x (fst v), snd v)) xs s) = snd s
+  exact list.foldr_preserves (fun (x : α) (v : β × γ) => (step x (fst v), snd v)) snd (by intro x v; rfl) xs s
++ left_fixed (xs : list α) (a : β) : list.foldl (fun x v => (snd v, fst v)) xs (a, a) = (a, a)
+  apply list.foldl_fixed; intro x; rfl
++ right_fixed (xs : list α) (a : β) : list.foldr (fun x v => (snd v, fst v)) xs (a, a) = (a, a)
+  apply list.foldr_fixed; intro x; rfl
++ paired_right (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (list.foldr step xs s) ∧ q (list.foldr step xs s) := list.foldr_invariants h xs s hp hq
+#axioms left_history
+#axioms right_swap
+#axioms left_projection
+#axioms right_unchanged
+#axioms left_fixed
+#axioms paired_right

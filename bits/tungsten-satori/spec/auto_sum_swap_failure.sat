@@ -1,0 +1,53 @@
+import arith
+
++ nat_wrong_bounds (f : ℕ → ℕ → ℕ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < n, (∑ i < m, f i j)) := by auto
+
++ nat_wrong_indices (f : ℕ → ℕ → ℕ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f j i)) := by auto
+
++ nat_wrong_function (f g : ℕ → ℕ → ℕ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, g i j)) := by auto
+
++ nat_dependent_bound (f : ℕ → ℕ → ℕ) (n : ℕ) : (∑ i < n, (∑ j < i, f i j)) = (∑ j < n, (∑ i < j, f i j)) := by auto
+
++ nat_extra_row (f : ℕ → ℕ → ℕ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n+1, f i j)) := by auto
+
++ nat_strict (f : ℕ → ℕ → ℕ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) < (∑ j < m, (∑ i < n, f i j)) := by auto
+
++ int_wrong_bounds (f : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < n, (∑ i < m, f i j)) := by auto
+
++ int_wrong_indices (f : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f j i)) := by auto
+
++ int_wrong_function (f g : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, g i j)) := by auto
+
++ int_dependent_bound (f : ℕ → ℕ → ℤ) (n : ℕ) : (∑ i < n, (∑ j < i, f i j)) = (∑ j < n, (∑ i < j, f i j)) := by auto
+
++ int_extra_row (f : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n+1, f i j)) := by auto
+
++ int_strict (f : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) < (∑ j < m, (∑ i < n, f i j)) := by auto
+
++ rat_wrong_bounds (f : ℕ → ℕ → ℚ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < n, (∑ i < m, f i j)) := by auto
+
++ rat_wrong_indices (f : ℕ → ℕ → ℚ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f j i)) := by auto
+
++ rat_wrong_function (f g : ℕ → ℕ → ℚ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, g i j)) := by auto
+
++ rat_dependent_bound (f : ℕ → ℕ → ℚ) (n : ℕ) : (∑ i < n, (∑ j < i, f i j)) = (∑ j < n, (∑ i < j, f i j)) := by auto
+
++ rat_extra_row (f : ℕ → ℕ → ℚ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n+1, f i j)) := by auto
+
++ rat_strict (f : ℕ → ℕ → ℚ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) < (∑ j < m, (∑ i < n, f i j)) := by auto
+
++ real_wrong_bounds (f : ℕ → ℕ → ℝ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < n, (∑ i < m, f i j)) := by auto
+
++ real_wrong_indices (f : ℕ → ℕ → ℝ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f j i)) := by auto
+
++ real_wrong_function (f g : ℕ → ℕ → ℝ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, g i j)) := by auto
+
++ real_dependent_bound (f : ℕ → ℕ → ℝ) (n : ℕ) : (∑ i < n, (∑ j < i, f i j)) = (∑ j < n, (∑ i < j, f i j)) := by auto
+
++ real_extra_row (f : ℕ → ℕ → ℝ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n+1, f i j)) := by auto
+
++ real_strict (f : ℕ → ℕ → ℝ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) < (∑ j < m, (∑ i < n, f i j)) := by auto
+
++ generic_swap (f : ℕ → ℕ → α) (n m : ℕ) :
+    (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f i j))
+  auto

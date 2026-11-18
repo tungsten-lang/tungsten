@@ -1,0 +1,91 @@
+import arith
+
++ nat_missing_range (f : ℕ → ℕ) (n a b : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ nat_closed_range (f : ℕ → ℕ) (n a b : ℕ) (ha : a ≤ n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ nat_wrong_weight (f : ℕ → ℕ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 2 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ nat_wrong_sign (f : ℕ → ℕ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a-f b
+  auto
+
++ nat_wrong_bound (f : ℕ → ℕ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)))+1 ≤ f a+f b
+  auto
+
++ nat_branch_leak (f : ℕ → ℕ) (n a b : ℕ) (p : Prop) (ha : a < n) (hb : b < n ∨ p) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ nat_conditional_guard (f : ℕ → ℕ) (n a b : ℕ) (p : Prop) (ha : a < n) (hb : p → b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ int_missing_range (f : ℕ → ℤ) (n a b : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ int_closed_range (f : ℕ → ℤ) (n a b : ℕ) (ha : a ≤ n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ int_wrong_weight (f : ℕ → ℤ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 2 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ int_wrong_sign (f : ℕ → ℤ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a-f b
+  auto
+
++ int_wrong_bound (f : ℕ → ℤ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)))+1 ≤ f a+f b
+  auto
+
++ int_branch_leak (f : ℕ → ℤ) (n a b : ℕ) (p : Prop) (ha : a < n) (hb : b < n ∨ p) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ int_conditional_guard (f : ℕ → ℤ) (n a b : ℕ) (p : Prop) (ha : a < n) (hb : p → b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ rat_missing_range (f : ℕ → ℚ) (n a b : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ rat_closed_range (f : ℕ → ℚ) (n a b : ℕ) (ha : a ≤ n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ rat_wrong_weight (f : ℕ → ℚ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 2 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ rat_wrong_sign (f : ℕ → ℚ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a-f b
+  auto
+
++ rat_wrong_bound (f : ℕ → ℚ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)))+1 ≤ f a+f b
+  auto
+
++ rat_branch_leak (f : ℕ → ℚ) (n a b : ℕ) (p : Prop) (ha : a < n) (hb : b < n ∨ p) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ rat_conditional_guard (f : ℕ → ℚ) (n a b : ℕ) (p : Prop) (ha : a < n) (hb : p → b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ real_missing_range (f : ℕ → ℝ) (n a b : ℕ) (ha : a < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ real_closed_range (f : ℕ → ℝ) (n a b : ℕ) (ha : a ≤ n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ real_wrong_weight (f : ℕ → ℝ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 2 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ real_wrong_sign (f : ℕ → ℝ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a-f b
+  auto
+
++ real_wrong_bound (f : ℕ → ℝ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0)))+1 ≤ f a+f b
+  auto
+
++ real_branch_leak (f : ℕ → ℝ) (n a b : ℕ) (p : Prop) (ha : a < n) (hb : b < n ∨ p) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ real_conditional_guard (f : ℕ → ℝ) (n a b : ℕ) (p : Prop) (ha : a < n) (hb : p → b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto
+
++ natural_difference (f : ℕ → ℕ) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)-(if i=b then 1 else 0))) = f a-f b
+  auto
+
++ generic_pair (f : ℕ → α) (n a b : ℕ) (ha : a < n) (hb : b < n) : (∑ i < n, f i*((if i=a then 1 else 0)+(if i=b then 1 else 0))) = f a+f b
+  auto

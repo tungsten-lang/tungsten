@@ -1,0 +1,44 @@
+import arith
+
++ nonnegative (x : ℚ) : 0 ≤ |x|
+  auto
++ positive (x : ℚ) (h : x ≠ 0) : 0 < |x|
+  auto
++ nonnegative_value (x : ℚ) (h : 0 ≤ x) : |x| = x
+  auto
++ nonpositive_value (x : ℚ) (h : x ≤ 0) : |x| = 0-x
+  auto
++ interval (x e : ℚ) (lo : 0-e ≤ x) (hi : x ≤ e) : |x| ≤ e
+  auto
++ strict_interval (x e : ℚ) (lo : 0-e < x) (hi : x < e) : |x| < e
+  auto
++ endpoints (x e : ℚ) (h : |x| ≤ e) : 0-e ≤ x ∧ x ≤ e
+  auto
++ strict_endpoints (x e : ℚ) (h : |x| < e) : 0-e < x ∧ x < e
+  auto
++ weakened_endpoint (x e d : ℚ) (h : |x| < e) (hd : e ≤ d-1) : x < d
+  auto
++ triangle (x y : ℚ) : |x+y| ≤ |x|+|y|
+  auto
++ difference (x y : ℚ) : |x-y| ≤ |x|+|y|
+  auto
++ metric_triangle (x y z : ℚ) : |x-z| ≤ |x-y|+|y-z|
+  auto
++ reverse_triangle (x y : ℚ) : | |x|-|y| | ≤ |x-y|
+  auto
++ product (x y : ℚ) : |x*y| = |x|*|y|
+  auto
++ nested (x : ℚ) : | |x| | = |x|
+  auto
++ squared_bound (x c : ℚ) (h : x*x ≤ c*c) (hc : 0 ≤ c) : |x| ≤ c
+  auto
++ strict_squared_order (x y : ℚ) (h : x*x < y*y) : |x| < |y|
+  auto
++ zero_bound (x : ℚ) (h : |x| ≤ 0) : x = 0
+  auto
++ pointwise (f : ℕ → ℚ) (c : ℚ) (h : ∀ i, |f i| ≤ c) (n : ℕ) : f n ≤ c
+  auto
+opaque a : ℚ
+axiom known_abs : |a| ≤ 1
++ explicit_bound : a ≤ 1
+  auto [known_abs]

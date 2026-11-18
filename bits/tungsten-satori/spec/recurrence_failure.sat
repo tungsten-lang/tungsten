@@ -1,0 +1,14 @@
+import recurrence
+
++ real_negative_rate (f : ℕ → ℝ) (base : f 0 ≤ 1) (step : ∀ i, f (i + 1) ≤ (-1) * f i) (n : ℕ) : f n ≤ 1 * (-1) ^ n := recurrence.geometric_upper.real f (-1) 1 (by decide) base step n
++ real_reversed_gap (f : ℕ → ℝ) (base : f 0 ≤ 0) (step : ∀ i, f (i + 1) ≤ 2 * f i + 3 * 1 ^ i) (n : ℕ) : (1 - 2) * f n ≤ 3 * (1 ^ n - 2 ^ n) := recurrence.geometric_forcing.real f 2 1 3 (by decide) (by decide) base step n
++ real_missing_initial (f : ℕ → ℝ) (step : ∀ i, f i + 1 ≤ f (i + 1)) (n : ℕ) : 0 + (n : ℝ) * 1 ≤ f n := by apply recurrence.linear_lower.real f 1 0
++ rational_positive_initial (f : ℕ → ℚ) (base : f 0 ≤ 1) (step : ∀ i, f (i + 1) ≤ 1 * f i + 2 * 3 ^ i) (n : ℕ) : (3 - 1) * f n ≤ 2 * (3 ^ n - 1 ^ n) := recurrence.geometric_forcing.rat f 1 3 2 (by decide) (by decide) base step n
++ rational_missing_step (f : ℕ → ℚ) (base : f 0 ≤ 2) (n : ℕ) : f n ≤ 2 * 3 ^ n := by apply recurrence.geometric_upper.rat f 3 2 (by decide) base
++ rational_wrong_multiplier (f : ℕ → ℚ) (base : f 0 ≤ 2) (step : ∀ i, f (i + 1) ≤ 3 * f i) (n : ℕ) : f n ≤ 2 * 2 ^ n := recurrence.geometric_upper.rat f 3 2 (by decide) base step n
++ integer_inequality_is_equality (f : ℕ → ℤ) (step : ∀ i, f (i + 1) ≤ 2 * f i) (n : ℕ) : f n = f 0 * 2 ^ n := recurrence.geometric_eq.int f 2 step n
++ integer_negative_rate (f : ℕ → ℤ) (base : 1 ≤ f 0) (step : ∀ i, (-2) * f i ≤ f (i + 1)) (n : ℕ) : 1 * (-2) ^ n ≤ f n := recurrence.geometric_lower.int f (-2) 1 (by decide) base step n
++ integer_reversed_step (f : ℕ → ℤ) (base : f 0 ≤ 2) (step : ∀ i, f i + 3 ≤ f (i + 1)) (n : ℕ) : f n ≤ 2 + (n : ℤ) * 3 := recurrence.linear_upper.int f 3 2 base step n
++ natural_reversed_step (f : ℕ → ℕ) (base : 1 ≤ f 0) (step : ∀ i, f (i + 1) ≤ f i + 2) (n : ℕ) : 1 + n * 2 ≤ f n := recurrence.linear_lower.nat f 2 1 base step n
++ natural_wrong_exponent (f : ℕ → ℕ) (step : ∀ i, f (i + 1) = 3 * f i) (n : ℕ) : f n = f 0 * 3 ^ (n + 1) := recurrence.geometric_eq.nat f 3 step n
++ natural_missing_initial (f : ℕ → ℕ) (step : ∀ i, f (i + 1) ≤ 2 * f i) (n : ℕ) : f n ≤ 1 * 2 ^ n := by apply recurrence.geometric_upper.nat f 2 1 (by decide)

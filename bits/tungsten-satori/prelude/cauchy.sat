@@ -1,0 +1,123 @@
+-- Cauchy–Schwarz for finite weighted sums. Weights may vanish.
+import quadratic
+import list_sum
+
++ list_sum.weighted_square_expand.real (xs : list α) (w f g : α → ℝ) (x y : ℝ) :
+    sum_list xs (fun i => w i * ((x*f i-y*g i)*(x*f i-y*g i))) = x^2*(sum_list xs (fun i => w i * (f i * f i))) - 2*x*y*(sum_list xs (fun i => w i * (f i * g i))) + y^2*(sum_list xs (fun i => w i * (g i * g i)))
+  induction xs with i xs ih
+  · simp
+  · rw [list_sum.cons, list_sum.cons, list_sum.cons, list_sum.cons, ih]
+    ring
+
++ list_sum.weighted_cauchy.real (xs : list α) (w f g : α → ℝ) (nonneg : ∀ i ∈ xs, 0 ≤ w i) :
+    (sum_list xs (fun i => w i * (f i * g i)))^2 ≤ (sum_list xs (fun i => w i * (f i * f i)))*(sum_list xs (fun i => w i * (g i * g i)))
+  apply quadratic_form.bound.real
+  intro x y
+  rw [← list_sum.weighted_square_expand.real xs w f g x y]
+  apply sum_list_nonneg.real
+  intro i hi
+  exact mul_nonneg.real (w i) ((x*f i-y*g i)*(x*f i-y*g i)) (nonneg i hi) (by nlinarith)
+
++ list_sum.cauchy.real (xs : list α) (f g : α → ℝ) :
+    (sum_list xs (fun i => f i * g i))^2 ≤ (sum_list xs (fun i => f i * f i))*(sum_list xs (fun i => g i * g i))
+  simpa using list_sum.weighted_cauchy.real xs (fun i => 1) f g (by intro i hi; linarith)
+
++ sum_below.weighted_square_expand.real (n : ℕ) (w f g : ℕ → ℝ) (x y : ℝ) :
+    sum_below n (fun i => w i * ((x*f i-y*g i)*(x*f i-y*g i))) = x^2*(sum_below n (fun i => w i * (f i * f i))) - 2*x*y*(sum_below n (fun i => w i * (f i * g i))) + y^2*(sum_below n (fun i => w i * (g i * g i)))
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
+
++ sum_below.weighted_cauchy.real (n : ℕ) (w f g : ℕ → ℝ) (nonneg : ∀ i < n, 0 ≤ w i) :
+    (sum_below n (fun i => w i * (f i * g i)))^2 ≤ (sum_below n (fun i => w i * (f i * f i)))*(sum_below n (fun i => w i * (g i * g i)))
+  apply quadratic_form.bound.real
+  intro x y
+  rw [← sum_below.weighted_square_expand.real n w f g x y]
+  apply sum_nonneg.real
+  intro i hi
+  exact mul_nonneg.real (w i) ((x*f i-y*g i)*(x*f i-y*g i)) (nonneg i hi) (by nlinarith)
+
++ sum_below.cauchy.real (n : ℕ) (f g : ℕ → ℝ) :
+    (sum_below n (fun i => f i * g i))^2 ≤ (sum_below n (fun i => f i * f i))*(sum_below n (fun i => g i * g i))
+  simpa using sum_below.weighted_cauchy.real n (fun i => 1) f g (by intro i hi; linarith)
+
++ list_sum.weighted_square_expand.rat (xs : list α) (w f g : α → ℚ) (x y : ℚ) :
+    sum_list xs (fun i => w i * ((x*f i-y*g i)*(x*f i-y*g i))) = x^2*(sum_list xs (fun i => w i * (f i * f i))) - 2*x*y*(sum_list xs (fun i => w i * (f i * g i))) + y^2*(sum_list xs (fun i => w i * (g i * g i)))
+  induction xs with i xs ih
+  · simp
+  · rw [list_sum.cons, list_sum.cons, list_sum.cons, list_sum.cons, ih]
+    ring
+
++ list_sum.weighted_cauchy.rat (xs : list α) (w f g : α → ℚ) (nonneg : ∀ i ∈ xs, 0 ≤ w i) :
+    (sum_list xs (fun i => w i * (f i * g i)))^2 ≤ (sum_list xs (fun i => w i * (f i * f i)))*(sum_list xs (fun i => w i * (g i * g i)))
+  apply quadratic_form.bound.rat
+  intro x y
+  rw [← list_sum.weighted_square_expand.rat xs w f g x y]
+  apply sum_list_nonneg.rat
+  intro i hi
+  exact mul_nonneg.rat (w i) ((x*f i-y*g i)*(x*f i-y*g i)) (nonneg i hi) (by nlinarith)
+
++ list_sum.cauchy.rat (xs : list α) (f g : α → ℚ) :
+    (sum_list xs (fun i => f i * g i))^2 ≤ (sum_list xs (fun i => f i * f i))*(sum_list xs (fun i => g i * g i))
+  simpa using list_sum.weighted_cauchy.rat xs (fun i => 1) f g (by intro i hi; linarith)
+
++ sum_below.weighted_square_expand.rat (n : ℕ) (w f g : ℕ → ℚ) (x y : ℚ) :
+    sum_below n (fun i => w i * ((x*f i-y*g i)*(x*f i-y*g i))) = x^2*(sum_below n (fun i => w i * (f i * f i))) - 2*x*y*(sum_below n (fun i => w i * (f i * g i))) + y^2*(sum_below n (fun i => w i * (g i * g i)))
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
+
++ sum_below.weighted_cauchy.rat (n : ℕ) (w f g : ℕ → ℚ) (nonneg : ∀ i < n, 0 ≤ w i) :
+    (sum_below n (fun i => w i * (f i * g i)))^2 ≤ (sum_below n (fun i => w i * (f i * f i)))*(sum_below n (fun i => w i * (g i * g i)))
+  apply quadratic_form.bound.rat
+  intro x y
+  rw [← sum_below.weighted_square_expand.rat n w f g x y]
+  apply sum_nonneg.rat
+  intro i hi
+  exact mul_nonneg.rat (w i) ((x*f i-y*g i)*(x*f i-y*g i)) (nonneg i hi) (by nlinarith)
+
++ sum_below.cauchy.rat (n : ℕ) (f g : ℕ → ℚ) :
+    (sum_below n (fun i => f i * g i))^2 ≤ (sum_below n (fun i => f i * f i))*(sum_below n (fun i => g i * g i))
+  simpa using sum_below.weighted_cauchy.rat n (fun i => 1) f g (by intro i hi; linarith)
+
++ list_sum.weighted_square_expand.int (xs : list α) (w f g : α → ℤ) (x y : ℤ) :
+    sum_list xs (fun i => w i * ((x*f i-y*g i)*(x*f i-y*g i))) = x^2*(sum_list xs (fun i => w i * (f i * f i))) - 2*x*y*(sum_list xs (fun i => w i * (f i * g i))) + y^2*(sum_list xs (fun i => w i * (g i * g i)))
+  induction xs with i xs ih
+  · simp
+  · rw [list_sum.cons, list_sum.cons, list_sum.cons, list_sum.cons, ih]
+    ring
+
++ list_sum.weighted_cauchy.int (xs : list α) (w f g : α → ℤ) (nonneg : ∀ i ∈ xs, 0 ≤ w i) :
+    (sum_list xs (fun i => w i * (f i * g i)))^2 ≤ (sum_list xs (fun i => w i * (f i * f i)))*(sum_list xs (fun i => w i * (g i * g i)))
+  apply quadratic_form.bound.int
+  intro x y
+  rw [← list_sum.weighted_square_expand.int xs w f g x y]
+  apply sum_list_nonneg.int
+  intro i hi
+  exact mul_nonneg.int (w i) ((x*f i-y*g i)*(x*f i-y*g i)) (nonneg i hi) (by nlinarith)
+
++ list_sum.cauchy.int (xs : list α) (f g : α → ℤ) :
+    (sum_list xs (fun i => f i * g i))^2 ≤ (sum_list xs (fun i => f i * f i))*(sum_list xs (fun i => g i * g i))
+  simpa using list_sum.weighted_cauchy.int xs (fun i => 1) f g (by intro i hi; linarith)
+
++ sum_below.weighted_square_expand.int (n : ℕ) (w f g : ℕ → ℤ) (x y : ℤ) :
+    sum_below n (fun i => w i * ((x*f i-y*g i)*(x*f i-y*g i))) = x^2*(sum_below n (fun i => w i * (f i * f i))) - 2*x*y*(sum_below n (fun i => w i * (f i * g i))) + y^2*(sum_below n (fun i => w i * (g i * g i)))
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ, sum_below_succ, sum_below_succ, ih]
+    ring
+
++ sum_below.weighted_cauchy.int (n : ℕ) (w f g : ℕ → ℤ) (nonneg : ∀ i < n, 0 ≤ w i) :
+    (sum_below n (fun i => w i * (f i * g i)))^2 ≤ (sum_below n (fun i => w i * (f i * f i)))*(sum_below n (fun i => w i * (g i * g i)))
+  apply quadratic_form.bound.int
+  intro x y
+  rw [← sum_below.weighted_square_expand.int n w f g x y]
+  apply sum_nonneg.int
+  intro i hi
+  exact mul_nonneg.int (w i) ((x*f i-y*g i)*(x*f i-y*g i)) (nonneg i hi) (by nlinarith)
+
++ sum_below.cauchy.int (n : ℕ) (f g : ℕ → ℤ) :
+    (sum_below n (fun i => f i * g i))^2 ≤ (sum_below n (fun i => f i * f i))*(sum_below n (fun i => g i * g i))
+  simpa using sum_below.weighted_cauchy.int n (fun i => 1) f g (by intro i hi; linarith)

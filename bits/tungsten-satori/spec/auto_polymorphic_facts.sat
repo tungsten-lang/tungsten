@@ -1,0 +1,57 @@
+import realx
+
+opaque measure : α → ℝ
+axiom measure_nonneg (x : α) : 0 ≤ measure x
+opaque paired : α → β → ℝ
+axiom paired_nonneg (x : α) (y : β) : 0 ≤ paired x y
+opaque allowed : α → Prop
+axiom guarded_measure (x : α) (h : allowed x) : 0 ≤ measure x
+axiom bundled_measure (x : α) (y : β) : 0 ≤ measure x ∧ 0 ≤ measure y
+opaque ready : Prop
+axiom universally_ready (x : α) : ready
+axiom either_measure (x y : α) : 0 ≤ measure x ∨ 0 ≤ measure y
+
++ nat_norm (x y : ℕ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg]
+
++ int_norm (x y : ℤ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg]
+
++ rat_norm (x y : ℚ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg]
+
++ real_norm (x y : ℝ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg]
+
++ generic_norm (x y : β) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg]
+
++ function_norm (x y : ℕ → ℝ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg]
+
++ pair_norm (x y : ℚ × ℤ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg]
+
++ mixed_types (x : ℚ) (y : ℤ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [measure_nonneg]
+
++ two_parameters (x : ℤ) (y : Prop) : sqrt ((paired x y)^2+(paired x y)^2) ≤ paired x y+paired x y
+  auto [paired_nonneg]
+
++ partially_applied (x : α) (y z : ℚ) : sqrt ((paired x y)^2+(paired x z)^2) ≤ paired x y+paired x z
+  auto [paired_nonneg x]
+
++ local_fixed (x y : α) (h : ∀ z : α, 0 ≤ measure z) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto
+
++ guard_supplied (x y : ℚ) (hx : allowed x) (hy : allowed y) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [guarded_measure]
+
++ swapped_parameters (x : β) (y : α) : sqrt ((paired x y)^2+(paired x y)^2) ≤ paired x y+paired x y
+  auto [paired_nonneg]
+
++ bundled_types (x : ℚ) (y : ℤ) : sqrt ((measure x)^2+(measure y)^2) ≤ measure x+measure y
+  auto [bundled_measure]
+
++ pure_logic : ready
+  auto [universally_ready]

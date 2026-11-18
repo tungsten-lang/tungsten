@@ -1,0 +1,22 @@
+import quadratic
+
++ int_form (a b c : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
++ int_product (a b c : ℤ) (q : ∀ x y : ℤ, 0 ≤ x*x*a-2*x*y*b+y*y*c) : b*b ≤ a*c
+  auto
++ int_guarded (P : Prop) (h : P) (a b c : ℤ) (q : P → ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
+
++ rat_form (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
++ rat_product (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x*x*a-2*x*y*b+y*y*c) : b*b ≤ a*c
+  auto
++ rat_guarded (P : Prop) (h : P) (a b c : ℚ) (q : P → ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
+
++ real_form (a b c : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto
++ real_product (a b c : ℝ) (q : ∀ x y : ℝ, 0 ≤ x*x*a-2*x*y*b+y*y*c) : b*b ≤ a*c
+  auto
++ real_guarded (P : Prop) (h : P) (a b c : ℝ) (q : P → ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*c
+  auto

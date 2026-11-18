@@ -79,14 +79,26 @@
         thms.push(c.thm)
       @parent.solve(@just.call(thms))
 
+-> strict_bound_note(bound, missing)
+  "  proved " + bound + "\n  need " + missing
+
 + Prover
   ro :k, :d, :session
-  rw :goals
+  rw :goals, :auto_defaults, :sum_aliases_allowed, :registered_search
 
   -> new(@session)
     @k = @session.k
     @d = @session.d
     @goals = []
+    @auto_defaults = nil
+    @registered_search = false
+    @registered_index = nil
+    @registered_version = -1
+    @sum_aliases_allowed = true
+    @sum_alias_rules = {}
+    @fold_alias_rules = {}
+    @application_squares = {}
+    @application_square_cache = {}
     @hcount = 0
     @split_ne = []
     @nl_mode = false
@@ -137,7 +149,9 @@
       if tm_eq(th2.concl, gc)
         th = @k.eq_mp(@k.sym(@d.beta_norm_conv(goal.concl)), th2)
       else
-        th3 = try_defeq(th, goal.concl)
+        th3 = try_eta_fit(th, goal.concl)
+        if th3 == nil
+          th3 = try_defeq(th, goal.concl)
         if th3 == nil
           fail("type mismatch: proof shows\n  " + tm_show(th.concl) + "\nbut the goal is\n  " + tm_show(goal.concl))
         th = th3
@@ -150,18 +164,40 @@
         fail("proof depends on an assumption not in context: " + tm_show(h))
     th
 
-  # Definitional unfolding: both sides compute to the same value.
+  # Checked conversion through definitions and repeated-product notation.
   -> try_defeq(th, target)
     begin
-      a = @k.compute(th.concl)
-      b = @k.compute(target)
+      a = @d.beta_eta_conv(th.concl)
+      b = @d.beta_eta_conv(target)
+      a = @k.trans(a, @k.compute(dest_binop(a.concl, "=")[1]))
+      b = @k.trans(b, @k.compute(dest_binop(b.concl, "=")[1]))
+      # Unfolding a function alias can expose further beta/eta reductions.
+      a = @k.trans(a, @d.beta_eta_conv(dest_binop(a.concl, "=")[1]))
+      b = @k.trans(b, @d.beta_eta_conv(dest_binop(b.concl, "=")[1]))
       va = dest_binop(a.concl, "=")[1]
       vb = dest_binop(b.concl, "=")[1]
+      if !tm_eq(va, vb)
+        # Aliases can occur inside quantified goals as well as at the head.
+        a = @k.trans(a, @d.compute_conv(va))
+        b = @k.trans(b, @d.compute_conv(vb))
+        a = @k.trans(a, @d.beta_eta_conv(dest_binop(a.concl, "=")[1]))
+        b = @k.trans(b, @d.beta_eta_conv(dest_binop(b.concl, "=")[1]))
+        va = dest_binop(a.concl, "=")[1]
+        vb = dest_binop(b.concl, "=")[1]
+      if !tm_eq(va, vb)
+        sa = application_square_normalization(va)
+        sb = application_square_normalization(vb)
+        if sa != nil
+          a = @k.trans(a, sa)
+        if sb != nil
+          b = @k.trans(b, sb)
+        va = dest_binop(a.concl, "=")[1]
+        vb = dest_binop(b.concl, "=")[1]
       if tm_eq(va, vb)
         return @k.eq_mp(@k.sym(b), @k.eq_mp(a, th))
     rescue e
-      return nil
-    nil
+      0
+    try_square_fit(th, target)
 
   # ---------------------------------------------------------------------------
   # Running tactic blocks
@@ -229,6 +265,17 @@
       run_block(n.block)
       return
     parts = semi_parts(toks)
+    if n.block.size > 0 && parts.size > 0 && !block_tactic?(parts[parts.size - 1])
+      # An indented continuation owns only this goal and its descendants.
+      # Dedenting cannot abandon its goals or consume a surrounding sibling.
+      sub = Prover.new(@session)
+      sub.goals = [first_goal]
+      sub.run_node(TacNode.new(toks, [], n.line))
+      sub.run_block(n.block)
+      if sub.goals.size > 0
+        fail("line " + n.line.to_s + ": indented proof not closed:\n" + sub.goals[0].goal.show(@k))
+      @goals = arr_sub(@goals, 1, @goals.size - 1)
+      return
     if parts.size > 1
       pi = 0
       while pi < parts.size
@@ -324,6 +371,11 @@
     if name == "all_goals" || name == "any_goals"
       return run_all_goals(args, line)
     g = first_goal
+    conv = @d.beta_norm_opt(g.goal.concl)
+    if conv != nil
+      normalized = dest_binop(conv.concl, "=")[1]
+      refs = refine(g, [g.goal.with_concl(normalized)], ->(ts) @k.eq_mp(@k.sym(conv), ts[0]))
+      g = refs[0]
     case name
     when "intro", "intros"
       tac_intro(g, args, name == "intros")
@@ -370,6 +422,8 @@
       tac_rw(g, args)
     when "simp", "simp_all"
       tac_simp(g, args, name == "simp_all")
+    when "simpa"
+      tac_simpa(g, args)
     when "unfold"
       tac_unfold(g, args)
     when "decide"
@@ -378,6 +432,8 @@
       tac_norm_num(g, args)
     when "ring"
       tac_ring(g)
+    when "linear_combination"
+      tac_linear_combination(g, args)
     when "linarith", "arith"
       tac_linarith(g, args)
     when "omega"
@@ -401,7 +457,22 @@
     when "sat"
       tac_sat(g)
     when "auto", "tauto", "aesop"
-      tac_auto(g, 3)
+      hints = []
+      if args.size > 0
+        if args.size < 2 || args[0].text != "\[" || args[args.size - 1].text != "]"
+          fail("auto: expected a bracketed list of lemmas")
+        inner = arr_sub(args, 1, args.size - 2)
+        if inner.size > 0
+          split_top(inner, ",").each -> (hint)
+            hints = hints + auto_hint_rules(g.goal, proof_expr(g.goal, hint, nil))
+      begin
+        tac_auto(g, 3, hints, [24, 4], [])
+      rescue e
+        if e.to_s == "auto failed" && @goals.size > 0
+          note = strict_bound_feedback(first_goal.goal, hints)
+          if note != nil
+            fail("auto failed\n" + note)
+        raise e
     when "specialize"
       tac_specialize(g, args)
     when "symm"
@@ -419,7 +490,21 @@
     when "clear"
       @goals[0] = GoalRef.new(g.goal, g.node, g.index)
     else
+      expression = parse_expr_toks(toks)
+      if proof_line?(g.goal, expression)
+        return close(g, fit(g, proof_ast(g.goal, expression, g.goal.concl)))
       fail("unknown tactic '" + name + "'")
+
+  # A known proof expression can stand alone as a proof step. Tactic names
+  # are dispatched first; term variables and unknown names are not guessed.
+  -> proof_line?(goal, expression)
+    if expression.kind == :id
+      if goal.fixes.any?(->(fixed) fixed[0] == expression.s)
+        return false
+      return !term_def?(goal, expression.s) && lookup_proof(goal, expression.s) != nil
+    if expression.kind == :app || expression.kind == :proj || expression.kind == :paren
+      return proof_line?(goal, expression.kids[0])
+    expression.kind == :anon
 
   # ---------------------------------------------------------------------------
   # Proof expressions: hypothesis/theorem names applied to terms and proofs.
@@ -451,6 +536,8 @@
     nil
 
   -> project_proof(th, field)
+    # A supplied predicate can expose a connective only after beta reduction.
+    th = @d.beta_norm_thm(th)
     case field
     when "1", "left"
       @k.conj1(th)
@@ -458,9 +545,13 @@
       @k.conj2(th)
     when "mp"
       e = dest_binop(th.concl, "=")
+      if e == nil || !ty_eq(type_of(e[0]), ty_bool)
+        fail(".mp needs an equivalence")
       @k.disch(e[0], @k.eq_mp(th, @k.assume(e[0])))
     when "mpr"
       e = dest_binop(th.concl, "=")
+      if e == nil || !ty_eq(type_of(e[0]), ty_bool)
+        fail(".mpr needs an equivalence")
       @k.disch(e[1], @k.eq_mp(@k.sym(th), @k.assume(e[1])))
     when "symm"
       @k.sym(th)
@@ -487,6 +578,12 @@
     @k.defs.has_key?(name)
 
   -> proof_ast(goal, e, expected = nil)
+    if expected != nil
+      conv = @d.beta_norm_opt(expected)
+      if conv != nil
+        normalized = dest_binop(conv.concl, "=")[1]
+        th = fit_concl(proof_ast(goal, e, normalized), normalized)
+        return @k.eq_mp(@k.sym(conv), th)
     if e.kind == :by
       if expected == nil
         fail("(by …) needs a known statement here")
@@ -571,10 +668,20 @@
     t2 = @d.beta_norm_term(target)
     if tm_eq(th2.concl, t2)
       return @k.eq_mp(@k.sym(@d.beta_norm_conv(target)), th2)
+    th3 = try_eta_fit(th, target)
+    if th3 != nil
+      return th3
     th3 = try_defeq(th, target)
     if th3 != nil
       return th3
     fail("mismatch: have " + tm_show(th.concl) + " but need " + tm_show(target))
+
+  -> try_eta_fit(th, target)
+    from = @d.beta_eta_conv(th.concl)
+    to = @d.beta_eta_conv(target)
+    if !tm_eq(dest_binop(from.concl, "=")[1], dest_binop(to.concl, "=")[1])
+      return nil
+    @k.eq_mp(@k.sym(to), @k.eq_mp(from, th))
 
   # Instantiate theorem th with explicit args; match its conclusion against
   # `target` (if given). Returns [thm, remaining premise props].
@@ -586,6 +693,10 @@
     hv = []
     th.hyps.each -> (h)
       tm_tyvars_into(h, hv)
+    # A projection or partially applied theorem can contain fixed local terms
+    # even with no hypotheses. Their types were already chosen by the caller.
+    tm_frees(th.concl).each -> (v)
+      tm_tyvars_into(v, hv)
     ren = {}
     tvs = {}
     tyvars.each -> (x)
@@ -596,6 +707,9 @@
     t = th
     if ren.size > 0
       t = k.inst_type(th, ren)
+    # A local `have` can retain an applied predicate at its head. Expose its
+    # checked logical form before discovering any arguments to consume.
+    t = @d.beta_norm_thm(t)
     # telescope: walk ∀ and ⇒, creating pattern vars
     steps = []
     pvars = {}
@@ -624,7 +738,7 @@
           steps.push([:imp, pq[0]])
           cur = pq[1]
           curs.push(cur)
-        elsif nq != nil && target != nil && is_const?(target, "⊥")
+        elsif nq != nil && ((target != nil && is_const?(target, "⊥")) || (target == nil && steps.size == 0 && args.size > 0))
           steps.push([:not, nq])
           cur = @k.false_tm
           curs.push(cur)
@@ -643,25 +757,34 @@
       isproof = proof_name?(goal, a)
       while si < steps.size && (filled.has_key?(si) || (steps[si][0] == :all && isproof))
         si += 1
-      if si >= steps.size
-        fail("too many arguments")
-      st = steps[si]
       tstep = si
-      if st[0] != :all && !isproof
+      if !isproof
         # the earliest ∀ binder still unbound (earlier ones may have been skipped by a proof argument)
         j = 0
         while j < steps.size && !(steps[j][0] == :all && !filled.has_key?(j) && !mt.tm.has_key?(var_key(steps[j][1])))
           j += 1
         if j < steps.size
           tstep = j
+      if tstep >= steps.size
+        if ai > 0
+          # Instantiating a predicate may expose more logical arguments.
+          # Replay the supplied prefix, then continue from its checked beta
+          # conversion. Each retry consumes at least one source argument.
+          prefix = instantiate_to(goal, th, arr_sub(args, 0, ai), nil, false)
+          resumed = @d.beta_norm_thm(prefix[0])
+          return instantiate_to(goal, resumed, arr_sub(args, ai, args.size - ai), target, allow_open)
+        fail("too many arguments")
       if steps[tstep][0] == :all
         v = steps[tstep][1]
         vt = ty_subst(v.ty, mt.ty)
         term = nil
-        if vt.tag == :v && tvs.has_key?(vt.name)
-          term = elab_term_ast(goal, a, nil)
-        else
-          term = elab_term_ast(goal, a, vt)
+        inferred_types = {}
+        ty_vars(vt).each -> (name)
+          if tvs.has_key?(name)
+            inferred_types[name] = @session.elab.fresh_meta
+        # Keep known parts of the expected type (e.g. a projection's domain)
+        # while allowing its remaining type parameters to be inferred.
+        term = elab_term_ast(goal, a, ty_subst(vt, inferred_types))
         if !mt.m(v, term, 0)
           fail("argument has the wrong type")
         if tstep > maxused
@@ -673,28 +796,55 @@
       else
         if si > maxused
           maxused = si
-        prem = st[1]
-        prem_i = tm_subst(prem, mt.tm)
-        pth = proof_ast(goal, a, closed_or_nil(prem_i, pvars))
-        if !mt.m(prem, pth.concl, 0)
-          b1 = @d.beta_norm_thm(pth)
-          if !mt.m(prem, b1.concl, 0)
-            fail("argument proves " + tm_show(pth.concl) + " but the premise is " + tm_show(prem))
-          pth = b1
+        prem = steps[si][1]
+        prem_i = closed_or_nil(tm_subst(prem, mt.tm), pvars)
+        if prem_i != nil
+          prem_i = tm_inst_types(prem_i, mt.ty)
+        pth = proof_ast(goal, a, prem_i)
+        matched = match_application(mt, prem, pth.concl)
+        if matched == nil && prem_i != nil
+          # A hypothesis or projection can prove a definitionally equal alias.
+          # Convert the supplied proof before matching the known premise; the
+          # conversion preserves its assumptions and is replayed by the kernel.
+          converted = try_defeq(pth, prem_i)
+          if converted != nil
+            matched = match_application(mt, prem, converted.concl)
+            if matched != nil
+              pth = converted
+        if matched == nil
+          fail("argument proves " + tm_show(pth.concl) + " but the premise is " + tm_show(prem))
+        mt = matched
         proofs[si] = pth
         si += 1
       ai += 1
     if target != nil
       # use the shortest telescope prefix whose remainder matches the target
-      tb = @d.beta_norm_term(target)
       found = -1
       j = si
       while j <= steps.size && found < 0
-        trial = mt.clone
-        if trial.m(curs[j], target, 0) || trial.m(curs[j], tb, 0)
+        trial = match_application(mt, curs[j], target)
+        if trial != nil
           found = j
           mt = trial
         j += 1
+      if found < 0 && args.size > 0
+        # Expose a supplied predicate's telescope before definitional fitting
+        # can erase a premise such as True. `apply` still opens that premise.
+        prefix = instantiate_to(goal, th, args, nil, false)
+        resumed = @d.beta_norm_thm(prefix[0])
+        if !tm_eq(resumed.concl, th.concl)
+          return instantiate_to(goal, resumed, [], target, allow_open)
+      if found < 0
+        # Preserve ordinary premise matching before trying aliases: computing
+        # a whole implication can otherwise erase a trivially true premise.
+        j = si
+        while j <= steps.size && found < 0
+          instantiated = closed_or_nil(tm_subst(curs[j], mt.tm), pvars)
+          if instantiated != nil
+            instantiated = tm_inst_types(instantiated, mt.ty)
+            if try_defeq(k.assume(instantiated), target) != nil
+              found = j
+          j += 1
       if found < 0
         fail("cannot match " + tm_show(cur) + " with goal " + tm_show(target))
       steps = arr_sub(steps, 0, found)
@@ -716,8 +866,7 @@
             return [regen(thx, gens), open]
           if target == nil && !allow_open
             # a later premise was supplied: instantiate with a fresh variable and generalize back at the end
-            fv = mk_var(fresh_name(v.name.slice(1, v.name.size - 1), avoid), ty_subst(v.ty, mt.ty))
-            avoid.push(fv)
+            fv = mk_var(fresh_name_from_set(v.name.slice(1, v.name.size - 1), used_names), ty_subst(v.ty, mt.ty))
             gens.push(fv)
             thx = k.spec(fv, thx)
             si += 1
@@ -751,6 +900,188 @@
           thx = @d.undisch(thx)
       si += 1
     [regen(thx, gens), open]
+
+  # Compress repeated numeric factors without expanding their contents.
+  # Prove v*v = v^2 once per type, then instantiate at the actual operand.
+  -> application_square?(t)
+    pair = dest_binop(t, "*")
+    pair != nil && tm_eq(pair[0], pair[1]) && ["nat", "int", "rat", "real"].include?(type_of(pair[0]).name)
+
+  -> application_square_conv(t, budget)
+    budget[0] -= 1
+    if budget[0] < 0
+      fail("application: square normalization limit")
+    th = nil
+    if t.tag == :app
+      f = application_square_conv(t.a, budget)
+      x = application_square_conv(t.b, budget)
+      if f != nil || x != nil
+        th = @k.mk_comb(f == nil ? @k.refl(t.a) : f, x == nil ? @k.refl(t.b) : x)
+    elsif t.tag == :lam
+      opened = dest_lam_fresh(t, [t])
+      body = application_square_conv(opened[1], budget)
+      if body != nil
+        th = @k.abs_rule(opened[0], body)
+    cur = th == nil ? t : dest_binop(th.concl, "=")[1]
+    if application_square?(cur)
+      base = dest_binop(cur, "*")[0]
+      ty = type_of(base)
+      rule = @application_squares[ty.name]
+      if rule == nil
+        v = mk_var("square", ty)
+        product = mk_apps(@k.mk_const("*", ty_funs([ty, ty], ty)), [v, v])
+        power = mk_apps(@k.mk_const("^", ty_funs([ty, ty_nat], ty)), [v, mk_lit(2, ty_nat)])
+        rule = @k.gen(v, @k.ring_eq(product, power))
+        @application_squares[ty.name] = rule
+      step = @k.spec(base, rule)
+      th = th == nil ? step : @k.trans(th, step)
+    th
+
+  -> application_square_normalization(t)
+    bucket = @application_square_cache[t.h]
+    if bucket != nil
+      bucket.each -> (entry)
+        if tm_eq(entry[0], t)
+          return entry[1]
+    conv = nil
+    begin
+      conv = application_square_conv(t, [128])
+    rescue e
+      0
+    if @application_square_cache.size < 256
+      if bucket == nil
+        bucket = []
+        @application_square_cache[t.h] = bucket
+      bucket.push([t, conv])
+    conv
+
+  -> try_square_fit(th, target)
+    left_head = strip_app(th.concl)[0]
+    right_head = strip_app(target)[0]
+    if [:const, :var].include?(left_head.tag) && [:const, :var].include?(right_head.tag) && !tm_eq(left_head, right_head)
+      return nil
+    a = application_square_normalization(th.concl)
+    b = application_square_normalization(target)
+    if a == nil && b == nil
+      return nil
+    left = a == nil ? th.concl : dest_binop(a.concl, "=")[1]
+    right = b == nil ? target : dest_binop(b.concl, "=")[1]
+    if !tm_eq(left, right)
+      return nil
+    result = a == nil ? th : @k.eq_mp(a, th)
+    b == nil ? result : @k.eq_mp(@k.sym(b), result)
+
+  -> match_application_squares(mt, pattern, target)
+    a = application_square_normalization(pattern)
+    b = application_square_normalization(target)
+    if a == nil && b == nil
+      return nil
+    mt.match_instantiated(@d, a == nil ? pattern : dest_binop(a.concl, "=")[1], b == nil ? target : dest_binop(b.concl, "=")[1])
+
+  -> match_application(mt, pattern, target)
+    trial = mt.clone
+    if trial.m(pattern, target, 0)
+      return trial
+    trial = mt.clone
+    if trial.m(pattern, @d.beta_norm_term(target), 0)
+      return trial
+    trial = mt.clone
+    if trial.m(@d.beta_eta_term(pattern), @d.beta_eta_term(target), 0)
+      return trial
+    matched = mt.match_instantiated(@d, pattern, target)
+    if matched != nil
+      return matched
+    begin
+      matched = mt.match_instantiated(@d, pattern, target, true)
+      if matched != nil
+        return matched
+    rescue e
+      0
+    matched = match_application_squares(mt, pattern, target)
+    if matched != nil
+      return matched
+    # Expose target-side definitions absent from the theorem's vocabulary.
+    # Keep shared operations (such as sum_below) folded while inferring args.
+    protected = {}
+    application_constants(pattern, protected)
+    rules = []
+    application_aliases(target, protected, {}, rules, [8])
+    if rules.size > 0
+      folder = Simp.new(@d, rules)
+      # Infer arguments before a reflexive equality or other outer proposition
+      # simplifies to True and loses the structure needed by the theorem.
+      inner = folder.sub_simp_opt(target, 0)
+      if inner != nil
+        expanded = dest_binop(inner.concl, "=")[1]
+        matched = mt.match_instantiated(@d, pattern, expanded)
+        if matched == nil
+          matched = match_application_squares(mt, pattern, expanded)
+        if matched != nil
+          return matched
+      conv = folder.simp_conv(target, 0)
+      expanded = dest_binop(conv.concl, "=")[1]
+      matched = mt.match_instantiated(@d, pattern, expanded)
+      return matched == nil ? match_application_squares(mt, pattern, expanded) : matched
+    nil
+
+  -> application_constants(t, names)
+    if t.tag == :const
+      names[t.name] = true
+    elsif t.tag == :app
+      application_constants(t.a, names)
+      application_constants(t.b, names)
+    elsif t.tag == :lam
+      application_constants(t.b, names)
+
+  # Retain a record field as a projection rather than unfolding its recursor.
+  # Use only closed, unconditional, kernel-only constructor equations.
+  -> application_projection_rules(t)
+    if !t.ty.fun?
+      return []
+    info = @k.inductives[t.ty.dom.name]
+    candidates = @session.simp_by_head[t.name]
+    if info == nil || info.ctors.size != 1 || candidates == nil
+      return []
+    out = []
+    candidates.each -> (r)
+      if r.is_eq && r.conds.size == 0 && r.th.hyps.size == 0 && r.th.tags.size == 0 && r.rhs.tag == :var
+        lhs = strip_app(r.lhs)
+        if lhs[0].tag == :const && lhs[0].name == t.name && lhs[1].size == 1
+          ctor = strip_app(lhs[1][0])
+          if ctor[0].tag == :const && ctor[0].name == info.ctors[0][0] && ctor[1].size == info.ctors[0][1].size
+            fields = true
+            selected = false
+            ctor[1].each -> (arg)
+              if arg.tag != :var
+                fields = false
+              if tm_eq(arg, r.rhs)
+                selected = true
+            if fields && selected
+              out.push(r)
+    out
+
+  -> application_aliases(t, protected, seen, rules, budget)
+    if budget[0] <= 0
+      return 0
+    if t.tag == :const
+      if !protected.has_key?(t.name) && !seen.has_key?(t.name)
+        seen[t.name] = true
+        projections = application_projection_rules(t)
+        if projections.size > 0
+          budget[0] -= 1
+          projections.each -> (rule) rules.push(rule)
+          return 0
+        definition = @k.defs[t.name]
+        if definition != nil
+          budget[0] -= 1
+          rules.push(make_rule(@d, definition, t.name))
+          application_aliases(dest_binop(definition.concl, "=")[1], protected, seen, rules, budget)
+    elsif t.tag == :app
+      application_aliases(t.a, protected, seen, rules, budget)
+      application_aliases(t.b, protected, seen, rules, budget)
+    elsif t.tag == :lam
+      application_aliases(t.b, protected, seen, rules, budget)
+    0
 
   -> regen(thx, gens)
     i = gens.size - 1
@@ -864,6 +1195,10 @@
     goal.hyps.each -> (h)
       if is_const?(h[1], "⊥")
         return @k.false_elim(@k.assume(h[1]), c)
+    goal.hyps.each -> (h)
+      fitted = try_square_fit(@k.assume(h[1]), c)
+      if fitted != nil
+        return fitted
     nil
 
   -> tac_rfl(g)
@@ -1099,6 +1434,7 @@
     refine(g, [ng], ->(ts) @d.prove_hyp(th, ts[0]))
 
   -> destruct_or(g, th, alts)
+    th = @d.beta_norm_thm(th)
     goal = g.goal
     pq = dest_binop(th.concl, "∨")
     if pq == nil
@@ -1139,6 +1475,7 @@
     out
 
   -> destruct_tuple(g, th, items)
+    th = @d.beta_norm_thm(th)
     goal = g.goal
     if items.size == 1
       return destruct(g, th, items[0])
@@ -1166,6 +1503,7 @@
 
   # h : x = t (x a fixed variable) — replace x by t everywhere.
   -> subst_eq_thm(g, th)
+    th = @d.beta_norm_thm(th)
     goal = g.goal
     e = dest_binop(th.concl, "=")
     if e == nil
@@ -1274,13 +1612,40 @@
           names.push(t.text)
     tac_induction_impl(g, target, names, true)
 
+  # Find a named binder in the leading ∀/→ telescope without changing scope.
+  -> induction_intro_count(c, name)
+    count = 0
+    while true
+      quant = dest_unop(c, "∀")
+      if quant != nil && quant.tag == :lam
+        count += 1
+        if quant.name == name
+          return count
+        c = quant.b
+      else
+        implication = dest_binop(c, "⇒")
+        if implication == nil
+          return -1
+        count += 1
+        c = implication[1]
+
   -> tac_induction_impl(g, target, names, use_ih)
+    if target.size != 1 || target[0].kind != :id
+      fail("induction/cases expects a single variable")
     goal = g.goal
     vname = target[0].text
     v = nil
     goal.fixes.each -> (f)
       if f[0] == vname || f[1].name == vname
         v = f[1]
+    if v == nil && use_ih
+      count = induction_intro_count(goal.concl, vname)
+      if count > 0
+        while count > 0
+          g = intro1(g, "_")
+          count -= 1
+        goal = g.goal
+        v = goal.fixes[goal.fixes.size - 1][1]
     if v == nil
       fail("induction: unknown variable " + vname)
     # revert hypotheses mentioning v
@@ -1382,6 +1747,10 @@
       e = dest_binop(c, "=")
       if (e != nil && tm_eq(e[0], e[1])) || is_const?(c, "⊤")
         tac_trivial(cur)
+      elsif e != nil
+        th = try_eta_fit(@k.refl(e[0]), c)
+        if th != nil
+          close(cur, th)
     rescue e
       0
     cur
@@ -1472,6 +1841,7 @@
   -> rewrite_once(rule, term, goal)
     s = Simp.new(@d, [rule])
     s.hyp_rules = hyp_thms(goal)
+    s.infer_conditions = true
     inst = find_instance_with_simp(s, rule, term)
     if inst == nil
       return nil
@@ -1482,9 +1852,12 @@
     conv
 
   -> find_instance_with_simp(s, rule, t)
-    th = s.apply_rule(rule, t, 0)
-    if th != nil
-      return th
+    # Search beneath binders too, but never instantiate a rule with a loose
+    # de Bruijn index. Closed subterms there (such as a free variable) are safe.
+    if tm_closed_bound?(t)
+      th = s.apply_rule(rule, t, 0)
+      if th != nil
+        return th
     case t.tag
     when :app
       r = find_instance_with_simp(s, rule, t.a)
@@ -1492,8 +1865,6 @@
         return r
       return find_instance_with_simp(s, rule, t.b)
     when :lam
-      if lam_count_bound(t.b, 0)
-        return nil
       return find_instance_with_simp(s, rule, t.b)
     nil
 
@@ -1511,7 +1882,7 @@
       bth = b == nil ? @k.refl(t.b) : b
       return @k.mk_comb(ath, bth)
     when :lam
-      p = dest_lam_fresh(t, [t, lhs])
+      p = dest_lam_fresh(t, [t, eqth.concl] + eqth.hyps)
       inner = replace_conv_opt(p[1], lhs, eqth)
       if inner == nil
         return nil
@@ -1556,7 +1927,7 @@
               r = arr_sub(r, 1, r.size - 1)
             nm = r[0].text
             if r.size == 1 && @session.k.defs.has_key?(nm)
-              rules.push(make_rule(@d, @session.k.defs[nm], nm))
+              rules.push(make_rule(@d, @session.k.defs[nm], nm, false))
               @session.eqns_of(nm).each -> (eqth)
                 rules.push(make_rule(@d, eqth, nm))
             else
@@ -1566,31 +1937,7 @@
               rules.push(make_rule(@d, th, nm))
     rules
 
-  -> tac_simp(g, args, all)
-    goal = g.goal
-    at = find_top(args, "at", 0)
-    if at >= 0 && args.size - at - 1 == 1 && args[at + 1].text == "⊢"
-      return tac_simp(g, arr_sub(args, 0, at), all)
-    target_h = nil
-    rs = args
-    if at >= 0 && args.size - at - 1 > 1
-      # `simp [...] at h1 h2`: each listed hypothesis in turn (stops if one closes the goal)
-      cur = g
-      k = at + 1
-      while k < args.size
-        r = nil
-        if args[k].text == "⊢"
-          r = tac_simp(cur, arr_sub(args, 0, at), all)
-        else
-          r = tac_simp(cur, arr_sub(args, 0, at + 1) + [args[k]], all)
-        if r == nil || r.size == 0
-          return r
-        cur = r[0]
-        k += 1
-      return [cur]
-    if at >= 0
-      target_h = args[at + 1].text
-      rs = arr_sub(args, 0, at)
+  -> goal_simplifier(goal, rs, all = false)
     only = false
     if rs.size > 0 && rs[0].text == "only"
       only = true
@@ -1603,8 +1950,77 @@
     s.hyp_rules = hyp_thms(goal)
     prover = self
     s.discharger = ->(c) prover.try_arith_discharge(goal, c)
+    s
+
+  -> tac_simpa(g, args)
+    goal = g.goal
+    using = find_top(args, "using", 0)
+    rs = using < 0 ? args : arr_sub(args, 0, using)
+    if find_top(rs, "at", 0) >= 0
+      fail("simpa closes the goal; use simp for hypothesis locations")
+    th = nil
+    if using >= 0
+      if using + 1 == args.size
+        fail("simpa: expected a proof after 'using'")
+      # Check the supplied proof even when simplification could close the goal alone.
+      th = proof_expr(goal, arr_sub(args, using + 1, args.size - using - 1))
+    s = goal_simplifier(goal, rs)
+    goal_eq = s.simp_conv(goal.concl, 0)
+    target = dest_binop(goal_eq.concl, "=")[1]
+    if th != nil
+      source_eq = goal_simplifier(goal, rs).simp_conv(th.concl, 0)
+      th = @k.eq_mp(source_eq, th)
+      th = instantiate_to(goal, th, [], target, false)[0]
+      th = fit_concl(th, target)
+    elsif target.op == OP_TRUE
+      th = @k.truth
+    else
+      th = find_assumption(goal.with_concl(target))
+      if th == nil
+        fail("simpa did not close the goal: " + tm_show(target))
+    close(g, fit(g, @k.eq_mp(@k.sym(goal_eq), th)))
+
+  -> tac_simp(g, args, all)
+    goal = g.goal
+    at = find_top(args, "at", 0)
+    rs = args
+    targets = [nil]
+    everywhere = false
+    if at >= 0
+      rs = arr_sub(args, 0, at)
+      locations = arr_sub(args, at + 1, args.size - at - 1)
+      if locations.size == 0
+        fail("simp: expected a location after 'at'")
+      targets = []
+      if locations.any?(-> (t) t.text == "*")
+        if locations.size != 1
+          fail("simp: '*' already selects every hypothesis and the goal")
+        everywhere = true
+        goal.hyps.each -> (h) targets.push(h[0])
+        targets.push(nil)
+      else
+        locations.each -> (t)
+          if t.text == "⊢"
+            targets.push(nil)
+          else
+            hyp_or_fail(goal, t.text)
+            targets.push(t.text)
+    # Resolve rules before rewriting hypotheses that may supply those rules.
+    s = goal_simplifier(goal, rs, all)
+    cur = g
+    targets.each -> (target)
+      r = simp_at_goal(cur, s, target, everywhere)
+      if r.size == 0 || r[0].thm != nil
+        return []
+      cur = r[0]
+    [cur]
+
+  -> simp_at_goal(g, s, target_h = nil, allow_unchanged = false)
+    goal = g.goal
     if target_h != nil
       old = hyp_or_fail(goal, target_h)
+      if is_const?(old, "⊥")
+        return close(g, @k.false_elim(@k.assume(old), goal.concl))
       eqth = s.simp_conv_opt(old, 0)
       if eqth == nil
         return [g]
@@ -1619,6 +2035,8 @@
       th = find_assumption(goal)
       if th != nil
         return close(g, th)
+      if allow_unchanged
+        return [g]
       fail("simp made no progress")
     rhs = dest_binop(eqth.concl, "=")[1]
     if rhs.op == OP_TRUE
@@ -1627,6 +2045,8 @@
       th = find_assumption(goal)
       if th != nil
         return close(g, th)
+      if allow_unchanged
+        return [g]
       fail("simp made no progress")
     ng = goal.with_concl(rhs)
     refs = refine(g, [ng], ->(ts) @k.eq_mp(@k.sym(eqth), ts[0]))
@@ -1678,9 +2098,11 @@
       if eqs.size > 0
         eqs.each -> (e)
           rules.push(make_rule(@d, e, nm))
-      elsif @k.defs.has_key?(nm)
-        rules.push(make_rule(@d, @k.defs[nm], nm))
-      else
+      # Applied equations do not match a bare function passed as an argument.
+      # Its defining equality also unfolds that higher-order occurrence.
+      if @k.defs.has_key?(nm)
+        rules.push(make_rule(@d, @k.defs[nm], nm, false))
+      elsif eqs.size == 0
         fail("unfold: " + nm + " is not a definition")
     s = Simp.new(@d, rules)
     goal = g.goal
@@ -1721,11 +2143,96 @@
     tac_simp(g, args, false)
 
   -> tac_ring(g)
-    c = g.goal.concl
+    c = @d.beta_eta_term(g.goal.concl)
     e = dest_binop(c, "=")
     if e == nil
       fail("ring: goal is not an equation")
-    close(g, @k.ring_eq(e[0], e[1]))
+    begin
+      return close(g, fit_concl(@k.ring_eq(e[0], e[1]), g.goal.concl))
+    rescue original
+      # Try checked defining equations only after ordinary ring normalization.
+      # Normalize the two sides separately so the final polynomial check and
+      # its trust tag remain the same as an explicit unfold followed by ring.
+      begin
+        rules = auto_relation_definitions([c])
+        simplifier = Simp.new(@d, rules)
+        simplifier.step_limit = 4096
+        left = simplifier.simp_conv(e[0], 0)
+        right = simplifier.simp_conv(e[1], 0)
+        lhs = dest_binop(left.concl, "=")[1]
+        rhs = dest_binop(right.concl, "=")[1]
+        if !tm_eq(lhs, e[0]) || !tm_eq(rhs, e[1])
+          proof = @k.trans(left, @k.trans(@k.ring_eq(lhs, rhs), @k.sym(right)))
+          return close(g, fit_concl(proof, g.goal.concl))
+      rescue e2
+        0
+      fail(original.to_s)
+
+  # A polynomial certificate written as a sum of scaled equality proofs.
+  # Subtraction reverses an equality, so it also works over ℕ without using
+  # truncated subtraction. Every leaf and coefficient is checked before use.
+  -> combination_binop(op, ty, a, b)
+    operator = @k.mk_const(op, ty_funs([ty, ty], ty))
+    @k.mk_comb(@k.mk_comb(@k.refl(operator), a), b)
+
+  -> combination_proof(goal, e, ty)
+    if e.kind == :unop && e.s == "neg"
+      return @k.sym(combination_proof(goal, e.kids[0], ty))
+    if e.kind == :binop && (e.s == "+" || e.s == "-")
+      a = combination_proof(goal, e.kids[0], ty)
+      b = combination_proof(goal, e.kids[1], ty)
+      if e.s == "-"
+        b = @k.sym(b)
+      return combination_binop("+", ty, a, b)
+    if e.kind == :binop && e.s == "*"
+      coefficient = nil
+      begin
+        coefficient = elab_term_ast(goal, e.kids[0], ty)
+      rescue err
+        0
+      if coefficient != nil
+        return combination_binop("*", ty, @k.refl(coefficient), combination_proof(goal, e.kids[1], ty))
+      coefficient = elab_term_ast(goal, e.kids[1], ty)
+      return combination_binop("*", ty, combination_proof(goal, e.kids[0], ty), @k.refl(coefficient))
+    th = proof_ast(goal, e)
+    th = fit_concl(th, @d.beta_eta_term(th.concl))
+    eq = dest_binop(th.concl, "=")
+    if eq == nil || !ty_eq(type_of(eq[0]), ty)
+      fail("linear_combination: expected an equality at " + ty_show(ty))
+    th
+
+  -> tac_linear_combination(g, args)
+    target = dest_binop(@d.beta_eta_term(g.goal.concl), "=")
+    if target == nil || !numeric_type?(type_of(target[0]))
+      fail("linear_combination: goal must be an equality over ℕ, ℤ, ℚ or ℝ")
+    if args.size == 0
+      return tac_ring(g)
+    ty = type_of(target[0])
+    th = combination_proof(g.goal, parse_expr_toks(args), ty)
+    th = fit_concl(th, @d.beta_eta_term(th.concl))
+    eq = dest_binop(th.concl, "=")
+    add = @k.mk_const("+", ty_funs([ty, ty], ty))
+    if ty_eq(ty, ty_nat)
+      # Ring checks the proposed combination; arithmetic only cancels the
+      # common additive term. It sees this certificate, not unrelated hypotheses.
+      left = mk_apps(add, [target[0], eq[1]])
+      right = mk_apps(add, [target[1], eq[0]])
+      balanced = @k.trans(@k.ring_eq(left, right), @k.mk_comb(@k.refl(mk_app(add, target[1])), th))
+      le = @k.mk_const("≤", ty_funs([ty, ty], ty_bool))
+      forward = mk_apps(le, [target[0], target[1]])
+      backward = mk_apps(le, [target[1], target[0]])
+      a = arith_prove_core(Goal.new([], [], forward), [balanced])
+      b = arith_prove_core(Goal.new([], [], backward), [balanced])
+      anti = @session.lemma_at("le_antisymm", ty)
+      result = @k.mp(@k.mp(@k.spec(target[1], @k.spec(target[0], anti)), a), b)
+    else
+      # A - B = L - R gives A = L + (B - R) = R + (B - R) = B.
+      sub = @k.mk_const("-", ty_funs([ty, ty], ty))
+      pad = mk_apps(sub, [target[1], eq[1]])
+      shifted = combination_binop("+", ty, th, @k.refl(pad))
+      ends = dest_binop(shifted.concl, "=")
+      result = @k.trans(@k.trans(@k.ring_eq(target[0], ends[0]), shifted), @k.ring_eq(ends[1], target[1]))
+    close(g, fit(g, result))
 
   # Linear arithmetic over hypotheses and the negated goal.
   -> tac_linarith(g, args)
@@ -1739,6 +2246,10 @@
       split_top(inner, ",").each -> (p)
         if p.size > 0
           extra.push(proof_expr(goal, p))
+    close(g, linarith_proof(goal, extra))
+
+  -> linarith_proof(goal, extra)
+    c = goal.concl
     e = dest_binop(c, "=")
     if e != nil && numeric_type?(type_of(e[0]))
       # prove ≤ both ways then antisymmetry
@@ -1749,8 +2260,8 @@
       t1 = arith_prove(goal.with_concl(a), extra)
       t2 = arith_prove(goal.with_concl(b), extra)
       anti = @session.lemma_at("le_antisymm", ty)
-      return close(g, @k.mp(@k.mp(@k.spec(e[1], @k.spec(e[0], anti)), t1), t2))
-    close(g, arith_prove(goal, extra))
+      return @k.mp(@k.mp(@k.spec(e[1], @k.spec(e[0], anti)), t1), t2)
+    arith_prove(goal, extra)
 
   -> numeric_type?(ty)
     ty.tag == :c && ["nat", "int", "rat", "real"].include?(ty.name)
@@ -1881,7 +2392,7 @@
               0
     0
 
-  -> arith_prove_core(goal, extra)
+  -> arith_prove_core(goal, extra, with_squares = true)
     c = goal.concl
     # negate goal into a comparison hypothesis
     hyps = []
@@ -1895,12 +2406,19 @@
     else
       neg = @k.neg_tm(c)
       hyps.push(@k.assume(neg))
-    # fold closed numeric subterms (1 / 2 ^ 4 ↦ 1/16) with simp's zero-alloc fast path
-    folder = Simp.new(@d, [])
+    # Normalize the induction constructor even inside opaque function atoms;
+    # the resulting equality conversions carry the successor lemma's proof.
+    rules = []
+    successor = @session.lemma_at("succ_eq_add_one", ty_nat)
+    if successor != nil
+      rules.push(make_rule(@d, successor, "succ_eq_add_one.nat"))
+    # Fold closed numeric subterms (1 / 2 ^ 4 ↦ 1/16) on the same traversal.
+    folder = Simp.new(@d, rules)
     folded = []
     bottom = nil
     hyps.each -> (h)
       begin
+        h = @k.eq_mp(@d.beta_eta_conv(h.concl), h)
         eqth = folder.simp_conv_opt(h.concl, 0)
         if eqth == nil
           folded.push(h)
@@ -1940,10 +2458,24 @@
       if @nl_mode && ty != TY_NAT_SINGLETON
         ts2 = ts2 + nl_products(ts, ty)
       if @nl_mode && ty == TY_NAT_SINGLETON
-        ts2 = ts2 + nl_products_nat(integer_strengthen(ts, ty))
+        # Products need the derived 0 ≤ n facts too, including factors that
+        # occur only in the goal. Otherwise a ≤ b cannot be scaled by n.
+        ts2 = ts2 + nl_products_nat(integer_strengthen(ts2, ty))
       if ty == TY_NAT_SINGLETON || ty == TY_INT_SINGLETON
         ts2 = integer_strengthen(ts2, ty)
       coeffs = fm_certificate(ts2, ty.name)
+      if coeffs == nil && @nl_mode && ty != TY_NAT_SINGLETON
+        unified = nl_unify_variables(ts)
+        cross_input = unified
+        if with_squares
+          unified = unified + nl_square_facts(unified, ty)
+        ts3 = unified + nl_products(unified, ty) + nl_products(unified, ty, true)
+        coeffs = fm_certificate(ts3, ty.name)
+        if coeffs == nil && with_squares
+          # Try completed squares last, without multiplying them pairwise.
+          ts3 = ts3 + nl_square_facts(cross_input, ty, true)
+          coeffs = fm_certificate(ts3, ty.name)
+        ts2 = ts3
       if coeffs != nil
         f = @k.farkas(ts2, coeffs)
         if neg == nil
@@ -2013,7 +2545,7 @@
 
   # nlinarith: for each hypothesis a ≤ b (a < b) the fact 0 ≤ b - a (0 < b - a), then every pairwise product of those
   # differences, proved with mul_nonneg / mul_pos. Linear arithmetic then treats the expanded monomials as atoms.
-  -> nl_products(ts, ty)
+  -> nl_products(ts, ty, cubic = false)
     zero = ty == TY_INT_SINGLETON ? mk_lit(0, ty) : mk_lit(Q_ZERO, ty)
     minus = @k.mk_const("-", ty_funs([ty, ty], ty))
     le = @k.mk_const("≤", ty_funs([ty, ty], TY_BOOL_SINGLETON))
@@ -2062,6 +2594,35 @@
             0
     @nl_mode = saved
     out = []
+    if cubic
+      # Bound the fallback to eight affine factors (at most 120 triples).
+      # Every generated fact is an application of existing multiplication rules.
+      eligible = []
+      terms.each_with_index -> (term, index)
+        if eligible.size < 8 && nl_affine_degree(term) <= 1
+          eligible.push(index)
+      i = 0
+      while i < eligible.size
+        j = i
+        while j < eligible.size
+          a = eligible[i]
+          b = eligible[j]
+          pair = @k.mp(@k.mp(@k.spec(terms[b], @k.spec(terms[a], mn)), nns[a]), nns[b])
+          pair_pos = nil
+          if poss[a] != nil && poss[b] != nil
+            pair_pos = @k.mp(@k.mp(@k.spec(terms[b], @k.spec(terms[a], mp)), poss[a]), poss[b])
+          product = dest_binop(pair.concl, "≤")[1]
+          k = j
+          while k < eligible.size
+            c = eligible[k]
+            if pair_pos != nil && poss[c] != nil
+              out.push(@k.mp(@k.mp(@k.spec(terms[c], @k.spec(product, mp)), pair_pos), poss[c]))
+            else
+              out.push(@k.mp(@k.mp(@k.spec(terms[c], @k.spec(product, mn)), pair), nns[c]))
+            k += 1
+          j += 1
+        i += 1
+      return out
     i = 0
     while i < terms.size
       j = i
@@ -2073,6 +2634,140 @@
         j += 1
       i += 1
     out
+
+  # Squares need no sign premise. Prove each detected square by a checked
+  # sign split, without recursively collecting square facts in either branch.
+  -> nl_square_facts(ts, ty, cross = false)
+    bases = []
+    seen = {}
+    if cross
+      nl_cross_square_bases(ts, ty, bases, seen)
+    else
+      ts.each -> (th)
+        nl_square_bases(th.concl, ty, bases, seen)
+    zero = ty == TY_INT_SINGLETON ? mk_lit(0, ty) : mk_lit(Q_ZERO, ty)
+    le = @k.mk_const("≤", ty_funs([ty, ty], TY_BOOL_SINGLETON))
+    mul = @k.mk_const("*", ty_funs([ty, ty], ty))
+    out = []
+    bases.each -> (base)
+      sign = mk_apps(le, [zero, base])
+      square = mk_apps(le, [zero, mk_apps(mul, [base, base])])
+      yes = arith_prove_core(Goal.new([], [["square_sign", sign]], square), [], false)
+      no = arith_prove_core(Goal.new([], [["square_sign", @k.neg_tm(sign)]], square), [], false)
+      out.push(@k.disj_cases(@k.excluded_middle(sign), yes, no))
+    out
+
+  # A quadratic's x*y or linear x term suggests checked completed squares.
+  # Treat linear terms as x*1; inspect normalized monomials, not notation.
+  -> nl_cross_square_bases(ts, ty, bases, seen)
+    ctx = RingCtx.new("rat")
+    pairs = []
+    diagonals = []
+    ts.each -> (th)
+      cmp = dest_cmp_rel(th.concl)
+      poly = poly_add(ring_norm(cmp[2], ty.name, ctx), poly_scale(ring_norm(cmp[1], ty.name, ctx), Q_NEG_ONE))
+      poly.each -> (mid, coefficient)
+        factors = ctx.monos[mid]
+        pair = nil
+        # A coefficient can hide the syntactic square: c*x*x is still x².
+        if factors.size == 2 && factors[1] == 2 && diagonals.size < 12 && !diagonals.include?(factors[0])
+          diagonals.push(factors[0])
+        if factors.size == 4 && factors[1] == 1 && factors[3] == 1
+          diagonal = poly[ctx.intern_mono([factors[0], 2])]
+          pair = [factors[0], factors[2], diagonal, coefficient]
+        elsif factors.size == 2 && factors[1] == 1
+          diagonal = poly[ctx.intern_mono([factors[0], 2])]
+          if diagonal != nil
+            pair = [factors[0], 0, diagonal, coefficient]
+        if pair != nil && pairs.size < 6 && !pairs.include?(pair)
+          pairs.push(pair)
+    atoms = {}
+    atoms[0] = ty == TY_INT_SINGLETON ? mk_lit(1, ty) : mk_lit(Q_ONE, ty)
+    ctx.atoms.each -> (_hash, bucket)
+      bucket.each -> (entry) atoms[entry[1]] = entry[0]
+    diagonals.each -> (id)
+      base = atoms[id]
+      if tm_closed_bound?(base) && tm_set_add?(seen, base)
+        bases.push(base)
+    minus = @k.mk_const("-", ty_funs([ty, ty], ty))
+    plus = @k.mk_const("+", ty_funs([ty, ty], ty))
+    mul = @k.mk_const("*", ty_funs([ty, ty], ty))
+    pairs.each -> (pair)
+      a = atoms[pair[0]]
+      b = atoms[pair[1]]
+      [minus, plus].each -> (operator)
+        base = mk_apps(operator, [a, b])
+        if tm_closed_bound?(base) && tm_set_add?(seen, base)
+          bases.push(base)
+      # For A*x^2+B*x*y, complete the square with (2*A*x+B*y)^2.
+      # Clear rational denominators so the same construction works over ℤ.
+      if pair[2] != nil
+        diagonal = pair[2]
+        cross = pair[3]
+        left = 2 * diagonal[0] * cross[1]
+        right = cross[0] * diagonal[1]
+        lc = ty == TY_INT_SINGLETON ? mk_lit(left, ty) : mk_lit([left, 1], ty)
+        rc = ty == TY_INT_SINGLETON ? mk_lit(right, ty) : mk_lit([right, 1], ty)
+        base = mk_apps(plus, [mk_apps(mul, [lc, a]), mk_apps(mul, [rc, b])])
+        if tm_closed_bound?(base) && tm_set_add?(seen, base)
+          bases.push(base)
+    0
+
+  -> nl_square_bases(t, ty, bases, seen)
+    if bases.size >= 12 || t.tag != :app
+      return 0
+    product = dest_binop(t, "*")
+    power = dest_binop(t, "^")
+    base = nil
+    if product != nil && tm_eq(product[0], product[1])
+      base = product[0]
+    elsif power != nil && power[1].tag == :lit && power[1].val == 2
+      base = power[0]
+    if base != nil && base.tag != :lit && ty_eq(type_of(base), ty) && tm_closed_bound?(base) && tm_set_add?(seen, base)
+      bases.push(base)
+    nl_square_bases(t.a, ty, bases, seen)
+    nl_square_bases(t.b, ty, bases, seen)
+    0
+
+  # Substitute equal local variables using checked congruence before the
+  # cubic search: x = y must identify x*p*q and y*p*q as well as x and y.
+  -> nl_unify_variables(ts)
+    out = ts
+    count = 0
+    ts.each -> (equation)
+      eq = dest_binop(equation.concl, "=")
+      if count < 8 && eq != nil && eq[0].tag == :var && eq[1].tag == :var && !tm_eq(eq[0], eq[1])
+        changed = []
+        out.each -> (th)
+          conv = replace_conv_opt(th.concl, eq[0], equation)
+          changed.push(conv == nil ? th : @k.eq_mp(conv, th))
+        out = changed
+        count += 1
+    out
+
+  # Conservative syntactic degree; opaque function applications are atoms.
+  -> nl_affine_degree(t)
+    if t.tag == :lit
+      return 0
+    if t.tag == :app && t.a.tag == :const && t.a.op == OP_NEG
+      return nl_affine_degree(t.b)
+    d = dest_binop(t, "/")
+    if d != nil && d[1].tag == :lit
+      return nl_affine_degree(d[0])
+    d = dest_binop(t, "+")
+    if d == nil
+      d = dest_binop(t, "-")
+    if d != nil
+      a = nl_affine_degree(d[0])
+      b = nl_affine_degree(d[1])
+      return a > b ? a : b
+    d = dest_binop(t, "*")
+    if d != nil
+      return nl_affine_degree(d[0]) + nl_affine_degree(d[1])
+    d = dest_binop(t, "^")
+    if d != nil
+      return 2
+    return 1
 
   # nlinarith over ℕ: for hypotheses a ≤ b, c ≤ d the product fact a*d + b*c ≤ a*c + b*d (nl_cross.nat), i.e.
   # (b - a)(d - c) ≥ 0 without truncated subtraction
@@ -2240,21 +2935,3100 @@
     back = @d.ap_term(unsat_c, ev)
     close(g, @k.eq_mp(@k.sym(back), th))
 
-  -> tac_auto(g, depth)
+  # Saturate the local context with kernel-checked consequences. Caps on facts
+  # and candidate terms keep quantified instantiation predictable.
+  -> auto_add_fact(facts, th)
+    if facts.size >= 128
+      return false
+    facts.each -> (old)
+      if tm_eq(old.concl, th.concl)
+        return false
+    facts.push(th)
+    true
+
+  -> auto_collect_terms(t, terms)
+    if terms.size >= 64
+      return
+    if tm_closed_bound?(t)
+      found = false
+      terms.each -> (old)
+        if tm_eq(old, t)
+          found = true
+      if !found
+        terms.push(t)
+    if t.tag == :app
+      auto_collect_terms(t.b, terms)
+      auto_collect_terms(t.a, terms)
+    elsif t.tag == :lam
+      auto_collect_terms(t.b, terms)
+
+  # Index a fixed fact set once. Hash collisions still require full term
+  # equality, and every edge retains the theorem that justifies it.
+  -> auto_equality_graph(facts)
+    graph = {}
+    facts.each -> (th)
+      eq = @k.dest_eq(th.concl)
+      if eq != nil
+        [false, true].each -> (reverse)
+          source = eq[reverse ? 1 : 0]
+          target = eq[reverse ? 0 : 1]
+          bucket = graph[source.h]
+          if bucket == nil
+            bucket = []
+            graph[source.h] = bucket
+          bucket.push([source, target, th, reverse])
+    graph
+
+  # Search the known equality graph, then compare applications structurally.
+  # Reuse the index through congruence; allocate proofs only for new paths.
+  -> auto_equal(left, right, facts, depth, graph = nil)
+    if tm_eq(left, right)
+      return @k.refl(left)
+    if depth <= 0 || !ty_eq(type_of(left), type_of(right))
+      return nil
+    if graph == nil
+      graph = auto_equality_graph(facts)
+    if graph.size == 0
+      return nil
+    nodes = [left]
+    paths = [nil]
+    visited = {}
+    tm_set_add?(visited, left)
+    i = 0
+    while i < nodes.size && nodes.size < 128
+      node = nodes[i]
+      edges = graph[node.h]
+      if edges != nil
+        edges.each -> (edge)
+          if tm_eq(edge[0], node)
+            next_term = edge[1]
+            found = tm_eq(next_term, right)
+            if found || (!tm_set_has?(visited, next_term) && nodes.size < 128)
+              step = edge[3] ? @k.sym(edge[2]) : edge[2]
+              path = i == 0 ? step : @k.trans(paths[i], step)
+              if found
+                return path
+              tm_set_add?(visited, next_term)
+              nodes.push(next_term)
+              paths.push(path)
+      i += 1
+    if left.tag == :app && right.tag == :app
+      fn_eq = auto_equal(left.a, right.a, facts, depth - 1, graph)
+      if fn_eq != nil
+        arg_eq = auto_equal(left.b, right.b, facts, depth - 1, graph)
+        if arg_eq != nil
+          return @k.mk_comb(fn_eq, arg_eq)
+    nil
+
+  # Arithmetic equalities between existing arguments can be lifted through
+  # applications. No new terms or backwards rules are searched here.
+  -> auto_argument_equal(left, right, facts, depth, budget)
+    known = auto_equal(left, right, facts, depth)
+    if known != nil
+      return known
+    if depth <= 0 || !ty_eq(type_of(left), type_of(right))
+      return nil
+    if left.tag == :app && right.tag == :app && tm_eq(strip_app(left)[0], strip_app(right)[0])
+      head = auto_argument_equal(left.a, right.a, facts, depth - 1, budget)
+      if head != nil
+        arg = auto_argument_equal(left.b, right.b, facts, depth - 1, budget)
+        if arg != nil
+          return @k.mk_comb(head, arg)
+    if numeric_type?(type_of(left)) && budget[0] > 0
+      nodes = [64]
+      a = auto_quadratic_degree(left, nodes)
+      b = auto_quadratic_degree(right, nodes)
+      if nodes[0] >= 0 && a >= 0 && a <= 1 && b >= 0 && b <= 1
+        budget[0] -= 1
+        comparisons = []
+        facts.each -> (th) normalize_comparisons(th, comparisons)
+        begin
+          prover = Prover.new(@session)
+          return prover.linarith_proof(Goal.new([], [], @k.eq_tm(left, right)), comparisons)
+        rescue e
+          0
+    nil
+
+  # Derive one new consequence using an equality to match a premise. Processing
+  # the new fact before searching again also handles chained implications.
+  -> auto_equal_mp(facts)
+    if facts.size >= 128
+      return false
+    has_equality = false
+    facts.each -> (th)
+      if @k.dest_eq(th.concl) != nil
+        has_equality = true
+    if !has_equality
+      return false
+    graph = auto_equality_graph(facts)
+    i = 0
+    while i < facts.size
+      imp_th = facts[i]
+      imp = dest_binop(imp_th.concl, "⇒")
+      if imp != nil
+        j = 0
+        while j < facts.size
+          premise = facts[j]
+          if !tm_eq(premise.concl, imp[0])
+            eq = auto_equal(premise.concl, imp[0], facts, 16, graph)
+            if eq != nil
+              result = @k.mp(imp_th, @k.eq_mp(eq, premise))
+              if auto_add_fact(facts, result)
+                return true
+          j += 1
+      neg = dest_unop(imp_th.concl, "¬")
+      if neg != nil
+        j = 0
+        while j < facts.size
+          premise = facts[j]
+          if !tm_eq(premise.concl, neg)
+            eq = auto_equal(premise.concl, neg, facts, 16, graph)
+            if eq != nil
+              result = @k.not_elim(imp_th, @k.eq_mp(eq, premise))
+              if auto_add_fact(facts, result)
+                return true
+          j += 1
+      i += 1
+    false
+
+  -> auto_fresh(goal, facts, terms, ty)
+    avoid = goal.all_terms + terms
+    facts.each -> (fact)
+      avoid.push(fact.concl)
+      fact.hyps.each -> (hyp)
+        avoid.push(hyp)
+    mk_var(fresh_name("w", avoid), ty)
+
+  -> auto_forward(goal, hints = [])
+    facts = []
+    terms = []
+    goal.fixes.each -> (f)
+      auto_collect_terms(f[1], terms)
+    auto_collect_terms(goal.concl, terms)
+    goal.hyps.each -> (h)
+      auto_add_fact(facts, @k.assume(h[1]))
+      auto_collect_terms(h[1], terms)
+    hints.each -> (hint) auto_add_fact(facts, hint)
+    proof = auto_search(goal, facts + [], terms, [], 3, [24])
+    if proof != nil
+      return proof
+    auto_classical(goal, facts, terms, [], 3, [12], false)
+
+  -> auto_arithmetic_proof(goal, facts, budget)
+    if budget[0] <= 0 || (!comparison?(goal.concl) && !is_const?(goal.concl, "⊥"))
+      return nil
+    comparisons = []
+    facts.each -> (th)
+      normalize_comparisons(th, comparisons)
+    if comparisons.size == 0
+      return nil
+    budget[0] -= 1
+    begin
+      # Isolate arithmetic's mutable search state. Assumptions remain on the
+      # supplied theorem objects and are discharged by the enclosing proof.
+      prover = Prover.new(@session)
+      return prover.linarith_proof(Goal.new(goal.fixes, [], goal.concl), comparisons)
+    rescue e
+      nil
+
+  -> auto_has_arithmetic(t)
+    if comparison?(t)
+      return true
+    if t.tag == :app
+      return auto_has_arithmetic(t.a) || auto_has_arithmetic(t.b)
+    if t.tag == :lam
+      return auto_has_arithmetic(t.b)
+    false
+
+  # Arithmetic treats applications as atoms. Connect existing numeric atoms
+  # whose arguments are equal, using ordinary checked congruence.
+  -> auto_arithmetic_congruence(terms, facts, budget)
+    if budget.size == 1
+      budget.push(32)
+      budget.push(8)
+    added = 0
+    i = 0
+    while i < terms.size && budget[1] > 0 && budget[2] > 0
+      left = terms[i]
+      if left.tag == :app && numeric_type?(type_of(left))
+        head = strip_app(left)[0]
+        j = i + 1
+        while j < terms.size && budget[1] > 0 && budget[2] > 0
+          right = terms[j]
+          if right.tag == :app && ty_eq(type_of(left), type_of(right)) && tm_eq(head, strip_app(right)[0])
+            budget[1] -= 1
+            eq = auto_argument_equal(left, right, facts, 16, budget)
+            if eq != nil && auto_add_fact(facts, eq)
+              added += 1
+              budget[2] -= 1
+          j += 1
+      i += 1
+    added > 0
+
+  -> auto_arithmetic_forward(goal, hints = [], nonlinear = nil, squares = false)
+    facts = []
+    terms = []
+    useful = false
+    goal.hyps.each -> (h)
+      known = @k.assume(h[1])
+      auto_add_fact(facts, known)
+      bounds = auto_abs_bounds(known)
+      if bounds != nil
+        auto_add_fact(facts, bounds)
+        useful = true
+      if auto_minmax_facts(h[1], facts)
+        useful = true
+      if comparison?(h[1]) || @k.dest_eq(h[1]) != nil || dest_unop(h[1], "∀") != nil || dest_binop(h[1], "⇒") != nil || dest_binop(h[1], "∨") != nil || dest_binop(h[1], "∧") != nil
+        useful = true
+    useful = useful || hints.size > 0
+    if auto_minmax_facts(goal.concl, facts)
+      useful = true
+    if !(goal.all_terms + hints.map -> (hint) hint.concl).any?(->(term) auto_has_arithmetic(term))
+      return nonlinear == nil ? nil : auto_nonlinear_premise(goal, nonlinear)
+    auto_collect_terms(goal.concl, terms)
+    goal.fixes.each -> (f)
+      auto_collect_terms(f[1], terms)
+    goal.hyps.each -> (h)
+      auto_collect_terms(h[1], terms)
+    hints.each -> (hint) auto_collect_terms(hint.concl, terms)
+    if !useful
+      return nonlinear == nil ? nil : auto_nonlinear_premise(goal, nonlinear)
+    instances = auto_hint_instances(goal, hints, terms, false, squares)
+    if instances.size > 0
+      selected = []
+      (facts + hints).each -> (known)
+        if !hints.any?(-> (hint) dest_unop(hint.concl, "∀") != nil && tm_eq(hint.concl, known.concl))
+          auto_add_fact(selected, known)
+      instances.each -> (hint) auto_add_fact(selected, hint)
+      proof = auto_search(goal, selected, terms, [], 3, [24], [24])
+      if proof != nil
+        return proof
+      if nonlinear != nil && squares
+        proof = auto_square_arithmetic(goal, nonlinear, selected)
+        if proof != nil
+          return proof
+    # Preserve the general search when matching existing operands is insufficient.
+    hints.each -> (hint) auto_add_fact(facts, hint)
+    proof = auto_search(goal, facts, terms, [], 3, [24], [24])
+    if proof != nil || nonlinear == nil
+      return proof
+    if squares
+      return auto_square_arithmetic(goal, nonlinear, facts)
+    # The hint fallback follows the ordinary local-context attempt.
+    if hints.size == 0
+      proof = auto_nonlinear_premise(goal, nonlinear)
+      if proof != nil
+        return proof
+    # Only root saturation facts survive here. Branch-local assumptions stayed
+    # in copied fact arrays and cannot enter a later arithmetic certificate.
+    auto_nonlinear_premise(goal, nonlinear, facts)
+
+  # Prioritize quantified hints whose arithmetic operands already occur here.
+  # Match whole applications to infer correlated arguments, retaining guards.
+  -> auto_hint_instances(goal, hints, terms, left_only = false, match_guards = false)
+    out = []
+    budget = 32
+    joined_out = []
+    join_budget = 16
+    hints.each -> (hint)
+      if dest_unop(hint.concl, "∀") != nil && out.size < 8 && budget > 0
+        fixed = []
+        hint.hyps.each -> (h) tm_tyvars_into(h, fixed)
+        tm_frees(hint.concl).each -> (v) tm_tyvars_into(v, fixed)
+        used_types = {}
+        (goal.all_terms + [hint.concl]).each -> (t)
+          tm_tyvars(t).each -> (name) used_types[name] = true
+        ren = {}
+        tvs = {}
+        tm_tyvars(hint.concl).each -> (name)
+          if !fixed.include?(name)
+            fresh = fresh_name_from_set("§hint_" + name, used_types)
+            ren[name] = ty_var(fresh)
+            tvs[fresh] = true
+        th = @k.inst_type(hint, ren)
+        names = {}
+        (goal.all_terms + [th.concl] + th.hyps).each -> (t) tm_free_names_into(t, names)
+        vars = []
+        pvars = {}
+        quant = dest_unop(th.concl, "∀")
+        while quant != nil && quant.tag == :lam && vars.size < 8
+          v = mk_var(fresh_name_from_set("?hint", names), quant.ty)
+          vars.push(v)
+          pvars[v.vkey] = true
+          th = @k.spec(v, th)
+          quant = dest_unop(th.concl, "∀")
+        conclusion = th.concl
+        guards = []
+        implication = dest_binop(conclusion, "⇒")
+        while implication != nil
+          guards.push(implication[0])
+          conclusion = implication[1]
+          implication = dest_binop(conclusion, "⇒")
+        patterns = []
+        if quant == nil && comparison?(conclusion)
+          equality = @k.dest_eq(conclusion)
+          if left_only
+            if equality != nil && vars.all?(-> (v) tm_free_in?(v, equality[0]))
+              patterns.push(equality[0])
+          else
+            auto_collect_terms(conclusion, patterns)
+        patterns.each -> (pattern)
+          if pattern.tag == :app && numeric_type?(type_of(pattern))
+            head = strip_app(pattern)[0]
+            terms.each -> (term)
+              target_head = strip_app(term)[0]
+              if term.tag == :app && (!left_only || ty_eq(type_of(pattern), type_of(term))) && (head.tag == :var || (target_head.tag == :const && head.name == target_head.name)) && out.size < 8 && budget > 0
+                budget -= 1
+                mt = Matcher.new(pvars, tvs)
+                if mt.m(pattern, term, 0)
+                  if vars.all?(-> (v) mt.tm.has_key?(v.vkey))
+                    instance = @k.inst(@k.inst_type(th, mt.ty), mt.pairs)
+                    auto_add_fact(out, instance)
+                  elsif !left_only && join_budget > 0
+                    # Independent operands can determine different binders,
+                    # as in 1/a ≤ 1/b. Join two matches within the same fuel.
+                    endpoints = dest_cmp_rel(conclusion)
+                    [endpoints[1], endpoints[2]].each -> (other)
+                      if other.tag == :app && vars.any?(-> (v) !mt.tm.has_key?(v.vkey) && tm_free_in?(v, other))
+                        other_head = strip_app(other)[0]
+                        terms.each -> (candidate)
+                          candidate_head = strip_app(candidate)[0]
+                          if candidate.tag == :app && candidate_head.tag == :const && other_head.tag == :const && candidate_head.name == other_head.name && joined_out.size < 8 && join_budget > 0
+                            join_budget -= 1
+                            joined = mt.clone
+                            if joined.m(other, candidate, 0) && vars.all?(-> (v) joined.tm.has_key?(v.vkey))
+                              instance = @k.inst(@k.inst_type(th, joined.ty), joined.pairs)
+                              auto_add_fact(joined_out, instance)
+        # A known guard can determine correlated arguments even when the
+        # bound's endpoint occurs only after arithmetic normalization.
+        # Keep the implication intact: matching a guard does not prove it.
+        if match_guards && !left_only && quant == nil
+          guards.each -> (guard)
+            if guard.tag == :app
+              goal.hyps.each -> (hyp)
+                if out.size < 8 && budget > 0
+                  budget -= 1
+                  mt = Matcher.new(pvars, tvs)
+                  if mt.m(guard, hyp[1], 0) && vars.all?(-> (v) mt.tm.has_key?(v.vkey))
+                    auto_add_fact(out, @k.inst(@k.inst_type(th, mt.ty), mt.pairs))
+    # Keep the original complete matches first; joined operands fill spare slots.
+    joined_out.each -> (instance)
+      if out.size < 8
+        auto_add_fact(out, instance)
+    out
+
+  # Split only on existing atomic propositions, with a shared case budget.
+  # Each branch is an ordinary kernel proof and excluded_middle supplies the split.
+  -> auto_classical(goal, facts, terms, used, depth, budget, try_direct)
+    if try_direct
+      proof = auto_search(goal, facts + [], terms, [], 3, [24])
+      if proof != nil
+        return proof
+    if depth <= 0 || budget[0] <= 0
+      return nil
+    i = 0
+    while i < terms.size && budget[0] > 0
+      atom = terms[i]
+      if ty_eq(type_of(atom), ty_bool) && !is_const?(atom, "⊤") && !is_const?(atom, "⊥") && dest_unop(atom, "¬") == nil && dest_unop(atom, "∀") == nil && dest_unop(atom, "∃") == nil && dest_binop(atom, "∧") == nil && dest_binop(atom, "∨") == nil && dest_binop(atom, "⇒") == nil
+        # Splitting a fact already known true or false repeats the same
+        # quantified search in its live branch and adds no information.
+        seen = facts.any? -> (th) tm_eq(th.concl, atom) || (dest_unop(th.concl, "¬") != nil && tm_eq(dest_unop(th.concl, "¬"), atom))
+        used.each -> (old)
+          if tm_eq(old, atom)
+            seen = true
+        if !seen
+          budget[0] -= 1
+          next_used = used + [atom]
+          yes = auto_classical(goal, facts + [@k.assume(atom)], terms, next_used, depth - 1, budget, true)
+          if yes != nil
+            no = auto_classical(goal, facts + [@k.assume(@k.neg_tm(atom))], terms, next_used, depth - 1, budget, true)
+            if no != nil
+              return @k.disj_cases(@k.excluded_middle(atom), yes, no)
+      i += 1
+    nil
+
+  -> auto_type_patterns(t, flexible, out)
+    if out.size >= 16
+      return 0
+    if t.tag == :const
+      if t.name != "∀" && t.name != "∃" && tm_tyvars(t).any?(-> (name) flexible.has_key?(name)) && !out.any?(-> (old) tm_eq(old, t))
+        out.push(t)
+    elsif t.tag == :app
+      auto_type_patterns(t.a, flexible, out)
+      auto_type_patterns(t.b, flexible, out)
+    elsif t.tag == :lam
+      auto_type_patterns(t.b, flexible, out)
+    0
+
+  # A first-order recurrence should specialize at indices of its sequence
+  # already in scope, plus literal cases. Unrelated natural coefficients are
+  # not useful indices. Other quantified facts retain the general search.
+  -> auto_recurrence_witnesses(quant, terms)
+    if !ty_eq(quant.ty, ty_nat)
+      return nil
+    index = mk_var(fresh_name("recurrence_index", [quant] + terms), ty_nat)
+    body = tm_instantiate(quant.b, index, 0)
+    equation = @k.dest_eq(body)
+    if equation == nil || !numeric_type?(type_of(equation[0]))
+      return nil
+    [false, true].each -> (reverse)
+      side = equation[reverse ? 1 : 0]
+      other = equation[reverse ? 0 : 1]
+      spine = strip_app(side)
+      head = spine[0]
+      args = spine[1]
+      if head.tag == :var || (head.tag == :const && head.op == OP_NONE)
+        position = -1
+        valid = true
+        current = []
+        args.each_with_index -> (arg, i)
+          successor = dest_unop(arg, "succ")
+          addition = dest_binop(arg, "+")
+          shifted = (successor != nil && tm_eq(successor, index)) || (addition != nil && tm_eq(addition[0], index) && addition[1].tag == :lit && addition[1].val == 1)
+          if shifted && position == -1
+            position = i
+            current.push(index)
+          else
+            if tm_free_in?(index, arg)
+              valid = false
+            current.push(arg)
+        if valid && position >= 0
+          previous = mk_apps(head, current)
+          parts = []
+          auto_collect_terms(other, parts)
+          if parts.any?(-> (term) tm_eq(term, previous))
+            selected = []
+            matched = false
+            terms.each -> (term)
+              if term.tag == :lit && ty_eq(type_of(term), ty_nat) && !selected.any?(-> (old) tm_eq(old, term))
+                selected.push(term)
+              target = strip_app(term)
+              if target[1].size == args.size && tm_eq(target[0], head)
+                same = true
+                args.each_with_index -> (arg, i)
+                  if i != position && !tm_eq(arg, target[1][i])
+                    same = false
+                if same
+                  witness = target[1][position]
+                  if ty_eq(type_of(witness), ty_nat)
+                    matched = true
+                    if !selected.any?(-> (old) tm_eq(old, witness))
+                      selected.push(witness)
+            if matched
+              return selected
+    nil
+
+  # Infer reusable type parameters from typed symbols already in scope.
+  # Hypotheses and supplied free terms fix their types, as in theorem application.
+  -> auto_specialize_fact(th, quant, terms, facts)
+    if facts.size >= 128
+      return
+    witnesses = auto_recurrence_witnesses(quant, terms)
+    if witnesses == nil
+      witnesses = terms
+    witnesses.each -> (term)
+      if facts.size < 128 && ty_eq(quant.ty, type_of(term))
+        auto_add_fact(facts, @k.spec(term, th))
+    fixed = []
+    th.hyps.each -> (hyp) tm_tyvars_into(hyp, fixed)
+    tm_frees(th.concl).each -> (term) tm_tyvars_into(term, fixed)
+    flexible = {}
+    tm_tyvars(th.concl).each -> (name)
+      if !fixed.include?(name)
+        flexible[name] = true
+    if flexible.size == 0
+      return 0
+    patterns = []
+    auto_type_patterns(th.concl, flexible, patterns)
+    instances = []
+    terms.each -> (term)
+      if term.tag == :const
+        patterns.each -> (pattern)
+          if instances.size < 8 && pattern.name == term.name
+            matcher = Matcher.new({}, flexible)
+            if matcher.match_ty(pattern.ty, term.ty)
+              instance = @k.inst_type(th, matcher.ty)
+              if !tm_eq(instance.concl, th.concl) && !instances.any?(-> (old) tm_eq(old.concl, instance.concl))
+                instances.push(instance)
+    # A purely logical rule may have no matching typed symbol in the goal.
+    if instances.size == 0
+      terms.each -> (term)
+        if instances.size < 8
+          matcher = Matcher.new({}, flexible)
+          if matcher.match_ty(quant.ty, type_of(term))
+            instance = @k.inst_type(th, matcher.ty)
+            if !tm_eq(instance.concl, th.concl) && !instances.any?(-> (old) tm_eq(old.concl, instance.concl))
+              instances.push(instance)
+    instances.each -> (instance)
+      binder = dest_unop(instance.concl, "∀")
+      terms.each -> (term)
+        if ty_eq(binder.ty, type_of(term))
+          auto_add_fact(facts, @k.spec(term, instance))
+    0
+
+  # Only already loaded, closed rules with the standard checked oracles may
+  # enter implicit search. Named assumptions remain explicit hints.
+  -> auto_loaded_rule(name)
+    th = @session.theorems[name]
+    if th == nil || th.hyps.size != 0 || tm_frees(th.concl).size != 0
+      return nil
+    th.tags.each -> (tag)
+      if tag != "oracle:arith" && tag != "oracle:ring"
+        return nil
+    th
+
+  -> auto_abs_bounds(th)
+    cmp = dest_cmp_rel(th.concl)
+    if cmp == nil || (cmp[0] != "≤" && cmp[0] != "<")
+      return nil
+    value = dest_unop(cmp[1], "abs")
+    if value == nil || !["int", "rat", "real"].include?(type_of(value).name)
+      return nil
+    name = cmp[0] == "≤" ? "abs_le." : "abs_lt."
+    rule = auto_loaded_rule(name + type_of(value).name)
+    if rule == nil
+      return nil
+    begin
+      return @k.eq_mp(@k.spec(cmp[2], @k.spec(value, rule)), th)
+    rescue e
+      nil
+
+  # Supply checked endpoint bounds only for min/max terms already present in
+  # a comparison. Closed-term collection and the existing fact cap bound this
+  # enrichment; no new min/max applications or branch assumptions are invented.
+  -> auto_minmax_facts(conclusion, facts)
+    cmp = dest_cmp_rel(conclusion)
+    if cmp == nil
+      return false
+    terms = []
+    auto_collect_terms(cmp[1], terms)
+    auto_collect_terms(cmp[2], terms)
+    added = false
+    terms.each -> (term)
+      spine = strip_app(term)
+      if spine[0].tag == :const && ["min", "max"].include?(spine[0].name) && spine[1].size == 2
+        suffix = type_of(term).name
+        if ["nat", "int", "rat", "real"].include?(suffix)
+          prefix = spine[0].name == "min" ? "min_le_" : "le_max_"
+          ["left", "right"].each -> (side)
+            rule = auto_loaded_rule(prefix + side + "." + suffix)
+            if rule != nil
+              begin
+                th = @k.spec(spine[1][1], @k.spec(spine[1][0], rule))
+                if auto_add_fact(facts, th)
+                  added = true
+              rescue e
+                0
+    added
+
+  -> auto_introduce_search(goal, facts, terms, used, depth, budget, arithmetic)
+    if depth <= 0 || budget[0] <= 0
+      return nil
+    if dest_unop(goal.concl, "∀") != nil || dest_binop(goal.concl, "⇒") != nil
+      facts.each -> (known)
+        if tm_eq(known.concl, goal.concl)
+          return known
+    universal = dest_unop(goal.concl, "∀")
+    if universal != nil && universal.tag == :lam && budget[0] > 0
+      budget[0] -= 1
+      v = auto_fresh(goal, facts, terms, universal.ty)
+      body = tm_instantiate(universal.b, v, 0)
+      proof = auto_search(goal.with_concl(body), facts + [], terms + [v], used, depth - 1, budget, arithmetic)
+      if proof != nil
+        return @k.gen(v, proof)
+    implication_goal = dest_binop(goal.concl, "⇒")
+    if implication_goal != nil && budget[0] > 0
+      budget[0] -= 1
+      proof = auto_search(goal.with_concl(implication_goal[1]), facts + [@k.assume(implication_goal[0])], terms, used, depth - 1, budget, arithmetic)
+      if proof != nil
+        return @k.disch(implication_goal[0], proof)
+    nil
+
+  # Quantified bounds can generate a Cartesian product of instances. Before
+  # saturating, try the origin and signed coordinate unit vectors. An assignment
+  # prunes this forward search only when it satisfies every supplied fact and
+  # falsifies the goal. Universal premises need symbolic justification.
+  -> auto_arithmetic_counterexample(goal, facts)
+    if facts.size == 0 || facts.size > 12 || goal.fixes.size > 8 || !comparison?(goal.concl)
+      return false
+    if !facts.any?(-> (th) dest_unop(th.concl, "∀") != nil)
+      return false
+    nodes = [1024]
+    if !auto_small_term?(goal.concl, nodes) || !facts.all?(-> (th) auto_small_term?(th.concl, nodes))
+      return false
+    vars = goal.fixes.map(-> (entry) entry[1]).select(-> (v) numeric_type?(v.ty))
+    assignment = {}
+    vars.each -> (v) assignment[v.vkey] = model_integer(v.ty, 0)
+    begin
+      if model_witness?(goal, facts, assignment)
+        return true
+      vars.each -> (v)
+        values = v.ty.name == "nat" ? [1] : [1, -1]
+        values.each -> (n)
+          assignment[v.vkey] = model_integer(v.ty, n)
+          if model_witness?(goal, facts, assignment)
+            return true
+        assignment[v.vkey] = model_integer(v.ty, 0)
+    rescue e
+      return false
+    false
+
+  -> model_witness?(goal, facts, assignment)
+    fuel = [96]
+    model_truth(goal.concl, assignment, fuel) == false && facts.all?(-> (th) model_truth(th.concl, assignment, fuel) == true)
+
+  -> model_integer(ty, n)
+    mk_lit(ty.name == "nat" || ty.name == "int" ? n : [n, 1], ty)
+
+  -> model_truth(term, assignment, fuel)
+    fuel[0] -= 1
+    if fuel[0] < 0
+      return nil
+    guard = dest_binop(term, "⇒")
+    if guard != nil
+      conclusion = model_truth(guard[1], assignment, fuel)
+      if conclusion == true
+        return true
+      premise = model_truth(guard[0], assignment, fuel)
+      if premise == false
+        return true
+      return premise == true ? conclusion : nil
+    body = term
+    types = []
+    binder = dest_unop(body, "∀")
+    while binder != nil && binder.tag == :lam && numeric_type?(binder.ty)
+      types.push(binder.ty)
+      body = binder.b
+      binder = dest_unop(body, "∀")
+    result = model_comparison(body, assignment)
+    if result != nil || types.size == 0 || types.size > 4
+      return result
+    # One exact false instance refutes a universal. Finite successes leave it
+    # unknown. Symbolic normalization above is what can establish it for all.
+    unit = -1
+    while unit < types.size
+      instance = body
+      i = types.size - 1
+      while i >= 0
+        instance = tm_instantiate(instance, model_integer(types[i], i == unit ? 1 : 0), types.size - 1 - i)
+        i -= 1
+      if model_comparison(instance, assignment) == false
+        return false
+      unit += 1
+    nil
+
+  -> model_comparison(term, assignment)
+    cmp = dest_cmp_rel(term)
+    if cmp == nil || !numeric_type?(type_of(cmp[1]))
+      return nil
+    kind = type_of(cmp[1]).name
+    nodes = [128]
+    recurrence_ring_cost(cmp[1], kind, nodes)
+    recurrence_ring_cost(cmp[2], kind, nodes)
+    ctx = RingCtx.new("rat")
+    left = ring_norm(tm_subst(cmp[1], assignment), kind, ctx)
+    right = ring_norm(tm_subst(cmp[2], assignment), kind, ctx)
+    diff = poly_add(right, poly_scale(left, Q_NEG_ONE))
+    if diff.size > 0 && (diff.size != 1 || diff[0] == nil)
+      return nil
+    sign = diff.size == 0 ? 0 : diff[0][0]
+    case cmp[0]
+    when "<"
+      sign > 0
+    when "≤"
+      sign >= 0
+    else
+      sign == 0
+
+  -> auto_search(goal, facts, terms, used, depth, budget, arithmetic = nil)
+    if auto_arithmetic_counterexample(goal, facts)
+      return nil
+    # Guard goals introduce their binders before spending arithmetic fuel on
+    # unrelated instances of the surrounding range hypotheses.
+    if arithmetic != nil
+      proof = auto_introduce_search(goal, facts, terms, used, depth, budget, arithmetic)
+      if proof != nil
+        return proof
+    i = 0
+    while true
+      while i < facts.size
+        th = facts[i]
+        if tm_eq(th.concl, goal.concl)
+          return th
+        fitted = try_square_fit(th, goal.concl)
+        if fitted != nil
+          return fitted
+        if is_const?(th.concl, "⊥")
+          return @k.false_elim(th, goal.concl)
+        if dest_binop(th.concl, "∧") != nil
+          auto_add_fact(facts, @k.conj1(th))
+          auto_add_fact(facts, @k.conj2(th))
+        bounds = auto_abs_bounds(th)
+        if bounds != nil
+          auto_add_fact(facts, bounds)
+        if arithmetic != nil
+          auto_minmax_facts(th.concl, facts)
+        quant = dest_unop(th.concl, "∀")
+        if quant != nil && quant.tag == :lam
+          auto_specialize_fact(th, quant, terms, facts)
+        # Check both directions because either premise may have arrived last.
+        j = 0
+        while j <= i
+          other = facts[j]
+          imp = dest_binop(th.concl, "⇒")
+          if imp != nil && tm_eq(imp[0], other.concl)
+            auto_add_fact(facts, @k.mp(th, other))
+          imp2 = dest_binop(other.concl, "⇒")
+          if imp2 != nil && tm_eq(imp2[0], th.concl)
+            auto_add_fact(facts, @k.mp(other, th))
+          neg = dest_unop(th.concl, "¬")
+          if neg != nil && tm_eq(neg, other.concl)
+            return @k.false_elim(@k.not_elim(th, other), goal.concl)
+          neg2 = dest_unop(other.concl, "¬")
+          if neg2 != nil && tm_eq(neg2, th.concl)
+            return @k.false_elim(@k.not_elim(other, th), goal.concl)
+          j += 1
+        i += 1
+      changed = auto_equal_mp(facts)
+      if arithmetic != nil
+        if auto_arithmetic_congruence(terms, facts, arithmetic)
+          changed = true
+        proof = auto_arithmetic_proof(goal, facts, arithmetic)
+        if proof != nil
+          return proof
+        # Discharge instantiated guards using only already checked facts.
+        # Retry after new consequences arrive, within the shared solver budget.
+        attempted = []
+        facts.each -> (rule)
+          implication = dest_binop(rule.concl, "⇒")
+          if implication != nil && !facts.any?(->(th) tm_eq(th.concl, implication[1]))
+            guard = nil
+            facts.each -> (known)
+              if tm_eq(known.concl, implication[0])
+                guard = known
+            if guard == nil && !attempted.any?(->(term) tm_eq(term, implication[0]))
+              attempted.push(implication[0])
+              guard = auto_arithmetic_proof(goal.with_concl(implication[0]), facts, arithmetic)
+              # Induction hypotheses often require a bounded universal premise.
+              # Prove it in a detached search, sharing fuel and cycle detection.
+              structured = dest_unop(implication[0], "∀") != nil || dest_binop(implication[0], "⇒") != nil || dest_binop(implication[0], "∧") != nil
+              if guard == nil && structured && depth > 0 && budget[0] > 0 && !used.any?(-> (old) tm_eq(old, rule.concl))
+                budget[0] -= 1
+                guard = auto_search(goal.with_concl(implication[0]), facts + [], terms, used + [rule.concl], depth - 1, budget, arithmetic)
+            if guard != nil
+              auto_add_fact(facts, guard)
+              if auto_add_fact(facts, @k.mp(rule, guard))
+                changed = true
+      if !changed
+        break
+    graph = auto_equality_graph(facts)
+    # A negated conjunction contradicts its two known components.
+    ni = 0
+    while ni < facts.size
+      neg_th = facts[ni]
+      neg = dest_unop(neg_th.concl, "¬")
+      pair = nil
+      if neg != nil
+        pair = dest_binop(neg, "∧")
+      if pair != nil
+        left = nil
+        right = nil
+        facts.each -> (candidate)
+          if left == nil
+            eq = auto_equal(candidate.concl, pair[0], facts, 16, graph)
+            if eq != nil
+              left = @k.eq_mp(eq, candidate)
+          if right == nil
+            eq = auto_equal(candidate.concl, pair[1], facts, 16, graph)
+            if eq != nil
+              right = @k.eq_mp(eq, candidate)
+        if left != nil && right != nil
+          return @k.false_elim(@k.not_elim(neg_th, @k.conj(left, right)), goal.concl)
+      ni += 1
+    target_eq = @k.dest_eq(goal.concl)
+    if target_eq != nil
+      proof = auto_equal(target_eq[0], target_eq[1], facts, 16, graph)
+      if proof != nil
+        return proof
+    facts.each -> (th)
+      proof = auto_equal(th.concl, goal.concl, facts, 16, graph)
+      if proof != nil
+        return @k.eq_mp(proof, th)
+    alternatives = dest_binop(goal.concl, "∨")
+    if alternatives != nil
+      facts.each -> (th)
+        left_eq = auto_equal(th.concl, alternatives[0], facts, 16, graph)
+        if left_eq != nil
+          return @k.disj1(@k.eq_mp(left_eq, th), alternatives[1])
+        right_eq = auto_equal(th.concl, alternatives[1], facts, 16, graph)
+        if right_eq != nil
+          return @k.disj2(alternatives[0], @k.eq_mp(right_eq, th))
+    if depth > 0
+      if arithmetic == nil
+        proof = auto_introduce_search(goal, facts, terms, used, depth, budget, arithmetic)
+        if proof != nil
+          return proof
+      negation_goal = dest_unop(goal.concl, "¬")
+      if negation_goal != nil && budget[0] > 0
+        budget[0] -= 1
+        proof = auto_search(goal.with_concl(@k.false_tm), facts + [@k.assume(negation_goal)], terms, used, depth - 1, budget, arithmetic)
+        if proof != nil
+          return @k.not_intro(negation_goal, proof)
+      conjunction = dest_binop(goal.concl, "∧")
+      if conjunction != nil && budget[0] > 0
+        budget[0] -= 1
+        left = auto_search(goal.with_concl(conjunction[0]), facts + [], terms, used, depth - 1, budget, arithmetic)
+        if left != nil
+          right = auto_search(goal.with_concl(conjunction[1]), facts + [], terms, used, depth - 1, budget, arithmetic)
+          if right != nil
+            return @k.conj(left, right)
+      existential = dest_unop(goal.concl, "∃")
+      if existential != nil && existential.tag == :lam
+        ti = 0
+        while ti < terms.size && budget[0] > 0
+          witness = terms[ti]
+          if ty_eq(existential.ty, type_of(witness))
+            budget[0] -= 1
+            body = tm_instantiate(existential.b, witness, 0)
+            proof = auto_search(goal.with_concl(body), facts + [], terms, used, depth - 1, budget, arithmetic)
+            if proof != nil
+              return @k.exists_intro(goal.concl, witness, proof)
+          ti += 1
+      # Work backwards from a relevant implication, then prove its premise.
+      # Remember attempted implications to stop cycles such as p → q → p.
+      ii = 0
+      while ii < facts.size && budget[0] > 0
+        implication = facts[ii]
+        imp = dest_binop(implication.concl, "⇒")
+        if imp != nil
+          seen = false
+          used.each -> (old)
+            if tm_eq(old, implication.concl)
+              seen = true
+          if !seen
+            consequent_eq = auto_equal(imp[1], goal.concl, facts, 16, graph)
+            if consequent_eq != nil
+              budget[0] -= 1
+              premise = auto_search(goal.with_concl(imp[0]), facts + [], terms, used + [implication.concl], depth - 1, budget, arithmetic)
+              if premise != nil
+                return @k.eq_mp(consequent_eq, @k.mp(implication, premise))
+        ii += 1
+      fi = 0
+      while fi < facts.size && budget[0] > 0
+        th = facts[fi]
+        ex = dest_unop(th.concl, "∃")
+        if ex != nil && ex.tag == :lam
+          seen = false
+          used.each -> (old)
+            if tm_eq(old, th.concl)
+              seen = true
+          if !seen
+            budget[0] -= 1
+            witness = auto_fresh(goal, facts, terms, ex.ty)
+            body = tm_instantiate(ex.b, witness, 0)
+            proof = auto_search(goal, facts + [@k.assume(body)], terms + [witness], used + [th.concl], depth - 1, budget, arithmetic)
+            if proof != nil
+              return @k.choose(witness, th, proof)
+        fi += 1
+      facts.each -> (th)
+        disj = dest_binop(th.concl, "∨")
+        if disj != nil && budget[0] > 0
+          seen = false
+          used.each -> (old)
+            if tm_eq(old, th.concl)
+              seen = true
+          if !seen
+            budget[0] -= 1
+            next_used = used + [th.concl]
+            left_facts = facts + [@k.assume(disj[0])]
+            left = auto_search(goal, left_facts, terms, next_used, depth - 1, budget, arithmetic)
+            if left != nil
+              right_facts = facts + [@k.assume(disj[1])]
+              right = auto_search(goal, right_facts, terms, next_used, depth - 1, budget, arithmetic)
+              if right != nil
+                return @k.disj_cases(th, left, right)
+    nil
+
+  # Expose both directions of a quantified/conditional iff, retaining every
+  # binder and guard. These are derived implications, not a rewrite oracle.
+  -> auto_hint_rules(goal, hint)
+    th = @d.beta_norm_thm(hint)
+    steps = []
+    while true
+      quant = dest_unop(th.concl, "∀")
+      if quant != nil && quant.tag == :lam
+        avoid = goal.all_terms + [th.concl] + th.hyps
+        v = mk_var(fresh_name("hint", avoid), quant.ty)
+        steps.push([:all, v])
+        th = @k.spec(v, th)
+      else
+        implication = dest_binop(th.concl, "⇒")
+        if implication == nil
+          break
+        steps.push([:imp, implication[0]])
+        th = @d.undisch(th)
+    equality = @k.dest_eq(th.concl)
+    if equality == nil || !ty_eq(type_of(equality[0]), ty_bool)
+      return [hint]
+    forward = @k.disch(equality[0], @k.eq_mp(th, @k.assume(equality[0])))
+    backward = @k.disch(equality[1], @k.eq_mp(@k.sym(th), @k.assume(equality[1])))
+    i = steps.size - 1
+    while i >= 0
+      step = steps[i]
+      if step[0] == :all
+        forward = @k.gen(step[1], forward)
+        backward = @k.gen(step[1], backward)
+      else
+        forward = @k.disch(step[1], forward)
+        backward = @k.disch(step[1], backward)
+      i -= 1
+    [hint, forward, backward]
+
+  # Index a small set of loaded arithmetic/analysis rules by the relation and
+  # outer operand constructors. Bound variables are wildcard operand heads.
+  -> auto_operand_head(t)
+    head = strip_app(t)[0]
+    if head.tag == :const
+      return "c:" + head.name
+    if head.tag == :lit
+      return "literal"
+    "*"
+
+  # Follow only the applied head, retaining each spelling for indexed lookup.
+  # This selects candidates; their application still reconstructs a checked proof.
+  -> auto_operand_heads(t)
+    out = []
+    steps = 0
+    while steps <= 8
+      name = auto_operand_head(t)
+      if !out.include?(name)
+        out.push(name)
+      if application_square?(t) && !out.include?("c:^")
+        out.push("c:^")
+      square = dest_binop(t, "^")
+      if square != nil && square[1].tag == :lit && square[1].val == 2 && ["nat", "int", "rat", "real"].include?(type_of(square[0]).name) && !out.include?("c:*")
+        out.push("c:*")
+      spine = strip_app(t)
+      head = spine[0]
+      if steps == 8 || head.tag != :const || @k.defs[head.name] == nil
+        break
+      rule = make_rule(@d, @k.defs[head.name], head.name)
+      conv = Simp.new(@d, [rule]).rewrite_top(head, 0)
+      if conv == nil
+        break
+      rhs = dest_binop(conv.concl, "=")[1]
+      t = @d.beta_norm_term(mk_apps(rhs, spine[1]))
+      steps += 1
+    out
+
+  -> auto_rule_spine(t)
+    while true
+      quant = dest_unop(t, "∀")
+      if quant != nil && quant.tag == :lam
+        t = quant.b
+      else
+        implication = dest_binop(t, "⇒")
+        if implication == nil
+          break
+        t = implication[1]
+    spine = strip_app(t)
+    if spine[0].tag != :const || !["=", "≤", "<"].include?(spine[0].name) || spine[1].size != 2
+      return nil
+    spine
+
+  -> auto_rule_shape(t)
+    spine = auto_rule_spine(t)
+    if spine == nil
+      return nil
+    [spine[0].name, auto_operand_head(spine[1][0]), auto_operand_head(spine[1][1]), ty_show(type_of(spine[1][0]))]
+
+  -> auto_registered_key(term)
+    shape = auto_rule_shape(term)
+    if shape != nil
+      operand = auto_rule_spine(term)[1][0]
+      if ty_vars(type_of(operand)).size > 0
+        shape[3] = "*"
+      return "math|" + shape.join("|")
+    while true
+      quant = dest_unop(term, "∀")
+      implication = dest_binop(term, "⇒")
+      if quant != nil
+        term = quant.b
+      elsif implication != nil
+        term = implication[1]
+      else
+        break
+    head = strip_app(term)[0]
+    head.tag == :const ? "logic|" + head.name : "*"
+
+  # Registrations name already proved rules. Index only their conclusions;
+  # ordinary instantiation and premise proofs still justify every use.
+  -> auto_registered_hints(goal, side = nil)
+    if @registered_index == nil || @registered_version != @session.auto_rule_version
+      @registered_index = {}
+      @registered_version = @session.auto_rule_version
+      @session.auto_rules.each -> (name, th)
+        if @session.theorems[name] == th
+          begin
+            auto_relation_parts(th, [32]).each -> (part)
+              auto_hint_rules(goal, part).each -> (rule)
+                key = auto_registered_key(rule.concl)
+                bucket = @registered_index[key]
+                if bucket == nil
+                  bucket = []
+                  @registered_index[key] = bucket
+                bucket.push([name, th, rule])
+                shape = auto_rule_shape(rule.concl)
+                if shape != nil
+                  ty = ty_vars(type_of(auto_rule_spine(rule.concl)[1][0])).size > 0 ? "*" : shape[3]
+                  [[shape[0], shape[1], "?rhs", ty], [shape[0], "?lhs", shape[2], ty]].each -> (parts)
+                    endpoint_key = "math|" + parts.join("|")
+                    endpoints = @registered_index[endpoint_key]
+                    if endpoints == nil
+                      endpoints = []
+                      @registered_index[endpoint_key] = endpoints
+                    endpoints.push([name, th, rule])
+          rescue e
+            0
+    keys = side == nil ? ["*"] : []
+    shape = auto_rule_shape(goal.concl)
+    if shape != nil
+      spine = auto_rule_spine(goal.concl)
+      lefts = side == :right ? ["?lhs"] : auto_operand_heads(spine[1][0]) + ["*"]
+      rights = side == :left ? ["?rhs"] : auto_operand_heads(spine[1][1]) + ["*"]
+      [shape[3], "*"].each -> (ty)
+        lefts.each -> (left)
+          rights.each -> (right)
+            key = "math|" + [shape[0], left, right, ty].join("|")
+            if !keys.include?(key)
+              keys.push(key)
+    else
+      keys.push(auto_registered_key(goal.concl))
+    out = []
+    keys.each -> (key)
+      bucket = @registered_index[key]
+      if bucket != nil
+        bucket.each -> (entry)
+          # Shadowing a name does not transfer its old registration.
+          if @session.theorems[entry[0]] == entry[1]
+            auto_add_fact(out, entry[2])
+    out
+
+  # Registered bounds can be intermediate facts rather than the entire goal.
+  # Select by existing endpoints; matching still retains every rule guard.
+  -> auto_registered_arithmetic(goal, hints, budget, seen = [], known_only = false)
+    if budget[0] <= 0 || !comparison?(goal.concl) || goal.hyps.size > 12 || hints.size > 8 || !auto_small_term?(goal.concl, [256])
+      return nil
+    terms = []
+    auto_collect_terms(goal.concl, terms)
+    goal.hyps.each -> (h) auto_collect_terms(h[1], terms)
+    candidates = []
+    terms.each -> (term)
+      if term.tag == :app && numeric_type?(type_of(term)) && candidates.size < 32
+        ["=", "≤", "<"].each -> (relation)
+          rel = @k.mk_const(relation, ty_funs([type_of(term), type_of(term)], ty_bool))
+          probe = goal.with_concl(mk_apps(rel, [term, term]))
+          [:left, :right].each -> (side)
+            auto_registered_hints(probe, side).each -> (rule)
+              if candidates.size < 32
+                auto_add_fact(candidates, rule)
+    if candidates.size == 0
+      return nil
+    budget[0] -= 1
+    instances = auto_hint_instances(goal, candidates, terms, false, true)
+    if instances.size == 0
+      return nil
+    supplied = hints + auto_hint_instances(goal, hints, terms, false, true)
+    context = (goal.hyps.map -> (h) @k.assume(h[1])) + supplied
+    if known_only
+      bounds = []
+      instances.each -> (instance)
+        bound = instance
+        imp = dest_binop(bound.concl, "⇒")
+        while imp != nil
+          premise = context.find(-> (th) tm_eq(th.concl, imp[0]))
+          if premise == nil
+            break
+          bound = @k.mp(bound, premise)
+          imp = dest_binop(bound.concl, "⇒")
+        if imp == nil && comparison?(bound.concl)
+          bounds.push(bound)
+      return bounds.size == 0 ? nil : auto_arithmetic_proof(goal, context + bounds, budget)
+    if !auto_arithmetic_counterexample(goal, context + instances)
+      proof = auto_arithmetic_forward(goal, supplied + instances, budget)
+      if proof != nil
+        return proof
+    # First check which suggested bound would actually close the arithmetic
+    # goal. Only then spend premise-search fuel on its quantified guards.
+    # The provisional assumption must be discharged by the proved bound.
+    instances.each -> (instance)
+      spine = auto_rule_spine(instance.concl)
+      if spine != nil && budget[0] > 0
+        conclusion = mk_apps(spine[0], spine[1])
+        bridge = auto_arithmetic_proof(goal, context + [@k.assume(conclusion)], budget)
+        if bridge != nil
+          bound = auto_hint_proof(goal.with_concl(conclusion), [instance], supplied, budget, seen + [goal.concl])
+          if bound != nil
+            return @d.prove_hyp(bound, bridge)
+    nil
+
+  -> auto_default_hints(goal, left_only = false)
+    shape = auto_rule_shape(goal.concl)
+    if shape == nil
+      return []
+    if @auto_defaults == nil
+      @auto_defaults = {}
+      analytic_order = ["exp_le_exp", "exp_lt_exp", "log_le_log", "log_lt_log",
+        "exp_le_one_iff", "exp_lt_one", "one_le_exp_iff"]
+      names = ["sum_below.congr", "sum_below.eq_of_recurrence", "sqrt_nonneg", "sqrt_pos", "sqrt_le_sqrt", "sqrt_lt_sqrt",
+        "sequence.descent_on.nat", "sequence.descent_length.nat",
+        "recurrence.geometric_sum.nat", "recurrence.geometric_sum_of_pos.nat",
+        "sq_sqrt", "sqrt_sq", "sqrt_sq_eq_abs", "sqrt_eq_of_mul_self", "sqrt_mul",
+        "sqrt_lt_iff", "lt_sqrt_iff", "exp_pos", "exp_nonneg", "one_lt_exp", "exp_ge_one_add",
+        "log_nonneg", "log_pos", "log_neg", "log_le_sub_one",
+        "sq_nonneg.int", "sq_nonneg.rat", "sq_nonneg.real", "two_mul_le_add_sq.nat",
+        "square_gap.le_abs.int", "square_gap.le_abs.rat", "square_gap.le_abs.real",
+        "one_add_lt_exp", "exp_tangent_le", "exp_tangent_lt", "exp_midpoint_le", "exp_midpoint_lt",
+        "exp_weighted_jensen", "exp_weighted_jensen_lt", "sqrt_le_iff", "le_sqrt_iff",
+        "one_div_sqrt_le_div_iff", "one_div_sqrt_lt_div_iff", "div_le_one_div_sqrt_iff", "div_lt_one_div_sqrt_iff",
+        "sqrt_sub_sq_le_abs", "sqrt_sub_abs_le", "log_midpoint_le", "log_midpoint_lt",
+        "log_weighted_jensen", "log_weighted_jensen_lt", "sub_one_le_mul_log", "neg_mul_log_le_scale",
+        "sum_below.entropy_le_log.real",
+        "list_sum.weighted_sqrt_mul_le.real", "list_sum.sqrt_mul_le.real",
+        "sum_below.weighted_sqrt_mul_le.real", "sum_below.sqrt_mul_le.real",
+        "sqrt_mul.weighted_add_le", "sqrt_mul.add_le", "abs_le_sqrt_mul", "norm2.add_le", "norm2.sub_le"] + analytic_order
+      ["nat", "int", "rat", "real"].each -> (suffix)
+        ["sequence.monotone_on", "sequence.antitone_on",
+          "sum_nonneg", "sum_le", "sum_add", "sum_sub", "sum_const_mul", "sum_mul_const",
+          "sum_below.split", "sum_below.const_le", "sum_below.le_const", "sum_below.mono",
+          "sum_below.zero", "sum_below.eq_zero", "sum_below.swap", "sum_below.exchange",
+          "sum_below.scale", "sum_below.add", "sum_below.sub", "sum_below.succ_front",
+          "sum_below.single", "sum_below.single_out", "sum_below.single_eq",
+          "sum_const", "sum_below.eq_const", "sum_below.eq_one", "sum_telescope"].each -> (prefix)
+          names.push(prefix + "." + suffix)
+      ["list_sum", "sum_below"].each -> (prefix)
+        ["int", "rat", "real"].each -> (suffix)
+          ["weighted_cauchy", "cauchy"].each -> (rule)
+            names.push(prefix + "." + rule + "." + suffix)
+        ["weighted_cauchy_sqrt", "cauchy_sqrt", "weighted_minkowski", "minkowski"].each -> (rule)
+          names.push(prefix + "." + rule + ".real")
+      ["int", "rat", "real"].each -> (suffix)
+        ["recurrence.geometric_sum", "recurrence.geometric_forcing",
+          "abs_nonneg", "abs_pos", "abs_of_nonneg", "abs_of_nonpos", "le_abs_self",
+          "neg_le_abs", "neg_abs_le", "abs_le_of", "abs_lt_of", "abs_add", "abs_sub",
+          "abs_sub_le", "abs_sub_abs_le_abs_sub", "abs_abs_sub_abs_le", "abs_mul",
+          "abs_neg", "abs_sub_comm", "abs_abs", "abs_sq", "sq_abs", "sq_le_sq",
+          "sq_lt_sq", "abs_le_of_sq_le_sq"].each -> (prefix)
+          names.push(prefix + "." + suffix)
+      ["nat", "int", "rat", "real"].each -> (suffix)
+        ["min_le_left", "min_le_right", "le_min", "lt_min", "min_eq_left",
+          "min_eq_right", "min_comm", "min_self", "le_max_left", "le_max_right",
+          "max_le", "max_lt", "max_eq_left", "max_eq_right", "max_comm", "max_self",
+          "min_le_max", "min_add_max", "min_le_min", "max_le_max",
+          "max_le_mul_max", "mul_min_le_min"].each -> (prefix)
+          names.push(prefix + "." + suffix)
+      power_identities = []
+      ["nat", "int", "rat", "real"].each -> (suffix)
+        ["pow_add", "pow_mul", "mul_pow"].each -> (prefix)
+          name = prefix + "." + suffix
+          power_identities.push(name)
+          names.push(name)
+        ["pow_nonneg", "pow_pos", "one_le_pow", "pow_le_one", "pow_le_pow_left",
+          "pow_le_pow_right", "pow_le_pow_of_le_one", "pow_lt_pow_left",
+          "pow_lt_pow_right"].each -> (prefix)
+          names.push(prefix + "." + suffix)
+      division_order = []
+      ["rat", "real"].each -> (suffix)
+        ["one_div_pos", "one_div_nonneg", "one_div_neg", "div_pos", "div_nonneg",
+          "div_le_div_of_nonneg_right", "div_lt_div_of_pos_right",
+          "div_le_div_of_nonneg_left", "one_div_le_one_div_of_le",
+          "one_div_lt_one_div_of_lt", "div_self", "mul_div_cancel",
+          "mul_div_cancel_right", "mul_div_cancel_left", "one_div_one_div"].each -> (prefix)
+          names.push(prefix + "." + suffix)
+        ["div_le_iff", "le_div_iff", "div_lt_iff", "lt_div_iff", "div_le_one",
+          "div_le_div_iff", "div_lt_div_iff", "eq_div_iff", "div_eq_iff"].each -> (prefix)
+          name = prefix + "." + suffix
+          division_order.push(name)
+          names.push(name)
+      names.each -> (name)
+        th = auto_loaded_rule(name)
+        if th != nil
+          rules = auto_hint_rules(goal, th)
+          # These unconditional identities are equally useful in either
+          # direction. Kernel symmetry avoids an arithmetic detour.
+          if power_identities.include?(name)
+            rules.push(sym_rule(th))
+          rules.each -> (rule)
+            pattern = auto_rule_shape(rule.concl)
+            # Order equivalences reduce an exp/log comparison to its inputs.
+            # Their reverse directions would introduce exp/log into arbitrary
+            # arithmetic goals; those remain available as explicit hints.
+            oriented = !analytic_order.include?(name) || (pattern != nil && (["c:exp", "c:log"].include?(pattern[1]) || ["c:exp", "c:log"].include?(pattern[2])))
+            # Clear a quotient goal only after proving its denominator guard.
+            # Reverse directions remain explicit, avoiding division in ordinary
+            # product comparisons and unconstrained denominator searches.
+            if division_order.include?(name)
+              oriented = pattern != nil && (pattern[1] == "c:/" || pattern[2] == "c:/")
+            if pattern != nil && oriented
+              # Generic defaults share a lookup bucket, but instantiate_to
+              # still checks the full types and every premise before use.
+              operand = auto_rule_spine(rule.concl)[1][0]
+              if ty_vars(type_of(operand)).size > 0
+                pattern[3] = "*"
+              key = pattern.join("|")
+              bucket = @auto_defaults[key]
+              if bucket == nil
+                bucket = []
+                @auto_defaults[key] = bucket
+              bucket.push(rule)
+              if pattern[0] == "="
+                key = ["=", pattern[1], "?rhs", pattern[3]].join("|")
+                bucket = @auto_defaults[key]
+                if bucket == nil
+                  bucket = []
+                  @auto_defaults[key] = bucket
+                bucket.push(rule)
+    out = []
+    keys = []
+    spine = auto_rule_spine(goal.concl)
+    lefts = auto_operand_heads(spine[1][0]) + ["*"]
+    rights = left_only ? ["?rhs"] : auto_operand_heads(spine[1][1]) + ["*"]
+    [shape[3], "*"].each -> (ty)
+      lefts.each -> (left)
+        rights.each -> (right)
+          key = [shape[0], left, right, ty].join("|")
+          if !keys.include?(key)
+            keys.push(key)
+            bucket = @auto_defaults[key]
+            if bucket != nil
+              out = out + bucket
+    out
+
+  # Instantiate equalities at existing numeric subexpressions, then let the
+  # arithmetic search discharge their guards and combine their conclusions.
+  # This final root fallback neither invents endpoints nor recursively expands
+  # newly derived terms: at most64 terms,32 rules/matches and8 instances.
+  -> auto_subterm_arithmetic(goal, hints)
+    if !comparison?(goal.concl)
+      return nil
+    terms = []
+    auto_collect_terms(goal.concl, terms)
+    goal.hyps.each -> (h) auto_collect_terms(h[1], terms)
+    candidates = []
+    hints.each -> (hint)
+      if candidates.size < 32
+        auto_add_fact(candidates, hint)
+    terms.each -> (term)
+      if term.tag == :app && numeric_type?(type_of(term)) && candidates.size < 32
+        probe = goal.with_concl(@k.eq_tm(term, term))
+        auto_default_hints(probe, true).each -> (rule)
+          if candidates.size < 32
+            auto_add_fact(candidates, rule)
+    instances = auto_hint_instances(goal, candidates, terms, true)
+    if instances.size > 0
+      proof = auto_arithmetic_forward(goal, hints + instances)
+      if proof != nil
+        return proof
+    # A default bound can also contribute to arithmetic without matching the
+    # whole goal, e.g. a square bound followed by an added positive margin.
+    # Instantiate only at existing terms; the ordinary checker proves the
+    # final comparison, including strictness and every rule premise.
+    cmp = dest_cmp_rel(goal.concl)
+    if !["≤", "<"].include?(cmp[0]) || goal.hyps.size > 12 || hints.size > 8 || !auto_small_term?(goal.concl, [256])
+      return nil
+    probe = goal
+    if cmp[0] == "<"
+      rel = @k.mk_const("≤", ty_funs([type_of(cmp[1]), type_of(cmp[1])], ty_bool))
+      probe = goal.with_concl(mk_apps(rel, [cmp[1], cmp[2]]))
+    rules = auto_default_hints(probe)
+    instances = auto_hint_instances(goal, rules, terms)
+    if instances.size == 0
+      return nil
+    auto_arithmetic_forward(goal, hints + instances)
+
+  -> auto_arithmetic_shape?(term, leaves)
+    conjunction = dest_binop(term, "∧")
+    if conjunction != nil
+      return auto_arithmetic_shape?(conjunction[0], leaves) && auto_arithmetic_shape?(conjunction[1], leaves)
+    leaves[0] -= 1
+    comparison = dest_cmp_rel(term)
+    leaves[0] >= 0 && comparison != nil && numeric_type?(type_of(comparison[1]))
+
+  # Expose small defined arithmetic expressions once, keeping recursive tails
+  # folded. Every new hypothesis is derived from its original checked equation.
+  -> auto_defined_arithmetic(goal, hints, budget, rewrite_hints = false)
+    comparison = dest_cmp_rel(goal.concl)
+    shape = rewrite_hints ? auto_arithmetic_shape?(goal.concl, [4]) : (comparison != nil && numeric_type?(type_of(comparison[1])))
+    if budget[0] <= 0 || !shape || goal.hyps.size > 12 || hints.size > 8 || !auto_small_term?(goal.concl, [256])
+      return nil
+    begin
+      definitions = auto_relation_definitions(goal.all_terms + (hints.map -> (hint) hint.concl))
+      facts = []
+      if rewrite_hints
+        rules = []
+        protected = []
+        nodes = [4096]
+        hints.each -> (hint)
+          if auto_small_term?(hint.concl, [512])
+            auto_relation_parts(hint, [8]).each -> (part)
+              if rules.size >= 32
+                fail("arithmetic rewrites: rule limit")
+              rule = make_rule(@d, part, "arithmetic hint")
+              rules.push(rule)
+              auto_relation_heads(rule.lhs, protected, nodes)
+        if rules.size == 0
+          return nil
+        # Keep the supplied formula's head intact until its rewrite can apply.
+        definitions = rules + (definitions.select -> (rule) !protected.include?(rule.head_name))
+        facts = (goal.hyps.map -> (h) @k.assume(h[1])) + hints
+      if definitions.size == 0
+        return nil
+      conversion = auto_relation_normalize(goal.concl, definitions, facts)
+      conclusion = dest_binop(conversion.concl, "=")[1]
+      if !auto_small_term?(conclusion, [1024])
+        return nil
+      changed = !tm_eq(conclusion, goal.concl)
+      nodes = [4096]
+      hyps = goal.hyps + []
+      converted = []
+      goal.hyps.each -> (h)
+        step = auto_relation_normalize(h[1], definitions, facts)
+        term = dest_binop(step.concl, "=")[1]
+        if !auto_small_term?(term, nodes)
+          fail("defined arithmetic: hypothesis limit")
+        if !tm_eq(term, h[1])
+          name = "defined_fact" + converted.size.to_s
+          while hyps.any?(-> (old) old[0] == name)
+            name += "_"
+          hyps.push([name, term])
+          converted.push(@k.eq_mp(step, @k.assume(h[1])))
+          changed = true
+      normalized_hints = hints.map -> (hint)
+        step = auto_relation_normalize(hint.concl, definitions, facts)
+        proof = @k.eq_mp(step, hint)
+        if !auto_small_term?(proof.concl, nodes)
+          fail("defined arithmetic: hint limit")
+        if !tm_eq(proof.concl, hint.concl)
+          changed = true
+        proof
+      if !changed
+        return nil
+      # A formula may simplify its own statement to True. Retain the supplied
+      # facts as well: another arithmetic step can still need that statement.
+      if rewrite_hints
+        normalized_hints = hints + normalized_hints
+      budget[0] -= 1
+      worker = Prover.new(@session)
+      worker.auto_defaults = @auto_defaults
+      worker.registered_search = @registered_search
+      ref = GoalRef.new(Goal.new(goal.fixes, hyps, conclusion), nil, 0)
+      worker.goals = [ref]
+      worker.tac_auto(ref, 3, normalized_hints, budget, [goal.concl])
+      if ref.thm == nil || worker.goals.size != 0
+        return nil
+      proof = @k.eq_mp(@k.sym(conversion), worker.fit(ref, ref.thm))
+      converted.each -> (fact) proof = @d.prove_hyp(fact, proof)
+      proof
+    rescue e
+      nil
+
+  # Fold exactly the loaded definition of sum_below, using a checked equation.
+  # Matching the complete recursion body distinguishes sums from other recursors.
+  -> auto_sum_fold_rule(ty)
+    key = ty_show(ty)
+    cached = @sum_alias_rules[key]
+    if cached != nil
+      return cached
+    definition = @k.defs["sum_below"]
+    if definition == nil
+      return nil
+    n = mk_var("sum_index", ty_nat)
+    f = mk_var("sum_function", ty_fun(ty_nat, ty))
+    head = @k.mk_const("sum_below", ty_funs([ty_nat, type_of(f)], ty))
+    unfolded = Simp.new(@d, [make_rule(@d, definition, "sum_below")]).rewrite_top(head, 0)
+    if unfolded == nil
+      return nil
+    unfolded = @d.beta_norm_thm(@d.ap_thm(@d.ap_thm(unfolded, n), f))
+    equation = @k.gen(n, @k.gen(f, @k.sym(unfolded)))
+    rule = make_rule(@d, equation, "sum_below.fold")
+    @sum_alias_rules[key] = rule
+    rule
+
+  -> auto_sum_alias_top(t, limits)
+    spine = strip_app(t)
+    head = spine[0]
+    if limits[1] <= 0 || limits[2] <= 0 || t.tag != :app || type_of(t).fun? || head.tag != :const || head.name == "sum_below" || @k.defs[head.name] == nil || !auto_small_term?(t, [128])
+      return nil
+    limits[1] -= 1
+    th = nil
+    cur = t
+    steps = 0
+    while steps < 8
+      spine = strip_app(cur)
+      head = spine[0]
+      if head.tag != :const || @k.defs[head.name] == nil
+        break
+      step = Simp.new(@d, [make_rule(@d, @k.defs[head.name], head.name)]).rewrite_top(head, 0)
+      if step == nil
+        break
+      spine[1].each -> (arg) step = @d.ap_thm(step, arg)
+      step = @d.beta_norm_thm(step)
+      th = th == nil ? step : @k.trans(th, step)
+      cur = dest_binop(th.concl, "=")[1]
+      if !auto_small_term?(cur, [128])
+        return nil
+      if is_const?(strip_app(cur)[0], "sum_below")
+        limits[2] -= 1
+        return th
+      steps += 1
+    if th == nil
+      return nil
+    rule = auto_sum_fold_rule(type_of(t))
+    if rule == nil
+      return nil
+    folded = Simp.new(@d, [rule]).apply_rule(rule, cur, 0)
+    if folded == nil
+      return nil
+    limits[2] -= 1
+    @k.trans(th, folded)
+
+  -> auto_sum_alias_conv(t, limits)
+    if limits[0] <= 0 || limits[2] <= 0
+      return nil
+    limits[0] -= 1
+    th = nil
+    if t.tag == :app
+      a = auto_sum_alias_conv(t.a, limits)
+      b = auto_sum_alias_conv(t.b, limits)
+      if a != nil || b != nil
+        th = @k.mk_comb(a == nil ? @k.refl(t.a) : a, b == nil ? @k.refl(t.b) : b)
+    elsif t.tag == :lam
+      opened = dest_lam_fresh(t, [t])
+      body = auto_sum_alias_conv(opened[1], limits)
+      if body != nil
+        th = @k.abs_rule(opened[0], body)
+    cur = th == nil ? t : dest_binop(th.concl, "=")[1]
+    step = auto_sum_alias_top(cur, limits)
+    if step != nil
+      th = th == nil ? step : @k.trans(th, step)
+    th
+
+  # One final retry on checked sum notation. Scan at most512 nodes, try16
+  # defined heads and convert four sums, unfolding at most eight heads each.
+  -> auto_sum_alias_proof(goal, hints, budget)
+    if !@sum_aliases_allowed || budget[0] <= 0 || (!comparison?(goal.concl) && @k.dest_eq(goal.concl) == nil)
+      return nil
+    begin
+      limits = [512, 16, 4]
+      conversion = auto_sum_alias_conv(goal.concl, limits)
+      conclusion = conversion == nil ? goal.concl : dest_binop(conversion.concl, "=")[1]
+      # Supplied proofs may still depend on the original hypotheses.
+      hyps = goal.hyps + []
+      converted = []
+      goal.hyps.each -> (h)
+        step = auto_sum_alias_conv(h[1], limits)
+        if step != nil
+          name = "sum_alias" + converted.size.to_s
+          while hyps.any?(-> (old) old[0] == name)
+            name += "_"
+          hyps.push([name, dest_binop(step.concl, "=")[1]])
+          converted.push(@k.eq_mp(step, @k.assume(h[1])))
+      normalized_hints = hints.map -> (hint)
+        step = auto_sum_alias_conv(hint.concl, limits)
+        step == nil ? hint : @k.eq_mp(step, hint)
+      if conversion == nil && converted.size == 0 && limits[2] == 4
+        return nil
+      worker = Prover.new(@session)
+      worker.auto_defaults = @auto_defaults
+      worker.registered_search = @registered_search
+      worker.sum_aliases_allowed = false
+      ref = GoalRef.new(Goal.new(goal.fixes, hyps, conclusion), nil, 0)
+      worker.goals = [ref]
+      worker.tac_auto(ref, 3, normalized_hints, budget, [])
+      if ref.thm == nil || worker.goals.size != 0
+        return nil
+      result = worker.fit(ref, ref.thm)
+      if conversion != nil
+        result = @k.eq_mp(@k.sym(conversion), result)
+      converted.each -> (proof) result = @d.prove_hyp(proof, result)
+      result
+    rescue e
+      nil
+
+  # One checked bottom-up pass, without repeatedly simplifying a successor
+  # chain's expanded children. The same node budget covers premises and facts.
+  -> auto_recurrence_successors(t, rule, nodes)
+    nodes[0] -= 1
+    if nodes[0] < 0
+      fail("recurrence: successor conversion limit")
+    if t.tag == :lam
+      opened = dest_lam_fresh(t, [t])
+      return @k.abs_rule(opened[0], auto_recurrence_successors(opened[1], rule, nodes))
+    if t.tag != :app
+      return @k.refl(t)
+    result = @k.mk_comb(auto_recurrence_successors(t.a, rule, nodes), auto_recurrence_successors(t.b, rule, nodes))
+    value = dest_binop(result.concl, "=")[1]
+    if value.a.tag == :const && value.a.op == OP_SUCC
+      result = @k.trans(result, @k.spec(value.b, rule))
+    result
+
+  # Check a recurrence premise after opening its binders. Definitions and
+  # supplied equalities may expose a ring identity; every conversion is checked.
+  -> auto_recurrence_premise(goal, hints, induction = false, paired = false)
+    worker = Prover.new(@session)
+    root = GoalRef.new(goal, nil, 0)
+    worker.goals = [root]
+    ref = worker.tac_intro(root, [], true)
+    definitions = paired ? auto_relation_definitions(ref.goal.all_terms + (hints.map -> (hint) hint.concl)) : nil
+    conversion = paired ? auto_relation_normalize(ref.goal.concl, definitions) : @d.compute_conv(ref.goal.concl)
+    conclusion = dest_binop(conversion.concl, "=")[1]
+    if !auto_small_term?(conclusion, [paired ? 2048 : 512])
+      fail("recurrence: expanded premise limit")
+    successor = auto_loaded_rule("succ_eq_add_one.nat")
+    successor_nodes = [paired ? 8192 : 1024]
+    if successor != nil
+      normalized = auto_recurrence_successors(conclusion, successor, successor_nodes)
+      conversion = @k.trans(conversion, normalized)
+      conclusion = dest_binop(conversion.concl, "=")[1]
+    expansion = nil
+    if induction
+      names = ["nat", "int", "rat", "real"].map -> (suffix) "pow_succ." + suffix
+      equation = @k.dest_eq(ref.goal.concl)
+      if equation != nil
+        names.push("cast_succ." + type_of(equation[0]).name)
+      expansions = []
+      names.each -> (name)
+        rule = auto_loaded_rule(name)
+        if rule != nil
+          expansions.push(make_rule(@d, rule, name))
+      if expansions.size > 0
+        expansion = Simp.new(@d, expansions)
+        expansion.step_limit = 512
+        normalized = expansion.simp_conv_opt(conclusion, 0)
+        if normalized != nil
+          conversion = @k.trans(conversion, normalized)
+          conclusion = dest_binop(conversion.concl, "=")[1]
+    facts = (ref.goal.hyps.map -> (h) @k.assume(h[1])) + hints
+    rules = []
+    converted_facts = []
+    induction_rules = []
+    facts.each_with_index -> (fact, i)
+      if rules.size < 32 && auto_small_term?(fact.concl, [paired ? 512 : 128])
+        begin
+          converted = @k.eq_mp(paired ? auto_relation_normalize(fact.concl, definitions) : @d.compute_conv(fact.concl), fact)
+          if auto_small_term?(converted.concl, [paired ? 2048 : 512])
+            if successor != nil
+              converted = @k.eq_mp(auto_recurrence_successors(converted.concl, successor, successor_nodes), converted)
+            if expansion != nil
+              # Each already size-bounded fact gets its own normalization fuel.
+              fact_expansion = Simp.new(@d, expansions)
+              fact_expansion.step_limit = 512
+              normalized = fact_expansion.simp_conv_opt(converted.concl, 0)
+              if normalized != nil
+                converted = @k.eq_mp(normalized, converted)
+            parts = paired ? auto_relation_parts(converted, [8]) : [converted]
+            parts.each -> (part)
+              if rules.size < 32
+                rule = make_rule(@d, part, "recurrence premise")
+                rules.push(rule)
+                if i >= goal.hyps.size && i < ref.goal.hyps.size
+                  induction_rules.push(rule)
+            converted_facts.push(converted)
+        rescue e
+          0
+    # Use the newly introduced induction hypothesis before supplied rules can
+    # rewrite inside an unfolded recursive body and change its matching shape.
+    if induction_rules.size > 0
+      induction_simp = Simp.new(@d, induction_rules)
+      induction_simp.step_limit = 512
+      simplified = induction_simp.simp_conv_opt(conclusion, 0)
+      if simplified != nil
+        conversion = @k.trans(conversion, simplified)
+        conclusion = dest_binop(conversion.concl, "=")[1]
+    simplifier = Simp.new(@d, paired ? rules + definitions : rules)
+    simplifier.step_limit = 512
+    simplified = simplifier.simp_conv_opt(conclusion, 0)
+    if simplified != nil
+      conversion = @k.trans(conversion, simplified)
+      conclusion = dest_binop(conversion.concl, "=")[1]
+    # Checked rewrites may duplicate a bounded input; ring expansion stays capped.
+    equality = @k.dest_eq(conclusion)
+    proof = is_const?(conclusion, "⊤") ? @k.truth : nil
+    if paired
+      proof = auto_relation_result(conclusion, [4])
+    if equality != nil && auto_small_term?(conclusion, [1024])
+      begin
+        equality.each -> (side) recurrence_ring_cost(side, type_of(side).name, [128])
+        proof = tm_eq(equality[0], equality[1]) ? @k.refl(equality[0]) : @k.ring_eq(equality[0], equality[1])
+      rescue e
+        0
+    if proof == nil && induction && equality != nil && auto_small_term?(conclusion, [1024])
+      proof = auto_arithmetic_proof(ref.goal.with_concl(conclusion), converted_facts, [1])
+    if proof == nil
+      fail("recurrence: initial value or step is not established")
+    worker.goals = [ref]
+    worker.close(ref, worker.fit(ref, @k.eq_mp(@k.sym(conversion), proof)))
+    worker.fit(root, root.thm)
+
+  -> auto_recurrence_indices(term, kind = "nat")
+    terms = []
+    auto_collect_terms(term, terms)
+    indices = []
+    # Preserve numeric sequence candidates first. A list may also feed a
+    # structured result whose numeric observation appears in the outer formula.
+    passes = kind == "list" ? [true, false] : [true]
+    passes.each -> (numeric)
+      terms.each -> (term)
+        spine = strip_app(term)
+        head = spine[0]
+        args = spine[1]
+        if indices.size < 2 && args.size > 0 && numeric_type?(type_of(term)) == numeric && (head.tag == :var || (head.tag == :const && head.op == OP_NONE))
+          args.reverse.each -> (index)
+            if indices.size < 2 && index.tag == :var && type_of(index).tag == :c && type_of(index).name == kind && !indices.any?(-> (old) tm_eq(old, index))
+              indices.push(index)
+    indices
+
+  # Infer degree <=3 coefficients from the requested answer, then replay an
+  # existing induction lemma. At most two sequence indices per orientation;
+  # never recursively guess another polynomial while checking its premises.
+  -> auto_polynomial_recurrence(goal, hints, budget)
+    equality = @k.dest_eq(goal.concl)
+    if equality == nil || !numeric_type?(type_of(equality[0])) || !auto_small_term?(goal.concl, [256])
+      return nil
+    [false, true].each -> (reverse)
+      left = equality[reverse ? 1 : 0]
+      right = equality[reverse ? 0 : 1]
+      indices = auto_recurrence_indices(left)
+      indices.each -> (index)
+        if budget[0] > 0
+          begin
+            recognized = recurrence_coefficients(@k, right, index)
+            degree = recognized[0]
+            cs = recognized[1]
+            name = degree <= 1 ? "linear_eq" : (degree == 2 ? "quadratic" : "cubic")
+            counter = ty_eq(type_of(left), ty_nat) && tm_eq(right, index)
+            rule = auto_loaded_rule(counter ? "recurrence.count" : "recurrence." + name + "." + type_of(left).name)
+            if rule != nil
+              budget[0] -= 1
+              values = degree <= 1 ? [cs[0], cs[1]] : (degree == 2 ? [cs[2], cs[1], cs[0]] : [cs[3], cs[2], cs[1], cs[0]])
+              if counter
+                values = []
+              result = rule
+              ([mk_lam(index, left)] + values + [index]).each -> (value) result = @k.spec(value, result)
+              result = @d.beta_norm_thm(result)
+              while dest_binop(result.concl, "⇒") != nil
+                premise = dest_binop(result.concl, "⇒")[0]
+                result = @k.mp(result, auto_recurrence_premise(goal.with_concl(premise), hints))
+              sides = @k.dest_eq(result.concl)
+              sides.each -> (side) recurrence_ring_cost(side, type_of(side).name, [128])
+              if !tm_eq(sides[1], right)
+                result = @k.trans(result, @k.ring_eq(sides[1], right))
+              return reverse ? @k.sym(result) : result
+          rescue e
+            0
+    nil
+
+  # Recognize A*r^n+B from the requested answer. The shifted sequence must
+  # satisfy the loaded geometric rule; no rate, base or step is assumed.
+  # Natural goals require B=0, since subtraction there is truncated.
+  -> auto_geometric_equality(goal, hints, budget)
+    equality = @k.dest_eq(goal.concl)
+    if equality == nil || !numeric_type?(type_of(equality[0])) || !auto_small_term?(goal.concl, [256])
+      return nil
+    ty = type_of(equality[0])
+    rule = auto_loaded_rule("recurrence.geometric_eq." + ty.name)
+    if rule == nil
+      return nil
+    zero = mk_lit(ty.name == "nat" || ty.name == "int" ? 0 : Q_ZERO, ty)
+    [false, true].each -> (reverse)
+      left = equality[reverse ? 1 : 0]
+      right = equality[reverse ? 0 : 1]
+      indices = auto_recurrence_indices(left)
+      terms = []
+      auto_collect_terms(right, terms)
+      attempts = 0
+      terms.each -> (power)
+        parts = dest_binop(power, "^")
+        if parts != nil && parts[1].tag == :var && indices.any?(-> (index) tm_eq(index, parts[1])) && !tm_free_in?(parts[1], parts[0]) && attempts < 2 && budget[0] > 0
+          attempts += 1
+          budget[0] -= 1
+          begin
+            index = parts[1]
+            recognized = recurrence_atom_coefficients(@k, right, index, power)
+            if recognized[0] > 1
+              fail("recurrence: not affine in a single power")
+            constant = recognized[1][0]
+            coefficient = recognized[1][1]
+            shifted = !tm_eq(constant, zero)
+            if shifted && ty.name == "nat"
+              fail("recurrence: natural offset must be on the sequence side")
+            value = left
+            if shifted
+              value = mk_apps(@k.mk_const("-", ty_funs([ty, ty], ty)), [left, constant])
+            sequence = mk_lam(index, value)
+            result = @d.beta_norm_thm(@k.spec(index, @k.spec(parts[0], @k.spec(sequence, rule))))
+            premise = dest_binop(result.concl, "⇒")[0]
+            result = @k.mp(result, auto_recurrence_premise(goal.with_concl(premise), hints))
+            initial = @d.beta_norm_term(mk_app(sequence, mk_lit(0, ty_nat)))
+            base = auto_recurrence_premise(goal.with_concl(@k.eq_tm(initial, coefficient)), hints)
+            times = @k.mk_const("*", ty_funs([ty, ty], ty))
+            result = @k.trans(result, @k.mk_comb(@k.mk_comb(@k.refl(times), base), @k.refl(power)))
+            if shifted
+              plus = @k.mk_const("+", ty_funs([ty, ty], ty))
+              result = @k.mk_comb(@k.mk_comb(@k.refl(plus), result), @k.refl(constant))
+            sides = @k.dest_eq(result.concl)
+            sides.each -> (side) recurrence_ring_cost(side, ty.name, [128])
+            result = @k.trans(@k.ring_eq(left, sides[0]), @k.trans(result, @k.ring_eq(sides[1], right)))
+            return reverse ? @k.sym(result) : result
+          rescue e
+            0
+    nil
+
+  # One library induction for a small numeric closed form. Its step receives
+  # exactly the current-index equality, never the goal at the next index.
+  # The premise checker performs bounded algebra, with no recursive auto.
+  -> auto_recurrence_identity(goal, hints, budget, kind = "nat")
+    equality = @k.dest_eq(goal.concl)
+    if equality == nil || !numeric_type?(type_of(equality[0])) || !auto_small_term?(goal.concl, [256]) || budget[0] <= 0
+      return nil
+    rule = auto_loaded_rule(kind == "list" ? "list.recursive_identity" : "recurrence.identity")
+    if rule == nil
+      return nil
+    [false, true].each -> (reverse)
+      left = equality[reverse ? 1 : 0]
+      right = equality[reverse ? 0 : 1]
+      auto_recurrence_indices(left, kind).each -> (index)
+        if budget[0] > 0
+          begin
+            if !recurrence_formula?(@k, right, index, [64], [4, []])
+              fail("recurrence: unsupported closed form")
+            recurrence_ring_cost(right, type_of(right).name, [128])
+            budget[0] -= 1
+            sequence = mk_lam(index, left)
+            formula = mk_lam(index, right)
+            types = {}
+            ty_match(dest_unop(rule.concl, "∀").ty, type_of(sequence), types)
+            result = @k.inst_type(rule, types)
+            [sequence, formula, index].each -> (value) result = @k.spec(value, result)
+            result = @d.beta_norm_thm(result)
+            while dest_binop(result.concl, "⇒") != nil
+              premise = dest_binop(result.concl, "⇒")[0]
+              proof = nil
+              begin
+                proof = auto_recurrence_premise(goal.with_concl(premise), hints, true)
+              rescue e
+                if kind == "list"
+                  proof = auto_list_identity_premise(goal.with_concl(premise), hints, budget)
+                else
+                  fail("recurrence: unproved premise")
+              result = @k.mp(result, proof)
+            return reverse ? @k.sym(result) : result
+          rescue e
+            0
+    nil
+
+  # Try one universally quantified parameter, retaining it in the induction
+  # hypothesis so a recursive call may pass a different value. At most two
+  # argument variables per index; every generalized base and step is checked.
+  -> auto_recurrence_family(goal, hints, budget)
+    equality = @k.dest_eq(goal.concl)
+    if equality == nil || !numeric_type?(type_of(equality[0])) || !auto_small_term?(goal.concl, [256]) || budget[0] <= 0
+      return nil
+    rule = auto_loaded_rule("recurrence.family")
+    if rule == nil
+      return nil
+    [false, true].each -> (reverse)
+      left = equality[reverse ? 1 : 0]
+      right = equality[reverse ? 0 : 1]
+      auto_recurrence_indices(left).each -> (index)
+        terms = []
+        auto_collect_terms(left, terms)
+        parameters = []
+        terms.each -> (term)
+          spine = strip_app(term)
+          if numeric_type?(type_of(term)) && spine[1].any?(-> (arg) tm_eq(arg, index)) && (spine[0].tag == :var || (spine[0].tag == :const && spine[0].op == OP_NONE))
+            spine[1].reverse.each -> (arg)
+              if parameters.size < 2 && arg.tag == :var && !tm_eq(arg, index) && !parameters.any?(-> (old) tm_eq(old, arg))
+                parameters.push(arg)
+        parameters.each -> (parameter)
+          if budget[0] > 0
+            begin
+              if !recurrence_formula?(@k, right, index, [64], [4, []])
+                fail("recurrence: unsupported family formula")
+              recurrence_ring_cost(right, type_of(right).name, [128])
+              budget[0] -= 1
+              sequence = mk_lam(index, mk_lam(parameter, left))
+              formula = mk_lam(index, mk_lam(parameter, right))
+              types = {}
+              ty_match(dest_unop(rule.concl, "∀").ty, type_of(sequence), types)
+              result = @k.inst_type(rule, types)
+              [sequence, formula, index].each -> (value) result = @k.spec(value, result)
+              result = @d.beta_norm_thm(result)
+              while dest_binop(result.concl, "⇒") != nil
+                premise = dest_binop(result.concl, "⇒")[0]
+                result = @k.mp(result, auto_recurrence_premise(goal.with_concl(premise), hints, true))
+              result = @k.spec(parameter, result)
+              return reverse ? @k.sym(result) : result
+            rescue e
+              0
+    nil
+
+  -> auto_relation_heads(t, names, nodes)
+    nodes[0] -= 1
+    if nodes[0] < 0
+      fail("list relation: definition scan limit")
+    if t.tag == :const && @k.defs[t.name] != nil && !names.include?(t.name)
+      if names.size >= 32
+        fail("list relation: definition limit")
+      names.push(t.name)
+    if t.tag == :app
+      auto_relation_heads(t.a, names, nodes)
+      auto_relation_heads(t.b, names, nodes)
+    elsif t.tag == :lam
+      auto_relation_heads(t.b, names, nodes)
+    0
+
+  # Use checked constructor equations instead of expanding opaque recursive
+  # tails into recursors. Include only definitions reached from this premise.
+  -> auto_relation_definitions(terms)
+    names = []
+    nodes = [8192]
+    terms.each -> (term) auto_relation_heads(term, names, nodes)
+    rules = []
+    i = 0
+    while i < names.size
+      name = names[i]
+      equations = @session.eqns_of(name)
+      if equations.size == 0
+        projection = auto_loaded_rule(name + ".mk")
+        if projection != nil && projection.tags.size == 0
+          equations = [projection]
+      equations.each -> (equation)
+        if equation.hyps.size == 0 && equation.tags.size == 0
+          if rules.size >= 64
+            fail("list relation: defining equation limit")
+          rules.push(make_rule(@d, equation, name))
+          auto_relation_heads(equation.concl, names, nodes)
+      i += 1
+    rules
+
+  -> auto_relation_normalize(t, rules, facts = [])
+    simplifier = Simp.new(@d, rules)
+    simplifier.hyp_rules = facts
+    simplifier.step_limit = 1024
+    simplifier.simp_conv(t, 0)
+
+  # Project conjunctions through binders and guards without dropping either.
+  # Every resulting rewrite theorem retains the original hypotheses and tags.
+  -> auto_relation_parts(th, leaves, variables = [], guards = [])
+    quant = dest_unop(th.concl, "∀")
+    if quant != nil
+      opened = dest_lam_fresh(quant, [th.concl] + th.hyps)
+      return auto_relation_parts(@k.spec(opened[0], th), leaves, variables + [opened[0]], guards)
+    implication = dest_binop(th.concl, "⇒")
+    if implication != nil
+      return auto_relation_parts(@k.mp(th, @k.assume(implication[0])), leaves, variables, guards + [implication[0]])
+    conjunction = dest_binop(th.concl, "∧")
+    if conjunction != nil
+      return auto_relation_parts(@k.conj1(th), leaves, variables, guards) + auto_relation_parts(@k.conj2(th), leaves, variables, guards)
+    leaves[0] -= 1
+    if leaves[0] < 0
+      fail("list relation: fact projection limit")
+    result = th
+    guards.reverse.each -> (guard) result = @k.disch(guard, result)
+    variables.reverse.each -> (variable) result = @k.gen(variable, result)
+    [result]
+
+  -> auto_relation_result(t, leaves)
+    if is_const?(t, "⊤")
+      return @k.truth
+    conjunction = dest_binop(t, "∧")
+    if conjunction != nil
+      return @k.conj(auto_relation_result(conjunction[0], leaves), auto_relation_result(conjunction[1], leaves))
+    leaves[0] -= 1
+    equation = @k.dest_eq(t)
+    if leaves[0] < 0 || equation == nil || !auto_small_term?(t, [1024])
+      fail("list relation: equation limit")
+    if tm_eq(equation[0], equation[1])
+      return @k.refl(equation[0])
+    equation.each -> (side) recurrence_ring_cost(side, type_of(side).name, [128])
+    @k.ring_eq(equation[0], equation[1])
+
+  -> auto_relation_shape?(t, leaves)
+    conjunction = dest_binop(t, "∧")
+    if conjunction != nil
+      return auto_relation_shape?(conjunction[0], leaves) && auto_relation_shape?(conjunction[1], leaves)
+    leaves[0] -= 1
+    equation = @k.dest_eq(t)
+    leaves[0] >= 0 && equation != nil && type_of(equation[0]).name != "bool"
+
+  -> auto_relation_state_call?(t, index, state)
+    terms = []
+    auto_collect_terms(t, terms)
+    terms.any? -> (term)
+      args = strip_app(term)[1]
+      args.any?(-> (arg) tm_eq(arg, index)) && args.any?(-> (arg) tm_eq(arg, state))
+
+  # Prefer rewriting the stateful call to its formula, independently in each
+  # coordinate. The checked symmetry is reversed when rebuilding the result.
+  -> auto_relation_orient(th, index, state)
+    conjunction = dest_binop(th.concl, "∧")
+    if conjunction != nil
+      return @k.conj(auto_relation_orient(@k.conj1(th), index, state), auto_relation_orient(@k.conj2(th), index, state))
+    equation = @k.dest_eq(th.concl)
+    if !auto_relation_state_call?(equation[0], index, state) && auto_relation_state_call?(equation[1], index, state)
+      return @k.sym(th)
+    th
+
+  -> auto_relation_restore(th, target)
+    conjunction = dest_binop(target, "∧")
+    if conjunction != nil
+      return @k.conj(auto_relation_restore(@k.conj1(th), conjunction[0]), auto_relation_restore(@k.conj2(th), conjunction[1]))
+    tm_eq(th.concl, target) ? th : @k.sym(th)
+
+  # One list induction with one generalized state, keeping up to four
+  # coordinate equations together. At most two existing argument pairs are
+  # tried; the premise checker performs bounded rewriting and ring arithmetic.
+  -> auto_list_relation(goal, hints, budget)
+    if budget[0] <= 0 || goal.hyps.size > 12 || hints.size > 8 || !auto_small_term?(goal.concl, [256]) || !auto_relation_shape?(goal.concl, [4])
+      return nil
+    rule = auto_loaded_rule("list.recursive_relation")
+    if rule == nil
+      return nil
+    terms = []
+    auto_collect_terms(goal.concl, terms)
+    pairs = []
+    terms.each -> (term)
+      spine = strip_app(term)
+      if spine[0].tag == :var || (spine[0].tag == :const && spine[0].op == OP_NONE)
+        spine[1].each -> (index)
+          if index.tag == :var && index.ty.tag == :c && index.ty.name == "list"
+            spine[1].reverse.each -> (state)
+              if pairs.size < 2 && state.tag == :var && !state.ty.fun? && !tm_eq(state, index) && !pairs.any?(-> (pair) tm_eq(pair[0], index) && tm_eq(pair[1], state))
+                pairs.push([index, state])
+    pairs.each -> (pair)
+      if budget[0] > 0
+        budget[0] -= 1
+        begin
+          conclusion = auto_relation_orient(@k.assume(goal.concl), pair[0], pair[1]).concl
+          predicate = mk_lam(pair[0], mk_lam(pair[1], conclusion))
+          types = {}
+          ty_match(dest_unop(rule.concl, "∀").ty, type_of(predicate), types)
+          result = @k.inst_type(rule, types)
+          [predicate, pair[0]].each -> (value) result = @k.spec(value, result)
+          result = @d.beta_norm_thm(result)
+          while dest_binop(result.concl, "⇒") != nil
+            premise = dest_binop(result.concl, "⇒")[0]
+            result = @k.mp(result, auto_recurrence_premise(goal.with_concl(premise), hints, true, true))
+          return fit_concl(auto_relation_restore(@k.spec(pair[1], result), goal.concl), goal.concl)
+        rescue e
+          0
+    nil
+
+  # Reverse the complete loaded fold definition. Matching its entire recursion
+  # body checks the direction, initial state and step, not just the head name.
+  -> auto_fold_rule(name, list_ty, state_ty)
+    key = name + ":" + ty_show(list_ty) + ":" + ty_show(state_ty)
+    if @fold_alias_rules[key] != nil
+      return @fold_alias_rules[key]
+    definition = @k.defs[name]
+    if definition == nil
+      return nil
+    step = mk_var("fold_step", ty_funs([list_ty.args[0], state_ty], state_ty))
+    xs = mk_var("fold_list", list_ty)
+    state = mk_var("fold_state", state_ty)
+    head = @k.mk_const(name, ty_funs([type_of(step), list_ty, state_ty], state_ty))
+    unfolded = Simp.new(@d, [make_rule(@d, definition, name)]).rewrite_top(head, 0)
+    if unfolded == nil
+      return nil
+    [step, xs, state].each -> (value) unfolded = @d.ap_thm(unfolded, value)
+    equation = @k.sym(@d.beta_norm_thm(unfolded))
+    [state, xs, step].each -> (value) equation = @k.gen(value, equation)
+    rule = make_rule(@d, equation, name + ".fold")
+    @fold_alias_rules[key] = rule
+    rule
+
+  -> auto_fold_call(t, list_ty)
+    names = ["list.foldl", "list.foldr"]
+    if names.include?(strip_app(t)[0].name)
+      return @k.refl(t)
+    cur = t
+    result = nil
+    steps = 0
+    while steps < 8
+      spine = strip_app(cur)
+      head = spine[0]
+      if head.tag != :const || @k.defs[head.name] == nil
+        break
+      conv = Simp.new(@d, [make_rule(@d, @k.defs[head.name], head.name)]).rewrite_top(head, 0)
+      if conv == nil
+        break
+      spine[1].each -> (arg) conv = @d.ap_thm(conv, arg)
+      conv = @d.beta_norm_thm(conv)
+      result = result == nil ? conv : @k.trans(result, conv)
+      cur = dest_binop(result.concl, "=")[1]
+      if !auto_small_term?(cur, [256])
+        return nil
+      if names.include?(strip_app(cur)[0].name)
+        return result
+      steps += 1
+    if result == nil
+      return nil
+    names.each -> (name)
+      rule = auto_fold_rule(name, list_ty, type_of(t))
+      if rule != nil
+        folded = Simp.new(@d, [rule]).apply_rule(rule, cur, 0)
+        if folded != nil
+          return @k.trans(result, folded)
+    nil
+
+  # Abstract only the selected, locally closed traversal call. Keeping the
+  # whole conclusion preserves mutually dependent components of an invariant.
+  -> auto_fold_body(t, call, state)
+    if tm_eq(t, call)
+      return state
+    if t.tag == :app
+      return mk_app(auto_fold_body(t.a, call, state), auto_fold_body(t.b, call, state))
+    if t.tag == :lam
+      return mk_lam_raw(t.name, t.ty, auto_fold_body(t.b, call, state))
+    t
+
+  # One loaded invariant theorem, with its base and preservation premises
+  # proved independently. At most two calls from a 256-node conclusion, eight
+  # alias unfoldings each, sharing auto's fuel. Premises cannot start induction.
+  -> auto_fold_invariant(goal, hints, budget)
+    if budget[0] <= 0 || goal.hyps.size > 12 || hints.size > 8 || !auto_small_term?(goal.concl, [256])
+      return nil
+    terms = []
+    auto_collect_terms(goal.concl, terms)
+    attempts = 0
+    terms.each -> (call)
+      spine = strip_app(call)
+      if attempts < 2 && budget[0] > 0 && call.tag == :app && !type_of(call).fun? && spine[0].tag == :const && @k.defs[spine[0].name] != nil && spine[1].size >= 2
+        args = spine[1]
+        initial = args[args.size - 1]
+        index = -1
+        args.each_with_index -> (arg, i)
+          if i < args.size - 1 && type_of(arg).tag == :c && type_of(arg).name == "list"
+            index = i
+        if index >= 0 && ty_eq(type_of(initial), type_of(call))
+          attempts += 1
+          budget[0] -= 1
+          begin
+            state = mk_var(fresh_name("fold_state", goal.all_terms), type_of(call))
+            xs = mk_var(fresh_name("fold_list", goal.all_terms + [state]), type_of(args[index]))
+            predicate = mk_lam(state, auto_fold_body(goal.concl, call, state))
+            conversion = auto_fold_call(call, type_of(args[index]))
+            if conversion != nil
+              folded = strip_app(dest_binop(conversion.concl, "=")[1])
+              rule = auto_loaded_rule(folded[0].name + "_invariant_on")
+              if rule == nil || folded[1].size != 3
+                fail("fold: invariant rule not loaded")
+              types = {}
+              ty_match(dest_unop(rule.concl, "∀").ty, type_of(folded[1][0]), types)
+              result = @k.inst_type(rule, types)
+              [folded[1][0], predicate, folded[1][1]].each -> (value) result = @k.spec(value, result)
+              initial = folded[1][2]
+            else
+              rule = auto_loaded_rule("list.recursive_invariant")
+              if rule == nil
+                fail("fold: recursive invariant rule not loaded")
+              generalized = args + []
+              generalized[index] = xs
+              generalized[args.size - 1] = state
+              sequence = mk_lam(xs, mk_lam(state, mk_apps(spine[0], generalized)))
+              types = {}
+              ty_match(dest_unop(rule.concl, "∀").ty, type_of(sequence), types)
+              result = @k.inst_type(rule, types)
+              [sequence, predicate, args[index]].each -> (value) result = @k.spec(value, result)
+            result = @d.beta_norm_thm(result)
+            while dest_binop(result.concl, "⇒") != nil || dest_unop(result.concl, "∀") != nil
+              if dest_unop(result.concl, "∀") != nil
+                result = @d.beta_norm_thm(@k.spec(initial, result))
+              else
+                premise = dest_binop(result.concl, "⇒")[0]
+                worker = Prover.new(@session)
+                ref = GoalRef.new(goal.with_concl(premise), nil, 0)
+                worker.goals = [ref]
+                opened = worker.tac_intro(ref, [], true)
+                proof = worker.auto_list_bound_premise(opened.goal, hints, budget)
+                worker.close(opened, proof)
+                result = @k.mp(result, worker.fit(ref, ref.thm))
+            if conversion != nil
+              conversion = replace_conv(goal.concl, call, conversion)
+              result = fit_concl(result, dest_binop(conversion.concl, "=")[1])
+              result = @k.eq_mp(@k.sym(conversion), result)
+            return fit_concl(result, goal.concl)
+          rescue e
+            0
+    nil
+
+  # Normalize one list-induction branch, then use bounded non-inductive auto.
+  # Conversion proofs retain the original hypotheses; nested induction is disabled.
+  -> auto_list_bound_premise(goal, hints, budget)
+    conversion = @d.compute_conv(goal.concl)
+    conclusion = dest_binop(conversion.concl, "=")[1]
+    successor = auto_loaded_rule("succ_eq_add_one.nat")
+    successor_nodes = [8192]
+    if successor != nil
+      conversion = @k.trans(conversion, auto_recurrence_successors(conclusion, successor, successor_nodes))
+      conclusion = dest_binop(conversion.concl, "=")[1]
+    nodes = [4096]
+    if !auto_small_term?(conclusion, [1024])
+      fail("list bound: expanded conclusion limit")
+    hyps = []
+    conversions = []
+    member_rule = auto_loaded_rule("list.forall_cons")
+    goal.hyps.each -> (h)
+      proof = @k.assume(h[1])
+      if member_rule != nil
+        simplifier = Simp.new(@d, [make_rule(@d, member_rule, "list.forall_cons")])
+        simplifier.step_limit = 512
+        step = simplifier.simp_conv_opt(proof.concl, 0)
+        if step != nil
+          proof = @k.eq_mp(step, proof)
+      proof = @k.eq_mp(@d.compute_conv(proof.concl), proof)
+      if successor != nil
+        proof = @k.eq_mp(auto_recurrence_successors(proof.concl, successor, successor_nodes), proof)
+      if !auto_small_term?(proof.concl, nodes)
+        fail("list bound: hypothesis limit")
+      hyps.push([h[0], proof.concl])
+      conversions.push(proof)
+    normalized_hints = hints.map -> (hint)
+      proof = @k.eq_mp(@d.compute_conv(hint.concl), hint)
+      if successor != nil
+        proof = @k.eq_mp(auto_recurrence_successors(proof.concl, successor, successor_nodes), proof)
+      if !auto_small_term?(proof.concl, nodes)
+        fail("list bound: hint limit")
+      proof
+    result = auto_list_bound_branch(Goal.new(goal.fixes, hyps, conclusion), normalized_hints, budget, [2])
+    conversions.each -> (proof) result = @d.prove_hyp(proof, result)
+    @k.eq_mp(@k.sym(conversion), result)
+
+  # Split at most two exposed conditional summands, never inside a binder.
+  -> auto_list_bound_branch(goal, hints, budget, splits)
+    terms = []
+    auto_collect_terms(goal.concl, terms)
+    if splits[0] > 0 && budget[0] > 0
+      terms.each -> (term)
+        spine = strip_app(term)
+        if spine[0].op == OP_ITE && spine[1].size == 3 && numeric_type?(type_of(term))
+          condition = spine[1][0]
+          known = goal.hyps.any? -> (h) tm_eq(h[1], condition) || tm_eq(h[1], @k.neg_tm(condition))
+          if !known
+            splits[0] -= 1
+            budget[0] -= 1
+            name = "list_condition"
+            while goal.hyps.any?(-> (h) h[0] == name)
+              name += "_"
+            yes = auto_list_bound_branch(goal.add_hyp(name, condition), hints, budget, splits)
+            no = auto_list_bound_branch(goal.add_hyp(name, @k.neg_tm(condition)), hints, budget, splits)
+            return @k.disj_cases(@k.excluded_middle(condition), yes, no)
+    worker = Prover.new(@session)
+    worker.auto_defaults = @auto_defaults
+    worker.registered_search = @registered_search
+    ref = GoalRef.new(goal, nil, 0)
+    worker.goals = [ref]
+    simplified = [ref]
+    begin
+      simplified = worker.tac_simp(ref, [], true)
+    rescue e
+      0
+    if ref.thm == nil && simplified.size > 0
+      worker.tac_auto(simplified[0], 3, hints, budget, [goal.concl])
+    if ref.thm == nil || worker.goals.size != 0
+      fail("list bound: open branch")
+    worker.fit(ref, ref.thm)
+
+  # One list induction for a small numeric bound. Hypotheses mentioning the
+  # list are reverted by the existing induction tactic and checked in each case.
+  -> auto_list_bound(goal, hints, budget)
+    comparison = dest_cmp_rel(goal.concl)
+    if comparison == nil || !["≤", "<"].include?(comparison[0]) || !numeric_type?(type_of(comparison[1])) || !auto_small_term?(goal.concl, [256]) || goal.hyps.size > 12 || hints.size > 8 || budget[0] <= 0
+      return nil
+    indices = auto_recurrence_indices(comparison[1], "list")
+    auto_recurrence_indices(comparison[2], "list").each -> (index)
+      if indices.size < 2 && !indices.any?(-> (old) tm_eq(old, index))
+        indices.push(index)
+    indices.each -> (index)
+      if budget[0] > 0
+        begin
+          if !recurrence_formula?(@k, comparison[1], index, [64], [4, []]) || !recurrence_formula?(@k, comparison[2], index, [64], [4, []])
+            fail("list bound: unsupported formula")
+          name = nil
+          goal.fixes.each -> (fix)
+            if tm_eq(fix[1], index)
+              name = fix[0]
+          if name == nil
+            fail("list bound: missing binder")
+          budget[0] -= 1
+          worker = Prover.new(@session)
+          root = GoalRef.new(goal, nil, 0)
+          worker.goals = [root]
+          worker.tac_induction_impl(root, [Tok.new(:id, name, 0, 0)], [], true)
+          branches = worker.goals + []
+          if branches.size != 2
+            fail("list bound: unexpected constructors")
+          branches.each -> (branch)
+            proof = auto_list_bound_premise(branch.goal, hints, budget)
+            worker.close(branch, worker.fit(branch, proof))
+          return worker.fit(root, root.thm)
+        rescue e
+          0
+    nil
+
+  -> auto_small_term?(term, nodes)
+    nodes[0] -= 1
+    if nodes[0] < 0
+      return false
+    if term.tag == :app
+      return auto_small_term?(term.a, nodes) && auto_small_term?(term.b, nodes)
+    if term.tag == :lam
+      return auto_small_term?(term.b, nodes)
+    true
+
+  # Distribute small summands using proved algebra and sum rules. This final
+  # fallback is confined to existing finite sums: four conversions, 128 input
+  # nodes each, quadratic summands, 512 simp steps and eight guard checks.
+  -> auto_sum_arithmetic(goal, hints)
+    if !comparison?(goal.concl)
+      return nil
+    terms = []
+    auto_collect_terms(goal.concl, terms)
+    goal.hyps.each -> (h) auto_collect_terms(h[1], terms)
+    facts = (goal.hyps.map -> (h) @k.assume(h[1])) + hints
+    comparisons = []
+    facts.each -> (th) normalize_comparisons(th, comparisons)
+    inferred = []
+    attempts = 4
+    guards = [8]
+    rules_by_type = {}
+    terms.each -> (term)
+      spine = strip_app(term)
+      if attempts > 0 && is_const?(spine[0], "sum_below") && spine[1].size == 2 && numeric_type?(type_of(term)) && spine[1][1].tag == :lam && auto_small_term?(term, [128])
+        nodes = [64]
+        degree = auto_quadratic_degree(spine[1][1].b, nodes)
+        if degree >= 0 && degree <= 2 && nodes[0] >= 0
+          attempts -= 1
+          suffix = type_of(term).name
+          rules = rules_by_type[suffix]
+          if rules == nil
+            rules = []
+            ["left_distrib", "right_distrib", "mul_sub", "sum_add", "sum_sub", "sum_const_mul", "sum_mul_const", "sum_below.single", "sum_below.single_out", "sum_below.zero"].each -> (prefix)
+              name = prefix + "." + suffix
+              th = auto_loaded_rule(name)
+              if th != nil
+                rules.push(make_rule(@d, th, name))
+            rules_by_type[suffix] = rules
+          simplifier = Simp.new(@d, rules)
+          simplifier.step_limit = 512
+          simplifier.hyp_rules = facts
+          prover = self
+          simplifier.discharger = -> (condition)
+            if guards[0] > 0
+              guards[0] -= 1
+              begin
+                worker = Prover.new(prover.session)
+                worker.linarith_proof(Goal.new(goal.fixes, [], condition), comparisons)
+              rescue e
+                nil
+            else
+              nil
+          begin
+            th = simplifier.simp_conv_opt(term, 0)
+            if th != nil
+              auto_add_fact(inferred, th)
+          rescue e
+            0
+    if inferred.size == 0
+      return nil
+    auto_arithmetic_proof(goal, facts + inferred, [1])
+
+  # Local quantified bounds may need arithmetic to discharge their guards.
+  # Match them backwards, using the same checked, bounded rule search.
+  -> auto_local_hints(goal)
+    shape = auto_rule_shape(goal.concl)
+    if shape == nil
+      return []
+    out = []
+    spine = auto_rule_spine(goal.concl)
+    lefts = auto_operand_heads(spine[1][0])
+    rights = auto_operand_heads(spine[1][1])
+    goal.hyps.each -> (h)
+      if dest_unop(h[1], "∀") != nil || dest_binop(h[1], "⇒") != nil
+        pattern = auto_rule_shape(h[1])
+        if pattern != nil && pattern[0] == shape[0] && (pattern[1] == "*" || lefts.include?(pattern[1])) && (pattern[2] == "*" || rights.include?(pattern[2]))
+          out.push(@k.assume(h[1]))
+    out
+
+  # Small quadratic side conditions may need products of signs or squares.
+  # Opaque applications remain atoms; large powers never reach normalization.
+  -> auto_quadratic_degree(t, budget, atoms = nil)
+    budget[0] -= 1
+    if budget[0] < 0
+      return -1
+    if t.tag == :lit
+      return 0
+    if t.tag == :app && t.a.tag == :const && t.a.op == OP_NEG
+      return auto_quadratic_degree(t.b, budget, atoms)
+    spine = strip_app(t)
+    if spine[0].tag != :const || spine[1].size != 2
+      if atoms != nil && !atoms.any?(-> (old) tm_eq(old, t))
+        atoms.push(t)
+      return 1
+    name = spine[0].name
+    args = spine[1]
+    if name == "^"
+      # The arithmetic checker treats a variable exponent as one atom too.
+      # Constant high powers stay excluded: their expansion can be enormous.
+      if args[1].tag != :lit
+        if atoms != nil && !atoms.any?(-> (old) tm_eq(old, t))
+          atoms.push(t)
+        return 1
+      if args[1].val < 0 || args[1].val > 2
+        return -1
+      degree = auto_quadratic_degree(args[0], budget, atoms)
+      return degree < 0 ? -1 : degree * args[1].val
+    if name == "/" && args[1].tag == :lit
+      return auto_quadratic_degree(args[0], budget, atoms)
+    if !["+", "-", "*"].include?(name)
+      if atoms != nil && !atoms.any?(-> (old) tm_eq(old, t))
+        atoms.push(t)
+      return 1
+    left = auto_quadratic_degree(args[0], budget, atoms)
+    right = auto_quadratic_degree(args[1], budget, atoms)
+    if left < 0 || right < 0
+      return -1
+    name == "*" ? left + right : (left > right ? left : right)
+
+  # Keep the connected arithmetic component of the goal. Quantified hints
+  # may also specialize at incidental terms such as partially applied powers.
+  # Conjunctive facts can repeat a comparison; count each conclusion once.
+  -> auto_relevant_comparisons(goal, comparisons, additional = [])
+    atoms = []
+    scan = [64]
+    ([goal.concl] + additional).each -> (term)
+      cmp = dest_cmp_rel(term)
+      auto_quadratic_degree(cmp[1], scan, atoms)
+      auto_quadratic_degree(cmp[2], scan, atoms)
+    candidates = []
+    comparisons.each -> (th)
+      sides = dest_cmp_rel(th.concl)
+      found = []
+      scan = [64]
+      left = auto_quadratic_degree(sides[1], scan, found)
+      right = auto_quadratic_degree(sides[2], scan, found)
+      if scan[0] >= 0 && left >= 0 && left <= 2 && right >= 0 && right <= 2 && !candidates.any?(-> (entry) tm_eq(entry[0].concl, th.concl))
+        candidates.push([th, found])
+    out = []
+    changed = true
+    while changed && out.size <= 8
+      changed = false
+      candidates.each -> (entry)
+        if !out.include?(entry[0]) && entry[1].any?(-> (atom) atoms.any?(-> (old) tm_eq(old, atom)))
+          out.push(entry[0])
+          entry[1].each -> (atom)
+            if !atoms.any?(-> (old) tm_eq(old, atom))
+              atoms.push(atom)
+          changed = true
+    out
+
+  # Repeated compound values can form a quadratic problem even when their
+  # expanded expressions have higher degree. Prove the stronger statement for
+  # fresh variables, then instantiate them and restore the original premises.
+  -> auto_compound_occurrences(t, candidate, nodes)
+    nodes[0] -= 1
+    if nodes[0] < 0
+      fail("compound arithmetic: scan limit")
+    if tm_eq(t, candidate)
+      return 1
+    square = dest_binop(t, "^")
+    if square != nil && square[1].tag == :lit && square[1].val == 2
+      return 2 * auto_compound_occurrences(square[0], candidate, nodes)
+    if t.tag == :app
+      return auto_compound_occurrences(t.a, candidate, nodes) + auto_compound_occurrences(t.b, candidate, nodes)
+    if t.tag == :lam
+      return auto_compound_occurrences(t.b, candidate, nodes)
+    0
+
+  -> auto_compound_arithmetic(goal, budget, facts)
+    if budget.size < 2 || budget[1] <= 0 || !comparison?(goal.concl)
+      return nil
+    begin
+      raw = []
+      supplied = facts == nil ? (goal.hyps.map -> (h) @k.assume(h[1])) : facts
+      supplied.each -> (th) normalize_comparisons(th, raw)
+      ty = type_of(dest_cmp_rel(goal.concl)[1])
+      raw = raw.select -> (th) ty_eq(type_of(dest_cmp_rel(th.concl)[1]), ty)
+      if raw.size > 16
+        return nil
+      expressions = [goal.concl] + (raw.map -> (th) th.concl)
+      nodes = [512]
+      if !expressions.all?(-> (t) auto_small_term?(t, nodes))
+        return nil
+      terms = []
+      expressions.each -> (t) auto_collect_terms(t, terms)
+      candidates = []
+      scans = [4096]
+      terms.each -> (term)
+        if candidates.size < 4 && term.tag == :app && ty_eq(type_of(term), ty)
+          degree = auto_quadratic_degree(term, [32])
+          if degree >= 2 && degree <= 4
+            count = 0
+            expressions.each -> (t)
+              if count < 2
+                count += auto_compound_occurrences(t, term, scans)
+            if count >= 2
+              candidates.push(term)
+      if candidates.size == 0
+        return nil
+      names = {}
+      (goal.all_terms + expressions).each -> (t) tm_free_names_into(t, names)
+      raw.each -> (th) th.hyps.each -> (h) tm_free_names_into(h, names)
+      replacements = []
+      abstracted = expressions
+      candidates.each -> (term)
+        variable = mk_var(fresh_name_from_set("compound", names), ty)
+        replacements.push([variable, term])
+        abstracted = abstracted.map -> (t) auto_fold_body(t, term, variable)
+      assumptions = []
+      i = 1
+      while i < abstracted.size
+        assumptions.push(@k.assume(abstracted[i]))
+        i += 1
+      probe = goal.with_concl(abstracted[0])
+      selected = auto_relevant_comparisons(probe, assumptions)
+      if selected.size > 8
+        return nil
+      nodes = [64]
+      ([probe.concl] + (selected.map -> (th) th.concl)).each -> (t)
+        cmp = dest_cmp_rel(t)
+        [cmp[1], cmp[2]].each -> (side)
+          degree = auto_quadratic_degree(side, nodes)
+          if degree < 0 || degree > 2
+            fail("compound arithmetic: not quadratic")
+      if nodes[0] < 0
+        return nil
+      budget[1] -= 1
+      worker = Prover.new(@session)
+      proof = @k.inst(worker.quadratic_premise_proof(probe, selected), replacements)
+      raw.each -> (th) proof = @d.prove_hyp(th, proof)
+      proof
+    rescue e
+      nil
+
+  -> auto_nonlinear_premise(goal, budget, facts = nil)
+    proof = auto_nonlinear_direct(goal, budget, facts)
+    if proof == nil
+      proof = auto_compound_arithmetic(goal, budget, facts)
+    # Keep existing attempts first; use nonzero premises only if they fail.
+    proof == nil ? auto_nonlinear_direct(goal, budget, facts, true) : proof
+
+  # Higher-degree terms can cancel against supplied bounds, leaving a sum of
+  # squares. Suggest only small square instances, then check a linear
+  # certificate; never multiply the higher-degree comparisons together.
+  -> auto_square_arithmetic(goal, budget, facts = nil)
+    if budget[0] <= 0 || !comparison?(goal.concl)
+      return nil
+    ty = type_of(dest_cmp_rel(goal.concl)[1])
+    if !["int", "rat", "real"].include?(ty.name)
+      return nil
+    rule = auto_loaded_rule("sq_nonneg." + ty.name)
+    if rule == nil
+      return nil
+    begin
+      comparisons = []
+      raw = facts == nil ? (goal.hyps.map -> (h) @k.assume(h[1])) : facts
+      raw.each -> (th)
+        parts = []
+        normalize_comparisons(th, parts)
+        parts.each -> (part)
+          if ty_eq(type_of(dest_cmp_rel(part.concl)[1]), ty)
+            auto_add_fact(comparisons, part)
+      if comparisons.size > 8
+        return nil
+      nodes = [256]
+      cost = 0
+      expressions = [goal.concl] + (comparisons.map -> (th) th.concl)
+      if !expressions.all?(-> (term) auto_small_term?(term, nodes))
+        return nil
+      nodes = [128]
+      expressions.each -> (term)
+        cmp = dest_cmp_rel(term)
+        cost += recurrence_ring_cost(cmp[1], ty.name, nodes) + recurrence_ring_cost(cmp[2], ty.name, nodes)
+      if cost > 64
+        return nil
+      bases = []
+      # The goal is inspected only to suggest bases; this assumed theorem is
+      # never passed to the arithmetic proof. Each square comes from the lemma.
+      nl_cross_square_bases(comparisons + [@k.assume(goal.concl)], ty, bases, {})
+      if bases.size == 0
+        return nil
+      squares = bases.map -> (base) @k.spec(base, rule)
+      budget[0] -= 1
+      worker = Prover.new(@session)
+      worker.linarith_proof(Goal.new(goal.fixes, [], goal.concl), comparisons + squares)
+    rescue e
+      nil
+
+  -> auto_nonlinear_direct(goal, budget, facts = nil, split_nonzero = false)
+    if budget.size < 2 || budget[1] <= 0 || !comparison?(goal.concl)
+      return nil
+    comparisons = []
+    raw = facts == nil ? (goal.hyps.map -> (h) @k.assume(h[1])) : facts
+    raw.each -> (th) normalize_comparisons(th, comparisons)
+    ty = type_of(dest_cmp_rel(goal.concl)[1])
+    disequalities = []
+    if split_nonzero
+      raw.each -> (th)
+        negative = dest_unop(th.concl, "¬")
+        equation = negative == nil ? nil : dest_binop(negative, "=")
+        if equation != nil && ty_eq(type_of(equation[0]), ty)
+          auto_add_fact(disequalities, th)
+      if disequalities.size == 0 || disequalities.size > 2
+        return nil
+    if facts != nil
+      comparisons = comparisons.select -> (th) ty_eq(type_of(dest_cmp_rel(th.concl)[1]), ty)
+      # Nonzero premises can expose a contradictory component even when the
+      # requested conclusion mentions different variables. Seed its atoms too.
+      seeds = disequalities.map -> (th) dest_unop(th.concl, "¬")
+      comparisons = auto_relevant_comparisons(goal, comparisons, seeds)
+    if comparisons.size + disequalities.size > 8 || disequalities.size > 2
+      return nil
+    nodes = [64]
+    nonlinear = false
+    ([goal.concl] + (comparisons.map -> (th) th.concl) + (disequalities.map -> (th) dest_unop(th.concl, "¬"))).each -> (term)
+      cmp = dest_cmp_rel(term)
+      [cmp[1], cmp[2]].each -> (side)
+        degree = auto_quadratic_degree(side, nodes)
+        if degree < 0 || degree > 2
+          nodes[0] = -1
+        if degree == 2
+          nonlinear = true
+    if nodes[0] < 0 || !nonlinear
+      return nil
+    budget[1] -= 1
+    begin
+      # Fresh arithmetic state; only checked comparison proofs enter the solver.
+      worker = Prover.new(@session)
+      return worker.quadratic_premise_proof(goal, comparisons, disequalities)
+    rescue e
+      0
+    if budget[1] <= 0
+      return nil
+    enriched = auto_equality_products(goal, comparisons, nodes)
+    if enriched.size == comparisons.size
+      return nil
+    budget[1] -= 1
+    begin
+      worker = Prover.new(@session)
+      worker.quadratic_premise_proof(goal, enriched, disequalities)
+    rescue e
+      nil
+
+  # Multiplying an affine equality by a goal factor is ordinary congruence,
+  # with no sign assumption. Keep the first arithmetic attempt unchanged;
+  # this bounded retry supplies at most four degree-two equality consequences.
+  -> auto_equality_products(goal, comparisons, nodes)
+    ty = type_of(dest_cmp_rel(goal.concl)[1])
+    terms = []
+    auto_collect_terms(goal.concl, terms)
+    factors = []
+    terms.each -> (term)
+      product = dest_binop(term, "*")
+      if product != nil
+        product.each -> (factor)
+          if factor.tag != :lit && ty_eq(type_of(factor), ty) && !factors.any?(-> (old) tm_eq(old, factor))
+            degree = auto_quadratic_degree(factor, [16])
+            if degree == 1
+              factors.push(factor)
+    equalities = []
+    comparisons.each -> (known)
+      eq = @k.dest_eq(known.concl)
+      if eq != nil && ty_eq(type_of(eq[0]), ty)
+        degree_left = auto_quadratic_degree(eq[0], [32])
+        degree_right = auto_quadratic_degree(eq[1], [32])
+        if degree_left >= 0 && degree_left <= 1 && degree_right >= 0 && degree_right <= 1
+          equalities.push(known)
+    out = comparisons + []
+    mul = @k.mk_const("*", ty_funs([ty, ty], ty))
+    factors.each -> (factor)
+      equalities.each -> (known)
+        if out.size < comparisons.size + 4 && nodes[0] > 0
+          eq = @k.dest_eq(known.concl)
+          multiplier = mk_app(mul, factor)
+          left = mk_app(multiplier, eq[0])
+          right = mk_app(multiplier, eq[1])
+          left_degree = auto_quadratic_degree(left, nodes)
+          right_degree = auto_quadratic_degree(right, nodes)
+          if nodes[0] >= 0 && left_degree <= 2 && right_degree <= 2
+            auto_add_fact(out, @k.mk_comb(@k.refl(multiplier), known))
+    out
+
+  # Squared bounds often hide an order fact needed by a later product bound.
+  # Derive at most two such facts, then replace their squared constraints in
+  # the final search. Their checked proofs retain every original dependency.
+  -> auto_square_bound_chain(goal, hints, budget)
+    if !comparison?(goal.concl) || budget[1] < 2
+      return nil
+    ty = type_of(dest_cmp_rel(goal.concl)[1])
+    raw = []
+    goal.hyps.each -> (h) normalize_comparisons(@k.assume(h[1]), raw)
+    hints.each -> (hint) normalize_comparisons(hint, raw)
+    facts = []
+    raw.each -> (th)
+      if ty_eq(type_of(dest_cmp_rel(th.concl)[1]), ty)
+        auto_add_fact(facts, th)
+    if facts.size > 8
+      return nil
+    nodes = [64]
+    ([goal.concl] + facts.map -> (th) th.concl).each -> (term)
+      cmp = dest_cmp_rel(term)
+      [cmp[1], cmp[2]].each -> (side)
+        degree = auto_quadratic_degree(side, nodes)
+        if degree < 0 || degree > 2
+          nodes[0] = -1
+    if nodes[0] < 0
+      return nil
+    bases = []
+    seen = {}
+    facts.each -> (th) nl_square_bases(th.concl, ty, bases, seen)
+    if bases.size < 2 || bases.size > 4
+      return nil
+    if budget.size < 3
+      budget.push(16)
+    inferred = []
+    eliminated = []
+    power = @k.mk_const("^", ty_funs([ty, TY_NAT_SINGLETON], ty))
+    bases.each -> (left)
+      bases.each -> (right)
+        if !tm_eq(left, right) && budget[1] > 1 && budget[2] > 0 && inferred.size < 2
+          relations = dest_cmp_rel(goal.concl)[0] == "<" ? ["<", "≤"] : ["≤"]
+          bound = nil
+          relations.each -> (relation)
+            if bound == nil && budget[1] > 1 && budget[2] > 0
+              rel = @k.mk_const(relation, ty_funs([ty, ty], TY_BOOL_SINGLETON))
+              square_left = mk_apps(power, [left, mk_lit(2, TY_NAT_SINGLETON)])
+              square_right = mk_apps(power, [right, mk_lit(2, TY_NAT_SINGLETON)])
+              squared = mk_apps(rel, [square_left, square_right])
+              budget[2] -= 1
+              ordered_squares = auto_arithmetic_proof(goal.with_concl(squared), facts, [1])
+              if ordered_squares != nil
+                conclusion = mk_apps(rel, [left, right])
+                if !facts.any?(-> (th) tm_eq(th.concl, conclusion))
+                  bound = auto_nonlinear_premise(goal.with_concl(conclusion), budget, facts)
+          if bound != nil
+            inferred.push(bound)
+            eliminated.push(left)
+            eliminated.push(right)
+    if inferred.size == 0
+      return nil
+    remaining = inferred + []
+    facts.each -> (th)
+      used = []
+      nl_square_bases(th.concl, ty, used, {})
+      if !used.any?(-> (base) eliminated.any?(-> (old) tm_eq(old, base)))
+        auto_add_fact(remaining, th)
+    result = auto_arithmetic_proof(goal, remaining, [1])
+    if result != nil
+      return result
+    auto_nonlinear_premise(goal, budget, remaining)
+
+  -> quadratic_premise_proof(goal, comparisons, disequalities = [])
+    @nl_mode = true
+    hyps = []
+    disequalities.each -> (th) hyps.push(["nonzero" + hyps.size.to_s, th.concl])
+    proof = linarith_proof(Goal.new(goal.fixes, hyps, goal.concl), comparisons)
+    disequalities.each -> (th) proof = @d.prove_hyp(th, proof)
+    proof
+
+  # Small affine natural-number goals may contain truncated subtraction.
+  # Use omega's checked case split, with the same shared auto budget.
+  -> auto_natural_arithmetic(goal, budget)
+    cmp = dest_cmp_rel(goal.concl)
+    if cmp == nil || !ty_eq(type_of(cmp[1]), ty_nat) || budget[0] <= 0 || find_nat_sub(goal, []) == nil
+      return nil
+    ["le_total.nat", "sub_add_cancel.nat", "sub_eq_zero.nat"].each -> (name)
+      if auto_loaded_rule(name) == nil
+        return nil
+    comparisons = [goal.concl]
+    goal.hyps.each -> (h)
+      if comparison?(h[1])
+        comparisons.push(h[1])
+    if comparisons.size > 9
+      return nil
+    nodes = [64]
+    comparisons.each -> (term)
+      sides = dest_cmp_rel(term)
+      [sides[1], sides[2]].each -> (side)
+        degree = auto_quadratic_degree(side, nodes)
+        if degree < 0 || degree > 1
+          nodes[0] = -1
+    if nodes[0] < 0
+      return nil
+    budget[0] -= 1
+    begin
+      worker = Prover.new(@session)
+      worker.natural_arithmetic_proof(goal)
+    rescue e
+      nil
+
+  -> natural_arithmetic_proof(goal)
+    @omega_mode = true
+    linarith_proof(goal, [])
+
+  # Candidate premises are solved in detached
+  # proof states; a failed candidate cannot refine or solve the caller's goal.
+  -> auto_hint_proof(goal, candidates, hints, budget, seen)
+    if budget[0] <= 0
+      return nil
+    seen.each -> (previous)
+      if tm_eq(previous, goal.concl)
+        return nil
+    candidates.each -> (hint)
+      if budget[0] > 0
+        budget[0] -= 1
+        begin
+          applied = instantiate_to(goal, hint, [], goal.concl, true)
+          result = applied[0]
+          applied[1].each -> (premise)
+            normalized = @d.beta_norm_term(premise)
+            if tm_eq(normalized, goal.concl) || seen.any?(-> (previous) tm_eq(previous, normalized))
+              fail("auto: cyclic rule premise")
+            sub = Prover.new(@session)
+            sub.auto_defaults = @auto_defaults
+            sub.registered_search = @registered_search
+            ref = GoalRef.new(goal.with_concl(normalized), nil, 0)
+            sub.goals = [ref]
+            sub.tac_auto(ref, 3, hints, budget, seen + [goal.concl])
+            if ref.thm == nil || sub.goals.size != 0
+              fail("auto: a lemma premise remains open")
+            proof = sub.fit(ref, ref.thm)
+            result = @d.prove_hyp(fit_concl(proof, premise), result)
+          return fit_concl(result, goal.concl)
+        rescue e
+          0
+    nil
+
+  # A local bound can expose the missing monotonicity step: from c <= b^n,
+  # prove b^n <= x^n, then combine the two checked comparisons. Endpoints come
+  # from existing facts; strictness, hypotheses and named tags are retained.
+  -> auto_bound_chain(goal, hints, budget, seen)
+    target = dest_cmp_rel(goal.concl)
+    if target == nil || !["≤", "<"].include?(target[0]) || !numeric_type?(type_of(target[1])) || budget[0] <= 0 || seen.size >= 6
+      return nil
+    if seen.any?(-> (previous) tm_eq(previous, goal.concl))
+      return nil
+    facts = []
+    goal.hyps.each -> (h) normalize_comparisons(@k.assume(h[1]), facts)
+    hints.each -> (hint) normalize_comparisons(hint, facts)
+    attempted = []
+    bridges = [16]
+    # Keep exact endpoint chains first. A second pass permits checked affine
+    # bridges such as c < c+1 or c-1 < c, without inventing new terms.
+    [false, true].each -> (affine)
+      facts.each -> (known)
+        bound = dest_cmp_rel(known.concl)
+        if ["≤", "<"].include?(bound[0]) && ty_eq(type_of(bound[1]), type_of(target[1]))
+          [false, true].each -> (upper)
+            endpoint = upper ? bound[2] : bound[1]
+            outer = upper ? target[2] : target[1]
+            exact = tm_eq(endpoint, outer)
+            if exact != affine && attempted.size < 4 && budget[0] > 0
+              ends = upper ? [target[1], bound[1]] : [bound[2], target[2]]
+              relation = target[0] == "<" && bound[0] == "≤" ? "<" : "≤"
+              supporting = [known]
+              viable = exact
+              if affine && bridges[0] > 0
+                bridge_ends = upper ? [endpoint, outer] : [outer, endpoint]
+                bridge_term = mk_apps(@k.mk_const(relation, ty_funs([type_of(outer), type_of(outer)], ty_bool)), bridge_ends)
+                bridge = auto_arithmetic_proof(goal.with_concl(bridge_term), facts, bridges)
+                if bridge == nil && relation == "<" && bridges[0] > 0
+                  bridge_term = mk_apps(@k.mk_const("≤", ty_funs([type_of(outer), type_of(outer)], ty_bool)), bridge_ends)
+                  bridge = auto_arithmetic_proof(goal.with_concl(bridge_term), facts, bridges)
+                elsif bridge != nil
+                  relation = "≤"
+                if bridge != nil
+                  supporting.push(bridge)
+                  viable = true
+              premise = mk_apps(@k.mk_const(relation, ty_funs([type_of(target[1]), type_of(target[1])], ty_bool)), ends)
+              if viable && !tm_eq(premise, goal.concl) && !seen.any?(-> (old) tm_eq(old, premise)) && !attempted.any?(-> (old) tm_eq(old, premise))
+                attempted.push(premise)
+                budget[0] -= 1
+                begin
+                  sub = Prover.new(@session)
+                  sub.auto_defaults = @auto_defaults
+                  sub.registered_search = @registered_search
+                  ref = GoalRef.new(goal.with_concl(premise), nil, 0)
+                  sub.goals = [ref]
+                  sub.tac_auto(ref, 3, hints, budget, seen + [goal.concl])
+                  if ref.thm != nil && sub.goals.size == 0
+                    supporting.push(sub.fit(ref, ref.thm))
+                    result = auto_arithmetic_proof(goal, supporting, [1])
+                    if result != nil
+                      return result
+                rescue e
+                  0
+    auto_normalized_bound_chain(goal, hints, budget, seen, facts, attempted)
+
+  # Cancel offsets or scalar factors only through a checked arithmetic proof.
+  # Seek a bound on an existing application whose head fits the other endpoint;
+  # do not enumerate arbitrary term pairs or invent algebraic expressions.
+  -> auto_normalized_bound_chain(goal, hints, budget, seen, facts, attempted)
+    if budget.size < 3
+      budget.push(16)
+    if budget[0] <= 0 || budget[2] <= 0 || attempted.size >= 4 || facts.size > 16
+      return nil
+    target = dest_cmp_rel(goal.concl)
+    terms = []
+    facts.each -> (known) auto_collect_terms(known.concl, terms)
+    [false, true].each -> (upper)
+      other = upper ? target[1] : target[2]
+      heads = auto_operand_heads(other)
+      terms.each -> (pivot)
+        if pivot.tag == :app && ty_eq(type_of(pivot), type_of(other)) && !tm_eq(pivot, other) && auto_operand_heads(pivot).any?(-> (head) heads.include?(head)) && budget[0] > 0 && budget[2] > 0 && attempted.size < 4
+          ends = upper ? [target[1], pivot] : [pivot, target[2]]
+          bound_ends = upper ? [pivot, target[2]] : [target[1], pivot]
+          relation = target[0]
+          bound = nil
+          [relation, "≤"].uniq().each -> (bound_relation)
+            if bound == nil && budget[2] > 0
+              budget[2] -= 1
+              conclusion = mk_apps(@k.mk_const(bound_relation, ty_funs([type_of(other), type_of(other)], ty_bool)), bound_ends)
+              bound = auto_arithmetic_proof(goal.with_concl(conclusion), facts, [1])
+              if bound == nil
+                bound = auto_nonlinear_premise(goal.with_concl(conclusion), budget, facts)
+              if bound != nil
+                relation = target[0] == "<" && bound_relation == "≤" ? "<" : "≤"
+          if bound != nil
+            premise = mk_apps(@k.mk_const(relation, ty_funs([type_of(other), type_of(other)], ty_bool)), ends)
+            if !tm_eq(premise, goal.concl) && !seen.any?(-> (old) tm_eq(old, premise)) && !attempted.any?(-> (old) tm_eq(old, premise))
+              attempted.push(premise)
+              budget[0] -= 1
+              begin
+                sub = Prover.new(@session)
+                sub.auto_defaults = @auto_defaults
+                sub.registered_search = @registered_search
+                ref = GoalRef.new(goal.with_concl(premise), nil, 0)
+                sub.goals = [ref]
+                sub.tac_auto(ref, 3, hints, budget, seen + [goal.concl])
+                if ref.thm != nil && sub.goals.size == 0
+                  result = auto_arithmetic_proof(goal, [bound, sub.fit(ref, ref.thm)], [1])
+                  if result != nil
+                    return result
+              rescue e
+                0
+    nil
+
+  # Preserve supplied algebraic interfaces while exposing recursive equations.
+  # Their left-hand sides must survive until the corresponding rule can apply.
+  -> auto_relation_hint_premise(goal, hints)
+    facts = (goal.hyps.map -> (h) @k.assume(h[1])) + hints
+    rules = []
+    protected = []
+    nodes = [4096]
+    facts.each -> (fact)
+      if auto_small_term?(fact.concl, [512])
+        auto_relation_parts(fact, [8]).each -> (part)
+          if rules.size < 32
+            rule = make_rule(@d, part, "algebraic interface")
+            rules.push(rule)
+            if dest_unop(part.concl, "∀") != nil
+              auto_relation_heads(rule.lhs, protected, nodes)
+    definitions = auto_relation_definitions(goal.all_terms + (hints.map -> (hint) hint.concl))
+    visible = definitions.select -> (rule) !protected.include?(rule.head_name)
+    simplifier = Simp.new(@d, rules + visible)
+    simplifier.hyp_rules = facts
+    simplifier.step_limit = 512
+    conversion = simplifier.simp_conv(goal.concl, 0)
+    conclusion = dest_binop(conversion.concl, "=")[1]
+    if tm_eq(conclusion, goal.concl) || !auto_small_term?(conclusion, [1024])
+      fail("algebraic interface: no bounded rewrite")
+    proof = auto_recurrence_premise(goal.with_concl(conclusion), hints, true, true)
+    @k.eq_mp(@k.sym(conversion), proof)
+
+  # A list step may distinguish its finite head. Open the existing induction
+  # premise, then check all constructor cases without starting another induction.
+  -> auto_list_identity_premise(goal, hints, budget)
+    worker = Prover.new(@session)
+    root = GoalRef.new(goal, nil, 0)
+    worker.goals = [root]
+    ref = worker.tac_intro(root, [], true)
+    proof = worker.auto_finite_cases(ref.goal, hints, budget)
+    if proof == nil
+      proof = worker.auto_relation_hint_premise(ref.goal, hints)
+    worker.close(ref, worker.fit(ref, proof))
+    worker.fit(root, root.thm)
+
+  -> auto_finite_leaf(goal, hints, budget)
+    worker = Prover.new(@session)
+    ref = GoalRef.new(goal, nil, 0)
+    worker.goals = [ref]
+    begin
+      worker.tac_decide(ref)
+      return worker.fit(ref, ref.thm)
+    rescue e
+      0
+    if auto_relation_shape?(goal.concl, [4])
+      begin
+        return auto_recurrence_premise(goal, hints, true, true)
+      rescue e
+        0
+    begin
+      return auto_list_bound_premise(goal, hints, budget)
+    rescue e
+      0
+    auto_relation_hint_premise(goal, hints)
+
+  # Existing cases reconstruction supplies every branch; no constructor is
+  # sampled or assumed. The selected types have at most four nullary cases.
+  -> auto_finite_split(goal, hints, budget, variables, at)
+    if at == variables.size
+      if budget[0] <= 0
+        fail("finite cases: branch budget exhausted")
+      budget[0] -= 1
+      return auto_finite_leaf(goal, hints, budget)
+    worker = Prover.new(@session)
+    root = GoalRef.new(goal, nil, 0)
+    worker.goals = [root]
+    worker.tac_induction_impl(root, [Tok.new(:id, variables[at][0], 0, 0)], [], false)
+    branches = worker.goals + []
+    branches.each -> (branch)
+      proof = auto_finite_split(branch.goal, hints, budget, variables, at + 1)
+      worker.close(branch, proof)
+    if root.thm == nil || worker.goals.size != 0
+      fail("finite cases: open constructor case")
+    worker.fit(root, root.thm)
+
+  # At most two finite variables and sixteen complete branches. Prefer
+  # variables in the conclusion; inspect hypotheses when it has none.
+  -> auto_finite_cases(goal, hints, budget)
+    if budget[0] <= 0 || goal.hyps.size > 12 || hints.size > 8 || !auto_small_term?(goal.concl, [256])
+      return nil
+    variables = []
+    cases = 1
+    [false, true].each -> (in_hyps)
+      if variables.size == 0
+        goal.fixes.each -> (fix)
+          info = @k.inductive_of_type(fix[1].ty)
+          relevant = in_hyps ? goal.hyps.any?(-> (h) tm_free_in?(fix[1], h[1])) : tm_free_in?(fix[1], goal.concl)
+          if variables.size < 2 && relevant && info != nil && info.ctors.size > 0 && info.ctors.size <= 4 && info.ctors.all?(-> (ctor) ctor[1].size == 0)
+            variables.push(fix)
+            cases *= info.ctors.size
+    if variables.size == 0 || cases > budget[0]
+      return nil
+    # Keep a failed case trial from exhausting unrelated hint/rule search.
+    # Its own branch and logical work still share the existing bounded fuel.
+    trial = [budget[0], budget[1]]
+    budget[0] -= 1
+    begin
+      auto_finite_split(goal, hints, trial, variables, 0)
+    rescue e
+      nil
+
+  # For P or Q, the Q case is immediate; prove P under not Q. Reconstruct
+  # both cases with excluded middle, retaining all arithmetic dependencies.
+  -> auto_arithmetic_disjunction(goal, depth, hints, budget, seen)
+    parts = dest_binop(goal.concl, "∨")
+    if parts == nil || depth <= 1 || budget[0] <= 0 || goal.hyps.size > 12 || hints.size > 8 || !auto_small_term?(goal.concl, [256]) || !parts.all?(-> (part) comparison?(part))
+      return nil
+    [1, 0].each -> (side)
+      if budget[0] > 0
+        budget[0] -= 1
+        begin
+          condition = parts[side]
+          name = "arithmetic_case"
+          while goal.hyps.any?(-> (hyp) hyp[0] == name)
+            name += "_"
+          branch = goal.with_concl(parts[1-side]).add_hyp(name, @k.neg_tm(condition))
+          worker = Prover.new(@session)
+          worker.auto_defaults = @auto_defaults
+          worker.registered_search = @registered_search
+          ref = GoalRef.new(branch, nil, 0)
+          worker.goals = [ref]
+          worker.tac_auto(ref, depth-1, hints, budget, seen + [goal.concl])
+          if ref.thm != nil && worker.goals.size == 0
+            proof = worker.fit(ref, ref.thm)
+            yes = side == 1 ? @k.disj2(parts[0], @k.assume(condition)) : @k.disj1(@k.assume(condition), parts[1])
+            no = side == 1 ? @k.disj1(proof, parts[1]) : @k.disj2(parts[0], proof)
+            return @k.disj_cases(@k.excluded_middle(condition), yes, no)
+        rescue e
+          0
+    nil
+
+  # Run once at the tactic boundary, never while auto is exploring a branch.
+  -> strict_bound_feedback(goal, hints)
+    sides = dest_binop(goal.concl, "<")
+    if sides == nil || !numeric_type?(type_of(sides[0]))
+      return nil
+    ty = type_of(sides[0])
+    le = @k.mk_const("≤", ty_funs([ty, ty], ty_bool))
+    ref = GoalRef.new(goal.with_concl(mk_apps(le, sides)), nil, 0)
+    probe = Prover.new(@session)
+    probe.goals = [ref]
+    begin
+      probe.tac_auto(ref, 3, hints, [24, 4], [])
+      if ref.thm == nil || probe.goals.size != 0
+        return nil
+      th = probe.fit(ref, ref.thm)
+      if th.tags.include?("sorry")
+        return nil
+      missing = @k.neg_tm(@k.eq_tm(sides[0], sides[1]))
+      deps = th.tags.select -> (tag) tag.starts_with?("split:")
+      if deps.size > 0
+        # Only the split driver knows whether the skipped declarations checked.
+        return "⋯ strict-bound\t" + tm_show(th.concl) + "\t" + tm_show(missing) + "   \[" + deps.join(", ") + "]"
+      strict_bound_note(tm_show(th.concl), tm_show(missing))
+    rescue e
+      nil
+
+  -> tac_auto(g, depth, hints, budget, seen)
     if depth <= 0
       fail("auto: depth exhausted")
     th = find_assumption(g.goal)
     if th != nil
       return close(g, th)
+    # Discharge registered guards already in scope before enumerating their
+    # quantified instances. A miss leaves the ordinary search fuel intact.
+    if seen.size == 0 && @session.auto_rules.size > 0 && g.goal.hyps.any?(-> (h) dest_unop(h[1], "∀") != nil)
+      th = auto_registered_arithmetic(g.goal, hints, [2, 0], seen, true)
+      if th != nil
+        return close(g, fit(g, th))
+    th = auto_forward(g.goal)
+    if th != nil
+      return close(g, th)
     c = g.goal.concl
     if intro_able?(c)
       ng = tac_intro(g, [], true)
-      return tac_auto(ng, depth)
+      return tac_auto(ng, depth, hints, budget, seen)
+    if seen.size == 0
+      relation = auto_list_relation(g.goal, hints, budget)
+      if relation != nil
+        return close(g, fit(g, relation))
+      invariant = auto_fold_invariant(g.goal, hints, budget)
+      if invariant != nil
+        return close(g, fit(g, invariant))
+      finite = auto_finite_cases(g.goal, hints, budget)
+      if finite != nil
+        return close(g, fit(g, finite))
+      # Normalize a supplied arithmetic formula once before splitting its
+      # conclusions, so the branches share the original nonlinear fuel.
+      if hints.size > 0
+        trial = [budget[0], budget[1]]
+        rewritten = auto_defined_arithmetic(g.goal, hints, trial, true)
+        if rewritten != nil
+          budget[0] = trial[0]
+          budget[1] = trial[1]
+          return close(g, fit(g, rewritten))
+        # A failed bounded normalization trial must not starve the ordinary
+        # proof path, which may need the original spelling of a supplied fact.
+        if trial[0] < budget[0]
+          budget[0] -= 1
     pq = dest_binop(c, "∧")
     if pq != nil || (dest_binop(c, "=") != nil && type_of(dest_binop(c, "=")[0]).name == "bool")
       refs = tac_constructor(g)
       refs.each -> (r)
-        tac_auto(r, depth - 1)
+        tac_auto(r, depth - 1, hints, budget, seen)
       return 0
     attempts = [:rfl, :decide, :simp, :linarith, :contradiction]
     attempts.each -> (a)
@@ -2276,21 +6050,144 @@
           return tac_contradiction(g)
       rescue e
         0
+    equality = @k.dest_eq(g.goal.concl)
+    if equality != nil && equality[0].tag == :app && equality[1].tag == :app && tm_eq(strip_app(equality[0])[0], strip_app(equality[1])[0])
+      congruent = auto_argument_equal(equality[0], equality[1], (g.goal.hyps.map -> (h) @k.assume(h[1])) + hints, 16, [8])
+      if congruent != nil
+        return close(g, fit(g, congruent))
+    arithmetic = auto_arithmetic_forward(g.goal, [], seen.size > 0 ? budget : nil)
+    if arithmetic != nil
+      return close(g, fit(g, arithmetic))
+    # In arithmetic side conditions, use supplied facts before chasing another
+    # backwards rule (which may restate the parent bound through an alias).
+    hint_arithmetic = seen.size > 0 && hints.size > 0 && comparison?(g.goal.concl)
+    if hint_arithmetic
+      arithmetic = auto_arithmetic_forward(g.goal, hints, budget)
+      if arithmetic != nil
+        return close(g, fit(g, arithmetic))
+    natural = auto_natural_arithmetic(g.goal, budget)
+    if natural != nil
+      return close(g, fit(g, natural))
+    hinted = auto_hint_proof(g.goal, hints + auto_local_hints(g.goal) + auto_default_hints(g.goal), hints, budget, seen)
+    if hinted != nil
+      return close(g, fit(g, hinted))
+    if hints.size > 0
+      forwarded = comparison?(g.goal.concl) ? nil : auto_forward(g.goal, hints)
+      if forwarded != nil
+        return close(g, fit(g, forwarded))
+      if !hint_arithmetic
+        arithmetic = auto_arithmetic_forward(g.goal, hints, seen.size > 0 ? budget : nil)
+        if arithmetic != nil
+          return close(g, fit(g, arithmetic))
+    # Keep direct small product/sign arguments terse as well as rule premises.
+    # This uses the same four-attempt nonlinear budget and degree/node limits.
+    nonlinear_facts = nil
+    if hints.size > 0
+      nonlinear_facts = (g.goal.hyps.map -> (h) @k.assume(h[1])) + hints
+    nonlinear = auto_nonlinear_premise(g.goal, budget, nonlinear_facts)
+    if nonlinear != nil
+      return close(g, fit(g, nonlinear))
+    squared = auto_square_bound_chain(g.goal, hints, budget)
+    if squared != nil
+      return close(g, fit(g, squared))
+    chained = auto_bound_chain(g.goal, hints, budget, seen)
+    if chained != nil
+      return close(g, fit(g, chained))
     pq = dest_binop(c, "∨")
     if pq != nil
+      trial = [budget[0], budget[1]]
+      cases = auto_arithmetic_disjunction(g.goal, depth, hints, trial, seen)
+      if cases != nil
+        budget[0] = trial[0]
+        budget[1] = trial[1]
+        return close(g, fit(g, cases))
+      if trial[0] < budget[0]
+        budget[0] -= 1
       begin
         saved = @goals
         refs = tac_left_right(g, true)
-        tac_auto(refs[0], depth - 1)
+        tac_auto(refs[0], depth - 1, hints, budget, seen)
         return 0
       rescue e
         @goals = saved
       begin
         refs = tac_left_right(g, false)
-        tac_auto(refs[0], depth - 1)
+        tac_auto(refs[0], depth - 1, hints, budget, seen)
         return 0
       rescue e
         @goals = saved
+    if seen.size == 0
+      arithmetic = auto_subterm_arithmetic(g.goal, hints)
+      if arithmetic == nil
+        arithmetic = auto_sum_arithmetic(g.goal, hints)
+      if arithmetic != nil
+        return close(g, fit(g, arithmetic))
+      # Try a proved equality rule in the other orientation once at the root.
+      # Share the existing fuel and remember both goals when solving premises.
+      equality = @k.dest_eq(g.goal.concl)
+      if equality != nil && type_of(equality[0]).name != "bool"
+        reversed = g.goal.with_concl(@k.eq_tm(equality[1], equality[0]))
+        candidates = hints + auto_local_hints(reversed) + auto_default_hints(reversed)
+        proof = auto_hint_proof(reversed, candidates, hints, budget, seen + [g.goal.concl])
+        if proof != nil
+          return close(g, fit(g, @k.sym(proof)))
+      aliased = auto_sum_alias_proof(g.goal, hints, budget)
+      if aliased != nil
+        return close(g, fit(g, aliased))
+      polynomial = auto_polynomial_recurrence(g.goal, hints, budget)
+      if polynomial != nil
+        return close(g, fit(g, polynomial))
+      geometric = auto_geometric_equality(g.goal, hints, budget)
+      if geometric != nil
+        return close(g, fit(g, geometric))
+      identity = auto_recurrence_identity(g.goal, hints, budget)
+      if identity != nil
+        return close(g, fit(g, identity))
+      family = auto_recurrence_family(g.goal, hints, budget)
+      if family != nil
+        return close(g, fit(g, family))
+      list_identity = auto_recurrence_identity(g.goal, hints, budget, "list")
+      if list_identity != nil
+        return close(g, fit(g, list_identity))
+      list_bound = auto_list_bound(g.goal, hints, budget)
+      if list_bound != nil
+        return close(g, fit(g, list_bound))
+      defined = auto_defined_arithmetic(g.goal, hints, budget)
+      if defined != nil
+        return close(g, fit(g, defined))
+      # Keep all established paths first: an unsuccessful square trial must
+      # not spend the nonlinear fuel needed by induction or rule premises.
+      # These are linear certificates with proved squares, not nonlinear
+      # product searches. Give the final fallback two shared attempts of its own.
+      square_budget = [2]
+      squared = auto_square_arithmetic(g.goal, square_budget)
+      if squared != nil
+        return close(g, fit(g, squared))
+      supplied = hints + []
+      g.goal.hyps.each -> (hyp)
+        if dest_unop(hyp[1], "∀") != nil
+          auto_add_fact(supplied, @k.assume(hyp[1]))
+      if supplied.size > 0 && supplied.size <= 8
+        arithmetic = auto_arithmetic_forward(g.goal, supplied, square_budget, true)
+        if arithmetic != nil
+          return close(g, fit(g, arithmetic))
+    if @registered_search
+      proof = auto_hint_proof(g.goal, auto_registered_hints(g.goal), hints, budget, seen)
+      if proof == nil
+        proof = auto_registered_arithmetic(g.goal, hints, budget, seen)
+      if proof != nil
+        return close(g, fit(g, proof))
+    elsif seen.size == 0 && @session.auto_rules.size > 0
+      # A separate late search leaves all established paths and their fuel
+      # intact. Rule premises share these bounds and the ordinary cycle checks.
+      worker = Prover.new(@session)
+      worker.registered_search = true
+      registered_budget = [24, 4]
+      proof = worker.auto_hint_proof(g.goal, worker.auto_registered_hints(g.goal), hints, registered_budget, [])
+      if proof == nil
+        proof = worker.auto_registered_arithmetic(g.goal, hints, registered_budget)
+      if proof != nil
+        return close(g, fit(g, proof))
     fail("auto failed")
 
   -> tac_specialize(g, args)

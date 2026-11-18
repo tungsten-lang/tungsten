@@ -1,0 +1,124 @@
+import arith
+
++ nat_missing_inside (f : ℕ → ℕ) (n j : ℕ) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ nat_missing_outside (f : ℕ → ℕ) (n j : ℕ) : (∑ i < n, f i*(if i=j then 1 else 0)) = 0
+  auto
+
++ nat_closed_inside (f : ℕ → ℕ) (n j : ℕ) (h : j ≤ n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ nat_wrong_index (f : ℕ → ℕ) (n j k : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f k
+  auto
+
++ nat_wrong_value (f : ℕ → ℕ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 2 else 0)) = f j
+  auto
+
++ nat_nonzero_else (f : ℕ → ℕ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 1)) = f j
+  auto
+
++ nat_wrong_predicate (f : ℕ → ℕ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i≤j then 1 else 0)) = f j
+  auto
+
++ int_missing_inside (f : ℕ → ℤ) (n j : ℕ) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ int_missing_outside (f : ℕ → ℤ) (n j : ℕ) : (∑ i < n, f i*(if i=j then 1 else 0)) = 0
+  auto
+
++ int_closed_inside (f : ℕ → ℤ) (n j : ℕ) (h : j ≤ n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ int_wrong_index (f : ℕ → ℤ) (n j k : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f k
+  auto
+
++ int_wrong_value (f : ℕ → ℤ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 2 else 0)) = f j
+  auto
+
++ int_nonzero_else (f : ℕ → ℤ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 1)) = f j
+  auto
+
++ int_wrong_predicate (f : ℕ → ℤ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i≤j then 1 else 0)) = f j
+  auto
+
++ rat_missing_inside (f : ℕ → ℚ) (n j : ℕ) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ rat_missing_outside (f : ℕ → ℚ) (n j : ℕ) : (∑ i < n, f i*(if i=j then 1 else 0)) = 0
+  auto
+
++ rat_closed_inside (f : ℕ → ℚ) (n j : ℕ) (h : j ≤ n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ rat_wrong_index (f : ℕ → ℚ) (n j k : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f k
+  auto
+
++ rat_wrong_value (f : ℕ → ℚ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 2 else 0)) = f j
+  auto
+
++ rat_nonzero_else (f : ℕ → ℚ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 1)) = f j
+  auto
+
++ rat_wrong_predicate (f : ℕ → ℚ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i≤j then 1 else 0)) = f j
+  auto
+
++ real_missing_inside (f : ℕ → ℝ) (n j : ℕ) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ real_missing_outside (f : ℕ → ℝ) (n j : ℕ) : (∑ i < n, f i*(if i=j then 1 else 0)) = 0
+  auto
+
++ real_closed_inside (f : ℕ → ℝ) (n j : ℕ) (h : j ≤ n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ real_wrong_index (f : ℕ → ℝ) (n j k : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f k
+  auto
+
++ real_wrong_value (f : ℕ → ℝ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 2 else 0)) = f j
+  auto
+
++ real_nonzero_else (f : ℕ → ℝ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 1)) = f j
+  auto
+
++ real_wrong_predicate (f : ℕ → ℝ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i≤j then 1 else 0)) = f j
+  auto
+
++ generic (f : ℕ → α) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  auto
+
++ nat_wrong_value_index (f : ℕ → ℕ) (n j k : ℕ) (v : ℕ) (hj : j < n) (h : f k = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ nat_unproved_value (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (p : Prop) (hj : j < n) (h : p → f j = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ nat_missing_inner (f : ℕ → ℕ → ℕ) (n m j k : ℕ) (hj : j < n) : (∑ i < n, (∑ l < m, f i l*(if l=k then 1 else 0))*(if i=j then 1 else 0)) = f j k
+  auto
+
++ int_wrong_value_index (f : ℕ → ℤ) (n j k : ℕ) (v : ℤ) (hj : j < n) (h : f k = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ int_unproved_value (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (p : Prop) (hj : j < n) (h : p → f j = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ int_missing_inner (f : ℕ → ℕ → ℤ) (n m j k : ℕ) (hj : j < n) : (∑ i < n, (∑ l < m, f i l*(if l=k then 1 else 0))*(if i=j then 1 else 0)) = f j k
+  auto
+
++ rat_wrong_value_index (f : ℕ → ℚ) (n j k : ℕ) (v : ℚ) (hj : j < n) (h : f k = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ rat_unproved_value (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (p : Prop) (hj : j < n) (h : p → f j = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ rat_missing_inner (f : ℕ → ℕ → ℚ) (n m j k : ℕ) (hj : j < n) : (∑ i < n, (∑ l < m, f i l*(if l=k then 1 else 0))*(if i=j then 1 else 0)) = f j k
+  auto
+
++ real_wrong_value_index (f : ℕ → ℝ) (n j k : ℕ) (v : ℝ) (hj : j < n) (h : f k = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ real_unproved_value (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (p : Prop) (hj : j < n) (h : p → f j = v) : (∑ i < n, f i*(if i=j then 1 else 0)) = v
+  auto
+
++ real_missing_inner (f : ℕ → ℕ → ℝ) (n m j k : ℕ) (hj : j < n) : (∑ i < n, (∑ l < m, f i l*(if l=k then 1 else 0))*(if i=j then 1 else 0)) = f j k
+  auto

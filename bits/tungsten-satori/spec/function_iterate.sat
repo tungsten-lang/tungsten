@@ -1,0 +1,16 @@
+-- The general invariance pattern previously needed a local iteration definition
+-- and an induction in family 027's like-for-like benchmark.
++ iterate_facet (p : α → α) (facet : α → β) (h : ∀ x, facet (p x) = facet x) (x : α) (n : ℕ) : facet (function.iterate p n x) = facet x := function.iterate_preserves p facet h n x
++ iterate_facet_hoisted (p : α → α) (facet : α → β) (h : ∀ x, facet (p x) = facet x) (x : α) (n : ℕ) : facet (function.iterate p n x) = facet x := function.iterate_preserves p facet n x h
++ iterate_zero (f : α → α) (x : α) : function.iterate f 0 x = x := by simp
++ iterate_step (f : α → α) (n : ℕ) (x : α) : function.iterate f (n + 1) x = f (function.iterate f n x) := by simp
++ iterate_literal : function.iterate (fun x => x + 2) 3 1 = 7 := by decide
++ iterate_literal_add : function.iterate (fun x => 2 * x + 1) (2 + 3) 0 = function.iterate (fun x => 2 * x + 1) 2 (function.iterate (fun x => 2 * x + 1) 3 0) := by decide
++ iterate_fixed (f : α → α) (x : α) (h : f x = x) (n : ℕ) : function.iterate f n x = x := function.iterate_fixed f x h n
++ iterate_add (f : α → α) (m n : ℕ) (x : α) : function.iterate f (m + n) x = function.iterate f m (function.iterate f n x) := function.iterate_add f m n x
++ iterate_apply (f : α → α) (n : ℕ) (x : α) : function.iterate f n (f x) = f (function.iterate f n x) := function.iterate_apply f n x
++ iterate_map (f : α → α) (g : β → β) (h : α → β) (comm : ∀ x, h (f x) = g (h x)) (n : ℕ) (x : α) : h (function.iterate f n x) = function.iterate g n (h x) := function.iterate_commutes f g h comm n x
+#axioms iterate_facet
+#axioms iterate_map
+#axioms iterate_fixed
+#axioms iterate_add

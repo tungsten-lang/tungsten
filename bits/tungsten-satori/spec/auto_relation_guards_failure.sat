@@ -1,0 +1,3 @@
++ unsupplied (xs : list ℕ) (s : ℚ) (h : ∀ x, allowed x) : first (list.foldl move xs s) = list.foldl update xs (first s) := by auto
++ missing_guard (xs : list ℕ) (s : ℚ) : first (list.foldl move xs s) = list.foldl update xs (first s) := by auto [guarded]
++ point_guard (xs : list ℕ) (s : ℚ) (h : allowed 0) : first (list.foldl move xs s) = list.foldl update xs (first s) := by auto [guarded]

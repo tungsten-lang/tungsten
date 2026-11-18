@@ -1,0 +1,35 @@
++ preserve (p : α → Prop) (x : α) (h : p x) : p x := h
++ invalid_fixed_argument (a b c : ℕ) (h : a = b) : a = c := preserve (fun x => a = x) b h
++ invalid_predicate (a b : ℕ) (h : a = b) : b = a := preserve (fun x => a = x) b h
++ invalid_repeated (a b : ℕ) (h : a = a) : a = b := by apply preserve (fun (x : ℕ) => x = x); exact h
++ invalid_missing_proof (a b : α) : a = b := by apply preserve (fun (x : α) => a = x) b
++ invalid_capture (a b : α) (p : α → α → Prop) (h : ∀ a, p a a) : ∀ x, p b x := preserve (fun a => ∀ b, p a b) b h
+-> same_as (a b : α) : Prop := a = b
++ invalid_alias (a b : α) : same_as a b := preserve (fun x => a = x) a (by rfl)
++ invalid_alias_assumption (a b : α) : same_as a b := preserve (fun x => a = x) b
++ expose (P : ℕ → Prop) (h : ∀ n, P n) : ∀ n, P n := h
++ exposed_wrong_premise (P Q : ℕ → Prop) (h : ∀ n, P n → Q n) (n : ℕ) (hn : Q n) : Q n := expose (fun n => P n → Q n) h n hn
++ exposed_wrong_index (P Q : ℕ → Prop) (h : ∀ n, P n → Q n) (m n : ℕ) (hm : P m) : Q n := expose (fun n => P n → Q n) h n hm
++ exposed_missing_premise (P Q : ℕ → Prop) (h : ∀ n, P n → Q n) (n : ℕ) : Q n := expose (fun n => P n → Q n) h n
++ exposed_wrong_forall (P : ℕ → α → Prop) (h : ∀ n, ∀ x, P n x) (n : ℕ) (x y : α) : P n y := expose (fun n => ∀ x, P n x) h n x
++ exposed_extra_argument (P : ℕ → Prop) (h : ∀ n, P n) (n : ℕ) (hn : P n) : P n := expose P h n hn
++ unused_parameter (x : ℕ) (P : Prop) (h : P) : P := h
++ partial_no_assumption (P Q : Prop) (h : Q) (a : ℕ) : P
+  have all := unused_parameter h
+  exact all a
+-> failure_successor_alias (x : ℕ) : ℕ := x + 1
++ alias_wrong_literal (f : ℕ → ℕ) (h : ∃ x, f x = failure_successor_alias 0) : ∃ x, f x = 2 := h
++ alias_captured (compute : ℕ) (f : ℕ → ℕ) (h : ∀ x, f x = failure_successor_alias compute) : ∀ x, f x = x + 1 := h
+-> failure_premise_alias (p : α → Prop) (x : α) : Prop := p x
++ alias_argument_wrong_index (p : α → Prop) (x y : α) (h : failure_premise_alias p x) : p y := preserve p y h
++ alias_projection_wrong_predicate (p q : α → Prop) (x : α) (h : failure_premise_alias p x ∧ True) : q x := preserve q x h.1
++ alias_quantified_capture (p : ℕ → ℕ → Prop) (h : ∀ x, failure_premise_alias (p x) x) (y : ℕ) : ∀ x, p y x := preserve (fun (n : ℕ) => ∀ x, p n x) y h
++ stored_wrong_premise (P Q : Prop) (h : P → Q) (hq : Q) : Q
+  have k := preserve (fun (n : ℕ) => P → Q) 0 h
+  exact k hq
++ stored_wrong_index (p : α → Prop) (h : ∀ x, p x) (x y : α) : p y
+  have k := preserve (fun (n : ℕ) => ∀ x, p x) 0 h
+  exact k x
++ stored_wrong_negation (P Q : Prop) (h : ¬ P) (hq : Q) : False
+  have k := preserve (fun (n : ℕ) => ¬ P) 0 h
+  exact k hq

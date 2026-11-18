@@ -1,0 +1,197 @@
+
+-> items.nat : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => x+items.nat xs
+-> twice.nat : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => 2*x+twice.nat xs
+-> weighted.nat (c : ℕ) : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => c*x+weighted.nat c xs
+-> units.nat : list α → ℕ
+  | [] => 0
+  | x :: xs => 1+units.nat xs
+-> twounits.nat : list α → ℕ
+  | [] => 0
+  | x :: xs => 2+twounits.nat xs
+-> rows.nat (ys : list ℕ) : list ℕ → ℕ
+  | [] => 0
+  | x :: xs => weighted.nat x ys+rows.nat ys xs
++ nat_defined (xs : list ℕ) : twice.nat xs = 2*items.nat xs := by auto
++ nat_reverse (xs : list ℕ) : 2*items.nat xs = twice.nat xs := by auto
++ nat_scaled (xs : list ℕ) (c : ℕ) : weighted.nat c xs = c*items.nat xs := by auto
++ nat_hinted (xs ys : list ℕ) : rows.nat ys xs = items.nat xs*items.nat ys
+  auto [nat_scaled]
++ nat_local_hint (xs ys : list ℕ) : rows.nat ys xs = items.nat xs*items.nat ys
+  have rule := nat_scaled
+  auto
++ nat_generic (xs : list α) : twounits.nat xs = 2*units.nat xs := by auto
++ nat_same_step (f g : list α → ℕ) (w : α → ℕ) (xs : list α)
+    (base : f [] = g []) (fs : ∀ x ys, f (x :: ys) = w x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = w x+g ys) : f xs = g xs
+  auto
++ nat_offset (f g : list α → ℕ) (w : α → ℕ) (c : ℕ) (xs : list α)
+    (base : f [] = g []+c) (fs : ∀ x ys, f (x :: ys) = w x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = w x+g ys) : f xs = g xs+c
+  auto
++ nat_sum (f g h : list α → ℕ) (u v : α → ℕ) (xs : list α)
+    (base : h [] = f []+g []) (fs : ∀ x ys, f (x :: ys) = u x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = v x+g ys) (hs : ∀ x ys, h (x :: ys) = u x+v x+h ys) : h xs = f xs+g xs
+  auto
++ nat_parameter (f g : ℕ → list α → ℕ) (a : ℕ) (xs : list α)
+    (base : f a [] = g a []) (fs : ∀ x ys, f a (x :: ys) = a+f a ys)
+    (gs : ∀ x ys, g a (x :: ys) = a+g a ys) : f a xs = g a xs
+  auto
+
+-> items.int : list ℤ → ℤ
+  | [] => 0
+  | x :: xs => x+items.int xs
+-> twice.int : list ℤ → ℤ
+  | [] => 0
+  | x :: xs => 2*x+twice.int xs
+-> weighted.int (c : ℤ) : list ℤ → ℤ
+  | [] => 0
+  | x :: xs => c*x+weighted.int c xs
+-> units.int : list α → ℤ
+  | [] => 0
+  | x :: xs => 1+units.int xs
+-> twounits.int : list α → ℤ
+  | [] => 0
+  | x :: xs => 2+twounits.int xs
+-> rows.int (ys : list ℤ) : list ℤ → ℤ
+  | [] => 0
+  | x :: xs => weighted.int x ys+rows.int ys xs
++ int_defined (xs : list ℤ) : twice.int xs = 2*items.int xs := by auto
++ int_reverse (xs : list ℤ) : 2*items.int xs = twice.int xs := by auto
++ int_scaled (xs : list ℤ) (c : ℤ) : weighted.int c xs = c*items.int xs := by auto
++ int_hinted (xs ys : list ℤ) : rows.int ys xs = items.int xs*items.int ys
+  auto [int_scaled]
++ int_local_hint (xs ys : list ℤ) : rows.int ys xs = items.int xs*items.int ys
+  have rule := int_scaled
+  auto
++ int_generic (xs : list α) : twounits.int xs = 2*units.int xs := by auto
++ int_same_step (f g : list α → ℤ) (w : α → ℤ) (xs : list α)
+    (base : f [] = g []) (fs : ∀ x ys, f (x :: ys) = w x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = w x+g ys) : f xs = g xs
+  auto
++ int_offset (f g : list α → ℤ) (w : α → ℤ) (c : ℤ) (xs : list α)
+    (base : f [] = g []+c) (fs : ∀ x ys, f (x :: ys) = w x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = w x+g ys) : f xs = g xs+c
+  auto
++ int_sum (f g h : list α → ℤ) (u v : α → ℤ) (xs : list α)
+    (base : h [] = f []+g []) (fs : ∀ x ys, f (x :: ys) = u x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = v x+g ys) (hs : ∀ x ys, h (x :: ys) = u x+v x+h ys) : h xs = f xs+g xs
+  auto
++ int_parameter (f g : ℤ → list α → ℤ) (a : ℤ) (xs : list α)
+    (base : f a [] = g a []) (fs : ∀ x ys, f a (x :: ys) = a+f a ys)
+    (gs : ∀ x ys, g a (x :: ys) = a+g a ys) : f a xs = g a xs
+  auto
+
+-> items.rat : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => x+items.rat xs
+-> twice.rat : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => 2*x+twice.rat xs
+-> weighted.rat (c : ℚ) : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => c*x+weighted.rat c xs
+-> units.rat : list α → ℚ
+  | [] => 0
+  | x :: xs => 1+units.rat xs
+-> twounits.rat : list α → ℚ
+  | [] => 0
+  | x :: xs => 2+twounits.rat xs
+-> rows.rat (ys : list ℚ) : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => weighted.rat x ys+rows.rat ys xs
++ rat_defined (xs : list ℚ) : twice.rat xs = 2*items.rat xs := by auto
++ rat_reverse (xs : list ℚ) : 2*items.rat xs = twice.rat xs := by auto
++ rat_scaled (xs : list ℚ) (c : ℚ) : weighted.rat c xs = c*items.rat xs := by auto
++ rat_hinted (xs ys : list ℚ) : rows.rat ys xs = items.rat xs*items.rat ys
+  auto [rat_scaled]
++ rat_local_hint (xs ys : list ℚ) : rows.rat ys xs = items.rat xs*items.rat ys
+  have rule := rat_scaled
+  auto
++ rat_generic (xs : list α) : twounits.rat xs = 2*units.rat xs := by auto
++ rat_same_step (f g : list α → ℚ) (w : α → ℚ) (xs : list α)
+    (base : f [] = g []) (fs : ∀ x ys, f (x :: ys) = w x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = w x+g ys) : f xs = g xs
+  auto
++ rat_offset (f g : list α → ℚ) (w : α → ℚ) (c : ℚ) (xs : list α)
+    (base : f [] = g []+c) (fs : ∀ x ys, f (x :: ys) = w x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = w x+g ys) : f xs = g xs+c
+  auto
++ rat_sum (f g h : list α → ℚ) (u v : α → ℚ) (xs : list α)
+    (base : h [] = f []+g []) (fs : ∀ x ys, f (x :: ys) = u x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = v x+g ys) (hs : ∀ x ys, h (x :: ys) = u x+v x+h ys) : h xs = f xs+g xs
+  auto
++ rat_parameter (f g : ℚ → list α → ℚ) (a : ℚ) (xs : list α)
+    (base : f a [] = g a []) (fs : ∀ x ys, f a (x :: ys) = a+f a ys)
+    (gs : ∀ x ys, g a (x :: ys) = a+g a ys) : f a xs = g a xs
+  auto
+
+-> items.real : list ℝ → ℝ
+  | [] => 0
+  | x :: xs => x+items.real xs
+-> twice.real : list ℝ → ℝ
+  | [] => 0
+  | x :: xs => 2*x+twice.real xs
+-> weighted.real (c : ℝ) : list ℝ → ℝ
+  | [] => 0
+  | x :: xs => c*x+weighted.real c xs
+-> units.real : list α → ℝ
+  | [] => 0
+  | x :: xs => 1+units.real xs
+-> twounits.real : list α → ℝ
+  | [] => 0
+  | x :: xs => 2+twounits.real xs
+-> rows.real (ys : list ℝ) : list ℝ → ℝ
+  | [] => 0
+  | x :: xs => weighted.real x ys+rows.real ys xs
++ real_defined (xs : list ℝ) : twice.real xs = 2*items.real xs := by auto
++ real_reverse (xs : list ℝ) : 2*items.real xs = twice.real xs := by auto
++ real_scaled (xs : list ℝ) (c : ℝ) : weighted.real c xs = c*items.real xs := by auto
++ real_hinted (xs ys : list ℝ) : rows.real ys xs = items.real xs*items.real ys
+  auto [real_scaled]
++ real_local_hint (xs ys : list ℝ) : rows.real ys xs = items.real xs*items.real ys
+  have rule := real_scaled
+  auto
++ real_generic (xs : list α) : twounits.real xs = 2*units.real xs := by auto
++ real_same_step (f g : list α → ℝ) (w : α → ℝ) (xs : list α)
+    (base : f [] = g []) (fs : ∀ x ys, f (x :: ys) = w x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = w x+g ys) : f xs = g xs
+  auto
++ real_offset (f g : list α → ℝ) (w : α → ℝ) (c : ℝ) (xs : list α)
+    (base : f [] = g []+c) (fs : ∀ x ys, f (x :: ys) = w x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = w x+g ys) : f xs = g xs+c
+  auto
++ real_sum (f g h : list α → ℝ) (u v : α → ℝ) (xs : list α)
+    (base : h [] = f []+g []) (fs : ∀ x ys, f (x :: ys) = u x+f ys)
+    (gs : ∀ x ys, g (x :: ys) = v x+g ys) (hs : ∀ x ys, h (x :: ys) = u x+v x+h ys) : h xs = f xs+g xs
+  auto
++ real_parameter (f g : ℝ → list α → ℝ) (a : ℝ) (xs : list α)
+    (base : f a [] = g a []) (fs : ∀ x ys, f a (x :: ys) = a+f a ys)
+    (gs : ∀ x ys, g a (x :: ys) = a+g a ys) : f a xs = g a xs
+  auto
+
+-- The tensor identity needs a polynomial hint after rewriting the tail.
+-> data_mass : list (ℚ × ℚ) → ℚ
+  | [] => 0
+  | x :: xs => fst x+data_mass xs
+-> data_moment : list (ℚ × ℚ) → ℚ
+  | [] => 0
+  | x :: xs => fst x*snd x+data_moment xs
+-> data_energy : list (ℚ × ℚ) → ℚ
+  | [] => 0
+  | x :: xs => fst x*snd x^2+data_energy xs
+-> pair_energy (x : ℚ × ℚ) : list (ℚ × ℚ) → ℚ
+  | [] => 0
+  | y :: ys => fst x*fst y*(snd x+snd y)^2+pair_energy x ys
+-> tensor_energy (ys : list (ℚ × ℚ)) : list (ℚ × ℚ) → ℚ
+  | [] => 0
+  | x :: xs => pair_energy x ys+tensor_energy ys xs
++ rat_pair_energy (x : ℚ × ℚ) (ys : list (ℚ × ℚ)) : pair_energy x ys = fst x*(data_mass ys*snd x^2+2*snd x*data_moment ys+data_energy ys)
+  auto
++ rat_tensor_energy (xs ys : list (ℚ × ℚ)) : tensor_energy ys xs = data_mass ys*data_energy xs+2*data_moment xs*data_moment ys+data_mass xs*data_energy ys
+  auto [rat_pair_energy]

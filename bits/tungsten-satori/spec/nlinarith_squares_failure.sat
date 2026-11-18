@@ -1,0 +1,13 @@
++ real_strict (x : ℝ) : 0 < x*x := by nlinarith
++ real_negative (x : ℝ) : x*x ≤ 0 := by nlinarith
++ real_mixed (x y : ℝ) : 0 ≤ x*y := by nlinarith
++ real_opposite (x : ℝ) : 0 ≤ x*(-x) := by nlinarith
++ rat_strict (x : ℚ) : 0 < x*x := by nlinarith
++ rat_negative (x : ℚ) : x*x ≤ 0 := by nlinarith
++ rat_mixed (x y : ℚ) : 0 ≤ x*y := by nlinarith
++ rat_opposite (x : ℚ) : 0 ≤ x*(-x) := by nlinarith
++ int_strict (x : ℤ) : 0 < x*x := by nlinarith
++ int_negative (x : ℤ) : x*x ≤ 0 := by nlinarith
++ int_mixed (x y : ℤ) : 0 ≤ x*y := by nlinarith
++ int_opposite (x : ℤ) : 0 ≤ x*(-x) := by nlinarith
++ wrong_function_sign (f : ℚ → ℝ) (x : ℚ) : 0 ≤ f (x*x) := by nlinarith

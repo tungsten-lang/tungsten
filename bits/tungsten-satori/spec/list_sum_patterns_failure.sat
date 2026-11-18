@@ -1,0 +1,4 @@
+import list_sum
++ missing_nonneg (xs : list α) (f : α → ℚ) (x : α) (h : x ∈ xs) : f x ≤ sum_list xs f := sum_list_member_le.rat xs f x h
++ missing_membership (xs : list ℕ) (x : ℕ) : x ≤ sum xs := member_le_sum.nat xs x
++ invalid_eta (f : ℕ → ℕ) : (fun x => f (f x)) = f := by rfl

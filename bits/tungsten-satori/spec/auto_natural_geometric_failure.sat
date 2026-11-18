@@ -1,0 +1,22 @@
+import recurrence
+
++ nat_geometric_missing_base (s : ℕ → ℕ) (r : ℕ) (step : ∀ i, s (i+1) = s i+(r+1)^i) (n : ℕ) : r*s n+1 = (r+1)^n
+  auto
+
++ nat_geometric_missing_step (s : ℕ → ℕ) (r : ℕ) (base : s 0 = 0) (n : ℕ) : r*s n+1 = (r+1)^n
+  auto
+
++ nat_geometric_wrong_index (s : ℕ → ℕ) (r : ℕ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+(r+1)^(i+1)) (n : ℕ) : r*s n+1 = (r+1)^n
+  auto
+
++ nat_geometric_wrong_coefficient (s : ℕ → ℕ) (r : ℕ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+(r+1)^i) (n : ℕ) : (r+1)*s n+1 = (r+1)^n
+  auto
+
++ nat_geometric_missing_positive (s : ℕ → ℕ) (r : ℕ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+r^i) (n : ℕ) : (r-1)*s n+1 = r^n
+  auto
+
++ nat_geometric_zero_rate (s : ℕ → ℕ) (base : s 0 = 0) (step : ∀ i, s (i+1) = s i+0^i) (n : ℕ) : (0-1)*s n+1 = 0^n
+  auto
+
++ nat_geometric_wrong_base (s : ℕ → ℕ) (r : ℕ) (base : s 0 = 1) (step : ∀ i, s (i+1) = s i+(r+1)^i) (n : ℕ) : r*s n+1 = (r+1)^n
+  auto

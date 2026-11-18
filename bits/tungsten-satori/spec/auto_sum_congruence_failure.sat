@@ -1,0 +1,18 @@
+import arith
+
++ missing (f g : ℕ → α) (n : ℕ) : sum_below n f = sum_below n g := by auto
++ outside (f g : ℕ → α) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below (n+1) f = sum_below (n+1) g := by auto
++ unequal_ranges (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below (n+1) g := by auto
++ wrong_function (f g k : ℕ → α) (n : ℕ) (h : ∀ i < n, f i = k i) : sum_below n f = sum_below n g := by auto
++ weak (f g : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) : sum_below n f = sum_below n g := by auto
++ wrong_shift (f g : ℕ → ℤ) (a n : ℕ) (h : ∀ i < n, f (a+i) = g (a+i)) : (∑ i < n, f (a+i)) = (∑ i < n, g i) := by auto
++ missing_nested_guard (f g : ℕ → ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, f i j = g i j) : (∑ i < n, (∑ j < m+1, f i j)) = (∑ i < n, (∑ j < m+1, g i j)) := by auto
++ cycle (f g : ℕ → α) (n : ℕ) (h : sum_below n f = sum_below n g → ∀ i < n, f i = g i) : sum_below n f = sum_below n g := by auto
++ fixed_types (f g : ℕ → α) (u v : ℕ → β) (n : ℕ) (h : ∀ i < n, u i = v i) : sum_below n f = sum_below n g := by auto
++ concrete_types (f g : ℕ → ℝ) (u v : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, u i = v i) : sum_below n f = sum_below n g := by auto
++ wrong_list_type (f g : ℕ → list α) (u v : ℕ → list β) (n : ℕ) (h : ∀ i < n, u i = v i) : sum_below n f = sum_below n g := by auto
++ missing_premise (f g : ℕ → α) (n : ℕ) (P : Prop) (h : ∀ i < n, P → f i = g i) : sum_below n f = sum_below n g := by auto
+
++ wrong_instantiation (n : ℕ) (h : ∀ i < n, (poly_left i : ℚ) = poly_right i) :
+    (∑ i < n, (poly_left i : ℝ)) = (∑ i < n, poly_right i)
+  auto

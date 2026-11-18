@@ -1,0 +1,36 @@
+import arith
+opaque a : ℚ
+axiom supplied_positive : 0 < a
+
++ missing_positive (a : ℚ) (n : ℕ) : 0 < a^n
+  auto
+
++ zero_base (n : ℕ) (h : 0 < n) : 0 < (0 : ℚ)^n
+  auto
+
++ weak_strict (a b : ℚ) (n : ℕ) (h0 : 0 ≤ a) (h : a ≤ b) : a^n < b^n
+  auto
+
++ zero_exponent (a b : ℚ) (h0 : 0 ≤ a) (h : a < b) : a^0 < b^0
+  auto
+
++ missing_exponent (a : ℚ) (m n : ℕ) (h : 1 < a) : a^m ≤ a^n
+  auto
+
++ unit_strict (m n : ℕ) (h : m < n) : (1 : ℚ)^m < 1^n
+  auto
+
++ wrong_direction (a : ℚ) (m n : ℕ) (h : 1 < a) (hmn : m < n) : a^n ≤ a^m
+  auto
+
++ weak_unit_upper (a : ℚ) (n : ℕ) (h0 : 0 ≤ a) (h1 : a ≤ 1) : a^n < 1
+  auto
+
++ branch_leak (a b : ℚ) (n : ℕ) (h : 0 < a ∨ a < b) : a^n < b^n
+  auto
+
++ negative_base (a b : ℚ) (n : ℕ) (h : a < b) (hn : 0 < n) : a^n < b^n
+  auto
+
++ no_global_bound (n : ℕ) : 0 < a^n
+  auto

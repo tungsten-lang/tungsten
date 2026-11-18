@@ -1,0 +1,127 @@
+-- Finite intervals: injections, pigeonhole witnesses and bijections.
+-- The cardinality induction uses the swap argument in corpus family 094.
+import nat
+
+-> nat.range_swap (f : ℕ → ℕ) (k d x : ℕ) : ℕ := if f x + 1 = d then f k else f x
+
++ nat.inj_bound (m : ℕ) : ∀ d : ℕ, ∀ f : ℕ → ℕ, (∀ x < m, f x < d) → (∀ x < m, ∀ y < m, f x = f y → x = y) → m ≤ d
+  induction m with d0 f0 h01 h02 k ih d f hf hinj
+  · omega
+  · simp only [succ_eq_add_one.nat] at hf hinj ⊢
+    have fkd := hf k (by omega)
+    have g1 : ∀ x < k, nat.range_swap f k d x < d - 1
+      intro x hx
+      unfold nat.range_swap
+      by_cases e : f x + 1 = d
+      · simp [e]
+        by_contra c
+        have eq : f x = f k := by omega
+        have xk := hinj x (by omega) k (by omega) eq
+        omega
+      · simp [e]
+        have fxd := hf x (by omega)
+        omega
+    have g2 : ∀ x < k, ∀ y < k, nat.range_swap f k d x = nat.range_swap f k d y → x = y
+      intro x hx y hy hxy
+      unfold nat.range_swap at hxy
+      by_cases ex : f x + 1 = d
+      · by_cases ey : f y + 1 = d
+        · have eq : f x = f y := by omega
+          exact hinj x (by omega) y (by omega) eq
+        · simp [ex, ey] at hxy
+          have yk := hinj k (by omega) y (by omega) hxy
+          omega
+      · by_cases ey : f y + 1 = d
+        · simp [ex, ey] at hxy
+          have xk := hinj x (by omega) k (by omega) hxy
+          omega
+        · simp [ex, ey] at hxy
+          exact hinj x (by omega) y (by omega) hxy
+    have r := ih (d - 1) (nat.range_swap f k d) g1 g2
+    omega
+
+-- Inclusive endpoints and pairwise-distinct values, as in occurrence positions.
++ nat.inj_bound_le (m : ℕ) : ∀ n, ∀ f : ℕ → ℕ, (∀ x ≤ m, f x ≤ n) → (∀ x ≤ m, ∀ y ≤ m, x ≠ y → f x ≠ f y) → m ≤ n
+  intro n f hf hi
+  have bound : ∀ x < m + 1, f x < n + 1
+    intro x hx
+    omega [hf x (by omega)]
+  have inj : ∀ x < m + 1, ∀ y < m + 1, f x = f y → x = y
+    intro x hx y hy e
+    by_contra ne
+    exact hi x (by omega) y (by omega) ne e
+  have size := nat.inj_bound (m + 1) (n + 1) f bound inj
+  omega
+
+-- More inputs than available values give two ordered inputs with equal images.
++ nat.pigeonhole (m n : ℕ) (f : ℕ → ℕ) (large : n < m) (bound : ∀ x < m, f x < n) : ∃ x < m, ∃ y < m, x < y ∧ f x = f y
+  by_contra none
+  have inj : ∀ x < m, ∀ y < m, f x = f y → x = y
+    intro x hx y hy e
+    by_contra ne
+    by_cases lt : x < y
+    · exact none ⟨x, hx, y, hy, lt, e⟩
+    · exact none ⟨y, hy, x, hx, by omega, by symm; exact e⟩
+  have size := nat.inj_bound m n f bound inj
+  omega
+
++ nat.pigeonhole_le (m n : ℕ) (f : ℕ → ℕ) (large : n < m) (bound : ∀ x ≤ m, f x ≤ n) : ∃ x ≤ m, ∃ y ≤ m, x < y ∧ f x = f y
+  have hb : ∀ x < m + 1, f x < n + 1
+    intro x hx
+    omega [bound x (by omega)]
+  obtain ⟨x, hx, y, hy, hxy, e⟩ := nat.pigeonhole (m + 1) (n + 1) f (by omega) hb
+  exact ⟨x, by omega, y, by omega, hxy, e⟩
+
+-- Extend an injection by one input when a target value is unused.
+-> nat.range_extend (f : ℕ → ℕ) (m b x : ℕ) : ℕ := if x < m then f x else b
+
++ nat.inj_bound_of_missing (m n : ℕ) (f : ℕ → ℕ)
+    (bound : ∀ x < m, f x < n) (inj : ∀ x < m, ∀ y < m, f x = f y → x = y)
+    (b : ℕ) (hb : b < n) (missing : ∀ x < m, f x ≠ b) : m < n
+  have he : ∀ x < m + 1, nat.range_extend f m b x < n
+    intro x hx
+    unfold nat.range_extend
+    by_cases lt : x < m
+    · simp [lt]
+      exact bound x lt
+    · simp [lt]
+  have hi : ∀ x < m + 1, ∀ y < m + 1, nat.range_extend f m b x = nat.range_extend f m b y → x = y
+    intro x hx y hy e
+    unfold nat.range_extend at e
+    by_cases xl : x < m
+    · by_cases yl : y < m
+      · simp [xl, yl] at e
+        exact inj x xl y yl e
+      · simp [xl, yl] at e
+        exfalso
+        exact missing x xl e
+    · by_cases yl : y < m
+      · simp [xl, yl] at e
+        exfalso
+        exact missing y yl (by symm; exact e)
+      · omega
+  have size := nat.inj_bound (m + 1) n (nat.range_extend f m b) he hi
+  omega
+
+-- An injection between equal finite intervals hits each target exactly once.
++ nat.surjective_of_injective (n : ℕ) (f : ℕ → ℕ)
+    (bound : ∀ x < n, f x < n) (inj : ∀ x < n, ∀ y < n, f x = f y → x = y) : ∀ y < n, ∃ x < n, f x = y
+  intro y hy
+  by_contra none
+  have missing : ∀ x < n, f x ≠ y
+    intro x hx e
+    exact none ⟨x, hx, e⟩
+  have size := nat.inj_bound_of_missing n n f bound inj y hy missing
+  omega
+
++ nat.unique_preimage (n : ℕ) (f : ℕ → ℕ)
+    (bound : ∀ x < n, f x < n) (inj : ∀ x < n, ∀ y < n, f x = f y → x = y)
+    (y : ℕ) (hy : y < n) : ∃ x < n, f x = y ∧ ∀ z < n, f z = y → z = x
+  obtain ⟨x, hx, e⟩ := nat.surjective_of_injective n f bound inj y hy
+  use x
+  constructor
+  · exact hx
+  · constructor
+    · exact e
+    · intro z hz ez
+      exact inj z hz x hx (by rw [ez, e])

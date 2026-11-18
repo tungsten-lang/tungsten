@@ -136,6 +136,18 @@ use builtin_arity
   when "read_dir"
     read_dir(args[0])
 
+  when "file_pwd"
+    ccall("__w_file_pwd")
+
+  when "file_chdir"
+    ccall("__w_file_chdir", args[0])
+
+  when "file_mkdir"
+    ccall("__w_file_mkdir", args[0], args[1])
+
+  when "file_rmdir"
+    ccall("__w_file_rmdir", args[0])
+
   when "file_size"
     file_size(args[0])
 
@@ -662,7 +674,7 @@ use builtin_arity
 # List of builtin names
 builtin_names = [
   "puts", "print", "read_file", "read_file_bytes", "file?", "file_exists?", "file_directory?", "read_dir",
-  "file_size", "file_mtime_ns", "file_expand_path", "file_expand_path_base", "file_join", "file_basename", "file_dirname", "file_extname", "file_realpath", "file_readlink", "file_symlink", "write_file", "write_file_bytes", "file_stat_data", "tempfile_create", "file_unlink", "file_unlink_strict",
+  "file_pwd", "file_chdir", "file_mkdir", "file_rmdir", "file_size", "file_mtime_ns", "file_expand_path", "file_expand_path_base", "file_join", "file_basename", "file_dirname", "file_extname", "file_realpath", "file_readlink", "file_symlink", "write_file", "write_file_bytes", "file_stat_data", "tempfile_create", "file_unlink", "file_unlink_strict",
   "file_link", "file_chmod", "file_touch", "file_rename", "file_temp_for", "file_fsync", "file_fsync_parent",
   "cache_read", "cache_write",
   "exit", "type", "to_s", "to_i", "class",

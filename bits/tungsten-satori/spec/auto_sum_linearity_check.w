@@ -30,6 +30,6 @@ use proof_source
     session.run_source("opaque hidden_f : ℕ → ℝ\nopaque hidden_g : ℕ → ℝ\nopaque hidden_k : ℕ → ℝ\naxiom hidden_scale : ∀ i, hidden_f i = 3 * hidden_g i\naxiom hidden_add : ∀ i, hidden_f i = hidden_g i + hidden_k i\n+ marked_scale (n : ℕ) : (∑ i < n, hidden_f i) = 3 * (∑ i < n, hidden_g i) := by auto \[hidden_scale]\n+ marked_add (n : ℕ) : (∑ i < n, hidden_f i) = (∑ i < n, hidden_g i) + (∑ i < n, hidden_k i) := by auto \[hidden_add]\n")
     ["scale", "add"].each -> (name)
       th = session.theorems["marked_" + name]
-      if session.failures != previous || th == nil || th.hyps.size != 0 || th.tags != ["axiom:hidden_" + name, "oracle:arith", "oracle:ring"]
+      if session.failures != previous || th == nil || th.hyps.size != 0 || th.tags != ["axiom:hidden_" + name, "oracle:ring"]
         raise "automatic linearity lost or mixed pointwise assumption tags"
   << "Automatic termwise linearity passed: " + suffix

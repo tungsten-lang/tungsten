@@ -9,7 +9,7 @@
     # Per-name integer policy for the tree walker: "int"/"bigint" promote,
     # "i64"/"u64" wrap. Missing means the compiled default (wrap +/-/*,
     # promote untyped <<).
-    @hints = {}
+    @hints = nil
     # Closure capture set (capture_only): when non-nil, only these names
     # write through to the parent; any other assignment is a local of this
     # scope even if an ancestor binds the name by the time the body runs.
@@ -60,15 +60,19 @@
 
   -> set_hint(name, hint)
     if @bindings.has_key?(name)
+      if @hints == nil
+        @hints = {}
       @hints[name] = hint
     elsif writes_through?(name)
       @parent.set_hint(name, hint)
     else
+      if @hints == nil
+        @hints = {}
       @hints[name] = hint
 
   -> get_hint(name)
     if @bindings.has_key?(name)
-      if @hints.has_key?(name)
+      if @hints != nil && @hints.has_key?(name)
         return @hints[name]
       return nil
     if @parent != nil
@@ -81,7 +85,7 @@
   # local never inherits an outer binding's fixed width.
   -> slot_hint(name)
     if @bindings.has_key?(name)
-      if @hints.has_key?(name)
+      if @hints != nil && @hints.has_key?(name)
         return @hints[name]
       return nil
     if writes_through?(name)
@@ -93,8 +97,14 @@
   # while making block locals fresh exactly as Environment.new would.
   -> clear_bindings
     ccall("w_hash_clear_reuse", @bindings)
-    ccall("w_hash_clear_reuse", @hints)
+    if @hints != nil
+      ccall("w_hash_clear_reuse", @hints)
     self
+
+  -> set_block_parent(parent)
+    @parent = parent
+    if parent != nil
+      parent.note_child()
 
   # A closure or goroutine can still read this frame through its child scope.
   -> note_child

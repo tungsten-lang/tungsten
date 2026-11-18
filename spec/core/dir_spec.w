@@ -1,14 +1,6 @@
 # Dir / Directory — class-method facade over the directory intrinsics (core/dir.w).
 #
-# Every method is a class method delegating to a `file_*` / `read_dir` intrinsic.
-# The listing half (entries/children/read/ls/each/foreach/each_child/empty?/
-# exist?/directory?) is wired on both engines; pwd/current/chdir/cd/mkdir/
-# mkdir_p/rmdir need `file_pwd`, `file_chdir`, `file_mkdir` and `file_rmdir`,
-# which only the compiled engine supplies (see the capability gate below).
-#
-# Run from the repository root (it lists core/traits and spec/fixtures):
-#   bin/tungsten run --interpret spec/core/dir_spec.w
-#   bin/tungsten -o /tmp/dir_spec spec/core/dir_spec.w && /tmp/dir_spec
+# Run from the repository root (it lists core/traits and spec/fixtures).
 
 use core/dir
 
@@ -69,55 +61,42 @@ check("walk descends recursively",
       walked.sort == [walk_root, walk_root + "/nested", walk_root + "/nested/child.txt", walk_root + "/root.txt"])
 check("walk yields the root itself", walked.include?(walk_root))
 
-# ---- mutating / cwd surface (compiled engine only) ----
-# BUG: `file_pwd`, `file_chdir`, `file_mkdir` and `file_rmdir` are not wired into the
-# native interpreter — Directory.pwd raises "Undefined method 'file_pwd'" there, while the
-# compiled engine returns the working directory. This gate keeps the interpreter lane green.
-# Repro: printf 'use core/directory\n<< Directory.pwd\n' > /tmp/d.w && bin/tungsten run --interpret /tmp/d.w
-fs_native = true
-begin
+# ---- directory creation and working directory ----
+cwd = Directory.pwd
+check("pwd is a string", type(cwd) == "String")
+check("pwd is absolute", cwd.slice(0, 1) == "/")
+check("current is pwd", Directory.current == cwd)
+
+temp = Tempfile.new("tungsten_directory_spec")
+scratch = temp.path
+temp.close!()
+check("mkdir creates a directory", Directory.mkdir(scratch) == true && Directory.exist?(scratch))
+check("a fresh directory is empty", Directory.empty?(scratch))
+check("mkdir_p creates intermediate levels",
+      Directory.mkdir_p(scratch + "/a/b/c") == true && Directory.exist?(scratch + "/a/b/c"))
+check("parent of a nested tree is no longer empty", !Directory.empty?(scratch))
+check("entries sees the new child", Directory.entries(scratch) == ["a"])
+
+# chdir without a block moves the process; with a block it restores the old cwd.
+Directory.chdir(scratch)
+check("chdir moves the working directory", Directory.pwd.include?("tungsten_directory_spec"))
+Directory.chdir(cwd)
+check("chdir back", Directory.pwd == cwd)
+
+block_saw = Directory.chdir(scratch) -> ()
   Directory.pwd
-rescue e
-  fs_native = false
+check("chdir with a block returns the block value", block_saw.include?("tungsten_directory_spec"))
+check("chdir with a block restores the cwd", Directory.pwd == cwd)
 
-if fs_native
-  cwd = Directory.pwd
-  check("pwd is a string", type(cwd) == "String")
-  check("pwd is absolute", cwd.slice(0, 1) == "/")
-  check("current is pwd", Directory.current == cwd)
+cd_saw = Directory.cd(scratch) -> ()
+  Directory.pwd
+check("cd is chdir", cd_saw.include?("tungsten_directory_spec") && Directory.pwd == cwd)
 
-  scratch = "/tmp/tungsten_directory_spec"
-  Directory.rmdir(scratch + "/nested")
-  Directory.rmdir(scratch)
-  check("mkdir creates a directory", Directory.mkdir(scratch) == true && Directory.exist?(scratch))
-  check("a fresh directory is empty", Directory.empty?(scratch))
-  check("mkdir_p creates intermediate levels",
-        Directory.mkdir_p(scratch + "/a/b/c") == true && Directory.exist?(scratch + "/a/b/c"))
-  check("parent of a nested tree is no longer empty", !Directory.empty?(scratch))
-  check("entries sees the new child", Directory.entries(scratch) == ["a"])
-
-  # chdir without a block moves the process; with a block it restores the old cwd.
-  Directory.chdir(scratch)
-  check("chdir moves the working directory", Directory.pwd.include?("tungsten_directory_spec"))
-  Directory.chdir(cwd)
-  check("chdir back", Directory.pwd == cwd)
-
-  block_saw = Directory.chdir(scratch) -> ()
-    Directory.pwd
-  check("chdir with a block returns the block value", block_saw.include?("tungsten_directory_spec"))
-  check("chdir with a block restores the cwd", Directory.pwd == cwd)
-
-  cd_saw = Directory.cd(scratch) -> ()
-    Directory.pwd
-  check("cd is chdir", cd_saw.include?("tungsten_directory_spec") && Directory.pwd == cwd)
-
-  check("rmdir removes an empty directory",
-        Directory.rmdir(scratch + "/a/b/c") == true && !Directory.exist?(scratch + "/a/b/c"))
-  Directory.rmdir(scratch + "/a/b")
-  Directory.rmdir(scratch + "/a")
-  Directory.rmdir(scratch)
-  check("cleanup removed the scratch tree", !Directory.exist?(scratch))
-else
-  << "SKIP directory cwd/mkdir surface (interpreter: file_pwd/file_mkdir/file_rmdir unwired)"
+check("rmdir removes an empty directory",
+      Directory.rmdir(scratch + "/a/b/c") == true && !Directory.exist?(scratch + "/a/b/c"))
+Directory.rmdir(scratch + "/a/b")
+Directory.rmdir(scratch + "/a")
+Directory.rmdir(scratch)
+check("cleanup removed the scratch tree", !Directory.exist?(scratch))
 
 << "ALL PASS directory_spec ([passed.load()] checks)"

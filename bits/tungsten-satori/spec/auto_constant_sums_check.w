@@ -40,6 +40,6 @@ use proof_source
     previous = session.failures
     session.run_source("opaque marked_f : ℕ → ℝ\naxiom marked_constant : ∀ i, marked_f i = 2\n+ marked_total (n : ℕ) : (∑ i < n, marked_f i) = (n : ℝ)*2 := by auto \[marked_constant]\n")
     th = session.theorems["marked_total"]
-    if session.failures != previous || th == nil || th.hyps.size != 0 || th.tags != ["axiom:marked_constant", "oracle:arith", "oracle:ring"]
+    if session.failures != previous || th == nil || th.hyps.size != 0 || th.tags != ["axiom:marked_constant", "oracle:ring"]
       raise "constant sum lost its pointwise assumption tag"
   << "Automatic constant sums passed: " + suffix

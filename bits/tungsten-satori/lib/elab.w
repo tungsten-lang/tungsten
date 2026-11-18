@@ -273,7 +273,7 @@
     when :dec
       parts = e.s.split(".")
       den = int_pow_fast(10, parts[1].size)
-      t = mk_lit(q_make(parts[0].to_i * den + parts[1].to_i, den), fresh_meta)
+      t = mk_lit(q_make(zadd(zmul(parts[0].to_i, den), parts[1].to_i), den), fresh_meta)
       mark_numeric(t.ty, true)
       t
     when :id

@@ -539,6 +539,7 @@
     body = lam.b
     conn_op = q_op == OP_EX ? OP_AND : OP_IMP
     dom = nil
+    range_end = nil
     rest = nil
     if body.tag == :app && body.a.tag == :app && body.a.a.tag == :const && body.a.a.op == conn_op
       guard = body.a.b
@@ -551,12 +552,12 @@
           if ghead.op == OP_LT && ty == TY_NAT_SINGLETON
             nv = reify(ev(grhs, KEnv.new(@tt, env)))
             if nv.tag == :lit
-              dom = range_lits(0, nv.val)
+              range_end = nv.val
               rest = rest_cand
           elsif ghead.op == OP_LE && ty == TY_NAT_SINGLETON
             nv = reify(ev(grhs, KEnv.new(@tt, env)))
             if nv.tag == :lit
-              dom = range_lits(0, nv.val + 1)
+              range_end = zadd(nv.val, 1)
               rest = rest_cand
           elsif ghead.name == "mem"
             lst = reify(ev(grhs, KEnv.new(@tt, env)))
@@ -564,7 +565,7 @@
             if items != nil
               dom = items
               rest = rest_cand
-    if dom == nil
+    if dom == nil && range_end == nil
       if ty == TY_BOOL_SINGLETON
         dom = [@tt, @ff]
         rest = body
@@ -578,13 +579,14 @@
             dom[ci] = mk_const_raw(info.ctors[ci][0], ty)
             ci += 1
           rest = body
-    if dom == nil
+    if dom == nil && range_end == nil
       return nil
     residue = []
-    nd = dom.size
+    nd = range_end == nil ? dom.size : range_end
     di = 0
     while di < nd
-      v = reify(ev(rest, KEnv.new(dom[di], env)))
+      x = range_end == nil ? dom[di] : mk_nat(di)
+      v = reify(ev(rest, KEnv.new(x, env)))
       if q_op == OP_ALL
         if false?(v)
           return @ff
@@ -613,17 +615,6 @@
       @tt
     else
       @ff
-
-  -> range_lits(lo, hi)
-    if hi <= lo
-      return []
-    cnt = hi - lo
-    out = Array.new(cnt)
-    i = 0
-    while i < cnt
-      out[i] = mk_nat(lo + i)
-      i += 1
-    out
 
   # ---- primitive decisions on terms -------------------------------------------------
 
@@ -662,7 +653,7 @@
       mk_lit(zadd(v, 1), TY_NAT_SINGLETON)
     when OP_NEG
       if rt == TY_INT_SINGLETON
-        mk_lit(0 - v, rt)
+        mk_lit(zsub(0, v), rt)
       elsif rt == TY_RAT_SINGLETON || rt == TY_REAL_SINGLETON
         mk_lit(q_neg(v), rt)
       else
@@ -670,7 +661,7 @@
     when OP_ABS
       if rt == TY_INT_SINGLETON || rt == TY_NAT_SINGLETON
         if v < 0
-          mk_lit(0 - v, rt)
+          mk_lit(zsub(0, v), rt)
         else
           x
       elsif rt == TY_RAT_SINGLETON || rt == TY_REAL_SINGLETON
@@ -705,7 +696,7 @@
       when OP_ADD
         return mk_lit(zadd(a, b), at)
       when OP_MUL
-        return mk_lit(a * b, at)
+        return mk_lit(zmul(a, b), at)
       when OP_SUB
         r = zsub(a, b)
         if at == TY_NAT_SINGLETON && r < 0
@@ -752,8 +743,8 @@
   base = a
   while e > 0
     if (e & 1) == 1
-      r = r * base
+      r = zmul(r, base)
     e = e >> 1
     if e > 0
-      base = base * base
+      base = zmul(base, base)
   r

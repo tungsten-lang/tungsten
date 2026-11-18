@@ -1,3 +1,6 @@
+INTERPRETER_I64_MIN = -9223372036854775808
+INTERPRETER_I64_MAX = 9223372036854775807
+
 + Interpreter
 
   # -- Assignment --
@@ -799,7 +802,7 @@
       return true
     if type(value) != "BigInt"
       return false
-    wrap_signed_bits(value, 64) == value
+    value >= INTERPRETER_I64_MIN && value <= INTERPRETER_I64_MAX
 
   -> promote_int_hint?(hint)
     if hint == nil
@@ -1482,6 +1485,9 @@
         cap = args[0]
       return ccall("w_strbuf_new", cap)
 
+    method_key = @global_method_keys[name]
+    if method_key == nil
+      method_key = "__method__" + name
     # Lexically bound callables take priority over implicit method/builtin
     # lookup, matching compiled calls. This also lets compositions capture
     # parameters named first, last, etc. without invoking a builtin on nil.
@@ -1498,7 +1504,7 @@
       # marker after a constructor parses), and `x()` cannot be told from `x`.
       # Read the variable, as the compiled lowering does (lowering/calls.w),
       # unless a method, function or class of that name takes precedence.
-      if args.size() == 0 && block == nil && implicit_self_method(current_self(), name, 0, false, args) == nil && !@env.defined?("__method__" + name) && !@classes.has_key?(name)
+      if args.size() == 0 && block == nil && implicit_self_method(current_self(), name, 0, false, args) == nil && !@env.defined?(method_key) && !@classes.has_key?(name)
         return v
 
     # Method on current self — checked before the generic builtin table so a
@@ -1515,12 +1521,10 @@
     # the same core/base64.w autoload that the compiled loader performs before
     # consulting the global method table.
     if name in ("base64_encode" "base64_decode" "base64url_encode" "base64url_decode")
-      method_key = "__method__" + name
       if !@env.defined?(method_key)
         try_autoload_class("Base64")
 
     # Global method
-    method_key = "__method__" + name
     if @env.defined?(method_key)
       m = nil
       overloads = @function_overloads[name]

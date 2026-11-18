@@ -358,8 +358,13 @@ TY_REAL_SINGLETON = intern_ty_con0("real")
 # ---------------------------------------------------------------------------
 # Terms
 
+# Presence flags let tactics skip traversals of subterms that cannot contribute.
+TERM_MINMAX = 1
+TERM_DIVMOD = 2
+TERM_SQUARE_PRODUCT = 4
+
 + KTm
-  ro :tag, :name, :ty, :a, :b, :idx, :val, :h, :cl, :mx, :tv, :op, :vkey
+  ro :tag, :name, :ty, :a, :b, :idx, :val, :h, :cl, :mx, :tv, :op, :vkey, :search_ops
 
   # tag :var(name, ty)  :const(name, ty)  :app(a = fn, b = arg)
   #     :lam(name = hint, ty = binder type, b = body)  :bnd(idx, ty)
@@ -369,6 +374,7 @@ TY_REAL_SINGLETON = intern_ty_con0("real")
     @mx = 0
     @tv = false
     @op = OP_NONE
+    @search_ops = 0
     @vkey = nil
     case @tag
     when :var
@@ -379,9 +385,17 @@ TY_REAL_SINGLETON = intern_ty_con0("real")
     when :const
       @tv = @ty.has_var
       @op = const_opcode(@name)
+      if @name == "min" || @name == "max"
+        @search_ops = TERM_MINMAX
+      elsif @op == OP_DIV || @op == OP_MOD
+        @search_ops = TERM_DIVMOD
       @h = (str_hash(@name) * 37 + @ty.h + 2) % HASH_MOD
     when :app
       @cl = @a.cl && @b.cl
+      @search_ops = @a.search_ops | @b.search_ops
+      # Equal factors have equal hashes. The conversion checks both terms.
+      if @a.tag == :app && @a.a.op == OP_MUL && @a.b.h == @b.h
+        @search_ops = @search_ops | TERM_SQUARE_PRODUCT
       @tv = @a.tv || @b.tv
       @mx = @a.mx
       if @b.mx > @mx
@@ -391,6 +405,7 @@ TY_REAL_SINGLETON = intern_ty_con0("real")
       @h = (@a.h * 41 + @b.h * 7 + 3) % HASH_MOD
     when :lam
       @cl = @b.cl
+      @search_ops = @b.search_ops
       @tv = @ty.has_var || @b.tv
       if @b.mx > 1
         @mx = @b.mx - 1
@@ -417,8 +432,19 @@ TY_REAL_SINGLETON = intern_ty_con0("real")
   else
     v.to_s
 
+# Reuse immutable nodes built repeatedly by substitution and proof search.
+# Each slot holds one candidate. A hash collision evicts it; only an exact
+# match of all constructor arguments (including binder hints) can reuse it.
+VAR_TM_SLOTS = Array.new(16384)
+
 -> mk_var(n, ty)
-  KTm.new(:var, n, ty, nil, nil, 0, nil)
+  slot = (str_hash(n) + ty.id * 31) & (VAR_TM_SLOTS.size - 1)
+  t = VAR_TM_SLOTS[slot]
+  if t != nil && t.name == n && t.ty == ty
+    return t
+  t = KTm.new(:var, n, ty, nil, nil, 0, nil)
+  VAR_TM_SLOTS[slot] = t
+  t
 
 CONST_TM_CACHE = {}
 
@@ -494,11 +520,27 @@ LIT_CACHE = {}
 -> mk_nat(n)
   mk_lit(n, TY_NAT_SINGLETON)
 
+APP_TM_SLOTS = Array.new(65536)
+
 -> mk_app_raw(f, x)
-  KTm.new(:app, nil, nil, f, x, 0, nil)
+  slot = (f.h * 41 + x.h * 7) & (APP_TM_SLOTS.size - 1)
+  t = APP_TM_SLOTS[slot]
+  if t != nil && t.a == f && t.b == x
+    return t
+  t = KTm.new(:app, nil, nil, f, x, 0, nil)
+  APP_TM_SLOTS[slot] = t
+  t
+
+LAM_TM_SLOTS = Array.new(8192)
 
 -> mk_lam_raw(hint, ty, body)
-  KTm.new(:lam, hint, ty, nil, body, 0, nil)
+  slot = (ty.h * 43 + body.h * 11) & (LAM_TM_SLOTS.size - 1)
+  t = LAM_TM_SLOTS[slot]
+  if t != nil && t.b == body && t.ty == ty && t.name == hint
+    return t
+  t = KTm.new(:lam, hint, ty, nil, body, 0, nil)
+  LAM_TM_SLOTS[slot] = t
+  t
 
 -> tm_eq(a, b)
   if a == b
@@ -896,11 +938,22 @@ Q_ZERO = [0, 1]
 Q_ONE = [1, 1]
 Q_NEG_ONE = [-1, 1]
 
+# The mathematical integers promote at every width. Use the boxed arithmetic
+# operations even when both operands happen to fit a machine register.
+-> zadd(a, b)
+  (a ## int) + b
+
+-> zsub(a, b)
+  (a ## int) - b
+
+-> zmul(a, b)
+  (a ## int) * b
+
 -> int_gcd(a, b)
   if a < 0
-    a = 0 - a
+    a = zsub(0, a)
   if b < 0
-    b = 0 - b
+    b = zsub(0, b)
   while b != 0
     t = a % b
     a = b
@@ -913,8 +966,8 @@ Q_NEG_ONE = [-1, 1]
   if n == 0
     return Q_ZERO
   if d < 0
-    n = 0 - n
-    d = 0 - d
+    n = zsub(0, n)
+    d = zsub(0, d)
   if d == 1
     if n == 1
       return Q_ONE
@@ -939,13 +992,13 @@ Q_NEG_ONE = [-1, 1]
     return [s, 1]
   if x[1] == y[1]
     return q_make(zadd(x[0], y[0]), x[1])
-  q_make(zadd(x[0] * y[1], y[0] * x[1]), x[1] * y[1])
+  q_make(zadd(zmul(x[0], y[1]), zmul(y[0], x[1])), zmul(x[1], y[1]))
 
 -> q_sub(x, y)
   if y[0] == 0
     return x
   if x[0] == 0
-    return [0 - y[0], y[1]]
+    return [zsub(0, y[0]), y[1]]
   if x[1] == 1 && y[1] == 1
     s = zsub(x[0], y[0])
     if s == 0
@@ -953,21 +1006,21 @@ Q_NEG_ONE = [-1, 1]
     return [s, 1]
   if x[1] == y[1]
     return q_make(zsub(x[0], y[0]), x[1])
-  q_make(zsub(x[0] * y[1], y[0] * x[1]), x[1] * y[1])
+  q_make(zsub(zmul(x[0], y[1]), zmul(y[0], x[1])), zmul(x[1], y[1]))
 
 -> q_mul(x, y)
   if x[0] == 0 || y[0] == 0
     return Q_ZERO
   if x[1] == 1 && y[1] == 1
-    return [x[0] * y[0], 1]
+    return [zmul(x[0], y[0]), 1]
   g1 = int_gcd(x[0], y[1])
   g2 = int_gcd(y[0], x[1])
   n1 = g1 > 1 ? x[0] / g1 : x[0]
   d2 = g1 > 1 ? y[1] / g1 : y[1]
   n2 = g2 > 1 ? y[0] / g2 : y[0]
   d1 = g2 > 1 ? x[1] / g2 : x[1]
-  n = n1 * n2
-  d = d1 * d2
+  n = zmul(n1, n2)
+  d = zmul(d1, d2)
   if d == 1
     if n == 1
       return Q_ONE
@@ -982,13 +1035,13 @@ Q_NEG_ONE = [-1, 1]
   if x[0] == 0
     return Q_ZERO
   if y[0] < 0
-    return q_mul(x, [0 - y[1], 0 - y[0]])
+    return q_mul(x, [zsub(0, y[1]), zsub(0, y[0])])
   q_mul(x, [y[1], y[0]])
 
 -> q_neg(x)
   if x[0] == 0
     return Q_ZERO
-  [0 - x[0], x[1]]
+  [zsub(0, x[0]), x[1]]
 
 -> q_cmp(x, y)
   if x[1] == y[1]
@@ -997,8 +1050,8 @@ Q_NEG_ONE = [-1, 1]
     if x[0] > y[0]
       return 1
     return 0
-  l = x[0] * y[1]
-  r = y[0] * x[1]
+  l = zmul(x[0], y[1])
+  r = zmul(y[0], x[1])
   if l < r
     -1
   elsif l > r
@@ -1021,7 +1074,7 @@ Q_NEG_ONE = [-1, 1]
 -> int_fmod(a, b)
   if b == 0
     return a
-  zsub(a, b * int_fdiv(a, b))
+  zsub(a, zmul(b, int_fdiv(a, b)))
 
 -> int_pow(a, e)
   if e <= 0
@@ -1031,25 +1084,11 @@ Q_NEG_ONE = [-1, 1]
   exp = e
   while exp > 0
     if (exp & 1) == 1
-      r = r * base
+      r = zmul(r, base)
     exp = exp >> 1
     if exp > 0
-      base = base * base
+      base = zmul(base, base)
   r
-
-# ---------------------------------------------------------------------------
-# Overflow-safe integer addition.
-BIG_GUARD = 2305843009213693952
-
--> zadd(a, b)
-  if type(a) == "Int" && type(b) == "Int" && (a >= BIG_GUARD || a <= 0 - BIG_GUARD || b >= BIG_GUARD || b <= 0 - BIG_GUARD)
-    return (a * 4 + b * 4) / 4
-  a + b
-
--> zsub(a, b)
-  if type(a) == "Int" && type(b) == "Int" && (a >= BIG_GUARD || a <= 0 - BIG_GUARD || b >= BIG_GUARD || b <= 0 - BIG_GUARD)
-    return (a * 4 - b * 4) / 4
-  a - b
 
 # Preallocated slice copy (avoids Array#slice view-table retention and push reallocs).
 -> arr_sub(a, start, len)

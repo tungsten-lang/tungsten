@@ -142,6 +142,62 @@ expect(counts, "resumed seeds are new", fresh, true)
 retry_plan = Runner.new(bench, options.merge({"retry_errors" => true})).plan(fast, tasks)
 expect(counts, "errors are retried on request", retry_plan.size, 9)
 
+changed = Runner.new(bench, options.merge({"scale" => 2}))
+rejected = false
+begin
+  changed.plan(fast, tasks)
+rescue e
+  rejected = e.to_s.include?("incompatible resume")
+expect(counts, "budget changes fail during planning", rejected, true)
+# Existing records can lack newer fields, or the task/adapter can have changed.
+coin_config = bench.select_algos("fake/coin")[0]
+mutations = [{"target_rank" => 6}, {"start_sha256" => "different"}, {"algo_command" => "new flags"}, {"start_sha256" => nil}]
+mutations.each -> (mutation)
+  rejected = false
+  begin
+    runner.check_resume(coin[0].merge(mutation), tasks[0], coin_config)
+  rescue e
+    rejected = e.to_s.include?("incompatible resume")
+  expect(counts, "resume detects " + mutation.keys[0], rejected, true)
+coin.each -> (rec)
+  if rec["hit"]
+    path = out + "/schemes/fake.coin/2x2x2-" + rec["seed"].to_s + ".mfw"
+    expect(counts, "archived digest", rec["scheme_sha256"], Crypto:SHA256.hexdigest(read_file(path)))
+
+# Make schemes a regular file so that the certificate cannot be published.
+broken_out = root + "/broken"
+File.mkdir_p(broken_out)
+write_file(broken_out + "/schemes", "occupied")
+single = options.merge({"out" => broken_out, "jobs" => 1, "runs" => 1})
+coin_algo = bench.select_algos("fake/coin")
+failed = false
+begin
+  Runner.new(bench, single).run(coin_algo, tasks)
+rescue e
+  failed = e.to_s.include?("scratch retained")
+expect(counts, "publication failure stops the run", failed, true)
+expect(counts, "failed hit was never appended", records_of(broken_out, "fake.coin").size, 0)
+scratch = broken_out + "/runs/fake.coin/2x2x2/1002/scheme.mfw"
+expect(counts, "failed hit retained for recovery", File.exists?(scratch), true)
+File.rm(broken_out + "/schemes")
+expect(counts, "retry succeeds", Runner.new(bench, single).run(coin_algo, tasks), true)
+expect(counts, "retry preserves original scratch", File.exists?(scratch), true)
+
+# Point the journal at a missing directory to fail the append after publication.
++ BrokenJournalRunner < Runner
+  -> records_path(algo)
+    self.out + "/missing-parent/journal.jsonl"
+
+journal_out = root + "/journal"
+failed = false
+begin
+  BrokenJournalRunner.new(bench, single.merge({"out" => journal_out})).run(coin_algo, tasks)
+rescue e
+  failed = e.to_s.include?("scratch retained")
+expect(counts, "append failure stops the run", failed, true)
+expect(counts, "certificate published before append", File.exists?(journal_out + "/schemes/fake.coin/2x2x2-1002.mfw"), true)
+expect(counts, "append failure preserves scratch", File.exists?(journal_out + "/runs/fake.coin/2x2x2/1002/scheme.mfw"), true)
+
 # 3. Budget enforcement: a CPU-bound loop, ended by the CPU limit, two seeds.
 spin_options = options.merge({"experiment" => "spin", "runs" => 2, "jobs" => 2})
 spin_runner = Runner.new(bench, spin_options)

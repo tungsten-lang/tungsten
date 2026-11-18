@@ -60,10 +60,36 @@ expect(counts, "negative period", ffwd_policy(c, -1, 256, 1, 8, 0), 0)
 expect(counts, "negative stall", ffwd_policy(c, 2000, -1, 1, 8, 0), 0)
 expect(counts, "no-pair flag range", ffwd_policy(c, 2000, 256, 2, 8, 0), 0)
 expect(counts, "negative slack", ffwd_policy(c, 2000, 256, 1, -1, 0), 0)
-expect(counts, "proposal mode range", ffwd_policy(c, 2000, 256, 1, 8, 2), 0)
+expect(counts, "proposal mode range", ffwd_policy(c, 2000, 256, 1, 8, 3), 0)
 expect(counts, "rejected settings change nothing", c[46] == 2000 && c[47] == 256 && c[49] == 8 && c[52] == 0, true)
 expect(counts, "valid settings", ffwd_policy(c, 500, 0, 0, 2, 1), 1)
 expect(counts, "settings installed", [c[46], c[47], c[48], c[49], c[52]].to_s, [500, 0, 0, 2, 1].to_s)
+
+# In the naive 2x3x4 tensor the factors repeat with three different
+# multiplicities. Every unordered (axis, slot, slot) must occur exactly once.
+-> check_rect_pairs(counts, st, index) (Hash i64[] i64[])
+  pairs = {}
+  valid = true
+  bucket = 0 ## i64
+  while bucket < index[2]
+    id = index[index[24]+bucket] ## i64
+    axis = id / index[1] ## i64
+    count = ffwd_bucket_pairs(st, index, id, -1) ## i64
+    ordinal = 0 ## i64
+    while ordinal < count
+      ffwd_bucket_pairs(st, index, id, ordinal)
+      first_slot = index[54] ## i64
+      second_slot = index[55] ## i64
+      key = [axis, first_slot < second_slot ? first_slot : second_slot, first_slot < second_slot ? second_slot : first_slot].to_s
+      valid = false if first_slot == second_slot || pairs.key?(key) || st[st[14]+3*first_slot+axis] != st[st[14]+3*second_slot+axis]
+      pairs[key] = true
+      ordinal += 1
+    bucket += 1
+  expect(counts, "enumeration contains only unique legal pairs", valid, true)
+  expect(counts, "all legal pairs of the rectangular start", pairs.size, 6*6 + 12*1 + 8*3)
+
+rect = walker(2, 3, 4, 42, 2)
+check_rect_pairs(counts, rect[0], rect[1])
 
 # 3. Uniform proposals without a guard or extra triggers replay the packed fleet walker.
 fleet = walker(3, 3, 3, 4242, 2)
@@ -99,7 +125,7 @@ run(untouched, tail[1])
 expect(counts, "watching does not change the walk", snapshot(untouched).to_s, snapshot(stop_at).to_s)
 
 # 5. Every switch keeps the walk exact and the counters consistent.
-settings = [[2000, 256, 1, 8, 0, 2], [2000, 256, 1, 8, 1, 2], [2000, 256, 1, 8, 0, 1], [2000, 256, 1, 8, 0, 3], [500, 256, 1, 8, 0, 2], [8000, 256, 1, 8, 0, 2], [0, 0, 1, 8, 0, 2], [2000, 0, 1, 8, 0, 2], [0, 0, 0, 8, 0, 2], [2000, 256, 1, 0, 0, 2], [2000, 256, 1, 2, 0, 2], [2000, 256, 1, 16, 0, 2], [2000, 256, 1, 8, 1, 3]]
+settings = [[2000, 256, 1, 8, 2, 2], [2000, 256, 1, 8, 0, 2], [2000, 256, 1, 8, 1, 2], [2000, 256, 1, 8, 0, 1], [2000, 256, 1, 8, 0, 3], [500, 256, 1, 8, 0, 2], [8000, 256, 1, 8, 0, 2], [0, 0, 1, 8, 0, 2], [2000, 0, 1, 8, 0, 2], [0, 0, 0, 8, 0, 2], [2000, 256, 1, 0, 0, 2], [2000, 256, 1, 2, 0, 2], [2000, 256, 1, 16, 0, 2], [2000, 256, 1, 8, 1, 3]]
 settings.each -> (s)
   label = s.to_s
   x = walker(3, 3, 3, 31337, s[5])

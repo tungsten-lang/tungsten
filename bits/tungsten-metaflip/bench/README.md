@@ -106,6 +106,7 @@ exactness verifier. The tool supplies moves, trace and its own diagnostics.
 | `status` | `ok`, or `error` with `error` set (infrastructure failure; excluded from all statistics) |
 | `target_rank`, `start_rank`, `budget_cpu_s` | copied from the task (the budget after `--budget-scale`) |
 | `hit` | the classification used by all statistics: tool claim, verified exact, scheme rank `<= target`, and `cpu_s_total <= budget_cpu_s` |
+| `start_sha256`, `algo_command` | SHA-256 of the starting MFW1 bytes and the configured adapter command with its switches |
 | `tool_hit`, `exact` | the tool's claim; the verifier's verdict (`null`: no scheme, or verification disabled) |
 | `best_rank` | best rank reported by the tool (`null` if unreported) |
 | `cpu_s_total` | CPU seconds of the timed section (the tool process and its descendants); the whole adapter tree when the adapter reports none |
@@ -195,7 +196,7 @@ campaign behaviour, and a run without options is byte-identical to the walker be
 
 | switch | values | default | effect |
 | --- | --- | --- | --- |
-| `--proposal` | `directed`, `uniform` | `directed` | legal-bucket proposals (a uniform legal bucket, a member, an equal-factor partner), or a uniform term, position and partner as the packed fleet walker draws them; a draw without a partner is a void proposal |
+| `--proposal` | `directed`, `uniform`, `legal-pair` | `directed` | legal-bucket proposals (a uniform legal bucket, a member, an equal-factor partner), or a uniform term, position and partner as the packed fleet walker draws them; a draw without a partner is a void proposal. `legal-pair` samples uniformly among all (axis, ordered pair of distinct terms with an equal factor) |
 | `--guard` | `nonbacktracking`, `none`, `tabu` | `nonbacktracking` | reject a proposal that returns to the current or previous state; no guard; also reject a hit in a direct-mapped history (`--history N`, a power of two, default 4096) |
 | `--split-period` | `P >= 0` | `2000` | rank-raising split every `P` proposals (0: never) |
 | `--split-stall` | `R >= 0` | `256` | split, and forget the history, after `R` consecutive rejections (0: never) |
@@ -211,7 +212,7 @@ campaign behaviour, and a run without options is byte-identical to the walker be
 literature). The uniform proposal distribution with `--guard none --split-stall 0 --split-no-pair off` makes the same decisions as the packed
 fleet walker `ffws_work`, bit for bit (`spec/bench_walker_test.w`); with the default guard and triggers it isolates the proposal distribution alone.
 
-Variants in `algos.tsv` (one factor at a time from `V0`): `uniform`; `guard-none`, `guard-tabu`; `split-p500`, `split-p8000` (period);
+Variants in `algos.tsv` (one factor at a time from `V0`): `legal-pair`, `uniform`; `guard-none`, `guard-tabu`; `split-p500`, `split-p8000` (period);
 `split-nopair` (only when no legal pair exists), `split-nostall` (without the 256-rejection trigger), `split-never`; `slack-0`, `slack-2`, `slack-4`, `slack-16`;
 `restart-100k`, `restart-1M`.
 
@@ -233,7 +234,9 @@ bench/metascore summary --in DIR|FILE[,...] [--experiment NAME] [--reference ALG
 
 `--out` defaults to `~/.tungsten/metaflip/experiments/record-hunt-20260926/work/eval/NAME/`; it holds `<algo>.<variant>.jsonl`, `schemes/` (the scheme of every hit),
 `bin/` (the walker, built once per source state), `runs/` (scratch directories, removed after a clean run unless `--keep-runs`) and `invocations.log`.
-Runs are resumable: a finished `(experiment, algo, task, seed)` row is skipped on the next invocation; `--n` may grow between invocations.
+Runs are resumable: a finished `(experiment, algo, task, seed)` row is skipped on the next invocation; `--n` may grow between invocations. Before launching work the runner compares each selected task's CPU budget, target rank and starting-scheme digest, and each selected algorithm's adapter command, against earlier records of the experiment. Use a new experiment when these change or when older records lack the digest or command. Older records still work in metascore.
+
+The runner stages each hit certificate beside its destination, checks its SHA-256, and publishes it before appending the run record. A publication or record-write failure stops new launches and reports the retained scratch directory. A retry uses a fresh directory.
 `--jobs` is the number of concurrent runs (default 4). Hits count in `metascore` only when the verifier approved them (`--unverified` also counts hits without a verdict).
 Running the `.w` files with `bin/tungsten FILE ...` needs a bare `--` before the options; the launchers avoid that.
 

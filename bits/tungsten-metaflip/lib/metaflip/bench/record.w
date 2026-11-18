@@ -68,7 +68,15 @@ use format
 
   # Appends the record to a JSONL file; false when the write failed.
   -> .append(path, rec)
-    ccall("__w_append_file", path, Record.encode(rec) + "\n")
+    line = Record.encode(rec) + "\n"
+    if File.exists?(path) && File.size(path) > 0
+      file = File.open(path, "rb")
+      begin
+        file.seek(-1, 2)
+        line = "\n" + line if file.read(1) != "\n"
+      ensure
+        file.close()
+    ccall("__w_append_file", path, line)
 
   # The complete records of a JSONL file, in order. A line that is torn or not
   # a record (the file may end inside a write) is skipped.

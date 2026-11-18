@@ -1,6 +1,7 @@
 # Algorithms (bench/README.md, section 2): name, adapter command, note.
 algo	command	notes
 metaflip/V0	{bench}/adapters/metaflip {task} {seed} {budget} {out}	campaign walker: directed legal-bucket proposals, nonbacktracking guard, split every 2000 proposals, on 256 consecutive rejections and without a legal pair, slack 8
+metaflip/legal-pair	{bench}/adapters/metaflip --proposal legal-pair {task} {seed} {budget} {out}	V0 with proposals uniform over oriented equal-factor pairs across all three axes
 metaflip/uniform	{bench}/adapters/metaflip --proposal uniform {task} {seed} {budget} {out}	V0 with proposals drawn uniformly over terms, positions and partners
 metaflip/guard-none	{bench}/adapters/metaflip --guard none {task} {seed} {budget} {out}	V0 without a guard
 metaflip/guard-tabu	{bench}/adapters/metaflip --guard tabu {task} {seed} {budget} {out}	V0 with the tabu history guard (4096 entries)

@@ -10,8 +10,8 @@
 #   --json                  print a one-line JSON summary after the result line
 #   --cpu-budget SECONDS    stop once this process has used that much CPU time
 #                           (STEPS may then be `unlimited`)
-#   --proposal directed|uniform
-#                           legal-bucket proposals, or uniform term/position/partner
+#   --proposal directed|uniform|legal-pair
+#                           sample by legal bucket, by term/position, or by legal pair
 #   --guard nonbacktracking|none|tabu     (tabu table size: --history N, default 4096)
 #   --split-period P        split every P proposals, 0: never (default 2000)
 #   --split-stall R         split and forget the history after R consecutive
@@ -212,7 +212,7 @@ VALUED = ["--target", "--cpu-budget", "--proposal", "--guard", "--history", "--s
 
 -> usage()
   << "usage: wide-rect-walk NxMxP SEED.mfw OUTPUT.mfw STEPS [NONCE] [options]"
-  << "options: --target R --trace --json --cpu-budget SECONDS --proposal directed|uniform"
+  << "options: --target R --trace --json --cpu-budget SECONDS --proposal directed|uniform|legal-pair"
   << "  --guard nonbacktracking|none|tabu --history N --split-period P --split-stall R"
   << "  --split-no-pair on|off --slack K --restart X"
   exit(2)
@@ -260,7 +260,7 @@ stall = option_number(opts, "--split-stall", 256) ## i64
 no_pair = option_switch(opts, "--split-no-pair", 1) ## i64
 slack = option_number(opts, "--slack", 8) ## i64
 restart = option_number(opts, "--restart", 0) ## i64
-if guards[guard_name] == nil || (proposal_name != "directed" && proposal_name != "uniform") || target < 0 || history < 2 || period < 0 || stall < 0 || no_pair < 0 || slack < 0 || restart < 0
+if guards[guard_name] == nil || (proposal_name != "directed" && proposal_name != "uniform" && proposal_name != "legal-pair") || target < 0 || history < 2 || period < 0 || stall < 0 || no_pair < 0 || slack < 0 || restart < 0
   << "invalid option value"
   exit(2)
 raw = read_file(positional[1])
@@ -287,6 +287,8 @@ if opts["--json"] != nil
 proposal = 0 ## i64
 if proposal_name == "uniform"
   proposal = 1
+elsif proposal_name == "legal-pair"
+  proposal = 2
 # Only a non-default switch or a watch reaches the walker; the campaign call path stays untouched.
 custom = 0 ## i64
 if proposal != 0 || period != 2000 || stall != 256 || no_pair != 1 || slack != 8

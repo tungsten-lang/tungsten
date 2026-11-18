@@ -13,10 +13,12 @@ use scheme
 # used, then two term-fingerprint caches indexed by stable live slot.
 # Dirty bucket IDs are kept in header 32..43; length is header[23].
 # Header 44/45 is scratch for the fused fingerprint calculation.
+# Word 53 requests an index refresh; 54/55 hold a selected legal pair. In
+# legal-pair mode the witness table holds each bucket's unordered pair count.
 # Policy words 46..52 (ffwd_init installs the campaign values; ffwd_policy and
 # ffwd_watch change them): split period, stall threshold, split on no legal
 # pair, split slack over the best rank, target rank, report threshold and
-# proposal mode (0 directed legal buckets, 1 uniform term/position).
+# proposal mode (0 directed legal buckets, 1 uniform term/position, 2 uniform legal pair).
 -> ffwd_words(st, history) (i64[] i64) i64
   64+9*(st[3]+1)+3*history+2*st[2]
 
@@ -113,6 +115,29 @@ use scheme
     return 2
   0
 
+# Enumerate unordered equal-factor pairs in a single hash chain. A negative
+# ordinal counts all pairs. Otherwise store its two live slots in c[54..55].
+-> ffwd_bucket_pairs(st, c, id, ordinal) (i64[] i64[] i64 i64) i64
+  axis=id / c[1] ## i64
+  links=st[20]+axis*st[2] ## i64
+  hashes=st[22]+axis*st[2] ## i64
+  stride=st[1] ## i64
+  base=st[14]+axis*stride ## i64
+  count=0 ## i64
+  a=st[st[19]+id]-1 ## i64
+  while a>=0
+    b=st[links+a]-1 ## i64
+    while b>=0
+      if st[hashes+a]==st[hashes+b] && ffws_equal(st,base+3*a*stride,st,base+3*b*stride,stride)==1
+        if count==ordinal
+          c[54]=a
+          c[55]=b
+          return count
+        count+=1
+      b=st[links+b]-1
+    a=st[links+a]-1
+  count
+
 # Refresh only buckets touched by a transaction. A witness is an actual
 # equal-factor pair, not a hash collision. The index never selects a singleton.
 -> ffwd_refresh(st, c, id) (i64[] i64[] i64) i64
@@ -121,6 +146,11 @@ use scheme
   head=st[st[19]+id] ## i64
   witness=0-1 ## i64
   a=head ## i64
+  if c[52]==2
+    count=ffwd_bucket_pairs(st,c,id,-1) ## i64
+    if count>0
+      witness=count
+    a=0
   while a!=0 && witness<0
     b=st[st[20]+axis*cap+a-1] ## i64
     while b!=0
@@ -273,6 +303,14 @@ use scheme
   first=0 ## i64
   second=0 ## i64
   axis=0 ## i64
+  # The active IDs are identical under either policy. Rebuild their payloads
+  # on a policy change; subsequent transactions update only dirty buckets.
+  if c[53]!=0
+    idx=0 ## i64
+    while idx<c[2]
+      ffwd_refresh(st,c,c[c[24]+idx])
+      idx+=1
+    c[53]=0
   if c[52]==0
     if c[2]==0
       return ffwd_void(st,c)
@@ -297,6 +335,32 @@ use scheme
       second=ffws_partner(st,first,axis,word)
     if second<0
       return 0-1
+  elsif c[52]==2
+    if c[2]==0
+      return ffwd_void(st,c)
+    total=0 ## i64
+    idx=0 ## i64
+    while idx<c[2]
+      total+=c[c[26]+c[c[24]+idx]]
+      idx+=1
+    # Each pair has two orientations. The rank cap bounds this below 2^31.
+    span=2*total ## i64
+    limit=2147483648-(2147483648 % span) ## i64
+    word=ffws_rand(st) ## i64
+    while word>=limit
+      word=ffws_rand(st)
+    draw=word % span ## i64
+    ordinal=draw / 2 ## i64
+    idx=0
+    id=c[c[24]] ## i64
+    while ordinal>=c[c[26]+id]
+      ordinal-=c[c[26]+id]
+      idx+=1
+      id=c[c[24]+idx]
+    axis=id / c[1]
+    ffwd_bucket_pairs(st,c,id,ordinal)
+    first=c[54+(draw & 1)]
+    second=c[55-(draw & 1)]
   else
     if st[4]<2
       return ffwd_void(st,c)
@@ -387,14 +451,16 @@ use scheme
 # values: a split every `period` proposals (0: never), on a stall of `stall`
 # consecutive rejections (0: never; the history is forgotten too) and when no
 # legal pair exists (`no_pair`), never above best+`slack`; `proposal` 0 samples
-# legal buckets, 1 samples term, position and partner uniformly.
+# legal buckets, 1 draws by term and position, 2 draws by oriented legal pair.
 -> ffwd_policy(c, period, stall, no_pair, slack, proposal) (i64[] i64 i64 i64 i64 i64) i64
-  if period<0 || stall<0 || slack<0 || (no_pair!=0 && no_pair!=1) || (proposal!=0 && proposal!=1)
+  if period<0 || stall<0 || slack<0 || (no_pair!=0 && no_pair!=1) || (proposal<0 || proposal>2)
     return 0
   c[46]=period
   c[47]=stall
   c[48]=no_pair
   c[49]=slack
+  if proposal!=c[52] && (proposal==2 || c[52]==2)
+    c[53]=1
   c[52]=proposal
   1
 

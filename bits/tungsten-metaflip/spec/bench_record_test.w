@@ -46,6 +46,8 @@ expect(counts, "append again", Record.append(path, back), true)
 ccall("__w_append_file", path, "{\"not\":\"a record\"}\n")
 ccall("__w_append_file", path, "{\"schema\":1,\"exp")
 expect(counts, "loading skips the torn and the foreign line", Record.load(path).size, 2)
+expect(counts, "retry after torn write", Record.append(path, rec), true)
+expect(counts, "new record survives a torn predecessor", Record.load(path).size, 3)
 File.rm(path)
 expect(counts, "a missing file has no records", Record.load(path).size, 0)
 

@@ -27,6 +27,7 @@ use walker
     @verify = self.option("verify", "hits")
     @verifier = Verifier.new(@bench, self.option("verifier", "ruby"))
     @starts = {}
+    @start_hashes = {}
     @tally = {"runs" => 0, "hits" => 0, "errors" => 0, "false_claims" => 0}
     @host = Proc.hostname()
     @commit = ""
@@ -63,12 +64,40 @@ use walker
   # The jobs still to run for the selected algorithms and tasks.
   -> plan(algos, tasks)
     records = []
+    selected_tasks = {}
+    selected_algos = {}
+    tasks.each -> (task)
+      selected_tasks[task.id] = task
     algos.each -> (algo)
-      Record.load(self.records_path(algo)).each -> (rec)
-        records.push(rec)
+      selected_algos[algo.name] = algo
+    if File.directory?(@out)
+      File.children(@out).each -> (name)
+        if name.ends_with?(".jsonl")
+          Record.load(@out + "/" + name).each -> (rec)
+            if rec["experiment"] == @experiment
+              self.check_resume(rec, selected_tasks[rec["task"]], selected_algos[rec["algo"]])
+              records.push(rec)
     done = Plan.finished(@experiment, records, self.option("retry_errors", false))
     order_seed = self.option("order_seed", Stats.seed_of(@experiment))
     Plan.jobs(@experiment, algos, tasks, self.option("runs", nil), order_seed, done)
+
+  # The adapter and the record both express CPU seconds to millisecond precision.
+  -> budget(task)
+    Format.trimmed(task.budget_cpu_s * @scale, 3).to_f
+
+  -> check_resume(rec, task, algo)
+    field = nil
+    if task != nil
+      if rec["budget_cpu_s"] == nil || rec["budget_cpu_s"].to_f != self.budget(task)
+        field = "CPU budget"
+      elsif rec["target_rank"] != task.target
+        field = "target rank"
+      elsif rec["start_sha256"] != self.start_hash(task)
+        field = "starting-scheme digest"
+    if algo != nil && rec["algo_command"] != algo.command
+      field = "algorithm command"
+    if field != nil
+      raise "incompatible resume for " + rec["task"] + " / " + rec["algo"] + ": " + field + " differs or is unknown; use a new experiment"
 
   # Runs everything the plan lists; false when interrupted.
   -> run(algos, tasks)
@@ -91,8 +120,9 @@ use walker
     @finished = 0
     next_job = 0 ## i64
     running = []
-    while next_job < @total || running.size > 0
-      while running.size < @slots && next_job < @total
+    @storage_error = nil
+    while (next_job < @total && @storage_error == nil) || running.size > 0
+      while running.size < @slots && next_job < @total && @storage_error == nil
         running.push(self.launch(jobs[next_job]))
         next_job += 1
       still = []
@@ -117,12 +147,17 @@ use walker
         << "interrupted after " + @finished.to_s + " of " + @total.to_s + " runs"
         return false
       Proc.sleep_ms(4) if !progressed
+    raise @storage_error if @storage_error != nil
     true
 
   # The text of the start scheme of a task, generated once.
   -> start_text(task)
     @starts[task.id] = Start.text(@bench, task) if !@starts.key?(task.id)
     @starts[task.id]
+
+  -> start_hash(task)
+    @start_hashes[task.id] = Crypto:SHA256.hexdigest(self.start_text(task)) if !@start_hashes.key?(task.id)
+    @start_hashes[task.id]
 
   -> run_dir(algo, task, seed)
     @out + "/runs/" + algo.slug + "/" + task.slug + "/" + seed.to_s
@@ -156,10 +191,15 @@ use walker
     algo = job["algo"]
     seed = job["seed"]
     dir = self.run_dir(algo, task, seed)
-    system("rm -rf " + Shell.quote(dir))
+    # A retry must preserve the diagnostics and certificate of a failed write.
+    base = dir
+    attempt = 0
+    while File.exists?(dir)
+      attempt += 1
+      dir = base + "-retry-" + attempt.to_s
     File.mkdir_p(dir)
     write_file(dir + "/start.mfw", self.start_text(task))
-    budget = task.budget_cpu_s * @scale ## f64
+    budget = self.budget(task) ## f64
     cpu_limit = Math.ceil(budget).to_i + 2 ## i64
     values = {"bench" => @bench.dir, "task" => task.id, "seed" => seed, "budget" => Format.trimmed(budget, 3), "out" => dir}
     command = Shell.expand(algo.command, values)
@@ -189,24 +229,45 @@ use walker
   -> finish(job, ended)
     @finished += 1
     rec = self.classify(job, ended)
-    Record.append(self.records_path(job["algo"]), rec)
+    dir = job["dir"]
+    begin
+      self.archive(job, rec) if rec["hit"] == true
+      if !Record.append(self.records_path(job["algo"]), rec)
+        raise "could not append benchmark record"
+    rescue e
+      @storage_error = "benchmark write failed; scratch retained at " + dir + ": " + e.to_s
+      << @storage_error
+      return nil
     @tally["runs"] += 1
     @tally["hits"] += 1 if rec["hit"] == true
     @tally["errors"] += 1 if rec["status"] != "ok"
     @tally["false_claims"] += 1 if rec["tool_hit"] == true && rec["exact"] == false
-    self.keep(job, rec)
+    system("rm -rf " + Shell.quote(dir)) if rec["status"] == "ok" && !self.option("keep_runs", false)
     verdict = rec["status"] != "ok" ? "error" : (rec["hit"] ? "hit" : "miss")
     << "\[" + @finished.to_s + "/" + @total.to_s + "\] " + job["algo"].name + " " + job["task"].id + " seed=" + job["seed"].to_s + " " + verdict + " cpu=" + Format.trimmed(ended.cpu_s, 3) + "s"
     ccall("w_flush")
 
-  # Keeps the scheme of a hit and removes the scratch directory of a clean run.
-  -> keep(job, rec)
-    dir = job["dir"]
-    if rec["hit"] == true
-      target = @out + "/schemes/" + job["algo"].slug
-      File.mkdir_p(target)
-      system("cp " + Shell.quote(dir + "/scheme.mfw") + " " + Shell.quote(target + "/" + job["task"].slug + "-" + job["seed"].to_s + ".mfw"))
-    system("rm -rf " + Shell.quote(dir)) if rec["status"] == "ok" && !self.option("keep_runs", false)
+  # Publish verified bytes before the record that will cause resume to skip this run.
+  -> archive(job, rec)
+    target = @out + "/schemes/" + job["algo"].slug
+    File.mkdir_p(target)
+    path = target + "/" + job["task"].slug + "-" + job["seed"].to_s + ".mfw"
+    text = read_file(job["dir"] + "/scheme.mfw")
+    raise "missing hit certificate" if text == nil
+    digest = Crypto:SHA256.hexdigest(text)
+    if rec["scheme_sha256"] != nil && rec["scheme_sha256"] != digest
+      raise "certificate differs from the adapter digest"
+    temporary = file_temp_for(path)
+    raise "cannot stage certificate at " + path if temporary == nil
+    begin
+      raise "certificate write failed" unless write_file(temporary, text)
+      copy = read_file(temporary)
+      raise "certificate copy differs" if copy == nil || Crypto:SHA256.hexdigest(copy) != digest
+      raise "certificate sync failed" unless file_fsync(temporary)
+      File.atomic_replace(temporary, path)
+    ensure
+      File.rm(temporary) if File.exists?(temporary)
+    rec["scheme_sha256"] = digest
 
   # Signals of the CPU limit that ends a run: SIGXCPU or SIGKILL of the adapter, as the shell's 128+signal.
   -> cpu_limit_exit?(ended)
@@ -230,6 +291,8 @@ use walker
       error = "no result.json"
     result = {} if result == nil
     rec = {"schema" => 1, "experiment" => @experiment, "algo" => algo.name, "variant" => algo.variant, "task" => task.id, "index" => job["index"], "seed" => job["seed"], "status" => "ok", "error" => nil}
+    rec["algo_command"] = algo.command
+    rec["start_sha256"] = self.start_hash(task)
     rec["target_rank"] = task.target
     rec["start_rank"] = Start.rank(self.start_text(task))
     rec["budget_cpu_s"] = job["budget"]

@@ -1,0 +1,11 @@
+--- a/bits/tungsten-wassat/lib/solver.w
++++ b/bits/tungsten-wassat/lib/solver.w
+@@ -7346,7 +7346,7 @@
+               k += 1
+             k = n if k >= pos
+           if k < n
+-            if st[13] == 1 && n > 8 && n < 32768
++            if n < 32768 && ((st[13] == 1 && n > 8) || (n >= 64 && (pos > 2 || k >= 32)))
+               ar[stx - 1] = 2147483648 | (k << 15) | n
+             repl = ar[stx + k]
+             ar[stx + k] = neg

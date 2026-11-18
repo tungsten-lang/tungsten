@@ -1,0 +1,213 @@
+--- a/bits/tungsten-wassat/lib/solver.w
++++ b/bits/tungsten-wassat/lib/solver.w
+@@ -149,7 +149,7 @@
+     wassat_query_keep(query_owner, @hstate, @hstate.size * 8) if query_owner != nil
+     @rassign = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 1] : i64[1]
+     wassat_query_keep(query_owner, @rassign, @rassign.size * 8) if query_owner != nil
+-    @pstate = i64[14] # qhead / tsize / conflict / bail / props / chrono; [12] ticks, [13] saved positions
++    @pstate = i64[35] # qhead / tsize / conflict / bail / props / chrono; [12] ticks, [13] saved positions
+     wassat_query_keep(query_owner, @pstate, @pstate.size * 8) if query_owner != nil
+     # Native snapshot counters: phase saves/copied/skipped at 6..8, and
+     # spine saves/scanned/skipped at 9..11. Keep wide work counts unboxed:
+@@ -7201,6 +7201,24 @@
+     i += 1
+   0
+
++# Logarithmic replacement-scan histogram for the diagnostic build.
++-> wassat_scan_profile_bin(depth) (i64) i64
++  case
++  when depth == 1
++    0
++  when depth == 2
++    1
++  when depth <= 4
++    2
++  when depth <= 8
++    3
++  when depth <= 16
++    4
++  when depth <= 32
++    5
++  else
++    6
++
+ -> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i32[] i8[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i32[] i64[] i64 i64[] i64[]) i64
+   word_mask = 4294967295 ## i64
+   qhead = st[0]
+@@ -7213,6 +7231,20 @@
+   # two lists it scans, one per long clause it has to open. Budgets and
+   # benchmark limits in ticks do not depend on what else the machine runs.
+   ticks = 0
++  block_hit = 0 ## i64
++  block_miss = 0 ## i64
++  other_hit = 0 ## i64
++  scans = 0 ## i64
++  probes = 0 ## i64
++  moves = 0 ## i64
++  true_moves = 0 ## i64
++  exhausted = 0 ## i64
++  wraps = 0 ## i64
++  tail_probes = 0 ## i64
++  binary_entries = 0 ## i64
++  ternary_scans = 0 ## i64
++  recycle_words = 0 ## i64
++  grow_words = 0 ## i64
+   while qhead < tsize && conflict < 0 && bail == 0
+     p = tr[qhead] ## i64
+     qhead += 1
+@@ -7240,6 +7272,7 @@
+     ticks += 1 + ((bd[bdi + 1] + 7) >> 3)
+     while b >= blo && conflict < 0
+       pay = blp[b] ## i64
++      binary_entries += 1
+       b -= 1
+       # the other literal is stored as a LIT INDEX, so its truth is one byte
+       # load with no sign handling — and consecutive entries are contiguous,
+@@ -7286,10 +7319,12 @@
+       # instead of being re-fetched per entry (stores on the clause-inspect
+       # paths below otherwise pin them inside the loop body)
+       while bv > 0 && j > lo
++        block_hit += 1
+         j -= 1
+         e = wp[j]
+         bv = lasg[e & word_mask]
+       if bv > 0
++        block_hit += 1
+         j -= 1
+       else
+         # The entry carries the clause's ARENA OFFSET, not its index, so
+@@ -7298,6 +7333,7 @@
+         # dependent miss per inspected clause instead of two, and no
+         # clause-table descriptor on this path at all.
+         stx = e >> 32 ## i64
++        block_miss += 1
+         ticks += 1
+         n = ar[stx - 1] & word_mask ## i64
+         # Bit 31 of the length word marks a saved replacement position:
+@@ -7319,6 +7355,7 @@
+         oli = (((other ^ so) - so) << 1) + (so & 1)
+         ov = lasg[oli]
+         if ov > 0
++          other_hit += 1
+           wp[j] = cbase | oli
+           j -= 1
+         else
+@@ -7327,7 +7364,11 @@
+           # were false then and mostly still are, and rescanning them on
+           # every visit is quadratic in the clause length.
+           k = pos
++          scans += 1
++          ternary_scans += 1 if n == 3
++          depth = 0 ## i64
+           while k < n
++            depth += 1
+             lk = ar[stx + k]
+             sk = lk >> 63
+             # Reuse the per-literal truth bytes maintained for watched literals.
+@@ -7336,8 +7377,10 @@
+             break if vk >= 0
+             k += 1
+           if k >= n && pos > 2
++            wraps += 1
+             k = 2
+             while k < pos
++              depth += 1
+               lk = ar[stx + k]
+               sk = lk >> 63
+               kli = (((lk ^ sk) - sk) << 1) + (sk & 1)
+@@ -7345,7 +7388,14 @@
+               break if vk >= 0
+               k += 1
+             k = n if k >= pos
++          probes += depth
++          if st.size >= 35
++            bucket = wassat_scan_profile_bin(depth) ## i64
++            st[23 + bucket] += 1
++          tail_probes += depth if depth > 32
+           if k < n
++            moves += 1
++            true_moves += 1 if vk > 0
+             if st[13] == 1 && n > 8 && n < 32768
+               ar[stx - 1] = 2147483648 | (k << 15) | n
+             repl = ar[stx + k]
+@@ -7368,6 +7418,7 @@
+             rn = wd[rdi + 1]
+             if rn >= wd[rdi + 2]
+               recycled = wassat_ws_recycle(wd, wp, wst, rdi)
++              recycle_words += rn if recycled == 1
+             if rn >= wd[rdi + 2]
+               need = 4
+               need = rn * 2 if rn * 2 > 4
+@@ -7377,6 +7428,7 @@
+               else
+                 wst[5] = wst[5] + 1
+                 wst[6] = wst[6] + rn
++                grow_words += rn
+                 src = wd[rdi]
+                 q = 0
+                 while q < rn
+@@ -7390,6 +7442,7 @@
+               wp[wd[rdi] + rn] = cbase | oli
+               wd[rdi + 1] = rn + 1
+           else
++            exhausted += 1
+             wp[j] = cbase | oli
+             if ov == 0
+               v = other
+@@ -7437,6 +7490,21 @@
+   st[3] = bail
+   st[4] = st[4] + visits
+   st[12] = st[12] + ticks
++  if st.size >= 35
++    st[14] += block_hit
++    st[15] += block_miss
++    st[16] += other_hit
++    st[17] += scans
++    st[18] += probes
++    st[19] += moves
++    st[20] += true_moves
++    st[21] += exhausted
++    st[22] += wraps
++    st[30] += tail_probes
++    st[31] += binary_entries
++    st[32] += ternary_scans
++    st[33] += recycle_words
++    st[34] += grow_words
+   0
+
+ # Reclaim a substantial dead prefix before allocating another watch block.
+--- a/bits/tungsten-wassat/benchmarks/prop_bench.w
++++ b/bits/tungsten-wassat/benchmarks/prop_bench.w
+@@ -17,6 +17,16 @@
+ # Benchmark-only intervention: compare the scan policy in one release binary
+ # without changing the production policy or any other Kissat-profile choices.
+ + PropBenchSolver < Wassat
++  -> show_counts
++    counts = @pstate ## i64[]
++    names = "block_hit block_miss other_hit scans probes moves true_moves exhausted wraps one two three_four five_eight nine_sixteen seventeen_thirtytwo above_thirtytwo tail_probes binary_entries ternary_scans recycle_words grow_words".split(" ")
++    line = StringBuffer(512)
++    line << "PROFILE"
++    names.each_with_index -> (name, i)
++      line << " [name]=[counts[14 + i]]"
++    << line.to_s
++    0
++
+   -> set_saved_positions(value)
+     @pstate[13] = value
+     0
+@@ -58,6 +68,7 @@
+       s.enable_target_stable_only unless env("PB_TARGET") == "0"
+ s.set_saved_positions(0) if s != nil && env("WASSAT_BENCH_SAVED_POS") == "0"
+ s.set_saved_positions(1) if s != nil && env("WASSAT_BENCH_SAVED_POS") == "1"
++s.show_counts if s != nil
+ t1 = prop_bench_us
+ if pre_status != 0
+   << "RESULT status=[pre_status] conflicts=0 decisions=0 props=0 load_ms=[(t1 - t0) / 1000] solve_ms=0 props_per_s=0 conflicts_per_s=0 restarts=0 reduces=0 mode=[mode] vars=[snv]"
+@@ -83,6 +94,7 @@
+     done = true if budget > 0 && spent >= budget
+     done = true if prop_bench_us - t1 >= limit_us
+ t2 = prop_bench_us
++s.show_counts
+ # Replay SAT models outside the timed search. Reconstruct eliminated variables
+ # for prepared kernels before checking every original clause.
+ if r["status"] == 1

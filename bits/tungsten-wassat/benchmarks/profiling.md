@@ -3,6 +3,10 @@
 Use a frozen `--release` binary and record its source and compiler hashes.
 For table-free runs, set `WASSAT_BACKDOOR_TABLES=0`.
 
+The [propagation study](../docs/propagation-profile-2026-11-18.md) includes
+a counter build for long-watch blocker hits and replacement-scan lengths,
+plus paired release measurements for alternative implementations.
+
 For engine-only comparisons, build `prop_bench.w` with `--release` and use
 `engine_pairs.py`. Its JSON manifest contains records such as
 `{"name":"dense", "path":"/path/input.cnf", "conflicts":20000, "mode":"raw"}`.

@@ -1,0 +1,65 @@
+import sum_range
+
++ interval_constant (f : ℕ → α) (a b : ℕ) (ab : a ≤ b) (step : ∀ i, a ≤ i → i < b → f (i + 1) = f i) : f b = f a
+  apply nat.interval_induct (fun i => f i = f a) a b ab
+  · rfl
+  · intro i hi hb ih
+    rw [step i hi hb]
+    exact ih
++ interval_empty (P : ℕ → Prop) (a : ℕ) (h : P a) : P a
+  exact nat.interval_induct P a a (by omega) h (by intro i hi hb ih; omega)
+
++ real_local (f : ℕ → ℝ) (h : ∀ i, 4 ≤ i → i < 7 → f i ≤ f (i + 1)) : f 4 ≤ f 7 := sequence.monotone_on.real f 4 7 (by decide) h
++ real_global_down (f : ℕ → ℝ) (h : ∀ i, f (i + 1) ≤ f i) (n : ℕ) : f (n + 8) ≤ f n := sequence.antitone.real f h n (n + 8) (by omega)
+-> signed_terms (i : ℕ) : ℝ := if i < 3 then -100 else 2
++ real_negative_prefix : sum_below 3 signed_terms ≤ sum_below 5 signed_terms
+  apply sum_below.mono.real signed_terms 3 5 (by decide)
+  intro i hi hb
+  unfold signed_terms
+  have hn : ¬ i < 3 := by omega
+  simp [hn]
++ real_equal_endpoints (f : ℕ → ℝ) (n : ℕ) : sum_below n f ≤ sum_below n f
+  exact sum_below.mono.real f n n (by omega) (by intro i hi hb; omega)
+
++ rational_local_down (f : ℕ → ℚ) (h : ∀ i, 2 ≤ i → i < 6 → f (i + 1) ≤ f i) : f 6 ≤ f 2 := sequence.antitone_on.rat f 2 6 (by decide) h
++ rational_global (f : ℕ → ℚ) (h : ∀ i, f i ≤ f (i + 1)) (n : ℕ) : f 0 ≤ f n := sequence.monotone.rat f h 0 n (by omega)
++ rational_sum_tail (f : ℕ → ℚ) (h : ∀ i, 5 ≤ i → i < 9 → 0 ≤ f i) : sum_below 5 f ≤ sum_below 9 f := sum_below.mono.rat f 5 9 (by decide) h
++ rational_empty (f : ℕ → ℚ) : f 4 ≤ f 4 := sequence.monotone_on.rat f 4 4 (by decide) (by intro i hi hb; omega)
++ rational_cycle (d : ℕ → ℚ) (step : ∀ i, d (i + 1) ≤ d i) (i j : ℕ) (cyc : d (i + j) = d 0) : d i = d 0
+  linarith [sequence.antitone.rat step i (i + j) (by omega), sequence.antitone.rat step 0 i (by omega)]
+
++ integer_local (f : ℕ → ℤ) (h : ∀ i, 8 ≤ i → i < 11 → f i ≤ f (i + 1)) : f 8 ≤ f 11 := sequence.monotone_on.int f 8 11 (by decide) h
++ integer_global_down (f : ℕ → ℤ) (h : ∀ i, f (i + 1) ≤ f i) (a b : ℕ) (hab : a ≤ b) : f b ≤ f a := sequence.antitone.int f h a b hab
++ integer_sum_singleton (f : ℕ → ℤ) (a : ℕ) (h : 0 ≤ f a) : sum_below a f ≤ sum_below (a + 1) f
+  apply sum_below.mono.int f a (a + 1) (by omega)
+  intro i hi hb
+  have e : i = a := by omega
+  rw [e]; exact h
++ integer_plateau (f : ℕ → ℤ) (h : ∀ i, f i = f (i + 1)) (n : ℕ) : f 0 ≤ f n
+  exact sequence.monotone.int f (by intro i; linarith [h i]) 0 n (by omega)
+
++ natural_local_down (f : ℕ → ℕ) (h : ∀ i, 4 ≤ i → i < 8 → f (i + 1) ≤ f i) : f 8 ≤ f 4 := sequence.antitone_on.nat f 4 8 (by decide) h
++ natural_global (f : ℕ → ℕ) (h : ∀ i, f i ≤ f (i + 1)) (a b : ℕ) (hab : a ≤ b) : f a ≤ f b := sequence.monotone.nat f h a b hab
++ cum_mono (mu : ℕ → ℕ) (a b : ℕ) (h : a ≤ b) : ∑ j < a, mu j ≤ ∑ j < b, mu j
+  exact sum_below.mono.nat mu a b h (by intro i hi hb; omega)
++ natural_zero_tail : sum_below 3 (fun (i : ℕ) => 0) ≤ sum_below 6 (fun (i : ℕ) => 0)
+  exact sum_below.mono.nat (fun i => 0) 3 6 (by decide) (by intro i hi hb; decide)
+#axioms interval_constant
+#axioms interval_empty
+#axioms real_local
+#axioms real_global_down
+#axioms real_negative_prefix
+#axioms real_equal_endpoints
+#axioms rational_local_down
+#axioms rational_global
+#axioms rational_sum_tail
+#axioms rational_empty
+#axioms rational_cycle
+#axioms integer_local
+#axioms integer_global_down
+#axioms integer_sum_singleton
+#axioms integer_plateau
+#axioms natural_local_down
+#axioms natural_global
+#axioms cum_mono
+#axioms natural_zero_tail

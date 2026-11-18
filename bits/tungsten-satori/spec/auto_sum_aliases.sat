@@ -1,0 +1,94 @@
+import arith
+
+-> accum (f : ℕ → α) : ℕ → α
+  | 0 => 0
+  | n + 1 => accum f n + f n
+
+-> wrapped (n : ℕ) (f : ℕ → α) : α := accum f n
+
++ nat_constant (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i=c) : accum f n = n*c
+  auto
+
++ nat_scale (f g : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i=c*g i) : wrapped n f = c*accum g n
+  auto
+
++ nat_bound (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i ≤ c) : accum f n ≤ n*c
+  auto
+
++ nat_hyp (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : accum f n=c) : (∑ i < n, f i)+1=c+1
+  auto
+
++ nat_quantified (f : ℕ → ℕ → ℕ) (m n k : ℕ) (c : ℕ) (hk : k < m) (h : ∀ j < m, accum (f j) n=c) : (∑ i < n, f k i)=c
+  auto
+
++ nat_nested (f : ℕ → ℕ → ℕ) (n m : ℕ) (c : ℕ) (sum_alias0 : ∀ j < n, accum (f j) m=c) : accum (fun j => accum (f j) m) n = n*c
+  auto [sum_alias0]
+
++ int_constant (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i=c) : accum f n = (n : ℤ)*c
+  auto
+
++ int_scale (f g : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i=c*g i) : wrapped n f = c*accum g n
+  auto
+
++ int_bound (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i ≤ c) : accum f n ≤ (n : ℤ)*c
+  auto
+
++ int_hyp (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : accum f n=c) : (∑ i < n, f i)+1=c+1
+  auto
+
++ int_quantified (f : ℕ → ℕ → ℤ) (m n k : ℕ) (c : ℤ) (hk : k < m) (h : ∀ j < m, accum (f j) n=c) : (∑ i < n, f k i)=c
+  auto
+
++ int_nested (f : ℕ → ℕ → ℤ) (n m : ℕ) (c : ℤ) (sum_alias0 : ∀ j < n, accum (f j) m=c) : accum (fun j => accum (f j) m) n = (n : ℤ)*c
+  auto [sum_alias0]
+
++ int_telescope (f : ℕ → ℤ) (n : ℕ) : accum (fun i => f (i+1)-f i) n = f n-f 0
+  auto
+
++ rat_constant (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i=c) : accum f n = (n : ℚ)*c
+  auto
+
++ rat_scale (f g : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i=c*g i) : wrapped n f = c*accum g n
+  auto
+
++ rat_bound (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i ≤ c) : accum f n ≤ (n : ℚ)*c
+  auto
+
++ rat_hyp (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : accum f n=c) : (∑ i < n, f i)+1=c+1
+  auto
+
++ rat_quantified (f : ℕ → ℕ → ℚ) (m n k : ℕ) (c : ℚ) (hk : k < m) (h : ∀ j < m, accum (f j) n=c) : (∑ i < n, f k i)=c
+  auto
+
++ rat_nested (f : ℕ → ℕ → ℚ) (n m : ℕ) (c : ℚ) (sum_alias0 : ∀ j < n, accum (f j) m=c) : accum (fun j => accum (f j) m) n = (n : ℚ)*c
+  auto [sum_alias0]
+
++ rat_telescope (f : ℕ → ℚ) (n : ℕ) : accum (fun i => f (i+1)-f i) n = f n-f 0
+  auto
+
++ real_constant (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i=c) : accum f n = (n : ℝ)*c
+  auto
+
++ real_scale (f g : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i=c*g i) : wrapped n f = c*accum g n
+  auto
+
++ real_bound (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i ≤ c) : accum f n ≤ (n : ℝ)*c
+  auto
+
++ real_hyp (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : accum f n=c) : (∑ i < n, f i)+1=c+1
+  auto
+
++ real_quantified (f : ℕ → ℕ → ℝ) (m n k : ℕ) (c : ℝ) (hk : k < m) (h : ∀ j < m, accum (f j) n=c) : (∑ i < n, f k i)=c
+  auto
+
++ real_nested (f : ℕ → ℕ → ℝ) (n m : ℕ) (c : ℝ) (sum_alias0 : ∀ j < n, accum (f j) m=c) : accum (fun j => accum (f j) m) n = (n : ℝ)*c
+  auto [sum_alias0]
+
++ real_telescope (f : ℕ → ℝ) (n : ℕ) : accum (fun i => f (i+1)-f i) n = f n-f 0
+  auto
+
++ generic_congr (f g : ℕ → α) (n : ℕ) (h : ∀ i < n, f i=g i) : accum f n=accum g n
+  auto
+
++ generic_reverse (f g : ℕ → α) (n : ℕ) (h : ∀ i < n, f i=g i) : accum g n=wrapped n f
+  auto

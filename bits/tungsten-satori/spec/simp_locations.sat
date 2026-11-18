@@ -1,0 +1,70 @@
+import logic
+
++ both (p : Prop) (h : True ∧ p) : p ∧ True
+  simp at *
+
++ hypotheses_only (p q : Prop) (h : True ∧ p) (k : q ∧ True) : q ∧ p
+  simp at *
+  auto
+
++ unchanged (p q : Prop) (h : p) (k : q) : q ∧ p
+  simp only [] at *
+  auto
+
++ no_hypotheses : True ∧ True
+  simp at *
+
++ contradiction (p : Prop) (h : False ∧ p) : p
+  simp at *
+
++ selected_rule (p q : Prop) (e : p = q) (h : p) : q
+  simp only [e] at *
+
++ reverse_rule (p q : Prop) (e : p = q) (h : q) : p
+  simp only [← e] at *
+
++ all_rules (p q : Prop) (e : p = q) (h : p) : q
+  simp only [*] at *
+
++ under_binder (p : α → Prop) (h : ∀ x, True ∧ p x) : ∀ x, p x
+  simp at *
+
++ branch_local (p q : Prop) (h : (True ∧ p) ∨ (True ∧ q)) : p ∨ q
+  cases h with hp hq
+    simp at *
+    simp at *
+
+-> wrapped (p : Prop) : Prop := True ∧ p
+
++ unfold_everywhere (p q : Prop) (h : wrapped p) (k : wrapped q) : wrapped (q ∧ p)
+  simp [wrapped] at *
+  auto
+
++ named_locations (p q : Prop) (h : True ∧ p) (k : q ∧ True) : q ∧ p
+  simp at h k
+  auto
+
++ goal_location (p : Prop) (h : p) : True ∧ p
+  simp at ⊢
+
++ continued_product (x : ℚ) : x *
+    1 = x
+  ring
+
+axiom location_source : True ∧ False
+
++ marked : False
+  have h := location_source
+  simp at *
+
++ named_rule (p q : Prop) (e : p = q) (h : p) : q
+  simp only [e] at e h ⊢
+
++ simplified_conditions (p q : Prop) (h : True ∧ p) (rule : p → q = True) : q
+  simp [rule] at *
+  auto
+
+axiom location_rewrite (p q : Prop) : p = q
+
++ marked_rule (p q : Prop) (h : p) : q
+  simp only [location_rewrite] at *

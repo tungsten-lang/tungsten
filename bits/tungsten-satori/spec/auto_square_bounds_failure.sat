@@ -1,0 +1,44 @@
+import arith
+opaque a : ℚ
+opaque b : ℚ
+opaque y : ℚ
+opaque z : ℚ
+opaque s : ℚ
+opaque t : ℚ
+axiom supplied_squares : y*y ≤ s*s ∧ z*z ≤ t*t
+
++ missing_sign (a y s : ℚ) (ha : 0 < a) (hy : 0 ≤ y) (h : y*y ≤ s*s) : a*y ≤ a*s
+  auto
+
++ negative_roots (a y s : ℚ) (ha : 0 < a) (hy : y < 0) (hs : s < 0) (h : y*y ≤ s*s) : a*y ≤ a*s
+  auto
+
++ negative_weight (a y s : ℚ) (ha : a < 0) (hy : 0 ≤ y) (hs : 0 ≤ s) (h : y*y ≤ s*s) : a*y ≤ a*s
+  auto
+
++ weak_strict (a y s : ℚ) (ha : 0 < a) (hy : 0 ≤ y) (hs : 0 ≤ s) (h : y*y ≤ s*s) : a*y < a*s
+  auto
+
++ zero_weight (a y s : ℚ) (ha : 0 ≤ a) (hy : 0 ≤ y) (hs : 0 ≤ s) (h : y*y < s*s) : a*y < a*s
+  auto
+
++ missing_second (a b y z s t : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hy : 0 ≤ y) (hz : 0 ≤ z) (hs : 0 ≤ s) (ht : 0 ≤ t) (hys : y*y ≤ s*s) : a*y+b*z ≤ a*s+b*t
+  auto
+
++ reversed_second (a b y z s t : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hy : 0 ≤ y) (hz : 0 ≤ z) (hs : 0 ≤ s) (ht : 0 ≤ t) (hys : y*y ≤ s*s) (hzt : t*t ≤ z*z) : a*y+b*z ≤ a*s+b*t
+  auto
+
++ wrong_coupling (X P1 P2 Y a s : ℚ) (ha : 0 ≤ a) (hs : 0 ≤ s) (hY0 : 0 ≤ Y) (hX : X = P1+P2) (h1 : P1 ≤ 4*a*s) (h2 : P2 ≤ a*Y) (hY : 4*(Y*Y) ≤ X) (hX4 : X ≤ 4*(s*s)) : X ≤ 4*a*s
+  auto
+
++ wrong_shift (a y s : ℚ) (ha : 0 < a) (hy : 0 ≤ y+1) (hs : 0 ≤ s+2) (h : (y+1)^2 ≤ (s+2)^2) : a*(y+2) ≤ a*(s+1)
+  auto
+
++ branch_leak (a y s : ℚ) (ha : 0 < a) (hy : 0 ≤ y) (hs : 0 ≤ s) (h : y*y ≤ s*s ∨ y = s+1) : a*y ≤ a*s
+  auto
+
++ natural_weak_strict (a y s : ℕ) (ha : 0 < a) (h : y*y ≤ s*s) : a*y < a*s
+  auto
+
++ no_global_bounds (ha : 0 ≤ a) (hb : 0 ≤ b) (hy : 0 ≤ y) (hz : 0 ≤ z) (hs : 0 ≤ s) (ht : 0 ≤ t) : a*y+b*z ≤ a*s+b*t
+  auto

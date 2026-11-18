@@ -1,0 +1,30 @@
+import realx
+
++ real_negative_denominator : (1 : ℝ)*(-1) ≤ 0*1 ↔ 1/1 ≤ 0/(-1)
+  symm
+  exact div_le_div_iff.real 1 0 1 (-1) (by linarith) (by linarith)
+
++ real_zero_denominator : (1 : ℝ)/0 ≤ 0/1 ↔ 1*1 ≤ 0*0 := div_le_div_iff.real 1 0 0 1 (by linarith) (by linarith)
+
++ real_weak_to_strict (a b c d : ℝ) (hc : 0 < c) (hd : 0 < d) (h : a*d ≤ b*c) : a/c < b/d := (div_lt_div_iff.real a b c d hc hd).mpr h
+
++ rat_negative_denominator : (1 : ℚ)*(-1) ≤ 0*1 ↔ 1/1 ≤ 0/(-1)
+  symm
+  exact div_le_div_iff.rat 1 0 1 (-1) (by linarith) (by linarith)
+
++ rat_zero_denominator : (1 : ℚ)/0 ≤ 0/1 ↔ 1*1 ≤ 0*0 := div_le_div_iff.rat 1 0 0 1 (by linarith) (by linarith)
+
++ rat_weak_to_strict (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) (h : a*d ≤ b*c) : a/c < b/d := (div_lt_div_iff.rat a b c d hc hd).mpr h
+
++ missing_numerator_sign (B m c : ℝ) (hB : 0 < B) (hc : 0 < c) (h : c*c ≤ m*m*B) : 1/sqrt B ≤ m/c
+  exact (one_div_sqrt_le_div_iff B m c hB (by linarith) hc).mpr h
+
++ zero_radicand : (1 : ℝ)/1 ≤ 1/sqrt 0 := (div_le_one_div_sqrt_iff 0 1 1 (by linarith) (by linarith) (by linarith)).mpr (by norm_num)
+
++ zero_root_denominator : 1/sqrt 1 ≤ (1 : ℝ)/0 := (one_div_sqrt_le_div_iff 1 1 0 (by linarith) (by linarith) (by linarith)).mpr (by norm_num)
+
++ negative_numerator : 1/sqrt 1 ≤ (-1 : ℝ)/1 := (one_div_sqrt_le_div_iff 1 (-1) 1 (by linarith) (by linarith) (by linarith)).mpr (by norm_num)
+
++ strict_lower_equality : 1/sqrt 4 < (1 : ℝ)/2 := (one_div_sqrt_lt_div_iff 4 1 2 (by linarith) (by linarith) (by linarith)).mpr (by norm_num)
+
++ strict_upper_equality : (1 : ℝ)/2 < 1/sqrt 4 := (div_lt_one_div_sqrt_iff 4 1 2 (by linarith) (by linarith) (by linarith)).mpr (by norm_num)

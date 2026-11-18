@@ -1,0 +1,3 @@
+import arith
++ negative_is_not_nat : ∃ n : ℕ, (-1 : ℤ) = (n : ℤ) := int_nonnegative_nat (-1) (by decide)
++ zero_is_not_negative : ∃ n : ℕ, (0 : ℤ) = 0 - ((n : ℤ) + 1) := int_negative_succ 0 (by decide)

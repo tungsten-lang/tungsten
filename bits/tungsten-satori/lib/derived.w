@@ -4,17 +4,12 @@
 + Derived
   ro :k
   -> new(@k)
-    @fresh = 0
     @bool_lemmas = nil
 
   -> bool_lemmas
     if @bool_lemmas == nil
       @bool_lemmas = BoolLemmas.new(self)
     @bool_lemmas
-
-  -> fresh_name(base)
-    @fresh += 1
-    base + "_" + @fresh.to_s
 
   # ---- small logical rules --------------------------------------------------------
 
@@ -72,9 +67,6 @@
         nm = "x"
       v = mk_var(fresh_name_from_set(nm, used), q.ty)
       t = @k.spec(v, t)
-
-  -> fresh_name_avoiding(base, terms)
-    fresh_name_global(base, terms)
 
   -> gen_all(vars, th)
     t = th
@@ -160,8 +152,85 @@
       return t
     dest_binop(conv.concl, "=")[1]
 
--> fresh_name_global(base, terms)
-  fresh_name(base, terms)
+  # Eta-normalization as a kernel proof, used when matching extensionally
+  # equivalent function arguments (for example, f and fun x => f x).
+  -> eta_norm_opt(t)
+    if t.tag == :app
+      f = eta_norm_opt(t.a)
+      x = eta_norm_opt(t.b)
+      if f == nil && x == nil
+        return nil
+      return @k.mk_comb(f == nil ? @k.refl(t.a) : f, x == nil ? @k.refl(t.b) : x)
+    if t.tag == :lam
+      used = {}
+      tm_free_names_into(t, used)
+      v = mk_var(fresh_name_from_set("eta", used), t.ty)
+      inner = eta_norm_opt(tm_instantiate(t.b, v, 0))
+      th = nil
+      current = t
+      if inner != nil
+        th = @k.abs_rule(v, inner)
+        current = dest_binop(th.concl, "=")[1]
+      if !tm_eq(eta_contract(current), current)
+        eta = @k.eta(current)
+        if th == nil
+          return eta
+        return @k.trans(th, eta)
+      return th
+    nil
+
+  -> beta_eta_conv(t)
+    first = beta_norm_conv(t)
+    middle = dest_binop(first.concl, "=")[1]
+    second = eta_norm_opt(middle)
+    if second == nil
+      return first
+    @k.trans(first, second)
+
+  -> beta_eta_term(t)
+    dest_binop(beta_eta_conv(t).concl, "=")[1]
+
+  # Evaluate beneath binders using fresh free variables and kernel congruence.
+  # The evaluator's ordinary (shallow) conversion remains the only computation
+  # rule; abstraction closes each opened binder without capturing free names.
+  -> compute_conv(t)
+    first = @k.compute(t)
+    value = dest_binop(first.concl, "=")[1]
+    @k.trans(first, compute_binders_conv(value))
+
+  -> compute_binders_conv(t)
+    if t.tag == :lam
+      used = {}
+      tm_free_names_into(t, used)
+      v = mk_var(fresh_name_from_set("compute", used), t.ty)
+      return @k.abs_rule(v, compute_conv(tm_instantiate(t.b, v, 0)))
+    if t.tag == :app
+      return @k.mk_comb(compute_binders_conv(t.a), compute_binders_conv(t.b))
+    @k.refl(t)
+
+  # Literal arithmetic for argument inference. Preserve proposition structure,
+  # open expressions, powers and definitions; final fitting replays computation.
+  -> application_literal_term(t, budget)
+    budget[0] -= 1
+    if budget[0] < 0
+      raise "application: literal normalization limit"
+    if t.tag == :lam
+      return mk_lam_raw(t.name, t.ty, application_literal_term(t.b, budget))
+    if t.tag != :app
+      return t
+    cur = mk_app_raw(application_literal_term(t.a, budget), application_literal_term(t.b, budget))
+    if !["nat", "int", "rat", "real"].include?(type_of(cur).name)
+      return cur
+    spine = strip_app(cur)
+    head = spine[0]
+    args = spine[1]
+    if head.tag != :const || !args.all?(-> (arg) arg.tag == :lit)
+      return cur
+    binary = args.size == 2 && head.op >= OP_ADD && head.op <= OP_MOD
+    unary = args.size == 1 && head.op >= OP_SUCC && head.op <= OP_FLOOR
+    if binary || unary
+      return dest_binop(@k.compute(cur).concl, "=")[1]
+    cur
 
 # ---------------------------------------------------------------------------
 # Matching. Pattern variables are free variables listed in `pvars` (Hash of
@@ -317,9 +386,9 @@
 # Rewrite rules: a theorem `hyps ⊢ ∀xs. c1 → ... → l = r` prepared for matching.
 
 + RewriteRule
-  ro :th, :lhs, :rhs, :conds, :pvars, :tvs, :name, :head_name, :is_eq
+  ro :th, :lhs, :rhs, :conds, :pvars, :tvs, :name, :head_name, :is_eq, :rewrite_head
   # th: spec'd theorem (free pattern vars) with conclusion `conds → l = r`
-  -> new(@th, @lhs, @rhs, @conds, @pvars, @tvs, @name, @head_name, @is_eq)
+  -> new(@th, @lhs, @rhs, @conds, @pvars, @tvs, @name, @head_name, @is_eq, @rewrite_head)
 
 -> rule_head_const_name(t)
   while t.tag == :app
@@ -328,7 +397,7 @@
     return t.name
   nil
 
--> make_rule(d, th, name)
+-> make_rule(d, th, name, rewrite_head = true)
   k = d.k
   tvs = {}
   tyvars = tm_tyvars(th.concl)
@@ -374,7 +443,7 @@
       e = [u, k.false_tm]
     else
       e = [c, k.truth_tm]
-  RewriteRule.new(t, e[0], e[1], conds, pvars, tvs, name, rule_head_const_name(e[0]), is_eq)
+  RewriteRule.new(t, e[0], e[1], conds, pvars, tvs, name, rule_head_const_name(e[0]), is_eq, rewrite_head)
 
 
 # λx. f x  ~>  f   (when x does not occur in f)
@@ -384,6 +453,42 @@
   t
 
 + Matcher
+  # Explicit function arguments can expose beta redexes in the pattern.
+  # Normalize after substitution, retaining the original keys for inferred
+  # arguments even when known type substitutions change their variable keys.
+  -> match_instantiated(d, pattern, target, literals = false)
+    p = tm_subst(pattern, @tm)
+    vars = {}
+    origins = {}
+    tm_frees(p).each -> (v)
+      if @pvars.has_key?(v.vkey)
+        typed = mk_var(v.name, ty_subst(v.ty, @ty))
+        vars[typed.vkey] = true
+        origins[typed.vkey] = v
+    trial = Matcher.new(vars, @tvs)
+    trial.copy_from({}, @ty, {})
+    p = d.beta_eta_term(tm_inst_types(p, @ty))
+    t = d.beta_eta_term(target)
+    if literals
+      p = d.application_literal_term(p, [128])
+      t = d.application_literal_term(t, [128])
+    matched = trial.m(p, t, 0)
+    out = clone
+    trial.ty.each -> (name, ty)
+      out.ty[name] = ty
+    origins.each -> (key, v)
+      value = trial.tm[key]
+      if value != nil && !out.bind(v, value)
+        return nil
+    if matched
+      return out
+    # A predicate inferred from an earlier premise can expose more arguments
+    # when it is applied later. Retry with those substitutions normalized.
+    # Each retry binds a new term variable, and failed trials stay isolated.
+    if out.tm.size > @tm.size
+      return out.match_instantiated(d, pattern, target, literals)
+    nil
+
   -> clone
     c = Matcher.new(@pvars, @tvs)
     c.copy_from(@tm, @ty, @pvar_objs)

@@ -1,0 +1,97 @@
+import sequence_order
+
++ nat_missing_step (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b) : f a ≤ f b
+  auto
+
++ nat_missing_order (f : ℕ → ℕ) (a b : ℕ) (h : ∀ i, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ nat_missing_last (f : ℕ → ℕ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i+1 < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ nat_missing_first (f : ℕ → ℕ) (a b : ℕ) (ab : a < b) (h : ∀ i, a < i → i < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ nat_wrong_direction (f : ℕ → ℕ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f b ≤ f a
+  auto
+
++ nat_strict_conclusion (f : ℕ → ℕ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f a < f b
+  auto
+
++ nat_cycle (f : ℕ → ℕ) (a b : ℕ) (ab : a < b) (h : f a ≤ f b → f a ≤ f b) : f a ≤ f b
+  auto
+
++ nat_descent_missing_last (f : ℕ → ℕ) (n : ℕ) (h : ∀ i, i+1 < n → f (i+1)+1 ≤ f i) : f n+n ≤ f 0
+  auto
+
++ nat_descent_weak (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i+1) ≤ f i) : n ≤ f 0
+  auto
+
++ nat_descent_too_long (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i+1)+1 ≤ f i) : n+1 ≤ f 0
+  auto
+
++ nat_descent_wrong_direction (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i+1 ≤ f (i+1)) : n ≤ f 0
+  auto
+
++ int_missing_step (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b) : f a ≤ f b
+  auto
+
++ int_missing_order (f : ℕ → ℤ) (a b : ℕ) (h : ∀ i, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ int_missing_last (f : ℕ → ℤ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i+1 < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ int_missing_first (f : ℕ → ℤ) (a b : ℕ) (ab : a < b) (h : ∀ i, a < i → i < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ int_wrong_direction (f : ℕ → ℤ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f b ≤ f a
+  auto
+
++ int_strict_conclusion (f : ℕ → ℤ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f a < f b
+  auto
+
++ int_cycle (f : ℕ → ℤ) (a b : ℕ) (ab : a < b) (h : f a ≤ f b → f a ≤ f b) : f a ≤ f b
+  auto
+
++ rat_missing_step (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b) : f a ≤ f b
+  auto
+
++ rat_missing_order (f : ℕ → ℚ) (a b : ℕ) (h : ∀ i, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ rat_missing_last (f : ℕ → ℚ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i+1 < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ rat_missing_first (f : ℕ → ℚ) (a b : ℕ) (ab : a < b) (h : ∀ i, a < i → i < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ rat_wrong_direction (f : ℕ → ℚ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f b ≤ f a
+  auto
+
++ rat_strict_conclusion (f : ℕ → ℚ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f a < f b
+  auto
+
++ rat_cycle (f : ℕ → ℚ) (a b : ℕ) (ab : a < b) (h : f a ≤ f b → f a ≤ f b) : f a ≤ f b
+  auto
+
++ real_missing_step (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b) : f a ≤ f b
+  auto
+
++ real_missing_order (f : ℕ → ℝ) (a b : ℕ) (h : ∀ i, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ real_missing_last (f : ℕ → ℝ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i+1 < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ real_missing_first (f : ℕ → ℝ) (a b : ℕ) (ab : a < b) (h : ∀ i, a < i → i < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ real_wrong_direction (f : ℕ → ℝ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f b ≤ f a
+  auto
+
++ real_strict_conclusion (f : ℕ → ℝ) (a b : ℕ) (ab : a < b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f a < f b
+  auto
+
++ real_cycle (f : ℕ → ℝ) (a b : ℕ) (ab : a < b) (h : f a ≤ f b → f a ≤ f b) : f a ≤ f b
+  auto

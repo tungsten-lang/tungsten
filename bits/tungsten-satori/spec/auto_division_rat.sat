@@ -1,0 +1,91 @@
+import arith
+
++ positive (a b : ℚ) (ha : 0 < a) (hb : 0 < b) : 0 < a/b
+  auto
+
++ nonnegative (a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) : 0 ≤ a/b
+  auto
+
++ reciprocal_positive (a : ℚ) (ha : 0 < a) : 0 < 1/a
+  auto
+
++ reciprocal_negative (a : ℚ) (ha : a < 0) : 1/a < 0
+  auto
+
++ upper (a b c : ℚ) (hc : 0 < c) (h : a ≤ b*c) : a/c ≤ b
+  auto
+
++ lower (a b c : ℚ) (hc : 0 < c) (h : a*c ≤ b) : a ≤ b/c
+  auto
+
++ strict_upper (a b c : ℚ) (hc : 0 < c) (h : a < b*c) : a/c < b
+  auto
+
++ strict_lower (a b c : ℚ) (hc : 0 < c) (h : a*c < b) : a < b/c
+  auto
+
++ cross (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) (h : a*d ≤ b*c) : a/c ≤ b/d
+  auto
+
++ cross_strict (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) (h : a*d < b*c) : a/c < b/d
+  auto
+
++ numerator_order (a b c : ℚ) (hc : 0 ≤ c) (h : a ≤ b) : a/c ≤ b/c
+  auto
+
++ numerator_strict (a b c : ℚ) (hc : 0 < c) (h : a < b) : a/c < b/c
+  auto
+
++ denominator_order (a b c : ℚ) (ha : 0 ≤ a) (hc : 0 < c) (h : c ≤ b) : a/b ≤ a/c
+  auto
+
++ reciprocal_order (a b : ℚ) (ha : 0 < a) (h : a ≤ b) : 1/b ≤ 1/a
+  auto
+
++ reciprocal_strict (a b : ℚ) (ha : 0 < a) (h : a < b) : 1/b < 1/a
+  auto
+
++ unit_bound (x : ℚ) (hx : 0 < x) : x/(x+1) < 1
+  auto
+
++ self (x : ℚ) (hx : x ≠ 0) : x/x = 1
+  auto
+
++ cancel (x y : ℚ) (hy : y ≠ 0) : x/y*y = x
+  auto
+
++ cancel_right (x y : ℚ) (hy : y ≠ 0) : x*y/y = x
+  auto
+
++ cancel_left (x y : ℚ) (hx : x ≠ 0) : x*y/x = y
+  auto
+
++ equality (a b c : ℚ) (hc : c ≠ 0) (h : a = b*c) : a/c = b
+  auto
+
++ equality_right (a b c : ℚ) (hc : c ≠ 0) (h : a*c = b) : a = b/c
+  auto
+
++ guard_arithmetic (x : ℚ) (hx : 2 < x) : 0 < (x-1)/(x+1)
+  auto
+
++ nested (x : ℚ) (hx : 0 < x) : 0 < 1/(1/x)
+  auto
+
++ double_inverse (x : ℚ) : 1/(1/x) = x
+  auto
+
+-> ratio (x y : ℚ) : ℚ := x/y
+
++ alias (x y : ℚ) (hx : 0 < x) (hy : 0 < y) : 0 < ratio x y
+  auto
+
++ cleared_hint (a b c : ℚ) (hc : 0 < c) (h : a/c ≤ b) : a ≤ b*c
+  auto [div_le_iff.rat]
+
+opaque known_a : ℚ
+opaque known_b : ℚ
+axiom supplied_cross : known_a ≤ known_b*2
+
++ explicit_bound : known_a/2 ≤ known_b
+  auto [supplied_cross]

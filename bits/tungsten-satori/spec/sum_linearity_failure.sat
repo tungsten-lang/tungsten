@@ -1,0 +1,6 @@
+import list_sum
+
++ invalid_one_member (xs : list α) (f g : α → β) (x : α) (h : f x = g x) : sum_list xs f = sum_list xs g := by apply list_sum.congr; exact h
++ invalid_append (xs ys : list α) (f : α → ℝ) : sum_list (xs ++ ys) f = sum_list xs f := sum_list_append.real xs ys f
++ invalid_nat_subtraction (xs : list α) (f g : α → ℕ) : sum_list xs (fun x => f x - g x) = sum_list xs f - sum_list xs g := by simp [sum_list_sub.int]
++ invalid_map (xs : list ℕ) (f g : ℕ → ℕ) : sum_list (map f xs) g = sum_list xs (fun x => f (g x)) := list_sum.map xs f g

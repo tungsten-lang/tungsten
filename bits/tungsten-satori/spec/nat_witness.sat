@@ -1,0 +1,64 @@
++ witness (P : ℕ → Prop) (n : ℕ) (h : P n) : ∃ m, P m ∧ ∀ k < m, ¬ P k
+  exact nat.exists_least_of P n h
+
++ existential_witness (P : ℕ → Prop) (h : ∃ n, P n) : ∃ n, P n ∧ ∀ m < n, ¬ P m
+  exact nat.exists_least P h
+
+-- Zero can be the least witness; it needs no predecessor or positive bound.
++ zero_witness : ∃ n, n = 0 ∧ ∀ m < n, ¬ (m = 0)
+  exact nat.exists_least_of (fun n => n = 0) 0 (by rfl)
+
++ threshold_minimum (b n : ℕ) (h : b ≤ n ∧ ∀ m < n, ¬ (b ≤ m)) : n = b
+  have lower := h.1
+  have upper := nat.least_le (fun m => b ≤ m) n b h.2 (by linarith)
+  linarith
+
++ least_bound (P : ℕ → Prop) (n m : ℕ) (least : ∀ k < n, ¬ P k) (hm : P m) : n ≤ m
+  exact nat.least_le P n m least hm
+
++ strong_zero_and_step (P : ℕ → Prop) (h0 : P 0)
+    (step : ∀ n, 0 < n → (∀ m < n, P m) → P n) : ∀ n, P n
+  apply nat.strong_induct P
+  intro n ih
+  by_cases z : n = 0
+  · rw [z]
+    exact h0
+  · exact step n (by linarith) ih
+
++ reverse_zero (P : ℕ → Prop) (h : P 0) : P 0
+  exact nat.reverse_induct P 0 h (by intro n hn ih; exfalso; linarith) 0 (by linarith)
+
++ reverse_endpoint (P : ℕ → Prop) (b : ℕ) (h : P b)
+    (step : ∀ n, n < b → (∀ m, n < m → m ≤ b → P m) → P n) : P b
+  exact nat.reverse_induct P b h step b (by linarith)
+
++ empty_prefix (f : ℕ → ℕ) : f 0 + 0 ≤ f 0
+  exact nat.descent_bound f 0 (by intro k hk; exfalso; linarith)
+
+-- A descending finite prefix may be followed by an arbitrary tail.
++ finite_prefix (f : ℕ → ℕ) (step : ∀ k < 3, f (k + 1) < f k) : f 3 + 3 ≤ f 0
+  exact nat.descent_bound f 3 step
+
++ impossible_chain (f : ℕ → ℕ) (step : ∀ k, f (k + 1) < f k) : False
+  exact nat.no_infinite_descent f step
+
+-- Descent applies to a property with an existential witness, not only a sequence.
++ measure_descent (R : α → Prop) (rank : α → ℕ)
+    (step : ∀ x, R x → ∃ y, rank y < rank x ∧ R y) (x : α) (hx : R x) : False
+  have descend : ∀ n, (∃ x, R x ∧ rank x = n) → ∃ m, m < n ∧ (∃ y, R y ∧ rank y = m)
+    intro n hn
+    obtain ⟨x, rx, ex⟩ := hn
+    obtain ⟨y, hy, ry⟩ := step x rx
+    use rank y
+    constructor
+    · rw [← ex]
+      exact hy
+    · exact ⟨y, ry, rfl⟩
+  exact nat.infinite_descent (fun n => ∃ y, R y ∧ rank y = n) descend (rank x) ⟨x, hx, rfl⟩
+
+#axioms witness
+#axioms zero_witness
+#axioms strong_zero_and_step
+#axioms reverse_zero
+#axioms finite_prefix
+#axioms measure_descent

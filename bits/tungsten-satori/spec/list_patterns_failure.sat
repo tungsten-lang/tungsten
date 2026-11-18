@@ -1,0 +1,5 @@
+-- Membership, direction and both append components remain necessary.
++ invalid_nonmember (p : α → Prop) (xs : list α) (x : α) (h : all p xs) : p x := by apply list.all_mem p xs x; exact h
++ invalid_reverse (p q : α → Prop) (xs : list α) (hq : all q xs) (h : ∀ x ∈ xs, p x → q x) : all p xs := list.all_imp p q xs h hq
++ invalid_append (p : α → Prop) (xs ys : list α) (h : all p xs) : all p (xs ++ ys) := by rw [list.all_append]; exact ⟨h, h⟩
++ invalid_empty (p : α → Prop) (x : α) : p x := by have h : all p [] := by simp [all]; exact list.all_mem p [] x (by simp) h

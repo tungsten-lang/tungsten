@@ -1,0 +1,13 @@
+import recurrence
+-> bfly : ℕ → ℕ
+  | 0 => 0
+  | k+1 => 2*bfly k+2^k
+-> chacon : ℕ → ℕ
+  | 0 => 1
+  | k+1 => 3*chacon k+1
++ bfly_closed (k : ℕ) : 2*bfly k = k*2^k := by auto
++ chacon_closed (k : ℕ) : 2*chacon k+1 = 3^(k+1) := by auto
+-> quarter (j : ℕ) : ℚ := (1/4)^j
+-> weight (j : ℕ) : ℚ := ((j : ℚ)+1)*(1/4)^j
++ mass_closed (n : ℕ) : sum_below n quarter = 4/3-4/3*(1/4)^n := by auto
++ entropy_closed (n : ℕ) : sum_below n weight = 16/9-(1/4)^n*(4/3*(n : ℚ)+16/9) := by auto

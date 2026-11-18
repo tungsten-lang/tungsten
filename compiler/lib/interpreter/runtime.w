@@ -7,6 +7,7 @@
 + Interpreter
   -> new(argv_values = nil)
     @env = Environment.new()
+    @idle_method_frames = []
     @classes = {}
     @traits = {}
     # Top-level methods share the same overload rules as class methods, but
@@ -741,7 +742,12 @@
       # its established [env, node] pair shape.
       benv = Environment.new(env)
       benv.define("__block_self__", current_self())
-      benv.define("__return_frame_id__", @return_frames.last())
+      # A nested block inherits the lexical method's return target. The
+      # dispatch stack can instead name the iterator currently invoking it.
+      target = @return_frames.last()
+      if env.defined?("__return_frame_id__")
+        target = env.get("__return_frame_id__")
+      benv.define("__return_frame_id__", target)
       return [benv, node]
     if t == :puts
       return eval_puts(node, env)

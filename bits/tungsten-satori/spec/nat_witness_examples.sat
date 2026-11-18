@@ -1,0 +1,74 @@
+-- Compact least-index and descent proofs from corpus families 244, 185, 293 and 312.
+-> img (B : ℕ → ℕ → Prop) (f : ℕ → ℕ) (i y : ℕ) : Prop := ∃ x, B i x ∧ f x = y
+-> yslice (B : ℕ → ℕ → Prop) (f : ℕ → ℕ) (i y : ℕ) : Prop := img B f i y ∧ ∀ k < i, ¬ img B f k y
+-> sslice (B : ℕ → ℕ → Prop) (f : ℕ → ℕ) (i x : ℕ) : Prop := B i x ∧ yslice B f i (f x)
+
+-- the Y_i are pairwise disjoint (y has one least index)
++ yslices_disjoint (B : ℕ → ℕ → Prop) (f : ℕ → ℕ) (i k y : ℕ) (h1 : yslice B f i y) (h2 : yslice B f k y) : i = k
+  unfold yslice at h1 h2
+  exact nat.least_unique (fun i => img B f i y) i k h1 h2
+-- hence the S_i are pairwise disjoint
++ sslices_disjoint (B : ℕ → ℕ → Prop) (f : ℕ → ℕ) (i k x : ℕ) (h1 : sslice B f i x) (h2 : sslice B f k x) : i = k
+  unfold sslice at h1
+  unfold sslice at h2
+  exact yslices_disjoint B f i k (f x) h1.2 h2.2
+-- f maps S_i onto Y_i
++ slice_onto (B : ℕ → ℕ → Prop) (f : ℕ → ℕ) (i y : ℕ) (h : yslice B f i y) : ∃ x, sslice B f i x ∧ f x = y
+  have h0 := h
+  unfold yslice at h0
+  obtain ⟨im, _⟩ := h0
+  unfold img at im
+  obtain ⟨x, bx, fx⟩ := im
+  use x
+  constructor
+  · unfold sslice
+    constructor
+    · exact bx
+    · rw [fx]
+      exact h
+  · exact fx
+-- the least-index lemma (by induction on a bound): every y in some image lies in exactly one Y_i
+-> below (P : ℕ → Prop) (n : ℕ) : Prop := ∀ m, m ≤ n → P m → ∃ i, P i ∧ ∀ k < i, ¬ P k
++ least_below (P : ℕ → Prop) (n : ℕ) : below P n
+  unfold below
+  intro m hm pm
+  exact nat.exists_least_of P m pm
++ slices_cover (B : ℕ → ℕ → Prop) (f : ℕ → ℕ) (y i0 : ℕ) (h : img B f i0 y) : ∃ i, yslice B f i y
+  unfold yslice
+  exact nat.exists_least_of (fun i => img B f i y) i0 h
+
+
++ descent_bound (f : ℕ → ℕ) (dec : ∀ n, f (n + 1) < f n) (n : ℕ) : f n + n ≤ f 0
+  exact nat.descent_bound f n (by intro k hk; exact dec k)
++ no_infinite_descent (f : ℕ → ℕ) (dec : ∀ n, f (n + 1) < f n) : False
+  exact nat.no_infinite_descent f dec
+
+
++ descent_drop (s : ℕ → ℕ) (h : ∀ x, s (x + 1) + 1 ≤ s x) : ∀ n, s n + n ≤ s 0
+  intro n
+  exact nat.descent_bound s n (by intro k hk; linarith [h k])
++ no_cyclic_descent (s : ℕ → ℕ) (N : ℕ) (hN : 1 ≤ N) (h : ∀ x, s (x + 1) + 1 ≤ s x) (hp : s N = s 0) : False
+  have k : s N + N ≤ s 0 := descent_drop s h N
+  linarith
+
+
+-- The following named assumptions are the corpus model inputs, not library rules.
+opaque ok : ℕ → ℕ → Prop
+-- Lemma 3.5 (top-dimensional base case): retraction plus unique fillers above q.
+axiom base_case (q : ℕ) : ok q q
+-- Lemma 3.6, Props. 3.7–3.8, 4.2–4.3: if all upper expansions n < j ≤ q are weak equivalences, so is the J_n one.
+axiom induction_step (q n : ℕ) (hn : n < q) (h : ∀ j : ℕ, n < j → j ≤ q → ok q j) : ok q n
+
++ descending_strong (q : ℕ) : ∀ k : ℕ, ∀ d : ℕ, d ≤ k → ∀ n : ℕ, n + d = q → ok q n
+  intro k d hd n h
+  exact nat.reverse_induct (ok q) q (base_case q) (induction_step q) n (by linarith)
++ every_level (q n : ℕ) (h : n ≤ q) : ok q n
+  exact nat.reverse_induct (ok q) q (base_case q) (induction_step q) n h
+
+
+#axioms yslices_disjoint
+#axioms least_below
+#axioms slices_cover
+#axioms descent_bound
+#axioms descent_drop
+#axioms every_level

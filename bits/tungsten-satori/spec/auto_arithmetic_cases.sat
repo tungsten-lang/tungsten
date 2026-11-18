@@ -1,0 +1,119 @@
++ nat_order (x y : ℕ) : x ≤ y ∨ y ≤ x
+  auto
+
++ nat_strict_order (x y : ℕ) : x < y ∨ y ≤ x
+  auto
+
++ nat_zero_product (x y : ℕ) (h : x*y = 0) : x = 0 ∨ y = 0
+  auto
+
++ nat_union (a x y : ℕ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ nat_product_sign (x y : ℕ) (h : 0 < x*y) : 0 < x ∨ y < 0
+  auto
+
++ nat_strict_square (x : ℕ) : x = 0 ∨ 0 < x*x
+  auto
+
++ int_order (x y : ℤ) : x ≤ y ∨ y ≤ x
+  auto
+
++ int_strict_order (x y : ℤ) : x < y ∨ y ≤ x
+  auto
+
++ int_zero_product (x y : ℤ) (h : x*y = 0) : x = 0 ∨ y = 0
+  auto
+
++ int_union (a x y : ℤ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ int_product_sign (x y : ℤ) (h : 0 < x*y) : 0 < x ∨ y < 0
+  auto
+
++ int_strict_square (x : ℤ) : x = 0 ∨ 0 < x*x
+  auto
+
++ rat_order (x y : ℚ) : x ≤ y ∨ y ≤ x
+  auto
+
++ rat_strict_order (x y : ℚ) : x < y ∨ y ≤ x
+  auto
+
++ rat_zero_product (x y : ℚ) (h : x*y = 0) : x = 0 ∨ y = 0
+  auto
+
++ rat_union (a x y : ℚ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ rat_product_sign (x y : ℚ) (h : 0 < x*y) : 0 < x ∨ y < 0
+  auto
+
++ rat_strict_square (x : ℚ) : x = 0 ∨ 0 < x*x
+  auto
+
++ real_order (x y : ℝ) : x ≤ y ∨ y ≤ x
+  auto
+
++ real_strict_order (x y : ℝ) : x < y ∨ y ≤ x
+  auto
+
++ real_zero_product (x y : ℝ) (h : x*y = 0) : x = 0 ∨ y = 0
+  auto
+
++ real_union (a x y : ℝ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ real_product_sign (x y : ℝ) (h : 0 < x*y) : 0 < x ∨ y < 0
+  auto
+
++ real_strict_square (x : ℝ) : x = 0 ∨ 0 < x*x
+  auto
+
++ nat_swapped (a x y : ℕ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (hy0 : 0 ≤ y) : a ≤ 0 ∨ a*y < 1
+  auto
+
++ nat_fresh_name (a x y : ℕ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (arithmetic_case : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ nat_two_nonzero (x y z : ℕ) (h : x*y = 0) (hx : x ≠ 0) (hy : y ≠ 0) : z = 0
+  auto
+
++ nat_duplicate (x y : ℕ) (h : x*y = 0) (h1 : y ≠ 0) (h2 : y ≠ 0) (h3 : y ≠ 0) : x = 0
+  auto
+
++ int_swapped (a x y : ℤ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (hy0 : 0 ≤ y) : a ≤ 0 ∨ a*y < 1
+  auto
+
++ int_fresh_name (a x y : ℤ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (arithmetic_case : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ int_two_nonzero (x y z : ℤ) (h : x*y = 0) (hx : x ≠ 0) (hy : y ≠ 0) : z = 0
+  auto
+
++ int_duplicate (x y : ℤ) (h : x*y = 0) (h1 : y ≠ 0) (h2 : y ≠ 0) (h3 : y ≠ 0) : x = 0
+  auto
+
++ rat_swapped (a x y : ℚ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (hy0 : 0 ≤ y) : a ≤ 0 ∨ a*y < 1
+  auto
+
++ rat_fresh_name (a x y : ℚ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (arithmetic_case : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ rat_two_nonzero (x y z : ℚ) (h : x*y = 0) (hx : x ≠ 0) (hy : y ≠ 0) : z = 0
+  auto
+
++ rat_duplicate (x y : ℚ) (h : x*y = 0) (h1 : y ≠ 0) (h2 : y ≠ 0) (h3 : y ≠ 0) : x = 0
+  auto
+
++ real_swapped (a x y : ℝ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (hy0 : 0 ≤ y) : a ≤ 0 ∨ a*y < 1
+  auto
+
++ real_fresh_name (a x y : ℝ) (hx : 0 < x) (h : a*x < 1) (hy : y ≤ x) (arithmetic_case : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ real_two_nonzero (x y z : ℝ) (h : x*y = 0) (hx : x ≠ 0) (hy : y ≠ 0) : z = 0
+  auto
+
++ real_duplicate (x y : ℝ) (h : x*y = 0) (h1 : y ≠ 0) (h2 : y ≠ 0) (h3 : y ≠ 0) : x = 0
+  auto

@@ -1,0 +1,87 @@
+opaque measure_nat : ℕ → ℕ → ℕ
+opaque allowed_nat : ℕ → ℕ → bool
+axiom measure_nat_formula : ∀ a b, measure_nat a b = 12*(a*b)^2
+axiom measure_nat_guarded : ∀ a b, allowed_nat a b → measure_nat a b = 12*(a*b)^2
++ nat_unsupplied (a b : ℕ) (h : measure_nat a b = 0) : a*b = 0
+  auto
+
++ nat_missing_guard (a b : ℕ) (h : measure_nat a b = 0) : a*b = 0
+  auto [measure_nat_guarded]
+
++ nat_wrong_guard (a b c : ℕ) (ha : allowed_nat a c) (h : measure_nat a b = 0) : a*b = 0
+  auto [measure_nat_guarded]
+
++ nat_wrong_component (a b c : ℕ) (h : measure_nat a b = 0) : a*c = 0
+  auto [measure_nat_formula]
+
++ nat_nonzero_total (a b : ℕ) (h : measure_nat a b = 12) : a*b = 0
+  auto [measure_nat_formula]
+
++ nat_strict (a b : ℕ) (h : measure_nat a b ≤ 0) : a*b < 0
+  auto [measure_nat_formula]
+
+opaque measure_int : ℤ → ℤ → ℤ
+opaque allowed_int : ℤ → ℤ → bool
+axiom measure_int_formula : ∀ a b, measure_int a b = 12*(a*b)^2
+axiom measure_int_guarded : ∀ a b, allowed_int a b → measure_int a b = 12*(a*b)^2
++ int_unsupplied (a b : ℤ) (h : measure_int a b = 0) : a*b = 0
+  auto
+
++ int_missing_guard (a b : ℤ) (h : measure_int a b = 0) : a*b = 0
+  auto [measure_int_guarded]
+
++ int_wrong_guard (a b c : ℤ) (ha : allowed_int a c) (h : measure_int a b = 0) : a*b = 0
+  auto [measure_int_guarded]
+
++ int_wrong_component (a b c : ℤ) (h : measure_int a b = 0) : a*c = 0
+  auto [measure_int_formula]
+
++ int_nonzero_total (a b : ℤ) (h : measure_int a b = 12) : a*b = 0
+  auto [measure_int_formula]
+
++ int_strict (a b : ℤ) (h : measure_int a b ≤ 0) : a*b < 0
+  auto [measure_int_formula]
+
+opaque measure_rat : ℚ → ℚ → ℚ
+opaque allowed_rat : ℚ → ℚ → bool
+axiom measure_rat_formula : ∀ a b, measure_rat a b = 12*(a*b)^2
+axiom measure_rat_guarded : ∀ a b, allowed_rat a b → measure_rat a b = 12*(a*b)^2
++ rat_unsupplied (a b : ℚ) (h : measure_rat a b = 0) : a*b = 0
+  auto
+
++ rat_missing_guard (a b : ℚ) (h : measure_rat a b = 0) : a*b = 0
+  auto [measure_rat_guarded]
+
++ rat_wrong_guard (a b c : ℚ) (ha : allowed_rat a c) (h : measure_rat a b = 0) : a*b = 0
+  auto [measure_rat_guarded]
+
++ rat_wrong_component (a b c : ℚ) (h : measure_rat a b = 0) : a*c = 0
+  auto [measure_rat_formula]
+
++ rat_nonzero_total (a b : ℚ) (h : measure_rat a b = 12) : a*b = 0
+  auto [measure_rat_formula]
+
++ rat_strict (a b : ℚ) (h : measure_rat a b ≤ 0) : a*b < 0
+  auto [measure_rat_formula]
+
+opaque measure_real : ℝ → ℝ → ℝ
+opaque allowed_real : ℝ → ℝ → bool
+axiom measure_real_formula : ∀ a b, measure_real a b = 12*(a*b)^2
+axiom measure_real_guarded : ∀ a b, allowed_real a b → measure_real a b = 12*(a*b)^2
++ real_unsupplied (a b : ℝ) (h : measure_real a b = 0) : a*b = 0
+  auto
+
++ real_missing_guard (a b : ℝ) (h : measure_real a b = 0) : a*b = 0
+  auto [measure_real_guarded]
+
++ real_wrong_guard (a b c : ℝ) (ha : allowed_real a c) (h : measure_real a b = 0) : a*b = 0
+  auto [measure_real_guarded]
+
++ real_wrong_component (a b c : ℝ) (h : measure_real a b = 0) : a*c = 0
+  auto [measure_real_formula]
+
++ real_nonzero_total (a b : ℝ) (h : measure_real a b = 12) : a*b = 0
+  auto [measure_real_formula]
+
++ real_strict (a b : ℝ) (h : measure_real a b ≤ 0) : a*b < 0
+  auto [measure_real_formula]

@@ -1,0 +1,25 @@
+import log_convex
+
++ exp_at_zero : 1+0 < exp 0 := one_add_lt_exp 0 (by linarith)
++ exp_equal (x : ℝ) : exp x+exp x*(x-x) < exp x := exp_tangent_lt x x (by intro h; linarith)
++ exp_zero_weight (x y : ℝ) (h : x ≠ y) : (0+1)*exp y < 0*exp x+1*exp y := exp_weighted_jensen_lt x y y 0 1 (by linarith) (by linarith) h (by ring)
++ exp_equal_middle (x : ℝ) : 2*exp ((x+x)/2) < exp x+exp x := exp_midpoint_lt x x (by intro h; linarith)
++ exp_missing_mean (x y z : ℝ) (h : x ≠ y) : 2*exp z < exp x+exp y
+  have bound := exp_weighted_jensen_lt x y z 1 1 (by linarith) (by linarith) h (by linarith)
+  linarith
++ exp_reverse (x y : ℝ) (h : x ≠ y) : exp x+exp y < 2*exp ((x+y)/2) := exp_midpoint_lt x y h
+
++ log_missing_left (x y : ℝ) (hy : 0 < y) : x*log y ≤ x*log x+y-x := log_tangent_le x y (by linarith) hy
++ log_missing_right (x y : ℝ) (hx : 0 < x) : x*log y ≤ x*log x+y-x := log_tangent_le x y hx (by linarith)
++ log_zero_center (x y : ℝ) (hx : 0 < x) (hy : 0 < y) : log x+log y ≤ 2*log 0
+  have bound := log_weighted_jensen x y 0 1 1 hx hy (by linarith) (by linarith) (by linarith) (by linarith)
+  linarith
++ log_zero_left_weight (x y : ℝ) (hx : 0 < x) (hy : 0 < y) (h : x ≠ y) : 0*log x+1*log y < (0+1)*log y := log_weighted_jensen_lt x y y 0 1 hx hy (by linarith) (by linarith) h (by ring)
++ log_zero_right_weight (x y : ℝ) (hx : 0 < x) (hy : 0 < y) (h : x ≠ y) : 1*log x+0*log y < (1+0)*log x := log_weighted_jensen_lt x y x 1 0 hx hy (by linarith) (by linarith) h (by ring)
++ log_equal_middle (x : ℝ) (hx : 0 < x) : log x+log x < 2*log ((x+x)/2) := log_midpoint_lt x x hx hx (by intro h; linarith)
++ log_missing_mean (x y z : ℝ) (hx : 0 < x) (hy : 0 < y) (h : x ≠ y) : log x+log y < 2*log z
+  have bound := log_weighted_jensen_lt x y z 1 1 hx hy (by linarith) (by linarith) h (by linarith)
+  linarith
++ log_weak_to_strict (x y : ℝ) (hx : 0 < x) (hy : 0 < y) : log x+log y < 2*log ((x+y)/2) := log_midpoint_le x y hx hy
++ log_equal_support (x : ℝ) (hx : 0 < x) : x*log x < x*log x+x-x := log_tangent_lt x x hx hx (by intro h; linarith)
++ log_reverse (x y : ℝ) (hx : 0 < x) (hy : 0 < y) (h : x ≠ y) : 2*log ((x+y)/2) < log x+log y := log_midpoint_lt x y hx hy h

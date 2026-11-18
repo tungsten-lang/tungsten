@@ -1,0 +1,25 @@
+-- Standard norm bounds need only the mathematical statement.
+import euclidean
+
+-> ip (n : ℕ) (w f g : ℕ → ℝ) : ℝ := sum_below n (fun i => w i*(f i*g i))
+-> norm (n : ℕ) (w f : ℕ → ℝ) : ℝ := sqrt (ip n w f f)
+
++ cauchy (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i, 0 ≤ w i) :
+    |ip n w f g| ≤ norm n w f * norm n w g
+  auto
+
++ cauchy_sq (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i, 0 ≤ w i) :
+    (ip n w f g)^2 ≤ ip n w f f * ip n w g g
+  auto
+
++ triangle (a b c d : ℝ) :
+    sqrt ((a+c)^2 + (b+d)^2) ≤ sqrt (a^2+b^2) + sqrt (c^2+d^2)
+  auto
+
++ reverse_triangle (a b c d : ℝ) :
+    sqrt (a^2+b^2) - sqrt (c^2+d^2) ≤ sqrt ((a-c)^2 + (b-d)^2)
+  auto
+
++ weighted_triangle (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i, 0 ≤ w i) :
+    norm n w (fun i => f i+g i) ≤ norm n w f + norm n w g
+  auto

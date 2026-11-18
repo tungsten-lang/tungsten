@@ -1,0 +1,34 @@
++ typo (p : Prop) (hp : p) : p
+  hpp
+
++ wrong_proof (p q : Prop) (hp : p) : q
+  hp
+
++ missing_premise (p q : Prop) (h : p → q) : q
+  h
+
++ wrong_argument (p q : Prop) (h : p → q) (hq : q) : q
+  h hq
+
++ wrong_projection (p q : Prop) (h : p ∧ q) : p
+  h.2
+
++ wrong_witness (p : α → Prop) (x y : α) (h : p x) : ∃ z, p z
+  ⟨y, h⟩
+
++ term_is_not_proof (p : Prop) (x : ℕ) : p
+  x
+
++ tactic_precedence (p : Prop) (rfl : p) : p
+  rfl
+
++ scope (p : α → Prop) (x : α) (h : p x) : ∀ y, p y
+  intro y
+    h
+
++ overclosed (p : Prop) (hp : p) : p
+  hp
+    hp
+
++ shadowed (global_fact : ℕ) : True
+  global_fact

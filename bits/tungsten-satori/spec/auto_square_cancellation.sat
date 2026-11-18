@@ -1,0 +1,71 @@
++ int_shared (x y k : ℤ) : k*x*x+2*x*y ≤ k*x*x+x^2+y^2
+  auto
+
++ int_weighted (x y v w : ℤ) (h : v*x^2 ≤ w*x^2) : 2*x*y+v*x^2 ≤ (w+1)*x^2+y^2
+  auto
+
++ int_two_bounds (x y u v w : ℤ) (h : u*x^2 ≤ w*x^2) (j : v*y^2 ≤ w*y^2) : 2*x*y+u*x^2+v*y^2 ≤ (w+1)*(x^2+y^2)
+  auto
+
++ int_cycle (x y z u v t w : ℤ) (h : u*x^2 ≤ w*x^2) (j : v*y^2 ≤ w*y^2) (k : t*z^2 ≤ w*z^2) : 2*x*y+2*y*z+2*z*x+u*x^2+v*y^2+t*z^2 ≤ (w+2)*(x^2+y^2+z^2)
+  auto
+
++ int_reordered (orchid maple weight : ℤ) : maple*orchid*2+orchid*weight*orchid ≤ maple^2+orchid^2+weight*orchid^2
+  auto
+
++ int_function (f g v : ℕ → ℤ) (n : ℕ) : v n*(f n)^2+2*f n*g n ≤ v n*(f n)^2+(f n)^2+(g n)^2
+  auto
+
++ int_strict (x y k : ℤ) : k*x*x+2*x*y < k*x*x+x^2+y^2+1
+  auto
+
++ int_quartic (x y a b : ℤ) : a*b*x*x+2*x*y ≤ a*b*x*x+x^2+y^2
+  auto
+
++ rat_shared (x y k : ℚ) : k*x*x+2*x*y ≤ k*x*x+x^2+y^2
+  auto
+
++ rat_weighted (x y v w : ℚ) (h : v*x^2 ≤ w*x^2) : 2*x*y+v*x^2 ≤ (w+1)*x^2+y^2
+  auto
+
++ rat_two_bounds (x y u v w : ℚ) (h : u*x^2 ≤ w*x^2) (j : v*y^2 ≤ w*y^2) : 2*x*y+u*x^2+v*y^2 ≤ (w+1)*(x^2+y^2)
+  auto
+
++ rat_cycle (x y z u v t w : ℚ) (h : u*x^2 ≤ w*x^2) (j : v*y^2 ≤ w*y^2) (k : t*z^2 ≤ w*z^2) : 2*x*y+2*y*z+2*z*x+u*x^2+v*y^2+t*z^2 ≤ (w+2)*(x^2+y^2+z^2)
+  auto
+
++ rat_reordered (orchid maple weight : ℚ) : maple*orchid*2+orchid*weight*orchid ≤ maple^2+orchid^2+weight*orchid^2
+  auto
+
++ rat_function (f g v : ℕ → ℚ) (n : ℕ) : v n*(f n)^2+2*f n*g n ≤ v n*(f n)^2+(f n)^2+(g n)^2
+  auto
+
++ rat_strict (x y k : ℚ) : k*x*x+2*x*y < k*x*x+x^2+y^2+1
+  auto
+
++ rat_quartic (x y a b : ℚ) : a*b*x*x+2*x*y ≤ a*b*x*x+x^2+y^2
+  auto
+
++ real_shared (x y k : ℝ) : k*x*x+2*x*y ≤ k*x*x+x^2+y^2
+  auto
+
++ real_weighted (x y v w : ℝ) (h : v*x^2 ≤ w*x^2) : 2*x*y+v*x^2 ≤ (w+1)*x^2+y^2
+  auto
+
++ real_two_bounds (x y u v w : ℝ) (h : u*x^2 ≤ w*x^2) (j : v*y^2 ≤ w*y^2) : 2*x*y+u*x^2+v*y^2 ≤ (w+1)*(x^2+y^2)
+  auto
+
++ real_cycle (x y z u v t w : ℝ) (h : u*x^2 ≤ w*x^2) (j : v*y^2 ≤ w*y^2) (k : t*z^2 ≤ w*z^2) : 2*x*y+2*y*z+2*z*x+u*x^2+v*y^2+t*z^2 ≤ (w+2)*(x^2+y^2+z^2)
+  auto
+
++ real_reordered (orchid maple weight : ℝ) : maple*orchid*2+orchid*weight*orchid ≤ maple^2+orchid^2+weight*orchid^2
+  auto
+
++ real_function (f g v : ℕ → ℝ) (n : ℕ) : v n*(f n)^2+2*f n*g n ≤ v n*(f n)^2+(f n)^2+(g n)^2
+  auto
+
++ real_strict (x y k : ℝ) : k*x*x+2*x*y < k*x*x+x^2+y^2+1
+  auto
+
++ real_quartic (x y a b : ℝ) : a*b*x*x+2*x*y ≤ a*b*x*x+x^2+y^2
+  auto

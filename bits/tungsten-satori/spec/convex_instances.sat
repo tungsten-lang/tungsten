@@ -1,0 +1,45 @@
+import convex_real
+
++ real_convex_affine (lo hi a b : ℝ) : convex_interval.real lo hi (fun x => a*x+b) := convex_interval.affine.real lo hi a b
+
++ real_concave_affine (lo hi a b : ℝ) : concave_interval.real lo hi (fun x => a*x+b) := concave_interval.affine.real lo hi a b
+
++ real_square (lo hi : ℝ) : convex_interval.real lo hi (fun x => x^2) := convex_interval.square.real lo hi
+
++ real_negative_slope (lo hi : ℝ) : convex_interval.real lo hi (fun x => (-7)*x+3) := convex_interval.affine.real lo hi (-7) 3
+
++ real_weighted_square (x y z a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hab : 0 < a+b) (mean : (a+b)*z = a*x+b*y) : (a+b)*z^2 ≤ a*x^2+b*y^2
+  have form := convex_interval.square.real (min x y) (max x y)
+  unfold convex_interval.real at form
+  exact form x y z a b (min_le_left.real x y) (le_max_left.real x y) (min_le_right.real x y) (le_max_right.real x y) ha hb hab mean
+
++ rat_convex_affine (lo hi a b : ℚ) : convex_interval.rat lo hi (fun x => a*x+b) := convex_interval.affine.rat lo hi a b
+
++ rat_concave_affine (lo hi a b : ℚ) : concave_interval.rat lo hi (fun x => a*x+b) := concave_interval.affine.rat lo hi a b
+
++ rat_square (lo hi : ℚ) : convex_interval.rat lo hi (fun x => x^2) := convex_interval.square.rat lo hi
+
++ rat_negative_slope (lo hi : ℚ) : convex_interval.rat lo hi (fun x => (-7)*x+3) := convex_interval.affine.rat lo hi (-7) 3
+
++ rat_weighted_square (x y z a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hab : 0 < a+b) (mean : (a+b)*z = a*x+b*y) : (a+b)*z^2 ≤ a*x^2+b*y^2
+  have form := convex_interval.square.rat (min x y) (max x y)
+  unfold convex_interval.rat at form
+  exact form x y z a b (min_le_left.rat x y) (le_max_left.rat x y) (min_le_right.rat x y) (le_max_right.rat x y) ha hb hab mean
+
++ tangent (x y : ℝ) : exp x+exp x*(y-x) ≤ exp y := exp_tangent_le x y
+
++ weighted_exp (x y z a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) (mean : (a+b)*z = a*x+b*y) : (a+b)*exp z ≤ a*exp x+b*exp y := exp_weighted_jensen x y z a b ha hb mean
+
++ midpoint (x y : ℝ) : 2*exp ((x+y)/2) ≤ exp x+exp y := exp_midpoint_le x y
+
++ finite_exp (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (mean : (n : ℝ)*m = ∑ i < n, p i) : (n : ℝ)*exp m ≤ ∑ i < n, exp (p i) := sum_below.exp_jensen.real n p m mean
+
++ exp_interval (lo hi : ℝ) : convex_interval.real lo hi exp := convex_interval.exp.real lo hi
+
++ zero_weights (x y z : ℝ) : (0+0)*exp z ≤ 0*exp x+0*exp y := exp_weighted_jensen x y z 0 0 (by linarith) (by linarith) (by ring)
+
++ zero_count (p : ℕ → ℝ) (m : ℝ) : ((0 : ℕ) : ℝ)*exp m ≤ ∑ i < 0, exp (p i) := sum_below.exp_jensen.real 0 p m (by simp [cast_zero.real])
+
++ single_exp (x z : ℝ) (h : z = x) : exp z ≤ exp x
+  have bound := exp_weighted_jensen x 0 z 1 0 (by linarith) (by linarith) (by rw [h]; ring)
+  linarith

@@ -1,0 +1,54 @@
++ eta_rewrite (F : (α → β) → γ) (f : α → β) (y : γ) (h : F (fun x => f x) = y) : F f = y := by rw [h]
++ eta_target (F : (α → β) → γ) (f : α → β) (y : γ) (h : F f = y) : F (fun x => f x) = y := by rw [h]
++ beta_target (F : (α → β) → γ) (c : β) (y : γ) (h : F (fun (x : α) => c) = y) : F (fun (x : α) => (fun z => c) x) = y := by rw [h]
++ eta_in_hyp (F : (α → β) → γ) (f : α → β) (x y : γ) (h : F (fun z => f z) = x) (hx : F f = y) : x = y := by rw [h] at hx; exact hx
++ eta_under_binder (F : (α → β) → γ) (f : α → β) (p : γ → α → Prop) (y : γ) (h : F (fun x => f x) = y) (hy : ∀ x, p y x) : ∀ x, p (F f) x := by rw [h]; exact hy
++ eta_conditional (F : (α → β) → γ) (p : (α → β) → Prop) (f : α → β) (y : γ) (rule : ∀ g, p g → F (fun x => g x) = y) (hp : p f) : F f = y := by rw [rule]
++ eta_simp (F : (α → β) → γ) (f : α → β) (y : γ) (h : F (fun x => f x) = y) : F f = y := by simp only [h]
++ function_head_simp (f g : α → β) (x : α) (y : β) (e : f = g) (h : g x = y) : f x = y := by simp only [e]
++ function_head_simp_hyp (f g : α → β) (x : α) (y : β) (e : f = g) (h : f x = y) : g x = y := by simp only [e] at h; exact h
+-> head_count : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => head_count n + 1
++ definition_induction (n : ℕ) : head_count n = n
+  induction n with n ih
+  · simp [head_count]
+  · simp [head_count, ih]
+-> head_choose (a b : ℕ) : ℕ := if a ≤ b then a else b
++ definition_conditional (a b : ℕ) (h : a ≤ b) : head_choose a b = a := by simp [head_choose, h]
++ eta_linear (F : (α → β) → ℝ) (f : α → β) (h : F (fun x => f x) ≤ 3) : F f ≤ 3 := by linarith
++ eta_ring (F : (α → β) → ℝ) (f : α → β) : F f + F (fun x => f x) = 2 * F f := by ring
+-> eta_alias (f : α → β) : α → β := fun x => f x
++ eta_alias_exact (F : (α → β) → γ) (f : α → β) (y : γ) (h : F (fun x => f x) = y) : F (eta_alias f) = y := h
++ eta_alias_wrapped (F : (α → β) → γ) (f : α → β) (y : γ) (h : F f = y) : F (fun x => eta_alias f x) = y := h
+#axioms eta_rewrite
+#axioms eta_under_binder
+#axioms eta_conditional
+#axioms eta_simp
+#axioms eta_linear
+#axioms eta_ring
+
+-> unfold_identity (x : α) : α := x
+-> unfold_first (x y : α) : α := x
+-> unfold_increment (n : ℕ) : ℕ := n + 1
++ bare_unfold (F : (α → α) → β) (y : β) (h : F (fun x => x) = y) : F unfold_identity = y
+  unfold unfold_identity
+  rw [h]
++ bare_unfold_binary (F : (α → α → α) → β) (y : β) (h : F (fun x y => x) = y) : F unfold_first = y
+  unfold unfold_first
+  rw [h]
++ bare_unfold_under_binder (F : α → (α → α) → β) (g : α → β) (h : ∀ x, F x (fun y => y) = g x) : ∀ x, F x unfold_identity = g x
+  unfold unfold_identity
+  intro x
+  rw [h]
++ bare_unfold_bound (F : (ℕ → ℕ) → ℚ) (h : F (fun n => n + 1) ≤ 3) : F unfold_increment ≤ 3
+  unfold unfold_increment
+  linarith
++ bare_unfold_hyp (F : (ℕ → ℕ) → ℚ) (h : F unfold_increment ≤ 3) : F (fun n => n + 1) ≤ 3
+  unfold unfold_increment at h
+  linarith
+#axioms bare_unfold
+#axioms bare_unfold_binary
+#axioms bare_unfold_under_binder
+#axioms bare_unfold_bound
+#axioms bare_unfold_hyp

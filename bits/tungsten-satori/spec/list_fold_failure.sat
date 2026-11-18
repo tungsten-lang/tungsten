@@ -1,0 +1,10 @@
++ invalid_left_order : list.foldl (fun (x s : ℕ) => 10 * s + x) [1, 2] 0 = 21 := by decide
++ invalid_right_order : list.foldr (fun (x s : ℕ) => 10 * s + x) [1, 2] 0 = 12 := by decide
++ invalid_empty : list.foldl (fun (x s : ℕ) => s + x) [] 4 = 0 := by decide
++ invalid_initial (step : α → β → β) (p : β → Prop) (h : ∀ x s, p s → p (step x s)) (xs : list α) (s : β) : p (list.foldl step xs s) := by apply list.foldl_invariant step p h
++ invalid_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (hs : p s) : p (list.foldr step xs s) := by apply list.foldr_invariant
++ invalid_members (step : α → β → β) (p : β → Prop) (xs ys : list α) (h : ∀ x ∈ ys, ∀ s, p s → p (step x s)) (s : β) (hs : p s) : p (list.foldl step xs s) := by apply list.foldl_invariant_on step p xs h
++ invalid_fusion (step : α → β → β) (next : α → γ → γ) (f : β → γ) (xs : list α) (s : β) : f (list.foldr step xs s) = list.foldr next xs (f s) := by apply list.foldr_commutes
++ invalid_fixed (step : α → β → β) (xs : list α) (s : β) : list.foldl step xs s = s := by apply list.foldl_fixed
++ invalid_second_fact (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) (xs : list α) (s : β) (hp : p s) : p (list.foldl step xs s) ∧ q (list.foldl step xs s) := by apply list.foldl_invariants h xs s hp
++ invalid_second_invariant (step : α → β → β) (p q : β → Prop) (h : ∀ x s, p s → q s → p (step x s) ∧ p (step x s)) (xs : list α) (s : β) (hp : p s) (hq : q s) : p (list.foldr step xs s) ∧ q (list.foldr step xs s) := list.foldr_invariants h xs s hp hq

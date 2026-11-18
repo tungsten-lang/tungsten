@@ -1,0 +1,63 @@
+import sqrt_distance
+
++ real_missing_left (a b : ℝ) (hb : 0 ≤ b) : (a-b)*(a-b) ≤ |a*a-b*b|
+  apply square_gap.le_abs.real a b
+  · linarith
+  · exact hb
+
++ real_missing_right (a b : ℝ) (ha : 0 ≤ a) : (a-b)*(a-b) ≤ |a*a-b*b|
+  apply square_gap.le_abs.real a b ha
+  linarith
+
++ real_strict (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a-b)*(a-b) < |a*a-b*b| := square_gap.le_abs.real a b ha hb
+
++ rat_missing_left (a b : ℚ) (hb : 0 ≤ b) : (a-b)*(a-b) ≤ |a*a-b*b|
+  apply square_gap.le_abs.rat a b
+  · linarith
+  · exact hb
+
++ rat_missing_right (a b : ℚ) (ha : 0 ≤ a) : (a-b)*(a-b) ≤ |a*a-b*b|
+  apply square_gap.le_abs.rat a b ha
+  linarith
+
++ rat_strict (a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a-b)*(a-b) < |a*a-b*b| := square_gap.le_abs.rat a b ha hb
+
++ int_missing_left (a b : ℤ) (hb : 0 ≤ b) : (a-b)*(a-b) ≤ |a*a-b*b|
+  apply square_gap.le_abs.int a b
+  · linarith
+  · exact hb
+
++ int_missing_right (a b : ℤ) (ha : 0 ≤ a) : (a-b)*(a-b) ≤ |a*a-b*b|
+  apply square_gap.le_abs.int a b ha
+  linarith
+
++ int_strict (a b : ℤ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a-b)*(a-b) < |a*a-b*b| := square_gap.le_abs.int a b ha hb
+
++ root_missing_left (x y : ℝ) (hy : 0 ≤ y) : (sqrt x-sqrt y)^2 ≤ |x-y|
+  apply sqrt_sub_sq_le_abs x y
+  · linarith
+  · exact hy
+
++ root_missing_right (x y : ℝ) (hx : 0 ≤ x) : |sqrt x-sqrt y| ≤ sqrt (|x-y|)
+  apply sqrt_sub_abs_le x y hx
+  linarith
+
++ root_strict (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : |sqrt x-sqrt y| < sqrt (|x-y|) := sqrt_sub_abs_le x y hx hy
+
++ root_lipschitz (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : |sqrt x-sqrt y| ≤ |x-y| := sqrt_sub_abs_le x y hx hy
+
++ list_negative_weight (xs : list α) (w f g : α → ℝ) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*(sqrt (f i)-sqrt (g i))^2) ≤ sum_list xs (fun i => w i*|f i-g i|)
+  apply list_sum.weighted_sqrt_distance.real xs w f g
+  · intro i hi; linarith
+  · exact hf
+  · exact hg
+
++ list_strict (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*(sqrt (f i)-sqrt (g i))^2) < sum_list xs (fun i => w i*|f i-g i|) := list_sum.weighted_sqrt_distance.real xs w f g hw hf hg
+
++ range_negative_weight (n : ℕ) (w f g : ℕ → ℝ) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*(sqrt (f i)-sqrt (g i))^2) ≤ sum_below n (fun i => w i*|f i-g i|)
+  apply sum_below.weighted_sqrt_distance.real n w f g
+  · intro i hi; linarith
+  · exact hf
+  · exact hg
+
++ range_strict (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*(sqrt (f i)-sqrt (g i))^2) < sum_below n (fun i => w i*|f i-g i|) := sum_below.weighted_sqrt_distance.real n w f g hw hf hg

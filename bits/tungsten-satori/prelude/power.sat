@@ -1,0 +1,75 @@
+-- Basic power identities, independent of factorials and finite sums.
+-- Exponents are natural; bases may be natural, integer, rational or real.
+import core
+
++ pow_add.real (a : ℝ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
+  induction n with n ih
+  · rw [add_zero.nat, pow_zero.real]
+    ring
+  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.real, pow_succ.real, ih]
+    ring
+
++ pow_mul.real (a : ℝ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
+  induction n with n ih
+  · rw [mul_zero.nat, pow_zero.real, pow_zero.real]
+  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.real, ih, pow_succ.real]
+
++ mul_pow.real (a b : ℝ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, pow_succ.real, ih]
+    ring
+
++ pow_add.rat (a : ℚ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
+  induction n with n ih
+  · rw [add_zero.nat, pow_zero.rat]
+    ring
+  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.rat, pow_succ.rat, ih]
+    ring
+
++ pow_mul.rat (a : ℚ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
+  induction n with n ih
+  · rw [mul_zero.nat, pow_zero.rat, pow_zero.rat]
+  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.rat, ih, pow_succ.rat]
+
++ mul_pow.rat (a b : ℚ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.rat, pow_succ.rat, pow_succ.rat, ih]
+    ring
+
++ pow_add.int (a : ℤ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
+  induction n with n ih
+  · rw [add_zero.nat, pow_zero.int]
+    ring
+  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.int, pow_succ.int, ih]
+    ring
+
++ pow_mul.int (a : ℤ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
+  induction n with n ih
+  · rw [mul_zero.nat, pow_zero.int, pow_zero.int]
+  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.int, ih, pow_succ.int]
+
++ mul_pow.int (a b : ℤ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.int, pow_succ.int, pow_succ.int, ih]
+    ring
+
++ pow_add.nat (a : ℕ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
+  induction n with n ih
+  · rw [add_zero.nat, pow_zero.nat]
+    ring
+  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.nat, pow_succ.nat, ih]
+    ring
+
++ pow_mul.nat (a : ℕ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
+  induction n with n ih
+  · rw [mul_zero.nat, pow_zero.nat, pow_zero.nat]
+  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.nat, ih, pow_succ.nat]
+
++ mul_pow.nat (a b : ℕ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, pow_succ.nat, ih]
+    ring

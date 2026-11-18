@@ -1,0 +1,7 @@
+import list_sum
+
++ invalid_missing_zero (p : ℕ → Prop) (xs : list ℕ) (ha : ∀ a b, p a → p b → p (a + b)) (h : all p xs) : p (sum xs) := by apply sum.closed p xs
++ invalid_missing_addition (p : ℕ → Prop) (xs : list ℕ) (hz : p 0) (h : all p xs) : p (sum xs) := by apply sum.closed p xs hz
++ invalid_missing_members (m : ℕ) (xs : list ℕ) : ∃ k : ℕ, sum xs = m * k := by apply sum_multiple.nat m xs
++ invalid_changed_multiplier (m n : ℕ) (xs : list ℕ) (h : all (fun x => ∃ k : ℕ, x = m * k) xs) : ∃ k : ℕ, sum xs = n * k := sum_multiple.nat m xs h
++ invalid_reverse_divisibility (m : ℕ) (xs : list α) (f : α → ℕ) (x : α) (h : m ∣ sum_list xs f) : m ∣ f x := by apply sum_list_dvd.nat m xs f

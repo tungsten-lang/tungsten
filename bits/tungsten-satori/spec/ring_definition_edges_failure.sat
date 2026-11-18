@@ -1,0 +1,10 @@
++ truncated_subtraction (x y : ℕ) : cut x y+y = x
+  ring
++ missing_denominator (x y : ℚ) : quotient x y*y = x
+  ring
++ zero_denominator (x : ℚ) : quotient x 0 = x
+  ring
++ unsupplied_axiom (x : ℚ) : hidden x = x
+  ring
++ unused_hypothesis (x y : ℚ) (h : x = y) : x = y
+  ring

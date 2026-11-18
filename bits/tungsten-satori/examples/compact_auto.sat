@@ -1,0 +1,13 @@
+-- Common loaded patterns work with plain auto; no lemma names are needed.
+import entropy
+import sqrt_distance
+
++ exponential_gap (x : ℝ) (hx : 0 < x) : 1+x < exp x := by auto
++ strict_midpoint (x y : ℝ) (h : x < y) : 2*exp ((x+y)/2) < exp x+exp y := by auto
++ root_distance (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : |sqrt x-sqrt y| ≤ sqrt (|x-y|) := by auto
++ scalar_entropy (x : ℝ) (hx : 0 ≤ x) : x-1 ≤ x*log x := by auto
++ finite_entropy (n : ℕ) (p : ℕ → ℝ) (hn : 0 < (n : ℝ)) (hp : ∀ i < n, 0 ≤ p i) (mass : sum_below n p = 1) :
+    sum_below n (fun i => 0-p i*log (p i)) ≤ log (n : ℝ)
+  auto
+
++ reciprocal_root (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : c*c ≤ m*m*B) : 1/sqrt B ≤ m/c := by auto

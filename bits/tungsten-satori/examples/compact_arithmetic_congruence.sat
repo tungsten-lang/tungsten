@@ -1,0 +1,25 @@
+import arith
+
++ indexed_bound (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i = k) (h : f k+x ≤ 7) : f i+x+1 ≤ 8
+  auto
+
++ shifted_index (f : ℕ → α) (s i : ℕ) : f (s+(i+1)) = f ((s+1)+i)
+  auto
+
++ shifted_bound (f : ℕ → ℚ) (s i : ℕ) (h : f ((s+1)+i) ≤ 7) : f (s+(i+1))+1 ≤ 8
+  auto
+
+-> total (f : ℕ → ℚ) : ℕ → ℚ
+  | 0 => 0
+  | n + 1 => total f n + f n
+
++ total_nonneg (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ total f n
+  induction n
+    simp [total]
+    simp [total]; auto
+
++ total_zero (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) (hz : total f n = 0) : ∀ i < n, f i = 0
+  induction n
+    omega
+    simp [total] at *
+    by_cases e : i = n <;> auto [total_nonneg f n]

@@ -1,0 +1,16 @@
+import list_product
+
++ invalid_product_sign (xs : list α) (f g : α → ℚ) (h : ∀ x ∈ xs, f x ≤ g x) : prod_list xs f ≤ prod_list xs g
+  apply prod_list_le.rat <;> auto
++ invalid_unit_bound (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, 0 ≤ f x) : 1 ≤ prod_list xs f
+  apply prod_list_one_le.int <;> auto
++ invalid_signed_bernoulli (xs : list α) (f : α → ℝ) : 1 + sum_list xs f ≤ prod_list xs (fun x => 1 + f x)
+  apply one_add_sum_list_le_prod_list.real <;> auto
++ invalid_empty_invariant (p : α → Prop) (xs : list α) (h : ∀ x ∈ xs, p x) (hm : ∀ a b, p a → p b → p (a * b)) : p (prod_list xs (fun x => x))
+  apply list_product.closed <;> auto
++ invalid_product_congruence (xs : list α) (f g : α → ℝ) (x : α) (h : f x = g x) : prod_list xs f = prod_list xs g
+  apply list_product.congr <;> auto
++ invalid_strict_bound (xs : list α) (f : α → ℕ) : 1 + sum_list xs f < prod_list xs (fun x => 1 + f x)
+  exact one_add_sum_list_le_prod_list.nat xs f
++ invalid_empty_product : prod_list ([] : list ℕ) (fun x => x) = 0 := by decide
++ invalid_multiplicity : (∏ x ∈ [2, 2], x) = 2 := by decide

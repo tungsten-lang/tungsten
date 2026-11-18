@@ -198,8 +198,8 @@
     if ew_mode <= 5
       if ew_smode > ew_mode
         return false
-      ew_mask = (1 << (8 * ew_smode)) - 1
-      ew_sh = 4 + 8 * (ew_mode - ew_smode)
+      ew_mask = ((1 << (8 * ew_smode)) - 1) ## i64
+      ew_sh = (4 + 8 * (ew_mode - ew_smode)) ## i64
       return (((ew_v >> ew_sh) ^ (ew_sv >> 4)) & ew_mask) == 0
     ew_n = ccall_nobox("w_string_byte_length", self) ## i64
     if ew_smode <= 5

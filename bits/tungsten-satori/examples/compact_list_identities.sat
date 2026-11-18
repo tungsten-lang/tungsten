@@ -1,0 +1,15 @@
+-- Custom totals need no hand-written list induction.
+-> total : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => x+total xs
+-> weighted (c : ℚ) : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => c*x+weighted c xs
++ scale (c : ℚ) (xs : list ℚ) : weighted c xs = c*total xs
+  auto
+
+-> rows (ys : list ℚ) : list ℚ → ℚ
+  | [] => 0
+  | x :: xs => weighted x ys+rows ys xs
++ rectangle (xs ys : list ℚ) : rows ys xs = total xs*total ys
+  auto [scale]

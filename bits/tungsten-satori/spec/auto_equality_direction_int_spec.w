@@ -1,0 +1,2 @@
+use auto_equality_direction_check
+check_auto_equality_direction("int")

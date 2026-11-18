@@ -1,0 +1,35 @@
+import recurrence
+
++ real_wrong_balance (f : ℕ → ℝ) (n : ℕ) (step : ∀ i, f (i + 1) = 2 * f i + 3) : 1 * f n + 2 = (1 * f 0 + 2) * 2 ^ n
+  exact recurrence.affine_transform.real f 2 3 1 2 (by decide) step n
++ real_missing_step (f : ℕ → ℝ) (n : ℕ) : 1 * f n + 3 = (1 * f 0 + 3) * 2 ^ n
+  apply recurrence.affine_transform.real f 2 3 1 3 (by decide)
++ real_wrong_offset (f : ℕ → ℝ) (n : ℕ) (step : ∀ i, f (i + 1) = 1 * f i + 1) : f n = (f 0 + 8) * 1 ^ n - 8
+  exact recurrence.affine_closed.real f 1 1 8 (by decide) step n
++ real_wrong_initial (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i + 1) = 2 * f i + 3) : f n = (2 ^ n - 1) * 3
+  exact recurrence.affine_zero.real f 2 3 3 base (by decide) step n
+
++ rat_wrong_balance (f : ℕ → ℚ) (n : ℕ) (step : ∀ i, f (i + 1) = 2 * f i + 3) : 1 * f n + 2 = (1 * f 0 + 2) * 2 ^ n
+  exact recurrence.affine_transform.rat f 2 3 1 2 (by decide) step n
++ rat_missing_step (f : ℕ → ℚ) (n : ℕ) : 1 * f n + 3 = (1 * f 0 + 3) * 2 ^ n
+  apply recurrence.affine_transform.rat f 2 3 1 3 (by decide)
++ rat_wrong_offset (f : ℕ → ℚ) (n : ℕ) (step : ∀ i, f (i + 1) = 1 * f i + 1) : f n = (f 0 + 8) * 1 ^ n - 8
+  exact recurrence.affine_closed.rat f 1 1 8 (by decide) step n
++ rat_wrong_initial (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i + 1) = 2 * f i + 3) : f n = (2 ^ n - 1) * 3
+  exact recurrence.affine_zero.rat f 2 3 3 base (by decide) step n
+
++ int_wrong_balance (f : ℕ → ℤ) (n : ℕ) (step : ∀ i, f (i + 1) = 2 * f i + 3) : 1 * f n + 2 = (1 * f 0 + 2) * 2 ^ n
+  exact recurrence.affine_transform.int f 2 3 1 2 (by decide) step n
++ int_missing_step (f : ℕ → ℤ) (n : ℕ) : 1 * f n + 3 = (1 * f 0 + 3) * 2 ^ n
+  apply recurrence.affine_transform.int f 2 3 1 3 (by decide)
++ int_wrong_offset (f : ℕ → ℤ) (n : ℕ) (step : ∀ i, f (i + 1) = 1 * f i + 1) : f n = (f 0 + 8) * 1 ^ n - 8
+  exact recurrence.affine_closed.int f 1 1 8 (by decide) step n
++ int_wrong_initial (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i + 1) = 2 * f i + 3) : f n = (2 ^ n - 1) * 3
+  exact recurrence.affine_zero.int f 2 3 3 base (by decide) step n
+
++ nat_wrong_balance (f : ℕ → ℕ) (n : ℕ) (step : ∀ i, f (i + 1) = 2 * f i + 3) : 1 * f n + 2 = (1 * f 0 + 2) * 2 ^ n
+  exact recurrence.affine_transform.nat f 2 3 1 2 (by decide) step n
++ nat_missing_step (f : ℕ → ℕ) (n : ℕ) : 1 * f n + 3 = (1 * f 0 + 3) * 2 ^ n
+  apply recurrence.affine_transform.nat f 2 3 1 3 (by decide)
++ nat_wrong_initial (f : ℕ → ℕ) (n : ℕ) (step : ∀ i, f (i + 1) = 2 * f i + 1) : 1 * f n + 1 = (1 * 0 + 1) * 2 ^ n
+  exact recurrence.affine_transform.nat f 2 1 1 1 (by decide) step n

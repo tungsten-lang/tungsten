@@ -1,0 +1,19 @@
++ nat_missing_guard (f : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) : f m ≤ 8 := by auto
++ nat_too_strong (f : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m < 7 := by auto
++ nat_wrong_index (f : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f n ≤ 8 := by auto
+
++ int_missing_guard (f : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) : f m ≤ 8 := by auto
++ int_too_strong (f : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m < 7 := by auto
++ int_wrong_index (f : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f n ≤ 8 := by auto
+
++ rat_missing_guard (f : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) : f m ≤ 8 := by auto
++ rat_too_strong (f : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m < 7 := by auto
++ rat_wrong_index (f : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f n ≤ 8 := by auto
+
++ real_missing_guard (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) : f m ≤ 8 := by auto
++ real_too_strong (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m < 7 := by auto
++ real_wrong_index (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f n ≤ 8 := by auto
+
++ branch_leak (f : ℕ → ℝ) (n m : ℕ) (h : (∀ i < n, f i ≤ 7) ∨ (∀ i < n, 7 ≤ f i)) (hm : m+1 ≤ n) : f m ≤ 8 := by auto
++ circular (f : ℕ → ℝ) (m : ℕ) (h : f m ≤ 7 → f m ≤ 8) (k : f m ≤ 8 → f m ≤ 7) : f m ≤ 8 := by auto
++ no_global_axiom (f : ℕ → ℝ) (n m : ℕ) (hm : m+1 ≤ n) : f m ≤ 8 := by auto

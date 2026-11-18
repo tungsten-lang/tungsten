@@ -1,0 +1,11 @@
+import entropy
+import sqrt_distance
+
++ missing_exp_difference (x : ℝ) : 1+x < exp x := by auto
++ strict_equal (x : ℝ) : 2*exp ((x+x)/2) < exp x+exp x := by auto
++ missing_root_sign (x y : ℝ) (hx : 0 ≤ x) : |sqrt x-sqrt y| ≤ sqrt (|x-y|) := by auto
++ missing_entropy_sign (x : ℝ) : x-1 ≤ x*log x := by auto
++ missing_total (n : ℕ) (p : ℕ → ℝ) (hn : 0 < (n : ℝ)) (hp : ∀ i < n, 0 ≤ p i) : sum_below n (fun i => 0-p i*log (p i)) ≤ log (n : ℝ) := by auto
++ root_wrong_sign (B m c : ℝ) (hB : 0 < B) (hc : 0 < c) (h : c*c ≤ m*m*B) : 1/sqrt B ≤ m/c := by auto
++ strict_root_equality (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : c*c = m*m*B) : 1/sqrt B < m/c := by auto
++ missing_square_sign (a b : ℚ) (ha : 0 ≤ a) : (a-b)*(a-b) ≤ |a*a-b*b| := by auto

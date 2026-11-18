@@ -1,0 +1,17 @@
+import sequence_order
+
++ bounded_drop (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i + 1) + 1 ≤ f i) : f n + n ≤ f 0 := sequence.descent_on.nat f n h
++ global_drop (f : ℕ → ℕ) (h : ∀ i, f (i + 1) + 1 ≤ f i) : ∀ n, f n + n ≤ f 0 := sequence.descent.nat f h
++ length_bound (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i + 1) + 1 ≤ f i) : n ≤ f 0 := sequence.descent_length.nat f n h
++ no_cycle (f : ℕ → ℕ) (n : ℕ) (h : 0 < n) (step : ∀ i < n, f (i + 1) + 1 ≤ f i) (cycle : f n = f 0) : False := sequence.no_cyclic_descent.nat f n h step cycle
++ no_infinite (f : ℕ → ℕ) : ¬ (∀ i, f (i + 1) < f i) := sequence.no_infinite_descent.nat f
++ empty_chain (f : ℕ → ℕ) : f 0 + 0 ≤ f 0 := sequence.descent_on.nat f 0 (by intro i hi; omega)
++ countdown (m n : ℕ) (h : n ≤ m) : m - n + n ≤ m
+  have bound := sequence.descent_on.nat (fun i => m - i) n (by intro i hi; omega)
+  omega
++ strict_steps (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i + 1) < f i) : n ≤ f 0
+  exact sequence.descent_length.nat f n (by intro i hi; omega [h i hi])
++ finite_not_infinite : (∀ i < 3, 3 - (i + 1) < 3 - i) ∧ ¬ (∀ i, 3 - (i + 1) < 3 - i)
+  constructor
+  · intro i hi; omega
+  · exact sequence.no_infinite_descent.nat (fun i => 3 - i)

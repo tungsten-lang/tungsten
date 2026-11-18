@@ -1,0 +1,54 @@
+import recurrence
+
++ real_missing_base (f : ℕ → ℝ) (n : ℕ) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℝ) + 3) :
+    f n = 1 * (n : ℝ) * (n : ℝ) + 2 * (n : ℝ) + 5
+  exact recurrence.quadratic.real f 1 2 5 (by assumption) step n
++ real_wrong_linear (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2) : f n = 5 + (n : ℝ) * 3
+  exact recurrence.linear_eq.real f 5 3 base step n
++ real_wrong_quadratic (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℝ) + 2) :
+    f n = 1 * (n : ℝ) * (n : ℝ) + 2 * (n : ℝ) + 5
+  exact recurrence.quadratic.real f 1 2 5 base step n
++ real_wrong_cubic (f : ℕ → ℝ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 3 * (i : ℝ) * (i : ℝ) + 1) :
+    f n = 1 * (n : ℝ) * (n : ℝ) * (n : ℝ) + 0 * (n : ℝ) * (n : ℝ) + 0 * (n : ℝ) + 0
+  exact recurrence.cubic.real f 1 0 0 0 base step n
+
++ rat_missing_base (f : ℕ → ℚ) (n : ℕ) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℚ) + 3) :
+    f n = 1 * (n : ℚ) * (n : ℚ) + 2 * (n : ℚ) + 5
+  exact recurrence.quadratic.rat f 1 2 5 (by assumption) step n
++ rat_wrong_linear (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2) : f n = 5 + (n : ℚ) * 3
+  exact recurrence.linear_eq.rat f 5 3 base step n
++ rat_wrong_quadratic (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℚ) + 2) :
+    f n = 1 * (n : ℚ) * (n : ℚ) + 2 * (n : ℚ) + 5
+  exact recurrence.quadratic.rat f 1 2 5 base step n
++ rat_wrong_cubic (f : ℕ → ℚ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 3 * (i : ℚ) * (i : ℚ) + 1) :
+    f n = 1 * (n : ℚ) * (n : ℚ) * (n : ℚ) + 0 * (n : ℚ) * (n : ℚ) + 0 * (n : ℚ) + 0
+  exact recurrence.cubic.rat f 1 0 0 0 base step n
+
++ int_missing_base (f : ℕ → ℤ) (n : ℕ) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℤ) + 3) :
+    f n = 1 * (n : ℤ) * (n : ℤ) + 2 * (n : ℤ) + 5
+  exact recurrence.quadratic.int f 1 2 5 (by assumption) step n
++ int_wrong_linear (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2) : f n = 5 + (n : ℤ) * 3
+  exact recurrence.linear_eq.int f 5 3 base step n
++ int_wrong_quadratic (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2 * (i : ℤ) + 2) :
+    f n = 1 * (n : ℤ) * (n : ℤ) + 2 * (n : ℤ) + 5
+  exact recurrence.quadratic.int f 1 2 5 base step n
++ int_wrong_cubic (f : ℕ → ℤ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 3 * (i : ℤ) * (i : ℤ) + 1) :
+    f n = 1 * (n : ℤ) * (n : ℤ) * (n : ℤ) + 0 * (n : ℤ) * (n : ℤ) + 0 * (n : ℤ) + 0
+  exact recurrence.cubic.int f 1 0 0 0 base step n
+
++ nat_missing_base (f : ℕ → ℕ) (n : ℕ) (step : ∀ i, f (i + 1) = f i + 2 * i + 3) :
+    f n = 1 * n * n + 2 * n + 5
+  exact recurrence.quadratic.nat f 1 2 5 (by assumption) step n
++ nat_wrong_linear (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2) : f n = 5 + n * 3
+  exact recurrence.linear_eq.nat f 5 3 base step n
++ nat_wrong_quadratic (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 5) (step : ∀ i, f (i + 1) = f i + 2 * i + 2) :
+    f n = 1 * n * n + 2 * n + 5
+  exact recurrence.quadratic.nat f 1 2 5 base step n
++ nat_wrong_cubic (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 3 * i * i + 1) :
+    f n = 1 * n * n * n + 0 * n * n + 0 * n + 0
+  exact recurrence.cubic.nat f 1 0 0 0 base step n
+
++ counter_wrong_base (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 1) (step : ∀ i, f (i + 1) = f i + 1) : f n = n
+  exact recurrence.count f base step n
++ counter_wrong_step (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i + 1) = f i + 2) : f n = n
+  exact recurrence.count f base step n

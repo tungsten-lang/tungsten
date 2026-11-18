@@ -1,0 +1,16 @@
++ chord_contradiction (P X S Y c Fx Gy : ℚ) (hP : 0 < P) (hPX : P < X) (hY : 0 ≤ Y) (hYS : Y ≤ S) (hS : 0 < S) (hc : 1 < c)
+    (hF : (c - 1) * X ≤ (Fx - 1) * P) (hG : (Gy - 1) * S ≤ (c - 1) * Y) (heq : Fx = Gy) : False
+  nlinarith
+
++ real_triple (a b c : ℝ) (ha : 0 < a) (hb : 0 < b) (hc : 0 < c) : 0 < a*b*c := by nlinarith
++ real_weak (a b c : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hc : 0 ≤ c) : 0 ≤ a*b*c := by nlinarith
+
++ rat_triple (a b c : ℚ) (ha : 0 < a) (hb : 0 < b) (hc : 0 < c) : 0 < a*b*c := by nlinarith
++ rat_weak (a b c : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hc : 0 ≤ c) : 0 ≤ a*b*c := by nlinarith
+
++ int_triple (a b c : ℤ) (ha : 0 < a) (hb : 0 < b) (hc : 0 < c) : 0 < a*b*c := by nlinarith
++ int_weak (a b c : ℤ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hc : 0 ≤ c) : 0 ≤ a*b*c := by nlinarith
+
++ equal_factors (x y a b : ℚ) (e : x = y) (hx : 0 < x) (ha : 0 < a) (hb : 0 < b) : 0 < y * a * b := by nlinarith
++ chained_factors (x y z a b : ℝ) (e : x = y) (j : y = z) (hx : 0 < x) (ha : 0 < a) (hb : 0 < b) : 0 < z * a * b := by nlinarith
++ negated_factors (a b c : ℚ) (ha : a < 0) (hb : b < 0) (hc : c < 0) : 0 < (-a) * (-b) * (-c) := by nlinarith

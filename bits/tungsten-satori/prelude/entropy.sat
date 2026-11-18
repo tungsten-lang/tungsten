@@ -1,0 +1,46 @@
+-- Entropy bounds with zero masses allowed; log 0 needs no assigned value.
+import realx
+import log_convex
+
++ mul_log_tangent_le (a x : ℝ) (ha : 0 < a) (hx : 0 ≤ x) : x*log a+x-a ≤ x*log x
+  by_cases zero : x = 0
+  · rw [zero]
+    nlinarith
+  · have bound := log_tangent_le x a (by linarith) ha
+    linarith
+
++ mul_log_tangent_lt (a x : ℝ) (ha : 0 < a) (hx : 0 ≤ x) (hne : x ≠ a) : x*log a+x-a < x*log x
+  by_cases zero : x = 0
+  · rw [zero]
+    nlinarith
+  · have bound := log_tangent_lt x a (by linarith) ha hne
+    linarith
+
++ sub_one_le_mul_log (x : ℝ) (hx : 0 ≤ x) : x-1 ≤ x*log x
+  have bound := mul_log_tangent_le 1 x (by linarith) hx
+  rw [log_one] at bound
+  linarith
+
++ neg_mul_log_le_scale (x c : ℝ) (hx : 0 ≤ x) (hc : 0 < c) : 0-x*log x ≤ x*(log c-1)+1/c
+  by_cases zero : x = 0
+  · rw [zero]
+    have pos := one_div_pos.real c hc
+    nlinarith
+  · have xp : 0 < x := by linarith
+    have bound := sub_one_le_mul_log (c*x) (by nlinarith)
+    rw [log_mul c x hc xp] at bound
+    have inv := mul_inv_cancel.real c (by linarith)
+    nlinarith
+
++ neg_mul_log_le_of_le (x t : ℝ) (ht : 0 < t) (h : t ≤ x) : 0-x*log x ≤ x*log (1/t)
+  have bound := (log_le_log t x ht (by linarith)).mpr h
+  have reciprocal : log (1/t) = 0-log t := by rw [log_div 1 t (by linarith) ht, log_one]
+  rw [reciprocal]
+  nlinarith
+
++ sum_below.entropy_le_log.real (n : ℕ) (p : ℕ → ℝ) (hn : 0 < (n : ℝ)) (hp : ∀ i < n, 0 ≤ p i) (mass : sum_below n p = 1) :
+    sum_below n (fun i => 0-p i*log (p i)) ≤ log (n : ℝ)
+  have bound := sum_le.real (fun i => 0-p i*log (p i)) (fun i => p i*(log (n : ℝ)-1)+1/(n : ℝ)) n (by intro i hi; exact neg_mul_log_le_scale (p i) (n : ℝ) (hp i hi) hn)
+  rw [sum_add.real, sum_mul_const.real, sum_const.real, mass] at bound
+  have inv := mul_inv_cancel.real (n : ℝ) (by linarith)
+  nlinarith

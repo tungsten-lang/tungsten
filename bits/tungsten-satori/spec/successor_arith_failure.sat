@@ -1,0 +1,7 @@
++ wrong_successor (n : ℕ) : succ n = n := by linarith
++ wrong_offset (n : ℕ) : succ n = n+2 := by omega
++ wrong_nested (n : ℕ) : succ (succ n) = n+1 := by nlinarith
++ missing_step (f : ℕ → ℕ) (n : ℕ) (h : n ≤ f n) : succ n ≤ f (succ n) := by auto
++ wrong_index (f : ℕ → ℝ) (n : ℕ) (h : f (n+1) ≤ 7) : f (succ (succ n)) ≤ 8 := by linarith
++ wrong_strict (f : ℕ → ℝ) (n : ℕ) (h : f (n+1) ≤ 7) : f (succ n) < 7 := by auto
++ missing_range (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < m, f (i+1) ≤ 7) : f (succ n) ≤ 8 := by auto

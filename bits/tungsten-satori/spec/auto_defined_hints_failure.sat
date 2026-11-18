@@ -1,0 +1,8 @@
++ unsupplied (v : ℚ × ℚ) (h : ready v) : fst (shifted v) < snd (shifted v)
+  auto
++ missing_guard (v : ℚ × ℚ) : fst (shifted v) < snd (shifted v)
+  auto [ordered_if]
++ wrong_guard (v w : ℚ × ℚ) (h : ready w) : fst (shifted v) < snd (shifted v)
+  auto [ordered_if]
++ too_strong (v : ℚ × ℚ) (h : ready v) : fst (shifted v)+1 < snd (shifted v)
+  auto [ordered_if v h]

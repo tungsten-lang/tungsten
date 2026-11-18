@@ -1,0 +1,152 @@
+import recurrence
+
+-> line.real : ℕ → ℝ
+  | 0 => 5
+  | i + 1 => line.real i + (-2)
+-> curve.real : ℕ → ℝ
+  | 0 => 7
+  | i + 1 => curve.real i + 2 * (i : ℝ) + 4
+-> cube.real : ℕ → ℝ
+  | 0 => 3
+  | i + 1 => cube.real i + (-3) * (i : ℝ) * (i : ℝ) + (-3) * (i : ℝ) + (-1)
+-> flat.real : ℕ → ℝ
+  | 0 => 9
+  | i + 1 => flat.real i
++ real_linear (n : ℕ) : line.real n = 5 - 2 * (n : ℝ)
+  have h := recurrence.linear_eq.real line.real 5 (-2) (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ real_quadratic (n : ℕ) : curve.real n = (n : ℝ) * (n : ℝ) + 3 * (n : ℝ) + 7
+  have h := recurrence.quadratic.real curve.real 1 3 7 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ real_cubic (n : ℕ) : cube.real n = 3 - (n : ℝ) * (n : ℝ) * (n : ℝ)
+  have h := recurrence.cubic.real cube.real (-1) 0 0 3 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ real_constant (n : ℕ) : flat.real n = 9
+  have h := recurrence.quadratic.real flat.real 0 0 9 (by rfl) (by intro i; unfold flat.real; ring) n
+  rw [h]; ring
++ real_values : line.real 0 = 5 ∧ line.real 3 = (-1) ∧ curve.real 2 = 17 ∧ cube.real 2 = (-5) ∧ flat.real 2 = 9 := by decide
+
+-> line.rat : ℕ → ℚ
+  | 0 => 5
+  | i + 1 => line.rat i + (-2)
+-> curve.rat : ℕ → ℚ
+  | 0 => 7
+  | i + 1 => curve.rat i + 2 * (i : ℚ) + 4
+-> cube.rat : ℕ → ℚ
+  | 0 => 3
+  | i + 1 => cube.rat i + (-3) * (i : ℚ) * (i : ℚ) + (-3) * (i : ℚ) + (-1)
+-> flat.rat : ℕ → ℚ
+  | 0 => 9
+  | i + 1 => flat.rat i
++ rat_linear (n : ℕ) : line.rat n = 5 - 2 * (n : ℚ)
+  have h := recurrence.linear_eq.rat line.rat 5 (-2) (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ rat_quadratic (n : ℕ) : curve.rat n = (n : ℚ) * (n : ℚ) + 3 * (n : ℚ) + 7
+  have h := recurrence.quadratic.rat curve.rat 1 3 7 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ rat_cubic (n : ℕ) : cube.rat n = 3 - (n : ℚ) * (n : ℚ) * (n : ℚ)
+  have h := recurrence.cubic.rat cube.rat (-1) 0 0 3 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ rat_constant (n : ℕ) : flat.rat n = 9
+  have h := recurrence.quadratic.rat flat.rat 0 0 9 (by rfl) (by intro i; unfold flat.rat; ring) n
+  rw [h]; ring
++ rat_values : line.rat 0 = 5 ∧ line.rat 3 = (-1) ∧ curve.rat 2 = 17 ∧ cube.rat 2 = (-5) ∧ flat.rat 2 = 9 := by decide
+
+-> line.int : ℕ → ℤ
+  | 0 => 5
+  | i + 1 => line.int i + (-2)
+-> curve.int : ℕ → ℤ
+  | 0 => 7
+  | i + 1 => curve.int i + 2 * (i : ℤ) + 4
+-> cube.int : ℕ → ℤ
+  | 0 => 3
+  | i + 1 => cube.int i + (-3) * (i : ℤ) * (i : ℤ) + (-3) * (i : ℤ) + (-1)
+-> flat.int : ℕ → ℤ
+  | 0 => 9
+  | i + 1 => flat.int i
++ int_linear (n : ℕ) : line.int n = 5 - 2 * (n : ℤ)
+  have h := recurrence.linear_eq.int line.int 5 (-2) (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ int_quadratic (n : ℕ) : curve.int n = (n : ℤ) * (n : ℤ) + 3 * (n : ℤ) + 7
+  have h := recurrence.quadratic.int curve.int 1 3 7 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ int_cubic (n : ℕ) : cube.int n = 3 - (n : ℤ) * (n : ℤ) * (n : ℤ)
+  have h := recurrence.cubic.int cube.int (-1) 0 0 3 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ int_constant (n : ℕ) : flat.int n = 9
+  have h := recurrence.quadratic.int flat.int 0 0 9 (by rfl) (by intro i; unfold flat.int; ring) n
+  rw [h]; ring
++ int_values : line.int 0 = 5 ∧ line.int 3 = (-1) ∧ curve.int 2 = 17 ∧ cube.int 2 = (-5) ∧ flat.int 2 = 9 := by decide
+
+-> line.nat : ℕ → ℕ
+  | 0 => 5
+  | i + 1 => line.nat i + 2
+-> curve.nat : ℕ → ℕ
+  | 0 => 7
+  | i + 1 => curve.nat i + 2 * i + 4
+-> cube.nat : ℕ → ℕ
+  | 0 => 3
+  | i + 1 => cube.nat i + 3 * i * i + 3 * i + 1
+-> flat.nat : ℕ → ℕ
+  | 0 => 9
+  | i + 1 => flat.nat i
++ nat_linear (n : ℕ) : line.nat n = 5 + 2 * n
+  have h := recurrence.linear_eq.nat line.nat 5 2 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ nat_quadratic (n : ℕ) : curve.nat n = n * n + 3 * n + 7
+  have h := recurrence.quadratic.nat curve.nat 1 3 7 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ nat_cubic (n : ℕ) : cube.nat n = 3 + n * n * n
+  have h := recurrence.cubic.nat cube.nat 1 0 0 3 (by rfl) (by intro i; rfl) n
+  rw [h]; ring
++ nat_constant (n : ℕ) : flat.nat n = 9
+  have h := recurrence.quadratic.nat flat.nat 0 0 9 (by rfl) (by intro i; unfold flat.nat; ring) n
+  rw [h]; ring
++ nat_values : line.nat 0 = 5 ∧ line.nat 3 = 11 ∧ curve.nat 2 = 17 ∧ cube.nat 2 = 11 ∧ flat.nat 2 = 9 := by decide
+
+-> plen : ℕ → ℕ
+  | 0 => 0
+  | j + 1 => plen j + 2 * j + 4
++ plen_closed (j : ℕ) : plen j = j * j + 3 * j
+  have h := recurrence.quadratic.nat plen 1 3 0 (by rfl) (by intro i; rfl) j
+  rw [h]; ring
+
+-> cr : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => cr n + 1
+-> kr : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => kr n + 2 * cr n + 3
++ cr_closed (j : ℕ) : cr j = j
+  exact recurrence.count cr (by rfl) (by intro i; rfl) j
+
++ kr_closed (j : ℕ) : kr j = j * (j + 2)
+  have h := recurrence.quadratic.nat kr 1 2 0 (by rfl) (by intro i; simp [kr, cr_closed]) j
+  rw [h]; ring
+
+-> cexp : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => cexp n + 1
+-> kexp : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => kexp n + 2 * cexp n + 3
++ cexp_closed (j : ℕ) : cexp j = j
+  exact recurrence.count cexp (by rfl) (by intro i; rfl) j
+
++ kexp_closed (j : ℕ) : kexp j = j * (j + 2)
+  have h := recurrence.quadratic.nat kexp 1 2 0 (by rfl) (by intro i; simp [kexp, cexp_closed]) j
+  rw [h]; ring
+
+-> sj : ℕ → ℤ
+  | 0 => 0
+  | k + 1 => sj k + (k : ℤ)
+-> sj2 : ℕ → ℤ
+  | 0 => 0
+  | k + 1 => sj2 k + (k : ℤ) * (k : ℤ)
++ sj_closed (r : ℕ) : 2 * sj r = (r : ℤ) * ((r : ℤ) - 1)
+  have h := recurrence.quadratic.int (fun i => 2 * sj i) 1 (-1) 0 (by simp [sj]) (by intro i; simp [sj]; ring) r
+  rw [h]; ring
+
++ sj2_closed (r : ℕ) : 6 * sj2 r = (r : ℤ) * ((r : ℤ) - 1) * (2 * (r : ℤ) - 1)
+  have h := recurrence.cubic.int (fun i => 6 * sj2 i) 2 (-3) 1 0 (by simp [sj2]) (by intro i; simp [sj2]; ring) r
+  rw [h]; ring

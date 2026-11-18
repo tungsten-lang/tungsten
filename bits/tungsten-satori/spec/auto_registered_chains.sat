@@ -1,0 +1,46 @@
+import quadratic
+
++ int_upper (a b c d : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : b^2 ≤ d
+  auto
+
++ int_strict (a b c d : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c < d) : b^2 < d
+  auto
+
++ int_offset (a b c d : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : b^2+1 ≤ d+1
+  auto
+
++ int_scaled (a b c d : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : 2*b^2 ≤ 2*d
+  auto
+
++ int_lower (a b c d : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : d ≤ b^2) : d ≤ a*c
+  auto
+
++ rat_upper (a b c d : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : b^2 ≤ d
+  auto
+
++ rat_strict (a b c d : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c < d) : b^2 < d
+  auto
+
++ rat_offset (a b c d : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : b^2+1 ≤ d+1
+  auto
+
++ rat_scaled (a b c d : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : 2*b^2 ≤ 2*d
+  auto
+
++ rat_lower (a b c d : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : d ≤ b^2) : d ≤ a*c
+  auto
+
++ real_upper (a b c d : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : b^2 ≤ d
+  auto
+
++ real_strict (a b c d : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c < d) : b^2 < d
+  auto
+
++ real_offset (a b c d : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : b^2+1 ≤ d+1
+  auto
+
++ real_scaled (a b c d : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : 2*b^2 ≤ 2*d
+  auto
+
++ real_lower (a b c d : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : d ≤ b^2) : d ≤ a*c
+  auto

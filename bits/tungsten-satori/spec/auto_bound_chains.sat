@@ -1,0 +1,49 @@
+import arith
+
++ lower (x b c : ℚ) (k : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c ≤ b^k) : c ≤ x^k
+  auto
+
++ upper (x b c : ℚ) (k : ℕ) (h0 : 0 ≤ x) (hb : x ≤ b) (hc : b^k ≤ c) : x^k ≤ c
+  auto
+
++ strict_outer (x b c : ℚ) (k : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c < b^k) : c < x^k
+  auto
+
++ strict_inner (x b c : ℚ) (k : ℕ) (h0 : 0 ≤ b) (hb : b < x) (hk : 0 < k) (hc : c ≤ b^k) : c < x^k
+  auto
+
++ strict_upper (x b c : ℚ) (k : ℕ) (h0 : 0 ≤ x) (hb : x ≤ b) (hc : b^k < c) : x^k < c
+  auto
+
++ two_edges (x b c d : ℚ) (k : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c ≤ d) (hd : d ≤ b^k) : c ≤ x^k
+  auto
+
++ conjunction (x b c : ℚ) (k : ℕ) (h : 0 ≤ b ∧ b ≤ x ∧ c ≤ b^k) : c ≤ x^k
+  auto
+
++ exponent (a c : ℚ) (m n : ℕ) (h : 1 ≤ a) (hmn : m ≤ n) (hc : c ≤ a^m) : c ≤ a^n
+  auto
+
++ generic (f : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v) (x b c : ℚ) (hb : b ≤ x) (hc : c ≤ f b) : c ≤ f x
+  auto
+
++ maximum (a b c d u : ℚ) (ha : a ≤ c) (hb : b ≤ d) (hu : u ≤ max a b) : u ≤ max c d
+  auto
+
++ natural (x b c : ℕ) (k : ℕ) (hb : b ≤ x) (hc : c ≤ b^k) : c ≤ x^k
+  auto
+
++ integer (x b c : ℤ) (k : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c ≤ b^k) : c ≤ x^k
+  auto
+
++ real_value (x b c : ℝ) (k : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c ≤ b^k) : c ≤ x^k
+  auto
+
+opaque a : ℚ
+opaque b : ℚ
+opaque c : ℚ
+opaque n : ℕ
+axiom supplied_bound : c ≤ b^n
+
++ explicit_bound (h0 : 0 ≤ b) (hb : b ≤ a) : c ≤ a^n
+  auto [supplied_bound]

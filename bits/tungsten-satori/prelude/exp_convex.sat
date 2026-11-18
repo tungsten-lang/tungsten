@@ -1,0 +1,56 @@
+-- Exponential tangent and Jensen bounds without the full realx library.
+import real
+
+-- Exponential supporting lines and finite Jensen bounds.
++ exp_tangent_le (x y : ℝ) : exp x + exp x*(y-x) ≤ exp y
+  have lower := exp_ge_one_add (y-x)
+  have pos := exp_pos x
+  have scaled := mul_nonneg.real (exp x) (exp (y-x)-(1+(y-x))) (by linarith) (by linarith)
+  have e : x+(y-x) = y := by ring
+  have product := exp_add x (y-x)
+  rw [e] at product
+  nlinarith
+
++ exp_weighted_jensen (x y z a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) (mean : (a+b)*z = a*x+b*y) : (a+b)*exp z ≤ a*exp x+b*exp y
+  have left := mul_nonneg.real a (exp x-(exp z+exp z*(x-z))) ha (by linarith [exp_tangent_le z x])
+  have right := mul_nonneg.real b (exp y-(exp z+exp z*(y-z))) hb (by linarith [exp_tangent_le z y])
+  have center : exp z*((a+b)*z) = exp z*(a*x+b*y) := by rw [mean]
+  linarith
+
++ exp_midpoint_le (x y : ℝ) : 2*exp ((x+y)/2) ≤ exp x+exp y
+  have bound := exp_weighted_jensen x y ((x+y)/2) 1 1 (by linarith) (by linarith) (by ring)
+  linarith
+
+-- Equality in the exponential supporting-line bound occurs only at its center.
++ one_add_lt_exp (x : ℝ) (hne : x ≠ 0) : 1+x < exp x
+  by_cases low : x < 0-2
+  · linarith [exp_pos x]
+  · have half := exp_ge_one_add (x/2)
+    have square := exp_add (x/2) (x/2)
+    have split : x/2+x/2 = x := by ring
+    rw [split] at square
+    have sign := exp_pos (x/2)
+    nlinarith
+
++ exp_tangent_lt (x y : ℝ) (hne : x ≠ y) : exp x+exp x*(y-x) < exp y
+  have lower := one_add_lt_exp (y-x) (by intro h; apply hne; linarith)
+  have product := mul_pos.real (exp x) (exp (y-x)-(1+(y-x))) (exp_pos x) (by linarith)
+  have e : x+(y-x) = y := by ring
+  have addition := exp_add x (y-x)
+  rw [e] at addition
+  nlinarith
+
++ exp_weighted_jensen_lt (x y z a b : ℝ) (ha : 0 < a) (hb : 0 < b) (hne : x ≠ y) (mean : (a+b)*z = a*x+b*y) : (a+b)*exp z < a*exp x+b*exp y
+  have center : exp z*((a+b)*z) = exp z*(a*x+b*y) := by rw [mean]
+  by_cases hx : z = x
+  · have hy : z ≠ y := by intro h; apply hne; linarith
+    have left := mul_nonneg.real a (exp x-(exp z+exp z*(x-z))) (by linarith) (by linarith [exp_tangent_le z x])
+    have right := mul_pos.real b (exp y-(exp z+exp z*(y-z))) hb (by linarith [exp_tangent_lt z y hy])
+    linarith
+  · have left := mul_pos.real a (exp x-(exp z+exp z*(x-z))) ha (by linarith [exp_tangent_lt z x hx])
+    have right := mul_nonneg.real b (exp y-(exp z+exp z*(y-z))) (by linarith) (by linarith [exp_tangent_le z y])
+    linarith
+
++ exp_midpoint_lt (x y : ℝ) (hne : x ≠ y) : 2*exp ((x+y)/2) < exp x+exp y
+  have bound := exp_weighted_jensen_lt x y ((x+y)/2) 1 1 (by linarith) (by linarith) hne (by ring)
+  linarith

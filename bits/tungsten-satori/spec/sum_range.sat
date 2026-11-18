@@ -1,0 +1,62 @@
+import sum_range
+
+-> local_total (f : ℕ → α) : ℕ → α
+  | 0 => 0
+  | n + 1 => local_total f n + f n
++ local_total_eq (f : ℕ → α) (n : ℕ) : local_total f n = sum_below n f
+  exact sum_below.eq_of_recurrence f (local_total f) (by rfl) (by intro i; rfl) n
++ real_front_empty (f : ℕ → ℝ) : sum_below 1 f = f 0 + sum_below 0 (fun i => f (i + 1)) := sum_below.succ_front.real f 0
++ rational_front (f : ℕ → ℚ) (n : ℕ) : sum_below (n + 1) f = f 0 + sum_below n (fun i => f (i + 1)) := sum_below.succ_front.rat f n
++ integer_front_negative : sum_below 3 (fun (i : ℕ) => -((i : ℤ) + 1)) = -6
+  show sum_below (2 + 1) (fun (i : ℕ) => -((i : ℤ) + 1)) = -6
+  rw [sum_below.succ_front.int]; decide
++ natural_front_singleton (f : ℕ → ℕ) : sum_below 2 f = f 0 + f 1
+  show sum_below (1 + 1) f = f 0 + f 1
+  rw [sum_below.succ_front.nat]
+  show f 0 + (0 + f 1) = f 0 + f 1
+  simp
+
++ range_congruence (f g : ℕ → α) (h : ∀ i < 5, f i = g i) : sum_below 5 f = sum_below 5 g := sum_below.congr f g 5 h
++ real_strict_witness (f g : ℕ → ℝ) (h : ∀ i < 4, f i ≤ g i) (hs : f 2 < g 2) : sum_below 4 f < sum_below 4 g
+  exact sum_below.lt_of_le_of_exists_lt.real f g 4 h ⟨2, by decide, hs⟩
++ real_negative_band (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, -3 ≤ f i ∧ f i ≤ -1) : (n : ℝ) * (-3) ≤ sum_below n f ∧ sum_below n f ≤ (n : ℝ) * (-1)
+  constructor
+  · apply sum_below.const_le.real; auto
+  · apply sum_below.le_const.real; auto
++ real_empty (c : ℝ) (f : ℕ → ℝ) : sum_below 0 f ≤ 0 * c
+  exact sum_below.le_const.real f c 0 (by intro i hi; omega)
++ rational_negative (f : ℕ → ℚ) (h : ∀ i < 3, f i < -1) : sum_below 3 f < 3 * (-1) := sum_below.lt_const.rat f (-1) 3 (by decide) h
++ rational_singleton (x c : ℚ) (h : c < x) : c < sum_below 1 (fun i => x)
+  have hs := sum_below.const_lt.rat (fun i => x) c 1 (by decide) (by intro i hi; exact h)
+  simp at hs
+  exact hs
++ integer_lower (f : ℕ → ℤ) (h : ∀ i < 3, -4 < f i) : 3 * (-4) < sum_below 3 f := sum_below.const_lt.int f (-4) 3 (by decide) h
++ integer_equal_rest (f g : ℕ → ℤ) (h : ∀ i < 3, f i ≤ g i) (hs : f 0 < g 0) : sum_below 3 f < sum_below 3 g
+  exact sum_below.lt_of_le_of_exists_lt.int f g 3 h ⟨0, by decide, hs⟩
++ natural_strict (f g : ℕ → ℕ) (h : ∀ i < 2, f i < g i) : sum_below 2 f < sum_below 2 g := sum_below.lt.nat f g 2 (by decide) h
++ natural_empty (f : ℕ → ℕ) : 0 * 7 ≤ sum_below 0 f
+  apply sum_below.const_le.nat f 7 0
+  intro i hi; omega
++ real_split : sum_below (2 + 3) (fun (i : ℕ) => (i : ℝ)) = 10 := by rw [sum_below.split.real]; decide
++ rational_split : sum_below (3 + 2) (fun (i : ℕ) => (i : ℚ) / 2) = 5 := by rw [sum_below.split.rat]; decide
++ integer_split : sum_below (1 + 3) (fun (i : ℕ) => (i : ℤ) - 2) = -2 := by rw [sum_below.split.int]; decide
++ natural_split : sum_below (2 + 3) (fun (i : ℕ) => i) = 10 := by rw [sum_below.split.nat]; decide
+#axioms range_congruence
+#axioms real_strict_witness
+#axioms real_negative_band
+#axioms real_empty
+#axioms rational_negative
+#axioms rational_singleton
+#axioms integer_lower
+#axioms integer_equal_rest
+#axioms natural_strict
+#axioms natural_empty
+#axioms real_split
+#axioms rational_split
+#axioms integer_split
+#axioms natural_split
+#axioms local_total_eq
+#axioms real_front_empty
+#axioms rational_front
+#axioms integer_front_negative
+#axioms natural_front_singleton

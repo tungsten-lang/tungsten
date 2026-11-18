@@ -1,0 +1,42 @@
+import arith
+opaque a : ℚ
+opaque x : ℚ
+opaque y : ℚ
+opaque z : ℚ
+axiom supplied_balance : x+y = z
+
++ wrong_constant (a x y z : ℚ) (h : x+y = z) : a*x+a*y = a*z+1
+  auto
+
++ inequality_as_equality (a x y z : ℚ) (ha : 0 < a) (h : x+y ≤ z) : a*x+a*y = a*z
+  auto
+
++ unknown_sign (a x y z : ℚ) (h : x+y ≤ z) : a*x+a*y ≤ a*z
+  auto
+
++ negative_sign (a x y z : ℚ) (ha : a < 0) (h : x+y ≤ z) : a*x+a*y ≤ a*z
+  auto
+
++ missing_equality (a x y z w u : ℚ) (h : x+y = z) : a*x+a*y+a*w = a*u
+  auto
+
++ wrong_factor (a b x y z : ℚ) (h : x+y = z) : a*x+b*y = a*z
+  auto
+
++ branch_leak (a x y z : ℚ) (h : x+y = z ∨ x+y = z+1) : a*x+a*y = a*z
+  auto
+
++ natural_truncation (a x y z : ℕ) (h : x-y = z) : a*x = a*y+a*z
+  auto
+
++ wrong_coupling (a D Ap Am A0 Y Pp Pm : ℚ) (ha : 0 ≤ a) (hA : Ap+Am+A0 = 2*D) (hAm : Y ≤ Am) (hA0 : 0 ≤ A0) (hPm : Pm ≤ 2*a*Ap) (hPp : Pp ≤ a*Y) : Pp+Pm+a*Y ≤ 3*a*D
+  auto
+
++ missing_coupling_sign (a D Ap Am A0 Y Pp Pm : ℚ) (hA : Ap+Am+A0 = 2*D) (hAm : Y ≤ Am) (hA0 : 0 ≤ A0) (hPm : Pm ≤ 2*a*Ap) (hPp : Pp ≤ a*Y) : Pp+Pm+a*Y ≤ 4*a*D
+  auto
+
++ weak_strict (a D Ap Am A0 Y Pp Pm : ℚ) (ha : 0 ≤ a) (hA : Ap+Am+A0 = 2*D) (hAm : Y ≤ Am) (hA0 : 0 ≤ A0) (hPm : Pm ≤ 2*a*Ap) (hPp : Pp ≤ a*Y) : Pp+Pm+a*Y < 4*a*D
+  auto
+
++ no_global_balance : a*x+a*y = a*z
+  auto

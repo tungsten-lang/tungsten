@@ -1,0 +1,8 @@
++ invalid_left (p q : Prop) (h : (fun r => r ∧ q) p) : q := h.1
++ invalid_missing_assumption (p q : Prop) : (fun r => r ∧ q) p := ⟨(by trivial), (by trivial)⟩
++ invalid_iff_direction (p q : Prop) (h : (fun r => r ↔ q) p) (hq : q) : p := h.mp hq
++ invalid_mp_shape (p : Prop) (h : (fun r => r ∧ r) p) : p := h.mp h.1
++ invalid_mpr_type (a b : α) (h : (fun x => a = x) b) : a = b := h.mpr h
++ invalid_capture (p : α → α → Prop) (a : α) (h : (fun x => ∃ y, p x y) a) : ∃ y, p y y
+  obtain ⟨y, hy⟩ := h
+  exact ⟨y, hy⟩

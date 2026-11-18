@@ -1,0 +1,47 @@
++ unknown_name : ∀ n : ℕ, n+0 = n
+  induction m
+    rfl
+    rfl
+
++ missing_target : ∀ n : ℕ, n+0 = n
+  induction
+    rfl
+    rfl
+
++ extra_target (n : ℕ) : n+0 = n
+  induction n garbage
+    rfl
+    rfl
+
++ expression_target (n : ℕ) : n+0 = n
+  induction n+1
+    rfl
+    rfl
+
++ missing_case : ∀ n : ℕ, n+0 = n
+  induction n
+    rfl
+
++ invalid_step : ∀ n : ℕ, n = 0
+  induction n
+    rfl
+    rfl
+
++ inside_disjunction : (∀ n : ℕ, n+0 = n) ∨ True
+  induction n
+    rfl
+    rfl
+
++ inside_negation : ¬(∀ n : ℕ, n = 0)
+  induction n
+    rfl
+    rfl
+
++ wrong_type : ∀ x : ℝ, x = x
+  induction x
+    rfl
+
++ cases_extra (n : ℕ) : n+0 = n
+  cases n garbage
+    rfl
+    rfl

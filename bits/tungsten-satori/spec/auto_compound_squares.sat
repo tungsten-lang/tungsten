@@ -1,0 +1,62 @@
++ nat_pair_zero (a b c d : ℕ) (h : (a*b)*(a*b)+(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ nat_weighted_three (a b c d e f : ℕ) (h : 12*(a*b)*(a*b)+12*(c*d)*(c*d)+12*(e*f)*(e*f) = 0) : a*b = 0 ∧ c*d = 0 ∧ e*f = 0
+  auto
++ nat_nonnegative (a b : ℕ) : 0 ≤ (a*b)*(a*b)
+  auto
++ nat_ordered_squares (a b c d : ℕ) (ha : 0 ≤ a*b) (hc : 0 ≤ c*d) (h : (a*b)^2 ≤ (c*d)^2) : a*b ≤ c*d
+  auto
++ nat_shifted (a b c d : ℕ) (ha : 0 ≤ a*b+1) (hc : 0 ≤ c*d+2) (h : (a*b+1)^2 ≤ (c*d+2)^2) : a*b+1 ≤ c*d+2
+  auto
++ nat_fresh_names (compound compound_1 a b : ℕ) (h : (compound*a)*(compound*a)+(compound_1*b)*(compound_1*b) = 0) : compound*a = 0
+  auto
++ nat_nested_base (a b c d e f : ℕ) (h : (a*b*c)^2+(d*e*f)^2 = 0) : a*b*c = 0
+  auto
++ int_pair_zero (a b c d : ℤ) (h : (a*b)*(a*b)+(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ int_weighted_three (a b c d e f : ℤ) (h : 12*(a*b)*(a*b)+12*(c*d)*(c*d)+12*(e*f)*(e*f) = 0) : a*b = 0 ∧ c*d = 0 ∧ e*f = 0
+  auto
++ int_nonnegative (a b : ℤ) : 0 ≤ (a*b)*(a*b)
+  auto
++ int_amgm (a b c d : ℤ) : 2*(a*b)*(c*d) ≤ (a*b)^2+(c*d)^2
+  auto
++ int_ordered_squares (a b c d : ℤ) (ha : 0 ≤ a*b) (hc : 0 ≤ c*d) (h : (a*b)^2 ≤ (c*d)^2) : a*b ≤ c*d
+  auto
++ int_shifted (a b c d : ℤ) (ha : 0 ≤ a*b+1) (hc : 0 ≤ c*d+2) (h : (a*b+1)^2 ≤ (c*d+2)^2) : a*b+1 ≤ c*d+2
+  auto
++ int_fresh_names (compound compound_1 a b : ℤ) (h : (compound*a)*(compound*a)+(compound_1*b)*(compound_1*b) = 0) : compound*a = 0
+  auto
++ int_nested_base (a b c d e f : ℤ) (h : (a*b*c)^2+(d*e*f)^2 = 0) : a*b*c = 0
+  auto
++ rat_pair_zero (a b c d : ℚ) (h : (a*b)*(a*b)+(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ rat_weighted_three (a b c d e f : ℚ) (h : 12*(a*b)*(a*b)+12*(c*d)*(c*d)+12*(e*f)*(e*f) = 0) : a*b = 0 ∧ c*d = 0 ∧ e*f = 0
+  auto
++ rat_nonnegative (a b : ℚ) : 0 ≤ (a*b)*(a*b)
+  auto
++ rat_amgm (a b c d : ℚ) : 2*(a*b)*(c*d) ≤ (a*b)^2+(c*d)^2
+  auto
++ rat_ordered_squares (a b c d : ℚ) (ha : 0 ≤ a*b) (hc : 0 ≤ c*d) (h : (a*b)^2 ≤ (c*d)^2) : a*b ≤ c*d
+  auto
++ rat_shifted (a b c d : ℚ) (ha : 0 ≤ a*b+1) (hc : 0 ≤ c*d+2) (h : (a*b+1)^2 ≤ (c*d+2)^2) : a*b+1 ≤ c*d+2
+  auto
++ rat_fresh_names (compound compound_1 a b : ℚ) (h : (compound*a)*(compound*a)+(compound_1*b)*(compound_1*b) = 0) : compound*a = 0
+  auto
++ rat_nested_base (a b c d e f : ℚ) (h : (a*b*c)^2+(d*e*f)^2 = 0) : a*b*c = 0
+  auto
++ real_pair_zero (a b c d : ℝ) (h : (a*b)*(a*b)+(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ real_weighted_three (a b c d e f : ℝ) (h : 12*(a*b)*(a*b)+12*(c*d)*(c*d)+12*(e*f)*(e*f) = 0) : a*b = 0 ∧ c*d = 0 ∧ e*f = 0
+  auto
++ real_nonnegative (a b : ℝ) : 0 ≤ (a*b)*(a*b)
+  auto
++ real_amgm (a b c d : ℝ) : 2*(a*b)*(c*d) ≤ (a*b)^2+(c*d)^2
+  auto
++ real_ordered_squares (a b c d : ℝ) (ha : 0 ≤ a*b) (hc : 0 ≤ c*d) (h : (a*b)^2 ≤ (c*d)^2) : a*b ≤ c*d
+  auto
++ real_shifted (a b c d : ℝ) (ha : 0 ≤ a*b+1) (hc : 0 ≤ c*d+2) (h : (a*b+1)^2 ≤ (c*d+2)^2) : a*b+1 ≤ c*d+2
+  auto
++ real_fresh_names (compound compound_1 a b : ℝ) (h : (compound*a)*(compound*a)+(compound_1*b)*(compound_1*b) = 0) : compound*a = 0
+  auto
++ real_nested_base (a b c d e f : ℝ) (h : (a*b*c)^2+(d*e*f)^2 = 0) : a*b*c = 0
+  auto

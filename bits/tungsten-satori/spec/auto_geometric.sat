@@ -1,0 +1,32 @@
+import geometric_mean
+
++ list_weighted (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i))) := by auto
+
++ list_unweighted (xs : list α) (f g : α → ℝ) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => sqrt (f i*g i)) ≤ sqrt ((sum_list xs f)*(sum_list xs g)) := by auto
+
++ list_zero_weights (xs : list α) (f g : α → ℝ) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => 0*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => 0*f i))*(sum_list xs (fun i => 0*g i)))
+  auto
+
++ list_zero_values (xs : list α) (w g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (0*g i)) ≤ sqrt ((sum_list xs (fun i => w i*0))*(sum_list xs (fun i => w i*g i)))
+  auto
+
++ range_weighted (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i))) := by auto
+
++ range_unweighted (n : ℕ) (f g : ℕ → ℝ) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => sqrt (f i*g i)) ≤ sqrt ((sum_below n f)*(sum_below n g)) := by auto
+
++ range_zero_weights (n : ℕ) (f g : ℕ → ℝ) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => 0*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => 0*f i))*(sum_below n (fun i => 0*g i)))
+  auto
+
++ range_zero_values (n : ℕ) (w g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (0*g i)) ≤ sqrt ((sum_below n (fun i => w i*0))*(sum_below n (fun i => w i*g i)))
+  auto
+
++ scalar_weighted (x1 y1 x2 y2 a b : ℝ) (h1 : 0 ≤ x1) (h2 : 0 ≤ y1) (h3 : 0 ≤ x2) (h4 : 0 ≤ y2) (ha : 0 ≤ a) (hb : 0 ≤ b) :
+    a*sqrt (x1*y1)+b*sqrt (x2*y2) ≤ sqrt ((a*x1+b*x2)*(a*y1+b*y2))
+  auto
+
++ scalar_unweighted (x1 y1 x2 y2 : ℝ) (h1 : 0 ≤ x1) (h2 : 0 ≤ y1) (h3 : 0 ≤ x2) (h4 : 0 ≤ y2) :
+    sqrt (x1*y1)+sqrt (x2*y2) ≤ sqrt ((x1+x2)*(y1+y2))
+  auto
+
++ list_repeated (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : sqrt (a*b)+sqrt (a*b) ≤ sqrt ((a+a)*(b+b))
+  auto

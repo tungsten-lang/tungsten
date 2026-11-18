@@ -1,0 +1,8 @@
++ zero_factor (x y : ℚ) (h : x*y = 0) : x = 0 ∨ y = 0
+  auto
+
++ cancel_nonzero (x y : ℚ) (h : x*y = 0) (hy : y ≠ 0) : x = 0
+  auto
+
++ product_bound (a x y : ℝ) (h : a*x < 1) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto

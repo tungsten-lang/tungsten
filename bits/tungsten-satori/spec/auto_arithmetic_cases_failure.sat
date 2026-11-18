@@ -1,0 +1,83 @@
++ nat_wrong_order (x y : ℕ) : x < y ∨ y < x
+  auto
+
++ nat_nonzero_product (x y : ℕ) (h : x*y = 1) : x = 0 ∨ y = 0
+  auto
+
++ nat_missing_upper (a x y : ℕ) (hx : 0 < x) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ nat_wrong_sign (x y : ℕ) (h : 0 < x*y) : x ≤ 0 ∨ y ≤ 0
+  auto
+
++ nat_gap (x : ℕ) : x ≤ 0 ∨ 2 ≤ x
+  auto
+
++ nat_branch_leak (x : ℕ) (h : 0 ≤ x) : x = 0 ∨ x < 0
+  auto
+
++ int_wrong_order (x y : ℤ) : x < y ∨ y < x
+  auto
+
++ int_nonzero_product (x y : ℤ) (h : x*y = 1) : x = 0 ∨ y = 0
+  auto
+
++ int_missing_upper (a x y : ℤ) (hx : 0 < x) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ int_wrong_sign (x y : ℤ) (h : 0 < x*y) : x ≤ 0 ∨ y ≤ 0
+  auto
+
++ int_gap (x : ℤ) : x ≤ 0 ∨ 2 ≤ x
+  auto
+
++ int_branch_leak (x : ℤ) (h : 0 ≤ x) : x = 0 ∨ x < 0
+  auto
+
++ rat_wrong_order (x y : ℚ) : x < y ∨ y < x
+  auto
+
++ rat_nonzero_product (x y : ℚ) (h : x*y = 1) : x = 0 ∨ y = 0
+  auto
+
++ rat_missing_upper (a x y : ℚ) (hx : 0 < x) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ rat_wrong_sign (x y : ℚ) (h : 0 < x*y) : x ≤ 0 ∨ y ≤ 0
+  auto
+
++ rat_gap (x : ℚ) : x ≤ 0 ∨ 2 ≤ x
+  auto
+
++ rat_branch_leak (x : ℚ) (h : 0 ≤ x) : x = 0 ∨ x < 0
+  auto
+
++ real_wrong_order (x y : ℝ) : x < y ∨ y < x
+  auto
+
++ real_nonzero_product (x y : ℝ) (h : x*y = 1) : x = 0 ∨ y = 0
+  auto
+
++ real_missing_upper (a x y : ℝ) (hx : 0 < x) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
+
++ real_wrong_sign (x y : ℝ) (h : 0 < x*y) : x ≤ 0 ∨ y ≤ 0
+  auto
+
++ real_gap (x : ℝ) : x ≤ 0 ∨ 2 ≤ x
+  auto
+
++ real_branch_leak (x : ℝ) (h : 0 ≤ x) : x = 0 ∨ x < 0
+  auto
+
++ nat_missing_second (x y z : ℕ) (h : x*y = 0) (hx : x ≠ 0) : z = 0
+  auto
+
++ int_missing_second (x y z : ℤ) (h : x*y = 0) (hx : x ≠ 0) : z = 0
+  auto
+
++ rat_missing_second (x y z : ℚ) (h : x*y = 0) (hx : x ≠ 0) : z = 0
+  auto
+
++ real_missing_second (x y z : ℝ) (h : x*y = 0) (hx : x ≠ 0) : z = 0
+  auto

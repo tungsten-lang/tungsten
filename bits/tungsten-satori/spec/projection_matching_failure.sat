@@ -1,0 +1,25 @@
+import projection_matching
+
+opaque unknown_pair : complex_pair → complex_pair → complex_pair
+-> wrong_add (z w : complex_pair) : complex_pair := complex_pair.mk (z.re+w.re+1) (z.im+w.im)
+
++ wrong_constructor (z w : complex_pair) : magnitude (wrong_add z w) ≤ magnitude z + magnitude w
+  auto
+
++ wrong_field (z w : complex_pair) : magnitude (add_pair z w) ≤ magnitude z + sqrt (w.re^2+w.re^2)
+  auto
+
++ strict_triangle (z w : complex_pair) : magnitude (add_pair z w) < magnitude z + magnitude w
+  auto
+
++ opaque_constructor (z w : complex_pair) : magnitude (unknown_pair z w) ≤ magnitude z + magnitude w
+  auto
+
++ wrong_apply (z w : complex_pair) : magnitude (add_pair z w) ≤ magnitude z
+  apply norm2.add_le
+
++ wrong_partial (z w : complex_pair) : magnitude (add_pair z w) ≤ magnitude z + magnitude w
+  exact norm2.add_le w.re z.im
+
++ wrong_function_field (a b c d : ℝ) : sqrt ((transform.run (translation (c+1)) a)^2+(b+d)^2) ≤ sqrt (a^2+b^2) + sqrt (c^2+d^2)
+  auto

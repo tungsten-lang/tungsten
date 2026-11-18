@@ -1,0 +1,8 @@
+import real
+
++ moment_ratio (b η x y : ℝ) (hb : 0 < b) (he : 3 * η < 1)
+    (hx : x ≤ (1 + 3 * η) * b) (hy : (1 - 3 * η) * b ≤ y) (hη : 0 ≤ η) : x * (1 - 3 * η) ≤ y * (1 + 3 * η)
+  auto
+
++ union_bound (n2 x : ℝ) (hx : 0 < x) (hn : n2 * x < 1) (q : ℝ) (hq : q ≤ x) (hq0 : 0 ≤ q) : n2 * q < 1 ∨ n2 ≤ 0
+  auto

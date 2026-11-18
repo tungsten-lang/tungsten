@@ -1,0 +1,19 @@
+import sum_range
+
++ invalid_total_base (f s : ℕ → α) (step : ∀ i, s (i + 1) = s i + f i) (n : ℕ) : s n = sum_below n f := by apply sum_below.eq_of_recurrence f s
++ invalid_total_step (f s : ℕ → α) (base : s 0 = 0) (n : ℕ) : s n = sum_below n f := by apply sum_below.eq_of_recurrence f s
++ invalid_total_index (f s : ℕ → α) (base : s 0 = 0) (step : ∀ i, s (i + 1) = s i + f (i + 1)) (n : ℕ) : s n = sum_below n f := sum_below.eq_of_recurrence f s base step n
++ invalid_front_real (f : ℕ → ℝ) (n : ℕ) : sum_below (n + 1) f = f 0 + sum_below n f := sum_below.succ_front.real f n
++ invalid_front_rat (f : ℕ → ℚ) (n : ℕ) : sum_below n f = f 0 + sum_below n (fun i => f (i + 1)) := sum_below.succ_front.rat f n
++ invalid_front_int (f : ℕ → ℤ) (n : ℕ) : sum_below (n + 1) f = f 1 + sum_below n (fun i => f (i + 1)) := sum_below.succ_front.int f n
++ invalid_front_nat (f : ℕ → ℕ) (n : ℕ) : sum_below (n + 1) f = f 0 + sum_below n (fun i => f (i + 2)) := sum_below.succ_front.nat f n
+
++ invalid_congruence (f g : ℕ → α) (h : ∀ i < 4, f i = g i) : sum_below 5 f = sum_below 5 g := sum_below.congr f g 5 h
++ invalid_empty_strict (f : ℕ → ℝ) (h : ∀ i < 0, f i < 1) : sum_below 0 f < 0 * 1 := by apply sum_below.lt_const.real f 1 0
++ invalid_unbounded_other_terms (f g : ℕ → ℝ) (h : f 0 < g 0) : sum_below 2 f < sum_below 2 g := by apply sum_below.lt_of_le_of_exists_lt.real
++ invalid_outside_witness (f g : ℕ → ℚ) (h : ∀ i < 3, f i ≤ g i) (hs : f 3 < g 3) : sum_below 3 f < sum_below 3 g := sum_below.lt_of_le_of_exists_lt.rat f g 3 h ⟨3, by decide, hs⟩
++ invalid_reversed_bound (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i ≤ -1) : (n : ℚ) * (-1) ≤ sum_below n f := sum_below.const_le.rat f (-1) n h
++ invalid_no_strict_term (f g : ℕ → ℤ) (h : ∀ i < 3, f i ≤ g i) : sum_below 3 f < sum_below 3 g := by apply sum_below.lt_of_le_of_exists_lt.int f g 3 h
++ invalid_shift (f : ℕ → ℤ) (a b : ℕ) : sum_below (a + b) f = sum_below a f + sum_below b (fun i => f (b + i)) := sum_below.split.int f a b
++ invalid_weak_is_strict (f : ℕ → ℕ) (h : ∀ i < 3, f i ≤ 1) : sum_below 3 f < 3 * 1 := sum_below.lt_const.nat f 1 3 (by decide) h
++ invalid_natural_empty (f g : ℕ → ℕ) (h : ∀ i < 0, f i < g i) : sum_below 0 f < sum_below 0 g := by apply sum_below.lt.nat f g 0

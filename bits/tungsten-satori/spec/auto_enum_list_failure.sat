@@ -1,0 +1,156 @@
+inductive token
+  | rest
+  | one
+  | two
+
+-> count.nat : list token → ℕ
+  | [] => 0
+  | rest :: xs => count.nat xs
+  | one :: xs => 1+count.nat xs
+  | two :: xs => 2+count.nat xs
+-> twice.nat : list token → ℕ
+  | [] => 0
+  | rest :: xs => twice.nat xs
+  | one :: xs => 2+twice.nat xs
+  | two :: xs => 4+twice.nat xs
+-> scaled.nat (k : ℕ) : list token → ℕ
+  | [] => 0
+  | rest :: xs => scaled.nat k xs
+  | one :: xs => k+scaled.nat k xs
+  | two :: xs => 2*k+scaled.nat k xs
+-> coordinates.nat : list token → ℕ × ℕ
+  | [] => (0, 0)
+  | rest :: xs => coordinates.nat xs
+  | one :: xs => (1+fst (coordinates.nat xs), 2+snd (coordinates.nat xs))
+  | two :: xs => (2+fst (coordinates.nat xs), 4+snd (coordinates.nat xs))
+-> wrong_last.nat : list token → ℕ
+  | [] => 0
+  | rest :: xs => wrong_last.nat xs
+  | one :: xs => 2+wrong_last.nat xs
+  | two :: xs => 3+wrong_last.nat xs
+
+-> count.int : list token → ℤ
+  | [] => 0
+  | rest :: xs => count.int xs
+  | one :: xs => 1+count.int xs
+  | two :: xs => 2+count.int xs
+-> twice.int : list token → ℤ
+  | [] => 0
+  | rest :: xs => twice.int xs
+  | one :: xs => 2+twice.int xs
+  | two :: xs => 4+twice.int xs
+-> scaled.int (k : ℤ) : list token → ℤ
+  | [] => 0
+  | rest :: xs => scaled.int k xs
+  | one :: xs => k+scaled.int k xs
+  | two :: xs => 2*k+scaled.int k xs
+-> coordinates.int : list token → ℤ × ℤ
+  | [] => (0, 0)
+  | rest :: xs => coordinates.int xs
+  | one :: xs => (1+fst (coordinates.int xs), 2+snd (coordinates.int xs))
+  | two :: xs => (2+fst (coordinates.int xs), 4+snd (coordinates.int xs))
+-> wrong_last.int : list token → ℤ
+  | [] => 0
+  | rest :: xs => wrong_last.int xs
+  | one :: xs => 2+wrong_last.int xs
+  | two :: xs => 3+wrong_last.int xs
+
+-> count.rat : list token → ℚ
+  | [] => 0
+  | rest :: xs => count.rat xs
+  | one :: xs => 1+count.rat xs
+  | two :: xs => 2+count.rat xs
+-> twice.rat : list token → ℚ
+  | [] => 0
+  | rest :: xs => twice.rat xs
+  | one :: xs => 2+twice.rat xs
+  | two :: xs => 4+twice.rat xs
+-> scaled.rat (k : ℚ) : list token → ℚ
+  | [] => 0
+  | rest :: xs => scaled.rat k xs
+  | one :: xs => k+scaled.rat k xs
+  | two :: xs => 2*k+scaled.rat k xs
+-> coordinates.rat : list token → ℚ × ℚ
+  | [] => (0, 0)
+  | rest :: xs => coordinates.rat xs
+  | one :: xs => (1+fst (coordinates.rat xs), 2+snd (coordinates.rat xs))
+  | two :: xs => (2+fst (coordinates.rat xs), 4+snd (coordinates.rat xs))
+-> wrong_last.rat : list token → ℚ
+  | [] => 0
+  | rest :: xs => wrong_last.rat xs
+  | one :: xs => 2+wrong_last.rat xs
+  | two :: xs => 3+wrong_last.rat xs
+
+-> count.real : list token → ℝ
+  | [] => 0
+  | rest :: xs => count.real xs
+  | one :: xs => 1+count.real xs
+  | two :: xs => 2+count.real xs
+-> twice.real : list token → ℝ
+  | [] => 0
+  | rest :: xs => twice.real xs
+  | one :: xs => 2+twice.real xs
+  | two :: xs => 4+twice.real xs
+-> scaled.real (k : ℝ) : list token → ℝ
+  | [] => 0
+  | rest :: xs => scaled.real k xs
+  | one :: xs => k+scaled.real k xs
+  | two :: xs => 2*k+scaled.real k xs
+-> coordinates.real : list token → ℝ × ℝ
+  | [] => (0, 0)
+  | rest :: xs => coordinates.real xs
+  | one :: xs => (1+fst (coordinates.real xs), 2+snd (coordinates.real xs))
+  | two :: xs => (2+fst (coordinates.real xs), 4+snd (coordinates.real xs))
+-> wrong_last.real : list token → ℝ
+  | [] => 0
+  | rest :: xs => wrong_last.real xs
+  | one :: xs => 2+wrong_last.real xs
+  | two :: xs => 3+wrong_last.real xs
++ nat_wrong_factor (xs : list token) : twice.nat xs = count.nat xs
+  auto
++ nat_last_case (xs : list token) : wrong_last.nat xs = 2*count.nat xs
+  auto
++ nat_wrong_projection (xs : list token) : fst (coordinates.nat xs) = twice.nat xs
+  auto
++ nat_wrong_initial (xs : list token) : twice.nat xs = 2*count.nat xs+1
+  auto
++ nat_wrong_list (xs : list token) (ys : list token) : twice.nat xs = 2*count.nat ys
+  auto
++ nat_wrong_scale (xs : list token) (k : ℕ) : scaled.nat k xs = (k+1)*count.nat xs
+  auto
++ int_wrong_factor (xs : list token) : twice.int xs = count.int xs
+  auto
++ int_last_case (xs : list token) : wrong_last.int xs = 2*count.int xs
+  auto
++ int_wrong_projection (xs : list token) : fst (coordinates.int xs) = twice.int xs
+  auto
++ int_wrong_initial (xs : list token) : twice.int xs = 2*count.int xs+1
+  auto
++ int_wrong_list (xs : list token) (ys : list token) : twice.int xs = 2*count.int ys
+  auto
++ int_wrong_scale (xs : list token) (k : ℤ) : scaled.int k xs = (k+1)*count.int xs
+  auto
++ rat_wrong_factor (xs : list token) : twice.rat xs = count.rat xs
+  auto
++ rat_last_case (xs : list token) : wrong_last.rat xs = 2*count.rat xs
+  auto
++ rat_wrong_projection (xs : list token) : fst (coordinates.rat xs) = twice.rat xs
+  auto
++ rat_wrong_initial (xs : list token) : twice.rat xs = 2*count.rat xs+1
+  auto
++ rat_wrong_list (xs : list token) (ys : list token) : twice.rat xs = 2*count.rat ys
+  auto
++ rat_wrong_scale (xs : list token) (k : ℚ) : scaled.rat k xs = (k+1)*count.rat xs
+  auto
++ real_wrong_factor (xs : list token) : twice.real xs = count.real xs
+  auto
++ real_last_case (xs : list token) : wrong_last.real xs = 2*count.real xs
+  auto
++ real_wrong_projection (xs : list token) : fst (coordinates.real xs) = twice.real xs
+  auto
++ real_wrong_initial (xs : list token) : twice.real xs = 2*count.real xs+1
+  auto
++ real_wrong_list (xs : list token) (ys : list token) : twice.real xs = 2*count.real ys
+  auto
++ real_wrong_scale (xs : list token) (k : ℝ) : scaled.real k xs = (k+1)*count.real xs
+  auto

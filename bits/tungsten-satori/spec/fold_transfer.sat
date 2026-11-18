@@ -1,0 +1,37 @@
+-- From 060-global-spherical-shells/transfer.sat; the original run is retained for equivalence.
+inductive letter
+  | ls
+  | la
+  | lb
+
+-> step : letter → ℤ × ℤ → ℤ × ℤ
+  | ls, v => (fst v, fst v)
+  | la, v => (fst v + snd v, fst v)
+  | lb, v => (2 * fst v - snd v, fst v)
+-> run (l : list letter) (v : ℤ × ℤ) : ℤ × ℤ := list.foldl step l v
++ step_inv (x : letter) (v : ℤ × ℤ) (h1 : 1 ≤ snd v) (h2 : snd v ≤ fst v) : 1 ≤ snd (step x v) ∧ snd (step x v) ≤ fst (step x v)
+  cases x
+  · show 1 ≤ fst v ∧ fst v ≤ fst v
+    constructor
+    · linarith
+    · linarith
+  · show 1 ≤ fst v ∧ fst v ≤ fst v + snd v
+    constructor
+    · linarith
+    · linarith
+  · show 1 ≤ fst v ∧ fst v ≤ 2 * fst v - snd v
+    constructor
+    · linarith
+    · linarith
++ run_inv (l : list letter) : ∀ v : ℤ × ℤ, 1 ≤ snd v → snd v ≤ fst v → 1 ≤ snd (run l v) ∧ snd (run l v) ≤ fst (run l v)
+  intro v h1 h2
+  exact list.foldl_invariants step_inv l v h1 h2
+-> original_run : list letter → ℤ × ℤ → ℤ × ℤ
+  | [], v => v
+  | x :: l, v => original_run l (step x v)
++ run_equivalent (l : list letter) : ∀ v, original_run l v = run l v
+  induction l with v x l ih v
+  · rfl
+  · simp [original_run, run, ih]
+#axioms run_inv
+#axioms run_equivalent

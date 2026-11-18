@@ -1,0 +1,44 @@
+import convex_real
+
++ real_concave_square : concave_interval.real 0 1 (fun x => x^2) := convex_interval.square.real 0 1
+
++ real_negative_square : convex_interval.real 0 1 (fun x => -x^2) := convex_interval.square.real 0 1
+
++ real_strict_square (x y z a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hab : 0 < a+b) (mean : (a+b)*z = a*x+b*y) : (a+b)*z^2 < a*x^2+b*y^2 := real_weighted_square x y z a b ha hb hab mean
+
++ real_missing_square_sign (x y z a b : ℝ) (ha : 0 ≤ a) (hab : 0 < a+b) (mean : (a+b)*z = a*x+b*y) : (a+b)*z^2 ≤ a*x^2+b*y^2
+  apply real_weighted_square x y z a b ha
+  · linarith
+  · exact hab
+  · exact mean
+
++ rat_concave_square : concave_interval.rat 0 1 (fun x => x^2) := convex_interval.square.rat 0 1
+
++ rat_negative_square : convex_interval.rat 0 1 (fun x => -x^2) := convex_interval.square.rat 0 1
+
++ rat_strict_square (x y z a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hab : 0 < a+b) (mean : (a+b)*z = a*x+b*y) : (a+b)*z^2 < a*x^2+b*y^2 := rat_weighted_square x y z a b ha hb hab mean
+
++ rat_missing_square_sign (x y z a b : ℚ) (ha : 0 ≤ a) (hab : 0 < a+b) (mean : (a+b)*z = a*x+b*y) : (a+b)*z^2 ≤ a*x^2+b*y^2
+  apply rat_weighted_square x y z a b ha
+  · linarith
+  · exact hab
+  · exact mean
+
++ tangent_upper (x y : ℝ) : exp y ≤ exp x+exp x*(y-x) := exp_tangent_le x y
+
++ strict_midpoint (x y : ℝ) : 2*exp ((x+y)/2) < exp x+exp y := exp_midpoint_le x y
+
++ missing_exp_sign (x y z a b : ℝ) (ha : 0 ≤ a) (mean : (a+b)*z = a*x+b*y) : (a+b)*exp z ≤ a*exp x+b*exp y
+  apply exp_weighted_jensen x y z a b ha
+  · linarith
+  · exact mean
+
++ missing_exp_mean (x y z a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a+b)*exp z ≤ a*exp x+b*exp y
+  apply exp_weighted_jensen x y z a b ha hb
+  linarith
+
++ wrong_finite_mean (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (h : m = ∑ i < n, p i) : (n : ℝ)*exp m ≤ ∑ i < n, exp (p i)
+  apply sum_below.exp_jensen.real n p m
+  linarith
+
++ strict_zero_count (p : ℕ → ℝ) (m : ℝ) : ((0 : ℕ) : ℝ)*exp m < ∑ i < 0, exp (p i) := sum_below.exp_jensen.real 0 p m (by simp [cast_zero.real])

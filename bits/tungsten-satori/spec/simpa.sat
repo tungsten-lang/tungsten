@@ -1,0 +1,31 @@
++ unchanged (p : Prop) (h : p) : p := by simpa using h
++ simplify_goal (p : Prop) (h : p) : True ∧ p := by simpa using h
++ simplify_proof (p : Prop) (h : p ∧ True) : p := by simpa using h
++ simplify_both (p : Prop) (h : True ∧ p) : p ∧ True := by simpa using h
++ close_true : True ∧ True := by simpa
++ close_assumption (p : Prop) (h : p) : True ∧ p := by simpa
++ only_rule (p q : Prop) (e : p = q) (h : p) : q := by simpa only [e] using h
++ reverse_rule (p q : Prop) (e : p = q) (h : q) : p := by simpa only [← e] using h
++ all_hypotheses (p q : Prop) (e : p = q) (h : p) : q := by simpa only [*] using h
++ empty_rules (p : Prop) (h : p) : p := by simpa only [] using h
++ empty_no_using (p : Prop) (h : p) : p := by simpa only []
++ explicit_default (p : Prop) (h : p ∧ True) : p := by simpa [] using h
+-> simpa_alias (p : Prop) : Prop := p ∧ True
++ unfold_alias (p : Prop) (h : p) : simpa_alias p := by simpa [simpa_alias] using h
++ under_forall (p : α → Prop) (h : ∀ x, p x ∧ True) : ∀ x, p x := by simpa using h
++ under_exists (p : α → Prop) (h : ∃ x, True ∧ p x) : ∃ x, p x := by simpa using h
++ beta_eta (F : (α → β) → γ) (f : α → β) (y : γ) (h : F (fun x => f x) = y) : F f = y := by simpa using h
++ function_rule (f g : α → β) (x : α) (y : β) (e : f = g) (h : f x = y) : g x = y := by simpa only [e] using h
++ function_rule_binder (f g : α → β) (p : β → Prop) (e : f = g) (h : ∀ x, p (f x) ∧ True) : ∀ x, p (g x) := by simpa [e] using h
++ function_rule_chain (f g h : α → β) (x : α) (y : β) (fg : f = g) (gh : g = h) (proof : f x = y) : h x = y := by simpa only [fg, gh] using proof
++ function_rule_lambda (f : ℕ → ℕ) (x y : ℕ) (e : f = (fun n => n + 0)) (h : f x = y) : x = y := by simpa [e] using h
++ proof_projection (p q : Prop) (h : (p ∧ True) ∧ q) : p := by simpa using h.1
++ wrap_proof (p : Prop) (h : p) : p ∧ True := ⟨h, trivial⟩
++ application (p : Prop) (h : p) : p := by simpa using wrap_proof p h
++ inferred_argument (p : α → Prop) (x : α) (h : ∀ y, p y ∧ True) : p x := by simpa using h
++ conditional_rule (f g : α → β) (p : α → Prop) (x : α) (y : β)
+    (rule : ∀ z, p z → f z = g z) (hp : p x) (h : f x = y) : g x = y
+  simpa only [rule] using h
++ bound_names (p : α → α → Prop) (_simp1 : α) (h : ∀ x, p _simp1 x ∧ True) : ∀ x, p _simp1 x := by simpa using h
++ zero_add (x y : ℕ) (h : x + 0 = y) : x = y := by simpa using h
++ closed_using : (2 : ℕ) = 2 := by simpa using close_true

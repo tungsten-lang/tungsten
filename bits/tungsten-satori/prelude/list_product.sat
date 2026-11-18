@@ -1,0 +1,177 @@
+-- List-indexed products. Every occurrence of a repeated member contributes.
+import list_sum
+
++ list_product.nil (f : α → β) : prod_list ([] : list α) f = (1 : β) := by rfl
++ list_product.cons (x : α) (xs : list α) (f : α → β) : prod_list (x :: xs) f = f x * prod_list xs f := by rfl
++ list_product.congr (xs : list α) (f g : α → β) (h : ∀ x ∈ xs, f x = g x) : prod_list xs f = prod_list xs g
+  induction xs with hnil x xs ih h
+  · rfl
+  · have hx := h x (by simp)
+    have ht : ∀ y ∈ xs, f y = g y
+      intro y hy; exact h y (by simp [hy])
+    rw [list_product.cons, list_product.cons, hx, ih ht]
++ list_product.map (xs : list α) (f : α → β) (g : β → γ) : prod_list (map f xs) g = prod_list xs (fun x => g (f x))
+  induction xs with x xs ih
+  · rfl
+  · simp [map, prod_list, ih]
++ list_product.closed (p : β → Prop) (xs : list α) (f : α → β) (h1 : p (1 : β)) (hmul : ∀ a b, p a → p b → p (a * b)) (h : ∀ x ∈ xs, p (f x)) : p (prod_list xs f)
+  induction xs with hnil x xs ih h
+  · rw [list_product.nil]; exact h1
+  · have head : p (f x) := h x (by simp)
+    have tail : ∀ y ∈ xs, p (f y)
+      intro y hy; exact h y (by simp [hy])
+    rw [list_product.cons]
+    exact hmul (f x) (prod_list xs f) head (ih tail)
+
++ prod_list_nonneg.real (xs : list α) (f : α → ℝ) (h : ∀ x ∈ xs, 0 ≤ f x) : 0 ≤ prod_list xs f
+  apply list_product.closed (fun (x : ℝ) => 0 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; exact mul_nonneg.real a b ha hb
+  · exact h
++ prod_list_one_le.real (xs : list α) (f : α → ℝ) (h : ∀ x ∈ xs, 1 ≤ f x) : 1 ≤ prod_list xs f
+  apply list_product.closed (fun (x : ℝ) => 1 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; nlinarith
+  · exact h
++ prod_list_le.real (xs : list α) (f g : α → ℝ) (hf : ∀ x ∈ xs, 0 ≤ f x) (h : ∀ x ∈ xs, f x ≤ g x) : prod_list xs f ≤ prod_list xs g
+  induction xs with hn0 h0 x xs ih hn h
+  · simp [prod_list]
+  · have hx0 := hn x (by simp)
+    have hx := h x (by simp)
+    have ht0 : ∀ y ∈ xs, 0 ≤ f y
+      intro y hy; exact hn y (by simp [hy])
+    have ht : ∀ y ∈ xs, f y ≤ g y
+      intro y hy; exact h y (by simp [hy])
+    have tail := ih ht0 ht
+    have tail0 := prod_list_nonneg.real xs f ht0
+    simp [prod_list]
+    nlinarith
++ prod_list_append.real (xs ys : list α) (f : α → ℝ) : prod_list (xs ++ ys) f = prod_list xs f * prod_list ys f
+  induction xs with x xs ih
+  · simp [append, prod_list]
+  · simp [append, prod_list, ih]; ring
++ prod_list_mul.real (xs : list α) (f g : α → ℝ) : prod_list xs (fun x => f x * g x) = prod_list xs f * prod_list xs g
+  induction xs with x xs ih
+  · simp [prod_list]
+  · simp [prod_list, ih]; ring
++ one_add_sum_list_le_prod_list.real (xs : list α) (f : α → ℝ) (h : ∀ x ∈ xs, 0 ≤ f x) : 1 + sum_list xs f ≤ prod_list xs (fun x => 1 + f x)
+  induction xs with h0 x xs ih h
+  · simp [sum_list, prod_list]
+  · have hx := h x (by simp)
+    have ht : ∀ y ∈ xs, 0 ≤ f y
+      intro y hy; exact h y (by simp [hy])
+    have tail := ih ht
+    have tail0 := sum_list_nonneg.real xs f ht
+    simp [sum_list, prod_list]
+    nlinarith
+
++ prod_list_nonneg.rat (xs : list α) (f : α → ℚ) (h : ∀ x ∈ xs, 0 ≤ f x) : 0 ≤ prod_list xs f
+  apply list_product.closed (fun (x : ℚ) => 0 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; exact mul_nonneg.rat a b ha hb
+  · exact h
++ prod_list_one_le.rat (xs : list α) (f : α → ℚ) (h : ∀ x ∈ xs, 1 ≤ f x) : 1 ≤ prod_list xs f
+  apply list_product.closed (fun (x : ℚ) => 1 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; nlinarith
+  · exact h
++ prod_list_le.rat (xs : list α) (f g : α → ℚ) (hf : ∀ x ∈ xs, 0 ≤ f x) (h : ∀ x ∈ xs, f x ≤ g x) : prod_list xs f ≤ prod_list xs g
+  induction xs with hn0 h0 x xs ih hn h
+  · simp [prod_list]
+  · have hx0 := hn x (by simp)
+    have hx := h x (by simp)
+    have ht0 : ∀ y ∈ xs, 0 ≤ f y
+      intro y hy; exact hn y (by simp [hy])
+    have ht : ∀ y ∈ xs, f y ≤ g y
+      intro y hy; exact h y (by simp [hy])
+    have tail := ih ht0 ht
+    have tail0 := prod_list_nonneg.rat xs f ht0
+    simp [prod_list]
+    nlinarith
++ prod_list_append.rat (xs ys : list α) (f : α → ℚ) : prod_list (xs ++ ys) f = prod_list xs f * prod_list ys f
+  induction xs with x xs ih
+  · simp [append, prod_list]
+  · simp [append, prod_list, ih]; ring
++ prod_list_mul.rat (xs : list α) (f g : α → ℚ) : prod_list xs (fun x => f x * g x) = prod_list xs f * prod_list xs g
+  induction xs with x xs ih
+  · simp [prod_list]
+  · simp [prod_list, ih]; ring
++ one_add_sum_list_le_prod_list.rat (xs : list α) (f : α → ℚ) (h : ∀ x ∈ xs, 0 ≤ f x) : 1 + sum_list xs f ≤ prod_list xs (fun x => 1 + f x)
+  induction xs with h0 x xs ih h
+  · simp [sum_list, prod_list]
+  · have hx := h x (by simp)
+    have ht : ∀ y ∈ xs, 0 ≤ f y
+      intro y hy; exact h y (by simp [hy])
+    have tail := ih ht
+    have tail0 := sum_list_nonneg.rat xs f ht
+    simp [sum_list, prod_list]
+    nlinarith
+
++ prod_list_nonneg.int (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, 0 ≤ f x) : 0 ≤ prod_list xs f
+  apply list_product.closed (fun (x : ℤ) => 0 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; exact mul_nonneg.int a b ha hb
+  · exact h
++ prod_list_one_le.int (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, 1 ≤ f x) : 1 ≤ prod_list xs f
+  apply list_product.closed (fun (x : ℤ) => 1 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; nlinarith
+  · exact h
++ prod_list_le.int (xs : list α) (f g : α → ℤ) (hf : ∀ x ∈ xs, 0 ≤ f x) (h : ∀ x ∈ xs, f x ≤ g x) : prod_list xs f ≤ prod_list xs g
+  induction xs with hn0 h0 x xs ih hn h
+  · simp [prod_list]
+  · have hx0 := hn x (by simp)
+    have hx := h x (by simp)
+    have ht0 : ∀ y ∈ xs, 0 ≤ f y
+      intro y hy; exact hn y (by simp [hy])
+    have ht : ∀ y ∈ xs, f y ≤ g y
+      intro y hy; exact h y (by simp [hy])
+    have tail := ih ht0 ht
+    have tail0 := prod_list_nonneg.int xs f ht0
+    simp [prod_list]
+    nlinarith
++ prod_list_append.int (xs ys : list α) (f : α → ℤ) : prod_list (xs ++ ys) f = prod_list xs f * prod_list ys f
+  induction xs with x xs ih
+  · simp [append, prod_list]
+  · simp [append, prod_list, ih]; ring
++ prod_list_mul.int (xs : list α) (f g : α → ℤ) : prod_list xs (fun x => f x * g x) = prod_list xs f * prod_list xs g
+  induction xs with x xs ih
+  · simp [prod_list]
+  · simp [prod_list, ih]; ring
++ one_add_sum_list_le_prod_list.int (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, 0 ≤ f x) : 1 + sum_list xs f ≤ prod_list xs (fun x => 1 + f x)
+  induction xs with h0 x xs ih h
+  · simp [sum_list, prod_list]
+  · have hx := h x (by simp)
+    have ht : ∀ y ∈ xs, 0 ≤ f y
+      intro y hy; exact h y (by simp [hy])
+    have tail := ih ht
+    have tail0 := sum_list_nonneg.int xs f ht
+    simp [sum_list, prod_list]
+    nlinarith
+
++ prod_list_nonneg.nat (xs : list α) (f : α → ℕ) : 0 ≤ prod_list xs f := zero_le.nat (prod_list xs f)
++ prod_list_one_le.nat (xs : list α) (f : α → ℕ) (h : ∀ x ∈ xs, 1 ≤ f x) : 1 ≤ prod_list xs f
+  apply list_product.closed (fun (x : ℕ) => 1 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; nlinarith
+  · exact h
++ prod_list_le.nat (xs : list α) (f g : α → ℕ) (h : ∀ x ∈ xs, f x ≤ g x) : prod_list xs f ≤ prod_list xs g
+  induction xs with h0 x xs ih h
+  · simp [prod_list]
+  · have hx := h x (by simp)
+    have ht : ∀ y ∈ xs, f y ≤ g y
+      intro y hy; exact h y (by simp [hy])
+    simp [prod_list]
+    nlinarith [ih ht]
++ prod_list_append.nat (xs ys : list α) (f : α → ℕ) : prod_list (xs ++ ys) f = prod_list xs f * prod_list ys f
+  induction xs with x xs ih
+  · simp [append, prod_list]
+  · simp [append, prod_list, ih]; ring
++ prod_list_mul.nat (xs : list α) (f g : α → ℕ) : prod_list xs (fun x => f x * g x) = prod_list xs f * prod_list xs g
+  induction xs with x xs ih
+  · simp [prod_list]
+  · simp [prod_list, ih]; ring
++ one_add_sum_list_le_prod_list.nat (xs : list α) (f : α → ℕ) : 1 + sum_list xs f ≤ prod_list xs (fun x => 1 + f x)
+  induction xs with x xs ih
+  · simp [sum_list, prod_list]
+  · simp [sum_list, prod_list]; nlinarith

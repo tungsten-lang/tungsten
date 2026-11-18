@@ -4,15 +4,18 @@
 
 + Simp
   ro :d, :k
-  rw :hyp_rules, :discharger
+  rw :hyp_rules, :discharger, :step_limit, :infer_conditions
 
   -> new(@d, rules, @base_by_head = nil, @base_general = nil)
     @k = @d.k
     @by_head = {}
     @general = []
     @steps = 0
+    @step_limit = 20000
     @hyp_rules = []
     @discharger = nil
+    @infer_conditions = false
+    @binder_names = nil
     n = rules.size
     i = 0
     while i < n
@@ -20,6 +23,7 @@
       i += 1
 
   -> add_rule(r)
+    @binder_names = nil
     hn = r.head_name
     if hn != nil
       arr = @by_head[hn]
@@ -30,42 +34,49 @@
     else
       @general.push(r)
 
-  -> try_rule_list(list, t, depth)
+  -> try_rule_list(list, t, depth, at_head = false)
     if list == nil
       return nil
     n = list.size
     i = 0
     while i < n
-      th = apply_rule(list[i], t, depth)
-      if th != nil
-        return th
+      if !at_head || list[i].rewrite_head
+        th = apply_rule(list[i], t, depth)
+        if th != nil
+          return th
       i += 1
     nil
 
   # Try to rewrite t at the top with one rule: returns ⊢ t = t' or nil.
-  -> rewrite_top(t, depth)
+  -> rewrite_top(t, depth, at_head = false)
     hd = t
     while hd.tag == :app
       hd = hd.a
     if hd.tag == :const
       nm = hd.name
       if @base_by_head != nil
-        th = try_rule_list(@base_by_head[nm], t, depth)
+        th = try_rule_list(@base_by_head[nm], t, depth, at_head)
         if th != nil
           return th
-      th = try_rule_list(@by_head[nm], t, depth)
+      th = try_rule_list(@by_head[nm], t, depth, at_head)
       if th != nil
         return th
     if @base_general != nil
-      th = try_rule_list(@base_general, t, depth)
+      th = try_rule_list(@base_general, t, depth, at_head)
       if th != nil
         return th
-    try_rule_list(@general, t, depth)
+    try_rule_list(@general, t, depth, at_head)
 
   -> apply_rule(r, t, depth)
     mt = Matcher.new(r.pvars, r.tvs)
     if !mt.m(r.lhs, t, 0)
-      return nil
+      mt = Matcher.new(r.pvars, r.tvs).match_instantiated(@d, r.lhs, t)
+      if mt == nil
+        return nil
+    if @infer_conditions
+      mt = match_conditions(r, mt)
+      if mt == nil
+        return nil
     th = r.th
     if mt.ty.size > 0
       th = @k.inst_type(th, mt.ty)
@@ -77,7 +88,7 @@
     while i < nc
       pq = dest_binop(th.concl, "⇒")
       cond = @d.beta_norm_term(pq[0])
-      if tm_frees_pattern?(cond, r)
+      if tm_unmatched_pattern?(r.conds[i], r.pvars, mt.tm)
         return nil
       pc = discharge(cond, depth)
       if pc == nil
@@ -99,26 +110,47 @@
         res = @d.eqt_intro(th)
     eq_sides = dest_binop(res.concl, "=")
     if !tm_eq(eq_sides[0], t)
-      return nil
+      from = @d.beta_eta_conv(t)
+      to = @d.beta_eta_conv(eq_sides[0])
+      if !tm_eq(dest_binop(from.concl, "=")[1], dest_binop(to.concl, "=")[1])
+        return nil
+      res = @k.trans(from, @k.trans(@k.sym(to), res))
     if tm_eq(eq_sides[1], t)
       return nil
     res
 
-  -> tm_frees_pattern?(t, r)
-    if t.cl || r.pvars.size == 0
-      return false
-    tm_frees_pat_walk?(t, r.pvars)
+  # An explicit rw rule may infer missing arguments from existing premises.
+  # Ordinary simp only uses arguments determined by the rewritten expression.
+  -> match_conditions(r, mt)
+    attempts = 32
+    i = 0
+    while i < r.conds.size
+      cond = r.conds[i]
+      if tm_unmatched_pattern?(cond, r.pvars, mt.tm)
+        found = nil
+        j = 0
+        while j < @hyp_rules.size && attempts > 0 && found == nil
+          attempts -= 1
+          found = mt.match_instantiated(@d, cond, @hyp_rules[j].concl)
+          j += 1
+        if found == nil
+          return nil
+        mt = found
+      i += 1
+    mt
 
-  -> tm_frees_pat_walk?(t, pvars)
-    if t.cl
+  # Inspect the original condition and match bindings. A substituted target
+  # variable may share a pattern variable's name without being unresolved.
+  -> tm_unmatched_pattern?(t, pvars, bindings)
+    if t.cl || pvars.size == 0
       return false
     case t.tag
     when :var
-      pvars.has_key?(t.vkey)
+      pvars.has_key?(t.vkey) && !bindings.has_key?(t.vkey)
     when :app
-      tm_frees_pat_walk?(t.a, pvars) || tm_frees_pat_walk?(t.b, pvars)
+      tm_unmatched_pattern?(t.a, pvars, bindings) || tm_unmatched_pattern?(t.b, pvars, bindings)
     when :lam
-      tm_frees_pat_walk?(t.b, pvars)
+      tm_unmatched_pattern?(t.b, pvars, bindings)
     else
       false
 
@@ -204,7 +236,7 @@
   # Bottom-up simplification: returns nil if unchanged, else ⊢ t = t'
   -> simp_conv_opt(t, depth)
     @steps += 1
-    if @steps > 20000
+    if @steps > @step_limit
       raise "simp: step limit exceeded (looping rules?)"
     th = sub_simp_opt(t, depth)
     cur = th == nil ? t : dest_binop(th.concl, "=")[1]
@@ -233,6 +265,31 @@
       return @k.refl(t)
     th
 
+  # Fixed names in rewrite proofs and local facts must stay free when entering
+  # a binder. Cache rule names; hypothesis rules can change between calls.
+  -> binder_variable(t)
+    if @binder_names == nil
+      @binder_names = {}
+      lists = @by_head.values + [@general]
+      if @base_by_head != nil
+        lists += @base_by_head.values
+      if @base_general != nil
+        lists.push(@base_general)
+      lists.each -> (rules)
+        rules.each -> (rule)
+          tm_frees(rule.th.concl).each -> (variable)
+            if !rule.pvars.has_key?(variable.vkey)
+              @binder_names[variable.name] = true
+          rule.th.hyps.each -> (hyp) tm_free_names_into(hyp, @binder_names)
+    names = {}
+    @binder_names.each -> (name, _) names[name] = true
+    @hyp_rules.each -> (fact)
+      tm_free_names_into(fact.concl, names)
+      fact.hyps.each -> (hyp) tm_free_names_into(hyp, names)
+    tm_free_names_into(t, names)
+    hint = t.name == nil || t.name == "" ? "x" : t.name
+    mk_var(fresh_name_from_set(hint, names), t.ty)
+
   -> sub_simp_opt(t, depth)
     case t.tag
     when :app
@@ -244,19 +301,30 @@
       xth = x == nil ? @k.refl(t.b) : x
       @k.mk_comb(fth, xth)
     when :lam
-      p = dest_lam_fresh(t, [t])
-      inner = simp_conv_opt(p[1], depth)
+      variable = binder_variable(t)
+      inner = simp_conv_opt(tm_instantiate(t.b, variable, 0), depth)
       if inner == nil
         return nil
-      @k.abs_rule(p[0], inner)
+      @k.abs_rule(variable, inner)
     else
       nil
 
-  # The function part of an application: simplify its arguments, not the head itself.
+  # Function equalities apply at call heads. Definition bodies stay deferred so
+  # applied equations and induction hypotheses can match before unfolding.
   -> simp_conv_head_opt(t, depth)
     if t.tag == :app || t.tag == :lam
       return simp_conv_opt(t, depth)
-    nil
+    th = nil
+    cur = t
+    rounds = 0
+    while rounds < 64
+      step = rewrite_top(cur, depth, true)
+      if step == nil
+        return th
+      th = th == nil ? step : @k.trans(th, step)
+      cur = dest_binop(step.concl, "=")[1]
+      rounds += 1
+    th
 
 # Boolean identities proved from the kernel rules.
 + BoolLemmas

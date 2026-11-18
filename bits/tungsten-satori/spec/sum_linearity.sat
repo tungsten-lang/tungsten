@@ -1,0 +1,48 @@
+import list_sum
+
++ memberwise_sum_eq (xs : list α) (f g : α → β) (h : ∀ x ∈ xs, f x = g x) : (∑ x ∈ xs, f x) = ∑ x ∈ xs, g x := list_sum.congr xs f g h
++ map_composed (xs : list α) (f : α → β) (g : β → γ) : (∑ y ∈ map f xs, g y) = ∑ x ∈ xs, g (f x) := list_sum.map xs f g
++ natural_addition (xs : list α) (f g : α → ℕ) : (∑ x ∈ xs, f x + g x) = (∑ x ∈ xs, f x) + ∑ x ∈ xs, g x := sum_list_add.nat xs f g
++ integer_difference (xs : list α) (f g : α → ℤ) : (∑ x ∈ xs, f x - g x) = (∑ x ∈ xs, f x) - ∑ x ∈ xs, g x := sum_list_sub.int xs f g
++ rational_negation (xs : list α) (f : α → ℚ) : (∑ x ∈ xs, -f x) = -(∑ x ∈ xs, f x) := sum_list_neg.rat xs f
++ real_append (xs ys : list α) (f : α → ℝ) : (∑ x ∈ xs ++ ys, f x) = (∑ x ∈ xs, f x) + ∑ x ∈ ys, f x := sum_list_append.real xs ys f
++ empty_members (f g : α → β) : sum_list [] f = sum_list [] g := by apply list_sum.congr; intro x hx; simp at hx
++ duplicates : (∑ x ∈ [1, 1] ++ [2], x) = 4 := by decide
++ natural_sub_counterexample : (∑ x ∈ [0, 1], (1 - x) - x) ≠ ((∑ x ∈ [0, 1], 1 - x) - ∑ x ∈ [0, 1], x) := by decide
+
+-- Same definitions and expansion statement as Borsuk's convexity argument.
+-> ix : list ℝ → ℕ → ℝ
+  | [], n => 0
+  | x :: xs, 0 => x
+  | x :: xs, n + 1 => ix xs n
+-> dot (u v : list ℝ) : ℝ := ix u 0 * ix v 0 + ix u 1 * ix v 1 + ix u 2 * ix v 2 + ix u 3 * ix v 3
++ sum_dot_expand (G : list (list ℝ)) (c : list ℝ → ℝ) (x : list ℝ)
+    : sum_list G (fun h => c h * dot x h) = ix x 0 * sum_list G (fun h => c h * ix h 0) + ix x 1 * sum_list G (fun h => c h * ix h 1) +
+      ix x 2 * sum_list G (fun h => c h * ix h 2) + ix x 3 * sum_list G (fun h => c h * ix h 3)
+  simp [← sum_list_const_mul.real, ← sum_list_add.real]
+  apply list_sum.congr
+  intro h hh; unfold dot; ring
++ dot_comm (u v : list ℝ) : dot u v = dot v u
+  unfold dot
+  ring
+-> rep (G : list (list ℝ)) (lam : list ℝ → ℝ) (u : list ℝ) : Prop := ∀ t < 4, ix u t = sum_list G (fun g => lam g * ix g t)
++ rep_dot (G : list (list ℝ)) (lam : list ℝ → ℝ) (u x : list ℝ) (hu : rep G lam u) : sum_list G (fun g => lam g * dot x g) = dot x u
+  unfold rep at hu
+  rw [sum_dot_expand G lam x]
+  rw [← hu 0 (by decide), ← hu 1 (by decide), ← hu 2 (by decide), ← hu 3 (by decide)]
+  unfold dot
+  trivial
++ comb_dot (G : list (list ℝ)) (lam mu : list ℝ → ℝ) (u v : list ℝ) (hu : rep G lam u) (hv : rep G mu v)
+    : dot u v = sum_list G (fun g => lam g * sum_list G (fun h => mu h * dot g h))
+  rw [dot_comm u v, ← rep_dot G lam u v hu]
+  apply list_sum.congr
+  intro g hg; rw [rep_dot G mu v g hv, dot_comm g v]
+
+#axioms memberwise_sum_eq
+#axioms map_composed
+#axioms natural_addition
+#axioms integer_difference
+#axioms rational_negation
+#axioms real_append
+#axioms sum_dot_expand
+#axioms comb_dot

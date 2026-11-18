@@ -1,0 +1,107 @@
+inductive mode
+  | mild
+  | medium
+  | strong
+inductive quarter
+  | north
+  | east
+  | south
+  | west
+-> cycle : mode → mode
+  | mild => medium
+  | medium => strong
+  | strong => mild
+-> choose : mode → α → α → α → α
+  | mild, a, b, c => a
+  | medium, a, b, c => b
+  | strong, a, b, c => c
+-> code : quarter → ℕ
+  | north => 0
+  | east => 1
+  | south => 2
+  | west => 3
+-> blend : quarter → quarter → ℕ
+  | north, b => code b
+  | east, b => code b+1
+  | south, b => code b+2
+  | west, b => code b+3
+-> mark : mode → ℤ
+  | mild => 0
+  | medium => 1
+  | strong => 2
++ cycle_three (m : mode) : cycle (cycle (cycle m)) = m := by auto
++ cycle_distinct (m : mode) : cycle m ≠ m := by auto
++ choose_first (m : mode) (a b c : α) (x y z : β) : fst (choose m (a,x) (b,y) (c,z)) = choose m a b c := by auto
++ choose_second (m : mode) (a b c : α) (x y z : β) : snd (choose m (a,x) (b,y) (c,z)) = choose m x y z := by auto
++ choose_equal (m : mode) (a : α) : choose m a a a = a := by auto
++ choose_guard (m : mode) (a b c d : ℤ) (ha : a ≤ d) (hb : b ≤ d) (hc : c ≤ d) : choose m a b c ≤ d := by auto
++ excluded_case (m : mode) (h : m ≠ strong) : choose m (1 : ℤ) 2 9 ≤ 2 := by auto
++ impossible_mark (m : mode) (h : mark m = -1) : False := by auto
++ blend_commutes (a b : quarter) : blend a b = blend b a := by auto
++ blend_bound (a b : quarter) : blend a b ≤ 6 := by auto
++ blend_formula (a b : quarter) : blend a b = code a+code b := by auto
+
+-> weight.nat : mode → ℕ
+  | mild => 1
+  | medium => 2
+  | strong => 3
+-> scale.nat : mode → ℕ → ℕ
+  | mild, x => x+1
+  | medium, x => 2*x+1
+  | strong, x => 3*x+1
++ nat_formula (m : mode) (x : ℕ) : scale.nat m x = weight.nat m*x+1 := by auto
++ nat_add (m : mode) (x y : ℕ) : scale.nat m (x+y) = scale.nat m x+weight.nat m*y := by auto
++ nat_nonnegative (m : mode) (x : ℕ) (h : 0 ≤ x) : 0 ≤ scale.nat m x := by auto
++ nat_positive (m : mode) (x : ℕ) (h : 0 ≤ x) : 0 < scale.nat m x := by auto
++ nat_monotone (m : mode) (x y : ℕ) (h : x ≤ y) : scale.nat m x ≤ scale.nat m y := by auto
++ nat_paired (m : mode) (x y : ℕ) : scale.nat m x = weight.nat m*x+1 ∧ scale.nat m (x+y) = scale.nat m x+weight.nat m*y := by auto
+
+-> weight.int : mode → ℤ
+  | mild => 1
+  | medium => 2
+  | strong => 3
+-> scale.int : mode → ℤ → ℤ
+  | mild, x => x+1
+  | medium, x => 2*x+1
+  | strong, x => 3*x+1
++ int_formula (m : mode) (x : ℤ) : scale.int m x = weight.int m*x+1 := by auto
++ int_add (m : mode) (x y : ℤ) : scale.int m (x+y) = scale.int m x+weight.int m*y := by auto
++ int_nonnegative (m : mode) (x : ℤ) (h : 0 ≤ x) : 0 ≤ scale.int m x := by auto
++ int_positive (m : mode) (x : ℤ) (h : 0 ≤ x) : 0 < scale.int m x := by auto
++ int_monotone (m : mode) (x y : ℤ) (h : x ≤ y) : scale.int m x ≤ scale.int m y := by auto
++ int_paired (m : mode) (x y : ℤ) : scale.int m x = weight.int m*x+1 ∧ scale.int m (x+y) = scale.int m x+weight.int m*y := by auto
+
+-> weight.rat : mode → ℚ
+  | mild => 1
+  | medium => 2
+  | strong => 3
+-> scale.rat : mode → ℚ → ℚ
+  | mild, x => x+1
+  | medium, x => 2*x+1
+  | strong, x => 3*x+1
++ rat_formula (m : mode) (x : ℚ) : scale.rat m x = weight.rat m*x+1 := by auto
++ rat_add (m : mode) (x y : ℚ) : scale.rat m (x+y) = scale.rat m x+weight.rat m*y := by auto
++ rat_nonnegative (m : mode) (x : ℚ) (h : 0 ≤ x) : 0 ≤ scale.rat m x := by auto
++ rat_positive (m : mode) (x : ℚ) (h : 0 ≤ x) : 0 < scale.rat m x := by auto
++ rat_monotone (m : mode) (x y : ℚ) (h : x ≤ y) : scale.rat m x ≤ scale.rat m y := by auto
++ rat_paired (m : mode) (x y : ℚ) : scale.rat m x = weight.rat m*x+1 ∧ scale.rat m (x+y) = scale.rat m x+weight.rat m*y := by auto
+
+-> weight.real : mode → ℝ
+  | mild => 1
+  | medium => 2
+  | strong => 3
+-> scale.real : mode → ℝ → ℝ
+  | mild, x => x+1
+  | medium, x => 2*x+1
+  | strong, x => 3*x+1
++ real_formula (m : mode) (x : ℝ) : scale.real m x = weight.real m*x+1 := by auto
++ real_add (m : mode) (x y : ℝ) : scale.real m (x+y) = scale.real m x+weight.real m*y := by auto
++ real_nonnegative (m : mode) (x : ℝ) (h : 0 ≤ x) : 0 ≤ scale.real m x := by auto
++ real_positive (m : mode) (x : ℝ) (h : 0 ≤ x) : 0 < scale.real m x := by auto
++ real_monotone (m : mode) (x y : ℝ) (h : x ≤ y) : scale.real m x ≤ scale.real m y := by auto
++ real_paired (m : mode) (x y : ℝ) : scale.real m x = weight.real m*x+1 ∧ scale.real m (x+y) = scale.real m x+weight.real m*y := by auto
+
+inductive ghost α
+  | ghost_empty
+  | ghost_full
++ phantom_cases (g : ghost ℚ) : g = ghost_empty ∨ g = ghost_full := by auto

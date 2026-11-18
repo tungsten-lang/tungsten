@@ -1,0 +1,41 @@
+import sqrt_distance
+
++ real_gap (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a-b)*(a-b) ≤ |a*a-b*b| := square_gap.le_abs.real a b ha hb
+
++ real_swapped (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (b-a)*(b-a) ≤ |b*b-a*a| := square_gap.le_abs.real b a hb ha
+
++ real_zero (a : ℝ) (ha : 0 ≤ a) : (a-0)*(a-0) ≤ |a*a-0*0| := square_gap.le_abs.real a 0 ha (by linarith)
+
++ real_equality (a : ℝ) (ha : 0 ≤ a) : (a-a)*(a-a) ≤ |a*a-a*a| := square_gap.le_abs.real a a ha ha
+
++ rat_gap (a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a-b)*(a-b) ≤ |a*a-b*b| := square_gap.le_abs.rat a b ha hb
+
++ rat_swapped (a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (b-a)*(b-a) ≤ |b*b-a*a| := square_gap.le_abs.rat b a hb ha
+
++ rat_zero (a : ℚ) (ha : 0 ≤ a) : (a-0)*(a-0) ≤ |a*a-0*0| := square_gap.le_abs.rat a 0 ha (by linarith)
+
++ rat_equality (a : ℚ) (ha : 0 ≤ a) : (a-a)*(a-a) ≤ |a*a-a*a| := square_gap.le_abs.rat a a ha ha
+
++ int_gap (a b : ℤ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a-b)*(a-b) ≤ |a*a-b*b| := square_gap.le_abs.int a b ha hb
+
++ int_swapped (a b : ℤ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (b-a)*(b-a) ≤ |b*b-a*a| := square_gap.le_abs.int b a hb ha
+
++ int_zero (a : ℤ) (ha : 0 ≤ a) : (a-0)*(a-0) ≤ |a*a-0*0| := square_gap.le_abs.int a 0 ha (by linarith)
+
++ int_equality (a : ℤ) (ha : 0 ≤ a) : (a-a)*(a-a) ≤ |a*a-a*a| := square_gap.le_abs.int a a ha ha
+
++ root_squared (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : (sqrt x-sqrt y)^2 ≤ |x-y| := sqrt_sub_sq_le_abs x y hx hy
+
++ root_holder (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : |sqrt x-sqrt y| ≤ sqrt (|x-y|) := sqrt_sub_abs_le x y hx hy
+
++ root_zero (x : ℝ) (hx : 0 ≤ x) : |sqrt x-sqrt 0| ≤ sqrt (|x-0|) := sqrt_sub_abs_le x 0 hx (by linarith)
+
++ root_equal (x : ℝ) (hx : 0 ≤ x) : (sqrt x-sqrt x)^2 ≤ |x-x| := sqrt_sub_sq_le_abs x x hx hx
+
++ list_weighted (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*(sqrt (f i)-sqrt (g i))^2) ≤ sum_list xs (fun i => w i*|f i-g i|) := list_sum.weighted_sqrt_distance.real xs w f g hw hf hg
+
++ list_unweighted (xs : list α) (f g : α → ℝ) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => (sqrt (f i)-sqrt (g i))^2) ≤ sum_list xs (fun i => |f i-g i|) := list_sum.sqrt_distance.real xs f g hf hg
+
++ range_weighted (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*(sqrt (f i)-sqrt (g i))^2) ≤ sum_below n (fun i => w i*|f i-g i|) := sum_below.weighted_sqrt_distance.real n w f g hw hf hg
+
++ range_unweighted (n : ℕ) (f g : ℕ → ℝ) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => (sqrt (f i)-sqrt (g i))^2) ≤ sum_below n (fun i => |f i-g i|) := sum_below.sqrt_distance.real n f g hf hg

@@ -1,0 +1,2 @@
+use auto_recurrence_identity_check
+check_auto_recurrence_identity("real")

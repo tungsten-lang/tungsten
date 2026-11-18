@@ -1,0 +1,59 @@
+import arith
+
++ nat_missing (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ nat_outside_i (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n+1, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n+1, g j i)) := by auto
+
++ nat_outside_j (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m+1, f i j)) = (∑ j < m+1, v j * (∑ i < n, g j i)) := by auto
+
++ nat_wrong_weight (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) (w : ℕ → ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, w j * (∑ i < n, g j i)) := by auto
+
++ nat_wrong_entry (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) (k : ℕ → ℕ → ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, k j i)) := by auto
+
++ nat_weak (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j ≤ v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ nat_cycle (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ) (h : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) → ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ int_missing (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ int_outside_i (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n+1, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n+1, g j i)) := by auto
+
++ int_outside_j (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m+1, f i j)) = (∑ j < m+1, v j * (∑ i < n, g j i)) := by auto
+
++ int_wrong_weight (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) (w : ℕ → ℤ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, w j * (∑ i < n, g j i)) := by auto
+
++ int_wrong_entry (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) (k : ℕ → ℕ → ℤ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, k j i)) := by auto
+
++ int_weak (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j ≤ v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ int_cycle (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) (h : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) → ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ rat_missing (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ rat_outside_i (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n+1, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n+1, g j i)) := by auto
+
++ rat_outside_j (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m+1, f i j)) = (∑ j < m+1, v j * (∑ i < n, g j i)) := by auto
+
++ rat_wrong_weight (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) (w : ℕ → ℚ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, w j * (∑ i < n, g j i)) := by auto
+
++ rat_wrong_entry (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) (k : ℕ → ℕ → ℚ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, k j i)) := by auto
+
++ rat_weak (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j ≤ v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ rat_cycle (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) (h : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) → ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ real_missing (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ real_outside_i (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n+1, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n+1, g j i)) := by auto
+
++ real_outside_j (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m+1, f i j)) = (∑ j < m+1, v j * (∑ i < n, g j i)) := by auto
+
++ real_wrong_weight (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) (w : ℕ → ℝ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, w j * (∑ i < n, g j i)) := by auto
+
++ real_wrong_entry (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) (k : ℕ → ℕ → ℝ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, k j i)) := by auto
+
++ real_weak (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j ≤ v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ real_cycle (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ) (h : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) → ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto
+
++ generic (f g : ℕ → ℕ → α) (u v : ℕ → α) (n m : ℕ) (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i)) := by auto

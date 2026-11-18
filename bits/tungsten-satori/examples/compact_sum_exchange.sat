@@ -1,0 +1,17 @@
+import arith
+
++ bilinear (A : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ) :
+    (∑ i < n, u i * (∑ j < m, A i j * v j)) = (∑ j < m, v j * (∑ i < n, u i * A i j))
+  auto
+
++ exchange (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ)
+    (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) :
+    (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i))
+  auto
+
+-> row (A : ℕ → ℕ → ℚ) (v : ℕ → ℚ) (m i : ℕ) : ℚ := ∑ j < m, A i j * v j
+-> col (A : ℕ → ℕ → ℚ) (u : ℕ → ℚ) (n j : ℕ) : ℚ := ∑ i < n, u i * A i j
+
++ rows_eq_cols (A : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ) :
+    (∑ i < n, u i * row A v m i) = (∑ j < m, v j * col A u n j)
+  auto

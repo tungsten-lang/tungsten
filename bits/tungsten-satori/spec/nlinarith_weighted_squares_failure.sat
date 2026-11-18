@@ -1,0 +1,6 @@
++ int_negative (x y : ℤ) (h : 12*x*x-12*y*y = 0) : x = 0
+  nlinarith
++ rat_negative (x y : ℚ) (h : 12*x*x-12*y*y = 0) : x = 0
+  nlinarith
++ real_negative (x y : ℝ) (h : 12*x*x-12*y*y = 0) : x = 0
+  nlinarith

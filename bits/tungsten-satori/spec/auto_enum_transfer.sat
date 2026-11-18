@@ -1,0 +1,27 @@
+inductive letter
+  | ls
+  | la
+  | lb
+
+structure m2 := (x11 : ℤ) (x12 : ℤ) (x21 : ℤ) (x22 : ℤ)
+-> lmat : letter → m2
+  | ls => m2.mk 1 0 1 0
+  | la => m2.mk 1 1 1 0
+  | lb => m2.mk 2 (-1) 1 0
+-> mmul (x y : m2) : m2 := m2.mk (x.x11 * y.x11 + x.x12 * y.x21) (x.x11 * y.x12 + x.x12 * y.x22) (x.x21 * y.x11 + x.x22 * y.x21) (x.x21 * y.x12 + x.x22 * y.x22)
+-> mdet (x : m2) : ℤ := x.x11 * x.x22 - x.x12 * x.x21
+-> prodw : list letter → m2
+  | [] => m2.mk 1 0 0 1
+  | x :: l => mmul (prodw l) (lmat x)
+
++ det_mul (x y : m2) : mdet (mmul x y) = mdet x * mdet y
+  unfold mdet mmul
+  simp
+  ring
+-> sgn : list letter → ℤ
+  | [] => 1
+  | ls :: l => 0
+  | la :: l => -sgn l
+  | lb :: l => sgn l
++ det_word (l : list letter) : mdet (prodw l) = sgn l
+  auto [det_mul]

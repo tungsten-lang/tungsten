@@ -1,0 +1,7 @@
+opaque approved : ℚ → ℚ → ℚ → ℚ → Prop
+axiom zero_when : ∀ a b c d, approved a b c d → (a*b)^2+(c*d)^2 = 0
++ supplied (a b c d : ℚ) (h : approved a b c d) : a*b = 0
+  auto [zero_when a b c d h]
++ local_supplied (a b c d : ℚ) (h : approved a b c d) : a*b = 0
+  have z := zero_when a b c d h
+  auto

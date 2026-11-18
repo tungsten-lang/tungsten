@@ -1,0 +1,84 @@
++ preserve (p : α → Prop) (x : α) (h : p x) : p x := h
++ lambda_explicit (a b : ℕ) (h : a = b) : a = b := preserve (fun x => a = x) b h
++ lambda_infer_from_goal (a b : ℕ) (h : a = b) : a = b := by apply preserve (fun x => a = x); exact h
++ lambda_infer_from_proof (a b : ℕ) (h : a = b) : a = b := preserve (fun x => a = x) h
++ lambda_generic (a b : α) (h : a = b) : a = b := preserve (fun (x : α) => a = x) h
++ lambda_nested_type (xs ys : list (list α)) (h : xs = ys) : xs = ys := preserve (fun (x : list (list α)) => xs = x) h
++ lambda_repeated (a : ℕ) : a = a := by apply preserve (fun (x : ℕ) => x = x); rfl
++ lambda_exists (p : α → α → Prop) (a b : α) (h : p b a) : ∃ y, p b y := by apply preserve (fun x => ∃ y, p x y) b; use a
++ lambda_quantified (p : α → α → Prop) (a : α) (h : ∀ x, p a x) : ∀ x, p a x := preserve (fun y => ∀ x, p y x) a h
++ lambda_constant (a : ℕ) (p : α → Prop) (h : ∀ x, p x) : ∀ x, p x := preserve (fun (n : ℕ) => ∀ x, p x) a h
++ lambda_have (a b : ℕ) (h : a = b) : a = b
+  have t := preserve (fun x => a = x) h
+  exact t
+-> reflexive_at (x : α) : Prop := x = x
++ lambda_alias (a : α) : reflexive_at a := preserve (fun (x : α) => x = x) a (by rfl)
++ lambda_alias_applied (a : α) (h : reflexive_at a) : a = a := preserve (fun (x : α) => reflexive_at x) a h
++ map_reflexive (a : α) (f : α → β) : f a = f a := by rfl
++ partial_projection (v : α × β) : snd v = snd v := map_reflexive v snd
++ after_proof (p : α → Prop) (h : ∀ x, p x) (b : β) : ∀ c : α, p c := by intro c; exact h c
++ mixed_binders (p : α → Prop) (h : ∀ x, p x) (b : β) (a : α) : p a := after_proof p h b a
++ premise_kept (a : α) (h : True) : a = a := by rfl
++ explicit_premise (a : α) : a = a
+  apply premise_kept a
+  trivial
++ expose (P : ℕ → Prop) (h : ∀ n, P n) : ∀ n, P n := h
++ exposed_implication (P Q : ℕ → Prop) (h : ∀ n, P n → Q n) (n : ℕ) (hn : P n) : Q n := expose (fun n => P n → Q n) h n hn
++ exposed_negation (P : ℕ → Prop) (h : ∀ n, ¬ P n) (n : ℕ) (hn : P n) : False := expose (fun n => ¬ P n) h n hn
++ exposed_forall (P : ℕ → α → Prop) (h : ∀ n, ∀ x, P n x) (n : ℕ) (x : α) : P n x := expose (fun n => ∀ x, P n x) h n x
++ exposed_have (P Q : ℕ → Prop) (h : ∀ n, P n → Q n) (n : ℕ) (hn : P n) : Q n
+  have result := expose (fun n => P n → Q n) h n hn
+  exact result
++ exposed_not_have (P : ℕ → Prop) (h : ∀ n, ¬ P n) (n : ℕ) (hn : P n) : False
+  have result := expose (fun n => ¬ P n) h n hn
+  exact result
++ exposed_apply (P Q : ℕ → Prop) (h : ∀ n, P n → Q n) (n : ℕ) (hn : P n) : Q n
+  apply expose (fun n => P n → Q n) h n hn
++ exposed_apply_open (P Q : ℕ → Prop) (h : ∀ n, P n → Q n) (n : ℕ) (hn : P n) : Q n
+  apply expose (fun n => P n → Q n) h n
+  exact hn
++ exposed_twice (P Q : Prop) (h : ∀ n : ℕ, ∀ R : Prop, R → R) (pq : P → Q) (hp : P) : Q
+  exact expose (fun n => ∀ R : Prop, R → R) h 0 (P → Q) pq hp
++ unused_parameter (x : ℕ) (P : Prop) (h : P) : P := h
++ partial_unused (P : Prop) (h : P) (x : ℕ) : P
+  have all := unused_parameter h
+  exact all x
+-> successor_alias (x : ℕ) : ℕ := x + 1
++ alias_under_exists (f : ℕ → ℕ) (h : ∃ x, f x = successor_alias 0) : ∃ x, f x = 1 := h
++ alias_under_forall (compute : ℕ) (f : ℕ → ℕ) (h : ∀ x, f x = successor_alias compute) : ∀ x, f x = compute + 1 := h
++ true_reflexive (n : ℕ) : True → n = n := by intro h; rfl
++ exposed_apply_true (n : ℕ) : n = n
+  apply expose (fun n => True → n = n) true_reflexive n
+  trivial
+-> premise_alias (p : α → Prop) (x : α) : Prop := p x
++ alias_proof_argument (p : α → Prop) (x : α) (h : premise_alias p x) : p x := preserve p x h
++ alias_projection_argument (p : α → Prop) (x : α) (h : premise_alias p x ∧ True) : p x := preserve p x h.1
++ alias_quantified_argument (p : α → Prop) (h : ∀ x, premise_alias p x) : ∀ x, p x
+  exact preserve (fun (n : ℕ) => ∀ x, p x) 0 h
++ stored_implication (P Q : Prop) (h : P → Q) (hp : P) : Q
+  have k := preserve (fun (n : ℕ) => P → Q) 0 h
+  exact k hp
++ stored_forall (p : α → Prop) (h : ∀ x, p x) (x : α) : p x
+  have k := preserve (fun (n : ℕ) => ∀ x, p x) 0 h
+  exact k x
++ stored_negation (P : Prop) (h : ¬ P) (hp : P) : False
+  have k := preserve (fun (n : ℕ) => ¬ P) 0 h
+  exact k hp
+#axioms lambda_infer_from_proof
+#axioms lambda_nested_type
+#axioms lambda_exists
+#axioms exposed_implication
+#axioms exposed_negation
+#axioms exposed_forall
+#axioms exposed_apply_open
+#axioms exposed_apply_true
+#axioms exposed_twice
+#axioms partial_unused
+#axioms alias_under_exists
+#axioms alias_under_forall
+#axioms alias_proof_argument
+#axioms alias_projection_argument
+#axioms alias_quantified_argument
+#axioms stored_implication
+#axioms stored_forall
+#axioms stored_negation

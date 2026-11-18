@@ -1,0 +1,10 @@
+import application_types
+
++ change_fixed (x y z : α) (h : x = y) : z = x := by exact (flip_eq x y).mp h
++ wrong_premise (x y z : α) (h : z = y) : y = x := by exact (flip_eq x y).mp h
++ change_predicate (p q : α → Prop) (x : α) (h : p x) : q x := by exact (predicate_iff p x).mp h
++ change_argument (p : α → Prop) (x y : α) (h : p y) : p x := by exact (predicate_iff p x).mp h
++ change_type (p : α → Prop) (q : β → Prop) (x : α) (y : β) (h : p x) : q y := by exact (predicate_iff p x).mp h
++ swap_types (p : α → β → Prop) (q : β → α → Prop) (x : α) (y : β) (h : p x y) : q y x := by exact (relation_iff p x y).mp h
++ wrong_witness (p : α → Prop) (x y : α) (h : p x) : ∃ z, p z := by exact (exists_iff p).mpr ⟨y, h⟩
++ captured_binder (p : α → Prop) (x : α) (h : p x) : ∀ x, p x := by intro y; exact (predicate_iff p y).mp h

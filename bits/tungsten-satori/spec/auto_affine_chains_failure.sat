@@ -1,0 +1,47 @@
+import arith
+opaque a : ℚ
+opaque b : ℚ
+opaque c : ℚ
+opaque e : ℚ
+opaque n : ℕ
+axiom supplied_bound : c+e ≤ b^n
+axiom supplied_margin : 0 < e
+
++ weak_strict (x b c e : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (he : 0 ≤ e) (hc : c+e ≤ b^n) : c < x^n
+  auto
+
++ wrong_margin (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c-1 ≤ b^n) : c ≤ x^n
+  auto
+
++ wrong_upper_margin (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ x) (hb : x ≤ b) (hc : b^n ≤ c+1) : x^n ≤ c
+  auto
+
++ unknown_margin (x b c e : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c+e ≤ b^n) : c < x^n
+  auto
+
++ zero_exponent (x b c e : ℚ) (h0 : 0 ≤ b) (hb : b < x) (he : 0 ≤ e) (hc : c+e ≤ b^0) : c < x^0
+  auto
+
++ negative_base (x b c : ℚ) (n : ℕ) (hb : b < x) (hc : c+1 ≤ b^n) : c ≤ x^n
+  auto
+
++ missing_edge (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c+1 ≤ d) : c ≤ x^n
+  auto
+
++ cycle (x c d : ℚ) (n : ℕ) (hc : c+1 ≤ d+1) (hd : d ≤ c) : c ≤ x^n
+  auto
+
++ branch_leak (x b c e : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (he : 0 < e ∨ e = 0) (hc : c+e ≤ b^n) : c < x^n
+  auto
+
++ wrong_function (f g : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v) (x b c : ℚ) (hb : b ≤ x) (hc : c+1 ≤ g b) : c ≤ f x
+  auto
+
++ truncated_upper (x b c : ℕ) (n : ℕ) (hb : x ≤ b) (hc : b^n ≤ c-1) : x^n < c
+  auto
+
++ no_global_bound (h0 : 0 ≤ b) (hb : b ≤ a) : c < a^n
+  auto
+
++ no_global_margin (h0 : 0 ≤ b) (hb : b ≤ a) : c < a^n
+  auto [supplied_bound]

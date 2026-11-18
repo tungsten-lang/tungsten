@@ -1,0 +1,63 @@
+import arith
+
+-> total_nat (f : ℕ → ℕ) : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => total_nat f n + f n
+
++ total_nonneg_nat (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, 1 ≤ f i) : n ≤ total_nat f n
+  induction n
+    simp [total_nat]
+    simp [total_nat]; auto
+
+-> total_int (f : ℕ → ℤ) : ℕ → ℤ
+  | 0 => 0
+  | n + 1 => total_int f n + f n
+
++ total_nonneg_int (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ total_int f n
+  induction n
+    simp [total_int]
+    simp [total_int]; auto
+
+-> total_rat (f : ℕ → ℚ) : ℕ → ℚ
+  | 0 => 0
+  | n + 1 => total_rat f n + f n
+
++ total_nonneg_rat (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ total_rat f n
+  induction n
+    simp [total_rat]
+    simp [total_rat]; auto
+
+-> total_real (f : ℕ → ℝ) : ℕ → ℝ
+  | 0 => 0
+  | n + 1 => total_real f n + f n
+
++ total_nonneg_real (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ total_real f n
+  induction n
+    simp [total_real]
+    simp [total_real]; auto
+
++ restricted (f : ℕ → ℚ) (n : ℕ) (x : ℚ) (step : (∀ i < n, 0 ≤ f i) → 0 ≤ x) (h : ∀ i < n+1, 0 ≤ f i) : 0 ≤ x + f n
+  auto
+
++ strict_restricted (f : ℕ → ℝ) (n : ℕ) (x : ℝ) (step : (∀ i < n, 0 < f i) → 0 ≤ x) (h : ∀ i < n+1, 0 < f i) : 0 < x + f n
+  auto
+
++ conditional (p : Prop) (x y : ℚ) (step : (p → 0 ≤ x) → 0 ≤ y) (h : 0 ≤ x) : 0 ≤ x+y
+  auto
+
++ paired (x y z : ℚ) (step : (0 ≤ x ∧ 0 ≤ y) → 0 ≤ z) (h : 1 ≤ x) (k : 2 ≤ y) : 0 ≤ x+y+z
+  auto
+
++ vacuous (f : ℕ → ℚ) (x : ℚ) (step : (∀ i < 0, 0 ≤ f i) → 0 ≤ x) : 0 ≤ x+1
+  auto
+
++ nested (f : ℕ → ℚ) (n : ℕ) (x y : ℚ) (step : (∀ i < n, 0 ≤ f i) → 0 ≤ x) (next : (∀ i < n, 0 ≤ f i) → 0 ≤ y) (h : ∀ i < n+1, 0 ≤ f i) : 0 ≤ x+y
+  auto
+
+opaque f : ℕ → ℚ
+opaque n : ℕ
+opaque x : ℚ
+axiom supplied_step : (∀ i < n, 0 ≤ f i) → 0 ≤ x
+
++ hinted (h : ∀ i < n+1, 0 ≤ f i) : 0 ≤ x+f n
+  auto [supplied_step]

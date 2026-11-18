@@ -752,6 +752,10 @@
     resolved
 
   -> wrap_unsigned_bits(value, bits)
+    if bits >= 48 && type(value) == "Int" && value >= 0
+      return value
+    if bits == 64
+      return ccall("w_u64", ccall_nobox("w_to_u64", value))
     modulus = pow2(bits)
     wrapped = value % modulus
     if wrapped < 0
@@ -759,6 +763,10 @@
     wrapped
 
   -> wrap_signed_bits(value, bits)
+    if bits >= 48 && type(value) == "Int"
+      return value
+    if bits == 64
+      return ccall("w_int", ccall_nobox("w_to_i64", value))
     modulus = pow2(bits)
     wrapped = wrap_unsigned_bits(value, bits)
     sign_bit = modulus / 2
@@ -1123,28 +1131,40 @@
     # `f(1, _)` — explicit partial application: a bare `_` argument that is
     # not a bound variable is a placeholder, and the call denotes the lambda
     # over the placeholders (mirrors lowering/calls.w placeholder_lambda_for_call).
-    if !env.defined?("_")
-      ph_names = []
-      ph_args = []
-      raw_args = ast_get(node, :args)
+    raw_args = ast_get(node, :args)
+    if raw_args.size() > 0 && !env.defined?("_")
+      ph_names = nil
+      ph_args = nil
       pi = 0
       while pi < raw_args.size()
         pa = raw_args[pi]
         if is_ast_node?(pa) && ast_kind(pa) == :var && ast_get(pa, :name) == "_"
+          if ph_names == nil
+            ph_names = []
+            ph_args = []
+            j = 0
+            while j < pi
+              ph_args.push(raw_args[j])
+              j += 1
           ph_name = "__pa" + (ph_names.size() + 1).to_s()
           ph_names.push(ph_name)
           ph_args.push(Tungsten:AST:Var.new(ph_name))
-        else
+        elsif ph_args != nil
           ph_args.push(pa)
         pi += 1
-      if ph_names.size() > 0
+      if ph_names != nil
         ph_call = Tungsten:AST:Call.new(ast_get(node, :receiver), ast_get(node, :name), ph_args, ast_get(node, :block))
         return evaluate(Tungsten:AST:Block.new(ph_names, [ph_call]), env)
     block = nil
     if ast_get(node, :block) != nil
       block = evaluate(ast_get(node, :block), env)
-    args = ast_get(node, :args).map -> (a)
-      evaluate(a, env)
+    # Dispatch borrows the vector. Splat and keyword binders make their own
+    # containers when arguments are exposed to the interpreted program.
+    args = [] ## recycle
+    ai = 0
+    while ai < raw_args.size()
+      args.push(evaluate(raw_args[ai], env))
+      ai += 1
     method_name = ast_get(node, :name)
     passthrough = block != nil && interpreter_method_takes_no_block?(method_name)
     call_block = passthrough ? nil : block

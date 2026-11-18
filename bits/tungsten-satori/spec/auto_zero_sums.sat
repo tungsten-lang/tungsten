@@ -1,0 +1,73 @@
+import arith
+
+-> nat_zero_weight (f : ℕ → ℕ) (i : ℕ) : ℕ := 0 * f i
+
++ nat_constant (n : ℕ) : (∑ i < n, (0 : ℕ)) = 0 := by auto
+
++ nat_pointwise (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ nat_smaller (f : ℕ → ℕ) (n m : ℕ) (h : ∀ i < m, f i = 0) (hn : n ≤ m) : (∑ i < n, f i) = 0 := by auto
+
++ nat_all (f : ℕ → ℕ) (n : ℕ) (h : ∀ i, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ nat_cancel (f : ℕ → ℕ) (n : ℕ) : (∑ i < n, f i - f i) = 0 := by auto
+
++ nat_alias (f : ℕ → ℕ) (n : ℕ) : (∑ i < n, nat_zero_weight f i) = 0 := by unfold nat_zero_weight; auto
+
++ nat_guarded (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, i < n → f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ nat_empty (f : ℕ → ℕ) : (∑ i < 0, f i) = 0 := by auto
+
+-> int_zero_weight (f : ℕ → ℤ) (i : ℕ) : ℤ := 0 * f i
+
++ int_constant (n : ℕ) : (∑ i < n, (0 : ℤ)) = 0 := by auto
+
++ int_pointwise (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ int_smaller (f : ℕ → ℤ) (n m : ℕ) (h : ∀ i < m, f i = 0) (hn : n ≤ m) : (∑ i < n, f i) = 0 := by auto
+
++ int_all (f : ℕ → ℤ) (n : ℕ) (h : ∀ i, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ int_cancel (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i - f i) = 0 := by auto
+
++ int_alias (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, int_zero_weight f i) = 0 := by unfold int_zero_weight; auto
+
++ int_guarded (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, i < n → f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ int_empty (f : ℕ → ℤ) : (∑ i < 0, f i) = 0 := by auto
+
+-> rat_zero_weight (f : ℕ → ℚ) (i : ℕ) : ℚ := 0 * f i
+
++ rat_constant (n : ℕ) : (∑ i < n, (0 : ℚ)) = 0 := by auto
+
++ rat_pointwise (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ rat_smaller (f : ℕ → ℚ) (n m : ℕ) (h : ∀ i < m, f i = 0) (hn : n ≤ m) : (∑ i < n, f i) = 0 := by auto
+
++ rat_all (f : ℕ → ℚ) (n : ℕ) (h : ∀ i, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ rat_cancel (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i - f i) = 0 := by auto
+
++ rat_alias (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, rat_zero_weight f i) = 0 := by unfold rat_zero_weight; auto
+
++ rat_guarded (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, i < n → f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ rat_empty (f : ℕ → ℚ) : (∑ i < 0, f i) = 0 := by auto
+
+-> real_zero_weight (f : ℕ → ℝ) (i : ℕ) : ℝ := 0 * f i
+
++ real_constant (n : ℕ) : (∑ i < n, (0 : ℝ)) = 0 := by auto
+
++ real_pointwise (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ real_smaller (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < m, f i = 0) (hn : n ≤ m) : (∑ i < n, f i) = 0 := by auto
+
++ real_all (f : ℕ → ℝ) (n : ℕ) (h : ∀ i, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ real_cancel (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i - f i) = 0 := by auto
+
++ real_alias (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, real_zero_weight f i) = 0 := by unfold real_zero_weight; auto
+
++ real_guarded (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, i < n → f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ real_empty (f : ℕ → ℝ) : (∑ i < 0, f i) = 0 := by auto

@@ -1,0 +1,10 @@
+import recurrence
++ count (f : ℕ → ℕ) (n : ℕ) (base : f 0 = 0) (step : ∀ i, f (i+1) = f i+1) : f n = n := by auto
+opaque marked_counter : ℕ → ℕ
+axiom counter_base : marked_counter 0 = 0
+axiom counter_step : ∀ i, marked_counter (i+1) = marked_counter i+1
++ named_count (n : ℕ) : marked_counter n = n := by auto [counter_base, counter_step]
++ local_count (n : ℕ) : marked_counter n = n
+  have base := counter_base
+  have step := counter_step
+  auto

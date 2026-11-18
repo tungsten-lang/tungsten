@@ -1,0 +1,33 @@
+-- From 060-global-spherical-shells/transfer.sat.
+inductive letter
+  | ls
+  | la
+  | lb
+
+structure m2 := (x11 : ℤ) (x12 : ℤ) (x21 : ℤ) (x22 : ℤ)
+-> lmat : letter → m2
+  | ls => m2.mk 1 0 1 0
+  | la => m2.mk 1 1 1 0
+  | lb => m2.mk 2 (-1) 1 0
+-> mmul (x y : m2) : m2 := m2.mk (x.x11 * y.x11 + x.x12 * y.x21) (x.x11 * y.x12 + x.x12 * y.x22) (x.x21 * y.x11 + x.x22 * y.x21) (x.x21 * y.x12 + x.x22 * y.x22)
+-> prodw : list letter → m2
+  | [] => m2.mk 1 0 0 1
+  | x :: l => mmul (prodw l) (lmat x)
+
+-> step : letter → ℤ × ℤ → ℤ × ℤ
+  | ls, v => (fst v, fst v)
+  | la, v => (fst v + snd v, fst v)
+  | lb, v => (2 * fst v - snd v, fst v)
+-> run : list letter → ℤ × ℤ → ℤ × ℤ
+  | [], v => v
+  | x :: l, v => run l (step x v)
++ step_inv (x : letter) (v : ℤ × ℤ) (h1 : 1 ≤ snd v) (h2 : snd v ≤ fst v) : 1 ≤ snd (step x v) ∧ snd (step x v) ≤ fst (step x v)
+  auto
++ run_inv (l : list letter) : ∀ v : ℤ × ℤ, 1 ≤ snd v → snd v ≤ fst v → 1 ≤ snd (run l v) ∧ snd (run l v) ≤ fst (run l v)
+  auto [step_inv]
+-> act1 (m : m2) (v : ℤ × ℤ) : ℤ := m.x11 * fst v + m.x12 * snd v
+-> act2 (m : m2) (v : ℤ × ℤ) : ℤ := m.x21 * fst v + m.x22 * snd v
++ step_act (x : letter) (v : ℤ × ℤ) : fst (step x v) = act1 (lmat x) v ∧ snd (step x v) = act2 (lmat x) v
+  auto
++ run_act (l : list letter) : ∀ v : ℤ × ℤ, fst (run l v) = act1 (prodw l) v ∧ snd (run l v) = act2 (prodw l) v
+  auto [step_act]

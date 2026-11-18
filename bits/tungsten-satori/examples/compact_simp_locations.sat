@@ -1,0 +1,18 @@
+import arith
+
+-> total : list (ℚ × ℚ) → ℚ
+  | [] => 0
+  | (s, c) :: rest => c + total rest
+
+-> admissible : list (ℚ × ℚ) → Prop
+  | [] => True
+  | (s, c) :: rest => 0 ≤ s ∧ s ≤ 3*c ∧ admissible rest
+
++ total_nonneg (xs : list (ℚ × ℚ)) : admissible xs → 0 ≤ total xs
+  induction xs with _ p
+    simp [total]
+    cases p; simp [admissible, total] at *; auto
+
++ combined (p q : Prop) (h : True ∧ p) (k : q ∧ True) : q ∧ p
+  simp at *
+  auto

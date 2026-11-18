@@ -1,0 +1,17 @@
+-> step (n : ℕ) : ℕ := n+100
+-> walk (step : ℕ → ℕ) : list ℕ → ℕ → ℕ
+  | [], s => s
+  | x :: xs, s => walk step xs (step s)
++ parameter_function : walk (fun n => n+1) [8, 9] 3 = 5 := by decide
+-> counted (zero : ℕ) : list ℕ → ℕ
+  | [] => zero
+  | x :: xs => counted zero xs+1
++ parameter_zero : counted 7 [1, 2] = 9 := by decide
+-> head_default (nil : ℕ) : list ℕ → ℕ
+  | [] => nil
+  | x :: xs => x
++ parameter_nil : head_default 4 [] = 4 := by decide
++ constructor_nil : head_default 4 [6] = 6 := by decide
+-> identity (step : ℕ) : ℕ → ℕ
+  | value => step
++ parameter_simple : identity 7 8 = 7 := by decide

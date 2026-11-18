@@ -1,0 +1,35 @@
+import arith
+
++ nat_wrong_shift (f : ℕ → ℕ) (n : ℕ) : (∑ i < n+1, f i) = f 0 + (∑ i < n, f i) := by auto
+
++ nat_wrong_first (f : ℕ → ℕ) (n : ℕ) : (∑ i < n+1, f i) = f 1 + (∑ i < n, f (i+1)) := by auto
+
++ nat_extra_tail (f : ℕ → ℕ) (n : ℕ) : (∑ i < n+1, f i) = f 0 + (∑ i < n+1, f (i+1)) := by auto
+
++ nat_missing_term (f : ℕ → ℕ) (n : ℕ) : (∑ i < n, f i) = f 0 + (∑ i < n, f (i+1)) := by auto
+
++ int_wrong_shift (f : ℕ → ℤ) (n : ℕ) : (∑ i < n+1, f i) = f 0 + (∑ i < n, f i) := by auto
+
++ int_wrong_first (f : ℕ → ℤ) (n : ℕ) : (∑ i < n+1, f i) = f 1 + (∑ i < n, f (i+1)) := by auto
+
++ int_extra_tail (f : ℕ → ℤ) (n : ℕ) : (∑ i < n+1, f i) = f 0 + (∑ i < n+1, f (i+1)) := by auto
+
++ int_missing_term (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i) = f 0 + (∑ i < n, f (i+1)) := by auto
+
++ rat_wrong_shift (f : ℕ → ℚ) (n : ℕ) : (∑ i < n+1, f i) = f 0 + (∑ i < n, f i) := by auto
+
++ rat_wrong_first (f : ℕ → ℚ) (n : ℕ) : (∑ i < n+1, f i) = f 1 + (∑ i < n, f (i+1)) := by auto
+
++ rat_extra_tail (f : ℕ → ℚ) (n : ℕ) : (∑ i < n+1, f i) = f 0 + (∑ i < n+1, f (i+1)) := by auto
+
++ rat_missing_term (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i) = f 0 + (∑ i < n, f (i+1)) := by auto
+
++ real_wrong_shift (f : ℕ → ℝ) (n : ℕ) : (∑ i < n+1, f i) = f 0 + (∑ i < n, f i) := by auto
+
++ real_wrong_first (f : ℕ → ℝ) (n : ℕ) : (∑ i < n+1, f i) = f 1 + (∑ i < n, f (i+1)) := by auto
+
++ real_extra_tail (f : ℕ → ℝ) (n : ℕ) : (∑ i < n+1, f i) = f 0 + (∑ i < n+1, f (i+1)) := by auto
+
++ real_missing_term (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i) = f 0 + (∑ i < n, f (i+1)) := by auto
+
++ generic (f : ℕ → α) (n : ℕ) : (∑ i < n+1, f i) = f 0 + (∑ i < n, f (i+1)) := by auto

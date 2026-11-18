@@ -1,0 +1,43 @@
+import euclidean
+
++ list_missing_cauchy_sign (xs : list α) (w f g : α → ℝ) :
+    |sum_list xs (fun i => w i*(f i*g i))| ≤ sqrt (sum_list xs (fun i => w i*(f i*f i))) * sqrt (sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ list_missing_triangle_sign (xs : list α) (w f g : α → ℝ) :
+    sqrt (sum_list xs (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_list xs (fun i => w i*(f i*f i))) + sqrt (sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ list_strict_triangle (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) : sqrt (sum_list xs (fun i => w i*((f i+g i)*(f i+g i)))) < sqrt (sum_list xs (fun i => w i*(f i*f i))) + sqrt (sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ list_strict_cauchy (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) :
+    |sum_list xs (fun i => w i*(f i*g i))| < sqrt (sum_list xs (fun i => w i*(f i*f i))) * sqrt (sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ list_wrong_vector (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) : sqrt (sum_list xs (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_list xs (fun i => w i*(f i*f i))) + sqrt (sum_list xs (fun i => w i*(f i*f i)))
+  auto
+
++ range_missing_cauchy_sign (n : ℕ) (w f g : ℕ → ℝ) :
+    |sum_below n (fun i => w i*(f i*g i))| ≤ sqrt (sum_below n (fun i => w i*(f i*f i))) * sqrt (sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ range_missing_triangle_sign (n : ℕ) (w f g : ℕ → ℝ) :
+    sqrt (sum_below n (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_below n (fun i => w i*(f i*f i))) + sqrt (sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ range_strict_triangle (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) : sqrt (sum_below n (fun i => w i*((f i+g i)*(f i+g i)))) < sqrt (sum_below n (fun i => w i*(f i*f i))) + sqrt (sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ range_strict_cauchy (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) :
+    |sum_below n (fun i => w i*(f i*g i))| < sqrt (sum_below n (fun i => w i*(f i*f i))) * sqrt (sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ range_wrong_vector (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) : sqrt (sum_below n (fun i => w i*((f i+g i)*(f i+g i)))) ≤ sqrt (sum_below n (fun i => w i*(f i*f i))) + sqrt (sum_below n (fun i => w i*(f i*f i)))
+  auto
+
++ scalar_missing_signs (x a b : ℝ) (h : x^2 ≤ a*b) : |x| ≤ sqrt a * sqrt b
+  auto
+
++ planar_wrong_direction (a b c d : ℝ) : sqrt ((a+c)^2+(b+d)^2) ≥ sqrt (a^2+b^2)+sqrt (c^2+d^2)
+  auto

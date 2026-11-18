@@ -1,0 +1,80 @@
+
+-> shift.nat (v : ℕ × ℕ) : ℕ × ℕ := (fst v+1, snd v+2)
+-> total.nat (v : ℕ × ℕ) : ℕ := fst v+snd v
+-> ordered.nat (v : ℕ × ℕ) : Prop := fst v ≤ snd v
+-> positive.nat (v : ℕ × ℕ) : Prop := 0 < fst v ∧ 0 < snd v
+-> pairwise.nat (v w : ℕ × ℕ) : Prop := fst v = fst w ∧ snd v = snd w
+-> allowance.nat (x : ℕ) : Prop := 2 ≤ x
+-> record.nat (f : α → ℕ) (x : α) : ℕ × ℕ := (f x, f x+1)
+
+-> shift.int (v : ℤ × ℤ) : ℤ × ℤ := (fst v+1, snd v+2)
+-> total.int (v : ℤ × ℤ) : ℤ := fst v+snd v
+-> ordered.int (v : ℤ × ℤ) : Prop := fst v ≤ snd v
+-> positive.int (v : ℤ × ℤ) : Prop := 0 < fst v ∧ 0 < snd v
+-> pairwise.int (v w : ℤ × ℤ) : Prop := fst v = fst w ∧ snd v = snd w
+-> allowance.int (x : ℤ) : Prop := 2 ≤ x
+-> record.int (f : α → ℤ) (x : α) : ℤ × ℤ := (f x, f x+1)
+
+-> shift.rat (v : ℚ × ℚ) : ℚ × ℚ := (fst v+1, snd v+2)
+-> total.rat (v : ℚ × ℚ) : ℚ := fst v+snd v
+-> ordered.rat (v : ℚ × ℚ) : Prop := fst v ≤ snd v
+-> positive.rat (v : ℚ × ℚ) : Prop := 0 < fst v ∧ 0 < snd v
+-> pairwise.rat (v w : ℚ × ℚ) : Prop := fst v = fst w ∧ snd v = snd w
+-> allowance.rat (x : ℚ) : Prop := 2 ≤ x
+-> record.rat (f : α → ℚ) (x : α) : ℚ × ℚ := (f x, f x+1)
+
+-> shift.real (v : ℝ × ℝ) : ℝ × ℝ := (fst v+1, snd v+2)
+-> total.real (v : ℝ × ℝ) : ℝ := fst v+snd v
+-> ordered.real (v : ℝ × ℝ) : Prop := fst v ≤ snd v
+-> positive.real (v : ℝ × ℝ) : Prop := 0 < fst v ∧ 0 < snd v
+-> pairwise.real (v w : ℝ × ℝ) : Prop := fst v = fst w ∧ snd v = snd w
+-> allowance.real (x : ℝ) : Prop := 2 ≤ x
+-> record.real (f : α → ℝ) (x : α) : ℝ × ℝ := (f x, f x+1)
++ nat_wrong_shift (v : ℕ × ℕ) (h : 0 ≤ total.nat v) : 4 ≤ total.nat (shift.nat v)
+  auto
++ nat_missing_order (v : ℕ × ℕ) : fst (shift.nat v) < snd (shift.nat v)
+  auto
++ nat_strict_equal (v w : ℕ × ℕ) (h : pairwise.nat v w) : total.nat (shift.nat v) < total.nat (shift.nat w)
+  auto
++ nat_wrong_record (f : α → ℕ) (x : α) (h : 0 ≤ f x) : 2 ≤ total.nat (record.nat f x)
+  auto
++ nat_missing_guard (v : ℕ × ℕ) (rule : allowance.nat (fst v) → ordered.nat v) : fst (shift.nat v) < snd (shift.nat v)
+  auto
++ nat_wrong_guard (v w : ℕ × ℕ) (h : allowance.nat (fst w)) (rule : allowance.nat (fst v) → ordered.nat v) : fst (shift.nat v) < snd (shift.nat v)
+  auto
++ int_wrong_shift (v : ℤ × ℤ) (h : 0 ≤ total.int v) : 4 ≤ total.int (shift.int v)
+  auto
++ int_missing_order (v : ℤ × ℤ) : fst (shift.int v) < snd (shift.int v)
+  auto
++ int_strict_equal (v w : ℤ × ℤ) (h : pairwise.int v w) : total.int (shift.int v) < total.int (shift.int w)
+  auto
++ int_wrong_record (f : α → ℤ) (x : α) (h : 0 ≤ f x) : 2 ≤ total.int (record.int f x)
+  auto
++ int_missing_guard (v : ℤ × ℤ) (rule : allowance.int (fst v) → ordered.int v) : fst (shift.int v) < snd (shift.int v)
+  auto
++ int_wrong_guard (v w : ℤ × ℤ) (h : allowance.int (fst w)) (rule : allowance.int (fst v) → ordered.int v) : fst (shift.int v) < snd (shift.int v)
+  auto
++ rat_wrong_shift (v : ℚ × ℚ) (h : 0 ≤ total.rat v) : 4 ≤ total.rat (shift.rat v)
+  auto
++ rat_missing_order (v : ℚ × ℚ) : fst (shift.rat v) < snd (shift.rat v)
+  auto
++ rat_strict_equal (v w : ℚ × ℚ) (h : pairwise.rat v w) : total.rat (shift.rat v) < total.rat (shift.rat w)
+  auto
++ rat_wrong_record (f : α → ℚ) (x : α) (h : 0 ≤ f x) : 2 ≤ total.rat (record.rat f x)
+  auto
++ rat_missing_guard (v : ℚ × ℚ) (rule : allowance.rat (fst v) → ordered.rat v) : fst (shift.rat v) < snd (shift.rat v)
+  auto
++ rat_wrong_guard (v w : ℚ × ℚ) (h : allowance.rat (fst w)) (rule : allowance.rat (fst v) → ordered.rat v) : fst (shift.rat v) < snd (shift.rat v)
+  auto
++ real_wrong_shift (v : ℝ × ℝ) (h : 0 ≤ total.real v) : 4 ≤ total.real (shift.real v)
+  auto
++ real_missing_order (v : ℝ × ℝ) : fst (shift.real v) < snd (shift.real v)
+  auto
++ real_strict_equal (v w : ℝ × ℝ) (h : pairwise.real v w) : total.real (shift.real v) < total.real (shift.real w)
+  auto
++ real_wrong_record (f : α → ℝ) (x : α) (h : 0 ≤ f x) : 2 ≤ total.real (record.real f x)
+  auto
++ real_missing_guard (v : ℝ × ℝ) (rule : allowance.real (fst v) → ordered.real v) : fst (shift.real v) < snd (shift.real v)
+  auto
++ real_wrong_guard (v w : ℝ × ℝ) (h : allowance.real (fst w)) (rule : allowance.real (fst v) → ordered.real v) : fst (shift.real v) < snd (shift.real v)
+  auto

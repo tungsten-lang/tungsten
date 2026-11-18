@@ -1,0 +1,37 @@
+import auto_log_exp
+
++ missing_log_domain (x y : ℝ) (h : x ≤ y) : log x ≤ log y
+  auto
+
++ zero_log_domain (x y : ℝ) (hx : 0 ≤ x) (h : x ≤ y) : log x ≤ log y
+  auto
+
++ missing_log_order (x y : ℝ) (hx : 0 < x) (hy : 0 < y) : log x ≤ log y
+  auto
+
++ reversed_log_order (x y : ℝ) (hx : 0 < x) (h : y ≤ x) : log x ≤ log y
+  auto
+
++ weak_strict_log (x y : ℝ) (hx : 0 < x) (h : x ≤ y) : log x < log y
+  auto
+
++ missing_log_sign (x : ℝ) (h : 0 < x) : 0 ≤ log x
+  auto
+
++ missing_exp_order (x y : ℝ) : exp x ≤ exp y
+  auto
+
++ weak_strict_exp (x y : ℝ) (h : x ≤ y) : exp x < exp y
+  auto
+
++ wrong_decay_sign (a x y : ℝ) (ha : a ≤ 0) (h : x ≤ y) : decay a y ≤ decay a x
+  auto
+
++ weak_unit_exp (x : ℝ) (h : x ≤ 0) : exp x < 1
+  auto
+
++ weak_log_negative (x : ℝ) (hx : 0 < x) (h : x ≤ 1) : log x < 0
+  auto
+
++ wrong_exp_lower (x : ℝ) (h : x ≤ 0) : 1 ≤ exp x
+  auto

@@ -1,0 +1,19 @@
+import recurrence
+-> fsum (s m : ℚ) : ℕ → ℚ → ℚ
+  | 0, c => 0
+  | k + 1, c => s * (m + c) ^ 2 + fsum s m k (c + 1)
+-> csum : ℕ → ℚ → ℚ
+  | 0, c => 0
+  | k + 1, c => c + csum k (c + 1)
+-> c2sum : ℕ → ℚ → ℚ
+  | 0, c => 0
+  | k + 1, c => c ^ 2 + c2sum k (c + 1)
+-> cnt : ℕ → ℚ
+  | 0 => 0
+  | k + 1 => 1 + cnt k
++ fsum_split (s m : ℚ) (k : ℕ) : ∀ c : ℚ, fsum s m k c = s * (cnt k * m ^ 2 + 2 * m * csum k c + c2sum k c)
+  auto
++ csum_closed (k : ℕ) : ∀ c : ℚ, csum k c = cnt k * c + cnt k * (cnt k - 1) / 2
+  auto
++ c2sum_closed (k : ℕ) : ∀ c : ℚ, c2sum k c = cnt k * c ^ 2 + c * cnt k * (cnt k - 1) + cnt k * (cnt k - 1) * (2 * cnt k - 1) / 6
+  auto

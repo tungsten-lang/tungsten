@@ -1,0 +1,49 @@
+import arith
+
+opaque aggregate_int : (ℕ → ℤ) → ℕ → ℤ
+axiom aggregate_nonneg_int (f : ℕ → ℤ) (n : ℕ) : (∀ i < n, 0 ≤ f i) → 0 ≤ aggregate_int f n
+opaque aggregate_rat : (ℕ → ℚ) → ℕ → ℚ
+axiom aggregate_nonneg_rat (f : ℕ → ℚ) (n : ℕ) : (∀ i < n, 0 ≤ f i) → 0 ≤ aggregate_rat f n
+opaque aggregate_real : (ℕ → ℝ) → ℕ → ℝ
+axiom aggregate_nonneg_real (f : ℕ → ℝ) (n : ℕ) : (∀ i < n, 0 ≤ f i) → 0 ≤ aggregate_real f n
+opaque aggregate_nat : (ℕ → ℕ) → ℕ → ℕ
+axiom aggregate_lower_nat (f : ℕ → ℕ) (n : ℕ) : (∀ i < n, 1 ≤ f i) → n ≤ aggregate_nat f n
+opaque folded : (α → ℚ) → α → ℚ
+axiom folded_nonneg (f : α → ℚ) (a : α) : (∀ x, 0 ≤ f x) → 0 ≤ folded f a
+
++ missing_guard (f : ℕ → ℚ) (n i : ℕ) (hz : aggregate_rat f n+f n = 0) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_rat]
+
++ wrong_range (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n, 0 ≤ f j) (hz : aggregate_rat f (n+1)+f n = 0) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_rat]
+
++ wrong_sign (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, f j ≤ 0) (hz : aggregate_rat f n+f n = 0) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_rat]
+
++ wrong_function (f g : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat g n+f n = 0) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_rat]
+
++ missing_index (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) : f i = 0
+  auto [aggregate_nonneg_rat]
+
++ wrong_sum (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 1) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_rat]
+
++ weak_nat (f : ℕ → ℕ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_nat f n+f n = n+1) (e : i = n) : f i = 1
+  auto [aggregate_lower_nat]
+
++ wrong_partial (f g : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_rat g]
+
++ escaped_premise (f : α → ℚ) (a b : α) (hz : folded f a+f a = 0) (e : b = a) : f b = 0
+  auto [folded_nonneg]
+
++ unsupplied (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) (e : i = n) : f i = 0
+  auto
+
++ fixed_type (f : α → ℚ) (g : β → ℚ) (a b : β) (h : ∀ x, 0 ≤ g x) (hz : folded g a+g a = 0) (e : b = a) : g b = 0
+  auto [folded_nonneg f]
+
++ conditional_leak (f : ℕ → ℚ) (n i : ℕ) (p : Prop) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) (e : i = n)
+    (rule : p → ∀ g k, (∀ j < k, 0 ≤ g j) → 0 ≤ aggregate_rat g k) : f i = 0
+  auto [rule]

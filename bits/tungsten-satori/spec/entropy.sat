@@ -1,0 +1,17 @@
+import entropy
+
++ tangent (a x : ℝ) (ha : 0 < a) (hx : 0 ≤ x) : x*log a+x-a ≤ x*log x := mul_log_tangent_le a x ha hx
++ strict_tangent (a x : ℝ) (ha : 0 < a) (hx : 0 ≤ x) (h : x ≠ a) : x*log a+x-a < x*log x := mul_log_tangent_lt a x ha hx h
++ zero_tangent (a : ℝ) (ha : 0 < a) : 0*log a+0-a < 0*log 0 := mul_log_tangent_lt a 0 ha (by linarith) (by linarith)
++ equal_tangent (a : ℝ) (ha : 0 < a) : a*log a+a-a ≤ a*log a := mul_log_tangent_le a a ha (by linarith)
++ gibbs (x : ℝ) (hx : 0 ≤ x) : x-1 ≤ x*log x := sub_one_le_mul_log x hx
++ zero_gibbs : 0-1 ≤ 0*log 0 := sub_one_le_mul_log 0 (by linarith)
++ scaled (x c : ℝ) (hx : 0 ≤ x) (hc : 0 < c) : 0-x*log x ≤ x*(log c-1)+1/c := neg_mul_log_le_scale x c hx hc
++ zero_scaled (c : ℝ) (hc : 0 < c) : 0-0*log 0 ≤ 0*(log c-1)+1/c := neg_mul_log_le_scale 0 c (by linarith) hc
++ heavy (x t : ℝ) (ht : 0 < t) (h : t ≤ x) : 0-x*log x ≤ x*log (1/t) := neg_mul_log_le_of_le x t ht h
++ equal_heavy (x : ℝ) (hx : 0 < x) : 0-x*log x ≤ x*log (1/x) := neg_mul_log_le_of_le x x hx (by linarith)
++ finite_entropy (n : ℕ) (p : ℕ → ℝ) (hn : 0 < (n : ℝ)) (hp : ∀ i < n, 0 ≤ p i) (mass : sum_below n p = 1) : sum_below n (fun i => 0-p i*log (p i)) ≤ log (n : ℝ) := sum_below.entropy_le_log.real n p hn hp mass
++ uniform_binary : sum_below 2 (fun i => 0-(1/2)*log (1/2)) ≤ log 2
+  exact sum_below.entropy_le_log.real 2 (fun i => 1/2) (by norm_num) (by intro i hi; linarith) (by decide)
++ point_mass : sum_below 2 (fun i => 0-(if i = 0 then 1 else 0)*log (if i = 0 then 1 else 0)) ≤ log 2
+  exact sum_below.entropy_le_log.real 2 (fun i => if i = 0 then 1 else 0) (by norm_num) (by intro i hi; by_cases h : i = 0 <;> simp [h]) (by decide)

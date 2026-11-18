@@ -1,0 +1,51 @@
+import geometric_mean
+
++ list_weighted (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i))) := list_sum.weighted_sqrt_mul_le.real xs w f g hw hf hg
+
++ list_unweighted (xs : list α) (f g : α → ℝ) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => sqrt (f i*g i)) ≤ sqrt ((sum_list xs f)*(sum_list xs g)) := list_sum.sqrt_mul_le.real xs f g hf hg
+
++ list_zero_weights (xs : list α) (f g : α → ℝ) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => 0*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => 0*f i))*(sum_list xs (fun i => 0*g i)))
+  exact list_sum.weighted_sqrt_mul_le.real xs (fun i => 0) f g (by intro i hi; linarith) hf hg
+
++ list_zero_values (xs : list α) (w g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (0*g i)) ≤ sqrt ((sum_list xs (fun i => w i*0))*(sum_list xs (fun i => w i*g i)))
+  exact list_sum.weighted_sqrt_mul_le.real xs w (fun i => 0) g hw (by intro i hi; linarith) hg
+
++ list_empty (f g : ℕ → ℝ) : 0 ≤ sqrt 0
+  simpa using list_sum.sqrt_mul_le.real ([] : list ℕ) f g (by intro i hi; simp at hi) (by intro i hi; simp at hi)
+
++ range_weighted (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i))) := sum_below.weighted_sqrt_mul_le.real n w f g hw hf hg
+
++ range_unweighted (n : ℕ) (f g : ℕ → ℝ) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => sqrt (f i*g i)) ≤ sqrt ((sum_below n f)*(sum_below n g)) := sum_below.sqrt_mul_le.real n f g hf hg
+
++ range_zero_weights (n : ℕ) (f g : ℕ → ℝ) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => 0*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => 0*f i))*(sum_below n (fun i => 0*g i)))
+  exact sum_below.weighted_sqrt_mul_le.real n (fun i => 0) f g (by intro i hi; linarith) hf hg
+
++ range_zero_values (n : ℕ) (w g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (0*g i)) ≤ sqrt ((sum_below n (fun i => w i*0))*(sum_below n (fun i => w i*g i)))
+  exact sum_below.weighted_sqrt_mul_le.real n w (fun i => 0) g hw (by intro i hi; linarith) hg
+
++ range_empty (f g : ℕ → ℝ) : 0 ≤ sqrt 0
+  simpa using sum_below.sqrt_mul_le.real 0 f g (by intro i hi; omega) (by intro i hi; omega)
+
++ scalar_weighted (x1 y1 x2 y2 a b : ℝ) (h1 : 0 ≤ x1) (h2 : 0 ≤ y1) (h3 : 0 ≤ x2) (h4 : 0 ≤ y2) (ha : 0 ≤ a) (hb : 0 ≤ b) :
+    a*sqrt (x1*y1)+b*sqrt (x2*y2) ≤ sqrt ((a*x1+b*x2)*(a*y1+b*y2))
+  exact sqrt_mul.weighted_add_le x1 y1 x2 y2 a b h1 h2 h3 h4 ha hb
+
++ scalar_unweighted (x1 y1 x2 y2 : ℝ) (h1 : 0 ≤ x1) (h2 : 0 ≤ y1) (h3 : 0 ≤ x2) (h4 : 0 ≤ y2) :
+    sqrt (x1*y1)+sqrt (x2*y2) ≤ sqrt ((x1+x2)*(y1+y2))
+  exact sqrt_mul.add_le x1 y1 x2 y2 h1 h2 h3 h4
+
++ list_repeated (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : sqrt (a*b)+sqrt (a*b) ≤ sqrt ((a+a)*(b+b))
+  simpa [sum_list] using list_sum.sqrt_mul_le.real (0 :: 0 :: []) (fun i => a) (fun i => b) (by intro i hi; exact ha) (by intro i hi; exact hb)
+
++ range_local_domain (f g : ℕ → ℝ) (hf : 0 ≤ f 0) (hg : 0 ≤ g 0) : sum_below 1 (fun i => sqrt (f i*g i)) ≤ sqrt ((sum_below 1 f)*(sum_below 1 g))
+  have pf : ∀ i < 1, 0 ≤ f i
+    intro i hi
+    have e : i = 0 := by omega
+    rw [e]
+    exact hf
+  have pg : ∀ i < 1, 0 ≤ g i
+    intro i hi
+    have e : i = 0 := by omega
+    rw [e]
+    exact hg
+  exact sum_below.sqrt_mul_le.real 1 f g pf pg

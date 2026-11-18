@@ -1,0 +1,162 @@
+-- Finite sums of squares and positive-weight zero detectors.
+import sum_support
+
++ list_sum.squares_nonneg.real (xs : list α) (f : α → ℝ) : 0 ≤ sum_list xs (fun x => f x * f x)
+  apply sum_list_nonneg.real
+  intro x hx
+  nlinarith
+
++ list_sum.squares_eq_zero_iff.real (xs : list α) (f : α → ℝ) :
+    sum_list xs (fun x => f x * f x) = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total
+    have zero := (list_sum.eq_zero_iff.real xs (fun x => f x * f x) (by intro x hx; nlinarith)).mp total
+    intro x hx
+    have h := zero x hx
+    nlinarith
+  · intro zero
+    apply list_sum.eq_zero.real
+    intro x hx
+    rw [zero x hx]
+    simp
+
++ list_sum.weighted_squares_nonneg.real (xs : list α) (w f : α → ℝ) (nonneg : ∀ x ∈ xs, 0 ≤ w x) :
+    0 ≤ sum_list xs (fun x => w x * (f x * f x))
+  apply sum_list_nonneg.real
+  intro x hx
+  exact mul_nonneg.real (w x) (f x * f x) (nonneg x hx) (by nlinarith)
+
++ list_sum.weighted_squares_eq_zero_iff.real (xs : list α) (w f : α → ℝ) (positive : ∀ x ∈ xs, 0 < w x) :
+    sum_list xs (fun x => w x * (f x * f x)) = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total
+    have zero := (list_sum.eq_zero_iff.real xs (fun x => w x * (f x * f x)) (by intro x hx; exact mul_nonneg.real (w x) (f x * f x) (by have h := positive x hx; linarith) (by nlinarith))).mp total
+    intro x hx
+    have hp := positive x hx
+    have hz := zero x hx
+    have square : f x * f x = 0 := by nlinarith
+    nlinarith
+  · intro zero
+    apply list_sum.eq_zero.real
+    intro x hx
+    rw [zero x hx]
+    simp
+
++ list_sum.squares_nonneg.rat (xs : list α) (f : α → ℚ) : 0 ≤ sum_list xs (fun x => f x * f x)
+  apply sum_list_nonneg.rat
+  intro x hx
+  nlinarith
+
++ list_sum.squares_eq_zero_iff.rat (xs : list α) (f : α → ℚ) :
+    sum_list xs (fun x => f x * f x) = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total
+    have zero := (list_sum.eq_zero_iff.rat xs (fun x => f x * f x) (by intro x hx; nlinarith)).mp total
+    intro x hx
+    have h := zero x hx
+    nlinarith
+  · intro zero
+    apply list_sum.eq_zero.rat
+    intro x hx
+    rw [zero x hx]
+    simp
+
++ list_sum.weighted_squares_nonneg.rat (xs : list α) (w f : α → ℚ) (nonneg : ∀ x ∈ xs, 0 ≤ w x) :
+    0 ≤ sum_list xs (fun x => w x * (f x * f x))
+  apply sum_list_nonneg.rat
+  intro x hx
+  exact mul_nonneg.rat (w x) (f x * f x) (nonneg x hx) (by nlinarith)
+
++ list_sum.weighted_squares_eq_zero_iff.rat (xs : list α) (w f : α → ℚ) (positive : ∀ x ∈ xs, 0 < w x) :
+    sum_list xs (fun x => w x * (f x * f x)) = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total
+    have zero := (list_sum.eq_zero_iff.rat xs (fun x => w x * (f x * f x)) (by intro x hx; exact mul_nonneg.rat (w x) (f x * f x) (by have h := positive x hx; linarith) (by nlinarith))).mp total
+    intro x hx
+    have hp := positive x hx
+    have hz := zero x hx
+    have square : f x * f x = 0 := by nlinarith
+    nlinarith
+  · intro zero
+    apply list_sum.eq_zero.rat
+    intro x hx
+    rw [zero x hx]
+    simp
+
++ list_sum.squares_nonneg.int (xs : list α) (f : α → ℤ) : 0 ≤ sum_list xs (fun x => f x * f x)
+  apply sum_list_nonneg.int
+  intro x hx
+  nlinarith
+
++ list_sum.squares_eq_zero_iff.int (xs : list α) (f : α → ℤ) :
+    sum_list xs (fun x => f x * f x) = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total
+    have zero := (list_sum.eq_zero_iff.int xs (fun x => f x * f x) (by intro x hx; nlinarith)).mp total
+    intro x hx
+    have h := zero x hx
+    nlinarith
+  · intro zero
+    apply list_sum.eq_zero.int
+    intro x hx
+    rw [zero x hx]
+    simp
+
++ list_sum.weighted_squares_nonneg.int (xs : list α) (w f : α → ℤ) (nonneg : ∀ x ∈ xs, 0 ≤ w x) :
+    0 ≤ sum_list xs (fun x => w x * (f x * f x))
+  apply sum_list_nonneg.int
+  intro x hx
+  exact mul_nonneg.int (w x) (f x * f x) (nonneg x hx) (by nlinarith)
+
++ list_sum.weighted_squares_eq_zero_iff.int (xs : list α) (w f : α → ℤ) (positive : ∀ x ∈ xs, 0 < w x) :
+    sum_list xs (fun x => w x * (f x * f x)) = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total
+    have zero := (list_sum.eq_zero_iff.int xs (fun x => w x * (f x * f x)) (by intro x hx; exact mul_nonneg.int (w x) (f x * f x) (by have h := positive x hx; linarith) (by nlinarith))).mp total
+    intro x hx
+    have hp := positive x hx
+    have hz := zero x hx
+    have square : f x * f x = 0 := by nlinarith
+    nlinarith
+  · intro zero
+    apply list_sum.eq_zero.int
+    intro x hx
+    rw [zero x hx]
+    simp
+
++ list_sum.squares_nonneg.nat (xs : list α) (f : α → ℕ) : 0 ≤ sum_list xs (fun x => f x * f x)
+  exact zero_le.nat (sum_list xs (fun x => f x * f x))
+
++ list_sum.squares_eq_zero_iff.nat (xs : list α) (f : α → ℕ) :
+    sum_list xs (fun x => f x * f x) = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total
+    have zero := (list_sum.eq_zero_iff.nat xs (fun x => f x * f x)).mp total
+    intro x hx
+    simpa using (mul_eq_zero.nat (f x) (f x)).mp (zero x hx)
+  · intro zero
+    apply list_sum.eq_zero.nat
+    intro x hx
+    rw [zero x hx]
+    simp
+
++ list_sum.weighted_squares_nonneg.nat (xs : list α) (w f : α → ℕ) :
+    0 ≤ sum_list xs (fun x => w x * (f x * f x))
+  exact zero_le.nat (sum_list xs (fun x => w x * (f x * f x)))
+
++ list_sum.weighted_squares_eq_zero_iff.nat (xs : list α) (w f : α → ℕ) (positive : ∀ x ∈ xs, 0 < w x) :
+    sum_list xs (fun x => w x * (f x * f x)) = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total
+    have zero := (list_sum.eq_zero_iff.nat xs (fun x => w x * (f x * f x))).mp total
+    intro x hx
+    obtain weight | square := (mul_eq_zero.nat (w x) (f x * f x)).mp (zero x hx)
+    · have hp := positive x hx
+      exfalso
+      linarith
+    · simpa using (mul_eq_zero.nat (f x) (f x)).mp square
+  · intro zero
+    apply list_sum.eq_zero.nat
+    intro x hx
+    rw [zero x hx]
+    simp

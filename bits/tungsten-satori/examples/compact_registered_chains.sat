@@ -1,0 +1,9 @@
+import quadratic
+
++ upper_bound (a b c d : ℚ)
+    (q : ∀ x y : ℚ, 0 ≤ x^2*a - 2*x*y*b + y^2*c) (h : a*c ≤ d) : b^2 ≤ d
+  auto
+
++ scaled_bound (a b c d : ℝ)
+    (q : ∀ x y : ℝ, 0 ≤ x^2*a - 2*x*y*b + y^2*c) (h : a*c ≤ d) : 2*b^2 ≤ 2*d
+  auto

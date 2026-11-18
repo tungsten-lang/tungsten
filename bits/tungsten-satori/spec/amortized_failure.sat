@@ -1,0 +1,22 @@
+import amortized
+
++ wrong_run_order : run.final (fun (s x : ℕ) => 10 * s + x) [1, 2, 3] 0 = 321 := by decide
++ wrong_cost_timing : run.total (fun (s x : ℕ) => 10 * s + x) (fun s x => s) [1, 2, 3] 0 = 136 := by decide
++ wrong_scale (next : β → α → β) (cost : β → α → ℤ) (xs : list α) (s : β) : run.total next (fun s x => 2 * cost s x) xs s = 3 * run.total next cost xs s := run.total_scale.int next cost 2 xs s
++ missing_step (next : β → α → β) (cost opt : β → α → ℚ) (phi : β → ℚ) (c : ℚ) (P : β → Prop) (Q : α → Prop) (xs : list α) : ∀ s, P s → all Q xs → P (run.final next xs s) ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + c * run.total next opt xs s
+  apply run.ratio.rat next cost opt phi c P Q
++ missing_closure (next : β → α → β) (cost opt : β → α → ℚ) (phi : β → ℚ) (c : ℚ) (P : β → Prop) (Q : α → Prop)
+    (step : ∀ s, P s → ∀ x, Q x → cost s x + phi (next s x) - phi s ≤ c * opt s x) (xs : list α) : ∀ s, P s → all Q xs → P (run.final next xs s) ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + c * run.total next opt xs s
+  exact run.ratio.rat next cost opt phi c P Q step xs
++ wrong_requests (next : β → ℕ → β) (cost opt : β → ℕ → ℚ) (phi : β → ℚ) (c : ℚ) (P : β → Prop)
+    (step : ∀ s, P s → ∀ x, x < 2 → P (next s x) ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (xs : list ℕ) (s : β) (hs : P s) (hx : all (fun x => x < 3) xs) : P (run.final next xs s) ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + c * run.total next opt xs s
+  exact run.ratio.rat next cost opt phi c P (fun x => x < 2) step xs s hs hx
++ wrong_state (next : ℕ → α → ℕ) (cost opt : ℕ → α → ℚ) (phi : ℕ → ℚ) (c : ℚ) (Q : α → Prop)
+    (step : ∀ s, s < 2 → ∀ x, Q x → next s x < 2 ∧ cost s x + phi (next s x) - phi s ≤ c * opt s x)
+    (xs : list α) (s : ℕ) (hs : s < 3) (hx : all Q xs) : run.final next xs s < 2 ∧ run.total next cost xs s + phi (run.final next xs s) ≤ phi s + c * run.total next opt xs s
+  exact run.ratio.rat next cost opt phi c (fun s => s < 2) Q step xs s hs hx
++ negative_potential (xs : list ℤ) (h : all (fun x => True) xs) : run.total (fun (s x : ℤ) => s - x) (fun s x => x) xs 0 ≤ 0 * run.total (fun (s x : ℤ) => s - x) (fun s x => 0) xs 0
+  apply run.ratio_zero.int (fun (s x : ℤ) => s - x) (fun s x => x) (fun s x => 0) (fun s => s) 0 (fun s => True) (fun x => True) (by intro s hs x hx; constructor; trivial; linarith)
++ nonzero_initial : run.total (fun (s x : ℝ) => 0) (fun s x => s) [0] 10 ≤ 0 * run.total (fun (s x : ℝ) => 0) (fun s x => 0) [0] 10
+  exact run.ratio_zero.real (fun (s x : ℝ) => 0) (fun s x => s) (fun s x => 0) (fun s => s) 0 (fun s => 0 ≤ s) (fun x => True) (by intro s hs x hx; constructor; linarith; linarith) (by intro s hs; exact hs) [0] 10 (by decide) (by trivial) (by decide)

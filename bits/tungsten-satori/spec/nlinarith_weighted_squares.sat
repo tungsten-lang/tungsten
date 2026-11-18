@@ -1,0 +1,12 @@
++ int_zero (x y z : ℤ) (h : 12*x*x+12*y*y+12*z*z = 0) : x = 0
+  nlinarith
++ int_weighted_nonnegative (x y z : ℤ) : 0 ≤ 3*x*x+5*y*y
+  nlinarith
++ rat_zero (x y z : ℚ) (h : 12*x*x+12*y*y+12*z*z = 0) : x = 0
+  nlinarith
++ rat_weighted_nonnegative (x y z : ℚ) : 0 ≤ 3*x*x+5*y*y
+  nlinarith
++ real_zero (x y z : ℝ) (h : 12*x*x+12*y*y+12*z*z = 0) : x = 0
+  nlinarith
++ real_weighted_nonnegative (x y z : ℝ) : 0 ≤ 3*x*x+5*y*y
+  nlinarith

@@ -1,0 +1,21 @@
+inductive phase
+  | phase_a
+  | phase_b
+opaque enabled : phase → Prop
+opaque score : phase → ℚ
+axiom score_a : enabled phase_a → score phase_a = 1
+axiom score_b : enabled phase_b → score phase_b = 2
++ supplied (p : phase) (h : enabled p) : 0 < score p := by auto [score_a, score_b]
++ local_supplied (p : phase) (h : enabled p) : 0 < score p
+  have a := score_a
+  have b := score_b
+  auto
+
+inductive corner
+  | corner_a
+  | corner_b
+  | corner_c
+  | corner_d
+opaque related : corner → corner → Prop
+axiom every_pair : ∀ a b, related a b
++ direct_hint_after_cases (a b : corner) : related a b := by auto [every_pair]

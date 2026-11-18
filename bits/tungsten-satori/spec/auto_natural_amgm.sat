@@ -1,0 +1,24 @@
++ natural_square (x y : ℕ) : 2*x*y ≤ x*x+y*y
+  auto
++ natural_power (x y : ℕ) : 2*x*y ≤ x^2+y^2
+  auto
++ renamed_bound (orchid maple : ℕ) : 2*orchid*maple ≤ orchid^2+maple^2
+  auto
++ compound_product (a b c d : ℕ) : 2*(a*b)*(c*d) ≤ (a*b)*(a*b)+(c*d)*(c*d)
+  auto
++ compound_power (a b c d : ℕ) : 2*(a*b)*(c*d) ≤ (a*b)^2+(c*d)^2
+  auto
++ reversed_product (x y : ℕ) : y*x*2 ≤ x^2+y^2
+  auto
++ reversed_sum (x y : ℕ) : 2*x*y ≤ y^2+x^2
+  auto
++ shifted_inputs (x y : ℕ) : 2*(x+1)*(y+2) ≤ (x+1)^2+(y+2)^2
+  auto
++ function_inputs (f g : ℕ → ℕ) (n : ℕ) : 2*f n*g n ≤ (f n)^2+(g n)^2
+  auto
++ added_bound (x y : ℕ) : 2*x*y ≤ x^2+y^2+3
+  auto
++ strict_margin (x y : ℕ) : 2*x*y < x^2+y^2+1
+  auto
++ subtraction_inputs (x y : ℕ) : 2*(x-y)*(y-x) ≤ (x-y)^2+(y-x)^2
+  auto

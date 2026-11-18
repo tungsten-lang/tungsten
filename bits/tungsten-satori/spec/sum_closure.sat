@@ -1,0 +1,35 @@
+import list_sum
+
+-- The original Alperin statement now uses one library application.
++ sum_multiple (m : ℕ) (l : list ℕ) : all (fun x => ∃ k : ℕ, x = m * k) l → ∃ k : ℕ, sum l = m * k := sum_multiple.nat m l
++ invariant_sum (p : β → Prop) (xs : list α) (f : α → β) (hz : p (0 : β)) (ha : ∀ a b, p a → p b → p (a + b)) (h : ∀ x ∈ xs, p (f x)) : p (∑ x ∈ xs, f x) := list_sum.closed p xs f hz ha h
++ invariant_naturals (p : ℕ → Prop) (xs : list ℕ) (hz : p 0) (ha : ∀ a b, p a → p b → p (a + b)) (h : all p xs) : p (sum xs) := sum.closed p xs hz ha h
++ weighted_divisible (m : ℕ) (xs : list α) (f : α → ℕ) (h : ∀ x ∈ xs, m ∣ f x) : m ∣ ∑ x ∈ xs, f x := sum_list_dvd.nat m xs f h
++ zero_divisor (xs : list ℕ) (h : ∀ x ∈ xs, x = 0) : 0 ∣ sum xs
+  apply sum_dvd.nat 0 xs
+  intro x hx
+  unfold dvd
+  rw [h x hx]
+  decide
++ zero_multiple (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, f x = 0) : ∃ k : ℤ, sum_list xs f = 0 * k
+  apply sum_list_multiple.int 0 xs f
+  intro x hx
+  exact ⟨0, by rw [h x hx]; ring⟩
++ negative_multiple (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, ∃ k : ℤ, f x = -3 * k) : ∃ k : ℤ, (∑ x ∈ xs, f x) = -3 * k := sum_list_multiple.int (-3) xs f h
++ empty_multiple (m : ℤ) (f : ℕ → ℤ) : ∃ k : ℤ, sum_list [] f = m * k
+  apply sum_list_multiple.int m ([] : list ℕ) f
+  intro x hx
+  simp at hx
++ repeated_multiple : ∃ k : ℕ, (∑ x ∈ [1, 1, 2], 3 * x) = 3 * k
+  apply sum_list_multiple.nat 3 [1, 1, 2] (fun x => 3 * x)
+  intro x hx
+  exact ⟨x, rfl⟩
++ repeated_sum : (∑ x ∈ [1, 1, 2], 3 * x) = 12 := by decide
++ reverse_divisibility_false : 3 ∣ sum [1, 2] ∧ ¬ (3 ∣ (1 : ℕ)) := by decide
+#axioms sum_multiple
+#axioms invariant_sum
+#axioms invariant_naturals
+#axioms weighted_divisible
+#axioms zero_multiple
+#axioms negative_multiple
+#axioms empty_multiple

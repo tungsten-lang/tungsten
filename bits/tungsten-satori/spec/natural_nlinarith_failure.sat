@@ -1,0 +1,11 @@
+import core
+import order
+
++ invalid_strict_weight (a b c : ℕ) (h : a < b) : a * c < b * c := by nlinarith
++ invalid_reverse (a b c : ℕ) (h : a ≤ b) : c * b ≤ c * a := by nlinarith
++ invalid_signed_weight (a b c : ℤ) (h : a ≤ b) : c * a ≤ c * b := by nlinarith
++ invalid_real_weight (a b c : ℝ) (h : a ≤ b) : c * a ≤ c * b := by nlinarith
++ invalid_square (n : ℕ) (h : 5 ≤ n) : 36 ≤ n * n := by nlinarith
++ invalid_truncated_sub (a b : ℕ) : a - b + b = a := by nlinarith
++ invalid_natural_strict (n : ℕ) : 0 < n * n := by nlinarith
++ invalid_function_weight (w : ℕ → ℤ) (a b : ℤ) (x : ℕ) (h : a ≤ b) : w x * a ≤ w x * b := by nlinarith

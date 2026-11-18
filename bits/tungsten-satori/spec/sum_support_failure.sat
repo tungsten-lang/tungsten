@@ -1,0 +1,35 @@
+import sum_support
+
++ real_outside_bound (f : ℕ → ℝ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hz : (∑ i < n, f i) = 0) : f n = 0 := by exact (sum_below.eq_zero_iff.real f n hn).mp hz n (by omega)
++ real_wrong_total (f : ℕ → ℝ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hz : (∑ i < n, f i) = 1) : ∀ i < n, f i = 0 := by exact (sum_below.eq_zero_iff.real f n hn).mp hz
++ real_weak_positive (f : ℕ → ℝ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (h : ∃ i < n, 0 ≤ f i) : 0 < (∑ i < n, f i) := by exact (sum_below.pos_iff.real f n hn).mpr h
++ real_empty_positive (f : ℕ → ℝ) : 0 < (∑ i < 0, f i) := by exact sum_below.pos.real f 0 (by decide) (by intro i hi; omega)
++ real_outside_member (xs : list α) (f : α → ℝ) (x : α) (hn : ∀ x ∈ xs, 0 ≤ f x) (hz : sum_list xs f = 0) : f x = 0 := by exact (list_sum.eq_zero_iff.real xs f hn).mp hz x (by auto)
++ real_wrong_list_total (xs : list α) (f : α → ℝ) (hn : ∀ x ∈ xs, 0 ≤ f x) (hz : sum_list xs f = 1) : ∀ x ∈ xs, f x = 0 := by exact (list_sum.eq_zero_iff.real xs f hn).mp hz
++ real_missing_sign (f : ℕ → ℝ) (n : ℕ) (hz : (∑ i < n, f i) = 0) : ∀ i < n, f i = 0 := by exact (sum_below.eq_zero_iff.real f n (by intro i hi; linarith)).mp hz
++ real_missing_list_sign (xs : list α) (f : α → ℝ) (hz : sum_list xs f = 0) : ∀ x ∈ xs, f x = 0 := by exact (list_sum.eq_zero_iff.real xs f (by intro x hx; linarith)).mp hz
+
++ rat_outside_bound (f : ℕ → ℚ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hz : (∑ i < n, f i) = 0) : f n = 0 := by exact (sum_below.eq_zero_iff.rat f n hn).mp hz n (by omega)
++ rat_wrong_total (f : ℕ → ℚ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hz : (∑ i < n, f i) = 1) : ∀ i < n, f i = 0 := by exact (sum_below.eq_zero_iff.rat f n hn).mp hz
++ rat_weak_positive (f : ℕ → ℚ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (h : ∃ i < n, 0 ≤ f i) : 0 < (∑ i < n, f i) := by exact (sum_below.pos_iff.rat f n hn).mpr h
++ rat_empty_positive (f : ℕ → ℚ) : 0 < (∑ i < 0, f i) := by exact sum_below.pos.rat f 0 (by decide) (by intro i hi; omega)
++ rat_outside_member (xs : list α) (f : α → ℚ) (x : α) (hn : ∀ x ∈ xs, 0 ≤ f x) (hz : sum_list xs f = 0) : f x = 0 := by exact (list_sum.eq_zero_iff.rat xs f hn).mp hz x (by auto)
++ rat_wrong_list_total (xs : list α) (f : α → ℚ) (hn : ∀ x ∈ xs, 0 ≤ f x) (hz : sum_list xs f = 1) : ∀ x ∈ xs, f x = 0 := by exact (list_sum.eq_zero_iff.rat xs f hn).mp hz
++ rat_missing_sign (f : ℕ → ℚ) (n : ℕ) (hz : (∑ i < n, f i) = 0) : ∀ i < n, f i = 0 := by exact (sum_below.eq_zero_iff.rat f n (by intro i hi; linarith)).mp hz
++ rat_missing_list_sign (xs : list α) (f : α → ℚ) (hz : sum_list xs f = 0) : ∀ x ∈ xs, f x = 0 := by exact (list_sum.eq_zero_iff.rat xs f (by intro x hx; linarith)).mp hz
+
++ int_outside_bound (f : ℕ → ℤ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hz : (∑ i < n, f i) = 0) : f n = 0 := by exact (sum_below.eq_zero_iff.int f n hn).mp hz n (by omega)
++ int_wrong_total (f : ℕ → ℤ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hz : (∑ i < n, f i) = 1) : ∀ i < n, f i = 0 := by exact (sum_below.eq_zero_iff.int f n hn).mp hz
++ int_weak_positive (f : ℕ → ℤ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (h : ∃ i < n, 0 ≤ f i) : 0 < (∑ i < n, f i) := by exact (sum_below.pos_iff.int f n hn).mpr h
++ int_empty_positive (f : ℕ → ℤ) : 0 < (∑ i < 0, f i) := by exact sum_below.pos.int f 0 (by decide) (by intro i hi; omega)
++ int_outside_member (xs : list α) (f : α → ℤ) (x : α) (hn : ∀ x ∈ xs, 0 ≤ f x) (hz : sum_list xs f = 0) : f x = 0 := by exact (list_sum.eq_zero_iff.int xs f hn).mp hz x (by auto)
++ int_wrong_list_total (xs : list α) (f : α → ℤ) (hn : ∀ x ∈ xs, 0 ≤ f x) (hz : sum_list xs f = 1) : ∀ x ∈ xs, f x = 0 := by exact (list_sum.eq_zero_iff.int xs f hn).mp hz
++ int_missing_sign (f : ℕ → ℤ) (n : ℕ) (hz : (∑ i < n, f i) = 0) : ∀ i < n, f i = 0 := by exact (sum_below.eq_zero_iff.int f n (by intro i hi; linarith)).mp hz
++ int_missing_list_sign (xs : list α) (f : α → ℤ) (hz : sum_list xs f = 0) : ∀ x ∈ xs, f x = 0 := by exact (list_sum.eq_zero_iff.int xs f (by intro x hx; linarith)).mp hz
+
++ nat_outside_bound (f : ℕ → ℕ) (n : ℕ) (hz : (∑ i < n, f i) = 0) : f n = 0 := by exact (sum_below.eq_zero_iff.nat f n).mp hz n (by omega)
++ nat_wrong_total (f : ℕ → ℕ) (n : ℕ) (hz : (∑ i < n, f i) = 1) : ∀ i < n, f i = 0 := by exact (sum_below.eq_zero_iff.nat f n).mp hz
++ nat_weak_positive (f : ℕ → ℕ) (n : ℕ) (h : ∃ i < n, 0 ≤ f i) : 0 < (∑ i < n, f i) := by exact (sum_below.pos_iff.nat f n).mpr h
++ nat_empty_positive (f : ℕ → ℕ) : 0 < (∑ i < 0, f i) := by exact sum_below.pos.nat f 0 (by decide) (by intro i hi; omega)
++ nat_outside_member (xs : list α) (f : α → ℕ) (x : α) (hz : sum_list xs f = 0) : f x = 0 := by exact (list_sum.eq_zero_iff.nat xs f).mp hz x (by auto)
++ nat_wrong_list_total (xs : list α) (f : α → ℕ) (hz : sum_list xs f = 1) : ∀ x ∈ xs, f x = 0 := by exact (list_sum.eq_zero_iff.nat xs f).mp hz

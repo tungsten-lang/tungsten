@@ -1,0 +1,7 @@
+-- Scalar exponential bounds must not import arith's unrelated fact definition.
+import exp_convex
+-> fact : ℕ → ℚ
+  | 0 => 1
+  | n+1 => ((n : ℚ)+1)*fact n
++ local_factorial : fact 4 = 24 := by decide
++ local_midpoint (x y : ℝ) : 2*exp ((x+y)/2) ≤ exp x+exp y := exp_midpoint_le x y

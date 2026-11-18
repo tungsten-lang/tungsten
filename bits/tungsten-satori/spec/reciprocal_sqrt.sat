@@ -1,0 +1,43 @@
+import realx
+
++ real_le_forward (a b c d : ℝ) (hc : 0 < c) (hd : 0 < d) (h : a/c ≤ b/d) : a*d ≤ b*c := (div_le_div_iff.real a b c d hc hd).mp h
+
++ real_le_backward (a b c d : ℝ) (hc : 0 < c) (hd : 0 < d) (h : a*d ≤ b*c) : a/c ≤ b/d := (div_le_div_iff.real a b c d hc hd).mpr h
+
++ real_lt_forward (a b c d : ℝ) (hc : 0 < c) (hd : 0 < d) (h : a/c < b/d) : a*d < b*c := (div_lt_div_iff.real a b c d hc hd).mp h
+
++ real_lt_backward (a b c d : ℝ) (hc : 0 < c) (hd : 0 < d) (h : a*d < b*c) : a/c < b/d := (div_lt_div_iff.real a b c d hc hd).mpr h
+
++ real_negative_numerators : (-3 : ℝ)/2 ≤ (-1)/3 := (div_le_div_iff.real (-3) (-1) 2 3 (by linarith) (by linarith)).mpr (by norm_num)
+
++ rat_le_forward (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) (h : a/c ≤ b/d) : a*d ≤ b*c := (div_le_div_iff.rat a b c d hc hd).mp h
+
++ rat_le_backward (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) (h : a*d ≤ b*c) : a/c ≤ b/d := (div_le_div_iff.rat a b c d hc hd).mpr h
+
++ rat_lt_forward (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) (h : a/c < b/d) : a*d < b*c := (div_lt_div_iff.rat a b c d hc hd).mp h
+
++ rat_lt_backward (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) (h : a*d < b*c) : a/c < b/d := (div_lt_div_iff.rat a b c d hc hd).mpr h
+
++ rat_negative_numerators : (-3 : ℚ)/2 ≤ (-1)/3 := (div_le_div_iff.rat (-3) (-1) 2 3 (by linarith) (by linarith)).mpr (by norm_num)
+
++ lower_le_forward (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : 1/sqrt B ≤ m/c) : c*c ≤ m*m*B := (one_div_sqrt_le_div_iff B m c hB hm hc).mp h
+
++ lower_le_backward (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : c*c ≤ m*m*B) : 1/sqrt B ≤ m/c := (one_div_sqrt_le_div_iff B m c hB hm hc).mpr h
+
++ lower_lt_forward (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : 1/sqrt B < m/c) : c*c < m*m*B := (one_div_sqrt_lt_div_iff B m c hB hm hc).mp h
+
++ lower_lt_backward (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : c*c < m*m*B) : 1/sqrt B < m/c := (one_div_sqrt_lt_div_iff B m c hB hm hc).mpr h
+
++ upper_le_forward (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : m/c ≤ 1/sqrt B) : m*m*B ≤ c*c := (div_le_one_div_sqrt_iff B m c hB hm hc).mp h
+
++ upper_le_backward (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : m*m*B ≤ c*c) : m/c ≤ 1/sqrt B := (div_le_one_div_sqrt_iff B m c hB hm hc).mpr h
+
++ upper_lt_forward (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : m/c < 1/sqrt B) : m*m*B < c*c := (div_lt_one_div_sqrt_iff B m c hB hm hc).mp h
+
++ upper_lt_backward (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) (h : m*m*B < c*c) : m/c < 1/sqrt B := (div_lt_one_div_sqrt_iff B m c hB hm hc).mpr h
+
++ equality_lower : 1/sqrt 4 ≤ (1 : ℝ)/2 := (one_div_sqrt_le_div_iff 4 1 2 (by linarith) (by linarith) (by linarith)).mpr (by norm_num)
+
++ equality_upper : (1 : ℝ)/2 ≤ 1/sqrt 4 := (div_le_one_div_sqrt_iff 4 1 2 (by linarith) (by linarith) (by linarith)).mpr (by norm_num)
+
++ zero_numerator (B c : ℝ) (hB : 0 < B) (hc : 0 < c) : 0/c ≤ 1/sqrt B := (div_le_one_div_sqrt_iff B 0 c hB (by linarith) hc).mpr (by nlinarith)

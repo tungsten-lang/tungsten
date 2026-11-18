@@ -1,0 +1,50 @@
+import arith
+opaque a : ℚ
+opaque b : ℚ
+opaque c : ℚ
+opaque d : ℚ
+opaque n : ℕ
+axiom supplied_bound : d*c ≤ d*b^n
+axiom supplied_sign : 0 < d
+
++ zero_factor (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hd : d = 0) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ weak_factor (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hd : 0 ≤ d) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ unknown_factor (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ negative_direction (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hd : d < 0) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ nonzero_factor (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hd : d ≠ 0) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ weak_strict (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hd : 0 < d) (hc : d*c ≤ d*b^n) : c < x^n
+  auto
+
++ zero_exponent (x b c d : ℚ) (h0 : 0 ≤ b) (hb : b < x) (hd : 0 < d) (hc : d*c ≤ d*b^0) : c < x^0
+  auto
+
++ missing_base (x b c d : ℚ) (n : ℕ) (hb : b ≤ x) (hd : 0 < d) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ branch_leak (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hd : 0 < d ∨ d = 0) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ wrong_function (f g : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v) (x b c d : ℚ) (hb : b ≤ x) (hd : 0 < d) (hc : d*c ≤ d*g b) : c ≤ f x
+  auto
+
++ natural_zero (x b c d : ℕ) (n : ℕ) (hb : b ≤ x) (hc : d*c ≤ d*b^n) : c ≤ x^n
+  auto
+
++ wrong_product (a b : ℚ) (ha : 0 < a) (hb : 0 < b) : (a+1)*(b+1) ≤ a*b
+  auto
+
++ no_global_bound (h0 : 0 ≤ b) (hb : b ≤ a) : c ≤ a^n
+  auto
+
++ no_global_sign (h0 : 0 ≤ b) (hb : b ≤ a) : c ≤ a^n
+  auto [supplied_bound]

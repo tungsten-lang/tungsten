@@ -1,0 +1,18 @@
+import auto_hints
+
++ missing_premise (x : ℝ) : marked x := by auto [mark_nonneg]
++ wrong_sign (x : ℝ) (hx : 0 ≤ x) : marked x := by auto [mark_negative]
++ missing_chain (x : ℝ) : finished x := by auto [mark_finish, mark_nonneg]
++ loop_only (x : ℝ) : finished x := by auto [finish_loop]
++ unfinished_pair (x : ℝ) (hx : 0 ≤ x) : marked x ∧ finished x := by auto [mark_nonneg]
++ wrong_instance (x y : ℝ) (hx : 0 ≤ x) : marked y := by auto [mark_nonneg x]
++ false_exp (x : ℝ) : 2*exp ((x+x)/2) < exp x+exp x := by auto [exp_midpoint_lt]
++ ignored_bare : True := by auto mark_nonneg
++ ignored_unknown : True := by auto [absent_hint]
++ trailing_tokens : True := by auto [mark_nonneg] ignored
++ missing_bracket : True := by auto [mark_nonneg
++ empty_entry : True := by auto [mark_nonneg, ]
+
++ open_partial (x : ℝ) (hx : 0 ≤ x) : marked x := by auto [mark_two_sides]
++ leaked_universal (f : ℝ → ℝ) (h : 0 ≤ f 0) : finished (f 0) := by auto [finish_all, mark_nonneg]
++ wrong_type (x : ℝ) (n : ℕ) : wrapped x := by auto [wrap_rule n]

@@ -1,0 +1,22 @@
+-- Compact inequality proofs adapted from the Ulam and Tingley developments.
+-- Give nonlinear arithmetic the intermediate bound when a direct contradiction stalls.
+
++ kesten_contracts (s : ℝ) (h0 : 0 ≤ s) (h3 : s * s = 3) : (1 + 2 * s) / 5 < 1
+  nlinarith
+
++ distance_positive (s K : ℝ) (hs : 0 ≤ s) (hK : 0 ≤ K) (h : 4 * K * K < s * s) : 0 < s / 2 - K
+  nlinarith
+
++ net_bound_eps (L u e : ℝ) (he : 0 < 1 - 2 * e) (h : L ≤ u + 2 * e * L) : L * (1 - 2 * e) ≤ u
+  linarith
+
++ small_product (A B : ℚ) (ha : 0 < A) (hb : 0 < B) (hab : A + B < 1) (hle : A ≤ B) : A * (1 - B) < 1 / 4
+  nlinarith
+
++ epsilon_small (A B d e : ℚ) (ha : 0 < A) (hb : 0 < B) (hab : A + B < 1) (hle : A ≤ B) (hd : d ≤ 2)
+    (he : e ≤ d * (A * (1 - B))) (hpos : 0 ≤ A * (1 - B)) : e < 1 / 2
+  nlinarith [small_product A B ha hb hab hle]
+
++ chord_contradiction (P X S Y c Fx Gy : ℚ) (hP : 0 < P) (hPX : P < X) (hY : 0 ≤ Y) (hYS : Y ≤ S) (hS : 0 < S) (hc : 1 < c)
+    (hF : (c - 1) * X ≤ (Fx - 1) * P) (hG : (Gy - 1) * S ≤ (c - 1) * Y) (heq : Fx = Gy) : False
+  nlinarith

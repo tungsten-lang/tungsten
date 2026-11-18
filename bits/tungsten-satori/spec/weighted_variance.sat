@@ -1,0 +1,12 @@
+import arith
+
+-- The benchmark's variance split is now a direct application of the general gap.
++ variance_split (a b x y u v : ℝ) (ha : 0 < a) (hb : 0 < b) : x + y - (u + v) ^ 2 / (a + b) = (x - u ^ 2 / a) + (y - v ^ 2 / b) + a * b / (a + b) * (u / a - v / b) ^ 2
+  linarith [weighted_variance_gap.real a b u v (by linarith) (by linarith) (by linarith)]
++ rational_gap (a b u v : ℚ) (ha : a ≠ 0) (hb : b ≠ 0) (hab : a + b ≠ 0) : u ^ 2 / a + v ^ 2 / b - (u + v) ^ 2 / (a + b) = a * b / (a + b) * (u / a - v / b) ^ 2 := weighted_variance_gap.rat a b u v ha hb hab
+-- Negative weights are allowed; dropping either nonzero condition can be false.
++ signed_weights : ((1 : ℚ) ^ 2 / (-1) + 2 ^ 2 / 2 - (1 + 2) ^ 2 / ((-1) + 2) = (-1) * 2 / ((-1) + 2) * (1 / (-1) - 2 / 2) ^ 2) := by decide
++ zero_weight_counterexample : ¬ ((1 : ℚ) ^ 2 / 0 + 0 ^ 2 / 1 - (1 + 0) ^ 2 / (0 + 1) = 0 * 1 / (0 + 1) * (1 / 0 - 0 / 1) ^ 2) := by decide
++ zero_sum_counterexample : ¬ ((1 : ℚ) ^ 2 / 1 + 0 ^ 2 / (-1) - (1 + 0) ^ 2 / (1 + (-1)) = 1 * (-1) / (1 + (-1)) * (1 / 1 - 0 / (-1)) ^ 2) := by decide
+#axioms variance_split
+#axioms rational_gap

@@ -1,0 +1,13 @@
+import auto_registration_library
+
+opaque admissible : ℚ → ℚ → ℚ → Prop
+axiom supplied_form (a b c : ℚ) : admissible a b c → ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c
+
++ unsupplied (a b c d : ℚ) (ready : admissible a b c) (h : a*c ≤ d) : 2*b^2 ≤ 2*d
+  auto
+
++ wrong_endpoint (a b c d : ℚ) (ready : admissible a b c) (h : d ≤ a*c) : 2*b^2 ≤ 2*d
+  auto [supplied_form]
+
++ missing_ready (a b c d : ℚ) (h : a*c ≤ d) : 2*b^2 ≤ 2*d
+  auto [supplied_form]

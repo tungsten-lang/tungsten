@@ -1,0 +1,12 @@
+import auto_registration_library
+
+opaque admissible : ℚ → ℚ → ℚ → Prop
+axiom supplied_form (a b c : ℚ) : admissible a b c → ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c
+opaque unrelated : Prop
+axiom irrelevant : unrelated
+
++ supplied_chain (a b c d : ℚ) (ready : admissible a b c) (h : a*c ≤ d) : 2*b^2 ≤ 2*d
+  auto [supplied_form]
+
++ unused_hint (a b c d : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) (h : a*c ≤ d) : 2*b^2 ≤ 2*d
+  auto [irrelevant]

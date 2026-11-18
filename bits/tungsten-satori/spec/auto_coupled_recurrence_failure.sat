@@ -1,0 +1,125 @@
+import recurrence
+
++ nat_missing_base (f g : ℕ → ℕ) (n : ℕ) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ nat_missing_left_step (f g : ℕ → ℕ) (n : ℕ) (base : f 0 = g 0) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ nat_missing_right_step (f g : ℕ → ℕ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) : f n = g n
+  auto
+
++ nat_wrong_base (f g : ℕ → ℕ) (n : ℕ) (base : f 0 = g 0+1) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ nat_wrong_step (f g : ℕ → ℕ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+2) : f n = g n
+  auto
+
++ nat_point_step (f g : ℕ → ℕ) (n : ℕ) (base : f 0 = g 0) (fs : f (n+1) = f n+1) (gs : g (n+1) = g n+1) : f n = g n
+  auto
+
++ nat_late_step (f g : ℕ → ℕ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+2) = f (i+1)+1) (gs : ∀ i, g (i+2) = g (i+1)+1) : f n = g n
+  auto
+
++ nat_wrong_index (f g : ℕ → ℕ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g (n+1)
+  auto
+
++ nat_wrong_parameter (f g : ℕ → ℕ → ℕ) (a b : ℕ) (n : ℕ)
+    (base : f 0 a = g 0 a) (fs : ∀ i, f (i+1) a = f i a+1) (gs : ∀ i, g (i+1) a = g i a+1) : f n a = g n b
+  auto
++ nat_conditional_step (f g : ℕ → ℕ) (n : ℕ)
+    (base : f 0 = g 0) (fs : ∀ i, 0 < i → f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ int_missing_base (f g : ℕ → ℤ) (n : ℕ) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ int_missing_left_step (f g : ℕ → ℤ) (n : ℕ) (base : f 0 = g 0) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ int_missing_right_step (f g : ℕ → ℤ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) : f n = g n
+  auto
+
++ int_wrong_base (f g : ℕ → ℤ) (n : ℕ) (base : f 0 = g 0+1) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ int_wrong_step (f g : ℕ → ℤ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+2) : f n = g n
+  auto
+
++ int_point_step (f g : ℕ → ℤ) (n : ℕ) (base : f 0 = g 0) (fs : f (n+1) = f n+1) (gs : g (n+1) = g n+1) : f n = g n
+  auto
+
++ int_late_step (f g : ℕ → ℤ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+2) = f (i+1)+1) (gs : ∀ i, g (i+2) = g (i+1)+1) : f n = g n
+  auto
+
++ int_wrong_index (f g : ℕ → ℤ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g (n+1)
+  auto
+
++ int_wrong_parameter (f g : ℕ → ℤ → ℤ) (a b : ℤ) (n : ℕ)
+    (base : f 0 a = g 0 a) (fs : ∀ i, f (i+1) a = f i a+1) (gs : ∀ i, g (i+1) a = g i a+1) : f n a = g n b
+  auto
++ int_conditional_step (f g : ℕ → ℤ) (n : ℕ)
+    (base : f 0 = g 0) (fs : ∀ i, 0 < i → f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ rat_missing_base (f g : ℕ → ℚ) (n : ℕ) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ rat_missing_left_step (f g : ℕ → ℚ) (n : ℕ) (base : f 0 = g 0) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ rat_missing_right_step (f g : ℕ → ℚ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) : f n = g n
+  auto
+
++ rat_wrong_base (f g : ℕ → ℚ) (n : ℕ) (base : f 0 = g 0+1) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ rat_wrong_step (f g : ℕ → ℚ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+2) : f n = g n
+  auto
+
++ rat_point_step (f g : ℕ → ℚ) (n : ℕ) (base : f 0 = g 0) (fs : f (n+1) = f n+1) (gs : g (n+1) = g n+1) : f n = g n
+  auto
+
++ rat_late_step (f g : ℕ → ℚ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+2) = f (i+1)+1) (gs : ∀ i, g (i+2) = g (i+1)+1) : f n = g n
+  auto
+
++ rat_wrong_index (f g : ℕ → ℚ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g (n+1)
+  auto
+
++ rat_wrong_parameter (f g : ℕ → ℚ → ℚ) (a b : ℚ) (n : ℕ)
+    (base : f 0 a = g 0 a) (fs : ∀ i, f (i+1) a = f i a+1) (gs : ∀ i, g (i+1) a = g i a+1) : f n a = g n b
+  auto
++ rat_conditional_step (f g : ℕ → ℚ) (n : ℕ)
+    (base : f 0 = g 0) (fs : ∀ i, 0 < i → f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ real_missing_base (f g : ℕ → ℝ) (n : ℕ) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ real_missing_left_step (f g : ℕ → ℝ) (n : ℕ) (base : f 0 = g 0) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ real_missing_right_step (f g : ℕ → ℝ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) : f n = g n
+  auto
+
++ real_wrong_base (f g : ℕ → ℝ) (n : ℕ) (base : f 0 = g 0+1) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto
+
++ real_wrong_step (f g : ℕ → ℝ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+2) : f n = g n
+  auto
+
++ real_point_step (f g : ℕ → ℝ) (n : ℕ) (base : f 0 = g 0) (fs : f (n+1) = f n+1) (gs : g (n+1) = g n+1) : f n = g n
+  auto
+
++ real_late_step (f g : ℕ → ℝ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+2) = f (i+1)+1) (gs : ∀ i, g (i+2) = g (i+1)+1) : f n = g n
+  auto
+
++ real_wrong_index (f g : ℕ → ℝ) (n : ℕ) (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g (n+1)
+  auto
+
++ real_wrong_parameter (f g : ℕ → ℝ → ℝ) (a b : ℝ) (n : ℕ)
+    (base : f 0 a = g 0 a) (fs : ∀ i, f (i+1) a = f i a+1) (gs : ∀ i, g (i+1) a = g i a+1) : f n a = g n b
+  auto
++ real_conditional_step (f g : ℕ → ℝ) (n : ℕ)
+    (base : f 0 = g 0) (fs : ∀ i, 0 < i → f (i+1) = f i+1) (gs : ∀ i, g (i+1) = g i+1) : f n = g n
+  auto

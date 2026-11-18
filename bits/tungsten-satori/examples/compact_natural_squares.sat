@@ -1,0 +1,9 @@
+-- One proved square bound works for natural values and compound expressions.
++ square_bound (x y : ℕ) : 2*x*y ≤ x^2+y^2
+  auto
+
++ product_bound (a b c d : ℕ) : 2*(a*b)*(c*d) ≤ (a*b)^2+(c*d)^2
+  auto
+
++ strict_margin (x y : ℕ) : 2*x*y < x^2+y^2+1
+  auto

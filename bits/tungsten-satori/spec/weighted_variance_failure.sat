@@ -1,0 +1,2 @@
+import arith
++ missing_sum_condition (a b u v : ℚ) (ha : a ≠ 0) (hb : b ≠ 0) : u ^ 2 / a + v ^ 2 / b - (u + v) ^ 2 / (a + b) = a * b / (a + b) * (u / a - v / b) ^ 2 := weighted_variance_gap.rat a b u v ha hb

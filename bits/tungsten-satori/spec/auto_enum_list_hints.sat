@@ -1,0 +1,29 @@
+inductive mark
+  | blank
+  | single
+  | pair
+-> weight : mark → ℚ
+  | blank => 0
+  | single => 1
+  | pair => 2
+-> total : list mark → ℚ
+  | [] => 0
+  | blank :: xs => total xs
+  | single :: xs => 1+total xs
+  | pair :: xs => 2+total xs
+structure state := (a : ℚ) (b : ℚ)
+opaque empty : state
+opaque update : mark → state → state
+opaque measure : state → ℚ
+opaque allowed : mark → Prop
+-> run : list mark → state
+  | [] => empty
+  | x :: xs => update x (run xs)
+axiom measure_base : measure empty = 0
+axiom measure_step : ∀ x s, allowed x → measure (update x s) = weight x + measure s
++ supplied (xs : list mark) (h : ∀ x, allowed x) : measure (run xs) = total xs
+  auto [measure_base, measure_step]
++ local_supplied (xs : list mark) (h : ∀ x, allowed x) : measure (run xs) = total xs
+  have b := measure_base
+  have s := measure_step
+  auto

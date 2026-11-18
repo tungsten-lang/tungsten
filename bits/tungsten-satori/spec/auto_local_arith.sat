@@ -1,0 +1,9 @@
++ guarded_bound (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m ≤ 7 := by auto
++ two_guards (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i, 0 < i → i < n → f i ≤ 7) (lo : 1 ≤ m) (hi : m+1 ≤ n) : f m ≤ 7 := by auto
+
+axiom supplied_bound (f : ℕ → ℝ) (n : ℕ) : ∀ i < n, f i ≤ 7
++ marked_bound (f : ℕ → ℝ) (n m : ℕ) (hm : m+1 ≤ n) : f m ≤ 7
+  have h := supplied_bound f n
+  auto
+
+-> add_instead (f : ℕ → ℝ) (c : ℝ) (i : ℕ) : ℝ := c+f i

@@ -1,0 +1,18 @@
+opaque square_ready : ℚ → ℚ → ℚ → Prop
+axiom supplied_square_bound (x v w : ℚ) : square_ready x v w → v*x^2 ≤ w*x^2
+axiom unused_square_fact : False
+
++ supplied (x y v w : ℚ) (h : square_ready x v w) : 2*x*y+v*x^2 ≤ (w+1)*x^2+y^2
+  auto [supplied_square_bound]
++ local_bound (x y v w : ℚ) (h : square_ready x v w) : 2*x*y+v*x^2 ≤ (w+1)*x^2+y^2
+  have bound := supplied_square_bound x v w h
+  auto
++ unused (x y v w : ℚ) (h : square_ready x v w) : 2*x*y+v*x^2 ≤ (w+1)*x^2+y^2
+  auto [supplied_square_bound]
++ partial (x y v w : ℚ) (h : square_ready x v w) : 2*x*y+v*x^2 ≤ (w+1)*x^2+y^2
+  auto [supplied_square_bound x]
+
++ local_rule (x y v w : ℚ) (h : square_ready x v w)
+    (bound : ∀ a b c : ℚ, square_ready a b c → b*a^2 ≤ c*a^2) :
+    2*x*y+v*x^2 ≤ (w+1)*x^2+y^2
+  auto

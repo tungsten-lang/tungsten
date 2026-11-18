@@ -1,0 +1,11 @@
+import arith
+
++ distribute_balance (a x y z : ℚ) (h : x+y = z) : a*x+a*y = a*z
+  auto
+
++ two_balances (a x y z w u : ℚ) (h : x+y = z) (k : z+w = u) : a*x+a*y+a*w = a*u
+  auto
+
++ coupling_four (a D Ap Am A0 Y Pp Pm : ℚ) (ha : 0 ≤ a) (hA : Ap+Am+A0 = 2*D)
+    (hAm : Y ≤ Am) (hA0 : 0 ≤ A0) (hPm : Pm ≤ 2*a*Ap) (hPp : Pp ≤ a*Y) : Pp+Pm+a*Y ≤ 4*a*D
+  auto

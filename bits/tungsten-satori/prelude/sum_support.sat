@@ -1,0 +1,279 @@
+-- Vanishing and positivity of finite sums. Sign hypotheses are local to the index set.
+import sum_range
+import list_sum
+
++ sum_below.eq_zero_iff.real (f : ℕ → ℝ) (n : ℕ) (nonneg : ∀ i < n, 0 ≤ f i) :
+    (∑ i < n, f i) = 0 ↔ ∀ i < n, f i = 0
+  constructor
+  · intro total i hi
+    have bound := single_le_sum.real f n i nonneg hi
+    have h0 := nonneg i hi
+    linarith
+  · exact sum_below.eq_zero.real f n
+
++ sum_below.pos_iff.real (f : ℕ → ℝ) (n : ℕ) (nonneg : ∀ i < n, 0 ≤ f i) :
+    0 < (∑ i < n, f i) ↔ ∃ i < n, 0 < f i
+  constructor
+  · intro total
+    by_contra missing
+    have zero : ∀ i < n, f i = 0
+      intro i hi
+      have hn : ¬ 0 < f i
+        intro hp
+        apply missing
+        use i
+        exact ⟨hi, hp⟩
+      have h0 := nonneg i hi
+      linarith
+    have hs := sum_below.eq_zero.real f n zero
+    linarith
+  · intro positive
+    obtain ⟨i, hi, hp⟩ := positive
+    have bound := single_le_sum.real f n i nonneg hi
+    linarith
+
++ sum_below.pos.real (f : ℕ → ℝ) (n : ℕ) (nonempty : 0 < n) (positive : ∀ i < n, 0 < f i) : 0 < (∑ i < n, f i)
+  exact (sum_below.pos_iff.real f n (by intro i hi; have h0 := positive i hi; linarith)).mpr ⟨0, nonempty, positive 0 nonempty⟩
+
++ list_sum.eq_zero.real (xs : list α) (f : α → ℝ) (zero : ∀ x ∈ xs, f x = 0) : sum_list xs f = 0
+  induction xs with h x xs ih h
+  · rfl
+  · have head := h x (by simp)
+    have tail : ∀ y ∈ xs, f y = 0 := by intro y hy; exact h y (by simp [hy])
+    simp [sum_list, head, ih tail]
+
++ list_sum.eq_zero_iff.real (xs : list α) (f : α → ℝ) (nonneg : ∀ x ∈ xs, 0 ≤ f x) :
+    sum_list xs f = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total x hx
+    have bound := sum_list_member_le.real xs f x hx nonneg
+    have h0 := nonneg x hx
+    linarith
+  · exact list_sum.eq_zero.real xs f
+
++ list_sum.pos_iff.real (xs : list α) (f : α → ℝ) (nonneg : ∀ x ∈ xs, 0 ≤ f x) :
+    0 < sum_list xs f ↔ ∃ x ∈ xs, 0 < f x
+  constructor
+  · intro total
+    by_contra missing
+    have zero : ∀ x ∈ xs, f x = 0
+      intro x hx
+      have hn : ¬ 0 < f x
+        intro hp
+        apply missing
+        use x
+        exact ⟨hx, hp⟩
+      have h0 := nonneg x hx
+      linarith
+    have hs := list_sum.eq_zero.real xs f zero
+    linarith
+  · intro positive
+    obtain ⟨x, hx, hp⟩ := positive
+    have bound := sum_list_member_le.real xs f x hx nonneg
+    linarith
+
++ sum_below.eq_zero_iff.rat (f : ℕ → ℚ) (n : ℕ) (nonneg : ∀ i < n, 0 ≤ f i) :
+    (∑ i < n, f i) = 0 ↔ ∀ i < n, f i = 0
+  constructor
+  · intro total i hi
+    have bound := single_le_sum.rat f n i nonneg hi
+    have h0 := nonneg i hi
+    linarith
+  · exact sum_below.eq_zero.rat f n
+
++ sum_below.pos_iff.rat (f : ℕ → ℚ) (n : ℕ) (nonneg : ∀ i < n, 0 ≤ f i) :
+    0 < (∑ i < n, f i) ↔ ∃ i < n, 0 < f i
+  constructor
+  · intro total
+    by_contra missing
+    have zero : ∀ i < n, f i = 0
+      intro i hi
+      have hn : ¬ 0 < f i
+        intro hp
+        apply missing
+        use i
+        exact ⟨hi, hp⟩
+      have h0 := nonneg i hi
+      linarith
+    have hs := sum_below.eq_zero.rat f n zero
+    linarith
+  · intro positive
+    obtain ⟨i, hi, hp⟩ := positive
+    have bound := single_le_sum.rat f n i nonneg hi
+    linarith
+
++ sum_below.pos.rat (f : ℕ → ℚ) (n : ℕ) (nonempty : 0 < n) (positive : ∀ i < n, 0 < f i) : 0 < (∑ i < n, f i)
+  exact (sum_below.pos_iff.rat f n (by intro i hi; have h0 := positive i hi; linarith)).mpr ⟨0, nonempty, positive 0 nonempty⟩
+
++ list_sum.eq_zero.rat (xs : list α) (f : α → ℚ) (zero : ∀ x ∈ xs, f x = 0) : sum_list xs f = 0
+  induction xs with h x xs ih h
+  · rfl
+  · have head := h x (by simp)
+    have tail : ∀ y ∈ xs, f y = 0 := by intro y hy; exact h y (by simp [hy])
+    simp [sum_list, head, ih tail]
+
++ list_sum.eq_zero_iff.rat (xs : list α) (f : α → ℚ) (nonneg : ∀ x ∈ xs, 0 ≤ f x) :
+    sum_list xs f = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total x hx
+    have bound := sum_list_member_le.rat xs f x hx nonneg
+    have h0 := nonneg x hx
+    linarith
+  · exact list_sum.eq_zero.rat xs f
+
++ list_sum.pos_iff.rat (xs : list α) (f : α → ℚ) (nonneg : ∀ x ∈ xs, 0 ≤ f x) :
+    0 < sum_list xs f ↔ ∃ x ∈ xs, 0 < f x
+  constructor
+  · intro total
+    by_contra missing
+    have zero : ∀ x ∈ xs, f x = 0
+      intro x hx
+      have hn : ¬ 0 < f x
+        intro hp
+        apply missing
+        use x
+        exact ⟨hx, hp⟩
+      have h0 := nonneg x hx
+      linarith
+    have hs := list_sum.eq_zero.rat xs f zero
+    linarith
+  · intro positive
+    obtain ⟨x, hx, hp⟩ := positive
+    have bound := sum_list_member_le.rat xs f x hx nonneg
+    linarith
+
++ sum_below.eq_zero_iff.int (f : ℕ → ℤ) (n : ℕ) (nonneg : ∀ i < n, 0 ≤ f i) :
+    (∑ i < n, f i) = 0 ↔ ∀ i < n, f i = 0
+  constructor
+  · intro total i hi
+    have bound := single_le_sum.int f n i nonneg hi
+    have h0 := nonneg i hi
+    linarith
+  · exact sum_below.eq_zero.int f n
+
++ sum_below.pos_iff.int (f : ℕ → ℤ) (n : ℕ) (nonneg : ∀ i < n, 0 ≤ f i) :
+    0 < (∑ i < n, f i) ↔ ∃ i < n, 0 < f i
+  constructor
+  · intro total
+    by_contra missing
+    have zero : ∀ i < n, f i = 0
+      intro i hi
+      have hn : ¬ 0 < f i
+        intro hp
+        apply missing
+        use i
+        exact ⟨hi, hp⟩
+      have h0 := nonneg i hi
+      linarith
+    have hs := sum_below.eq_zero.int f n zero
+    linarith
+  · intro positive
+    obtain ⟨i, hi, hp⟩ := positive
+    have bound := single_le_sum.int f n i nonneg hi
+    linarith
+
++ sum_below.pos.int (f : ℕ → ℤ) (n : ℕ) (nonempty : 0 < n) (positive : ∀ i < n, 0 < f i) : 0 < (∑ i < n, f i)
+  exact (sum_below.pos_iff.int f n (by intro i hi; have h0 := positive i hi; linarith)).mpr ⟨0, nonempty, positive 0 nonempty⟩
+
++ list_sum.eq_zero.int (xs : list α) (f : α → ℤ) (zero : ∀ x ∈ xs, f x = 0) : sum_list xs f = 0
+  induction xs with h x xs ih h
+  · rfl
+  · have head := h x (by simp)
+    have tail : ∀ y ∈ xs, f y = 0 := by intro y hy; exact h y (by simp [hy])
+    simp [sum_list, head, ih tail]
+
++ list_sum.eq_zero_iff.int (xs : list α) (f : α → ℤ) (nonneg : ∀ x ∈ xs, 0 ≤ f x) :
+    sum_list xs f = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total x hx
+    have bound := sum_list_member_le.int xs f x hx nonneg
+    have h0 := nonneg x hx
+    linarith
+  · exact list_sum.eq_zero.int xs f
+
++ list_sum.pos_iff.int (xs : list α) (f : α → ℤ) (nonneg : ∀ x ∈ xs, 0 ≤ f x) :
+    0 < sum_list xs f ↔ ∃ x ∈ xs, 0 < f x
+  constructor
+  · intro total
+    by_contra missing
+    have zero : ∀ x ∈ xs, f x = 0
+      intro x hx
+      have hn : ¬ 0 < f x
+        intro hp
+        apply missing
+        use x
+        exact ⟨hx, hp⟩
+      have h0 := nonneg x hx
+      linarith
+    have hs := list_sum.eq_zero.int xs f zero
+    linarith
+  · intro positive
+    obtain ⟨x, hx, hp⟩ := positive
+    have bound := sum_list_member_le.int xs f x hx nonneg
+    linarith
+
++ sum_below.eq_zero_iff.nat (f : ℕ → ℕ) (n : ℕ) :
+    (∑ i < n, f i) = 0 ↔ ∀ i < n, f i = 0
+  constructor
+  · intro total i hi
+    have bound := single_le_sum.nat f n i (by intro i hi; exact zero_le.nat (f i)) hi
+    linarith
+  · exact sum_below.eq_zero.nat f n
+
++ sum_below.pos_iff.nat (f : ℕ → ℕ) (n : ℕ) :
+    0 < (∑ i < n, f i) ↔ ∃ i < n, 0 < f i
+  constructor
+  · intro total
+    by_contra missing
+    have zero : ∀ i < n, f i = 0
+      intro i hi
+      have hn : ¬ 0 < f i
+        intro hp
+        apply missing
+        use i
+        exact ⟨hi, hp⟩
+      linarith
+    have hs := sum_below.eq_zero.nat f n zero
+    linarith
+  · intro positive
+    obtain ⟨i, hi, hp⟩ := positive
+    have bound := single_le_sum.nat f n i (by intro i hi; exact zero_le.nat (f i)) hi
+    linarith
+
++ sum_below.pos.nat (f : ℕ → ℕ) (n : ℕ) (nonempty : 0 < n) (positive : ∀ i < n, 0 < f i) : 0 < (∑ i < n, f i)
+  exact (sum_below.pos_iff.nat f n).mpr ⟨0, nonempty, positive 0 nonempty⟩
+
++ list_sum.eq_zero.nat (xs : list α) (f : α → ℕ) (zero : ∀ x ∈ xs, f x = 0) : sum_list xs f = 0
+  induction xs with h x xs ih h
+  · rfl
+  · have head := h x (by simp)
+    have tail : ∀ y ∈ xs, f y = 0 := by intro y hy; exact h y (by simp [hy])
+    simp [sum_list, head, ih tail]
+
++ list_sum.eq_zero_iff.nat (xs : list α) (f : α → ℕ) :
+    sum_list xs f = 0 ↔ ∀ x ∈ xs, f x = 0
+  constructor
+  · intro total x hx
+    have bound := sum_list_member_le.nat xs f x hx
+    linarith
+  · exact list_sum.eq_zero.nat xs f
+
++ list_sum.pos_iff.nat (xs : list α) (f : α → ℕ) :
+    0 < sum_list xs f ↔ ∃ x ∈ xs, 0 < f x
+  constructor
+  · intro total
+    by_contra missing
+    have zero : ∀ x ∈ xs, f x = 0
+      intro x hx
+      have hn : ¬ 0 < f x
+        intro hp
+        apply missing
+        use x
+        exact ⟨hx, hp⟩
+      linarith
+    have hs := list_sum.eq_zero.nat xs f zero
+    linarith
+  · intro positive
+    obtain ⟨x, hx, hp⟩ := positive
+    have bound := sum_list_member_le.nat xs f x hx
+    linarith

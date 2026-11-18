@@ -1,0 +1,76 @@
+import realx
+
++ upper_product (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) (h : sqrt x < y) : x < y*y
+  auto
+
++ lower_product (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) (h : y < sqrt x) : y*y < x
+  auto
+
++ root_product (x : ℝ) (h : 0 ≤ x) : sqrt (x*x) = x
+  auto
+
++ product_root (x : ℝ) (h : 0 ≤ x) : sqrt x*sqrt x = x
+  auto
+
++ product_abs (x : ℝ) : sqrt (x*x) = |x|
+  auto
+
++ exact_root (x : ℝ) (h : 0 ≤ x) : sqrt (x*x) = x
+  sqrt_sq x h
+
++ applied_root (x : ℝ) (h : 0 ≤ x) : sqrt (x*x) = x
+  apply sqrt_sq
+  h
+
+opaque accepted : ℝ → Prop
+axiom accept_square (x : ℝ) : accepted (x^2)
+axiom accept_product (x : ℝ) : accepted (x*x)
++ opaque_argument (x : ℝ) : accepted (x*x)
+  auto [accept_square]
+
++ opposite_spelling (x : ℝ) : accepted (x^2)
+  accept_product x
+
++ guarded (P : ℝ → Prop) (x : ℝ) (h : P (x*x)) (step : ∀ t : ℝ, P (t^2) → accepted t) : accepted x
+  step x h
+
++ quantified (P : ℝ → Prop) (h : ∀ x : ℝ, P (x^2)) : ∀ y : ℝ, P (y*y)
+  h
+
++ function_argument (F : (ℝ → ℝ) → Prop) (h : F (fun x => x^2)) : F (fun y => y*y)
+  h
+
++ capture_safe (F : (ℝ → ℝ) → Prop) (square : ℝ) (h : F (fun x => (x+square)^2)) : F (fun y => (y+square)*(y+square))
+  h
+
++ nat_argument (P : ℕ → Prop) (x : ℕ) (h : P (x^2)) : P (x*x)
+  h
+
++ int_argument (P : ℤ → Prop) (x : ℤ) (h : P (x^2)) : P (x*x)
+  h
+
++ rat_argument (P : ℚ → Prop) (x : ℚ) (h : P (x^2)) : P (x*x)
+  h
+
+-> square_alias (x : ℝ) : ℝ := x*x
++ alias_root (x : ℝ) (h : 0 ≤ x) : sqrt (square_alias x) = x
+  auto
+
+opaque ready : ℝ → Prop
++ local_square (x : ℝ) (h : ∀ t : ℝ, ready t → 2 ≤ t^2) (hx : ready x) : 2 ≤ x*x
+  auto
+
++ local_product (x : ℝ) (h : ∀ t : ℝ, ready t → 2 ≤ t*t) (hx : ready x) : 2 ≤ x^2
+  auto
+
++ automatic_assumption (P : ℝ → Prop) (x : ℝ) (h : P (x^2)) : P (x*x)
+  auto
+
++ automatic_quantified (P : ℝ → Prop) (x : ℝ) (h : ∀ y : ℝ, P (y^2)) : P (x*x)
+  auto
+
++ automatic_guard (P : ℝ → Prop) (x : ℝ) (h : P (x*x)) (step : ∀ t : ℝ, P (t^2) → accepted t) : accepted x
+  auto
+
++ closed_literal (P : ℝ → Prop) (h : P (2*2)) : P (2^2)
+  h

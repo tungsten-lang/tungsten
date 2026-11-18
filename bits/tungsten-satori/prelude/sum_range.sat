@@ -1,0 +1,124 @@
+-- Finite-range sums: reindexing, strict comparison and constant bounds.
+import arith
+import sequence_order
+
+-- One strict summand suffices; the other comparisons may be equalities.
+
++ sum_below.lt_of_le_of_exists_lt.real (f g : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) (hs : ∃ i, i < n ∧ f i < g i) : sum_below n f < sum_below n g
+  induction n with h hs n ih h hs
+  · obtain ⟨i, hi, hfg⟩ := hs; omega
+  · simp only [succ_eq_add_one.nat] at h hs
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    have hp : ∀ i < n, f i ≤ g i := by intro i hi; exact h i (by omega)
+    have hn := h n (by omega)
+    obtain ⟨i, hi, hfg⟩ := hs
+    by_cases e : i = n
+    · have prev := sum_le.real f g n hp
+      rw [e] at hfg
+      linarith
+    · have prev := ih hp ⟨i, by omega, hfg⟩
+      linarith
+
++ sum_below.lt.real (f g : ℕ → ℝ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, f i < g i) : sum_below n f < sum_below n g
+  apply sum_below.lt_of_le_of_exists_lt.real f g n
+  · intro i hi; linarith [h i hi]
+  · exact ⟨0, hn, h 0 hn⟩
+
++ sum_below.lt_const.real (f : ℕ → ℝ) (c : ℝ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, f i < c) : sum_below n f < (n : ℝ) * c
+  have hs := sum_below.lt.real f (fun i => c) n hn h
+  rw [sum_const.real] at hs
+  exact hs
++ sum_below.const_lt.real (f : ℕ → ℝ) (c : ℝ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, c < f i) : (n : ℝ) * c < sum_below n f
+  have hs := sum_below.lt.real (fun i => c) f n hn h
+  rw [sum_const.real] at hs
+  exact hs
+
+-- One strict summand suffices; the other comparisons may be equalities.
++ sum_below.lt_of_le_of_exists_lt.rat (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) (hs : ∃ i, i < n ∧ f i < g i) : sum_below n f < sum_below n g
+  induction n with h hs n ih h hs
+  · obtain ⟨i, hi, hfg⟩ := hs; omega
+  · simp only [succ_eq_add_one.nat] at h hs
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    have hp : ∀ i < n, f i ≤ g i := by intro i hi; exact h i (by omega)
+    have hn := h n (by omega)
+    obtain ⟨i, hi, hfg⟩ := hs
+    by_cases e : i = n
+    · have prev := sum_le.rat f g n hp
+      rw [e] at hfg
+      linarith
+    · have prev := ih hp ⟨i, by omega, hfg⟩
+      linarith
+
++ sum_below.lt.rat (f g : ℕ → ℚ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, f i < g i) : sum_below n f < sum_below n g
+  apply sum_below.lt_of_le_of_exists_lt.rat f g n
+  · intro i hi; linarith [h i hi]
+  · exact ⟨0, hn, h 0 hn⟩
+
++ sum_below.lt_const.rat (f : ℕ → ℚ) (c : ℚ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, f i < c) : sum_below n f < (n : ℚ) * c
+  have hs := sum_below.lt.rat f (fun i => c) n hn h
+  rw [sum_const.rat] at hs
+  exact hs
++ sum_below.const_lt.rat (f : ℕ → ℚ) (c : ℚ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, c < f i) : (n : ℚ) * c < sum_below n f
+  have hs := sum_below.lt.rat (fun i => c) f n hn h
+  rw [sum_const.rat] at hs
+  exact hs
+
+-- One strict summand suffices; the other comparisons may be equalities.
++ sum_below.lt_of_le_of_exists_lt.int (f g : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) (hs : ∃ i, i < n ∧ f i < g i) : sum_below n f < sum_below n g
+  induction n with h hs n ih h hs
+  · obtain ⟨i, hi, hfg⟩ := hs; omega
+  · simp only [succ_eq_add_one.nat] at h hs
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    have hp : ∀ i < n, f i ≤ g i := by intro i hi; exact h i (by omega)
+    have hn := h n (by omega)
+    obtain ⟨i, hi, hfg⟩ := hs
+    by_cases e : i = n
+    · have prev := sum_le.int f g n hp
+      rw [e] at hfg
+      linarith
+    · have prev := ih hp ⟨i, by omega, hfg⟩
+      linarith
+
++ sum_below.lt.int (f g : ℕ → ℤ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, f i < g i) : sum_below n f < sum_below n g
+  apply sum_below.lt_of_le_of_exists_lt.int f g n
+  · intro i hi; linarith [h i hi]
+  · exact ⟨0, hn, h 0 hn⟩
+
++ sum_below.lt_const.int (f : ℕ → ℤ) (c : ℤ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, f i < c) : sum_below n f < (n : ℤ) * c
+  have hs := sum_below.lt.int f (fun i => c) n hn h
+  rw [sum_const.int] at hs
+  exact hs
++ sum_below.const_lt.int (f : ℕ → ℤ) (c : ℤ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, c < f i) : (n : ℤ) * c < sum_below n f
+  have hs := sum_below.lt.int (fun i => c) f n hn h
+  rw [sum_const.int] at hs
+  exact hs
+
+-- One strict summand suffices; the other comparisons may be equalities.
++ sum_below.lt_of_le_of_exists_lt.nat (f g : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i ≤ g i) (hs : ∃ i, i < n ∧ f i < g i) : sum_below n f < sum_below n g
+  induction n with h hs n ih h hs
+  · obtain ⟨i, hi, hfg⟩ := hs; omega
+  · simp only [succ_eq_add_one.nat] at h hs
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    have hp : ∀ i < n, f i ≤ g i := by intro i hi; exact h i (by omega)
+    have hn := h n (by omega)
+    obtain ⟨i, hi, hfg⟩ := hs
+    by_cases e : i = n
+    · have prev := sum_le.nat f g n hp
+      rw [e] at hfg
+      linarith
+    · have prev := ih hp ⟨i, by omega, hfg⟩
+      linarith
+
++ sum_below.lt.nat (f g : ℕ → ℕ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, f i < g i) : sum_below n f < sum_below n g
+  apply sum_below.lt_of_le_of_exists_lt.nat f g n
+  · intro i hi; linarith [h i hi]
+  · exact ⟨0, hn, h 0 hn⟩
+
++ sum_below.lt_const.nat (f : ℕ → ℕ) (c : ℕ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, f i < c) : sum_below n f < n * c
+  have hs := sum_below.lt.nat f (fun i => c) n hn h
+  rw [sum_const.nat] at hs
+  exact hs
++ sum_below.const_lt.nat (f : ℕ → ℕ) (c : ℕ) (n : ℕ) (hn : 0 < n) (h : ∀ i < n, c < f i) : n * c < sum_below n f
+  have hs := sum_below.lt.nat (fun i => c) f n hn h
+  rw [sum_const.nat] at hs
+  exact hs

@@ -1,0 +1,49 @@
+import arith
+opaque known_a : ℚ
+opaque known_b : ℚ
+axiom supplied_cross : known_a ≤ known_b*2
+
++ missing_positive (a b : ℚ) (ha : 0 < a) : 0 < a/b
+  auto
+
++ zero_strict (a : ℚ) (ha : 0 < a) : 0 < a/0
+  auto
+
++ missing_denominator (a b c : ℚ) (h : a ≤ b*c) : a/c ≤ b
+  auto
+
++ negative_denominator (a b c : ℚ) (hc : c < 0) (h : a < b*c) : a/c < b
+  auto
+
++ weak_denominator (a b c : ℚ) (hc : 0 ≤ c) (h : a*c < b) : a < b/c
+  auto
+
++ missing_second_denominator (a b c d : ℚ) (hc : 0 < c) (h : a*d ≤ b*c) : a/c ≤ b/d
+  auto
+
++ weak_strict (a b c : ℚ) (hc : 0 < c) (h : a ≤ b*c) : a/c < b
+  auto
+
++ wrong_numerator (a b c : ℚ) (hc : 0 < c) (h : a ≤ b) : b/c ≤ a/c
+  auto
+
++ wrong_reciprocal (a b : ℚ) (ha : 0 < a) (h : a < b) : 1/a ≤ 1/b
+  auto
+
++ missing_numerator_sign (a b c : ℚ) (hc : 0 < c) (h : c ≤ b) : a/b ≤ a/c
+  auto
+
++ zero_cancel (x : ℚ) : x*0/0 = x
+  auto
+
++ unguarded_self (x : ℚ) : x/x = 1
+  auto
+
++ unguarded_equality (a b c : ℚ) (h : a*c = b) : a = b/c
+  auto
+
++ branch_leak (a b c : ℚ) (h : 0 < c ∨ a < b*c) : a/c < b
+  auto
+
++ no_global_bound : known_a/2 ≤ known_b
+  auto

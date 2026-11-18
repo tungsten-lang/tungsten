@@ -1,0 +1,55 @@
+import geometric_mean
+
++ list_missing_w (xs : list α) (w f g : α → ℝ) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i)))
+  apply list_sum.weighted_sqrt_mul_le.real xs w f g
+  · intro i hi; linarith
+  · exact hf
+  · exact hg
+
++ list_missing_f (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i)))
+  apply list_sum.weighted_sqrt_mul_le.real xs w f g
+  · exact hw
+  · intro i hi; linarith
+  · exact hg
+
++ list_missing_g (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i)))
+  apply list_sum.weighted_sqrt_mul_le.real xs w f g
+  · exact hw
+  · exact hf
+  · intro i hi; linarith
+
++ list_strict (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) < sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i))) := list_sum.weighted_sqrt_mul_le.real xs w f g hw hf hg
+
++ list_reverse (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i))) ≤ sum_list xs (fun i => w i*sqrt (f i*g i)) := list_sum.weighted_sqrt_mul_le.real xs w f g hw hf hg
+
++ list_wrong_vector (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*f i))) := list_sum.weighted_sqrt_mul_le.real xs w f g hw hf hg
+
++ range_missing_w (n : ℕ) (w f g : ℕ → ℝ) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i)))
+  apply sum_below.weighted_sqrt_mul_le.real n w f g
+  · intro i hi; linarith
+  · exact hf
+  · exact hg
+
++ range_missing_f (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i)))
+  apply sum_below.weighted_sqrt_mul_le.real n w f g
+  · exact hw
+  · intro i hi; linarith
+  · exact hg
+
++ range_missing_g (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i)))
+  apply sum_below.weighted_sqrt_mul_le.real n w f g
+  · exact hw
+  · exact hf
+  · intro i hi; linarith
+
++ range_strict (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) < sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i))) := sum_below.weighted_sqrt_mul_le.real n w f g hw hf hg
+
++ range_reverse (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i))) ≤ sum_below n (fun i => w i*sqrt (f i*g i)) := sum_below.weighted_sqrt_mul_le.real n w f g hw hf hg
+
++ range_wrong_vector (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*f i))) := sum_below.weighted_sqrt_mul_le.real n w f g hw hf hg
+
++ scalar_missing_sign (a b c d : ℝ) : sqrt (a*b)+sqrt (c*d) ≤ sqrt ((a+c)*(b+d))
+  apply sqrt_mul.add_le a b c d <;> linarith
+
++ scalar_strict_equality : sqrt (1*1)+sqrt (1*1) < sqrt ((1+1)*(1+1))
+  exact sqrt_mul.add_le 1 1 1 1 (by linarith) (by linarith) (by linarith) (by linarith)

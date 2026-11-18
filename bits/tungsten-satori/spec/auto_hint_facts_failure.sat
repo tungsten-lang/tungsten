@@ -1,0 +1,28 @@
+import auto_hint_facts
+
++ missing_hint (x : ℕ) : norm x ≤ u x+v x
+  auto [u_sign]
+
++ missing_guard (x : ℕ) : norm x ≤ u x+v x
+  auto [guarded_sign, v_sign]
+
++ weak_guard (x : ℕ) (h : 1 ≤ x) : norm x ≤ u x+v x
+  auto [guarded_sign, v_sign]
+
++ strict_bound (x : ℕ) : norm x < u x+v x
+  auto [u_sign, v_sign]
+
++ wrong_instance (x y : ℕ) : norm x ≤ u x+v x
+  auto [u_sign y, v_sign y]
+
++ missing_chain (x : ℕ) : norm x ≤ u x+v x
+  auto [ready_sign, v_sign]
+
++ branch_leak (x : ℕ) : norm x ≤ u x+v x
+  auto [either_sign]
+
++ no_global_search (x : ℕ) : norm x ≤ u x+v x
+  auto
+
++ wrong_result (x : ℕ) : norm x ≤ u x
+  auto [both_signs]

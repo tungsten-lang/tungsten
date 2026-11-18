@@ -1,0 +1,15 @@
++ unsupplied_bound (a x y : ℚ) (h : case_ready a) (hx : 0 < x) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto
++ missing_guard (a x y : ℚ) (hx : 0 < x) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto [case_upper a x]
++ wrong_guard (a x y : ℚ) (h : case_ready y) (hx : 0 < x) (hy : y ≤ x) (hy0 : 0 ≤ y) : a*y < 1 ∨ a ≤ 0
+  auto [case_upper a x]
++ unsupplied_nonzero (x y : ℚ) (h : case_ready x) (hxy : x*y = 0) : y = 0
+  auto
++ wrong_nonzero_guard (x y : ℚ) (h : case_ready y) (hxy : x*y = 0) : y = 0
+  auto [case_nonzero x]
++ nonzero_product (x y : ℚ) (h : case_ready x) (hxy : x*y = 1) : y = 0
+  auto [case_nonzero x h]
+
++ missing_second_guard (x y z : ℚ) (hx : case_ready x) (hxy : x*y = 0) : z = 0
+  auto [case_nonzero x hx, case_other_nonzero y]

@@ -1,0 +1,26 @@
+-- Borsuk's local membership induction becomes one library application.
++ all_mem (p : list ℝ → Prop) (l : list (list ℝ)) : ∀ x, x ∈ l → all p l → p x := list.all_mem p l
++ predicate_from_members (p : α → Prop) (xs : list α) (h : ∀ x ∈ xs, p x) : all p xs := list.all_of_mem p xs h
++ bounded_transform (p q : α → Prop) (xs : list α) (hp : all p xs) (h : ∀ x ∈ xs, p x → q x) : all q xs := list.all_imp p q xs h hp
++ mapped_predicate (p : β → Prop) (f : α → β) (xs : list α) (h : all (fun x => p (f x)) xs) : all p (map f xs) := by rw [list.all_map]; exact h
++ append_predicate (p : α → Prop) (xs ys : list α) (hx : all p xs) (hy : all p ys) : all p (xs ++ ys) := by rw [list.all_append]; exact ⟨hx, hy⟩
++ append_members (p : α → Prop) (xs ys : list α) : all p (xs ++ ys) ↔ (∀ x ∈ xs, p x) ∧ (∀ y ∈ ys, p y) := by rw [list.all_append, list.all_iff, list.all_iff]
++ empty_predicate (p : α → Prop) : all p [] := by apply list.all_of_mem; intro x hx; simp at hx
++ repeated_predicate (p : α → Prop) (x : α) (h : p x) : all p [x, x] := by simp [all, h]
+#axioms all_mem
+#axioms predicate_from_members
+#axioms bounded_transform
+#axioms mapped_predicate
+#axioms append_predicate
+#axioms append_members
+
+import arith
++ orbit_multiple (p h d : ℕ) : ∃ k : ℕ, p ^ (h + d) = p ^ h * k := by use p ^ d; exact pow_add.nat p h d
+-- Same statement as Alperin's eleven-line induction body, now five steps.
++ orbit_sizes_divisible (p h : ℕ) (l : list ℕ) : all (fun x => ∃ d : ℕ, x = p ^ (h + d)) l → all (fun x => ∃ k : ℕ, x = p ^ h * k) l
+  rw [list.all_iff, list.all_iff]
+  intro hl x hx
+  obtain ⟨d, hd⟩ := hl x hx
+  rw [hd]
+  exact orbit_multiple p h d
+#axioms orbit_sizes_divisible

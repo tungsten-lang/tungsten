@@ -1,0 +1,38 @@
+import arith
+opaque a : ℚ
+opaque b : ℚ
+opaque c : ℚ
+axiom supplied_max : max a b ≤ c
+
++ missing_upper (a b c : ℚ) (ha : a ≤ c) : max a b ≤ c
+  auto
+
++ missing_lower (a b c : ℚ) (ha : c ≤ a) : c ≤ min a b
+  auto
+
++ weak_strict_upper (a b c : ℚ) (ha : a ≤ c) (hb : b ≤ c) : max a b < c
+  auto
+
++ weak_strict_lower (a b c : ℚ) (ha : c ≤ a) (hb : c ≤ b) : c < min a b
+  auto
+
++ wrong_min (a b : ℚ) (h : a < b) : min a b = b
+  auto
+
++ wrong_max (a b : ℚ) (h : a < b) : max a b = a
+  auto
+
++ wrong_endpoint (a b c : ℚ) (h : min a b ≤ c) : a ≤ c
+  auto
+
++ missing_clamp_order (lo hi x : ℚ) : max lo (min hi x) ≤ hi
+  auto
+
++ branch_leak (a b c : ℚ) (h : max a b ≤ c ∨ c ≤ min a b) : a = c
+  auto
+
++ missing_scale_sign (a b c d k : ℚ) (ha : c ≤ k*a) (hb : d ≤ k*b) : max c d ≤ k*max a b
+  auto
+
++ no_global_bound : a ≤ c
+  auto

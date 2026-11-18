@@ -15,6 +15,8 @@
 -- signs · more powers, min/max, field division · ℕ division · products over a range · sum shifting and the binomial
 -- theorem · Int.toNat and Euclid's lemma · lists.
 -- Exponential, logarithm, square root and the Archimedean property of ℝ are in realx (import realx).
+import quadratic
+import power
 
 -- ---- big operators: one step (∑ i < n, f i is sum_below n f; note ∑ i < n, f i + c parses as ∑ i < n, (f i + c)) ----
 @[simp] + sum_below_zero (f : ℕ → α) : ∑ i < 0, f i = 0 := by rfl
@@ -714,21 +716,6 @@
 + pow_succ_left.real (a : ℝ) (n : ℕ) : a ^ (n + 1) = a * a ^ n
   rw [pow_succ.real]
   ring
-+ pow_add.real (a : ℝ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
-  induction n with n ih
-  · rw [add_zero.nat, pow_zero.real]
-    ring
-  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.real, pow_succ.real, ih]
-    ring
-+ pow_mul.real (a : ℝ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
-  induction n with n ih
-  · rw [mul_zero.nat, pow_zero.real, pow_zero.real]
-  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.real, ih, pow_succ.real]
-+ mul_pow.real (a b : ℝ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
-  induction n with n ih
-  · simp
-  · rw [succ_eq_add_one.nat, pow_succ.real, pow_succ.real, pow_succ.real, ih]
-    ring
 + pow_nonneg.real (a : ℝ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a ^ n
   induction n with n ih
   · simp
@@ -781,8 +768,7 @@
     · exact ih e
     · exact e
 + sq_pos_of_ne_zero.real (a : ℝ) (h : a ≠ 0) : 0 < a ^ 2
-  by_contra c
-  exact h (pow_eq_zero.real a 2 (by linarith [sq_nonneg.real a]))
+  nlinarith
 
 -- ℚ
 + pow_one.rat (a : ℚ) : a ^ 1 = a := by ring
@@ -790,21 +776,6 @@
 + pow_succ_left.rat (a : ℚ) (n : ℕ) : a ^ (n + 1) = a * a ^ n
   rw [pow_succ.rat]
   ring
-+ pow_add.rat (a : ℚ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
-  induction n with n ih
-  · rw [add_zero.nat, pow_zero.rat]
-    ring
-  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.rat, pow_succ.rat, ih]
-    ring
-+ pow_mul.rat (a : ℚ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
-  induction n with n ih
-  · rw [mul_zero.nat, pow_zero.rat, pow_zero.rat]
-  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.rat, ih, pow_succ.rat]
-+ mul_pow.rat (a b : ℚ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
-  induction n with n ih
-  · simp
-  · rw [succ_eq_add_one.nat, pow_succ.rat, pow_succ.rat, pow_succ.rat, ih]
-    ring
 + pow_nonneg.rat (a : ℚ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a ^ n
   induction n with n ih
   · simp
@@ -857,8 +828,7 @@
     · exact ih e
     · exact e
 + sq_pos_of_ne_zero.rat (a : ℚ) (h : a ≠ 0) : 0 < a ^ 2
-  by_contra c
-  exact h (pow_eq_zero.rat a 2 (by linarith [sq_nonneg.rat a]))
+  nlinarith
 
 -- ℤ
 + pow_one.int (a : ℤ) : a ^ 1 = a := by ring
@@ -866,21 +836,6 @@
 + pow_succ_left.int (a : ℤ) (n : ℕ) : a ^ (n + 1) = a * a ^ n
   rw [pow_succ.int]
   ring
-+ pow_add.int (a : ℤ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
-  induction n with n ih
-  · rw [add_zero.nat, pow_zero.int]
-    ring
-  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.int, pow_succ.int, ih]
-    ring
-+ pow_mul.int (a : ℤ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
-  induction n with n ih
-  · rw [mul_zero.nat, pow_zero.int, pow_zero.int]
-  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.int, ih, pow_succ.int]
-+ mul_pow.int (a b : ℤ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
-  induction n with n ih
-  · simp
-  · rw [succ_eq_add_one.nat, pow_succ.int, pow_succ.int, pow_succ.int, ih]
-    ring
 + pow_nonneg.int (a : ℤ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a ^ n
   induction n with n ih
   · simp
@@ -933,8 +888,7 @@
     · exact ih e
     · exact e
 + sq_pos_of_ne_zero.int (a : ℤ) (h : a ≠ 0) : 0 < a ^ 2
-  by_contra c
-  exact h (pow_eq_zero.int a 2 (by linarith [sq_nonneg.int a]))
+  nlinarith
 
 -- ℕ
 + pow_one.nat (a : ℕ) : a ^ 1 = a := by ring
@@ -942,21 +896,6 @@
 + pow_succ_left.nat (a : ℕ) (n : ℕ) : a ^ (n + 1) = a * a ^ n
   rw [pow_succ.nat]
   ring
-+ pow_add.nat (a : ℕ) (m n : ℕ) : a ^ (m + n) = a ^ m * a ^ n
-  induction n with n ih
-  · rw [add_zero.nat, pow_zero.nat]
-    ring
-  · rw [succ_eq_add_one.nat, ← add_assoc.nat, pow_succ.nat, pow_succ.nat, ih]
-    ring
-+ pow_mul.nat (a : ℕ) (m n : ℕ) : a ^ (m * n) = (a ^ m) ^ n
-  induction n with n ih
-  · rw [mul_zero.nat, pow_zero.nat, pow_zero.nat]
-  · rw [succ_eq_add_one.nat, left_distrib.nat, mul_one.nat, pow_add.nat, ih, pow_succ.nat]
-+ mul_pow.nat (a b : ℕ) (n : ℕ) : (a * b) ^ n = a ^ n * b ^ n
-  induction n with n ih
-  · simp
-  · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, pow_succ.nat, ih]
-    ring
 + pow_nonneg.nat (a : ℕ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a ^ n
   exact zero_le.nat (a ^ n)
 + pow_pos.nat (a : ℕ) (n : ℕ) (h : 0 < a) : 0 < a ^ n
@@ -2315,6 +2254,22 @@
 + abs_max_sub_max_le_abs.real (a b c : ℝ) : |max a c - max b c| ≤ |a - b|
   obtain ⟨e1, k1⟩ | ⟨e1, k1⟩ := max_cases.real a c <;> obtain ⟨e2, k2⟩ | ⟨e2, k2⟩ := max_cases.real b c <;> rw [e1, e2] <;>
     apply abs_le_of.real <;> linarith [le_abs_self.real (a - b), neg_le_abs.real (a - b)]
+-- Mathlib: abs_min_sub_min_le_abs
++ abs_min_sub_min_le_abs.real (a b c : ℝ) : |min a c - min b c| ≤ |a - b|
+  obtain ⟨e1, k1⟩ | ⟨e1, k1⟩ := min_cases.real a c <;> obtain ⟨e2, k2⟩ | ⟨e2, k2⟩ := min_cases.real b c <;> rw [e1, e2] <;>
+    apply abs_le_of.real <;> linarith [le_abs_self.real (a - b), neg_le_abs.real (a - b)]
+-- Fixed left endpoints of min and max are non-expansive.
++ abs_min_left_lipschitz.real (c a b : ℝ) : |min c a - min c b| ≤ |a - b|
+  rw [min_comm.real c a, min_comm.real c b]
+  exact abs_min_sub_min_le_abs.real a b c
++ abs_max_left_lipschitz.real (c a b : ℝ) : |max c a - max c b| ≤ |a - b|
+  rw [max_comm.real c a, max_comm.real c b]
+  exact abs_max_sub_max_le_abs.real a b c
+-- Either nesting of min and max is non-expansive, even if lo > hi.
++ clamp_max_min_lipschitz.real (lo hi x y : ℝ) : |max lo (min hi x) - max lo (min hi y)| ≤ |x - y|
+  linarith [abs_max_left_lipschitz.real lo (min hi x) (min hi y), abs_min_left_lipschitz.real hi x y]
++ clamp_min_max_lipschitz.real (lo hi x y : ℝ) : |min hi (max lo x) - min hi (max lo y)| ≤ |x - y|
+  linarith [abs_min_left_lipschitz.real hi (max lo x) (max lo y), abs_max_left_lipschitz.real lo x y]
 -- Mathlib: mul_sub
 + mul_sub.real (a b c : ℝ) : a * (b - c) = a * b - a * c := by ring
 + mul_sub.rat (a b c : ℚ) : a * (b - c) = a * b - a * c := by ring
@@ -2327,6 +2282,10 @@
 + sub_sub_sub_cancel_left.real (a b c : ℝ) : c - a - (c - b) = b - a := by ring
 + sub_sub_sub_cancel_left.rat (a b c : ℚ) : c - a - (c - b) = b - a := by ring
 + sub_sub_sub_cancel_left.int (a b c : ℤ) : c - a - (c - b) = b - a := by ring
+-- Mathlib: sub_sub_sub_cancel_right
++ sub_sub_sub_cancel_right.real (a b c : ℝ) : a - c - (b - c) = a - b := by ring
++ sub_sub_sub_cancel_right.rat (a b c : ℚ) : a - c - (b - c) = a - b := by ring
++ sub_sub_sub_cancel_right.int (a b c : ℤ) : a - c - (b - c) = a - b := by ring
 -- Mathlib: mul_div_mul_left
 + mul_div_mul_left.real (a b c : ℝ) (hc : c ≠ 0) : c * a / (c * b) = a / b
   rw [← div_mul_div.real c c a b, div_self.real c hc]
@@ -2685,3 +2644,598 @@
   · intro h
     obtain ⟨e1, e2⟩ := h
     rw [e1, e2]
+
+-- The weighted variance gap; weights need only be nonzero, as must their sum.
++ weighted_variance_gap.real (a b u v : ℝ) (ha : a ≠ 0) (hb : b ≠ 0) (hab : a + b ≠ 0) : u ^ 2 / a + v ^ 2 / b - (u + v) ^ 2 / (a + b) = a * b / (a + b) * (u / a - v / b) ^ 2
+  have p : (a * (1 / a) - 1) * ((1 / (a + b)) * b * u ^ 2 * (1 / a) - 2 * u * v * (1 / (a + b)) * b * (1 / b) - u ^ 2 * (1 / (a + b))) + (b * (1 / b) - 1) * ((1 / (a + b)) * a * v ^ 2 * (1 / b) - 2 * u * v * (1 / (a + b)) - v ^ 2 * (1 / (a + b))) + ((a + b) * (1 / (a + b)) - 1) * (u ^ 2 * (1 / a) + v ^ 2 * (1 / b)) = 0 := by rw [mul_inv_cancel.real a ha, mul_inv_cancel.real b hb, mul_inv_cancel.real (a + b) hab]; ring
+  rw [div_def.real (u ^ 2), div_def.real (v ^ 2), div_def.real ((u + v) ^ 2), div_def.real (a * b), div_def.real u, div_def.real v]
+  linarith
++ weighted_variance_gap.rat (a b u v : ℚ) (ha : a ≠ 0) (hb : b ≠ 0) (hab : a + b ≠ 0) : u ^ 2 / a + v ^ 2 / b - (u + v) ^ 2 / (a + b) = a * b / (a + b) * (u / a - v / b) ^ 2
+  have p : (a * (1 / a) - 1) * ((1 / (a + b)) * b * u ^ 2 * (1 / a) - 2 * u * v * (1 / (a + b)) * b * (1 / b) - u ^ 2 * (1 / (a + b))) + (b * (1 / b) - 1) * ((1 / (a + b)) * a * v ^ 2 * (1 / b) - 2 * u * v * (1 / (a + b)) - v ^ 2 * (1 / (a + b))) + ((a + b) * (1 / (a + b)) - 1) * (u ^ 2 * (1 / a) + v ^ 2 * (1 / b)) = 0 := by rw [mul_inv_cancel.rat a ha, mul_inv_cancel.rat b hb, mul_inv_cancel.rat (a + b) hab]; ring
+  rw [div_def.rat (u ^ 2), div_def.rat (v ^ 2), div_def.rat ((u + v) ^ 2), div_def.rat (a * b), div_def.rat u, div_def.rat v]
+  linarith
+
+-- Integer case patterns with natural witnesses. The negative case uses the
+-- unique shape -(n + 1), so zero belongs only to the nonnegative side.
++ int_nonnegative_nat (e : ℤ) (h : 0 ≤ e) : ∃ n : ℕ, e = (n : ℤ)
+  exact ⟨nat_of_int e, (int_of_nat_of_int e h).symm⟩
++ int_negative_succ (e : ℤ) (h : e < 0) : ∃ n : ℕ, e = 0 - ((n : ℤ) + 1)
+  exact ⟨nat_of_int (0 - e - 1), by linarith [int_of_nat_of_int (0 - e - 1) (by linarith)]⟩
++ int_negative_or_nat (e : ℤ) : (∃ n : ℕ, e = 0 - ((n : ℤ) + 1)) ∨ (∃ n : ℕ, e = (n : ℤ))
+  by_cases h : e < 0
+  · left; exact int_negative_succ e h
+  · right; exact int_nonnegative_nat e (by linarith)
++ int_nonnegative_even_or_odd (e : ℤ) (h : 0 ≤ e) : (∃ n : ℕ, e = 2 * (n : ℤ)) ∨ (∃ n : ℕ, e = 2 * (n : ℤ) + 1)
+  obtain k | k := mod_two_cases.int e
+  · left; exact ⟨nat_of_int (e / 2), by linarith [int_of_nat_of_int (e / 2) (by linarith)]⟩
+  · right; exact ⟨nat_of_int (e / 2), by linarith [int_of_nat_of_int (e / 2) (by linarith)]⟩
++ int_negative_or_even_or_odd (e : ℤ) : (∃ n : ℕ, e = 0 - ((n : ℤ) + 1)) ∨ (∃ n : ℕ, e = 2 * (n : ℤ)) ∨ (∃ n : ℕ, e = 2 * (n : ℤ) + 1)
+  by_cases h : e < 0
+  · left; exact int_negative_succ e h
+  · right; exact int_nonnegative_even_or_odd e (by linarith)
+
+-- The distance between two ordered values is their max minus their min.
++ two_min_add_abs.real (x y : ℝ) : 2 * min x y + |x - y| = x + y
+  obtain ⟨e, c⟩ | ⟨e, c⟩ := min_cases.real x y <;> obtain ⟨f, d⟩ | ⟨f, d⟩ := abs_cases.real (x - y) <;> linarith
++ two_max_sub_abs.real (x y : ℝ) : 2 * max x y - |x - y| = x + y
+  obtain ⟨e, c⟩ | ⟨e, c⟩ := max_cases.real x y <;> obtain ⟨f, d⟩ | ⟨f, d⟩ := abs_cases.real (x - y) <;> linarith
++ max_sub_min_eq_abs.real (x y : ℝ) : max x y - min x y = |x - y|
+  linarith [two_min_add_abs.real x y, two_max_sub_abs.real x y]
++ two_min_add_abs.rat (x y : ℚ) : 2 * min x y + |x - y| = x + y
+  obtain ⟨e, c⟩ | ⟨e, c⟩ := min_cases.rat x y <;> obtain ⟨f, d⟩ | ⟨f, d⟩ := abs_cases.rat (x - y) <;> linarith
++ two_max_sub_abs.rat (x y : ℚ) : 2 * max x y - |x - y| = x + y
+  obtain ⟨e, c⟩ | ⟨e, c⟩ := max_cases.rat x y <;> obtain ⟨f, d⟩ | ⟨f, d⟩ := abs_cases.rat (x - y) <;> linarith
++ max_sub_min_eq_abs.rat (x y : ℚ) : max x y - min x y = |x - y|
+  linarith [two_min_add_abs.rat x y, two_max_sub_abs.rat x y]
++ two_min_add_abs.int (x y : ℤ) : 2 * min x y + |x - y| = x + y
+  obtain ⟨e, c⟩ | ⟨e, c⟩ := min_cases.int x y <;> obtain ⟨f, d⟩ | ⟨f, d⟩ := abs_cases.int (x - y) <;> linarith
++ two_max_sub_abs.int (x y : ℤ) : 2 * max x y - |x - y| = x + y
+  obtain ⟨e, c⟩ | ⟨e, c⟩ := max_cases.int x y <;> obtain ⟨f, d⟩ | ⟨f, d⟩ := abs_cases.int (x - y) <;> linarith
++ max_sub_min_eq_abs.int (x y : ℤ) : max x y - min x y = |x - y|
+  linarith [two_min_add_abs.int x y, two_max_sub_abs.int x y]
+
++ div_le_div_iff.real (a b c d : ℝ) (hc : 0 < c) (hd : 0 < d) : a/c ≤ b/d ↔ a*d ≤ b*c
+  rw [le_div_iff.real (a/c) b d hd]
+  have shuffle : (a/c)*d = (a*d)/c := by rw [div_def.real a c, div_def.real (a*d) c]; ring
+  rw [shuffle, div_le_iff.real (a*d) b c hc]
+
++ div_lt_div_iff.real (a b c d : ℝ) (hc : 0 < c) (hd : 0 < d) : a/c < b/d ↔ a*d < b*c
+  rw [lt_div_iff.real (a/c) b d hd]
+  have shuffle : (a/c)*d = (a*d)/c := by rw [div_def.real a c, div_def.real (a*d) c]; ring
+  rw [shuffle, div_lt_iff.real (a*d) b c hc]
+
++ div_le_div_iff.rat (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) : a/c ≤ b/d ↔ a*d ≤ b*c
+  rw [le_div_iff.rat (a/c) b d hd]
+  have shuffle : (a/c)*d = (a*d)/c := by rw [div_def.rat a c, div_def.rat (a*d) c]; ring
+  rw [shuffle, div_le_iff.rat (a*d) b c hc]
+
++ div_lt_div_iff.rat (a b c d : ℚ) (hc : 0 < c) (hd : 0 < d) : a/c < b/d ↔ a*d < b*c
+  rw [lt_div_iff.rat (a/c) b d hd]
+  have shuffle : (a/c)*d = (a*d)/c := by rw [div_def.rat a c, div_def.rat (a*d) c]; ring
+  rw [shuffle, div_lt_iff.rat (a*d) b c hc]
+
+-- Scale endpoint bounds without exposing the min/max branches.
+
++ max_le_mul_max.nat (a b c d k : ℕ) (hk : 0 ≤ k) (ha : c ≤ k*a) (hb : d ≤ k*b) : max c d ≤ k*max a b
+  apply max_le.nat
+  · nlinarith [le_max_left.nat a b]
+  · nlinarith [le_max_right.nat a b]
+
++ mul_min_le_min.nat (a b c d k : ℕ) (hk : 0 ≤ k) (ha : k*a ≤ c) (hb : k*b ≤ d) : k*min a b ≤ min c d
+  apply le_min.nat
+  · nlinarith [min_le_left.nat a b]
+  · nlinarith [min_le_right.nat a b]
+
++ max_le_mul_max.int (a b c d k : ℤ) (hk : 0 ≤ k) (ha : c ≤ k*a) (hb : d ≤ k*b) : max c d ≤ k*max a b
+  apply max_le.int
+  · nlinarith [le_max_left.int a b]
+  · nlinarith [le_max_right.int a b]
+
++ mul_min_le_min.int (a b c d k : ℤ) (hk : 0 ≤ k) (ha : k*a ≤ c) (hb : k*b ≤ d) : k*min a b ≤ min c d
+  apply le_min.int
+  · nlinarith [min_le_left.int a b]
+  · nlinarith [min_le_right.int a b]
+
++ max_le_mul_max.rat (a b c d k : ℚ) (hk : 0 ≤ k) (ha : c ≤ k*a) (hb : d ≤ k*b) : max c d ≤ k*max a b
+  apply max_le.rat
+  · nlinarith [le_max_left.rat a b]
+  · nlinarith [le_max_right.rat a b]
+
++ mul_min_le_min.rat (a b c d k : ℚ) (hk : 0 ≤ k) (ha : k*a ≤ c) (hb : k*b ≤ d) : k*min a b ≤ min c d
+  apply le_min.rat
+  · nlinarith [min_le_left.rat a b]
+  · nlinarith [min_le_right.rat a b]
+
++ max_le_mul_max.real (a b c d k : ℝ) (hk : 0 ≤ k) (ha : c ≤ k*a) (hb : d ≤ k*b) : max c d ≤ k*max a b
+  apply max_le.real
+  · nlinarith [le_max_left.real a b]
+  · nlinarith [le_max_right.real a b]
+
++ mul_min_le_min.real (a b c d k : ℝ) (hk : 0 ≤ k) (ha : k*a ≤ c) (hb : k*b ≤ d) : k*min a b ≤ min c d
+  apply le_min.real
+  · nlinarith [min_le_left.real a b]
+  · nlinarith [min_le_right.real a b]
+
+-- ---- finite-range splitting, constant bounds and prefix monotonicity ----
+
++ sum_below.split.real (f : ℕ → ℝ) (a b : ℕ) : sum_below (a + b) f = sum_below a f + sum_below b (fun i => f (a + i))
+  induction b with b ih
+  · simp
+  · rw [succ_eq_add_one.nat]
+    have e : a + (b + 1) = (a + b) + 1 := by ring
+    rw [e, sum_below_succ, sum_below_succ, ih]
+    ring
+
++ sum_below.le_const.real (f : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i ≤ c) : sum_below n f ≤ (n : ℝ) * c
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, cast_succ.real]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    linarith [h n (by omega)]
+
++ sum_below.const_le.real (f : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, c ≤ f i) : (n : ℝ) * c ≤ sum_below n f
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, cast_succ.real]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    linarith [h n (by omega)]
+
++ sum_below.mono.real (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b) (nonneg : ∀ i, a ≤ i → i < b → 0 ≤ f i) : sum_below a f ≤ sum_below b f
+  have step : ∀ i, a ≤ i → (i ≤ b → sum_below a f ≤ sum_below i f) → i+1 ≤ b → sum_below a f ≤ sum_below (i+1) f
+    intro i hi ih hb
+    rw [sum_below_succ]
+    linarith [ih (by omega), nonneg i hi (by omega)]
+  exact le_induction.nat (fun n => n ≤ b → sum_below a f ≤ sum_below n f) a (by intro h; linarith) step b ab (by omega)
+
++ sum_below.split.rat (f : ℕ → ℚ) (a b : ℕ) : sum_below (a + b) f = sum_below a f + sum_below b (fun i => f (a + i))
+  induction b with b ih
+  · simp
+  · rw [succ_eq_add_one.nat]
+    have e : a + (b + 1) = (a + b) + 1 := by ring
+    rw [e, sum_below_succ, sum_below_succ, ih]
+    ring
+
++ sum_below.le_const.rat (f : ℕ → ℚ) (c : ℚ) (n : ℕ) (h : ∀ i < n, f i ≤ c) : sum_below n f ≤ (n : ℚ) * c
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, cast_succ.rat]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    linarith [h n (by omega)]
+
++ sum_below.const_le.rat (f : ℕ → ℚ) (c : ℚ) (n : ℕ) (h : ∀ i < n, c ≤ f i) : (n : ℚ) * c ≤ sum_below n f
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, cast_succ.rat]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    linarith [h n (by omega)]
+
++ sum_below.mono.rat (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b) (nonneg : ∀ i, a ≤ i → i < b → 0 ≤ f i) : sum_below a f ≤ sum_below b f
+  have step : ∀ i, a ≤ i → (i ≤ b → sum_below a f ≤ sum_below i f) → i+1 ≤ b → sum_below a f ≤ sum_below (i+1) f
+    intro i hi ih hb
+    rw [sum_below_succ]
+    linarith [ih (by omega), nonneg i hi (by omega)]
+  exact le_induction.nat (fun n => n ≤ b → sum_below a f ≤ sum_below n f) a (by intro h; linarith) step b ab (by omega)
+
++ sum_below.split.int (f : ℕ → ℤ) (a b : ℕ) : sum_below (a + b) f = sum_below a f + sum_below b (fun i => f (a + i))
+  induction b with b ih
+  · simp
+  · rw [succ_eq_add_one.nat]
+    have e : a + (b + 1) = (a + b) + 1 := by ring
+    rw [e, sum_below_succ, sum_below_succ, ih]
+    ring
+
++ sum_below.le_const.int (f : ℕ → ℤ) (c : ℤ) (n : ℕ) (h : ∀ i < n, f i ≤ c) : sum_below n f ≤ (n : ℤ) * c
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, cast_succ.int]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    linarith [h n (by omega)]
+
++ sum_below.const_le.int (f : ℕ → ℤ) (c : ℤ) (n : ℕ) (h : ∀ i < n, c ≤ f i) : (n : ℤ) * c ≤ sum_below n f
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, cast_succ.int]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    linarith [h n (by omega)]
+
++ sum_below.mono.int (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b) (nonneg : ∀ i, a ≤ i → i < b → 0 ≤ f i) : sum_below a f ≤ sum_below b f
+  have step : ∀ i, a ≤ i → (i ≤ b → sum_below a f ≤ sum_below i f) → i+1 ≤ b → sum_below a f ≤ sum_below (i+1) f
+    intro i hi ih hb
+    rw [sum_below_succ]
+    linarith [ih (by omega), nonneg i hi (by omega)]
+  exact le_induction.nat (fun n => n ≤ b → sum_below a f ≤ sum_below n f) a (by intro h; linarith) step b ab (by omega)
+
++ sum_below.split.nat (f : ℕ → ℕ) (a b : ℕ) : sum_below (a + b) f = sum_below a f + sum_below b (fun i => f (a + i))
+  induction b with b ih
+  · simp
+  · rw [succ_eq_add_one.nat]
+    have e : a + (b + 1) = (a + b) + 1 := by ring
+    rw [e, sum_below_succ, sum_below_succ, ih]
+    ring
+
++ sum_below.le_const.nat (f : ℕ → ℕ) (c : ℕ) (n : ℕ) (h : ∀ i < n, f i ≤ c) : sum_below n f ≤ n * c
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    linarith [h n (by omega)]
+
++ sum_below.const_le.nat (f : ℕ → ℕ) (c : ℕ) (n : ℕ) (h : ∀ i < n, c ≤ f i) : n * c ≤ sum_below n f
+  induction n with h n ih h
+  · simp
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    linarith [h n (by omega)]
+
++ sum_below.mono.nat (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b) (nonneg : ∀ i, a ≤ i → i < b → 0 ≤ f i) : sum_below a f ≤ sum_below b f
+  have step : ∀ i, a ≤ i → (i ≤ b → sum_below a f ≤ sum_below i f) → i+1 ≤ b → sum_below a f ≤ sum_below (i+1) f
+    intro i hi ih hb
+    rw [sum_below_succ]
+    linarith [ih (by omega), nonneg i hi (by omega)]
+  exact le_induction.nat (fun n => n ≤ b → sum_below a f ≤ sum_below n f) a (by intro h; linarith) step b ab (by omega)
+
+-- ---- sums of zero terms -------------------------------------------------------------------------------------
+
++ sum_below.congr (f g : ℕ → α) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g
+  induction n with h n ih h
+  · rfl
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    rw [ih (by intro i hi; exact h i (by omega)), h n (by omega)]
+
++ sum_below.zero.real (n : ℕ) : (∑ i < n, (0 : ℝ)) = 0
+  induction n with n ih
+  · rfl
+  · simp only [succ_eq_add_one.nat, sum_below_succ, ih, add_zero.real]
+
++ sum_below.eq_zero.real (f : ℕ → ℝ) (n : ℕ) (zero : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0
+  rw [sum_below.congr f (fun i => (0 : ℝ)) n zero, sum_below.zero.real]
+
++ sum_below.zero.rat (n : ℕ) : (∑ i < n, (0 : ℚ)) = 0
+  induction n with n ih
+  · rfl
+  · simp only [succ_eq_add_one.nat, sum_below_succ, ih, add_zero.rat]
+
++ sum_below.eq_zero.rat (f : ℕ → ℚ) (n : ℕ) (zero : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0
+  rw [sum_below.congr f (fun i => (0 : ℚ)) n zero, sum_below.zero.rat]
+
++ sum_below.zero.int (n : ℕ) : (∑ i < n, (0 : ℤ)) = 0
+  induction n with n ih
+  · rfl
+  · simp only [succ_eq_add_one.nat, sum_below_succ, ih, add_zero.int]
+
++ sum_below.eq_zero.int (f : ℕ → ℤ) (n : ℕ) (zero : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0
+  rw [sum_below.congr f (fun i => (0 : ℤ)) n zero, sum_below.zero.int]
+
++ sum_below.zero.nat (n : ℕ) : (∑ i < n, (0 : ℕ)) = 0
+  induction n with n ih
+  · rfl
+  · simp only [succ_eq_add_one.nat, sum_below_succ, ih, add_zero.nat]
+
++ sum_below.eq_zero.nat (f : ℕ → ℕ) (n : ℕ) (zero : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0
+  rw [sum_below.congr f (fun i => (0 : ℕ)) n zero, sum_below.zero.nat]
+
+-- ---- interchange of rectangular sums -------------------------------------------------------------------------
+
++ sum_below.swap.nat (f : ℕ → ℕ → ℕ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f i j))
+  induction n with n ih
+  · simp only [sum_below_zero, sum_below.zero.nat]
+  · simp only [succ_eq_add_one.nat, sum_below_succ, ih, sum_add.nat]
+
++ sum_below.swap.int (f : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f i j))
+  induction n with n ih
+  · simp only [sum_below_zero, sum_below.zero.int]
+  · simp only [succ_eq_add_one.nat, sum_below_succ, ih, sum_add.int]
+
++ sum_below.swap.rat (f : ℕ → ℕ → ℚ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f i j))
+  induction n with n ih
+  · simp only [sum_below_zero, sum_below.zero.rat]
+  · simp only [succ_eq_add_one.nat, sum_below_succ, ih, sum_add.rat]
+
++ sum_below.swap.real (f : ℕ → ℕ → ℝ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f i j))
+  induction n with n ih
+  · simp only [sum_below_zero, sum_below.zero.real]
+  · simp only [succ_eq_add_one.nat, sum_below_succ, ih, sum_add.real]
+
+-- ---- weighted exchange from termwise equality ----------------------------------------------------------------
+
++ sum_below.exchange.nat (f g : ℕ → ℕ → ℕ) (u v : ℕ → ℕ) (n m : ℕ)
+    (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) :
+    (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i))
+  have a : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ i < n, (∑ j < m, u i * f i j))
+    apply sum_below.congr
+    intro i hi
+    rw [sum_const_mul.nat]
+  have b : (∑ i < n, (∑ j < m, u i * f i j)) = (∑ i < n, (∑ j < m, v j * g j i))
+    apply sum_below.congr
+    intro i hi
+    apply sum_below.congr
+    intro j hj
+    exact h i hi j hj
+  rw [a, b, sum_below.swap.nat]
+  apply sum_below.congr
+  intro j hj
+  rw [sum_const_mul.nat]
+
++ sum_below.exchange.int (f g : ℕ → ℕ → ℤ) (u v : ℕ → ℤ) (n m : ℕ)
+    (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) :
+    (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i))
+  have a : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ i < n, (∑ j < m, u i * f i j))
+    apply sum_below.congr
+    intro i hi
+    rw [sum_const_mul.int]
+  have b : (∑ i < n, (∑ j < m, u i * f i j)) = (∑ i < n, (∑ j < m, v j * g j i))
+    apply sum_below.congr
+    intro i hi
+    apply sum_below.congr
+    intro j hj
+    exact h i hi j hj
+  rw [a, b, sum_below.swap.int]
+  apply sum_below.congr
+  intro j hj
+  rw [sum_const_mul.int]
+
++ sum_below.exchange.rat (f g : ℕ → ℕ → ℚ) (u v : ℕ → ℚ) (n m : ℕ)
+    (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) :
+    (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i))
+  have a : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ i < n, (∑ j < m, u i * f i j))
+    apply sum_below.congr
+    intro i hi
+    rw [sum_const_mul.rat]
+  have b : (∑ i < n, (∑ j < m, u i * f i j)) = (∑ i < n, (∑ j < m, v j * g j i))
+    apply sum_below.congr
+    intro i hi
+    apply sum_below.congr
+    intro j hj
+    exact h i hi j hj
+  rw [a, b, sum_below.swap.rat]
+  apply sum_below.congr
+  intro j hj
+  rw [sum_const_mul.rat]
+
++ sum_below.exchange.real (f g : ℕ → ℕ → ℝ) (u v : ℕ → ℝ) (n m : ℕ)
+    (h : ∀ i < n, ∀ j < m, u i * f i j = v j * g j i) :
+    (∑ i < n, u i * (∑ j < m, f i j)) = (∑ j < m, v j * (∑ i < n, g j i))
+  have a : (∑ i < n, u i * (∑ j < m, f i j)) = (∑ i < n, (∑ j < m, u i * f i j))
+    apply sum_below.congr
+    intro i hi
+    rw [sum_const_mul.real]
+  have b : (∑ i < n, (∑ j < m, u i * f i j)) = (∑ i < n, (∑ j < m, v j * g j i))
+    apply sum_below.congr
+    intro i hi
+    apply sum_below.congr
+    intro j hj
+    exact h i hi j hj
+  rw [a, b, sum_below.swap.real]
+  apply sum_below.congr
+  intro j hj
+  rw [sum_const_mul.real]
+
+-- ---- linearity from termwise equality ------------------------------------------------------------------------
+
++ sum_below.scale.nat (f g : ℕ → ℕ) (c : ℕ) (n : ℕ) (h : ∀ i < n, f i = c * g i) :
+    (∑ i < n, f i) = c * (∑ i < n, g i)
+  rw [sum_below.congr f (fun i => c * g i) n h, sum_const_mul.nat]
+
++ sum_below.add.nat (f g k : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) :
+    (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i)
+  rw [sum_below.congr f (fun i => g i + k i) n h, sum_add.nat]
+
++ sum_below.scale.int (f g : ℕ → ℤ) (c : ℤ) (n : ℕ) (h : ∀ i < n, f i = c * g i) :
+    (∑ i < n, f i) = c * (∑ i < n, g i)
+  rw [sum_below.congr f (fun i => c * g i) n h, sum_const_mul.int]
+
++ sum_below.add.int (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) :
+    (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i)
+  rw [sum_below.congr f (fun i => g i + k i) n h, sum_add.int]
+
++ sum_below.scale.rat (f g : ℕ → ℚ) (c : ℚ) (n : ℕ) (h : ∀ i < n, f i = c * g i) :
+    (∑ i < n, f i) = c * (∑ i < n, g i)
+  rw [sum_below.congr f (fun i => c * g i) n h, sum_const_mul.rat]
+
++ sum_below.add.rat (f g k : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) :
+    (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i)
+  rw [sum_below.congr f (fun i => g i + k i) n h, sum_add.rat]
+
++ sum_below.scale.real (f g : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i = c * g i) :
+    (∑ i < n, f i) = c * (∑ i < n, g i)
+  rw [sum_below.congr f (fun i => c * g i) n h, sum_const_mul.real]
+
++ sum_below.add.real (f g k : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i + k i) :
+    (∑ i < n, f i) = (∑ i < n, g i) + (∑ i < n, k i)
+  rw [sum_below.congr f (fun i => g i + k i) n h, sum_add.real]
+
+-- ---- separate the first summand -----------------------------------------------------------------------------
+
++ sum_below.succ_front.real (f : ℕ → ℝ) (n : ℕ) : sum_below (n + 1) f = f 0 + sum_below n (fun i => f (i + 1))
+  induction n with n ih
+  · rw [sum_below_succ]; simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, sum_below_succ]
+    ring
+
++ sum_below.succ_front.rat (f : ℕ → ℚ) (n : ℕ) : sum_below (n + 1) f = f 0 + sum_below n (fun i => f (i + 1))
+  induction n with n ih
+  · rw [sum_below_succ]; simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, sum_below_succ]
+    ring
+
++ sum_below.succ_front.int (f : ℕ → ℤ) (n : ℕ) : sum_below (n + 1) f = f 0 + sum_below n (fun i => f (i + 1))
+  induction n with n ih
+  · rw [sum_below_succ]; simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, sum_below_succ]
+    ring
+
++ sum_below.succ_front.nat (f : ℕ → ℕ) (n : ℕ) : sum_below (n + 1) f = f 0 + sum_below n (fun i => f (i + 1))
+  induction n with n ih
+  · rw [sum_below_succ]; simp
+  · rw [succ_eq_add_one.nat, sum_below_succ, ih, sum_below_succ]
+    ring
+
+-- ---- subtraction from termwise equality ----------------------------------------------------------------------
+
++ sum_below.sub.int (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i - k i) :
+    (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  rw [sum_below.congr f (fun i => g i - k i) n h, sum_sub.int]
+
++ sum_below.sub.rat (f g k : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i - k i) :
+    (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  rw [sum_below.congr f (fun i => g i - k i) n h, sum_sub.rat]
+
++ sum_below.sub.real (f g k : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i - k i) :
+    (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  rw [sum_below.congr f (fun i => g i - k i) n h, sum_sub.real]
+
+-- ---- one selected summand ------------------------------------------------------------------------------------
+
++ sum_below.single_out.nat (f : ℕ → ℕ) (n j : ℕ) (hj : n ≤ j) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = 0
+  induction n with h0 n ih h
+  · rfl
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, ih (by linarith)]
+    have ne : ¬ (n = j) := by linarith
+    simp [ne]
+
++ sum_below.single.nat (f : ℕ → ℕ) (n j : ℕ) (hj : j < n) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = f j
+  induction n with h0 n ih h
+  · linarith
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    by_cases c : j < n
+    · rw [ih c]
+      have ne : ¬ (n = j) := by linarith
+      simp [ne]
+    · have e : j = n := by linarith
+      rw [sum_below.single_out.nat f n j (by linarith), e]
+      simp
+
++ sum_below.single_out.int (f : ℕ → ℤ) (n j : ℕ) (hj : n ≤ j) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = 0
+  induction n with h0 n ih h
+  · rfl
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, ih (by linarith)]
+    have ne : ¬ (n = j) := by linarith
+    simp [ne]
+
++ sum_below.single.int (f : ℕ → ℤ) (n j : ℕ) (hj : j < n) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = f j
+  induction n with h0 n ih h
+  · linarith
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    by_cases c : j < n
+    · rw [ih c]
+      have ne : ¬ (n = j) := by linarith
+      simp [ne]
+    · have e : j = n := by linarith
+      rw [sum_below.single_out.int f n j (by linarith), e]
+      simp
+
++ sum_below.single_out.rat (f : ℕ → ℚ) (n j : ℕ) (hj : n ≤ j) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = 0
+  induction n with h0 n ih h
+  · rfl
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, ih (by linarith)]
+    have ne : ¬ (n = j) := by linarith
+    simp [ne]
+
++ sum_below.single.rat (f : ℕ → ℚ) (n j : ℕ) (hj : j < n) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = f j
+  induction n with h0 n ih h
+  · linarith
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    by_cases c : j < n
+    · rw [ih c]
+      have ne : ¬ (n = j) := by linarith
+      simp [ne]
+    · have e : j = n := by linarith
+      rw [sum_below.single_out.rat f n j (by linarith), e]
+      simp
+
++ sum_below.single_out.real (f : ℕ → ℝ) (n j : ℕ) (hj : n ≤ j) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = 0
+  induction n with h0 n ih h
+  · rfl
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, ih (by linarith)]
+    have ne : ¬ (n = j) := by linarith
+    simp [ne]
+
++ sum_below.single.real (f : ℕ → ℝ) (n j : ℕ) (hj : j < n) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = f j
+  induction n with h0 n ih h
+  · linarith
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ]
+    by_cases c : j < n
+    · rw [ih c]
+      have ne : ¬ (n = j) := by linarith
+      simp [ne]
+    · have e : j = n := by linarith
+      rw [sum_below.single_out.real f n j (by linarith), e]
+      simp
+
++ sum_below.single_eq.nat (f : ℕ → ℕ) (n j : ℕ) (v : ℕ) (hj : j < n) (h : f j = v) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = v
+  rw [sum_below.single.nat f n j hj, h]
+
++ sum_below.single_eq.int (f : ℕ → ℤ) (n j : ℕ) (v : ℤ) (hj : j < n) (h : f j = v) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = v
+  rw [sum_below.single.int f n j hj, h]
+
++ sum_below.single_eq.rat (f : ℕ → ℚ) (n j : ℕ) (v : ℚ) (hj : j < n) (h : f j = v) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = v
+  rw [sum_below.single.rat f n j hj, h]
+
++ sum_below.single_eq.real (f : ℕ → ℝ) (n j : ℕ) (v : ℝ) (hj : j < n) (h : f j = v) :
+    (∑ i < n, f i * (if i = j then 1 else 0)) = v
+  rw [sum_below.single.real f n j hj, h]
+
+-- Exact totals of pointwise constant functions.
+
++ sum_below.eq_const.nat (f : ℕ → ℕ) (c : ℕ) (n : ℕ) (h : ∀ i < n, f i = c) : (∑ i < n, f i) = n * c
+  rw [sum_below.congr f (fun i => c) n h, sum_const.nat]
+
++ sum_below.eq_one.nat (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = 1) : (∑ i < n, f i) = n
+  rw [sum_below.eq_const.nat f 1 n h]
+  ring
+
++ sum_below.eq_const.int (f : ℕ → ℤ) (c : ℤ) (n : ℕ) (h : ∀ i < n, f i = c) : (∑ i < n, f i) = (n : ℤ) * c
+  rw [sum_below.congr f (fun i => c) n h, sum_const.int]
+
++ sum_below.eq_one.int (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = 1) : (∑ i < n, f i) = (n : ℤ)
+  rw [sum_below.eq_const.int f 1 n h]
+  ring
+
++ sum_below.eq_const.rat (f : ℕ → ℚ) (c : ℚ) (n : ℕ) (h : ∀ i < n, f i = c) : (∑ i < n, f i) = (n : ℚ) * c
+  rw [sum_below.congr f (fun i => c) n h, sum_const.rat]
+
++ sum_below.eq_one.rat (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = 1) : (∑ i < n, f i) = (n : ℚ)
+  rw [sum_below.eq_const.rat f 1 n h]
+  ring
+
++ sum_below.eq_const.real (f : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i = c) : (∑ i < n, f i) = (n : ℝ) * c
+  rw [sum_below.congr f (fun i => c) n h, sum_const.real]
+
++ sum_below.eq_one.real (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = 1) : (∑ i < n, f i) = (n : ℝ)
+  rw [sum_below.eq_const.real f 1 n h]
+  ring
+
+-- Recognize an existing cumulative sum without changing its definition.
++ sum_below.eq_of_recurrence (f s : ℕ → α) (base : s 0 = 0)
+    (step : ∀ i, s (i + 1) = s i + f i) (n : ℕ) : s n = sum_below n f
+  induction n with n ih
+  · rw [sum_below_zero]; exact base
+  · rw [succ_eq_add_one.nat, step, sum_below_succ, ih]

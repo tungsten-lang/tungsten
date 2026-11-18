@@ -1,0 +1,22 @@
+import arith
+
++ guarded_add (n j : ℕ) (h : n = 0) : n+j = j
+  omega
+
++ unused_guard (x y : ℕ) (h : y < 0) : x+1 = x
+  omega
+
++ same_names (n j : ℕ) (h : n = 0) : n+j = j
+  simp only [guarded_add]
+
++ swapped_names (n j : ℕ) (h : j = 0) : j+n = n
+  simp only [guarded_add]
+
++ renamed (a b : ℕ) (h : a = 0) : a+b = b
+  simp only [guarded_add]
+
++ under_binder (n : ℕ) (h : n = 0) : (fun (j : ℕ) => n+j) = (fun j => j)
+  simp only [guarded_add]
+
++ selected_names (f : ℕ → ℤ) (n j : ℕ) (h : j < n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  simp only [sum_below.single.int]

@@ -1,0 +1,48 @@
++ nat_negative_weight (a b c d : ℕ) (h : (a*b)*(a*b)-(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ nat_zero_weight (a b c d : ℕ) (h : 0*(a*b)*(a*b)+(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ nat_strict_bound (a b c d : ℕ) (ha : 0 ≤ a*b) (hc : 0 ≤ c*d) (h : (a*b)^2 ≤ (c*d)^2) : a*b < c*d
+  auto
++ nat_wrong_component (a b c d : ℕ) (h : (a*b)^2+(c*d)^2 = 0) : a = 0
+  auto
++ nat_nonzero_total (a b c d : ℕ) (h : (a*b)^2+(c*d)^2 = 1) : a*b = 0
+  auto
++ nat_inconsistent_substitution (a b c : ℕ) (h : (a*b)^2+(a*c)^2 = 0) : b*c = 0
+  auto
++ int_negative_weight (a b c d : ℤ) (h : (a*b)*(a*b)-(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ int_zero_weight (a b c d : ℤ) (h : 0*(a*b)*(a*b)+(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ int_strict_bound (a b c d : ℤ) (ha : 0 ≤ a*b) (hc : 0 ≤ c*d) (h : (a*b)^2 ≤ (c*d)^2) : a*b < c*d
+  auto
++ int_wrong_component (a b c d : ℤ) (h : (a*b)^2+(c*d)^2 = 0) : a = 0
+  auto
++ int_nonzero_total (a b c d : ℤ) (h : (a*b)^2+(c*d)^2 = 1) : a*b = 0
+  auto
++ int_inconsistent_substitution (a b c : ℤ) (h : (a*b)^2+(a*c)^2 = 0) : b*c = 0
+  auto
++ rat_negative_weight (a b c d : ℚ) (h : (a*b)*(a*b)-(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ rat_zero_weight (a b c d : ℚ) (h : 0*(a*b)*(a*b)+(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ rat_strict_bound (a b c d : ℚ) (ha : 0 ≤ a*b) (hc : 0 ≤ c*d) (h : (a*b)^2 ≤ (c*d)^2) : a*b < c*d
+  auto
++ rat_wrong_component (a b c d : ℚ) (h : (a*b)^2+(c*d)^2 = 0) : a = 0
+  auto
++ rat_nonzero_total (a b c d : ℚ) (h : (a*b)^2+(c*d)^2 = 1) : a*b = 0
+  auto
++ rat_inconsistent_substitution (a b c : ℚ) (h : (a*b)^2+(a*c)^2 = 0) : b*c = 0
+  auto
++ real_negative_weight (a b c d : ℝ) (h : (a*b)*(a*b)-(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ real_zero_weight (a b c d : ℝ) (h : 0*(a*b)*(a*b)+(c*d)*(c*d) = 0) : a*b = 0
+  auto
++ real_strict_bound (a b c d : ℝ) (ha : 0 ≤ a*b) (hc : 0 ≤ c*d) (h : (a*b)^2 ≤ (c*d)^2) : a*b < c*d
+  auto
++ real_wrong_component (a b c d : ℝ) (h : (a*b)^2+(c*d)^2 = 0) : a = 0
+  auto
++ real_nonzero_total (a b c d : ℝ) (h : (a*b)^2+(c*d)^2 = 1) : a*b = 0
+  auto
++ real_inconsistent_substitution (a b c : ℝ) (h : (a*b)^2+(a*c)^2 = 0) : b*c = 0
+  auto

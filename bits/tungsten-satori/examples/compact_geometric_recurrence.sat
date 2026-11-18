@@ -1,0 +1,13 @@
+import recurrence
+
+-> partial (r : ℚ) : ℕ → ℚ
+  | 0 => 0
+  | n+1 => partial r n+r^n
+
++ closed_sum (r : ℚ) (n : ℕ) : (1-r)*partial r n = 1-r^n
+  auto
+
++ forced_bound (s : ℕ → ℝ) (b q c : ℝ)
+    (rate : 0 ≤ b) (gap : b < q) (base : s 0 = 0)
+    (step : ∀ i, s (i+1) ≤ b*s i+c*q^i) : ∀ n, (q-b)*s n ≤ c*(q^n-b^n)
+  auto

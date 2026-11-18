@@ -1,0 +1,42 @@
+-- Repeated application of an endomorphism, in a namespace so local `iter`
+-- definitions remain available to developments with different conventions.
+-> function.iterate (f : α → α) : ℕ → α → α
+  | 0 => fun x => x
+  | n + 1 => fun x => f (function.iterate f n x)
+
+@[simp] + function.iterate_zero (f : α → α) (x : α) : function.iterate f 0 x = x := by rfl
+@[simp] + function.iterate_succ (f : α → α) (n : ℕ) (x : α) : function.iterate f (n + 1) x = f (function.iterate f n x) := by rfl
+
+-- A fixed point remains fixed under any number of steps.
++ function.iterate_fixed (f : α → α) (x : α) (h : f x = x) (n : ℕ) : function.iterate f n x = x
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, function.iterate_succ, ih, h]
+
+-- Iterating for m + n steps is iterating n steps and then m more.
++ function.iterate_add (f : α → α) (m n : ℕ) (x : α) : function.iterate f (m + n) x = function.iterate f m (function.iterate f n x)
+  induction m with m ih
+  · simp
+  · have e : m + 1 + n = m + n + 1 := by rw [add_assoc.nat, add_comm.nat 1 n, ← add_assoc.nat]
+    rw [succ_eq_add_one.nat, e, function.iterate_succ, function.iterate_succ, ih]
+
+-- An iterate commutes with the function being iterated.
++ function.iterate_apply (f : α → α) (n : ℕ) (x : α) : function.iterate f n (f x) = f (function.iterate f n x)
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, function.iterate_succ, function.iterate_succ, ih]
+
+-- A quantity preserved by one step is preserved by every iterate.
++ function.iterate_preserves (f : α → α) (g : α → β) (h : ∀ x, g (f x) = g x) (n : ℕ) (x : α) : g (function.iterate f n x) = g x
+  induction n with n ih <;> simp [function.iterate, h, *]
+
+-- A map intertwining two steps also intertwines their iterates.
++ function.iterate_commutes (f : α → α) (g : β → β) (h : α → β) (comm : ∀ x, h (f x) = g (h x)) (n : ℕ) (x : α) : h (function.iterate f n x) = function.iterate g n (h x)
+  induction n with n ih <;> simp [function.iterate, comm, *]
+
+-- A property preserved by one step holds throughout the orbit.
++ function.iterate_invariant (f : α → α) (P : α → Prop) (step : ∀ x, P x → P (f x)) (n : ℕ) (x : α) (hx : P x) : P (function.iterate f n x)
+  induction n with n ih
+  · simp
+  · rw [succ_eq_add_one.nat, function.iterate_succ]
+    exact step (function.iterate f n x) ih

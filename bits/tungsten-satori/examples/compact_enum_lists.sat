@@ -1,0 +1,17 @@
+inductive beat
+  | rest
+  | short
+  | long
+-> duration : list beat → ℚ
+  | [] => 0
+  | rest :: xs => duration xs
+  | short :: xs => 1+duration xs
+  | long :: xs => 2+duration xs
+-> stretched (k : ℚ) : list beat → ℚ
+  | [] => 0
+  | rest :: xs => stretched k xs
+  | short :: xs => k+stretched k xs
+  | long :: xs => 2*k+stretched k xs
+
++ stretch_duration (k : ℚ) (xs : list beat) : stretched k xs = k*duration xs
+  auto

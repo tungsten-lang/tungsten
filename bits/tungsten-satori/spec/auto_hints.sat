@@ -1,0 +1,34 @@
+import exp_convex
+
+opaque marked : ℝ → Prop
+opaque finished : ℝ → Prop
+opaque wrapped : α → Prop
+axiom mark_nonneg (x : ℝ) : 0 ≤ x → marked x
+axiom mark_negative (x : ℝ) : x < 0 → marked x
+axiom mark_finish (x : ℝ) : marked x → finished x
+axiom finish_loop (x : ℝ) : finished x → finished x
+axiom mark_two_sides (x : ℝ) : 0 ≤ x → x < 0 → marked x
+axiom finish_all (f : ℝ → ℝ) : (∀ x : ℝ, marked (f x)) → finished (f 0)
+axiom wrap_rule (x : α) : wrapped x
+
++ direct (x : ℝ) (hx : 0 ≤ x) : marked x := by auto [mark_nonneg]
++ arithmetic (x : ℝ) (hx : 1 ≤ x) : marked x := by auto [mark_nonneg]
++ retry (x : ℝ) (hx : 0 ≤ x) : marked x := by auto [mark_negative, mark_nonneg]
++ chain (x : ℝ) (hx : 0 ≤ x) : finished x := by auto [mark_finish, mark_nonneg]
++ loop_then_rule (x : ℝ) (hx : 0 ≤ x) : finished x := by auto [finish_loop, mark_finish, mark_nonneg]
++ partial (x : ℝ) (hx : 0 ≤ x) : marked x := by auto [mark_nonneg x]
++ introduced : ∀ x : ℝ, 0 ≤ x → finished x := by auto [mark_finish, mark_nonneg]
++ paired (x : ℝ) (hx : 0 ≤ x) : marked x ∧ finished x := by auto [mark_finish, mark_nonneg]
++ alternative (x : ℝ) (hx : 0 ≤ x) : False ∨ marked x := by auto [mark_nonneg]
++ local_rule (x : ℝ) (h : ∀ y : ℝ, y ≤ x → marked y) : marked x := by auto [h]
++ aesop_hint (x : ℝ) (hx : 0 ≤ x) : marked x := by aesop [mark_nonneg]
++ tauto_hint (x : ℝ) (hx : 0 ≤ x) : marked x := by tauto [mark_nonneg]
++ empty_hints (p : Prop) (h : p) : p := by auto []
++ exp_library (x y : ℝ) (h : x ≠ y) : 2*exp ((x+y)/2) < exp x+exp y := by auto [exp_midpoint_lt]
++ exp_sign (x : ℝ) (h : 0 < x) : 1+x < exp x := by auto [one_add_lt_exp]
++ exp_support (x y : ℝ) (h : x < y) : exp x+exp x*(y-x) < exp y := by auto [exp_tangent_lt]
+
++ retry_partial (x : ℝ) (hx : 0 ≤ x) : marked x := by auto [mark_two_sides, mark_nonneg]
++ quantified_premise (f : ℝ → ℝ) (h : ∀ x : ℝ, 0 ≤ f x) : finished (f 0) := by auto [finish_all, mark_nonneg]
++ poly_real (x : ℝ) : wrapped x := by auto [wrap_rule]
++ poly_nat (x : ℕ) : wrapped x := by auto [wrap_rule]

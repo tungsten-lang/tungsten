@@ -1,0 +1,13 @@
+-- Analytic convex-function instances; polynomial instances are in convex.
+import convex
+import exp_convex
+
++ convex_interval.exp.real (lo hi : ℝ) : convex_interval.real lo hi exp
+  unfold convex_interval.real
+  intro x y z a b hx0 hx1 hy0 hy1 ha hb hab mean
+  exact exp_weighted_jensen x y z a b ha hb mean
+
++ sum_below.exp_jensen.real (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (mean : (n : ℝ)*m = ∑ i < n, p i) : (n : ℝ)*exp m ≤ ∑ i < n, exp (p i)
+  have lower := sum_le.real (fun i => exp m+exp m*(p i-m)) (fun i => exp (p i)) n (by intro i hi; exact exp_tangent_le m (p i))
+  rw [sum_add.real, sum_const.real, sum_const_mul.real, sum_sub.real, sum_const.real, ← mean] at lower
+  nlinarith

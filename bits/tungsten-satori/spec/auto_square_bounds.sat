@@ -1,0 +1,45 @@
+import arith
+
++ coupling_rat (X P1 P2 Y a s : ℚ) (ha : 0 ≤ a) (hs : 0 ≤ s) (hY0 : 0 ≤ Y) (hX : X = P1+P2) (h1 : P1 ≤ 4*a*s) (h2 : P2 ≤ a*Y) (hY : 4*(Y*Y) ≤ X) (hX4 : X ≤ 4*(s*s)) : X ≤ 5*a*s
+  auto
+
++ coupling_int (X P1 P2 Y a s : ℤ) (ha : 0 ≤ a) (hs : 0 ≤ s) (hY0 : 0 ≤ Y) (hX : X = P1+P2) (h1 : P1 ≤ 4*a*s) (h2 : P2 ≤ a*Y) (hY : 4*(Y*Y) ≤ X) (hX4 : X ≤ 4*(s*s)) : X ≤ 5*a*s
+  auto
+
++ coupling_real (X P1 P2 Y a s : ℝ) (ha : 0 ≤ a) (hs : 0 ≤ s) (hY0 : 0 ≤ Y) (hX : X = P1+P2) (h1 : P1 ≤ 4*a*s) (h2 : P2 ≤ a*Y) (hY : 4*(Y*Y) ≤ X) (hX4 : X ≤ 4*(s*s)) : X ≤ 5*a*s
+  auto
+
++ coupling_nat (X P1 P2 Y a s : ℕ) (ha : 0 ≤ a) (hs : 0 ≤ s) (hY0 : 0 ≤ Y) (hX : X = P1+P2) (h1 : P1 ≤ 4*a*s) (h2 : P2 ≤ a*Y) (hY : 4*(Y*Y) ≤ X) (hX4 : X ≤ 4*(s*s)) : X ≤ 5*a*s
+  auto
+
++ two_bounds (a b y z s t : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hy : 0 ≤ y) (hz : 0 ≤ z) (hs : 0 ≤ s) (ht : 0 ≤ t) (hys : y*y ≤ s*s) (hzt : z*z ≤ t*t) : a*y+b*z ≤ a*s+b*t
+  auto
+
++ two_bounds_nat (a b y z s t : ℕ) (ha : 0 ≤ a) (hb : 0 ≤ b) (hy : 0 ≤ y) (hz : 0 ≤ z) (hs : 0 ≤ s) (ht : 0 ≤ t) (hys : y*y ≤ s*s) (hzt : z*z ≤ t*t) : a*y+b*z ≤ a*s+b*t
+  auto
+
++ weighted (a y s : ℚ) (ha : 0 ≤ a) (hy : 0 ≤ y) (hs : 0 ≤ s) (h : y*y ≤ s*s) : a*y ≤ a*s
+  auto
+
++ strict_weighted (a y s : ℚ) (ha : 0 < a) (hy : 0 ≤ y) (hs : 0 ≤ s) (h : y*y < s*s) : a*y < a*s
+  auto
+
++ mixed_spelling (X P1 P2 Y a s : ℚ) (ha : 0 ≤ a) (hs : 0 ≤ s) (hY0 : 0 ≤ Y) (hX : X = P1+P2) (h1 : P1 ≤ 4*a*s) (h2 : P2 ≤ a*Y) (hY : 4*Y^2 ≤ X) (hX4 : X ≤ 4*(s*s)) : X ≤ 5*a*s
+  auto
+
++ shifted_bases (a y s : ℚ) (ha : 0 ≤ a) (hy : 0 ≤ y+1) (hs : 0 ≤ s+2) (h : (y+1)^2 ≤ (s+2)^2) : a*(y+1) ≤ a*(s+2)
+  auto
+
++ conjunction (X P1 P2 Y a s : ℚ) (h : 0 ≤ a ∧ 0 ≤ s ∧ 0 ≤ Y ∧ X = P1+P2 ∧ P1 ≤ 4*a*s ∧ P2 ≤ a*Y ∧ 4*(Y*Y) ≤ X ∧ X ≤ 4*(s*s)) : X ≤ 5*a*s
+  auto
+
+opaque a : ℚ
+opaque b : ℚ
+opaque y : ℚ
+opaque z : ℚ
+opaque s : ℚ
+opaque t : ℚ
+axiom supplied_squares : y*y ≤ s*s ∧ z*z ≤ t*t
+
++ explicit_bounds (ha : 0 ≤ a) (hb : 0 ≤ b) (hy : 0 ≤ y) (hz : 0 ≤ z) (hs : 0 ≤ s) (ht : 0 ≤ t) : a*y+b*z ≤ a*s+b*t
+  auto [supplied_squares]

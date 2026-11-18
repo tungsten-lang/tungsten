@@ -1,0 +1,16 @@
+import sequence_order
+
++ rising (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b)
+    (step : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ falling (f : ℕ → ℚ) (step : ∀ i, f (i+1) ≤ f i) : ∀ a b, a ≤ b → f b ≤ f a
+  auto
+
++ remaining_rank (d : ℕ → ℕ) (n : ℕ)
+    (step : ∀ i < n, d (i+1) < d i) : d n+n ≤ d 0
+  auto
+
++ run_length (d : ℕ → ℕ) (n : ℕ)
+    (step : ∀ i < n, d (i+1) < d i) : n ≤ d 0
+  auto

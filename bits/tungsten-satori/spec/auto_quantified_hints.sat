@@ -1,0 +1,64 @@
+import arith
+
+opaque aggregate_int : (ℕ → ℤ) → ℕ → ℤ
+axiom aggregate_nonneg_int (f : ℕ → ℤ) (n : ℕ) : (∀ i < n, 0 ≤ f i) → 0 ≤ aggregate_int f n
+
++ generic_int (f : ℕ → ℤ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_int f n+f n = 0) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_int]
+
+opaque aggregate_rat : (ℕ → ℚ) → ℕ → ℚ
+axiom aggregate_nonneg_rat (f : ℕ → ℚ) (n : ℕ) : (∀ i < n, 0 ≤ f i) → 0 ≤ aggregate_rat f n
+
++ generic_rat (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_rat]
+
+opaque aggregate_real : (ℕ → ℝ) → ℕ → ℝ
+axiom aggregate_nonneg_real (f : ℕ → ℝ) (n : ℕ) : (∀ i < n, 0 ≤ f i) → 0 ≤ aggregate_real f n
+
++ generic_real (f : ℕ → ℝ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_real f n+f n = 0) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_real]
+
+opaque aggregate_nat : (ℕ → ℕ) → ℕ → ℕ
+axiom aggregate_lower_nat (f : ℕ → ℕ) (n : ℕ) : (∀ i < n, 1 ≤ f i) → n ≤ aggregate_nat f n
+
++ generic_nat (f : ℕ → ℕ) (n i : ℕ) (h : ∀ j < n+1, 1 ≤ f j) (hz : aggregate_nat f n+f n = n+1) (e : i = n) : f i = 1
+  auto [aggregate_lower_nat]
+
++ partially_applied (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) (e : i = n) : f i = 0
+  auto [aggregate_nonneg_rat f]
+
++ local_rule (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) (e : i = n)
+    (rule : ∀ g k, (∀ j < k, 0 ≤ g j) → 0 ≤ aggregate_rat g k) : f i = 0
+  auto [rule]
+
++ local_fixed_function (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) (e : i = n)
+    (rule : ∀ k, (∀ j < k, 0 ≤ f j) → 0 ≤ aggregate_rat f k) : f i = 0
+  auto [rule]
+
+opaque folded : (α → ℚ) → α → ℚ
+axiom folded_nonneg (f : α → ℚ) (a : α) : (∀ x, 0 ≤ f x) → 0 ≤ folded f a
+
++ polymorphic (f : α → ℚ) (a b : α) (h : ∀ x, 0 ≤ f x) (hz : folded f a+f a = 0) (e : b = a) : f b = 0
+  auto [folded_nonneg]
+
++ fixed_polymorphic (f : α → ℚ) (a b : α) (h : ∀ x, 0 ≤ f x) (hz : folded f a+f a = 0) (e : b = a) : f b = 0
+  auto [folded_nonneg f]
+
++ concrete_domain (f : list ℕ → ℚ) (a b : list ℕ) (h : ∀ x, 0 ≤ f x) (hz : folded f a+f a = 0) (e : b = a) : f b = 0
+  auto [folded_nonneg]
+
++ irrelevant_hint (f : ℕ → ℚ) (n i : ℕ) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) (e : i = n) : f i = 0
+  auto [folded_nonneg, aggregate_nonneg_rat]
+
++ fallback (f : ℕ → ℚ) (n : ℕ) (h : ∀ j < n, 0 ≤ f j) : 0 ≤ aggregate_rat f n
+  auto [aggregate_nonneg_rat]
+
++ nested_domain (f : list α → ℚ) (a b : list α) (h : ∀ x, 0 ≤ f x) (hz : folded f a+f a = 0) (e : b = a) : f b = 0
+  auto [folded_nonneg]
+
+opaque sample : ℕ → ℚ
+opaque cutoff : ℕ
+axiom stored_zero : aggregate_rat sample cutoff+sample cutoff = 0
+
++ mixed_hints (i : ℕ) (h : ∀ j < cutoff+1, 0 ≤ sample j) (e : i = cutoff) : sample i = 0
+  auto [stored_zero, aggregate_nonneg_rat]

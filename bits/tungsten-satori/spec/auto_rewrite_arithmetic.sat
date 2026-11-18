@@ -1,0 +1,103 @@
+opaque measure_nat : ℕ → ℕ → ℕ
+opaque allowed_nat : ℕ → ℕ → bool
+axiom measure_nat_formula : ∀ a b, measure_nat a b = 12*(a*b)^2
+axiom measure_nat_guarded : ∀ a b, allowed_nat a b → measure_nat a b = 12*(a*b)^2
++ nat_zero (a b c d : ℕ) (h : measure_nat a b + measure_nat c d = 0) : a*b = 0 ∧ c*d = 0
+  auto [measure_nat_formula]
+
++ nat_upper (a b : ℕ) (h : measure_nat a b ≤ 0) : a*b = 0
+  auto [measure_nat_formula]
+
++ nat_local (a b c d : ℕ) (h : measure_nat a b + measure_nat c d = 0) : a*b = 0
+  have formula := measure_nat_formula
+  auto [formula]
+
++ nat_guarded (a b : ℕ) (ha : allowed_nat a b) (h : measure_nat a b = 0) : a*b = 0
+  auto [measure_nat_guarded]
+
++ nat_applied (a b : ℕ) (ha : allowed_nat a b) (h : measure_nat a b = 0) : a*b = 0
+  auto [measure_nat_guarded a b ha]
+
+opaque measure_int : ℤ → ℤ → ℤ
+opaque allowed_int : ℤ → ℤ → bool
+axiom measure_int_formula : ∀ a b, measure_int a b = 12*(a*b)^2
+axiom measure_int_guarded : ∀ a b, allowed_int a b → measure_int a b = 12*(a*b)^2
++ int_zero (a b c d : ℤ) (h : measure_int a b + measure_int c d = 0) : a*b = 0 ∧ c*d = 0
+  auto [measure_int_formula]
+
++ int_upper (a b : ℤ) (h : measure_int a b ≤ 0) : a*b = 0
+  auto [measure_int_formula]
+
++ int_local (a b c d : ℤ) (h : measure_int a b + measure_int c d = 0) : a*b = 0
+  have formula := measure_int_formula
+  auto [formula]
+
++ int_guarded (a b : ℤ) (ha : allowed_int a b) (h : measure_int a b = 0) : a*b = 0
+  auto [measure_int_guarded]
+
++ int_applied (a b : ℤ) (ha : allowed_int a b) (h : measure_int a b = 0) : a*b = 0
+  auto [measure_int_guarded a b ha]
+
+opaque measure_rat : ℚ → ℚ → ℚ
+opaque allowed_rat : ℚ → ℚ → bool
+axiom measure_rat_formula : ∀ a b, measure_rat a b = 12*(a*b)^2
+axiom measure_rat_guarded : ∀ a b, allowed_rat a b → measure_rat a b = 12*(a*b)^2
++ rat_zero (a b c d : ℚ) (h : measure_rat a b + measure_rat c d = 0) : a*b = 0 ∧ c*d = 0
+  auto [measure_rat_formula]
+
++ rat_upper (a b : ℚ) (h : measure_rat a b ≤ 0) : a*b = 0
+  auto [measure_rat_formula]
+
++ rat_local (a b c d : ℚ) (h : measure_rat a b + measure_rat c d = 0) : a*b = 0
+  have formula := measure_rat_formula
+  auto [formula]
+
++ rat_guarded (a b : ℚ) (ha : allowed_rat a b) (h : measure_rat a b = 0) : a*b = 0
+  auto [measure_rat_guarded]
+
++ rat_applied (a b : ℚ) (ha : allowed_rat a b) (h : measure_rat a b = 0) : a*b = 0
+  auto [measure_rat_guarded a b ha]
+
+opaque measure_real : ℝ → ℝ → ℝ
+opaque allowed_real : ℝ → ℝ → bool
+axiom measure_real_formula : ∀ a b, measure_real a b = 12*(a*b)^2
+axiom measure_real_guarded : ∀ a b, allowed_real a b → measure_real a b = 12*(a*b)^2
++ real_zero (a b c d : ℝ) (h : measure_real a b + measure_real c d = 0) : a*b = 0 ∧ c*d = 0
+  auto [measure_real_formula]
+
++ real_upper (a b : ℝ) (h : measure_real a b ≤ 0) : a*b = 0
+  auto [measure_real_formula]
+
++ real_local (a b c d : ℝ) (h : measure_real a b + measure_real c d = 0) : a*b = 0
+  have formula := measure_real_formula
+  auto [formula]
+
++ real_guarded (a b : ℝ) (ha : allowed_real a b) (h : measure_real a b = 0) : a*b = 0
+  auto [measure_real_guarded]
+
++ real_applied (a b : ℝ) (ha : allowed_real a b) (h : measure_real a b = 0) : a*b = 0
+  auto [measure_real_guarded a b ha]
+
++ nat_assumed (a b : ℕ) (hf : ∀ x y, measure_nat x y = 12*(x*y)^2) (h : measure_nat a b = 0) : a*b = 0
+  auto [hf]
+
++ nat_unused (a b : ℕ) (h : measure_nat a b = 0) : a*b = 0
+  auto [measure_nat_formula, measure_nat_guarded]
+
++ int_assumed (a b : ℤ) (hf : ∀ x y, measure_int x y = 12*(x*y)^2) (h : measure_int a b = 0) : a*b = 0
+  auto [hf]
+
++ int_unused (a b : ℤ) (h : measure_int a b = 0) : a*b = 0
+  auto [measure_int_formula, measure_int_guarded]
+
++ rat_assumed (a b : ℚ) (hf : ∀ x y, measure_rat x y = 12*(x*y)^2) (h : measure_rat a b = 0) : a*b = 0
+  auto [hf]
+
++ rat_unused (a b : ℚ) (h : measure_rat a b = 0) : a*b = 0
+  auto [measure_rat_formula, measure_rat_guarded]
+
++ real_assumed (a b : ℝ) (hf : ∀ x y, measure_real x y = 12*(x*y)^2) (h : measure_real a b = 0) : a*b = 0
+  auto [hf]
+
++ real_unused (a b : ℝ) (h : measure_real a b = 0) : a*b = 0
+  auto [measure_real_formula, measure_real_guarded]

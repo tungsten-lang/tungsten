@@ -1,0 +1,11 @@
+-> square_box (x y : ℚ) : ℚ := (x+y)*(x+y)
++ numeric_entry (x y : ℚ) : square_box x y = x*x+2*x*y+y*y
+  norm_num
++ combination_entry (x y : ℚ) : square_box x y = x*x+2*x*y+y*y
+  linear_combination
+opaque hidden : ℚ → ℚ
+axiom hidden_value : ∀ x, hidden x = x
++ opaque_atoms (x y : ℚ) : hidden x*(hidden y+1) = hidden x*hidden y+hidden x
+  ring
+-> cut (x y : ℕ) : ℕ := x-y
+-> quotient (x y : ℚ) : ℚ := x/y

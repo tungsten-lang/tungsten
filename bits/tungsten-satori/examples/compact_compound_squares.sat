@@ -1,0 +1,6 @@
++ zero_components (a b c d : ℚ) (h : (a*b)^2+(c*d)^2 = 0) : a*b = 0 ∧ c*d = 0
+  auto
++ product_bound (a b c d : ℚ) : 2*(a*b)*(c*d) ≤ (a*b)^2+(c*d)^2
+  auto
++ weighted_zero (x y z : ℚ) (h : 12*x*x+12*y*y+12*z*z = 0) : x = 0
+  nlinarith

@@ -1,0 +1,37 @@
+import geometric_mean
+
++ list_missing_w (xs : list α) (w f g : α → ℝ) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i)))
+  auto
+
++ list_missing_f (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i)))
+  auto
+
++ list_missing_g (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i)))
+  auto
+
++ list_strict (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) < sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i))) := by auto
+
++ list_reverse (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*g i))) ≤ sum_list xs (fun i => w i*sqrt (f i*g i)) := by auto
+
++ list_wrong_vector (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) : sum_list xs (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_list xs (fun i => w i*f i))*(sum_list xs (fun i => w i*f i))) := by auto
+
++ range_missing_w (n : ℕ) (w f g : ℕ → ℝ) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i)))
+  auto
+
++ range_missing_f (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i)))
+  auto
+
++ range_missing_g (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i)))
+  auto
+
++ range_strict (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) < sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i))) := by auto
+
++ range_reverse (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*g i))) ≤ sum_below n (fun i => w i*sqrt (f i*g i)) := by auto
+
++ range_wrong_vector (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) : sum_below n (fun i => w i*sqrt (f i*g i)) ≤ sqrt ((sum_below n (fun i => w i*f i))*(sum_below n (fun i => w i*f i))) := by auto
+
++ scalar_missing_sign (a b c d : ℝ) : sqrt (a*b)+sqrt (c*d) ≤ sqrt ((a+c)*(b+d))
+  auto
+
++ scalar_strict_equality : sqrt (1*1)+sqrt (1*1) < sqrt ((1+1)*(1+1))
+  auto

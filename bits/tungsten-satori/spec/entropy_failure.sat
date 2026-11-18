@@ -1,0 +1,14 @@
+import entropy
+
++ missing_center (a x : ℝ) (hx : 0 ≤ x) : x*log a+x-a ≤ x*log x := mul_log_tangent_le a x (by linarith) hx
++ missing_mass_sign (a x : ℝ) (ha : 0 < a) : x*log a+x-a ≤ x*log x := mul_log_tangent_le a x ha (by linarith)
++ equal_strict (a : ℝ) (ha : 0 < a) : a*log a+a-a < a*log a := mul_log_tangent_lt a a ha (by linarith) (by intro h; linarith)
++ weak_to_strict (a x : ℝ) (ha : 0 < a) (hx : 0 ≤ x) : x*log a+x-a < x*log x := mul_log_tangent_le a x ha hx
++ negative_gibbs (x : ℝ) : x-1 ≤ x*log x := sub_one_le_mul_log x (by linarith)
++ zero_scale (x : ℝ) (hx : 0 ≤ x) : 0-x*log x ≤ x*(log 0-1)+1/0 := neg_mul_log_le_scale x 0 hx (by linarith)
++ negative_scale (x c : ℝ) (hx : 0 ≤ x) (hc : c < 0) : 0-x*log x ≤ x*(log c-1)+1/c := neg_mul_log_le_scale x c hx (by linarith)
++ wrong_heavy_order (x t : ℝ) (hx : 0 < x) (ht : 0 < t) (h : x < t) : 0-x*log x ≤ x*log (1/t) := neg_mul_log_le_of_le x t ht (by linarith)
++ zero_threshold (x : ℝ) (hx : 0 < x) : 0-x*log x ≤ x*log (1/0) := neg_mul_log_le_of_le x 0 (by linarith) (by linarith)
++ missing_total (n : ℕ) (p : ℕ → ℝ) (hn : 0 < (n : ℝ)) (hp : ∀ i < n, 0 ≤ p i) : sum_below n (fun i => 0-p i*log (p i)) ≤ log (n : ℝ) := sum_below.entropy_le_log.real n p hn hp (by linarith)
++ missing_atom_signs (n : ℕ) (p : ℕ → ℝ) (hn : 0 < (n : ℝ)) (mass : sum_below n p = 1) : sum_below n (fun i => 0-p i*log (p i)) ≤ log (n : ℝ) := sum_below.entropy_le_log.real n p hn (by intro i hi; linarith) mass
++ strict_finite (n : ℕ) (p : ℕ → ℝ) (hn : 0 < (n : ℝ)) (hp : ∀ i < n, 0 ≤ p i) (mass : sum_below n p = 1) : sum_below n (fun i => 0-p i*log (p i)) < log (n : ℝ) := sum_below.entropy_le_log.real n p hn hp mass

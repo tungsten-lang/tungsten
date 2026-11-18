@@ -1,0 +1,34 @@
+-- Square-root distance bounds, including weighted finite sums.
+import realx
+import square_gap
+import list_sum
+
++ sqrt_sub_sq_le_abs (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : (sqrt x-sqrt y)^2 ≤ |x-y|
+  have gap := square_gap.le_abs.real (sqrt x) (sqrt y) (sqrt_nonneg x) (sqrt_nonneg y)
+  rw [(sqrt_spec x hx).2, (sqrt_spec y hy).2] at gap
+  nlinarith
+
++ sqrt_sub_abs_le (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : |sqrt x-sqrt y| ≤ sqrt (|x-y|)
+  exact (le_sqrt_iff (|x-y|) (|sqrt x-sqrt y|) (abs_nonneg.real (x-y)) (abs_nonneg.real (sqrt x-sqrt y))).mpr (by rw [sq_abs.real]; exact sqrt_sub_sq_le_abs x y hx hy)
+
++ list_sum.weighted_sqrt_distance.real (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) :
+    sum_list xs (fun i => w i*(sqrt (f i)-sqrt (g i))^2) ≤ sum_list xs (fun i => w i*|f i-g i|)
+  apply sum_list_weighted_le.real xs w (fun i => (sqrt (f i)-sqrt (g i))^2) (fun i => |f i-g i|) hw
+  intro i hi
+  exact sqrt_sub_sq_le_abs (f i) (g i) (hf i hi) (hg i hi)
+
++ list_sum.sqrt_distance.real (xs : list α) (f g : α → ℝ) (hf : ∀ i ∈ xs, 0 ≤ f i) (hg : ∀ i ∈ xs, 0 ≤ g i) :
+    sum_list xs (fun i => (sqrt (f i)-sqrt (g i))^2) ≤ sum_list xs (fun i => |f i-g i|)
+  simpa using list_sum.weighted_sqrt_distance.real xs (fun i => 1) f g (by intro i hi; linarith) hf hg
+
++ sum_below.weighted_sqrt_distance.real (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) :
+    sum_below n (fun i => w i*(sqrt (f i)-sqrt (g i))^2) ≤ sum_below n (fun i => w i*|f i-g i|)
+  apply sum_le.real
+  intro i hi
+  have bound := sqrt_sub_sq_le_abs (f i) (g i) (hf i hi) (hg i hi)
+  have sign := hw i hi
+  nlinarith
+
++ sum_below.sqrt_distance.real (n : ℕ) (f g : ℕ → ℝ) (hf : ∀ i < n, 0 ≤ f i) (hg : ∀ i < n, 0 ≤ g i) :
+    sum_below n (fun i => (sqrt (f i)-sqrt (g i))^2) ≤ sum_below n (fun i => |f i-g i|)
+  simpa using sum_below.weighted_sqrt_distance.real n (fun i => 1) f g (by intro i hi; linarith) hf hg

@@ -1,0 +1,5 @@
+import polymorphic_pattern
+
++ invalid_nil (f : ℕ → ℝ) : poly_sum [] f = 1 := by simp [poly_sum]
++ invalid_product (x : ℕ) (xs : list ℕ) (f : ℕ → ℤ) : poly_product (x :: xs) f = f x + poly_product xs f := by simp [poly_product]
++ invalid_catchall (a b : α) (xs : list α) : poly_first a (b :: xs) = a := by simp [poly_first]

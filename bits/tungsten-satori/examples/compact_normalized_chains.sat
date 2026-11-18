@@ -1,0 +1,14 @@
+import arith
+
++ cancel_offset (x b c d : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : c+d ≤ b^n+d) : c ≤ x^n
+  auto
+
++ cancel_scale (x b c : ℝ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c ≤ 2*b^n) : c ≤ x^n
+  auto
+
++ retain_margin (x b c : ℚ) (n : ℕ) (h0 : 0 ≤ b) (hb : b ≤ x) (hc : 2*c+1 ≤ 2*b^n) : c < x^n
+  auto
+
++ monotone_scaled (f : ℚ → ℚ) (mono : ∀ u v, u ≤ v → f u ≤ f v)
+    (x b c : ℚ) (hb : b ≤ x) (hc : 2*c ≤ 2*f b) : c ≤ f x
+  auto

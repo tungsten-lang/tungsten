@@ -1,0 +1,30 @@
+inductive letter
+  | ls
+  | la
+  | lb
+
+structure m2 := (x11 : ℤ) (x12 : ℤ) (x21 : ℤ) (x22 : ℤ)
+-> step : letter → ℤ × ℤ → ℤ × ℤ
+  | ls, v => (fst v, fst v)
+  | la, v => (fst v + snd v, fst v)
+  | lb, v => (2 * fst v - snd v, fst v)
+-> run : list letter → ℤ × ℤ → ℤ × ℤ
+  | [], v => v
+  | x :: l, v => run l (step x v)
++ step_inv (x : letter) (v : ℤ × ℤ) (h1 : 1 ≤ snd v) (h2 : snd v ≤ fst v) : 1 ≤ snd (step x v) ∧ snd (step x v) ≤ fst (step x v)
+  cases x
+  · show 1 ≤ fst v ∧ fst v ≤ fst v
+    constructor
+    · linarith
+    · linarith
+  · show 1 ≤ fst v ∧ fst v ≤ fst v + snd v
+    constructor
+    · linarith
+    · linarith
+  · show 1 ≤ fst v ∧ fst v ≤ 2 * fst v - snd v
+    constructor
+    · linarith
+    · linarith
++ run_inv (l : list letter) : ∀ v : ℤ × ℤ, 1 ≤ snd v → snd v ≤ fst v → 1 ≤ snd (run l v) ∧ snd (run l v) ≤ fst (run l v)
+  auto [step_inv]
+-- the state is the matrix action: run l v = (prodw l)·v, coordinatewise

@@ -1,0 +1,35 @@
+import arith
+
++ missing (f : ℕ → ℚ) (n : ℕ) (x : ℚ) (step : (∀ i < n, 0 ≤ f i) → 0 ≤ x) : 0 ≤ x+1
+  auto
+
++ wrong_range (f : ℕ → ℚ) (n : ℕ) (x : ℚ) (step : (∀ i < n+1, 0 ≤ f i) → 0 ≤ x) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ x+1
+  auto
+
++ wrong_sign (f : ℕ → ℚ) (n : ℕ) (x : ℚ) (step : (∀ i < n, 0 ≤ f i) → 0 ≤ x) (h : ∀ i < n+1, f i ≤ 0) : 0 ≤ x+1
+  auto
+
++ weak_strict (f : ℕ → ℚ) (n : ℕ) (x : ℚ) (step : (∀ i < n, 0 < f i) → 0 ≤ x) (h : ∀ i < n+1, 0 ≤ f i) : 0 ≤ x+1
+  auto
+
++ escaped (p : Prop) (x y : ℚ) (step : (p → 0 ≤ x) → 0 ≤ y) (h : p → 0 ≤ x) : 0 ≤ x+y
+  auto
+
++ missing_pair (x y z : ℚ) (step : (0 ≤ x ∧ 0 ≤ y) → 0 ≤ z) (h : 0 ≤ x) : 0 ≤ z+1
+  auto
+
++ cycle (p q : Prop) (x : ℚ) (first : p → q) (second : q → p) (step : (p ∧ q) → 0 ≤ x) : 0 ≤ x+1
+  auto
+
++ branch_leak (p : Prop) (x y : ℚ) (step : (p → 0 ≤ x) → 0 ≤ y) (h : p ∨ 0 ≤ x) : 0 ≤ x+y
+  auto
+
++ wrong_function (f g : ℕ → ℚ) (n : ℕ) (x : ℚ) (step : (∀ i < n, 0 ≤ f i) → 0 ≤ x) (h : ∀ i < n+1, 0 ≤ g i) : 0 ≤ x+1
+  auto
+
+opaque f : ℕ → ℚ
+opaque n : ℕ
+opaque x : ℚ
+
++ no_global_step (h : ∀ i < n+1, 0 ≤ f i) : 0 ≤ x+f n
+  auto

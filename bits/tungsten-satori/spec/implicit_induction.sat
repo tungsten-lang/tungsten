@@ -1,0 +1,54 @@
++ named_nat : ∀ n : ℕ, n+0 = n
+  induction n
+    rfl
+    rfl
+
++ named_cases : ∀ n : ℕ, n+0 = n
+  induction n with k ih
+    rfl
+    rfl
+
++ earlier_binder : ∀ m n : ℕ, n+m = m+n
+  induction n
+    ring
+    ring
+
++ preceding_guard (p : Prop) : p → ∀ n : ℕ, n+0 = n
+  induction n
+    rfl
+    rfl
+
++ step_guard : ∀ n : ℕ, 0 ≤ n → n+0 = n
+  induction n
+    rfl
+    rfl
+
++ increasing (f : ℕ → ℕ) (h : ∀ i, f i < f (i+1)) : ∀ i, i ≤ f i
+  induction i
+    linarith
+    auto
+
++ already_local (n : ℕ) : n+0 = n
+  induction n
+    rfl
+    rfl
+
++ local_priority (n : ℕ) : ∀ n : ℕ, n+0 = n
+  induction n
+    rfl
+    rfl
+
++ list_identity : ∀ xs : list α, xs = xs
+  induction xs
+    rfl
+    rfl
+
++ earlier_list_parameter : ∀ x : α, ∀ xs : list α, x = x
+  induction xs
+    rfl
+    rfl
+
++ bullet_compat : ∀ n : ℕ, n+0 = n
+  induction n with k ih
+  · rfl
+  · rfl

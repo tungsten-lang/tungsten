@@ -1,0 +1,69 @@
+import arith
+
++ nat_reassociate (f : ℕ → α) (s i : ℕ) : f (s+(i+1)) = f ((s+1)+i)
+  auto
+
++ nat_balanced (f : ℕ → α) (i j : ℕ) (h : i+3 = j+2) : f (i+1) = f j
+  auto
+
++ nat_bound (f : ℕ → ℚ) (s i : ℕ) (h : f ((s+1)+i) ≤ 7) : f (s+(i+1))+1 ≤ 8
+  auto
+
++ int_reassociate (f : ℤ → α) (s i : ℤ) : f (s+(i+1)) = f ((s+1)+i)
+  auto
+
++ int_balanced (f : ℤ → α) (i j : ℤ) (h : i+3 = j+2) : f (i+1) = f j
+  auto
+
++ int_bound (f : ℤ → ℚ) (s i : ℤ) (h : f ((s+1)+i) ≤ 7) : f (s+(i+1))+1 ≤ 8
+  auto
+
++ rat_reassociate (f : ℚ → α) (s i : ℚ) : f (s+(i+1)) = f ((s+1)+i)
+  auto
+
++ rat_balanced (f : ℚ → α) (i j : ℚ) (h : i+3 = j+2) : f (i+1) = f j
+  auto
+
++ rat_bound (f : ℚ → ℚ) (s i : ℚ) (h : f ((s+1)+i) ≤ 7) : f (s+(i+1))+1 ≤ 8
+  auto
+
++ real_reassociate (f : ℝ → α) (s i : ℝ) : f (s+(i+1)) = f ((s+1)+i)
+  auto
+
++ real_balanced (f : ℝ → α) (i j : ℝ) (h : i+3 = j+2) : f (i+1) = f j
+  auto
+
++ real_bound (f : ℝ → ℚ) (s i : ℝ) (h : f ((s+1)+i) ≤ 7) : f (s+(i+1))+1 ≤ 8
+  auto
+
++ nested (f : ℕ → α) (g : ℕ → ℕ) (s i : ℕ) : f (g (s+(i+1))) = f (g ((s+1)+i))
+  auto
+
++ two_arguments (f : ℕ → ℤ → α) (s i : ℕ) (x y : ℤ) : f (s+(i+1)) (x+(y+2)) = f ((s+1)+i) ((x+2)+y)
+  auto
+
++ squeezed (f : ℕ → α) (i j : ℕ) (h : i ≤ j) (k : j ≤ i) : f i = f j
+  auto
+
++ conditional (f : ℕ → ℚ) (i j : ℕ) (p : Prop) (hp : p) (e : p → i+3 = j+2) (h : f j ≤ 7) : f (i+1)+1 ≤ 8
+  auto
+
++ strict (f : ℕ → ℝ) (s i : ℕ) (h : f ((s+1)+i) < 7) : f (s+(i+1))+1 < 8
+  auto
+
++ scaled (f : ℤ → α) (x : ℤ) : f (2*x+3*x) = f (5*x)
+  auto
+
++ branch (f : ℕ → ℚ) (i j : ℕ) (e : i+1 = j ∨ i+1 = j) (h : f j ≤ 7) : f (i+1)+1 ≤ 8
+  auto
+
+opaque indexed : ℕ → α
+opaque first_index : ℕ
+opaque second_index : ℕ
+axiom given_index : first_index+3 = second_index+2
+
++ hinted : indexed (first_index+1) = indexed second_index
+  auto [given_index]
+
++ explicit (f : ℕ → α) (i j : ℕ) (e : i = j) : f i = f j
+  auto

@@ -1,0 +1,23 @@
+-- Square gaps for nonnegative scalars, and their absolute-distance bound.
+import arith
+
++ square_gap.le_abs.real (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a-b)*(a-b) ≤ |a*a-b*b|
+  obtain h | h := le_total.real a b
+  · rw [abs_of_nonpos.real (a*a-b*b) (by nlinarith)]
+    nlinarith
+  · rw [abs_of_nonneg.real (a*a-b*b) (by nlinarith)]
+    nlinarith
+
++ square_gap.le_abs.rat (a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a-b)*(a-b) ≤ |a*a-b*b|
+  obtain h | h := le_total.rat a b
+  · rw [abs_of_nonpos.rat (a*a-b*b) (by nlinarith)]
+    nlinarith
+  · rw [abs_of_nonneg.rat (a*a-b*b) (by nlinarith)]
+    nlinarith
+
++ square_gap.le_abs.int (a b : ℤ) (ha : 0 ≤ a) (hb : 0 ≤ b) : (a-b)*(a-b) ≤ |a*a-b*b|
+  obtain h | h := le_total.int a b
+  · rw [abs_of_nonpos.int (a*a-b*b) (by nlinarith)]
+    nlinarith
+  · rw [abs_of_nonneg.int (a*a-b*b) (by nlinarith)]
+    nlinarith

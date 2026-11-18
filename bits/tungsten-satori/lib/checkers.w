@@ -30,7 +30,7 @@
 # pair-multiplication caching, avoiding all string formatting and splitting.
 
 + RingCtx
-  ro :atoms
+  ro :atoms, :monos
   -> new(@kind)
     @atoms = {}
     @atom_count = 0

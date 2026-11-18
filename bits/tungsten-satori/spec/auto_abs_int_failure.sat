@@ -1,0 +1,22 @@
+import auto_abs_int
+
++ missing_lower (x e : ℤ) (h : x ≤ e) : |x| ≤ e
+  auto
++ missing_upper (x e : ℤ) (h : 0-e ≤ x) : |x| ≤ e
+  auto
++ weak_strict (x e : ℤ) (lo : 0-e ≤ x) (hi : x ≤ e) : |x| < e
+  auto
++ strict_endpoint (x e : ℤ) (h : |x| ≤ e) : x < e
+  auto
++ wrong_endpoint (x e : ℤ) (h : |x| < e) : x < 0-e
+  auto
++ negative_squared_bound (x c : ℤ) (h : x*x ≤ c*c) (hc : c ≤ 0) : |x| ≤ c
+  auto
++ wrong_value (x : ℤ) : |x| = x
+  auto
++ false_monotonicity (x y : ℤ) (h : x ≤ y) : |x| ≤ |y|
+  auto
++ branch_leak (x y c : ℤ) (h : |x| ≤ c ∨ |y| ≤ c) : x ≤ c
+  auto
++ no_global_bound : a ≤ 1
+  auto

@@ -1,0 +1,73 @@
+import cauchy
+
++ real_missing_list_sign (xs : list α) (w f g : α → ℝ) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  apply list_sum.weighted_cauchy.real xs w f g
+  intro i hi
+  linarith
+
++ real_strict_list (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 < (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  nlinarith [list_sum.weighted_cauchy.real xs w f g hw]
+
++ real_missing_range_sign (n : ℕ) (w f g : ℕ → ℝ) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  apply sum_below.weighted_cauchy.real n w f g
+  intro i hi
+  linarith
+
++ real_strict_range (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 < (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  nlinarith [sum_below.weighted_cauchy.real n w f g hw]
+
++ real_weak_form (a b c : ℝ) (q : ∀ x : ℝ, 0 ≤ x^2*a-2*x*x*b+x^2*c) : b^2 ≤ a*c
+  apply quadratic_form.bound.real a b c
+  intro x y
+  exact q x
+
++ real_wrong_diagonal (a b c : ℝ) (q : ∀ x y : ℝ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*a
+  nlinarith [quadratic_form.bound.real a b c q]
+
++ rat_missing_list_sign (xs : list α) (w f g : α → ℚ) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  apply list_sum.weighted_cauchy.rat xs w f g
+  intro i hi
+  linarith
+
++ rat_strict_list (xs : list α) (w f g : α → ℚ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 < (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  nlinarith [list_sum.weighted_cauchy.rat xs w f g hw]
+
++ rat_missing_range_sign (n : ℕ) (w f g : ℕ → ℚ) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  apply sum_below.weighted_cauchy.rat n w f g
+  intro i hi
+  linarith
+
++ rat_strict_range (n : ℕ) (w f g : ℕ → ℚ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 < (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  nlinarith [sum_below.weighted_cauchy.rat n w f g hw]
+
++ rat_weak_form (a b c : ℚ) (q : ∀ x : ℚ, 0 ≤ x^2*a-2*x*x*b+x^2*c) : b^2 ≤ a*c
+  apply quadratic_form.bound.rat a b c
+  intro x y
+  exact q x
+
++ rat_wrong_diagonal (a b c : ℚ) (q : ∀ x y : ℚ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*a
+  nlinarith [quadratic_form.bound.rat a b c q]
+
++ int_missing_list_sign (xs : list α) (w f g : α → ℤ) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  apply list_sum.weighted_cauchy.int xs w f g
+  intro i hi
+  linarith
+
++ int_strict_list (xs : list α) (w f g : α → ℤ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 < (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  nlinarith [list_sum.weighted_cauchy.int xs w f g hw]
+
++ int_missing_range_sign (n : ℕ) (w f g : ℕ → ℤ) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  apply sum_below.weighted_cauchy.int n w f g
+  intro i hi
+  linarith
+
++ int_strict_range (n : ℕ) (w f g : ℕ → ℤ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 < (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  nlinarith [sum_below.weighted_cauchy.int n w f g hw]
+
++ int_weak_form (a b c : ℤ) (q : ∀ x : ℤ, 0 ≤ x^2*a-2*x*x*b+x^2*c) : b^2 ≤ a*c
+  apply quadratic_form.bound.int a b c
+  intro x y
+  exact q x
+
++ int_wrong_diagonal (a b c : ℤ) (q : ∀ x y : ℤ, 0 ≤ x^2*a-2*x*y*b+y^2*c) : b^2 ≤ a*a
+  nlinarith [quadratic_form.bound.int a b c q]

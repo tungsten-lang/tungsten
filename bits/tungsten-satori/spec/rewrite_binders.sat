@@ -1,0 +1,10 @@
++ exists_rewrite (a b : α) (h : a = b) (p : α → α → Prop) (hp : ∃ x, p b x) : ∃ x, p a x := by rw [h]; exact hp
++ forall_rewrite (a b : α) (h : a = b) (p : α → α → Prop) (hp : ∀ x, p b x) : ∀ x, p a x := by rw [h]; exact hp
++ nested_rewrite (a b : α) (h : a = b) (p : α → α → α → Prop) (hp : ∀ x, ∃ y, p b x y) : ∀ x, ∃ y, p a x y := by rw [h]; exact hp
++ hypothesis_rewrite (a b : α) (h : a = b) (p : α → α → Prop) (hp : ∀ x, p a x) : ∀ x, p b x := by rw [h] at hp; exact hp
++ avoid_rhs_capture (a y : α) (h : a = y) (p : α → α → Prop) (hp : ∀ z, p y z) : ∀ y, p a y := by rw [h]; exact hp
++ lambda_rewrite (a b : α) (h : a = b) (f : α → α → β) : (fun x => f a x) = (fun x => f b x) := by rw [h]
++ repeated_rewrite (a b : α) (h : a = b) (p : α → α → Prop) (hp : ∀ x, p b x ∧ p x b) : ∀ x, p a x ∧ p x a := by rw [h]; exact hp
+#axioms exists_rewrite
+#axioms avoid_rhs_capture
+#axioms repeated_rewrite

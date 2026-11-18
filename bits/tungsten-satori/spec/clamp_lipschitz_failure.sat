@@ -1,0 +1,2 @@
+import arith
++ invalid_strict (x : ℝ) : |max 0 (min 1 x) - max 0 (min 1 x)| < |x - x| := by linarith [clamp_max_min_lipschitz.real 0 1 x x]

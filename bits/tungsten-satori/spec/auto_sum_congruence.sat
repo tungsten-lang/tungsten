@@ -1,0 +1,29 @@
+import arith
+
++ natural (f g : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g := by auto
++ integer (f g : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g := by auto
++ rational (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g := by auto
++ real (f g : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g := by auto
+
++ generic (f g : ℕ → α) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g := by auto
++ nested_type (f g : ℕ → list α) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g := by auto
++ function_type (f g : ℕ → (α → β)) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g := by auto
+
++ everywhere (f g : ℕ → α) (n : ℕ) (h : ∀ i, f i = g i) : sum_below n f = sum_below n g := by auto
++ larger_range (f g : ℕ → α) (n m : ℕ) (h : ∀ i < m, f i = g i) (hn : n ≤ m) : sum_below n f = sum_below n g := by auto
++ guarded (f g : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, i < n → f i = g i) : sum_below n f = sum_below n g := by auto
++ symmetric (f g : ℕ → α) (n : ℕ) (h : ∀ i < n, g i = f i) : sum_below n f = sum_below n g := by auto
++ shifted (f g : ℕ → ℤ) (a n : ℕ) (h : ∀ i < n, f (a+i) = g (a+i)) : (∑ i < n, f (a+i)) = (∑ i < n, g (a+i)) := by auto
++ nested (f g : ℕ → ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, ∀ j < m, f i j = g i j) : (∑ i < n, (∑ j < m, f i j)) = (∑ i < n, (∑ j < m, g i j)) := by auto
+
+-> total (f : ℕ → α) (n : ℕ) : α := sum_below n f
++ alias (f g : ℕ → α) (n : ℕ) (h : ∀ i < n, f i = g i) : total f n = total g n := by auto
++ beta (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i) : (∑ i < n, (fun x => f x) i) = (∑ i < n, g i) := by auto
++ term_arithmetic (f g : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i + g i) = (∑ i < n, g i + f i) := by auto
++ application (f g : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i) : (∑ i < n, f i * 2) = (∑ i < n, g i * 2) := by auto
+
+opaque poly_left : ℕ → α
+opaque poly_right : ℕ → α
++ same_instantiation (n : ℕ) (h : ∀ i < n, (poly_left i : ℝ) = poly_right i) :
+    (∑ i < n, (poly_left i : ℝ)) = (∑ i < n, poly_right i)
+  auto

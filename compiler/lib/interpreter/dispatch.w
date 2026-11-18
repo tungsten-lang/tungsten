@@ -1127,7 +1127,9 @@
     # parity. Reads still resolve globals/constants (get ignores the
     # barrier); closures that capture method-locals keep write-through
     # because their block_env has no barrier and chains to this env.
-    method_env = Environment.new(@env, true)
+    method_env = @idle_method_frames.pop()
+    if method_env == nil || method_env.parent != @env
+      method_env = Environment.new(@env, true)
     # Closures inherit their creating method's lexical constant scope.
     method_env.define("__lexical_class__", method[:w_class])
     # Own a __block__ slot per frame (nil when no block arrives) so
@@ -1253,6 +1255,9 @@
       @method_stack.pop()
       @self_stack.pop()
       @return_frames.pop()
+      if !method_env.has_children && @idle_method_frames.size() < 128
+        method_env.clear_bindings()
+        @idle_method_frames.push(method_env)
     if pending_error != nil
       raise pending_error
     result

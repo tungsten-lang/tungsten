@@ -1,0 +1,64 @@
+import cauchy
+
++ real_list_weighted (xs : list α) (w f g : α → ℝ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ real_list (xs : list α) (f g : α → ℝ) : (sum_list xs (fun i => f i*g i))^2 ≤ (sum_list xs (fun i => f i*f i))*(sum_list xs (fun i => g i*g i))
+  auto
+
++ real_range_weighted (n : ℕ) (w f g : ℕ → ℝ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ real_range (n : ℕ) (f g : ℕ → ℝ) : (sum_below n (fun i => f i*g i))^2 ≤ (sum_below n (fun i => f i*f i))*(sum_below n (fun i => g i*g i))
+  auto
+
++ real_empty (f g : ℕ → ℝ) : (sum_list ([] : list ℕ) (fun i => f i*g i))^2 ≤ (sum_list ([] : list ℕ) (fun i => f i*f i))*(sum_list ([] : list ℕ) (fun i => g i*g i))
+  auto
+
++ real_repeated (x : α) (f g : α → ℝ) : (sum_list (x :: x :: []) (fun i => f i*g i))^2 ≤ (sum_list (x :: x :: []) (fun i => f i*f i))*(sum_list (x :: x :: []) (fun i => g i*g i))
+  auto
+
++ real_zero_weights (n : ℕ) (f g : ℕ → ℝ) : (sum_below n (fun i => 0*(f i*g i)))^2 ≤ (sum_below n (fun i => 0*(f i*f i)))*(sum_below n (fun i => 0*(g i*g i)))
+  auto
+
++ rat_list_weighted (xs : list α) (w f g : α → ℚ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ rat_list (xs : list α) (f g : α → ℚ) : (sum_list xs (fun i => f i*g i))^2 ≤ (sum_list xs (fun i => f i*f i))*(sum_list xs (fun i => g i*g i))
+  auto
+
++ rat_range_weighted (n : ℕ) (w f g : ℕ → ℚ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ rat_range (n : ℕ) (f g : ℕ → ℚ) : (sum_below n (fun i => f i*g i))^2 ≤ (sum_below n (fun i => f i*f i))*(sum_below n (fun i => g i*g i))
+  auto
+
++ rat_empty (f g : ℕ → ℚ) : (sum_list ([] : list ℕ) (fun i => f i*g i))^2 ≤ (sum_list ([] : list ℕ) (fun i => f i*f i))*(sum_list ([] : list ℕ) (fun i => g i*g i))
+  auto
+
++ rat_repeated (x : α) (f g : α → ℚ) : (sum_list (x :: x :: []) (fun i => f i*g i))^2 ≤ (sum_list (x :: x :: []) (fun i => f i*f i))*(sum_list (x :: x :: []) (fun i => g i*g i))
+  auto
+
++ rat_zero_weights (n : ℕ) (f g : ℕ → ℚ) : (sum_below n (fun i => 0*(f i*g i)))^2 ≤ (sum_below n (fun i => 0*(f i*f i)))*(sum_below n (fun i => 0*(g i*g i)))
+  auto
+
++ int_list_weighted (xs : list α) (w f g : α → ℤ) (hw : ∀ i ∈ xs, 0 ≤ w i) : (sum_list xs (fun i => w i*(f i*g i)))^2 ≤ (sum_list xs (fun i => w i*(f i*f i)))*(sum_list xs (fun i => w i*(g i*g i)))
+  auto
+
++ int_list (xs : list α) (f g : α → ℤ) : (sum_list xs (fun i => f i*g i))^2 ≤ (sum_list xs (fun i => f i*f i))*(sum_list xs (fun i => g i*g i))
+  auto
+
++ int_range_weighted (n : ℕ) (w f g : ℕ → ℤ) (hw : ∀ i < n, 0 ≤ w i) : (sum_below n (fun i => w i*(f i*g i)))^2 ≤ (sum_below n (fun i => w i*(f i*f i)))*(sum_below n (fun i => w i*(g i*g i)))
+  auto
+
++ int_range (n : ℕ) (f g : ℕ → ℤ) : (sum_below n (fun i => f i*g i))^2 ≤ (sum_below n (fun i => f i*f i))*(sum_below n (fun i => g i*g i))
+  auto
+
++ int_empty (f g : ℕ → ℤ) : (sum_list ([] : list ℕ) (fun i => f i*g i))^2 ≤ (sum_list ([] : list ℕ) (fun i => f i*f i))*(sum_list ([] : list ℕ) (fun i => g i*g i))
+  auto
+
++ int_repeated (x : α) (f g : α → ℤ) : (sum_list (x :: x :: []) (fun i => f i*g i))^2 ≤ (sum_list (x :: x :: []) (fun i => f i*f i))*(sum_list (x :: x :: []) (fun i => g i*g i))
+  auto
+
++ int_zero_weights (n : ℕ) (f g : ℕ → ℤ) : (sum_below n (fun i => 0*(f i*g i)))^2 ≤ (sum_below n (fun i => 0*(f i*f i)))*(sum_below n (fun i => 0*(g i*g i)))
+  auto

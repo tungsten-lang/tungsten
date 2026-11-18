@@ -1,0 +1,11 @@
++ missing_guard (f : ℕ → ℕ) (n : ℕ) : n+1 = f n
+  rw [from_guard]
+
++ wrong_guard (f : ℕ → ℕ) (n m : ℕ) (h : f m = m+1) : n+1 = f n
+  rw [from_guard]
+
++ wrong_result (f g : ℕ → ℕ) (n : ℕ) (h : f n = n+1) : n+1 = g n
+  rw [from_guard]
+
++ fixed_argument (f g : ℕ → ℕ) (n : ℕ) (h : f n = n+1) : n+1 = g n
+  rw [from_guard g]

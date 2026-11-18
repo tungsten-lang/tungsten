@@ -1,0 +1,13 @@
+import arith
+
++ missing_guard (n j : ℕ) : n+j = j
+  simp only [guarded_add]
+
++ wrong_guard (n j : ℕ) (h : j = 0) : n+j = j
+  simp only [guarded_add]
+
++ unmatched_guard (x y : ℕ) (h : y < 0) : x+1 = x
+  simp only [unused_guard]
+
++ outside_selection (f : ℕ → ℤ) (n j : ℕ) (h : j ≤ n) : (∑ i < n, f i*(if i=j then 1 else 0)) = f j
+  simp only [sum_below.single.int]

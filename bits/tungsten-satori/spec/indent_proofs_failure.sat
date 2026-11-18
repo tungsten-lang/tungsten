@@ -1,0 +1,33 @@
++ ignored_invalid (p : Prop) (hp : p) : p
+  exact hp
+    not_a_tactic
+
++ ignored_admit (p : Prop) (hp : p) : p
+  exact hp
+    sorry
+
++ open_nested (p q : Prop) (hp : p) (hq : q) : p ∧ q
+  constructor
+    exact hp
+  exact hq
+
++ sibling_escape (p q : Prop) (hp : p) (hq : q) : p ∧ q
+  constructor
+  exact hp
+    exact hq
+
++ branch_scope (p : Prop) : p ∨ ¬p
+  by_cases h : p
+    left
+      exact h
+    left
+      exact h
+
++ wrong_nested (p q : Prop) (hp : p) (hq : q) : p ∧ q
+  constructor
+    exact hp
+    exact hp
+
++ nested_universal (p : α → Prop) (x : α) (h : p x) : ∀ y, p y
+  intro y
+    exact h

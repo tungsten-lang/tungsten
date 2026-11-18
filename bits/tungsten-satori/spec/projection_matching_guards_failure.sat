@@ -1,0 +1,10 @@
+import projection_matching_guards
+
++ hidden_projection (x y : ℚ) : pretend (record.mk x y) = x
+  exact reflexive_rule
+
++ hidden_projection_apply (x y : ℚ) : pretend (record.mk x y) = x
+  apply reflexive_rule
+
++ swapped_projection (x y : ℚ) : record.first (record.mk x y) = y
+  exact reflexive_rule

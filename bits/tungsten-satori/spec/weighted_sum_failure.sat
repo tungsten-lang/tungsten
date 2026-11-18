@@ -1,0 +1,19 @@
+import list_sum
+
+-- A signed weight cannot be omitted, even if the summand bound is true.
++ missing_weight (xs : list α) (w f : α → ℝ) (c : ℝ) (h : ∀ x ∈ xs, c ≤ f x) : c * sum_list xs w ≤ sum_list xs (fun x => w x * f x)
+  apply sum_list_weighted_lower.real <;> auto
++ negative_weight : (∑ x ∈ [0], (-1 : ℤ) * 0) ≤ ∑ x ∈ [0], (-1 : ℤ) * 1
+  apply sum_list_weighted_le.int
+  · intro x hx; decide
+  · intro x hx; decide
++ negative_inner (xs : list α) (ys : list β) (w : α → ℚ) (v : β → ℚ) (f : α → β → ℚ) (c : ℚ) (hw : ∀ x ∈ xs, 0 ≤ w x) (hv : ∀ y ∈ ys, v y ≤ 0) (h : ∀ x ∈ xs, ∀ y ∈ ys, f x y ≤ c) : sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y)) ≤ c * (sum_list xs w * sum_list ys v)
+  apply sum_list_double_upper.rat <;> auto
++ missing_outer (xs : list α) (ys : list β) (w : α → ℝ) (v : β → ℝ) (f : α → β → ℝ) (c : ℝ) (hv : ∀ y ∈ ys, 0 ≤ v y) (h : ∀ x ∈ xs, ∀ y ∈ ys, c ≤ f x y) : c * (sum_list xs w * sum_list ys v) ≤ sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y))
+  apply sum_list_double_lower.real <;> auto
++ wrong_list (xs ys : list ℕ) (w f : ℕ → ℕ) (c : ℕ) (h : ∀ x ∈ xs, f x ≤ c) : sum_list ys (fun x => w x * f x) ≤ c * sum_list ys w
+  apply sum_list_weighted_upper.nat <;> auto
++ reversed_bound (xs : list α) (w f : α → ℤ) (c : ℤ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, c ≤ f x) : sum_list xs (fun x => w x * f x) ≤ c * sum_list xs w
+  apply sum_list_weighted_upper.int <;> auto
++ lost_multiplicity : (∑ x ∈ [1, 1], (1 : ℕ) * 2) ≤ 2 * sum_list [1] (fun x => (1 : ℕ))
+  apply sum_list_weighted_upper.nat <;> decide

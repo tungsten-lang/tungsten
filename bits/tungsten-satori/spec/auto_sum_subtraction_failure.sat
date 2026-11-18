@@ -1,0 +1,61 @@
+import arith
+
++ int_missing (f g k : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ int_outside (f g k : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = g i-k i) : (∑ i < n+1, f i) = (∑ i < n+1, g i) - (∑ i < n+1, k i)
+  auto
+
++ int_wrong_sign (f g : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n, f i) + (∑ i < n, g i)
+  auto
+
++ int_wrong_order (f g : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n, g i) - (∑ i < n, f i)
+  auto
+
++ int_wrong_range (f g : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n+1, f i) - (∑ i < n, g i)
+  auto
+
++ int_circular (f g k : ℕ → ℤ) (n : ℕ) (h : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i) → ∀ i < n, f i = g i-k i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ rat_missing (f g k : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ rat_outside (f g k : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = g i-k i) : (∑ i < n+1, f i) = (∑ i < n+1, g i) - (∑ i < n+1, k i)
+  auto
+
++ rat_wrong_sign (f g : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n, f i) + (∑ i < n, g i)
+  auto
+
++ rat_wrong_order (f g : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n, g i) - (∑ i < n, f i)
+  auto
+
++ rat_wrong_range (f g : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n+1, f i) - (∑ i < n, g i)
+  auto
+
++ rat_circular (f g k : ℕ → ℚ) (n : ℕ) (h : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i) → ∀ i < n, f i = g i-k i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ real_missing (f g k : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ real_outside (f g k : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = g i-k i) : (∑ i < n+1, f i) = (∑ i < n+1, g i) - (∑ i < n+1, k i)
+  auto
+
++ real_wrong_sign (f g : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n, f i) + (∑ i < n, g i)
+  auto
+
++ real_wrong_order (f g : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n, g i) - (∑ i < n, f i)
+  auto
+
++ real_wrong_range (f g : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n+1, f i) - (∑ i < n, g i)
+  auto
+
++ real_circular (f g k : ℕ → ℝ) (n : ℕ) (h : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i) → ∀ i < n, f i = g i-k i) : (∑ i < n, f i) = (∑ i < n, g i) - (∑ i < n, k i)
+  auto
+
++ natural (f g : ℕ → ℕ) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n, f i) - (∑ i < n, g i)
+  auto
+
++ generic (f g : ℕ → α) (n : ℕ) : (∑ i < n, f i-g i) = (∑ i < n, f i) - (∑ i < n, g i)
+  auto

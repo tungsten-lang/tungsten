@@ -1,0 +1,61 @@
++ l_no_base (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (h : ∀ x s, p s → p (step x s)) : p (list.foldl step xs s) := by auto
+
++ l_no_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (hs : p s) : p (list.foldl step xs s) := by auto
+
++ l_point_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (hs : p s) (h : ∀ x, p s → p (step x s)) : p (list.foldl step xs s) := by auto
+
++ l_wrong_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (other : α → β → β) (hs : p s) (h : ∀ x s, p s → p (other x s)) : p (list.foldl step xs s) := by auto
+
++ l_wrong_state (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (t : β) (ht : p t) (h : ∀ x s, p s → p (step x s)) : p (list.foldl step xs s) := by auto
+
++ l_wrong_list (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (ys : list α) (hs : p s) (h : ∀ x ∈ ys, ∀ s, p s → p (step x s)) : p (list.foldl step xs s) := by auto
+
++ l_point_member (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (x : α) (hx : x ∈ xs) (hs : p s) (h : ∀ s, p s → p (step x s)) : p (list.foldl step xs s) := by auto
+
++ l_paired_base (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (q : β → Prop) (hp : p s) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) : p (list.foldl step xs s) ∧ q (list.foldl step xs s) := by auto
+
++ l_paired_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (q : β → Prop) (hp : p s) (hq : q s) (h : ∀ x s, p s → q s → p (step x s)) : p (list.foldl step xs s) ∧ q (list.foldl step xs s) := by auto
+
++ l_conclusion (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (q : β → Prop) (hp : p s) (h : ∀ x s, p s → p (step x s)) : q (list.foldl step xs s) := by auto
+
++ l_reversed_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (hs : p s) (h : ∀ x s, p (step x s) → p s) : p (list.foldl step xs s) := by auto
+
++ l_wrong_field (step : α → β → β) (xs : list α) (s : β × γ) : fst (list.foldl (fun x v => (step x (fst v), snd v)) xs s) = fst s := by auto
+
++ l_wrong_order (xs : list ℕ) : list.foldl (fun x s => 10*s+x) xs 0 = list.foldr (fun x s => 10*s+x) xs 0 := by auto
+
++ r_no_base (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (h : ∀ x s, p s → p (step x s)) : p (list.foldr step xs s) := by auto
+
++ r_no_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (hs : p s) : p (list.foldr step xs s) := by auto
+
++ r_point_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (hs : p s) (h : ∀ x, p s → p (step x s)) : p (list.foldr step xs s) := by auto
+
++ r_wrong_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (other : α → β → β) (hs : p s) (h : ∀ x s, p s → p (other x s)) : p (list.foldr step xs s) := by auto
+
++ r_wrong_state (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (t : β) (ht : p t) (h : ∀ x s, p s → p (step x s)) : p (list.foldr step xs s) := by auto
+
++ r_wrong_list (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (ys : list α) (hs : p s) (h : ∀ x ∈ ys, ∀ s, p s → p (step x s)) : p (list.foldr step xs s) := by auto
+
++ r_point_member (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (x : α) (hx : x ∈ xs) (hs : p s) (h : ∀ s, p s → p (step x s)) : p (list.foldr step xs s) := by auto
+
++ r_paired_base (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (q : β → Prop) (hp : p s) (h : ∀ x s, p s → q s → p (step x s) ∧ q (step x s)) : p (list.foldr step xs s) ∧ q (list.foldr step xs s) := by auto
+
++ r_paired_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (q : β → Prop) (hp : p s) (hq : q s) (h : ∀ x s, p s → q s → p (step x s)) : p (list.foldr step xs s) ∧ q (list.foldr step xs s) := by auto
+
++ r_conclusion (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (q : β → Prop) (hp : p s) (h : ∀ x s, p s → p (step x s)) : q (list.foldr step xs s) := by auto
+
++ r_reversed_step (step : α → β → β) (p : β → Prop) (xs : list α) (s : β) (hs : p s) (h : ∀ x s, p (step x s) → p s) : p (list.foldr step xs s) := by auto
+
++ r_wrong_field (step : α → β → β) (xs : list α) (s : β × γ) : fst (list.foldr (fun x v => (step x (fst v), snd v)) xs s) = fst s := by auto
+
++ r_wrong_order (xs : list ℕ) : list.foldr (fun x s => 10*s+x) xs 0 = list.foldl (fun x s => 10*s+x) xs 0 := by auto
+
+-> changed_base (step : α → β → β) (bad : β) : list α → β → β
+  | [], s => bad
+  | x :: xs, s => changed_base step bad xs (step x s)
++ bad_base (step : α → β → β) (p : β → Prop) (bad s : β) (xs : list α) (hs : p s) (h : ∀ x s, p s → p (step x s)) : p (changed_base step bad xs s) := by auto
+-> changed_step (step other : α → β → β) : list α → β → β
+  | [], s => s
+  | x :: xs, s => changed_step step other xs (other x s)
++ bad_step (step other : α → β → β) (p : β → Prop) (s : β) (xs : list α) (hs : p s) (h : ∀ x s, p s → p (step x s)) : p (changed_step step other xs s) := by auto
++ no_nested (outer : list α) (inner : list γ) (f : α → β → β) (g : γ → β → β) (p : β → Prop) (s : β) (hs : p s) (h : ∀ x s, p s → p (f x s)) : p (list.foldl g inner (list.foldl f outer s)) := by auto

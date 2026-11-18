@@ -1,0 +1,125 @@
+import recurrence
+
+-> tick.nat : ℕ → ℕ
+  | 0 => 1
+  | i+1 => tick.nat i+1
+-> squares.nat : ℕ → ℕ
+  | 0 => 1
+  | i+1 => squares.nat i+2*tick.nat i+1
++ nat_defined (n : ℕ) : squares.nat n = tick.nat n*tick.nat n := by auto
++ nat_defined_reverse (n : ℕ) : tick.nat n*tick.nat n = squares.nat n := by auto
++ nat_product (f g h : ℕ → ℕ) (A B r s : ℕ) (n : ℕ)
+    (f0 : f 0 = A*B) (g0 : g 0 = A) (h0 : h 0 = B)
+    (fs : ∀ i, f (i+1) = r*s*f i) (gs : ∀ i, g (i+1) = r*g i) (hs : ∀ i, h (i+1) = s*h i) : f n = g n*h n
+  auto
++ nat_sum (f g h : ℕ → ℕ) (A B c d : ℕ) (n : ℕ)
+    (f0 : f 0 = A) (g0 : g 0 = B) (h0 : h 0 = A+B)
+    (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+d) (hs : ∀ i, h (i+1) = h i+c+d) : h n = f n+g n
+  auto
++ nat_same_step (f g : ℕ → ℕ) (c : ℕ) (n : ℕ)
+    (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+c) : f n = g n
+  auto
++ nat_offset (f g : ℕ → ℕ) (A c : ℕ) (n : ℕ)
+    (base : f 0 = g 0+A) (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+c) : f n = g n+A
+  auto
++ nat_four (f a b c d : ℕ → ℕ) (n : ℕ)
+    (base : f 0 = a 0+b 0+c 0+d 0) (fs : ∀ i, f (i+1) = f i+4)
+    (as : ∀ i, a (i+1) = a i+1) (bs : ∀ i, b (i+1) = b i+1)
+    (cs : ∀ i, c (i+1) = c i+1) (ds : ∀ i, d (i+1) = d i+1) : f n = a n+b n+c n+d n
+  auto
++ nat_family (f g : ℕ → ℕ → ℕ) (a c : ℕ) (n : ℕ)
+    (base : f 0 a = g 0 a) (fs : ∀ i, f (i+1) a = f i a+c) (gs : ∀ i, g (i+1) a = g i a+c) : f n a = g n a
+  auto
+
+-> tick.int : ℕ → ℤ
+  | 0 => 1
+  | i+1 => tick.int i+1
+-> squares.int : ℕ → ℤ
+  | 0 => 1
+  | i+1 => squares.int i+2*tick.int i+1
++ int_defined (n : ℕ) : squares.int n = tick.int n*tick.int n := by auto
++ int_defined_reverse (n : ℕ) : tick.int n*tick.int n = squares.int n := by auto
++ int_product (f g h : ℕ → ℤ) (A B r s : ℤ) (n : ℕ)
+    (f0 : f 0 = A*B) (g0 : g 0 = A) (h0 : h 0 = B)
+    (fs : ∀ i, f (i+1) = r*s*f i) (gs : ∀ i, g (i+1) = r*g i) (hs : ∀ i, h (i+1) = s*h i) : f n = g n*h n
+  auto
++ int_sum (f g h : ℕ → ℤ) (A B c d : ℤ) (n : ℕ)
+    (f0 : f 0 = A) (g0 : g 0 = B) (h0 : h 0 = A+B)
+    (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+d) (hs : ∀ i, h (i+1) = h i+c+d) : h n = f n+g n
+  auto
++ int_same_step (f g : ℕ → ℤ) (c : ℤ) (n : ℕ)
+    (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+c) : f n = g n
+  auto
++ int_offset (f g : ℕ → ℤ) (A c : ℤ) (n : ℕ)
+    (base : f 0 = g 0+A) (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+c) : f n = g n+A
+  auto
++ int_four (f a b c d : ℕ → ℤ) (n : ℕ)
+    (base : f 0 = a 0+b 0+c 0+d 0) (fs : ∀ i, f (i+1) = f i+4)
+    (as : ∀ i, a (i+1) = a i+1) (bs : ∀ i, b (i+1) = b i+1)
+    (cs : ∀ i, c (i+1) = c i+1) (ds : ∀ i, d (i+1) = d i+1) : f n = a n+b n+c n+d n
+  auto
++ int_family (f g : ℕ → ℤ → ℤ) (a c : ℤ) (n : ℕ)
+    (base : f 0 a = g 0 a) (fs : ∀ i, f (i+1) a = f i a+c) (gs : ∀ i, g (i+1) a = g i a+c) : f n a = g n a
+  auto
+
+-> tick.rat : ℕ → ℚ
+  | 0 => 1
+  | i+1 => tick.rat i+1
+-> squares.rat : ℕ → ℚ
+  | 0 => 1
+  | i+1 => squares.rat i+2*tick.rat i+1
++ rat_defined (n : ℕ) : squares.rat n = tick.rat n*tick.rat n := by auto
++ rat_defined_reverse (n : ℕ) : tick.rat n*tick.rat n = squares.rat n := by auto
++ rat_product (f g h : ℕ → ℚ) (A B r s : ℚ) (n : ℕ)
+    (f0 : f 0 = A*B) (g0 : g 0 = A) (h0 : h 0 = B)
+    (fs : ∀ i, f (i+1) = r*s*f i) (gs : ∀ i, g (i+1) = r*g i) (hs : ∀ i, h (i+1) = s*h i) : f n = g n*h n
+  auto
++ rat_sum (f g h : ℕ → ℚ) (A B c d : ℚ) (n : ℕ)
+    (f0 : f 0 = A) (g0 : g 0 = B) (h0 : h 0 = A+B)
+    (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+d) (hs : ∀ i, h (i+1) = h i+c+d) : h n = f n+g n
+  auto
++ rat_same_step (f g : ℕ → ℚ) (c : ℚ) (n : ℕ)
+    (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+c) : f n = g n
+  auto
++ rat_offset (f g : ℕ → ℚ) (A c : ℚ) (n : ℕ)
+    (base : f 0 = g 0+A) (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+c) : f n = g n+A
+  auto
++ rat_four (f a b c d : ℕ → ℚ) (n : ℕ)
+    (base : f 0 = a 0+b 0+c 0+d 0) (fs : ∀ i, f (i+1) = f i+4)
+    (as : ∀ i, a (i+1) = a i+1) (bs : ∀ i, b (i+1) = b i+1)
+    (cs : ∀ i, c (i+1) = c i+1) (ds : ∀ i, d (i+1) = d i+1) : f n = a n+b n+c n+d n
+  auto
++ rat_family (f g : ℕ → ℚ → ℚ) (a c : ℚ) (n : ℕ)
+    (base : f 0 a = g 0 a) (fs : ∀ i, f (i+1) a = f i a+c) (gs : ∀ i, g (i+1) a = g i a+c) : f n a = g n a
+  auto
+
+-> tick.real : ℕ → ℝ
+  | 0 => 1
+  | i+1 => tick.real i+1
+-> squares.real : ℕ → ℝ
+  | 0 => 1
+  | i+1 => squares.real i+2*tick.real i+1
++ real_defined (n : ℕ) : squares.real n = tick.real n*tick.real n := by auto
++ real_defined_reverse (n : ℕ) : tick.real n*tick.real n = squares.real n := by auto
++ real_product (f g h : ℕ → ℝ) (A B r s : ℝ) (n : ℕ)
+    (f0 : f 0 = A*B) (g0 : g 0 = A) (h0 : h 0 = B)
+    (fs : ∀ i, f (i+1) = r*s*f i) (gs : ∀ i, g (i+1) = r*g i) (hs : ∀ i, h (i+1) = s*h i) : f n = g n*h n
+  auto
++ real_sum (f g h : ℕ → ℝ) (A B c d : ℝ) (n : ℕ)
+    (f0 : f 0 = A) (g0 : g 0 = B) (h0 : h 0 = A+B)
+    (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+d) (hs : ∀ i, h (i+1) = h i+c+d) : h n = f n+g n
+  auto
++ real_same_step (f g : ℕ → ℝ) (c : ℝ) (n : ℕ)
+    (base : f 0 = g 0) (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+c) : f n = g n
+  auto
++ real_offset (f g : ℕ → ℝ) (A c : ℝ) (n : ℕ)
+    (base : f 0 = g 0+A) (fs : ∀ i, f (i+1) = f i+c) (gs : ∀ i, g (i+1) = g i+c) : f n = g n+A
+  auto
++ real_four (f a b c d : ℕ → ℝ) (n : ℕ)
+    (base : f 0 = a 0+b 0+c 0+d 0) (fs : ∀ i, f (i+1) = f i+4)
+    (as : ∀ i, a (i+1) = a i+1) (bs : ∀ i, b (i+1) = b i+1)
+    (cs : ∀ i, c (i+1) = c i+1) (ds : ∀ i, d (i+1) = d i+1) : f n = a n+b n+c n+d n
+  auto
++ real_family (f g : ℕ → ℝ → ℝ) (a c : ℝ) (n : ℕ)
+    (base : f 0 a = g 0 a) (fs : ∀ i, f (i+1) a = f i a+c) (gs : ∀ i, g (i+1) a = g i a+c) : f n a = g n a
+  auto

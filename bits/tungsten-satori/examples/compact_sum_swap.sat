@@ -1,0 +1,16 @@
+import arith
+
++ interchange (f : ℕ → ℕ → ℝ) (n m : ℕ) :
+    (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f i j))
+  auto
+
++ weighted (f : ℕ → ℕ → ℚ) (w : ℕ → ℚ) (n m : ℕ) :
+    (∑ i < n, (∑ j < m, w i * f i j)) = (∑ j < m, (∑ i < n, w i * f i j))
+  auto
+
+-> row (f : ℕ → ℕ → ℕ) (m i : ℕ) : ℕ := ∑ j < m, f i j
+-> col (f : ℕ → ℕ → ℕ) (n j : ℕ) : ℕ := ∑ i < n, f i j
+
++ rows_eq_cols (f : ℕ → ℕ → ℕ) (n m : ℕ) :
+    (∑ i < n, row f m i) = (∑ j < m, col f n j)
+  auto

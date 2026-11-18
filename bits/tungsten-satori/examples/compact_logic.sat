@@ -1,0 +1,12 @@
+-- Proof terms need no exact prefix; indentation carries the proof structure.
++ swap (p q : Prop) (h : p ∧ q) : q ∧ p
+  constructor
+    h.2
+    h.1
+
++ compose (p q r : Prop) (h : p → q) (k : q → r) : p → r
+  intro hp
+    k (h hp)
+
++ witness (p : α → Prop) (x : α) (h : p x) : ∃ y, p y
+  ⟨x, h⟩

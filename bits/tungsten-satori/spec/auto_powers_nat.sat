@@ -1,0 +1,52 @@
+import arith
+
++ nonnegative (a : ℕ) (n : ℕ) (h : 0 ≤ a) : 0 ≤ a^n
+  auto
+
++ positive (a : ℕ) (n : ℕ) (h : 0 < a) : 0 < a^n
+  auto
+
++ unit_lower (a : ℕ) (n : ℕ) (h : 1 ≤ a) : 1 ≤ a^n
+  auto
+
++ unit_upper (a : ℕ) (n : ℕ) (h0 : 0 ≤ a) (h1 : a ≤ 1) : a^n ≤ 1
+  auto
+
++ base_order (a b : ℕ) (n : ℕ) (h0 : 0 ≤ a) (h : a ≤ b) : a^n ≤ b^n
+  auto
+
++ base_strict (a b : ℕ) (n : ℕ) (h0 : 0 ≤ a) (h : a < b) (hn : 0 < n) : a^n < b^n
+  auto
+
++ exponent_order (a : ℕ) (m n : ℕ) (h : 1 ≤ a) (hmn : m ≤ n) : a^m ≤ a^n
+  auto
+
++ exponent_strict (a : ℕ) (m n : ℕ) (h : 1 < a) (hmn : m < n) : a^m < a^n
+  auto
+
++ derived_sign (x : ℕ) (n : ℕ) (hx : 3 ≤ x) : 0 < (x-1)^n
+  auto
+
++ nested (a b : ℕ) (m n : ℕ) (h0 : 0 ≤ a) (h : a ≤ b) : (a^m)^n ≤ (b^m)^n
+  auto
+
++ pointwise (f g : ℕ → ℕ) (h0 : ∀ i, 0 ≤ f i) (h : ∀ i, f i ≤ g i) (i n : ℕ) : f i ^ n ≤ g i ^ n
+  auto
+
++ large_exponent (a : ℕ) (h : 0 < a) : 0 < a^64
+  auto
+
+opaque a : ℕ
+axiom supplied_positive : 0 < a
+
++ explicit_bound (n : ℕ) : 0 < a^n
+  auto [supplied_positive]
+
++ subtract (x : ℕ) (hx : 3 ≤ x) : 0 < x-1
+  auto
+
++ truncate (x y : ℕ) (h : x ≤ y) : x-y = 0
+  auto
+
++ recover (x y : ℕ) (h : y ≤ x) : x-y+y = x
+  auto

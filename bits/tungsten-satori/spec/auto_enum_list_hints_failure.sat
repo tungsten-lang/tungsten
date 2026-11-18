@@ -1,0 +1,10 @@
++ unsupplied (xs : list mark) (h : ∀ x, allowed x) : measure (run xs) = total xs
+  auto
++ missing_guard (xs : list mark) : measure (run xs) = total xs
+  auto [measure_base, measure_step]
++ point_guard (xs : list mark) (h : allowed single) : measure (run xs) = total xs
+  auto [measure_base, measure_step]
++ missing_base (xs : list mark) (h : ∀ x, allowed x) : measure (run xs) = total xs
+  auto [measure_step]
++ wrong_tail (xs ys : list mark) (h : ∀ x, allowed x) : measure (run xs) = total ys
+  auto [measure_base, measure_step]

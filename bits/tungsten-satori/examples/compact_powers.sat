@@ -1,0 +1,16 @@
+import arith
+
++ monotone (a b : ℝ) (n : ℕ) (h0 : 0 ≤ a) (h : a ≤ b) : a^n ≤ b^n
+  auto
+
++ strict (a b : ℚ) (n : ℕ) (h0 : 0 ≤ a) (h : a < b) (hn : 0 < n) : a^n < b^n
+  auto
+
++ decay (a : ℝ) (m n : ℕ) (h0 : 0 ≤ a) (h1 : a ≤ 1) (h : m ≤ n) : a^n ≤ a^m
+  auto
+
++ positive (x n : ℕ) (hx : 3 ≤ x) : 0 < (x-1)^n
+  auto
+
++ pointwise (f g : ℕ → ℤ) (h0 : ∀ i, 0 ≤ f i) (h : ∀ i, f i ≤ g i) (i n : ℕ) : f i ^ n ≤ g i ^ n
+  auto

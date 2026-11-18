@@ -1,0 +1,33 @@
+-- A least witness still requires the property to be inhabited.
++ empty_property : ∃ n : ℕ, False ∧ ∀ m < n, ¬ False
+  exact nat.exists_least (fun n => False)
+
+-- A witness of a different property does not establish this one.
++ wrong_property (P Q : ℕ → Prop) (n : ℕ) (h : Q n) : ∃ m, P m ∧ ∀ k < m, ¬ P k
+  exact nat.exists_least_of P n h
+
++ no_minimality (P : ℕ → Prop) (n m : ℕ) (hn : P n) (hm : P m) : n = m
+  exact nat.least_unique P n m hn hm
+
+-- Strong induction must cover zero and cannot assume the current case.
++ missing_zero (P : ℕ → Prop) (step : ∀ n, 0 < n → (∀ m < n, P m) → P n) : ∀ n, P n
+  exact nat.strong_induct P step
+
++ circular_induction (P : ℕ → Prop) (step : ∀ n, (∀ m ≤ n, P m) → P n) : ∀ n, P n
+  exact nat.strong_induct P step
+
++ missing_top (P : ℕ → Prop) (b : ℕ) (step : ∀ n, n < b → (∀ m, n < m → m ≤ b → P m) → P n) : P b
+  exact nat.reverse_induct P b step b (by linarith)
+
++ outside_interval (P : ℕ → Prop) (b : ℕ) (h : P b)
+    (step : ∀ n, n < b → (∀ m, n < m → m ≤ b → P m) → P n) : P (b + 1)
+  exact nat.reverse_induct P b h step (b + 1) (by linarith)
+
++ weak_descent (f : ℕ → ℕ) (step : ∀ k, f (k + 1) ≤ f k) : False
+  exact nat.no_infinite_descent f step
+
++ short_prefix (f : ℕ → ℕ) (step : ∀ k < 2, f (k + 1) < f k) : f 3 + 3 ≤ f 0
+  exact nat.descent_bound f 3 step
+
++ nondecreasing_property (P : ℕ → Prop) (step : ∀ n, P n → ∃ m, m ≤ n ∧ P m) (n : ℕ) : ¬ P n
+  exact nat.infinite_descent P step n

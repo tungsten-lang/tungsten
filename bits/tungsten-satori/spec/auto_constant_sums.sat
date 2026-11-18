@@ -1,0 +1,105 @@
+import arith
+
+-> nat_uniform (c : ℕ) (i : ℕ) : ℕ := c
+
++ nat_direct (n : ℕ) (c : ℕ) : (∑ i < n, c) = n*c
+  auto
+
++ nat_termwise (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i=c) : (∑ i < n, f i) = n*c
+  auto
+
++ nat_offset (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i+2=c+2) : (∑ i < n, f i) = n*c
+  auto
+
++ nat_larger (f : ℕ → ℕ) (n m : ℕ) (c : ℕ) (hn : n ≤ m) (h : ∀ i < m, f i=c) : (∑ i < n, f i) = n*c
+  auto
+
++ nat_one (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i=1) : (∑ i < n, f i) = n
+  auto
+
++ nat_alias (n : ℕ) (c : ℕ) : (∑ i < n, nat_uniform c i) = n*c
+  auto
+
++ nat_reverse (f : ℕ → ℕ) (n : ℕ) (c : ℕ) (h : ∀ i < n, f i=c) : n*c = (∑ i < n, f i)
+  auto
+
++ nat_empty (c : ℕ) : (∑ i < 0, c) = 0
+  auto
+
+-> int_uniform (c : ℤ) (i : ℕ) : ℤ := c
+
++ int_direct (n : ℕ) (c : ℤ) : (∑ i < n, c) = (n : ℤ)*c
+  auto
+
++ int_termwise (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i=c) : (∑ i < n, f i) = (n : ℤ)*c
+  auto
+
++ int_offset (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i+2=c+2) : (∑ i < n, f i) = (n : ℤ)*c
+  auto
+
++ int_larger (f : ℕ → ℤ) (n m : ℕ) (c : ℤ) (hn : n ≤ m) (h : ∀ i < m, f i=c) : (∑ i < n, f i) = (n : ℤ)*c
+  auto
+
++ int_one (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i=1) : (∑ i < n, f i) = (n : ℤ)
+  auto
+
++ int_alias (n : ℕ) (c : ℤ) : (∑ i < n, int_uniform c i) = (n : ℤ)*c
+  auto
+
++ int_reverse (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : ∀ i < n, f i=c) : (n : ℤ)*c = (∑ i < n, f i)
+  auto
+
++ int_empty (c : ℤ) : (∑ i < 0, c) = 0
+  auto
+
+-> rat_uniform (c : ℚ) (i : ℕ) : ℚ := c
+
++ rat_direct (n : ℕ) (c : ℚ) : (∑ i < n, c) = (n : ℚ)*c
+  auto
+
++ rat_termwise (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i=c) : (∑ i < n, f i) = (n : ℚ)*c
+  auto
+
++ rat_offset (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i+2=c+2) : (∑ i < n, f i) = (n : ℚ)*c
+  auto
+
++ rat_larger (f : ℕ → ℚ) (n m : ℕ) (c : ℚ) (hn : n ≤ m) (h : ∀ i < m, f i=c) : (∑ i < n, f i) = (n : ℚ)*c
+  auto
+
++ rat_one (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i=1) : (∑ i < n, f i) = (n : ℚ)
+  auto
+
++ rat_alias (n : ℕ) (c : ℚ) : (∑ i < n, rat_uniform c i) = (n : ℚ)*c
+  auto
+
++ rat_reverse (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : ∀ i < n, f i=c) : (n : ℚ)*c = (∑ i < n, f i)
+  auto
+
++ rat_empty (c : ℚ) : (∑ i < 0, c) = 0
+  auto
+
+-> real_uniform (c : ℝ) (i : ℕ) : ℝ := c
+
++ real_direct (n : ℕ) (c : ℝ) : (∑ i < n, c) = (n : ℝ)*c
+  auto
+
++ real_termwise (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i=c) : (∑ i < n, f i) = (n : ℝ)*c
+  auto
+
++ real_offset (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i+2=c+2) : (∑ i < n, f i) = (n : ℝ)*c
+  auto
+
++ real_larger (f : ℕ → ℝ) (n m : ℕ) (c : ℝ) (hn : n ≤ m) (h : ∀ i < m, f i=c) : (∑ i < n, f i) = (n : ℝ)*c
+  auto
+
++ real_one (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i=1) : (∑ i < n, f i) = (n : ℝ)
+  auto
+
++ real_alias (n : ℕ) (c : ℝ) : (∑ i < n, real_uniform c i) = (n : ℝ)*c
+  auto
+
++ real_reverse (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : ∀ i < n, f i=c) : (n : ℝ)*c = (∑ i < n, f i)
+  auto
+
++ real_empty (c : ℝ) : (∑ i < 0, c) = 0
+  auto

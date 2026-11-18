@@ -35,21 +35,21 @@
   ro :pos
   -> new(@toks, start = 0)
     @pos = start
+    @limit = @toks.size
 
   -> peek
-    if @pos < @toks.size
-      @toks[@pos]
-    else
-      nil
+    if @pos < @limit
+      return @toks[@pos]
+    nil
 
   -> peek_at(k)
-    if @pos + k < @toks.size
-      @toks[@pos + k]
-    else
-      nil
+    i = @pos + k
+    if i < @limit
+      return @toks[i]
+    nil
 
   -> at_end?
-    @pos >= @toks.size
+    @pos >= @limit
 
   -> next_tok
     t = peek
@@ -381,7 +381,7 @@
       # tactic block inside a term: collect tokens up to the enclosing bracket
       start = @pos
       depth = 0
-      while @pos < @toks.size && !(depth == 0 && (@toks[@pos].text == ")" || @toks[@pos].text == "\]" || @toks[@pos].text == "⟩" || @toks[@pos].text == ","))
+      while @pos < @limit && !(depth == 0 && (@toks[@pos].text == ")" || @toks[@pos].text == "\]" || @toks[@pos].text == "⟩" || @toks[@pos].text == ","))
         tx = @toks[@pos].text
         if tx == "(" || tx == "\[" || tx == "⟨" || tx == "{"
           depth += 1

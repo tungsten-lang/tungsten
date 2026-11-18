@@ -1,0 +1,35 @@
++ nat_missing (x y : ℕ) (h : x*y = 0) : x = 0
+  auto
+
++ nat_wrong_value (x y : ℕ) (h : x*y = 1) (hy : y ≠ 0) : x = 0
+  auto
+
++ nat_wrong_factor (x y z : ℕ) (h : x*y = 0) (hz : z ≠ 0) : x = 0
+  auto
+
++ int_missing (x y : ℤ) (h : x*y = 0) : x = 0
+  auto
+
++ int_wrong_value (x y : ℤ) (h : x*y = 1) (hy : y ≠ 0) : x = 0
+  auto
+
++ int_wrong_factor (x y z : ℤ) (h : x*y = 0) (hz : z ≠ 0) : x = 0
+  auto
+
++ rat_missing (x y : ℚ) (h : x*y = 0) : x = 0
+  auto
+
++ rat_wrong_value (x y : ℚ) (h : x*y = 1) (hy : y ≠ 0) : x = 0
+  auto
+
++ rat_wrong_factor (x y z : ℚ) (h : x*y = 0) (hz : z ≠ 0) : x = 0
+  auto
+
++ real_missing (x y : ℝ) (h : x*y = 0) : x = 0
+  auto
+
++ real_wrong_value (x y : ℝ) (h : x*y = 1) (hy : y ≠ 0) : x = 0
+  auto
+
++ real_wrong_factor (x y z : ℝ) (h : x*y = 0) (hz : z ≠ 0) : x = 0
+  auto

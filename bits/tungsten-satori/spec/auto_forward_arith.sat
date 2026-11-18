@@ -1,0 +1,23 @@
++ nat_weaken (f : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m ≤ 8 := by auto
++ nat_combine (f g : ℕ → ℕ) (n m : ℕ) (hf : ∀ i < n, f i ≤ 7) (hg : ∀ i < n, g i ≤ 3) (hm : m+1 ≤ n) : f m+g m ≤ 10 := by auto
++ nat_equality (f : ℕ → ℕ) (n m : ℕ) (h : ∀ i < n, f i = 7) (hm : m+1 ≤ n) : f m+1 = 8 := by auto
+
++ int_weaken (f : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m ≤ 8 := by auto
++ int_combine (f g : ℕ → ℤ) (n m : ℕ) (hf : ∀ i < n, f i ≤ 7) (hg : ∀ i < n, g i ≤ 3) (hm : m+1 ≤ n) : f m+g m ≤ 10 := by auto
++ int_equality (f : ℕ → ℤ) (n m : ℕ) (h : ∀ i < n, f i = 7) (hm : m+1 ≤ n) : f m+1 = 8 := by auto
+
++ rat_weaken (f : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m ≤ 8 := by auto
++ rat_combine (f g : ℕ → ℚ) (n m : ℕ) (hf : ∀ i < n, f i ≤ 7) (hg : ∀ i < n, g i ≤ 3) (hm : m+1 ≤ n) : f m+g m ≤ 10 := by auto
++ rat_equality (f : ℕ → ℚ) (n m : ℕ) (h : ∀ i < n, f i = 7) (hm : m+1 ≤ n) : f m+1 = 8 := by auto
+
++ real_weaken (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (hm : m+1 ≤ n) : f m ≤ 8 := by auto
++ real_combine (f g : ℕ → ℝ) (n m : ℕ) (hf : ∀ i < n, f i ≤ 7) (hg : ∀ i < n, g i ≤ 3) (hm : m+1 ≤ n) : f m+g m ≤ 10 := by auto
++ real_equality (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, f i = 7) (hm : m+1 ≤ n) : f m+1 = 8 := by auto
+
++ predicate_guard (p : ℕ → Prop) (n m : ℕ) (h : ∀ i < n, p i) (hm : m+1 ≤ n) : p m := by auto
++ two_stage (p : ℝ → Prop) (f : ℕ → ℝ) (n m : ℕ) (h : ∀ i < n, f i ≤ 7) (k : ∀ x : ℝ, x ≤ 8 → p x) (hm : m+1 ≤ n) : p (f m) := by auto
++ branches (f : ℕ → ℝ) (n m : ℕ) (h : (∀ i < n, f i ≤ 7) ∨ (∀ i < n, f i ≤ 6)) (hm : m+1 ≤ n) : f m ≤ 8 := by auto
+axiom supplied_forward (f : ℕ → ℝ) (n : ℕ) : ∀ i < n, f i ≤ 7
++ marked (f : ℕ → ℝ) (n m : ℕ) (hm : m+1 ≤ n) : f m ≤ 8
+  have h := supplied_forward f n
+  auto

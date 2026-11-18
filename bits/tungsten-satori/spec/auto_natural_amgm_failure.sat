@@ -1,0 +1,20 @@
++ excessive_factor (x y : ℕ) : 3*x*y ≤ x^2+y^2
+  auto
++ strict_equality (x y : ℕ) : 2*x*y < x^2+y^2
+  auto
++ missing_square (x y : ℕ) : 2*x*y ≤ x^2
+  auto
++ wrong_direction (x y : ℕ) : x^2+y^2 ≤ 2*x*y
+  auto
++ compound_excess (a b c d : ℕ) : 3*(a*b)*(c*d) ≤ (a*b)^2+(c*d)^2
+  auto
++ compound_strict (a b c d : ℕ) : 2*(a*b)*(c*d) < (a*b)^2+(c*d)^2
+  auto
++ false_shift (x y : ℕ) : 2*(x+1)*(y+2)+1 ≤ (x+1)^2+(y+2)^2
+  auto
++ mismatched_functions (f g h : ℕ → ℕ) (n : ℕ) : 2*f n*g n ≤ (f n)^2+(h n)^2
+  auto
++ missing_margin (x y : ℕ) : 2*x*y+1 ≤ x^2+y^2
+  auto
++ unrelated_square (x y z : ℕ) : 2*x*y ≤ x^2+z^2
+  auto

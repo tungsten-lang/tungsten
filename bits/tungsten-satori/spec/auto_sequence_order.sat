@@ -1,0 +1,109 @@
+import sequence_order
+
++ nat_up (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ nat_down (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ nat_global_up (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ nat_global_down (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ nat_prefix (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i < b, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ nat_quantified (f : ℕ → ℕ) (h : ∀ i, f (i+1) ≤ f i) : ∀ a b, a ≤ b → f b ≤ f a
+  auto
+
++ nat_wider (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i < b+3, f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ nat_strict_step (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f i < f (i+1)) : f a ≤ f b
+  auto
+
++ nat_descent (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i+1)+1 ≤ f i) : f n+n ≤ f 0
+  auto
+
++ nat_length (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i+1)+1 ≤ f i) : n ≤ f 0
+  auto
+
++ nat_strict_descent (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i+1) < f i) : f n+n ≤ f 0
+  auto
+
++ nat_descent_quantified (f : ℕ → ℕ) : ∀ n, (∀ i < n, f (i+1)+1 ≤ f i) → f n+n ≤ f 0
+  auto
+
++ int_up (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ int_down (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ int_global_up (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ int_global_down (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ int_prefix (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i < b, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ int_quantified (f : ℕ → ℤ) (h : ∀ i, f (i+1) ≤ f i) : ∀ a b, a ≤ b → f b ≤ f a
+  auto
+
++ int_wider (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i < b+3, f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ int_strict_step (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f i < f (i+1)) : f a ≤ f b
+  auto
+
++ rat_up (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ rat_down (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ rat_global_up (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ rat_global_down (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ rat_prefix (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i < b, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ rat_quantified (f : ℕ → ℚ) (h : ∀ i, f (i+1) ≤ f i) : ∀ a b, a ≤ b → f b ≤ f a
+  auto
+
++ rat_wider (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i < b+3, f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ rat_strict_step (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f i < f (i+1)) : f a ≤ f b
+  auto
+
++ real_up (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ real_down (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ real_global_up (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ real_global_down (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ real_prefix (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i < b, f i ≤ f (i+1)) : f a ≤ f b
+  auto
+
++ real_quantified (f : ℕ → ℝ) (h : ∀ i, f (i+1) ≤ f i) : ∀ a b, a ≤ b → f b ≤ f a
+  auto
+
++ real_wider (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i < b+3, f (i+1) ≤ f i) : f b ≤ f a
+  auto
+
++ real_strict_step (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b) (h : ∀ i, a ≤ i → i < b → f i < f (i+1)) : f a ≤ f b
+  auto

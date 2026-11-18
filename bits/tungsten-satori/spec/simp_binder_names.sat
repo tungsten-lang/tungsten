@@ -1,0 +1,7 @@
+opaque f : ℚ → ℚ
+opaque p : ℚ → bool
+axiom conditional : ∀ x, p x → f x = x
++ binder_guard (x : ℚ) (hx : p x) : ∀ y, p y → f y = y
+  have rule := conditional
+  simp only [conditional] at rule
+  exact rule

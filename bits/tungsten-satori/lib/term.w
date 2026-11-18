@@ -398,7 +398,7 @@ TY_REAL_SINGLETON = intern_ty_con0("real")
     when :bnd
       @tv = @ty.has_var
       @mx = @idx + 1
-      @h = (@idx * 47 + 5) % HASH_MOD
+      @h = (@idx * 47 + @ty.h * 59 + 5) % HASH_MOD
     else
       @tv = @ty.has_var
       lh = 0
@@ -515,7 +515,7 @@ LIT_CACHE = {}
   when :lam
     ty_eq(a.ty, b.ty) && tm_eq(a.b, b.b)
   when :bnd
-    a.idx == b.idx
+    a.idx == b.idx && ty_eq(a.ty, b.ty)
   else
     ty_eq(a.ty, b.ty) && lit_val_eq(a.val, b.val)
 

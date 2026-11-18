@@ -1,0 +1,77 @@
+import arith
+
++ lower (a b c : ℕ) (ha : c ≤ a) (hb : c ≤ b) : c ≤ min a b
+  auto
+
++ upper (a b c : ℕ) (ha : a ≤ c) (hb : b ≤ c) : max a b ≤ c
+  auto
+
++ strict_lower (a b c : ℕ) (ha : c < a) (hb : c < b) : c < min a b
+  auto
+
++ strict_upper (a b c : ℕ) (ha : a < c) (hb : b < c) : max a b < c
+  auto
+
++ min_endpoint (a b : ℕ) : min a b ≤ a ∧ min a b ≤ b
+  auto
+
++ max_endpoint (a b : ℕ) : a ≤ max a b ∧ b ≤ max a b
+  auto
+
++ chosen_min (a b : ℕ) (h : a ≤ b) : min a b = a
+  auto
+
++ chosen_max (a b : ℕ) (h : a ≤ b) : max a b = b
+  auto
+
++ min_commute (a b : ℕ) : min a b = min b a
+  auto
+
++ max_commute (a b : ℕ) : max a b = max b a
+  auto
+
++ sum (a b : ℕ) : min a b + max a b = a+b
+  auto
+
++ min_monotone (a b c d : ℕ) (h : a ≤ c) (k : b ≤ d) : min a b ≤ min c d
+  auto
+
++ max_monotone (a b c d : ℕ) (h : a ≤ c) (k : b ≤ d) : max a b ≤ max c d
+  auto
+
++ clamp (lo hi x : ℕ) (h : lo ≤ hi) : lo ≤ max lo (min hi x) ∧ max lo (min hi x) ≤ hi
+  auto
+
++ upper_endpoints (a b c : ℕ) (h : max a b < c) : a < c ∧ b < c
+  auto
+
++ lower_endpoints (a b c : ℕ) (h : c < min a b) : c < a ∧ c < b
+  auto
+
++ sum_bound (a b c : ℕ) (h : max a b ≤ c) : a+b ≤ 2*c
+  auto
+
++ scaled_max (a b c d k : ℕ) (hk : 0 ≤ k) (ha : c ≤ k*a) (hb : d ≤ k*b) : max c d ≤ k*max a b
+  auto
+
++ scaled_min (a b c d k : ℕ) (hk : 0 ≤ k) (ha : k*a ≤ c) (hb : k*b ≤ d) : k*min a b ≤ min c d
+  auto
+
++ pointwise (f g : ℕ → ℕ) (c : ℕ) (h : ∀ i, max (f i) (g i) ≤ c) (n : ℕ) : f n ≤ c
+  auto
+
++ branch (a b c : ℕ) (h : max a b < c ∨ a < c) : a < c
+  auto
+
+-> roof (a b : ℕ) : ℕ := max a b
+
++ alias (a b c : ℕ) (ha : a ≤ c) (hb : b ≤ c) : roof a b ≤ c
+  auto
+
+opaque a : ℕ
+opaque b : ℕ
+opaque c : ℕ
+axiom supplied_max : max a b ≤ c
+
++ explicit_bound : a ≤ c
+  auto [supplied_max]

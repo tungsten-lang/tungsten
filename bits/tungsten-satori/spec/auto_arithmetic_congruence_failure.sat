@@ -1,0 +1,41 @@
+import arith
+
++ missing (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (h : f k+x ≤ 7) : f i+x ≤ 7
+  auto
+
++ ordered (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i ≤ k) (h : f k+x ≤ 7) : f i+x ≤ 7
+  auto
+
++ unequal (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i ≠ k) (h : f k+x ≤ 7) : f i+x ≤ 7
+  auto
+
++ different_function (f g : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i = k) (h : f k+x ≤ 7) : g i+x ≤ 7
+  auto
+
++ incomplete_chain (f : ℕ → ℚ) (i j k : ℕ) (x : ℚ) (e : i = j) (h : f k+x ≤ 7) : f i+x ≤ 7
+  auto
+
++ missing_argument (f : ℕ → ℕ → ℚ) (i j k l : ℕ) (x : ℚ) (e : i = k) (h : f k l+x ≤ 7) : f i j+x ≤ 7
+  auto
+
++ weak_strict (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i = k) (h : f k+x ≤ 7) : f i+x < 7
+  auto
+
++ changed_bound (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i = k) (h : f k+x ≤ 7) : f i+x ≤ 6
+  auto
+
++ branch_leak (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i = k ∨ i = 0) (h : f k+x ≤ 7) : f i+x ≤ 7
+  auto
+
++ missing_sign (f : ℕ → ℚ) (i k : ℕ) (x : ℚ) (e : i = k) (h : x+f k = 0) (hx : 0 ≤ x) : f i = 0
+  auto
+
+opaque f : ℕ → ℚ
+opaque i : ℕ
+opaque k : ℕ
+
++ no_global_index (x : ℚ) (h : f k+x ≤ 7) : f i+x ≤ 7
+  auto
+
++ no_global_bound (e : i = k) : f i+1 ≤ 8
+  auto

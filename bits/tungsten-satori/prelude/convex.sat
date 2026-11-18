@@ -1,0 +1,189 @@
+-- Finite Jensen inequalities and concavity on closed intervals.
+-- Means are specified by multiplication, avoiding division in callers.
+import sum_range
+
+-> concave_interval.real (lo hi : ℝ) (f : ℝ → ℝ) : Prop := ∀ x y z a b : ℝ, lo ≤ x → x ≤ hi → lo ≤ y → y ≤ hi → 0 ≤ a → 0 ≤ b → 0 < a+b → (a+b)*z = a*x+b*y → a*f x+b*f y ≤ (a+b)*f z
+-> convex_interval.real (lo hi : ℝ) (f : ℝ → ℝ) : Prop := ∀ x y z a b : ℝ, lo ≤ x → x ≤ hi → lo ≤ y → y ≤ hi → 0 ≤ a → 0 ≤ b → 0 < a+b → (a+b)*z = a*x+b*y → (a+b)*f z ≤ a*f x+b*f y
+
++ concave_interval.sub_convex.real (lo hi : ℝ) (f g : ℝ → ℝ) (hf : concave_interval.real lo hi f) (hg : convex_interval.real lo hi g) : concave_interval.real lo hi (fun x => f x-g x)
+  unfold concave_interval.real
+  intro x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  unfold concave_interval.real at hf
+  unfold convex_interval.real at hg
+  have p := hf x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  have q := hg x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  linarith
+
++ sum_below.concave_jensen_succ.real (lo hi : ℝ) (n : ℕ) : ∀ (f : ℝ → ℝ) (p : ℕ → ℝ) (m : ℝ), concave_interval.real lo hi f → (∀ j < n+1, lo ≤ p j ∧ p j ≤ hi) → ((n : ℝ)+1)*m = (∑ j < n+1, p j) → (∑ j < n+1, f (p j)) ≤ ((n : ℝ)+1)*f m
+  induction n with f p m hf hp hm n ih f p m hf hp hm
+  · rw [sum_below_succ, sum_below_zero] at hm
+    rw [sum_below_succ, sum_below_zero, cast_zero.real]
+    rw [cast_zero.real] at hm
+    have e : m = p 0 := by linarith
+    rw [e]
+    linarith
+  · simp only [succ_eq_add_one.nat] at hp
+    rw [succ_eq_add_one.nat, cast_succ.real]
+    rw [succ_eq_add_one.nat, cast_succ.real, sum_below_succ] at hm
+    rw [sum_below_succ]
+    have cn := cast_nonneg.real n
+    have ne : (n : ℝ)+1 ≠ 0 := by linarith
+    have q := mul_div_cancel.real (∑ j < n+1, p j) ((n : ℝ)+1) ne
+    have hm0 : ((n : ℝ)+1)*((∑ j < n+1, p j)/((n : ℝ)+1)) = ∑ j < n+1, p j := by linarith
+    have hp' : ∀ j < n+1, lo ≤ p j ∧ p j ≤ hi := by intro j hj; exact hp j (by omega)
+    have prev := ih f p ((∑ j < n+1, p j)/((n : ℝ)+1)) hf hp' hm0
+    have s0 := sum_below.const_le.real p lo (n+1) (by intro j hj; exact (hp' j hj).1)
+    have s1 := sum_below.le_const.real p hi (n+1) (by intro j hj; exact (hp' j hj).2)
+    rw [cast_succ.real] at s0
+    rw [cast_succ.real] at s1
+    have m0 : lo ≤ (∑ j < n+1, p j)/((n : ℝ)+1) := by nlinarith
+    have m1 : (∑ j < n+1, p j)/((n : ℝ)+1) ≤ hi := by nlinarith
+    have last := hp (n+1) (by omega)
+    unfold concave_interval.real at hf
+    have conc := hf ((∑ j < n+1, p j)/((n : ℝ)+1)) (p (n+1)) m ((n : ℝ)+1) 1 m0 m1 last.1 last.2 (by linarith) (by linarith) (by linarith) (by linarith)
+    linarith
+
++ sum_below.concave_jensen.real (lo hi : ℝ) (f : ℝ → ℝ) (hf : concave_interval.real lo hi f) (n : ℕ) : ∀ (p : ℕ → ℝ) (m : ℝ), (∀ j < n, lo ≤ p j ∧ p j ≤ hi) → (n : ℝ)*m = (∑ j < n, p j) → (∑ j < n, f (p j)) ≤ (n : ℝ)*f m
+  induction n with p m hp hm n ih p m hp hm
+  · simp [cast_zero.real]
+  · simp only [succ_eq_add_one.nat] at hp
+    rw [succ_eq_add_one.nat, cast_succ.real] at hm
+    rw [succ_eq_add_one.nat, cast_succ.real]
+    exact sum_below.concave_jensen_succ.real lo hi n f p m hf hp hm
+
++ sum_below.convex_jensen.real (lo hi : ℝ) (f : ℝ → ℝ) (hf : convex_interval.real lo hi f) (n : ℕ) (p : ℕ → ℝ) (m : ℝ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℝ)*m = (∑ j < n, p j)) : (n : ℝ)*f m ≤ ∑ j < n, f (p j)
+  have neg : concave_interval.real lo hi (fun x => (-1)*f x)
+    unfold concave_interval.real
+    intro x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+    unfold convex_interval.real at hf
+    have h := hf x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+    linarith
+  have bound := sum_below.concave_jensen.real lo hi (fun x => (-1)*f x) neg n p m hp hm
+  rw [sum_const_mul.real] at bound
+  linarith
+
++ concave_interval.mono_below_max.real (lo hi : ℝ) (f : ℝ → ℝ) (x y peak : ℝ) (hf : concave_interval.real lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : y ≤ peak) (hpeak : peak ≤ hi) (hmax : ∀ z : ℝ, lo ≤ z → z ≤ hi → f z ≤ f peak) : f x ≤ f y
+  unfold concave_interval.real at hf
+  by_cases e : y = peak
+  · rw [e]
+    exact hmax x hx (by linarith)
+  · have strict : y < peak := by
+      by_contra h
+      have same : y = peak := by linarith
+      exact e same
+    have conc := hf x peak y (peak-y) (y-x) hx (by linarith) (by linarith) hpeak (by linarith) (by linarith) (by linarith) (by ring)
+    have fy := hmax y (by linarith) (by linarith)
+    nlinarith
+
+-> concave_interval.rat (lo hi : ℚ) (f : ℚ → ℚ) : Prop := ∀ x y z a b : ℚ, lo ≤ x → x ≤ hi → lo ≤ y → y ≤ hi → 0 ≤ a → 0 ≤ b → 0 < a+b → (a+b)*z = a*x+b*y → a*f x+b*f y ≤ (a+b)*f z
+-> convex_interval.rat (lo hi : ℚ) (f : ℚ → ℚ) : Prop := ∀ x y z a b : ℚ, lo ≤ x → x ≤ hi → lo ≤ y → y ≤ hi → 0 ≤ a → 0 ≤ b → 0 < a+b → (a+b)*z = a*x+b*y → (a+b)*f z ≤ a*f x+b*f y
+
++ concave_interval.sub_convex.rat (lo hi : ℚ) (f g : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (hg : convex_interval.rat lo hi g) : concave_interval.rat lo hi (fun x => f x-g x)
+  unfold concave_interval.rat
+  intro x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  unfold concave_interval.rat at hf
+  unfold convex_interval.rat at hg
+  have p := hf x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  have q := hg x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  linarith
+
++ sum_below.concave_jensen_succ.rat (lo hi : ℚ) (n : ℕ) : ∀ (f : ℚ → ℚ) (p : ℕ → ℚ) (m : ℚ), concave_interval.rat lo hi f → (∀ j < n+1, lo ≤ p j ∧ p j ≤ hi) → ((n : ℚ)+1)*m = (∑ j < n+1, p j) → (∑ j < n+1, f (p j)) ≤ ((n : ℚ)+1)*f m
+  induction n with f p m hf hp hm n ih f p m hf hp hm
+  · rw [sum_below_succ, sum_below_zero] at hm
+    rw [sum_below_succ, sum_below_zero, cast_zero.rat]
+    rw [cast_zero.rat] at hm
+    have e : m = p 0 := by linarith
+    rw [e]
+    linarith
+  · simp only [succ_eq_add_one.nat] at hp
+    rw [succ_eq_add_one.nat, cast_succ.rat]
+    rw [succ_eq_add_one.nat, cast_succ.rat, sum_below_succ] at hm
+    rw [sum_below_succ]
+    have cn := cast_nonneg.rat n
+    have ne : (n : ℚ)+1 ≠ 0 := by linarith
+    have q := mul_div_cancel.rat (∑ j < n+1, p j) ((n : ℚ)+1) ne
+    have hm0 : ((n : ℚ)+1)*((∑ j < n+1, p j)/((n : ℚ)+1)) = ∑ j < n+1, p j := by linarith
+    have hp' : ∀ j < n+1, lo ≤ p j ∧ p j ≤ hi := by intro j hj; exact hp j (by omega)
+    have prev := ih f p ((∑ j < n+1, p j)/((n : ℚ)+1)) hf hp' hm0
+    have s0 := sum_below.const_le.rat p lo (n+1) (by intro j hj; exact (hp' j hj).1)
+    have s1 := sum_below.le_const.rat p hi (n+1) (by intro j hj; exact (hp' j hj).2)
+    rw [cast_succ.rat] at s0
+    rw [cast_succ.rat] at s1
+    have m0 : lo ≤ (∑ j < n+1, p j)/((n : ℚ)+1) := by nlinarith
+    have m1 : (∑ j < n+1, p j)/((n : ℚ)+1) ≤ hi := by nlinarith
+    have last := hp (n+1) (by omega)
+    unfold concave_interval.rat at hf
+    have conc := hf ((∑ j < n+1, p j)/((n : ℚ)+1)) (p (n+1)) m ((n : ℚ)+1) 1 m0 m1 last.1 last.2 (by linarith) (by linarith) (by linarith) (by linarith)
+    linarith
+
++ sum_below.concave_jensen.rat (lo hi : ℚ) (f : ℚ → ℚ) (hf : concave_interval.rat lo hi f) (n : ℕ) : ∀ (p : ℕ → ℚ) (m : ℚ), (∀ j < n, lo ≤ p j ∧ p j ≤ hi) → (n : ℚ)*m = (∑ j < n, p j) → (∑ j < n, f (p j)) ≤ (n : ℚ)*f m
+  induction n with p m hp hm n ih p m hp hm
+  · simp [cast_zero.rat]
+  · simp only [succ_eq_add_one.nat] at hp
+    rw [succ_eq_add_one.nat, cast_succ.rat] at hm
+    rw [succ_eq_add_one.nat, cast_succ.rat]
+    exact sum_below.concave_jensen_succ.rat lo hi n f p m hf hp hm
+
++ sum_below.convex_jensen.rat (lo hi : ℚ) (f : ℚ → ℚ) (hf : convex_interval.rat lo hi f) (n : ℕ) (p : ℕ → ℚ) (m : ℚ) (hp : ∀ j < n, lo ≤ p j ∧ p j ≤ hi) (hm : (n : ℚ)*m = (∑ j < n, p j)) : (n : ℚ)*f m ≤ ∑ j < n, f (p j)
+  have neg : concave_interval.rat lo hi (fun x => (-1)*f x)
+    unfold concave_interval.rat
+    intro x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+    unfold convex_interval.rat at hf
+    have h := hf x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+    linarith
+  have bound := sum_below.concave_jensen.rat lo hi (fun x => (-1)*f x) neg n p m hp hm
+  rw [sum_const_mul.rat] at bound
+  linarith
+
++ concave_interval.mono_below_max.rat (lo hi : ℚ) (f : ℚ → ℚ) (x y peak : ℚ) (hf : concave_interval.rat lo hi f) (hx : lo ≤ x) (hxy : x ≤ y) (hy : y ≤ peak) (hpeak : peak ≤ hi) (hmax : ∀ z : ℚ, lo ≤ z → z ≤ hi → f z ≤ f peak) : f x ≤ f y
+  unfold concave_interval.rat at hf
+  by_cases e : y = peak
+  · rw [e]
+    exact hmax x hx (by linarith)
+  · have strict : y < peak := by
+      by_contra h
+      have same : y = peak := by linarith
+      exact e same
+    have conc := hf x peak y (peak-y) (y-x) hx (by linarith) (by linarith) hpeak (by linarith) (by linarith) (by linarith) (by ring)
+    have fy := hmax y (by linarith) (by linarith)
+    nlinarith
+
++ convex_interval.affine.real (lo hi a b : ℝ) : convex_interval.real lo hi (fun x => a*x+b)
+  unfold convex_interval.real
+  intro x y z u v hx0 hx1 hy0 hy1 hu hv huv hz
+  have scaled : a*((u+v)*z) = a*(u*x+v*y) := by rw [hz]
+  linarith
+
++ concave_interval.affine.real (lo hi a b : ℝ) : concave_interval.real lo hi (fun x => a*x+b)
+  unfold concave_interval.real
+  intro x y z u v hx0 hx1 hy0 hy1 hu hv huv hz
+  have scaled : a*((u+v)*z) = a*(u*x+v*y) := by rw [hz]
+  linarith
+
++ convex_interval.square.real (lo hi : ℝ) : convex_interval.real lo hi (fun x => x^2)
+  unfold convex_interval.real
+  intro x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  have center : z*((a+b)*z) = z*(a*x+b*y) := by rw [hz]
+  have left := mul_nonneg.real a ((x-z)^2) ha (by nlinarith)
+  have right := mul_nonneg.real b ((y-z)^2) hb (by nlinarith)
+  nlinarith
+
++ convex_interval.affine.rat (lo hi a b : ℚ) : convex_interval.rat lo hi (fun x => a*x+b)
+  unfold convex_interval.rat
+  intro x y z u v hx0 hx1 hy0 hy1 hu hv huv hz
+  have scaled : a*((u+v)*z) = a*(u*x+v*y) := by rw [hz]
+  linarith
+
++ concave_interval.affine.rat (lo hi a b : ℚ) : concave_interval.rat lo hi (fun x => a*x+b)
+  unfold concave_interval.rat
+  intro x y z u v hx0 hx1 hy0 hy1 hu hv huv hz
+  have scaled : a*((u+v)*z) = a*(u*x+v*y) := by rw [hz]
+  linarith
+
++ convex_interval.square.rat (lo hi : ℚ) : convex_interval.rat lo hi (fun x => x^2)
+  unfold convex_interval.rat
+  intro x y z a b hx0 hx1 hy0 hy1 ha hb hab hz
+  have center : z*((a+b)*z) = z*(a*x+b*y) := by rw [hz]
+  have left := mul_nonneg.rat a ((x-z)^2) ha (by nlinarith)
+  have right := mul_nonneg.rat b ((y-z)^2) hb (by nlinarith)
+  nlinarith

@@ -1,0 +1,14 @@
+import sum_range
+
++ interval_missing_base (P : ℕ → Prop) (a b : ℕ) (ab : a ≤ b) (step : ∀ i, a ≤ i → i < b → P i → P (i + 1)) : P b
+  apply nat.interval_induct P a b ab
++ interval_reversed (P : ℕ → Prop) (a b : ℕ) (ab : b ≤ a) (base : P a) (step : ∀ i, a ≤ i → i < b → P i → P (i + 1)) : P b := nat.interval_induct P a b ab base step
++ interval_missing_last (P : ℕ → Prop) (a b : ℕ) (ab : a ≤ b) (base : P a) (step : ∀ i, a ≤ i → i + 1 < b → P i → P (i + 1)) : P b := nat.interval_induct P a b ab base step
++ real_missing_first (f : ℕ → ℝ) (h : ∀ i, 3 < i → i < 5 → f i ≤ f (i + 1)) : f 3 ≤ f 5 := sequence.monotone_on.real f 3 5 (by decide) h
++ real_prefix_only (f : ℕ → ℝ) (h : ∀ i, 0 ≤ i → i < 3 → 0 ≤ f i) : sum_below 3 f ≤ sum_below 5 f := sum_below.mono.real f 3 5 (by decide) h
++ rational_wrong_direction (f : ℕ → ℚ) (h : ∀ i, f (i + 1) ≤ f i) : f 0 ≤ f 4 := sequence.antitone.rat f h 0 4 (by decide)
++ rational_negative_tail (f : ℕ → ℚ) (h : ∀ i, 3 ≤ i → i < 5 → f i ≤ 0) : sum_below 3 f ≤ sum_below 5 f := sum_below.mono.rat f 3 5 (by decide) h
++ integer_weak_strict (f : ℕ → ℤ) (h : ∀ i, f i ≤ f (i + 1)) : f 0 < f 4 := sequence.monotone.int f h 0 4 (by decide)
++ integer_sum_reversed (f : ℕ → ℤ) (h : ∀ i, 2 ≤ i → i < 5 → 0 ≤ f i) : sum_below 5 f ≤ sum_below 2 f := sum_below.mono.int f 2 5 (by decide) h
++ natural_beyond_interval (f : ℕ → ℕ) (h : ∀ i, 2 ≤ i → i < 4 → f i ≤ f (i + 1)) : f 2 ≤ f 5 := sequence.monotone_on.nat f 2 5 (by decide) h
++ natural_sum_backwards (f : ℕ → ℕ) : sum_below 5 f ≤ sum_below 2 f := sum_below.mono.nat f 5 2 (by omega) (by intro i hi hb; omega)

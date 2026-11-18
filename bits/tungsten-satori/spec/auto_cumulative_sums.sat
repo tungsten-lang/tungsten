@@ -1,0 +1,77 @@
+import arith
+
+-> local_total (f : ℕ → α) : ℕ → α
+  | 0 => 0
+  | n + 1 => local_total f n + f n
+
++ defined_total (f : ℕ → α) (n : ℕ) : local_total f n = sum_below n f
+  auto
+
++ defined_reverse (f : ℕ → α) (n : ℕ) : sum_below n f = local_total f n
+  auto
+
++ generic_direct (f s : ℕ → α) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ generic_reverse (f s : ℕ → α) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : sum_below n f = s n
+  auto
+
++ nat_direct (f s : ℕ → ℕ) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ nat_reverse (f s : ℕ → ℕ) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : sum_below n f = s n
+  auto
+
++ int_direct (f s : ℕ → ℤ) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ int_reverse (f s : ℕ → ℤ) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : sum_below n f = s n
+  auto
+
++ int_telescope (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f n-f 0
+  auto
+
++ int_telescope_reverse (f : ℕ → ℤ) (n : ℕ) : f n-f 0 = (∑ i < n, f (i+1)-f i)
+  auto
+
++ int_endpoint (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f (i+1)-f i)+f 0 = f n
+  auto
+
++ int_bound (f : ℕ → ℤ) (n : ℕ) (c : ℤ) (h : f n ≤ f 0+c) : (∑ i < n, f (i+1)-f i) ≤ c
+  auto
+
++ rat_direct (f s : ℕ → ℚ) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ rat_reverse (f s : ℕ → ℚ) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : sum_below n f = s n
+  auto
+
++ rat_telescope (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f n-f 0
+  auto
+
++ rat_telescope_reverse (f : ℕ → ℚ) (n : ℕ) : f n-f 0 = (∑ i < n, f (i+1)-f i)
+  auto
+
++ rat_endpoint (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f (i+1)-f i)+f 0 = f n
+  auto
+
++ rat_bound (f : ℕ → ℚ) (n : ℕ) (c : ℚ) (h : f n ≤ f 0+c) : (∑ i < n, f (i+1)-f i) ≤ c
+  auto
+
++ real_direct (f s : ℕ → ℝ) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : s n = sum_below n f
+  auto
+
++ real_reverse (f s : ℕ → ℝ) (base : s 0=0) (step : ∀ i, s (i+1)=s i+f i) (n : ℕ) : sum_below n f = s n
+  auto
+
++ real_telescope (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f (i+1)-f i) = f n-f 0
+  auto
+
++ real_telescope_reverse (f : ℕ → ℝ) (n : ℕ) : f n-f 0 = (∑ i < n, f (i+1)-f i)
+  auto
+
++ real_endpoint (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f (i+1)-f i)+f 0 = f n
+  auto
+
++ real_bound (f : ℕ → ℝ) (n : ℕ) (c : ℝ) (h : f n ≤ f 0+c) : (∑ i < n, f (i+1)-f i) ≤ c
+  auto

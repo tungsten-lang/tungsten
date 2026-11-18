@@ -1,0 +1,4 @@
++ false_missing (p : Prop) (h : True) : p
+  simp at h
++ norm_num_missing (p : Prop) (h : True) : p
+  norm_num at h

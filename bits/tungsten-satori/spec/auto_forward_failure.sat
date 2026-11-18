@@ -1,0 +1,13 @@
++ invalid (p q : Prop) (h : p → q) : q := by auto
++ invalid_quantified (P Q : ℕ → Prop) (x : ℕ) (h : ∀ n : ℕ, P n → Q n) : Q x := by auto
++ invalid_equality (a b c : α) (h : a = b) : a = c := by auto
++ invalid_equal_apply (P : α → Prop) (a b c : α) (q : Prop) (h : a = b ∧ P a) (k : P c → q) : q := by auto
++ invalid_cases (p q r : Prop) (h : p ∨ q) (hp : p → r) : r := by auto
++ invalid_equal_contradiction (P : α → Prop) (a b c : α) (h : a = b ∧ P a ∧ ¬P c) (q : Prop) : q := by auto
++ invalid_exists (P : α → Prop) (x : α) : ∃ y : α, P y := by auto
++ invalid_witness_escape (P : α → Prop) (h : ∃ x : α, P x) : ∀ y : α, P y := by auto
++ invalid_backward_exists (P : α → Prop) (r : Prop) (h : (∃ y : α, P y) → r) : r := by auto
++ invalid_backward_cycle (p q : Prop) (h : p → q) (k : q → p) : q := by auto
++ invalid_backward_forall (P : α → Prop) (r : Prop) (h : (∀ x : α, P x) → r) : r := by auto
++ invalid_backward_imp (p q r : Prop) (h : (p → q) → r) : r := by auto
++ invalid_classical (p q : Prop) : p ∨ q := by auto

@@ -3,6 +3,7 @@
 -- sqrt_nonneg, sup_exists) and the arith library. This module adds no axioms.
 import real
 import arith
+import exp_convex
 
 -- ---- exponential --------------------------------------------------------------------------------------------------
 + exp_nonneg (x : ℝ) : 0 ≤ exp x
@@ -181,6 +182,64 @@ import arith
 + le_sqrt_iff (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : y ≤ sqrt x ↔ y ^ 2 ≤ x
   have k := (sqrt_spec x hx).2
   have p := sqrt_nonneg x
+  constructor <;> intro h <;> nlinarith
+
+-- Strict comparisons retain the signs needed to square both sides.
++ sqrt_lt_iff (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : sqrt x < y ↔ x < y ^ 2
+  have k := (sqrt_spec x hx).2
+  have p := sqrt_nonneg x
+  constructor <;> intro h <;> nlinarith
+
++ lt_sqrt_iff (x y : ℝ) (hx : 0 ≤ x) (hy : 0 ≤ y) : y < sqrt x ↔ y ^ 2 < x
+  have k := (sqrt_spec x hx).2
+  have p := sqrt_nonneg x
+  constructor <;> intro h <;> nlinarith
+
+-- Convert a squared inner-product bound to the corresponding norm bound.
++ abs_le_sqrt_mul (x a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) (h : x^2 ≤ a*b) : |x| ≤ sqrt a * sqrt b
+  have bound := sqrt_le_sqrt (x^2) (a*b) (by nlinarith) h
+  rw [sqrt_sq_eq_abs, sqrt_mul a b ha hb] at bound
+  exact bound
+
+-- Reciprocal-root bounds reduce to polynomial certificates.
++ one_div_sqrt_le_div_iff (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) : 1/sqrt B ≤ m/c ↔ c*c ≤ m*m*B
+  have sp := sqrt_pos B hB
+  have ss := (sqrt_spec B (by linarith)).2
+  have mp := mul_nonneg.real m (sqrt B) hm (by linarith)
+  have square : (m*sqrt B)*(m*sqrt B) = m*m*B
+    have e : (m*sqrt B)*(m*sqrt B) = m*m*(sqrt B*sqrt B) := by ring
+    rw [e, ss]
+  rw [div_le_div_iff.real 1 m (sqrt B) c sp hc]
+  constructor <;> intro h <;> nlinarith
+
++ one_div_sqrt_lt_div_iff (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) : 1/sqrt B < m/c ↔ c*c < m*m*B
+  have sp := sqrt_pos B hB
+  have ss := (sqrt_spec B (by linarith)).2
+  have mp := mul_nonneg.real m (sqrt B) hm (by linarith)
+  have square : (m*sqrt B)*(m*sqrt B) = m*m*B
+    have e : (m*sqrt B)*(m*sqrt B) = m*m*(sqrt B*sqrt B) := by ring
+    rw [e, ss]
+  rw [div_lt_div_iff.real 1 m (sqrt B) c sp hc]
+  constructor <;> intro h <;> nlinarith
+
++ div_le_one_div_sqrt_iff (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) : m/c ≤ 1/sqrt B ↔ m*m*B ≤ c*c
+  have sp := sqrt_pos B hB
+  have ss := (sqrt_spec B (by linarith)).2
+  have mp := mul_nonneg.real m (sqrt B) hm (by linarith)
+  have square : (m*sqrt B)*(m*sqrt B) = m*m*B
+    have e : (m*sqrt B)*(m*sqrt B) = m*m*(sqrt B*sqrt B) := by ring
+    rw [e, ss]
+  rw [div_le_div_iff.real m 1 c (sqrt B) hc sp]
+  constructor <;> intro h <;> nlinarith
+
++ div_lt_one_div_sqrt_iff (B m c : ℝ) (hB : 0 < B) (hm : 0 ≤ m) (hc : 0 < c) : m/c < 1/sqrt B ↔ m*m*B < c*c
+  have sp := sqrt_pos B hB
+  have ss := (sqrt_spec B (by linarith)).2
+  have mp := mul_nonneg.real m (sqrt B) hm (by linarith)
+  have square : (m*sqrt B)*(m*sqrt B) = m*m*B
+    have e : (m*sqrt B)*(m*sqrt B) = m*m*(sqrt B*sqrt B) := by ring
+    rw [e, ss]
+  rw [div_lt_div_iff.real m 1 c (sqrt B) hc sp]
   constructor <;> intro h <;> nlinarith
 
 -- AM–GM for two terms

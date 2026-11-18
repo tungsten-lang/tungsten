@@ -1,0 +1,6 @@
+import power
+
++ combine (a : ℚ) (m n : ℕ) : a^m*a^n = a^(m+n) := by auto
++ nested (a : ℤ) (m n : ℕ) : (a^m)^n = a^(m*n) := by auto
++ product (a b : ℝ) (n : ℕ) : (a*b)^n = a^n*b^n := by auto
++ split (a : ℕ) (m n : ℕ) : a^(m+n) = a^m*a^n := by auto

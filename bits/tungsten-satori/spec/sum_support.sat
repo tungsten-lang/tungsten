@@ -1,0 +1,84 @@
+import sum_support
+
++ real_constant (n : ℕ) : (∑ i < n, (0 : ℝ)) = 0 := sum_below.zero.real n
++ real_bounded_zero (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := sum_below.eq_zero.real f n h
++ real_bounded_terms (f : ℕ → ℝ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hz : (∑ i < n, f i) = 0) : ∀ i < n, f i = 0 := (sum_below.eq_zero_iff.real f n hn).mp hz
++ real_bounded_positive (f : ℕ → ℝ) (n : ℕ) (hn : 0 < n) (hp : ∀ i < n, 0 < f i) : 0 < (∑ i < n, f i) := sum_below.pos.real f n hn hp
++ real_bounded_witness (f : ℕ → ℝ) (n k : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hk : k < n) (hp : 0 < f k) : 0 < (∑ i < n, f i) := (sum_below.pos_iff.real f n hn).mpr ⟨k, hk, hp⟩
++ real_bounded_find (f : ℕ → ℝ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hp : 0 < (∑ i < n, f i)) : ∃ i < n, 0 < f i := (sum_below.pos_iff.real f n hn).mp hp
++ real_list_zero (xs : list α) (f : α → ℝ) (h : ∀ x ∈ xs, f x = 0) : sum_list xs f = 0 := list_sum.eq_zero.real xs f h
++ real_list_terms (xs : list α) (f : α → ℝ) (hn : ∀ x ∈ xs, 0 ≤ f x) (hz : sum_list xs f = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.eq_zero_iff.real xs f hn).mp hz
++ real_list_witness (xs : list α) (f : α → ℝ) (x : α) (hn : ∀ x ∈ xs, 0 ≤ f x) (hx : x ∈ xs) (hp : 0 < f x) : 0 < sum_list xs f := (list_sum.pos_iff.real xs f hn).mpr ⟨x, hx, hp⟩
++ real_list_find (xs : list α) (f : α → ℝ) (hn : ∀ x ∈ xs, 0 ≤ f x) (hp : 0 < sum_list xs f) : ∃ x ∈ xs, 0 < f x := (list_sum.pos_iff.real xs f hn).mp hp
++ real_empty (f : ℕ → ℝ) : (∑ i < 0, f i) = 0 := by apply sum_below.eq_zero.real; intro i hi; omega
++ real_repeated (f : ℕ → ℝ) (h : f 1 = 0 ∧ f 2 = 0) : sum_list [1, 1, 2] f = 0
+  apply list_sum.eq_zero.real
+  intro x hx
+  simp at hx
+  obtain a | b | c := hx
+  · rw [a]; exact h.1
+  · rw [b]; exact h.1
+  · rw [c]; exact h.2
++ real_signed_cancellation : (∑ i < 2, (if i = 0 then 1 else -1 : ℝ)) = 0 ∧ ¬ (∀ i < 2, (if i = 0 then 1 else -1 : ℝ) = 0) := by decide
+
++ rat_constant (n : ℕ) : (∑ i < n, (0 : ℚ)) = 0 := sum_below.zero.rat n
++ rat_bounded_zero (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := sum_below.eq_zero.rat f n h
++ rat_bounded_terms (f : ℕ → ℚ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hz : (∑ i < n, f i) = 0) : ∀ i < n, f i = 0 := (sum_below.eq_zero_iff.rat f n hn).mp hz
++ rat_bounded_positive (f : ℕ → ℚ) (n : ℕ) (hn : 0 < n) (hp : ∀ i < n, 0 < f i) : 0 < (∑ i < n, f i) := sum_below.pos.rat f n hn hp
++ rat_bounded_witness (f : ℕ → ℚ) (n k : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hk : k < n) (hp : 0 < f k) : 0 < (∑ i < n, f i) := (sum_below.pos_iff.rat f n hn).mpr ⟨k, hk, hp⟩
++ rat_bounded_find (f : ℕ → ℚ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hp : 0 < (∑ i < n, f i)) : ∃ i < n, 0 < f i := (sum_below.pos_iff.rat f n hn).mp hp
++ rat_list_zero (xs : list α) (f : α → ℚ) (h : ∀ x ∈ xs, f x = 0) : sum_list xs f = 0 := list_sum.eq_zero.rat xs f h
++ rat_list_terms (xs : list α) (f : α → ℚ) (hn : ∀ x ∈ xs, 0 ≤ f x) (hz : sum_list xs f = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.eq_zero_iff.rat xs f hn).mp hz
++ rat_list_witness (xs : list α) (f : α → ℚ) (x : α) (hn : ∀ x ∈ xs, 0 ≤ f x) (hx : x ∈ xs) (hp : 0 < f x) : 0 < sum_list xs f := (list_sum.pos_iff.rat xs f hn).mpr ⟨x, hx, hp⟩
++ rat_list_find (xs : list α) (f : α → ℚ) (hn : ∀ x ∈ xs, 0 ≤ f x) (hp : 0 < sum_list xs f) : ∃ x ∈ xs, 0 < f x := (list_sum.pos_iff.rat xs f hn).mp hp
++ rat_empty (f : ℕ → ℚ) : (∑ i < 0, f i) = 0 := by apply sum_below.eq_zero.rat; intro i hi; omega
++ rat_repeated (f : ℕ → ℚ) (h : f 1 = 0 ∧ f 2 = 0) : sum_list [1, 1, 2] f = 0
+  apply list_sum.eq_zero.rat
+  intro x hx
+  simp at hx
+  obtain a | b | c := hx
+  · rw [a]; exact h.1
+  · rw [b]; exact h.1
+  · rw [c]; exact h.2
++ rat_signed_cancellation : (∑ i < 2, (if i = 0 then 1 else -1 : ℚ)) = 0 ∧ ¬ (∀ i < 2, (if i = 0 then 1 else -1 : ℚ) = 0) := by decide
+
++ int_constant (n : ℕ) : (∑ i < n, (0 : ℤ)) = 0 := sum_below.zero.int n
++ int_bounded_zero (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := sum_below.eq_zero.int f n h
++ int_bounded_terms (f : ℕ → ℤ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hz : (∑ i < n, f i) = 0) : ∀ i < n, f i = 0 := (sum_below.eq_zero_iff.int f n hn).mp hz
++ int_bounded_positive (f : ℕ → ℤ) (n : ℕ) (hn : 0 < n) (hp : ∀ i < n, 0 < f i) : 0 < (∑ i < n, f i) := sum_below.pos.int f n hn hp
++ int_bounded_witness (f : ℕ → ℤ) (n k : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hk : k < n) (hp : 0 < f k) : 0 < (∑ i < n, f i) := (sum_below.pos_iff.int f n hn).mpr ⟨k, hk, hp⟩
++ int_bounded_find (f : ℕ → ℤ) (n : ℕ) (hn : ∀ i < n, 0 ≤ f i) (hp : 0 < (∑ i < n, f i)) : ∃ i < n, 0 < f i := (sum_below.pos_iff.int f n hn).mp hp
++ int_list_zero (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, f x = 0) : sum_list xs f = 0 := list_sum.eq_zero.int xs f h
++ int_list_terms (xs : list α) (f : α → ℤ) (hn : ∀ x ∈ xs, 0 ≤ f x) (hz : sum_list xs f = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.eq_zero_iff.int xs f hn).mp hz
++ int_list_witness (xs : list α) (f : α → ℤ) (x : α) (hn : ∀ x ∈ xs, 0 ≤ f x) (hx : x ∈ xs) (hp : 0 < f x) : 0 < sum_list xs f := (list_sum.pos_iff.int xs f hn).mpr ⟨x, hx, hp⟩
++ int_list_find (xs : list α) (f : α → ℤ) (hn : ∀ x ∈ xs, 0 ≤ f x) (hp : 0 < sum_list xs f) : ∃ x ∈ xs, 0 < f x := (list_sum.pos_iff.int xs f hn).mp hp
++ int_empty (f : ℕ → ℤ) : (∑ i < 0, f i) = 0 := by apply sum_below.eq_zero.int; intro i hi; omega
++ int_repeated (f : ℕ → ℤ) (h : f 1 = 0 ∧ f 2 = 0) : sum_list [1, 1, 2] f = 0
+  apply list_sum.eq_zero.int
+  intro x hx
+  simp at hx
+  obtain a | b | c := hx
+  · rw [a]; exact h.1
+  · rw [b]; exact h.1
+  · rw [c]; exact h.2
++ int_signed_cancellation : (∑ i < 2, (if i = 0 then 1 else -1 : ℤ)) = 0 ∧ ¬ (∀ i < 2, (if i = 0 then 1 else -1 : ℤ) = 0) := by decide
+
++ nat_constant (n : ℕ) : (∑ i < n, (0 : ℕ)) = 0 := sum_below.zero.nat n
++ nat_bounded_zero (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := sum_below.eq_zero.nat f n h
++ nat_bounded_terms (f : ℕ → ℕ) (n : ℕ) (hz : (∑ i < n, f i) = 0) : ∀ i < n, f i = 0 := (sum_below.eq_zero_iff.nat f n).mp hz
++ nat_bounded_positive (f : ℕ → ℕ) (n : ℕ) (hn : 0 < n) (hp : ∀ i < n, 0 < f i) : 0 < (∑ i < n, f i) := sum_below.pos.nat f n hn hp
++ nat_bounded_witness (f : ℕ → ℕ) (n k : ℕ) (hk : k < n) (hp : 0 < f k) : 0 < (∑ i < n, f i) := (sum_below.pos_iff.nat f n).mpr ⟨k, hk, hp⟩
++ nat_bounded_find (f : ℕ → ℕ) (n : ℕ) (hp : 0 < (∑ i < n, f i)) : ∃ i < n, 0 < f i := (sum_below.pos_iff.nat f n).mp hp
++ nat_list_zero (xs : list α) (f : α → ℕ) (h : ∀ x ∈ xs, f x = 0) : sum_list xs f = 0 := list_sum.eq_zero.nat xs f h
++ nat_list_terms (xs : list α) (f : α → ℕ) (hz : sum_list xs f = 0) : ∀ x ∈ xs, f x = 0 := (list_sum.eq_zero_iff.nat xs f).mp hz
++ nat_list_witness (xs : list α) (f : α → ℕ) (x : α) (hx : x ∈ xs) (hp : 0 < f x) : 0 < sum_list xs f := (list_sum.pos_iff.nat xs f).mpr ⟨x, hx, hp⟩
++ nat_list_find (xs : list α) (f : α → ℕ) (hp : 0 < sum_list xs f) : ∃ x ∈ xs, 0 < f x := (list_sum.pos_iff.nat xs f).mp hp
++ nat_empty (f : ℕ → ℕ) : (∑ i < 0, f i) = 0 := by apply sum_below.eq_zero.nat; intro i hi; omega
++ nat_repeated (f : ℕ → ℕ) (h : f 1 = 0 ∧ f 2 = 0) : sum_list [1, 1, 2] f = 0
+  apply list_sum.eq_zero.nat
+  intro x hx
+  simp at hx
+  obtain a | b | c := hx
+  · rw [a]; exact h.1
+  · rw [b]; exact h.1
+  · rw [c]; exact h.2

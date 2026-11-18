@@ -1,0 +1,77 @@
++ pair (p q : Prop) (hp : p) (hq : q) : p ∧ q
+  constructor
+    exact hp
+    exact hq
+
++ arrows (p q : Prop) : (p → p) ∧ (q → q)
+  constructor
+    intro hp
+      exact hp
+    intro hq
+      exact hq
+
++ nested (p q r : Prop) (hp : p) (hq : q) (hr : r) : (p ∧ q) ∧ r
+  constructor
+    constructor
+      exact hp
+      exact hq
+    exact hr
+
++ choice (p : Prop) : p ∨ ¬p
+  by_cases h : p
+    left
+      exact h
+    right
+      exact h
+
++ implications (p q : Prop) (hp : p) (hq : q) : (p → q) ∧ (q → p)
+  constructor
+    intro h
+      have k : q
+        exact hq
+      exact k
+    intro h
+      exact hp
+
++ continuation (p q : Prop) (hp : p) (h : p → q) : q
+  have k := h hp
+    exact k
+
++ sequence (p q : Prop) (hp : p) (h : p → q) : q
+  have k := hp; apply h
+    exact k
+
++ applied (p q r : Prop) (hp : p) (hq : q) (h : p → q → r) : r
+  apply h
+    exact hp
+    exact hq
+
++ mixed (p q : Prop) : (p → p) ∧ (q → q)
+  constructor
+  · intro hp
+      exact hp
+  · intro hq
+    exact hq
+
++ witness (p q : ℕ → Prop) (n : ℕ) (h : p n) (k : p n → q n) : ∃ i, q i
+  use n
+    exact k h
+
++ cases_layout (p q r : Prop) (h : p ∨ q) (hp : p → r) (hq : q → r) : r
+  cases h with h1 h2
+    exact hp h1
+    exact hq h2
+
++ induction_layout (n : ℕ) : n+0 = n
+  induction n with k ih
+    rfl
+    rfl
+
++ quantified (p : α → Prop) : ∀ x, p x → p x
+  intro x h
+    exact h
+
++ own_have (p : Prop) (hp : p) : p
+  have h : p
+    exact hp
+  exact h

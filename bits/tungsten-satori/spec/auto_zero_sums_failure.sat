@@ -1,0 +1,49 @@
+import arith
+
++ nat_missing (f : ℕ → ℕ) (n : ℕ) : (∑ i < n, f i) = 0 := by auto
+
++ nat_outside (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n+1, f i) = 0 := by auto
+
++ nat_wrong_function (f g : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, g i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ nat_wrong_total (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 1 := by auto
+
++ nat_weak (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : (∑ i < n, f i) = 0 := by auto
+
++ nat_cycle (f : ℕ → ℕ) (n : ℕ) (h : (∑ i < n, f i) = 0 → ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ int_missing (f : ℕ → ℤ) (n : ℕ) : (∑ i < n, f i) = 0 := by auto
+
++ int_outside (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n+1, f i) = 0 := by auto
+
++ int_wrong_function (f g : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, g i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ int_wrong_total (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 1 := by auto
+
++ int_weak (f : ℕ → ℤ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : (∑ i < n, f i) = 0 := by auto
+
++ int_cycle (f : ℕ → ℤ) (n : ℕ) (h : (∑ i < n, f i) = 0 → ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ rat_missing (f : ℕ → ℚ) (n : ℕ) : (∑ i < n, f i) = 0 := by auto
+
++ rat_outside (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n+1, f i) = 0 := by auto
+
++ rat_wrong_function (f g : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, g i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ rat_wrong_total (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 1 := by auto
+
++ rat_weak (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : (∑ i < n, f i) = 0 := by auto
+
++ rat_cycle (f : ℕ → ℚ) (n : ℕ) (h : (∑ i < n, f i) = 0 → ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ real_missing (f : ℕ → ℝ) (n : ℕ) : (∑ i < n, f i) = 0 := by auto
+
++ real_outside (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n+1, f i) = 0 := by auto
+
++ real_wrong_function (f g : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, g i = 0) : (∑ i < n, f i) = 0 := by auto
+
++ real_wrong_total (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, f i = 0) : (∑ i < n, f i) = 1 := by auto
+
++ real_weak (f : ℕ → ℝ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : (∑ i < n, f i) = 0 := by auto
+
++ real_cycle (f : ℕ → ℝ) (n : ℕ) (h : (∑ i < n, f i) = 0 → ∀ i < n, f i = 0) : (∑ i < n, f i) = 0 := by auto

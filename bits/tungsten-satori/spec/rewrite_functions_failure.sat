@@ -1,0 +1,18 @@
++ invalid_eta_capture (F : (α → α) → β) (a : α) (y : β) (h : F (fun x => x) = y) : F (fun x => a) = y := by rw [h]
++ invalid_eta_argument (F : (α → β) → γ) (f g : α → β) (y : γ) (h : F (fun x => f x) = y) : F g = y := by rw [h]
++ invalid_eta_condition (F : (α → β) → γ) (p : (α → β) → Prop) (f : α → β) (y : γ) (rule : ∀ g, p g → F (fun x => g x) = y) : F f = y := by rw [rule]
++ invalid_eta_bound (F : (α → β) → γ) (f : α → β) (a : α) (y : γ) (h : F (fun x => f x) = y) : F (fun x => f a) = y := by simp only [h]
++ invalid_eta_linear (F : (α → β) → ℝ) (f : α → β) (a : α) (h : F (fun x => f a) ≤ 0) : F f ≤ 0 := by linarith
++ invalid_eta_ring (F : (α → β) → ℝ) (f g : α → β) : F f + F (fun x => g x) = 2 * F f := by ring
+-> wrong_alias (f : α → β) (a : α) : α → β := fun x => f a
++ invalid_alias_exact (F : (α → β) → γ) (f : α → β) (a : α) (y : γ) (h : F (fun x => f x) = y) : F (wrong_alias f a) = y := h
+-> failure_identity (x : α) : α := x
+-> unfold_second (x y : α) : α := y
++ invalid_unfold_capture (F : (α → α) → β) (a : α) (y : β) (h : F (fun x => x) = y) : F (fun x => failure_identity a) = y
+  unfold failure_identity
+  rw [h]
++ invalid_unfold_order (F : (α → α → α) → β) (y : β) (h : F (fun x y => x) = y) : F unfold_second = y
+  unfold unfold_second
+  rw [h]
++ function_head_fixed_argument (f g : α → β) (x : α) (y : β) (e : f = g) (h : f x = y) : ∀ z, g z = y := by simp only [e] at h; exact h
++ function_head_argument_order (f g : α → α → β) (x y : α) (z : β) (e : f = g) (h : f x y = z) : g y x = z := by simp only [e] at h; exact h

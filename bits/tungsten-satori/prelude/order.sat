@@ -1,34 +1,13 @@
 -- Order facts derived from the core axioms (proved, not assumed).
 
 + sq_nonneg.int (a : ℤ) : 0 ≤ a ^ 2
-  by_cases h : 0 ≤ a
-  · have e : a ^ 2 = a * a := by ring
-    rw [e]
-    exact mul_nonneg.int a a h h
-  · have h2 : 0 ≤ 0 - a := by linarith
-    have e : a ^ 2 = (0 - a) * (0 - a) := by ring
-    rw [e]
-    exact mul_nonneg.int (0 - a) (0 - a) h2 h2
+  nlinarith
 
 + sq_nonneg.rat (a : ℚ) : 0 ≤ a ^ 2
-  by_cases h : 0 ≤ a
-  · have e : a ^ 2 = a * a := by ring
-    rw [e]
-    exact mul_nonneg.rat a a h h
-  · have h2 : 0 ≤ 0 - a := by linarith
-    have e : a ^ 2 = (0 - a) * (0 - a) := by ring
-    rw [e]
-    exact mul_nonneg.rat (0 - a) (0 - a) h2 h2
+  nlinarith
 
 + sq_nonneg.real (a : ℝ) : 0 ≤ a ^ 2
-  by_cases h : 0 ≤ a
-  · have e : a ^ 2 = a * a := by ring
-    rw [e]
-    exact mul_nonneg.real a a h h
-  · have h2 : 0 ≤ 0 - a := by linarith
-    have e : a ^ 2 = (0 - a) * (0 - a) := by ring
-    rw [e]
-    exact mul_nonneg.real (0 - a) (0 - a) h2 h2
+  nlinarith
 
 
 -- (b − a)(d − c) ≥ 0 without truncated subtraction: nlinarith's product facts over ℕ
@@ -43,3 +22,9 @@
   rw [e2] at q2
   rw [e1] at q3
   linarith
+
+-- Natural AM–GM, using order cases instead of signed subtraction.
++ two_mul_le_add_sq.nat (a b : ℕ) : 2 * a * b ≤ a ^ 2 + b ^ 2
+  by_cases h : a ≤ b
+  · nlinarith
+  · nlinarith

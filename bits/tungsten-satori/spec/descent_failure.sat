@@ -1,0 +1,8 @@
+import sequence_order
+
++ weak_step (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i + 1) ≤ f i) : n ≤ f 0 := sequence.descent_length.nat f n h
++ missing_last (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i + 1) + 1 ≤ f i) : n + 1 ≤ f 0 := sequence.descent_length.nat f (n + 1) h
++ empty_cycle : False := sequence.no_cyclic_descent.nat (fun i => 0) 0 (by decide) (by intro i hi; omega) (by rfl)
++ missing_cycle (f : ℕ → ℕ) (n : ℕ) (h : 0 < n) (step : ∀ i < n, f (i + 1) + 1 ≤ f i) : False := sequence.no_cyclic_descent.nat f n h step (by rfl)
++ wrong_origin (f : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f (i + 1) + 1 ≤ f i) : n ≤ f 1 := sequence.descent_length.nat f n h
++ weak_infinite : ¬ (∀ i, (0 : ℕ) ≤ 0) := sequence.no_infinite_descent.nat (fun i => 0)

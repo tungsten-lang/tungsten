@@ -1,0 +1,417 @@
+-- List-indexed sum patterns. Repeated elements contribute repeatedly.
+-- Member bounds for signed summands require nonnegativity.
+import arith
+
++ list_sum.nil (f : α → β) : sum_list ([] : list α) f = (0 : β) := by rfl
++ list_sum.cons (x : α) (xs : list α) (f : α → β) : sum_list (x :: xs) f = f x + sum_list xs f := by rfl
+
++ list_sum.congr (xs : list α) (f g : α → β) (h : ∀ x ∈ xs, f x = g x) : sum_list xs f = sum_list xs g
+  induction xs with hnil x xs ih h
+  · rfl
+  · have hx := h x (by simp)
+    have ht : ∀ y ∈ xs, f y = g y
+      intro y hy
+      exact h y (by simp [hy])
+    rw [list_sum.cons, list_sum.cons, hx, ih ht]
+
++ list_sum.map (xs : list α) (f : α → β) (g : β → γ) : sum_list (map f xs) g = sum_list xs (fun x => g (f x))
+  induction xs with x xs ih
+  · rfl
+  · simp [map, sum_list, ih]
+
+-- Properties closed under zero and addition pass to finite sums.
++ list_sum.closed (p : β → Prop) (xs : list α) (f : α → β) (h0 : p (0 : β)) (hadd : ∀ a b, p a → p b → p (a + b)) (h : ∀ x ∈ xs, p (f x)) : p (sum_list xs f)
+  induction xs with hnil x xs ih h
+  · rw [list_sum.nil]; exact h0
+  · have head : p (f x) := h x (by simp)
+    have tail : ∀ y ∈ xs, p (f y)
+      intro y hy
+      exact h y (by simp [hy])
+    rw [list_sum.cons]
+    exact hadd (f x) (sum_list xs f) head (ih tail)
+
++ list_sum.id (xs : list ℕ) : sum_list xs (fun x => x) = sum xs
+  induction xs with x xs ih
+  · rfl
+  · simp [sum_list, sum, ih]
+
++ sum.closed (p : ℕ → Prop) (xs : list ℕ) (h0 : p 0) (hadd : ∀ a b, p a → p b → p (a + b)) (h : all p xs) : p (sum xs)
+  rw [← list_sum.id xs]
+  apply list_sum.closed p xs (fun x => x) h0 hadd
+  exact (list.all_iff p xs).mp h
+
++ sum_list_nonneg.real (xs : list α) (f : α → ℝ) (nonneg : ∀ y ∈ xs, 0 ≤ f y) : 0 ≤ sum_list xs f
+  apply list_sum.closed (fun (x : ℝ) => 0 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; linarith
+  · exact nonneg
++ sum_list_member_le.real (xs : list α) (f : α → ℝ) (x : α) (h : x ∈ xs) (nonneg : ∀ y ∈ xs, 0 ≤ f y) : f x ≤ sum_list xs f
+  induction xs with h0 hn0 y ys ih h hn
+  · simp at h0
+  · have head : 0 ≤ f y := hn y (by simp)
+    have tail : ∀ z ∈ ys, 0 ≤ f z
+      intro z hz
+      apply hn z
+      simp [hz]
+    simp [sum_list] at h
+    have eq : sum_list (y :: ys) f = f y + sum_list ys f := by rfl
+    rw [eq]
+    obtain a | b := h
+    · rw [a]; linarith [sum_list_nonneg.real ys f tail]
+    · linarith [ih b tail]
++ sum_list_le.real (xs : list α) (f g : α → ℝ) (h : ∀ x ∈ xs, f x ≤ g x) : sum_list xs f ≤ sum_list xs g
+  induction xs with h0 y ys ih h
+  · have ef : sum_list ([] : list α) f = (0 : ℝ) := by rfl
+    have eg : sum_list ([] : list α) g = (0 : ℝ) := by rfl
+    rw [ef, eg]
+    linarith
+  · have head : f y ≤ g y := h y (by simp)
+    have tail : ∀ z ∈ ys, f z ≤ g z
+      intro z hz
+      apply h z
+      simp [hz]
+    have ef : sum_list (y :: ys) f = f y + sum_list ys f := by rfl
+    have eg : sum_list (y :: ys) g = g y + sum_list ys g := by rfl
+    rw [ef, eg]
+    linarith [ih tail]
++ sum_list_const_mul.real (xs : list α) (f : α → ℝ) (c : ℝ) : sum_list xs (fun x => c * f x) = c * sum_list xs f
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_nonneg.rat (xs : list α) (f : α → ℚ) (nonneg : ∀ y ∈ xs, 0 ≤ f y) : 0 ≤ sum_list xs f
+  apply list_sum.closed (fun (x : ℚ) => 0 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; linarith
+  · exact nonneg
++ sum_list_member_le.rat (xs : list α) (f : α → ℚ) (x : α) (h : x ∈ xs) (nonneg : ∀ y ∈ xs, 0 ≤ f y) : f x ≤ sum_list xs f
+  induction xs with h0 hn0 y ys ih h hn
+  · simp at h0
+  · have head : 0 ≤ f y := hn y (by simp)
+    have tail : ∀ z ∈ ys, 0 ≤ f z
+      intro z hz
+      apply hn z
+      simp [hz]
+    simp [sum_list] at h
+    have eq : sum_list (y :: ys) f = f y + sum_list ys f := by rfl
+    rw [eq]
+    obtain a | b := h
+    · rw [a]; linarith [sum_list_nonneg.rat ys f tail]
+    · linarith [ih b tail]
++ sum_list_le.rat (xs : list α) (f g : α → ℚ) (h : ∀ x ∈ xs, f x ≤ g x) : sum_list xs f ≤ sum_list xs g
+  induction xs with h0 y ys ih h
+  · have ef : sum_list ([] : list α) f = (0 : ℚ) := by rfl
+    have eg : sum_list ([] : list α) g = (0 : ℚ) := by rfl
+    rw [ef, eg]
+    linarith
+  · have head : f y ≤ g y := h y (by simp)
+    have tail : ∀ z ∈ ys, f z ≤ g z
+      intro z hz
+      apply h z
+      simp [hz]
+    have ef : sum_list (y :: ys) f = f y + sum_list ys f := by rfl
+    have eg : sum_list (y :: ys) g = g y + sum_list ys g := by rfl
+    rw [ef, eg]
+    linarith [ih tail]
++ sum_list_const_mul.rat (xs : list α) (f : α → ℚ) (c : ℚ) : sum_list xs (fun x => c * f x) = c * sum_list xs f
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_nonneg.int (xs : list α) (f : α → ℤ) (nonneg : ∀ y ∈ xs, 0 ≤ f y) : 0 ≤ sum_list xs f
+  apply list_sum.closed (fun (x : ℤ) => 0 ≤ x) xs f
+  · linarith
+  · intro a b ha hb; linarith
+  · exact nonneg
++ sum_list_member_le.int (xs : list α) (f : α → ℤ) (x : α) (h : x ∈ xs) (nonneg : ∀ y ∈ xs, 0 ≤ f y) : f x ≤ sum_list xs f
+  induction xs with h0 hn0 y ys ih h hn
+  · simp at h0
+  · have head : 0 ≤ f y := hn y (by simp)
+    have tail : ∀ z ∈ ys, 0 ≤ f z
+      intro z hz
+      apply hn z
+      simp [hz]
+    simp [sum_list] at h
+    have eq : sum_list (y :: ys) f = f y + sum_list ys f := by rfl
+    rw [eq]
+    obtain a | b := h
+    · rw [a]; linarith [sum_list_nonneg.int ys f tail]
+    · linarith [ih b tail]
++ sum_list_le.int (xs : list α) (f g : α → ℤ) (h : ∀ x ∈ xs, f x ≤ g x) : sum_list xs f ≤ sum_list xs g
+  induction xs with h0 y ys ih h
+  · have ef : sum_list ([] : list α) f = (0 : ℤ) := by rfl
+    have eg : sum_list ([] : list α) g = (0 : ℤ) := by rfl
+    rw [ef, eg]
+    linarith
+  · have head : f y ≤ g y := h y (by simp)
+    have tail : ∀ z ∈ ys, f z ≤ g z
+      intro z hz
+      apply h z
+      simp [hz]
+    have ef : sum_list (y :: ys) f = f y + sum_list ys f := by rfl
+    have eg : sum_list (y :: ys) g = g y + sum_list ys g := by rfl
+    rw [ef, eg]
+    linarith [ih tail]
++ sum_list_const_mul.int (xs : list α) (f : α → ℤ) (c : ℤ) : sum_list xs (fun x => c * f x) = c * sum_list xs f
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_member_le.nat (xs : list α) (f : α → ℕ) (x : α) (h : x ∈ xs) : f x ≤ sum_list xs f
+  induction xs with h0 y ys ih h
+  · simp at h0
+  · simp [sum_list] at h
+    simp [sum_list]
+    obtain a | b := h
+    · rw [a]; linarith
+    · linarith [ih b]
++ member_le_sum.nat (xs : list ℕ) (x : ℕ) (h : x ∈ xs) : x ≤ sum xs
+  induction xs with h0 y ys ih h
+  · simp at h0
+  · simp [sum] at h
+    simp [sum]
+    obtain a | b := h
+    · linarith
+    · linarith [ih b]
++ sum_list_le.nat (xs : list α) (f g : α → ℕ) (h : ∀ x ∈ xs, f x ≤ g x) : sum_list xs f ≤ sum_list xs g
+  induction xs with h0 y ys ih h
+  · have ef : sum_list ([] : list α) f = (0 : ℕ) := by rfl
+    have eg : sum_list ([] : list α) g = (0 : ℕ) := by rfl
+    rw [ef, eg]
+    linarith
+  · have head : f y ≤ g y := h y (by simp)
+    have tail : ∀ z ∈ ys, f z ≤ g z
+      intro z hz
+      apply h z
+      simp [hz]
+    have ef : sum_list (y :: ys) f = f y + sum_list ys f := by rfl
+    have eg : sum_list (y :: ys) g = g y + sum_list ys g := by rfl
+    rw [ef, eg]
+    linarith [ih tail]
++ sum_list_const_mul.nat (xs : list α) (f : α → ℕ) (c : ℕ) : sum_list xs (fun x => c * f x) = c * sum_list xs f
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_multiple.nat (m : ℕ) (xs : list α) (f : α → ℕ) (h : ∀ x ∈ xs, ∃ k : ℕ, f x = m * k) : ∃ k : ℕ, sum_list xs f = m * k
+  apply list_sum.closed (fun x => ∃ k : ℕ, x = m * k) xs f
+  · use 0; ring
+  · intro a b ha hb
+    obtain ⟨ka, ea⟩ := ha
+    obtain ⟨kb, eb⟩ := hb
+    use ka + kb
+    rw [ea, eb]; ring
+  · exact h
+
++ sum_list_multiple.int (m : ℤ) (xs : list α) (f : α → ℤ) (h : ∀ x ∈ xs, ∃ k : ℤ, f x = m * k) : ∃ k : ℤ, sum_list xs f = m * k
+  apply list_sum.closed (fun x => ∃ k : ℤ, x = m * k) xs f
+  · use 0; ring
+  · intro a b ha hb
+    obtain ⟨ka, ea⟩ := ha
+    obtain ⟨kb, eb⟩ := hb
+    use ka + kb
+    rw [ea, eb]; ring
+  · exact h
+
++ sum_multiple.nat (m : ℕ) (xs : list ℕ) (h : all (fun x => ∃ k : ℕ, x = m * k) xs) : ∃ k : ℕ, sum xs = m * k
+  rw [← list_sum.id xs]
+  apply sum_list_multiple.nat m xs (fun x => x)
+  exact (list.all_iff (fun x => ∃ k : ℕ, x = m * k) xs).mp h
+
++ sum_list_dvd.nat (m : ℕ) (xs : list α) (f : α → ℕ) (h : ∀ x ∈ xs, m ∣ f x) : m ∣ sum_list xs f
+  have multiples : ∀ x ∈ xs, ∃ k : ℕ, f x = m * k
+    intro x hx
+    have hxdiv := h x hx
+    unfold dvd at hxdiv
+    use f x / m
+    linarith [div_add_mod.nat (f x) m]
+  obtain ⟨k, hk⟩ := sum_list_multiple.nat m xs f multiples
+  unfold dvd
+  rw [hk]
+  exact mul_mod_right.nat m k
+
++ sum_dvd.nat (m : ℕ) (xs : list ℕ) (h : ∀ x ∈ xs, m ∣ x) : m ∣ sum xs
+  rw [← list_sum.id xs]
+  exact sum_list_dvd.nat m xs (fun x => x) h
+
+-- Linearity and concatenation. Natural subtraction is not additive.
+
++ sum_list_add.nat (xs : list α) (f g : α → ℕ) : sum_list xs (fun x => f x + g x) = sum_list xs f + sum_list xs g
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_append.nat (xs ys : list α) (f : α → ℕ) : sum_list (xs ++ ys) f = sum_list xs f + sum_list ys f
+  induction xs with x xs ih
+  · simp [append, sum_list]
+  · simp [append, sum_list, ih]; ring
+
++ sum_list_add.int (xs : list α) (f g : α → ℤ) : sum_list xs (fun x => f x + g x) = sum_list xs f + sum_list xs g
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_append.int (xs ys : list α) (f : α → ℤ) : sum_list (xs ++ ys) f = sum_list xs f + sum_list ys f
+  induction xs with x xs ih
+  · simp [append, sum_list]
+  · simp [append, sum_list, ih]; ring
+
++ sum_list_sub.int (xs : list α) (f g : α → ℤ) : sum_list xs (fun x => f x - g x) = sum_list xs f - sum_list xs g
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_neg.int (xs : list α) (f : α → ℤ) : sum_list xs (fun x => -f x) = -sum_list xs f
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_add.rat (xs : list α) (f g : α → ℚ) : sum_list xs (fun x => f x + g x) = sum_list xs f + sum_list xs g
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_append.rat (xs ys : list α) (f : α → ℚ) : sum_list (xs ++ ys) f = sum_list xs f + sum_list ys f
+  induction xs with x xs ih
+  · simp [append, sum_list]
+  · simp [append, sum_list, ih]; ring
+
++ sum_list_sub.rat (xs : list α) (f g : α → ℚ) : sum_list xs (fun x => f x - g x) = sum_list xs f - sum_list xs g
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_neg.rat (xs : list α) (f : α → ℚ) : sum_list xs (fun x => -f x) = -sum_list xs f
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_add.real (xs : list α) (f g : α → ℝ) : sum_list xs (fun x => f x + g x) = sum_list xs f + sum_list xs g
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_append.real (xs ys : list α) (f : α → ℝ) : sum_list (xs ++ ys) f = sum_list xs f + sum_list ys f
+  induction xs with x xs ih
+  · simp [append, sum_list]
+  · simp [append, sum_list, ih]; ring
+
++ sum_list_sub.real (xs : list α) (f g : α → ℝ) : sum_list xs (fun x => f x - g x) = sum_list xs f - sum_list xs g
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
++ sum_list_neg.real (xs : list α) (f : α → ℝ) : sum_list xs (fun x => -f x) = -sum_list xs f
+  induction xs with x xs ih
+  · simp [sum_list]
+  · simp [sum_list, ih]; ring
+
+-- Weighted bounds need nonnegative weights only at members of each list.
+-- The lower and upper bounds themselves may have either sign.
++ sum_list_weighted_le.real (xs : list α) (w f g : α → ℝ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, f x ≤ g x) : sum_list xs (fun x => w x * f x) ≤ sum_list xs (fun x => w x * g x)
+  apply sum_list_le.real
+  intro x hx
+  exact mul_le_mul_of_nonneg_left.real (f x) (g x) (w x) (h x hx) (hw x hx)
+
++ sum_list_weighted_lower.real (xs : list α) (w f : α → ℝ) (c : ℝ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, c ≤ f x) : c * sum_list xs w ≤ sum_list xs (fun x => w x * f x)
+  rw [← sum_list_const_mul.real xs w c]
+  apply sum_list_le.real
+  intro x hx; nlinarith [hw x hx, h x hx]
+
++ sum_list_weighted_upper.real (xs : list α) (w f : α → ℝ) (c : ℝ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, f x ≤ c) : sum_list xs (fun x => w x * f x) ≤ c * sum_list xs w
+  rw [← sum_list_const_mul.real xs w c]
+  apply sum_list_le.real
+  intro x hx; nlinarith [hw x hx, h x hx]
+
++ sum_list_double_lower.real (xs : list α) (ys : list β) (w : α → ℝ) (v : β → ℝ) (f : α → β → ℝ) (c : ℝ) (hw : ∀ x ∈ xs, 0 ≤ w x) (hv : ∀ y ∈ ys, 0 ≤ v y) (h : ∀ x ∈ xs, ∀ y ∈ ys, c ≤ f x y) : c * (sum_list xs w * sum_list ys v) ≤ sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y))
+  have rows : ∀ x ∈ xs, c * sum_list ys v ≤ sum_list ys (fun y => v y * f x y)
+    intro x hx
+    exact sum_list_weighted_lower.real ys v (f x) c hv (h x hx)
+  linarith [sum_list_weighted_lower.real xs w (fun x => sum_list ys (fun y => v y * f x y)) (c * sum_list ys v) hw rows]
+
++ sum_list_double_upper.real (xs : list α) (ys : list β) (w : α → ℝ) (v : β → ℝ) (f : α → β → ℝ) (c : ℝ) (hw : ∀ x ∈ xs, 0 ≤ w x) (hv : ∀ y ∈ ys, 0 ≤ v y) (h : ∀ x ∈ xs, ∀ y ∈ ys, f x y ≤ c) : sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y)) ≤ c * (sum_list xs w * sum_list ys v)
+  have rows : ∀ x ∈ xs, sum_list ys (fun y => v y * f x y) ≤ c * sum_list ys v
+    intro x hx
+    exact sum_list_weighted_upper.real ys v (f x) c hv (h x hx)
+  linarith [sum_list_weighted_upper.real xs w (fun x => sum_list ys (fun y => v y * f x y)) (c * sum_list ys v) hw rows]
+
++ sum_list_weighted_le.rat (xs : list α) (w f g : α → ℚ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, f x ≤ g x) : sum_list xs (fun x => w x * f x) ≤ sum_list xs (fun x => w x * g x)
+  apply sum_list_le.rat
+  intro x hx
+  exact mul_le_mul_of_nonneg_left.rat (f x) (g x) (w x) (h x hx) (hw x hx)
+
++ sum_list_weighted_lower.rat (xs : list α) (w f : α → ℚ) (c : ℚ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, c ≤ f x) : c * sum_list xs w ≤ sum_list xs (fun x => w x * f x)
+  rw [← sum_list_const_mul.rat xs w c]
+  apply sum_list_le.rat
+  intro x hx; nlinarith [hw x hx, h x hx]
+
++ sum_list_weighted_upper.rat (xs : list α) (w f : α → ℚ) (c : ℚ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, f x ≤ c) : sum_list xs (fun x => w x * f x) ≤ c * sum_list xs w
+  rw [← sum_list_const_mul.rat xs w c]
+  apply sum_list_le.rat
+  intro x hx; nlinarith [hw x hx, h x hx]
+
++ sum_list_double_lower.rat (xs : list α) (ys : list β) (w : α → ℚ) (v : β → ℚ) (f : α → β → ℚ) (c : ℚ) (hw : ∀ x ∈ xs, 0 ≤ w x) (hv : ∀ y ∈ ys, 0 ≤ v y) (h : ∀ x ∈ xs, ∀ y ∈ ys, c ≤ f x y) : c * (sum_list xs w * sum_list ys v) ≤ sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y))
+  have rows : ∀ x ∈ xs, c * sum_list ys v ≤ sum_list ys (fun y => v y * f x y)
+    intro x hx
+    exact sum_list_weighted_lower.rat ys v (f x) c hv (h x hx)
+  linarith [sum_list_weighted_lower.rat xs w (fun x => sum_list ys (fun y => v y * f x y)) (c * sum_list ys v) hw rows]
+
++ sum_list_double_upper.rat (xs : list α) (ys : list β) (w : α → ℚ) (v : β → ℚ) (f : α → β → ℚ) (c : ℚ) (hw : ∀ x ∈ xs, 0 ≤ w x) (hv : ∀ y ∈ ys, 0 ≤ v y) (h : ∀ x ∈ xs, ∀ y ∈ ys, f x y ≤ c) : sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y)) ≤ c * (sum_list xs w * sum_list ys v)
+  have rows : ∀ x ∈ xs, sum_list ys (fun y => v y * f x y) ≤ c * sum_list ys v
+    intro x hx
+    exact sum_list_weighted_upper.rat ys v (f x) c hv (h x hx)
+  linarith [sum_list_weighted_upper.rat xs w (fun x => sum_list ys (fun y => v y * f x y)) (c * sum_list ys v) hw rows]
+
++ sum_list_weighted_le.int (xs : list α) (w f g : α → ℤ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, f x ≤ g x) : sum_list xs (fun x => w x * f x) ≤ sum_list xs (fun x => w x * g x)
+  apply sum_list_le.int
+  intro x hx
+  exact mul_le_mul_of_nonneg_left.int (f x) (g x) (w x) (h x hx) (hw x hx)
+
++ sum_list_weighted_lower.int (xs : list α) (w f : α → ℤ) (c : ℤ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, c ≤ f x) : c * sum_list xs w ≤ sum_list xs (fun x => w x * f x)
+  rw [← sum_list_const_mul.int xs w c]
+  apply sum_list_le.int
+  intro x hx; nlinarith [hw x hx, h x hx]
+
++ sum_list_weighted_upper.int (xs : list α) (w f : α → ℤ) (c : ℤ) (hw : ∀ x ∈ xs, 0 ≤ w x) (h : ∀ x ∈ xs, f x ≤ c) : sum_list xs (fun x => w x * f x) ≤ c * sum_list xs w
+  rw [← sum_list_const_mul.int xs w c]
+  apply sum_list_le.int
+  intro x hx; nlinarith [hw x hx, h x hx]
+
++ sum_list_double_lower.int (xs : list α) (ys : list β) (w : α → ℤ) (v : β → ℤ) (f : α → β → ℤ) (c : ℤ) (hw : ∀ x ∈ xs, 0 ≤ w x) (hv : ∀ y ∈ ys, 0 ≤ v y) (h : ∀ x ∈ xs, ∀ y ∈ ys, c ≤ f x y) : c * (sum_list xs w * sum_list ys v) ≤ sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y))
+  have rows : ∀ x ∈ xs, c * sum_list ys v ≤ sum_list ys (fun y => v y * f x y)
+    intro x hx
+    exact sum_list_weighted_lower.int ys v (f x) c hv (h x hx)
+  linarith [sum_list_weighted_lower.int xs w (fun x => sum_list ys (fun y => v y * f x y)) (c * sum_list ys v) hw rows]
+
++ sum_list_double_upper.int (xs : list α) (ys : list β) (w : α → ℤ) (v : β → ℤ) (f : α → β → ℤ) (c : ℤ) (hw : ∀ x ∈ xs, 0 ≤ w x) (hv : ∀ y ∈ ys, 0 ≤ v y) (h : ∀ x ∈ xs, ∀ y ∈ ys, f x y ≤ c) : sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y)) ≤ c * (sum_list xs w * sum_list ys v)
+  have rows : ∀ x ∈ xs, sum_list ys (fun y => v y * f x y) ≤ c * sum_list ys v
+    intro x hx
+    exact sum_list_weighted_upper.int ys v (f x) c hv (h x hx)
+  linarith [sum_list_weighted_upper.int xs w (fun x => sum_list ys (fun y => v y * f x y)) (c * sum_list ys v) hw rows]
+
++ sum_list_weighted_le.nat (xs : list α) (w f g : α → ℕ) (h : ∀ x ∈ xs, f x ≤ g x) : sum_list xs (fun x => w x * f x) ≤ sum_list xs (fun x => w x * g x)
+  apply sum_list_le.nat
+  intro x hx
+  exact mul_le_mul_of_nonneg_left.nat (f x) (g x) (w x) (h x hx) (by linarith)
+
++ sum_list_weighted_lower.nat (xs : list α) (w f : α → ℕ) (c : ℕ) (h : ∀ x ∈ xs, c ≤ f x) : c * sum_list xs w ≤ sum_list xs (fun x => w x * f x)
+  rw [← sum_list_const_mul.nat xs w c]
+  apply sum_list_le.nat
+  intro x hx; nlinarith [h x hx]
+
++ sum_list_weighted_upper.nat (xs : list α) (w f : α → ℕ) (c : ℕ) (h : ∀ x ∈ xs, f x ≤ c) : sum_list xs (fun x => w x * f x) ≤ c * sum_list xs w
+  rw [← sum_list_const_mul.nat xs w c]
+  apply sum_list_le.nat
+  intro x hx; nlinarith [h x hx]
+
++ sum_list_double_lower.nat (xs : list α) (ys : list β) (w : α → ℕ) (v : β → ℕ) (f : α → β → ℕ) (c : ℕ) (h : ∀ x ∈ xs, ∀ y ∈ ys, c ≤ f x y) : c * (sum_list xs w * sum_list ys v) ≤ sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y))
+  have rows : ∀ x ∈ xs, c * sum_list ys v ≤ sum_list ys (fun y => v y * f x y)
+    intro x hx
+    exact sum_list_weighted_lower.nat ys v (f x) c (h x hx)
+  linarith [sum_list_weighted_lower.nat xs w (fun x => sum_list ys (fun y => v y * f x y)) (c * sum_list ys v) rows]
+
++ sum_list_double_upper.nat (xs : list α) (ys : list β) (w : α → ℕ) (v : β → ℕ) (f : α → β → ℕ) (c : ℕ) (h : ∀ x ∈ xs, ∀ y ∈ ys, f x y ≤ c) : sum_list xs (fun x => w x * sum_list ys (fun y => v y * f x y)) ≤ c * (sum_list xs w * sum_list ys v)
+  have rows : ∀ x ∈ xs, sum_list ys (fun y => v y * f x y) ≤ c * sum_list ys v
+    intro x hx
+    exact sum_list_weighted_upper.nat ys v (f x) c (h x hx)
+  linarith [sum_list_weighted_upper.nat xs w (fun x => sum_list ys (fun y => v y * f x y)) (c * sum_list ys v) rows]

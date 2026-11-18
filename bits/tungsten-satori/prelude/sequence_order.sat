@@ -1,0 +1,67 @@
+-- Adjacent inequalities suffice on the interval whose endpoints are compared.
+import arith
+
++ nat.interval_induct (P : ℕ → Prop) (a b : ℕ) (ab : a ≤ b) (base : P a)
+    (step : ∀ i, a ≤ i → i < b → P i → P (i + 1)) : P b
+  have reach := le_induction.nat (fun i => i ≤ b → P i) a (by intro h; exact base) (by intro i hi ih hn; exact step i hi (by omega) (ih (by omega))) b ab
+  exact reach (by omega)
+
++ sequence.monotone_on.real (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b)
+    (step : ∀ i, a ≤ i → i < b → f i ≤ f (i + 1)) : f a ≤ f b
+  exact nat.interval_induct (fun i => f a ≤ f i) a b ab (by linarith) (by intro i hi hb ih; linarith [step i hi hb])
++ sequence.antitone_on.real (f : ℕ → ℝ) (a b : ℕ) (ab : a ≤ b)
+    (step : ∀ i, a ≤ i → i < b → f (i + 1) ≤ f i) : f b ≤ f a
+  exact nat.interval_induct (fun i => f i ≤ f a) a b ab (by linarith) (by intro i hi hb ih; linarith [step i hi hb])
++ sequence.monotone.real (f : ℕ → ℝ) (step : ∀ i, f i ≤ f (i + 1)) (a b : ℕ) (ab : a ≤ b) : f a ≤ f b
+  exact sequence.monotone_on.real f a b ab (by intro i hi hb; exact step i)
++ sequence.antitone.real (f : ℕ → ℝ) (step : ∀ i, f (i + 1) ≤ f i) (a b : ℕ) (ab : a ≤ b) : f b ≤ f a
+  exact sequence.antitone_on.real f a b ab (by intro i hi hb; exact step i)
+
++ sequence.monotone_on.rat (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b)
+    (step : ∀ i, a ≤ i → i < b → f i ≤ f (i + 1)) : f a ≤ f b
+  exact nat.interval_induct (fun i => f a ≤ f i) a b ab (by linarith) (by intro i hi hb ih; linarith [step i hi hb])
++ sequence.antitone_on.rat (f : ℕ → ℚ) (a b : ℕ) (ab : a ≤ b)
+    (step : ∀ i, a ≤ i → i < b → f (i + 1) ≤ f i) : f b ≤ f a
+  exact nat.interval_induct (fun i => f i ≤ f a) a b ab (by linarith) (by intro i hi hb ih; linarith [step i hi hb])
++ sequence.monotone.rat (f : ℕ → ℚ) (step : ∀ i, f i ≤ f (i + 1)) (a b : ℕ) (ab : a ≤ b) : f a ≤ f b
+  exact sequence.monotone_on.rat f a b ab (by intro i hi hb; exact step i)
++ sequence.antitone.rat (f : ℕ → ℚ) (step : ∀ i, f (i + 1) ≤ f i) (a b : ℕ) (ab : a ≤ b) : f b ≤ f a
+  exact sequence.antitone_on.rat f a b ab (by intro i hi hb; exact step i)
+
++ sequence.monotone_on.int (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b)
+    (step : ∀ i, a ≤ i → i < b → f i ≤ f (i + 1)) : f a ≤ f b
+  exact nat.interval_induct (fun i => f a ≤ f i) a b ab (by linarith) (by intro i hi hb ih; linarith [step i hi hb])
++ sequence.antitone_on.int (f : ℕ → ℤ) (a b : ℕ) (ab : a ≤ b)
+    (step : ∀ i, a ≤ i → i < b → f (i + 1) ≤ f i) : f b ≤ f a
+  exact nat.interval_induct (fun i => f i ≤ f a) a b ab (by linarith) (by intro i hi hb ih; linarith [step i hi hb])
++ sequence.monotone.int (f : ℕ → ℤ) (step : ∀ i, f i ≤ f (i + 1)) (a b : ℕ) (ab : a ≤ b) : f a ≤ f b
+  exact sequence.monotone_on.int f a b ab (by intro i hi hb; exact step i)
++ sequence.antitone.int (f : ℕ → ℤ) (step : ∀ i, f (i + 1) ≤ f i) (a b : ℕ) (ab : a ≤ b) : f b ≤ f a
+  exact sequence.antitone_on.int f a b ab (by intro i hi hb; exact step i)
+
++ sequence.monotone_on.nat (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b)
+    (step : ∀ i, a ≤ i → i < b → f i ≤ f (i + 1)) : f a ≤ f b
+  exact nat.interval_induct (fun i => f a ≤ f i) a b ab (by linarith) (by intro i hi hb ih; linarith [step i hi hb])
++ sequence.antitone_on.nat (f : ℕ → ℕ) (a b : ℕ) (ab : a ≤ b)
+    (step : ∀ i, a ≤ i → i < b → f (i + 1) ≤ f i) : f b ≤ f a
+  exact nat.interval_induct (fun i => f i ≤ f a) a b ab (by linarith) (by intro i hi hb ih; linarith [step i hi hb])
++ sequence.monotone.nat (f : ℕ → ℕ) (step : ∀ i, f i ≤ f (i + 1)) (a b : ℕ) (ab : a ≤ b) : f a ≤ f b
+  exact sequence.monotone_on.nat f a b ab (by intro i hi hb; exact step i)
++ sequence.antitone.nat (f : ℕ → ℕ) (step : ∀ i, f (i + 1) ≤ f i) (a b : ℕ) (ab : a ≤ b) : f b ≤ f a
+  exact sequence.antitone_on.nat f a b ab (by intro i hi hb; exact step i)
+
+-- A natural-valued rank can lose at least one only finitely many times.
++ sequence.descent_on.nat (f : ℕ → ℕ) (n : ℕ) (step : ∀ i < n, f (i + 1) + 1 ≤ f i) : f n + n ≤ f 0
+  exact nat.interval_induct (fun i => f i + i ≤ f 0) 0 n (by omega) (by omega) (by intro i hi hn ih; omega [step i hn])
++ sequence.descent.nat (f : ℕ → ℕ) (step : ∀ i, f (i + 1) + 1 ≤ f i) : ∀ n, f n + n ≤ f 0
+  intro n
+  exact sequence.descent_on.nat f n (by intro i hi; exact step i)
++ sequence.descent_length.nat (f : ℕ → ℕ) (n : ℕ) (step : ∀ i < n, f (i + 1) + 1 ≤ f i) : n ≤ f 0
+  omega [sequence.descent_on.nat f n step]
++ sequence.no_cyclic_descent.nat (f : ℕ → ℕ) (n : ℕ) (positive : 0 < n)
+    (step : ∀ i < n, f (i + 1) + 1 ≤ f i) (cycle : f n = f 0) : False
+  omega [sequence.descent_on.nat f n step]
++ sequence.no_infinite_descent.nat (f : ℕ → ℕ) : ¬ (∀ i, f (i + 1) < f i)
+  intro step
+  have bound := sequence.descent_length.nat f (f 0 + 1) (by intro i hi; omega [step i])
+  omega

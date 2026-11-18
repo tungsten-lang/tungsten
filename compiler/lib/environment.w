@@ -2,6 +2,9 @@
 
 + Environment
   -> new(@parent = nil, @barrier = false)
+    @has_children = false
+    if @parent != nil
+      @parent.note_child()
     @bindings = {}
     # Per-name integer policy for the tree walker: "int"/"bigint" promote,
     # "i64"/"u64" wrap. Missing means the compiled default (wrap +/-/*,
@@ -90,8 +93,12 @@
   # while making block locals fresh exactly as Environment.new would.
   -> clear_bindings
     ccall("w_hash_clear_reuse", @bindings)
-    @hints = {}
+    ccall("w_hash_clear_reuse", @hints)
     self
+
+  # A closure or goroutine can still read this frame through its child scope.
+  -> note_child
+    @has_children = true
 
   -> defined?(name)
     if @bindings.has_key?(name)
@@ -120,4 +127,4 @@
       return false
     @parent.defined_locally_or_in_scope?(name)
 
-  ro :parent
+  ro :parent, :has_children

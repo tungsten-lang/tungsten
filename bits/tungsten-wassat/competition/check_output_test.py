@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import tempfile
+import tracemalloc
 import unittest
 from pathlib import Path
 
@@ -76,6 +77,35 @@ class CompetitionOutputTest(unittest.TestCase):
             "SAT",
             10,
         )
+
+    def test_replays_many_clauses_and_sparse_variable_ids_in_bounded_memory(self) -> None:
+        count = 60_000
+        variable = 200_000_000
+        cnf = self.tmp / "large.cnf"
+        with cnf.open("w", encoding="ascii") as stream:
+            stream.write(f"p cnf {variable} {count}\n")
+            stream.write("c " + "comment" * 14_000 + "\n")
+            for _ in range(count):
+                stream.write(f"1 -{variable} 0 ")
+        stdout = self.write("model.out", f"s SATISFIABLE\nv -{variable} 0\n")
+        tracemalloc.start()
+        try:
+            check_output(cnf, stdout, "SAT", 10)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 4 * 1024 * 1024)
+
+    def test_checks_literals_even_after_a_clause_is_satisfied(self) -> None:
+        for text in ("p cnf 1 1\n1 2 0\n", "p cnf 1 1\n1 garbage 0\n"):
+            cnf = self.write("invalid.cnf", text)
+            self.assert_rejected(cnf, "s SATISFIABLE\nv 1 0\n", "SAT", 10)
+
+    def test_streams_clauses_across_comments_and_newlines(self) -> None:
+        cnf = self.write("split.cnf", "p cnf 5 2\n-1\nc comment\n5 0 -1\n\n5 0")
+        output = self.write("split.out", "v 1 5 0\ns SATISFIABLE\n")
+        check_output(cnf, output, "SAT", 10)
+        self.assertEqual(parse_cnf(cnf), (5, [[-1, 5], [-1, 5]]))
 
     def test_dimacs_parser_rejects_malformed_or_unterminated_input(self) -> None:
         malformed = self.write("malformed.cnf", "p cnf 2 1\np cnf 2 1\n1 0\n")

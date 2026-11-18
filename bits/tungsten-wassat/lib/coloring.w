@@ -924,7 +924,7 @@ WASSAT_COLORING_NODE_CAP = 200000
   k_slots
 
 # Return the clique/obstruction size on a verified obstruction, otherwise zero.
--> wassat_coloring_clique_unsat(formula)
+-> wassat_coloring_clique_unsat(formula, witness = nil)
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
   return 0 if nv < 6 || ncl < 7
@@ -948,7 +948,7 @@ WASSAT_COLORING_NODE_CAP = 200000
       widths[n] = widths[n] + 1
     ci += 1
 
-  if binaries * 10 >= ncl * 9
+  if witness != nil || binaries * 10 >= ncl * 9
     width = 0
     count = 0
     w = 2
@@ -962,7 +962,9 @@ WASSAT_COLORING_NODE_CAP = 200000
       # Collect pairwise-disjoint positive choice clauses. Sorting the variable
       # ids gives each clause a deterministic color coordinate independent of
       # literal order. An overlapping clause is simply not a candidate.
-      group_vars = i64[count * width]
+      group_cap = count < WASSAT_COLORING_MAX_GROUPS ? count : WASSAT_COLORING_MAX_GROUPS
+      group_vars = i64[group_cap * width]
+      group_ids = i32[witness == nil ? 0 : WASSAT_COLORING_MAX_GROUPS]
       owner = i64[nv + 1]
       color = i64[nv + 1]
       scratch = i64[width]
@@ -996,6 +998,7 @@ WASSAT_COLORING_NODE_CAP = 200000
               disjoint = false if owner[v] != 0
               j += 1
             if disjoint
+              group_ids[groups] = ci + 1 if witness != nil
               j = 0
               while j < width
                 v = scratch[j]
@@ -1085,7 +1088,21 @@ WASSAT_COLORING_NODE_CAP = 200000
           if wassat_coloring_clique_dfs(
             adj, groups, target, cands, ncand, 0, clique, pm
           ) == 1
+            if witness != nil
+              rows = witness["rows"]
+              choices = witness["choices"]
+              i = 0
+              while i < target
+                rows.push(group_ids[clique[i]])
+                j = 0
+                while j < width
+                  choices.push(group_vars[clique[i] * width + j])
+                  j += 1
+                i += 1
             return target
+
+  # The remaining recognizers return different kinds of obstruction.
+  return 0 if witness != nil
 
   # Combinatorial AMO-clique-cover, relativized-PHP, exact-one parity, and
   # clique-coloring obstructions on compact unit-free formulas.

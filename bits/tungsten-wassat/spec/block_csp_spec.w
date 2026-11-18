@@ -116,4 +116,25 @@ describe "Wassat generic block CSP" ->
     res = wassat_block_csp_solve(formula)
     expect(res["status"]).to eq(-1)
 
+describe "Wassat pattern-domain decoding" ->
+  it "lifts compact choices through a mixed-sign two-block clause" ->
+    f = wassat_parse_cnf_native("p cnf 4 5\n-1 -2 0\n-3 4 0\n1 0\n-4 0\n1 -2 3 -4 0\n")
+    r = wassat_compact_solve(f)
+    expect(r["blocks"]).to eq(2)
+    expect(wassat_model_satisfies?(f, r["model"])).to eq(true)
+
+  it "declines a clause spanning three compact domains" ->
+    f = wassat_parse_cnf_native("p cnf 6 4\n-1 -2 0\n-3 -4 0\n-5 -6 0\n1 2 3 5 0\n")
+    expect(wassat_compact_solve(f)).to eq(nil)
+
+  it "lifts signed one-hot values and retains merged support clauses" ->
+    f = wassat_parse_cnf_native("p cnf 8 5\n-3 1 -2 4 0\n8 -6 5 -7 0\n-1 6 7 0\n1 0\n-6 0\n")
+    r = wassat_signed_domain_solve(f, 4)
+    expect(r["blocks"]).to eq(2)
+    expect(wassat_model_satisfies?(f, r["model"])).to eq(true)
+
+  it "declines when a satisfiable formula rejects the exactly-one proposal" ->
+    f = wassat_parse_cnf_native("p cnf 8 4\n-1 2 3 4 0\n-5 6 7 8 0\n2 0\n3 0\n")
+    expect(wassat_signed_domain_solve(f, 4)).to eq(nil)
+
 spec_summary

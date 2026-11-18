@@ -1,6 +1,7 @@
 use miter_eval
 use klieber_local
 use circuit_certificate
+use word_sort_certificate
 
 # Circuit equivalence / miter lanes (Klieber, SatCoin, AIG, word-sort,
 # gray-code miters), split out of multiplier.w. Each lane reconstructs its
@@ -1535,6 +1536,7 @@ WASSAT_AIG_NO_NODE = 400001
             cur += 1
             r += 1
           if ok_cmp && cur == v + comp_len
+            return 0 unless wassat_word_sort_comparator?(fla, fcs, fcl, m_cls, m_off, m_cnt, bx, by, v, k, comp_len)
             op_type[n_ops] = 3
             op_dst[n_ops] = v + comp_len - 1
             op_a[n_ops] = word_id[bx] - 1
@@ -1648,12 +1650,15 @@ WASSAT_AIG_NO_NODE = 400001
     while b < k
       xv = xv0 + b
       return 0 if m_cnt[xv] != 4
+      return 0 unless wassat_word_sort_xor_group?(fla, fcs, fcl, m_cls, m_off[xv], m_cnt[xv], wa0 + b, wb0 + b, xv)
       b += 1
     return 0 if m_cnt[or_start + i] != k + 1
+    return 0 unless wassat_word_sort_or_group?(fla, fcs, fcl, m_cls, m_off[or_start + i], m_cnt[or_start + i], xv0, k, or_start + i)
     out_wa[i] = word_id[wa0] - 1
     out_wb[i] = word_id[wb0] - 1
     i += 1
   return 0 if m_cnt[nv] != n + 1
+  return 0 unless wassat_word_sort_or_group?(fla, fcs, fcl, m_cls, m_off[nv], m_cnt[nv], or_start, n, nv)
 
   # Generate all canonical weak orderings (Ordered Bell Number F(n) <= 545,835)
   max_batches = 8600

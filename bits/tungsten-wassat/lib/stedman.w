@@ -20,6 +20,7 @@
 
 use solver
 use preprocess
+use stedman_cover
 
 WASSAT_STEDMAN_MIN_NODES = 5
 WASSAT_STEDMAN_MAX_NODES = 4096
@@ -499,6 +500,14 @@ WASSAT_STEDMAN_COMPLETION_CONFLICTS = 100
   scan = wassat_stedman_scan(
     nv, formula["flat_ncl"], lits, offs, lens, node_cap
   )
+  unless scan["recognized"]
+    cover = wassat_stedman_cover_scan(nv, formula["flat_ncl"], lits, offs, lens, node_cap)
+    unless cover == nil
+      scan["recognized"] = true
+      scan["found"] = true
+      scan["transitions"] = cover["n"]
+      scan["cover_rounds"] = cover["rounds"]
+      scan["assumptions"] = wassat_stedman_assumptions(cover["n"], cover["calls"], cover["types"])
   return scan unless scan["recognized"] && scan["found"]
 
   art = wassat_raw_artifact(formula, nv)

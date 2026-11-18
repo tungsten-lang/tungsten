@@ -67,6 +67,22 @@ unlimited; a positive budget that is exhausted returns `s UNKNOWN` (unless
 preprocessing or root propagation decides the formula with no search conflict),
 and the reported conflict count is the aggregate.
 
+With experimental `WASSAT_CIRCUIT_CONES=1`, plain DRAT mode also races a bounded
+comparison-circuit specialist beside its final search when the original clauses
+match its structural admission checks.
+The specialist proves local signal equalities and returns a complete proof
+against the original CNF; its compact solvers share the same aggregate conflict
+budget. A miss cancels only the specialist and ordinary search continues.
+The fast portfolio admits the same specialist as an additional worker and
+retains its proved aliases and proof prefix across ordinary allocation rounds.
+Resident-memory planning uses detected RAM rather than a fixed GiB ceiling.
+Automatic admission remains suspended during qualification. Explicit private
+query ownership reduced standalone b18 peak memory from 30.82GB to 464MB while
+preserving its independently checked proof. The full fast portfolio still needs
+phase-throughput and memory qualification before default activation.
+Sequential and hinted-proof modes retain their existing routes. See the
+[implementation and qualification notes](docs/circuit-cones-2026-11-17.md).
+
 The main solver inspects variable, clause, literal, binary, ternary, and unit
 counts. That policy chooses among raw or preprocessed kernels, bounded local
 search, a CDCL probe, diversified raw-kernel arms, EVSIDS or VMTF branching,
@@ -525,9 +541,13 @@ sliding-puzzle transition encoding. A further strict lane reconstructs compact
 guarded-transition encodings for Stedman and Erin triples and searches their
 induced Hamiltonian cycle. Two clean-room lanes construct Gardam's published
 21-term Hantzsche--Wendt group-ring unit from the group law, and recover
-distance-pruned knight-tour position/square supports before generating a tour
-without a stored solution table. Sum-of-three-cubes searches non-negative
-roots below 2048.
+distance-pruned knight-tour position/square supports before generating a tour.
+Wassat also recognizes the signed successor-matrix knight encoding, propagates
+partially pinned Stedman calls, and recovers comparison constants in wide
+SAT-X cube circuits. The earlier cube search covers non-negative roots below
+2048. Its triangle-free Ramsey bound checks degree counts and
+enumerates the remaining neighborhoods on 18 vertices.
+[SC2025 measurements and derivations](docs/sc2025-stedman-argumentation-2026-11-18.md)
 The lanes otherwise use bounded arithmetic, information-set decoding, or
 combinatorial search, then construct or complete a Boolean assignment. A
 structural miss or exhausted bound falls through; a hit is still published
@@ -538,6 +558,29 @@ the complete license is retained in
 
 Every SAT model is reconstructed after preprocessing and checked against the
 original formula before it is printed.
+
+For Summle puzzles, Wassat recovers the numbers and target from the CNF,
+searches expressions over disjoint input occurrences, then completes and checks
+the Boolean model. The SC2025 instance reaches 8638 in six operations.
+[Measurements and witness](docs/summle-2026-11-18.md)
+
+Wassat can also recover compact domains from binary-clause components and
+signed one-hot domains from disjoint choice rows. It turns each two-domain
+clause into a table of forbidden value pairs and checks the resulting model
+against the input. [SC2025 random-CSP measurements](docs/compact-domains-2026-11-18.md)
+
+`wassat certify input.cnf --veripb proof.pbp` can export a cutting-planes
+refutation when the choice clauses require more mutually exclusive allocations
+than there are colors, including when each row names its colors in a different
+order. It can also certify an odd-charge component of XOR equations with even
+incidence for every variable, or a contradiction propagated through locally
+proved implications. The command returns 20 with a certificate or 0 with
+`s UNKNOWN` when recognition misses. Use `veripb --cnf input.cnf proof.pbp`
+to check the certificate against the original formula.
+[Capacity results](docs/polynomial-clique-capacity-certificate-2026-11-17.md) ·
+[Parity results](docs/parity-certificates-2026-11-18.md) ·
+[Local induction results](docs/local-induction-2026-11-18.md) ·
+[Competition measurements and research comparisons](docs/sc2025-specialists-2026-11-18.md)
 
 Exit codes follow the SAT Competition convention, so a competition harness can
 score a run without parsing its output: **10** for `s SATISFIABLE`, **20** for

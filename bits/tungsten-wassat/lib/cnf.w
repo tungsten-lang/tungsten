@@ -172,7 +172,7 @@
   # and every literal at least a digit plus a separator (2 bytes), so
   # text.size/2 bounds BOTH counts. On multi-hundred-MB DIMACS files (e.g.
   # 754 MB / 35.6M clauses), sizing offs and lens at text.size/2 allocates
-  # >9 GiB before parsing begins, exceeding the 8 GiB process memory ceiling;
+  # >9 GiB before parsing begins, exceeding a common 8 GiB process ceiling;
   # use the p-line clause count when present to tighten the initial caps.
   # Apply the same bounded hint scan to medium files too; byte-based clause
   # tables otherwise overallocate heavily even for a short scout solve.
@@ -203,7 +203,7 @@
              5: "clause not terminated by 0", 6: "clause count mismatch",
              7: "input exceeds parser buffers", 8: "XNF/native XOR clauses are not supported; expand them to CNF" }
     raise "[msgs[err]] (line [hdr[5]])"
-  raise "implausible variable count [hdr[0]] in header" if hdr[0] > 50000000
+  raise "implausible variable count [hdr[0]] in header" if hdr[0] > 200000000
   0
 
 # Large files cannot be represented by String. The caller owns the mapping
@@ -317,8 +317,8 @@
             declared_clauses = parts[3].to_i
             # A hostile header must fail loudly here, not OOM later when the
             # solver sizes its per-variable arrays from the declaration.
-            raise "implausible variable count [nvars] in header" if nvars > 50000000
-            raise "implausible clause count [declared_clauses] in header" if declared_clauses > 200000000
+            raise "implausible variable count [nvars] in header" if nvars > 200000000
+            raise "implausible clause count [declared_clauses] in header" if declared_clauses > 500000000
             have_header = true
           else
             raise "missing p cnf header" unless have_header

@@ -26,6 +26,15 @@ use ../lib/solver
     self.enqueue_lvl(3, -1, 0)
 
 describe "Propagation snapshot root reuse" ->
+  it "can check an implication without copying an assignment" ->
+    solver = Wassat.new(3, [[-1, 2], [-2, 3]], 0, 0)
+    counts = i64[4]
+    expect(solver.propagation_snapshot([1, -3], nil, counts)).to eq(-1)
+    expect(solver.propagation_snapshot([-1, -3], nil, counts)).to eq(1)
+    values = i8[4]
+    expect(solver.propagation_snapshot([1], values, counts)).to eq(1)
+    expect(values[3]).to eq(1)
+
   it "closes fresh root units once and reuses the completed queue" ->
     s = Wassat.new(4, [[1], [-1, 2], [-2, 3]], 0, 0)
     values = i8[5]; counters = i64[4]

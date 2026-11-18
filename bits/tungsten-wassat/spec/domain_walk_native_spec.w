@@ -50,7 +50,7 @@ describe "Wassat native finite-domain worker" ->
     expect(wassat_domain_plan(f, 0, 1000000, 0, 0)).to eq(nil)
     if System.cpu_count > 0 && System.physical_memory_bytes > 100000000
       expect(wassat_domain_plan(f, 0, 0, 0, 0) != nil).to eq(true)
-    expect(wassat_race_memory_fits?(f, 0, 0, 0, 2684354561)).to eq(false)
+    expect(wassat_race_memory_fits?(f, 0, 0, 0, wassat_race_memory_budget_bytes(System.physical_memory_bytes) + 1)).to eq(false)
     dwn_restore("WASSAT_DOMAIN_WALK", old_mode)
     dwn_restore("WASSAT_ARMS", old_arms)
 

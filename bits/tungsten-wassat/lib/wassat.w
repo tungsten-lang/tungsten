@@ -31,6 +31,7 @@ use crypto_circuits
 use circuit
 use fermat
 use sum_of_three_cubes
+use circuit_cone_parallel
 use sdp
 use vdwb
 use backdoor
@@ -38,6 +39,7 @@ use sgi
 use schooltt
 use symmetry_fix
 use block_csp
+use compact_domains
 use arithmetic_coloring
 use ramsey_lex
 use gate_closure
@@ -54,15 +56,21 @@ use latin_csp
 use ternary_affine
 use ais
 use coloring
+use capacity_certificate
+use parity_certificate
+use induction_certificate
+use paired_circuit
 use mycielski
 use covering
 use directed_kernel
 use edge_matching
 use sliding_puzzle
+use summle
 use stedman
 use hantzsche_wendt
 use gray_track
 use matching_balance
+use signed_hall
 use matching_parity
 use partition_circuit
 use pair_affine
@@ -103,6 +111,7 @@ use cover_split
   << "    wassat <problem.cnf> --lrat <path>      certificate-backed, LRAT dialect"
   << "    wassat <problem.cnf> --drat <path>      certificate-backed, plain DRAT"
   << "    wassat <problem.cnf> --fast             trusted answers, no certificate"
+  << "    wassat certify <problem.cnf> --veripb <path>   produce a structural counting proof"
   << "    wassat portfolio <problem.cnf> --proof <path>"
   << "    wassat portfolio <problem.cnf> --fast --threads <n>"
   << "    wassat sls <problem.cnf> --flips <n> --seed <n>"
@@ -271,6 +280,57 @@ use cover_split
     << text
   0
 
+# Structural VeriPB proofs use one-based clause IDs from the original CNF.
+# A bounded recognition miss leaves the certificate destination empty.
+-> wassat_run_certify(args)
+  unless args.size == 4 && args[2] == "--veripb"
+    raise "usage: wassat certify <problem.cnf> --veripb <path>"
+  input = args[1]; dest = args[3]; quiet = dest == "-"
+  mapping = File.mmap(input)
+  begin
+    wassat_clear_output(dest, input, "VeriPB")
+    formula = wassat_parse_cnf_mapped(mapping)
+  ensure
+    mapping.close
+  proof = wassat_clique_capacity_proof(formula)
+  parity = {}
+  reason = "clique capacity"
+  if proof == nil && formula["nvars"] <= 128*WASSAT_BLOCK_MAX_SIZE && formula["flat_ncl"] <= WASSAT_BLOCK_MAX_CLAUSES
+    shape = wassat_shape_counts_new(formula["flat_lens"], formula["flat_ncl"])
+    signed = wassat_signed_domain_solve(formula, shape[1], true)
+    if signed != nil
+      proof = wassat_clique_capacity_proof(formula, signed["witness"])
+      reason = "permuted clique capacity"
+  if proof == nil && formula["nvars"] <= WASSAT_HALL_MAX_VARS && formula["flat_ncl"] <= WASSAT_HALL_MAX_CLAUSES
+    hall_config = WassatConfig.from_lens(formula["nvars"], formula["flat_lens"], formula["flat_ncl"])
+    if hall_config.use_signed_hall
+      proof = wassat_signed_hall(formula, true, clock_ms() + WASSAT_HALL_MS)
+      reason = "signed Hall deficit" if proof != nil
+  if proof == nil
+    res = wassat_parity_sum_unsat(formula, 0, parity)
+    if res["status"] == -1
+      reason = "parity"
+    else
+      proof = wassat_induction_proof(formula)
+      if proof == nil
+        wassat_status(quiet, "s UNKNOWN")
+        return 0
+      reason = "local induction"
+  tmp = wassat_reserve_output(dest, input, "VeriPB")
+  begin
+    if proof == nil
+      wassat_emit_parity_pb(tmp, parity)
+    elsif quiet
+      print(proof)
+    else
+      raise "cannot write VeriPB proof at '[tmp]'" unless write_file(tmp, proof)
+    wassat_publish_output(tmp, dest, "VeriPB")
+  ensure
+    wassat_discard_output(tmp, dest)
+  wassat_status(quiet, "s UNSATISFIABLE")
+  wassat_status(quiet, "c mode: VeriPB [reason] certificate")
+  exit(20)
+
 # Report malformed input as a clean diagnostic rather than a backtrace. The
 # parser is deliberately strict -- a DIMACS file whose clause count disagrees
 # with its header is far more likely to be truncated or to carry trailing
@@ -373,8 +433,9 @@ use cover_split
   parity_source = nil
   if proof_mode == WASSAT_PROOF_NONE
     parity_source = wassat_matching_parity_source(formula)
+  pair_quotient = 0
   if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PAIR_GADGET") != "0"
-    wassat_apply_pair_gadget_quotient(formula)
+    pair_quotient = wassat_apply_pair_gadget_quotient(formula)
   # Cache the one full clause-shape pass immediately. Exact structural lanes
   # use it for constant-time admission gates, and ordinary routing reuses the
   # same object below instead of rescanning every unrelated formula.
@@ -420,6 +481,37 @@ use cover_split
     print("0\n") if drat_final == "-"
     exit(20)
 
+  if pair_quotient == 0 && config.max_clause_size >= 17 && (options["conflicts"] == 0 || budget_used < options["conflicts"])
+    summle_cap = wassat_stage_conflict_cap(options["conflicts"], budget_used, WASSAT_SUMMLE_CONFLICT_CAP)
+    summle = wassat_summle_solve(formula, summle_cap)
+    if summle != nil
+      budget_used += summle["conflicts"]
+      if summle["status"] == 1
+        wassat_discard_output(wrat_out, wrat_final)
+        wassat_discard_output(drat_out, drat_final)
+        smtext = wassat_sat_text(summle["model"])
+        wassat_status(quiet, smtext.slice(0, smtext.size - 1))
+        sm = summle["summle"]
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified Summle arithmetic expression)")
+        wassat_status(quiet, "c summle target=[sm[2]] inputs=[sm[0]] steps=[sm[5]] states=[sm[3]] pairs=[sm[4]]")
+        wassat_status(quiet, "c conflicts: [budget_used], decisions: [summle["decisions"]], props: [summle["props"]]")
+        exit(10)
+
+  # Paired bit circuits can prove matching inputs one bit at a time.
+  # The sweep emits plain RUP. Hinted proof requests use the normal solver.
+  if wrat_final == nil && config.max_clause_size == 3 && wassat_paired_prefix?(formula)
+    certificate = wassat_paired_refutation(formula, drat_final != nil, clock_ms() + WASSAT_PAIRED_CIRCUIT_MS)
+    tprof = wassat_prof("cli.paired_circuit", tprof)
+    if certificate != nil
+      if drat_final != nil && drat_final != "-"
+        raise "paired circuit proof write failed" unless write_file(drat_out, certificate)
+        wassat_publish_output(drat_out, drat_final, "DRAT")
+      wassat_status(quiet, "s UNSATISFIABLE")
+      wassat_status(quiet, "c lane: paired_circuit")
+      wassat_status(quiet, "c conflicts: 0, decisions: 0")
+      print(certificate) if drat_final == "-"
+      exit(20)
+
   # Bounded clause checks recover cyclic bit tracks and exactly-one flips.
   # Rotation invariance makes the flip count a multiple of twice the bit
   # width. This arithmetic certificate is fast-only until it emits DRAT.
@@ -435,6 +527,15 @@ use cover_split
       wassat_status(quiet, "c mode: fast (clause-checked cyclic Gray-code counting refutation)")
       wassat_status(quiet, "c gray words=[gray[1]] bits=[gray[2]] rotations=[gray[4]] xor_gates=[gray[5]] exact_one_pairs=[gray[6]] scanned_clauses=[gray[3]] candidates=[gray[7]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
+      exit(20)
+
+  if proof_mode == WASSAT_PROOF_NONE && config.use_signed_hall && formula["nvars"] <= WASSAT_HALL_MAX_VARS && formula["flat_ncl"] <= WASSAT_HALL_MAX_CLAUSES
+    hall = wassat_signed_hall(formula, false, clock_ms() + WASSAT_HALL_MS)
+    tprof = wassat_prof("cli.signed_hall", tprof)
+    if hall != nil
+      wassat_status(quiet, "s UNSATISFIABLE")
+      wassat_status(quiet, "c mode: fast (signed Hall deficit)")
+      wassat_status(quiet, "c conflicts: 0, decisions: 0")
       exit(20)
 
   # Exact-one row incidence is an edge graph. A checked bipartite component
@@ -514,15 +615,13 @@ use cover_split
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(10)
 
-  # Distance-pruned knight-tour formulas expose exact-one position/square
-  # supports and a complete transition fingerprint. Recover the unlabeled
-  # knight graph, generate a tour with bounded Warnsdorff search, and complete
-  # its small conditioned residual with the compact chronological lane.
-  # This remains model-only and fail-closed: recognition, search, completion,
-  # and full original-CNF replay must all succeed before publication.
+  # Recover either a position/square matrix or a signed successor matrix.
+  # Construct a tour on its graph and complete the original Boolean model.
   if (
     env("WASSAT_KNIGHT_TOUR") != "0" &&
-    wassat_knight_side(config.max_clause_size) != 0 &&
+    (wassat_knight_side(config.max_clause_size) != 0 ||
+      (wassat_knight_side(config.max_clause_size - 1) != 0 &&
+       formula["nvars"] >= config.max_clause_size * config.max_clause_size)) &&
     (options["conflicts"] == 0 || budget_used < options["conflicts"])
   )
     knight_cap = wassat_stage_conflict_cap(
@@ -540,7 +639,8 @@ use cover_split
       wassat_discard_output(drat_out, drat_final)
       kttext = wassat_sat_text(knight["model"])
       wassat_status(quiet, kttext.slice(0, kttext.size - 1))
-      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified distance-pruned knight tour)")
+      encoding = knight["successor"] ? "successor" : "distance-pruned"
+      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified [encoding] knight tour)")
       wassat_status(quiet, "c knight side=[knight["side"]], positions=[knight["positions"]], tour_nodes=[knight["nodes"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: [knight["decisions"]], props: [knight["props"]]")
       exit(10)
@@ -589,6 +689,7 @@ use cover_split
       wassat_status(quiet, sttext.slice(0, sttext.size - 1))
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified Stedman triples model)")
       wassat_status(quiet, "c stedman transitions=[stedman["transitions"]], nodes=[stedman["nodes"]]")
+      wassat_prof_note("stedman.cover rounds=[stedman["cover_rounds"]]") if tprof != 0 && stedman["cover_rounds"] != nil
       wassat_status(quiet, "c conflicts: [budget_used], decisions: [stedman["decisions"]], props: [stedman["props"]]")
       exit(10)
   # Canonical Fermat encodings expose their fixed difference in a strict
@@ -656,7 +757,7 @@ use cover_split
       mdp = wassat_mdp_solve(
         formula, mdp_cap, proof_mode,
         proof_mode == WASSAT_PROOF_WRAT && drat_final != nil,
-        prove_cap, total_rem
+        prove_cap, total_rem, config.max_clause_size
       )
       tprof = wassat_prof("cli.mdp", tprof)
       budget_used += mdp["conflicts"]
@@ -741,14 +842,29 @@ use cover_split
   if env("WASSAT_BLOCK_CSP") != "0"
     bcsp = wassat_block_csp_solve(formula)
     tprof = wassat_prof("cli.block_csp", tprof)
+    pattern_lane = nil
+    if bcsp["status"] == 0 && pair_quotient == 0 && config.max_clause_size >= 4 && config.max_clause_size <= WASSAT_BLOCK_MAX_SIZE
+      pattern = nil
+      if formula["nvars"] <= 640 && config.ternary_count == 0 && config.max_clause_size <= 10
+        pattern = wassat_compact_solve(formula)
+        pattern_lane = "compact_domains" if pattern != nil
+      if pattern == nil
+        pattern = wassat_signed_domain_solve(formula, config.max_clause_size)
+        pattern_lane = "signed_domains" if pattern != nil
+      bcsp = pattern if pattern != nil
     if bcsp["status"] == 1
       unless wassat_model_satisfies?(formula, bcsp["model"])
         raise "internal error: block-CSP model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
       wassat_print_sat_model(bcsp["model"], quiet)
-      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact block CSP)")
-      wassat_status(quiet, "c lane: block_csp")
+      if pattern_lane != nil
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified finite-domain CSP)")
+        wassat_status(quiet, "c lane: [pattern_lane]")
+        wassat_status(quiet, "c domain tabu_moves=[bcsp["moves"]]")
+      else
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact block CSP)")
+        wassat_status(quiet, "c lane: block_csp")
       wassat_status(quiet, "c block_csp blocks=[bcsp["blocks"]], nodes=[bcsp["nodes"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(10)
@@ -756,26 +872,41 @@ use cover_split
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
       wassat_status(quiet, "s UNSATISFIABLE")
-      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact block CSP)")
-      wassat_status(quiet, "c lane: block_csp")
+      if bcsp["witness"] != nil
+        wassat_status(quiet, "c mode: fast (permuted clique capacity)")
+        wassat_status(quiet, "c lane: signed_capacity")
+      else
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact block CSP)")
+        wassat_status(quiet, "c lane: block_csp")
       wassat_status(quiet, "c block_csp blocks=[bcsp["blocks"]], nodes=[bcsp["nodes"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(20)
   # A recursively derived clique bound can refute a completely verified
   # two-color graph before spending time in bounded coloring search.
   if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_RAMSEY_BOUND") != "0"
-    rb = wassat_ramsey_bound_solve(formula, clock_ms() + WASSAT_RAMSEY_BOUND_MS)
+    bound_ms = WASSAT_RAMSEY_BOUND_MS
+    # The complete clique check reads every literal. Allow time proportional
+    # to that work on the supported graph sizes.
+    if formula["nvars"] <= 780 && formula.has_key?("flat_nlits")
+      bound_ms += formula["flat_nlits"] / 100000 if formula["flat_ncl"] <= 400000
+    coverage_deadline = clock_ms() + bound_ms
+    rb = wassat_ramsey_bound_solve(formula, coverage_deadline, coverage_deadline + WASSAT_RAMSEY_GLUING_MS)
     tprof = wassat_prof("cli.ramsey_bound", tprof)
     if rb != nil
       bw = rb["work"]
       if env("WASSAT_PROFILE") == "1"
         wassat_prof_note("ramsey_bound refuted=[bw[0]] stopped=[bw[1]] vertices=[bw[2]] scanned=[bw[3]] positive=[bw[4]] negative=[bw[5]] upper=[bw[6]] steps=[bw[7]] polls=[bw[8]] parity_steps=[bw[9]]")
+        wassat_prof_note("ramsey_bound.gluing nodes=[bw[13]]") if bw[12] == 2
         cw = rb["check"]
         if cw != nil
           wassat_prof_note("ramsey_bound.coverage accepted=[cw[0]] stopped=[cw[1]] checked_clauses=[cw[3]] literal_reads=[cw[4]] groups=[cw[5]] distinct=[cw[6]] duplicates=[cw[7]] rank_terms=[cw[8]] polls=[cw[15]]")
       if rb["status"] == -1
         wassat_status(quiet, "s UNSATISFIABLE")
-        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (complete-clique recursive bound)")
+        kind = bw[10] > 0 ? "complete-clique neighborhood bound" : "complete-clique recursive bound"
+        kind = "complete-clique degree bound" if bw[12] == 1
+        kind = "complete-clique neighborhood gluing" if bw[12] == 2
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] ([kind])")
+        wassat_status(quiet, "c ramsey neighborhood factors=[bw[10]] completions=[bw[11]]") if bw[10] > 0
         wassat_status(quiet, "c lane: ramsey_bound")
         wassat_status(quiet, "c bound vertices=[bw[2]] positive=[bw[4]] negative=[bw[5]] upper=[bw[6]]")
         wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
@@ -996,6 +1127,46 @@ use cover_split
       << "c ais graph_vars=[ais["graph_vars"]], components=[ais["components"]], lower=[ais["lower_bound"]], upper=[ais["upper_bound"]]"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
+  # An early bounded reconfiguration probe; misses fall through to all
+  # ordinary preprocessors and the later cooperative scout.
+  if proof_mode == WASSAT_PROOF_NONE && options["conflicts"] == 0 && env("WASSAT_EARLY_RECONF") != "0" && !wassat_sequential?
+    front_nv = formula["nvars"]
+    front_nc = formula["flat_ncl"]
+    front_shape = wassat_reconf_prefix(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], front_nv, front_nc)
+    if front_shape != 0 && formula["flat_nlits"] <= 8000000
+      front_shape = wassat_reconf_large_prefix(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], front_nc)
+    front_plan = nil
+    front_plan = wassat_reconf_plan(formula, 1, 1, 0) if front_shape != 0
+    if front_plan != nil
+      front_stop = i64[4]
+      front_result = i64[formula["nvars"] + 8]
+      front_handle = wassat_reconf_start(formula, front_plan, front_stop, front_result)
+      z = front_handle.join(80)
+      front_cancel_ms = clock_ms()
+      z = wassat_stop_cancel(front_stop)
+      z = front_handle.join
+      front_tail_ms = clock_ms() - front_cancel_ms
+      front_status = wassat_stop_status(front_stop)
+      if env("WASSAT_PROFILE") == "1"
+        wassat_reconf_profile(front_plan, front_status)
+        wassat_prof_note("front.reconfiguration status=[front_status] stop_to_join_ms=[front_tail_ms]")
+      if front_status == 1
+        model = []
+        v = 1
+        while v <= formula["nvars"]
+          model.push(front_result[v] == 1 ? v : 0 - v)
+          v += 1
+        unless wassat_model_satisfies?(formula, model)
+          raise "internal error: front reconfiguration model does not satisfy the input formula"
+        wassat_print_sat_model(model, false)
+        << "c mode: fast (verified front graph reconfiguration)"
+        << "c conflicts: [budget_used], decisions: 0, props: 0"
+        exit(10)
+      if front_status == -1
+        << "s UNSATISFIABLE"
+        << "c mode: fast (clause-checked front graph reconfiguration)"
+        << "c conflicts: [budget_used], decisions: 0, props: 0"
+        exit(20)
   # Parity-sum certificate (parity_sum.w): a connected set of the input's own
   # parity equations whose sum is 0 = 1. One pass over the clauses.
   if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PARITY_SUM") != "0"
@@ -2086,8 +2257,7 @@ use cover_split
           estimated_bytes += sls_bytes * (scout_sls_arenas + 1)
           estimated_bytes += pre_bytes * (pre_arms + resident_pre_arenas)
           physical_bytes = System.physical_memory_bytes ## i64
-          budget_bytes = physical_bytes > 0 ? physical_bytes / 3 : 0
-          budget_bytes = 2684354560 if budget_bytes > 2684354560
+          budget_bytes = wassat_race_memory_budget_bytes(physical_bytes)
           per_sls_allowed = wassat_sls_arm_memory_allowed?(formula)
           requested_sls_flips = wassat_sls_arm_flips
           sls_admitted = sls_flips > 0
@@ -2175,6 +2345,7 @@ use cover_split
           arm_tag = "arm [rr["winner"]]"
           arm_tag = "sls arm" if rr["sls_won"] == true
           arm_tag = "exact small-circuit arm" if rr["circuit_won"] == true
+          arm_tag = "proved comparison-cone arm" if rr["comparison_cones_won"] == true
           arm_tag = "checked binary-counter cover model" if rr["counter_cover_won"] == true
           arm_tag = "verified common-net model" if rr["box_net_won"] == true
           arm_tag = "verified sparse-domain model" if rr["sparse_domain_won"] == true
@@ -2213,6 +2384,7 @@ use cover_split
           else
             << "s UNSATISFIABLE"
           << "c mode: fast (raw cdcl race, [arm_tag])"
+          << "c lane: comparison-cones" if rr["comparison_cones_won"] == true
           << "c conflicts: [budget_used], decisions: 0, props: 0"
           << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(won_stats, pre_msr)
           exit(rr["status"] == 1 ? 10 : 20)
@@ -2329,6 +2501,7 @@ use cover_split
     final_budget = options["conflicts"] - budget_used
     skip_final = final_budget <= 0
   result = nil
+  cone_joint = nil
   if skip_final
     result = s.unknown_result
     result["conflicts"] = 0 if s == scout_solver
@@ -2336,10 +2509,33 @@ use cover_split
     solve_cap = final_budget
     # solve_budget takes additional work, including when resuming the scout.
     # final_budget already excludes its completed conflicts.
-    result = s.solve_budget(solve_cap)
+    if proof_mode == WASSAT_PROOF_DRAT && !wassat_sequential? && wassat_cone_enabled?
+      cone_joint = wassat_cone_parallel_solve(s, formula, solve_cap)
+    if cone_joint == nil
+      result = s.solve_budget(solve_cap)
+    else
+      result = cone_joint["result"]
     result["conflicts"] -= scout_conflicts if s == scout_solver && result["conflicts"] >= scout_conflicts
   tprof = wassat_prof("cli.solve", tprof)
+  if cone_joint != nil && tprof != 0
+    cresult = cone_joint["cone"]
+    wassat_prof_note("cli.comparison_cones recognized=[cresult["recognized"]] won=[cone_joint["cone_won"]] stopped=[cresult["stopped"]] nominees=[cresult["nominees"]] aliases=[cresult["internal_proved"]] unresolved=[cresult["unresolved"]] conflicts=[cresult["conflicts"]] aggregate=[cone_joint["conflicts"]]")
   s.profile_counters("cli.final")
+  if cone_joint != nil && cone_joint["cone_won"]
+    # The serial worker is joined and its partial prefix is now discarded.
+    # The cone certificate derives directly from the ORIGINAL flat formula,
+    # so it replaces that prefix rather than being appended to it.
+    s.abort_proof_sinks
+    dtext = cone_joint["cone"]["drat_text"]
+    unless drat_final == "-"
+      raise "proof write failed at '[drat_out]'" unless write_file(drat_out, dtext)
+      wassat_publish_output(drat_out, drat_final, "DRAT")
+    wassat_status(quiet, "s UNSATISFIABLE")
+    wassat_status(quiet, "c mode: [wassat_mode_of(options)] (original circuit-cone refutation)")
+    wassat_status(quiet, "c lane: comparison-cones")
+    wassat_status(quiet, "c conflicts: [budget_used + cone_joint["conflicts"]], decisions: [cone_joint["cone"]["decisions"]]")
+    print(dtext) if drat_final == "-"
+    exit(20)
   if probe_p != nil
     if result["status"] == 0
       prc = probe_p.poll
@@ -2529,6 +2725,12 @@ use cover_split
     << "Tungsten Wassat [WASSAT_VERSION]"
   elsif cmd == "help" || cmd == "--help" || cmd == "-h"
     wassat_print_usage
+  elsif cmd == "certify"
+    begin
+      return wassat_run_certify(args)
+    rescue e
+      wassat_status(args.size == 4 && args[3] == "-", "c error: [e]")
+      exit(1)
   elsif cmd == "sls"
     rest = []
     i = 1

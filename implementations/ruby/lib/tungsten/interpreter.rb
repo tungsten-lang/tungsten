@@ -5983,6 +5983,11 @@ module Tungsten
       return compiler_result unless compiler_result.equal?(COMPILER_CCALL_MISS)
 
       case cname
+      when "w_value_free_w"
+        runtime_error("w_value_free_w expects one value", node: node) unless args.size == 2
+        # Native disposal is a lifetime hint. Ruby environments and containers
+        # retain their references and Ruby's collector owns the backing values.
+        0
       when "w_date_new_w"
         runtime_error("w_date_new_w expects seven fields", node: node) unless args.size == 8
         Date.new(args[1], args[2], args[3], args[4], args[5], args[6], args[7])

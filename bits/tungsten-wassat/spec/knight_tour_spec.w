@@ -128,6 +128,34 @@ use knight_tour
     lines.join("\n") + "\n"
   )
 
+# Signed edge matrix with independently permuted incoming and outgoing
+# supports. Each guarded arc sees a private rank bit from both endpoints.
+-> knight_successor_fixture(corrupt)
+  nodes = 36
+  lines = []
+  k = 0
+  while k < nodes
+    dest = (5 * k + 7) % nodes
+    source = nodes - 1 - k
+    incoming = []
+    outgoing = []
+    j = 0
+    while j < nodes
+      a = 1 + j * nodes + dest
+      a = 0 - a if a % 3 == 0
+      incoming.push(a)
+      if knight_fixture_edge?(source, j, 6)
+        b = 1 + source * nodes + j
+        b = 0 - b if b % 3 == 0
+        outgoing.push(b)
+        lines.push("[-b] [nodes * nodes + source + 1] [nodes * nodes + j + 1] 0")
+      j += 1
+    incoming[0] = incoming[1] if corrupt && k == 0
+    lines.push(incoming.join(" ") + " 0")
+    lines.push(outgoing.join(" ") + " 0")
+    k += 1
+  "p cnf [nodes * nodes + nodes] [lines.size]\n" + lines.join("\n") + "\n"
+
 describe "Wassat distance-pruned knight-tour specialist" ->
   it "recovers the two support families and generates a table-free tour" ->
     formula = wassat_parse_cnf_native(knight_fixture(false))
@@ -177,5 +205,20 @@ describe "Wassat distance-pruned knight-tour specialist" ->
     expect(result["recognized"]).to eq(false)
     expect(result["status"]).to eq(0)
     expect(result["model"]).to eq([])
+
+  it "recovers a signed successor matrix and closes a tour" ->
+    formula = wassat_parse_cnf_native(knight_successor_fixture(false))
+    result = wassat_knight_tour_solve(formula)
+    expect(result["successor"]).to eq(true)
+    expect(result["positions"]).to eq(36)
+    expect(result["status"]).to eq(1)
+    expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
+    exhausted = wassat_knight_tour_solve_budget(formula, 1, 1)
+    expect(exhausted["status"]).to eq(0)
+    expect(exhausted["model"]).to eq([])
+
+  it "rejects duplicate successor matrix membership" ->
+    formula = wassat_parse_cnf_native(knight_successor_fixture(true))
+    expect(wassat_knight_recover(formula).empty?).to eq(true)
 
 spec_summary

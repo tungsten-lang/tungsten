@@ -159,6 +159,18 @@ describe "Wassat parity sum" ->
     f = cl_formula(3, cl_join([cl_xor2(1, 3, 1), cl_xor2(1, 2, 1), cl_xor2(2, 3, 0)]))
     expect(wassat_parity_sum_unsat(f)["status"]).to eq(0)
 
+  it "exports only the surviving equations of one contradictory component" ->
+    f = cl_formula(8, cl_join([cl_xor2(1, 3, 1), cl_xor2(1, 2, 0), cl_xor2(2, 3, 0),
+      cl_xor2(1, 4, 1), cl_xor2(6, 7, 0), cl_xor2(6, 8, 0), cl_xor2(7, 8, 0)]))
+    witness = {}
+    expect(wassat_parity_sum_unsat(f, 0, witness)["status"]).to eq(-1)
+    members = witness["members"] ## i8[]
+    expect(members.size).to eq(7)
+    i = 0
+    while i < 7
+      expect(members[i]).to eq(i < 3 ? 1 : 0)
+      i += 1
+
   it "ignores a parity constraint with a clause missing" ->
     lines = cl_join([cl_xor3(1, 2, 3, 1), cl_xor3(1, 2, 3, 0)])
     # All eight clauses forbid every assignment of the three variables.

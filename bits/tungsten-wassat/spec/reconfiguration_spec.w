@@ -12,6 +12,18 @@ describe "Wassat bounded graph reconfiguration" ->
     expect(r["meta"][23]).to eq(0)
     expect(rc_replay(rows, r["result"])).to eq(true)
 
+  it "filters expanded inputs with the same first selector row the decoder requires" ->
+    rows = rc_rows(6, [1, 3], [2, 4], 3)
+    f = rc_flat(54, rows)
+    lits = f["flat_lits"]; offs = f["flat_offs"]; lens = f["flat_lens"]
+    expect(wassat_reconf_large_prefix(lits, offs, lens, rows.size)).to eq(1)
+    ci = 6
+    while ci < rows.size && lens[ci] != 6
+      ci += 1
+    expect(ci < rows.size).to eq(true)
+    lits[offs[ci] + 1] += 1
+    expect(wassat_reconf_large_prefix(lits, offs, lens, rows.size)).to eq(0)
+
   it "handles the high bit of a packed word" ->
     rows = rc_rows(64, [0, 62], [1, 63])
     r = rc_solve(64, rows)
@@ -24,11 +36,21 @@ describe "Wassat bounded graph reconfiguration" ->
     expect(r["hit"]).to eq(1)
     expect(rc_replay(rows, r["result"])).to eq(true)
 
-  it "falls through when the shortest path is too short for the encoding" ->
-    r = rc_solve(8, rc_rows(8, [0, 2], [1, 3], 3), 3)
-    expect(r["hit"]).to eq(0)
+  it "finds and replays a longer simple path when the shortest path is too short" ->
+    rows = rc_rows(8, [0, 2], [1, 3], 3)
+    r = rc_solve(8, rows, 3)
+    expect(r["hit"]).to eq(1)
     expect(r["meta"][1]).to eq(1)
-    expect(r["meta"][0]).to eq(0)
+    expect(r["meta"][0]).to eq(1)
+    expect(rc_replay(rows, r["result"])).to eq(true)
+
+  it "retries from clean units after a candidate fails an extra clause" ->
+    rows = rc_rows(6, [1, 3], [2, 4], 3)
+    rows.push([-2, -5])
+    r = rc_solve(6, rows, 3)
+    expect(r["hit"]).to eq(1)
+    expect(r["meta"][30]).to eq(2)
+    expect(rc_replay(rows, r["result"])).to eq(true)
 
   it "refutes an exhausted graph only after checking original transitions" ->
     r = rc_solve(4, rc_rows(4, [0, 2], [1, 3]))
@@ -117,6 +139,15 @@ describe "Wassat bounded graph reconfiguration" ->
     expect(hit).to eq(-1)
     expect(m[2]).to eq(3)
     expect(m[8] <= 2).to eq(true)
+
+  it "declines a packed state with bits outside the graph" ->
+    initial = i64[2]; goal = i64[2]; adj = i64[140]
+    initial[1] = 1 << 10
+    goal[0] = 1
+    m = i64[32]
+    hit = wassat_reconf_search(initial, goal, adj, i64[256], i64[128], 70, 2, 128, m, i64[4], 0)
+    expect(hit).to eq(-1)
+    expect(m[24]).to eq(0)
 
   it "rejects unsafe search buffer dimensions" ->
     initial = i64[1]; goal = i64[1]; adj = i64[8]

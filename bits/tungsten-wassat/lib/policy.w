@@ -5,6 +5,8 @@
 # deterministic from the parsed task shape, so benchmark results are
 # reproducible and library callers get the same decisions as the CLI.
 
+use cnf
+
 # Clause-shape histogram over the parser's flat lengths:
 #   [0] total literals  [1] longest clause  [2] units  [3] binary  [4] ternary
 #   [5] empty input clauses
@@ -345,18 +347,26 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
   units = wassat_flat_unit_count(formula["flat_lens"], nc)
   16777216 + 288 * (nv + 4) + 8 * (nl + nc + 2) + 41 * slots + 8 * (pool + watches + units)
 
--> wassat_race_memory_fits?(formula, cdcl_arenas, sls_arenas,
-                            preprocess_arenas = 0, extra_bytes = 0)
-  memory = System.physical_memory_bytes ## i64
-  # These gates add optional resident arenas. Unknown capacity fails closed;
-  # the baseline serial/raw solver remains available without them.
-  return false if memory <= 0
-  budget = memory / 3
-  budget = 2684354560 if budget > 2684354560
+-> wassat_race_memory_budget_bytes(memory)
+  memory > 0 ? memory / 3 : 0
+
+-> wassat_race_memory_bytes(formula, cdcl_arenas, sls_arenas, preprocess_arenas, extra_bytes)
   estimated = wassat_cdcl_arena_bytes(formula) * cdcl_arenas
   estimated += wassat_sls_arena_bytes(formula) * sls_arenas
   estimated += wassat_preprocess_arena_bytes(formula) * preprocess_arenas
-  estimated + extra_bytes <= budget
+  estimated + extra_bytes
+
+-> wassat_race_memory_fits_for_memory?(formula, cdcl_arenas, sls_arenas, preprocess_arenas, extra_bytes, memory)
+  # These gates add optional resident arenas. Unknown capacity fails closed;
+  # the baseline serial/raw solver remains available without them.
+  return false if memory <= 0
+  budget = wassat_race_memory_budget_bytes(memory)
+  wassat_race_memory_bytes(formula, cdcl_arenas, sls_arenas, preprocess_arenas, extra_bytes) <= budget
+
+-> wassat_race_memory_fits?(formula, cdcl_arenas, sls_arenas,
+                            preprocess_arenas = 0, extra_bytes = 0)
+  wassat_race_memory_fits_for_memory?(formula, cdcl_arenas, sls_arenas,
+    preprocess_arenas, extra_bytes, System.physical_memory_bytes)
 
 # Metaflip-style frozen-core / exact-fringe repair.  These are internal
 # resource limits, not tuning options: the arm inspects the walk it actually
@@ -847,6 +857,10 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
   # computed once from the parser's flat length array in `.from_lens`.
   -> max_clause_size
     @max_clause
+
+  # Unit-rich, mostly binary encodings can hide signed aliases of choice rows.
+  -> use_signed_hall
+    @max_clause >= 3 && @max_clause <= 32 && @units * 16 >= @nvars && @binary * 2 >= @nclauses
 
   -> use_congruence(raw)
     # Congruence closure: ternary strengthening (extract_binaries) plus AND

@@ -504,7 +504,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 
 # Build contiguous literal occurrences in the same reverse-insertion order
 # as the linked representation. End offsets double as descending fill cursors,
-# so construction needs no additional scratch allocation.
+# so construction needs no additional scratch allocation. The low 31 bits of
+# each private width hold the normalized clause length. Binary clauses also
+# store the XOR of their two distinct variable IDs in the high 32 bits.
 -> wassat_sls_build_occ(fla, fcs, fcl, och, ocv, ncl, nv) (i64[] i64[] i64[] i64[] u32[] i64 i64) i64
   limit = 2 * nv + 4
   i = 0
@@ -514,8 +516,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   ci = 0
   while ci < ncl
     o = fcs[ci]
+    n = fcl[ci] & 2147483647
     j = 0
-    while j < fcl[ci]
+    while j < n
       l = fla[o + j]
       li = l > 0 ? 2 * l : 2 * (0 - l) + 1
       och[li] += 1
@@ -530,13 +533,20 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   ci = 0
   while ci < ncl
     o = fcs[ci]
+    n = fcl[ci] & 2147483647
     j = 0
-    while j < fcl[ci]
+    while j < n
       l = fla[o + j]
       li = l > 0 ? 2 * l : 2 * (0 - l) + 1
       och[li] -= 1
       ocv[och[li]] = ci
       j += 1
+    if n == 2
+      a = fla[o]
+      b = fla[o + 1]
+      a = 0 - a if a < 0
+      b = 0 - b if b < 0
+      fcl[ci] = ((a ^ b) << 32) | 2
     ci += 1
   0
 
@@ -551,7 +561,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   while ci < ncl
     wght[ci] = 1
     stx = fcs[ci]
-    n = fcl[ci]
+    n = fcl[ci] & 2147483647
     sc = 0
     cv = 0 ## i64
     j = 0
@@ -577,7 +587,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     sc = cstate[ci] >> 32
     if sc == 0
       stx = fcs[ci]
-      n = fcl[ci]
+      n = fcl[ci] & 2147483647
       j = 0
       while j < n
         l = fla[stx + j]
@@ -690,7 +700,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         wght[ci] = wght[ci] + 1
         wtotal += 1
         stx = fcs[ci]
-        n = fcl[ci]
+        n = fcl[ci] & 2147483647
         j = 0
         while j < n
           uvar = fla[stx + j]
@@ -719,7 +729,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         while i < ncl
           if (cstate[i] >> 32) == 0
             stx = fcs[i]
-            n = fcl[i]
+            n = fcl[i] & 2147483647
             j = 0
             while j < n
               uvar = fla[stx + j]
@@ -750,7 +760,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         r = 0 - r
       ci = ulist[r % ucount]
       stx = fcs[ci]
-      n = fcl[ci]
+      n = fcl[ci] & 2147483647
       flip = 0
       bestscore = 0
       if ((r >> 16) & 15) == 0 && step > 200000
@@ -818,22 +828,37 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         upos[last] = p
         ucount -= 1
         upos[ci] = 0 - 1
-        stx = fcs[ci]
-        n = fcl[ci]
-        j = 0
-        while j < n
-          uvar = fla[stx + j]
-          if uvar < 0
-            uvar = 0 - uvar
-          score[uvar] = score[uvar] - wght[ci]
-          if uvar != v
-            ccf[uvar] = 1
-            if score[uvar] > 0 && gin[uvar] == 0
-              gstk[gsize] = uvar
-              gsize += 1
-              gin[uvar] = 1
-          j += 1
-        score[v] = score[v] - wght[ci]
+        width_and_pair = fcl[ci] ## i64
+        endpoints = width_and_pair >> 32
+        if endpoints != 0
+          # The flipped variable is also the sole breaker. Only its partner
+          # can enter the good-variable stack on this transition.
+          partner = endpoints ^ v
+          weight = wght[ci] ## i64
+          score[v] = score[v] - 2 * weight
+          score[partner] = score[partner] - weight
+          ccf[partner] = 1
+          if score[partner] > 0 && gin[partner] == 0
+            gstk[gsize] = partner
+            gsize += 1
+            gin[partner] = 1
+        else
+          stx = fcs[ci]
+          n = width_and_pair
+          j = 0
+          while j < n
+            uvar = fla[stx + j]
+            if uvar < 0
+              uvar = 0 - uvar
+            score[uvar] = score[uvar] - wght[ci]
+            if uvar != v
+              ccf[uvar] = 1
+              if score[uvar] > 0 && gin[uvar] == 0
+                gstk[gsize] = uvar
+                gsize += 1
+                gin[uvar] = 1
+            j += 1
+          score[v] = score[v] - wght[ci]
       else
         if old == 1
           x = packed & 2147483647
@@ -862,22 +887,35 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         ulist[ucount] = ci
         upos[ci] = ucount
         ucount += 1
-        stx = fcs[ci]
-        n = fcl[ci]
-        j = 0
-        while j < n
-          uvar = fla[stx + j]
-          if uvar < 0
-            uvar = 0 - uvar
-          score[uvar] = score[uvar] + wght[ci]
-          if uvar != v
-            ccf[uvar] = 1
-          if score[uvar] > 0 && ccf[uvar] == 1 && gin[uvar] == 0
-            gstk[gsize] = uvar
+        width_and_pair = fcl[ci] ## i64
+        endpoints = width_and_pair >> 32
+        if endpoints != 0
+          partner = endpoints ^ v
+          weight = wght[ci] ## i64
+          score[v] = score[v] + 2 * weight
+          score[partner] = score[partner] + weight
+          ccf[partner] = 1
+          if score[partner] > 0 && gin[partner] == 0
+            gstk[gsize] = partner
             gsize += 1
-            gin[uvar] = 1
-          j += 1
-        score[v] = score[v] + wght[ci]
+            gin[partner] = 1
+        else
+          stx = fcs[ci]
+          n = width_and_pair
+          j = 0
+          while j < n
+            uvar = fla[stx + j]
+            if uvar < 0
+              uvar = 0 - uvar
+            score[uvar] = score[uvar] + wght[ci]
+            if uvar != v
+              ccf[uvar] = 1
+            if score[uvar] > 0 && ccf[uvar] == 1 && gin[uvar] == 0
+              gstk[gsize] = uvar
+              gsize += 1
+              gin[uvar] = 1
+            j += 1
+          score[v] = score[v] + wght[ci]
       else
         x = (packed ^ v) & 2147483647 ## i64
         if old == 2

@@ -24,7 +24,7 @@
     while i < vars.size - 1
       right = vars[i]
       state["nvars"] += 1
-      raise "expanded variable count exceeds 50000000" if state["nvars"] > 50000000
+      raise "expanded variable count exceeds 200000000" if state["nvars"] > 200000000
       out = state["nvars"]
       clauses.push([left, right, 0 - out])
       clauses.push([0 - left, 0 - right, 0 - out])
@@ -63,8 +63,8 @@
           raise "invalid clause count" unless wassat_unsigned_decimal?(parts[3])
           original = parts[2].to_i
           declared = parts[3].to_i
-          raise "implausible variable count" if original > 50000000
-          raise "implausible clause count" if declared > 200000000
+          raise "implausible variable count" if original > 200000000
+          raise "implausible clause count" if declared > 500000000
           state["nvars"] = original
           header = true
         else
@@ -93,7 +93,7 @@
                 lit = tok.to_i
                 raise "literal exceeds original variable count" if lit.abs > original
                 current.push(lit)
-          raise "expanded clause count exceeds 200000000" if state["clauses"].size > 200000000
+          raise "expanded clause count exceeds 500000000" if state["clauses"].size > 500000000
   raise "missing p cnf header" unless header
   raise "unterminated input clause" unless current.empty? && !is_xor
   raise "input clause count mismatch" unless parsed == declared

@@ -25,6 +25,7 @@
 
 use solver
 use preprocess
+use knight_successor
 
 WASSAT_KNIGHT_MIN_SIDE = 6
 WASSAT_KNIGHT_MAX_SIDE = 30
@@ -51,12 +52,12 @@ WASSAT_KNIGHT_HASH_PRIME = 2147483647
     side += 2
   0
 
-# Degree histogram of an ordinary side-by-side knight graph after deleting
-# corner zero.  The recovered graph must have exactly this histogram.
--> wassat_knight_expected_degrees(side, histogram) (i64 i64[]) i64
+# Degree histogram of the full board (first_square=0) or the board with
+# corner zero removed (first_square=1).
+-> wassat_knight_expected_degrees(side, histogram, first_square = 1) (i64 i64[] i64) i64
   dr = [1, 2, -1, -2, 1, 2, -1, -2]
   dc = [2, 1, 2, 1, -2, -1, -2, -1]
-  square = 1
+  square = first_square
   while square < side * side
     row = square / side
     col = square % side
@@ -67,7 +68,7 @@ WASSAT_KNIGHT_HASH_PRIME = 2147483647
       cc = col + dc[move]
       if rr >= 0 && rr < side && cc >= 0 && cc < side
         destination = rr * side + cc
-        degree += 1 if destination != 0
+        degree += 1 if destination >= first_square
       move += 1
     return 0 if degree < 0 || degree > WASSAT_KNIGHT_MAX_DEGREE
     histogram[degree] += 1
@@ -98,7 +99,10 @@ WASSAT_KNIGHT_HASH_PRIME = 2147483647
     ci += 1
 
   side = wassat_knight_side(max_len)
-  return {} if side == 0
+  if side == 0
+    side = wassat_knight_side(max_len - 1)
+    return {} if side == 0
+    return wassat_knight_successor_recover(formula, side, long_count)
   vertices = side * side
   positions = vertices - 1
   return {} unless long_count == 2 * vertices - 6
@@ -1021,16 +1025,18 @@ WASSAT_KNIGHT_HASH_PRIME = 2147483647
     "primary_vars": recovered["primary_vars"], "nodes": 0,
     "conflicts": 0, "decisions": 0, "props": 0
   }
-  found = wassat_knight_find_tour(
-    recovered, path, meta, node_cap
-  )
+  successor = recovered["successor"] == true
+  result["successor"] = successor
+  if successor
+    found = wassat_knight_successor_tour(recovered, path, meta, node_cap)
+  else
+    found = wassat_knight_find_tour(recovered, path, meta, node_cap)
   result["nodes"] = meta[0]
   return result unless found == 1
   tprof = wassat_prof("knight.tour", tprof)
 
   matrix = recovered["matrix"] ## i64[]
   semantics = recovered["semantics"] ## i8[]
-  position_sequence = recovered["position_sequence"] ## i64[]
   values = i8[formula["nvars"] + 1]
   variable = 1
   while variable <= formula["nvars"]
@@ -1039,14 +1045,21 @@ WASSAT_KNIGHT_HASH_PRIME = 2147483647
     elsif semantics[variable] == -1
       values[variable] = 1
     variable += 1
-  depth = 0
-  while depth < positions
-    variable = matrix[
-      position_sequence[depth] * positions + path[depth]
-    ]
-    return result if variable <= 0
-    values[variable] = semantics[variable]
-    depth += 1
+  if successor
+    depth = 0
+    while depth < positions
+      variable = matrix[path[depth] * positions + path[(depth + 1) % positions]]
+      return result if variable <= 0
+      values[variable] = semantics[variable]
+      depth += 1
+  else
+    position_sequence = recovered["position_sequence"] ## i64[]
+    depth = 0
+    while depth < positions
+      variable = matrix[position_sequence[depth] * positions + path[depth]]
+      return result if variable <= 0
+      values[variable] = semantics[variable]
+      depth += 1
 
   completion = WassatKnightResidual.new(formula, values, conflict_cap)
   tprof = wassat_prof("knight.load", tprof)

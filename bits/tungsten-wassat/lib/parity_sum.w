@@ -68,7 +68,7 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
 
 # Peel, split and sum. Equations: eoff/elen index evars (variable ids, each at
 # most once per equation), erhs is 0 or 1. Returns 1 on a refuting component.
--> wassat_parity_sum_close(nv, ne, eoff, elen, erhs, evars, st) (i64 i64 i64[] i64[] i64[] i64[] i64[]) i64
+-> wassat_parity_sum_close(nv, ne, eoff, elen, erhs, evars, st, members) (i64 i64 i64[] i64[] i64[] i64[] i64[] i8[]) i64
   # Occurrences per variable.
   vst = i64[nv + 3]
   i = 0 ## i64
@@ -174,15 +174,23 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
         t += 1
     v += 1
   found = 0 ## i64
+  root = 0 - 1 ## i64
   i = 0
   while i < ne
     if dead[i] == 0 && par[i] == i
       st[3] += 1
       if bad[i] == 0 && sum[i] == 1
         st[4] += 1
-        st[5] = size[i] if found == 0
+        if found == 0
+          st[5] = size[i]
+          root = i
         found = 1
     i += 1
+  if found == 1 && members.size >= ne
+    i = 0
+    while i < ne
+      members[i] = 1 if dead[i] == 0 && wassat_parity_find(par, i) == root
+      i += 1
   found
 
 # Does the clause over these n literal codes (any order) exist? Returns its
@@ -462,7 +470,7 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
   ne
 
 # Returns { "status": 0 or -1, "work": st }.
--> wassat_parity_sum_unsat(formula, deadline = 0)
+-> wassat_parity_sum_unsat(formula, deadline = 0, witness = nil)
   st = i64[16]
   miss = { "status": 0, "work": st }
   return miss unless formula.has_key?("flat_ncl")
@@ -526,6 +534,11 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
     if he && ho
       # Every assignment of these variables is forbidden.
       st[6] = 1
+      if witness != nil
+        witness["local"] = true
+        witness["vars"] = ev
+        witness["offset"] = 5*i
+        witness["width"] = k
       return { "status": 0 - 1, "work": st }
     if he || ho
       eoff[nq] = nl
@@ -539,9 +552,20 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
       nq += 1
     i += 1
   st[1] = nq
+  members = i8[witness == nil ? 0 : nq]
   if nq > 0
-    hit = wassat_parity_sum_close(nv, nq, eoff, elen, erhs, evars, st)
-    return { "status": 0 - 1, "work": st } if hit == 1
+    hit = wassat_parity_sum_close(nv, nq, eoff, elen, erhs, evars, st, members)
+    if hit == 1
+      if witness != nil
+        witness["members"] = members
+        witness["vars"] = evars
+        witness["offsets"] = eoff
+        witness["lengths"] = elen
+        witness["rhs"] = erhs
+      return { "status": 0 - 1, "work": st }
+  # The exporter proves each selected row from its complete XOR truth table.
+  # A cardinality-derived parity needs a different local certificate.
+  return miss if witness != nil
   # Again with the cardinality equations beside the XORs (a second pass, so
   # that extra equations can never cost a refutation the XORs give alone).
   kcap = (nsmall >> 2) + 8
@@ -579,6 +603,6 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
     i += 1
   st[2] = 0
   st[3] = 0
-  hit = wassat_parity_sum_close(nv, nt, eoff2, elen2, erhs2, evars2, st)
+  hit = wassat_parity_sum_close(nv, nt, eoff2, elen2, erhs2, evars2, st, members)
   return { "status": 0 - 1, "work": st } if hit == 1
   miss

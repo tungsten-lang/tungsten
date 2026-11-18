@@ -75,20 +75,26 @@
   mask = mask | 4 if windmill_enabled && nv >= 20000 && nv <= 2000000 && ncl >= 100000 && ncl <= 20000000
   mask
 
--> wassat_specialists_solve(formula, result, proof_mode = 0, conflict_cap = 0, dual_drat = false, total_budget = 0)
+-> wassat_specialists_solve(formula, result, proof_mode = 0, conflict_cap = 0, dual_drat = false, total_budget = 0, max_width = -1)
   return result unless formula.has_key?("flat_ncl")
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
   fp = i64[6]
   mask = wassat_specialist_fingerprint_mask(nv, ncl, env("WASSAT_WINDMILL") != "0")
   tprof = wassat_prof_clock
-  if mask != 0
+  # Only symmetry fixing needs the number of positive choice rows. The CLI
+  # already measured the maximum clause width on this exact flat formula.
+  # Formulas wider than 24 cannot pass the symmetry-fixing decoder.
+  scan = mask != 0 && (max_width < 0 || ((mask & 2) != 0 && max_width <= 24))
+  if scan
     wassat_fingerprint_scan(
       formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], ncl, fp
     )
+  else
+    fp[0] = max_width
   tprof = wassat_prof("specialists.fingerprint", tprof)
   if env("WASSAT_PROFILE") == "1"
-    scanned = mask != 0 ? ncl : 0
+    scanned = scan ? ncl : 0
     z = wassat_prof_note("specialists.fingerprint eligible_mask=[mask] scanned_clauses=[scanned]")
   if (mask & 1) != 0 && fp[0] <= 3
     res = wassat_sdp_solve(formula, result)

@@ -6,7 +6,7 @@ use atomic_stop
 use reconfiguration_verify
 
 WASSAT_RECONF_MAX_VERTICES = 512
-WASSAT_RECONF_MAX_STATES = 64
+WASSAT_RECONF_MAX_STATES = 128
 WASSAT_RECONF_NODE_CAP = 131072
 
 fn wassat_reconf_pop(x) (i64) i64
@@ -25,8 +25,8 @@ fn wassat_reconf_ctz(x) (i64) i64
   m[2] != 0 ? 1 : 0
 
 -> wassat_reconf_prepare(lits, offs, lens, nv, nc, units, starts, initial, goal, adj, m, stop, deadline) (i64[] i64[] i64[] i64 i64 i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
-  return 0 if nv < 16 || nv > 500000 || nc < 16 || nc > 1500000
-  return 0 if offs.size < nc || lens.size < nc || lits.size > 8000000
+  return 0 if nv < 16 || nv > 750000 || nc < 16 || nc > 3000000
+  return 0 if offs.size < nc || lens.size < nc || lits.size > 32000000
   one = 1 ## i64
   ci = 0
   while ci < nc
@@ -199,6 +199,8 @@ fn wassat_reconf_ctz(x) (i64) i64
   positions = i64[cap]
   table = i64[cap * 2]
   scratch = i64[words]
+  blocked_once = i64[words]
+  blocked_twice = i64[words]
   j = 0
   while j < words
     states[j] = initial[j]
@@ -244,13 +246,32 @@ fn wassat_reconf_ctz(x) (i64) i64
       j = 0
       while j < words
         scratch[j] = states[node * words + j]
+        blocked_once[j] = 0
+        blocked_twice[j] = 0
         j += 1
+      # A token jump removes one token. Vertices attacked by two or more
+      # occupied vertices cannot become independent in a single jump.
+      word = 0
+      while word < words
+        occupied_bits = scratch[word] ## i64
+        while occupied_bits != 0
+          bit = wassat_reconf_ctz(occupied_bits)
+          u = word * 64 + bit
+          return 0 - 1 if u >= n
+          j = 0
+          while j < words
+            neighbors = adj[u * words + j] ## i64
+            blocked_twice[j] |= blocked_once[j] & neighbors
+            blocked_once[j] |= neighbors
+            j += 1
+          occupied_bits = (occupied_bits & (occupied_bits - one)) ## i64
+        word += 1
       v = 0
       while v < n
         vw = v >> 6
         vb = one << (v & 63) ## i64
         occupied = scratch[vw] & vb ## i64
-        if occupied == 0
+        if occupied == 0 && (blocked_twice[vw] & vb) == 0
           conflict = 0 - 1
           j = 0
           while j < words
@@ -331,6 +352,102 @@ fn wassat_reconf_ctz(x) (i64) i64
   m[24] = 1
   0 - 1
 
+# A bounded simple-path walk supplies SAT candidates; full clause replay is mandatory.
+-> wassat_reconf_walk(initial, goal, adj, states, parents, n, horizon, m, stop, deadline, seed) (i64[] i64[] i64[] i64[] i64[] i64 i64 i64[] i64[] i64 i64) i64
+  words = (n + 63) / 64
+  return 0 - 1 if horizon < 2 || horizon >= 128 || states.size < (horizon + 1) * words || parents.size <= horizon
+  rng = seed ## i64
+  one = 1 ## i64
+  trial = 0
+  while trial < 10000
+    return 0 - 1 if wassat_reconf_stop(m, stop, deadline) != 0
+    j = 0
+    while j < words
+      states[j] = initial[j]
+      j += 1
+    parents[0] = -1
+    depth = 0
+    while depth < horizon
+      rem = horizon - depth - 1
+      target = rem / 3
+      target = 7 if target > 7
+      total = 0 ## i64
+      chosen_u = -1
+      chosen_v = -1
+      v = 0
+      while v < n
+        return 0 - 1 if (v & 15) == 0 && wassat_reconf_stop(m, stop, deadline) != 0
+        vw = v >> 6
+        vb = one << (v & 63) ## i64
+        if (states[depth * words + vw] & vb) == 0
+          conflict = -1
+          j = 0
+          while j < words
+            blocked = states[depth * words + j] & adj[v * words + j] ## i64
+            if blocked != 0
+              if conflict >= 0 || (blocked & (blocked - 1)) != 0
+                conflict = -2
+                break
+              conflict = j * 64 + wassat_reconf_ctz(blocked)
+            j += 1
+          if conflict >= -1
+            u = conflict >= 0 ? conflict : 0
+            limit = conflict >= 0 ? conflict + 1 : n
+            while u < limit
+              return 0 - 1 if (u & 63) == 0 && wassat_reconf_stop(m, stop, deadline) != 0
+              uw = u >> 6
+              ub = one << (u & 63) ## i64
+              if (states[depth * words + uw] & ub) != 0
+                dist = 0
+                j = 0
+                while j < words
+                  candidate = states[depth * words + j]
+                  candidate ^= ub if j == uw
+                  candidate |= vb if j == vw
+                  dist += wassat_reconf_pop(goal[j] & (goal[j] ^ candidate))
+                  j += 1
+                if dist <= rem && (dist != 0 || rem == 0)
+                  prior = 0
+                  repeat = 0
+                  while prior <= depth && repeat == 0
+                    j = 0
+                    while j < words
+                      candidate = states[depth * words + j]
+                      candidate ^= ub if j == uw
+                      candidate |= vb if j == vw
+                      break if candidate != states[prior * words + j]
+                      j += 1
+                    repeat = 1 if j == words
+                    prior += 1
+                  if repeat == 0
+                    diff = dist - target
+                    diff = -diff if diff < 0
+                    weight = 100 / ((diff + 1) * (diff + 1))
+                    weight = 1 if weight == 0
+                    total += weight
+                    rng = (rng * 48271) % 2147483647
+                    if rng % total < weight
+                      chosen_u = u
+                      chosen_v = v
+              u += 1
+        v += 1
+      break if chosen_u < 0
+      j = 0
+      while j < words
+        states[(depth + 1) * words + j] = states[depth * words + j]
+        j += 1
+      states[(depth + 1) * words + (chosen_u >> 6)] ^= one << (chosen_u & 63)
+      states[(depth + 1) * words + (chosen_v >> 6)] |= one << (chosen_v & 63)
+      parents[depth + 1] = depth
+      depth += 1
+      m[7] += 1
+      return 0 - 1 if wassat_reconf_stop(m, stop, deadline) != 0
+    if depth == horizon
+      m[8] = horizon + 1
+      return horizon
+    trial += 1
+  0 - 1
+
 -> wassat_reconf_complete(lits, offs, lens, nv, nc, values, m, stop, deadline) (i64[] i64[] i64[] i64 i64 i8[] i64[] i64[] i64) i64
   pass = 0
   while pass < 16
@@ -386,7 +503,7 @@ fn wassat_reconf_ctz(x) (i64) i64
 
 -> wassat_reconf_model(lits, offs, lens, nv, nc, m, stop, res, base, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64 i64) i64
   one = 1 ## i64
-  return 0 if nv < 16 || nv > 500000 || nc < 16 || nc > 1500000
+  return 0 if nv < 16 || nv > 750000 || nc < 16 || nc > 3000000
   return 0 if wassat_reconf_stop(m, stop, deadline) != 0
   values = i8[nv + 1]
   starts = i64[WASSAT_RECONF_MAX_STATES]
@@ -403,30 +520,56 @@ fn wassat_reconf_ctz(x) (i64) i64
   began = clock_ms()
   node = wassat_reconf_search(initial, goal, adj, states, parents, n, m[4], cap, m, stop, deadline)
   m[19] = clock_ms() - began
-  if node < 0
-    if m[24] == 1 && wassat_reconf_stop(m, stop, deadline) == 0
-      began = clock_ms()
-      certified = wassat_rc_verify(lits, offs, lens, nv, nc, n, starts, initial, goal, m, stop, deadline)
-      m[29] = clock_ms() - began
-      return -1 if certified == 1
+  if node < 0 && m[24] == 1 && wassat_reconf_stop(m, stop, deadline) == 0
+    began = clock_ms()
+    certified = wassat_rc_verify(lits, offs, lens, nv, nc, n, starts, initial, goal, m, stop, deadline)
+    m[29] = clock_ms() - began
+    return -1 if certified == 1
     return 0
-  step = m[4] - 1
-  while step >= 0
-    return 0 if node < 0 || node >= m[8]
-    v = 0
-    while v < n
-      variable = starts[step] + v + 1
-      sign = 0 - 1
-      sign = 1 if (states[node * words + (v >> 6)] & (one << (v & 63))) != 0
-      return 0 if values[variable] != 0 && values[variable] != sign
-      values[variable] = sign
-      v += 1
-    node = parents[node]
-    step -= 1
-  return 0 if node != 0
-  began = clock_ms()
-  checked = wassat_reconf_complete(lits, offs, lens, nv, nc, values, m, stop, deadline)
-  m[21] = clock_ms() - began
+  walk = node < 0 && m[2] == 0
+  retry = 0
+  checked = 0
+  while retry < 8
+    return 0 if wassat_reconf_stop(m, stop, deadline) != 0
+    if retry > 0
+      v = 0
+      while v <= nv
+        return 0 if (v & 4095) == 0 && wassat_reconf_stop(m, stop, deadline) != 0
+        values[v] = 0
+        v += 1
+      recognized = wassat_reconf_prepare(lits, offs, lens, nv, nc, values, starts, initial, goal, adj, m, stop, deadline)
+      return 0 if recognized != n
+    if walk
+      began = clock_ms()
+      node = wassat_reconf_walk(initial, goal, adj, states, parents, n, m[4], m, stop, deadline, retry + 1)
+      m[19] += clock_ms() - began
+    return 0 if node < 0
+    step = m[4] - 1
+    compatible = 1
+    while step >= 0 && compatible != 0
+      return 0 if node < 0 || node >= m[8]
+      v = 0
+      while v < n
+        variable = starts[step] + v + 1
+        sign = 0 - 1
+        sign = 1 if (states[node * words + (v >> 6)] & (one << (v & 63))) != 0
+        if values[variable] != 0 && values[variable] != sign
+          compatible = 0
+          break
+        values[variable] = sign
+        v += 1
+      node = parents[node]
+      step -= 1
+    return 0 if compatible != 0 && node != 0
+    if compatible != 0
+      began = clock_ms()
+      checked = wassat_reconf_complete(lits, offs, lens, nv, nc, values, m, stop, deadline)
+      m[21] += clock_ms() - began
+      break if checked != 0
+    return 0 unless walk
+    return 0 if wassat_reconf_stop(m, stop, deadline) != 0
+    m[30] += 1
+    retry += 1
   return 0 if checked == 0
   v = 1
   while v <= nv
@@ -450,7 +593,7 @@ fn wassat_reconf_ctz(x) (i64) i64
   WASSAT_RECONF_NODE_CAP * 15 * 8 + (nv + 8) * 9 + 40000 + 1048576
 
 -> wassat_reconf_prefix(lits, offs, lens, nv, nc) (i64[] i64[] i64[] i64 i64) i64
-  return 0 if nv < 64 || nv > 500000 || nc < 1000 || nc > 1500000
+  return 0 if nv < 64 || nv > 750000 || nc < 1000 || nc > 3000000
   return 0 if offs.size < nc || lens.size < nc || lits.size < 2
   ci = 0
   largest = 0
@@ -471,6 +614,43 @@ fn wassat_reconf_ctz(x) (i64) i64
     ci += 1
   1
 
+# Cheap nomination for the early scout and expanded-size admission.
+# The full decoder still checks every premise and original clause.
+-> wassat_reconf_large_prefix(lits, offs, lens, nc) (i64[] i64[] i64[] i64) i64
+  if offs.size < nc || lens.size < nc
+    return 0
+  edges = 0
+  n = 0
+  while edges < nc && edges < 65536 && lens[edges] == 2
+    off = offs[edges]
+    return 0 if off < 0 || off > lits.size - 2
+    u = lits[off]; v = lits[off + 1]
+    break if u >= 0 || v >= 0
+    u = -u; v = -v
+    return 0 if u == v || u > WASSAT_RECONF_MAX_VERTICES || v > WASSAT_RECONF_MAX_VERTICES
+    n = u if u > n
+    n = v if v > n
+    edges += 1
+  return 0 if n < 4 || edges < n || edges >= nc || edges >= 65536
+  ci = edges
+  end = edges + 65536
+  end = nc if end > nc
+  checks = 0
+  while ci < end
+    if lens[ci] == n
+      off = offs[ci]
+      return 0 if off < 0 || off > lits.size - n
+      base = lits[off]
+      if base > 0
+        j = 0
+        while j < n && lits[off + j] == base + j
+          checks += 1
+          return 0 if checks > 65536
+          j += 1
+        return base == n + 1 ? 1 : 0 if j == n
+    ci += 1
+  0
+
 -> wassat_reconf_plan(formula, workers, cdcl_arenas, sls_arenas)
   mode = env("WASSAT_RECONFIGURATION")
   return nil if mode == "0" || formula == nil
@@ -479,10 +659,12 @@ fn wassat_reconf_ctz(x) (i64) i64
   return nil unless formula.has_key?("flat_ncl")
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
-  return nil if nv < 16 || nv > 500000 || nc < 16 || nc > 1500000
+  return nil if nv < 16 || nv > 750000 || nc < 16 || nc > 3000000
   return nil if formula["flat_nlits"] > 8000000
   if mode != "1"
     return nil if wassat_reconf_prefix(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], nv, nc) == 0
+    if nv > 500000 || nc > 1500000 || formula["flat_lits"].size > 8000000
+      return nil if wassat_reconf_large_prefix(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], nc) == 0
   bytes = wassat_reconf_bytes(nv) + wassat_rc_verify_bytes(nc)
   return nil unless wassat_race_memory_fits?(formula, cdcl_arenas, sls_arenas, 1, bytes)
   m = i64[32]
@@ -507,4 +689,4 @@ fn wassat_reconf_ctz(x) (i64) i64
 
 -> wassat_reconf_profile(plan, status)
   m = plan["meta"]
-  wassat_prof_note("scout.reconfiguration status=[status] recognized=[m[1]] stopped=[m[2]] vertices=[m[3]] stages=[m[4]] edges=[m[5]] expanded=[m[6]] generated=[m[7]] states=[m[8]] peak_heap=[m[9]] hash_probes=[m[10]] graph_words=[m[11]] polls=[m[12]] lift_passes=[m[13]] lift_assigned=[m[14]] replay_clauses=[m[15]] replay_literals=[m[16]] prepare_ms=[m[20]] search_ms=[m[19]] lift_ms=[m[21]] scratch_bytes=[m[22]] best_missing=[m[23]] exhausted=[m[24]] verified=[m[25]] verify_probes=[m[26]] verify_clauses=[m[27]] amo_pairs=[m[28]] verify_ms=[m[29]] ms=[m[18] - m[17]]")
+  wassat_prof_note("scout.reconfiguration status=[status] recognized=[m[1]] stopped=[m[2]] vertices=[m[3]] stages=[m[4]] edges=[m[5]] expanded=[m[6]] generated=[m[7]] states=[m[8]] peak_heap=[m[9]] hash_probes=[m[10]] graph_words=[m[11]] polls=[m[12]] lift_passes=[m[13]] lift_assigned=[m[14]] replay_clauses=[m[15]] replay_literals=[m[16]] prepare_ms=[m[20]] search_ms=[m[19]] lift_ms=[m[21]] scratch_bytes=[m[22]] best_missing=[m[23]] exhausted=[m[24]] verified=[m[25]] verify_probes=[m[26]] verify_clauses=[m[27]] amo_pairs=[m[28]] verify_ms=[m[29]] rejected=[m[30]] ms=[m[18] - m[17]]")

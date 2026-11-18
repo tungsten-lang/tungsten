@@ -34,6 +34,7 @@ use cnf
 use policy
 use atomic_stop
 use sls
+use query_storage
 
 UNASSIGNED = 0
 
@@ -50,12 +51,15 @@ WASSAT_MAX_CLAUSE_INDEX = 2147483647
 WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
 + Wassat
-  -> new(@nvars, @input_clauses, @proof_mode, legacy_lookahead = 0, flat_shell = false)
+  -> new(@nvars, @input_clauses, @proof_mode, legacy_lookahead = 0, flat_shell = false, query_owner = nil)
+    raise "private query storage requires plain DRAT" if query_owner != nil && @proof_mode != WASSAT_PROOF_DRAT
     raise "variable count exceeds signed 32-bit packed representation" if @nvars > WASSAT_MAX_VARIABLE_INDEX
     nv = @nvars
     @config = WassatConfig.new(@nvars, @input_clauses)
+    wassat_query_keep(query_owner, @config, 0) if query_owner != nil
     @lookahead = @config.lookahead_candidates
-    @assign = i8[nv + 1]         # 0 unassigned, 1 true, -1 false — one BYTE
+    @assign = i8[nv + 1] # 0 unassigned, 1 true, -1 false — one BYTE
+    wassat_query_keep(query_owner, @assign, @assign.size * 1) if query_owner != nil
                                  # per var: the propagation loop's random
                                  # reads then live in L1 (i64 was 8x bigger)
     # VMTF decision queue (focused mode): doubly-linked list over vars,
@@ -64,9 +68,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # the kissat split: VMTF chases the conflict frontier, the heap
     # remembers long-run importance.
     @vq_next = i64[nv + 2]
+    wassat_query_keep(query_owner, @vq_next, @vq_next.size * 8) if query_owner != nil
     @vq_prev = i64[nv + 2]
+    wassat_query_keep(query_owner, @vq_prev, @vq_prev.size * 8) if query_owner != nil
     @vq_stamp = i64[nv + 2]
-    @vq_state = i64[5]           # head / tail / stamp counter / search pos / sec floor
+    wassat_query_keep(query_owner, @vq_stamp, @vq_stamp.size * 8) if query_owner != nil
+    @vq_state = i64[5] # head / tail / stamp counter / search pos / sec floor
+    wassat_query_keep(query_owner, @vq_state, @vq_state.size * 8) if query_owner != nil
     # VMTF measured: bmc-scale raw kernels 4.6x fewer conflicts (ibm-10
     # 5.9k -> 1.3k); random 3-SAT regresses ~25% — so the queue drives
     # focused mode only on raw kernels, EVSIDS everywhere else.
@@ -98,10 +106,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @rst_den = 4 if @rst_den < 1
     @chrono_t = 50
     @otfs_allowed = @proof_mode == WASSAT_PROOF_NONE && nv < 10000000 && env("WASSAT_OTFS") != "0"
-    @kbuf = i64[nv + 2]          # backjump keep-buffer for out-of-order levels
-    @bstate = i64[4]             # dlevel / tsize / qhead / cumulative unassignments
+    @kbuf = i64[nv + 2] # backjump keep-buffer for out-of-order levels
+    wassat_query_keep(query_owner, @kbuf, @kbuf.size * 8) if query_owner != nil
+    @bstate = i64[4] # dlevel / tsize / qhead / cumulative unassignments
+    wassat_query_keep(query_owner, @bstate, @bstate.size * 8) if query_owner != nil
     @pwork = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 4] : i64[1]
+    wassat_query_keep(query_owner, @pwork, @pwork.size * 8) if query_owner != nil
     @phint = @proof_mode == WASSAT_PROOF_WRAT ? i64[nv + 4] : i64[1]
+    wassat_query_keep(query_owner, @phint, @phint.size * 8) if query_owner != nil
     if !flat_shell
       max_dec = nv
       max_dec = env("WASSAT_MAX_DEC_VAR").to_i if env("WASSAT_MAX_DEC_VAR") != nil
@@ -119,30 +131,46 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         @vq_state[3] = 1
         @vq_state[4] = 0
     @level = i64[nv + 1]
-    @reason = i32[nv + 1]        # signed packed clause index, or -1 for a decision
-    @seen = i8[nv + 1]          # analysis/hint marks are only 0..4
-    @phase = i8[nv + 1]          # saved polarity: 1 or -1
-    @activity = i64[nv + 1]      # scaled integer VSIDS score
-    @heap = i64[nv + 1]          # max-heap of branching variables
-    @heappos = i32[nv + 1]       # variable -> heap slot, -1 when absent
-    @hstate = i64[2]              # heap size / EVSIDS increment
+    wassat_query_keep(query_owner, @level, @level.size * 8) if query_owner != nil
+    @reason = i32[nv + 1] # signed packed clause index, or -1 for a decision
+    wassat_query_keep(query_owner, @reason, @reason.size * 4) if query_owner != nil
+    @seen = i8[nv + 1] # analysis/hint marks are only 0..4
+    wassat_query_keep(query_owner, @seen, @seen.size * 1) if query_owner != nil
+    @phase = i8[nv + 1] # saved polarity: 1 or -1
+    wassat_query_keep(query_owner, @phase, @phase.size * 1) if query_owner != nil
+    @activity = i64[nv + 1] # scaled integer VSIDS score
+    wassat_query_keep(query_owner, @activity, @activity.size * 8) if query_owner != nil
+    @heap = i64[nv + 1] # max-heap of branching variables
+    wassat_query_keep(query_owner, @heap, @heap.size * 8) if query_owner != nil
+    @heappos = i32[nv + 1] # variable -> heap slot, -1 when absent
+    wassat_query_keep(query_owner, @heappos, @heappos.size * 4) if query_owner != nil
+    @hstate = i64[2] # heap size / EVSIDS increment
+    wassat_query_keep(query_owner, @hstate, @hstate.size * 8) if query_owner != nil
     @rassign = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 1] : i64[1]
-    @pstate = i64[14]            # qhead / tsize / conflict / bail / props / chrono; [12] ticks, [13] saved positions
+    wassat_query_keep(query_owner, @rassign, @rassign.size * 8) if query_owner != nil
+    @pstate = i64[14] # qhead / tsize / conflict / bail / props / chrono; [12] ticks, [13] saved positions
+    wassat_query_keep(query_owner, @pstate, @pstate.size * 8) if query_owner != nil
     # Native snapshot counters: phase saves/copied/skipped at 6..8, and
     # spine saves/scanned/skipped at 9..11. Keep wide work counts unboxed:
     # avoided quadratic work can exceed the small-integer range in a worker.
-    @astate = i64[26]            # analysis / OTFS scalars, minimization work, bump mode
+    @astate = i64[26] # analysis / OTFS scalars, minimization work, bump mode
+    wassat_query_keep(query_owner, @astate, @astate.size * 8) if query_owner != nil
     # Large circuits can spend most analysis time minimizing along long
     # reason graphs. Keep smaller kernels exhaustive: even rare truncation
     # perturbs productive QWH and bit-vector searches. Zero is the control.
     @astate[11] = nv >= 100000 ? 16384 : 0
     if env("WASSAT_MINIMIZE_WORK") != nil
       @astate[11] = wassat_decimal_in_range("WASSAT_MINIMIZE_WORK", env("WASSAT_MINIMIZE_WORK"), 0, 2000000000)
-    @lbuf = i64[nv + 3]          # learned clause, reused every conflict
-    @obuf = i64[nv + 3]          # watch-ordered copy of the learned clause
-    @mbuf = i64[nv + 3]          # minimisation scratch
-    @mstk = i64[nv + 3]          # recursive-minimisation DFS stack
-    @mclr = i64[nv + 3]          # marks to clear after minimisation
+    @lbuf = i64[nv + 3] # learned clause, reused every conflict
+    wassat_query_keep(query_owner, @lbuf, @lbuf.size * 8) if query_owner != nil
+    @obuf = i64[nv + 3] # watch-ordered copy of the learned clause
+    wassat_query_keep(query_owner, @obuf, @obuf.size * 8) if query_owner != nil
+    @mbuf = i64[nv + 3] # minimisation scratch
+    wassat_query_keep(query_owner, @mbuf, @mbuf.size * 8) if query_owner != nil
+    @mstk = i64[nv + 3] # recursive-minimisation DFS stack
+    wassat_query_keep(query_owner, @mstk, @mstk.size * 8) if query_owner != nil
+    @mclr = i64[nv + 3] # marks to clear after minimisation
+    wassat_query_keep(query_owner, @mclr, @mclr.size * 8) if query_owner != nil
     @use_otfs = false
     # These buffers are disjoint in time: proof replay never runs in the
     # proof-free mode where OTFS is enabled. Reusing its native work arrays
@@ -153,14 +181,18 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @otfs_units = 0
     @otfs_conflicts = 0
     @pending_conflict = -1
-    @lbd_seen = i64[nv + 2]      # scratch for literal-block-distance
+    @lbd_seen = i64[nv + 2] # scratch for literal-block-distance
+    wassat_query_keep(query_owner, @lbd_seen, @lbd_seen.size * 8) if query_owner != nil
     @lbd_stamp = 0
     @trail = i32[nv + 2]
+    wassat_query_keep(query_owner, @trail, @trail.size * 4) if query_owner != nil
     @trail_lim = i32[nv + 2]
+    wassat_query_keep(query_owner, @trail_lim, @trail_lim.size * 4) if query_owner != nil
     # the assignment again, indexed by literal (lit_index): lassign[2v] is
     # assign[v], lassign[2v+1] is -assign[v]. One byte load answers "is this
     # literal true?" in native propagate — no sign-mask arithmetic.
     @lassign = i8[2 * nv + 4]
+    wassat_query_keep(query_owner, @lassign, @lassign.size * 1) if query_owner != nil
     @hstate[0] = nv
     @hstate[1] = 32
     if !flat_shell
@@ -185,7 +217,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @conflicts = 0
     @decisions_made = 0
     @proof = []
+    wassat_query_keep(query_owner, @proof, 0) if query_owner != nil
     @drat = []
+    wassat_query_keep(query_owner, @drat, 0) if query_owner != nil
     @refuted = false
     @ok = true
     @terminal_status = 0
@@ -198,8 +232,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # refute the original CNF. @formula_unsat marks the one verdict no later
     # query can undo.
     @assump = []
+    wassat_query_keep(query_owner, @assump, 0) if query_owner != nil
     @nassump = 0
     @failed_core = []
+    wassat_query_keep(query_owner, @failed_core, 0) if query_owner != nil
     @formula_unsat = false
 
     # Global proof-id counter. Without preprocessing every stored clause gets
@@ -215,7 +251,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @drat_sink = nil
     @dual_drat = false           # WRAT mode also emits plain DRAT lines
     @wrat_pend = []
+    wassat_query_keep(query_owner, @wrat_pend, 0) if query_owner != nil
     @drat_pend = []
+    wassat_query_keep(query_owner, @drat_pend, 0) if query_owner != nil
     @pend_bytes = 0
     @wrat_header_done = false
 
@@ -238,6 +276,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # ivar arithmetic there was ~3% of the fast-path profile.
     # [0] LBD fast (alpha 1/32)  [1] LBD slow (1/16384)  [2] trail (1/4096)
     @estate = i64[4]
+    wassat_query_keep(query_owner, @estate, @estate.size * 8) if query_owner != nil
     @lbd_gcount = 0              # restart warmup gate + stats
     @reductions = 0
 
@@ -287,8 +326,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # non-best rephase steps (Inverted / Original / Random) so those steps
     # never destroy the deepest-trail memory or seed target phases with
     # constant all-negative / all-positive polarities.
-    @bphase = i8[nv + 1]        # active target phases in the current epoch
-    @best_phase = i8[nv + 1]    # persistent deepest-trail phases across rephases
+    @bphase = i8[nv + 1] # active target phases in the current epoch
+    wassat_query_keep(query_owner, @bphase, @bphase.size * 1) if query_owner != nil
+    @best_phase = i8[nv + 1] # persistent deepest-trail phases across rephases
+    wassat_query_keep(query_owner, @best_phase, @best_phase.size * 1) if query_owner != nil
     if !flat_shell
       v = 0
       while v <= nv
@@ -303,8 +344,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # a single conflict-free repair dive resolves culprits first and then
     # replays the surviving spine before handing control back to VMTF/EVSIDS.
     @epoch_spine = flat_shell ? nil : i64[nv + 2]
+    wassat_query_keep(query_owner, @epoch_spine, @epoch_spine.size * 8) if query_owner != nil && @epoch_spine != nil
     @epoch_spine_len = 0
     @culprits = i64[32]
+    wassat_query_keep(query_owner, @culprits, @culprits.size * 8) if query_owner != nil
     @nculprits = 0
     @at_epoch_best = 0
     @spine_active = 0
@@ -385,7 +428,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @reduce_floor = env("WASSAT_REDUCE_FLOOR") != "0"
     @auto_vivify = @config.use_vivification
     @vivify_phase = nil
-    @vivify_phase = i8[nv + 1] if @auto_vivify
+    if @auto_vivify
+      @vivify_phase = i8[nv + 1]
+      wassat_query_keep(query_owner, @vivify_phase, @vivify_phase.size * 1) if query_owner != nil
 
     # Threaded-portfolio state (--fast). @stop_cell is a shared i64[] the
     # winner raises; the solve loop polls it at conflict boundaries —
@@ -437,7 +482,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # then cumulative clause visits, copied words, remapped clauses/reasons,
     # over-limit reductions, schedule adjustments, added learning headroom,
     # then performed/avoided survivor recount visits and growing-table recycling.
-    @rhist = i64[77]             # recount work, growing-table recycles and reclaimed slots
+    @rhist = i64[77] # recount work, growing-table recycles and reclaimed slots
+    wassat_query_keep(query_owner, @rhist, @rhist.size * 8) if query_owner != nil
     @reuse_reduce_count = env("WASSAT_REDUCE_COUNT") != "0"
     @recycle_growing = env("WASSAT_RECYCLE_CLAUSES") != "0"
     # Mid-search inprocessing schedule. WASSAT_INPROCESS pins a fixed
@@ -454,13 +500,17 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # prepare_inprocessing, because fixed-capacity race arms must not allocate.
     @inp_ready = false
     @inp_pm = i64[16]
+    wassat_query_keep(query_owner, @inp_pm, @inp_pm.size * 8) if query_owner != nil
     @inp_sst = i64[8]
+    wassat_query_keep(query_owner, @inp_sst, @inp_sst.size * 8) if query_owner != nil
     @inp_rst = i64[8]
+    wassat_query_keep(query_owner, @inp_rst, @inp_rst.size * 8) if query_owner != nil
     # Native cumulative counters: cancelled rounds, genuine units,
     # subsumption work, SCC work, cleaned literals, then substitution hash
     # clauses/probes/compared literals, then subsumption literal comparisons
     # and rejected missing-literal candidates. Never boxed in workers.
     @inp_totals = i64[10]
+    wassat_query_keep(query_owner, @inp_totals, @inp_totals.size * 8) if query_owner != nil
     @inp_phase = nil
     @inp_mark = nil
     @inp_lits = nil
@@ -513,24 +563,35 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       rtotal += c.size
     if @proof_mode == WASSAT_PROOF_WRAT
       @rocc_head = i64[2 * nv + 4]
+      wassat_query_keep(query_owner, @rocc_head, @rocc_head.size * 8) if query_owner != nil
       i = 0
       while i < 2 * nv + 4
         @rocc_head[i] = -1
         i += 1
       @rocc_cap = 2 * rtotal + 4096
       @rocc_next = i64[@rocc_cap]
+      wassat_query_keep(query_owner, @rocc_next, @rocc_next.size * 8) if query_owner != nil
       @rocc_ci = i64[@rocc_cap]
+      wassat_query_keep(query_owner, @rocc_ci, @rocc_ci.size * 8) if query_owner != nil
     else
       @rocc_head = i64[1]
+      wassat_query_keep(query_owner, @rocc_head, @rocc_head.size * 8) if query_owner != nil
       @rocc_cap = 1
       @rocc_next = i64[1]
+      wassat_query_keep(query_owner, @rocc_next, @rocc_next.size * 8) if query_owner != nil
       @rocc_ci = i64[1]
+      wassat_query_keep(query_owner, @rocc_ci, @rocc_ci.size * 8) if query_owner != nil
     @rocc_size = 0
     @rtrail = @proof_mode == WASSAT_PROOF_WRAT ? i64[nv + 2] : i64[1]
+    wassat_query_keep(query_owner, @rtrail, @rtrail.size * 8) if query_owner != nil
     @rst = i64[4]
+    wassat_query_keep(query_owner, @rst, @rst.size * 8) if query_owner != nil
     @rout = @proof_mode == WASSAT_PROOF_WRAT ? i64[nv + 8] : i64[1]
+    wassat_query_keep(query_owner, @rout, @rout.size * 8) if query_owner != nil
     @runits = []                 # indices of stored unit clauses (hinted mode)
+    wassat_query_keep(query_owner, @runits, 0) if query_owner != nil
     @rempties = []               # indices of stored empty clauses (hinted mode)
+    wassat_query_keep(query_owner, @rempties, 0) if query_owner != nil
 
     # clause arena
     total = 0
@@ -541,6 +602,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     cap = (total + @input_clauses.size) * 8 + 4096
     cap = 1 if flat_shell
     @arena = i64[cap]
+    wassat_query_keep(query_owner, @arena, @arena.size * 8) if query_owner != nil
     @acap = cap
     @asize = 0
     maxcl = @input_clauses.size * 8 + 1024
@@ -550,10 +612,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # miss; sharing one 16-byte-aligned pair means one cache line and one
     # array descriptor instead of two of each.
     @cmeta = i64[2 * maxcl]
-    @alive = i8[maxcl]          # 0 dead / 1 live; one byte per clause
-    @clbd = i64[maxcl]           # 0 = original clause (never deleted)
-    @cused = i64[maxcl]          # conflict count when last resolved in analysis
-    @gid = i64[maxcl]            # clause index -> global proof id
+    wassat_query_keep(query_owner, @cmeta, @cmeta.size * 8) if query_owner != nil
+    @alive = i8[maxcl] # 0 dead / 1 live; one byte per clause
+    wassat_query_keep(query_owner, @alive, @alive.size * 1) if query_owner != nil
+    @clbd = i64[maxcl] # 0 = original clause (never deleted)
+    wassat_query_keep(query_owner, @clbd, @clbd.size * 8) if query_owner != nil
+    @cused = i64[maxcl] # conflict count when last resolved in analysis
+    wassat_query_keep(query_owner, @cused, @cused.size * 8) if query_owner != nil
+    @gid = i64[maxcl] # clause index -> global proof id
+    wassat_query_keep(query_owner, @gid, @gid.size * 8) if query_owner != nil
     @ccap = maxcl
     @ncl = 0
 
@@ -573,9 +640,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # start / size / capacity live at bl[4li], +1, +2 (stride 4 keeps the
     # pair 16-byte aligned, so start and size arrive in one `ldp`)
     @bldir = i64[4 * (2 * nv + 4)]
+    wassat_query_keep(query_owner, @bldir, @bldir.size * 8) if query_owner != nil
     @blp_cap = flat_shell ? 1 : 2 * maxcl + 2 * (2 * nv + 4) + 64
     @bl_pool = i64[@blp_cap]
-    @bl_state = i64[4]           # pool top / pool cap / overflow flag
+    wassat_query_keep(query_owner, @bl_pool, @bl_pool.size * 8) if query_owner != nil
+    @bl_state = i64[4] # pool top / pool cap / overflow flag
+    wassat_query_keep(query_owner, @bl_state, @bl_state.size * 8) if query_owner != nil
     @bl_state[1] = @blp_cap
 
     # Contiguous watch stacks: per-literal blocks inside one packed pool.
@@ -588,15 +658,21 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # The stride-4 directory holds start / size / remaining capacity / base.
     # Base retains the block origin so a consumed prefix can be reused.
     @wsdir = i64[4 * nlits]
+    wassat_query_keep(query_owner, @wsdir, @wsdir.size * 8) if query_owner != nil
     @wp_cap = flat_shell ? 1 : 4 * maxcl + 2 * nlits + 64
     @wpool = i64[@wp_cap]
+    wassat_query_keep(query_owner, @wpool, @wpool.size * 8) if query_owner != nil
     # Watch-pool state: top / capacity / overflow flag, then cumulative
     # rebuilds / rebuilt entries / relocations / copied entries / overflows,
     # then prefix recycles / recycled copies / reclaimed slots.
     # Each arm owns its counters; only the slow pool-maintenance paths write
     # them, with no atomics or extra work in the literal-scanning loops.
     @wp_state = i64[14]
+    wassat_query_keep(query_owner, @wp_state, @wp_state.size * 8) if query_owner != nil
     @wp_state[1] = @wp_cap
+    # Keep lifetime metadata after the established hot variable/clause fields.
+    # It must be installed before the first clause-loading method is called.
+    @query_owner = query_owner
 
     @input_clauses.each -> (c)
       self.add_input_clause(c)
@@ -609,13 +685,16 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # [4] blocks shrunk  [5] backjump target out  [6] probe clear-list size
     # [7] distinct decision levels collected.
     @shcnt = i64[nv + 3]
+    wassat_query_keep(query_owner, @shcnt, @shcnt.size * 8) if query_owner != nil
     @shst = i64[8]
+    wassat_query_keep(query_owner, @shst, @shst.size * 8) if query_owner != nil
     @use_shrink = @config.use_shrinking
 
     # Equivalent-literal substitution: var -> the signed literal it was
     # proved equivalent to (0 = not substituted). Written by
     # substitute_equivalences, read once when a model is extracted.
     @subst = i64[1]
+    wassat_query_keep(query_owner, @subst, @subst.size * 8) if query_owner != nil
     @nsubst = 0
     @raw_flat = false
     # Lucky phases run at most once per solver, on the first solve_query.
@@ -631,19 +710,23 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # @amark flags the variables of the conflict being analyzed.
     @ksearch = false
     @kst = i64[16]
+    wassat_query_keep(query_owner, @kst, @kst.size * 8) if query_owner != nil
     @krhist = i64[1]
+    wassat_query_keep(query_owner, @krhist, @krhist.size * 8) if query_owner != nil
     @kreduce_at = 0
     @ktrail = env("WASSAT_KTRAIL") != "0"
     @kreduce = false
     @kpromote = false
     @kfuse = false
     @krun = i64[8]
+    wassat_query_keep(query_owner, @krun, @krun.size * 8) if query_owner != nil
     @kviv = nil
     @kviv_at = 0
     @kviv_effort = 10
     @kwant = false
     @kdiv = 1
     @amark = i8[nv + 1]
+    wassat_query_keep(query_owner, @amark, @amark.size * 1) if query_owner != nil
     # A streamed DRAT-only proof is formatted natively into @dbytes and
     # written through @dchunk (see drat_put). Building a string per line
     # cost about 1.7 KB of unreclaimed memory per conflict: the runtime has
@@ -653,7 +736,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @dbcap = 0
     @dchunk = nil
     @dkeep = i8[1]
-    self.prepare_walk
+    wassat_query_keep(query_owner, @dkeep, @dkeep.size * 1) if query_owner != nil
+    @query_dbytes = nil
+    @query_lits = nil
+    # Private assumption queries never run the phase walk (nassump > 0).
+    # Do not allocate an unused second solver and its borrowed arena views.
+    self.prepare_walk if query_owner == nil
     # A solver built from clause lists (the certificate modes, the library
     # API) takes the profile here; flat loads decide in load_flat.
     self.enable_kissat_search if !flat_shell && @config.use_kissat_search
@@ -688,11 +776,16 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if @ncl + 1 >= @ccap
       ncap = @ccap * 2
       cm = i64[2 * ncap]
+      wassat_query_keep(@query_owner, cm, cm.size * 8) if @query_owner != nil
       al = i8[ncap]
+      wassat_query_keep(@query_owner, al, al.size * 1) if @query_owner != nil
       lb = i64[ncap]
+      wassat_query_keep(@query_owner, lb, lb.size * 8) if @query_owner != nil
       cu = i64[ncap]
+      wassat_query_keep(@query_owner, cu, cu.size * 8) if @query_owner != nil
       has_gid = @gid.size > 1
       gd = has_gid ? i64[ncap] : @gid
+      wassat_query_keep(@query_owner, gd, gd.size * 8) if @query_owner != nil && has_gid
       i = 0
       while i < @ncl
         cm[2 * i] = @cmeta[2 * i]
@@ -712,12 +805,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       # every live clause from the clause DB (watches are reconstructible)
       @wp_cap = 4 * ncap + 4 * @nvars + 72
       @wpool = i64[@wp_cap]
+      wassat_query_keep(@query_owner, @wpool, @wpool.size * 8) if @query_owner != nil
       @wp_state[0] = 0
       @wp_state[1] = @wp_cap
       self.rebuild_watches
       # the binary pool is sized by clause capacity too — regrow and repack
       @blp_cap = 2 * ncap + 4 * @nvars + 72
       @bl_pool = i64[@blp_cap]
+      wassat_query_keep(@query_owner, @bl_pool, @bl_pool.size * 8) if @query_owner != nil
       @bl_state[0] = 0
       @bl_state[1] = @blp_cap
       self.rebuild_binaries
@@ -841,7 +936,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       ncap = @rocc_cap * 2
       ncap = @rocc_size + need + 4096 if ncap < @rocc_size + need
       nn = i64[ncap]
+      wassat_query_keep(@query_owner, nn, nn.size * 8) if @query_owner != nil
       nc = i64[ncap]
+      wassat_query_keep(@query_owner, nc, nc.size * 8) if @query_owner != nil
       i = 0
       while i < @rocc_size
         nn[i] = @rocc_next[i]
@@ -1153,12 +1250,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # Propagation-only query for a private model-proposal solver. No decisions,
   # learning or refutation publication. The detached assignment includes root
   # units and the assumptions' implications, with 0 for unassigned variables.
-  # A conflict is only a rejected proposal. Saved phases may change, so this
+  # Pass nil for values when only the propagation verdict is needed.
+  # Saved phases may change, so this
   # entry belongs to a dedicated propagation shell, never a live search arm.
   # Counters: queries, propagated literals, cancellations, rejected queries.
   -> propagation_snapshot(assumptions, values, counters)
     return 0 unless @proof_mode == WASSAT_PROOF_NONE && @nsubst == 0
-    return 0 if values.size <= @nvars || counters.size < 4 || wassat_stop_requested?(@stop_cell)
+    return 0 if (values != nil && values.size <= @nvars) || counters.size < 4 || wassat_stop_requested?(@stop_cell)
     counters[0] += 1
     props0 = @pstate[4]
     # Preserve an already closed root queue; a fresh shell still has qhead 0.
@@ -1179,7 +1277,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             self.enqueue(lit, -1)
             conflict = self.propagate >= 0
     stopped = wassat_stop_requested?(@stop_cell)
-    wassat_copy_vivify_phases(@assign, values, @nvars) unless conflict || stopped
+    wassat_copy_vivify_phases(@assign, values, @nvars) unless conflict || stopped || values == nil
     self.backjump(0)
     # A cancelled root scan or root conflict must be replayed if resumed.
     @qhead = 0 if stopped || root_conflict
@@ -1279,6 +1377,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     sphase = nil
     if @conflicts > 0
       sphase = i64[@nvars + 1]
+      wassat_query_keep(@query_owner, sphase, sphase.size * 8) if @query_owner != nil
       v = 0
       while v <= @nvars
         sphase[v] = @phase[v]
@@ -1575,12 +1674,17 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @kfuse = env("WASSAT_KFUSE") != "0"
     # Scalars of the conflict-analysing vivifier; [4] probes, [5] literals
     # removed, [6] learned clauses found implied. nil keeps the prefix form.
-    @kviv = i64[8] if env("WASSAT_KVIVIFY") != "0"
+    if env("WASSAT_KVIVIFY") != "0"
+      @kviv = i64[8]
+      wassat_query_keep(@query_owner, @kviv, @kviv.size * 8) if @query_owner != nil
     @kviv_effort = 10
     @kviv_effort = env("WASSAT_KVIVIFY_EFFORT").to_i if env("WASSAT_KVIVIFY_EFFORT") != nil
-    @vivify_phase = i8[@nvars + 1] if @vivify_phase == nil
+    if @vivify_phase == nil
+      @vivify_phase = i8[@nvars + 1]
+      wassat_query_keep(@query_owner, @vivify_phase, @vivify_phase.size * 1) if @query_owner != nil
     @wp_state[12] = 1 if env("WASSAT_WATCH_ROOMY") != "0"
     @krhist = i64[1088]
+    wassat_query_keep(@query_owner, @krhist, @krhist.size * 8) if @query_owner != nil
     @kreduce_at = @conflicts + 1000 / @kdiv + 1
     0
 
@@ -1622,7 +1726,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> set_primary_decision_vars(vars)
     return 0 if @nvars < 1
     mark = i8[@nvars + 1]
+    wassat_query_keep(@query_owner, mark, mark.size * 1) if @query_owner != nil
     order = i64[@nvars + 1]
+    wassat_query_keep(@query_owner, order, order.size * 8) if @query_owner != nil
     nprim = 0
     i = 0
     while i < vars.size
@@ -1804,20 +1910,34 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     nl = 2 * nv + 4
     if (@inprocess_passes & 1) != 0
       @inp_phase = i8[nv + 1]
+      wassat_query_keep(@query_owner, @inp_phase, @inp_phase.size * 1) if @query_owner != nil
       @inp_mark = i64[nv + 1]
+      wassat_query_keep(@query_owner, @inp_mark, @inp_mark.size * 8) if @query_owner != nil
       @inp_lits = i64[nv + 2]
+      wassat_query_keep(@query_owner, @inp_lits, @inp_lits.size * 8) if @query_owner != nil
     if (@inprocess_passes & 2) != 0 && @vivify_phase == nil
       @vivify_phase = i8[nv + 1]
-    @inp_units = i64[nv + 2] if @inp_units == nil
+      wassat_query_keep(@query_owner, @vivify_phase, @vivify_phase.size * 1) if @query_owner != nil
+    if @inp_units == nil
+      @inp_units = i64[nv + 2]
+      wassat_query_keep(@query_owner, @inp_units, @inp_units.size * 8) if @query_owner != nil
     if (@inprocess_passes & 8) != 0 && @allow_subst && @config.use_substitution(true)
       @inp_s_idx = i64[nl]
+      wassat_query_keep(@query_owner, @inp_s_idx, @inp_s_idx.size * 8) if @query_owner != nil
       @inp_s_low = i64[nl]
+      wassat_query_keep(@query_owner, @inp_s_low, @inp_s_low.size * 8) if @query_owner != nil
       @inp_s_onstk = i64[nl]
+      wassat_query_keep(@query_owner, @inp_s_onstk, @inp_s_onstk.size * 8) if @query_owner != nil
       @inp_s_reprs = i64[nl]
+      wassat_query_keep(@query_owner, @inp_s_reprs, @inp_s_reprs.size * 8) if @query_owner != nil
       @inp_s_stk = @sub_head != nil ? @sub_head : i64[nl]
+      wassat_query_keep(@query_owner, @inp_s_stk, @inp_s_stk.size * 8) if @query_owner != nil && @sub_head == nil
       @inp_s_work = i64[nl]
+      wassat_query_keep(@query_owner, @inp_s_work, @inp_s_work.size * 8) if @query_owner != nil
       @inp_s_wcur = i64[nl]
+      wassat_query_keep(@query_owner, @inp_s_wcur, @inp_s_wcur.size * 8) if @query_owner != nil
       @inp_s_mark = @sub_stamp != nil ? @sub_stamp : i64[nl]
+      wassat_query_keep(@query_owner, @inp_s_mark, @inp_s_mark.size * 8) if @query_owner != nil && @sub_stamp == nil
       # Subsumption and SCC never run at the same time, and the subsumption
       # pass resets its head and stamp tables on entry.
       @sub_head = @inp_s_stk if @sub_head == nil
@@ -1826,9 +1946,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       while hcap < 2 * (@ccap + 16) && hcap < 524288
         hcap = hcap * 2
       @inp_ht = i64[hcap]
-      @subst = i64[nv + 2] if @nsubst == 0 && @subst.size < nv + 2
+      wassat_query_keep(@query_owner, @inp_ht, @inp_ht.size * 8) if @query_owner != nil
+      if @nsubst == 0 && @subst.size < nv + 2
+        @subst = i64[nv + 2]
+        wassat_query_keep(@query_owner, @subst, @subst.size * 8) if @query_owner != nil
       # SCC rewrite needs one unit-clause slot per clause, but no signatures.
-      @sub_next = i64[@ccap + 2] if @sub_next == nil
+      if @sub_next == nil
+        @sub_next = i64[@ccap + 2]
+        wassat_query_keep(@query_owner, @sub_next, @sub_next.size * 8) if @query_owner != nil
     self.prepare_subsume_scratch if (@inprocess_passes & 4) != 0 || @subsume_every > 0
     @inp_ready = true
     0
@@ -2064,7 +2189,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       # First-UIP clauses are RUP, hence also valid DRAT additions. Recording
       # their literals directly avoids the whole-database propagation replay
       # required to construct WRAT hints.
-      self.log_drat_line(lits.empty? ? "0" : lits.join(" ") + " 0")
+      if @query_owner != nil
+        self.query_drat_boxed(lits)
+      else
+        self.log_drat_line(lits.empty? ? "0" : lits.join(" ") + " 0")
       @refuted = true if lits.empty?
     0
 
@@ -2258,6 +2386,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if drat_path != nil && @proof_mode == WASSAT_PROOF_DRAT
       @dbcap = 1048576
       @dbytes = u8[@dbcap]
+      wassat_query_keep(@query_owner, @dbytes, @dbytes.size * 1) if @query_owner != nil
       @dbpos = 0
       @dchunk = drat_path + ".chunk"
     0
@@ -2282,6 +2411,37 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     else
       @dbpos = pos
     0
+
+  # Private in-memory proofs use the same native formatter as streamed DRAT.
+  # A reusable byte buffer avoids one temporary string per literal; the
+  # resulting line is owned until cone lifting has copied original variables.
+  -> query_drat_put(src, start, n)
+    need = 12 * n + 6
+    if @query_dbytes == nil || @query_dbytes.size < need
+      @query_dbytes = u8[need]
+      wassat_query_keep(@query_owner, @query_dbytes, need)
+    pos = wassat_drat_put(@query_dbytes, 0, @query_dbytes.size, src, start, n, 0)
+    raise "private query proof formatter overflow" if pos < 0
+    # Borrowed views have permanent registry edges; Array.copy returns boxed
+    # values. Copy into a fresh byte array to preserve both type and lifetime.
+    bytes = u8[pos - 1]
+    wassat_query_keep(@query_owner, bytes, pos - 1)
+    wassat_query_copy_bytes(@query_dbytes, bytes, pos - 1)
+    line = ccall("w_string_from_byte_array", bytes)
+    wassat_query_keep(@query_owner, line, pos - 1)
+    @drat.push(line)
+    0
+
+  -> query_drat_boxed(lits)
+    n = lits.size
+    if @query_lits == nil || @query_lits.size < n
+      @query_lits = i64[n]
+      wassat_query_keep(@query_owner, @query_lits, n * 8)
+    i = 0
+    while i < n
+      @query_lits[i] = lits[i]
+      i += 1
+    self.query_drat_put(@query_lits, 0, n)
 
   # In WRAT mode, additionally emit each step in plain DRAT. Emitting both
   # natively at log time is what keeps the two dialects in lockstep once
@@ -2329,10 +2489,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       text = @wrat_pend.join("")
       raise "proof write failed at '[@wrat_sink]'" unless wassat_append_text(@wrat_sink, text)
       @wrat_pend = []
+      wassat_query_keep(@query_owner, @wrat_pend, 0) if @query_owner != nil
     unless @drat_pend.empty?
       dtext = @drat_pend.join("")
       raise "proof write failed at '[@drat_sink]'" unless wassat_append_text(@drat_sink, dtext)
       @drat_pend = []
+      wassat_query_keep(@query_owner, @drat_pend, 0) if @query_owner != nil
     @pend_bytes = 0
     0
 
@@ -2340,7 +2502,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # partial refutation on disk masquerading as evidence for this formula.
   -> abort_proof_sinks
     @wrat_pend = []
+    wassat_query_keep(@query_owner, @wrat_pend, 0) if @query_owner != nil
     @drat_pend = []
+    wassat_query_keep(@query_owner, @drat_pend, 0) if @query_owner != nil
     @pend_bytes = 0
     @dbpos = 0
     z = ccall("__w_unlink", @dchunk) unless @dchunk == nil
@@ -2370,6 +2534,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # cone by closure, so their falsifications derive too.
   -> log_learned_direct(n, confl)
     return 0 if @proof_mode == WASSAT_PROOF_NONE
+    if @proof_mode == WASSAT_PROOF_DRAT && @query_owner != nil
+      self.query_drat_put(@lbuf, 0, n)
+      @refuted = true if n == 0
+      return 0
     if @proof_mode == WASSAT_PROOF_DRAT && @dbytes != nil
       self.drat_put(@lbuf, 0, n, 0)
       @refuted = true if n == 0
@@ -2431,7 +2599,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Portfolio workers cannot allocate. Their buffer is prepared while
     # loading the solver; direct, unthreaded callers can initialize it here.
     return 0 if @vivify_phase == nil && @fixed_caps
-    @vivify_phase = i8[@nvars + 1] if @vivify_phase == nil
+    if @vivify_phase == nil
+      @vivify_phase = i8[@nvars + 1]
+      wassat_query_keep(@query_owner, @vivify_phase, @vivify_phase.size * 1) if @query_owner != nil
     saved_phase = @vivify_phase
     wassat_copy_vivify_phases(@phase, saved_phase, @nvars)
     root_conflict = self.propagate
@@ -2797,10 +2967,19 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     nl = 2 * @nvars + 4
     if @sub_sig == nil || @sub_sig.size < @ccap + 2
       @sub_sig = i64[@ccap + 2]
-      @sub_next = i64[@ccap + 2] if @sub_next == nil || @sub_next.size < @ccap + 2
-    @sub_head = i64[nl] if @sub_head == nil
-    @sub_stamp = i64[nl] if @sub_stamp == nil
-    @inp_units = i64[@nvars + 2] if @inp_units == nil
+      wassat_query_keep(@query_owner, @sub_sig, @sub_sig.size * 8) if @query_owner != nil
+      if @sub_next == nil || @sub_next.size < @ccap + 2
+        @sub_next = i64[@ccap + 2]
+        wassat_query_keep(@query_owner, @sub_next, @sub_next.size * 8) if @query_owner != nil
+    if @sub_head == nil
+      @sub_head = i64[nl]
+      wassat_query_keep(@query_owner, @sub_head, @sub_head.size * 8) if @query_owner != nil
+    if @sub_stamp == nil
+      @sub_stamp = i64[nl]
+      wassat_query_keep(@query_owner, @sub_stamp, @sub_stamp.size * 8) if @query_owner != nil
+    if @inp_units == nil
+      @inp_units = i64[@nvars + 2]
+      wassat_query_keep(@query_owner, @inp_units, @inp_units.size * 8) if @query_owner != nil
     0
 
   # One pass of wassat_learned_subsume. `irred` 1 also lets irredundant
@@ -2815,7 +2994,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       self.prepare_subsume_scratch
       if @sub_sig.size < @ncl + 2
         @sub_sig = i64[@ncl * 2 + 1024]
+        wassat_query_keep(@query_owner, @sub_sig, @sub_sig.size * 8) if @query_owner != nil
         @sub_next = i64[@ncl * 2 + 1024]
+        wassat_query_keep(@query_owner, @sub_next, @sub_next.size * 8) if @query_owner != nil
     pm = @inp_pm
     k = 0
     while k < 16
@@ -2875,6 +3056,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if @inp_units == nil
       return 0 if @fixed_caps
       @inp_units = i64[@nvars + 2]
+      wassat_query_keep(@query_owner, @inp_units, @inp_units.size * 8) if @query_owner != nil
     st = @inp_pm
     again = true
     while again && @ok
@@ -3180,7 +3362,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # an implied clause is always sound. Compaction zeroes the length of every
   # dead clause, so none is written twice.
   -> log_drat_deletions
-    @dkeep = i8[@ccap + 1] if @dkeep.size < @ncl + 1
+    # Cone lifting keeps additions only; RUP remains valid when deleted
+    # clauses are retained, so private queries need no deletion records.
+    return 0 if @query_owner != nil
+    if @dkeep.size < @ncl + 1
+      @dkeep = i8[@ccap + 1]
+      wassat_query_keep(@query_owner, @dkeep, @dkeep.size * 1) if @query_owner != nil
     wassat_mark_reasons(@trail, @reason, @dkeep, @tsize, @ncl, 1)
     ci = 0
     while ci < @ncl
@@ -4047,7 +4234,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         @best_phase[v] = -1
       v += 1
     unless lean
-      @epoch_spine = i64[nv + 2] if @epoch_spine == nil
+      if @epoch_spine == nil
+        @epoch_spine = i64[nv + 2]
+        wassat_query_keep(@query_owner, @epoch_spine, @epoch_spine.size * 8) if @query_owner != nil
       max_dec = nv
       max_dec = env("WASSAT_MAX_DEC_VAR").to_i if env("WASSAT_MAX_DEC_VAR") != nil
       v = 1
@@ -4074,7 +4263,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @reduce_limit = @config.reduce_limit
     @reduce_step = @config.reduce_step
     @auto_vivify = @config.use_vivification
-    @vivify_phase = i8[@nvars + 1] if @auto_vivify && @vivify_phase == nil
+    if @auto_vivify && @vivify_phase == nil
+      @vivify_phase = i8[@nvars + 1]
+      wassat_query_keep(@query_owner, @vivify_phase, @vivify_phase.size * 1) if @query_owner != nil
     # The shell was constructed with an empty clause list; the schedule
     # belongs to the real formula's shape.
     @inprocess_every = @config.inprocess_every
@@ -4137,18 +4328,23 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # The number of variables does not bound it: truncating repeated units
     # can discard a later assignment or even a root contradiction.
     units = i64[wassat_flat_unit_count(sfcl, sncl)]
+    wassat_query_keep(@query_owner, units, units.size * 8) if @query_owner != nil
     pm = i64[12]
+    wassat_query_keep(@query_owner, pm, pm.size * 8) if @query_owner != nil
     pm[0] = sncl
     pm[1] = cap
     pm[2] = maxcl
     pm[9] = synth
     if !lean && art["raw"] == true && sncl >= 40000000 && art.has_key?("formula_ref") && sfcl.size > 0
       @cmeta = i64[2 * maxcl]
+      wassat_query_keep(@query_owner, @cmeta, @cmeta.size * 8) if @query_owner != nil
       @alive = i8[maxcl]
+      wassat_query_keep(@query_owner, @alive, @alive.size * 1) if @query_owner != nil
       wassat_load_flat_meta(art["fcs"], sfcl, @cmeta, @alive, units, pm)
       old_fcs = art["fcs"]
       old_fcl = art["fcl"]
       empty_i64 = i64[0]
+      wassat_query_keep(@query_owner, empty_i64, empty_i64.size * 8) if @query_owner != nil
       art["fcs"] = @cmeta
       art["fcl"] = empty_i64
       fref = art["formula_ref"]
@@ -4157,6 +4353,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       z = ccall("w_value_free_w", old_fcs)
       z = ccall("w_value_free_w", old_fcl)
       @arena = i64[cap]
+      wassat_query_keep(@query_owner, @arena, @arena.size * 8) if @query_owner != nil
       @acap = cap
       wassat_load_flat_arena(art["fla"], @cmeta, @arena, pm)
       old_fla = art["fla"]
@@ -4164,8 +4361,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       fref["flat_lits"] = @arena
       z = ccall("w_value_free_w", old_fla)
       @clbd = i64[maxcl]
+      wassat_query_keep(@query_owner, @clbd, @clbd.size * 8) if @query_owner != nil
       @cused = i64[maxcl]
+      wassat_query_keep(@query_owner, @cused, @cused.size * 8) if @query_owner != nil
       @gid = i64[1]
+      wassat_query_keep(@query_owner, @gid, @gid.size * 8) if @query_owner != nil
       @ncl = pm[3]
       @asize = pm[4]
       self.init_var_tables(false)
@@ -4177,21 +4377,29 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @wp_cap = 2 * (nlong + head) + 2 * @nvars + 1048576 + nlong / 4
       @wp_cap = wassat_watch_reserve_capacity(@wp_cap, watch_extra)
       @wpool = i64[@wp_cap]
+      wassat_query_keep(@query_owner, @wpool, @wpool.size * 8) if @query_owner != nil
       @wp_state[0] = 0
       @wp_state[1] = @wp_cap
       @blp_cap = 2 * (nbins + head) + 2 * @nvars + 1048576
       @bl_pool = i64[@blp_cap]
+      wassat_query_keep(@query_owner, @bl_pool, @bl_pool.size * 8) if @query_owner != nil
       @bl_state[0] = 0
       @bl_state[1] = @blp_cap
     else
       self.init_var_tables(lean)
       @arena = i64[cap]
+      wassat_query_keep(@query_owner, @arena, @arena.size * 8) if @query_owner != nil
       @acap = cap
       @cmeta = i64[2 * maxcl]
+      wassat_query_keep(@query_owner, @cmeta, @cmeta.size * 8) if @query_owner != nil
       @alive = i8[maxcl]
+      wassat_query_keep(@query_owner, @alive, @alive.size * 1) if @query_owner != nil
       @clbd = i64[maxcl]
+      wassat_query_keep(@query_owner, @clbd, @clbd.size * 8) if @query_owner != nil
       @cused = i64[maxcl]
+      wassat_query_keep(@query_owner, @cused, @cused.size * 8) if @query_owner != nil
       @gid = (@proof_mode == WASSAT_PROOF_NONE && sncl >= 5000000) ? i64[1] : i64[maxcl]
+      wassat_query_keep(@query_owner, @gid, @gid.size * 8) if @query_owner != nil
       wassat_load_flat(art["fla"], art["fcs"], sfcl, salive, art["ftaut"],
                        art["fpgid"], @arena, @cmeta, @alive, @clbd,
                        @gid, units, pm)
@@ -4205,10 +4413,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @wp_cap = wassat_lucky_watch_capacity(@cmeta, @ncl, @nvars, @wp_cap) if lean
       @wp_cap = wassat_watch_reserve_capacity(@wp_cap, watch_extra)
       @wpool = i64[@wp_cap]
+      wassat_query_keep(@query_owner, @wpool, @wpool.size * 8) if @query_owner != nil
       @wp_state[0] = 0
       @wp_state[1] = @wp_cap
       @blp_cap = 2 * maxcl + 4 * @nvars + 72
       @bl_pool = i64[@blp_cap]
+      wassat_query_keep(@query_owner, @bl_pool, @bl_pool.size * 8) if @query_owner != nil
       @bl_state[0] = 0
       @bl_state[1] = @blp_cap
     if art["raw"] == true
@@ -4522,8 +4732,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     while hcap < 4 * cap
       hcap = hcap * 2
     out = i64[2 * cap]
+    wassat_query_keep(@query_owner, out, out.size * 8) if @query_owner != nil
     ht = i64[hcap]
+    wassat_query_keep(@query_owner, ht, ht.size * 8) if @query_owner != nil
     st = i64[8]
+    wassat_query_keep(@query_owner, st, st.size * 8) if @query_owner != nil
     wassat_extract_binaries(@cmeta, @alive, @arena, @lassign, @bldir,
                             @bl_pool, ht, out, st, @ncl, cap,
                             hcap - 1)
@@ -4621,7 +4834,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # wrong model. Entries already written are likewise never overwritten;
     # the chain they form is resolved in unsubstitute. (prepare_inprocessing
     # may have sized it already, still all zero.)
-    @subst = i64[@nvars + 2] if @nsubst == 0 && @subst.size < @nvars + 2
+    if @nsubst == 0 && @subst.size < @nvars + 2
+      @subst = i64[@nvars + 2]
+      wassat_query_keep(@query_owner, @subst, @subst.size * 8) if @query_owner != nil
     v = 1
     while v <= @nvars
       r = reprs[v << 1]
@@ -4846,9 +5061,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     return 0 if highest < @trail_lim.size && highest < @lbd_seen.size && highest < @shcnt.size
     raise "assumption decision levels exceed fixed solver capacity" if @fixed_caps
     cap = highest + 2
-    @trail_lim = i32[cap] if highest >= @trail_lim.size
-    @lbd_seen = i64[cap] if highest >= @lbd_seen.size
-    @shcnt = i64[cap] if highest >= @shcnt.size
+    if highest >= @trail_lim.size
+      @trail_lim = i32[cap]
+      wassat_query_keep(@query_owner, @trail_lim, @trail_lim.size * 4) if @query_owner != nil
+    if highest >= @lbd_seen.size
+      @lbd_seen = i64[cap]
+      wassat_query_keep(@query_owner, @lbd_seen, @lbd_seen.size * 8) if @query_owner != nil
+    if highest >= @shcnt.size
+      @shcnt = i64[cap]
+      wassat_query_keep(@query_owner, @shcnt, @shcnt.size * 8) if @query_owner != nil
     0
 
   -> solve_assuming_budget(assumptions, max_conflicts)
@@ -4864,6 +5085,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @assump = assumptions
     if @nsubst > 0
       @assump = []
+      wassat_query_keep(@query_owner, @assump, 0) if @query_owner != nil
       assumptions.each -> (a)
         @assump.push(self.assumption_representative(a))
     self.prepare_assumption_levels(@assump)
@@ -4880,6 +5102,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           i += 1
       r["core"] = original_core
     @assump = []
+    wassat_query_keep(@query_owner, @assump, 0) if @query_owner != nil
     @nassump = 0
     r
 
@@ -4894,6 +5117,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @qhead = 0
     @pending_conflict = -1
     @failed_core = []
+    wassat_query_keep(@query_owner, @failed_core, 0) if @query_owner != nil
     @terminal_status = 0 unless @formula_unsat
     0
 
@@ -4904,22 +5128,29 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> result_for(status)
     sat = status == 1
     unsat = status == -1 || status == -2
-    model = []
+    model = @query_owner == nil ? [] : wassat_query_box(@query_owner)
     if sat
       self.unsubstitute
       model = Array.new(@nvars)
+      wassat_query_keep(@query_owner, model, 0) if @query_owner != nil
       v = 1
       while v <= @nvars
         model[v - 1] = @assign[v] >= 0 ? v : 0 - v
         v += 1
 
-    core = []
-    core = @failed_core.dup if status == -2
-    proof = []
-    drat = []
-    proof = @proof.dup if unsat && @proof_mode == WASSAT_PROOF_WRAT
-    drat = @drat.dup if unsat && (@proof_mode == WASSAT_PROOF_DRAT || @dual_drat)
-    { "sat": sat, "unsat": unsat, "complete": status != 0,
+    core = @query_owner == nil ? [] : wassat_query_box(@query_owner)
+    if status == -2
+      core = @failed_core.dup
+      wassat_query_keep(@query_owner, core, 0) if @query_owner != nil
+    proof = @query_owner == nil ? [] : wassat_query_box(@query_owner)
+    drat = @query_owner == nil ? [] : wassat_query_box(@query_owner)
+    if unsat && @proof_mode == WASSAT_PROOF_WRAT
+      proof = @proof.dup
+      wassat_query_keep(@query_owner, proof, 0) if @query_owner != nil
+    if unsat && (@proof_mode == WASSAT_PROOF_DRAT || @dual_drat)
+      drat = @drat.dup
+      wassat_query_keep(@query_owner, drat, 0) if @query_owner != nil
+    result = { "sat": sat, "unsat": unsat, "complete": status != 0,
       "status": status == -2 ? -1 : status, "model": model,
       "core": core, "proof": proof, "drat": drat,
       "proof_mode": @proof_mode,
@@ -4939,12 +5170,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       "watch_relocations": @wp_state[5], "watch_copied_entries": @wp_state[6],
       "watch_overflows": @wp_state[7], "watch_recycles": @wp_state[8],
       "watch_recycle_copied": @wp_state[9], "watch_reclaimed_slots": @wp_state[10] }
+    wassat_query_keep(@query_owner, result, 0) if @query_owner != nil
+    result
 
   # A positive conflict budget is additional work for this call. Returning
   # UNKNOWN preserves the trail, learned database, restart cadence, and hidden
   # proof prefix so a later call can continue safely. Zero is unlimited.
   -> solve_budget(max_conflicts)
     @assump = []
+    wassat_query_keep(@query_owner, @assump, 0) if @query_owner != nil
     @nassump = 0
     self.solve_query(max_conflicts)
 
@@ -4978,6 +5212,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # UNSAT-under-assumptions is a per-query verdict, never terminal.
     @terminal_status = status unless status == 0 || status == -2
     self.result_for(status)
+
+-> wassat_query_copy_bytes(src, dst, n) (u8[] u8[] i64)
+  i = 0 ## i64
+  while i < n
+    dst[i] = src[i]
+    i += 1
+  0
 
 -> wassat_copy_vivify_phases(src, dst, nv) (i8[] i8[] i64)
   v = 0

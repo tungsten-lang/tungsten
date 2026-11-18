@@ -47,6 +47,7 @@ use naked_sudoku
 use affine_circuit
 use treewidth
 use box_net
+use circuit_cone_fast
 use ../../../core/bit_ops
 
 WASSAT_ARM_MARATHON = 0        # rare restarts, saved phases (the default core)
@@ -1806,7 +1807,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
                      incumbent_conflicts = 0, pre_workers = 0, sls_worker = 0,
                      scout_solvers = 0, scout_sls_arenas = 0,
                      resident_preprocess_arenas = 0, cover_plan = nil, cycle_plan = nil, initial_circuit_plan = nil,
-                     scout_lucky_arenas = 0)
+                     scout_lucky_arenas = 0, initial_cone_plan = nil)
   # Continuation is additive. Replacing matrix arm 3 made qwh.35 lose its
   # repeatable 4,366-conflict trajectory; the scout has already allocated its
   # solver, so keeping it as one extra arm restores that diversity without
@@ -2100,6 +2101,24 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     naked_cdcl += 1 if circuit_plan != nil && circuit_plan["box_net"] == true
     naked_plan = wassat_naked_plan(formula, naked_workers, naked_cdcl,
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, naked_extra)
+  # Additive comparison-cone worker. It is boxed and therefore joins at EVERY
+  # round barrier; its checkpoint resumes without replacing any existing arm
+  # or disabling adaptive allocation. Reserve its proof/simulation footprint.
+  cone_plan = initial_cone_plan
+  if cone_plan == nil && art["raw"] == true && cycle_plan == nil && !wassat_sequential? && wassat_cone_enabled?
+    cone_allowed = env("WASSAT_ARMS") == nil || env("WASSAT_CIRCUIT_CONES") == "1"
+    if cone_allowed && threads + pre_workers > 0 && wassat_cone_candidate(formula)
+      cone_workers = naked_workers + (naked_plan == nil ? 0 : 1)
+      cone_extra = naked_extra + (naked_plan == nil ? 0 : naked_plan["scratch"])
+      cone_scratch = wassat_cone_fast_bytes(nv)
+      if System.cpu_count > cone_workers && System.physical_memory_bytes > 0
+        cone_used = wassat_race_memory_bytes(formula, naked_cdcl,
+          sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, cone_extra + cone_scratch)
+        cone_available = wassat_race_memory_budget_bytes(System.physical_memory_bytes) - cone_used
+        if cone_available >= 0
+          # Retention gets a share of remaining capacity, not a fixed GiB cap.
+          # One active query and the detached certificate remain in base scratch.
+          cone_plan = wassat_cone_fast_plan(formula, 45000, cone_available / 4)
   cap = threads + 3
   cap += 1 if circuit_plan != nil
   keychart_index = keychart_plan == nil ? -1 : cap
@@ -2118,6 +2137,8 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
   cap += 1 if capacity_plan != nil
   naked_index = naked_plan == nil ? -1 : cap
   cap += 1 if naked_plan != nil
+  cone_index = cone_plan == nil ? -1 : cap
+  cap += 1 if cone_plan != nil
   stop = i64[4]
   res = i64[cap * (nv + 8)]
   tel = i64[cap * WASSAT_TEL_STRIDE]
@@ -2236,6 +2257,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     "nae_plan": nae_plan, "nae_index": nae_index,
     "capacity_plan": capacity_plan, "capacity_index": capacity_index,
     "naked_plan": naked_plan, "naked_index": naked_index,
+    "cone_plan": cone_plan, "cone_index": cone_index,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
     "credit": credit, "offsets": offsets, "sls": [], "prune_info": prune_info,
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
@@ -2834,6 +2856,17 @@ WASSAT_AXIS_SLOTS = 10
   naked_idx = race["naked_index"]
   naked_base = naked_idx * (nv + 8)
   naked_handle = nil
+  cone_plan = race["cone_plan"]
+  cone_plan = nil if wassat_sequential? || env("WASSAT_CIRCUIT_CONES") == "0"
+  cone_idx = race["cone_index"]
+  cone_base = cone_plan == nil ? 0 : cone_idx * (nv + 8)
+  if cone_plan != nil
+    cone_cap = budget > 0 && budget < 1000000 ? budget : 1000000
+    cone_plan["deadline"] = clock_ms() + cone_plan["window_ms"]
+    cone_plan["state"] = wassat_cone_checkpoint(formula, cone_cap, cone_plan["deadline"], conflict_budget, budget, cone_idx + 1)
+    cone_plan["state"]["profile_queries"] = env("WASSAT_CONE_PROFILE_QUERIES") == "1"
+    cone_plan["state"]["retain_output_queries"] = cone_plan["retain_output_queries"] == true
+    cone_plan["state"]["retention_bytes"] = cone_plan["retention_bytes"]
   if keychart_plan != nil && conflict_budget != nil
     keychart_plan["solver"].set_shared_conflict_budget(conflict_budget, budget, keychart_idx + 1)
   round_ms = wassat_race_round_ms
@@ -2988,6 +3021,12 @@ WASSAT_AXIS_SLOTS = 10
   while running == 1
     handles = []
     sls_handle = nil
+    cone_handle = nil
+    cone_stop = nil
+    if cone_plan != nil && cone_plan["state"]["finished"] != true
+      cone_stop = i64[2]
+      cone_plan["slices"] += 1
+      cone_handle = Thread.new -> wassat_cone_fast_arm(cone_plan, cone_stop, stop, res, cone_base, nv)
     a = 0
     while a < threads
       if live[a] == 1
@@ -3079,7 +3118,21 @@ WASSAT_AXIS_SLOTS = 10
         keychart_handle = wassat_seq_turn(keychart_handle, stop, 0)
         keychart_handle = nil
     handles.each -> (h)
+      if cone_handle != nil
+        remaining = cone_plan["deadline"] - clock_ms()
+        remaining = 1 if remaining < 1
+        finished = h.join(remaining)
+        unless finished
+          z = wassat_stop_cancel(cone_stop)
+          z = cone_handle.join
+          cone_handle = nil
       z = h.join
+    # This worker performs boxed dispatch. Cancel/join it before any scoring
+    # or reallocation, retaining its checkpoint for the next ordinary round.
+    if cone_handle != nil
+      z = wassat_stop_cancel(cone_stop)
+      z = cone_handle.join
+      cone_handle = nil
     # Join decisive CDCL work FIRST. If this was its final bounded slice (or
     # every live arm retired/stalled), signal the model-only walker before
     # joining it. The old all-handles join could wait behind the walker's full
@@ -3099,6 +3152,7 @@ WASSAT_AXIS_SLOTS = 10
       decisive_now = 1 if nae_plan != nil && ccall("__w_arr_load_acq", res, nae_base) != 0
       decisive_now = 1 if capacity_plan != nil && ccall("__w_arr_load_acq", res, capacity_base) != 0
       decisive_now = 1 if naked_plan != nil && ccall("__w_arr_load_acq", res, naked_base) != 0
+      decisive_now = 1 if cone_plan != nil && ccall("__w_arr_load_acq", res, cone_base) == -1
       cdcl_can_continue = 0
       if decisive_now == 0 && round1 > 0
         a = 0
@@ -3145,6 +3199,7 @@ WASSAT_AXIS_SLOTS = 10
       decided = 1 if nae_plan != nil && ccall("__w_arr_load_acq", res, nae_base) != 0
       decided = 1 if capacity_plan != nil && ccall("__w_arr_load_acq", res, capacity_base) != 0
       decided = 1 if naked_plan != nil && ccall("__w_arr_load_acq", res, naked_base) != 0
+      decided = 1 if cone_plan != nil && ccall("__w_arr_load_acq", res, cone_base) == -1
       if decided == 0
         # Score the round every arm just finished, and retire the arms that
         # cannot continue: retired by the solver, stuck (no conflict advanced,
@@ -3311,6 +3366,11 @@ WASSAT_AXIS_SLOTS = 10
   if perm_handle != nil
     z = wassat_stop_cancel(stop)
     z = perm_handle.join
+  if cone_plan != nil
+    wassat_cone_fast_profile(cone_plan)
+    # All slices are joined. An ordinary winner can abandon an unfinished
+    # checkpoint, so release any retained private query owners here as well.
+    wassat_cone_checkpoint_release(cone_plan["state"])
   # Workers already record completion immediately before publishing a win.
   # Report the join tail without adding clocks or atomics to their hot loops.
   if env("WASSAT_PROFILE") == "1"
@@ -3333,6 +3393,10 @@ WASSAT_AXIS_SLOTS = 10
       ended = res[sls_base + nv + 5]
       last_ms = ended if ended > last_ms
       answer_ms = ended if res[sls_base] == 1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
+    if cone_plan != nil
+      ended = res[cone_base + nv + 5]
+      last_ms = ended if ended > last_ms
+      answer_ms = ended if res[cone_base] == -1 && ended > 0 && (answer_ms == 0 || ended < answer_ms)
     if circuit_plan != nil
       ended = res[circuit_base + nv + 5]
       last_ms = ended if ended > last_ms
@@ -3455,6 +3519,9 @@ WASSAT_AXIS_SLOTS = 10
   if status == 0 && circuit_plan != nil && res[circuit_base] == -1
     status = -1
     winner = circuit_idx
+  if status == 0 && cone_plan != nil && res[cone_base] == -1
+    status = -1
+    winner = cone_idx
   if status == 0 && cover_plan != nil && res[cover_base] != 0
     status = res[cover_base]
     winner = cover_idx
@@ -3494,6 +3561,7 @@ WASSAT_AXIS_SLOTS = 10
   keychart_conflicts = keychart_plan == nil ? 0 : res[keychart_base + nv + 4]
   repair_conflicts = sls.size > 0 ? res[sls_base + nv + 7] : 0
   conflicts = repair_conflicts + keychart_conflicts
+  conflicts += res[cone_base + nv + 4] if cone_plan != nil
   if circuit_plan != nil && circuit_plan["byte_relation"] == true
     bm = circuit_plan["meta"]
     conflicts += bm[40] + bm[41]
@@ -3501,10 +3569,17 @@ WASSAT_AXIS_SLOTS = 10
   conflicts += circuit_plan["meta"][17] if circuit_plan != nil && circuit_plan["sorting_network"] == true
   if conflict_budget != nil
     conflicts = ccall("__w_arr_load_acq", conflict_budget, 0)
+  else
+    # Unlimited races still report ALL work, not just the winning arm.
+    # `spent` retains earlier rounds/retired solver instances; the remaining
+    # telemetry delta excludes the scout continuation's pre-race offset.
+    a = 0
+    while a < total
+      tb = a * WASSAT_TEL_STRIDE
+      conflicts += spent[a] + tel[tb] - prev[tb]
+      a += 1
   if winner >= 0
     base = winner * (nv + 8)
-    if winner != sls_idx && winner != circuit_idx && winner != keychart_idx && winner != cover_idx && winner != domain_idx && winner != perm_idx && winner != cycle_idx && winner != nae_idx && winner != capacity_idx && conflict_budget == nil
-      conflicts += res[base + nv + 4] - offsets[winner]
     if status == 1
       v = 1
       while v <= nv
@@ -3521,6 +3596,7 @@ WASSAT_AXIS_SLOTS = 10
     "conflict_budget": conflict_budget,
     "pre_index": (winner >= threads && winner < threads + pre.size) ? winner - threads : 0 - 1,
     "circuit_won": circuit_plan != nil && winner == circuit_idx,
+    "comparison_cones_won": cone_plan != nil && winner == cone_idx,
     "wide_circuit_won": wide_won,
     "rectangle_bound_won": circuit_plan != nil && circuit_plan["rectangle_bound"] == true && winner == circuit_idx && !wide_won,
     "roster_bound_won": circuit_plan != nil && circuit_plan["roster_bound"] == true && winner == circuit_idx && !wide_won,

@@ -105,6 +105,37 @@ describe "Original-clique recursive Ramsey refutation" ->
       expect(result["check"][6]).to eq(f["flat_ncl"])
       i += 1
 
+  it "exhausts the neighborhood cases for the triangle versus six-set bound" ->
+    work = i64[12]
+    expect(wassat_ramsey_neighborhood_degrees).to eq(true)
+    expect(wassat_ramsey_neighborhood_refutes(work, 0)).to eq(true)
+    expect(work[10]).to eq(3)
+    expect(work[11]).to eq(72)
+
+  it "derives triangle-free degree bounds and respects feasible boundaries" ->
+    work = i64[13]
+    expect(wassat_ramsey_triangle_bound(4, 9, work, 0)).to eq(9)
+    expect(wassat_ramsey_triangle_bound(7, 23, work, 0)).to eq(0)
+    expect(wassat_ramsey_triangle_bound(7, 25, work, 0)).to eq(24)
+    expect(wassat_ramsey_triangle_bound(7, 25, work, clock_ms() - 1)).to eq(0)
+    expect(work[1]).to eq(1)
+
+  it "finds the four-cycle completion and exhausts its tighter edge cap" ->
+    h = i64[1]
+    cfg = i64[4]
+    cfg[0] = 2
+    cfg[1] = 2
+    cfg[2] = 3
+    stats = i64[1]
+    g = i64[4]
+    wassat_ramsey_link(g, 1, 2)
+    wassat_ramsey_link(g, 1, 3)
+    expect(wassat_ramsey_glue(h, g, 2, 3, cfg, stats, 0)).to eq(0)
+    cfg[2] = 4
+    expect(wassat_ramsey_glue(h, g, 2, 3, cfg, stats, clock_ms() - 1)).to eq(-1)
+    expect(wassat_ramsey_glue(h, g, 2, 3, cfg, stats, 0)).to eq(1)
+    expect(g[0]).to eq(12)
+
   it "rejects a missing clique hidden by a duplicate" ->
     rows = bound_rows(6, 3, 3)
     rows[0] = rows[1]

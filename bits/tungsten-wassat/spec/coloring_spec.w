@@ -65,4 +65,49 @@ describe "Wassat coloring-clique shortcut" ->
     f = wassat_parse_cnf_native(coloring_cnf(false, true))
     expect(wassat_coloring_clique_unsat(f)).to eq(0)
 
+  it "emits a polynomial VeriPB proof with original clause IDs on an embedded clique" ->
+    f = wassat_parse_cnf_native(coloring_cnf(true, false, true))
+    proof = wassat_clique_capacity_proof(f)
+    expect(proof.starts_with?("pseudo-Boolean proof version 3.0\n")).to eq(true)
+    # Three colors, two capacity extensions per color, then the contradiction.
+    expect(proof.split("\npol ").size).to eq(8)
+    id = f["flat_ncl"] + 7
+    expect(proof.ends_with?("conclusion UNSAT : [id] ;\nend pseudo-Boolean proof ;\n")).to eq(true)
+
+  it "declines to certify satisfiable choice rows with incomplete exclusions" ->
+    f = wassat_parse_cnf_native(coloring_cnf(false, true))
+    expect(wassat_clique_capacity_proof(f)).to eq(nil)
+
+-> signed_capacity_fixture(drop)
+  choices = [[-3, 1, 2], [4, -6, 5], [-8, 9, 7], [12, 11, -10]]
+  clauses = []
+  g = 0
+  while g < 4
+    row = choices[g]
+    clauses.push("[row[g%3]] [row[(g+1)%3]] [row[(g+2)%3]] 0")
+    h = 0
+    while h < g
+      j = 0
+      while j < 3
+        unless drop && g == 3 && h == 2 && j == 1
+          clauses.push("[0-row[j]] [0-choices[h][j]] 0")
+        j += 1
+      h += 1
+    g += 1
+  wassat_parse_cnf_native("p cnf 12 [clauses.size]\n"+clauses.join("\n")+"\n")
+
+describe "Signed, permuted clique capacity" ->
+  it "aligns columns from actual exclusions and certifies the original signed choices" ->
+    f = signed_capacity_fixture(false)
+    r = wassat_signed_domain_solve(f, 3, true)
+    expect(r["status"]).to eq(-1)
+    expect(r["witness"]["rows"].size).to eq(4)
+    expect(wassat_clique_capacity_proof(f, r["witness"]).starts_with?("pseudo-Boolean")).to eq(true)
+
+  it "declines a single missing matching entry" ->
+    f = signed_capacity_fixture(true)
+    expect(wassat_signed_domain_solve(f, 3, true)).to eq(nil)
+    s = wassat_signed_domain_solve(f, 3)
+    expect(wassat_model_satisfies?(f, s["model"])).to eq(true)
+
 spec_summary

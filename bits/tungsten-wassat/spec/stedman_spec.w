@@ -100,6 +100,36 @@ describe "Wassat Stedman triples specialist" ->
     expect(result["recognized"]).to eq(false)
     expect(result["status"]).to eq(0)
 
+  it "propagates a typed cycle cover from pinned calls and types" ->
+    text = stedman_fixture_text(false)
+    parts = text.split("\n")
+    body = parts.slice(1, parts.size - 1).join("\n")
+    # Five calls in total (call 3 is already true). Type zero is pinned at
+    # the start, and its three bits must propagate around the whole cycle.
+    hints = ["-1 0", "-2 0", "-4 0", "-5 0", "-6 0", "-7 0", "-8 0"]
+    rows = body.strip + "\n" + hints.join("\n") + "\n"
+    count = rows.strip.split("\n").size
+    formula = wassat_parse_cnf_native("p cnf 48 [count]\n" + rows)
+    result = wassat_stedman_solve(formula)
+    expect(result["status"]).to eq(1)
+    expect(result["cover_rounds"] > 0).to eq(true)
+    expect(wassat_model_satisfies?(formula, result["model"])).to eq(true)
+    # Node 1's first sequence bit must be true on departure from node 0.
+    blocked = wassat_parse_cnf_native("p cnf 48 [count + 1]\n" + rows + "-21 0\n")
+    result = wassat_stedman_solve(blocked)
+    expect(result["status"]).to eq(0)
+    expect(result["model"]).to eq([])
+
+  it "declines a disjoint cycle cover even when every transition is fixed" ->
+    dom = i64[5]; dest = i32[60]; types = i8[60]
+    ends = [1, 0, 3, 4, 2]
+    u = 0
+    while u < 5
+      dom[u] = 1
+      dest[12 * u] = ends[u]
+      u += 1
+    expect(wassat_stedman_cover_propagate(5, dom, dest, types, 8, i8[5], i8[5])).to eq(0)
+
   it "falls through on an unrelated formula" ->
     formula = wassat_parse_cnf_native("p cnf 1 1\n1 0\n")
     result = wassat_stedman_solve(formula)
@@ -114,7 +144,7 @@ describe "Wassat Stedman triples specialist" ->
     output = "/tmp/wassat-stedman-proof-mode.out"
     expect(write_file(input, stedman_fixture_text(false))).to eq(true)
     File.unlink(proof) if File.exist?(proof)
-    cmd = "(" + bin + " " + input + " --proof " + proof
+    cmd = "(env -u TUNGSTEN_WASSAT_PARSE_STUB " + bin + " " + input + " --proof " + proof
     cmd += " > " + output + " 2>&1); test $? -eq 10"
     expect(system(cmd)).to eq(true)
     text = read_file(output)

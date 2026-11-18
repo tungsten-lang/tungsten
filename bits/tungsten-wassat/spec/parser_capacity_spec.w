@@ -13,6 +13,12 @@ use ../lib/cnf
 PADDING = capacity_padding(1400)
 
 describe "Native DIMACS capacity hints" ->
+  it "accepts competition-scale variable headers and rejects headers above the limit" ->
+    f = wassat_parse_cnf_native("p cnf 117295030 0\n")
+    expect(f["nvars"]).to eq(117295030)
+    f = wassat_parse_cnf_native("p cnf 200000000 0\n")
+    expect(f["nvars"]).to eq(200000000)
+    expect(-> () wassat_parse_cnf_native("p cnf 200000001 0\n")).to raise_error
   it "sizes small-file clause tables from a valid declaration" ->
     f = wassat_parse_cnf_native("p cnf 3 2\n" + PADDING + "1 -2 0\n3 0\n")
     expect(f["flat_ncl"]).to eq(2)

@@ -1565,8 +1565,8 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     t += 1
   []
 
-# Size parallel --sat arms safely against BOTH System.physical_memory_bytes and
-# Tungsten's runtime memory ceiling (default 8.0 GiB TUNGSTEN_MEMORY_LIMIT).
+# Size parallel --sat arms conservatively against physical memory and, when
+# configured, Tungsten's runtime memory ceiling.
 -> wassat_windmill_arm_count(nv, ncl, extra_arenas)
   # One arm runs inline on the coordinator, with no thread at all.
   return 1 if wassat_sequential?
@@ -1579,10 +1579,10 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     return wanted if ea >= 1 && ea <= 8
   # Measured RSS per full-CNF solver on 758k clauses / 73k vars is ~220 MiB;
   # budget ~270 MiB at that scale and stay under 58% of TUNGSTEN_MEMORY_LIMIT
-  # (default 8 GiB -> ~4.86 GiB arena ceiling, ~2.4 GiB actual RSS for 8 arms).
+  # (the conservative 8 GiB planning baseline gives a ~4.86 GiB arena ceiling).
   per_solver = ncl * 280 + nv * 340 + 25165824
-  # Default TUNGSTEN_MEMORY_LIMIT is 8 GiB (8,589,934,592 bytes); keep total
-  # resident solver arenas below 58% (~4.86 GiB) so peak RSS stays ~4.0 GiB.
+  # Keep this lane's established planning baseline even when no runtime limit
+  # is configured; it is not a per-process memory ceiling.
   rt_limit = 8589934592
   if env("TUNGSTEN_MEMORY_LIMIT") != nil
     el = env("TUNGSTEN_MEMORY_LIMIT").to_i

@@ -14,6 +14,13 @@ use ../lib/policy
   c
 
 describe "Large raw watch reserve policy" ->
+  it "identifies dense moving-watch databases from their actual long clauses" ->
+    expect(reserve_config(2048, 131072, 0, 0).dense_watch_database?).to eq(true)
+    expect(reserve_config(2049, 131072, 0, 0).dense_watch_database?).to eq(false)
+    expect(reserve_config(3, 131071, 0, 0).dense_watch_database?).to eq(false)
+    expect(reserve_config(3, 200000, 50000, 50000).dense_watch_database?).to eq(false)
+    expect(reserve_config(3, 200000, 0, 0, 100000).dense_watch_database?).to eq(false)
+
   it "counts long clauses rather than every database entry" ->
     expect(reserve_config(500000, 8000000, 4000000, 1000000).watch_extra_percent).to eq(0)
     expect(reserve_config(500000, 8000000, 1000000, 1000000).watch_extra_percent).to eq(25)

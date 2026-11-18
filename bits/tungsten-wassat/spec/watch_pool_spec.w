@@ -2,7 +2,7 @@ use spec
 use ../lib/solver
 
 -> pool_fixture(ncl, extra, nlits = 28, overflows = 0)
-  ar = i64[4 * ncl + 4]
+  ar = i32[4 * ncl + 4]
   cm = i64[2 * ncl]
   alive = i8[ncl]
   entries = 0
@@ -33,7 +33,7 @@ use ../lib/solver
   l > 0 ? 2 * l : 2 * (0 - l) + 1
 
 -> pool_check(result)
-  ar = result["ar"] ## i64[]
+  ar = result["ar"] ## i32[]
   cm = result["cm"] ## i64[]
   alive = result["alive"] ## i8[]
   wd = result["wd"] ## i64[]

@@ -3,11 +3,11 @@ use ../lib/solver
 
 -> hash_rewrite_fixture(clauses, nv, mappings = [], capacity = 1024, limit = 1024, learned = false)
   ncl = clauses.size
-  total = ncl + 1
+  total = 2 * ncl + 1
   clauses.each ->(c) total += c.size
   cm = i64[2 * ncl]
   alive = i8[ncl]
-  ar = i64[total]
+  ar = i32[total]
   clbd = i64[ncl]
   reprs = i64[2 * nv + 4]
   mark = i64[2 * nv + 4]
@@ -15,16 +15,16 @@ use ../lib/solver
   units = i64[ncl + 2]
   st = i64[8]
   ci = 0
-  pos = 1
+  pos = 2
   clauses.each ->(c)
     cm[2 * ci] = pos
     cm[2 * ci + 1] = c.size
     alive[ci] = 1
-    ar[pos - 1] = (ci << 32) | c.size
+    wassat_hdr_put(ar, pos - 2, ci, c.size)
     c.each ->(l)
       ar[pos] = l
       pos += 1
-    pos += 1
+    pos += 2
     ci += 1
   clbd[0] = 5 if learned
   mappings.each ->(pair)

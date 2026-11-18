@@ -8,7 +8,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     ps = i64[3]
     ps[1] = 32
     wassat_bl_add(bd, pool, ps, 3, 2147483647, 5)
-    ar = i64[1]
+    ar = i32[1]
     asg = i8[4]
     lasg = i8[10]
     lvl = i64[4]
@@ -18,7 +18,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     wp = i64[1]
     ws = i64[12]
     tr = i32[4]
-    st = i64[6]
+    st = i64[14]
     tr[0] = 1
     asg[1] = 1
     lasg[2] = 1
@@ -31,8 +31,8 @@ describe "Packed watch words above the boxed small-integer range" ->
     expect(st[2]).to eq(-1)
 
   it "preserves high arena offsets and header ids through long propagation" ->
-    ar = i64[70005]
-    wassat_hdr_put(ar, 70000, 2147483647, 3)
+    ar = i32[70005]
+    wassat_hdr_put(ar, 69999, 2147483647, 3)
     ar[70001] = -1
     ar[70002] = 3
     ar[70003] = 2
@@ -47,7 +47,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     rsn = i32[4]
     phs = i8[4]
     tr = i32[4]
-    st = i64[6]
+    st = i64[14]
     bd = i64[40]
     bp = i64[1]
     tr[0] = 1
@@ -65,7 +65,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     expect(st[2]).to eq(-1)
 
   it "rebuilds long watches without truncating their arena offsets" ->
-    ar = i64[70005]
+    ar = i32[70005]
     ar[70001] = -1
     ar[70002] = 2
     ar[70003] = 3

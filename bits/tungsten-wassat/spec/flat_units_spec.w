@@ -93,7 +93,7 @@ describe "Wassat duplicate input units" ->
     rescue e
       rejected = true
     expect(rejected).to eq(true)
-    arena = i64[16]
+    arena = i32[16]
     lbd = i64[3]
     gids = i64[3]
     unused = i64[1]

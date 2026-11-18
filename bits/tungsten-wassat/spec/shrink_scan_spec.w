@@ -3,7 +3,7 @@ use ../lib/solver
 
 -> shrink_scan_fixture(interleaved, failed, fallback, extra)
   nv = 8 + extra
-  ar = i64[8]
+  ar = i32[8]
   ar[0] = -1
   ar[1] = 2
   ar[2] = -1
@@ -148,7 +148,7 @@ describe "Wassat shrinking level order" ->
 
   it "shrinks many shuffled blocks in ascending level order" ->
     nv = 61
-    ar = i64[80]
+    ar = i32[80]
     cm = i64[80]
     asg = i8[nv + 3]
     lvl = i64[nv + 3]
@@ -229,7 +229,7 @@ describe "Wassat shrinking level order" ->
 
   it "preserves a long singleton clause and clears all level counters" ->
     nv = 64
-    ar = i64[1]
+    ar = i32[1]
     asg = i8[nv + 3]
     lvl = i64[nv + 3]
     rsn = i32[nv + 3]

@@ -672,6 +672,16 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     nlong = @nclauses - @units - @binary - @empty_clause_count
     wassat_watch_reserve_percent(@nvars, @nclauses, nlong)
 
+  # Large per-literal lists relocate in large chunks. Give these databases
+  # the regular table-growth watch capacity at intake, so a few moves do not
+  # repeatedly force a count/fill pass over every clause. Count only clauses
+  # that use moving watches; binaries have a separate implication pool.
+  -> dense_watch_database?
+    # An explicit reserve percentage replaces automatic sizing for A/B runs.
+    return false if env("WASSAT_WATCH_EXTRA") != nil
+    nlong = @nclauses - @units - @binary - @empty_clause_count
+    nlong >= 131072 && nlong >= 64 * @nvars
+
   -> raw_heuristics?
     # This is the historical raw-kernel classifier used by preprocessing
     # technique gates. Trusted routing is deliberately a separate question

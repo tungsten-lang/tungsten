@@ -71,11 +71,11 @@ describe "Watch-block prefix recycling" ->
       i += 1
 
   it "reclaims the destination block inside propagation without retrying" ->
-    ar = i64[5]
+    ar = i32[5]
     wassat_hdr_put(ar, 0, 0, 3)
-    ar[1] = -1
-    ar[2] = -2
-    ar[3] = 3
+    ar[2] = -1
+    ar[3] = -2
+    ar[4] = 3
     wd = i64[40]
     wp = i64[16]
     ws = i64[12]
@@ -84,7 +84,7 @@ describe "Watch-block prefix recycling" ->
     while i < 8
       wassat_ws_add(wd, wp, ws, 6, 70001 + i, 2)
       i += 1
-    wassat_ws_add(wd, wp, ws, 3, 1, -2)
+    wassat_ws_add(wd, wp, ws, 3, 2, -2)
     wd[24] = wd[24] + 4
     wd[25] = wd[25] - 4
     wd[26] = wd[26] - 4
@@ -94,7 +94,7 @@ describe "Watch-block prefix recycling" ->
     rsn = i32[4]
     phs = i8[4]
     tr = i32[4]
-    st = i64[6]
+    st = i64[14]
     bd = i64[40]
     bp = i64[1]
     asg[1] = 1
@@ -113,9 +113,9 @@ describe "Watch-block prefix recycling" ->
     expect(ws[8]).to eq(1)
     expect(wd[25]).to eq(5)
     expect(wd[13]).to eq(0)
-    expect(ar[2]).to eq(3)
+    expect(ar[3]).to eq(3)
     word = wp[wd[24] + 4] ## i64
-    expect(word >> 32).to eq(1)
+    expect(word >> 32).to eq(2)
     expect(word & 4294967295).to eq(5)
 
 spec_summary

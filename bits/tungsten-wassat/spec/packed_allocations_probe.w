@@ -1,7 +1,7 @@
 # Native allocation regression, driven by packed_allocations_test.py.
 use ../lib/wassat
 
-ar = i64[70005]
+ar = i32[70005]
 cm = i64[2]
 alive = i8[1]
 wd = i64[40]
@@ -20,7 +20,7 @@ ws[1] = 32
 bs[1] = 32
 i = 0
 while i < 100000
-  wassat_hdr_put(ar, 70000, 70000, 3)
+  wassat_hdr_put(ar, 69999, 70000, 3)
   wd[13] = 0
   wassat_ws_add(wd, wp, ws, 3, 70001, 2)
   bd[13] = 0

@@ -17,7 +17,7 @@ use ../lib/solver
       dst = ci == oldn-1 ? count-1 : ci * (count / oldn)
       @cmeta[2*dst] = oldcm[2*ci]; @cmeta[2*dst+1] = oldcm[2*ci+1]
       @alive[dst] = oldal[ci]; @clbd[dst] = oldlb[ci]; @cused[dst] = oldcu[ci]
-      wassat_hdr_put(@arena, oldcm[2*ci]-1, dst, oldcm[2*ci+1])
+      wassat_hdr_put(@arena, oldcm[2*ci]-2, dst, oldcm[2*ci+1])
       v = 1
       while v <= @nvars
         # Re-encode only reasons still naming the original compact index.
@@ -93,10 +93,17 @@ describe "Growing clause table recycling" ->
     expect(s.ncl).to eq(before)
     expect(s.rhist[75]).to eq(0)
 
-  it "never recycles proof-mode clause indices" ->
-    s = growing_recycle_fixture(65536, true, false, WASSAT_PROOF_DRAT)
+  it "never recycles WRAT clause indices" ->
+    s = growing_recycle_fixture(65536, true, false, WASSAT_PROOF_WRAT)
     s.reduce_db
     expect(s.ncl).to eq(65536)
     expect(s.rhist[75]).to eq(0)
+
+  it "allows DRAT recycling after emitting deletions by literal" ->
+    s = growing_recycle_fixture(65536, true, false, WASSAT_PROOF_DRAT)
+    s.reduce_db
+    expect(s.ncl).to eq(6)
+    expect(s.rhist[75]).to eq(1)
+    expect(s.solve["status"]).to eq(1)
 
 spec_summary

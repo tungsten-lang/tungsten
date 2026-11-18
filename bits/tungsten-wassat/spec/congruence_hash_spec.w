@@ -7,7 +7,7 @@ use ../lib/solver
   clauses.each ->(c) nl += c.size
   cm = i64[2 * nc]
   alive = i8[nc]
-  ar = i64[nl]
+  ar = i32[nl]
   p = 0
   ci = 0
   while ci < nc

@@ -3,6 +3,52 @@
 Use a frozen `--release` binary and record its source and compiler hashes.
 For table-free runs, set `WASSAT_BACKDOOR_TABLES=0`.
 
+For engine-only comparisons, build `prop_bench.w` with `--release` and use
+`engine_pairs.py`. Its JSON manifest contains records such as
+`{"name":"dense", "path":"/path/input.cnf", "conflicts":20000, "mode":"raw"}`.
+It alternates binaries within each repetition, strips ambient `WASSAT_*`
+settings, retains every run, and records binary/input hashes. `same_search`
+requires identical verdict and search counters across both binaries and all
+repetitions; a false value means timing includes a trajectory change.
+Optional `seconds` and `ticks` fields set the benchmark's search limits
+(`ticks` is in millions). The harness's `--timeout` bounds the entire child,
+including parsing and loading; a timeout is saved before the harness fails.
+Check each version's statuses and `all_solved`: a time ratio between a
+completed solve and a capped UNKNOWN run is not a speed comparison.
+
+```sh
+python3 bits/tungsten-wassat/benchmarks/engine_pairs.py /tmp/corpus.json \
+  --baseline /tmp/prop-before --candidate /tmp/prop-after \
+  --reps 5 --out /tmp/engine-pairs.json
+```
+
+To isolate automatic dense-watch sizing in one binary, use that binary for
+both arguments and add `--baseline-env WASSAT_WATCH_EXTRA=0`. This restores
+the prior watch capacity on ordinary small/medium raw solvers; the Kissat
+profile already reserves the larger pool. An explicit `WASSAT_WATCH_EXTRA`
+percentage replaces automatic dense sizing. These are diagnostic controls,
+not additional public solver modes. Run correctness/model/proof checks
+separately: a fixed-budget timing run is not a proof of an UNSAT verdict.
+
+`prop_bench.w` also accepts `WASSAT_BENCH_SAVED_POS=0/1` to isolate saved
+clause-scan positions, independently of the other Kissat-profile settings.
+Pass it through `--baseline-env` / `--candidate-env` with the same binary.
+This is a benchmark fixture intervention only. It changes watch selection
+and can dramatically change time to a verdict even when individual scans
+get cheaper, so include fresh complete-solve cases as well as bounded runs.
+
+For certificate formatting, `proof_bench.w` runs one raw solver and includes
+sink flushes in `solve_us`. Its arguments are `input.cnf conflicts
+wrat|dual|drat output-prefix [native|text]`. Build with `--release`, alternate
+`native` and `text` runs of the same binary, and compare both search counters
+and proof-file hashes. `text` restores the former WRAT formatting path in the
+benchmark fixture; DRAT-only retains byte formatting in both modes as a
+control. Parsing, loading, buffer allocation, and SAT model checking are
+outside the timed interval. SAT models are checked against the original CNF.
+The benchmark intentionally keeps partial SAT/UNKNOWN streams for comparison;
+only independently checked, completed UNSAT streams are certificates. Use
+the production CLI for normal proof publication and cleanup.
+
 Build diagnostics:
 
 ```sh
@@ -103,9 +149,17 @@ mark table. The table holds only marks 0 through 4 and uses one byte per
 variable across minimization, shrinking, assumption cores, and proof hints.
 `analysis reason_bytes` reports the signed 32-bit reason array payload,
 including the unused variable-zero slot. Clause indices already occupy a
-signed high word in packed headers and binary entries; insertion and flat
-loading reject indices outside that range. The -1 sentinel remains signed,
-and global proof IDs retain their 64-bit storage.
+signed i32 cell in compact headers and a signed high word in packed binary
+entries; insertion and flat loading reject indices outside that range. The -1
+sentinel remains signed, and global proof IDs retain their 64-bit storage.
+
+`analysis arena_used` and `arena_capacity` use logical cells: n literals plus
+one header per record, preserving the learning/compaction budget from the
+previous i64 representation. `arena_cells` is the physical i32 cursor: n
+literals plus two header cells per record. Allocated backing has
+`arena_capacity + clause_capacity` i32 cells, so changing clause-table capacity
+also reserves header space. Compaction copied-cell counters count physical
+cells, not bytes; use the element width when comparing representations.
 
 `phases payload_bytes` sums the saved, target, and best phase tables plus
 allocated probing and vivification phase backups. These polarity buffers use

@@ -2,23 +2,23 @@ use spec
 use ../lib/solver
 
 -> counter_propagation(pool_cap)
-  ar = i64[5]
+  ar = i32[5]
   wassat_hdr_put(ar, 0, 0, 3)
-  ar[1] = -1
-  ar[2] = 2
-  ar[3] = 3
+  ar[2] = -1
+  ar[3] = 2
+  ar[4] = 3
   wd = i64[40]
   wp = i64[pool_cap]
   ws = i64[12]
   ws[1] = pool_cap
-  wassat_ws_add(wd, wp, ws, 3, 1, 2)
+  wassat_ws_add(wd, wp, ws, 3, 2, 2)
   asg = i8[4]
   lasg = i8[10]
   lvl = i64[4]
   rsn = i32[4]
   phs = i8[4]
   tr = i32[4]
-  st = i64[6]
+  st = i64[14]
   bd = i64[40]
   bp = i64[1]
   asg[1] = 1
@@ -34,11 +34,11 @@ use ../lib/solver
 
 describe "Wassat cumulative performance counters" ->
   it "executes repeated writes and appends with the same mutable arguments" ->
-    ar = i64[4]
+    ar = i32[4]
     wassat_hdr_put(ar, 0, 2, 3)
     ar[0] = 0
     wassat_hdr_put(ar, 0, 2, 3)
-    expect(ar[0]).to eq(8589934595)
+    expect([ar[0], ar[1]]).to eq([2, 3])
     bd = i64[40]
     bp = i64[16]
     bs = i64[3]
@@ -89,7 +89,7 @@ describe "Wassat cumulative performance counters" ->
     expect(r["st"][3]).to eq(1)
 
   it "accumulates repack work across rebuilds and preserves relocation totals" ->
-    ar = i64[5]
+    ar = i32[5]
     ar[1] = 1
     ar[2] = 2
     ar[3] = 3

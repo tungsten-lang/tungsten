@@ -1,7 +1,7 @@
 use spec
 use ../lib/solver
 
--> shrink_scan_fixture(interleaved, failed, fallback, extra)
+-> shrink_scan_fixture(interleaved, failed, fallback, extra, seeded = false)
   nv = 8 + extra
   ar = i32[8]
   ar[0] = -1
@@ -89,6 +89,8 @@ use ../lib/solver
       out[st[0]] = -v
       st[0] = st[0] + 1
       v += 1
+  uip_level = lvl[out[0].abs]
+  wassat_lbd_buf(out, lvl, cnt, st[0], 37) if seeded
   wassat_shrink(ar, asg, lvl, rsn, sn, cm, tr, tlim, out, tmp, stk,
                  dstk, tclr, cnt, st, nv)
   result = []
@@ -99,9 +101,11 @@ use ../lib/solver
   clean = true
   i = 0
   while i < nv + 3
-    clean = false if sn[i] != 0 || cnt[i] != 0
+    expected = seeded && i == uip_level ? 37 : 0
+    clean = false if sn[i] != 0 || cnt[i] != expected
     i += 1
-  { "clause": result, "clean": clean, "target": st[5],
+  glue = wassat_lbd_buf(out, lvl, cnt, st[0], 38)
+  { "lbd": glue, "clause": result, "clean": clean, "target": st[5],
     "attempts": st[3], "shrunk": st[4] }
 
 describe "Wassat shrinking scan and compaction" ->
@@ -110,6 +114,13 @@ describe "Wassat shrinking scan and compaction" ->
     expect(r["clause"]).to eq([-6, -4, -5, -1])
     expect(r["target"]).to eq(3)
     expect(r["clean"]).to eq(true)
+
+  it "shrinks a clause between two LBD scans of the same levels" ->
+    r = shrink_scan_fixture(false, false, false, 0, true)
+    expect(r["clause"]).to eq([-6, -4, -5, -1])
+    expect(r["target"]).to eq(3)
+    expect(r["clean"]).to eq(true)
+    expect(r["lbd"]).to eq(4)
 
   it "skips both unmarked and marked foreign-level trail entries" ->
     r = shrink_scan_fixture(true, false, false, 0)

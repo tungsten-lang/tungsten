@@ -107,8 +107,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @rst_den = 4 if @rst_den < 1
     @chrono_t = 50
     @otfs_allowed = @proof_mode == WASSAT_PROOF_NONE && nv < 10000000 && env("WASSAT_OTFS") != "0"
-    @kbuf = i64[nv + 2] # backjump keep-buffer for out-of-order levels
-    wassat_query_keep(query_owner, @kbuf, @kbuf.size * 8) if query_owner != nil
     @bstate = i64[4] # dlevel / tsize / qhead / cumulative unassignments
     wassat_query_keep(query_owner, @bstate, @bstate.size * 8) if query_owner != nil
     @pwork = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 4] : i64[1]
@@ -152,7 +150,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_query_keep(query_owner, @obuf, @obuf.size * 8) if query_owner != nil
     @mbuf = i64[nv + 3] # minimisation scratch
     wassat_query_keep(query_owner, @mbuf, @mbuf.size * 8) if query_owner != nil
-    @mstk = i64[nv + 3] # recursive-minimisation DFS stack
+    # Backjumping reuses the analysis stack for retained trail literals.
+    # Each operation fills its own entries before reading them.
+    @mstk = i64[nv + 3]
     wassat_query_keep(query_owner, @mstk, @mstk.size * 8) if query_owner != nil
     @mclr = i64[nv + 3] # marks to clear after minimisation
     wassat_query_keep(query_owner, @mclr, @mclr.size * 8) if query_owner != nil
@@ -166,7 +166,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @otfs_units = 0
     @otfs_conflicts = 0
     @pending_conflict = -1
-    @lbd_seen = i64[nv + 2] # scratch for literal-block-distance
+    @lbd_seen = i64[nv + 2] # LBD stamps and temporary per-level shrink counts
     wassat_query_keep(query_owner, @lbd_seen, @lbd_seen.size * 8) if query_owner != nil
     @lbd_stamp = 0
     @trail = i32[nv + 2]
@@ -645,14 +645,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       self.add_input_clause(c)
 
     # All-UIP shrink state (appended last: ctor blocks accrete at the end).
-    # @shcnt counts clause literals per decision LEVEL during a shrink call
-    # (all-zero between calls; typed arrays start zeroed); @shst carries
-    # scalars/stats across the native boundary: [0] size in/out  [1] body
-    # literals examined  [2] literals removed  [3] block attempts
+    # @shst carries scalars/stats across the native boundary: [0] size in/out
+    # [1] body literals examined  [2] literals removed  [3] block attempts
     # [4] blocks shrunk  [5] backjump target out  [6] probe clear-list size
     # [7] distinct decision levels collected.
-    @shcnt = i64[nv + 3]
-    wassat_query_keep(query_owner, @shcnt, @shcnt.size * 8) if query_owner != nil
     @shst = i64[8]
     wassat_query_keep(query_owner, @shst, @shst.size * 8) if query_owner != nil
     @use_shrink = @config.use_shrinking
@@ -1088,7 +1084,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @bstate[1] = @tsize
     wassat_backjump(@trail, @trail_lim, @assign, @lassign, @level, @reason, @heap,
                     @heappos, @activity, @hstate, @vq_stamp, @vq_state,
-                    @kbuf, @bstate, target, @use_chrono ? 1 : 0)
+                    @mstk, @bstate, target, @use_chrono ? 1 : 0)
     @dlevel = @bstate[0]
     @tsize = @bstate[1]
     @qhead = @bstate[2]
@@ -1192,7 +1188,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @shst[0] = n
     z = wassat_shrink(@arena, @assign, @level, @reason, @seen, @cmeta,
                       @trail, @trail_lim, @lbuf, @mbuf, @mstk, @obuf, @mclr,
-                      @shcnt, @shst, @nvars)
+                      @lbd_seen, @shst, @nvars)
     @lsize = @shst[0]
     @shst[5]
 
@@ -1310,7 +1306,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     choice = wassat_rollout_branch(
       @arena, @assign, @lassign, @level, @reason, @phase, @wsdir, @wpool, @wp_state,
       @trail, @trail_lim, @pstate, @bldir, @bl_pool, @heap, @heappos, @activity,
-      @hstate, @vq_stamp, @vq_state, @kbuf, @bstate, @cmeta, @alive,
+      @hstate, @vq_stamp, @vq_state, @mstk, @bstate, @cmeta, @alive,
       @dlevel, @nvars, @ncl, @lookahead
     )
     return self.pick_branch_activity if choice == 0
@@ -5236,7 +5232,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # to count them without allocating, then clear every borrowed mark.
   -> prepare_assumption_levels(assumptions)
     upper = @nvars + assumptions.size
-    return 0 if upper < @trail_lim.size && upper < @lbd_seen.size && upper < @shcnt.size
+    return 0 if upper < @trail_lim.size && upper < @lbd_seen.size
     distinct = 0
     i = 0
     while i < assumptions.size
@@ -5251,7 +5247,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @seen[@mclr[i]] = 0
       i += 1
     highest = upper - distinct
-    return 0 if highest < @trail_lim.size && highest < @lbd_seen.size && highest < @shcnt.size
+    return 0 if highest < @trail_lim.size && highest < @lbd_seen.size
     raise "assumption decision levels exceed fixed solver capacity" if @fixed_caps
     cap = highest + 2
     if highest >= @trail_lim.size
@@ -5260,9 +5256,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if highest >= @lbd_seen.size
       @lbd_seen = i64[cap]
       wassat_query_keep(@query_owner, @lbd_seen, @lbd_seen.size * 8) if @query_owner != nil
-    if highest >= @shcnt.size
-      @shcnt = i64[cap]
-      wassat_query_keep(@query_owner, @shcnt, @shcnt.size * 8) if @query_owner != nil
     0
 
   -> solve_assuming_budget(assumptions, max_conflicts)
@@ -8678,9 +8671,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # blocks; on random 3-SAT nearly every block is a singleton and the
 # pass no-ops in one walk over the clause.
 #
-# Scratch: `tmp` holds the working clause body; `cnt` is a per-LEVEL
-# literal count (all-zero between calls — restored via the level list
-# before returning); `stk` carries all distinct levels at its TOP end,
+# Scratch: `tmp` holds the working clause body. The LBD table `cnt`
+# holds negative literal counts for levels touched by this call.
+# `stk` carries all distinct levels at its TOP end,
 # with multi-literal levels in a sorted prefix of that occupied range,
 # and the per-attempt pulled-variable list at its bottom
 # (distinct other-level entries and pulled variables are disjoint and
@@ -8711,8 +8704,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       tgt = lvl[v]
     st[5] = tgt
     return n
-  # Mark the body, count literals per level, and collect distinct levels
-  # at the top of stk. All levels remain here for counter cleanup.
+  # The level table holds zero or a positive LBD stamp on entry. A negative
+  # entry is the number of body literals seen at that level, negated. Record
+  # each touched level once so it can be cleared before the next LBD scan.
   nlev = 0
   m = 0
   i = 1
@@ -8721,10 +8715,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     v = q
     v = 0 - q if q < 0
     lq = lvl[v]
-    if cnt[lq] == 0
+    count = cnt[lq] ## i64
+    if count >= 0
       stk[nv + 2 - nlev] = lq
       nlev += 1
-    cnt[lq] = cnt[lq] + 1
+      count = 0
+    cnt[lq] = count - 1
     sn[v] = 1
     tmp[m] = q
     m += 1
@@ -8739,7 +8735,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     j = 0
     while j < nlev
       lq = stk[base + j]
-      if cnt[lq] >= 2
+      if cnt[lq] <= -2
         stk[base + j] = stk[base + blocks]
         stk[base + blocks] = lq
         blocks += 1
@@ -8754,9 +8750,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   k = nlev - 1
   while k >= nlev - blocks
     bl = stk[nv + 2 - k]
-    if cnt[bl] >= 2
+    if cnt[bl] <= -2
       st[3] = st[3] + 1
-      opn = cnt[bl]
+      opn = 0 - cnt[bl]
       flr = tlim[bl - 1] ## i64
       ti = tlim[bl] - 1 ## i64
       np = 0
@@ -8859,7 +8855,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         tmp[m] = 0 - uip
         m += 1
         sn[w] = 1
-        cnt[bl] = 1
+        cnt[bl] = -1
         st[4] = st[4] + 1
       else
         # failed block: clear its pulled marks, then re-mark the level's

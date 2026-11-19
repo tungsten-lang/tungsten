@@ -2,7 +2,7 @@ use spec
 use ../lib/solver
 
 + AssumptionLevelFixture < Wassat
-  ro :trail_lim, :lbd_seen, :shcnt, :max_query_level
+  ro :trail_lim, :lbd_seen, :max_query_level
 
   -> force_negative_decisions(vars)
     @lookahead = 0
@@ -26,7 +26,7 @@ use ../lib/solver
     i = 0
     while i < n
       lv = @level[@lbuf[i].abs]
-      raise "shrink level outside scratch" if lv >= @shcnt.size || lv >= @trail_lim.size
+      raise "shrink level outside scratch" if lv >= @lbd_seen.size || lv >= @trail_lim.size
       i += 1
     super(n)
 

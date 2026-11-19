@@ -4,6 +4,9 @@
 `~/math/detour/`. **Verdict:** mostly negative, with exactly one open
 transposition worth costing (§4).
 
+A November 2026 follow-up measured a separate DETOUR idea for repeated assumption
+queries. [Small-region implication summaries and benchmarks](assumption-regions.md).
+
 This closes the DETOUR half of the "what about DETOUR / metaflip ideas?"
 question. The metaflip half was answered earlier and was a measured null.
 

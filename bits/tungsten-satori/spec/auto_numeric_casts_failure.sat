@@ -1,0 +1,16 @@
++ strict (n : ℕ) : 0 < (n : ℝ) := by auto
++ reversed (n : ℕ) : (n : ℚ) ≤ 0 := by auto
++ unguarded (z : ℤ) : 0 ≤ (z : ℝ) := by auto
++ wrong_guard (q r : ℚ) (h : 0 ≤ r) : 0 ≤ (q : ℝ) := by auto
++ truncated (m n : ℕ) : ((m - n : ℕ) : ℝ) = (m : ℝ) - (n : ℝ) := by auto
++ strict_cast (m n : ℕ) (h : m ≤ n) : (m : ℝ) < (n : ℝ) := by auto
++ backward (m n : ℤ) (h : (m : ℚ) < (n : ℚ)) : n ≤ m := by auto
++ wrong_term (f : ℕ → ℚ) (i j : ℕ) (h : f i ≤ 2) : (f j : ℝ) ≤ 2 := by auto
++ rounded (q : ℚ) (h : q < 1 / 2) : (q : ℝ) ≤ 0 := by auto
++ fractional_gap (p q : ℚ) (h : p < q) : (p : ℝ) + 1 ≤ (q : ℝ) := by auto
++ truncated_div (m : ℕ) : ((m / 2 : ℕ) : ℝ) = (m : ℝ) / 2 := by auto
++ floor_inj (p q : ℚ) (h : floor p = floor q) : (p : ℝ) = (q : ℝ) := by auto
++ consistent (n : ℕ) (h : n ≤ 3) (k : 2 ≤ (n : ℝ)) : False := by auto
++ can_equal (m n : ℕ) (h : m ≤ n) (k : (n : ℝ) ≤ (m : ℝ)) : m ≠ n := by auto
++ unsupplied (z : ℤ) : (sample_value z : ℝ) < 10 := by auto
++ wrong_hint (x y : ℤ) : (sample_value y : ℝ) ≤ 9 := by linarith [sample_bound x]

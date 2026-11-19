@@ -1,0 +1,9 @@
+import core
+
++ nat_mul_power (n : ℕ) (t : ℝ) :
+    (n : ℝ) * t ^ (n - 1) * t = (n : ℝ) * t ^ n
+  auto
+
++ power_backward_weight (r : ℝ) (j l : ℕ) (hl : l < j) :
+    r ^ (j - l) = r * r ^ (j - (l + 1))
+  auto

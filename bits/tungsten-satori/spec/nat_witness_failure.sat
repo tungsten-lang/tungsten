@@ -31,3 +31,9 @@
 
 + nondecreasing_property (P : ℕ → Prop) (step : ∀ n, P n → ∃ m, m ≤ n ∧ P m) (n : ℕ) : ¬ P n
   exact nat.infinite_descent P step n
+
++ initial_too_large (f : ℕ → ℕ) (n : ℕ) (h : f 0 ≤ n + 1) : ∃ k ≤ n, f k ≤ f (k + 1)
+  auto [nat.exists_nondecreasing_step]
+
++ can_grow (f : ℕ → ℕ) (n : ℕ) (h : f 0 ≤ n) : ∃ k ≤ n, f k = f (k + 1)
+  auto [nat.exists_nondecreasing_step]

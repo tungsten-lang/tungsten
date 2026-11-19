@@ -1,0 +1,17 @@
+opaque f : ℕ → ℚ
+opaque g : ℕ → ℚ
+axiom gap (i : ℕ) : f i < g i
+axiom guarded_gap (i : ℕ) : 2 < i → f i < g i
+
++ negative_slope (a b : ℝ) (h : a < b) : ∃ x, a ≤ 2 - 5*x ∧ 2 - 5*x < b := by auto
++ touching (a b : ℚ) (h : a ≤ b) : ∃ x, a ≤ 3*x ∧ 3*x ≤ b := by auto
++ separated (a b : ℚ) (h : a ≤ b) (ne : a ≠ b) : ∃ x, a < 3*x ∧ 3*x < b := by auto
++ negated_bound (a b : ℝ) (h : ¬ b ≤ a) : ∃ x, a < 3*x ∧ 3*x < b := by auto
++ fixed_value (a : ℝ) : ∃ x, 3*x + 1 = a := by auto
++ only_lower (a b : ℚ) : ∃ x, a < x ∧ b < x := by auto
++ only_upper (a b : ℝ) : ∃ x, x < a ∧ x < b := by auto
++ cancelled (a b : ℚ) (h : a < b) : ∃ x, a < x ∧ x < b ∧ x + a < x + b := by auto
++ intersection (a b c d : ℚ) (hac : a < c) (had : a < d) (hbc : b < c) (hbd : b < d) :
+    ∃ x, a < x ∧ b ≤ x ∧ x ≤ c ∧ x < d := by auto
++ hinted (i : ℕ) : ∃ x, f i < 3*x ∧ 3*x < g i := by auto [gap]
++ guarded (i : ℕ) (h : 3 < i) : ∃ x, f i < 3*x ∧ 3*x < g i := by auto [guarded_gap]

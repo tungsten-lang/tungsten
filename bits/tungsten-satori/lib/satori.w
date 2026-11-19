@@ -22,6 +22,7 @@ use pattern
 use session
 
 SATORI_VERSION = "0.1.0"
+SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 6"
 
 -> satori_usage
   << "Satori [SATORI_VERSION] — a concise proof language with a small kernel"
@@ -92,7 +93,7 @@ SATORI_VERSION = "0.1.0"
     << "error: no input files"
     return 1
   if only == 0
-    << "⋯ satori split protocol 3"
+    << SATORI_SPLIT_PROTOCOL
   root = Env.get("SATORI_ROOT")
   if root == nil || root == ""
     root = Dir.pwd
@@ -183,18 +184,18 @@ SATORI_VERSION = "0.1.0"
   memo[name] = out
   out
 
--> split_bound_note(line, own, deps, memo, failed)
+-> split_partial_note(line, own, deps, memo, failed)
   st = split_tags(line)
   parts = st[0].split("\t")
-  if parts.size != 3 || st[2].size == 0
+  if parts.size < 2 || parts.size > 4 || st[2].size == 0
     return nil
   st[2].each -> (id)
-    if !own.has_key?(id)
+    if failed.has_key?(id) || !own.has_key?(id)
       return nil
     tags = split_resolve(id, own, deps, memo, failed, [])
     if tags.any?(-> (tag) tag == "sorry" || tag.starts_with?("uses-failed:"))
       return nil
-  strict_bound_note(parts[1], parts[2])
+  partial_proof_note(parts[1], parts.size >= 3 ? parts[2] : nil, parts.size == 4 ? parts[3] : nil)
 
 -> split_check(root, f, jobs, no_cache = false)
   t0 = ccall("__w_clock")
@@ -221,16 +222,19 @@ SATORI_VERSION = "0.1.0"
       p = Process.spawn(["/bin/sh", "-c", "SATORI_ROOT=\"$3\" \"$0\" --only 0 \"$1\" > \"$2\" 2>&1", bin, f, dir + "/out.0", root])
       p.wait
     skel = split_lines(dir + "/out.0")
-    if !skel.include?("⋯ satori split protocol 3")
+    if !skel.include?(SATORI_SPLIT_PROTOCOL)
       << "✗ " + f + ": split worker is incompatible or failed to start; use a matching Satori binary (SATORI_BIN)"
       return 1
     names = []
     indices = []
+    registrations = []
     skel.each -> (l)
       if l.starts_with?("⋯ split ")
         parts = l.split("⋯ split ")[1].split(" ")
         indices.push(parts[0])
         names.push(parts[1])
+        if parts.size == 3 && parts[2] == "auto"
+          registrations.push([parts[0], parts[1]])
     if names.size > 0
       File.write(dir + "/indices", indices.join("\n") + "\n")
       # Fast-exit loop checks child completion every 10 ms for the first 50 ms before entering 250 ms RSS watchdog.
@@ -268,6 +272,15 @@ SATORI_VERSION = "0.1.0"
       blocks[id] = b
       k += 1
     memo = {}
+    # A worker sees placeholders for earlier declarations. Check registrations
+    # in source order once their complete dependency tags are available.
+    registrations.each -> (entry)
+      id = entry[0]
+      if !failed.has_key?(id)
+        error = auto_registration_error(split_resolve(id, own, deps, memo, failed, []))
+        if error != nil
+          failed[id] = entry[1]
+          blocks[id] = ["✗ theorem " + entry[1] + ": " + error]
     skel.each -> (l)
       if l.starts_with?("⋯ split ")
         id = l.split("⋯ split ")[1].split(" ")[0]
@@ -275,8 +288,8 @@ SATORI_VERSION = "0.1.0"
         if failed.has_key?(id)
           nfail += 1
           b.each -> (x)
-            if x.starts_with?("⋯ strict-bound\t")
-              note = split_bound_note(x, own, deps, memo, failed)
+            if x.starts_with?("⋯ partial-proof\t")
+              note = split_partial_note(x, own, deps, memo, failed)
               if note != nil
                 << note
             else
@@ -307,7 +320,7 @@ SATORI_VERSION = "0.1.0"
           << nm + " depends on: " + tags.join(", ")
       elsif l.starts_with?("── ")
         0
-      elsif l == "⋯ satori split protocol 3"
+      elsif l == SATORI_SPLIT_PROTOCOL
         0
       else
         if l.starts_with?("✗")

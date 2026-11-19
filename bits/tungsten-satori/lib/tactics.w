@@ -79,22 +79,22 @@
         thms.push(c.thm)
       @parent.solve(@just.call(thms))
 
--> strict_bound_note(bound, missing)
-  "  proved " + bound + "\n  need " + missing
+-> partial_proof_note(proved, missing, witness = nil)
+  note = "  proved " + proved
+  if missing != nil
+    note += "\n  need " + missing
+  witness == nil ? note : "  witness " + witness + "\n" + note
 
 + Prover
   ro :k, :d, :session
-  rw :goals, :auto_defaults, :sum_aliases_allowed, :registered_search, :auto_rule_path
+  rw :goals, :sum_aliases_allowed, :registered_search, :auto_rule_path
 
   -> new(@session)
     @k = @session.k
     @d = @session.d
     @goals = []
-    @auto_defaults = nil
     @auto_rule_path = []
     @registered_search = false
-    @registered_index = nil
-    @registered_version = -1
     @sum_aliases_allowed = true
     @sum_alias_rules = {}
     @fold_alias_rules = {}
@@ -470,8 +470,16 @@
         tac_auto(g, 3, hints, [24, 4], [])
       rescue e
         if e.to_s == "auto failed" && @goals.size > 0
-          note = strict_bound_feedback(first_goal.goal, hints)
-          if note != nil
+          goal = first_goal.goal
+          note = strict_bound_feedback(goal, hints)
+          if note == nil
+            begin
+              note = witness_feedback(goal, hints)
+              if note == nil
+                note = hint_feedback(goal, hints)
+            rescue diagnostic_error
+              note = nil
+          if note
             fail("auto failed\n" + note)
         raise e
     when "specialize"
@@ -2071,7 +2079,7 @@
       sub = Prover.new(@session)
       root = GoalRef.new(goal.with_concl(c), nil, 0)
       sub.goals = [root]
-      sub.tac_linarith(root, [])
+      sub.tac_linarith(root, [], false)
       return root.thm
     rescue e
       return nil
@@ -2240,9 +2248,8 @@
     close(g, fit(g, result))
 
   # Linear arithmetic over hypotheses and the negated goal.
-  -> tac_linarith(g, args)
+  -> tac_linarith(g, args, with_casts = true)
     goal = g.goal
-    c = goal.concl
     extra = []
     if args.size > 0
       inner = args
@@ -2251,7 +2258,101 @@
       split_top(inner, ",").each -> (p)
         if p.size > 0
           extra.push(proof_expr(goal, p))
-    close(g, linarith_proof(goal, extra))
+    begin
+      proof = linarith_proof(goal, extra)
+    rescue e
+      if !with_casts
+        raise e
+      proof = cast_arithmetic_proof(goal, extra)
+      if proof == nil
+        raise e
+    close(g, proof)
+
+  # Put comparisons in a common domain already present in the problem.
+  # Every transport is a checked equivalence. In particular a natural
+  # subtraction remains inside its cast and a rational need never be rounded.
+  -> cast_arithmetic_proof(goal, extra)
+    if !goal.concl.has_widening_cast? && !goal.hyps.any?(-> (h) h[1].has_widening_cast?)
+      if !extra.any?(-> (th) th.concl.has_widening_cast?)
+        return nil
+    negated = dest_unop(goal.concl, "¬")
+    if negated != nil
+      refutation = cast_arithmetic_proof(goal.with_concl(@k.false_tm), extra + [@k.assume(negated)])
+      return refutation == nil ? nil : @k.not_intro(negated, refutation)
+    target = dest_cmp_rel(goal.concl)
+    if goal.concl.op != OP_FALSE && (target == nil || !numeric_type?(type_of(target[1])))
+      return nil
+    facts = []
+    goal.hyps.each -> (h) normalize_comparisons(@k.assume(h[1]), facts, true)
+    extra.each -> (th) normalize_comparisons(th, facts, true)
+    domain = target == nil ? TY_NAT_SINGLETON : type_of(target[1])
+    facts.each -> (th)
+      cmp = th.concl.a.op == OP_NOT ? th.concl.b : th.concl
+      ty = type_of(cmp.a.b)
+      if th.concl.has_widening_cast? && @session.elab.coercion(domain, ty) != nil
+        domain = ty
+    # Reuse just the cast homomorphisms. Simplifying the comparison itself
+    # with the full simp set would immediately strip both casts again.
+    rules = []
+    ["int_of_nat", "rat_of_int", "real_of_rat"].each -> (cast)
+      bucket = @session.simp_by_head[cast]
+      if bucket != nil
+        bucket.each -> (rule)
+          if (rule.name == cast + "_add" || rule.name == cast + "_mul") && rule.th.tags.size == 0
+            rules.push(rule)
+    folder = Simp.new(@d, rules)
+    begin
+      eq = target == nil ? @k.refl(goal.concl) : comparison_at_type(goal.concl, domain, folder)
+      if eq == nil
+        return nil
+      conclusion = eq.concl.b
+      changed = !tm_eq(goal.concl, conclusion)
+      if conclusion.op == OP_TRUE
+        return @k.eq_mp(@k.sym(eq), @k.truth)
+      # Preserve the unit gap of strict natural and integer bounds on widening.
+      gaps = []
+      facts.each -> (th)
+        if th.concl.a.tag == :app && th.concl.a.a.op == OP_LT
+          ty = type_of(th.concl.a.b)
+          if ty == domain || (ty != TY_NAT_SINGLETON && ty != TY_INT_SINGLETON)
+            next
+          bound = integer_strengthen([th], ty)[0]
+          if bound != th
+            gaps.push(bound)
+      lifted = []
+      (facts + gaps).each -> (th)
+        conv = comparison_at_type(th.concl, domain, folder)
+        if conv != nil
+          fact = @k.eq_mp(conv, th)
+          changed = changed || !tm_eq(fact.concl, th.concl)
+          if tm_eq(fact.concl, conclusion)
+            return @k.eq_mp(@k.sym(eq), fact)
+          lifted.push(fact)
+      if !changed
+        return nil
+      th = Prover.new(@session).linarith_proof(Goal.new(goal.fixes, [], conclusion), lifted)
+      return @k.eq_mp(@k.sym(eq), th)
+    rescue e
+      nil
+
+  -> comparison_at_type(term, domain, folder)
+    body = dest_unop(term, "¬")
+    if body != nil
+      eq = comparison_at_type(body, domain, folder)
+      return eq == nil ? nil : @k.mk_comb(@k.refl(term.a), eq)
+    cmp = dest_cmp_rel(term)
+    ty = type_of(cmp[1])
+    if ty == domain
+      return folder.simp_conv(term)
+    if @session.elab.coercion(ty, domain) == nil
+      return nil
+    prefix = ty == TY_NAT_SINGLETON ? "cast_" : ty.name + "_cast_"
+    suffix = {"≤" => "le", "<" => "lt", "=" => "inj"}[cmp[0]]
+    lem = @session.theorems[prefix + suffix + "." + domain.name]
+    if lem == nil || lem.tags.size != 0
+      return nil
+    eq = @k.sym(@k.spec(cmp[2], @k.spec(cmp[1], lem)))
+    @k.trans(eq, folder.simp_conv(eq.concl.b))
 
   -> linarith_proof(goal, extra)
     c = goal.concl
@@ -2285,24 +2386,55 @@
     if np != nil
       inner = arith_prove(Goal.new(goal.fixes, goal.hyps + [["_neg", np]], @k.false_tm), extra)
       return @k.not_intro(np, inner)
-    # split numeric disequalities a ≠ b into a < b ∨ b < a (at most 4 of them)
-    goal.hyps.each -> (h)
-      e = dest_unop(h[1], "¬")
-      if e != nil
-        d = dest_binop(e, "=")
-        if d != nil && numeric_type?(type_of(d[0])) && (extra.size < 100)
-          lem = @session.lemma_at("lt_or_gt_of_ne", type_of(d[0]))
-          if lem != nil && !@split_ne.include?(tm_key(h[1]))
-            if @split_ne.size < 4
-              @split_ne.push(tm_key(h[1]))
-              disj = @k.mp(@k.spec(d[1], @k.spec(d[0], lem)), @k.assume(h[1]))
-              pq = dest_binop(disj.concl, "∨")
-              g1 = Goal.new(goal.fixes, goal.hyps + [["_lt", pq[0]]], c)
-              g2 = Goal.new(goal.fixes, goal.hyps + [["_gt", pq[1]]], c)
-              t1 = arith_prove(g1, extra)
-              t2 = arith_prove(g2, extra)
+    # Try the linear certificate first. Only split a disequality when the
+    # unsplit facts do not suffice, retaining the proof that supplied it.
+    begin
+      return arith_prove_order(goal, extra)
+    rescue failure
+      if @split_ne.size >= 4 || extra.size >= 100
+        raise failure
+      facts = []
+      goal.hyps.each -> (h)
+        if numeric_disequality?(h[1]) || dest_binop(h[1], "∧") != nil
+          collect_disequalities(@k.assume(h[1]), facts)
+      extra.each -> (th) collect_disequalities(th, facts)
+      facts.each -> (th)
+        key = tm_key(th.concl)
+        if !@split_ne.include?(key)
+          sides = @k.dest_eq(th.concl.b)
+          lem = @session.lemma_at("lt_or_gt_of_ne", type_of(sides[0]))
+          if lem != nil
+            disj = @k.mp(@k.spec(sides[1], @k.spec(sides[0], lem)), th)
+            pq = dest_binop(disj.concl, "∨")
+            @split_ne.push(key)
+            begin
+              left = arith_prove(goal.add_hyp("_lt", pq[0]), extra)
+              right = arith_prove(goal.add_hyp("_gt", pq[1]), extra)
+            ensure
               @split_ne.pop
-              return @k.disj_cases(disj, t1, t2)
+            if !hyps_has?(left.hyps, pq[0])
+              return left
+            if !hyps_has?(right.hyps, pq[1])
+              return right
+            return @k.disj_cases(disj, left, right)
+      raise failure
+
+  -> collect_disequalities(th, out)
+    if numeric_disequality?(th.concl)
+      out.push(th)
+    elsif dest_binop(th.concl, "∧") != nil
+      collect_disequalities(@k.conj1(th), out)
+      collect_disequalities(@k.conj2(th), out)
+    0
+
+  -> numeric_disequality?(term)
+    if term.tag != :app || term.a.op != OP_NOT
+      return false
+    sides = @k.dest_eq(term.b)
+    sides != nil && numeric_type?(type_of(sides[0]))
+
+  -> arith_prove_order(goal, extra)
+    c = goal.concl
     # omega: split a truncated ℕ subtraction a - b into b ≤ a (a - b + b = a) and a ≤ b (a - b = 0), at most 3 deep
     if @omega_mode && @split_sub.size < 3
       s = find_nat_sub(goal, extra)
@@ -2806,15 +2938,15 @@
     nil
 
   # Turns hypothesis theorems into comparison theorems (a < b, a ≤ b, a = b).
-  -> normalize_comparisons(th, out)
+  -> normalize_comparisons(th, out, include_ne = false)
     p = th.concl
-    if comparison?(p)
+    if comparison?(p) || (include_ne && numeric_disequality?(p))
       out.push(th)
       return
     pq = dest_binop(p, "∧")
     if pq != nil
-      normalize_comparisons(@k.conj1(th), out)
-      normalize_comparisons(@k.conj2(th), out)
+      normalize_comparisons(@k.conj1(th), out, include_ne)
+      normalize_comparisons(@k.conj2(th), out, include_ne)
       return
     np = dest_unop(p, "¬")
     if np != nil
@@ -3122,26 +3254,28 @@
       auto_add_fact(facts, @k.assume(h[1]))
       auto_collect_terms(h[1], terms)
     hints.each -> (hint) auto_add_fact(facts, hint)
-    proof = auto_search(goal, facts + [], terms, [], 3, [24])
+    proof = auto_search_root(goal, facts + [], terms)
     if proof != nil
       return proof
     auto_classical(goal, facts, terms, [], 3, [12], false)
 
   -> auto_arithmetic_proof(goal, facts, budget)
-    if budget[0] <= 0 || (!comparison?(goal.concl) && !is_const?(goal.concl, "⊥"))
+    if budget[0] <= 0 || (!comparison?(goal.concl) && !numeric_disequality?(goal.concl) && !is_const?(goal.concl, "⊥"))
       return nil
     comparisons = []
     facts.each -> (th)
-      normalize_comparisons(th, comparisons)
+      normalize_comparisons(th, comparisons, true)
     if comparisons.size == 0
       return nil
     budget[0] -= 1
+    # The theorem objects retain the assumptions used by both attempts.
+    prover = Prover.new(@session)
+    target = Goal.new(goal.fixes, [], goal.concl)
     begin
-      # Isolate arithmetic's mutable search state. Assumptions remain on the
-      # supplied theorem objects and are discharged by the enclosing proof.
-      prover = Prover.new(@session)
-      return prover.linarith_proof(Goal.new(goal.fixes, [], goal.concl), comparisons)
+      return prover.linarith_proof(target, comparisons)
     rescue e
+      if comparisons.any?(-> (th) numeric_disequality?(th.concl))
+        return prover.cast_arithmetic_proof(target, comparisons)
       nil
 
   -> auto_has_arithmetic(t)
@@ -3213,7 +3347,7 @@
         if !hints.any?(-> (hint) dest_unop(hint.concl, "∀") != nil && tm_eq(hint.concl, known.concl))
           auto_add_fact(selected, known)
       instances.each -> (hint) auto_add_fact(selected, hint)
-      proof = auto_search(goal, selected, terms, [], 3, [24], [24])
+      proof = auto_search_root(goal, selected, terms, true)
       if proof != nil
         return proof
       if nonlinear != nil && squares
@@ -3222,7 +3356,7 @@
           return proof
     # Preserve the general search when matching existing operands is insufficient.
     hints.each -> (hint) auto_add_fact(facts, hint)
-    proof = auto_search(goal, facts, terms, [], 3, [24], [24])
+    proof = auto_search_root(goal, facts, terms, true)
     if proof != nil || nonlinear == nil
       return proof
     if squares
@@ -3278,6 +3412,8 @@
           conclusion = implication[1]
           implication = dest_binop(conclusion, "⇒")
         patterns = []
+        if !left_only && numeric_disequality?(conclusion)
+          conclusion = conclusion.b
         if quant == nil && comparison?(conclusion)
           equality = @k.dest_eq(conclusion)
           if left_only
@@ -3655,6 +3791,27 @@
     else
       sign == 0
 
+  -> auto_search_root(goal, facts, terms, arithmetic = false)
+    proof = auto_search(goal, facts, terms, [], 3, [24], arithmetic ? [24] : nil)
+    target = dest_unop(goal.concl, "∃")
+    if proof != nil || target == nil || target.tag != :lam
+      return proof
+    # After ordinary witness search, the root facts include proved instances
+    # of hints. Open one existential and try its witness directly in the goal.
+    budget = [12]
+    solver = arithmetic ? [12] : nil
+    facts.each -> (th)
+      source = dest_unop(th.concl, "∃")
+      if source != nil && source.tag == :lam && ty_eq(source.ty, target.ty) && budget[0] > 0
+        budget[0] -= 1
+        witness = auto_fresh(goal, facts, terms, source.ty)
+        given = tm_instantiate(source.b, witness, 0)
+        required = tm_instantiate(target.b, witness, 0)
+        body = auto_search(goal.with_concl(required), facts + [@k.assume(given)], [witness] + terms, [th.concl], 2, budget, solver)
+        if body != nil
+          return @k.choose(witness, th, @k.exists_intro(goal.concl, witness, body))
+    auto_interval_witness(goal, target, facts)
+
   -> auto_search(goal, facts, terms, used, depth, budget, arithmetic = nil)
     if auto_arithmetic_counterexample(goal, facts)
       return nil
@@ -3666,6 +3823,7 @@
         return proof
     implications = []
     negations = []
+    exclusions = []
     i = 0
     while true
       while i < facts.size
@@ -3692,6 +3850,8 @@
         neg = dest_unop(th.concl, "¬")
         implications.push(imp)
         negations.push(neg)
+        if neg != nil && dest_unop(neg, "∃") != nil
+          exclusions.push(th)
         # Check both directions because either premise may have arrived last.
         j = 0
         while j <= i
@@ -3866,6 +4026,13 @@
               right = auto_search(goal, right_facts, terms, next_used, depth - 1, budget, arithmetic)
               if right != nil
                 return @k.disj_cases(th, left, right)
+      # A checked witness contradicts its exclusion for any conclusion.
+      exclusions.each -> (th)
+        if budget[0] > 0 && !used.any?(-> (old) tm_eq(old, th.concl))
+          budget[0] -= 1
+          exists = auto_search(goal.with_concl(th.concl.b), facts + [], terms, used + [th.concl], depth - 1, budget, arithmetic)
+          if exists != nil
+            return @k.false_elim(@k.not_elim(th, exists), goal.concl)
     nil
 
   # Expose both directions of a quantified/conditional iff, retaining every
@@ -3980,35 +4147,40 @@
     head = strip_app(term)[0]
     head.tag == :const ? "logic|" + head.name : "*"
 
-  # Registrations name already proved rules. Index only their conclusions;
-  # ordinary instantiation and premise proofs still justify every use.
+  # All registered rules are closed. Their projections and index keys depend
+  # only on the library, so detached searches can share one session index.
+  -> build_registered_index
+    index = {}
+    context = Goal.new([], [], @k.false_tm)
+    @session.auto_rules.each -> (name, th)
+      begin
+        auto_relation_parts(th, [32]).each -> (part)
+          auto_hint_rules(context, part).each -> (rule)
+            key = auto_registered_key(rule.concl)
+            bucket = index[key]
+            if bucket == nil
+              bucket = []
+              index[key] = bucket
+            bucket.push([name, th, rule])
+            shape = auto_rule_shape(rule.concl)
+            if shape != nil
+              ty = ty_vars(type_of(auto_rule_spine(rule.concl)[1][0])).size > 0 ? "*" : shape[3]
+              [[shape[0], shape[1], "?rhs", ty], [shape[0], "?lhs", shape[2], ty]].each -> (parts)
+                endpoint_key = "math|" + parts.join("|")
+                endpoints = index[endpoint_key]
+                if endpoints == nil
+                  endpoints = []
+                  index[endpoint_key] = endpoints
+                endpoints.push([name, th, rule])
+      rescue e
+        0
+    index
+
   -> auto_registered_hints(goal, side = nil)
-    if @registered_index == nil || @registered_version != @session.auto_rule_version
-      @registered_index = {}
-      @registered_version = @session.auto_rule_version
-      @session.auto_rules.each -> (name, th)
-        if @session.theorems[name] == th
-          begin
-            auto_relation_parts(th, [32]).each -> (part)
-              auto_hint_rules(goal, part).each -> (rule)
-                key = auto_registered_key(rule.concl)
-                bucket = @registered_index[key]
-                if bucket == nil
-                  bucket = []
-                  @registered_index[key] = bucket
-                bucket.push([name, th, rule])
-                shape = auto_rule_shape(rule.concl)
-                if shape != nil
-                  ty = ty_vars(type_of(auto_rule_spine(rule.concl)[1][0])).size > 0 ? "*" : shape[3]
-                  [[shape[0], shape[1], "?rhs", ty], [shape[0], "?lhs", shape[2], ty]].each -> (parts)
-                    endpoint_key = "math|" + parts.join("|")
-                    endpoints = @registered_index[endpoint_key]
-                    if endpoints == nil
-                      endpoints = []
-                      @registered_index[endpoint_key] = endpoints
-                    endpoints.push([name, th, rule])
-          rescue e
-            0
+    index = @session.auto_rule_index
+    if index == nil
+      index = build_registered_index
+      @session.auto_rule_index = index
     keys = side == nil ? ["*"] : []
     shape = auto_rule_shape(goal.concl)
     if shape != nil
@@ -4025,7 +4197,7 @@
       keys.push(auto_registered_key(goal.concl))
     out = []
     keys.each -> (key)
-      bucket = @registered_index[key]
+      bucket = index[key]
       if bucket != nil
         bucket.each -> (entry)
           # Shadowing a name does not transfer its old registration.
@@ -4095,8 +4267,10 @@
     shape = auto_rule_shape(goal.concl)
     if shape == nil
       return []
-    if @auto_defaults == nil
-      @auto_defaults = {}
+    index = @session.auto_default_index
+    if index == nil
+      index = {}
+      context = Goal.new([], [], @k.false_tm)
       analytic_order = ["exp_le_exp", "exp_lt_exp", "log_le_log", "log_lt_log",
         "exp_le_one_iff", "exp_lt_one", "one_le_exp_iff"]
       names = ["sum_below.congr", "sum_below.eq_of_recurrence", "sqrt_nonneg", "sqrt_pos", "sqrt_le_sqrt", "sqrt_lt_sqrt",
@@ -4140,7 +4314,7 @@
           "sq_lt_sq", "abs_le_of_sq_le_sq"].each -> (prefix)
           names.push(prefix + "." + suffix)
       ["nat", "int", "rat", "real"].each -> (suffix)
-        ["min_le_left", "min_le_right", "le_min", "lt_min", "min_eq_left",
+        ["div_eq_zero_of_den_eq_zero", "min_le_left", "min_le_right", "le_min", "lt_min", "min_eq_left",
           "min_eq_right", "min_comm", "min_self", "le_max_left", "le_max_right",
           "max_le", "max_lt", "max_eq_left", "max_eq_right", "max_comm", "max_self",
           "min_le_max", "min_add_max", "min_le_min", "max_le_max",
@@ -4170,9 +4344,11 @@
           division_order.push(name)
           names.push(name)
       names.each -> (name)
+        # Also watch absent names, so a later import can add a default.
+        @session.auto_default_names[name] = true
         th = auto_loaded_rule(name)
         if th != nil
-          rules = auto_hint_rules(goal, th)
+          rules = auto_hint_rules(context, th)
           # These unconditional identities are equally useful in either
           # direction. Kernel symmetry avoids an arithmetic detour.
           if power_identities.include?(name)
@@ -4195,18 +4371,19 @@
               if ty_vars(type_of(operand)).size > 0
                 pattern[3] = "*"
               key = pattern.join("|")
-              bucket = @auto_defaults[key]
+              bucket = index[key]
               if bucket == nil
                 bucket = []
-                @auto_defaults[key] = bucket
+                index[key] = bucket
               bucket.push(rule)
               if pattern[0] == "="
                 key = ["=", pattern[1], "?rhs", pattern[3]].join("|")
-                bucket = @auto_defaults[key]
+                bucket = index[key]
                 if bucket == nil
                   bucket = []
-                  @auto_defaults[key] = bucket
+                  index[key] = bucket
                 bucket.push(rule)
+      @session.auto_default_index = index
     out = []
     keys = []
     spine = auto_rule_spine(goal.concl)
@@ -4218,7 +4395,7 @@
           key = [shape[0], left, right, ty].join("|")
           if !keys.include?(key)
             keys.push(key)
-            bucket = @auto_defaults[key]
+            bucket = index[key]
             if bucket != nil
               out = out + bucket
     out
@@ -4338,7 +4515,6 @@
         normalized_hints = hints + normalized_hints
       budget[0] -= 1
       worker = Prover.new(@session)
-      worker.auto_defaults = @auto_defaults
       worker.registered_search = @registered_search
       ref = GoalRef.new(Goal.new(goal.fixes, hyps, conclusion), nil, 0)
       worker.goals = [ref]
@@ -4458,7 +4634,6 @@
       if conversion == nil && converted.size == 0 && limits[2] == 4
         return nil
       worker = Prover.new(@session)
-      worker.auto_defaults = @auto_defaults
       worker.registered_search = @registered_search
       worker.sum_aliases_allowed = false
       ref = GoalRef.new(Goal.new(goal.fixes, hyps, conclusion), nil, 0)
@@ -5144,7 +5319,6 @@
             no = auto_list_bound_branch(goal.add_hyp(name, @k.neg_tm(condition)), hints, budget, splits)
             return @k.disj_cases(@k.excluded_middle(condition), yes, no)
     worker = Prover.new(@session)
-    worker.auto_defaults = @auto_defaults
     worker.registered_search = @registered_search
     ref = GoalRef.new(goal, nil, 0)
     worker.goals = [ref]
@@ -5490,6 +5664,147 @@
     rescue e
       nil
 
+  # Specialize a loaded field lemma only when its sign or nonzero premise
+  # follows from the original facts. Keep the proof of that premise.
+  -> auto_guarded_field_rule(name, args, goal, facts)
+    rule = auto_loaded_rule(name + "." + type_of(args[0]).name)
+    if rule == nil
+      return nil
+    args.each -> (arg) rule = @k.spec(arg, rule)
+    premise = dest_binop(rule.concl, "⇒")
+    if premise == nil
+      return nil
+    guard = facts.find -> (th) tm_eq(th.concl, premise[0])
+    if guard == nil
+      guard = auto_arithmetic_proof(goal.with_concl(premise[0]), facts, [1])
+    guard == nil ? nil : @k.mp(rule, guard)
+
+  # All entries are binary comparisons or quotient applications.
+  -> auto_binary_cost_ok?(terms)
+    nodes = [160]
+    cost = 0
+    terms.each -> (term)
+      kind = type_of(term.a.b).name
+      cost += recurrence_ring_cost(term.a.b, kind, nodes) + recurrence_ring_cost(term.b, kind, nodes)
+    cost <= 64
+
+  # A denominator that may vanish has two obligations. Select the matching
+  # proved rule only at the root, after the indexed quotient rules.
+  -> auto_division_cases(goal, hints)
+    sides = dest_cmp_rel(goal.concl)
+    if sides == nil || sides[0] == "=" || goal.hyps.size + hints.size > 8
+      return nil
+    ty = type_of(sides[1])
+    if ty != TY_RAT_SINGLETON && ty != TY_REAL_SINGLETON
+      return nil
+    if dest_binop(sides[1], "/") == nil && dest_binop(sides[2], "/") == nil
+      return nil
+    facts = (goal.hyps.map -> (h) @k.assume(h[1])) + hints
+    nodes = [256]
+    if !auto_small_term?(goal.concl, nodes) || !facts.all?(-> (th) auto_small_term?(th.concl, nodes))
+      return nil
+    comparisons = []
+    facts.each -> (th) normalize_comparisons(th, comparisons)
+    op = sides[0] == "<" ? "lt" : "le"
+    [1, 2].each -> (i)
+      q = dest_binop(sides[i], "/")
+      if q == nil || q[1].tag == :lit
+        next
+      name = i == 1 ? "div_" + op : op + "_div"
+      rule = auto_loaded_rule(name + "_of_nonneg_den." + ty.name)
+      if rule == nil
+        next
+      begin
+        args = i == 1 ? [q[0], sides[2], q[1]] : [sides[1], q[0], q[1]]
+        args.each -> (arg) rule = @k.spec(arg, rule)
+        while dest_binop(rule.concl, "⇒") != nil
+          premise = rule.concl.a.b
+          proof = facts.find -> (th) tm_eq(th.concl, premise)
+          if proof == nil
+            branch = dest_binop(premise, "⇒")
+            target = branch == nil ? premise : branch[1]
+            local = branch == nil ? comparisons : comparisons + [@k.assume(branch[0])]
+            if local.size > 10 || !auto_binary_cost_ok?([target] + (local.map -> (th) th.concl))
+              break
+            sub = goal.with_concl(target)
+            proof = auto_arithmetic_proof(sub, local, [1])
+            if proof == nil && branch != nil
+              proof = auto_nonlinear_direct(sub, [1, 1], local)
+            if proof != nil && branch != nil
+              proof = @k.disch(branch[0], proof)
+          if proof == nil
+            break
+          rule = @k.mp(rule, proof)
+        if tm_eq(rule.concl, goal.concl)
+          return rule
+      rescue e
+        0
+    nil
+
+  # Clear observed field quotients before polynomial arithmetic. The order
+  # equivalences require positive denominators; cancellation only needs ≠ 0.
+  -> auto_field_arithmetic(goal, hints)
+    cmp = dest_cmp_rel(goal.concl)
+    if cmp == nil || goal.hyps.size + hints.size > 8
+      return nil
+    ty = type_of(cmp[1])
+    if ty != TY_RAT_SINGLETON && ty != TY_REAL_SINGLETON
+      return nil
+    if (goal.concl.search_ops & TERM_DIVMOD) == 0 && !goal.hyps.any?(-> (h) (h[1].search_ops & TERM_DIVMOD) != 0) && !hints.any?(-> (th) (th.concl.search_ops & TERM_DIVMOD) != 0)
+      return nil
+    begin
+      raw = hints + (goal.hyps.map -> (h) @k.assume(h[1]))
+      nodes = [256]
+      if !auto_small_term?(goal.concl, nodes) || !raw.all?(-> (th) auto_small_term?(th.concl, nodes))
+        return nil
+      facts = []
+      raw.each -> (th) normalize_comparisons(th, facts, true)
+      if facts.size > 8
+        return nil
+      facts = facts.select -> (th)
+        relation = numeric_disequality?(th.concl) ? th.concl.b : th.concl
+        type_of(dest_cmp_rel(relation)[1]) == ty
+      comparisons = facts.select -> (th) comparison?(th.concl)
+      terms = []
+      expressions = [goal.concl] + (comparisons.map -> (th) th.concl)
+      expressions.each -> (term)
+        if (term.search_ops & TERM_DIVMOD) != 0
+          auto_collect_terms(term, terms)
+      quotients = terms.select -> (term) dest_binop(term, "/") != nil && type_of(term) == ty && term.b.tag != :lit
+      if quotients.size == 0 || quotients.size > 3
+        return nil
+      # Include the insides of every quotient. Ring normalization treats the
+      # whole quotient as an atom until its denominator enters a guard.
+      guard_terms = facts.map -> (th) numeric_disequality?(th.concl) ? th.concl.b : th.concl
+      if !auto_binary_cost_ok?([goal.concl] + guard_terms + quotients)
+        return nil
+      enriched = comparisons + []
+      quotients.each -> (quot)
+        cancel = auto_guarded_field_rule("mul_div_cancel", [quot.a.b, quot.b], goal, facts)
+        if cancel != nil
+          auto_add_fact(enriched, cancel)
+      comparisons.each -> (th)
+        sides = dest_cmp_rel(th.concl)
+        op = sides[0] == "=" ? "eq" : (sides[0] == "<" ? "lt" : "le")
+        [1, 2].each -> (i)
+          q = sides[i]
+          if quotients.any?(-> (quot) tm_eq(quot, q))
+            args = i == 1 ? [q.a.b, sides[2], q.b] : [sides[1], q.a.b, q.b]
+            lemma = i == 1 ? "div_" + op + "_iff" : op + "_div_iff"
+            iff = auto_guarded_field_rule(lemma, args, goal, facts)
+            if iff != nil
+              auto_add_fact(enriched, @k.eq_mp(iff, th))
+      if enriched.size == comparisons.size || enriched.size > 10
+        return nil
+      if !auto_binary_cost_ok?([goal.concl] + (enriched.map -> (th) th.concl))
+        return nil
+      linear = auto_arithmetic_proof(goal, enriched, [1])
+      if linear != nil
+        return linear
+      Prover.new(@session).quadratic_premise_proof(goal, enriched)
+    rescue e
+      nil
+
   -> auto_nonlinear_direct(goal, budget, facts = nil, split_nonzero = false)
     if budget.size < 2 || budget[1] <= 0 || !comparison?(goal.concl)
       return nil
@@ -5655,11 +5970,7 @@
 
   -> quadratic_premise_proof(goal, comparisons, disequalities = [])
     @nl_mode = true
-    hyps = []
-    disequalities.each -> (th) hyps.push(["nonzero" + hyps.size.to_s, th.concl])
-    proof = linarith_proof(Goal.new(goal.fixes, hyps, goal.concl), comparisons)
-    disequalities.each -> (th) proof = @d.prove_hyp(th, proof)
-    proof
+    linarith_proof(Goal.new(goal.fixes, [], goal.concl), comparisons + disequalities)
 
   # Small affine natural-number goals may contain truncated subtraction.
   # Use omega's checked case split, with the same shared auto budget.
@@ -5692,9 +6003,116 @@
     rescue e
       nil
 
-  -> natural_arithmetic_proof(goal)
+  -> natural_arithmetic_proof(goal, extra = [])
     @omega_mode = true
-    linarith_proof(goal, [])
+    linarith_proof(goal, extra)
+
+  # A power step can sit inside a larger ring identity. Try its algebra
+  # first, then justify the exact change of exponent over the naturals.
+  -> auto_power_step(goal, hints)
+    if (goal.concl.search_ops & TERM_POWER) == 0 || !auto_small_term?(goal.concl, [128])
+      return nil
+    terms = []
+    auto_collect_terms(goal.concl, terms)
+    powers = terms.select -> (t) t.tag == :app && t.a.tag == :app && t.a.a.op == OP_POW && t.b.tag != :lit
+    if powers.size < 2 || powers.size > 4 || goal.hyps.size + hints.size > 12
+      return nil
+    bounds = []
+    raw = []
+    goal.hyps.each -> (h) normalize_comparisons(@k.assume(h[1]), raw, true)
+    hints.each -> (hint) normalize_comparisons(hint, raw, true)
+    raw.each -> (th)
+      rel = numeric_disequality?(th.concl) ? th.concl.b : th.concl
+      if type_of(rel.a.b) == TY_NAT_SINGLETON
+        nodes = [64]
+        degrees = [rel.a.b, rel.b].map -> (side) auto_quadratic_degree(side, nodes)
+        if degrees.all?(-> (d) d >= 0 && d <= 1)
+          auto_add_fact(bounds, th)
+    if bounds.size > 8
+      return nil
+    powers.each -> (high)
+      rule = auto_loaded_rule("pow_succ." + type_of(high).name)
+      if rule != nil
+        powers.each -> (low)
+          if !tm_eq(low, high) && tm_eq(low.a, high.a)
+            proof = power_step_pair(goal, high, low, rule, bounds, hints)
+            if proof != nil
+              return proof
+    nil
+
+  -> power_step_pair(goal, high, low, rule, bounds, hints)
+    begin
+      step = @k.spec(low.b, @k.spec(low.a.b, rule))
+      successor_power = @k.dest_eq(step.concl)[0]
+      index = @k.eq_tm(high.b, successor_power.b)
+      rewrite = @k.trans(@d.ap_term(high.a, @k.assume(index)), step)
+      bridge = power_rewrite_identity(goal.concl, [rewrite])
+      index_goal = goal.with_concl(index)
+      ascending = power_index_proof(index_goal, bounds, hints)
+      if ascending != nil
+        return @d.prove_hyp(ascending, bridge)
+      # At zero the predecessor saturates. The entire original equation
+      # must hold there, for example because a weight vanishes.
+      zero = @k.eq_tm(high.b, mk_lit(0, ty_nat))
+      base = power_zero_case(goal, @k.assume(zero), bounds)
+      nonzero = @k.neg_tm(zero)
+      ascending = power_index_proof(index_goal.add_hyp("_nonzero", nonzero), bounds + [@k.assume(nonzero)], hints)
+      if ascending != nil
+        return @k.disj_cases(@k.excluded_middle(zero), base, @d.prove_hyp(ascending, bridge))
+    rescue e
+      return nil
+    nil
+
+  -> power_zero_case(goal, zero, bounds)
+    equations = [zero]
+    exponent = zero.concl.a.b
+    if exponent.tag != :var
+      # An exponent such as m+n can vanish only when both summands do.
+      # Only substitute variables whose zero value arithmetic actually proves.
+      variables = tm_frees(exponent)
+      if variables.size <= 3
+        variables.each -> (v)
+          if v.ty == TY_NAT_SINGLETON
+            claim = @k.eq_tm(v, zero.concl.b)
+            th = power_index_proof(goal.with_concl(claim), bounds + [zero], [])
+            if th != nil
+              equations.push(th)
+    power_rewrite_identity(goal.concl, equations)
+
+  -> power_rewrite_identity(conclusion, equations)
+    conv = @k.refl(conclusion)
+    equations.each -> (eq)
+      rewrite = replace_conv_opt(conv.concl.b, eq.concl.a.b, eq)
+      if rewrite != nil
+        conv = @k.trans(conv, rewrite)
+    sides = @k.dest_eq(conv.concl.b)
+    sides.each -> (side) recurrence_ring_cost(side, type_of(side).name, [128])
+    folder = Simp.new(@d, [])
+    folder.step_limit = 256
+    conv = @k.trans(conv, folder.simp_conv(conv.concl.b))
+    @k.eq_mp(@k.sym(conv), auto_relation_result(conv.concl.b, [1]))
+
+  -> power_index_proof(goal, bounds, hints)
+    sides = @k.dest_eq(goal.concl)
+    if tm_eq(sides[0], sides[1])
+      return @k.refl(sides[0])
+    reversed = @k.eq_tm(sides[1], sides[0])
+    bounds.each -> (th)
+      if tm_eq(th.concl, goal.concl)
+        return th
+      if tm_eq(th.concl, reversed)
+        return @k.sym(th)
+    nodes = [64]
+    if !sides.all?(-> (side) [0, 1].include?(auto_quadratic_degree(side, nodes)))
+      return nil
+    begin
+      proof = Prover.new(@session).natural_arithmetic_proof(Goal.new(goal.fixes, [], goal.concl), bounds)
+      if proof.tags.all?(-> (tag) tag == "oracle:arith" || tag == "oracle:ring" || bounds.any?(-> (th) th.tags.include?(tag)))
+        return proof
+    rescue e
+      0
+    rules = hints + auto_local_hints(goal)
+    auto_hint_proof(goal, rules, hints, [4, 1], [])
 
   # Candidate premises are solved in detached
   # proof states; a failed candidate cannot refine or solve the caller's goal.
@@ -5732,7 +6150,6 @@
             if tm_eq(normalized, goal.concl) || seen.any?(-> (previous) tm_eq(previous, normalized))
               fail("auto: cyclic rule premise")
             sub = Prover.new(@session)
-            sub.auto_defaults = @auto_defaults
             sub.registered_search = @registered_search
             sub.auto_rule_path = @auto_rule_path + [[hint.concl, pointwise, goal.fixes.size]]
             ref = GoalRef.new(goal.with_concl(normalized), nil, 0)
@@ -5801,7 +6218,6 @@
                 budget[0] -= 1
                 begin
                   sub = Prover.new(@session)
-                  sub.auto_defaults = @auto_defaults
                   sub.registered_search = @registered_search
                   ref = GoalRef.new(goal.with_concl(premise), nil, 0)
                   sub.goals = [ref]
@@ -5851,7 +6267,6 @@
               budget[0] -= 1
               begin
                 sub = Prover.new(@session)
-                sub.auto_defaults = @auto_defaults
                 sub.registered_search = @registered_search
                 ref = GoalRef.new(goal.with_concl(premise), nil, 0)
                 sub.goals = [ref]
@@ -5986,7 +6401,6 @@
             name += "_"
           branch = goal.with_concl(parts[1-side]).add_hyp(name, @k.neg_tm(condition))
           worker = Prover.new(@session)
-          worker.auto_defaults = @auto_defaults
           worker.registered_search = @registered_search
           ref = GoalRef.new(branch, nil, 0)
           worker.goals = [ref]
@@ -6000,6 +6414,23 @@
           0
     nil
 
+  # Only shorten a diagnostic with an unconditional, dependency-free equivalence.
+  -> show_missing_condition(missing)
+    original = tm_show(missing)
+    begin
+      simp = Simp.new(@d, [], @session.simp_by_head, @session.simp_general)
+      simp.step_limit = 128
+      conv = simp.simp_conv_opt(missing, 0)
+      if conv != nil && conv.hyps.size == 0 && conv.tags.size == 0
+        rhs = conv.concl.b
+        if rhs.op != OP_TRUE && rhs.op != OP_FALSE
+          short = tm_show(rhs)
+          if short.size < original.size
+            return short
+    rescue e
+      return original
+    original
+
   # Run once at the tactic boundary, never while auto is exploring a branch.
   -> strict_bound_feedback(goal, hints)
     sides = dest_binop(goal.concl, "<")
@@ -6007,22 +6438,596 @@
       return nil
     ty = type_of(sides[0])
     le = @k.mk_const("≤", ty_funs([ty, ty], ty_bool))
-    ref = GoalRef.new(goal.with_concl(mk_apps(le, sides)), nil, 0)
+    th = feedback_proof(goal.with_concl(mk_apps(le, sides)), hints)
+    if th == nil
+      return nil
+    equal = @k.eq_tm(sides[0], sides[1])
+    apart = @k.neg_tm(equal)
+    nodes = [384]
+    small_context = goal.hyps.size <= 12 && goal.hyps.all?(-> (h) auto_small_term?(h[1], nodes))
+    small_hints = hints.size <= 8 && hints.all?(-> (hint) auto_small_term?(hint.concl, nodes))
+    if small_context && small_hints && auto_small_term?(goal.concl, [96])
+      begin
+        sides.each -> (side) recurrence_ring_cost(side, ty.name, [96])
+        allowed = th.tags + ["oracle:arith", "oracle:ring", "oracle:sat"]
+        hints.each -> (hint) allowed = tags_union(allowed, hint.tags)
+        same = feedback_proof(goal.with_concl(equal), hints)
+        if same != nil
+          if !same.tags.include?("sorry") && same.tags.all?(-> (tag) allowed.include?(tag))
+            return checked_progress_note(same, nil)
+          # The tie conflicts with a proposed repair, but its dependencies
+          # cannot justify reporting it. Suppress the other diagnostic routes.
+          return false
+        note = strict_argument_feedback(goal, sides, th, equal, hints, allowed)
+        if note != nil
+          return note
+      rescue diagnostic_error
+        0
+    checked_progress_note(th, apart)
+
+  # Try the arguments of the same unary or binary operation. A smaller gap
+  # must suffice for strictness, and closing it must force equal endpoints.
+  -> strict_argument_feedback(goal, sides, bound, equal, hints, allowed)
+    if sides[0].tag != :app || sides[1].tag != :app
+      return nil
+    left = strip_app(sides[0])
+    right = strip_app(sides[1])
+    if !tm_eq(left[0], right[0]) || left[1].size != right[1].size || left[1].size > 2
+      return nil
+    original = show_missing_condition(@k.neg_tm(equal))
+    left[1].each_with_index -> (a, i)
+      b = right[1][i]
+      if tm_eq(a, b)
+        ty = type_of(a)
+        if a.tag == :lit || !numeric_type?(ty)
+          next
+        b = mk_lit(ty == ty_rat || ty == ty_real ? Q_ZERO : 0, ty)
+      same = @k.eq_tm(a, b)
+      missing = @k.neg_tm(same)
+      if tm_show(missing).size >= original.size || find_assumption(goal.with_concl(missing)) != nil
+        next
+      collapse = feedback_proof(goal.with_concl(equal).add_hyp("_same", same), hints)
+      if collapse == nil || !collapse.tags.all?(-> (tag) allowed.include?(tag))
+        next
+      repair = feedback_proof(goal.add_hyp("_apart", missing), hints)
+      if repair == nil || !repair.tags.all?(-> (tag) allowed.include?(tag)) || feedback_proof(goal.with_concl(missing), hints) != nil
+        next
+      forced = feedback_proof(goal.with_concl(same), hints)
+      if forced == nil
+        return checked_progress_note(bound, missing, nil, [collapse, repair])
+      if forced.tags.all?(-> (tag) allowed.include?(tag))
+        return checked_progress_note(@d.prove_hyp(forced, collapse), nil)
+    nil
+
+  -> feedback_proof(goal, hints)
+    ref = GoalRef.new(goal, nil, 0)
     probe = Prover.new(@session)
+    probe.registered_search = @registered_search
     probe.goals = [ref]
     begin
       probe.tac_auto(ref, 3, hints, [24, 4], [])
       if ref.thm == nil || probe.goals.size != 0
         return nil
-      th = probe.fit(ref, ref.thm)
-      if th.tags.include?("sorry")
+      probe.fit(ref, ref.thm)
+    rescue e
+      nil
+
+  # A rule offers a repair only after matching the actual goal and discharging
+  # every other premise. Explicit hints take priority over library suggestions.
+  -> hint_feedback(goal, hints)
+    nodes = [128]
+    if hints.size > 8 || goal.hyps.size > 12 || !auto_small_term?(goal.concl, nodes)
+      return nil
+    fuel = [6]
+    note = rule_feedback(goal, hints, hints, fuel)
+    if note == nil && fuel[0] > 0 && @session.auto_rules.size > 0
+      rules = auto_registered_hints(goal)
+      note = rule_feedback(goal, arr_sub(rules, 0, 8), hints, fuel)
+    if note != nil || (goal.hyps.size == 0 && hints.size == 0)
+      return note
+    # An unsolicited repair must use the caller's evidence and leave a
+    # smaller premise. Limit these probes to assumptions and linear arithmetic.
+    defaults = auto_default_hints(goal)
+    if defaults.size == 0
+      return nil
+    facts = (goal.hyps.map -> (h) @k.assume(h[1])) + hints
+    input_nodes = [384]
+    if !facts.all?(-> (th) auto_small_term?(th.concl, input_nodes))
+      return nil
+    numeric = []
+    facts.each -> (th) normalize_comparisons(th, numeric, true)
+    terms = numeric.map -> (th) numeric_disequality?(th.concl) ? th.concl.b : th.concl
+    if numeric.size > 12 || !auto_binary_cost_ok?(terms)
+      return nil
+    rule_feedback(goal, arr_sub(defaults, 0, 12), hints, [8], numeric, 127 - nodes[0])
+
+  -> rule_feedback(goal, candidates, hints, fuel, numeric = nil, missing_limit = 128)
+    candidates.each -> (hint)
+      if fuel[0] == 0
         return nil
-      missing = @k.neg_tm(@k.eq_tm(sides[0], sides[1]))
-      deps = th.tags.select -> (tag) tag.starts_with?("split:")
-      if deps.size > 0
-        # Only the split driver knows whether the skipped declarations checked.
-        return "⋯ strict-bound\t" + tm_show(th.concl) + "\t" + tm_show(missing) + "   \[" + deps.join(", ") + "]"
-      strict_bound_note(tm_show(th.concl), tm_show(missing))
+      if hint.tags.include?("sorry") || !auto_small_term?(hint.concl, [128])
+        next
+      body = hint.concl
+      while dest_unop(body, "∀") != nil && body.b.tag == :lam
+        body = body.b.b
+      if dest_binop(body, "⇒") == nil
+        next
+      begin
+        applied = instantiate_to(goal, hint, [], goal.concl, true)
+        if numeric != nil && applied[1].size < 2
+          next
+        note = hint_premise_note(goal, applied, hints, fuel, numeric, missing_limit)
+        if note != nil
+          return note
+      rescue e
+        0
+    nil
+
+  -> default_premise_evidence(goal, hints, numeric, fuel)
+    given = hints.find -> (th) tm_eq(th.concl, goal.concl)
+    if given != nil
+      return [given, true]
+    if !comparison?(goal.concl) && !numeric_disequality?(goal.concl)
+      return [nil, false]
+    term = numeric_disequality?(goal.concl) ? goal.concl.b : goal.concl
+    if !auto_binary_cost_ok?([term])
+      return [nil, false]
+    # Probe under assumptions to distinguish arithmetic truths from facts
+    # that use the context. Restore the dependencies of every used hint.
+    assumptions = numeric.map -> (th) @k.assume(th.concl)
+    proof = auto_arithmetic_proof(goal, assumptions, fuel)
+    if proof == nil || proof.hyps.size == 0
+      return [proof, false]
+    used = proof.hyps
+    used.each -> (premise)
+      source = numeric.find -> (th) tm_eq(th.concl, premise)
+      if source == nil
+        return [nil, false]
+      proof = @d.prove_hyp(source, proof)
+    [proof, true]
+
+  -> hint_premise_note(goal, applied, hints, fuel, numeric, missing_limit)
+    if applied[1].size == 0 || applied[1].size > 4
+      return nil
+    result = applied[0]
+    supported = numeric == nil
+    known = nil
+    missing = nil
+    seen = {}
+    applied[1].each -> (premise)
+      if !tm_set_add?(seen, premise)
+        next
+      if !auto_small_term?(premise, [128]) || tm_contains?(premise, goal.concl)
+        return nil
+      sub = goal.with_concl(premise)
+      proof = find_assumption(sub)
+      if proof == nil
+        if fuel[0] <= 0
+          return nil
+        if numeric == nil
+          fuel[0] -= 1
+          proof = feedback_proof(sub, hints)
+        else
+          found = default_premise_evidence(sub, hints, numeric, fuel)
+          proof = found[0]
+          supported = supported || found[1]
+      if proof != nil
+        if proof.hyps.size > 0
+          supported = true
+        known = known == nil ? proof : @k.conj(known, proof)
+        result = @d.prove_hyp(proof, result)
+      elsif missing == nil
+        missing = premise
+      else
+        return nil
+    if !supported || missing == nil || fuel[0] <= 0 || !auto_small_term?(missing, [missing_limit])
+      return nil
+    fuel[0] -= 1
+    if feedback_proof(goal.with_concl(@k.neg_tm(missing)), hints) != nil
+      return nil
+    ref = GoalRef.new(goal.add_hyp("_premise", missing), nil, 0)
+    conditional = @k.disch(missing, fit(ref, result))
+    checked_progress_note(known == nil ? conditional : known, missing, nil, [conditional])
+
+  -> checked_progress_note(th, missing, witness = nil, support = [])
+    tags = th.tags
+    support.each -> (proof) tags = tags_union(tags, proof.tags)
+    if tags.include?("sorry")
+      return nil
+    proved = tm_show(th.concl)
+    need = missing == nil ? nil : show_missing_condition(missing)
+    deps = tags.select -> (tag) tag.starts_with?("split:")
+    if deps.size > 0
+      # Split workers can only vouch for premises once their checks finish.
+      fields = ["⋯ partial-proof", proved]
+      if need != nil
+        fields.push(need)
+      if witness != nil
+        fields.push(witness)
+      return fields.join("\t") + "   \[" + deps.join(", ") + "]"
+    partial_proof_note(proved, need, witness)
+
+  # Isolate the quantified variable over a dense ordered field. Endpoints are
+  # suggestions: the checker proves each original conjunct at the chosen value.
+  -> auto_interval_witness(goal, ex, known)
+    if (ex.ty != TY_RAT_SINGLETON && ex.ty != TY_REAL_SINGLETON) || !auto_small_term?(ex.b, [128])
+      return nil
+    parts = witness_components(ex.b)
+    if parts.size > 6
+      return nil
+    ty = ex.ty
+    opened = dest_lam_fresh(ex, goal.all_terms)
+    v = opened[0]
+    lower = []
+    upper = []
+    symbolic = []
+    fixed = nil
+    minus = @k.mk_const("-", ty_funs([ty, ty], ty))
+    times = @k.mk_const("*", ty_funs([ty, ty], ty))
+    begin
+      parts.each -> (part)
+        cmp = dest_cmp_rel(tm_instantiate(part, v, 0))
+        if cmp == nil || !ty_eq(type_of(cmp[1]), ty)
+          return nil
+        if occurs_bnd(part, 0)
+          difference = mk_apps(minus, [cmp[2], cmp[1]])
+          poly = recurrence_atom_coefficients(@k, difference, v, v)
+          if poly[0] == 0
+            next
+          slope = poly[1][1]
+          if poly[0] != 1
+            return nil
+          if slope.tag != :lit
+            if cmp[0] == "="
+              return nil
+            symbolic.push([part, slope])
+            next
+          if tm_eq(cmp[1], v) && !tm_free_in?(v, cmp[2])
+            bound = cmp[2]
+          elsif tm_eq(cmp[2], v) && !tm_free_in?(v, cmp[1])
+            bound = cmp[1]
+          else
+            scale = mk_lit(q_div(Q_NEG_ONE, slope.val), ty)
+            bound = mk_apps(times, [scale, poly[1][0]])
+          if cmp[0] == "="
+            fixed = bound
+          else
+            bounds = slope.val[0] > 0 ? lower : upper
+            if !bounds.any?(-> (other) tm_eq(other, bound))
+              bounds.push(bound)
+      # With no surviving coefficient the obligation is independent of x.
+      if lower.size + upper.size == 0 && fixed == nil && symbolic.size == 0
+        fixed = mk_lit(Q_ZERO, ty)
+      facts = []
+      known.each -> (th)
+        # Root saturation already projected conjunctions and discharged guards.
+        if comparison?(th.concl) || dest_unop(th.concl, "¬") != nil
+          normalized = []
+          normalize_comparisons(th, normalized, true)
+          normalized.each -> (bound)
+            rel = numeric_disequality?(bound.concl) ? bound.concl.b : bound.concl
+            if ty_eq(type_of(rel.a.b), ty)
+              begin
+                nodes = [128]
+                recurrence_ring_cost(rel.a.b, ty.name, nodes)
+                recurrence_ring_cost(rel.b, ty.name, nodes)
+                auto_add_fact(facts, bound)
+              rescue e
+                0
+          if facts.size > 12
+            return nil
+      if fixed != nil
+        return checked_interval_witness(goal, ex, fixed, facts)
+      if symbolic.size > 0
+        return interval_at_endpoint(goal, ex, lower, upper, symbolic, facts)
+      interval_extremes(ty, lower, upper, facts, [16], -> (w, bounds) checked_interval_witness(goal, ex, w, bounds))
+    rescue e
+      nil
+
+  # At an endpoint where every variable-slope inequality has a strict
+  # margin, the library gives a positive radius for each. Intersect these
+  # neighborhoods with the ordinary bounds before checking the witness.
+  -> interval_at_endpoint(goal, ex, lower, upper, symbolic, facts)
+    ty = ex.ty
+    lemma = auto_loaded_rule("affine_step_radius." + ty.name)
+    if lemma == nil
+      return nil
+    zero = mk_lit(Q_ZERO, ty)
+    minus = @k.mk_const("-", ty_funs([ty, ty], ty))
+    plus = @k.mk_const("+", ty_funs([ty, ty], ty))
+    lt = @k.mk_const("<", ty_funs([ty, ty], ty_bool))
+    fuel = [16]
+    # Zero is also a useful center for bounds that only constrain the slope.
+    candidates = (upper.map -> (b) [b, false]) + (lower.map -> (b) [b, true])
+    if candidates.size == 0
+      candidates.push([zero, true])
+    candidates.each -> (candidate)
+      if fuel[0] <= 0
+        return nil
+      anchor = candidate[0]
+      right = candidate[1]
+      lows = lower + []
+      highs = upper + []
+      if lower.size + upper.size == 0
+        lows.push(anchor)
+      bounds = facts + []
+      rules = []
+      begin
+        symbolic.each -> (entry)
+          sides = dest_cmp_rel(tm_instantiate(entry[0], anchor, 0))
+          margin = mk_apps(minus, [sides[2], sides[1]])
+          positive = interval_body_proof(goal, mk_apps(lt, [zero, margin]), facts)
+          slope = right ? mk_apps(minus, [zero, entry[1]]) : entry[1]
+          radius = @k.mp(@k.spec(margin, @k.spec(slope, lemma)), positive)
+          pos = @k.conj1(radius)
+          rules.push(@k.conj2(radius))
+          bounds.push(pos)
+          if right
+            highs.push(mk_apps(plus, [anchor, pos.concl.b]))
+          else
+            lows.push(mk_apps(minus, [anchor, pos.concl.b]))
+        verify = -> (w, known)
+          delta = right ? mk_apps(minus, [w, anchor]) : mk_apps(minus, [anchor, w])
+          positive = interval_body_proof(goal, mk_apps(lt, [zero, delta]), known)
+          justified = known + []
+          rules.each -> (rule)
+            step = @k.mp(@k.spec(delta, rule), positive)
+            within = interval_body_proof(goal, dest_binop(step.concl, "⇒")[0], known)
+            justified.push(@k.mp(step, within))
+          checked_interval_witness(goal, ex, w, justified)
+        return interval_extremes(ty, lows, highs, bounds, fuel, verify)
+      rescue e
+        0
+    nil
+
+  -> interval_extremes(ty, lower, upper, facts, fuel, verify)
+    if fuel[0] <= 0
+      fail("interval witness: case limit")
+    if lower.size > 1 || upper.size > 1
+      maximum = lower.size > 1
+      bounds = maximum ? lower : upper
+      a = bounds[0]
+      b = bounds[1]
+      rest = arr_sub(bounds, 2, bounds.size - 2)
+      order = auto_loaded_rule("le_total." + ty.name)
+      if order == nil
+        fail("interval witness: total order unavailable")
+      total = @k.spec(b, @k.spec(a, order))
+      cases = dest_binop(total.concl, "∨")
+      branches = []
+      [0, 1].each -> (side)
+        greater = side == 0 ? b : a
+        smaller = side == 0 ? a : b
+        lows = maximum ? [greater] + rest : lower
+        highs = maximum ? upper : [smaller] + rest
+        branches.push(interval_extremes(ty, lows, highs, facts + [@k.assume(cases[side])], fuel, verify))
+      return @k.disj_cases(total, branches[0], branches[1])
+    plus = @k.mk_const("+", ty_funs([ty, ty], ty))
+    if lower.size == 0
+      w = mk_apps(plus, [upper[0], mk_lit(Q_NEG_ONE, ty)])
+    elsif upper.size == 0
+      w = mk_apps(plus, [lower[0], mk_lit(Q_ONE, ty)])
+    else
+      divide = @k.mk_const("/", ty_funs([ty, ty], ty))
+      w = mk_apps(divide, [mk_apps(plus, [lower[0], upper[0]]), mk_lit([2, 1], ty)])
+    fuel[0] -= 1
+    verify.call(w, facts)
+
+  -> checked_interval_witness(goal, ex, w, facts)
+    body = tm_instantiate(ex.b, w, 0)
+    @k.exists_intro(goal.concl, w, interval_body_proof(goal, body, facts))
+
+  -> interval_body_proof(goal, body, facts)
+    pair = dest_binop(body, "∧")
+    if pair != nil
+      return @k.conj(interval_body_proof(goal, pair[0], facts), interval_body_proof(goal, pair[1], facts))
+    nodes = [128]
+    ty = type_of(body.a.b).name
+    recurrence_ring_cost(body.a.b, ty, nodes)
+    recurrence_ring_cost(body.b, ty, nodes)
+    linarith_proof(Goal.new(goal.fixes, [], body), facts)
+
+  -> witness_components(term)
+    pair = dest_binop(term, "∧")
+    if pair == nil
+      return [term]
+    witness_components(pair[0]) + witness_components(pair[1])
+
+  # Infer witnesses from actual evidence for a conjunct mentioning the binder.
+  # All obligations for a candidate use that same substitution.
+  -> witness_feedback(goal, hints)
+    ex = dest_unop(goal.concl, "∃")
+    if ex == nil || ex.tag != :lam || dest_binop(ex.b, "∧") == nil || !auto_small_term?(ex.b, [128])
+      return nil
+    facts = []
+    goal.hyps.each -> (h) auto_add_fact(facts, @k.assume(h[1]))
+    hints.each -> (th)
+      if !th.tags.include?("sorry") && th.hyps.all?(-> (hyp) goal.hyps.any?(-> (h) tm_eq(h[1], hyp)))
+        auto_add_fact(facts, th)
+    i = 0
+    while i < facts.size && i < 64
+      th = facts[i]
+      if dest_binop(th.concl, "∧") != nil
+        auto_add_fact(facts, @k.conj1(th))
+        auto_add_fact(facts, @k.conj2(th))
+      i += 1
+    v = auto_fresh(goal, facts, [], ex.ty)
+    leaves = witness_components(ex.b)
+    if ex.ty == TY_RAT_SINGLETON || ex.ty == TY_REAL_SINGLETON
+      note = interval_gap_feedback(goal, ex, v, leaves, facts, hints)
+      if note != nil
+        return note
+    flexible = {}
+    flexible[v.vkey] = true
+    seen = {}
+    best = nil
+    bounds = facts.select -> (th) comparison?(th.concl)
+    fuel = [8]
+    leaves.each -> (part)
+      if occurs_bnd(part, 0)
+        pattern = tm_instantiate(part, v, 0)
+        facts.each -> (th)
+          if seen.size >= 12
+            break
+          mt = Matcher.new(flexible, {})
+          if mt.m(pattern, th.concl, 0)
+            w = mt.tm[v.vkey]
+            if w != nil && auto_small_term?(w, [64]) && tm_set_add?(seen, w)
+              progress = witness_conditions(leaves, w, facts, bounds, fuel)
+              if progress != nil && (best == nil || progress[0] < best[0])
+                best = progress
+                if best[0] == 1
+                  return checked_progress_note(best[1], best[2], tm_show(w))
+    best == nil ? nil : checked_progress_note(best[1], best[2], tm_show(best[3]))
+
+  # A weak comparison suggests a repair only if every witness forces the
+  # strict comparison and adding the disequality proves the original goal.
+  -> interval_gap_feedback(goal, ex, v, leaves, facts, hints)
+    if leaves.size > 6 || facts.size > 16
+      return nil
+    nodes = [512]
+    if !facts.all?(-> (th) auto_small_term?(th.concl, nodes))
+      return nil
+    lower = []
+    upper = []
+    strict = false
+    ty = ex.ty
+    le = @k.mk_const("≤", ty_funs([ty, ty], ty_bool))
+    nodes = [128]
+    begin
+      leaves.each -> (part)
+        cmp = dest_cmp_rel(part)
+        if cmp == nil || !ty_eq(type_of(cmp[1]), ty)
+          return nil
+        recurrence_ring_cost(cmp[1], ty.name, nodes)
+        recurrence_ring_cost(cmp[2], ty.name, nodes)
+        strict = strict || cmp[0] == "<"
+        if occurs_bnd(part, 0)
+          if !occurs_bnd(cmp[1], 0)
+            lower.push(cmp[1])
+          if !occurs_bnd(cmp[2], 0)
+            upper.push(cmp[2])
+        elsif cmp[0] == "<"
+          # A binder-independent strict side condition can be the only gap.
+          lower.push(cmp[1])
+          upper.push(cmp[2])
+      if !strict
+        return nil
+      candidates = []
+      lower.each -> (a)
+        upper.each -> (b) candidates.push(mk_apps(le, [a, b]))
+      # The context can supply a more natural spelling after rescaling,
+      # e.g. 2*a ≤ 3*b for a < 3*x and 2*x < b.
+      facts.each -> (th)
+        if dest_binop(th.concl, "≤") != nil && ty_eq(type_of(th.concl.a.b), ty)
+          candidates.push(th.concl)
+      body = @k.assume(tm_instantiate(ex.b, v, 0))
+      seen = {}
+      trials = [3]
+      candidates.each -> (weak)
+        if seen.size >= 10 || trials[0] == 0
+          break
+        sides = dest_binop(weak, "≤")
+        if !tm_eq(sides[0], sides[1]) && tm_set_add?(seen, weak)
+          note = checked_interval_gap(goal, hints, v, body, weak, trials)
+          if note != nil
+            return note
+    rescue e
+      return nil
+    nil
+
+  -> checked_interval_gap(goal, hints, v, body, weak, trials)
+    sides = dest_binop(weak, "≤")
+    lt = @k.mk_const("<", type_of(weak.a.a))
+    begin
+      required = interval_body_proof(goal, mk_apps(lt, sides), [body])
+      if !hyps_has?(required.hyps, body.concl)
+        return nil
+      necessary = @k.choose(v, @k.assume(goal.concl), required)
+      trials[0] -= 1
+      bound = feedback_proof(goal.with_concl(weak), hints)
+      if bound == nil || bound.tags.include?("sorry")
+        return nil
+      equal = @k.eq_tm(sides[0], sides[1])
+      missing = @k.neg_tm(equal)
+      if feedback_proof(goal.with_concl(equal), hints) != nil || feedback_proof(goal.with_concl(missing), hints) != nil
+        return nil
+      repair = feedback_proof(goal.add_hyp("interval_gap", missing), hints)
+      if repair == nil || !hyps_has?(repair.hyps, missing)
+        return nil
+      checked_progress_note(bound, missing, nil, [necessary, @k.disch(missing, repair)])
+    rescue e
+      nil
+
+  -> witness_conditions(parts, w, facts, bounds, fuel)
+    known = nil
+    missing = nil
+    count = 0
+    supported = false
+    seen = {}
+    parts.reverse.each -> (part)
+      leaf = tm_instantiate(part, w, 0)
+      proof = nil
+      neg = dest_unop(leaf, "¬")
+      if neg == nil
+        neg = @k.neg_tm(leaf)
+      facts.each -> (th)
+        if tm_eq(th.concl, neg)
+          return nil
+        if proof == nil && tm_eq(th.concl, leaf)
+          proof = th
+      if proof != nil && occurs_bnd(part, 0)
+        supported = true
+      if !tm_set_add?(seen, leaf)
+        next
+      if proof == nil
+        if witness_trivial(neg) != nil
+          return nil
+        proof = witness_trivial(leaf)
+      comparison = leaf.tag == :app && leaf.a.op == OP_NOT ? leaf.b : leaf
+      if proof == nil && comparison?(comparison)
+        if fuel[0] == 0
+          return nil
+        fuel[0] -= 1
+        proof = witness_comparison(comparison, bounds)
+        if proof != nil && !tm_eq(proof.concl, leaf)
+          return nil
+      if proof == nil
+        if leaf.op == OP_FALSE
+          return nil
+        missing = missing == nil ? leaf : @k.bin("∧", leaf, missing)
+        count += 1
+      else
+        known = known == nil ? proof : @k.conj(proof, known)
+    if !supported || missing == nil || known.tags.include?("sorry")
+      return nil
+    [count, known, missing, w]
+
+  -> witness_trivial(term)
+    if term.op == OP_TRUE
+      return @k.truth
+    sides = @k.dest_eq(term)
+    if sides != nil && tm_eq(sides[0], sides[1])
+      return @k.refl(sides[0])
+    nil
+
+  # Return a checked bound or its negation when small linear facts settle it.
+  -> witness_comparison(leaf, bounds)
+    goal = Goal.new([], [], leaf)
+    begin
+      cmp = dest_cmp_rel(leaf)
+      ty = type_of(cmp[1]).name
+      nodes = [64]
+      recurrence_ring_cost(cmp[1], ty, nodes)
+      recurrence_ring_cost(cmp[2], ty, nodes)
+      relevant = auto_relevant_comparisons(goal, bounds)
+      if relevant.size > 8
+        return nil
+      worker = Prover.new(@session)
+      begin
+        return worker.linarith_proof(goal, relevant)
+      rescue e
+        return worker.linarith_proof(goal.with_concl(@k.neg_tm(leaf)), relevant)
     rescue e
       nil
 
@@ -6087,9 +7092,14 @@
           r = tac_simp(g, [], true)
           if @goals.size < saved.size
             return r
+          if r.size == 1 && r[0] != g && comparison?(r[0].goal.concl)
+            begin
+              return close(r[0], linarith_proof(r[0].goal, hints))
+            rescue e
+              0
           @goals = saved
         when :linarith
-          return tac_linarith(g, [])
+          return tac_linarith(g, [], false)
         when :contradiction
           return tac_contradiction(g)
       rescue e
@@ -6115,6 +7125,10 @@
     hinted = auto_hint_proof(g.goal, hints + auto_local_hints(g.goal) + auto_default_hints(g.goal), hints, budget, seen)
     if hinted != nil
       return close(g, fit(g, hinted))
+    if seen.size == 0 && (g.goal.concl.search_ops & TERM_DIVMOD) != 0
+      divided = auto_division_cases(g.goal, hints)
+      if divided != nil
+        return close(g, fit(g, divided))
     if hints.size > 0
       forwarded = comparison?(g.goal.concl) ? nil : auto_forward(g.goal, hints)
       if forwarded != nil
@@ -6161,15 +7175,22 @@
       rescue e
         @goals = saved
     if seen.size == 0
-      arithmetic = auto_subterm_arithmetic(g.goal, hints)
+      arithmetic = cast_arithmetic_proof(g.goal, hints)
+      if arithmetic == nil
+        arithmetic = auto_subterm_arithmetic(g.goal, hints)
       if arithmetic == nil
         arithmetic = auto_sum_arithmetic(g.goal, hints)
+      if arithmetic == nil
+        arithmetic = auto_field_arithmetic(g.goal, hints)
       if arithmetic != nil
         return close(g, fit(g, arithmetic))
       # Try a proved equality rule in the other orientation once at the root.
       # Share the existing fuel and remember both goals when solving premises.
       equality = @k.dest_eq(g.goal.concl)
       if equality != nil && type_of(equality[0]).name != "bool"
+        power = auto_power_step(g.goal, hints)
+        if power != nil
+          return close(g, fit(g, power))
         reversed = g.goal.with_concl(@k.eq_tm(equality[1], equality[0]))
         candidates = hints + auto_local_hints(reversed) + auto_default_hints(reversed)
         proof = auto_hint_proof(reversed, candidates, hints, budget, seen + [g.goal.concl])

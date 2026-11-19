@@ -1,0 +1,15 @@
+opaque ready : ℕ → Prop
+opaque permitted : ℕ → Prop
+axiom permission (i : ℕ) (h : ready i) : permitted i
++ bridge (i : ℕ) (h : ready i) : permitted i := permission i h
++ copy (i : ℕ) (h : ready i) : permitted i := bridge i h
+@[auto] + forbidden (i : ℕ) (h : ready i) : permitted i := copy i h
++ downstream (i : ℕ) (h : ready i) : permitted i := by auto
++ no_advice (i : ℕ) : permitted i := by auto
+
++ product (a b c : ℤ) (h : a ≤ b) (hc : 0 ≤ c) : a*c ≤ b*c := by nlinarith
+@[auto] + scaling (a b c : ℤ) (h : a ≤ b) (hc : 0 ≤ c) : a*c ≤ b*c := product a b c h hc
++ needs_sign (a b c : ℤ) (h : a ≤ b) : a*c ≤ b*c := by auto
+
++ unfinished (p : Prop) : p := by sorry
+@[auto] + unfinished_rule (p : Prop) : p := unfinished p

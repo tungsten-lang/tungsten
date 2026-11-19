@@ -1,5 +1,12 @@
 # TODO
 
+## Satori and Tungsten examples
+
+- [ ] Expand both corpora with checked Satori proofs and runnable Tungsten
+  programs drawn from real work. Include compact proofs from several areas of
+  mathematics and idiomatic programs that solve complete scientific problems.
+  Record each example’s source and the command that verifies it.
+
 ## Compiler bugs found building core/physics + Plot3D (2026-08-03)
 
 Found porting Lanyon's CompressibleEuler to core/physics with the Plot3D

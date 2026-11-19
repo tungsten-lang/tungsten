@@ -1,0 +1,12 @@
+import arith
+
++ exists_gap_parameter (a b : ℝ) (ha : 0 < a) :
+    ∃ t : ℝ, 0 < t ∧ t < 1 ∧ (1 - t) * b < t * a
+  auto
+
++ interior_bound (lo hi m u : ℚ) (h : lo < hi) (gap : m*lo < u) :
+    ∃ x, lo < x ∧ x < hi ∧ m*x < u
+  auto
+
++ common_step (m n : ℝ) : ∃ t : ℝ, 0 < t ∧ m*t < 2 ∧ n*t < 1
+  auto

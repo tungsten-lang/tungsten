@@ -70,6 +70,10 @@
   -> apply_rule(r, t, depth)
     mt = Matcher.new(r.pvars, r.tvs)
     if !mt.m(r.lhs, t, 0)
+      # With fixed types and no binders, a failed first-order match cannot
+      # change on retry: none of its bindings can introduce a beta/eta step.
+      if r.tvs.size == 0 && r.lhs.mx == 0 && ((r.lhs.search_ops | t.search_ops) & TERM_LAMBDA) == 0
+        return nil
       mt = Matcher.new(r.pvars, r.tvs).match_instantiated(@d, r.lhs, t)
       if mt == nil
         return nil

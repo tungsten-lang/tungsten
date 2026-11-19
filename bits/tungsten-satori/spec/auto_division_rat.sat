@@ -89,3 +89,21 @@ axiom supplied_cross : known_a ≤ known_b*2
 
 + explicit_bound : known_a/2 ≤ known_b
   auto [supplied_cross]
+
++ scaled_bound (a b c t : ℚ) (hc : 0 < c) (hab : a/c ≤ b) (ht : b*c < t) : a < t := by auto
+
++ nested_slope (z l d : ℚ) (hz : 0 < z) (hl : 0 < l) (hzl : 2+3*l < z) (hd : d < (l/z-1)/(1+l)) : 2 < -d*z := by auto
+
++ discount_loss (c t : ℚ) (hc : 0 ≤ c) (ht : 0 ≤ t) : c - c/(1+t) ≤ c*t := by auto
+
+axiom supplied_positive : 0 < known_a
++ conditional_scale (x y t : ℚ) (h : x/known_a ≤ y) (ht : y*known_a < t) : x < t
+  auto [supplied_positive]
+
+-- The percolation potential permits a vanishing denominator.
++ square_over_bound (a r : ℚ) (ha : 0 ≤ a) (hr : 0 ≤ r) (hra : r ≤ a) : r^2/a ≤ r := by auto
++ zero_denominator (a b : ℚ) (hl : 0 ≤ b) (hu : b ≤ 0) : a/b = 0 := by auto
++ zero_numerator (a : ℚ) : 0/a = 0 := by simp
++ lower_at_zero (a b c : ℚ) (hc : 0 ≤ c) (hz : c = 0 → a ≤ 0) (h : a*c ≤ b) : a ≤ b/c := by auto
++ strict_at_zero (a b c : ℚ) (hc : 0 ≤ c) (hz : c = 0 → 0 < b) (h : a+1 ≤ b*c) : a/c < b := by auto
++ strict_lower_at_zero (a b c : ℚ) (hc : 0 ≤ c) (hz : c = 0 → a < 0) (h : a*c < b) : a < b/c := by auto

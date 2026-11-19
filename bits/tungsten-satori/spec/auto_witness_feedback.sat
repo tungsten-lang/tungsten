@@ -1,0 +1,24 @@
+opaque active : ℕ → Prop
+opaque ready : ℕ → Prop
+opaque signed : ℕ → Prop
+axiom marked (u : ℕ) : active u
+
++ guarded (k n : ℕ) (bound : k < n) (h : active k) : ∃ j ≤ n, active j ∧ ready j := by auto
++ compound (f : ℕ → ℕ) (k : ℕ) (h : active (f k)) : ∃ j, active j ∧ ready j := by auto
++ nested (k : ℕ) (h : active k ∧ signed k) : ∃ j, (active j ∧ ready j) ∧ signed j := by auto
++ ranked (x y : ℕ) (hx : active x) (hy : active y ∧ signed y) : ∃ j, active j ∧ signed j ∧ ready j := by auto
++ supplied (x : ℕ) : ∃ j, active j ∧ ready j := by auto [marked x]
++ two_missing (x : ℕ) (h : active x) : ∃ j, active j ∧ (ready j ∧ signed j) := by auto
++ independent (x : ℕ) (h : active x) : ∃ j : ℕ, active x ∧ ready j := by auto
++ no_fact : ∃ j, active j ∧ ready j := by auto
++ refuted (x : ℕ) (hx : active x) (hn : ¬ ready x) : ∃ j, active j ∧ ready j := by auto
++ refuted_neg (x : ℕ) (hx : active x) (hr : ready x) : ∃ j, active j ∧ ¬ ready j := by auto
++ impossible (x : ℕ) (hx : active x) : ∃ j < 0, active j := by auto
++ outside (hx : active 7) : ∃ j < 5, active j := by auto
++ unrelated (x : ℕ) (hx : active x) : ∃ j, ready j ∧ signed j := by auto
++ repaired (k n : ℕ) (bound : k < n) (h : active k) (r : ready k) : ∃ j ≤ n, active j ∧ ready j := by auto
++ repaired_pair (k : ℕ) (h : active k) (rest : ready k ∧ signed k) : ∃ j, active j ∧ (ready j ∧ signed j) := by auto
++ alternative (x y : ℕ) (hx : active x) (hy : active y) (no : ¬ ready x) : ∃ i, active i ∧ ready i := by auto
++ no_refl (p : α → Prop) (x : α) (h : p x) : ∃ i, p i ∧ i ≠ i := by auto
++ negated_guard (x n : ℕ) (hx : active x) (hr : x < n) : ∃ i, active i ∧ ¬ (i ≤ n) := by auto
++ repeated (k : ℕ) (h : active k) : ∃ j, active j ∧ (ready j ∧ ready j) := by auto

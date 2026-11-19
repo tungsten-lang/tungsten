@@ -1,0 +1,58 @@
+import arith
+
+-- The multiplier step of common_clamp_ratio, with its sign hypothesis removed.
++ clamp (lo hi A y : ℝ) (hA : 1 ≤ A) : 1 * max lo (min hi y) ≤ A * max lo (min hi y)
+  auto [mul_le_mul_of_nonneg_right.real]
++ clamp_repaired (lo hi A y : ℝ) (hA : 1 ≤ A) (hlo : 0 ≤ lo) : 1 * max lo (min hi y) ≤ A * max lo (min hi y)
+  auto [mul_le_mul_of_nonneg_right.real]
+
+opaque ready : ℕ → Prop
+opaque active : ℕ → Prop
+opaque done_at : ℕ → Prop
+opaque mark : ℕ → Prop
+axiom finish (i : ℕ) : ready i → active i → done_at i
+axiom marked (i : ℕ) : mark i → done_at i
+axiom visible (i : ℕ) : ready i
+
++ first_missing (i : ℕ) (h : active i) : done_at i := by auto [finish]
++ supplied (i : ℕ) : done_at i := by auto [finish, visible]
++ refuted (i : ℕ) (h : ready i) (hn : ¬ active i) : done_at i := by auto [finish]
++ second_path (i : ℕ) (h : ready i) (hn : ¬ active i) : done_at i := by auto [finish, marked]
++ two_missing (i : ℕ) : done_at i := by auto [finish]
++ other_index (i j : ℕ) (h : ready i) : done_at i := by auto [finish j]
++ circular (i : ℕ) (rule : done_at i ∧ ready i → done_at i) : done_at i := by auto [rule]
++ repaired (i : ℕ) (h : active i) : done_at i := by auto [finish, visible]
+
+opaque aggregate : (ℕ → ℚ) → ℕ → ℚ
+axiom aggregate_nonneg (f : ℕ → ℚ) (n : ℕ) : (∀ i < n, 0 ≤ f i) → 0 ≤ aggregate f n
++ quantified (f : ℕ → ℚ) (n : ℕ) : 0 ≤ aggregate f n := by auto [aggregate_nonneg f]
++ quantified_repaired (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ aggregate f n := by auto [aggregate_nonneg f]
+
+-- Search the imported registrations without naming a rule.
++ unordered (a b : ℚ) (h : a ≠ b) : a < b := by auto
++ backwards (a b : ℤ) (h : b < a) : a < b := by auto
++ cast_guard (q : ℚ) : 0 ≤ (q : ℝ) := by auto
++ registered_clamp (lo hi A y : ℝ) (hA : 1 ≤ A) : 1 * max lo (min hi y) ≤ A * max lo (min hi y)
+  auto
++ registered_repair (lo hi A y : ℝ) (hA : 1 ≤ A) (hlo : 0 ≤ lo) : 1 * max lo (min hi y) ≤ A * max lo (min hi y)
+  auto
+axiom mul_le_mul_of_nonneg_right.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : a*c ≤ b*c
++ shadowed_scale (a b c : ℝ) (h : a ≤ b) : a*c ≤ b*c := by auto
+
+-- A default library rule can expose one missing guard without being named.
++ quotient (a b c : ℝ) (h : a ≤ b*c) : a/c ≤ b := by auto
+-- normalized_edge_bound from Gotsman–Linial, with denominator positivity removed.
++ edge_bound (N C T a : ℝ) (hedge : C ≤ 2*T) (henergy : T ≤ 4*a*N) : C/N ≤ 8*a := by auto
++ power_guard (a b : ℝ) (n : ℕ) (h : a < b) : a^n ≤ b^n := by auto
++ refuted_guard (a b c : ℝ) (h : a ≤ b*c) (hc : c = 0) : a/c ≤ b := by auto
++ unrelated_guard (a b c t : ℝ) (ht : 0 < t) : a/c ≤ b := by auto
++ quotient_repaired (a b c : ℝ) (h : a ≤ b*c) (hc : 0 < c) : a/c ≤ b := by auto
+
+opaque A : ℝ
+opaque B : ℝ
+opaque C : ℝ
+axiom stronger_bound : A+1 ≤ B*C
++ supplied_quotient : A/C ≤ B := by auto [stronger_bound]
++ unfinished_bound : A+1 ≤ B*C := by sorry
++ unsupported_quotient : A/C ≤ B := by auto [unfinished_bound]
++ local_evidence (h : A+1 ≤ B*C) : A/C ≤ B := by auto [unfinished_bound]

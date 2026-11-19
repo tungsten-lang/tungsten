@@ -6,10 +6,11 @@ use proof_source
   session.quiet = true
   session.no_cache = true
   session.run_import("prelude")
+  registered = session.auto_rules.size
   session.run_source(proof_declarations("bits/tungsten-satori/prelude/quadratic.sat", ["quadratic_form.bound." + suffix]))
   good = ["form", "product", "guarded"].map -> (name) suffix + "_" + name
   session.run_source(proof_declarations("bits/tungsten-satori/spec/auto_registration.sat", good))
-  if session.failures != 0 || session.auto_rules.size != 1
+  if session.failures != 0 || session.auto_rules.size != registered + 1
     raise "registered quadratic rules failed: " + suffix
   good.each -> (name)
     th = session.theorems[name]

@@ -1,0 +1,8 @@
++ strict_gap (a b : ℚ) (h : a ≤ b) : ∃ x, a < x ∧ x < b := by auto
++ strict_singleton (a : ℚ) : ∃ x, x = a ∧ 3*x < 3*a := by auto
++ cancelled_false (a : ℝ) : ∃ x, a < x ∧ x + a < x + a := by auto
++ impossible_intersection (a b : ℝ) (h : a < b) : ∃ x, a < x ∧ x < b ∧ b ≤ x := by auto
++ adjacent_integers (a : ℤ) : ∃ x : ℤ, a < x ∧ x < a + 1 := by auto
++ opaque_range (f : ℚ → ℚ) (a : ℚ) : ∃ x, f x = a := by auto
++ different_index (i j : ℕ) : ∃ x, f i < 3*x ∧ 3*x < g j := by auto [gap]
++ missing_guard (i : ℕ) : ∃ x, f i < 3*x ∧ 3*x < g i := by auto [guarded_gap]

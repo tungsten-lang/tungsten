@@ -435,9 +435,16 @@ SATC_LIB_FILES = [
     out.to_s
 
 
+-> auto_registration_error(tags, allow_split = false)
+  tags.each -> (tag)
+    if !["oracle:arith", "oracle:ring", "oracle:sat"].include?(tag) && !(allow_split && tag.starts_with?("split:"))
+      return "auto registration excludes " + tag + "; use an explicit auto hint instead"
+  nil
+
 + Session
   ro :k, :d, :elab, :theorems, :simp_rules, :simp_by_head, :simp_general, :messages, :stats, :root, :failures, :auto_rules, :auto_rule_version
-  rw :prelude_mode, :quiet, :only, :no_cache, :keep_messages
+  ro :auto_default_names
+  rw :prelude_mode, :quiet, :only, :no_cache, :keep_messages, :auto_rule_index, :auto_default_index
 
   -> new(@root)
     @k = KKernel.new
@@ -445,7 +452,10 @@ SATC_LIB_FILES = [
     @d = Derived.new(@k)
     @elab = Elab.new(@k)
     @theorems = {}
+    @auto_default_names = {}
+    @auto_default_index = nil
     @auto_rules = {}
+    @auto_rule_index = nil
     @auto_rule_version = 0
     @order = []
     @simp_rules = []
@@ -521,22 +531,29 @@ SATC_LIB_FILES = [
       return t
     @k.defs[name]
 
-  -> add_theorem(name, th)
+  -> bind_theorem(name, th)
     @theorems[name] = th
     @order.push(name)
+    if @auto_default_index != nil && @auto_default_names.has_key?(name)
+      @auto_default_index = nil
+    th
+
+  -> add_theorem(name, th)
+    bind_theorem(name, th)
     if @rec != nil
       @rec.add_thm(name, th)
 
   -> check_auto_rule(th)
     if th == nil || th.hyps.size != 0 || tm_frees(th.concl).size != 0
       raise "auto registration requires a closed proved theorem"
-    th.tags.each -> (tag)
-      if !["oracle:arith", "oracle:ring", "oracle:sat"].include?(tag) && !(@only != nil && tag.starts_with?("split:"))
-        raise "auto registration excludes " + tag + "; use an explicit auto hint instead"
+    error = auto_registration_error(th.tags, @only != nil)
+    if error != nil
+      raise error
 
   -> register_auto_rule(name, th)
     check_auto_rule(th)
     @auto_rules[name] = th
+    @auto_rule_index = nil
     @auto_rule_version += 1
     if @rec != nil
       @rec.add_auto(name)
@@ -740,15 +757,13 @@ SATC_LIB_FILES = [
               tgs[j] = flds[4 + j]
               j += 1
             th = @k.restore_thm(concl, tgs)
-            @theorems[nm] = th
-            @order.push(nm)
+            bind_theorem(nm, th)
           elsif tag == "O_AXIOM"
             nm = flds[1]
             concl = tms[flds[2].to_i]
             fnd = flds[3] == "1"
             th = @k.new_axiom(nm, concl, fnd)
-            @theorems[nm] = th
-            @order.push(nm)
+            bind_theorem(nm, th)
           elsif tag == "O_DEF"
             @k.restore_define(flds[1], tms[flds[2].to_i])
           elsif tag == "O_EQNS"
@@ -1042,8 +1057,7 @@ SATC_LIB_FILES = [
   -> exec_axiom(c)
     r = @elab.elab_prop(c.ty, c.binders, true)
     th = @k.new_axiom(c.name, r[0], @prelude_mode)
-    @theorems[c.name] = th
-    @order.push(c.name)
+    bind_theorem(c.name, th)
     if @rec != nil
       @rec.add_axiom(c.name, r[0], @prelude_mode)
       @rec.axiom_count = @rec.axiom_count + 1
@@ -1067,7 +1081,7 @@ SATC_LIB_FILES = [
         if c.text == "auto"
           register_auto_rule(c.name, th)
         @stats["theorems"] = @stats["theorems"] + 1
-        say("⋯ split " + @thm_index.to_s + " " + c.name)
+        say("⋯ split " + @thm_index.to_s + " " + c.name + (c.text == "auto" ? " auto" : ""))
         return
     if c.tactics != nil
       th = prove_with_tactics(stmt, names, c.tactics)

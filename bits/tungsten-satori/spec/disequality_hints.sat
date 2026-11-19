@@ -1,0 +1,20 @@
+opaque row : ℕ → ℤ
+opaque col : ℕ → ℤ
+opaque ready : ℕ → Prop
+axiom apart (i : ℕ) : row i ≠ col i
+axiom guarded (i : ℕ) : ready i → col i ≠ row i
+axiom packet (i : ℕ) : row i ≤ col i ∧ col i ≠ row i
+
++ applied (i : ℕ) (h : row i ≤ col i) : row i < col i := by linarith [apart i]
++ quantified (i : ℕ) (h : row i ≤ col i) : row i < col i := by auto [apart]
++ widened (i : ℕ) (h : row i ≤ col i) : (row i : ℝ) < (col i : ℝ) := by auto [apart]
++ guarded_reverse (i : ℕ) (r : ready i) (h : row i ≤ col i) : row i < col i := by auto [guarded]
++ bundled (i : ℕ) : (row i : ℝ) < (col i : ℝ) := by linarith [packet i]
++ unused (i : ℕ) (h : row i < col i) : row i + 1 ≤ col i := by linarith [apart i]
+
++ strict_of_separated (f : ℕ → ℝ) (weak : ∀ i j, i ≤ j → f i ≤ f j)
+    (apart : ∀ i j, i ≠ j → f i ≠ f j) (m n : ℕ) (h : m < n) : f m < f n := by auto
++ strict_of_injective (f : ℕ → ℝ) (weak : ∀ i j, i ≤ j → f i ≤ f j)
+    (inj : ∀ i j, f i = f j → i = j) (m n : ℕ) (h : m < n) : f m < f n := by auto
+
++ at_least_three (q : ℕ) (h : q ≠ 0 ∧ q ≠ 1 ∧ q ≠ 2) : 3 ≤ q := by linarith

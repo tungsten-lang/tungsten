@@ -10,8 +10,8 @@ session.run_file("bits/tungsten-satori/spec/nat_witness.sat")
 session.run_file("bits/tungsten-satori/spec/nat_witness_examples.sat")
 if session.failures != 0
   raise "natural witness and descent proofs failed"
-lemmas = ["strong_induct", "reverse_induct", "exists_least_of", "exists_least", "least_le", "least_unique", "infinite_descent", "descent_bound", "no_infinite_descent"].map -> (name) "nat." + name
-applications = ["witness", "existential_witness", "zero_witness", "threshold_minimum", "least_bound", "strong_zero_and_step", "reverse_zero", "reverse_endpoint", "empty_prefix", "finite_prefix", "impossible_chain", "measure_descent", "yslices_disjoint", "sslices_disjoint", "least_below", "slices_cover", "descent_bound", "no_infinite_descent", "descent_drop", "no_cyclic_descent"]
+lemmas = ["strong_induct", "reverse_induct", "exists_least_of", "exists_least", "least_le", "least_unique", "infinite_descent", "descent_bound", "exists_nondecreasing_step", "no_infinite_descent"].map -> (name) "nat." + name
+applications = ["witness", "existential_witness", "zero_witness", "threshold_minimum", "least_bound", "strong_zero_and_step", "reverse_zero", "reverse_endpoint", "empty_prefix", "finite_prefix", "impossible_chain", "measure_descent", "yslices_disjoint", "sslices_disjoint", "least_below", "slices_cover", "descent_bound", "no_infinite_descent", "descent_drop", "no_cyclic_descent", "consecutive_eq"]
 (lemmas + applications).each -> (name)
   th = session.theorems[name]
   if th == nil || th.hyps.size != 0 || th.tags != ["oracle:arith"]
@@ -25,6 +25,6 @@ marked = session.theorems["marked_descent"]
 if marked == nil || marked.hyps.size != 0 || marked.tags != ["axiom:bad_step", "oracle:arith"]
   raise "descent lost its assumption tag"
 session.run_file("bits/tungsten-satori/spec/nat_witness_failure.sat")
-if session.failures != 10
+if session.failures != 12
   raise "natural patterns accepted an invalid bound or missing premise"
 << "Natural witness and descent patterns passed"

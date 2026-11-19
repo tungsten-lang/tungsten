@@ -1,0 +1,12 @@
+opaque top : ℕ → ℕ
+opaque previous : ℕ → ℕ
+axiom neighbor (i : ℕ) : 1 < i → top i = previous i + 1
+
++ positive (a : ℚ) (n : ℕ) (h : 0 < n) : a * a^(n-1) = a^n := by auto
++ successor (a k : ℤ) (n : ℕ) : k * a^(n+1) = a^n * k * a := by auto
++ offset (a b : ℚ) (n : ℕ) : a^(n+2) + b = b + a^(n+1)*a := by auto
++ opposite (a k : ℕ) (m n : ℕ) (h : m+1 = n) : k*a^n = k*a^m*a := by auto
++ hinted (a k : ℝ) (i : ℕ) (h : 2 < i) : k*a^(top i) = a^(previous i)*k*a := by auto [neighbor]
++ masked (a : ℚ) (n : ℕ) : (n : ℚ)^2*a^n = a^(n-1)*(n : ℚ)^2*a := by auto
++ sum_weight (a : ℝ) (m n : ℕ) :
+    ((m : ℝ) + (n : ℝ))*a^(m+n) = a*((m : ℝ) + (n : ℝ))*a^((m+n)-1) := by auto

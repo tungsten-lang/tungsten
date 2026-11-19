@@ -1,0 +1,22 @@
++ nat_int (n : ℕ) : 0 ≤ (n : ℤ) := by auto
++ nat_rat (n : ℕ) : 0 ≤ (n : ℚ) := by auto
++ int_rat (z : ℤ) (h : 0 ≤ z) : 0 ≤ (z : ℚ) := by auto
++ rat_real (q : ℚ) (h : 0 ≤ q) : 0 ≤ (q : ℝ) := by auto
+
+opaque sample_value : ℤ → ℤ
+axiom sample_sign (x : ℤ) : 0 ≤ sample_value x
+axiom sample_bound (z : ℤ) : sample_value z ≤ 9
++ marked (x : ℤ) : 0 ≤ (sample_value x : ℝ)
+  have h := sample_sign x
+  auto
++ use_bound (z : ℤ) : (sample_value z : ℝ) < 10 := by linarith [sample_bound z]
+
++ fractional (q : ℚ) (h : q < 1 / 2) : (q : ℝ) < 1 / 2 := by auto
++ opaque_order (f : α → ℤ) (i j : α) (h : f i ≤ f j) : (f i : ℝ) ≤ (f j : ℝ) := by auto
++ reflect_literal (n : ℕ) (h : (n : ℝ) ≤ 7) : n ≤ 7 := by linarith
++ cast_sum_bound (m n : ℕ) (h : m + 1 ≤ n) : (m : ℝ) + 1 ≤ (n : ℝ) := by linarith
++ discrete_gap (m n : ℤ) (h : m < n) : (m : ℝ) + 1 ≤ (n : ℝ) := by linarith
++ cone_coefficient (r : ℚ) (n : ℕ) (h : 0 - 1 / 32 ≤ r) (k : 3 ≤ n) : 0 < r + (n : ℚ) - 5 / 2 := by auto
++ same_domain (m n : ℕ) (z : ℝ) (h : ((m + n : ℕ) : ℝ) ≤ z) : (m : ℝ) + (n : ℝ) ≤ z := by linarith
++ inconsistent (n : ℕ) (h : 3 ≤ n) (k : (n : ℝ) ≤ 2) : False := by linarith
++ separated (m n : ℕ) (h : (m : ℝ) ≤ 3) (k : 4 ≤ n) : m ≠ n := by linarith

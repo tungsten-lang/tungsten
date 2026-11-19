@@ -94,6 +94,31 @@ project_goal = Goal.new([], [["h", exists_both]], exists_p)
 th = prover.auto_forward(project_goal)
 if th == nil || !tm_eq(th.concl, exists_p) || th.hyps.size != 1 || !tm_eq(th.hyps[0], exists_both)
   raise "auto failed to eliminate and reuse an existential witness"
+second = mk_var("S", ty_fun(ty_nat, ty_bool))
+both_at_n = k.quant("∃", n, k.bin("∧", mk_app(pred, n), mk_app(second, n)))
+excluded = k.neg_tm(both_at_n)
+at_x = [["none", excluded], ["hx", mk_app(pred, x)], ["sx", mk_app(second, x)]]
+th = prover.auto_forward(Goal.new([], at_x, r))
+if th == nil || !tm_eq(th.concl, r) || th.hyps.size != 3 || th.tags.size != 0
+  raise "auto failed to refute the exclusion with a common witness"
+separate = [["none", excluded], ["hx", mk_app(pred, x)], ["sn", mk_app(second, n)]]
+if prover.auto_forward(Goal.new([], separate, r)) != nil
+  raise "auto combined facts from different witnesses"
+k.declare_const("forbidden", ty_fun(ty_nat, ty_bool))
+forbidden = k.mk_const("forbidden", ty_fun(ty_nat, ty_bool))
+hint = k.new_axiom("no_forbidden", k.neg_tm(k.quant("∃", n, mk_app(forbidden, n))))
+premise = mk_app(forbidden, x)
+th = prover.auto_forward(Goal.new([], [["hx", premise]], r), [hint])
+if th == nil || th.hyps.size != 1 || !tm_eq(th.hyps[0], premise) || th.tags != ["axiom:no_forbidden"]
+  raise "the exclusion hint lost its proof dependencies"
+# Several other witnesses satisfy P. The named x already satisfies both predicates.
+crowded = [["px", mk_app(pred, x)], ["sx", mk_app(second, x)]]
+["A", "B", "C", "D"].each -> (name)
+  other = mk_var(name, ty_fun(ty_nat, ty_bool))
+  crowded.push([name, k.quant("∃", n, k.bin("∧", mk_app(pred, n), mk_app(other, n)))])
+th = prover.auto_forward(Goal.new([["x", x]], crowded, both_at_n))
+if th == nil || th.hyps.size != 2 || !hyps_has?(th.hyps, mk_app(second, x))
+  raise "irrelevant existential hypotheses exhausted the named witness search"
 escape_goal = Goal.new([["x", x]], [["h", exists_p]], mk_app(pred, x))
 if prover.auto_forward(escape_goal) != nil
   raise "auto allowed an existential witness to escape"

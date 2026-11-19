@@ -4,7 +4,18 @@ use spec
 use ../lib/solver
 
 + ChoiceBranchCheck < Wassat
-  ro :first_decision
+  ro :first_decision, :ncl
+
+  -> contains_clause(literals)
+    (0...@ncl).any? -> (ci)
+      start = @cmeta[ci * 2]
+      size = @cmeta[ci * 2 + 1]
+      @alive[ci] == 1 && size == literals.size && (0...size).all? -> (i)
+        literals.include?(@arena[start + i])
+
+  -> retire_first_row
+    @alive[0] = 0
+    self.rebuild_watches
 
   -> start_with_positive_phase
     @phase[1] = 1
@@ -96,6 +107,57 @@ describe("branching on choice clauses") ->
     s.add_input_clause([2, 8, 12])
     expect(s.choice_polarity(1)).to eq(0)
     expect(s.choose_now).to eq(0)
+
+  it("installs signed conditional clauses once before a worker freezes") ->
+    clauses = overlapping_choices(true)
+    s = ChoiceBranchCheck.new(24, clauses, WASSAT_PROOF_NONE, 0)
+    expect(s.contains_clause([1, 5, 6])).to eq(false)
+    s.enable_fixed_caps
+    expect(s.contains_clause([1, 5, 6])).to eq(true)
+    count = s.ncl
+    s.enable_fixed_caps
+    expect(s.ncl).to eq(count)
+    expect(s.solve_assuming([-1])["sat"]).to eq(true)
+    expect(s.solve_assuming([-1, -5, -6])["unsat"]).to eq(true)
+
+  it("packs repeated choices once when shortening a row") ->
+    rows = i32[19]
+    [5, 4, 6, 8, 8, 10, 5, 4, 6, 10, 8, 10, 5, 4, 6, 8, 8, 8, 0].each_with_index -> (x, i)
+      rows[i] = x
+    dir = i64[48]
+    dir[13] = 2
+    pool = i64[2]
+    pool[0] = 5
+    pool[1] = 7
+    out = i64[4]
+    expect(wassat_choice_residuals(rows, dir, pool, i32[16], out, 2)).to eq(2)
+    expect(out[0]).to eq(8 | (10 << 16))
+    expect(out[1]).to eq(8)
+
+  it("skips conditional clauses when a proof would need replay or boxed output") ->
+    [WASSAT_PROOF_WRAT, WASSAT_PROOF_DRAT].each -> (mode)
+      s = ChoiceBranchCheck.new(24, overlapping_choices(true), mode, 0)
+      count = s.ncl
+      expect(s.add_choice_supports).to eq(0)
+      expect(s.ncl).to eq(count)
+
+  it("rechecks live source rows before installing conditional clauses") ->
+    s = ChoiceBranchCheck.new(24, overlapping_choices(true), WASSAT_PROOF_NONE, 0)
+    count = s.ncl
+    s.retire_first_row
+    s.enable_fixed_caps
+    expect(s.contains_clause([1, 5, 6])).to eq(false)
+    expect(s.ncl).to eq(count)
+
+  it("replays queued root assignments against newly installed watches") ->
+    clauses = overlapping_choices(true)
+    clauses.push([-1])
+    clauses.push([-5])
+    s = ChoiceBranchCheck.new(24, clauses, WASSAT_PROOF_NONE, 0)
+    result = s.solve_budget(0)
+    expect(result["sat"]).to eq(true)
+    expect(result["model"][5]).to eq(6)
+    expect(s.contains_clause([1, 5, 6])).to eq(true)
 
   it("requires a binary exclusion for every pair in each overlapping row") ->
     s = ChoiceBranchCheck.new(24, overlapping_choices(false), WASSAT_PROOF_NONE, 0)

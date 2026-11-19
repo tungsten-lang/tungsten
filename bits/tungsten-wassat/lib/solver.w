@@ -738,7 +738,61 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       wassat_query_keep(@query_owner, seen, seen.size * 4) if @query_owner != nil
       return nil if wassat_choice_exclusions(rows, @bldir, @bl_pool, seen) == 0
       @choice_polarities = marks
+      @choice_input_end = @ncl
     rows
+
+  # Shorten choice rows under a single hypothetical literal at the root.
+  # Install the consequences before search or before a proof-free arm freezes.
+  # Repack the live prefix because branching hints may outlive a rewrite.
+  -> add_choice_supports
+    return 0 if @choice_polarities == nil || @choice_input_end == 0
+    last = @choice_input_end
+    @choice_input_end = 0
+    return 0 if @lookahead == 0 || @dlevel != 0 || @fixed_caps || @query_owner != nil || last > @ncl
+    # Streamed DRAT can emit short clauses directly from the raw literal buffer.
+    # Constructing strings or replaying WRAT hints costs more than this saves.
+    return 0 unless @proof_mode == WASSAT_PROOF_NONE || (@proof_mode == WASSAT_PROOF_DRAT && @dbytes != nil)
+    rows = i32[@choice_rows.size]
+    signs = i8[@nvars + 1]
+    occurrences = @config.long_occurrences
+    return 0 if wassat_pack_choice_rows(@arena, @cmeta, @alive, signs, rows, last, @nvars, occurrences) == 0
+    seen = i32[@nvars * 2 + 4]
+    residuals = i64[rows.size / 4 + 1]
+    # Spread a few trial variables over the input. Sparse residuals rarely
+    # repay a scan of every row for every variable.
+    stride = (@nvars + 7) / 8 ## i64
+    probe = 1 ## i64
+    hits = 0 ## i64
+    while probe <= @nvars && hits < 8
+      chosen = (probe << 1) + (signs[probe] < 0 ? 1 : 0)
+      hits += wassat_choice_residuals(rows, @bldir, @bl_pool, seen, residuals, chosen)
+      probe += stride
+    return 0 if hits < 8
+    added = 0 ## i64
+    limit = @nvars * 8 ## i64
+    v = 1 ## i64
+    while v <= @nvars && added < limit
+      chosen = (v << 1) + (signs[v] < 0 ? 1 : 0)
+      count = wassat_choice_residuals(rows, @bldir, @bl_pool, seen, residuals, chosen) ## i64
+      i = 0 ## i64
+      while i < count && added < limit
+        @lbuf[0] = 0 - v * signs[v]
+        word = residuals[i] ## i64
+        n = 1 ## i64
+        while word != 0
+          lit = word & 65535
+          @lbuf[n] = (lit >> 1) * (1 - 2 * (lit & 1))
+          n += 1
+          word = word >> 16
+        self.drat_put(@lbuf, 0, n, 0) if @proof_mode == WASSAT_PROOF_DRAT
+        # These bounded encoding clauses stay through learned-clause reduction.
+        self.store_flat(@lbuf, n)
+        added += 1
+        i += 1
+      v += 1
+    # Root assignments made before attachment must visit the new watches.
+    @qhead = 0 if added > 0
+    added
 
   # ---- literal encoding ---------------------------------------------------
 
@@ -2275,6 +2329,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # inprocessing scratch must exist now or never. Solvers that never freeze
     # (serial, scouts) allocate it lazily at their first round instead, so a
     # short-lived solver never pays for it.
+    if @proof_mode == WASSAT_PROOF_NONE && @choice_polarities != nil && @choice_input_end > 0
+      self.add_choice_supports
     self.prepare_inprocessing if @inprocess_at > 0
     @fixed_caps = true
     0
@@ -3730,6 +3786,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if @formula_unsat
       self.log_clause([]) unless @refuted
       return -1
+    self.add_choice_supports if @choice_polarities != nil && @choice_input_end > 0
     result = 0                       # 0 unknown, 1 sat, -1 unsat
     limited = false
     # Each saved phase array agrees with its own trail prefix. Independent
@@ -9406,6 +9463,62 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       break if count <= stop_at
     row = stop
   best >> 1
+
+# With chosen true, every other literal forced by its binary watches is true.
+# Excluding at least two members leaves a shorter implication: choosing x
+# requires at least one of the residual literals. A row satisfied under x
+# contributes nothing. Deduplicate residuals for each antecedent.
+# Store up to three remaining literal indices in 16-bit lanes. Zero terminates
+# a short word. Compact choice formulas have at most 512 variables.
+-> wassat_choice_residuals(rows, dir, pool, seen, out, chosen) (i32[] i64[] i64[] i32[] i64[] i64) i64
+  key = (chosen ^ 1) << 2
+  j = dir[key]
+  end = j + dir[key + 1]
+  return 0 if end - j < 2
+  seen[chosen] = chosen
+  while j < end
+    seen[pool[j] & 4294967295] = chosen
+    j += 1
+  row = 0 ## i64
+  used = 0 ## i64
+  while rows[row] > 0
+    i = row + 1
+    stop = i + rows[row]
+    size = 0 ## i64
+    a = 0 ## i64
+    b = 0 ## i64
+    c = 0 ## i64
+    while i < stop
+      lit = rows[i] ## i64
+      break if seen[lit] == chosen
+      if seen[lit ^ 1] != chosen
+        break if size == 3
+        size += 1
+        if a == 0 || lit < a
+          c = b
+          b = a
+          a = lit
+        elsif b == 0 || lit < b
+          c = b
+          b = lit
+        else
+          c = lit
+      i += 1
+    if i == stop && size > 0 && size + 2 <= rows[row]
+      # Repeated literals in an input row denote the same choice.
+      c = 0 if c == b
+      if b == a
+        b = c
+        c = 0
+      word = a | (b << 16) | (c << 32)
+      j = 0
+      while j < used && out[j] != word
+        j += 1
+      if j == used
+        out[used] = word
+        used += 1
+    row = stop
+  used
 
 # Both polarities use the same trail and watch storage as a search decision.
 # A successful probe is undone before scoring. Return -1 with the trial

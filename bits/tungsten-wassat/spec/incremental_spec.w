@@ -23,6 +23,39 @@ BVE_SIMPLE_INC = "p cnf 3 2\n1 2 0\n-1 3 0\n"
 
 describe "Wassat incremental solving" ->
 
+  context "rollout conflicts" ->
+    it "resumes a failed trial of either polarity after a shared budget stop" ->
+      [1, -1].each -> (failed)
+        opposite = 0 - failed
+        clauses = [[opposite, 2], [opposite, -2], [failed, 3, 4],
+                   [failed, 3, -4], [failed, -3, 4], [failed, -3, -4]]
+        # An independent satisfiable component enables automatic lookahead.
+        (5...18).each -> (i)
+          (i + 1...20).each -> (j)
+            clauses.push([i, j, 20])
+        s = Wassat.new(20, clauses, WASSAT_PROOF_WRAT, 0)
+        expect(s.trial(failed)).to eq(-1)
+        expect(s.trial(opposite) > 0).to eq(true)
+        expect(s.pick_branch_rollout).to eq(-1)
+
+        tickets = i64[2]
+        tickets[0] = 1
+        s.set_shared_conflict_budget(tickets, 1, 1)
+        stopped = s.solve_budget(0)
+        expect(stopped["status"]).to eq(0)
+        expect(stopped["decisions"]).to eq(1)
+        expect(stopped["conflicts"]).to eq(0)
+        expect(tickets[1]).to eq(0)
+
+        s.set_shared_conflict_budget(nil, 0, 0)
+        result = s.solve_budget(0)
+        expect(result["unsat"]).to eq(true)
+        input = StringBuffer()
+        input.append("p cnf 20 [clauses.size]\n")
+        clauses.each -> (clause)
+          input.append("[clause.join(" ")] 0\n")
+        expect(wrat_verify(input.to_s, wassat_proof_text(result))["verified"]).to eq(true)
+
   context "assumptions as decisions" ->
     it "solves SAT under assumptions and honors them in the model" ->
       s = inc_solver(IMPL_CHAIN, WASSAT_PROOF_NONE)

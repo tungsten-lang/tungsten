@@ -1201,33 +1201,27 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # truncated. Scoring is the classic product rule: a variable that propagates
   # a lot on BOTH polarities splits the search most evenly.
   #
-  # A trial that propagates to a conflict is a failed literal: the opposite
-  # polarity is implied, which is strictly better than branching at all.
+  # Keep a failed trial's trail intact for the ordinary CDCL conflict path.
   -> pick_branch_rollout
-    best = 0
-    bestscore = -1
-    tried = 0
-    v = 1
-    while v <= @nvars && tried < @lookahead
-      if @assign[v] == 0
-        tried += 1
-        pos = self.trial(v)
-        neg = self.trial(0 - v)
-        # A polarity that propagates to a conflict makes this variable a very
-        # attractive branch, but it is NOT acted on here: asserting the
-        # opposite literal mid-search would put an assignment at a decision
-        # level with no trail_lim entry, and backjumping would then mistake it
-        # for a decision. Failed-literal probing belongs at level zero.
-        score = 0
-        if pos < 0 || neg < 0
-          score = 1000000
-        else
-          score = pos * neg * 2 + pos + neg
-        if score > bestscore
-          bestscore = score
-          best = v
-      v += 1
-    best == 0 ? self.pick_branch_activity : best
+    @pstate[0] = @qhead
+    @pstate[1] = @tsize
+    @pstate[2] = -1
+    @pstate[5] = @use_chrono ? 1 : 0
+    choice = wassat_rollout_branch(
+      @arena, @assign, @lassign, @level, @reason, @phase, @wsdir, @wpool, @wp_state,
+      @trail, @trail_lim, @pstate, @bldir, @bl_pool, @heap, @heappos, @activity,
+      @hstate, @vq_stamp, @vq_state, @kbuf, @bstate, @cmeta, @alive,
+      @dlevel, @nvars, @ncl, @lookahead
+    )
+    return self.pick_branch_activity if choice == 0
+    @qhead = @pstate[0]
+    @tsize = @pstate[1]
+    @spine_active = 0
+    if choice < 0
+      @dlevel += 1
+      @decisions_made += 1
+      @pending_conflict = @pstate[2]
+    choice
 
   # Trial-assign one literal, propagate, and report how many literals that
   # implied. Returns -1 if the trial hit a conflict. Restores the trail.
@@ -4256,7 +4250,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               # far inside the parity gate.
               pl = @bphase[v] if @use_target && (!@target_stable_only || @mode_stable) && @bphase[v] != 0
               self.enqueue(pl > 0 ? v : 0 - v, -1)
-            # v < 0 means rollout applied a forced literal; just loop again
+            # A negative result returns to the loop with the trail already updated.
     limited ? 0 : result
 
   # Flat-load construction for the trusted path: build the solver shell
@@ -8218,19 +8212,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       if rs[2] == 1
         tp = bph[v] ## i64
         pol = tp if tp != 0
-      l = v
-      if pol > 0
-        pol = 1
-      else
-        pol = 0 - 1
-        l = 0 - v
-      asg[v] = pol
-      lasg[v << 1] = pol
-      lasg[(v << 1) + 1] = 0 - pol
-      lvl[v] = dl
-      rsn[v] = 0 - 1
-      phs[v] = pol
-      tr[ts] = l
+      pol = pol > 0 ? 1 : -1
+      wassat_enqueue_decision(asg, lasg, lvl, rsn, phs, tr, ts, dl, v, pol)
       st[1] = ts + 1
       st[2] = 0 - 1
       st[3] = 0
@@ -9284,6 +9267,62 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       count += 1
     i += 1
   count
+
+# Append an unreasoned decision to an unassigned variable's trail slot.
+-> wassat_enqueue_decision(asg, lasg, lvl, rsn, phs, tr, slot, dl, v, polarity) (i8[] i8[] i64[] i32[] i8[] i32[] i64 i64 i64 i64) i64
+  asg[v] = polarity
+  lasg[v << 1] = polarity
+  lasg[(v << 1) + 1] = 0 - polarity
+  lvl[v] = dl
+  rsn[v] = -1
+  phs[v] = polarity
+  tr[slot] = polarity * v
+  0
+
+# Both polarities use the same trail and watch storage as a search decision.
+# A successful probe is undone before scoring. Return -1 with the trial
+# still on the trail when propagation supplies a conflict clause.
+-> wassat_rollout_branch(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, tlim, st, bd, blp, heap, hpos, act, hst, vqs, vst, kbuf, bs, cm, alive, dl, nv, ncl, limit) (i32[] i8[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i32[] i32[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64 i64 i64 i64) i64
+  best = 0 ## i64
+  best_score = -1 ## i64
+  tried = 0 ## i64
+  trial_level = dl + 1
+  v = 1 ## i64
+  while v <= nv && tried < limit
+    if asg[v] == 0
+      tried += 1
+      positive = 0 ## i64
+      polarity = 1 ## i64
+      while polarity >= -1
+        mark = st[1]
+        tlim[dl] = mark
+        wassat_enqueue_decision(asg, lasg, lvl, rsn, phs, tr, mark, trial_level, v, polarity)
+        st[1] = mark + 1
+        while true
+          st[2] = -1
+          st[3] = 0
+          wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, trial_level, bd, blp)
+          break if st[3] == 0
+          # Propagation rewinds the interrupted watch list before returning.
+          wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, 2 * nv + 4)
+          wst[2] = 0
+        return -1 if st[2] >= 0
+        gain = st[1] - mark
+        bs[0] = trial_level
+        bs[1] = st[1]
+        wassat_backjump(tr, tlim, asg, lasg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, bs, dl, st[5])
+        st[0] = bs[2]
+        st[1] = bs[1]
+        if polarity > 0
+          positive = gain
+        else
+          score = 2 * positive * gain + positive + gain
+          if score > best_score
+            best_score = score
+            best = v
+        polarity -= 2
+    v += 1
+  best
 
 # Native backjump: pop trail levels above `target`, unassigning and
 # re-inserting each variable into the decision heap; under chronological

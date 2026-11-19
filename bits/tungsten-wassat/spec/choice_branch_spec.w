@@ -134,6 +134,36 @@ describe("branching on choice clauses") ->
     expect(out[0]).to eq(8 | (10 << 16))
     expect(out[1]).to eq(8)
 
+  it("matches scalar residuals across word boundaries and repeated row members") ->
+    nrows = 130
+    rows = i32[6 * nrows + 1]
+    (0...nrows).each -> (r)
+      rows[6 * r] = 5
+      [10, 12, 14, 16, 18].each_with_index -> (lit, i)
+        rows[6 * r + i + 1] = lit
+    special = [[0, 4, 6, 10, 12, 14], [63, 4, 4, 16, 18, 20], [64, 6, 4, 22, 24, 26],
+               [127, 6, 6, 28, 30, 32], [128, 4, 6, 34, 36, 38], [129, 4, 6, 8, 40, 42]]
+    special.each -> (entry)
+      (1..5).each -> (i)
+        rows[6 * entry[0] + i] = entry[i]
+    starts = i32[nrows]
+    stride = 22
+    masks = i64[3 * stride]
+    wassat_index_choice_rows(rows, starts, masks, stride)
+    dir = i64[176]
+    dir[13] = 3
+    pool = i64[3]
+    pool[0] = 5
+    pool[1] = 7
+    pool[2] = 8
+    direct = i64[nrows]
+    indexed = i64[nrows]
+    n = wassat_choice_residuals(rows, dir, pool, i32[44], direct, 2)
+    expect(n).to eq(5)
+    expect(wassat_indexed_choice_residuals(rows, dir, pool, i32[44], indexed, 2, starts, masks, stride)).to eq(n)
+    (0...n).each -> (i)
+      expect(indexed[i]).to eq(direct[i])
+
   it("skips conditional clauses when a proof would need replay or boxed output") ->
     [WASSAT_PROOF_WRAT, WASSAT_PROOF_DRAT].each -> (mode)
       s = ChoiceBranchCheck.new(24, overlapping_choices(true), mode, 0)

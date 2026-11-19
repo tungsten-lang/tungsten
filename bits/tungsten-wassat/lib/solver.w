@@ -752,28 +752,45 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Streamed DRAT can emit short clauses directly from the raw literal buffer.
     # Constructing strings or replaying WRAT hints costs more than this saves.
     return 0 unless @proof_mode == WASSAT_PROOF_NONE || (@proof_mode == WASSAT_PROOF_DRAT && @dbytes != nil)
-    rows = i32[@choice_rows.size]
-    signs = i8[@nvars + 1]
+    # The index and the row copies are private to this root pass. A streamed
+    # proof may raise during attachment, so release the scratch on both exits.
+    scratch = wassat_query_storage
+    begin
+      self.attach_choice_supports(last, scratch)
+    ensure
+      wassat_query_destroy(scratch)
+
+  -> attach_choice_supports(last, scratch)
+    rows = wassat_query_i32(scratch, @choice_rows.size)
+    signs = wassat_query_i8(scratch, @nvars + 1)
     occurrences = @config.long_occurrences
-    return 0 if wassat_pack_choice_rows(@arena, @cmeta, @alive, signs, rows, last, @nvars, occurrences) == 0
-    seen = i32[@nvars * 2 + 4]
-    residuals = i64[rows.size / 4 + 1]
+    packed = wassat_pack_choice_rows(@arena, @cmeta, @alive, signs, rows, last, @nvars, occurrences) ## i64
+    return 0 if packed == 0
+    seen = wassat_query_i32(scratch, @nvars * 2 + 4)
+    # One width precedes each row in the packed literal prefix.
+    row_count = packed - occurrences ## i64
+    residuals = wassat_query_i64(scratch, row_count)
     # Spread a few trial variables over the input. Sparse residuals rarely
     # repay a scan of every row for every variable.
-    stride = (@nvars + 7) / 8 ## i64
+    probe_step = (@nvars + 7) / 8 ## i64
     probe = 1 ## i64
     hits = 0 ## i64
     while probe <= @nvars && hits < 8
       chosen = (probe << 1) + (signs[probe] < 0 ? 1 : 0)
       hits += wassat_choice_residuals(rows, @bldir, @bl_pool, seen, residuals, chosen)
-      probe += stride
+      probe += probe_step
     return 0 if hits < 8
+    starts = wassat_query_i32(scratch, row_count)
+    words = (starts.size + 63) >> 6
+    stride = @nvars + 1 ## i64
+    row_masks = wassat_query_i64(scratch, stride * words)
+    wassat_index_choice_rows(rows, starts, row_masks, stride)
     added = 0 ## i64
     limit = @nvars * 8 ## i64
     v = 1 ## i64
     while v <= @nvars && added < limit
       chosen = (v << 1) + (signs[v] < 0 ? 1 : 0)
-      count = wassat_choice_residuals(rows, @bldir, @bl_pool, seen, residuals, chosen) ## i64
+      count = wassat_indexed_choice_residuals(rows, @bldir, @bl_pool, seen, residuals, chosen, starts, row_masks, stride) ## i64
       i = 0 ## i64
       while i < count && added < limit
         @lbuf[0] = 0 - v * signs[v]
@@ -9482,42 +9499,102 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   row = 0 ## i64
   used = 0 ## i64
   while rows[row] > 0
+    used = wassat_collect_choice_residual(rows, seen, out, row, chosen, used)
+    row += rows[row] + 1
+  used
+
+-> wassat_collect_choice_residual(rows, seen, out, row, chosen, used) (i32[] i32[] i64[] i64 i64 i64) i64
+  i = row + 1
+  stop = i + rows[row]
+  size = 0 ## i64
+  a = 0 ## i64
+  b = 0 ## i64
+  c = 0 ## i64
+  while i < stop
+    lit = rows[i] ## i64
+    break if seen[lit] == chosen
+    if seen[lit ^ 1] != chosen
+      break if size == 3
+      size += 1
+      if a == 0 || lit < a
+        c = b
+        b = a
+        a = lit
+      elsif b == 0 || lit < b
+        c = b
+        b = lit
+      else
+        c = lit
+    i += 1
+  if i == stop && size > 0 && size + 2 <= rows[row]
+    # Repeated literals in an input row denote the same choice.
+    c = 0 if c == b
+    if b == a
+      b = c
+      c = 0
+    word = a | (b << 16) | (c << 32)
+    j = 0
+    while j < used && out[j] != word
+      j += 1
+    if j == used
+      out[used] = word
+      used += 1
+  used
+
+# Each block of 64 rows has a membership word per variable. Slot zero
+# conservatively includes rows with a repeated variable: excluding one
+# variable there can remove two occurrences. Row offsets preserve input order.
+-> wassat_index_choice_rows(rows, starts, mask, stride) (i32[] i32[] i64[] i64) i64
+  one = 1 ## i64
+  row = 0 ## i64
+  ordinal = 0 ## i64
+  while rows[row] > 0
+    starts[ordinal] = row
+    base = (ordinal >> 6) * stride
+    bit = one << (ordinal & 63)
     i = row + 1
     stop = i + rows[row]
-    size = 0 ## i64
-    a = 0 ## i64
-    b = 0 ## i64
-    c = 0 ## i64
     while i < stop
-      lit = rows[i] ## i64
-      break if seen[lit] == chosen
-      if seen[lit ^ 1] != chosen
-        break if size == 3
-        size += 1
-        if a == 0 || lit < a
-          c = b
-          b = a
-          a = lit
-        elsif b == 0 || lit < b
-          c = b
-          b = lit
-        else
-          c = lit
+      key = base + (rows[i] >> 1)
+      mask[base] |= bit if (mask[key] & bit) != 0
+      mask[key] |= bit
       i += 1
-    if i == stop && size > 0 && size + 2 <= rows[row]
-      # Repeated literals in an input row denote the same choice.
-      c = 0 if c == b
-      if b == a
-        b = c
-        c = 0
-      word = a | (b << 16) | (c << 32)
-      j = 0
-      while j < used && out[j] != word
-        j += 1
-      if j == used
-        out[used] = word
-        used += 1
+    ordinal += 1
     row = stop
+  0
+
+# A shorter consequence requires at least two excluded occurrences. Intersect
+# each neighbour's membership with the accumulated hits. The index ignores
+# polarity, so the original row still decides which literals survive.
+-> wassat_indexed_choice_residuals(rows, dir, pool, seen, out, chosen, starts, mask, stride) (i32[] i64[] i64[] i32[] i64[] i64 i32[] i64[] i64) i64
+  key = (chosen ^ 1) << 2
+  j = dir[key]
+  end = j + dir[key + 1]
+  return 0 if end - j < 2
+  seen[chosen] = chosen
+  while j < end
+    seen[pool[j] & 4294967295] = chosen
+    j += 1
+  used = 0 ## i64
+  offset = 0 ## i64
+  while offset < starts.size
+    base = (offset >> 6) * stride
+    hits = mask[base + (chosen >> 1)]
+    candidates = mask[base]
+    j = dir[key]
+    while j < end
+      other = pool[j] & 4294967295
+      rows_hit = mask[base + (other >> 1)]
+      candidates |= hits & rows_hit
+      hits |= rows_hit
+      j += 1
+    bits = candidates
+    while bits != 0
+      lane = ccall_nobox("__w_bit_cttz_u64", bits) ## i64
+      row = starts[offset + lane] ## i64
+      used = wassat_collect_choice_residual(rows, seen, out, row, chosen, used)
+      bits &= bits - 1
+    offset += 64
   used
 
 # Both polarities use the same trail and watch storage as a search decision.

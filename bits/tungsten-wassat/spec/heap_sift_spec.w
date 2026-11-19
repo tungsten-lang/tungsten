@@ -55,4 +55,49 @@ describe "Stable heap sifting" ->
     expect(wassat_heap_down(heap, pos, act, state, 0)).to eq(0)
     expect(wassat_heap_up(heap, pos, act, 0)).to eq(0)
 
+  it "preserves a parent tie when an activity bump rescales the heap" ->
+    heap = i64[3]
+    pos = i32[3]
+    act = i64[3]
+    state = i64[2]
+    heap[0] = 1
+    heap[1] = 2
+    pos[2] = 1
+    act[1] = 4503599627370496
+    act[2] = act[1] - 1
+    state[0] = 2
+    state[1] = 64
+    expect(wassat_evsids_bump(act, heap, pos, state, 2, 2)).to eq(1)
+    expect(act[1]).to eq(1048576)
+    expect(act[2]).to eq(act[1])
+    expect(heap[0]).to eq(1)
+    expect(pos[2]).to eq(1)
+
+  it "uses the rescaled increment for the rest of an activity batch" ->
+    heap = i64[3]
+    pos = i32[5]
+    act = i64[5]
+    state = i64[2]
+    vars = i64[3]
+    heap[0] = 1
+    heap[1] = 2
+    pos[2] = 1
+    pos[3] = -1
+    pos[4] = -1
+    act[1] = 4503599627370496
+    act[2] = act[1] - 1
+    act[3] = -1
+    state[0] = 2
+    state[1] = 64
+    vars[0] = 2
+    vars[1] = 3
+    vars[2] = 4
+    wassat_evsids_batch(act, heap, pos, state, vars, 3, 4)
+    expect(act[2]).to eq(act[1])
+    expect(heap[0]).to eq(1)
+    expect(act[3]).to eq(-1)
+    expect(act[4]).to eq(32)
+    expect(pos[4]).to eq(-1)
+    expect(state[1]).to eq(32)
+
 spec_summary

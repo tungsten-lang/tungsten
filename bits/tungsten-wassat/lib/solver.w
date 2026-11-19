@@ -8074,24 +8074,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   bmode = st[21]
   if bmode == 1
     z = wassat_sort_by_key(ab, vqs, na)
-    i = 0
-    while i < na
-      z = wassat_vmtf_front(vqn, vqp, vqs, vst, ab[i])
-      am[ab[i]] = 0
-      i += 1
-  elsif bmode == 2
-    i = 0
-    while i < na
-      z = wassat_evsids_bump(act, heap, hpos, hst, ab[i], nv)
-      am[ab[i]] = 0
-      i += 1
   else
-    i = 0
-    while i < na
-      z = wassat_evsids_bump(act, heap, hpos, hst, ab[i], nv)
-      z = wassat_vmtf_front(vqn, vqp, vqs, vst, ab[i])
-      am[ab[i]] = 0
-      i += 1
+    z = wassat_evsids_batch(act, heap, hpos, hst, ab, na, nv)
+  i = 0
+  while i < na
+    v = ab[i] ## i64
+    if bmode != 2
+      z = wassat_vmtf_front(vqn, vqp, vqs, vst, v)
+    am[v] = 0
+    i += 1
 
   st[12] += prescan_lits
   st[13] += resume_lits
@@ -9253,10 +9244,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # Sift a saved variable through a hole. Parent/child shifts retain the exact
 # tie order of swaps, while each displaced variable is written only once.
 -> wassat_heap_up(heap, hpos, act, index) (i64[] i32[] i64[] i64) i64
-  i = index
-  return i if i <= 0
-  v = heap[i]
-  key = act[v]
+  return index if index <= 0
+  v = heap[index] ## i64
+  wassat_heap_up_key(heap, hpos, act, index, v, act[v])
+
+-> wassat_heap_up_key(heap, hpos, act, index, v, key) (i64[] i32[] i64[] i64 i64 i64) i64
+  i = index ## i64
   while i > 0
     parent = (i - 1) / 2
     pv = heap[parent]
@@ -9801,15 +9794,36 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   r = vqs[v] if v > 0
   r
 
--> wassat_evsids_bump(act, heap, hpos, hst, v, nv) (i64[] i64[] i32[] i64[] i64 i64) i64
-  return 0 if act[v] < 0
-  act[v] = act[v] + hst[1]
-  if act[v] > 4503599627370496
+# Return the current increment so a batch can keep it across bumps. A rescale
+# changes both the increment and the key used to restore the heap.
+-> wassat_evsids_raise(act, heap, hpos, hst, v, nv, key, increment) (i64[] i64[] i32[] i64[] i64 i64 i64 i64) i64
+  key += increment
+  act[v] = key
+  if key > 4503599627370496
     z = wassat_evsids_rescale(act, hst, nv)
-  if hpos[v] >= 0
-    index = hpos[v] ## i64
-    z = wassat_heap_up(heap, hpos, act, index)
+    key = act[v]
+    increment = hst[1]
+  index = hpos[v] ## i64
+  if index > 0
+    z = wassat_heap_up_key(heap, hpos, act, index, v, key)
+  increment
+
+-> wassat_evsids_bump(act, heap, hpos, hst, v, nv) (i64[] i64[] i32[] i64[] i64 i64) i64
+  key = act[v] ## i64
+  return 0 if key < 0
+  z = wassat_evsids_raise(act, heap, hpos, hst, v, nv, key, hst[1])
   1
+
+-> wassat_evsids_batch(act, heap, hpos, hst, vars, count, nv) (i64[] i64[] i32[] i64[] i64[] i64 i64) i64
+  increment = hst[1] ## i64
+  i = 0 ## i64
+  while i < count
+    v = vars[i] ## i64
+    key = act[v] ## i64
+    if key >= 0
+      increment = wassat_evsids_raise(act, heap, hpos, hst, v, nv, key, increment)
+    i += 1
+  0
 
 # Per-conflict EMA updates (fixed-point << 16) and the per-decision restart
 # trigger, over the typed @estate scratch — both run in the innermost loop.

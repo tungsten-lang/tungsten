@@ -7253,6 +7253,10 @@
         proof = worker.auto_registered_arithmetic(g.goal, hints, registered_budget)
       if proof != nil
         return close(g, fit(g, proof))
+    if seen.size == 0
+      proof = auto_hint_proof(g.goal, @session.selected_premises(g.goal), hints, [16, 2], [])
+      if proof != nil
+        return close(g, fit(g, proof))
     fail("auto failed")
 
   -> tac_specialize(g, args)

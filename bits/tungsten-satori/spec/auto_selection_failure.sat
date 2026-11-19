@@ -1,0 +1,13 @@
+opaque marked : ℕ → Prop
+axiom seed (n : ℕ) : marked n
++ via_seed (n : ℕ) : marked n := seed n
++ via_previous (n : ℕ) : marked n := via_seed n
++ excluded_axiom (n : ℕ) : marked n := by auto
+
+opaque blue : ℕ → Prop
++ admitted (n : ℕ) : blue n := by sorry
++ excluded_sorry (n : ℕ) : blue n := by auto
+
+opaque red : ℕ → Prop
++ unfinished (n : ℕ) : red n := by auto
++ excluded_failure (n : ℕ) : red n := by auto

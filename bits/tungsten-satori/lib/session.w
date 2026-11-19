@@ -441,8 +441,34 @@ SATC_LIB_FILES = [
       return "auto registration excludes " + tag + "; use an explicit auto hint instead"
   nil
 
+# Logical connectives and generic arithmetic occur in almost every statement.
+# Use distinctive constants from the conclusion to retrieve a small shortlist.
+-> premise_symbols(term, symbols, fuel)
+  if fuel[0] <= 0 || symbols.size >= 12
+    return
+  fuel[0] -= 1
+  if term.tag == :const
+    if (term.op == OP_NONE || term.op == OP_MOD) && !symbols.include?(term.name)
+      symbols.push(term.name)
+  elsif term.tag == :app
+    premise_symbols(term.a, symbols, fuel)
+    premise_symbols(term.b, symbols, fuel)
+  elsif term.tag == :lam
+    premise_symbols(term.b, symbols, fuel)
+
+-> premise_conclusion(term)
+  while true
+    binder = dest_unop(term, "∀")
+    if binder != nil && binder.tag == :lam
+      term = binder.b
+    elsif term.tag == :app && term.a.tag == :app && is_const?(term.a.a, "⇒")
+      term = term.b
+    else
+      return term
+
 + Session
   ro :k, :d, :elab, :theorems, :simp_rules, :simp_by_head, :simp_general, :messages, :stats, :root, :failures, :auto_rules, :auto_rule_version
+  ro :premise_retry, :split_premises
   ro :auto_default_names
   rw :prelude_mode, :quiet, :only, :no_cache, :keep_messages, :auto_rule_index, :auto_default_index
 
@@ -457,6 +483,11 @@ SATC_LIB_FILES = [
     @auto_rules = {}
     @auto_rule_index = nil
     @auto_rule_version = 0
+    @premise_index = {}
+    @pending_premises = []
+    @unknown_symbols = {}
+    @split_premises = {}
+    @premise_retry = {}
     @order = []
     @simp_rules = []
     @simp_by_head = {}
@@ -531,17 +562,83 @@ SATC_LIB_FILES = [
       return t
     @k.defs[name]
 
-  -> bind_theorem(name, th)
+  -> bind_theorem(name, th, proved = false)
     @theorems[name] = th
     @order.push(name)
+    if proved && th.hyps.size == 0 && th.concl.cl && tm_closed_bound?(th.concl) && !name.ends_with?(".def")
+      if auto_registration_error(th.tags, @only != nil) == nil
+        @pending_premises.push([name, th, nil])
     if @auto_default_index != nil && @auto_default_names.has_key?(name)
       @auto_default_index = nil
     th
 
   -> add_theorem(name, th)
-    bind_theorem(name, th)
+    bind_theorem(name, th, true)
     if @rec != nil
       @rec.add_thm(name, th)
+
+  -> index_pending_premises
+    @pending_premises.each -> (entry)
+      name = entry[0]
+      th = entry[1]
+      if @theorems[name] != th
+        next
+      symbols = []
+      premise_symbols(premise_conclusion(th.concl), symbols, [96])
+      unknown = th.tags.find(-> (tag) tag.starts_with?("split:") && !@split_premises.has_key?(tag))
+      symbols.each -> (key)
+        if unknown != nil
+          if @unknown_symbols[key] == nil
+            @unknown_symbols[key] = {}
+          @unknown_symbols[key][unknown] = true
+        else
+          if @premise_index[key] == nil
+            @premise_index[key] = []
+          @premise_index[key].push(entry)
+    @pending_premises = []
+
+  -> selected_premises(goal)
+    keys = []
+    premise_symbols(goal.concl, keys, [96])
+    if keys.size == 0
+      return []
+    index_pending_premises
+    context = []
+    fuel = [128]
+    goal.hyps.each -> (hyp) premise_symbols(hyp[1], context, fuel)
+    scores = {}
+    keys.each -> (key)
+      if @unknown_symbols.has_key?(key)
+        @unknown_symbols[key].each -> (id, _) @premise_retry[id] = true
+      bucket = @premise_index[key]
+      if bucket != nil && bucket.size <= 64
+        weight = 1024 / bucket.size
+        bucket.each -> (entry)
+          name = entry[0]
+          if @theorems[name] == entry[1]
+            if !scores.has_key?(name)
+              scores[name] = 0
+              if context.size > 0
+                if entry[2] == nil
+                  features = []
+                  premise_symbols(entry[1].concl, features, [128])
+                  entry[2] = features
+                entry[2].each -> (symbol)
+                  if context.include?(symbol) && !keys.include?(symbol)
+                    scores[name] += 1
+            scores[name] = scores[name] + weight
+    # Prefer shared rare symbols. Use the name only to break equal scores deterministically.
+    candidates = []
+    while candidates.size < 8 && scores.size > 0
+      best = nil
+      high = 0
+      scores.each -> (name, score)
+        if score > high || (score == high && name < best)
+          best = name
+          high = score
+      candidates.push(@theorems[best])
+      scores.delete(best)
+    candidates
 
   -> check_auto_rule(th)
     if th == nil || th.hyps.size != 0 || tm_frees(th.concl).size != 0
@@ -757,7 +854,7 @@ SATC_LIB_FILES = [
               tgs[j] = flds[4 + j]
               j += 1
             th = @k.restore_thm(concl, tgs)
-            bind_theorem(nm, th)
+            bind_theorem(nm, th, true)
           elsif tag == "O_AXIOM"
             nm = flds[1]
             concl = tms[flds[2].to_i]

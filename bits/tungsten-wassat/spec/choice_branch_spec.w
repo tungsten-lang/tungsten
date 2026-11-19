@@ -124,8 +124,8 @@ describe("branching on choice clauses") ->
     rows = i32[19]
     [5, 4, 6, 8, 8, 10, 5, 4, 6, 10, 8, 10, 5, 4, 6, 8, 8, 8, 0].each_with_index -> (x, i)
       rows[i] = x
-    dir = i64[48]
-    dir[13] = 2
+    dir = i32[36]
+    dir[7] = 2
     pool = i64[2]
     pool[0] = 5
     pool[1] = 7
@@ -150,8 +150,8 @@ describe("branching on choice clauses") ->
     stride = 22
     masks = i64[3 * stride]
     wassat_index_choice_rows(rows, starts, masks, stride)
-    dir = i64[176]
-    dir[13] = 3
+    dir = i32[132]
+    dir[7] = 3
     pool = i64[3]
     pool[0] = 5
     pool[1] = 7

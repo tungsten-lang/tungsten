@@ -4,10 +4,10 @@ use ../lib/wassat
 ar = i32[70005]
 cm = i64[2]
 alive = i8[1]
-wd = i64[40]
+wd = i32[40]
 wp = i64[32]
-ws = i64[12]
-bd = i64[40]
+ws = i64[14]
+bd = i32[30]
 bp = i64[32]
 bs = i64[3]
 cm[0] = 70001
@@ -23,7 +23,7 @@ while i < 100000
   wassat_hdr_put(ar, 69999, 70000, 3)
   wd[13] = 0
   wassat_ws_add(wd, wp, ws, 3, 70001, 2)
-  bd[13] = 0
+  bd[7] = 0
   wassat_bl_add(bd, bp, bs, 3, 70000, 5)
   wassat_ws_rebuild(cm, alive, ar, wd, wp, ws, 1, 10)
   # Recycle packed words above the boxed small-integer range too.

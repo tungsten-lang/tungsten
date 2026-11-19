@@ -18,9 +18,9 @@ use ../lib/solver
     entries += 2 if alive[ci] == 1 && cm[2 * ci + 1] >= 3
     ci += 1
   cap = entries + nlits + extra
-  wd = i64[4 * nlits]
+  wd = i32[4 * nlits]
   wp = i64[cap + 2]
-  ws = i64[12]
+  ws = i64[14]
   ws[1] = cap
   ws[7] = overflows
   wp[cap] = 8273
@@ -36,7 +36,7 @@ use ../lib/solver
   ar = result["ar"] ## i32[]
   cm = result["cm"] ## i64[]
   alive = result["alive"] ## i8[]
-  wd = result["wd"] ## i64[]
+  wd = result["wd"] ## i32[]
   wp = result["wp"] ## i64[]
   ws = result["ws"] ## i64[]
   ncl = result["ncl"]

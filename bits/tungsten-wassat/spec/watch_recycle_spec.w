@@ -3,7 +3,7 @@ use ../lib/solver
 
 describe "Watch-block prefix recycling" ->
   it "reclaims an overlapping dead prefix without changing entry order" ->
-    wd = i64[8]
+    wd = i32[8]
     wp = i64[32]
     st = i64[12]
     wd[0] = 8
@@ -35,7 +35,7 @@ describe "Watch-block prefix recycling" ->
       i += 1
 
   it "requires substantial reclaimed capacity before copying a large block" ->
-    wd = i64[4]
+    wd = i32[4]
     wp = i64[64]
     st = i64[12]
     wd[0] = 4
@@ -46,7 +46,7 @@ describe "Watch-block prefix recycling" ->
     expect(st[8]).to eq(0)
 
   it "reuses space for an append even when the pool has no free tail" ->
-    wd = i64[16]
+    wd = i32[16]
     wp = i64[12]
     st = i64[12]
     st[1] = 12
@@ -76,7 +76,7 @@ describe "Watch-block prefix recycling" ->
     ar[2] = -1
     ar[3] = -2
     ar[4] = 3
-    wd = i64[40]
+    wd = i32[40]
     wp = i64[16]
     ws = i64[12]
     ws[1] = 16
@@ -95,7 +95,7 @@ describe "Watch-block prefix recycling" ->
     phs = i8[4]
     tr = i32[4]
     st = i64[14]
-    bd = i64[40]
+    bd = i32[30]
     bp = i64[1]
     asg[1] = 1
     asg[2] = 1

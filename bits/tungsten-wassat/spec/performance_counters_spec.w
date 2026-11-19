@@ -7,7 +7,7 @@ use ../lib/solver
   ar[2] = -1
   ar[3] = 2
   ar[4] = 3
-  wd = i64[40]
+  wd = i32[40]
   wp = i64[pool_cap]
   ws = i64[12]
   ws[1] = pool_cap
@@ -19,7 +19,7 @@ use ../lib/solver
   phs = i8[4]
   tr = i32[4]
   st = i64[14]
-  bd = i64[40]
+  bd = i32[30]
   bp = i64[1]
   asg[1] = 1
   asg[2] = -1
@@ -39,14 +39,14 @@ describe "Wassat cumulative performance counters" ->
     ar[0] = 0
     wassat_hdr_put(ar, 0, 2, 3)
     expect([ar[0], ar[1]]).to eq([2, 3])
-    bd = i64[40]
+    bd = i32[30]
     bp = i64[16]
     bs = i64[3]
     bs[1] = 16
     wassat_bl_add(bd, bp, bs, 3, 0, 4)
     wassat_bl_add(bd, bp, bs, 3, 0, 4)
-    expect(bd[13]).to eq(2)
-    wd = i64[40]
+    expect(bd[7]).to eq(2)
+    wd = i32[40]
     wp = i64[16]
     ws = i64[12]
     ws[1] = 16
@@ -55,7 +55,7 @@ describe "Wassat cumulative performance counters" ->
     expect(wd[13]).to eq(2)
 
   it "counts successful block relocations, copied entries, and failed appends separately" ->
-    wd = i64[40]
+    wd = i32[40]
     wp = i64[12]
     ws = i64[12]
     ws[1] = 12
@@ -98,7 +98,7 @@ describe "Wassat cumulative performance counters" ->
     cm[1] = 3
     alive = i8[1]
     alive[0] = 1
-    wd = i64[40]
+    wd = i32[40]
     wp = i64[16]
     ws = i64[12]
     ws[1] = 16

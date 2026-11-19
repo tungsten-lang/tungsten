@@ -27,12 +27,12 @@ use ../lib/solver
   lvl[3] = third
   rsn = i32[5]
   phs = i8[5]
-  wd = i64[48]
+  wd = i32[48]
   wp = i64[16]
   ws = i64[12]
   ws[1] = 16
   wassat_ws_add(wd, wp, ws, 3, 2, 4)
-  bd = i64[48]
+  bd = i32[36]
   bp = i64[1]
   tr = i32[5]
   tr[0] = 1
@@ -89,10 +89,10 @@ describe "Chronological implication levels" ->
     lvl[v] = v == 2 ? trigger : 0
     v += 1
   lvl[width] = current if high_tail
-  wd = i64[4 * (2 * width + 4)]; wp = i64[16]; ws = i64[12]
+  wd = i32[4 * (2 * width + 4)]; wp = i64[16]; ws = i64[12]
   ws[1] = 16
   wassat_ws_add(wd, wp, ws, 5, 2, 1)
-  bd = i64[4 * (2 * width + 4)]; bp = i64[1]
+  bd = i32[3 * (2 * width + 4)]; bp = i64[1]
   tr = i32[width + 1]; tr[0] = 2
   st = i64[14]; st[1] = 1; st[5] = 1
   wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, ws, tr, st, current, bd, bp)

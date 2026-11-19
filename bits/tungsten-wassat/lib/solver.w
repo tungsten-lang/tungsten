@@ -604,10 +604,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # entries stream and their `lasg` truth probes all issue at once. The
     # lit-index payload makes that probe a single byte load, with no sign
     # dance at all.
-    # start / size / capacity live at bl[4li], +1, +2 (stride 4 keeps the
-    # pair 16-byte aligned, so start and size arrive in one `ldp`)
-    @bldir = i64[4 * (2 * nv + 4)]
-    wassat_query_keep(query_owner, @bldir, @bldir.size * 8) if query_owner != nil
+    # Each start/length pair points into a WArray, whose size and capacity
+    # fit signed i32. Appends read the capacity for literal li at the
+    # opposite end of the same directory, slot size - 1 - li.
+    @bldir = i32[3 * (2 * nv + 4)]
+    wassat_query_keep(query_owner, @bldir, @bldir.size * 4) if query_owner != nil
     @blp_cap = flat_shell ? 1 : 2 * maxcl + 2 * (2 * nv + 4) + 64
     @bl_pool = i64[@blp_cap]
     wassat_query_keep(query_owner, @bl_pool, @bl_pool.size * 8) if query_owner != nil
@@ -616,7 +617,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @bl_state[1] = @blp_cap
 
     # Contiguous watch stacks: per-literal blocks inside one packed pool.
-    # Entry = (clause_index << 32) | blocker_lit_index. The previous
+    # Entry = (arena_offset << 32) | blocker_lit_index. The previous
     # intrusive linked lists paid a cache miss per node hop; blocks scan
     # linearly (propagation was 56% of the ibm-12 solve profile). Packing
     # and unpacking live ONLY in native typed code: a boxed `ci << 32`
@@ -624,8 +625,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     nlits = 2 * nv + 4
     # The stride-4 directory holds start / size / remaining capacity / base.
     # Base retains the block origin so a consumed prefix can be reused.
-    @wsdir = i64[4 * nlits]
-    wassat_query_keep(query_owner, @wsdir, @wsdir.size * 8) if query_owner != nil
+    @wsdir = i32[4 * nlits]
+    wassat_query_keep(query_owner, @wsdir, @wsdir.size * 4) if query_owner != nil
     @wp_cap = flat_shell ? 1 : 4 * maxcl + 2 * nlits + 64
     @wpool = i64[@wp_cap]
     wassat_query_keep(query_owner, @wpool, @wpool.size * 8) if query_owner != nil
@@ -3326,8 +3327,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       if @assign[v] == 0
         # +v propagates through the binaries holding -v, and -v through those
         # holding +v.
-        pos_n = @bldir[(((v << 1) + 1) << 2) + 1]
-        neg_n = @bldir[((v << 1) << 2) + 1]
+        pos_n = @bldir[(((v << 1) + 1) << 1) + 1]
+        neg_n = @bldir[((v << 1) << 1) + 1]
         if pos_n > 0 || neg_n > 0
           @probe_gen += 1
           @inp_nlift = 0
@@ -5548,7 +5549,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # `src` goes to the arena at `at` (two header cells, then literals), its table
 # entries are filled, and it is attached through its first two literals in
 # the order store_clause attaches them.
--> wassat_store_flat(ar, cm, alive, clbd, src, wd, wp, wst, bd, blp, blst, at, ci, n) (i32[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64) i64
+-> wassat_store_flat(ar, cm, alive, clbd, src, wd, wp, wst, bd, blp, blst, at, ci, n) (i32[] i64[] i8[] i64[] i64[] i32[] i64[] i64[] i32[] i64[] i64[] i64 i64 i64) i64
   ar[at] = ci
   ar[at + 1] = n
   stx = at + 2 ## i64
@@ -5616,10 +5617,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # exhaustion — the caller repacks via rebuild_binaries. `oli` is already a
 # lit index; the packing lives here because a boxed `ci << 32` leaves the
 # small-int range.
--> wassat_bl_add(bd, blp, blst, li, ci, oli) (i64[] i64[] i64[] i64 i64 i64) i64
-  d = li << 2 ## i64
+-> wassat_bl_add(bd, blp, blst, li, ci, oli) (i32[] i64[] i64[] i64 i64 i64) i64
+  d = li << 1 ## i64
+  cap_slot = bd.size - 1 - li ## i64
   n = bd[d + 1]
-  if n >= bd[d + 2]
+  if n >= bd[cap_slot]
     need = 4
     need = n * 2 if n * 2 > 4
     top = blst[0]
@@ -5633,7 +5635,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       blp[top + q] = word
       q += 1
     bd[d] = top
-    bd[d + 2] = need
+    bd[cap_slot] = need
     blst[0] = top + need
   word = (ci << 32) | oli ## i64
   blp[bd[d] + n] = word
@@ -5644,10 +5646,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # (count, fill) with +1 slack per literal, mirroring wassat_ws_rebuild.
 # Always fits: 2*binaries + nlits is far below the pool's 2*ccap sizing.
 # Never allocates.
--> wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i8[] i32[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_bl_rebuild(cm, alive, ar, bd, blp, blst, ncl, nlits) (i64[] i8[] i32[] i32[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
-    bd[(li << 2) + 1] = 0
+    bd[(li << 1) + 1] = 0
     li += 1
   ci = 0
   while ci < ncl
@@ -5665,15 +5667,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         lb = bq << 1
       else
         lb = ((0 - bq) << 1) + 1
-      bd[(la << 2) + 1] = bd[(la << 2) + 1] + 1
-      bd[(lb << 2) + 1] = bd[(lb << 2) + 1] + 1
+      bd[(la << 1) + 1] = bd[(la << 1) + 1] + 1
+      bd[(lb << 1) + 1] = bd[(lb << 1) + 1] + 1
     ci += 1
   top = 0
   li = 0
   while li < nlits
-    d = li << 2 ## i64
+    d = li << 1 ## i64
     bd[d] = top
-    bd[d + 2] = bd[d + 1] + 1
+    bd[bd.size - 1 - li] = bd[d + 1] + 1
     top = top + bd[d + 1] + 1
     bd[d + 1] = 0
     li += 1
@@ -5694,8 +5696,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         lb = bq << 1
       else
         lb = ((0 - bq) << 1) + 1
-      da = la << 2 ## i64
-      db = lb << 2 ## i64
+      da = la << 1 ## i64
+      db = lb << 1 ## i64
       wa = (ci << 32) | lb ## i64
       wb = (ci << 32) | la ## i64
       blp[bd[da] + bd[da + 1]] = wa
@@ -5740,14 +5742,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # Test either binary clause (a,b) or (a,c) through the smaller combined
 # adjacency. Both endpoints index the same clause. Return (reads << 1) | hit
 # so the caller can retain work counters without a separate output buffer.
--> wassat_binary_either(bd, blp, a, b, c) (i64[] i64[] i64 i64 i64) i64
-  ad = a << 2 ## i64
+-> wassat_binary_either(bd, blp, a, b, c) (i32[] i64[] i64 i64 i64) i64
+  ad = a << 1 ## i64
   an = bd[ad + 1] ## i64
-  bn = bd[(b << 2) + 1] ## i64
-  cn = bd[(c << 2) + 1] ## i64
+  bn = bd[(b << 1) + 1] ## i64
+  cn = bd[(c << 1) + 1] ## i64
   reads = 0 ## i64
   if bn + cn < an
-    d = b << 2 ## i64
+    d = b << 1 ## i64
     p = bd[d] ## i64
     start = p ## i64
     e = p + bn ## i64
@@ -5756,7 +5758,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       p += 1
       return ((p - start) << 1) | 1 if found
     reads = p - start ## i64
-    d = c << 2 ## i64
+    d = c << 1 ## i64
     p = bd[d] ## i64
     start = p ## i64
     e = p + cn ## i64
@@ -5777,7 +5779,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   reads << 1
 
 
--> wassat_extract_binaries(cm, alive, ar, lasg, bd, blp, ht, out, st, ncl, outcap, hmask) (i64[] i8[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64)
+-> wassat_extract_binaries(cm, alive, ar, lasg, bd, blp, ht, out, st, ncl, outcap, hmask) (i64[] i8[] i32[] i8[] i32[] i64[] i64[] i64[] i64[] i64 i64 i64)
   checks = 0
   queries = 0
   n = 0
@@ -5891,7 +5893,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[2] = 1 when a capacity stopped the scan short of the whole formula
 #   st[3] = binary entries checked  st[4] = scratch marks written
 #   st[5] = candidates checked from opposite binary endpoints
--> wassat_extract_and_gates(cm, alive, ar, lasg, bd, blp, mark, gar, ght, out, st, ncl, gcap, hmask, outcap) (i64[] i8[] i32[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64)
+-> wassat_extract_and_gates(cm, alive, ar, lasg, bd, blp, mark, gar, ght, out, st, ncl, gcap, hmask, outcap) (i64[] i8[] i32[] i8[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i64)
   gen = 0
   binary_checks = 0
   binary_marks = 0
@@ -5928,9 +5930,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             else
               lh = ((0 - lhs) << 1) + 1
             nlh = lh ^ 1
-            if bd[(nlh << 2) + 1] >= arity
+            if bd[(nlh << 1) + 1] >= arity
               gen += 1
-              d = nlh << 2 ## i64
+              d = nlh << 1 ## i64
               p = bd[d]
               e = p + bd[d + 1]
               # Every binary is present at both endpoints. For a large
@@ -5945,7 +5947,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                     l2 = ar[stx + k]
                     sign = l2 >> 63
                     l2i = ((((l2 ^ sign) - sign) << 1) + (sign & 1)) ^ 1
-                    cost += bd[(l2i << 2) + 1]
+                    cost += bd[(l2i << 1) + 1]
                   k += 1
                 reverse = cost < e - p
               matched = 0
@@ -5958,7 +5960,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                     l2 = ar[stx + k]
                     sign = l2 >> 63
                     l2i = ((((l2 ^ sign) - sign) << 1) + (sign & 1)) ^ 1
-                    other = l2i << 2
+                    other = l2i << 1
                     op = bd[other]
                     op_start = op
                     oe = op + bd[other + 1]
@@ -6356,7 +6358,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[1] = literals mapped away from themselves
 #   st[2] = edges traversed
 #   st[3] = the contradictory variable, when st[0] is 1
--> wassat_scc(bd, blp, asg, idx, low, onstk, reprs, stk, work, wcur, st, nlits, stop_cell) (i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[])
+-> wassat_scc(bd, blp, asg, idx, low, onstk, reprs, stk, work, wcur, st, nlits, stop_cell) (i32[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[])
   dfsi = 1
   stop = 0
   ticks = 0
@@ -6383,7 +6385,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           stk[stop] = u
           stop += 1
           onstk[u] = 1
-        d = (u ^ 1) << 2 ## i64
+        d = (u ^ 1) << 1 ## i64
         blo = bd[d]
         bn = bd[d + 1]
         k = wcur[top - 1]
@@ -7304,7 +7306,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     i += 1
   0
 
--> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i32[] i8[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i32[] i64[] i64 i64[] i64[]) i64
+-> wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, st, dl, bd, blp) (i32[] i8[] i8[] i64[] i32[] i8[] i32[] i64[] i64[] i32[] i64[] i64 i32[] i64[]) i64
   word_mask = 4294967295 ## i64
   qhead = st[0]
   tsize = st[1]
@@ -7337,7 +7339,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     plvl = dl
     plvl = lvl[pv2] if st[5] == 1
     # binary implications first: direct assign/conflict, no arena access
-    bdi = li << 2 ## i64
+    bdi = li << 1 ## i64
     blo = bd[bdi]
     b = blo + bd[bdi + 1] - 1
     ticks += 1 + ((bd[bdi + 1] + 7) >> 3)
@@ -7547,7 +7549,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # list to recover one slot would make repeated remove/append cycles quadratic.
 # Forward copying is overlap-safe because the destination is below the source.
 # wd has stride four; wst has twelve slots, including counters at 8..10.
--> wassat_ws_recycle(wd, wp, wst, d) (i64[] i64[] i64[] i64) i64
+-> wassat_ws_recycle(wd, wp, wst, d) (i32[] i64[] i64[] i64) i64
   src = wd[d]
   base = wd[d + 3]
   freed = src - base
@@ -7568,7 +7570,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # Append one watch entry to a literal's block, relocating the block to the
 # pool top (capacity doubling) when full. Sets wst[2] and returns -1 when
 # the pool itself is exhausted — the caller repacks via rebuild_watches.
--> wassat_ws_add(wd, wp, wst, li, stx, blk) (i64[] i64[] i64[] i64 i64 i64) i64
+-> wassat_ws_add(wd, wp, wst, li, stx, blk) (i32[] i64[] i64[] i64 i64 i64) i64
   d = li << 2 ## i64
   n = wd[d + 1]
   if n >= wd[d + 2]
@@ -7604,7 +7606,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # (count, fill), with one spare entry per literal and bounded proportional
 # headroom for dense databases. Capacity comes from the existing pool while
 # leaving free space for later block relocations. Never allocates.
--> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i8[] i32[] i64[] i64[] i64[] i64 i64) i64
+-> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i8[] i32[] i32[] i64[] i64[] i64 i64) i64
   li = 0
   while li < nlits
     wd[(li << 2) + 1] = 0
@@ -8158,7 +8160,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # [2] 1 when the true literal was implied by a different clause  [3] level
 # stamp (in). `lev` is a per-level stamp array, `sn` the all-zero seen marks.
 # The caller owns the backjump to the root and the restore of saved phases.
--> wassat_vivify_probe(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, tlim, st, bd, blp, cm, sn, cl, out, lev, vs, ci) (i32[] i8[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i32[] i32[] i64[] i64[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64) i64
+-> wassat_vivify_probe(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, tlim, st, bd, blp, cm, sn, cl, out, lev, vs, ci) (i32[] i8[] i8[] i64[] i32[] i8[] i32[] i64[] i64[] i32[] i32[] i64[] i32[] i64[] i64[] i8[] i64[] i64[] i64[] i64[] i64) i64
   stx = cm[ci << 1] ## i64
   n = cm[(ci << 1) + 1] ## i64
   i = 0 ## i64
@@ -8289,7 +8291,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # left (a model), 2 on a conflict (in st[2]), 3 when the watch pool needs a
 # repack (the caller's next propagate does it), 4 when the conflict-free
 # trail is deeper than the best one.
--> wassat_search_run(ar, asg, lasg, lvl, rsn, phs, bph, wd, wp, wst, tr, tlim, st, bd, blp, heap, hpos, act, hst, vqn, vqs, vst, rs) (i32[] i8[] i8[] i64[] i32[] i8[] i8[] i64[] i64[] i64[] i32[] i32[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
+-> wassat_search_run(ar, asg, lasg, lvl, rsn, phs, bph, wd, wp, wst, tr, tlim, st, bd, blp, heap, hpos, act, hst, vqn, vqs, vst, rs) (i32[] i8[] i8[] i64[] i32[] i8[] i8[] i32[] i64[] i64[] i32[] i32[] i64[] i32[] i64[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
   dl = rs[0]
   limit = rs[4]
   made = 0 ## i64
@@ -9419,13 +9421,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # A binary (not a or not b) is indexed under not a with not b as its
 # other literal. Stamp each row member's binary neighbours once and check
 # that all later members occur among them. The position is a unique stamp.
--> wassat_choice_exclusions(rows, dir, pool, seen) (i32[] i64[] i64[] i32[]) i64
+-> wassat_choice_exclusions(rows, dir, pool, seen) (i32[] i32[] i64[] i32[]) i64
   row = 0 ## i64
   while rows[row] > 0
     i = row + 1
     end = i + rows[row]
     while i + 1 < end
-      key = (rows[i] ^ 1) << 2
+      key = (rows[i] ^ 1) << 1
       j = dir[key]
       limit = j + dir[key + 1]
       while j < limit
@@ -9476,8 +9478,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # contributes nothing. Deduplicate residuals for each antecedent.
 # Store up to three remaining literal indices in 16-bit lanes. Zero terminates
 # a short word. Compact choice formulas have at most 512 variables.
--> wassat_choice_residuals(rows, dir, pool, seen, out, chosen) (i32[] i64[] i64[] i32[] i64[] i64) i64
-  key = (chosen ^ 1) << 2
+-> wassat_choice_residuals(rows, dir, pool, seen, out, chosen) (i32[] i32[] i64[] i32[] i64[] i64) i64
+  key = (chosen ^ 1) << 1
   j = dir[key]
   end = j + dir[key + 1]
   return 0 if end - j < 2
@@ -9555,8 +9557,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # A shorter consequence requires at least two excluded occurrences. Intersect
 # each neighbour's membership with the accumulated hits. The index ignores
 # polarity, so the original row still decides which literals survive.
--> wassat_indexed_choice_residuals(rows, dir, pool, seen, out, chosen, starts, mask, stride) (i32[] i64[] i64[] i32[] i64[] i64 i32[] i64[] i64) i64
-  key = (chosen ^ 1) << 2
+-> wassat_indexed_choice_residuals(rows, dir, pool, seen, out, chosen, starts, mask, stride) (i32[] i32[] i64[] i32[] i64[] i64 i32[] i64[] i64) i64
+  key = (chosen ^ 1) << 1
   j = dir[key]
   end = j + dir[key + 1]
   return 0 if end - j < 2
@@ -9589,7 +9591,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # Both polarities use the same trail and watch storage as a search decision.
 # A successful probe is undone before scoring. Return -1 with the trial
 # still on the trail when propagation supplies a conflict clause.
--> wassat_rollout_branch(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, tlim, st, bd, blp, heap, hpos, act, hst, vqs, vst, kbuf, bs, cm, alive, dl, nv, ncl, limit) (i32[] i8[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i32[] i32[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64 i64 i64 i64) i64
+-> wassat_rollout_branch(ar, asg, lasg, lvl, rsn, phs, wd, wp, wst, tr, tlim, st, bd, blp, heap, hpos, act, hst, vqs, vst, kbuf, bs, cm, alive, dl, nv, ncl, limit) (i32[] i8[] i8[] i64[] i32[] i8[] i32[] i64[] i64[] i32[] i32[] i64[] i32[] i64[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64 i64 i64 i64) i64
   best = 0 ## i64
   best_score = -1 ## i64
   tried = 0 ## i64

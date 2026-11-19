@@ -131,7 +131,7 @@ use ../lib/preprocess
   0
 
 # Shared binary lists and the same trail, reasons and assignment storage as Wassat.
--> word_propagate(ar, asg, lasg, lvl, rsn, ph, blank, wp, ws, tr, st, dl, bd, bp, pos, neg, yes, no, ids, offsets, entries, stamps, dirty, state) (i32[] i8[] i8[] i64[] i32[] i8[] i64[] i64[] i64[] i32[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i32[] i32[] i32[] i64[] i32[] i64[]) i64
+-> word_propagate(ar, asg, lasg, lvl, rsn, ph, blank, wp, ws, tr, st, dl, bd, bp, pos, neg, yes, no, ids, offsets, entries, stamps, dirty, state) (i32[] i8[] i8[] i64[] i32[] i8[] i32[] i64[] i64[] i32[] i64[] i64 i32[] i64[] i64[] i64[] i64[] i64[] i32[] i32[] i32[] i64[] i32[] i64[]) i64
   while st[0] < st[1] && st[2] < 0
     first = st[0] ## i64
     ignored = wassat_propagate(ar, asg, lasg, lvl, rsn, ph, blank, wp, ws, tr, st, dl, bd, bp)
@@ -159,7 +159,7 @@ use ../lib/preprocess
     @mw_dirty = i32[count]; @mw_stamps = i64[count]; @word_state = i64[1]
     @mw_offsets = i32[2 * @nvars + 4]
     cursor = i32[2 * @nvars + 4]
-    @mw_blank = i64[4 * (2 * @nvars + 4)]
+    @mw_blank = i32[4 * (2 * @nvars + 4)]
     n = word_index(cm, @alive, @arena, @ncl, nw, @mw_pos, @mw_neg, @mw_ids, @mw_offsets, @mw_entries, cursor)
     raise "bad row count" unless n == count
     0

@@ -3,7 +3,7 @@ use ../lib/solver
 
 describe "Packed watch words above the boxed small-integer range" ->
   it "preserves high clause ids through binary propagation" ->
-    bd = i64[40]
+    bd = i32[30]
     pool = i64[32]
     ps = i64[3]
     ps[1] = 32
@@ -14,9 +14,9 @@ describe "Packed watch words above the boxed small-integer range" ->
     lvl = i64[4]
     rsn = i32[4]
     phs = i8[4]
-    wd = i64[40]
+    wd = i32[40]
     wp = i64[1]
-    ws = i64[12]
+    ws = i64[14]
     tr = i32[4]
     st = i64[14]
     tr[0] = 1
@@ -36,9 +36,9 @@ describe "Packed watch words above the boxed small-integer range" ->
     ar[70001] = -1
     ar[70002] = 3
     ar[70003] = 2
-    wd = i64[40]
+    wd = i32[40]
     wp = i64[32]
-    ws = i64[12]
+    ws = i64[14]
     ws[1] = 32
     wassat_ws_add(wd, wp, ws, 3, 70001, 3)
     asg = i8[4]
@@ -48,7 +48,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     phs = i8[4]
     tr = i32[4]
     st = i64[14]
-    bd = i64[40]
+    bd = i32[30]
     bp = i64[1]
     tr[0] = 1
     st[1] = 1
@@ -74,9 +74,9 @@ describe "Packed watch words above the boxed small-integer range" ->
     cm[1] = 3
     alive = i8[1]
     alive[0] = 1
-    wd = i64[40]
+    wd = i32[40]
     wp = i64[32]
-    ws = i64[12]
+    ws = i64[14]
     ws[1] = 32
     wassat_ws_rebuild(cm, alive, ar, wd, wp, ws, 1, 10)
     expect(wd[13]).to eq(1)

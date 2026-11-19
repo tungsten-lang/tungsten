@@ -31,6 +31,26 @@ use ../lib/solver
   expect(solver.strengthened_pairs).to eq(expected)
 
 describe "Ternary binary membership" ->
+  it "grows the last literal's block without overwriting adjacent lists" ->
+    dir = i32[30] # ten literal indices
+    pool = i64[16]
+    state = i64[3]
+    state[1] = 16
+    wassat_bl_add(dir, pool, state, 8, 1, 2)
+    i = 0
+    while i < 5
+      wassat_bl_add(dir, pool, state, 9, 2147483647, i + 2)
+      i += 1
+    expect(dir[17]).to eq(1)
+    expect(dir[19]).to eq(5)
+    expect(pool[dir[16]]).to eq(4294967298)
+    i = 0
+    while i < 5
+      word = pool[dir[18] + i] ## i64
+      expect(word >> 32).to eq(2147483647)
+      expect(word & 4294967295).to eq(i + 2)
+      i += 1
+
   it "preserves implication priority, signs and duplicate suppression" ->
     [0, 1, 2].each -> (pivot)
       check_ternary_membership(pivot, 0, false, false)
@@ -49,7 +69,7 @@ describe "Exact either-binary adjacency queries" ->
   it "matches an independent edge oracle with bounded reads" ->
     seed = 0
     while seed < 12
-      bd = i64[80]; pool = i64[2048]; state = i64[4]; state[1] = 2048
+      bd = i32[60]; pool = i64[2048]; state = i64[4]; state[1] = 2048
       edges = []
       a = 2
       while a < 18
@@ -71,8 +91,8 @@ describe "Exact either-binary adjacency queries" ->
           expected = true if (edge[0] == a && (edge[1] == b || edge[1] == c)) || (edge[1] == a && (edge[0] == b || edge[0] == c))
         code = wassat_binary_either(bd, pool, a, b, c)
         expect((code & 1) == 1).to eq(expected)
-        bound = bd[4 * a + 1]
-        opposite = bd[4 * b + 1] + bd[4 * c + 1]
+        bound = bd[2 * a + 1]
+        opposite = bd[2 * b + 1] + bd[2 * c + 1]
         bound = opposite if opposite < bound
         expect((code >> 1) <= bound).to eq(true)
         q += 1

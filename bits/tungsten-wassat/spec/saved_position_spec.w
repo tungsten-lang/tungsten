@@ -23,10 +23,10 @@ use ../lib/solver
   ar[2] = -1
   asg[1] = 1; lasg[2] = 1; lasg[3] = -1
   asg[2] = other; lasg[4] = other; lasg[5] = 0 - other
-  wd = i64[4 * (2 * width + 4)]; wp = i64[16]; ws = i64[14]
+  wd = i32[4 * (2 * width + 4)]; wp = i64[16]; ws = i64[14]
   ws[1] = 16
   wassat_ws_add(wd, wp, ws, 3, 2, 2)
-  bd = i64[4 * (2 * width + 4)]; bp = i64[1]
+  bd = i32[3 * (2 * width + 4)]; bp = i64[1]
   tr = i32[width + 2]; tr[0] = 1
   st = i64[14]; st[1] = 1; st[13] = enabled
   wassat_propagate(ar, asg, lasg, lvl, rsn, phs, wd, wp, ws, tr, st, 1, bd, bp)

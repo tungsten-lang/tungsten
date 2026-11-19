@@ -1,0 +1,10 @@
++ wrong_value (n : ℕ) (h : n % 4 = 3) : even n := by auto
++ mixed_branches (n : ℤ) (h : n % 4 = 1 ∨ n % 4 = 2) : odd n := by auto
++ mirrored_branches (n : ℤ) (h : n % 4 = 2 ∨ n % 4 = 3) : odd n := by auto
++ unrelated (n m : ℕ) (h : m % 4 = 3) : odd n := by auto
++ nonfactor (n : ℤ) (h : n % 6 = 5) : n % 4 = 1 := by auto
++ finer (n : ℤ) (h : odd n) : n % 4 = 1 := by auto
++ zero_target (n : ℤ) (h : n % 4 = 3) : n % 0 = 3 := by auto
++ zero_source (n : ℕ) (h : n % 0 = 2) : odd n := by auto
++ variable_source (n k : ℤ) (h : n % k = 1) : odd n := by auto
++ negative_source (n : ℤ) (h : n % (-4) = -2) : odd n := by auto

@@ -2502,6 +2502,67 @@
       i += 1
     out
 
+  # Orient a literal remainder equation. For odd/even, unfold only the head
+  # so the dividend keeps exactly the spelling it has in the branch fact.
+  -> literal_residue(prop)
+    conversion = nil
+    if prop.tag == :app && (is_const?(prop.a, "odd") || is_const?(prop.a, "even"))
+      head = @k.compute(prop.a)
+      if head.concl.b.tag != :lam
+        return nil
+      applied = @d.ap_thm(head, prop.b)
+      conversion = @k.trans(applied, @k.beta(applied.concl.b))
+      prop = conversion.concl.b
+    if (prop.search_ops & TERM_DIVMOD) == 0
+      return nil
+    sides = dest_binop(prop, "=")
+    if sides == nil
+      return nil
+    reversed = sides[0].tag == :lit
+    rem = reversed ? sides[1] : sides[0]
+    value = reversed ? sides[0] : sides[1]
+    if value.tag != :lit || rem.tag != :app || rem.a.tag != :app || rem.a.a.op != OP_MOD || rem.b.tag != :lit
+      return nil
+    ty = type_of(rem)
+    if (ty != TY_NAT_SINGLETON && ty != TY_INT_SINGLETON) || rem.b.val <= 0
+      return nil
+    [rem, value, reversed, conversion]
+
+  -> auto_residue(target, fact)
+    source = literal_residue(fact.concl)
+    if source == nil
+      return nil
+    dividend = source[0].a.b
+    if !tm_eq(dividend, target[0].a.b)
+      return nil
+    modulus = source[0].b
+    divisor = target[0].b
+    if modulus.val % divisor.val != 0 || int_fmod(source[1].val, divisor.val) != target[1].val
+      return nil
+    begin
+      equation = source[3] == nil ? fact : @k.eq_mp(source[3], fact)
+      proof = source[2] ? @k.sym(equation) : equation
+      if !tm_eq(modulus, divisor)
+        ty = type_of(divisor)
+        rule = auto_loaded_rule("mod_of_factor." + ty.name)
+        if rule == nil
+          return nil
+        factor = mk_lit(modulus.val / divisor.val, ty)
+        [dividend, modulus, divisor, factor, source[1]].each -> (arg) rule = @k.spec(arg, rule)
+        # Compute the factorization and positivity guards inside the kernel.
+        rule = @k.mp(rule, @d.eqt_elim(@k.compute(rule.concl.a.b)))
+        if ty == TY_INT_SINGLETON
+          rule = @k.mp(rule, @d.eqt_elim(@k.compute(rule.concl.a.b)))
+        proof = @k.mp(rule, proof)
+        proof = @k.trans(proof, @k.compute(proof.concl.b))
+      if !tm_eq(proof.concl, @k.eq_tm(target[0], target[1]))
+        return nil
+      if target[2]
+        proof = @k.sym(proof)
+      return target[3] == nil ? proof : @k.eq_mp(@k.sym(target[3]), proof)
+    rescue e
+      nil
+
   -> collect_divmod(t, seen, out)
     if (t.search_ops & TERM_DIVMOD) == 0 || t.tag != :app
       return 0
@@ -3821,6 +3882,7 @@
       proof = auto_introduce_search(goal, facts, terms, used, depth, budget, arithmetic)
       if proof != nil
         return proof
+    residue = literal_residue(goal.concl)
     implications = []
     negations = []
     exclusions = []
@@ -3830,6 +3892,10 @@
         th = facts[i]
         if tm_eq(th.concl, goal.concl)
           return th
+        if residue != nil
+          proof = auto_residue(residue, th)
+          if proof != nil
+            return proof
         fitted = try_square_fit(th, goal.concl)
         if fitted != nil
           return fitted

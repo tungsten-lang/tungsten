@@ -92,3 +92,9 @@ import core
   by_cases h : a ≤ b
   · nlinarith
   · nlinarith
+
++ mul_le_mul_left.nat (k a b : ℕ) (h : a ≤ b) : k * a ≤ k * b
+  have e := sub_add_cancel.nat b a h
+  have q := left_distrib.nat k (b - a) a
+  rw [e] at q
+  linarith [zero_le.nat (k * (b - a))]

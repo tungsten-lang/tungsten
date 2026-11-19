@@ -875,14 +875,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       wassat_query_keep(@query_owner, @wpool, @wpool.size * 8) if @query_owner != nil
       @wp_state[0] = 0
       @wp_state[1] = @wp_cap
-      self.rebuild_watches
       # the binary pool is sized by clause capacity too — regrow and repack
       @blp_cap = 2 * ncap + 4 * @nvars + 72
       @bl_pool = i64[@blp_cap]
       wassat_query_keep(@query_owner, @bl_pool, @bl_pool.size * 8) if @query_owner != nil
       @bl_state[0] = 0
       @bl_state[1] = @blp_cap
-      self.rebuild_binaries
+      self.rebuild_watch_pools
     0
 
   # Register binary clause (a | b): falsifying a implies b and vice versa.
@@ -925,6 +924,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_ws_rebuild(@cmeta, @alive, @arena, @wsdir,
                       @wpool, @wp_state, @ncl, 2 * @nvars + 4)
     @wp_state[2] = 0
+    0
+
+  -> rebuild_watch_pools
+    wassat_rebuild_watch_pools(@cmeta, @alive, @arena, @bldir, @bl_pool, @bl_state,
+                               @wsdir, @wpool, @wp_state, @ncl, 2 * @nvars + 4)
     0
 
   # The learned-clause store. `buf` is one of the solver's own i64 buffers,
@@ -3224,8 +3228,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         wassat_clean_root(@cmeta, @alive, @arena, @lassign, @inp_units, st, @ncl, @nvars + 2)
         @inp_cleaned += st[2] + st[4]
         @inp_totals[4] = @inp_totals[4] + st[5]
-        self.rebuild_binaries
-        self.rebuild_watches
+        self.rebuild_watch_pools
         if st[0] == 1
           @ok = false
           @formula_unsat = true
@@ -3468,6 +3471,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # clause it ever learned, in its arena and in the checker's database
     # (AProVE07-21: 1.37M lemmas, 14.8k deletions, 1.7 GB after 54 s).
     self.log_drat_deletions if @proof_mode == WASSAT_PROOF_DRAT
+    remap = false
     if @proof_mode == WASSAT_PROOF_NONE || @proof_mode == WASSAT_PROOF_DRAT
       remap = @fixed_caps && @gid.size >= @ncl
       wassat_reduce_compact(@cmeta, @alive, @arena, @clbd, @cused,
@@ -3487,12 +3491,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         @rhist[75] += 1
         @rhist[76] += @ncl - @rhist[65]
         remap = true
-      if remap
-        @ncl = @rhist[65]
-        self.rebuild_binaries
+      @ncl = @rhist[65] if remap
 
-    # rebuild watches from scratch over the survivors (tight repack)
-    self.rebuild_watches
+    # Binary entries carry clause indices. Long entries carry arena offsets.
+    if remap
+      self.rebuild_watch_pools
+    else
+      self.rebuild_watches
     # Subsumption rewrote clause bodies in place, or root units arrived since
     # inprocessing last cleaned: strip root-false literals, drop root-satisfied
     # clauses, and repack both watch structures from a consistent database.
@@ -4620,8 +4625,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       # shape as the SLS-burst gate. Policy decides; the default preserves
       # the old behaviour until the measurement says otherwise.
       @use_target = @config.use_target_phases(false)
-    self.rebuild_watches
-    self.rebuild_binaries
+    self.rebuild_watch_pools
     @next_gid = art["next_gid"]
     @ok = false if pm[6] == 1
     u = 0
@@ -5008,8 +5012,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @inp_totals[6] = @inp_totals[6] + rst[5]
     @inp_totals[7] = @inp_totals[7] + rst[6]
     wassat_prof_note("subst.hash clauses=[rst[4]] probes=[rst[5]] compared_literals=[rst[6]] max_advance=[rst[7]]") if prof_start != 0
-    self.rebuild_watches
-    self.rebuild_binaries
+    self.rebuild_watch_pools
     # Mid-search the root is fully propagated, so a rewritten clause can now
     # watch a root-false literal: the caller's clean must not be skipped.
     @need_clean = true if mid
@@ -5642,6 +5645,85 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   bd[d + 1] = n + 1
   0
 
+# The binary and long directories both start each list with a pool offset
+# and a live count. Write in clause order, including two entries when a
+# clause watches the same literal twice.
+-> wassat_watch_fill_pair(dir, pool, shift, reference, la, lb) (i32[] i64[] i64 i64 i64 i64) i64
+  da = la << shift ## i64
+  db = lb << shift ## i64
+  pool[dir[da] + dir[da + 1]] = (reference << 32) | lb
+  dir[da + 1] += 1
+  pool[dir[db] + dir[db + 1]] = (reference << 32) | la
+  dir[db + 1] += 1
+  0
+
+-> wassat_watch_lit_index(lit) (i64) i64
+  sign = lit >> 63 ## i64
+  (((lit ^ sign) - sign) << 1) + (sign & 1)
+
+# When both pools need rebuilding, count live binary and long watches in one
+# pass. Reserve the two layouts separately, then fill both in clause order.
+-> wassat_rebuild_watch_pools(cm, alive, ar, bd, bp, bs, wd, wp, ws, ncl, nlits) (i64[] i8[] i32[] i32[] i64[] i64[] i32[] i64[] i64[] i64 i64) i64
+  li = 0 ## i64
+  while li < nlits
+    bd[(li << 1) + 1] = 0
+    wd[(li << 2) + 1] = 0
+    li += 1
+  entries = wassat_shared_watch_count(cm, alive, ar, bd, wd, ncl)
+  wassat_bl_layout(bd, bs, nlits)
+  wassat_ws_layout(wd, ws, nlits, entries)
+  wassat_shared_watch_fill(cm, alive, ar, bd, bp, wd, wp, ncl)
+  bs[2] = 0
+  ws[2] = 0
+  0
+
+-> wassat_shared_watch_count(cm, alive, ar, bd, wd, ncl) (i64[] i8[] i32[] i32[] i32[] i64) i64
+  entries = 0 ## i64
+  ci = 0 ## i64
+  while ci < ncl
+    n = cm[(ci << 1) + 1] ## i64
+    if n >= 2 && alive[ci] == 1
+      stx = cm[ci << 1] ## i64
+      la = wassat_watch_lit_index(ar[stx] ## i64)
+      lb = wassat_watch_lit_index(ar[stx + 1] ## i64)
+      if n == 2
+        bd[(la << 1) + 1] += 1
+        bd[(lb << 1) + 1] += 1
+      else
+        entries += 2
+        wd[(la << 2) + 1] += 1
+        wd[(lb << 2) + 1] += 1
+    ci += 1
+  entries
+
+-> wassat_shared_watch_fill(cm, alive, ar, bd, bp, wd, wp, ncl) (i64[] i8[] i32[] i32[] i64[] i32[] i64[] i64) i64
+  ci = 0 ## i64
+  while ci < ncl
+    n = cm[(ci << 1) + 1] ## i64
+    if n >= 2 && alive[ci] == 1
+      stx = cm[ci << 1] ## i64
+      la = wassat_watch_lit_index(ar[stx] ## i64)
+      lb = wassat_watch_lit_index(ar[stx + 1] ## i64)
+      if n == 2
+        wassat_watch_fill_pair(bd, bp, 1, ci, la, lb)
+      else
+        wassat_watch_fill_pair(wd, wp, 2, stx, la, lb)
+    ci += 1
+  0
+
+-> wassat_bl_layout(bd, blst, nlits) (i32[] i64[] i64) i64
+  top = 0 ## i64
+  li = 0 ## i64
+  while li < nlits
+    d = li << 1 ## i64
+    bd[d] = top
+    bd[bd.size - 1 - li] = bd[d + 1] + 1
+    top = top + bd[d + 1] + 1
+    bd[d + 1] = 0
+    li += 1
+  blst[0] = top
+  0
+
 # Counting repack of the whole binary pool from the clause DB: two passes
 # (count, fill) with +1 slack per literal, mirroring wassat_ws_rebuild.
 # Always fits: 2*binaries + nlits is far below the pool's 2*ccap sizing.
@@ -5655,55 +5737,19 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   while ci < ncl
     if alive[ci] == 1 && cm[(ci << 1) + 1] == 2
       stx = cm[ci << 1] ## i64
-      a = ar[stx]
-      bq = ar[stx + 1]
-      la = 0 ## i64
-      if a > 0
-        la = a << 1
-      else
-        la = ((0 - a) << 1) + 1
-      lb = 0 ## i64
-      if bq > 0
-        lb = bq << 1
-      else
-        lb = ((0 - bq) << 1) + 1
-      bd[(la << 1) + 1] = bd[(la << 1) + 1] + 1
-      bd[(lb << 1) + 1] = bd[(lb << 1) + 1] + 1
+      la = wassat_watch_lit_index(ar[stx] ## i64)
+      lb = wassat_watch_lit_index(ar[stx + 1] ## i64)
+      bd[(la << 1) + 1] += 1
+      bd[(lb << 1) + 1] += 1
     ci += 1
-  top = 0
-  li = 0
-  while li < nlits
-    d = li << 1 ## i64
-    bd[d] = top
-    bd[bd.size - 1 - li] = bd[d + 1] + 1
-    top = top + bd[d + 1] + 1
-    bd[d + 1] = 0
-    li += 1
-  blst[0] = top
+  wassat_bl_layout(bd, blst, nlits)
   ci = 0
   while ci < ncl
     if alive[ci] == 1 && cm[(ci << 1) + 1] == 2
       stx = cm[ci << 1]
-      a = ar[stx]
-      bq = ar[stx + 1]
-      la = 0
-      if a > 0
-        la = a << 1
-      else
-        la = ((0 - a) << 1) + 1
-      lb = 0
-      if bq > 0
-        lb = bq << 1
-      else
-        lb = ((0 - bq) << 1) + 1
-      da = la << 1 ## i64
-      db = lb << 1 ## i64
-      wa = (ci << 32) | lb ## i64
-      wb = (ci << 32) | la ## i64
-      blp[bd[da] + bd[da + 1]] = wa
-      bd[da + 1] = bd[da + 1] + 1
-      blp[bd[db] + bd[db + 1]] = wb
-      bd[db + 1] = bd[db + 1] + 1
+      la = wassat_watch_lit_index(ar[stx] ## i64)
+      lb = wassat_watch_lit_index(ar[stx + 1] ## i64)
+      wassat_watch_fill_pair(bd, blp, 1, ci, la, lb)
     ci += 1
   0
 
@@ -7602,54 +7648,26 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   wd[d + 1] = n + 1
   0
 
-# Counting repack of the whole watch pool from the clause DB: two passes
-# (count, fill), with one spare entry per literal and bounded proportional
-# headroom for dense databases. Capacity comes from the existing pool while
-# leaving free space for later block relocations. Never allocates.
--> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i8[] i32[] i32[] i64[] i64[] i64 i64) i64
-  li = 0
-  while li < nlits
-    wd[(li << 2) + 1] = 0
-    li += 1
-  ci = 0
-  while ci < ncl
-    if alive[ci] == 1 && cm[(ci << 1) + 1] >= 3
-      stx = cm[ci << 1] ## i64
-      a = ar[stx]
-      bq = ar[stx + 1]
-      la = 0 ## i64
-      if a > 0
-        la = a << 1
-      else
-        la = ((0 - a) << 1) + 1
-      lb = 0 ## i64
-      if bq > 0
-        lb = bq << 1
-      else
-        lb = ((0 - bq) << 1) + 1
-      wd[(la << 2) + 1] = wd[(la << 2) + 1] + 1
-      wd[(lb << 2) + 1] = wd[(lb << 2) + 1] + 1
-    ci += 1
+-> wassat_ws_layout(wd, wst, nlits, entries) (i32[] i64[] i64 i64) i64
   # Spend half the spare pool on proportional per-literal headroom. Dense
   # lists otherwise relocate after just two appends and repeatedly repack
   # the entire database. Keep the other half free for those relocations,
   # and cap headroom at 25% of live entries to retain locality.
-  entries = 0
-  dense_entries = 0
-  li = 0
-  while li < nlits
-    count = wd[(li << 2) + 1]
-    entries += count
-    dense_entries += count if count >= 64
-    li += 1
   wst[3] = wst[3] + 1
   wst[4] = wst[4] + entries
   # Preserve the compact sparse layout until repeated overflows demonstrate
   # thrashing. Reserving space on the first build can instead cause an extra
   # repack by crowding out relocations of the many short lists.
   sparse = entries < 64 * nlits
-  reserve_entries = sparse ? dense_entries : entries
-  reserve_entries = 0 if sparse && wst[7] < 3
+  reserve_entries = entries ## i64
+  if sparse && wst[12] != 1
+    reserve_entries = 0
+    if wst[7] >= 3
+      li = 0 ## i64
+      while li < nlits
+        count = wd[(li << 2) + 1] ## i64
+        reserve_entries += count if count >= 64
+        li += 1
   slack = (wst[1] - entries - nlits) / 2
   slack = 0 if slack < 0
   slack = reserve_entries / 4 if slack > reserve_entries / 4
@@ -7666,8 +7684,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     slack = (wst[1] - entries - nlits) * 3 / 4
     slack = 0 if slack < 0
     slack = entries * 2 if slack > entries * 2
-  top = 0
-  li = 0
+  top = 0 ## i64
+  li = 0 ## i64
   while li < nlits
     d = li << 2 ## i64
     count = wd[d + 1]
@@ -7680,32 +7698,38 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wd[d + 1] = 0
     li += 1
   wst[0] = top
+  0
+
+# Counting repack of the whole watch pool from the clause DB: two passes
+# (count, fill), with one spare entry per literal and bounded proportional
+# headroom for dense databases. Capacity comes from the existing pool while
+# leaving free space for later block relocations. Never allocates.
+-> wassat_ws_rebuild(cm, alive, ar, wd, wp, wst, ncl, nlits) (i64[] i8[] i32[] i32[] i64[] i64[] i64 i64) i64
+  li = 0
+  while li < nlits
+    wd[(li << 2) + 1] = 0
+    li += 1
+  entries = 0 ## i64
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1 && cm[(ci << 1) + 1] >= 3
+      entries += 2
+      stx = cm[ci << 1] ## i64
+      la = wassat_watch_lit_index(ar[stx] ## i64)
+      lb = wassat_watch_lit_index(ar[stx + 1] ## i64)
+      wd[(la << 2) + 1] += 1
+      wd[(lb << 2) + 1] += 1
+    ci += 1
+  wassat_ws_layout(wd, wst, nlits, entries)
   # Ascending fill + the backward block scan in propagate = exactly the
   # replaced linked lists' order (prepend, newest scanned first).
   ci = 0
   while ci < ncl
     if alive[ci] == 1 && cm[(ci << 1) + 1] >= 3
       stx = cm[ci << 1]
-      a = ar[stx]
-      bq = ar[stx + 1]
-      la = 0
-      if a > 0
-        la = a << 1
-      else
-        la = ((0 - a) << 1) + 1
-      lb = 0
-      if bq > 0
-        lb = bq << 1
-      else
-        lb = ((0 - bq) << 1) + 1
-      da = la << 2 ## i64
-      db = lb << 2 ## i64
-      wa = (stx << 32) | lb ## i64
-      wb = (stx << 32) | la ## i64
-      wp[wd[da] + wd[da + 1]] = wa
-      wd[da + 1] = wd[da + 1] + 1
-      wp[wd[db] + wd[db + 1]] = wb
-      wd[db + 1] = wd[db + 1] + 1
+      la = wassat_watch_lit_index(ar[stx] ## i64)
+      lb = wassat_watch_lit_index(ar[stx + 1] ## i64)
+      wassat_watch_fill_pair(wd, wp, 2, stx, la, lb)
     ci += 1
   0
 

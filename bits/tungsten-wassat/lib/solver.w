@@ -154,8 +154,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # Each operation fills its own entries before reading them.
     @mstk = i64[nv + 3]
     wassat_query_keep(query_owner, @mstk, @mstk.size * 8) if query_owner != nil
-    @mclr = i64[nv + 3] # marks to clear after minimisation
-    wassat_query_keep(query_owner, @mclr, @mclr.size * 8) if query_owner != nil
     @use_otfs = false
     # These buffers are disjoint in time: proof replay never runs in the
     # proof-free mode where OTFS is enabled. Reusing its native work arrays
@@ -1163,7 +1161,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       elsif @kst[10] < 655360
         @astate[22] = 1
     wassat_analyze(@arena, @assign, @level, @reason, @seen, @cmeta,
-                   @trail, @lbuf, @mbuf, @mstk, @mclr, @activity, @heap,
+                   @trail, @lbuf, @mbuf, @mstk, @activity, @heap,
                    @heappos, @hstate, @astate, @nvars, @cused,
                    @vq_next, @vq_prev, @vq_stamp, @vq_state,
                    @pwork, @rassign, @obuf, @amark, @clbd, @lbd_seen)
@@ -1192,7 +1190,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> shrink_learned(n)
     @shst[0] = n
     z = wassat_shrink(@arena, @assign, @level, @reason, @seen, @cmeta,
-                      @trail, @trail_lim, @lbuf, @mbuf, @mstk, @obuf, @mclr,
+                      @trail, @trail_lim, @lbuf, @mbuf, @mstk, @obuf, @lbuf,
                       @lbd_seen, @shst, @nvars)
     @lsize = @shst[0]
     @shst[5]
@@ -1209,7 +1207,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     return core if @level[av] == 0
     # Follow only the reasons that explain this failed assumption. The queue
     # doubles as the list of marks to clear, including at reconvergent edges.
-    queue = @mclr
+    queue = @mbuf
     leaves = @mstk
     seen = @seen
     reason = @reason
@@ -5243,12 +5241,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       v = assumptions[i].abs
       if @seen[v] == 0
         @seen[v] = 1
-        @mclr[distinct] = v
+        @mbuf[distinct] = v
         distinct += 1
       i += 1
     i = 0
     while i < distinct
-      @seen[@mclr[i]] = 0
+      @seen[@mbuf[i]] = 0
       i += 1
     highest = upper - distinct
     return 0 if highest < @trail_lim.size && highest < @lbd_seen.size
@@ -7747,7 +7745,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[12..20] = cumulative pre-scan/resume visits, probes, failed probes,
 #     removed literals, maximum reason length, frames, input literals, skipped
 #     probes. The maximum is a high-water mark; all other counts accumulate.
--> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, tclr, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark, ab, am, clbd, lseen) (i32[] i8[] i64[] i32[] i8[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64[])
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark, ab, am, clbd, lseen) (i32[] i8[] i64[] i32[] i8[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64[])
   confl = st[0]
   na = 0
   promote = st[24] == 1
@@ -7759,6 +7757,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   cl = confl
   size = 1
   resolved = 0
+  reasons = st[22] == 1
   otfs_on = st[9] == 1
   keep_going = true
 
@@ -7813,7 +7812,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           # surviving minimisation: collected here, bumped once at the end.
           ab[na] = vq
           na += 1
-          am[vq] = 1
+          am[vq] = 1 if reasons
           if lvl[vq] >= dl
             counter += 1
           else
@@ -7858,7 +7857,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           sn[vq] = 1
           ab[na] = vq
           na += 1
-          am[vq] = 1
+          am[vq] = 1 if reasons
           if lvl[vq] >= dl
             counter += 1
           else
@@ -7928,7 +7927,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   failed = 0
   max_reason = 0
   frames = 0
-  nclr = 0
+  # tmp[1..size) can hold the entire kept body. Only variables outside
+  # the marked body enter the probe-clear list, each at most once. The
+  # two lists therefore fit together in this variable-sized buffer.
+  clear = size ## i64
   keep = 1
   i = 1
   while i < size
@@ -7968,8 +7970,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               elsif mk == 0
                 if rsn[vk] < 0 || (abs_mask & (one << (lvl[vk] & 63))) == 0
                   sn[vk] = 4
-                  tclr[nclr] = vk
-                  nclr += 1
+                  tmp[clear] = vk
+                  clear += 1
                   good = 0
                 elsif child == 0
                   child = vk
@@ -7995,8 +7997,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           if child == 0
             if sp > 1
               sn[cv] = 3
-              tclr[nclr] = cv
-              nclr += 1
+              tmp[clear] = cv
+              clear += 1
             sp -= 1
           else
             stk[sp - 1] = (ci << 32) | cv
@@ -8014,8 +8016,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           fv = stk[j] & u32_mask
           if sn[fv] == 0
             sn[fv] = 4
-            tclr[nclr] = fv
-            nclr += 1
+            tmp[clear] = fv
+            clear += 1
           j += 1
     elsif rsn[vq] >= 0
       budget_skipped += 1
@@ -8033,9 +8035,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       vq = 0 - q
     sn[vq] = 0
     i += 1
-  i = 0
-  while i < nclr
-    sn[tclr[i]] = 0
+  i = size
+  while i < clear
+    sn[tmp[i]] = 0
     i += 1
 
   i = 1
@@ -8102,13 +8104,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     z = wassat_sort_by_key(ab, vqs, na)
   else
     z = wassat_evsids_batch(act, heap, hpos, hst, ab, na, nv)
-  i = 0
-  while i < na
-    v = ab[i] ## i64
-    if bmode != 2
-      z = wassat_vmtf_front(vqn, vqp, vqs, vst, v)
-    am[v] = 0
-    i += 1
+  if bmode != 2
+    wassat_vmtf_batch(vqn, vqp, vqs, vst, ab, am, na, st[22])
+  elsif reasons
+    i = 0
+    while i < na
+      am[ab[i]] = 0
+      i += 1
 
   st[12] += prescan_lits
   st[13] += resume_lits
@@ -8721,6 +8723,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       tgt = lvl[v]
     st[5] = tgt
     return n
+  # The caller may lend out as the clear list. The body moves to tmp
+  # before the first probe, and all probe marks clear before output.
+  asserting = out[0] ## i64
   # The level table holds zero or a positive LBD stamp on entry. A negative
   # entry is the number of body literals seen at that level, negated. Record
   # each touched level once so it can be cleared before the next LBD scan.
@@ -8927,6 +8932,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   while r < st[6]
     sn[tclr[r]] = 0
     r += 1
+  out[0] = asserting
   tgt = 0
   r = 0
   while r < m
@@ -9779,24 +9785,49 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # VMTF move-to-front: unlink v and relink it at the queue head with a fresh
 # stamp. The stamp orders "recently in a conflict"; backjump repositions the
 # search cursor to the highest-stamp unassigned variable.
--> wassat_vmtf_front(vqn, vqp, vqs, vst, v) (i64[] i64[] i64[] i64[] i64) i64
-  return 0 if vqs[v] <= vst[4]
-  return 0 if vst[0] == v
-  pn = vqn[v]
-  pp = vqp[v]
-  if pp > 0
-    vqn[pp] = pn
-  if pn > 0
-    vqp[pn] = pp
-  if vst[1] == v
-    vst[1] = pp
-  h = vst[0]
-  vqp[h] = v
-  vqn[v] = h
+# Splice an eligible non-head variable to the front. Both callers retain the
+# search cursor, which the decision and backjump paths maintain separately.
+-> wassat_vmtf_splice(vqn, vqp, vqs, v, head, stamp, tail) (i64[] i64[] i64[] i64 i64 i64 i64) i64
+  pn = vqn[v] ## i64
+  pp = vqp[v] ## i64
+  vqn[pp] = pn if pp > 0
+  vqp[pn] = pp if pn > 0
+  vqp[head] = v
+  vqn[v] = head
   vqp[v] = 0
+  vqs[v] = stamp
+  return pp if tail == v
+  tail
+
+-> wassat_vmtf_front(vqn, vqp, vqs, vst, v) (i64[] i64[] i64[] i64[] i64) i64
+  head = vst[0] ## i64
+  return 0 if vqs[v] <= vst[4] || head == v
+  stamp = vst[2] + 1 ## i64
+  vst[1] = wassat_vmtf_splice(vqn, vqp, vqs, v, head, stamp, vst[1])
   vst[0] = v
-  vst[2] = vst[2] + 1
-  vqs[v] = vst[2]
+  vst[2] = stamp
+  0
+
+# The frontier and stamp are private to this conflict. Publish them once
+# after moving the analyzed variables in their original order.
+-> wassat_vmtf_batch(vqn, vqp, vqs, vst, vars, am, n, mark) (i64[] i64[] i64[] i64[] i64[] i8[] i64 i64) i64
+  head = vst[0] ## i64
+  tail = vst[1] ## i64
+  stamp = vst[2] ## i64
+  floor = vst[4] ## i64
+  marks = mark == 1
+  i = 0 ## i64
+  while i < n
+    v = vars[i] ## i64
+    if vqs[v] > floor && head != v
+      stamp += 1
+      tail = wassat_vmtf_splice(vqn, vqp, vqs, v, head, stamp, tail)
+      head = v
+    am[v] = 0 if marks
+    i += 1
+  vst[0] = head
+  vst[1] = tail
+  vst[2] = stamp
   0
 
 # VMTF decision: walk from the search cursor toward the tail, skipping

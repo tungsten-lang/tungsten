@@ -1,7 +1,7 @@
 use spec
 use ../lib/solver
 
--> shrink_scan_fixture(interleaved, failed, fallback, extra, seeded = false)
+-> shrink_scan_fixture(interleaved, failed, fallback, extra, seeded = false, share_output = false)
   nv = 8 + extra
   ar = i32[8]
   ar[0] = -1
@@ -28,7 +28,7 @@ use ../lib/solver
   tmp = i64[nv + 3]
   stk = i64[nv + 3]
   dstk = i64[nv + 3]
-  tclr = i64[nv + 3]
+  tclr = share_output ? out : i64[nv + 3]
   cnt = i64[nv + 3]
   st = i64[8]
   v = 1
@@ -141,6 +141,13 @@ describe "Wassat shrinking scan and compaction" ->
     expect(r["attempts"]).to eq(2)
     expect(r["shrunk"]).to eq(1)
     expect(r["clean"]).to eq(true)
+
+  it "can borrow the output while clearing successful and failed probes" ->
+    [false, true].each -> (failed)
+      separate = shrink_scan_fixture(false, failed, true, 9, true)
+      shared = shrink_scan_fixture(false, failed, true, 9, true, true)
+      expect(shared).to eq(separate)
+      expect(shared["clean"]).to eq(true)
 
 describe "Wassat shrinking level order" ->
   it "keeps resolution order and output order with many distinct levels" ->

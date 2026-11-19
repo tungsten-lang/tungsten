@@ -1,0 +1,13 @@
+import arith
+
++ parity (n : ℤ) : even n ∨ odd n := by auto
+
+opaque lit : ℕ → Prop
+
++ lantern (n : ℕ) (base : lit 0) (step : ∀ j : ℕ, lit j → lit (succ j)) : lit n
+  induction n with j ih
+  · exact base
+  · exact step j ih
+
++ sum_lit (a b : ℕ) (base : lit 0) (step : ∀ j : ℕ, lit j → lit (succ j)) : lit (a+b)
+  auto

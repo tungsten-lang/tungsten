@@ -367,6 +367,30 @@ for jobs in 0 2; do
   need valid a
   proved score d = d"
 done
+# Warm and replay a user module, then use its unregistered induction lemma.
+cp bits/tungsten-satori/examples/premise_selection.sat "$tmp/lamps.sat"
+cat >"$tmp/select.sat" <<'EOF'
+import lamps
+
++ imported_lamp (x : ℕ) (h : lit 0) (s : ∀ k : ℕ, lit k → lit (succ k)) : lit x := by auto
+EOF
+for run in cold warm; do
+  "$bin" check "$tmp/select.sat" >"$out"
+  grep -q '^✓ imported_lamp : .*lit x$' "$out"
+done
+SATORI_BIN="$bin" "$bin" check --no-cache -j 1 "$tmp/select.sat" >"$out"
+grep -q '^✓ imported_lamp : .*lit x$' "$out"
+for jobs in 0 1; do
+  set -- check --no-cache
+  if test "$jobs" != 0; then set -- "$@" -j "$jobs"; fi
+  if SATORI_BIN="$bin" "$bin" "$@" bits/tungsten-satori/spec/auto_selection_failure.sat >"$out"; then
+    echo "untrusted premise selected" >&2
+    exit 1
+  fi
+  for theorem in excluded_axiom excluded_sorry unfinished excluded_failure; do
+    grep -q "^✗ .*theorem $theorem).*auto failed" "$out"
+  done
+done
 for jobs in 0 1; do
   set -- check --no-cache
   if test "$jobs" != 0; then set -- "$@" -j "$jobs"; fi

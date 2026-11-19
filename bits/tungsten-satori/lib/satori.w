@@ -22,7 +22,7 @@ use pattern
 use session
 
 SATORI_VERSION = "0.1.0"
-SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 6"
+SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
 
 -> satori_usage
   << "Satori [SATORI_VERSION] — a concise proof language with a small kernel"
@@ -111,9 +111,15 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 6"
     if no_cache
       s.no_cache = true
     s.only = only
+    if only != nil && only > 0
+      path = Env.get("SATORI_SPLIT_PREMISES")
+      if path != nil && path != ""
+        split_lines(path).each -> (tag) s.split_premises[tag] = true
     s.load_prelude
     t0 = ccall("__w_clock")
     s.run_file(f)
+    if only != nil && only > 0 && s.premise_retry.size > 0
+      << "⋯ select " + s.premise_retry.keys.join(" ")
     dt = ccall("__w_clock") - t0
     failures += s.failures
     st = s.stats
@@ -227,18 +233,18 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 6"
       return 1
     names = []
     indices = []
-    registrations = []
+    registrations = {}
     skel.each -> (l)
       if l.starts_with?("⋯ split ")
         parts = l.split("⋯ split ")[1].split(" ")
         indices.push(parts[0])
         names.push(parts[1])
         if parts.size == 3 && parts[2] == "auto"
-          registrations.push([parts[0], parts[1]])
+          registrations[parts[0]] = parts[1]
     if names.size > 0
       File.write(dir + "/indices", indices.join("\n") + "\n")
       # Fast-exit loop checks child completion every 10 ms for the first 50 ms before entering 250 ms RSS watchdog.
-      job = "out=\"$4/out.$3\"; idx=$(sed -n \"${3}p\" \"$4/indices\"); if test -n \"$7\"; then SATORI_ROOT=\"$5\" \"$0\" \"$7\" --only \"$idx\" \"$1\" > \"$out\" 2>&1 & else SATORI_ROOT=\"$5\" \"$0\" --only \"$idx\" \"$1\" > \"$out\" 2>&1 & fi; pid=$!; "
+      job = "export SATORI_SPLIT_PREMISES=\"$8\"; out=\"$4/out.$3\"; idx=$(sed -n \"${3}p\" \"$4/indices\"); if test -n \"$7\"; then SATORI_ROOT=\"$5\" \"$0\" \"$7\" --only \"$idx\" \"$1\" > \"$out\" 2>&1 & else SATORI_ROOT=\"$5\" \"$0\" --only \"$idx\" \"$1\" > \"$out\" 2>&1 & fi; pid=$!; "
       job = job + "for _fast in 1 2 3 4 5; do kill -0 $pid 2>/dev/null || break; sleep 0.01; done; t=0; "
       job = job + "while kill -0 $pid 2>/dev/null; do r=$(ps -o rss= -p $pid 2>/dev/null | tr -d ' '); "
       job = job + "if test -n \"$r\" && test \"$r\" -gt $(( $2 * 1024 )); then kill -9 $pid; echo 'satori-split: memory limit' >> \"$out\"; break; fi; "
@@ -251,11 +257,24 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 6"
     own = {}
     deps = {}
     failed = {}
+    memo = {}
+    trusted = {}
+    workers = names.size
     k = 0
     while k < names.size
       nm = names[k]
       id = indices[k]
       lines = split_lines(dir + "/out." + (k + 1).to_s)
+      # A provisional statement is never eligible on its own. If it shared a
+      # goal symbol, replay with the IDs whose proofs and dependencies checked.
+      requests = lines.find(-> (line) line.starts_with?("⋯ select split:"))
+      if requests != nil && requests.split(" ").any?(-> (tag) trusted.has_key?(tag))
+        path = dir + "/trusted"
+        File.write(path, trusted.keys.join("\n"))
+        replay = Process.spawn(["/bin/sh", "-c", job, bin, f, mem, (k + 1).to_s, dir, root, secs, nc_flag, path])
+        replay.wait
+        workers += 1
+        lines = split_lines(dir + "/out." + (k + 1).to_s)
       b = split_block(lines, indices[k].to_i)
       if b.size == 0 || !b[0].starts_with?("✓ ")
         failed[id] = nm
@@ -269,18 +288,14 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 6"
         st = split_tags(b[0])
         own[id] = st[1]
         deps[id] = st[2]
+        error = auto_registration_error(split_resolve(id, own, deps, memo, failed, []))
+        if error == nil
+          trusted["split:" + id] = true
+        elsif registrations.has_key?(id)
+          failed[id] = nm
+          b = ["✗ theorem " + nm + ": " + error]
       blocks[id] = b
       k += 1
-    memo = {}
-    # A worker sees placeholders for earlier declarations. Check registrations
-    # in source order once their complete dependency tags are available.
-    registrations.each -> (entry)
-      id = entry[0]
-      if !failed.has_key?(id)
-        error = auto_registration_error(split_resolve(id, own, deps, memo, failed, []))
-        if error != nil
-          failed[id] = entry[1]
-          blocks[id] = ["✗ theorem " + entry[1] + ": " + error]
     skel.each -> (l)
       if l.starts_with?("⋯ split ")
         id = l.split("⋯ split ")[1].split(" ")[0]
@@ -350,7 +365,7 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 6"
     status = "OK"
     if nfail > 0
       status = "FAILED (" + nfail.to_s + ")"
-    << "── " + f + ": " + status + " — " + info + ", " + ((dt * ~1000.0).round / ~1000.0).to_s + " s wall, " + names.size.to_s + " theorem processes, " + jobs.to_s + " at a time"
+    << "── " + f + ": " + status + " — " + info + ", " + ((dt * ~1000.0).round / ~1000.0).to_s + " s wall, " + workers.to_s + " theorem processes, " + jobs.to_s + " at a time"
   ensure
     Process.spawn(["/bin/rm", "-rf", dir]).wait
   nfail

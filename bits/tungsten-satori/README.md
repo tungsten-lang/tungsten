@@ -323,6 +323,14 @@ and `calc` retain their existing proof blocks.
   of 24 rule attempts and detects cycles. Failed candidates contribute neither
   assumptions nor trust tags. `aesop` and `tauto` support the same behavior.
 
+  Bare `auto` also tries up to eight previously proved lemmas that share a
+  distinctive constant with the goal. Rare constants rank higher, and symbols
+  from local hypotheses help choose between candidates. Satori instantiates
+  each lemma and proves its premises. For example, after `import arith`,
+  `+ parity (n : ℤ) : even n ∨ odd n := by auto` finds the library's parity
+  theorem. The [premise selection example](examples/premise_selection.sat)
+  also uses an ordinary user lemma proved by induction.
+
   Library authors can write `@[auto] + lemma ...` to register a proved rule.
   Subsequent proofs use ordinary `auto`, including after an import. Selection
   uses the conclusion's structure and type; theorem names have no special

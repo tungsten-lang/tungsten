@@ -362,6 +362,7 @@ TY_REAL_SINGLETON = intern_ty_con0("real")
 TERM_MINMAX = 1
 TERM_DIVMOD = 2
 TERM_SQUARE_PRODUCT = 4
+TERM_LAMBDA = 8
 
 + KTm
   ro :tag, :name, :ty, :a, :b, :idx, :val, :h, :cl, :mx, :tv, :op, :vkey, :search_ops
@@ -405,7 +406,7 @@ TERM_SQUARE_PRODUCT = 4
       @h = (@a.h * 41 + @b.h * 7 + 3) % HASH_MOD
     when :lam
       @cl = @b.cl
-      @search_ops = @b.search_ops
+      @search_ops = @b.search_ops | TERM_LAMBDA
       @tv = @ty.has_var || @b.tv
       if @b.mx > 1
         @mx = @b.mx - 1

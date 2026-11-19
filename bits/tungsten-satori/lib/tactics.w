@@ -959,6 +959,8 @@
     conv
 
   -> try_square_fit(th, target)
+    if ((th.concl.search_ops | target.search_ops) & TERM_SQUARE_PRODUCT) == 0
+      return nil
     left_head = strip_app(th.concl)[0]
     right_head = strip_app(target)[0]
     if [:const, :var].include?(left_head.tag) && [:const, :var].include?(right_head.tag) && !tm_eq(left_head, right_head)
@@ -2421,7 +2423,8 @@
     bottom = nil
     hyps.each -> (h)
       begin
-        h = @k.eq_mp(@d.beta_eta_conv(h.concl), h)
+        if (h.concl.search_ops & TERM_LAMBDA) != 0
+          h = @k.eq_mp(@d.beta_eta_conv(h.concl), h)
         eqth = folder.simp_conv_opt(h.concl, 0)
         if eqth == nil
           folded.push(h)
@@ -2982,17 +2985,7 @@
           bucket.push([source, target, th, reverse])
     graph
 
-  # Search the known equality graph, then compare applications structurally.
-  # Reuse the index through congruence; allocate proofs only for new paths.
-  -> auto_equal(left, right, facts, depth, graph = nil)
-    if tm_eq(left, right)
-      return @k.refl(left)
-    if depth <= 0 || !ty_eq(type_of(left), type_of(right))
-      return nil
-    if graph == nil
-      graph = auto_equality_graph(facts)
-    if graph.size == 0
-      return nil
+  -> auto_equality_path(left, right, graph)
     nodes = [left]
     paths = [nil]
     visited = {}
@@ -3015,7 +3008,28 @@
               nodes.push(next_term)
               paths.push(path)
       i += 1
+    nil
+
+  # Search the known equality graph, then compare applications structurally.
+  # Reuse the index through congruence; allocate proofs only for new paths.
+  -> auto_equal(left, right, facts, depth, graph = nil)
+    if tm_eq(left, right)
+      return @k.refl(left)
+    if depth <= 0 || !ty_eq(type_of(left), type_of(right))
+      return nil
+    if graph == nil
+      graph = auto_equality_graph(facts)
+    if graph.size == 0
+      return nil
+    # Every equality contributes both endpoints. A path needs an edge at each.
+    if graph[left.h] != nil && graph[right.h] != nil
+      path = auto_equality_path(left, right, graph)
+      if path != nil
+        return path
     if left.tag == :app && right.tag == :app
+      if tm_eq(left.a, right.a)
+        arg_eq = auto_equal(left.b, right.b, facts, depth - 1, graph)
+        return arg_eq == nil ? nil : @k.mk_comb(@k.refl(left.a), arg_eq)
       fn_eq = auto_equal(left.a, right.a, facts, depth - 1, graph)
       if fn_eq != nil
         arg_eq = auto_equal(left.b, right.b, facts, depth - 1, graph)
@@ -3052,46 +3066,40 @@
           0
     nil
 
+  # Congruence preserves the head unless an equality can rewrite the
+  # term or a function on its spine. Hash collisions only admit extra matches.
+  -> auto_fixed_head(term, graph)
+    while graph[term.h] == nil
+      if term.tag != :app
+        return term.h
+      term = term.a
+    nil
+
   # Derive one new consequence using an equality to match a premise. Processing
   # the new fact before searching again also handles chained implications.
   -> auto_equal_mp(facts)
     if facts.size >= 128
       return false
-    has_equality = false
-    facts.each -> (th)
-      if @k.dest_eq(th.concl) != nil
-        has_equality = true
-    if !has_equality
-      return false
     graph = auto_equality_graph(facts)
-    i = 0
-    while i < facts.size
-      imp_th = facts[i]
-      imp = dest_binop(imp_th.concl, "⇒")
-      if imp != nil
+    if graph.size == 0
+      return false
+    heads = facts.map(-> (th) auto_fixed_head(th.concl, graph))
+    facts.each -> (rule)
+      imp = dest_binop(rule.concl, "⇒")
+      guard = imp == nil ? dest_unop(rule.concl, "¬") : imp[0]
+      if guard != nil && (imp == nil || !facts.any?(-> (th) tm_eq(th.concl, imp[1])))
+        head = auto_fixed_head(guard, graph)
         j = 0
         while j < facts.size
           premise = facts[j]
-          if !tm_eq(premise.concl, imp[0])
-            eq = auto_equal(premise.concl, imp[0], facts, 16, graph)
+          if (head == nil || heads[j] == nil || head == heads[j]) && !tm_eq(premise.concl, guard)
+            eq = auto_equal(premise.concl, guard, facts, 16, graph)
             if eq != nil
-              result = @k.mp(imp_th, @k.eq_mp(eq, premise))
+              matched = @k.eq_mp(eq, premise)
+              result = imp == nil ? @k.not_elim(rule, matched) : @k.mp(rule, matched)
               if auto_add_fact(facts, result)
                 return true
           j += 1
-      neg = dest_unop(imp_th.concl, "¬")
-      if neg != nil
-        j = 0
-        while j < facts.size
-          premise = facts[j]
-          if !tm_eq(premise.concl, neg)
-            eq = auto_equal(premise.concl, neg, facts, 16, graph)
-            if eq != nil
-              result = @k.not_elim(imp_th, @k.eq_mp(eq, premise))
-              if auto_add_fact(facts, result)
-                return true
-          j += 1
-      i += 1
     false
 
   -> auto_fresh(goal, facts, terms, ty)
@@ -3654,6 +3662,8 @@
       proof = auto_introduce_search(goal, facts, terms, used, depth, budget, arithmetic)
       if proof != nil
         return proof
+    implications = []
+    negations = []
     i = 0
     while true
       while i < facts.size
@@ -3676,20 +3686,22 @@
         quant = dest_unop(th.concl, "∀")
         if quant != nil && quant.tag == :lam
           auto_specialize_fact(th, quant, terms, facts)
+        imp = dest_binop(th.concl, "⇒")
+        neg = dest_unop(th.concl, "¬")
+        implications.push(imp)
+        negations.push(neg)
         # Check both directions because either premise may have arrived last.
         j = 0
         while j <= i
           other = facts[j]
-          imp = dest_binop(th.concl, "⇒")
           if imp != nil && tm_eq(imp[0], other.concl)
             auto_add_fact(facts, @k.mp(th, other))
-          imp2 = dest_binop(other.concl, "⇒")
+          imp2 = implications[j]
           if imp2 != nil && tm_eq(imp2[0], th.concl)
             auto_add_fact(facts, @k.mp(other, th))
-          neg = dest_unop(th.concl, "¬")
           if neg != nil && tm_eq(neg, other.concl)
             return @k.false_elim(@k.not_elim(th, other), goal.concl)
-          neg2 = dest_unop(other.concl, "¬")
+          neg2 = negations[j]
           if neg2 != nil && tm_eq(neg2, th.concl)
             return @k.false_elim(@k.not_elim(other, th), goal.concl)
           j += 1

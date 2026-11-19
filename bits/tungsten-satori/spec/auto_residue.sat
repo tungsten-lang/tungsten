@@ -16,3 +16,13 @@
 
 axiom supplied_residue (n : ℤ) : n % 10 = 9
 + from_hint (n : ℤ) : odd n := by auto [supplied_residue n]
+
++ affine (n : ℤ) (h : n % 5 = 2) : (2*n + 1) % 5 = 0 := by auto
++ nested (a b : ℕ) (ha : a % 14 = 10) (hb : b % 7 = 2) : ((a+b)*(a+1)) % 7 = 6 := by auto
++ square_cases (n : ℤ) (h : n % 5 = 2 ∨ n % 5 = 3) : n*n % 5 = 4 := by auto
++ from_subterm (a b : ℕ) (h : 4 = a*b % 5) : (a*b+3) % 5 = 2 := by auto
++ negative_coefficient (n : ℤ) (h : n % 5 = 2) : 2 = ((-2)*n + 1) % 5 := by auto
++ parity_sum (n m : ℤ) (h : odd n) (j : even m) : odd (n+m) := by auto
++ expression_hint (n : ℤ) : (3*n+1) % 5 = 3 := by auto [supplied_residue n]
++ multiple (a b : ℤ) (ha : a % 5 = 0) : (a*b+2) % 5 = 2 := by auto
++ multiple_right (a b : ℕ) (hb : b % 5 = 0) : a*b % 5 = 0 := by auto

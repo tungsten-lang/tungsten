@@ -216,6 +216,9 @@ and `calc` retain their existing proof blocks.
   On ℕ and ℤ, `auto` reduces a known remainder to any positive literal divisor
   of its positive literal modulus. For example, `n % 4 = 1 ∨ n % 4 = 3`
   proves `odd n` in one `auto`: both branches give remainder 1 modulo 2.
+  Sums and products use the modulus in the goal. From `n % 5 = 2`, bare
+  `auto` proves `(2*n + 1) % 5 = 0`. A factor with remainder zero also
+  determines the remainder of a product with an unknown factor.
   Common loaded arithmetic and analysis rules also work with plain `by auto`,
   including square bounds, exponential/logarithmic Jensen, square-root
   comparisons, geometric-mean bounds, Cauchy–Schwarz, Euclidean triangle

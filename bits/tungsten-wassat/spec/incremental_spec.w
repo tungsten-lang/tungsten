@@ -171,4 +171,16 @@ describe "Wassat incremental solving" ->
       expect(-> () wassat_check_assumptions(art, [0])).to raise_error
       expect(-> () wassat_check_assumptions(art, [99])).to raise_error
 
+describe "Detached signed SAT models" ->
+  it "materializes signed variables in order and returns an independently mutable array" ->
+    solver = Wassat.new(4, [[-1], [2], [-3, 4]], WASSAT_PROOF_NONE)
+    first = solver.solve_assuming([3])["model"]
+    expect(first).to eq([-1, 2, 3, 4])
+    first[0] = "edited"
+    first.push(nil)
+    second = solver.solve_assuming([-4])["model"]
+    expect(second).to eq([-1, 2, -3, -4])
+    expect(first).to eq(["edited", 2, 3, 4, nil])
+    expect(Wassat.new(0, [], WASSAT_PROOF_NONE).solve["model"]).to eq([])
+
 spec_summary

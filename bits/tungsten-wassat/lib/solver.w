@@ -5213,15 +5213,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   -> result_for(status)
     sat = status == 1
     unsat = status == -1 || status == -2
-    model = @query_owner == nil ? [] : wassat_query_box(@query_owner)
     if sat
       self.unsubstitute
-      model = Array.new(@nvars)
-      wassat_query_keep(@query_owner, model, 0) if @query_owner != nil
-      v = 1
-      while v <= @nvars
-        model[v - 1] = @assign[v] >= 0 ? v : 0 - v
-        v += 1
+      model = wassat_signed_model(@assign)
+    else
+      model = []
+    wassat_query_keep(@query_owner, model, 0) if @query_owner != nil
 
     core = @query_owner == nil ? [] : wassat_query_box(@query_owner)
     if status == -2
@@ -5297,6 +5294,21 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # UNSAT-under-assumptions is a per-query verdict, never terminal.
     @terminal_status = status unless status == 0 || status == -2
     self.result_for(status)
+
+# DIMACS literals fit in an immediate Int. The result uses ordinary Array
+# slots so callers can keep and mutate a model after the solver resumes.
+-> wassat_signed_model(assign) (i8[]) w64[]
+  nv = assign.size - 1 ## i64
+  model = w64[nv]
+  int_tag = wvalue_bits(0) ## i64
+  payload_mask = wvalue_bits(-1) ^ int_tag ## i64
+  v = 1 ## i64
+  while v <= nv
+    lit = v
+    lit = 0 - v if assign[v] < 0
+    model[v - 1] = wvalue_from_bits((int_tag | (lit & payload_mask)) ## i64)
+    v += 1
+  model
 
 -> wassat_query_copy_bytes(src, dst, n) (u8[] u8[] i64)
   i = 0 ## i64

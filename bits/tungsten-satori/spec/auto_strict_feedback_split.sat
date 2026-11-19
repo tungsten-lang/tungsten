@@ -9,3 +9,26 @@ axiom bound (x : ℚ) : score x ≤ x
 + failed (x : ℚ) : score x ≤ x := by assumption
 + copied (x : ℚ) : score x ≤ x := failed x
 + from_failed (c : ℚ) : score c < c := by auto [copied]
+
+opaque valid : ℚ → Prop
++ witness_checked (a : ℚ) : ∃ i, score i ≤ i ∧ valid i := by auto [checked a]
++ witness_unfinished (b : ℚ) : ∃ i, score i ≤ i ∧ valid i := by auto [unfinished b]
++ witness_failed (c : ℚ) : ∃ i, score i ≤ i ∧ valid i := by auto [copied c]
+
++ interval_checked (a b z : ℚ) (h : a ≤ b) : ∃ x, a < 3*x ∧ 3*x < b ∧ score z ≤ z := by auto [checked z]
++ interval_unfinished (a b z : ℚ) (h : a ≤ b) : ∃ x, a < 3*x ∧ 3*x < b ∧ score z ≤ z := by auto [unfinished z]
++ interval_failed (a b z : ℚ) (h : a ≤ b) : ∃ x, a < 3*x ∧ 3*x < b ∧ score z ≤ z := by auto [copied z]
+
+opaque enabled : ℚ → Prop
+axiom enable (x : ℚ) : score x ≤ x → valid x → enabled x
++ enable_checked (x : ℚ) : score x ≤ x → valid x → enabled x := enable x
++ enable_unfinished (x : ℚ) : score x ≤ x → valid x → enabled x := by sorry
++ hint_checked (a : ℚ) : enabled a := by auto [enable_checked, checked a]
++ hint_unfinished_rule (b : ℚ) : enabled b := by auto [enable_unfinished, checked b]
++ hint_failed_premise (c : ℚ) : enabled c := by auto [enable_checked, copied c]
+
+axiom same_score (x : ℚ) : score x = x
++ equal_checked (x : ℚ) : score x = x := same_score x
++ forced_tie (d : ℚ) : score d < d := by auto [equal_checked d]
++ equal_unfinished (x : ℚ) : score x = x := by sorry
++ unfinished_tie (e : ℚ) : score e < e := by auto [equal_unfinished e]

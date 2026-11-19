@@ -29,6 +29,47 @@ the same assumptions and hints. When that succeeds, the diagnostic reads:
   need b ^ 2 ≠ d
 ```
 
+For `(m : ℝ) < (n : ℝ)` with naturals `m ≤ n`, the missing condition simplifies
+to `m ≠ n`. Adding that hypothesis closes the goal with `by auto`.
+If the missing fact comes from a library lemma, `auto [lemma]` can infer
+its arguments and prove its guards. For example, from `f i ≤ g i` and
+a lemma `apart : ∀ j, f j ≠ g j`, `by auto [apart]` proves `f i < g i`.
+
+If an explicit hint or an `@[auto]` rule matches the goal and one premise stays open, `auto`
+shows what it proved and which premise would finish that application. With
+`import arith`, scaling `a ≤ b` to `a*c ≤ b*c` with plain `auto`
+reports `proved a ≤ b` and `need 0 ≤ c`. With `a ≠ b` and the goal `a < b`, `auto`
+finds the registered order rule and reports `need a ≤ b`. For `a/c ≤ b`,
+if the hypotheses imply `a ≤ b*c`, a loaded division rule can report
+`proved a ≤ b * c` and `need 0 < c`.
+
+For `a*c < b*c`, if `a < b` and `0 ≤ c`, the remaining condition is
+`c ≠ 0`. If `c = 0` is known, the diagnostic reads `proved a * c = b * c`.
+The same check can reduce `f i ≠ f j` to `i ≠ j` when the hypotheses establish
+injectivity.
+
+For an existential goal, `auto` can report a concrete witness and the
+conditions still needed for that choice. For example, given `active k`
+and `k < n`, a failed proof of `∃ j ≤ n, active j ∧ ready j` produces
+the following diagnostic.
+
+```text
+  witness k
+  proved k ≤ n ∧ active k
+  need ready k
+```
+
+Over ℚ and ℝ, `auto` can construct a witness for simultaneous linear bounds.
+For example, `a < b` suffices for `∃ x : ℚ, a < 3*x ∧ 3*x < b`.
+Given only `a ≤ b`, the diagnostic reports `proved a ≤ b` and `need a ≠ b`.
+Satori checks that every witness forces a strict gap and replays the original
+goal with the proposed condition.
+The arithmetic checker verifies each bound at the chosen value.
+See the [interval proofs](examples/compact_interval_witnesses.sat).
+With `arith` loaded, a strict margin at one endpoint also lets `auto`
+step inside the interval while preserving several bounds with variable slopes.
+See the [affine step proofs](examples/compact_affine_steps.sat).
+
 Run it from the Tungsten root (it needs the prelude and the SAT solver):
 
 ```sh
@@ -63,7 +104,7 @@ time, each under a memory and time watchdog (`SATORI_JOB_MEM_MB`, default 6144;
 `SATORI_JOB_SECONDS`, default 3600). A process admits the other theorems with a
 `split:INDEX` tag identifying its declaration. The driver replaces each such tag by
 the transitive tags of that declaration's own check, including in `#axioms` output,
-so the verdict and trust tags match a single-process run. If
+and rechecks `@[auto]` registrations against those resolved tags. If
 a theorem fails, every theorem that used it is marked `uses-failed:NAME`.
 The driver starts workers from its own executable; `SATORI_BIN` may override it
 with a matching Satori binary. Incompatible worker protocols are rejected.
@@ -168,7 +209,8 @@ and `calc` retain their existing proof blocks.
   It also chains equalities, applies congruence and substitutes in propositions,
   including when matching implication premises and contradictory facts, and handles bounded case splits
   on disjunctions. It can choose a witness already in scope or extract one from an
-  existential hypothesis, and work backwards through implications to construct their premises,
+  existential hypothesis. A witness can also refute a negated existential when
+  its guards hold. The search works backwards through implications to construct their premises,
   introducing variables and assumptions where needed. A bounded classical case search
   handles patterns such as excluded middle and double negation.
   Common loaded arithmetic and analysis rules also work with plain `by auto`,
@@ -195,15 +237,30 @@ and `calc` retain their existing proof blocks.
   inequalities and squared bounds work across integers, rationals and reals.
   Local absolute-value bounds supply their endpoints to later arithmetic;
   see [compact absolute-value proofs](examples/compact_abs.sat).
+  For widening casts along ℕ → ℤ → ℚ → ℝ, `simp` distributes casts over
+  sums and products, and `auto` carries nonnegativity into arithmetic.
+  From `h : m ≤ n` over naturals, `by auto` proves `(m : ℝ) ≤ (n : ℝ)`.
+  `simpa using h` transports equality and strict or weak order in either
+  direction. For bounds involving literals or arithmetic in several domains,
+  `linarith` can widen the hypotheses and combine them in a common domain.
+  See [numeric cast proofs](examples/compact_numeric_casts.sat).
   Rational and real quotient bounds, reciprocal order and cancellation also
   use loaded `arith` rules. `auto` proves the denominator conditions before
-  cross multiplying; see [compact division proofs](examples/compact_division.sat).
+  cross multiplying. It can use a quotient in a hypothesis too. Given
+  `0 < c`, `a/c ≤ b` and `b*c < t`, it proves `a < t`.
+  When the denominator may be zero, `auto` checks that case too. For
+  example, `0 ≤ r` and `r ≤ a` suffice for `r^2/a ≤ r`.
+  See [compact division proofs](examples/compact_division.sat).
   Minimum/maximum bounds, clamps and nonnegative scaling work over ℕ, ℤ, ℚ
   and ℝ. Their endpoint bounds feed arithmetic automatically, including after
   specializing a local quantified hypothesis; see [compact min/max proofs](examples/compact_minmax.sat).
   Natural-exponent powers use their base-sign and exponent-order conditions
   automatically. Small natural-subtraction guards need no separate `omega`
   step; see [compact power proofs](examples/compact_powers.sat).
+  In an algebraic identity, `auto` can check that two exponents differ by one
+  and apply the power recurrence. For a predecessor such as `n - 1`, it can
+  prove the zero case separately when a factor vanishes.
+  See the [power step examples](examples/compact_power_steps.sat).
   A local bound can also guide a missing comparison: from `c ≤ b^n`, `auto`
   can prove `b^n ≤ x^n` and conclude `c ≤ x^n`, without an intermediate `have`.
   This works with strict bounds and local monotonicity rules too; see
@@ -423,6 +480,9 @@ and at most `bound`. `nat.infinite_descent` rules out a property whose every
 witness yields a strictly smaller witness. For sequences, `nat.descent_bound`
 needs strict decrease only on a finite prefix and proves `f n + n ≤ f 0`;
 `nat.no_infinite_descent` rules out strict decrease at every natural index.
+From `f 0 ≤ n`, `nat.exists_nondecreasing_step` gives some `k ≤ n` with
+`f k ≤ f (k + 1)`. If the sequence is weakly decreasing through `n`,
+`auto [nat.exists_nondecreasing_step]` finds a pair of equal adjacent values.
 
 `list.foldl step xs state` runs an element-first step (`step element state`) from
 left to right; `list.foldr` combines from right to left. Both are included by

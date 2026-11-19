@@ -1,0 +1,10 @@
+import core
+
++ exists_inner_disk_scale (δ : ℝ) (hδ : 0 < δ) : ∃ r : ℝ, 0 < r ∧ r < 1 ∧ 1 - r < δ
+  auto
+
++ exists_endpoint_count_exponent (s : ℝ) (hs : 3 / 2 < s) : ∃ a : ℝ, 0 < a ∧ 0 < 2 * s - 3 - 6 * a
+  auto
+
++ rational_between (a b : ℚ) (h : a < b) : ∃ x, a < 3*x ∧ 3*x < b
+  auto

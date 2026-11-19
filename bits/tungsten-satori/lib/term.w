@@ -363,6 +363,8 @@ TERM_MINMAX = 1
 TERM_DIVMOD = 2
 TERM_SQUARE_PRODUCT = 4
 TERM_LAMBDA = 8
+TERM_WIDEN = 16
+TERM_POWER = 32
 
 + KTm
   ro :tag, :name, :ty, :a, :b, :idx, :val, :h, :cl, :mx, :tv, :op, :vkey, :search_ops
@@ -390,6 +392,10 @@ TERM_LAMBDA = 8
         @search_ops = TERM_MINMAX
       elsif @op == OP_DIV || @op == OP_MOD
         @search_ops = TERM_DIVMOD
+      elsif @op == OP_POW
+        @search_ops = TERM_POWER
+      elsif @op >= OP_INT_OF_NAT && @op <= OP_REAL_OF_RAT
+        @search_ops = TERM_WIDEN
       @h = (str_hash(@name) * 37 + @ty.h + 2) % HASH_MOD
     when :app
       @cl = @a.cl && @b.cl
@@ -423,6 +429,9 @@ TERM_LAMBDA = 8
       else
         lh = ((@val % HASH_MOD) + HASH_MOD) % HASH_MOD
       @h = (lh * 53 + @ty.h + 6) % HASH_MOD
+
+  -> has_widening_cast?
+    (@search_ops & TERM_WIDEN) != 0
 
   -> to_s
     tm_show(self)
@@ -561,6 +570,13 @@ LAM_TM_SLOTS = Array.new(8192)
     a.idx == b.idx && ty_eq(a.ty, b.ty)
   else
     ty_eq(a.ty, b.ty) && lit_val_eq(a.val, b.val)
+
+-> tm_contains?(t, subterm)
+  if tm_eq(t, subterm)
+    return true
+  if t.tag == :app
+    return tm_contains?(t.a, subterm) || tm_contains?(t.b, subterm)
+  t.tag == :lam && tm_contains?(t.b, subterm)
 
 -> lit_val_eq(va, vb)
   if type(va) == "Array"

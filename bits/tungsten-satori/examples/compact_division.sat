@@ -14,3 +14,12 @@ import arith
 
 + solve (a b c : ℝ) (hc : c ≠ 0) (h : a*c = b) : a = b/c
   auto
+
++ reversed_order (a b c : ℚ) (hc : c < 0) (h : a/c < b) : b*c < a
+  auto
+
++ discount_loss (c t : ℝ) (hc : 0 ≤ c) (ht : 0 ≤ t) : c - c/(1+t) ≤ c*t
+  auto
+
++ square_over_bound (a r : ℝ) (ha : 0 ≤ a) (hr : 0 ≤ r) (hra : r ≤ a) : r^2/a ≤ r
+  auto

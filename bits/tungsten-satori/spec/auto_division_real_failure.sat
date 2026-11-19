@@ -53,3 +53,15 @@ axiom supplied_cross : known_a ≤ known_b*2
 
 + natural_quotient (a b : ℕ) (ha : 0 < a) (hb : 0 < b) : 0 < a/b
   auto
+
++ wrong_scale_direction (a b c : ℝ) (hc : c < 0) (hab : a/c < b) : a < b*c := by auto
+
++ zero_scale_equality (a b c : ℝ) (hc : c = 0) (hab : a/c = b) : a = b*c := by auto
+
++ missing_slope_bound (z l d : ℝ) (hz : 0 < z) (hl : 0 < l) (hd : d < (l/z-1)/(1+l)) : 2 < -d*z := by auto
+
++ missing_scale_guard (x y t : ℝ) (h : x/known_a ≤ y) (ht : y*known_a < t) : x < t := by auto
+
++ missing_zero_case (a b c : ℝ) (hc : 0 ≤ c) (h : a ≤ b*c) : a/c ≤ b := by auto
++ weak_zero_case (a b c : ℝ) (hc : 0 ≤ c) (hb : 0 ≤ b) (h : a < b*c) : a/c < b := by auto
++ missing_positive_case (a b c : ℝ) (hc : 0 ≤ c) (hz : c = 0 → a < 0) : a < b/c := by auto

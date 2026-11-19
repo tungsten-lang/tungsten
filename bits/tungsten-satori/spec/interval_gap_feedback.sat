@@ -1,0 +1,16 @@
+opaque f : ℕ → ℚ
+opaque g : ℕ → ℚ
+axiom ordered (i : ℕ) : f i ≤ g i
+
++ open_gap (a b : ℚ) (h : a ≤ b) : ∃ x, a < x ∧ x < b := by auto
++ rescaled (a b : ℝ) (h : 2*a ≤ 3*b) : ∃ x, a < 3*x ∧ 2*x ≤ b := by auto
++ chained (a b c : ℝ) (h : a ≤ c) (k : c ≤ b) : ∃ x, a ≤ 7-2*x ∧ 7-2*x < b := by auto
++ hinted (i : ℕ) : ∃ x, f i ≤ 3*x ∧ 3*x < g i := by auto [ordered]
++ side_condition (a b c d : ℚ) (h : a ≤ b) (k : c ≤ d) : ∃ x, a ≤ 2*x ∧ 2*x ≤ b ∧ c < d := by auto
+
++ known_equal (a b : ℝ) (h : a ≤ b) (k : b ≤ a) : ∃ x, a < x ∧ x ≤ b := by auto
++ no_order (a b : ℚ) : ∃ x, a < 2*x ∧ 2*x < b := by auto
++ two_gaps (a b c d : ℝ) (h : a ≤ b) (k : c ≤ d) : ∃ x, a < x ∧ x < b ∧ c < d := by auto
++ discrete (a b : ℤ) (h : a ≤ b) : ∃ x : ℤ, a < x ∧ x < b := by auto
++ insufficient (a b : ℚ) (h : a ≤ b) : ∃ x, a < x^2 ∧ x^2 < b := by auto
++ wrong_scale (a b : ℝ) (h : a ≤ b) : ∃ x, a < 2*x ∧ 3*x < b := by auto

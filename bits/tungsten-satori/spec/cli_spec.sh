@@ -356,8 +356,32 @@ for jobs in 0 2; do
     echo "strict feedback closed an unproved goal" >&2
     exit 1
   fi
-  test "$(grep '^  proved ' "$out")" = "  proved score a ≤ a"
-  test "$(grep '^  need ' "$out")" = "  need score a ≠ a"
+  test "$(grep -E '^  (proved|need|witness) ' "$out")" = "  proved score a ≤ a
+  need score a ≠ a
+  witness a
+  proved score a ≤ a
+  need valid a
+  proved a ≤ b
+  need a ≠ b
+  proved score a ≤ a
+  need valid a
+  proved score d = d"
+done
+for jobs in 0 1; do
+  set -- check --no-cache
+  if test "$jobs" != 0; then set -- "$@" -j "$jobs"; fi
+  if SATORI_BIN="$bin" "$bin" "$@" bits/tungsten-satori/spec/split_auto_dependencies.sat >"$out"; then
+    echo "accepted an untrusted auto registration" >&2
+    exit 1
+  fi
+  grep -q '^✗ .*forbidden.*auto registration excludes axiom:permission' "$out"
+  grep -q '^✗ .*unfinished_rule.*auto registration excludes sorry' "$out"
+  grep -q '^✓ scaling .*\[oracle:arith\]$' "$out"
+  test "$(grep -E '^  (proved|need) ' "$out")" = "  proved a ≤ b
+  need 0 ≤ c"
+  if test "$jobs" != 0; then
+    grep -q '^✓ downstream .*uses-failed:forbidden' "$out"
+  fi
 done
 printf '%s\n' '#axioms missing_theorem' >"$tmp/missing-axioms.sat"
 if "$bin" check --no-cache "$tmp/missing-axioms.sat" >"$out"; then
@@ -630,7 +654,7 @@ for name in witness zero_witness strong_zero_and_step reverse_zero finite_prefix
   grep -q "^$name depends on: oracle:arith$" "$out"
 done
 "$bin" check --no-cache bits/tungsten-satori/spec/nat_witness_examples.sat >"$out"
-for name in yslices_disjoint least_below slices_cover descent_bound descent_drop; do
+for name in yslices_disjoint least_below slices_cover descent_bound descent_drop consecutive_eq; do
   grep -q "^$name depends on: oracle:arith$" "$out"
 done
 grep -q '^every_level depends on: axiom:base_case, axiom:induction_step, oracle:arith$' "$out"
@@ -638,7 +662,7 @@ if "$bin" check --no-cache bits/tungsten-satori/spec/nat_witness_failure.sat >"$
   echo "natural patterns accepted an invalid bound or missing premise" >&2
   exit 1
 fi
-grep -q 'FAILED (10)' "$out"
+grep -q 'FAILED (12)' "$out"
 "$bin" check --no-cache bits/tungsten-satori/spec/function_iterate.sat >"$out"
 grep -q '^iterate_facet depends only on the foundational kernel$' "$out"
 grep -q '^iterate_map depends only on the foundational kernel$' "$out"

@@ -24,3 +24,7 @@ inductive LayoutChoice
   | x =>
     |x|
 + layout_pattern_abs_ok : layout_pattern_abs (-3) = 3 := by decide
+
+@[simp] + annotated_header (a : ℤ)
+    (b : ℤ) : (a+0) + (b+0) = a+b
+  simp

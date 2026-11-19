@@ -52,6 +52,10 @@
   linarith
 
 
+-- Jacobsthal dimension bound: a weakly decreasing sequence has a plateau.
++ consecutive_eq (d : ℕ → ℕ) (n : ℕ) (hd : ∀ k ≤ n, d (k + 1) ≤ d k) (h : d 0 ≤ n) : ∃ k ≤ n, d k = d (k + 1)
+  auto [nat.exists_nondecreasing_step]
+
 -- The following named assumptions are the corpus model inputs, not library rules.
 opaque ok : ℕ → ℕ → Prop
 -- Lemma 3.5 (top-dimensional base case): retraction plus unique fillers above q.
@@ -71,4 +75,5 @@ axiom induction_step (q n : ℕ) (hn : n < q) (h : ∀ j : ℕ, n < j → j ≤ 
 #axioms slices_cover
 #axioms descent_bound
 #axioms descent_drop
+#axioms consecutive_eq
 #axioms every_level

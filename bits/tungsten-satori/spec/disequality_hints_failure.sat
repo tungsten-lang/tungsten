@@ -1,0 +1,8 @@
++ can_equal (i : ℕ) (h : row i ≤ col i) : row i < col i := by auto
++ other_index (i j : ℕ) (h : row i ≤ col i) : row i < col i := by auto [apart j]
++ no_order (i : ℕ) : (row i : ℝ) < (col i : ℝ) := by auto [apart]
++ missing_guard (i : ℕ) (h : row i ≤ col i) : row i < col i := by auto [guarded]
++ constant_allowed (f : ℕ → ℝ) (weak : ∀ i j, i ≤ j → f i ≤ f j) (m n : ℕ) (h : m < n) : f m < f n := by auto
++ equal_inputs (f : ℕ → ℝ) (weak : ∀ i j, i ≤ j → f i ≤ f j)
+    (inj : ∀ i j, f i = f j → i = j) (m n : ℕ) (h : m ≤ n) : f m < f n := by auto
++ can_be_two (q : ℕ) (h : q ≠ 0 ∧ q ≠ 1) : 3 ≤ q := by linarith

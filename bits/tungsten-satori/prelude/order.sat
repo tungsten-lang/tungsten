@@ -1,4 +1,5 @@
 -- Order facts derived from the core axioms (proved, not assumed).
+import core
 
 + sq_nonneg.int (a : ℤ) : 0 ≤ a ^ 2
   nlinarith
@@ -9,6 +10,69 @@
 + sq_nonneg.real (a : ℝ) : 0 ≤ a ^ 2
   nlinarith
 
+-- A weak bound and unequal endpoints give a strict bound.
+@[auto] + lt_of_le_of_ne.nat (a b : ℕ) (h : a ≤ b) (hne : a ≠ b) : a < b := by linarith
+@[auto] + lt_of_le_of_ne.int (a b : ℤ) (h : a ≤ b) (hne : a ≠ b) : a < b := by linarith
+@[auto] + lt_of_le_of_ne.rat (a b : ℚ) (h : a ≤ b) (hne : a ≠ b) : a < b := by linarith
+@[auto] + lt_of_le_of_ne.real (a b : ℝ) (h : a ≤ b) (hne : a ≠ b) : a < b := by linarith
+
+-- Nonnegativity follows a widening cast one step at a time.
+@[auto] + cast_nonneg.int (n : ℕ) : 0 ≤ (n : ℤ) := int_of_nat_nonneg n
+@[auto] + int_cast_nonneg.rat (z : ℤ) (h : 0 ≤ z) : 0 ≤ (z : ℚ)
+  simpa using (rat_of_int_le 0 z).mpr h
+@[auto] + rat_cast_nonneg.real (q : ℚ) (h : 0 ≤ q) : 0 ≤ (q : ℝ)
+  simpa using (real_of_rat_le 0 q).mpr h
+
+-- Widening casts preserve and reflect comparisons.
++ cast_le.int (m n : ℕ) : (m : ℤ) ≤ (n : ℤ) ↔ m ≤ n := int_of_nat_le m n
+@[simp] + cast_lt.int (m n : ℕ) : (m : ℤ) < (n : ℤ) ↔ m < n
+  simp only [lt_iff_le_not_le.int, lt_iff_le_not_le.nat, int_of_nat_le]
+
+@[simp] + cast_inj.int (m n : ℕ) : (m : ℤ) = (n : ℤ) ↔ m = n
+  constructor
+  · intro h
+    apply le_antisymm.nat
+    · exact (int_of_nat_le m n).mp (by simp only [h, le_refl.int])
+    · exact (int_of_nat_le n m).mp (by simp only [h, le_refl.int])
+  · intro h
+    rw [h]
+
++ int_cast_le.rat (m n : ℤ) : (m : ℚ) ≤ (n : ℚ) ↔ m ≤ n := rat_of_int_le m n
+@[simp] + int_cast_lt.rat (m n : ℤ) : (m : ℚ) < (n : ℚ) ↔ m < n
+  simp only [lt_iff_le_not_le.rat, lt_iff_le_not_le.int, rat_of_int_le]
+
+@[simp] + int_cast_inj.rat (m n : ℤ) : (m : ℚ) = (n : ℚ) ↔ m = n
+  constructor
+  · intro h
+    apply le_antisymm.int
+    · exact (rat_of_int_le m n).mp (by simp only [h, le_refl.rat])
+    · exact (rat_of_int_le n m).mp (by simp only [h, le_refl.rat])
+  · intro h
+    rw [h]
+
++ rat_cast_le.real (p q : ℚ) : (p : ℝ) ≤ (q : ℝ) ↔ p ≤ q := real_of_rat_le p q
+@[simp] + rat_cast_lt.real (p q : ℚ) : (p : ℝ) < (q : ℝ) ↔ p < q
+  simp only [lt_iff_le_not_le.real, lt_iff_le_not_le.rat, real_of_rat_le]
+
+@[simp] + rat_cast_inj.real (p q : ℚ) : (p : ℝ) = (q : ℝ) ↔ p = q
+  constructor
+  · intro h
+    apply le_antisymm.rat
+    · exact (real_of_rat_le p q).mp (by simp only [h, le_refl.real])
+    · exact (real_of_rat_le q p).mp (by simp only [h, le_refl.real])
+  · intro h
+    rw [h]
+
+-- Comparisons across two or three embeddings compose by simplification.
++ int_cast_le.real (m n : ℤ) : (m : ℝ) ≤ (n : ℝ) ↔ m ≤ n := by simp
++ int_cast_lt.real (m n : ℤ) : (m : ℝ) < (n : ℝ) ↔ m < n := by simp
++ int_cast_inj.real (m n : ℤ) : (m : ℝ) = (n : ℝ) ↔ m = n := by simp
++ cast_le.rat (m n : ℕ) : (m : ℚ) ≤ (n : ℚ) ↔ m ≤ n := by simp
++ cast_lt.rat (m n : ℕ) : (m : ℚ) < (n : ℚ) ↔ m < n := by simp
++ cast_inj.rat (m n : ℕ) : (m : ℚ) = (n : ℚ) ↔ m = n := by simp
++ cast_le.real (m n : ℕ) : (m : ℝ) ≤ (n : ℝ) ↔ m ≤ n := by simp
++ cast_lt.real (m n : ℕ) : (m : ℝ) < (n : ℝ) ↔ m < n := by simp
++ cast_inj.real (m n : ℕ) : (m : ℝ) = (n : ℝ) ↔ m = n := by simp
 
 -- (b − a)(d − c) ≥ 0 without truncated subtraction: nlinarith's product facts over ℕ
 + nl_cross.nat (a b c d : ℕ) (h : a ≤ b) (k : c ≤ d) : a * d + b * c ≤ a * c + b * d

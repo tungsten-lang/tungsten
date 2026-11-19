@@ -1,0 +1,10 @@
++ nat_real (n : ℕ) : 0 ≤ (n : ℝ) := by auto
++ int_real (z : ℤ) (h : 0 ≤ z) : 0 ≤ (z : ℝ) := by auto
++ weighted (m n : ℕ) : 1 ≤ 2*(m : ℝ) + (n : ℝ) + 1 := by auto
++ strict_shift (f : α → ℕ) (x : α) : 0 < (f x : ℚ) + 1 := by auto
++ cast_step (n : ℕ) : ((n + 1 : ℕ) : ℝ) = (n : ℝ) + 1 := by simp
++ cast_polynomial (m n : ℕ) : ((m*n + 2 : ℕ) : ℚ) = (m : ℚ)*(n : ℚ) + 2 := by simp
++ cast_order (m n : ℕ) (h : m ≤ n) : (m : ℝ) ≤ (n : ℝ) := by auto
++ reflect_strict (x y : ℤ) (h : (x : ℝ) < (y : ℝ)) : x < y := by simpa using h
++ reflect_eq (m n : ℕ) (h : (m : ℝ) = (n : ℝ)) : m = n := by simpa using h
++ mixed_bound (x : ℤ) (y : ℚ) (h : x ≤ 7) (k : y ≤ 3 / 2) : (x : ℝ) + (y : ℝ) ≤ 17 / 2 := by linarith

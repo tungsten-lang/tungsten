@@ -10,6 +10,13 @@ axiom score_bound (x : ℤ) : score x ≤ x
 + supplied (x : ℤ) : score x < x
   auto [score_bound]
 
++ padded (x y : ℤ) (h : x + 0 ≤ y) : x + 0 < y
+  auto
+
+@[simp] axiom score_inj (x y : ℤ) : score x = score y ↔ x = y
++ guarded (x y : ℤ) (h : score x ≤ score y) : score x < score y
+  auto
+
 + focused (x y : ℝ) (p : Prop) (hp : p) (h : x ≤ y) : p ∧ x < y
   auto
 
@@ -27,3 +34,7 @@ axiom score_bound (x : ℤ) : score x ≤ x
 
 + strict (a b c : ℚ) (h : a ≤ b) (k : b < c) : a < c
   auto
+
+opaque mirror : ℤ → ℤ
+@[simp] axiom mirror_score (x : ℤ) : mirror x = score x
++ implicit_tie (x : ℤ) (h : mirror x ≤ score x) : mirror x < score x := by auto

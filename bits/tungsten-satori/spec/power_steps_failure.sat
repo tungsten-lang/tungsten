@@ -1,0 +1,9 @@
++ zero_case (a : ℚ) (n : ℕ) : a * a^(n-1) = a^n := by auto
++ weak_gap (a : ℝ) (m n : ℕ) (h : n ≤ m+1) : a^n = a^m*a := by auto
++ different_base (a b : ℚ) (n : ℕ) : b^(n+1) = a^n*b := by auto
++ nonzero_weight (a : ℤ) (n : ℕ) : ((n : ℤ)+1)*a^n = ((n : ℤ)+1)*a^(n-1)*a := by auto
++ wrong_guard (a : ℝ) (i : ℕ) (h : 1 ≤ i) : a^(top i) = a^(previous i)*a := by auto [neighbor]
++ guard_missing (a : ℝ) (i : ℕ) (h : 2 < i) : a^(top i) = a^(previous i)*a := by auto
++ wrong_index (a : ℕ) (m n : ℕ) : a^(m+1) = a^n*a := by auto
++ zero_difference (a : ℚ) (m n : ℕ) :
+    ((m : ℚ)+(n : ℚ))*a^(m-n) = a*((m : ℚ)+(n : ℚ))*a^((m-n)-1) := by auto

@@ -281,9 +281,13 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
     return false
   continues_after?(toks[n - 1])
 
--> header_start_tok?(indent, t)
+-> header_start?(indent, toks)
   if indent != 0
     return false
+  i = 0
+  while i + 4 < toks.size && toks[i].text == "@" && toks[i+1].text == "\[" && toks[i+3].text == "\]"
+    i += 4
+  t = toks[i]
   if t.kind == :sym
     return t.text == "+" || t.text == "→"
   t.kind == :kw && SAT_HDR_KW.has_key?(t.text)
@@ -349,7 +353,7 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
         if cur != nil
           out.push(cur)
         cur = LLine.new(r[0], toks, lineno)
-        hdr_cand = header_start_tok?(r[0], t0)
+        hdr_cand = header_start?(r[0], toks)
         hdr_closed = !hdr_cand
         st = scan_layout_state(toks, 0, hdr_closed)
         depth = st[0]

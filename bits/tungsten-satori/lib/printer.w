@@ -58,7 +58,8 @@ PP_BOUNDED_RELS = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
     show_lit(t)
   when :lam
     nm = pp_fresh(t.name, names)
-    paren_if("fun " + nm + " => " + tm_pp(t.b, names + [nm], 0), prec > 0)
+    binder = pp_cast_binder?(t) ? "(" + nm + " : " + ty_show(t.ty) + ")" : nm
+    paren_if("fun " + binder + " => " + tm_pp(t.b, names + [nm], 0), prec > 0)
   else
     tm_pp_app(t, names, prec)
 
@@ -73,16 +74,32 @@ PP_BOUNDED_RELS = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
     nm = base + k.to_s
   nm
 
+# An untyped binder in (n : ℝ) would infer n : ℝ and erase the cast on re-entry.
+-> pp_cast_binder?(lam)
+  lam.b.has_widening_cast? && [TY_NAT_SINGLETON, TY_INT_SINGLETON, TY_RAT_SINGLETON, TY_REAL_SINGLETON].include?(lam.ty)
+
 -> tm_pp_app(t, names, prec)
   sp = strip_app(t)
   h = sp[0]
   args = sp[1]
   if h.tag == :const
     nm = h.name
+    if h.op >= OP_INT_OF_NAT && h.op <= OP_REAL_OF_RAT && args.size == 1
+      src = args[0]
+      while src.tag == :app && src.a.op >= OP_INT_OF_NAT && src.a.op <= OP_REAL_OF_RAT
+        src = src.b
+      operand = tm_pp(src, names, 0)
+      # Literals and overloaded operations need their original arithmetic
+      # domain: ((1 / 2 : ℕ) : ℝ) must still denote natural division.
+      if src.tag != :var && src.tag != :bnd
+        operand = "(" + operand + " : " + ty_show(type_of(src)) + ")"
+      return "(" + operand + " : " + ty_show(type_of(t)) + ")"
     if (nm == "∀" || nm == "∃" || nm == "ε") && args.size == 1 && args[0].tag == :lam
-      bq = pp_bounded(nm, args[0], names, prec)
-      if bq != nil
-        return bq
+      typed = pp_cast_binder?(args[0])
+      if !typed
+        bq = pp_bounded(nm, args[0], names, prec)
+        if bq != nil
+          return bq
       # merge directly nested binders of the same kind:  ∀ x y, …
       bns = []
       cur = args[0]
@@ -93,12 +110,15 @@ PP_BOUNDED_RELS = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
         nms = nms + [bn]
         inner = cur.b
         isp = strip_app(inner)
-        if nm != "ε" && isp[0].tag == :const && isp[0].name == nm && isp[1].size == 1 && isp[1][0].tag == :lam
+        if nm != "ε" && isp[0].tag == :const && isp[0].name == nm && isp[1].size == 1 && isp[1][0].tag == :lam && typed == pp_cast_binder?(isp[1][0]) && (!typed || ty_eq(cur.ty, isp[1][0].ty))
           cur = isp[1][0]
         else
           break
       body = tm_pp(cur.b, nms, 0)
-      return paren_if(nm + " " + bns.join(" ") + ", " + body, prec > 0)
+      binders = bns.join(" ")
+      if typed
+        binders = binders + " : " + ty_show(cur.ty)
+      return paren_if(nm + " " + binders + ", " + body, prec > 0)
     if nm == "¬" && args.size == 1
       e = dest_binop(args[0], "=")
       if e != nil && type_of(e[0]).name != "bool"

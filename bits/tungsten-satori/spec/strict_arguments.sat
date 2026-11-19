@@ -1,0 +1,21 @@
+import arith
+
++ possible_zero (a b c : ℝ) (h : a < b) (s : 0 ≤ c) : a*c < b*c := by auto
++ possible_tie (a b c : ℝ) (h : a ≤ b) (s : 0 < c) : c*a < c*b := by auto
++ unknown_sign (a b c : ℝ) (h : a < b) : a*c < b*c := by auto
++ zero_factor (a b c : ℝ) (s : c = 0) : a*c < b*c := by auto
++ two_gaps (a b c : ℝ) (h : a ≤ b) (s : 0 ≤ c) : a*c < b*c := by auto
++ shifted (a b t : ℝ) (h : a ≤ b) : t+a < t+b := by auto
+
++ flat (f : ℕ → ℝ) (i j : ℕ) (h : f i ≤ f j) : f i < f j := by auto
++ injective (f : ℕ → ℝ) (i j : ℕ) (h : f i ≤ f j)
+    (sep : ∀ m n, m ≠ n → f m ≠ f n) : f i < f j := by auto [sep]
++ square_tie (a b : ℝ) (h : a^2 ≤ b^2) : a^2 < b^2 := by auto
+
+-- The multiplication in the Hilbert limit-cycle slope estimate, allowing z = 0.
++ slope (z l d : ℝ) (hz : 0 ≤ z) (hX : d*(1+l) < l/z-1) : d*(1+l)*z < (l/z-1)*z := by auto
++ slope_repaired (z l d : ℝ) (hz : 0 ≤ z) (hX : d*(1+l) < l/z-1) (hn : z ≠ 0) :
+    d*(1+l)*z < (l/z-1)*z := by auto
+
++ sign_repaired (a b c : ℝ) (h : a < b) (s : 0 ≤ c) (n : c ≠ 0) : a*c < b*c := by auto
++ order_repaired (a b c : ℝ) (h : a ≤ b) (s : 0 < c) (n : a ≠ b) : c*a < c*b := by auto

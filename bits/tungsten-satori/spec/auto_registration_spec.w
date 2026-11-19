@@ -5,8 +5,9 @@ session = Session.new(".")
 session.quiet = true
 session.no_cache = true
 session.run_import("prelude")
+registered = session.auto_rules.size
 session.run_source(File.read("bits/tungsten-satori/spec/auto_registration_library.sat"))
-if session.failures != 0 || session.auto_rules.size != 2
+if session.failures != 0 || session.auto_rules.size != registered + 2
   raise "local rules were not registered"
 if session.auto_rules["classical_pattern"].tags != ["oracle:sat"]
   raise "checked SAT registration lost its dependency"

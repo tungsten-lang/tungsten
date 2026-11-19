@@ -7,11 +7,12 @@ use proof_source
   session.no_cache = true
   session.run_import("core")
   session.run_source(proof_declarations("bits/tungsten-satori/prelude/list.sat", ["sum_below"]))
-  arithmetic = ["sum_below_zero", "sum_below_succ", "cast_add.int", "int_cast_zero.rat", "int_cast_nonneg.rat", "int_cast_add." + suffix, "int_cast_nonneg." + suffix, "cast_zero." + suffix, "cast_one." + suffix, "cast_add." + suffix, "cast_succ." + suffix, "cast_nonneg." + suffix, "mul_div_cancel." + suffix, "sum_const_mul." + suffix]
+  signs = ["int_cast_nonneg.rat"]
+  arithmetic = ["sum_below_zero", "sum_below_succ", "cast_add.int", "int_cast_zero.rat", "int_cast_add." + suffix, "cast_zero." + suffix, "cast_one." + suffix, "cast_add." + suffix, "cast_succ." + suffix, "cast_nonneg." + suffix, "mul_div_cancel." + suffix, "sum_const_mul." + suffix]
   if suffix == "real"
-    arithmetic = arithmetic + ["rat_cast_zero.real", "rat_cast_nonneg.real"]
-  else
-    arithmetic = ["sum_below_zero", "sum_below_succ", "cast_add.int", "int_cast_zero.rat", "int_cast_nonneg.rat", "int_cast_add.rat", "cast_zero.rat", "cast_one.rat", "cast_add.rat", "cast_succ.rat", "cast_nonneg.rat", "mul_div_cancel.rat", "sum_const_mul.rat"]
+    signs.push("rat_cast_nonneg.real")
+    arithmetic = arithmetic + ["rat_cast_zero.real", "int_cast_nonneg.real"]
+  session.run_source(proof_declarations("bits/tungsten-satori/prelude/order.sat", signs))
   session.run_source(proof_declarations("bits/tungsten-satori/prelude/arith.sat", arithmetic))
   session.run_source(proof_declarations("bits/tungsten-satori/prelude/arith.sat", ["sum_below.le_const." + suffix, "sum_below.const_le." + suffix]))
   lemmas = ["concave_interval.sub_convex", "sum_below.concave_jensen_succ", "sum_below.concave_jensen", "sum_below.convex_jensen", "concave_interval.mono_below_max"].map -> (name) name + "." + suffix

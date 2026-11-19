@@ -86,6 +86,16 @@ theorem nat.induct (P : ℕ → Prop) : P 0 → (∀ n, P n → P (n + 1)) → �
     have last := step n (by linarith)
     linarith
 
+-- More than f 0 consecutive strict drops would force a negative value.
++ nat.exists_nondecreasing_step (f : ℕ → ℕ) (n : ℕ) (h : f 0 ≤ n) : ∃ k ≤ n, f k ≤ f (k + 1)
+  by_contra none
+  have step : ∀ k < n + 1, f (k + 1) < f k
+    intro k hk
+    by_contra weak
+    apply none
+    exact ⟨k, by linarith, by linarith⟩
+  linarith [nat.descent_bound f (n + 1) step]
+
 + nat.no_infinite_descent (f : ℕ → ℕ) (step : ∀ n, f (n + 1) < f n) : False
   have bound := nat.descent_bound f (f 0 + 1) (by intro k hk; exact step k)
   linarith

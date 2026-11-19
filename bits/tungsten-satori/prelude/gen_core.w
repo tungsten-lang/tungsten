@@ -7,7 +7,9 @@
 #
 #   cd ~/tungsten && bin/tungsten bits/tungsten-satori/prelude/gen_core.w
 
-SIMP = ["add_zero", "zero_add", "mul_one", "one_mul", "mul_zero", "zero_mul", "pow_zero", "le_refl", "lt_irrefl", "zero_le", "succ_eq_add_one"]
+SIMP = ["add_zero", "zero_add", "mul_one", "one_mul", "mul_zero", "zero_mul", "div_zero", "pow_zero", "le_refl", "lt_irrefl", "zero_le", "succ_eq_add_one",
+  "int_of_nat_add", "int_of_nat_mul", "int_of_nat_le", "rat_of_int_add", "rat_of_int_mul", "rat_of_int_le",
+  "real_of_rat_add", "real_of_rat_mul", "real_of_rat_le"]
 
 TYPES = [["nat", "ℕ"], ["int", "ℤ"], ["rat", "ℚ"], ["real", "ℝ"]]
 
@@ -125,6 +127,8 @@ NAT.each -> (line)
   sb.append("axiom " + line.slice(0, sp) + ".nat" + line.slice(sp, line.size - sp) + "\n")
 sb.append("\n-- casts\n")
 CASTS.each -> (line)
+  if SIMP.include?(line.slice(0, line.index(" ")))
+    sb.append("@\[simp\] ")
   sb.append("axiom " + line + "\n")
 File.write("bits/tungsten-satori/prelude/core.sat", sb.to_s)
 << "wrote prelude/core.sat"

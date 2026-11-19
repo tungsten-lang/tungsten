@@ -39,7 +39,7 @@ axiom abs_of_nonneg.nat (a : ℕ) : 0 ≤ a → abs a = a
 axiom lt_or_gt_of_ne.nat (a b : ℕ) : ¬ a = b → a < b ∨ b < a
 axiom lt_iff_add_one_le.nat (a b : ℕ) : a < b ↔ a + 1 ≤ b
 axiom div_add_mod.nat (a b : ℕ) : b * (a / b) + a % b = a
-axiom div_zero.nat (a : ℕ) : a / 0 = 0
+@[simp] axiom div_zero.nat (a : ℕ) : a / 0 = 0
 axiom mod_nonneg.nat (a b : ℕ) : 0 < b → 0 ≤ a % b
 axiom mod_lt.nat (a b : ℕ) : 0 < b → a % b < b
 
@@ -84,7 +84,7 @@ axiom abs_of_neg.int (a : ℤ) : a < 0 → abs a = neg a
 axiom neg_mul.int (a b : ℤ) : neg a * b = neg (a * b)
 axiom lt_iff_add_one_le.int (a b : ℤ) : a < b ↔ a + 1 ≤ b
 axiom div_add_mod.int (a b : ℤ) : b * (a / b) + a % b = a
-axiom div_zero.int (a : ℤ) : a / 0 = 0
+@[simp] axiom div_zero.int (a : ℤ) : a / 0 = 0
 axiom mod_nonneg.int (a b : ℤ) : 0 < b → 0 ≤ a % b
 axiom mod_lt.int (a b : ℤ) : 0 < b → a % b < b
 
@@ -129,7 +129,7 @@ axiom abs_of_neg.rat (a : ℚ) : a < 0 → abs a = neg a
 axiom neg_mul.rat (a b : ℚ) : neg a * b = neg (a * b)
 axiom mul_inv_cancel.rat (a : ℚ) : ¬ a = 0 → a * (1 / a) = 1
 axiom div_def.rat (a b : ℚ) : a / b = a * (1 / b)
-axiom div_zero.rat (a : ℚ) : a / 0 = 0
+@[simp] axiom div_zero.rat (a : ℚ) : a / 0 = 0
 
 -- ℝ
 axiom add_comm.real (a b : ℝ) : a + b = b + a
@@ -172,7 +172,7 @@ axiom abs_of_neg.real (a : ℝ) : a < 0 → abs a = neg a
 axiom neg_mul.real (a b : ℝ) : neg a * b = neg (a * b)
 axiom mul_inv_cancel.real (a : ℝ) : ¬ a = 0 → a * (1 / a) = 1
 axiom div_def.real (a b : ℝ) : a / b = a * (1 / b)
-axiom div_zero.real (a : ℝ) : a / 0 = 0
+@[simp] axiom div_zero.real (a : ℝ) : a / 0 = 0
 
 -- ℕ specifics
 @[simp] axiom zero_le.nat (n : ℕ) : 0 ≤ n
@@ -181,16 +181,16 @@ axiom sub_add_cancel.nat (a b : ℕ) : b ≤ a → a - b + b = a
 axiom sub_eq_zero.nat (a b : ℕ) : a ≤ b → a - b = 0
 
 -- casts
-axiom int_of_nat_add (m n : ℕ) : int_of_nat (m + n) = int_of_nat m + int_of_nat n
-axiom int_of_nat_mul (m n : ℕ) : int_of_nat (m * n) = int_of_nat m * int_of_nat n
-axiom int_of_nat_le (m n : ℕ) : int_of_nat m ≤ int_of_nat n ↔ m ≤ n
+@[simp] axiom int_of_nat_add (m n : ℕ) : int_of_nat (m + n) = int_of_nat m + int_of_nat n
+@[simp] axiom int_of_nat_mul (m n : ℕ) : int_of_nat (m * n) = int_of_nat m * int_of_nat n
+@[simp] axiom int_of_nat_le (m n : ℕ) : int_of_nat m ≤ int_of_nat n ↔ m ≤ n
 axiom int_of_nat_nonneg (n : ℕ) : 0 ≤ int_of_nat n
-axiom rat_of_int_add (m n : ℤ) : rat_of_int (m + n) = rat_of_int m + rat_of_int n
-axiom rat_of_int_mul (m n : ℤ) : rat_of_int (m * n) = rat_of_int m * rat_of_int n
-axiom rat_of_int_le (m n : ℤ) : rat_of_int m ≤ rat_of_int n ↔ m ≤ n
-axiom real_of_rat_add (m n : ℚ) : real_of_rat (m + n) = real_of_rat m + real_of_rat n
-axiom real_of_rat_mul (m n : ℚ) : real_of_rat (m * n) = real_of_rat m * real_of_rat n
-axiom real_of_rat_le (m n : ℚ) : real_of_rat m ≤ real_of_rat n ↔ m ≤ n
+@[simp] axiom rat_of_int_add (m n : ℤ) : rat_of_int (m + n) = rat_of_int m + rat_of_int n
+@[simp] axiom rat_of_int_mul (m n : ℤ) : rat_of_int (m * n) = rat_of_int m * rat_of_int n
+@[simp] axiom rat_of_int_le (m n : ℤ) : rat_of_int m ≤ rat_of_int n ↔ m ≤ n
+@[simp] axiom real_of_rat_add (m n : ℚ) : real_of_rat (m + n) = real_of_rat m + real_of_rat n
+@[simp] axiom real_of_rat_mul (m n : ℚ) : real_of_rat (m * n) = real_of_rat m * real_of_rat n
+@[simp] axiom real_of_rat_le (m n : ℚ) : real_of_rat m ≤ real_of_rat n ↔ m ≤ n
 axiom nat_of_int_of_nat (n : ℕ) : nat_of_int (int_of_nat n) = n
 axiom int_of_nat_of_int (z : ℤ) : 0 ≤ z → int_of_nat (nat_of_int z) = z
 axiom nat_of_int_nonpos (z : ℤ) : z ≤ 0 → nat_of_int z = 0

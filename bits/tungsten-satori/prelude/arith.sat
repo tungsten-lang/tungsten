@@ -570,13 +570,13 @@ import power
   constructor <;> intro h <;> linarith
 + sub_pos.real (a b : ℝ) : 0 < a - b ↔ b < a
   constructor <;> intro h <;> linarith
-+ mul_le_mul_of_nonneg_left.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
+@[auto] + mul_le_mul_of_nonneg_left.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
   nlinarith
-+ mul_le_mul_of_nonneg_right.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
+@[auto] + mul_le_mul_of_nonneg_right.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
   nlinarith
-+ mul_lt_mul_of_pos_left.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : c * a < c * b
+@[auto] + mul_lt_mul_of_pos_left.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : c * a < c * b
   nlinarith
-+ mul_lt_mul_of_pos_right.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : a * c < b * c
+@[auto] + mul_lt_mul_of_pos_right.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : a * c < b * c
   nlinarith
 + mul_le_mul.real (a b c d : ℝ) (h : a ≤ b) (k : c ≤ d) (hc : 0 ≤ c) (hb : 0 ≤ b) : a * c ≤ b * d
   nlinarith
@@ -607,13 +607,13 @@ import power
   constructor <;> intro h <;> linarith
 + sub_pos.rat (a b : ℚ) : 0 < a - b ↔ b < a
   constructor <;> intro h <;> linarith
-+ mul_le_mul_of_nonneg_left.rat (a b c : ℚ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
+@[auto] + mul_le_mul_of_nonneg_left.rat (a b c : ℚ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
   nlinarith
-+ mul_le_mul_of_nonneg_right.rat (a b c : ℚ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
+@[auto] + mul_le_mul_of_nonneg_right.rat (a b c : ℚ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
   nlinarith
-+ mul_lt_mul_of_pos_left.rat (a b c : ℚ) (h : a < b) (hc : 0 < c) : c * a < c * b
+@[auto] + mul_lt_mul_of_pos_left.rat (a b c : ℚ) (h : a < b) (hc : 0 < c) : c * a < c * b
   nlinarith
-+ mul_lt_mul_of_pos_right.rat (a b c : ℚ) (h : a < b) (hc : 0 < c) : a * c < b * c
+@[auto] + mul_lt_mul_of_pos_right.rat (a b c : ℚ) (h : a < b) (hc : 0 < c) : a * c < b * c
   nlinarith
 + mul_le_mul.rat (a b c d : ℚ) (h : a ≤ b) (k : c ≤ d) (hc : 0 ≤ c) (hb : 0 ≤ b) : a * c ≤ b * d
   nlinarith
@@ -644,13 +644,13 @@ import power
   constructor <;> intro h <;> linarith
 + sub_pos.int (a b : ℤ) : 0 < a - b ↔ b < a
   constructor <;> intro h <;> linarith
-+ mul_le_mul_of_nonneg_left.int (a b c : ℤ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
+@[auto] + mul_le_mul_of_nonneg_left.int (a b c : ℤ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
   nlinarith
-+ mul_le_mul_of_nonneg_right.int (a b c : ℤ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
+@[auto] + mul_le_mul_of_nonneg_right.int (a b c : ℤ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
   nlinarith
-+ mul_lt_mul_of_pos_left.int (a b c : ℤ) (h : a < b) (hc : 0 < c) : c * a < c * b
+@[auto] + mul_lt_mul_of_pos_left.int (a b c : ℤ) (h : a < b) (hc : 0 < c) : c * a < c * b
   nlinarith
-+ mul_lt_mul_of_pos_right.int (a b c : ℤ) (h : a < b) (hc : 0 < c) : a * c < b * c
+@[auto] + mul_lt_mul_of_pos_right.int (a b c : ℤ) (h : a < b) (hc : 0 < c) : a * c < b * c
   nlinarith
 + mul_le_mul.int (a b c d : ℤ) (h : a ≤ b) (k : c ≤ d) (hc : 0 ≤ c) (hb : 0 ≤ b) : a * c ≤ b * d
   nlinarith
@@ -685,17 +685,17 @@ import power
 + mul_le_mul_right.nat (k a b : ℕ) (h : a ≤ b) : a * k ≤ b * k
   rw [mul_comm.nat a k, mul_comm.nat b k]
   exact mul_le_mul_left.nat k a b h
-+ mul_le_mul_of_nonneg_left.nat (a b c : ℕ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
+@[auto] + mul_le_mul_of_nonneg_left.nat (a b c : ℕ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
   exact mul_le_mul_left.nat c a b h
-+ mul_le_mul_of_nonneg_right.nat (a b c : ℕ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
+@[auto] + mul_le_mul_of_nonneg_right.nat (a b c : ℕ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
   exact mul_le_mul_right.nat c a b h
 + mul_le_mul.nat (a b c d : ℕ) (h : a ≤ b) (k : c ≤ d) (hc : 0 ≤ c) (hb : 0 ≤ b) : a * c ≤ b * d
   linarith [mul_le_mul_right.nat c a b h, mul_le_mul_left.nat b c d k]
-+ mul_lt_mul_of_pos_left.nat (a b c : ℕ) (h : a < b) (hc : 0 < c) : c * a < c * b
+@[auto] + mul_lt_mul_of_pos_left.nat (a b c : ℕ) (h : a < b) (hc : 0 < c) : c * a < c * b
   have p := mul_le_mul_left.nat c (a + 1) b (by linarith)
   have q := left_distrib.nat c a 1
   linarith
-+ mul_lt_mul_of_pos_right.nat (a b c : ℕ) (h : a < b) (hc : 0 < c) : a * c < b * c
+@[auto] + mul_lt_mul_of_pos_right.nat (a b c : ℕ) (h : a < b) (hc : 0 < c) : a * c < b * c
   rw [mul_comm.nat a c, mul_comm.nat b c]
   exact mul_lt_mul_of_pos_left.nat a b c h hc
 + mul_self_le_mul_self.nat (a b : ℕ) (h : 0 ≤ a) (k : a ≤ b) : a * a ≤ b * b
@@ -951,6 +951,12 @@ import power
   · rw [succ_eq_add_one.nat, pow_succ.nat]
     linarith
 
+-- Division is total at zero in all four numeric domains.
++ div_eq_zero_of_den_eq_zero.nat (a b : ℕ) (h : b = 0) : a / b = 0 := by simp [h]
++ div_eq_zero_of_den_eq_zero.int (a b : ℤ) (h : b = 0) : a / b = 0 := by simp [h]
++ div_eq_zero_of_den_eq_zero.rat (a b : ℚ) (h : b = 0) : a / b = 0 := by simp [h]
++ div_eq_zero_of_den_eq_zero.real (a b : ℝ) (h : b = 0) : a / b = 0 := by simp [h]
+
 -- ---- division and remainder on ℕ and ℤ -------------------------------------------------------------------------
 -- ℕ: n % 0 = n and n / 0 = 0, as in core's div_add_mod.nat and div_zero.nat
 + mod_zero.nat (n : ℕ) : n % 0 = n
@@ -1141,6 +1147,14 @@ import power
     linarith [mul_le_mul_of_nonneg_right.real a (b / c) c h (by linarith), mul_div_cancel.real b c (by linarith)]
   · intro h
     linarith [div_le_div_of_nonneg_right.real (a * c) b c h (by linarith), mul_div_cancel_right.real a c (by linarith)]
++ affine_step_radius.real (m e : ℝ) (h : 0 < e) :
+    0 < e / (|m| + 1) ∧ ∀ t, 0 < t → t ≤ e / (|m| + 1) → m*t < e
+  have d : 0 < |m| + 1 := by linarith [abs_nonneg.real m]
+  constructor
+  · exact div_pos.real e (|m| + 1) h d
+  · intro t ht hb
+    have upper := (le_div_iff.real t e (|m| + 1) d).mp hb
+    linarith [mul_le_mul_of_nonneg_right.real m (|m|) t (le_abs_self.real m) (by linarith)]
 + div_lt_iff.real (a b c : ℝ) (hc : 0 < c) : a / c < b ↔ a < b * c
   constructor
   · intro h
@@ -1153,6 +1167,30 @@ import power
     linarith [mul_lt_mul_of_pos_right.real a (b / c) c h hc, mul_div_cancel.real b c (by linarith)]
   · intro h
     linarith [div_lt_div_of_pos_right.real (a * c) b c h hc, mul_div_cancel_right.real a c (by linarith)]
++ div_le_of_nonneg_den.real (a b c : ℝ) (hc : 0 ≤ c)
+    (hz : c = 0 → 0 ≤ b) (hp : 0 < c → a ≤ b * c) : a / c ≤ b
+  by_cases h : c = 0
+  · simpa [h] using hz h
+  · have pos : 0 < c := by linarith
+    exact (div_le_iff.real a b c pos).mpr (hp pos)
++ le_div_of_nonneg_den.real (a b c : ℝ) (hc : 0 ≤ c)
+    (hz : c = 0 → a ≤ 0) (hp : 0 < c → a * c ≤ b) : a ≤ b / c
+  by_cases h : c = 0
+  · simpa [h] using hz h
+  · have pos : 0 < c := by linarith
+    exact (le_div_iff.real a b c pos).mpr (hp pos)
++ div_lt_of_nonneg_den.real (a b c : ℝ) (hc : 0 ≤ c)
+    (hz : c = 0 → 0 < b) (hp : 0 < c → a < b * c) : a / c < b
+  by_cases h : c = 0
+  · simpa [h] using hz h
+  · have pos : 0 < c := by linarith
+    exact (div_lt_iff.real a b c pos).mpr (hp pos)
++ lt_div_of_nonneg_den.real (a b c : ℝ) (hc : 0 ≤ c)
+    (hz : c = 0 → a < 0) (hp : 0 < c → a * c < b) : a < b / c
+  by_cases h : c = 0
+  · simpa [h] using hz h
+  · have pos : 0 < c := by linarith
+    exact (lt_div_iff.real a b c pos).mpr (hp pos)
 + div_le_one.real (a b : ℝ) (hb : 0 < b) : a / b ≤ 1 ↔ a ≤ b
   have k := div_le_iff.real a 1 b hb
   constructor
@@ -1344,6 +1382,14 @@ import power
     linarith [mul_le_mul_of_nonneg_right.rat a (b / c) c h (by linarith), mul_div_cancel.rat b c (by linarith)]
   · intro h
     linarith [div_le_div_of_nonneg_right.rat (a * c) b c h (by linarith), mul_div_cancel_right.rat a c (by linarith)]
++ affine_step_radius.rat (m e : ℚ) (h : 0 < e) :
+    0 < e / (|m| + 1) ∧ ∀ t, 0 < t → t ≤ e / (|m| + 1) → m*t < e
+  have d : 0 < |m| + 1 := by linarith [abs_nonneg.rat m]
+  constructor
+  · exact div_pos.rat e (|m| + 1) h d
+  · intro t ht hb
+    have upper := (le_div_iff.rat t e (|m| + 1) d).mp hb
+    linarith [mul_le_mul_of_nonneg_right.rat m (|m|) t (le_abs_self.rat m) (by linarith)]
 + div_lt_iff.rat (a b c : ℚ) (hc : 0 < c) : a / c < b ↔ a < b * c
   constructor
   · intro h
@@ -1356,6 +1402,30 @@ import power
     linarith [mul_lt_mul_of_pos_right.rat a (b / c) c h hc, mul_div_cancel.rat b c (by linarith)]
   · intro h
     linarith [div_lt_div_of_pos_right.rat (a * c) b c h hc, mul_div_cancel_right.rat a c (by linarith)]
++ div_le_of_nonneg_den.rat (a b c : ℚ) (hc : 0 ≤ c)
+    (hz : c = 0 → 0 ≤ b) (hp : 0 < c → a ≤ b * c) : a / c ≤ b
+  by_cases h : c = 0
+  · simpa [h] using hz h
+  · have pos : 0 < c := by linarith
+    exact (div_le_iff.rat a b c pos).mpr (hp pos)
++ le_div_of_nonneg_den.rat (a b c : ℚ) (hc : 0 ≤ c)
+    (hz : c = 0 → a ≤ 0) (hp : 0 < c → a * c ≤ b) : a ≤ b / c
+  by_cases h : c = 0
+  · simpa [h] using hz h
+  · have pos : 0 < c := by linarith
+    exact (le_div_iff.rat a b c pos).mpr (hp pos)
++ div_lt_of_nonneg_den.rat (a b c : ℚ) (hc : 0 ≤ c)
+    (hz : c = 0 → 0 < b) (hp : 0 < c → a < b * c) : a / c < b
+  by_cases h : c = 0
+  · simpa [h] using hz h
+  · have pos : 0 < c := by linarith
+    exact (div_lt_iff.rat a b c pos).mpr (hp pos)
++ lt_div_of_nonneg_den.rat (a b c : ℚ) (hc : 0 ≤ c)
+    (hz : c = 0 → a < 0) (hp : 0 < c → a * c < b) : a < b / c
+  by_cases h : c = 0
+  · simpa [h] using hz h
+  · have pos : 0 < c := by linarith
+    exact (lt_div_iff.rat a b c pos).mpr (hp pos)
 + div_le_one.rat (a b : ℚ) (hb : 0 < b) : a / b ≤ 1 ↔ a ≤ b
   have k := div_le_iff.rat a 1 b hb
   constructor
@@ -1484,26 +1554,6 @@ import power
   have f : m - n + n = m := by ring
   rw [f] at e
   linarith
-+ int_cast_le.rat (m n : ℤ) : (m : ℚ) ≤ (n : ℚ) ↔ m ≤ n := rat_of_int_le m n
-+ int_cast_lt.rat (m n : ℤ) : (m : ℚ) < (n : ℚ) ↔ m < n
-  have k := rat_of_int_le n m
-  constructor
-  · intro h
-    by_contra c
-    linarith [k.mpr (by linarith)]
-  · intro h
-    by_contra c
-    linarith [k.mp (by linarith)]
-+ int_cast_inj.rat (m n : ℤ) : (m : ℚ) = (n : ℚ) ↔ m = n
-  constructor
-  · intro h
-    linarith [(rat_of_int_le m n).mp (by linarith), (rat_of_int_le n m).mp (by linarith)]
-  · intro h
-    rw [h]
-+ int_cast_nonneg.rat (z : ℤ) (h : 0 ≤ z) : 0 ≤ (z : ℚ)
-  have k := (rat_of_int_le 0 z).mpr h
-  rw [int_cast_zero.rat] at k
-  exact k
 + int_cast_pow.rat (m : ℤ) (n : ℕ) : ((m ^ n : ℤ) : ℚ) = (m : ℚ) ^ n
   induction n with n ih
   · rw [pow_zero.int, pow_zero.rat]
@@ -1519,26 +1569,6 @@ import power
   have f : p - q + q = p := by ring
   rw [f] at e
   linarith
-+ rat_cast_le.real (p q : ℚ) : (p : ℝ) ≤ (q : ℝ) ↔ p ≤ q := real_of_rat_le p q
-+ rat_cast_lt.real (p q : ℚ) : (p : ℝ) < (q : ℝ) ↔ p < q
-  have k := real_of_rat_le q p
-  constructor
-  · intro h
-    by_contra c
-    linarith [k.mpr (by linarith)]
-  · intro h
-    by_contra c
-    linarith [k.mp (by linarith)]
-+ rat_cast_inj.real (p q : ℚ) : (p : ℝ) = (q : ℝ) ↔ p = q
-  constructor
-  · intro h
-    linarith [(real_of_rat_le p q).mp (by linarith), (real_of_rat_le q p).mp (by linarith)]
-  · intro h
-    rw [h]
-+ rat_cast_nonneg.real (q : ℚ) (h : 0 ≤ q) : 0 ≤ (q : ℝ)
-  have k := (real_of_rat_le 0 q).mpr h
-  rw [rat_cast_zero.real] at k
-  exact k
 + rat_cast_pow.real (q : ℚ) (n : ℕ) : ((q ^ n : ℚ) : ℝ) = (q : ℝ) ^ n
   induction n with n ih
   · rw [pow_zero.rat, pow_zero.real]
@@ -1562,24 +1592,6 @@ import power
   rw [rat_of_int_mul, real_of_rat_mul]
 + int_cast_sub.real (m n : ℤ) : ((m - n : ℤ) : ℝ) = (m : ℝ) - (n : ℝ)
   rw [int_cast_sub.rat, rat_cast_sub.real]
-+ int_cast_le.real (m n : ℤ) : (m : ℝ) ≤ (n : ℝ) ↔ m ≤ n
-  constructor
-  · intro h
-    exact (rat_of_int_le m n).mp ((real_of_rat_le (rat_of_int m) (rat_of_int n)).mp h)
-  · intro h
-    exact (real_of_rat_le (rat_of_int m) (rat_of_int n)).mpr ((rat_of_int_le m n).mpr h)
-+ int_cast_lt.real (m n : ℤ) : (m : ℝ) < (n : ℝ) ↔ m < n
-  constructor
-  · intro h
-    exact (int_cast_lt.rat m n).mp ((rat_cast_lt.real (rat_of_int m) (rat_of_int n)).mp h)
-  · intro h
-    exact (rat_cast_lt.real (rat_of_int m) (rat_of_int n)).mpr ((int_cast_lt.rat m n).mpr h)
-+ int_cast_inj.real (m n : ℤ) : (m : ℝ) = (n : ℝ) ↔ m = n
-  constructor
-  · intro h
-    exact (int_cast_inj.rat m n).mp ((rat_cast_inj.real (rat_of_int m) (rat_of_int n)).mp h)
-  · intro h
-    rw [h]
 + int_cast_nonneg.real (z : ℤ) (h : 0 ≤ z) : 0 ≤ (z : ℝ)
   exact rat_cast_nonneg.real (rat_of_int z) (int_cast_nonneg.rat z h)
 + int_cast_pow.real (m : ℤ) (n : ℕ) : ((m ^ n : ℤ) : ℝ) = (m : ℝ) ^ n
@@ -1595,23 +1607,6 @@ import power
   have e := cast_add.int (m - n) n
   rw [sub_add_cancel.nat m n h] at e
   linarith
-+ cast_le.int (m n : ℕ) : (m : ℤ) ≤ (n : ℤ) ↔ m ≤ n := int_of_nat_le m n
-+ cast_lt.int (m n : ℕ) : (m : ℤ) < (n : ℤ) ↔ m < n
-  have k := int_of_nat_le n m
-  constructor
-  · intro h
-    by_contra c
-    linarith [k.mpr (by linarith)]
-  · intro h
-    by_contra c
-    linarith [k.mp (by linarith)]
-+ cast_inj.int (m n : ℕ) : (m : ℤ) = (n : ℤ) ↔ m = n
-  constructor
-  · intro h
-    linarith [(int_of_nat_le m n).mp (by linarith), (int_of_nat_le n m).mp (by linarith)]
-  · intro h
-    rw [h]
-+ cast_nonneg.int (n : ℕ) : 0 ≤ (n : ℤ) := int_of_nat_nonneg n
 + cast_pos.int (n : ℕ) : 0 < (n : ℤ) ↔ 0 < n
   have k := cast_lt.int 0 n
   rw [cast_zero.int] at k
@@ -1639,24 +1634,6 @@ import power
   have e := cast_add.rat (m - n) n
   rw [sub_add_cancel.nat m n h] at e
   linarith
-+ cast_le.rat (m n : ℕ) : (m : ℚ) ≤ (n : ℚ) ↔ m ≤ n
-  constructor
-  · intro h
-    exact (cast_le.int m n).mp ((int_cast_le.rat (int_of_nat m) (int_of_nat n)).mp h)
-  · intro h
-    exact (int_cast_le.rat (int_of_nat m) (int_of_nat n)).mpr ((cast_le.int m n).mpr h)
-+ cast_lt.rat (m n : ℕ) : (m : ℚ) < (n : ℚ) ↔ m < n
-  constructor
-  · intro h
-    exact (cast_lt.int m n).mp ((int_cast_lt.rat (int_of_nat m) (int_of_nat n)).mp h)
-  · intro h
-    exact (int_cast_lt.rat (int_of_nat m) (int_of_nat n)).mpr ((cast_lt.int m n).mpr h)
-+ cast_inj.rat (m n : ℕ) : (m : ℚ) = (n : ℚ) ↔ m = n
-  constructor
-  · intro h
-    exact (cast_inj.int m n).mp ((int_cast_inj.rat (int_of_nat m) (int_of_nat n)).mp h)
-  · intro h
-    rw [h]
 + cast_nonneg.rat (n : ℕ) : 0 ≤ (n : ℚ)
   exact int_cast_nonneg.rat (int_of_nat n) (int_of_nat_nonneg n)
 + cast_pos.rat (n : ℕ) : 0 < (n : ℚ) ↔ 0 < n
@@ -1691,24 +1668,6 @@ import power
   have e := cast_add.real (m - n) n
   rw [sub_add_cancel.nat m n h] at e
   linarith
-+ cast_le.real (m n : ℕ) : (m : ℝ) ≤ (n : ℝ) ↔ m ≤ n
-  constructor
-  · intro h
-    exact (cast_le.int m n).mp ((int_cast_le.real (int_of_nat m) (int_of_nat n)).mp h)
-  · intro h
-    exact (int_cast_le.real (int_of_nat m) (int_of_nat n)).mpr ((cast_le.int m n).mpr h)
-+ cast_lt.real (m n : ℕ) : (m : ℝ) < (n : ℝ) ↔ m < n
-  constructor
-  · intro h
-    exact (cast_lt.int m n).mp ((int_cast_lt.real (int_of_nat m) (int_of_nat n)).mp h)
-  · intro h
-    exact (int_cast_lt.real (int_of_nat m) (int_of_nat n)).mpr ((cast_lt.int m n).mpr h)
-+ cast_inj.real (m n : ℕ) : (m : ℝ) = (n : ℝ) ↔ m = n
-  constructor
-  · intro h
-    exact (cast_inj.int m n).mp ((int_cast_inj.real (int_of_nat m) (int_of_nat n)).mp h)
-  · intro h
-    rw [h]
 + cast_nonneg.real (n : ℕ) : 0 ≤ (n : ℝ)
   exact int_cast_nonneg.real (int_of_nat n) (int_of_nat_nonneg n)
 + cast_pos.real (n : ℕ) : 0 < (n : ℝ) ↔ 0 < n
@@ -2186,10 +2145,10 @@ import power
 + sub_self.rat (a : ℚ) : a - a = 0 := by ring
 + sub_self.int (a : ℤ) : a - a = 0 := by ring
 -- Mathlib: zero_div
-+ zero_div.real (a : ℝ) : 0 / a = 0
+@[simp] + zero_div.real (a : ℝ) : 0 / a = 0
   rw [div_def.real]
   ring
-+ zero_div.rat (a : ℚ) : 0 / a = 0
+@[simp] + zero_div.rat (a : ℚ) : 0 / a = 0
   rw [div_def.rat]
   ring
 -- Mathlib: neg_div

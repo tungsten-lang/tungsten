@@ -4233,7 +4233,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               spine_level = @nassump
               spine_size = 0
               if @choice_polarities != nil
-                v = wassat_choice_variable(@choice_rows, @lassign)
+                # Propagation has handled live unit rows. A two-choice row
+                # is sufficient for this branching hint at the fixed point.
+                v = wassat_choice_variable_until(@choice_rows, @lassign, 2)
                 if v > 0
                   polarities = @choice_polarities ## i8[]
                   choice_phase = polarities[v]
@@ -9378,6 +9380,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # A satisfied row or a tie cannot improve the current choice. Zero lets the
 # caller use its ordinary decision machinery for the remaining variables.
 -> wassat_choice_variable(rows, values) (i32[] i8[]) i64
+  wassat_choice_variable_until(rows, values, 1)
+
+-> wassat_choice_variable_until(rows, values, stop_at) (i32[] i8[] i64) i64
   row = 0 ## i64
   best = 0 ## i64
   fewest = 2147483647 ## i64
@@ -9398,7 +9403,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if i == stop && count > 0
       best = first
       fewest = count
-      break if count == 1
+      break if count <= stop_at
     row = stop
   best >> 1
 

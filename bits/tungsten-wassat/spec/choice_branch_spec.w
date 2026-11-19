@@ -53,6 +53,17 @@ describe("branching on choice clauses") ->
     values[6] = 1
     expect(wassat_choice_variable(rows, values)).to eq(0)
 
+  it("can stop at two open choices while an unrestricted scan still finds a later singleton") ->
+    rows = i32[9]
+    [3, 2, 4, 6, 3, 8, 10, 12, 0].each_with_index -> (x, i)
+      rows[i] = x
+    values = i8[14]
+    values[2] = -1
+    values[8] = -1
+    values[10] = -1
+    expect(wassat_choice_variable(rows, values)).to eq(6)
+    expect(wassat_choice_variable_until(rows, values, 2)).to eq(2)
+
   it("uses signed choice rows and falls back when an input adds a long clause") ->
     cs = []
     (0...6).each -> (i)

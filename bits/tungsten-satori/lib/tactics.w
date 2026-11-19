@@ -2528,16 +2528,15 @@
       return nil
     [rem, value, reversed, conversion]
 
-  -> auto_residue(target, fact)
-    source = literal_residue(fact.concl)
+  -> residue_from_fact(rem, source, fact, expected = nil)
     if source == nil
       return nil
     dividend = source[0].a.b
-    if !tm_eq(dividend, target[0].a.b)
+    if !tm_eq(dividend, rem.a.b)
       return nil
     modulus = source[0].b
-    divisor = target[0].b
-    if modulus.val % divisor.val != 0 || int_fmod(source[1].val, divisor.val) != target[1].val
+    divisor = rem.b
+    if modulus.val % divisor.val != 0 || (expected != nil && int_fmod(source[1].val, divisor.val) != expected.val)
       return nil
     begin
       equation = source[3] == nil ? fact : @k.eq_mp(source[3], fact)
@@ -2555,11 +2554,89 @@
           rule = @k.mp(rule, @d.eqt_elim(@k.compute(rule.concl.a.b)))
         proof = @k.mp(rule, proof)
         proof = @k.trans(proof, @k.compute(proof.concl.b))
-      if !tm_eq(proof.concl, @k.eq_tm(target[0], target[1]))
+      sides = @k.dest_eq(proof.concl)
+      if sides != nil && tm_eq(sides[0], rem) && sides[1].tag == :lit
+        return proof
+      nil
+    rescue e
+      nil
+
+  -> finish_residue(target, proof)
+    if proof == nil || !tm_eq(proof.concl, @k.eq_tm(target[0], target[1]))
+      return nil
+    oriented = target[2] ? @k.sym(proof) : proof
+    target[3] == nil ? oriented : @k.eq_mp(@k.sym(target[3]), oriented)
+
+  -> residue_operation(t)
+    if t.tag == :app && t.a.tag == :app
+      op = t.a.a.op
+      if op == OP_ADD || op == OP_MUL
+        return op
+    OP_NONE
+
+  # Each visited subterm yields a theorem t % k = r at the goal's modulus.
+  # The fact index and node budget belong to this branch alone.
+  -> residue_expression(rem, known, fuel)
+    if fuel[0] <= 0
+      return nil
+    fuel[0] -= 1
+    t = rem.a.b
+    if t.tag == :lit || (t.tag == :app && t.a.op == OP_NEG && t.b.tag == :lit)
+      return @k.compute(rem)
+    bucket = known[t.h]
+    if bucket != nil
+      bucket.each -> (entry)
+        proof = residue_from_fact(rem, entry[0], entry[1])
+        if proof != nil
+          return proof
+    op = residue_operation(t)
+    if op == OP_NONE
+      return nil
+    modulus = rem.b
+    mod_op = rem.a.a
+    lhs = mk_apps(mod_op, [t.a.b, modulus])
+    rhs = mk_apps(mod_op, [t.b, modulus])
+    left = residue_expression(lhs, known, fuel)
+    if left == nil && op == OP_ADD
+      return nil
+    right = tm_eq(lhs, rhs) ? left : residue_expression(rhs, known, fuel)
+    ty = type_of(modulus)
+    if left != nil && right != nil
+      reduced = @k.mk_comb(@d.ap_term(t.a.a, left), right)
+    else
+      # One zero residue determines a product even with an unknown cofactor.
+      zero = left == nil ? right : left
+      if op != OP_MUL || zero == nil || zero.concl.b.val != 0
         return nil
-      if target[2]
-        proof = @k.sym(proof)
-      return target[3] == nil ? proof : @k.eq_mp(@k.sym(target[3]), proof)
+      other = left == nil ? lhs : rhs
+      law = auto_loaded_rule((left == nil ? "mul_zero." : "zero_mul.") + ty.name)
+      if law == nil
+        return nil
+      change = left == nil ? @d.ap_term(mk_app_raw(t.a.a, lhs), right) : @d.ap_thm(@d.ap_term(t.a.a, left), rhs)
+      reduced = @k.trans(change, @k.spec(other, law))
+    rule = auto_loaded_rule((op == OP_ADD ? "add_mod." : "mul_mod.") + ty.name)
+    if rule == nil
+      return nil
+    rule = @k.spec(modulus, @k.spec(t.b, @k.spec(t.a.b, rule)))
+    if ty == TY_INT_SINGLETON
+      rule = @k.mp(rule, @d.eqt_elim(@k.compute(rule.concl.a.b)))
+    step = @d.ap_thm(@d.ap_term(mod_op, reduced), modulus)
+    @k.trans(@k.trans(rule, step), @k.compute(step.concl.b))
+
+  -> auto_residue_expression(target, facts)
+    rem = target[0]
+    if residue_operation(rem.a.b) == OP_NONE
+      return nil
+    known = {}
+    facts.each -> (fact)
+      source = literal_residue(fact.concl)
+      if source != nil && source[0].b.val % rem.b.val == 0
+        key = source[0].a.b.h
+        if known[key] == nil
+          known[key] = []
+        known[key].push([source, fact])
+    begin
+      finish_residue(target, residue_expression(rem, known, [64]))
     rescue e
       nil
 
@@ -3893,7 +3970,8 @@
         if tm_eq(th.concl, goal.concl)
           return th
         if residue != nil
-          proof = auto_residue(residue, th)
+          equation = residue_from_fact(residue[0], literal_residue(th.concl), th, residue[1])
+          proof = finish_residue(residue, equation)
           if proof != nil
             return proof
         fitted = try_square_fit(th, goal.concl)
@@ -3966,6 +4044,10 @@
                 changed = true
       if !changed
         break
+    if residue != nil
+      proof = auto_residue_expression(residue, facts)
+      if proof != nil
+        return proof
     graph = auto_equality_graph(facts)
     # A negated conjunction contradicts its two known components.
     ni = 0

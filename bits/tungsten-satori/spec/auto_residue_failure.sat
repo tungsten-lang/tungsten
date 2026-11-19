@@ -8,3 +8,7 @@
 + zero_source (n : ℕ) (h : n % 0 = 2) : odd n := by auto
 + variable_source (n k : ℤ) (h : n % k = 1) : odd n := by auto
 + negative_source (n : ℤ) (h : n % (-4) = -2) : odd n := by auto
++ wrong_sum (n : ℤ) (h : n % 5 = 2) : (2*n+1) % 5 = 1 := by auto
++ unknown_factor (a b : ℕ) (h : a % 7 = 2) : a*b % 7 = 4 := by auto
++ missing_branch (n : ℤ) (h : n % 5 = 2 ∨ n % 5 = 4) : n*n % 5 = 4 := by auto
++ wrong_modulus (n : ℕ) (h : n % 3 = 2) : (2*n+1) % 5 = 0 := by auto

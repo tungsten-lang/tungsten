@@ -21,6 +21,15 @@ import order
   · have u := div_mod_unique.nat (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.nat a k, left_distrib.nat k (a / k) b]) (mod_lt.nat a k (by linarith))
     exact u.2.symm
 
++ add_mod.nat (a b k : ℕ) : (a + b) % k = (a % k + b % k) % k
+  have e : a + b = a % k + b % k + k * (a / k + b / k)
+    linarith [div_add_mod.nat a k, div_add_mod.nat b k, left_distrib.nat k (a / k) (b / k)]
+  rw [e, add_mul_mod.nat]
++ mul_mod.nat (a b k : ℕ) : (a * b) % k = (a % k) * (b % k) % k
+  have e : (k * (a / k) + a % k) * (k * (b / k) + b % k) = a % k * (b % k) + k * (k * (a / k) * (b / k) + a / k * (b % k) + a % k * (b / k)) := by ring
+  rw [div_add_mod.nat a k, div_add_mod.nat b k] at e
+  rw [e, add_mul_mod.nat]
+
 + mod_of_factor.nat (n m d k r : ℕ) (hm : d*k = m) (hr : n % m = r) : n % d = r % d
   have e : n % m + d*(k*(n/m)) = d*k*(n/m) + n % m := by ring
   rw [hm, div_add_mod.nat] at e
@@ -46,6 +55,15 @@ import order
 + add_mul_mod.int (a b k : ℤ) (hk : 0 < k) : (a + k * b) % k = a % k
   have u := div_mod_unique.int (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.int a k, left_distrib.int k (a / k) b]) (mod_nonneg.int a k hk) (mod_lt.int a k hk)
   exact u.2.symm
+
++ add_mod.int (a b k : ℤ) (hk : 0 < k) : (a + b) % k = (a % k + b % k) % k
+  have e : a + b = a % k + b % k + k * (a / k + b / k)
+    linarith [div_add_mod.int a k, div_add_mod.int b k, left_distrib.int k (a / k) (b / k)]
+  rw [e, add_mul_mod.int (a % k + b % k) (a / k + b / k) k hk]
++ mul_mod.int (a b k : ℤ) (hk : 0 < k) : (a * b) % k = (a % k) * (b % k) % k
+  have e : (k * (a / k) + a % k) * (k * (b / k) + b % k) = a % k * (b % k) + k * (k * (a / k) * (b / k) + a / k * (b % k) + a % k * (b / k)) := by ring
+  rw [div_add_mod.int a k, div_add_mod.int b k] at e
+  rw [e, add_mul_mod.int (a % k * (b % k)) (k * (a / k) * (b / k) + a / k * (b % k) + a % k * (b / k)) k hk]
 
 + mod_of_factor.int (n m d k r : ℤ) (hm : d*k = m) (hd : 0 < d) (hr : n % m = r) : n % d = r % d
   have e : n % m + d*(k*(n/m)) = d*k*(n/m) + n % m := by ring

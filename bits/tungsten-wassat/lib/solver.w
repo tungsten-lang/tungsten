@@ -716,6 +716,20 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # A solver built from clause lists (the certificate modes, the library
     # API) takes the profile here; flat loads decide in load_flat.
     self.enable_kissat_search if !flat_shell && @config.use_kissat_search
+    @choice_rows = self.disjoint_choice_rows unless flat_shell
+
+  # Within the small lookahead policy, disjoint long clauses provide an
+  # explicit set of choices per row. Each variable must occur exactly once
+  # across those rows. The configured trial width remains an override.
+  -> disjoint_choice_rows
+    return nil unless @lookahead > 0 && @config.long_occurrences == @nvars
+    return nil if env("WASSAT_LOOKAHEAD") != nil
+    rows = i32[@nvars + @nvars / 3 + 1]
+    marks = i8[@nvars + 1]
+    wassat_query_keep(@query_owner, marks, marks.size) if @query_owner != nil
+    wassat_query_keep(@query_owner, rows, rows.size * 4) if @query_owner != nil
+    return nil if wassat_pack_choice_rows(@arena, @cmeta, @alive, marks, rows, @ncl, @nvars) == 0
+    rows
 
   # ---- literal encoding ---------------------------------------------------
 
@@ -929,6 +943,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> add_input_clause(c)
     n = c.size
+    @choice_rows = nil if n >= 3 && @choice_rows != nil
     if n == 0
       # Keep an explicit input empty clause in the database. Besides making
       # the arena faithfully represent the DIMACS input, this gives hinted
@@ -1203,6 +1218,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   #
   # Keep a failed trial's trail intact for the ordinary CDCL conflict path.
   -> pick_branch_rollout
+    if @choice_rows != nil
+      v = wassat_choice_variable(@choice_rows, @lassign) ## i64
+      return v if v > 0
     @pstate[0] = @qhead
     @pstate[1] = @tsize
     @pstate[2] = -1
@@ -4552,6 +4570,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @raw_flat = art["raw"] == true
     self.prepare_walk unless lean
     self.enable_kissat_search if kprofile
+    @choice_rows = lean ? nil : self.disjoint_choice_rows
     0
 
   # Inprocessing for raw kernels, which bypass the preprocessor entirely:
@@ -9278,6 +9297,63 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   phs[v] = polarity
   tr[slot] = polarity * v
   0
+
+# Copy the signed choices once. Input rows remain valid branching hints when
+# watch moves, database compaction or strengthening change the clause arena.
+-> wassat_pack_choice_rows(ar, cm, alive, marks, rows, ncl, nv) (i32[] i64[] i8[] i8[] i32[] i64 i64) i64
+  ci = 0 ## i64
+  used = 0 ## i64
+  write = 0 ## i64
+  while ci < ncl
+    width = cm[(ci << 1) + 1]
+    if alive[ci] == 1 && width >= 3
+      return 0 if used + width > nv
+      rows[write] = width
+      write += 1
+      start = cm[ci << 1]
+      stop = start + width
+      while start < stop
+        lit = ar[start] ## i64
+        sign = lit >> 63
+        var = (lit ^ sign) - sign
+        return 0 if marks[var] != 0
+        marks[var] = 1
+        rows[write] = (var << 1) + (sign & 1)
+        write += 1
+        start += 1
+      used += width
+    ci += 1
+  rows[write] = 0
+  return 0 if used != nv
+  write
+
+# Pick a variable from the unsatisfied row with the fewest open choices.
+# A satisfied row or a tie cannot improve the current choice. Zero lets the
+# caller use its ordinary decision machinery for the remaining variables.
+-> wassat_choice_variable(rows, values) (i32[] i8[]) i64
+  row = 0 ## i64
+  best = 0 ## i64
+  fewest = 2147483647 ## i64
+  while rows[row] > 0
+    first = 0 ## i64
+    count = 0 ## i64
+    i = row + 1
+    stop = i + rows[row]
+    while i < stop
+      slot = rows[i] ## i64
+      value = values[slot]
+      break if value > 0
+      if value == 0
+        first = slot if count == 0
+        count += 1
+        break if count >= fewest
+      i += 1
+    if i == stop && count > 0
+      best = first
+      fewest = count
+      break if count == 1
+    row = stop
+  best >> 1
 
 # Both polarities use the same trail and watch storage as a search decision.
 # A successful probe is undone before scoring. Return -1 with the trial

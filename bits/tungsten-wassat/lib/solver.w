@@ -716,19 +716,28 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # A solver built from clause lists (the certificate modes, the library
     # API) takes the profile here; flat loads decide in load_flat.
     self.enable_kissat_search if !flat_shell && @config.use_kissat_search
-    @choice_rows = self.disjoint_choice_rows unless flat_shell
+    @choice_rows = self.prepare_choice_rows(false) unless flat_shell
 
-  # Within the small lookahead policy, disjoint long clauses provide an
-  # explicit set of choices per row. Each variable must occur exactly once
-  # across those rows. The configured trial width remains an override.
-  -> disjoint_choice_rows
-    return nil unless @lookahead > 0 && @config.long_occurrences == @nvars
+  # A disjoint set of rows guides variable choice. When rows overlap, a
+  # value can satisfy several at once. Use its sign only when every row
+  # has pairwise binary exclusions, so selecting a member fixes that row.
+  -> prepare_choice_rows(lean)
+    @choice_polarities = nil
+    return nil if lean
+    return nil unless @lookahead > 0 && @nvars > 0
     return nil if env("WASSAT_LOOKAHEAD") != nil
-    rows = i32[@nvars + @nvars / 3 + 1]
+    occ = @config.long_occurrences
+    return nil if occ < @nvars || occ > WASSAT_LOOKAHEAD_CHOICE_DENSITY * @nvars
+    rows = i32[occ + occ / 3 + 1]
     marks = i8[@nvars + 1]
     wassat_query_keep(@query_owner, marks, marks.size) if @query_owner != nil
     wassat_query_keep(@query_owner, rows, rows.size * 4) if @query_owner != nil
-    return nil if wassat_pack_choice_rows(@arena, @cmeta, @alive, marks, rows, @ncl, @nvars) == 0
+    return nil if wassat_pack_choice_rows(@arena, @cmeta, @alive, marks, rows, @ncl, @nvars, occ) == 0
+    if occ > @nvars
+      seen = i32[2 * @nvars + 4]
+      wassat_query_keep(@query_owner, seen, seen.size * 4) if @query_owner != nil
+      return nil if wassat_choice_exclusions(rows, @bldir, @bl_pool, seen) == 0
+      @choice_polarities = marks
     rows
 
   # ---- literal encoding ---------------------------------------------------
@@ -943,7 +952,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
   -> add_input_clause(c)
     n = c.size
-    @choice_rows = nil if n >= 3 && @choice_rows != nil
+    if n >= 3 && @choice_rows != nil
+      @choice_rows = nil
+      @choice_polarities = nil
     if n == 0
       # Keep an explicit input empty clause in the database. Besides making
       # the arena faithfully represent the DIMACS input, this gives hinted
@@ -4214,13 +4225,19 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               self.enqueue(a, -1)
             handled = true
           unless handled
-            v = 0
+            choice_phase = 0 ## i64
+            v = 0 ## i64
             if @lookahead > 0
               phase_prefix = 0
               best_prefix = 0
               spine_level = @nassump
               spine_size = 0
-              v = self.pick_branch_rollout
+              if @choice_polarities != nil
+                v = wassat_choice_variable(@choice_rows, @lassign)
+                if v > 0
+                  polarities = @choice_polarities ## i8[]
+                  choice_phase = polarities[v]
+              v = self.pick_branch_rollout if v == 0
             elsif @kfuse && @nassump == 0 && @spine_active == 0
               # Every test above this point reads conflict counts, except
               # the best-trail snapshot. So decisions and propagations run
@@ -4253,20 +4270,22 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
               @decisions_made += 1
               @trail_lim[@dlevel] = @tsize
               @dlevel += 1
-              # Target phases (cms5's 'polar stb', Biere): decide with the
-              # polarity from the deepest conflict-free trail seen, not the
-              # churn-prone last-saved phase. Ablating exactly this knob on
-              # cms5 separates its 0.18s from 0.64s on bmc-ibm-12.
-              pl = @phase[v]
-              # Unconditioned on mode, deliberately. CaDiCaL gates target
-              # phases to stable mode, but wassat runs focused-first with a
-              # 16k-conflict stable floor, and the SAT payoff lives in the
-              # focused phase: mode-gated, f1000 stays unsolved and uf250 is
-              # unchanged; unconditioned, f1000 goes T/O -> 5.5s, uf250-0100
-              # 0.23s -> 0.02s, f600 1.0s -> 0.35s, against a ~1.3x tax on
-              # uuf-class refutations (uuf250-01 1.42s -> 1.89s) that stays
-              # far inside the parity gate.
-              pl = @bphase[v] if @use_target && (!@target_stable_only || @mode_stable) && @bphase[v] != 0
+              pl = choice_phase ## i64
+              if pl == 0
+                # Target phases (cms5's 'polar stb', Biere): decide with the
+                # polarity from the deepest conflict-free trail seen, not the
+                # churn-prone last-saved phase. Ablating exactly this knob on
+                # cms5 separates its 0.18s from 0.64s on bmc-ibm-12.
+                pl = @phase[v]
+                # Unconditioned on mode, deliberately. CaDiCaL gates target
+                # phases to stable mode, but wassat runs focused-first with a
+                # 16k-conflict stable floor, and the SAT payoff lives in the
+                # focused phase: mode-gated, f1000 stays unsolved and uf250 is
+                # unchanged; unconditioned, f1000 goes T/O -> 5.5s, uf250-0100
+                # 0.23s -> 0.02s, f600 1.0s -> 0.35s, against a ~1.3x tax on
+                # uuf-class refutations (uuf250-01 1.42s -> 1.89s) that stays
+                # far inside the parity gate.
+                pl = @bphase[v] if @use_target && (!@target_stable_only || @mode_stable) && @bphase[v] != 0
               self.enqueue(pl > 0 ? v : 0 - v, -1)
             # A negative result returns to the loop with the trail already updated.
     limited ? 0 : result
@@ -4570,7 +4589,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @raw_flat = art["raw"] == true
     self.prepare_walk unless lean
     self.enable_kissat_search if kprofile
-    @choice_rows = lean ? nil : self.disjoint_choice_rows
+    @choice_rows = self.prepare_choice_rows(lean)
     0
 
   # Inprocessing for raw kernels, which bypass the preprocessor entirely:
@@ -9300,14 +9319,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 
 # Copy the signed choices once. Input rows remain valid branching hints when
 # watch moves, database compaction or strengthening change the clause arena.
--> wassat_pack_choice_rows(ar, cm, alive, marks, rows, ncl, nv) (i32[] i64[] i8[] i8[] i32[] i64 i64) i64
+-> wassat_pack_choice_rows(ar, cm, alive, marks, rows, ncl, nv, occ) (i32[] i64[] i8[] i8[] i32[] i64 i64 i64) i64
   ci = 0 ## i64
+  variables = 0 ## i64
   used = 0 ## i64
   write = 0 ## i64
   while ci < ncl
     width = cm[(ci << 1) + 1]
     if alive[ci] == 1 && width >= 3
-      return 0 if used + width > nv
+      return 0 if used + width > occ
       rows[write] = width
       write += 1
       start = cm[ci << 1]
@@ -9316,16 +9336,43 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         lit = ar[start] ## i64
         sign = lit >> 63
         var = (lit ^ sign) - sign
-        return 0 if marks[var] != 0
-        marks[var] = 1
+        polarity = 1 | sign
+        if marks[var] == 0
+          marks[var] = polarity
+          variables += 1
+        elsif marks[var] != polarity
+          return 0
         rows[write] = (var << 1) + (sign & 1)
         write += 1
         start += 1
       used += width
     ci += 1
   rows[write] = 0
-  return 0 if used != nv
+  return 0 unless used == occ && variables == nv
   write
+
+# A binary (not a or not b) is indexed under not a with not b as its
+# other literal. Stamp each row member's binary neighbours once and check
+# that all later members occur among them. The position is a unique stamp.
+-> wassat_choice_exclusions(rows, dir, pool, seen) (i32[] i64[] i64[] i32[]) i64
+  row = 0 ## i64
+  while rows[row] > 0
+    i = row + 1
+    end = i + rows[row]
+    while i + 1 < end
+      key = (rows[i] ^ 1) << 2
+      j = dir[key]
+      limit = j + dir[key + 1]
+      while j < limit
+        seen[pool[j] & 4294967295] = i
+        j += 1
+      j = i + 1
+      while j < end
+        return 0 if seen[rows[j] ^ 1] != i
+        j += 1
+      i += 1
+    row = end
+  1
 
 # Pick a variable from the unsatisfied row with the fewest open choices.
 # A satisfied row or a tie cannot improve the current choice. Zero lets the

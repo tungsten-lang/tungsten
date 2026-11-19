@@ -90,8 +90,10 @@
     cons[i] = LinCon.new(coef, c0, r, deriv)
     i += 1
   res = fm_solve(cons, 0)
-  if res == nil
+  if res == :limit
     return lp_certificate(cons)
+  if res == nil
+    return nil
   out = Array.new(n)
   i = 0
   while i < n
@@ -109,6 +111,8 @@
       j += 1
   out
 
+# A contradictory row carries its derivation. No variables left means
+# the rational constraints are feasible. Only a cutoff needs simplex.
 -> fm_solve(cons, rounds)
   nc = cons.size
   ci = 0
@@ -117,7 +121,7 @@
       return cons[ci]
     ci += 1
   if rounds > 12 || nc > 600
-    return nil
+    return :limit
   # Single pass over sparse nonzeros to count pos/neg/equality occurrences per variable.
   pos_cnt = {}
   neg_cnt = {}

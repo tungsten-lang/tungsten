@@ -1,0 +1,18 @@
++ odd_branches (n : ℤ) (h : n % 4 = 1 ∨ n % 4 = 3) : odd n := by auto
+
++ one_mod_four (n : ℕ) (h : n % 4 = 1) : odd n := by auto
++ three_mod_four (n : ℕ) (h : n % 4 = 3) : n % 2 = 1 := by auto
++ even_branch (n : ℤ) (h : n % 10 = 8) : even n := by auto
+
++ explicit_cases (n : ℕ) (h : n % 12 = 5 ∨ n % 9 = 8) : n % 3 = 2
+  obtain p | p := h
+  · auto
+  · auto
+
++ reversed (n : ℤ) (h : 17 = (n+1) % 24) : 5 = (n+1) % 6 := by auto
++ divisor_one (n : ℕ) (h : n % 7 = 5) : n % 1 = 0 := by auto
+
++ large_modulus (n : ℤ) (h : n % 4294967296 = 4294967295) : n % 65536 = 65535 := by auto
+
+axiom supplied_residue (n : ℤ) : n % 10 = 9
++ from_hint (n : ℤ) : odd n := by auto [supplied_residue n]

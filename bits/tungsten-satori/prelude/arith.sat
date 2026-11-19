@@ -17,6 +17,7 @@
 -- Exponential, logarithm, square root and the Archimedean property of ℝ are in realx (import realx).
 import quadratic
 import power
+import divmod
 
 -- ---- big operators: one step (∑ i < n, f i is sum_below n f; note ∑ i < n, f i + c parses as ∑ i < n, (f i + c)) ----
 @[simp] + sum_below_zero (f : ℕ → α) : ∑ i < 0, f i = 0 := by rfl
@@ -677,11 +678,6 @@ import power
   nlinarith [sq_nonneg.int (a - b)]
 
 -- ℕ (nlinarith does not run on ℕ, so these are the tools for ℕ products)
-+ mul_le_mul_left.nat (k a b : ℕ) (h : a ≤ b) : k * a ≤ k * b
-  have e := sub_add_cancel.nat b a h
-  have q := left_distrib.nat k (b - a) a
-  rw [e] at q
-  linarith [zero_le.nat (k * (b - a))]
 + mul_le_mul_right.nat (k a b : ℕ) (h : a ≤ b) : a * k ≤ b * k
   rw [mul_comm.nat a k, mul_comm.nat b k]
   exact mul_le_mul_left.nat k a b h
@@ -967,27 +963,9 @@ import power
   linarith [div_add_mod.nat n k]
 + lt_mul_div_succ.nat (n k : ℕ) (hk : 0 < k) : n < k * (n / k + 1)
   linarith [div_add_mod.nat n k, mod_lt.nat n k hk, left_distrib.nat k (n / k) 1]
-+ div_mod_unique.nat (n k q r : ℕ) (h : n = k * q + r) (hr : r < k) : q = n / k ∧ r = n % k
-  have d := div_add_mod.nat n k
-  have m := mod_lt.nat n k (by linarith)
-  have e : q = n / k
-    by_contra c
-    obtain l | l := lt_or_gt_of_ne.nat q (n / k) c
-    · linarith [mul_le_mul_left.nat k (q + 1) (n / k) (by linarith), left_distrib.nat k q 1]
-    · linarith [mul_le_mul_left.nat k (n / k + 1) q (by linarith), left_distrib.nat k (n / k) 1]
-  have f : k * q + n % k = n
-    rw [e]
-    exact d
-  exact ⟨e, by linarith⟩
 + add_mul_div.nat (a b k : ℕ) (hk : 0 < k) : (a + k * b) / k = a / k + b
   have u := div_mod_unique.nat (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.nat a k, left_distrib.nat k (a / k) b]) (mod_lt.nat a k hk)
   exact u.1.symm
-+ add_mul_mod.nat (a b k : ℕ) : (a + k * b) % k = a % k
-  by_cases hk : k = 0
-  · rw [hk]
-    simp
-  · have u := div_mod_unique.nat (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.nat a k, left_distrib.nat k (a / k) b]) (mod_lt.nat a k (by linarith))
-    exact u.2.symm
 + mul_div_cancel_left.nat (k n : ℕ) (hk : 0 < k) : k * n / k = n
   have u := div_mod_unique.nat (k * n) k n 0 (by linarith) hk
   exact u.1.symm
@@ -1029,25 +1007,9 @@ import power
   linarith [div_add_mod.int n k, mod_nonneg.int n k hk]
 + lt_mul_div_succ.int (n k : ℤ) (hk : 0 < k) : n < k * (n / k + 1)
   linarith [div_add_mod.int n k, mod_lt.int n k hk, left_distrib.int k (n / k) 1]
-+ div_mod_unique.int (n k q r : ℤ) (h : n = k * q + r) (h0 : 0 ≤ r) (hr : r < k) : q = n / k ∧ r = n % k
-  have d := div_add_mod.int n k
-  have m0 := mod_nonneg.int n k (by linarith)
-  have m := mod_lt.int n k (by linarith)
-  have e : q = n / k
-    by_contra c
-    obtain l | l := lt_or_gt_of_ne.int q (n / k) c
-    · linarith [mul_le_mul_of_nonneg_left.int (q + 1) (n / k) k (by linarith) (by linarith)]
-    · linarith [mul_le_mul_of_nonneg_left.int (n / k + 1) q k (by linarith) (by linarith)]
-  have f : k * q + n % k = n
-    rw [e]
-    exact d
-  exact ⟨e, by linarith⟩
 + add_mul_div.int (a b k : ℤ) (hk : 0 < k) : (a + k * b) / k = a / k + b
   have u := div_mod_unique.int (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.int a k, left_distrib.int k (a / k) b]) (mod_nonneg.int a k hk) (mod_lt.int a k hk)
   exact u.1.symm
-+ add_mul_mod.int (a b k : ℤ) (hk : 0 < k) : (a + k * b) % k = a % k
-  have u := div_mod_unique.int (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.int a k, left_distrib.int k (a / k) b]) (mod_nonneg.int a k hk) (mod_lt.int a k hk)
-  exact u.2.symm
 + mul_div_cancel_left.int (k n : ℤ) (hk : 0 < k) : k * n / k = n
   exact (div_mod_unique.int (k * n) k n 0 (by linarith) (by linarith) hk).1.symm
 + mul_mod_right.int (k n : ℤ) (hk : 0 < k) : k * n % k = 0

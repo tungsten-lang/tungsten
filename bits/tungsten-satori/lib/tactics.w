@@ -2946,9 +2946,12 @@
   -> auto_add_fact(facts, th)
     if facts.size >= 128
       return false
-    facts.each -> (old)
-      if tm_eq(old.concl, th.concl)
+    c = th.concl
+    i = 0
+    while i < facts.size
+      if tm_eq(facts[i].concl, c)
         return false
+      i += 1
     facts.push(th)
     true
 
@@ -2956,11 +2959,10 @@
     if terms.size >= 64
       return
     if tm_closed_bound?(t)
-      found = false
-      terms.each -> (old)
-        if tm_eq(old, t)
-          found = true
-      if !found
+      i = 0
+      while i < terms.size && !tm_eq(terms[i], t)
+        i += 1
+      if i == terms.size
         terms.push(t)
     if t.tag == :app
       auto_collect_terms(t.b, terms)

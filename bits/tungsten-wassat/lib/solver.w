@@ -1142,36 +1142,52 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # conjunction the formula refutes. MiniSat's analyzeFinal.
   -> analyze_final(a)
     core = [a]
-    av = a.abs
-    @seen[av] = 1
-    marked = [av]
-    i = @tsize - 1
-    floor = 0
-    floor = @trail_lim[0] if @dlevel > 0
-    while i >= floor
-      l = @trail[i]
-      v = l.abs
-      if @seen[v] == 1
-        if @reason[v] < 0 && @level[v] > 0
-          # an assumption decision (level 0 reason-less literals are input
-          # units, formula-implied, never part of a core); when it is the
-          # same VARIABLE it is the opposing assumption literal itself
-          # (assume x and -x together)
-          core.push(l) unless l == a
-        elsif @reason[v] >= 0
-          ci = @reason[v]
-          st = @cmeta[2 * ci]
-          n = @cmeta[2 * ci + 1]
-          j = 0
-          while j < n
-            q = @arena[st + j].abs
-            if @seen[q] == 0 && @level[q] > 0
-              @seen[q] = 1
-              marked.push(q)
-            j += 1
-      i -= 1
-    marked.each -> (v)
-      @seen[v] = 0
+    failed = a ## i64
+    av = failed
+    av = 0 - av if av < 0
+    return core if @level[av] == 0
+    # Follow only the reasons that explain this failed assumption. The queue
+    # doubles as the list of marks to clear, including at reconvergent edges.
+    queue = @mclr
+    leaves = @mstk
+    seen = @seen
+    reason = @reason
+    level = @level
+    meta = @cmeta
+    arena = @arena
+    queue[0] = av
+    seen[av] = 1
+    head = 0 ## i64
+    count = 1 ## i64
+    used = 0 ## i64
+    while head < count
+      v = queue[head] ## i64
+      head += 1
+      ci = reason[v] ## i64
+      if ci < 0
+        leaves[used] = level[v]
+        used += 1
+      else
+        off = meta[ci << 1] ## i64
+        limit = off + meta[(ci << 1) + 1] ## i64
+        while off < limit
+          q = arena[off] ## i64
+          q = 0 - q if q < 0
+          if seen[q] == 0 && level[q] > 0
+            seen[q] = 1
+            queue[count] = q
+            count += 1
+          off += 1
+    while count > 0
+      count -= 1
+      seen[queue[count]] = 0
+    # Decision levels preserve the previous reverse-trail order of the core,
+    # including repeated assumptions that opened empty levels.
+    wassat_order_core_levels(leaves, queue, used, @dlevel) if used > 1
+    while used > 0
+      used -= 1
+      l = @trail[@trail_lim[leaves[used] - 1]] ## i64
+      core.push(l) unless l == failed
     core
 
   # Finish the ordinary failed-assumption path in one place so the owner of a
@@ -8534,6 +8550,26 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       root = child
       child = 2 * root + 1
     stk[base + root] = value
+  0
+
+# Restore trail order among distinct decision levels. When the levels cover
+# much of a short range, scatter them into the traversal's retired queue.
+# Repeated assumptions can open levels beyond its variable-sized capacity.
+-> wassat_order_core_levels(leaves, queue, used, depth) (i64[] i64[] i64 i64) i64
+  if used <= 16 || depth > 2 * used || depth > queue.size
+    return wassat_shrink_sort_levels(leaves, 0, used)
+  wassat_zero_i64(queue, depth)
+  i = 0 ## i64
+  while i < used
+    queue[leaves[i] - 1] = 1
+    i += 1
+  i = 0
+  level = 1 ## i64
+  while i < used
+    if queue[level - 1] == 1
+      leaves[i] = level
+      i += 1
+    level += 1
   0
 
 # All-UIP learned-clause shrinking (Feng & Bacchus 2020; CaDiCaL "shrink").

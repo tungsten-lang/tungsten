@@ -65,6 +65,33 @@ describe "Wassat incremental solving" ->
       expect(-> () s.solve_assuming([0])).to raise_error
       expect(-> () s.solve_assuming([99])).to raise_error
 
+    it "orders shared-reason leaves by decision level across empty assumptions" ->
+      f = "p cnf 10 6\n1 0\n-2 6 0\n-2 7 0\n-3 -6 -7 8 0\n-4 -8 9 0\n-1 -9 10 0\n"
+      s = inc_solver(f, WASSAT_PROOF_WRAT)
+      r = s.solve_assuming([1, 2, 2, 3, 4, 5, -10])
+      expect(r["core"]).to eq([-10, 4, 3, 2])
+      proof = "wrat 1\n" + r["proof"].join("\n") + "\n"
+      checked = wrat_verify(f, proof)
+      expect(checked["steps"]).to eq(r["proof"].size)
+      expect(checked["reason"].index("without deriving") != nil).to eq(true)
+      expect(s.solve_assuming([-2, -10])["sat"]).to eq(true)
+
+    it "returns wide failed cores in order with ordinary and empty decision levels" ->
+      [1, 4].each -> (copies)
+        clause = [21]
+        assumptions = []
+        expected = [-21]
+        (1..20).each -> (v)
+          lit = v % 2 == 0 ? 0 - v : v
+          clause.push(0 - lit)
+          (0...copies).each -> (i)
+            assumptions.push(lit)
+        (1..20).each -> (i)
+          expected.push(assumptions[(20 - i) * copies])
+        assumptions.push(-21)
+        s = Wassat.new(21, [clause], WASSAT_PROOF_NONE)
+        expect(s.solve_assuming(assumptions)["core"]).to eq(expected)
+
   context "the core is a certificate" ->
     it "logs the blocking clause as a final RUP addition the checker accepts" ->
       s = inc_solver(IMPL_CHAIN, WASSAT_PROOF_WRAT)

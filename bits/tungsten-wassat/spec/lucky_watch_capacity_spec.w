@@ -2,7 +2,7 @@ use spec
 use ../lib/wassat
 
 + LuckyCapacityFixture < Wassat
-  ro :wp_state, :ccap, :acap, :ncl, :asize
+  ro :wp_state, :ccap, :acap, :ncl, :asize, :aused, :arena
 
 -> lucky_capacity_formula(nv, rows)
   count = 0
@@ -66,8 +66,13 @@ describe "Lean lucky watch relocation space" ->
     expect(capacity_model_holds(rows, [])).to eq(false)
     expect(s.wp_state[3] - before < 192).to eq(true)
     # Only the watcher arena gets relocation headroom. Learning remains lean.
+    expect(s.ncl).to eq(rows.size)
     expect(s.ccap).to eq(s.ncl + 2)
-    expect(s.acap).to eq(s.asize + 2)
+    expect(s.aused).to eq(f["flat_nlits"] + s.ncl)
+    expect(s.acap).to eq(s.aused + 2)
+    # Each physical record has one extra header cell for its clause index.
+    expect(s.asize).to eq(s.aused + s.ncl)
+    expect(s.arena.size).to eq(s.acap + s.ccap)
 
   it "preserves a dense root contradiction" ->
     rows = [[-1], [-2], [-3]]

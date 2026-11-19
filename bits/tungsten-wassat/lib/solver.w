@@ -115,22 +115,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_query_keep(query_owner, @pwork, @pwork.size * 8) if query_owner != nil
     @phint = @proof_mode == WASSAT_PROOF_WRAT ? i64[nv + 4] : i64[1]
     wassat_query_keep(query_owner, @phint, @phint.size * 8) if query_owner != nil
-    if !flat_shell
-      max_dec = nv
-      max_dec = env("WASSAT_MAX_DEC_VAR").to_i if env("WASSAT_MAX_DEC_VAR") != nil
-      v = 1
-      while v <= nv
-        @vq_prev[v] = v - 1
-        @vq_next[v] = v + 1
-        @vq_stamp[v] = v <= max_dec ? nv - v + 1 : 0
-        v += 1
-      if nv >= 1
-        @vq_next[nv] = 0
-        @vq_state[0] = 1
-        @vq_state[1] = nv
-        @vq_state[2] = nv + 1
-        @vq_state[3] = 1
-        @vq_state[4] = 0
     @level = i64[nv + 1]
     wassat_query_keep(query_owner, @level, @level.size * 8) if query_owner != nil
     @reason = i32[nv + 1] # signed packed clause index, or -1 for a decision
@@ -196,22 +180,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_query_keep(query_owner, @lassign, @lassign.size * 1) if query_owner != nil
     @hstate[0] = nv
     @hstate[1] = 32
-    if !flat_shell
-      max_dec2 = nv
-      max_dec2 = env("WASSAT_MAX_DEC_VAR").to_i if env("WASSAT_MAX_DEC_VAR") != nil
-      @heappos[0] = -1
-      v = 0
-      while v <= nv
-        @reason[v] = -1
-        @phase[v] = -1
-        v += 1
-      v = 1
-      while v <= nv
-        @heap[v - 1] = v
-        @heappos[v] = v - 1
-        @activity[v] = -1 if v > max_dec2
-        v += 1
-
     @tsize = 0
     @qhead = 0
     @dlevel = 0
@@ -331,12 +299,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_query_keep(query_owner, @bphase, @bphase.size * 1) if query_owner != nil
     @best_phase = i8[nv + 1] # persistent deepest-trail phases across rephases
     wassat_query_keep(query_owner, @best_phase, @best_phase.size * 1) if query_owner != nil
-    if !flat_shell
-      v = 0
-      while v <= nv
-        @bphase[v] = -1
-        @best_phase[v] = -1
-        v += 1
+    self.fill_var_tables(false) unless flat_shell
     @best_tsize = 0
     @epoch_best_tsize = 0
     # Branch memory: retain the decision spine of the deepest conflict-free
@@ -4321,9 +4284,15 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     s
 
   -> init_var_tables(lean = false)
-    nv = @nvars
+    if !lean && @epoch_spine == nil
+      @epoch_spine = i64[@nvars + 2]
+      wassat_query_keep(@query_owner, @epoch_spine, @epoch_spine.size * 8) if @query_owner != nil
+    self.fill_var_tables(lean)
+
+  -> fill_var_tables(lean)
+    nv = @nvars ## i64
     @heappos[0] = -1
-    v = 0
+    v = 0 ## i64
     while v <= nv
       @reason[v] = -1
       @phase[v] = -1
@@ -4331,28 +4300,33 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         @bphase[v] = -1
         @best_phase[v] = -1
       v += 1
-    unless lean
-      if @epoch_spine == nil
-        @epoch_spine = i64[nv + 2]
-        wassat_query_keep(@query_owner, @epoch_spine, @epoch_spine.size * 8) if @query_owner != nil
-      max_dec = nv
-      max_dec = env("WASSAT_MAX_DEC_VAR").to_i if env("WASSAT_MAX_DEC_VAR") != nil
-      v = 1
-      while v <= nv
-        @vq_prev[v] = v - 1
-        @vq_next[v] = v + 1
-        @vq_stamp[v] = v <= max_dec ? nv - v + 1 : 0
-        @heap[v - 1] = v
-        @heappos[v] = v - 1
-        @activity[v] = -1 if v > max_dec
-        v += 1
-      if nv >= 1
-        @vq_next[nv] = 0
-        @vq_state[0] = 1
-        @vq_state[1] = nv
-        @vq_state[2] = nv + 1
-        @vq_state[3] = 1
-        @vq_state[4] = 0
+    return 0 if lean
+
+    max_dec = nv
+    bound = env("WASSAT_MAX_DEC_VAR")
+    if bound != nil
+      # Compare at full precision before narrowing an environment value.
+      requested = bound.to_i ## int
+      if requested <= 0
+        max_dec = 0
+      elsif requested < nv
+        max_dec = requested ## i64
+    v = 1
+    while v <= nv
+      @vq_prev[v] = v - 1
+      @vq_next[v] = v + 1
+      @vq_stamp[v] = v <= max_dec ? nv - v + 1 : 0
+      @heap[v - 1] = v
+      @heappos[v] = v - 1
+      @activity[v] = -1 if v > max_dec
+      v += 1
+    if nv >= 1
+      @vq_next[nv] = 0
+      @vq_state[0] = 1
+      @vq_state[1] = nv
+      @vq_state[2] = nv + 1
+      @vq_state[3] = 1
+      @vq_state[4] = 0
     0
 
   # A huge single-arm raw load consumes its parser mirrors to bound peak RSS.

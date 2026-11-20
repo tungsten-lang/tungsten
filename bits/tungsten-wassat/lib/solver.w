@@ -4555,7 +4555,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_copy_i8(src_al, @alive, ncl)
     @wp_cap = wp_cap
     @wpool = i64[@wp_cap]
-    wassat_copy_i64(src_wd, @wsdir, @wsdir.size)
+    wassat_copy_i32(src_wd, @wsdir, @wsdir.size)
     wassat_copy_i64(src_wp, @wpool, src_wst[0])
     @wp_state[0] = src_wst[0]
     @wp_state[1] = @wp_cap
@@ -4563,7 +4563,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @wp_state[4] = src_wst[4]
     @blp_cap = blp_cap
     @bl_pool = i64[@blp_cap]
-    wassat_copy_i64(src_bd, @bldir, @bldir.size)
+    wassat_copy_i32(src_bd, @bldir, @bldir.size)
     wassat_copy_i64(src_bp, @bl_pool, src_bst[0])
     @bl_state[0] = src_bst[0]
     @bl_state[1] = @blp_cap

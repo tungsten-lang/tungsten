@@ -14,7 +14,7 @@ use ../lib/solver
   wassat_ws_add(wd, wp, ws, 3, 2, 2)
   asg = i8[4]
   lasg = i8[10]
-  lvl = i64[4]
+  lvl = i32[4]
   rsn = i32[4]
   phs = i8[4]
   tr = i32[4]
@@ -93,7 +93,7 @@ describe "Wassat cumulative performance counters" ->
     ar[1] = 1
     ar[2] = 2
     ar[3] = 3
-    cm = i64[2]
+    cm = i32[2]
     cm[0] = 1
     cm[1] = 3
     alive = i8[1]

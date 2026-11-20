@@ -71,14 +71,14 @@ WASSAT_ARM_SLS = 2             # local search, models only
     cnf_text = read_file(@input_path)
     raise "cannot read input formula '[@input_path]'" if cnf_text == nil
     wassat_clear_output(proof_out, @input_path, "portfolio proof")
-    formula = wassat_parse_cnf(cnf_text)
+    formula = wassat_parse_cnf_native(cnf_text)
     proof_tmp_out = wassat_reserve_output(proof_out, @input_path, "portfolio proof")
     @proof_tmp_output = proof_tmp_out
     portfolio_started = ccall("__w_clock_ms")
 
     # preprocess ONCE; the artifact is what every arm consumes
-    # wassat_parse_cnf above is the BOXED parser -- no flat mirrors exist here.
-    pre = WassatPreprocess.new(formula["nvars"], formula["clauses"], WASSAT_PROOF_WRAT, nil)
+    pre = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_WRAT, formula)
+    pre.set_deadline_ms(@timeout_ms) if @timeout_ms > 0
     art = pre.run
 
     if art["status"] == -1
@@ -2142,11 +2142,14 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
   stop = i64[4]
   res = i64[cap * (nv + 8)]
   tel = i64[cap * WASSAT_TEL_STRIDE]
-  # Cell k counts clauses AUTHORED by arm k that some other arm installed.
-  credit = i64[cap]
+  # Cell k*16 counts clauses AUTHORED by arm k that some other arm installed
+  # (128-byte cache-line spacing avoids cross-core false sharing on ARM64/x86).
+  credit = i64[cap * 16]
   ring_maxlen = 24
   ring_cap = 4096
-  ring = i64[8 + ring_cap * (3 + ring_maxlen)]
+  ring = i64[16 + ring_cap * (3 + ring_maxlen)]
+  unit_cap = 65536
+  unit_ring = i64[16 + unit_cap * 3]
   # The arm's configuration, kept as DATA rather than only as a sequence of
   # calls on the solver: an allocator that may replace an arm has to be able
   # to name the configuration it is replacing, name the one it is replacing it
@@ -2167,6 +2170,9 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     prune_info = wassat_structural_prune(nv, formula)
   wassat_keychart_prepare(keychart_plan, art, stop) if keychart_plan != nil
   solvers = []
+  proto_plain = nil
+  proto_kissat = nil
+  defer_simplify = prune_info == nil
   a = 0
   while a < threads
     # Preserve every established matrix arm. The OTFS specialist clones arm
@@ -2178,7 +2184,31 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     # An arm the matrix will put on the Kissat schedule is loaded for it, so
     # its watch pool is sized for that layout.
     kraw = !continued && matrix_threads > 1 && ((art["config"].kissat_search_mask >> (specialist ? 1 : a)) & 1) == 1
-    s = continued ? incumbent : (kraw ? Wassat.from_flat_kissat(nv, art) : Wassat.from_flat(nv, art, 0))
+    s = nil
+    if continued
+      s = incumbent
+    elsif kraw
+      if proto_kissat == nil
+        s = Wassat.from_flat_kissat(nv, art)
+        proto_kissat = s unless art["arena_consumed"] == true
+      else
+        s = Wassat.from_flat_clone(nv, art, proto_kissat, true)
+    else
+      if proto_plain == nil
+        s = Wassat.from_flat(nv, art, 0)
+        proto_plain = s unless art["arena_consumed"] == true
+      else
+        s = Wassat.from_flat_clone(nv, art, proto_plain, false)
+    # Clone the freshly loaded formula before any arm rewrites clauses, parks
+    # substituted variables, or installs pruning clauses. The flat clone
+    # copies loading state and has no model-reconstruction map from a search.
+    solvers.push(s)
+    a += 1
+  a = 0
+  while a < threads
+    s = solvers[a]
+    continued = incumbent != nil && a == threads - 1
+    specialist = a >= otfs_index && a < otfs_index + otfs_specialists
     offsets[a] = incumbent_conflicts if continued
     s.enable_otfs if specialist
     # INPROCESSING axis (policy inprocess_arm_mask). Cleared before
@@ -2186,55 +2216,32 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     if !continued && matrix_threads > 1 && ((art["config"].inprocess_arm_mask >> (specialist ? 1 : a)) & 1) == 0
       s.disable_inprocess
     s.delay_inprocess(a * art["config"].inprocess_stagger) unless continued
-    s.enable_fixed_caps
     s.set_stop_cell(stop)
-    # A lone raw arm has nobody to share with — the preprocessing arms solve
-    # DIFFERENT formulas and must never take its clauses — so it keeps the
-    # export path out of its inner loop entirely.
-    # Keep continuation private: letting it publish into the established
-    # matrix perturbed qwh.35's repeatable 4,366-conflict winning basin. Its
-    # value is the state it already learned, not another source of clauses.
     if threads > 1 && !continued
-      # The specialist may import the matrix's glue clauses, but does not
-      # publish its changed trajectory back into the baseline arms. Thus the
-      # hedge can win without perturbing the configurations it protects.
       s.enable_sharing(ring, ring_cap, ring_maxlen, a, !specialist)
-      # Import-only specialists must also stay out of adaptive author-credit:
-      # accepting a baseline clause is evidence about the specialist, not a
-      # contribution that should change the protected arm's allocation.
-      s.set_share_credit(credit) unless specialist
+      s.enable_unit_sharing(unit_ring, unit_cap)
+      s.set_share_credit(credit, 16) unless specialist
     if continued
-      # Keep every bit of the scout trajectory. In particular, do not run
-      # raw simplification after search has begun or overwrite the phases it
-      # learned. Sharing/fixed-cap state above is safe to attach at a barrier.
       z = 0
     elsif matrix_threads == 1
-      # Sole raw arm: take the configuration the serial post-probe solve
-      # would have used, so adding a preprocessing arm changes only what
-      # runs BESIDE the raw search and never the raw trajectory itself.
       s.enable_chrono
-      s.simplify_raw if art["config"].force_simplify?
+      if art["config"].force_simplify?
+        if defer_simplify
+          s.defer_simplify_raw_mode(1)
+        else
+          s.simplify_raw
     else
       source = specialist ? 1 : a
       wassat_race_matrix_config(source, cfgs, a * WASSAT_CFG_STRIDE)
-      # TRAIL REUSE axis, set here rather than in the native matrix because the
-      # assignment is policy-driven (see policy.w trail_reuse_mask). Two-sided
-      # and trajectory-dependent: forced on every arm it wins 2bitadd_10 and
-      # schooltt but turns f1000 from 5.7s into a >150s timeout, twice.
       cfgs[a * WASSAT_CFG_STRIDE + 7] = (art["config"].trail_reuse_mask >> source) & 1
-      # STABLE-ONLY axis (kissat --stable=2, reluctant restarts) and
-      # FOCUSED-ONLY axis (kissat --sat, fast EMA restarts + target phases).
-      # In a 4-arm raw race:
-      #   arms 0, 1: standard focused/stable alternation
-      #   arm 2: fast-restart focused-only + target phases
-      #   arm 3: reluctant-restart stable-only + target phases
       cfgs[a * WASSAT_CFG_STRIDE + 8] = (art["config"].stable_only_mask >> source) & 1
       cfgs[a * WASSAT_CFG_STRIDE + 9] = (art["config"].focused_only_mask >> source) & 1
-      # KISSAT SCHEDULE axis (policy kissat_search_mask).
       cfgs[a * WASSAT_CFG_STRIDE + 10] = (art["config"].kissat_search_mask >> source) & 1
       wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE,
                                art["config"].force_simplify?,
-                               art["config"].use_vmtf(art["raw"] == true))
+                               art["config"].use_vmtf(art["raw"] == true),
+                               defer_simplify)
+    s.enable_fixed_caps
     if prune_info != nil && !continued
       # Share all pruned unit and binary clauses with every arm, and specialize
       # arms across DETOUR wavefront (mode 1), Clue/Sudoku Truth-Table (mode 2),
@@ -2245,7 +2252,6 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       arm_mode = 3 if a == 6
       arm_mode = 4 if a == 3 || a == 7
       wassat_apply_structural_pruning(s, prune_info, arm_mode, a == 0)
-    solvers.push(s)
     a += 1
   { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
     "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
@@ -2259,6 +2265,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     "naked_plan": naked_plan, "naked_index": naked_index,
     "cone_plan": cone_plan, "cone_index": cone_index,
     "art": art, "ring": ring, "ring_cap": ring_cap, "ring_maxlen": ring_maxlen,
+    "unit_ring": unit_ring, "unit_cap": unit_cap,
     "credit": credit, "offsets": offsets, "sls": [], "prune_info": prune_info,
     "matrix_threads": matrix_threads, "incumbent_index": incumbent_index,
     "otfs_index": otfs_index, "otfs_specialists": otfs_specialists,
@@ -2377,7 +2384,7 @@ WASSAT_TEL_STRIDE = 8
 # Apply a configuration vector to a freshly built solver. `forced` is the
 # WASSAT_SIMPLIFY measurement hook: it only reaches arms whose simplify axis is
 # 0, exactly as before.
--> wassat_race_apply_config(s, cfgs, b, forced, policy_vmtf)
+-> wassat_race_apply_config(s, cfgs, b, forced, policy_vmtf, defer_simplify = false)
   if cfgs[b] == 1
     if policy_vmtf
       s.disable_vmtf
@@ -2387,9 +2394,13 @@ WASSAT_TEL_STRIDE = 8
   s.reseed_phases(cfgs[b + 2]) if cfgs[b + 1] == 1
   s.set_positive_phases if cfgs[b + 1] == 2
   s.enable_chrono if cfgs[b + 3] == 1
-  s.simplify_raw_mode(0) if cfgs[b + 4] == 1
-  s.simplify_raw_mode(1) if cfgs[b + 4] == 2
-  s.simplify_raw if cfgs[b + 4] == 0 && forced
+  if defer_simplify
+    s.defer_simplify_raw_mode(0) if cfgs[b + 4] == 1
+    s.defer_simplify_raw_mode(1) if cfgs[b + 4] == 2 || (cfgs[b + 4] == 0 && forced)
+  else
+    s.simplify_raw_mode(0) if cfgs[b + 4] == 1
+    s.simplify_raw_mode(1) if cfgs[b + 4] == 2
+    s.simplify_raw if cfgs[b + 4] == 0 && forced
   s.enable_shrink if cfgs[b + 5] == 1
   # Two intervals, not one: the axis pays, so spend its second arm on a
   # DIFFERENT cadence rather than a duplicate. Arm 2 subsumes every 3k
@@ -2426,14 +2437,36 @@ WASSAT_TEL_STRIDE = 8
 # arm, so a ring would be unsound AND useless.
 -> wassat_race_add_pre(race, pre, heavy, label, pre_formula = nil)
   raise "race capacity exceeded" if race["threads"] + race["pre"].size >= race["cap"]
-  # Without an explicit formula the arm renders the one its preprocessor was
-  # built for: its buffers are sized from that formula, and the race's own
-  # formula may be a larger rendering of the same problem.
   pf = pre_formula
-  pf = pre.flat if pf == nil
+  pf = pre.flat if pf == nil && pre != nil
   pf = race["formula"] if pf == nil
-  race["pre"].push({ "pre": pre, "heavy": heavy, "label": label, "out": [], "formula": pf })
+  race["pre"].push({ "pre": pre, "pre_box": pre == nil ? [] : [pre], "heavy": heavy, "label": label, "out": [], "formula": pf, "light_budget": 0, "heavy_budget": 0, "stage_ms": 0, "force_full": false })
   0
+
+-> wassat_race_add_pre_deferred(race, pre_formula, heavy, label, light_budget, heavy_budget, stage_ms = 0, force_full = false)
+  raise "race capacity exceeded" if race["threads"] + race["pre"].size >= race["cap"]
+  pf = pre_formula == nil ? race["formula"] : pre_formula
+  race["pre"].push({ "pre": nil, "pre_box": [], "heavy": heavy, "label": label, "out": [], "formula": pf, "light_budget": light_budget, "heavy_budget": heavy_budget, "stage_ms": stage_ms, "force_full": force_full })
+  0
+
+-> wassat_pre_arm_body_spec(spec, formula, nv, res, base, heavy, stop, out, budget,
+                            tel, tbase, round, budget_state = nil,
+                            budget_limit = 0, budget_slot = 0, pre_sls_allowed = false,
+                            tick_slice = 0)
+  pbox = spec["pre_box"]
+  pp = pbox.empty? ? spec["pre"] : pbox[0]
+  if pp == nil && round == 0
+    pp = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, formula)
+    pp.set_budget(spec["light_budget"]) if spec["light_budget"] > 0
+    stage_ms = spec["stage_ms"]
+    pp.set_deadline_ms(stage_ms) if stage_ms != nil && stage_ms > 0
+    if heavy && spec["heavy_budget"] > 0
+      pp.set_heavy_budget(spec["heavy_budget"], stage_ms == nil ? 0 : stage_ms)
+    pp.force_full_pipeline if spec["force_full"] == true
+    pbox.push(pp)
+  wassat_pre_arm_body(pp, formula, nv, res, base, heavy, stop, out, budget,
+                      tel, tbase, round, budget_state, budget_limit, budget_slot,
+                      pre_sls_allowed, tick_slice)
 
 # A preprocessing arm: ONE thread that renders the formula and then solves
 # what it rendered. This is the whole point of the design — preprocessing is
@@ -2551,7 +2584,44 @@ WASSAT_TEL_STRIDE = 8
     i -= 1
   0
 
-# ---- the reward signal --------------------------------------------------------
+-> wassat_persistent_raw_worker(slot_box, res, base, tel, tbase, ctl, cbase)
+  done = false
+  while !done
+    spins = 0
+    cmd = ccall("__w_arr_load_acq", ctl, cbase)
+    while cmd == 0 || cmd == 2
+      spins += 1
+      if spins > 200
+        z = ccall("__w_sleep_ms", 1)
+      cmd = ccall("__w_arr_load_acq", ctl, cbase)
+    if cmd < 0
+      done = true
+    else
+      arm_slice = ctl[cbase + 1]
+      arm_ticks = ctl[cbase + 2]
+      solver = slot_box.first
+      wassat_fast_arm_body_round(solver, res, base, arm_slice, tel, tbase, arm_ticks)
+      z = ccall("__w_arr_store_rel", ctl, cbase, 2)
+  0
+
+# Wait for every persistent worker whose mailbox was armed (`ctl[cbase] != 0`)
+# to reach state 2, then park it back to state 0 before the coordinator runs.
+-> wassat_persistent_raw_barrier(ctl, threads) (i64[] i64) i64
+  a = 0
+  while a < threads
+    cbase = a * 16
+    st = ccall("__w_arr_load_acq", ctl, cbase)
+    if st == 1
+      spins = 0
+      while st == 1
+        spins += 1
+        if spins > 200
+          z = ccall("__w_sleep_ms", 1)
+        st = ccall("__w_arr_load_acq", ctl, cbase)
+    if st == 2
+      z = ccall("__w_arr_store_rel", ctl, cbase, 0)
+    a += 1
+  0
 #
 # A race arm's terminal signal is "did you win", and it is useless for
 # allocation: at most one arm per race ever emits it, and it arrives exactly
@@ -2799,10 +2869,10 @@ WASSAT_AXIS_SLOTS = 10
   # their logical slot and SLS's optional exact repair uses its fixed slot.
   conflict_budget = nil
   if budget > 0
-    conflict_budget = i64[cap + 1]
+    conflict_budget = i64[(cap + 1) * 16]
     a = 0
     while a < threads
-      solvers[a].set_shared_conflict_budget(conflict_budget, budget, a + 1)
+      solvers[a].set_shared_conflict_budget(conflict_budget, budget, (a + 1) * 16)
       a += 1
   race["conflict_budget"] = conflict_budget
   total = threads + pre.size
@@ -2863,12 +2933,12 @@ WASSAT_AXIS_SLOTS = 10
   if cone_plan != nil
     cone_cap = budget > 0 && budget < 1000000 ? budget : 1000000
     cone_plan["deadline"] = clock_ms() + cone_plan["window_ms"]
-    cone_plan["state"] = wassat_cone_checkpoint(formula, cone_cap, cone_plan["deadline"], conflict_budget, budget, cone_idx + 1)
+    cone_plan["state"] = wassat_cone_checkpoint(formula, cone_cap, cone_plan["deadline"], conflict_budget, budget, (cone_idx + 1) * 16)
     cone_plan["state"]["profile_queries"] = env("WASSAT_CONE_PROFILE_QUERIES") == "1"
     cone_plan["state"]["retain_output_queries"] = cone_plan["retain_output_queries"] == true
     cone_plan["state"]["retention_bytes"] = cone_plan["retention_bytes"]
   if keychart_plan != nil && conflict_budget != nil
-    keychart_plan["solver"].set_shared_conflict_budget(conflict_budget, budget, keychart_idx + 1)
+    keychart_plan["solver"].set_shared_conflict_budget(conflict_budget, budget, (keychart_idx + 1) * 16)
   round_ms = wassat_race_round_ms
   trace = wassat_race_trace?
   # Reallocation needs somebody to reallocate: with one raw arm there is no
@@ -3016,6 +3086,21 @@ WASSAT_AXIS_SLOTS = 10
   if naked_plan != nil
     naked_handle = wassat_naked_start(formula, naked_plan, stop, res, naked_base)
     naked_handle = wassat_seq_turn(naked_handle, stop, 0) if seq
+  use_pool = !seq && round1 > 0 && threads > 0 && cone_plan == nil
+  pool_ctl = nil
+  pool_boxes = []
+  pool_handles = []
+  if use_pool
+    pool_ctl = i64[threads * 16]
+    a = 0
+    while a < threads
+      box = [solvers[a]]
+      pool_boxes.push(box)
+      pbase = a * (nv + 8)
+      ptbase = a * WASSAT_TEL_STRIDE
+      pcbase = a * 16
+      pool_handles.push(Thread.new -> wassat_persistent_raw_worker(box, res, pbase, tel, ptbase, pool_ctl, pcbase))
+      a += 1
   round = 0
   running = 1
   while running == 1
@@ -3030,20 +3115,25 @@ WASSAT_AXIS_SLOTS = 10
     a = 0
     while a < threads
       if live[a] == 1
-        solver = solvers[a]
-        base = a * (nv + 8)
-        tbase = a * WASSAT_TEL_STRIDE
-        arm_slice = slice[a]
-        arm_ticks = seq_ticks
-        arm_handle = Thread.new -> wassat_fast_arm_body_round(solver, res, base, arm_slice, tel, tbase, arm_ticks)
-        arm_handle = wassat_seq_turn(arm_handle, stop, 0) if seq
-        handles.push(arm_handle)
+        if use_pool
+          pcbase = a * 16
+          pool_ctl[pcbase + 1] = slice[a]
+          pool_ctl[pcbase + 2] = seq_ticks
+          z = ccall("__w_arr_store_rel", pool_ctl, pcbase, 1)
+        else
+          solver = solvers[a]
+          base = a * (nv + 8)
+          tbase = a * WASSAT_TEL_STRIDE
+          arm_slice = slice[a]
+          arm_ticks = seq_ticks
+          arm_handle = Thread.new -> wassat_fast_arm_body_round(solver, res, base, arm_slice, tel, tbase, arm_ticks)
+          arm_handle = wassat_seq_turn(arm_handle, stop, 0) if seq
+          handles.push(arm_handle)
       a += 1
     p = 0
     while p < pre.size
       if live[threads + p] == 1
         spec = pre[p]
-        pp = spec["pre"]
         pformula = spec["formula"]
         heavy = spec["heavy"]
         out = spec["out"]
@@ -3051,7 +3141,7 @@ WASSAT_AXIS_SLOTS = 10
         tbase = (threads + p) * WASSAT_TEL_STRIDE
         pre_slice = slice[threads + p]
         pre_round = round
-        pre_slot = threads + p + 1
+        pre_slot = (threads + p + 1) * 16
         # Reserve only one extra arena, even if a library caller registers
         # two light renderings instead of the CLI's light/heavy pair.
         pre_sls_allowed = race["pre_sls_allowed"] && p == 0 && budget == 0 && round1 == 0
@@ -3060,8 +3150,8 @@ WASSAT_AXIS_SLOTS = 10
         # heavily preprocessed search answers most inputs any arm answers
         # (see wassat_seq_heavy_weight) and gets that many turns' worth.
         pre_ticks = seq_ticks * wassat_seq_heavy_weight if seq && heavy
-        pre_handle = Thread.new -> wassat_pre_arm_body(
-          pp, pformula, nv, res, base, heavy, stop, out, pre_slice, tel,
+        pre_handle = Thread.new -> wassat_pre_arm_body_spec(
+          spec, pformula, nv, res, base, heavy, stop, out, pre_slice, tel,
           tbase, pre_round, conflict_budget, budget, pre_slot, pre_sls_allowed,
           pre_ticks
         )
@@ -3074,17 +3164,9 @@ WASSAT_AXIS_SLOTS = 10
       sseed = spec["seed"]
       sout = spec["out"]
       sart = spec["art"]
-      # Default unbounded races retain the established long walker. Bounded
-      # or explicitly rounded races advance it in 200k-flip slices, so a
-      # finite CDCL budget can never leave a 200M-flip orphan at the join.
       starget = sflips
       if budget > 0 || round1 > 0
         starget = WASSAT_SLS_REPAIR_PREFIX_FLIPS * (round + 1)
-        # The conflict slices double, so the walker's share of a sequential
-        # round would otherwise shrink to nothing: double its ceiling too.
-        # ... and stop doubling it when they stop (wassat_seq_ticks_cap), or
-        # the walker's turn keeps doubling against CDCL turns that no longer
-        # do. From there its cumulative target grows by a fixed step.
         if seq
           flat = 0
           grown = wassat_seq_round1_ticks
@@ -3105,7 +3187,7 @@ WASSAT_AXIS_SLOTS = 10
       sls_handle = Thread.new -> wassat_sls_arm_body_round(
         nv, formula, sart, res, sls_base, stop, starget, sflips, sseed,
         sout, first_sls, repair_allowed, repair_cap,
-        conflict_budget, budget, sls_idx + 1
+        conflict_budget, budget, (sls_idx + 1) * 16
       )
       sls_handle = wassat_seq_turn(sls_handle, stop, 0) if seq
     if keychart_plan != nil && (!seq || round == 0)
@@ -3113,10 +3195,9 @@ WASSAT_AXIS_SLOTS = 10
         keychart_plan, formula, stop, res, keychart_base, nv
       )
       if seq
-        # One shot, bounded by its own move and repair caps: it takes its
-        # turn in the first round and is not cancelled there.
         keychart_handle = wassat_seq_turn(keychart_handle, stop, 0)
         keychart_handle = nil
+    wassat_persistent_raw_barrier(pool_ctl, threads) if use_pool
     handles.each -> (h)
       if cone_handle != nil
         remaining = cone_plan["deadline"] - clock_ms()
@@ -3216,13 +3297,14 @@ WASSAT_AXIS_SLOTS = 10
             dconf = tel[tb] - prev[tb]
             dms = tel[tb + 7] - prev[tb + 7]
             dprop = tel[tb + 2] - prev[tb + 2]
-            dcredit = credit[a] - pcredit[a]
+            cur_cred = credit[a * 16]
+            dcredit = cur_cred - pcredit[a]
             spent[a] = spent[a] + dconf
             score[a] = wassat_race_arm_score(metric, dconf, dms, dprop, dcredit, tel[tb + 6], tel[tb + 3])
             best = score[a] if a < matrix_threads && score[a] > best
             if trace
-              z = ccall("__w_eprint", "c trace r[round] arm[a] conf=[tel[tb]] d=[dconf] ms=[dms] lbdf=[tel[tb + 3] >> 16] lbds=[tel[tb + 4] >> 16] trail=[tel[tb + 5] >> 16] learnt=[tel[tb + 6]] dec=[tel[tb + 1]] prop=[tel[tb + 2]] credit=[credit[a]] score=[score[a]]\n")
-            pcredit[a] = credit[a]
+              z = ccall("__w_eprint", "c trace r[round] arm[a] conf=[tel[tb]] d=[dconf] ms=[dms] lbdf=[tel[tb + 3] >> 16] lbds=[tel[tb + 4] >> 16] trail=[tel[tb + 5] >> 16] learnt=[tel[tb + 6]] dec=[tel[tb + 1]] prop=[tel[tb + 2]] credit=[cur_cred] score=[score[a]]\n")
+            pcredit[a] = cur_cred
             live[a] = 0 if res[a * (nv + 8)] == 2
             live[a] = 0 if dconf <= 0
             live[a] = 0 if budget > 0 && spent[a] >= budget
@@ -3302,24 +3384,27 @@ WASSAT_AXIS_SLOTS = 10
             ns = Wassat.from_flat(nv, art, 0)
             is_otfs = worst >= race["otfs_index"] && worst < race["otfs_index"] + race["otfs_specialists"]
             ns.enable_otfs if is_otfs
-            ns.enable_fixed_caps
             ns.set_stop_cell(stop)
             if conflict_budget != nil
               ns.set_shared_conflict_budget(
-                conflict_budget, budget, worst + 1
+                conflict_budget, budget, (worst + 1) * 16
               )
             ns.enable_sharing(
               race["ring"], race["ring_cap"], race["ring_maxlen"], worst,
               !is_otfs
             )
-            ns.set_share_credit(credit) unless is_otfs
+            ns.enable_unit_sharing(race["unit_ring"], race["unit_cap"])
+            ns.set_share_credit(credit, 16) unless is_otfs
             wassat_race_apply_config(ns, cfgs, cb,
                                      art["config"].force_simplify?,
-                                     art["config"].use_vmtf(art["raw"] == true))
+                                     art["config"].use_vmtf(art["raw"] == true),
+                                     race["prune_info"] == nil)
+            ns.enable_fixed_caps
             if race["prune_info"] != nil
               wassat_apply_structural_pruning(ns, race["prune_info"], 0, false)
             solvers[worst].profile_counters("race.arm[worst].retired.round[round]")
             solvers[worst] = ns
+            pool_boxes[worst][0] = ns if use_pool
             # A fresh solver's counters restart at zero, so its telemetry
             # baseline restarts with them. `spent` deliberately does NOT: the
             # aggregate --conflicts cap counts work the race did, not work any
@@ -3342,6 +3427,13 @@ WASSAT_AXIS_SLOTS = 10
     if seq
       seq_ticks = seq_ticks * 2
       seq_ticks = seq_ticks_cap if seq_ticks > seq_ticks_cap
+  if use_pool
+    a = 0
+    while a < threads
+      z = ccall("__w_arr_store_rel", pool_ctl, a * 16, -1)
+      a += 1
+    pool_handles.each -> (ph)
+      z = ph.join
   if circuit_handle != nil
     z = wassat_stop_cancel(stop)
     z = circuit_handle.join
@@ -3660,7 +3752,9 @@ WASSAT_AXIS_SLOTS = 10
   # answer) but wasteful, so the ring holds ~8 drain intervals' worth.
   ring_maxlen = 24
   ring_cap = 32768
-  ring = i64[8 + ring_cap * (3 + ring_maxlen)]
+  ring = i64[16 + ring_cap * (3 + ring_maxlen)]
+  unit_cap = 65536
+  unit_ring = i64[16 + unit_cap * 3]
   # Export gate. Glue-only (2) is the raw race's setting and leaves the ring
   # nearly empty; this half exports broadly and lets the IMPORT filter below
   # decide what is worth installing, which is the GpuShareSat division of
@@ -3699,24 +3793,28 @@ WASSAT_AXIS_SLOTS = 10
     prune_info = wassat_structural_prune(nv, formula)
 
   solvers = []
+  proto = nil
   a = 0
   while a < threads
-    s = Wassat.from_flat(nv, art, 0)
+    s = nil
+    if proto == nil
+      s = Wassat.from_flat(nv, art, 0)
+      proto = s unless art["arena_consumed"] == true
+    else
+      s = Wassat.from_flat_clone(nv, art, proto, false)
+    solvers.push(s)
+    a += 1
+  a = 0
+  while a < threads
+    s = solvers[a]
     s.set_share_lbd(share_lbd)
-    s.enable_fixed_caps
     s.set_stop_cell(stop)
-    s.enable_sharing(ring, ring_cap, ring_maxlen, a) if share
+    if share
+      s.enable_sharing(ring, ring_cap, ring_maxlen, a)
+      s.enable_unit_sharing(unit_ring, unit_cap)
     if filter_slots > 0 && share
       s.set_assignment_sink(asg_sinks[a], asg_words, filter_slots, filter_every)
       s.enable_import_filter
-    # Diversity along the axes that measurably move trajectories, the same
-    # three the raw-kernel race samples: branching heuristic, initial
-    # phases, and chronological backtracking. Arm 0 is the marathon default
-    # — the serial path's own configuration — so the race can only improve
-    # on it, never lose to it by construction.
-    #
-    # Odd arms take the heuristic the policy did NOT pick, so both EVSIDS
-    # and VMTF are sampled whatever the kernel's shape says.
     if a % 2 == 1
       if config.use_vmtf(art["raw"] == true)
         s.disable_vmtf
@@ -3730,12 +3828,12 @@ WASSAT_AXIS_SLOTS = 10
     s.enable_chrono if grp % 2 == 1
     s.enable_focused_only if a % 4 == 2
     s.enable_stable_only if a % 4 == 3
+    s.enable_fixed_caps
     if prune_info != nil
       arm_mode = 0
       arm_mode = 1 if a == 2 || a == 4
       arm_mode = 2 if a == 1 || a == 5
       wassat_apply_structural_pruning(s, prune_info, arm_mode, a == 0 && share)
-    solvers.push(s)
     a += 1
 
   # Materialize before any worker starts; the helper handles both raw and

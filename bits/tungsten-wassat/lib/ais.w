@@ -173,6 +173,17 @@ WASSAT_AIS_MAX_EDGES = 1000000
   return wassat_ais_miss if nv < 5 || ncl < 6
   return wassat_ais_miss if nv > WASSAT_AIS_MAX_AUX + WASSAT_AIS_MAX_GRAPH_VARS
   return wassat_ais_miss if ncl > WASSAT_AIS_MAX_CLAUSES
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  if cfg != nil
+    return wassat_ais_miss if cfg.empty_clause_count > 0 || cfg.large > 0
+    u_cfg = cfg.units
+    t_cfg = cfg.ternary
+    return wassat_ais_miss if u_cfg < 1 || u_cfg >= WASSAT_AIS_MAX_BOUND
+    return wassat_ais_miss if t_cfg < u_cfg || t_cfg % u_cfg != 0
+    ng_cfg = t_cfg / u_cfg + 2
+    return wassat_ais_miss if ng_cfg < 3 || ng_cfg > WASSAT_AIS_MAX_GRAPH_VARS
+    kb_cfg = u_cfg + 1
+    return wassat_ais_miss unless nv - ng_cfg == (ng_cfg - 1) * kb_cfg
 
   lits = formula["flat_lits"] ## i64[]
   offs = formula["flat_offs"] ## i64[]
@@ -189,25 +200,35 @@ WASSAT_AIS_MAX_EDGES = 1000000
     # The exact counter/graph grammar contains only units, binaries, and
     # ternaries. Most unrelated formulas therefore leave after a handful of
     # length reads rather than paying a whole structural scan.
-    return wassat_ais_miss if n < 1 || n > 3
+    if n < 1 || n > 3
+      z = ccall("w_value_free_w", graph)
+      return wassat_ais_miss
     if n == 2
       off = offs[ci]
       a = lits[off]
       b = lits[off + 1]
       if a > 0 && b > 0
-        return wassat_ais_miss if a == b
+        if a == b
+          z = ccall("w_value_free_w", graph)
+          return wassat_ais_miss
         if graph[a] == 0
           graph[a] = 1
           ngraph += 1
         if graph[b] == 0
           graph[b] = 1
           ngraph += 1
-        return wassat_ais_miss if ngraph > WASSAT_AIS_MAX_GRAPH_VARS
+        if ngraph > WASSAT_AIS_MAX_GRAPH_VARS
+          z = ccall("w_value_free_w", graph)
+          return wassat_ais_miss
         graph_edges += 1
-        return wassat_ais_miss if graph_edges > WASSAT_AIS_MAX_EDGES
+        if graph_edges > WASSAT_AIS_MAX_EDGES
+          z = ccall("w_value_free_w", graph)
+          return wassat_ais_miss
     ci += 1
 
-  return wassat_ais_miss if ngraph < 3
+  if ngraph < 3
+    z = ccall("w_value_free_w", graph)
+    return wassat_ais_miss
 
   # In this counter grammar the first row has k-1 negative unit
   # initializers.  k=1 is a safe unsupported narrowing.

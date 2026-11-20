@@ -19,7 +19,7 @@
 # (O(1) break bookkeeping), per-variable weighted scores maintained
 # incrementally, and an unsatisfied-clause list with positions. The plan
 # asked for the assignment as bool[]; bool[] in native typed signatures
-# currently trips the KIND_BOOL inline-encoding linker bug, so it is i64[]
+# currently trips the KIND_BOOL inline-encoding linker bug, so it is i8[]
 # holding 0/1 until that is fixed.
 #
 #   score(v) = w(clauses made satisfied by flipping v)
@@ -29,7 +29,7 @@
 
 use atomic_stop
 
-WASSAT_SLS_WEIGHT_CAP_MULT = 16
+WASSAT_SLS_WEIGHT_CAP_MULT = 200
 
 # Occurrence entries are unsigned 32-bit clause IDs; literal offsets stay i64.
 # Keep the signed 32-bit count limit before normalization or buffer allocation.
@@ -101,7 +101,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       @impossible = true if pm[4] == 1
       @ncl = pm[2]
       total = pm[3]
-      @fla = i64[total + 2]
+      @fla = i32[total + 2]
       @fcs = i64[@ncl + 2]
       @fcl = i64[@ncl + 2]
       k = 0
@@ -138,7 +138,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       @work.each -> (c)
         total += c.size
       @ncl = @work.size
-      @fla = i64[total + 2]
+      @fla = i32[total + 2]
       @fcs = i64[@ncl + 2]
       @fcl = i64[@ncl + 2]
     @och = i64[2 * nv + 4]
@@ -160,25 +160,25 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         ci += 1
     wassat_sls_build_occ(@fla, @fcs, @fcl, @och, @ocv, @ncl, nv)
 
-    @asg = i64[nv + 1]           # 0 false, 1 true (see bool[] note above)
+    @asg = i8[nv + 1]            # 0 false, 1 true (see bool[] note above)
     # One cache access supplies both fields in each occurrence update:
     # high 32 bits = true count, low 31 bits = XOR of true variable IDs.
-    # Weights and weighted scores remain independent i64 values.
+    # Clause weights are i32[]; weighted scores remain i64.
     @clause_state = i64[@ncl + 2]
-    @wght = i64[@ncl + 2]
+    @wght = i32[@ncl + 2]
     @score = i64[nv + 1]
-    @ccf = i64[nv + 1]
+    @ccf = i8[nv + 1]
     @lastf = i64[nv + 1]
-    @ulist = i64[@ncl + 2]
-    @upos = i64[@ncl + 2]
-    @gstk = i64[nv + 2]
-    @gin = i64[nv + 1]
+    @ulist = i32[@ncl + 2]
+    @upos = i32[@ncl + 2]
+    @gstk = i32[nv + 2]
+    @gin = i8[nv + 1]
     # Best assignment seen, and the trail of variables flipped since it was
     # taken (see wassat_sls_run): the flip loop is not monotone, so the
     # assignment it ends on is routinely worse than the best one it passed
     # through, and the best one is what a phase seed wants.
-    @bag = i64[nv + 1]
-    @wtr = i64[nv + 4]
+    @bag = i8[nv + 1]
+    @wtr = i32[nv + 4]
     # st[12] is the resume bit.  The portfolio may pause one eligible walk
     # at a fixed prefix to try an exact frozen-fringe repair, then resume the
     # SAME weighted trajectory if the repair misses.  Keeping this bit in the
@@ -328,16 +328,16 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     tot = @apm[5] + @apm[5] / 4 + 16384
     @wcap_cl = cap
     @wcap_lit = tot
-    @fla = i64[tot + 2]
+    @fla = i32[tot + 2]
     @fcs = i64[cap + 2]
     @fcl = i64[cap + 2]
     @och = i64[2 * nv + 4]
     @ocv = u32[tot + 2]
     @stamp = i64[2 * nv + 4]
     @clause_state = i64[cap + 2]
-    @wght = i64[cap + 2]
-    @ulist = i64[cap + 2]
-    @upos = i64[cap + 2]
+    @wght = i32[cap + 2]
+    @ulist = i32[cap + 2]
+    @upos = i32[cap + 2]
     @impossible = false
     cap
 
@@ -399,7 +399,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 # preprocessor's subsumption uses.
 #   pm in : [0] ncl  [1] nvars
 #   pm out: [2] clauses kept  [3] literals kept  [4] saw-empty-clause
--> wassat_sls_flat_size(fla, fcs, fcl, stamp, pm, stp) (i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_flat_size(fla, fcs, fcl, stamp, pm, stp) (i64[] i64[] i64[] i64[] i64[] i64[]) i64
   ncl = pm[0]
   nv = pm[1]
   keep = 0
@@ -446,7 +446,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 
 # Pass 2: write the deduplicated, tautology-free clauses into the walker's own
 # flat arrays. Identical traversal to pass 1, so the counts cannot disagree.
--> wassat_sls_flat_fill(fla, fcs, fcl, stamp, ofla, ofcs, ofcl, pm, stp) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+-> wassat_sls_flat_fill(fla, fcs, fcl, stamp, ofla, ofcs, ofcl, pm, stp) (i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64[] i64[]) i64
   ncl = pm[0]
   nv = pm[1]
   gen = 0
@@ -507,7 +507,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 # so construction needs no additional scratch allocation. The low 31 bits of
 # each private width hold the normalized clause length. Binary clauses also
 # store the XOR of their two distinct variable IDs in the high 32 bits.
--> wassat_sls_build_occ(fla, fcs, fcl, och, ocv, ncl, nv) (i64[] i64[] i64[] i64[] u32[] i64 i64) i64
+-> wassat_sls_build_occ(fla, fcs, fcl, och, ocv, ncl, nv) (i32[] i64[] i64[] i64[] u32[] i64 i64) i64
   limit = 2 * nv + 4
   i = 0
   while i < limit
@@ -553,22 +553,27 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 # A normalized clause has at most nvars distinct literals. With signed-32-bit
 # variable IDs, both fields stay nonnegative and bit 31 is always zero.
 # XORing a flipped ID cannot carry into the count in the high half.
--> wassat_sls_init_state(fla, fcs, fcl, asg, cstate, wght, ulist, upos, score, gstk, gin, st) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
-  nv = st[0]
-  ncl = st[1]
-  ucount = 0
-  ci = 0
+-> wassat_sls_init_state(fla, fcs, fcl, asg, cstate, wght, ulist, upos, score, gstk, gin, st) (i32[] i64[] i64[] i8[] i64[] i32[] i32[] i32[] i64[] i32[] i8[] i64[]) i64
+  nv = st[0] ## i64
+  ncl = st[1] ## i64
+  ucount = 0 ## i64
+  ci = 0 ## i64
   while ci < ncl
     wght[ci] = 1
-    stx = fcs[ci]
-    n = fcl[ci] & 2147483647
-    sc = 0
+    stx = fcs[ci] ## i64
+    n = fcl[ci] & 2147483647 ## i64
+    sc = 0 ## i64
     cv = 0 ## i64
-    j = 0
+    j = 0 ## i64
     while j < n
-      l = fla[stx + j]
-      uvar = l < 0 ? 0 - l : l ## i64
-      lv = l > 0 ? asg[uvar] : 1 - asg[uvar]
+      l = fla[stx + j] ## i64
+      uvar = l ## i64
+      uvar = 0 - l if l < 0
+      lv = 0 ## i64
+      if l > 0
+        lv = asg[uvar]
+      else
+        lv = 1 - asg[uvar]
       if lv == 1
         sc += 1
         cv = cv ^ uvar
@@ -584,22 +589,23 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 
   ci = 0
   while ci < ncl
-    sc = cstate[ci] >> 32
+    sc = cstate[ci] >> 32 ## i64
     if sc == 0
-      stx = fcs[ci]
-      n = fcl[ci] & 2147483647
-      j = 0
+      stx = fcs[ci] ## i64
+      n = fcl[ci] & 2147483647 ## i64
+      j = 0 ## i64
       while j < n
-        l = fla[stx + j]
-        uvar = l < 0 ? 0 - l : l
+        l = fla[stx + j] ## i64
+        uvar = l ## i64
+        uvar = 0 - l if l < 0
         score[uvar] = score[uvar] + 1
         j += 1
     elsif sc == 1
       score[cstate[ci] & 2147483647] = score[cstate[ci] & 2147483647] - 1
     ci += 1
 
-  gsize = 0
-  v = 1
+  gsize = 0 ## i64
+  v = 1 ## i64
   while v <= nv
     if score[v] > 0
       gstk[gsize] = v
@@ -611,18 +617,18 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   st[7] = ucount
   0
 
--> wassat_sls_run(fla, fcs, fcl, och, ocv, asg, cstate, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i64[] i64[] i64[] i64[] u32[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
-  nv = st[0]
-  ncl = st[1]
-  ucount = st[2]
-  gsize = st[3]
-  step = st[4]
-  maxflips = st[5]
+-> wassat_sls_run(fla, fcs, fcl, och, ocv, asg, cstate, wght, score, ccf, lastf, ulist, upos, gstk, gin, bag, wtr, st, stp, pm2) (i32[] i64[] i64[] i64[] u32[] i8[] i64[] i32[] i64[] i8[] i64[] i32[] i32[] i32[] i8[] i8[] i32[] i64[] i64[] i64[]) i64
+  nv = st[0] ## i64
+  ncl = st[1] ## i64
+  ucount = st[2] ## i64
+  gsize = st[3] ## i64
+  step = st[4] ## i64
+  maxflips = st[5] ## i64
   rng = st[6] ## i64
-  best = st[7]
-  wtotal = st[8]
-  found = 0
-  wcap = ncl * WASSAT_SLS_WEIGHT_CAP_MULT ## i64
+  best = st[7] ## i64
+  wtotal = st[8] ## i64
+  found = 0 ## i64
+  wcap = ncl * 200 ## i64
   # Best-assignment snapshot, kissat walk.c's `update_best`. The search is
   # not monotone -- clause weighting deliberately climbs out of minima --
   # so the assignment the budget happens to end on is routinely worse than
@@ -630,12 +636,14 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   # is O(nv) per improvement; instead flipped variables are trailed and the
   # snapshot is patched with just that delta (kissat's trick), with a full
   # copy as the overflow fallback once the trail passes nv/4.
-  resume = st[12]
-  wtn = resume == 1 ? st[10] : 0
-  wovf = resume == 1 ? st[11] : 0
-  wtcap = nv / 4 + 1
+  resume = st[12] ## i64
+  wtn = 0 ## i64
+  wtn = st[10] if resume == 1
+  wovf = 0 ## i64
+  wovf = st[11] if resume == 1
+  wtcap = nv / 4 + 1 ## i64
   if resume == 0
-    vb = 1
+    vb = 1 ## i64
     while vb <= nv
       bag[vb] = asg[vb]
       vb += 1
@@ -648,16 +656,21 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
   # arm has to decide for itself. pm2[0] is the improvement window in flips,
   # pm2[1] the number of consecutive windows without progress that retires it,
   # and the kernel sets pm2[2] when it did. 0 disables.
-  plat_win = pm2[0]
-  plat_max = pm2[1]
+  plat_win = pm2[0] ## i64
+  plat_max = pm2[1] ## i64
   # Continuation keeps the original retirement windows. Resetting them
   # grants extra flips on every pause and can revive a retired walk.
-  plat_ref = resume == 1 ? pm2[3] : best
-  plat_run = resume == 1 ? pm2[4] : 0
-  plat_next = resume == 1 ? pm2[5] : plat_win
-  plat_stop = resume == 1 ? pm2[2] : 0
+  plat_ref = best ## i64
+  plat_ref = pm2[3] if resume == 1
+  plat_run = 0 ## i64
+  plat_run = pm2[4] if resume == 1
+  plat_next = plat_win ## i64
+  plat_next = pm2[5] if resume == 1
+  plat_stop = 0 ## i64
+  plat_stop = pm2[2] if resume == 1
   pm2[2] = 0 if resume == 0
-  while ucount > 0 && step < maxflips && wassat_stop_load(stp) == 0 && plat_stop == 0
+  stopped = wassat_stop_load(stp) ## i64
+  while ucount > 0 && step < maxflips && stopped == 0 && plat_stop == 0
     if plat_win > 0 && step >= plat_next
       plat_next = step + plat_win
       if best < plat_ref
@@ -669,41 +682,71 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
           plat_stop = 1
           pm2[2] = 1
     # ---- pick: best configuration-changed positive-score variable ---------
-    flip = 0
-    bestscore = 0
-    k = 0
-    keep = 0
-    while k < gsize
-      u = gstk[k]
-      if score[u] > 0 && ccf[u] == 1
-        gstk[keep] = u
-        keep += 1
-        better = 0
-        if score[u] > bestscore
-          better = 1
-        else
-          if score[u] == bestscore && flip != 0 && lastf[u] < lastf[flip]
+    flip = 0 ## i64
+    bestscore = 0 ## i64
+    if gsize > 128
+      samples = 0 ## i64
+      while samples < 50 && gsize > 128
+        rng = rng ^ (rng << 13)
+        rng = rng ^ (rng >> 7)
+        rng = rng ^ (rng << 17)
+        rng = 88172645463325252 if rng == 0
+        idx = ((rng & 2147483647) * gsize) >> 31 ## i64
+        u = gstk[idx] ## i64
+        uscore = score[u] ## i64
+        if uscore > 0 && ccf[u] == 1
+          samples += 1
+          better = 0 ## i64
+          if flip == 0
             better = 1
-        if better == 1
-          bestscore = score[u]
-          flip = u
-      else
-        gin[u] = 0
-      k += 1
-    gsize = keep
+          elsif uscore > bestscore
+            better = 1
+          elsif uscore == bestscore && lastf[u] < lastf[flip]
+            better = 1
+          if better == 1
+            bestscore = uscore
+            flip = u
+        else
+          gin[u] = 0
+          gsize -= 1
+          gstk[idx] = gstk[gsize]
+    if gsize <= 128
+      flip = 0
+      bestscore = 0
+      k = 0 ## i64
+      keep = 0 ## i64
+      while k < gsize
+        u = gstk[k] ## i64
+        uscore = score[u] ## i64
+        if uscore > 0 && ccf[u] == 1
+          gstk[keep] = u
+          keep += 1
+          better = 0 ## i64
+          if uscore > bestscore
+            better = 1
+          else
+            if uscore == bestscore && flip != 0 && lastf[u] < lastf[flip]
+              better = 1
+          if better == 1
+            bestscore = uscore
+            flip = u
+        else
+          gin[u] = 0
+        k += 1
+      gsize = keep
 
     if flip == 0
       # ---- stuck: reweight unsatisfied clauses, then diversify ------------
-      k = 0
+      k = 0 ## i64
       while k < ucount
-        ci = ulist[k]
+        ci = ulist[k] ## i64
         wght[ci] = wght[ci] + 1
         wtotal += 1
-        stx = fcs[ci]
-        n = fcl[ci] & 2147483647
-        j = 0
+        stx = fcs[ci] ## i64
+        n = fcl[ci] & 2147483647 ## i64
+        j = 0 ## i64
         while j < n
-          uvar = fla[stx + j]
+          uvar = fla[stx + j] ## i64
           if uvar < 0
             uvar = 0 - uvar
           score[uvar] = score[uvar] + 1
@@ -715,24 +758,24 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         k += 1
       if wtotal > wcap
         # smooth: halve every weight and rebuild scores from the definition
-        i = 0
+        i = 0 ## i64
         wtotal = 0
         while i < ncl
           wght[i] = (wght[i] + 1) / 2
           wtotal += wght[i]
           i += 1
-        v2 = 1
+        v2 = 1 ## i64
         while v2 <= nv
           score[v2] = 0
           v2 += 1
         i = 0
         while i < ncl
           if (cstate[i] >> 32) == 0
-            stx = fcs[i]
-            n = fcl[i] & 2147483647
-            j = 0
+            stx = fcs[i] ## i64
+            n = fcl[i] & 2147483647 ## i64
+            j = 0 ## i64
             while j < n
-              uvar = fla[stx + j]
+              uvar = fla[stx + j] ## i64
               if uvar < 0
                 uvar = 0 - uvar
               score[uvar] = score[uvar] + wght[i]
@@ -755,26 +798,26 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       rng = rng ^ (rng << 13)
       rng = rng ^ (rng >> 7)
       rng = rng ^ (rng << 17)
-      r = rng
+      r = rng ## i64
       if r < 0
         r = 0 - r
-      ci = ulist[r % ucount]
-      stx = fcs[ci]
-      n = fcl[ci] & 2147483647
+      ci = ulist[r % ucount] ## i64
+      stx = fcs[ci] ## i64
+      n = fcl[ci] & 2147483647 ## i64
       flip = 0
       bestscore = 0
       if ((r >> 16) & 15) == 0 && step > 200000
-        uvar = fla[stx + ((r >> 20) % n)]
+        uvar = fla[stx + ((r >> 20) % n)] ## i64
         if uvar < 0
           uvar = 0 - uvar
         flip = uvar
       else
-        j = 0
+        j = 0 ## i64
         while j < n
-          uvar = fla[stx + j]
+          uvar = fla[stx + j] ## i64
           if uvar < 0
             uvar = 0 - uvar
-          better = 0
+          better = 0 ## i64
           if flip == 0
             better = 1
           else
@@ -789,8 +832,8 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
           j += 1
 
     # ---- flip -------------------------------------------------------------
-    v = flip
-    nowtrue = 0
+    v = flip ## i64
+    nowtrue = 0 ## i64
     if asg[v] == 0
       asg[v] = 1
       nowtrue = 1
@@ -812,28 +855,28 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       li = v << 1
     else
       li = (v << 1) + 1
-    w = och[li]
-    wend = och[li + 1]
+    w = och[li] ## i64
+    wend = och[li + 1] ## i64
     while w < wend
-      ci = ocv[w]
+      ci = ocv[w] ## i64
       packed = cstate[ci] ## i64
-      old = packed >> 32
+      old = packed >> 32 ## i64
       cstate[ci] = (packed + 4294967296) ^ v
       if old == 0
         # leaves the unsat list; every member loses its make bonus, the
         # flipped variable additionally becomes the breaker
-        p = upos[ci]
-        last = ulist[ucount - 1]
+        p = upos[ci] ## i64
+        last = ulist[ucount - 1] ## i64
         ulist[p] = last
         upos[last] = p
         ucount -= 1
         upos[ci] = 0 - 1
         width_and_pair = fcl[ci] ## i64
-        endpoints = width_and_pair >> 32
+        endpoints = width_and_pair >> 32 ## i64
         if endpoints != 0
           # The flipped variable is also the sole breaker. Only its partner
           # can enter the good-variable stack on this transition.
-          partner = endpoints ^ v
+          partner = endpoints ^ v ## i64
           weight = wght[ci] ## i64
           score[v] = score[v] - 2 * weight
           score[partner] = score[partner] - weight
@@ -843,11 +886,11 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
             gsize += 1
             gin[partner] = 1
         else
-          stx = fcs[ci]
-          n = width_and_pair
-          j = 0
+          stx = fcs[ci] ## i64
+          n = width_and_pair ## i64
+          j = 0 ## i64
           while j < n
-            uvar = fla[stx + j]
+            uvar = fla[stx + j] ## i64
             if uvar < 0
               uvar = 0 - uvar
             score[uvar] = score[uvar] - wght[ci]
@@ -861,7 +904,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
           score[v] = score[v] - wght[ci]
       else
         if old == 1
-          x = packed & 2147483647
+          x = packed & 2147483647 ## i64
           score[x] = score[x] + wght[ci]
           if score[x] > 0 && ccf[x] == 1 && gin[x] == 0
             gstk[gsize] = x
@@ -874,12 +917,12 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
       li = (v << 1) + 1
     else
       li = v << 1
-    w = och[li]
-    wend = och[li + 1]
+    w = och[li] ## i64
+    wend = och[li + 1] ## i64
     while w < wend
-      ci = ocv[w]
+      ci = ocv[w] ## i64
       packed = cstate[ci] ## i64
-      old = packed >> 32
+      old = packed >> 32 ## i64
       cstate[ci] = (packed - 4294967296) ^ v
       if old == 1
         # newly unsatisfied: every member gains a make bonus, the flipped
@@ -888,9 +931,9 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
         upos[ci] = ucount
         ucount += 1
         width_and_pair = fcl[ci] ## i64
-        endpoints = width_and_pair >> 32
+        endpoints = width_and_pair >> 32 ## i64
         if endpoints != 0
-          partner = endpoints ^ v
+          partner = endpoints ^ v ## i64
           weight = wght[ci] ## i64
           score[v] = score[v] + 2 * weight
           score[partner] = score[partner] + weight
@@ -900,11 +943,11 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
             gsize += 1
             gin[partner] = 1
         else
-          stx = fcs[ci]
-          n = width_and_pair
-          j = 0
+          stx = fcs[ci] ## i64
+          n = width_and_pair ## i64
+          j = 0 ## i64
           while j < n
-            uvar = fla[stx + j]
+            uvar = fla[stx + j] ## i64
             if uvar < 0
               uvar = 0 - uvar
             score[uvar] = score[uvar] + wght[ci]
@@ -925,18 +968,20 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
     if ucount < best
       best = ucount
       if wovf == 1
-        vb = 1
+        vb = 1 ## i64
         while vb <= nv
           bag[vb] = asg[vb]
           vb += 1
         wovf = 0
       else
-        kb = 0
+        kb = 0 ## i64
         while kb < wtn
-          xb = wtr[kb]
+          xb = wtr[kb] ## i64
           bag[xb] = asg[xb]
           kb += 1
       wtn = 0
+    if ucount > 0 && (step & 4095) == 0
+      stopped = wassat_stop_load(stp) ## i64
   if ucount == 0
     found = 1
   st[2] = ucount
@@ -996,7 +1041,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 # Worst-case sizing for a walk over a solver's arena: how many irredundant
 # clauses are alive and how many literals they hold. Learned clauses carry a
 # non-zero LBD, originals do not -- the same test `reduce_db` uses.
--> wassat_sls_arena_size(cmeta, alive, clbd, pm) (i64[] i8[] i64[] i64[])
+-> wassat_sls_arena_size(cmeta, alive, clbd, pm) (i32[] i8[] i32[] i64[]) i64
   ncl_in = pm[0]
   tot = 0
   cnt = 0
@@ -1020,7 +1065,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 16
 #
 #   pm[0] clauses in   pm[1] nvars   pm[2] clauses out   pm[3] literals out
 #   pm[6] clause capacity            pm[7] literal capacity
--> wassat_sls_from_arena(ar, cmeta, alive, clbd, asg, fla, fcs, fcl, och, ocv, stamp, pm) (i32[] i64[] i8[] i64[] i8[] i64[] i64[] i64[] i64[] u32[] i64[] i64[])
+-> wassat_sls_from_arena(ar, cmeta, alive, clbd, asg, fla, fcs, fcl, och, ocv, stamp, pm) (i32[] i32[] i8[] i32[] i8[] i32[] i64[] i64[] i64[] u32[] i64[] i64[]) i64
   ncl_in = pm[0]
   nv = pm[1]
   capcl = pm[6]

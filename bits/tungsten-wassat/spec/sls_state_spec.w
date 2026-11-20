@@ -7,10 +7,10 @@ describe "Packed SLS clause state" ->
 
   it "retains true counts above 255 and critical XORs above 127" ->
     nv = 512
-    literals = i64[nv + 1]
+    literals = i32[nv + 1]
     offsets = i64[2]
     lengths = i64[2]
-    assignment = i64[nv + 1]
+    assignment = i8[nv + 1]
     i = 0
     while i < nv
       literals[i] = i + 1
@@ -21,12 +21,12 @@ describe "Packed SLS clause state" ->
     offsets[1] = nv
     lengths[1] = 1
     clause_state = i64[2]
-    weights = i64[2]
-    unsatisfied = i64[2]
-    positions = i64[2]
+    weights = i32[2]
+    unsatisfied = i32[2]
+    positions = i32[2]
     scores = i64[nv + 1]
-    good = i64[nv + 1]
-    in_good = i64[nv + 1]
+    good = i32[nv + 1]
+    in_good = i8[nv + 1]
     state = i64[13]
     state[0] = nv
     state[1] = 2

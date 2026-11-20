@@ -109,30 +109,48 @@ WASSAT_CIRCUIT_WORK_CAP = 200000000
     trial += 1
   0
 
+-> wassat_circuit_free(ga, gb, tt, seen_tt, uval, value)
+  z = ccall("w_value_free_w", ga)
+  z = ccall("w_value_free_w", gb)
+  z = ccall("w_value_free_w", tt)
+  z = ccall("w_value_free_w", seen_tt)
+  z = ccall("w_value_free_w", uval)
+  z = ccall("w_value_free_w", value)
+  0
+
 -> wassat_circuit_model(formula)
   return [] unless formula.has_key?("flat_ncl")
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
   return [] if nv < 3 || ncl < 5
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  ternaries = 0
+  if cfg != nil
+    return [] unless cfg.empty_clause_count == 0 && cfg.binary == 0 && cfg.large == 0 && cfg.max_clause == 3
+    ternaries = cfg.ternary
+    return [] if ternaries <= 0 || (ternaries & 3) != 0 || ternaries > 4 * WASSAT_CIRCUIT_GATE_CAP
+    p_cfg = nv - (ternaries >> 2)
+    return [] if p_cfg < 1 || p_cfg > WASSAT_CIRCUIT_MAX_INPUTS
+
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
 
   # Header shape: groups of four ternaries, then only units.
-  ternaries = 0
-  units = 0
-  ci = 0
-  while ci < ncl
-    n = fcl[ci]
-    if n == 3
-      return [] if units > 0
-      ternaries += 1
-    elsif n == 1
-      units += 1
-    else
-      return []
-    ci += 1
-  return [] if ternaries == 0 || ternaries % 4 != 0
+  if cfg == nil
+    units = 0
+    ci = 0
+    while ci < ncl
+      n = fcl[ci]
+      if n == 3
+        return [] if units > 0
+        ternaries += 1
+      elsif n == 1
+        units += 1
+      else
+        return []
+      ci += 1
+    return [] if ternaries == 0 || ternaries % 4 != 0
   gates = ternaries / 4
   return [] if gates > WASSAT_CIRCUIT_GATE_CAP
   p = nv - gates
@@ -148,20 +166,28 @@ WASSAT_CIRCUIT_WORK_CAP = 200000000
   gi = 0
   while gi < gates
     o = wassat_circuit_gate(fla, fcs, fcl, gi * 4, ga, gb, tt, seen_tt)
-    return [] if o <= p
+    if o <= p
+      wassat_circuit_free(ga, gb, tt, seen_tt, uval, value)
+      return []
     gi += 1
   v = p + 1
   while v <= nv
-    return [] if seen_tt[v] == 0
+    if seen_tt[v] == 0
+      wassat_circuit_free(ga, gb, tt, seen_tt, uval, value)
+      return []
     v += 1
 
   ci = ternaries
   while ci < ncl
     l = fla[fcs[ci]]
     v = wassat_multiplier_abs(l)
-    return [] if v < 1 || v > nv
+    if v < 1 || v > nv
+      wassat_circuit_free(ga, gb, tt, seen_tt, uval, value)
+      return []
     want = l > 0 ? 2 : 1
-    return [] if uval[v] != 0 && uval[v] != want
+    if uval[v] != 0 && uval[v] != want
+      wassat_circuit_free(ga, gb, tt, seen_tt, uval, value)
+      return []
     uval[v] = want
     ci += 1
 
@@ -180,15 +206,22 @@ WASSAT_CIRCUIT_WORK_CAP = 200000000
   trials = nfree >= 31 ? 2147483647 : (1 << nfree)
   budget = WASSAT_CIRCUIT_WORK_CAP / (gates > 0 ? gates : 1)
   trials = budget if trials > budget
-  return [] if trials < 1
+  if trials < 1
+    z = ccall("w_value_free_w", free_vars)
+    wassat_circuit_free(ga, gb, tt, seen_tt, uval, value)
+    return []
   ok = wassat_circuit_search(
     ga, gb, tt, uval, value, free_vars, nv, p, nfree, trials
   )
-  return [] unless ok == 1
+  z = ccall("w_value_free_w", free_vars)
+  unless ok == 1
+    wassat_circuit_free(ga, gb, tt, seen_tt, uval, value)
+    return []
   model = []
   v = 1
   while v <= nv
     model.push(value[v] == 1 ? v : 0 - v)
     v += 1
+  wassat_circuit_free(ga, gb, tt, seen_tt, uval, value)
   return [] unless wassat_model_satisfies?(formula, model)
   model

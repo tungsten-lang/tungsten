@@ -534,7 +534,7 @@ describe "Tungsten Wassat" ->
     it "raises bumped variables to the top and keeps inverse positions valid" ->
       asg = i8[6]
       act = i64[6]
-      heap = i64[6]
+      heap = i32[6]
       hpos = i32[6]
       hst = i64[2]
       v = 0
@@ -556,7 +556,7 @@ describe "Tungsten Wassat" ->
     it "lazily drops assigned variables and reinserts them after unassignment" ->
       asg = i8[5]
       act = i64[5]
-      heap = i64[5]
+      heap = i32[5]
       hpos = i32[5]
       hst = i64[2]
       v = 0
@@ -581,7 +581,7 @@ describe "Tungsten Wassat" ->
 
     it "grows the integer increment by one sixteenth and rescales safely" ->
       act = i64[4]
-      heap = i64[4]
+      heap = i32[4]
       hpos = i32[4]
       hst = i64[2]
       v = 0

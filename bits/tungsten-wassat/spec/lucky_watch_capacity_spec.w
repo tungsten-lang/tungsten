@@ -42,7 +42,7 @@ use ../lib/wassat
   true
 
 -> capacity_meta(widths)
-  cm = i64[2 * widths.size]
+  cm = i32[2 * widths.size]
   i = 0
   while i < widths.size
     cm[2 * i + 1] = widths[i]
@@ -85,7 +85,7 @@ describe "Lean lucky watch relocation space" ->
     expect(s.lucky_probe).to eq(-1)
 
   it "does not enlarge binary-only or already spacious pools" ->
-    cm = i64[2048]
+    cm = i32[2048]
     i = 0
     while i < 1024
       cm[2 * i + 1] = 2
@@ -97,7 +97,7 @@ describe "Lean lucky watch relocation space" ->
       i += 1
     expect(wassat_lucky_watch_capacity(cm, 1024, 4096, 18504)).to eq(18504)
     expect(wassat_lucky_watch_capacity(cm, 1024, 3, 4096)).to eq(4096)
-    expect(wassat_lucky_watch_capacity(i64[0], 0, 0, 72)).to eq(72)
+    expect(wassat_lucky_watch_capacity(i32[0], 0, 0, 72)).to eq(72)
 
   it "reserves relocation space for long clauses without charging binaries or units" ->
     widths = []

@@ -3,7 +3,7 @@ use ../lib/solver
 
 -> pool_fixture(ncl, extra, nlits = 28, overflows = 0)
   ar = i32[4 * ncl + 4]
-  cm = i64[2 * ncl]
+  cm = i32[2 * ncl]
   alive = i8[ncl]
   entries = 0
   ci = 0
@@ -34,7 +34,7 @@ use ../lib/solver
 
 -> pool_check(result)
   ar = result["ar"] ## i32[]
-  cm = result["cm"] ## i64[]
+  cm = result["cm"] ## i32[]
   alive = result["alive"] ## i8[]
   wd = result["wd"] ## i32[]
   wp = result["wp"] ## i64[]

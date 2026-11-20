@@ -416,156 +416,281 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
       st[5] = 1 if clock_ms() >= deadline
   q
 
-# Gate extraction and closure. Fills rep (representative literal code per
-# variable) and st. Returns 1 when the closure ran, 0 on a declined shape.
--> wassat_gc_close(fla, fcs, fcl, ncl, nv, rep, st, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64) i64
-  tcon = nv + 1 ## i64
-  nl = (nv + 2) << 1 ## i64
-  tt = tcon << 1 ## i64
-  v = 0
+-> wassat_gc_grow_arr(old_arr, used, new_cap) (i64[] i64 i64) i64[]
+  nxt = i64[new_cap]
+  i = 0 ## i64
+  while i < used
+    nxt[i] = old_arr[i]
+    i += 1
+  z = ccall("w_value_free_w", old_arr)
+  nxt
+
+-> wassat_gc_init_rep(rep, tcon) (i64[] i64) i64
+  v = 0 ## i64
   while v <= tcon
     rep[v] = v << 1
     v += 1
-  queue = i64[nv + 4]
-  # ---- census: binaries per literal, clauses of 3..5 distinct variables.
-  bst = i64[nl + 2]
-  nbin = 0
-  nidx = 0
-  nlit = 0
-  ci = 0
+  0
+
+-> wassat_gc_census(fcl, ncl, counts) (i64[] i64 i64[]) i64
+  n1 = 0 ## i64
+  n2 = 0 ## i64
+  n3 = 0 ## i64
+  n4 = 0 ## i64
+  n5 = 0 ## i64
+  nlit = 0 ## i64
+  ci = 0 ## i64
   while ci < ncl
     n = fcl[ci] ## i64
-    off = fcs[ci] ## i64
     nlit += n
     if n == 2
-      a = fla[off] ## i64
-      b = fla[off + 1] ## i64
-      ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1 ## i64
-      cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1 ## i64
-      if (ca >> 1) != (cb >> 1)
-        bst[ca + 1] += 1
-        bst[cb + 1] += 1
-        nbin += 1
-    elsif n >= 3 && n <= 5
-      nidx += 1
+      n2 += 1
+    elsif n == 3
+      n3 += 1
+    elsif n == 1
+      n1 += 1
+    elsif n == 4
+      n4 += 1
+    elsif n == 5
+      n5 += 1
     ci += 1
-  st[13] = nbin
-  c = 0
-  while c <= nl
-    bst[c + 1] += bst[c]
-    c += 1
-  # Unsorted adjacency, then a second bucket pass in literal order, which
-  # leaves every list sorted without a comparison sort.
-  bun = i64[2 * nbin + 2]
-  fill = i64[nl + 2]
-  ci = 0
-  while ci < ncl
-    if fcl[ci] == 2
-      off = fcs[ci]
-      a = fla[off]
-      b = fla[off + 1]
-      ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
-      cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
-      if (ca >> 1) != (cb >> 1)
-        bun[bst[ca] + fill[ca]] = cb
-        fill[ca] += 1
-        bun[bst[cb] + fill[cb]] = ca
-        fill[cb] += 1
-    ci += 1
-  bad = i64[2 * nbin + 2]
-  c = 0
-  while c < nl
-    fill[c] = 0
-    c += 1
-  c = 0
-  while c < nl
-    p = bst[c] ## i64
-    pe = bst[c + 1] ## i64
-    while p < pe
-      y = bun[p] ## i64
-      bad[bst[y] + fill[y]] = c
-      fill[y] += 1
-      p += 1
-    c += 1
+  counts[0] = nlit
+  counts[1] = n1
+  counts[2] = n2
+  counts[3] = n3
+  counts[4] = n4
+  counts[5] = n5
+  0
+
+-> wassat_gc_cfg_decline?(formula)
+  return false unless formula.has_key?("config")
+  cfg = formula["config"]
+  return false if cfg == nil
+  u = cfg.units
+  b = cfg.binary
+  return false if u > 0 || b >= 2
+  t = cfg.ternary
+  return true if t > WASSAT_GATE_CLOSURE_MAX_INDEXED
+  return true if t < 4 && cfg.large < 8
+  false
+
+-> wassat_gc_free_state(ga, gmeta)
+  i = 0
+  while i < ga.size
+    z = ccall("w_value_free_w", ga[i]) if ga[i] != nil
+    ga[i] = nil
+    i += 1
+  z = ccall("w_value_free_w", ga)
+  z = ccall("w_value_free_w", gmeta) if gmeta != nil
+  0
+
+# Gate extraction and closure. Fills rep and st; when keep_state == 1 and
+# gates > 0, stores [gty, glhs, goff, glen, ar, ht, ohead, onext, ogate, queue]
+# in ga and [ng, au, hmask, qh] in gmeta (otherwise frees all scratch).
+-> wassat_gc_close_state(fla, fcs, fcl, ncl, nv, rep, st, counts, keep_state, ga, gmeta, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64 Array i64[] i64) i64
+  nlit = counts[0] ## i64
+  n1 = counts[1] ## i64
+  n2 = counts[2] ## i64
+  n3 = counts[3] ## i64
+  n4 = counts[4] ## i64
+  n5 = counts[5] ## i64
+  nidx = n3 + n4 + n5 ## i64
+  can_xi = 0 ## i64
+  if nidx > 0 && nidx <= WASSAT_GATE_CLOSURE_MAX_INDEXED && (n3 >= 4 || n4 >= 8 || n5 >= 16)
+    can_xi = 1
+  return 0 if n1 == 0 && n2 < 2 && can_xi == 0
+  tcon = nv + 1 ## i64
+  nl = (nv + 2) << 1 ## i64
+  tt = tcon << 1 ## i64
+  z = wassat_gc_init_rep(rep, tcon)
+  queue = i64[nv + 4]
+  nbin = 0 ## i64
+  run_and = 0 ## i64
+  bst = i64[0]
+  bad = i64[0]
+  has_bin_adj = 0 ## i64
+  if n2 >= 2
+    z = ccall("w_value_free_w", bst)
+    z = ccall("w_value_free_w", bad)
+    bst = i64[nl + 2]
+    ci = 0 ## i64
+    while ci < ncl
+      if fcl[ci] == 2
+        off = fcs[ci] ## i64
+        a = fla[off] ## i64
+        b = fla[off + 1] ## i64
+        ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1 ## i64
+        cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1 ## i64
+        if (ca >> 1) != (cb >> 1)
+          bst[ca + 1] += 1
+          bst[cb + 1] += 1
+          nbin += 1
+      ci += 1
+    st[13] = nbin
+    if nbin >= 2
+      has_bin_adj = 1
+      c = 0 ## i64
+      while c <= nl
+        bst[c + 1] += bst[c]
+        c += 1
+      # Unsorted adjacency, then a second bucket pass in literal order, which
+      # leaves every list sorted without a comparison sort.
+      bun = i64[2 * nbin + 2]
+      fill = i64[nl + 2]
+      ci = 0
+      while ci < ncl
+        if fcl[ci] == 2
+          off = fcs[ci]
+          a = fla[off]
+          b = fla[off + 1]
+          ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
+          cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
+          if (ca >> 1) != (cb >> 1)
+            bun[bst[ca] + fill[ca]] = cb
+            fill[ca] += 1
+            bun[bst[cb] + fill[cb]] = ca
+            fill[cb] += 1
+        ci += 1
+      bad = i64[2 * nbin + 2]
+      c = 0
+      while c < nl
+        fill[c] = 0
+        c += 1
+      c = 0
+      while c < nl
+        p = bst[c] ## i64
+        pe = bst[c + 1] ## i64
+        while p < pe
+          y = bun[p] ## i64
+          bad[bst[y] + fill[y]] = c
+          fill[y] += 1
+          p += 1
+        c += 1
+      z = ccall("w_value_free_w", fill)
+      z = ccall("w_value_free_w", bun)
+      run_and = 1 if nbin * 8 >= ncl
+    else
+      z = ccall("w_value_free_w", bst)
+      bst = i64[0]
+      bad = i64[0]
+  elsif n2 == 1
+    # Count single non-tautological binary for st[13] parity, no eq/AND possible.
+    ci = 0
+    while ci < ncl
+      if fcl[ci] == 2
+        off = fcs[ci]
+        a = fla[off]
+        b = fla[off + 1]
+        va = a > 0 ? a : 0 - a ## i64
+        vb = b > 0 ? b : 0 - b ## i64
+        nbin += 1 if va != vb
+      ci += 1
+    st[13] = nbin
   # ---- units and binary-pair equivalences.
-  ci = 0
-  while ci < ncl
-    n = fcl[ci]
-    off = fcs[ci]
-    if n == 1
-      a = fla[off]
-      ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
-      z = wassat_gc_merge(rep, queue, st, tcon, ca, tt)
-    elsif n == 2
-      a = fla[off]
-      b = fla[off + 1]
-      ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
-      cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
-      if (ca >> 1) != (cb >> 1) && wassat_gc_has_bin(bst, bad, ca ^ 1, cb ^ 1) == 1
-        z = wassat_gc_merge(rep, queue, st, tcon, ca ^ 1, cb)
-    ci += 1
-  # ---- gate arena.
-  maxg = 2 * ncl + 16 ## i64
+  if n1 > 0 || has_bin_adj == 1
+    ci = 0
+    while ci < ncl
+      n = fcl[ci] ## i64
+      if n == 1
+        a = fla[fcs[ci]]
+        ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
+        z = wassat_gc_merge(rep, queue, st, tcon, ca, tt)
+      elsif n == 2 && has_bin_adj == 1
+        off = fcs[ci]
+        a = fla[off]
+        b = fla[off + 1]
+        ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
+        cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
+        if (ca >> 1) != (cb >> 1)
+          lo = ca < cb ? ca : cb ## i64
+          if (lo & 1) == 0 && wassat_gc_has_bin(bst, bad, ca ^ 1, cb ^ 1) == 1
+            z = wassat_gc_merge(rep, queue, st, tcon, ca ^ 1, cb)
+      ci += 1
+  if run_and == 0 && can_xi == 0
+    z = ccall("w_value_free_w", bst)
+    z = ccall("w_value_free_w", bad)
+    z = ccall("w_value_free_w", queue)
+    return 1
+  # ---- gate arena (starts small, doubles on demand up to original ceiling).
+  maxg_cap = 2 * ncl + 16 ## i64
+  acap_cap = 2 * nlit + 64 ## i64
+  maxg = maxg_cap < 4096 ? maxg_cap : 4096 ## i64
+  acap = acap_cap < 16384 ? acap_cap : 16384 ## i64
   gty = i64[maxg]
   glhs = i64[maxg]
   goff = i64[maxg]
   glen = i64[maxg]
-  acap = 2 * nlit + 64 ## i64
   ar = i64[acap]
-  ng = 0
-  au = 0
-  ticks = 0
-  late = 0
+  ng = 0 ## i64
+  au = 0 ## i64
+  ticks = 0 ## i64
+  late = 0 ## i64
   budget = WASSAT_GATE_CLOSURE_TICKS + WASSAT_GATE_CLOSURE_TICKS_PER_LITERAL * nlit ## i64
   # ---- AND gates.
-  # An AND gate of k inputs owns k binaries, so a formula with few binaries
-  # per clause has few gates per clause: skip the scan.
-  ci = 0
-  ci = ncl if nbin * 8 < ncl
-  while ci < ncl && ticks < budget
-    n = fcl[ci]
-    if n >= 3 && n <= WASSAT_GATE_CLOSURE_MAX_AND + 1
-      off = fcs[ci]
-      j = 0
-      while j < n
-        a = fla[off + j]
-        ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
-        na = ca ^ 1 ## i64
-        if bst[na + 1] - bst[na] >= n - 1 && ng < maxg && au + n < acap
-          ok = 1
-          k = 0
-          while k < n && ok == 1
-            if k != j
-              b = fla[off + k]
-              cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
-              ticks += 1
-              ok = 0 if wassat_gc_has_bin(bst, bad, na, cb ^ 1) == 0
-            k += 1
-          if ok == 1
-            gty[ng] = 1
-            glhs[ng] = ca
-            goff[ng] = au
-            glen[ng] = n - 1
-            k = 0
-            while k < n
-              if k != j
-                b = fla[off + k]
-                cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
-                ar[au] = cb ^ 1
-                au += 1
-              k += 1
-            ng += 1
-            st[8] += 1
-        j += 1
-    ci += 1
-    if (ci & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
-      ticks = budget
-      late = 1
+  if run_and == 1
+    ci = 0
+    while ci < ncl && ticks < budget
+      n = fcl[ci]
+      if n >= 3 && n <= WASSAT_GATE_CLOSURE_MAX_AND + 1
+        off = fcs[ci]
+        j = 0 ## i64
+        while j < n
+          a = fla[off + j]
+          ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
+          na = ca ^ 1 ## i64
+          if bst[na + 1] - bst[na] >= n - 1
+            if ng + 2 >= maxg && maxg < maxg_cap
+              nmaxg = maxg << 1 ## i64
+              nmaxg = maxg_cap if nmaxg > maxg_cap
+              gty = wassat_gc_grow_arr(gty, ng, nmaxg)
+              glhs = wassat_gc_grow_arr(glhs, ng, nmaxg)
+              goff = wassat_gc_grow_arr(goff, ng, nmaxg)
+              glen = wassat_gc_grow_arr(glen, ng, nmaxg)
+              maxg = nmaxg
+            if au + n + 2 >= acap && acap < acap_cap
+              nacap = acap << 1 ## i64
+              while nacap < au + n + 16
+                nacap = nacap << 1
+              nacap = acap_cap if nacap > acap_cap
+              ar = wassat_gc_grow_arr(ar, au, nacap)
+              acap = nacap
+            if ng < maxg && au + n < acap
+              ok = 1 ## i64
+              k = 0 ## i64
+              while k < n && ok == 1
+                if k != j
+                  b = fla[off + k]
+                  cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
+                  ticks += 1
+                  ok = 0 if wassat_gc_has_bin(bst, bad, na, cb ^ 1) == 0
+                k += 1
+              if ok == 1
+                gty[ng] = 1
+                glhs[ng] = ca
+                goff[ng] = au
+                glen[ng] = n - 1
+                k = 0
+                while k < n
+                  if k != j
+                    b = fla[off + k]
+                    cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
+                    ar[au] = cb ^ 1
+                    au += 1
+                  k += 1
+                ng += 1
+                st[8] += 1
+          j += 1
+      ci += 1
+      if (ci & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
+        ticks = budget
+        late = 1
+  z = ccall("w_value_free_w", bst)
+  z = ccall("w_value_free_w", bad)
   # Each gate kind has its own allowance; only the deadline ends them all.
   st[11] = ticks
   ticks = 0 if late == 0
   # ---- clause set for sizes 3..5 (sorted literal codes, zero padded).
-  if nidx > 0 && nidx <= WASSAT_GATE_CLOSURE_MAX_INDEXED && ticks < budget
+  if can_xi == 1 && ticks < budget
     ccap = 1024 ## i64
     while ccap < 2 * nidx + 2
       ccap = ccap << 1
@@ -573,14 +698,14 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
     cht = i64[ccap]
     sk = i64[5 * nidx + 5]
     tst = i64[nl + 2]
-    ni = 0
+    ni = 0 ## i64
     ci = 0
     while ci < ncl
       n = fcl[ci]
       if n >= 3 && n <= 5
         off = fcs[ci]
         base = ni * 5 ## i64
-        j = 0
+        j = 0 ## i64
         while j < 5
           sk[base + j] = 0
           j += 1
@@ -590,7 +715,7 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
           sk[base + j] = a > 0 ? a << 1 : ((0 - a) << 1) | 1
           j += 1
         z = wassat_gc_sort(sk, base, n)
-        distinct = 1
+        distinct = 1 ## i64
         j = 1
         while j < n
           distinct = 0 if (sk[base + j] >> 1) == (sk[base + j - 1] >> 1)
@@ -607,165 +732,210 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
       ci += 1
     st[14] = ni
     # Ternary occurrences per literal.
-    c = 0
-    while c <= nl
-      tst[c + 1] += tst[c]
-      c += 1
-    toc = i64[tst[nl] + 2]
-    c = 0
-    while c < nl
-      fill[c] = 0
-      c += 1
-    i = 0
-    while i < ni
-      base = i * 5
-      if sk[base + 3] == 0
-        j = 0
-        while j < 3
-          x = sk[base + j] ## i64
-          toc[tst[x] + fill[x]] = i
-          fill[x] += 1
-          j += 1
-      i += 1
+    toc = i64[0]
+    if n3 >= 4
+      z = ccall("w_value_free_w", toc)
+      c = 0
+      while c <= nl
+        tst[c + 1] += tst[c]
+        c += 1
+      toc = i64[tst[nl] + 2]
+      tfill = i64[nl + 2]
+      i = 0 ## i64
+      while i < ni
+        base = i * 5
+        if sk[base + 3] == 0
+          j = 0
+          while j < 3
+            x = sk[base + j] ## i64
+            toc[tst[x] + tfill[x]] = i
+            tfill[x] += 1
+            j += 1
+        i += 1
+      z = ccall("w_value_free_w", tfill)
     # ---- XOR gates: the representative clause of a parity class has no
     # negative literal, or exactly one on its smallest variable.
-    xs = i64[8]
-    i = 0
+    i = 0 ## i64
     while i < ni && ticks < budget
       base = i * 5
-      n = 3
+      n = 3 ## i64
       n = 4 if sk[base + 3] != 0
       n = 5 if sk[base + 4] != 0
-      negs = 0
-      j = 0
-      while j < n
-        negs += sk[base + j] & 1
-        j += 1
-      if negs == 0 || (negs == 1 && (sk[base] & 1) == 1)
-        ok = 1
-        mask = 0
-        full = (1 << n) - 1 ## i64
-        while mask <= full && ok == 1
-          # Parity of the sign pattern must equal the class parity.
-          pc = 0
-          j = 0
-          while j < n
-            pc += (mask >> j) & 1
-            j += 1
-          if (pc & 1) == negs
-            j = 0
-            while j < 5
-              xs[j] = 0
-              j += 1
-            j = 0
-            while j < n
-              xs[j] = (sk[base + j] & (0 - 2)) | ((mask >> j) & 1)
-              j += 1
-            ticks += 1
-            ok = 0 if wassat_gc_clause_at(cht, sk, cmask, n, xs[0], xs[1], xs[2], xs[3], xs[4]) <= 0
-          mask += 1
-        if ok == 1 && ng + n < maxg && au + n * n < acap
-          # A clause with `negs` negations forbids the assignment with that
-          # many true variables, so x1 ^ .. ^ xn = 1 - negs.
-          st[9] += 1
-          j = 0
-          while j < n
-            gty[ng] = 2
-            glhs[ng] = (sk[base + j] & (0 - 2)) | (negs == 0 ? 1 : 0)
-            goff[ng] = au
-            glen[ng] = n - 1
-            k = 0
-            while k < n
-              if k != j
-                ar[au] = sk[base + k] & (0 - 2)
-                au += 1
-              k += 1
-            ng += 1
-            j += 1
+      if (n == 3 && n3 >= 4) || (n == 4 && n4 >= 8) || (n == 5 && n5 >= 16)
+        negs = 0 ## i64
+        j = 0
+        while j < n
+          negs += sk[base + j] & 1
+          j += 1
+        if negs == 0 || (negs == 1 && (sk[base] & 1) == 1)
+          v0 = sk[base] & (0 - 2) ## i64
+          v1 = sk[base + 1] & (0 - 2) ## i64
+          v2 = sk[base + 2] & (0 - 2) ## i64
+          v3 = n >= 4 ? (sk[base + 3] & (0 - 2)) : 0 ## i64
+          v4 = n == 5 ? (sk[base + 4] & (0 - 2)) : 0 ## i64
+          ok = 1 ## i64
+          # Clause i itself is mask == 0 (negs == 0) or mask == 1 (negs == 1);
+          # start directly at the first 2-flip partner clause.
+          mask = negs == 0 ? 3 : 2 ## i64
+          full = (1 << n) - 1 ## i64
+          while mask <= full && ok == 1
+            pc = ccall_nobox("__w_bit_ctpop_u64", mask) ## i64
+            if (pc & 1) == negs
+              x0 = v0 | (mask & 1) ## i64
+              x1 = v1 | ((mask >> 1) & 1) ## i64
+              x2 = v2 | ((mask >> 2) & 1) ## i64
+              x3 = n >= 4 ? (v3 | ((mask >> 3) & 1)) : 0 ## i64
+              x4 = n == 5 ? (v4 | ((mask >> 4) & 1)) : 0 ## i64
+              ticks += 1
+              ok = 0 if wassat_gc_clause_at(cht, sk, cmask, n, x0, x1, x2, x3, x4) <= 0
+            mask += 1
+          if ok == 1
+            if ng + n + 2 >= maxg && maxg < maxg_cap
+              nmaxg = maxg << 1
+              while nmaxg < ng + n + 8
+                nmaxg = nmaxg << 1
+              nmaxg = maxg_cap if nmaxg > maxg_cap
+              gty = wassat_gc_grow_arr(gty, ng, nmaxg)
+              glhs = wassat_gc_grow_arr(glhs, ng, nmaxg)
+              goff = wassat_gc_grow_arr(goff, ng, nmaxg)
+              glen = wassat_gc_grow_arr(glen, ng, nmaxg)
+              maxg = nmaxg
+            if au + n * n + 4 >= acap && acap < acap_cap
+              nacap = acap << 1
+              while nacap < au + n * n + 16
+                nacap = nacap << 1
+              nacap = acap_cap if nacap > acap_cap
+              ar = wassat_gc_grow_arr(ar, au, nacap)
+              acap = nacap
+            if ng + n < maxg && au + n * n < acap
+              # A clause with `negs` negations forbids the assignment with that
+              # many true variables, so x1 ^ .. ^ xn = 1 - negs.
+              st[9] += 1
+              j = 0
+              while j < n
+                gty[ng] = 2
+                glhs[ng] = (sk[base + j] & (0 - 2)) | (negs == 0 ? 1 : 0)
+                goff[ng] = au
+                glen[ng] = n - 1
+                k = 0
+                while k < n
+                  if k != j
+                    ar[au] = sk[base + k] & (0 - 2)
+                    au += 1
+                  k += 1
+                ng += 1
+                j += 1
       i += 1
       if (i & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
         ticks = budget
         late = 1
-    # ---- ITE gates: clause (l | -c | -t) with c positive, its partner
+    # ---- ITE gates: clause (l | -c | -t) with l and c positive, its partner
     # (-l | -c | t), and for some e the pair (l | c | -e), (-l | c | e).
-    ord = i64[18]
-    ord[0] = 0
-    ord[1] = 1
-    ord[2] = 2
-    ord[3] = 0
-    ord[4] = 2
-    ord[5] = 1
-    ord[6] = 1
-    ord[7] = 0
-    ord[8] = 2
-    ord[9] = 1
-    ord[10] = 2
-    ord[11] = 0
-    ord[12] = 2
-    ord[13] = 0
-    ord[14] = 1
-    ord[15] = 2
-    ord[16] = 1
-    ord[17] = 0
     st[11] += ticks
     ticks = 0 if late == 0
-    i = 0
-    while i < ni && ticks < budget
-      base = i * 5
-      if sk[base + 3] == 0
-        r = 0
-        while r < 6
-          l = sk[base + ord[r * 3]] ## i64
-          y = sk[base + ord[r * 3 + 1]] ## i64
-          zc = sk[base + ord[r * 3 + 2]] ## i64
-          if (y & 1) == 1
-            cc = y ^ 1 ## i64
-            t = zc ^ 1 ## i64
-            ticks += 1
-            if wassat_gc_has_tern(cht, sk, cmask, l ^ 1, y, t) == 1
-              # Clauses holding both c and l: scan the shorter list.
-              sx = cc ## i64
-              sy = l ## i64
-              if tst[l + 1] - tst[l] < tst[cc + 1] - tst[cc]
-                sx = l
-                sy = cc
-              p = tst[sx]
-              pe = tst[sx + 1]
-              while p < pe
-                ob = toc[p] * 5 ## i64
-                p += 1
-                ticks += 1
-                third = 0 - 1 ## i64
-                if sk[ob] == sy
-                  third = sk[ob + 1] == sx ? sk[ob + 2] : sk[ob + 1]
-                elsif sk[ob + 1] == sy
-                  third = sk[ob] == sx ? sk[ob + 2] : sk[ob]
-                elsif sk[ob + 2] == sy
-                  third = sk[ob] == sx ? sk[ob + 1] : sk[ob]
-                if third >= 0
-                  e = third ^ 1 ## i64
-                  ev = e >> 1 ## i64
-                  if ev != (cc >> 1) && ev != (t >> 1) && ev != (l >> 1) && ng < maxg && au + 3 < acap
-                    if wassat_gc_has_tern(cht, sk, cmask, cc, e, l ^ 1) == 1
-                      gty[ng] = 3
-                      glhs[ng] = l
-                      goff[ng] = au
-                      glen[ng] = 3
-                      ar[au] = cc
-                      ar[au + 1] = t
-                      ar[au + 2] = e
-                      au += 3
-                      ng += 1
-                      st[10] += 1
-          r += 1
-      i += 1
-      if (i & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
-        ticks = budget
-        late = 1
+    if n3 >= 4 && ticks < budget
+      ord = i64[18]
+      ord[0] = 0
+      ord[1] = 1
+      ord[2] = 2
+      ord[3] = 0
+      ord[4] = 2
+      ord[5] = 1
+      ord[6] = 1
+      ord[7] = 0
+      ord[8] = 2
+      ord[9] = 1
+      ord[10] = 2
+      ord[11] = 0
+      ord[12] = 2
+      ord[13] = 0
+      ord[14] = 1
+      ord[15] = 2
+      ord[16] = 1
+      ord[17] = 0
+      i = 0
+      while i < ni && ticks < budget
+        base = i * 5
+        if sk[base + 3] == 0
+          r = 0 ## i64
+          while r < 6
+            l = sk[base + ord[r * 3]] ## i64
+            y = sk[base + ord[r * 3 + 1]] ## i64
+            zc = sk[base + ord[r * 3 + 2]] ## i64
+            if (l & 1) == 0 && (y & 1) == 1
+              cc = y ^ 1 ## i64
+              t = zc ^ 1 ## i64
+              ticks += 1
+              if wassat_gc_has_tern(cht, sk, cmask, l ^ 1, y, t) == 1
+                # Clauses holding both c and l: scan the shorter list.
+                sx = cc ## i64
+                sy = l ## i64
+                if tst[l + 1] - tst[l] < tst[cc + 1] - tst[cc]
+                  sx = l
+                  sy = cc
+                p = tst[sx]
+                pe = tst[sx + 1]
+                while p < pe
+                  ob = toc[p] * 5 ## i64
+                  p += 1
+                  ticks += 1
+                  third = 0 - 1 ## i64
+                  if sk[ob] == sy
+                    third = sk[ob + 1] == sx ? sk[ob + 2] : sk[ob + 1]
+                  elsif sk[ob + 1] == sy
+                    third = sk[ob] == sx ? sk[ob + 2] : sk[ob]
+                  elsif sk[ob + 2] == sy
+                    third = sk[ob] == sx ? sk[ob + 1] : sk[ob]
+                  if third >= 0
+                    e = third ^ 1 ## i64
+                    ev = e >> 1 ## i64
+                    if ev != (cc >> 1) && ev != (t >> 1) && ev != (l >> 1)
+                      if wassat_gc_has_tern(cht, sk, cmask, cc, e, l ^ 1) == 1
+                        if ng + 2 >= maxg && maxg < maxg_cap
+                          nmaxg = maxg << 1
+                          nmaxg = maxg_cap if nmaxg > maxg_cap
+                          gty = wassat_gc_grow_arr(gty, ng, nmaxg)
+                          glhs = wassat_gc_grow_arr(glhs, ng, nmaxg)
+                          goff = wassat_gc_grow_arr(goff, ng, nmaxg)
+                          glen = wassat_gc_grow_arr(glen, ng, nmaxg)
+                          maxg = nmaxg
+                        if au + 6 >= acap && acap < acap_cap
+                          nacap = acap << 1
+                          nacap = acap_cap if nacap > acap_cap
+                          ar = wassat_gc_grow_arr(ar, au, nacap)
+                          acap = nacap
+                        if ng < maxg && au + 3 < acap
+                          gty[ng] = 3
+                          glhs[ng] = l
+                          goff[ng] = au
+                          glen[ng] = 3
+                          ar[au] = cc
+                          ar[au + 1] = t
+                          ar[au + 2] = e
+                          au += 3
+                          ng += 1
+                          st[10] += 1
+            r += 1
+        i += 1
+        if (i & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
+          ticks = budget
+          late = 1
+      z = ccall("w_value_free_w", ord)
+    z = ccall("w_value_free_w", toc)
+    z = ccall("w_value_free_w", tst)
+    z = ccall("w_value_free_w", sk)
+    z = ccall("w_value_free_w", cht)
   st[11] += ticks
   st[18] = ng
   st[19] = au
-  return 1 if ng == 0 && st[4] == 0
+  if ng == 0
+    z = ccall("w_value_free_w", ar)
+    z = ccall("w_value_free_w", glen)
+    z = ccall("w_value_free_w", goff)
+    z = ccall("w_value_free_w", glhs)
+    z = ccall("w_value_free_w", gty)
+    z = ccall("w_value_free_w", queue)
+    return 1
   # ---- closure.
   hcap = 1024 ## i64
   while hcap < 4 * ng + 4
@@ -776,8 +946,8 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   ohead = i64[nv + 4]
   onext = i64[ocap]
   ogate = i64[ocap]
-  qh = 0
-  g = 0
+  qh = 0 ## i64
+  g = 0 ## i64
   while g < ng && st[5] == 0 && st[1] == 0
     if wassat_gc_install(g, rep, gty, glhs, goff, glen, ar, ht, hmask, queue, st, tcon) == 1
       off = goff[g]
@@ -792,7 +962,46 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
     if (g & 4095) == 0 && deadline > 0
       st[15] += 1
       st[5] = 1 if clock_ms() >= deadline
+  if keep_state == 1 && st[1] == 0
+    ga[0] = gty
+    ga[1] = glhs
+    ga[2] = goff
+    ga[3] = glen
+    ga[4] = ar
+    ga[5] = ht
+    ga[6] = ohead
+    ga[7] = onext
+    ga[8] = ogate
+    ga[9] = queue
+    gmeta[0] = ng
+    gmeta[1] = au
+    gmeta[2] = hmask
+    gmeta[3] = qh
+  else
+    z = ccall("w_value_free_w", ogate)
+    z = ccall("w_value_free_w", onext)
+    z = ccall("w_value_free_w", ohead)
+    z = ccall("w_value_free_w", ht)
+    z = ccall("w_value_free_w", ar)
+    z = ccall("w_value_free_w", glen)
+    z = ccall("w_value_free_w", goff)
+    z = ccall("w_value_free_w", glhs)
+    z = ccall("w_value_free_w", gty)
+    z = ccall("w_value_free_w", queue)
   1
+
+# Gate extraction and closure. Fills rep (representative literal code per
+# variable) and st. Returns 1 when the closure ran, 0 on a declined shape.
+-> wassat_gc_close(fla, fcs, fcl, ncl, nv, rep, st, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64) i64
+  counts = i64[6]
+  z = wassat_gc_census(fcl, ncl, counts)
+  ga = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
+  gmeta = i64[4]
+  ran = wassat_gc_close_state(fla, fcs, fcl, ncl, nv, rep, st, counts, 0, ga, gmeta, deadline)
+  z = ccall("w_value_free_w", gmeta)
+  z = ccall("w_value_free_w", ga)
+  z = ccall("w_value_free_w", counts)
+  ran
 
 # Returns nil when the lane declines or derives nothing, else the formula
 # with the implied units and equivalences appended.
@@ -801,29 +1010,45 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return nil if nv < 8 || nv > WASSAT_GATE_CLOSURE_MAX_VARS || nc < 8 || nc > WASSAT_GATE_CLOSURE_MAX_CLAUSES
+  return nil if wassat_gc_cfg_decline?(formula)
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
-  nlits = formula["flat_nlits"]
+  counts = i64[6]
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  if cfg != nil && cfg.large == 0
+    counts[0] = cfg.nliterals
+    counts[1] = cfg.units
+    counts[2] = cfg.binary
+    counts[3] = cfg.ternary
+  else
+    z = wassat_gc_census(fcl, nc, counts)
+  nidx = counts[3] + counts[4] + counts[5]
+  can_xi = nidx > 0 && nidx <= WASSAT_GATE_CLOSURE_MAX_INDEXED && (counts[3] >= 4 || counts[4] >= 8 || counts[5] >= 16)
+  if counts[1] == 0 && counts[2] < 2 && !can_xi
+    z = ccall("w_value_free_w", counts)
+    return nil
   st = i64[24]
   rep = i64[nv + 4]
-  return nil unless wassat_gc_close(fla, fcs, fcl, nc, nv, rep, st, deadline) == 1
-  return nil if st[0] == 0 && st[1] == 0
-  wassat_gate_closure_append(formula, rep, st)
+  ga = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
+  gmeta = i64[4]
+  ran = wassat_gc_close_state(fla, fcs, fcl, nc, nv, rep, st, counts, 0, ga, gmeta, deadline)
+  z = ccall("w_value_free_w", gmeta)
+  z = ccall("w_value_free_w", ga)
+  z = ccall("w_value_free_w", counts)
+  if ran != 1 || (st[0] == 0 && st[1] == 0)
+    z = ccall("w_value_free_w", rep)
+    z = ccall("w_value_free_w", st)
+    return nil
+  res = wassat_gate_closure_append(formula, rep, st)
+  z = ccall("w_value_free_w", rep)
+  res
 
-# The input with the closure's units and equivalences appended.
--> wassat_gate_closure_append(formula, rep, st)
-  nv = formula["nvars"]
-  nc = formula["flat_ncl"]
-  fla = formula["flat_lits"] ## i64[]
-  fcs = formula["flat_offs"] ## i64[]
-  fcl = formula["flat_lens"] ## i64[]
-  nlits = formula["flat_nlits"]
-  tcon = nv + 1
-  # Count, then fill.
-  units = 0
-  eqs = 0
-  v = 1
+-> wassat_gc_count_rep(rep, nv, meta) (i64[] i64 i64[]) i64
+  tcon = nv + 1 ## i64
+  units = 0 ## i64
+  eqs = 0 ## i64
+  v = 1 ## i64
   while v <= nv
     r = wassat_gc_find(rep, v << 1)
     if r != (v << 1)
@@ -832,17 +1057,13 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
       else
         eqs += 1
     v += 1
-  st[16] = units
-  st[17] = eqs
-  extra_c = units + 2 * eqs
-  extra_l = units + 4 * eqs
-  if st[1] != 0
-    extra_c += 2
-    extra_l += ((st[2] >> 1) == tcon || (st[3] >> 1) == tcon) ? 2 : 4
-  out = i64[nlits + extra_l]
-  off = i64[nc + extra_c]
-  len = i64[nc + extra_c]
-  i = 0
+  meta[0] = units
+  meta[1] = eqs
+  units + eqs
+
+-> wassat_gc_emit_rep(fla, fcs, fcl, nc, nlits, nv, rep, st, emit_clash, out, off, len, meta) (i64[] i64[] i64[] i64 i64 i64 i64[] i64[] i64 i64[] i64[] i64[] i64[]) i64
+  tcon = nv + 1 ## i64
+  i = 0 ## i64
   while i < nlits
     out[i] = fla[i]
     i += 1
@@ -851,9 +1072,9 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
     off[i] = fcs[i]
     len[i] = fcl[i]
     i += 1
-  p = nlits
-  c = nc
-  v = 1
+  p = nlits ## i64
+  c = nc ## i64
+  v = 1 ## i64
   while v <= nv
     r = wassat_gc_find(rep, v << 1)
     if r != (v << 1)
@@ -864,7 +1085,7 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
         p += 1
         c += 1
       else
-        rl = (r & 1) == 0 ? r >> 1 : 0 - (r >> 1)
+        rl = (r & 1) == 0 ? r >> 1 : 0 - (r >> 1) ## i64
         off[c] = p
         len[c] = 2
         out[p] = 0 - v
@@ -876,25 +1097,23 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
         p += 4
         c += 2
     v += 1
-  if st[1] != 0
+  if emit_clash == 1 && st[1] != 0
     # The clash a = b against the classes above. A constant side makes the
     # other side a unit; two constants clash outright.
-    a = st[2]
-    b = st[3]
+    a = st[2] ## i64
+    b = st[3] ## i64
     if (a >> 1) == tcon
-      x = a
+      x = a ## i64
       a = b
       b = x
-    al = (a & 1) == 0 ? a >> 1 : 0 - (a >> 1)
+    al = (a & 1) == 0 ? a >> 1 : 0 - (a >> 1) ## i64
     if (a >> 1) == tcon
-      al = 1
-      bl = 0 - 1
       off[c] = p
       len[c] = 1
-      out[p] = al
+      out[p] = 1
       off[c + 1] = p + 1
       len[c + 1] = 1
-      out[p + 1] = bl
+      out[p + 1] = 0 - 1
       p += 2
     elsif (b >> 1) == tcon
       off[c] = p
@@ -905,7 +1124,7 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
       out[p + 1] = out[p]
       p += 2
     else
-      bl = (b & 1) == 0 ? b >> 1 : 0 - (b >> 1)
+      bl = (b & 1) == 0 ? b >> 1 : 0 - (b >> 1) ## i64
       off[c] = p
       len[c] = 2
       out[p] = 0 - al
@@ -916,93 +1135,211 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
       out[p + 3] = 0 - bl
       p += 4
     c += 2
+  meta[0] = c
+  meta[1] = p
+  c
+
+# The input with the closure's units and equivalences appended.
+-> wassat_gate_closure_append(formula, rep, st)
+  nv = formula["nvars"]
+  nc = formula["flat_ncl"]
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
+  nlits = formula["flat_nlits"]
+  tcon = nv + 1
+  rmeta = i64[2]
+  z = wassat_gc_count_rep(rep, nv, rmeta)
+  units = rmeta[0]
+  eqs = rmeta[1]
+  st[16] = units
+  st[17] = eqs
+  extra_c = units + 2 * eqs
+  extra_l = units + 4 * eqs
+  if st[1] != 0
+    extra_c += 2
+    extra_l += ((st[2] >> 1) == tcon || (st[3] >> 1) == tcon) ? 2 : 4
+  out = i64[nlits + extra_l]
+  off = i64[nc + extra_c]
+  len = i64[nc + extra_c]
+  z = wassat_gc_emit_rep(fla, fcs, fcl, nc, nlits, nv, rep, st, 1, out, off, len, rmeta)
+  c = rmeta[0]
+  p = rmeta[1]
+  z = ccall("w_value_free_w", rmeta)
   lifted = { "nvars": nv, "nclauses": c, "clauses": [], "boxed": false,
     "flat_lits": out, "flat_offs": off, "flat_lens": len,
     "flat_ncl": c, "flat_nlits": p }
   { "formula": lifted, "work": st, "added_from": nc, "rewritten": false }
 
-# Rewrite every clause through the representative map: constants are
-# evaluated, a literal becomes its representative, repeated literals are
-# written once, and a clause holding a true constant or a complementary pair
-# is dropped. A clause that shrinks to one literal makes that literal a
-# constant, and the rewriting starts over (at most PASSES times; a later unit
-# that is not followed up only leaves a clause longer than it could be).
-# Then one unit clause for every constant variable and two binaries for every
-# other merged variable are appended, so a model of the result gives the
-# merged variables their values and is a model of the input as it stands.
-#
-# Soundness: the map holds in every model of the input (closure) or follows
-# by unit propagation from clauses rewritten under it, so each clause
-# written is equivalent to its original under facts the input implies, and
-# the appended clauses state exactly those facts. Input and result have the
-# same models.
-#
-# st: 16 duplicate clauses dropped  17 variables merged or constant
-#     20 clauses written  21 literals written  22 units found  23 passes
-#     1 is set when a clause becomes empty (the input is unsatisfiable).
-# Returns the number of clauses in off/len, or -1 on an empty clause.
--> wassat_gc_rewrite(fla, fcs, fcl, nc, nv, rep, out, off, len, mark, st) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64[] i64[] i64[]) i64
+# Single-pass clause rewrite + linear 2-watched-literal unit propagation +
+# hash deduplication over core clauses (without emitting the rep tail yet).
+# Newly discovered unit root variables are written into new_units[0..uqn-1]
+# and rw_meta: [core_c, core_nlits, total_c, total_nlits, uqn].
+# Returns total_c (core_c + appended_c), or -1 on an empty clause.
+-> wassat_gc_rewrite_core(fla, fcs, fcl, nc, nv, rep, out, off, len, mark, stamp_box, new_units, rw_meta, st, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
   tcon = nv + 1 ## i64
-  stamp = 0 ## i64
-  c = 0
-  p = 0
-  passes = 0
-  again = 1
-  while again == 1
-    again = 0
-    passes += 1
-    c = 0
-    p = 0
-    ci = 0
-    while ci < nc
-      n = fcl[ci] ## i64
-      o = fcs[ci] ## i64
-      start = p
-      stamp += 1
-      sat = 0
-      j = 0
-      while j < n && sat == 0
-        x = fla[o + j] ## i64
-        code = x > 0 ? x << 1 : ((0 - x) << 1) | 1 ## i64
-        r = wassat_gc_find(rep, code)
-        rv = r >> 1 ## i64
-        if rv == tcon
-          sat = 1 if (r & 1) == 0
-        elsif mark[r] != stamp
-          if mark[r ^ 1] == stamp
-            sat = 1
-          else
-            mark[r] = stamp
-            out[p] = (r & 1) == 0 ? rv : 0 - rv
-            p += 1
-        j += 1
-      if sat == 1
+  stamp = stamp_box[0] ## i64
+  c = 0 ## i64
+  p = 0 ## i64
+  uqn = 0 ## i64
+  ci = 0 ## i64
+  while ci < nc
+    n = fcl[ci] ## i64
+    o = fcs[ci] ## i64
+    start = p ## i64
+    stamp += 1
+    sat = 0 ## i64
+    j = 0 ## i64
+    while j < n && sat == 0
+      x = fla[o + j] ## i64
+      code = x > 0 ? x << 1 : ((0 - x) << 1) | 1 ## i64
+      r = wassat_gc_find(rep, code)
+      rv = r >> 1 ## i64
+      if rv == tcon
+        sat = 1 if (r & 1) == 0
+      elsif mark[r] != stamp
+        if mark[r ^ 1] == stamp
+          sat = 1
+        else
+          mark[r] = stamp
+          out[p] = (r & 1) == 0 ? rv : 0 - rv
+          p += 1
+      j += 1
+    if sat == 1
+      p = start
+    else
+      k = p - start ## i64
+      if k == 0
+        stamp_box[0] = stamp
+        st[1] = 1
+        return 0 - 1
+      if k == 1
+        x = out[start] ## i64
+        vx = x > 0 ? x : 0 - x ## i64
+        rep[vx] = x > 0 ? (tcon << 1) : ((tcon << 1) | 1)
+        new_units[uqn] = vx
+        uqn += 1
+        st[22] += 1
         p = start
       else
-        k = p - start
-        if k == 0
-          st[1] = 1
-          return 0 - 1
-        if k == 1
-          # The literal is a root of the map: bind it to the true constant.
-          x = out[start]
-          if x > 0
-            rep[x] = tcon << 1
-          else
-            rep[0 - x] = (tcon << 1) | 1
-          st[22] += 1
-          again = 1 if passes < WASSAT_GATE_CLOSURE_PASSES
-          p = start
+        off[c] = start
+        len[c] = k
+        c += 1
+    ci += 1
+  passes = 1 ## i64
+  if uqn > 0 && c > 0
+    passes = 2
+    uqn_init = uqn ## i64
+    whead = i64[(nv + 2) << 1]
+    wnext = i64[2 * c + 4]
+    ci = 0
+    while ci < c
+      o = off[ci] ## i64
+      n = len[ci] ## i64
+      sat = 0
+      m = 0 ## i64
+      j = 0
+      while j < n && sat == 0
+        lit = out[o + j] ## i64
+        v = lit > 0 ? lit : 0 - lit ## i64
+        rc = rep[v] ## i64
+        if (rc >> 1) == tcon
+          if ((rc & 1) == 0 && lit > 0) || ((rc & 1) == 1 && lit < 0)
+            sat = 1
         else
-          off[c] = start
-          len[c] = k
-          c += 1
+          out[o + m] = lit
+          m += 1
+        j += 1
+      if sat == 1
+        len[ci] = 0
+      elsif m == 0
+        z = ccall("w_value_free_w", wnext)
+        z = ccall("w_value_free_w", whead)
+        stamp_box[0] = stamp
+        st[1] = 1
+        return 0 - 1
+      elsif m == 1
+        lit = out[o] ## i64
+        vx = lit > 0 ? lit : 0 - lit ## i64
+        rep[vx] = lit > 0 ? (tcon << 1) : ((tcon << 1) | 1)
+        new_units[uqn] = vx
+        uqn += 1
+        st[22] += 1
+        len[ci] = 0
+      else
+        len[ci] = m
+        l0 = out[o] ## i64
+        c0 = l0 > 0 ? (l0 << 1) : (((0 - l0) << 1) | 1) ## i64
+        n0 = 2 * ci ## i64
+        wnext[n0] = whead[c0]
+        whead[c0] = n0 + 1
+        l1 = out[o + 1] ## i64
+        c1 = l1 > 0 ? (l1 << 1) : (((0 - l1) << 1) | 1) ## i64
+        n1 = n0 + 1 ## i64
+        wnext[n1] = whead[c1]
+        whead[c1] = n1 + 1
       ci += 1
+    uqh = uqn_init ## i64
+    late_rw = 0 ## i64
+    while uqh < uqn && late_rw == 0
+      uv = new_units[uqh] ## i64
+      uqh += 1
+      urc = rep[uv] ## i64
+      # Watch list of the literal of uv that just became FALSE.
+      fcode = (urc & 1) == 0 ? ((uv << 1) | 1) : (uv << 1) ## i64
+      e = whead[fcode] ## i64
+      whead[fcode] = 0
+      while e != 0
+        idx = e - 1 ## i64
+        nxe = wnext[idx] ## i64
+        ci = idx >> 1
+        slot = idx & 1 ## i64
+        n = len[ci]
+        if n > 0
+          o = off[ci]
+          other = out[o + (slot ^ 1)] ## i64
+          ov = other > 0 ? other : 0 - other ## i64
+          orc = rep[ov] ## i64
+          if (orc >> 1) == tcon && (((orc & 1) == 0 && other > 0) || ((orc & 1) == 1 && other < 0))
+            len[ci] = 0
+          else
+            moved = 0 ## i64
+            j = 2 ## i64
+            while j < n && moved == 0
+              cand = out[o + j] ## i64
+              cv = cand > 0 ? cand : 0 - cand ## i64
+              crc = rep[cv] ## i64
+              if (crc >> 1) != tcon
+                out[o + j] = out[o + slot]
+                out[o + slot] = cand
+                ccode = cand > 0 ? (cv << 1) : ((cv << 1) | 1) ## i64
+                wnext[idx] = whead[ccode]
+                whead[ccode] = idx + 1
+                moved = 1
+              elsif ((crc & 1) == 0 && cand > 0) || ((crc & 1) == 1 && cand < 0)
+                len[ci] = 0
+                moved = 1
+              j += 1
+            if moved == 0
+              if (orc >> 1) == tcon
+                z = ccall("w_value_free_w", wnext)
+                z = ccall("w_value_free_w", whead)
+                stamp_box[0] = stamp
+                st[1] = 1
+                return 0 - 1
+              rep[ov] = other > 0 ? (tcon << 1) : ((tcon << 1) | 1)
+              new_units[uqn] = ov
+              uqn += 1
+              st[22] += 1
+              len[ci] = 0
+        e = nxe
+      if (uqh & 1023) == 0 && deadline > 0 && clock_ms() >= deadline
+        late_rw = 1
+    z = ccall("w_value_free_w", wnext)
+    z = ccall("w_value_free_w", whead)
   st[23] = passes
   # Clauses that became equal are written once: the defining clauses of two
-  # merged gates are the same clauses now. An order-free hash finds the
-  # candidates and the stamps compare them as sets (a rewritten clause has
-  # no repeated literal, so equal length and containment is equality).
+  # merged gates are the same clauses now.
   hcap = 16 ## i64
   while hcap < c * 2
     hcap = hcap << 1
@@ -1010,82 +1347,246 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   heads = i64[hcap]
   nextc = i64[c + 1]
   hval = i64[c + 1]
-  q = 0
-  wp = 0
+  q = 0 ## i64
+  wp = 0 ## i64
   ci = 0
   while ci < c
-    o = off[ci] ## i64
     n = len[ci] ## i64
-    h = 0 ## i64
-    stamp += 1
-    j = 0
-    while j < n
-      x = out[o + j] ## i64
-      code = x > 0 ? x << 1 : ((0 - x) << 1) | 1 ## i64
-      mark[code] = stamp
-      h = (h + ((code * 40503) & 1073741823)) & 1073741823
-      j += 1
-    dup = 0
-    e = heads[h & hmask]
-    while e != 0 && dup == 0
-      k = e - 1
-      if hval[k] == h && len[k] == n
-        same = 1
-        ko = off[k]
+    if n > 0
+      o = off[ci] ## i64
+      sat = 0
+      m = n ## i64
+      if passes == 2
+        m = 0
         j = 0
-        while j < n && same == 1
-          y = out[ko + j] ## i64
-          cy = y > 0 ? y << 1 : ((0 - y) << 1) | 1 ## i64
-          same = 0 if mark[cy] != stamp
+        while j < n && sat == 0
+          lit = out[o + j] ## i64
+          v = lit > 0 ? lit : 0 - lit ## i64
+          rc = rep[v] ## i64
+          if (rc >> 1) == tcon
+            if ((rc & 1) == 0 && lit > 0) || ((rc & 1) == 1 && lit < 0)
+              sat = 1
+          else
+            out[o + m] = lit
+            m += 1
           j += 1
-        dup = 1 if same == 1
-      e = nextc[k]
-    if dup == 0
-      j = 0
-      while j < n
-        out[wp + j] = out[o + j]
-        j += 1
-      off[q] = wp
-      len[q] = n
-      hval[q] = h
-      nextc[q] = heads[h & hmask]
-      heads[h & hmask] = q + 1
-      wp += n
-      q += 1
-    else
-      st[16] += 1
+      if sat == 0
+        if m == 0
+          z = ccall("w_value_free_w", hval)
+          z = ccall("w_value_free_w", nextc)
+          z = ccall("w_value_free_w", heads)
+          stamp_box[0] = stamp
+          st[1] = 1
+          return 0 - 1
+        if m == 1
+          lit = out[o] ## i64
+          vx = lit > 0 ? lit : 0 - lit ## i64
+          if (rep[vx] >> 1) != tcon
+            rep[vx] = lit > 0 ? (tcon << 1) : ((tcon << 1) | 1)
+            new_units[uqn] = vx
+            uqn += 1
+            st[22] += 1
+        else
+          h = 0 ## i64
+          stamp += 1
+          j = 0
+          while j < m
+            x = out[o + j] ## i64
+            code = x > 0 ? x << 1 : ((0 - x) << 1) | 1 ## i64
+            mark[code] = stamp
+            h = (h + (code * 2654435761)) & 4611686018427387903
+            j += 1
+          hb = (h ^ (h >> 16)) & hmask ## i64
+          dup = 0 ## i64
+          e = heads[hb] ## i64
+          while e != 0 && dup == 0
+            k = e - 1 ## i64
+            if hval[k] == h && len[k] == m
+              same = 1 ## i64
+              ko = off[k] ## i64
+              j = 0
+              while j < m && same == 1
+                y = out[ko + j] ## i64
+                cy = y > 0 ? y << 1 : ((0 - y) << 1) | 1 ## i64
+                same = 0 if mark[cy] != stamp
+                j += 1
+              dup = 1 if same == 1
+            e = nextc[k]
+          if dup == 0
+            j = 0
+            while j < m
+              out[wp + j] = out[o + j]
+              j += 1
+            off[q] = wp
+            len[q] = m
+            hval[q] = h
+            nextc[q] = heads[hb]
+            heads[hb] = q + 1
+            wp += m
+            q += 1
+          else
+            st[16] += 1
     ci += 1
-  c = q
-  p = wp
-  merged = 0
-  v = 1
-  while v <= nv
-    r = wassat_gc_find(rep, v << 1)
-    if r != (v << 1)
-      merged += 1
-      if (r >> 1) == tcon
-        off[c] = p
-        len[c] = 1
-        out[p] = (r & 1) == 0 ? v : 0 - v
-        p += 1
-        c += 1
-      else
-        rl = (r & 1) == 0 ? r >> 1 : 0 - (r >> 1)
-        off[c] = p
-        len[c] = 2
-        out[p] = 0 - v
-        out[p + 1] = rl
-        off[c + 1] = p + 2
-        len[c + 1] = 2
-        out[p + 2] = v
-        out[p + 3] = 0 - rl
-        p += 4
-        c += 2
-    v += 1
+  z = ccall("w_value_free_w", hval)
+  z = ccall("w_value_free_w", nextc)
+  z = ccall("w_value_free_w", heads)
+  stamp_box[0] = stamp
+  rmeta = i64[2]
+  merged = wassat_gc_count_rep(rep, nv, rmeta) ## i64
+  units_cnt = rmeta[0] ## i64
+  eqs_cnt = rmeta[1] ## i64
+  z = ccall("w_value_free_w", rmeta)
+  total_c = q + units_cnt + 2 * eqs_cnt ## i64
+  total_p = wp + units_cnt + 4 * eqs_cnt ## i64
   st[17] = merged
-  st[20] = c
-  st[21] = p
-  c
+  st[20] = total_c
+  st[21] = total_p
+  rw_meta[0] = q
+  rw_meta[1] = wp
+  rw_meta[2] = total_c
+  rw_meta[3] = total_p
+  rw_meta[4] = uqn
+  total_c
+
+-> wassat_gc_push_units(queue, st, new_units, uqn) (i64[] i64[] i64[] i64) i64
+  i = 0 ## i64
+  while i < uqn
+    if st[4] < queue.size
+      queue[st[4]] = new_units[i]
+      st[4] += 1
+    i += 1
+  0
+
+# Check binary equivalences among shrunk core clauses and cascade any merges
+# through the persistent gate state.
+-> wassat_gc_close_incremental(fla, fcs, fcl, ncl, nv, rep, st, ga, gmeta, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] Array i64[] i64) i64
+  tcon = nv + 1 ## i64
+  nl = (nv + 2) << 1 ## i64
+  st[0] = 0
+  st[16] = 0
+  st[22] = 0
+  st[23] = 0
+  ng = gmeta[0] ## i64
+  if ng > 0
+    gty = ga[0] ## i64[]
+    glhs = ga[1] ## i64[]
+    goff = ga[2] ## i64[]
+    glen = ga[3] ## i64[]
+    ar = ga[4] ## i64[]
+    ht = ga[5] ## i64[]
+    ohead = ga[6] ## i64[]
+    onext = ga[7] ## i64[]
+    ogate = ga[8] ## i64[]
+    queue = ga[9] ## i64[]
+    hmask = gmeta[2] ## i64
+    # If hash or watch pool ran past 75% across rounds, compact active gates.
+    if st[6] * 3 > hmask || st[7] + 4 * ng > ogate.size
+      i = 0 ## i64
+      while i <= hmask
+        ht[i] = 0
+        i += 1
+      i = 0
+      while i < ohead.size
+        ohead[i] = 0
+        i += 1
+      st[5] = 0
+      st[6] = 0
+      st[7] = 0
+      gmeta[3] = st[4]
+      g = 0 ## i64
+      while g < ng && st[5] == 0 && st[1] == 0
+        if gty[g] != 0
+          if wassat_gc_install(g, rep, gty, glhs, goff, glen, ar, ht, hmask, queue, st, tcon) == 1
+            off = goff[g]
+            n = glen[g]
+            j = 0 ## i64
+            while j < n
+              z = wassat_gc_watch(g, ar[off + j] >> 1, ohead, onext, ogate, st)
+              j += 1
+            z = wassat_gc_watch(g, glhs[g] >> 1, ohead, onext, ogate, st)
+          gmeta[3] = wassat_gc_drain(gmeta[3], rep, gty, glhs, goff, glen, ar, ht, hmask, queue, st, tcon, ohead, onext, ogate, deadline)
+        g += 1
+    else
+      gmeta[3] = wassat_gc_drain(gmeta[3], rep, gty, glhs, goff, glen, ar, ht, hmask, queue, st, tcon, ohead, onext, ogate, deadline)
+    # Check any new binary equivalences in the shrunk core clauses.
+    if st[1] == 0 && st[5] == 0
+      nbin = 0 ## i64
+      ci = 0 ## i64
+      while ci < ncl
+        nbin += 1 if fcl[ci] == 2
+        ci += 1
+      if nbin >= 2
+        bst = i64[nl + 2]
+        nbin = 0
+        ci = 0
+        while ci < ncl
+          if fcl[ci] == 2
+            off = fcs[ci] ## i64
+            a = fla[off] ## i64
+            b = fla[off + 1] ## i64
+            ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1 ## i64
+            cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1 ## i64
+            if (ca >> 1) != (cb >> 1)
+              bst[ca + 1] += 1
+              bst[cb + 1] += 1
+              nbin += 1
+          ci += 1
+        if nbin >= 2
+          c = 0 ## i64
+          while c <= nl
+            bst[c + 1] += bst[c]
+            c += 1
+          bun = i64[2 * nbin + 2]
+          fill = i64[nl + 2]
+          ci = 0
+          while ci < ncl
+            if fcl[ci] == 2
+              off = fcs[ci]
+              a = fla[off]
+              b = fla[off + 1]
+              ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
+              cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
+              if (ca >> 1) != (cb >> 1)
+                bun[bst[ca] + fill[ca]] = cb
+                fill[ca] += 1
+                bun[bst[cb] + fill[cb]] = ca
+                fill[cb] += 1
+            ci += 1
+          bad = i64[2 * nbin + 2]
+          c = 0
+          while c < nl
+            fill[c] = 0
+            c += 1
+          c = 0
+          while c < nl
+            p = bst[c] ## i64
+            pe = bst[c + 1] ## i64
+            while p < pe
+              y = bun[p] ## i64
+              bad[bst[y] + fill[y]] = c
+              fill[y] += 1
+              p += 1
+            c += 1
+          z = ccall("w_value_free_w", fill)
+          z = ccall("w_value_free_w", bun)
+          ci = 0
+          while ci < ncl
+            if fcl[ci] == 2
+              off = fcs[ci]
+              a = fla[off]
+              b = fla[off + 1]
+              ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
+              cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
+              if (ca >> 1) != (cb >> 1)
+                lo = ca < cb ? ca : cb ## i64
+                if (lo & 1) == 0 && wassat_gc_has_bin(bst, bad, ca ^ 1, cb ^ 1) == 1
+                  z = wassat_gc_merge(rep, queue, st, tcon, ca ^ 1, cb)
+            ci += 1
+          z = ccall("w_value_free_w", bad)
+          if gmeta[3] < st[4] && st[1] == 0 && st[5] == 0
+            gmeta[3] = wassat_gc_drain(gmeta[3], rep, gty, glhs, goff, glen, ar, ht, hmask, queue, st, tcon, ohead, onext, ogate, deadline)
+        z = ccall("w_value_free_w", bst)
+  1
 
 # Closure, then rewriting, repeated while the rewriting still uncovers units
 # for the next closure to work with. Returns nil when the first closure
@@ -1102,52 +1603,107 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return nil if nv < 8 || nv > WASSAT_GATE_CLOSURE_MAX_VARS || nc < 8 || nc > WASSAT_GATE_CLOSURE_MAX_CLAUSES
+  return nil if wassat_gc_cfg_decline?(formula)
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
   nlits = formula["flat_nlits"]
-  first = i64[24]
-  # Per round: variables merged or constant, units found while rewriting,
-  # duplicate clauses dropped, clauses out.
-  hist = i64[4 * WASSAT_GATE_CLOSURE_ROUNDS + 4]
-  known = 0
-  rounds = 0
-  refuted = false
+  counts = i64[6]
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  if cfg != nil && cfg.large == 0
+    counts[0] = cfg.nliterals
+    counts[1] = cfg.units
+    counts[2] = cfg.binary
+    counts[3] = cfg.ternary
+  else
+    z = wassat_gc_census(fcl, nc, counts)
+  nidx = counts[3] + counts[4] + counts[5]
+  can_xi = nidx > 0 && nidx <= WASSAT_GATE_CLOSURE_MAX_INDEXED && (counts[3] >= 4 || counts[4] >= 8 || counts[5] >= 16)
+  if counts[1] == 0 && counts[2] < 2 && !can_xi
+    z = ccall("w_value_free_w", counts)
+    return nil
+
+  st = i64[24]
+  rep = i64[nv + 4]
+  ga = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
+  gmeta = i64[4]
+  ran = wassat_gc_close_state(fla, fcs, fcl, nc, nv, rep, st, counts, 1, ga, gmeta, deadline)
+  z = ccall("w_value_free_w", counts)
+
+  if ran != 1 || (st[0] == 0 && st[1] == 0)
+    wassat_gc_free_state(ga, gmeta)
+    z = ccall("w_value_free_w", rep)
+    z = ccall("w_value_free_w", st)
+    return nil
+  if st[1] != 0 || (nv > WASSAT_GATE_CLOSURE_REWRITE_ALWAYS && st[0] * 200 < nv) || (st[18] == 0 && nc > WASSAT_GATE_CLOSURE_PLAIN_CLAUSES)
+    wassat_gc_free_state(ga, gmeta)
+    res_app = wassat_gate_closure_append(formula, rep, st)
+    z = ccall("w_value_free_w", rep)
+    return res_app
+
   mark = i64[(nv + 3) * 2]
-  tcon = nv + 1
-  going = true
+  stamp_box = i64[1]
+  new_units = i64[nv + 4]
+  rw_meta = i64[5]
+  out = i64[nlits + 8]
+  off = i64[nc + 8]
+  len = i64[nc + 8]
+  kept = wassat_gc_rewrite_core(fla, fcs, fcl, nc, nv, rep, out, off, len, mark, stamp_box, new_units, rw_meta, st, deadline)
+  if kept >= 0 && kept * 10 > nc * 9
+    z = ccall("w_value_free_w", len)
+    z = ccall("w_value_free_w", off)
+    z = ccall("w_value_free_w", out)
+    z = ccall("w_value_free_w", rw_meta)
+    z = ccall("w_value_free_w", new_units)
+    z = ccall("w_value_free_w", stamp_box)
+    z = ccall("w_value_free_w", mark)
+    wassat_gc_free_state(ga, gmeta)
+    res_app = wassat_gate_closure_append(formula, rep, st)
+    z = ccall("w_value_free_w", rep)
+    return res_app
+
+  first = i64[24]
+  i = 0
+  while i < 24
+    first[i] = st[i]
+    i += 1
+  hist = i64[4 * WASSAT_GATE_CLOSURE_ROUNDS + 4]
+  hist[0] = st[17]
+  hist[1] = st[22]
+  hist[2] = st[16]
+  hist[3] = kept
+  rounds = 1
+  known = st[17]
+  refuted = false
+  core_fla = out
+  core_fcs = off
+  core_fcl = len
+  core_nc = rw_meta[0]
+  core_nlits = rw_meta[1]
+
+  if kept < 0
+    refuted = true
+  elsif ga[9] != nil && rw_meta[4] > 0
+    q_arr = ga[9] ## i64[]
+    z = wassat_gc_push_units(q_arr, st, new_units, rw_meta[4])
+
+  going = !refuted && rounds < WASSAT_GATE_CLOSURE_ROUNDS && st[5] == 0 && known > 0 && st[22] > 0 && first[18] > 0
   while going
-    st = i64[24]
-    rep = i64[nv + 4]
-    ran = wassat_gc_close(fla, fcs, fcl, nc, nv, rep, st, deadline)
     going = false
-    if rounds == 0 && ran == 1 && st[1] == 0 && st[0] != 0 && nv > WASSAT_GATE_CLOSURE_REWRITE_ALWAYS && st[0] * 200 < nv
-      return wassat_gate_closure_append(formula, rep, st)
-    # Without gates the closure only chains units and equivalences; on a very
-    # large input that is not worth two passes over every clause.
-    if rounds == 0 && ran == 1 && st[1] == 0 && st[0] != 0 && st[18] == 0 && nc > WASSAT_GATE_CLOSURE_PLAIN_CLAUSES
-      return wassat_gate_closure_append(formula, rep, st)
-    if ran == 1 && st[1] == 0 && st[0] != 0
-      out = i64[nlits + 4 * nv + 8]
-      off = i64[nc + 2 * nv + 8]
-      len = i64[nc + 2 * nv + 8]
-      i = 0
-      while i < mark.size
-        mark[i] = 0
-        i += 1
-      kept = wassat_gc_rewrite(fla, fcs, fcl, nc, nv, rep, out, off, len, mark, st)
-      # The rewritten formula replaces the input only when it is at least a
-      # tenth shorter. A formula that is nearly the input in other words
-      # buys the search nothing and moves it onto another trajectory, which
-      # measured as a net loss on satisfiable inputs. The map, with the
-      # units the rewriting found, is appended instead.
-      if rounds == 0 && kept >= 0 && kept * 10 > nc * 9
-        return wassat_gate_closure_append(formula, rep, st)
-      if rounds == 0
-        i = 0
-        while i < 24
-          first[i] = st[i]
-          i += 1
+    z = wassat_gc_close_incremental(core_fla, core_fcs, core_fcl, core_nc, nv, rep, st, ga, gmeta, deadline)
+    if st[1] == 0 && st[0] != 0
+      out2 = i64[core_nlits + 8]
+      off2 = i64[core_nc + 8]
+      len2 = i64[core_nc + 8]
+      kept = wassat_gc_rewrite_core(core_fla, core_fcs, core_fcl, core_nc, nv, rep, out2, off2, len2, mark, stamp_box, new_units, rw_meta, st, deadline)
+      z = ccall("w_value_free_w", core_fcl)
+      z = ccall("w_value_free_w", core_fcs)
+      z = ccall("w_value_free_w", core_fla)
+      core_fla = out2
+      core_fcs = off2
+      core_fcl = len2
+      core_nc = rw_meta[0]
+      core_nlits = rw_meta[1]
       hist[4 * rounds] = st[17]
       hist[4 * rounds + 1] = st[22]
       hist[4 * rounds + 2] = st[16]
@@ -1155,43 +1711,61 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
       rounds += 1
       if kept < 0
         refuted = true
-        out[0] = 1
-        out[1] = 0 - 1
-        off[0] = 0
-        len[0] = 1
-        off[1] = 1
-        len[1] = 1
-        fla = out
-        fcs = off
-        fcl = len
-        nc = 2
-        nlits = 2
       else
-        fla = out
-        fcs = off
-        fcl = len
-        nc = kept
-        nlits = st[21]
-        # The closure leaves the gates at a fixpoint, so only units that
-        # the rewriting found in other clauses give the next one anything to
-        # do (and without gates there is nothing to close). The appended
-        # units and equivalences are read back by the next closure, so a
-        # round that knows no more variables than the last found nothing.
-        going = rounds < WASSAT_GATE_CLOSURE_ROUNDS && st[5] == 0 && st[17] > known && st[22] > 0 && st[18] > 0
+        if ga[9] != nil && rw_meta[4] > 0
+          q_arr = ga[9] ## i64[]
+          z = wassat_gc_push_units(q_arr, st, new_units, rw_meta[4])
+        going = rounds < WASSAT_GATE_CLOSURE_ROUNDS && st[5] == 0 && st[17] > known && st[22] > 0
         known = st[17]
-    elsif rounds == 0
-      return nil if ran != 1 || (st[0] == 0 && st[1] == 0)
-      # A clash inside the closure: the appending lift writes it out.
-      return wassat_gate_closure_append(formula, rep, st)
-  # Count what the final formula says about the variables.
-  units = 0
-  ci = 0
-  while ci < nc
-    units += 1 if fcl[ci] == 1
-    ci += 1
-  reduced = { "nvars": nv, "nclauses": nc, "clauses": [], "boxed": false,
-    "flat_lits": fla, "flat_offs": fcs, "flat_lens": fcl,
-    "flat_ncl": nc, "flat_nlits": nlits }
-  { "rewritten": true, "formula": reduced, "work": first, "rounds": rounds, "units": units, "history": hist,
-    "clauses_in": formula["flat_ncl"], "clauses_out": nc, "refuted": refuted }
+
+  z = ccall("w_value_free_w", rw_meta)
+  z = ccall("w_value_free_w", new_units)
+  z = ccall("w_value_free_w", stamp_box)
+  z = ccall("w_value_free_w", mark)
+  wassat_gc_free_state(ga, gmeta)
+
+  if refuted
+    z = ccall("w_value_free_w", core_fcl)
+    z = ccall("w_value_free_w", core_fcs)
+    z = ccall("w_value_free_w", core_fla)
+    z = ccall("w_value_free_w", rep)
+    z = ccall("w_value_free_w", st)
+    rout = i64[2]
+    roff = i64[2]
+    rlen = i64[2]
+    rout[0] = 1
+    rout[1] = 0 - 1
+    roff[0] = 0
+    rlen[0] = 1
+    roff[1] = 1
+    rlen[1] = 1
+    reduced_ref = { "nvars": nv, "nclauses": 2, "clauses": [], "boxed": false,
+      "flat_lits": rout, "flat_offs": roff, "flat_lens": rlen,
+      "flat_ncl": 2, "flat_nlits": 2 }
+    return { "rewritten": true, "formula": reduced_ref, "work": first, "rounds": rounds, "units": 2, "history": hist,
+      "clauses_in": formula["flat_ncl"], "clauses_out": 2, "refuted": true }
+
+  rmeta = i64[2]
+  z = wassat_gc_count_rep(rep, nv, rmeta)
+  units_out = rmeta[0]
+  eqs_out = rmeta[1]
+  final_c = core_nc + units_out + 2 * eqs_out
+  final_l = core_nlits + units_out + 4 * eqs_out
+  fout = i64[final_l + 1]
+  foff = i64[final_c + 1]
+  flen = i64[final_c + 1]
+  z = wassat_gc_emit_rep(core_fla, core_fcs, core_fcl, core_nc, core_nlits, nv, rep, st, 0, fout, foff, flen, rmeta)
+  out_nc = rmeta[0]
+  out_nl = rmeta[1]
+  z = ccall("w_value_free_w", rmeta)
+  z = ccall("w_value_free_w", core_fcl)
+  z = ccall("w_value_free_w", core_fcs)
+  z = ccall("w_value_free_w", core_fla)
+  z = ccall("w_value_free_w", rep)
+  z = ccall("w_value_free_w", st)
+  reduced = { "nvars": nv, "nclauses": out_nc, "clauses": [], "boxed": false,
+    "flat_lits": fout, "flat_offs": foff, "flat_lens": flen,
+    "flat_ncl": out_nc, "flat_nlits": out_nl }
+  { "rewritten": true, "formula": reduced, "work": first, "rounds": rounds, "units": units_out, "history": hist,
+    "clauses_in": formula["flat_ncl"], "clauses_out": out_nc, "refuted": false }
 

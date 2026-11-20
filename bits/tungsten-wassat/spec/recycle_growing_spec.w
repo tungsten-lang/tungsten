@@ -10,8 +10,8 @@ use ../lib/solver
     oldcm = @cmeta; oldal = @alive; oldlb = @clbd; oldcu = @cused
     oldn = @ncl
     @ccap = count + 2; @ncl = count
-    @cmeta = i64[2 * @ccap]; @alive = i8[@ccap]
-    @clbd = i64[@ccap]; @cused = i64[@ccap]; @gid = sentinel ? i64[1] : i64[@ccap]
+    @cmeta = i32[2 * @ccap]; @alive = i8[@ccap]
+    @clbd = i32[@ccap]; @cused = i32[@ccap]; @gid = sentinel ? i64[1] : i64[@ccap]
     ci = 0
     while ci < oldn
       dst = ci == oldn-1 ? count-1 : ci * (count / oldn)

@@ -4,11 +4,11 @@ use ../lib/solver
 # Two surviving clauses separated by dead input slots. Moving the first
 # survivor overlaps its old body, so retaining literal order matters.
 -> reduction_storage_fixture(remap)
-  cm = i64[8]
+  cm = i32[8]
   alive = i8[4]
   ar = i32[16]
-  lbd = i64[4]
-  used = i64[4]
+  lbd = i32[4]
+  used = i32[4]
   gid = remap ? i64[4] : i64[1]
   rsn = i32[5]
   state = i64[70]
@@ -99,10 +99,10 @@ describe "Wassat reduction storage" ->
     expect([f[7][64], f[7][65], f[7][66], f[7][67], f[7][68], f[7][69]]).to eq([0, 0, 4, 0, 0, 3])
 
   it "protects originals, binary clauses, low glue and recently used tier two" ->
-    cm = i64[16]
+    cm = i32[16]
     alive = i8[8]
-    lbd = i64[8]
-    used = i64[8]
+    lbd = i32[8]
+    used = i32[8]
     hist = i64[70]
     glues = [0, 2, 4, 6, 6, 8, 70, 100]
     i = 0
@@ -123,11 +123,11 @@ describe "Wassat reduction storage" ->
     expect([hist[66], hist[69]]).to eq([116, 7])
 
   it "handles an empty database without consuming sentinel entries" ->
-    cm = i64[1]
+    cm = i32[1]
     alive = i8[1]
     ar = i32[1]
-    lbd = i64[1]
-    used = i64[1]
+    lbd = i32[1]
+    used = i32[1]
     gid = i64[1]
     rsn = i32[1]
     state = i64[70]

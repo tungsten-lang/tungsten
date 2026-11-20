@@ -48,12 +48,18 @@ WASSAT_RELAY_BUDGET = 40000000
 
 # Literal code: 2v for v, 2v + 1 for -v.
 -> wassat_relay_code(x) (i64) i64
-  return (0 - x) * 2 + 1 if x < 0
-  x * 2
+  return ((0 - x) << 1) | 1 if x < 0
+  x << 1
 
 -> wassat_relay_neg(c) (i64) i64
-  return c - 1 if c % 2 == 1
-  c + 1
+  c ^ 1
+
+-> wassat_relay_has_quad(fcl, nc) (i64[] i64) i64
+  ci = 0 ## i64
+  while ci < nc
+    return 1 if fcl[ci] == 4
+    ci += 1
+  0
 
 # Is the binary clause (a | b), as codes, present? bst/badj: binary
 # occurrences per literal code. work[0] counts the entries read.
@@ -83,32 +89,20 @@ WASSAT_RELAY_BUDGET = 40000000
     j += 1
   0 - 1
 
-# st slots: 0 status (1 refuted)   1 accepted choice clauses   2 classes
-#           3 relays   4 nodes   5 candidate choice clauses
-#           6 stop (1 budget, 2 capacity)
-# Returns { "status": 0 or -1, "work": st }.
--> wassat_relay_count_unsat(formula)
-  st = i64[8]
-  miss = { "status": 0, "work": st }
-  return miss unless formula.has_key?("flat_ncl")
-  nv = formula["nvars"]
-  nc = formula["flat_ncl"]
-  return miss if nv < 4 || nv > WASSAT_RELAY_MAX_VARS || nc < 4 || nc > WASSAT_RELAY_MAX_CLAUSES
-  fla = formula["flat_lits"] ## i64[]
-  fcs = formula["flat_offs"] ## i64[]
-  fcl = formula["flat_lens"] ## i64[]
-  top = 2 * nv + 4
+-> wassat_relay_run(fla, fcs, fcl, nv, nc, st) (i64[] i64[] i64[] i64 i64 i64[]) i64
+  return 0 if wassat_relay_has_quad(fcl, nc) == 0
+  top = 2 * nv + 4 ## i64
   # Literals of four-literal clauses, and binary occurrences per literal.
   cnt4 = i64[top]
   bst = i64[top + 2]
-  n4 = 0
-  ci = 0
+  n4 = 0 ## i64
+  ci = 0 ## i64
   while ci < nc
-    n = fcl[ci]
-    off = fcs[ci]
+    n = fcl[ci] ## i64
+    off = fcs[ci] ## i64
     if n == 4
       n4 += 1
-      j = 0
+      j = 0 ## i64
       while j < 4
         cnt4[wassat_relay_code(fla[off + j])] += 1
         j += 1
@@ -116,22 +110,25 @@ WASSAT_RELAY_BUDGET = 40000000
       bst[wassat_relay_code(fla[off]) + 1] += 1
       bst[wassat_relay_code(fla[off + 1]) + 1] += 1
     ci += 1
-  return miss if n4 == 0
+  if n4 == 0
+    z = ccall("w_value_free_w", cnt4)
+    z = ccall("w_value_free_w", bst)
+    return 0
   # dof[h]: 1 + the clause D whose head is the literal h (the negated relay).
   # D has exactly one literal whose negation is in no four-literal clause,
   # and that literal is itself in one: the head.
   dof = i64[top]
-  nd = 0
+  nd = 0 ## i64
   ci = 0
   while ci < nc
     n = fcl[ci]
     if n >= 3 && n <= WASSAT_RELAY_MAX_TOKENS + 1
       off = fcs[ci]
-      bad = 0
-      badc = 0
+      bad = 0 ## i64
+      badc = 0 ## i64
       j = 0
       while j < n && bad < 2
-        c = wassat_relay_code(fla[off + j])
+        c = wassat_relay_code(fla[off + j]) ## i64
         if cnt4[wassat_relay_neg(c)] == 0
           bad += 1 if bad == 0 || c != badc
           badc = c
@@ -140,8 +137,12 @@ WASSAT_RELAY_BUDGET = 40000000
         dof[badc] = ci + 1
         nd += 1
     ci += 1
-  return miss if nd < 2
-  i = 0
+  if nd < 2
+    z = ccall("w_value_free_w", dof)
+    z = ccall("w_value_free_w", cnt4)
+    z = ccall("w_value_free_w", bst)
+    return 0
+  i = 0 ## i64
   while i <= top
     bst[i + 1] += bst[i]
     i += 1
@@ -150,19 +151,19 @@ WASSAT_RELAY_BUDGET = 40000000
   # relay[p]: 1 + the relay code of literal p, from a binary clause (-p | r)
   # whose r has a clause D. With several, the r busiest in the conflicts.
   relay = i64[top]
-  leads = 0
+  leads = 0 ## i64
   ci = 0
   while ci < nc
     if fcl[ci] == 2
       off = fcs[ci]
-      a = wassat_relay_code(fla[off])
-      b = wassat_relay_code(fla[off + 1])
+      a = wassat_relay_code(fla[off]) ## i64
+      b = wassat_relay_code(fla[off + 1]) ## i64
       badj[bst[a] + bfill[a]] = b
       bfill[a] += 1
       badj[bst[b] + bfill[b]] = a
       bfill[b] += 1
-      na = wassat_relay_neg(a)
-      nb = wassat_relay_neg(b)
+      na = wassat_relay_neg(a) ## i64
+      nb = wassat_relay_neg(b) ## i64
       if dof[nb] != 0
         leads += 1 if relay[na] == 0
         relay[na] = b + 1 if relay[na] == 0 || cnt4[nb] > cnt4[wassat_relay_neg(relay[na] - 1)]
@@ -170,58 +171,85 @@ WASSAT_RELAY_BUDGET = 40000000
         leads += 1 if relay[nb] == 0
         relay[nb] = a + 1 if relay[nb] == 0 || cnt4[na] > cnt4[wassat_relay_neg(relay[nb] - 1)]
     ci += 1
+  z = ccall("w_value_free_w", cnt4)
+  z = ccall("w_value_free_w", bfill)
   # Two choice clauses of two literals each need four literals with a relay.
-  return miss if leads < 4
+  if leads < 4
+    z = ccall("w_value_free_w", relay)
+    z = ccall("w_value_free_w", badj)
+    z = ccall("w_value_free_w", dof)
+    z = ccall("w_value_free_w", bst)
+    return 0
   # Choice clauses, accepted greedily. Entries (literal code) hang off the
   # relay they lead to; ridx numbers the relays in use.
   ridx = i64[top]
   ehead = i64[top]
-  ecap = 1024
+  ecap = 1024 ## i64
   elit = i64[ecap]
   enext = i64[ecap]
-  ne = 0
-  nr = 0
-  accepted = 0
+  ne = 0 ## i64
+  nr = 0 ## i64
+  accepted = 0 ## i64
   work = i64[2]
   ci = 0
   while ci < nc
     n = fcl[ci]
     if n >= 2
       off = fcs[ci]
-      whole = 1
+      whole = 1 ## i64
       j = 0
       while j < n && whole == 1
         whole = 0 if relay[wassat_relay_code(fla[off + j])] == 0
         j += 1
       if whole == 1
         st[5] += 1
-        ok = 1
+        ok = 1 ## i64
         j = 0
         while j < n && ok == 1
-          p = wassat_relay_code(fla[off + j])
-          r = relay[p] - 1
-          np = wassat_relay_neg(p)
-          e = ehead[r]
+          p = wassat_relay_code(fla[off + j]) ## i64
+          r = relay[p] - 1 ## i64
+          np = wassat_relay_neg(p) ## i64
+          e = ehead[r] ## i64
           while e != 0 && ok == 1
             ok = 0 if wassat_relay_binary(bst, badj, np, wassat_relay_neg(elit[e]), work) == 0
             e = enext[e]
           j += 1
         if work[0] > WASSAT_RELAY_BUDGET
           st[6] = 1
-          return miss
+          z = ccall("w_value_free_w", work)
+          z = ccall("w_value_free_w", enext)
+          z = ccall("w_value_free_w", elit)
+          z = ccall("w_value_free_w", ehead)
+          z = ccall("w_value_free_w", ridx)
+          z = ccall("w_value_free_w", relay)
+          z = ccall("w_value_free_w", badj)
+          z = ccall("w_value_free_w", dof)
+          z = ccall("w_value_free_w", bst)
+          return 0
         if ok == 1
           if ne + n + 2 > ecap
             ecap = (ne + n + 2) * 2
             if ecap > WASSAT_RELAY_MAX_ENTRIES
               st[6] = 2
-              return miss
+              z = ccall("w_value_free_w", work)
+              z = ccall("w_value_free_w", enext)
+              z = ccall("w_value_free_w", elit)
+              z = ccall("w_value_free_w", ehead)
+              z = ccall("w_value_free_w", ridx)
+              z = ccall("w_value_free_w", relay)
+              z = ccall("w_value_free_w", badj)
+              z = ccall("w_value_free_w", dof)
+              z = ccall("w_value_free_w", bst)
+              return 0
             elit2 = i64[ecap]
             enext2 = i64[ecap]
-            q = 0
+            q = 0 ## i64
             while q <= ne
               elit2[q] = elit[q]
               enext2[q] = enext[q]
               q += 1
+            z = ccall("w_value_free_w", elit)
+            z = ccall("w_value_free_w", enext)
             elit = elit2
             enext = enext2
           j = 0
@@ -238,27 +266,38 @@ WASSAT_RELAY_BUDGET = 40000000
             j += 1
           accepted += 1
     ci += 1
+  z = ccall("w_value_free_w", enext)
+  z = ccall("w_value_free_w", elit)
+  z = ccall("w_value_free_w", ehead)
+  z = ccall("w_value_free_w", relay)
+  z = ccall("w_value_free_w", badj)
+  z = ccall("w_value_free_w", bst)
   st[1] = accepted
   st[3] = nr
-  return miss if accepted < 2 || nr < 2
+  if accepted < 2 || nr < 2
+    z = ccall("w_value_free_w", work)
+    z = ccall("w_value_free_w", ridx)
+    z = ccall("w_value_free_w", dof)
+    return 0
   # Nodes: the tokens of each relay in use.
   rd = i64[nr + 2]
   rhead = i64[nr + 2]
   nbase = i64[nr + 2]
-  nn = 0
-  c = 2
+  nn = 0 ## i64
+  c = 2 ## i64
   while c < top
     if ridx[c] != 0
-      ri = ridx[c]
-      h = wassat_relay_neg(c)
-      d = dof[h] - 1
+      ri = ridx[c] ## i64
+      h = wassat_relay_neg(c) ## i64
+      d = dof[h] - 1 ## i64
       rd[ri] = d
       rhead[ri] = h
     c += 1
-  ri = 1
+  z = ccall("w_value_free_w", dof)
+  ri = 1 ## i64
   while ri <= nr
     nbase[ri] = nn
-    d = rd[ri]
+    d = rd[ri] ## i64
     off = fcs[d]
     n = fcl[d]
     j = 0
@@ -269,12 +308,17 @@ WASSAT_RELAY_BUDGET = 40000000
   st[4] = nn
   if nn > WASSAT_RELAY_MAX_NODES
     st[6] = 2
-    return miss
+    z = ccall("w_value_free_w", nbase)
+    z = ccall("w_value_free_w", rhead)
+    z = ccall("w_value_free_w", rd)
+    z = ccall("w_value_free_w", work)
+    z = ccall("w_value_free_w", ridx)
+    return 0
   nrel = i64[nn + 2]
   ri = 1
   while ri <= nr
-    last = ri < nr ? nbase[ri + 1] : nn
-    q = nbase[ri]
+    last = ri < nr ? nbase[ri + 1] : nn ## i64
+    q = nbase[ri] ## i64
     while q < last
       nrel[q] = ri
       q += 1
@@ -286,15 +330,15 @@ WASSAT_RELAY_BUDGET = 40000000
       off = fcs[ci]
       i = 0
       while i < 4
-        r1 = ridx[wassat_relay_neg(wassat_relay_code(fla[off + i]))]
+        r1 = ridx[wassat_relay_neg(wassat_relay_code(fla[off + i]))] ## i64
         if r1 != 0
-          j = i + 1
+          j = i + 1 ## i64
           while j < 4
-            r2 = ridx[wassat_relay_neg(wassat_relay_code(fla[off + j]))]
+            r2 = ridx[wassat_relay_neg(wassat_relay_code(fla[off + j]))] ## i64
             if r2 != 0 && r2 != r1
               # The two remaining places.
-              o1 = 0 - 1
-              o2 = 0 - 1
+              o1 = 0 - 1 ## i64
+              o2 = 0 - 1 ## i64
               q = 0
               while q < 4
                 if q != i && q != j
@@ -303,11 +347,11 @@ WASSAT_RELAY_BUDGET = 40000000
                   else
                     o2 = q
                 q += 1
-              k1 = wassat_relay_neg(wassat_relay_code(fla[off + o1]))
-              k2 = wassat_relay_neg(wassat_relay_code(fla[off + o2]))
+              k1 = wassat_relay_neg(wassat_relay_code(fla[off + o1])) ## i64
+              k2 = wassat_relay_neg(wassat_relay_code(fla[off + o2])) ## i64
               work[0] += 4 * WASSAT_RELAY_MAX_TOKENS
-              x = wassat_relay_node(fla, fcs, fcl, rd, rhead, nbase, r1, k1)
-              y = wassat_relay_node(fla, fcs, fcl, rd, rhead, nbase, r2, k2)
+              x = wassat_relay_node(fla, fcs, fcl, rd, rhead, nbase, r1, k1) ## i64
+              y = wassat_relay_node(fla, fcs, fcl, rd, rhead, nbase, r2, k2) ## i64
               if x >= 0 && y >= 0
                 adj[x * nn + y] = 1
                 adj[y * nn + x] = 1
@@ -320,49 +364,92 @@ WASSAT_RELAY_BUDGET = 40000000
         i += 1
       if work[0] > WASSAT_RELAY_BUDGET
         st[6] = 1
-        return miss
+        z = ccall("w_value_free_w", adj)
+        z = ccall("w_value_free_w", nrel)
+        z = ccall("w_value_free_w", nbase)
+        z = ccall("w_value_free_w", rhead)
+        z = ccall("w_value_free_w", rd)
+        z = ccall("w_value_free_w", work)
+        z = ccall("w_value_free_w", ridx)
+        return 0
     ci += 1
+  z = ccall("w_value_free_w", nbase)
+  z = ccall("w_value_free_w", rhead)
+  z = ccall("w_value_free_w", rd)
+  z = ccall("w_value_free_w", ridx)
   # Greedy classes: pairwise adjacent, pairwise different relays.
   grp = i64[nn + 2]
   cand = i64[nn + 2]
   rstamp = i64[nr + 2]
-  classes = 0
+  classes = 0 ## i64
   i = 0
   while i < nn && classes < accepted
     if grp[i] == 0
       classes += 1
       grp[i] = classes
       rstamp[nrel[i]] = classes
-      ncand = 0
+      ncand = 0 ## i64
       j = i + 1
       while j < nn
         if grp[j] == 0 && adj[i * nn + j] == 1
           cand[ncand] = j
           ncand += 1
         j += 1
-      t = 0
+      t = 0 ## i64
       while t < ncand
-        u = cand[t]
+        u = cand[t] ## i64
         if u >= 0 && rstamp[nrel[u]] != classes
           grp[u] = classes
           rstamp[nrel[u]] = classes
           q = t + 1
           while q < ncand
-            w = cand[q]
+            w = cand[q] ## i64
             cand[q] = 0 - 1 if w >= 0 && adj[u * nn + w] != 1
             q += 1
           work[0] += ncand - t
         t += 1
       if work[0] > WASSAT_RELAY_BUDGET
         st[6] = 1
-        return miss
+        z = ccall("w_value_free_w", rstamp)
+        z = ccall("w_value_free_w", cand)
+        z = ccall("w_value_free_w", grp)
+        z = ccall("w_value_free_w", adj)
+        z = ccall("w_value_free_w", nrel)
+        z = ccall("w_value_free_w", work)
+        return 0
     i += 1
+  z = ccall("w_value_free_w", rstamp)
+  z = ccall("w_value_free_w", cand)
+  z = ccall("w_value_free_w", grp)
+  z = ccall("w_value_free_w", adj)
+  z = ccall("w_value_free_w", nrel)
+  z = ccall("w_value_free_w", work)
   # Nodes not reached before the loop stopped would only add classes.
   if i < nn
     st[2] = classes
-    return miss
+    return 0
   st[2] = classes
   if accepted > classes
     st[0] = 1
-    return { "status": 0 - 1, "work": st }
+    return 1
+  0
+
+# st slots: 0 status (1 refuted)   1 accepted choice clauses   2 classes
+#           3 relays   4 nodes   5 candidate choice clauses
+#           6 stop (1 budget, 2 capacity)
+# Returns { "status": 0 or -1, "work": st }.
+-> wassat_relay_count_unsat(formula)
+  st = i64[8]
+  miss = { "status": 0, "work": st }
+  return miss unless formula.has_key?("flat_ncl")
+  nv = formula["nvars"]
+  nc = formula["flat_ncl"]
+  return miss if nv < 4 || nv > WASSAT_RELAY_MAX_VARS || nc < 4 || nc > WASSAT_RELAY_MAX_CLAUSES
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  if cfg != nil
+    return miss if cfg.large == 0 || cfg.binary < 2
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
+  return { "status": 0 - 1, "work": st } if wassat_relay_run(fla, fcs, fcl, nv, nc, st) == 1
   miss

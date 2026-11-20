@@ -12,7 +12,7 @@
 # workers without claiming or corrupting a concurrently completed verdict.
 
 -> wassat_stop_load(cell) (i64[]) i64
-  ccall("__w_arr_load_acq", cell, 0)
+  ccall("__w_arr_load_acq", cell, 0) ## i64
 
 -> wassat_stop_requested?(cell)
   cell != nil && wassat_stop_load(cell) != 0
@@ -23,7 +23,7 @@
 
 -> wassat_stop_publish(cell, status) (i64[] i64) i64
   return 0 unless status == 1 || status == 0 - 1
-  won = ccall("__w_arr_compare_exchange", cell, 1, 0, status)
+  won = ccall("__w_arr_compare_exchange", cell, 1, 0, status) ## i64
   if won == 1
     z = ccall("__w_arr_store_rel", cell, 0, 1)
   won

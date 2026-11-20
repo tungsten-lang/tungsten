@@ -82,7 +82,7 @@ use ../lib/solver
 # given length, glue (0 = irredundant) and last-use stamp.
 -> ks_reduce_tables(lens, glues, used)
   n = lens.size
-  cm = i64[2 * n]; alive = i8[n]; lbd = i64[n]; us = i64[n]
+  cm = i32[2 * n]; alive = i8[n]; lbd = i32[n]; us = i32[n]
   i = 0
   while i < n
     cm[2 * i + 1] = lens[i]
@@ -192,7 +192,7 @@ describe "Kissat schedule kernels" ->
     expect(a[4]).to eq(5)
 
   it "puts the asserting literal and the highest remaining level first" ->
-    lb = i64[5]; ob = i64[5]; lvl = i64[8]
+    lb = i64[5]; ob = i64[5]; lvl = i32[8]
     lb[0] = -7; lb[1] = 2; lb[2] = -3; lb[3] = 4
     lvl[7] = 9; lvl[2] = 1; lvl[3] = 6; lvl[4] = 4
     wassat_watch_order(lb, ob, lvl, 4)
@@ -215,11 +215,11 @@ describe "Kissat clause-database reduction" ->
     t = ks_reduce_tables([20, 5, 10, 10, 30, 20, 20, 10, 10, 8],
                          [0, 9, 2, 5, 9, 9, 4, 7, 3, 3],
                          [0, 0, 0, 60, 0, 0, 0, 0, 0, 0])
-    cm = t["cm"] ## i64[]
+    cm = t["cm"] ## i32[]
     alive = t["alive"] ## i8[]
-    lbd = t["lbd"] ## i64[]
-    used = t["used"] ## i64[]
-    hist = i64[1088]; tr = i32[4]; rsn = i32[4]; lvl = i64[4]
+    lbd = t["lbd"] ## i32[]
+    used = t["used"] ## i32[]
+    hist = i64[1088]; tr = i32[4]; rsn = i32[4]; lvl = i32[4]
     left = wassat_kreduce_select(cm, alive, lbd, used, hist, 10, 50, tr, rsn, lvl, 0, 100)
     # candidates 4..7 hold 80 literals (8 and 9 have LBD 3); 70% is 56:
     # the 30, then both 20s
@@ -239,11 +239,11 @@ describe "Kissat clause-database reduction" ->
     t = ks_reduce_tables([20, 5, 10, 10, 30, 20, 20, 10, 10, 8],
                          [0, 9, 2, 5, 9, 9, 4, 7, 3, 3],
                          [0, 0, 0, 60, 0, 0, 0, 0, 0, 0])
-    cm = t["cm"] ## i64[]
+    cm = t["cm"] ## i32[]
     alive = t["alive"] ## i8[]
-    lbd = t["lbd"] ## i64[]
-    used = t["used"] ## i64[]
-    hist = i64[1088]; tr = i32[4]; rsn = i32[4]; lvl = i64[4]
+    lbd = t["lbd"] ## i32[]
+    used = t["used"] ## i32[]
+    hist = i64[1088]; tr = i32[4]; rsn = i32[4]; lvl = i32[4]
     tr[0] = 1; tr[1] = -2
     rsn[1] = -1; lvl[1] = 1
     rsn[2] = 4; lvl[2] = 1

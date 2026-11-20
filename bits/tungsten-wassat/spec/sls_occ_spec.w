@@ -29,7 +29,7 @@ describe "Contiguous SLS occurrences" ->
     expect(sls_occ_count_error(artifact)).to eq(true)
 
   it "preserves reverse-insertion visitation order and resets empty ranges" ->
-    literals = i64[7]; offsets = i64[3]; lengths = i64[3]
+    literals = i32[7]; offsets = i64[3]; lengths = i64[3]
     input = [1, -2, 3, 1, 2, -2, -3]
     i = 0
     while i < 7
@@ -57,7 +57,7 @@ describe "Contiguous SLS occurrences" ->
     expect(sls_occ_at(starts, clauses, 2)).to eq([])
     expect(starts[8]).to eq(0)
   it "builds the same ranges after root filtering, deduplication and tautology removal" ->
-    arena = i32[10]; meta = i64[8]; alive = i8[4]; lbd = i64[4]; assign = i8[4]
+    arena = i32[10]; meta = i32[8]; alive = i8[4]; lbd = i32[4]; assign = i8[4]
     input = [1, 2, -1, 3, 2, -2, 3, 2, 2, 3]
     i = 0
     while i < 10
@@ -70,7 +70,7 @@ describe "Contiguous SLS occurrences" ->
       alive[i] = 1
       i += 1
     assign[1] = 1
-    literals = i64[12]; offsets = i64[6]; lengths = i64[6]
+    literals = i32[12]; offsets = i64[6]; lengths = i64[6]
     starts = i64[10]; clauses = u32[12]; stamp = i64[10]; pm = i64[8]
     pm[0] = 4; pm[1] = 3; pm[6] = 4; pm[7] = 10
     wassat_sls_from_arena(arena, meta, alive, lbd, assign,

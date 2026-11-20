@@ -124,7 +124,12 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     flat = nil if flat != nil && !flat.has_key?("flat_ncl")
     @flat = flat
     nv = @nvars
-    @config = flat == nil ? WassatConfig.new(@nvars, @input_clauses) : WassatConfig.from_lens(@nvars, flat["flat_lens"], flat["flat_ncl"])
+    if flat == nil
+      @config = WassatConfig.new(@nvars, @input_clauses)
+    elsif flat["config"] != nil && flat["config"].nvars == @nvars && flat["config"].nclauses == flat["flat_ncl"]
+      @config = flat["config"]
+    else
+      @config = WassatConfig.from_lens(@nvars, flat["flat_lens"], flat["flat_ncl"])
     @passign = i64[nv + 1]       # root assignment: 0 / 1 / -1
     @preason = i64[nv + 1]       # root reason clause index, -1 = none
     @tpos = i64[nv + 1]          # trail position, for hint ordering
@@ -164,6 +169,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @ftaut = i64[@fccap]         # ci -> 1 when the clause is a tautology
     @fsig = i64[@fccap]          # ci -> 64-bit literal signature
     @fpgid = i64[@fccap]         # ci -> global proof id
+    @sub_dirty = i8[@fccap]      # ci -> 1 needs subsumer/candidate scan, 0 clean
     @fla = i64[@facap]           # literal arena
     @fasize = 0
     @next_gid = 1
@@ -174,12 +180,15 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @oh = i64[2 * nv + 2]        # lit_index -> first node, -1 = empty
     @on = i64[@ocap]             # node -> next node
     @ov = i64[@ocap]             # node -> clause index
-    @ocount = i64[2 * nv + 2]    # lit_index -> stored occurrences (not decayed)
+    @ocount = i64[2 * nv + 2]    # lit_index -> live occurrences
+    @bve_dirty = i8[nv + 2]      # v -> 1 eligible for next BVE scan, 0 clean
+    @last_bve_margin = -1
     @osize = 0
     i = 0
     while i < 2 * nv + 2
       @oh[i] = -1
       i += 1
+    wassat_pre_fill_i8(@bve_dirty, nv + 1, 1)
 
     # proof prefix streams (in-memory; the coordinator owns writing them out)
     @emit_wrat = @proof_mode == WASSAT_PROOF_WRAT
@@ -187,8 +196,17 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @wrat_lines = []
     @drat_lines = []
 
-    # elimination stack: tagged entries, walked backwards at reconstruction
+    # elimination stack: tagged entries, walked backwards at reconstruction.
+    # Substitutions and BVE steps buffer into flat typed arrays (@rstack_hdr /
+    # @rstack_lits) and flush as immutable "flat_batch" chunks onto @stack.
     @stack = []
+    @rstack_hdr = nil
+    @rstack_lits = nil
+    @rstack_hcap = 0
+    @rstack_lcap = 0
+    @rstack_hend = 0
+    @rstack_lsize = 0
+    @rstack_flushed = 0
 
     @status = 0                  # 0 unknown, -1 refuted during preprocessing
     @ticks = 0
@@ -235,6 +253,18 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @scc_graph_cursor = nil
     @scc_graph_targets = nil
     @scc_graph_clauses = nil
+    @scc_index = nil
+    @scc_low = nil
+    @scc_oncur = nil
+    @scc_cur = nil
+    @scc_frame_node = nil
+    @scc_frame_child = nil
+    @scc_st = i64[4]
+    @scc_last_ncomp = 0
+    @sort_cnt = nil
+    @sort_vars = nil
+    @str_buf = i64[64]
+    @str_cap = 64
     @clauses_subsumed = 0
     @clauses_strengthened = 0
     @vars_eliminated = 0
@@ -290,6 +320,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @helper_mark = {}
     @probing = false
     @lazy_lits = false
+    @flat_consumer = false
+    @flat_proof_output = false
     @force_full = false
     @raw_kernel = false
 
@@ -309,6 +341,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     pm[0] = ncl
     wassat_pre_intake(lits, offs, lens, @fla, @fcs, @fcl, @falive, @ftaut,
                       @fsig, @fpgid, @oh, @on, @ov, @ocount, pm)
+    wassat_pre_fill_i8(@sub_dirty, ncl, 1)
     @ncl = ncl
     @fasize = pm[1]
     @osize = pm[2]
@@ -341,6 +374,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     0
 
   -> run_light_flat(parse, rewrite_counter = false)
+    @flat_consumer = true
     tp = wassat_prof_clock
     # Reuse this arm's original capacity, but shrink its logical variable
     # range: branching on discarded auxiliary coordinates changes the search.
@@ -354,6 +388,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
         @ncl_in = parse["flat_ncl"]
         @counter_base = counter["meta"][1]
         @config = WassatConfig.from_lens(@nvars, parse["flat_lens"], @ncl_in)
+        self.flush_rstack
         @stack.push({ "kind": "counter_rewrite", "gates": counter["gates"], "meta": counter["meta"] })
         wassat_counter_profile(counter["meta"])
     return nil if self.cancelled
@@ -419,6 +454,61 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   -> enable_dual_emission
     @emit_wrat = true
     @emit_drat = true
+    0
+
+  # Downstream DRAT solver ingests flat mirrors directly without boxed clauses.
+  -> enable_flat_proof_output
+    @flat_proof_output = true
+    0
+
+  -> ensure_rstack(need_entries, need_lits)
+    if @rstack_lsize + need_lits > 1073741824
+      self.flush_rstack
+      @rstack_hdr = nil
+      @rstack_lits = nil
+      @rstack_hcap = 0
+      @rstack_lcap = 0
+      @rstack_hend = 0
+      @rstack_lsize = 0
+      @rstack_flushed = 0
+    need_hwords = 4 * (@rstack_hend + need_entries)
+    if @rstack_hdr == nil || need_hwords > @rstack_hcap
+      ncap = @rstack_hcap == 0 ? 1024 : @rstack_hcap * 2
+      ncap = need_hwords + 1024 if ncap < need_hwords
+      nh = i32[ncap]
+      if @rstack_hdr != nil
+        old_h = @rstack_hdr ## i32[]
+        wassat_pre_copy_i32(old_h, nh, 4 * @rstack_hend)
+      @rstack_hdr = nh
+      @rstack_hcap = ncap
+    need_lwords = @rstack_lsize + need_lits
+    if @rstack_lits == nil || need_lwords > @rstack_lcap
+      lcap = @rstack_lcap == 0 ? 2048 : @rstack_lcap * 2
+      lcap = need_lwords + 2048 if lcap < need_lwords
+      nl = i32[lcap]
+      if @rstack_lits != nil
+        old_l = @rstack_lits ## i32[]
+        wassat_pre_copy_i32(old_l, nl, @rstack_lsize)
+      @rstack_lits = nl
+      @rstack_lcap = lcap
+    0
+
+  -> push_rstack_subst(yv, r_for_y)
+    self.ensure_rstack(1, 0)
+    hdr = @rstack_hdr ## i32[]
+    base = 4 * @rstack_hend
+    hdr[base] = 3
+    hdr[base + 1] = yv
+    hdr[base + 2] = r_for_y
+    hdr[base + 3] = 0
+    @rstack_hend += 1
+    0
+
+  -> flush_rstack
+    if @rstack_hend > @rstack_flushed
+      @stack.push({ "kind": "flat_batch", "hdr": @rstack_hdr, "lits": @rstack_lits,
+                    "hstart": @rstack_flushed, "hend": @rstack_hend })
+      @rstack_flushed = @rstack_hend
     0
 
   -> force_full_pipeline
@@ -520,6 +610,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       tt = i64[ncap]
       sg = i64[ncap]
       gd = i64[ncap]
+      sd = i8[ncap]
       i = 0
       while i < @ncl
         cs[i] = @fcs[i]
@@ -528,6 +619,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
         tt[i] = @ftaut[i]
         sg[i] = @fsig[i]
         gd[i] = @fpgid[i]
+        sd[i] = @sub_dirty[i]
         i += 1
       @fcs = cs
       @fcl = cl
@@ -535,6 +627,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       @ftaut = tt
       @fsig = sg
       @fpgid = gd
+      @sub_dirty = sd
       @fccap = ncap
     0
 
@@ -544,6 +637,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     before_occurrences = @osize
     wassat_pre_compact_live(@fla, @fcs, @fcl, @falive, @ftaut,
                             @oh, @on, @ov, @ncl, @nvars, @compact_pm)
+    wassat_pre_recompute_ocount(@fla, @fcs, @fcl, @falive, @ocount, @ncl, @nvars)
     @fasize = @compact_pm[0]
     @osize = @compact_pm[1]
     @compact_after_eliminated = @vars_eliminated
@@ -602,6 +696,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @fcs[ci] = @fasize
     @fcl[ci] = arr.size
     @falive[ci] = 1
+    @sub_dirty[ci] = 1
     @fpgid[ci] = @next_gid
     @next_gid += 1
     @fsig[ci] = self.signature_of(arr)
@@ -643,6 +738,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @fcs[ci] = @fasize
     @fcl[ci] = n
     @falive[ci] = 1
+    @sub_dirty[ci] = 1
     @fpgid[ci] = @next_gid
     @next_gid += 1
     @ftaut[ci] = 0
@@ -669,8 +765,10 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   -> delete_clause(ci)
     if @falive[ci] == 1
       @falive[ci] = 0
+      wassat_pre_retire_clause(@fla, @fcs[ci], @fcl[ci], @ocount, @bve_dirty)
       if @emit_wrat || @emit_drat
-        self.plog_delete([@fpgid[ci]], [self.lits_of(ci)])
+        lls = @emit_drat ? [self.lits_of(ci)] : []
+        self.plog_delete([@fpgid[ci]], lls)
     0
 
   # Delete a batch with one WRAT line (and per-clause DRAT lines).
@@ -681,12 +779,33 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       cis.each -> (ci)
         if @falive[ci] == 1
           @falive[ci] = 0
+          wassat_pre_retire_clause(@fla, @fcs[ci], @fcl[ci], @ocount, @bve_dirty)
           ids.push(@fpgid[ci])
-          lls.push(self.lits_of(ci))
+          lls.push(self.lits_of(ci)) if @emit_drat
       self.plog_delete(ids, lls) unless ids.empty?
     else
       cis.each -> (ci)
-        @falive[ci] = 0
+        if @falive[ci] == 1
+          @falive[ci] = 0
+          wassat_pre_retire_clause(@fla, @fcs[ci], @fcl[ci], @ocount, @bve_dirty)
+    0
+
+  -> delete_batch_buf(buf, n)
+    if @emit_wrat || @emit_drat
+      ids = []
+      lls = []
+      i = 0
+      while i < n
+        ci = buf[i]
+        if @falive[ci] == 1
+          @falive[ci] = 0
+          wassat_pre_retire_clause(@fla, @fcs[ci], @fcl[ci], @ocount, @bve_dirty)
+          ids.push(@fpgid[ci])
+          lls.push(self.lits_of(ci)) if @emit_drat
+        i += 1
+      self.plog_delete(ids, lls) unless ids.empty?
+    else
+      wassat_pre_delete_list(@fla, @fcs, @fcl, @falive, @ocount, @bve_dirty, buf, n)
     0
 
   # ---- root propagation with reasons ---------------------------------------
@@ -825,24 +944,27 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 
   # ---- technique 1: failed-literal probing ----------------------------------
 
+  -> ensure_sort_scratch
+    if @sort_cnt == nil
+      @sort_cnt = i64[16385]
+    if @sort_vars == nil || @sort_vars.size < @nvars + 2
+      @sort_vars = i32[@nvars + 2]
+    0
+
   # Probe candidate order: unassigned variables by descending occurrence
   # count (probing never removes a variable, so freezing is irrelevant).
-  # Packed sort keys must stay under 2^46: the boxed integer fast path is
-  # 48-bit signed, and a wrapped key decodes to a wild variable index.
+  # Uses a 16384-bucket typed counting sort so @nvars >= 16777216 never
+  # overflows a packed key and no full-formula boxed sort runs.
   -> probe_candidates
-    scored = []
-    v = 1
-    while v <= @nvars
-      if @passign[v] == 0
-        c = @ocount[2 * v] + @ocount[2 * v + 1]
-        c = 4194302 if c > 4194302
-        scored.push((4194303 - c) * 16777216 + v)
-      v += 1
-    scored = scored.sort
+    self.ensure_sort_scratch
+    cnt = @sort_cnt ## i64[]
+    vars = @sort_vars ## i32[]
+    total = wassat_pre_sort_probe_vars(@passign, @ocount, cnt, vars, @nvars)
+    limit = total < @probe_cap ? total : @probe_cap
     out = []
     i = 0
-    while i < scored.size && i < @probe_cap
-      out.push(scored[i] % 16777216)
+    while i < limit
+      out.push(vars[i])
       i += 1
     out
 
@@ -857,7 +979,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     self.assign(lit, 0 - 1)
     confl = self.propagate_root
     if confl >= 0
-      chain = self.conflict_chain(confl, lit.abs)
+      chain = @emit_wrat ? self.conflict_chain(confl, lit.abs) : []
       # undo the probe segment before touching root state
       self.undo_to(mark, qsave)
       @probing = false
@@ -971,73 +1093,28 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     offsets = adj[0] ## i64[]
     targets = adj[1] ## i64[]
     n = 2 * @nvars + 2
-    index = i64[n]
-    low = i64[n]
-    oncur = i64[n]
+    if @scc_index == nil || @scc_index.size < n
+      @scc_index = i64[n]
+      @scc_low = i64[n]
+      @scc_oncur = i64[n]
+      @scc_cur = i64[n]
+      @scc_frame_node = i64[n]
+      @scc_frame_child = i64[n]
+    idx_arr = @scc_index ## i64[]
+    low_arr = @scc_low ## i64[]
+    oncur_arr = @scc_oncur ## i64[]
+    cur_arr = @scc_cur ## i64[]
+    fnode_arr = @scc_frame_node ## i64[]
+    fchild_arr = @scc_frame_child ## i64[]
     comp = i64[n]
-    i = 0
-    while i < n
-      index[i] = -1
-      comp[i] = -1
-      i += 1
-    counter = i64[2]             # [0] next index, [1] next component
-    cur = i64[n]                 # Reused component stack
-    cur_size = 0
-    frame_node = i64[n]          # Reused DFS stack
-    frame_child = i64[n]
-    peak = 0
-    node = 2
-    while node < 2 * @nvars + 2
-      if index[node] < 0 && @passign[node / 2] == 0
-        depth = 1
-        peak = 1 if peak < 1
-        frame_node[0] = node
-        frame_child[0] = 0
-        while depth > 0
-          u = frame_node[depth - 1]
-          if frame_child[depth - 1] == 0
-            index[u] = counter[0]
-            low[u] = counter[0]
-            counter[0] = counter[0] + 1
-            cur[cur_size] = u
-            cur_size += 1
-            oncur[u] = 1
-          start = offsets[u]
-          count = offsets[u + 1] - start
-          advanced = false
-          k = frame_child[depth - 1]
-          while k < count && !advanced
-            w = targets[start + k]
-            @ticks += 1
-            if index[w] < 0
-              frame_child[depth - 1] = k + 1
-              frame_node[depth] = w
-              frame_child[depth] = 0
-              depth += 1
-              peak = depth if depth > peak
-              advanced = true
-            else
-              low[u] = low[w] if oncur[w] == 1 && low[w] < low[u]
-              k += 1
-          unless advanced
-            depth -= 1
-            if depth > 0
-              parent = frame_node[depth - 1]
-              low[parent] = low[u] if low[u] < low[parent]
-            if low[u] == index[u]
-              done = false
-              while !done
-                cur_size -= 1
-                w = cur[cur_size]
-                oncur[w] = 0
-                comp[w] = counter[1]
-                done = true if w == u
-              counter[1] = counter[1] + 1
-      node += 1
+    wassat_pre_tarjan(offsets, targets, @passign, idx_arr, low_arr, oncur_arr,
+                      comp, cur_arr, fnode_arr, fchild_arr, @scc_st, n)
+    @ticks += @scc_st[3]
     @scc_runs += 1
-    @scc_nodes += counter[0]
-    @scc_components += counter[1]
-    @scc_peak_frames = peak if peak > @scc_peak_frames
+    @scc_nodes += @scc_st[0]
+    @scc_components += @scc_st[1]
+    @scc_last_ncomp = @scc_st[1]
+    @scc_peak_frames = @scc_st[2] if @scc_st[2] > @scc_peak_frames
     comp
 
   # BFS a path of implication edges from literal `a` to literal `b`,
@@ -1099,80 +1176,61 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     tsub = wassat_prof("pre.subst.tarjan", tsub)
 
     # Singleton components cannot substitute anything. Count first, then
-    # retain the original first-member order for nontrivial components.
-    sizes = i64[2 * @nvars + 2]
-    node = 2
-    while node < 2 * @nvars + 2
-      key = comp[node]
-      sizes[key] = sizes[key] + 1 if key >= 0
-      node += 1
-    groups = {}
-    singletons = 0
-    node = 2
-    while node < 2 * @nvars + 2
-      key = comp[node]
-      if key >= 0 && sizes[key] > 1
-        groups[key] = [] unless groups.has_key?(key)
-        groups[key].push(node)
-      elsif key >= 0
-        singletons += 1
-      node += 1
-    @scc_singletons += singletons
+    # build a flat CSR of nontrivial components in first-member order.
+    n = 2 * @nvars + 2
+    sizes = i64[n]
+    gpm = i64[3]
+    wassat_pre_count_scc(comp, sizes, n, gpm)
+    @scc_singletons += gpm[0]
+    nontrivial_nodes = gpm[1]
+    if nontrivial_nodes == 0
+      tsub = wassat_prof("pre.subst.group", tsub)
+      wassat_prof_note("pre.subst.work runs=[@scc_runs] nodes=[@scc_nodes] components=[@scc_components] singletons=[@scc_singletons] peak_frames=[@scc_peak_frames] edges=[@scc_edges] graph_bytes=[@scc_graph_bytes]") if tsub != 0
+      tsub = wassat_prof("pre.subst.rewrite", tsub)
+      return 0
+
+    grp_id = i64[n]
+    grp_offs = i64[n + 1]
+    grp_cursor = i64[n]
+    grp_members = i64[nontrivial_nodes]
+    ngrp = wassat_pre_build_scc_csr(comp, sizes, grp_id, grp_offs, grp_cursor, grp_members, n)
     tsub = wassat_prof("pre.subst.group", tsub)
 
     before = @vars_substituted
-    groups.each -> (key, members)
-      if @status == 0 && members.size > 1 && self.within_budget
-        if @proof_mode == WASSAT_PROOF_NONE && @lazy_lits
-          self.collect_subst_class(members)
-        else
+    if @proof_mode == WASSAT_PROOF_NONE && @lazy_lits
+      self.ensure_rstack(nontrivial_nodes, 0)
+      hdr = @rstack_hdr ## i32[]
+      spm = i64[3]
+      gi = 0
+      while gi < ngrp && @status == 0 && self.within_budget
+        chunk_end = gi + 256
+        chunk_end = ngrp if chunk_end > ngrp
+        spm[0] = @status
+        spm[1] = @vars_substituted
+        spm[2] = @rstack_hend
+        wassat_pre_collect_subst_csr(grp_offs, grp_members, @seen, @frozen,
+                                     @replit, @gone, hdr, gi, chunk_end, spm)
+        @status = spm[0]
+        @vars_substituted = spm[1]
+        @rstack_hend = spm[2]
+        gi = chunk_end
+    else
+      gi = 0
+      while gi < ngrp && @status == 0 && self.within_budget
+        mstart = grp_offs[gi]
+        mend = grp_offs[gi + 1]
+        if mend - mstart > 1
+          members = []
+          mk = mstart
+          while mk < mend
+            members.push(grp_members[mk])
+            mk += 1
           self.substitute_class(adj, comp, members)
+        gi += 1
     if @proof_mode == WASSAT_PROOF_NONE && @lazy_lits && @status == 0 && @vars_substituted > before
       self.rewrite_all_subst_flat
     wassat_prof_note("pre.subst.work runs=[@scc_runs] nodes=[@scc_nodes] components=[@scc_components] singletons=[@scc_singletons] peak_frames=[@scc_peak_frames] edges=[@scc_edges] graph_bytes=[@scc_graph_bytes]") if tsub != 0
     tsub = wassat_prof("pre.subst.rewrite", tsub)
-    0
-
-  -> collect_subst_class(members)
-    stampv = {}
-    contradiction_var = 0
-    lits_of = []
-    members.each -> (m)
-      v = m / 2
-      l = m % 2 == 0 ? v : 0 - v
-      lits_of.push(l)
-      if stampv.has_key?(v)
-        contradiction_var = v
-      else
-        stampv[v] = true
-    if contradiction_var > 0
-      @status = -1
-      return 0
-    rep = 0
-    lits_of.each -> (l)
-      av = l >= 0 ? l : 0 - l
-      rep = l if rep == 0 && @frozen[av] == 1
-    if rep == 0
-      best = 0
-      lits_of.each -> (l)
-        av = l >= 0 ? l : 0 - l
-        bav = best >= 0 ? best : 0 - best
-        best = l if best == 0 || av < bav
-      rep = best
-    already = false
-    lits_of.each -> (l)
-      av = l >= 0 ? l : 0 - l
-      already = true if @replit[av] != 0
-    return 0 if already
-    lits_of.each -> (y)
-      if y != rep && @status == 0
-        yv = y >= 0 ? y : 0 - y
-        if @frozen[yv] == 0
-          r_for_y = yv == y ? rep : 0 - rep
-          @replit[yv] = r_for_y
-          @gone[yv] = 2
-          @stack.push({ "kind": "subst", "var": yv, "rep": r_for_y })
-          @vars_substituted += 1
     0
 
   -> rewrite_all_subst_flat
@@ -1184,9 +1242,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     pm = i64[8]
     pm[0] = @ncl
     pm[1] = @nvars
-    wassat_pre_subst_rewrite_flat(@fla, @fcs, @fcl, @falive, @ftaut, @fsig,
-                                  @oh, @on, @ov, @ocount, @passign, @replit,
-                                  units, pm)
+    wassat_pre_subst_rewrite_flat_dirty(@fla, @fcs, @fcl, @falive, @ftaut, @fsig,
+                                        @oh, @on, @ov, @ocount, @passign, @replit,
+                                        units, pm, @sub_dirty, @bve_dirty)
     @osize = pm[2]
     @ticks += pm[3]
     nunits = pm[4]
@@ -1208,17 +1266,18 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   # Substitute one nontrivial SCC. members are lit_indexes.
   -> substitute_class(adj, comp, members)
     # detect x and -x in one class: the formula is unsatisfiable
-    stampv = {}
     contradiction_var = 0
     lits_of = []
     members.each -> (m)
       v = m / 2
       l = m % 2 == 0 ? v : 0 - v
       lits_of.push(l)
-      if stampv.has_key?(v)
+      if @seen[v] == 1
         contradiction_var = v
       else
-        stampv[v] = true
+        @seen[v] = 1
+    members.each -> (m)
+      @seen[m / 2] = 0
     if contradiction_var > 0
       x = contradiction_var
       # derive [-x] via the path x => -x, then [x] via -x => x, then empty
@@ -1286,7 +1345,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           helpers.push(cb)
           @replit[yv] = r_for_y
           @gone[yv] = 2
-          @stack.push({ "kind": "subst", "var": yv, "rep": r_for_y })
+          self.push_rstack_subst(yv, r_for_y)
           @vars_substituted += 1
 
     # rewrite every live clause containing a substituted variable of this class
@@ -1420,11 +1479,18 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     tick_cap == 0 || @ticks < tick_cap
 
   -> run_subsumption
+    return false unless wassat_pre_any_dirty(@sub_dirty, @falive, @ftaut, @ncl) == 1
     tick_cap = 0
-    if @tick_budget > 0 && @ncl_in > 20000
+    work_cap = 0
+    if @tick_budget > 0
       rem = @tick_budget - @ticks
       rem = 0 if rem < 0
-      tick_cap = @ticks + rem / 2
+      if @ncl_in > 20000
+        tick_cap = @ticks + rem / 2
+        work_cap = rem / 2
+      else
+        work_cap = rem
+      work_cap = 1 if work_cap <= 0
     deadline_cap = 0
     if @deadline_ms > 0 && @ncl_in > 20000
       now = ccall("__w_clock_ms")
@@ -1432,8 +1498,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       rem_ms = 0 if rem_ms < 0
       deadline_cap = now + rem_ms / 2
     progress = false
+    sub_work = 0
     next_ci = 0
-    while next_ci < @ncl && self.within_subsumption_budget(tick_cap, deadline_cap) && @status == 0
+    while next_ci < @ncl && (work_cap == 0 || sub_work < work_cap) && self.within_subsumption_budget(tick_cap, deadline_cap) && @status == 0
       base = @lgen + 1
       snapshot = @ncl
       @subscan_pm[0] = base
@@ -1444,10 +1511,13 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       @subscan_pm[5] = 0
       @subscan_pm[6] = 0
       @subscan_pm[7] = WASSAT_PRE_SUB_CHUNK_TICKS
-      wassat_pre_subpass(@fla, @fcs, @fcl, @falive, @ftaut, @fsig, @oh, @on,
-                         @ov, @ocount, @lstamp, @subscan_out, @subscan_pm)
+      @subscan_pm[8] = 0
+      wassat_pre_subpass_dirty(@fla, @fcs, @fcl, @falive, @ftaut, @fsig, @oh, @on,
+                               @ov, @ocount, @lstamp, @subscan_out, @subscan_pm,
+                               @sub_dirty, 1)
       @ticks += @subscan_pm[5]
-      @lgen = base + snapshot + 1
+      sub_work += @subscan_pm[8]
+      @lgen = base + 2 * snapshot + 2
       hits = @subscan_out[0]
       k = 0
       while k < hits && @status == 0
@@ -1456,20 +1526,30 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       next_ci = @subscan_pm[6]
     progress
 
-  # Re-verify one native-scan survivor exactly and commit it: flip == 0 is a
-  # subsumption (pure deletion), otherwise strengthen the candidate by
-  # dropping the negated flip literal (add-then-delete, never in place).
+  -> ensure_str_buf(need)
+    if need > @str_cap
+      ncap = @str_cap * 2
+      ncap = need + 16 if ncap < need
+      @str_buf = i64[ncap]
+      @str_cap = ncap
+    0
+
+  # Re-verify one native-scan survivor exactly over @fla and commit it:
+  # flip == 0 is a subsumption (pure deletion), otherwise strengthen the
+  # candidate by dropping the negated flip literal (add-then-delete).
   -> commit_survivor(sci, di, fl)
     return false unless @falive[sci] == 1 && @falive[di] == 1
-    arr = self.lits_of(sci)
+    sst = @fcs[sci]
+    slen = @fcl[sci]
     if fl == 0
-      if self.subset_of(arr, self.lits_of(di))
+      if wassat_pre_subset_flat(@fla, sst, slen, @fcs[di], @fcl[di]) == 1
         self.delete_clause(di)
         @clauses_subsumed += 1
         true
       else
         false
     else
+      return false if @ftaut[di] == 1
       # Strengthen to fixpoint against this subsumer: dropping one negated
       # literal often exposes the next (the within-subsumer cascade the
       # immediate-commit flow used to find via its later flip scans).
@@ -1477,41 +1557,66 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       target = di
       more = true
       first_flip = fl
-      while more && @status == 0
+      while more && @status == 0 && @falive[sci] == 1 && @falive[target] == 1
+        tst = @fcs[target]
+        tlen = @fcl[target]
         flipped = 0
-        if first_flip != 0 && self.subset_one_flip(arr, first_flip, self.lits_of(target))
+        if first_flip != 0 && wassat_pre_subset_one_flip_flat(@fla, sst, slen, first_flip, tst, tlen) == 1
           flipped = first_flip
         else
           fi = 0
-          while fi < arr.size && flipped == 0
-            cand = arr[fi]
-            flipped = cand if self.subset_one_flip(arr, cand, self.lits_of(target))
+          while fi < slen && flipped == 0
+            cand = @fla[sst + fi]
+            flipped = cand if wassat_pre_subset_one_flip_flat(@fla, sst, slen, cand, tst, tlen) == 1
             fi += 1
         first_flip = 0
         if flipped == 0
           more = false
         else
           l = flipped
-          strengthened = []
-          self.lits_of(target).each -> (dl)
-            strengthened.push(dl) unless dl == 0 - l
-          gid = @next_gid
-          self.plog_add(gid, strengthened, [@fpgid[sci], @fpgid[target]])
-          nci = self.store(strengthened)
+          nci = -1
+          sn = 0
+          unit_lit = 0
+          if !@emit_wrat && !@emit_drat && @lazy_lits
+            self.ensure_str_buf(tlen)
+            sn = wassat_pre_copy_without_lit(@fla, tst, tlen, 0 - l, @str_buf)
+            unit_lit = @str_buf[0] if sn == 1
+            nci = self.store_from_buf(@str_buf, 0, sn)
+          else
+            strengthened = []
+            ti = 0
+            while ti < tlen
+              dl = @fla[tst + ti]
+              strengthened.push(dl) unless dl == 0 - l
+              ti += 1
+            sn = strengthened.size
+            unit_lit = strengthened[0] if sn == 1
+            gid = @next_gid
+            self.plog_add(gid, strengthened, [@fpgid[sci], @fpgid[target]])
+            nci = @lazy_lits ? self.store_from_buf_arr(strengthened) : self.store(strengthened)
           self.delete_clause(target)
           @clauses_strengthened += 1
           any = true
-          if strengthened.size == 1 && @status == 0
-            lv = self.value(strengthened[0])
+          if sn == 1 && @status == 0
+            lv = self.value(unit_lit)
             if lv < 0
               self.refute(nci)
             elsif lv == 0
-              self.assign(strengthened[0], nci)
+              self.assign(unit_lit, nci)
               confl = self.propagate_root
               self.refute(confl) if confl >= 0
           target = nci
-          more = strengthened.size >= arr.size   # a further flip needs >= |C|
+          more = sn >= slen   # a further flip needs >= |C|
       any
+
+  -> store_from_buf_arr(arr)
+    n = arr.size
+    self.ensure_str_buf(n)
+    i = 0
+    while i < n
+      @str_buf[i] = arr[i]
+      i += 1
+    self.store_from_buf(@str_buf, 0, n)
 
   -> subset_of(small, big)
     ok = true
@@ -1607,6 +1712,55 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     wassat_prof_note("pre.and2 candidates=[@and2_candidates] eliminated=[@and2_eliminated] find_ticks=[pm[5]]")
     progress
 
+  -> commit_bve_parents(v)
+    wassat_pre_bve_parent_stats(@fla, @fcs, @fcl, @falive, @ftaut,
+                                @oh, @on, @ov, v, @bve_pm)
+    npos = @bve_pm[0]
+    pos_nonpiv = @bve_pm[1]
+    nneg = @bve_pm[2]
+    neg_nonpiv = @bve_pm[3]
+    push_pos = pos_nonpiv <= neg_nonpiv
+    signed_piv = push_pos ? v : 0 - v
+    push_li = push_pos ? 2 * v : 2 * v + 1
+    need_entries = 1 + (push_pos ? npos : nneg)
+    need_lits = push_pos ? pos_nonpiv : neg_nonpiv
+    self.ensure_rstack(need_entries, need_lits)
+    hdr = @rstack_hdr ## i32[]
+    rlits = @rstack_lits ## i32[]
+    @bve_pm[0] = @rstack_hend
+    @bve_pm[1] = @rstack_lsize
+    wassat_pre_push_bve_rstack(@fla, @fcs, @fcl, @falive, @ftaut,
+                               @oh, @on, @ov, push_li, v, signed_piv,
+                               hdr, rlits, @bve_pm)
+    @rstack_hend = @bve_pm[0]
+    @rstack_lsize = @bve_pm[1]
+    if @emit_wrat || @emit_drat
+      parents = self.live_occ(2 * v)
+      w = @oh[2 * v + 1]
+      while w >= 0
+        ci = @ov[w]
+        parents.push(ci) if @falive[ci] == 1 && @ftaut[ci] == 0
+        w = @on[w]
+      self.delete_batch(parents)
+    else
+      wassat_pre_retire_pivot_occ(@fla, @fcs, @fcl, @falive, @ftaut,
+                                  @oh, @on, @ov, @ocount, @bve_dirty, v)
+    0
+
+  -> propagate_bve_units(units)
+    return 0 if units == nil
+    units.each -> (nci)
+      if @status == 0
+        l = @fla[@fcs[nci]]
+        lv = self.value(l)
+        if lv < 0
+          self.refute(nci)
+        elsif lv == 0
+          self.assign(l, nci)
+          confl = self.propagate_root
+          self.refute(confl) if confl >= 0
+    0
+
   -> try_eliminate_and2(out_lit, base_ci, side1_ci, side2_ci)
     v = out_lit.abs
     return false if @frozen[v] == 1 || @passign[v] != 0 || @gone[v] != 0
@@ -1631,21 +1785,17 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @lgen = @bve_pm[9]
     return false if @bve_pm[6] == 0
 
-    # Snapshot the original pivot clauses before storing any resolvent.
-    # Resolvents never contain the pivot, but this also makes the proof and
-    # reconstruction ordering explicit.
-    pos = self.live_occ(2 * v)
-    neg = self.live_occ(2 * v + 1)
-
     count = @bve_pm[7]
-    units = []
+    units = nil
     off = 0
     i = 0
     if !@emit_wrat && !@emit_drat && @lazy_lits
       while i < count
         n = @bve_out[off]
         nci = self.store_from_buf(@bve_out, off + 3, n)
-        units.push(nci) if n == 1
+        if n == 1
+          units = [] if units == nil
+          units.push(nci)
         off += 3 + n
         i += 1
     else
@@ -1660,44 +1810,22 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           j += 1
         gid = @next_gid
         self.plog_add(gid, res, [@fpgid[aci], @fpgid[bci]])
-        nci = self.store(res)
-        if res.size == 1
+        nci = @lazy_lits ? self.store_from_buf(@bve_out, off + 3, n) : self.store(res)
+        if n == 1
+          units = [] if units == nil
           units.push(nci)
         off += 3 + n
         i += 1
 
-    @stack.push({ "kind": "bve_var", "pivot": v })
-    pos.each -> (ci)
-      @stack.push({ "kind": "bve", "pivot": v,
-                    "lits": self.copy_clause_lits(ci) })
-    if @emit_wrat || @emit_drat
-      parents = []
-      pos.each -> (ci)
-        parents.push(ci)
-      neg.each -> (ci)
-        parents.push(ci)
-      self.delete_batch(parents)
-    else
-      pos.each -> (ci)
-        @falive[ci] = 0
-      neg.each -> (ci)
-        @falive[ci] = 0
+    self.commit_bve_parents(v)
     @gone[v] = 1
+    @bve_dirty[v] = 0
     @vars_eliminated += 1
     @and2_eliminated += 1
     # Propagate only after every pivot parent is gone.  Otherwise a new unit
     # can make a still-live parent imply the pivot, and derive a replacement
     # unit containing a variable that the artifact already marks eliminated.
-    units.each -> (nci)
-      if @status == 0
-        l = @fla[@fcs[nci]]
-        lv = self.value(l)
-        if lv < 0
-          self.refute(nci)
-        elsif lv == 0
-          self.assign(l, nci)
-          confl = self.propagate_root
-          self.refute(confl) if confl >= 0
+    self.propagate_bve_units(units)
     true
 
   # Eliminate v when the set of non-tautological resolvents is no larger
@@ -1721,7 +1849,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     @bve_hash_hits += @bve_pm[9]
     @bve_compared_literals += @bve_pm[10]
     @ticks += @bve_pm[7]
-    return false if @bve_pm[4] == 0
+    if @bve_pm[4] == 0
+      @bve_dirty[v] = 0
+      return false
 
     # The proposal contains copied literals and stable parent clause ids.
     # Reclaim before collecting occurrence lists or starting the atomic commit,
@@ -1735,16 +1865,16 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     # commit from the packed buffer: all resolvents added, all originals
     # deleted, or nothing — the atomicity contract is unchanged
     count = @bve_pm[5]
-    units = []
-    pos = self.live_occ(2 * v)
-    neg = self.live_occ(2 * v + 1)
+    units = nil
     off = 0
     i = 0
     if !@emit_wrat && !@emit_drat && @lazy_lits
       while i < count
         n = @bve_out[off]
         nci = self.store_from_buf(@bve_out, off + 3, n)
-        units.push(nci) if n == 1
+        if n == 1
+          units = [] if units == nil
+          units.push(nci)
         off += 3 + n
         i += 1
     else
@@ -1759,38 +1889,17 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           j += 1
         gid = @next_gid
         self.plog_add(gid, res, [@fpgid[aci], @fpgid[bci]])
-        nci = self.store(res)
-        if res.size == 1
+        nci = @lazy_lits ? self.store_from_buf(@bve_out, off + 3, n) : self.store(res)
+        if n == 1
+          units = [] if units == nil
           units.push(nci)
         off += 3 + n
         i += 1
-    @stack.push({ "kind": "bve_var", "pivot": v })
-    pos.each -> (ci)
-      @stack.push({ "kind": "bve", "pivot": v, "lits": self.copy_clause_lits(ci) })
-    if @emit_wrat || @emit_drat
-      parents = []
-      pos.each -> (ci)
-        parents.push(ci)
-      neg.each -> (ci)
-        parents.push(ci)
-      self.delete_batch(parents)
-    else
-      pos.each -> (ci)
-        @falive[ci] = 0
-      neg.each -> (ci)
-        @falive[ci] = 0
+    self.commit_bve_parents(v)
     @gone[v] = 1
+    @bve_dirty[v] = 0
     @vars_eliminated += 1
-    units.each -> (nci)
-      if @status == 0
-        l = @fla[@fcs[nci]]
-        lv = self.value(l)
-        if lv < 0
-          self.refute(nci)
-        elsif lv == 0
-          self.assign(l, nci)
-          confl = self.propagate_root
-          self.refute(confl) if confl >= 0
+    self.propagate_bve_units(units)
     true
 
   -> live_occ(li)
@@ -1835,21 +1944,19 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     t ? nil : out
 
   -> run_bve
-    # cheapest first: ascending occurrence sum (packed key, see
-    # probe_candidates on the 2^46 bound)
-    scored = []
-    v = 1
-    while v <= @nvars
-      if @passign[v] == 0 && @gone[v] == 0 && @frozen[v] == 0
-        c = @ocount[2 * v] + @ocount[2 * v + 1]
-        c = 4194302 if c > 4194302
-        scored.push(c * 16777216 + v)
-      v += 1
-    scored = scored.sort
+    eff_margin = @bve_margin_override < 0 ? @bve_margin : @bve_margin_override
+    if eff_margin > @last_bve_margin
+      wassat_pre_fill_i8(@bve_dirty, @nvars + 1, 1)
+    @last_bve_margin = eff_margin
+    self.ensure_sort_scratch
+    cnt = @sort_cnt ## i64[]
+    vars = @sort_vars ## i32[]
+    total = wassat_pre_sort_bve_vars(@passign, @gone, @frozen, @bve_dirty,
+                                     @ocount, cnt, vars, @nvars)
     progress = false
     i = 0
-    while i < scored.size && @status == 0 && self.within_budget
-      progress = true if self.try_eliminate(scored[i] % 16777216)
+    while i < total && @status == 0 && self.within_budget
+      progress = true if self.try_eliminate(vars[i])
       i += 1
     wassat_prof_note("pre.bve_hash probes=[@bve_hash_probes] hits=[@bve_hash_hits] compared_literals=[@bve_compared_literals]") if env("WASSAT_PROFILE") == "1"
     progress
@@ -1984,28 +2091,16 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
         raise "internal error: root literal [l] lost its unit clause"
       keep_unit[rci] = 1
       ti += 1
-    doomed = []
-    ci = 0
-    while ci < @ncl
-      if @falive[ci] == 1 && keep_unit[ci] == 0
-        if @ftaut[ci] == 1
-          doomed.push(ci)
-        else
-          st = @fcs[ci]
-          len = @fcl[ci]
-          sat = false
-          i = 0
-          while i < len
-            sat = true if self.value(@fla[st + i]) > 0
-            i += 1
-          doomed.push(ci) if sat
-      ci += 1
-    self.delete_batch(doomed)
+    doomed_buf = i64[@ncl + 1]
+    ndoomed = wassat_pre_find_satisfied(@fla, @fcs, @fcl, @falive, @ftaut,
+                                        @passign, keep_unit, doomed_buf, @ncl)
+    self.delete_batch_buf(doomed_buf, ndoomed) if ndoomed > 0
     0
 
   # ---- artifact -------------------------------------------------------------
 
   -> artifact
+    self.flush_rstack
     # A substituted variable that ended up root-assigned during the rewrite
     # cascades is pinned by a live unit clause, so it is not "gone" in the
     # assumption/consistency sense (reconstruction still overwrites it with
@@ -2015,12 +2110,13 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       @gone[v] = 0 if @gone[v] == 2 && @passign[v] != 0
       v += 1
     # Boxed clauses are consumed only by the small-kernel SLS burst and
-    # the portfolio artifact writer; on big trusted-path formulas every
-    # downstream consumer reads the flat mirrors, and materializing 300k
-    # lazy clauses here would undo the lazy-truth win — twice per run.
-    # Proof callers construct the logical clause database from this mirror;
-    # its entries must stay aligned with gids even above the lazy threshold.
-    skip_boxed = @stop_cell != nil && @proof_mode == WASSAT_PROOF_NONE && @lazy_lits
+    # the portfolio artifact writer; on trusted-path flat formulas every
+    # downstream consumer reads the flat mirrors, and materializing lazy
+    # clauses here would undo the lazy-truth win — twice per run.
+    # Proof callers construct the logical clause database from this mirror
+    # unless flat DRAT output was requested; otherwise entries stay aligned
+    # with gids even above the lazy threshold.
+    skip_boxed = ((@stop_cell != nil || @flat_consumer) && @proof_mode == WASSAT_PROOF_NONE && @lazy_lits) || (@flat_proof_output && @proof_mode == WASSAT_PROOF_DRAT)
     want_boxed = !skip_boxed && (@proof_mode != WASSAT_PROOF_NONE || !@lazy_lits || @ncl <= 50000)
     clauses = []
     gids = []
@@ -2034,7 +2130,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     { "nvars": @nvars, "clauses": clauses, "gids": gids,
       "counter_base": @counter_base, "raw": @raw_kernel,
       "next_gid": @next_gid, "status": @status, "config": @config,
-      "stack": @stack, "gone": @gone,
+      "stack": @stack.dup, "gone": @gone,
       "fla": @fla, "fcs": @fcs, "fcl": @fcl, "falive": @falive,
       "ftaut": @ftaut, "fpgid": @fpgid, "fncl": @ncl,
       "wrat": @wrat_lines, "drat": @drat_lines,
@@ -2256,6 +2352,12 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 # driver gets the budget and the deadline back every ~1.5ms instead of once
 # per formula.
 -> wassat_pre_subpass(fla, fcs, fcl, falive, ftaut, fsig, och, ocn, ocv, ocount, lstamp, out, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[])
+  dummy = i8[1]
+  wassat_pre_subpass_dirty(fla, fcs, fcl, falive, ftaut, fsig, och, ocn, ocv,
+                           ocount, lstamp, out, pm, dummy, 0)
+  0
+
+-> wassat_pre_subpass_dirty(fla, fcs, fcl, falive, ftaut, fsig, och, ocn, ocv, ocount, lstamp, out, pm, sub_dirty, use_dirty) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64)
   base = pm[0]
   sci = pm[1]
   endci = pm[2]
@@ -2263,14 +2365,12 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   budget = pm[4]
   tcap = pm[7]
   tcap = 9223372036854775807 if tcap <= 0
+  visit_cap = 4 * cap
   ticks = 0
   # `ticks` is the CALIBRATED currency the budgets in policy.w are quoted
   # in, and it is charged only for a candidate that survives to the literal
-  # match. That makes it the wrong thing to cut a chunk on: a bucket walk
-  # that rejects every candidate retires no ticks at all and would run the
-  # whole formula uninterrupted. `work` charges the walk too, so the chunk
-  # boundary tracks real time, and it is deliberately kept out of pm[5] so
-  # the reported tick counts stay comparable with every number on record.
+  # match. `work` charges the walk too, so chunk boundaries and run_subsumption
+  # work caps track real time even when signature filtering rejects everything.
   work = 0
   count = 0
   while sci < endci && count < budget && work < tcap
@@ -2284,23 +2384,22 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       slen = fcl[sci]
       if slen < 1
         keep = 0
-    if keep == 1
-      gen = base + sci
+    if keep == 0
+      sub_dirty[sci] = 0 if use_dirty == 1
+    else
+      sci_dirty = 1
+      sci_dirty = sub_dirty[sci] if use_dirty == 1
+      gen_pos = base + 2 * sci
+      gen_neg = gen_pos + 1
       stx = fcs[sci]
       csig = fsig[sci]
-      # duplicated-literal subsumers cannot anchor strengthening chains
+      # Stamp both polarities and find the two rarest positive buckets.
       has_dup = 0
-      a = 0
-      while a < slen
-        b = a + 1
-        while b < slen
-          if fla[stx + a] == fla[stx + b]
-            has_dup = 1
-          b += 1
-        a += 1
-      # stamp literals, find rarest bucket
-      best_li = -1 ## i64
-      best_cnt = 0
+      best_li1 = -1 ## i64
+      best_cnt1 = 0
+      best_li2 = -1 ## i64
+      best_cnt2 = 0
+      l_best1 = 0
       j = 0
       while j < slen
         l = fla[stx + j]
@@ -2309,95 +2408,154 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           li = l << 1
         else
           li = ((0 - l) << 1) + 1
-        lstamp[li] = gen
-        c = ocount[li]
-        if best_li < 0 || c < best_cnt
-          best_li = li
-          best_cnt = c
+        if lstamp[li] == gen_pos
+          has_dup = 1
+        else
+          lstamp[li] = gen_pos
+          lstamp[li ^ 1] = gen_neg
+          c = ocount[li]
+          if best_li1 < 0 || c < best_cnt1
+            best_li2 = best_li1
+            best_cnt2 = best_cnt1
+            best_li1 = li
+            best_cnt1 = c
+            l_best1 = l
+          elsif best_li2 < 0 || c < best_cnt2
+            best_li2 = li
+            best_cnt2 = c
         j += 1
-      pass_i = 0
-      while pass_i <= slen
-        mode = 0
-        li = best_li
-        flip = 0
-        run = 1
-        if pass_i > 0
-          if has_dup == 1
-            run = 0
-          else
-            mode = 1
-            l = fla[stx + (pass_i - 1)]
-            flip = 0 - l
-            if flip > 0
-              li = flip << 1
+
+      # Walk 1 (och[best_li1]): covers all subsumptions (mode 0) plus any
+      # 1-flip strengthening (mode 1) where the flipped literal is NOT l_best1.
+      scanned = 0
+      visits = 0
+      prev_ci = -1
+      w = och[best_li1]
+      while w >= 0 && scanned < cap && visits < visit_cap
+        ci = ocv[w]
+        visits = visits + 1
+        work = work + 1
+        ok = 1
+        if ci == sci || ci == prev_ci
+          ok = 0
+        prev_ci = ci
+        if ok == 1 && use_dirty == 1 && sci_dirty == 0 && sub_dirty[ci] == 0
+          ok = 0
+        if ok == 1 && falive[ci] != 1
+          ok = 0
+        n = 0
+        if ok == 1
+          scanned = scanned + 1
+          n = fcl[ci]
+          if n < slen || n < 2
+            ok = 0
+        if ok == 1
+          if (csig & fsig[ci]) != csig
+            ok = 0
+        if ok == 1
+          dstx = fcs[ci]
+          ticks = ticks + n
+          work = work + n
+          pos_matched = 0
+          neg_l2 = 0
+          neg_conflict = 0
+          j = 0
+          while j < n
+            l2 = fla[dstx + j]
+            lidx = 0 ## i64
+            if l2 > 0
+              lidx = l2 << 1
             else
-              li = ((0 - flip) << 1) + 1
-        if run == 1
-          scanned = 0
-          w = och[li]
-          while w >= 0 && scanned < cap
-            ci = ocv[w]
+              lidx = ((0 - l2) << 1) + 1
+            sv = lstamp[lidx]
+            if sv == gen_pos
+              pos_matched = pos_matched + 1
+            elsif sv == gen_neg
+              if neg_l2 == 0
+                neg_l2 = l2
+              elsif neg_l2 != l2
+                neg_conflict = 1
+            j = j + 1
+          if pos_matched >= slen && count < 5400
+            out[3 * count + 1] = sci
+            out[3 * count + 2] = ci
+            out[3 * count + 3] = 0
+            count = count + 1
+          if has_dup == 0 && ftaut[ci] == 0 && neg_l2 != 0 && neg_conflict == 0 && pos_matched >= slen - 1 && count < 5400
+            out[3 * count + 1] = sci
+            out[3 * count + 2] = ci
+            out[3 * count + 3] = 0 - neg_l2
+            count = count + 1
+        w = ocn[w]
+
+      # Walk 2: only needed when has_dup == 0, solely to find mode 1 hits where
+      # l_best1 itself was flipped (so ci contains -l_best1 and, if slen >= 2,
+      # every remaining literal of sci including best_li2). Pick whichever of
+      # och[best_li1 ^ 1] and och[best_li2] has fewer live occurrences.
+      if has_dup == 0
+        flip1 = 0 - l_best1
+        flip1_li = best_li1 ^ 1
+        walk2_li = flip1_li
+        if best_li2 >= 0 && ocount[best_li2] < ocount[flip1_li]
+          walk2_li = best_li2
+        scanned = 0
+        visits = 0
+        prev_ci = -1
+        w = och[walk2_li]
+        while w >= 0 && scanned < cap && visits < visit_cap
+          ci = ocv[w]
+          visits = visits + 1
+          work = work + 1
+          ok = 1
+          if ci == sci || ci == prev_ci
+            ok = 0
+          prev_ci = ci
+          if ok == 1 && use_dirty == 1 && sci_dirty == 0 && sub_dirty[ci] == 0
+            ok = 0
+          if ok == 1 && (falive[ci] != 1 || ftaut[ci] == 1)
+            ok = 0
+          n = 0
+          if ok == 1
             scanned = scanned + 1
-            work = work + 1
-            ok = 1
-            if ci == sci
+            n = fcl[ci]
+            if n < slen || n < 2
               ok = 0
-            if ok == 1 && falive[ci] != 1
+          if ok == 1
+            if (csig & fsig[ci]) != csig
               ok = 0
-            if ok == 1 && mode == 1 && ftaut[ci] == 1
-              ok = 0
-            n = 0
-            if ok == 1
-              n = fcl[ci]
-              if n < slen
-                ok = 0
-              # never delete or strengthen a unit clause: root literals'
-              # units are load-bearing citations for the whole certificate
-              if n < 2
-                ok = 0
-            if ok == 1 && mode == 0
-              if (csig & fsig[ci]) != csig
-                ok = 0
-            if ok == 1
-              dstx = fcs[ci]
-              ticks = ticks + n
-              work = work + n
-              matched = 0
-              flip_seen = 0
-              j = 0
-              while j < n
-                l2 = fla[dstx + j]
+          if ok == 1
+            dstx = fcs[ci]
+            ticks = ticks + n
+            work = work + n
+            pos_matched = 0
+            flip1_seen = 0
+            j = 0
+            while j < n
+              l2 = fla[dstx + j]
+              if l2 == flip1
+                flip1_seen = 1
+              else
                 lidx = 0 ## i64
                 if l2 > 0
                   lidx = l2 << 1
                 else
                   lidx = ((0 - l2) << 1) + 1
-                if lstamp[lidx] == gen
-                  matched = matched + 1
-                if mode == 1 && l2 == flip
-                  flip_seen = 1
-                j = j + 1
-              hit = 0
-              if mode == 0
-                if matched >= slen
-                  hit = 1
-              else
-                if flip_seen == 1 && matched >= slen - 1
-                  hit = 1
-              if hit == 1 && count < 5400
-                out[3 * count + 1] = sci
-                out[3 * count + 2] = ci
-                if mode == 0
-                  out[3 * count + 3] = 0
-                else
-                  out[3 * count + 3] = 0 - flip
-                count = count + 1
-            w = ocn[w]
-        pass_i += 1
+                if lstamp[lidx] == gen_pos
+                  pos_matched = pos_matched + 1
+              j = j + 1
+            if flip1_seen == 1 && pos_matched >= slen - 1 && count < 5400
+              out[3 * count + 1] = sci
+              out[3 * count + 2] = ci
+              out[3 * count + 3] = l_best1
+              count = count + 1
+          w = ocn[w]
+      if use_dirty == 1 && count < 5400
+        sub_dirty[sci] = 0
     sci += 1
   out[0] = count
   pm[5] = pm[5] + ticks
   pm[6] = sci
+  pm[8] = work
   0
 
 # Find exact two-input AND definitions in ascending variable order.
@@ -2555,6 +2713,13 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   max_hashcap = WASSAT_PRE_BVE_HASH_CAPACITY ## i64
   outcap = max_outcap if outcap > max_outcap
   hashcap = max_hashcap if hashcap > max_hashcap
+  hash_epoch = gen + 1
+  if gen >= 70368744177663
+    hash_epoch = 0
+    hi = 0
+    while hi < hashcap
+      hpos[hi] = -1
+      hi += 1
   pm[6] = 0
   pm[7] = 0
   ticks = 0
@@ -2775,31 +2940,45 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                 j = j + 1
               h = h ^ rl
               isdup = 0
-              j = 0
-              while j < count && isdup == 0
-                if hbuf[j] == h && out[hpos[j]] == rl
-                  prev = hpos[j]
+              vacant = -1
+              probes = 0
+              slot = 0
+              if hashcap > 0
+                folded = (h ^ (h >> 32)) & 2147483647
+                if (hashcap & (hashcap - 1)) == 0
+                  slot = folded & (hashcap - 1)
+                else
+                  slot = folded % hashcap
+              while probes < hashcap && isdup == 0 && vacant < 0
+                encoded = hpos[slot]
+                probes = probes + 1
+                if (encoded >> 17) != hash_epoch
+                  vacant = slot
+                elsif hbuf[slot] == h && out[encoded & 131071] == rl
+                  sp = encoded & 131071
                   same = 1
-                  p = 0
-                  while p < rl && same == 1
-                    hit = 0
-                    q = 0
-                    while q < rl && hit == 0
-                      if out[prev + 3 + q] == out[dst + p]
-                        hit = 1
-                      q = q + 1
-                    if hit == 0
+                  q = 0
+                  while q < rl && same == 1
+                    lq = out[sp + 3 + q]
+                    avq = lq
+                    if lq < 0
+                      avq = 0 - lq
+                    liq = avq + avq
+                    if lq < 0
+                      liq = liq + 1
+                    if lstamp[liq] != gen
                       same = 0
-                    p = p + 1
+                    q = q + 1
                   if same == 1
                     isdup = 1
-                j = j + 1
+                slot = slot + 1
+                slot = 0 if slot == hashcap
               if isdup == 0
-                if count >= hashcap
+                if count >= hashcap || vacant < 0
                   valid = 0
                 else
-                  hbuf[count] = h
-                  hpos[count] = hdr
+                  hbuf[vacant] = h
+                  hpos[vacant] = (hash_epoch << 17) | hdr
                   out[hdr] = rl
                   out[hdr + 1] = aci
                   out[hdr + 2] = bci
@@ -2989,7 +3168,11 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                   probes = 0
                   slot = 0
                   if hashcap > 0
-                    slot = ((h ^ (h >> 32)) & 2147483647) % hashcap
+                    folded = (h ^ (h >> 32)) & 2147483647
+                    if (hashcap & (hashcap - 1)) == 0
+                      slot = folded & (hashcap - 1)
+                    else
+                      slot = folded % hashcap
                   while probes < hashcap && isdup == 0 && vacant < 0
                     encoded = hpos[slot]
                     probes += 1
@@ -2999,18 +3182,19 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
                       hash_hits += 1
                       sp = encoded & 131071
                       same = 1
-                      p = 0
-                      while p < rl && same == 1
-                        found = 0
-                        q = 0
-                        while q < rl && found == 0
-                          if out[sp + 3 + q] == out[base + p]
-                            found = 1
-                          q += 1
-                        compared_literals += q
-                        if found == 0
+                      q = 0
+                      while q < rl && same == 1
+                        lq = out[sp + 3 + q]
+                        avq = lq
+                        if lq < 0
+                          avq = 0 - lq
+                        liq = avq + avq
+                        if lq < 0
+                          liq = liq + 1
+                        q += 1
+                        if lstamp[liq] != gen
                           same = 0
-                        p += 1
+                      compared_literals += q
                       if same == 1
                         isdup = 1
                     slot += 1
@@ -3045,6 +3229,13 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       0
 
 -> wassat_pre_subst_rewrite_flat(fla, fcs, fcl, falive, ftaut, fsig, och, ocn, ocv, ocount, passign, replit, units, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
+  dummy_sub = i8[pm[0] + 1]
+  dummy_bve = i8[pm[1] + 2]
+  wassat_pre_subst_rewrite_flat_dirty(fla, fcs, fcl, falive, ftaut, fsig,
+                                      och, ocn, ocv, ocount, passign, replit,
+                                      units, pm, dummy_sub, dummy_bve)
+
+-> wassat_pre_subst_rewrite_flat_dirty(fla, fcs, fcl, falive, ftaut, fsig, och, ocn, ocv, ocount, passign, replit, units, pm, sub_dirty, bve_dirty) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i8[]) i64
   ncl = pm[0]
   nv = pm[1]
   ticks = 0
@@ -3075,6 +3266,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
         while i < len
           l = fla[st + i]
           av = l < 0 ? 0 - l : l
+          bve_dirty[av] = 1
           rl = replit[av]
           if rl != 0
             l = l > 0 ? rl : 0 - rl
@@ -3090,15 +3282,18 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
           if dup == 0
             fla[st + w] = l
             wav = l < 0 ? 0 - l : l
+            bve_dirty[wav] = 1
             sig = sig | ((1 ## i64) << (wav & 63))
             w += 1
           i += 1
         if taut == 1
           falive[ci] = 0
           ftaut[ci] = 1
+          sub_dirty[ci] = 0
         else
           fcl[ci] = w
           fsig[ci] = sig
+          sub_dirty[ci] = 1
           if w == 1
             units[nunits] = ci
             nunits += 1
@@ -3112,20 +3307,22 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   osize = 0
   ci = 0
   while ci < ncl
-    if falive[ci] == 1 && ftaut[ci] == 0
+    if falive[ci] == 1
       st = fcs[ci]
       len = fcl[ci]
+      is_taut = ftaut[ci]
       j = 0
       while j < len
         l = fla[st + j]
         av = l < 0 ? 0 - l : l
         lidx = av << 1
         lidx = lidx + 1 if l < 0
-        ocn[osize] = och[lidx]
-        ocv[osize] = ci
-        och[lidx] = osize
         ocount[lidx] = ocount[lidx] + 1
-        osize += 1
+        if is_taut == 0
+          ocn[osize] = och[lidx]
+          ocv[osize] = ci
+          och[lidx] = osize
+          osize += 1
         j += 1
     ci += 1
   pm[2] = osize
@@ -3203,8 +3400,10 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 # side-tables the loader expects. Tautologies stay in: they are satisfied
 # under every assignment, so they never propagate or conflict, and the
 # watch scheme carries them at no cost.
--> wassat_raw_artifact(parse, nvars)
+-> wassat_raw_artifact(parse, nvars, cfg = nil)
   ncl = parse["flat_ncl"]
+  c = cfg == nil ? parse["config"] : cfg
+  c = WassatConfig.from_lens(nvars, parse["flat_lens"], ncl) if c == nil || c.nvars != nvars || c.nclauses != ncl
   # No side tables at all: every clause is alive and proof ids are
   # sequential, so the loader synthesizes both from the index ("fsynth").
   # Materializing them cost three ncl-sized allocations plus their fills —
@@ -3212,7 +3411,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   # in the case of proof ids, never read on this path.
   empty = i64[1]
   { "nvars": nvars, "clauses": [], "gids": [], "raw": true,
-    "config": WassatConfig.from_lens(nvars, parse["flat_lens"], ncl),
+    "config": c,
     "next_gid": ncl + 1, "status": 0,
     "stack": [], "gone": nvars >= 10000000 ? empty : i64[nvars + 2],
     "fla": parse["flat_lits"], "fcs": parse["flat_offs"],
@@ -3309,7 +3508,13 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   si = 0
   while si < stack.size
     e = stack[si]
-    if e["kind"] == "bve_var"
+    kind = e["kind"]
+    if kind == "flat_batch"
+      hdr = e["hdr"] ## i32[]
+      hs = e["hstart"] ## i64
+      he = e["hend"] ## i64
+      wassat_reconstruct_batch_defaults(hdr, sign, hs, he)
+    elsif kind == "bve_var"
       p = e["pivot"]
       sign[p.abs] = p > 0 ? -1 : 1
     si += 1
@@ -3317,7 +3522,14 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   si = stack.size - 1
   while si >= 0
     e = stack[si]
-    if e["kind"] == "bve"
+    kind = e["kind"]
+    if kind == "flat_batch"
+      hdr = e["hdr"] ## i32[]
+      lits = e["lits"] ## i32[]
+      hs = e["hstart"] ## i64
+      he = e["hend"] ## i64
+      wassat_reconstruct_batch_reverse(hdr, lits, sign, hs, he)
+    elsif kind == "bve"
       arr = e["lits"]
       sat = false
       i = 0
@@ -3328,9 +3540,9 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
       unless sat
         p = e["pivot"]
         sign[p.abs] = p > 0 ? 1 : -1
-    elsif e["kind"] == "counter_rewrite"
+    elsif kind == "counter_rewrite"
       z = wassat_counter_lift_sign(sign, e["gates"], e["meta"])
-    elsif e["kind"] == "subst"
+    elsif kind == "subst"
       r = e["rep"]
       rv = r > 0 ? sign[r.abs] : 0 - sign[r.abs]
       sign[e["var"]] = rv
@@ -3341,6 +3553,47 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     out.push(sign[v] >= 0 ? v : 0 - v)
     v += 1
   out
+
+-> wassat_reconstruct_batch_defaults(hdr, sign, hstart, hend) (i32[] i64[] i64 i64) i64
+  k = hstart
+  while k < hend
+    base = 4 * k
+    if hdr[base] == 1
+      p = hdr[base + 1]
+      pv = p >= 0 ? p : 0 - p
+      sign[pv] = p > 0 ? -1 : 1
+    k += 1
+  0
+
+-> wassat_reconstruct_batch_reverse(hdr, lits, sign, hstart, hend) (i32[] i32[] i64[] i64 i64) i64
+  k = hend - 1
+  while k >= hstart
+    base = 4 * k
+    tag = hdr[base]
+    if tag == 2
+      p = hdr[base + 1]
+      pv = p >= 0 ? p : 0 - p
+      pval = p > 0 ? sign[pv] : 0 - sign[pv]
+      if pval <= 0
+        off = hdr[base + 2]
+        len = hdr[base + 3]
+        sat = 0
+        j = 0
+        while j < len && sat == 0
+          l = lits[off + j]
+          lv = l >= 0 ? l : 0 - l
+          if (l > 0 ? sign[lv] : 0 - sign[lv]) > 0
+            sat = 1
+          j += 1
+        if sat == 0
+          sign[pv] = p > 0 ? 1 : -1
+    elsif tag == 3
+      yv = hdr[base + 1]
+      r = hdr[base + 2]
+      rv = r >= 0 ? r : 0 - r
+      sign[yv] = r > 0 ? sign[rv] : 0 - sign[rv]
+    k -= 1
+  0
 
 # Clause ids and proof ids remain stable. Store order makes source offsets
 # monotone, so live literals can be packed down in place. Rebuild occurrence
@@ -3374,4 +3627,456 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     ci += 1
   pm[0] = asize
   pm[1] = osize
+  0
+
+-> wassat_pre_recompute_ocount(fla, fcs, fcl, alive, ocount, ncl, nv) (i64[] i64[] i64[] i64[] i64[] i64 i64) i64
+  li = 0
+  limit = 2 * nv + 2
+  while li < limit
+    ocount[li] = 0
+    li += 1
+  ci = 0
+  while ci < ncl
+    if alive[ci] == 1
+      st = fcs[ci]
+      n = fcl[ci]
+      j = 0
+      while j < n
+        l = fla[st + j]
+        av = l >= 0 ? l : 0 - l
+        lidx = (av << 1) + (l < 0 ? 1 : 0)
+        ocount[lidx] = ocount[lidx] + 1
+        j += 1
+    ci += 1
+  0
+
+-> wassat_pre_fill_i8(arr, n, val) (i8[] i64 i64) i64
+  i = 0
+  while i < n
+    arr[i] = val
+    i += 1
+  0
+
+-> wassat_pre_copy_i32(src, dst, n) (i32[] i32[] i64) i64
+  i = 0
+  while i < n
+    dst[i] = src[i]
+    i += 1
+  0
+
+-> wassat_pre_retire_clause(fla, st, len, ocount, bve_dirty) (i64[] i64 i64 i64[] i8[]) i64
+  j = 0
+  while j < len
+    l = fla[st + j]
+    av = l >= 0 ? l : 0 - l
+    li = (av << 1) + (l < 0 ? 1 : 0)
+    ocount[li] = ocount[li] - 1 if ocount[li] > 0
+    bve_dirty[av] = 1
+    j += 1
+  0
+
+-> wassat_pre_delete_list(fla, fcs, fcl, falive, ocount, bve_dirty, list, n) (i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64) i64
+  i = 0
+  while i < n
+    ci = list[i]
+    if falive[ci] == 1
+      falive[ci] = 0
+      st = fcs[ci]
+      len = fcl[ci]
+      j = 0
+      while j < len
+        l = fla[st + j]
+        av = l >= 0 ? l : 0 - l
+        li = (av << 1) + (l < 0 ? 1 : 0)
+        ocount[li] = ocount[li] - 1 if ocount[li] > 0
+        bve_dirty[av] = 1
+        j += 1
+    i += 1
+  0
+
+-> wassat_pre_find_satisfied(fla, fcs, fcl, falive, ftaut, passign, keep_unit, doomed_out, ncl) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  ndoomed = 0
+  ci = 0
+  while ci < ncl
+    if falive[ci] == 1 && keep_unit[ci] == 0
+      if ftaut[ci] == 1
+        doomed_out[ndoomed] = ci
+        ndoomed += 1
+      else
+        st = fcs[ci]
+        len = fcl[ci]
+        sat = 0
+        j = 0
+        while j < len && sat == 0
+          l = fla[st + j]
+          av = l >= 0 ? l : 0 - l
+          pa = passign[av]
+          if (l > 0 && pa > 0) || (l < 0 && pa < 0)
+            sat = 1
+          j += 1
+        if sat == 1
+          doomed_out[ndoomed] = ci
+          ndoomed += 1
+    ci += 1
+  ndoomed
+
+-> wassat_pre_any_dirty(sub_dirty, falive, ftaut, ncl) (i8[] i64[] i64[] i64) i64
+  ci = 0
+  while ci < ncl
+    if sub_dirty[ci] == 1 && falive[ci] == 1 && ftaut[ci] == 0
+      return 1
+    ci += 1
+  0
+
+-> wassat_pre_subset_flat(fla, sst, slen, bst, blen) (i64[] i64 i64 i64 i64) i64
+  i = 0
+  while i < slen
+    l = fla[sst + i]
+    found = 0
+    j = 0
+    while j < blen && found == 0
+      found = 1 if fla[bst + j] == l
+      j += 1
+    return 0 if found == 0
+    i += 1
+  1
+
+-> wassat_pre_subset_one_flip_flat(fla, sst, slen, flip, bst, blen) (i64[] i64 i64 i64 i64 i64) i64
+  i = 0
+  while i < slen
+    l = fla[sst + i]
+    want = l == flip ? 0 - l : l
+    found = 0
+    j = 0
+    while j < blen && found == 0
+      found = 1 if fla[bst + j] == want
+      j += 1
+    return 0 if found == 0
+    i += 1
+  1
+
+-> wassat_pre_copy_without_lit(fla, st, len, drop_lit, dst) (i64[] i64 i64 i64 i64[]) i64
+  w = 0
+  i = 0
+  while i < len
+    l = fla[st + i]
+    if l != drop_lit
+      dst[w] = l
+      w += 1
+    i += 1
+  w
+
+-> wassat_pre_bve_parent_stats(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, v, out_pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[]) i64
+  npos = 0
+  pos_nonpiv = 0
+  w = och[2 * v]
+  while w >= 0
+    ci = ocv[w]
+    if falive[ci] == 1 && ftaut[ci] == 0
+      npos += 1
+      n = fcl[ci]
+      pos_nonpiv += n - 1 if n > 1
+    w = ocn[w]
+  nneg = 0
+  neg_nonpiv = 0
+  w = och[2 * v + 1]
+  while w >= 0
+    ci = ocv[w]
+    if falive[ci] == 1 && ftaut[ci] == 0
+      nneg += 1
+      n = fcl[ci]
+      neg_nonpiv += n - 1 if n > 1
+    w = ocn[w]
+  out_pm[0] = npos
+  out_pm[1] = pos_nonpiv
+  out_pm[2] = nneg
+  out_pm[3] = neg_nonpiv
+  0
+
+-> wassat_pre_push_bve_rstack(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, push_li, v, signed_piv, hdr, rlits, pm) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64 i64 i32[] i32[] i64[]) i64
+  hend = pm[0]
+  lsize = pm[1]
+  hbase = 4 * hend
+  hdr[hbase] = 1
+  hdr[hbase + 1] = signed_piv
+  hdr[hbase + 2] = 0
+  hdr[hbase + 3] = 0
+  hend += 1
+  w = och[push_li]
+  while w >= 0
+    ci = ocv[w]
+    if falive[ci] == 1 && ftaut[ci] == 0
+      st = fcs[ci]
+      n = fcl[ci]
+      loff = lsize
+      j = 0
+      while j < n
+        l = fla[st + j]
+        av = l >= 0 ? l : 0 - l
+        if av != v
+          rlits[lsize] = l
+          lsize += 1
+        j += 1
+      hbase = 4 * hend
+      hdr[hbase] = 2
+      hdr[hbase + 1] = signed_piv
+      hdr[hbase + 2] = loff
+      hdr[hbase + 3] = lsize - loff
+      hend += 1
+    w = ocn[w]
+  pm[0] = hend
+  pm[1] = lsize
+  0
+
+-> wassat_pre_retire_pivot_occ(fla, fcs, fcl, falive, ftaut, och, ocn, ocv, ocount, bve_dirty, v) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64) i64
+  side = 0
+  while side < 2
+    w = och[2 * v + side]
+    while w >= 0
+      ci = ocv[w]
+      if falive[ci] == 1 && ftaut[ci] == 0
+        falive[ci] = 0
+        st = fcs[ci]
+        len = fcl[ci]
+        j = 0
+        while j < len
+          l = fla[st + j]
+          av = l >= 0 ? l : 0 - l
+          li = (av << 1) + (l < 0 ? 1 : 0)
+          ocount[li] = ocount[li] - 1 if ocount[li] > 0
+          bve_dirty[av] = 1
+          j += 1
+      w = ocn[w]
+    side += 1
+  0
+
+-> wassat_pre_sort_probe_vars(passign, ocount, cnt, out, nv) (i64[] i64[] i64[] i32[] i64) i64
+  k = 0
+  while k <= 16384
+    cnt[k] = 0
+    k += 1
+  v = 1
+  while v <= nv
+    if passign[v] == 0
+      c = ocount[2 * v] + ocount[2 * v + 1]
+      b = 16383 - (c < 16383 ? c : 16383)
+      cnt[b + 1] = cnt[b + 1] + 1
+    v += 1
+  k = 0
+  while k < 16384
+    cnt[k + 1] = cnt[k + 1] + cnt[k]
+    k += 1
+  total = cnt[16384]
+  v = 1
+  while v <= nv
+    if passign[v] == 0
+      c = ocount[2 * v] + ocount[2 * v + 1]
+      b = 16383 - (c < 16383 ? c : 16383)
+      pos = cnt[b]
+      out[pos] = v
+      cnt[b] = pos + 1
+    v += 1
+  total
+
+-> wassat_pre_sort_bve_vars(passign, gone, frozen, bve_dirty, ocount, cnt, out, nv) (i64[] i64[] i64[] i8[] i64[] i64[] i32[] i64) i64
+  k = 0
+  while k <= 16384
+    cnt[k] = 0
+    k += 1
+  v = 1
+  while v <= nv
+    if passign[v] == 0 && gone[v] == 0 && frozen[v] == 0 && bve_dirty[v] == 1
+      c = ocount[2 * v] + ocount[2 * v + 1]
+      b = c < 16383 ? c : 16383
+      cnt[b + 1] = cnt[b + 1] + 1
+    v += 1
+  k = 0
+  while k < 16384
+    cnt[k + 1] = cnt[k + 1] + cnt[k]
+    k += 1
+  total = cnt[16384]
+  v = 1
+  while v <= nv
+    if passign[v] == 0 && gone[v] == 0 && frozen[v] == 0 && bve_dirty[v] == 1
+      c = ocount[2 * v] + ocount[2 * v + 1]
+      b = c < 16383 ? c : 16383
+      pos = cnt[b]
+      out[pos] = v
+      cnt[b] = pos + 1
+    v += 1
+  total
+
+-> wassat_pre_tarjan(offsets, targets, passign, index, low, oncur, comp, cur, frame_node, frame_child, st, n) (i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  i = 0
+  while i < n
+    index[i] = -1
+    comp[i] = -1
+    oncur[i] = 0
+    i += 1
+  next_idx = 0
+  next_comp = 0
+  cur_size = 0
+  peak = 0
+  ticks = 0
+  node = 2
+  while node < n
+    if index[node] < 0 && passign[node >> 1] == 0
+      depth = 1
+      peak = 1 if peak < 1
+      frame_node[0] = node
+      frame_child[0] = 0
+      while depth > 0
+        u = frame_node[depth - 1]
+        if frame_child[depth - 1] == 0
+          index[u] = next_idx
+          low[u] = next_idx
+          next_idx += 1
+          cur[cur_size] = u
+          cur_size += 1
+          oncur[u] = 1
+        start = offsets[u]
+        count = offsets[u + 1] - start
+        advanced = 0
+        k = frame_child[depth - 1]
+        while k < count && advanced == 0
+          w = targets[start + k]
+          ticks += 1
+          if index[w] < 0
+            frame_child[depth - 1] = k + 1
+            frame_node[depth] = w
+            frame_child[depth] = 0
+            depth += 1
+            peak = depth if depth > peak
+            advanced = 1
+          else
+            low[u] = low[w] if oncur[w] == 1 && low[w] < low[u]
+            k += 1
+        if advanced == 0
+          depth -= 1
+          if depth > 0
+            parent = frame_node[depth - 1]
+            low[parent] = low[u] if low[u] < low[parent]
+          if low[u] == index[u]
+            done = 0
+            while done == 0
+              cur_size -= 1
+              w = cur[cur_size]
+              oncur[w] = 0
+              comp[w] = next_comp
+              done = 1 if w == u
+            next_comp += 1
+    node += 1
+  st[0] = next_idx
+  st[1] = next_comp
+  st[2] = peak
+  st[3] = ticks
+  0
+
+-> wassat_pre_count_scc(comp, sizes, n, gpm) (i64[] i64[] i64 i64[]) i64
+  node = 2
+  while node < n
+    key = comp[node]
+    sizes[key] = sizes[key] + 1 if key >= 0
+    node += 1
+  singletons = 0
+  nontrivial_nodes = 0
+  node = 2
+  while node < n
+    key = comp[node]
+    if key >= 0
+      if sizes[key] > 1
+        nontrivial_nodes += 1
+      else
+        singletons += 1
+    node += 1
+  gpm[0] = singletons
+  gpm[1] = nontrivial_nodes
+  0
+
+-> wassat_pre_build_scc_csr(comp, sizes, grp_id, grp_offs, grp_cursor, grp_members, n) (i64[] i64[] i64[] i64[] i64[] i64[] i64) i64
+  i = 0
+  while i < n
+    grp_id[i] = -1
+    i += 1
+  ngrp = 0
+  total = 0
+  node = 2
+  while node < n
+    key = comp[node]
+    if key >= 0 && sizes[key] > 1
+      gid = grp_id[key]
+      if gid < 0
+        gid = ngrp
+        ngrp += 1
+        grp_id[key] = gid
+        grp_offs[gid] = total
+        grp_cursor[gid] = total
+        total += sizes[key]
+      pos = grp_cursor[gid]
+      grp_members[pos] = node
+      grp_cursor[gid] = pos + 1
+    node += 1
+  grp_offs[ngrp] = total
+  ngrp
+
+-> wassat_pre_collect_subst_csr(grp_offs, grp_members, seen, frozen, replit, gone, hdr, gstart, gend, spm) (i64[] i64[] i64[] i64[] i64[] i64[] i32[] i64 i64 i64[]) i64
+  status = spm[0]
+  vars_subst = spm[1]
+  hend = spm[2]
+  gi = gstart
+  while gi < gend && status == 0
+    mstart = grp_offs[gi]
+    mend = grp_offs[gi + 1]
+    contradiction_var = 0
+    mk = mstart
+    while mk < mend
+      v = grp_members[mk] >> 1
+      if seen[v] == 1
+        contradiction_var = v
+      else
+        seen[v] = 1
+      mk += 1
+    mk = mstart
+    while mk < mend
+      seen[grp_members[mk] >> 1] = 0
+      mk += 1
+    if contradiction_var > 0
+      status = -1
+    else
+      rep = 0
+      best = 0
+      already = 0
+      mk = mstart
+      while mk < mend
+        m = grp_members[mk]
+        v = m >> 1
+        l = (m & 1) == 0 ? v : 0 - v
+        rep = l if rep == 0 && frozen[v] == 1
+        bav = best >= 0 ? best : 0 - best
+        best = l if best == 0 || v < bav
+        already = 1 if replit[v] != 0
+        mk += 1
+      rep = best if rep == 0
+      if already == 0
+        mk = mstart
+        while mk < mend && status == 0
+          m = grp_members[mk]
+          yv = m >> 1
+          y = (m & 1) == 0 ? yv : 0 - yv
+          if y != rep && frozen[yv] == 0
+            r_for_y = yv == y ? rep : 0 - rep
+            replit[yv] = r_for_y
+            gone[yv] = 2
+            hbase = 4 * hend
+            hdr[hbase] = 3
+            hdr[hbase + 1] = yv
+            hdr[hbase + 2] = r_for_y
+            hdr[hbase + 3] = 0
+            hend += 1
+            vars_subst += 1
+          mk += 1
+    gi += 1
+  spm[0] = status
+  spm[1] = vars_subst
+  spm[2] = hend
   0

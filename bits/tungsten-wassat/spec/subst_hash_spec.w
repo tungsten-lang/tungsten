@@ -5,10 +5,10 @@ use ../lib/solver
   ncl = clauses.size
   total = 2 * ncl + 1
   clauses.each ->(c) total += c.size
-  cm = i64[2 * ncl]
+  cm = i32[2 * ncl]
   alive = i8[ncl]
   ar = i32[total]
-  clbd = i64[ncl]
+  clbd = i32[ncl]
   reprs = i64[2 * nv + 4]
   mark = i64[2 * nv + 4]
   ht = i64[capacity]

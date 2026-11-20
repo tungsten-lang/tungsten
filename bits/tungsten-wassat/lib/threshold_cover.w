@@ -297,7 +297,12 @@ fn wassat_tc_ctz(x) (i64) i64
       if n == 1
         total += 1
       else
-        return 0 - 1 if n > WASSAT_THRESHOLD_COVER_MIS_VERTICES
+        if n > WASSAT_THRESHOLD_COVER_MIS_VERTICES
+          z = ccall("w_value_free_w", ms)
+          z = ccall("w_value_free_w", local)
+          z = ccall("w_value_free_w", queue)
+          z = ccall("w_value_free_w", comp)
+          return 0 - 1
         w = (n + 61) / 62 ## i64
         nb = i64[n * w + 1]
         i = 0 ## i64
@@ -328,12 +333,122 @@ fn wassat_tc_ctz(x) (i64) i64
         ms[3] = 0
         ms[4] = deadline
         z = wassat_tc_mis(nb, w, pst, 0, 0, ms, tmp)
+        z = ccall("w_value_free_w", tmp)
+        z = ccall("w_value_free_w", pst)
+        z = ccall("w_value_free_w", nb)
         work[0] += ms[1]
-        return 0 - 1 if ms[3] != 0
+        if ms[3] != 0
+          z = ccall("w_value_free_w", ms)
+          z = ccall("w_value_free_w", local)
+          z = ccall("w_value_free_w", queue)
+          z = ccall("w_value_free_w", comp)
+          return 0 - 1
         total += ms[0]
-      return 0 - 1 if total >= need
+      if total >= need
+        z = ccall("w_value_free_w", ms)
+        z = ccall("w_value_free_w", local)
+        z = ccall("w_value_free_w", queue)
+        z = ccall("w_value_free_w", comp)
+        return 0 - 1
     s += 1
+  z = ccall("w_value_free_w", ms)
+  z = ccall("w_value_free_w", local)
+  z = ccall("w_value_free_w", queue)
+  z = ccall("w_value_free_w", comp)
   total
+
+-> wassat_tc_pair_fallback(fla, fcs, fcl, nv, nc, nlits, deadline, st2) (i64[] i64[] i64[] i64 i64 i64 i64 i64[]) i64
+  # A candidate is a clause (a | b) that comes with (-a | -b), the two nodes
+  # of a counter's first position, and whose variables each head some
+  # definition (occur negated in a three-literal clause that has a positive
+  # literal). Most formulas have none and stop here after two passes.
+  heads = i8[nv + 2]
+  ci = 0 ## i64
+  while ci < nc
+    if fcl[ci] == 3
+      off = fcs[ci] ## i64
+      x = fla[off] ## i64
+      y = fla[off + 1] ## i64
+      z3 = fla[off + 2] ## i64
+      if x > 0 || y > 0 || z3 > 0
+        heads[0 - x] = 1 if x < 0
+        heads[0 - y] = 1 if y < 0
+        heads[0 - z3] = 1 if z3 < 0
+    ci += 1
+  mate = i64[nv + 2]
+  found = 0 ## i64
+  ci = 0
+  while ci < nc
+    if fcl[ci] == 2
+      x = fla[fcs[ci]] ## i64
+      y = fla[fcs[ci] + 1] ## i64
+      if x > 0 && y > 0 && x != y && heads[x] == 1 && heads[y] == 1 && mate[x] == 0 && mate[y] == 0
+        mate[x] = y
+        mate[y] = x
+        found += 1
+    ci += 1
+  z = ccall("w_value_free_w", heads)
+  if found == 0
+    z = ccall("w_value_free_w", mate)
+    return 0
+  exact = i8[nv + 2]
+  ci = 0
+  while ci < nc
+    if fcl[ci] == 2
+      x = fla[fcs[ci]]
+      y = fla[fcs[ci] + 1]
+      exact[0 - x] = 1 if x < 0 && y < 0 && mate[0 - x] == 0 - y
+    ci += 1
+  tried = 0 ## i64
+  ci = 0
+  while ci < nc && tried < WASSAT_THRESHOLD_COVER_PAIR_ROOTS
+    if fcl[ci] == 2 && fla[fcs[ci]] > 0 && fla[fcs[ci] + 1] > 0 && mate[fla[fcs[ci]]] == fla[fcs[ci] + 1] && (exact[fla[fcs[ci]]] == 1 || exact[fla[fcs[ci] + 1]] == 1)
+      tried += 1
+      a = fla[fcs[ci]] ## i64
+      b = fla[fcs[ci] + 1] ## i64
+      xl = i64[nlits + 5]
+      xo = i64[nc + 3]
+      xn = i64[nc + 3]
+      i = 0 ## i64
+      while i < nlits
+        xl[i] = fla[i]
+        i += 1
+      i = 0
+      while i < nc
+        xo[i] = fcs[i]
+        xn[i] = fcl[i]
+        i += 1
+      r = nv + 1 ## i64
+      xo[nc] = nlits
+      xn[nc] = 1
+      xl[nlits] = r
+      xo[nc + 1] = nlits + 1
+      xn[nc + 1] = 3
+      xl[nlits + 1] = 0 - r
+      xl[nlits + 2] = a
+      xl[nlits + 3] = b
+      i = 0
+      while i < 16
+        st2[i] = 0
+        i += 1
+      hit = wassat_tc_run(xl, xo, xn, nv + 1, nc + 2, st2, deadline) ## i64
+      z = ccall("w_value_free_w", xn)
+      z = ccall("w_value_free_w", xo)
+      z = ccall("w_value_free_w", xl)
+      if hit == 1
+        st2[12] = a
+        st2[13] = b
+        z = ccall("w_value_free_w", exact)
+        z = ccall("w_value_free_w", mate)
+        return 1
+      if st2[7] == 3
+        z = ccall("w_value_free_w", exact)
+        z = ccall("w_value_free_w", mate)
+        return 0
+    ci += 1
+  z = ccall("w_value_free_w", exact)
+  z = ccall("w_value_free_w", mate)
+  0
 
 # Returns { "status": 0 or -1, "work": st }.
 -> wassat_threshold_cover_unsat(formula, deadline = 0)
@@ -343,91 +458,25 @@ fn wassat_tc_ctz(x) (i64) i64
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return miss if nv < 4 || nv > WASSAT_THRESHOLD_COVER_MAX_VARS || nc < 4 || nc > WASSAT_THRESHOLD_COVER_MAX_CLAUSES
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  if cfg != nil
+    return miss if (cfg.binary + cfg.ternary) == 0
+    return miss if cfg.units == 0 && (cfg.ternary == 0 || cfg.binary < 2)
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
-  hit = wassat_tc_run(fla, fcs, fcl, nv, nc, st, deadline)
+  hit = (cfg != nil && cfg.units == 0) ? 0 : wassat_tc_run(fla, fcs, fcl, nv, nc, st, deadline)
   return { "status": 0 - 1, "work": st } if hit == 1
   # No unit clause gave a count. A positive clause (a | b) can stand in for
   # one: with a fresh variable r, the clauses (r) and (-r | a | b) say the
   # same thing, and r is a root whose demand is the smaller of the two. A
   # path counter written as one node per (position, count) starts this way.
   return miss if st[7] == 3 || nc > WASSAT_THRESHOLD_COVER_PAIR_CLAUSES
+  return miss if cfg != nil && (cfg.ternary == 0 || cfg.binary < 2)
   nlits = formula["flat_nlits"]
-  # A candidate is a clause (a | b) that comes with (-a | -b), the two nodes
-  # of a counter's first position, and whose variables each head some
-  # definition (occur negated in a three-literal clause that has a positive
-  # literal). Most formulas have none and stop here after two passes.
-  heads = i8[nv + 2]
-  ci = 0
-  while ci < nc
-    if fcl[ci] == 3
-      off = fcs[ci]
-      x = fla[off]
-      y = fla[off + 1]
-      z = fla[off + 2]
-      if x > 0 || y > 0 || z > 0
-        heads[0 - x] = 1 if x < 0
-        heads[0 - y] = 1 if y < 0
-        heads[0 - z] = 1 if z < 0
-    ci += 1
-  mate = i64[nv + 2]
-  found = 0
-  ci = 0
-  while ci < nc
-    if fcl[ci] == 2
-      x = fla[fcs[ci]]
-      y = fla[fcs[ci] + 1]
-      if x > 0 && y > 0 && x != y && heads[x] == 1 && heads[y] == 1 && mate[x] == 0 && mate[y] == 0
-        mate[x] = y
-        mate[y] = x
-        found += 1
-    ci += 1
-  return miss if found == 0
-  exact = i8[nv + 2]
-  ci = 0
-  while ci < nc
-    if fcl[ci] == 2
-      x = fla[fcs[ci]]
-      y = fla[fcs[ci] + 1]
-      exact[0 - x] = 1 if x < 0 && y < 0 && mate[0 - x] == 0 - y
-    ci += 1
-  tried = 0
-  ci = 0
-  while ci < nc && tried < WASSAT_THRESHOLD_COVER_PAIR_ROOTS
-    if fcl[ci] == 2 && fla[fcs[ci]] > 0 && fla[fcs[ci] + 1] > 0 && mate[fla[fcs[ci]]] == fla[fcs[ci] + 1] && (exact[fla[fcs[ci]]] == 1 || exact[fla[fcs[ci] + 1]] == 1)
-      tried += 1
-      a = fla[fcs[ci]]
-      b = fla[fcs[ci] + 1]
-      xl = i64[nlits + 5]
-      xo = i64[nc + 3]
-      xn = i64[nc + 3]
-      i = 0
-      while i < nlits
-        xl[i] = fla[i]
-        i += 1
-      i = 0
-      while i < nc
-        xo[i] = fcs[i]
-        xn[i] = fcl[i]
-        i += 1
-      r = nv + 1
-      xo[nc] = nlits
-      xn[nc] = 1
-      xl[nlits] = r
-      xo[nc + 1] = nlits + 1
-      xn[nc + 1] = 3
-      xl[nlits + 1] = 0 - r
-      xl[nlits + 2] = a
-      xl[nlits + 3] = b
-      st2 = i64[16]
-      hit = wassat_tc_run(xl, xo, xn, nv + 1, nc + 2, st2, deadline)
-      if hit == 1
-        st2[12] = a
-        st2[13] = b
-        return { "status": 0 - 1, "work": st2 }
-      return miss if st2[7] == 3
-    ci += 1
+  st2 = i64[16]
+  return { "status": 0 - 1, "work": st2 } if wassat_tc_pair_fallback(fla, fcs, fcl, nv, nc, nlits, deadline, st2) == 1
+  z = ccall("w_value_free_w", st2)
   miss
 
 # One pass over the unit-asserted roots of the clauses given. Fills st and
@@ -468,7 +517,11 @@ fn wassat_tc_ctz(x) (i64) i64
   while i < nroot
     anydef = 1 if nst[roots[i] + 1] > 0
     i += 1
-  return 0 if anydef == 0
+  if anydef == 0
+    z = ccall("w_value_free_w", dead)
+    z = ccall("w_value_free_w", nst)
+    z = ccall("w_value_free_w", roots)
+    return 0
   v = 0
   while v <= nv
     nst[v + 1] += nst[v]
@@ -490,6 +543,7 @@ fn wassat_tc_ctz(x) (i64) i64
             nfill[x] += 1
           j += 1
     ci += 1
+  z = ccall("w_value_free_w", nfill)
   out = i64[4]
   # kind[v]: 0 unseen, 1 node, 2 leaf.  A node has a binary definition with a
   # positive tail or a ternary one with two positive tails.
@@ -859,6 +913,7 @@ fn wassat_tc_ctz(x) (i64) i64
                 mwork = i64[2]
                 alpha = wassat_tc_alpha(ast, adj, inroot, nleaf, k_need, mwork, deadline)
                 st[10] += mwork[0]
+                z = ccall("w_value_free_w", mwork)
                 if alpha >= 0 && k_need > alpha
                   st[3] = alpha
                   st[9] = 1
@@ -877,9 +932,26 @@ fn wassat_tc_ctz(x) (i64) i64
                     zero[i] = 1
                     singles += 1
                   i += 1
+                z = ccall("w_value_free_w", gsize)
                 groups1 = groups
+              z = ccall("w_value_free_w", seen)
+              z = ccall("w_value_free_w", hstamp)
+              z = ccall("w_value_free_w", hits)
+              z = ccall("w_value_free_w", grp)
+              z = ccall("w_value_free_w", afill)
+              z = ccall("w_value_free_w", adj)
+              z = ccall("w_value_free_w", ast)
+            z = ccall("w_value_free_w", inroot)
           tcpass += 1
           tcpass = 2 if singles == 0
+        z = ccall("w_value_free_w", zero)
+        z = ccall("w_value_free_w", tk)
+        z = ccall("w_value_free_w", tl)
+        z = ccall("w_value_free_w", acc)
+        z = ccall("w_value_free_w", need)
+        z = ccall("w_value_free_w", sup)
+        z = ccall("w_value_free_w", lbit)
+        z = ccall("w_value_free_w", lw)
     # Once the definitions are read one way only, both ways get a turn: a
     # counter laid out position by position counts in one direction.
     retry = 1 if dir == 1 && st[0] == 0 && st[7] == 0
@@ -888,6 +960,18 @@ fn wassat_tc_ctz(x) (i64) i64
     else
       dir = 0
       ri += 1
+  z = ccall("w_value_free_w", defd)
+  z = ccall("w_value_free_w", spos)
+  z = ccall("w_value_free_w", stack)
+  z = ccall("w_value_free_w", order)
+  z = ccall("w_value_free_w", nid)
+  z = ccall("w_value_free_w", state)
+  z = ccall("w_value_free_w", kind)
+  z = ccall("w_value_free_w", out)
+  z = ccall("w_value_free_w", nocc)
+  z = ccall("w_value_free_w", dead)
+  z = ccall("w_value_free_w", nst)
+  z = ccall("w_value_free_w", roots)
   st[0]
 
 # A covering bound with overlaps.
@@ -920,28 +1004,18 @@ fn wassat_tc_ctz(x) (i64) i64
 WASSAT_COVER_BOUND_MAX_VARS = 1024
 WASSAT_COVER_BOUND_MAX_PAIRS = 8000000
 
-# st slots: 0 status, 1 positive clauses, 2 bound, 3 groups, 4 variables, 5 least overlap.
--> wassat_cover_bound_unsat(formula)
-  st = i64[8]
-  miss = { "status": 0, "work": st }
-  return miss unless formula.has_key?("flat_ncl")
-  nv = formula["nvars"]
-  nc = formula["flat_ncl"]
-  return miss if nv < 3 || nv > WASSAT_THRESHOLD_COVER_MAX_VARS || nc < 3 || nc > WASSAT_THRESHOLD_COVER_MAX_CLAUSES
-  fla = formula["flat_lits"] ## i64[]
-  fcs = formula["flat_offs"] ## i64[]
-  fcl = formula["flat_lens"] ## i64[]
+-> wassat_cover_bound_run(fla, fcs, fcl, nv, nc, st) (i64[] i64[] i64[] i64 i64 i64[]) i64
   idx = i64[nv + 2]
-  nvp = 0
-  npos = 0
-  pairs = 0
-  ci = 0
+  nvp = 0 ## i64
+  npos = 0 ## i64
+  pairs = 0 ## i64
+  ci = 0 ## i64
   while ci < nc
-    n = fcl[ci]
+    n = fcl[ci] ## i64
     if n >= 2
-      off = fcs[ci]
-      pos = 1
-      j = 0
+      off = fcs[ci] ## i64
+      pos = 1 ## i64
+      j = 0 ## i64
       while j < n && pos == 1
         pos = 0 if fla[off + j] < 0
         j += 1
@@ -950,27 +1024,31 @@ WASSAT_COVER_BOUND_MAX_PAIRS = 8000000
         pairs += n * n
         j = 0
         while j < n
-          x = fla[off + j]
+          x = fla[off + j] ## i64
           if idx[x] == 0
             nvp += 1
             idx[x] = nvp
           j += 1
-        return miss if nvp > WASSAT_COVER_BOUND_MAX_VARS || pairs > WASSAT_COVER_BOUND_MAX_PAIRS
+        if nvp > WASSAT_COVER_BOUND_MAX_VARS || pairs > WASSAT_COVER_BOUND_MAX_PAIRS
+          z = ccall("w_value_free_w", idx)
+          return 0
     ci += 1
-  return miss if npos < 2 || nvp < 2
+  if npos < 2 || nvp < 2
+    z = ccall("w_value_free_w", idx)
+    return 0
   st[1] = npos
   st[4] = nvp
   deg = i64[nvp + 2]
   co = i64[(nvp + 1) * (nvp + 1) + 1]
-  w = nvp + 1
+  w = nvp + 1 ## i64
   ast = i64[nvp + 3]
   ci = 0
   while ci < nc
     n = fcl[ci]
     off = fcs[ci]
     if n == 2 && fla[off] < 0 && fla[off + 1] < 0
-      a = idx[0 - fla[off]]
-      b = idx[0 - fla[off + 1]]
+      a = idx[0 - fla[off]] ## i64
+      b = idx[0 - fla[off + 1]] ## i64
       if a != 0 && b != 0 && a != b
         ast[a + 1] += 1
         ast[b + 1] += 1
@@ -985,8 +1063,8 @@ WASSAT_COVER_BOUND_MAX_PAIRS = 8000000
         j = 0
         while j < n
           a = idx[fla[off + j]]
-          first = 1
-          k = 0
+          first = 1 ## i64
+          k = 0 ## i64
           while k < j
             first = 0 if fla[off + k] == fla[off + j]
             k += 1
@@ -995,8 +1073,8 @@ WASSAT_COVER_BOUND_MAX_PAIRS = 8000000
             k = j + 1
             while k < n
               b = idx[fla[off + k]]
-              dup = 0
-              q = 0
+              dup = 0 ## i64
+              q = 0 ## i64
               while q < k
                 dup = 1 if fla[off + q] == fla[off + k]
                 q += 1
@@ -1006,7 +1084,7 @@ WASSAT_COVER_BOUND_MAX_PAIRS = 8000000
               k += 1
           j += 1
     ci += 1
-  i = 0
+  i = 0 ## i64
   while i <= nvp
     ast[i + 1] += ast[i]
     i += 1
@@ -1024,22 +1102,24 @@ WASSAT_COVER_BOUND_MAX_PAIRS = 8000000
         adj[ast[b] + afill[b]] = a
         afill[b] += 1
     ci += 1
+  z = ccall("w_value_free_w", afill)
+  z = ccall("w_value_free_w", idx)
   grp = i64[nvp + 2]
   hits = i64[nvp + 2]
   hstamp = i64[nvp + 2]
   seen = i64[nvp + 2]
-  groups = 0
-  sid = 0
+  groups = 0 ## i64
+  sid = 0 ## i64
   i = 1
   while i <= nvp
     if grp[i] == 0
       groups += 1
       grp[i] = groups
-      size = 1
+      size = 1 ## i64
       sid += 1
-      t = ast[i]
+      t = ast[i] ## i64
       while t < ast[i + 1]
-        u = adj[t]
+        u = adj[t] ## i64
         if seen[u] != sid
           seen[u] = sid
           hstamp[u] = groups
@@ -1052,41 +1132,67 @@ WASSAT_COVER_BOUND_MAX_PAIRS = 8000000
           grp[u] = groups
           size += 1
           sid += 1
-          t2 = ast[u]
+          t2 = ast[u] ## i64
           while t2 < ast[u + 1]
-            w3 = adj[t2]
+            w3 = adj[t2] ## i64
             if seen[w3] != sid
               seen[w3] = sid
               hits[w3] += 1 if hstamp[w3] == groups
             t2 += 1
         t += 1
     i += 1
+  z = ccall("w_value_free_w", seen)
+  z = ccall("w_value_free_w", hstamp)
+  z = ccall("w_value_free_w", hits)
+  z = ccall("w_value_free_w", adj)
+  z = ccall("w_value_free_w", ast)
   st[3] = groups
   gmax = i64[groups + 2]
   i = 1
   while i <= nvp
     gmax[grp[i]] = deg[i] if deg[i] > gmax[grp[i]]
     i += 1
-  least = 0 - 1
+  z = ccall("w_value_free_w", deg)
+  least = 0 - 1 ## i64
   a = 1
   while a <= nvp
     b = a + 1
     while b <= nvp
       if grp[a] != grp[b]
-        c = co[a * w + b]
+        c = co[a * w + b] ## i64
         least = c if least < 0 || c < least
       b += 1
     a += 1
+  z = ccall("w_value_free_w", co)
+  z = ccall("w_value_free_w", grp)
   least = 0 if least < 0
   st[5] = least
-  bound = 0
-  g = 1
+  bound = 0 ## i64
+  g = 1 ## i64
   while g <= groups
     bound += gmax[g]
     g += 1
+  z = ccall("w_value_free_w", gmax)
   bound -= (groups - 1) * least
   st[2] = bound
   if bound < npos
     st[0] = 1
-    return { "status": 0 - 1, "work": st }
+    return 1
+  0
+
+# st slots: 0 status, 1 positive clauses, 2 bound, 3 groups, 4 variables, 5 least overlap.
+-> wassat_cover_bound_unsat(formula)
+  st = i64[8]
+  miss = { "status": 0, "work": st }
+  return miss unless formula.has_key?("flat_ncl")
+  nv = formula["nvars"]
+  nc = formula["flat_ncl"]
+  return miss if nv < 3 || nv > WASSAT_THRESHOLD_COVER_MAX_VARS || nc < 3 || nc > WASSAT_THRESHOLD_COVER_MAX_CLAUSES
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  if cfg != nil
+    return miss if cfg.binary == 0 || (cfg.binary + cfg.ternary + cfg.large) < 3
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
+  return { "status": 0 - 1, "work": st } if wassat_cover_bound_run(fla, fcs, fcl, nv, nc, st) == 1
   miss

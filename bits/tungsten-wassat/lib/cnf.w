@@ -100,11 +100,12 @@
   offs = formula["flat_offs"]
   lens = formula["flat_lens"]
   ncl = formula["flat_ncl"]
+  interleaved = lens.size == 0
   clauses = []
   k = 0
   while k < ncl
-    o = offs[k]
-    n = lens[k]
+    o = interleaved ? offs[2 * k] : offs[k]
+    n = interleaved ? offs[2 * k + 1] : lens[k]
     c = []
     j = 0
     while j < n
@@ -135,7 +136,9 @@
     "flat_lits": lits, "flat_offs": offs, "flat_lens": lens,
     "flat_ncl": parsed["clauses"].size, "flat_nlits": lits.size }
 
--> wassat_parse_cnf_header_clauses(text) (String) i64
+-> wassat_parse_cnf_header_pair(text, out) (String i64[]) i64
+  out[0] = 0
+  out[1] = 0
   limit = text.size
   limit = 65536 if limit > 65536
   i = 0
@@ -147,7 +150,11 @@
         j = i + 6
         while j < limit && text.byte_at(j) == 32
           j += 1
+        nv = 0
+        has_nv = false
         while j < limit && text.byte_at(j) >= 48 && text.byte_at(j) <= 57
+          nv = nv * 10 + (text.byte_at(j) - 48)
+          has_nv = true
           j += 1
         while j < limit && text.byte_at(j) == 32
           j += 1
@@ -159,40 +166,53 @@
           j += 1
         # A digit run cut by the hint window may be only a prefix of the
         # actual clause count. Ignore it and let the strict scanner decide.
-        return decl if has_digit && decl > 0 && j < limit
+        if has_nv && has_digit && decl > 0 && j < limit
+          out[0] = nv
+          out[1] = decl
+          return decl
     while i < limit && text.byte_at(i) != 10
       i += 1
     i += 1
   0
 
--> wassat_parse_cnf_native(text)
-  if env("TUNGSTEN_WASSAT_PARSE_STUB") == "1"
-    return wassat_parse_cnf_test_stub(text)
-  # Every clause needs at least a "0" terminator plus a separator (2 bytes),
-  # and every literal at least a digit plus a separator (2 bytes), so
-  # text.size/2 bounds BOTH counts. On multi-hundred-MB DIMACS files (e.g.
-  # 754 MB / 35.6M clauses), sizing offs and lens at text.size/2 allocates
-  # >9 GiB before parsing begins, exceeding a common 8 GiB process ceiling;
-  # use the p-line clause count when present to tighten the initial caps.
-  # Apply the same bounded hint scan to medium files too; byte-based clause
-  # tables otherwise overallocate heavily even for a short scout solve.
-  cap_l = text.size / 2 + 64
+-> wassat_parse_cnf_header_clauses(text) (String) i64
+  pair = i64[2]
+  wassat_parse_cnf_header_pair(text, pair)
+
+-> wassat_estimate_cnf_caps(byte_len, prefix, caps) (i64 String i64[]) i64
+  cap_l = byte_len / 2 + 64
   fallback_l = cap_l
-  cap_c = text.size / 2 + 64
-  if text.size >= 65536
-    decl = wassat_parse_cnf_header_clauses(text)
+  cap_c = byte_len / 2 + 64
+  if byte_len >= 65536 && prefix != nil
+    pair = i64[2]
+    decl = wassat_parse_cnf_header_pair(prefix, pair)
+    nv = pair[0]
     if decl > 0 && decl + 64 < cap_c
       cap_c = decl + 64
-      rem_bytes = text.size - 2 * decl
+      rem_bytes = byte_len - 2 * decl
       if rem_bytes > 0
         fallback_l = rem_bytes / 2 + 64
-        # Three bytes per literal is only an estimate, not a bound.
-        # Short positive literals may require the conservative retry below.
-        if text.size >= 400000000 && decl >= 20000000
+        if nv >= 1000 && byte_len >= 1048576
+          est = rem_bytes / 5 + 64
+          floor_l = 2 * decl + 64
+          est = floor_l if est < floor_l
+          est = fallback_l if est > fallback_l
+          cap_l = est
+        elsif byte_len >= 400000000 && decl >= 20000000
           cap_l = rem_bytes / 3 + 64
         else
           cap_l = rem_bytes / 2 + 64
-  wassat_parse_cnf_native_buffers(text, cap_l, cap_c, fallback_l)
+  caps[0] = cap_l
+  caps[1] = cap_c
+  caps[2] = fallback_l
+  0
+
+-> wassat_parse_cnf_native(text)
+  if env("TUNGSTEN_WASSAT_PARSE_STUB") == "1"
+    return wassat_parse_cnf_test_stub(text)
+  caps = i64[3]
+  wassat_estimate_cnf_caps(text.size, text, caps)
+  wassat_parse_cnf_native_buffers(text, caps[0], caps[1], caps[2])
 
 # Check the complete strict scan before trusting its counts or publishing data.
 -> wassat_parse_cnf_check_header(hdr)
@@ -218,6 +238,12 @@
   cap_l = hdr[3] + 1
   cap_c = hdr[2] + 2
   wassat_parse_cnf_native_buffers(mapping, cap_l, cap_c, cap_l)
+
+-> wassat_parse_cnf_mapped_fast(mapping, prefix)
+  return wassat_parse_cnf_mapped(mapping) if mapping.size > 2147483647 || prefix == nil
+  caps = i64[3]
+  wassat_estimate_cnf_caps(mapping.size, prefix, caps)
+  wassat_parse_cnf_native_buffers(mapping, caps[0], caps[1], caps[2])
 
 -> wassat_parse_cnf_file_native(path)
   mapping = File.mmap(path)

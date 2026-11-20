@@ -11,7 +11,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     ar = i32[1]
     asg = i8[4]
     lasg = i8[10]
-    lvl = i64[4]
+    lvl = i32[4]
     rsn = i32[4]
     phs = i8[4]
     wd = i32[40]
@@ -43,7 +43,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     wassat_ws_add(wd, wp, ws, 3, 70001, 3)
     asg = i8[4]
     lasg = i8[10]
-    lvl = i64[4]
+    lvl = i32[4]
     rsn = i32[4]
     phs = i8[4]
     tr = i32[4]
@@ -69,7 +69,7 @@ describe "Packed watch words above the boxed small-integer range" ->
     ar[70001] = -1
     ar[70002] = 2
     ar[70003] = 3
-    cm = i64[2]
+    cm = i32[2]
     cm[0] = 70001
     cm[1] = 3
     alive = i8[1]

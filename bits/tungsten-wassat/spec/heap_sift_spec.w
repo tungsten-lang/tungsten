@@ -3,7 +3,7 @@ use ../lib/solver
 
 describe "Stable heap sifting" ->
   it "preserves equal-priority removal order" ->
-    heap = i64[8]
+    heap = i32[8]
     pos = i32[8]
     act = i64[8]
     state = i64[2]
@@ -19,7 +19,7 @@ describe "Stable heap sifting" ->
       expect(wassat_heap_valid(heap, pos, act, state, 7)).to eq(1)
 
   it "maintains inverse positions and maximum priority through repeated bumps" ->
-    heap = i64[128]
+    heap = i32[128]
     pos = i32[128]
     act = i64[128]
     state = i64[2]
@@ -48,7 +48,7 @@ describe "Stable heap sifting" ->
       expect(wassat_heap_valid(heap, pos, act, state, 127)).to eq(1)
 
   it "does not inspect absent entries when sifting an empty heap" ->
-    heap = i64[0]
+    heap = i32[0]
     pos = i32[0]
     act = i64[0]
     state = i64[2]
@@ -56,7 +56,7 @@ describe "Stable heap sifting" ->
     expect(wassat_heap_up(heap, pos, act, 0)).to eq(0)
 
   it "preserves a parent tie when an activity bump rescales the heap" ->
-    heap = i64[3]
+    heap = i32[3]
     pos = i32[3]
     act = i64[3]
     state = i64[2]
@@ -74,7 +74,7 @@ describe "Stable heap sifting" ->
     expect(pos[2]).to eq(1)
 
   it "uses the rescaled increment for the rest of an activity batch" ->
-    heap = i64[3]
+    heap = i32[3]
     pos = i32[5]
     act = i64[5]
     state = i64[2]

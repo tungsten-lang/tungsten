@@ -427,10 +427,12 @@ use cover_split
   tprof = wassat_prof_clock
   cnf_text = ""
   cnf_mapping = nil
+  cnf_prefix = nil
   input_bytes = File.size(input)
-  if input_bytes != nil && input_bytes > 2147483647
+  if input_bytes != nil && input_bytes >= 1048576 && env("TUNGSTEN_WASSAT_PARSE_STUB") != "1"
     cnf_mapping = File.mmap(input)
-  else
+    cnf_prefix = File.read_prefix(input, 65536) if cnf_mapping != nil && input_bytes <= 2147483647
+  if cnf_mapping == nil
     cnf_text = read_file(input)
     raise "cannot read input formula '[input]'" if cnf_text == nil
   formula = nil
@@ -442,14 +444,19 @@ use cover_split
     wassat_clear_output(drat_final, input, "DRAT")
     if cnf_mapping == nil
       formula = wassat_parse_cnf_native(cnf_text)
+    elsif input_bytes <= 2147483647 && cnf_prefix != nil
+      formula = wassat_parse_cnf_mapped_fast(cnf_mapping, cnf_prefix)
     else
       formula = wassat_parse_cnf_mapped(cnf_mapping)
   ensure
+    if cnf_prefix != nil
+      z = ccall("w_value_free_w", cnf_prefix)
     if cnf_mapping != nil
       cnf_mapping.close
     else
       z = ccall("w_value_free_w", cnf_text)
   cnf_text = ""
+  cnf_prefix = nil
   tprof = wassat_prof("cli.parse", tprof)
   parity_source = nil
   if proof_mode == WASSAT_PROOF_NONE
@@ -464,6 +471,7 @@ use cover_split
   config = WassatConfig.from_lens(
     formula["nvars"], formula["flat_lens"], formula["flat_ncl"]
   )
+  formula["config"] = config
   if config_started != 0
     z = wassat_prof("config.shape", config_started)
     z = wassat_prof_note("config.shape scanned_clauses=[formula["flat_ncl"]]")
@@ -2357,32 +2365,23 @@ use cover_split
                                    scout_lucky ? 1 : 0)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
           if pre_arms > 0
-            # A preprocessor per arm: two threads rendering through one would
-            # race on its arena. Constructed HERE, on the main thread, because
-            # construction is the one part that touches the parsed formula's
-            # boxed clauses while another arm might be reading them.
-            plight = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, cdcl_formula)
-            plight.set_budget(wassat_pre_light_ticks)
-            # Stamped here, a wall deadline would run out during the turns
-            # taken before this arm's: sequential renderings are bounded by
-            # their tick budgets alone.
+            # Each preprocessing arm constructs its own WassatPreprocess inside
+            # its worker thread on round 0 from immutable flat arrays, taking
+            # pre_arena zero-fills off the coordinator's critical path and
+            # stamping its wall deadline when the arm actually starts.
             pre_stage_ms = wassat_pre_stage_ms
             pre_stage_ms = 0 if wassat_sequential?
-            plight.set_deadline_ms(pre_stage_ms)
-            plight.force_full_pipeline
-            # The arm renders the formula its buffers were sized for. Left
-            # to the default it rendered the race's formula (the input as
-            # written), which ignored the gate closure and overran the
-            # buffers once the closure's formula became the smaller one.
-            wassat_race_add_pre(race, plight, false, "light", cdcl_formula)
+            light_ticks = wassat_pre_light_ticks
+            wassat_race_add_pre_deferred(
+              race, cdcl_formula, false, "light", light_ticks, 0,
+              pre_stage_ms, true
+            )
             if pre_arms > 1
               pheavy_f = quad_shift > 0 ? orig_formula : cdcl_formula
-              pheavy = WassatPreprocess.new(pheavy_f["nvars"], [], WASSAT_PROOF_NONE, pheavy_f)
-              pheavy.set_budget(wassat_pre_light_ticks)
-              pheavy.set_deadline_ms(pre_stage_ms)
-              pheavy.set_heavy_budget(wassat_pre_heavy_ticks, pre_stage_ms)
-              pheavy.force_full_pipeline
-              wassat_race_add_pre(race, pheavy, true, "heavy", pheavy_f)
+              wassat_race_add_pre_deferred(
+                race, pheavy_f, true, "heavy", light_ticks,
+                wassat_pre_heavy_ticks, pre_stage_ms, true
+              )
         # Every CDCL arm shares one lock-free ticket pool containing what
         # remains of the aggregate budget. The last ticket publishes
         # cancellation after its conflict is fully analyzed, so the race
@@ -2470,10 +2469,18 @@ use cover_split
           if r2 == 0
             exit(prc == 20 ? 20 : 10)
           probe_p = nil
+  elsif proof_mode == WASSAT_PROOF_DRAT && formula["flat_ncl"] > wassat_pre_max_clauses
+    art = wassat_raw_artifact(formula, formula["nvars"])
   else
     pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula)
     pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
+    if proof_mode == WASSAT_PROOF_DRAT
+      pre.enable_flat_proof_output
+      if formula["flat_ncl"] > 100000
+        pre.set_budget(wassat_pre_light_ticks)
+        pre.set_heavy_budget(wassat_pre_heavy_ticks, 0)
     art = pre.run
+    pre = nil
   pre_ms = ccall("__w_clock_ms") - t0
   pstats = wassat_pre_stats_text(art["stats"], pre_ms)
 
@@ -2520,17 +2527,25 @@ use cover_split
     s.enable_chrono if art["raw"] == true
     s.simplify_raw if config.force_simplify? && s != scout_solver
     tprof = wassat_prof("cli.from_flat", tprof)
+  elsif proof_mode == WASSAT_PROOF_DRAT
+    s = Wassat.from_flat(formula["nvars"], art, 0, proof_mode)
+    unless art["raw"] == true
+      z = ccall("w_value_free_w", art["fla"])
+      z = ccall("w_value_free_w", art["fcs"])
+      z = ccall("w_value_free_w", art["fcl"])
+      z = ccall("w_value_free_w", art["falive"])
+      z = ccall("w_value_free_w", art["ftaut"])
+      z = ccall("w_value_free_w", art["fpgid"])
+      art["fla"] = nil
+      art["fcs"] = nil
+      art["fcl"] = nil
+      art["falive"] = nil
+      art["ftaut"] = nil
+      art["fpgid"] = nil
+    tprof = wassat_prof("cli.from_flat", tprof)
   else
     s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, 0)
     s.seed_proof_ids(art["gids"], art["next_gid"])
-    # The schedule, target phases and chronological backtracking change only
-    # which clauses get learned, and each learned clause is RUP whatever the
-    # trail order (policy use_proof_kissat_search). DRAT only: WRAT hints
-    # are collected along the trail.
-    if proof_mode == WASSAT_PROOF_DRAT
-      s.enable_kissat_search if config.use_proof_kissat_search && !s.kissat_search?
-      s.enable_target_phases if config.use_proof_target_phases
-      s.enable_chrono if config.use_proof_chrono
 
   # File destinations stream during search so certificate memory stays flat;
   # `-` destinations render from the in-memory arrays after the fact. When
@@ -2725,7 +2740,8 @@ use cover_split
   raise "--noise only applies with --gpu" if noise_seen && !gpu
   cnf_text = read_file(input)
   raise "cannot read input formula '[input]'" if cnf_text == nil
-  formula = wassat_parse_cnf(cnf_text)
+  formula = wassat_parse_cnf_native(cnf_text)
+  z = wassat_formula_clauses(formula) if gpu
   r = nil
   if pre
     # SLS over the preprocessed kernel: the structured shell (root

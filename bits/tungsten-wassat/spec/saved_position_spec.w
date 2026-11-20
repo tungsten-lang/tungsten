@@ -11,7 +11,7 @@ use ../lib/solver
   if pos > 0
     ar[1] = 2147483648 | (pos << 15) | width
   asg = i8[width + 1]; lasg = i8[2 * width + 4]
-  lvl = i64[width + 1]; rsn = i32[width + 2]; phs = i8[width + 1]
+  lvl = i32[width + 1]; rsn = i32[width + 2]; phs = i8[width + 1]
   i = 1
   while i <= width
     ar[i + 1] = i

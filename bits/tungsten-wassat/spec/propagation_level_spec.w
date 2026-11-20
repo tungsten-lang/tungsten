@@ -21,7 +21,7 @@ use ../lib/solver
   lasg[5] = positive_tail ? 1 : -1
   lasg[6] = -1
   lasg[7] = 1
-  lvl = i64[5]
+  lvl = i32[5]
   lvl[1] = trigger
   lvl[2] = second
   lvl[3] = third
@@ -80,7 +80,7 @@ describe "Chronological implication levels" ->
   ar[2] = flip ? -2 : 1
   ar[3] = flip ? 1 : -2
   asg = i8[width + 1]; lasg = i8[2 * width + 4]
-  lvl = i64[width + 1]; rsn = i32[width + 1]; phs = i8[width + 1]
+  lvl = i32[width + 1]; rsn = i32[width + 1]; phs = i8[width + 1]
   v = 2
   while v <= width
     ar[v + 1] = -v if v > 2
@@ -110,9 +110,9 @@ describe "Bounded implication levels" ->
         expect(long_implication_level(width, 1, 1024, true, flip)).to eq([1024, 7, 1, -1, 1])
         expect(long_implication_level(width, 1, 1024, false, flip)).to eq([1, 7, 1, -1, 1])
 
-  it "preserves root and wide integer levels" ->
+  it "preserves root and maximum 32-bit integer levels" ->
     expect(long_implication_level(65, 0, 0, false, false)).to eq([0, 7, 1, -1, 1])
-    expect(long_implication_level(65, 1099511627776, 1099511627776, false, true)).to eq([1099511627776, 7, 1, -1, 1])
-    expect(long_implication_level(65, 1, 1099511627776, true, false)).to eq([1099511627776, 7, 1, -1, 1])
+    expect(long_implication_level(65, 2147483647, 2147483647, false, true)).to eq([2147483647, 7, 1, -1, 1])
+    expect(long_implication_level(65, 1, 2147483647, true, false)).to eq([2147483647, 7, 1, -1, 1])
 
 spec_summary

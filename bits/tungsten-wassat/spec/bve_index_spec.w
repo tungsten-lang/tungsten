@@ -46,7 +46,7 @@ describe "BVE indexed duplicate resolution" ->
       expected.push(n + 2)
       pre = BveIndexProbe.new(n + 2, [a, b, [-1, n + 2], [n + 2, -1]], WASSAT_PROOF_NONE, nil)
       pre.prepare
-      want = [1, 1, 3, 3 * (n + 1) * (n + 2) / 2, expected.sort]
+      want = [1, 1, 3, 3 * (n + 1), expected.sort]
       expect(pre.scan).to eq(want)
       g = pre.lgen
       expect(pre.scan).to eq(want)
@@ -56,7 +56,7 @@ describe "BVE indexed duplicate resolution" ->
   it "accepts duplicates at a full table and clears tags after their packed range" ->
     pre = BveIndexProbe.new(3, [[1, 2], [2, 1], [-1, 3], [3, -1]], WASSAT_PROOF_NONE, nil)
     pre.prepare
-    want = [1, 1, 3, 9, [2, 3]]
+    want = [1, 1, 3, 6, [2, 3]]
     expect(pre.scan(1)).to eq(want)
     pre.lgen = 70368744177662
     expect(pre.scan(1)).to eq(want)

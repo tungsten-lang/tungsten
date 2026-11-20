@@ -173,7 +173,7 @@ describe "Phase prefixes retained across ordinary conflict backjumps" ->
       expect(r["phase_copied"] < 2 * 80 + 2 * 50).to eq(true)
 
 describe "Phase prefix policy in clause-sharing arms" ->
-  it "preserves full refreshes when a solver joins a sharing ring" ->
+  it "retains unchanged prefixes across non-import conflicts and refreshes on import" ->
     a = []
     b = []
     v = 1
@@ -194,6 +194,6 @@ describe "Phase prefix policy in clause-sharing arms" ->
     expect(r["conflicts"] > 0).to eq(true)
     expect(s.snapshot_matches_model?).to eq(true)
     expect([a, b].all? -> (c) c.any? -> (l) r["model"].include?(l)).to eq(true)
-    expect(r["phase_copied"] >= 2 * 80 + 2 * 50).to eq(true)
+    expect(r["phase_copied"] < 2 * 80 + 2 * 50).to eq(true)
 
 spec_summary

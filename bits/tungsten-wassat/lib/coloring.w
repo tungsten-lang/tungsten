@@ -923,11 +923,24 @@ WASSAT_COLORING_NODE_CAP = 200000
     u += 1
   k_slots
 
+-> wassat_coloring_count_widths(fcl, ncl, widths) (i64[] i64 i64[]) i64
+  ci = 0 ## i64
+  while ci < ncl
+    n = fcl[ci] ## i64
+    if n >= 3 && n <= WASSAT_COLORING_MAX_WIDTH
+      widths[n] = widths[n] + 1
+    ci += 1
+  0
+
 # Return the clique/obstruction size on a verified obstruction, otherwise zero.
 -> wassat_coloring_clique_unsat(formula, witness = nil)
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
   return 0 if nv < 6 || ncl < 7
+
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  if cfg != nil && witness == nil
+    return 0 if cfg.binary == 0 || cfg.max_clause < 3
 
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
@@ -938,25 +951,36 @@ WASSAT_COLORING_NODE_CAP = 200000
   widths = i64[WASSAT_COLORING_MAX_WIDTH + 1]
   binaries = 0
   min_len = 999999
-  ci = 0
-  while ci < ncl
-    n = fcl[ci]
-    min_len = n if n < min_len
-    if n == 2
-      binaries += 1
-    elsif n >= 2 && n <= WASSAT_COLORING_MAX_WIDTH
-      widths[n] = widths[n] + 1
-    ci += 1
+  if cfg != nil
+    binaries = cfg.binary
+    min_len = cfg.empty_clause_count > 0 ? 0 : (cfg.units > 0 ? 1 : 2)
+    if (witness != nil || binaries * 10 >= ncl * 9) && cfg.max_clause >= 3
+      if cfg.large == 0
+        widths[3] = cfg.ternary
+      else
+        z = wassat_coloring_count_widths(fcl, ncl, widths)
+  else
+    ci = 0
+    while ci < ncl
+      n = fcl[ci]
+      min_len = n if n < min_len
+      if n == 2
+        binaries += 1
+      elsif n >= 2 && n <= WASSAT_COLORING_MAX_WIDTH
+        widths[n] = widths[n] + 1
+      ci += 1
+
+  width = 0
+  count = 0
+  w = 2
+  while w <= WASSAT_COLORING_MAX_WIDTH
+    if widths[w] > count
+      width = w
+      count = widths[w]
+    w += 1
+  z = ccall("w_value_free_w", widths)
 
   if witness != nil || binaries * 10 >= ncl * 9
-    width = 0
-    count = 0
-    w = 2
-    while w <= WASSAT_COLORING_MAX_WIDTH
-      if widths[w] > count
-        width = w
-        count = widths[w]
-      w += 1
     other = ncl - binaries
     if width >= 3 && count >= width + 1 && count * 10 >= other * 9 && count * width <= nv
       # Collect pairwise-disjoint positive choice clauses. Sorting the variable
@@ -1104,24 +1128,29 @@ WASSAT_COLORING_NODE_CAP = 200000
   # The remaining recognizers return different kinds of obstruction.
   return 0 if witness != nil
 
+  can_cc = cfg == nil || (cfg.large > 0 && cfg.binary > 0 && cfg.ternary > 0)
+
   # Combinatorial AMO-clique-cover, relativized-PHP, exact-one parity, and
   # clique-coloring obstructions on compact unit-free formulas.
   if min_len >= 2 && nv <= 4096 && ncl <= 250000
     forced_lit = i8[nv + 1]
     res = wassat_amo_cover_or_rphp_unsat(fla, fcs, fcl, nv, ncl, forced_lit, true)
+    z = ccall("w_value_free_w", forced_lit)
     return res if res > 0
     forced_lit2 = i8[nv + 1]
     res = wassat_amo_cover_or_rphp_unsat(fla, fcs, fcl, nv, ncl, forced_lit2, false)
+    z = ccall("w_value_free_w", forced_lit2)
     return res if res > 0
     res = wassat_exact_one_even_parity_unsat(fla, fcs, fcl, nv, ncl)
     return res if res > 0
-    res = wassat_clique_coloring_unsat(fla, fcs, fcl, nv, ncl)
-    return res if res > 0
+    if can_cc
+      res = wassat_clique_coloring_unsat(fla, fcs, fcl, nv, ncl)
+      return res if res > 0
     res = wassat_rpoc_bin_unsat(fla, fcs, fcl, nv, ncl)
     return res if res > 0
     res = wassat_stconn_grid_unsat(fla, fcs, fcl, nv, ncl)
     return res if res > 0
-  if (min_len == 1 || nv > 4096 || ncl > 250000) && nv <= 2000000 && ncl <= 8000000
+  if can_cc && (min_len == 1 || nv > 4096 || ncl > 250000) && nv <= 2000000 && ncl <= 8000000
     # The clique-coloring check reads presence only, so it also accepts the
     # formula with unit clauses added; the other checks stay unit-free. It is
     # one pass with its own table caps, so it also takes the larger inputs

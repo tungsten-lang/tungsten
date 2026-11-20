@@ -12,11 +12,12 @@ PORT_BIN = PORT_BIN_ENV == nil || PORT_BIN_ENV == "" ? "bits/tungsten-wassat/bin
 PORT_SAT = "p cnf 3 3\n1 0\n-1 2 0\n-2 3 0\n"
 PORT_SLS_UNSAT = "p cnf 2 4\n1 2 0\n1 -2 0\n-1 2 0\n-1 -2 0\n"
 
-# Exclude every assignment over ten variables. The wide clauses prevent the
-# preprocessor from collapsing the task, so proof mode genuinely exercises a
-# worker process and the coordinator's streamed prefix+suffix splice.
+# Exclude every assignment over twelve variables. Each literal occurs 2,048
+# times (above WASSAT_PRE_BUCKET_CAP = 1024), preventing 2-walk strengthening
+# from collapsing the hypercube during preprocessing, so proof mode genuinely
+# exercises a worker process and the coordinator's streamed prefix+suffix splice.
 -> port_search_unsat
-  nvars = 10
+  nvars = 12
   lines = ["p cnf [nvars] [1 << nvars]"]
   mask = 0
   while mask < (1 << nvars)

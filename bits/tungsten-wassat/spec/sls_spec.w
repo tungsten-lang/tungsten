@@ -98,7 +98,7 @@ describe "Wassat SLS" ->
       expect(size_pm[2]).to eq(0)
       expect(size_pm[3]).to eq(0)
 
-      ofla = i64[1]
+      ofla = i32[1]
       ofcs = i64[1]
       ofcl = i64[1]
       fill_pm = i64[6]

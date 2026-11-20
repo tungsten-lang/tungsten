@@ -61,7 +61,7 @@ describe "Wassat duplicate input units" ->
     f = flat_units_formula(FLAT_DUPLICATE_UNSAT)
     ncl = f["flat_ncl"]
     units = i64[ncl]
-    meta = i64[2 * (ncl + 2)]
+    meta = i32[2 * (ncl + 2)]
     alive = i8[ncl + 2]
     pm = i64[12]
     pm[0] = ncl
@@ -80,7 +80,7 @@ describe "Wassat duplicate input units" ->
   it "rejects an undersized unit buffer in both native loaders" ->
     f = flat_units_formula("p cnf 1 1\n1 0\n")
     units = i64[0]
-    meta = i64[6]
+    meta = i32[6]
     alive = i8[3]
     pm = i64[12]
     pm[0] = 1
@@ -94,7 +94,7 @@ describe "Wassat duplicate input units" ->
       rejected = true
     expect(rejected).to eq(true)
     arena = i32[16]
-    lbd = i64[3]
+    lbd = i32[3]
     gids = i64[3]
     unused = i64[1]
     rejected = false

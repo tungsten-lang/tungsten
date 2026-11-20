@@ -12,14 +12,14 @@ use ../lib/solver
   ar[5] = 5
   ar[6] = -4
   ar[7] = 6
-  cm = i64[8]
+  cm = i32[8]
   ci = 0
   while ci < 4
     cm[2 * ci] = 2 * ci
     cm[2 * ci + 1] = 2
     ci += 1
   asg = i8[nv + 3]
-  lvl = i64[nv + 3]
+  lvl = i32[nv + 3]
   rsn = i32[nv + 3]
   sn = i8[nv + 3]
   tr = i32[nv + 3]
@@ -167,9 +167,9 @@ describe "Wassat shrinking level order" ->
   it "shrinks many shuffled blocks in ascending level order" ->
     nv = 61
     ar = i32[80]
-    cm = i64[80]
+    cm = i32[80]
     asg = i8[nv + 3]
-    lvl = i64[nv + 3]
+    lvl = i32[nv + 3]
     rsn = i32[nv + 3]
     sn = i8[nv + 3]
     tr = i32[nv + 3]
@@ -249,10 +249,10 @@ describe "Wassat shrinking level order" ->
     nv = 64
     ar = i32[1]
     asg = i8[nv + 3]
-    lvl = i64[nv + 3]
+    lvl = i32[nv + 3]
     rsn = i32[nv + 3]
     sn = i8[nv + 3]
-    cm = i64[1]
+    cm = i32[1]
     tr = i32[nv + 3]
     tlim = i32[nv + 3]
     out = i64[nv + 3]

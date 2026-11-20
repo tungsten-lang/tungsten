@@ -216,12 +216,15 @@ WASSAT_BVA_SOLVE_PROPS = 5000000
   rch = i64[rcap]
   rowc2 = i64[rcap]
   rch2 = i64[rcap]
+  row_map = i64[rcap]
   mlits = i64[rcap + 16]
-  pairs = WASSAT_BVA_PAIRS ## i64
+  nsmall = st[8] ## i64
+  pairs = 64 * nsmall + 4096 ## i64
+  pairs = WASSAT_BVA_PAIRS if pairs > WASSAT_BVA_PAIRS
   pl = i64[pairs + 8]
   pr = i64[pairs + 8]
   pd = i64[pairs + 8]
-  touched = i64[pairs + 8]
+  touched = i64[nlc + 8]
   ncap = 2 * pairs ## i64
   nd = i64[ncap + 8]
   npv = i64[ncap + 8]
@@ -258,77 +261,49 @@ WASSAT_BVA_SOLVE_PROPS = 5000000
       mlits[0] = l
       nm = 1 ## i64
       nn = 0 ## i64
+      np = 0 ## i64
+      capped = 1 ## i64
       grow = 1 ## i64
       while grow == 1
-        np = 0 ## i64
         nt = 0 ## i64
-        r = 0 ## i64
-        while r < nr && np < pairs
-          cc = rowc[r] ## i64
-          base = 3 * cc ## i64
-          k = clen[cc] ## i64
-          stamp += 1
-          # The rest of the row: a, and b for a ternary row.
-          a = 0 - 1 ## i64
-          b = 0 - 1 ## i64
-          j = 0 ## i64
-          while j < k
-            q = cl[base + j]
-            if q != l
-              if a < 0
-                a = q
-              else
-                b = q
-            j += 1
-          ticks += 1
-          if alive[cc] == 0
-            # A copy another row already dropped: it matches nothing.
-            k = 0
-          elsif k == 2
-            # Every other binary clause holding a is (a | l2).
-            oi = a << 1
-            z = wassat_bva_clean(ohead, onext, ocls, alive, odead, oi) if odead[oi] > 0
-            e = ohead[oi]
-            while e != 0 && np < pairs
-              d = ocls[e - 1] ## i64
-              e = onext[e - 1]
-              ticks += 1
-              if d != cc
-                l2 = cl[3 * d] == a ? cl[3 * d + 1] : cl[3 * d] ## i64
-                # A second copy of the row itself: drop it, or it would be
-                # counted as a row of its own and then removed only once.
-                z = wassat_bva_kill(cl, clen, alive, ocnt, odead, st, d) if l2 == l
-                if l2 != l && l2 != (l ^ 1) && inm[l2] != stepid && seen[l2] != stamp
-                  seen[l2] = stamp
-                  pl[np] = l2
-                  pr[np] = r
-                  pd[np] = d
-                  np += 1
-                  if pcnt[l2] == 0
-                    touched[nt] = l2
-                    nt += 1
-                  pcnt[l2] += 1
-          elsif k == 3
-            # Every other ternary clause holding the pair is (a | b | l2).
-            h = wassat_bva_slot(tkey, tmask, a, b) ## i64
-            prev = 0 ## i64
-            e = thead[h]
-            while e != 0 && np < pairs
-              d = tcls[e - 1]
-              nxe = tnext[e - 1] ## i64
-              ticks += 1
-              if alive[d] == 0
-                if prev == 0
-                  thead[h] = nxe
+        if capped == 1
+          np = 0
+          hit_cap = 0 ## i64
+          r = 0 ## i64
+          while r < nr && np < pairs
+            cc = rowc[r] ## i64
+            base = 3 * cc ## i64
+            k = clen[cc] ## i64
+            stamp += 1
+            # The rest of the row: a, and b for a ternary row.
+            a = 0 - 1 ## i64
+            b = 0 - 1 ## i64
+            j = 0 ## i64
+            while j < k
+              q = cl[base + j]
+              if q != l
+                if a < 0
+                  a = q
                 else
-                  tnext[prev - 1] = nxe
-              else
-                prev = e
+                  b = q
+              j += 1
+            ticks += 1
+            if alive[cc] == 0
+              # A copy another row already dropped: it matches nothing.
+              k = 0
+            elsif k == 2
+              # Every other binary clause holding a is (a | l2).
+              oi = a << 1
+              z = wassat_bva_clean(ohead, onext, ocls, alive, odead, oi) if odead[oi] > 0
+              e = ohead[oi]
+              while e != 0 && np < pairs
+                d = ocls[e - 1] ## i64
+                e = onext[e - 1]
+                ticks += 1
                 if d != cc
-                  db = 3 * d ## i64
-                  l2 = cl[db]
-                  l2 = cl[db + 1] if l2 == a || l2 == b
-                  l2 = cl[db + 2] if l2 == a || l2 == b
+                  l2 = cl[3 * d] == a ? cl[3 * d + 1] : cl[3 * d] ## i64
+                  # A second copy of the row itself: drop it, or it would be
+                  # counted as a row of its own and then removed only once.
                   z = wassat_bva_kill(cl, clen, alive, ocnt, odead, st, d) if l2 == l
                   if l2 != l && l2 != (l ^ 1) && inm[l2] != stepid && seen[l2] != stamp
                     seen[l2] = stamp
@@ -340,8 +315,54 @@ WASSAT_BVA_SOLVE_PROPS = 5000000
                       touched[nt] = l2
                       nt += 1
                     pcnt[l2] += 1
-              e = nxe
-          r += 1
+              hit_cap = 1 if e != 0 && np >= pairs
+            elsif k == 3
+              # Every other ternary clause holding the pair is (a | b | l2).
+              h = wassat_bva_slot(tkey, tmask, a, b) ## i64
+              prev = 0 ## i64
+              e = thead[h]
+              while e != 0 && np < pairs
+                d = tcls[e - 1]
+                nxe = tnext[e - 1] ## i64
+                ticks += 1
+                if alive[d] == 0
+                  if prev == 0
+                    thead[h] = nxe
+                  else
+                    tnext[prev - 1] = nxe
+                else
+                  prev = e
+                  if d != cc
+                    db = 3 * d ## i64
+                    l2 = cl[db]
+                    l2 = cl[db + 1] if l2 == a || l2 == b
+                    l2 = cl[db + 2] if l2 == a || l2 == b
+                    z = wassat_bva_kill(cl, clen, alive, ocnt, odead, st, d) if l2 == l
+                    if l2 != l && l2 != (l ^ 1) && inm[l2] != stepid && seen[l2] != stamp
+                      seen[l2] = stamp
+                      pl[np] = l2
+                      pr[np] = r
+                      pd[np] = d
+                      np += 1
+                      if pcnt[l2] == 0
+                        touched[nt] = l2
+                        nt += 1
+                      pcnt[l2] += 1
+                e = nxe
+              hit_cap = 1 if e != 0 && np >= pairs
+            r += 1
+          hit_cap = 1 if r < nr
+          capped = hit_cap
+        else
+          i = 0 ## i64
+          while i < np
+            l2 = pl[i] ## i64
+            if pcnt[l2] == 0
+              touched[nt] = l2
+              nt += 1
+            pcnt[l2] += 1
+            i += 1
+          ticks += np
         best = 0 - 1 ## i64
         bc = 0 ## i64
         t = 0 ## i64
@@ -357,18 +378,48 @@ WASSAT_BVA_SOLVE_PROPS = 5000000
         if best < 0 || nw <= cur || nn + bc > ncap || nm >= rcap
           grow = 0
         else
-          r2 = 0 ## i64
-          i = 0 ## i64
-          while i < np
-            if pl[i] == best
-              r = pr[i]
-              nd[nn] = pd[i]
-              npv[nn] = rch[r]
-              nn += 1
-              rowc2[r2] = rowc[r]
-              rch2[r2] = nn
-              r2 += 1
-            i += 1
+          if capped == 0
+            r = 0
+            while r < nr
+              row_map[r] = 0 - 1
+              r += 1
+            r2 = 0 ## i64
+            i = 0 ## i64
+            while i < np
+              if pl[i] == best
+                r = pr[i]
+                nd[nn] = pd[i]
+                npv[nn] = rch[r]
+                nn += 1
+                rowc2[r2] = rowc[r]
+                rch2[r2] = nn
+                row_map[r] = r2
+                r2 += 1
+              i += 1
+            w = 0 ## i64
+            i = 0
+            while i < np
+              nr_i = row_map[pr[i]] ## i64
+              if nr_i >= 0 && pl[i] != best
+                pl[w] = pl[i]
+                pr[w] = nr_i
+                pd[w] = pd[i]
+                w += 1
+              i += 1
+            np = w
+          else
+            r2 = 0
+            i = 0
+            while i < np
+              if pl[i] == best
+                r = pr[i]
+                nd[nn] = pd[i]
+                npv[nn] = rch[r]
+                nn += 1
+                rowc2[r2] = rowc[r]
+                rch2[r2] = nn
+                r2 += 1
+              i += 1
           i = 0
           while i < r2
             rowc[i] = rowc2[i]
@@ -424,10 +475,90 @@ WASSAT_BVA_SOLVE_PROPS = 5000000
           z = wassat_bva_push(heap, st, (ocnt[l] << 24) | l) if ocnt[l] >= 3
       if stop == 0 && deadline > 0 && (st[6] & 15) == 0 && clock_ms() >= deadline
         stop = 2
+  z = ccall("w_value_free_w", inm)
+  z = ccall("w_value_free_w", seen)
+  z = ccall("w_value_free_w", pcnt)
+  z = ccall("w_value_free_w", npv)
+  z = ccall("w_value_free_w", nd)
+  z = ccall("w_value_free_w", touched)
+  z = ccall("w_value_free_w", pd)
+  z = ccall("w_value_free_w", pr)
+  z = ccall("w_value_free_w", pl)
+  z = ccall("w_value_free_w", mlits)
+  z = ccall("w_value_free_w", row_map)
+  z = ccall("w_value_free_w", rch2)
+  z = ccall("w_value_free_w", rowc2)
+  z = ccall("w_value_free_w", rch)
+  z = ccall("w_value_free_w", rowc)
+  z = ccall("w_value_free_w", heap)
   st[4] = nx
   st[5] = ticks
   st[7] = stop
   nx
+
+-> wassat_bva_load(fla, fcs, fcl, nc, cl, clen, alive, ohead, onext, ocls, ocnt, tkey, thead, tnext, tcls, tmask, st) (i64[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[]) i64
+  kept_lits = 0 ## i64
+  ci = 0 ## i64
+  while ci < nc
+    off = fcs[ci] ## i64
+    n = fcl[ci] ## i64
+    if wassat_bva_small(fla, off, n) == 1
+      a = fla[off] ## i64
+      b = fla[off + 1] ## i64
+      ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1 ## i64
+      cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1 ## i64
+      cc = 0 - 1 ## i64
+      if n == 3
+        c = fla[off + 2] ## i64
+        cc = c > 0 ? c << 1 : ((0 - c) << 1) | 1
+      z = wassat_bva_add(cl, clen, alive, ohead, onext, ocls, ocnt, tkey, thead, tnext, tcls, tmask, st, ca, cb, cc)
+    else
+      kept_lits += n
+    ci += 1
+  kept_lits
+
+-> wassat_bva_alive_lits(clen, alive, np) (i64[] i64[] i64) i64
+  outl = 0 ## i64
+  i = 0 ## i64
+  while i < np
+    outl += clen[i] if alive[i] == 1
+    i += 1
+  outl
+
+-> wassat_bva_pack(fla, fcs, fcl, nc, np, cl, clen, alive, out, off2, len2, meta) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[]) i64
+  p = 0 ## i64
+  c2 = 0 ## i64
+  ci = 0 ## i64
+  while ci < nc
+    off = fcs[ci] ## i64
+    n = fcl[ci] ## i64
+    if wassat_bva_small(fla, off, n) == 0
+      off2[c2] = p
+      len2[c2] = n
+      j = 0 ## i64
+      while j < n
+        out[p] = fla[off + j]
+        p += 1
+        j += 1
+      c2 += 1
+    ci += 1
+  i = 0 ## i64
+  while i < np
+    if alive[i] == 1
+      n = clen[i] ## i64
+      off2[c2] = p
+      len2[c2] = n
+      j = 0
+      while j < n
+        q = cl[3 * i + j] ## i64
+        out[p] = (q & 1) == 0 ? q >> 1 : 0 - (q >> 1)
+        p += 1
+        j += 1
+      c2 += 1
+    i += 1
+  meta[0] = c2
+  meta[1] = p
+  c2
 
 # Returns nil when the lane declines the shape, else { "formula", "work" (st) }
 # where "formula" (more variables, fewer clauses) is nil when the product
@@ -440,15 +571,21 @@ WASSAT_BVA_SOLVE_PROPS = 5000000
   nv = formula["nvars"]
   nc = formula["flat_ncl"]
   return nil if nv < 8 || nv > WASSAT_BVA_MAX_VARS
-  fla = formula["flat_lits"]
-  fcs = formula["flat_offs"]
-  fcl = formula["flat_lens"]
   # No formula with fewer clauses than the density asks for can pass.
   return nil if nc < min_density * nv
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  if cfg != nil
+    c_small = cfg.binary + cfg.ternary
+    return nil if c_small < min_small || c_small < min_density * nv
+    return nil if (nc - c_small) * min_ratio >= nc
+  fla = formula["flat_lits"] ## i64[]
+  fcs = formula["flat_offs"] ## i64[]
+  fcl = formula["flat_lens"] ## i64[]
   cen = i64[2]
   z = wassat_bva_census(fla, fcs, fcl, nc, cen)
   nsmall = cen[0]
   nsmall3 = cen[1]
+  z = ccall("w_value_free_w", cen)
   return nil if nsmall < min_small || nsmall > WASSAT_BVA_MAX_SMALL || nsmall < min_density * nv
   # A result is kept only below nc / min_ratio clauses, and a step removes
   # small clauses only.
@@ -475,73 +612,42 @@ WASSAT_BVA_SOLVE_PROPS = 5000000
   thead = i64[tsize]
   tnext = i64[3 * pcap]
   tcls = i64[3 * pcap]
-  ci = 0
-  while ci < nc
-    off = fcs[ci]
-    n = fcl[ci]
-    if wassat_bva_small(fla, off, n) == 1
-      a = fla[off]
-      b = fla[off + 1]
-      ca = a > 0 ? a << 1 : ((0 - a) << 1) | 1
-      cb = b > 0 ? b << 1 : ((0 - b) << 1) | 1
-      cc = 0 - 1
-      if n == 3
-        c = fla[off + 2]
-        cc = c > 0 ? c << 1 : ((0 - c) << 1) | 1
-      z = wassat_bva_add(cl, clen, alive, ohead, onext, ocls, ocnt, tkey, thead, tnext, tcls, tmask, st, ca, cb, cc)
-    ci += 1
   st[8] = nsmall
   st[10] = nc
+  kept_lits = wassat_bva_load(fla, fcs, fcl, nc, cl, clen, alive, ohead, onext, ocls, ocnt, tkey, thead, tnext, tcls, tmask, st)
   budget = WASSAT_BVA_TICKS + WASSAT_BVA_TICKS_PER_CLAUSE * nsmall
   nx = wassat_bva_reduce(nv, maxnew, pcap, cl, clen, alive, ohead, onext, ocls, ocnt, odead, tkey, thead, tnext, tcls, tmask, st, budget, deadline)
+  z = ccall("w_value_free_w", tcls)
+  z = ccall("w_value_free_w", tnext)
+  z = ccall("w_value_free_w", thead)
+  z = ccall("w_value_free_w", tkey)
+  z = ccall("w_value_free_w", ocls)
+  z = ccall("w_value_free_w", onext)
+  z = ccall("w_value_free_w", odead)
+  z = ccall("w_value_free_w", ocnt)
+  z = ccall("w_value_free_w", ohead)
   live = st[3]
   outc = nc - nsmall + live
   st[9] = outc
-  return { "formula": nil, "work": st } if nx == 0 || outc * min_ratio > nc
+  if nx == 0 || outc * min_ratio > nc
+    z = ccall("w_value_free_w", alive)
+    z = ccall("w_value_free_w", clen)
+    z = ccall("w_value_free_w", cl)
+    return { "formula": nil, "work": st }
   # Count literals, then fill: untouched clauses first, then the pool.
-  outl = 0
-  ci = 0
-  while ci < nc
-    outl += fcl[ci] if wassat_bva_small(fla, fcs[ci], fcl[ci]) == 0
-    ci += 1
   np = st[1]
-  i = 0
-  while i < np
-    outl += clen[i] if alive[i] == 1
-    i += 1
+  outl = kept_lits + wassat_bva_alive_lits(clen, alive, np)
   out = i64[outl + 1]
   off2 = i64[outc + 1]
   len2 = i64[outc + 1]
-  p = 0
-  c2 = 0
-  ci = 0
-  while ci < nc
-    off = fcs[ci]
-    n = fcl[ci]
-    if wassat_bva_small(fla, off, n) == 0
-      off2[c2] = p
-      len2[c2] = n
-      j = 0
-      while j < n
-        out[p] = fla[off + j]
-        p += 1
-        j += 1
-      c2 += 1
-    ci += 1
-  i = 0
-  while i < np
-    if alive[i] == 1
-      n = clen[i]
-      off2[c2] = p
-      len2[c2] = n
-      j = 0
-      while j < n
-        q = cl[3 * i + j]
-        out[p] = (q & 1) == 0 ? q >> 1 : 0 - (q >> 1)
-        p += 1
-        j += 1
-      c2 += 1
-    i += 1
+  meta = i64[2]
+  z = wassat_bva_pack(fla, fcs, fcl, nc, np, cl, clen, alive, out, off2, len2, meta)
+  c2 = meta[0]
+  p = meta[1]
+  z = ccall("w_value_free_w", meta)
+  z = ccall("w_value_free_w", alive)
+  z = ccall("w_value_free_w", clen)
+  z = ccall("w_value_free_w", cl)
   lifted = { "nvars": nv + nx, "nclauses": c2, "clauses": [], "boxed": false,
     "flat_lits": out, "flat_offs": off2, "flat_lens": len2,
     "flat_ncl": c2, "flat_nlits": p }

@@ -90,7 +90,7 @@ describe "Watch-block prefix recycling" ->
     wd[26] = wd[26] - 4
     asg = i8[4]
     lasg = i8[10]
-    lvl = i64[4]
+    lvl = i32[4]
     rsn = i32[4]
     phs = i8[4]
     tr = i32[4]

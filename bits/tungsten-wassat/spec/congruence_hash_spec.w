@@ -5,7 +5,7 @@ use ../lib/solver
   nc = clauses.size
   nl = 0
   clauses.each ->(c) nl += c.size
-  cm = i64[2 * nc]
+  cm = i32[2 * nc]
   alive = i8[nc]
   ar = i32[nl]
   p = 0

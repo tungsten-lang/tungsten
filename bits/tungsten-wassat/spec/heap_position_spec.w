@@ -7,7 +7,7 @@ describe "Heap position representation" ->
 
   it "keeps a large positive position distinct from the absent sentinel" ->
     pos = i32[2]
-    heap = i64[2]
+    heap = i32[2]
     act = i64[2]
     st = i64[2]
     pos[1] = 2147483647

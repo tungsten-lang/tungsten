@@ -6,7 +6,7 @@ use ../lib/preprocess
 
 # Fields per long clause are stored across consecutive blocks of 64 variable IDs.
 # A tautological block makes the whole clause permanently satisfied.
--> word_index(cm, live, ar, nc, nw, pos, neg, ids, offsets, entries, cursor) (i64[] i8[] i32[] i64 i64 i64[] i64[] i32[] i32[] i32[] i32[]) i64
+-> word_index(cm, live, ar, nc, nw, pos, neg, ids, offsets, entries, cursor) (i32[] i8[] i32[] i64 i64 i64[] i64[] i32[] i32[] i32[] i32[]) i64
   row = 0 ## i64
   (0...nc).each -> (ci)
     n = cm[2 * ci + 1] ## i64
@@ -109,7 +109,7 @@ use ../lib/preprocess
     i += 1
   count
 
--> word_infer(pos, neg, yes, no, ids, dirty, n, asg, lasg, lvl, rsn, ph, tr, st, dl) (i64[] i64[] i64[] i64[] i32[] i32[] i64 i8[] i8[] i64[] i32[] i8[] i32[] i64[] i64) i64
+-> word_infer(pos, neg, yes, no, ids, dirty, n, asg, lasg, lvl, rsn, ph, tr, st, dl) (i64[] i64[] i64[] i64[] i32[] i32[] i64 i8[] i8[] i32[] i32[] i8[] i32[] i64[] i64) i64
   j = 0 ## i64
   while j < n
     r = dirty[j] ## i64
@@ -131,7 +131,7 @@ use ../lib/preprocess
   0
 
 # Shared binary lists and the same trail, reasons and assignment storage as Wassat.
--> word_propagate(ar, asg, lasg, lvl, rsn, ph, blank, wp, ws, tr, st, dl, bd, bp, pos, neg, yes, no, ids, offsets, entries, stamps, dirty, state) (i32[] i8[] i8[] i64[] i32[] i8[] i32[] i64[] i64[] i32[] i64[] i64 i32[] i64[] i64[] i64[] i64[] i64[] i32[] i32[] i32[] i64[] i32[] i64[]) i64
+-> word_propagate(ar, asg, lasg, lvl, rsn, ph, blank, wp, ws, tr, st, dl, bd, bp, pos, neg, yes, no, ids, offsets, entries, stamps, dirty, state) (i32[] i8[] i8[] i32[] i32[] i8[] i32[] i64[] i64[] i32[] i64[] i64 i32[] i64[] i64[] i64[] i64[] i64[] i32[] i32[] i32[] i64[] i32[] i64[]) i64
   while st[0] < st[1] && st[2] < 0
     first = st[0] ## i64
     ignored = wassat_propagate(ar, asg, lasg, lvl, rsn, ph, blank, wp, ws, tr, st, dl, bd, bp)
@@ -146,7 +146,7 @@ use ../lib/preprocess
     nw = (@nvars + 63) / 64 ## i64
     count = 0 ## i64
     occurrences = 0 ## i64
-    cm = @cmeta ## i64[]
+    cm = @cmeta ## i32[]
     (0...@ncl).each -> (ci)
       if @alive[ci] == 1 && cm[2 * ci + 1] >= 3
         count += 1

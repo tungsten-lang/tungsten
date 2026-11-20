@@ -270,8 +270,28 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
 # Counts are ARENAS, not live threads: this runtime has no collector, so the
 # scout's completed lucky/SLS allocations remain resident while the raw race
 # runs. A continuation is still one arena and must not be counted twice.
+-> wassat_cdcl_walk_arena_bytes(nv, ncl, nlits)
+  return 0 if env("WASSAT_WALK") == "0"
+  # 1.25x irredundant walker buffers after i8/i32 narrowing:
+  # fla(i32) + ocv(u32) = 10*nlits; fcs/fcl/cstate/wght/ulist/upos = 40*ncl;
+  # och/stamp + var tables = 72*nv.
+  bytes = 1048576 + 10 * nlits + 40 * ncl + 72 * (nv + 4)
+  cap_mb = wassat_sls_max_arena_mb
+  return 0 if cap_mb > 0 && (bytes / 1048576) > cap_mb
+  bytes
+
+-> wassat_walk_memory_allowed_counts?(nv, ncl, nlits)
+  return false if env("WASSAT_WALK") == "0"
+  cap_mb = wassat_sls_max_arena_mb
+  return true if cap_mb == 0
+  bytes = 1048576 + 10 * nlits + 40 * ncl + 72 * (nv + 4)
+  (bytes / 1048576) <= cap_mb
+
+-> wassat_cdcl_arena_bytes_counts(nv, ncl, nlits)
+  25165824 + 16 * nlits + 112 * ncl + 320 * nv + wassat_cdcl_walk_arena_bytes(nv, ncl, nlits) + wassat_inprocess_scratch_bytes(ncl, nv)
+
 -> wassat_cdcl_arena_bytes(formula)
-  25165824 + 24 * formula["flat_nlits"] + 160 * formula["flat_ncl"] + 640 * formula["nvars"] + wassat_inprocess_scratch_bytes(formula["flat_ncl"], formula["nvars"])
+  wassat_cdcl_arena_bytes_counts(formula["nvars"], formula["flat_ncl"], formula["flat_nlits"])
 
 # Conservative per-solver scratch for the enabled inprocessing passes.
 # Clause-slot tables include loader headroom; SCC and subsumption share two
@@ -628,7 +648,10 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
   capacity + capacity * percent / 100
 
 + WassatConfig
-  ro :empty_clause_count
+  ro :nvars, :nclauses, :nliterals, :units, :binary, :ternary, :max_clause, :empty_clause_count
+
+  -> large
+    @nclauses - @units - @binary - @ternary - @empty_clause_count
   -> new(@nvars, clauses)
     @nclauses = clauses.size
     @nliterals = 0
@@ -1279,9 +1302,8 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
     # renderings. Unknown memory (zero) leaves the CPU-only decision intact.
     memory = System.physical_memory_bytes ## i64
     if memory > 0
-      per_arm = 25165824 + 24 * @nliterals + 160 * @nclauses + 640 * @nvars + wassat_inprocess_scratch_bytes(@nclauses, @nvars)
-      budget = memory / 3
-      budget = 2684354560 if budget > 2684354560
+      per_arm = wassat_cdcl_arena_bytes_counts(@nvars, @nclauses, @nliterals)
+      budget = wassat_race_memory_budget_bytes(memory)
       while arms > 1 && per_arm * arms > budget
         arms -= 1
     arms

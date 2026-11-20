@@ -2,7 +2,7 @@
 use ../lib/wassat
 
 ar = i32[70005]
-cm = i64[2]
+cm = i32[2]
 alive = i8[1]
 wd = i32[40]
 wp = i64[32]

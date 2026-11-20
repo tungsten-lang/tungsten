@@ -34,7 +34,7 @@ use ../lib/solver
 
 describe "Reduction count reuse" ->
   it "returns the surviving learned count after selection" ->
-    cm = i64[6]; alive = i8[3]; lbd = i64[3]; used = i64[3]; hist = i64[70]
+    cm = i32[6]; alive = i8[3]; lbd = i32[3]; used = i32[3]; hist = i64[70]
     i = 0
     while i < 3
       cm[2 * i + 1] = 3
@@ -92,7 +92,7 @@ describe "Reduction count reuse" ->
     expect(s.rhist[74]).to eq(4)
 
   it "returns zero for an empty learned population" ->
-    cm = i64[1]; alive = i8[1]; lbd = i64[1]; used = i64[1]; hist = i64[70]
+    cm = i32[1]; alive = i8[1]; lbd = i32[1]; used = i32[1]; hist = i64[70]
     expect(wassat_reduce_select(cm, alive, lbd, used, hist, 0, 0)).to eq(0)
 
   it "keeps large recount telemetry in the native slab" ->

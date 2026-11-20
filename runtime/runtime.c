@@ -55128,16 +55128,27 @@ static inline __attribute__((always_inline)) WValue w_dimacs_scan(
         /* Literal: optional sign, then digits, then a delimiter. One pass. */
         int neg = 0, signed_tok = 0;
         if (c == '-' || c == '+') { neg = (c == '-'); signed_tok = 1; i++; }
-        /* The required first digit needs neither multiplication nor a bound check. */
-        if (i >= tlen || !(cls[(unsigned char)tx[i]] & DC_DIGIT)) P_ERR(3);
         size_t digit_start = i;
-        int64_t v = tx[i++] - '0';
-        while (i < tlen && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
-            int digit = tx[i] - '0';
+        int64_t v = 0;
+        /* Eight decimal digits fit the literal bound. Check input length
+         * once for this common prefix, then check overflow on longer tokens. */
+        if (tlen - i >= 8) {
+            for (unsigned j = 0; j < 8; j++) {
+                unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+                if (digit > 9) goto end_digits;
+                v = v * 10 + digit;
+                i++;
+            }
+        }
+        while (i < tlen) {
+            unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+            if (digit > 9) break;
             v = v * 10 + digit;
             if (v > 2000000000LL) P_ERR(4);
             i++;
         }
+    end_digits:
+        if (i == digit_start) P_ERR(3);
         /* Trailing junk inside the token is a bad token. */
         if (!AT_BREAK(i)) P_ERR(3);
 
@@ -55153,7 +55164,11 @@ static inline __attribute__((always_inline)) WValue w_dimacs_scan(
             if (!count_only) lits[nlits] = neg ? -v : v;
             nlits++;
             cur_len++;
-            cur_off = nlits - cur_len;
+        }
+        /* The literal scanner has already validated this delimiter. */
+        if (i < tlen) {
+            if (tx[i] == '\n') { lineno++; line_started = 0; }
+            i++;
         }
     }
     if (!have_header) P_ERR(1);

@@ -49,6 +49,19 @@ describe "Mapped native DIMACS input" ->
              ["p cnf 1 1\nx 1 0", 8]]
     cases.each ->(item)
       expect(mmap_check_modes(item[0])).to eq(item[1])
+  it "keeps digit-run boundaries and line numbers in both scan modes" ->
+    text = "p cnf 2000000000 3\r\n\t-00000000000012345 +12345678 0 0\r\n+2000000000 0"
+    expect(mmap_check_modes(text)).to eq(0)
+    row = mmap_raw_scan(text, false)
+    expect([row[1][0], row[1][1], row[1][2]]).to eq([-12345, 12345678, 2000000000])
+    expect([row[2][0], row[2][1], row[2][2], row[3][0], row[3][1], row[3][2]]).to eq([0, 2, 2, 2, 0, 1])
+    cases = [["2000000001x", 4], ["12345678x", 3], ["000000000", 3], ["+", 3]]
+    cases.each -> (item)
+      bad = "p cnf 2000000000 1\n1\n\n" + item[0]
+      expect(mmap_check_modes(bad)).to eq(item[1])
+      hdr = mmap_raw_scan(bad, true)[0]
+      expect(hdr[5]).to eq(4)
+
   it "sizes mapped buffers from the validated syntax" ->
     path = "/tmp/wassat-case328-mmap-size.cnf"
     text = "c " + "x" * 70000 + "\np cnf 3 2\n1 -2 0\n3 0\n"

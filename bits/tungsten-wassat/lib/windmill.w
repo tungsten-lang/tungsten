@@ -58,6 +58,165 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
     b = c1
   a * cols - ((a * (a + 1)) / 2) + (b - a - 1)
 
+-> wassat_windmill_has_cell_clauses(fla, fcs, fcl, ncl, min_cells, deadline) (i64[] i64[] i64[] i64 i64 i64) i64
+  npos3 = 0 ## i64
+  nneg2 = 0 ## i64
+  need_neg2 = 3 * min_cells ## i64
+  ci = 0 ## i64
+  while ci < ncl
+    n = fcl[ci] ## i64
+    if n == 2
+      off = fcs[ci] ## i64
+      a = fla[off] ## i64
+      b = fla[off + 1] ## i64
+      if a < 0 && b < 0
+        d = a - b ## i64
+        d = 0 - d if d < 0
+        if d == 1 || d == 2
+          nneg2 += 1
+          return 1 if npos3 >= min_cells && nneg2 >= need_neg2
+    elsif n == 3
+      off = fcs[ci] ## i64
+      a = fla[off] ## i64
+      b = fla[off + 1] ## i64
+      c = fla[off + 2] ## i64
+      if a > 0 && b > 0 && c > 0
+        lo = a ## i64
+        mid = b ## i64
+        hi = c ## i64
+        if lo > mid
+          tmp = lo ## i64
+          lo = mid
+          mid = tmp
+        if mid > hi
+          tmp = mid ## i64
+          mid = hi
+          hi = tmp
+        if lo > mid
+          tmp = lo ## i64
+          lo = mid
+          mid = tmp
+        if mid == lo + 1 && hi == lo + 2
+          npos3 += 1
+          return 1 if npos3 >= min_cells && nneg2 >= need_neg2
+    ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      return 0
+  return 1 if npos3 >= min_cells && nneg2 >= need_neg2
+  0
+
+-> wassat_windmill_scan_cells(fla, fcs, fcl, ncl, nv, pos3, nb1, nb2, unitv, deadline) (i64[] i64[] i64[] i64 i64 i8[] i8[] i8[] i8[] i64) i64
+  ci = 0 ## i64
+  while ci < ncl
+    n = fcl[ci] ## i64
+    off = fcs[ci] ## i64
+    if n == 1
+      l = fla[off] ## i64
+      v = l < 0 ? 0 - l : l ## i64
+      unitv[v] = l > 0 ? 1 : -1 if v >= 1 && v <= nv
+    elsif n == 2
+      a = fla[off] ## i64
+      b = fla[off + 1] ## i64
+      if a < 0 && b < 0
+        u = 0 - a ## i64
+        w = 0 - b ## i64
+        if u > w
+          tmp = u ## i64
+          u = w
+          w = tmp
+        if u >= 1 && u <= nv
+          if w == u + 1
+            nb1[u] = 1
+          elsif w == u + 2
+            nb2[u] = 1
+    elsif n == 3
+      a = fla[off] ## i64
+      b = fla[off + 1] ## i64
+      c = fla[off + 2] ## i64
+      if a > 0 && b > 0 && c > 0
+        lo = a ## i64
+        mid = b ## i64
+        hi = c ## i64
+        if lo > mid
+          tmp = lo ## i64
+          lo = mid
+          mid = tmp
+        if mid > hi
+          tmp = mid ## i64
+          mid = hi
+          hi = tmp
+        if lo > mid
+          tmp = lo ## i64
+          lo = mid
+          mid = tmp
+        pos3[lo] = 1 if mid == lo + 1 && hi == lo + 2 && lo <= nv
+    ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      return 0 - 1
+  0
+
+-> wassat_windmill_scan_stride(fla, fcs, fcl, ncl, sbase, send, maxd, dcount, deadline) (i64[] i64[] i64[] i64 i64 i64 i64 i64[] i64) i64
+  ci = 0 ## i64
+  while ci < ncl
+    if fcl[ci] == 3
+      off = fcs[ci] ## i64
+      neg = 0 ## i64
+      negv = 0 ## i64
+      s2 = 0 ## i64
+      g = 0 ## i64
+      j = 0 ## i64
+      while j < 3
+        l = fla[off + j] ## i64
+        if l < 0
+          neg += 1
+          negv = 0 - l
+        elsif l >= sbase && l <= send
+          s2 = l
+        else
+          g = l
+        j += 1
+      if neg == 1 && negv >= sbase && negv <= send && s2 > negv && g > 0
+        d = s2 - negv ## i64
+        dcount[d] += 1 if d <= maxd
+    ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      return 0 - 1
+  0
+
+-> wassat_windmill_scan_guards(fla, fcs, fcl, ncl, sbase, send, stride, nguard, guard, deadline) (i64[] i64[] i64[] i64 i64 i64 i64 i64 i64[] i64) i64
+  ci = 0 ## i64
+  while ci < ncl
+    if fcl[ci] == 3
+      off = fcs[ci] ## i64
+      neg = 0 ## i64
+      negv = 0 ## i64
+      s2 = 0 ## i64
+      g = 0 ## i64
+      j = 0 ## i64
+      while j < 3
+        l = fla[off + j] ## i64
+        if l < 0
+          neg += 1
+          negv = 0 - l
+        elsif l >= sbase && l <= send
+          s2 = l
+        else
+          g = l
+        j += 1
+      if neg == 1 && negv >= sbase && negv <= send && s2 == negv + stride && g > 0
+        cell = negv - sbase ## i64
+        k = cell % 3 ## i64
+        idx = cell / 3 ## i64
+        if k <= 1 && idx < nguard
+          if guard[idx] == 0
+            guard[idx] = g
+          elsif guard[idx] != g
+            return 0 - 2
+    ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      return 0 - 1
+  0
+
 # Returns nil on a miss, else a layout hash:
 #   "cols", "h", "rows" (state rows), "sbase", "stride",
 #   "guard"      i64[(rows-1)*cols]   guard var of (transition r, column c)
@@ -73,57 +232,39 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
   return nil if nv < 50 || nv > 20000000 || ncl < 100 || ncl > 100000000
+  min_cells = WASSAT_WINDMILL_MIN_COLS * WASSAT_WINDMILL_MIN_ROWS
+  min_trans = WASSAT_WINDMILL_MIN_ROWS - 1
+  min_units = 2 * WASSAT_WINDMILL_MIN_COLS + min_trans - 1
+  min_bins = 3 * min_cells + min_trans
+  min_terns = min_cells + WASSAT_WINDMILL_MIN_COLS * min_trans + 2 * min_trans
+  cfg = formula.has_key?("config") ? formula["config"] : nil
+  if cfg != nil
+    return nil if cfg.max_clause_size < 3
+    return nil if cfg.units < min_units || cfg.binary < min_bins || cfg.ternary < min_terns
+  elsif ncl >= 4096
+    sc = wassat_shape_counts_new(formula["flat_lens"], ncl)
+    s_max = sc[1]
+    s_units = sc[2]
+    s_bins = sc[3]
+    s_terns = sc[4]
+    z = ccall("w_value_free_w", sc)
+    return nil if s_max < 3 || s_units < min_units || s_bins < min_bins || s_terns < min_terns
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
+  deadline = env("WASSAT_WINDMILL_DUMP") != nil ? 0 : clock_ms() + 250
+  if ncl >= 4096 && wassat_windmill_has_cell_clauses(fla, fcs, fcl, ncl, min_cells, deadline) == 0
+    return nil
   pos3 = i8[nv + 3]
   nb1 = i8[nv + 3]
   nb2 = i8[nv + 3]
   unitv = i8[nv + 3]
-  ci = 0
-  while ci < ncl
-    n = fcl[ci]
-    off = fcs[ci]
-    if n == 1
-      l = fla[off]
-      v = l < 0 ? 0 - l : l
-      unitv[v] = l > 0 ? 1 : -1 if v >= 1 && v <= nv
-    elsif n == 2
-      a = fla[off]
-      b = fla[off + 1]
-      if a < 0 && b < 0
-        u = 0 - a
-        w = 0 - b
-        if u > w
-          tmp = u
-          u = w
-          w = tmp
-        if w == u + 1
-          nb1[u] = 1
-        elsif w == u + 2
-          nb2[u] = 1
-    elsif n == 3
-      a = fla[off]
-      b = fla[off + 1]
-      c = fla[off + 2]
-      if a > 0 && b > 0 && c > 0
-        lo = a
-        mid = b
-        hi = c
-        if lo > mid
-          tmp = lo
-          lo = mid
-          mid = tmp
-        if mid > hi
-          tmp = mid
-          mid = hi
-          hi = tmp
-        if lo > mid
-          tmp = lo
-          lo = mid
-          mid = tmp
-        pos3[lo] = 1 if mid == lo + 1 && hi == lo + 2
-    ci += 1
+  if wassat_windmill_scan_cells(fla, fcs, fcl, ncl, nv, pos3, nb1, nb2, unitv, deadline) < 0
+    z = ccall("w_value_free_w", unitv)
+    z = ccall("w_value_free_w", nb2)
+    z = ccall("w_value_free_w", nb1)
+    z = ccall("w_value_free_w", pos3)
+    return nil
   # First exactly-one cell.
   sbase = 0
   v = 1
@@ -132,40 +273,32 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
       sbase = v
       break
     v += 1
-  return nil if sbase == 0
+  if sbase == 0
+    z = ccall("w_value_free_w", unitv)
+    z = ccall("w_value_free_w", nb2)
+    z = ccall("w_value_free_w", nb1)
+    z = ccall("w_value_free_w", pos3)
+    return nil
   ncells = 0
   v = sbase
   while v + 2 <= nv && pos3[v] == 1 && nb1[v] == 1 && nb2[v] == 1 && nb1[v + 1] == 1
     ncells += 1
     v += 3
-  return nil if ncells < WASSAT_WINDMILL_MIN_COLS * WASSAT_WINDMILL_MIN_ROWS
+  z = ccall("w_value_free_w", nb2)
+  z = ccall("w_value_free_w", pos3)
+  if ncells < min_cells
+    z = ccall("w_value_free_w", unitv)
+    z = ccall("w_value_free_w", nb1)
+    return nil
   send = sbase + 3 * ncells - 1
   # Carry-over distance: (g, -s, s') with s' - s the stride.
   maxd = 3 * WASSAT_WINDMILL_MAX_COLS
   dcount = i64[maxd + 1]
-  ci = 0
-  while ci < ncl
-    if fcl[ci] == 3
-      off = fcs[ci]
-      neg = 0
-      negv = 0
-      s2 = 0
-      g = 0
-      j = 0
-      while j < 3
-        l = fla[off + j]
-        if l < 0
-          neg += 1
-          negv = 0 - l
-        elsif l >= sbase && l <= send
-          s2 = l
-        else
-          g = l
-        j += 1
-      if neg == 1 && negv >= sbase && negv <= send && s2 > negv && g > 0
-        d = s2 - negv
-        dcount[d] += 1 if d <= maxd
-    ci += 1
+  if wassat_windmill_scan_stride(fla, fcs, fcl, ncl, sbase, send, maxd, dcount, deadline) < 0
+    z = ccall("w_value_free_w", dcount)
+    z = ccall("w_value_free_w", unitv)
+    z = ccall("w_value_free_w", nb1)
+    return nil
   stride = 0
   best = 0
   d = 3
@@ -174,56 +307,48 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
       best = dcount[d]
       stride = d
     d += 3
-  return nil if stride == 0 || stride % 3 != 0
+  z = ccall("w_value_free_w", dcount)
+  if stride == 0 || stride % 3 != 0
+    z = ccall("w_value_free_w", unitv)
+    z = ccall("w_value_free_w", nb1)
+    return nil
   cols = stride / 3
-  return nil if cols < WASSAT_WINDMILL_MIN_COLS || cols > WASSAT_WINDMILL_MAX_COLS || cols % 2 == 0
-  return nil if ncells % cols != 0
+  if cols < WASSAT_WINDMILL_MIN_COLS || cols > WASSAT_WINDMILL_MAX_COLS || cols % 2 == 0 || ncells % cols != 0
+    z = ccall("w_value_free_w", unitv)
+    z = ccall("w_value_free_w", nb1)
+    return nil
   rows = ncells / cols
-  return nil if rows < WASSAT_WINDMILL_MIN_ROWS || rows > WASSAT_WINDMILL_MAX_ROWS
+  if rows < WASSAT_WINDMILL_MIN_ROWS || rows > WASSAT_WINDMILL_MAX_ROWS
+    z = ccall("w_value_free_w", unitv)
+    z = ccall("w_value_free_w", nb1)
+    return nil
   h = (cols - 1) / 2
   ntrans = rows - 1
   # Guard grid from the k = 0 carry-over clauses; k = 1 must agree.
   guard = i64[ntrans * cols]
-  ci = 0
-  while ci < ncl
-    if fcl[ci] == 3
-      off = fcs[ci]
-      neg = 0
-      negv = 0
-      s2 = 0
-      g = 0
-      j = 0
-      while j < 3
-        l = fla[off + j]
-        if l < 0
-          neg += 1
-          negv = 0 - l
-        elsif l >= sbase && l <= send
-          s2 = l
-        else
-          g = l
-        j += 1
-      if neg == 1 && negv >= sbase && negv <= send && s2 == negv + stride && g > 0
-        cell = negv - sbase
-        k = cell % 3
-        idx = cell / 3
-        if k <= 1 && idx < ntrans * cols
-          if guard[idx] == 0
-            guard[idx] = g
-          elsif guard[idx] != g
-            return nil
-    ci += 1
+  if wassat_windmill_scan_guards(fla, fcs, fcl, ncl, sbase, send, stride, ntrans * cols, guard, deadline) < 0
+    z = ccall("w_value_free_w", guard)
+    z = ccall("w_value_free_w", unitv)
+    z = ccall("w_value_free_w", nb1)
+    return nil
   idx = 0
   while idx < ntrans * cols
-    return nil if guard[idx] == 0
+    if guard[idx] == 0
+      z = ccall("w_value_free_w", guard)
+      z = ccall("w_value_free_w", unitv)
+      z = ccall("w_value_free_w", nb1)
+      return nil
     idx += 1
   # Initial row: h left cells, median, h right cells; final row reversed.
   c = 0
   while c < cols
     want = c < h ? 0 : (c == h ? 2 : 1)
-    return nil unless unitv[sbase + 3 * c + want] == 1
     wantf = c < h ? 1 : 0
-    return nil if c != h && unitv[sbase + (rows - 1) * stride + 3 * c + wantf] != 1
+    if unitv[sbase + 3 * c + want] != 1 || (c != h && unitv[sbase + (rows - 1) * stride + 3 * c + wantf] != 1)
+      z = ccall("w_value_free_w", guard)
+      z = ccall("w_value_free_w", unitv)
+      z = ccall("w_value_free_w", nb1)
+      return nil
     c += 1
   # P pairs: (p, p+1) with -p v -(p+1) and an all-positive 3-clause
   # (f, p, p+1) whose third literal is outside the state grid.
@@ -256,6 +381,13 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
         elsif hi == mid + 1 && lo != mid - 1 && nb1[mid] == 1 && !(mid >= sbase && mid <= send)
           pflag[mid] = lo
     ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      z = ccall("w_value_free_w", pflag)
+      z = ccall("w_value_free_w", guard)
+      z = ccall("w_value_free_w", unitv)
+      z = ccall("w_value_free_w", nb1)
+      return nil
+  z = ccall("w_value_free_w", nb1)
   # Tie each pair to a transition: the smallest state row it shares a clause with.
   prow = i64[nv + 3]
   v = 1
@@ -286,6 +418,12 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
             prow[p] = minrow if prow[p] < 0 || minrow < prow[p]
           j += 1
     ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      z = ccall("w_value_free_w", prow)
+      z = ccall("w_value_free_w", pflag)
+      z = ccall("w_value_free_w", guard)
+      z = ccall("w_value_free_w", unitv)
+      return nil
   pvar = i64[ntrans]
   tvar = i64[ntrans]
   flag = i64[ntrans]
@@ -294,7 +432,16 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
   while v <= nv
     if pflag[v] > 0 && prow[v] >= 0 && prow[v] < ntrans
       r = prow[v]
-      return nil if pvar[r] != 0 && pvar[r] != v
+      if pvar[r] != 0 && pvar[r] != v
+        z = ccall("w_value_free_w", active)
+        z = ccall("w_value_free_w", flag)
+        z = ccall("w_value_free_w", tvar)
+        z = ccall("w_value_free_w", pvar)
+        z = ccall("w_value_free_w", prow)
+        z = ccall("w_value_free_w", pflag)
+        z = ccall("w_value_free_w", guard)
+        z = ccall("w_value_free_w", unitv)
+        return nil
       pvar[r] = v
       flag[r] = pflag[v]
     v += 1
@@ -326,18 +473,50 @@ WASSAT_WINDMILL_ROUND_SLICE = 200000
           if tvar[r] == 0 || negv < tvar[r]
             tvar[r] = negv
     ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      z = ccall("w_value_free_w", active)
+      z = ccall("w_value_free_w", flag)
+      z = ccall("w_value_free_w", tvar)
+      z = ccall("w_value_free_w", pvar)
+      z = ccall("w_value_free_w", prow)
+      z = ccall("w_value_free_w", pflag)
+      z = ccall("w_value_free_w", guard)
+      z = ccall("w_value_free_w", unitv)
+      return nil
+  z = ccall("w_value_free_w", prow)
+  z = ccall("w_value_free_w", pflag)
   nmoves = 0
   r = 0
   while r < ntrans
-    return nil if pvar[r] == 0 || tvar[r] == 0 || flag[r] == 0
+    if pvar[r] == 0 || tvar[r] == 0 || flag[r] == 0
+      z = ccall("w_value_free_w", active)
+      z = ccall("w_value_free_w", flag)
+      z = ccall("w_value_free_w", tvar)
+      z = ccall("w_value_free_w", pvar)
+      z = ccall("w_value_free_w", guard)
+      z = ccall("w_value_free_w", unitv)
+      return nil
     f = flag[r]
     if unitv[f] == -1
       active[r] = 1
       nmoves += 1
     elsif unitv[f] != 1
+      z = ccall("w_value_free_w", active)
+      z = ccall("w_value_free_w", flag)
+      z = ccall("w_value_free_w", tvar)
+      z = ccall("w_value_free_w", pvar)
+      z = ccall("w_value_free_w", guard)
+      z = ccall("w_value_free_w", unitv)
       return nil
     r += 1
-  return nil if nmoves < 2
+  if nmoves < 2
+    z = ccall("w_value_free_w", active)
+    z = ccall("w_value_free_w", flag)
+    z = ccall("w_value_free_w", tvar)
+    z = ccall("w_value_free_w", pvar)
+    z = ccall("w_value_free_w", guard)
+    z = ccall("w_value_free_w", unitv)
+    return nil
 
   # Check whether active moves form a prefix 0..nmoves-1 and input units on
   # (G, P, T) respect the point-reflection automorphism (r -> nmoves-1-r, c -> cols-1-c).

@@ -402,6 +402,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
     exit(10)
   elsif result["status"] == -1
     s.flush_proof_sinks
+    s.close_proof_sinks
     raise "proof flush failed" unless ccall("__w_fsync_path", tmp)
     raise "proof rename failed" unless ccall("__w_rename", tmp, proof_tmp)
     raise "status write failed" unless write_file(status_path, "UNSAT\n")
@@ -467,6 +468,8 @@ WASSAT_ARM_SLS = 2             # local search, models only
   s = Wassat.from_flat_lucky(nv, art)
   s.set_stop_cell(stop)
   s.lucky_shared(res, base)
+  s.release_arenas
+  0
 
 # ---- SLS arm ------------------------------------------------------------------
 #
@@ -522,10 +525,13 @@ WASSAT_ARM_SLS = 2             # local search, models only
   # The snapshot/count equality is an exact hand-off contract between the SLS
   # kernel and repair. A stale endpoint or malformed snapshot is a miss, never
   # a larger guessed neighbourhood.
-  return miss unless meta[0] == best_unsat
-  return miss if meta[1] < 1 || meta[1] > WASSAT_SLS_REPAIR_MAX_FRINGE
+  if meta[0] != best_unsat || meta[1] < 1 || meta[1] > WASSAT_SLS_REPAIR_MAX_FRINGE
+    z = ccall("w_value_free_w", meta)
+    z = ccall("w_value_free_w", mutable)
+    return miss
   miss["attempted"] = true
   miss["relaxed"] = meta[1]
+  z = ccall("w_value_free_w", meta)
 
   repair = Wassat.from_flat(nv, art, 0)
   repair.enable_fixed_caps
@@ -538,18 +544,18 @@ WASSAT_ARM_SLS = 2             # local search, models only
   previous_conflicts = 0
   round = 0
   while round < WASSAT_SLS_REPAIR_ROUNDS && miss["core_rounds"] < 128
-    return miss if wassat_stop_requested?(stop)
+    break if wassat_stop_requested?(stop)
     eff_round = round
     core_step = miss["core_rounds"] / 16
     eff_round = core_step if core_step > eff_round
     eff_round = WASSAT_SLS_REPAIR_ROUNDS - 1 if eff_round >= WASSAT_SLS_REPAIR_ROUNDS
     allowance = wassat_sls_repair_round_conflicts(eff_round)
     internal_left = WASSAT_SLS_REPAIR_MAX_CONFLICTS - miss["conflicts"]
-    return miss if internal_left <= 0
+    break if internal_left <= 0
     allowance = internal_left if allowance > internal_left
     if conflict_cap > 0
       caller_left = conflict_cap - miss["conflicts"]
-      return miss if caller_left <= 0
+      break if caller_left <= 0
       allowance = caller_left if allowance > caller_left
 
     assumptions = []
@@ -559,7 +565,7 @@ WASSAT_ARM_SLS = 2             # local search, models only
       v += 1
     # Poll immediately before every persistent-solver query. The solver itself
     # also polls the same cell at each conflict.
-    return miss if wassat_stop_requested?(stop)
+    break if wassat_stop_requested?(stop)
     r = repair.solve_assuming_budget(assumptions, allowance)
     delta = r["conflicts"] - previous_conflicts
     delta = 0 if delta < 0
@@ -569,27 +575,31 @@ WASSAT_ARM_SLS = 2             # local search, models only
 
     if r["status"] == 1
       unless wassat_model_satisfies?(formula, r["model"])
+        repair.release_arenas
+        z = ccall("w_value_free_w", mutable)
         raise "internal error: frozen-fringe repair model does not satisfy the input formula"
       miss["sat"] = true
       miss["model"] = r["model"]
-      return miss
+      break
     if r["status"] == 0 - 1
       core = r["core"]
       # Empty means the raw formula itself was refuted. This model-only lane
       # has no certificate channel, so it must not publish or stop the race.
-      return miss if core.empty?
+      break if core.empty?
       added = 0
       core.each -> (l)
         v = l.abs
         if mutable[v] == 0
           mutable[v] = 1
           added += 1
-      return miss if added == 0
+      break if added == 0
       miss["relaxed"] += added
       miss["core_rounds"] += 1
-      return miss if miss["relaxed"] > WASSAT_SLS_REPAIR_MAX_FRINGE
+      break if miss["relaxed"] > WASSAT_SLS_REPAIR_MAX_FRINGE
     else
       round += 1
+  repair.release_arenas
+  z = ccall("w_value_free_w", mutable)
   miss
 
 # One bounded/resumable SLS slice. The first call constructs from the ALREADY
@@ -2170,9 +2180,15 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     prune_info = wassat_structural_prune(nv, formula)
   wassat_keychart_prepare(keychart_plan, art, stop) if keychart_plan != nil
   solvers = []
-  proto_plain = nil
-  proto_kissat = nil
   defer_simplify = prune_info == nil
+  is_raw = art["raw"] == true
+  forced_simp = art["config"].force_simplify?
+  arm_kraw = i8[threads + 1]
+  arm_simp = i8[threads + 1]
+  n_fresh = 0
+  n_simp1 = 0
+  n_simp2 = 0
+  single_fresh = -1
   a = 0
   while a < threads
     # Preserve every established matrix arm. The OTFS specialist clones arm
@@ -2181,34 +2197,127 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     # final slot is still the scout continuation.
     continued = incumbent != nil && a == threads - 1
     specialist = a >= otfs_index && a < otfs_index + otfs_specialists
-    # An arm the matrix will put on the Kissat schedule is loaded for it, so
-    # its watch pool is sized for that layout.
-    kraw = !continued && matrix_threads > 1 && ((art["config"].kissat_search_mask >> (specialist ? 1 : a)) & 1) == 1
-    s = nil
-    if continued
-      s = incumbent
-    elsif kraw
-      if proto_kissat == nil
-        s = Wassat.from_flat_kissat(nv, art)
-        proto_kissat = s unless art["arena_consumed"] == true
-      else
-        s = Wassat.from_flat_clone(nv, art, proto_kissat, true)
-    else
-      if proto_plain == nil
-        s = Wassat.from_flat(nv, art, 0)
-        proto_plain = s unless art["arena_consumed"] == true
-      else
-        s = Wassat.from_flat_clone(nv, art, proto_plain, false)
-    # Clone the freshly loaded formula before any arm rewrites clauses, parks
-    # substituted variables, or installs pruning clauses. The flat clone
-    # copies loading state and has no model-reconstruction map from a search.
-    solvers.push(s)
+    solvers.push(continued ? incumbent : nil)
+    unless continued
+      n_fresh += 1
+      single_fresh = a
+      source = specialist ? 1 : a
+      kraw = matrix_threads > 1 && ((art["config"].kissat_search_mask >> source) & 1) == 1
+      arm_kraw[a] = kraw ? 1 : 0
+      if matrix_threads > 1
+        b = a * WASSAT_CFG_STRIDE
+        wassat_race_matrix_config(source, cfgs, b)
+        cfgs[b + 7] = (art["config"].trail_reuse_mask >> source) & 1
+        cfgs[b + 8] = (art["config"].stable_only_mask >> source) & 1
+        cfgs[b + 9] = (art["config"].focused_only_mask >> source) & 1
+        cfgs[b + 10] = (art["config"].kissat_search_mask >> source) & 1
+        if is_raw
+          arm_simp[a] = 1 if cfgs[b + 4] == 1
+          arm_simp[a] = 2 if cfgs[b + 4] == 2 || (cfgs[b + 4] == 0 && forced_simp)
+      elsif matrix_threads == 1 && is_raw && forced_simp
+        arm_simp[a] = 2
+      n_simp1 += 1 if arm_simp[a] == 1
+      n_simp2 += 1 if arm_simp[a] == 2
     a += 1
+  dedup_subst = false
+  dedup_cong = false
+  if n_fresh == 1
+    solvers[single_fresh] = arm_kraw[single_fresh] == 1 ? Wassat.from_flat_kissat(nv, art) : Wassat.from_flat(nv, art, 0)
+  elsif n_fresh >= 2
+    # Single flat intake scan: build one plain prototype first, then clone
+    # Kissat-schedule and simplified prototypes from its already-built tables.
+    proto_plain = Wassat.from_flat(nv, art, 0)
+    dedup_subst = is_raw && n_simp1 >= 2
+    dedup_cong = is_raw && n_simp2 >= 2
+    proto_subst = dedup_subst ? Wassat.from_flat_clone(nv, art, proto_plain, false) : nil
+    proto_cong = dedup_cong ? Wassat.from_flat_clone(nv, art, proto_plain, false) : nil
+    last_unsimp_plain = -1
+    a = 0
+    while a < threads
+      if solvers[a] == nil && !(arm_simp[a] == 1 && dedup_subst) && !(arm_simp[a] == 2 && dedup_cong)
+        last_unsimp_plain = a if arm_kraw[a] == 0
+      a += 1
+    proto_kissat = nil
+    a = 0
+    while a < threads
+      if solvers[a] == nil && !(arm_simp[a] == 1 && dedup_subst) && !(arm_simp[a] == 2 && dedup_cong)
+        if arm_kraw[a] == 1
+          if proto_kissat == nil
+            proto_kissat = Wassat.from_flat_clone(nv, art, proto_plain, true)
+            solvers[a] = proto_kissat
+          else
+            solvers[a] = Wassat.from_flat_clone(nv, art, proto_kissat, true)
+        elsif a == last_unsimp_plain
+          solvers[a] = proto_plain
+          proto_plain = nil
+        else
+          solvers[a] = Wassat.from_flat_clone(nv, art, proto_plain, false)
+      a += 1
+    proto_plain.release_arenas if proto_plain != nil
+    proto_plain = nil
+    # Deduplicate Round-0 simplify_raw_mode(0) and simplify_raw_mode(1) into at
+    # most two leader prototypes before cloning their worker arms. While the
+    # 1-2 monomorphic Wassat simplify threads run, the coordinator thread only
+    # joins; all cloned Wassat shells are constructed sequentially on the
+    # coordinator immediately after join, so zero concurrent polymorphic boxed
+    # dispatch or inline-cache interleaving can occur.
+    if dedup_subst || dedup_cong
+      simp_stop = i64[4]
+      probe_zero = [0]
+      proto_subst.set_stop_cell(simp_stop) if proto_subst != nil
+      proto_cong.set_stop_cell(simp_stop) if proto_cong != nil
+      if defer_simplify && !wassat_sequential? && proto_subst != nil && proto_cong != nil
+        t_sub = Thread.new -> wassat_simplify_leader_body(proto_subst, 0, simp_stop, probe_zero)
+        t_cng = Thread.new -> wassat_simplify_leader_body(proto_cong, 1, simp_stop, probe_zero)
+        z = t_sub.join
+        z = t_cng.join
+      else
+        wassat_simplify_leader_body(proto_subst, 0, simp_stop, probe_zero) if proto_subst != nil
+        wassat_simplify_leader_body(proto_cong, 1, simp_stop, probe_zero) if proto_cong != nil && !wassat_stop_requested?(simp_stop)
+      proto_subst.set_stop_cell(stop) if proto_subst != nil
+      proto_cong.set_stop_cell(stop) if proto_cong != nil
+      z = ccall("w_value_free_w", simp_stop)
+    if dedup_subst
+      last_subst_plain = -1
+      a = 0
+      while a < threads
+        last_subst_plain = a if solvers[a] == nil && arm_simp[a] == 1 && arm_kraw[a] == 0
+        a += 1
+      a = 0
+      while a < threads
+        if solvers[a] == nil && arm_simp[a] == 1
+          if a == last_subst_plain
+            solvers[a] = proto_subst
+            proto_subst = nil
+          else
+            solvers[a] = Wassat.from_flat_clone(nv, art, proto_subst, arm_kraw[a] == 1)
+        a += 1
+      proto_subst.release_arenas if proto_subst != nil
+    if dedup_cong
+      last_cong_plain = -1
+      a = 0
+      while a < threads
+        last_cong_plain = a if solvers[a] == nil && arm_simp[a] == 2 && arm_kraw[a] == 0
+        a += 1
+      a = 0
+      while a < threads
+        if solvers[a] == nil && arm_simp[a] == 2
+          if a == last_cong_plain
+            solvers[a] = proto_cong
+            proto_cong = nil
+          else
+            solvers[a] = Wassat.from_flat_clone(nv, art, proto_cong, arm_kraw[a] == 1)
+        a += 1
+      proto_cong.release_arenas if proto_cong != nil
+  exported_subst_units = false
+  exported_cong_units = false
+  probe_ok = [0]
   a = 0
   while a < threads
     s = solvers[a]
     continued = incumbent != nil && a == threads - 1
     specialist = a >= otfs_index && a < otfs_index + otfs_specialists
+    already_simplified = !continued && ((arm_simp[a] == 1 && dedup_subst) || (arm_simp[a] == 2 && dedup_cong))
     offsets[a] = incumbent_conflicts if continued
     s.enable_otfs if specialist
     # INPROCESSING axis (policy inprocess_arm_mask). Cleared before
@@ -2221,26 +2330,28 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       s.enable_sharing(ring, ring_cap, ring_maxlen, a, !specialist)
       s.enable_unit_sharing(unit_ring, unit_cap)
       s.set_share_credit(credit, 16) unless specialist
+      if already_simplified && !specialist && s.install_pruning_clause(probe_ok, false, false) >= 0
+        if arm_simp[a] == 1 && !exported_subst_units
+          s.export_root_trail_from(0)
+          exported_subst_units = true
+        elsif arm_simp[a] == 2 && !exported_cong_units
+          s.export_root_trail_from(0)
+          exported_cong_units = true
     if continued
       z = 0
     elsif matrix_threads == 1
       s.enable_chrono
-      if art["config"].force_simplify?
+      if forced_simp && !already_simplified
         if defer_simplify
           s.defer_simplify_raw_mode(1)
         else
           s.simplify_raw
     else
-      source = specialist ? 1 : a
-      wassat_race_matrix_config(source, cfgs, a * WASSAT_CFG_STRIDE)
-      cfgs[a * WASSAT_CFG_STRIDE + 7] = (art["config"].trail_reuse_mask >> source) & 1
-      cfgs[a * WASSAT_CFG_STRIDE + 8] = (art["config"].stable_only_mask >> source) & 1
-      cfgs[a * WASSAT_CFG_STRIDE + 9] = (art["config"].focused_only_mask >> source) & 1
-      cfgs[a * WASSAT_CFG_STRIDE + 10] = (art["config"].kissat_search_mask >> source) & 1
       wassat_race_apply_config(s, cfgs, a * WASSAT_CFG_STRIDE,
-                               art["config"].force_simplify?,
-                               art["config"].use_vmtf(art["raw"] == true),
-                               defer_simplify)
+                               forced_simp,
+                               art["config"].use_vmtf(is_raw),
+                               defer_simplify,
+                               already_simplified)
     s.enable_fixed_caps
     if prune_info != nil && !continued
       # Share all pruned unit and binary clauses with every arm, and specialize
@@ -2253,6 +2364,8 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       arm_mode = 4 if a == 3 || a == 7
       wassat_apply_structural_pruning(s, prune_info, arm_mode, a == 0)
     a += 1
+  z = ccall("w_value_free_w", arm_simp)
+  z = ccall("w_value_free_w", arm_kraw)
   { "nv": nv, "solvers": solvers, "res": res, "stop": stop, "threads": threads,
     "cap": cap, "pre": [], "formula": formula, "tel": tel, "cfgs": cfgs,
     "circuit_plan": circuit_plan, "keychart_plan": keychart_plan,
@@ -2381,10 +2494,16 @@ WASSAT_TEL_STRIDE = 8
   # trail_reuse_mask in the build loop, which this native fn cannot read.
   0
 
+-> wassat_simplify_leader_body(s, mode, stop, probe_zero)
+  s.simplify_raw_mode(mode)
+  if s.install_pruning_clause(probe_zero, false, false) < 0
+    won = wassat_stop_publish(stop, 0 - 1)
+  0
+
 # Apply a configuration vector to a freshly built solver. `forced` is the
 # WASSAT_SIMPLIFY measurement hook: it only reaches arms whose simplify axis is
 # 0, exactly as before.
--> wassat_race_apply_config(s, cfgs, b, forced, policy_vmtf, defer_simplify = false)
+-> wassat_race_apply_config(s, cfgs, b, forced, policy_vmtf, defer_simplify = false, skip_simplify = false)
   if cfgs[b] == 1
     if policy_vmtf
       s.disable_vmtf
@@ -2394,13 +2513,14 @@ WASSAT_TEL_STRIDE = 8
   s.reseed_phases(cfgs[b + 2]) if cfgs[b + 1] == 1
   s.set_positive_phases if cfgs[b + 1] == 2
   s.enable_chrono if cfgs[b + 3] == 1
-  if defer_simplify
-    s.defer_simplify_raw_mode(0) if cfgs[b + 4] == 1
-    s.defer_simplify_raw_mode(1) if cfgs[b + 4] == 2 || (cfgs[b + 4] == 0 && forced)
-  else
-    s.simplify_raw_mode(0) if cfgs[b + 4] == 1
-    s.simplify_raw_mode(1) if cfgs[b + 4] == 2
-    s.simplify_raw if cfgs[b + 4] == 0 && forced
+  unless skip_simplify
+    if defer_simplify
+      s.defer_simplify_raw_mode(0) if cfgs[b + 4] == 1
+      s.defer_simplify_raw_mode(1) if cfgs[b + 4] == 2 || (cfgs[b + 4] == 0 && forced)
+    else
+      s.simplify_raw_mode(0) if cfgs[b + 4] == 1
+      s.simplify_raw_mode(1) if cfgs[b + 4] == 2
+      s.simplify_raw if cfgs[b + 4] == 0 && forced
   s.enable_shrink if cfgs[b + 5] == 1
   # Two intervals, not one: the axis pays, so spend its second arm on a
   # DIFFERENT cadence rather than a duplicate. Arm 2 subsumes every 3k
@@ -2517,19 +2637,27 @@ WASSAT_TEL_STRIDE = 8
   rewrite_counter = !heavy && (budget == 0 || tick_slice > 0) && budget_limit == 0 && env("WASSAT_COUNTER_REWRITE") != "0"
   rewrite_counter = false if env("WASSAT_ARMS") != nil && env("WASSAT_COUNTER_REWRITE") != "1"
   rendered = pre.run_light_flat(formula, rewrite_counter)
-  return 0 if rendered == nil
-  rendered = pre.run_heavy if heavy && rendered["status"] == 0
-  return 0 if rendered == nil
+  if rendered == nil
+    pre.release_arenas
+    return 0
+  if heavy && rendered["status"] == 0
+    rendered = pre.run_heavy
+    if rendered == nil
+      pre.release_arenas
+      return 0
   pnv = rendered["nvars"]
   rendered["stats"]["solver_nvars"] = pnv
   # A projected walker must consume the same variable space as its rendering.
   pre_sls_allowed = false if pnv != formula["nvars"]
-  return 0 if wassat_stop_requested?(stop)
+  if wassat_stop_requested?(stop)
+    pre.release_arenas
+    return 0
   out.push(rendered["stack"])
   out.push(rendered["stats"])
   # A refutation during preprocessing is a real answer: report it the way an
   # arm reports one, so the coordinator needs no second channel for it.
   if rendered["status"] != 0
+    pre.release_arenas
     res[base] = 0 - 1
     won = wassat_stop_publish(stop, 0 - 1)
     return 0
@@ -2559,12 +2687,14 @@ WASSAT_TEL_STRIDE = 8
       out.push(projected_meta)
       projected_meta[11] = wassat_pre_sls_extra_bytes(formula) + wassat_sls_arena_bytes(formula)
       projected_handle = Thread.new -> wassat_pre_sls_body(formula, rendered, stop, projected_result, projected_meta)
+  pre.release_arenas if projected_handle == nil
   s.set_tick_stop(tick_slice) if tick_slice > 0
   s.solve_shared_budget(res, base, budget)
   wassat_pre_arm_copy_telemetry(res, base, pnv, nv)
   s.export_telemetry(tel, tbase)
   if projected_handle != nil
     z = projected_handle.join
+    pre.release_arenas
     # Only the parent writes the CDCL slot. The private payload stays in the
     # reduced variable space so the existing collector reconstructs it once.
     if projected_result[0] == 1 && res[base] == 0
@@ -3403,6 +3533,7 @@ WASSAT_AXIS_SLOTS = 10
             if race["prune_info"] != nil
               wassat_apply_structural_pruning(ns, race["prune_info"], 0, false)
             solvers[worst].profile_counters("race.arm[worst].retired.round[round]")
+            solvers[worst].release_arenas
             solvers[worst] = ns
             pool_boxes[worst][0] = ns if use_pool
             # A fresh solver's counters restart at zero, so its telemetry
@@ -3902,7 +4033,7 @@ WASSAT_AXIS_SLOTS = 10
     model = wassat_reconstruct_model(art["stack"], reduced_model, nv)
     unless wassat_model_satisfies?(formula, model)
       raise "internal error: winning arm's model does not satisfy the original formula"
-    print(wassat_sat_text(model))
+    wassat_print_sat_model(model, false)
   elsif verdict == "UNSAT"
     << "s UNSATISFIABLE"
   else
@@ -4027,7 +4158,7 @@ WASSAT_AXIS_SLOTS = 10
     raise e
   port.cleanup
   if r["verdict"] == "SAT"
-    print(wassat_sat_text(r["model"]))
+    wassat_print_sat_model(r["model"], false)
   elsif r["verdict"] == "UNSAT"
     << "s UNSATISFIABLE"
   else

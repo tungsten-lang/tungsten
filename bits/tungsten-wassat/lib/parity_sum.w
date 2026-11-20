@@ -245,24 +245,11 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
 # s-subset of L stays a clause, up to 8 literals; a + 1 must be at most 5 too.
 # Appends to kv (variables, 8 slots an equation) / kn / kr; returns the count.
 -> wassat_parity_cardinality(fla, fcs, fcl, nc, nv, kv, kn, kr, kcap, st, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64[] i64 i64[] i64) i64
+  nl = 2 * nv + 4 ## i64
+  deg = i32[nl + 2]
+  xs = i64[8]
   nmid = 0 ## i64
   ci = 0 ## i64
-  while ci < nc
-    nmid += 1 if fcl[ci] >= 3 && fcl[ci] <= 5
-    ci += 1
-  return 0 if nmid < 8
-  csize = 1024 ## i64
-  while csize < 2 * nmid
-    csize = csize << 1
-  cmask = csize - 1 ## i64
-  ctab = i64[csize]
-  ck = i64[5 * nmid + 5]
-  clen = i64[nmid + 1]
-  xs = i64[8]
-  nl = 2 * nv + 4 ## i64
-  ost = i64[nl + 2]
-  ne = 0 ## i64
-  ci = 0
   while ci < nc
     n = fcl[ci] ## i64
     if n >= 3 && n <= 5
@@ -283,24 +270,113 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
         ok = 0 if (xs[j] >> 1) == (xs[j - 1] >> 1)
         j += 1
       if ok == 1
-        j = n
-        while j < 5
-          xs[j] = 0
+        nmid += 1
+        j = 0
+        while j < n
+          deg[xs[j]] = deg[xs[j]] + 1 if deg[xs[j]] < 1000000
           j += 1
-        at = wassat_parity_at(ctab, ck, cmask, n, xs[0], xs[1], xs[2], xs[3], xs[4]) ## i64
-        if at <= 0
-          ctab[0 - at - 1] = ne + 1
-          j = 0
-          while j < 5
-            ck[5 * ne + j] = xs[j]
-            j += 1
-          clen[ne] = n
-          j = 0
-          while j < n
-            ost[xs[j] + 1] += 1
-            j += 1
-          ne += 1
     ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      z = ccall("w_value_free_w", xs)
+      z = ccall("w_value_free_w", deg)
+      st[8] = 2
+      return 0
+  if nmid < 8
+    z = ccall("w_value_free_w", xs)
+    z = ccall("w_value_free_w", deg)
+    return 0
+  nkeep = 0 ## i64
+  ci = 0
+  while ci < nc
+    n = fcl[ci] ## i64
+    if n >= 3 && n <= 5
+      off = fcs[ci] ## i64
+      keep = 1 ## i64
+      j = 0 ## i64
+      while j < n
+        l = fla[off + j] ## i64
+        v2 = (l > 0 ? l : 0 - l) << 1 ## i64
+        if deg[v2] < 3 || deg[v2 | 1] < 3
+          keep = 0
+          j = n
+        else
+          j += 1
+      nkeep += 1 if keep == 1
+    ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      z = ccall("w_value_free_w", xs)
+      z = ccall("w_value_free_w", deg)
+      st[8] = 2
+      return 0
+  if nkeep < 8
+    z = ccall("w_value_free_w", xs)
+    z = ccall("w_value_free_w", deg)
+    return 0
+  csize = 1024 ## i64
+  while csize < 2 * nkeep
+    csize = csize << 1
+  cmask = csize - 1 ## i64
+  ctab = i64[csize]
+  ck = i64[5 * nkeep + 5]
+  clen = i64[nkeep + 1]
+  ost = i64[nl + 2]
+  ne = 0 ## i64
+  ci = 0
+  while ci < nc
+    n = fcl[ci] ## i64
+    if n >= 3 && n <= 5
+      off = fcs[ci] ## i64
+      keep = 1 ## i64
+      j = 0 ## i64
+      while j < n
+        l = fla[off + j] ## i64
+        v2 = (l > 0 ? l : 0 - l) << 1 ## i64
+        if deg[v2] < 3 || deg[v2 | 1] < 3
+          keep = 0
+          j = n
+        else
+          x = l > 0 ? v2 : (v2 | 1) ## i64
+          k = j ## i64
+          while k > 0 && xs[k - 1] > x
+            xs[k] = xs[k - 1]
+            k -= 1
+          xs[k] = x
+          j += 1
+      if keep == 1
+        ok = 1 ## i64
+        j = 1
+        while j < n
+          ok = 0 if (xs[j] >> 1) == (xs[j - 1] >> 1)
+          j += 1
+        if ok == 1 && ne < nkeep
+          j = n
+          while j < 5
+            xs[j] = 0
+            j += 1
+          at = wassat_parity_at(ctab, ck, cmask, n, xs[0], xs[1], xs[2], xs[3], xs[4]) ## i64
+          if at <= 0
+            ctab[0 - at - 1] = ne + 1
+            j = 0
+            while j < 5
+              ck[5 * ne + j] = xs[j]
+              j += 1
+            clen[ne] = n
+            j = 0
+            while j < n
+              ost[xs[j] + 1] += 1
+              j += 1
+            ne += 1
+    ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      z = ccall("w_value_free_w", ost)
+      z = ccall("w_value_free_w", clen)
+      z = ccall("w_value_free_w", ck)
+      z = ccall("w_value_free_w", ctab)
+      z = ccall("w_value_free_w", xs)
+      z = ccall("w_value_free_w", deg)
+      st[8] = 2
+      return 0
+  z = ccall("w_value_free_w", deg)
   if ne < 8
     z = ccall("w_value_free_w", ost)
     z = ccall("w_value_free_w", xs)
@@ -323,6 +399,16 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
       ofill[x] += 1
       j += 1
     i += 1
+    if (i & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      z = ccall("w_value_free_w", ofill)
+      z = ccall("w_value_free_w", occ)
+      z = ccall("w_value_free_w", ost)
+      z = ccall("w_value_free_w", xs)
+      z = ccall("w_value_free_w", clen)
+      z = ccall("w_value_free_w", ck)
+      z = ccall("w_value_free_w", ctab)
+      st[8] = 2
+      return 0
   z = ccall("w_value_free_w", ofill)
   covered = i64[ne + 1]
   inl = i64[nl + 2]
@@ -424,7 +510,9 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
             kr[nk] = (need + neg) & 1
             nk += 1
     i += 1
-    if (i & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
+    if nk == 0 && ticks >= 200000
+      i = ne
+    elsif (i & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
       st[8] = 2
       i = ne
   z = ccall("w_value_free_w", lits)
@@ -458,6 +546,7 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
   xs = i64[8]
   sg = i64[8]
   nu = 0 ## i64
+  any_both = 0 ## i64
   ci = 0 ## i64
   while ci < nc
     n = fcl[ci] ## i64
@@ -515,7 +604,9 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
         sbit = sg[0] == 0 ? 1 : 2 ## i64
         w1 = h1 >> 4 ## i64
         sh1 = (h1 & 15) << 1 ## i64
-        bf[w1] = bf[w1] | (sbit << sh1)
+        nw1 = bf[w1] | (sbit << sh1) ## i64
+        bf[w1] = nw1
+        any_both = 1 if ((nw1 >> sh1) & 3) == 3
         w2 = h2 >> 4 ## i64
         sh2 = (h2 & 15) << 1 ## i64
         bf[w2] = bf[w2] | (sbit << sh2)
@@ -525,6 +616,10 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
       z = ccall("w_value_free_w", xs)
       return 0 - 1
   meta[1] = nu
+  if any_both == 0
+    z = ccall("w_value_free_w", sg)
+    z = ccall("w_value_free_w", xs)
+    return 0
   ncand = 0 ## i64
   ci = 0
   while ci < nc
@@ -762,6 +857,7 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
   n25 = n2 + n3 + n4 + n5
   cap_s = nsmall
   ne = 0
+  units_only = false
   tab = nil
   ev = nil
   ek = nil
@@ -795,23 +891,40 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
       z = ccall("w_value_free_w", bf)
       st[8] = 2
       return miss
-    if ncand == 0 && (witness != nil || !has_card_shape)
+    if ncand == 0
+      z = ccall("w_value_free_w", bf)
+      if witness != nil || !has_card_shape
+        z = ccall("w_value_free_w", umask)
+        st[1] = nu
+        return miss
+      units_only = true
+      ev = i64[5 * nu + 5]
+      ek = i64[nu + 1]
+      emask = i64[nu + 1]
+      if nu > 0
+        v = 1
+        while v <= nv
+          um = umask[v] ## i64
+          if um != 0
+            ev[5 * ne] = v
+            ek[ne] = 1
+            emask[ne] = um
+            ne += 1
+          v += 1
+      z = ccall("w_value_free_w", umask)
+    else
+      cap_s = ncand + nu
+      tsize = 1024
+      while tsize < 2 * cap_s + 4
+        tsize = tsize << 1
+      tmask = tsize - 1
+      tab = i64[tsize]
+      ev = i64[5 * cap_s + 5]
+      ek = i64[cap_s + 1]
+      emask = i64[cap_s + 1]
+      ne = wassat_parity_collect_filtered(fla, fcs, fcl, nc, nv, bf, bmask, umask, tab, tmask, ev, ek, emask, deadline)
       z = ccall("w_value_free_w", umask)
       z = ccall("w_value_free_w", bf)
-      st[1] = nu
-      return miss
-    cap_s = ncand + nu
-    tsize = 1024
-    while tsize < 2 * cap_s + 4
-      tsize = tsize << 1
-    tmask = tsize - 1
-    tab = i64[tsize]
-    ev = i64[5 * cap_s + 5]
-    ek = i64[cap_s + 1]
-    emask = i64[cap_s + 1]
-    ne = wassat_parity_collect_filtered(fla, fcs, fcl, nc, nv, bf, bmask, umask, tab, tmask, ev, ek, emask, deadline)
-    z = ccall("w_value_free_w", umask)
-    z = ccall("w_value_free_w", bf)
   else
     tsize = 1024
     while tsize < 2 * cap_s
@@ -822,7 +935,7 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
     ek = i64[cap_s + 1]
     emask = i64[cap_s + 1]
     ne = wassat_parity_collect(fla, fcs, fcl, nc, tab, tmask, ev, ek, emask, deadline)
-  z = ccall("w_value_free_w", tab)
+  z = ccall("w_value_free_w", tab) if tab != nil
   if ne < 0
     z = ccall("w_value_free_w", emask)
     z = ccall("w_value_free_w", ek)
@@ -895,7 +1008,7 @@ WASSAT_PARITY_SUM_MAX_VARS = 8000000
   z = ccall("w_value_free_w", ev)
   st[1] = nq
   members = i8[witness == nil ? 0 : nq]
-  if nq > 0
+  if nq > 0 && !units_only
     hit = wassat_parity_sum_close(nv, nq, eoff, elen, erhs, evars, st, members)
     if hit == 1
       if witness != nil

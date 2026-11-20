@@ -283,6 +283,43 @@ use cover_split
     << text
   0
 
+-> wassat_emit_sat_model(model, quiet)
+  if quiet
+    rtext = wassat_sat_text(model)
+    wassat_status(true, rtext.slice(0, rtext.size - 1))
+  else
+    wassat_print_sat_model(model, false)
+  0
+
+-> wassat_drat_bytes_to_string(bytes, n)
+  return "" if bytes == nil || n <= 0
+  sb = StringBuffer(n)
+  view = bytes[0...n]
+  sb.append(view)
+  z = ccall("w_value_free_w", view)
+  sb.to_s
+
+-> wassat_free_art_flat(pre_obj, art)
+  if pre_obj != nil
+    pre_obj.release_arenas
+  elsif art["raw"] != true
+    z = ccall("w_value_free_w", art["fla"]) if art.has_key?("fla") && art["fla"] != nil
+    z = ccall("w_value_free_w", art["fcs"]) if art.has_key?("fcs") && art["fcs"] != nil
+    z = ccall("w_value_free_w", art["fcl"]) if art.has_key?("fcl") && art["fcl"] != nil
+    z = ccall("w_value_free_w", art["falive"]) if art.has_key?("falive") && art["falive"] != nil
+    z = ccall("w_value_free_w", art["ftaut"]) if art.has_key?("ftaut") && art["ftaut"] != nil
+    z = ccall("w_value_free_w", art["fpgid"]) if art.has_key?("fpgid") && art["fpgid"] != nil
+    z = ccall("w_value_free_w", art["fsig"]) if art.has_key?("fsig") && art["fsig"] != nil
+  if art["raw"] != true
+    art["fla"] = nil
+    art["fcs"] = nil
+    art["fcl"] = nil
+    art["falive"] = nil
+    art["ftaut"] = nil
+    art["fpgid"] = nil
+    art["fsig"] = nil if art.has_key?("fsig")
+  0
+
 # Structural certificates cite one-based clause IDs from the original CNF.
 # A bounded recognition miss leaves the certificate destination empty.
 -> wassat_run_certify(args)
@@ -390,7 +427,7 @@ use cover_split
   model = wassat_reconstruct_model(light_stack, reduced_model, formula["nvars"])
   unless wassat_model_satisfies?(formula, model)
     raise "internal error: probe model does not satisfy the input formula"
-  print(wassat_sat_text(model))
+  wassat_print_sat_model(model, false)
   << "c mode: fast (raced: light probe)"
   << "c conflicts: [prior_conflicts], decisions: 0"
   << "c stats restarts=0 reduces=0 " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - start_ms)
@@ -553,8 +590,7 @@ use cover_split
       if summle["status"] == 1
         wassat_discard_output(wrat_out, wrat_final)
         wassat_discard_output(drat_out, drat_final)
-        smtext = wassat_sat_text(summle["model"])
-        wassat_status(quiet, smtext.slice(0, smtext.size - 1))
+        wassat_emit_sat_model(summle["model"], quiet)
         sm = summle["summle"]
         wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified Summle arithmetic expression)")
         wassat_status(quiet, "c summle target=[sm[2]] inputs=[sm[0]] steps=[sm[5]] states=[sm[3]] pairs=[sm[4]]")
@@ -634,8 +670,7 @@ use cover_split
       if am[0] == 1
         wassat_discard_output(wrat_out, wrat_final)
         wassat_discard_output(drat_out, drat_final)
-        atext = wassat_sat_text(pair_model["model"])
-        wassat_status(quiet, atext.slice(0, atext.size - 1))
+        wassat_emit_sat_model(pair_model["model"], quiet)
         wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified Boolean pair-function affine model)")
         wassat_status(quiet, "c pair_affine blocks=[am[1]] columns=[am[2]] pairs=[am[3]] rank=[am[4]]")
         wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
@@ -652,8 +687,7 @@ use cover_split
       if pm[0] == 1
         wassat_discard_output(wrat_out, wrat_final)
         wassat_discard_output(drat_out, drat_final)
-        ptext = wassat_sat_text(partition["model"])
-        wassat_status(quiet, ptext.slice(0, ptext.size - 1))
+        wassat_emit_sat_model(partition["model"], quiet)
         wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified equal-sum partition circuit model)")
         wassat_status(quiet, "c partition inputs=[pm[1]] gates=[pm[2]] bits=[pm[3]] pair_probes=[pm[8]]")
         wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
@@ -672,8 +706,7 @@ use cover_split
         raise "internal error: Hantzsche-Wendt model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      hwtext = wassat_sat_text(hw["model"])
-      wassat_status(quiet, hwtext.slice(0, hwtext.size - 1))
+      wassat_emit_sat_model(hw["model"], quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified Hantzsche-Wendt group-ring unit)")
       wassat_status(quiet, "c hantzsche supports=[hw["support_left"]]+[hw["support_right"]], xor_rows=[hw["xor_rows"]], candidates=[hw["candidates"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
@@ -701,8 +734,7 @@ use cover_split
         raise "internal error: knight-tour model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      kttext = wassat_sat_text(knight["model"])
-      wassat_status(quiet, kttext.slice(0, kttext.size - 1))
+      wassat_emit_sat_model(knight["model"], quiet)
       encoding = knight["successor"] ? "successor" : "distance-pruned"
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified [encoding] knight tour)")
       wassat_status(quiet, "c knight side=[knight["side"]], positions=[knight["positions"]], tour_nodes=[knight["nodes"]]")
@@ -725,8 +757,7 @@ use cover_split
         raise "internal error: sliding-puzzle model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      ptext = wassat_sat_text(puzzle["model"])
-      wassat_status(quiet, ptext.slice(0, ptext.size - 1))
+      wassat_emit_sat_model(puzzle["model"], quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified 5x5 sliding-puzzle model)")
       wassat_status(quiet, "c puzzle moves=[puzzle["moves"]], nodes=[puzzle["nodes"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: [puzzle["decisions"]], props: [puzzle["props"]]")
@@ -749,8 +780,7 @@ use cover_split
         raise "internal error: Stedman model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      sttext = wassat_sat_text(stedman["model"])
-      wassat_status(quiet, sttext.slice(0, sttext.size - 1))
+      wassat_emit_sat_model(stedman["model"], quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified Stedman triples model)")
       wassat_status(quiet, "c stedman transitions=[stedman["transitions"]], nodes=[stedman["nodes"]]")
       wassat_prof_note("stedman.cover rounds=[stedman["cover_rounds"]]") if tprof != 0 && stedman["cover_rounds"] != nil
@@ -767,8 +797,7 @@ use cover_split
         raise "internal error: Fermat circuit model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      ftext = wassat_sat_text(fermat_model)
-      wassat_status(quiet, ftext.slice(0, ftext.size - 1))
+      wassat_emit_sat_model(fermat_model, quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified Fermat circuit model)")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(10)
@@ -788,8 +817,7 @@ use cover_split
         raise "internal error: sum-of-three-cubes model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      s3text = wassat_sat_text(sum3["model"])
-      wassat_status(quiet, s3text.slice(0, s3text.size - 1))
+      wassat_emit_sat_model(sum3["model"], quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified sum-of-three-cubes circuit model)")
       wassat_status(quiet, "c sum3 target=[sum3["target"]], operands=[sum3["x"]],[sum3["y"]],[sum3["z"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: [sum3["decisions"]], props: [sum3["props"]]")
@@ -887,8 +915,7 @@ use cover_split
         raise "internal error: ternary-affine model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      atext = wassat_sat_text(affine["model"])
-      wassat_status(quiet, atext.slice(0, atext.size - 1))
+      wassat_emit_sat_model(affine["model"], quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact ternary affine GF(3) model)")
       wassat_status(quiet, "c affine groups=[affine["groups"]], equations=[affine["equations"]], rank=[affine["rank"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
@@ -1089,8 +1116,7 @@ use cover_split
         raise "internal error: multiplier model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      mtext = wassat_sat_text(multiplier_model)
-      wassat_status(quiet, mtext.slice(0, mtext.size - 1))
+      wassat_emit_sat_model(multiplier_model, quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified multiplier circuit model)")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(10)
@@ -1133,8 +1159,7 @@ use cover_split
         raise "internal error: synchronizing-automaton model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      stext = wassat_sat_text(automata_model)
-      wassat_status(quiet, stext.slice(0, stext.size - 1))
+      wassat_emit_sat_model(automata_model, quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified synchronizing-automaton model)")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(10)
@@ -1150,8 +1175,7 @@ use cover_split
         raise "internal error: Latin CSP model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      ltext = wassat_sat_text(latin["model"])
-      wassat_status(quiet, ltext.slice(0, ltext.size - 1))
+      wassat_emit_sat_model(latin["model"], quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (exact [latin["width"]]-value Latin ternary CSP)")
       wassat_status(quiet, "c latin groups=[latin["groups"]], constraints=[latin["constraints"]], seeds=[latin["seeds"]], nodes=[latin["nodes"]], checks=[latin["checks"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
@@ -1173,8 +1197,7 @@ use cover_split
         raise "internal error: edge-matching model does not satisfy the input formula"
       wassat_discard_output(wrat_out, wrat_final)
       wassat_discard_output(drat_out, drat_final)
-      etext = wassat_sat_text(edge_match["model"])
-      wassat_status(quiet, etext.slice(0, etext.size - 1))
+      wassat_emit_sat_model(edge_match["model"], quiet)
       wassat_status(quiet, "c mode: [wassat_mode_of(options)] (verified compact edge-matching model)")
       wassat_status(quiet, "c edge grid=[edge_match["side"]]x[edge_match["side"]], cells=[edge_match["cells"]], edges=[edge_match["edges"]], nodes=[edge_match["nodes"]]")
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
@@ -1345,7 +1368,7 @@ use cover_split
       if cover["status"] == 1
         unless wassat_model_satisfies?(formula, cover["model"])
           raise "internal error: conflict-cover model does not satisfy the input formula"
-        print(wassat_sat_text(cover["model"]))
+        wassat_print_sat_model(cover["model"], false)
       else
         << "s UNSATISFIABLE"
       << "c mode: fast (exact conflict-constrained covering)"
@@ -1364,7 +1387,7 @@ use cover_split
       if split["status"] == 1
         unless wassat_model_satisfies?(formula, split["model"])
           raise "internal error: case-split model does not satisfy the input formula"
-        print(wassat_sat_text(split["model"]))
+        wassat_print_sat_model(split["model"], false)
       else
         << "s UNSATISFIABLE"
       << "c mode: fast (covering case split)"
@@ -1381,7 +1404,7 @@ use cover_split
       if directed["status"] == 1
         unless wassat_model_satisfies?(formula, directed["model"])
           raise "internal error: directed-kernel model does not satisfy the input formula"
-        print(wassat_sat_text(directed["model"]))
+        wassat_print_sat_model(directed["model"], false)
       else
         << "s UNSATISFIABLE"
       << "c mode: fast (exact directed-kernel SCC prefix)"
@@ -2195,7 +2218,7 @@ use cover_split
           xmodel = xmodel.slice(0, orig_nvars) if ramsey_lex != nil
           unless wassat_model_satisfies?(orig_formula, xmodel)
             raise "internal error: xor arm model does not satisfy the input formula"
-          print(wassat_sat_text(xmodel))
+          wassat_print_sat_model(xmodel, false)
           if scout_res[scout_xor_base + scout_nv + 2] == 1
             << "c mode: fast (xorshift circuit model, [scout_res[scout_xor_base + scout_nv + 4]] gates)"
           else
@@ -2304,11 +2327,29 @@ use cover_split
         # raw arm and no preprocessing arm.
         sls_flips = wassat_sls_arm_flips
         sls_flips = 0 unless wassat_sls_arm_memory_allowed?(formula)
-        # Completed scout allocations are still resident. The race walker is
-        # accepted only if every planned raw/preprocessed solver, the scout's
-        # ordinary and optional lucky solvers, the retained scout walker, and
-        # this second walker fit together below the shared one-third-RAM
-        # ceiling.
+        # The scout lucky arm already released its arena inside
+        # wassat_lucky_arm_body. When scout_solver will NOT continue into the
+        # race and a multi-arm/pre/SLS race will actually run, release the
+        # abandoned scout_solver arena BEFORE sizing race_cdcl_arenas (keeping
+        # scout_solver intact whenever no race runs so the single-arm fallback
+        # below reuses it directly).
+        scout_cdcl_arenas = scout_solver == nil ? 0 : 1
+        continuation = (scout_solver != nil && config.continue_scout?) ? scout_solver : nil
+        if continuation == nil && scout_solver != nil
+          will_race_without_scout = arms > 1 || pre_arms > 0
+          if !will_race_without_scout && sls_flips > 0
+            will_race_without_scout = wassat_race_memory_fits?(
+              formula, arms + pre_arms, scout_sls_arenas + 1,
+              pre_arms + resident_pre_arenas
+            )
+          if will_race_without_scout
+            scout_solver.release_arenas
+            scout_solver = nil
+            scout_cdcl_arenas = 0
+        # Completed scout allocations still resident alongside the race. The
+        # race walker is accepted only if every planned raw/preprocessed solver,
+        # any retained scout solver, the retained scout walker, and this second
+        # walker fit together below the shared one-third-RAM ceiling.
         race_cdcl_arenas = arms + pre_arms + scout_cdcl_arenas
         unless wassat_race_memory_fits?(
           formula, race_cdcl_arenas, scout_sls_arenas + 1,
@@ -2333,7 +2374,7 @@ use cover_split
           wassat_prof_note("race.arena_bytes cdcl=[cdcl_bytes] sls=[sls_bytes] preprocess=[pre_bytes]")
         race = nil
         cover_workers = arms + pre_arms + (sls_flips > 0 ? 1 : 0)
-        cover_workers += 1 if config.continue_scout? && scout_solver != nil
+        cover_workers += 1 if continuation != nil
         cover_plan = wassat_resolution_cover_plan(formula, cover_workers)
         cycle_plan = nil
         if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && options["conflicts"] == 0
@@ -2349,7 +2390,6 @@ use cover_split
           tree_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
           solo_circuit_plan = wassat_treewidth_plan(formula, 1, tree_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
         if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil || cycle_plan != nil || solo_circuit_plan != nil
-          continuation = config.continue_scout? ? scout_solver : nil
           matrix_arms = arms
           if arms == 1 && pre_arms == 0 && sls_flips == 0 && (cover_plan != nil || cycle_plan != nil || solo_circuit_plan != nil)
             # Preserve the lone solver's trajectory and memory footprint.
@@ -2362,7 +2402,7 @@ use cover_split
                                    continuation, continuation_spent, pre_arms,
                                    sls_flips > 0 ? 1 : 0, scout_cdcl_arenas,
                                    scout_sls_arenas, resident_pre_arenas, cover_plan, cycle_plan, solo_circuit_plan,
-                                   scout_lucky ? 1 : 0)
+                                   0)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
           if pre_arms > 0
             # Each preprocessing arm constructs its own WassatPreprocess inside
@@ -2476,11 +2516,11 @@ use cover_split
     pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
     if proof_mode == WASSAT_PROOF_DRAT
       pre.enable_flat_proof_output
-      if formula["flat_ncl"] > 100000
+      pre.set_deadline_ms(wassat_pre_stage_ms)
+      if formula["flat_ncl"] > 100000 || formula["flat_nlits"] > 400000
         pre.set_budget(wassat_pre_light_ticks)
         pre.set_heavy_budget(wassat_pre_heavy_ticks, 0)
     art = pre.run
-    pre = nil
   pre_ms = ccall("__w_clock_ms") - t0
   pstats = wassat_pre_stats_text(art["stats"], pre_ms)
 
@@ -2489,6 +2529,8 @@ use cover_split
     # Certificates reach durable storage BEFORE the verdict is announced: a
     # failed write must never leave "s UNSATISFIABLE" beside an incomplete
     # proof.
+    wassat_free_art_flat(pre, art)
+    pre = nil
     wtext = ""
     dtext = ""
     unless wrat_final == nil
@@ -2498,10 +2540,23 @@ use cover_split
         raise "proof write failed at '[wrat_out]'" unless write_file(wrat_out, wtext)
         wassat_publish_output(wrat_out, wrat_final, "WRAT")
     unless drat_final == nil
-      dtext = art["drat"].empty? ? "" : art["drat"].join("\n") + "\n"
-      unless drat_final == "-"
-        raise "proof write failed at '[drat_out]'" unless write_file(drat_out, dtext)
+      has_dbytes = art.has_key?("drat_bpos") && art["drat_bpos"] > 0 && art["drat_bytes"] != nil
+      if drat_final == "-"
+        if has_dbytes
+          dtext = wassat_drat_bytes_to_string(art["drat_bytes"], art["drat_bpos"])
+        else
+          dtext = art["drat"].empty? ? "" : art["drat"].join("\n") + "\n"
+      else
+        if has_dbytes
+          raise "proof write failed at '[drat_out]'" unless wassat_append_bytes_n(drat_out, art["drat_bytes"], art["drat_bpos"])
+        else
+          dtext = art["drat"].empty? ? "" : art["drat"].join("\n") + "\n"
+          raise "proof write failed at '[drat_out]'" unless write_file(drat_out, dtext)
         wassat_publish_output(drat_out, drat_final, "DRAT")
+      if art.has_key?("drat_bytes") && art["drat_bytes"] != nil
+        z = ccall("w_value_free_w", art["drat_bytes"])
+        art["drat_bytes"] = nil
+        art["drat_bpos"] = 0
     wassat_status(quiet, "s UNSATISFIABLE")
     wassat_status(quiet, "c mode: [wassat_mode_of(options)]")
     wassat_status(quiet, "c conflicts: [budget_used], decisions: 0")
@@ -2510,77 +2565,90 @@ use cover_split
     print(dtext) if drat_final == "-"
     exit(20)
 
-  s = nil
-  if proof_mode == WASSAT_PROOF_NONE
-    # trusted path: ingest the preprocessor's flat mirrors natively, or reuse
-    # the raw scout solver directly when no raw race was constructed so huge
-    # single-arm inputs do not allocate a second multi-GB solver arena.
-    if art["raw"] == true && scout_solver != nil && race == nil
-      s = scout_solver
-      s.set_stop_cell(nil)
-      s.set_shared_conflict_budget(nil, 0, 0)
-    else
-      s = Wassat.from_flat(formula["nvars"], art, 0)
-    # This solver only runs when the bounded probe missed — a long search
-    # ahead, where chronological backtracking measurably pays (the probe
-    # itself must stay plain: fast target-phase dives dislike it).
-    s.enable_chrono if art["raw"] == true
-    s.simplify_raw if config.force_simplify? && s != scout_solver
-    tprof = wassat_prof("cli.from_flat", tprof)
-  elsif proof_mode == WASSAT_PROOF_DRAT
-    s = Wassat.from_flat(formula["nvars"], art, 0, proof_mode)
-    unless art["raw"] == true
-      z = ccall("w_value_free_w", art["fla"])
-      z = ccall("w_value_free_w", art["fcs"])
-      z = ccall("w_value_free_w", art["fcl"])
-      z = ccall("w_value_free_w", art["falive"])
-      z = ccall("w_value_free_w", art["ftaut"])
-      z = ccall("w_value_free_w", art["fpgid"])
-      art["fla"] = nil
-      art["fcs"] = nil
-      art["fcl"] = nil
-      art["falive"] = nil
-      art["ftaut"] = nil
-      art["fpgid"] = nil
-    tprof = wassat_prof("cli.from_flat", tprof)
-  else
-    s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, 0)
-    s.seed_proof_ids(art["gids"], art["next_gid"])
-
-  # File destinations stream during search so certificate memory stays flat;
-  # `-` destinations render from the in-memory arrays after the fact. When
-  # both dialects are requested they are emitted natively in lockstep. The
-  # coordinator owns the certificate: the preprocessing prefix goes to each
-  # sink before the solver appends a single line.
-  wrat_stream = nil
-  wrat_stream = wrat_out unless wrat_final == nil || wrat_final == "-"
-  drat_stream = nil
-  drat_stream = drat_out unless drat_final == nil || drat_final == "-"
-  s.stream_proofs(wrat_stream, drat_stream) unless wrat_stream == nil && drat_stream == nil
-  s.enable_dual_drat if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
-  unless wrat_stream == nil
-    whead = header_wanted ? "wrat 1\n" : ""
-    whead = whead + art["wrat"].join("\n") + "\n" unless art["wrat"].empty?
-    raise "proof write failed at '[wrat_stream]'" unless whead == "" || wassat_append_text(wrat_stream, whead)
-    s.wrat_header_written
-  unless drat_stream == nil || art["drat"].empty?
-    dhead = art["drat"].join("\n") + "\n"
-    raise "proof write failed at '[drat_stream]'" unless wassat_append_text(drat_stream, dhead)
-
-  # Final search runs on whatever remains of the aggregate budget. If earlier
-  # CDCL stages (scout, raw race) already spent it, add no further conflicts —
-  # report UNKNOWN. --conflicts 0 stays unlimited.
+  # Final search runs on whatever remains of the aggregate budget. Evaluate
+  # skip_final BEFORE solver construction and proof header streaming so an
+  # already-exhausted --conflicts run allocates no final solver arena and
+  # writes no partial proof prefix. --conflicts 0 stays unlimited.
   final_budget = options["conflicts"]
   skip_final = false
   if options["conflicts"] > 0
     final_budget = options["conflicts"] - budget_used
     skip_final = final_budget <= 0
+  s = nil
   result = nil
   cone_joint = nil
   if skip_final
-    result = s.unknown_result
-    result["conflicts"] = 0 if s == scout_solver
+    wassat_free_art_flat(pre, art)
+    pre = nil
+    if art.has_key?("drat_bytes") && art["drat_bytes"] != nil
+      z = ccall("w_value_free_w", art["drat_bytes"])
+      art["drat_bytes"] = nil
+      art["drat_bpos"] = 0
+    if scout_solver != nil
+      scout_solver.release_arenas
+      scout_solver = nil
+    result = { "status": 0, "model": [], "conflicts": 0, "decisions": 0,
+               "props": 0, "restarts": 0, "reduces": 0, "proof": [],
+               "drat": [], "complete": false, "proof_mode": proof_mode }
   else
+    if scout_solver != nil && art["raw"] != true
+      scout_solver.release_arenas
+      scout_solver = nil
+    if proof_mode == WASSAT_PROOF_NONE
+      # trusted path: ingest the preprocessor's flat mirrors natively, or reuse
+      # the raw scout solver directly when no raw race was constructed so huge
+      # single-arm inputs do not allocate a second multi-GB solver arena.
+      if art["raw"] == true && scout_solver != nil && race == nil
+        s = scout_solver
+        s.set_stop_cell(nil)
+        s.set_shared_conflict_budget(nil, 0, 0)
+      else
+        s = Wassat.from_flat(formula["nvars"], art, 0)
+      wassat_free_art_flat(pre, art) unless art["raw"] == true
+      pre = nil
+      # This solver only runs when the bounded probe missed — a long search
+      # ahead, where chronological backtracking measurably pays (the probe
+      # itself must stay plain: fast target-phase dives dislike it).
+      s.enable_chrono if art["raw"] == true
+      s.simplify_raw if config.force_simplify? && s != scout_solver
+      tprof = wassat_prof("cli.from_flat", tprof)
+    elsif proof_mode == WASSAT_PROOF_DRAT
+      s = Wassat.from_flat(formula["nvars"], art, 0, proof_mode)
+      wassat_free_art_flat(pre, art) unless art["raw"] == true
+      pre = nil
+      tprof = wassat_prof("cli.from_flat", tprof)
+    else
+      s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, 0)
+      s.seed_proof_ids(art["gids"], art["next_gid"])
+      wassat_free_art_flat(pre, art) unless art["raw"] == true
+      pre = nil
+
+    # File destinations stream during search so certificate memory stays flat;
+    # `-` destinations render from the in-memory arrays after the fact. When
+    # both dialects are requested they are emitted natively in lockstep. The
+    # coordinator owns the certificate: the preprocessing prefix goes to each
+    # sink before the solver opens or appends a single line.
+    wrat_stream = nil
+    wrat_stream = wrat_out unless wrat_final == nil || wrat_final == "-"
+    drat_stream = nil
+    drat_stream = drat_out unless drat_final == nil || drat_final == "-"
+    unless wrat_stream == nil
+      whead = header_wanted ? "wrat 1\n" : ""
+      whead = whead + art["wrat"].join("\n") + "\n" unless art["wrat"].empty?
+      raise "proof write failed at '[wrat_stream]'" unless whead == "" || wassat_append_text(wrat_stream, whead)
+    unless drat_stream == nil
+      if art.has_key?("drat_bpos") && art["drat_bpos"] > 0 && art["drat_bytes"] != nil
+        raise "proof write failed at '[drat_stream]'" unless wassat_append_bytes_n(drat_stream, art["drat_bytes"], art["drat_bpos"])
+        z = ccall("w_value_free_w", art["drat_bytes"])
+        art["drat_bytes"] = nil
+        art["drat_bpos"] = 0
+      elsif !art["drat"].empty?
+        dhead = art["drat"].join("\n") + "\n"
+        raise "proof write failed at '[drat_stream]'" unless wassat_append_text(drat_stream, dhead)
+    s.stream_proofs(wrat_stream, drat_stream) unless wrat_stream == nil && drat_stream == nil
+    s.enable_dual_drat if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
+    s.wrat_header_written unless wrat_stream == nil
+
     solve_cap = final_budget
     # solve_budget takes additional work, including when resuming the scout.
     # final_budget already excludes its completed conflicts.
@@ -2595,12 +2663,12 @@ use cover_split
   if cone_joint != nil && tprof != 0
     cresult = cone_joint["cone"]
     wassat_prof_note("cli.comparison_cones recognized=[cresult["recognized"]] won=[cone_joint["cone_won"]] stopped=[cresult["stopped"]] nominees=[cresult["nominees"]] aliases=[cresult["internal_proved"]] unresolved=[cresult["unresolved"]] conflicts=[cresult["conflicts"]] aggregate=[cone_joint["conflicts"]]")
-  s.profile_counters("cli.final")
+  s.profile_counters("cli.final") if s != nil
   if cone_joint != nil && cone_joint["cone_won"]
     # The serial worker is joined and its partial prefix is now discarded.
     # The cone certificate derives directly from the ORIGINAL flat formula,
     # so it replaces that prefix rather than being appended to it.
-    s.abort_proof_sinks
+    s.abort_proof_sinks if s != nil
     dtext = cone_joint["cone"]["drat_text"]
     unless drat_final == "-"
       raise "proof write failed at '[drat_out]'" unless write_file(drat_out, dtext)
@@ -2627,7 +2695,7 @@ use cover_split
       prc = probe_p.wait
   # A run that did not end UNSAT truncates its sink destinations at once: a
   # partial refutation must never survive on disk, whatever happens later.
-  s.abort_proof_sinks unless result["status"] == -1
+  s.abort_proof_sinks if s != nil && result["status"] != -1
   if result["status"] != -1
     wassat_discard_output(wrat_out, wrat_final)
     wassat_discard_output(drat_out, drat_final)
@@ -2647,7 +2715,9 @@ use cover_split
   # On UNSAT the certificate is flushed to durable storage BEFORE the
   # verdict is announced: a failed flush raises here and the run reports an
   # error, never "s UNSATISFIABLE" beside an incomplete proof.
-  s.flush_proof_sinks if result["status"] == -1
+  if s != nil && result["status"] == -1
+    s.flush_proof_sinks
+    s.close_proof_sinks
   if result["status"] == -1
     wassat_publish_output(wrat_out, wrat_final, "WRAT") unless wrat_final == nil || wrat_final == "-"
     wassat_publish_output(drat_out, drat_final, "DRAT") unless drat_final == nil || drat_final == "-"
@@ -2655,8 +2725,8 @@ use cover_split
   # Trim the trailing newline: wassat_result_text ends with one and
   # wassat_status appends its own.
   agg_conflicts = result["conflicts"] + budget_used
-  if result["status"] == 1 && result["model"].size > 100000
-    wassat_print_sat_model(result["model"], quiet)
+  if result["status"] == 1
+    wassat_emit_sat_model(result["model"], quiet)
   else
     rtext = wassat_result_text(result)
     wassat_status(quiet, rtext.slice(0, rtext.size - 1))
@@ -2672,6 +2742,11 @@ use cover_split
         print(whead + lines.join("\n") + "\n")
     unless drat_final == nil
       if drat_final == "-"
+        if art.has_key?("drat_bpos") && art["drat_bpos"] > 0 && art["drat_bytes"] != nil
+          print(wassat_drat_bytes_to_string(art["drat_bytes"], art["drat_bpos"]))
+          z = ccall("w_value_free_w", art["drat_bytes"])
+          art["drat_bytes"] = nil
+          art["drat_bpos"] = 0
         dlines = wassat_concat_arrays(art["drat"], result["drat"])
         print(dlines.empty? ? "" : dlines.join("\n") + "\n")
   # Block form, NOT `exit(n) if cond`. parse_exit takes its operand with
@@ -2767,7 +2842,7 @@ use cover_split
     # ORIGINAL formula before reporting
     unless wassat_model_satisfies?(formula, r["model"])
       raise "internal error: SLS model does not satisfy the input formula"
-    print(wassat_sat_text(r["model"]))
+    wassat_print_sat_model(r["model"], false)
   else
     << "s UNKNOWN"
   << "c mode: sls"

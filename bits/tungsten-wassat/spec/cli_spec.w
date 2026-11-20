@@ -528,4 +528,31 @@ describe "Tungsten Wassat CLI" ->
       expect(out.index("s UNKNOWN") != nil).to eq(true)
       expect(out.index("c conflicts: 3,") == nil).to eq(true)
 
+    it "logs congruence.binaries under WASSAT_PROFILE=1 without touching freed stats" ->
+      bin = cli_test_bin
+      cnf = "/tmp/wassat-cli-prof-congruence.cnf"
+      clauses = ["p cnf 140 600"]
+      seed = 7
+      ci = 0
+      while ci < 600
+        seed = (seed * 1103515245 + 12345) & 2147483647
+        v1 = (seed % 140) + 1
+        s1 = ((seed >> 11) & 1) == 0 ? v1 : 0 - v1
+        seed = (seed * 1103515245 + 12345) & 2147483647
+        v2 = (seed % 139) + 1
+        v2 += 1 if v2 >= v1
+        s2 = ((seed >> 11) & 1) == 0 ? v2 : 0 - v2
+        seed = (seed * 1103515245 + 12345) & 2147483647
+        v3 = (seed % 138) + 1
+        v3 += 1 if v3 >= v1 || v3 >= v2
+        v3 += 1 if v3 >= v1 && v3 >= v2
+        v3 = 140 if v3 > 140
+        s3 = ((seed >> 11) & 1) == 0 ? v3 : 0 - v3
+        clauses.push("[s1] [s2] [s3] 0")
+        ci += 1
+      expect(write_file(cnf, clauses.join("\n") + "\n")).to eq(true)
+      expect(cli_exits("WASSAT_PROFILE=1 " + bin + " " + cnf + " --fast --conflicts 3000 > /tmp/wassat-cli-prof-congruence.out 2>&1", 0)).to eq(true)
+      out = read_file("/tmp/wassat-cli-prof-congruence.out")
+      expect(out.index("congruence.binaries") != nil).to eq(true)
+
 spec_summary

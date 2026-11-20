@@ -273,9 +273,9 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
 -> wassat_cdcl_walk_arena_bytes(nv, ncl, nlits)
   return 0 if env("WASSAT_WALK") == "0"
   # 1.25x irredundant walker buffers after i8/i32 narrowing:
-  # fla(i32) + ocv(u32) = 10*nlits; fcs/fcl/cstate/wght/ulist/upos = 40*ncl;
-  # och/stamp + var tables = 72*nv.
-  bytes = 1048576 + 10 * nlits + 40 * ncl + 72 * (nv + 4)
+  # fla(i32) + ocv(u32) = 10*nlits; fcs/fcl/cstate/wght/ulist/upos = 36*ncl;
+  # och/stamp + var tables = 64*nv.
+  bytes = 1048576 + 10 * nlits + 36 * ncl + 64 * (nv + 4)
   cap_mb = wassat_sls_max_arena_mb
   return 0 if cap_mb > 0 && (bytes / 1048576) > cap_mb
   bytes
@@ -284,11 +284,11 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
   return false if env("WASSAT_WALK") == "0"
   cap_mb = wassat_sls_max_arena_mb
   return true if cap_mb == 0
-  bytes = 1048576 + 10 * nlits + 40 * ncl + 72 * (nv + 4)
+  bytes = 1048576 + 10 * nlits + 36 * ncl + 64 * (nv + 4)
   (bytes / 1048576) <= cap_mb
 
 -> wassat_cdcl_arena_bytes_counts(nv, ncl, nlits)
-  25165824 + 16 * nlits + 112 * ncl + 320 * nv + wassat_cdcl_walk_arena_bytes(nv, ncl, nlits) + wassat_inprocess_scratch_bytes(ncl, nv)
+  25165824 + 8 * nlits + 64 * ncl + 256 * nv + wassat_inprocess_scratch_bytes(ncl, nv)
 
 -> wassat_cdcl_arena_bytes(formula)
   wassat_cdcl_arena_bytes_counts(formula["nvars"], formula["flat_ncl"], formula["flat_nlits"])
@@ -314,27 +314,24 @@ WASSAT_LOOKAHEAD_CHOICE_DENSITY = 8
   bytes
 
 -> wassat_preprocess_arena_bytes(formula)
-  # A live preprocessor retains roughly six 2*ncl clause tables, three
-  # 2*nlits literal/occurrence arenas, and its variable/probe scratch while
-  # the solver built from its rendering is also live. Keep it separate from
-  # that later CDCL arena; treating the arm as only one of the two was the
-  # peak-residency accounting bug.
-  25165824 + 48 * formula["flat_nlits"] + 96 * formula["flat_ncl"] + 128 * formula["nvars"]
+  # A live preprocessor retains narrowed i8/i32 clause, literal and occurrence
+  # tables plus 64-bit signatures and variable/probe/SCC scratch while the
+  # solver built from its rendering is initialized.
+  25165824 + 24 * formula["flat_nlits"] + 36 * formula["flat_ncl"] + 160 * formula["nvars"]
 
 -> wassat_sls_arena_bytes(formula)
   lits = formula["flat_nlits"]
   ncl = formula["flat_ncl"]
   nv = formula["nvars"]
-  # Three literal-sized arrays; seven clause-sized arrays; the variable
-  # arrays plus the constructor's native deduplication stamp. Add one MiB for
-  # descriptors, state, and the deliberately conservative small-formula floor.
-  1048576 + (3 * lits + 7 * ncl + 12 * nv) * 8
+  # Two 4-byte literal-sized arrays (fla i32, ocv u32); narrowed clause-sized
+  # arrays (fcs/fcl/wght/ulist/upos i32 + cstate i64 = 28..36 bytes/clause);
+  # narrowed variable/occurrence tables plus one MiB floor.
+  1048576 + 8 * lits + 36 * ncl + 64 * (nv + 4)
 
-# Tighter envelope for a flat walker: literals (i64), occurrences (u32),
-# six clause arrays, eight variable arrays, occurrence offsets, and the
-# intake stamp. Retain the older broad estimate above for established gates.
+# Tighter envelope for a flat walker: literals (i32), occurrences (u32),
+# narrowed clause arrays, variable arrays, and occurrence offsets.
 -> wassat_flat_sls_arena_bytes(formula)
-  1048576 + 12 * formula["flat_nlits"] + 48 * formula["flat_ncl"] + 96 * (formula["nvars"] + 4)
+  1048576 + 8 * formula["flat_nlits"] + 36 * formula["flat_ncl"] + 64 * (formula["nvars"] + 4)
 
 # Unit clauses among the first `ncl` clause lengths. Here rather than beside
 # the loader that also calls it, because the arena estimate below needs it

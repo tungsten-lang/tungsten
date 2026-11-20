@@ -62,6 +62,13 @@
       j += 1
   n
 
+-> wassat_gm_free4(a, b, c, d) (i64[] i64[] i64[] i64[]) i64
+  z = ccall("w_value_free_w", a)
+  z = ccall("w_value_free_w", b)
+  z = ccall("w_value_free_w", c)
+  z = ccall("w_value_free_w", d)
+  0
+
 -> wassat_gm_schedule(f)
   nc = f["flat_ncl"]
   nv = f["nvars"]
@@ -77,25 +84,36 @@
   gates = 0
   assertion = 0
   while ci < nc
-    return nil if lens[ci] == 0
+    if lens[ci] == 0
+      wassat_gm_free4(arity, args, table, fixed)
+      return nil
     lit = lits[offs[ci]]
     v = lit.abs
     if lens[ci] == 1
-      return nil if fixed[v] != 0
+      if fixed[v] != 0
+        wassat_gm_free4(arity, args, table, fixed)
+        return nil
       fixed[v] = lit
       assertion = lit if v == root
       ci += 1
     else
-      return nil if arity[v] != 0 || gates >= 16384
+      if arity[v] != 0 || gates >= 16384
+        wassat_gm_free4(arity, args, table, fixed)
+        return nil
       last = ci + 1
       while last < nc && lens[last] > 1 && lits[offs[last]].abs == v
         last += 1
-      return nil if last-ci > 16
-      return nil unless wassat_gm_decode_rows(lits, offs, lens, ci, last, v, args, arity, table)
-      return nil if v == root && !(arity[v] == 2 && (table[v] == 6 || table[v] == 9))
+      if last - ci > 16 || !wassat_gm_decode_rows(lits, offs, lens, ci, last, v, args, arity, table)
+        wassat_gm_free4(arity, args, table, fixed)
+        return nil
+      if v == root && !(arity[v] == 2 && (table[v] == 6 || table[v] == 9))
+        wassat_gm_free4(arity, args, table, fixed)
+        return nil
       gates += 1
       ci = last
-  return nil if assertion == 0
+  if assertion == 0
+    wassat_gm_free4(arity, args, table, fixed)
+    return nil
   a = args[4*root]; b = args[4*root+1]
   flags = i64[nv+1]; queue = i64[nv+1]
   wassat_gm_cone(a,args,arity,flags,1,queue)
@@ -106,7 +124,10 @@
   v = 1
   while v <= nv
     if arity[v] > 0
-      return nil if v != root && (flags[v] == 0 || fixed[v] != 0)
+      if v != root && (flags[v] == 0 || fixed[v] != 0)
+        wassat_gm_free4(flags, queue, depth, sig)
+        wassat_gm_free4(arity, args, table, fixed)
+        return nil
       depth[v] = -1
     elsif flags[v] != 0
       order.push(v)
@@ -177,10 +198,20 @@
         count += 1
       edge = links[edge]
     i += 1
-  return nil if count != gates
+  wassat_gm_free4(heads, links, sinks, pending)
+  wassat_gm_free4(arity, args, table, fixed)
+  z = ccall("w_value_free_w", queue)
+  z = ccall("w_value_free_w", depth)
+  if count != gates
+    z = ccall("w_value_free_w", flags)
+    z = ccall("w_value_free_w", sig)
+    return nil
   j = 0
   while j < 16
-    return nil if sig[16*root+j] != (assertion > 0 ? 0 : -1)
+    if sig[16*root+j] != (assertion > 0 ? 0 : -1)
+      z = ccall("w_value_free_w", flags)
+      z = ccall("w_value_free_w", sig)
+      return nil
     j += 1
   reps = {}
   pairs = []
@@ -203,37 +234,51 @@
         cross = true if (flags[x] == 1 && flags[y] == 2) || (flags[x] == 2 && flags[y] == 1)
     else
       reps[h] = x
+  z = ccall("w_value_free_w", flags)
+  z = ccall("w_value_free_w", sig)
   return nil unless cross
   { "pairs": pairs, "assertion": assertion }
 
 -> wassat_gm_solve(f, plan, mode, path)
   started = clock_ms()
-  rows = []
+  nv = f["nvars"]
   nc = f["flat_ncl"]
   lens = f["flat_lens"] ## i64[]
   offs = f["flat_offs"] ## i64[]
   lits = f["flat_lits"] ## i64[]
   assertion = plan["assertion"]
+  salive = i64[nc]
+  spgid = i64[mode == WASSAT_PROOF_WRAT ? nc : 0]
+  kept = 0
   ci = 0
   while ci < nc
     unless lens[ci] == 1 && lits[offs[ci]] == assertion
-      row = []
-      j = 0
-      while j < lens[ci]
-        row.push(lits[offs[ci]+j])
-        j += 1
-      rows.push(row)
+      salive[ci] = 1
+      spgid[ci] = kept + 1 if mode == WASSAT_PROOF_WRAT
+      kept += 1
     ci += 1
-  solver = Wassat.new(f["nvars"], rows, mode)
-  solver.stream_proofs(nil,path) if path != nil
+  art = wassat_raw_artifact(f, nv)
+  orig_empty = art["falive"]
+  art["fsynth"] = false
+  art["falive"] = salive
+  art["fpgid"] = spgid
+  art["next_gid"] = kept + 1
+  solver = Wassat.from_flat(nv, art, 0, mode)
+  z = ccall("w_value_free_w", salive)
+  z = ccall("w_value_free_w", spgid)
+  z = ccall("w_value_free_w", orig_empty)
+  z = ccall("w_value_free_w", art["gone"])
+  solver.stream_proofs(nil, path) if path != nil
   pairs = plan["pairs"]
+  fast_coop = mode == WASSAT_PROOF_NONE && !wassat_sequential?
+  deadline = started + (fast_coop ? 1500 : 45000)
+  final_cap = fast_coop ? 10000 : 200000
   i = 0
   proved = 0
-  deadline = started + 45000
   while i < pairs.size && clock_ms() < deadline
     x = pairs[i]; y = pairs[i+1]
     sign = 1
-    while sign >= -1
+    while sign >= -1 && clock_ms() < deadline
       u = sign*x; v = sign*y
       r = solver.solve_assuming_budget([u,0-v],15000)
       break unless r["status"] == -1
@@ -249,6 +294,12 @@
   # the sweep so the two directions were established independently of it.
   solver.reset_query
   solver.add_input_clause([assertion])
-  r = solver.solve_budget(200000)
-  solver.flush_proof_sinks if path != nil
+  r = solver.solve_budget(final_cap)
+  if path != nil
+    if r["status"] == -1
+      solver.flush_proof_sinks
+    else
+      solver.abort_proof_sinks
+    solver.close_proof_sinks
+  solver.release_arenas
   r

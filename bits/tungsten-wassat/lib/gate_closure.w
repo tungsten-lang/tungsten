@@ -432,7 +432,7 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
     v += 1
   0
 
--> wassat_gc_census(fcl, ncl, counts) (i64[] i64 i64[]) i64
+-> wassat_gc_census(fcl, ncl, counts, deadline) (i64[] i64 i64[] i64) i64
   n1 = 0 ## i64
   n2 = 0 ## i64
   n3 = 0 ## i64
@@ -454,6 +454,7 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
     elsif n == 5
       n5 += 1
     ci += 1
+    return 0 - 1 if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
   counts[0] = nlit
   counts[1] = n1
   counts[2] = n2
@@ -484,6 +485,161 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   z = ccall("w_value_free_w", gmeta) if gmeta != nil
   0
 
+# Fast strided 512-clause structure probe over width 3..5 clauses.
+# Counts clauses with (a) a binary side clause (-li | -lj) in (bst, bad), or
+# (b) an adjacent width 3..5 clause sharing >= 2 variable IDs.
+# Returns -1 when fewer than 128 width 3..5 clauses were sampled, else hit count.
+-> wassat_gc_sample_structure(fla, fcs, fcl, ncl, has_bin_adj, bst, bad) (i64[] i64[] i64[] i64 i64 i64[] i64[]) i64
+  stride = ncl >> 9 ## i64
+  stride = 1 if stride < 1
+  ci = 0 ## i64
+  steps = 0 ## i64
+  sampled = 0 ## i64
+  hits = 0 ## i64
+  while ci < ncl && steps < 512
+    n = fcl[ci] ## i64
+    if n >= 3 && n <= 5
+      sampled += 1
+      off = fcs[ci] ## i64
+      hit = 0 ## i64
+      if n == 3 && has_bin_adj == 1
+        a0 = fla[off] ## i64
+        a1 = fla[off + 1] ## i64
+        a2 = fla[off + 2] ## i64
+        nl0 = a0 > 0 ? ((a0 << 1) | 1) : ((0 - a0) << 1) ## i64
+        nl1 = a1 > 0 ? ((a1 << 1) | 1) : ((0 - a1) << 1) ## i64
+        nl2 = a2 > 0 ? ((a2 << 1) | 1) : ((0 - a2) << 1) ## i64
+        if wassat_gc_has_bin(bst, bad, nl0, nl1) == 1 || wassat_gc_has_bin(bst, bad, nl0, nl2) == 1 || wassat_gc_has_bin(bst, bad, nl1, nl2) == 1
+          hit = 1
+      if hit == 0 && ci + 1 < ncl
+        n2c = fcl[ci + 1] ## i64
+        if n2c >= 3 && n2c <= 5
+          off2 = fcs[ci + 1] ## i64
+          shared = 0 ## i64
+          j = 0 ## i64
+          while j < n
+            lj = fla[off + j] ## i64
+            vj = lj < 0 ? 0 - lj : lj ## i64
+            k = 0 ## i64
+            while k < n2c
+              lk = fla[off2 + k] ## i64
+              vk = lk < 0 ? 0 - lk : lk ## i64
+              if vj == vk
+                shared += 1
+                break
+              k += 1
+            j += 1
+          hit = 1 if shared >= 2
+      hits += hit
+    ci += stride
+    steps += 1
+  return 0 - 1 if sampled < 128
+  hits
+
+# Exact permutation-invariant polarity-degree prefilter for XOR-3/4/5 and ITE-3.
+# Writes keep_ci[ci] = 1 for eligible width 3..5 clauses and keep_counts[0..2] =
+# [n3_keep, n4_keep, n5_keep]. Returns total kept clauses, or -1 on deadline.
+-> wassat_gc_prefilter_xi(fla, fcs, fcl, ncl, nl, n3, n4, n5, keep_ci, keep_counts, deadline) (i64[] i64[] i64[] i64 i64 i64 i64 i64 i8[] i64[] i64) i64
+  d3 = i8[n3 >= 4 ? nl + 2 : 0]
+  d4 = i8[n4 >= 8 ? nl + 2 : 0]
+  d5 = i8[n5 >= 16 ? nl + 2 : 0]
+  ci = 0 ## i64
+  while ci < ncl
+    n = fcl[ci] ## i64
+    if n == 3 && n3 >= 4
+      off = fcs[ci] ## i64
+      j = 0 ## i64
+      while j < 3
+        a = fla[off + j] ## i64
+        c = a > 0 ? (a << 1) : (((0 - a) << 1) | 1) ## i64
+        d3[c] = d3[c] + 1 if d3[c] < 2
+        j += 1
+    elsif n == 4 && n4 >= 8
+      off = fcs[ci]
+      j = 0
+      while j < 4
+        a = fla[off + j]
+        c = a > 0 ? (a << 1) : (((0 - a) << 1) | 1)
+        d4[c] = d4[c] + 1 if d4[c] < 4
+        j += 1
+    elsif n == 5 && n5 >= 16
+      off = fcs[ci]
+      j = 0
+      while j < 5
+        a = fla[off + j]
+        c = a > 0 ? (a << 1) : (((0 - a) << 1) | 1)
+        d5[c] = d5[c] + 1 if d5[c] < 8
+        j += 1
+    ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      z = ccall("w_value_free_w", d5)
+      z = ccall("w_value_free_w", d4)
+      z = ccall("w_value_free_w", d3)
+      return 0 - 1
+  k3 = 0 ## i64
+  k4 = 0 ## i64
+  k5 = 0 ## i64
+  ci = 0
+  while ci < ncl
+    n = fcl[ci]
+    if n == 3 && n3 >= 4
+      off = fcs[ci]
+      both1 = 0 ## i64
+      both2 = 0 ## i64
+      j = 0
+      while j < 3
+        a = fla[off + j]
+        vp = (a > 0 ? a : 0 - a) << 1 ## i64
+        dp = d3[vp] ## i64
+        dn = d3[vp | 1] ## i64
+        both1 += 1 if dp >= 1 && dn >= 1
+        both2 += 1 if dp >= 2 && dn >= 2
+        j += 1
+      if both1 == 3 && both2 >= 2
+        keep_ci[ci] = 1
+        k3 += 1
+    elsif n == 4 && n4 >= 8
+      off = fcs[ci]
+      ok4 = 1 ## i64
+      j = 0
+      while j < 4
+        a = fla[off + j]
+        vp = (a > 0 ? a : 0 - a) << 1
+        if d4[vp] < 4 || d4[vp | 1] < 4
+          ok4 = 0
+          break
+        j += 1
+      if ok4 == 1
+        keep_ci[ci] = 1
+        k4 += 1
+    elsif n == 5 && n5 >= 16
+      off = fcs[ci]
+      ok5 = 1 ## i64
+      j = 0
+      while j < 5
+        a = fla[off + j]
+        vp = (a > 0 ? a : 0 - a) << 1
+        if d5[vp] < 8 || d5[vp | 1] < 8
+          ok5 = 0
+          break
+        j += 1
+      if ok5 == 1
+        keep_ci[ci] = 1
+        k5 += 1
+    ci += 1
+    if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+      z = ccall("w_value_free_w", d5)
+      z = ccall("w_value_free_w", d4)
+      z = ccall("w_value_free_w", d3)
+      return 0 - 1
+  z = ccall("w_value_free_w", d5)
+  z = ccall("w_value_free_w", d4)
+  z = ccall("w_value_free_w", d3)
+  keep_counts[0] = k3
+  keep_counts[1] = k4
+  keep_counts[2] = k5
+  k3 + k4 + k5
+
 # Gate extraction and closure. Fills rep and st; when keep_state == 1 and
 # gates > 0, stores [gty, glhs, goff, glen, ar, ht, ohead, onext, ogate, queue]
 # in ga and [ng, au, hmask, qh] in gmeta (otherwise frees all scratch).
@@ -511,7 +667,6 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   has_bin_adj = 0 ## i64
   if n2 >= 2
     z = ccall("w_value_free_w", bst)
-    z = ccall("w_value_free_w", bad)
     bst = i64[nl + 2]
     ci = 0 ## i64
     while ci < ncl
@@ -526,6 +681,12 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
           bst[cb + 1] += 1
           nbin += 1
       ci += 1
+      if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+        st[5] = 1
+        z = ccall("w_value_free_w", bst)
+        z = ccall("w_value_free_w", bad)
+        z = ccall("w_value_free_w", queue)
+        return 1
     st[13] = nbin
     if nbin >= 2
       has_bin_adj = 1
@@ -551,6 +712,15 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
             bun[bst[cb] + fill[cb]] = ca
             fill[cb] += 1
         ci += 1
+        if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+          st[5] = 1
+          z = ccall("w_value_free_w", fill)
+          z = ccall("w_value_free_w", bun)
+          z = ccall("w_value_free_w", bst)
+          z = ccall("w_value_free_w", bad)
+          z = ccall("w_value_free_w", queue)
+          return 1
+      z = ccall("w_value_free_w", bad)
       bad = i64[2 * nbin + 2]
       c = 0
       while c < nl
@@ -572,7 +742,6 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
     else
       z = ccall("w_value_free_w", bst)
       bst = i64[0]
-      bad = i64[0]
   elsif n2 == 1
     # Count single non-tautological binary for st[13] parity, no eq/AND possible.
     ci = 0
@@ -585,6 +754,12 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
         vb = b > 0 ? b : 0 - b ## i64
         nbin += 1 if va != vb
       ci += 1
+      if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+        st[5] = 1
+        z = ccall("w_value_free_w", bst)
+        z = ccall("w_value_free_w", bad)
+        z = ccall("w_value_free_w", queue)
+        return 1
     st[13] = nbin
   # ---- units and binary-pair equivalences.
   if n1 > 0 || has_bin_adj == 1
@@ -606,6 +781,12 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
           if (lo & 1) == 0 && wassat_gc_has_bin(bst, bad, ca ^ 1, cb ^ 1) == 1
             z = wassat_gc_merge(rep, queue, st, tcon, ca ^ 1, cb)
       ci += 1
+      if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+        st[5] = 1
+        z = ccall("w_value_free_w", bst)
+        z = ccall("w_value_free_w", bad)
+        z = ccall("w_value_free_w", queue)
+        return 1
   if run_and == 0 && can_xi == 0
     z = ccall("w_value_free_w", bst)
     z = ccall("w_value_free_w", bad)
@@ -684,6 +865,14 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
       if (ci & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
         ticks = budget
         late = 1
+  unstructured_pure = 0 ## i64
+  if can_xi == 1 && late == 0 && nidx >= 32768 && st[0] == 0 && st[1] == 0 && ng == 0
+    shits = wassat_gc_sample_structure(fla, fcs, fcl, ncl, has_bin_adj, bst, bad)
+    if shits >= 0 && shits < 4
+      if has_bin_adj == 1
+        can_xi = 0
+      else
+        unstructured_pure = 1
   z = ccall("w_value_free_w", bst)
   z = ccall("w_value_free_w", bad)
   # Each gate kind has its own allowance; only the deadline ends them all.
@@ -691,240 +880,285 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
   ticks = 0 if late == 0
   # ---- clause set for sizes 3..5 (sorted literal codes, zero padded).
   if can_xi == 1 && ticks < budget
-    ccap = 1024 ## i64
-    while ccap < 2 * nidx + 2
-      ccap = ccap << 1
-    cmask = ccap - 1 ## i64
-    cht = i64[ccap]
-    sk = i64[5 * nidx + 5]
-    tst = i64[nl + 2]
-    ni = 0 ## i64
-    ci = 0
-    while ci < ncl
-      n = fcl[ci]
-      if n >= 3 && n <= 5
-        off = fcs[ci]
-        base = ni * 5 ## i64
-        j = 0 ## i64
-        while j < 5
-          sk[base + j] = 0
-          j += 1
-        j = 0
-        while j < n
-          a = fla[off + j]
-          sk[base + j] = a > 0 ? a << 1 : ((0 - a) << 1) | 1
-          j += 1
-        z = wassat_gc_sort(sk, base, n)
-        distinct = 1 ## i64
-        j = 1
-        while j < n
-          distinct = 0 if (sk[base + j] >> 1) == (sk[base + j - 1] >> 1)
-          j += 1
-        if distinct == 1
-          at = wassat_gc_clause_at(cht, sk, cmask, n, sk[base], sk[base + 1], sk[base + 2], sk[base + 3], sk[base + 4])
-          if at <= 0
-            cht[0 - at - 1] = ni + 1
-            if n == 3
-              tst[sk[base] + 1] += 1
-              tst[sk[base + 1] + 1] += 1
-              tst[sk[base + 2] + 1] += 1
-            ni += 1
-      ci += 1
-    st[14] = ni
-    # Ternary occurrences per literal.
-    toc = i64[0]
-    if n3 >= 4
-      z = ccall("w_value_free_w", toc)
-      c = 0
-      while c <= nl
-        tst[c + 1] += tst[c]
-        c += 1
-      toc = i64[tst[nl] + 2]
-      tfill = i64[nl + 2]
-      i = 0 ## i64
-      while i < ni
-        base = i * 5
-        if sk[base + 3] == 0
-          j = 0
-          while j < 3
-            x = sk[base + j] ## i64
-            toc[tst[x] + tfill[x]] = i
-            tfill[x] += 1
-            j += 1
-        i += 1
-      z = ccall("w_value_free_w", tfill)
-    # ---- XOR gates: the representative clause of a parity class has no
-    # negative literal, or exactly one on its smallest variable.
-    i = 0 ## i64
-    while i < ni && ticks < budget
-      base = i * 5
-      n = 3 ## i64
-      n = 4 if sk[base + 3] != 0
-      n = 5 if sk[base + 4] != 0
-      if (n == 3 && n3 >= 4) || (n == 4 && n4 >= 8) || (n == 5 && n5 >= 16)
-        negs = 0 ## i64
-        j = 0
-        while j < n
-          negs += sk[base + j] & 1
-          j += 1
-        if negs == 0 || (negs == 1 && (sk[base] & 1) == 1)
-          v0 = sk[base] & (0 - 2) ## i64
-          v1 = sk[base + 1] & (0 - 2) ## i64
-          v2 = sk[base + 2] & (0 - 2) ## i64
-          v3 = n >= 4 ? (sk[base + 3] & (0 - 2)) : 0 ## i64
-          v4 = n == 5 ? (sk[base + 4] & (0 - 2)) : 0 ## i64
-          ok = 1 ## i64
-          # Clause i itself is mask == 0 (negs == 0) or mask == 1 (negs == 1);
-          # start directly at the first 2-flip partner clause.
-          mask = negs == 0 ? 3 : 2 ## i64
-          full = (1 << n) - 1 ## i64
-          while mask <= full && ok == 1
-            pc = ccall_nobox("__w_bit_ctpop_u64", mask) ## i64
-            if (pc & 1) == negs
-              x0 = v0 | (mask & 1) ## i64
-              x1 = v1 | ((mask >> 1) & 1) ## i64
-              x2 = v2 | ((mask >> 2) & 1) ## i64
-              x3 = n >= 4 ? (v3 | ((mask >> 3) & 1)) : 0 ## i64
-              x4 = n == 5 ? (v4 | ((mask >> 4) & 1)) : 0 ## i64
-              ticks += 1
-              ok = 0 if wassat_gc_clause_at(cht, sk, cmask, n, x0, x1, x2, x3, x4) <= 0
-            mask += 1
-          if ok == 1
-            if ng + n + 2 >= maxg && maxg < maxg_cap
-              nmaxg = maxg << 1
-              while nmaxg < ng + n + 8
-                nmaxg = nmaxg << 1
-              nmaxg = maxg_cap if nmaxg > maxg_cap
-              gty = wassat_gc_grow_arr(gty, ng, nmaxg)
-              glhs = wassat_gc_grow_arr(glhs, ng, nmaxg)
-              goff = wassat_gc_grow_arr(goff, ng, nmaxg)
-              glen = wassat_gc_grow_arr(glen, ng, nmaxg)
-              maxg = nmaxg
-            if au + n * n + 4 >= acap && acap < acap_cap
-              nacap = acap << 1
-              while nacap < au + n * n + 16
-                nacap = nacap << 1
-              nacap = acap_cap if nacap > acap_cap
-              ar = wassat_gc_grow_arr(ar, au, nacap)
-              acap = nacap
-            if ng + n < maxg && au + n * n < acap
-              # A clause with `negs` negations forbids the assignment with that
-              # many true variables, so x1 ^ .. ^ xn = 1 - negs.
-              st[9] += 1
-              j = 0
-              while j < n
-                gty[ng] = 2
-                glhs[ng] = (sk[base + j] & (0 - 2)) | (negs == 0 ? 1 : 0)
-                goff[ng] = au
-                glen[ng] = n - 1
-                k = 0
-                while k < n
-                  if k != j
-                    ar[au] = sk[base + k] & (0 - 2)
-                    au += 1
-                  k += 1
-                ng += 1
-                j += 1
-      i += 1
-      if (i & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
-        ticks = budget
+    use_keep = 0 ## i64
+    keep_ci = i8[0]
+    n3_eff = n3 ## i64
+    n4_eff = n4 ## i64
+    n5_eff = n5 ## i64
+    nidx_eff = nidx ## i64
+    if nidx >= 4096
+      z = ccall("w_value_free_w", keep_ci)
+      keep_ci = i8[ncl]
+      kcounts = i64[3]
+      nidx_eff = wassat_gc_prefilter_xi(fla, fcs, fcl, ncl, nl, n3, n4, n5, keep_ci, kcounts, deadline)
+      n3_eff = kcounts[0]
+      n4_eff = kcounts[1]
+      n5_eff = kcounts[2]
+      z = ccall("w_value_free_w", kcounts)
+      if nidx_eff < 0
         late = 1
-    # ---- ITE gates: clause (l | -c | -t) with l and c positive, its partner
-    # (-l | -c | t), and for some e the pair (l | c | -e), (-l | c | e).
-    st[11] += ticks
-    ticks = 0 if late == 0
-    if n3 >= 4 && ticks < budget
-      ord = i64[18]
-      ord[0] = 0
-      ord[1] = 1
-      ord[2] = 2
-      ord[3] = 0
-      ord[4] = 2
-      ord[5] = 1
-      ord[6] = 1
-      ord[7] = 0
-      ord[8] = 2
-      ord[9] = 1
-      ord[10] = 2
-      ord[11] = 0
-      ord[12] = 2
-      ord[13] = 0
-      ord[14] = 1
-      ord[15] = 2
-      ord[16] = 1
-      ord[17] = 0
-      i = 0
-      while i < ni && ticks < budget
+        st[5] = 1
+        ticks = budget
+        can_xi = 0
+      elsif (n3_eff < 4 && n4_eff < 8 && n5_eff < 16) || (unstructured_pure == 1 && nidx_eff * 2 < nidx)
+        can_xi = 0
+      else
+        use_keep = 1
+    if can_xi == 0
+      z = ccall("w_value_free_w", keep_ci)
+    else
+      ccap = 1024 ## i64
+      while ccap < 2 * nidx_eff + 2
+        ccap = ccap << 1
+      cmask = ccap - 1 ## i64
+      cht = i64[ccap]
+      sk = i64[5 * nidx_eff + 5]
+      tst = i64[nl + 2]
+      ni = 0 ## i64
+      ci = 0
+      while ci < ncl
+        n = fcl[ci]
+        if n >= 3 && n <= 5 && (use_keep == 0 || keep_ci[ci] == 1)
+          off = fcs[ci]
+          base = ni * 5 ## i64
+          j = 0 ## i64
+          while j < 5
+            sk[base + j] = 0
+            j += 1
+          j = 0
+          while j < n
+            a = fla[off + j]
+            sk[base + j] = a > 0 ? a << 1 : ((0 - a) << 1) | 1
+            j += 1
+          z = wassat_gc_sort(sk, base, n)
+          distinct = 1 ## i64
+          j = 1
+          while j < n
+            distinct = 0 if (sk[base + j] >> 1) == (sk[base + j - 1] >> 1)
+            j += 1
+          if distinct == 1
+            at = wassat_gc_clause_at(cht, sk, cmask, n, sk[base], sk[base + 1], sk[base + 2], sk[base + 3], sk[base + 4])
+            if at <= 0
+              cht[0 - at - 1] = ni + 1
+              if n == 3
+                tst[sk[base] + 1] += 1
+                tst[sk[base + 1] + 1] += 1
+                tst[sk[base + 2] + 1] += 1
+              ni += 1
+        ci += 1
+        if (ci & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+          late = 1
+          st[5] = 1
+          ticks = budget
+          break
+      z = ccall("w_value_free_w", keep_ci)
+      st[14] = ni
+      # Ternary occurrences per literal.
+      toc = i64[0]
+      if n3_eff >= 4 && late == 0
+        z = ccall("w_value_free_w", toc)
+        c = 0
+        while c <= nl
+          tst[c + 1] += tst[c]
+          c += 1
+        toc = i64[tst[nl] + 2]
+        tfill = i64[nl + 2]
+        i = 0 ## i64
+        while i < ni
+          base = i * 5
+          if sk[base + 3] == 0
+            j = 0
+            while j < 3
+              x = sk[base + j] ## i64
+              toc[tst[x] + tfill[x]] = i
+              tfill[x] += 1
+              j += 1
+          i += 1
+          if (i & 65535) == 0 && deadline > 0 && clock_ms() >= deadline
+            late = 1
+            st[5] = 1
+            ticks = budget
+            break
+        z = ccall("w_value_free_w", tfill)
+      # ---- XOR gates: the representative clause of a parity class has no
+      # negative literal, or exactly one on its smallest variable.
+      i = 0 ## i64
+      while i < ni && ticks < budget && late == 0
         base = i * 5
-        if sk[base + 3] == 0
-          r = 0 ## i64
-          while r < 6
-            l = sk[base + ord[r * 3]] ## i64
-            y = sk[base + ord[r * 3 + 1]] ## i64
-            zc = sk[base + ord[r * 3 + 2]] ## i64
-            if (l & 1) == 0 && (y & 1) == 1
-              cc = y ^ 1 ## i64
-              t = zc ^ 1 ## i64
-              ticks += 1
-              if wassat_gc_has_tern(cht, sk, cmask, l ^ 1, y, t) == 1
-                # Clauses holding both c and l: scan the shorter list.
-                sx = cc ## i64
-                sy = l ## i64
-                if tst[l + 1] - tst[l] < tst[cc + 1] - tst[cc]
-                  sx = l
-                  sy = cc
-                p = tst[sx]
-                pe = tst[sx + 1]
-                while p < pe
-                  ob = toc[p] * 5 ## i64
-                  p += 1
-                  ticks += 1
-                  third = 0 - 1 ## i64
-                  if sk[ob] == sy
-                    third = sk[ob + 1] == sx ? sk[ob + 2] : sk[ob + 1]
-                  elsif sk[ob + 1] == sy
-                    third = sk[ob] == sx ? sk[ob + 2] : sk[ob]
-                  elsif sk[ob + 2] == sy
-                    third = sk[ob] == sx ? sk[ob + 1] : sk[ob]
-                  if third >= 0
-                    e = third ^ 1 ## i64
-                    ev = e >> 1 ## i64
-                    if ev != (cc >> 1) && ev != (t >> 1) && ev != (l >> 1)
-                      if wassat_gc_has_tern(cht, sk, cmask, cc, e, l ^ 1) == 1
-                        if ng + 2 >= maxg && maxg < maxg_cap
-                          nmaxg = maxg << 1
-                          nmaxg = maxg_cap if nmaxg > maxg_cap
-                          gty = wassat_gc_grow_arr(gty, ng, nmaxg)
-                          glhs = wassat_gc_grow_arr(glhs, ng, nmaxg)
-                          goff = wassat_gc_grow_arr(goff, ng, nmaxg)
-                          glen = wassat_gc_grow_arr(glen, ng, nmaxg)
-                          maxg = nmaxg
-                        if au + 6 >= acap && acap < acap_cap
-                          nacap = acap << 1
-                          nacap = acap_cap if nacap > acap_cap
-                          ar = wassat_gc_grow_arr(ar, au, nacap)
-                          acap = nacap
-                        if ng < maxg && au + 3 < acap
-                          gty[ng] = 3
-                          glhs[ng] = l
-                          goff[ng] = au
-                          glen[ng] = 3
-                          ar[au] = cc
-                          ar[au + 1] = t
-                          ar[au + 2] = e
-                          au += 3
-                          ng += 1
-                          st[10] += 1
-            r += 1
+        n = 3 ## i64
+        n = 4 if sk[base + 3] != 0
+        n = 5 if sk[base + 4] != 0
+        if (n == 3 && n3_eff >= 4) || (n == 4 && n4_eff >= 8) || (n == 5 && n5_eff >= 16)
+          negs = 0 ## i64
+          j = 0
+          while j < n
+            negs += sk[base + j] & 1
+            j += 1
+          if negs == 0 || (negs == 1 && (sk[base] & 1) == 1)
+            v0 = sk[base] & (0 - 2) ## i64
+            v1 = sk[base + 1] & (0 - 2) ## i64
+            v2 = sk[base + 2] & (0 - 2) ## i64
+            v3 = n >= 4 ? (sk[base + 3] & (0 - 2)) : 0 ## i64
+            v4 = n == 5 ? (sk[base + 4] & (0 - 2)) : 0 ## i64
+            ok = 1 ## i64
+            if n == 3
+              if tst[v0 + 1] - tst[v0] < 2 || tst[v0 + 2] - tst[v0 + 1] < 2 || tst[v1 + 1] - tst[v1] < 2 || tst[v1 + 2] - tst[v1 + 1] < 2 || tst[v2 + 1] - tst[v2] < 2 || tst[v2 + 2] - tst[v2 + 1] < 2
+                ok = 0
+            # Clause i itself is mask == 0 (negs == 0) or mask == 1 (negs == 1);
+            # start directly at the first 2-flip partner clause.
+            mask = negs == 0 ? 3 : 2 ## i64
+            full = (1 << n) - 1 ## i64
+            while mask <= full && ok == 1
+              pc = ccall_nobox("__w_bit_ctpop_u64", mask) ## i64
+              if (pc & 1) == negs
+                x0 = v0 | (mask & 1) ## i64
+                x1 = v1 | ((mask >> 1) & 1) ## i64
+                x2 = v2 | ((mask >> 2) & 1) ## i64
+                x3 = n >= 4 ? (v3 | ((mask >> 3) & 1)) : 0 ## i64
+                x4 = n == 5 ? (v4 | ((mask >> 4) & 1)) : 0 ## i64
+                ticks += 1
+                ok = 0 if wassat_gc_clause_at(cht, sk, cmask, n, x0, x1, x2, x3, x4) <= 0
+              mask += 1
+            if ok == 1
+              if ng + n + 2 >= maxg && maxg < maxg_cap
+                nmaxg = maxg << 1
+                while nmaxg < ng + n + 8
+                  nmaxg = nmaxg << 1
+                nmaxg = maxg_cap if nmaxg > maxg_cap
+                gty = wassat_gc_grow_arr(gty, ng, nmaxg)
+                glhs = wassat_gc_grow_arr(glhs, ng, nmaxg)
+                goff = wassat_gc_grow_arr(goff, ng, nmaxg)
+                glen = wassat_gc_grow_arr(glen, ng, nmaxg)
+                maxg = nmaxg
+              if au + n * n + 4 >= acap && acap < acap_cap
+                nacap = acap << 1
+                while nacap < au + n * n + 16
+                  nacap = nacap << 1
+                nacap = acap_cap if nacap > acap_cap
+                ar = wassat_gc_grow_arr(ar, au, nacap)
+                acap = nacap
+              if ng + n < maxg && au + n * n < acap
+                # A clause with `negs` negations forbids the assignment with that
+                # many true variables, so x1 ^ .. ^ xn = 1 - negs.
+                st[9] += 1
+                j = 0
+                while j < n
+                  gty[ng] = 2
+                  glhs[ng] = (sk[base + j] & (0 - 2)) | (negs == 0 ? 1 : 0)
+                  goff[ng] = au
+                  glen[ng] = n - 1
+                  k = 0
+                  while k < n
+                    if k != j
+                      ar[au] = sk[base + k] & (0 - 2)
+                      au += 1
+                    k += 1
+                  ng += 1
+                  j += 1
         i += 1
+        break if st[9] == 0 && ng == 0 && st[0] == 0 && ticks >= 250000
         if (i & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
           ticks = budget
           late = 1
-      z = ccall("w_value_free_w", ord)
-    z = ccall("w_value_free_w", toc)
-    z = ccall("w_value_free_w", tst)
-    z = ccall("w_value_free_w", sk)
-    z = ccall("w_value_free_w", cht)
+      # ---- ITE gates: clause (l | -c | -t) with l and c positive, its partner
+      # (-l | -c | t), and for some e the pair (l | c | -e), (-l | c | e).
+      st[11] += ticks
+      ticks = 0 if late == 0
+      if n3_eff >= 4 && ticks < budget && late == 0
+        ord = i64[18]
+        ord[0] = 0
+        ord[1] = 1
+        ord[2] = 2
+        ord[3] = 0
+        ord[4] = 2
+        ord[5] = 1
+        ord[6] = 1
+        ord[7] = 0
+        ord[8] = 2
+        ord[9] = 1
+        ord[10] = 2
+        ord[11] = 0
+        ord[12] = 2
+        ord[13] = 0
+        ord[14] = 1
+        ord[15] = 2
+        ord[16] = 1
+        ord[17] = 0
+        i = 0
+        while i < ni && ticks < budget
+          base = i * 5
+          if sk[base + 3] == 0
+            r = 0 ## i64
+            while r < 6
+              l = sk[base + ord[r * 3]] ## i64
+              y = sk[base + ord[r * 3 + 1]] ## i64
+              zc = sk[base + ord[r * 3 + 2]] ## i64
+              if (l & 1) == 0 && (y & 1) == 1
+                cc = y ^ 1 ## i64
+                t = zc ^ 1 ## i64
+                ln = l ^ 1 ## i64
+                if tst[l + 1] - tst[l] >= 2 && tst[ln + 1] - tst[ln] >= 2 && tst[y + 1] - tst[y] >= 2 && tst[cc + 1] - tst[cc] >= 2 && tst[t + 1] - tst[t] >= 1
+                  ticks += 1
+                  if wassat_gc_has_tern(cht, sk, cmask, ln, y, t) == 1
+                    # Clauses holding both c and l: scan the shorter list.
+                    sx = cc ## i64
+                    sy = l ## i64
+                    if tst[l + 1] - tst[l] < tst[cc + 1] - tst[cc]
+                      sx = l
+                      sy = cc
+                    p = tst[sx]
+                    pe = tst[sx + 1]
+                    while p < pe
+                      ob = toc[p] * 5 ## i64
+                      p += 1
+                      ticks += 1
+                      third = 0 - 1 ## i64
+                      if sk[ob] == sy
+                        third = sk[ob + 1] == sx ? sk[ob + 2] : sk[ob + 1]
+                      elsif sk[ob + 1] == sy
+                        third = sk[ob] == sx ? sk[ob + 2] : sk[ob]
+                      elsif sk[ob + 2] == sy
+                        third = sk[ob] == sx ? sk[ob + 1] : sk[ob]
+                      if third >= 0
+                        e = third ^ 1 ## i64
+                        ev = e >> 1 ## i64
+                        if ev != (cc >> 1) && ev != (t >> 1) && ev != (l >> 1)
+                          if tst[e + 1] - tst[e] >= 1 && wassat_gc_has_tern(cht, sk, cmask, cc, e, ln) == 1
+                            if ng + 2 >= maxg && maxg < maxg_cap
+                              nmaxg = maxg << 1
+                              nmaxg = maxg_cap if nmaxg > maxg_cap
+                              gty = wassat_gc_grow_arr(gty, ng, nmaxg)
+                              glhs = wassat_gc_grow_arr(glhs, ng, nmaxg)
+                              goff = wassat_gc_grow_arr(goff, ng, nmaxg)
+                              glen = wassat_gc_grow_arr(glen, ng, nmaxg)
+                              maxg = nmaxg
+                            if au + 6 >= acap && acap < acap_cap
+                              nacap = acap << 1
+                              nacap = acap_cap if nacap > acap_cap
+                              ar = wassat_gc_grow_arr(ar, au, nacap)
+                              acap = nacap
+                            if ng < maxg && au + 3 < acap
+                              gty[ng] = 3
+                              glhs[ng] = l
+                              goff[ng] = au
+                              glen[ng] = 3
+                              ar[au] = cc
+                              ar[au + 1] = t
+                              ar[au + 2] = e
+                              au += 3
+                              ng += 1
+                              st[10] += 1
+              r += 1
+          i += 1
+          break if st[10] == 0 && st[9] == 0 && ng == 0 && st[0] == 0 && ticks >= 250000
+          if (i & 4095) == 0 && deadline > 0 && clock_ms() >= deadline
+            ticks = budget
+            late = 1
+        z = ccall("w_value_free_w", ord)
+      z = ccall("w_value_free_w", toc)
+      z = ccall("w_value_free_w", tst)
+      z = ccall("w_value_free_w", sk)
+      z = ccall("w_value_free_w", cht)
   st[11] += ticks
   st[18] = ng
   st[19] = au
@@ -994,7 +1228,10 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
 # variable) and st. Returns 1 when the closure ran, 0 on a declined shape.
 -> wassat_gc_close(fla, fcs, fcl, ncl, nv, rep, st, deadline) (i64[] i64[] i64[] i64 i64 i64[] i64[] i64) i64
   counts = i64[6]
-  z = wassat_gc_census(fcl, ncl, counts)
+  if wassat_gc_census(fcl, ncl, counts, deadline) < 0
+    st[5] = 1
+    z = ccall("w_value_free_w", counts)
+    return 0
   ga = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
   gmeta = i64[4]
   ran = wassat_gc_close_state(fla, fcs, fcl, ncl, nv, rep, st, counts, 0, ga, gmeta, deadline)
@@ -1022,7 +1259,9 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
     counts[2] = cfg.binary
     counts[3] = cfg.ternary
   else
-    z = wassat_gc_census(fcl, nc, counts)
+    if wassat_gc_census(fcl, nc, counts, deadline) < 0
+      z = ccall("w_value_free_w", counts)
+      return nil
   nidx = counts[3] + counts[4] + counts[5]
   can_xi = nidx > 0 && nidx <= WASSAT_GATE_CLOSURE_MAX_INDEXED && (counts[3] >= 4 || counts[4] >= 8 || counts[5] >= 16)
   if counts[1] == 0 && counts[2] < 2 && !can_xi
@@ -1616,7 +1855,9 @@ WASSAT_GATE_CLOSURE_MAX_INDEXED = 6000000
     counts[2] = cfg.binary
     counts[3] = cfg.ternary
   else
-    z = wassat_gc_census(fcl, nc, counts)
+    if wassat_gc_census(fcl, nc, counts, deadline) < 0
+      z = ccall("w_value_free_w", counts)
+      return nil
   nidx = counts[3] + counts[4] + counts[5]
   can_xi = nidx > 0 && nidx <= WASSAT_GATE_CLOSURE_MAX_INDEXED && (counts[3] >= 4 || counts[4] >= 8 || counts[5] >= 16)
   if counts[1] == 0 && counts[2] < 2 && !can_xi

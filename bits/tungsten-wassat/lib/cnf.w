@@ -139,6 +139,7 @@
 -> wassat_parse_cnf_header_pair(text, out) (String i64[]) i64
   out[0] = 0
   out[1] = 0
+  out[2] = 0 if out.size >= 3
   limit = text.size
   limit = 65536 if limit > 65536
   i = 0
@@ -169,6 +170,13 @@
         if has_nv && has_digit && decl > 0 && j < limit
           out[0] = nv
           out[1] = decl
+          if out.size >= 3
+            k = j
+            tlen = text.size
+            while k < tlen && text.byte_at(k) != 10
+              k += 1
+            k += 1 if k < tlen
+            out[2] = k
           return decl
     while i < limit && text.byte_at(i) != 10
       i += 1
@@ -179,27 +187,101 @@
   pair = i64[2]
   wassat_parse_cnf_header_pair(text, pair)
 
+# Sample up to 4096 non-comment clause bytes right after the `p cnf` header,
+# counting non-zero literal tokens (out[0]) and clause bytes (out[1]).
+-> wassat_sample_cnf_density(prefix, start_pos, byte_len, out) (String i64 i64 i64[]) i64
+  out[0] = 0
+  out[1] = 0
+  plen = prefix.size
+  return 0 if start_pos <= 0 || start_pos >= plen
+  sample_lits = 0
+  sample_bytes = 0
+  pos = start_pos
+  scan_end = start_pos + 16384
+  scan_end = plen if scan_end > plen
+  while pos < scan_end && sample_bytes < 4096
+    line_end = pos
+    while line_end < plen && prefix.byte_at(line_end) != 10
+      line_end += 1
+    has_nl = line_end < plen
+    next_pos = has_nl ? line_end + 1 : line_end
+    s = pos
+    while s < line_end && prefix.byte_at(s) <= 32
+      s += 1
+    if s >= line_end
+      pos = next_pos
+    else
+      b0 = prefix.byte_at(s)
+      if b0 == 37
+        break
+      t0_end = s
+      while t0_end < line_end && prefix.byte_at(t0_end) > 32
+        t0_end += 1
+      if t0_end - s == 1 && b0 == 99
+        pos = next_pos
+      else
+        rem_win = 4096 - sample_bytes
+        chunk_end = next_pos
+        truncated = false
+        if chunk_end - pos > rem_win
+          chunk_end = pos + rem_win
+          truncated = true
+        elsif !has_nl && plen < byte_len
+          truncated = true
+        if truncated
+          while chunk_end > pos && prefix.byte_at(chunk_end - 1) > 32
+            chunk_end -= 1
+        break if chunk_end <= pos
+        k = s
+        while k < chunk_end
+          while k < chunk_end && prefix.byte_at(k) <= 32
+            k += 1
+          break if k >= chunk_end
+          ts = k
+          while k < chunk_end && prefix.byte_at(k) > 32
+            k += 1
+          te = k
+          unless te - ts == 1 && prefix.byte_at(ts) == 48
+            sample_lits += 1
+        sample_bytes += chunk_end - pos
+        break if truncated
+        pos = next_pos
+  out[0] = sample_lits
+  out[1] = sample_bytes
+  0
+
 -> wassat_estimate_cnf_caps(byte_len, prefix, caps) (i64 String i64[]) i64
   cap_l = byte_len / 2 + 64
   fallback_l = cap_l
   cap_c = byte_len / 2 + 64
   if byte_len >= 65536 && prefix != nil
-    pair = i64[2]
+    pair = i64[3]
     decl = wassat_parse_cnf_header_pair(prefix, pair)
-    nv = pair[0]
     if decl > 0 && decl + 64 < cap_c
       cap_c = decl + 64
       rem_bytes = byte_len - 2 * decl
       if rem_bytes > 0
         fallback_l = rem_bytes / 2 + 64
-        if nv >= 1000 && byte_len >= 1048576
-          est = rem_bytes / 5 + 64
+        if byte_len >= 1048576
+          nv = pair[0]
+          default_est = fallback_l
+          if nv >= 1000
+            default_est = rem_bytes / 5 + 64
+          elsif byte_len >= 400000000 && decl >= 20000000
+            default_est = rem_bytes / 3 + 64
+          sout = i64[2]
+          wassat_sample_cnf_density(prefix, pair[2], byte_len, sout)
+          sample_lits = sout[0]
+          sample_bytes = sout[1]
           floor_l = 2 * decl + 64
+          est = default_est
+          if sample_lits >= 32 && sample_bytes >= 128
+            body_bytes = pair[2] > 0 && byte_len > pair[2] ? byte_len - pair[2] : rem_bytes
+            sampled = (body_bytes * sample_lits / sample_bytes) * 23 / 20 + 1024
+            est = sampled if sampled < default_est
           est = floor_l if est < floor_l
           est = fallback_l if est > fallback_l
           cap_l = est
-        elsif byte_len >= 400000000 && decl >= 20000000
-          cap_l = rem_bytes / 3 + 64
         else
           cap_l = rem_bytes / 2 + 64
   caps[0] = cap_l
@@ -252,6 +334,13 @@
   ensure
     mapping.close
 
+-> wassat_copy_prefix_i64(src, dst, n) (i64[] i64[] i64) i64
+  i = 0
+  while i < n
+    dst[i] = src[i]
+    i += 1
+  0
+
 # A small initial literal buffer is safe only with a bounded retry. The
 # strict native scanner rewrites the same clause tables and header; nothing
 # is published until it accepts the entire input. Keeping this boundary
@@ -280,6 +369,24 @@
   wassat_parse_cnf_check_header(hdr)
   nvars = hdr[0]
   ncl = hdr[2]
+  nlits = hdr[3]
+  # Demand-zeroed large allocations never fault pages past `nlits`, whereas
+  # copying `0..nlits` into a second buffer doubles physical RSS at the high-
+  # water mark on multi-hundred-MB inputs. Only compact small heap slabs.
+  if nlits <= 4194304 && cap_l - nlits >= 1048576 && cap_l * 3 > nlits * 4
+    tight_lits = i64[nlits + 1]
+    wassat_copy_prefix_i64(lits, tight_lits, nlits)
+    z = ccall("w_value_free_w", lits)
+    lits = tight_lits
+  if ncl <= 2097152 && cap_c - ncl >= 524288 && cap_c * 3 > ncl * 4
+    tight_offs = i64[ncl + 2]
+    wassat_copy_prefix_i64(offs, tight_offs, ncl)
+    z = ccall("w_value_free_w", offs)
+    offs = tight_offs
+    tight_lens = i64[ncl + 2]
+    wassat_copy_prefix_i64(lens, tight_lens, ncl)
+    z = ccall("w_value_free_w", lens)
+    lens = tight_lens
   # NO eager boxed materialization. Building one Array per clause cost ~60% of
   # parse time (302ms of 499ms on a 10M-clause instance) for data the flat
   # mirrors already hold: a clause IS the slice (flat_offs[k], flat_lens[k])
@@ -289,7 +396,7 @@
   # which materializes once and caches.
   { "nvars": nvars, "clauses": [], "boxed": false,
     "flat_lits": lits, "flat_offs": offs, "flat_lens": lens,
-    "flat_ncl": ncl, "flat_nlits": hdr[3] }
+    "flat_ncl": ncl, "flat_nlits": nlits }
 
 # Parse DIMACS CNF text into {"nvars": Int, "clauses": Array}.
 -> wassat_parse_cnf(text)

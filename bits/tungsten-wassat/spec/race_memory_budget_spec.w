@@ -13,7 +13,7 @@ describe "Wassat physical-memory race planning" ->
     f = { "nvars": 100000, "flat_ncl": 200000, "flat_nlits": 600000 }
     expect(wassat_race_memory_fits_for_memory?(f, 1, 1, 1, 0, 2147483648)).to eq(true)
     expect(wassat_race_memory_fits_for_memory?(f, 20, 1, 1, 0, 2147483648)).to eq(false)
-    expect(wassat_race_memory_fits_for_memory?(f, 1, 20, 1, 0, 2147483648)).to eq(false)
+    expect(wassat_race_memory_fits_for_memory?(f, 1, 40, 1, 0, 2147483648)).to eq(false)
     expect(wassat_race_memory_fits_for_memory?(f, 1, 1, 20, 0, 2147483648)).to eq(false)
 
   it "declines unknown capacity and never gives a zero-capacity host a budget" ->

@@ -42,6 +42,24 @@ WASSAT_PRE_SLS_FLIPS = 2000000
   meta[3] = lits
   live
 
+-> wassat_pre_sls_view_32(offs, lens, alive, taut, ncl, dst_offs, dst_lens, meta, stop) (i32[] i32[] i8[] i8[] i64 i32[] i32[] i64[] i64[]) i64
+  return -1 if ncl < 0 || ncl > offs.size || ncl > lens.size
+  return -1 if ncl > alive.size || ncl > taut.size || ncl > dst_offs.size || ncl > dst_lens.size
+  ci = 0
+  live = 0
+  lits = 0
+  while ci < ncl
+    return -1 if (ci & 255) == 0 && wassat_stop_load(stop) != 0
+    if alive[ci] == 1 && taut[ci] == 0
+      dst_offs[live] = offs[ci]
+      dst_lens[live] = lens[ci]
+      lits += lens[ci]
+      live += 1
+    ci += 1
+  meta[2] = live
+  meta[3] = lits
+  live
+
 # meta: attempted, substituted, live clauses/literals, flips, best unsat,
 # verified, start/end ms, cancelled, preparation ms, estimated extra bytes.
 -> wassat_pre_sls_body(formula, art, stop, result, meta)
@@ -54,14 +72,32 @@ WASSAT_PRE_SLS_FLIPS = 2000000
     return 0
   nv = formula["nvars"]
   ncl = art["fncl"]
-  offs = i64[ncl]
-  lens = i64[ncl]
-  live = wassat_pre_sls_view(art["fcs"], art["fcl"], art["falive"],
-    art["ftaut"], ncl, offs, lens, meta, stop)
-  if live >= 0 && !wassat_stop_requested?(stop)
-    view = { "flat_ncl": live, "flat_lits": art["fla"],
-             "flat_offs": offs, "flat_lens": lens }
-    s = WassatSls.new(nv, [], stop, view)
+  is_32 = art.has_key?("fla_bits") && art["fla_bits"] == 32
+  s = nil
+  live = -1
+  if is_32
+    offs32 = i32[ncl]
+    lens32 = i32[ncl]
+    live = wassat_pre_sls_view_32(art["fcs"], art["fcl"], art["falive"],
+      art["ftaut"], ncl, offs32, lens32, meta, stop)
+    if live >= 0 && !wassat_stop_requested?(stop)
+      view = { "flat_ncl": live, "flat_lits": art["fla"],
+               "flat_offs": offs32, "flat_lens": lens32, "fla_bits": 32 }
+      s = WassatSls.new(nv, [], stop, view)
+    z = ccall("w_value_free_w", offs32)
+    z = ccall("w_value_free_w", lens32)
+  else
+    offs = i64[ncl]
+    lens = i64[ncl]
+    live = wassat_pre_sls_view(art["fcs"], art["fcl"], art["falive"],
+      art["ftaut"], ncl, offs, lens, meta, stop)
+    if live >= 0 && !wassat_stop_requested?(stop)
+      view = { "flat_ncl": live, "flat_lits": art["fla"],
+               "flat_offs": offs, "flat_lens": lens }
+      s = WassatSls.new(nv, [], stop, view)
+    z = ccall("w_value_free_w", offs)
+    z = ccall("w_value_free_w", lens)
+  if s != nil && !wassat_stop_requested?(stop)
     s.set_stop_cell(stop)
     meta[10] = clock_ms() - meta[7]
     r = s.solve(WASSAT_PRE_SLS_FLIPS, 1)

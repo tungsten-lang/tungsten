@@ -212,14 +212,20 @@ describe "Wassat portfolio (process race)" ->
       divs = {
         "nvars": 862, "flat_ncl": 855716, "flat_nlits": 9386236
       }
-      expect(wassat_sls_arena_mb(divs)).to eq(261)
+      expect(wassat_sls_arena_mb(divs)).to eq(102)
       expect(wassat_sls_arm_memory_allowed?(divs)).to eq(true)
+
+      dense_cap = {
+        "nvars": 862, "flat_ncl": 1500000, "flat_nlits": 27500000
+      }
+      expect(wassat_sls_arena_mb(dense_cap)).to eq(262)
+      expect(wassat_sls_arm_memory_allowed?(dense_cap)).to eq(true)
 
       # The same allocation size on a broad application shape remains over
       # the limit: the exception is about dense few-variable kernels, not a
       # disguised global cap increase.
       broad = {
-        "nvars": 50000, "flat_ncl": 855716, "flat_nlits": 9386236
+        "nvars": 50000, "flat_ncl": 1500000, "flat_nlits": 27500000
       }
       expect(wassat_sls_arm_memory_allowed?(broad)).to eq(false)
 

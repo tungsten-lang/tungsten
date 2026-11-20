@@ -477,9 +477,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @inp_mark = nil
     @inp_lits = nil
     @inp_units = nil
-    @inp_s_idx = nil
     @inp_s_low = nil
-    @inp_s_onstk = nil
     @inp_s_reprs = nil
     @inp_s_stk = nil
     @inp_s_work = nil
@@ -2007,12 +2005,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       @inp_units = i64[nv + 2]
       wassat_query_keep(@query_owner, @inp_units, @inp_units.size * 8) if @query_owner != nil
     if (@inprocess_passes & 8) != 0 && @allow_subst && @config.use_substitution(true)
-      @inp_s_idx = i64[nl]
-      wassat_query_keep(@query_owner, @inp_s_idx, @inp_s_idx.size * 8) if @query_owner != nil
       @inp_s_low = i64[nl]
       wassat_query_keep(@query_owner, @inp_s_low, @inp_s_low.size * 8) if @query_owner != nil
-      @inp_s_onstk = i64[nl]
-      wassat_query_keep(@query_owner, @inp_s_onstk, @inp_s_onstk.size * 8) if @query_owner != nil
       @inp_s_reprs = i64[nl]
       wassat_query_keep(@query_owner, @inp_s_reprs, @inp_s_reprs.size * 8) if @query_owner != nil
       @inp_s_stk = @sub_head != nil ? @sub_head : i64[nl]
@@ -3316,7 +3310,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       return 0
     wassat_copy_vivify_phases(@phase, @inp_phase, @nvars)
     props0 = @pstate[4]
-    allow_eq = @allow_subst && (@inprocess_passes & 8) != 0 && @inp_s_idx != nil && @config.use_substitution(true)
+    allow_eq = @allow_subst && (@inprocess_passes & 8) != 0 && @inp_s_reprs != nil && @config.use_substitution(true)
     eq_room = 4096
     v = @probe_cursor
     v = 1 if v < 1 || v > @nvars
@@ -3429,7 +3423,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     t5 = wassat_prof_clock
     self.clean_root_clauses if @ok
     t6 = wassat_prof_clock
-    if @ok && !wassat_stop_requested?(@stop_cell) && (@inprocess_passes & 8) != 0 && @allow_subst && @inp_s_idx != nil && @config.use_substitution(true)
+    if @ok && !wassat_stop_requested?(@stop_cell) && (@inprocess_passes & 8) != 0 && @allow_subst && @inp_s_reprs != nil && @config.use_substitution(true)
       self.substitute_equivalences
       self.clean_root_clauses if @ok
     t7 = wassat_prof_clock
@@ -4744,7 +4738,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     if rounds > 1
       and_scratch = [nil, nil, nil, nil, nil]
       xor_scratch = [nil, nil, nil, nil, nil, nil, nil, nil]
-      scc_scratch = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
+      scc_scratch = [nil, nil, nil, nil, nil, nil, nil, nil]
     r = 0
     while r < rounds
       m = self.extract_and_gates(and_scratch) + self.extract_xor_gates(xor_scratch)
@@ -4961,24 +4955,18 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # fixed-capacity worker may not allocate). The load-time call keeps its
     # own exact-size tables, so its rewrite is unchanged.
     mid = @conflicts > 0
-    pre = mid && @inp_s_idx != nil && @inp_ht != nil && @sub_next != nil && @sub_next.size >= @ncl + 2
+    pre = mid && @inp_s_reprs != nil && @inp_ht != nil && @sub_next != nil && @sub_next.size >= @ncl + 2
     return 0 if mid && !pre && @fixed_caps
     prof_start = wassat_prof_clock
-    idx = pre ? @inp_s_idx : wassat_congruence_buffer(scratch, 0, nl)
-    low = pre ? @inp_s_low : wassat_congruence_buffer(scratch, 1, nl)
-    onstk = pre ? @inp_s_onstk : wassat_congruence_buffer(scratch, 2, nl)
-    reprs = pre ? @inp_s_reprs : wassat_congruence_buffer(scratch, 3, nl)
-    stk = pre ? @inp_s_stk : wassat_congruence_buffer(scratch, 4, nl)
-    work = pre ? @inp_s_work : wassat_congruence_buffer(scratch, 5, nl)
-    wcur = pre ? @inp_s_wcur : wassat_congruence_buffer(scratch, 6, nl)
-    if pre
-      wassat_zero_i64(idx, nl)
-      wassat_zero_i64(low, nl)
-      wassat_zero_i64(onstk, nl)
-      wassat_zero_i64(reprs, nl)
+    low = pre ? @inp_s_low : wassat_congruence_buffer(scratch, 0, nl)
+    reprs = pre ? @inp_s_reprs : wassat_congruence_buffer(scratch, 1, nl)
+    stk = pre ? @inp_s_stk : wassat_congruence_buffer(scratch, 2, nl)
+    work = pre ? @inp_s_work : wassat_congruence_buffer(scratch, 3, nl)
+    wcur = pre ? @inp_s_wcur : wassat_congruence_buffer(scratch, 4, nl)
+    wassat_zero_i64(reprs, nl) if pre
     st = @inp_sst
     wassat_zero_i64(st, 8)
-    wassat_scc(@bldir, @bl_pool, @assign, idx, low, onstk, reprs, stk,
+    wassat_scc(@bldir, @bl_pool, @assign, low, reprs, stk,
                work, wcur, st, 2 * @nvars + 2, @stop_cell)
     @inp_totals[3] = @inp_totals[3] + st[5]
     # SCC only wrote scratch. Discard a partial result before any rewrite.
@@ -4991,9 +4979,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     hcap = 1024
     while hcap < 2 * (@ncl + 16)
       hcap = hcap * 2
-    ht = pre ? @inp_ht : wassat_congruence_buffer(scratch, 7, hcap)
-    mark = pre ? @inp_s_mark : wassat_congruence_buffer(scratch, 8, nl)
-    units = pre ? @sub_next : wassat_congruence_buffer(scratch, 9, scratch == nil ? @ncl + 2 : @ccap + 2)
+    ht = pre ? @inp_ht : wassat_congruence_buffer(scratch, 5, hcap)
+    mark = pre ? @inp_s_mark : wassat_congruence_buffer(scratch, 6, nl)
+    units = pre ? @sub_next : wassat_congruence_buffer(scratch, 7, scratch == nil ? @ncl + 2 : @ccap + 2)
     # The prepared table is capped, so bound its linear probe: a missed
     # duplicate costs a redundant clause, an unbounded probe a full scan.
     plim = pre ? 32 : hcap
@@ -6400,11 +6388,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 # Literals of root-assigned variables are skipped: their value is already
 # fixed and rewriting a root reason clause would orphan it.
 #
+# reprs is zero for an unseen literal, the negative discovery index while
+# it is on the Tarjan stack, and its positive representative once closed.
 #   st[0] = 1 when one component holds both x and -x (formula UNSAT)
 #   st[1] = literals mapped away from themselves
 #   st[2] = edges traversed
 #   st[3] = the contradictory variable, when st[0] is 1
--> wassat_scc(bd, blp, asg, idx, low, onstk, reprs, stk, work, wcur, st, nlits, stop_cell) (i32[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[])
+-> wassat_scc(bd, blp, asg, low, reprs, stk, work, wcur, st, nlits, stop_cell) (i32[] i64[] i8[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64[])
   dfsi = 1
   stop = 0
   ticks = 0
@@ -6418,22 +6408,26 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       st[5] = work_done
       return 0
     nv = node >> 1
-    if idx[node] == 0 && asg[nv] == 0
+    if reprs[node] == 0 && asg[nv] == 0
       work[0] = node
       wcur[0] = 0
       top = 1
       while top > 0 && st[0] == 0
         u = work[top - 1]
-        if idx[u] == 0
-          idx[u] = dfsi
+        d = (u ^ 1) << 1 ## i64
+        bn = bd[d + 1] ## i64
+        if reprs[u] == 0
+          # A sink forms its own component and cannot lower its parent's lowlink.
+          if bn == 0
+            reprs[u] = u
+            top -= 1
+            next
+          reprs[u] = 0 - dfsi
           low[u] = dfsi
           dfsi += 1
           stk[stop] = u
           stop += 1
-          onstk[u] = 1
-        d = (u ^ 1) << 1 ## i64
-        blo = bd[d]
-        bn = bd[d + 1]
+        blo = bd[d] ## i64
         k = wcur[top - 1]
         advanced = 0
         while k < bn && advanced == 0
@@ -6447,14 +6441,14 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           k += 1
           ticks += 1
           if asg[w >> 1] == 0
-            if idx[w] == 0
+            if reprs[w] == 0
               wcur[top - 1] = k
               work[top] = w
               wcur[top] = 0
               top += 1
               advanced = 1
             else
-              if onstk[w] == 1 && low[w] < low[u]
+              if reprs[w] < 0 && low[w] < low[u]
                 low[u] = low[w]
         if advanced == 0
           wcur[top - 1] = k
@@ -6463,8 +6457,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             pu = work[top - 1]
             if low[u] < low[pu]
               low[pu] = low[u]
-          if low[u] == idx[u]
-            base = stop - 1
+          if low[u] == 0 - reprs[u]
+            base = stop - 1 ## i64
+            if stk[base] == u
+              reprs[u] = u
+              stop = base
+              next
             while stk[base] != u
               work_done += 1
               if (work_done & 1023) == 0 && wassat_stop_requested?(stop_cell)
@@ -6494,7 +6492,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                 st[5] = work_done
                 return 0
               x = stk[j]
-              onstk[x] = 0
               reprs[x] = rep
               j += 1
             j = base

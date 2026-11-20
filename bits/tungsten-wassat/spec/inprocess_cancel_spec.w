@@ -151,6 +151,17 @@ describe "Inprocessing cancellation and query boundaries" ->
     expect(s.nsubst).to eq(1)
     expect(s.inp_totals[1]).to eq(0)
 
+  it "keeps sinks and completed components separate across implication edges" ->
+    # 1 -> 2 <-> 3 -> 4 -> 5, with a second edge into the closed cycle.
+    clauses = [[-1, 2], [-2, 3], [-3, 2], [-3, 4], [-4, 5], [-6, 3]]
+    s = CancelFixture.new(6, clauses, WASSAT_PROOF_NONE, 0)
+    s.substitute_equivalences
+    expect(s.nsubst).to eq(1)
+    result = s.solve_assuming([-1, -2, 4, -6])
+    expect(result["sat"]).to eq(true)
+    expect(cancel_model_ok(clauses, result["model"])).to eq(true)
+    expect(s.solve_assuming([2, -3])["unsat"]).to eq(true)
+
   it "follows mappings accumulated over separate substitution rounds" ->
     clauses = [[-2, -3], [2, 3], [1, 2], [-1, -2]]
     s = CancelFixture.new(3, [[-2, -3], [2, 3]], 0, 0)

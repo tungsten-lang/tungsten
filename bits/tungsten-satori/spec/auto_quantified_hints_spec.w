@@ -9,7 +9,7 @@ session.run_import("order")
 session.run_source(File.read("bits/tungsten-satori/spec/auto_quantified_hints.sat").replace("import arith\n", ""))
 if session.failures != 0
   raise "quantified arithmetic hints failed"
-["generic_int", "generic_rat", "generic_real", "generic_nat", "partially_applied", "local_rule", "local_fixed_function", "polymorphic", "fixed_polymorphic", "concrete_domain", "irrelevant_hint", "fallback", "nested_domain", "mixed_hints"].each -> (name)
+["generic_int", "generic_rat", "generic_real", "generic_nat", "partially_applied", "local_rule", "local_fixed_function", "polymorphic", "fixed_polymorphic", "concrete_domain", "irrelevant_hint", "fallback", "nested_domain", "mixed_hints", "skip_unrelated_domain"].each -> (name)
   th = session.theorems[name]
   expected = ["axiom:aggregate_nonneg_rat", "oracle:arith"]
   if name == "generic_int" || name == "generic_real"
@@ -17,7 +17,7 @@ if session.failures != 0
     expected = ["axiom:aggregate_nonneg_" + suffix, "oracle:arith"]
   if name == "generic_nat"
     expected = ["axiom:aggregate_lower_nat", "oracle:arith"]
-  if name == "local_rule" || name == "local_fixed_function"
+  if ["local_rule", "local_fixed_function", "skip_unrelated_domain"].include?(name)
     expected = ["oracle:arith"]
   if ["polymorphic", "fixed_polymorphic", "concrete_domain", "nested_domain"].include?(name)
     expected = ["axiom:folded_nonneg", "oracle:arith"]
@@ -27,7 +27,7 @@ if session.failures != 0
     expected = ["axiom:aggregate_nonneg_rat", "axiom:stored_zero", "oracle:arith"]
   if th == nil || th.hyps.size != 0 || th.tags != expected
     raise "quantified hint missing, open or has unexpected trust: " + name
-["missing_guard", "wrong_range", "wrong_sign", "wrong_function", "missing_index", "wrong_sum", "weak_nat", "wrong_partial", "escaped_premise", "unsupplied", "fixed_type", "conditional_leak"].each -> (name)
+["missing_guard", "wrong_range", "wrong_sign", "wrong_function", "missing_index", "wrong_sum", "weak_nat", "wrong_partial", "escaped_premise", "unsupplied", "fixed_type", "conditional_leak", "mismatched_domain_only"].each -> (name)
   before = session.failures
   session.run_source(proof_declarations("bits/tungsten-satori/spec/auto_quantified_hints_failure.sat", [name]))
   if session.failures != before + 1 || session.theorems[name] != nil

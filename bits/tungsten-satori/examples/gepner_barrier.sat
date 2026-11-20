@@ -1,0 +1,55 @@
+-- The scalar comparison in the Gepner stability corpus, family 055.
+import gronwall
+
+-> gepner.rate (t x : ℝ) : ℝ := max (-t/3) (x/t-2*t/3)
+
++ gepner.rate_bound (a b : ℝ) (ha : 0 < a) : one_sided_lipschitz_on gepner.rate a b (1/a)
+  unfold one_sided_lipschitz_on; intro t x y lo hi xy
+  have nonneg := mul_nonneg.real (1/a) (x-y) (one_div_nonneg.real a (by linarith)) (by linarith)
+  have scaled := div_le_div_of_nonneg_left.real (x-y) t a (by linarith) ha lo
+  have gap : (x-y)/t = x/t-y/t := by rw [div_def.real (x-y) t,div_def.real x t,div_def.real y t]; ring
+  have cap : (x-y)/a = (1/a)*(x-y) := by rw [div_def.real (x-y) a]; ring
+  rw [gap,cap] at scaled
+  unfold gepner.rate
+  obtain ⟨eq,left⟩ | ⟨eq,right⟩ := max_cases.real (-t/3) (x/t-2*t/3)
+  · rw [eq]; linarith [le_max_right.real (-t/3) (y/t-2*t/3)]
+  · rw [eq]; linarith [le_max_left.real (-t/3) (y/t-2*t/3)]
+
+-- A quadratic lower barrier can be compared directly with any supersolution.
++ gepner.quadratic (g v : ℝ → ℝ) (a b q l k : ℝ) (ha : 0 < a) (ab : a ≤ b)
+    (dg : interval.deriv g v a b) (initial : q*a^2+l*a+k ≤ g a)
+    (sub : ∀ t, a ≤ t → t ≤ b → q*(2*t)+l ≤ gepner.rate t (q*t^2+l*t+k))
+    (sup : ∀ t, a ≤ t → t ≤ b → gepner.rate t (g t) ≤ v t) : q*b^2+l*b+k ≤ g b
+  have quad := interval.deriv.quadratic q l k a b
+  exact gronwall.subsolution gepner.rate (fun t => q*t^2+l*t+k) g (fun t => q*(2*t)+l) v a b (1/a) ab quad dg initial (gepner.rate_bound a b ha) sub sup
+
++ gepner.first_arc (g v : ℝ → ℝ) (a b L : ℝ) (ha : 0 < a) (ab : a ≤ b)
+    (dg : interval.deriv g v a b) (initial : a*L-2*a^2/3 ≤ g a)
+    (sup : ∀ t, a ≤ t → t ≤ b → gepner.rate t (g t) ≤ v t) : b*L-2*b^2/3 ≤ g b
+  have sub : ∀ t, a ≤ t → t ≤ b → (-2/3)*(2*t)+L ≤ gepner.rate t ((-2/3)*t^2+L*t+0)
+    intro t lo hi; unfold gepner.rate
+    have div : ((-2/3)*t^2+L*t+0)/t = L-2*t/3 := (div_eq_iff.real ((-2/3)*t^2+L*t+0) (L-2*t/3) t (by linarith)).mpr (by ring)
+    linarith [le_max_right.real (-t/3) (((-2/3)*t^2+L*t+0)/t-2*t/3)]
+  linarith [gepner.quadratic g v a b (-2/3) L 0 ha ab dg (by linarith) sub sup]
+
++ gepner.second_arc (g v : ℝ → ℝ) (a b k : ℝ) (ha : 0 < a) (ab : a ≤ b)
+    (dg : interval.deriv g v a b) (initial : k-a^2/6 ≤ g a)
+    (sup : ∀ t, a ≤ t → t ≤ b → gepner.rate t (g t) ≤ v t) : k-b^2/6 ≤ g b
+  have sub : ∀ t, a ≤ t → t ≤ b → (-1/6)*(2*t)+0 ≤ gepner.rate t ((-1/6)*t^2+0*t+k)
+    intro t lo hi; unfold gepner.rate
+    linarith [le_max_left.real (-t/3) (((-1/6)*t^2+0*t+k)/t-2*t/3)]
+  linarith [gepner.quadratic g v a b (-1/6) 0 k ha ab dg (by linarith) sub sup]
+
+-- The two arcs meet at L. No admissible profile can vanish for b² < 3L² on the second arc.
++ gepner.no_early_zero (g v : ℝ → ℝ) (a L b : ℝ) (ha : 0 < a) (al : a ≤ L) (lb : L ≤ b)
+    (dg : interval.deriv g v a b) (initial : a*L-2*a^2/3 ≤ g a)
+    (sup : ∀ t, a ≤ t → t ≤ b → gepner.rate t (g t) ≤ v t) (early : b^2 < 3*L^2) : 0 < g b
+  have first := gepner.first_arc g v a L L ha al (interval.deriv.restrict g v a b a L dg (by linarith) lb) initial (by intro t lo hi; exact sup t lo (by linarith))
+  have second := gepner.second_arc g v L b (L^2/2) (by linarith) lb (interval.deriv.restrict g v a b L b dg al (by linarith)) (by linarith) (by intro t lo hi; exact sup t (by linarith) hi)
+  linarith
+
+-- Starting on the second arc yields the small-initial-value threshold directly.
++ gepner.single_arc_positive (g v : ℝ → ℝ) (a b C : ℝ) (ha : 0 < a) (ab : a ≤ b)
+    (dg : interval.deriv g v a b) (initial : C ≤ g a)
+    (sup : ∀ t, a ≤ t → t ≤ b → gepner.rate t (g t) ≤ v t) (early : b^2 < a^2+6*C) : 0 < g b
+  linarith [gepner.second_arc g v a b (C+a^2/6) ha ab dg (by linarith) sup]

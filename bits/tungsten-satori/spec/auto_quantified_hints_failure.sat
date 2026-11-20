@@ -47,3 +47,5 @@ axiom folded_nonneg (f : α → ℚ) (a : α) : (∀ x, 0 ≤ f x) → 0 ≤ fol
 + conditional_leak (f : ℕ → ℚ) (n i : ℕ) (p : Prop) (h : ∀ j < n+1, 0 ≤ f j) (hz : aggregate_rat f n+f n = 0) (e : i = n)
     (rule : p → ∀ g k, (∀ j < k, 0 ≤ g j) → 0 ≤ aggregate_rat g k) : f i = 0
   auto [rule]
+
++ mismatched_domain_only (f : ℤ → ℤ) (g : ℕ → ℤ) (other : ∀ n, 0 ≤ g n) : ∀ k, f k ≤ 6 := by auto

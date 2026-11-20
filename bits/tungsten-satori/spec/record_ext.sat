@@ -1,0 +1,36 @@
+structure sample α β := (value : α) (label : β)
+
++ all_fields (a b : sample α β) (v : a.value = b.value) (l : a.label = b.label) : a = b := by ext <;> assumption
++ inferred (a b : sample α β) (v : b.value = a.value) (l : a.label = b.label) : a = b := by auto
++ rebuild (a : sample α β) : sample.mk a.value a.label = a := by auto
++ right_rebuild (a : sample α β) : a = sample.mk a.value a.label := by auto
++ concrete (a b : ℤ) : sample.mk (a+b) (a*b) = sample.mk (b+a) (b*a) := by ext <;> ring
++ functions (f g : α → sample β γ) (h : ∀ x, (f x).value = (g x).value) (k : ∀ x, (f x).label = (g x).label) : f = g
+  ext x; ext
+  · exact h x
+  · exact k x
+
+structure stamp :=
++ vacuous (a b : stamp) : a = b := by ext
+#axioms inferred
+
+structure packet α := (read : ℕ → α) (tag : ℤ)
++ callback (p q : packet α) (read : ∀ n, p.read n = q.read n) (tag : p.tag = q.tag) : p = q
+  ext
+  · ext n; exact read n
+  · exact tag
+
+structure box α := (contents : α)
++ nested (a b : box (sample ℤ ℕ)) (v : a.contents.value = b.contents.value) (l : a.contents.label = b.contents.label) : a = b := by auto
+
+axiom label_agrees (a b : sample α β) : a.label = b.label
++ marked (a b : sample α β) (h : a.value = b.value) : a = b := by auto [label_agrees a b]
+#axioms marked
+
++ tuple_eta (p : (ℕ → ℝ) × (ℕ → ℝ)) : (fst p,snd p) = p := by auto
++ tuples (p q : α × β) (a : p.1 = q.1) (b : q.2 = p.2) : p = q := by ext <;> auto
+
+-> data.origin : box (sample ℤ ℕ) := box.mk (sample.mk (-1) 2)
++ global_field : data.origin.contents.label = 2 := by decide
+-> data.origin.contents.label : ℕ := 7
++ declared_name : data.origin.contents.label = 7 ∧ (data.origin.contents).label = 2 := by decide

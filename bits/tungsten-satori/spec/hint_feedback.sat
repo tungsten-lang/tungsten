@@ -28,6 +28,14 @@ axiom aggregate_nonneg (f : ℕ → ℚ) (n : ℕ) : (∀ i < n, 0 ≤ f i) → 
 + quantified (f : ℕ → ℚ) (n : ℕ) : 0 ≤ aggregate f n := by auto [aggregate_nonneg f]
 + quantified_repaired (f : ℕ → ℚ) (n : ℕ) (h : ∀ i < n, 0 ≤ f i) : 0 ≤ aggregate f n := by auto [aggregate_nonneg f]
 
+axiom checked_batch (n : ℕ) : (∀ j < n, ready j ∧ active j ∧ mark j) → done_at n
++ batch_gap (n : ℕ) (r : ∀ j < n, ready j) (m : ∀ k < n, mark k) : done_at n := by auto [checked_batch]
++ batch_other_range (n m : ℕ) (r : ∀ j < m, ready j) (mark_n : ∀ j < n, mark j) : done_at n := by auto [checked_batch]
++ batch_repaired (n : ℕ) (r : ∀ j < n, ready j) (a : ∀ j < n, active j) (m : ∀ j < n, mark j) :
+    done_at n := by auto [checked_batch]
++ batch_refuted (n : ℕ) (r : ∀ j < n, ready j) (m : ∀ j < n, mark j) (absent : ¬(∀ j < n, active j)) :
+    done_at n := by auto [checked_batch]
+
 -- Search the imported registrations without naming a rule.
 + unordered (a b : ℚ) (h : a ≠ b) : a < b := by auto
 + backwards (a b : ℤ) (h : b < a) : a < b := by auto
@@ -56,3 +64,11 @@ axiom stronger_bound : A+1 ≤ B*C
 + unfinished_bound : A+1 ≤ B*C := by sorry
 + unsupported_quotient : A/C ≤ B := by auto [unfinished_bound]
 + local_evidence (h : A+1 ≤ B*C) : A/C ≤ B := by auto [unfinished_bound]
+
+opaque base_load : ℕ → ℕ
+opaque extra_load : ℕ → ℕ
+-> load_of (n : ℕ) : ℕ := base_load n + extra_load n
+@[auto] + by_allowance (n b : ℕ) (base : base_load n ≤ 2) (limit : 2+extra_load n ≤ b) : load_of n ≤ b := by unfold load_of; linarith
+@[auto] + by_capacity (n b : ℕ) (base : base_load n ≤ 2) (extra : extra_load n ≤ 1) (limit : 3 ≤ b) : load_of n ≤ b := by unfold load_of; linarith
++ use_context (n b : ℕ) (base : base_load n ≤ 2) (extra : extra_load n ≤ 1) : load_of n ≤ b := by auto
++ use_named (n b : ℕ) (base : base_load n ≤ 2) (extra : extra_load n ≤ 1) : load_of n ≤ b := by auto [by_allowance]

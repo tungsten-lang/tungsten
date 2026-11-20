@@ -1,0 +1,15 @@
+import quadrature
+
+-- This degree-six polynomial vanishes at all five nodes and has a nonzero integral.
++ nodes_only : quadrature.mean (fun x => x^2*(x^2-1)*(x^2-1/4)) = 0
+  apply quadrature.boole <;> auto
+
++ bad_weights : quadrature.mean (fun x => x^4) = 1/4
+  apply quadrature.boole <;> auto
+
++ false_moment : quadrature.mean (fun x => x^2*(x^2-1)*(x^2-1/4)) = 0 := by auto
++ wrong_orientation : darboux.integral 2 (-1) (fun x => x^2) = 3 := by auto
++ unordered_certificate (a b : ℝ) : darboux.has_integral (fun x => 3*x^2) a b (b^3-a^3) := by auto
++ unknown_integrand (f : ℝ → ℝ) : quadrature.mean (fun x => f x) = f 0 := by auto
++ reciprocal : quadrature.mean (fun x => 1/(x^2+1)) = 1 := by auto
++ missing_term (c : ℕ → ℝ) (n : ℕ) : darboux.has_integral (fun x => ∑ i < n+1, c i*x^i) 0 1 (∑ i < n, c i/((i:ℝ)+1)) := by auto

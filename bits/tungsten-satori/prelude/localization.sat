@@ -1,0 +1,353 @@
+-- Localization by a multiplicative set (Stacks Project, Section 10.9).
+-- A fraction is specified by the cleared equation i(d) y = i(a).
+import spectrum
+import choice
+
+-> ring_ops.unit (R : ring_ops α) (d : α) : Prop := ∃ u, R.mul u d = R.one
+-> multiplicative (R : ring_ops α) (U : set α) : Prop :=
+  U R.one ∧ ∀ x y, U x → U y → U (R.mul x y)
+
++ comm_ring.mul_swap (R : ring_ops α) (h : comm_ring R) (x y z : α) :
+    R.mul x (R.mul y z) = R.mul y (R.mul x z)
+  unfold comm_ring at h; obtain ⟨aa,ac,az,an,ma,mc,rest⟩ := h
+  rw [← ma x y z,mc x y,ma y x z]
+
++ comm_ring.mul_shuffle (R : ring_ops α) (h : comm_ring R) (a b c d : α) :
+    R.mul (R.mul a b) (R.mul c d) = R.mul (R.mul a c) (R.mul b d)
+  unfold comm_ring at h; obtain ⟨aa,ac,az,an,ma,mc,rest⟩ := h
+  rw [ma a b (R.mul c d),← ma b c d,mc b c,ma c b d,← ma a c (R.mul b d)]
+
++ ring_ops.unit.cancel (R : ring_ops α) (d x y : α) (h : comm_ring R) (unit : ring_ops.unit R d)
+    (eq : R.mul d x = R.mul d y) : x = y
+  unfold ring_ops.unit at unit; obtain ⟨u,inv⟩ := unit
+  unfold comm_ring at h; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := h
+  calc
+    x = R.mul (R.mul u d) x := by rw [inv,mo]
+    _ = R.mul u (R.mul d y) := by rw [ma,eq]
+    _ = y := by rw [← ma,inv,mo]
+
+-- Reconstruct a coordinate from its numerator after inverting its denominator.
+@[auto] + ring_ops.solve_unit (R : ring_ops α) (u d x a : α) (h : comm_ring R)
+    (inv : R.mul u d = R.one) (cleared : R.mul d x = a) : x = R.mul u a
+  unfold comm_ring at h; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := h
+  rw [← cleared,← ma,inv,mo]
+
+@[auto] + ring_ops.solve_iff (R : ring_ops α) (u d x a : α) (h : comm_ring R) (inv : R.mul u d = R.one) :
+    R.mul d x = a ↔ x = R.mul u a
+  constructor
+  · exact ring_ops.solve_unit R u d x a h inv
+  · intro eq; unfold comm_ring at h; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := h
+    rw [eq,← ma,mc d u,inv,mo]
+
++ ring_ops.unit.surjective (R : ring_ops α) (d : α) (hr : comm_ring R) (unit : ring_ops.unit R d) (a : α) :
+    ∃ x, R.mul d x = a
+  unfold ring_ops.unit at unit; obtain ⟨u,inv⟩ := unit
+  exact ⟨R.mul u a,(ring_ops.solve_iff R u d (R.mul u a) a hr inv).mpr rfl⟩
+
++ ring_hom.map_unit (R : ring_ops α) (S : ring_ops β) (f : α → β) (x : α) (hom : ring_hom R S f)
+    (unit : ring_ops.unit R x) : ring_ops.unit S (f x)
+  unfold ring_ops.unit at unit ⊢; obtain ⟨u,inv⟩ := unit
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  exact ⟨f u,by rw [← mul,inv,one]⟩
+
+-> localization (R : ring_ops α) (S : ring_ops β) (i : α → β) (U : set α) : Prop :=
+  multiplicative R U ∧ ring_hom R S i ∧ (∀ d ∈ U, ring_ops.unit S (i d)) ∧
+  (∀ y, ∃ a d, U d ∧ S.mul (i d) y = i a) ∧
+  ∀ a b, i a = i b → ∃ d ∈ U, R.mul d a = R.mul d b
+
+@[auto] + localization.eq_iff (R : ring_ops α) (S : ring_ops β) (i : α → β) (U : set α)
+    (hs : comm_ring S) (loc : localization R S i U) (a b : α) :
+    i a = i b ↔ ∃ d ∈ U, R.mul d a = R.mul d b
+  unfold localization at loc; obtain ⟨closed,hom,units,reps,reflects⟩ := loc
+  constructor
+  · exact reflects a b
+  · intro cleared; obtain ⟨d,hd,eq⟩ := cleared; unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+    apply ring_ops.unit.cancel S (i d) (i a) (i b) hs (units d hd)
+    rw [← mul d a,← mul d b,eq]
+
++ localization.zero_iff (R : ring_ops α) (S : ring_ops β) (i : α → β) (U : set α)
+    (hr : comm_ring R) (hs : comm_ring S) (loc : localization R S i U) (a : α) :
+    i a = S.zero ↔ ∃ d ∈ U, R.mul d a = R.zero
+  have eq := localization.eq_iff R S i U hs loc a R.zero
+  unfold localization at loc; obtain ⟨closed,hom,rest⟩ := loc
+  unfold ring_hom at hom; rw [hom.1] at eq
+  simpa [comm_ring.mul_zero R hr] using eq
+
++ localization.hom_ext (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (U : set α)
+    (f g : β → γ) (ht : comm_ring T) (loc : localization R S i U) (hf : ring_hom S T f)
+    (hg : ring_hom S T g) (agree : ∀ a, f (i a) = g (i a)) : f = g
+  unfold localization at loc; obtain ⟨closed,hom,units,reps,reflects⟩ := loc
+  funext y; obtain ⟨a,d,hd,eq⟩ := reps y
+  have unit := ring_hom.map_unit S T f (i d) hf (units d hd)
+  unfold ring_hom at hf hg; obtain ⟨zf,ofn,af,nf,mf⟩ := hf; obtain ⟨zg,og,ag,ng,mg⟩ := hg
+  apply ring_ops.unit.cancel T (f (i d)) (f y) (g y) ht unit
+  calc
+    T.mul (f (i d)) (f y) = f (i a) := by rw [← mf,eq]
+    _ = T.mul (f (i d)) (g y) := by rw [agree d,← mg,eq,agree a]
+
+@[auto] + localization.comap_avoids (R : ring_ops α) (S : ring_ops β) (i : α → β) (U : set α)
+    (loc : localization R S i U) (P : set β) (prime : P ∈ spectrum S) (d : α) (hd : d ∈ U) :
+    ideal.comap i P ∈ spectrum.D R d
+  unfold localization at loc; obtain ⟨closed,hom,units,reps,reflects⟩ := loc
+  unfold spectrum.D; constructor
+  · exact spectrum.comap R S i P hom prime
+  · unfold ideal.comap; intro bad; have unit := units d hd; unfold ring_ops.unit at unit; obtain ⟨u,inv⟩ := unit
+    unfold spectrum at prime
+    have hit := ideal.mul_left S P u (i d) prime.1 bad
+    rw [inv] at hit; exact prime.2.1 hit
+
+-- A fraction belongs to the extended prime exactly when its numerator does.
+-> localization.extend (S : ring_ops β) (i : α → β) (U P : set α) : set β :=
+  fun y => ∃ a d, U d ∧ S.mul (i d) y = i a ∧ P a
+
++ localization.cross (R : ring_ops α) (S : ring_ops β) (i : α → β) (hs : comm_ring S) (hom : ring_hom R S i)
+    (y : β) (a d b e : α) (first : S.mul (i d) y = i a) (second : S.mul (i e) y = i b) :
+    i (R.mul e a) = i (R.mul d b)
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  rw [mul e a,mul d b,← first,← second,comm_ring.mul_swap S hs (i e) (i d) y]
+
++ localization.mem_iff (R : ring_ops α) (S : ring_ops β) (i : α → β) (U P : set α) (hs : comm_ring S)
+    (loc : localization R S i U) (prime : P ∈ spectrum R) (away : ∀ d ∈ U, ¬ P d)
+    (y : β) (a d : α) (hd : d ∈ U) (rep : S.mul (i d) y = i a) :
+    localization.extend S i U P y ↔ P a
+  constructor
+  · intro member; unfold localization.extend at member; obtain ⟨b,e,he,eb,hb⟩ := member
+    unfold localization at loc; obtain ⟨closed,hom,units,reps,reflects⟩ := loc
+    obtain ⟨c,hc,eq⟩ := reflects (R.mul e a) (R.mul d b) (localization.cross R S i hs hom y a d b e rep eb)
+    unfold spectrum at prime
+    have hit := ideal.mul_left R P c (R.mul d b) prime.1 (ideal.mul_left R P d b prime.1 hb)
+    rw [← eq] at hit
+    obtain hcP | hea := prime.2.2 c (R.mul e a) hit
+    · exfalso; exact away c hc hcP
+    · obtain heP | ha := prime.2.2 e a hea
+      · exfalso; exact away e he heP
+      · exact ha
+  · intro ha; unfold localization.extend; exact ⟨a,d,hd,rep,ha⟩
+
++ localization.comap_extend (R : ring_ops α) (S : ring_ops β) (i : α → β) (U P : set α) (hs : comm_ring S)
+    (loc : localization R S i U) (prime : P ∈ spectrum R) (away : ∀ d ∈ U, ¬ P d) :
+    ideal.comap i (localization.extend S i U P) = P
+  have mem := localization.mem_iff R S i U P hs loc prime away
+  unfold localization at loc; obtain ⟨closed,hom,rest⟩ := loc
+  unfold multiplicative at closed; unfold ring_hom at hom
+  unfold comm_ring at hs; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hs
+  funext x; exact mem (i x) x R.one closed.1 (by rw [hom.2.1,mo])
+
++ localization.extend_comap (R : ring_ops α) (S : ring_ops β) (i : α → β) (U : set α) (J : set β)
+    (hs : comm_ring S) (loc : localization R S i U) (idealJ : ideal S J) :
+    localization.extend S i U (ideal.comap i J) = J
+  unfold localization at loc; obtain ⟨closed,hom,units,reps,reflects⟩ := loc
+  funext y; unfold localization.extend ideal.comap; constructor
+  · intro member; obtain ⟨a,d,hd,rep,ha⟩ := member
+    have unit := units d hd; unfold ring_ops.unit at unit; obtain ⟨u,inv⟩ := unit
+    rw [ring_ops.solve_unit S u (i d) y (i a) hs inv rep]; exact ideal.mul_left S J u (i a) idealJ ha
+  · intro hy; obtain ⟨a,d,hd,rep⟩ := reps y
+    exact ⟨a,d,hd,rep,by rw [← rep]; exact ideal.mul_left S J (i d) y idealJ hy⟩
+
+-- Clear both denominators once for a sum or product.
++ localization.sum_rep (R : ring_ops α) (S : ring_ops β) (i : α → β) (hs : comm_ring S) (hom : ring_hom R S i)
+    (y z : β) (a d b e : α) (hy : S.mul (i d) y = i a) (hz : S.mul (i e) z = i b) :
+    S.mul (i (R.mul d e)) (S.add y z) = i (R.add (R.mul e a) (R.mul d b))
+  have swap := comm_ring.mul_swap S hs
+  unfold comm_ring at hs; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hs
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  rw [mul d e,dist,ma (i d) (i e) y,swap (i d) (i e) y,hy,ma (i d) (i e) z,hz,add,mul e a,mul d b]
+
++ localization.product_rep (R : ring_ops α) (S : ring_ops β) (i : α → β) (hs : comm_ring S) (hom : ring_hom R S i)
+    (y z : β) (a d b e : α) (hy : S.mul (i d) y = i a) (hz : S.mul (i e) z = i b) :
+    S.mul (i (R.mul d e)) (S.mul y z) = i (R.mul a b)
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  rw [mul d e,comm_ring.mul_shuffle S hs (i d) (i e) y z,hy,hz,mul a b]
+
++ comm_ring.mul_neg (S : ring_ops β) (hs : comm_ring S) (d y : β) : S.mul d (S.neg y) = S.neg (S.mul d y)
+  have mz := comm_ring.mul_zero S hs
+  unfold comm_ring at hs; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hs
+  have zero : S.add (S.mul d (S.neg y)) (S.mul d y) = S.zero := by rw [← dist,an,mz]
+  calc
+    S.mul d (S.neg y) = S.add (S.mul d (S.neg y)) S.zero := by rw [ac,az]
+    _ = S.add (S.mul d (S.neg y)) (S.add (S.mul d y) (S.neg (S.mul d y))) := by rw [ac (S.mul d y) (S.neg (S.mul d y)),an]
+    _ = S.neg (S.mul d y) := by rw [← aa,zero,az]
+
++ localization.extend_prime (R : ring_ops α) (S : ring_ops β) (i : α → β) (U P : set α) (hs : comm_ring S)
+    (loc : localization R S i U) (prime : P ∈ spectrum R) (away : ∀ d ∈ U, ¬ P d) :
+    localization.extend S i U P ∈ spectrum S
+  have mem := localization.mem_iff R S i U P hs loc prime away
+  have same := localization.comap_extend R S i U P hs loc prime away
+  unfold localization at loc; obtain ⟨closed,hom,units,reps,reflects⟩ := loc
+  unfold multiplicative at closed; unfold spectrum at prime ⊢
+  have sum := localization.sum_rep R S i hs hom
+  have prod := localization.product_rep R S i hs hom
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  constructor
+  · unfold ideal; constructor
+    · rw [← zero]; have hit := ideal.zero R P prime.1; rw [← same] at hit; exact hit
+    · constructor
+      · intro y z hy hz
+        obtain ⟨a,d,hd,dy⟩ := reps y; obtain ⟨b,e,he,ez⟩ := reps z
+        have membership := mem (S.add y z) (R.add (R.mul e a) (R.mul d b)) (R.mul d e) (closed.2 d e hd he) (sum y z a d b e dy ez)
+        exact membership.mpr (ideal.add R P (R.mul e a) (R.mul d b) prime.1 (ideal.mul_left R P e a prime.1 ((mem y a d hd dy).mp hy)) (ideal.mul_left R P d b prime.1 ((mem z b e he ez).mp hz)))
+      · constructor
+        · intro y hy; obtain ⟨a,d,hd,dy⟩ := reps y
+          have membership := mem (S.neg y) (R.neg a) d hd (by rw [comm_ring.mul_neg S hs,dy,neg])
+          exact membership.mpr (ideal.neg R P a prime.1 ((mem y a d hd dy).mp hy))
+        · intro y z hz; obtain ⟨a,d,hd,dy⟩ := reps y; obtain ⟨b,e,he,ez⟩ := reps z
+          have membership := mem (S.mul y z) (R.mul a b) (R.mul d e) (closed.2 d e hd he) (prod y z a d b e dy ez)
+          exact membership.mpr (ideal.mul_left R P a b prime.1 ((mem z b e he ez).mp hz))
+  · constructor
+    · rw [← one]; intro hit; apply prime.2.1; rw [← same]; exact hit
+    · intro y z hit; obtain ⟨a,d,hd,dy⟩ := reps y; obtain ⟨b,e,he,ez⟩ := reps z
+      have ab := (mem (S.mul y z) (R.mul a b) (R.mul d e) (closed.2 d e hd he) (prod y z a d b e dy ez)).mp hit
+      obtain ha | hb := prime.2.2 a b ab
+      · left; exact (mem y a d hd dy).mpr ha
+      · right; exact (mem z b e he ez).mpr hb
+
++ localization.spectrum (R : ring_ops α) (S : ring_ops β) (i : α → β) (U P : set α)
+    (hs : comm_ring S) (loc : localization R S i U) :
+    (P ∈ spectrum R ∧ ∀ d ∈ U, ¬ P d) ↔ ∃ J ∈ spectrum S, ideal.comap i J = P
+  constructor
+  · intro h
+    exact ⟨localization.extend S i U P,localization.extend_prime R S i U P hs loc h.1 h.2,localization.comap_extend R S i U P hs loc h.1 h.2⟩
+  · intro h; obtain ⟨J,hj,eq⟩ := h; rw [← eq]
+    have avoids := localization.comap_avoids R S i U loc J hj
+    unfold localization at loc; obtain ⟨closed,hom,rest⟩ := loc
+    exact ⟨spectrum.comap R S i J hom hj,by intro d hd; have op := avoids d hd; unfold spectrum.D at op; exact op.2⟩
+
+-> ring_ops.powers (R : ring_ops α) (f : α) : set α := fun d => ∃ n, ring_ops.power R f n = d
+
++ ring_ops.power_add (R : ring_ops α) (hr : comm_ring R) (f : α) (n m : ℕ) :
+    ring_ops.power R f (n+m) = R.mul (ring_ops.power R f n) (ring_ops.power R f m)
+  unfold comm_ring at hr; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hr
+  induction n with k ih
+  · simp [ring_ops.power,mo]
+  · have step : (k+1)+m = (k+m)+1 := by omega
+    rw [succ_eq_add_one.nat,step]; simp only [ring_ops.power,ih,ma]
+
++ multiplicative.powers (R : ring_ops α) (hr : comm_ring R) (f : α) : multiplicative R (ring_ops.powers R f)
+  unfold multiplicative ring_ops.powers; constructor
+  · exact ⟨0,rfl⟩
+  · intro x y hx hy; obtain ⟨n,ex⟩ := hx; obtain ⟨m,ey⟩ := hy
+    exact ⟨n+m,by rw [ring_ops.power_add R hr,ex,ey]⟩
+
++ ring_ops.powers_self (R : ring_ops α) (hr : comm_ring R) (f : α) : f ∈ ring_ops.powers R f
+  unfold comm_ring at hr; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hr
+  unfold ring_ops.powers; use 1
+  calc
+    ring_ops.power R f 1 = R.mul f R.one := by rfl
+    _ = f := by rw [mc,mo]
+
+-- Spec R[1/f] is the basic open D(f). The inverse sends P to extend P.
+@[auto] + localization.away_spectrum (R : ring_ops α) (S : ring_ops β) (i : α → β) (f : α) (P : set α)
+    (hr : comm_ring R) (hs : comm_ring S) (loc : localization R S i (ring_ops.powers R f)) :
+    P ∈ spectrum.D R f ↔ ∃ J ∈ spectrum S, ideal.comap i J = P
+  have corr := localization.spectrum R S i (ring_ops.powers R f) P hs loc
+  unfold spectrum.D; constructor
+  · intro h; apply corr.mp; constructor
+    · exact h.1
+    · intro d hd bad; unfold ring_ops.powers at hd; obtain ⟨n,eq⟩ := hd; rw [← eq] at bad
+      exact h.2 (spectrum.of_power_mem R P f h.1 n bad)
+  · intro h; obtain ⟨prime,away⟩ := corr.mpr h; exact ⟨prime,away f (ring_ops.powers_self R hr f)⟩
+
++ localization.away_zero_iff (R : ring_ops α) (S : ring_ops β) (i : α → β) (f a : α)
+    (hr : comm_ring R) (hs : comm_ring S) (loc : localization R S i (ring_ops.powers R f)) :
+    i a = S.zero ↔ ∃ n, R.mul (ring_ops.power R f n) a = R.zero
+  have vanish := localization.zero_iff R S i (ring_ops.powers R f) hr hs loc a
+  constructor
+  · intro zero; obtain ⟨d,hd,ann⟩ := vanish.mp zero; unfold ring_ops.powers at hd
+    obtain ⟨n,eq⟩ := hd; exact ⟨n,by rw [eq]; exact ann⟩
+  · intro h; obtain ⟨n,ann⟩ := h
+    exact vanish.mpr ⟨ring_ops.power R f n,by unfold ring_ops.powers; exact ⟨n,rfl⟩,ann⟩
+
+-- Transport a cleared equation through any map that supplies an inverse.
++ ring_hom.solve_unit (R : ring_ops α) (S : ring_ops β) (i : α → β) (hs : comm_ring S)
+    (hom : ring_hom R S i) (d x a : α) (u : β) (inv : S.mul u (i d) = S.one)
+    (cleared : R.mul d x = a) : i x = S.mul u (i a)
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  exact ring_ops.solve_unit S u (i d) (i x) (i a) hs inv (by rw [← mul,cleared])
+
+-- A map out of R that inverts U has a unique extension to its localization.
++ localization.descends (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (f : α → γ)
+    (U : set α) (ht : comm_ring T) (loc : localization R S i U) (hom : ring_hom R T f)
+    (units : ∀ d ∈ U, ring_ops.unit T (f d)) (a b : α) (eq : i a = i b) : f a = f b
+  unfold localization at loc; obtain ⟨closed,base,invert,reps,reflects⟩ := loc
+  obtain ⟨c,hc,ann⟩ := reflects a b eq; unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  exact ring_ops.unit.cancel T (f c) (f a) (f b) ht (units c hc) (by rw [← mul c a,← mul c b,ann])
+
+-> localization.value (S : ring_ops β) (T : ring_ops γ) (i : α → β) (f : α → γ) (U : set α) (y : β) (v : γ) : Prop :=
+  ∀ a d, U d → S.mul (i d) y = i a → T.mul (f d) v = f a
+
++ localization.value_exists (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (f : α → γ)
+    (U : set α) (hs : comm_ring S) (ht : comm_ring T) (loc : localization R S i U) (hom : ring_hom R T f)
+    (units : ∀ d ∈ U, ring_ops.unit T (f d)) (y : β) : ∃ v, localization.value S T i f U y v
+  have desc := localization.descends R S T i f U ht loc hom units
+  unfold localization at loc; obtain ⟨closed,base,invert,reps,reflects⟩ := loc
+  obtain ⟨a,d,hd,dy⟩ := reps y; have unit := units d hd; unfold ring_ops.unit at unit; obtain ⟨u,inv⟩ := unit
+  use T.mul u (f a); unfold localization.value; intro b e he ey
+  have crossed := desc (R.mul e a) (R.mul d b) (localization.cross R S i hs base y a d b e dy ey)
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  rw [mul e a,mul d b] at crossed
+  have solve := ring_ops.solve_unit T u (f d) (f b) (T.mul (f e) (f a)) ht inv crossed.symm
+  rw [comm_ring.mul_swap T ht (f e) u (f a)]; exact solve.symm
+
++ localization.lift_exists (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (f : α → γ)
+    (U : set α) (hs : comm_ring S) (ht : comm_ring T) (loc : localization R S i U) (hom : ring_hom R T f)
+    (units : ∀ d ∈ U, ring_ops.unit T (f d)) : ∃ g, ring_hom S T g ∧ ∀ x, g (i x) = f x
+  obtain ⟨g,values⟩ := choice.function (localization.value S T i f U) (localization.value_exists R S T i f U hs ht loc hom units)
+  unfold localization.value at values
+  unfold localization at loc; obtain ⟨closed,base,invert,reps,reflects⟩ := loc; unfold multiplicative at closed
+  have sumS := localization.sum_rep R S i hs base; have sumT := localization.sum_rep R T f ht hom
+  have prodS := localization.product_rep R S i hs base; have prodT := localization.product_rep R T f ht hom
+  unfold ring_hom at base hom
+  have oneS : ∀ z, S.mul S.one z = z := by unfold comm_ring at hs; exact hs.2.2.2.2.2.2.1
+  have oneT : ∀ z, T.mul T.one z = z := by unfold comm_ring at ht; exact ht.2.2.2.2.2.2.1
+  have over : ∀ x, g (i x) = f x
+    intro x; have eval := values (i x) x R.one closed.1 (by rw [base.2.1,oneS])
+    rw [hom.2.1,oneT] at eval; exact eval
+  use g; constructor
+  · apply ring_hom.of_ops S T g hs ht
+    · rw [← base.1,over,hom.1]
+    · rw [← base.2.1,over,hom.2.1]
+    · intro y z; obtain ⟨a,d,hd,dy⟩ := reps y; obtain ⟨b,e,he,ez⟩ := reps z
+      have de := closed.2 d e hd he
+      have left := values (S.add y z) (R.add (R.mul e a) (R.mul d b)) (R.mul d e) de (sumS y z a d b e dy ez)
+      have right := sumT (g y) (g z) a d b e (values y a d hd dy) (values z b e he ez)
+      exact ring_ops.unit.cancel T (f (R.mul d e)) (g (S.add y z)) (T.add (g y) (g z)) ht (units (R.mul d e) de) (by rw [left,right])
+    · intro y z; obtain ⟨a,d,hd,dy⟩ := reps y; obtain ⟨b,e,he,ez⟩ := reps z
+      have de := closed.2 d e hd he
+      have left := values (S.mul y z) (R.mul a b) (R.mul d e) de (prodS y z a d b e dy ez)
+      have right := prodT (g y) (g z) a d b e (values y a d hd dy) (values z b e he ez)
+      exact ring_ops.unit.cancel T (f (R.mul d e)) (g (S.mul y z)) (T.mul (g y) (g z)) ht (units (R.mul d e) de) (by rw [left,right])
+  · exact over
+
+@[auto] + localization.lift_iff (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (f : α → γ)
+    (U : set α) (hs : comm_ring S) (ht : comm_ring T) (loc : localization R S i U) (hom : ring_hom R T f) :
+    (∃ g, ring_hom S T g ∧ ∀ x, g (i x) = f x) ↔ ∀ d ∈ U, ring_ops.unit T (f d)
+  constructor
+  · intro h; obtain ⟨g,hg,over⟩ := h; intro d hd; rw [← over d]
+    unfold localization at loc; obtain ⟨closed,base,units,rest⟩ := loc
+    exact ring_hom.map_unit S T g (i d) hg (units d hd)
+  · exact localization.lift_exists R S T i f U hs ht loc hom
+
++ ring_ops.unit.mul (R : ring_ops α) (hr : comm_ring R) (x y : α) (hx : ring_ops.unit R x) (hy : ring_ops.unit R y) :
+    ring_ops.unit R (R.mul x y)
+  unfold ring_ops.unit at hx hy ⊢; obtain ⟨u,ux⟩ := hx; obtain ⟨v,vy⟩ := hy
+  use R.mul u v; rw [comm_ring.mul_shuffle R hr u v x y,ux,vy]
+  unfold comm_ring at hr; exact hr.2.2.2.2.2.2.1 R.one
+
++ ring_hom.inverts_powers (R : ring_ops α) (T : ring_ops γ) (f : α → γ) (d : α) (ht : comm_ring T)
+    (hom : ring_hom R T f) (unit : ring_ops.unit T (f d)) : ∀ s ∈ ring_ops.powers R d, ring_ops.unit T (f s)
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  have all : ∀ n, ring_ops.unit T (f (ring_ops.power R d n))
+    intro n; induction n with k ih
+    · simp only [ring_ops.power,one]; unfold ring_ops.unit; use T.one
+      unfold comm_ring at ht; exact ht.2.2.2.2.2.2.1 T.one
+    · simp only [succ_eq_add_one.nat,ring_ops.power,mul]
+      exact ring_ops.unit.mul T ht (f d) (f (ring_ops.power R d k)) unit ih
+  intro s hs; unfold ring_ops.powers at hs; obtain ⟨n,eq⟩ := hs; rw [← eq]; exact all n
+
+@[auto] + localization.away_lift (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (f : α → γ)
+    (d : α) (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T) (loc : localization R S i (ring_ops.powers R d)) (hom : ring_hom R T f) :
+    (∃ g, ring_hom S T g ∧ ∀ x, g (i x) = f x) ↔ ring_ops.unit T (f d)
+  have corr := localization.lift_iff R S T i f (ring_ops.powers R d) hs ht loc hom
+  constructor
+  · intro extension; have units := corr.mp extension; exact units d (ring_ops.powers_self R hr d)
+  · intro unit; exact corr.mpr (ring_hom.inverts_powers R T f d ht hom unit)

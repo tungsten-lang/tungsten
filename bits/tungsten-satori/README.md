@@ -41,7 +41,12 @@ shows what it proved and which premise would finish that application. With
 reports `proved a ≤ b` and `need 0 ≤ c`. With `a ≠ b` and the goal `a < b`, `auto`
 finds the registered order rule and reports `need a ≤ b`. For `a/c ≤ b`,
 if the hypotheses imply `a ≤ b*c`, a loaded division rule can report
-`proved a ≤ b * c` and `need 0 < c`.
+`proved a ≤ b * c` and `need 0 < c`. When a rule needs a strict bound,
+the diagnostic can show a known weak bound and the disequality that closes
+the gap, even if the bounds use different linear expressions.
+If a rule requires two boundary conditions throughout an interval and the
+left endpoint is covered, `auto` reports just the right endpoint condition
+over that interval. [Heat-flow example](spec/heat_source_failure.sat)
 
 For `a*c < b*c`, if `a < b` and `0 ≤ c`, the remaining condition is
 `c ≠ 0`. If `c = 0` is known, the diagnostic reads `proved a * c = b * c`.
@@ -77,6 +82,28 @@ bin/tungsten bits/tungsten-satori/bin/satori.w -- file.sat
 bits/tungsten-satori/bin/satori file.sat            # prebuilt release binary
 bits/tungsten-satori/bin/satori check -j 4 file.sat # split mode
 ```
+
+Search the library before choosing an import. For example, this finds the
+rational finite-sum interchange theorem in `arith`:
+
+```sh
+satori find '(f : ℕ → ℕ → ℚ) : (∑ i < n, ∑ j < m, f i j) = (∑ j < m, ∑ i < n, f i j)'
+```
+
+Each result gives the import and the declaration with its hypotheses. Search
+matches renamed binders, literal arguments and expressions under binders.
+For example, it recognizes the same interchange when the summand is
+`w i * A i j * v j`. Bare `auto` tries the indexed sum identity before
+expanding a large symbolic sum at literal bounds. Use `_` for any subexpression. Optional binders before `:` narrow the type or require
+a hypothesis, as in `(x : ℝ) (h : 0 ≤ x) : sqrt (x ^ 2) = x`. The first
+12 matches are shown by default. Use `find --all` for the full list. Lookup reads
+module source, including modules the proof has yet to import. Use `check` to verify a proof and `#axioms` to inspect its
+dependencies.
+
+`check -j 1` gives each theorem a fresh process and lets `auto` reuse eligible
+earlier proofs as soon as their dependencies have checked. For branching
+recursions, `decide` shares repeated applications of the same recursive
+function within one evaluation.
 
 Basic finite-sum rules are included by `arith` and `realx`.
 [Compact sum examples](examples/compact_sums.sat) show how library rules replace
@@ -122,6 +149,11 @@ deduction, LCF-style: only `lib/kernel.w` can create a theorem. The trusted base
 | checkers | `checkers.w` | LRAT (tag `oracle:sat`), ring normal form (`oracle:ring`), Farkas certificates (`oracle:arith`) |
 | foundational axioms | `prelude/core.sat` (generated) | ordered-semiring/ring/field facts for ℕ ℤ ℚ ℝ; consistent with the evaluator's literal semantics |
 
+During literal evaluation the kernel can reuse up to 8,192 computed values
+of named functions `ℕ → ℕ`. Each entry records the function, its exact
+input and its reduced output. The table belongs to the kernel that checked
+those definitions.
+
 Every theorem carries a tag list. Using a non-prelude `axiom` adds `axiom:name`,
 using `sorry` adds `sorry`, and each checker adds its oracle tag. `#axioms name`
 prints them. A file that states imported deep results as axioms is therefore honest
@@ -160,6 +192,11 @@ inserts the coercions ℕ→ℤ→ℚ→ℝ; `∑ i < n, f i`, `∑ x ∈ l, f x
 `α → β`, `α × β`, `list α`, `set α`, with Greek letters as type variables. Numerals
 default to ℕ (decimals to ℚ).
 
+A named predicate keeps its ordinary proof constructors and projections.
+For `h : x ∈ Icc a b`, `h.1` proves `a ≤ x` and `h.2` proves `x ≤ b`.
+Given the bounds, `⟨lo,hi⟩` proves membership. The same syntax works through
+user-defined conjunctions, and `⟨w,hw⟩` supplies a witness for a named existential.
+
 ## Tactics
 
 `intro x h` · `intros` · `exact e` · `apply thm args` · `assumption` · `rfl` ·
@@ -171,6 +208,11 @@ default to ℕ (decimals to ℚ).
 `nlinarith [extra]` · `linear_combination 2 * h₁ - x * h₂` · `positivity` · `omega` · `t1 <;> t2` · `all_goals t` ·
 `sat` · `auto` · `specialize h a` · `symm` · `calc` · `funext x` · `subst h` ·
 `revert h` · `sorry` · `·` focuses a goal.
+
+For an equality of structures or pairs, `ext` gives one equality per field
+in declaration order. Use `ext <;> ring` for coordinate identities or bare
+`auto` when the field equalities are already known. For functions, `ext x`
+introduces a point and asks for equality there.
 
 An ordinary tactic can own an indented proof of the subgoals it opens:
 
@@ -191,6 +233,14 @@ Nested blocks stay within their parent's goal; they cannot consume a sibling
 outside that block. Bullets remain available for explicit focus. `have h : P`
 and `calc` retain their existing proof blocks.
 
+* `interval_cases i` reads the bounds on a natural or integer variable and
+  substitutes each possible value, in increasing order, throughout the goal
+  and its hypotheses. For instance, `interval_cases i <;> decide` checks a
+  numerical assertion at every point. Strict bounds exclude their endpoints.
+  The explicit tactic handles up to 64 values. Bare `auto` also tries one
+  interval of up to eight values with endpoints between −256 and 256.
+  If a branch remains open, its diagnostic identifies the value, e.g. `open case i = 2`.
+  [Examples](spec/interval_cases.sat)
 * `induction x` introduces `x` from the statement's leading quantifiers when
   it is not already local, along with any preceding parameters and guards.
   Case names are optional when automation can finish the branches; the
@@ -203,6 +253,11 @@ and `calc` retain their existing proof blocks.
   get default names.
 * `decide` evaluates a closed proposition in the kernel. Bounded quantifiers over
   literal ranges, literal lists, `Prop` and enumeration types expand finitely.
+  A single `∀ i < n, P i := by decide` checks the whole range. During the
+  check, repeated numeric calls and recursive subproblems can reuse values
+  already computed by the kernel.
+* From `∀ i ∈ S, P i ∧ Q i`, `auto` can supply `∀ i ∈ S, Q i` as a lemma
+  premise. The projection preserves nested binders and their guards. [Examples](spec/pointwise_conjunct.sat)
 * `auto` derives consequences of local hypotheses, including conjunction projections,
   implication chains and contradictions, with bounded forward reasoning. It specializes
   universal facts at in-scope variables and terms already present in the goal or hypotheses.
@@ -213,12 +268,34 @@ and `calc` retain their existing proof blocks.
   its guards hold. The search works backwards through implications to construct their premises,
   introducing variables and assumptions where needed. A bounded classical case search
   handles patterns such as excluded middle and double negation.
+  Given `P (a+b) (a*b)`, it also proves `P (b+a) (b*a)` by checking a
+  polynomial identity for each changed argument.
   On ℕ and ℤ, `auto` reduces a known remainder to any positive literal divisor
   of its positive literal modulus. For example, `n % 4 = 1 ∨ n % 4 = 3`
   proves `odd n` in one `auto`: both branches give remainder 1 modulo 2.
   Sums and products use the modulus in the goal. From `n % 5 = 2`, bare
   `auto` proves `(2*n + 1) % 5 = 0`. A factor with remainder zero also
   determines the remainder of a product with an unknown factor.
+  Two remainders of the same expression must agree modulo the gcd of their
+  moduli. For example, `n % 4 = 1` and `n % 6 = 2` give opposite parities,
+  so `auto` closes that branch.
+  Small sums and products can also determine a residue without assumptions.
+  For example, `2*(6*q+1)` expands to `12*q+2`, so its remainder modulo
+  9 must be 2 modulo 3. Bare `auto` proves `2*(6*q+1) % 9 ≠ 0`.
+  A positive power preserves a residue `r` when `r*r % m = r`.
+  For example, `x % 10 = 6` gives `x^(j+1) % 10 = 6`. When the
+  exponent can be zero, `auto` also checks `1 % m = r`.
+  For `∃ q, n = m*q + r`, `auto` can prove `n % m = r` and use
+  `n / m` as the witness. The same rule handles `∃ q, n = q*m` when
+  the remainder is zero.
+  For parity, `auto` also proves `∃ q, n = 2*q ∨ n = 2*q+1` over ℕ
+  and ℤ. Use `obtain ⟨q, h | h⟩ := parity_quotient.nat n` to name the
+  quotient and split the proof. For another positive modulus, `quotient_cases`
+  reduces a property of `n` to that property of `m*q+r` for every
+  quotient and every remainder in range.
+  From `0 ≤ a < m`, bare `auto` proves `a / m = 0` and `a % m = a`.
+  Over ℕ it also proves `m ≤ a` from `m ∣ a` and `0 < a`. To use that
+  bound in a contradiction such as `2 < p` and `p ∣ 2`, write `auto [le_of_dvd.nat]`.
   Common loaded arithmetic and analysis rules also work with plain `by auto`,
   including square bounds, exponential/logarithmic Jensen, square-root
   comparisons, geometric-mean bounds, Cauchy–Schwarz, Euclidean triangle
@@ -329,6 +406,13 @@ and `calc` retain their existing proof blocks.
   of 24 rule attempts and detects cycles. Failed candidates contribute neither
   assumptions nor trust tags. `aesop` and `tauto` support the same behavior.
 
+  If a local hypothesis proves `P x` for all `x` in an interval, bare `auto`
+  can restrict it to a smaller interval by proving both endpoint bounds.
+  The same search works when a definition hides the quantifier. For example,
+  a result for all admissible Sobolev profiles of order `s` applies at order
+  `t` when `s ≤ t`. The registered inclusion theorem supplies the energy
+  bound. [Examples](spec/predicate_transfer.sat)
+
   Bare `auto` also tries up to eight previously proved lemmas that share a
   distinctive constant with the goal. Rare constants rank higher, and symbols
   from local hypotheses help choose between candidates. Satori instantiates
@@ -336,6 +420,13 @@ and `calc` retain their existing proof blocks.
   `+ parity (n : ℤ) : even n ∨ odd n := by auto` finds the library's parity
   theorem. The [premise selection example](examples/premise_selection.sat)
   also uses an ordinary user lemma proved by induction.
+  When the goal leaves theorem arguments open, `apply` and `auto` can infer
+  them from matching local hypotheses, including separate relational premises that
+  each determine a different witness. For example, a pointwise inequality
+  can supply both sequences in a limit comparison. `auto [fact]` also uses
+  the supplied fact to infer an argument that appears only in a premise,
+  such as the bound in an eventual inequality. If matches give different
+  arguments, supply the intended ones explicitly.
 
   Library authors can write `@[auto] + lemma ...` to register a proved rule.
   Subsequent proofs use ordinary `auto`, including after an import. Selection
@@ -372,6 +463,9 @@ and `calc` retain their existing proof blocks.
   applications. Induction steps do not need a `show` line just to restate the
   generated successor goal. See [the compact induction example](examples/compact_induction.sat),
   which uses indentation and `auto` without helper lemmas or imports.
+* `linarith`, `arith`, `nlinarith`, `omega` and `positivity` also prove conjunctions.
+  For example, from `a ≤ x` and `x ≤ b`, `by linarith` closes `2*a ≤ 2*x ∧ 2*x ≤ 2*b`.
+  Each conjunct uses the same hypotheses. A failure identifies the first unproved conjunct.
 * `linarith` runs Fourier–Motzkin and hands the kernel a Farkas certificate. When elimination gets large (more than 12
   rounds or 600 constraints), an exact two-phase simplex over the Farkas multipliers takes over, which is complete for linear
   arithmetic. For ℕ and ℤ it uses nonnegativity (of variables and of products of non-literal factors) and
@@ -406,6 +500,9 @@ and `calc` retain their existing proof blocks.
   inferred after simplification. Omit `using e` when simplification and a local assumption suffice. `simpa` must
   close the goal; use `simp … at h` to simplify a hypothesis. Function equalities rewrite both bare functions and
   call heads, so `simpa [f_eq] using h` also handles occurrences such as `f x` under quantifiers.
+* `set q : ℚ := 1/3 with hq` names a value in the current branch and replaces
+  matching occurrences in its hypotheses and goal. The type is optional.
+  The equation defaults to `q_def`. Use `rw [hq]` where the value is needed.
 * `have h : P := by t1; t2` runs both tactics on the subgoal. A block indented under `have h : P` (also on a `·` line) is
   its proof. `rw [thm a b]` uses the given arguments (the rule's free variables are fixed, not patterns); `rw … at h1 h2`
   and `unfold f at h1 h2` act on every listed hypothesis. `rw` can replace free subterms inside lambdas and quantifiers,
@@ -451,9 +548,22 @@ and `calc` retain their existing proof blocks.
   Known guards can also determine arguments of supplied conditional lemmas.
   See [compact_square_cancellation.sat](examples/compact_square_cancellation.sat).
 * `ring` proves commutative-ring identities over ℕ ℤ ℚ ℝ, including through
-  small local definitions and constructor projections. Ordinary polynomial
-  identities need no preceding `unfold`; opaque functions remain opaque.
+  small local definitions and constructor projections. It also checks identities
+  pointwise under function binders and in the arguments of opaque functions.
+  For example, `auto` proves `F (fun x => g (x+x)) = F (fun x => g (2*x))`.
+  A single `ring` checks every equality in a conjunction
+  and identifies the first one it cannot prove.
   See [compact_ring_definitions.sat](examples/compact_ring_definitions.sat).
+* For small polynomial equalities, `auto` can infer a combination of the equations in scope.
+  For example, `s*s = 3` suffices for `(r*s/2)^2 = 3*r^2/4` over ℝ. The same check
+  accepts named equations in `auto [h]`. When polynomial division stalls, `auto` tries
+  bounded Gaussian elimination on monomial multiples of the equations. For example,
+  `a+b=c+d` and `a^2+b^2=c^2+d^2` give `a*b=c*d`. An explicit `linear_combination`
+  can supply coefficients beyond the search bound.
+* With `import arith`, `auto` can prove two possible roots directly. From
+  `x^2+a*b=(a+b)*x` it derives `x=a ∨ x=b`. Each alternative can have
+  further conjuncts, which must follow in its own branch. The zero-product
+  argument also works over ℕ using an identity without subtraction.
 * `linear_combination` closes a numeric equality with an explicit polynomial combination of equality proofs.
   Write `linear_combination 2 * h₂ - 6 * (r - 1) * h₁`; coefficients can be terms, on either side of `*`,
   and proofs can be applications or projections. `+` combines equalities and `-` reverses them;
@@ -470,6 +580,8 @@ Pattern definitions accept constructor patterns in several argument positions
 (`| x :: xs, 0 => …`), nested patterns (`x :: y :: ys`, `(a, b) :: rest`, `n + 2`,
 literal numbers and list literals) and uppercase pattern variables; the first
 matching equation wins. Recursive calls must be on a direct constructor argument.
+With an explicitly named definition, `simp only [f]` and `unfold f` can
+expand small natural-number pattern arguments even when other arguments are symbolic.
 Generated equations retain the declared type parameters and simplify at every
 instance, including sums and products over ℤ, ℚ and ℝ.
 
@@ -516,6 +628,10 @@ from membership `hx` and `hp : all p xs`; `list.all_of_mem` builds `all` from
 memberwise facts. `rw [list.all_iff]` converts `all p xs` to `∀ x ∈ xs, p x`.
 `list.all_imp`, `list.all_map` and `list.all_append` transform, map and combine
 these predicates without another list induction.
+
+Bare `auto` proves `all P [a,b,c]` from proofs of `P a`, `P b` and `P c`.
+It can reuse a proved tail and retrieve closed item theorems by their exact
+statements. If one item is missing, the diagnostic names its proposition.
 
 Optional:
 * `import geometric`: finite geometric sums over ℤ, ℚ and ℝ, with no
@@ -634,6 +750,52 @@ Optional:
   with the index; premises are needed only before the requested endpoint.
   Signed multipliers must be nonnegative, while values and offsets may be
   negative. Zero multipliers and empty prefixes are supported.
+* `import spectrum` gives prime ideals, basic opens `spectrum.D`, closed sets
+  `spectrum.V`, and the prime correspondence for a surjective ring map.
+  Bare `auto` proves `D(fg) = D(f) ∩ D(g)`. Use `import spectrum_int` for
+  integer examples such as the cover by D(2) and D(3). [Examples](spec/spectrum.sat)
+* `import localization` characterizes a localization by invertible denominators,
+  fraction representatives, and equality after clearing a denominator. For
+  `R[1/d]`, `localization.away_spectrum` identifies its primes with `D(d)`.
+  `localization.away_lift` extends a ring map exactly when it sends `d` to a
+  unit, and `localization.hom_ext` proves uniqueness. [Examples](spec/localization.sat)
+* `import affine_gluing` glues sections on two principal opens. Given a
+  `localization.two_open_cover i j r s` and agreement `r u = s v` on their
+  intersection, `by auto` proves `∃! x, i x = u ∧ j x = v`. The cover comes
+  from comaximal elements `f, g` and localizations at `f`, `g`, and `f*g`.
+  A power of `f*g` clears the overlap equation, including in rings with zero
+  divisors. [Product-ring example](spec/affine_gluing.sat)
+  · [A stable-coordinate chart over a commutative ring](examples/localized_chart.sat)
+* `import finite_cover` glues fractions on any finite list of principal opens.
+  Supply a partition of unity, denominators that are powers of their generators,
+  and pairwise equality after restriction to each overlap. Then `by auto` proves
+  that there is a unique global section. With packaged chart maps and restrictions,
+  the proof needs only the cover and pairwise agreement. [Finite-cover examples](spec/finite_cover.sat)
+* `import dual_number` gives dual numbers over a commutative ring. A map
+  extending a given scalar map is determined by the image of ε, which can
+  be any square-zero element. [Examples](spec/dual_number.sat)
+* `import derivation` proves the power rule for a derivation along a ring map
+  and constructs the ring map `x ↦ f x + ε D x`. [Dual-number examples](spec/derivation.sat)
+* `import localized_derivation` lets `auto` extend a derivation uniquely from
+  a commutative ring to its localization. At a point, differentiate a fraction
+  using `d*y = a` and the inverse of the value of `d`. [Fraction examples](spec/localized_derivation.sat)
+* `import derivation_real` computes monomial derivatives at a real-valued
+  point. Given the coordinate-ring identity `t^(m+1) g = 1`, `auto` can
+  differentiate the density and compute a weighted divergence. [Coordinate calculation](examples/coordinate_bracket.sat)
+* `import scale` supplies rational and real division lemmas. Given `0 < e`,
+  bare `auto` proves `∃ x, a ≤ x ∧ b ≤ e*x` for arbitrary thresholds.
+* `import power_bound` checks a list of small powers and rounded-down rational
+  bounds. At each step the proof checks the rounding and nonnegative base.
+  [The 2,080th-power example](examples/rounded_power.sat)
+* `import power_tangent` gives Bernoulli's inequality and finite AM–GM over ℚ and ℝ.
+  Given nonnegative terms with `(n:ℝ)*z = (∑ i < n, f i)`, bare `auto` proves
+  `(∏ i < n, f i) ≤ z^n`, including the empty product. Two values may also
+  have arbitrary natural multiplicities. [Examples](spec/power_tangent.sat)
+* `import principal` gives integer congruence modulo any generator `m`.
+  `principal.congruent m a b` means `a - b = m * k` for some integer `k`.
+  Given congruent inputs, `auto` carries the relation through sums, differences,
+  products, negation and natural powers. At `m = 0` it means equality.
+  [Examples](spec/principal.sat)
 * `import linear2`: elimination and uniqueness for two linear equations over
   ℤ, ℚ and ℝ. `linear2.eliminate` gives the two determinant identities without
   division, including singular systems. `linear2.unique` proves equal inputs
@@ -690,6 +852,10 @@ Optional:
   small weighted summands, so sums of selected entries need no manual
   distributivity rewrites. All four numeric types are included by `arith`;
   subtraction distribution applies to ℤ, ℚ and ℝ.
+  For an equality between weighted sums, bare `auto` collects terms over
+  the same range or list and checks the polynomial identity at one index.
+  Coefficients may occur on either side. A range of length `n` contributes
+  `n*c` for a constant summand `c`. [Examples](spec/auto_sum_ring.sat)
   `auto` recognizes a cumulative sum from its zero base and additive recurrence
   (`sum_below.eq_of_recurrence`). It also telescopes successive differences over
   ℤ, ℚ and ℝ, and combines the result with endpoint bounds. Definitionally
@@ -728,6 +894,32 @@ Optional:
   `quadratic_form.bound.real a b c q` extracts `b² ≤ a*c` from
   `q : ∀ x y, 0 ≤ x²*a - 2*x*y*b + y²*c`; `.rat` and `.int` also work,
   including zero diagonal coefficients.
+* For a univariate polynomial of degree up to 16 over ℤ, ℚ or ℝ, `auto` can use
+  literal bounds or prove a sign on the whole line. It bisects a finite interval
+  when its Bernstein coefficients do not settle the sign, and searches for a
+  shift with nonnegative coefficients on each infinite tail. Polynomial hypotheses
+  can also restrict the domain. For example, from `1 ≤ x^2`, `auto` proves
+  `0 ≤ x^4-1` on both rays. It checks the cut points and proves which hypothesis
+  fails on each excluded interval. Each certificate is kernel-checked. On failure, `auto` can show an
+  exact counterexample such as `t = 1/2 (0 ≤ -1/8 is false)`. It evaluates the
+  goal, local hypotheses and explicit hints at that value. Both searches are
+  bounded. For an existential goal such as `∃ t : ℚ, 0 ≤ t ∧ p t < 0`,
+  the same search supplies the numeral and checks every conjunct.
+  [Sign bounds](spec/polynomial_sign.sat) · [Witnesses](spec/polynomial_witness.sat)
+* `import quadratic_roots` checks real roots by completing the square. From
+  `a ≠ 0` and `4*a*c ≤ b^2`, bare `auto` proves `∃ x, a*x^2+b*x+c = 0`.
+  For a factored discriminant, prove `completed_square f k a b D` once:
+  `k*f x = (a*x+b)^2-D` for every `x`. With nonzero scale and slope,
+  `auto` distinguishes no real root, a unique root, and two distinct roots
+  exhausting all solutions. [Examples](spec/quadratic_roots.sat)
+* `import quadratic_form` gives the principal-minor tests for a symmetric
+  two-by-two matrix over ℤ, ℚ or ℝ. Bare `auto` proves nonnegative energy
+  from nonnegative diagonal entries and determinant. A positive diagonal
+  entry suffices with a nonnegative determinant. A positive determinant and
+  a positive diagonal entry give strict positivity at every nonzero vector.
+  For example, from `k < a` and `b² ≤ (a-k)*(c-k)` it proves
+  `k*(x²+y²) ≤ a*x² + 2*b*x*y + c*y²`. In the other direction it recovers
+  the determinant bound from a form of either sign. [Examples](spec/quadratic_form.sat)
 * `import list_sum`: comparison, nonnegativity, member bounds and scalar
   multiplication for list-indexed sums over ℕ, ℤ, ℚ and ℝ; addition and
   concatenation identities, plus subtraction and negation over ℤ, ℚ and ℝ.
@@ -773,6 +965,18 @@ Optional:
   unweighted sums. Both families also provide `weighted_square_expand`
   for expanding `Σ w*(x*f-y*g)²`. The `.rat` and `.int` variants have the
   same arguments.
+* `import finite_l2` proves Parseval's identity for finite real matrices whose
+  rows are orthogonal and have a common squared norm. `import walsh` proves
+  that condition for the Walsh–Hadamard transform on every binary cube.
+  With `N = 2^d`, summing Hadamard entries at complementary indices leaves
+  the parity-weighted diagonal. The same proof works for an arbitrary matrix
+  at every dimension. [QAC⁰ parity example](examples/hadamard_parity.sat)
+* `import walsh_character` proves orthogonality for any family of distinct
+  binary words using the digits `(v / 2^i) % 2`. `import symplectic_character`
+  specializes this to the alternating pairing on two s-bit blocks. For
+  `L+1 = 4^s`, bare `auto` proves the squared operator-norm bound on the
+  nonzero vectors and counts the `(L−1)/2` nonzero vectors orthogonal to a
+  given nonzero row. [Sign matrix and row count](examples/symplectic_sign.sat)
 * `import euclidean`: real norm bounds for lists and bounded sums.
   `sum_below.weighted_cauchy_sqrt.real n w f g nonneg` proves
   `|Σ w*f*g| ≤ √(Σ w*f²)*√(Σ w*g²)`; `weighted_minkowski.real` proves
@@ -845,6 +1049,43 @@ Optional:
   `exp_tangent_lt x y hne` and `exp_midpoint_lt x y hne` require `x ≠ y`.
   `exp_weighted_jensen_lt x y z a b ha hb hne mean` requires both weights
   positive and the inputs distinct; it uses the same mean equation.
+* `import binomial` provides the rising factorial `asc_factorial a k` and
+  binomial shift identities. Bare `auto` proves `choose n k * (n+1) =
+  (k+1) * choose (n+1) (k+1)`, including outside the row. For a fixed
+  offset, `simpa [asc_factorial] using choose.shift_symm a b 3` gives
+  the symmetry with the three factors written out. `import factorial`
+  suffices for Pascal's rule, factorials and binomial symmetry. [Examples](spec/binomial.sat)
+* `import interpolation` works with a convex relation on two rational
+  parameters, such as the order and reciprocal exponent of a PDE estimate.
+  Given endpoint estimates for every order strictly above two thresholds,
+  `auto [interpolation.above left right convex]` proves estimates above the
+  line joining them. Use `interpolation.on_or_above` when both endpoints
+  include their thresholds. A local `have region := interpolation.above left right convex`
+  lets subsequent goals use bare `auto`. [Examples](spec/interpolation.sat)
+* `import positive_functional` derives monotonicity and signed real linearity
+  for positive, additive functionals on functions bounded on a given set.
+  If the functional sends one to one, `auto` can evaluate any function constant
+  on that set. Finite weighted sums of point evaluations give concrete examples.
+  [Examples](spec/positive_functional.sat)
+* `import fatou` transfers a uniform upper bound on nonnegative integrals to a
+  pointwise limit. With finite measurable terms, pointwise convergence and a
+  uniform bound in scope, `by auto` proves the limit bound. If the limit is
+  `a*g` with positive mass and the uniform bound is `C` times that mass,
+  `auto` proves `a ≤ C`. The lower-integral version also accepts a pointwise
+  lower limit and bounds attained arbitrarily far out in the sequence. Supply
+  continuity from below for finite-volume sets and measurability of countable
+  tail intersections. [Examples](spec/fatou.sat)
+* `import sobolev` defines finite Fourier energy at real order `s` using
+  the weight `(1+|ξ|²)^s`, a complex frequency profile, and the supplied finite
+  volumes of measurable sets. From finite energy at `t` and `s ≤ t`, bare
+  `auto` proves finite energy at `s` with the same bound. `import lower_integral`
+  also gives pointwise comparison and evaluation at a unit point mass.
+  [Examples](spec/sobolev.sat)
+* `import threshold` handles upward-closed predicates over ℚ and ℝ.
+  If witnesses lie below `a+e` for every positive `e`, bare `auto`
+  proves `P s` for `a < s`. An attained endpoint also gives the closed
+  range, including a cutoff expressed as `a ≤ c*s` with `0 < c`.
+  [Examples](spec/threshold.sat)
 * `import convex_real`: the exponential instance `convex_interval.exp.real lo hi`
   and the unrestricted finite bound `sum_below.exp_jensen.real n p m mean`,
   which proves `n*exp m ≤ Σ exp(p i)` from `n*m = Σ p i`, including `n = 0`.
@@ -861,12 +1102,149 @@ Optional:
   are one, and repeated members contribute repeatedly.
 * `import real`: `is_sup` with `sup_exists`, `sqrt exp log sin cos pi` with their
   basic laws, `tends_to converges continuous_at continuous summable bounded_seq
-  monotone_seq` (ε–δ definitions).
+  monotone_seq` (ε–δ definitions). Satori proves bounded monotone convergence
+  from the least-upper-bound axiom `sup_exists`.
+* `import limits` adds proofs for real sequence limits. Bare `auto` proves
+  constant limits and translates a known limit from `a n → A` to `a n - c → A - c`.
+  Use `tends_to.of_error_le` when the new absolute error is bounded by a known
+  one, or `tends_to.of_eventual_error_le` when the bound begins at index `k`.
+  [Examples](spec/limits.sat) include a sequence with an arbitrary first term.
+* `import supremum` gives bounds and strict approximations for real suprema.
+  From `is_sup (set.range f) s`, bare `auto` proves `f i ≤ s`, proves
+  `s ≤ b` given a pointwise upper bound, and finds a value above any `b < s`.
+  [Examples](spec/supremum.sat) also cover arbitrary real sets.
+* `import interval_slope` bounds the change of a real function on `[a,b]`.
+  Given a derivative bounded above by `M` throughout the interval,
+  `interval.increment_le_of_deriv_le` proves `f b - f a ≤ M*(b-a)`.
+  Derivatives at the endpoints are taken within the interval. For a curve with
+  corners, `interval.increment_le_of_partition` combines the increment bounds
+  on its pieces. Bare `auto` proves the affine and square derivative rules.
+  [Examples](spec/interval_slope.sat)
+* `import polyline` constructs a piecewise-affine function from its knots,
+  slopes and starting value. Given ordered knots, bare `auto` finds the
+  increment inside a piece and recovers prescribed values at the knots from
+  their successive differences. `polyline.increment_le` bounds the change
+  between arbitrary covered times using only slopes on pieces whose interiors
+  meet the open interval. Repeated knots contribute zero.
+  [Examples](spec/polyline.sat)
+* `import polyline_curve` gives one function `polyline.curve t m v` for an
+  infinite sequence of ordered knots. A proof of `x ≤ t n` lets `auto`
+  identify its value at `x` with the finite prefix ending at knot `n`.
+  `polyline.curve_increment_le` bounds its change on any covered interval.
+  [Examples](spec/polyline_curve.sat)
+* `import derivative` gives the sum, product, square and constant-multiple
+  rules for `has_deriv_within`, plus finite sums. The rules work on arbitrary
+  subsets of the real line, including interval endpoints.
+* `import darboux` defines `darboux.has_integral f a b I` on `a ≤ b` by
+  lower and upper step sums. It proves uniqueness, monotonicity, agreement
+  on the interval, and the integral of a constant. Bare `auto` joins adjacent
+  intervals, splits a known integral at a specified point, or adds two integrands.
+  [Examples](spec/darboux.sat)
+* `import integral_calculus` proves that continuous real functions are Darboux
+  integrable on compact intervals. `darboux.fundamental` evaluates an integral
+  from a primitive and its derivative, including one-sided endpoint derivatives.
+  `import exp_calculus` supplies the integrals of `exp (q*x+r)` and `x*exp (q*x)`
+  for nonzero `q`, plus the boundary formula for an exponential integrating factor.
+  [Examples](spec/integral_calculus.sat)
+* `import interval_integral` defines the oriented value `darboux.integral a b f`.
+  `darboux.integral.by_parts` integrates a product derivative with both boundary terms.
+  A proof of `darboux.agrees op` transfers certified values on ordered intervals
+  to another integral operator.
+* `import integral_parameter` differentiates a fixed-interval integral of a
+  time-dependent function. Supply continuous spatial slices and a jointly
+  continuous partial time derivative on the rectangle. The proof derives the
+  uniform time estimate from compactness in space and includes one-sided time
+  derivatives at both endpoints. [Examples](spec/integral_parameter.sat)
+* `import gronwall` bounds growth on a closed interval. Given `E′ ≤ c E` and
+  `a ≤ b`, `by auto` proves `E b ≤ exp (c*(b-a))*E a`. For ordered initial
+  values, two profiles stay ordered if their derivative gap is bounded by
+  `c*(f-g)` wherever `g < f`. [Proofs](spec/gronwall.sat) · [Gepner barrier](examples/gepner_barrier.sat)
+* `import weak_derivative` gives a Darboux formulation of integration by parts.
+  `interval.weak_deriv u v a b l r` says that for every C¹ test function
+  `p` with derivative `q`, ∫(vp + uq) = r·p(b) − l·p(a). The library
+  derives it for C¹ fields, joins intervals with matching traces, and
+  proves it for |x| with any assigned slope at the corner. [Examples](spec/weak_derivative.sat)
+* `import heat_interval` proves the spatial identity ∫ u u″ + ∫ (u′)² = [u u′].
+  For a classical solution of uₜ = uₓₓ it gives the time derivative of ∫ u²,
+  including both boundary fluxes. With insulated ends, `auto` proves energy
+  decay between the two times. For two solutions with matching endpoint fluxes,
+  the squared distance contracts. With equal initial temperatures on a
+  nondegenerate interval, `by auto` proves pointwise equality at any later time
+  in the rectangle. [Examples](spec/heat_interval.sat)
+* `import heat_source` covers the forced equation uₜ = uₓₓ + f. On a time
+  interval `Icc c d` and spatial interval `Icc a b`, bare `auto` bounds
+  the squared distance of two solutions from their initial distance and a
+  uniform bound on the squared L² distance of their sources. The two
+  solutions must have matching fluxes at each endpoint. For one insulated
+  solution, `auto` proves that energy is nonincreasing when source work
+  is at most the gradient energy. It can also check this pointwise, as for the damped heat
+  equation uₜ = uₓₓ − u. Total heat changes by the time integral of net
+  boundary flux plus source input. When the two endpoint fluxes agree, the
+  source alone accounts for the change.
+  [Examples](spec/heat_source.sat)
+* `import interval_balance` turns a local law ρₜ = jₓ into a change in the
+  spatial integral of ρ by integrating j(right) − j(left) over time.
+  `import wave_interval` applies it to the classical one-dimensional wave.
+  Given a solution and matching endpoint fluxes, `by auto` proves energy
+  conservation. For the travelling wave v = q = t + x at unit speed, the
+  same law gives an energy increase of 2 on the unit square.
+  [Examples](spec/wave_interval.sat)
+* `import quadrature` lets `auto` compute normalized polynomial means on
+  [−1,1]. For example, `quadrature.mean (fun x => (x+k)^2) = k^2+1/3`
+  takes `by auto`. With `import interval_integral`, the same method checks
+  oriented integrals between symbolic endpoints. It assembles a proof from
+  the constant and power integrals and checks the integrand identity by
+  ring normalization. Expanded expressions have a search limit of degree 16.
+  For a polynomial written as `∑ i < n, c i*x^i`, `darboux.polynomial`
+  also handles symbolic `n` by induction.
+  For functions specified by their quartic interpolant, `quadrature.boole`
+  takes a proof that interpolation holds throughout the interval.
+  [Examples](spec/quadrature.sat)
+* `import heat_path` proves the energy balance for continuous-time heat flow
+  on a finite spatial path. Given the node equations with insulated ends,
+  `auto` proves that the sum of squared temperatures is nonincreasing.
+  [Examples](spec/heat_path.sat)
+* `import continuity` lets bare `auto` prove pointwise continuity of real
+  expressions built with sums, products, powers, absolute values, min and max.
+  `import polyline_continuity` extends this to finite polylines and to curves
+  whose ordered knots cover every real time. [Examples](spec/continuity.sat)
+* `import closure` extends inequalities between continuous real functions to
+  points in the closure of a set. Bare `auto` passes a bound on an open
+  interval to either endpoint when the interval is nonempty. For example,
+  from `∀ e, 0 < e → 0 ≤ a+(z^2+e)*m` it proves `0 ≤ a+z^2*m` for any
+  real slope `m`. A missing continuity hypothesis is reported at the
+  endpoint. [Examples](spec/closure.sat)
+* `import choice` names a classical witness as `choice P`. Given
+  `∃ x, P x`, bare `auto` proves `P (choice P)` using the kernel's
+  Hilbert choice rule. `choice.function` collects a witness for each input
+  into a single function. [Examples](spec/choice.sat)
+* `import limit_order` adds constant scaling, order and the squeeze theorem.
+  Bare `auto` scales a known limit by any real constant and proves monotonicity
+  of partial sums of nonnegative terms. Use `tends_to.le` to pass an inequality
+  to the limit and `tends_to.squeeze` when the two bounding sequences have the
+  same limit. Both rules also accept bounds on a tail via
+  `tends_to.le_of_eventual_le` and `tends_to.squeeze_eventually`.
+  [Examples](spec/limit_order.sat) include weighted bounds and partial sums.
+* `import finite_bounds` gives a uniform strict lower margin on finite intervals.
+  An eventual bound above the same floor extends the margin to the whole sequence
+  from the starting index. [Examples](spec/finite_bounds.sat)
+* `import series` adds the comparison test for real series. From
+  `0 ≤ a i` and `a i ≤ b i` for every index, and `summable b`, bare `auto`
+  proves `summable a`. An upper bound on every partial sum also suffices for
+  a series with nonnegative terms. [Examples](spec/series.sat)
 * `import graph`: graphs as adjacency predicates on `0..n-1`; `simple
   edge_list_adj proper_coloring colorable color_assignment clique independent
   degree regular consecutive distinct_list hamiltonian_cycle`.
   `color_assignment` is the sat-friendly colouring form, e.g.
   `+ k4 (x : ℕ → ℕ → Prop) : ¬ color_assignment 4 3 k4 x := by intro h; sat`.
+* `import laplacian` gives the unnormalized graph Laplacian. `laplacian ns u v`
+  sums `u v - u w` over neighbors `w` in `ns`. For rational or real values,
+  `auto` proves nonnegativity at a local maximum. If the Laplacian there is
+  zero, `auto` also proves that any neighbor has the same value. If a harmonic
+  function attains a global maximum at a vertex, it takes that value at every
+  vertex reachable from it. Use `auto [laplacian.strong_max.real]` (or `.rat`).
+  A finite walk supplies reachability via `reachable.of_walk`.
+  See the [three-vertex path and harmonic maximum examples](spec/laplacian.sat).
 * Recursive numeric list identities also work with `auto`: Satori checks the
   empty list and one cons step. Definitions may combine several list totals;
   supply auxiliary identities with `auto [lemma]` when needed. This pattern
@@ -1092,3 +1470,20 @@ an untrusted oracle, not into the trusted base**. Concretely:
   by other active projects (`~/math` SAT campaigns, DETOUR's SAT rollout, Lonely Runner certificates, the `.wrat` format). Satori itself
   depends on the name in exactly two places, the Bitfile line and the default path in `satbridge.w`. After a rename, set
   `SATORI_SOLVER` or update those two lines.
+
+## Checking CNF state transfers
+
+A transfer gives a constant substitution that sends every model matching a
+source guard to a model matching a target guard and leaving the source. The
+witness is a DIMACS file with the original variable count and exactly three
+rows. Read each of the first two rows as a conjunction of signed literals,
+for the source and target respectively. The third row sets the listed
+variables to the indicated truth values. All other variables retain their
+values.
+
+    satori emit-transfer original.cnf transfer.cnf counterexample.cnf
+    wassat counterexample.cnf --lrat transfer.lrat
+    satori check-transfer original.cnf transfer.cnf transfer.lrat
+
+The last command reconstructs the counterexample formula and checks the
+hinted propagation proof inside Satori. Only proof generation needs a solver.

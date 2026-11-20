@@ -1,0 +1,19 @@
+import darboux
+
++ backwards : darboux.has_integral (fun x => (2 : ℝ)) 3 1 (-4) := by auto
++ wrong_area : darboux.has_integral (fun x => (2 : ℝ)) 0 3 5 := by auto
++ endpoints_only (f : ℝ → ℝ) (h : darboux.has_integral f 0 1 0) (g : ℝ → ℝ) (a : f 0 = g 0) (b : f 1 = g 1) : darboux.has_integral g 0 1 0
+  apply darboux.congr f g 0 1 0 h
+  auto
++ wrong_sign (f : ℝ → ℝ) (I : ℝ) (h : darboux.has_integral f 0 1 I) :
+    darboux.has_integral (fun x => -f x) 0 1 I := by auto
+
++ gap (f : ℝ → ℝ) (L R : ℝ) (left : darboux.has_integral f 0 1 L) (right : darboux.has_integral f 2 3 R) :
+    darboux.has_integral f 0 3 (L+R) := by auto
++ different_integrands (f g : ℝ → ℝ) (L R : ℝ) (left : darboux.has_integral f 0 1 L) (right : darboux.has_integral g 1 2 R) :
+    darboux.has_integral f 0 2 (L+R) := by auto
++ outside (f : ℝ → ℝ) (I : ℝ) (h : darboux.has_integral f 0 1 I) :
+    ∃ L R, darboux.has_integral f 0 2 L ∧ darboux.has_integral f 2 1 R ∧ I = L+R := by auto
+
++ sum_mixed_intervals (f g : ℝ → ℝ) (I J : ℝ) (hf : darboux.has_integral f 0 2 I) (hg : darboux.has_integral g 1 2 J) :
+    darboux.has_integral (fun x => f x+g x) 0 2 (I+J) := by auto

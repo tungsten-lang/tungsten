@@ -1,0 +1,62 @@
+import walsh
+import binary_digits
+
+-> walsh.phase (n : ℕ) : ℝ := if n%2 = 0 then 1 else -1
+
++ walsh.phase_add (a b : ℕ) : walsh.phase (a+b) = walsh.phase a*walsh.phase b
+  unfold walsh.phase; rw [add_mod.nat a b 2]
+  have x := mod_two_cases.nat a; have y := mod_two_cases.nat b
+  cases x with a0 a1 <;> cases y with b0 b1 <;> simp [*]
+
++ walsh.half_digit (n l b : ℕ) (hl : l < n) (hb : b < 2) : walsh.half n (l+n*b) = l
+  unfold walsh.half; by_cases z : b = 0
+  · simp [z,hl]
+  · have one : b = 1 := by omega
+    have hi : ¬ (l+n < n) := by omega
+    simp [one,hi]; omega
+
++ walsh.row_digit (d u v a b : ℕ) (hu : u < 2^d) (hv : v < 2^d) (ha : a < 2) (hb : b < 2) :
+    walsh.row (d+1) (u+2^d*a) (v+2^d*b) = walsh.phase (a*b)*walsh.row d u v
+  have step : walsh.row (d+1) (u+2^d*a) (v+2^d*b) =
+      (if v+2^d*b < 2^d then 1 else walsh.sign (2^d) (u+2^d*a))*walsh.row d (walsh.half (2^d) (u+2^d*a)) (walsh.half (2^d) (v+2^d*b)) := by rfl
+  rw [step,walsh.half_digit (2^d) u a hu ha,walsh.half_digit (2^d) v b hv hb]
+  have un : ¬ (u+2^d < 2^d) := by omega
+  have vn : ¬ (v+2^d < 2^d) := by omega
+  have ac := mod_two_cases.nat a; rw [(div_mod_of_lt.nat a 2 ha).2] at ac
+  have bc := mod_two_cases.nat b; rw [(div_mod_of_lt.nat b 2 hb).2] at bc
+  cases ac with az ao <;> cases bc with bz bo <;> simp [walsh.phase,walsh.sign,*]
+
++ walsh.character (d : ℕ) : ∀ a b : ℕ → ℕ, (∀ i < d, a i < 2) → (∀ i < d, b i < 2) →
+    walsh.row d (binary.pack d a) (binary.pack d b) = walsh.phase (∑ i < d, a i*b i)
+  induction d with a b ha hb d ih a b ha hb
+  · simp [walsh.phase,walsh.row,binary.pack]
+  · rw [succ_eq_add_one.nat] at ha hb ⊢
+    have al : ∀ i < d, a i < 2 := by intro i hi; exact ha i (by omega)
+    have bl : ∀ i < d, b i < 2 := by intro i hi; exact hb i (by omega)
+    simp only [binary.pack_succ,sum_below_succ]
+    rw [walsh.row_digit d (binary.pack d a) (binary.pack d b) (a d) (b d) (binary.pack_lt d a al) (binary.pack_lt d b bl) (ha d (by omega)) (hb d (by omega)),ih a b al bl,walsh.phase_add]; ring
+
+-- A family of distinct binary words indexes orthogonal characters, including subfamilies.
+-> walsh.character_matrix (d : ℕ) (word : ℕ → ℕ → ℕ) (u v : ℕ) : ℝ :=
+  walsh.phase (∑ i < d, word u i*binary.bit v i)
+
+@[auto] + walsh.character_matrix.orthogonal (d n : ℕ) (word : ℕ → ℕ → ℕ)
+    (digits : ∀ u < n, ∀ i < d, word u i < 2)
+    (distinct : ∀ u < n, ∀ v < n, (∀ i < d, word u i = word v i) → u = v) :
+    finite_l2.orthogonal n (2^d) (walsh.character_matrix d word) (2^d)
+  have entry : ∀ u < n, ∀ j < 2^d, walsh.character_matrix d word u j = walsh.row d (binary.pack d (word u)) j
+    intro u hu j hj
+    have e := walsh.character d (word u) (binary.bit j) (digits u hu) (by intro i hi; exact binary.bit_lt j i)
+    rw [binary.reconstruct d j hj] at e; exact e.symm
+  have orth := walsh.orthogonal d; unfold finite_l2.orthogonal at orth ⊢
+  intro u hu v hv
+  have prod := orth (binary.pack d (word u)) (binary.pack_lt d (word u) (digits u hu)) (binary.pack d (word v)) (binary.pack_lt d (word v) (digits v hv))
+  have eq : finite_l2.dot (2^d) (walsh.character_matrix d word u) (walsh.character_matrix d word v) =
+      finite_l2.dot (2^d) (walsh.row d (binary.pack d (word u))) (walsh.row d (binary.pack d (word v)))
+    unfold finite_l2.dot; apply sum_below.congr; intro j hj; rw [entry u hu j hj,entry v hv j hj]
+  rw [eq,prod]; by_cases same : u = v
+  · rw [same]; simp
+  · have ne : binary.pack d (word u) ≠ binary.pack d (word v)
+      intro equal
+      exact same (distinct u hu v hv (binary.pack_inj d (word u) (word v) (digits u hu) (digits v hv) equal))
+    simp [same,ne]

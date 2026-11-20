@@ -1,0 +1,36 @@
+import quadratic_roots
+
++ real_root (a b c : ℝ) (ha : a ≠ 0) (disc : 0 ≤ b^2-4*a*c) : ∃ x, a*x*x+b*x+c = 0 := by auto
+
++ irrational : ∃ x : ℝ, x*x = 2
+  have model : completed_square (fun (x : ℝ) => x*x-2) 1 1 0 2 := by unfold completed_square; intro x; ring
+  obtain ⟨x,h⟩ := completed_square.exists_root (fun (x : ℝ) => x*x-2) 1 1 0 2 model (by decide) (by decide) (by decide)
+  exact ⟨x,by linarith⟩
+
++ repeated (f : ℝ → ℝ) (form : completed_square f (-3) 2 7 0) : ∃! x, f x = 0 := by auto
+
++ separated (f : ℝ → ℝ) (form : completed_square f 2 (-5) 1 8) :
+    ∃ u v, u ≠ v ∧ ∀ x, f x = 0 ↔ x = u ∨ x = v := by auto
+
++ everywhere_pos (f : ℝ → ℝ) (form : completed_square f 2 0 4 (-1)) (x : ℝ) : 0 < f x := by auto
+
++ necessary (f : ℝ → ℝ) (k a b D x : ℝ) (form : completed_square f k a b D) (root : f x = 0) : 0 ≤ D := completed_square.discriminant form root
+
++ negative_leading (a b c : ℝ) (ha : a < 0) (disc : 4*a*c ≤ b^2) : ∃ x, a*x^2+b*x+c = 0 := by auto
+
++ above (f : ℝ → ℝ) (form : completed_square f 1 2 (-8) 1) (x : ℝ) (root : f x = 0) : 3 < x
+  auto
+
++ no_real_root (f : ℝ → ℝ) (D : ℝ) (neg : D < 0) (form : completed_square f 5 3 2 D) (x : ℝ) : f x ≠ 0 := by auto
+
++ collapsed (f : ℝ → ℝ) (D : ℝ) (zero : D = 0) (form : completed_square f 2 1 0 D) : ∃! x, f x = 0 := by auto
+
+#axioms separated
+#axioms no_real_root
+
+-- A negative conclusion retains the hypotheses and trust of its explicit rule.
+opaque excluded : ℕ → Prop
+opaque active_at : ℕ → Prop
+axiom excludes (i : ℕ) : active_at i → ¬ excluded i
++ explicit_negative (i : ℕ) (live : active_at i) : ¬ excluded i := by auto [excludes]
+#axioms explicit_negative

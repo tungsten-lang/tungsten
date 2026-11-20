@@ -1,0 +1,69 @@
+-- Least-significant digit first.
+import arith
+
+-> binary.bit (v i : ℕ) : ℕ := (v/2^i)%2
+-> binary.pack : ℕ → (ℕ → ℕ) → ℕ
+  | 0 => fun a => 0
+  | d+1 => fun a => binary.pack d a+2^d*a d
+
++ binary.pack_succ (d : ℕ) (a : ℕ → ℕ) : binary.pack (d+1) a = binary.pack d a+2^d*a d := by rfl
+
++ binary.bit_lt (v i : ℕ) : binary.bit v i < 2 := mod_lt.nat (v/2^i) 2 (by decide)
+
+@[auto] + binary.high_zero (v i s : ℕ) (hv : v < 2^s) (high : s ≤ i) : binary.bit v i = 0
+  have bound := pow_le_pow_right.nat 2 s i (by decide) high
+  unfold binary.bit; rw [(div_mod_of_lt.nat v (2^i) (by omega)).1]; decide
+
++ binary.pack_lt (d : ℕ) : ∀ a : ℕ → ℕ, (∀ i < d, a i < 2) → binary.pack d a < 2^d
+  induction d with a h d ih a h
+  · simp [binary.pack]
+  · rw [succ_eq_add_one.nat] at h ⊢
+    have low := ih a (by intro i hi; exact h i (by omega))
+    have top := h d (by omega)
+    rw [binary.pack_succ,pow_succ.nat]
+    by_cases z : a d = 0
+    · rw [z]; omega
+    · have one : a d = 1 := by omega
+      rw [one]; omega
+
++ binary.pack_digits (d : ℕ) : ∀ v : ℕ, binary.pack d (binary.bit v) = v % 2^d
+  induction d with v d ih v
+  · simp [binary.pack]; omega [mod_lt.nat v 1 (by decide)]
+  · rw [succ_eq_add_one.nat,binary.pack_succ,pow_succ.nat,ih v]
+    set n := 2^d with hn
+    have pos : 0 < n := by rw [hn]; exact two_pow_pos.nat d
+    have lo := mod_lt.nat v n pos
+    have split := div_add_mod.nat v n
+    have q := div_add_mod.nat (v/n) 2
+    have eq : v = n*2*((v/n)/2)+(v%n+n*((v/n)%2))
+      rw [← q] at split; nlinarith
+    have bound : v%n+n*((v/n)%2) < n*2
+      have cases2 := mod_two_cases.nat (v/n); cases cases2 with z o
+      · rw [z]; omega
+      · rw [o]; omega
+    unfold binary.bit; rw [← hn]; exact (div_mod_unique.nat v (n*2) ((v/n)/2) (v%n+n*((v/n)%2)) eq bound).2
+
++ binary.reconstruct (d v : ℕ) (hv : v < 2^d) : binary.pack d (binary.bit v) = v
+  rw [binary.pack_digits]; exact (div_mod_of_lt.nat v (2^d) hv).2
+
++ binary.pack_inj (d : ℕ) : ∀ a b : ℕ → ℕ, (∀ i < d, a i < 2) → (∀ i < d, b i < 2) →
+    binary.pack d a = binary.pack d b → ∀ i < d, a i = b i
+  induction d with a b ha hb eq i hi d ih a b ha hb eq i hi
+  · omega
+  · rw [succ_eq_add_one.nat] at ha hb eq hi
+    have al : ∀ j < d, a j < 2 := by intro j hj; exact ha j (by omega)
+    have bl : ∀ j < d, b j < 2 := by intro j hj; exact hb j (by omega)
+    have low := binary.pack_lt d a al
+    have low' := binary.pack_lt d b bl
+    simp only [binary.pack_succ] at eq
+    have top := div_mod_unique.nat (binary.pack d a+2^d*a d) (2^d) (b d) (binary.pack d b) (by rw [eq]; ring) low'
+    have base := div_mod_unique.nat (binary.pack d a+2^d*a d) (2^d) (a d) (binary.pack d a) (by ring) low
+    by_cases last : i = d
+    · rw [last]; linarith [top.1,base.1]
+    · exact ih a b al bl (by linarith [top.2,base.2]) i (by omega)
+
++ binary.pack_congr (d : ℕ) : ∀ a b : ℕ → ℕ, (∀ i < d, a i = b i) → binary.pack d a = binary.pack d b
+  induction d with a b h d ih a b h
+  · rfl
+  · rw [succ_eq_add_one.nat] at h ⊢
+    simp only [binary.pack_succ,ih a b (by intro i hi; exact h i (by omega)),h d (by omega)]

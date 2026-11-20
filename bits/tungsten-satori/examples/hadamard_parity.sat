@@ -1,0 +1,11 @@
+-- QAC⁰ parity conversion (corpus family 274, equation 6.2).
+-- Average complementary Hadamard entries to extract the parity coefficient of the diagonal.
+import walsh
+
++ parity_conversion (d : ℕ) (B : ℕ → ℕ → ℝ) :
+    (1/2^d)*(∑ h < 2^d, walsh.entry d B (2^d-1-h) h) = (1/2^d)*(∑ x < 2^d, walsh.parity d x*B x x) := by auto
+
++ three_bits (B : ℕ → ℕ → ℝ) :
+    (1/8)*(∑ h < 8, walsh.entry 3 B (7-h) h) = (1/8)*(∑ x < 8, walsh.parity 3 x*B x x)
+  exact parity_conversion 3 B
+#axioms three_bits

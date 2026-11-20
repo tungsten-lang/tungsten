@@ -1,0 +1,103 @@
+-- Real-valued first-order calculations on a commutative coordinate ring.
+import derivation
+import arith
+
+-> ring_ops.real : ring_ops ℝ := ring_ops.mk 0 1 (fun x y => x+y) (fun x => -x) (fun x y => x*y)
+@[auto] + comm_ring.real : comm_ring ring_ops.real
+  unfold comm_ring ring_ops.real
+  exact ⟨by intro x y z; ring,by intro x y; ring,by intro x; ring,by intro x; ring,by intro x y z; ring,by intro x y; ring,by intro x; ring,by intro x y z; ring⟩
+
++ ring_ops.power.real (x : ℝ) (n : ℕ) : ring_ops.power ring_ops.real x n = x^n
+  induction n with k ih
+  · simp [ring_ops.power,ring_ops.real]
+  · rw [succ_eq_add_one.nat,pow_succ.real]
+    show x*ring_ops.power ring_ops.real x k = x^k*x
+    rw [ih]; ring
+
++ ring_ops.of_nat.real (n : ℕ) : ring_ops.of_nat ring_ops.real n = (n : ℝ)
+  induction n with k ih
+  · decide
+  · rw [succ_eq_add_one.nat,cast_succ.real]
+    show 1+ring_ops.of_nat ring_ops.real k = (k:ℝ)+1
+    rw [ih]; ring
+
+-- Differentiate t^(n+1) a at a point, including the derivative of a.
+@[auto] + derivation_at.monomial_succ.real (R : ring_ops α) (f D : α → ℝ) (t a : α) (n : ℕ)
+    (hr : comm_ring R) (hom : ring_hom R ring_ops.real f) (der : derivation_at R ring_ops.real f D) :
+    D (ring_ops.monomial R t (n+1) a) = ((n:ℝ)+1)*(f t)^n*D t*f a+(f t)^(n+1)*D a
+  have eq := derivation_at.monomial_succ R ring_ops.real f D t a n hr comm_ring.real hom der
+  rw [ring_ops.power.real,ring_ops.power.real,ring_ops.of_nat.real,cast_succ.real] at eq
+  simp only [ring_ops.real] at eq; rw [eq]; ring
+
+-- A logarithmic direction with D(t) = w t acts on the monomial at any t.
+@[auto] + derivation_at.weighted_monomial.real (R : ring_ops α) (f D : α → ℝ) (t a : α) (n : ℕ) (w : ℝ)
+    (hr : comm_ring R) (hom : ring_hom R ring_ops.real f) (der : derivation_at R ring_ops.real f D) (weight : D t = w*f t) :
+    D (ring_ops.monomial R t n a) = (f t)^n*((n:ℝ)*w*f a+D a)
+  cases n with k
+  · unfold comm_ring at hr; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hr
+    simp [ring_ops.monomial,ring_ops.power,mo,cast_zero.real]
+  · rw [succ_eq_add_one.nat,derivation_at.monomial_succ.real R f D t a k hr hom der,weight,cast_succ.real,pow_succ.real]; ring
+
++ ring_hom.monomial.real (R : ring_ops α) (f : α → ℝ) (t : α) (n : ℕ) (a : α) (hom : ring_hom R ring_ops.real f) :
+    f (ring_ops.monomial R t n a) = (f t)^n*f a
+  have power := ring_hom.power R ring_ops.real f hom t n
+  unfold ring_hom at hom; unfold ring_ops.monomial
+  rw [hom.2.2.2.2,power,ring_ops.power.real]; rfl
+
+-- Differentiate the cleared identity t^(m+1) g = 1. No division is needed.
+@[auto] + derivation_at.inverse_power.real (R : ring_ops α) (f D : α → ℝ) (t g : α) (m : ℕ)
+    (hr : comm_ring R) (hom : ring_hom R ring_ops.real f) (der : derivation_at R ring_ops.real f D)
+    (inverse : ring_ops.monomial R t (m+1) g = R.one) :
+    (f t)^(m+1)*D g = -(((m:ℝ)+1)*(f t)^m*D t*f g)
+  have eq := derivation_at.inverse_power R ring_ops.real f D t g m hr comm_ring.real hom der inverse
+  rw [ring_ops.power.real,ring_ops.power.real,ring_ops.of_nat.real,cast_succ.real] at eq
+  simp [ring_ops.real] at eq; linear_combination eq
+
++ derivation_at.mul.real (R : ring_ops α) (f D : α → ℝ) (x y : α) (der : derivation_at R ring_ops.real f D) :
+    D (R.mul x y) = f x*D y+D x*f y := der.2 x y
+
+-- Divergence with density g=t^-(m+1) for the field (t^(k+1)b, t^k h).
+-- t^(m+1)g=1 is an identity of functions, so it can be differentiated.
+@[auto] + derivation_at.weighted_divergence.real (R : ring_ops α) (f T Z : α → ℝ) (t g b h : α) (m k : ℕ)
+    (hr : comm_ring R) (hom : ring_hom R ring_ops.real f) (dt : derivation_at R ring_ops.real f T)
+    (dz : derivation_at R ring_ops.real f Z) (radial : T t = 1) (level : Z t = 0) (coeff : T b = 0)
+    (inverse : ring_ops.monomial R t (m+1) g = R.one) :
+    (f t)^(m+1)*(T (R.mul g (ring_ops.monomial R t (k+1) b)) + Z (R.mul g (ring_ops.monomial R t k h))) =
+      (f t)^k*(((k:ℝ)-(m:ℝ))*f b+Z h)
+  have val := ring_hom.monomial.real R f t
+  have norm := (val (m+1) g hom).symm
+  have one : f R.one = 1 := hom.2.1
+  rw [inverse,one] at norm
+  have tg := derivation_at.inverse_power.real R f T t g m hr hom dt inverse
+  have zg := derivation_at.inverse_power.real R f Z t g m hr hom dz inverse
+  have radial_g : (f t)^(m+1)*f t*T g = -((m:ℝ)+1)
+    rw [radial] at tg; rw [pow_succ.real (f t) m] at norm tg ⊢
+    linear_combination f t * tg - ((m:ℝ)+1)*norm
+  have level_g : (f t)^(m+1)*Z g = 0 := by simpa [level] using zg
+  have tb := derivation_at.monomial_succ.real R f T t b k hr hom dt
+  have zh := derivation_at.weighted_monomial.real R f Z t h k 0 hr hom dz (by simpa using level)
+  rw [derivation_at.mul.real R f T g (ring_ops.monomial R t (k+1) b) dt,derivation_at.mul.real R f Z g (ring_ops.monomial R t k h) dz]
+  rw [tb,zh,val (k+1) b hom,val k h hom,radial,coeff,pow_succ.real (f t) k]
+  linear_combination ((f t)^k*(((k:ℝ)+1)*f b+Z h))*norm + ((f t)^k*f b)*radial_g + ((f t)^k*f h)*level_g
+
++ derivation_at.linear.real (R : ring_ops α) (f T Z : α → ℝ) (p q : ℝ)
+    (dt : derivation_at R ring_ops.real f T) (dz : derivation_at R ring_ops.real f Z) :
+    derivation_at R ring_ops.real f (fun x => p*T x+q*Z x)
+  unfold derivation_at at dt dz ⊢
+  constructor
+  · intro x y; rw [dt.1 x y,dz.1 x y]; simp [ring_ops.real]; ring
+  · intro x y; rw [dt.2 x y,dz.2 x y]; simp [ring_ops.real]; ring
+
+-- The action at a point of t^k (b t∂t + h ∂z) on a function x.
+-> coordinate_field (f T Z : α → ℝ) (t : α) (k : ℕ) (b h x : α) : ℝ :=
+  (f t)^k*(f b*f t*T x+f h*Z x)
+
+@[auto] + coordinate_field.monomial (R : ring_ops α) (f T Z : α → ℝ) (t b h a : α) (k n : ℕ)
+    (hr : comm_ring R) (hom : ring_hom R ring_ops.real f) (dt : derivation_at R ring_ops.real f T)
+    (dz : derivation_at R ring_ops.real f Z) (radial : T t = 1) (level : Z t = 0) (coeff : T a = 0) :
+    coordinate_field f T Z t k b h (ring_ops.monomial R t n a) = (f t)^k*(f t)^n*((n:ℝ)*f b*f a+f h*Z a)
+  have dir := derivation_at.linear.real R f T Z (f b*f t) (f h) dt dz
+  have weight : (f b*f t)*T t+f h*Z t = f b*f t := by rw [radial,level]; ring
+  have act := derivation_at.weighted_monomial.real R f (fun x => (f b*f t)*T x+f h*Z x) t a n (f b) hr hom dir weight
+  simp only at act; rw [coeff] at act
+  unfold coordinate_field; rw [act]; ring

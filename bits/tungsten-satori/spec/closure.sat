@@ -1,0 +1,21 @@
+import closure
+
++ endpoint (f g : ℝ → ℝ) (c : ℝ) (hf : continuous_at f c) (hg : continuous_at g c)
+    (order : ∀ t, c < t → f t ≤ g t) : f c ≤ g c := by auto
++ left_endpoint (a m : ℝ) (bound : ∀ t : ℝ, t < 2 → a ≤ m*(t-2)+3) : a ≤ 3 := by auto
++ perturbation (a m z : ℝ) (bound : ∀ e : ℝ, 0 < e → 0 ≤ a+(z^2+e)*m) : 0 ≤ a+z^2*m := by auto
++ density (p : ℝ) (window : ∀ e : ℝ, 0 < e → 1-e ≤ 2*p ∧ 2*p ≤ 1+e) : p=1/2 := by auto
++ local_window (a m r : ℝ) (hr : 0 < r) (bound : ∀ t : ℝ, 0 < t → t < r → a+t*m ≤ 4) : a ≤ 4 := by auto
++ upper_endpoint (f : ℝ → ℝ) (cf : continuous_at f 5) (bound : ∀ t : ℝ, 1 < t → t < 5 → f t ≤ 2*t) : f 5 ≤ 10 := by auto
++ relative (S : set ℝ) (f g : ℝ → ℝ) (x : ℝ) (near : x ∈ real.closure S)
+    (cf : continuous_within_at f S x) (cg : continuous_within_at g S x)
+    (le : ∀ y ∈ S, f y ≤ g y) : f x ≤ g x := by auto
++ open_interval (a b : ℝ) (proper : a < b) : a ∈ real.closure (fun y => a < y ∧ y < b) ∧ b ∈ real.closure (fun y => a < y ∧ y < b) := by auto
+
+opaque t0 : ℝ
+opaque obs : ℝ → ℝ
+axiom nearby : ∀ t, t0 < t → obs t ≤ 7+(t-t0)
+axiom regular : continuous_at obs t0
+axiom unused : obs t0 ≤ 8
++ observation : obs t0 ≤ 7 := by auto [nearby,regular,unused]
+#axioms observation

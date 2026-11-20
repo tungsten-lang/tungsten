@@ -1,0 +1,111 @@
+-- Evaluate certified Darboux integrals and transfer them to other interval integrals.
+import integral_calculus
+import choice
+
+-> darboux.agrees (op : ℝ → ℝ → (ℝ → ℝ) → ℝ) : Prop :=
+  ∀ a b f I, darboux.has_integral f a b I → op a b f = I
+
+-- Use zero if the integrand is nonintegrable between the ordered endpoints.
+-> darboux.value (a b : ℝ) (f : ℝ → ℝ) : ℝ :=
+  if ∃ I, darboux.has_integral f a b I then choice (darboux.has_integral f a b) else 0
+-> darboux.integral (a b : ℝ) (f : ℝ → ℝ) : ℝ :=
+  if a ≤ b then darboux.value a b f else -darboux.value b a f
+
++ darboux.integral_agrees : darboux.agrees darboux.integral
+  unfold darboux.agrees
+  intro a b f I hi
+  have exists_value : ∃ J, darboux.has_integral f a b J := ⟨I,hi⟩
+  have ordered := hi
+  unfold darboux.has_integral at ordered
+  have selected := choice.unique (fun J => darboux.has_integral f a b J) I hi (by intro J hj; exact darboux.unique f a b J I hj hi)
+  unfold choice at selected
+  simp only [darboux.has_integral,ordered.1] at selected
+  simp only [darboux.integral,darboux.value,ordered.1,exists_value]
+
++ darboux.agrees.continuous (op : ℝ → ℝ → (ℝ → ℝ) → ℝ) (agree : darboux.agrees op) (a b : ℝ) (f : ℝ → ℝ)
+    (ab : a ≤ b) (cont : ∀ x, a ≤ x → x ≤ b → continuous_at f x) : darboux.has_integral f a b (op a b f)
+  obtain ⟨I,hi⟩ := darboux.continuous f a b ab cont
+  unfold darboux.agrees at agree
+  rw [agree a b f I hi]; exact hi
+
++ darboux.agrees.split (op : ℝ → ℝ → (ℝ → ℝ) → ℝ) (agree : darboux.agrees op) (a b c : ℝ) (f : ℝ → ℝ)
+    (ab : a ≤ b) (bc : b ≤ c) (whole : darboux.has_integral f a c (op a c f)) : op a c f = op a b f + op b c f
+  obtain ⟨L,R,left,right,sum⟩ := darboux.split f a b c (op a c f) ab bc whole
+  unfold darboux.agrees at agree
+  rw [agree a b f L left,agree b c f R right]
+  exact sum
+
++ darboux.agrees.scale (op : ℝ → ℝ → (ℝ → ℝ) → ℝ) (agree : darboux.agrees op) (a b k : ℝ) (f : ℝ → ℝ)
+    (hi : darboux.has_integral f a b (op a b f)) : op a b (fun x => k*f x) = k*op a b f
+  unfold darboux.agrees at agree
+  exact agree a b (fun x => k*f x) (k*op a b f) (darboux.scale f a b (op a b f) k hi)
+
++ darboux.integral_reverse (a b : ℝ) (f : ℝ → ℝ) : darboux.integral b a f = -darboux.integral a b f
+  by_cases eq : a = b
+  · rw [eq]
+    have agree := darboux.integral_agrees
+    unfold darboux.agrees at agree
+    rw [agree b b f 0 (darboux.point f b)]; ring
+  · by_cases ab : a ≤ b
+    · have ba : ¬ b ≤ a := by linarith
+      simp [darboux.integral,ab,ba]
+    · have ba : b ≤ a := by linarith
+      simp [darboux.integral,ab,ba]
+      ring
+
+-- Oriented integral, with a certificate for each possible endpoint order.
++ darboux.integral.orientations (a b : ℝ) (f : ℝ → ℝ) (v : ℝ)
+    (forward : a ≤ b → darboux.has_integral f a b v) (backward : b ≤ a → darboux.has_integral f b a (-v)) :
+    darboux.integral a b f = v
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  by_cases h : a ≤ b
+  · exact agree a b f v (forward h)
+  · have value := agree b a f (-v) (backward (by linarith))
+    linarith [darboux.integral_reverse a b f]
+
++ darboux.agrees.mono (op : ℝ → ℝ → (ℝ → ℝ) → ℝ) (agree : darboux.agrees op) (a b : ℝ) (f g : ℝ → ℝ)
+    (ab : a ≤ b) (hf : ∀ t, a ≤ t → t ≤ b → continuous_at f t) (hg : ∀ t, a ≤ t → t ≤ b → continuous_at g t)
+    (le : ∀ x, a ≤ x → x ≤ b → f x ≤ g x) : op a b f ≤ op a b g
+  exact darboux.mono f g a b (op a b f) (op a b g) (darboux.agrees.continuous op agree a b f ab hf) (darboux.agrees.continuous op agree a b g ab hg) le
+
++ darboux.integral.by_parts (F G f g : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b)
+    (products : ∀ x, a ≤ x → x ≤ b → continuous_at (fun y => f y*G y) x ∧ continuous_at (fun y => F y*g y) x)
+    (df : ∀ x, a ≤ x → x ≤ b → has_deriv_within F (fun z => a ≤ z ∧ z ≤ b) x (f x))
+    (dg : ∀ x, a ≤ x → x ≤ b → has_deriv_within G (fun z => a ≤ z ∧ z ≤ b) x (g x)) :
+    darboux.integral a b (fun x => f x*G x) + darboux.integral a b (fun x => F x*g x) = F b*G b-F a*G a
+  apply darboux.by_parts F G f g a b
+  · apply darboux.agrees.continuous darboux.integral darboux.integral_agrees a b (fun x => f x*G x) ab
+    intro x lo hi; exact (products x lo hi).1
+  · apply darboux.agrees.continuous darboux.integral darboux.integral_agrees a b (fun x => F x*g x) ab
+    intro x lo hi; exact (products x lo hi).2
+  · exact df
+  · exact dg
+
++ darboux.integral.nonneg (f : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b)
+    (cont : ∀ x, a ≤ x → x ≤ b → continuous_at f x) (pos : ∀ x, a ≤ x → x ≤ b → 0 ≤ f x) :
+    0 ≤ darboux.integral a b f
+  have hi := darboux.agrees.continuous darboux.integral darboux.integral_agrees a b f ab cont
+  exact darboux.nonneg f a b (darboux.integral a b f) hi pos
+
++ darboux.integral.continuous_within (f : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b)
+    (cont : ∀ x, a ≤ x → x ≤ b → continuous_within_at f (fun z => a ≤ z ∧ z ≤ b) x) :
+    darboux.has_integral f a b (darboux.integral a b f)
+  obtain ⟨I,hi⟩ := darboux.integrable_within f a b ab cont
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  rw [agree a b f I hi]; exact hi
+
++ darboux.integral.sq_of_deriv (f v : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b)
+    (diff : ∀ x ∈ (fun z => a ≤ z ∧ z ≤ b), has_deriv_within f (fun z => a ≤ z ∧ z ≤ b) x (v x)) :
+    darboux.has_integral (fun x => (f x)^2) a b (darboux.integral a b (fun x => (f x)^2))
+  apply darboux.integral.continuous_within (fun x => (f x)^2) a b ab
+  intro x lo hi
+  exact has_deriv_within.continuous_within (fun z => (f z)^2) (fun z => a ≤ z ∧ z ≤ b) x (2*f x*v x) (has_deriv_within.sq f (fun z => a ≤ z ∧ z ≤ b) x (v x) (diff x ⟨lo,hi⟩))
+
+@[auto] + darboux.integral.zero_of_sq_nonpos (f : ℝ → ℝ) (a b x : ℝ) (ab : a < b) (ax : a ≤ x) (xb : x ≤ b)
+    (cont : ∀ z, a ≤ z → z ≤ b → continuous_within_at f (fun y => a ≤ y ∧ y ≤ b) z)
+    (bound : darboux.integral a b (fun z => (f z)^2) ≤ 0) : f x = 0
+  by_contra ne
+  have sq : ∀ z, a ≤ z → z ≤ b → continuous_within_at (fun y => (f y)^2) (fun y => a ≤ y ∧ y ≤ b) z
+    intro z az zb; exact continuous_at.comp_within (fun y => y^2) f (fun y => a ≤ y ∧ y ≤ b) z (by auto) (cont z az zb)
+  have area := darboux.integral.continuous_within (fun z => (f z)^2) a b (by linarith) sq
+  linarith [darboux.pos_of_pos_at (fun z => (f z)^2) a b (darboux.integral a b (fun z => (f z)^2)) x ab ax xb area (by intro z az zb; exact sq_nonneg.real (f z)) (sq x ax xb) (sq_pos_of_ne_zero.real (f x) ne)]

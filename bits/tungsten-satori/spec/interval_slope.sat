@@ -1,0 +1,24 @@
+import interval_slope
+
++ affine (x m c : ℝ) (S : set ℝ) : has_deriv_within (fun z => m*z+c) S x m := by auto
++ square (x : ℝ) (S : set ℝ) : has_deriv_within (fun z => z^2) S x (2*x) := by auto
+
++ quadratic_increment (a b : ℝ) (h : a ≤ b) : b^2-a^2 ≤ 2*b*(b-a)
+  apply interval.increment_le_of_deriv_le (fun z => z^2) (fun z => 2*z) a b (2*b) h
+  · intro t lo hi; auto
+  · intro t lo hi; linarith
+
++ decreasing (a b m c : ℝ) (h : a ≤ b) (neg : m ≤ -1) : (m*b+c)-(m*a+c) ≤ (-1)*(b-a)
+  apply interval.increment_le_of_deriv_le (fun z => m*z+c) (fun z => m) a b (-1) h
+  · intro t lo hi; auto
+  · intro t lo hi; exact neg
+
++ empty_partition (f : ℝ → ℝ) (t : ℕ → ℝ) (M : ℝ) : f (t 0)-f (t 0) ≤ M*(t 0-t 0)
+  apply interval.increment_le_of_partition f t M 0
+  intro i hi; omega
+
+opaque reading : ℝ → ℝ
+opaque rate : ℝ → ℝ
+axiom measured_deriv : ∀ t, 0 ≤ t → t ≤ 1 → has_deriv_within reading (fun z => 0 ≤ z ∧ z ≤ 1) t (rate t)
++ measured (upper : ∀ t, 0 ≤ t → t ≤ 1 → rate t ≤ 3) : reading 1-reading 0 ≤ 3*(1-0)
+  exact interval.increment_le_of_deriv_le reading rate 0 1 3 (by decide) measured_deriv upper

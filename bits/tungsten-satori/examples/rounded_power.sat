@@ -1,0 +1,18 @@
+-- Kahn–Kalai constant, corpus family 176. At n = 65 there are 2080 edges.
+-- Each pair gives an exponent and a rational lower bound after that power.
+import power_bound
+
+-> edge_rounds : list (ℕ × ℚ) :=
+  let scale : ℚ := 1000000000000;
+  [(4,998667973570/scale), (4,994682530595/scale), (2,989393336670/scale),
+   (5,948079826933/scale), (13,500015855327/scale)]
+
++ edge_power (x : ℚ) (hx : x = 2079307 / 2080000) : (1 / 2 : ℚ) < x ^ 2080
+  exact power_bound.strict edge_rounds (2079307/2080000) x (1/2) (by linarith) (by decide) (by decide)
+
+-- p ≤ C·p_E = C/4160 and P(K₂ ⊆ G(65, p)) = 1 − (1 − p)^2080 ≥ 1/2 force C ≥ 1.386
++ edge_constant (C p y : ℚ) (hy : y = 1 - p) (hp : p ≤ C / 4160) (hc : 1 / 2 ≤ 1 - y ^ 2080) : 1386 / 1000 ≤ C
+  by_contra h
+  set x : ℚ := 2079307 / 2080000 with hx
+  have lower := edge_power x hx
+  linarith [pow_le_pow_left.rat x y 2080 (by linarith) (by linarith)]

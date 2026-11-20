@@ -3,3 +3,6 @@
 
 + square_sum (x y : ℚ) : square (x+y) = square x+2*area x y+square y
   ring
+
++ square_pair (x y : ℚ) :
+    square (x+y) = square x+2*area x y+square y ∧ square (x-y) = square x-2*area x y+square y := by ring

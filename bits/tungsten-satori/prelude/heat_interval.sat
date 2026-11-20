@@ -1,0 +1,143 @@
+-- Spatial integration by parts and energy decay for the one-dimensional heat equation.
+import interval_balance
+
++ heat_interval.balance (u q r : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b)
+    (smooth : ∀ x, a ≤ x → x ≤ b → continuous_at u x ∧ continuous_at q x ∧ continuous_at r x)
+    (du : ∀ x, a ≤ x → x ≤ b → has_deriv_within u (fun z => a ≤ z ∧ z ≤ b) x (q x))
+    (dq : ∀ x, a ≤ x → x ≤ b → has_deriv_within q (fun z => a ≤ z ∧ z ≤ b) x (r x)) :
+    darboux.integral a b (fun x => u x*r x) + darboux.integral a b (fun x => (q x)^2) = u b*q b-u a*q a
+  have sq : (fun x => q x*q x) = (fun x => (q x)^2) := by ring
+  have products : ∀ x, a ≤ x → x ≤ b → continuous_at (fun y => q y*q y) x ∧ continuous_at (fun y => u y*r y) x
+    intro x lo hi; obtain ⟨hu,hq,hr⟩ := smooth x lo hi; constructor <;> auto
+  have balance := darboux.integral.by_parts u q q r a b ab products du dq
+  rw [sq] at balance
+  linarith
+
++ heat_interval.dissipative (u q r : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b)
+    (smooth : ∀ x, a ≤ x → x ≤ b → continuous_at u x ∧ continuous_at q x ∧ continuous_at r x)
+    (du : ∀ x, a ≤ x → x ≤ b → has_deriv_within u (fun z => a ≤ z ∧ z ≤ b) x (q x))
+    (dq : ∀ x, a ≤ x → x ≤ b → has_deriv_within q (fun z => a ≤ z ∧ z ≤ b) x (r x))
+    (boundary : u b*q b ≤ u a*q a) : darboux.integral a b (fun x => u x*r x) ≤ 0
+  have cont : ∀ x, a ≤ x → x ≤ b → continuous_at (fun y => (q y)^2) x
+    intro x lo hi; obtain ⟨hu,hq,hr⟩ := smooth x lo hi; auto
+  have low := darboux.integral.nonneg (fun x => (q x)^2) a b ab cont (by intro x lo hi; exact sq_nonneg.real (q x))
+  linarith [heat_interval.balance u q r a b ab smooth du dq]
+
+-- Time comes first in each field. q is the spatial derivative and r is both u_xx and u_t.
+-> heat_interval.solution (u q r : ℝ → ℝ → ℝ) (T X : set ℝ) : Prop :=
+  ∀ t ∈ T, ∀ x ∈ X, continuous_within_box u T X t x ∧ continuous_within_box r T X t x ∧
+    has_deriv_within (u t) X x (q t x) ∧ has_deriv_within (q t) X x (r t x) ∧
+    has_deriv_within (fun s => u s x) T t (r t x)
+
+-- Heat content obeys the same local balance law, with flux u_x.
++ heat_interval.solution.balance (u q r : ℝ → ℝ → ℝ) (T X : set ℝ) (flow : heat_interval.solution u q r T X) :
+    interval.balance u q r T X
+  unfold heat_interval.solution at flow; unfold interval.balance; constructor
+  · unfold has_continuous_time_deriv; intro t ht x hx
+    obtain ⟨uc,rc,ux,qx,ut⟩ := flow t ht x hx
+    exact ⟨continuous_within_box.slice u T X t x ht uc,rc,ut⟩
+  · intro t ht x hx; obtain ⟨uc,rc,ux,qx,ut⟩ := flow t ht x hx; exact qx
+
+-> heat_interval.energy (u : ℝ → ℝ → ℝ) (a b t : ℝ) : ℝ := darboux.integral a b (fun x => (u t x)^2)
+
++ heat_interval.solution.energy_density (u q r : ℝ → ℝ → ℝ) (T X : set ℝ) (flow : heat_interval.solution u q r T X) :
+    has_continuous_time_deriv (fun t x => (u t x)^2) (fun t x => 2*(u t x*r t x)) T X
+  apply has_continuous_time_deriv.sq u r T X
+  unfold heat_interval.solution at flow; intro t ht x hx
+  obtain ⟨uc,rc,ux,qx,ut⟩ := flow t ht x hx; exact ⟨uc,rc,ut⟩
+
+-- Integrating u u_xx by parts exchanges one derivative for the boundary flux.
++ heat_interval.gradient_balance (u q r : ℝ → ℝ) (a b J : ℝ) (ab : a ≤ b)
+    (mixed : darboux.has_integral (fun x => u x*r x) a b J)
+    (ux : interval.deriv u q a b) (qx : interval.deriv q r a b) :
+    darboux.integral a b (fun x => (q x)^2)+J = u b*q b-u a*q a
+  unfold interval.deriv at ux qx
+  have square := darboux.integral.sq_of_deriv q r a b ab (by intro x hx; exact qx x hx.1 hx.2)
+  have prod := darboux.congr (fun x => (q x)^2) (fun x => q x*q x) a b (darboux.integral a b (fun x => (q x)^2)) square (by intro x lo hi; ring)
+  exact darboux.by_parts u q q r a b (darboux.integral a b (fun x => (q x)^2)) J prod mixed ux qx
+
++ heat_interval.energy_rate (u q r : ℝ → ℝ → ℝ) (a b c d t : ℝ) (ab : a ≤ b) (ct : c ≤ t) (td : t ≤ d)
+    (flow : heat_interval.solution u q r (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b)) :
+    has_deriv_within (heat_interval.energy u a b) (fun z => c ≤ z ∧ z ≤ d) t (2*(u t b*q t b-u t a*q t a-heat_interval.energy q a b t))
+  have density := heat_interval.solution.energy_density u q r (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b) flow
+  have deriv := darboux.integral.time_deriv (fun s x => (u s x)^2) (fun s x => 2*(u s x*r s x)) a b c d t ab ct td density
+  unfold heat_interval.solution at flow
+  have spatial := flow t ⟨ct,td⟩
+  have ux : ∀ x, a ≤ x → x ≤ b → has_deriv_within (u t) (fun z => a ≤ z ∧ z ≤ b) x (q t x) := by intro x lo hi; have h := spatial x ⟨lo,hi⟩; exact h.2.2.1
+  have qx : ∀ x, a ≤ x → x ≤ b → has_deriv_within (q t) (fun z => a ≤ z ∧ z ≤ b) x (r t x) := by intro x lo hi; have h := spatial x ⟨lo,hi⟩; exact h.2.2.2.1
+  have mixed := darboux.integral.box_slice (fun s x => u s x*r s x) (fun z => c ≤ z ∧ z ≤ d) a b t ⟨ct,td⟩ ab (by intro x hx; obtain ⟨uc,rc,rest⟩ := spatial x hx; exact continuous_within_box.mul u r (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b) t x uc rc)
+  have twice := darboux.agrees.scale darboux.integral darboux.integral_agrees a b 2 (fun x => u t x*r t x) mixed
+  have balance := heat_interval.gradient_balance (u t) (q t) (r t) a b (darboux.integral a b (fun x => u t x*r t x)) ab mixed ux qx
+  have flux : darboux.integral a b (fun x => 2*(u t x*r t x)) = 2*(u t b*q t b-u t a*q t a-heat_interval.energy q a b t) := by unfold heat_interval.energy; linarith
+  rw [flux] at deriv; exact deriv
+
++ heat_interval.energy_le (u q r : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.solution u q r (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b))
+    (boundary : ∀ t, c ≤ t → t ≤ d → u t b*q t b ≤ u t a*q t a) :
+    heat_interval.energy u a b d ≤ heat_interval.energy u a b c
+  apply interval.nonincreasing_of_deriv_nonpos (heat_interval.energy u a b) (fun t => 2*(u t b*q t b-u t a*q t a-heat_interval.energy q a b t)) c d cd
+  · intro t lo hi; exact heat_interval.energy_rate u q r a b c d t ab lo hi flow
+  · unfold heat_interval.solution at flow
+    intro t lo hi
+    have square := darboux.integral.sq_of_deriv (q t) (r t) a b ab (by intro x hx; have row := flow t ⟨lo,hi⟩ x hx; exact row.2.2.2.1)
+    have pos := darboux.nonneg (fun x => (q t x)^2) a b (heat_interval.energy q a b t) square (by intro x ax xb; exact sq_nonneg.real (q t x))
+    linarith [boundary t lo hi]
+
+@[auto] + heat_interval.insulated (u q r : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.solution u q r (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b))
+    (ends : ∀ t, c ≤ t → t ≤ d → q t a = 0 ∧ q t b = 0) :
+    heat_interval.energy u a b d ≤ heat_interval.energy u a b c
+  apply heat_interval.energy_le u q r a b c d ab cd flow
+  intro t lo hi; obtain ⟨left,right⟩ := ends t lo hi
+  rw [left,right]; linarith
+
++ heat_interval.solution.sub (u q r v p s : ℝ → ℝ → ℝ) (T X : set ℝ)
+    (hu : heat_interval.solution u q r T X) (hv : heat_interval.solution v p s T X) :
+    heat_interval.solution (fun t x => u t x-v t x) (fun t x => q t x-p t x) (fun t x => r t x-s t x) T X
+  unfold heat_interval.solution at hu hv ⊢
+  intro t ht x hx
+  obtain ⟨uc,rc,ux,qx,ut⟩ := hu t ht x hx
+  obtain ⟨vc,sc,vx,px,vt⟩ := hv t ht x hx
+  exact ⟨continuous_within_box.sub u v T X t x uc vc,continuous_within_box.sub r s T X t x rc sc,
+    has_deriv_within.sub (u t) (v t) X x (q t x) (p t x) ux vx,has_deriv_within.sub (q t) (p t) X x (r t x) (s t x) qx px,
+    has_deriv_within.sub (fun z => u z x) (fun z => v z x) T t (r t x) (s t x) ut vt⟩
+
++ heat_interval.solution.restrict_time (u q r : ℝ → ℝ → ℝ) (S T X : set ℝ)
+    (flow : heat_interval.solution u q r S X) (sub : ∀ z ∈ T, z ∈ S) : heat_interval.solution u q r T X
+  unfold heat_interval.solution at flow ⊢
+  intro t ht x hx
+  obtain ⟨uc,rc,ux,qx,ut⟩ := flow t (sub t ht) x hx
+  exact ⟨continuous_within_box.restrict_time u S T X t x uc sub,continuous_within_box.restrict_time r S T X t x rc sub,
+    ux,qx,has_deriv_within.restrict (fun s => u s x) S T t (r t x) ut sub⟩
+
+-- At any later time, the squared distance of two solutions with the same endpoint fluxes can only decrease.
+@[auto] + heat_interval.contraction (u q r v p s : ℝ → ℝ → ℝ) (a b c d t : ℝ) (ab : a ≤ b) (ct : c ≤ t) (td : t ≤ d)
+    (hu : heat_interval.solution u q r (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b))
+    (hv : heat_interval.solution v p s (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b))
+    (ends : ∀ k, c ≤ k → k ≤ d → q k a = p k a ∧ q k b = p k b) :
+    heat_interval.energy (fun k x => u k x-v k x) a b t ≤ heat_interval.energy (fun k x => u k x-v k x) a b c
+  have diff := heat_interval.solution.sub u q r v p s (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b) hu hv
+  have sub : ∀ z ∈ (fun z => c ≤ z ∧ z ≤ t), z ∈ (fun z => c ≤ z ∧ z ≤ d) := by intro z hz; exact ⟨hz.1,by linarith [hz.2]⟩
+  have flow := heat_interval.solution.restrict_time (fun k x => u k x-v k x) (fun k x => q k x-p k x) (fun k x => r k x-s k x) (fun z => c ≤ z ∧ z ≤ d) (fun z => c ≤ z ∧ z ≤ t) (fun z => a ≤ z ∧ z ≤ b) diff sub
+  apply heat_interval.insulated (fun k x => u k x-v k x) (fun k x => q k x-p k x) (fun k x => r k x-s k x) a b c t ab ct flow
+  intro k ck kt; obtain ⟨left,right⟩ := ends k ck (by linarith)
+  constructor <;> linarith
+
+@[auto] + heat_interval.unique (u q r v p s : ℝ → ℝ → ℝ) (a b c d t x : ℝ) (ab : a < b) (ct : c ≤ t) (td : t ≤ d) (ax : a ≤ x) (xb : x ≤ b)
+    (hu : heat_interval.solution u q r (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b))
+    (hv : heat_interval.solution v p s (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b))
+    (initial : ∀ z, a ≤ z → z ≤ b → u c z = v c z)
+    (ends : ∀ k, c ≤ k → k ≤ d → q k a = p k a ∧ q k b = p k b) : u t x = v t x
+  have decay := heat_interval.contraction u q r v p s a b c d t (by linarith) ct td hu hv ends
+  unfold heat_interval.energy at decay
+  have start := darboux.congr (fun z => 0) (fun z => (u c z-v c z)^2) a b (0*(b-a)) (darboux.const a b 0 (by linarith)) (by intro z az zb; rw [initial z az zb]; ring)
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  rw [agree a b (fun z => (u c z-v c z)^2) (0*(b-a)) start] at decay
+  have diff := heat_interval.solution.sub u q r v p s (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b) hu hv
+  unfold heat_interval.solution at diff
+  have row := diff t ⟨ct,td⟩
+  have spatial : ∀ z, a ≤ z → z ≤ b → continuous_within_at (fun y => u t y-v t y) (fun y => a ≤ y ∧ y ≤ b) z
+    intro z az zb; have here := row z ⟨az,zb⟩
+    exact continuous_within_box.slice (fun k y => u k y-v k y) (fun k => c ≤ k ∧ k ≤ d) (fun y => a ≤ y ∧ y ≤ b) t z ⟨ct,td⟩ here.1
+  have zero := darboux.integral.zero_of_sq_nonpos (fun z => u t z-v t z) a b x ab ax xb spatial (by linarith)
+  linarith

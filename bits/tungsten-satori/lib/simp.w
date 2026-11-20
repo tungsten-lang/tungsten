@@ -11,7 +11,9 @@
     @by_head = {}
     @general = []
     @steps = 0
+    @normal_terms = nil
     @step_limit = 20000
+    @literal_steps = 128
     @hyp_rules = []
     @discharger = nil
     @infer_conditions = false
@@ -67,9 +69,38 @@
         return th
     try_rule_list(@general, t, depth, at_head)
 
-  -> apply_rule(r, t, depth)
+  # For an explicitly named definition, view a small natural literal as
+  # predecessor + offset when its defining pattern asks for that shape.
+  # Build the conversion only at matching positions; all other arguments stay folded.
+  -> literal_pattern_conv(pattern, t)
+    if pattern.tag != :app
+      return nil
+    if t.tag == :lit && t.ty == TY_NAT_SINGLETON && t.val <= 32
+      if pattern.a.tag != :app || pattern.a.a.op != OP_ADD || pattern.a.b.tag != :var
+        return nil
+      offset = pattern.b
+      if offset.tag != :lit || offset.ty != t.ty || offset.val <= 0 || offset.val > t.val
+        return nil
+      expanded = mk_app_raw(mk_app_raw(pattern.a.a, mk_lit(t.val - offset.val, t.ty)), offset)
+      return @k.sym(@k.compute(expanded))
+    if t.tag != :app
+      return nil
+    f = literal_pattern_conv(pattern.a, t.a)
+    x = literal_pattern_conv(pattern.b, t.b)
+    if f == nil && x == nil
+      return nil
+    @k.mk_comb(f == nil ? @k.refl(t.a) : f, x == nil ? @k.refl(t.b) : x)
+
+  -> apply_rule(r, t, depth, try_literals = true)
     mt = Matcher.new(r.pvars, r.tvs)
     if !mt.m(r.lhs, t, 0)
+      if try_literals && r.literal_patterns && @literal_steps > 0
+        conv = literal_pattern_conv(r.lhs, t)
+        if conv != nil
+          step = apply_rule(r, conv.concl.b, depth, false)
+          if step != nil
+            @literal_steps -= 1
+            return @k.trans(conv, step)
       # With fixed types and no binders, a failed first-order match cannot
       # change on retry: none of its bindings can introduce a beta/eta step.
       if r.tvs.size == 0 && r.lhs.mx == 0 && ((r.lhs.search_ops | t.search_ops) & TERM_LAMBDA) == 0
@@ -242,7 +273,19 @@
     @steps += 1
     if @steps > @step_limit
       raise "simp: step limit exceeded (looping rules?)"
+    memo = @normal_terms != nil && depth == 0 && t.tag == :app
+    if memo
+      entry = @normal_terms[t.h & 255]
+      if entry != nil && tm_eq(entry[0], t)
+        return entry[1]
     th = sub_simp_opt(t, depth)
+    result = finish_simp_opt(t, depth, th)
+    if memo
+      @normal_terms[t.h & 255] = [t, result]
+    result
+
+  # Continue at the head when the caller already has the child conversions.
+  -> finish_simp_opt(t, depth, th)
     cur = th == nil ? t : dest_binop(th.concl, "=")[1]
     rounds = 0
     while rounds < 64
@@ -268,6 +311,17 @@
     if th == nil
       return @k.refl(t)
     th
+
+  # A defining equation may duplicate an already normalized argument.
+  # Reuse checked subterm conversions for this call with fixed rules.
+  -> simp_definition_conv(t, children_only = false)
+    @normal_terms = Array.new(256)
+    begin
+      if children_only
+        return sub_simp_opt(t, 0)
+      simp_conv(t, 0)
+    ensure
+      @normal_terms = nil
 
   # Fixed names in rewrite proofs and local facts must stay free when entering
   # a binder. Cache rule names; hypothesis rules can change between calls.

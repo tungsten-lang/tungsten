@@ -1,0 +1,13 @@
++ guarded (S : set α) (A B C D : α → Prop) (rows : ∀ x ∈ S, A x ∧ ((B x ∧ C x) ∧ D x)) :
+    ∀ y ∈ S, C y := by auto
++ interleaved (S : set α) (T : α → set β) (A B : α → β → Prop)
+    (rows : ∀ x ∈ S, ∀ y ∈ T x, A x y ∧ B x y) : ∀ i ∈ S, ∀ j ∈ T i, B i j := by auto
++ subtree (S : set α) (A B C : α → Prop) (rows : ∀ x ∈ S, (A x ∧ B x) ∧ C x) :
+    ∀ y ∈ S, A y ∧ B y := by auto
+opaque scope : set ℕ
+opaque p : ℕ → Prop
+opaque q : ℕ → Prop
+axiom evidence : ∀ x ∈ scope, p x ∧ q x
+axiom irrelevant : ∀ x ∈ scope, p x
++ provenance : ∀ x ∈ scope, q x := by auto [evidence,irrelevant]
+#axioms provenance

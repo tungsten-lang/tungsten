@@ -1,0 +1,40 @@
+import localized_derivation
+
++ chart_direction (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (U : set α) (f : β → γ) (D : α → γ)
+    (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T) (loc : localization R S i U)
+    (hom : ring_hom S T f) (dir : derivation_at R T (fun a => f (i a)) D) :
+    ∃! E, derivation_at S T f E ∧ ∀ a, E (i a) = D a := by auto
+
++ quotient (R : ring_ops α) (T : ring_ops β) (f D : α → β) (a d y : α) (u : β) (ht : comm_ring T)
+    (dir : derivation_at R T f D) (fraction : R.mul d y = a) (inverse : T.mul u (f d) = T.one) :
+    D y = T.mul u (T.add (D a) (T.neg (T.mul (D d) (f y)))) := by auto
+
++ unit_jet (R : ring_ops α) (x : dual α) (hr : comm_ring R) :
+    ring_ops.unit (dual.ops R) x ↔ ring_ops.unit R x.re := by auto
+
+#axioms chart_direction
+#axioms quotient
+#axioms unit_jet
+
++ ordinary (R : ring_ops α) (S : ring_ops β) (i : α → β) (U : set α) (D : α → α)
+    (hr : comm_ring R) (hs : comm_ring S) (loc : localization R S i U) (dir : derivation_at R R (fun a => a) D) :
+    ∃! E, derivation_at S S (fun y => y) E ∧ ∀ a, E (i a) = i (D a) := by auto
+#axioms ordinary
+
+-- In ℚ[ε], (6+5ε)/(2+3ε) has value 3 and first derivative -2.
++ fraction_exists : (dual.ops ring_ops.rat).mul (dual.mk 2 3) (dual.mk 3 (-2)) = dual.mk 6 5 := by decide
++ quotient_at_two (y : dual ℚ) (rep : (dual.ops ring_ops.rat).mul (dual.mk 2 3) y = dual.mk 6 5) : y.du = -2
+  have pt := dual.re_hom ring_ops.rat
+  have id : ring_hom (dual.ops ring_ops.rat) (dual.ops ring_ops.rat) (fun x => x) := by unfold ring_hom; auto
+  have dir := dual.derivation (dual.ops ring_ops.rat) ring_ops.rat (fun x => x) id
+  have value := ring_hom.solve_unit (dual.ops ring_ops.rat) ring_ops.rat dual.re comm_ring.rat pt (dual.mk 2 3) y (dual.mk 6 5) (1/2) (by decide) rep
+  have slope := derivation_at.fraction (dual.ops ring_ops.rat) ring_ops.rat dual.re dual.du (dual.mk 6 5) (dual.mk 2 3) y (1/2) comm_ring.rat dir rep (by decide)
+  rw [value] at slope; exact slope
+
+-- Killing ε identifies two inputs with different tangents. This quotient cannot extend D.
++ lost_direction : ¬ ∃ E : ℚ → ℚ, ∀ x : dual ℚ, E x.re = x.du
+  intro h; obtain ⟨E,agree⟩ := h
+  have first : E 0 = 0 := agree (dual.mk 0 0)
+  have second : E 0 = 1 := agree (dual.mk 0 1)
+  have distinct : (0:ℚ) ≠ 1 := by decide
+  rw [first] at second; exact distinct second

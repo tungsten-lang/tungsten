@@ -8,3 +8,18 @@ import application_types
 + swap_types (p : α → β → Prop) (q : β → α → Prop) (x : α) (y : β) (h : p x y) : q y x := by exact (relation_iff p x y).mp h
 + wrong_witness (p : α → Prop) (x y : α) (h : p x) : ∃ z, p z := by exact (exists_iff p).mpr ⟨y, h⟩
 + captured_binder (p : α → Prop) (x : α) (h : p x) : ∀ x, p x := by intro y; exact (predicate_iff p y).mp h
+
++ ambiguous_witness (P : α → Prop) (x y : α) (hx : P x) (hy : P y) : ∃ z, P z := by apply exists_from_witness <;> assumption
++ missing_property (P Q : α → Prop) (x : α) (hx : P x) : ∃ y, P y ∧ Q y := by apply shared_witness <;> assumption
++ mismatched_witnesses (P Q : α → Prop) (x y : α) (hx : P x) (hy : Q y) : ∃ z, P z ∧ Q z := by apply shared_witness <;> assumption
+
++ ambiguous_pair (P : α → Prop) (Q : β → Prop) (x z : α) (y : β) (hx : P x) (hz : P z) (hy : Q y) :
+    ∃ a b, P a ∧ Q b := by apply witnesses <;> assumption
+
++ pair_missing (P Q : Prop) (p : P) : paired P Q := ⟨p,p⟩
++ invalid_field (P Q : Prop) (e : equivalent P Q) : P := e.1
++ wrong_direction (P Q : Prop) (f : P → Q) : equivalent P Q := ⟨f,f⟩
+
++ ambiguous_value (P : α → Prop) (g : β → γ) (b : γ) (x : α) (y z : β)
+    (hx : P x) (hy : g y = b) (hz : g z = b) :
+    ∃ v w, P v ∧ g w = b := by apply witnesses_at_value <;> assumption

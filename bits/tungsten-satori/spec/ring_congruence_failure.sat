@@ -1,0 +1,7 @@
+opaque measure : (ℝ → ℝ) → ℝ
+opaque other : (ℝ → ℝ) → ℝ
+
++ capture (x : ℝ) : measure (fun y => x) = measure (fun y => y) := by auto
++ swapped : (fun (x : ℤ) (y : ℤ) => x-y) = (fun x y => y-x) := by ring
++ wrong_head (f : ℝ → ℝ) : measure f = other f := by ring
++ underflow (f : ℕ → ℕ) (x y : ℕ) : f (x-y+y) = f x := by ring

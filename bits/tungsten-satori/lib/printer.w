@@ -57,19 +57,19 @@ PP_BOUNDED_RELS = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
   when :lit
     show_lit(t)
   when :lam
-    nm = pp_fresh(t.name, names)
+    nm = pp_fresh(t, names)
     binder = pp_cast_binder?(t) ? "(" + nm + " : " + ty_show(t.ty) + ")" : nm
     paren_if("fun " + binder + " => " + tm_pp(t.b, names + [nm], 0), prec > 0)
   else
     tm_pp_app(t, names, prec)
 
--> pp_fresh(hint, names)
-  base = hint
+-> pp_fresh(lam, names)
+  base = lam.name
   if base == nil || base == ""
     base = "x"
   nm = base
   k = 0
-  while names.include?(nm)
+  while names.include?(nm) || tm_name_free?(nm, lam.b)
     k += 1
     nm = base + k.to_s
   nm
@@ -94,7 +94,7 @@ PP_BOUNDED_RELS = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
       if src.tag != :var && src.tag != :bnd
         operand = "(" + operand + " : " + ty_show(type_of(src)) + ")"
       return "(" + operand + " : " + ty_show(type_of(t)) + ")"
-    if (nm == "∀" || nm == "∃" || nm == "ε") && args.size == 1 && args[0].tag == :lam
+    if (nm == "∀" || nm == "∃") && args.size == 1 && args[0].tag == :lam
       typed = pp_cast_binder?(args[0])
       if !typed
         bq = pp_bounded(nm, args[0], names, prec)
@@ -105,12 +105,12 @@ PP_BOUNDED_RELS = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
       cur = args[0]
       nms = names
       while true
-        bn = pp_fresh(cur.name, nms)
+        bn = pp_fresh(cur, nms)
         bns.push(bn)
         nms = nms + [bn]
         inner = cur.b
         isp = strip_app(inner)
-        if nm != "ε" && isp[0].tag == :const && isp[0].name == nm && isp[1].size == 1 && isp[1][0].tag == :lam && typed == pp_cast_binder?(isp[1][0]) && (!typed || ty_eq(cur.ty, isp[1][0].ty))
+        if isp[0].tag == :const && isp[0].name == nm && isp[1].size == 1 && isp[1][0].tag == :lam && typed == pp_cast_binder?(isp[1][0]) && (!typed || ty_eq(cur.ty, isp[1][0].ty))
           cur = isp[1][0]
         else
           break
@@ -132,7 +132,7 @@ PP_BOUNDED_RELS = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
       if nm.ends_with?("list")
         rel = " ∈ "
       lam = args[1]
-      bn = pp_fresh(lam.name, names)
+      bn = pp_fresh(lam, names)
       s2 = op + " " + bn + rel + tm_pp(args[0], names, 66) + ", " + tm_pp(lam.b, names + [bn], 66)
       # the body extends to the right, so any operator context needs parentheses: (∑ i < n, f i) + f n
       return paren_if(s2, prec > 0)
@@ -177,7 +177,7 @@ PP_BOUNDED_RELS = [["<", " < "], ["≤", " ≤ "], ["mem", " ∈ "]]
     if out == nil
       d = dest_binop(g[0], r[0])
       if d != nil && d[0].tag == :bnd && d[0].idx == 0 && !lam_count_bound(d[1], 0)
-        bn = pp_fresh(lam.name, names)
+        bn = pp_fresh(lam, names)
         bound = tm_pp(d[1], names + [bn], 66)
         out = paren_if(q + " " + bn + r[1] + bound + ", " + tm_pp(g[1], names + [bn], 0), prec > 0)
   out

@@ -1,0 +1,28 @@
+-- Comparison tests for real series and their partial sums.
+import limit_order
+
+@[auto] + monotone_seq.converges_of_le (a b : ℕ → ℝ) (B : ℝ) (mono : monotone_seq a)
+    (hb : tends_to b B) (bound : ∀ n, a n ≤ b n) : converges a
+  unfold tends_to at hb
+  obtain ⟨N, near⟩ := hb 1 (by decide)
+  apply monotone_seq.converges_of_upper_bound a (B+1) mono
+  unfold monotone_seq at mono
+  intro n
+  have hi := (abs_lt.real (b (n+N) - B) 1).mp (near (n+N) (by omega))
+  linarith [mono n (n+N) (by omega), bound (n+N)]
+
+@[auto] + partial_sum.le_of_le (a b : ℕ → ℝ) (le : ∀ i, a i ≤ b i) (n : ℕ) : partial_sum a n ≤ partial_sum b n
+  unfold partial_sum
+  apply sum_le.real
+  intro i hi
+  exact le i
+
+@[auto] + summable.of_partial_sum_le (a : ℕ → ℝ) (B : ℝ) (nonneg : ∀ i, 0 ≤ a i) (bound : ∀ n, partial_sum a n ≤ B) : summable a
+  unfold summable
+  exact monotone_seq.converges_of_upper_bound (partial_sum a) B (partial_sum.monotone a nonneg) bound
+
+@[auto] + summable.of_nonneg_le (a b : ℕ → ℝ) (nonneg : ∀ i, 0 ≤ a i) (le : ∀ i, a i ≤ b i) (hb : summable b) : summable a
+  unfold summable converges at hb
+  obtain ⟨B, limit⟩ := hb
+  unfold summable
+  exact monotone_seq.converges_of_le (partial_sum a) (partial_sum b) B (partial_sum.monotone a nonneg) limit (partial_sum.le_of_le a b le)

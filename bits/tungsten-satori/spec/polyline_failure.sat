@@ -1,0 +1,15 @@
+import polyline
+
+-- Extending a prefix can change values beyond its last knot.
++ future (t m : ℕ → ℝ) (x : ℝ) (h : t 1 < x) (ord : ∀ i < 2, t i ≤ t (i+1)) :
+    polyline t m 0 2 x = polyline t m 0 1 x := by auto
++ crossed_corner (t m : ℕ → ℝ) (x y : ℝ) (ord : ∀ i < 2, t i ≤ t (i+1))
+    (lo : t 0 ≤ x) (mid : x < t 1 ∧ t 1 < y) (up : y ≤ t 2) :
+    polyline t m 0 2 y-polyline t m 0 2 x = m 0*(y-x) := by auto
++ unordered (t m : ℕ → ℝ) (x y : ℝ) (lo : t 0 ≤ x) (xy : x ≤ y) (up : y ≤ t 1) :
+    polyline t m 0 2 y-polyline t m 0 2 x = m 0*(y-x) := by auto
++ missing_step (t m h : ℕ → ℝ) (ord : ∀ i < 2, t i ≤ t (i+1))
+    (step : ∀ i < 1, h (i+1)-h i = m i*(t (i+1)-t i)) : polyline t m (h 0) 2 (t 2) = h 2 := by auto
++ outside_cover (t m : ℕ → ℝ) (x : ℝ) (past : t 1 < x) (ord : ∀ i < 1, t i ≤ t (i+1)) :
+    polyline t m 0 1 x-polyline t m 0 1 (t 1) ≤ (-1)*(x-t 1)
+  apply polyline.increment_le t m 0 1 (t 1) x (-1) ord (ord 0 (by decide)) (by linarith) (by linarith)

@@ -1,0 +1,34 @@
+import darboux
+
++ restricted_constant (a b c : ℝ) (ab : a ≤ b) :
+    darboux.has_integral (fun x => if a ≤ x then c else x) a b (c*(b-a))
+  apply darboux.congr (fun x => c) (fun x => if a ≤ x then c else x) a b (c*(b-a)) (darboux.const a b c ab)
+  intro x ax xb; simp [ax]
+
++ degenerate (f : ℝ → ℝ) (a : ℝ) : darboux.has_integral f a a 0 := by auto
+
++ two_values (f : ℝ → ℝ) (I J : ℝ) (u : darboux.has_integral f 0 2 I) (v : darboux.has_integral f 0 2 J) : I = J
+  exact darboux.unique f 0 2 I J u v
+
++ average_bound (f : ℝ → ℝ) (I : ℝ) (h : darboux.has_integral f 2 5 I) (bounded : ∀ x, 2 ≤ x → x ≤ 5 → f x ≤ 4) : I ≤ 12
+  linarith [darboux.le_const f 2 5 I 4 h bounded]
+
+-- Heights 0 and 1 on [0,1] and [1,2] give a lower sum of 1 for f(x)=x.
++ two_rectangles : 1 ∈ darboux.lower_sums (fun x => x) 0 2
+  have empty : darboux.lower_sum (fun x => x) 0 2 2 0 := by simp [darboux.lower_sum]
+  have right := darboux.rectangle (fun x => x) 0 1 2 2 1 0 (by decide) (by decide) (by intro x lo hi; exact lo) empty
+  have both := darboux.rectangle (fun x => x) 1 0 1 2 0 1 (by decide) (by decide) (by intro x lo hi; exact lo) (by simpa using right)
+  unfold darboux.lower_sums
+  use 2; simpa using both
+
++ opposite (f : ℝ → ℝ) (I : ℝ) (h : darboux.has_integral f 0 1 I) :
+    darboux.has_integral (fun x => -f x) 0 1 (-I) := by auto
+
++ join (f : ℝ → ℝ) (a b c L R : ℝ) (left : darboux.has_integral f a b L) (right : darboux.has_integral f b c R) :
+    darboux.has_integral f a c (L+R) := by auto
+
++ split_at (f : ℝ → ℝ) (a b c I : ℝ) (ab : a ≤ b) (bc : b ≤ c) (whole : darboux.has_integral f a c I) :
+    ∃ L R, darboux.has_integral f a b L ∧ darboux.has_integral f b c R ∧ I = L+R := by auto
+
++ sum_values (f g : ℝ → ℝ) (I J : ℝ) (hf : darboux.has_integral f 0 2 I) (hg : darboux.has_integral g 0 2 J) :
+    darboux.has_integral (fun x => f x+g x) 0 2 (I+J) := by auto

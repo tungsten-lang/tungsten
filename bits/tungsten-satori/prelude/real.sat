@@ -1,12 +1,7 @@
--- Real analysis vocabulary (import real). Definitions are given in full;
--- the analytic facts below are FOUNDATIONAL axioms of ℝ and of the named
--- functions (each is a standard theorem about the real numbers). Theorems that
--- use them are not tagged, exactly like the ordered-field axioms in core.sat.
+-- Real analysis vocabulary and foundational laws of the named functions.
+-- Monotone convergence follows from the least-upper-bound property.
 
--- order-completeness (least upper bounds)
--> upper_bound (S : set ℝ) (b : ℝ) : Prop := ∀ x ∈ S, x ≤ b
--> is_sup (S : set ℝ) (s : ℝ) : Prop := upper_bound S s ∧ ∀ b, upper_bound S b → s ≤ b
-axiom sup_exists (S : set ℝ) : (∃ x, S x) → (∃ b, upper_bound S b) → ∃ s, is_sup S s
+import real_completeness
 
 -- square root, exponential, logarithm, trigonometry
 opaque sqrt : ℝ → ℝ
@@ -39,4 +34,35 @@ axiom sin_zero : sin 0 = 0
 -> summable (a : ℕ → ℝ) : Prop := converges (partial_sum a)
 -> bounded_seq (a : ℕ → ℝ) : Prop := ∃ B : ℝ, ∀ n, abs (a n) ≤ B
 -> monotone_seq (a : ℕ → ℝ) : Prop := ∀ m n : ℕ, m ≤ n → a m ≤ a n
-axiom monotone_bounded_converges (a : ℕ → ℝ) : monotone_seq a → bounded_seq a → converges a
+
++ monotone_seq.tends_to_sup (a : ℕ → ℝ) (s : ℝ) (mono : monotone_seq a) (hs : is_sup (set.range a) s) : tends_to a s
+  unfold monotone_seq at mono
+  unfold tends_to
+  intro e pos
+  obtain ⟨N, near⟩ := is_sup.exists_range_gt a s (s-e) hs (by linarith)
+  use N
+  intro n hn
+  have lo := mono N n hn
+  have hi := is_sup.range_ge a s hs n
+  by_cases zero : a n - s = 0
+  · rw [zero, abs_of_nonneg.real 0 (by decide)]
+    exact pos
+  · rw [abs_of_neg.real (a n - s) (by linarith)]
+    linarith
+
+@[auto] + monotone_seq.converges_of_upper_bound (a : ℕ → ℝ) (b : ℝ) (mono : monotone_seq a) (bound : ∀ n, a n ≤ b) : converges a
+  obtain ⟨s, hs⟩ := is_sup.range_exists a 0 b bound
+  unfold converges
+  exact ⟨s, monotone_seq.tends_to_sup a s mono hs⟩
+
++ monotone_bounded_converges (a : ℕ → ℝ) : monotone_seq a → bounded_seq a → converges a
+  intro mono bounds
+  unfold bounded_seq at bounds
+  obtain ⟨b, hb⟩ := bounds
+  apply monotone_seq.converges_of_upper_bound a b mono
+  intro n
+  by_cases h : 0 ≤ a n
+  · have upper := hb n
+    rw [abs_of_nonneg.real (a n) h] at upper
+    exact upper
+  · linarith [abs_nonneg.real (a n), hb n]

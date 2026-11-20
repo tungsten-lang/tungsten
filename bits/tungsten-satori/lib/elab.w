@@ -31,7 +31,17 @@
     @type_params = []
 
   -> register_fields(tyname, ctor, fields)
-    @fields[tyname] = [ctor, fields]
+    @fields[tyname] = [ctor, fields.map -> (name) tyname + "." + name]
+
+  -> record_layout(ty)
+    if ty.tag != :c
+      return nil
+    record = @fields[ty.name]
+    if record == nil && ty.name == "prod" && @k.defs.has_key?("fst") && @k.defs.has_key?("snd")
+      info = @k.inductives[ty.name]
+      if info != nil && info.ctors.size == 1 && info.ctors[0][0] == "pair" && info.ctors[0][1].size == 2
+        return ["pair", ["fst", "snd"]]
+    record
 
   -> fresh_meta
     @counter += 1
@@ -203,11 +213,7 @@
   # ---- terms -------------------------------------------------------------------
 
   -> ast_spine(e)
-    args = []
-    while e.kind == :app
-      args.unshift(e.kids[1])
-      e = e.kids[0]
-    [e, args]
+    e.spine
 
   -> lookup_local(n)
     i = @locals.size - 1
@@ -315,16 +321,14 @@
     when :list
       elab_list(e.kids)
     when :setof
-      v = mk_var(e.s, fresh_meta)
-      if e.ty != nil
-        v = mk_var(e.s, elab_type(e.ty))
+      v = bound_var(e.ty == nil ? fresh_meta : elab_type(e.ty))
       push_local(e.s, v)
       body = elab(e.kids[0])
       pop_local
       unify(tyof(body), ty_bool)
-      mk_lam(v, body)
+      bind_lambda(e.s, v, body)
     when :setlit
-      v = mk_var("x", fresh_meta)
+      v = bound_var(fresh_meta)
       body = nil
       e.kids.each -> (x)
         eq = app2("=", v, elab(x))
@@ -334,7 +338,7 @@
           body = app2("∨", body, eq)
       if body == nil
         body = const_inst("⊥")
-      mk_lam(v, body)
+      bind_lambda("x", v, body)
     when :let
       v = elab(e.kids[0])
       if e.ty != nil
@@ -360,25 +364,38 @@
       i -= 1
     t
 
-  -> elab_id(n)
-    v = lookup_local(n)
-    if v != nil
-      return v
+  -> named_const(n)
     if @aliases.has_key?(n)
       return const_inst(@aliases[n])
     if @k.has_const?(n)
       return const_inst(n)
-    # p.x : field projection or namespaced constant
+    nil
+
+  -> elab_id(n)
+    v = lookup_local(n)
+    if v != nil
+      return v
+    c = named_const(n)
+    if c != nil
+      return c
     if n.include?(".")
       parts = n.split(".")
+      i = 1
       base = lookup_local(parts[0])
+      if base == nil
+        # A global record can itself have a qualified name. An exact declared
+        # name above takes precedence over interpreting its suffix as fields.
+        i = parts.size - 1
+        while i > 0
+          base = named_const(parts[0...i].join("."))
+          if base != nil
+            break
+          i -= 1
       if base != nil
-        t = base
-        i = 1
         while i < parts.size
-          t = project(t, parts[i])
+          base = project(base, parts[i])
           i += 1
-        return t
+        return base
     if @allow_auto && auto_name?(n)
       @autobound.each -> (p)
         if p[0] == n
@@ -542,25 +559,29 @@
       return app(s, x)
     raise "∈: right side is not a set or list: " + ty_show(st)
 
-  -> binder_var(b)
-    ty = nil
-    if b.ty != nil
-      ty = elab_type(b.ty)
-    else
-      ty = fresh_meta
-    mk_var(b.name, ty)
+  -> binder_type(b)
+    b.ty == nil ? fresh_meta : elab_type(b.ty)
+
+  # Term lets can carry free variables under later binders. Abstract a fresh
+  # internal variable, retaining the source spelling only as a printing hint.
+  -> bound_var(ty)
+    @counter += 1
+    mk_var("§binder" + @counter.to_s, ty)
+
+  -> bind_lambda(name, v, body)
+    mk_lam_raw(name, v.ty, tm_abstract(body, v, 0))
 
   -> elab_lam(bs, body, i)
     if i >= bs.size
       return elab(body)
-    v = binder_var(bs[i])
+    v = bound_var(binder_type(bs[i]))
     push_local(bs[i].name, v)
     b = elab_lam(bs, body, i + 1)
     pop_local
-    mk_lam(v, b)
+    bind_lambda(bs[i].name, v, b)
 
-  -> quant_of(q, v, body)
-    lam = mk_lam(v, body)
+  -> quant_of(q, v, body, name = nil)
+    lam = bind_lambda(name == nil ? v.name : name, v, body)
     c = const_inst(q)
     app(c, lam)
 
@@ -570,10 +591,10 @@
       unify(tyof(p), ty_bool)
       return p
     b = bs[i]
-    v = binder_var(b)
+    v = bound_var(binder_type(b))
     guard = nil
     if b.rel != nil
-      guard = elab_guard(v, b.rel, b.bound)
+      guard = elab_guard(b.name, v, b.rel, b.bound)
       # ∀ a < 5, …  with a literal bound: the binder defaults to ℕ (as decide expects), so a
       # later ascription (a : ℤ) inserts a coercion instead of retyping the binder
       if b.ty == nil && (b.rel == "<" || b.rel == "≤") && meta?(v.ty)
@@ -586,19 +607,19 @@
       px = inner
       if guard != nil
         px = app2("∧", guard, inner)
-      y = mk_var(b.name + "'", v.ty)
+      y = bound_var(v.ty)
       py = tm_instantiate(tm_abstract(px, v, 0), y, 0)
-      uniq = quant_of("∀", y, app2("⇒", py, app2("=", y, v)))
-      return quant_of("∃", v, app2("∧", px, uniq))
+      uniq = quant_of("∀", y, app2("⇒", py, app2("=", y, v)), b.name + "'")
+      return quant_of("∃", v, app2("∧", px, uniq), b.name)
     if guard != nil
       if q == "∀"
         inner = app2("⇒", guard, inner)
       else
         inner = app2("∧", guard, inner)
-    quant_of(q, v, inner)
+    quant_of(q, v, inner, b.name)
 
-  -> elab_guard(v, rel, bound_ast)
-    push_local(v.name, v)
+  -> elab_guard(name, v, rel, bound_ast)
+    push_local(name, v)
     bt = elab(bound_ast)
     pop_local
     case rel
@@ -718,7 +739,7 @@
       if b.ty != nil && b.ty.kind == :either && !type_expr?(b.ty.kids[0])
         hyps.push(b)
       else
-        v = binder_var(b)
+        v = mk_var(b.name, binder_type(b))
         push_local(b.name, v)
         vars.push([b.name, v, :var])
     hyp_terms = []
@@ -768,7 +789,7 @@
     reset
     locals.each -> (p)
       push_local(p[0], p[1])
-    t = elab(e)
+    t = (expected != nil && expected.fun? && e.kind == :lam) ? elab_lam_expected(e.binders, e.kids[0], 0, expected) : elab(e)
     if expected != nil
       unify(tyof(t), expected)
     f = finalize(t, false)
@@ -783,13 +804,13 @@
     e = resolve(exp)
     v = nil
     if bs[i].ty == nil && e.fun?
-      v = mk_var(bs[i].name, e.dom)
+      v = bound_var(e.dom)
     else
-      v = binder_var(bs[i])
+      v = bound_var(binder_type(bs[i]))
     push_local(bs[i].name, v)
     nexp = fresh_meta
     if e.fun?
       nexp = e.cod
     b = elab_lam_expected(bs, body, i + 1, nexp)
     pop_local
-    mk_lam(v, b)
+    bind_lambda(bs[i].name, v, b)

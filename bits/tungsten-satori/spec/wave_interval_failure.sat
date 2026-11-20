@@ -1,0 +1,12 @@
+import wave_interval
+
++ missing_flux (c : ℝ) (v q r s : ℝ → ℝ → ℝ) (wave : wave_interval.solution c v q r s (Icc 0 2) (Icc 0 1)) :
+    wave_interval.energy v q 0 1 2 = wave_interval.energy v q 0 1 0 := by auto
++ one_closed_end (c : ℝ) (v q r s : ℝ → ℝ → ℝ) (wave : wave_interval.solution c v q r s (Icc 0 2) (Icc 0 1))
+    (left : ∀ t, 0 ≤ t → t ≤ 2 → v t 0 = 0) : wave_interval.energy v q 0 1 2 = wave_interval.energy v q 0 1 0 := by auto
++ reversed_work (c : ℝ) (v q r s : ℝ → ℝ → ℝ) (W : ℝ) (wave : wave_interval.solution c v q r s (Icc 0 2) (Icc 0 1))
+    (net : darboux.has_integral (fun t => wave_interval.flux c v q t 0-wave_interval.flux c v q t 1) 0 2 W) :
+    wave_interval.energy v q 0 1 2-wave_interval.energy v q 0 1 0 = W := by auto
++ wrong_rate (u j r g : ℝ → ℝ → ℝ) (time : has_continuous_time_deriv u r (Icc 0 2) (Icc 0 1))
+    (space : ∀ t ∈ Icc 0 2, ∀ x ∈ Icc 0 1, has_deriv_within (j t) (Icc 0 1) x (g t x)) :
+    interval.balance u j r (Icc 0 2) (Icc 0 1) := by auto

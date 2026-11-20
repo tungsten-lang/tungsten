@@ -1,0 +1,15 @@
+import arith
+
++ paired_nat (a b c d : ℕ) (s : a+b=c+d) (q : a*a+b*b=c*c+d*d) : (a=c ∧ b=d) ∨ (a=d ∧ b=c) := by auto
++ shifted (x a b : ℚ) (h : x*x+a*b=(a+b)*x) : x=a ∨ x=b := by auto
++ swapped (x y a b : ℝ) (total : x+y=a+b) (prod : x*y=a*b) : (y=b ∧ x=a) ∨ (y=a ∧ x=b) := by auto
++ opaque_arm (x y : ℤ) (P : Prop) (given : P) (h : x*y=0) : (P ∧ x=0) ∨ y=0 := by auto
++ bounds (x a b z : ℕ) (s : x*x+a*b=(a+b)*x) (h : a≤z) : (x=a ∧ x≤z) ∨ x=b := by auto
++ common_guard (a b t : ℤ) (prod : a*b=0) (zero : t=0) :
+    (t=0 ∧ a=0) ∨ (t=0 ∧ b=0) := by auto
++ branch_product (x a b z : ℚ) (roots : (x-a)*(x-b)=0) :
+    (x=a ∧ z*x=z*a) ∨ (x=b ∧ z*x=z*b) := by auto
+axiom supplied_roots (x a b : ℝ) : x*x+a*b=(a+b)*x
+axiom irrelevant_flag : False ∨ True
++ marked_roots (x a b : ℝ) : x=b ∨ x=a := by auto [supplied_roots x a b, irrelevant_flag]
+#axioms marked_roots

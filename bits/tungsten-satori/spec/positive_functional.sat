@@ -1,0 +1,27 @@
+import positive_functional
+
++ signed_scale (S : set α) (E : (α → ℝ) → ℝ) (pos : functional.positive S E) (add : functional.additive S E)
+    (f : α → ℝ) (b : bounded_on S f) : E (fun x => (-3)*f x) = (-3)*E f := by auto
+
++ signed_sum (S : set α) (E : (α → ℝ) → ℝ) (pos : functional.positive S E) (add : functional.additive S E)
+    (w : ℕ → ℝ) (f : ℕ → α → ℝ) (n : ℕ) (b : ∀ i < n, bounded_on S (f i)) :
+    E (fun x => ∑ i < n, w i*f i x) = (∑ i < n, w i*E (f i)) := by auto
+
++ atomic_support (S : set α) (p : ℕ → α) (w : ℕ → ℝ) (n : ℕ)
+    (hw : ∀ i < n, 0 ≤ w i) (hp : ∀ i < n, 0 < w i → p i ∈ S) : functional.positive S (functional.atomic p w n) := by auto
++ atomic_signed (S : set α) (p : ℕ → α) (w : ℕ → ℝ) (n : ℕ) : functional.additive S (functional.atomic p w n) := by auto
++ atomic_mass (p : ℕ → α) (w : ℕ → ℝ) (n : ℕ) (mass : (∑ i < n, w i) = 1) : functional.atomic p w n (fun x => 1) = 1 := by auto
++ point_value (p : ℕ → ℝ) (f : ℝ → ℝ) : functional.atomic p (fun i => 1) 1 f = f (p 0)
+  unfold functional.atomic
+  have one : (1:ℕ) = 0+1 := by decide
+  rw [one,sum_below_succ]
+  simp only [sum_below_succ,sum_below_zero,one_mul.real,zero_add.real]
+
+opaque avg : (ℝ → ℝ) → ℝ
+opaque domain : set ℝ
+axiom pos : functional.positive domain avg
+axiom add : functional.additive domain avg
+axiom mass : avg (fun x => 1) = 1
++ constant_on (f : ℝ → ℝ) (c : ℝ) (h : ∀ x ∈ domain, f x = c) : avg f = c := by auto [pos,add,mass]
+#axioms signed_scale
+#axioms constant_on

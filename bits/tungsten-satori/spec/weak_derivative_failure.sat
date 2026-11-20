@@ -1,0 +1,17 @@
+import weak_derivative
+import exp_calculus
+import interval_balance
+
++ one_trace (u v : ℝ → ℝ) (r c : ℝ) (weak : interval.weak_deriv u v 0 1 0 r) :
+    darboux.has_integral (fun x => exp (-c*x)*(v x-c*u x)) 0 1 0 := by auto
++ one_endpoint (u v p q : ℝ → ℝ) (l r : ℝ) (weak : interval.weak_deriv u v 0 2 l r) (test : interval.c1 p q 0 2)
+    (one : p 0=0) : darboux.has_integral (fun x => v x*p x+u x*q x) 0 2 0 := by auto
++ jump (u v : ℝ → ℝ) (left : interval.weak_deriv u v 0 2 0 3) (right : interval.weak_deriv u v 2 5 4 0) :
+    interval.weak_deriv u v 0 5 0 0 := by auto
++ point_values (u v : ℝ → ℝ) (l r : ℝ) (weak : interval.weak_deriv u v 0 1 l r) :
+    darboux.has_integral v 0 1 (u 1-u 0) := by auto
++ interior_change (f g : ℝ → ℝ) (hf : darboux.has_integral f 0 1 2) (ends : f 0=g 0 ∧ f 1=g 1) :
+    darboux.has_integral g 0 1 2 := by auto
++ missing_net (u j r : ℝ → ℝ → ℝ) (l h : ℝ → ℝ)
+    (balance : interval.weak_balance u j r (Icc 0 2) 0 1 l h) :
+    darboux.integral 0 1 (u 2)=darboux.integral 0 1 (u 0) := by auto

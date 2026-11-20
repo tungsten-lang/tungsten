@@ -507,6 +507,7 @@ SATC_LIB_FILES = [
     @current_dir = "."
     @only = nil
     @thm_index = 0
+    bind_theorem("epsilon_spec", @d.epsilon_spec)
 
   -> solver_path
     @root + "/bits/tungsten-wassat/bin/wassat"
@@ -585,6 +586,7 @@ SATC_LIB_FILES = [
         next
       symbols = []
       premise_symbols(premise_conclusion(th.concl), symbols, [96])
+      symbols.push(th.concl.h)
       unknown = th.tags.find(-> (tag) tag.starts_with?("split:") && !@split_premises.has_key?(tag))
       symbols.each -> (key)
         if unknown != nil
@@ -596,6 +598,22 @@ SATC_LIB_FILES = [
             @premise_index[key] = []
           @premise_index[key].push(entry)
     @pending_premises = []
+
+  # Exact conclusions share the selection index and its trust and replay policy.
+  # Integer term hashes occupy a separate key space from symbol names.
+  -> exact_premise(term)
+    if !term.cl
+      return nil
+    if @pending_premises.size > 0
+      index_pending_premises
+    bucket = @premise_index[term.h]
+    if bucket != nil
+      bucket.each -> (entry)
+        if @theorems[entry[0]] == entry[1] && tm_eq(entry[1].concl, term)
+          return entry[1]
+    if @unknown_symbols.has_key?(term.h)
+      @unknown_symbols[term.h].each -> (id, _) @premise_retry[id] = true
+    nil
 
   -> selected_premises(goal)
     keys = []

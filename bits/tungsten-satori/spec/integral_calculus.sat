@@ -1,0 +1,30 @@
+import interval_integral
+import exp_calculus
+
++ square_primitive (a b : ℝ) (ab : a ≤ b) : darboux.has_integral (fun x => 2*x) a b (b^2-a^2)
+  apply darboux.fundamental (fun x => x^2) (fun x => 2*x) a b ab
+  · intro t atle tb; auto
+  · intro t atle tb; auto
+
++ negative_multiple (f : ℝ → ℝ) (I : ℝ) (hi : darboux.has_integral f 0 2 I) :
+    darboux.has_integral (fun x => (-3)*f x) 0 2 ((-3)*I) := by auto
+
++ linear_exponential (a b q r : ℝ) (ab : a ≤ b) (hq : q ≠ 0) :
+    darboux.has_integral (fun x => exp (q*x+r)) a b ((exp (q*b+r)-exp (q*a+r))/q) := by auto
+
++ first_moment (a b q : ℝ) (ab : a ≤ b) (hq : q ≠ 0) :
+    darboux.has_integral (fun x => x*exp (q*x)) a b ((b/q-1/q^2)*exp (q*b)-(a/q-1/q^2)*exp (q*a)) := by auto
+
++ reversed (f : ℝ → ℝ) : darboux.integral 5 1 f = -darboux.integral 1 5 f := darboux.integral_reverse 1 5 f
+
++ zero_flux (u v : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b) (left : u a = 0) (right : u b = 0)
+    (cont : ∀ t, a ≤ t → t ≤ b → continuous_at u t ∧ continuous_at v t)
+    (du : ∀ t, a ≤ t → t ≤ b → has_deriv_within u (fun z => a ≤ z ∧ z ≤ b) t (v t)) :
+    darboux.has_integral (fun t => exp (-c*t)*(v t-c*u t)) a b 0 := by
+  simpa [left,right] using darboux.exp_weighted_deriv u v c a b ab cont du
+
+-- The guarded rule's conclusion already matches with the integral folded.
++ value_bound (f : ℝ → ℝ) (a b c : ℝ) (hi : darboux.has_integral f a b (darboux.integral a b f))
+    (low : ∀ x, a ≤ x → x ≤ b → f x ≤ c) : darboux.integral a b f ≤ c*(b-a)
+  apply darboux.le_const f a b (darboux.integral a b f) c hi
+  exact low

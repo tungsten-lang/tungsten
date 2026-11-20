@@ -1,0 +1,161 @@
+-- Supporting lines of natural powers on the nonnegative half-line.
+import arith
+
+@[auto] + power.tangent.real (a x : ℝ) (n : ℕ) (ha : 0 ≤ a) (hx : 0 ≤ x) :
+    a^(n+1)+((n:ℝ)+1)*a^n*(x-a) ≤ x^(n+1)
+  induction n with k ih
+  · simp [pow_one.real]; linarith
+  · have scaled := mul_le_mul_of_nonneg_right.real (a^(k+1)+((k:ℝ)+1)*a^k*(x-a)) (x^(k+1)) x ih hx
+    have weight := mul_nonneg.real ((k:ℝ)+1) (a^k) (by linarith [cast_nonneg.real k]) (pow_nonneg.real a k ha)
+    have rem := mul_nonneg.real (((k:ℝ)+1)*a^k) ((x-a)^2) weight (sq_nonneg.real (x-a))
+    rw [pow_succ.real a k] at scaled
+    rw [succ_eq_add_one.nat,cast_succ.real,pow_succ.real a (k+1),pow_succ.real x (k+1),pow_succ.real a k]
+    linarith
+
+@[auto] + power.bernoulli_scaled.real (a u : ℝ) (n : ℕ) (ha : 0 ≤ a) (hu : 0 ≤ a+u) :
+    a^(n+1)+(n:ℝ)*a^n*u ≤ a*(a+u)^n
+  cases n with k
+  · simp [pow_one.real]
+  · rw [succ_eq_add_one.nat,cast_succ.real]
+    have t := power.tangent.real a (a+u) k ha hu
+    have bound := mul_le_mul_of_nonneg_left.real (a^(k+1)+((k:ℝ)+1)*a^k*((a+u)-a)) ((a+u)^(k+1)) a t ha
+    rw [pow_succ.real a (k+1),pow_succ.real a k]
+    rw [pow_succ.real a k] at bound
+    linarith
+
+-- The arithmetic mean of n copies of a and one copy of b bounds their geometric mean.
+@[auto] + power.weighted_amgm.real (a b : ℝ) (n : ℕ) (ha : 0 ≤ a) (hb : 0 ≤ b) :
+    ((n:ℝ)+1)^(n+1)*a^n*b ≤ ((n:ℝ)*a+b)^(n+1)
+  have hn := cast_nonneg.real n
+  have bound := power.tangent.real (((n:ℝ)+1)*a) ((n:ℝ)*a+b) n (by nlinarith) (by nlinarith)
+  rw [pow_succ.real (((n:ℝ)+1)*a) n,mul_pow.real ((n:ℝ)+1) a n] at bound
+  rw [pow_succ.real ((n:ℝ)+1) n]
+  linarith
+
+@[auto] + power.tangent.rat (a x : ℚ) (n : ℕ) (ha : 0 ≤ a) (hx : 0 ≤ x) :
+    a^(n+1)+((n:ℚ)+1)*a^n*(x-a) ≤ x^(n+1)
+  rw [← real_of_rat_le]
+  simp only [rat_cast_add.real,rat_cast_mul.real,rat_cast_pow.real,rat_cast_sub.real,rat_cast_one.real]
+  exact power.tangent.real (a:ℝ) (x:ℝ) n (by auto) (by auto)
+
+@[auto] + power.bernoulli_scaled.rat (a u : ℚ) (n : ℕ) (ha : 0 ≤ a) (hu : 0 ≤ a+u) :
+    a^(n+1)+(n:ℚ)*a^n*u ≤ a*(a+u)^n
+  rw [← real_of_rat_le]
+  simp only [rat_cast_add.real,rat_cast_mul.real,rat_cast_pow.real,rat_cast_sub.real,rat_cast_one.real]
+  exact power.bernoulli_scaled.real (a:ℝ) (u:ℝ) n (by auto) (by auto)
+
+@[auto] + power.weighted_amgm.rat (a b : ℚ) (n : ℕ) (ha : 0 ≤ a) (hb : 0 ≤ b) :
+    ((n:ℚ)+1)^(n+1)*a^n*b ≤ ((n:ℚ)*a+b)^(n+1)
+  rw [← real_of_rat_le]
+  simp only [rat_cast_add.real,rat_cast_mul.real,rat_cast_pow.real,rat_cast_sub.real,rat_cast_one.real]
+  exact power.weighted_amgm.real (a:ℝ) (b:ℝ) n (by auto) (by auto)
+
+@[auto] + power.bernoulli_sub.real (q : ℝ) (n : ℕ) (hq : q ≤ 1) : 1-(n:ℝ)*q ≤ (1-q)^n
+  have h := one_add_mul_le_pow.real (0-q) n (by linarith)
+  have e : 1+(0-q) = 1-q := by ring
+  rw [e] at h; linarith
+
+@[auto] + power.complement.real (x : ℝ) (n : ℕ) (hx : 0 ≤ x) : 1-x^n ≤ (n:ℝ)*(1-x)
+  have h := one_add_mul_le_pow.real (x-1) n (by linarith)
+  have e : 1+(x-1) = x := by ring
+  rw [e] at h; linarith
+
+@[auto] + power.bernoulli_positive_part.real (x : ℝ) (n : ℕ) (hn : 0 < n) :
+    1+(n:ℝ)*x ≤ (if 0 ≤ 1+x then (1+x)^n else 0)
+  by_cases h : 0 ≤ 1+x
+  · simpa [h] using one_add_mul_le_pow.real x n (by linarith)
+  · simp [h]
+    have one : (1:ℝ) ≤ (n:ℝ) := by auto
+    nlinarith
+
+@[auto] + power.bernoulli_sub.rat (q : ℚ) (n : ℕ) (hq : q ≤ 1) : 1-(n:ℚ)*q ≤ (1-q)^n
+  have h := one_add_mul_le_pow.rat (0-q) n (by linarith)
+  have e : 1+(0-q) = 1-q := by ring
+  rw [e] at h; linarith
+
+@[auto] + power.complement.rat (x : ℚ) (n : ℕ) (hx : 0 ≤ x) : 1-x^n ≤ (n:ℚ)*(1-x)
+  have h := one_add_mul_le_pow.rat (x-1) n (by linarith)
+  have e : 1+(x-1) = x := by ring
+  rw [e] at h; linarith
+
+@[auto] + power.bernoulli_positive_part.rat (x : ℚ) (n : ℕ) (hn : 0 < n) :
+    1+(n:ℚ)*x ≤ (if 0 ≤ 1+x then (1+x)^n else 0)
+  by_cases h : 0 ≤ 1+x
+  · simpa [h] using one_add_mul_le_pow.rat x n (by linarith)
+  · simp [h]
+    have one : (1:ℚ) ≤ (n:ℚ) := by auto
+    nlinarith
+
+-- Append one observation to a mean without extracting a root.
++ power.amgm_step.real (a b z : ℝ) (n : ℕ) (ha : 0 ≤ a) (hb : 0 ≤ b) (mean : ((n:ℝ)+1)*z = (n:ℝ)*a+b) :
+    a^n*b ≤ z^(n+1)
+  have bound := power.weighted_amgm.real a b n ha hb
+  rw [← mean,mul_pow.real] at bound
+  have pos := pow_pos.real ((n:ℝ)+1) (n+1) (by linarith [cast_nonneg.real n])
+  by_contra bad
+  have strict := mul_lt_mul_of_pos_left.real (z^(n+1)) (a^n*b) (((n:ℝ)+1)^(n+1)) (by linarith) pos
+  linarith
+
+@[auto] + prod_below.amgm.real (f : ℕ → ℝ) (n : ℕ) :
+    ∀ z : ℝ, (∀ i < n, 0 ≤ f i) → (n:ℝ)*z = (∑ i < n, f i) → (∏ i < n, f i) ≤ z^n
+  induction n with z hf mean k ih z hf mean
+  · simp
+  · rw [succ_eq_add_one.nat,cast_succ.real,sum_below_succ] at mean
+    rw [succ_eq_add_one.nat,prod_below_succ]
+    have prev : ∀ i < k, 0 ≤ f i := by intro i hi; exact hf i (by omega)
+    have last := hf k (by omega)
+    set a : ℝ := (∑ i < k, f i)/(k:ℝ)
+    have total : (k:ℝ)*a = (∑ i < k, f i)
+      by_cases zero : k = 0
+      · rw [zero]; simp
+      · have pos := (cast_pos.real k).mpr (by omega)
+        rw [a_def]; linarith [mul_div_cancel.real (∑ i < k, f i) (k:ℝ) (by linarith)]
+    have nonneg : 0 ≤ a := by rw [a_def]; exact div_nonneg.real (∑ i < k, f i) (k:ℝ) (sum_nonneg.real f k prev) (cast_nonneg.real k)
+    have bound := power.amgm_step.real a (f k) z k nonneg last (by linarith)
+    linarith [mul_le_mul_of_nonneg_right.real (∏ i < k, f i) (a^k) (f k) (ih a prev total) last]
+
++ prod_below.eq_const.real (f : ℕ → ℝ) (c : ℝ) (n : ℕ) (h : ∀ i < n, f i = c) : (∏ i < n, f i) = c^n
+  induction n with h k ih h
+  · simp
+  · rw [succ_eq_add_one.nat,prod_below_succ,pow_succ.real]
+    rw [ih (by intro i hi; exact h i (by omega)),h k (by omega)]
+
+-- Two values with arbitrary multiplicities, including empty blocks.
+@[auto] + power.weighted_mean.real (x y z : ℝ) (m n : ℕ) (hx : 0 ≤ x) (hy : 0 ≤ y)
+    (mean : ((m:ℝ)+(n:ℝ))*z = (m:ℝ)*x+(n:ℝ)*y) : x^m*y^n ≤ z^(m+n)
+  set f : ℕ → ℝ := fun i => if i < m then x else y
+  have prefix : ∀ i < m, f i = x := by intro i hi; simp [f_def,hi]
+  have blocks : ∀ k : ℕ, (∑ i < m+k, f i) = (m:ℝ)*x+(k:ℝ)*y ∧ (∏ i < m+k, f i) = x^m*y^k
+    intro k; induction k with k ih
+    · rw [add_zero.nat,cast_zero.real,pow_zero.real,sum_below.eq_const.real f x m prefix,prod_below.eq_const.real f x m prefix]
+      constructor <;> ring
+    · have neg : ¬ m+k < m := by omega
+      have last : f (m+k) = y := by simp [f_def,neg]
+      rw [succ_eq_add_one.nat,← add_assoc.nat,cast_succ.real,sum_below_succ,prod_below_succ,pow_succ.real,ih.1,ih.2,last]
+      constructor <;> ring
+  have nonneg : ∀ i < m+n, 0 ≤ f i
+    intro i hi; by_cases h : i < m <;> simp [f_def,h] <;> auto
+  have totals := blocks n
+  have bound := prod_below.amgm.real f (m+n) z nonneg (by rw [cast_add.real,totals.1]; exact mean)
+  rw [totals.2] at bound; exact bound
+
+@[auto] + power.weighted_mean.rat (x y z : ℚ) (m n : ℕ) (hx : 0 ≤ x) (hy : 0 ≤ y)
+    (mean : ((m:ℚ)+(n:ℚ))*z = (m:ℚ)*x+(n:ℚ)*y) : x^m*y^n ≤ z^(m+n)
+  rw [← real_of_rat_le,rat_cast_mul.real,rat_cast_pow.real,rat_cast_pow.real,rat_cast_pow.real]
+  apply power.weighted_mean.real
+  · auto
+  · auto
+  · have e : real_of_rat (((m:ℚ)+(n:ℚ))*z) = real_of_rat ((m:ℚ)*x+(n:ℚ)*y) := by rw [mean]
+    simpa only [rat_cast_mul.real,rat_cast_add.real] using e
+
+@[auto] + prod_below.amgm.rat (f : ℕ → ℚ) (n : ℕ) (z : ℚ) (hf : ∀ i < n, 0 ≤ f i)
+    (mean : (n:ℚ)*z = (∑ i < n, f i)) : (∏ i < n, f i) ≤ z^n
+  have casts : ∀ k : ℕ, ((∑ i < k, f i):ℝ) = (∑ i < k, (f i:ℝ)) ∧ ((∏ i < k, f i):ℝ) = (∏ i < k, (f i:ℝ))
+    intro k; induction k with k ih
+    · simp
+    · rw [succ_eq_add_one.nat,sum_below_succ,sum_below_succ,prod_below_succ,prod_below_succ,rat_cast_add.real,rat_cast_mul.real,ih.1,ih.2]
+      constructor <;> rfl
+  rw [← real_of_rat_le,(casts n).2,rat_cast_pow.real]
+  apply prod_below.amgm.real (fun i => (f i:ℝ)) n (z:ℝ)
+  · intro i hi; exact (real_of_rat_le 0 (f i)).mpr (hf i hi)
+  · rw [← (casts n).1,← mean,rat_cast_mul.real]

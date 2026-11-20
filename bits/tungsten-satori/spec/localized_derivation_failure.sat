@@ -1,0 +1,15 @@
+import localized_derivation
+
+-- A ring map alone need not let a tangent descend along it.
++ arbitrary_quotient (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (f : β → γ) (D : α → γ)
+    (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T) (map : ring_hom R S i)
+    (hom : ring_hom S T f) (der : derivation_at R T (fun a => f (i a)) D) :
+    ∃! E, derivation_at S T f E ∧ ∀ a, E (i a) = D a := by auto
+
++ moving_denominator (R : ring_ops α) (T : ring_ops β) (f D : α → β) (a d y : α) (u : β) (ht : comm_ring T)
+    (der : derivation_at R T f D) (rep : R.mul d y = a) (inv : T.mul u (f d) = T.one) :
+    D y = T.mul u (D a) := by auto
+
++ nonunit (R : ring_ops α) (T : ring_ops β) (f D : α → β) (a d y : α) (u : β) (ht : comm_ring T)
+    (der : derivation_at R T f D) (rep : R.mul d y = a) (fixed : D d = T.zero) :
+    D y = T.mul u (D a) := by auto

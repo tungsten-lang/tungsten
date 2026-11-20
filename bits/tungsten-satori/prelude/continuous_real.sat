@@ -1,0 +1,195 @@
+-- Continuity of real-valued expressions, from the epsilon-delta definition.
+import real
+import real_bounds
+import finite_sum
+
+@[auto] + continuous_at.id (x : ℝ) : continuous_at (fun y => y) x
+  unfold continuous_at
+  intro e he
+  exact ⟨e, he, by intro y near; exact near⟩
+
+@[auto] + continuous_at.const (c x : ℝ) : continuous_at (fun y => c) x
+  unfold continuous_at
+  intro e he
+  use e
+  constructor
+  · exact he
+  · intro y near
+    have zero : c-c = 0 := by ring
+    rw [zero, abs_of_nonneg.real 0 (by decide)]
+    exact he
+
++ continuous_at.congr_near (f g : ℝ → ℝ) (x r : ℝ) (pos : 0 < r) (hf : continuous_at f x)
+    (agree : ∀ y, |y-x| < r → g y = f y) : continuous_at g x
+  have center : g x = f x
+    apply agree x
+    have zero : x-x = 0 := by ring
+    rw [zero, abs_of_nonneg.real 0 (by decide)]
+    exact pos
+  unfold continuous_at at hf ⊢
+  intro e he
+  obtain ⟨d, hd, near⟩ := hf e he
+  use min r d
+  constructor
+  · exact lt_min.real r d 0 pos hd
+  · intro y hy
+    rw [agree y (by linarith [min_le_left.real r d]), center]
+    exact near y (by linarith [min_le_right.real r d])
+
++ continuous_at.comp (f g : ℝ → ℝ) (x : ℝ) (hf : continuous_at f (g x)) (hg : continuous_at g x) :
+    continuous_at (fun y => f (g y)) x
+  unfold continuous_at at hf hg ⊢
+  intro e he
+  obtain ⟨r, hr, outer⟩ := hf e he
+  obtain ⟨d, hd, inner⟩ := hg r hr
+  exact ⟨d, hd, by intro y hy; exact outer (g y) (inner y hy)⟩
+
++ continuous_at.pair (f g : ℝ → ℝ) (x e : ℝ) (hf : continuous_at f x) (hg : continuous_at g x) (he : 0 < e) :
+    ∃ d : ℝ, 0 < d ∧ ∀ y, |y-x| < d → |f y-f x| < e ∧ |g y-g x| < e
+  unfold continuous_at at hf hg
+  obtain ⟨r, hr, fr⟩ := hf e he
+  obtain ⟨s, hs, gs⟩ := hg e he
+  use min r s
+  constructor
+  · exact lt_min.real r s 0 hr hs
+  · intro y hy
+    exact ⟨fr y (by linarith [min_le_left.real r s]), gs y (by linarith [min_le_right.real r s])⟩
+
+-- A local bound in terms of the larger input error gives one shared radius.
++ continuous_at.of_pair_bound (f g h : ℝ → ℝ) (x K : ℝ) (hf : continuous_at f x) (hg : continuous_at g x)
+    (pos : 0 < K) (bound : ∀ y, |g y-g x| < 1 → |h y-h x| ≤ K*max |f y-f x| |g y-g x|) : continuous_at h x
+  unfold continuous_at
+  intro e he
+  have radius := lt_min.real 1 (e/K) 0 (by decide) (div_pos.real e K he pos)
+  obtain ⟨d, hd, near⟩ := continuous_at.pair f g x (min 1 (e/K)) hf hg radius
+  use d
+  constructor
+  · exact hd
+  · intro y hy
+    obtain ⟨fy, gy⟩ := near y hy
+    have smaller := min_le_right.real 1 (e/K)
+    have both : max |f y-f x| |g y-g x| < e/K
+      obtain ⟨eq, ord⟩ | ⟨eq, ord⟩ := max_cases.real (|f y-f x|) (|g y-g x|) <;> linarith
+    have small := (lt_div_iff.real (max |f y-f x| |g y-g x|) e K pos).mp both
+    linarith [bound y (by linarith [min_le_left.real 1 (e/K)])]
+
+@[auto] + continuous_at.abs (f : ℝ → ℝ) (x : ℝ) (hf : continuous_at f x) : continuous_at (fun y => |f y|) x
+  unfold continuous_at at hf ⊢
+  intro e he
+  obtain ⟨d, hd, near⟩ := hf e he
+  exact ⟨d, hd, by intro y hy; linarith [abs_abs_sub_abs_le.real (f y) (f x), near y hy]⟩
+
+@[auto] + continuous_at.add (f g : ℝ → ℝ) (x : ℝ) (hf : continuous_at f x) (hg : continuous_at g x) :
+    continuous_at (fun y => f y+g y) x
+  apply continuous_at.of_pair_bound f g (fun y => f y+g y) x 2 hf hg (by decide)
+  intro y gy
+  have eq : f y+g y-(f x+g x) = (f y-f x)+(g y-g x) := by ring
+  rw [eq]
+  linarith [abs_add.real (f y-f x) (g y-g x), le_max_left.real (|f y-f x|) (|g y-g x|), le_max_right.real (|f y-f x|) (|g y-g x|)]
+
+@[auto] + continuous_at.sub (f g : ℝ → ℝ) (x : ℝ) (hf : continuous_at f x) (hg : continuous_at g x) :
+    continuous_at (fun y => f y-g y) x
+  apply continuous_at.of_pair_bound f g (fun y => f y-g y) x 2 hf hg (by decide)
+  intro y gy
+  have eq : f y-g y-(f x-g x) = (f y-f x)-(g y-g x) := by ring
+  rw [eq]
+  linarith [abs_sub.real (f y-f x) (g y-g x), le_max_left.real (|f y-f x|) (|g y-g x|), le_max_right.real (|f y-f x|) (|g y-g x|)]
+
+@[auto] + continuous_at.min (f g : ℝ → ℝ) (x : ℝ) (hf : continuous_at f x) (hg : continuous_at g x) :
+    continuous_at (fun y => min (f y) (g y)) x
+  apply continuous_at.of_pair_bound f g (fun y => min (f y) (g y)) x 1 hf hg (by decide)
+  intro y gy
+  linarith [abs_min_sub_min_le_max.real (f y) (g y) (f x) (g x)]
+
+@[auto] + continuous_at.max (f g : ℝ → ℝ) (x : ℝ) (hf : continuous_at f x) (hg : continuous_at g x) :
+    continuous_at (fun y => max (f y) (g y)) x
+  apply continuous_at.of_pair_bound f g (fun y => max (f y) (g y)) x 1 hf hg (by decide)
+  intro y gy
+  linarith [abs_max_sub_max_le_max.real (f y) (g y) (f x) (g x)]
+
++ bounded_step_radius.real (m e : ℝ) (he : 0 < e) : ∃ k : ℝ, 0 < k ∧ k ≤ 1 ∧ m*k < e
+  obtain ⟨pos,small⟩ := affine_step_radius.real m e he
+  have hk := lt_min.real 1 (e/(|m|+1)) 0 (by decide) pos
+  exact ⟨min 1 (e/(|m|+1)),hk,min_le_left.real 1 (e/(|m|+1)),small (min 1 (e/(|m|+1))) hk (min_le_right.real 1 (e/(|m|+1)))⟩
+
++ mul_error_le.real (p q a b : ℝ) (gy : |q-b| < 1) :
+    |p*q-a*b| ≤ (|a|+|b|+1)*max |p-a| |q-b|
+  have eq : p*q-a*b = (p-a)*q+a*(q-b) := by ring
+  have err := abs_add.real ((p-a)*q) (a*(q-b))
+  rw [abs_mul.real (p-a) (q), abs_mul.real (a) (q-b)] at err
+  have ly := le_max_left.real (|p-a|) (|q-b|)
+  have ry := le_max_right.real (|p-a|) (|q-b|)
+  have local : |q| ≤ |b|+1 := by linarith [abs_sub_abs_le_abs_sub.real (q) (b)]
+  have bounded := mul_le_mul_of_nonneg_left.real (|q|) (|b|+1) (|p-a|) local (abs_nonneg.real (p-a))
+  have left := mul_le_mul_of_nonneg_right.real (|p-a|) (max |p-a| |q-b|) (|b|+1) ly (by linarith [abs_nonneg.real (b)])
+  have right := mul_le_mul_of_nonneg_left.real (|q-b|) (max |p-a| |q-b|) (|a|) ry (abs_nonneg.real (a))
+  rw [eq]; linarith
+
+@[auto] + continuous_at.mul (f g : ℝ → ℝ) (x : ℝ) (hf : continuous_at f x) (hg : continuous_at g x) :
+    continuous_at (fun y => f y*g y) x
+  apply continuous_at.of_pair_bound f g (fun y => f y*g y) x (|f x|+|g x|+1) hf hg (by linarith [abs_nonneg.real (f x), abs_nonneg.real (g x)])
+  intro y gy
+  exact mul_error_le.real (f y) (g y) (f x) (g x) gy
+
++ continuous_at.congr (f g : ℝ → ℝ) (x : ℝ) (hf : continuous_at f x) (agree : ∀ y, g y = f y) : continuous_at g x
+  have eq : g = f := by funext y; exact agree y
+  rw [eq]; exact hf
+
+@[auto] + continuous_at.pow (f : ℝ → ℝ) (n : ℕ) (x : ℝ) (hf : continuous_at f x) : continuous_at (fun y => (f y)^n) x
+  induction n with k ih
+  · apply continuous_at.congr (fun y => 1) (fun y => (f y)^0) x (continuous_at.const 1 x)
+    intro y; exact pow_zero.real (f y)
+  · rw [succ_eq_add_one.nat]
+    apply continuous_at.congr (fun y => (f y)^k*f y) (fun y => (f y)^(k+1)) x (continuous_at.mul (fun y => (f y)^k) f x ih hf)
+    intro y; exact pow_succ.real (f y) k
+
+@[auto] + continuous_at.sum_below (f : ℕ → ℝ → ℝ) (n : ℕ) (x : ℝ) (hf : ∀ i < n, continuous_at (f i) x) :
+    continuous_at (fun y => ∑ i < n, f i y) x
+  induction n with h k ih h
+  · apply continuous_at.congr (fun y => 0) (fun y => ∑ i < 0, f i y) x (continuous_at.const 0 x)
+    intro y; rfl
+  · rw [succ_eq_add_one.nat]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    have total := continuous_at.add (fun y => ∑ i < k, f i y) (f k) x prev (h k (by omega))
+    apply continuous_at.congr (fun y => (∑ i < k, f i y)+f k y) (fun y => ∑ i < k+1, f i y) x total
+    intro y; rfl
+
+-- Relative continuity tests values only at points of the specified set.
+-> continuous_within_at (f : ℝ → ℝ) (S : set ℝ) (x : ℝ) : Prop :=
+  ∀ e : ℝ, 0 < e → ∃ d : ℝ, 0 < d ∧ ∀ y ∈ S, |y-x| < d → |f y-f x| < e
+
++ continuous_at.within (f : ℝ → ℝ) (S : set ℝ) (x : ℝ) (cont : continuous_at f x) : continuous_within_at f S x
+  unfold continuous_at at cont; unfold continuous_within_at
+  intro e he; obtain ⟨d,pos,near⟩ := cont e he
+  exact ⟨d,pos,by intro y hy close; exact near y close⟩
+
++ continuous_at.comp_within (f g : ℝ → ℝ) (S : set ℝ) (x : ℝ)
+    (hf : continuous_at f (g x)) (hg : continuous_within_at g S x) : continuous_within_at (fun y => f (g y)) S x
+  unfold continuous_at at hf; unfold continuous_within_at at hg ⊢
+  intro e he
+  obtain ⟨r,hr,outer⟩ := hf e he
+  obtain ⟨d,hd,inner⟩ := hg r hr
+  exact ⟨d,hd,by intro y hy close; exact outer (g y) (inner y hy close)⟩
+
+-- Extending f by its value at x gives ordinary continuity at x.
++ continuous_within_at.extend_iff (f : ℝ → ℝ) (S : set ℝ) (x : ℝ) (hx : x ∈ S) :
+    continuous_within_at f S x ↔ continuous_at (fun y => f (if y ∈ S then y else x)) x
+  unfold continuous_within_at continuous_at; simp only [hx]; constructor
+  · intro h e he; obtain ⟨d,hd,near⟩ := h e he
+    use d; constructor
+    · exact hd
+    · intro y hy; by_cases inside : y ∈ S
+      · simp only [inside]; exact near y inside hy
+      · simp only [inside]; exact abs_lt_of.real (f x-f x) e (by linarith) (by linarith)
+  · intro h e he; obtain ⟨d,hd,near⟩ := h e he
+    use d; constructor
+    · exact hd
+    · intro y inside hy; have bound := near y hy; simpa only [inside] using bound
+
++ continuous_within_at.mul (f g : ℝ → ℝ) (S : set ℝ) (x : ℝ) (hx : x ∈ S)
+    (hf : continuous_within_at f S x) (hg : continuous_within_at g S x) : continuous_within_at (fun y => f y*g y) S x
+  have back := (continuous_within_at.extend_iff (fun y => f y*g y) S x hx).mpr
+  apply back
+  have cf := (continuous_within_at.extend_iff f S x hx).mp hf
+  have cg := (continuous_within_at.extend_iff g S x hx).mp hg
+  exact continuous_at.mul (fun y => f (if y ∈ S then y else x)) (fun y => g (if y ∈ S then y else x)) x cf cg

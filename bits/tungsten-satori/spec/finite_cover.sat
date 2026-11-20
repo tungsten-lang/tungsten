@@ -1,0 +1,85 @@
+import finite_cover
+
+-- No two of 6, 10 and 15 generate the unit ideal in ℤ.
+-> gen (i : ℕ) : ℤ := if i=0 then 6 else if i=1 then 10 else 15
+@[auto] + three_opens : localization.principal_cover ring_ops.int gen [0,1,2]
+  unfold localization.principal_cover; use fun i => if i=2 then -1 else 1
+
++ integers_glue (a d : ℕ → ℤ) (den : ∀ i ∈ [0,1,2], d i ∈ ring_ops.powers ring_ops.int (gen i))
+    (match_on : localization.compatible_fractions ring_ops.int gen d a [0,1,2]) :
+    ∃! x, localization.represents_fractions ring_ops.int gen d a [0,1,2] x := by auto
+
++ arbitrary_sections (R : ring_ops α) (S : β → ring_ops γ) (h : β → α → γ) (f : β → α) (ids : list β) (u : β → γ)
+    (hr : comm_ring R) (cover : localization.principal_cover R f ids)
+    (charts : ∀ i ∈ ids, comm_ring (S i) ∧ localization R (S i) (h i) (ring_ops.powers R (f i)))
+    (overlaps : ∀ i ∈ ids, ∀ j ∈ ids, localization.overlap_agreement R (S i) (S j) (h i) (h j) (f i) (f j) (u i) (u j)) :
+    ∃! x, ∀ i ∈ ids, h i x = u i := by auto
+
++ same_section (R : ring_ops α) (f : β → α) (ids : list β) (hr : comm_ring R) (cover : localization.principal_cover R f ids)
+    (x y : α) (local : ∀ i ∈ ids, localization.away_equal R (f i) x y) : x=y := by auto
+
++ empty_cover_int : ¬ localization.principal_cover ring_ops.int (fun (i : ℕ) => 1) []
+  intro cover; unfold localization.principal_cover at cover; obtain ⟨w,cert⟩ := cover
+  simp [ideal.combination,ring_ops.int] at cert
+
+-- Three coordinate axes in ℤ³. Distinct charts have a zero overlap ring,
+-- so their numerators can differ before restriction.
+inductive axis
+  | east
+  | north
+  | west
+-> triple : ring_ops (axis → ℤ) := ring_ops.mk (fun t => 0) (fun t => 1)
+  (fun x y t => x t+y t) (fun x t => -x t) (fun x y t => x t*y t)
+@[auto] + triple_laws : comm_ring triple
+  unfold comm_ring
+  exact ⟨by intros; funext t; simp [triple] <;> ring,by intros; funext t; simp [triple] <;> ring,
+    by intros; funext t; simp [triple] <;> ring,by intros; funext t; simp [triple] <;> ring,
+    by intros; funext t; simp [triple] <;> ring,by intros; funext t; simp [triple] <;> ring,
+    by intros; funext t; simp [triple] <;> ring,by intros; funext t; simp [triple] <;> ring⟩
+
+-> axis_id (i t : axis) : ℤ := if i=t then 1 else 0
+-> axes : list axis := [east,north,west]
+@[auto] + axes_cover : localization.principal_cover triple axis_id axes
+  unfold localization.principal_cover; use fun i => (ring_ops.one triple); funext t; cases t <;> decide
+
++ axes_agree (v : axis → ℤ) :
+    localization.compatible_fractions triple axis_id (fun i => (ring_ops.one triple)) (fun i t => v i) axes
+  unfold localization.compatible_fractions localization.away_equal; intro i hi j hj
+  use ring_ops.mul triple (axis_id i) (axis_id j); constructor
+  · exact ring_ops.powers_self triple triple_laws (ring_ops.mul triple (axis_id i) (axis_id j))
+  · funext t; by_cases same : i=t
+    · subst same; by_cases hit : j=t
+      · subst hit; rfl
+      · simp [triple,axis_id,hit]
+    · simp [triple,axis_id,same]
+
++ axes_glue (v : axis → ℤ) :
+    ∃! x, localization.represents_fractions triple axis_id (fun i => (ring_ops.one triple)) (fun i t => v i) axes x
+  apply localization.glue_finite triple triple_laws axis_id (fun i => (ring_ops.one triple)) (fun i t => v i) axes axes_cover
+  · intro i hi; exact ⟨0,rfl⟩
+  · exact axes_agree v
+
+-> numerator (i t : axis) : ℤ := if i=east then 3 else 5
+
++ cleared_only : localization.compatible_fractions triple axis_id (fun i => ring_ops.one triple) numerator axes ∧ numerator east ≠ numerator west
+  constructor
+  · exact axes_agree (fun i => if i=east then 3 else 5)
+  · intro eq; have three : numerator east east = 3 := by decide
+    rw [eq] at three; have five : numerator west east = 5 := by decide
+    linarith
+
+#axioms arbitrary_sections
+#axioms axes_glue
+
++ restrict_and_glue (ids : list β) (h : β → α → γ) (r s : β → β → γ → δ) (u : β → γ)
+    (cover : localization.finite_open_cover ids h r s)
+    (agree : ∀ i ∈ ids, ∀ j ∈ ids, r i j (u i) = s i j (u j)) :
+    ∃! x, ∀ i ∈ ids, h i x = u i := by auto
+
++ incompatible_sections (ids : list β) (h : β → α → γ) (r s : β → β → γ → δ) (u : β → γ)
+    (cover : localization.finite_open_cover ids h r s) (i j : β) (hi : i ∈ ids) (hj : j ∈ ids) (clash : r i j (u i) ≠ s i j (u j)) :
+    ¬ (∃! x, ∀ t ∈ ids, h t x = u t)
+  intro whole; have overlaps := (localization.finite_open_cover.glue_iff ids h r s u cover).mp whole
+  exact clash (overlaps i hi j hj)
+
+#axioms restrict_and_glue

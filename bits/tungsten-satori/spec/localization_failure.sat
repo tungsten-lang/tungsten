@@ -1,0 +1,16 @@
+import localization
+
++ cancel_without_unit (R : ring_ops α) (d x y : α) (hr : comm_ring R) (eq : R.mul d x = R.mul d y) : x = y := by auto
+
++ any_prime_lifts (R : ring_ops α) (S : ring_ops β) (i : α → β) (d : α) (P : set α)
+    (hr : comm_ring R) (hs : comm_ring S) (loc : localization R S i (ring_ops.powers R d)) (prime : P ∈ spectrum R) :
+    ∃ J ∈ spectrum S, ideal.comap i J = P
+  exact (localization.away_spectrum R S i d P hr hs loc).mp (by unfold spectrum.D; exact ⟨prime,by auto⟩)
+
++ any_map_lifts (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (f : α → γ) (d : α)
+    (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T) (loc : localization R S i (ring_ops.powers R d)) (hom : ring_hom R T f) :
+    ∃ g, ring_hom S T g ∧ ∀ x, g (i x) = f x
+  exact (localization.away_lift R S T i f d hr hs ht loc hom).mpr (by auto)
+
++ injective_localization (R : ring_ops α) (S : ring_ops β) (i : α → β) (U : set α) (loc : localization R S i U)
+    (a b : α) (eq : i a = i b) : a = b := by auto

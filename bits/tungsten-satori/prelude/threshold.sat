@@ -1,0 +1,58 @@
+-- Endpoint and strict threshold estimates over the rationals and reals.
+import scale
+
+-- A positive error is enough to get a witness below any larger cutoff.
+@[auto] + threshold.witness_below.rat (P : ℚ → Prop) (a : ℚ)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) : ∀ b, a < b → ∃ r, P r ∧ r < b
+  intro b gap
+  obtain ⟨r,hr,lt⟩ := near (b-a) (by linarith)
+  exact ⟨r,hr,by linarith⟩
+
+-- Bounds taken at all positive errors can be passed to the cutoff.
+@[auto] + threshold.lower_bound.rat (P : ℚ → Prop) (a b : ℚ)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) (bound : ∀ r, P r → b ≤ r) : b ≤ a
+  by_contra outside
+  obtain ⟨r,hr,lt⟩ := threshold.witness_below.rat near b (by linarith)
+  linarith [bound r hr]
+
+-- Upward closure reaches every point strictly above an approximated cutoff.
+@[auto] + threshold.above.rat (P : ℚ → Prop) (a : ℚ)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) (up : ∀ r s, P r → r ≤ s → P s) : ∀ s, a < s → P s
+  intro s gap
+  obtain ⟨r,hr,lt⟩ := threshold.witness_below.rat near s gap
+  exact up r s hr (by linarith)
+
+-- A proof at c*t = a includes the boundary. Positivity fixes the direction.
+@[auto] + threshold.closed.rat (P : ℚ → Prop) (a c : ℚ)
+    (edge : ∀ t, c*t = a → P t) (up : ∀ r s, P r → r ≤ s → P s) (pos : 0 < c) : ∀ s, a ≤ c*s → P s
+  intro s bound
+  have eq : c*(a/c) = a := by linarith [mul_div_cancel.rat a c (by linarith)]
+  exact up (a/c) s (edge (a/c) eq) (by nlinarith)
+
+-- A positive error is enough to get a witness below any larger cutoff.
+@[auto] + threshold.witness_below.real (P : ℝ → Prop) (a : ℝ)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) : ∀ b, a < b → ∃ r, P r ∧ r < b
+  intro b gap
+  obtain ⟨r,hr,lt⟩ := near (b-a) (by linarith)
+  exact ⟨r,hr,by linarith⟩
+
+-- Bounds taken at all positive errors can be passed to the cutoff.
+@[auto] + threshold.lower_bound.real (P : ℝ → Prop) (a b : ℝ)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) (bound : ∀ r, P r → b ≤ r) : b ≤ a
+  by_contra outside
+  obtain ⟨r,hr,lt⟩ := threshold.witness_below.real near b (by linarith)
+  linarith [bound r hr]
+
+-- Upward closure reaches every point strictly above an approximated cutoff.
+@[auto] + threshold.above.real (P : ℝ → Prop) (a : ℝ)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) (up : ∀ r s, P r → r ≤ s → P s) : ∀ s, a < s → P s
+  intro s gap
+  obtain ⟨r,hr,lt⟩ := threshold.witness_below.real near s gap
+  exact up r s hr (by linarith)
+
+-- A proof at c*t = a includes the boundary. Positivity fixes the direction.
+@[auto] + threshold.closed.real (P : ℝ → Prop) (a c : ℝ)
+    (edge : ∀ t, c*t = a → P t) (up : ∀ r s, P r → r ≤ s → P s) (pos : 0 < c) : ∀ s, a ≤ c*s → P s
+  intro s bound
+  have eq : c*(a/c) = a := by linarith [mul_div_cancel.real a c (by linarith)]
+  exact up (a/c) s (edge (a/c) eq) (by nlinarith)

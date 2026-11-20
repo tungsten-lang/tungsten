@@ -1,0 +1,64 @@
+-- Constant-speed wave equation in first-order form. For displacement u,
+-- v = u_t and q = c*u_x, so v_t = c*q_x and q_t = c*v_x.
+import interval_balance
+
+-> wave_interval.solution (c : ℝ) (v q vx qx : ℝ → ℝ → ℝ) (T X : set ℝ) : Prop :=
+  ∀ t ∈ T, ∀ x ∈ X, continuous_within_box v T X t x ∧ continuous_within_box q T X t x ∧
+    continuous_within_box vx T X t x ∧ continuous_within_box qx T X t x ∧
+    has_deriv_within (v t) X x (vx t x) ∧ has_deriv_within (q t) X x (qx t x) ∧
+    has_deriv_within (fun s => v s x) T t (c*qx t x) ∧ has_deriv_within (fun s => q s x) T t (c*vx t x)
+
+-> wave_interval.density (v q : ℝ → ℝ → ℝ) (t x : ℝ) : ℝ := (1/2)*(v t x*v t x+q t x*q t x)
+-> wave_interval.flux (c : ℝ) (v q : ℝ → ℝ → ℝ) (t x : ℝ) : ℝ := c*(v t x*q t x)
+-> wave_interval.energy (v q : ℝ → ℝ → ℝ) (a b t : ℝ) : ℝ := darboux.integral a b (wave_interval.density v q t)
+
++ wave_interval.balance (c : ℝ) (v q vx qx : ℝ → ℝ → ℝ) (T X : set ℝ)
+    (wave : wave_interval.solution c v q vx qx T X) :
+    interval.balance (wave_interval.density v q) (wave_interval.flux c v q) (fun t x => c*(vx t x*q t x+v t x*qx t x)) T X
+  unfold wave_interval.solution at wave
+  unfold interval.balance wave_interval.density wave_interval.flux; constructor
+  · unfold has_continuous_time_deriv; intro t ht x hx
+    obtain ⟨vc,qc,rc,sc,dx,dy,dt,ds⟩ := wave t ht x hx
+    constructor
+    · apply continuous_within_box.slice (fun s y => (1/2)*(v s y*v s y+q s y*q s y)) T X t x ht
+      apply continuous_within_box.scale (1/2) (fun s y => v s y*v s y+q s y*q s y)
+      exact continuous_within_box.add (continuous_within_box.mul vc vc) (continuous_within_box.mul qc qc)
+    constructor
+    · apply continuous_within_box.scale c (fun s y => vx s y*q s y+v s y*qx s y)
+      exact continuous_within_box.add (continuous_within_box.mul rc qc) (continuous_within_box.mul vc sc)
+    · have dv := has_deriv_within.mul dt dt
+      have dq := has_deriv_within.mul ds ds
+      have sum := has_deriv_within.add dv dq
+      have scaled := has_deriv_within.scale (1/2) sum
+      have eq : (1/2)*(c*qx t x*v t x+v t x*(c*qx t x)+(c*vx t x*q t x+q t x*(c*vx t x))) = c*(vx t x*q t x+v t x*qx t x) := by ring
+      rw [eq] at scaled; exact scaled
+  · intro t ht x hx
+    obtain ⟨vc,qc,rc,sc,dx,dy,dt,ds⟩ := wave t ht x hx
+    exact has_deriv_within.scale c (has_deriv_within.mul dx dy)
+
+@[auto] + wave_interval.energy_change (c : ℝ) (v q vx qx : ℝ → ℝ → ℝ) (a b l h I : ℝ) (ab : a ≤ b)
+    (wave : wave_interval.solution c v q vx qx (Icc l h) (Icc a b))
+    (net : darboux.has_integral (fun t => wave_interval.flux c v q t b-wave_interval.flux c v q t a) l h I) :
+    wave_interval.energy v q a b h-wave_interval.energy v q a b l = I
+  exact interval.balance.change ab (wave_interval.balance wave) net
+
+@[auto] + wave_interval.conserved (c : ℝ) (v q vx qx : ℝ → ℝ → ℝ) (a b l h : ℝ) (ab : a ≤ b) (lh : l ≤ h)
+    (wave : wave_interval.solution c v q vx qx (Icc l h) (Icc a b))
+    (ends : ∀ t, l ≤ t → t ≤ h → wave_interval.flux c v q t b = wave_interval.flux c v q t a) :
+    wave_interval.energy v q a b h = wave_interval.energy v q a b l
+  exact interval.balance.conserved ab lh (wave_interval.balance wave) ends
+
+-- Either zero velocity or zero strain closes an endpoint to energy transfer.
++ wave_interval.flux_zero (c : ℝ) (v q : ℝ → ℝ → ℝ) (t x : ℝ) (endpt : v t x = 0 ∨ q t x = 0) :
+    wave_interval.flux c v q t x = 0
+  unfold wave_interval.flux; obtain hv | hq := endpt
+  · rw [hv]; ring
+  · rw [hq]; ring
+
+@[auto] + wave_interval.reflecting (c : ℝ) (v q vx qx : ℝ → ℝ → ℝ) (a b l h : ℝ) (ab : a ≤ b) (lh : l ≤ h)
+    (wave : wave_interval.solution c v q vx qx (Icc l h) (Icc a b))
+    (ends : ∀ t, l ≤ t → t ≤ h → (v t a = 0 ∨ q t a = 0) ∧ (v t b = 0 ∨ q t b = 0)) :
+    wave_interval.energy v q a b h = wave_interval.energy v q a b l
+  apply wave_interval.conserved ab lh wave
+  intro t lo hi; obtain ⟨left,right⟩ := ends t lo hi
+  rw [wave_interval.flux_zero c v q t b right,wave_interval.flux_zero c v q t a left]

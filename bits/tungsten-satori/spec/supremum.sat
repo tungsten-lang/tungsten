@@ -1,0 +1,9 @@
+import supremum
+
++ member_bound (T : set ℝ) (s x : ℝ) (h : is_sup T s) (hx : x ∈ T) : x ≤ s := by auto
++ least_bound (T : set ℝ) (s b : ℝ) (h : is_sup T s) (ub : upper_bound T b) : s ≤ b := by auto
++ least_value (f : α → ℝ) (s b : ℝ) (h : is_sup (set.range f) s) (ub : ∀ i, f i ≤ b) : s ≤ b := by auto
++ value_bound (f : α → ℝ) (s : ℝ) (i : α) (h : is_sup (set.range f) s) : f i ≤ s := by auto
++ approached (f : α → ℝ) (s b : ℝ) (h : is_sup (set.range f) s) (lt : b < s) : ∃ i, b < f i := by auto
++ unique_sup (S : set ℝ) (x y : ℝ) (hx : is_sup S x) (hy : is_sup S y) : x = y := by auto
++ nonempty_range_sup (f : α → ℝ) (i : α) (b : ℝ) (h : ∀ j, f j ≤ b) : ∃ s, is_sup (set.range f) s := by exact is_sup.range_exists f i b h

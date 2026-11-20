@@ -37,9 +37,7 @@
   ring
 
 + eleven_forms (y c : ℝ) : 55 * E 11 y c = 55 + 495 * y + 1980 * c ∧ 10 * E 5 y c + 15 * E 6 y c - 300 * c = 25 + 90 * y - 180 * c
-  constructor
-  · ring
-  · ring
+  ring
 
 + eleven_farkas (y c : ℝ) : y + 2 / 9 = (55 * E 11 y c) / 1485 + (10 * E 5 y c + 15 * E 6 y c - 300 * c) / 135
   ring

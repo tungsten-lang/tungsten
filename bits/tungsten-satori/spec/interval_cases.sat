@@ -1,0 +1,31 @@
++ enumerate (n : ℕ) (h : n < 3) : n=0 ∨ n=1 ∨ n=2 := by auto
++ signed (t : ℤ) (lo : -3 < t) (hi : t ≤ 0) : t^2 ≤ 4 := by interval_cases t <;> decide
++ joined (n : ℕ) (P : ℕ → Prop) (bounds : n < 2+2 ∧ 2 ≤ n) (two : P 2) (three : P 3) : P n
+  interval_cases n
+  · exact two
+  · exact three
++ implicit_zero (n : ℕ) (P : Prop) (h : n < 0) : P := by interval_cases n
++ impossible (x : ℤ) (P : Prop) (h : 4 < x ∧ x < 5) : P := by interval_cases x
++ singleton (i : ℤ) (h : 9 = i) (P : ℤ → Prop) (p : P 9) : P i := by interval_cases i; exact p
++ strong_bounds (i : ℕ) (a : i < 200) (b : i ≤ 2) (c : ¬ i ≤ 0) : i=1 ∨ i=2 := by interval_cases i <;> decide
++ large_offset (n : ℤ) (lo : 100000000000000000000000 ≤ n) (hi : n < 100000000000000000000002) :
+    n = 100000000000000000000000 ∨ n = 100000000000000000000001 := by interval_cases n <;> decide
++ nested (i j : ℕ) (h : i < 2) (k : j ≤ i) : i*j = j := by interval_cases i <;> interval_cases j <;> decide
++ previous_name (i : ℕ) (P : ℕ → Prop) (h1 : P 0) (h2 : P 1) (bounds : i ≤ 1) : P i
+  interval_cases i
+  · exact h1
+  · exact h2
++ substitute_under_binder (n : ℕ) (h : n = 1) (P : ℕ → ℕ → Prop) (p : ∀ j, P n j) : ∀ j, P 1 j
+  interval_cases n; exact p
+
+opaque index : ℕ
+axiom index_bound (i : ℕ) : i < 3
+axiom spare : index = 42
++ from_hint (i : ℕ) : i=0 ∨ i=1 ∨ i=2 := by auto [index_bound i, spare]
+#axioms from_hint
++ unused_hint (i : ℕ) (h : i<3) : i=0 ∨ i=1 ∨ i=2 := by auto [spare]
+#axioms unused_hint
++ unused_after_subst (n : ℕ) (x : ℕ) (h : x = 0) : n = n
+  have debt := spare
+  subst h; rfl
+#axioms unused_after_subst

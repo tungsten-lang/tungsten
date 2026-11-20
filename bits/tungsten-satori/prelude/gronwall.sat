@@ -1,0 +1,121 @@
+-- Differential Grönwall estimates on a closed real interval.
+import exp_derivative
+
++ interval.deriv.exp_weight (F v : ℝ → ℝ) (a b c : ℝ) (diff : interval.deriv F v a b) :
+    interval.deriv (fun t => exp (-c*t)*F t) (fun t => exp (-c*t)*(v t-c*F t)) a b
+  unfold interval.deriv at diff ⊢
+  intro t lo hi; exact has_deriv_within.exp_weight F (fun z => a ≤ z ∧ z ≤ b) t (v t) c (diff t lo hi)
+
+@[auto] + gronwall.bound (F v : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b) (diff : interval.deriv F v a b)
+    (rate : ∀ t, a ≤ t → t ≤ b → v t ≤ c*F t) : F b ≤ exp (c*(b-a))*F a
+  have deriv := interval.deriv.exp_weight F v a b c diff
+  unfold interval.deriv at deriv
+  have weighted := interval.nonincreasing_of_deriv_nonpos (fun t => exp (-c*t)*F t) (fun t => exp (-c*t)*(v t-c*F t)) a b ab deriv (by intro t lo hi; nlinarith [exp_pos (-c*t),rate t lo hi])
+  have restore := mul_le_mul_of_nonneg_left.real (exp (-c*b)*F b) (exp (-c*a)*F a) (exp (c*b)) weighted (exp_nonneg (c*b))
+  have undo : exp (c*b)*exp (-c*b) = 1 := by rw [← exp_add]; have z : c*b+-c*b = 0 := by ring; rw [z,exp_zero]
+  have shift : exp (c*b)*exp (-c*a) = exp (c*(b-a)) := by rw [← exp_add]; ring
+  have left : exp (c*b)*(exp (-c*b)*F b) = F b := by linear_combination (F b)*undo
+  have right : exp (c*b)*(exp (-c*a)*F a) = exp (c*(b-a))*F a := by linear_combination (F a)*shift
+  rw [left,right] at restore; exact restore
+
+@[auto] + gronwall.zero (F v : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b) (diff : interval.deriv F v a b)
+    (rate : ∀ t, a ≤ t → t ≤ b → v t ≤ c*F t) (start : F a = 0) (nonneg : 0 ≤ F b) : F b = 0
+  have bound := gronwall.bound F v a b c ab diff rate
+  rw [start] at bound; linarith
+
+-- The last time a continuous function takes a level before ending above it.
++ interval.last_level (F : ℝ → ℝ) (a b h : ℝ) (ab : a ≤ b) (start : F a ≤ h) (finish : h < F b)
+    (cont : ∀ t, a ≤ t → t ≤ b → continuous_within_at F (fun z => a ≤ z ∧ z ≤ b) t) :
+    ∃ s, a ≤ s ∧ s < b ∧ F s = h ∧ ∀ t, s < t → t ≤ b → h < F t
+  set S : set ℝ := fun x => a ≤ x ∧ x ≤ b ∧ F x ≤ h
+  have seed : S a := by rw [S_def]; exact ⟨by linarith,ab,start⟩
+  have bound : upper_bound S b := by unfold upper_bound; intro x hx; rw [S_def] at hx; exact hx.2.1
+  obtain ⟨s,hs⟩ := sup_exists S ⟨a,seed⟩ ⟨b,bound⟩
+  have lo := is_sup.le_of_mem S s a hs seed
+  have hi : s ≤ b := by unfold is_sup at hs; exact hs.2 b bound
+  have after : ∀ t, s < t → t ≤ b → h < F t
+    intro t st tb; by_contra below
+    have member : S t := by rw [S_def]; exact ⟨by linarith,tb,by linarith⟩
+    linarith [is_sup.le_of_mem S s t hs member]
+  have near := cont s lo hi
+  unfold continuous_within_at at near
+  have fs : F s ≤ h
+    by_contra above
+    obtain ⟨d,pos,close⟩ := near (F s-h) (by linarith)
+    obtain ⟨x,member,dist⟩ := is_sup.exists_gt S s (s-d) hs (by linarith)
+    have xs := is_sup.le_of_mem S s x hs member
+    rw [S_def] at member
+    have est := close x ⟨member.1,member.2.1⟩ ((abs_lt.real (x-s) d).mpr ⟨by linarith,by linarith⟩)
+    linarith [(abs_lt.real (F x-F s) (F s-h)).mp est,member.2.2]
+  have sb : s < b := by by_contra no; have eq : s = b := by linarith; rw [eq] at fs; linarith
+  have eq : F s = h
+    by_contra different
+    obtain ⟨d,pos,close⟩ := near (h-F s) (by linarith)
+    set u := min (d/2) ((b-s)/2)
+    have up : 0 < u := by rw [u_def]; exact lt_min.real (d/2) ((b-s)/2) 0 (by linarith) (by linarith)
+    have ud : u ≤ d/2 := by rw [u_def]; exact min_le_left.real (d/2) ((b-s)/2)
+    have ub : u ≤ (b-s)/2 := by rw [u_def]; exact min_le_right.real (d/2) ((b-s)/2)
+    have est := close (s+u) ⟨by linarith,by linarith⟩ ((abs_lt.real (s+u-s) d).mpr ⟨by linarith,by linarith⟩)
+    linarith [(abs_lt.real (F (s+u)-F s) (h-F s)).mp est,after (s+u) (by linarith) (by linarith)]
+  exact ⟨s,lo,sb,eq,after⟩
+
++ interval.nonpos_of_deriv_when_pos (F v : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b) (diff : interval.deriv F v a b)
+    (start : F a ≤ 0) (rate : ∀ t, a ≤ t → t ≤ b → 0 < F t → v t ≤ 0) : F b ≤ 0
+  unfold interval.deriv at diff
+  by_contra above
+  have cont : ∀ t, a ≤ t → t ≤ b → continuous_within_at F (fun z => a ≤ z ∧ z ≤ b) t
+    intro t lo hi; exact has_deriv_within.continuous_within F (fun z => a ≤ z ∧ z ≤ b) t (v t) (diff t lo hi)
+  obtain ⟨s,asle,sb,level,after⟩ := interval.last_level F a b (F b/2) ab (by linarith) (by linarith) cont
+  have down : F b ≤ F s
+    apply interval.nonincreasing_of_deriv_nonpos F v s b (by linarith)
+    · intro t st tb
+      exact has_deriv_within.restrict F (fun z => a ≤ z ∧ z ≤ b) (fun z => s ≤ z ∧ z ≤ b) t (v t) (diff t (by linarith) tb) (by intro y hy; exact ⟨by linarith [hy.1],hy.2⟩)
+    · intro t st tb
+      apply rate t (by linarith) tb
+      by_cases hit : s = t
+      · rw [← hit,level]; linarith
+      · linarith [after t (by linarith) tb]
+  linarith
+
++ gronwall.nonpos (F v : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b) (diff : interval.deriv F v a b)
+    (start : F a ≤ 0) (rate : ∀ t, a ≤ t → t ≤ b → 0 < F t → v t ≤ c*F t) : F b ≤ 0
+  have down : exp (-c*b)*F b ≤ 0
+    apply interval.nonpos_of_deriv_when_pos (fun t => exp (-c*t)*F t) (fun t => exp (-c*t)*(v t-c*F t)) a b ab (interval.deriv.exp_weight F v a b c diff)
+    · nlinarith [exp_pos (-c*a)]
+    · intro t lo hi pos
+      have positive : 0 < F t := by by_contra no; nlinarith [exp_pos (-c*t)]
+      nlinarith [exp_pos (-c*t),rate t lo hi positive]
+  by_contra pos; linarith [mul_pos.real (exp (-c*b)) (F b) (exp_pos (-c*b)) (by linarith)]
+
+@[auto] + gronwall.compare (F G v w : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b)
+    (df : interval.deriv F v a b) (dg : interval.deriv G w a b) (start : F a ≤ G a)
+    (rate : ∀ t, a ≤ t → t ≤ b → G t < F t → v t-w t ≤ c*(F t-G t)) : F b ≤ G b
+  have diff : interval.deriv (fun t => F t-G t) (fun t => v t-w t) a b
+    unfold interval.deriv at df dg ⊢
+    intro t lo hi; exact has_deriv_within.sub F G (fun z => a ≤ z ∧ z ≤ b) t (v t) (w t) (df t lo hi) (dg t lo hi)
+  have down := gronwall.nonpos (fun t => F t-G t) (fun t => v t-w t) a b c ab diff (by linarith) (by intro t lo hi pos; exact rate t lo hi (by linarith))
+  linarith
+
+-- The vector field needs a Lipschitz bound only from above in the state.
+-> one_sided_lipschitz_on (H : ℝ → ℝ → ℝ) (a b c : ℝ) : Prop :=
+  ∀ t x y, a ≤ t → t ≤ b → y < x → H t x-H t y ≤ c*(x-y)
+
+@[auto] + gronwall.subsolution (H : ℝ → ℝ → ℝ) (F G v w : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b)
+    (df : interval.deriv F v a b) (dg : interval.deriv G w a b) (start : F a ≤ G a)
+    (lip : one_sided_lipschitz_on H a b c)
+    (sub : ∀ t, a ≤ t → t ≤ b → v t ≤ H t (F t))
+    (sup : ∀ t, a ≤ t → t ≤ b → H t (G t) ≤ w t) : F b ≤ G b
+  apply gronwall.compare F G v w a b c ab df dg start
+  unfold one_sided_lipschitz_on at lip
+  intro t lo hi past
+  linarith [lip t (F t) (G t) lo hi past,sub t lo hi,sup t lo hi]
+
+-- Applying the exponential estimate to F + K absorbs a constant source term.
+@[auto] + gronwall.affine (F v : ℝ → ℝ) (a b K : ℝ) (ab : a ≤ b) (diff : interval.deriv F v a b)
+    (rate : ∀ t, a ≤ t → t ≤ b → v t ≤ F t+K) : F b ≤ exp (b-a)*F a+(exp (b-a)-1)*K
+  have shifted : interval.deriv (fun t => F t+K) v a b
+    unfold interval.deriv at diff ⊢; intro t lo hi
+    exact has_deriv_within.add_const F (fun z => a ≤ z ∧ z ≤ b) t (v t) K (diff t lo hi)
+  have bound := gronwall.bound (fun t => F t+K) v a b 1 ab shifted (by intro t lo hi; linarith [rate t lo hi])
+  have one : 1*(b-a) = b-a := by ring
+  rw [one] at bound; linarith

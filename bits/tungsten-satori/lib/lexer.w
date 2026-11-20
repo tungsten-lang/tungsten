@@ -341,7 +341,10 @@ SAT_HDR_KW = build_str_set(["theorem", "lemma", "axiom", "def", "opaque"])
       is_pipe = t0.kind == :sym && t0.text == "|" && depth == 0
       # After an operator, a leading bar starts an absolute-value operand.
       # Otherwise keep pattern clauses and inductive constructors separate.
-      if cur != nil && (depth > 0 || line_continues_after?(cur.toks) || (!is_pipe && r[0] > 0 && (continues_before?(t0) || (hdr_cand && !hdr_closed))))
+      # After a structure's := only a field group continues the declaration.
+      # A fieldless record can be followed immediately by its first theorem.
+      empty_record = cur != nil && cur.toks[0].text == "structure" && cur.toks.last.text == ":=" && r[0] == 0 && t0.text != "("
+      if cur != nil && !empty_record && (depth > 0 || line_continues_after?(cur.toks) || (!is_pipe && r[0] > 0 && (continues_before?(t0) || (hdr_cand && !hdr_closed))))
         j = 0
         while j < nt
           cur.toks.push(toks[j])

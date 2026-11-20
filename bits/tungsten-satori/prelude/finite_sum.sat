@@ -1,0 +1,13 @@
+-- Finite sum recursion and congruence.
+import list
+
+@[simp] + sum_below_zero (f : ℕ → α) : ∑ i < 0, f i = 0 := by rfl
+
++ sum_below_succ (n : ℕ) (f : ℕ → α) : ∑ i < n + 1, f i = (∑ i < n, f i) + f n := by rfl
+
++ sum_below.congr (f g : ℕ → α) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g
+  induction n with h n ih h
+  · rfl
+  · simp only [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
+    rw [ih (by intro i hi; exact h i (by omega)), h n (by omega)]

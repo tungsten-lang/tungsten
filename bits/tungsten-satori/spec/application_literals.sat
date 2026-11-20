@@ -36,3 +36,8 @@ import core
   apply adjacent_binder
   · exact h
   · exact k
+
++ offset_right (F : ℕ → Prop) (shift : ∀ n, F (n+3)) : F 17 := shift
++ offset_left (F : ℕ → Prop) (shift : ∀ n, F (3+n)) : F 3 := shift
++ successor (F : ℕ → Prop) (step : ∀ n, F (succ n)) : F 8 := step
++ same_offset (F : ℕ → ℕ → Prop) (shift : ∀ n, F (n+2) (n+4)) : F 7 9 := shift

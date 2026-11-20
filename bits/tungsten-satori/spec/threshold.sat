@@ -1,0 +1,25 @@
+import threshold
+
++ witness (P : ℚ → Prop) (a b : ℚ) (gap : a < b)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) : ∃ x, P x ∧ x < b := by auto
+
++ limit_bound (P : ℝ → Prop) (a b : ℝ)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) (floor : ∀ r, P r → b ≤ r) : b ≤ a := by auto
+
++ open_range (P : ℝ → Prop) (a s : ℝ) (gap : a < s)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) (up : ∀ x y, P x → x ≤ y → P y) : P s := by auto
+
++ closed_range (P : ℚ → Prop) (a c s : ℚ) (pos : 0 < c) (bound : a ≤ c*s)
+    (edge : ∀ t, c*t = a → P t) (up : ∀ x y, P x → x ≤ y → P y) : P s := by auto
+
++ at_boundary (P : ℝ → Prop) (edge : ∀ t : ℝ, 4*t = 3 → P t) (up : ∀ x y, P x → x ≤ y → P y) :
+    P (3/4) ∧ P 1 := by constructor <;> auto
+
+-- The open interval supplies a witness for every error and excludes the endpoint.
++ open_endpoint (a : ℚ) : (∀ e : ℚ, 0 < e → ∃ r, a < r ∧ r < a+e) ∧ ¬ a < a
+  constructor
+  · intro e pos; exact ⟨a+e/2,by linarith,by linarith⟩
+  · linarith
+
+#axioms closed_range
+#axioms limit_bound

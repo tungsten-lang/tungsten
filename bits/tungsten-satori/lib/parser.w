@@ -7,6 +7,14 @@
     @ty = nil
     @line = 0
 
+  -> spine
+    e = self
+    args = []
+    while e.kind == :app
+      args.unshift(e.kids[1])
+      e = e.kids[0]
+    [e, args]
+
 -> ast(kind, s, kids)
   Ast.new(kind, s, kids)
 
@@ -495,6 +503,7 @@
 
 -> find_top(toks, sym, start)
   depth = 0
+  let_assignment = false
   i = start
   while i < toks.size
     t = toks[i]
@@ -502,8 +511,15 @@
       depth += 1
     if t.kind == :sym && (t.text == ")" || t.text == "\]" || t.text == "}" || t.text == "⟩")
       depth -= 1
-    if depth == 0 && (t.kind == :sym || t.kind == :kw) && t.text == sym
-      return i
+    if depth == 0
+      # A let inside a proposition owns its next :=, including in a theorem
+      # signature, a local have, a calc step, and the declaration index.
+      if sym == ":=" && t.kind == :kw && t.text == "let"
+        let_assignment = true
+      elsif (t.kind == :sym || t.kind == :kw) && t.text == sym
+        if !let_assignment
+          return i
+        let_assignment = false
     i += 1
   -1
 

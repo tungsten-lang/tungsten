@@ -1,0 +1,6 @@
+import limits
+
++ wrong_shift (a : ℕ → ℝ) (h : tends_to a 2) : tends_to (fun n => a n - 1) 3 := by auto
++ wrong_constant (x y : ℝ) : tends_to (fun n => x) y := by auto
++ reversed_bound (a b : ℕ → ℝ) (h : tends_to a 0) (bound : ∀ n, |a n - 0| ≤ |b n - 0|) : tends_to b 0 := by auto [tends_to.of_error_le a 0 b 0 h]
++ finite_prefix (a b : ℕ → ℝ) (h : tends_to a 0) (bound : ∀ n, n ≤ 10 → |b n - 0| ≤ |a n - 0|) : tends_to b 0 := by auto [tends_to.of_eventual_error_le a 0 b 0 h 10]

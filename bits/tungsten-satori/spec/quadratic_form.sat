@@ -1,0 +1,25 @@
+import quadratic_form
+
++ neck (a b c x y : ℚ) (pivot : 0 < a) (det : 0 ≤ a*c-b*b) :
+    0 ≤ a*x*x + 2*b*x*y + c*y*y := by auto
+
++ hessian_at_max (a b c : ℝ) (h : ∀ x y, a*x*x + 2*b*x*y + c*y*y ≤ 0) : 0 ≤ a*c-b*b := by auto
++ hessian_at_min (a b c : ℝ) (h : ∀ x y, 0-(a*x*x + 2*b*x*y + c*y*y) ≤ 0) : 0 ≤ a*c-b*b := by auto
+
++ singular_allowed (a b c x y : ℚ) (ha : 0 ≤ a) (hc : 0 ≤ c) (det : b^2 ≤ a*c) :
+    0 ≤ a*x^2 + 2*b*x*y + c*y^2 := by auto
+
++ odd_cross (a b c x y : ℤ) (pivot : 0 < c) (det : b^2 ≤ 4*a*c) :
+    b*x*y ≤ a*x^2 + c*y^2 := by auto
+
++ ellipticity (a b c k x y : ℝ) (pivot : k < a) (det : b^2 ≤ (a-k)*(c-k)) :
+    k*(x^2+y^2) ≤ a*x^2 + 2*b*x*y + c*y^2 := by auto
+
++ positive_energy (a b c : ℝ) (f g : ℕ → ℝ) (i : ℕ) (pivot : 0 < a) (det : b^2 < a*c)
+    (point : f i ≠ 0 ∨ g i ≠ 0) : 2*b*f i*g i < (f i)^2*a + (g i)^2*c := by auto
+
++ integer_minors (a b c : ℤ) (h : ∀ x y, (x ≠ 0 ∨ y ≠ 0) → 0 < a*x*x + 2*b*x*y + c*y*y) :
+    0 < a ∧ 0 < a*c-b*b := (quadratic_form.definite_iff.int a b c).mp h
+
++ shifted_pointwise (f : ℕ → ℚ) (g : ℚ → ℚ) (h : ∀ i t, f i*t^2 ≤ g t) :
+    ∀ j z, 0 ≤ g z-z*(f j)*z := by auto

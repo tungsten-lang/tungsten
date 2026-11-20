@@ -1,0 +1,168 @@
+-- Fatou's inequality for the nonnegative lower integral.
+import lower_integral_value
+import limit_order
+import set
+import closure
+
+-- Continuity from below, restricted to a cell of finite volume.
+-> volume.continuous_below (vol : set α → ℝ → Prop) (sets : set (set α)) : Prop :=
+  ∀ (A : set α) (m : ℝ), vol A m → ∀ E : ℕ → set α, (∀ k, sets (E k)) →
+    (∀ k l, k ≤ l → E k ⊆ E l) → (∀ x ∈ A, ∃ k, x ∈ E k) →
+    ∃ v : ℕ → ℝ, (∀ k, 0 ≤ v k ∧ vol (set.inter A (E k)) (v k)) ∧ tends_to v m
+
+-- Test measurability by comparison with finite nonnegative simple functions.
+-> lower_integral.measurable (vol : set α → ℝ → Prop) (sets : set (set α)) (f : α → ℝ) : Prop :=
+  ∀ (n : ℕ) (A : ℕ → set α) (c m : ℕ → ℝ), (∀ i < n, 0 ≤ c i ∧ 0 ≤ m i ∧ vol (A i) (m i)) →
+    sets (fun x => (∑ i < n, if x ∈ A i then c i else 0) ≤ f x)
+
+-- On an increasing cover, restrict each test cell to E k, then pass to
+-- the limit in the finite sum of their volumes. Test cells can overlap.
++ lower_integral.exhaust_step (vol : set α → ℝ → Prop) (sets : set (set α)) (F : ℕ → α → ℝ)
+    (B : ℝ) (n : ℕ) (A : ℕ → set α) (c m : ℕ → ℝ) (E : ℕ → set α)
+    (cont : volume.continuous_below vol sets) (meas : ∀ k, sets (E k))
+    (inc : ∀ k l, k ≤ l → E k ⊆ E l) (cover : ∀ x, ∃ k, x ∈ E k)
+    (cells : ∀ i < n, 0 ≤ c i ∧ 0 ≤ m i ∧ vol (A i) (m i))
+    (pos : ∀ k x, 0 ≤ F k x) (bounds : ∀ k, lower_integral.bound vol (F k) B)
+    (inside : ∀ k, ∀ x ∈ E k, (∑ i < n, if x ∈ A i then c i else 0) ≤ F k x) :
+    (∑ i < n, c i*m i) ≤ B
+  set v : ℕ → ℕ → ℝ := fun i => choice (fun (w : ℕ → ℝ) => (∀ k, 0 ≤ w k ∧ vol (set.inter (A i) (E k)) (w k)) ∧ tends_to w (m i))
+  have volumes : ∀ i < n, (∀ k, 0 ≤ v i k ∧ vol (set.inter (A i) (E k)) (v i k)) ∧ tends_to (v i) (m i)
+    intro i hi; rw [v_def]; apply choice.spec (fun (w : ℕ → ℝ) => (∀ k, 0 ≤ w k ∧ vol (set.inter (A i) (E k)) (w k)) ∧ tends_to w (m i))
+    unfold volume.continuous_below at cont
+    have cell := cells i hi
+    exact cont (A i) (m i) cell.2.2 E meas inc (by intro x hx; exact cover x)
+  have bound : ∀ k, (∑ i < n, c i*v i k) ≤ B
+    intro k; have h := bounds k; unfold lower_integral.bound at h
+    apply h n (fun i => set.inter (A i) (E k)) c (fun i => v i k)
+    · intro i hi; have cell := cells i hi; have vcell := volumes i hi; exact ⟨cell.1,vcell.1 k⟩
+    · intro x; by_cases hit : E k x
+      · simpa [set.inter,hit] using inside k x hit
+      · simpa [set.inter,hit,sum_below.zero.real] using pos k x
+  have lim := tends_to.sum_below (fun i k => c i*v i k) (fun i => c i*m i) n (by intro i hi; have h := volumes i hi; exact tends_to.const_mul (v i) (m i) (c i) h.2)
+  exact tends_to.le (fun k => ∑ i < n, c i*v i k) (fun k => B) (∑ i < n, c i*m i) B lim (tends_to.const B) bound
+
+-- At every point, every strict lower bound for G eventually bounds F.
+-> seq.liminf_ge (F : ℕ → α → ℝ) (G : α → ℝ) : Prop :=
+  ∀ x r, r < G x → ∃ k, ∀ j, k ≤ j → r ≤ F j x
+
+@[auto] + seq.liminf_ge.of_limit (F : ℕ → α → ℝ) (G : α → ℝ)
+    (limit : ∀ x, tends_to (fun n => F n x) (G x)) : seq.liminf_ge F G
+  unfold seq.liminf_ge; intro x r lt
+  have near := limit x; unfold tends_to at near
+  obtain ⟨k,tail⟩ := near (G x-r) (by linarith)
+  use k; intro j hj
+  have b := (abs_lt.real (F j x-G x) (G x-r)).mp (tail j hj)
+  linarith [b.1]
+
+-- The volume laws used below are continuity from below and measurable tail intersections.
+-> volume.exhaustion_laws (vol : set α → ℝ → Prop) (sets : set (set α)) : Prop :=
+  volume.continuous_below vol sets ∧ ∀ (S : ℕ → set α) (k : ℕ), (∀ j, sets (S j)) →
+    sets (fun x => ∀ j, k ≤ j → S j x)
+
+@[auto] + lower_integral.bound.fatou (vol : set α → ℝ → Prop) (sets : set (set α)) (F : ℕ → α → ℝ) (G : α → ℝ) (B : ℝ)
+    (space : volume.exhaustion_laws vol sets) (meas : ∀ k, lower_integral.measurable vol sets (F k)) (pos : ∀ k x, 0 ≤ F k x)
+    (limit : seq.liminf_ge F G) (bounds : ∀ k, lower_integral.bound vol (F k) B) : lower_integral.bound vol G B
+  unfold volume.exhaustion_laws at space; unfold seq.liminf_ge at limit
+  unfold lower_integral.bound; intro n A c m cells minor
+  set s : α → ℝ := fun x => ∑ i < n, if x ∈ A i then c i else 0
+  have scaled : ∀ t : ℝ, 0 < t → t < 1 → t*(∑ i < n, c i*m i) ≤ B
+    intro t ht lt
+    set E : ℕ → set α := fun k x => ∀ j, k ≤ j → t*s x ≤ F j x
+    have scaled_cells : ∀ i < n, 0 ≤ t*c i ∧ 0 ≤ m i ∧ vol (A i) (m i)
+      intro i hi; have h := cells i hi; exact ⟨mul_nonneg.real t (c i) (by linarith) h.1,h.2⟩
+    have measurable : ∀ k, sets (E k)
+      intro k; rw [E_def]
+      apply space.2 (fun j x => t*s x ≤ F j x) k
+      intro j; have h := meas j; unfold lower_integral.measurable at h
+      have hm := h n A (fun i => t*c i) m scaled_cells
+      simpa only [lower_integral.scale_step,s_def] using hm
+    have inc : ∀ k l, k ≤ l → E k ⊆ E l
+      intro k l kl; unfold subset; intro x h
+      rw [E_def] at h ⊢; intro j jl; exact h j (by omega)
+    have cover : ∀ x, ∃ k, x ∈ E k
+      intro x; rw [E_def]
+      by_cases small : s x ≤ 0
+      · use 0; intro j hj; nlinarith [pos j x,mul_nonneg.real t (0-s x) (by linarith) (by linarith)]
+      · have h : s x ≤ G x := by rw [s_def]; exact minor x
+        exact limit x (t*s x) (by nlinarith [mul_pos.real (1-t) (s x) (by linarith) (by linarith)])
+    have inside : ∀ k, ∀ x ∈ E k, (∑ i < n, if x ∈ A i then t*c i else 0) ≤ F k x
+      intro k x h; rw [E_def] at h; rw [lower_integral.scale_step]; simpa only [s_def] using h k (by omega)
+    have h := lower_integral.exhaust_step vol sets F B n A (fun i => t*c i) m E space.1 measurable inc cover scaled_cells pos bounds inside
+    have eq : (∑ i < n, t*c i*m i) = t*(∑ i < n, c i*m i)
+      rw [← sum_const_mul.real]; apply sum_below.congr; intro i hi; ring
+    linarith
+  have bound := continuous_at.le_at_right_endpoint (fun t => t*(∑ i < n, c i*m i)) (fun t => B) 0 1 scaled (by decide) (by auto) (by auto)
+  linarith
+
+-- Compare with a lower limit of integral bounds. For each tolerance, the
+-- small bounds need only occur arbitrarily far out in the sequence.
++ lower_integral.bound.fatou_liminf (vol : set α → ℝ → Prop) (sets : set (set α)) (F : ℕ → α → ℝ) (G : α → ℝ) (B : ℝ)
+    (space : volume.exhaustion_laws vol sets) (meas : ∀ k, lower_integral.measurable vol sets (F k)) (pos : ∀ k x, 0 ≤ F k x)
+    (limit : seq.liminf_ge F G) (often : ∀ e : ℝ, 0 < e → ∀ k : ℕ, ∃ j, k ≤ j ∧ lower_integral.bound vol (F j) (B+e)) :
+    lower_integral.bound vol G B
+  have close : ∀ e : ℝ, 0 < e → lower_integral.bound vol G (B+e)
+    intro e he
+    obtain ⟨idx,pick⟩ := choice.function (fun k j => k ≤ j ∧ lower_integral.bound vol (F j) (B+e)) (often e he)
+    apply lower_integral.bound.fatou vol sets (fun k => F (idx k)) G (B+e) space
+    · intro k; exact meas (idx k)
+    · intro k; exact pos (idx k)
+    · unfold seq.liminf_ge at limit ⊢; intro x r lt
+      obtain ⟨k,tail⟩ := limit x r lt; use k; intro j hj
+      have h := pick j; exact tail (idx j) (by omega [h.1])
+    · intro k; exact (pick k).2
+  unfold lower_integral.bound; intro n A c m cells minor
+  by_contra bad
+  have h := close (((∑ i < n, c i*m i)-B)/2) (by linarith)
+  unfold lower_integral.bound at h; linarith [h n A c m cells minor]
+
+-- Finite measurable nonnegative functions, the domain used by numerical Fatou.
+-> lower_integral.integrable (vol : set α → ℝ → Prop) (sets : set (set α)) (f : α → ℝ) : Prop :=
+  (∀ x, 0 ≤ f x) ∧ lower_integral.measurable vol sets f ∧ (∃ B, lower_integral.bound vol f B)
+
+@[auto] + lower_integral.value.fatou (vol : set α → ℝ → Prop) (sets : set (set α)) (F : ℕ → α → ℝ) (G : α → ℝ) (B : ℝ)
+    (space : volume.exhaustion_laws vol sets) (finite : ∀ k, lower_integral.integrable vol sets (F k))
+    (limit : ∀ x, tends_to (fun k => F k x) (G x)) (bound : ∀ k, lower_integral.value vol (F k) ≤ B) : lower_integral.value vol G ≤ B
+  have pos : ∀ k x, 0 ≤ F k x := by intro k; have h := finite k; unfold lower_integral.integrable at h; exact h.1
+  have meas : ∀ k, lower_integral.measurable vol sets (F k) := by intro k; have h := finite k; unfold lower_integral.integrable at h; exact h.2.1
+  have bounds : ∀ k, lower_integral.bound vol (F k) B
+    intro k; have h := finite k; unfold lower_integral.integrable at h
+    exact lower_integral.bound_value vol (F k) (pos k) h.2.2 B (bound k)
+  have h := lower_integral.bound.fatou vol sets F G B space meas pos (seq.liminf_ge.of_limit F G limit) bounds
+  have nonneg : ∀ x, 0 ≤ G x
+    intro x; exact tends_to.le (fun k => 0) (fun k => F k x) 0 (G x) (tends_to.const 0) (limit x) (by intro k; exact pos k x)
+  exact lower_integral.value_le vol G B nonneg h
+
+-- A unit point mass satisfies the volume laws on every subset.
++ volume.exhaustion_laws.atom (p : α) : volume.exhaustion_laws (lower_integral.atom p) (fun A => True)
+  unfold volume.exhaustion_laws; constructor
+  · unfold volume.continuous_below; intro A m cell E measurable inc cover
+    unfold lower_integral.atom at cell
+    use fun k => if p ∈ set.inter A (E k) then (1:ℝ) else 0
+    constructor
+    · intro k; constructor
+      · by_cases hit : p ∈ set.inter A (E k) <;> simp [hit]
+      · simp [lower_integral.atom]
+    · by_cases hit : A p
+      · obtain ⟨k,mem⟩ := cover p hit
+        unfold tends_to; intro e he; use k; intro j hj
+        have subset := inc k j hj; unfold subset at subset
+        have there := subset p mem
+        simpa [set.inter,hit,there,cell] using he
+      · unfold tends_to; intro e he; use 0; intro j hj; simpa [set.inter,hit,cell] using he
+  · intro S k; trivial
+
+@[auto] + lower_integral.integrable.atom (p : α) (f : α → ℝ) (pos : ∀ x, 0 ≤ f x) :
+    lower_integral.integrable (lower_integral.atom p) (fun A => True) f
+  unfold lower_integral.integrable; constructor
+  · exact pos
+  · constructor
+    · unfold lower_integral.measurable; intro n A c m; trivial
+    · exact ⟨f p,(lower_integral.at_atom p f (f p) pos).mpr (by linarith)⟩
+
+-- A nonzero limiting profile gives a lower bound on any uniform constant.
+@[auto] + lower_integral.fatou_constant (vol : set α → ℝ → Prop) (sets : set (set α)) (F : ℕ → α → ℝ) (g : α → ℝ) (a C : ℝ)
+    (space : volume.exhaustion_laws vol sets) (ha : 0 ≤ a) (mass : 0 < lower_integral.value vol g)
+    (conv : ∀ x, tends_to (fun n => F n x) (a*g x)) (bounds : ∀ n, lower_integral.integrable vol sets (F n) ∧ lower_integral.value vol (F n) ≤ C*lower_integral.value vol g) : a ≤ C
+  have bound := lower_integral.value.fatou vol sets F (fun x => a*g x) (C*lower_integral.value vol g) space (by intro n; exact (bounds n).1) conv (by intro n; exact (bounds n).2)
+  rw [lower_integral.value.scale vol g a ha] at bound
+  by_contra bad; linarith [mul_lt_mul_of_pos_right.real C a (lower_integral.value vol g) (by linarith) mass]

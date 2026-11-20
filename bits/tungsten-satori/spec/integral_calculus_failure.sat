@@ -1,0 +1,13 @@
+import interval_integral
+import exp_calculus
+
++ zero_slope (q : ℝ) : darboux.has_integral (fun x => exp (q*x+1)) 0 2 ((exp (q*2+1)-exp (q*0+1))/q) := by auto
++ wrong_increment : darboux.has_integral (fun x => 2*x) 0 2 2 := by auto
++ missing_order (a b : ℝ) : darboux.has_integral (fun x => exp (x+1)) a b (exp (b+1)-exp (a+1)) := by auto
++ missing_boundary (u v : ℝ → ℝ) (b c : ℝ) (ab : 0 ≤ b) (left : u 0 = 0)
+    (cont : ∀ t, 0 ≤ t → t ≤ b → continuous_at u t ∧ continuous_at v t)
+    (du : ∀ t, 0 ≤ t → t ≤ b → has_deriv_within u (fun z => 0 ≤ z ∧ z ≤ b) t (v t)) :
+    darboux.has_integral (fun t => exp (-c*t)*(v t-c*u t)) 0 b 0 := by
+  simpa [left] using darboux.exp_weighted_deriv u v c 0 b ab cont du
+
++ arbitrary_operator (op : ℝ → ℝ → (ℝ → ℝ) → ℝ) : darboux.agrees op := by auto

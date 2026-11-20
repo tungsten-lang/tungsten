@@ -1,0 +1,23 @@
+import fatou
+
++ reverse_limit (vol : set α → ℝ → Prop) (sets : set (set α)) (f : ℕ → α → ℝ) (g : α → ℝ) (B : ℝ)
+    (space : volume.exhaustion_laws vol sets) (finite : ∀ k, lower_integral.integrable vol sets (f k))
+    (conv : ∀ x, tends_to (fun k => f k x) (g x)) (b : ∀ k, B ≤ lower_integral.value vol (f k)) :
+    B ≤ lower_integral.value vol g := by auto
+
++ strict_limit (p : ℝ) : lower_integral.value (lower_integral.atom p) (fun x => 1) < 1 := by auto
++ wrong_point (p q : ℝ) (f : ℝ → ℝ) (pos : ∀ x, 0 ≤ f x) : lower_integral.value (lower_integral.atom p) f = f q := by auto
++ negative_scale (p : ℝ) : lower_integral.value (lower_integral.atom p) (fun x => -1) = -1 := by auto
+
++ one_index (vol : set α → ℝ → Prop) (sets : set (set α)) (f : ℕ → α → ℝ) (g : α → ℝ) (B : ℝ)
+    (space : volume.exhaustion_laws vol sets) (finite : ∀ k, lower_integral.integrable vol sets (f k))
+    (conv : ∀ x, tends_to (fun k => f k x) (g x)) (b : lower_integral.value vol (f 0) ≤ B) :
+    lower_integral.value vol g ≤ B := by apply lower_integral.value.fatou vol sets f <;> auto
+
++ missing_volume_law (vol : set α → ℝ → Prop) (sets : set (set α)) (f : ℕ → α → ℝ) (g : α → ℝ) (B : ℝ)
+    (finite : ∀ k, lower_integral.integrable vol sets (f k)) (conv : ∀ x, tends_to (fun k => f k x) (g x))
+    (b : ∀ k, lower_integral.value vol (f k) ≤ B) : lower_integral.value vol g ≤ B := by apply lower_integral.value.fatou vol sets f <;> auto
+
++ zero_profile (vol : set α → ℝ → Prop) (sets : set (set α)) (f : ℕ → α → ℝ) (g : α → ℝ) (a C : ℝ)
+    (space : volume.exhaustion_laws vol sets) (pos : 0 ≤ a) (mass : lower_integral.value vol g = 0)
+    (conv : ∀ x, tends_to (fun n => f n x) (a*g x)) (b : ∀ n, lower_integral.integrable vol sets (f n) ∧ lower_integral.value vol (f n) ≤ C*lower_integral.value vol g) : a ≤ C := by auto

@@ -1,0 +1,14 @@
+import symplectic_character
+
++ repeated_words (word : ℕ → ℕ → ℕ) (digits : ∀ u < 2, ∀ i < 3, word u i < 2) :
+    finite_l2.orthogonal 2 (2^3) (walsh.character_matrix 3 word) (2^3) := by auto
+
++ missing_size (s L u : ℕ) (inside : u < L) :
+    (∑ v < L, (if symplectic.pairing s (u+1) (v+1) = 0 then (1 : ℝ) else 0)) = ((L : ℝ)-1)/2 := by auto
+
++ outside_row (s L u : ℕ) (size : L+1 = 4^s) :
+    (∑ v < L, (if symplectic.pairing s (u+1) (v+1) = 0 then (1 : ℝ) else 0)) = ((L : ℝ)-1)/2 := by auto
+
++ dropped_factor (x y : ℕ → ℝ) :
+    (∑ i < 3, x i*(∑ j < 3, symplectic.character 1 (i+1) (j+1)*y j))^2 ≤
+    3*((∑ i < 3, x i^2)*(∑ j < 3, y j^2)) := by auto

@@ -1,0 +1,42 @@
+import finite_l2
+import cauchy
+
++ finite_l2.bilinear_bound (n m : ℕ) (K : ℕ → ℕ → ℝ) (c : ℝ) (x y : ℕ → ℝ)
+    (orth : finite_l2.orthogonal n m K c) :
+    finite_l2.dot n x (finite_l2.transform m (fun v u => K u v) y)^2 ≤ c*(finite_l2.dot n x x*finite_l2.dot m y y)
+  set image := finite_l2.transform n K x with him
+  have cs : finite_l2.dot m y image^2 ≤ finite_l2.dot m y y*finite_l2.dot m image image := sum_below.cauchy.real m y image
+  rw [him,finite_l2.parseval n m K c x x orth,finite_l2.adjoint n m K x y] at cs
+  nlinarith
+
+-> finite_l2.prepend_zero (x : ℕ → ℝ) (i : ℕ) : ℝ := if i = 0 then 0 else x (i-1)
+
++ finite_l2.dot_prepend (n : ℕ) (x y : ℕ → ℝ) :
+    finite_l2.dot (n+1) (finite_l2.prepend_zero x) y = finite_l2.dot n x (fun i => y (i+1))
+  unfold finite_l2.dot; rw [sum_range_succ'.real]
+  have head : finite_l2.prepend_zero x 0 = 0 := by rfl
+  rw [head]; simp only [zero_mul.real,add_zero.real]
+  apply sum_below.congr; intro i hi
+  have ne : i+1 ≠ 0 := by omega
+  have idx : i+1-1 = i := by omega
+  simp [finite_l2.prepend_zero,ne,idx]
+
++ finite_l2.prepend_energy (n : ℕ) (x : ℕ → ℝ) :
+    finite_l2.dot (n+1) (finite_l2.prepend_zero x) (finite_l2.prepend_zero x) = finite_l2.dot n x x
+  rw [finite_l2.dot_prepend]; unfold finite_l2.dot; apply sum_below.congr; intro i hi
+  have ne : i+1 ≠ 0 := by omega
+  have idx : i+1-1 = i := by omega
+  simp [finite_l2.prepend_zero,ne,idx]
+
+-- Remove the first row and column by embedding both test vectors with a leading zero.
+@[auto] + finite_l2.minor_bound (n m : ℕ) (K : ℕ → ℕ → ℝ) (c : ℝ) (x y : ℕ → ℝ)
+    (orth : finite_l2.orthogonal (n+1) (m+1) K c) :
+    (∑ i < n, x i*(∑ j < m, K (i+1) (j+1)*y j))^2 ≤ c*((∑ i < n, x i^2)*(∑ j < m, y j^2))
+  have bound := finite_l2.bilinear_bound (n+1) (m+1) K c (finite_l2.prepend_zero x) (finite_l2.prepend_zero y) orth
+  rw [finite_l2.prepend_energy n x,finite_l2.prepend_energy m y,finite_l2.dot_prepend] at bound
+  have slice : ∀ i : ℕ, finite_l2.transform (m+1) (fun v u => K u v) (finite_l2.prepend_zero y) (i+1) = ∑ j < m, K (i+1) (j+1)*y j
+    intro i
+    have cut := finite_l2.dot_prepend m y (K (i+1)); unfold finite_l2.dot at cut
+    unfold finite_l2.transform; rw [cut]; apply sum_below.congr; intro j hj; ring
+  unfold finite_l2.dot at bound
+  simpa [slice,pow_two.real] using bound

@@ -1,0 +1,122 @@
+-- Real absolute-value, order and division estimates used in continuity proofs.
+import scale
+
++ abs_cases.real (x : ℝ) : (|x| = x ∧ 0 ≤ x) ∨ (|x| = 0 - x ∧ x < 0)
+  by_cases h : 0 ≤ x
+  · left
+    exact ⟨abs_of_nonneg.real x h, h⟩
+  · right
+    have e := abs_of_neg.real x (by linarith)
+    have e2 : neg x = 0 - x := by ring
+    rw [e2] at e
+    exact ⟨e, by linarith⟩
++ abs_of_nonpos.real (x : ℝ) (h : x ≤ 0) : |x| = 0 - x
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ le_abs_self.real (x : ℝ) : x ≤ |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ neg_le_abs.real (x : ℝ) : 0 - x ≤ |x|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ abs_lt.real (x c : ℝ) : |x| < c ↔ 0 - c < x ∧ x < c
+  constructor
+  · intro h
+    exact ⟨by linarith [neg_le_abs.real x], by linarith [le_abs_self.real x]⟩
+  · intro h
+    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
++ abs_le_of.real (x c : ℝ) (h : 0 - c ≤ x) (k : x ≤ c) : |x| ≤ c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.real x <;> linarith
++ abs_lt_of.real (x c : ℝ) (h : 0 - c < x) (k : x < c) : |x| < c
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.real x <;> linarith
++ abs_sub_comm.real (a b : ℝ) : |a - b| = |b - a|
+  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real (a - b) <;> obtain ⟨f, l⟩ | ⟨f, l⟩ := abs_cases.real (b - a) <;> linarith
++ abs_mul.real (a b : ℝ) : |a * b| = |a| * |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real a <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := abs_cases.real b <;> rw [e, f]
+  · rw [abs_of_nonneg.real (a * b) (mul_nonneg.real a b h k)]
+  · rw [abs_of_nonpos.real (a * b) (by linarith [mul_nonneg.real a (0 - b) h (by linarith)])]
+    ring
+  · rw [abs_of_nonpos.real (a * b) (by linarith [mul_nonneg.real (0 - a) b (by linarith) k])]
+    ring
+  · rw [abs_of_nonneg.real (a * b) (by linarith [mul_nonneg.real (0 - a) (0 - b) (by linarith) (by linarith)])]
+    ring
++ abs_add.real (a b : ℝ) : |a + b| ≤ |a| + |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real (a + b) <;> linarith [le_abs_self.real a, neg_le_abs.real a, le_abs_self.real b, neg_le_abs.real b]
++ abs_sub.real (a b : ℝ) : |a - b| ≤ |a| + |b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real (a - b) <;> linarith [le_abs_self.real a, neg_le_abs.real a, le_abs_self.real b, neg_le_abs.real b]
++ abs_sub_abs_le_abs_sub.real (a b : ℝ) : |a| - |b| ≤ |a - b|
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real a <;> linarith [le_abs_self.real (a - b), neg_le_abs.real (a - b), le_abs_self.real b, neg_le_abs.real b]
++ abs_abs_sub_abs_le.real (a b : ℝ) : | |a| - |b| | ≤ |a - b|
+  apply abs_le_of.real
+  · linarith [abs_sub_abs_le_abs_sub.real b a, abs_sub_comm.real a b]
+  · exact abs_sub_abs_le_abs_sub.real a b
+
+-- Minimum and maximum.
++ min_cases.real (a b : ℝ) : (min a b = a ∧ a ≤ b) ∨ (min a b = b ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [min, h], h⟩
+  · right; exact ⟨by simp [min, h], by linarith⟩
++ max_cases.real (a b : ℝ) : (max a b = b ∧ a ≤ b) ∨ (max a b = a ∧ b < a)
+  by_cases h : a ≤ b
+  · left; exact ⟨by simp [max, h], h⟩
+  · right; exact ⟨by simp [max, h], by linarith⟩
++ min_le_left.real (a b : ℝ) : min a b ≤ a
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.real a b <;> linarith
++ min_le_right.real (a b : ℝ) : min a b ≤ b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.real a b <;> linarith
++ lt_min.real (a b c : ℝ) (h : c < a) (k : c < b) : c < min a b
+  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.real a b <;> linarith
++ le_max_left.real (a b : ℝ) : a ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.real a b <;> linarith
++ le_max_right.real (a b : ℝ) : b ≤ max a b
+  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.real a b <;> linarith
+
+-- Multiplication preserves order at the indicated sign.
+@[auto] + mul_le_mul_of_nonneg_left.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
+  nlinarith
+@[auto] + mul_le_mul_of_nonneg_right.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
+  nlinarith
+@[auto] + mul_lt_mul_of_pos_left.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : c * a < c * b
+  nlinarith
+@[auto] + mul_lt_mul_of_pos_right.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : a * c < b * c
+  nlinarith
+
+-- Positive denominators and small affine perturbations.
++ one_div_nonneg.real (a : ℝ) (h : 0 ≤ a) : 0 ≤ 1 / a
+  by_cases k : a = 0
+  · rw [k, div_zero.real]
+    linarith
+  · linarith [one_div_pos.real a (by linarith)]
++ mul_div_cancel_right.real (a b : ℝ) (h : b ≠ 0) : a * b / b = a
+  have e : a * b / b = a * (b * (1 / b)) := by rw [div_def.real]; ring
+  rw [e, mul_inv_cancel.real b h]
+  ring
++ div_le_div_of_nonneg_right.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : a / c ≤ b / c
+  rw [div_def.real a c, div_def.real b c]
+  exact mul_le_mul_of_nonneg_right.real a b (1 / c) h (one_div_nonneg.real c hc)
++ div_lt_div_of_pos_right.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : a / c < b / c
+  rw [div_def.real a c, div_def.real b c]
+  exact mul_lt_mul_of_pos_right.real a b (1 / c) h (one_div_pos.real c hc)
++ le_div_iff.real (a b c : ℝ) (hc : 0 < c) : a ≤ b / c ↔ a * c ≤ b
+  constructor
+  · intro h
+    linarith [mul_le_mul_of_nonneg_right.real a (b / c) c h (by linarith), mul_div_cancel.real b c (by linarith)]
+  · intro h
+    linarith [div_le_div_of_nonneg_right.real (a * c) b c h (by linarith), mul_div_cancel_right.real a c (by linarith)]
++ affine_step_radius.real (m e : ℝ) (h : 0 < e) :
+    0 < e / (|m| + 1) ∧ ∀ t, 0 < t → t ≤ e / (|m| + 1) → m*t < e
+  have d : 0 < |m| + 1 := by linarith [abs_nonneg.real m]
+  constructor
+  · exact div_pos.real e (|m| + 1) h d
+  · intro t ht hb
+    have upper := (le_div_iff.real t e (|m| + 1) d).mp hb
+    linarith [mul_le_mul_of_nonneg_right.real m (|m|) t (le_abs_self.real m) (by linarith)]
++ lt_div_iff.real (a b c : ℝ) (hc : 0 < c) : a < b / c ↔ a * c < b
+  constructor
+  · intro h
+    linarith [mul_lt_mul_of_pos_right.real a (b / c) c h hc, mul_div_cancel.real b c (by linarith)]
+  · intro h
+    linarith [div_lt_div_of_pos_right.real (a * c) b c h hc, mul_div_cancel_right.real a c (by linarith)]
++ abs_max_sub_max_le_max.real (a b c d : ℝ) : |max a b - max c d| ≤ max |a - c| |b - d|
+  obtain ⟨e1, k1⟩ | ⟨e1, k1⟩ := max_cases.real a b <;> obtain ⟨e2, k2⟩ | ⟨e2, k2⟩ := max_cases.real c d <;> rw [e1, e2] <;>
+    apply abs_le_of.real <;> linarith [le_max_left.real (|a - c|) (|b - d|), le_max_right.real (|a - c|) (|b - d|), le_abs_self.real (a - c), neg_le_abs.real (a - c), le_abs_self.real (b - d), neg_le_abs.real (b - d)]
++ abs_min_sub_min_le_max.real (a b c d : ℝ) : |min a b - min c d| ≤ max |a - c| |b - d|
+  obtain ⟨e1, k1⟩ | ⟨e1, k1⟩ := min_cases.real a b <;> obtain ⟨e2, k2⟩ | ⟨e2, k2⟩ := min_cases.real c d <;> rw [e1, e2] <;>
+    apply abs_le_of.real <;> linarith [le_max_left.real (|a - c|) (|b - d|), le_max_right.real (|a - c|) (|b - d|), le_abs_self.real (a - c), neg_le_abs.real (a - c), le_abs_self.real (b - d), neg_le_abs.real (b - d)]

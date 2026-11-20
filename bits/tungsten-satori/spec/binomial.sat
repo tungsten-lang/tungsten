@@ -1,0 +1,20 @@
+import binomial
+
++ shifted (n k h : ℕ) : choose (n+h) (k+h)*asc_factorial (k+1) h = choose n k*asc_factorial (n+1) h := by auto
++ successor (n k : ℕ) : choose n k*(n+1) = (k+1)*choose (n+1) (k+1) := by auto
++ weighted_rows (a b : ℕ) : choose (a+b+3) (a+3)*((a+1)*(a+2)*(a+3)) = choose (a+b+3) (b+3)*((b+1)*(b+2)*(b+3)) :=
+  by simpa [asc_factorial] using choose.shift_symm a b 3
++ positive_inside (n k : ℕ) (inside : k ≤ n) : 0 < choose n k := by auto
++ outside_row : choose 2 5*(2+1) = (5+1)*choose 3 6 ∧ choose 3 6 = 0 := by decide
++ empty_product (a : ℕ) : asc_factorial a 0 = 1 := by rfl
+#axioms weighted_rows
+
+-- Reduce a literal recursion index even when the operands are abstract.
+-> advance (f : α → α) (x : α) : ℕ → α
+  | 0 => x
+  | k+1 => f (advance f x k)
++ four_steps (f : α → α) (x : α) : advance f x 4 = f (f (f (f x))) := by simp only [advance]
++ symbolic_step (f : α → α) (x : α) (k : ℕ) : advance f x (k+1) = f (advance f x k) := by simp only [advance]
++ four_factors (x : ℕ) : asc_factorial x 4 = x*(x+1)*(x+2)*(x+3) := by unfold asc_factorial; ring
++ count_range (n k : ℕ) : 0 < choose n k ↔ k ≤ n := by simp
+#axioms four_steps

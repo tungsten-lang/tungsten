@@ -1,0 +1,22 @@
+import walsh
+
++ rectangular (K : ℕ → ℕ → ℝ) (x y : ℕ → ℝ) (orth : finite_l2.orthogonal 2 3 K 5) :
+    finite_l2.dot 3 (finite_l2.transform 2 K x) (finite_l2.transform 2 K y) = 5*finite_l2.dot 2 x y := by auto
+
++ cube_energy (d : ℕ) (x : ℕ → ℝ) :
+    finite_l2.dot (2^d) (walsh.transform d x) (walsh.transform d x) = 2^d*finite_l2.dot (2^d) x x := by auto
+
++ attenuation (n : ℕ) (w f : ℕ → ℝ) (bound : ∀ i < n, w i*w i ≤ 1) :
+    finite_l2.dot n (fun i => w i*f i) (fun i => w i*f i) ≤ finite_l2.dot n f f := by auto
+
++ trace (d : ℕ) (B : ℕ → ℕ → ℝ) :
+    (∑ h < 2^d, walsh.entry d B (2^d-1-h) h) = ∑ x < 2^d, walsh.parity d x*B x x := by auto
+#axioms trace
+
+-- A single off-diagonal entry contributes to individual terms but cancels in the trace.
+-> point (x y : ℕ) : ℝ := if x = 1 ∧ y = 2 then 8 else 0
++ off_diagonal : walsh.entry 3 point 5 2 = 1 ∧ walsh.entry 3 point 7 0 = -1 ∧ (∑ h < 8, walsh.entry 3 point (7-h) h) = 0 := by decide
++ signed_diagonal : (∑ h < 8, walsh.entry 3 (fun i j => if i = 4 ∧ j = 4 then 3 else 0) (7-h) h) = -3 := by decide
++ zero_bits (B : ℕ → ℕ → ℝ) : walsh.entry 0 B 0 0 = B 0 0
+  have one : ∀ f : ℕ → ℝ, (∑ i < 1, f i) = f 0 := by intro f; simpa using sum_below_succ 0 f
+  simp [walsh.entry,walsh.transform,finite_l2.transform,walsh.row,one]

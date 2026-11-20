@@ -1,0 +1,4 @@
++ strict_minimum : ∃ t : ℚ, 256*t^2 - 352*t + 120 < -1 := by auto
++ wrong_interval : ∃ t : ℝ, 1 < t ∧ 256*t^2 - 352*t + 120 < 0 := by auto
++ disjoint : ∃ t : ℝ, (t-1)^2 < 1/100 ∧ (t+1)^2 < 1/100 := by auto
++ no_integer : ∃ n : ℤ, 0 < n ∧ n < 1 ∧ n^2 < 2 := by auto

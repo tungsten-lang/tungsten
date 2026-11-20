@@ -1,0 +1,11 @@
+import spectrum_int
+
++ union_for_product : spectrum.D ring_ops.int 6 = set.union (spectrum.D ring_ops.int 2) (spectrum.D ring_ops.int 3) := by auto
++ composite_prime : ideal.multiples 6 ∈ spectrum ring_ops.int := by auto
++ exponent_zero : spectrum.D ring_ops.int (ring_ops.power ring_ops.int 2 0) = spectrum.D ring_ops.int 2 := by auto
++ nonunit_cover : set.union (spectrum.D ring_ops.int 6) (spectrum.D ring_ops.int 10) = spectrum ring_ops.int := by auto
+
++ missing_surjection (R : ring_ops α) (S : ring_ops β) (f : α → β) (P : set α)
+    (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f)
+    (point : P ∈ spectrum.V R (ring_hom.kernel S f)) : ∃ J ∈ spectrum S, ideal.comap f J = P
+  exact (spectrum.quotient R S f P hr hs hom (by auto)).mp point

@@ -30,6 +30,10 @@ def all (p : α → Prop) : list α → Prop
   | [] => True
   | x :: xs => p x ∧ all p xs
 
++ list.all_nil (p : α → Prop) : all p [] := by unfold all; trivial
++ list.all_cons (p : α → Prop) (x : α) (xs : list α) (head : p x) (tail : all p xs) :
+    all p (x :: xs) := by unfold all; exact ⟨head,tail⟩
+
 theorem length_append (xs ys : list α) : length (xs ++ ys) = length xs + length ys
   induction xs with x xs ih
   · simp [append, length]

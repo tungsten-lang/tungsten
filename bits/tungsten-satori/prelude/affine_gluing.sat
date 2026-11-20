@@ -1,0 +1,170 @@
+-- Sections on a cover of Spec R by two principal opens (Stacks, Section 26.5).
+import localization
+
+-> ring_ops.comaximal (R : ring_ops α) (f g : α) : Prop :=
+  ∃ a b, R.add (R.mul a f) (R.mul b g) = R.one
+
++ ring_ops.comaximal.symm (R : ring_ops α) (hr : comm_ring R) (f g : α)
+    (h : ring_ops.comaximal R f g) : ring_ops.comaximal R g f
+  unfold ring_ops.comaximal at h ⊢; unfold comm_ring at hr
+  obtain ⟨a,b,eq⟩ := h
+  exact ⟨b,a,by rw [hr.2.1]; exact eq⟩
+
++ ring_ops.comaximal.mul_left (R : ring_ops α) (hr : comm_ring R) (f x g : α)
+    (hf : ring_ops.comaximal R f g) (hx : ring_ops.comaximal R x g) : ring_ops.comaximal R (R.mul f x) g
+  unfold ring_ops.comaximal at hf hx ⊢
+  obtain ⟨a,b,ef⟩ := hf; obtain ⟨c,d,ex⟩ := hx
+  have shuffle := comm_ring.mul_shuffle R hr
+  unfold comm_ring at hr; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hr
+  set t := R.mul a f with ht
+  have expand : R.add (R.mul (R.mul a c) (R.mul f x)) (R.mul (R.mul t d) g) = t
+    rw [← shuffle a f c x,← ht,ma t d g,← dist t,ex,mc t R.one,mo]
+  use R.mul a c
+  use R.add (R.mul t d) b
+  rw [mc (R.add (R.mul t d) b) g,dist,mc g (R.mul t d),mc g b,← aa,expand]; exact ef
+
++ ring_ops.comaximal.power_left (R : ring_ops α) (hr : comm_ring R) (f g : α)
+    (h : ring_ops.comaximal R f g) (n : ℕ) : ring_ops.comaximal R (ring_ops.power R f n) g
+  induction n with k ih
+  · have zero := comm_ring.mul_zero R hr g
+    unfold comm_ring at hr; unfold ring_ops.comaximal
+    obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hr
+    exact ⟨R.one,R.zero,by simp only [ring_ops.power,mo,mc R.zero g,zero,ac R.one R.zero,az]⟩
+  · simp only [succ_eq_add_one.nat,ring_ops.power]; exact ring_ops.comaximal.mul_left R hr f (ring_ops.power R f k) g h ih
+
++ ring_ops.comaximal.powers (R : ring_ops α) (hr : comm_ring R) (f g d e : α)
+    (cover : ring_ops.comaximal R f g) (hd : d ∈ ring_ops.powers R f) (he : e ∈ ring_ops.powers R g) : ring_ops.comaximal R d e
+  unfold ring_ops.powers at hd he
+  obtain ⟨n,hn⟩ := hd; obtain ⟨m,hm⟩ := he; rw [← hn,← hm]
+  have swap := ring_ops.comaximal.symm R hr
+  have left := ring_ops.comaximal.power_left R hr f g cover n
+  exact swap (ring_ops.power R g m) (ring_ops.power R f n) (ring_ops.comaximal.power_left R hr g (ring_ops.power R f n) (swap (ring_ops.power R f n) g left) m)
+
+-- Coefficients of a partition of unity recover x from f*x and g*x.
++ ring_ops.partition (R : ring_ops α) (hr : comm_ring R) (a b f g : α)
+    (cover : R.add (R.mul a f) (R.mul b g) = R.one) (x : α) :
+    R.add (R.mul a (R.mul f x)) (R.mul b (R.mul g x)) = x
+  unfold comm_ring at hr; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hr
+  rw [← ma a f x,← ma b g x,mc (R.mul a f) x,mc (R.mul b g) x,← dist,cover,mc x R.one,mo]
+
++ ring_ops.comaximal.patch (R : ring_ops α) (hr : comm_ring R) (d e u v : α)
+    (cover : ring_ops.comaximal R d e) (agree : R.mul e u = R.mul d v) :
+    ∃ x, R.mul d x = u ∧ R.mul e x = v
+  unfold ring_ops.comaximal at cover; obtain ⟨a,b,h⟩ := cover
+  have split := ring_ops.partition R hr a b d e h
+  have swap := comm_ring.mul_swap R hr
+  unfold comm_ring at hr; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hr
+  use R.add (R.mul a u) (R.mul b v); constructor
+  · rw [dist,swap d a u,swap d b v,← agree]; exact split u
+  · rw [dist,swap e a u,swap e b v,agree]; exact split v
+
++ localization.away_ext (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (j : α → γ)
+    (f g x y : α) (hr : comm_ring R) (cover : ring_ops.comaximal R f g)
+    (lf : localization R S i (ring_ops.powers R f)) (lg : localization R T j (ring_ops.powers R g))
+    (first : i x = i y) (second : j x = j y) : x = y
+  obtain ⟨d,hd,ex⟩ := lf.2.2.2.2 x y first
+  obtain ⟨e,he,ey⟩ := lg.2.2.2.2 x y second
+  have both := ring_ops.comaximal.powers R hr f g d e cover hd he
+  unfold ring_ops.comaximal at both; obtain ⟨a,b,h⟩ := both
+  have split := ring_ops.partition R hr a b d e h
+  rw [← split x,ex,ey,split y]
+
++ ring_ops.power_mul (R : ring_ops α) (hr : comm_ring R) (f g : α) (n : ℕ) :
+    ring_ops.power R (R.mul f g) n = R.mul (ring_ops.power R f n) (ring_ops.power R g n)
+  induction n with k ih
+  · simp only [ring_ops.power,hr.2.2.2.2.2.2.1]
+  · simp only [succ_eq_add_one.nat,ring_ops.power,ih,comm_ring.mul_shuffle R hr f g]
+
+-- r restricts sections to a smaller open and commutes with the base-ring maps.
+-> localization.restriction (S : ring_ops β) (L : ring_ops δ) (i : α → β) (k : α → δ) (r : β → δ) : Prop :=
+  ring_hom S L r ∧ ∀ a, r (i a) = k a
+
+-- Restrict from D(f) to D(fg). The universal property determines the map.
+@[auto] + localization.overlap_restriction (R : ring_ops α) (S : ring_ops β) (L : ring_ops δ) (i : α → β) (k : α → δ)
+    (f g : α) (hr : comm_ring R) (hs : comm_ring S) (hl : comm_ring L)
+    (lf : localization R S i (ring_ops.powers R f)) (overlap : localization R L k (ring_ops.powers R (R.mul f g))) :
+    ∃! r, localization.restriction S L i k r
+  have unit := overlap.2.2.1 (R.mul f g) (ring_ops.powers_self R hr (R.mul f g))
+  unfold ring_ops.unit at unit; obtain ⟨v,inv⟩ := unit
+  rw [overlap.2.1.2.2.2.2] at inv
+  have invert : ring_ops.unit L (k f) := ⟨L.mul v (k g),by rw [hl.2.2.2.2.1,hl.2.2.2.2.2.1 (k g) (k f)]; exact inv⟩
+  obtain ⟨r,hom,base⟩ := (localization.away_lift R S L i k f hr hs hl lf overlap.2.1).mpr invert
+  exact ⟨r,⟨hom,base⟩,by intro t h; exact localization.hom_ext R S L i (ring_ops.powers R f) t r hl lf h.1 hom (by intro a; rw [h.2 a,base a])⟩
+
++ localization.restriction.rep (S : ring_ops β) (L : ring_ops δ) (i : α → β) (k : α → δ) (r : β → δ)
+    (res : localization.restriction S L i k r) (d a : α) (u : β) (rep : S.mul (i d) u = i a) :
+    L.mul (k d) (r u) = k a
+  have mul := res.1.2.2.2.2
+  rw [← res.2 d,← mul,rep,res.2 a]
+
++ localization.of_scaled_rep (R : ring_ops α) (S : ring_ops β) (i : α → β) (U : set α)
+    (hs : comm_ring S) (loc : localization R S i U) (p d a x : α) (u : β)
+    (hp : p ∈ U) (hd : d ∈ U) (rep : S.mul (i d) u = i a) (eq : R.mul (R.mul p d) x = R.mul p a) :
+    i x = u
+  have mul := loc.2.1.2.2.2.2
+  have unit := loc.2.2.1 (R.mul p d) (loc.1.2 p d hp hd)
+  apply ring_ops.unit.cancel S (i (R.mul p d)) (i x) u hs unit
+  have assoc := hs.2.2.2.2.1
+  rw [← mul (R.mul p d) x,eq,mul p a,mul p d,assoc,rep]
+
+-- Equal sections on D(fg) may agree only after multiplying by a power of fg.
+-- Its two factors enlarge the two denominators before applying the partition of unity.
+@[auto] + localization.glue (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (L : ring_ops δ)
+    (i : α → β) (j : α → γ) (k : α → δ) (r : β → δ) (s : γ → δ) (f g : α) (u : β) (v : γ)
+    (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T) (hl : comm_ring L) (cover : ring_ops.comaximal R f g)
+    (lf : localization R S i (ring_ops.powers R f)) (lg : localization R T j (ring_ops.powers R g))
+    (overlap : localization R L k (ring_ops.powers R (R.mul f g)))
+    (rf : localization.restriction S L i k r) (rg : localization.restriction T L j k s) (agree : r u = s v) :
+    ∃! x, i x = u ∧ j x = v
+  obtain ⟨a,d,hd,du⟩ := lf.2.2.2.1 u
+  obtain ⟨b,e,he,ev⟩ := lg.2.2.2.1 v
+  have first := localization.restriction.rep S L i k r rf d a u du
+  have second := localization.restriction.rep T L j k s rg e b v ev
+  rw [agree] at first
+  have equal := localization.cross R L k hl overlap.2.1 (s v) a d b e first second
+  obtain ⟨w,hw,clear⟩ := overlap.2.2.2.2 (R.mul e a) (R.mul d b) equal
+  unfold ring_ops.powers at hw; obtain ⟨n,hn⟩ := hw
+  rw [← hn,ring_ops.power_mul R hr] at clear
+  set p := ring_ops.power R f n with ep; set q := ring_ops.power R g n with eq
+  have hp : p ∈ ring_ops.powers R f := ⟨n,ep.symm⟩
+  have hq : q ∈ ring_ops.powers R g := ⟨n,eq.symm⟩
+  have cop := ring_ops.comaximal.powers R hr f g (R.mul p d) (R.mul q e) cover (lf.1.2 p d hp hd) (lg.1.2 q e hq he)
+  have cross : R.mul (R.mul q e) (R.mul p a) = R.mul (R.mul p d) (R.mul q b)
+    rw [comm_ring.mul_shuffle R hr q e p a,hr.2.2.2.2.2.1 q p,comm_ring.mul_shuffle R hr p d q b]; exact clear
+  obtain ⟨x,ex,ey⟩ := ring_ops.comaximal.patch R hr (R.mul p d) (R.mul q e) (R.mul p a) (R.mul q b) cop cross
+  have ix := localization.of_scaled_rep R S i (ring_ops.powers R f) hs lf p d a x u hp hd du ex
+  have jx := localization.of_scaled_rep R T j (ring_ops.powers R g) ht lg q e b x v hq he ev ey
+  exact ⟨x,⟨ix,jx⟩,by intro y h; exact localization.away_ext R S T i j f g y x hr cover lf lg (by rw [h.1,ix]) (by rw [h.2,jx])⟩
+
+-- Package a two-open cover once. Subsequent section proofs need only the maps.
+-> localization.two_open_cover (i : α → β) (j : α → γ) (r : β → δ) (s : γ → δ) : Prop :=
+  ∃ R : ring_ops α, ∃ S : ring_ops β, ∃ T : ring_ops γ, ∃ L : ring_ops δ, ∃ k : α → δ, ∃ f g : α,
+  comm_ring R ∧ comm_ring S ∧ comm_ring T ∧ comm_ring L ∧ ring_ops.comaximal R f g ∧
+  localization R S i (ring_ops.powers R f) ∧ localization R T j (ring_ops.powers R g) ∧
+  localization R L k (ring_ops.powers R (R.mul f g)) ∧ localization.restriction S L i k r ∧ localization.restriction T L j k s
+
+@[auto] + localization.glue_iff (i : α → β) (j : α → γ) (r : β → δ) (s : γ → δ)
+    (cover : localization.two_open_cover i j r s) (u : β) (v : γ) :
+    (∃! x, i x = u ∧ j x = v) ↔ r u = s v
+  unfold localization.two_open_cover at cover
+  obtain ⟨R,S,T,L,k,f,g,hr,hs,ht,hl,c,lf,lg,overlap,rf,rg⟩ := cover
+  constructor
+  · intro h; obtain ⟨x,images,unique⟩ := h; rw [← images.1,← images.2,rf.2 x,rg.2 x]
+  · exact localization.glue R S T L i j k r s f g u v hr hs ht hl c lf lg overlap rf rg
+
+@[auto] + localization.cover_exists (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (L : ring_ops δ)
+    (i : α → β) (j : α → γ) (k : α → δ) (f g : α)
+    (lf : localization R S i (ring_ops.powers R f)) (lg : localization R T j (ring_ops.powers R g))
+    (overlap : localization R L k (ring_ops.powers R (R.mul f g)))
+    (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T) (hl : comm_ring L) (cover : ring_ops.comaximal R f g) : ∃ r : β → δ, ∃ s : γ → δ, localization.two_open_cover i j r s
+  obtain ⟨r,rf,ur⟩ := localization.overlap_restriction R S L i k f g hr hs hl lf overlap
+  rw [hr.2.2.2.2.2.1 f g] at overlap
+  obtain ⟨s,rg,us⟩ := localization.overlap_restriction R T L j k g f hr ht hl lg overlap
+  rw [hr.2.2.2.2.2.1 g f] at overlap
+  exact ⟨r,s,⟨R,S,T,L,k,f,g,hr,hs,ht,hl,cover,lf,lg,overlap,rf,rg⟩⟩
+
++ localization.cover_ext (i : α → β) (j : α → γ) (r : β → δ) (s : γ → δ)
+    (cover : localization.two_open_cover i j r s) (x y : α) (first : i x = i y) (second : j x = j y) : x = y
+  unfold localization.two_open_cover at cover
+  obtain ⟨R,S,T,L,k,f,g,hr,hs,ht,hl,c,lf,lg,rest⟩ := cover
+  exact localization.away_ext R S T i j f g x y hr c lf lg first second

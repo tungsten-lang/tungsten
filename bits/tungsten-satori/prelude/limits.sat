@@ -1,0 +1,39 @@
+-- Real sequence limits from their epsilon definition.
+import real
+
++ tends_to.of_eventual_error_le (a : ℕ → ℝ) (A : ℝ) (b : ℕ → ℝ) (B : ℝ) (ha : tends_to a A) (k : ℕ)
+    (bound : ∀ n, k ≤ n → |b n - B| ≤ |a n - A|) : tends_to b B
+  unfold tends_to at ha
+  unfold tends_to
+  intro e he
+  obtain ⟨N, near⟩ := ha e he
+  use k + N
+  intro n hn
+  linarith [bound n (by omega), near n (by omega)]
+
++ tends_to.of_error_le (a : ℕ → ℝ) (A : ℝ) (b : ℕ → ℝ) (B : ℝ) (ha : tends_to a A)
+    (bound : ∀ n, |b n - B| ≤ |a n - A|) : tends_to b B
+  apply tends_to.of_eventual_error_le a A b B ha 0
+  intro n hn
+  exact bound n
+
+@[auto] + tends_to.const (c : ℝ) : tends_to (fun n => c) c
+  unfold tends_to
+  intro e he
+  use 0
+  intro n hn
+  have z : c - c = 0 := by ring
+  rw [z, abs_of_nonneg.real 0 (by decide)]
+  exact he
+
+@[auto] + tends_to.sub_const (a : ℕ → ℝ) (A c : ℝ) (ha : tends_to a A) : tends_to (fun n => a n - c) (A - c)
+  apply tends_to.of_error_le a A (fun n => a n - c) (A-c) ha
+  intro n
+  have e : a n - c - (A-c) = a n - A := by ring
+  rw [e]
+  linarith
+
++ tends_to.congr (a b : ℕ → ℝ) (A : ℝ) (ha : tends_to a A) (same : ∀ n, b n = a n) : tends_to b A
+  have e : b = a := by funext n; exact same n
+  rw [e]
+  exact ha

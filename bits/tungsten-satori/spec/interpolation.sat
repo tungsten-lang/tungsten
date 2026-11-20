@@ -1,0 +1,37 @@
+import interpolation
+
++ exact_chord (P : ℚ → ℚ → Prop) (mix : interpolation.convex P) (l : P 2 (-1)) (r : P (-4) 3) :
+    P (1/2) 0 := by auto [interpolation.segment l r mix]
+
++ strict_strip (P : ℚ → ℚ → Prop) (mix : interpolation.convex P)
+    (l : ∀ u : ℚ, 2 < u → P u (-1)) (r : ∀ u : ℚ, -4 < u → P u 3)
+    (z s : ℚ) (lo : -1 ≤ s) (hi : s ≤ 3) (gap : 1 < 2*z+3*s) : P z s :=
+  by auto [interpolation.above l r mix]
+
++ closed_boundary (P : ℚ → ℚ → Prop) (mix : interpolation.convex P)
+    (l : ∀ u : ℚ, 2 ≤ u → P u (-1)) (r : ∀ u : ℚ, -4 ≤ u → P u 3) :
+    P (1/2) 0 := by auto [interpolation.on_or_above l r mix]
+
++ both_ends (P : ℚ → ℚ → Prop) (mix : interpolation.convex P)
+    (l : ∀ u : ℚ, 2 < u → P u (-1)) (r : ∀ u : ℚ, -4 ≤ u → P u 3) : P 3 (-1) ∧ P (-3) 3
+  have region := interpolation.above l (interpolation.open_of_closed r) mix
+  constructor <;> auto
+
++ interior_pair (P : ℚ → ℚ → Prop) (mix : interpolation.convex P)
+    (l : ∀ u : ℚ, 2 < u → P u (-1)) (r : ∀ u : ℚ, -4 < u → P u 3) : P 1 0 ∧ P (-2) 2
+  have region := interpolation.above l r mix
+  constructor <;> auto
+
+#axioms interior_pair
+
+-- This concrete region excludes the boundary even though it admits every positive margin.
+-> tilted (z s : ℚ) : Prop := 1 < 2*z+3*s
++ tilted_convex : interpolation.convex tilted
+  unfold interpolation.convex tilted
+  intro a b l r t low high p q
+  have lo := mul_nonneg.rat (1-t) (2*a+3*l-1) (by linarith) (by linarith)
+  by_cases zero : t = 0
+  · rw [zero]; linarith
+  · have hi := mul_pos.rat t (2*b+3*r-1) (by linarith) (by linarith)
+    nlinarith
++ strict_boundary : tilted (51/100) 0 ∧ ¬ tilted (1/2) 0 := by decide

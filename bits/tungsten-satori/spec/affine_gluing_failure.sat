@@ -1,0 +1,12 @@
+import affine_gluing
+
++ missing_overlap (i : α → β) (j : α → γ) (r : β → δ) (s : γ → δ)
+    (cover : localization.two_open_cover i j r s) (u : β) (v : γ) :
+    ∃! x, i x = u ∧ j x = v := by auto
+
++ missing_cover (i : α → β) (j : α → γ) (r : β → δ) (s : γ → δ) (u : β) (v : γ) (agree : r u = s v) :
+    ∃! x, i x = u ∧ j x = v := by auto
+
++ wrong_sections (i : α → β) (j : α → γ) (r : β → δ) (s : γ → δ) (cover : localization.two_open_cover i j r s)
+    (u : β) (v w : γ) (agree : r u = s w) :
+    ∃! x, i x = u ∧ j x = v := by auto

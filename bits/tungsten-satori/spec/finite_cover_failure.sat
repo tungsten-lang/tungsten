@@ -1,0 +1,21 @@
+import finite_cover
+
++ missing_cover (R : ring_ops α) (hr : comm_ring R) (f d u : β → α) (ids : list β) (den : ∀ i ∈ ids, d i ∈ ring_ops.powers R (f i))
+    (agree : localization.compatible_fractions R f d u ids) : ∃! x, localization.represents_fractions R f d u ids x := by auto
+
++ missing_denominator (R : ring_ops α) (hr : comm_ring R) (f d u : β → α) (ids : list β) (cover : localization.principal_cover R f ids)
+    (agree : localization.compatible_fractions R f d u ids) : ∃! x, localization.represents_fractions R f d u ids x := by auto
+
++ diagonal_only (ids : list β) (h : β → α → γ) (r s : β → β → γ → δ) (u : β → γ)
+    (cover : localization.finite_open_cover ids h r s) (agree : ∀ i ∈ ids, r i i (u i)=s i i (u i)) :
+    ∃! x, ∀ i ∈ ids, h i x=u i := by auto
+
++ omitted_chart (h : ℕ → α → γ) (r s : ℕ → ℕ → γ → δ) (u : ℕ → γ)
+    (cover : localization.finite_open_cover [0,1,2] h r s) (agree : ∀ i ∈ [0,1], ∀ j ∈ [0,1], r i j (u i)=s i j (u j)) :
+    ∃! x, ∀ i ∈ [0,1,2], h i x=u i := by auto
+
++ raw_cross (R : ring_ops α) (hr : comm_ring R) (f d u : β → α) (ids : list β) (cover : localization.principal_cover R f ids)
+    (den : ∀ i ∈ ids, d i ∈ ring_ops.powers R (f i)) (agree : localization.compatible_fractions R f d u ids)
+    (i j : β) (hi : i ∈ ids) (hj : j ∈ ids) : R.mul (d j) (u i)=R.mul (d i) (u j) := by auto
+
++ empty_int : localization.principal_cover ring_ops.int (fun (i : ℕ) => 0) [] := by auto

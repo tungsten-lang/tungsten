@@ -1,0 +1,43 @@
+-- A finite interval of real values strictly above a has a common lower bound strictly above a.
+@[auto] + finite.lower_margin (f : ℕ → ℝ) (a cap : ℝ) (lo hi : ℕ) (hc : a < cap)
+    (pos : ∀ i, lo ≤ i → i < hi → a < f i) :
+    ∃ c, a < c ∧ c ≤ cap ∧ ∀ i, lo ≤ i → i < hi → c ≤ f i
+  have prefix : ∀ n : ℕ, (∀ i, lo ≤ i → i < n → a < f i) →
+      ∃ c, a < c ∧ c ≤ cap ∧ ∀ i, lo ≤ i → i < n → c ≤ f i
+    apply nat.induct (fun n => (∀ i, lo ≤ i → i < n → a < f i) →
+      ∃ c, a < c ∧ c ≤ cap ∧ ∀ i, lo ≤ i → i < n → c ≤ f i)
+    · intro h
+      exact ⟨cap, hc, by linarith, by intro i hlo hi0; omega⟩
+    · intro n ih h
+      obtain ⟨c, above, below, old⟩ := ih (by intro i hlo hlt; exact h i hlo (by omega))
+      by_cases in_range : lo ≤ n
+      · have next := h n in_range (by omega)
+        have meet : a < min c (f n) ∧ min c (f n) ≤ c ∧ min c (f n) ≤ f n
+          unfold min
+          by_cases order : c ≤ f n <;> simp [order] <;> auto
+        use min c (f n)
+        constructor
+        · exact meet.1
+        · constructor
+          · linarith [meet.2.1]
+          · intro i hlo hlt
+            by_cases eq : i = n
+            · rw [eq]
+              exact meet.2.2
+            · linarith [old i hlo (by omega), meet.2.1]
+      · exact ⟨c, above, below, by intro i hlo hlt; omega⟩
+  exact prefix hi pos
+
+-- Pointwise strictness also gives a uniform margin when the tail has one.
+@[auto] + finite.lower_margin_of_tail (f : ℕ → ℝ) (a cap : ℝ) (lo : ℕ) (hc : a < cap)
+    (pos : ∀ i, lo ≤ i → a < f i) (tail : ∃ hi : ℕ, ∀ i, hi ≤ i → cap ≤ f i) :
+    ∃ c, a < c ∧ ∀ i, lo ≤ i → c ≤ f i
+  obtain ⟨hi, eventual⟩ := tail
+  obtain ⟨c, above, small, prefix⟩ := finite.lower_margin f a cap lo hi hc (by intro i hlo hlt; exact pos i hlo)
+  use c
+  constructor
+  · exact above
+  · intro i hlo
+    by_cases h : i < hi
+    · exact prefix i hlo h
+    · linarith [eventual i (by omega)]

@@ -1,0 +1,227 @@
+-- Differentiate a fixed-interval integral using one time radius for every spatial point.
+import interval_integral
+
+-> uniform_deriv_within (F : ℝ → ℝ → ℝ) (v : ℝ → ℝ) (S X : set ℝ) (t : ℝ) : Prop :=
+  ∀ e : ℝ, 0 < e → ∃ d : ℝ, 0 < d ∧ ∀ s ∈ S, |s-t| < d →
+    ∀ x ∈ X, |F s x-F t x-(s-t)*v x| ≤ e*|s-t|
+
++ darboux.parameter_deriv (F : ℝ → ℝ → ℝ) (v J : ℝ → ℝ) (S : set ℝ) (a b t V : ℝ) (ht : t ∈ S)
+    (slices : ∀ s ∈ S, darboux.has_integral (F s) a b (J s)) (rate : darboux.has_integral v a b V)
+    (diff : uniform_deriv_within F v S (fun x => a ≤ x ∧ x ≤ b) t) : has_deriv_within J S t V
+  unfold uniform_deriv_within at diff
+  unfold has_deriv_within
+  intro e he
+  obtain ⟨pos,small⟩ := affine_step_radius.real (b-a) e he
+  obtain ⟨d,hd,near⟩ := diff (e/(|b-a|+1)) pos
+  use d; constructor
+  · exact hd
+  · intro s hs close
+    have delta := darboux.sub (F s) (F t) a b (J s) (J t) (slices s hs) (slices t ht)
+    have slope := darboux.scale v a b V (s-t) rate
+    have err := darboux.sub (fun x => F s x-F t x) (fun x => (s-t)*v x) a b (J s-J t) ((s-t)*V) delta slope
+    have bound := darboux.abs_le_const (fun x => F s x-F t x-(s-t)*v x) a b (J s-J t-(s-t)*V) ((e/(|b-a|+1))*|s-t|) err (by intro x lo hi; exact near s hs close x ⟨lo,hi⟩)
+    have coeff := small (e/(|b-a|+1)) pos (by linarith)
+    have scaled := mul_le_mul_of_nonneg_right.real ((b-a)*(e/(|b-a|+1))) e (|s-t|) (by linarith) (abs_nonneg.real (s-t))
+    have commute : V*(s-t) = (s-t)*V := by ring
+    rw [commute]; linarith
+
+-- Uniform in x at this time. The radius may depend on both t and the tolerance.
+-> uniform_continuous_within_at (v : ℝ → ℝ → ℝ) (S X : set ℝ) (t : ℝ) : Prop :=
+  ∀ e : ℝ, 0 < e → ∃ d : ℝ, 0 < d ∧ ∀ s ∈ S, |s-t| < d → ∀ x ∈ X, |v s x-v t x| ≤ e
+
++ interval.linearization_bound (F v : ℝ → ℝ) (S : set ℝ) (l r m e : ℝ) (lr : l ≤ r)
+    (inside : ∀ y, l ≤ y → y ≤ r → y ∈ S)
+    (diff : ∀ y ∈ S, has_deriv_within F S y (v y))
+    (osc : ∀ y, l ≤ y → y ≤ r → |v y-m| ≤ e) : |F r-F l-(r-l)*m| ≤ e*(r-l)
+  have deriv : ∀ y, l ≤ y → y ≤ r → has_deriv_within F (fun z => l ≤ z ∧ z ≤ r) y (v y)
+    intro y lo hi
+    apply has_deriv_within.restrict F S (fun z => l ≤ z ∧ z ≤ r) y (v y) (diff y (inside y lo hi))
+    intro z hz; exact inside z hz.1 hz.2
+  have upper := interval.increment_le_of_deriv_le F v l r (m+e) lr deriv (by intro y lo hi; linarith [osc y lo hi,le_abs_self.real (v y-m)])
+  have lower := interval.increment_ge_of_deriv_ge F v l r (m-e) lr deriv (by intro y lo hi; linarith [osc y lo hi,neg_le_abs.real (v y-m)])
+  apply abs_le_of.real <;> linarith
+
++ uniform_deriv_within.of_continuous_rate (F v : ℝ → ℝ → ℝ) (X : set ℝ) (c d t : ℝ) (ct : c ≤ t) (td : t ≤ d)
+    (diff : ∀ s, c ≤ s → s ≤ d → ∀ x ∈ X, has_deriv_within (fun z => F z x) (fun z => c ≤ z ∧ z ≤ d) s (v s x))
+    (cont : uniform_continuous_within_at v (fun z => c ≤ z ∧ z ≤ d) X t) :
+    uniform_deriv_within F (v t) (fun z => c ≤ z ∧ z ≤ d) X t
+  unfold uniform_continuous_within_at at cont
+  unfold uniform_deriv_within
+  intro e he; obtain ⟨rad,pos,near⟩ := cont e he
+  use rad; constructor
+  · exact pos
+  · intro s hs close x hx
+    have deriv : ∀ y ∈ (fun z => c ≤ z ∧ z ≤ d), has_deriv_within (fun z => F z x) (fun z => c ≤ z ∧ z ≤ d) y (v y x) := by intro y hy; exact diff y hy.1 hy.2 x hx
+    by_cases forward : t ≤ s
+    · have inside : ∀ y, t ≤ y → y ≤ s → c ≤ y ∧ y ≤ d := by intro y ty ys; exact ⟨by linarith,by linarith [hs.2]⟩
+      have osc : ∀ y, t ≤ y → y ≤ s → |v y x-v t x| ≤ e
+        intro y ty ys; apply near y (inside y ty ys)
+        · rw [abs_of_nonneg.real (y-t) (by linarith)]; linarith [le_abs_self.real (s-t)]
+        · exact hx
+      rw [abs_of_nonneg.real (s-t) (by linarith)]
+      exact interval.linearization_bound (fun z => F z x) (fun z => v z x) (fun z => c ≤ z ∧ z ≤ d) t s (v t x) e forward inside deriv osc
+    · have inside : ∀ y, s ≤ y → y ≤ t → c ≤ y ∧ y ≤ d := by intro y sy yt; exact ⟨by linarith [hs.1],by linarith⟩
+      have osc : ∀ y, s ≤ y → y ≤ t → |v y x-v t x| ≤ e
+        intro y sy yt; apply near y (inside y sy yt)
+        · rw [abs_of_nonpos.real (y-t) (by linarith)]; linarith [neg_le_abs.real (s-t)]
+        · exact hx
+      have rev := interval.linearization_bound (fun z => F z x) (fun z => v z x) (fun z => c ≤ z ∧ z ≤ d) s t (v t x) e (by linarith) inside deriv osc
+      have sign : F s x-F t x-(s-t)*v t x = 0-(F t x-F s x-(t-s)*v t x) := by ring
+      rw [sign,abs_neg.real,abs_of_nonpos.real (s-t) (by linarith)]; linarith
+
+-> continuous_within_box (F : ℝ → ℝ → ℝ) (S X : set ℝ) (t x : ℝ) : Prop :=
+  ∀ e : ℝ, 0 < e → ∃ d : ℝ, 0 < d ∧ ∀ s ∈ S, |s-t| < d →
+    ∀ y ∈ X, |y-x| < d → |F s y-F t x| < e
+
+-- Compactness in space turns pointwise box radii into a single time radius.
++ interval.uniform_time_continuity (F : ℝ → ℝ → ℝ) (S : set ℝ) (a b t : ℝ) (ab : a ≤ b) (ht : t ∈ S)
+    (cont : ∀ x, a ≤ x → x ≤ b → continuous_within_box F S (fun z => a ≤ z ∧ z ≤ b) t x) :
+    uniform_continuous_within_at F S (fun z => a ≤ z ∧ z ≤ b) t
+  unfold uniform_continuous_within_at
+  intro e he
+  have extend : ∀ p, a ≤ p → p ≤ b → ∃ d : ℝ, 0 < d ∧ ∀ s ∈ S, |s-t| < d → ∀ x, a ≤ x → x ≤ b → |x-p| < d → |F s x-F t x| ≤ e
+    intro p lo hi
+    have box := cont p lo hi; unfold continuous_within_box at box
+    obtain ⟨d,pos,near⟩ := box (e/2) (by linarith)
+    use d; constructor
+    · exact pos
+    · intro s hs close x ax xb xp
+      have left := near s hs close x ⟨ax,xb⟩ xp
+      have right := near t ht (abs_lt_of.real (t-t) d (by linarith) (by linarith)) x ⟨ax,xb⟩ xp
+      linarith [abs_sub_le.real (F s x) (F t p) (F t x),abs_sub_comm.real (F t x) (F t p)]
+  have start : ∃ d : ℝ, 0 < d ∧ ∀ s ∈ S, |s-t| < d → ∀ x, a ≤ x → x ≤ a → |F s x-F t x| ≤ e
+    obtain ⟨d,pos,near⟩ := extend a (by linarith) ab
+    exact ⟨d,pos,by intro s hs close x ax xa; exact near s hs close x ax (by linarith) (abs_lt_of.real (x-a) d (by linarith) (by linarith))⟩
+  have whole : ∃ d : ℝ, 0 < d ∧ ∀ s ∈ S, |s-t| < d → ∀ x, a ≤ x → x ≤ b → |F s x-F t x| ≤ e
+    apply interval.propagate (fun y => ∃ d : ℝ, 0 < d ∧ ∀ s ∈ S, |s-t| < d → ∀ x, a ≤ x → x ≤ y → |F s x-F t x| ≤ e) a b ab start
+    intro p ap pb
+    obtain ⟨d,pos,near⟩ := extend p ap pb
+    use d; constructor
+    · exact pos
+    · intro l r al lp pr rb ld rd old
+      obtain ⟨k,hk,prefix⟩ := old
+      use min k d; constructor
+      · exact lt_min.real k d 0 hk pos
+      · intro s hs close x ax xr
+        by_cases covered : x ≤ l
+        · exact prefix s hs (by linarith [min_le_left.real k d]) x ax covered
+        · exact near s hs (by linarith [min_le_right.real k d]) x ax (by linarith) (abs_lt_of.real (x-p) d (by linarith) (by linarith))
+  obtain ⟨d,pos,near⟩ := whole
+  exact ⟨d,pos,by intro s hs close x hx; exact near s hs close x hx.1 hx.2⟩
+
++ continuous_within_box.slice (F : ℝ → ℝ → ℝ) (S X : set ℝ) (t x : ℝ) (ht : t ∈ S)
+    (cont : continuous_within_box F S X t x) : continuous_within_at (F t) X x
+  unfold continuous_within_box at cont; unfold continuous_within_at
+  intro e he; obtain ⟨d,pos,near⟩ := cont e he
+  exact ⟨d,pos,near t ht (abs_lt_of.real (t-t) d (by linarith) (by linarith))⟩
+
+@[auto] + continuous_within_box.const (k : ℝ) (S X : set ℝ) (t x : ℝ) : continuous_within_box (fun s y => k) S X t x
+  unfold continuous_within_box; intro e he
+  exact ⟨1,by decide,by intro s hs close y hy near; exact abs_lt_of.real (k-k) e (by linarith) (by linarith)⟩
+
+@[auto] + continuous_within_box.mul (F G : ℝ → ℝ → ℝ) (S X : set ℝ) (t x : ℝ)
+    (hf : continuous_within_box F S X t x) (hg : continuous_within_box G S X t x) :
+    continuous_within_box (fun s y => F s y*G s y) S X t x
+  unfold continuous_within_box at hf hg ⊢
+  intro e he
+  obtain ⟨k,hk,one,small⟩ := bounded_step_radius.real (|F t x|+|G t x|+1) e he
+  obtain ⟨d,hd,left⟩ := hf k hk
+  obtain ⟨r,hr,right⟩ := hg k hk
+  use min d r; constructor
+  · exact lt_min.real d r 0 hd hr
+  · intro s hs close y hy near
+    have dr := min_le_left.real d r; have rr := min_le_right.real d r
+    have f := left s hs (by linarith) y hy (by linarith)
+    have g := right s hs (by linarith) y hy (by linarith)
+    have both : max |F s y-F t x| |G s y-G t x| ≤ k
+      obtain ⟨eq,h⟩ | ⟨eq,h⟩ := max_cases.real (|F s y-F t x|) (|G s y-G t x|) <;> linarith
+    have product := mul_le_mul_of_nonneg_left.real (max |F s y-F t x| |G s y-G t x|) k (|F t x|+|G t x|+1) both (by linarith [abs_nonneg.real (F t x),abs_nonneg.real (G t x)])
+    linarith [mul_error_le.real (F s y) (G s y) (F t x) (G t x) (by linarith)]
+
+@[auto] + continuous_within_box.scale (k : ℝ) (F : ℝ → ℝ → ℝ) (S X : set ℝ) (t x : ℝ)
+    (hf : continuous_within_box F S X t x) : continuous_within_box (fun s y => k*F s y) S X t x
+  exact continuous_within_box.mul (fun s y => k) F S X t x (continuous_within_box.const k S X t x) hf
+
+@[auto] + continuous_within_box.time (f : ℝ → ℝ) (S X : set ℝ) (t x : ℝ) (hf : continuous_at f t) :
+    continuous_within_box (fun s y => f s) S X t x
+  unfold continuous_at at hf; unfold continuous_within_box
+  intro e he; obtain ⟨d,pos,near⟩ := hf e he
+  exact ⟨d,pos,by intro s hs close y hy yx; exact near s close⟩
+
+@[auto] + continuous_within_box.space (f : ℝ → ℝ) (S X : set ℝ) (t x : ℝ) (hf : continuous_at f x) :
+    continuous_within_box (fun s y => f y) S X t x
+  unfold continuous_at at hf; unfold continuous_within_box
+  intro e he; obtain ⟨d,pos,near⟩ := hf e he
+  exact ⟨d,pos,by intro s hs close y hy yx; exact near y yx⟩
+
+@[auto] + continuous_within_box.add (F G : ℝ → ℝ → ℝ) (S X : set ℝ) (t x : ℝ)
+    (hf : continuous_within_box F S X t x) (hg : continuous_within_box G S X t x) :
+    continuous_within_box (fun s y => F s y+G s y) S X t x
+  unfold continuous_within_box at hf hg ⊢
+  intro e he
+  obtain ⟨r,hr,left⟩ := hf (e/2) (by linarith)
+  obtain ⟨d,hd,right⟩ := hg (e/2) (by linarith)
+  use min r d; constructor
+  · exact lt_min.real r d 0 hr hd
+  · intro s hs close y hy near
+    have lr := min_le_left.real r d; have rr := min_le_right.real r d
+    have f := left s hs (by linarith) y hy (by linarith)
+    have g := right s hs (by linarith) y hy (by linarith)
+    have eq : F s y+G s y-(F t x+G t x) = (F s y-F t x)+(G s y-G t x) := by ring
+    rw [eq]; linarith [abs_add.real (F s y-F t x) (G s y-G t x)]
+
++ darboux.integral.deriv (F v : ℝ → ℝ → ℝ) (a b c d t : ℝ) (ab : a ≤ b) (ct : c ≤ t) (td : t ≤ d)
+    (slices : ∀ s, c ≤ s → s ≤ d → ∀ x, a ≤ x → x ≤ b → continuous_within_at (F s) (fun z => a ≤ z ∧ z ≤ b) x)
+    (rate : ∀ x, a ≤ x → x ≤ b → continuous_within_box v (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b) t x)
+    (diff : ∀ s, c ≤ s → s ≤ d → ∀ x ∈ (fun z => a ≤ z ∧ z ≤ b), has_deriv_within (fun z => F z x) (fun z => c ≤ z ∧ z ≤ d) s (v s x)) :
+    has_deriv_within (fun s => darboux.integral a b (F s)) (fun z => c ≤ z ∧ z ≤ d) t (darboux.integral a b (v t))
+  apply darboux.parameter_deriv F (v t) (fun s => darboux.integral a b (F s)) (fun z => c ≤ z ∧ z ≤ d) a b t (darboux.integral a b (v t)) ⟨ct,td⟩
+  · intro s hs; exact darboux.integral.continuous_within (F s) a b ab (slices s hs.1 hs.2)
+  · apply darboux.integral.continuous_within (v t) a b ab
+    intro x lo hi; exact continuous_within_box.slice v (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b) t x ⟨ct,td⟩ (rate x lo hi)
+  · exact uniform_deriv_within.of_continuous_rate F v (fun z => a ≤ z ∧ z ≤ b) c d t ct td diff (interval.uniform_time_continuity v (fun z => c ≤ z ∧ z ≤ d) a b t ab ⟨ct,td⟩ rate)
+
+-- F is spatially continuous and its partial time derivative v is jointly continuous.
+-> has_continuous_time_deriv (F v : ℝ → ℝ → ℝ) (T X : set ℝ) : Prop :=
+  ∀ t ∈ T, ∀ x ∈ X, continuous_within_at (F t) X x ∧ continuous_within_box v T X t x ∧ has_deriv_within (fun s => F s x) T t (v t x)
+
+@[auto] + darboux.integral.time_deriv (F v : ℝ → ℝ → ℝ) (a b c d t : ℝ) (ab : a ≤ b) (ct : c ≤ t) (td : t ≤ d)
+    (diff : has_continuous_time_deriv F v (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b)) :
+    has_deriv_within (fun s => darboux.integral a b (F s)) (fun z => c ≤ z ∧ z ≤ d) t (darboux.integral a b (v t))
+  unfold has_continuous_time_deriv at diff
+  apply darboux.integral.deriv F v a b c d t ab ct td
+  · intro s cs sd x lo hi; have row := diff s ⟨cs,sd⟩ x ⟨lo,hi⟩; exact row.1
+  · intro x lo hi; have row := diff t ⟨ct,td⟩ x ⟨lo,hi⟩; exact row.2.1
+  · intro s cs sd x hx; have row := diff s ⟨cs,sd⟩ x hx; exact row.2.2
+
+@[auto] + continuous_within_box.sub (F G : ℝ → ℝ → ℝ) (S X : set ℝ) (t x : ℝ)
+    (hf : continuous_within_box F S X t x) (hg : continuous_within_box G S X t x) :
+    continuous_within_box (fun s y => F s y-G s y) S X t x
+  have sum := continuous_within_box.add F (fun s y => (-1)*G s y) S X t x hf (continuous_within_box.scale (-1) G S X t x hg)
+  have eq : (fun s y => F s y+(-1)*G s y) = (fun s y => F s y-G s y) := by ring
+  rw [eq] at sum; exact sum
+
++ continuous_within_box.restrict_time (F : ℝ → ℝ → ℝ) (S T X : set ℝ) (t x : ℝ)
+    (hf : continuous_within_box F S X t x) (sub : ∀ z ∈ T, z ∈ S) : continuous_within_box F T X t x
+  unfold continuous_within_box at hf ⊢
+  intro e he; obtain ⟨d,hd,near⟩ := hf e he
+  exact ⟨d,hd,by intro s hs close; exact near s (sub s hs) close⟩
+
+-- A jointly continuous field has a certified spatial integral at each time.
++ darboux.integral.box_slice (F : ℝ → ℝ → ℝ) (T : set ℝ) (a b t : ℝ) (ht : t ∈ T) (ab : a ≤ b)
+    (cont : ∀ x ∈ (Icc a b), continuous_within_box F T (Icc a b) t x) :
+    darboux.has_integral (F t) a b (darboux.integral a b (F t))
+  apply darboux.integral.continuous_within (F t) a b ab; intro x lo hi
+  exact continuous_within_box.slice F T (Icc a b) t x ht (cont x ⟨lo,hi⟩)
+
+-- The time derivative of F² with its spatial and joint continuity certificates.
++ has_continuous_time_deriv.sq (F v : ℝ → ℝ → ℝ) (T X : set ℝ)
+    (regular : ∀ t ∈ T, ∀ x ∈ X, continuous_within_box F T X t x ∧ continuous_within_box v T X t x ∧ has_deriv_within (fun s => F s x) T t (v t x)) :
+    has_continuous_time_deriv (fun t x => (F t x)^2) (fun t x => 2*(F t x*v t x)) T X
+  unfold has_continuous_time_deriv; intro t ht x hx
+  obtain ⟨uc,vc,ut⟩ := regular t ht x hx
+  have dt := has_deriv_within.sq (fun s => F s x) T t (v t x) ut
+  have assoc : 2*F t x*v t x = 2*(F t x*v t x) := by ring
+  rw [assoc] at dt
+  exact ⟨continuous_at.comp_within (fun z => z^2) (F t) X x (by auto) (continuous_within_box.slice F T X t x ht uc),
+    continuous_within_box.scale 2 (fun s y => F s y*v s y) T X t x (continuous_within_box.mul F v T X t x uc vc),dt⟩

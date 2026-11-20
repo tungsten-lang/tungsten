@@ -1,0 +1,26 @@
+-- Exact lower bounds on large powers from smaller, rounded-down rational powers.
+import arith
+
+-> power_bound.exponent : list (ℕ × ℚ) → ℕ
+  | [] => 1
+  | s :: rest => fst s * power_bound.exponent rest
+
+-> power_bound.last : list (ℕ × ℚ) → ℚ → ℚ
+  | [], b => b
+  | s :: rest, b => power_bound.last rest (snd s)
+
+-> power_bound.valid : list (ℕ × ℚ) → ℚ → Prop
+  | [], b => True
+  | s :: rest, b => 0 ≤ b ∧ snd s ≤ b ^ fst s ∧ power_bound.valid rest (snd s)
+
++ power_bound.lower (steps : list (ℕ × ℚ)) :
+    ∀ b x : ℚ, b ≤ x → power_bound.valid steps b → power_bound.last steps b ≤ x ^ power_bound.exponent steps
+  induction steps with b x hx valid s rest ih b x hx valid
+  · simpa [power_bound.last,power_bound.exponent,pow_one.rat] using hx
+  · simp only [power_bound.valid] at valid
+    have next : snd s ≤ x ^ fst s := by linarith [valid.2.1,pow_le_pow_left.rat b x (fst s) valid.1 hx]
+    simpa only [power_bound.last,power_bound.exponent,pow_mul.rat] using ih (snd s) (x ^ fst s) next valid.2.2
+
++ power_bound.strict (steps : list (ℕ × ℚ)) (b x c : ℚ) (hx : b ≤ x)
+    (valid : power_bound.valid steps b) (last : c < power_bound.last steps b) : c < x ^ power_bound.exponent steps
+  linarith [power_bound.lower steps b x hx valid]

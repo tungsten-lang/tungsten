@@ -1,0 +1,19 @@
+import symplectic_character
+
++ packed_bits (v : ℕ) (hv : v < 256) : binary.pack 8 (binary.bit v) = v := binary.reconstruct 8 v hv
+
++ two_words (word : ℕ → ℕ → ℕ) (digits : ∀ u < 2, ∀ i < 3, word u i < 2)
+    (distinct : ∀ u < 2, ∀ v < 2, (∀ i < 3, word u i = word v i) → u = v) :
+    finite_l2.orthogonal 2 (2^3) (walsh.character_matrix 3 word) (2^3) := by auto
+
++ block_order : symplectic.character 2 1 4 = -1 ∧ symplectic.character 2 1 2 = 1 ∧ symplectic.character 2 8 2 = -1 := by decide
+
+-- On the three nonzero vectors, the difference of the first two coordinate vectors attains the bound.
+-> contrast (i : ℕ) : ℝ := if i = 0 then 1 else if i = 1 then -1 else 0
++ sharp : (∑ i < 3, contrast i*(∑ j < 3, symplectic.character 1 (i+1) (j+1)*contrast j)) = 4 ∧
+    (∑ i < 3, contrast i^2) = 2 := by decide
+
++ empty_minor (x y : ℕ → ℝ) : (∑ i < 0, x i*(∑ j < 0, symplectic.character 0 (i+1) (j+1)*y j))^2 ≤
+    ((0 : ℝ)+1)*((∑ i < 0, x i^2)*(∑ j < 0, y j^2)) := symplectic.nonzero_bound 0 0 x y (by decide)
+
++ seven : ∀ u < 15, (∑ j < 15, (if symplectic.pairing 2 (u+1) (j+1) = 0 then (1 : ℝ) else 0)) = 7 := by decide

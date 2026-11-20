@@ -1,0 +1,57 @@
+-- Changing endpoint values preserves a Darboux integral.
+import integral_calculus
+
++ darboux.lower_sum_interior_le_zero (f : ℝ → ℝ) (n : ℕ) : ∀ a b s,
+    (∀ x, a < x → x < b → f x ≤ 0) → darboux.lower_sum f n a b s → s ≤ 0
+  induction n with a b s bound h k ih a b s bound h
+  · unfold darboux.lower_sum at h; linarith [h.2]
+  · simp only [succ_eq_add_one.nat,darboux.lower_sum] at h
+    obtain ⟨t,m,r,atle,tb,low,rest,area⟩ := h
+    have tail := ih t b r (by intro x tx xb; exact bound x (by linarith) xb) rest
+    by_cases same : a=t
+    · rw [same] at area; linarith
+    · have mid := low ((a+t)/2) (by linarith) (by linarith)
+      have sign := bound ((a+t)/2) (by linarith) (by linarith)
+      linarith [mul_nonneg.real (-m) (t-a) (by linarith) (by linarith)]
+
+-- An arbitrarily thin rectangle at each endpoint absorbs its point value.
++ darboux.endpoint_sup (f : ℝ → ℝ) (a b : ℝ) (ab : a < b)
+    (zero : ∀ x, a < x → x < b → f x=0) : is_sup (darboux.lower_sums f a b) 0
+  unfold is_sup; constructor
+  · unfold upper_bound; intro s hs; unfold darboux.lower_sums at hs; obtain ⟨n,part⟩ := hs
+    exact darboux.lower_sum_interior_le_zero f n a b s (by intro x lo hi; linarith [zero x lo hi]) part
+  · intro z upper; by_contra neg
+    set K := |f a|+|f b| with hk
+    have floor : ∀ x, a ≤ x → x ≤ b → -K ≤ f x
+      intro x lo hi; by_cases left : x=a
+      · rw [left]; linarith [neg_le_abs.real (f a),abs_nonneg.real (f b)]
+      · by_cases right : x=b
+        · rw [right]; linarith [neg_le_abs.real (f b),abs_nonneg.real (f a)]
+        · linarith [zero x (by linarith) (by linarith),abs_nonneg.real (f a),abs_nonneg.real (f b)]
+    obtain ⟨pos,small⟩ := affine_step_radius.real (2*K) (-z) (by linarith)
+    set h := min ((b-a)/3) ((-z)/(|2*K|+1)) with width
+    have hp : 0 < h := by rw [width]; exact lt_min.real ((b-a)/3) ((-z)/(|2*K|+1)) 0 (by linarith) pos
+    have length : h ≤ (b-a)/3 := by rw [width]; exact min_le_left.real ((b-a)/3) ((-z)/(|2*K|+1))
+    have err := small h hp (by rw [width]; exact min_le_right.real ((b-a)/3) ((-z)/(|2*K|+1)))
+    have last := darboux.prepend f (b-h) b b (-K) 0 (by linarith) (by linarith) (by intro x lo hi; exact floor x (by linarith) hi) (darboux.empty f b)
+    have middle := darboux.prepend f (a+h) (b-h) b 0 ((-K)*(b-(b-h))+0) (by linarith) (by linarith) (by intro x lo hi; linarith [zero x (by linarith) (by linarith)]) last
+    have first := darboux.prepend f a (a+h) b (-K) (0*(b-h-(a+h))+((-K)*(b-(b-h))+0)) (by linarith) (by linarith) (by intro x lo hi; exact floor x lo (by linarith)) middle
+    have area : (-K)*(a+h-a)+(0*(b-h-(a+h))+((-K)*(b-(b-h))+0)) = -(2*K*h) := by ring
+    rw [area] at first; unfold upper_bound at upper; linarith [upper (-(2*K*h)) first]
+
++ darboux.zero_interior (f : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b) (zero : ∀ x, a < x → x < b → f x=0) :
+    darboux.has_integral f a b 0
+  by_cases eq : a=b
+  · subst eq; exact darboux.point f b
+  · unfold darboux.has_integral
+    have lower := darboux.endpoint_sup f a b (by linarith) zero
+    have upper := darboux.endpoint_sup (fun x => -f x) a b (by linarith) (by intro x lo hi; linarith [zero x lo hi])
+    exact ⟨ab,lower,by simpa using upper⟩
+
++ darboux.congr_interior (f g : ℝ → ℝ) (a b I : ℝ) (integral : darboux.has_integral f a b I)
+    (agree : ∀ x, a < x → x < b → f x=g x) : darboux.has_integral g a b I
+  have order := integral; unfold darboux.has_integral at order
+  have delta := darboux.zero_interior (fun x => g x-f x) a b order.1 (by intro x lo hi; linarith [agree x lo hi])
+  have sum := darboux.add integral delta
+  have eq : (fun x => f x+(g x-f x)) = g := by ext x; ring
+  rw [eq] at sum; simpa using sum

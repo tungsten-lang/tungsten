@@ -1,0 +1,25 @@
+import sobolev
+
+-> on_interval (P : ℝ → Prop) (a b : ℝ) : Prop := ∀ x, a ≤ x → x ≤ b → P x
++ restrict_interval (P : ℝ → Prop) (a b c d : ℝ) (whole : on_interval P a b)
+    (lo : a ≤ c) (hi : d ≤ b) : on_interval P c d := by auto
+
+-> regular_data (ok : (α → ℝ × ℝ) → Prop) (v : set α → ℝ → Prop) (r : α → ℝ)
+    (s : ℚ) (P : (α → ℝ × ℝ) → Prop) : Prop :=
+  ∀ f, ok f → sobolev.finite v r f (s : ℝ) → P f
++ restrict_profiles (ok P : (α → ℝ × ℝ) → Prop) (v : set α → ℝ → Prop) (r : α → ℝ)
+    (s t : ℚ) (lower : regular_data ok v r s P) (le : s ≤ t) : regular_data ok v r t P := by auto
++ at_profile (ok P : (α → ℝ × ℝ) → Prop) (v : set α → ℝ → Prop) (r : α → ℝ)
+    (lower : ∀ g, ok g → sobolev.finite v r g 0 → P g)
+    (f : α → ℝ × ℝ) (valid : ok f) (energy : sobolev.finite v r f 1) : P f := by auto
+
++ apply_at_profile (ok P : (α → ℝ × ℝ) → Prop) (v : set α → ℝ → Prop) (r : α → ℝ)
+    (lower : regular_data ok v r 0 P) (f : α → ℝ × ℝ) (valid : ok f)
+    (energy : sobolev.finite v r f 1) : P f := by auto
+
+opaque regular_value : ℝ → Prop
+axiom initial_interval : on_interval regular_value 0 4
++ interior : on_interval regular_value 1 3 := by auto [initial_interval]
+
+#axioms restrict_profiles
+#axioms interior

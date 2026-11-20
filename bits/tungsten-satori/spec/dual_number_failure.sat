@@ -1,0 +1,8 @@
+import dual_number
+
++ nilpotent_is_zero : dual.epsilon ring_ops.rat = (dual.ops ring_ops.rat).zero := by auto
++ scalar_part_determines_value (x y : dual ℚ) (h : x.re = y.re) : x = y := by auto
++ missing_nilpotence (R : ring_ops α) (S : ring_ops β) (f : α → β) (n : β)
+    (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f) :
+    ∃ g, ring_hom (dual.ops R) S g ∧ (∀ a, g (dual.constant R a) = f a) ∧ g (dual.epsilon R) = n
+  exact (dual.lift_iff R S f n hr hs hom).mpr (by auto)

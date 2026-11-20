@@ -1,0 +1,80 @@
+-- The closure of a set of real numbers, including one-sided endpoints.
+import continuous_real
+
+-> real.closure (S : set ℝ) : set ℝ :=
+  fun x => ∀ r, 0 < r → ∃ y ∈ S, |y-x| < r
+
+@[auto] + real.closure.mem (S : set ℝ) (x : ℝ) (hx : x ∈ S) : x ∈ real.closure S
+  unfold real.closure; intro r pos
+  exact ⟨x,hx,by apply abs_lt_of.real <;> linarith⟩
+
+@[auto] + real.closure.of_right_interval (a b : ℝ) (ab : a < b) :
+    a ∈ real.closure (fun y => a < y ∧ y < b)
+  unfold real.closure; intro r pos
+  have hp := lt_min.real r (b-a) 0 pos (by linarith)
+  have hr := min_le_left.real r (b-a)
+  have hb := min_le_right.real r (b-a)
+  use a+min r (b-a)/2
+  constructor
+  · constructor <;> linarith
+  · apply abs_lt_of.real <;> linarith
+
+@[auto] + real.closure.of_left_interval (a b : ℝ) (ab : a < b) :
+    b ∈ real.closure (fun y => a < y ∧ y < b)
+  unfold real.closure; intro r pos
+  have hp := lt_min.real r (b-a) 0 pos (by linarith)
+  have hr := min_le_left.real r (b-a)
+  have hb := min_le_right.real r (b-a)
+  use b-min r (b-a)/2
+  constructor
+  · constructor <;> linarith
+  · apply abs_lt_of.real <;> linarith
+
+-- Each function need only be continuous relative to the approaching set.
+@[auto] + continuous_within_at.le_on_closure (f g : ℝ → ℝ) (S : set ℝ) (x : ℝ)
+    (near : x ∈ real.closure S) (hf : continuous_within_at f S x) (hg : continuous_within_at g S x)
+    (bound : ∀ y ∈ S, f y ≤ g y) : f x ≤ g x
+  by_contra outside
+  set e := (f x-g x)/2
+  have pos : 0 < e := by rw [e_def]; linarith
+  unfold continuous_within_at at hf hg
+  obtain ⟨r,hr,fr⟩ := hf e pos; obtain ⟨s,hs,gs⟩ := hg e pos
+  unfold real.closure at near
+  obtain ⟨y,inside,close⟩ := near (min r s) (lt_min.real r s 0 hr hs)
+  have left := fr y inside (by linarith [min_le_left.real r s])
+  have right := gs y inside (by linarith [min_le_right.real r s])
+  have lo := (abs_lt.real (f y-f x) e).mp left
+  have hi := (abs_lt.real (g y-g x) e).mp right
+  rw [e_def] at lo hi; linarith [lo.1,hi.2,bound y inside]
+
+@[auto] + continuous_at.le_on_closure (f g : ℝ → ℝ) (S : set ℝ) (x : ℝ)
+    (near : x ∈ real.closure S) (hf : continuous_at f x) (hg : continuous_at g x)
+    (bound : ∀ y ∈ S, f y ≤ g y) : f x ≤ g x
+  exact continuous_within_at.le_on_closure f g S x near (continuous_at.within f S x hf) (continuous_at.within g S x hg) bound
+
+@[auto] + continuous_at.le_at_left_endpoint (f g : ℝ → ℝ) (a b : ℝ)
+    (bound : ∀ y, a < y → y < b → f y ≤ g y) (proper : a < b)
+    (hf : continuous_at f a) (hg : continuous_at g a) : f a ≤ g a
+  apply continuous_at.le_on_closure f g (fun y => a < y ∧ y < b) a (real.closure.of_right_interval a b proper) hf hg
+  intro y hy; exact bound y hy.1 hy.2
+
+@[auto] + continuous_at.le_at_right_endpoint (f g : ℝ → ℝ) (a b : ℝ)
+    (bound : ∀ y, a < y → y < b → f y ≤ g y) (proper : a < b)
+    (hf : continuous_at f b) (hg : continuous_at g b) : f b ≤ g b
+  apply continuous_at.le_on_closure f g (fun y => a < y ∧ y < b) b (real.closure.of_left_interval a b proper) hf hg
+  intro y hy; exact bound y hy.1 hy.2
+
+@[auto] + continuous_at.le_from_right (f g : ℝ → ℝ) (x : ℝ)
+    (bound : ∀ y, x < y → f y ≤ g y) (hf : continuous_at f x) (hg : continuous_at g x) : f x ≤ g x
+  exact continuous_at.le_at_left_endpoint f g x (x+1) (by intro y lo hi; exact bound y lo) (by linarith) hf hg
+
+@[auto] + continuous_at.le_from_left (f g : ℝ → ℝ) (x : ℝ)
+    (bound : ∀ y, y < x → f y ≤ g y) (hf : continuous_at f x) (hg : continuous_at g x) : f x ≤ g x
+  exact continuous_at.le_at_right_endpoint f g (x-1) x (by intro y lo hi; exact bound y hi) (by linarith) hf hg
+
+@[auto] + real.eq_of_forall_between (a b : ℝ) (bound : ∀ e : ℝ, 0 < e → a-e ≤ b ∧ b ≤ a+e) : b = a
+  by_cases lo : b < a
+  · linarith [(bound ((a-b)/2) (by linarith)).1]
+  · by_cases hi : a < b
+    · linarith [(bound ((b-a)/2) (by linarith)).2]
+    · linarith

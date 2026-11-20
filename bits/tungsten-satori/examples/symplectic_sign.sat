@@ -1,0 +1,11 @@
+-- The sign-matrix estimates used by the two constructions in corpus family 152.
+import symplectic_character
+
++ nonzero_matrix (s L : ℕ) (x y : ℕ → ℝ) (size : L+1 = 4^s) :
+    (∑ u < L, x u*(∑ v < L, symplectic.character s (u+1) (v+1)*y v))^2 ≤
+    ((L : ℝ)+1)*((∑ u < L, x u^2)*(∑ v < L, y v^2)) := by auto
+
++ row_count (s L u : ℕ) (size : L+1 = 4^s) (inside : u < L) :
+    (∑ v < L, (if symplectic.pairing s (u+1) (v+1) = 0 then (1 : ℝ) else 0)) = ((L : ℝ)-1)/2 := by auto
+#axioms nonzero_matrix
+#axioms row_count

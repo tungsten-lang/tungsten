@@ -8,12 +8,12 @@ session.run_import("core")
 session.run_file("bits/tungsten-satori/spec/application_literals.sat")
 if session.failures != 0
   raise "literal argument inference failed"
-good = ["nat_literal", "int_literal", "rat_literal", "real_literal", "binder_literal"]
+good = ["nat_literal", "int_literal", "rat_literal", "real_literal", "binder_literal", "offset_right", "offset_left", "successor", "same_offset"]
 good.each -> (name)
   th = session.theorems[name]
   if th == nil || th.hyps.size != 0 || th.tags.size != 0
     raise "literal inference theorem missing, open or has unexpected trust: " + name
-bad = ["nat_wrong", "nat_missing", "int_wrong", "int_missing", "rat_wrong", "rat_missing", "real_wrong", "real_missing", "binder_capture"]
+bad = ["nat_wrong", "nat_missing", "int_wrong", "int_missing", "rat_wrong", "rat_missing", "real_wrong", "real_missing", "binder_capture", "too_small", "disagree"]
 bad.each -> (name)
   previous = session.failures
   session.run_source(proof_declarations("bits/tungsten-satori/spec/application_literals_failure.sat", [name]))

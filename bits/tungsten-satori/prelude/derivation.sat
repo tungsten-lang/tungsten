@@ -1,0 +1,105 @@
+-- An additive derivation taking values in a commutative ring S via f : R → S.
+import dual_number
+
+-> derivation_at (R : ring_ops α) (S : ring_ops β) (f D : α → β) : Prop :=
+  (∀ x y, D (R.add x y) = S.add (D x) (D y)) ∧
+  (∀ x y, D (R.mul x y) = S.add (S.mul (f x) (D y)) (S.mul (D x) (f y)))
+
++ derivation_at.map (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (f D : α → β) (g : β → γ)
+    (der : derivation_at R S f D) (hom : ring_hom S T g) :
+    derivation_at R T (fun a => g (f a)) (fun a => g (D a))
+  unfold derivation_at at der ⊢; unfold ring_hom at hom
+  obtain ⟨z,o,add,neg,mul⟩ := hom; constructor
+  · intro x y; rw [der.1,add]
+  · intro x y; rw [der.2,add,mul,mul]
+
+-> ring_ops.of_nat (R : ring_ops α) : ℕ → α
+  | 0 => R.zero
+  | n+1 => R.add R.one (ring_ops.of_nat R n)
+
+@[auto] + ring_hom.power (R : ring_ops α) (S : ring_ops β) (f : α → β) (hom : ring_hom R S f) (x : α) (n : ℕ) :
+    f (ring_ops.power R x n) = ring_ops.power S (f x) n
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  induction n with k ih
+  · exact one
+  · simp only [succ_eq_add_one.nat,ring_ops.power,mul,ih]
+
+@[auto] + derivation_at.power_succ (R : ring_ops α) (S : ring_ops β) (f D : α → β) (hr : comm_ring R) (hs : comm_ring S)
+    (hom : ring_hom R S f) (der : derivation_at R S f D) (x : α) (n : ℕ) :
+    D (ring_ops.power R x (n+1)) = S.mul (ring_ops.of_nat S (n+1)) (S.mul (ring_ops.power S (f x) n) (D x))
+  have map := ring_hom.power R S f hom x
+  have right := comm_ring.add_mul S hs
+  unfold comm_ring at hr hs; obtain ⟨ra,rc,rz,ri,rm,rs,ro,rd⟩ := hr
+  obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hs
+  unfold derivation_at at der; obtain ⟨add,mul⟩ := der
+  induction n with k ih
+  · simp only [ring_ops.power,ring_ops.of_nat,rs x R.one,ro,ac S.one S.zero,az,mo]
+  · rw [succ_eq_add_one.nat]
+    set c := ring_ops.of_nat S (k+1) with hc
+    set p := ring_ops.power S (f x) k with hp
+    have step := mul x (ring_ops.power R x (k+1))
+    rw [ih,map] at step
+    have reorder : S.mul (f x) (S.mul c (S.mul p (D x))) = S.mul c (S.mul (S.mul (f x) p) (D x)) := by
+      rw [← ma (f x) c,mc (f x) c,ma c (f x),ma (f x) p]
+    have next : ring_ops.power S (f x) (k+1) = S.mul (f x) p := by rw [hp]; rfl
+    have count : ring_ops.of_nat S ((k+1)+1) = S.add S.one c := by rw [hc]; rfl
+    rw [next,reorder,mc (D x) (S.mul (f x) p)] at step
+    rw [count,next,right,mo,ac]
+    exact step
+
+-- A single term t^n a in a coordinate ring.
+-> ring_ops.monomial (R : ring_ops α) (t : α) (n : ℕ) (a : α) : α := R.mul (ring_ops.power R t n) a
+
+@[auto] + derivation_at.monomial_succ (R : ring_ops α) (S : ring_ops β) (f D : α → β) (t a : α) (n : ℕ)
+    (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f) (der : derivation_at R S f D) :
+    D (ring_ops.monomial R t (n+1) a) = S.add (S.mul (ring_ops.power S (f t) (n+1)) (D a)) (S.mul (S.mul (ring_ops.of_nat S (n+1)) (S.mul (ring_ops.power S (f t) n) (D t))) (f a))
+  have power := derivation_at.power_succ R S f D hr hs hom der t n
+  unfold derivation_at at der; unfold ring_ops.monomial
+  rw [der.2,ring_hom.power R S f hom t (n+1),power]
+
+-- A homomorphism to dual numbers gives a derivation at its constant term.
+@[auto] + dual.derivation (R : ring_ops α) (S : ring_ops β) (j : α → dual β) (hom : ring_hom R (dual.ops S) j) :
+    derivation_at R S (fun x => (j x).re) (fun x => (j x).du)
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  unfold derivation_at; constructor
+  · intro x y; rw [add x y]; rfl
+  · intro x y; rw [mul x y]; rfl
+
++ comm_ring.eq_zero_of_double (S : ring_ops β) (hs : comm_ring S) (x : β) (same : x = S.add x x) : x = S.zero
+  unfold comm_ring at hs; obtain ⟨assoc,comm,zero,inv,rest⟩ := hs
+  have eq : S.add (S.neg x) (S.add x x) = S.zero := by rw [← same,inv]
+  rw [← assoc,inv,zero] at eq; exact eq
+
+@[auto] + derivation_at.zero (R : ring_ops α) (S : ring_ops β) (f D : α → β) (hr : comm_ring R) (hs : comm_ring S)
+    (der : derivation_at R S f D) : D R.zero = S.zero
+  unfold derivation_at at der; unfold comm_ring at hr
+  have eq := der.1 R.zero R.zero; rw [hr.2.2.1] at eq
+  exact comm_ring.eq_zero_of_double S hs (D R.zero) eq
+
+@[auto] + derivation_at.one (R : ring_ops α) (S : ring_ops β) (f D : α → β) (hr : comm_ring R) (hs : comm_ring S)
+    (hom : ring_hom R S f) (der : derivation_at R S f D) : D R.one = S.zero
+  unfold derivation_at at der; unfold ring_hom at hom
+  have eq := der.2 R.one R.one
+  unfold comm_ring at hr; obtain ⟨ra,rc,rz,ri,rm,rs,ro,rd⟩ := hr
+  have cancel := comm_ring.eq_zero_of_double S hs (D R.one)
+  unfold comm_ring at hs; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hs
+  rw [ro,hom.2.1,mo,mc (D R.one) S.one,mo] at eq; exact cancel eq
+
+@[auto] + derivation_at.inverse_power (R : ring_ops α) (S : ring_ops β) (f D : α → β) (t g : α) (m : ℕ)
+    (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f) (der : derivation_at R S f D)
+    (inverse : ring_ops.monomial R t (m+1) g = R.one) :
+    S.add (S.mul (ring_ops.power S (f t) (m+1)) (D g)) (S.mul (S.mul (ring_ops.of_nat S (m+1)) (S.mul (ring_ops.power S (f t) m) (D t))) (f g)) = S.zero
+  have eq := derivation_at.monomial_succ R S f D t g m hr hs hom der
+  rw [inverse,derivation_at.one R S f D hr hs hom der] at eq; exact eq.symm
+
+-- Every derivation at f makes the lift x ↦ f(x) + ε D(x) a ring map.
+@[auto] + derivation_at.lift (R : ring_ops α) (S : ring_ops β) (f D : α → β) (hr : comm_ring R) (hs : comm_ring S)
+    (hom : ring_hom R S f) (der : derivation_at R S f D) : ring_hom R (dual.ops S) (fun x => dual.mk (f x) (D x))
+  have dz := derivation_at.zero R S f D hr hs der
+  have do := derivation_at.one R S f D hr hs hom der
+  unfold derivation_at at der; unfold ring_hom at hom
+  apply ring_hom.of_ops R (dual.ops S) (fun x => dual.mk (f x) (D x)) hr (dual.comm_ring S hs)
+  · simp [dual.ops,dual.constant,hom.1,dz]
+  · simp [dual.ops,dual.constant,hom.2.1,do]
+  · intro x y; simp [dual.ops,dual.zip,hom.2.2.1,der.1]
+  · intro x y; simp [dual.ops,dual.product,hom.2.2.2.2,der.2]

@@ -1,0 +1,18 @@
+import dual_number
+
++ infinitesimal : dual.epsilon ring_ops.rat ≠ (dual.ops ring_ops.rat).zero ∧
+    (dual.ops ring_ops.rat).mul (dual.epsilon ring_ops.rat) (dual.epsilon ring_ops.rat) = (dual.ops ring_ops.rat).zero
+  exact ⟨dual.epsilon_ne_zero ring_ops.rat (by decide),dual.kernel_square ring_ops.rat comm_ring.rat (dual.epsilon ring_ops.rat) (by rfl)⟩
+
++ every_prime (R : ring_ops α) (laws : comm_ring R) (P : set (dual α)) (prime : P ∈ spectrum (dual.ops R)) :
+    dual.epsilon R ∈ P := by auto
+
++ open_of_constant_part (R : ring_ops α) (laws : comm_ring R) (x : dual α) :
+    spectrum.D (dual.ops R) x = spectrum.D (dual.ops R) (dual.constant R x.re) := by auto
+
++ tangent_product (a b c d : ℤ) : (dual.mul (dual.mk a b) (dual.mk c d)).du = a*d+b*c := by simp
+
++ image_of_epsilon (R : ring_ops α) (S : ring_ops β) (f : α → β) (n : β)
+    (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f) (nil : S.mul n n = S.zero) :
+    ∃ g, ring_hom (dual.ops R) S g ∧ (∀ a, g (dual.constant R a) = f a) ∧ g (dual.epsilon R) = n
+  exact (dual.lift_iff R S f n hr hs hom).mpr nil

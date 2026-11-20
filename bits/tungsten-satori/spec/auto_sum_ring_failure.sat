@@ -1,0 +1,19 @@
+import list_sum
+
++ wrong_bound (m n : ℕ) (f g : ℕ → ℚ) :
+    (∑ i < n, f i+g i) = (∑ i < n, f i)+(∑ i < m, g i) := by auto
+
++ changed_list (xs ys : list α) (f g : α → ℤ) :
+    (∑ i ∈ xs, f i+g i) = (∑ i ∈ xs, f i)+(∑ i ∈ ys, g i) := by auto
+
++ wrong_coefficient (n : ℕ) (w f g : ℕ → ℝ) :
+    (∑ i < n, w i*(2*f i+3*g i)) = 3*(∑ i < n, w i*f i)+2*(∑ i < n, w i*g i) := by auto
+
++ product_of_sums (n : ℕ) (f g : ℕ → ℝ) :
+    (∑ i < n, f i*g i) = (∑ i < n, f i)*(∑ i < n, g i) := by auto
+
++ truncated (n : ℕ) (f g : ℕ → ℕ) :
+    (∑ i < n, f i-g i) = (∑ i < n, f i)-(∑ i < n, g i) := by auto
+
++ wrong_length (n m : ℕ) (f : ℕ → ℤ) :
+    (∑ i < n, 1+f i) = (m : ℤ)+(∑ i < n, f i) := by auto

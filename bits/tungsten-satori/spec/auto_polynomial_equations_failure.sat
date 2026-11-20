@@ -1,0 +1,8 @@
++ cancel_zero (x y z : ℝ) (h : x*y=x*z) : y=z := by auto
++ wrong_square (r s : ℝ) (h : s*s=3) : (r*s/2)^2=3*r^2/2 := by auto
++ wrong_relation (a b x y e : ℚ) (h : a*b=1) : a*e*b-x*e*y=0 := by auto
++ truncated (u v x : ℕ) (h : u*v=4) : x*v=4+(x-u)*v := by auto
++ wrong_atom (f : ℤ → ℤ) (x y : ℤ) (h : (f x)^2=4) : y*(f y)^2=4*y := by auto
++ sum_only (a b c d : ℚ) (sum : a+b=c+d) : a*b=c*d := by auto
++ squares_only (a b c d : ℝ) (squares : a*a+b*b=c*c+d*d) : a*b=c*d := by auto
++ ordered_pair (a b c d : ℤ) (sum : a+b=c+d) (squares : a*a+b*b=c*c+d*d) : a=c := by auto

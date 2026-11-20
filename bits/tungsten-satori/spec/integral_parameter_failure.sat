@@ -1,0 +1,13 @@
+import integral_parameter
+
++ pointwise_only (F : ℝ → ℝ → ℝ) (v J : ℝ → ℝ) (V : ℝ)
+    (slices : ∀ s ∈ (fun z => 0 ≤ z ∧ z ≤ 1), darboux.has_integral (F s) 0 1 (J s))
+    (rate : darboux.has_integral v 0 1 V)
+    (each : ∀ x ∈ (fun z => 0 ≤ z ∧ z ≤ 1), has_deriv_within (fun s => F s x) (fun z => 0 ≤ z ∧ z ≤ 1) 0 (v x)) :
+    has_deriv_within J (fun z => 0 ≤ z ∧ z ≤ 1) 0 V
+  apply darboux.parameter_deriv F v J (fun z => 0 ≤ z ∧ z ≤ 1) 0 1 0 V (by auto) slices rate
+  auto
+
++ reversed_slice (F v : ℝ → ℝ → ℝ) (a b : ℝ) (ba : b < a)
+    (diff : has_continuous_time_deriv F v (fun z => 0 ≤ z ∧ z ≤ 1) (fun x => a ≤ x ∧ x ≤ b)) :
+    has_deriv_within (fun s => darboux.integral a b (F s)) (fun z => 0 ≤ z ∧ z ≤ 1) 0 (darboux.integral a b (v 0)) := by auto

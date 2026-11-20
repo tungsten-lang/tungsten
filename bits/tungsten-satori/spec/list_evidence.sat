@@ -1,0 +1,17 @@
+opaque cost : ℕ → ℕ
+-> twice (n : ℕ) : ℕ := cost n + cost n
++ west : twice 5 = 2 * cost 5 := by unfold twice; ring
++ east : twice 8 = 2 * cost 8 := by unfold twice; ring
+
++ assembled : all (fun n => twice n = 2 * cost n) [8,5,8] := by auto
+#axioms assembled
+
++ local_items (P : α → Prop) (a b : α) (ha : P a) (hb : P b) : all P [a,b,b] := by auto
++ known_tail (P : α → Prop) (a : α) (xs : list α) (h : all P xs) (ha : P a) : all P (a :: xs) := by auto
++ literal_tail (P : α → Prop) (a b c : α) (ha : P a) (h : all P [b,c]) : all P [a,b,c] := by auto
++ empty_list (P : α → Prop) : all P [] := by auto
+
+opaque red : ℕ → Prop
+axiom seed : red 3
++ named_hint : all red [3,3] := by auto [seed]
+#axioms named_hint

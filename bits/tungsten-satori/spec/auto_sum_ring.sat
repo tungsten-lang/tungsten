@@ -1,0 +1,17 @@
+import list_sum
+
++ weighted (n : ℕ) (c d : ℚ) (w f g : ℕ → ℚ) :
+    (∑ i < n, w i*(c*f i+d*g i)) = c*(∑ i < n, w i*f i) + (∑ i < n, w i*g i)*d := by auto
+
++ weighted_list (xs : list α) (f g : α → ℤ) (a b : ℤ) :
+    (∑ i ∈ xs, (a*f i-b*g i)^2) =
+    a^2*(∑ i ∈ xs, f i*f i) - 2*a*b*(∑ i ∈ xs, f i*g i) + (∑ i ∈ xs, g i*g i)*b^2 := by auto
+
++ natural (n c : ℕ) (f : ℕ → ℕ) :
+    (∑ i < n, c+3*f i) = n*c + (∑ i < n, f i)*3 := by auto
+
++ length_and_scalar (n : ℕ) (f : ℕ → ℝ) :
+    (∑ i < n, (n : ℝ)*f i+1) = (n : ℝ)*(∑ i < n, f i)+(n : ℝ) := by auto
+
+#axioms weighted
+#axioms weighted_list

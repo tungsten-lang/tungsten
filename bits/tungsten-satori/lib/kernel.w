@@ -87,6 +87,7 @@
     @ctor_of = {}
     @rec_of = {}
     @defcache = {}
+    @nat_results = {}
     @truth_c = mk_const_raw("⊤", TY_BOOL_SINGLETON)
     @false_c = mk_const_raw("⊥", TY_BOOL_SINGLETON)
     @neg_c = mk_const_raw("¬", ty_fun(TY_BOOL_SINGLETON, TY_BOOL_SINGLETON))
@@ -411,6 +412,8 @@
   -> select_rule(pl, x0, th)
     if pl.tag != :lam || !ty_eq(type_of(pl), ty_fun(pl.ty, ty_bool))
       raise "select: predicate must be a lambda"
+    if !ty_eq(pl.ty, type_of(x0))
+      raise "select: witness has wrong type"
     if !tm_eq(tm_instantiate(pl.b, x0, 0), th.concl)
       raise "select: theorem does not match predicate"
     e = mk_app_raw(mk_const_raw("ε", ty_fun(ty_fun(pl.ty, ty_bool), pl.ty)), pl)
@@ -552,7 +555,7 @@
 
   # ⊢ t = v by evaluation.
   -> compute(t, deep = false, symbolic = false)
-    v = KEval.new(self, deep, symbolic).eval(t)
+    v = KEval.new(self, deep, symbolic, @nat_results).eval(t)
     thm([], eq_tm(t, v), [])
 
   -> tagged(th, tag)

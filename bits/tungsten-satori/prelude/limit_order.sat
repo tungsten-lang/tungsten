@@ -1,0 +1,95 @@
+-- Order and scaling for real sequence limits.
+import limits
+import arith
+
+@[auto] + tends_to.const_mul (a : ℕ → ℝ) (A c : ℝ) (ha : tends_to a A) : tends_to (fun n => c * a n) (c * A)
+  unfold tends_to at ha
+  unfold tends_to
+  intro e he
+  have pos : 0 < |c| + 1 := by linarith [abs_nonneg.real c]
+  obtain ⟨N, near⟩ := ha (e / (|c| + 1)) (div_pos.real e (|c| + 1) he pos)
+  use N
+  intro n hn
+  have diff : c * a n - c * A = c * (a n - A) := by ring
+  rw [diff, abs_mul.real]
+  have bound := (lt_div_iff.real (|a n - A|) e (|c| + 1) pos).mp (near n hn)
+  nlinarith [abs_nonneg.real (a n - A)]
+
+@[auto] + tends_to.const_mul_zero (a : ℕ → ℝ) (c : ℝ) (h : tends_to a 0) : tends_to (fun n => c * a n) 0
+  simpa only [mul_zero.real] using tends_to.const_mul a 0 c h
+
+@[auto] + tends_to.mul_const (a : ℕ → ℝ) (A c : ℝ) (ha : tends_to a A) : tends_to (fun n => a n * c) (A * c)
+  rw [mul_comm.real A c]
+  apply tends_to.congr (fun n => c * a n)
+  · exact tends_to.const_mul a A c ha
+  · intro n
+    ring
+
+@[auto] + tends_to.mul_const_zero (a : ℕ → ℝ) (c : ℝ) (h : tends_to a 0) : tends_to (fun n => a n * c) 0
+  simpa only [zero_mul.real] using tends_to.mul_const a 0 c h
+
++ tends_to.le_of_eventual_le (a b : ℕ → ℝ) (A B : ℝ) (ha : tends_to a A) (hb : tends_to b B)
+    (k : ℕ) (bound : ∀ n, k ≤ n → a n ≤ b n) : A ≤ B
+  by_contra c
+  have eps : 0 < (A-B)/2 := by linarith [not_le.real A B c]
+  unfold tends_to at ha hb
+  obtain ⟨i, left⟩ := ha ((A-B)/2) eps
+  obtain ⟨j, right⟩ := hb ((A-B)/2) eps
+  have x := (abs_lt.real (a (k+i+j) - A) ((A-B)/2)).mp (left (k+i+j) (by omega))
+  have y := (abs_lt.real (b (k+i+j) - B) ((A-B)/2)).mp (right (k+i+j) (by omega))
+  linarith [bound (k+i+j) (by omega)]
+
+@[auto] + tends_to.le (a b : ℕ → ℝ) (A B : ℝ) (ha : tends_to a A) (hb : tends_to b B) (bound : ∀ n, a n ≤ b n) : A ≤ B
+  apply tends_to.le_of_eventual_le a b A B ha hb 0
+  intro n hn
+  exact bound n
+
++ tends_to.squeeze_eventually (lo hi : ℕ → ℝ) (L : ℝ) (a : ℕ → ℝ) (hl : tends_to lo L) (hh : tends_to hi L)
+    (k : ℕ) (bounds : ∀ n, k ≤ n → lo n ≤ a n ∧ a n ≤ hi n) : tends_to a L
+  unfold tends_to at hl hh
+  unfold tends_to
+  intro e he
+  obtain ⟨i, low⟩ := hl e he
+  obtain ⟨j, high⟩ := hh e he
+  use k+i+j
+  intro n hn
+  have x := (abs_lt.real (lo n - L) e).mp (low n (by omega))
+  have y := (abs_lt.real (hi n - L) e).mp (high n (by omega))
+  have b := bounds n (by omega)
+  apply abs_lt_of.real <;> linarith
+
+@[auto] + tends_to.squeeze (lo hi : ℕ → ℝ) (L : ℝ) (a : ℕ → ℝ) (hl : tends_to lo L) (hh : tends_to hi L)
+    (bounds : ∀ n, lo n ≤ a n ∧ a n ≤ hi n) : tends_to a L
+  apply tends_to.squeeze_eventually lo hi L a hl hh 0
+  intro n hn
+  exact bounds n
+
++ monotone_seq.le_limit (a : ℕ → ℝ) (L : ℝ) (ha : tends_to a L) (mono : monotone_seq a) (n : ℕ) : a n ≤ L
+  unfold monotone_seq at mono
+  apply tends_to.le_of_eventual_le (fun i => a n) a (a n) L (tends_to.const (a n)) ha n
+  exact mono n
+
+@[auto] + partial_sum.monotone (a : ℕ → ℝ) (ha : ∀ i, 0 ≤ a i) : monotone_seq (partial_sum a)
+  unfold monotone_seq
+  intro m n h
+  unfold partial_sum
+  apply sum_below.mono.real a m n h
+  intro i lo hi
+  exact ha i
+
+@[auto] + tends_to.add (a b : ℕ → ℝ) (A B : ℝ) (ha : tends_to a A) (hb : tends_to b B) :
+    tends_to (fun k => a k+b k) (A+B)
+  unfold tends_to at ha hb ⊢
+  intro e pos
+  obtain ⟨i,lo⟩ := ha (e/2) (by linarith); obtain ⟨j,hi⟩ := hb (e/2) (by linarith)
+  use i+j; intro k hk
+  have u := (abs_lt.real (a k-A) (e/2)).mp (lo k (by omega))
+  have v := (abs_lt.real (b k-B) (e/2)).mp (hi k (by omega))
+  apply abs_lt_of.real <;> linarith [u.1,u.2,v.1,v.2]
+
+@[auto] + tends_to.sum_below (f : ℕ → ℕ → ℝ) (L : ℕ → ℝ) (n : ℕ)
+    (limits : ∀ i < n, tends_to (f i) (L i)) : tends_to (fun k => ∑ i < n, f i k) (∑ i < n, L i)
+  induction n with limits k ih limits
+  · simpa only [sum_below_zero] using tends_to.const 0
+  · simp only [succ_eq_add_one.nat,sum_below_succ]
+    exact tends_to.add (fun j => ∑ i < k, f i j) (f k) (∑ i < k, L i) (L k) (ih (by intro i hi; exact limits i (by omega))) (limits k (by omega))

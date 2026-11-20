@@ -83,8 +83,22 @@
   -> imp_intro(p, th)
     @k.disch(p, th)
 
+  # ∀ P, (∃ x, P x) → P (ε P), from the kernel's choice rule.
+  -> epsilon_spec
+    a = ty_var("a")
+    p = mk_var("P", ty_fun(a, ty_bool))
+    x = mk_var("x", a)
+    px = mk_app(p, x)
+    exists = @k.quant("∃", x, px)
+    selected = @k.select_rule(mk_lam(x, px), x, @k.assume(px))
+    chosen = @k.choose(x, @k.assume(exists), selected)
+    result = @k.eq_mp(beta_eta_conv(chosen.concl), chosen)
+    @k.gen(p, @k.disch(exists, result))
+
   # Beta-normalizes every redex in t: returns nil when t is already beta-normal, else ⊢ t = t'
   -> beta_norm_opt(t)
+    if (t.search_ops & TERM_BETA_REDEX) == 0
+      return nil
     case t.tag
     when :app
       f = beta_norm_opt(t.a)
@@ -111,8 +125,6 @@
         return @k.trans(th2, nxt)
       th
     when :lam
-      if !has_beta_redex?(t.b)
-        return nil
       p = dest_lam_fresh(t, [t])
       inner = beta_norm_opt(p[1])
       if inner == nil
@@ -127,17 +139,6 @@
     if th == nil
       return @k.refl(t)
     th
-
-  -> has_beta_redex?(t)
-    case t.tag
-    when :app
-      if t.a.tag == :lam
-        return true
-      has_beta_redex?(t.a) || has_beta_redex?(t.b)
-    when :lam
-      has_beta_redex?(t.b)
-    else
-      false
 
   # Rewrites a theorem's conclusion to beta-normal form.
   -> beta_norm_thm(th)
@@ -155,6 +156,8 @@
   # Eta-normalization as a kernel proof, used when matching extensionally
   # equivalent function arguments (for example, f and fun x => f x).
   -> eta_norm_opt(t)
+    if (t.search_ops & TERM_ETA_CANDIDATE) == 0
+      return nil
     if t.tag == :app
       f = eta_norm_opt(t.a)
       x = eta_norm_opt(t.b)
@@ -179,16 +182,20 @@
       return th
     nil
 
+  -> beta_eta_opt(t)
+    first = beta_norm_opt(t)
+    if first == nil
+      return eta_norm_opt(t)
+    second = eta_norm_opt(first.concl.b)
+    second == nil ? first : @k.trans(first, second)
+
   -> beta_eta_conv(t)
-    first = beta_norm_conv(t)
-    middle = dest_binop(first.concl, "=")[1]
-    second = eta_norm_opt(middle)
-    if second == nil
-      return first
-    @k.trans(first, second)
+    conv = beta_eta_opt(t)
+    conv == nil ? @k.refl(t) : conv
 
   -> beta_eta_term(t)
-    dest_binop(beta_eta_conv(t).concl, "=")[1]
+    conv = beta_eta_opt(t)
+    conv == nil ? t : conv.concl.b
 
   # Evaluate beneath binders using fresh free variables and kernel congruence.
   # The evaluator's ordinary (shallow) conversion remains the only computation
@@ -196,6 +203,8 @@
   -> compute_conv(t)
     first = @k.compute(t)
     value = dest_binop(first.concl, "=")[1]
+    if (value.search_ops & TERM_LAMBDA) == 0
+      return first
     @k.trans(first, compute_binders_conv(value))
 
   -> compute_binders_conv(t)
@@ -204,7 +213,7 @@
       tm_free_names_into(t, used)
       v = mk_var(fresh_name_from_set("compute", used), t.ty)
       return @k.abs_rule(v, compute_conv(tm_instantiate(t.b, v, 0)))
-    if t.tag == :app
+    if t.tag == :app && (t.search_ops & TERM_LAMBDA) != 0
       return @k.mk_comb(compute_binders_conv(t.a), compute_binders_conv(t.b))
     @k.refl(t)
 
@@ -239,7 +248,7 @@
 
 + Matcher
   ro :tm, :ty
-  -> new(@pvars, @tvs)
+  -> new(@pvars, @tvs, @literal_offsets = false)
     @tm = {}
     @ty = {}
     @pvar_objs = {}
@@ -272,8 +281,29 @@
       i += 1
     true
 
+  # Infer an index in succ n, n+k or k+n from a natural literal. These
+  # proposals are used only for application inference; fitting the resulting
+  # theorem still checks the instantiated arithmetic in the kernel.
+  -> match_nat_offset(p, t)
+    var = p.b
+    offset = 1
+    if p.a.op != OP_SUCC
+      if p.a.tag != :app || p.a.a.op != OP_ADD
+        return false
+      arg = p.a.b
+      if arg.tag == :lit
+        offset = arg.val
+      elsif p.b.tag == :lit
+        offset = p.b.val
+        var = arg
+      else
+        return false
+    if var.tag != :var || var.ty != TY_NAT_SINGLETON || !@pvars.has_key?(var.vkey) || t.val < offset
+      return false
+    bind(var, mk_nat(zsub(t.val, offset)))
+
   # depth: number of binders entered (for higher-order patterns).
-  -> m(p, t, depth)
+  -> m(p, t, depth, expand_eta = false)
     if p.tag == :var && @pvars.has_key?(p.vkey)
       if t.mx > 0
         return false
@@ -282,6 +312,14 @@
     if p.tag == :app && p.a.tag == :var && p.b.tag == :bnd && @pvars.has_key?(p.a.vkey)
       return bind_ho(p.a, p.b.idx, t)
     if p.tag != t.tag
+      if @literal_offsets && p.tag == :app && t.tag == :lit && t.ty == TY_NAT_SINGLETON
+        return match_nat_offset(p, t)
+      # Application inference can encounter a partially applied function where
+      # the rule has a lambda. Closed terms may be placed under a fresh binder.
+      if expand_eta && p.tag == :lam && t.mx == 0
+        ft = type_of(t)
+        if ft.fun? && match_ty(p.ty, ft.dom)
+          return m(p.b, mk_app(t, mk_bnd(0, ft.dom)), depth + 1, true)
       return false
     case p.tag
     when :const
@@ -293,9 +331,9 @@
     when :lit
       lit_val_eq(p.val, t.val) && match_ty(p.ty, t.ty)
     when :app
-      m(p.a, t.a, depth) && m(p.b, t.b, depth)
+      m(p.a, t.a, depth, expand_eta) && m(p.b, t.b, depth, expand_eta)
     else
-      match_ty(p.ty, t.ty) && m(p.b, t.b, depth + 1)
+      match_ty(p.ty, t.ty) && m(p.b, t.b, depth + 1, expand_eta)
 
   -> bind(p, t)
     k = p.vkey
@@ -387,6 +425,7 @@
 
 + RewriteRule
   ro :th, :lhs, :rhs, :conds, :pvars, :tvs, :name, :head_name, :is_eq, :rewrite_head
+  rw :literal_patterns
   # th: spec'd theorem (free pattern vars) with conclusion `conds → l = r`
   -> new(@th, @lhs, @rhs, @conds, @pvars, @tvs, @name, @head_name, @is_eq, @rewrite_head)
 
@@ -396,6 +435,15 @@
   if t.tag == :const
     return t.name
   nil
+
+# Substitution, beta-eta conversion and numeric literal evaluation preserve
+# the outer constant of an application returning Prop.
+-> distinct_proposition_heads?(pattern, target)
+  if !ty_eq(type_of(target), ty_bool)
+    return false
+  left = rule_head_const_name(pattern)
+  right = rule_head_const_name(target)
+  left != nil && right != nil && left != right
 
 -> make_rule(d, th, name, rewrite_head = true)
   k = d.k
@@ -457,6 +505,8 @@
   # Normalize after substitution, retaining the original keys for inferred
   # arguments even when known type substitutions change their variable keys.
   -> match_instantiated(d, pattern, target, literals = false)
+    if distinct_proposition_heads?(pattern, target)
+      return nil
     p = tm_subst(pattern, @tm)
     vars = {}
     origins = {}
@@ -465,14 +515,14 @@
         typed = mk_var(v.name, ty_subst(v.ty, @ty))
         vars[typed.vkey] = true
         origins[typed.vkey] = v
-    trial = Matcher.new(vars, @tvs)
+    trial = Matcher.new(vars, @tvs, literals)
     trial.copy_from({}, @ty, {})
     p = d.beta_eta_term(tm_inst_types(p, @ty))
     t = d.beta_eta_term(target)
     if literals
       p = d.application_literal_term(p, [128])
       t = d.application_literal_term(t, [128])
-    matched = trial.m(p, t, 0)
+    matched = trial.m(p, t, 0, true)
     out = clone
     trial.ty.each -> (name, ty)
       out.ty[name] = ty
@@ -488,6 +538,11 @@
     if out.tm.size > @tm.size
       return out.match_instantiated(d, pattern, target, literals)
     nil
+
+  -> same_bindings?(other)
+    if @tm.size != other.tm.size || @ty.size != other.ty.size
+      return false
+    @tm.keys.all?(-> (k) other.tm.has_key?(k) && tm_eq(@tm[k], other.tm[k])) && @ty.keys.all?(-> (k) other.ty.has_key?(k) && ty_eq(@ty[k], other.ty[k]))
 
   -> clone
     c = Matcher.new(@pvars, @tvs)

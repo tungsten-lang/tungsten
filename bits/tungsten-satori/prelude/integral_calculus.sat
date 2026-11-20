@@ -1,0 +1,253 @@
+-- Continuous integrands and the fundamental theorem on a compact real interval.
+import darboux
+import derivative
+
+-- Extend a step minorant by one rectangle at the right endpoint.
++ darboux.extend (f : ℝ → ℝ) (a x y h L : ℝ) (ax : a ≤ x) (xy : x ≤ y)
+    (left : L ∈ darboux.lower_sums f a x) (low : ∀ z, x ≤ z → z ≤ y → h ≤ f z) :
+    L+h*(y-x) ∈ darboux.lower_sums f a y
+  have right := darboux.prepend f x y y h 0 xy (by linarith) low (darboux.empty f y)
+  exact (darboux.lower_sums_split_iff f a x y (L+h*(y-x)) ax xy).mpr ⟨L,h*(y-x)+0,left,right,by ring⟩
+
+-- Local oscillation supplies lower and upper step sums arbitrarily close together.
+-> darboux.bracket (f : ℝ → ℝ) (a b e : ℝ) : Prop := ∃ L N,
+  L ∈ darboux.lower_sums f a b ∧ N ∈ darboux.lower_sums (fun x => -f x) a b ∧ -(L+N) ≤ e*(b-a)
+
++ darboux.bracket_within (f : ℝ → ℝ) (a b e : ℝ) (ab : a ≤ b) (he : 0 < e)
+    (cont : ∀ t, a ≤ t → t ≤ b → continuous_within_at f (fun z => a ≤ z ∧ z ≤ b) t) : darboux.bracket f a b e
+  apply interval.propagate (fun y => darboux.bracket f a y e) a b ab
+  · unfold darboux.bracket
+    exact ⟨0,0,darboux.empty f a,darboux.empty (fun x => -f x) a,by linarith⟩
+  · intro t atle tb
+    have ht := cont t atle tb
+    unfold continuous_within_at at ht
+    obtain ⟨d,pos,near⟩ := ht (e/2) (by linarith)
+    use d
+    constructor
+    · exact pos
+    · intro x y ax xt ty yb nx ny old
+      unfold darboux.bracket at old ⊢
+      obtain ⟨L,N,low,high,gap⟩ := old
+      have osc : ∀ z, x ≤ z → z ≤ y → |f z-f t| < e/2
+        intro z xz zy
+        exact near z ⟨by linarith,by linarith⟩ (abs_lt_of.real (z-t) d (by linarith) (by linarith))
+      have lo := darboux.extend f a x y (f t-e/2) L ax (by linarith) low (by intro z xz zy; linarith [neg_le_abs.real (f z-f t), osc z xz zy])
+      have hi := darboux.extend (fun z => -f z) a x y (-f t-e/2) N ax (by linarith) high (by intro z xz zy; linarith [le_abs_self.real (f z-f t), osc z xz zy])
+      exact ⟨L+(f t-e/2)*(y-x),N+(-f t-e/2)*(y-x),lo,hi,by linarith⟩
+
++ darboux.continuous_bracket (f : ℝ → ℝ) (a b e : ℝ) (ab : a ≤ b) (he : 0 < e)
+    (cont : ∀ t, a ≤ t → t ≤ b → continuous_at f t) : darboux.bracket f a b e
+  apply darboux.bracket_within f a b e ab he
+  intro x lo hi; exact continuous_at.within f (fun z => a ≤ z ∧ z ≤ b) x (cont x lo hi)
+
++ darboux.bracket_exists (f : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b) (approx : ∀ e, 0 < e → darboux.bracket f a b e) :
+    ∃ I, darboux.has_integral f a b I
+  have seed := approx 1 (by decide)
+  unfold darboux.bracket at seed
+  obtain ⟨p,q,hp,hq,err⟩ := seed
+  have gap : ∀ s r, s ∈ darboux.lower_sums f a b → r ∈ darboux.lower_sums (fun x => -f x) a b → s+r ≤ 0
+    intro s r hs hr
+    unfold darboux.lower_sums at hs
+    obtain ⟨n,v⟩ := hs
+    exact darboux.lower_sum_gap f n a b s r v hr
+  have upper : upper_bound (darboux.lower_sums f a b) (-q) := by unfold upper_bound; intro s hs; linarith [gap s q hs hq]
+  have negUpper : upper_bound (darboux.lower_sums (fun x => -f x) a b) (-p) := by unfold upper_bound; intro r hr; linarith [gap p r hp hr]
+  obtain ⟨I,lo⟩ := sup_exists (darboux.lower_sums f a b) ⟨p,hp⟩ ⟨-q,upper⟩
+  obtain ⟨N,hi⟩ := sup_exists (darboux.lower_sums (fun x => -f x) a b) ⟨q,hq⟩ ⟨-p,negUpper⟩
+  have gap0 := darboux.sup_gap f a b I N lo hi
+  have eq : N = -I
+    by_contra ne
+    have pos : 0 < -(I+N) := by linarith
+    obtain ⟨de,small⟩ := affine_step_radius.real (b-a) (-(I+N)) pos
+    have bounds := approx (-(I+N)/(|b-a|+1)) de
+    unfold darboux.bracket at bounds
+    obtain ⟨L,R,hl,hr,close⟩ := bounds
+    linarith [small (-(I+N)/(|b-a|+1)) de (by linarith),is_sup.le_of_mem (darboux.lower_sums f a b) I L lo hl,is_sup.le_of_mem (darboux.lower_sums (fun x => -f x) a b) N R hi hr]
+  rw [eq] at hi
+  use I; unfold darboux.has_integral
+  exact ⟨ab,lo,hi⟩
+
++ darboux.integrable_within (f : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b)
+    (cont : ∀ t, a ≤ t → t ≤ b → continuous_within_at f (Icc a b) t) : ∃ I, darboux.has_integral f a b I
+  exact darboux.bracket_exists f a b ab (by intro e he; exact darboux.bracket_within f a b e ab he cont)
+
+@[auto] + darboux.continuous (f : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b) (cont : ∀ t, a ≤ t → t ≤ b → continuous_at f t) :
+    ∃ I, darboux.has_integral f a b I
+  exact darboux.bracket_exists f a b ab (by intro e he; exact darboux.continuous_bracket f a b e ab he cont)
+
+-- Every lower step sum of a derivative is bounded by the primitive's increment.
++ darboux.lower_sum_primitive_le (F f : ℝ → ℝ) (A B : ℝ)
+    (deriv : ∀ t, A ≤ t → t ≤ B → has_deriv_within F (fun z => A ≤ z ∧ z ≤ B) t (f t))
+    (n : ℕ) : ∀ a s, A ≤ a → darboux.lower_sum f n a B s → s ≤ F B-F a
+  induction n with a s Aa h k ih a s Aa h
+  · unfold darboux.lower_sum at h
+    obtain ⟨ab,zero⟩ := h
+    rw [ab,zero]; linarith
+  · simp only [succ_eq_add_one.nat,darboux.lower_sum] at h
+    obtain ⟨t,m,r,atle,tB,low,tail,area⟩ := h
+    have sub : ∀ x, a ≤ x → x ≤ t → has_deriv_within F (fun z => a ≤ z ∧ z ≤ t) x (f x)
+      intro x ax xt
+      apply has_deriv_within.restrict F (fun z => A ≤ z ∧ z ≤ B) (fun z => a ≤ z ∧ z ≤ t) x (f x) (deriv x (by linarith) (by linarith))
+      intro z hz
+      exact ⟨by linarith [hz.1],by linarith [hz.2]⟩
+    linarith [interval.increment_ge_of_deriv_ge F f a t m atle sub low,ih t r (by linarith) tail]
+
++ darboux.lower_sup_primitive_le (F f : ℝ → ℝ) (a b I : ℝ)
+    (deriv : ∀ t, a ≤ t → t ≤ b → has_deriv_within F (fun z => a ≤ z ∧ z ≤ b) t (f t))
+    (lo : is_sup (darboux.lower_sums f a b) I) : I ≤ F b-F a
+  unfold is_sup at lo
+  apply lo.2
+  unfold upper_bound
+  intro s hs; unfold darboux.lower_sums at hs
+  obtain ⟨n,h⟩ := hs
+  exact darboux.lower_sum_primitive_le F f a b deriv n a s (by linarith) h
+
++ darboux.eval_primitive (F f : ℝ → ℝ) (a b I : ℝ) (hf : darboux.has_integral f a b I)
+    (deriv : ∀ t, a ≤ t → t ≤ b → has_deriv_within F (fun z => a ≤ z ∧ z ≤ b) t (f t)) : I = F b-F a
+  unfold darboux.has_integral at hf
+  have upper := darboux.lower_sup_primitive_le F f a b I deriv hf.2.1
+  have neg : ∀ t, a ≤ t → t ≤ b → has_deriv_within (fun z => -F z) (fun z => a ≤ z ∧ z ≤ b) t (-f t)
+    intro t atle tb
+    exact has_deriv_within.neg F (fun z => a ≤ z ∧ z ≤ b) t (f t) (deriv t atle tb)
+  linarith [darboux.lower_sup_primitive_le (fun t => -F t) (fun t => -f t) a b (-I) neg hf.2.2]
+
++ darboux.fundamental (F f : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b) (cont : ∀ t, a ≤ t → t ≤ b → continuous_at f t)
+    (deriv : ∀ t, a ≤ t → t ≤ b → has_deriv_within F (fun z => a ≤ z ∧ z ≤ b) t (f t)) :
+    darboux.has_integral f a b (F b-F a)
+  obtain ⟨I,hi⟩ := darboux.continuous f a b ab cont
+  rw [← darboux.eval_primitive F f a b I hi deriv]
+  exact hi
+
++ darboux.lower_sum_scale (f : ℝ → ℝ) (k : ℝ) (hk : 0 ≤ k) (n : ℕ) : ∀ a b s,
+    darboux.lower_sum f n a b s → darboux.lower_sum (fun x => k*f x) n a b (k*s)
+  induction n with a b s hs j ih a b s hs
+  · unfold darboux.lower_sum at hs ⊢
+    obtain ⟨eq,zero⟩ := hs
+    exact ⟨eq,by rw [zero]; ring⟩
+  · simp only [succ_eq_add_one.nat,darboux.lower_sum] at hs ⊢
+    obtain ⟨t,h,r,atle,tb,low,tail,area⟩ := hs
+    have bound : ∀ x, a ≤ x → x ≤ t → k*h ≤ k*f x := by intro x ax xt; exact mul_le_mul_of_nonneg_left.real h (f x) k (low x ax xt) hk
+    exact ⟨t,k*h,k*r,atle,tb,bound,ih t b r tail,by rw [area]; ring⟩
+
++ darboux.lower_scale_sup (f : ℝ → ℝ) (a b I k : ℝ) (hk : 0 < k) (source : is_sup (darboux.lower_sums f a b) I) :
+    is_sup (darboux.lower_sums (fun x => k*f x) a b) (k*I)
+  have inv := one_div_pos.real k hk
+  have cancel := mul_div_cancel.real 1 k (by linarith)
+  have back : (fun x => (1/k)*(k*f x)) = f := by funext x; linear_combination (f x)*cancel
+  unfold is_sup
+  constructor
+  · unfold upper_bound
+    intro s hs; unfold darboux.lower_sums at hs
+    obtain ⟨n,h⟩ := hs
+    have divided := darboux.lower_sum_scale (fun x => k*f x) (1/k) (by linarith) n a b s h
+    rw [back] at divided
+    have member : (1/k)*s ∈ darboux.lower_sums f a b := by unfold darboux.lower_sums; exact ⟨n,divided⟩
+    have bound := mul_le_mul_of_nonneg_left.real ((1/k)*s) I k (is_sup.le_of_mem (darboux.lower_sums f a b) I ((1/k)*s) source member) (by linarith)
+    have eq : k*((1/k)*s) = s := by linear_combination s*cancel
+    linarith
+  · intro z upper
+    unfold upper_bound at upper
+    have bound : upper_bound (darboux.lower_sums f a b) (z/k)
+      unfold upper_bound
+      intro s hs; unfold darboux.lower_sums at hs
+      obtain ⟨n,h⟩ := hs
+      have member : k*s ∈ darboux.lower_sums (fun x => k*f x) a b := by unfold darboux.lower_sums; exact ⟨n,darboux.lower_sum_scale f k (by linarith) n a b s h⟩
+      exact (le_div_iff.real s z k hk).mpr (by linarith [upper (k*s) member])
+    unfold is_sup at source
+    linarith [(le_div_iff.real I z k hk).mp (source.2 (z/k) bound)]
+
++ darboux.scale_pos (f : ℝ → ℝ) (a b I k : ℝ) (hk : 0 < k) (hi : darboux.has_integral f a b I) :
+    darboux.has_integral (fun x => k*f x) a b (k*I)
+  unfold darboux.has_integral at hi ⊢
+  have sign : (fun x => -(k*f x)) = (fun x => k*(-f x)) := by ring
+  have neg : -(k*I) = k*(-I) := by ring
+  rw [sign,neg]
+  exact ⟨hi.1,darboux.lower_scale_sup f a b I k hk hi.2.1,darboux.lower_scale_sup (fun x => -f x) a b (-I) k hk hi.2.2⟩
+
+@[auto] + darboux.scale (f : ℝ → ℝ) (a b I k : ℝ) (hi : darboux.has_integral f a b I) :
+    darboux.has_integral (fun x => k*f x) a b (k*I)
+  by_cases pos : 0 < k
+  · exact darboux.scale_pos f a b I k pos hi
+  · by_cases zero : k = 0
+    · unfold darboux.has_integral at hi
+      have eq : (fun x => k*f x) = (fun (x : ℝ) => 0) := by rw [zero]; ring
+      have val : k*I = 0*(b-a) := by rw [zero]; ring
+      rw [eq,val]; exact darboux.const a b 0 hi.1
+    · have neg := darboux.scale_pos (fun x => -f x) a b (-I) (-k) (by linarith) (darboux.neg f a b I hi)
+      have eq : (fun x => -k*(-f x)) = (fun x => k*f x) := by ring
+      have val : -k*(-I) = k*I := by ring
+      rw [eq,val] at neg
+      exact neg
+
+-- Given integrals of both products, the product rule supplies the boundary term.
++ darboux.by_parts (F G f g : ℝ → ℝ) (a b I J : ℝ)
+    (hi : darboux.has_integral (fun x => f x*G x) a b I)
+    (hj : darboux.has_integral (fun x => F x*g x) a b J)
+    (df : ∀ t, a ≤ t → t ≤ b → has_deriv_within F (fun z => a ≤ z ∧ z ≤ b) t (f t))
+    (dg : ∀ t, a ≤ t → t ≤ b → has_deriv_within G (fun z => a ≤ z ∧ z ≤ b) t (g t)) :
+    I+J = F b*G b-F a*G a
+  apply darboux.eval_primitive (fun x => F x*G x) (fun x => f x*G x+F x*g x) a b (I+J)
+  · exact darboux.add (fun x => f x*G x) (fun x => F x*g x) a b I J hi hj
+  · intro t lo hi
+    exact has_deriv_within.mul F G (fun z => a ≤ z ∧ z ≤ b) t (f t) (g t) (df t lo hi) (dg t lo hi)
+
++ darboux.abs_le_const (f : ℝ → ℝ) (a b I c : ℝ) (hi : darboux.has_integral f a b I)
+    (bound : ∀ x, a ≤ x → x ≤ b → |f x| ≤ c) : |I| ≤ c*(b-a)
+  have pos := darboux.le_const f a b I c hi (by intro x lo hi; linarith [bound x lo hi,le_abs_self.real (f x)])
+  have neg := darboux.le_const (fun x => -f x) a b (-I) c (darboux.neg f a b I hi) (by intro x lo hi; linarith [bound x lo hi,neg_le_abs.real (f x)])
+  exact abs_le_of.real I (c*(b-a)) (by linarith) pos
+
+@[auto] + darboux.pow (a b : ℝ) (n : ℕ) (ab : a ≤ b) :
+    darboux.has_integral (fun x => x^n) a b ((b^(n+1)-a^(n+1))/((n:ℝ)+1))
+  obtain ⟨I,hi⟩ := darboux.continuous (fun x => x^n) a b ab (by intro x lo hi; auto)
+  have scaled := darboux.scale (fun x => x^n) a b I ((n:ℝ)+1) hi
+  have eval := darboux.eval_primitive (fun x => x^(n+1)) (fun x => ((n:ℝ)+1)*x^n) a b (((n:ℝ)+1)*I) scaled (by intro x lo hi; exact has_deriv_within.pow_succ_id n (fun z => a ≤ z ∧ z ≤ b) x)
+  have k : 0 < (n:ℝ)+1 := by linarith [cast_nonneg.real n]
+  have eq : I = (b^(n+1)-a^(n+1))/((n:ℝ)+1)
+    linarith [(le_div_iff.real I (b^(n+1)-a^(n+1)) ((n:ℝ)+1) k).mpr (by linarith),(div_le_iff.real (b^(n+1)-a^(n+1)) I ((n:ℝ)+1) k).mpr (by linarith)]
+  rw [← eq]; exact hi
+
+-- Extend a certified integral by one power with a constant coefficient.
++ darboux.add_monomial (a b : ℝ) (f : ℝ → ℝ) (I c : ℝ) (n : ℕ) (hi : darboux.has_integral f a b I) :
+    darboux.has_integral (fun x => f x+c*x^n) a b (I+c*((b^(n+1)-a^(n+1))/((n:ℝ)+1)))
+  have ordered := hi; unfold darboux.has_integral at ordered
+  have term := darboux.scale (fun x => x^n) a b ((b^(n+1)-a^(n+1))/((n:ℝ)+1)) c (darboux.pow a b n ordered.1)
+  exact darboux.add f (fun x => c*x^n) a b I (c*((b^(n+1)-a^(n+1))/((n:ℝ)+1))) hi term
+
+-- A power-basis polynomial can have a symbolic number of coefficients.
+@[auto] + darboux.polynomial (a b : ℝ) (c : ℕ → ℝ) (n : ℕ) (ab : a ≤ b) :
+    darboux.has_integral (fun x => ∑ i < n, c i*x^i) a b (∑ i < n, c i*((b^(i+1)-a^(i+1))/((i:ℝ)+1)))
+  induction n with k ih
+  · have base := darboux.const a b 0 ab
+    have zero : 0*(b-a) = 0 := by ring
+    rw [zero] at base; exact base
+  · rw [succ_eq_add_one.nat]
+    exact darboux.add_monomial a b (fun x => ∑ i < k, c i*x^i) (∑ i < k, c i*((b^(i+1)-a^(i+1))/((i:ℝ)+1))) (c k) k ih
+
+-- A positive value at even one endpoint gives a positive-area lower rectangle.
++ darboux.pos_of_pos_at (f : ℝ → ℝ) (a b I x : ℝ) (ab : a < b) (ax : a ≤ x) (xb : x ≤ b)
+    (hi : darboux.has_integral f a b I) (nonneg : ∀ z, a ≤ z → z ≤ b → 0 ≤ f z)
+    (cont : continuous_within_at f (fun z => a ≤ z ∧ z ≤ b) x) (pos : 0 < f x) : 0 < I
+  unfold continuous_within_at at cont
+  obtain ⟨d,hd,near⟩ := cont (f x/2) (by linarith)
+  set l := max a (x-d/2) with hl
+  set r := min b (x+d/2) with hr
+  have al : a ≤ l := by rw [hl]; exact le_max_left.real a (x-d/2)
+  have rb : r ≤ b := by rw [hr]; exact min_le_left.real b (x+d/2)
+  have lr : l < r
+    rw [hl,hr]; apply max_lt.real
+    · exact lt_min.real b (x+d/2) a ab (by linarith)
+    · exact lt_min.real b (x+d/2) (x-d/2) (by linarith) (by linarith)
+  have low : ∀ z, l ≤ z → z ≤ r → f x/2 ≤ f z
+    intro z lz zr
+    have close : |z-x| < d
+      apply abs_lt_of.real
+      · linarith [le_max_right.real a (x-d/2)]
+      · linarith [min_le_right.real b (x+d/2)]
+    linarith [near z ⟨by linarith,by linarith⟩ close,neg_le_abs.real (f z-f x)]
+  obtain ⟨L,J,left,rest,sum⟩ := darboux.split f a l b I al (by linarith) hi
+  obtain ⟨M,R,mid,right,sum2⟩ := darboux.split f l r b J (by linarith) rb rest
+  have bound := darboux.mono (fun z => f x/2) f l r ((f x/2)*(r-l)) M (darboux.const l r (f x/2) (by linarith)) mid low
+  have left0 := darboux.nonneg f a l L left (by intro z az zl; exact nonneg z az (by linarith))
+  have right0 := darboux.nonneg f r b R right (by intro z rz zb; exact nonneg z (by linarith) zb)
+  linarith [mul_pos.real (f x/2) (r-l) (by linarith) (by linarith)]

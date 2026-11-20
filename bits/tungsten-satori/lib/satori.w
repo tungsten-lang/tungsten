@@ -16,10 +16,13 @@ use elab
 use simp
 use arith
 use satbridge
+use transfer
 use polynomial
+use polynomial_sign
 use tactics
 use pattern
 use session
+use find
 
 SATORI_VERSION = "0.1.0"
 SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
@@ -29,7 +32,10 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
   << ""
   << "USAGE"
   << "    satori check FILE.sat ...     check proofs (default command)"
+  << "    satori find 'CONCLUSION'      find library declarations by statement"
   << "    satori stats FILE.sat ...     check and print line/theorem counts"
+  << "    satori check-transfer ORIGINAL.cnf TRANSFER.cnf PROOF.lrat"
+  << "    satori emit-transfer ORIGINAL.cnf TRANSFER.cnf OUTPUT.cnf"
   << "    satori version"
   << "    satori check -j N FILE.sat    split mode: each theorem in its own process, N at a time"
   << "                                  (fresh memory per theorem; same verdict and trust tags)"
@@ -52,6 +58,14 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
     i += 1
   true
 
+-> satori_root
+  root = Env.get("SATORI_ROOT")
+  if root == nil || root == ""
+    root = Dir.pwd
+    if !File.exist?(root + "/bits/tungsten-satori/prelude/prelude.sat")
+      root = Env.get("HOME") + "/tungsten"
+  root
+
 -> satori_main(args)
   if args.size == 0 || args[0] == "help" || args[0] == "--help"
     satori_usage
@@ -59,6 +73,10 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
   if args[0] == "version"
     << "satori " + SATORI_VERSION
     return 0
+  if args[0] == "check-transfer" || args[0] == "emit-transfer"
+    return satori_transfer_main(args)
+  if args[0] == "find"
+    return satori_find(satori_root, args)
   stats = false
   only = nil
   jobs = 0
@@ -94,11 +112,7 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
     return 1
   if only == 0
     << SATORI_SPLIT_PROTOCOL
-  root = Env.get("SATORI_ROOT")
-  if root == nil || root == ""
-    root = Dir.pwd
-    if !File.exist?(root + "/bits/tungsten-satori/prelude/prelude.sat")
-      root = Env.get("HOME") + "/tungsten"
+  root = satori_root
   failures = 0
   if jobs > 0
     files.each -> (f)
@@ -217,8 +231,12 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
   if secs == nil || secs == ""
     secs = "3600"
   nc_flag = no_cache ? "--no-cache" : ""
-  dir = root + "/bits/tungsten-satori/.satori-cache/split-" + ((t0 * ~1000000.0).round % 1000000000).to_s
-  File.mkdir_p(dir)
+  cache = root + "/bits/tungsten-satori/.satori-cache"
+  File.mkdir_p(cache)
+  dir = ccall("__w_mkdtemp_in", cache, "split")
+  if dir == nil
+    << "✗ " + f + ": could not create a split checking directory"
+    return 1
   nfail = 0
   begin
     if no_cache
@@ -250,31 +268,38 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
       job = job + "if test -n \"$r\" && test \"$r\" -gt $(( $2 * 1024 )); then kill -9 $pid; echo 'satori-split: memory limit' >> \"$out\"; break; fi; "
       job = job + "if test $t -gt $(( $6 * 4 )); then kill -9 $pid; echo 'satori-split: time limit' >> \"$out\"; break; fi; "
       job = job + "sleep 0.25; t=$((t+1)); done; wait $pid"
-      drv = "seq 1 \"$1\" | xargs -P \"$2\" -I{} /bin/sh -c \"$3\" \"$4\" \"$5\" \"$6\" {} \"$7\" \"$8\" \"$9\" \"${10}\""
-      q = Process.spawn(["/bin/sh", "-c", drv, "sh", names.size.to_s, jobs.to_s, job, bin, f, mem, dir, root, secs, nc_flag])
-      q.wait
+      if jobs > 1
+        drv = "seq 1 \"$1\" | xargs -P \"$2\" -I{} /bin/sh -c \"$3\" \"$4\" \"$5\" \"$6\" {} \"$7\" \"$8\" \"$9\" \"${10}\""
+        q = Process.spawn(["/bin/sh", "-c", drv, "sh", names.size.to_s, jobs.to_s, job, bin, f, mem, dir, root, secs, nc_flag])
+        q.wait
     blocks = {}
     own = {}
     deps = {}
     failed = {}
     memo = {}
     trusted = {}
+    path = dir + "/trusted"
     workers = names.size
     k = 0
     while k < names.size
       nm = names[k]
       id = indices[k]
-      lines = split_lines(dir + "/out." + (k + 1).to_s)
-      # A provisional statement is never eligible on its own. If it shared a
-      # goal symbol, replay with the IDs whose proofs and dependencies checked.
-      requests = lines.find(-> (line) line.starts_with?("⋯ select split:"))
-      if requests != nil && requests.split(" ").any?(-> (tag) trusted.has_key?(tag))
-        path = dir + "/trusted"
-        File.write(path, trusted.keys.join("\n"))
-        replay = Process.spawn(["/bin/sh", "-c", job, bin, f, mem, (k + 1).to_s, dir, root, secs, nc_flag, path])
-        replay.wait
-        workers += 1
-        lines = split_lines(dir + "/out." + (k + 1).to_s)
+      out = dir + "/out." + (k + 1).to_s
+      worker = ["/bin/sh", "-c", job, bin, f, mem, (k + 1).to_s, dir, root, secs, nc_flag, path]
+      if jobs == 1
+        # Every prior result is already known. Pass checked premises on the
+        # first attempt, before a closed goal falls back to recomputation.
+        Process.spawn(worker).wait
+      lines = split_lines(out)
+      if jobs > 1 && trusted.size > 0
+        requests = lines.find(-> (line) line.starts_with?("⋯ select split:"))
+        requested = requests != nil && requests.split(" ").any?(-> (tag) trusted.has_key?(tag))
+        # The speculative worker can hit its cap before emitting a request.
+        capped = lines.any?(-> (line) line.contains?("tungsten: memory limit exceeded:") || line == "satori-split: memory limit")
+        if requested || capped
+          Process.spawn(worker).wait
+          workers += 1
+          lines = split_lines(out)
       b = split_block(lines, indices[k].to_i)
       if b.size == 0 || !b[0].starts_with?("✓ ")
         failed[id] = nm
@@ -290,7 +315,9 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
         deps[id] = st[2]
         error = auto_registration_error(split_resolve(id, own, deps, memo, failed, []))
         if error == nil
-          trusted["split:" + id] = true
+          tag = "split:" + id
+          trusted[tag] = true
+          File.open(path, "a") -> (handle) handle.write(tag + "\n")
         elsif registrations.has_key?(id)
           failed[id] = nm
           b = ["✗ theorem " + nm + ": " + error]

@@ -1,0 +1,12 @@
+import derivation_real
+
++ missing_tangent_factor : (ring_ops.power (dual.ops ring_ops.int) (dual.mk 2 3) 4).du = 32 := by decide
+
+-- The inverse identity at a single point leaves D g undetermined.
++ point_inverse (R : ring_ops α) (f D : α → ℝ) (t g : α) (hr : comm_ring R)
+    (hom : ring_hom R ring_ops.real f) (der : derivation_at R ring_ops.real f D) (value : (f t)^5*f g = 1) :
+    (f t)^5*D g = -(5*(f t)^4*D t*f g) := by auto
+
++ missing_weight (R : ring_ops α) (f D : α → ℝ) (t a : α) (hr : comm_ring R)
+    (hom : ring_hom R ring_ops.real f) (der : derivation_at R ring_ops.real f D) :
+    D (ring_ops.monomial R t 3 a) = (f t)^3*(3*f a+D a) := by auto

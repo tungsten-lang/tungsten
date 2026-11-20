@@ -1,0 +1,44 @@
+-- On a σ-finite measure space, bound the lower integral by testing all finite
+-- nonnegative sums of indicators. Volume A m gives the finite measure of A.
+import finite_sum
+
+-> lower_integral.bound (volume : set α → ℝ → Prop) (f : α → ℝ) (B : ℝ) : Prop :=
+  ∀ (n : ℕ) (A : ℕ → set α) (c m : ℕ → ℝ),
+    (∀ i < n, 0 ≤ c i ∧ 0 ≤ m i ∧ volume (A i) (m i)) →
+    (∀ x, (∑ i < n, if x ∈ A i then c i else 0) ≤ f x) → (∑ i < n, c i*m i) ≤ B
+
+@[auto] + lower_integral.bound.mono (volume : set α → ℝ → Prop) (f g : α → ℝ) (B : ℝ)
+    (h : lower_integral.bound volume g B) (le : ∀ x, f x ≤ g x) : lower_integral.bound volume f B
+  unfold lower_integral.bound at h ⊢
+  intro n A c m pieces minorant
+  apply h n A c m pieces
+  intro x; linarith [minorant x,le x]
+
+-- A single nonnegative rectangle under the graph gives a lower bound.
++ lower_integral.bound.cell (volume : set α → ℝ → Prop) (f : α → ℝ) (B : ℝ) (A : set α) (c m : ℝ)
+    (bound : lower_integral.bound volume f B) (hc : 0 ≤ c) (hm : 0 ≤ m) (vol : volume A m)
+    (minorant : ∀ x, (if x ∈ A then c else 0) ≤ f x) : c*m ≤ B
+  unfold lower_integral.bound at bound
+  have piece := bound 1 (fun i => A) (fun i => c) (fun i => m) (by intro i hi; exact ⟨hc,hm,vol⟩)
+  have total := piece (by intro x; simpa [sum_below] using minorant x)
+  simpa [sum_below] using total
+
+-- Integration against a unit point mass evaluates any nonnegative density.
+-> lower_integral.atom (p : α) (A : set α) (m : ℝ) : Prop := m = (if p ∈ A then 1 else 0)
+
+@[auto] + lower_integral.at_atom (p : α) (f : α → ℝ) (B : ℝ) (nonneg : ∀ x, 0 ≤ f x) : lower_integral.bound (lower_integral.atom p) f B ↔ f p ≤ B
+  constructor
+  · intro h
+    have cell : lower_integral.atom p (fun x => x = p) 1 := by simp [lower_integral.atom]
+    have minor : ∀ x, (if x = p then f p else 0) ≤ f x
+      intro x; by_cases eq : x = p
+      · rw [eq]; simp
+      · simpa [eq] using nonneg x
+    have bound := lower_integral.bound.cell (lower_integral.atom p) f B (fun x => x = p) (f p) 1 h (nonneg p) (by decide) cell minor
+    linarith
+  · intro hp; unfold lower_integral.bound; intro n A c m cells minor
+    have total : (∑ i < n, c i*m i) = (∑ i < n, if p ∈ A i then c i else 0)
+      apply sum_below.congr; intro i hi
+      obtain ⟨hc,hm,mass⟩ := cells i hi; unfold lower_integral.atom at mass
+      by_cases hit : A i p <;> simp [mass,hit]
+    linarith [minor p]

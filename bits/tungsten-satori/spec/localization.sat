@@ -1,0 +1,66 @@
+import localization
+
++ open_points (R : ring_ops α) (S : ring_ops β) (i : α → β) (f : α) (P : set α)
+    (hr : comm_ring R) (hs : comm_ring S) (loc : localization R S i (ring_ops.powers R f)) :
+    P ∈ spectrum.D R f ↔ ∃ J ∈ spectrum S, ideal.comap i J = P := by auto
+
++ extend_map (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (f : α → γ) (d : α)
+    (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T) (loc : localization R S i (ring_ops.powers R d)) (hom : ring_hom R T f) :
+    (∃ g, ring_hom S T g ∧ ∀ x, g (i x) = f x) ↔ ring_ops.unit T (f d) := by auto
+
++ recover (S : ring_ops α) (d u x a : α) (ring : comm_ring S) (inverse : S.mul u d = S.one) (eq : S.mul d x = a) :
+    x = S.mul u a := by auto
+
+-- Inverting e = (1,0) in ℤ × ℤ leaves ℤ and kills (0,1).
+-> zz : ring_ops (ℤ × ℤ) := ring_ops.mk (0,0) (1,1) (fun x y => (fst x+fst y,snd x+snd y))
+  (fun x => (-fst x,-snd x)) (fun x y => (fst x*fst y,snd x*snd y))
+-> denominators : set (ℤ × ℤ) := fun x => x = (1,1) ∨ x = (1,0)
+
++ first_factor : localization zz ring_ops.int fst denominators
+  unfold localization; constructor
+  · unfold multiplicative denominators; constructor
+    · left; rfl
+    · intro x y hx hy; obtain hx | hx := hx <;> obtain hy | hy := hy <;> rw [hx,hy] <;> decide
+  · constructor
+    · unfold ring_hom; exact ⟨rfl,rfl,by intro x y; rfl,by intro x; rfl,by intro x y; rfl⟩
+    · constructor
+      · intro d hd; unfold denominators at hd; unfold ring_ops.unit; use 1; obtain hd | hd := hd <;> rw [hd] <;> rfl
+      · constructor
+        · intro y; exact ⟨(y,0),(1,0),by decide,by simp [ring_ops.int]⟩
+        · intro a b eq; exact ⟨(1,0),by decide,by simp [zz,eq]⟩
+
++ lost_factor : ((0,1) : ℤ × ℤ) ≠ (0,0) ∧ fst ((0,1) : ℤ × ℤ) = (0 : ℤ) := by decide
+
++ image_equality (a b : ℤ × ℤ) :
+    fst a = fst b ↔ ∃ d ∈ denominators, ring_ops.mul zz d a = ring_ops.mul zz d b
+  exact localization.eq_iff zz ring_ops.int fst denominators comm_ring.int first_factor a b
+
++ first_factor_away : localization zz ring_ops.int fst (ring_ops.powers zz (1,0))
+  have eq : ring_ops.powers zz (1,0) = denominators
+    funext d; unfold ring_ops.powers denominators; constructor
+    · have step : ∀ n, ring_ops.power zz (1,0) n = (1,1) ∨ ring_ops.power zz (1,0) n = (1,0)
+        intro n; induction n with k ih
+        · left; rfl
+        · right; simp only [succ_eq_add_one.nat,ring_ops.power]
+          obtain a | b := ih
+          · rw [a]; rfl
+          · rw [b]; rfl
+      intro h; obtain ⟨n,hn⟩ := h; rw [← hn]; exact step n
+    · intro h; obtain one | e := h
+      · exact ⟨0,by rw [one]; rfl⟩
+      · exact ⟨1,by rw [e]; rfl⟩
+  rw [eq]; exact first_factor
+
++ unique_extension (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (U : set α) (f g : β → γ)
+    (ht : comm_ring T) (loc : localization R S i U) (hf : ring_hom S T f) (hg : ring_hom S T g)
+    (agree : ∀ a, f (i a) = g (i a)) : f = g
+  exact localization.hom_ext R S T i U f g ht loc hf hg agree
+
++ two_has_no_retraction (S : ring_ops α) (i : ℤ → α) (hs : comm_ring S)
+    (loc : localization ring_ops.int S i (ring_ops.powers ring_ops.int 2)) :
+    ¬ ∃ g, ring_hom S ring_ops.int g ∧ ∀ x, g (i x) = x
+  have id : ring_hom ring_ops.int ring_ops.int (fun x => x)
+    unfold ring_hom; auto
+  intro ext; have unit := (localization.away_lift ring_ops.int S ring_ops.int i (fun x => x) 2 comm_ring.int hs comm_ring.int loc id).mp ext
+  unfold ring_ops.unit at unit; obtain ⟨v,inv⟩ := unit
+  have bad : v*2 = 1 := inv; by_cases sign : v ≤ 0 <;> omega

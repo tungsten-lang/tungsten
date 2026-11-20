@@ -1,0 +1,17 @@
+import quadratic_form
+
++ missing_diagonal (a b c x y : ℚ) (ha : 0 ≤ a) (det : b^2 ≤ a*c) :
+    0 ≤ a*x^2 + 2*b*x*y + c*y^2 := by auto
++ missing_determinant (a b c x y : ℝ) (ha : 0 < a) (hc : 0 < c) :
+    0 ≤ a*x^2 + 2*b*x*y + c*y^2 := by auto
++ singular_strict (a b c x y : ℤ) (ha : 0 < a) (det : b^2 ≤ a*c) (point : x ≠ 0 ∨ y ≠ 0) :
+    0 < a*x^2 + 2*b*x*y + c*y^2 := by auto
++ zero_vector (a b c x y : ℝ) (ha : 0 < a) (det : b^2 < a*c) :
+    0 < x^2*a - 2*b*x*y + y^2*c := by auto
++ wrong_cross (a b c x y : ℤ) (ha : 0 < a) (det : b^2 ≤ 4*a*c) :
+    2*b*x*y ≤ a*x^2 + c*y^2 := by auto
++ extra_linear (a b c x y : ℚ) (ha : 0 < a) (det : b^2 ≤ a*c) :
+    0 ≤ a*x^2 + 2*b*x*y + c*y^2 + x := by auto
++ single_direction (a b c : ℝ) (h : 0 ≤ a + 2*b + c) : 0 ≤ a*c-b*b := by auto
++ switched_coordinates (f : ℝ → ℝ → ℝ) (h : ∀ x y, 0 ≤ f x y + x) :
+    ∀ x y, -y ≤ f x y := by auto

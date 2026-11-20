@@ -1,0 +1,7 @@
+import limit_order
+
++ reversed_scale (a : ℕ → ℝ) (h : tends_to a 1) : tends_to (fun n => (-2) * a n) 2 := by auto
++ strict_limit (a b : ℕ → ℝ) (A B : ℝ) (ha : tends_to a A) (hb : tends_to b B) (h : ∀ n, a n < b n) : A < B := by auto [tends_to.le a b A B ha hb]
++ prefix_order (a b : ℕ → ℝ) (A B : ℝ) (ha : tends_to a A) (hb : tends_to b B) (h : ∀ n, n ≤ 10 → a n ≤ b n) : A ≤ B := by auto [tends_to.le_of_eventual_le a b A B ha hb 10]
++ upper_only (a b : ℕ → ℝ) (h : tends_to b 0) (upper : ∀ n, a n ≤ b n) : tends_to a 0 := by auto [tends_to.squeeze (fun n => 0) b 0 a (tends_to.const 0) h]
++ overshoot (a : ℕ → ℝ) (ha : tends_to a 0) : a 0 ≤ 0 := by auto [monotone_seq.le_limit a 0 ha]

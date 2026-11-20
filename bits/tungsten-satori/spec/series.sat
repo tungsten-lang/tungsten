@@ -1,0 +1,9 @@
+import series
+
++ compare (a b : ℕ → ℝ) (lower : ∀ i, 0 ≤ a i) (upper : ∀ i, a i ≤ b i) (hb : summable b) : summable a := by auto
++ bounded_sums (a : ℕ → ℝ) (B : ℝ) (lower : ∀ i, 0 ≤ a i) (upper : ∀ n, partial_sum a n ≤ B) : summable a := by auto
++ compare_sums (a b : ℕ → ℝ) (le : ∀ i, a i ≤ b i) (n : ℕ) : partial_sum a n ≤ partial_sum b n := by auto
++ monotone_below_limit (a b : ℕ → ℝ) (B : ℝ) (m : monotone_seq a) (le : ∀ n, a n ≤ b n) (lim : tends_to b B) : converges a := by auto
++ monotone_ceiling (a : ℕ → ℝ) (M : ℝ) (m : monotone_seq a) (h : ∀ n, a n ≤ M) : converges a := by auto
++ monotone_sup (a : ℕ → ℝ) (s : ℝ) (m : monotone_seq a) (h : is_sup (set.range a) s) : tends_to a s := by exact monotone_seq.tends_to_sup a s m h
++ bounded_monotone (a : ℕ → ℝ) (m : monotone_seq a) (h : bounded_seq a) : converges a := by exact monotone_bounded_converges a m h

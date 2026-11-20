@@ -1,0 +1,75 @@
+-- Unnormalized graph Laplacian, with the positive-semidefinite sign convention.
+-- ns lists the neighbors of v. Repeated entries count with multiplicity.
+import sum_support
+import graph
+
+-> laplacian (ns : list α) (u : α → β) (v : α) : β :=
+  sum_list ns (fun w => u v - u w)
+
++ laplacian.nonneg_at_max.rat (ns : list α) (u : α → ℚ) (v : α)
+    (maximum : ∀ w ∈ ns, u w ≤ u v) : 0 ≤ laplacian ns u v
+  unfold laplacian
+  apply sum_list_nonneg.rat
+  intro w hw
+  linarith [maximum w hw]
+
+@[auto] + laplacian.eq_zero_at_max_iff.rat (ns : list α) (u : α → ℚ) (v : α)
+    (maximum : ∀ w ∈ ns, u w ≤ u v) :
+    laplacian ns u v = 0 ↔ ∀ w ∈ ns, u w = u v
+  unfold laplacian
+  have zeros := list_sum.eq_zero_iff.rat ns (fun w => u v - u w) (by intro w hw; linarith [maximum w hw])
+  constructor
+  · intro harmonic w hw
+    linarith [zeros.mp harmonic w hw]
+  · intro flat
+    apply zeros.mpr
+    intro w hw
+    linarith [flat w hw]
+
++ laplacian.nonneg_at_max.real (ns : list α) (u : α → ℝ) (v : α)
+    (maximum : ∀ w ∈ ns, u w ≤ u v) : 0 ≤ laplacian ns u v
+  unfold laplacian
+  apply sum_list_nonneg.real
+  intro w hw
+  linarith [maximum w hw]
+
+@[auto] + laplacian.eq_zero_at_max_iff.real (ns : list α) (u : α → ℝ) (v : α)
+    (maximum : ∀ w ∈ ns, u w ≤ u v) :
+    laplacian ns u v = 0 ↔ ∀ w ∈ ns, u w = u v
+  unfold laplacian
+  have zeros := list_sum.eq_zero_iff.real ns (fun w => u v - u w) (by intro w hw; linarith [maximum w hw])
+  constructor
+  · intro harmonic w hw
+    linarith [zeros.mp harmonic w hw]
+  · intro flat
+    apply zeros.mpr
+    intro w hw
+    linarith [flat w hw]
+
++ laplacian.strong_max.rat (ns : α → list α) (u : α → ℚ) (v w : α)
+    (maximum : ∀ x, u x ≤ u v) (harmonic : ∀ x, laplacian (ns x) u x = 0)
+    (path : reachable (fun a b => b ∈ ns a) v w) : u w = u v
+  unfold reachable at path
+  apply path (fun x => u x = u v)
+  · rfl
+  · intro a b peak edge
+    have local : ∀ z ∈ ns a, u z ≤ u a
+      intro z hz
+      rw [peak]
+      exact maximum z
+    have flat := (laplacian.eq_zero_at_max_iff.rat (ns a) u a local).mp (harmonic a)
+    rw [flat b edge, peak]
+
++ laplacian.strong_max.real (ns : α → list α) (u : α → ℝ) (v w : α)
+    (maximum : ∀ x, u x ≤ u v) (harmonic : ∀ x, laplacian (ns x) u x = 0)
+    (path : reachable (fun a b => b ∈ ns a) v w) : u w = u v
+  unfold reachable at path
+  apply path (fun x => u x = u v)
+  · rfl
+  · intro a b peak edge
+    have local : ∀ z ∈ ns a, u z ≤ u a
+      intro z hz
+      rw [peak]
+      exact maximum z
+    have flat := (laplacian.eq_zero_at_max_iff.real (ns a) u a local).mp (harmonic a)
+    rw [flat b edge, peak]

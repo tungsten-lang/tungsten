@@ -1,0 +1,15 @@
+import limits
++ constant (L : ℝ) : tends_to (fun n => L) L := by auto
++ translate (a : ℕ → ℝ) (L c : ℝ) (h : tends_to a L) : tends_to (fun n => a n - c) (L-c) := by auto
++ translate_literal (a : ℕ → ℝ) (h : tends_to a 2) : tends_to (fun n => a n - 1) 1 := by simpa using tends_to.sub_const a 2 1 h
++ tail_bound (a b : ℕ → ℝ) (h : tends_to a 3) (bnd : ∀ n, 11 ≤ n → |b n - 2| ≤ |a n - 3|) : tends_to b 2 := by exact tends_to.of_eventual_error_le a 3 b 2 h 11 bnd
+
+-- An arbitrary first term has no bearing on the limit.
++ changed_first (x L : ℝ) : tends_to (fun n => if n = 0 then x else L) L
+  apply tends_to.of_eventual_error_le (fun n => L) L (fun n => if n = 0 then x else L) L (tends_to.const L) 1
+  intro n hn
+  have nz : n ≠ 0 := by omega
+  simp [nz]
+
++ same_values (a b : ℕ → ℝ) (L : ℝ) (h : tends_to a L) (hb : ∀ n, b n = a n) : tends_to b L
+  exact tends_to.congr a b L h hb

@@ -18,10 +18,11 @@
 import quadratic
 import power
 import divmod
+import real_bounds
+import factorial
+import finite_sum
 
 -- ---- big operators: one step (∑ i < n, f i is sum_below n f; note ∑ i < n, f i + c parses as ∑ i < n, (f i + c)) ----
-@[simp] + sum_below_zero (f : ℕ → α) : ∑ i < 0, f i = 0 := by rfl
-+ sum_below_succ (n : ℕ) (f : ℕ → α) : ∑ i < n + 1, f i = (∑ i < n, f i) + f n := by rfl
 @[simp] + prod_below_zero (f : ℕ → α) : ∏ i < 0, f i = 1 := by rfl
 + prod_below_succ (n : ℕ) (f : ℕ → α) : ∏ i < n + 1, f i = (∏ i < n, f i) * f n := by rfl
 
@@ -42,22 +43,7 @@ import divmod
 -- ---- absolute value (ℝ ℚ ℤ) -------------------------------------------------------------------------------------
 -- abs_cases.T is the workhorse: obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.T x <;> linarith
 -- ℝ
-+ abs_cases.real (x : ℝ) : (|x| = x ∧ 0 ≤ x) ∨ (|x| = 0 - x ∧ x < 0)
-  by_cases h : 0 ≤ x
-  · left
-    exact ⟨abs_of_nonneg.real x h, h⟩
-  · right
-    have e := abs_of_neg.real x (by linarith)
-    have e2 : neg x = 0 - x := by ring
-    rw [e2] at e
-    exact ⟨e, by linarith⟩
-+ abs_of_nonpos.real (x : ℝ) (h : x ≤ 0) : |x| = 0 - x
-  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
 + abs_of_pos.real (x : ℝ) (h : 0 < x) : |x| = x
-  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
-+ le_abs_self.real (x : ℝ) : x ≤ |x|
-  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
-+ neg_le_abs.real (x : ℝ) : 0 - x ≤ |x|
   obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
 + neg_abs_le.real (x : ℝ) : 0 - |x| ≤ x
   obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
@@ -67,41 +53,10 @@ import divmod
     exact ⟨by linarith [neg_le_abs.real x], by linarith [le_abs_self.real x]⟩
   · intro h
     obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
-+ abs_lt.real (x c : ℝ) : |x| < c ↔ 0 - c < x ∧ x < c
-  constructor
-  · intro h
-    exact ⟨by linarith [neg_le_abs.real x], by linarith [le_abs_self.real x]⟩
-  · intro h
-    obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> linarith
-+ abs_le_of.real (x c : ℝ) (h : 0 - c ≤ x) (k : x ≤ c) : |x| ≤ c
-  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.real x <;> linarith
-+ abs_lt_of.real (x c : ℝ) (h : 0 - c < x) (k : x < c) : |x| < c
-  obtain ⟨e, l⟩ | ⟨e, l⟩ := abs_cases.real x <;> linarith
 + abs_neg.real (x : ℝ) : |0 - x| = |x|
   obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real x <;> obtain ⟨f, l⟩ | ⟨f, l⟩ := abs_cases.real (0 - x) <;> linarith
-+ abs_sub_comm.real (a b : ℝ) : |a - b| = |b - a|
-  obtain ⟨e, k⟩ | ⟨e, k⟩ := abs_cases.real (a - b) <;> obtain ⟨f, l⟩ | ⟨f, l⟩ := abs_cases.real (b - a) <;> linarith
-+ abs_mul.real (a b : ℝ) : |a * b| = |a| * |b|
-  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real a <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := abs_cases.real b <;> rw [e, f]
-  · rw [abs_of_nonneg.real (a * b) (mul_nonneg.real a b h k)]
-  · rw [abs_of_nonpos.real (a * b) (by linarith [mul_nonneg.real a (0 - b) h (by linarith)])]
-    ring
-  · rw [abs_of_nonpos.real (a * b) (by linarith [mul_nonneg.real (0 - a) b (by linarith) k])]
-    ring
-  · rw [abs_of_nonneg.real (a * b) (by linarith [mul_nonneg.real (0 - a) (0 - b) (by linarith) (by linarith)])]
-    ring
-+ abs_add.real (a b : ℝ) : |a + b| ≤ |a| + |b|
-  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real (a + b) <;> linarith [le_abs_self.real a, neg_le_abs.real a, le_abs_self.real b, neg_le_abs.real b]
-+ abs_sub.real (a b : ℝ) : |a - b| ≤ |a| + |b|
-  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real (a - b) <;> linarith [le_abs_self.real a, neg_le_abs.real a, le_abs_self.real b, neg_le_abs.real b]
 + abs_sub_le.real (a b c : ℝ) : |a - c| ≤ |a - b| + |b - c|
   obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real (a - c) <;> linarith [le_abs_self.real (a - b), neg_le_abs.real (a - b), le_abs_self.real (b - c), neg_le_abs.real (b - c)]
-+ abs_sub_abs_le_abs_sub.real (a b : ℝ) : |a| - |b| ≤ |a - b|
-  obtain ⟨e, h⟩ | ⟨e, h⟩ := abs_cases.real a <;> linarith [le_abs_self.real (a - b), neg_le_abs.real (a - b), le_abs_self.real b, neg_le_abs.real b]
-+ abs_abs_sub_abs_le.real (a b : ℝ) : | |a| - |b| | ≤ |a - b|
-  apply abs_le_of.real
-  · linarith [abs_sub_abs_le_abs_sub.real b a, abs_sub_comm.real a b]
-  · exact abs_sub_abs_le_abs_sub.real a b
 + abs_abs.real (x : ℝ) : | |x| | = |x|
   exact abs_of_nonneg.real (abs x) (abs_nonneg.real x)
 + abs_pos.real (x : ℝ) (h : x ≠ 0) : 0 < |x|
@@ -350,21 +305,7 @@ import divmod
 -- ---- min and max (ℝ ℚ ℤ ℕ; nat.sat defines them by if) ---------------------------------------------------
 -- min_cases.T / max_cases.T split a min or max into its two branches
 -- ℝ
-+ min_cases.real (a b : ℝ) : (min a b = a ∧ a ≤ b) ∨ (min a b = b ∧ b < a)
-  by_cases h : a ≤ b
-  · left; exact ⟨by simp [min, h], h⟩
-  · right; exact ⟨by simp [min, h], by linarith⟩
-+ max_cases.real (a b : ℝ) : (max a b = b ∧ a ≤ b) ∨ (max a b = a ∧ b < a)
-  by_cases h : a ≤ b
-  · left; exact ⟨by simp [max, h], h⟩
-  · right; exact ⟨by simp [max, h], by linarith⟩
-+ min_le_left.real (a b : ℝ) : min a b ≤ a
-  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.real a b <;> linarith
-+ min_le_right.real (a b : ℝ) : min a b ≤ b
-  obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.real a b <;> linarith
 + le_min.real (a b c : ℝ) (h : c ≤ a) (k : c ≤ b) : c ≤ min a b
-  obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.real a b <;> linarith
-+ lt_min.real (a b c : ℝ) (h : c < a) (k : c < b) : c < min a b
   obtain ⟨e, l⟩ | ⟨e, l⟩ := min_cases.real a b <;> linarith
 + le_min_iff.real (a b c : ℝ) : c ≤ min a b ↔ c ≤ a ∧ c ≤ b
   constructor
@@ -378,10 +319,6 @@ import divmod
   obtain ⟨e, h⟩ | ⟨e, h⟩ := min_cases.real a b <;> obtain ⟨f, k⟩ | ⟨f, k⟩ := min_cases.real b a <;> linarith
 + min_self.real (a : ℝ) : min a a = a
   exact min_eq_left.real a a (le_refl.real a)
-+ le_max_left.real (a b : ℝ) : a ≤ max a b
-  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.real a b <;> linarith
-+ le_max_right.real (a b : ℝ) : b ≤ max a b
-  obtain ⟨e, h⟩ | ⟨e, h⟩ := max_cases.real a b <;> linarith
 + max_le.real (a b c : ℝ) (h : a ≤ c) (k : b ≤ c) : max a b ≤ c
   obtain ⟨e, l⟩ | ⟨e, l⟩ := max_cases.real a b <;> linarith
 + max_lt.real (a b c : ℝ) (h : a < c) (k : b < c) : max a b < c
@@ -571,14 +508,6 @@ import divmod
   constructor <;> intro h <;> linarith
 + sub_pos.real (a b : ℝ) : 0 < a - b ↔ b < a
   constructor <;> intro h <;> linarith
-@[auto] + mul_le_mul_of_nonneg_left.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : c * a ≤ c * b
-  nlinarith
-@[auto] + mul_le_mul_of_nonneg_right.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : a * c ≤ b * c
-  nlinarith
-@[auto] + mul_lt_mul_of_pos_left.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : c * a < c * b
-  nlinarith
-@[auto] + mul_lt_mul_of_pos_right.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : a * c < b * c
-  nlinarith
 + mul_le_mul.real (a b c d : ℝ) (h : a ≤ b) (k : c ≤ d) (hc : 0 ≤ c) (hb : 0 ≤ b) : a * c ≤ b * d
   nlinarith
 + mul_self_le_mul_self.real (a b : ℝ) (h : 0 ≤ a) (k : a ≤ b) : a * a ≤ b * b
@@ -704,6 +633,32 @@ import divmod
     linarith
   · intro h
     obtain e | e := h <;> rw [e] <;> ring
+
+-- The expanded zero product also applies to naturals without truncated subtraction.
++ eq_or_eq_of_cross_sum.int (a b c d : ℤ) (cross : a*c+b*d=a*d+b*c) : a=b ∨ c=d
+  have zero : (a-b)*(c-d)=0 := by linarith
+  obtain first | second := (mul_eq_zero.int (a-b) (c-d)).mp zero
+  · left; linarith
+  · right; linarith
+
++ eq_or_eq_of_cross_sum.rat (a b c d : ℚ) (cross : a*c+b*d=a*d+b*c) : a=b ∨ c=d
+  have zero : (a-b)*(c-d)=0 := by linarith
+  obtain first | second := (mul_eq_zero.rat (a-b) (c-d)).mp zero
+  · left; linarith
+  · right; linarith
+
++ eq_or_eq_of_cross_sum.real (a b c d : ℝ) (cross : a*c+b*d=a*d+b*c) : a=b ∨ c=d
+  have zero : (a-b)*(c-d)=0 := by linarith
+  obtain first | second := (mul_eq_zero.real (a-b) (c-d)).mp zero
+  · left; linarith
+  · right; linarith
+
++ eq_or_eq_of_cross_sum.nat (a b c d : ℕ) (cross : a*c+b*d=a*d+b*c) : a=b ∨ c=d
+  have lifted := (cast_inj.int (a*c+b*d) (a*d+b*c)).mpr cross
+  simp only [int_of_nat_add, int_of_nat_mul] at lifted
+  obtain first | second := eq_or_eq_of_cross_sum.int (a : ℤ) (b : ℤ) (c : ℤ) (d : ℤ) lifted
+  · left; exact (cast_inj.int a b).mp first
+  · right; exact (cast_inj.int c d).mp second
 
 -- ---- powers (ℝ ℚ ℤ ℕ; exponents are ℕ) -----------------------------------------------------------------------
 -- ℝ
@@ -981,15 +936,22 @@ import divmod
   by_cases hk : k = 0
   · rw [hk, mod_zero.nat, mod_zero.nat]
   · exact (div_mod_unique.nat (n % k) k 0 (n % k) (by linarith) (mod_lt.nat n k (by linarith))).2.symm
++ add_mod_mod.nat (a b k : ℕ) : (a + b % k) % k = (a + b) % k
+  rw [add_mod.nat a (b % k) k, mod_mod.nat, ← add_mod.nat a b k]
++ mod_ne_of_lt_of_lt_add.nat (x y p : ℕ) (hxy : x < y) (hyp : y < x + p) : x % p ≠ y % p
+  intro same
+  have dx := div_add_mod.nat x p
+  have dy := div_add_mod.nat y p
+  by_cases e : x / p = y / p
+  · rw [e] at dx
+    linarith
+  · obtain l | l := lt_or_gt_of_ne.nat (x / p) (y / p) e
+    · linarith [mul_le_mul_left.nat p (x / p + 1) (y / p) (by omega), left_distrib.nat p (x / p) 1]
+    · linarith [mul_le_mul_left.nat p (y / p + 1) (x / p) (by omega), left_distrib.nat p (y / p) 1]
 + pow_mod.nat (a n k : ℕ) : a ^ n % k = (a % k) ^ n % k
   induction n with n ih
   · simp
   · rw [succ_eq_add_one.nat, pow_succ.nat, pow_succ.nat, mul_mod.nat (a ^ n) a k, ih, mul_mod.nat ((a % k) ^ n) (a % k) k, mod_mod.nat]
-+ mod_two_cases.nat (n : ℕ) : n % 2 = 0 ∨ n % 2 = 1
-  have m := mod_lt.nat n 2 (by decide)
-  by_cases h : n % 2 = 0
-  · left; exact h
-  · right; linarith
 + even_or_odd.nat (n : ℕ) : even n ∨ odd n
   unfold even odd
   exact mod_two_cases.nat n
@@ -1008,26 +970,12 @@ import divmod
   exact (div_mod_unique.int (k * n) k n 0 (by linarith) (by linarith) hk).2.symm
 + mod_mod.int (n k : ℤ) (hk : 0 < k) : n % k % k = n % k
   exact (div_mod_unique.int (n % k) k 0 (n % k) (by linarith) (mod_nonneg.int n k hk) (mod_lt.int n k hk)).2.symm
-+ mod_two_cases.int (n : ℤ) : n % 2 = 0 ∨ n % 2 = 1
-  have m0 := mod_nonneg.int n 2 (by decide)
-  have m := mod_lt.int n 2 (by decide)
-  by_cases h : n % 2 = 0
-  · left; exact h
-  · right; linarith
 + even_or_odd.int (n : ℤ) : even n ∨ odd n
   unfold even odd
   exact mod_two_cases.int n
 
 -- ---- field division (ℝ ℚ; a⁻¹ is 1 / a, and a / 0 = 0) ------------------------------------------------------
 -- ℝ
-+ one_div_pos.real (a : ℝ) (h : 0 < a) : 0 < 1 / a
-  have m := mul_inv_cancel.real a (by linarith)
-  nlinarith
-+ one_div_nonneg.real (a : ℝ) (h : 0 ≤ a) : 0 ≤ 1 / a
-  by_cases k : a = 0
-  · rw [k, div_zero.real]
-    linarith
-  · linarith [one_div_pos.real a (by linarith)]
 + one_div_neg.real (a : ℝ) (h : a < 0) : 1 / a < 0
   have m := mul_inv_cancel.real a (by linarith)
   nlinarith
@@ -1058,61 +1006,24 @@ import divmod
 + div_self.real (a : ℝ) (h : a ≠ 0) : a / a = 1
   rw [div_def.real]
   exact mul_inv_cancel.real a h
-+ mul_div_cancel.real (a b : ℝ) (h : b ≠ 0) : a / b * b = a
-  have e : a / b * b = a * (b * (1 / b)) := by rw [div_def.real]; ring
-  rw [e, mul_inv_cancel.real b h]
-  ring
-+ mul_div_cancel_right.real (a b : ℝ) (h : b ≠ 0) : a * b / b = a
-  have e : a * b / b = a * (b * (1 / b)) := by rw [div_def.real]; ring
-  rw [e, mul_inv_cancel.real b h]
-  ring
 + mul_div_cancel_left.real (k n : ℝ) (h : k ≠ 0) : k * n / k = n
   rw [mul_comm.real]
   exact mul_div_cancel_right.real n k h
-+ div_pos.real (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : 0 < a / b
-  rw [div_def.real]
-  exact mul_pos.real a (1 / b) ha (one_div_pos.real b hb)
 + div_nonneg.real (a b : ℝ) (ha : 0 ≤ a) (hb : 0 ≤ b) : 0 ≤ a / b
   rw [div_def.real]
   exact mul_nonneg.real a (1 / b) ha (one_div_nonneg.real b hb)
-+ div_le_div_of_nonneg_right.real (a b c : ℝ) (h : a ≤ b) (hc : 0 ≤ c) : a / c ≤ b / c
-  rw [div_def.real a c, div_def.real b c]
-  exact mul_le_mul_of_nonneg_right.real a b (1 / c) h (one_div_nonneg.real c hc)
-+ div_lt_div_of_pos_right.real (a b c : ℝ) (h : a < b) (hc : 0 < c) : a / c < b / c
-  rw [div_def.real a c, div_def.real b c]
-  exact mul_lt_mul_of_pos_right.real a b (1 / c) h (one_div_pos.real c hc)
 + div_le_iff.real (a b c : ℝ) (hc : 0 < c) : a / c ≤ b ↔ a ≤ b * c
   constructor
   · intro h
     linarith [mul_le_mul_of_nonneg_right.real (a / c) b c h (by linarith), mul_div_cancel.real a c (by linarith)]
   · intro h
     linarith [div_le_div_of_nonneg_right.real a (b * c) c h (by linarith), mul_div_cancel_right.real b c (by linarith)]
-+ le_div_iff.real (a b c : ℝ) (hc : 0 < c) : a ≤ b / c ↔ a * c ≤ b
-  constructor
-  · intro h
-    linarith [mul_le_mul_of_nonneg_right.real a (b / c) c h (by linarith), mul_div_cancel.real b c (by linarith)]
-  · intro h
-    linarith [div_le_div_of_nonneg_right.real (a * c) b c h (by linarith), mul_div_cancel_right.real a c (by linarith)]
-+ affine_step_radius.real (m e : ℝ) (h : 0 < e) :
-    0 < e / (|m| + 1) ∧ ∀ t, 0 < t → t ≤ e / (|m| + 1) → m*t < e
-  have d : 0 < |m| + 1 := by linarith [abs_nonneg.real m]
-  constructor
-  · exact div_pos.real e (|m| + 1) h d
-  · intro t ht hb
-    have upper := (le_div_iff.real t e (|m| + 1) d).mp hb
-    linarith [mul_le_mul_of_nonneg_right.real m (|m|) t (le_abs_self.real m) (by linarith)]
 + div_lt_iff.real (a b c : ℝ) (hc : 0 < c) : a / c < b ↔ a < b * c
   constructor
   · intro h
     linarith [mul_lt_mul_of_pos_right.real (a / c) b c h hc, mul_div_cancel.real a c (by linarith)]
   · intro h
     linarith [div_lt_div_of_pos_right.real a (b * c) c h hc, mul_div_cancel_right.real b c (by linarith)]
-+ lt_div_iff.real (a b c : ℝ) (hc : 0 < c) : a < b / c ↔ a * c < b
-  constructor
-  · intro h
-    linarith [mul_lt_mul_of_pos_right.real a (b / c) c h hc, mul_div_cancel.real b c (by linarith)]
-  · intro h
-    linarith [div_lt_div_of_pos_right.real (a * c) b c h hc, mul_div_cancel_right.real a c (by linarith)]
 + div_le_of_nonneg_den.real (a b c : ℝ) (hc : 0 ≤ c)
     (hz : c = 0 → 0 ≤ b) (hp : 0 < c → a ≤ b * c) : a / c ≤ b
   by_cases h : c = 0
@@ -1255,9 +1166,6 @@ import divmod
       linarith
 
 -- ℚ
-+ one_div_pos.rat (a : ℚ) (h : 0 < a) : 0 < 1 / a
-  have m := mul_inv_cancel.rat a (by linarith)
-  nlinarith
 + one_div_nonneg.rat (a : ℚ) (h : 0 ≤ a) : 0 ≤ 1 / a
   by_cases k : a = 0
   · rw [k, div_zero.rat]
@@ -1293,10 +1201,6 @@ import divmod
 + div_self.rat (a : ℚ) (h : a ≠ 0) : a / a = 1
   rw [div_def.rat]
   exact mul_inv_cancel.rat a h
-+ mul_div_cancel.rat (a b : ℚ) (h : b ≠ 0) : a / b * b = a
-  have e : a / b * b = a * (b * (1 / b)) := by rw [div_def.rat]; ring
-  rw [e, mul_inv_cancel.rat b h]
-  ring
 + mul_div_cancel_right.rat (a b : ℚ) (h : b ≠ 0) : a * b / b = a
   have e : a * b / b = a * (b * (1 / b)) := by rw [div_def.rat]; ring
   rw [e, mul_inv_cancel.rat b h]
@@ -1304,9 +1208,6 @@ import divmod
 + mul_div_cancel_left.rat (k n : ℚ) (h : k ≠ 0) : k * n / k = n
   rw [mul_comm.rat]
   exact mul_div_cancel_right.rat n k h
-+ div_pos.rat (a b : ℚ) (ha : 0 < a) (hb : 0 < b) : 0 < a / b
-  rw [div_def.rat]
-  exact mul_pos.rat a (1 / b) ha (one_div_pos.rat b hb)
 + div_nonneg.rat (a b : ℚ) (ha : 0 ≤ a) (hb : 0 ≤ b) : 0 ≤ a / b
   rw [div_def.rat]
   exact mul_nonneg.rat a (1 / b) ha (one_div_nonneg.rat b hb)
@@ -1664,127 +1565,6 @@ import divmod
     have z : ((0 : ℕ) : ℚ) = 0 := by decide
     rw [z]
     linarith
-
--- ---- factorial and binomial coefficients (choose by Pascal's rule) --------------------------------------------
--> fact : ℕ → ℕ
-  | 0 => 1
-  | n + 1 => (n + 1) * fact n
-
--> choose : ℕ → ℕ → ℕ
-  | 0, 0 => 1
-  | 0, k + 1 => 0
-  | n + 1, 0 => 1
-  | n + 1, k + 1 => choose n k + choose n (k + 1)
-
-+ fact_zero : fact 0 = 1 := by rfl
-+ fact_succ (n : ℕ) : fact (n + 1) = (n + 1) * fact n := by rfl
-+ choose_zero_zero : choose 0 0 = 1 := by rfl
-+ choose_zero_succ (k : ℕ) : choose 0 (k + 1) = 0 := by rfl
-+ choose_succ_zero (n : ℕ) : choose (n + 1) 0 = 1 := by rfl
-+ choose_succ_succ (n k : ℕ) : choose (n + 1) (k + 1) = choose n k + choose n (k + 1) := by rfl
-
-+ fact_pos (n : ℕ) : 0 < fact n
-  induction n with n ih
-  · decide
-  · rw [succ_eq_add_one.nat, fact_succ]
-    exact mul_pos.nat (n + 1) (fact n) (by linarith) ih
-+ fact_le_fact (m n : ℕ) (h : m ≤ n) : fact m ≤ fact n
-  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m h]
-  rw [e]
-  have k : ∀ d, fact m ≤ fact (m + d)
-    intro d
-    induction d with d ih
-    · rw [add_zero.nat]
-      linarith
-    · rw [succ_eq_add_one.nat, ← add_assoc.nat, fact_succ]
-      linarith [mul_le_mul_right.nat (fact (m + d)) 1 (m + d + 1) (by linarith)]
-  exact k (n - m)
-+ choose_zero_right (n : ℕ) : choose n 0 = 1
-  induction n with n ih
-  · rfl
-  · rfl
-+ choose_eq_zero_of_lt (n : ℕ) : ∀ k, n < k → choose n k = 0
-  induction n with k h n ih k h
-  · have e : k = k - 1 + 1 := by linarith [sub_add_cancel.nat k 1 (by linarith)]
-    rw [e]
-    rfl
-  · rw [succ_eq_add_one.nat] at h
-    rw [succ_eq_add_one.nat]
-    have e : k = k - 1 + 1 := by linarith [sub_add_cancel.nat k 1 (by linarith)]
-    rw [e, choose_succ_succ, ih (k - 1) (by linarith), ih (k - 1 + 1) (by linarith)]
-    rfl
-+ choose_self (n : ℕ) : choose n n = 1
-  induction n with n ih
-  · rfl
-  · rw [succ_eq_add_one.nat, choose_succ_succ, ih, choose_eq_zero_of_lt n (n + 1) (by linarith)]
-    rfl
-+ choose_one_right (n : ℕ) : choose n 1 = n
-  induction n with n ih
-  · rfl
-  · rw [succ_eq_add_one.nat]
-    have e : choose (n + 1) 1 = choose n 0 + choose n 1 := by rfl
-    rw [e, choose_zero_right, ih]
-    ring
-+ choose_two_succ (n : ℕ) : 2 * choose (n + 1) 2 = (n + 1) * n
-  induction n with n ih
-  · rfl
-  · rw [succ_eq_add_one.nat]
-    have e : choose (n + 1 + 1) 2 = choose (n + 1) 1 + choose (n + 1) 2 := by rfl
-    rw [e, choose_one_right]
-    linarith
-+ choose_two (n : ℕ) : 2 * choose n 2 = n * (n - 1)
-  induction n with n ih
-  · rfl
-  · rw [succ_eq_add_one.nat]
-    have e : n + 1 - 1 = n := by linarith [sub_add_cancel.nat (n + 1) 1 (by linarith)]
-    rw [e]
-    exact choose_two_succ n
-
--- n! = C(n, k) · k! · (n − k)!, hence the symmetry C(n, n − k) = C(n, k)
-+ choose_mul_fact (n : ℕ) : ∀ k, k ≤ n → choose n k * fact k * fact (n - k) = fact n
-  induction n with k h n ih k h
-  · have e : k = 0 := by linarith
-    rw [e]
-    rfl
-  · rw [succ_eq_add_one.nat] at h
-    rw [succ_eq_add_one.nat]
-    induction k with h j ihk h
-    · have e : n + 1 - 0 = n + 1 := by linarith [sub_add_cancel.nat (n + 1) 0 (by linarith)]
-      rw [e, choose_zero_right, fact_zero]
-      ring
-    · rw [succ_eq_add_one.nat] at h
-      rw [succ_eq_add_one.nat]
-      have s : n + 1 - (j + 1) = n - j := by linarith [sub_add_cancel.nat (n + 1) (j + 1) h, sub_add_cancel.nat n j (by linarith)]
-      rw [choose_succ_succ, fact_succ j, fact_succ n, s]
-      have e1 : (j + 1) * (choose n j * fact j * fact (n - j)) = (j + 1) * fact n := by rw [ih j (by linarith)]
-      by_cases c : j + 1 ≤ n
-      · have i2 := ih (j + 1) c
-        rw [fact_succ j] at i2
-        have g : n - j = n - (j + 1) + 1 := by linarith [sub_add_cancel.nat n (j + 1) c, sub_add_cancel.nat n j (by linarith)]
-        have gG : fact (n - j) = (n - (j + 1) + 1) * fact (n - (j + 1))
-          rw [g, fact_succ]
-        have e2 : (n - (j + 1) + 1) * (choose n (j + 1) * ((j + 1) * fact j) * fact (n - (j + 1))) = (n - (j + 1) + 1) * fact n := by rw [i2]
-        have e3 : (choose n j + choose n (j + 1)) * ((j + 1) * fact j) * fact (n - j) = (j + 1) * (choose n j * fact j * fact (n - j)) + (n - (j + 1) + 1) * (choose n (j + 1) * ((j + 1) * fact j) * fact (n - (j + 1)))
-          rw [gG]
-          ring
-        have jd : j + 1 + (n - (j + 1) + 1) = n + 1 := by linarith [sub_add_cancel.nat n (j + 1) c]
-        have e4 : (j + 1 + (n - (j + 1) + 1)) * fact n = (n + 1) * fact n := by rw [jd]
-        linarith
-      · have jn : j = n := by linarith
-        rw [choose_eq_zero_of_lt n (j + 1) (by linarith)]
-        have e5 : (j + 1) * fact n = (n + 1) * fact n := by rw [jn]
-        linarith
-+ choose_symm (n k : ℕ) (h : k ≤ n) : choose n (n - k) = choose n k
-  have a := choose_mul_fact n k h
-  have b := choose_mul_fact n (n - k) (by linarith [sub_add_cancel.nat n k h])
-  have e : n - (n - k) = k := by linarith [sub_add_cancel.nat n k h, sub_add_cancel.nat n (n - k) (by linarith [sub_add_cancel.nat n k h])]
-  rw [e] at b
-  have p := mul_pos.nat (fact k) (fact (n - k)) (fact_pos k) (fact_pos (n - k))
-  have q : choose n (n - k) * (fact k * fact (n - k)) = choose n k * (fact k * fact (n - k)) := by linarith
-  by_contra c
-  obtain l | l := lt_or_gt_of_ne.nat (choose n (n - k)) (choose n k) c
-  · linarith [mul_lt_mul_of_pos_right.nat (choose n (n - k)) (choose n k) (fact k * fact (n - k)) l p]
-  · linarith [mul_lt_mul_of_pos_right.nat (choose n k) (choose n (n - k)) (fact k * fact (n - k)) l p]
 
 -- ---- sums (∑ i < n, f i) ---------------------------------------------------------------------------------------
 -- ℝ
@@ -2148,13 +1928,7 @@ import divmod
 + min_le_min.nat (a b c d : ℕ) (h1 : a ≤ c) (h2 : b ≤ d) : min a b ≤ min c d
   obtain ⟨e, k⟩ | ⟨e, k⟩ := min_cases.nat c d <;> rw [e] <;> linarith [min_le_left.nat a b, min_le_right.nat a b]
 -- Mathlib: abs_max_sub_max_le_max
-+ abs_max_sub_max_le_max.real (a b c d : ℝ) : |max a b - max c d| ≤ max |a - c| |b - d|
-  obtain ⟨e1, k1⟩ | ⟨e1, k1⟩ := max_cases.real a b <;> obtain ⟨e2, k2⟩ | ⟨e2, k2⟩ := max_cases.real c d <;> rw [e1, e2] <;>
-    apply abs_le_of.real <;> linarith [le_max_left.real (|a - c|) (|b - d|), le_max_right.real (|a - c|) (|b - d|), le_abs_self.real (a - c), neg_le_abs.real (a - c), le_abs_self.real (b - d), neg_le_abs.real (b - d)]
 -- Mathlib: abs_min_sub_min_le_max
-+ abs_min_sub_min_le_max.real (a b c d : ℝ) : |min a b - min c d| ≤ max |a - c| |b - d|
-  obtain ⟨e1, k1⟩ | ⟨e1, k1⟩ := min_cases.real a b <;> obtain ⟨e2, k2⟩ | ⟨e2, k2⟩ := min_cases.real c d <;> rw [e1, e2] <;>
-    apply abs_le_of.real <;> linarith [le_max_left.real (|a - c|) (|b - d|), le_max_right.real (|a - c|) (|b - d|), le_abs_self.real (a - c), neg_le_abs.real (a - c), le_abs_self.real (b - d), neg_le_abs.real (b - d)]
 -- Mathlib: abs_max_sub_max_le_abs
 + abs_max_sub_max_le_abs.real (a b c : ℝ) : |max a c - max b c| ≤ |a - b|
   obtain ⟨e1, k1⟩ | ⟨e1, k1⟩ := max_cases.real a c <;> obtain ⟨e2, k2⟩ | ⟨e2, k2⟩ := max_cases.real b c <;> rw [e1, e2] <;>
@@ -2362,6 +2136,11 @@ import divmod
     simp
   · rw [succ_eq_add_one.nat, sum_below_succ, ih, sum_below_succ]
     ring
++ sum_range_succ'.real (f : ℕ → ℝ) (n : ℕ) : ∑ i < n+1, f i = (∑ i < n, f (i+1))+f 0
+  induction n with n ih
+  · simpa using sum_below_succ 0 f
+  · rw [succ_eq_add_one.nat,sum_below_succ,ih,sum_below_succ]; ring
+
 -- Mathlib: Finset.sum_congr
 + sum_congr.nat (f g : ℕ → ℕ) (n : ℕ) (h : ∀ i < n, f i = g i) : ∑ i < n, f i = ∑ i < n, g i
   induction n with h n ih h
@@ -2788,13 +2567,6 @@ import divmod
   exact le_induction.nat (fun n => n ≤ b → sum_below a f ≤ sum_below n f) a (by intro h; linarith) step b ab (by omega)
 
 -- ---- sums of zero terms -------------------------------------------------------------------------------------
-
-+ sum_below.congr (f g : ℕ → α) (n : ℕ) (h : ∀ i < n, f i = g i) : sum_below n f = sum_below n g
-  induction n with h n ih h
-  · rfl
-  · simp only [succ_eq_add_one.nat] at h
-    rw [succ_eq_add_one.nat, sum_below_succ, sum_below_succ]
-    rw [ih (by intro i hi; exact h i (by omega)), h n (by omega)]
 
 + sum_below.zero.real (n : ℕ) : (∑ i < n, (0 : ℝ)) = 0
   induction n with n ih

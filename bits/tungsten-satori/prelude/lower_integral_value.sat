@@ -1,0 +1,112 @@
+-- Numerical values and nonnegative scaling of finite simple-function integrals.
+import lower_integral
+import supremum
+import choice
+import arith
+
++ lower_integral.scale_cell (P : Prop) (t c : ℝ) : (if P then t*c else 0) = t*(if P then c else 0) := by by_cases h : P <;> simp [h]
+
++ lower_integral.scale_step (A : ℕ → set α) (c : ℕ → ℝ) (n : ℕ) (t : ℝ) (x : α) :
+    (∑ i < n, if x ∈ A i then t*c i else 0) = t*(∑ i < n, if x ∈ A i then c i else 0)
+  rw [← sum_const_mul.real]
+  apply sum_below.congr; intro i hi; exact lower_integral.scale_cell (A i x) t (c i)
+
+-- Finite simple-function integrals attained below f.
+-> lower_integral.costs (vol : set α → ℝ → Prop) (f : α → ℝ) : set ℝ :=
+  fun b => ∃ (n : ℕ) (A : ℕ → set α) (c m : ℕ → ℝ),
+    (∀ i < n, 0 ≤ c i ∧ 0 ≤ m i ∧ vol (A i) (m i)) ∧
+    (∀ x, (∑ i < n, if x ∈ A i then c i else 0) ≤ f x) ∧ b = (∑ i < n, c i*m i)
+
++ lower_integral.bound_iff_upper (vol : set α → ℝ → Prop) (f : α → ℝ) (B : ℝ) :
+    lower_integral.bound vol f B ↔ upper_bound (lower_integral.costs vol f) B
+  unfold lower_integral.bound upper_bound lower_integral.costs; constructor
+  · intro h y hy; obtain ⟨n,A,c,m,cells,le,eq⟩ := hy; rw [eq]; exact h n A c m cells le
+  · intro h n A c m cells le; exact h (∑ i < n, c i*m i) ⟨n,A,c,m,cells,le,rfl⟩
+
++ lower_integral.zero_cost (vol : set α → ℝ → Prop) (f : α → ℝ) (pos : ∀ x, 0 ≤ f x) : 0 ∈ lower_integral.costs vol f
+  unfold lower_integral.costs
+  exact ⟨0,(fun i x => False),(fun i => 0),(fun i => 0),(by intro i hi; omega),(by intro x; simpa only [sum_below_zero] using pos x),rfl⟩
+
+-- Real-valued convention: a nonempty, bounded set of costs has its
+-- supremum as value. The fallback is zero (in particular for infinite mass).
+-> lower_integral.value (vol : set α → ℝ → Prop) (f : α → ℝ) : ℝ :=
+  if ∃ s, is_sup (lower_integral.costs vol f) s then choice (fun s => is_sup (lower_integral.costs vol f) s) else 0
+
++ lower_integral.value_spec (vol : set α → ℝ → Prop) (f : α → ℝ) (pos : ∀ x, 0 ≤ f x) (finite : ∃ B, lower_integral.bound vol f B) :
+    is_sup (lower_integral.costs vol f) (lower_integral.value vol f)
+  obtain ⟨B,upper⟩ := finite
+  have ex := sup_exists (lower_integral.costs vol f) ⟨0,lower_integral.zero_cost vol f pos⟩ ⟨B,(lower_integral.bound_iff_upper vol f B).mp upper⟩
+  unfold lower_integral.value; simp only [ex]; exact choice.spec (fun s => is_sup (lower_integral.costs vol f) s) ex
+
+@[auto] + lower_integral.value_le (vol : set α → ℝ → Prop) (f : α → ℝ) (B : ℝ) (pos : ∀ x, 0 ≤ f x)
+    (bound : lower_integral.bound vol f B) : lower_integral.value vol f ≤ B
+  have hs := lower_integral.value_spec vol f pos ⟨B,bound⟩
+  unfold is_sup at hs; exact hs.2 B ((lower_integral.bound_iff_upper vol f B).mp bound)
+
++ lower_integral.bound_value (vol : set α → ℝ → Prop) (f : α → ℝ) (pos : ∀ x, 0 ≤ f x) (finite : ∃ B, lower_integral.bound vol f B)
+    (B : ℝ) (le : lower_integral.value vol f ≤ B) : lower_integral.bound vol f B
+  have hs := lower_integral.value_spec vol f pos finite
+  exact (lower_integral.bound_iff_upper vol f B).mpr ((is_sup.le_iff (lower_integral.costs vol f) (lower_integral.value vol f) B hs).mp le)
+
++ lower_integral.costs.scale (vol : set α → ℝ → Prop) (f : α → ℝ) (t y : ℝ) (ht : 0 ≤ t) (hy : y ∈ lower_integral.costs vol f) :
+    t*y ∈ lower_integral.costs vol (fun x => t*f x)
+  unfold lower_integral.costs at hy ⊢; obtain ⟨n,A,c,m,cells,step,eq⟩ := hy
+  use n,A,(fun i => t*c i),m
+  constructor
+  · intro i hi; have h := cells i hi; exact ⟨mul_nonneg.real t (c i) ht h.1,h.2⟩
+  · constructor
+    · intro x; rw [lower_integral.scale_step]; exact mul_le_mul_of_nonneg_left.real (∑ i < n, if x ∈ A i then c i else 0) (f x) t (step x) ht
+    · rw [eq,← sum_const_mul.real]; apply sum_below.congr; intro i hi; ring
+
++ lower_integral.sup_scale (vol : set α → ℝ → Prop) (f : α → ℝ) (t s : ℝ) (ht : 0 < t) (hs : is_sup (lower_integral.costs vol f) s) :
+    is_sup (lower_integral.costs vol (fun x => t*f x)) (t*s)
+  have inv := one_div_pos.real t ht
+  have cancel : (1/t)*t = 1 := by linarith [mul_div_cancel.real 1 t (by linarith)]
+  have fn : (fun x => (1/t)*(t*f x)) = f := by funext x; rw [← mul_assoc.real,cancel]; ring
+  unfold is_sup at hs ⊢; constructor
+  · unfold upper_bound; intro b hb
+    have h := lower_integral.costs.scale vol (fun x => t*f x) (1/t) b (by linarith) hb
+    rw [fn] at h
+    have upper := hs.1; unfold upper_bound at upper
+    have hb' := mul_le_mul_of_nonneg_left.real ((1/t)*b) s t (upper ((1/t)*b) h) (by linarith)
+    have eq : t*((1/t)*b) = b := by rw [← mul_assoc.real,mul_comm.real t (1/t),cancel]; ring
+    linarith
+  · intro b upper; unfold upper_bound at upper
+    have h : upper_bound (lower_integral.costs vol f) (b/t)
+      unfold upper_bound; intro y hy
+      exact (le_div_iff.real y b t ht).mpr (by linarith [upper (t*y) (lower_integral.costs.scale vol f t y (by linarith) hy)])
+    have bound := (le_div_iff.real s b t ht).mp (hs.2 (b/t) h); linarith
+
++ lower_integral.value_of_sup (vol : set α → ℝ → Prop) (f : α → ℝ) (s : ℝ) (hs : is_sup (lower_integral.costs vol f) s) :
+    lower_integral.value vol f = s
+  have ex : ∃ v, is_sup (lower_integral.costs vol f) v := ⟨s,hs⟩
+  have chosen := choice.spec (fun v => is_sup (lower_integral.costs vol f) v) ex
+  have eq := is_sup.unique (lower_integral.costs vol f) (choice (fun v => is_sup (lower_integral.costs vol f) v)) s chosen hs
+  simpa only [lower_integral.value,ex] using eq
+
++ lower_integral.value.scale_pos (vol : set α → ℝ → Prop) (f : α → ℝ) (t : ℝ) (ht : 0 < t) :
+    lower_integral.value vol (fun x => t*f x) = t*lower_integral.value vol f
+  by_cases finite : ∃ s, is_sup (lower_integral.costs vol f) s
+  · obtain ⟨s,hs⟩ := finite; rw [lower_integral.value_of_sup vol f s hs]
+    exact lower_integral.value_of_sup vol (fun x => t*f x) (t*s) (lower_integral.sup_scale vol f t s ht hs)
+  · have none : ¬ (∃ s, is_sup (lower_integral.costs vol (fun x => t*f x)) s)
+      intro ex; obtain ⟨s,hs⟩ := ex
+      have h := lower_integral.sup_scale vol (fun x => t*f x) (1/t) s (one_div_pos.real t ht) hs
+      have cancel : (1/t)*t = 1 := by linarith [mul_div_cancel.real 1 t (by linarith)]
+      have eq : (fun x => (1/t)*(t*f x)) = f := by funext x; rw [← mul_assoc.real,cancel]; ring
+      rw [eq] at h; exact finite ⟨(1/t)*s,h⟩
+    simp [lower_integral.value,finite,none]
+
+@[auto] + lower_integral.value.scale (vol : set α → ℝ → Prop) (f : α → ℝ) (t : ℝ) (ht : 0 ≤ t) :
+    lower_integral.value vol (fun x => t*f x) = t*lower_integral.value vol f
+  by_cases zero : t = 0
+  · have twice := lower_integral.value.scale_pos vol (fun x => 0) 2 (by decide)
+    simp only [mul_zero.real] at twice
+    rw [zero]; simp only [zero_mul.real]; linarith
+  · exact lower_integral.value.scale_pos vol f t (by linarith)
+
+@[auto] + lower_integral.value.atom (p : α) (f : α → ℝ) (pos : ∀ x, 0 ≤ f x) : lower_integral.value (lower_integral.atom p) f = f p
+  have bound := (lower_integral.at_atom p f (f p) pos).mpr (by linarith)
+  have upper := lower_integral.value_le (lower_integral.atom p) f (f p) pos bound
+  have other := lower_integral.bound_value (lower_integral.atom p) f pos ⟨f p,bound⟩ (lower_integral.value (lower_integral.atom p) f) (by linarith)
+  exact le_antisymm.real (lower_integral.value (lower_integral.atom p) f) (f p) upper ((lower_integral.at_atom p f (lower_integral.value (lower_integral.atom p) f) pos).mp other)

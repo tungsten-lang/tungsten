@@ -1,0 +1,52 @@
+-- Order of the real exponential and logarithm.
+import real
+
++ one_lt_exp (x : ℝ) (h : 0 < x) : 1 < exp x
+  linarith [exp_ge_one_add x]
+
++ exp_lt_exp_of_lt (x y : ℝ) (h : x < y) : exp x < exp y
+  have e : x + (y - x) = y := by ring
+  have f : exp y = exp x * exp (y - x) := by rw [← exp_add, e]
+  rw [f]
+  nlinarith [exp_pos x, one_lt_exp (y - x) (by linarith)]
+
++ exp_lt_exp (x y : ℝ) : exp x < exp y ↔ x < y
+  constructor
+  · intro h
+    by_contra c
+    by_cases d : x = y
+    · rw [d] at h
+      linarith
+    · linarith [exp_lt_exp_of_lt y x (by linarith)]
+  · intro h
+    exact exp_lt_exp_of_lt x y h
+
++ exp_le_exp (x y : ℝ) : exp x ≤ exp y ↔ x ≤ y
+  constructor
+  · intro h
+    by_contra c
+    linarith [exp_lt_exp_of_lt y x (by linarith)]
+  · intro h
+    by_cases d : x = y
+    · rw [d]
+      linarith
+    · linarith [exp_lt_exp_of_lt x y (by linarith)]
+
++ log_one : log 1 = 0
+  have e := log_exp 0
+  rw [exp_zero] at e
+  exact e
+
++ log_le_log (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : log a ≤ log b ↔ a ≤ b
+  have k := exp_le_exp (log a) (log b)
+  rw [exp_log a ha, exp_log b hb] at k
+  constructor
+  · intro h
+    exact k.mpr h
+  · intro h
+    exact k.mp h
+
++ log_nonneg (x : ℝ) (h : 1 ≤ x) : 0 ≤ log x
+  have k := (log_le_log 1 x (by linarith) (by linarith)).mpr h
+  rw [log_one] at k
+  exact k

@@ -10,6 +10,8 @@ use proof_source
   basics = ["sum_below_zero", "sum_below_succ", "sum_below.congr", "sum_add." + suffix, "sum_below.zero." + suffix, "sum_below.swap." + suffix]
   session.run_source(proof_declarations("bits/tungsten-satori/prelude/arith.sat", basics))
   good = ["direct", "reverse", "weighted", "triple", "alias"].map -> (name) suffix + "_" + name
+  if suffix == "int"
+    good.push("int_matrix")
   session.run_source(proof_declarations("bits/tungsten-satori/spec/auto_sum_swap.sat", [suffix + "_rows", suffix + "_cols"] + good))
   if session.failures != 0
     raise "automatic sum interchange failed: " + suffix
@@ -18,6 +20,8 @@ use proof_source
     if th == nil || th.hyps.size != 0 || th.tags != ["oracle:ring"]
       raise "automatic sum interchange missing, open or has unexpected trust: " + name
   bad = ["wrong_bounds", "wrong_indices", "wrong_function", "dependent_bound", "extra_row", "strict"].map -> (name) suffix + "_" + name
+  if suffix == "int"
+    bad.push("int_literal_wrong_indices")
   if suffix == "nat"
     bad.push("generic_swap")
   bad.each -> (name)

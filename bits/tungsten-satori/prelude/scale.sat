@@ -1,0 +1,44 @@
+-- Positive field scales and cutoffs used in epsilon estimates.
+import core
+
++ one_div_pos.real (a : ℝ) (h : 0 < a) : 0 < 1 / a
+  have m := mul_inv_cancel.real a (by linarith)
+  nlinarith
+
++ mul_div_cancel.real (a b : ℝ) (h : b ≠ 0) : a / b * b = a
+  have e : a / b * b = a * (b * (1 / b)) := by rw [div_def.real]; ring
+  rw [e, mul_inv_cancel.real b h]
+  ring
+
++ div_pos.real (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : 0 < a / b
+  rw [div_def.real]
+  exact mul_pos.real a (1 / b) ha (one_div_pos.real b hb)
+
+@[auto] + exists_ge_scaled.real (a b e : ℝ) (he : 0 < e) : ∃ x, a ≤ x ∧ b ≤ e*x
+  have eq : e*(b*(1/e)) = b
+    rw [← mul_assoc.real,mul_comm.real e b,mul_assoc.real,mul_inv_cancel.real e (by linarith),mul_one.real]
+  by_cases h : a ≤ b*(1/e)
+  · exact ⟨b*(1/e),h,by linarith⟩
+  · have mono := mul_nonneg.real e (a-b*(1/e)) (by linarith) (by linarith)
+    exact ⟨a,by linarith,by nlinarith⟩
+
++ one_div_pos.rat (a : ℚ) (h : 0 < a) : 0 < 1 / a
+  have m := mul_inv_cancel.rat a (by linarith)
+  nlinarith
+
++ mul_div_cancel.rat (a b : ℚ) (h : b ≠ 0) : a / b * b = a
+  have e : a / b * b = a * (b * (1 / b)) := by rw [div_def.rat]; ring
+  rw [e, mul_inv_cancel.rat b h]
+  ring
+
++ div_pos.rat (a b : ℚ) (ha : 0 < a) (hb : 0 < b) : 0 < a / b
+  rw [div_def.rat]
+  exact mul_pos.rat a (1 / b) ha (one_div_pos.rat b hb)
+
+@[auto] + exists_ge_scaled.rat (a b e : ℚ) (he : 0 < e) : ∃ x, a ≤ x ∧ b ≤ e*x
+  have eq : e*(b*(1/e)) = b
+    rw [← mul_assoc.rat,mul_comm.rat e b,mul_assoc.rat,mul_inv_cancel.rat e (by linarith),mul_one.rat]
+  by_cases h : a ≤ b*(1/e)
+  · exact ⟨b*(1/e),h,by linarith⟩
+  · have mono := mul_nonneg.rat e (a-b*(1/e)) (by linarith) (by linarith)
+    exact ⟨a,by linarith,by nlinarith⟩

@@ -1,0 +1,25 @@
+import finite_bounds
+
++ weak_prefix (f : ℕ → ℝ) (pos : ∀ i : ℕ, 0 ≤ f i) :
+    ∃ c : ℝ, 0 < c ∧ c ≤ 1 ∧ ∀ i : ℕ, 0 ≤ i → i < 3 → c ≤ f i := by auto
+
++ missing_tail (f : ℕ → ℝ) (pos : ∀ i : ℕ, 1 ≤ i → 0 < f i) :
+    ∃ c : ℝ, 0 < c ∧ ∀ i : ℕ, 1 ≤ i → c ≤ f i := by auto
+
++ missing_prefix (f : ℕ → ℝ) (tail : ∃ n : ℕ, ∀ i : ℕ, n ≤ i → 2 ≤ f i) :
+    ∃ c : ℝ, 0 < c ∧ ∀ i : ℕ, 1 ≤ i → c ≤ f i := by auto
+
+opaque samples : ℕ → ℝ
+-> sample_bound (c : ℝ) (i : ℕ) : Prop := c ≤ samples i
+axiom samples_eventual : ∃ n : ℕ, ∀ i : ℕ, n ≤ i → sample_bound 2 i
+
++ other_sequence (f : ℕ → ℝ) (pos : ∀ i : ℕ, 1 ≤ i → 0 < f i) :
+    ∃ c : ℝ, 0 < c ∧ ∀ i : ℕ, 1 ≤ i → c ≤ f i := by auto [samples_eventual]
+
+opaque decay : ℕ → ℝ
+axiom decay_nonnegative_tail : ∃ n : ℕ, ∀ i : ℕ, n ≤ i → 0 ≤ decay i
+
++ nonpositive_cap (pos : ∀ i : ℕ, 1 ≤ i → 0 < decay i) :
+    ∃ c : ℝ, 0 < c ∧ ∀ i : ℕ, 1 ≤ i → c ≤ decay i := by auto [decay_nonnegative_tail]
+
++ named_tail_only : ∃ c : ℝ, 0 < c ∧ ∀ i : ℕ, 1 ≤ i → sample_bound c i := by auto [samples_eventual]

@@ -1,0 +1,22 @@
++ reciprocal (e x y : ℝ) (h : x*y=1) : e*x*y-x*y=e-1 := by auto
++ two_relations (a b x y e : ℚ) (h : a*b=1) (k : x*y=1) : a*e*b-x*e*y=0 := by auto
++ scaled_square (r s : ℝ) (hs : s*s=3) : (r*s/2)^2=3*r^2/4 := by auto
++ fourth_power (r s : ℝ) (hs : s*s=3) : (r*s)^4=9*r^4 := by auto
++ signed_product (u v x : ℤ) (h : u*v=4) : -x*u*v = -4*x := by auto
++ natural_product (u v x : ℕ) (h : u*v=4) : x*u*v=4*x := by auto
++ product_of_sums (x y z : ℤ) (h : x+y=z) : (x+y)^2*z=z^3 := by auto
++ overlapping (q s t u : ℝ) (balance : t^2=q*s^2) (slope : q*s*u = -2*t) : q^2*s^2*u^2=4*q*s^2 := by auto
++ unit_circle (r x y : ℚ) (unit : x*x+y*y=1) : (r-x)^2+y^2=(1-r*x)^2+(r*y)^2 := by auto
++ proportional (x y t : ℚ) (h : 3*x=2*y) : x*t=2*y*t/3 := by auto
+axiom supplied_product (x y : ℝ) : x*y=5
+axiom other_square (t : ℝ) : t*t=7
++ named (x y z : ℝ) : z*x*y=5*z := by auto [supplied_product x y, other_square z]
++ two_point (a b c d : ℚ) (sum : a+b=c+d) (squares : a*a+b*b=c*c+d*d) : (a-c)*(a-d)=0 := by auto
++ weighted_product (a b c d z : ℝ) (squares : a*a+b*b=c*c+d*d) (sum : a+b=c+d) : z*a*b=z*c*d := by auto
++ natural_moments (a b c d : ℕ) (sum : a+b=c+d) (squares : a*a+b*b=c*c+d*d) : a*b=c*d := by auto
++ scaled_moments (a b c d : ℤ) (sum : 4294967296*(a+b)=4294967296*(c+d))
+    (squares : 4294967297*(a*a+b*b)=4294967297*(c*c+d*d)) : a*b=c*d := by auto
+axiom second_moment (a b c d : ℝ) : a*a+b*b=c*c+d*d
++ marked_moments (a b c d z : ℝ) (sum : a+b=c+d) : a*b=c*d := by auto [other_square z, second_moment a b c d]
++ reciprocal_pair (m y b : ℝ) (unit : m*y=1) (balance : b*(m+1)=m) :
+    b*(1+y)=1 ∧ (m-1)*y=(1-y^2)*b := by auto

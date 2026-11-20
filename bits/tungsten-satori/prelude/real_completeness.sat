@@ -1,0 +1,61 @@
+-- order-completeness (least upper bounds)
+-> upper_bound (S : set ℝ) (b : ℝ) : Prop := ∀ x ∈ S, x ≤ b
+-> is_sup (S : set ℝ) (s : ℝ) : Prop := upper_bound S s ∧ ∀ b, upper_bound S b → s ≤ b
+axiom sup_exists (S : set ℝ) : (∃ x, S x) → (∃ b, upper_bound S b) → ∃ s, is_sup S s
+
+-> set.range (f : α → β) : set β := fun y => ∃ i, y = f i
+
+@[auto] + set.mem_range_self (f : α → β) (i : α) : f i ∈ set.range f
+  unfold set.range
+  exact ⟨i, rfl⟩
+
+@[auto] + upper_bound.range_iff (f : α → ℝ) (b : ℝ) : upper_bound (set.range f) b ↔ ∀ i, f i ≤ b
+  unfold upper_bound
+  constructor
+  · intro bound i
+    exact bound (f i) (set.mem_range_self f i)
+  · intro bound y hy
+    unfold set.range at hy
+    obtain ⟨i, e⟩ := hy
+    rw [e]
+    exact bound i
+
++ is_sup.le_of_mem (S : set ℝ) (s x : ℝ) (hs : is_sup S s) (hx : x ∈ S) : x ≤ s
+  unfold is_sup at hs
+  have upper := hs.1
+  unfold upper_bound at upper
+  exact upper x hx
+
++ is_sup.range_exists (f : α → ℝ) (i : α) (b : ℝ) (bound : ∀ j, f j ≤ b) : ∃ s, is_sup (set.range f) s
+  apply sup_exists (set.range f)
+  · exact ⟨f i, set.mem_range_self f i⟩
+  · exact ⟨b, (upper_bound.range_iff f b).mpr bound⟩
+
++ is_sup.exists_gt (S : set ℝ) (s b : ℝ) (hs : is_sup S s) (lt : b < s) : ∃ x ∈ S, b < x
+  by_contra no
+  have upper : upper_bound S b
+    unfold upper_bound
+    intro x hx
+    by_contra c
+    exact no ⟨x, hx, by linarith⟩
+  unfold is_sup at hs
+  linarith [hs.2 b upper]
+
+@[auto] + is_sup.range_ge (f : α → ℝ) (s : ℝ) (hs : is_sup (set.range f) s) (i : α) : f i ≤ s
+  exact is_sup.le_of_mem (set.range f) s (f i) hs (set.mem_range_self f i)
+
+@[auto] + is_sup.exists_range_gt (f : α → ℝ) (s b : ℝ) (hs : is_sup (set.range f) s) (lt : b < s) : ∃ i, b < f i
+  obtain ⟨x, hx, h⟩ := is_sup.exists_gt (set.range f) s b hs lt
+  unfold set.range at hx
+  obtain ⟨i, e⟩ := hx
+  rw [e] at h
+  exact ⟨i, h⟩
+
++ is_sup.add_le (S T : set ℝ) (I J z : ℝ) (hs : is_sup S I) (ht : is_sup T J)
+    (bound : ∀ s ∈ S, ∀ t ∈ T, s+t ≤ z) : I+J ≤ z
+  unfold is_sup at hs ht
+  have outer : upper_bound S (z-J)
+    unfold upper_bound; intro s member
+    have inner : upper_bound T (z-s) := by unfold upper_bound; intro t tm; linarith [bound s member t tm]
+    linarith [ht.2 (z-s) inner]
+  linarith [hs.2 (z-J) outer]

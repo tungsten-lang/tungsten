@@ -1,0 +1,120 @@
+-- Factorials and binomial coefficients from Pascal's rule.
+import nat
+import order
+
+-> fact : ℕ → ℕ
+  | 0 => 1
+  | n + 1 => (n + 1) * fact n
+
+-> choose : ℕ → ℕ → ℕ
+  | 0, 0 => 1
+  | 0, k + 1 => 0
+  | n + 1, 0 => 1
+  | n + 1, k + 1 => choose n k + choose n (k + 1)
+
++ fact_zero : fact 0 = 1 := by rfl
++ fact_succ (n : ℕ) : fact (n + 1) = (n + 1) * fact n := by rfl
++ choose_zero_zero : choose 0 0 = 1 := by rfl
++ choose_zero_succ (k : ℕ) : choose 0 (k + 1) = 0 := by rfl
++ choose_succ_zero (n : ℕ) : choose (n + 1) 0 = 1 := by rfl
++ choose_succ_succ (n k : ℕ) : choose (n + 1) (k + 1) = choose n k + choose n (k + 1) := by rfl
+
++ fact_pos (n : ℕ) : 0 < fact n
+  induction n with n ih
+  · decide
+  · rw [succ_eq_add_one.nat, fact_succ]
+    exact mul_pos.nat (n + 1) (fact n) (by linarith) ih
++ fact_le_fact (m n : ℕ) (h : m ≤ n) : fact m ≤ fact n
+  have e : n = m + (n - m) := by linarith [sub_add_cancel.nat n m h]
+  rw [e]
+  have k : ∀ d, fact m ≤ fact (m + d)
+    intro d
+    induction d with d ih
+    · rw [add_zero.nat]
+      linarith
+    · rw [succ_eq_add_one.nat, ← add_assoc.nat, fact_succ]
+      linarith [mul_le_mul_left.nat (fact (m+d)) 1 (m+d+1) (by omega)]
+  exact k (n - m)
++ choose_zero_right (n : ℕ) : choose n 0 = 1
+  induction n with n ih
+  · rfl
+  · rfl
++ choose_eq_zero_of_lt (n : ℕ) : ∀ k, n < k → choose n k = 0
+  induction n with k h n ih k h
+  · have e : k = k - 1 + 1 := by linarith [sub_add_cancel.nat k 1 (by linarith)]
+    rw [e]
+    rfl
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat]
+    have e : k = k - 1 + 1 := by linarith [sub_add_cancel.nat k 1 (by linarith)]
+    rw [e, choose_succ_succ, ih (k - 1) (by linarith), ih (k - 1 + 1) (by linarith)]
+    rfl
++ choose_self (n : ℕ) : choose n n = 1
+  induction n with n ih
+  · rfl
+  · rw [succ_eq_add_one.nat, choose_succ_succ, ih, choose_eq_zero_of_lt n (n + 1) (by linarith)]
+    rfl
++ choose_one_right (n : ℕ) : choose n 1 = n
+  induction n with n ih
+  · rfl
+  · rw [succ_eq_add_one.nat]
+    have e : choose (n + 1) 1 = choose n 0 + choose n 1 := by rfl
+    rw [e, choose_zero_right, ih]
+    ring
++ choose_two_succ (n : ℕ) : 2 * choose (n + 1) 2 = (n + 1) * n
+  induction n with n ih
+  · rfl
+  · rw [succ_eq_add_one.nat]
+    have e : choose (n + 1 + 1) 2 = choose (n + 1) 1 + choose (n + 1) 2 := by rfl
+    rw [e, choose_one_right]
+    linarith
++ choose_two (n : ℕ) : 2 * choose n 2 = n * (n - 1)
+  induction n with n ih
+  · rfl
+  · rw [succ_eq_add_one.nat]
+    have e : n + 1 - 1 = n := by linarith [sub_add_cancel.nat (n + 1) 1 (by linarith)]
+    rw [e]
+    exact choose_two_succ n
+
+-- n! = C(n, k) · k! · (n − k)!, hence the symmetry C(n, n − k) = C(n, k)
++ choose_mul_fact (n : ℕ) : ∀ k, k ≤ n → choose n k * fact k * fact (n - k) = fact n
+  induction n with k h n ih k h
+  · have e : k = 0 := by linarith
+    rw [e]
+    rfl
+  · rw [succ_eq_add_one.nat] at h
+    rw [succ_eq_add_one.nat]
+    induction k with h j ihk h
+    · have e : n + 1 - 0 = n + 1 := by linarith [sub_add_cancel.nat (n + 1) 0 (by linarith)]
+      rw [e, choose_zero_right, fact_zero]
+      ring
+    · rw [succ_eq_add_one.nat] at h
+      rw [succ_eq_add_one.nat]
+      have s : n + 1 - (j + 1) = n - j := by linarith [sub_add_cancel.nat (n + 1) (j + 1) h, sub_add_cancel.nat n j (by linarith)]
+      rw [choose_succ_succ, fact_succ j, fact_succ n, s]
+      have e1 : (j + 1) * (choose n j * fact j * fact (n - j)) = (j + 1) * fact n := by rw [ih j (by linarith)]
+      by_cases c : j + 1 ≤ n
+      · have i2 := ih (j + 1) c
+        rw [fact_succ j] at i2
+        have g : n - j = n - (j + 1) + 1 := by linarith [sub_add_cancel.nat n (j + 1) c, sub_add_cancel.nat n j (by linarith)]
+        have gG : fact (n - j) = (n - (j + 1) + 1) * fact (n - (j + 1))
+          rw [g, fact_succ]
+        have e2 : (n - (j + 1) + 1) * (choose n (j + 1) * ((j + 1) * fact j) * fact (n - (j + 1))) = (n - (j + 1) + 1) * fact n := by rw [i2]
+        have e3 : (choose n j + choose n (j + 1)) * ((j + 1) * fact j) * fact (n - j) = (j + 1) * (choose n j * fact j * fact (n - j)) + (n - (j + 1) + 1) * (choose n (j + 1) * ((j + 1) * fact j) * fact (n - (j + 1)))
+          rw [gG]
+          ring
+        have jd : j + 1 + (n - (j + 1) + 1) = n + 1 := by linarith [sub_add_cancel.nat n (j + 1) c]
+        have e4 : (j + 1 + (n - (j + 1) + 1)) * fact n = (n + 1) * fact n := by rw [jd]
+        linarith
+      · have jn : j = n := by linarith
+        rw [choose_eq_zero_of_lt n (j + 1) (by linarith)]
+        have e5 : (j + 1) * fact n = (n + 1) * fact n := by rw [jn]
+        linarith
++ choose_symm (n k : ℕ) (h : k ≤ n) : choose n (n - k) = choose n k
+  have a := choose_mul_fact n k h
+  have b := choose_mul_fact n (n - k) (by linarith [sub_add_cancel.nat n k h])
+  have e : n - (n - k) = k := by linarith [sub_add_cancel.nat n k h, sub_add_cancel.nat n (n - k) (by linarith [sub_add_cancel.nat n k h])]
+  rw [e] at b
+  have p := mul_pos.nat (fact k) (fact (n - k)) (fact_pos k) (fact_pos (n - k))
+  have q : choose n (n - k) * (fact k * fact (n - k)) = choose n k * (fact k * fact (n - k)) := by linarith
+  nlinarith

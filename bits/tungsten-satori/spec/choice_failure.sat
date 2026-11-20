@@ -1,0 +1,6 @@
+import choice
++ no_witness (P : α → Prop) : P (choice P) := by auto
++ other_predicate (P Q : ℕ → Prop) (h : ∃ n, Q n) : P (choice P) := by exact choice.spec P h
++ ambiguous (P : ℕ → Prop) (h : P 0) : choice P = 0 := by auto
++ varies (P : ℕ → ℕ → Prop) (h : ∀ i, ∃ j, P i j) : ∃ j, ∀ i, P i j := by exact choice.function P h
++ empty_value : choice (fun (n : ℕ) => False) = 0 := by decide

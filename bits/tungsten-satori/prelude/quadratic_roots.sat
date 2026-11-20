@@ -1,0 +1,122 @@
+-- A completed square can be used directly, even when a polynomial's
+-- coefficients or discriminant have already been factored.
+import real
+import scale
+
+-> completed_square (f : ℝ → ℝ) (k a b D : ℝ) : Prop :=
+  ∀ x, k*f x = (a*x+b)^2-D
+
++ completed_square.quadratic (a b c : ℝ) :
+    completed_square (fun x => a*x*x+b*x+c) (4*a) (2*a) b (b^2-4*a*c)
+  unfold completed_square; intro x; ring
+
++ completed_square.level (f : ℝ → ℝ) (k a b D : ℝ) (form : completed_square f k a b D) (hk : k ≠ 0) (x : ℝ) :
+    f x = 0 ↔ (a*x+b)^2 = D
+  unfold completed_square at form
+  constructor
+  · intro root; have eq := form x; rw [root] at eq; linarith
+  · intro sq; have prod : k*f x = 0 := by linarith [form x]
+    nlinarith
+
+-- Necessary even if the scale or slope vanishes.
++ completed_square.discriminant (f : ℝ → ℝ) (k a b D x : ℝ) (form : completed_square f k a b D) (root : f x = 0) : 0 ≤ D
+  unfold completed_square at form
+  have eq := form x; rw [root] at eq; linarith [sq_nonneg.real (a*x+b)]
+
+@[auto] + completed_square.no_root (f : ℝ → ℝ) (k a b D x : ℝ) (form : completed_square f k a b D)
+    (disc : D < 0) : f x ≠ 0
+  intro root; linarith [completed_square.discriminant form root]
+
++ completed_square.preimage (a b y : ℝ) (ha : a ≠ 0) : a*((y-b)/a)+b = y
+  linear_combination mul_div_cancel.real (y-b) a ha
+
+@[auto] + completed_square.exists_root (f : ℝ → ℝ) (k a b D : ℝ) (form : completed_square f k a b D)
+    (hk : k ≠ 0) (ha : a ≠ 0) (nonneg : 0 ≤ D) : ∃ x, f x = 0
+  use (sqrt D-b)/a
+  have eq := completed_square.level f k a b D form hk ((sqrt D-b)/a)
+  rw [eq,completed_square.preimage a b (sqrt D) ha]
+  obtain ⟨pos,sq⟩ := sqrt_spec D nonneg; nlinarith
+
++ completed_square.exists_iff (f : ℝ → ℝ) (k a b D : ℝ) (form : completed_square f k a b D)
+    (hk : k ≠ 0) (ha : a ≠ 0) : (∃ x, f x = 0) ↔ 0 ≤ D
+  constructor
+  · intro h; obtain ⟨x,hx⟩ := h; exact completed_square.discriminant f k a b D x form hx
+  · intro h; auto
+
+@[auto] + completed_square.positive (f : ℝ → ℝ) (k a b D x : ℝ) (form : completed_square f k a b D)
+    (scale : 0 < k) (disc : D < 0) : 0 < f x
+  unfold completed_square at form
+  have pos : 0 < k*f x := by linarith [form x,sq_nonneg.real (a*x+b)]
+  by_contra bad; linarith [mul_nonneg.real k (-f x) (by linarith) (by linarith)]
+
++ completed_square.branches (f : ℝ → ℝ) (k a b D r : ℝ) (form : completed_square f k a b D)
+    (hk : k ≠ 0) (square : r*r = D) (x : ℝ) : f x = 0 ↔ a*x+b = r ∨ a*x+b = -r
+  rw [completed_square.level f k a b D form hk x]
+  constructor
+  · intro h
+    have product : (a*x+b-r)*(a*x+b+r) = 0 := by nlinarith
+    by_cases first : a*x+b = r
+    · left; exact first
+    · right; have ne : a*x+b-r ≠ 0 := by linarith
+      have zero : a*x+b+r = 0 := by nlinarith
+      linarith
+  · intro h; obtain plus | minus := h
+    · rw [plus]; nlinarith
+    · rw [minus]; nlinarith
+
+@[auto] + completed_square.unique_root (f : ℝ → ℝ) (k a b D : ℝ) (form : completed_square f k a b D)
+    (hk : k ≠ 0) (ha : a ≠ 0) (double : D = 0) : ∃! x, f x = 0
+  rw [double] at form
+  obtain ⟨x,hx⟩ := completed_square.exists_root f k a b 0 form hk ha (by decide)
+  use x; constructor
+  · exact hx
+  · intro y hy
+    have ex := (completed_square.level f k a b 0 form hk x).mp hx
+    have ey := (completed_square.level f k a b 0 form hk y).mp hy
+    have lx : a*x+b = 0 := by nlinarith
+    have ly : a*y+b = 0 := by nlinarith
+    nlinarith
+
+@[auto] + completed_square.two_roots (f : ℝ → ℝ) (k a b D : ℝ) (form : completed_square f k a b D)
+    (hk : k ≠ 0) (ha : a ≠ 0) (pos : 0 < D) : ∃ u v, u ≠ v ∧ ∀ x, f x = 0 ↔ x = u ∨ x = v
+  obtain ⟨nonneg,square⟩ := sqrt_spec D (by linarith)
+  set u := (sqrt D-b)/a
+  set v := (-sqrt D-b)/a
+  have plus : a*u+b = sqrt D := by rw [u_def]; exact completed_square.preimage a b (sqrt D) ha
+  have minus : a*v+b = -sqrt D := by rw [v_def]; exact completed_square.preimage a b (-sqrt D) ha
+  use u; use v; constructor
+  · intro eq; rw [eq] at plus; have zero : sqrt D = 0 := by linarith
+    rw [zero] at square; linarith
+  · intro x; rw [completed_square.branches f k a b D (sqrt D) form hk square x]
+    constructor
+    · intro h; obtain l | r := h
+      · left; nlinarith
+      · right; nlinarith
+    · intro h; obtain l | r := h
+      · left; rw [l]; exact plus
+      · right; rw [r]; exact minus
+
+@[auto] + quadratic.exists_root.real (a b c : ℝ) (ha : a ≠ 0) (disc : 0 ≤ b^2-4*a*c) :
+    ∃ x, a*x*x+b*x+c = 0
+  have form := completed_square.quadratic a b c
+  exact completed_square.exists_root (fun x => a*x*x+b*x+c) (4*a) (2*a) b (b^2-4*a*c) form (by linarith) (by linarith) disc
+
+@[auto] + quadratic.exists_root_sq.real (a b c : ℝ) (ha : a ≠ 0) (disc : 0 ≤ b^2-4*a*c) :
+    ∃ x, a*x^2+b*x+c = 0
+  obtain ⟨x,h⟩ := quadratic.exists_root.real a b c ha disc
+  exact ⟨x,by linear_combination h⟩
+
+-- If the left endpoint is to the left of the vertex and outside the root
+-- interval, every root lies strictly to its right.
+@[auto] + completed_square.root_above (f : ℝ → ℝ) (k a b D lo x : ℝ) (form : completed_square f k a b D)
+    (ha : 0 < a) (left : a*lo+b < 0) (outside : D < (a*lo+b)^2) (root : f x = 0) : lo < x
+  unfold completed_square at form
+  have eq := form x; rw [root] at eq
+  by_contra bad
+  have order : a*x+b ≤ a*lo+b := by linarith [mul_nonneg.real a (lo-x) (by linarith) (by linarith)]
+  linarith [mul_nonneg.real ((a*lo+b)-(a*x+b)) (-(a*lo+b)-(a*x+b)) (by linarith) (by linarith)]
+
++ completed_square.root_above_of_value (f : ℝ → ℝ) (k a b D lo x : ℝ) (form : completed_square f k a b D)
+    (ha : 0 < a) (left : a*lo+b < 0) (outside : 0 < k*f lo) (root : f x = 0) : lo < x
+  have eq := form; unfold completed_square at eq
+  exact completed_square.root_above f k a b D lo x form ha left (by linarith [eq lo]) root

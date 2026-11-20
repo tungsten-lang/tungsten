@@ -1,0 +1,33 @@
+-- These bounds require a polynomial identity and signs on the stated domain.
+-> ripple (x : ℝ) : ℝ := 1 - 9*x^9 + 9*x^10
++ tenth_degree (x : ℝ) (lo : 0 ≤ x) (hi : x ≤ 1) : 0 < ripple x := by auto
++ shifted_box (t : ℚ) (lo : 1/2 ≤ t) (hi : t ≤ 3/2) :
+    0 < 1 - (t-1/2)^5 + (t-1/2)^6 := by auto
++ left_tail (t : ℤ) (hi : t < -2) : 0 < (-2-t)^7 := by auto
++ right_tail (t : ℚ) (lo : 2 ≤ t) : 0 < 3 + (t-2)^9 := by auto
++ open_ends (t : ℝ) (lo : 0 < t) (hi : t < 1) : 0 < t^3*(1-t)^5 := by auto
++ closed_ends (t : ℝ) (h : 0 ≤ t ∧ t ≤ 1) : 0 ≤ t^3*(1-t)^5 := by auto
+
+-> well (t : ℚ) : ℚ := 1600*t^4 - 3200*t^3 + 2400*t^2 - 800*t + 101
++ interior_minimum (t : ℚ) (lo : 0 ≤ t) (hi : t ≤ 1) : 0 < well t := by auto
++ whole_ray (t : ℚ) (lo : 0 ≤ t) : 0 < well t := by auto
++ reflected_ray (t : ℚ) (hi : t ≤ -2) : 0 < well (-t-2) := by auto
++ whole_line (t : ℚ) : 0 < well t := by auto
++ open_after_cut (t : ℚ) (lo : 0 < t) (hi : t ≤ 1) : 0 < t*well t := by auto
++ integer_cuts (t : ℤ) : 0 < t^4 - 12*t^3 + 54*t^2 - 108*t + 82 := by auto
+
+-- Curved hypotheses cut out the domain. At a shared root the cut itself matters.
++ quartic_gap (s : ℝ) (lo : 0 ≤ s) (hi : s^4 ≤ 1/10) :
+    (1-s^4)^3+6*s^6+4*s^9+s^12 ≤ 1-s^4/2 := by auto
++ outside_roots (x : ℚ) (h : 1 ≤ x^2) : 0 ≤ x^4-1 := by auto
++ two_guards (x : ℝ) (lo : 1 ≤ x^2) (hi : x^2 ≤ 4) : 0 ≤ (x^2-1)*(4-x^2) := by auto
++ open_fourth_root (x : ℤ) (h : x^4 < 16) : x < 2 := by auto
++ between_squares (n : ℤ) (lo : 1 < n*n) (hi : n*n < 4) : n < 0 := by auto
++ positive_root (x : ℝ) (pos : 0 ≤ x) (eq : x*x = 2) : 4/3 < x := by auto
+-> cutoff : ℚ := 4290471/10000000
++ cubic_threshold (p : ℚ) (pos : 0 ≤ p) (large : 1/2 < p^2+4*p^3) : cutoff < p := by auto
+
+axiom supplied_quartic (s : ℝ) : s^4 ≤ 1/10
+axiom unrelated_square (t : ℚ) : t^2 ≤ 3
++ guarded_hint (s : ℝ) : s < 3/5 := by auto [supplied_quartic s,unrelated_square 1]
+#axioms guarded_hint

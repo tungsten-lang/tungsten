@@ -1,0 +1,36 @@
+import polyline
+
+-- Four knots, including a repeated knot with a deliberately large slope.
+-> knot (i : ℕ) : ℝ := if i = 0 then 0 else if i ≤ 2 then 1 else 3
+-> rate (i : ℕ) : ℝ := if i = 0 then 2 else if i = 1 then 100 else -1
+
++ cross_corner : polyline knot rate 7 3 (5/2)-polyline knot rate 7 3 (1/2) = -1/2 := by decide
++ endpoints : polyline knot rate 7 3 0 = 7 ∧ polyline knot rate 7 3 3 = 7 := by decide
++ interior : polyline knot rate 7 3 (3/2) = 17/2 := by decide
++ extension : polyline knot rate 7 3 1 = polyline knot rate 7 1 1 := by decide
+
++ single_piece (t m : ℕ → ℝ) (v : ℝ) (n i : ℕ) (h : ∀ j < n, t j ≤ t (j+1))
+    (hi : i < n) (x y : ℝ) (lo : t i ≤ x) (ord : x ≤ y) (up : y ≤ t (i+1)) :
+    polyline t m v n y-polyline t m v n x = m i*(y-x) := by auto
++ same_prefix (t m : ℕ → ℝ) (v x : ℝ) (k n : ℕ) (h : k ≤ n) (past : x ≤ t k)
+    (ord : ∀ i < n, t i ≤ t (i+1)) : polyline t m v n x = polyline t m v k x := by auto
++ knots (t m h : ℕ → ℝ) (n : ℕ) (ord : ∀ i < n, t i ≤ t (i+1))
+    (step : ∀ i < n, h (i+1)-h i = m i*(t (i+1)-t i)) : polyline t m (h 0) n (t n) = h n := by auto
+
++ flat_interval (t m : ℕ → ℝ) (v x M : ℝ) (n : ℕ) (ordered : ∀ i < n, t i ≤ t (i+1)) (lo : t 0 ≤ x) (hi : x ≤ t n) :
+    polyline t m v n x-polyline t m v n x ≤ M*(x-x)
+  apply polyline.increment_le t m v n x x M ordered lo (by linarith) hi
+  intro i ii z xz zx left right; linarith
+
+-- A uniform bound of 2 suffices on [1/2,5/2], despite the rate of 100
+-- assigned to the zero-length piece [1,1].
++ active_pieces : polyline knot rate 7 3 (5/2)-polyline knot rate 7 3 (1/2) ≤ 2*(5/2-1/2)
+  apply polyline.increment_le knot rate 7 3 (1/2) (5/2) 2 (by decide) (by decide) (by decide) (by decide)
+  intro i hi x lo hi_x tx xt
+  by_cases zero : i = 0
+  · rw [zero]; decide
+  · by_cases one : i = 1
+    · rw [one] at tx xt
+      have same : knot (1+1) = knot 1 := by decide
+      linarith
+    · simp [rate, zero, one]

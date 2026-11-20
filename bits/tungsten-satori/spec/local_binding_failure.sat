@@ -1,0 +1,29 @@
++ sibling (P Q : Prop) (p : P) : P ∧ Q
+  constructor
+  · set n := 3 with eqn; exact p
+  · exact eqn
+
++ wrong_type (x : ℕ) : x = x
+  set y : ℤ := x
+  rfl
+
++ missing_rhs (x : ℕ) : x = x
+  set y := with eqn
+  rfl
+
++ missing_eq_name (x : ℕ) : x = x
+  set y := x with
+  rfl
+
++ false_value (x : ℤ) : x+1 = x
+  set y := x+1
+  exact y_def
+
++ inner_capture (x : ℕ) : (let y := x in fun (x : ℕ) => y) = (fun (z : ℕ) => z) := by rfl
++ quantified_capture (x : ℕ) : (let y := x in ∀ x : ℕ, x = y) := by intro z; rfl
++ comprehension_capture (x : ℕ) : (let y := x in ∀ n, n ∈ {x : ℕ | x = y}) := by intro z; rfl
+
++ renamed_capture (x : ℕ) : 0 = 1
+  set x := 1 with one
+  have bad : (fun (x1 : ℕ) => x) 0 = 0 := by rfl
+  omega

@@ -1,0 +1,174 @@
+-- Positive additive functionals on real functions bounded on a given set.
+import realx
+
+-> additive.real (h : ℝ → ℝ) : Prop := ∀ x y, h (x+y) = h x+h y
+
++ additive.nat_mul.real (h : ℝ → ℝ) (add : additive.real h) (x : ℝ) (n : ℕ) : h ((n:ℝ)*x) = (n:ℝ)*h x
+  unfold additive.real at add
+  induction n with k ih
+  · have z := add 0 0; rw [add_zero.real] at z; rw [cast_zero.real,zero_mul.real,zero_mul.real]; linarith
+  · rw [succ_eq_add_one.nat,cast_succ.real]
+    have eq : ((k:ℝ)+1)*x = (k:ℝ)*x+x := by ring
+    rw [eq,add,ih]; ring
+
+-- For an additive defect d with d(1)=0, doubling the argument modulo one
+-- doubles its value. A bounded supremum therefore satisfies s ≤ s/2.
++ additive.zero_on_unit (d : ℝ → ℝ) (add : additive.real d) (one : d 1 = 0)
+    (B : ℝ) (bounded : ∀ t, 0 ≤ t → t ≤ 1 → d t ≤ B) : ∀ t, 0 ≤ t → t ≤ 1 → d t = 0
+  unfold additive.real at add
+  set S : set ℝ := fun y => ∃ t, 0 ≤ t ∧ t ≤ 1 ∧ y = d t
+  have upper : upper_bound S B
+    unfold upper_bound; intro y hy; rw [S_def] at hy
+    obtain ⟨t,lo,hi,eq⟩ := hy; rw [eq]; exact bounded t lo hi
+  obtain ⟨s,hs⟩ := sup_exists S (by use d 1; rw [S_def]; exact ⟨1,by decide,by decide,rfl⟩) ⟨B,upper⟩
+  have cap : ∀ t, 0 ≤ t → t ≤ 1 → d t ≤ s
+    intro t lo hi; exact is_sup.le_of_mem S s (d t) hs (by rw [S_def]; exact ⟨t,lo,hi,rfl⟩)
+  have half : upper_bound S (s/2)
+    unfold upper_bound; intro y hy; rw [S_def] at hy; obtain ⟨t,lo,hi,eq⟩ := hy
+    have dbl := add t t
+    by_cases small : t+t ≤ 1
+    · linarith [cap (t+t) (by linarith) small]
+    · have wrap : t+t-1+1 = t+t := by ring
+      have h := add (t+t-1) 1; rw [wrap,one] at h
+      linarith [cap (t+t-1) (by linarith) (by linarith)]
+  unfold is_sup at hs
+  have bound := hs.2 (s/2) half
+  intro t lo hi
+  have wrap : t+(1-t) = 1 := by ring
+  have pair := add t (1-t); rw [wrap,one] at pair
+  linarith [cap t lo hi,cap (1-t) (by linarith) (by linarith)]
+
+-- The bounded form of Cauchy's functional equation. A one-sided bound on
+-- the unit interval suffices, even when x or h(1) is negative.
+@[auto] + additive.linear_of_bounded (h : ℝ → ℝ) (add : additive.real h) (B : ℝ)
+    (bounded : ∀ t, 0 ≤ t → t ≤ 1 → h t ≤ B) : ∀ x, h x = x*h 1
+  set d : ℝ → ℝ := fun x => h x-x*h 1
+  have da : additive.real d
+    unfold additive.real at add ⊢; intro x y; simp only [d_def]; rw [add x y]; ring
+  have small : ∀ t, 0 ≤ t → t ≤ 1 → d t = 0
+    apply additive.zero_on_unit d da (by rw [d_def]; ring) (B+|h 1|)
+    intro t lo hi; rw [d_def]
+    have v := mul_le_mul_of_nonneg_left.real (0-h 1) (|h 1|) t (neg_le_abs.real (h 1)) lo
+    nlinarith [bounded t lo hi,mul_nonneg.real (1-t) (|h 1|) (by linarith) (abs_nonneg.real (h 1))]
+  have positive : ∀ y, 0 ≤ y → d y = 0
+    intro y hy; obtain ⟨n,hn⟩ := exists_nat_gt.real y
+    have pos : 0 < (n:ℝ) := by linarith
+    have unit := small (y/(n:ℝ)) (div_nonneg.real y (n:ℝ) hy (by linarith)) ((div_le_iff.real y 1 (n:ℝ) pos).mpr (by linarith))
+    have nat := additive.nat_mul.real d da (y/(n:ℝ)) n
+    have eq : (n:ℝ)*(y/(n:ℝ)) = y := by linarith [mul_div_cancel.real y (n:ℝ) (by linarith)]
+    rw [eq,unit] at nat; linarith
+  intro x
+  by_cases pos : 0 ≤ x
+  · have zero := positive x pos; rw [d_def] at zero; linarith
+  · have zero := positive (-x) (by linarith)
+    have origin := positive 0 (by decide); unfold additive.real at da
+    have eq : x+(-x) = 0 := by ring
+    have pair := da x (-x); rw [eq,origin,zero,d_def] at pair; linarith
+
+-> bounded_on (S : set α) (f : α → ℝ) : Prop := ∃ B, ∀ x ∈ S, |f x| ≤ B
+
+@[auto] + bounded_on.const (S : set α) (c : ℝ) : bounded_on S (fun x => c)
+  unfold bounded_on; exact ⟨|c|,by intro x hx; linarith⟩
+
+@[auto] + bounded_on.add (S : set α) (f g : α → ℝ) (hf : bounded_on S f) (hg : bounded_on S g) :
+    bounded_on S (fun x => f x+g x)
+  unfold bounded_on at hf hg ⊢; obtain ⟨B,h⟩ := hf; obtain ⟨C,k⟩ := hg
+  use B+C; intro x hx; linarith [abs_add.real (f x) (g x),h x hx,k x hx]
+
+@[auto] + bounded_on.scale (S : set α) (f : α → ℝ) (c : ℝ) (hf : bounded_on S f) : bounded_on S (fun x => c*f x)
+  unfold bounded_on at hf ⊢; obtain ⟨B,h⟩ := hf
+  use |c|*B; intro x hx; rw [abs_mul.real]
+  exact mul_le_mul_of_nonneg_left.real (|f x|) B (|c|) (h x hx) (abs_nonneg.real c)
+
+@[auto] + bounded_on.of_eq (S : set α) (f g : α → ℝ) (hg : bounded_on S g) (eq : ∀ x ∈ S, f x = g x) : bounded_on S f
+  unfold bounded_on at hg ⊢; obtain ⟨B,h⟩ := hg; use B; intro x hx; rw [eq x hx]; exact h x hx
+
+-> functional.positive (S : set α) (E : (α → ℝ) → ℝ) : Prop :=
+  ∀ f, bounded_on S f → (∀ x ∈ S, 0 ≤ f x) → 0 ≤ E f
+-> functional.additive (S : set α) (E : (α → ℝ) → ℝ) : Prop :=
+  ∀ f g, bounded_on S f → bounded_on S g → E (fun x => f x+g x) = E f+E g
+
+@[auto] + functional.mono (S : set α) (E : (α → ℝ) → ℝ) (pos : functional.positive S E) (add : functional.additive S E)
+    (f g : α → ℝ) (hf : bounded_on S f) (hg : bounded_on S g) (le : ∀ x ∈ S, f x ≤ g x) : E f ≤ E g
+  set diff : α → ℝ := fun x => g x+(-1)*f x
+  have hd : bounded_on S diff := by rw [diff_def]; auto
+  unfold functional.positive at pos; unfold functional.additive at add
+  have zero := pos diff hd (by intro x hx; rw [diff_def]; linarith [le x hx])
+  have pair := add f diff hf hd
+  have eq : (fun x => f x+diff x) = g := by funext x; rw [diff_def]; ring
+  rw [eq] at pair; linarith
+
+@[auto] + functional.scale (S : set α) (E : (α → ℝ) → ℝ) (pos : functional.positive S E) (add : functional.additive S E)
+    (f : α → ℝ) (hf : bounded_on S f) (c : ℝ) : E (fun x => c*f x) = c*E f
+  set H : ℝ → ℝ := fun t => E (fun x => t*f x)
+  have plus : additive.real H
+    unfold additive.real; intro a b
+    have eq : (fun x => (a+b)*f x) = (fun x => a*f x+b*f x) := by funext x; ring
+    unfold functional.additive at add; simp only [H_def,eq]
+    exact add (fun x => a*f x) (fun x => b*f x) (by auto) (by auto)
+  unfold bounded_on at hf; obtain ⟨B,bound⟩ := hf
+  have bounded : ∀ t, 0 ≤ t → t ≤ 1 → H t ≤ E (fun x => B)
+    intro t lo hi; rw [H_def]; apply functional.mono S E pos add
+    · exact bounded_on.scale S f t (by unfold bounded_on; exact ⟨B,bound⟩)
+    · exact bounded_on.const S B
+    · intro x hx
+      have v := mul_le_mul_of_nonneg_left.real (f x) (|f x|) t (le_abs_self.real (f x)) lo
+      nlinarith [bound x hx,mul_nonneg.real (1-t) (|f x|) (by linarith) (abs_nonneg.real (f x))]
+  have result := additive.linear_of_bounded H plus (E (fun x => B)) bounded c
+  simpa only [H_def,one_mul.real] using result
+
+@[auto] + functional.const (S : set α) (E : (α → ℝ) → ℝ) (pos : functional.positive S E) (add : functional.additive S E)
+    (unit : E (fun x => 1) = 1) (c : ℝ) : E (fun x => c) = c
+  simpa only [mul_one.real,unit] using functional.scale S E pos add (fun x => 1) (bounded_on.const S 1) c
+
+@[auto] + functional.const_on (S : set α) (E : (α → ℝ) → ℝ) (pos : functional.positive S E) (add : functional.additive S E)
+    (unit : E (fun x => 1) = 1) (f : α → ℝ) (c : ℝ) (eq : ∀ x ∈ S, f x = c) : E f = c
+  have k := bounded_on.const S c
+  have hf := bounded_on.of_eq S f (fun x => c) k eq
+  have lo := functional.mono S E pos add f (fun x => c) hf k (by intro x hx; linarith [eq x hx])
+  have hi := functional.mono S E pos add (fun x => c) f k hf (by intro x hx; linarith [eq x hx])
+  linarith [functional.const S E pos add unit c]
+
+@[auto] + functional.add (S : set α) (E : (α → ℝ) → ℝ) (add : functional.additive S E)
+    (f g : α → ℝ) (hf : bounded_on S f) (hg : bounded_on S g) : E (fun x => f x+g x) = E f+E g
+  unfold functional.additive at add; exact add f g hf hg
+
+@[auto] + bounded_on.sum_below (S : set α) (f : ℕ → α → ℝ) (n : ℕ) (bounds : ∀ i < n, bounded_on S (f i)) :
+    bounded_on S (fun x => ∑ i < n, f i x)
+  induction n with bounds k ih bounds
+  · simpa only [sum_below_zero] using bounded_on.const S 0
+  · simp only [succ_eq_add_one.nat,sum_below_succ]
+    exact bounded_on.add S (fun x => ∑ i < k, f i x) (f k) (ih (by intro i hi; exact bounds i (by omega))) (bounds k (by omega))
+
+@[auto] + functional.sum_below (S : set α) (E : (α → ℝ) → ℝ) (add : functional.additive S E)
+    (f : ℕ → α → ℝ) (n : ℕ) (bounds : ∀ i < n, bounded_on S (f i)) : E (fun x => ∑ i < n, f i x) = (∑ i < n, E (f i))
+  induction n with bounds k ih bounds
+  · have z := functional.add S E add (fun x => 0) (fun x => 0) (bounded_on.const S 0) (bounded_on.const S 0)
+    simp only [zero_add.real] at z; simp only [sum_below_zero]; linarith
+  · simp only [succ_eq_add_one.nat,sum_below_succ]
+    have before : ∀ i < k, bounded_on S (f i) := by intro i hi; exact bounds i (by omega)
+    rw [functional.add S E add (fun x => ∑ i < k, f i x) (f k) (bounded_on.sum_below S f k before) (bounds k (by omega)),ih before]
+
+@[auto] + functional.weighted_sum (S : set α) (E : (α → ℝ) → ℝ) (pos : functional.positive S E) (add : functional.additive S E)
+    (c : ℕ → ℝ) (f : ℕ → α → ℝ) (n : ℕ) (bounds : ∀ i < n, bounded_on S (f i)) :
+    E (fun x => ∑ i < n, c i*f i x) = (∑ i < n, c i*E (f i))
+  rw [functional.sum_below S E add (fun i x => c i*f i x) n (by intro i hi; exact bounded_on.scale S (f i) (c i) (bounds i hi))]
+  apply sum_below.congr; intro i hi; exact functional.scale S E pos add (f i) (bounds i hi) (c i)
+
+-- A finite positive combination of evaluations; points with zero weight may lie outside S.
+-> functional.atomic (p : ℕ → α) (w : ℕ → ℝ) (n : ℕ) (f : α → ℝ) : ℝ := ∑ i < n, w i*f (p i)
+
+@[auto] + functional.atomic.positive (S : set α) (p : ℕ → α) (w : ℕ → ℝ) (n : ℕ)
+    (weights : ∀ i < n, 0 ≤ w i) (support : ∀ i < n, 0 < w i → p i ∈ S) : functional.positive S (functional.atomic p w n)
+  unfold functional.positive; intro f bound pos; unfold functional.atomic
+  apply sum_nonneg.real; intro i hi; by_cases live : 0 < w i
+  · exact mul_nonneg.real (w i) (f (p i)) (weights i hi) (pos (p i) (support i hi live))
+  · have zero : w i = 0 := by linarith [weights i hi]
+    rw [zero]; linarith
+
+@[auto] + functional.atomic.additive (S : set α) (p : ℕ → α) (w : ℕ → ℝ) (n : ℕ) : functional.additive S (functional.atomic p w n)
+  unfold functional.additive; intro f g hf hg; unfold functional.atomic
+  rw [← sum_add.real]; apply sum_below.congr; intro i hi; ring
+
+@[auto] + functional.atomic.unit (p : ℕ → α) (w : ℕ → ℝ) (n : ℕ) (mass : (∑ i < n, w i) = 1) : functional.atomic p w n (fun x => 1) = 1
+  simpa only [functional.atomic,mul_one.real] using mass

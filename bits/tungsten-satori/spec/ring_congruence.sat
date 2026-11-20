@@ -1,0 +1,10 @@
+opaque measure : (ℝ → ℝ) → ℝ
+opaque wave : ℝ → ℝ
+
++ integrands (x : ℝ) : measure (fun y => wave ((x+y)^2)) = measure (fun z => wave (x*x+2*x*z+z*z)) := by auto
++ eta (p : (ℝ → ℝ) → ℝ) (f : ℝ → ℝ) : p (fun x => f (x+0)) = p f := by auto
++ nested (x : ℤ) : (fun (a : ℤ) (b : ℤ) => (a+b)*x) = (fun a b => a*x+b*x) := by ring
++ opaque_application (f : ℚ → ℚ → ℚ) (x y : ℚ) : f (x+x) ((y+1)^2) = f (2*x) (y*y+2*y+1) := by ring
+
+-> point_sub (f g : ℕ → ℝ) (i : ℕ) : ℝ := f i-g i
++ vector (f g : ℕ → ℝ) : point_sub f (point_sub f g) = g := by ring

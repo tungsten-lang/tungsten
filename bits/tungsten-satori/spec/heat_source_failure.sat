@@ -1,0 +1,20 @@
+import heat_source
+
++ ignored_source (u q r f : ℝ → ℝ → ℝ) (flow : heat_interval.forced u q r f (Icc 0 1) (Icc 0 1))
+    (ends : ∀ t, 0 ≤ t → t ≤ 1 → q t 0 = 0 ∧ q t 1 = 0) :
+    heat_interval.energy u 0 1 1 ≤ heat_interval.energy u 0 1 0 := by auto
+
++ missing_flux (u q r f v p s g : ℝ → ℝ → ℝ) (K : ℝ)
+    (hu : heat_interval.forced u q r f (Icc 0 2) (Icc 0 1)) (hv : heat_interval.forced v p s g (Icc 0 2) (Icc 0 1))
+    (sources : ∀ t, 0 ≤ t → t ≤ 2 → heat_interval.energy (fun k x => f k x-g k x) 0 1 t ≤ K) :
+    heat_interval.energy (fun k x => u k x-v k x) 0 1 2 ≤ exp (2-0)*heat_interval.energy (fun k x => u k x-v k x) 0 1 0+(exp (2-0)-1)*K := by auto
+
++ source_only (u q r f : ℝ → ℝ → ℝ) (I : ℝ) (flow : heat_interval.forced u q r f (Icc 0 1) (Icc 0 1))
+    (net : darboux.has_integral (heat_interval.content f 0 1) 0 1 I) :
+    heat_interval.content u 0 1 1-heat_interval.content u 0 1 0 = I := by auto
+
++ left_flux_only (u q r f v p s g : ℝ → ℝ → ℝ) (K : ℝ)
+    (hu : heat_interval.forced u q r f (Icc 0 2) (Icc 0 1)) (hv : heat_interval.forced v p s g (Icc 0 2) (Icc 0 1))
+    (left : ∀ t, 0 ≤ t → t ≤ 2 → q t 0 = p t 0)
+    (sources : ∀ t, 0 ≤ t → t ≤ 2 → heat_interval.energy (fun k x => f k x-g k x) 0 1 t ≤ K) :
+    heat_interval.energy (fun k x => u k x-v k x) 0 1 2 ≤ exp (2-0)*heat_interval.energy (fun k x => u k x-v k x) 0 1 0+(exp (2-0)-1)*K := by auto

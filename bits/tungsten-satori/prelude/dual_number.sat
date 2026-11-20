@@ -1,0 +1,199 @@
+-- R[ε]/(ε²), with constant and first-order coefficients.
+import spectrum
+
+structure dual α := (re : α) (du : α)
+-> dual.constant (R : ring_ops α) (x : α) : dual α := dual.mk x R.zero
+-> dual.epsilon (R : ring_ops α) : dual α := dual.mk R.zero R.one
+-> dual.map (f : α → β) (x : dual α) : dual β := dual.mk (f x.re) (f x.du)
+-> dual.zip (f : α → β → γ) (x : dual α) (y : dual β) : dual γ := dual.mk (f x.re y.re) (f x.du y.du)
+-> dual.product (add mul : α → α → α) (x y : dual α) : dual α :=
+  dual.mk (mul x.re y.re) (add (mul x.re y.du) (mul x.du y.re))
+
+-> dual.ops (R : ring_ops α) : ring_ops (dual α) := ring_ops.mk
+  (dual.constant R R.zero) (dual.constant R R.one) (dual.zip R.add) (dual.map R.neg) (dual.product R.add R.mul)
+
+-- Coefficient arithmetic on the built-in scalar types.
+-> dual.add (x y : dual α) : dual α := dual.zip (fun a b => a+b) x y
+-> dual.sub (x y : dual α) : dual α := dual.zip (fun a b => a-b) x y
+-> dual.mul (x y : dual α) : dual α := dual.product (fun a b => a+b) (fun a b => a*b) x y
+-> dual.scalar (a : α) : dual α := dual.mk a 0
+
++ dual.eta (x : dual α) : dual.mk x.re x.du = x := by auto
+
++ dual.ext (x y : dual α) (first : x.re = y.re) (second : x.du = y.du) : x = y := by auto
+
++ dual.comm_ring (R : ring_ops α) (laws : comm_ring R) : comm_ring (dual.ops R)
+  have z := comm_ring.mul_zero R laws
+  have right := comm_ring.add_mul R laws; have shuffle := comm_ring.add_shuffle R laws
+  unfold comm_ring at laws; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := laws
+  unfold comm_ring
+  constructor
+  · intro x y w; ext <;> simp [dual.ops,dual.zip,dual.map,dual.product,aa]
+  · constructor
+    · intro x y; ext <;> simp [dual.ops,dual.zip,dual.map,dual.product] <;> apply ac
+    · constructor
+      · intro x; ext <;> simp [dual.ops,dual.zip,dual.map,dual.product,dual.constant,az]
+      · constructor
+        · intro x; ext <;> simp [dual.ops,dual.zip,dual.map,dual.product,dual.constant,an]
+        · constructor
+          · intro x y w; ext
+            · simp [dual.ops,dual.zip,dual.map,dual.product,ma]
+            · simp [dual.ops,dual.zip,dual.map,dual.product,right,dist,ma,aa]
+          · constructor
+            · intro x y; ext
+              · simp [dual.ops,dual.zip,dual.map,dual.product]; apply mc
+              · simp [dual.ops,dual.zip,dual.map,dual.product]; rw [mc x.re y.du,mc x.du y.re,ac]
+            · constructor
+              · intro x; ext
+                · simp [dual.ops,dual.zip,dual.map,dual.product,dual.constant,mo]
+                · simp [dual.ops,dual.zip,dual.map,dual.product,dual.constant,mo]; rw [mc R.zero x.re,z x.re,ac,az]
+              · intro x y w; ext
+                · simp [dual.ops,dual.zip,dual.map,dual.product,dist]
+                · simp [dual.ops,dual.zip,dual.map,dual.product,dist]; apply shuffle
+
++ dual.re_hom (R : ring_ops α) : ring_hom (dual.ops R) R dual.re
+  unfold ring_hom
+  exact ⟨rfl,rfl,by intro x y; rfl,by intro x; rfl,by intro x y; rfl⟩
+
++ dual.re_onto (R : ring_ops α) (a : α) : ∃ x : dual α, x.re = a
+  exact ⟨dual.constant R a,rfl⟩
+
++ dual.kernel_square (R : ring_ops α) (laws : comm_ring R) (x : dual α) (zero : x.re = R.zero) :
+    (dual.ops R).mul x x = (dual.ops R).zero
+  have z := comm_ring.mul_zero R laws
+  unfold comm_ring at laws; obtain ⟨aa,ac,az,an,ma,mc,rest⟩ := laws
+  ext <;> simp [dual.ops,dual.zip,dual.map,dual.product,dual.constant,zero,z]
+  rw [mc R.zero x.du,z x.du,az]
+
++ dual.kernel_mem (R : ring_ops α) (laws : comm_ring R) (P : set (dual α)) (prime : P ∈ spectrum (dual.ops R)) :
+    ring_hom.kernel R dual.re ⊆ P
+  unfold subset ring_hom.kernel; intro x zero
+  have square := dual.kernel_square R laws x zero
+  unfold spectrum at prime
+  have both := prime.2.2 x x (by rw [square]; exact ideal.zero (dual.ops R) P prime.1)
+  obtain hx | hx := both <;> exact hx
+
+-- Every prime of the dual numbers comes from a unique base prime.
++ dual.spectrum (R : ring_ops α) (laws : comm_ring R) (P : set (dual α)) :
+    P ∈ spectrum (dual.ops R) ↔ ∃ J ∈ spectrum R, ideal.comap dual.re J = P
+  have corr := spectrum.quotient (dual.ops R) R dual.re P (dual.comm_ring R laws) laws (dual.re_hom R) (dual.re_onto R)
+  constructor
+  · intro prime; apply corr.mp
+    unfold spectrum.V; exact ⟨prime,dual.kernel_mem R laws P prime⟩
+  · intro h; have point := corr.mpr h
+    unfold spectrum.V at point; exact point.1
+
++ dual.comap_injective (R : ring_ops α) (I J : set α) (same : ideal.comap dual.re I = ideal.comap dual.re J) : I = J
+  have left := ideal.image_comap (fun (x : dual α) => x.re) I (dual.re_onto R)
+  have right := ideal.image_comap (fun (x : dual α) => x.re) J (dual.re_onto R)
+  rw [same] at left; rw [← left]; exact right
+
++ dual.epsilon_ne_zero (R : ring_ops α) (nonzero : R.one ≠ R.zero) : dual.epsilon R ≠ (dual.ops R).zero
+  intro eq
+  have same : (dual.epsilon R).du = ((dual.ops R).zero).du := by rw [eq]
+  exact nonzero same
+
+@[auto] + dual.epsilon_mem (R : ring_ops α) (laws : comm_ring R) (P : set (dual α)) (prime : P ∈ spectrum (dual.ops R)) :
+    dual.epsilon R ∈ P
+  have ker := dual.kernel_mem R laws P prime; unfold subset at ker
+  apply ker (dual.epsilon R); unfold ring_hom.kernel; rfl
+
+@[simp] + dual.add_re (x y : dual α) : (dual.add x y).re = x.re+y.re := by rfl
+@[simp] + dual.add_du (x y : dual α) : (dual.add x y).du = x.du+y.du := by rfl
+@[simp] + dual.sub_re (x y : dual α) : (dual.sub x y).re = x.re-y.re := by rfl
+@[simp] + dual.sub_du (x y : dual α) : (dual.sub x y).du = x.du-y.du := by rfl
+@[simp] + dual.mul_re (x y : dual α) : (dual.mul x y).re = x.re*y.re := by rfl
+@[simp] + dual.mul_du (x y : dual α) : (dual.mul x y).du = x.re*y.du+x.du*y.re := by rfl
+@[simp] + dual.scalar_re (x : α) : (dual.scalar x).re = x := by rfl
+@[simp] + dual.scalar_du (x : α) : (dual.scalar x).du = 0 := by rfl
+
+@[auto] + dual.D_constant_part (R : ring_ops α) (laws : comm_ring R) (x : dual α) :
+    spectrum.D (dual.ops R) x = spectrum.D (dual.ops R) (dual.constant R x.re)
+  funext P; unfold spectrum.D
+  constructor
+  · intro h; obtain ⟨J,prime,eq⟩ := (dual.spectrum R laws P).mp h.1
+    constructor
+    · exact h.1
+    · rw [← eq] at h ⊢; exact h.2
+  · intro h; obtain ⟨J,prime,eq⟩ := (dual.spectrum R laws P).mp h.1
+    constructor
+    · exact h.1
+    · rw [← eq] at h ⊢; exact h.2
+
++ dual.field_spectrum (R : ring_ops α) (laws : comm_ring R) (nontrivial : R.one ≠ R.zero)
+    (inverse : ∀ x, x ≠ R.zero → ∃ y, R.mul y x = R.one) (P : set (dual α)) :
+    P ∈ spectrum (dual.ops R) ↔ P = (fun (x : dual α) => x.re = R.zero)
+  have pull : ideal.comap (fun (z : dual α) => z.re) (fun x => x = R.zero) = (fun (z : dual α) => z.re = R.zero) := by funext z; simp [ideal.comap]
+  constructor
+  · intro prime; obtain ⟨J,hj,eq⟩ := (dual.spectrum R laws P).mp prime
+    have zero := (spectrum.field R laws nontrivial inverse J).mp hj
+    rw [← eq,zero]; exact pull
+  · intro eq; have corr := dual.spectrum R laws P; apply corr.mpr
+    have zero := (spectrum.field R laws nontrivial inverse (fun x => x = R.zero)).mpr (by rfl)
+    exact ⟨(fun x => x = R.zero),zero,by rw [eq]; exact pull⟩
+
+-- Spec R[ε]/(ε²) on test algebras: a map over R is determined by the
+-- square-zero element chosen for ε.
+-> dual.lift (S : ring_ops β) (f : α → β) (n : β) (x : dual α) : β :=
+  S.add (f x.re) (S.mul (f x.du) n)
+
++ dual.lift_scalar (R : ring_ops α) (S : ring_ops β) (f : α → β) (n : β) (hs : comm_ring S) (hom : ring_hom R S f) (a : α) :
+    dual.lift S f n (dual.constant R a) = f a
+  have z := comm_ring.mul_zero S hs; unfold comm_ring at hs; obtain ⟨aa,ac,az,an,ma,mc,rest⟩ := hs
+  unfold ring_hom at hom; simp [dual.lift,dual.constant,hom.1]
+  rw [mc S.zero n,z,ac,az]
+
++ dual.lift_epsilon (R : ring_ops α) (S : ring_ops β) (f : α → β) (n : β) (hs : comm_ring S) (hom : ring_hom R S f) :
+    dual.lift S f n (dual.epsilon R) = n
+  unfold comm_ring at hs; obtain ⟨aa,ac,az,an,ma,mc,mo,rest⟩ := hs
+  unfold ring_hom at hom; simp [dual.lift,dual.epsilon,hom.1,hom.2.1,mo,az]
+
++ comm_ring.square_zero_product (S : ring_ops β) (hs : comm_ring S) (n a b c d : β) (nil : S.mul n n = S.zero) :
+    S.mul (S.add a (S.mul b n)) (S.add c (S.mul d n)) =
+    S.add (S.mul a c) (S.mul (S.add (S.mul a d) (S.mul b c)) n)
+  have right := comm_ring.add_mul S hs; have z := comm_ring.mul_zero S hs
+  unfold comm_ring at hs; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hs
+  have vanish : S.mul (S.mul b n) (S.mul d n) = S.zero
+    rw [ma b n (S.mul d n),← ma n d n,mc n d,ma d n n,nil,z d,z b]
+  have cross : S.mul (S.mul b n) c = S.mul (S.mul b c) n := by rw [ma b n c,mc n c,← ma b c n]
+  rw [right a (S.mul b n) (S.add c (S.mul d n)),dist a c (S.mul d n),dist (S.mul b n) c (S.mul d n),vanish,ac (S.mul (S.mul b n) c) S.zero,az,cross,← ma a d n,aa,right (S.mul a d) (S.mul b c) n]
+
++ dual.lift_hom (R : ring_ops α) (S : ring_ops β) (f : α → β) (n : β) (hr : comm_ring R) (hs : comm_ring S)
+    (hom : ring_hom R S f) (nil : S.mul n n = S.zero) : ring_hom (dual.ops R) S (dual.lift S f n)
+  have scalar := dual.lift_scalar R S f n hs hom
+  have right := comm_ring.add_mul S hs; have shuffle := comm_ring.add_shuffle S hs
+  have law := comm_ring.square_zero_product S hs n
+  apply ring_hom.of_ops (dual.ops R) S (dual.lift S f n) (dual.comm_ring R hr) hs
+  · unfold ring_hom at hom; have h := scalar R.zero; rw [hom.1] at h; exact h
+  · unfold ring_hom at hom; have h := scalar R.one; rw [hom.2.1] at h; exact h
+  · unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+    intro x y; simp [dual.lift,dual.ops,dual.zip,add,right]; apply shuffle
+  · unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+    intro x y; simp [dual.lift,dual.ops,dual.product,add,mul]
+    symm; exact law (f x.re) (f x.du) (f y.re) (f y.du) nil
+
++ dual.expand (R : ring_ops α) (laws : comm_ring R) (x : dual α) :
+    (dual.ops R).add (dual.constant R x.re) ((dual.ops R).mul (dual.constant R x.du) (dual.epsilon R)) = x
+  have z := comm_ring.mul_zero R laws
+  unfold comm_ring at laws; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := laws
+  ext <;> simp [dual.ops,dual.zip,dual.constant,dual.product,dual.epsilon,z,az]
+  · rw [ac,az]
+  · rw [ac,az,mc,mo]
+
++ dual.lift_unique (R : ring_ops α) (S : ring_ops β) (f : α → β) (g : dual α → β) (n : β) (hr : comm_ring R)
+    (hom : ring_hom (dual.ops R) S g) (scalars : ∀ a, g (dual.constant R a) = f a) (eps : g (dual.epsilon R) = n) :
+    g = dual.lift S f n
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  funext x
+  have eq := add (dual.constant R x.re) ((dual.ops R).mul (dual.constant R x.du) (dual.epsilon R))
+  rw [dual.expand R hr x,mul,scalars x.re,scalars x.du,eps] at eq; exact eq
+
+@[auto] + dual.lift_iff (R : ring_ops α) (S : ring_ops β) (f : α → β) (n : β) (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f) :
+    (∃ g, ring_hom (dual.ops R) S g ∧ (∀ a, g (dual.constant R a) = f a) ∧ g (dual.epsilon R) = n) ↔ S.mul n n = S.zero
+  constructor
+  · intro exists_g; obtain ⟨g,hg,scalars,eps⟩ := exists_g
+    unfold ring_hom at hg; obtain ⟨zero,one,add,neg,mul⟩ := hg
+    have square := mul (dual.epsilon R) (dual.epsilon R)
+    rw [dual.kernel_square R hr (dual.epsilon R) (by rfl),zero,eps] at square; exact square.symm
+  · intro nil
+    exact ⟨dual.lift S f n,dual.lift_hom R S f n hr hs hom nil,dual.lift_scalar R S f n hs hom,dual.lift_epsilon R S f n hs hom⟩

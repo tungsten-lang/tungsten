@@ -1,0 +1,10 @@
+-- The leaves may use different scalar types and either nesting order.
++ mixed (a b : ℤ) (x : ℚ) (r : ℝ) (n : ℕ) :
+    ((a+b)^2 = a^2+2*a*b+b^2 ∧ x/2+x/2 = x) ∧ (r*r = r^2 ∧ n+n = 2*n) := by ring
+
+-> twice (x : ℤ) : ℤ := x+x
+-> eightfold (x : ℤ) : ℤ := twice (twice (twice x))
++ repeated_argument (x : ℤ) : eightfold (eightfold (eightfold (x+1))) = 512*x+512 := by ring
+
++ combination_pair (x y : ℚ) : x*(y+1) = x*y+x ∧ (x-y)*(x+y) = x^2-y^2 := by linear_combination
++ numeric_pair (x y : ℚ) : x*(y+1) = x*y+x ∧ (x-y)*(x+y) = x^2-y^2 := by norm_num

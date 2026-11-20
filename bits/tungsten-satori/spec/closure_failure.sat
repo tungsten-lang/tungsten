@@ -1,0 +1,12 @@
+import closure
+
++ jump (f : ℝ → ℝ) (bound : ∀ e : ℝ, 0 < e → f e ≤ 0) : f 0 ≤ 0 := by auto
++ strict (f g : ℝ → ℝ) (x : ℝ) (cf : continuous_at f x) (cg : continuous_at g x)
+    (bound : ∀ y, x < y → f y < g y) : f x < g x := by auto
++ gap (f : ℝ → ℝ) (cf : continuous_at f 0) (bound : ∀ y : ℝ, 1 < y → f y ≤ 0) : f 0 ≤ 0 := by auto
++ empty_interval (x : ℝ) : x ∈ real.closure (fun y => x < y ∧ y < x) := by auto
++ far_set (S : set ℝ) (f g : ℝ → ℝ) (x : ℝ) (cf : continuous_within_at f S x) (cg : continuous_within_at g S x)
+    (bound : ∀ y ∈ S, f y ≤ g y) : f x ≤ g x := by auto
++ one_side (p : ℝ) (bound : ∀ e : ℝ, 0 < e → 2*p ≤ 1+e) : p=1/2 := by auto
++ punctured (f g : ℝ → ℝ) (x : ℝ) (cf : continuous_at f x) (cg : continuous_at g x)
+    (bound : ∀ y, x < y → y < x → f y ≤ g y) : f x ≤ g x := by auto

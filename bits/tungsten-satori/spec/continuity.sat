@@ -1,0 +1,14 @@
+import polyline_continuity
+
++ polynomial (x : ℝ) : continuous_at (fun y => y*y+3*y-1) x := by auto
++ clipped (a b x : ℝ) : continuous_at (fun y => min b (max a y)) x := by auto
++ power (n : ℕ) (x : ℝ) : continuous_at (fun y => (y+1)^n) x := by auto
++ aggregate (f : ℕ → ℝ → ℝ) (n : ℕ) (x : ℝ) (h : ∀ i < n, continuous_at (f i) x) :
+    continuous_at (fun y => ∑ i < n, f i y) x := continuous_at.sum_below f n x h
+
+-- The zero-length piece has slope 100; the neighboring slopes differ at 1.
+-> knot (i : ℕ) : ℝ := if i = 0 then 0 else if i ≤ 2 then 1 else 3
+-> slope (i : ℕ) : ℝ := if i = 0 then 2 else if i = 1 then 100 else -1
++ at_corner : continuous_at (polyline knot slope 7 3) 1 := by auto
++ whole_curve (t m : ℕ → ℝ) (v : ℝ) (ordered : ∀ i, t i ≤ t (i+1)) (cover : ∀ x, ∃ n, x ≤ t n) :
+    continuous (polyline.curve t m v) := by auto

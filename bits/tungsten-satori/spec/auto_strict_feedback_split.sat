@@ -32,3 +32,7 @@ axiom same_score (x : ℚ) : score x = x
 + forced_tie (d : ℚ) : score d < d := by auto [equal_checked d]
 + equal_unfinished (x : ℚ) : score x = x := by sorry
 + unfinished_tie (e : ℚ) : score e < e := by auto [equal_unfinished e]
+
+axiom strict_enables (x : ℚ) : score x < x → enabled x
++ strict_premise_checked (a : ℚ) : enabled a := by auto [strict_enables a, checked a]
++ strict_premise_failed (c : ℚ) : enabled c := by auto [strict_enables c, copied c]

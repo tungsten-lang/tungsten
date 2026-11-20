@@ -1,0 +1,14 @@
+-- Hilbert choice for an inhabited predicate. The witness need not be unique.
+-> choice (P : α → Prop) : α := ε P
+
+@[auto] + choice.spec (P : α → Prop) (exists_witness : ∃ x, P x) : P (choice P)
+  unfold choice
+  exact epsilon_spec P exists_witness
+
++ choice.unique (P : α → Prop) (x : α) (hx : P x) (unique : ∀ y, P y → y = x) : choice P = x
+  exact unique (choice P) (choice.spec P ⟨x, hx⟩)
+
++ choice.function (P : α → β → Prop) (total : ∀ x, ∃ y, P x y) : ∃ f : α → β, ∀ x, P x (f x)
+  use fun x => choice (P x)
+  intro x
+  exact choice.spec (P x) (total x)

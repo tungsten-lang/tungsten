@@ -1,0 +1,12 @@
+import power_tangent
+
++ negative_base (x : ℚ) : 1-x^3 ≤ 3*(1-x) := by auto
++ zero_exponent (x : ℝ) : 1 ≤ (if 0 ≤ 1+x then (1+x)^0 else 0) := by auto
++ strict_at_equality (a b : ℝ) (n : ℕ) (ha : 0 < a) (hb : 0 < b) :
+    ((n:ℝ)+1)^(n+1)*a^n*b < ((n:ℝ)*a+b)^(n+1) := by auto
++ missing_mean (f : ℕ → ℝ) (k : ℕ) (z : ℝ) (pos : ∀ j < k, 0 ≤ f j) :
+    (∏ j < k, f j) ≤ z^k := by auto
++ signed_factors (f : ℕ → ℚ) (k : ℕ) (z : ℚ) (avg : (k:ℚ)*z = (∑ j < k, f j)) :
+    (∏ j < k, f j) ≤ z^k := by auto
++ wrong_weight (x y z : ℚ) (m n : ℕ) (hx : 0 ≤ x) (hy : 0 ≤ y)
+    (avg : ((m:ℚ)+(n:ℚ))*z = (m:ℚ)*x+(n:ℚ)*y) : x^n*y^m ≤ z^(m+n) := by auto

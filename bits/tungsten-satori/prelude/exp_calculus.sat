@@ -1,0 +1,65 @@
+-- Integral formulas for real exponentials.
+import exp_derivative
+import weak_derivative
+
+@[auto] + darboux.exp_affine (a b q r : ℝ) (ab : a ≤ b) (hq : q ≠ 0) :
+    darboux.has_integral (fun x => exp (q*x+r)) a b ((exp (q*b+r)-exp (q*a+r))/q)
+  have value : (exp (q*b+r)-exp (q*a+r))/q = (1/q)*exp (q*b+r)-(1/q)*exp (q*a+r) := by rw [div_def.real]; ring
+  rw [value]
+  apply darboux.fundamental (fun x => (1/q)*exp (q*x+r)) (fun x => exp (q*x+r)) a b ab (by intro t atle tb; auto)
+  intro t atle tb
+  have inner := has_deriv_within.affine q r (fun z => a ≤ z ∧ z ≤ b) t
+  have outer := has_deriv_within.exp_comp (fun x => q*x+r) (fun z => a ≤ z ∧ z ≤ b) t q inner
+  have scaled := has_deriv_within.scale (1/q) (fun x => exp (q*x+r)) (fun z => a ≤ z ∧ z ≤ b) t (exp (q*t+r)*q) outer
+  have cancel : (1/q)*(exp (q*t+r)*q) = exp (q*t+r) := by linear_combination (exp (q*t+r))*(mul_div_cancel.real 1 q hq)
+  rw [cancel] at scaled
+  exact scaled
+
+@[auto] + darboux.x_exp (a b q : ℝ) (ab : a ≤ b) (hq : q ≠ 0) :
+    darboux.has_integral (fun x => x*exp (q*x)) a b ((b/q-1/q^2)*exp (q*b)-(a/q-1/q^2)*exp (q*a))
+  apply darboux.fundamental (fun x => (x/q-1/q^2)*exp (q*x)) (fun x => x*exp (q*x)) a b ab (by intro t atle tb; auto)
+  intro t atle tb
+  have lin : has_deriv_within (fun x => q*x) (fun z => a ≤ z ∧ z ≤ b) t q := by simpa using has_deriv_within.affine q 0 (fun z => a ≤ z ∧ z ≤ b) t
+  have ex := has_deriv_within.exp_comp (fun x => q*x) (fun z => a ≤ z ∧ z ≤ b) t q lin
+  have coeff : (fun (x : ℝ) => x/q-1/q^2) = (fun x => (1/q)*x+(-1/q^2)) := by funext x; rw [div_def.real x q,div_def.real (-1) (q^2),div_def.real 1 (q^2)]; ring
+  have affine : has_deriv_within (fun x => x/q-1/q^2) (fun z => a ≤ z ∧ z ≤ b) t (1/q)
+    rw [coeff]
+    exact has_deriv_within.affine (1/q) (-1/q^2) (fun z => a ≤ z ∧ z ≤ b) t
+  have prod := has_deriv_within.mul (fun x => x/q-1/q^2) (fun x => exp (q*x)) (fun z => a ≤ z ∧ z ≤ b) t (1/q) (exp (q*t)*q) affine ex
+  have qsq : q^2 ≠ 0 := by nlinarith
+  have reciprocal : (1/q^2)*q = 1/q
+    exact (eq_div_iff.real ((1/q^2)*q) 1 q hq).mpr (by linear_combination mul_div_cancel.real 1 (q^2) qsq)
+  have cancel : (1/q)*exp (q*t)+(t/q-1/q^2)*(exp (q*t)*q) = t*exp (q*t)
+    linear_combination (exp (q*t))*(mul_div_cancel.real t q hq) - (exp (q*t))*reciprocal
+  rw [cancel] at prod
+  exact prod
+
+-- Test a weak derivative against exp(-cx), keeping both endpoint traces.
+@[auto] + interval.weak_deriv.exp_moment (u v : ℝ → ℝ) (c a b l r : ℝ) (weak : interval.weak_deriv u v a b l r) :
+    darboux.has_integral (fun x => exp (-c*x)*(v x-c*u x)) a b (exp (-c*b)*r-exp (-c*a)*l)
+  have test : interval.c1 (fun x => exp (-c*x)) (fun x => exp (-c*x)*(-c)) a b
+    unfold interval.c1 interval.deriv; constructor
+    · intro x lo hi; exact has_deriv_within.exp_comp (fun y => -c*y) (Icc a b) x (-c) (has_deriv_within.scale_id (-c) (Icc a b) x)
+    · intro x hx; apply continuous_at.within; auto
+  unfold interval.weak_deriv at weak
+  have moment := weak (fun x => exp (-c*x)) (fun x => exp (-c*x)*(-c)) test
+  have ends : r*exp (-c*b)-l*exp (-c*a) = exp (-c*b)*r-exp (-c*a)*l := by ring
+  rw [ends] at moment
+  apply darboux.congr (fun x => v x*exp (-c*x)+u x*(exp (-c*x)*(-c))) (fun x => exp (-c*x)*(v x-c*u x)) a b (exp (-c*b)*r-exp (-c*a)*l) moment
+  intro x lo hi; ring
+
+@[auto] + interval.weak_deriv.exp_moment_zero (u v : ℝ → ℝ) (c a b : ℝ) (weak : interval.weak_deriv u v a b 0 0) :
+    darboux.has_integral (fun x => exp (-c*x)*(v x-c*u x)) a b 0
+  simpa using interval.weak_deriv.exp_moment u v c a b 0 0 weak
+
+-- Integrating factor for the first-order expression F' - c F.
++ darboux.exp_weighted_deriv (F v : ℝ → ℝ) (c a b : ℝ) (ab : a ≤ b)
+    (cont : ∀ t, a ≤ t → t ≤ b → continuous_at F t ∧ continuous_at v t)
+    (deriv : ∀ t, a ≤ t → t ≤ b → has_deriv_within F (fun z => a ≤ z ∧ z ≤ b) t (v t)) :
+    darboux.has_integral (fun t => exp (-c*t)*(v t-c*F t)) a b (exp (-c*b)*F b-exp (-c*a)*F a)
+  apply interval.weak_deriv.exp_moment
+  apply interval.c1.weak_deriv F v a b ab
+  unfold interval.c1; constructor
+  · exact deriv
+  · intro t ht; have row := cont t ht.1 ht.2
+    exact continuous_at.within v (Icc a b) t row.2

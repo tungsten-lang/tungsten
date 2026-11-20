@@ -1,0 +1,18 @@
+import threshold
+
++ lost_strictness (P : ℚ → Prop) (a s : ℚ) (weak : a ≤ s)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) (up : ∀ x y, P x → x ≤ y → P y) : P s := by auto
+
++ missing_monotonicity (P : ℝ → Prop) (near : ∀ e : ℝ, 0 < e → ∃ r, P r ∧ r < 2+e) : P 3 := by auto
+
++ zero_scale (P : ℝ → Prop) (edge : ∀ t : ℝ, 0*t = -1 → P t) (up : ∀ x y, P x → x ≤ y → P y) : P 0 := by auto
+
++ reversed_scale (P : ℚ → Prop) (edge : ∀ t : ℚ, (-2)*t = 2 → P t) (up : ∀ x y, P x → x ≤ y → P y) : P (-3) := by auto
+
++ one_error (P : ℚ → Prop) (near : ∃ r : ℚ, P r ∧ r < 2) (floor : ∀ r : ℚ, P r → 1 ≤ r) : (1 : ℚ) ≤ 0 := by auto
+
++ unrelated_bound (P : ℚ → Prop) (a s x y : ℚ) (weak : x ≤ y)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) (up : ∀ x y, P x → x ≤ y → P y) : P s := by auto
+
++ at_open_cutoff (P : ℚ → Prop) (a s : ℚ) (eq : a = s) (weak : a ≤ s)
+    (near : ∀ e, 0 < e → ∃ r, P r ∧ r < a+e) (up : ∀ x y, P x → x ≤ y → P y) : P s := by auto

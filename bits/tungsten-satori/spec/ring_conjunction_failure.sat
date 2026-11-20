@@ -1,0 +1,5 @@
++ wrong_first (x : ℤ) : x+1 = x ∧ x+x = 2*x := by ring
++ wrong_middle (x : ℤ) : x+x = 2*x ∧ (x*x = x ∧ x^2 = x*x) := by ring
++ unrelated_last (x y : ℚ) (h : x = y) : x+x = 2*x ∧ x = y := by ring
++ inequality (x : ℝ) : x*x = x^2 ∧ 0 ≤ x := by ring
++ truncated (n m : ℕ) : n+m = m+n ∧ n-m+m = n := by ring

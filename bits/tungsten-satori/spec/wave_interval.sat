@@ -1,0 +1,33 @@
+import wave_interval
+
++ boundary_work (c : ℝ) (v q r s : ℝ → ℝ → ℝ) (W : ℝ)
+    (wave : wave_interval.solution c v q r s (Icc 0 2) (Icc 0 1))
+    (work : darboux.has_integral (fun t => wave_interval.flux c v q t 1-wave_interval.flux c v q t 0) 0 2 W) :
+    wave_interval.energy v q 0 1 2-wave_interval.energy v q 0 1 0 = W := by auto
+
++ balanced_ends (c : ℝ) (v q r s : ℝ → ℝ → ℝ)
+    (wave : wave_interval.solution c v q r s (Icc 0 2) (Icc 0 1))
+    (ends : ∀ t, 0 ≤ t → t ≤ 2 → wave_interval.flux c v q t 1 = wave_interval.flux c v q t 0) :
+    wave_interval.energy v q 0 1 2 = wave_interval.energy v q 0 1 0 := by auto
+
++ transport (u j r : ℝ → ℝ → ℝ) (law : interval.balance u j r (Icc 0 2) (Icc 0 1))
+    (ends : ∀ t, 0 ≤ t → t ≤ 2 → j t 1 = j t 0) : darboux.integral 0 1 (u 2) = darboux.integral 0 1 (u 0) := by auto
+
+-- The travelling wave v=q=t+x has energy entering through the right endpoint.
++ travelling (T X : set ℝ) : wave_interval.solution 1 (fun t x => t+x) (fun t x => t+x) (fun t x => 1) (fun t x => 1) T X
+  unfold wave_interval.solution; intro t ht x hx
+  have cont := continuous_within_box.add (fun s y => s) (fun s y => y) T X t x (continuous_within_box.time (fun z => z) T X t x (by auto)) (continuous_within_box.space (fun z => z) T X t x (by auto))
+  exact ⟨cont,cont,by auto,by auto,by auto,by auto,by auto,by auto⟩
+
++ travelling_work :
+    wave_interval.energy (fun t x => t+x) (fun t x => t+x) 0 1 1-wave_interval.energy (fun t x => t+x) (fun t x => t+x) 0 1 0 = 2
+  apply wave_interval.energy_change 1 (fun t x => t+x) (fun t x => t+x) (fun t x => 1) (fun t x => 1) 0 1 0 1 2 (by decide) (travelling (Icc 0 1) (Icc 0 1))
+  unfold wave_interval.flux
+  have area := darboux.add (fun t => 2*t) (fun t => 1) 0 1 (1^2-0^2) (1*(1-0)) (darboux.fundamental (fun t => t^2) (fun t => 2*t) 0 1 (by decide) (by intro t lo hi; auto) (by intro t lo hi; auto)) (darboux.const 0 1 1 (by decide))
+  have eq : (fun (t : ℝ) => 1*((t+1)*(t+1))-1*((t+0)*(t+0))) = (fun t => 2*t+1) := by ring
+  rw [eq]; exact area
+#axioms travelling_work
+
++ reflecting_ends (v q r s : ℝ → ℝ → ℝ) (wave : wave_interval.solution 3 v q r s (Icc 0 2) (Icc 0 1))
+    (ends : ∀ t, 0 ≤ t → t ≤ 2 → (v t 0 = 0 ∨ q t 0 = 0) ∧ (v t 1 = 0 ∨ q t 1 = 0)) :
+    wave_interval.energy v q 0 1 2 = wave_interval.energy v q 0 1 0 := by auto

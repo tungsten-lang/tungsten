@@ -12,8 +12,8 @@
 # Anything else is left as a neutral term.
 
 + KClo
-  ro :lam, :env
-  -> new(@lam, @env)
+  ro :lam, :env, :memo_id
+  -> new(@lam, @env, @memo_id = 0)
   -> clo?
     true
 
@@ -24,6 +24,18 @@
 + KEnv
   ro :v, :up
   -> new(@v, @up)
+
+# The recursive argument of a function-valued nat_rec step. A branch may
+# return without calling it. Repeated uses share the same predecessor.
++ KNatRecEnv
+  ro :up
+  -> new(@evaluator, @base, @step, @index, @up)
+    @value = nil
+
+  -> v
+    if @value == nil
+      @value = @evaluator.nat_rec_function(@base, @step, @index)
+    @value
 
 -> env_get(env, i)
   e = env
@@ -46,15 +58,23 @@
   else
     false
 
+EVAL_MEMO_LIMIT = 32768
+NAT_RESULT_LIMIT = 8192
+LITERAL_BOUND = 4294967296
+
 + KEval
   ro :k, :fuel, :deep, :symbolic, :fresh, :memo, :defcache
 
-  -> new(@k, deep = false, symbolic = false)
+  -> new(@k, deep = false, symbolic = false, nat_results = nil)
+    @nat_results = nat_results == nil ? {} : nat_results
     @fuel = 200000000
     @deep = deep
     @symbolic = symbolic
     @fresh = 0
+    @next_memo_id = 0
     @memo = {}
+    @rec_calls = {}
+    @literal_calls = {}
     @memo_count = 0
     @defcache = @k.defcache
     @tt = @k.truth_tm
@@ -87,6 +107,8 @@
   # public entry: evaluate a (locally closed) term to a term
   -> eval(t)
     res = reify(ev(t, nil))
+    @rec_calls = {}
+    @literal_calls = {}
     @memo = {}
     @memo_count = 0
     res
@@ -156,7 +178,7 @@
           return pr[1]
         bi += 1
     v = ev_app(t, nil)
-    if @memo_count < 32768
+    if @memo_count < EVAL_MEMO_LIMIT
       if bucket == nil
         bucket = []
         @memo[t.h] = bucket
@@ -168,6 +190,55 @@
     if t.op == OP_NONE && @k.defs.has_key?(t.name)
       return ev(def_body(t), nil)
     t
+
+  -> cache_nat_call?(h, argc)
+    argc == 1 && !@deep && !@symbolic && h.ty.dom == TY_NAT_SINGLETON && h.ty.cod == TY_NAT_SINGLETON
+
+  # Definitions are immutable within one kernel. Reuse only results actually
+  # reduced to small literals, keyed by the definition and its exact input.
+  # Symbolic terms, closures and their captured environments stay out of it.
+  -> eval_nat_call(h, x)
+    if x.clo? || x.tag != :lit || x.val >= 65536
+      return apply1(eval_const(h), x)
+    key = h.name + "#" + x.val.to_s
+    known = @nat_results[key]
+    if known != nil
+      return known
+    result = apply1(eval_const(h), x)
+    if !result.clo? && result.tag == :lit && result.val < 65536 && @nat_results.size < NAT_RESULT_LIMIT
+      @nat_results[key] = result
+    result
+
+  # Cache saturated scalar calls on natural literals. Validate the typed head
+  # and both operands on every hit. Collisions only replace an earlier result.
+  -> eval_literal_call(h, x, y = nil)
+    slot = nil
+    y_val = nil
+    if small_literal?(x) && (y == nil || small_literal?(y))
+      y_val = y == nil ? nil : y.val
+      slot = (h.h * 31 + x.h * 131 + (y == nil ? 0 : y.h)) % NAT_RESULT_LIMIT
+      entry = @literal_calls[slot]
+      if entry != nil && entry[1] == x.val && entry[2] == y_val && tm_eq(entry[0], h)
+        return entry[3]
+    result = apply1(eval_const(h), x)
+    if y != nil
+      result = apply1(result, y)
+    if slot != nil && small_literal?(result)
+      @literal_calls[slot] = [h, x.val, y_val, result]
+    result
+
+  -> small_literal?(v)
+    if v.clo? || v.tag != :lit
+      return false
+    n = v.val
+    if v.ty == TY_RAT_SINGLETON || v.ty == TY_REAL_SINGLETON
+      if n[1] >= LITERAL_BOUND
+        return false
+      n = n[0]
+    n > -LITERAL_BOUND && n < LITERAL_BOUND
+
+  -> numeric_result?(ty)
+    ty == TY_NAT_SINGLETON || ty == TY_INT_SINGLETON || ty == TY_RAT_SINGLETON || ty == TY_REAL_SINGLETON
 
   # Definition body at the constant's type (cached per name and type id).
   -> def_body(t)
@@ -190,7 +261,26 @@
       t = t.a
     t
 
+  -> literal_call_head?(h)
+    h.op == OP_NONE && !@deep && !@symbolic && h.ty.dom == TY_NAT_SINGLETON && @k.defs.has_key?(h.name)
+
   -> ev_app(t, env)
+    # Take saturated operands directly from the application spine. In a finite
+    # sum this avoids rebuilding argument arrays for every arithmetic step.
+    if t.a.tag == :app && t.a.a.tag == :const
+      h = t.a.a
+      if h.op >= OP_ADD && h.op <= OP_LE
+        return eval_arithmetic(h, h.op, ev(t.a.b, env), ev(t.b, env))
+      if h.op == OP_EQ
+        return eval_equality(h, ev(t.a.b, env), ev(t.b, env))
+      if literal_call_head?(h) && h.ty.cod.fun? && h.ty.cod.dom == TY_NAT_SINGLETON && numeric_result?(h.ty.cod.cod)
+        return eval_literal_call(h, ev(t.a.b, env), ev(t.b, env))
+    elsif t.a.tag == :const
+      h = t.a
+      if literal_call_head?(h) && h.ty.cod != TY_NAT_SINGLETON && numeric_result?(h.ty.cod)
+        return eval_literal_call(h, ev(t.b, env))
+    elsif t.a.tag == :app && t.a.a.tag == :app && t.a.a.a.op == OP_ITE
+      return eval_ite(t.a.a.a, t.a.a.b, t.a.b, t.b, env)
     # Memoize closed curried prefixes of user definitions (e.g. `iter_collatz 120 (n + 1)`).
     if t.a.tag == :app && t.a.cl && t.a.mx == 0
       hd = spine_head(t.a)
@@ -220,6 +310,8 @@
   -> apply1(f, x)
     tick
     if f.clo?
+      if f.memo_id != 0
+        return apply_rec_closure(f, x)
       return ev(f.lam.b, KEnv.new(x, f.env))
     if f.tag == :lam
       return ev(f.b, KEnv.new(x, nil))
@@ -240,26 +332,35 @@
           return ev_const_vals(hd, vals)
     mk_app_raw(f, reify(x))
 
+  -> rec_closure(lam, env)
+    @next_memo_id += 1
+    KClo.new(lam, env, @next_memo_id)
+
+  # Only the slot is hashed. A hit requires the exact captured closure and an
+  # equal argument. Replacing a collision lets long enumerations keep sharing
+  # recent recursive calls after their first window of states is exhausted.
+  -> apply_rec_closure(f, x)
+    h = x.clo? ? x.lam.h : x.h
+    slot = (f.memo_id * 1009 + h) % EVAL_MEMO_LIMIT
+    entry = @rec_calls[slot]
+    if entry != nil && entry[0] == f.memo_id
+      old = entry[1]
+      if old == x || (!old.clo? && !x.clo? && tm_eq(old, x))
+        return entry[2]
+    result = ev(f.lam.b, KEnv.new(x, f.env))
+    if result.clo? && result.memo_id == 0
+      result = rec_closure(result.lam, result.env)
+    @rec_calls[slot] = [f.memo_id, x, result]
+    result
+
   # Constant applied to argument terms in env (lazy forms handled here).
   -> ev_const_app(h, args, env)
     op = h.op
     n = args.size
     if op != OP_NONE
       if op == OP_ITE && n >= 3
-        c = ev(args[0], env)
-        if true?(c)
-          return apply_terms(ev(args[1], env), args, 3, env)
-        if false?(c)
-          return apply_terms(ev(args[2], env), args, 3, env)
-        vals = Array.new(n)
-        vals[0] = c
-        vals[1] = ev(args[1], env)
-        vals[2] = ev(args[2], env)
-        i = 3
-        while i < n
-          vals[i] = ev(args[i], env)
-          i += 1
-        return neutral(h, vals)
+        branch = eval_ite(h, args[0], args[1], args[2], env)
+        return apply_terms(branch, args, 3, env)
       if op == OP_AND && n == 2
         l = ev(args[0], env)
         if false?(l)
@@ -288,6 +389,8 @@
       return ev_const_vals_op(h, op, vals)
     name = h.name
     if @k.defs.has_key?(name)
+      if cache_nat_call?(h, n)
+        return eval_nat_call(h, ev(args[0], env))
       f = eval_const(h)
       i = 0
       while i < n
@@ -355,6 +458,8 @@
       return ev_const_vals_op(h, op, vals)
     name = h.name
     if @k.defs.has_key?(name)
+      if cache_nat_call?(h, vals.size)
+        return eval_nat_call(h, vals[0])
       return apply_vals(eval_const(h), vals, 0)
     info = @k.rec_of[name]
     if info != nil
@@ -369,26 +474,9 @@
       v0 = vals[0]
       v1 = vals[1]
       if op >= OP_ADD && op <= OP_LE
-        if !v0.clo? && !v1.clo? && v0.tag == :lit && v1.tag == :lit
-          r = lit_binary_op(op, h.ty, v0, v1)
-          if r != nil
-            return r
-        if op == OP_ADD && !v1.clo? && v1.tag == :lit && v1.ty == TY_NAT_SINGLETON && (v0.clo? || v0.tag != :lit) && v1.val <= 64
-          r = reify(v0)
-          i = 0
-          kv = v1.val
-          while i < kv
-            r = mk_app_raw(@succ_c, r)
-            i += 1
-          return r
-        return neutral(h, vals)
+        return eval_arithmetic(h, op, v0, v1)
       if op == OP_EQ
-        a = reify(v0)
-        b = reify(v1)
-        d = decide_eq(a, b)
-        if d != nil
-          return d
-        return mk_app_raw(mk_app_raw(h, a), b)
+        return eval_equality(h, v0, v1)
       if op == OP_AND
         if false?(v0)
           return @ff
@@ -431,6 +519,35 @@
       return apply_vals(r, vals, 3)
     neutral(h, vals)
 
+  -> eval_ite(h, test, yes, no, env)
+    c = ev(test, env)
+    if true?(c)
+      return ev(yes, env)
+    if false?(c)
+      return ev(no, env)
+    neutral(h, [c, ev(yes, env), ev(no, env)])
+
+  -> eval_equality(h, left, right)
+    a = reify(left)
+    b = reify(right)
+    answer = decide_eq(a, b)
+    answer == nil ? mk_app_raw(mk_app_raw(h, a), b) : answer
+
+  -> eval_arithmetic(h, op, v0, v1)
+    if !v0.clo? && !v1.clo? && v0.tag == :lit && v1.tag == :lit
+      r = lit_binary_op(op, h.ty, v0, v1)
+      if r != nil
+        return r
+    if op == OP_ADD && !v1.clo? && v1.tag == :lit && v1.ty == TY_NAT_SINGLETON && (v0.clo? || v0.tag != :lit) && v1.val <= 64
+      r = reify(v0)
+      i = 0
+      kv = v1.val
+      while i < kv
+        r = mk_app_raw(@succ_c, r)
+        i += 1
+      return r
+    mk_app_raw(mk_app_raw(h, reify(v0)), reify(v1))
+
   -> reduction_arity_const(h)
     op = h.op
     if op != OP_NONE
@@ -449,6 +566,18 @@
       return 1000000
     0
 
+  # For a step λk ih x. body, rec z s (k+1) is a closure over k and the
+  # recursive result. Force that result only when body actually uses ih.
+  -> nat_rec_function(z, s, n)
+    if n == 0
+      if z.clo? && z.memo_id == 0
+        return rec_closure(z.lam, z.env)
+      return z
+    tick
+    k = n - 1
+    env = KNatRecEnv.new(self, z, s, k, KEnv.new(mk_nat(k), s.env))
+    rec_closure(s.lam.b.b, env)
+
   -> nat_rec_val(h, z, s, nv)
     if !nv.clo? && nv.tag == :lit
       nval = nv.val
@@ -457,6 +586,8 @@
         if s.clo? && s.lam.b.tag == :lam
           if !occurs_bnd(s.lam.b.b, 0)
             return apply1(apply1(s, mk_nat(nval - 1)), z)
+          if s.lam.b.b.tag == :lam
+            return nat_rec_function(z, s, nval)
         else
           f1 = apply1(s, mk_nat(nval - 1))
           if ignores_arg?(f1)

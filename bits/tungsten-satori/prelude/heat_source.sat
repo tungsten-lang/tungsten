@@ -1,0 +1,167 @@
+-- Classical heat flow u_t = u_xx + f on a closed space-time rectangle.
+import heat_interval
+import gronwall
+
+-> heat_interval.forced (u q r f : ℝ → ℝ → ℝ) (T X : set ℝ) : Prop :=
+  ∀ t ∈ T, ∀ x ∈ X, continuous_within_box u T X t x ∧ continuous_within_box r T X t x ∧
+    continuous_within_box f T X t x ∧ has_deriv_within (u t) X x (q t x) ∧
+    has_deriv_within (q t) X x (r t x) ∧ has_deriv_within (fun s => u s x) T t (r t x+f t x)
+
++ heat_interval.forced.sub (u q r f v p s g : ℝ → ℝ → ℝ) (T X : set ℝ)
+    (hu : heat_interval.forced u q r f T X) (hv : heat_interval.forced v p s g T X) :
+    heat_interval.forced (fun t x => u t x-v t x) (fun t x => q t x-p t x) (fun t x => r t x-s t x) (fun t x => f t x-g t x) T X
+  unfold heat_interval.forced at hu hv ⊢; intro t ht x hx
+  obtain ⟨uc,rc,fc,ux,qx,ut⟩ := hu t ht x hx
+  obtain ⟨vc,sc,gc,vx,px,vt⟩ := hv t ht x hx
+  have dt := has_deriv_within.sub (fun z => u z x) (fun z => v z x) T t (r t x+f t x) (s t x+g t x) ut vt
+  have eq : r t x+f t x-(s t x+g t x) = (r t x-s t x)+(f t x-g t x) := by ring
+  rw [eq] at dt
+  exact ⟨by auto,by auto,by auto,has_deriv_within.sub (u t) (v t) X x (q t x) (p t x) ux vx,
+    has_deriv_within.sub (q t) (p t) X x (r t x) (s t x) qx px,dt⟩
+
+-> heat_interval.work (u f : ℝ → ℝ → ℝ) (a b t : ℝ) : ℝ := darboux.integral a b (fun x => u t x*f t x)
+
++ heat_interval.forced.energy_rate (u q r f : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b)) :
+    interval.deriv (heat_interval.energy u a b) (fun t => 2*(u t b*q t b-u t a*q t a-heat_interval.energy q a b t+heat_interval.work u f a b t)) c d
+  unfold heat_interval.forced at flow
+  have density : has_continuous_time_deriv (fun t x => (u t x)^2) (fun t x => 2*(u t x*(r t x+f t x))) (Icc c d) (Icc a b)
+    apply has_continuous_time_deriv.sq u (fun s x => r s x+f s x)
+    intro t ht x hx; obtain ⟨uc,rc,fc,ux,qx,ut⟩ := flow t ht x hx
+    exact ⟨uc,continuous_within_box.add r f (Icc c d) (Icc a b) t x rc fc,ut⟩
+  unfold interval.deriv; intro t ct td
+  have deriv := darboux.integral.time_deriv (fun s x => (u s x)^2) (fun s x => 2*(u s x*(r s x+f s x))) a b c d t ab ct td density
+  have spatial := flow t ⟨ct,td⟩
+  have mixed := darboux.integral.box_slice (fun s x => u s x*r s x) (Icc c d) a b t ⟨ct,td⟩ ab (by intro x hx; obtain ⟨uc,rc,rest⟩ := spatial x hx; auto)
+  have work := darboux.integral.box_slice (fun s x => u s x*f s x) (Icc c d) a b t ⟨ct,td⟩ ab (by intro x hx; obtain ⟨uc,rc,fc,rest⟩ := spatial x hx; auto)
+  have ux : ∀ x, a ≤ x → x ≤ b → has_deriv_within (u t) (Icc a b) x (q t x) := by intro x lo hi; have h := spatial x ⟨lo,hi⟩; exact h.2.2.2.1
+  have qx : ∀ x, a ≤ x → x ≤ b → has_deriv_within (q t) (Icc a b) x (r t x) := by intro x lo hi; have h := spatial x ⟨lo,hi⟩; exact h.2.2.2.2.1
+  have balance : heat_interval.energy q a b t+heat_interval.work u r a b t = u t b*q t b-u t a*q t a := heat_interval.gradient_balance (u t) (q t) (r t) a b (heat_interval.work u r a b t) ab mixed ux qx
+  have sum := darboux.add (fun x => u t x*r t x) (fun x => u t x*f t x) a b (heat_interval.work u r a b t) (heat_interval.work u f a b t) mixed work
+  have twice := darboux.scale (fun x => u t x*r t x+u t x*f t x) a b (heat_interval.work u r a b t+heat_interval.work u f a b t) 2 sum
+  have cert := darboux.congr (fun x => 2*(u t x*r t x+u t x*f t x)) (fun x => 2*(u t x*(r t x+f t x))) a b (2*(heat_interval.work u r a b t+heat_interval.work u f a b t)) twice (by intro x lo hi; ring)
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  have value := agree a b (fun x => 2*(u t x*(r t x+f t x))) (2*(heat_interval.work u r a b t+heat_interval.work u f a b t)) cert
+  have rate : darboux.integral a b (fun x => 2*(u t x*(r t x+f t x))) = 2*(u t b*q t b-u t a*q t a-heat_interval.energy q a b t+heat_interval.work u f a b t) := by linarith
+  rw [rate] at deriv; exact deriv
+
+@[auto] + heat_interval.forced.energy_le (u q r f : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b))
+    (budget : ∀ t, c ≤ t → t ≤ d → u t b*q t b-u t a*q t a+heat_interval.work u f a b t ≤ heat_interval.energy q a b t) :
+    heat_interval.energy u a b d ≤ heat_interval.energy u a b c
+  have rate := heat_interval.forced.energy_rate u q r f a b c d ab flow
+  apply interval.nonincreasing_of_deriv_nonpos (heat_interval.energy u a b) (fun t => 2*(u t b*q t b-u t a*q t a-heat_interval.energy q a b t+heat_interval.work u f a b t)) c d cd rate
+  intro t lo hi; linarith [budget t lo hi]
+
+@[auto] + heat_interval.forced.insulated (u q r f : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b))
+    (ends : ∀ t, c ≤ t → t ≤ d → q t a = 0 ∧ q t b = 0)
+    (work : ∀ t, c ≤ t → t ≤ d → heat_interval.work u f a b t ≤ heat_interval.energy q a b t) :
+    heat_interval.energy u a b d ≤ heat_interval.energy u a b c
+  apply heat_interval.forced.energy_le u q r f a b c d ab cd flow
+  intro t lo hi; obtain ⟨left,right⟩ := ends t lo hi; rw [left,right]; linarith [work t lo hi]
+
+@[auto] + heat_interval.forced.dissipative (u q r f : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b))
+    (ends : ∀ t, c ≤ t → t ≤ d → q t a = 0 ∧ q t b = 0)
+    (density : ∀ t, c ≤ t → t ≤ d → ∀ x, a ≤ x → x ≤ b → u t x*f t x ≤ (q t x)^2) :
+    heat_interval.energy u a b d ≤ heat_interval.energy u a b c
+  apply heat_interval.forced.insulated u q r f a b c d ab cd flow ends
+  unfold heat_interval.forced at flow; intro t lo hi
+  have row := flow t ⟨lo,hi⟩
+  have work := darboux.integral.box_slice (fun s x => u s x*f s x) (Icc c d) a b t ⟨lo,hi⟩ ab (by intro x hx; obtain ⟨uc,rc,fc,rest⟩ := row x hx; auto)
+  have sq := darboux.integral.sq_of_deriv (q t) (r t) a b ab (by intro x hx; have h := row x hx; exact h.2.2.2.2.1)
+  exact darboux.mono (fun x => u t x*f t x) (fun x => (q t x)^2) a b (heat_interval.work u f a b t) (heat_interval.energy q a b t) work sq (density t lo hi)
+
++ heat_interval.work_le (u f : ℝ → ℝ → ℝ) (T : set ℝ) (a b t : ℝ) (ab : a ≤ b) (ht : t ∈ T)
+    (cont : ∀ x ∈ (Icc a b), continuous_within_box u T (Icc a b) t x ∧ continuous_within_box f T (Icc a b) t x) :
+    2*heat_interval.work u f a b t ≤ heat_interval.energy u a b t+heat_interval.energy f a b t
+  have mixed := darboux.integral.box_slice (fun s x => u s x*f s x) T a b t ht ab (by intro x hx; obtain ⟨uc,fc⟩ := cont x hx; auto)
+  have left := darboux.integral.continuous_within (fun x => (u t x)^2) a b ab (by intro x lo hi; exact continuous_at.comp_within (fun z => z^2) (u t) (Icc a b) x (by auto) (continuous_within_box.slice u T (Icc a b) t x ht (cont x ⟨lo,hi⟩).1))
+  have right := darboux.integral.continuous_within (fun x => (f t x)^2) a b ab (by intro x lo hi; exact continuous_at.comp_within (fun z => z^2) (f t) (Icc a b) x (by auto) (continuous_within_box.slice f T (Icc a b) t x ht (cont x ⟨lo,hi⟩).2))
+  have twice := darboux.scale (fun x => u t x*f t x) a b (heat_interval.work u f a b t) 2 mixed
+  have sum := darboux.add (fun x => (u t x)^2) (fun x => (f t x)^2) a b (heat_interval.energy u a b t) (heat_interval.energy f a b t) left right
+  exact darboux.mono (fun x => 2*(u t x*f t x)) (fun x => (u t x)^2+(f t x)^2) a b (2*heat_interval.work u f a b t) (heat_interval.energy u a b t+heat_interval.energy f a b t) twice sum (by intro x lo hi; linarith [sq_nonneg.real (u t x-f t x)])
+
+@[auto] + heat_interval.forced.bound (u q r f : ℝ → ℝ → ℝ) (a b c d K : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b))
+    (boundary : ∀ t, c ≤ t → t ≤ d → u t b*q t b ≤ u t a*q t a)
+    (source : ∀ t, c ≤ t → t ≤ d → heat_interval.energy f a b t ≤ K) :
+    heat_interval.energy u a b d ≤ exp (d-c)*heat_interval.energy u a b c+(exp (d-c)-1)*K
+  have rate := heat_interval.forced.energy_rate u q r f a b c d ab flow
+  apply gronwall.affine (heat_interval.energy u a b) (fun t => 2*(u t b*q t b-u t a*q t a-heat_interval.energy q a b t+heat_interval.work u f a b t)) c d K cd rate
+  unfold heat_interval.forced at flow; intro t lo hi
+  have slice := flow t ⟨lo,hi⟩
+  have sq := darboux.integral.sq_of_deriv (q t) (r t) a b ab (by intro x hx; have h := slice x hx; exact h.2.2.2.2.1)
+  have pos := darboux.nonneg (fun x => (q t x)^2) a b (heat_interval.energy q a b t) sq (by intro x ax xb; exact sq_nonneg.real (q t x))
+  have work := heat_interval.work_le u f (Icc c d) a b t ab ⟨lo,hi⟩ (by intro x hx; obtain ⟨uc,rc,fc,rest⟩ := slice x hx; exact ⟨uc,fc⟩)
+  linarith [boundary t lo hi,source t lo hi]
+
+@[auto] + heat_interval.forced.stability (u q r f v p s g : ℝ → ℝ → ℝ) (a b c d K : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (hu : heat_interval.forced u q r f (Icc c d) (Icc a b))
+    (hv : heat_interval.forced v p s g (Icc c d) (Icc a b))
+    (ends : ∀ t, c ≤ t → t ≤ d → q t a = p t a ∧ q t b = p t b)
+    (source : ∀ t, c ≤ t → t ≤ d → heat_interval.energy (fun k x => f k x-g k x) a b t ≤ K) :
+    heat_interval.energy (fun t x => u t x-v t x) a b d ≤ exp (d-c)*heat_interval.energy (fun t x => u t x-v t x) a b c+(exp (d-c)-1)*K
+  have diff := heat_interval.forced.sub u q r f v p s g (Icc c d) (Icc a b) hu hv
+  apply heat_interval.forced.bound (fun t x => u t x-v t x) (fun t x => q t x-p t x) (fun t x => r t x-s t x) (fun t x => f t x-g t x) a b c d K ab cd diff
+  · intro t lo hi; obtain ⟨left,right⟩ := ends t lo hi; rw [left,right]; linarith
+  · exact source
+
+-> heat_interval.content (u : ℝ → ℝ → ℝ) (a b t : ℝ) : ℝ := darboux.integral a b (u t)
+
++ heat_interval.forced.content_rate (u q r f : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b)) :
+    interval.deriv (heat_interval.content u a b) (fun t => q t b-q t a+heat_interval.content f a b t) c d
+  unfold heat_interval.forced at flow
+  have regular : has_continuous_time_deriv u (fun t x => r t x+f t x) (Icc c d) (Icc a b)
+    unfold has_continuous_time_deriv; intro t ht x hx
+    obtain ⟨uc,rc,fc,ux,qx,ut⟩ := flow t ht x hx
+    exact ⟨continuous_within_box.slice u (Icc c d) (Icc a b) t x ht uc,by auto,ut⟩
+  unfold interval.deriv; intro t ct td
+  have deriv := darboux.integral.time_deriv u (fun k x => r k x+f k x) a b c d t ab ct td regular
+  have row := flow t ⟨ct,td⟩
+  have ri := darboux.integral.box_slice r (Icc c d) a b t ⟨ct,td⟩ ab (by intro x hx; have h := row x hx; exact h.2.1)
+  have fi := darboux.integral.box_slice f (Icc c d) a b t ⟨ct,td⟩ ab (by intro x hx; have h := row x hx; exact h.2.2.1)
+  have flux := darboux.eval_primitive (q t) (r t) a b (heat_interval.content r a b t) ri (by intro x lo hi; have h := row x ⟨lo,hi⟩; exact h.2.2.2.2.1)
+  have sum := darboux.add (r t) (f t) a b (heat_interval.content r a b t) (heat_interval.content f a b t) ri fi
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  have value := agree a b (fun x => r t x+f t x) (heat_interval.content r a b t+heat_interval.content f a b t) sum
+  rw [value,flux] at deriv; exact deriv
+
+-- The source and the boundary flux together account for all the change in heat content.
+@[auto] + heat_interval.forced.content_change (u q r f : ℝ → ℝ → ℝ) (a b c d I : ℝ) (ab : a ≤ b)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b))
+    (net : darboux.has_integral (fun t => q t b-q t a+heat_interval.content f a b t) c d I) :
+    heat_interval.content u a b d-heat_interval.content u a b c = I
+  have diff := heat_interval.forced.content_rate u q r f a b c d ab flow
+  unfold interval.deriv at diff
+  exact (darboux.eval_primitive (heat_interval.content u a b) (fun t => q t b-q t a+heat_interval.content f a b t) c d I net diff).symm
+
+@[auto] + heat_interval.forced.source_change (u q r f : ℝ → ℝ → ℝ) (a b c d I : ℝ) (ab : a ≤ b)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b))
+    (ends : ∀ t, c ≤ t → t ≤ d → q t a = q t b)
+    (source : darboux.has_integral (heat_interval.content f a b) c d I) :
+    heat_interval.content u a b d-heat_interval.content u a b c = I
+  apply heat_interval.forced.content_change u q r f a b c d I ab flow
+  apply darboux.congr (heat_interval.content f a b) (fun t => q t b-q t a+heat_interval.content f a b t) c d I source
+  intro t lo hi; rw [ends t lo hi]; ring
+
+@[auto] + heat_interval.forced.conserved (u q r f : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b))
+    (net : ∀ t, c ≤ t → t ≤ d → q t b-q t a+heat_interval.content f a b t = 0) :
+    heat_interval.content u a b d = heat_interval.content u a b c
+  have zero := darboux.congr (fun t => 0) (fun t => q t b-q t a+heat_interval.content f a b t) c d (0*(d-c)) (darboux.const c d 0 cd) (by intro t lo hi; linarith [net t lo hi])
+  linarith [heat_interval.forced.content_change u q r f a b c d (0*(d-c)) ab flow zero]
+
++ heat_interval.solution.zero_source (u q r : ℝ → ℝ → ℝ) (T X : set ℝ) (flow : heat_interval.solution u q r T X) :
+    heat_interval.forced u q r (fun t x => 0) T X
+  unfold heat_interval.solution at flow; unfold heat_interval.forced; intro t ht x hx
+  obtain ⟨uc,rc,ux,qx,ut⟩ := flow t ht x hx
+  exact ⟨uc,rc,by auto,ux,qx,by simpa using ut⟩
+
+@[auto] + heat_interval.solution.conserved (u q r : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.solution u q r (Icc c d) (Icc a b))
+    (ends : ∀ t, c ≤ t → t ≤ d → q t a = q t b) : heat_interval.content u a b d = heat_interval.content u a b c
+  apply interval.balance.conserved u q r a b c d ab cd (heat_interval.solution.balance u q r (Icc c d) (Icc a b) flow)
+  intro t lo hi; exact (ends t lo hi).symm

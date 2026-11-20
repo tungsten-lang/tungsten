@@ -30,6 +30,15 @@ th = d.beta_norm_thm(th)
 expected = k.bin("⇒", k.eq_tm(a, a), k.eq_tm(a, a))
 if !tm_eq(th.concl, expected) || th.hyps.size != 0 || th.tags.size != 0
   raise "lambda match did not replay as a closed kernel proof"
+# Reducing under both binders exposes first the inner eta step, then the outer.
+f = mk_var("f", ty_funs([ty_nat, ty_nat], ty_nat))
+nested = mk_lam(a, mk_lam(b, mk_app(mk_lam(z, z), mk_apps(f, [a, b]))))
+conv = d.beta_eta_conv(nested)
+if !tm_eq(conv.concl.a.b, nested) || !tm_eq(conv.concl.b, f) || !tm_eq(d.beta_eta_term(nested), f) || conv.hyps.size != 0 || conv.tags.size != 0
+  raise "nested beta-eta conversion lost the application or captured a binder"
+diagonal = mk_lam(a, mk_apps(f, [a, a]))
+if d.eta_norm_opt(diagonal) != nil
+  raise "eta contracted a function that depends on the binder"
 # Exercise elaboration and proof replay as well as the matcher itself.
 session = Session.new(".")
 session.quiet = true

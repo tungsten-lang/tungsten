@@ -1,0 +1,11 @@
++ interval (a b x : ℚ) (h : a ≤ x ∧ x ≤ b) : 2*a ≤ 2*x ∧ 2*x ≤ 2*b := by linarith [h.1, h.2]
++ mixed (n : ℕ) (z : ℤ) (q : ℚ) (r : ℝ) (h : z < 3) (k : q ≤ 4) (j : r ≤ 7) :
+    (0 ≤ n ∧ z ≤ 2) ∧ (q < 5 ∧ r ≤ 8) := by arith
++ truncated (a b : ℕ) (h : b ≤ a) : a-b+b = a ∧ b-a = 0 := by omega
++ scaled (a b c : ℤ) (h : a ≤ b) (k : 0 ≤ c) : c*a ≤ c*b ∧ c*a+a ≤ c*b+b := by nlinarith
++ signs (x y : ℝ) : 0 ≤ |x| ∧ 0 ≤ y^2 := by positivity
+
+opaque f : ℤ → ℤ
+axiom lower (x : ℤ) : 1 ≤ f x
+axiom upper (x : ℤ) : f x ≤ 9
++ cast_bounds (x : ℤ) : 0 < f x ∧ (f x : ℝ) < 10 := by linarith [lower x, upper x]

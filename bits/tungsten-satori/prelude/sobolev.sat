@@ -1,0 +1,31 @@
+-- Inhomogeneous L² Sobolev energy on the Fourier side. The inputs are a
+-- frequency radius and the real and imaginary parts of a Fourier profile.
+-- For measurable profiles and Lebesgue volume, finite energy defines H^s.
+-- Dyatlov, 18.155, Definition 12.3 (https://math.mit.edu/~dyatlov/18.155/155-notes.pdf).
+import exp_order
+import lower_integral
+
+-> sobolev.weight (s r : ℝ) : ℝ := exp (s*log (1+r^2))
+-> sobolev.density (radius : α → ℝ) (f : α → ℝ × ℝ) (s : ℝ) (x : α) : ℝ :=
+  sobolev.weight s (radius x)*((fst (f x))^2+(snd (f x))^2)
+-> sobolev.finite (volume : set α → ℝ → Prop) (radius : α → ℝ) (f : α → ℝ × ℝ) (s : ℝ) : Prop :=
+  ∃ B, lower_integral.bound volume (sobolev.density radius f s) B
+
+@[auto] + sobolev.weight_le (r s t : ℝ) (le : s ≤ t) : sobolev.weight s r ≤ sobolev.weight t r
+  unfold sobolev.weight; rw [exp_le_exp]
+  nlinarith [mul_nonneg.real (t-s) (log (1+r^2)) (by linarith) (log_nonneg (1+r^2) (by nlinarith))]
+
+@[auto] + sobolev.density_le (radius : α → ℝ) (f : α → ℝ × ℝ) (s t : ℝ) (le : s ≤ t) :
+    ∀ x, sobolev.density radius f s x ≤ sobolev.density radius f t x
+  intro x; unfold sobolev.density
+  have w := sobolev.weight_le (radius x) s t le
+  nlinarith [mul_nonneg.real (sobolev.weight t (radius x)-sobolev.weight s (radius x))
+    ((fst (f x))^2+(snd (f x))^2) (by linarith) (by nlinarith)]
+
+@[auto] + sobolev.inclusion (volume : set α → ℝ → Prop) (radius : α → ℝ) (f : α → ℝ × ℝ) (s t : ℝ)
+    (higher : sobolev.finite volume radius f t) (le : s ≤ t) : sobolev.finite volume radius f s
+  unfold sobolev.finite at higher ⊢; obtain ⟨B,bound⟩ := higher
+  use B; auto
+
++ sobolev.weight_one (r : ℝ) : sobolev.weight 1 r = 1+r^2
+  unfold sobolev.weight; rw [one_mul.real,exp_log (1+r^2) (by nlinarith)]

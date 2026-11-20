@@ -16,6 +16,9 @@ import arith
 
 + int_wrong_indices (f : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f j i)) := by auto
 
++ int_literal_wrong_indices (f : ℕ → ℕ → ℤ) :
+    (∑ i < 17, ∑ j < 3, f i j) = (∑ j < 3, ∑ i < 17, f j i) := by auto
+
 + int_wrong_function (f g : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, g i j)) := by auto
 
 + int_dependent_bound (f : ℕ → ℕ → ℤ) (n : ℕ) : (∑ i < n, (∑ j < i, f i j)) = (∑ j < n, (∑ i < j, f i j)) := by auto

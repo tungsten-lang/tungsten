@@ -1,0 +1,72 @@
+-- Heat flow in continuous time on a spatial path with vertices 0 through n.
+import derivative
+
+-- Summation by parts with the two endpoint fluxes retained.
++ sum_below.by_parts.real (u q : ℕ → ℝ) (n : ℕ) :
+    (∑ i < n+1, u i*(q (i+1)-q i)) + (∑ i < n, (u (i+1)-u i)*q (i+1)) = u n*q (n+1)-u 0*q 0
+  induction n with k ih
+  · rw [sum_below_succ 0]; simp [sum_below]; ring
+  · rw [succ_eq_add_one.nat, sum_below_succ (k+1) (fun i => u i*(q (i+1)-q i)), sum_below_succ k (fun i => (u (i+1)-u i)*q (i+1))]
+    linarith
+
+-> heat_path.energy (u : ℕ → ℝ → ℝ) (n : ℕ) (t : ℝ) : ℝ := ∑ i < n+1, (u i t)^2
+-> heat_path.dissipation (u : ℕ → ℝ → ℝ) (n : ℕ) (t : ℝ) : ℝ := ∑ i < n, (u (i+1) t-u i t)^2
+
++ heat_path.balance (u : ℕ → ℝ → ℝ) (q : ℕ → ℝ) (n : ℕ) (S : set ℝ) (t : ℝ)
+    (flow : ∀ i < n+1, has_deriv_within (u i) S t (q (i+1)-q i))
+    (edges : ∀ i < n, q (i+1) = u (i+1) t-u i t) :
+    has_deriv_within (heat_path.energy u n) S t (2*(u n t*q (n+1)-u 0 t*q 0-heat_path.dissipation u n t))
+  have parts := sum_below.by_parts.real (fun i => u i t) q n
+  have loss : (∑ i < n, (u (i+1) t-u i t)*q (i+1)) = heat_path.dissipation u n t
+    unfold heat_path.dissipation
+    apply sum_below.congr
+    intro i hi; rw [edges i hi]; ring
+  rw [loss] at parts
+  have twice := sum_below.scale.real (fun i => 2*u i t*(q (i+1)-q i)) (fun i => u i t*(q (i+1)-q i)) 2 (n+1) (by intro i hi; ring)
+  have rate : (∑ i < n+1, 2*u i t*(q (i+1)-q i)) = 2*(u n t*q (n+1)-u 0 t*q 0-heat_path.dissipation u n t) := by linarith
+  rw [← rate]
+  unfold heat_path.energy
+  apply has_deriv_within.sum_below (fun i y => (u i y)^2) (fun i => 2*u i t*(q (i+1)-q i)) S t (n+1)
+  intro i hi
+  exact has_deriv_within.sq (u i) S t (q (i+1)-q i) (flow i hi)
+
++ heat_path.energy_rate (u : ℕ → ℝ → ℝ) (q : ℕ → ℝ) (n : ℕ) (S : set ℝ) (t : ℝ)
+    (flow : ∀ i < n+1, has_deriv_within (u i) S t (q (i+1)-q i))
+    (edges : ∀ i < n, q (i+1) = u (i+1) t-u i t) (left : q 0 = 0) (right : q (n+1) = 0) :
+    has_deriv_within (heat_path.energy u n) S t (-2*heat_path.dissipation u n t)
+  have rate := heat_path.balance u q n S t flow edges
+  rw [left, right] at rate
+  auto
+
++ heat_path.energy_le (u : ℕ → ℝ → ℝ) (q : ℝ → ℕ → ℝ) (n : ℕ) (a b : ℝ) (ab : a ≤ b)
+    (flow : ∀ t, a ≤ t → t ≤ b → ∀ i < n+1, has_deriv_within (u i) (fun z => a ≤ z ∧ z ≤ b) t (q t (i+1)-q t i))
+    (edges : ∀ t, a ≤ t → t ≤ b → ∀ i < n, q t (i+1) = u (i+1) t-u i t)
+    (ends : ∀ t, a ≤ t → t ≤ b → q t 0 = 0 ∧ q t (n+1) = 0) : heat_path.energy u n b ≤ heat_path.energy u n a
+  apply interval.nonincreasing_of_deriv_nonpos (heat_path.energy u n) (fun t => -2*heat_path.dissipation u n t) a b ab
+  · intro t lo hi
+    have bc := ends t lo hi
+    exact heat_path.energy_rate u (q t) n (fun z => a ≤ z ∧ z ≤ b) t (flow t lo hi) (edges t lo hi) bc.1 bc.2
+  · intro t lo hi
+    unfold heat_path.dissipation
+    have positive := sum_below.const_le.real (fun i => (u (i+1) t-u i t)^2) 0 n (by intro i hi; exact sq_nonneg.real (u (i+1) t-u i t))
+    linarith
+
+-- Canonical insulated flux at the j-th face. The endpoint faces are 0 and n+1.
+-> heat_path.flux (u : ℕ → ℝ → ℝ) (n : ℕ) (t : ℝ) (j : ℕ) : ℝ :=
+  if j = 0 ∨ n < j then 0 else u j t-u (j-1) t
+
++ heat_path.flux_inner (u : ℕ → ℝ → ℝ) (n i : ℕ) (t : ℝ) (hi : i < n) :
+    heat_path.flux u n t (i+1) = u (i+1) t-u i t
+  have inside : ¬ (i+1 = 0 ∨ n < i+1)
+    intro outside; obtain z | beyond := outside <;> omega
+  have prev : i+1-1 = i := by omega
+  simp [heat_path.flux, inside, prev]
+
+@[auto] + heat_path.insulated (u : ℕ → ℝ → ℝ) (n : ℕ) (a b : ℝ) (ab : a ≤ b)
+    (flow : ∀ t, a ≤ t → t ≤ b → ∀ i < n+1, has_deriv_within (u i) (fun z => a ≤ z ∧ z ≤ b) t
+      (heat_path.flux u n t (i+1)-heat_path.flux u n t i)) : heat_path.energy u n b ≤ heat_path.energy u n a
+  apply heat_path.energy_le u (heat_path.flux u n) n a b ab flow
+  · intro t lo hi i inside; exact heat_path.flux_inner u n i t inside
+  · intro t lo hi
+    have last : n+1 = 0 ∨ n < n+1 := by right; omega
+    simp [heat_path.flux, last]

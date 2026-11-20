@@ -1,0 +1,12 @@
+import quadratic_roots
+
++ zero_scale (f : ℝ → ℝ) (form : completed_square f 0 0 1 1) : ∃ x, f x = 0 := by auto
++ flat (f : ℝ → ℝ) (form : completed_square f 1 0 3 1) : ∃ x, f x = 0 := by auto
++ imaginary (f : ℝ → ℝ) (form : completed_square f 1 2 0 (-1)) : ∃ x, f x = 0 := by auto
++ double_count (f : ℝ → ℝ) (form : completed_square f 1 2 0 0) :
+    ∃ u v, u ≠ v ∧ ∀ x, f x = 0 ↔ x = u ∨ x = v := by auto
++ wrong_sign (f : ℝ → ℝ) (form : completed_square f (-1) 2 3 (-1)) : 0 < f 0 := by auto
++ constant (a b c : ℝ) (disc : 0 ≤ b^2-4*a*c) : ∃ x, a*x^2+b*x+c = 0 := by auto
+
++ wrong_function (f g : ℝ → ℝ) (form : completed_square f 1 3 2 (-1)) (x : ℝ) : g x ≠ 0 := by auto
++ at_boundary (f : ℝ → ℝ) (form : completed_square f 1 1 (-1) 1) (x : ℝ) (root : f x = 0) : 0 < x := by auto

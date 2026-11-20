@@ -1,0 +1,4 @@
+-- Sets are predicates. The parser spells subset as ⊆.
+-> subset (A B : set α) : Prop := ∀ x ∈ A, x ∈ B
+-> set.inter (A B : set α) : set α := fun x => A x ∧ B x
+-> set.union (A B : set α) : set α := fun x => A x ∨ B x

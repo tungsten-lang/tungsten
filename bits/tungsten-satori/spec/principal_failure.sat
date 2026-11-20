@@ -1,0 +1,7 @@
+import principal
+
++ wrong_generator (a b : ℤ) (h : principal.congruent 2 a b) : principal.congruent 4 a b := by auto
++ unrelated_function (m a b : ℤ) (f : ℤ → ℤ) (h : principal.congruent m a b) : principal.congruent m (f a) (f b) := by auto
++ changed_exponent (m a b : ℤ) (h : principal.congruent m a b) : principal.congruent m (a^2) (b^3) := by auto
++ missing_factor (m a b c d : ℤ) (h : principal.congruent m a b) : principal.congruent m (a*c) (b*d) := by auto
++ invalid_zero : principal.congruent 0 1 2 := by auto

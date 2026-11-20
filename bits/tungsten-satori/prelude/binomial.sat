@@ -1,0 +1,71 @@
+-- Factorial products and shifts of binomial coefficients.
+import factorial
+
+-- The k consecutive factors starting at a, with empty product one.
+-> asc_factorial (a : ℕ) : ℕ → ℕ
+  | 0 => 1
+  | k + 1 => asc_factorial a k * (a+k)
+
++ asc_factorial.factorial (a k : ℕ) : asc_factorial (a+1) k * fact a = fact (a+k)
+  induction k with k ih
+  · simp [asc_factorial]
+  · rw [succ_eq_add_one.nat,← add_assoc.nat,fact_succ]
+    simp only [asc_factorial]; linear_combination (a+k+1)*ih
+
++ choose.factorial (a b : ℕ) : choose (a+b) a * fact a * fact b = fact (a+b)
+  have h := choose_mul_fact (a+b) a (by omega)
+  have e : a+b-a = b := by omega
+  rw [e] at h; exact h
+
+@[auto] + choose.shift (n k h : ℕ) :
+    choose (n+h) (k+h) * asc_factorial (k+1) h = choose n k * asc_factorial (n+1) h
+  by_cases bound : k ≤ n
+  · have left := choose_mul_fact (n+h) (k+h) (by omega)
+    have diff : n+h-(k+h) = n-k := by omega
+    rw [diff,← asc_factorial.factorial k h,← asc_factorial.factorial n h] at left
+    have right := choose_mul_fact n k bound
+    have eq : (choose (n+h) (k+h)*asc_factorial (k+1) h)*(fact k*fact (n-k)) = (choose n k*asc_factorial (n+1) h)*(fact k*fact (n-k))
+      linear_combination left - (asc_factorial (n+1) h)*right
+    have pos := mul_pos.nat (fact k) (fact (n-k)) (fact_pos k) (fact_pos (n-k))
+    nlinarith
+  · rw [choose_eq_zero_of_lt n k (by omega),choose_eq_zero_of_lt (n+h) (k+h) (by omega)]
+    ring
+
++ choose.add_symm (a b : ℕ) : choose (a+b) a = choose (a+b) b
+  have h := choose_symm (a+b) b (by omega)
+  have e : a+b-b = a := by omega
+  rw [e] at h; exact h
+
+@[auto] + choose.shift_symm (a b h : ℕ) :
+    choose (a+b+h) (a+h)*asc_factorial (a+1) h = choose (a+b+h) (b+h)*asc_factorial (b+1) h
+  rw [choose.shift,choose.shift,choose.add_symm a b]
+
+@[auto] + choose.mul_factorial (a k : ℕ) : fact k * choose (a+k) k = asc_factorial (a+1) k
+  have h := choose.factorial k a
+  rw [add_comm.nat k a] at h
+  have eq : (fact k*choose (a+k) k)*fact a = asc_factorial (a+1) k*fact a := by linarith [asc_factorial.factorial a k]
+  nlinarith [fact_pos a]
+
+@[auto] + choose.positive (n k : ℕ) (bound : k ≤ n) : 0 < choose n k
+  have h := choose_mul_fact n k bound
+  by_contra nonpos
+  have zero : choose n k = 0 := by omega
+  rw [zero] at h; linarith [fact_pos n]
+
+-- Successive choices partition a+b+c objects into three labelled parts.
+@[auto] + choose.factorial_three (a b c : ℕ) :
+    fact c * choose (a+b+c) c * (choose (a+b) a * (fact a*fact b)) = fact (a+b+c)
+  have pair := choose.factorial a b
+  have total := choose.factorial c (a+b)
+  rw [add_comm.nat c (a+b)] at total
+  linear_combination (fact c*choose (a+b+c) c)*pair + total
+
+@[auto] + choose.succ_mul (n k : ℕ) : choose n k * (n+1) = (k+1)*choose (n+1) (k+1)
+  have shifted := choose.shift n k 1
+  simp only [asc_factorial] at shifted; linarith
+
+@[simp] + choose.positive_iff (n k : ℕ) : 0 < choose n k ↔ k ≤ n
+  constructor
+  · intro pos; by_contra outside
+    rw [choose_eq_zero_of_lt n k (by omega)] at pos; omega
+  · exact choose.positive n k

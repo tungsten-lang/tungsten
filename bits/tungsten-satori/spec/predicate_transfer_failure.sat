@@ -1,0 +1,17 @@
+import sobolev
+
+-> on_interval (P : ℝ → Prop) (a b : ℝ) : Prop := ∀ x, a ≤ x → x ≤ b → P x
++ wider (P : ℝ → Prop) (h : on_interval P 1 3) : on_interval P 0 3 := by auto
++ changed_property (P Q : ℝ → Prop) (h : on_interval P 0 4) : on_interval Q 1 3 := by auto
+
+-> on_profiles (v : set α → ℝ → Prop) (r : α → ℝ) (P : (α → ℝ × ℝ) → Prop)
+    (s : ℝ) : Prop := ∀ f, sobolev.finite v r f s → P f
++ wrong_order (v : set α → ℝ → Prop) (r : α → ℝ) (P : (α → ℝ × ℝ) → Prop)
+    (higher : on_profiles v r P 1) : on_profiles v r P 0 := by auto
++ missing_guard (ok P : (α → ℝ × ℝ) → Prop) (v : set α → ℝ → Prop) (r : α → ℝ)
+    (lower : ∀ g, ok g → sobolev.finite v r g 0 → P g)
+    (f : α → ℝ × ℝ) (energy : sobolev.finite v r f 1) : P f := by auto
+
+opaque regular_value : ℝ → Prop
+axiom initial_interval : on_interval regular_value 0 4
++ unsupplied : on_interval regular_value 1 3 := by auto

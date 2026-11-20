@@ -1,0 +1,12 @@
+import walsh
+
++ missing_orthogonality (K : ℕ → ℕ → ℝ) (x : ℕ → ℝ) :
+    finite_l2.dot 3 (finite_l2.transform 2 K x) (finite_l2.transform 2 K x) = 5*finite_l2.dot 2 x x := by auto
+
++ wrong_scale (x : ℕ → ℝ) : finite_l2.dot 4 (walsh.transform 2 x) (walsh.transform 2 x) = finite_l2.dot 4 x x := by auto
+
++ unchecked_multiplier (n : ℕ) (w f : ℕ → ℝ) :
+    finite_l2.dot n (fun i => w i*f i) (fun i => w i*f i) ≤ finite_l2.dot n f f := by auto
+
++ ordinary_trace (d : ℕ) (B : ℕ → ℕ → ℝ) :
+    (∑ h < 2^d, walsh.entry d B h h) = ∑ x < 2^d, walsh.parity d x*B x x := by auto

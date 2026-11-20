@@ -1,0 +1,21 @@
+import finite_bounds
+
++ offset (f : ℕ → ℝ) (hi : ℕ) (pos : ∀ i, 3 ≤ i → i < hi → 2 < f i) :
+    ∃ c : ℝ, 2 < c ∧ c ≤ 7 ∧ ∀ i, 3 ≤ i → i < hi → c ≤ f i := by auto
+
++ empty_interval (f : ℕ → ℝ) :
+    ∃ c : ℝ, 4 < c ∧ c ≤ 5 ∧ ∀ i : ℕ, 3 ≤ i → i < 2 → c ≤ f i
+  apply finite.lower_margin <;> auto
+
++ bounded_tail (f : ℕ → ℝ) (pos : ∀ i : ℕ, 1 ≤ i → 0 < f i)
+    (tail : ∃ n : ℕ, ∀ i : ℕ, n ≤ i → 2 ≤ f i) :
+    ∃ c : ℝ, 0 < c ∧ ∀ i : ℕ, 1 ≤ i → c ≤ f i
+  auto
+
+opaque samples : ℕ → ℝ
+-> sample_bound (c : ℝ) (i : ℕ) : Prop := c ≤ samples i
+axiom samples_positive : ∀ i : ℕ, 1 ≤ i → 0 < samples i
+axiom samples_eventual : ∃ n : ℕ, ∀ i : ℕ, n ≤ i → sample_bound 2 i
+
++ uniform_samples : ∃ c : ℝ, 0 < c ∧ ∀ i : ℕ, 1 ≤ i → sample_bound c i
+  auto [samples_positive, samples_eventual]

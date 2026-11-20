@@ -1,0 +1,24 @@
+import gronwall
+
++ growth (E d : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b) (diff : interval.deriv E d a b)
+    (bound : ∀ t, a ≤ t → t ≤ b → d t ≤ c*E t) : E b ≤ exp (c*(b-a))*E a := by auto
+
++ zero_energy (E d : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b) (diff : interval.deriv E d a b)
+    (bound : ∀ t, a ≤ t → t ≤ b → d t ≤ c*E t) (initial : E a = 0) (energy : 0 ≤ E b) : E b = 0 := by auto
+
++ no_crossing (f g u v : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b)
+    (df : interval.deriv f u a b) (dg : interval.deriv g v a b) (initial : f a ≤ g a)
+    (rate : ∀ t, a ≤ t → t ≤ b → g t < f t → u t-v t ≤ c*(f t-g t)) : f b ≤ g b := by auto
+
++ comparison (H : ℝ → ℝ → ℝ) (f g u v : ℝ → ℝ) (a b c : ℝ) (ab : a ≤ b)
+    (df : interval.deriv f u a b) (dg : interval.deriv g v a b) (initial : f a ≤ g a)
+    (lip : one_sided_lipschitz_on H a b c) (sub : ∀ t, a ≤ t → t ≤ b → u t ≤ H t (f t))
+    (sup : ∀ t, a ≤ t → t ≤ b → H t (g t) ≤ v t) : f b ≤ g b := by auto
+
+-- E(t) = -t starts at zero and satisfies E' ≤ 0, yet is negative at 1.
++ negative_endpoint : ∃ E d : ℝ → ℝ, interval.deriv E d 0 1 ∧ E 0 = 0 ∧
+    (∀ t, 0 ≤ t → t ≤ 1 → d t ≤ 0*E t) ∧ E 1 < 0
+  use (fun t => (-1)*t); use (fun t => (-1 : ℝ))
+  constructor
+  · unfold interval.deriv; intro t lo hi; exact has_deriv_within.scale_id (-1) (fun z => 0 ≤ z ∧ z ≤ 1) t
+  · exact ⟨by ring,by intro t lo hi; linarith,by norm_num⟩

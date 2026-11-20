@@ -1,0 +1,36 @@
+import sobolev
+
++ rougher (volume : set α → ℝ → Prop) (r : α → ℝ) (f : α → ℝ × ℝ) (s t : ℝ)
+    (hf : sobolev.finite volume r f t) (le : s ≤ t) : sobolev.finite volume r f s := by auto
+
++ across_zero (volume : set α → ℝ → Prop) (r : α → ℝ) (f : α → ℝ × ℝ)
+    (hf : sobolev.finite volume r f (1/3)) : sobolev.finite volume r f (-2) := by auto
+
++ same_bound (volume : set α → ℝ → Prop) (r : α → ℝ) (f : α → ℝ × ℝ) (s t B : ℝ)
+    (hf : lower_integral.bound volume (sobolev.density r f t) B) (le : s ≤ t) :
+    lower_integral.bound volume (sobolev.density r f s) B := by auto
+
++ origin (s : ℝ) : sobolev.weight s 0 = 1 := by simp [sobolev.weight,log_one,exp_zero]
+
++ order_zero (r : ℝ) : sobolev.weight 0 r = 1 := by simp [sobolev.weight,exp_zero]
+
+-- One complex Fourier coefficient 3+4i at radius 2 has energy 25 at order
+-- zero and 125 at order one. The smaller budget cannot be carried upwards.
+-> single_mode (s : ℝ) : ℕ → ℝ :=
+  sobolev.density (fun x => (2 : ℝ)) (fun x => ((3 : ℝ),(4 : ℝ))) s
+
++ mode_zero (x : ℕ) : single_mode 0 x = 25 := by simp [single_mode,sobolev.density,sobolev.weight,exp_zero] <;> ring
++ mode_one (x : ℕ) : single_mode 1 x = 125 := by simp [single_mode,sobolev.density,sobolev.weight_one] <;> ring
+
++ exact_energy (B : ℝ) : lower_integral.bound (lower_integral.atom 0) (single_mode 1) B ↔ 125 ≤ B
+  have e := lower_integral.at_atom 0 (single_mode 1) B (by intro x; rw [mode_one]; decide)
+  simpa [mode_one] using e
+
++ lost_budget : lower_integral.bound (lower_integral.atom 0) (single_mode 0) 25 ∧
+    ¬ lower_integral.bound (lower_integral.atom 0) (single_mode 1) 25
+  constructor
+  · exact (lower_integral.at_atom 0 (single_mode 0) 25 (by intro x; rw [mode_zero]; decide)).mpr (by rw [mode_zero]; decide)
+  · intro h; have too_small := (exact_energy 25).mp h; linarith
+
+#axioms rougher
+#axioms lost_budget

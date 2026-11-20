@@ -1,0 +1,285 @@
+-- Finite principal covers and gluing via fractions over the base ring.
+import affine_gluing
+
+-> localization.principal_cover (R : ring_ops α) (f : β → α) (ids : list β) : Prop :=
+  ∃ w : β → α, ideal.combination R w f ids = R.one
+
+@[auto] + localization.principal_cover.covers (R : ring_ops α) (f : β → α) (ids : list β)
+    (cover : localization.principal_cover R f ids) (P : set α) (prime : P ∈ spectrum R) :
+    ∃ i ∈ ids, P ∈ spectrum.D R (f i)
+  unfold localization.principal_cover at cover; obtain ⟨w,cert⟩ := cover
+  exact spectrum.bezout_cover R w f ids cert P prime
+
++ ideal.combination.scale (R : ring_ops α) (hr : comm_ring R) (w f : β → α) (c : α) (ids : list β) :
+    ideal.combination R (fun i => R.mul c (w i)) f ids = R.mul c (ideal.combination R w f ids)
+  induction ids with i rest ih
+  · exact (comm_ring.mul_zero R hr c).symm
+  · simp only [ideal.combination,ih,hr.2.2.2.2.1,hr.2.2.2.2.2.2.2]
+
+-- Replace the generators of a partition of unity by arbitrary powers. Accumulate
+-- terms already in P; coefficients of the remaining terms may change at each step.
++ localization.principal_cover.induct (R : ring_ops α) (hr : comm_ring R) (f : β → α) (P : set α)
+    (add : ∀ x y, P x → P y → P (R.add x y)) (scale : ∀ c x, P x → P (R.mul c x)) (ids : list β) :
+    ∀ w : β → α, ∀ z, P z → R.add z (ideal.combination R w f ids) = R.one →
+      (∀ i ∈ ids, ∃ d ∈ ring_ops.powers R (f i), P d) → P R.one
+  induction ids with w z pz eq local i rest ih w z pz eq local
+  · have e : R.add z R.zero = z := by rw [hr.2.1,hr.2.2.1]
+    simp only [ideal.combination,e] at eq; rw [← eq]; exact pz
+  · set tail := ideal.combination R w f rest with et
+    set t := R.add z tail with ht
+    have cert : ring_ops.comaximal R (f i) t
+      unfold ring_ops.comaximal; use w i; use R.one
+      simp only [ideal.combination] at eq
+      rw [hr.2.2.2.2.2.2.1,ht,et,← hr.1,hr.2.1 (R.mul (w i) (f i)) z,hr.1]; exact eq
+    obtain ⟨d,hd,pd⟩ := local i (by simp)
+    unfold ring_ops.powers at hd; obtain ⟨n,en⟩ := hd
+    have raised := ring_ops.comaximal.power_left R hr (f i) t cert n
+    rw [en] at raised; unfold ring_ops.comaximal at raised; obtain ⟨b,c,bezout⟩ := raised
+    apply ih (fun j => R.mul c (w j)) (R.add (R.mul b d) (R.mul c z))
+    · exact add (R.mul b d) (R.mul c z) (scale b d pd) (scale c z pz)
+    · rw [ideal.combination.scale R hr w f c rest,hr.1,← hr.2.2.2.2.2.2.2,← et,← ht]; exact bezout
+    · intro j hj; exact local j (by simp only [mem_cons]; right; exact hj)
+
++ localization.principal_cover.one (R : ring_ops α) (hr : comm_ring R) (f : β → α) (ids : list β)
+    (cover : localization.principal_cover R f ids) (P : set α) (zero : P R.zero)
+    (add : ∀ x y, P x → P y → P (R.add x y)) (scale : ∀ c x, P x → P (R.mul c x))
+    (local : ∀ i ∈ ids, ∃ d ∈ ring_ops.powers R (f i), P d) : P R.one
+  unfold localization.principal_cover at cover; obtain ⟨w,cert⟩ := cover
+  exact localization.principal_cover.induct R hr f P add scale ids w R.zero zero (by rw [hr.2.2.1,cert]) local
+
+-- Equality after restriction to D(f) may require a power even with a common denominator.
+-> localization.away_equal (R : ring_ops α) (f x y : α) : Prop :=
+  ∃ t ∈ ring_ops.powers R f, R.mul t x = R.mul t y
+
++ localization.away_equal.symm (R : ring_ops α) (f x y : α) (eq : localization.away_equal R f x y) : localization.away_equal R f y x
+  unfold localization.away_equal at eq ⊢; obtain ⟨p,hp,clear⟩ := eq; exact ⟨p,hp,clear.symm⟩
+
++ localization.away_equal.trans (R : ring_ops α) (hr : comm_ring R) (f x y z : α)
+    (left : localization.away_equal R f x y) (right : localization.away_equal R f y z) : localization.away_equal R f x z
+  unfold localization.away_equal at left right ⊢; obtain ⟨p,hp,ex⟩ := left; obtain ⟨q,hq,ez⟩ := right
+  have closed := multiplicative.powers R hr f
+  use R.mul q p; constructor
+  · exact closed.2 q p hq hp
+  · have swap := comm_ring.mul_swap R hr
+    rw [hr.2.2.2.2.1 q p x,ex,swap q p y,ez,swap p q z,hr.2.2.2.2.1 q p z]
+
++ localization.away_equal.scale (R : ring_ops α) (hr : comm_ring R) (f x y c : α) (eq : localization.away_equal R f x y) :
+    localization.away_equal R f (R.mul c x) (R.mul c y)
+  unfold localization.away_equal at eq ⊢; obtain ⟨p,hp,clear⟩ := eq
+  exact ⟨p,hp,by rw [comm_ring.mul_swap R hr p c x,clear,comm_ring.mul_swap R hr c p y]⟩
+
+@[auto] + localization.finite_ext (R : ring_ops α) (hr : comm_ring R) (f : β → α) (ids : list β)
+    (cover : localization.principal_cover R f ids) (x y : α)
+    (local : ∀ i ∈ ids, localization.away_equal R (f i) x y) : x=y
+  set P := fun t => R.mul t x = R.mul t y with ep
+  have full : P R.one
+    apply localization.principal_cover.one R hr f ids cover P
+    · simp only [ep]; rw [hr.2.2.2.2.2.1 R.zero x,hr.2.2.2.2.2.1 R.zero y,comm_ring.mul_zero R hr,comm_ring.mul_zero R hr]
+    · intro a b ha hb; simp only [ep] at ha hb ⊢; rw [comm_ring.add_mul R hr a b x,comm_ring.add_mul R hr a b y,ha,hb]
+    · intro a b hb; simp only [ep] at hb ⊢; rw [hr.2.2.2.2.1 a b x,hr.2.2.2.2.1 a b y,hb]
+    · intro i hi; rw [ep]; exact local i hi
+  simp only [ep,hr.2.2.2.2.2.2.1] at full; exact full
+
+-- Patch representatives whose cross-products already coincide in the base ring.
++ localization.patch_cleared (R : ring_ops α) (hr : comm_ring R) (f d u : β → α) (ids : list β)
+    (cover : localization.principal_cover R f ids) (den : ∀ i ∈ ids, d i ∈ ring_ops.powers R (f i))
+    (agree : ∀ i ∈ ids, ∀ j ∈ ids, R.mul (d j) (u i) = R.mul (d i) (u j)) :
+    ∃ x, ∀ i ∈ ids, R.mul (d i) x = u i
+  set P := fun t => ∃ x, ∀ i ∈ ids, R.mul (d i) x = R.mul t (u i) with ep
+  have full : P R.one
+    apply localization.principal_cover.one R hr f ids cover P
+    · rw [ep]; use R.zero; intro i hi
+      rw [comm_ring.mul_zero R hr,hr.2.2.2.2.2.1 R.zero (u i),comm_ring.mul_zero R hr]
+    · intro a b ha hb; simp only [ep] at ha hb ⊢; obtain ⟨x,ex⟩ := ha; obtain ⟨y,ey⟩ := hb
+      use R.add x y; intro i hi; rw [hr.2.2.2.2.2.2.2,ex i hi,ey i hi,comm_ring.add_mul R hr]
+    · intro a b hb; simp only [ep] at hb ⊢; obtain ⟨x,ex⟩ := hb
+      use R.mul a x; intro i hi; rw [comm_ring.mul_swap R hr (d i) a x,ex i hi,hr.2.2.2.2.1]
+    · intro i hi; rw [ep]; exact ⟨d i,den i hi,u i,agree i hi⟩
+  rw [ep] at full; obtain ⟨x,ex⟩ := full
+  exact ⟨x,by intro i hi; simpa only [hr.2.2.2.2.2.2.1] using ex i hi⟩
+
+-- A finite list of eventual identities admits a common exponent.
++ list.common_exponent (P : β → ℕ → Prop) (ids : list β)
+    (extend : ∀ i n m, P i n → P i (n+m)) : (∀ i ∈ ids, ∃ n, P i n) → ∃ n, ∀ i ∈ ids, P i n
+  induction ids with empty i rest ih local
+  · exact ⟨0,by intro j hj; simp at hj⟩
+  · obtain ⟨n,first⟩ := local i (by simp)
+    obtain ⟨m,tail⟩ := ih (by intro j hj; exact local j (by simp only [mem_cons]; right; exact hj))
+    use n+m; intro j hj; simp only [mem_cons] at hj; obtain eq | member := hj
+    · rw [eq]; exact extend i n m first
+    · rw [add_comm.nat n m]; exact extend j m n (tail j member)
+
+-> localization.compatible_fractions (R : ring_ops α) (f d u : β → α) (ids : list β) : Prop :=
+  ∀ i ∈ ids, ∀ j ∈ ids, localization.away_equal R (R.mul (f i) (f j)) (R.mul (d j) (u i)) (R.mul (d i) (u j))
+
+-> localization.represents_fractions (R : ring_ops α) (f d u : β → α) (ids : list β) (x : α) : Prop :=
+  ∀ i ∈ ids, localization.away_equal R (f i) (R.mul (d i) x) (u i)
+
++ localization.clear_overlaps (R : ring_ops α) (hr : comm_ring R) (f d u : β → α) (ids : list β)
+    (agree : localization.compatible_fractions R f d u ids) : ∃ n, ∀ i ∈ ids, ∀ j ∈ ids,
+    R.mul (ring_ops.power R (R.mul (f i) (f j)) n) (R.mul (d j) (u i)) =
+    R.mul (ring_ops.power R (R.mul (f i) (f j)) n) (R.mul (d i) (u j))
+  set P := fun i j n => R.mul (ring_ops.power R (R.mul (f i) (f j)) n) (R.mul (d j) (u i)) = R.mul (ring_ops.power R (R.mul (f i) (f j)) n) (R.mul (d i) (u j)) with ep
+  have up : ∀ i j n m, P i j n → P i j (n+m)
+    intro i j n m h; simp only [ep] at h ⊢
+    rw [add_comm.nat n m,ring_ops.power_add R hr]
+    simp only [hr.2.2.2.2.1,h]
+  have row : ∀ i ∈ ids, ∃ n, ∀ j ∈ ids, P i j n
+    intro i hi; apply list.common_exponent (P i) ids (up i)
+    intro j hj; unfold localization.compatible_fractions at agree
+    have hit := agree i hi j hj
+    unfold localization.away_equal ring_ops.powers at hit; obtain ⟨t,⟨n,en⟩,eq⟩ := hit
+    use n; simp only [ep,en]
+  simpa only [ep] using list.common_exponent (fun i n => ∀ j ∈ ids, P i j n) ids (by intro i n m h j hj; exact up i j n m (h j hj)) row
+
++ localization.representatives_ext (R : ring_ops α) (hr : comm_ring R) (f d u : β → α) (ids : list β) (x y : α)
+    (cover : localization.principal_cover R f ids) (den : ∀ i ∈ ids, d i ∈ ring_ops.powers R (f i))
+    (hx : localization.represents_fractions R f d u ids x) (hy : localization.represents_fractions R f d u ids y) : x=y
+  apply localization.finite_ext R hr f ids cover x y
+  unfold localization.represents_fractions at hx hy; intro i hi
+  have eq := localization.away_equal.trans R hr (f i) (R.mul (d i) x) (u i) (R.mul (d i) y) (hx i hi) (localization.away_equal.symm (hy i hi))
+  unfold localization.away_equal at eq ⊢; obtain ⟨p,hp,clear⟩ := eq
+  have closed := multiplicative.powers R hr (f i)
+  exact ⟨R.mul p (d i),closed.2 p (d i) hp (den i hi),by simp only [hr.2.2.2.2.1,clear]⟩
+
+-- A section u_i/d_i on D(f_i) can be compared on D(f_i f_j) without cancelling
+-- any factor in R. One finite clearing of powers gives compatible numerators in R.
+@[auto] + localization.glue_finite (R : ring_ops α) (hr : comm_ring R) (f d u : β → α) (ids : list β)
+    (cover : localization.principal_cover R f ids) (den : ∀ i ∈ ids, d i ∈ ring_ops.powers R (f i))
+    (agree : localization.compatible_fractions R f d u ids) : ∃! x, localization.represents_fractions R f d u ids x
+  obtain ⟨n,clear⟩ := localization.clear_overlaps R hr f d u ids agree
+  set p := fun i => ring_ops.power R (f i) n with ep
+  have powers : ∀ i, p i ∈ ring_ops.powers R (f i) := by intro i; exact ⟨n,by rw [ep]⟩
+  have scaled : ∀ i ∈ ids, ∀ j ∈ ids,
+      R.mul (R.mul (p j) (d j)) (R.mul (p i) (u i)) = R.mul (R.mul (p i) (d i)) (R.mul (p j) (u j))
+    intro i hi j hj; have eq := clear i hi j hj; rw [ring_ops.power_mul R hr] at eq
+    rw [comm_ring.mul_shuffle R hr (p j) (d j) (p i) (u i),hr.2.2.2.2.2.1 (p j) (p i),comm_ring.mul_shuffle R hr (p i) (d i) (p j) (u j),ep]; exact eq
+  have enlarged : ∀ i ∈ ids, R.mul (p i) (d i) ∈ ring_ops.powers R (f i)
+    intro i hi; have closed := multiplicative.powers R hr (f i); exact closed.2 (p i) (d i) (powers i) (den i hi)
+  obtain ⟨x,ex⟩ := localization.patch_cleared R hr f (fun i => R.mul (p i) (d i)) (fun i => R.mul (p i) (u i)) ids cover enlarged scaled
+  have rep : localization.represents_fractions R f d u ids x
+    unfold localization.represents_fractions localization.away_equal; intro i hi
+    exact ⟨p i,powers i,by rw [← hr.2.2.2.2.1]; exact ex i hi⟩
+  exact ⟨x,rep,by intro y hy; exact localization.representatives_ext R hr f d u ids y x cover den hy rep⟩
+
+-- Select only the representatives needed on this list, including repeated indices.
++ list.choose_witness (P : β → γ → Prop) (ids : list β) (default : γ) :
+    (∀ i ∈ ids, ∃ y, P i y) → ∃ pick : β → γ, ∀ i ∈ ids, P i (pick i)
+  induction ids with empty i rest ih local
+  · exact ⟨fun j => default,by intro j hj; simp at hj⟩
+  · obtain ⟨a,ha⟩ := local i (by simp)
+    obtain ⟨pick,tail⟩ := ih (by intro j hj; exact local j (by simp only [mem_cons]; right; exact hj))
+    use fun j => if j=i then a else pick j
+    intro j hj; by_cases same : j=i
+    · subst same; simp
+    · simp only [mem_cons,same] at hj; simpa [same] using tail j hj
+
+-- The value of a fraction in any implementation of the principal localization.
++ localization.represents_iff (R : ring_ops α) (S : ring_ops γ) (i : α → γ) (hs : comm_ring S) (f d a x : α) (u : γ)
+    (loc : localization R S i (ring_ops.powers R f)) (den : d ∈ ring_ops.powers R f) (rep : S.mul (i d) u = i a) :
+    localization.away_equal R f (R.mul d x) a ↔ i x = u
+  have eq := localization.eq_iff R S i (ring_ops.powers R f) hs loc (R.mul d x) a
+  have mul := loc.2.1.2.2.2.2
+  constructor
+  · intro weak; apply ring_ops.unit.cancel S (i d) (i x) u hs (loc.2.2.1 d den)
+    rw [rep,← mul]; exact eq.mpr weak
+  · intro same; apply eq.mp; rw [mul,same,rep]
+
+-- Compare arbitrary sections using their representatives in the base ring.
+-> localization.overlap_agreement (R : ring_ops α) (S : ring_ops γ) (T : ring_ops δ) (i : α → γ) (j : α → δ)
+    (f g : α) (u : γ) (v : δ) : Prop :=
+  ∀ a d b e, d ∈ ring_ops.powers R f → e ∈ ring_ops.powers R g →
+    S.mul (i d) u = i a → T.mul (j e) v = j b → localization.away_equal R (R.mul f g) (R.mul e a) (R.mul d b)
+
+@[auto] + localization.agree_of_restrictions (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (L : ring_ops δ)
+    (i : α → β) (j : α → γ) (k : α → δ) (r : β → δ) (s : γ → δ) (f g : α) (u : β) (v : γ)
+    (hl : comm_ring L) (overlap : localization R L k (ring_ops.powers R (R.mul f g)))
+    (rf : localization.restriction S L i k r) (rg : localization.restriction T L j k s) (agree : r u = s v) :
+    localization.overlap_agreement R S T i j f g u v
+  unfold localization.overlap_agreement; intro a d b e hd he first second
+  have left := localization.restriction.rep S L i k r rf d a u first
+  have right := localization.restriction.rep T L j k s rg e b v second
+  rw [agree] at left
+  exact overlap.2.2.2.2 (R.mul e a) (R.mul d b) (localization.cross R L k hl overlap.2.1 (s v) a d b e left right)
+
+@[auto] + localization.glue_sections (R : ring_ops α) (S : β → ring_ops γ) (h : β → α → γ) (f : β → α)
+    (ids : list β) (u : β → γ) (hr : comm_ring R) (cover : localization.principal_cover R f ids)
+    (charts : ∀ i ∈ ids, comm_ring (S i) ∧ localization R (S i) (h i) (ring_ops.powers R (f i)))
+    (agree : ∀ i ∈ ids, ∀ j ∈ ids, localization.overlap_agreement R (S i) (S j) (h i) (h j) (f i) (f j) (u i) (u j)) :
+    ∃! x, ∀ i ∈ ids, h i x = u i
+  set P := fun i z => snd z ∈ ring_ops.powers R (f i) ∧ (S i).mul (h i (snd z)) (u i) = h i (fst z) with ep
+  have each : ∀ i ∈ ids, ∃ z : α × α, P i z
+    intro i hi; have loc := (charts i hi).2
+    obtain ⟨a,d,hd,rep⟩ := loc.2.2.2.1 (u i)
+    use (a,d); simp only [ep]; exact ⟨hd,rep⟩
+  obtain ⟨pick,chosen⟩ := list.choose_witness P ids (R.zero,R.zero) each
+  set a := fun i => fst (pick i) with ea
+  set d := fun i => snd (pick i) with ed
+  have info : ∀ i ∈ ids, d i ∈ ring_ops.powers R (f i) ∧ (S i).mul (h i (d i)) (u i) = h i (a i)
+    intro i hi; have z := chosen i hi; simpa only [ep,ea,ed] using z
+  have co : localization.compatible_fractions R f d a ids
+    unfold localization.compatible_fractions; intro i hi j hj; have eq := agree i hi j hj
+    unfold localization.overlap_agreement at eq; have pi := info i hi; have pj := info j hj
+    exact eq (a i) (d i) (a j) (d j) pi.1 pj.1 pi.2 pj.2
+  obtain ⟨x,rep,unique⟩ := localization.glue_finite R hr f d a ids cover (by intro i hi; have z := info i hi; exact z.1) co
+  have at_chart : ∀ y i, i ∈ ids → (localization.away_equal R (f i) (R.mul (d i) y) (a i) ↔ h i y = u i)
+    intro y i hi; have ch := charts i hi; have pi := info i hi
+    exact localization.represents_iff R (S i) (h i) ch.1 (f i) (d i) (a i) y (u i) ch.2 pi.1 pi.2
+  unfold localization.represents_fractions at rep unique
+  exact ⟨x,by intro i hi; exact (at_chart x i hi).mp (rep i hi),by intro y same; apply unique y; intro i hi; exact (at_chart y i hi).mpr (same i hi)⟩
+
++ localization.away_equal.restrict (R : ring_ops α) (hr : comm_ring R) (f g x y : α)
+    (same : localization.away_equal R f x y) : localization.away_equal R (R.mul f g) x y
+  unfold localization.away_equal ring_ops.powers at same ⊢; obtain ⟨d,⟨n,en⟩,eq⟩ := same
+  use ring_ops.power R (R.mul f g) n; constructor
+  · exact ⟨n,rfl⟩
+  · rw [ring_ops.power_mul R hr,en,hr.2.2.2.2.2.1 d (ring_ops.power R g n)]
+    simp only [hr.2.2.2.2.1,eq]
+
++ localization.compatible_of_global (R : ring_ops α) (hr : comm_ring R) (f d u : β → α) (ids : list β)
+    (x : α) (rep : localization.represents_fractions R f d u ids x) : localization.compatible_fractions R f d u ids
+  unfold localization.represents_fractions at rep; unfold localization.compatible_fractions; intro i hi j hj
+  set h := R.mul (f i) (f j) with eh
+  have first := localization.away_equal.restrict R hr (f i) (f j) (R.mul (d i) x) (u i) (rep i hi)
+  have second := localization.away_equal.restrict R hr (f j) (f i) (R.mul (d j) x) (u j) (rep j hj)
+  rw [hr.2.2.2.2.2.1 (f j) (f i),← eh] at second
+  rw [← eh] at first
+  have left := localization.away_equal.scale R hr h (R.mul (d i) x) (u i) (d j) first
+  have right := localization.away_equal.scale R hr h (R.mul (d j) x) (u j) (d i) second
+  rw [comm_ring.mul_swap R hr (d j) (d i) x] at left
+  exact localization.away_equal.trans R hr h (R.mul (d j) (u i)) (R.mul (d i) (R.mul (d j) x)) (R.mul (d i) (u j)) (localization.away_equal.symm left) right
+
+@[auto] + localization.glue_finite_iff (R : ring_ops α) (hr : comm_ring R) (f d u : β → α) (ids : list β)
+    (cover : localization.principal_cover R f ids) (den : ∀ i ∈ ids, d i ∈ ring_ops.powers R (f i)) :
+    (∃! x, localization.represents_fractions R f d u ids x) ↔ localization.compatible_fractions R f d u ids
+  constructor
+  · intro glued; obtain ⟨x,rep,unique⟩ := glued; exact localization.compatible_of_global R hr f d u ids x rep
+  · exact localization.glue_finite R hr f d u ids cover den
+
++ localization.sections_ext (R : ring_ops α) (S : β → ring_ops γ) (h : β → α → γ) (f : β → α) (ids : list β)
+    (hr : comm_ring R) (cover : localization.principal_cover R f ids)
+    (charts : ∀ i ∈ ids, localization R (S i) (h i) (ring_ops.powers R (f i))) (x y : α)
+    (same : ∀ i ∈ ids, h i x = h i y) : x=y
+  apply localization.finite_ext R hr f ids cover x y
+  intro i hi; have loc := charts i hi; exact loc.2.2.2.2 x y (same i hi)
+
+-- Keep the chart maps and overlap restrictions visible to users. The ring
+-- data certify them as principal localizations of one finite affine cover.
+-> localization.finite_open_cover (ids : list β) (h : β → α → γ) (left right : β → β → γ → δ) : Prop :=
+  ∃ R : ring_ops α, ∃ S : β → ring_ops γ, ∃ L : β → β → ring_ops δ, ∃ f : β → α, ∃ k : β → β → α → δ,
+    comm_ring R ∧ localization.principal_cover R f ids ∧
+    (∀ i ∈ ids, comm_ring (S i) ∧ localization R (S i) (h i) (ring_ops.powers R (f i))) ∧
+    ∀ i ∈ ids, ∀ j ∈ ids, comm_ring (L i j) ∧ localization R (L i j) (k i j) (ring_ops.powers R (R.mul (f i) (f j))) ∧
+      localization.restriction (S i) (L i j) (h i) (k i j) (left i j) ∧ localization.restriction (S j) (L i j) (h j) (k i j) (right i j)
+
+@[auto] + localization.finite_open_cover.glue_iff (ids : list β) (h : β → α → γ) (left right : β → β → γ → δ) (u : β → γ)
+    (cover : localization.finite_open_cover ids h left right) :
+    (∃! x, ∀ i ∈ ids, h i x = u i) ↔ ∀ i ∈ ids, ∀ j ∈ ids, left i j (u i) = right i j (u j)
+  unfold localization.finite_open_cover at cover
+  obtain ⟨R,S,L,f,k,hr,partition,charts,pairs⟩ := cover; constructor
+  · intro glued; obtain ⟨x,global,unique⟩ := glued; intro i hi j hj
+    obtain ⟨hl,over,ri,rj⟩ := pairs i hi j hj
+    rw [← global i hi,← global j hj,ri.2 x,rj.2 x]
+  · intro agree; apply localization.glue_sections R S h f ids u hr partition charts
+    intro i hi j hj; obtain ⟨hl,over,ri,rj⟩ := pairs i hi j hj
+    exact localization.agree_of_restrictions R (S i) (S j) (L i j) (h i) (h j) (k i j) (left i j) (right i j) (f i) (f j) (u i) (u j) hl over ri rj (agree i hi j hj)

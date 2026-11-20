@@ -1,0 +1,8 @@
++ missing_guard (S : set α) (A B : α → Prop) (rows : ∀ x ∈ S, A x ∧ B x) : ∀ x, B x := by auto
++ changed_domain (S T : set α) (A B : α → Prop) (rows : ∀ x ∈ S, A x ∧ B x) : ∀ x ∈ T, B x := by auto
++ swapped_indices (S : set α) (T : α → set α) (A B : α → α → Prop) (rows : ∀ x ∈ S, ∀ y ∈ T x, A x y ∧ B x y) :
+    ∀ x ∈ S, ∀ y ∈ T x, B y x := by auto
++ lost_inner_guard (S : set α) (T : α → set β) (A B : α → β → Prop)
+    (rows : ∀ x ∈ S, ∀ y ∈ T x, A x y ∧ B x y) : ∀ x ∈ S, ∀ y, A x y := by auto
++ reversed_implication (S : set α) (A B C : α → Prop) (rows : ∀ x ∈ S, A x → B x ∧ C x) :
+    ∀ x ∈ S, B x → A x := by auto

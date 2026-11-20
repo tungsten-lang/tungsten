@@ -1,0 +1,6 @@
+import supremum
+
++ unattained (f : ℕ → ℝ) (s : ℝ) (h : is_sup (set.range f) s) : ∃ i, s ≤ f i := by auto
++ unbounded_range (f : ℕ → ℝ) : ∃ s, is_sup (set.range f) s := by auto
++ missing_member (S : set ℝ) (s x : ℝ) (h : is_sup S s) : x ≤ s := by auto
++ different_ranges (f g : ℕ → ℝ) (s b : ℝ) (h : is_sup (set.range f) s) (bound : ∀ n, g n ≤ b) : s ≤ b := by auto

@@ -1,0 +1,17 @@
+structure twin α := (a b : α)
++ missing (x y : twin α) (ha : x.a = y.a) : x = y := by auto
++ swapped (x y : twin α) (ha : x.a = y.b) (hb : x.b = y.a) : x = y := by ext <;> assumption
++ leftover (x y : twin α) (h : x.a = y.a) : x = y
+  ext
+  exact h
+
+inductive color
+  | red
+  | green
++ distinct : red = green := by ext
++ binder (x y : twin α) : x = y := by ext ignored
+
++ tuple_missing (p q : ℕ × ℤ) (a : p.1 = q.1) : p = q := by auto
+
+-> data.origin : twin ℤ := twin.mk 1 2
++ misspelled_projection : data.origin.absent = data.origin.absent := by rfl

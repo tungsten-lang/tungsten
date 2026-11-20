@@ -13,7 +13,7 @@ proof_source_blocks("bits/tungsten-satori/spec/auto_residue.sat").each -> (block
   if name == "supplied_residue"
     next
   th = s.theorems[name]
-  if th == nil || th.hyps.size != 0 || th.tags.include?("axiom:supplied_residue") != ["from_hint", "expression_hint"].include?(name)
+  if th == nil || th.hyps.size != 0 || th.tags.include?("axiom:supplied_residue") != ["from_hint", "expression_hint", "clash_hint", "power_hint", "quotient_hint"].include?(name)
     raise "missing proof or unexpected dependency: " + name
   if !th.tags.all?(-> (tag) ["oracle:ring", "oracle:arith", "axiom:supplied_residue"].include?(tag))
     raise "unexpected trust tag: " + name

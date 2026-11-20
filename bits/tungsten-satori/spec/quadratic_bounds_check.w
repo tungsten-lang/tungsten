@@ -32,4 +32,21 @@ use proof_source
   session.run_source(proof_declarations("bits/tungsten-satori/spec/quadratic_bounds_failure.sat", family[1]))
   if session.failures != family[1].size
     raise "quadratic bounds accepted an invalid goal for " + suffix
+  if suffix != "nat"
+    forms = {
+      "int" => ["odd_cross", "wrong_cross"],
+      "rat" => ["singular_allowed", "missing_diagonal"],
+      "real" => ["ellipticity", "missing_determinant"]
+    }[suffix]
+    rules = ["quadratic_form.nonneg_of_pos." + suffix, "quadratic_form.nonneg." + suffix]
+    session.run_source(proof_declarations("bits/tungsten-satori/prelude/quadratic_form.sat", rules))
+    session.run_source(proof_declarations("bits/tungsten-satori/spec/quadratic_form.sat", [forms[0]]))
+    (rules + [forms[0]]).each -> (name)
+      th = session.theorems[name]
+      if th == nil || th.hyps.size != 0 || th.tags != ["oracle:arith"]
+        raise "binary quadratic form is missing, open or has unexpected trust: " + name
+    before = session.failures
+    session.run_source(proof_declarations("bits/tungsten-satori/spec/quadratic_form_failure.sat", [forms[1]]))
+    if session.failures != before + 1 || session.theorems[forms[1]] != nil
+      raise "accepted invalid binary form: " + forms[1]
   << "Quadratic bounds passed: " + suffix

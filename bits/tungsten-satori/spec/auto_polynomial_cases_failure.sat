@@ -1,0 +1,9 @@
+import arith
+
++ missing_sum (a b c d : ℕ) (squares : a*a+b*b=c*c+d*d) : (a=c ∧ b=d) ∨ (a=d ∧ b=c) := by auto
++ unswapped (a b c d : ℤ) (sum : a+b=c+d) (squares : a*a+b*b=c*c+d*d) : (a=c ∧ b=d) ∨ (a=d ∧ b=d) := by auto
++ missing_roots (x a b : ℝ) : x=a ∨ x=b := by auto
++ wrong_root (x a b c : ℚ) (prod : (x-a)*(x-b)=0) : x=a ∨ x=c := by auto
++ open_branch (x y : ℕ) (prod : x*y=0) : (x=0 ∧ y=0) ∨ (y=0 ∧ 1≤x) := by auto
++ truncated (a b c d : ℕ) (prod : (a-b)*(c-d)=0) : a=b ∨ c=d := by auto
++ unsupported_flag (x y : ℤ) (P : Prop) (prod : x*y=0) : (P ∧ x=0) ∨ y=0 := by auto

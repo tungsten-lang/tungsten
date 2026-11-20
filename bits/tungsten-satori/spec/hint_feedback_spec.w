@@ -11,6 +11,10 @@ s.run_source(proof_declarations("bits/tungsten-satori/prelude/arith.sat", rules)
 if s.failures != 0
   raise "hint feedback fixtures failed to load"
 notes = {
+  "use_context" => ["base_load n ≤ 2 ∧ extra_load n ≤ 1", "3 ≤ b"],
+  "use_named" => ["base_load n ≤ 2", "2 + extra_load n ≤ b"],
+  "batch_gap" => ["(∀ j < n, ready j) ∧ (∀ k < n, mark k)", "∀ j < n, active j"],
+  "batch_other_range" => ["(∀ j < n, ready j ∧ active j ∧ mark j) → done_at n", "∀ j < n, ready j ∧ active j ∧ mark j"],
   "quotient" => ["a ≤ b * c", "0 < c"],
   "edge_bound" => ["C ≤ 8 * a * N", "0 < N"],
   "power_guard" => ["a ≤ b", "0 ≤ a"],
@@ -24,7 +28,7 @@ notes = {
   "cast_guard" => ["0 ≤ q → 0 ≤ (q : ℝ)", "0 ≤ q"],
   "registered_clamp" => ["1 ≤ A", "0 ≤ max lo (min hi y)"],
   "quantified" => ["(∀ i < n, 0 ≤ f i) → 0 ≤ aggregate f n", "∀ i < n, 0 ≤ f i"]}
-silent = ["unsupported_quotient", "unrelated_guard", "refuted_guard", "refuted", "two_missing", "other_index", "circular", "backwards", "shadowed_scale"]
+silent = ["unsupported_quotient", "unrelated_guard", "refuted_guard", "refuted", "batch_refuted", "two_missing", "other_index", "circular", "backwards", "shadowed_scale"]
 fixture = File.read("bits/tungsten-satori/spec/hint_feedback.sat").replace("import arith\n", "")
 parse_program(fixture).each -> (cmd)
   s.elab.reset_counter
@@ -46,6 +50,7 @@ parse_program(fixture).each -> (cmd)
     raise "unsupported hint repair: " + cmd.name + " " + msg
 expected = {"clamp_repaired" => ["oracle:arith"], "repaired" => ["axiom:finish", "axiom:visible"], "quantified_repaired" => ["axiom:aggregate_nonneg"]}
 expected["quotient_repaired"] = ["oracle:arith", "oracle:ring"]
+expected["batch_repaired"] = ["axiom:checked_batch"]
 expected["registered_repair"] = ["oracle:arith"]
 expected.keys.each -> (name)
   th = s.theorems[name]

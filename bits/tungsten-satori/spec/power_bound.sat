@@ -1,0 +1,10 @@
+import power_bound
+
++ start_negative (a b : ℚ) (e : ℚ) (h : 0 < e) : ∃ x, a ≤ x ∧ b ≤ e*x := by auto
++ real_cutoff (a b e : ℝ) (h : 0 < e) : ∃ x, a ≤ x ∧ b ≤ e*x := by auto
++ empty_chain (b x : ℚ) (le : b ≤ x) : power_bound.last [] b ≤ x ^ power_bound.exponent []
+  exact power_bound.lower [] b x le (by decide)
++ rounded (x : ℚ) (hx : 3/2 ≤ x) : 3 < x^4
+  exact power_bound.strict [(2,2),(2,4)] (3/2) x 3 hx (by decide) (by decide)
++ zero_exponent (x : ℚ) (hx : 0 ≤ x) : 1 ≤ x^0
+  exact power_bound.lower [(0,1)] 0 x hx (by decide)

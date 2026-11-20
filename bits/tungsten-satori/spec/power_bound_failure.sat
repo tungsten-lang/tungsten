@@ -1,0 +1,11 @@
+import power_bound
+
++ no_positive_scale : ∃ x : ℝ, 0 ≤ x ∧ 1 ≤ 0*x := by auto
++ rounded_up (x : ℚ) (hx : 3/2 ≤ x) : 3 ≤ x^2
+  exact power_bound.lower [(2,3)] (3/2) x hx (by decide)
++ negative_base (x : ℚ) (hx : -2 ≤ x) : 4 ≤ x^2
+  exact power_bound.lower [(2,4)] (-2) x hx (by decide)
++ lost_strictness (x : ℚ) (hx : 2 ≤ x) : 4 < x^2
+  exact power_bound.strict [(2,4)] 2 x 4 hx (by decide) (by decide)
++ missing_start (x : ℚ) : 4 ≤ x^2
+  exact power_bound.lower [(2,4)] 2 x (by auto) (by decide)

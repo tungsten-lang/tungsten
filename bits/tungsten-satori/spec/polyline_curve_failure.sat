@@ -1,0 +1,11 @@
+import polyline_curve
++ too_short (t m : ℕ → ℝ) (v x : ℝ) (n : ℕ) (ord : ∀ i, t i ≤ t (i+1)) (short : t n < x) :
+    polyline.curve t m v x = polyline t m v n x := by auto
++ future_reversal (t m : ℕ → ℝ) (v x : ℝ) (n : ℕ) (ord : ∀ i < n, t i ≤ t (i+1)) (cover : x ≤ t n) :
+    polyline.curve t m v x = polyline t m v n x := by auto
++ wrong_slope (t m : ℕ → ℝ) (v x y : ℝ) (ord : ∀ i, t i ≤ t (i+1)) (lo : t 1 ≤ x) (xy : x < y) (up : y ≤ t 2) :
+    polyline.curve t m v y-polyline.curve t m v x = m 0*(y-x) := by auto
++ downward_piece (t m : ℕ → ℝ) (v a b : ℝ) (order : ∀ i, t i ≤ t (i+1))
+    (cover : ∀ x, ∃ n, x ≤ t n) (start : t 0 ≤ a) (ab : a ≤ b) (up : ∀ i, m i ≤ 0) :
+    polyline.curve t m v a ≤ polyline.curve t m v b
+  exact polyline.curve_mono t m v a b order start ab (cover b) up

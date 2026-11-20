@@ -26,3 +26,50 @@ axiom supplied_residue (n : ℤ) : n % 10 = 9
 + expression_hint (n : ℤ) : (3*n+1) % 5 = 3 := by auto [supplied_residue n]
 + multiple (a b : ℤ) (ha : a % 5 = 0) : (a*b+2) % 5 = 2 := by auto
 + multiple_right (a b : ℕ) (hb : b % 5 = 0) : a*b % 5 = 0 := by auto
+
++ incompatible (n : ℤ) (a : n % 4 = 1) (b : n % 6 = 2) : False := by auto
++ prune (n : ℕ) (P : Prop) (a : n % 12 = 5) (b : n % 18 = 3 ∨ P) : P := by auto
++ reversed_clash (x y : ℤ) (a : 4 = (x+y) % 15) (b : (x+y) % 21 = 5) : False := by auto
++ divisor_clash (n : ℕ) (h : n % 25 = 7 ∧ n % 5 = 4) : False := by auto
++ parity_clash (n : ℤ) (a : even n) (b : n % 10 = 9) : False := by auto
++ large_clash (n : ℕ) (a : n % 3000000000 = 1) (b : n % 5000000000 = 3) : False := by auto
++ clash_hint (n : ℤ) (h : n % 6 = 2) : False := by auto [supplied_residue n]
+
++ scaled_offset (q : ℕ) : 2 * (6*q + 1) % 4 = 2 := by auto
++ partial_modulus (q : ℕ) : 2 * (6*q + 1) % 9 ≠ 0 := by auto
++ polynomial_product (x y : ℕ) : (3*x+1) * (3*y+2) % 6 ≠ 0 := by auto
++ signed_offset (x y : ℤ) : (1 - 6*x*y) % 9 ≠ 2 := by auto
++ signed_exact (x : ℤ) : (1 - 8*x) % 4 = 1 := by auto
++ polynomial_branch (x : ℤ) (P : Prop) (h : 4 = (6*x - 1) % 9 ∨ P) : P := by auto
++ large_coefficient (x : ℕ) : (120000000000000000000*x + 2) % 9 ≠ 3 := by auto
++ residue_conditions (q : ℕ) (h : 1 ≤ q) (P : Prop) (hp : P) :
+    (6 < 2*(6*q+1) ∧ (2*(6*q+1) % 6 = 0 ∨ 2*(6*q+1) % 6 = 2)) ∧
+    2*(6*q+1) % 4 ≠ 0 ∧ 2*(6*q+1) % 9 ≠ 0 ∧ P := by auto
+
++ translations (j v : ℕ) : (2 ^ (j + 1) * v) % 2 = 0 := by auto
++ one_residue (k : ℕ) : 7 ^ k % 6 = 1 := by auto
++ stable_residue (x : ℤ) (n : ℕ) (h : x % 10 = 6) (hn : 0 < n) : x ^ n % 10 = 6 := by auto
++ stable_nat (n : ℕ) : 10 ^ (n + 1) % 6 = 4 := by auto
++ right_power (x y : ℤ) (j : ℕ) (h : x % 5 = 0) : y * x ^ (j + 1) % 5 = 0 := by auto
++ power_mod_one (a n : ℕ) : a ^ n % 1 = 0 := by auto
++ power_hint (x : ℤ) (n : ℕ) : x ^ n % 2 = 1 := by auto [supplied_residue x]
+
++ power_quotient (k : ℕ) : ∃ q : ℕ, 7 ^ k = 6*q + 1 := by auto
++ symbolic_quotient (n m r : ℤ) (h : n % m = r) : ∃ q, r + q*m = n := by auto
++ factor_witness (n : ℤ) (h : n % 5 = 0) : ∃ q, n = q*5 := by auto
++ quotient_hint (n : ℤ) : ∃ q, n = 5*q + 4 := by auto [supplied_residue n]
++ parity_quotients (n : ℤ) : (∃ q, n = 2*q) ∨ (∃ q, n = 2*q+1) := by auto
++ alternative_quotient (n t : ℕ) (h : n = 2*t + 3) : ∃ q, n = 2*q + 3 := by auto
+
++ shared_half (n : ℕ) : ∃ q, n = 2*q ∨ n = 2*q+1 := by auto
++ signed_shared_half (n : ℤ) : ∃ q, n = 2*q ∨ n = 2*q+1 := by auto
++ parity_alternatives (n : ℕ) : (∃ q, n = 2*q) ∨ ∃ q, n = 2*q+1 := by auto
++ signed_division_cases (P : ℤ → Prop) (n : ℤ)
+    (h : ∀ q r : ℤ, 0 ≤ r → r < 3 → P (3*q+r)) : P n
+  exact quotient_cases.int 3 n P (by decide) h
+
++ small_dividend (a m : ℕ) (h : a < m) : a % m = a ∧ a / m = 0 := by auto
++ small_signed_dividend (a m : ℤ) (lo : 0 ≤ a) (hi : a < m) : a % m = a ∧ a / m = 0 := by auto
++ positive_dividend (a m : ℕ) (ha : 0 < a) (h : m ∣ a) : m ≤ a := by auto
++ strict_divisor_bound (p : ℕ) (h : 7 % p = 0) : p < 8 := by auto [le_of_mod_zero.nat]
++ impossible_divisor (p : ℕ) (h : 2 < p) (hd : p ∣ 2) : False := by auto [le_of_dvd.nat]

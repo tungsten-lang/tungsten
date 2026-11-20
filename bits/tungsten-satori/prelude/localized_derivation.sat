@@ -1,0 +1,71 @@
+-- Extend a derivation to a localization by extending its dual-number map.
+import derivation
+import localization
+
+-- If u is inverse to x.re, the inverse tangent coefficient is -u² x.du.
+@[auto] + dual.unit_iff (R : ring_ops α) (x : dual α) (hr : comm_ring R) :
+    ring_ops.unit (dual.ops R) x ↔ ring_ops.unit R x.re
+  constructor
+  · exact ring_hom.map_unit (dual.ops R) R dual.re x (dual.re_hom R)
+  · intro unit; unfold ring_ops.unit at unit ⊢; obtain ⟨u,inv⟩ := unit
+    use dual.mk u (R.neg (R.mul (R.mul u x.du) u))
+    have neg := comm_ring.mul_neg R hr
+    unfold comm_ring at hr; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := hr
+    ext
+    · exact inv
+    · show R.add (R.mul u x.du) (R.mul (R.neg (R.mul (R.mul u x.du) u)) x.re) = R.zero
+      rw [mc (R.neg (R.mul (R.mul u x.du) u)) x.re,neg,mc x.re (R.mul (R.mul u x.du) u),ma,inv,mc (R.mul u x.du) R.one,mo,ac,an]
+
+-- f is the point on the localized ring, so the denominators are already units there.
+@[auto] + localization.derivation (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (U : set α)
+    (f : β → γ) (D : α → γ) (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T)
+    (loc : localization R S i U) (hom : ring_hom S T f) (der : derivation_at R T (fun x => f (i x)) D) :
+    ∃! E, derivation_at S T f E ∧ ∀ a, E (i a) = D a
+  have base := ring_hom.comp R S T i f loc.2.1 hom
+  set j := fun a => dual.mk (f (i a)) (D a) with hj
+  have jet : ring_hom R (dual.ops T) j := by rw [hj]; exact derivation_at.lift R T (fun x => f (i x)) D hr ht base der
+  have units : ∀ d ∈ U, ring_ops.unit (dual.ops T) (j d)
+    intro d hd; have unit := dual.unit_iff T (j d) ht; apply unit.mpr; rw [hj]
+    exact ring_hom.map_unit S T f (i d) hom (loc.2.2.1 d hd)
+  obtain ⟨J,lifted,over⟩ := localization.lift_exists R S (dual.ops T) i j U hs (dual.comm_ring T ht) loc jet units
+  have re := ring_hom.comp S (dual.ops T) T J dual.re lifted (dual.re_hom T)
+  have scalar : (fun y => (J y).re) = f
+    apply localization.hom_ext R S T i U (fun y => (J y).re) f ht loc re hom
+    intro a; rw [over,hj]; rfl
+  have tangent := dual.derivation S T J lifted
+  rw [scalar] at tangent
+  use fun y => (J y).du
+  constructor
+  · exact ⟨tangent,by intro a; rw [over,hj]; rfl⟩
+  · intro E he
+    have other := derivation_at.lift S T f E hs ht hom he.1
+    have eq : (fun y => dual.mk (f y) (E y)) = J
+      apply localization.hom_ext R S (dual.ops T) i U (fun y => dual.mk (f y) (E y)) J (dual.comm_ring T ht) loc other lifted
+      intro a; rw [over,hj,he.2 a]
+    funext y
+    rw [← eq]; rfl
+
+-- A derivation R → R has a unique extension S → S, including in the presence of zero divisors.
+@[auto] + localization.extend_derivation (R : ring_ops α) (S : ring_ops β) (i : α → β) (U : set α)
+    (D : α → α) (hr : comm_ring R) (hs : comm_ring S) (loc : localization R S i U)
+    (der : derivation_at R R (fun a => a) D) :
+    ∃! E, derivation_at S S (fun y => y) E ∧ ∀ a, E (i a) = i (D a)
+  have id : ring_hom S S (fun y => y) := by unfold ring_hom; auto
+  exact localization.derivation R S S i U (fun y => y) (fun a => i (D a)) hr hs hs loc id (derivation_at.map R R S (fun a => a) D i der loc.2.1)
+
+-- Differentiate d*y=a, then solve for D y using the inverse of f d.
+@[auto] + derivation_at.fraction (R : ring_ops α) (T : ring_ops β) (f D : α → β) (a d y : α) (u : β)
+    (ht : comm_ring T) (der : derivation_at R T f D) (rep : R.mul d y = a) (inv : T.mul u (f d) = T.one) :
+    D y = T.mul u (T.add (D a) (T.neg (T.mul (D d) (f y))))
+  have eq := der.2 d y; rw [rep] at eq
+  apply ring_ops.solve_unit T u (f d) (D y) (T.add (D a) (T.neg (T.mul (D d) (f y)))) ht inv
+  unfold comm_ring at ht; obtain ⟨aa,ac,az,an,rest⟩ := ht
+  rw [eq,aa,ac (T.mul (D d) (f y)) (T.neg (T.mul (D d) (f y))),an,ac,az]
+
+@[auto] + derivation_at.fraction_fixed (R : ring_ops α) (T : ring_ops β) (f D : α → β) (d : α) (u : β)
+    (ht : comm_ring T) (der : derivation_at R T f D) (inv : T.mul u (f d) = T.one)
+    (fixed : D d = T.zero) (a y : α) (rep : R.mul d y = a) : D y = T.mul u (D a)
+  have eq := der.2 d y; have zero := comm_ring.mul_zero T ht
+  apply ring_ops.solve_unit T u (f d) (D y) (D a) ht inv
+  unfold comm_ring at ht; obtain ⟨aa,ac,az,an,ma,mc,rest⟩ := ht
+  rw [rep,fixed,mc T.zero (f y),zero,ac,az] at eq; exact eq.symm

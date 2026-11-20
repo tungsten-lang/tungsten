@@ -1,0 +1,35 @@
+import derivation_real
+
++ power_at (R : ring_ops α) (S : ring_ops β) (f D : α → β) (t : α) (n : ℕ)
+    (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f) (der : derivation_at R S f D) :
+    D (ring_ops.power R t (n+1)) = S.mul (ring_ops.of_nat S (n+1)) (S.mul (ring_ops.power S (f t) n) (D t)) := by auto
+
++ lift_at (R : ring_ops α) (S : ring_ops β) (f D : α → β) (hr : comm_ring R) (hs : comm_ring S)
+    (hom : ring_hom R S f) (der : derivation_at R S f D) : ring_hom R (dual.ops S) (fun x => dual.mk (f x) (D x)) := by auto
+
++ directional (R : ring_ops α) (f D : α → ℝ) (t a : α) (n : ℕ) (hr : comm_ring R)
+    (hom : ring_hom R ring_ops.real f) (der : derivation_at R ring_ops.real f D) :
+    D (ring_ops.monomial R t (n+1) a) = ((n:ℝ)+1)*(f t)^n*D t*f a+(f t)^(n+1)*D a := by auto
+
+-- (2+3ε)^4 has coefficient 4*2^3*3; a square-zero input has zero square.
++ tangent_at_two : (ring_ops.power (dual.ops ring_ops.int) (dual.mk 2 3) 4).du = 96 := by decide
++ at_zero : (ring_ops.power (dual.ops ring_ops.int) (dual.mk 0 1) 2).du = 0 := by decide
+
+-- Two independent first-order directions, t=1+ε and h=η.
+-> plane := dual.ops (dual.ops ring_ops.real)
+-> radial_coord : dual (dual ℝ) := dual.mk (dual.mk 1 1) (dual.mk 0 0)
+-> height : dual (dual ℝ) := dual.mk (dual.mk 0 0) (dual.mk 1 0)
+-> density : dual (dual ℝ) := dual.mk (dual.mk 1 (-5)) (dual.mk 0 0)
+-> three : dual (dual ℝ) := dual.constant (dual.ops ring_ops.real) (dual.constant ring_ops.real 3)
+-> dt (x : dual (dual ℝ)) : ℝ := x.re.du
+-> dz (x : dual (dual ℝ)) : ℝ := x.du.re
++ inverse_density : ring_ops.monomial plane radial_coord 5 density = plane.one := by decide
++ divergence_at_one :
+    dt (plane.mul density (ring_ops.monomial plane radial_coord 3 three)) +
+    dz (plane.mul density (ring_ops.monomial plane radial_coord 2 height)) = -5 := by decide
+
+-- The constant density has the same value at the point but a different derivative.
++ point_values_agree : density.re.re = plane.one.re.re ∧ dt density ≠ dt plane.one := by decide
++ unweighted_at_one : dt (ring_ops.monomial plane radial_coord 3 three) + dz (ring_ops.monomial plane radial_coord 2 height) = 10 := by decide
+#axioms power_at
+#axioms lift_at

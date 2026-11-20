@@ -1,0 +1,88 @@
+-- Stable-coordinate corpus, family 049, punctured-line chart.
+-- Given p, Q, y, z, solve for u, s, F, J:
+--   pu = Qy − z(z+1),     s = y − Q(Q+u²),
+--   pF = Q − s² + u²,    pJ = z − sQ.
+-- A unit p gives a unique solution over any commutative ring.
+import finite_cover
+import localized_derivation
+
+structure chart_data α := (u : α) (s : α) (f : α) (j : α)
+-> minus (R : ring_ops α) (a b : α) : α := R.add a (R.neg b)
+-> chart_u_num (R : ring_ops α) (q y z : α) : α := minus R (R.mul q y) (R.mul z (R.add z R.one))
+-> chart_s_value (R : ring_ops α) (q y u : α) : α := minus R y (R.mul q (R.add q (R.mul u u)))
+-> chart_f_num (R : ring_ops α) (q s u : α) : α := R.add (minus R q (R.mul s s)) (R.mul u u)
+-> chart_j_num (R : ring_ops α) (q z s : α) : α := minus R z (R.mul s q)
+
+-> chart (R : ring_ops α) (p q y z : α) (x : chart_data α) : Prop :=
+  R.mul p x.u = chart_u_num R q y z ∧ x.s = chart_s_value R q y x.u ∧
+  R.mul p x.f = chart_f_num R q x.s x.u ∧ R.mul p x.j = chart_j_num R q z x.s
+
++ chart_ext (R : ring_ops α) (p q y z : α) (ring : comm_ring R) (unit : ring_ops.unit R p)
+    (x w : chart_data α) : chart R p q y z x → chart R p q y z w → x = w
+  intro hx hw; unfold chart at hx hw
+  obtain ⟨ua,sa,fa,ja⟩ := hx; obtain ⟨ub,sb,fb,jb⟩ := hw
+  have cancel := ring_ops.unit.cancel R p
+  have eu : x.u = w.u := cancel x.u w.u ring unit (by rw [ua,ub])
+  have es : x.s = w.s := by rw [sa,sb,eu]
+  ext
+  · exact eu
+  · exact es
+  · apply cancel x.f w.f ring unit; rw [fa,fb,eu,es]
+  · apply cancel x.j w.j ring unit; rw [ja,jb,es]
+
++ chart_unique (R : ring_ops α) (hr : comm_ring R) (p q y z : α) (unit : ring_ops.unit R p) :
+    ∃! x, chart R p q y z x
+  have solve := ring_ops.unit.surjective R p hr unit
+  obtain ⟨u,hu⟩ := solve (chart_u_num R q y z)
+  set s := chart_s_value R q y u with hs
+  obtain ⟨f,hf⟩ := solve (chart_f_num R q s u)
+  obtain ⟨j,hj⟩ := solve (chart_j_num R q z s)
+  set x := chart_data.mk u s f j with hx
+  have point : chart R p q y z x := by rw [hx]; exact ⟨hu,hs,hf,hj⟩
+  exact ⟨x,point,by intro w hw; exact chart_ext R p q y z hr unit w x hw point⟩
+
++ chart_at_zero_branches : ∃ x w, chart ring_ops.int 0 0 0 0 x ∧ chart ring_ops.int 0 0 0 0 w ∧ x ≠ w
+  use chart_data.mk 0 0 0 0; use chart_data.mk 0 0 1 0
+
+-> chart_data.map (i : α → β) (x : chart_data α) : chart_data β := chart_data.mk (i x.u) (i x.s) (i x.f) (i x.j)
+
++ chart_mapped (R : ring_ops α) (S : ring_ops β) (i : α → β) (hom : ring_hom R S i)
+    (p q y z : α) (x : chart_data α) :
+    chart S (i p) (i q) (i y) (i z) (chart_data.map i x) ↔
+    i (R.mul p x.u) = i (chart_u_num R q y z) ∧ i x.s = i (chart_s_value R q y x.u) ∧
+    i (R.mul p x.f) = i (chart_f_num R q x.s x.u) ∧ i (R.mul p x.j) = i (chart_j_num R q z x.s)
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  simp [chart,chart_data.map,chart_u_num,chart_s_value,chart_f_num,chart_j_num,minus,one,add,neg,mul]
+
+-- All four coordinate equations descend, even if p is a zero divisor.
++ chart_on_cover (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (i : α → β) (j : α → γ)
+    (r : β → δ) (s : γ → δ) (cover : localization.two_open_cover i j r s) (hi : ring_hom R S i) (hj : ring_hom R T j)
+    (p q y z : α) (x : chart_data α)
+    (left : chart S (i p) (i q) (i y) (i z) (chart_data.map i x))
+    (right : chart T (j p) (j q) (j y) (j z) (chart_data.map j x)) : chart R p q y z x
+  obtain ⟨lu,ls,lf,lj⟩ := (chart_mapped R S i hi p q y z x).mp left
+  obtain ⟨ru,rs,rf,rj⟩ := (chart_mapped R T j hj p q y z x).mp right
+  have ext := localization.cover_ext i j r s cover
+  unfold chart; auto [ext]
+
+-- Check all four equations after restriction to every member of a finite cover.
++ chart_on_finite_cover (R : ring_ops α) (S : β → ring_ops γ) (h : β → α → γ) (g : β → α) (ids : list β)
+    (hr : comm_ring R) (cover : localization.principal_cover R g ids) (charts : ∀ i ∈ ids, localization R (S i) (h i) (ring_ops.powers R (g i)))
+    (p q y z : α) (x : chart_data α)
+    (local : ∀ i ∈ ids, chart (S i) (h i p) (h i q) (h i y) (h i z) (chart_data.map (h i) x)) : chart R p q y z x
+  have reflect := localization.sections_ext R S h g ids hr cover charts
+  have eqs : ∀ i ∈ ids, h i (R.mul p x.u) = h i (chart_u_num R q y z) ∧ h i x.s = h i (chart_s_value R q y x.u) ∧
+      h i (R.mul p x.f) = h i (chart_f_num R q x.s x.u) ∧ h i (R.mul p x.j) = h i (chart_j_num R q z x.s)
+    intro i hi; have loc := charts i hi
+    exact (chart_mapped R (S i) (h i) loc.2.1 p q y z x).mp (local i hi)
+  unfold chart; auto [reflect,eqs]
+
+-- Tangents on a fixed fibre of p. The three fractions have the same denominator.
++ chart_fibre_tangent (R : ring_ops α) (T : ring_ops β) (f D : α → β) (p q y z : α) (x : chart_data α) (v : β)
+    (ht : comm_ring T) (der : derivation_at R T f D) (point : chart R p q y z x)
+    (inverse : T.mul v (f p) = T.one) (fibre : D p = T.zero) :
+    D x.u = T.mul v (D (chart_u_num R q y z)) ∧ D x.f = T.mul v (D (chart_f_num R q x.s x.u)) ∧
+      D x.j = T.mul v (D (chart_j_num R q z x.s))
+  unfold chart at point; auto
+
+#axioms chart_fibre_tangent

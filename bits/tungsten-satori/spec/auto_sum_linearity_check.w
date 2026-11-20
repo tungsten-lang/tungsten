@@ -15,7 +15,9 @@ use proof_source
     raise "automatic termwise linearity failed: " + suffix
   (good + ["sum_below.scale." + suffix, "sum_below.add." + suffix]).each -> (name)
     th = session.theorems[name]
-    if th == nil || th.hyps.size != 0 || th.tags != ["oracle:arith", "oracle:ring"]
+    polynomial = name == suffix + "_add_algebra" || name == suffix + "_alias"
+    expected = polynomial ? ["oracle:ring"] : ["oracle:arith", "oracle:ring"]
+    if th == nil || th.hyps.size != 0 || th.tags != expected
       raise "automatic termwise linearity missing, open or has unexpected trust: " + name
   bad = ["scale_missing", "scale_outside", "wrong_scalar", "scale_cycle", "add_missing", "add_outside", "wrong_summand"].map -> (name) suffix + "_" + name
   if suffix == "nat"

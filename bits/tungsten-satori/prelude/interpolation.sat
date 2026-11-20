@@ -1,0 +1,46 @@
+-- Convex interpolation of estimates indexed by rational order and reciprocal exponent.
+import scale
+
+-> interpolation.convex (P : ℚ → ℚ → Prop) : Prop :=
+  ∀ a b l r t : ℚ, 0 ≤ t → t ≤ 1 → P a l → P b r → P ((1-t)*a+t*b) ((1-t)*l+t*r)
+
+-- A point on the segment, stated without choosing the interpolation weight.
++ interpolation.segment (P : ℚ → ℚ → Prop) (a b l r : ℚ)
+    (left : P a l) (right : P b r) (convex : interpolation.convex P) :
+    ∀ z s, l < r → l ≤ s → s ≤ r → (r-l)*z = (r-s)*a+(s-l)*b → P z s
+  intro z s width lo hi on_line
+  set t := (s-l)/(r-l) with ht
+  have weight : t*(r-l) = s-l := by rw [ht]; exact mul_div_cancel.rat (s-l) (r-l) (by linarith)
+  have low : 0 ≤ t := by nlinarith
+  have high : t ≤ 1 := by nlinarith
+  have xeq : (1-t)*l+t*r = s := by linear_combination weight
+  have yeq : ((1-t)*a+t*b)*(r-l) = z*(r-l) := by linear_combination (b-a)*weight - on_line
+  have cancel : (1-t)*a+t*b = z := by nlinarith [mul_inv_cancel.rat (r-l) (by linarith)]
+  unfold interpolation.convex at convex
+  have h := convex a b l r t low high left right
+  rw [xeq,cancel] at h; exact h
+
++ interpolation.open_of_closed (P : ℚ → ℚ → Prop) (a l : ℚ) (closed : ∀ z, a ≤ z → P z l) :
+    ∀ z, a < z → P z l := by intro z h; exact closed z (by linarith)
+
++ interpolation.above (P : ℚ → ℚ → Prop) (a b l r : ℚ)
+    (left : ∀ u, a < u → P u l) (right : ∀ u, b < u → P u r) (convex : interpolation.convex P) :
+    ∀ z s, l < r → l ≤ s → s ≤ r → (r-s)*a+(s-l)*b < (r-l)*z → P z s
+  intro z s width lo hi above
+  set gap := ((r-l)*z-((r-s)*a+(s-l)*b))/(r-l) with hg
+  have hg0 : 0 < gap
+    rw [hg]; apply div_pos.rat
+    · nlinarith
+    · linarith
+  have hg1 : gap*(r-l) = (r-l)*z-((r-s)*a+(s-l)*b) := by rw [hg]; apply mul_div_cancel.rat; linarith
+  apply interpolation.segment (left (a+gap) (by linarith)) (right (b+gap) (by linarith)) convex z s width lo hi
+  linear_combination -hg1
+
++ interpolation.on_or_above (P : ℚ → ℚ → Prop) (a b l r : ℚ)
+    (left : ∀ u, a ≤ u → P u l) (right : ∀ u, b ≤ u → P u r) (convex : interpolation.convex P) :
+    ∀ z s, l < r → l ≤ s → s ≤ r → (r-s)*a+(s-l)*b ≤ (r-l)*z → P z s
+  intro z s width lo hi bound
+  by_cases on : (r-l)*z = (r-s)*a+(s-l)*b
+  · exact interpolation.segment (left a (by linarith)) (right b (by linarith)) convex z s width lo hi on
+  · apply interpolation.above (interpolation.open_of_closed left) (interpolation.open_of_closed right) convex width lo hi
+    linarith

@@ -1,0 +1,16 @@
+import interpolation
+
++ lost_strictness (P : ℚ → ℚ → Prop) (mix : interpolation.convex P)
+    (l : ∀ u : ℚ, 2 < u → P u (-1)) (r : ∀ u : ℚ, -4 < u → P u 3)
+    (z s : ℚ) (lo : -1 ≤ s) (hi : s ≤ 3) (weak : 1 ≤ 2*z+3*s) : P z s :=
+  by auto [interpolation.above l r mix]
+
++ extrapolation (P : ℚ → ℚ → Prop) (mix : interpolation.convex P) (l : P 2 (-1)) (r : P (-4) 3) :
+    P (-7) 5 := by auto [interpolation.segment l r mix]
+
++ zero_width (P : ℚ → ℚ → Prop) (mix : interpolation.convex P) (l : P 2 1) (r : P 4 1) :
+    P 0 1 := by auto [interpolation.segment l r mix]
+
++ below_line (P : ℚ → ℚ → Prop) (mix : interpolation.convex P)
+    (l : ∀ u : ℚ, 2 ≤ u → P u (-1)) (r : ∀ u : ℚ, -4 ≤ u → P u 3) :
+    P 0 0 := by auto [interpolation.on_or_above l r mix]

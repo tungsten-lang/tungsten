@@ -1,0 +1,14 @@
+-> valley (x : ℚ) : ℚ := (2*x-1)^2 - 1
++ inner (t : ℚ) (h : 0 < t ∧ t < 1) (skip : t ≠ 1/2) : 0 ≤ valley t := by auto
++ universal : ∀ t : ℚ, 0 < t → t < 1 → 0 ≤ valley t := by auto
++ isolated (n : ℤ) (lo : 7 ≤ n) (hi : n ≤ 7) : n^2 < n^2 := by auto
++ linear (t : ℝ) (lo : 0 < t) : 2*t ≤ t := by auto
++ excluded (t : ℝ) (lo : 0 < t) (hi : t < 1) (away : t ≠ 1/3) : 0 < (3*t-1)^2 := by auto
+
+opaque admissible : ℚ → Prop
+axiom admissible_fact (t : ℚ) : admissible t
+axiom extra (t : ℚ) : 1/2 < t
++ constrained (t : ℚ) (lo : 0 < t) (hi : t < 1) : 0 ≤ valley t := by auto [extra t]
++ opaque_guard (t : ℚ) (lo : 0 < t) (hi : t < 1) (ok : admissible t) : 0 ≤ valley t := by auto
++ opaque_hint (t : ℚ) (lo : 0 < t) (hi : t < 1) : 0 ≤ valley t := by auto [admissible_fact t]
++ existential (P : ℚ → Prop) : ∃ t : ℚ, P t ∧ 0 ≤ valley t := by auto

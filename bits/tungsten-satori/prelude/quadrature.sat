@@ -1,0 +1,50 @@
+-- Interpolation and exact quadrature on [-1,1].
+import interval_integral
+
+-> quadrature.mean (f : ℝ → ℝ) : ℝ := (1/2)*darboux.integral (-1) 1 f
+
+-- A checked integral on [-1,1] determines its normalized mean.
++ quadrature.mean_of_integral (f : ℝ → ℝ) (I : ℝ) (h : darboux.has_integral f (-1) 1 I) :
+    quadrature.mean f = (1/2)*I
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  have value := agree (-1) 1 f I h
+  unfold quadrature.mean; linarith
+
+-- Lagrange basis at -1, -1/2, 0, 1/2, 1, written with the integer coordinate z=2x.
+-> quadrature.interpolate (A B C D E x : ℝ) : ℝ :=
+  A*(2*x+1)*(2*x)*(2*x-1)*(2*x-2)/24 - B*(2*x+2)*(2*x)*(2*x-1)*(2*x-2)/6 +
+  C*(2*x+2)*(2*x+1)*(2*x-1)*(2*x-2)/4 - D*(2*x+2)*(2*x+1)*(2*x)*(2*x-2)/6 +
+  E*(2*x+2)*(2*x+1)*(2*x)*(2*x-1)/24
+
++ quadrature.integral_quartic (p q r s t : ℝ) :
+    darboux.has_integral (fun x => p+q*x+r*x^2+s*x^3+t*x^4) (-1) 1 (2*(p+r/3+t/5))
+  have one : darboux.has_integral (fun x => x) (-1) 1 0 := by simpa [pow_one.real] using darboux.pow (-1) 1 1 (by decide)
+  have two : darboux.has_integral (fun x => x^2) (-1) 1 (2/3) := by simpa using darboux.pow (-1) 1 2 (by decide)
+  have three : darboux.has_integral (fun x => x^3) (-1) 1 0 := by simpa using darboux.pow (-1) 1 3 (by decide)
+  have four : darboux.has_integral (fun x => x^4) (-1) 1 (2/5) := by simpa using darboux.pow (-1) 1 4 (by decide)
+  have c := darboux.const (-1) 1 p (by decide)
+  have i1 := darboux.scale (fun x => x) (-1) 1 0 q one
+  have i2 := darboux.scale (fun x => x^2) (-1) 1 (2/3) r two
+  have i3 := darboux.scale (fun x => x^3) (-1) 1 0 s three
+  have i4 := darboux.scale (fun x => x^4) (-1) 1 (2/5) t four
+  have hi : darboux.has_integral (fun x => p+q*x+r*x^2+s*x^3+t*x^4) (-1) 1 (p*(1- -1)+q*0+r*(2/3)+s*0+t*(2/5)) := by auto
+  have val : p*(1- -1)+q*0+r*(2/3)+s*0+t*(2/5) = 2*(p+r/3+t/5) := by ring
+  rw [val] at hi; exact hi
+
++ quadrature.integral_interpolant (A B C D E : ℝ) :
+    darboux.has_integral (quadrature.interpolate A B C D E) (-1) 1 ((7*(A+E)+32*(B+D)+12*C)/45)
+  have moments := quadrature.integral_quartic C ((A-E)/6+4*(D-B)/3) (-(A+E)/6+8*(B+D)/3-5*C) (2*(E-A)/3+4*(B-D)/3) (2*(A+E)/3-8*(B+D)/3+4*C)
+  have eq : quadrature.interpolate A B C D E = (fun x => C+((A-E)/6+4*(D-B)/3)*x+(-(A+E)/6+8*(B+D)/3-5*C)*x^2+(2*(E-A)/3+4*(B-D)/3)*x^3+(2*(A+E)/3-8*(B+D)/3+4*C)*x^4) := by unfold quadrature.interpolate; ring
+  have val : 2*(C+(-(A+E)/6+8*(B+D)/3-5*C)/3+(2*(A+E)/3-8*(B+D)/3+4*C)/5) = (7*(A+E)+32*(B+D)+12*C)/45 := by ring
+  rw [← eq,val] at moments; exact moments
+
+-- Boole's five-point rule for functions agreeing with their quartic interpolant.
+-- The identity for every x in the interval is the proof of exactness.
++ quadrature.boole (f : ℝ → ℝ) (v : ℝ)
+    (poly : ∀ x, -1 ≤ x → x ≤ 1 → f x = quadrature.interpolate (f (-1)) (f (-1/2)) (f 0) (f (1/2)) (f 1) x)
+    (value : (7*(f (-1)+f 1)+32*(f (-1/2)+f (1/2))+12*f 0)/90 = v) : quadrature.mean f = v
+  have weights := quadrature.integral_interpolant (f (-1)) (f (-1/2)) (f 0) (f (1/2)) (f 1)
+  have cert := darboux.congr (quadrature.interpolate (f (-1)) (f (-1/2)) (f 0) (f (1/2)) (f 1)) f (-1) 1 ((7*(f (-1)+f 1)+32*(f (-1/2)+f (1/2))+12*f 0)/45) weights (by intro x lo hi; exact (poly x lo hi).symm)
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  have val := agree (-1) 1 f ((7*(f (-1)+f 1)+32*(f (-1/2)+f (1/2))+12*f 0)/45) cert
+  unfold quadrature.mean; linarith

@@ -1,0 +1,170 @@
+-- Principal minors of symmetric binary quadratic forms.
+import quadratic
+
+@[auto] + quadratic_form.det_of_nonneg.real (a b c : ℝ)
+    (form : ∀ x y, 0 ≤ a*x*x + 2*b*x*y + c*y*y) : 0 ≤ a*c-b*b
+  have bound := quadratic_form.bound.real a b c (by intro x y; linarith [form x (-y)])
+  linarith
+
+@[auto] + quadratic_form.det_of_nonpos.real (a b c : ℝ)
+    (form : ∀ x y, a*x*x + 2*b*x*y + c*y*y ≤ 0) : 0 ≤ a*c-b*b
+  have bound := quadratic_form.bound.real (-a) b (-c) (by intro x y; linarith [form x y])
+  linarith
+
+@[auto] + quadratic_form.nonneg_of_pos.real (a b c x y : ℝ) (ha : 0 < a) (det : 0 ≤ a*c-b*b) :
+    0 ≤ a*x*x + 2*b*x*y + c*y*y
+  by_contra neg
+  have bad := mul_pos.real a (-(a*x*x+2*b*x*y+c*y*y)) ha (by linarith)
+  linarith [sq_nonneg.real (a*x+b*y),mul_nonneg.real (a*c-b*b) (y*y) det (by nlinarith)]
+
+@[auto] + quadratic_form.nonneg.real (a b c x y : ℝ) (ha : 0 ≤ a) (hc : 0 ≤ c) (det : 0 ≤ a*c-b*b) :
+    0 ≤ a*x*x + 2*b*x*y + c*y*y
+  by_cases pos : 0 < a
+  · exact quadratic_form.nonneg_of_pos.real a b c x y pos det
+  · have az : a = 0 := by linarith
+    rw [az] at det ⊢
+    have bz : b = 0 := by nlinarith
+    rw [bz]; linarith [mul_nonneg.real c (y*y) hc (by nlinarith)]
+
++ quadratic_form.semidefinite_iff.real (a b c : ℝ) :
+    (∀ x y, 0 ≤ a*x*x + 2*b*x*y + c*y*y) ↔ 0 ≤ a ∧ 0 ≤ c ∧ 0 ≤ a*c-b*b
+  constructor
+  · intro h
+    exact ⟨by linarith [h 1 0],by linarith [h 0 1],quadratic_form.det_of_nonneg.real a b c h⟩
+  · intro h x y; exact quadratic_form.nonneg.real a b c x y h.1 h.2.1 h.2.2
+
+@[auto] + quadratic_form.pos.real (a b c x y : ℝ) (ha : 0 < a) (det : 0 < a*c-b*b) (point : x ≠ 0 ∨ y ≠ 0) :
+    0 < a*x*x + 2*b*x*y + c*y*y
+  by_cases zero : y = 0
+  · obtain hx | hy := point
+    · rw [zero]; have xx : 0 < x*x := by nlinarith
+      linarith [mul_pos.real a (x*x) ha xx]
+    · contradiction
+  · have yy : 0 < y*y := by nlinarith
+    by_contra bad
+    have prod := mul_nonneg.real a (-(a*x*x+2*b*x*y+c*y*y)) (by linarith) (by linarith)
+    linarith [sq_nonneg.real (a*x+b*y),mul_pos.real (a*c-b*b) (y*y) det yy]
+
++ quadratic_form.definite_iff.real (a b c : ℝ) :
+    (∀ x y, (x ≠ 0 ∨ y ≠ 0) → 0 < a*x*x + 2*b*x*y + c*y*y) ↔ 0 < a ∧ 0 < a*c-b*b
+  constructor
+  · intro h
+    have ha : 0 < a := by linarith [h 1 0 (by left; decide)]
+    have v := h (-b) a (by right; linarith)
+    constructor
+    · exact ha
+    · by_contra bad
+      linarith [mul_nonneg.real a (-(a*c-b*b)) (by linarith) (by linarith)]
+  · intro h x y point; exact quadratic_form.pos.real a b c x y h.1 h.2 point
+
+@[auto] + quadratic_form.det_of_nonneg.rat (a b c : ℚ)
+    (form : ∀ x y, 0 ≤ a*x*x + 2*b*x*y + c*y*y) : 0 ≤ a*c-b*b
+  have bound := quadratic_form.bound.rat a b c (by intro x y; linarith [form x (-y)])
+  linarith
+
+@[auto] + quadratic_form.det_of_nonpos.rat (a b c : ℚ)
+    (form : ∀ x y, a*x*x + 2*b*x*y + c*y*y ≤ 0) : 0 ≤ a*c-b*b
+  have bound := quadratic_form.bound.rat (-a) b (-c) (by intro x y; linarith [form x y])
+  linarith
+
+@[auto] + quadratic_form.nonneg_of_pos.rat (a b c x y : ℚ) (ha : 0 < a) (det : 0 ≤ a*c-b*b) :
+    0 ≤ a*x*x + 2*b*x*y + c*y*y
+  by_contra neg
+  have bad := mul_pos.rat a (-(a*x*x+2*b*x*y+c*y*y)) ha (by linarith)
+  linarith [sq_nonneg.rat (a*x+b*y),mul_nonneg.rat (a*c-b*b) (y*y) det (by nlinarith)]
+
+@[auto] + quadratic_form.nonneg.rat (a b c x y : ℚ) (ha : 0 ≤ a) (hc : 0 ≤ c) (det : 0 ≤ a*c-b*b) :
+    0 ≤ a*x*x + 2*b*x*y + c*y*y
+  by_cases pos : 0 < a
+  · exact quadratic_form.nonneg_of_pos.rat a b c x y pos det
+  · have az : a = 0 := by linarith
+    rw [az] at det ⊢
+    have bz : b = 0 := by nlinarith
+    rw [bz]; linarith [mul_nonneg.rat c (y*y) hc (by nlinarith)]
+
++ quadratic_form.semidefinite_iff.rat (a b c : ℚ) :
+    (∀ x y, 0 ≤ a*x*x + 2*b*x*y + c*y*y) ↔ 0 ≤ a ∧ 0 ≤ c ∧ 0 ≤ a*c-b*b
+  constructor
+  · intro h
+    exact ⟨by linarith [h 1 0],by linarith [h 0 1],quadratic_form.det_of_nonneg.rat a b c h⟩
+  · intro h x y; exact quadratic_form.nonneg.rat a b c x y h.1 h.2.1 h.2.2
+
+@[auto] + quadratic_form.pos.rat (a b c x y : ℚ) (ha : 0 < a) (det : 0 < a*c-b*b) (point : x ≠ 0 ∨ y ≠ 0) :
+    0 < a*x*x + 2*b*x*y + c*y*y
+  by_cases zero : y = 0
+  · obtain hx | hy := point
+    · rw [zero]; have xx : 0 < x*x := by nlinarith
+      linarith [mul_pos.rat a (x*x) ha xx]
+    · contradiction
+  · have yy : 0 < y*y := by nlinarith
+    by_contra bad
+    have prod := mul_nonneg.rat a (-(a*x*x+2*b*x*y+c*y*y)) (by linarith) (by linarith)
+    linarith [sq_nonneg.rat (a*x+b*y),mul_pos.rat (a*c-b*b) (y*y) det yy]
+
++ quadratic_form.definite_iff.rat (a b c : ℚ) :
+    (∀ x y, (x ≠ 0 ∨ y ≠ 0) → 0 < a*x*x + 2*b*x*y + c*y*y) ↔ 0 < a ∧ 0 < a*c-b*b
+  constructor
+  · intro h
+    have ha : 0 < a := by linarith [h 1 0 (by left; decide)]
+    have v := h (-b) a (by right; linarith)
+    constructor
+    · exact ha
+    · by_contra bad
+      linarith [mul_nonneg.rat a (-(a*c-b*b)) (by linarith) (by linarith)]
+  · intro h x y point; exact quadratic_form.pos.rat a b c x y h.1 h.2 point
+
+@[auto] + quadratic_form.det_of_nonneg.int (a b c : ℤ)
+    (form : ∀ x y, 0 ≤ a*x*x + 2*b*x*y + c*y*y) : 0 ≤ a*c-b*b
+  have bound := quadratic_form.bound.int a b c (by intro x y; linarith [form x (-y)])
+  linarith
+
+@[auto] + quadratic_form.det_of_nonpos.int (a b c : ℤ)
+    (form : ∀ x y, a*x*x + 2*b*x*y + c*y*y ≤ 0) : 0 ≤ a*c-b*b
+  have bound := quadratic_form.bound.int (-a) b (-c) (by intro x y; linarith [form x y])
+  linarith
+
+@[auto] + quadratic_form.nonneg_of_pos.int (a b c x y : ℤ) (ha : 0 < a) (det : 0 ≤ a*c-b*b) :
+    0 ≤ a*x*x + 2*b*x*y + c*y*y
+  by_contra neg
+  have bad := mul_pos.int a (-(a*x*x+2*b*x*y+c*y*y)) ha (by linarith)
+  linarith [sq_nonneg.int (a*x+b*y),mul_nonneg.int (a*c-b*b) (y*y) det (by nlinarith)]
+
+@[auto] + quadratic_form.nonneg.int (a b c x y : ℤ) (ha : 0 ≤ a) (hc : 0 ≤ c) (det : 0 ≤ a*c-b*b) :
+    0 ≤ a*x*x + 2*b*x*y + c*y*y
+  by_cases pos : 0 < a
+  · exact quadratic_form.nonneg_of_pos.int a b c x y pos det
+  · have az : a = 0 := by linarith
+    rw [az] at det ⊢
+    have bz : b = 0 := by nlinarith
+    rw [bz]; linarith [mul_nonneg.int c (y*y) hc (by nlinarith)]
+
++ quadratic_form.semidefinite_iff.int (a b c : ℤ) :
+    (∀ x y, 0 ≤ a*x*x + 2*b*x*y + c*y*y) ↔ 0 ≤ a ∧ 0 ≤ c ∧ 0 ≤ a*c-b*b
+  constructor
+  · intro h
+    exact ⟨by linarith [h 1 0],by linarith [h 0 1],quadratic_form.det_of_nonneg.int a b c h⟩
+  · intro h x y; exact quadratic_form.nonneg.int a b c x y h.1 h.2.1 h.2.2
+
+@[auto] + quadratic_form.pos.int (a b c x y : ℤ) (ha : 0 < a) (det : 0 < a*c-b*b) (point : x ≠ 0 ∨ y ≠ 0) :
+    0 < a*x*x + 2*b*x*y + c*y*y
+  by_cases zero : y = 0
+  · obtain hx | hy := point
+    · rw [zero]; have xx : 0 < x*x := by nlinarith
+      linarith [mul_pos.int a (x*x) ha xx]
+    · contradiction
+  · have yy : 0 < y*y := by nlinarith
+    by_contra bad
+    have prod := mul_nonneg.int a (-(a*x*x+2*b*x*y+c*y*y)) (by linarith) (by linarith)
+    linarith [sq_nonneg.int (a*x+b*y),mul_pos.int (a*c-b*b) (y*y) det yy]
+
++ quadratic_form.definite_iff.int (a b c : ℤ) :
+    (∀ x y, (x ≠ 0 ∨ y ≠ 0) → 0 < a*x*x + 2*b*x*y + c*y*y) ↔ 0 < a ∧ 0 < a*c-b*b
+  constructor
+  · intro h
+    have ha : 0 < a := by linarith [h 1 0 (by left; decide)]
+    have v := h (-b) a (by right; linarith)
+    constructor
+    · exact ha
+    · by_contra bad
+      linarith [mul_nonneg.int a (-(a*c-b*b)) (by linarith) (by linarith)]
+  · intro h x y point; exact quadratic_form.pos.int a b c x y h.1 h.2 point

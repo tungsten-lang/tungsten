@@ -1,0 +1,50 @@
+-- Differentiation of the real exponential and its integrating factor.
+import realx
+import derivative
+
++ exp.remainder (h : ℝ) (small : h ≤ 1/2) : 0 ≤ exp h-1-h ∧ exp h-1-h ≤ 2*h^2
+  have nonneg : 0 ≤ exp h-1-h := by linarith [exp_ge_one_add h]
+  have reflected := mul_le_mul_of_nonneg_left.real (1+(0-h)) (exp (0-h)) (exp h) (exp_ge_one_add (0-h)) (by linarith [exp_pos h])
+  rw [exp_neg_mul] at reflected
+  have prod := mul_nonneg.real (exp h-1-h) (1/2-h) nonneg (by linarith)
+  exact ⟨nonneg,by linarith⟩
+
+@[auto] + has_deriv_within.exp (S : set ℝ) (x : ℝ) : has_deriv_within exp S x (exp x)
+  unfold has_deriv_within
+  intro e he
+  obtain ⟨rad,small⟩ := affine_step_radius.real (2*exp x) e he
+  use min (1/2) (e/(|2*exp x|+1))
+  constructor
+  · exact lt_min.real (1/2) (e/(|2*exp x|+1)) 0 (by norm_num) rad
+  · intro y hy near
+    have half : |y-x| < 1/2 := by linarith [min_le_left.real (1/2) (e/(|2*exp x|+1))]
+    have rem := exp.remainder (y-x) (by linarith [le_abs_self.real (y-x)])
+    have ex : exp y = exp x*exp (y-x)
+      have add : y = x+(y-x) := by ring
+      exact (by rw [← exp_add,← add])
+    have pos : 0 ≤ exp x := by linarith [exp_pos x]
+    have lo := mul_nonneg.real (exp x) (exp (y-x)-1-(y-x)) pos rem.1
+    have hi := mul_le_mul_of_nonneg_left.real (exp (y-x)-1-(y-x)) (2*(y-x)^2) (exp x) rem.2 pos
+    have rate : 2*exp x*|y-x| ≤ e
+      have tiny := small (e/(|2*exp x|+1)) rad (by linarith)
+      have dist : |y-x| ≤ e/(|2*exp x|+1) := by linarith [min_le_right.real (1/2) (e/(|2*exp x|+1))]
+      linarith [mul_le_mul_of_nonneg_left.real (|y-x|) (e/(|2*exp x|+1)) (2*exp x) dist (by linarith)]
+    have final := mul_le_mul_of_nonneg_right.real (2*exp x*|y-x|) e (|y-x|) rate (abs_nonneg.real (y-x))
+    have sq : 2*exp x*(|y-x|*|y-x|) = 2*exp x*(y-x)^2 := by linear_combination (2*exp x)*(sq_abs.real (y-x))
+    rw [ex,abs_of_nonneg.real (exp x*exp (y-x)-exp x-exp x*(y-x)) (by linarith)]
+    linarith
+
+@[auto] + continuous_at.exp_comp (f : ℝ → ℝ) (x : ℝ) (hf : continuous_at f x) : continuous_at (fun y => exp (f y)) x
+  exact continuous_at.comp exp f x (has_deriv.continuous_at exp (f x) (exp (f x)) (has_deriv_within.exp (fun y => True) (f x))) hf
+
+@[auto] + has_deriv_within.exp_comp (f : ℝ → ℝ) (S : set ℝ) (x v : ℝ) (hf : has_deriv_within f S x v) :
+    has_deriv_within (fun y => exp (f y)) S x (exp (f x)*v)
+  exact has_deriv_within.comp exp f S (fun y => True) x (exp (f x)) v (has_deriv_within.exp (fun y => True) (f x)) hf (by intro y hy; trivial)
+
++ has_deriv_within.exp_weight (F : ℝ → ℝ) (S : set ℝ) (t v c : ℝ) (diff : has_deriv_within F S t v) :
+    has_deriv_within (fun y => exp (-c*y)*F y) S t (exp (-c*t)*(v-c*F t))
+  have wt := has_deriv_within.exp_comp (fun y => -c*y) S t (-c) (has_deriv_within.scale_id (-c) S t)
+  have product := has_deriv_within.mul (fun y => exp (-c*y)) F S t (exp (-c*t)*(-c)) v wt diff
+  have eq : exp (-c*t)*(-c)*F t+exp (-c*t)*v = exp (-c*t)*(v-c*F t) := by ring
+  rw [eq] at product
+  exact product

@@ -8,5 +8,6 @@ license     "MIT OR Apache-2.0"
 authors     ["Tungsten Language Project"]
 
 bit "tungsten-wassat", local: true
+bit "tungsten-wrat", local: true
 
 executable  "satori", source: "bin/satori.w"

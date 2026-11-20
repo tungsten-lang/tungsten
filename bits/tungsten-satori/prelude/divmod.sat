@@ -1,5 +1,7 @@
 -- Euclidean division and reduction of residues to a divisor of the modulus.
 import order
+import logic
+import nat
 
 + div_mod_unique.nat (n k q r : ℕ) (h : n = k * q + r) (hr : r < k) : q = n / k ∧ r = n % k
   have d := div_add_mod.nat n k
@@ -13,6 +15,19 @@ import order
     rw [e]
     exact d
   exact ⟨e, by linarith⟩
+
+@[auto] + div_mod_of_lt.nat (a m : ℕ) (h : a < m) : a / m = 0 ∧ a % m = a
+  have u := div_mod_unique.nat a m 0 a (by ring) h
+  exact ⟨u.1.symm, u.2.symm⟩
+
+@[auto] + le_of_mod_zero.nat (a m : ℕ) (ha : 0 < a) (hd : a % m = 0) : m ≤ a
+  by_contra c
+  have e := (div_mod_of_lt.nat a m (by omega)).2
+  omega
+
+@[auto] + le_of_dvd.nat (a m : ℕ) (ha : 0 < a) (hd : m ∣ a) : m ≤ a
+  unfold dvd at hd
+  exact le_of_mod_zero.nat a m ha hd
 
 + add_mul_mod.nat (a b k : ℕ) : (a + k * b) % k = a % k
   by_cases hk : k = 0
@@ -37,6 +52,47 @@ import order
   rw [e, hr] at h
   exact h
 
++ mod_two_cases.nat (n : ℕ) : n % 2 = 0 ∨ n % 2 = 1
+  have m := mod_lt.nat n 2 (by decide)
+  by_cases h : n % 2 = 0
+  · left; exact h
+  · right; linarith
+
+-- Eliminate a number by writing it as a quotient times the modulus plus a bounded remainder.
++ quotient_cases.nat (m n : ℕ) (P : ℕ → Prop) (hm : 0 < m)
+    (step : ∀ q r : ℕ, r < m → P (m*q+r)) : P n
+  have h := step (n/m) (n%m) (mod_lt.nat n m hm)
+  rw [div_add_mod.nat] at h
+  exact h
+
+@[auto] + parity_quotient.nat (n : ℕ) : ∃ q, n = 2*q ∨ n = 2*q+1
+  apply quotient_cases.nat 2 n (fun x => ∃ q, x = 2*q ∨ x = 2*q+1) (by decide)
+  intro q r hr
+  use q
+  by_cases z : r = 0
+  · left; linarith
+  · right; omega
+
+@[auto] + even_or_odd_quotient.nat (n : ℕ) : (∃ q, n = 2*q) ∨ ∃ q, n = 2*q+1
+  exact (exists_or (fun q => n = 2*q) (fun q => n = 2*q+1)).mp (parity_quotient.nat n)
+
+-- The exponent-zero guard is needed when the stable residue differs from 1 % k.
++ pow_mod_idempotent.nat (a k r n : ℕ) (base : a % k = r) (stable : r*r % k = r)
+    (initial : n = 0 → 1 % k = r) : a ^ n % k = r
+  have step : ∀ j : ℕ, a ^ (j + 1) % k = r
+    intro j
+    induction j with j ih
+    · rw [pow_succ.nat a 0, pow_zero.nat, one_mul.nat]
+      exact base
+    · rw [succ_eq_add_one.nat, pow_succ.nat a (j + 1), mul_mod.nat, ih, base]
+      exact stable
+  by_cases z : n = 0
+  · rw [z, pow_zero.nat]
+    exact initial z
+  · have e : n = (n - 1) + 1 := by omega
+    rw [e]
+    exact step (n - 1)
+
 + div_mod_unique.int (n k q r : ℤ) (h : n = k * q + r) (h0 : 0 ≤ r) (hr : r < k) : q = n / k ∧ r = n % k
   have d := div_add_mod.int n k
   have m0 := mod_nonneg.int n k (by linarith)
@@ -51,6 +107,10 @@ import order
     rw [e]
     exact d
   exact ⟨e, by linarith⟩
+
+@[auto] + div_mod_of_lt.int (a m : ℤ) (h0 : 0 ≤ a) (h : a < m) : a / m = 0 ∧ a % m = a
+  have u := div_mod_unique.int a m 0 a (by ring) h0 h
+  exact ⟨u.1.symm, u.2.symm⟩
 
 + add_mul_mod.int (a b k : ℤ) (hk : 0 < k) : (a + k * b) % k = a % k
   have u := div_mod_unique.int (a + k * b) k (a / k + b) (a % k) (by linarith [div_add_mod.int a k, left_distrib.int k (a / k) b]) (mod_nonneg.int a k hk) (mod_lt.int a k hk)
@@ -71,3 +131,43 @@ import order
   have h := add_mul_mod.int (n % m) (k*(n/m)) d hd
   rw [e, hr] at h
   exact h
+
++ mod_two_cases.int (n : ℤ) : n % 2 = 0 ∨ n % 2 = 1
+  have m0 := mod_nonneg.int n 2 (by decide)
+  have m := mod_lt.int n 2 (by decide)
+  by_cases h : n % 2 = 0
+  · left; exact h
+  · right; linarith
+
++ quotient_cases.int (m n : ℤ) (P : ℤ → Prop) (hm : 0 < m)
+    (step : ∀ q r : ℤ, 0 ≤ r → r < m → P (m*q+r)) : P n
+  have h := step (n/m) (n%m) (mod_nonneg.int n m hm) (mod_lt.int n m hm)
+  rw [div_add_mod.int] at h
+  exact h
+
+@[auto] + parity_quotient.int (n : ℤ) : ∃ q, n = 2*q ∨ n = 2*q+1
+  apply quotient_cases.int 2 n (fun x => ∃ q, x = 2*q ∨ x = 2*q+1) (by decide)
+  intro q r h0 hr
+  use q
+  by_cases z : r = 0
+  · left; linarith
+  · right; omega
+
+@[auto] + even_or_odd_quotient.int (n : ℤ) : (∃ q, n = 2*q) ∨ ∃ q, n = 2*q+1
+  exact (exists_or (fun q => n = 2*q) (fun q => n = 2*q+1)).mp (parity_quotient.int n)
+
++ pow_mod_idempotent.int (a k r : ℤ) (n : ℕ) (pos : 0 < k) (base : a % k = r) (stable : r*r % k = r)
+    (initial : n = 0 → (1 : ℤ) % k = r) : a ^ n % k = r
+  have step : ∀ j : ℕ, a ^ (j + 1) % k = r
+    intro j
+    induction j with j ih
+    · rw [pow_succ.int a 0, pow_zero.int, one_mul.int]
+      exact base
+    · rw [succ_eq_add_one.nat, pow_succ.int a (j + 1), mul_mod.int (a ^ (j + 1)) a k pos, ih, base]
+      exact stable
+  by_cases z : n = 0
+  · rw [z, pow_zero.int]
+    exact initial z
+  · have e : n = (n - 1) + 1 := by omega
+    rw [e]
+    exact step (n - 1)

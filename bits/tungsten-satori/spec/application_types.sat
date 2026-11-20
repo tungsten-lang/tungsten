@@ -19,3 +19,32 @@
 + closed_then_applied (x y : ℕ) (h : x = y) : y = x := (flip_eq x y).mp h
 + map_forward (F : (α → β) → γ) (f g : α → β) (h : F f = F g) : F g = F f := (flip_eq (F f) (F g)).mp h
 + nested_application (p : α → Prop) (x : α) (h : p x) : p x := (predicate_iff p x).mp ((predicate_iff p x).mpr h)
+
++ exists_from_witness (P : α → Prop) (x : α) (hx : P x) : ∃ y, P y := ⟨x, hx⟩
++ inferred_witness (P : α → Prop) (x : α) (hx : P x) : ∃ y, P y := by apply exists_from_witness <;> assumption
++ repeated_witness (P : α → Prop) (x : α) (hx hx2 : P x) : ∃ y, P y := by apply exists_from_witness <;> assumption
++ chosen_witness (P : α → Prop) (x y : α) (hx : P x) (hy : P y) : ∃ z, P z := by apply exists_from_witness P y <;> assumption
++ shared_witness (P Q : α → Prop) (x : α) (hp : P x) (hq : Q x) : ∃ y, P y ∧ Q y := ⟨x, hp, hq⟩
++ inferred_shared (P Q : α → Prop) (x : α) (hp : P x) (hq : Q x) : ∃ y, P y ∧ Q y := by apply shared_witness <;> assumption
+
++ witnesses (P : α → Prop) (Q : β → Prop) (x : α) (y : β) (hx : P x) (hy : Q y) :
+    ∃ z w, P z ∧ Q w := ⟨x,y,hx,hy⟩
++ inferred_pair (P : α → Prop) (Q : β → Prop) (x : α) (y : β) (hx : P x) (hy : Q y) :
+    ∃ z w, P z ∧ Q w := by apply witnesses <;> assumption
+
+-> paired (P Q : Prop) : Prop := P ∧ Q
+-> both_at (P Q : α → Prop) (x : α) : Prop := paired (P x) (Q x)
+-> has_pair (P Q : α → Prop) : Prop := ∃ x, both_at P Q x
+-> equivalent (P Q : Prop) : Prop := P ↔ Q
++ pair_value (P Q : α → Prop) (x : α) (p : P x) (q : Q x) : both_at P Q x := ⟨p,q⟩
++ pair_field (P Q : α → Prop) (x : α) (h : both_at P Q x) : Q x := h.2
++ pair_witness (P Q : α → Prop) (x : α) (p : P x) (q : Q x) : has_pair P Q := ⟨x,p,q⟩
++ iff_value (P Q : Prop) (f : P → Q) (g : Q → P) : equivalent P Q := ⟨f,g⟩
++ iff_field (P Q : Prop) (e : equivalent P Q) (p : P) : Q := e.mp p
++ pair_constructor (P Q : Prop) (p : P) (q : Q) : paired P Q := by constructor <;> assumption
++ ordinary_iff (P Q : Prop) (f : P → Q) (g : Q → P) : P ↔ Q := ⟨f,g⟩
+
++ witnesses_at_value (P : α → Prop) (g : β → γ) (b : γ) (x : α) (y : β)
+    (hx : P x) (hy : g y = b) : ∃ v w, P v ∧ g w = b := ⟨x,y,hx,hy⟩
++ inferred_value (P : α → Prop) (g : β → γ) (b : γ) (x : α) (y : β)
+    (hx : P x) (hy : g y = b) : ∃ v w, P v ∧ g w = b := by apply witnesses_at_value <;> assumption

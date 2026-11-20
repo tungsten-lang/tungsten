@@ -1,0 +1,11 @@
+import laplacian
++ missing_max (ns : list ℕ) (u : ℕ → ℝ) (v w : ℕ) (h : laplacian ns u v = 0) (hw : w ∈ ns) : u w = u v := by auto
++ missing_harmonic (ns : list ℕ) (u : ℕ → ℝ) (v w : ℕ) (h : ∀ i ∈ ns, u i ≤ u v) (hw : w ∈ ns) : u w = u v := by auto
++ missing_edge (ns : list ℕ) (u : ℕ → ℝ) (v w : ℕ) (h : ∀ i ∈ ns, u i ≤ u v) (z : laplacian ns u v = 0) : u w = u v := by auto
+
++ missing_path (ns : α → list α) (u : α → ℝ) (v w : α)
+    (peak : ∀ x, u x ≤ u v) (harmonic : ∀ x, laplacian (ns x) u x = 0) : u w = u v := by auto [laplacian.strong_max.real]
+
++ backward_path (ns : α → list α) (u : α → ℚ) (v w : α)
+    (peak : ∀ x, u x ≤ u v) (harmonic : ∀ x, laplacian (ns x) u x = 0)
+    (back : reachable (fun a b => b ∈ ns a) w v) : u w = u v := by auto [laplacian.strong_max.rat]

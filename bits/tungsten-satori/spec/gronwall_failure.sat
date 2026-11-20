@@ -1,0 +1,10 @@
+import gronwall
+
++ missing_sign (E d : ℝ → ℝ) (diff : interval.deriv E d 0 1)
+    (rate : ∀ t, 0 ≤ t → t ≤ 1 → d t ≤ 0*E t) (start : E 0 = 0) : E 1 = 0 := by auto
+
++ strict_growth (E d : ℝ → ℝ) (diff : interval.deriv E d 0 1)
+    (rate : ∀ t, 0 ≤ t → t ≤ 1 → d t ≤ 2*E t) : E 1 < exp (2*(1-0))*E 0 := by auto
+
++ missing_order (f g u v : ℝ → ℝ) (df : interval.deriv f u 0 1) (dg : interval.deriv g v 0 1)
+    (rate : ∀ t, 0 ≤ t → t ≤ 1 → g t < f t → u t-v t ≤ 2*(f t-g t)) : f 1 ≤ g 1 := by auto

@@ -45,3 +45,28 @@
 -- a Hamiltonian cycle on n vertices, as a list starting at 0
 -> hamiltonian_cycle (n : ℕ) (adj : ℕ → ℕ → Prop) (c : list ℕ) : Prop :=
   length c = n ∧ distinct_list c ∧ (∀ v ∈ c, v < n) ∧ consecutive adj c ∧ adj (last_or 0 c) (head_or 0 c)
+
+-- Reflexive transitive closure: every edge-closed predicate containing x contains y.
+-> reachable (edge : α → α → Prop) (x y : α) : Prop :=
+  ∀ P : α → Prop, P x → (∀ a b, P a → edge a b → P b) → P y
+
++ reachable.refl (edge : α → α → Prop) (x : α) : reachable edge x x
+  unfold reachable
+  intro P hx step
+  exact hx
+
++ reachable.step (edge : α → α → Prop) (x y z : α) (h : reachable edge x y) (e : edge y z) : reachable edge x z
+  unfold reachable
+  intro P hx step
+  unfold reachable at h
+  exact step y z (h P hx step) e
+
++ reachable.of_walk (edge : α → α → Prop) (w : ℕ → α) (k : ℕ)
+    (edges : ∀ i < k, edge (w i) (w (i+1))) : reachable edge (w 0) (w k)
+  have walk : ∀ j : ℕ, j ≤ k → reachable edge (w 0) (w j)
+    apply nat.induct (fun j => j ≤ k → reachable edge (w 0) (w j))
+    · intro h
+      exact reachable.refl edge (w 0)
+    · intro j ih h
+      exact reachable.step edge (w 0) (w j) (w (j+1)) (ih (by omega)) (edges j (by omega))
+  exact walk k (by omega)

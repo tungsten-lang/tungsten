@@ -1,9 +1,10 @@
 -- Real-analysis facts (import realx): exponential, logarithm, square root and the Archimedean property of ℝ, proved
 -- from the foundational axioms of real.sat (exp_pos, exp_add, exp_zero, exp_ge_one_add, log_exp, exp_log, sqrt_spec,
 -- sqrt_nonneg, sup_exists) and the arith library. This module adds no axioms.
-import real
+import supremum
 import arith
 import exp_convex
+import exp_order
 
 -- ---- exponential --------------------------------------------------------------------------------------------------
 + exp_nonneg (x : ℝ) : 0 ≤ exp x
@@ -19,37 +20,6 @@ import exp_convex
 + exp_sub (x y : ℝ) : exp (x - y) = exp x / exp y
   have e : x - y = x + (0 - y) := by ring
   rw [e, exp_add, exp_neg y, div_def.real (exp x) (exp y)]
-
-+ one_lt_exp (x : ℝ) (h : 0 < x) : 1 < exp x
-  linarith [exp_ge_one_add x]
-
-+ exp_lt_exp_of_lt (x y : ℝ) (h : x < y) : exp x < exp y
-  have e : x + (y - x) = y := by ring
-  have f : exp y = exp x * exp (y - x) := by rw [← exp_add, e]
-  rw [f]
-  nlinarith [exp_pos x, one_lt_exp (y - x) (by linarith)]
-
-+ exp_lt_exp (x y : ℝ) : exp x < exp y ↔ x < y
-  constructor
-  · intro h
-    by_contra c
-    by_cases d : x = y
-    · rw [d] at h
-      linarith
-    · linarith [exp_lt_exp_of_lt y x (by linarith)]
-  · intro h
-    exact exp_lt_exp_of_lt x y h
-
-+ exp_le_exp (x y : ℝ) : exp x ≤ exp y ↔ x ≤ y
-  constructor
-  · intro h
-    by_contra c
-    linarith [exp_lt_exp_of_lt y x (by linarith)]
-  · intro h
-    by_cases d : x = y
-    · rw [d]
-      linarith
-    · linarith [exp_lt_exp_of_lt x y (by linarith)]
 
 -- e^x ≤ 1 / (1 − x) for x < 1 (from 1 − x ≤ e^(−x))
 + exp_le_inv_one_sub (x : ℝ) (h : x < 1) : exp x ≤ 1 / (1 - x)
@@ -67,11 +37,6 @@ import exp_convex
     rw [succ_eq_add_one.nat, cast_succ.real, pow_succ.real, ← ih, e, exp_add]
 
 -- ---- logarithm (log is the inverse of exp on (0, ∞)) -------------------------------------------------------------
-+ log_one : log 1 = 0
-  have e := log_exp 0
-  rw [exp_zero] at e
-  exact e
-
 + log_mul (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : log (a * b) = log a + log b
   have e : a * b = exp (log a + log b) := by rw [exp_add, exp_log a ha, exp_log b hb]
   rw [e, log_exp]
@@ -93,24 +58,10 @@ import exp_convex
   · intro h
     exact k.mp h
 
-+ log_le_log (a b : ℝ) (ha : 0 < a) (hb : 0 < b) : log a ≤ log b ↔ a ≤ b
-  have k := exp_le_exp (log a) (log b)
-  rw [exp_log a ha, exp_log b hb] at k
-  constructor
-  · intro h
-    exact k.mpr h
-  · intro h
-    exact k.mp h
-
 + log_le_sub_one (x : ℝ) (hx : 0 < x) : log x ≤ x - 1
   have a := exp_ge_one_add (log x)
   rw [exp_log x hx] at a
   linarith
-
-+ log_nonneg (x : ℝ) (h : 1 ≤ x) : 0 ≤ log x
-  have k := (log_le_log 1 x (by linarith) (by linarith)).mpr h
-  rw [log_one] at k
-  exact k
 
 + log_pos (x : ℝ) (h : 1 < x) : 0 < log x
   have k := (log_lt_log 1 x (by linarith) (by linarith)).mpr h
@@ -257,35 +208,11 @@ import exp_convex
     intro n
     by_contra d
     exact c ⟨n, by linarith⟩
-  have ne : ∃ y, (fun y => ∃ n : ℕ, y = (n : ℝ)) y
-    use 0
-    show ∃ n : ℕ, (0 : ℝ) = (n : ℝ)
-    use 0
-  have bd : ∃ b, upper_bound (fun y => ∃ n : ℕ, y = (n : ℝ)) b
-    use x
-    unfold upper_bound
-    intro y hy
-    have k : ∃ n : ℕ, y = (n : ℝ) := hy
-    obtain ⟨n, e⟩ := k
-    rw [e]
-    exact hb n
-  obtain ⟨s, hs⟩ := sup_exists (fun y => ∃ n : ℕ, y = (n : ℝ)) ne bd
-  unfold is_sup at hs
-  have u : upper_bound (fun y => ∃ n : ℕ, y = (n : ℝ)) (s - 1)
-    unfold upper_bound
-    intro y hy
-    have k : ∃ n : ℕ, y = (n : ℝ) := hy
-    obtain ⟨n, e⟩ := k
-    have mem : (fun y => ∃ n : ℕ, y = (n : ℝ)) ((n + 1 : ℕ) : ℝ)
-      show ∃ j : ℕ, ((n + 1 : ℕ) : ℝ) = (j : ℝ)
-      use n + 1
-    have ub := hs.1
-    unfold upper_bound at ub
-    have m := ub ((n + 1 : ℕ) : ℝ) mem
-    rw [cast_succ.real] at m
-    rw [e]
-    linarith
-  linarith [hs.2 (s - 1) u]
+  obtain ⟨s, hs⟩ := is_sup.range_exists (fun (n : ℕ) => (n : ℝ)) 0 x hb
+  obtain ⟨n, near⟩ := is_sup.exists_range_gt (fun (j : ℕ) => (j : ℝ)) s (s - 1) hs (by linarith)
+  have upper := is_sup.range_ge (fun (j : ℕ) => (j : ℝ)) s hs (n + 1)
+  rw [cast_succ.real] at upper
+  linarith
 
 -- ---- exponential with unary minus, and Taylor-type bounds -----------------------------------------------------------
 -- exp_neg / exp_neg_mul above use 0 - x; these state the same facts with -x.

@@ -1,0 +1,25 @@
+import integral_parameter
+
++ differentiate (F v : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (regular : has_continuous_time_deriv F v (fun z => c ≤ z ∧ z ≤ d) (fun x => a ≤ x ∧ x ≤ b)) :
+    has_deriv_within (fun t => darboux.integral a b (F t)) (fun z => c ≤ z ∧ z ≤ d) d (darboux.integral a b (v d)) := by auto
+
+-- At the right endpoint the time derivative of ∫₀¹ t²x dx is 1.
++ right_endpoint :
+    has_deriv_within (fun t => darboux.integral 0 1 (fun x => t^2*x)) (fun z => 0 ≤ z ∧ z ≤ 1) 1 1
+  have reg : has_continuous_time_deriv (fun t x => t^2*x) (fun t x => (2*t)*x) (fun z => 0 ≤ z ∧ z ≤ 1) (fun z => 0 ≤ z ∧ z ≤ 1)
+    unfold has_continuous_time_deriv; intro t ht x hx
+    constructor
+    · apply continuous_at.within; auto
+    · constructor
+      · apply continuous_within_box.mul (fun s y => 2*s) (fun s y => y)
+        · apply continuous_within_box.time (fun s => 2*s); auto
+        · apply continuous_within_box.space (fun y => y); auto
+      · have h := has_deriv_within.mul (fun z => z^2) (fun z => x) (fun z => 0 ≤ z ∧ z ≤ 1) t (2*t) 0 (by auto) (by auto)
+        simpa using h
+  have slope := darboux.integral.time_deriv (fun t x => t^2*x) (fun t x => (2*t)*x) 0 1 0 1 1 (by decide) (by decide) (by decide) reg
+  have area : darboux.has_integral (fun x => x) 0 1 (1/2) := by simpa [pow_one.real] using darboux.pow 0 1 1 (by decide)
+  have scaled := darboux.scale (fun x => x) 0 1 (1/2) (2*1) area
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  have val := agree 0 1 (fun x => (2*1)*x) ((2*1)*(1/2)) scaled
+  rw [val] at slope; simpa using slope

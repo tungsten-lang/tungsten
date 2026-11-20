@@ -1,0 +1,10 @@
+opaque marked : ℕ → Prop
+axiom seed : marked 2
++ borrowed : marked 2 := seed
++ admitted : marked 3 := by sorry
++ hidden_axiom (h : marked 1) : all marked [1,2] := by auto
++ hidden_sorry (h : marked 1) : all marked [3,1] := by auto
++ repeated_gap (h : marked 1) : all marked [2,1,2] := by auto
++ two_gaps (h : marked 1) : all marked [1,4,5] := by auto
++ missing_tail (P : α → Prop) (a : α) (xs : list α) (ha : P a) : all P (a :: xs) := by auto
++ wrong_list (P : α → Prop) (a : α) (xs ys : list α) (ha : P a) (h : all P ys) : all P (a :: xs) := by auto

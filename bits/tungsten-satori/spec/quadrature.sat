@@ -1,0 +1,24 @@
+import quadrature
+
++ square_mean : quadrature.mean (fun x => x^2) = 1/3 := by apply quadrature.boole <;> auto
++ tilted (k : ℝ) : quadrature.mean (fun x => (x+k)^2) = k^2+1/3 := by auto
+
+-- This integrand vanishes at all five quadrature nodes.
++ unsampled_mass : quadrature.mean (fun x => x^2*(x^2-1)*(x^2-1/4)) = -1/42 := by auto
++ even_moment : 1/17 = quadrature.mean (fun t => t^16) := by auto
+
+-> angular (f : ℝ → ℝ) : ℝ := quadrature.mean f
+-> legendre2 (x : ℝ) : ℝ := (3*x^2-1)/2
++ legendre_energy : angular (fun t => (legendre2 t)^2) = 1/5 := by auto
+
++ polynomial_area (a b k : ℝ) (ab : a ≤ b) :
+    darboux.has_integral (fun t => k*t^6+1) a b (b-a+k*((b^7-a^7)/7)) := by auto
++ oriented (a b : ℝ) : darboux.integral a b (fun t => 3*t^2) = b^3-a^3 := by auto
++ reverse_interval : darboux.integral 2 (-1) (fun t => t^2) = -3 := by auto
++ point_interval (a : ℝ) : darboux.integral a a (fun t => (t+2)^3) = 0 := by auto
++ two_means (k : ℝ) : 3*angular (fun t => k*t^2) + angular (fun t => t^4) = k+1/5 := by auto
++ mean_as_integral : 2*angular (fun t => t^6) = darboux.integral (-1) 1 (fun t => t^6) := by auto
++ arbitrary_degree (n : ℕ) (c : ℕ → ℝ) (a b : ℝ) (h : a ≤ b) :
+    darboux.has_integral (fun t => ∑ j < n, c j*t^j) a b (∑ j < n, c j*((b^(j+1)-a^(j+1))/((j:ℝ)+1))) := by auto
+#axioms unsampled_mass
+#axioms legendre_energy

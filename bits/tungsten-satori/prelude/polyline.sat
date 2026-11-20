@@ -1,0 +1,93 @@
+-- A finite piecewise-affine real function, extended constantly outside its knots.
+import sequence_order
+
+-> polyline (t m : ℕ → ℝ) (v : ℝ) (n : ℕ) (x : ℝ) : ℝ :=
+  v + ∑ i < n, m i * (min x (t (i+1)) - min x (t i))
+
+@[simp] + polyline.zero (t m : ℕ → ℝ) (v x : ℝ) : polyline t m v 0 x = v
+  unfold polyline
+  rw [sum_below_zero]
+  ring
+
++ polyline.succ (t m : ℕ → ℝ) (v : ℝ) (n : ℕ) (x : ℝ) :
+    polyline t m v (n+1) x = polyline t m v n x + m n*(min x (t (n+1))-min x (t n))
+  unfold polyline
+  rw [sum_below_succ]
+  ring
+
+-- Once x lies behind the last knot, extending the prefix preserves its value.
+@[auto] + polyline.stable (t m : ℕ → ℝ) (v x : ℝ) (k n : ℕ) (kn : k ≤ n) (past : x ≤ t k)
+    (ordered : ∀ i < n, t i ≤ t (i+1)) : polyline t m v n x = polyline t m v k x
+  apply nat.interval_induct (fun j => polyline t m v j x = polyline t m v k x) k n kn (by rfl)
+  intro j kj jn same
+  have tj := sequence.monotone_on.real t k j kj (by intro i ki ij; exact ordered i (by omega))
+  have after : x ≤ t (j+1) := by linarith [ordered j jn]
+  rw [polyline.succ, min_eq_left.real x (t j) (by linarith), min_eq_left.real x (t (j+1)) after, same]
+  ring
+
+-- Past the last knot the whole prefix is constant.
++ polyline.after (t m : ℕ → ℝ) (v : ℝ) (n : ℕ) (ordered : ∀ i < n, t i ≤ t (i+1)) :
+    ∀ x y, t n ≤ x → t n ≤ y → polyline t m v n x = polyline t m v n y
+  induction n with order x y hx hy k ih order x y hx hy
+  · rw [polyline.zero, polyline.zero]
+  · rw [succ_eq_add_one.nat] at hx hy ⊢
+    have edge := order k (by omega)
+    have kx : t k ≤ x := by linarith
+    have ky : t k ≤ y := by linarith
+    rw [polyline.succ, polyline.succ t m v k y, min_eq_right.real x (t (k+1)) hx, min_eq_right.real y (t (k+1)) hy, min_eq_right.real x (t k) kx, min_eq_right.real y (t k) ky]
+    rw [ih (by intro i hi; exact order i (by omega)) x y kx ky]
+
+@[auto] + polyline.on_piece (t m : ℕ → ℝ) (v : ℝ) (n i : ℕ) (ordered : ∀ j < n, t j ≤ t (j+1)) (hi : i < n)
+    (x y : ℝ) (lx : t i ≤ x) (xy : x ≤ y) (yr : y ≤ t (i+1)) :
+    polyline t m v n y-polyline t m v n x = m i*(y-x)
+  have ly : t i ≤ y := by linarith
+  have xr : x ≤ t (i+1) := by linarith
+  rw [polyline.stable t m v y (i+1) n (by omega) yr ordered, polyline.stable t m v x (i+1) n (by omega) xr ordered]
+  rw [polyline.succ, polyline.succ t m v i x, min_eq_left.real y (t (i+1)) yr, min_eq_left.real x (t (i+1)) xr, min_eq_right.real y (t i) ly, min_eq_right.real x (t i) lx]
+  rw [polyline.after t m v i (by intro j hj; exact ordered j (by omega)) y x ly lx]
+  ring
+
+-- The endpoints may fall inside pieces. Each call to step concerns a
+-- positive-length interval contained in both the query and one original piece.
++ interval.increment_le_on_pieces (f : ℝ → ℝ) (t : ℕ → ℝ) (n : ℕ) (a b M : ℝ)
+    (start : t 0 ≤ a) (ab : a ≤ b) (finish : b ≤ t n)
+    (step : ∀ i < n, ∀ x y, a ≤ x → t i ≤ x → x < y → y ≤ t (i+1) → y ≤ b → f y-f x ≤ M*(y-x)) :
+    f b-f a ≤ M*(b-a)
+  have reach : ∀ j, j ≤ n → ∀ y, a ≤ y → y ≤ b → y ≤ t j → f y-f a ≤ M*(y-a)
+    intro j
+    induction j with jn y ay yb edge k ih kn y ay yb edge
+    · have eq : y = a := by linarith
+      rw [eq]; linarith
+    · by_cases prior : y ≤ t k
+      · exact ih (by omega) y ay yb prior
+      · by_cases left : t k ≤ a
+        · by_cases zero : y = a
+          · rw [zero]; linarith
+          · exact step k (by omega) a y (by linarith) left (by linarith) edge yb
+        · have prefix := ih (by omega) (t k) (by linarith) (by linarith) (by linarith)
+          have last := step k (by omega) (t k) y (by linarith) (by linarith) (by linarith) edge yb
+          linarith
+  exact reach n (by omega) b ab (by linarith) finish
+
+-- Test the slope only in the interior of a piece meeting the open query interval.
++ polyline.increment_le (t m : ℕ → ℝ) (v : ℝ) (n : ℕ) (a b M : ℝ)
+    (ordered : ∀ i < n, t i ≤ t (i+1)) (start : t 0 ≤ a) (ab : a ≤ b) (finish : b ≤ t n)
+    (bound : ∀ i < n, ∀ x, a < x → x < b → t i < x → x < t (i+1) → m i ≤ M) :
+    polyline t m v n b-polyline t m v n a ≤ M*(b-a)
+  apply interval.increment_le_on_pieces (polyline t m v n) t n a b M start ab finish
+  intro i hi x y ax tx xy yt yb
+  rw [polyline.on_piece t m v n i ordered hi x y tx (by linarith) yt]
+  have slope := bound i hi ((x+y)/2) (by linarith) (by linarith) (by linarith) (by linarith)
+  exact mul_le_mul_of_nonneg_right.real (m i) M (y-x) slope (by linarith)
+
+-- Recover prescribed knot values from their successive differences.
+@[auto] + polyline.at_knot (t m h : ℕ → ℝ) (n : ℕ) (ordered : ∀ i < n, t i ≤ t (i+1))
+    (step : ∀ i < n, h (i+1)-h i = m i*(t (i+1)-t i)) : polyline t m (h 0) n (t n) = h n
+  induction n with order steps k ih order steps
+  · rw [polyline.zero]
+  · rw [succ_eq_add_one.nat]
+    have edge := order k (by omega)
+    have inc := polyline.on_piece t m (h 0) (k+1) k order (by omega) (t k) (t (k+1)) (by linarith) edge (by linarith)
+    rw [polyline.stable t m (h 0) (t k) k (k+1) (by omega) (by linarith) order] at inc
+    have prev := ih (by intro i hi; exact order i (by omega)) (by intro i hi; exact steps i (by omega))
+    linarith [steps k (by omega)]

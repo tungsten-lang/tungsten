@@ -1,0 +1,21 @@
+import heat_path
+
++ missing_derivative (f g : ℝ → ℝ) (S : set ℝ) (t u v : ℝ) (hf : has_deriv_within f S t u) :
+    has_deriv_within (fun y => f y*g y) S t (u*g t+f t*v) := by auto
++ wrong_product (f g : ℝ → ℝ) (S : set ℝ) (t u v : ℝ) (hf : has_deriv_within f S t u) (hg : has_deriv_within g S t v) :
+    has_deriv_within (fun y => f y*g y) S t (u*v) := by auto
++ missing_outlet (u : ℕ → ℝ → ℝ) (q : ℕ → ℝ) (S : set ℝ) (t : ℝ)
+    (flow : ∀ i < 3, has_deriv_within (u i) S t (q (i+1)-q i)) (edges : ∀ i < 2, q (i+1) = u (i+1) t-u i t) (left : q 0 = 0) :
+    has_deriv_within (heat_path.energy u 2) S t (-2*heat_path.dissipation u 2 t)
+  apply heat_path.energy_rate u q 2 S t flow edges left
+  auto
++ reversed_gradient (u : ℕ → ℝ → ℝ) (q : ℕ → ℝ) (S : set ℝ) (t : ℝ)
+    (flow : ∀ i < 3, has_deriv_within (u i) S t (q (i+1)-q i)) (rev : ∀ i < 2, q (i+1) = u i t-u (i+1) t)
+    (left : q 0 = 0) (right : q 3 = 0) : has_deriv_within (heat_path.energy u 2) S t (-2*heat_path.dissipation u 2 t)
+  apply heat_path.energy_rate u q 2 S t flow <;> auto
++ backwards (u : ℕ → ℝ → ℝ) (n : ℕ) (a b : ℝ) (ab : a < b)
+    (h : ∀ t, a ≤ t → t ≤ b → ∀ i < n+1, has_deriv_within (u i) (fun z => a ≤ z ∧ z ≤ b) t
+      (heat_path.flux u n t (i+1)-heat_path.flux u n t i)) : heat_path.energy u n a ≤ heat_path.energy u n b := by auto
++ different_predicate (P Q : ℝ → Prop) (a : ℝ) (h : P (a*a)) : Q (a^2) := by auto
++ wrong_coordinate (P : ℝ → ℝ → Prop) (a b : ℝ) (h : P (a+b) (a*b)) : P (b+a) (a*b+1) := by auto
++ truncated (P : ℕ → Prop) (a b : ℕ) (h : P (a-b+b)) : P a := by auto

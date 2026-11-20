@@ -1,0 +1,30 @@
+import polyline_curve
+
++ covered_prefix (t m : ℕ → ℝ) (v x : ℝ) (n : ℕ) (order : ∀ i, t i ≤ t (i+1)) (cover : x ≤ t n) :
+    polyline.curve t m v x = polyline t m v n x := by auto
++ local_slope (t m : ℕ → ℝ) (v x y : ℝ) (i : ℕ) (order : ∀ k, t k ≤ t (k+1))
+    (lo : t i ≤ x) (xy : x ≤ y) (up : y ≤ t (i+1)) : polyline.curve t m v y-polyline.curve t m v x = m i*(y-x) := by auto
++ prescribed_knot (t m h : ℕ → ℝ) (n : ℕ) (order : ∀ k, t k ≤ t (k+1))
+    (step : ∀ i < n, h (i+1)-h i = m i*(t (i+1)-t i)) : polyline.curve t m (h 0) (t n) = h n := by auto
+
+-- The queried interval crosses a repeated knot. The value at the corner
+-- and the values on either side all belong to the same curve.
+-> knot (i : ℕ) : ℝ := if i = 0 then 0 else if i = 1 then 1 else (i:ℝ)-1
+-> slope (i : ℕ) : ℝ := if i = 0 then 2 else if i = 1 then 100 else -1
++ ordered (i : ℕ) : knot i ≤ knot (i+1)
+  by_cases z : i = 0
+  · rw [z]; decide
+  · by_cases o : i = 1
+    · rw [o]; decide
+    · have nz : i+1 ≠ 0 := by omega
+      have no : i+1 ≠ 1 := by omega
+      simp [knot, z, o, nz, no, cast_succ.real]
+      linarith
++ corner : polyline.curve knot slope 7 (5/2)-polyline.curve knot slope 7 (1/2) = -1/2
+  rw [polyline.curve_eq knot slope 7 (5/2) 4 ordered (by decide), polyline.curve_eq knot slope 7 (1/2) 1 ordered (by decide)]
+  decide
+
++ increasing (t m : ℕ → ℝ) (v a b : ℝ) (order : ∀ i, t i ≤ t (i+1))
+    (cover : ∀ x, ∃ n, x ≤ t n) (start : t 0 ≤ a) (ab : a ≤ b) (up : ∀ i, 0 ≤ m i) :
+    polyline.curve t m v a ≤ polyline.curve t m v b
+  exact polyline.curve_mono t m v a b order start ab (cover b) up

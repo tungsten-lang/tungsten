@@ -1,0 +1,51 @@
+-- Real finite transforms. K i j is the contribution of input i to output j.
+import arith
+
+-> finite_l2.dot (n : ℕ) (f g : ℕ → ℝ) : ℝ := ∑ i < n, f i*g i
+-> finite_l2.transform (n : ℕ) (K : ℕ → ℕ → ℝ) (f : ℕ → ℝ) (j : ℕ) : ℝ := ∑ i < n, f i*K i j
+
+-- The rows have pairwise zero dot products and each has squared norm c.
+-> finite_l2.orthogonal (n m : ℕ) (K : ℕ → ℕ → ℝ) (c : ℝ) : Prop :=
+  ∀ i < n, ∀ k < n, finite_l2.dot m (K i) (K k) = (if i = k then c else 0)
+
++ finite_l2.dot_comm (n : ℕ) (f g : ℕ → ℝ) : finite_l2.dot n f g = finite_l2.dot n g f
+  unfold finite_l2.dot; apply sum_below.congr; intro i hi; ring
+
++ finite_l2.adjoint (n m : ℕ) (K : ℕ → ℕ → ℝ) (f g : ℕ → ℝ) :
+    finite_l2.dot m g (finite_l2.transform n K f) = finite_l2.dot n f (finite_l2.transform m (fun j i => K i j) g)
+  unfold finite_l2.dot finite_l2.transform
+  apply sum_below.exchange.real
+  intro j hj i hi; ring
+
++ finite_l2.coefficient (n m : ℕ) (K : ℕ → ℕ → ℝ) (c : ℝ) (f : ℕ → ℝ) (k : ℕ)
+    (orth : finite_l2.orthogonal n m K c) (hk : k < n) :
+    finite_l2.dot m (K k) (finite_l2.transform n K f) = c*f k
+  rw [finite_l2.adjoint]
+  unfold finite_l2.dot finite_l2.transform; unfold finite_l2.orthogonal at orth
+  have terms : ∀ i < n, f i*(∑ j < m, K k j*K i j) = c*(f i*(if i = k then 1 else 0))
+    intro i hi
+    have entry := orth k hk i hi; unfold finite_l2.dot at entry; rw [entry]
+    by_cases e : i = k
+    · rw [e]; simp; ring
+    · have ne : k ≠ i := by omega
+      simp [e,ne]
+  rw [← sum_below.single.real f n k hk]
+  apply sum_below.scale.real; exact terms
+
+@[auto] + finite_l2.parseval (n m : ℕ) (K : ℕ → ℕ → ℝ) (c : ℝ) (f g : ℕ → ℝ)
+    (orth : finite_l2.orthogonal n m K c) :
+    finite_l2.dot m (finite_l2.transform n K f) (finite_l2.transform n K g) = c*finite_l2.dot n f g
+  rw [finite_l2.adjoint]; unfold finite_l2.dot
+  apply sum_below.scale.real
+  intro i hi
+  have coeff := finite_l2.coefficient n m K c f i orth hi
+  rw [finite_l2.dot_comm] at coeff
+  have entry : finite_l2.transform m (fun j k => K k j) (finite_l2.transform n K f) i = c*f i := coeff
+  rw [entry]; ring
+
+-- Multiplying coefficients by numbers of absolute value at most one contracts energy.
+@[auto] + finite_l2.multiplier (n : ℕ) (w f : ℕ → ℝ) (bound : ∀ i < n, w i*w i ≤ 1) :
+    finite_l2.dot n (fun i => w i*f i) (fun i => w i*f i) ≤ finite_l2.dot n f f
+  unfold finite_l2.dot; apply sum_le.real
+  intro i hi
+  nlinarith [mul_le_mul_of_nonneg_right.real (w i*w i) 1 (f i*f i) (bound i hi) (by nlinarith)]

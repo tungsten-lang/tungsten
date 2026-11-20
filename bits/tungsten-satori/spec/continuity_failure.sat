@@ -1,0 +1,6 @@
+import polyline_continuity
+
++ jump : continuous_at (fun y => if y = 0 then 1 else 0) 0 := by auto
++ wrong_point (f : ℝ → ℝ) (h : continuous_at f 0) : continuous_at (fun y => 3*f y) 1 := by auto
++ missing_factor (f g : ℝ → ℝ) (x : ℝ) (hf : continuous_at f x) : continuous_at (fun y => f y*g y) x := by auto
++ zero_radius (f : ℝ → ℝ) (x : ℝ) (h : ∀ y, |y-x| < 0 → f y = y) : continuous_at f x := by auto

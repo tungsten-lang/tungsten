@@ -1,0 +1,7 @@
+import series
+
++ signed_comparison (a b : ℕ → ℝ) (upper : ∀ i, a i ≤ b i) (hb : summable b) : summable a := by auto
++ reversed_comparison (a b : ℕ → ℝ) (lower : ∀ i, 0 ≤ a i) (reverse : ∀ i, b i ≤ a i) (hb : summable b) : summable a := by auto
++ bounded_terms (a : ℕ → ℝ) (h : ∀ i, 0 ≤ a i ∧ a i ≤ 1) : summable a := by auto
++ missing_monotonicity (a b : ℕ → ℝ) (upper : ∀ n, a n ≤ b n) (lim : tends_to b 0) : converges a := by auto
++ wrong_limit (a b : ℕ → ℝ) (m : monotone_seq a) (upper : ∀ n, a n ≤ b n) (lim : tends_to b 0) : tends_to a 0 := by auto

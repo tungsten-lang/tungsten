@@ -1,0 +1,348 @@
+-- Darboux integration on an ordered compact real interval.
+import real_completeness
+
+-- Area of a step minorant on n consecutive subintervals of [a,b].
+-> darboux.lower_sum (f : ℝ → ℝ) : ℕ → ℝ → ℝ → ℝ → Prop
+  | 0 => fun a b s => a = b ∧ s = 0
+  | n + 1 => fun a b s => ∃ t c r : ℝ, a ≤ t ∧ t ≤ b ∧
+      (∀ x, a ≤ x → x ≤ t → c ≤ f x) ∧ darboux.lower_sum f n t b r ∧ s = c*(t-a)+r
+
+-> darboux.lower_sums (f : ℝ → ℝ) (a b : ℝ) : set ℝ := fun s => ∃ n : ℕ, darboux.lower_sum f n a b s
+
+-- Upper sums of f are negatives of lower sums of -f.
+-> darboux.has_integral (f : ℝ → ℝ) (a b I : ℝ) : Prop :=
+  a ≤ b ∧ is_sup (darboux.lower_sums f a b) I ∧ is_sup (darboux.lower_sums (fun x => -f x) a b) (-I)
+
++ darboux.rectangle (f : ℝ → ℝ) (n : ℕ) (a t b c r : ℝ) (atle : a ≤ t) (tb : t ≤ b)
+    (bound : ∀ x, a ≤ x → x ≤ t → c ≤ f x) (rest : darboux.lower_sum f n t b r) :
+    darboux.lower_sum f (n+1) a b (c*(t-a)+r)
+  simp only [darboux.lower_sum]
+  exact ⟨t,c,r,atle,tb,bound,rest,rfl⟩
+
++ darboux.lower_sum_mono (f g : ℝ → ℝ) (n : ℕ) : ∀ a b s,
+    (∀ x, a ≤ x → x ≤ b → f x ≤ g x) → darboux.lower_sum f n a b s → darboux.lower_sum g n a b s
+  induction n with a b s fg h k ih a b s fg h
+  · exact h
+  · simp only [succ_eq_add_one.nat, darboux.lower_sum] at h ⊢
+    obtain ⟨t,c,r,atle,tb,low,rest,area⟩ := h
+    use t,c,r
+    exact ⟨atle,tb,(by intro x ax xt; linarith [low x ax xt, fg x ax (by linarith)]),ih t b r (by intro x tx xb; exact fg x (by linarith) xb) rest,area⟩
+
++ darboux.lower_le (f g : ℝ → ℝ) (a b I J : ℝ)
+    (hf : is_sup (darboux.lower_sums f a b) I) (hg : is_sup (darboux.lower_sums g a b) J)
+    (fg : ∀ x, a ≤ x → x ≤ b → f x ≤ g x) : I ≤ J
+  unfold is_sup at hf
+  apply hf.2 J
+  unfold upper_bound
+  intro s hs
+  unfold darboux.lower_sums at hs
+  obtain ⟨n, h⟩ := hs
+  apply is_sup.le_of_mem (darboux.lower_sums g a b) J s hg
+  unfold darboux.lower_sums
+  exact ⟨n, darboux.lower_sum_mono f g n a b s fg h⟩
+
+@[auto] + darboux.mono (f g : ℝ → ℝ) (a b I J : ℝ)
+    (hf : darboux.has_integral f a b I) (hg : darboux.has_integral g a b J)
+    (fg : ∀ x, a ≤ x → x ≤ b → f x ≤ g x) : I ≤ J
+  unfold darboux.has_integral at hf hg
+  exact darboux.lower_le f g a b I J hf.2.1 hg.2.1 fg
+
+@[auto] + darboux.unique (f : ℝ → ℝ) (a b I J : ℝ) (hi : darboux.has_integral f a b I)
+    (hj : darboux.has_integral f a b J) : I = J
+  have same : ∀ x, a ≤ x → x ≤ b → f x ≤ f x := by intro x ax xb; linarith
+  linarith [darboux.mono f f a b I J hi hj same, darboux.mono f f a b J I hj hi same]
+
++ darboux.lower_sum_const_le (c : ℝ) (n : ℕ) : ∀ a b s,
+    darboux.lower_sum (fun x => c) n a b s → s ≤ c*(b-a)
+  induction n with a b s h k ih a b s h
+  · unfold darboux.lower_sum at h
+    obtain ⟨eq,zero⟩ := h
+    rw [eq,zero]; linarith
+  · simp only [succ_eq_add_one.nat, darboux.lower_sum] at h
+    obtain ⟨t,m,r,atle,tb,low,rest,area⟩ := h
+    have rect := mul_nonneg.real (c-m) (t-a) (by linarith [low a (by linarith) atle]) (by linarith)
+    linarith [ih t b r rest]
+
++ darboux.const_sup (a b c : ℝ) (ab : a ≤ b) : is_sup (darboux.lower_sums (fun x => c) a b) (c*(b-a))
+  unfold is_sup
+  constructor
+  · unfold upper_bound
+    intro s hs; unfold darboux.lower_sums at hs
+    obtain ⟨n,h⟩ := hs
+    exact darboux.lower_sum_const_le c n a b s h
+  · intro z hz; unfold upper_bound at hz
+    apply hz
+    unfold darboux.lower_sums
+    have empty : darboux.lower_sum (fun x => c) 0 b b 0 := by simp [darboux.lower_sum]
+    have rect := darboux.rectangle (fun x => c) 0 a b b c 0 ab (by linarith) (by intro x ax xb; linarith) empty
+    use 1
+    simpa using rect
+
+@[auto] + darboux.const (a b c : ℝ) (ab : a ≤ b) : darboux.has_integral (fun x => c) a b (c*(b-a))
+  unfold darboux.has_integral
+  have neg : -(c*(b-a)) = (-c)*(b-a) := by ring
+  rw [neg]
+  exact ⟨ab,darboux.const_sup a b c ab,darboux.const_sup a b (-c) ab⟩
+
++ darboux.lower_sums_congr (f g : ℝ → ℝ) (a b : ℝ)
+    (fg : ∀ x, a ≤ x → x ≤ b → f x = g x) : darboux.lower_sums f a b = darboux.lower_sums g a b
+  funext s
+  unfold darboux.lower_sums
+  constructor
+  · intro h; obtain ⟨n,v⟩ := h
+    exact ⟨n,darboux.lower_sum_mono f g n a b s (by intro x ax xb; linarith [fg x ax xb]) v⟩
+  · intro h; obtain ⟨n,v⟩ := h
+    exact ⟨n,darboux.lower_sum_mono g f n a b s (by intro x ax xb; linarith [fg x ax xb]) v⟩
+
+@[auto] + darboux.congr (f g : ℝ → ℝ) (a b I : ℝ) (hf : darboux.has_integral f a b I)
+    (fg : ∀ x, a ≤ x → x ≤ b → f x = g x) : darboux.has_integral g a b I
+  unfold darboux.has_integral at hf ⊢
+  have neg : ∀ x, a ≤ x → x ≤ b → -f x = -g x := by intro x ax xb; rw [fg x ax xb]
+  rw [← darboux.lower_sums_congr f g a b fg, ← darboux.lower_sums_congr (fun x => -f x) (fun x => -g x) a b neg]
+  exact hf
+
+@[auto] + darboux.point (f : ℝ → ℝ) (a : ℝ) : darboux.has_integral f a a 0
+  have const := darboux.const a a (f a) (by linarith)
+  have zero : f a*(a-a) = 0 := by ring
+  rw [zero] at const
+  apply darboux.congr (fun x => f a) f a a 0 const
+  intro x ax xa
+  have at_a : x = a := by linarith
+  rw [at_a]
+
++ darboux.le_const (f : ℝ → ℝ) (a b I c : ℝ) (hf : darboux.has_integral f a b I)
+    (bound : ∀ x, a ≤ x → x ≤ b → f x ≤ c) : I ≤ c*(b-a)
+  have ab := hf
+  unfold darboux.has_integral at ab
+  exact darboux.mono f (fun x => c) a b I (c*(b-a)) hf (darboux.const a b c ab.1) bound
+
+@[auto] + darboux.neg (f : ℝ → ℝ) (a b I : ℝ) (hf : darboux.has_integral f a b I) :
+    darboux.has_integral (fun x => -f x) a b (-I)
+  unfold darboux.has_integral at hf ⊢
+  have twice : (fun x => -(-f x)) = f := by ring
+  have value : -(-I) = I := by ring
+  rw [twice,value]
+  exact ⟨hf.1,hf.2.2,hf.2.1⟩
+
++ darboux.empty (f : ℝ → ℝ) (a : ℝ) : 0 ∈ darboux.lower_sums f a a
+  unfold darboux.lower_sums
+  use 0
+
++ darboux.prepend (f : ℝ → ℝ) (a t b h R : ℝ) (atle : a ≤ t) (tb : t ≤ b)
+    (low : ∀ x, a ≤ x → x ≤ t → h ≤ f x) (rest : R ∈ darboux.lower_sums f t b) :
+    h*(t-a)+R ∈ darboux.lower_sums f a b
+  unfold darboux.lower_sums at rest ⊢
+  obtain ⟨n,partition⟩ := rest
+  exact ⟨n+1,darboux.rectangle f n a t b h R atle tb low partition⟩
+
++ darboux.lower_sum_append (f : ℝ → ℝ) (n : ℕ) : ∀ a b c L R, b ≤ c →
+    darboux.lower_sum f n a b L → R ∈ darboux.lower_sums f b c → L+R ∈ darboux.lower_sums f a c
+  induction n with a b c L R bc left right k ih a b c L R bc left right
+  · unfold darboux.lower_sum at left
+    obtain ⟨ab,zero⟩ := left
+    rw [ab,zero]; simpa using right
+  · simp only [succ_eq_add_one.nat,darboux.lower_sum] at left
+    obtain ⟨t,h,r,atle,tb,low,tail,area⟩ := left
+    have joined := darboux.prepend f a t c h (r+R) atle (by linarith) low (ih t b c r R bc tail right)
+    have eq : L+R = h*(t-a)+(r+R) := by linarith
+    rw [eq]; exact joined
+
+-- Cutting inside a rectangle keeps its height on both halves.
++ darboux.lower_sum_split (f : ℝ → ℝ) (n : ℕ) : ∀ a b c s, a ≤ b → b ≤ c → darboux.lower_sum f n a c s →
+    ∃ L R, L ∈ darboux.lower_sums f a b ∧ R ∈ darboux.lower_sums f b c ∧ s = L+R
+  induction n with a b c s ab bc whole k ih a b c s ab bc whole
+  · unfold darboux.lower_sum at whole
+    obtain ⟨ac,zero⟩ := whole
+    have same : a = b := by linarith
+    rw [← same,← ac,zero]
+    exact ⟨0,0,darboux.empty f a,darboux.empty f a,by ring⟩
+  · simp only [succ_eq_add_one.nat,darboux.lower_sum] at whole
+    obtain ⟨t,h,r,atle,tc,low,tail,area⟩ := whole
+    by_cases first : b ≤ t
+    · have suffix : r ∈ darboux.lower_sums f t c := by unfold darboux.lower_sums; exact ⟨k,tail⟩
+      have left := darboux.prepend f a b b h 0 ab (by linarith) (by intro x ax xb; exact low x ax (by linarith)) (darboux.empty f b)
+      have right := darboux.prepend f b t c h r first tc (by intro x bx xt; exact low x (by linarith) xt) suffix
+      exact ⟨h*(b-a)+0,h*(t-b)+r,left,right,by linarith⟩
+    · have tb : t ≤ b := by linarith
+      obtain ⟨L,R,left,right,sum⟩ := ih t b c r tb bc tail
+      exact ⟨h*(t-a)+L,R,darboux.prepend f a t b h L atle tb low left,right,by linarith⟩
+
++ darboux.lower_sums_split_iff (f : ℝ → ℝ) (a b c s : ℝ) (ab : a ≤ b) (bc : b ≤ c) :
+    s ∈ darboux.lower_sums f a c ↔ ∃ L R, L ∈ darboux.lower_sums f a b ∧ R ∈ darboux.lower_sums f b c ∧ s = L+R
+  constructor
+  · intro whole; unfold darboux.lower_sums at whole
+    obtain ⟨n,h⟩ := whole
+    exact darboux.lower_sum_split f n a b c s ab bc h
+  · intro pair; obtain ⟨L,R,left,right,sum⟩ := pair
+    unfold darboux.lower_sums at left
+    obtain ⟨n,h⟩ := left
+    rw [sum]; exact darboux.lower_sum_append f n a b c L R bc h right
+
++ darboux.sup_adjacent (f : ℝ → ℝ) (a b c I J : ℝ) (ab : a ≤ b) (bc : b ≤ c)
+    (left : is_sup (darboux.lower_sums f a b) I) (right : is_sup (darboux.lower_sums f b c) J) :
+    is_sup (darboux.lower_sums f a c) (I+J)
+  unfold is_sup
+  constructor
+  · unfold upper_bound
+    intro s hs
+    obtain ⟨L,R,hl,hr,eq⟩ := (darboux.lower_sums_split_iff f a b c s ab bc).mp hs
+    linarith [is_sup.le_of_mem (darboux.lower_sums f a b) I L left hl,is_sup.le_of_mem (darboux.lower_sums f b c) J R right hr]
+  · intro z bound
+    unfold upper_bound at bound
+    apply is_sup.add_le (darboux.lower_sums f a b) (darboux.lower_sums f b c) I J z left right
+    intro L hl R hr
+    exact bound (L+R) ((darboux.lower_sums_split_iff f a b c (L+R) ab bc).mpr ⟨L,R,hl,hr,rfl⟩)
+
+@[auto] + darboux.adjacent (f : ℝ → ℝ) (a b c I J : ℝ) (left : darboux.has_integral f a b I)
+    (right : darboux.has_integral f b c J) : darboux.has_integral f a c (I+J)
+  unfold darboux.has_integral at left right ⊢
+  have ab := left.1
+  have bc := right.1
+  have neg : -(I+J) = -I + -J := by ring
+  rw [neg]
+  exact ⟨by linarith,darboux.sup_adjacent f a b c I J ab bc left.2.1 right.2.1,darboux.sup_adjacent (fun x => -f x) a b c (-I) (-J) ab bc left.2.2 right.2.2⟩
+
+-- A minorant of f and a minorant of -f have nonpositive combined area,
+-- even when their partitions have different knots.
++ darboux.lower_sum_gap (f : ℝ → ℝ) (n : ℕ) : ∀ a b s r, darboux.lower_sum f n a b s →
+    r ∈ darboux.lower_sums (fun x => -f x) a b → s+r ≤ 0
+  induction n with a b s r minor major k ih a b s r minor major
+  · unfold darboux.lower_sum at minor
+    obtain ⟨ab,zero⟩ := minor
+    rw [ab] at major
+    have at_b := darboux.point (fun x => -f x) b
+    unfold darboux.has_integral at at_b
+    linarith [is_sup.le_of_mem (darboux.lower_sums (fun x => -f x) b b) 0 r at_b.2.1 major]
+  · simp only [succ_eq_add_one.nat,darboux.lower_sum] at minor
+    obtain ⟨t,h,v,atle,tb,low,tail,area⟩ := minor
+    obtain ⟨L,R,left,right,sum⟩ := (darboux.lower_sums_split_iff (fun x => -f x) a t b r atle tb).mp major
+    unfold darboux.lower_sums at left
+    obtain ⟨m,rects⟩ := left
+    have first := darboux.lower_sum_mono (fun x => -f x) (fun x => -h) m a t L (by intro x ax xt; linarith [low x ax xt]) rects
+    linarith [darboux.lower_sum_const_le (-h) m a t L first,ih t b v R tail right]
+
++ darboux.sup_gap (f : ℝ → ℝ) (a b I N : ℝ) (pos : is_sup (darboux.lower_sums f a b) I)
+    (neg : is_sup (darboux.lower_sums (fun x => -f x) a b) N) : I+N ≤ 0
+  unfold is_sup at pos neg
+  have bound : upper_bound (darboux.lower_sums f a b) (-N)
+    unfold upper_bound
+    intro s hs
+    unfold darboux.lower_sums at hs
+    obtain ⟨n,v⟩ := hs
+    have other : upper_bound (darboux.lower_sums (fun x => -f x) a b) (-s)
+      unfold upper_bound
+      intro r hr
+      linarith [darboux.lower_sum_gap f n a b s r v hr]
+    linarith [neg.2 (-s) other]
+  linarith [pos.2 (-N) bound]
+
++ darboux.sup_split (f : ℝ → ℝ) (a b c I : ℝ) (ab : a ≤ b) (bc : b ≤ c)
+    (whole : is_sup (darboux.lower_sums f a c) I) :
+    ∃ L R, is_sup (darboux.lower_sums f a b) L ∧ is_sup (darboux.lower_sums f b c) R ∧ I = L+R
+  obtain ⟨s,hs,lt⟩ := is_sup.exists_gt (darboux.lower_sums f a c) I (I-1) whole (by linarith)
+  obtain ⟨p,q,hp,hq,sum⟩ := (darboux.lower_sums_split_iff f a b c s ab bc).mp hs
+  have bound : ∀ u v, u ∈ darboux.lower_sums f a b → v ∈ darboux.lower_sums f b c → u+v ≤ I
+    intro u v hu hv
+    exact is_sup.le_of_mem (darboux.lower_sums f a c) I (u+v) whole ((darboux.lower_sums_split_iff f a b c (u+v) ab bc).mpr ⟨u,v,hu,hv,rfl⟩)
+  have bl : upper_bound (darboux.lower_sums f a b) (I-q) := by unfold upper_bound; intro u hu; linarith [bound u q hu hq]
+  have br : upper_bound (darboux.lower_sums f b c) (I-p) := by unfold upper_bound; intro v hv; linarith [bound p v hp hv]
+  obtain ⟨L,left⟩ := sup_exists (darboux.lower_sums f a b) ⟨p,hp⟩ ⟨I-q,bl⟩
+  obtain ⟨R,right⟩ := sup_exists (darboux.lower_sums f b c) ⟨q,hq⟩ ⟨I-p,br⟩
+  have total := darboux.sup_adjacent f a b c L R ab bc left right
+  unfold is_sup at whole total
+  exact ⟨L,R,left,right,by linarith [whole.2 (L+R) total.1,total.2 I whole.1]⟩
+
+@[auto] + darboux.split (f : ℝ → ℝ) (a b c I : ℝ) (ab : a ≤ b) (bc : b ≤ c) (whole : darboux.has_integral f a c I) :
+    ∃ L R, darboux.has_integral f a b L ∧ darboux.has_integral f b c R ∧ I = L+R
+  unfold darboux.has_integral at whole
+  obtain ⟨L,R,left,right,sum⟩ := darboux.sup_split f a b c I ab bc whole.2.1
+  obtain ⟨N,M,negL,negR,negSum⟩ := darboux.sup_split (fun x => -f x) a b c (-I) ab bc whole.2.2
+  have gapL := darboux.sup_gap f a b L N left negL
+  have gapR := darboux.sup_gap f b c R M right negR
+  have eqL : N = -L := by linarith
+  have eqR : M = -R := by linarith
+  rw [eqL] at negL
+  rw [eqR] at negR
+  use L,R
+  unfold darboux.has_integral
+  exact ⟨⟨ab,left,negL⟩,⟨bc,right,negR⟩,sum⟩
+
+-- Shift every rectangle of an existing partition by the same height.
++ darboux.lower_sum_shift (g : ℝ → ℝ) (h : ℝ) (n : ℕ) : ∀ a b r, darboux.lower_sum g n a b r →
+    darboux.lower_sum (fun x => h+g x) n a b (h*(b-a)+r)
+  induction n with a b r hr k ih a b r hr
+  · unfold darboux.lower_sum at hr ⊢
+    obtain ⟨ab,zero⟩ := hr
+    exact ⟨ab,by rw [ab,zero]; ring⟩
+  · simp only [succ_eq_add_one.nat,darboux.lower_sum] at hr ⊢
+    obtain ⟨t,m,u,atle,tb,low,tail,area⟩ := hr
+    exact ⟨t,h+m,h*(b-t)+u,atle,tb,(by intro x ax xt; linarith [low x ax xt]),ih t b u tail,(by linarith)⟩
+
++ darboux.lower_sums_shift_le (f g : ℝ → ℝ) (a b h r : ℝ) (low : ∀ x, a ≤ x → x ≤ b → h ≤ f x)
+    (hr : r ∈ darboux.lower_sums g a b) : h*(b-a)+r ∈ darboux.lower_sums (fun x => f x+g x) a b
+  unfold darboux.lower_sums at hr ⊢
+  obtain ⟨n,rects⟩ := hr
+  use n
+  exact darboux.lower_sum_mono (fun x => h+g x) (fun x => f x+g x) n a b (h*(b-a)+r) (by intro x ax xb; linarith [low x ax xb]) (darboux.lower_sum_shift g h n a b r rects)
+
+-- Overlay two partitions by cutting the second at each knot of the first.
++ darboux.lower_sum_add (f g : ℝ → ℝ) (n : ℕ) : ∀ a b s r, darboux.lower_sum f n a b s →
+    r ∈ darboux.lower_sums g a b → s+r ∈ darboux.lower_sums (fun x => f x+g x) a b
+  induction n with a b s r hs hr k ih a b s r hs hr
+  · unfold darboux.lower_sum at hs
+    obtain ⟨ab,zero⟩ := hs
+    rw [ab] at hr ⊢
+    have low : ∀ x, b ≤ x → x ≤ b → f b ≤ f x := by intro x bx xb; have eq : x = b := by linarith; rw [eq]; linarith
+    have shifted := darboux.lower_sums_shift_le f g b b (f b) r low hr
+    have eq : s+r = f b*(b-b)+r := by linarith
+    rw [eq]; exact shifted
+  · simp only [succ_eq_add_one.nat,darboux.lower_sum] at hs
+    obtain ⟨t,h,v,atle,tb,low,tail,area⟩ := hs
+    obtain ⟨L,R,left,right,sum⟩ := (darboux.lower_sums_split_iff g a t b r atle tb).mp hr
+    exact (darboux.lower_sums_split_iff (fun x => f x+g x) a t b (s+r) atle tb).mpr ⟨h*(t-a)+L,v+R,darboux.lower_sums_shift_le f g a t h L low left,ih t b v R tail right,by linarith⟩
+
++ darboux.sum_le_upper (f g : ℝ → ℝ) (a b I J z : ℝ) (hf : is_sup (darboux.lower_sums f a b) I)
+    (hg : is_sup (darboux.lower_sums g a b) J) (bound : upper_bound (darboux.lower_sums (fun x => f x+g x) a b) z) : I+J ≤ z
+  apply is_sup.add_le (darboux.lower_sums f a b) (darboux.lower_sums g a b) I J z hf hg
+  intro s hs r hr
+  unfold upper_bound at bound
+  unfold darboux.lower_sums at hs
+  obtain ⟨n,h⟩ := hs
+  exact bound (s+r) (darboux.lower_sum_add f g n a b s r h hr)
+
++ darboux.sum_sup (f g : ℝ → ℝ) (a b I J : ℝ) (hf : darboux.has_integral f a b I) (hg : darboux.has_integral g a b J) :
+    is_sup (darboux.lower_sums (fun x => f x+g x) a b) (I+J)
+  unfold darboux.has_integral at hf hg
+  unfold is_sup
+  constructor
+  · unfold upper_bound; intro s hs
+    unfold darboux.lower_sums at hs
+    obtain ⟨n,v⟩ := hs
+    have neg : (fun x => -(f x+g x)) = (fun x => -f x + -g x) := by ring
+    have bound : upper_bound (darboux.lower_sums (fun x => -f x + -g x) a b) (-s)
+      unfold upper_bound; intro r hr
+      rw [← neg] at hr
+      linarith [darboux.lower_sum_gap (fun x => f x+g x) n a b s r v hr]
+    linarith [darboux.sum_le_upper (fun x => -f x) (fun x => -g x) a b (-I) (-J) (-s) hf.2.2 hg.2.2 bound]
+  · intro z hz
+    exact darboux.sum_le_upper f g a b I J z hf.2.1 hg.2.1 hz
+
+@[auto] + darboux.add (f g : ℝ → ℝ) (a b I J : ℝ) (hf : darboux.has_integral f a b I) (hg : darboux.has_integral g a b J) :
+    darboux.has_integral (fun x => f x+g x) a b (I+J)
+  have pos := darboux.sum_sup f g a b I J hf hg
+  have neg := darboux.sum_sup (fun x => -f x) (fun x => -g x) a b (-I) (-J) (darboux.neg f a b I hf) (darboux.neg g a b J hg)
+  have fn_eq : (fun x => -(f x+g x)) = (fun x => -f x + -g x) := by ring
+  have val : -(I+J) = -I + -J := by ring
+  unfold darboux.has_integral at hf ⊢
+  rw [fn_eq,val]; exact ⟨hf.1,pos,neg⟩
+
+@[auto] + darboux.sub (f g : ℝ → ℝ) (a b I J : ℝ) (hf : darboux.has_integral f a b I) (hg : darboux.has_integral g a b J) :
+    darboux.has_integral (fun x => f x-g x) a b (I-J)
+  have diff := darboux.add f (fun x => -g x) a b I (-J) hf (darboux.neg g a b J hg)
+  have fn_eq : (fun x => f x + -g x) = (fun x => f x-g x) := by ring
+  have val : I+ -J = I-J := by ring
+  rw [fn_eq,val] at diff; exact diff
+
++ darboux.nonneg (f : ℝ → ℝ) (a b I : ℝ) (hi : darboux.has_integral f a b I) (pos : ∀ x, a ≤ x → x ≤ b → 0 ≤ f x) : 0 ≤ I
+  have ordered := hi; unfold darboux.has_integral at ordered
+  linarith [darboux.mono (fun x => 0) f a b (0*(b-a)) I (darboux.const a b 0 ordered.1) hi pos]

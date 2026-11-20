@@ -1,0 +1,109 @@
+-- The unnormalized real Fourier transform on the binary cube.
+import finite_l2
+
+-> walsh.half (n i : ℕ) : ℕ := if i < n then i else i-n
+-> walsh.sign (n i : ℕ) : ℝ := if i < n then 1 else -1
+-> walsh.row : ℕ → ℕ → ℕ → ℝ
+  | 0 => fun i j => 1
+  | d+1 => fun i j => (if j < 2^d then 1 else walsh.sign (2^d) i) * walsh.row d (walsh.half (2^d) i) (walsh.half (2^d) j)
+
++ walsh.double_size (d : ℕ) : 2^(d+1) = 2^d+2^d := by rw [pow_succ.nat]; ring
+
++ walsh.row_dot (d i k : ℕ) :
+    finite_l2.dot (2^(d+1)) (walsh.row (d+1) i) (walsh.row (d+1) k) =
+    (1+walsh.sign (2^d) i*walsh.sign (2^d) k)*finite_l2.dot (2^d) (walsh.row d (walsh.half (2^d) i)) (walsh.row d (walsh.half (2^d) k))
+  set n := 2^d with hn
+  set f := walsh.row d (walsh.half n i) with hf
+  set g := walsh.row d (walsh.half n k) with hg
+  have lo : ∀ j < n, walsh.row (d+1) i j*walsh.row (d+1) k j = f j*g j
+    intro j hj; rw [hf,hg]; simp [walsh.row,← hn,walsh.half,hj]
+  have hi : ∀ j < n, walsh.row (d+1) i (n+j)*walsh.row (d+1) k (n+j) = (walsh.sign n i*walsh.sign n k)*(f j*g j)
+    intro j hj
+    have out : ¬ (n+j < n) := by omega
+    have idx : n+j-n = j := by omega
+    rw [hf,hg]; simp [walsh.row,← hn,walsh.half,out,idx]; ring
+  have a := sum_below.congr lo
+  have b := sum_below.scale.real hi
+  unfold finite_l2.dot
+  rw [walsh.double_size,← hn,sum_below.split.real,a,b]; ring
+
++ walsh.half_lt (n i : ℕ) (hi : i < n+n) : walsh.half n i < n
+  unfold walsh.half; by_cases h : i < n <;> simp [h] <;> omega
+
++ walsh.orthogonal (d : ℕ) : finite_l2.orthogonal (2^d) (2^d) (walsh.row d) (2^d)
+  induction d with d ih
+  · unfold finite_l2.orthogonal finite_l2.dot; decide
+  · rw [succ_eq_add_one.nat]; unfold finite_l2.orthogonal at ih ⊢
+    intro i hi k hk; rw [walsh.row_dot]
+    rw [walsh.double_size] at hi hk
+    set n := 2^d with hn
+    have gram := ih (walsh.half n i) (walsh.half_lt n i hi) (walsh.half n k) (walsh.half_lt n k hk)
+    rw [gram,pow_succ.real 2 d]
+    by_cases eq : i = k
+    · rw [eq]; by_cases lo : k < n <;> simp [walsh.sign,lo] <;> ring
+    · by_cases a : i < n
+      · by_cases b : k < n <;> simp [walsh.sign,walsh.half,a,b,eq] <;> ring
+      · by_cases b : k < n
+        · simp [walsh.sign,a,b,eq]
+        · have ne : i-n ≠ k-n := by omega
+          simp [walsh.sign,walsh.half,a,b,eq,ne]
+
+-> walsh.transform (d : ℕ) (f : ℕ → ℝ) : ℕ → ℝ := finite_l2.transform (2^d) (walsh.row d) f
+
+@[auto] + walsh.parseval (d : ℕ) (f g : ℕ → ℝ) :
+    finite_l2.dot (2^d) (walsh.transform d f) (walsh.transform d g) = 2^d*finite_l2.dot (2^d) f g
+  exact finite_l2.parseval (walsh.orthogonal d)
+
+-- Complement all bits of j. The resulting character differs by the parity of i.
+-> walsh.parity : ℕ → ℕ → ℝ
+  | 0 => fun i => 1
+  | d+1 => fun i => walsh.sign (2^d) i * walsh.parity d (walsh.half (2^d) i)
+
++ walsh.complement (d : ℕ) : ∀ i j : ℕ, j < 2^d →
+    walsh.row d i (2^d-(j+1)) = walsh.parity d i*walsh.row d i j
+  induction d with i j hj d ih i j hj
+  · simp [walsh.parity,walsh.row]
+  · rw [succ_eq_add_one.nat] at hj ⊢
+    rw [walsh.double_size] at hj ⊢
+    set n := 2^d with hn
+    have step := ih (walsh.half n i) (walsh.half n j) (walsh.half_lt n j hj)
+    have total := sub_add_cancel.nat (n+n) (j+1) (by omega)
+    by_cases low : j < n
+    · have high : ¬ (n+n-(j+1) < n) := by omega
+      have idx : n+n-(j+1)-n = n-(j+1) := by omega [sub_add_cancel.nat n (j+1) (by omega)]
+      simp [walsh.half,low] at step
+      simp [walsh.row,walsh.parity,← hn,walsh.half,low,high,idx]
+      unfold walsh.half at step
+      rw [step]; ring
+    · have high : n+n-(j+1) < n := by omega
+      have upper := sub_add_cancel.nat j n (by omega)
+      have idx : n+n-(j+1) = n-(j-n+1) := by omega [sub_add_cancel.nat n (j-n+1) (by omega)]
+      simp [walsh.half,low] at step
+      simp [walsh.row,walsh.parity,← hn,walsh.half,low,high]
+      unfold walsh.half at step
+      rw [idx,step]; by_cases side : i < n <;> simp [walsh.sign,side] <;> ring
+
++ walsh.complement_index (n j : ℕ) (hj : j < n) : n-1-j = n-(j+1)
+  have pred := sub_add_cancel.nat n 1 (by omega)
+  omega [sub_add_cancel.nat (n-1) j (by omega),sub_add_cancel.nat n (j+1) (by omega)]
+
+-- Matrix entries in the normalized Hadamard basis.
+-> walsh.entry (d : ℕ) (B : ℕ → ℕ → ℝ) (h k : ℕ) : ℝ :=
+  (1/2^d)*(∑ x < 2^d, walsh.row d x h*walsh.transform d (B x) k)
+
+@[simp] + walsh.complementary_trace (d : ℕ) (B : ℕ → ℕ → ℝ) :
+    (∑ h < 2^d, walsh.entry d B (2^d-1-h) h) = ∑ x < 2^d, walsh.parity d x*B x x
+  unfold walsh.entry; rw [sum_const_mul.real,sum_below.swap.real]
+  have row : ∀ x < 2^d, (∑ h < 2^d, walsh.row d x (2^d-1-h)*walsh.transform d (B x) h) = 2^d*(walsh.parity d x*B x x)
+    intro x hx
+    have coeff := finite_l2.coefficient (2^d) (2^d) (walsh.row d) (2^d) (B x) x (walsh.orthogonal d) hx
+    have modulated : ∀ h < 2^d, walsh.row d x (2^d-1-h)*walsh.transform d (B x) h = walsh.parity d x*(walsh.row d x h*walsh.transform d (B x) h)
+      intro h hh; rw [walsh.complement_index (2^d) h hh,walsh.complement d x h hh]; ring
+    have factored := sum_below.scale.real modulated
+    unfold finite_l2.dot at coeff
+    rw [factored]; unfold walsh.transform; rw [coeff]; ring
+  have diagonal := sum_below.scale.real row
+  rw [diagonal]
+  have pos := pow_pos.real 2 d (by decide)
+  have inv := mul_inv_cancel.real (2^d) (by linarith)
+  rw [← mul_assoc.real,mul_comm.real (1/2^d) (2^d),inv]; ring

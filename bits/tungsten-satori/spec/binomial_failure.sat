@@ -1,0 +1,6 @@
+import binomial
+
++ no_weight (a b : ℕ) : choose (a+b+3) (a+3) = choose (a+b+3) (b+3) := by auto
++ missing_bound (n k : ℕ) : 0 < choose n k := by auto
++ lost_factor (a : ℕ) : fact 3 * choose (a+3) 3 = (a+1)*(a+2) := by simpa [asc_factorial] using choose.mul_factorial a 3
++ wrong_start (x : ℕ) : asc_factorial x 3 = (x+1)*(x+2)*(x+3) := by unfold asc_factorial; ring

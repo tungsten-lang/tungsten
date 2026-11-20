@@ -365,6 +365,9 @@ TERM_SQUARE_PRODUCT = 4
 TERM_LAMBDA = 8
 TERM_WIDEN = 16
 TERM_POWER = 32
+TERM_BETA_REDEX = 64
+TERM_ETA_CANDIDATE = 128
+TERM_FINITE_SUM = 256
 
 + KTm
   ro :tag, :name, :ty, :a, :b, :idx, :val, :h, :cl, :mx, :tv, :op, :vkey, :search_ops
@@ -390,6 +393,8 @@ TERM_POWER = 32
       @op = const_opcode(@name)
       if @name == "min" || @name == "max"
         @search_ops = TERM_MINMAX
+      elsif @name == "sum_below" || @name == "sum_list"
+        @search_ops = TERM_FINITE_SUM
       elsif @op == OP_DIV || @op == OP_MOD
         @search_ops = TERM_DIVMOD
       elsif @op == OP_POW
@@ -400,6 +405,8 @@ TERM_POWER = 32
     when :app
       @cl = @a.cl && @b.cl
       @search_ops = @a.search_ops | @b.search_ops
+      if @a.tag == :lam
+        @search_ops = @search_ops | TERM_BETA_REDEX
       # Equal factors have equal hashes. The conversion checks both terms.
       if @a.tag == :app && @a.a.op == OP_MUL && @a.b.h == @b.h
         @search_ops = @search_ops | TERM_SQUARE_PRODUCT
@@ -413,6 +420,9 @@ TERM_POWER = 32
     when :lam
       @cl = @b.cl
       @search_ops = @b.search_ops | TERM_LAMBDA
+      # eta_contract checks that the binder is absent from the function.
+      if @b.tag == :app && @b.b.tag == :bnd && @b.b.idx == 0
+        @search_ops = @search_ops | TERM_ETA_CANDIDATE
       @tv = @ty.has_var || @b.tv
       if @b.mx > 1
         @mx = @b.mx - 1

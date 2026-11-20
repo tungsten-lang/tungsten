@@ -1,0 +1,109 @@
+-- Weak integration by parts on a closed interval, with explicit endpoint traces.
+import integral_endpoints
+
+-- The derivative is continuous up to the endpoints, relative to the interval.
+-> interval.c1 (u v : ℝ → ℝ) (a b : ℝ) : Prop :=
+  interval.deriv u v a b ∧ ∀ x ∈ Icc a b, continuous_within_at v (Icc a b) x
+
+-- The test identity certifies the integral itself. The boundary values are
+-- traces supplied by the identity, independent of the point values of u.
+-> interval.weak_deriv (u v : ℝ → ℝ) (a b left right : ℝ) : Prop :=
+  ∀ p q : ℝ → ℝ, interval.c1 p q a b →
+    darboux.has_integral (fun x => v x*p x+u x*q x) a b (right*p b-left*p a)
+
+@[auto] + interval.c1.weak_deriv (u v : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b) (smooth : interval.c1 u v a b) :
+    interval.weak_deriv u v a b (u a) (u b)
+  unfold interval.weak_deriv; intro p q test
+  unfold interval.c1 at smooth test
+  obtain ⟨du,cv⟩ := smooth; obtain ⟨dp,cq⟩ := test
+  unfold interval.deriv at du dp
+  obtain ⟨I,first⟩ := darboux.integrable_within (fun x => v x*p x) a b ab (by
+    intro x lo hi; exact continuous_within_at.mul v p (Icc a b) x ⟨lo,hi⟩ (cv x ⟨lo,hi⟩) (has_deriv_within.continuous_within (dp x lo hi)))
+  obtain ⟨J,second⟩ := darboux.integrable_within (fun x => u x*q x) a b ab (by
+    intro x lo hi; exact continuous_within_at.mul u q (Icc a b) x ⟨lo,hi⟩ (has_deriv_within.continuous_within (du x lo hi)) (cq x ⟨lo,hi⟩))
+  have identity := darboux.by_parts first second du dp
+  have sum := darboux.add first second
+  rw [identity] at sum; exact sum
+
+@[auto] + interval.c1.with_traces (u v : ℝ → ℝ) (a b l r : ℝ) (ab : a ≤ b) (smooth : interval.c1 u v a b)
+    (ends : u a=l ∧ u b=r) : interval.weak_deriv u v a b l r
+  have weak := interval.c1.weak_deriv u v a b ab smooth
+  rw [ends.1,ends.2] at weak; exact weak
+
+@[auto] + interval.weak_deriv.test (u v p q : ℝ → ℝ) (a b l r : ℝ)
+    (du : interval.weak_deriv u v a b l r) (test : interval.c1 p q a b) (ends : p a=0 ∧ p b=0) :
+    darboux.has_integral (fun x => v x*p x+u x*q x) a b 0
+  unfold interval.weak_deriv at du; have eq := du p q test
+  rw [ends.1,ends.2] at eq; simpa using eq
+
+@[auto] + interval.weak_deriv.zero_trace (u v p q : ℝ → ℝ) (a b : ℝ)
+    (du : interval.weak_deriv u v a b 0 0) (test : interval.c1 p q a b) :
+    darboux.has_integral (fun x => v x*p x+u x*q x) a b 0
+  unfold interval.weak_deriv at du; simpa using du p q test
+
++ interval.c1.restrict (p q : ℝ → ℝ) (a b c d : ℝ) (test : interval.c1 p q a b)
+    (ac : a ≤ c) (db : d ≤ b) : interval.c1 p q c d
+  unfold interval.c1 at test ⊢; constructor
+  · exact interval.deriv.restrict p q a b c d test.1 ac db
+  · intro x hx
+    have whole := test.2 x ⟨by linarith [hx.1],by linarith [hx.2]⟩
+    unfold continuous_within_at at whole ⊢; intro e he
+    obtain ⟨r,pos,near⟩ := whole e he
+    exact ⟨r,pos,by intro y hy close; exact near y ⟨by linarith [hy.1],by linarith [hy.2]⟩ close⟩
+
+@[auto] + interval.weak_deriv.adjacent (u v : ℝ → ℝ) (a b c l m r : ℝ) (ab : a ≤ b) (bc : b ≤ c)
+    (left : interval.weak_deriv u v a b l m) (right : interval.weak_deriv u v b c m r) :
+    interval.weak_deriv u v a c l r
+  unfold interval.weak_deriv at left right ⊢; intro p q test
+  have first := left p q (interval.c1.restrict p q a c a b test (by linarith) bc)
+  have second := right p q (interval.c1.restrict p q a c b c test ab (by linarith))
+  have both := darboux.adjacent first second
+  have cancel : m*p b-l*p a+(r*p c-m*p b) = r*p c-l*p a := by ring
+  rw [cancel] at both; exact both
+
+-- Testing against one recovers the endpoint jump even for a weak derivative.
+@[auto] + interval.weak_deriv.increment (u v : ℝ → ℝ) (a b l r : ℝ)
+    (du : interval.weak_deriv u v a b l r) : darboux.has_integral v a b (r-l)
+  have one : interval.c1 (fun x => 1) (fun x => 0) a b
+    unfold interval.c1 interval.deriv; constructor
+    · intro x lo hi; exact has_deriv_within.const 1 (Icc a b) x
+    · intro x hx; exact continuous_at.within (fun y => 0) (Icc a b) x (continuous_at.const 0 x)
+  unfold interval.weak_deriv at du; have jump := du (fun x => 1) (fun x => 0) one
+  have boundary : r*1-l*1 = r-l := by ring
+  rw [boundary] at jump
+  exact darboux.congr (fun x => v x*1+u x*0) v a b (r-l) jump (by intro x lo hi; ring)
+
++ interval.weak_deriv.congr_interior (u v f g : ℝ → ℝ) (a b l r : ℝ) (du : interval.weak_deriv u v a b l r)
+    (agree : ∀ x, a < x → x < b → u x=f x ∧ v x=g x) : interval.weak_deriv f g a b l r
+  unfold interval.weak_deriv at du ⊢; intro p q test
+  apply darboux.congr_interior (fun x => v x*p x+u x*q x) (fun x => g x*p x+f x*q x) a b (r*p b-l*p a) (du p q test)
+  intro x lo hi; obtain ⟨value,slope⟩ := agree x lo hi; rw [value,slope]
+
++ interval.weak_deriv.linear (k a b : ℝ) (ab : a ≤ b) : interval.weak_deriv (fun x => k*x) (fun x => k) a b (k*a) (k*b)
+  apply interval.c1.weak_deriv (fun x => k*x) (fun x => k) a b ab
+  unfold interval.c1 interval.deriv; constructor
+  · intro x lo hi; exact has_deriv_within.scale_id k (Icc a b) x
+  · intro x hx; exact continuous_at.within (fun y => k) (Icc a b) x (continuous_at.const k x)
+
+-- A corner has a weak derivative. Its representative may take any value at zero.
+@[auto] + interval.weak_deriv.abs (a b k : ℝ) (lo : a ≤ 0) (hi : 0 ≤ b) :
+    interval.weak_deriv (fun x => |x|) (fun x => if x<0 then -1 else if 0<x then 1 else k) a b (-a) b
+  set sign := fun (x : ℝ) => if x<0 then -1 else if 0<x then 1 else k with hs
+  have left := interval.weak_deriv.linear (-1) a 0 lo
+  have right := interval.weak_deriv.linear 1 0 b hi
+  have L : interval.weak_deriv (fun x => |x|) sign a 0 (-a) 0
+    have l : (-1)*a = -a := by ring
+    rw [l] at left; simp only [mul_zero.real] at left
+    apply interval.weak_deriv.congr_interior (fun x => (-1)*x) (fun x => -1) (fun x => |x|) sign a 0 (-a) 0 left
+    intro x ax neg; rw [hs]; constructor
+    · rw [abs_of_neg.real x neg]; ring
+    · simp [neg]
+  have R : interval.weak_deriv (fun x => |x|) sign 0 b 0 b
+    simp at right
+    apply interval.weak_deriv.congr_interior (fun x => 1*x) (fun x => 1) (fun x => |x|) sign 0 b 0 b
+    · simpa using right
+    · intro x pos xb; rw [hs]; constructor
+      · rw [abs_of_nonneg.real x (by linarith)]; ring
+      · have nonneg : ¬ x<0 := by linarith
+        simp [pos,nonneg]
+  exact interval.weak_deriv.adjacent lo hi L R

@@ -1,0 +1,117 @@
+-- Local estimates on a closed real interval, composed using order completeness.
+import real_completeness
+import arith
+
+-- Closed real interval, including both endpoints.
+-> Icc (a b : ℝ) : set ℝ := fun x => a ≤ x ∧ x ≤ b
+
++ interval.propagate (P : ℝ → Prop) (a b : ℝ) (ordered : a ≤ b) (start : P a)
+    (local : ∀ t, a ≤ t → t ≤ b → ∃ d : ℝ, 0 < d ∧
+      ∀ x y, a ≤ x → x ≤ t → t ≤ y → y ≤ b → t-x < d → y-t < d → P x → P y) : P b
+  have seed : ∃ x : ℝ, a ≤ x ∧ x ≤ b ∧ P x := by exact ⟨a, by linarith, ordered, start⟩
+  have bound : upper_bound (fun x => a ≤ x ∧ x ≤ b ∧ P x) b
+    unfold upper_bound
+    intro x hx
+    exact hx.2.1
+  obtain ⟨s, hs⟩ := sup_exists (fun x => a ≤ x ∧ x ≤ b ∧ P x) seed ⟨b, bound⟩
+  have lo := is_sup.le_of_mem (fun x => a ≤ x ∧ x ≤ b ∧ P x) s a hs ⟨by linarith, ordered, start⟩
+  have hi : s ≤ b
+    unfold is_sup at hs
+    exact hs.2 b bound
+  obtain ⟨d, pos, cross⟩ := local s lo hi
+  obtain ⟨x, hx, near⟩ := is_sup.exists_gt (fun x => a ≤ x ∧ x ≤ b ∧ P x) s (s-d) hs (by linarith)
+  have xs := is_sup.le_of_mem (fun x => a ≤ x ∧ x ≤ b ∧ P x) s x hs hx
+  have extend : ∀ y, s ≤ y → y ≤ b → y-s < d → P y
+    intro y sy yb small
+    exact cross x y hx.1 xs sy yb (by linarith) small hx.2.2
+  by_cases hit : b-s < d
+  · exact extend b hi (by linarith) hit
+  · have member : a ≤ s+d/2 ∧ s+d/2 ≤ b ∧ P (s+d/2)
+      exact ⟨by linarith, by linarith, extend (s+d/2) (by linarith) (by linarith) (by linarith)⟩
+    have beyond := is_sup.le_of_mem (fun x => a ≤ x ∧ x ≤ b ∧ P x) s (s+d/2) hs member
+    exfalso
+    linarith
+
+-- The two one-sided bounds may come from different affine pieces at a corner.
++ interval.increment_le (f : ℝ → ℝ) (a b M : ℝ) (ordered : a ≤ b)
+    (local : ∀ t, a ≤ t → t ≤ b → ∃ d : ℝ, 0 < d ∧
+      (∀ x, a ≤ x → x ≤ t → t-x < d → f t-f x ≤ M*(t-x)) ∧
+      (∀ y, t ≤ y → y ≤ b → y-t < d → f y-f t ≤ M*(y-t))) : f b-f a ≤ M*(b-a)
+  apply interval.propagate (fun z => f z-f a ≤ M*(z-a)) a b ordered (by linarith)
+  intro t lo bt
+  obtain ⟨d, pos, left, right⟩ := local t lo bt
+  use d
+  constructor
+  · exact pos
+  · intro x y ax xt ty yb nearx neary prev
+    linarith [left x ax xt nearx, right y ty yb neary]
+
+-- First-order approximation relative to S, including one-sided endpoints.
+-> has_deriv_within (f : ℝ → ℝ) (S : set ℝ) (x v : ℝ) : Prop :=
+  ∀ e : ℝ, 0 < e → ∃ d : ℝ, 0 < d ∧
+    ∀ y ∈ S, |y-x| < d → |f y-f x-v*(y-x)| ≤ e*|y-x|
+
++ interval.increment_le_of_deriv_le (f v : ℝ → ℝ) (a b M : ℝ) (ordered : a ≤ b)
+    (deriv : ∀ t, a ≤ t → t ≤ b → has_deriv_within f (fun z => a ≤ z ∧ z ≤ b) t (v t))
+    (slope : ∀ t, a ≤ t → t ≤ b → v t ≤ M) : f b-f a ≤ M*(b-a)
+  have approx : ∀ e : ℝ, 0 < e → f b-f a ≤ (M+e)*(b-a)
+    intro e he
+    apply interval.increment_le f a b (M+e) ordered
+    intro t lo tb
+    have ht := deriv t lo tb
+    unfold has_deriv_within at ht
+    obtain ⟨d, hd, near⟩ := ht e he
+    have upper := slope t lo tb
+    use d
+    constructor
+    · exact hd
+    · constructor
+      · intro x ax xt close
+        have dist := abs_of_nonpos.real (x-t) (by linarith)
+        have nearx := near x ⟨ax, by linarith⟩ (by rw [dist]; linarith)
+        rw [dist] at nearx
+        linarith [neg_le_abs.real (f x-f t-v t*(x-t)), mul_le_mul_of_nonneg_right.real (v t) M (t-x) upper (by linarith)]
+      · intro y ty yb close
+        have dist := abs_of_nonneg.real (y-t) (by linarith)
+        have neary := near y ⟨by linarith, yb⟩ (by rw [dist]; exact close)
+        rw [dist] at neary
+        linarith [le_abs_self.real (f y-f t-v t*(y-t)), mul_le_mul_of_nonneg_right.real (v t) M (y-t) upper (by linarith)]
+  by_contra no
+  have gap : 0 < f b-f a-M*(b-a) := by linarith
+  obtain ⟨pos, small⟩ := affine_step_radius.real (b-a) (f b-f a-M*(b-a)) gap
+  have bound := approx ((f b-f a-M*(b-a))/(|b-a|+1)) pos
+  have err := small ((f b-f a-M*(b-a))/(|b-a|+1)) pos (by linarith)
+  linarith
+
+-- Sum the estimates on a finite partition. A corner needs no derivative.
++ interval.increment_le_of_partition (f : ℝ → ℝ) (t : ℕ → ℝ) (M : ℝ) (n : ℕ)
+    (step : ∀ i < n, f (t (i+1))-f (t i) ≤ M*(t (i+1)-t i)) :
+    f (t n)-f (t 0) ≤ M*(t n-t 0)
+  induction n with base k ih bounds
+  · linarith
+  · have prev := ih (by intro i hi; exact bounds i (by omega))
+    linarith [bounds k (by omega)]
+
+@[auto] + has_deriv_within.affine (m c : ℝ) (S : set ℝ) (x : ℝ) :
+    has_deriv_within (fun z => m*z+c) S x m
+  unfold has_deriv_within
+  intro e he
+  use e
+  constructor
+  · exact he
+  · intro y hy close
+    have err : m*y+c-(m*x+c)-m*(y-x) = 0 := by ring
+    rw [err, abs_of_nonneg.real 0 (by decide)]
+    exact mul_nonneg.real e (|y-x|) (by linarith) (abs_nonneg.real (y-x))
+
+@[auto] + has_deriv_within.square (S : set ℝ) (x : ℝ) :
+    has_deriv_within (fun z => z^2) S x (2*x)
+  unfold has_deriv_within
+  intro e he
+  use e
+  constructor
+  · exact he
+  · intro y hy close
+    have err : y^2-x^2-2*x*(y-x) = (y-x)*(y-x) := by ring
+    rw [err, abs_mul.real]
+    exact mul_le_mul_of_nonneg_right.real (|y-x|) e (|y-x|) (by linarith) (abs_nonneg.real (y-x))

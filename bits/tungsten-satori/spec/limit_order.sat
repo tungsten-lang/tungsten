@@ -1,0 +1,20 @@
+import limit_order
+
++ negative_scale (a : ℕ → ℝ) (L : ℝ) (h : tends_to a L) : tends_to (fun n => (-3) * a n) ((-3) * L) := by auto
++ scale_to_zero (a : ℕ → ℝ) (K : ℝ) (h : tends_to a 0) : tends_to (fun n => K * a n) 0 := by auto
++ right_scale (a : ℕ → ℝ) (A c : ℝ) (h : tends_to a A) : tends_to (fun n => a n * c) (A*c) := by auto
++ right_zero (a : ℕ → ℝ) (c : ℝ) (h : tends_to a 0) : tends_to (fun n => a n * c) 0 := by auto
++ scaled_order (a b : ℕ → ℝ) (A B K : ℝ) (ha : tends_to a A) (hb : tends_to b B) (h : ∀ n, a n ≤ K * b n) : A ≤ K * B
+  auto
++ zero_squeeze (a b : ℕ → ℝ) (K : ℝ) (hb : tends_to b 0) (h : ∀ n, 0 ≤ a n ∧ a n ≤ K * b n) : tends_to a 0
+  auto
+
++ order_after (a b : ℕ → ℝ) (A B : ℝ) (ha : tends_to a A) (hb : tends_to b B)
+    (k : ℕ) (h : ∀ n, k ≤ n → a n ≤ b n) : A ≤ B := by exact tends_to.le_of_eventual_le a b A B ha hb k h
++ squeeze_after (lo mid hi : ℕ → ℝ) (L : ℝ) (hl : tends_to lo L) (hh : tends_to hi L)
+    (k : ℕ) (h : ∀ n, k ≤ n → lo n ≤ mid n ∧ mid n ≤ hi n) : tends_to mid L
+  exact tends_to.squeeze_eventually lo hi L mid hl hh k h
+
++ growing_sums (a : ℕ → ℝ) (h : ∀ n, 0 ≤ a n) : monotone_seq (partial_sum a) := by auto
++ partial_sum_below_total (a : ℕ → ℝ) (L : ℝ) (h : ∀ n, 0 ≤ a n) (limit : tends_to (partial_sum a) L) (n : ℕ) : partial_sum a n ≤ L
+  exact monotone_seq.le_limit (partial_sum a) L limit (by auto) n

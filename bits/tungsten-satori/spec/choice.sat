@@ -1,0 +1,12 @@
+import choice
+
++ inhabited (P : α → Prop) (h : ∃ x, P x) : P (choice P) := by auto
++ singleton (x : α) : choice (fun y => y = x) = x := by exact choice.spec (fun y => y = x) ⟨x, by rfl⟩
++ unique_value (P : α → Prop) (u : α) (hu : P u) (all : ∀ z, P z → z = u) : choice P = u := by exact choice.unique P u hu all
++ section_of_surjection (f : α → β) (onto : ∀ y, ∃ x, f x = y) : ∃ g : β → α, ∀ y, f (g y) = y
+  exact choice.function (fun y x => f x = y) onto
+
+opaque accepted : ℝ → Prop
+axiom candidate : ∃ x, accepted x
++ marked : accepted (choice accepted) := by exact choice.spec accepted candidate
+#axioms marked

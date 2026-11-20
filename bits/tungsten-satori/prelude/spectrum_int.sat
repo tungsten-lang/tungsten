@@ -1,0 +1,51 @@
+-- Principal ideals of ℤ and the closed point associated with a positive prime.
+import spectrum
+import arith
+
+-> ideal.multiples (p : ℤ) : set ℤ := fun x => ∃ k : ℤ, x = p*k
+
++ ideal.multiples_ideal (p : ℤ) : ideal ring_ops.int (ideal.multiples p)
+  unfold ideal ring_ops.int ideal.multiples
+  constructor
+  · exact ⟨0,by ring⟩
+  · constructor
+    · intro x y hx hy; obtain ⟨u,eq⟩ := hx; obtain ⟨v,ev⟩ := hy
+      exact ⟨u+v,by rw [eq,ev]; ring⟩
+    · constructor
+      · intro x hx; obtain ⟨u,eq⟩ := hx; exact ⟨-u,by rw [eq]; ring⟩
+      · intro r x hx; obtain ⟨u,eq⟩ := hx; exact ⟨r*u,by rw [eq]; ring⟩
+
++ ideal.multiples_dvd (p x : ℤ) (pos : 0 < p) : x ∈ ideal.multiples p ↔ p ∣ x
+  unfold ideal.multiples dvd
+  constructor
+  · intro h; obtain ⟨k,eq⟩ := h; rw [eq]; exact (div_mod_unique.int (p*k) p k 0 (by ring) (by decide) pos).2.symm
+  · intro h; exact ⟨x/p,by linarith [div_add_mod.int x p]⟩
+
++ spectrum.int_prime_gt_one (p : ℤ) (primep : prime (nat_of_int p)) : 1 < p
+  have h2 : 2 ≤ nat_of_int p := by unfold prime at primep; exact primep.1
+  have pos : 0 < p := by by_contra bad; rw [nat_of_int_nonpos p (by linarith)] at h2; linarith
+  linarith [(cast_le.int 2 (nat_of_int p)).mpr h2,int_of_nat_of_int p (by linarith)]
+
+@[auto] + spectrum.int_prime (p : ℤ) (primep : prime (nat_of_int p)) : ideal.multiples p ∈ spectrum ring_ops.int
+  have big := spectrum.int_prime_gt_one p primep
+  have pos : 0 < p := by linarith
+  unfold spectrum
+  constructor
+  · exact ideal.multiples_ideal p
+  · constructor
+    · intro unit
+      have divides := (ideal.multiples_dvd p 1 pos).mp unit
+      unfold dvd at divides; linarith [(div_mod_unique.int 1 p 0 1 (by ring) (by decide) big).2]
+    · intro x y prod
+      obtain hx | hy := prime_dvd_mul.int p x y primep ((ideal.multiples_dvd p (x*y) pos).mp prod)
+      · left; exact (ideal.multiples_dvd p x pos).mpr hx
+      · right; exact (ideal.multiples_dvd p y pos).mpr hy
+
++ spectrum.int_D (p f : ℤ) (primep : prime (nat_of_int p)) :
+    ideal.multiples p ∈ spectrum.D ring_ops.int f ↔ f % p ≠ 0
+  have pos : 0 < p := by linarith [spectrum.int_prime_gt_one p primep]
+  have mem := ideal.multiples_dvd p f pos; unfold dvd at mem
+  unfold spectrum.D
+  constructor
+  · intro h zero; exact h.2 (mem.mpr zero)
+  · intro nz; exact ⟨spectrum.int_prime p primep,by intro inside; exact nz (mem.mp inside)⟩

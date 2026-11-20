@@ -16,6 +16,10 @@ import arith
 
 + int_direct (f : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, f i j)) = (∑ j < m, (∑ i < n, f i j)) := by auto
 
+-- The rectangular matrix sums in the Eilenberg–Ganea chain contraction.
++ int_matrix (a b : ℕ → ℤ) (D : ℕ → ℕ → ℤ) :
+    (∑ e < 163, ∑ t < 127, a e * (D e t * b t)) = (∑ t < 127, ∑ e < 163, a e * (D e t * b t)) := by auto
+
 + int_reverse (f : ℕ → ℕ → ℤ) (n m : ℕ) : (∑ j < m, (∑ i < n, f i j)) = (∑ i < n, (∑ j < m, f i j)) := by auto
 
 + int_weighted (f : ℕ → ℕ → ℤ) (w : ℕ → ℤ) (n m : ℕ) : (∑ i < n, (∑ j < m, w i * f i j)) = (∑ j < m, (∑ i < n, w i * f i j)) := by auto

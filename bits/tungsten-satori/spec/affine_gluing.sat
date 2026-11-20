@@ -1,0 +1,122 @@
+import affine_gluing
+
++ compatible_sections (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (L : ring_ops δ)
+    (i : α → β) (j : α → γ) (k : α → δ) (r : β → δ) (s : γ → δ) (f g : α) (u : β) (v : γ)
+    (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T) (hl : comm_ring L) (cover : ring_ops.comaximal R f g)
+    (lf : localization R S i (ring_ops.powers R f)) (lg : localization R T j (ring_ops.powers R g))
+    (overlap : localization R L k (ring_ops.powers R (R.mul f g)))
+    (rf : localization.restriction S L i k r) (rg : localization.restriction T L j k s) (agree : r u = s v) :
+    ∃! x, i x = u ∧ j x = v := by auto
+
+#axioms compatible_sections
+
+-- Two complementary idempotents in ℤ × ℤ. Their intersection is empty.
+inductive side
+  | west
+  | east
+inductive point
+  | star
+-> pair_ring : ring_ops (side → ℤ) := ring_ops.mk (fun t => 0) (fun t => 1)
+  (fun x y t => x t+y t) (fun x t => -x t) (fun x y t => x t*y t)
+-> empty_ring : ring_ops point := ring_ops.mk star star (fun x y => star) (fun x => star) (fun x y => star)
+-> west_id : side → ℤ
+  | west => 1
+  | east => 0
+-> east_id : side → ℤ
+  | west => 0
+  | east => 1
++ west_w : west_id west = 1 := by rfl
++ west_e : west_id east = 0 := by rfl
++ east_w : east_id west = 0 := by rfl
++ east_e : east_id east = 1 := by rfl
+-> at_west (x : side → ℤ) : ℤ := x west
+-> at_east (x : side → ℤ) : ℤ := x east
+-> forget (x : α) : point := star
+
++ pair_laws : comm_ring pair_ring
+  unfold comm_ring
+  exact ⟨by intros; funext t; simp [pair_ring] <;> ring,
+    by intros; funext t; simp [pair_ring] <;> ring,
+    by intros; funext t; simp [pair_ring] <;> ring,
+    by intros; funext t; simp [pair_ring] <;> ring,
+    by intros; funext t; simp [pair_ring] <;> ring,
+    by intros; funext t; simp [pair_ring] <;> ring,
+    by intros; funext t; simp [pair_ring] <;> ring,
+    by intros; funext t; simp [pair_ring] <;> ring⟩
+
++ empty_laws : comm_ring empty_ring
+  have eq : ∀ x y : point, x = y := by intro x; cases x; cases y; rfl
+  unfold comm_ring; exact ⟨by intros; apply eq,by intros; apply eq,by intros; apply eq,by intros; apply eq,
+    by intros; apply eq,by intros; apply eq,by intros; apply eq,by intros; apply eq⟩
+
+-- A surjective projection inverting f, whose equalities are cleared by f.
++ projection_chart (R : ring_ops α) (S : ring_ops β) (i : α → β) (f : α) (hr : comm_ring R) (hs : comm_ring S)
+    (hom : ring_hom R S i) (unit : i f = S.one) (onto : ∀ y, ∃ a, i a = y)
+    (clear : ∀ a b, i a = i b → R.mul f a = R.mul f b) : localization R S i (ring_ops.powers R f)
+  have closed := multiplicative.powers R hr f
+  have inv : ring_ops.unit S (i f) := ⟨S.one,by rw [unit,hs.2.2.2.2.2.2.1]⟩
+  unfold localization; exact ⟨closed,hom,ring_hom.inverts_powers R S i f hs hom inv,
+    by intro y; obtain ⟨a,eq⟩ := onto y; exact ⟨a,R.one,closed.1,by rw [hom.2.1,hs.2.2.2.2.2.2.1,eq]⟩,
+    by intro a b eq; exact ⟨f,ring_ops.powers_self R hr f,clear a b eq⟩⟩
+
++ west_chart : localization pair_ring ring_ops.int at_west (ring_ops.powers pair_ring west_id)
+  apply projection_chart pair_ring ring_ops.int at_west west_id pair_laws comm_ring.int
+  · unfold ring_hom; exact ⟨rfl,rfl,by intros; rfl,by intros; rfl,by intros; rfl⟩
+  · rfl
+  · intro y; exact ⟨fun t => y,rfl⟩
+  · intro a b h; unfold at_west at h; funext t; cases t <;> simp [pair_ring,west_w,west_e,h]
+
++ east_chart : localization pair_ring ring_ops.int at_east (ring_ops.powers pair_ring east_id)
+  apply projection_chart pair_ring ring_ops.int at_east east_id pair_laws comm_ring.int
+  · unfold ring_hom; exact ⟨rfl,rfl,by intros; rfl,by intros; rfl,by intros; rfl⟩
+  · rfl
+  · intro y; exact ⟨fun t => y,rfl⟩
+  · intro a b h; unfold at_east at h; funext t; cases t <;> simp [pair_ring,east_w,east_e,h]
+
++ forget_hom (R : ring_ops α) : ring_hom R empty_ring forget
+  unfold ring_hom; exact ⟨rfl,rfl,by intros; rfl,by intros; rfl,by intros; rfl⟩
+
++ empty_overlap : localization pair_ring empty_ring forget (ring_ops.powers pair_ring (ring_ops.mul pair_ring west_id east_id))
+  apply projection_chart pair_ring empty_ring forget (ring_ops.mul pair_ring west_id east_id) pair_laws empty_laws (forget_hom pair_ring)
+  · rfl
+  · intro y; cases y; exact ⟨west_id,rfl⟩
+  · intro a b h; funext t; cases t <;> simp [pair_ring,west_w,west_e,east_w,east_e]
+
++ complementary : ring_ops.comaximal pair_ring west_id east_id
+  unfold ring_ops.comaximal; use ring_ops.one pair_ring; use ring_ops.one pair_ring
+  funext t; cases t <;> decide
+
++ product_cover : localization.two_open_cover at_west at_east forget forget
+  have left : localization.restriction ring_ops.int empty_ring at_west forget forget := ⟨forget_hom ring_ops.int,by intros; rfl⟩
+  have right : localization.restriction ring_ops.int empty_ring at_east forget forget := ⟨forget_hom ring_ops.int,by intros; rfl⟩
+  exact ⟨pair_ring,ring_ops.int,ring_ops.int,empty_ring,forget,west_id,east_id,pair_laws,comm_ring.int,comm_ring.int,empty_laws,complementary,west_chart,east_chart,empty_overlap,left,right⟩
+
++ product_sections (u v : ℤ) : ∃! x, at_west x = u ∧ at_east x = v
+  have cover := product_cover
+  have agree : forget u = forget v := by rfl
+  auto
+
++ from_overlap (i : α → β) (j : α → γ) (r : β → δ) (s : γ → δ) (cover : localization.two_open_cover i j r s)
+    (u : β) (v : γ) (agree : r u = s v) : ∃! x, i x = u ∧ j x = v := by auto
+
+-- Unequal numerators restrict to the same overlap value.
++ torsion_on_overlap : west_id ≠ east_id ∧ forget west_id = forget east_id
+  constructor
+  · intro eq; have h : at_west west_id = at_west east_id := by rw [eq]
+    have bad : (1 : ℤ) = 0 := h; omega
+  · rfl
+
+-- Repeating one chart loses the other coordinate.
++ one_chart_misses_section : at_west east_id = at_west (ring_ops.zero pair_ring) ∧ east_id ≠ ring_ops.zero pair_ring
+  constructor
+  · rfl
+  · intro eq; have same : at_east east_id = at_east (ring_ops.zero pair_ring) := by rw [eq]
+    have bad : (1 : ℤ) = 0 := same; omega
+
++ make_cover (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (L : ring_ops δ)
+    (i : α → β) (j : α → γ) (k : α → δ) (f g : α)
+    (hr : comm_ring R) (hs : comm_ring S) (ht : comm_ring T) (hl : comm_ring L) (cover : ring_ops.comaximal R f g)
+    (lf : localization R S i (ring_ops.powers R f)) (lg : localization R T j (ring_ops.powers R g))
+    (overlap : localization R L k (ring_ops.powers R (R.mul f g))) : ∃ r : β → δ, ∃ s : γ → δ, localization.two_open_cover i j r s := by auto
+#axioms make_cover
+#axioms from_overlap

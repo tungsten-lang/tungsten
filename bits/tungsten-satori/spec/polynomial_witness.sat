@@ -1,0 +1,5 @@
+-> dip (x : ℚ) : ℚ := 256*x^2 - 352*x + 120
++ dipping : ∃ t : ℚ, 0 ≤ t ∧ t ≤ 1 ∧ dip t < 0 := by auto
++ at_minimum : ∃ t : ℚ, dip t ≤ -1 := by auto
++ two_conditions : ∃ t : ℝ, 0 ≤ t^2 ∧ (1000*t-711)^2 < 1/100 := by auto
++ negative_integer : ∃ n : ℤ, n < 0 ∧ (n+23)^2 ≤ 0 := by auto

@@ -1,0 +1,19 @@
+-- Least upper bounds of real sets and ranges.
+import real
+
+@[auto] + is_sup.le_iff (S : set ℝ) (s b : ℝ) (hs : is_sup S s) : s ≤ b ↔ upper_bound S b
+  unfold is_sup at hs
+  constructor
+  · intro h
+    unfold upper_bound
+    intro x hx
+    have bound := hs.1
+    unfold upper_bound at bound
+    linarith [bound x hx]
+  · exact hs.2 b
+
+@[auto] + is_sup.range_le_iff (f : α → ℝ) (s b : ℝ) (hs : is_sup (set.range f) s) : s ≤ b ↔ ∀ i, f i ≤ b
+  rw [is_sup.le_iff (set.range f) s b hs, upper_bound.range_iff]
+
++ is_sup.unique (S : set ℝ) (a b : ℝ) (ha : is_sup S a) (hb : is_sup S b) : a = b
+  unfold is_sup at ha hb; exact le_antisymm.real a b (ha.2 b hb.1) (hb.2 a ha.1)

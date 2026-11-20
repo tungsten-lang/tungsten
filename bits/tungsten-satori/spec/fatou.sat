@@ -1,0 +1,50 @@
+import fatou
+
++ simple_limit (w : ℕ → ℝ) (f : ℕ → ℕ → ℝ) (n : ℕ) (h : ∀ i < n, tends_to (f i) (w i)) :
+    tends_to (fun k => ∑ i < n, f i k) (∑ i < n, w i) := by auto
+
++ moving_tail (vol : set α → ℝ → Prop) (sets : set (set α)) (f : ℕ → α → ℝ) (g : α → ℝ) (B : ℝ)
+    (space : volume.exhaustion_laws vol sets) (meas : ∀ n, lower_integral.measurable vol sets (f n)) (pos : ∀ n x, 0 ≤ f n x)
+    (limit : ∀ x r, r < g x → ∃ k, ∀ j, k ≤ j → r ≤ f j x) (bound : ∀ n, lower_integral.bound vol (f n) B) :
+    lower_integral.bound vol g B := by exact lower_integral.bound.fatou vol sets f g B space meas pos limit bound
+
++ pointwise (vol : set α → ℝ → Prop) (sets : set (set α)) (f : ℕ → α → ℝ) (g : α → ℝ) (B : ℝ)
+    (space : volume.exhaustion_laws vol sets) (finite : ∀ k, lower_integral.integrable vol sets (f k))
+    (conv : ∀ x, tends_to (fun k => f k x) (g x)) (b : ∀ k, lower_integral.value vol (f k) ≤ B) :
+    lower_integral.value vol g ≤ B := by auto
+
++ point_mass (p : α) (f : α → ℝ) (h : ∀ x, 0 ≤ f x) : lower_integral.value (lower_integral.atom p) f = f p := by auto
++ point_laws (p : α) : volume.exhaustion_laws (lower_integral.atom p) (fun A => True) := by exact volume.exhaustion_laws.atom p
++ scaled (vol : set α → ℝ → Prop) (f : α → ℝ) (a : ℝ) (ha : 0 < a) :
+    lower_integral.value vol (fun x => a*f x) = a*lower_integral.value vol f := by auto
++ zero_scale (vol : set α → ℝ → Prop) (f : α → ℝ) :
+    lower_integral.value vol (fun x => 0*f x) = 0*lower_integral.value vol f := by auto
+#axioms moving_tail
+#axioms pointwise
+#axioms point_laws
+
++ sparse_bounds (vol : set α → ℝ → Prop) (sets : set (set α)) (f : ℕ → α → ℝ) (g : α → ℝ) (B : ℝ)
+    (space : volume.exhaustion_laws vol sets) (meas : ∀ k, lower_integral.measurable vol sets (f k)) (pos : ∀ k x, 0 ≤ f k x)
+    (limit : seq.liminf_ge f g) (bounds : ∀ e : ℝ, 0 < e → ∀ k : ℕ, ∃ j, k ≤ j ∧ lower_integral.bound vol (f j) (B+e)) :
+    lower_integral.bound vol g B := by apply lower_integral.bound.fatou_liminf vol sets f <;> assumption
+
++ point_cap (p : ℝ) (f : ℕ → ℝ → ℝ) (g : ℝ → ℝ) (B : ℝ) (pos : ∀ k x, 0 ≤ f k x)
+    (conv : ∀ x, tends_to (fun k => f k x) (g x)) (cap : ∀ k, f k p ≤ B) : lower_integral.value (lower_integral.atom p) g ≤ B
+  apply lower_integral.value.fatou (lower_integral.atom p) (fun A => True) f
+  · exact volume.exhaustion_laws.atom p
+  · intro k; exact lower_integral.integrable.atom p (f k) (pos k)
+  · exact conv
+  · intro k; rw [lower_integral.value.atom p (f k) (pos k)]; exact cap k
+
+opaque volume_on_line : set ℝ → ℝ → Prop
+opaque measurable_sets : set (set ℝ)
+axiom line_laws : volume.exhaustion_laws volume_on_line measurable_sets
++ line_limit (f : ℕ → ℝ → ℝ) (g : ℝ → ℝ) (B : ℝ) (finite : ∀ n, lower_integral.integrable volume_on_line measurable_sets (f n))
+    (conv : ∀ x, tends_to (fun n => f n x) (g x)) (bounds : ∀ n, lower_integral.value volume_on_line (f n) ≤ B) : lower_integral.value volume_on_line g ≤ B
+  apply lower_integral.value.fatou volume_on_line measurable_sets f <;> auto [line_laws]
+#axioms line_limit
+
++ profile_bound (vol : set α → ℝ → Prop) (sets : set (set α)) (f : ℕ → α → ℝ) (g : α → ℝ) (a C : ℝ)
+    (space : volume.exhaustion_laws vol sets) (pos : 0 < a) (mass : 0 < lower_integral.value vol g)
+    (conv : ∀ x, tends_to (fun n => f n x) (a*g x)) (b : ∀ n, lower_integral.integrable vol sets (f n) ∧ lower_integral.value vol (f n) ≤ C*lower_integral.value vol g) : a ≤ C
+  auto

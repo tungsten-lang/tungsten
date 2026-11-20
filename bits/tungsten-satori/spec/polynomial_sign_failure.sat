@@ -1,0 +1,17 @@
++ endpoint_zero (t : ℝ) (lo : 0 ≤ t) (hi : t ≤ 1) : 0 < t^3*(1-t)^5 := by auto
++ negative_inside (t : ℚ) (lo : 0 ≤ t) (hi : t ≤ 1) : 0 ≤ t^2 - t + 1/8 := by auto
++ absent_upper (t : ℤ) (lo : 0 ≤ t) : 0 ≤ t^3*(1-t)^5 := by auto
++ unrelated_bound (t s : ℝ) (lo : 0 ≤ t) (hi : s ≤ 1) : 0 ≤ t^3*(1-t)^5 := by auto
++ integer_division (t : ℤ) (lo : 0 < t) : 0 < t/2 := by auto
+
++ at_cut (t : ℝ) (lo : 0 ≤ t) (hi : t ≤ 1) : 0 < (2*t-1)^4 := by auto
++ inside_leaf (t : ℚ) (lo : 0 ≤ t) (hi : t ≤ 1) : 0 ≤ 256*t^2 - 352*t + 120 := by auto
++ wrong_ray (t : ℝ) : 0 < t^3 + 1 := by auto
++ negative_farther_out (t : ℚ) (lo : 0 ≤ t) : 0 < (t-20)^2 - 1 := by auto
+
++ shared_root (x : ℚ) (h : 1 ≤ x^2) : 0 < x^4-1 := by auto
++ negative_root (x : ℝ) (h : x*x = 2) : 4/3 < x := by auto
++ opposite_guard (s : ℝ) (s0 : 0 ≤ s) (h : 1/10 ≤ s^4) : s < 3/5 := by auto
++ independent_axis (s t : ℝ) (h : t^4 ≤ 1/10) : s < 3/5 := by auto
++ division_guard (x : ℤ) (h : (x/2)^2 = 0) : x ≤ 0 := by auto
++ between_rational_squares (x : ℚ) (lo : 1 < x*x) (hi : x*x < 4) : x < 0 := by auto

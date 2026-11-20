@@ -62,3 +62,5 @@ axiom stored_zero : aggregate_rat sample cutoff+sample cutoff = 0
 
 + mixed_hints (i : ℕ) (h : ∀ j < cutoff+1, 0 ≤ sample j) (e : i = cutoff) : sample i = 0
   auto [stored_zero, aggregate_nonneg_rat]
+
++ skip_unrelated_domain (f : ℤ → ℤ) (g : ℕ → ℤ) (other : ∀ n, 0 ≤ g n) (right : ∀ z, f z+1 ≤ 7) : ∀ k, f k ≤ 6 := by auto

@@ -1,0 +1,54 @@
+-- Local balance on an interval, with sign convention density_t = flux_x.
+import integral_parameter
+import weak_derivative
+
+-> interval.balance (density flux rate : ℝ → ℝ → ℝ) (T X : set ℝ) : Prop :=
+  has_continuous_time_deriv density rate T X ∧
+  ∀ t ∈ T, ∀ x ∈ X, has_deriv_within (flux t) X x (rate t x)
+
+-- Spatial differentiation holds against C¹ tests. The boundary fluxes are traces.
+-> interval.weak_balance (u j r : ℝ → ℝ → ℝ) (T : set ℝ) (a b : ℝ) (left right : ℝ → ℝ) : Prop :=
+  has_continuous_time_deriv u r T (Icc a b) ∧ ∀ t ∈ T, interval.weak_deriv (j t) (r t) a b (left t) (right t)
+
+@[auto] + interval.balance.weak (u j r : ℝ → ℝ → ℝ) (T : set ℝ) (a b : ℝ) (ab : a ≤ b)
+    (law : interval.balance u j r T (Icc a b)) :
+    interval.weak_balance u j r T a b (fun t => j t a) (fun t => j t b)
+  unfold interval.balance at law; unfold interval.weak_balance
+  obtain ⟨time,space⟩ := law; constructor
+  · exact time
+  · intro t ht; apply interval.c1.weak_deriv (j t) (r t) a b ab
+    unfold interval.c1 interval.deriv; constructor
+    · intro x lo hi; exact space t ht x ⟨lo,hi⟩
+    · unfold has_continuous_time_deriv at time; intro x hx
+      have row := time t ht x hx
+      exact continuous_within_box.slice r T (Icc a b) t x ht row.2.1
+
+@[auto] + interval.weak_balance.rate (u j r : ℝ → ℝ → ℝ) (left right : ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b)
+    (law : interval.weak_balance u j r (Icc c d) a b left right) :
+    interval.deriv (fun t => darboux.integral a b (u t)) (fun t => right t-left t) c d
+  unfold interval.weak_balance at law; unfold interval.deriv; intro t ct td
+  have dt := darboux.integral.time_deriv u r a b c d t ab ct td law.1
+  have flux := interval.weak_deriv.increment (j t) (r t) a b (left t) (right t) (law.2 t ⟨ct,td⟩)
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  rw [agree a b (r t) (right t-left t) flux] at dt; exact dt
+
++ interval.balance.rate (u j r : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b)
+    (law : interval.balance u j r (Icc c d) (Icc a b)) :
+    interval.deriv (fun t => darboux.integral a b (u t)) (fun t => j t b-j t a) c d
+  exact interval.weak_balance.rate ab (interval.balance.weak ab law)
+
+@[auto] + interval.weak_balance.change (u j r : ℝ → ℝ → ℝ) (left right : ℝ → ℝ) (a b c d I : ℝ) (ab : a ≤ b)
+    (law : interval.weak_balance u j r (Icc c d) a b left right) (net : darboux.has_integral (fun t => right t-left t) c d I) :
+    darboux.integral a b (u d)-darboux.integral a b (u c) = I
+  exact (darboux.eval_primitive (fun t => darboux.integral a b (u t)) (fun t => right t-left t) c d I net (interval.weak_balance.rate ab law)).symm
+
+@[auto] + interval.balance.change (u j r : ℝ → ℝ → ℝ) (a b c d I : ℝ) (ab : a ≤ b)
+    (law : interval.balance u j r (Icc c d) (Icc a b)) (net : darboux.has_integral (fun t => j t b-j t a) c d I) :
+    darboux.integral a b (u d)-darboux.integral a b (u c) = I
+  exact interval.weak_balance.change ab (interval.balance.weak ab law) net
+
+@[auto] + interval.balance.conserved (u j r : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (law : interval.balance u j r (Icc c d) (Icc a b)) (ends : ∀ t, c ≤ t → t ≤ d → j t b = j t a) :
+    darboux.integral a b (u d) = darboux.integral a b (u c)
+  have net := darboux.congr (fun t => 0) (fun t => j t b-j t a) c d (0*(d-c)) (darboux.const c d 0 cd) (by intro t lo hi; linarith [ends t lo hi])
+  linarith [interval.balance.change u j r a b c d (0*(d-c)) ab law net]

@@ -1,0 +1,167 @@
+-- Ideals in a commutative ring with identity. The zero ring is allowed.
+import set
+structure ring_ops α := (zero : α) (one : α) (add : α → α → α) (neg : α → α) (mul : α → α → α)
+
+-> comm_ring (R : ring_ops α) : Prop :=
+  (∀ x y z, R.add (R.add x y) z = R.add x (R.add y z)) ∧
+  (∀ x y, R.add x y = R.add y x) ∧ (∀ x, R.add R.zero x = x) ∧ (∀ x, R.add (R.neg x) x = R.zero) ∧
+  (∀ x y z, R.mul (R.mul x y) z = R.mul x (R.mul y z)) ∧
+  (∀ x y, R.mul x y = R.mul y x) ∧ (∀ x, R.mul R.one x = x) ∧
+  (∀ x y z, R.mul x (R.add y z) = R.add (R.mul x y) (R.mul x z))
+
+-> ring_ops.int : ring_ops ℤ := ring_ops.mk 0 1 (fun x y => x+y) (fun x => -x) (fun x y => x*y)
+@[auto] + comm_ring.int : comm_ring ring_ops.int
+  unfold comm_ring ring_ops.int
+  exact ⟨by intro x y z; ring,by intro x y; ring,by intro x; ring,by intro x; ring,by intro x y z; ring,by intro x y; ring,by intro x; ring,by intro x y z; ring⟩
+
+-> ideal (R : ring_ops α) (I : set α) : Prop :=
+  I R.zero ∧ (∀ x y, I x → I y → I (R.add x y)) ∧ (∀ x, I x → I (R.neg x)) ∧ (∀ r x, I x → I (R.mul r x))
+
+@[auto] + ideal.zero (R : ring_ops α) (I : set α) (h : ideal R I) : I R.zero
+  unfold ideal at h; exact h.1
+@[auto] + ideal.add (R : ring_ops α) (I : set α) (x y : α) (h : ideal R I) (hx : I x) (hy : I y) : I (R.add x y)
+  unfold ideal at h; exact h.2.1 x y hx hy
+@[auto] + ideal.neg (R : ring_ops α) (I : set α) (x : α) (h : ideal R I) (hx : I x) : I (R.neg x)
+  unfold ideal at h; exact h.2.2.1 x hx
+@[auto] + ideal.mul_left (R : ring_ops α) (I : set α) (r x : α) (h : ideal R I) (hx : I x) : I (R.mul r x)
+  unfold ideal at h; exact h.2.2.2 r x hx
+@[auto] + ideal.mul_right (R : ring_ops α) (I : set α) (x r : α) (laws : comm_ring R) (h : ideal R I) (hx : I x) : I (R.mul x r)
+  unfold comm_ring at laws
+  obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := laws
+  rw [mc x r]; exact ideal.mul_left R I r x h hx
+
+-> ideal.span (R : ring_ops α) (G : set α) : set α := fun x => ∀ I, ideal R I → G ⊆ I → I x
+
+@[auto] + ideal.span_contains (R : ring_ops α) (G : set α) : G ⊆ ideal.span R G
+  unfold subset; intro x hx; unfold ideal.span; intro I h sub; unfold subset at sub; exact sub x hx
+
+@[auto] + ideal.span_le (R : ring_ops α) (G I : set α) (h : ideal R I) (sub : G ⊆ I) : ideal.span R G ⊆ I
+  unfold subset; intro x hx; unfold ideal.span at hx; exact hx I h sub
+
++ ideal.span_is_ideal (R : ring_ops α) (G : set α) : ideal R (ideal.span R G)
+  unfold ideal
+  constructor
+  · unfold ideal.span; intro I h sub; exact ideal.zero R I h
+  · constructor
+    · intro x y hx hy; unfold ideal.span at hx hy ⊢
+      intro I h sub; exact ideal.add R I x y h (hx I h sub) (hy I h sub)
+    · constructor
+      · intro x hx; unfold ideal.span at hx ⊢
+        intro I h sub; exact ideal.neg R I x h (hx I h sub)
+      · intro r x hx; unfold ideal.span at hx ⊢
+        intro I h sub; exact ideal.mul_left R I r x h (hx I h sub)
+
+-- Reassemble x from x-y and y in the additive group of the ring.
++ comm_ring.sub_add (R : ring_ops α) (laws : comm_ring R) (x y : α) :
+    R.add (R.add x (R.neg y)) y = x
+  unfold comm_ring at laws; obtain ⟨assoc,comm,zero,inverse,rest⟩ := laws
+  rw [assoc x (R.neg y) y,inverse y,comm x R.zero,zero x]
+
+-> ring_hom (R : ring_ops α) (S : ring_ops β) (f : α → β) : Prop :=
+  f R.zero = S.zero ∧ f R.one = S.one ∧ (∀ x y, f (R.add x y) = S.add (f x) (f y)) ∧
+  (∀ x, f (R.neg x) = S.neg (f x)) ∧ ∀ x y, f (R.mul x y) = S.mul (f x) (f y)
+
++ ring_hom.comp (R : ring_ops α) (S : ring_ops β) (T : ring_ops γ) (f : α → β) (g : β → γ)
+    (hf : ring_hom R S f) (hg : ring_hom S T g) : ring_hom R T (fun x => g (f x))
+  unfold ring_hom at hf hg ⊢
+  obtain ⟨z,o,a,n,m⟩ := hf; obtain ⟨zz,oo,aa,nn,mm⟩ := hg
+  exact ⟨by rw [z,zz],by rw [o,oo],by intro x y; rw [a,aa],by intro x; rw [n,nn],by intro x y; rw [m,mm]⟩
+
+-> ideal.comap (f : α → β) (J : set β) : set α := fun x => J (f x)
+-> ideal.image (f : α → β) (I : set α) : set β := fun y => ∃ x ∈ I, f x = y
+-> ring_hom.kernel (S : ring_ops β) (f : α → β) : set α := fun x => f x = S.zero
+
++ ideal.comap_ideal (R : ring_ops α) (S : ring_ops β) (f : α → β) (J : set β) (hom : ring_hom R S f) (h : ideal S J) :
+    ideal R (ideal.comap f J)
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  unfold ideal ideal.comap
+  constructor
+  · rw [zero]; exact ideal.zero S J h
+  · constructor
+    · intro x y hx hy; rw [add x y]; exact ideal.add S J (f x) (f y) h hx hy
+    · constructor
+      · intro x hx; rw [neg x]; exact ideal.neg S J (f x) h hx
+      · intro r x hx; rw [mul r x]; exact ideal.mul_left S J (f r) (f x) h hx
+
++ ideal.image_ideal (R : ring_ops α) (S : ring_ops β) (f : α → β) (I : set α) (hom : ring_hom R S f)
+    (onto : ∀ y, ∃ x, f x = y) (h : ideal R I) : ideal S (ideal.image f I)
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  unfold ideal ideal.image
+  constructor
+  · exact ⟨R.zero,ideal.zero R I h,zero⟩
+  · constructor
+    · intro a b ha hb; obtain ⟨x,hx,fx⟩ := ha; obtain ⟨y,hy,fy⟩ := hb
+      exact ⟨R.add x y,ideal.add R I x y h hx hy,by rw [add x y,fx,fy]⟩
+    · constructor
+      · intro a ha; obtain ⟨x,hx,fx⟩ := ha
+        exact ⟨R.neg x,ideal.neg R I x h hx,by rw [neg x,fx]⟩
+      · intro b a ha; obtain ⟨x,hx,fx⟩ := ha; obtain ⟨r,fr⟩ := onto b
+        exact ⟨R.mul r x,ideal.mul_left R I r x h hx,by rw [mul r x,fr,fx]⟩
+
++ ideal.comap_image (R : ring_ops α) (S : ring_ops β) (f : α → β) (I : set α) (hr : comm_ring R) (hs : comm_ring S)
+    (hom : ring_hom R S f) (h : ideal R I) (ker : ring_hom.kernel S f ⊆ I) : ideal.comap f (ideal.image f I) = I
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  unfold comm_ring at hs; obtain ⟨aa,ac,az,an,rest⟩ := hs
+  unfold subset ring_hom.kernel at ker
+  funext x; unfold ideal.comap ideal.image
+  constructor
+  · intro hit; obtain ⟨y,hy,eq⟩ := hit
+    have same : f (R.add x (R.neg y)) = S.zero := by rw [add x (R.neg y),neg y,eq,ac (f x) (S.neg (f x)),an (f x)]
+    have hx := ideal.add R I (R.add x (R.neg y)) y h (ker (R.add x (R.neg y)) same) hy
+    rw [comm_ring.sub_add R hr x y] at hx; exact hx
+  · intro hx; exact ⟨x,hx,rfl⟩
+
++ ideal.image_comap (f : α → β) (J : set β) (onto : ∀ y, ∃ x, f x = y) : ideal.image f (ideal.comap f J) = J
+  funext y; unfold ideal.image ideal.comap
+  constructor
+  · intro h; obtain ⟨x,hx,eq⟩ := h; rw [← eq]; exact hx
+  · intro hy; obtain ⟨x,eq⟩ := onto y
+    exact ⟨x,by rw [eq]; exact hy,eq⟩
+
++ comm_ring.mul_zero (R : ring_ops α) (laws : comm_ring R) (x : α) : R.mul x R.zero = R.zero
+  unfold comm_ring at laws; obtain ⟨assoc,comm,zero,inv,ma,mc,mo,dist⟩ := laws
+  have twice := dist x R.zero R.zero; rw [zero R.zero] at twice
+  have eq : R.add (R.neg (R.mul x R.zero)) (R.add (R.mul x R.zero) (R.mul x R.zero)) = R.zero := by rw [← twice,inv (R.mul x R.zero)]
+  rw [← assoc,inv (R.mul x R.zero),zero (R.mul x R.zero)] at eq; exact eq
+
+-> ring_ops.rat : ring_ops ℚ := ring_ops.mk 0 1 (fun x y => x+y) (fun x => -x) (fun x y => x*y)
+@[auto] + comm_ring.rat : comm_ring ring_ops.rat
+  unfold comm_ring ring_ops.rat
+  exact ⟨by intro x y z; ring,by intro x y; ring,by intro x; ring,by intro x; ring,by intro x y z; ring,by intro x y; ring,by intro x; ring,by intro x y z; ring⟩
+
+-- Evaluate a finite linear combination with one weight and generator per index.
+-> ideal.combination (R : ring_ops α) (weight gen : β → α) : list β → α
+  | [] => R.zero
+  | i :: tail => R.add (R.mul (weight i) (gen i)) (ideal.combination R weight gen tail)
+
++ ideal.combination_mem (R : ring_ops α) (I : set α) (h : ideal R I) (w g : β → α) (ids : list β) :
+    (∀ i ∈ ids, I (g i)) → I (ideal.combination R w g ids)
+  induction ids with empty i tail ih members
+  · exact ideal.zero R I h
+  · have first := members i (by simp)
+    have rest := ih (by intro j hj; exact members j (by simp [hj]))
+    exact ideal.add R I (R.mul (w i) (g i)) (ideal.combination R w g tail) h (ideal.mul_left R I (w i) (g i) h first) rest
+
++ ring_hom.of_ops (R : ring_ops α) (S : ring_ops β) (f : α → β) (hr : comm_ring R) (hs : comm_ring S)
+    (zero : f R.zero = S.zero) (one : f R.one = S.one) (add : ∀ x y, f (R.add x y) = S.add (f x) (f y))
+    (mul : ∀ x y, f (R.mul x y) = S.mul (f x) (f y)) : ring_hom R S f
+  unfold comm_ring at hr hs
+  obtain ⟨ra,rc,rz,ri,rest⟩ := hr; obtain ⟨sa,sc,sz,si,rest2⟩ := hs
+  have neg : ∀ x, f (R.neg x) = S.neg (f x)
+    intro x
+    have cancel := add (R.neg x) x; rw [ri x,zero] at cancel
+    calc
+      f (R.neg x) = S.add (f (R.neg x)) S.zero := by rw [sc,sz]
+      _ = S.add (f (R.neg x)) (S.add (f x) (S.neg (f x))) := by rw [sc (f x) (S.neg (f x)),si]
+      _ = S.neg (f x) := by rw [← sa,← cancel,sz]
+  unfold ring_hom; exact ⟨zero,one,add,neg,mul⟩
+
++ comm_ring.add_shuffle (R : ring_ops α) (laws : comm_ring R) (a b c d : α) :
+    R.add (R.add a b) (R.add c d) = R.add (R.add a c) (R.add b d)
+  unfold comm_ring at laws; obtain ⟨assoc,comm,rest⟩ := laws
+  rw [assoc a b (R.add c d),← assoc b c d,comm b c,assoc c b d,← assoc a c (R.add b d)]
+
++ comm_ring.add_mul (R : ring_ops α) (laws : comm_ring R) (x y z : α) :
+    R.mul (R.add x y) z = R.add (R.mul x z) (R.mul y z)
+  unfold comm_ring at laws; obtain ⟨aa,ac,az,an,ma,comm,mo,dist⟩ := laws
+  rw [comm (R.add x y) z,dist z x y,comm z x,comm z y]

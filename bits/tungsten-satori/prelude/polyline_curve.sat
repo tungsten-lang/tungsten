@@ -1,0 +1,49 @@
+-- One real function agreeing with every finite prefix that covers the query.
+import choice
+import polyline
+
+-> polyline.curve (t m : ℕ → ℝ) (v x : ℝ) : ℝ :=
+  polyline t m v (choice (fun n => x ≤ t n)) x
+
++ polyline.agree (t m : ℕ → ℝ) (v x : ℝ) (i j : ℕ) (ordered : ∀ k, t k ≤ t (k+1))
+    (hi : x ≤ t i) (hj : x ≤ t j) : polyline t m v i x = polyline t m v j x
+  by_cases le : i ≤ j
+  · exact (polyline.stable t m v x i j le hi (by intro k hk; exact ordered k)).symm
+  · exact polyline.stable t m v x j i (by omega) hj (by intro k hk; exact ordered k)
+
+@[auto] + polyline.curve_eq (t m : ℕ → ℝ) (v x : ℝ) (n : ℕ) (ordered : ∀ i, t i ≤ t (i+1))
+    (covered : x ≤ t n) : polyline.curve t m v x = polyline t m v n x
+  unfold polyline.curve
+  apply polyline.agree t m v x (choice (fun k => x ≤ t k)) n ordered
+  · exact choice.spec (fun k => x ≤ t k) ⟨n, covered⟩
+  · exact covered
+
+@[auto] + polyline.curve_at_knot (t m h : ℕ → ℝ) (n : ℕ) (ordered : ∀ i, t i ≤ t (i+1))
+    (step : ∀ i < n, h (i+1)-h i = m i*(t (i+1)-t i)) : polyline.curve t m (h 0) (t n) = h n
+  rw [polyline.curve_eq t m (h 0) (t n) n ordered (by linarith)]
+  exact polyline.at_knot t m h n (by intro i hi; exact ordered i) step
+
++ polyline.curve_increment_le (t m : ℕ → ℝ) (v a b M : ℝ) (ordered : ∀ i, t i ≤ t (i+1))
+    (start : t 0 ≤ a) (ab : a ≤ b) (cover : ∃ n, b ≤ t n)
+    (bound : ∀ i x, a < x → x < b → t i < x → x < t (i+1) → m i ≤ M) :
+    polyline.curve t m v b-polyline.curve t m v a ≤ M*(b-a)
+  obtain ⟨n, hn⟩ := cover
+  rw [polyline.curve_eq t m v b n ordered hn, polyline.curve_eq t m v a n ordered (by linarith)]
+  exact polyline.increment_le t m v n a b M (by intro i hi; exact ordered i) start ab hn (by intro i hi; exact bound i)
+
+@[auto] + polyline.curve_on_piece (t m : ℕ → ℝ) (v : ℝ) (i : ℕ) (x y : ℝ) (ordered : ∀ k, t k ≤ t (k+1))
+    (lo : t i ≤ x) (xy : x ≤ y) (up : y ≤ t (i+1)) : polyline.curve t m v y-polyline.curve t m v x = m i*(y-x)
+  rw [polyline.curve_eq t m v y (i+1) ordered up, polyline.curve_eq t m v x (i+1) ordered (by linarith)]
+  exact polyline.on_piece t m v (i+1) i (by intro k hk; exact ordered k) (by omega) x y lo xy up
+
++ polyline.curve_mono (t m : ℕ → ℝ) (v a b : ℝ) (ordered : ∀ i, t i ≤ t (i+1))
+    (start : t 0 ≤ a) (ab : a ≤ b) (cover : ∃ n, b ≤ t n) (nonneg : ∀ i, 0 ≤ m i) :
+    polyline.curve t m v a ≤ polyline.curve t m v b
+  obtain ⟨n, hn⟩ := cover
+  have inc := interval.increment_le_on_pieces (fun z => 0-polyline.curve t m v z) t n a b 0 start ab hn
+  have pieces : ∀ i < n, ∀ x y, a ≤ x → t i ≤ x → x < y → y ≤ t (i+1) → y ≤ b →
+      (0-polyline.curve t m v y)-(0-polyline.curve t m v x) ≤ 0*(y-x)
+    intro i hi x y ax tx xy yt yb
+    have step := polyline.curve_on_piece t m v i x y ordered tx (by linarith) yt
+    linarith [mul_nonneg.real (m i) (y-x) (nonneg i) (by linarith)]
+  linarith [inc pieces]

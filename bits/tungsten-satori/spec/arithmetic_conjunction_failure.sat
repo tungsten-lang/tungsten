@@ -1,0 +1,4 @@
++ strict (x b : ℚ) (h : x ≤ b) : 2*x ≤ 2*b ∧ x < b := by linarith
++ unsigned (a b c : ℤ) (h : a ≤ b) : a ≤ b ∧ c*a ≤ c*b := by nlinarith
++ unguarded (a b : ℕ) : a ≤ a ∧ a-b+b = a := by omega
++ possibly_zero (x : ℝ) : 0 ≤ |x| ∧ 0 < x^2 := by positivity

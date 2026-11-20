@@ -1,0 +1,49 @@
+import weak_derivative
+import exp_calculus
+import heat_interval
+import wave_interval
+
++ corner (k : ℝ) : interval.weak_deriv (fun x => |x|) (fun x => if x<0 then -1 else if 0<x then 1 else k) (-2) 3 2 3
+  have shape := interval.weak_deriv.abs (-2) 3 k (by decide) (by decide)
+  simpa using shape
+
++ moment (u v : ℝ → ℝ) (R c : ℝ) (weak : interval.weak_deriv u v 0 R 0 0) :
+    darboux.has_integral (fun x => exp (-c*x)*(v x-c*u x)) 0 R 0 := by auto
+
++ radial_smooth (u v : ℝ → ℝ) (R c : ℝ) (radius : 0 ≤ R) (profile : interval.c1 u v 0 R)
+    (ends : u 0=0 ∧ u R=0) : darboux.has_integral (fun y => exp (-c*y)*(v y-c*u y)) 0 R 0 := by auto
+
++ endpoint_test (u v p q : ℝ → ℝ) (l r : ℝ) (weak : interval.weak_deriv u v 0 2 l r) (test : interval.c1 p q 0 2)
+    (ends : p 0=0 ∧ p 2=0) : darboux.has_integral (fun x => v x*p x+u x*q x) 0 2 0 := by auto
+
++ joined (u v : ℝ → ℝ) (l m r : ℝ) (first : interval.weak_deriv u v 0 2 l m) (second : interval.weak_deriv u v 2 5 m r) :
+    interval.weak_deriv u v 0 5 l r := by auto
+
++ soft_flux (u j r : ℝ → ℝ → ℝ) (l h : ℝ → ℝ) (I : ℝ)
+    (balance : interval.weak_balance u j r (Icc 0 2) 0 1 l h) (flux : darboux.has_integral (fun t => h t-l t) 0 2 I) :
+    darboux.integral 0 1 (u 2)-darboux.integral 0 1 (u 0)=I := by auto
+
++ heat_flux (u q r : ℝ → ℝ → ℝ) (flow : heat_interval.solution u q r (Icc 0 2) (Icc 0 1)) :
+    interval.weak_balance u q r (Icc 0 2) 0 1 (fun t => q t 0) (fun t => q t 1)
+  apply interval.balance.weak
+  · decide
+  · exact heat_interval.solution.balance flow
+
++ wave_flux (c : ℝ) (v q vx qx : ℝ → ℝ → ℝ) (wave : wave_interval.solution c v q vx qx (Icc 0 2) (Icc 0 1)) :
+    interval.weak_balance (wave_interval.density v q) (wave_interval.flux c v q) (fun t x => c*(vx t x*q t x+v t x*qx t x)) (Icc 0 2) 0 1 (fun t => wave_interval.flux c v q t 0) (fun t => wave_interval.flux c v q t 1)
+  apply interval.balance.weak
+  · decide
+  · exact wave_interval.balance wave
+
++ endpoint_values (f g : ℝ → ℝ) (hi : darboux.has_integral f 0 1 2)
+    (inside : ∀ x, 0 < x → x < 1 → f x=g x) : darboux.has_integral g 0 1 2 := by exact darboux.congr_interior hi inside
+
++ mismatched_traces (u v : ℝ → ℝ) (left : interval.weak_deriv u v 0 2 0 3) (right : interval.weak_deriv u v 2 5 4 0) :
+    ¬ interval.weak_deriv u v 0 5 0 0
+  intro whole
+  have parts := darboux.adjacent (interval.weak_deriv.increment left) (interval.weak_deriv.increment right)
+  linarith [darboux.unique parts (interval.weak_deriv.increment whole)]
+
+#axioms corner
+#axioms moment
+#axioms soft_flux

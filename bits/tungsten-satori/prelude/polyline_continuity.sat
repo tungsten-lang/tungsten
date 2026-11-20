@@ -1,0 +1,25 @@
+-- At any point strictly below a knot the curve agrees locally with a finite sum.
+import polyline_curve
+import continuity
+
+@[auto] + polyline.continuous_at (t m : ℕ → ℝ) (v : ℝ) (n : ℕ) (x : ℝ) :
+    continuous_at (polyline t m v n) x
+  have terms : ∀ i < n, continuous_at (fun y => m i*(min y (t (i+1))-min y (t i))) x
+    intro i hi
+    auto
+  have total := continuous_at.sum_below (fun i y => m i*(min y (t (i+1))-min y (t i))) n x terms
+  unfold polyline
+  exact continuous_at.add (fun y => v) (fun y => ∑ i < n, m i*(min y (t (i+1))-min y (t i))) x (continuous_at.const v x) total
+
++ polyline.curve_continuous_at (t m : ℕ → ℝ) (v x : ℝ) (n : ℕ) (order : ∀ i, t i ≤ t (i+1))
+    (past : x < t n) : continuous_at (polyline.curve t m v) x
+  apply continuous_at.congr_near (polyline t m v n) (polyline.curve t m v) x (t n-x) (by linarith) (polyline.continuous_at t m v n x)
+  intro y near
+  exact polyline.curve_eq t m v y n order (by linarith [le_abs_self.real (y-x)])
+
+@[auto] + polyline.curve_continuous (t m : ℕ → ℝ) (v : ℝ) (order : ∀ i, t i ≤ t (i+1))
+    (cover : ∀ T, ∃ n, T ≤ t n) : continuous (polyline.curve t m v)
+  unfold continuous
+  intro x
+  obtain ⟨n, hn⟩ := cover (x+1)
+  exact polyline.curve_continuous_at t m v x n order (by linarith)

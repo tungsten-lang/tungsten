@@ -1,0 +1,203 @@
+-- Prime ideals and principal opens. Stacks Project, Section 10.17 (00DY).
+import ideal
+
+-> spectrum (R : ring_ops α) : set (set α) := fun P =>
+  ideal R P ∧ ¬ P R.one ∧ ∀ x y, P (R.mul x y) → P x ∨ P y
+-> spectrum.D (R : ring_ops α) (f : α) : set (set α) := fun P => P ∈ spectrum R ∧ ¬ P f
+-> spectrum.V (R : ring_ops α) (G : set α) : set (set α) := fun P => P ∈ spectrum R ∧ G ⊆ P
+
++ spectrum.mul_mem (R : ring_ops α) (P : set α) (x y : α) (laws : comm_ring R) (prime : P ∈ spectrum R) :
+    P (R.mul x y) ↔ P x ∨ P y
+  unfold spectrum at prime
+  constructor
+  · exact prime.2.2 x y
+  · intro h; obtain hx | hy := h
+    · exact ideal.mul_right R P x y laws prime.1 hx
+    · exact ideal.mul_left R P x y prime.1 hy
+
+@[auto] + spectrum.D_mul (R : ring_ops α) (x y : α) (laws : comm_ring R) :
+    spectrum.D R (R.mul x y) = set.inter (spectrum.D R x) (spectrum.D R y)
+  funext P; unfold set.inter spectrum.D
+  constructor
+  · intro h; have iff := spectrum.mul_mem R P x y laws h.1
+    exact ⟨⟨h.1,by intro hx; exact h.2 (iff.mpr (by left; exact hx))⟩,⟨h.1,by intro hy; exact h.2 (iff.mpr (by right; exact hy))⟩⟩
+  · intro h; obtain ⟨⟨prime,hx⟩,⟨prime2,hy⟩⟩ := h
+    exact ⟨prime,by intro bad; obtain a | b := (spectrum.mul_mem R P x y laws prime).mp bad; exact hx a; exact hy b⟩
+
+@[auto] + spectrum.D_one (R : ring_ops α) : spectrum.D R R.one = spectrum R
+  funext P; unfold spectrum.D
+  constructor
+  · intro h; exact h.1
+  · intro h; have prime := h; unfold spectrum at prime; exact ⟨h,prime.2.1⟩
+
+@[auto] + spectrum.D_zero (R : ring_ops α) : spectrum.D R R.zero = (fun P => False)
+  funext P; unfold spectrum.D
+  constructor
+  · intro h; obtain ⟨prime,missing⟩ := h; unfold spectrum at prime
+    exact missing (ideal.zero R P prime.1)
+  · intro h; exfalso; exact h
+
+@[auto] + spectrum.V_span (R : ring_ops α) (G : set α) : spectrum.V R (ideal.span R G) = spectrum.V R G
+  funext P; unfold spectrum.V
+  constructor
+  · intro h; constructor
+    · exact h.1
+    · have generators := ideal.span_contains R G
+      have contained := h.2
+      unfold subset at generators contained ⊢
+      intro x hx; exact contained x (generators x hx)
+  · intro h; have prime := h.1; unfold spectrum at prime
+    exact ⟨h.1,ideal.span_le R G P prime.1 h.2⟩
+
++ spectrum.cover_of_unit (R : ring_ops α) (G : set α) (unit : R.one ∈ ideal.span R G) (P : set α) (prime : P ∈ spectrum R) :
+    ∃ f ∈ G, P ∈ spectrum.D R f
+  by_contra missing
+  have sub : G ⊆ P
+    unfold subset; intro f hf; by_contra absent
+    exact missing ⟨f,hf,by unfold spectrum.D; exact ⟨prime,absent⟩⟩
+  unfold spectrum at prime; unfold ideal.span at unit
+  exact prime.2.1 (unit P prime.1 sub)
+
+@[auto] + spectrum.comap (R : ring_ops α) (S : ring_ops β) (f : α → β) (J : set β) (hom : ring_hom R S f)
+    (prime : J ∈ spectrum S) : ideal.comap f J ∈ spectrum R
+  unfold spectrum at prime ⊢
+  have lifted := ideal.comap_ideal R S f J hom prime.1
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  constructor
+  · exact lifted
+  · unfold ideal.comap; constructor
+    · rw [one]; exact prime.2.1
+    · intro x y h; rw [mul x y] at h; exact prime.2.2 (f x) (f y) h
+
++ spectrum.preimage_D (R : ring_ops α) (S : ring_ops β) (f : α → β) (x : α) (hom : ring_hom R S f) :
+    (fun J => J ∈ spectrum S ∧ ideal.comap f J ∈ spectrum.D R x) = spectrum.D S (f x)
+  funext J; unfold spectrum.D
+  constructor
+  · intro h; exact ⟨h.1,h.2.2⟩
+  · intro h; exact ⟨h.1,spectrum.comap R S f J hom h.1,h.2⟩
+
++ spectrum.comap_in_V_kernel (R : ring_ops α) (S : ring_ops β) (f : α → β) (J : set β)
+    (hom : ring_hom R S f) (prime : J ∈ spectrum S) : ideal.comap f J ∈ spectrum.V R (ring_hom.kernel S f)
+  unfold spectrum.V
+  constructor
+  · exact spectrum.comap R S f J hom prime
+  · unfold subset ring_hom.kernel ideal.comap; intro x eq
+    rw [eq]; unfold spectrum at prime; exact ideal.zero S J prime.1
+
++ spectrum.image_prime (R : ring_ops α) (S : ring_ops β) (f : α → β) (P : set α)
+    (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f) (onto : ∀ y, ∃ x, f x = y)
+    (point : P ∈ spectrum.V R (ring_hom.kernel S f)) : ideal.image f P ∈ spectrum S
+  unfold spectrum.V at point; obtain ⟨prime,ker⟩ := point
+  unfold spectrum at prime ⊢
+  have same := ideal.comap_image R S f P hr hs hom prime.1 ker
+  have reflects : ∀ x, ideal.image f P (f x) → P x
+    intro x h; rw [← same]; exact h
+  have lifted := ideal.image_ideal R S f P hom onto prime.1
+  unfold ring_hom at hom; obtain ⟨zero,one,add,neg,mul⟩ := hom
+  constructor
+  · exact lifted
+  · constructor
+    · intro bad; exact prime.2.1 (reflects R.one (by rw [one]; exact bad))
+    · intro a b bad; obtain ⟨x,fx⟩ := onto a; obtain ⟨y,fy⟩ := onto b
+      have prod := reflects (R.mul x y) (by rw [mul x y,fx,fy]; exact bad)
+      obtain hx | hy := prime.2.2 x y prod
+      · left; unfold ideal.image; exact ⟨x,hx,fx⟩
+      · right; unfold ideal.image; exact ⟨y,hy,fy⟩
+
+-- A surjective map identifies the target spectrum with V(kernel). preimage_D
+-- describes the same correspondence on each standard open (Stacks 00DY, Lemma 10.17.7).
++ spectrum.quotient (R : ring_ops α) (S : ring_ops β) (f : α → β) (P : set α)
+    (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f) (onto : ∀ y, ∃ x, f x = y) :
+    P ∈ spectrum.V R (ring_hom.kernel S f) ↔ ∃ J ∈ spectrum S, ideal.comap f J = P
+  constructor
+  · intro point
+    have image := spectrum.image_prime R S f P hr hs hom onto point
+    unfold spectrum.V at point; obtain ⟨prime,ker⟩ := point; unfold spectrum at prime
+    exact ⟨ideal.image f P,image,ideal.comap_image R S f P hr hs hom prime.1 ker⟩
+  · intro existsJ; obtain ⟨J,prime,eq⟩ := existsJ
+    rw [← eq]; exact spectrum.comap_in_V_kernel R S f J hom prime
+
+-> ring_ops.power (R : ring_ops α) (x : α) : ℕ → α
+  | 0 => R.one
+  | n+1 => R.mul x (ring_ops.power R x n)
+
+-> ring_ops.nilpotent (R : ring_ops α) (x : α) : Prop := ∃ n : ℕ, ring_ops.power R x n = R.zero
+
++ spectrum.of_power_mem (R : ring_ops α) (P : set α) (x : α) (prime : P ∈ spectrum R) (n : ℕ) :
+    P (ring_ops.power R x n) → P x
+  unfold spectrum at prime
+  induction n with h k ih h
+  · simp only [ring_ops.power] at h; exfalso; exact prime.2.1 h
+  · simp only [succ_eq_add_one.nat,ring_ops.power] at h
+    obtain hx | rest := prime.2.2 x (ring_ops.power R x k) h
+    · exact hx
+    · exact ih rest
+
+@[auto] + spectrum.nilpotent_mem (R : ring_ops α) (P : set α) (x : α) (prime : P ∈ spectrum R) (nil : ring_ops.nilpotent R x) : P x
+  unfold ring_ops.nilpotent at nil; obtain ⟨n,zero⟩ := nil
+  apply spectrum.of_power_mem R P x prime n
+  rw [zero]; unfold spectrum at prime; exact ideal.zero R P prime.1
+
+@[auto] + spectrum.D_power (R : ring_ops α) (x : α) (n : ℕ) (laws : comm_ring R) :
+    spectrum.D R (ring_ops.power R x (n+1)) = spectrum.D R x
+  funext P; unfold spectrum.D
+  constructor
+  · intro h; obtain ⟨prime,absent⟩ := h
+    constructor
+    · exact prime
+    · intro hx; apply absent; unfold spectrum at prime
+      exact ideal.mul_right R P x (ring_ops.power R x n) laws prime.1 hx
+  · intro h; exact ⟨h.1,by intro bad; exact h.2 (spectrum.of_power_mem R P x h.1 (n+1) bad)⟩
+
++ spectrum.bezout_cover (R : ring_ops α) (w g : β → α) (ids : list β)
+    (cert : ideal.combination R w g ids = R.one) (P : set α) (prime : P ∈ spectrum R) :
+    ∃ i ∈ ids, P ∈ spectrum.D R (g i)
+  by_contra missing
+  have all : ∀ i ∈ ids, P (g i)
+    intro i hi; by_contra absent
+    exact missing ⟨i,hi,by unfold spectrum.D; exact ⟨prime,absent⟩⟩
+  unfold spectrum at prime
+  have unit := ideal.combination_mem R P prime.1 w g ids all
+  rw [cert] at unit; exact prime.2.1 unit
+
+-- Over a field the unique prime is the zero ideal.
++ spectrum.field (R : ring_ops α) (laws : comm_ring R) (nontrivial : R.one ≠ R.zero)
+    (inverse : ∀ x, x ≠ R.zero → ∃ y, R.mul y x = R.one) (P : set α) :
+    P ∈ spectrum R ↔ P = (fun x => x = R.zero)
+  have mz := comm_ring.mul_zero R laws
+  unfold comm_ring at laws; obtain ⟨aa,ac,az,an,ma,mc,mo,dist⟩ := laws
+  constructor
+  · intro prime; unfold spectrum at prime; funext x
+    constructor
+    · intro hx; by_contra nz; obtain ⟨y,inv⟩ := inverse x nz
+      have one := ideal.mul_left R P y x prime.1 hx
+      rw [inv] at one; exact prime.2.1 one
+    · intro zero; rw [zero]; exact ideal.zero R P prime.1
+  · intro eq; rw [eq]; unfold spectrum ideal
+    have negzero : R.neg R.zero = R.zero
+      have h := an R.zero; rw [ac (R.neg R.zero) R.zero,az] at h; exact h
+    constructor
+    · exact ⟨by intro x y hx hy; rw [hx,hy,az],by intro x hx; rw [hx,negzero],by intro r x hx; rw [hx,mz]⟩
+    · constructor
+      · exact nontrivial
+      · intro x y product
+        by_cases zero : x = R.zero
+        · left; exact zero
+        · right; obtain ⟨z,inv⟩ := inverse x zero
+          have vanish : R.mul z (R.mul x y) = R.zero := by rw [product,mz]
+          rw [← ma,inv,mo] at vanish; exact vanish
+
+-- Bézout's identity turns two standard opens into a cover of the spectrum.
++ spectrum.D_union (R : ring_ops α) (x y r s : α) (cert : R.add (R.mul r x) (R.mul s y) = R.one) :
+    set.union (spectrum.D R x) (spectrum.D R y) = spectrum R
+  funext P; unfold set.union spectrum.D
+  constructor
+  · intro covered; obtain h | h := covered <;> exact h.1
+  · intro prime
+    by_cases hx : P x
+    · right; constructor
+      · exact prime
+      · intro hy; unfold spectrum at prime
+        have one := ideal.add R P (R.mul r x) (R.mul s y) prime.1 (ideal.mul_left R P r x prime.1 hx) (ideal.mul_left R P s y prime.1 hy)
+        rw [cert] at one; exact prime.2.1 one
+    · left; exact ⟨prime,hx⟩

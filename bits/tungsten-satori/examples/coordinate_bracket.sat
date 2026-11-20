@@ -1,0 +1,27 @@
+import derivation_real
+
+-- Lemma 4.1 at a real-valued point of a coordinate ring. T and Z are its
+-- coordinate partial derivatives there. The coefficient functions depend on z.
++ bracket_coefficients (R : ring_ops α) (f T Z : α → ℝ) (t b h a c : α) (k n : ℕ)
+    (hr : comm_ring R) (hom : ring_hom R ring_ops.real f) (dt : derivation_at R ring_ops.real f T)
+    (dz : derivation_at R ring_ops.real f Z) (radial : T t = 1) (level : Z t = 0)
+    (hb : T b = 0) (hh : T h = 0) (ha : T a = 0) (hc : T c = 0) :
+    let X := coordinate_field f T Z t k b h in let Y := coordinate_field f T Z t n a c in
+    let M := ring_ops.monomial R t in
+    X (M (n+1) a) - Y (M (k+1) b) = (f t)^k*(f t)^n*f t*(((n:ℝ)-(k:ℝ))*f b*f a + f h*Z a-f c*Z b) ∧
+    X (M n c) - Y (M k h) = (f t)^k*(f t)^n*((n:ℝ)*f b*f c+f h*Z c-(k:ℝ)*f a*f h-f c*Z h)
+  have X := coordinate_field.monomial R f T Z t b h
+  have Y := coordinate_field.monomial R f T Z t a c
+  constructor
+  · rw [X a k (n+1) hr hom dt dz radial level ha,Y b n (k+1) hr hom dt dz radial level hb,cast_succ.real n,cast_succ.real k,pow_succ.real (f t) n,pow_succ.real (f t) k]; ring
+  · rw [X c k n hr hom dt dz radial level hc,Y h n k hr hom dt dz radial level hh]; ring
+
++ divergence_at (R : ring_ops α) (f T Z : α → ℝ) (t g b h : α) (k : ℕ)
+    (hr : comm_ring R) (hom : ring_hom R ring_ops.real f) (dt : derivation_at R ring_ops.real f T)
+    (dz : derivation_at R ring_ops.real f Z) (radial : T t = 1) (level : Z t = 0) (coeff : T b = 0)
+    (density : ring_ops.monomial R t 5 g = R.one) :
+    (f t)^5*(T (R.mul g (ring_ops.monomial R t (k+1) b))+Z (R.mul g (ring_ops.monomial R t k h))) =
+      (f t)^k*(((k:ℝ)-4)*f b+Z h) := by auto
+
+#axioms bracket_coefficients
+#axioms divergence_at

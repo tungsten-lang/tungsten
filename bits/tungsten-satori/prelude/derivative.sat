@@ -1,0 +1,213 @@
+-- Differential calculus on subsets of the real line, including one-sided endpoints.
+import interval_slope
+import continuity
+
+-- A derivative is a continuous slope k with f y - f x = k y * (y - x) on S.
+-- Extend the secant by v at x and off S so k is continuous at x on the whole line.
+-> secant_slope (f : ℝ → ℝ) (S : set ℝ) (x v y : ℝ) : ℝ :=
+  if y ∈ S ∧ y ≠ x then (f y-f x)/(y-x) else v
+
++ has_deriv_within.factor (f : ℝ → ℝ) (S : set ℝ) (x v : ℝ) (hf : has_deriv_within f S x v) :
+    ∃ k : ℝ → ℝ, continuous_at k x ∧ k x = v ∧ ∀ y ∈ S, f y-f x = k y*(y-x)
+  have center : secant_slope f S x v x = v := by simp [secant_slope]
+  have slope : ∀ y ∈ S, f y-f x = secant_slope f S x v y*(y-x)
+    intro y hy
+    by_cases eq : y = x
+    · rw [eq]; ring
+    · have use_secant : y ∈ S ∧ y ≠ x := ⟨hy, eq⟩
+      simp [secant_slope, use_secant]
+      exact (mul_div_cancel.real (f y-f x) (y-x) (by linarith)).symm
+  use secant_slope f S x v
+  constructor
+  · unfold continuous_at
+    intro e he
+    unfold has_deriv_within at hf
+    obtain ⟨d, hd, near⟩ := hf (e/2) (by linarith)
+    use d
+    constructor
+    · exact hd
+    · intro y close
+      rw [center]
+      by_cases inside : y ∈ S ∧ y ≠ x
+      · have pos : 0 < |y-x| := abs_pos.real (y-x) (by linarith [inside.2])
+        have decomp : (secant_slope f S x v y-v)*(y-x) = f y-f x-v*(y-x) := by linear_combination -(slope y inside.1)
+        have bound := near y inside.1 close
+        rw [← decomp, abs_mul.real] at bound
+        by_contra bad
+        have order := mul_le_mul_of_nonneg_right.real e (|secant_slope f S x v y-v|) (|y-x|) (by linarith) (by linarith)
+        nlinarith
+      · simp [secant_slope, inside]
+        linarith [abs_of_nonneg.real (v-v) (by linarith)]
+  · exact ⟨center, slope⟩
+
++ has_deriv_within.of_factor (f k : ℝ → ℝ) (S : set ℝ) (x v : ℝ) (hk : continuous_at k x)
+    (center : k x = v) (slope : ∀ y ∈ S, f y-f x = k y*(y-x)) : has_deriv_within f S x v
+  unfold continuous_at at hk
+  unfold has_deriv_within
+  intro e he
+  obtain ⟨d, hd, near⟩ := hk e he
+  use d
+  constructor
+  · exact hd
+  · intro y hy close
+    have decomp : f y-f x-v*(y-x) = (k y-k x)*(y-x) := by rw [slope y hy, center]; ring
+    rw [decomp, abs_mul.real]
+    exact mul_le_mul_of_nonneg_right.real (|k y-k x|) e (|y-x|) (by linarith [near y close]) (abs_nonneg.real (y-x))
+
+@[auto] + has_deriv_within.const (c : ℝ) (S : set ℝ) (x : ℝ) : has_deriv_within (fun y => c) S x 0
+  apply has_deriv_within.of_factor (fun y => c) (fun y => 0) S x 0 (by auto) (by rfl)
+  intro y hy; ring
+
+@[auto] + has_deriv_within.id (S : set ℝ) (x : ℝ) : has_deriv_within (fun y => y) S x 1
+  apply has_deriv_within.of_factor (fun y => y) (fun y => 1) S x 1 (by auto) (by rfl)
+  intro y hy; ring
+
+@[auto] + has_deriv_within.add (f g : ℝ → ℝ) (S : set ℝ) (x u v : ℝ)
+    (hf : has_deriv_within f S x u) (hg : has_deriv_within g S x v) :
+    has_deriv_within (fun y => f y+g y) S x (u+v)
+  obtain ⟨p, hp, px, fp⟩ := has_deriv_within.factor f S x u hf
+  obtain ⟨q, hq, qx, gq⟩ := has_deriv_within.factor g S x v hg
+  apply has_deriv_within.of_factor (fun y => f y+g y) (fun y => p y+q y) S x (u+v) (by auto) (by rw [px, qx])
+  intro y hy; linarith [fp y hy, gq y hy]
+
+@[auto] + has_deriv_within.mul (f g : ℝ → ℝ) (S : set ℝ) (x u v : ℝ)
+    (hf : has_deriv_within f S x u) (hg : has_deriv_within g S x v) :
+    has_deriv_within (fun y => f y*g y) S x (u*g x+f x*v)
+  obtain ⟨p, hp, px, fp⟩ := has_deriv_within.factor f S x u hf
+  obtain ⟨q, hq, qx, gq⟩ := has_deriv_within.factor g S x v hg
+  have cont : continuous_at (fun y => f x+(y-x)*p y) x := by auto
+  apply has_deriv_within.of_factor (fun y => f y*g y) (fun y => p y*g x+(f x+(y-x)*p y)*q y) S x (u*g x+f x*v)
+  · auto
+  · rw [px, qx]; ring
+  · intro y hy
+    have fy : f y = f x+(y-x)*p y := by linarith [fp y hy]
+    have gy : g y = g x+(y-x)*q y := by linarith [gq y hy]
+    rw [fy, gy]; ring
+
+@[auto] + has_deriv_within.scale (c : ℝ) (f : ℝ → ℝ) (S : set ℝ) (x v : ℝ) (hf : has_deriv_within f S x v) :
+    has_deriv_within (fun y => c*f y) S x (c*v)
+  obtain ⟨p, hp, px, fp⟩ := has_deriv_within.factor f S x v hf
+  apply has_deriv_within.of_factor (fun y => c*f y) (fun y => c*p y) S x (c*v) (by auto) (by rw [px])
+  intro y hy; linear_combination c*(fp y hy)
+
+@[auto] + has_deriv_within.sq (f : ℝ → ℝ) (S : set ℝ) (x v : ℝ) (hf : has_deriv_within f S x v) :
+    has_deriv_within (fun y => (f y)^2) S x (2*f x*v)
+  have prod := has_deriv_within.mul f f S x v v hf hf
+  have values : (fun y => f y*f y) = (fun y => (f y)^2) := by funext y; ring
+  rw [values] at prod
+  auto
+
++ has_deriv_within.sum_below (f : ℕ → ℝ → ℝ) (v : ℕ → ℝ) (S : set ℝ) (x : ℝ) (n : ℕ)
+    (hf : ∀ i < n, has_deriv_within (f i) S x (v i)) :
+    has_deriv_within (fun y => ∑ i < n, f i y) S x (∑ i < n, v i)
+  induction n with h k ih h
+  · exact has_deriv_within.const 0 S x
+  · rw [succ_eq_add_one.nat]
+    have prev := ih (by intro i hi; exact h i (by omega))
+    exact has_deriv_within.add (fun y => ∑ i < k, f i y) (f k) S x (∑ i < k, v i) (v k) prev (h k (by omega))
+
++ interval.nonincreasing_of_deriv_nonpos (f v : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b)
+    (deriv : ∀ t, a ≤ t → t ≤ b → has_deriv_within f (fun z => a ≤ z ∧ z ≤ b) t (v t))
+    (sign : ∀ t, a ≤ t → t ≤ b → v t ≤ 0) : f b ≤ f a
+  linarith [interval.increment_le_of_deriv_le f v a b 0 ab deriv sign]
+
++ has_deriv_within.restrict (F : ℝ → ℝ) (S T : set ℝ) (x v : ℝ)
+    (hf : has_deriv_within F S x v) (sub : ∀ y ∈ T, y ∈ S) : has_deriv_within F T x v
+  unfold has_deriv_within at hf ⊢
+  intro e he
+  obtain ⟨d,pos,near⟩ := hf e he
+  exact ⟨d,pos,by intro y hy close; exact near y (sub y hy) close⟩
+
+@[auto] + has_deriv_within.neg (F : ℝ → ℝ) (S : set ℝ) (x v : ℝ) (hf : has_deriv_within F S x v) :
+    has_deriv_within (fun t => -F t) S x (-v)
+  have scaled := has_deriv_within.scale (-1) F S x v hf
+  have eq : (fun t => (-1)*F t) = (fun t => -F t) := by ring
+  have sign : (-1)*v = -v := by ring
+  rw [eq,sign] at scaled
+  exact scaled
+
++ interval.increment_ge_of_deriv_ge (F f : ℝ → ℝ) (a b m : ℝ) (ab : a ≤ b)
+    (deriv : ∀ t, a ≤ t → t ≤ b → has_deriv_within F (fun z => a ≤ z ∧ z ≤ b) t (f t))
+    (low : ∀ t, a ≤ t → t ≤ b → m ≤ f t) : m*(b-a) ≤ F b-F a
+  have neg : ∀ t, a ≤ t → t ≤ b → has_deriv_within (fun z => -F z) (fun z => a ≤ z ∧ z ≤ b) t (-f t)
+    intro t atle tb
+    exact has_deriv_within.neg F (fun z => a ≤ z ∧ z ≤ b) t (f t) (deriv t atle tb)
+  linarith [interval.increment_le_of_deriv_le (fun z => -F z) (fun z => -f z) a b (-m) ab neg (by intro t atle tb; linarith [low t atle tb])]
+
++ has_deriv_within.comp (F g : ℝ → ℝ) (S T : set ℝ) (x u v : ℝ)
+    (outer : has_deriv_within F T (g x) u) (inner : has_deriv_within g S x v)
+    (maps : ∀ y ∈ S, g y ∈ T) : has_deriv_within (fun y => F (g y)) S x (u*v)
+  obtain ⟨p,hp,px,gp⟩ := has_deriv_within.factor g S x v inner
+  obtain ⟨q,hq,qx,Fq⟩ := has_deriv_within.factor F T (g x) u outer
+  have extension : continuous_at (fun y => g x+p y*(y-x)) x := by auto
+  have center : g x+p x*(x-x) = g x := by ring
+  have at_center : continuous_at q (g x+p x*(x-x)) := by rw [center]; exact hq
+  have composed := continuous_at.comp q (fun y => g x+p y*(y-x)) x at_center extension
+  apply has_deriv_within.of_factor (fun y => F (g y)) (fun y => q (g x+p y*(y-x))*p y) S x (u*v)
+  · exact continuous_at.mul (fun y => q (g x+p y*(y-x))) p x composed hp
+  · rw [center,qx,px]
+  · intro y hy
+    have agree : g x+p y*(y-x) = g y := by linarith [gp y hy]
+    rw [agree,Fq (g y) (maps y hy),gp y hy]; ring
+
++ has_deriv.continuous_at (f : ℝ → ℝ) (x v : ℝ) (deriv : has_deriv_within f (fun y => True) x v) : continuous_at f x
+  obtain ⟨p,hp,px,fp⟩ := has_deriv_within.factor f (fun y => True) x v deriv
+  apply continuous_at.congr (fun y => f x+p y*(y-x)) f x (by auto)
+  intro y; linarith [fp y (by trivial)]
+
++ has_deriv_within.continuous_within (f : ℝ → ℝ) (S : set ℝ) (x v : ℝ) (diff : has_deriv_within f S x v) :
+    continuous_within_at f S x
+  obtain ⟨k,hk,center,factor⟩ := has_deriv_within.factor f S x v diff
+  have cont : continuous_at (fun y => (y-x)*k y) x := by auto
+  unfold continuous_at at cont; unfold continuous_within_at
+  intro e he; obtain ⟨d,pos,near⟩ := cont e he
+  use d; constructor
+  · exact pos
+  · intro y hy close
+    have eq : f y-f x = (y-x)*k y-(x-x)*k x := by linear_combination factor y hy
+    rw [eq]; exact near y close
+
+@[auto] + has_deriv_within.add_const (f : ℝ → ℝ) (S : set ℝ) (x v k : ℝ) (hf : has_deriv_within f S x v) :
+    has_deriv_within (fun y => f y+k) S x v
+  simpa using has_deriv_within.add f (fun y => k) S x v 0 hf (has_deriv_within.const k S x)
+
+@[auto] + has_deriv_within.const_add (f : ℝ → ℝ) (S : set ℝ) (x v k : ℝ) (hf : has_deriv_within f S x v) :
+    has_deriv_within (fun y => k+f y) S x v
+  simpa using has_deriv_within.add (fun y => k) f S x 0 v (has_deriv_within.const k S x) hf
+
+@[auto] + has_deriv_within.scale_id (k : ℝ) (S : set ℝ) (x : ℝ) : has_deriv_within (fun y => k*y) S x k
+  simpa using has_deriv_within.scale k (fun y => y) S x 1 (has_deriv_within.id S x)
+
++ has_deriv_within.pow_succ_id (n : ℕ) (S : set ℝ) (x : ℝ) :
+    has_deriv_within (fun y => y^(n+1)) S x (((n:ℝ)+1)*x^n)
+  induction n with k ih
+  · simpa [pow_zero.real,pow_one.real,cast_zero.real] using has_deriv_within.id S x
+  · rw [succ_eq_add_one.nat,cast_succ.real]
+    have h := has_deriv_within.mul (fun y => y^(k+1)) (fun y => y) S x (((k:ℝ)+1)*x^k) 1 ih (has_deriv_within.id S x)
+    have fn_eq : (fun (y : ℝ) => y^(k+1)*y) = (fun y => y^((k+1)+1)) := by funext y; rw [pow_succ.real y (k+1)]
+    have val : ((k:ℝ)+1)*x^k*x+x^(k+1)*1 = ((k:ℝ)+1+1)*x^(k+1) := by rw [pow_succ.real x k]; ring
+    rw [fn_eq,val] at h; exact h
+
+@[auto] + has_deriv_within.sub (f g : ℝ → ℝ) (S : set ℝ) (x u v : ℝ)
+    (hf : has_deriv_within f S x u) (hg : has_deriv_within g S x v) :
+    has_deriv_within (fun y => f y-g y) S x (u-v)
+  obtain ⟨p,hp,px,fp⟩ := has_deriv_within.factor f S x u hf
+  obtain ⟨q,hq,qx,gq⟩ := has_deriv_within.factor g S x v hg
+  apply has_deriv_within.of_factor (fun y => f y-g y) (fun y => p y-q y) S x (u-v) (by auto) (by rw [px,qx])
+  intro y hy; linarith [fp y hy,gq y hy]
+
+-> interval.deriv (F v : ℝ → ℝ) (a b : ℝ) : Prop :=
+  ∀ t, a ≤ t → t ≤ b → has_deriv_within F (fun z => a ≤ z ∧ z ≤ b) t (v t)
+
++ interval.deriv.restrict (F v : ℝ → ℝ) (a b l r : ℝ) (diff : interval.deriv F v a b)
+    (left : a ≤ l) (right : r ≤ b) : interval.deriv F v l r
+  unfold interval.deriv at diff ⊢; intro t lo hi
+  exact has_deriv_within.restrict F (fun z => a ≤ z ∧ z ≤ b) (fun z => l ≤ z ∧ z ≤ r) t (v t) (diff t (by linarith) (by linarith)) (by intro y hy; exact ⟨by linarith [hy.1],by linarith [hy.2]⟩)
+
+@[auto] + interval.deriv.quadratic (q l k a b : ℝ) :
+    interval.deriv (fun t => q*t^2+l*t+k) (fun t => q*(2*t)+l) a b
+  unfold interval.deriv; intro t lo hi
+  set S : set ℝ := fun z => a ≤ z ∧ z ≤ b
+  have quad := has_deriv_within.scale q (fun z => z^2) S t (2*t) (has_deriv_within.square S t)
+  have sum := has_deriv_within.add (fun z => q*z^2) (fun z => l*z) S t (q*(2*t)) l quad (has_deriv_within.scale_id l S t)
+  exact has_deriv_within.add_const (fun z => q*z^2+l*z) S t (q*(2*t)+l) k sum

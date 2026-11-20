@@ -1,0 +1,8 @@
++ missing_lower (i : ℤ) (h : i < 3) : i=0 ∨ i=1 ∨ i=2 := by interval_cases i <;> decide
++ missing_upper (i : ℕ) (h : 2 ≤ i) : 2 = i := by interval_cases i <;> decide
++ dense (x : ℚ) (h : 0 ≤ x ∧ x ≤ 1) : x=0 ∨ x=1 := by interval_cases x <;> decide
++ wide (i : ℤ) (h : -40 ≤ i ∧ i ≤ 40) : i=0 := by interval_cases i <;> decide
++ forgot_last (i : ℕ) (h : i ≤ 2) : i=0 ∨ i=1 := by auto
++ unsupported_middle (P : ℤ → Prop) (i : ℤ) (h : -1 ≤ i ∧ i ≤ 1) (a : P (-1)) (b : P 1) : P i := by auto
++ branches (n : ℕ) (P : ℕ → Prop) (h : n < 3 ∨ P n) : n=0 ∨ n=1 ∨ n=2 := by auto
++ open_endpoint (n : ℕ) (h : n ≤ 3) : n < 3 := by interval_cases n <;> decide

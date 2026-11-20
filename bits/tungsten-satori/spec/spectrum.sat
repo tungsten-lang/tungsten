@@ -1,0 +1,27 @@
+import spectrum_int
+
++ product_open (R : ring_ops α) (f g : α) (ring : comm_ring R) :
+    spectrum.D R (R.mul f g) = set.inter (spectrum.D R f) (spectrum.D R g) := by auto
+
++ integer_cover : set.union (spectrum.D ring_ops.int 2) (spectrum.D ring_ops.int 3) = spectrum ring_ops.int
+  exact spectrum.D_union ring_ops.int 2 3 (-1) 1 (by decide)
+
++ positive_power (R : ring_ops α) (a : α) (n : ℕ) (ring : comm_ring R) :
+    spectrum.D R (ring_ops.power R a (n+1)) = spectrum.D R a := by auto
+
++ two_avoids_three : ideal.multiples 2 ∈ spectrum.D ring_ops.int 3
+  exact (spectrum.int_D 2 3 (by decide)).mpr (by decide)
+
++ two_contains_six : ideal.multiples 2 ∉ spectrum.D ring_ops.int 6
+  intro hit; have nz := (spectrum.int_D 2 6 (by decide)).mp hit; exact nz (by decide)
+
++ pullback_open (R : ring_ops α) (S : ring_ops β) (f : α → β) (a : α) (hom : ring_hom R S f) :
+    (fun P => P ∈ spectrum S ∧ ideal.comap f P ∈ spectrum.D R a) = spectrum.D S (f a)
+  exact spectrum.preimage_D R S f a hom
+
++ generated_closed (R : ring_ops α) (G : set α) : spectrum.V R (ideal.span R G) = spectrum.V R G := by auto
+
++ quotient_point (R : ring_ops α) (S : ring_ops β) (f : α → β) (P : set α)
+    (hr : comm_ring R) (hs : comm_ring S) (hom : ring_hom R S f) (onto : ∀ y, ∃ x, f x = y)
+    (point : P ∈ spectrum.V R (ring_hom.kernel S f)) : ∃ J ∈ spectrum S, ideal.comap f J = P
+  exact (spectrum.quotient R S f P hr hs hom onto).mp point

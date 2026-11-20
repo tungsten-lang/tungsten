@@ -1,0 +1,93 @@
+-- The alternating pairing of two s-bit blocks, in the order (position, momentum).
+import walsh_character
+import orthogonal_bound
+
+-> symplectic.word (s u i : ℕ) : ℕ := if i < s then binary.bit u (i+s) else binary.bit u (i-s)
+-> symplectic.pairing (s u v : ℕ) : ℕ :=
+  (∑ i < s, binary.bit u i*binary.bit v (i+s)+binary.bit u (i+s)*binary.bit v i)%2
+-> symplectic.character (s u v : ℕ) : ℝ := if symplectic.pairing s u v = 0 then 1 else -1
+
++ symplectic.word_digit (s u i : ℕ) : symplectic.word s u i < 2
+  unfold symplectic.word; by_cases low : i < s <;> simp [low,binary.bit] <;> apply mod_lt.nat <;> decide
+
++ symplectic.word_distinct (s u v : ℕ) (hu : u < 2^(s+s)) (hv : v < 2^(s+s))
+    (same : ∀ i < s+s, symplectic.word s u i = symplectic.word s v i) : u = v
+  rw [← binary.reconstruct (s+s) u hu,← binary.reconstruct (s+s) v hv]
+  apply binary.pack_congr; intro i hi
+  by_cases low : i < s
+  · have eq := same (i+s) (by omega)
+    have high : ¬ (i+s < s) := by omega
+    have idx : i+s-s = i := by omega
+    simpa [symplectic.word,high,idx] using eq
+  · have back := sub_add_cancel.nat i s (by omega)
+    have small : i-s < s := by omega
+    have eq := same (i-s) (by omega)
+    simpa [symplectic.word,small,back] using eq
+
++ symplectic.character_eq (s u v : ℕ) :
+    symplectic.character s u v = walsh.character_matrix (s+s) (symplectic.word s) u v
+  have lo : ∀ i < s, symplectic.word s u i*binary.bit v i = binary.bit u (i+s)*binary.bit v i := by intro i hi; simp [symplectic.word,hi,binary.bit]
+  have hi : ∀ i < s, symplectic.word s u (s+i)*binary.bit v (s+i) = binary.bit u i*binary.bit v (i+s)
+    intro i hi
+    have high : ¬ (s+i < s) := by omega
+    have idx : s+i-s = i := by omega
+    simp [symplectic.word,high,idx,binary.bit]; rw [add_comm.nat s i]
+  unfold symplectic.character symplectic.pairing walsh.character_matrix walsh.phase
+  rw [sum_below.split.nat,sum_below.congr lo,sum_below.congr hi,sum_add.nat,add_comm.nat (∑ i < s, binary.bit u i*binary.bit v (i+s))]
+
++ symplectic.size (s : ℕ) : 4^s = 2^(s+s)
+  induction s with s ih
+  · decide
+  · rw [succ_eq_add_one.nat,pow_succ.nat 4 s,ih]
+    have e : s+1+(s+1) = (s+s+1)+1 := by ring
+    rw [e,pow_succ.nat 2 (s+s+1),pow_succ.nat 2 (s+s)]; ring
+
+@[auto] + symplectic.orthogonal (s : ℕ) : finite_l2.orthogonal (4^s) (4^s) (symplectic.character s) ((4^s : ℕ) : ℝ)
+  rw [symplectic.size,cast_pow.real]
+  have orth := walsh.character_matrix.orthogonal (s+s) (2^(s+s)) (symplectic.word s) (by intro u hu i hi; exact symplectic.word_digit s u i) (by intro u hu v hv h; exact symplectic.word_distinct s u v hu hv h)
+  unfold finite_l2.orthogonal at orth ⊢
+  intro u hu v hv; have e := orth u hu v hv
+  unfold finite_l2.dot at e ⊢; simpa [symplectic.character_eq] using e
+
+@[auto] + symplectic.nonzero_bound (s L : ℕ) (x y : ℕ → ℝ) (size : L+1 = 4^s) :
+    (∑ i < L, x i*(∑ j < L, symplectic.character s (i+1) (j+1)*y j))^2 ≤ ((L : ℝ)+1)*((∑ i < L, x i^2)*(∑ j < L, y j^2))
+  have orth := symplectic.orthogonal s
+  rw [← size,cast_succ.real] at orth
+  exact finite_l2.minor_bound orth
+
++ symplectic.zero_left (s v : ℕ) : symplectic.character s 0 v = 1
+  have zero : ∀ i : ℕ, binary.bit 0 i = 0
+    intro i; unfold binary.bit; rw [(div_mod_of_lt.nat 0 (2^i) (two_pow_pos.nat i)).1]; decide
+  unfold symplectic.character symplectic.pairing
+  simp [zero,sum_below.zero.nat]
+
++ symplectic.pairing_comm (s u v : ℕ) : symplectic.pairing s u v = symplectic.pairing s v u
+  have terms : ∀ i < s, binary.bit u i*binary.bit v (i+s)+binary.bit u (i+s)*binary.bit v i =
+      binary.bit v i*binary.bit u (i+s)+binary.bit v (i+s)*binary.bit u i := by intro i hi; ring
+  unfold symplectic.pairing; rw [sum_below.congr terms]
+
+@[auto] + symplectic.isotropic (s u v : ℕ) (hu : u < 2^s) (hv : v < 2^s) : symplectic.pairing s u v = 0
+  have terms : ∀ i < s, binary.bit u i*binary.bit v (i+s)+binary.bit u (i+s)*binary.bit v i = 0
+    intro i hi; rw [binary.high_zero u (i+s) s hu (by omega),binary.high_zero v (i+s) s hv (by omega)]; ring
+  unfold symplectic.pairing; rw [sum_below.eq_zero.nat terms]; decide
+
++ symplectic.row_sum (s L u : ℕ) (size : L+1 = 4^s) (hu : u < L) :
+    (∑ j < L, symplectic.character s (u+1) (j+1)) = -1
+  have orth := symplectic.orthogonal s; unfold finite_l2.orthogonal at orth
+  rw [← size] at orth
+  have eq := orth (u+1) (by omega) 0 (by omega)
+  have nz : u+1 ≠ 0 := by omega
+  unfold finite_l2.dot at eq; simp only [symplectic.zero_left,mul_one.real,nz] at eq
+  have head : symplectic.character s (u+1) 0 = 1
+    unfold symplectic.character; rw [symplectic.pairing_comm]; exact symplectic.zero_left s (u+1)
+  rw [sum_range_succ'.real,head] at eq
+  linarith
+
+@[auto] + symplectic.orthogonal_count (s L u : ℕ) (size : L+1 = 4^s) (hu : u < L) :
+    (∑ j < L, (if symplectic.pairing s (u+1) (j+1) = 0 then (1 : ℝ) else 0)) = ((L : ℝ)-1)/2
+  have term : ∀ j < L, 2*(if symplectic.pairing s (u+1) (j+1) = 0 then (1 : ℝ) else 0) = 1+symplectic.character s (u+1) (j+1)
+    intro j hj; unfold symplectic.character; by_cases z : symplectic.pairing s (u+1) (j+1) = 0 <;> simp [z]
+  have e := sum_below.congr term
+  simp only at e
+  rw [sum_const_mul.real,sum_add.real,sum_const.real,symplectic.row_sum s L u size hu] at e
+  linarith

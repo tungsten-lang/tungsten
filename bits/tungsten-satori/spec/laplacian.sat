@@ -1,0 +1,32 @@
+import laplacian
+
++ sign_at_peak (u : ℕ → ℚ) (v : ℕ) (ns : list ℕ) (h : ∀ w ∈ ns, u w ≤ u v) : 0 ≤ laplacian ns u v := by auto
+
++ harmonic_neighbor (ns : list α) (u : α → ℝ) (v w : α) (h : ∀ i ∈ ns, u i ≤ u v)
+    (harmonic : laplacian ns u v = 0) (neighbor : w ∈ ns) : u w = u v := by auto
+
+-- Middle vertex of the three-vertex path in the hot-spots example.
++ path_center (u : ℕ → ℚ) : laplacian [0, 2] u 1 = 2 * u 1 - u 0 - u 2
+  simp [laplacian, sum_list]
+  ring
++ isolated (u : ℕ → ℝ) (v : ℕ) : laplacian [] u v = 0 := by rfl
++ repeated_neighbor (u : ℕ → ℚ) : laplacian [0, 0] u 1 = 2 * (u 1 - u 0)
+  simp [laplacian, sum_list]
+  ring
+
+-- The middle of a linear profile is harmonic and differs from both neighbors.
++ cancellation : laplacian [0, 2] (fun (x : ℚ) => x) 1 = 0 ∧ ¬ (∀ x ∈ [0, 2], (x : ℚ) = 1) := by decide
+
++ connected_max (ns : α → list α) (u : α → ℝ) (v : α)
+    (peak : ∀ x, u x ≤ u v) (harmonic : ∀ x, laplacian (ns x) u x = 0)
+    (connected : ∀ w, reachable (fun a b => b ∈ ns a) v w) : ∀ w, u w = u v
+  auto [laplacian.strong_max.real]
+
++ walk_max (ns : α → list α) (u : α → ℚ) (w : ℕ → α) (k : ℕ)
+    (peak : ∀ x, u x ≤ u (w 0)) (harmonic : ∀ x, laplacian (ns x) u x = 0)
+    (steps : ∀ i < k, w (i+1) ∈ ns (w i)) : u (w k) = u (w 0)
+  apply laplacian.strong_max.rat ns u (w 0) (w k) peak harmonic
+  exact reachable.of_walk (fun a b => b ∈ ns a) w k steps
+
++ disconnected_peaks (u : ℕ → ℚ) (unequal : u 0 ≠ u 1) :
+    laplacian [] u 0 = 0 ∧ laplacian [] u 1 = 0 ∧ u 0 ≠ u 1 := by simp [laplacian, sum_list, unequal]

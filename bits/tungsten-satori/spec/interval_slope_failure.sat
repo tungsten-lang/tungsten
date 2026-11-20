@@ -1,0 +1,18 @@
+import interval_slope
++ wrong_derivative : has_deriv_within (fun z => z^2) (fun z => True) 2 3 := by auto
++ too_steep (a b : ℝ) (h : a ≤ b) : b^2-a^2 ≤ 2*a*(b-a)
+  apply interval.increment_le_of_deriv_le (fun z => z^2) (fun z => 2*z) a b (2*a) h
+  · intro t lo hi; auto
+  · intro t lo hi; linarith
++ reversed (f v : ℝ → ℝ)
+    (deriv : ∀ t, 1 ≤ t → t ≤ 0 → has_deriv_within f (fun z => 1 ≤ z ∧ z ≤ 0) t (v t))
+    (slope : ∀ t, 1 ≤ t → t ≤ 0 → v t ≤ 0) : f 0-f 1 ≤ 0*(0-1)
+  exact interval.increment_le_of_deriv_le f v 1 0 0 (by decide) deriv slope
++ endpoint_jump (f : ℝ → ℝ)
+    (inside : ∀ t, 0 < t → t < 1 → has_deriv_within f (fun z => 0 ≤ z ∧ z ≤ 1) t 0) : f 1-f 0 ≤ 0*(1-0)
+  apply interval.increment_le_of_deriv_le f (fun z => 0) 0 1 0 (by decide)
+  · intro t lo hi; exact inside t (by linarith) (by linarith)
+  · intro t lo hi; linarith
++ missing_piece (f : ℝ → ℝ) (t : ℕ → ℝ) (M : ℝ)
+    (first : ∀ i < 2, f (t (i+1))-f (t i) ≤ M*(t (i+1)-t i)) : f (t 3)-f (t 0) ≤ M*(t 3-t 0)
+  exact interval.increment_le_of_partition f t M 3 first

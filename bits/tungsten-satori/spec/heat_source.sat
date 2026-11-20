@@ -1,0 +1,52 @@
+import heat_source
+
++ boundary_work (u q r f : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.forced u q r f (Icc c d) (Icc a b))
+    (budget : ∀ t, c ≤ t → t ≤ d → u t b*q t b-u t a*q t a+heat_interval.work u f a b t ≤ heat_interval.energy q a b t) :
+    heat_interval.energy u a b d ≤ heat_interval.energy u a b c := by auto
+
++ dissipative_input (u q r f : ℝ → ℝ → ℝ) (flow : heat_interval.forced u q r f (Icc 0 1) (Icc 0 1))
+    (ends : ∀ t, 0 ≤ t → t ≤ 1 → q t 0 = 0 ∧ q t 1 = 0)
+    (work : ∀ t, 0 ≤ t → t ≤ 1 → heat_interval.work u f 0 1 t ≤ heat_interval.energy q 0 1 t) :
+    heat_interval.energy u 0 1 1 ≤ heat_interval.energy u 0 1 0 := by auto
+
++ balanced_input (u q r f : ℝ → ℝ → ℝ) (I : ℝ) (flow : heat_interval.forced u q r f (Icc 0 1) (Icc 0 1))
+    (ends : ∀ t, 0 ≤ t → t ≤ 1 → q t 0 = q t 1)
+    (source : darboux.has_integral (heat_interval.content f 0 1) 0 1 I) :
+    heat_interval.content u 0 1 1-heat_interval.content u 0 1 0 = I := by auto
+
++ damped_heat (u q r : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.forced u q r (fun t x => -u t x) (Icc c d) (Icc a b))
+    (ends : ∀ t, c ≤ t → t ≤ d → q t a = 0 ∧ q t b = 0) :
+    heat_interval.energy u a b d ≤ heat_interval.energy u a b c := by auto
+
+#axioms damped_heat
+#axioms dissipative_input
+#axioms balanced_input
+
++ source_stability (u q r f v p s g : ℝ → ℝ → ℝ) (K : ℝ)
+    (hu : heat_interval.forced u q r f (Icc 0 2) (Icc 0 1))
+    (hv : heat_interval.forced v p s g (Icc 0 2) (Icc 0 1))
+    (ends : ∀ t, 0 ≤ t → t ≤ 2 → q t 0 = p t 0 ∧ q t 1 = p t 1)
+    (sources : ∀ t, 0 ≤ t → t ≤ 2 → heat_interval.energy (fun k x => f k x-g k x) 0 1 t ≤ K) :
+    heat_interval.energy (fun k x => u k x-v k x) 0 1 2 ≤ exp (2-0)*heat_interval.energy (fun k x => u k x-v k x) 0 1 0+(exp (2-0)-1)*K := by auto
+
++ matched_flux (u q r : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.solution u q r (Icc c d) (Icc a b))
+    (ends : ∀ t, c ≤ t → t ≤ d → q t a = q t b) : heat_interval.content u a b d = heat_interval.content u a b c := by auto
+
++ net_input (u q r f : ℝ → ℝ → ℝ) (I : ℝ)
+    (flow : heat_interval.forced u q r f (Icc 0 2) (Icc 0 1))
+    (net : darboux.has_integral (fun t => q t 1-q t 0+heat_interval.content f 0 1 t) 0 2 I) :
+    heat_interval.content u 0 1 2-heat_interval.content u 0 1 0 = I := by auto
+
+-- Unit forcing warms a spatially constant, insulated profile u(t,x) = t.
++ uniform_heating (T X : set ℝ) : heat_interval.forced (fun t x => t) (fun t x => 0) (fun t x => 0) (fun t x => 1) T X
+  unfold heat_interval.forced; intro t ht x hx
+  exact ⟨continuous_within_box.time (fun z => z) T X t x (by auto),by auto,by auto,by auto,by auto,by simpa using has_deriv_within.id T t⟩
+
++ increases_with_insulation : heat_interval.energy (fun t x => t) 0 1 1-heat_interval.energy (fun t x => t) 0 1 0 = 1
+  have agree := darboux.integral_agrees; unfold darboux.agrees at agree
+  have first := agree 0 1 (fun x => (0:ℝ)^2) (0^2*(1-0)) (darboux.const 0 1 (0^2) (by decide))
+  have last := agree 0 1 (fun x => (1:ℝ)^2) (1^2*(1-0)) (darboux.const 0 1 (1^2) (by decide))
+  unfold heat_interval.energy; linarith

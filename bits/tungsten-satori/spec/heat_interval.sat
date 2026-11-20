@@ -1,0 +1,58 @@
+import heat_interval
+
+-- The linear profile on [1,3] has boundary products 3 and 1.
++ two_endpoints :
+    darboux.integral 1 3 (fun x => x*0) + darboux.integral 1 3 (fun x => (1:ℝ)^2) = 2
+  have h := heat_interval.balance (fun x => x) (fun x => 1) (fun x => 0) 1 3 (by norm_num) (by intro x lo hi; auto) (by intro x lo hi; auto) (by intro x lo hi; auto)
+  linarith
+
++ insulated_profile (u q r : ℝ → ℝ) (a b : ℝ) (ab : a ≤ b)
+    (smooth : ∀ x, a ≤ x → x ≤ b → continuous_at u x ∧ continuous_at q x ∧ continuous_at r x)
+    (du : ∀ x, a ≤ x → x ≤ b → has_deriv_within u (fun z => a ≤ z ∧ z ≤ b) x (q x))
+    (dq : ∀ x, a ≤ x → x ≤ b → has_deriv_within q (fun z => a ≤ z ∧ z ≤ b) x (r x))
+    (left : q a = 0) (right : q b = 0) : darboux.integral a b (fun x => u x*r x) ≤ 0
+  exact heat_interval.dissipative u q r a b ab smooth du dq (by rw [left,right]; linarith)
+
++ neumann_decay (u q r : ℝ → ℝ → ℝ) (a b c d : ℝ) (ab : a ≤ b) (cd : c ≤ d)
+    (flow : heat_interval.solution u q r (fun z => c ≤ z ∧ z ≤ d) (fun z => a ≤ z ∧ z ≤ b))
+    (ends : ∀ t, c ≤ t → t ≤ d → q t a = 0 ∧ q t b = 0) :
+    heat_interval.energy u a b d ≤ heat_interval.energy u a b c := by auto
+
+-- u(t,x)=x²+2t solves the heat equation with nonzero right boundary flux.
++ warming (T X : set ℝ) : heat_interval.solution (fun t x => x^2+2*t) (fun t x => 2*x) (fun t x => 2) T X
+  unfold heat_interval.solution; intro t ht x hx
+  have sp := continuous_within_box.space (fun y => y^2) T X t x (by auto)
+  have tm := continuous_within_box.time (fun s => 2*s) T X t x (by auto)
+  exact ⟨continuous_within_box.add (fun s y => y^2) (fun s y => 2*s) T X t x sp tm,by auto,by auto,by auto,by auto⟩
+
++ warming_gains_energy :
+    heat_interval.energy (fun t x => x^2+2*t) 0 1 0 < heat_interval.energy (fun t x => x^2+2*t) 0 1 1
+  have initial := darboux.agrees.continuous darboux.integral darboux.integral_agrees 0 1 (fun x => (x^2+2*0)^2) (by decide) (by intro x lo hi; auto)
+  have final := darboux.agrees.continuous darboux.integral darboux.integral_agrees 0 1 (fun x => (x^2+2*1)^2) (by decide) (by intro x lo hi; auto)
+  have upper : ∀ x:ℝ, 0 ≤ x → x ≤ 1 → (x^2+2*0)^2 ≤ 1
+    intro x lo hi
+    have xx := mul_le_mul_of_nonneg_left.real x 1 x hi lo
+    have sq := mul_le_mul_of_nonneg_left.real (x^2) 1 (x^2) (by linarith) (sq_nonneg.real x)
+    linarith
+  have low : ∀ x:ℝ, 0 ≤ x → x ≤ 1 → 4 ≤ (x^2+2*1)^2 := by intro x lo hi; nlinarith [sq_nonneg.real x,sq_nonneg.real (x^2)]
+  have start := darboux.le_const (fun x => (x^2+2*0)^2) 0 1 (darboux.integral 0 1 (fun x => (x^2+2*0)^2)) 1 initial upper
+  have finish := darboux.mono (fun x => 4) (fun x => (x^2+2*1)^2) 0 1 (4*(1-0)) (darboux.integral 0 1 (fun x => (x^2+2*1)^2)) (darboux.const 0 1 4 (by decide)) final low
+  unfold heat_interval.energy; linarith
+
+-- The fluxes may be nonzero. Equality holds throughout the closed space-time rectangle.
++ same_temperature (u q r v p s : ℝ → ℝ → ℝ) (t x : ℝ)
+    (hu : heat_interval.solution u q r (fun z => 0 ≤ z ∧ z ≤ 2) (fun z => 0 ≤ z ∧ z ≤ 1))
+    (hv : heat_interval.solution v p s (fun z => 0 ≤ z ∧ z ≤ 2) (fun z => 0 ≤ z ∧ z ≤ 1))
+    (initial : ∀ z, 0 ≤ z → z ≤ 1 → u 0 z = v 0 z)
+    (ends : ∀ k, 0 ≤ k → k ≤ 2 → q k 0 = p k 0 ∧ q k 1 = p k 1)
+    (time : 0 ≤ t ∧ t ≤ 2) (space : 0 ≤ x ∧ x ≤ 1) : u t x = v t x := by auto
+
++ zero_at_endpoint (f : ℝ → ℝ)
+    (cont : ∀ z, 1 ≤ z → z ≤ 3 → continuous_within_at f (fun y => 1 ≤ y ∧ y ≤ 3) z)
+    (energy : darboux.integral 1 3 (fun z => (f z)^2) ≤ 0) : f 3 = 0 := by auto
+
++ distance_contracts (u q r v p s : ℝ → ℝ → ℝ)
+    (hu : heat_interval.solution u q r (fun z => 0 ≤ z ∧ z ≤ 2) (fun z => 0 ≤ z ∧ z ≤ 1))
+    (hv : heat_interval.solution v p s (fun z => 0 ≤ z ∧ z ≤ 2) (fun z => 0 ≤ z ∧ z ≤ 1))
+    (ends : ∀ k, 0 ≤ k → k ≤ 2 → q k 0 = p k 0 ∧ q k 1 = p k 1) :
+    heat_interval.energy (fun t x => u t x-v t x) 0 1 2 ≤ heat_interval.energy (fun t x => u t x-v t x) 0 1 0 := by auto

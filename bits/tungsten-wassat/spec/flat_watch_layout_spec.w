@@ -69,4 +69,25 @@ describe "Flat watch initialization" ->
     s.rebuild_binaries
     expect(s.watch_snapshot).to eq(pruned)
 
+  it "groups empty binary slots and uses their spares on the next insertion" ->
+    s = FlatWatchFixture.new(4, [[1, 2]], WASSAT_PROOF_NONE, 0)
+    s.rebuild_binaries
+    before = s.watch_snapshot
+    binary = before[0]
+    empty_count = binary.size - 2
+    binary.each -> (list)
+      if list[2].empty?
+        expect(list[0] < empty_count).to eq(true)
+        expect(list[1]).to eq(1)
+      else
+        expect(list[0] >= empty_count).to eq(true)
+    s.add_input_clause([-3, 4])
+    s.add_input_clause([1, -2])
+    after = s.watch_snapshot
+    expect(after[2]).to eq(before[2])
+    expect(after[0][7][2]).to eq([(1 << 32) | 8])
+    expect(after[0][8][2]).to eq([(1 << 32) | 7])
+    expect(after[0][2][2]).to eq([4, (2 << 32) | 5])
+    expect(after[0][5][2]).to eq([(2 << 32) | 2])
+
 spec_summary

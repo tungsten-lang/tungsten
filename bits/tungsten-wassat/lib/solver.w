@@ -5699,14 +5699,26 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     ci += 1
   0
 
+# Give empty binary lists adjacent spare slots. Filling the active lists can
+# then leave whole pages of the pool untouched until those spares are used.
 -> wassat_bl_layout(bd, blst, nlits) (i32[] i64[] i64) i64
   top = 0 ## i64
   li = 0 ## i64
   while li < nlits
+    top += 1 if bd[(li << 1) + 1] == 0
+    li += 1
+  next_empty = 0 ## i64
+  li = 0
+  while li < nlits
     d = li << 1 ## i64
-    bd[d] = top
-    bd[bd.size - 1 - li] = bd[d + 1] + 1
-    top = top + bd[d + 1] + 1
+    capacity = bd[d + 1] + 1 ## i64
+    bd[bd.size - 1 - li] = capacity
+    if capacity == 1
+      bd[d] = next_empty
+      next_empty += 1
+    else
+      bd[d] = top
+      top += capacity
     bd[d + 1] = 0
     li += 1
   blst[0] = top

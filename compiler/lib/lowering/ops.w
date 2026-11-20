@@ -1255,6 +1255,63 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       i += 1
   false
 
+# A top-level literal constant (collect_top_level_static_types) named by a
+# bare name that nothing in this function shadows (a slot, binding, typed
+# local, parameter, function, or any assignment in the body), as a fresh
+# literal node; otherwise nil. Top-level code keeps reading the global.
+-> literal_const_node(ctx, nm)
+  if ctx[:func][:name] == "main"
+    return nil
+  mod = ctx[:mod]
+  fl = mod[:top_level_float_literals]
+  il = mod[:top_level_int_literals]
+  isf = fl != nil && fl[nm] != nil
+  isi = il != nil && il.has_key?(nm)
+  if !isf && !isi
+    return nil
+  if pipe_ident_shadowed?(ctx, nm)
+    return nil
+  lac = ctx[:local_assignment_counts]
+  if lac != nil && lac[nm] != nil
+    return nil
+  if isf
+    return Tungsten:AST:Float.new(fl[nm].value.to_s())
+  Tungsten:AST:Int.new(il[nm])
+
+# Replace such names inside an arithmetic subtree (binary and unary
+# operators, type ascriptions) with their literals before the subtree is
+# typed, so `a[j] * KF` infers and lowers exactly like `a[j] * ~0.97`.
+-> inline_literal_consts(ctx, node)
+  if node == nil || !is_ast_node?(node)
+    return nil
+  k = ast_kind(node)
+  if k == :binary_op
+    l = node.left
+    if l != nil && is_ast_node?(l) && ast_kind(l) == :var
+      rl = literal_const_node(ctx, l.name)
+      if rl != nil
+        node.left = rl
+    else
+      inline_literal_consts(ctx, l)
+    r = node.right
+    if r != nil && is_ast_node?(r) && ast_kind(r) == :var
+      rr = literal_const_node(ctx, r.name)
+      if rr != nil
+        node.right = rr
+    else
+      inline_literal_consts(ctx, r)
+  elsif k == :unary_op
+    o = node.operand
+    if o != nil && is_ast_node?(o) && ast_kind(o) == :var
+      ro = literal_const_node(ctx, o.name)
+      if ro != nil
+        node.operand = ro
+    else
+      inline_literal_consts(ctx, o)
+  elsif k == :type_ascription
+    inline_literal_consts(ctx, node.expression)
+  nil
+
 -> pipe_ident_shadowed?(ctx, nm)
   if ctx[:func][:var_slots][nm] != nil || ctx[:bindings][nm] != nil || ctx[:var_types][nm] != nil
     return true
@@ -1708,6 +1765,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 -> lower_binary_op(ctx, node)
   wfn = ctx[:func]
   op = node.op
+  inline_literal_consts(ctx, node)
 
   cancelled = cancel_literal_factorial_quotient(ctx, node)
   if cancelled != nil

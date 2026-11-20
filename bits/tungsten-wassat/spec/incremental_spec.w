@@ -140,6 +140,27 @@ describe "Wassat incremental solving" ->
       expect(check["steps"]).to eq(r["proof"].size)
 
   context "query lifecycle" ->
+    it "keeps empty result arrays private before and after a failed assumption" ->
+      solver = Wassat.new(1, [[1]], WASSAT_PROOF_DRAT)
+      unused = solver.result_for(-2)
+      expect(unused["core"]).to eq([])
+      unused["core"].push(1)
+      unknown = solver.unknown_result
+      unknown["proof"].push("modified")
+      unknown["drat"].push("modified")
+      assumptions = [-1]
+      failed = solver.solve_assuming(assumptions)
+      expect(failed["core"]).to eq([-1])
+      failed["core"].push(1)
+      expect(assumptions).to eq([-1])
+      solved = solver.solve_assuming([1])
+      expect(solved["status"]).to eq(1)
+      expect(solved["core"]).to eq([])
+      expect(solved["proof"]).to eq([])
+      expect(solved["drat"]).to eq([])
+      expect(solver.result_for(-2)["core"]).to eq([])
+      expect(solver.solve_assuming(assumptions)["core"]).to eq([-1])
+
     it "answers fresh queries after SAT and after assumption-UNSAT" ->
       s = inc_solver(IMPL_CHAIN, WASSAT_PROOF_NONE)
       a = s.solve_assuming([1, 0 - 3])

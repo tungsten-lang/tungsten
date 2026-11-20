@@ -198,11 +198,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # clause); deriving the empty clause under assumption units would NOT
     # refute the original CNF. @formula_unsat marks the one verdict no later
     # query can undo.
-    @assump = []
-    wassat_query_keep(query_owner, @assump, 0) if query_owner != nil
+    @assump = nil
     @nassump = 0
-    @failed_core = []
-    wassat_query_keep(query_owner, @failed_core, 0) if query_owner != nil
+    @failed_core = nil
     @formula_unsat = false
 
     # Global proof-id counter. Without preprocessing every stored clause gets
@@ -5289,8 +5287,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             break
           i += 1
       r["core"] = original_core
-    @assump = []
-    wassat_query_keep(@query_owner, @assump, 0) if @query_owner != nil
+    @assump = nil
     @nassump = 0
     r
 
@@ -5304,8 +5301,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     # units, so replay the genuine root trail before asserting assumptions.
     @qhead = 0
     @pending_conflict = -1
-    @failed_core = []
-    wassat_query_keep(@query_owner, @failed_core, 0) if @query_owner != nil
+    @failed_core = nil
     @terminal_status = 0 unless @formula_unsat
     0
 
@@ -5323,18 +5319,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       model = []
     wassat_query_keep(@query_owner, model, 0) if @query_owner != nil
 
-    core = @query_owner == nil ? [] : wassat_query_box(@query_owner)
-    if status == -2
-      core = @failed_core.dup
-      wassat_query_keep(@query_owner, core, 0) if @query_owner != nil
-    proof = @query_owner == nil ? [] : wassat_query_box(@query_owner)
-    drat = @query_owner == nil ? [] : wassat_query_box(@query_owner)
-    if unsat && @proof_mode == WASSAT_PROOF_WRAT
-      proof = @proof.dup
-      wassat_query_keep(@query_owner, proof, 0) if @query_owner != nil
-    if unsat && (@proof_mode == WASSAT_PROOF_DRAT || @dual_drat)
-      drat = @drat.dup
-      wassat_query_keep(@query_owner, drat, 0) if @query_owner != nil
+    core = status == -2 && @failed_core != nil ? @failed_core.dup : []
+    proof = unsat && @proof_mode == WASSAT_PROOF_WRAT ? @proof.dup : []
+    drat = unsat && (@proof_mode == WASSAT_PROOF_DRAT || @dual_drat) ? @drat.dup : []
+    if @query_owner != nil
+      wassat_query_keep(@query_owner, core, 0)
+      wassat_query_keep(@query_owner, proof, 0)
+      wassat_query_keep(@query_owner, drat, 0)
     result = { "sat": sat, "unsat": unsat, "complete": status != 0,
       "status": status == -2 ? -1 : status, "model": model,
       "core": core, "proof": proof, "drat": drat,
@@ -5362,8 +5353,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # UNKNOWN preserves the trail, learned database, restart cadence, and hidden
   # proof prefix so a later call can continue safely. Zero is unlimited.
   -> solve_budget(max_conflicts)
-    @assump = []
-    wassat_query_keep(@query_owner, @assump, 0) if @query_owner != nil
+    @assump = nil
     @nassump = 0
     self.solve_query(max_conflicts)
 

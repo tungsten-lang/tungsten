@@ -5377,7 +5377,11 @@ uint64_t bn_submul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
     );
 }
 #else
-#define bn_submul_1 bn_submul_1_ref
+/* runtime_gmp.c calls this across translation units (runtime_internal.h),
+ * so it must be a real external definition, not a macro alias. */
+uint64_t bn_submul_1(uint64_t *rp, const uint64_t *up, int32_t n, uint64_t v) {
+    return bn_submul_1_ref(rp, up, n, v);
+}
 #endif
 
 /* rp = mp - up*v, returning the borrow word.  Unlike bn_submul_1 this writes

@@ -89,7 +89,7 @@ ages.each -> (k, v)
   << "[k] is [v]"
 << ages.keys
 `,
-    stdout: "36\n3\nada is 36\nalan is 41\ngrace is 85\n[\"ada\", \"alan\", \"grace\"]\n",
+    stdout: "36\n3\nada is 36\nalan is 41\ngrace is 85\n[ada, alan, grace]\n",
   },
   {
     name: "ranges with each",

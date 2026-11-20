@@ -9,6 +9,31 @@ Wassat 0.1 selects its search policy automatically from the parsed formula.
 There are no environment-variable or command-line switches for choosing
 branching, restart, probing, vivification, or portfolio-arm strategies.
 
+The native gate-miter sweep runs automatically in unrestricted `--fast` and
+standalone `--drat FILE` solves. It recognizes grouped gate definitions feeding
+an asserted XOR or XNOR, simulates the two cones, and uses incremental Wassat
+queries to prove candidate implications. The refutation is checkable against
+the original CNF. Set `WASSAT_GATE_MITER=0` for a baseline comparison.
+[Proof and cross-family measurements](docs/sc2026-sqrt-mitern168.md)
+
+For a disjunction of several XOR/XNOR outputs, Wassat also checks for a
+numbered sequence of complete lookup-table definitions. It resolves constants,
+complemented aliases, and unused gate inputs before comparing the functions.
+When all mismatch outputs simplify to false, it emits a structural refutation.
+[Goldberg circuit and certificate](docs/sc2026-goldb-heqc-k2mul.md)
+
+For the 28- and 32-input Gray-code circuit lane, `certify --circuit`
+writes a gate certificate with original DIMACS clause references. The
+standalone checker rederives the local tables and evaluates the full input
+space. This is a separate proof format from the competition DRAT stream.
+
+```sh
+bits/tungsten-wassat/bin/wassat certify problem.cnf --circuit problem.cert
+python3 bits/tungsten-wassat/competition/check_circuit.py problem.cnf problem.cert
+```
+
+[SBDP profile and checked results](docs/sc2026-sbdp-circuit.md)
+
 ## Build
 
 From the repository root:

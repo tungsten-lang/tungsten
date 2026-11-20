@@ -43,6 +43,8 @@ use compact_domains
 use arithmetic_coloring
 use ramsey_lex
 use gate_closure
+use gate_miter
+use output_miter
 use bva
 use parity_sum
 use threshold_cover
@@ -87,7 +89,7 @@ use structural_pruning
 use byte_relations
 use resource_capacity
 use portfolio
-use reconfiguration
+use reconfiguration_cut
 use quota_cover
 use lut_congruence
 use cover_split
@@ -111,6 +113,7 @@ use cover_split
   << "    wassat <problem.cnf> --lrat <path>      certificate-backed, LRAT dialect"
   << "    wassat <problem.cnf> --drat <path>      certificate-backed, plain DRAT"
   << "    wassat <problem.cnf> --fast             trusted answers, no certificate"
+  << "    wassat certify <problem.cnf> --circuit <path>  produce an exhaustive circuit certificate"
   << "    wassat certify <problem.cnf> --veripb <path>   produce a structural counting proof"
   << "    wassat portfolio <problem.cnf> --proof <path>"
   << "    wassat portfolio <problem.cnf> --fast --threads <n>"
@@ -280,18 +283,36 @@ use cover_split
     << text
   0
 
-# Structural VeriPB proofs use one-based clause IDs from the original CNF.
+# Structural certificates cite one-based clause IDs from the original CNF.
 # A bounded recognition miss leaves the certificate destination empty.
 -> wassat_run_certify(args)
-  unless args.size == 4 && args[2] == "--veripb"
-    raise "usage: wassat certify <problem.cnf> --veripb <path>"
+  unless args.size == 4 && (args[2] == "--veripb" || args[2] == "--circuit")
+    raise "usage: wassat certify <problem.cnf> --veripb|--circuit <path>"
   input = args[1]; dest = args[3]; quiet = dest == "-"
+  kind = args[2] == "--circuit" ? "circuit" : "VeriPB"
   mapping = File.mmap(input)
   begin
-    wassat_clear_output(dest, input, "VeriPB")
+    wassat_clear_output(dest, input, kind)
     formula = wassat_parse_cnf_mapped(mapping)
   ensure
     mapping.close
+  if args[2] == "--circuit"
+    certificate = StringBuffer()
+    unless wassat_miter28_gray_unsat?(formula, certificate)
+      wassat_status(quiet, "s UNKNOWN")
+      return 0
+    tmp = wassat_reserve_output(dest, input, kind)
+    begin
+      if quiet
+        print(certificate.to_s)
+      else
+        raise "cannot write circuit certificate" unless write_file(tmp, certificate.to_s)
+        wassat_publish_output(tmp, dest, kind)
+    ensure
+      wassat_discard_output(tmp, dest)
+    wassat_status(quiet, "s UNSATISFIABLE")
+    wassat_status(quiet, "c mode: exhaustive circuit certificate")
+    exit(20)
   proof = wassat_clique_capacity_proof(formula)
   parity = {}
   reason = "clique capacity"
@@ -454,6 +475,41 @@ use cover_split
   rescue e
     wassat_discard_output(wrat_out, wrat_final)
     raise e
+  if pair_quotient == 0 && wrat_final == nil && env("WASSAT_RECONFIGURATION") != "0"
+    certificate = wassat_jump_cut(formula, drat_final != nil)
+    if certificate != nil
+      if drat_final != nil && drat_final != "-"
+        raise "token jump proof write failed" unless write_file(drat_out, certificate)
+        wassat_publish_output(drat_out, drat_final, "DRAT")
+      wassat_status(quiet, "s UNSATISFIABLE")
+      wassat_status(quiet, "c mode: token jump capacity cut")
+      wassat_status(quiet, "c conflicts: 0, decisions: 0")
+      print(certificate) if drat_final == "-"
+      exit(20)
+  if pair_quotient == 0 && options["conflicts"] == 0 && wrat_final == nil && drat_final != "-" && env("WASSAT_GATE_MITER") != "0"
+    certificate = wassat_om_refute(formula, drat_out != nil)
+    if certificate != nil
+      if drat_out != nil
+        raise "output miter proof write failed" unless write_file(drat_out, certificate)
+        wassat_publish_output(drat_out, drat_final, "DRAT")
+      << "s UNSATISFIABLE"
+      << "c mode: structural output miter"
+      << "c conflicts: 0, decisions: 0"
+      exit(20)
+    gm_plan = wassat_gm_schedule(formula)
+    if gm_plan != nil
+      gm = wassat_gm_solve(formula, gm_plan, proof_mode, drat_out)
+      if gm["status"] == -1
+        wassat_publish_output(drat_out, drat_final, "DRAT") if drat_out != nil
+        << "s UNSATISFIABLE"
+        << "c mode: native gate miter sweep"
+        << "c conflicts: [gm["conflicts"]], decisions: [gm["decisions"]]"
+        exit(20)
+      if gm["status"] == 1 && wassat_model_satisfies?(formula, gm["model"])
+        wassat_print_sat_model(gm["model"], false)
+        wassat_discard_output(drat_out, drat_final)
+        exit(10)
+      raise "cannot reset gate miter proof" if drat_out != nil && !write_file(drat_out, "")
   # An original empty clause is already a complete refutation. The strict
   # parser has validated the WHOLE input before this point; do not construct
   # specialist or search arenas for a formula that cannot have a model.
@@ -1042,11 +1098,15 @@ use cover_split
       wassat_satcoin_circuit_unsat?(formula) ||
       wassat_aig_miter_unsat?(formula) ||
       wassat_word_sort_miter_unsat?(formula) ||
-      wassat_ascon_preimage_unsat?(formula) ||
-      wassat_miter28_gray_unsat?(formula)
+      wassat_ascon_preimage_unsat?(formula)
     )
       << "s UNSATISFIABLE"
       << "c mode: fast (verified multiplier circuit factorization refutation)"
+      << "c conflicts: [budget_used], decisions: 0, props: 0"
+      exit(20)
+    if proof_mode == WASSAT_PROOF_NONE && wassat_miter28_gray_unsat?(formula)
+      << "s UNSATISFIABLE"
+      << "c mode: fast (exhaustive circuit evaluation)"
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
   # A cheap checked graph obstruction precedes broader CSP recognition.

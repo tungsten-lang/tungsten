@@ -45,6 +45,15 @@ describe "Wassat focused/stable mode split, target-phase protection, and structu
       expect(solvers[3].focused_only?).to eq(false)
       expect(solvers[3].stable_only?).to eq(true)
 
+    it "reconstructs signed equivalences independently in a cloned portfolio arm" ->
+      # 1 = -2 = 3. Parking both substituted variables as positive can never
+      # satisfy the original chain without replaying the arm's substitutions.
+      f = spec_flat_formula("p cnf 3 4\n1 2 0\n-1 -2 0\n2 3 0\n-2 -3 0\n")
+      race = wassat_race_build(3, wassat_raw_artifact(f, 3), 6, f)
+      result = race["solvers"][5].solve_budget(100)
+      expect(result["status"]).to eq(1)
+      expect(wassat_model_satisfies?(f, result["model"])).to eq(true)
+
   context "target-phase (@bphase / @best_phase) protection across rephase" ->
     it "preserves @best_phase across Inverted/Original rephases and keeps @bphase intact on focused-only arms" ->
       s = Wassat.new(4, [[1, 2], [3, 4]], WASSAT_PROOF_NONE, 0)

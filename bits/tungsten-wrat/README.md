@@ -24,6 +24,7 @@ wrat problem.cnf proof.wrat      # hinted (near-linear)
 wrat problem.cnf proof.wratb     # same proof, packed varints
 wrat problem.cnf proof.drat      # plain DRAT, from any solver
 wrat pack proof.wrat proof.wratb # lossless hinted-proof packing
+wrat to-drat problem.cnf proof.wratb proof.drat # verify and export for a DRAT checker
 ```
 
 ```

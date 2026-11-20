@@ -1,0 +1,71 @@
+[
+  {
+    "trace": "branch-c.trace",
+    "modes": {
+      "2": 2
+    }
+  },
+  {
+    "trace": "branch-b.trace",
+    "modes": {
+      "2": 1
+    }
+  },
+  {
+    "trace": "branch-a0.trace",
+    "modes": {
+      "2": 0,
+      "4": 0
+    }
+  },
+  {
+    "trace": "branch-a1.trace",
+    "modes": {
+      "2": 0,
+      "4": 1
+    }
+  },
+  {
+    "trace": "branch-a20.trace",
+    "modes": {
+      "2": 0,
+      "4": 2,
+      "3": 0
+    }
+  },
+  {
+    "trace": "branch-a22.trace",
+    "modes": {
+      "2": 0,
+      "4": 2,
+      "3": 2
+    }
+  },
+  {
+    "trace": "tail0.trace",
+    "modes": {
+      "2": 0,
+      "4": 2,
+      "3": 1,
+      "12": 0
+    }
+  },
+  {
+    "trace": "tail1.trace",
+    "modes": {
+      "2": 0,
+      "4": 2,
+      "3": 1,
+      "12": 1
+    }
+  },
+  {
+    "trace": "tail2.trace",
+    "modes": {
+      "2": 0,
+      "4": 2,
+      "3": 1,
+      "12": 2
+    }
+  }
+]

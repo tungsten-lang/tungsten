@@ -23,7 +23,7 @@ case "$instance" in -*) fail "instance path must not begin with -";; esac
 mkdir -p -- "$proof_directory" ||
   fail "cannot create proof directory: $proof_directory"
 
-# The 2026 Main contract requires ASCII DRAT at exactly $2/proof.out while
-# the verdict and any SAT model remain on stdout.
+# This wrapper selects ASCII DRAT for the Main checker. The 2026 harness
+# takes the proof at $2/proof.out and the verdict and SAT model on stdout.
 exec "$solver" "$instance" --drat "$proof_directory/proof.out"
 

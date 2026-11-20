@@ -1708,7 +1708,7 @@ WASSAT_AIG_NO_NODE = 400001
 
 # Exact 28-input and 32-input fanout-ordered Gray-code bit-parallel miter refuter
 # (refutes dobdm_14_1, sbdp4_65, sbdp4_61_2, bd*/bw*_28_*, sbdp4_13*, 16_16_booth*).
--> wassat_miter28_gray_unsat?(formula)
+-> wassat_miter28_gray_unsat?(formula, certificate = nil)
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
   return false if nv < 500 || nv > 3500 || ncl < 1500 || ncl > 12000
@@ -1866,6 +1866,17 @@ WASSAT_AIG_NO_NODE = 400001
 
   out_var = wassat_multiplier_abs(out_lit)
   want_out = out_lit > 0 ? 1 : 0
+  # Record the original clause witnesses in the same topological order
+  # as the verified circuit. The separate checker rederives every table.
+  if certificate != nil
+    certificate.append("wassat-circuit 1\ninputs")
+    i = 0
+    while i < p
+      certificate.append(" [pis[i]]")
+      i += 1
+    certificate.append("\n")
+    certificate.append("fixed [0 - const_zero]\n") if const_zero > 0
+    certificate.append("assert [out_lit]\n")
   ready = i8[nv + 1]
   ready[const_zero] = 1 if const_zero > 0
   i = 0
@@ -1961,6 +1972,18 @@ WASSAT_AIG_NO_NODE = 400001
         b_ok = want_out == 1 ? ok1 : ok0
         tt = tt | (1 << mask) if b_ok
       mask += 1
+
+    if certificate != nil
+      certificate.append("gate [gv] [tt] [k0]")
+      j = 0
+      while j < k0
+        certificate.append(" [ins0[j]]")
+        j += 1
+      ci = head[gv]
+      while ci >= 0
+        certificate.append(" [ci + 1]")
+        ci = next_cl[ci]
+      certificate.append("\n")
 
     classified = false
     if k0 == 2

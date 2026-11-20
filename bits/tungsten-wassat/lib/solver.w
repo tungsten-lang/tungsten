@@ -9663,9 +9663,13 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 -> wassat_backjump(tr, tlim, asg, lasg, lvl, rsn, heap, hpos, act, hst, vqs, vst, kbuf, st, target, chrono) (i32[] i32[] i8[] i8[] i64[] i32[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i64[] i64 i64)
   dl = st[0]
   ts = st[1]
+  # An assignment can already be in the decision heap. A full heap contains
+  # every variable, so no variable in this suffix needs reinsertion.
+  heap_full = hst[0] == hpos.size - 1
   kept = 0
-  while dl > target
-    limit = tlim[dl - 1] ## i64
+  if dl > target
+    # Trail limits are ordered. This boundary covers every discarded level.
+    limit = tlim[target] ## i64
     while ts > limit
       ts -= 1
       l = tr[ts] ## i64
@@ -9679,10 +9683,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         lasg[v << 1] = 0
         lasg[(v << 1) + 1] = 0
         rsn[v] = 0 - 1
-        z = wassat_heap_insert(heap, hpos, act, hst, v)
+        z = wassat_heap_insert(heap, hpos, act, hst, v) unless heap_full
         if vqs[v] > vqs[vst[3]]
           vst[3] = v
-    dl -= 1
+    dl = target
   i = kept - 1
   while i >= 0
     tr[ts] = kbuf[i]

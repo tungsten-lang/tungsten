@@ -4,7 +4,7 @@ use ../lib/solver
 # Independently derive the surviving trail and maximum-priority cursor from
 # the suffix being removed. Equal stamps retain the old cursor, or the last
 # variable on the original trail when a new maximum is first encountered.
--> check_backjump_cursor(stamps, levels, initial, target, chrono, present)
+-> check_backjump_cursor(stamps, levels, initial, target, chrono, heap_stride)
   tr = i32[10]; tlim = i32[4]; asg = i8[9]; lasg = i8[22]
   lvl = i64[9]; rsn = i32[9]; heap = i64[9]; hpos = i32[9]
   act = i64[9]; hst = i64[2]; vqs = i64[9]; vst = i64[5]
@@ -23,7 +23,8 @@ use ../lib/solver
     rsn[v] = v + 10; lvl[v] = levels[v]; vqs[v] = stamps[v]
     hpos[v] = -1
     act[v] = v
-    z = wassat_heap_insert(heap, hpos, act, hst, v) if present
+    if heap_stride > 0 && v % heap_stride == 0
+      z = wassat_heap_insert(heap, hpos, act, hst, v)
     if v <= prefix || (chrono == 1 && levels[v] <= target)
       expected.push(lit)
     else
@@ -59,6 +60,7 @@ use ../lib/solver
     expect(rsn[v]).to eq(cleared ? -1 : v + 10)
     expect(vqs[v]).to eq(stamps[v])
     expect(lvl[v]).to eq(levels[v])
+    present = heap_stride > 0 && v % heap_stride == 0
     expect(hpos[v] >= 0).to eq(present || cleared)
     v += 1
   # A no-op jump must not count the same removals twice.
@@ -80,7 +82,8 @@ describe "Backjump cursor and unassignment accounting" ->
         [0, 3, 8].each -> (initial)
           [0, 1, 2, 3].each -> (target)
             [0, 1].each -> (chrono)
-              [false, true].each -> (present)
-                check_backjump_cursor(stamps, levels, initial, target, chrono, present)
+              # Initially empty, all variables present, or only even variables present.
+              [0, 1, 2].each -> (heap_stride)
+                check_backjump_cursor(stamps, levels, initial, target, chrono, heap_stride)
 
 spec_summary

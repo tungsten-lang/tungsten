@@ -36,6 +36,20 @@ ALL_EIGHT = "p cnf 3 8\n1 2 3 0\n1 2 -3 0\n1 -2 3 0\n1 -2 -3 0\n-1 2 3 0\n-1 2 -
 # or retire safely when a fixed-capacity arena cannot store another lemma.
 PLANTED_MIXED_SAT = "p cnf 3 7\n1 2 3 0\n1 2 -3 0\n1 -2 -3 0\n-1 2 3 0\n-1 2 -3 0\n-1 -2 3 0\n-1 -2 -3 0\n"
 
++ OtfsMarksFixture < Wassat
+  -> prime_levels
+    @lbuf[0] = 1
+    @lbuf[1] = 2
+    @level[1] = 2
+    @level[2] = 5
+    count = self.compute_lbd_buf(2)
+    @level[1] = 0
+    @level[2] = 0
+    count
+
+  -> replay_cells
+    @rassign.size
+
 # The first conflict has an intermediate resolvent that subsumes one reason:
 # OTFS learns (5 v 2), while ordinary first-UIP learns the incomparable
 # assumption-blocking clause (5 v 1).
@@ -439,6 +453,16 @@ describe "Tungsten Wassat" ->
       expect(wassat_stop_requested?(stop)).to eq(false)
 
   context "on-the-fly strengthening" ->
+    it "can mark variables whose indices were just marked as decision levels" ->
+      s = OtfsMarksFixture.new(5, OTFS_INSTALL, WASSAT_PROOF_NONE)
+      expect(s.prime_levels).to eq(2)
+      s.enable_otfs
+      s.enable_fixed_caps
+      r = s.solve_assuming([-1, -5])
+      expect(r["core"]).to eq([-5, -1])
+      expect(r["otfs_installed"]).to eq(1)
+      expect(s.replay_cells).to eq(1)
+
     it "installs an implied side lemma not dominated by first-UIP" ->
       s = Wassat.new(5, OTFS_INSTALL, WASSAT_PROOF_NONE, 0)
       s.enable_otfs

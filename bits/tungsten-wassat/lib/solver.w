@@ -129,7 +129,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     wassat_query_keep(query_owner, @heappos, @heappos.size * 4) if query_owner != nil
     @hstate = i64[2] # heap size / EVSIDS increment
     wassat_query_keep(query_owner, @hstate, @hstate.size * 8) if query_owner != nil
-    @rassign = (@proof_mode == WASSAT_PROOF_WRAT || @otfs_allowed) ? i64[nv + 1] : i64[1]
+    @rassign = @proof_mode == WASSAT_PROOF_WRAT ? i64[nv + 1] : i64[1]
     wassat_query_keep(query_owner, @rassign, @rassign.size * 8) if query_owner != nil
     @pstate = i64[14] # qhead / tsize / conflict / bail / props / chrono; [12] ticks, [13] saved positions
     wassat_query_keep(query_owner, @pstate, @pstate.size * 8) if query_owner != nil
@@ -164,9 +164,11 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @otfs_units = 0
     @otfs_conflicts = 0
     @pending_conflict = -1
-    @lbd_seen = i64[nv + 2] # LBD stamps and temporary per-level shrink counts
+    # LBD counts levels and OTFS checks candidate variables at separate
+    # points in analysis. Each scan takes a fresh positive stamp from
+    # @astate[25]. Shrinking borrows negative counts and clears them.
+    @lbd_seen = i64[nv + 2]
     wassat_query_keep(query_owner, @lbd_seen, @lbd_seen.size * 8) if query_owner != nil
-    @lbd_stamp = 0
     @trail = i32[nv + 2]
     wassat_query_keep(query_owner, @trail, @trail.size * 4) if query_owner != nil
     @trail_lim = i32[nv + 2]
@@ -1152,7 +1154,6 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @astate[24] = 0
     if @ksearch
       @astate[24] = @kpromote ? 1 : 0
-      @astate[25] = @lbd_stamp
       @astate[21] = @mode_stable ? 2 : 1
       if @kst[12] > 0
         @kst[12] -= 1
@@ -1162,8 +1163,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
                    @trail, @lbuf, @mbuf, @mstk, @activity, @heap,
                    @heappos, @hstate, @astate, @nvars, @cused,
                    @vq_next, @vq_prev, @vq_stamp, @vq_state,
-                   @pwork, @rassign, @obuf, @amark, @clbd, @lbd_seen)
-    @lbd_stamp = @astate[25] if @ksearch
+                   @pwork, @obuf, @amark, @clbd, @lbd_seen)
     if @astate[23] == 1
       @kst[13] += 1
       @kst[12] = @kst[13]
@@ -1173,9 +1173,9 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
     @lsize = @astate[3]
     if @astate[6] > 0
       @otfs_hits += 1
-      @lbd_stamp += 1
+      @astate[25] += 1
       @astate[8] = wassat_lbd_buf(
-        @pwork, @level, @lbd_seen, @astate[6], @lbd_stamp
+        @pwork, @level, @lbd_seen, @astate[6], @astate[25]
       )
     @astate[4]
 
@@ -2728,8 +2728,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # Literal block distance: how many distinct decision levels a clause spans.
   # Low-LBD clauses are the ones worth keeping (Audemard & Simon).
   -> compute_lbd_buf(n)
-    @lbd_stamp += 1
-    wassat_lbd_buf(@lbuf, @level, @lbd_seen, n, @lbd_stamp)
+    @astate[25] += 1
+    wassat_lbd_buf(@lbuf, @level, @lbd_seen, n, @astate[25])
 
   # A bounded pass over kept learned clauses (LBD 3..6, length >=3).
   # Keep only literals whose negations need an explicit probe decision.
@@ -2900,8 +2900,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
             cand = lb == 0
         if cand
           @kviv[4] += 1
-          @lbd_stamp += 1
-          @kviv[3] = @lbd_stamp
+          @astate[25] += 1
+          @kviv[3] = @astate[25]
           @pstate[0] = @qhead
           @pstate[1] = @tsize
           @pstate[5] = 0
@@ -7735,7 +7735,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
 #   st[12..20] = cumulative pre-scan/resume visits, probes, failed probes,
 #     removed literals, maximum reason length, frames, input literals, skipped
 #     probes. The maximum is a high-water mark; all other counts accumulate.
--> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, otmark, ab, am, clbd, lseen) (i32[] i8[] i64[] i32[] i8[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64[])
+-> wassat_analyze(ar, asg, lvl, rsn, sn, cm, tr, out, tmp, stk, act, heap, hpos, hst, st, nv, cused, vqn, vqp, vqs, vst, otfs, ab, am, clbd, lseen) (i32[] i8[] i64[] i32[] i8[] i64[] i32[] i64[] i64[] i64[] i64[] i64[] i32[] i64[] i64[] i64 i64[] i64[] i64[] i64[] i64[] i64[] i64[] i8[] i64[] i64[])
   confl = st[0]
   na = 0
   promote = st[24] == 1
@@ -7811,8 +7811,8 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
         j += 1
       resolvent = counter + size - 1
       if resolved > 0 && antecedent > 2 && resolvent < antecedent
-        st[10] += 1
-        gen = st[10]
+        st[25] += 1
+        gen = st[25]
         valid = 1
         cand = 0
         j = 0
@@ -7822,10 +7822,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
           if q < 0
             vq = 0 - q
           if vq != pv && lvl[vq] > 0
-            if otmark[vq] == gen
+            if lseen[vq] == gen
               valid = 0
             else
-              otmark[vq] = gen
+              lseen[vq] = gen
               stk[cand] = q
               cand += 1
           j += 1

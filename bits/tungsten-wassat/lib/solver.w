@@ -8091,7 +8091,7 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   # discovery order, as every arm did before the two were separated.
   bmode = st[21]
   if bmode == 1
-    z = wassat_sort_by_key(ab, vqs, na)
+    z = wassat_sort_conflict_vars(ab, vqs, na, tmp, stk)
   else
     z = wassat_evsids_batch(act, heap, hpos, hst, ab, na, nv)
   if bmode != 2
@@ -8113,6 +8113,73 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   st[20] += budget_skipped
   st[3] = keep
   st[4] = target
+  0
+
+# Sort large conflict sets by recency using the minimizer's two idle arrays.
+# Pack the stamp above the variable ID and distribute only the stamp bytes
+# that differ. Keep a untouched until the order is known to match Shell sort.
+-> wassat_sort_conflict_vars(a, key, n, work, aux) (i64[] i64[] i64 i64[] i64[]) i64
+  return wassat_sort_by_key(a, key, n) if n < 96 || aux.size - n < 256 || key.size > 4294967296
+  first = key[a[0]] ## i64
+  varying = 0 ## i64
+  i = 0 ## i64
+  while i < n
+    v = a[i] ## i64
+    stamp = key[v] ## i64
+    return wassat_sort_by_key(a, key, n) if stamp < 0 || stamp > 2147483647
+    work[i] = (stamp << 32) | v
+    varying |= stamp ^ first
+    i += 1
+  # The digit counts and offsets occupy aux[n..n+256), above both outputs.
+  from_buf = work
+  to_buf = aux
+  shift = 32 ## i64
+  while varying != 0
+    if (varying & 255) != 0
+      digit = 0 ## i64
+      while digit < 256
+        aux[n + digit] = 0
+        digit += 1
+      i = 0
+      while i < n
+        word = from_buf[i] ## i64
+        bucket = (word >> shift) & 255 ## i64
+        slot = n + bucket ## i64
+        aux[slot] = aux[slot] + 1
+        i += 1
+      digit = 0
+      start = 0 ## i64
+      while digit < 256
+        count = aux[n + digit] ## i64
+        aux[n + digit] = start
+        start += count
+        digit += 1
+      i = 0
+      while i < n
+        word = from_buf[i] ## i64
+        bucket = (word >> shift) & 255 ## i64
+        slot = n + bucket ## i64
+        pos = aux[slot] ## i64
+        aux[slot] = pos + 1
+        to_buf[pos] = word
+        i += 1
+      swap = from_buf
+      from_buf = to_buf
+      to_buf = swap
+    shift += 8
+    varying = varying >> 8
+  # Shell sort can permute ties. Retain its exact order on those inputs.
+  prev = -1 ## i64
+  i = 0
+  while i < n
+    stamp = from_buf[i] >> 32 ## i64
+    return wassat_sort_by_key(a, key, n) if stamp == prev
+    prev = stamp
+    i += 1
+  i = 0
+  while i < n
+    a[i] = from_buf[i] & 4294967295
+    i += 1
   0
 
 # Ascending Shell sort of the variables in a[0..n) by key[variable]. The

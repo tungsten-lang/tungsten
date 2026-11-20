@@ -7251,6 +7251,12 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
       cm[2 * ci + 1] = 0
       gid[ci] = -1
     ci += 1
+  # A new learned clause can occupy any reclaimed slot. Its first use
+  # must not inherit the previous occupant's conflict timestamp.
+  ci = nn
+  while ci < ncl
+    used[ci] = 0
+    ci += 1
   state[64] = wp
   state[65] = nn
   state[66] += ncl
@@ -7751,8 +7757,10 @@ WASSAT_MAX_VARIABLE_INDEX = 2147483647
   otfs_on = st[9] == 1
   keep_going = true
 
+  conflict_age = st[5] ## i64
   while keep_going
-    cused[cl] = st[5]
+    # Only learned clauses participate in recency-based reduction.
+    cused[cl] = conflict_age if clbd[cl] > 0
     stx = cm[cl << 1] ## i64
     n = cm[(cl << 1) + 1] ## i64
     # Promotion (Kissat): a learned clause resolved on again has its glue

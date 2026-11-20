@@ -49,6 +49,7 @@ describe "Wassat reduction storage" ->
     expect([f[5][0], f[5][1], f[5][2], f[5][3]]).to eq([-1, 0, -1, 1])
     expect([f[6][1], f[6][2], f[6][3], f[6][4]]).to eq([0, 1, -1, -1])
     expect([f[3][0], f[3][1], f[4][0], f[4][1]]).to eq([4, 8, 41, 43])
+    expect([f[4][2], f[4][3]]).to eq([0, 0])
     expect([f[7][64], f[7][65], f[7][66], f[7][67], f[7][68], f[7][69]]).to eq([10, 2, 4, 10, 2, 3])
 
   it "keeps clause indices and reasons when the map is a one-word sentinel" ->

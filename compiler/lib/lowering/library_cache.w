@@ -632,6 +632,8 @@ incremental_library_cache_state = {
     :top_level_vars,
     :top_level_var_types,
     :top_level_const_values,
+    :top_level_float_literals,
+    :top_level_int_literals,
     :top_level_static_types,
     :ccall_fns,
     :math_alias_fns,

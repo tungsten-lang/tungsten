@@ -334,6 +334,17 @@
     if class_has_instance_method?(mod, ctx[:class_name], name)
       return lower_implicit_self_bare_method(ctx, name)
 
+  # A single-assignment literal constant (collect_top_level_static_types)
+  # reads as its literal inside function and method bodies. Top-level code
+  # keeps the global, which also keeps a read before the assignment nil.
+  if wfn[:name] != "main"
+    flits = mod[:top_level_float_literals]
+    if flits != nil && flits[name] != nil
+      return lower_float(ctx, flits[name])
+    ilits = mod[:top_level_int_literals]
+    if ilits != nil && ilits.has_key?(name)
+      return lower_expression(ctx, Tungsten:AST:Int.new(ilits[name]))
+
   # Check if it's a top-level (module-scope) variable
   if mod[:top_level_vars][name] == true
     top_level_raw_type = nil

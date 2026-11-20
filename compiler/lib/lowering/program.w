@@ -224,6 +224,10 @@
     mod[:top_level_static_types] = {}
   if mod[:top_level_const_values] == nil
     mod[:top_level_const_values] = {}
+  if mod[:top_level_float_literals] == nil
+    mod[:top_level_float_literals] = {}
+  if mod[:top_level_int_literals] == nil
+    mod[:top_level_int_literals] = {}
 
   # First pass: count top-level :assign targets per name. A var assigned
   # exactly once at module scope is eligible for `constant` emission.
@@ -284,6 +288,23 @@
           cv_val = top_level_const_eval(expr.value)
           if cv_val != nil
             mod[:top_level_const_values][name] = cv_val
+        # Literal constants: a single-assignment top-level name whose value is a
+        # float literal (`A0 = ~0.97`, bare or `## f64`) or a bare integer
+        # literal in the inline range (`P = 10`) reads as that literal inside
+        # function and method bodies (lower_var), so typed code sees a typed
+        # constant instead of loading and unboxing a global — a typed loop
+        # reading a float constant ran ~9x slower than with the literal. The
+        # global is still stored, so top-level code and every engine agree.
+        if assign_count[name] == 1
+          lit = expr.value
+          if lit != nil && is_ast_node?(lit)
+            lk = ast_kind(lit)
+            if lk == :float && (expr.type_hint == nil || expr.type_hint == "f64")
+              mod[:top_level_float_literals][name] = lit
+            elsif lk == :int && expr.type_hint == nil
+              iv = lit.value
+              if type(iv) == "Int" && iv < 140737488355328 && iv > 0 - 140737488355328
+                mod[:top_level_int_literals][name] = iv
     i += 1
 
 # Constant-expression evaluator for `constant`-eligible top-level `## i64`

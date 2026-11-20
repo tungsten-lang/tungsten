@@ -18,6 +18,8 @@ for spec in sys.argv[2:]:
     f = {'path': dest}
     if dest.endswith(TEXT): f['content'] = raw.decode()
     else: f['base64'] = base64.b64encode(raw).decode()
-    r = call('app_files', {'app': app, 'files': [f]})
+    args = {'app': app, 'files': [f]}
+    if os.environ.get('YAKS_DRAFT'): args['draft'] = os.environ['YAKS_DRAFT']  # pin one draft
+    r = call('app_files', args)
     txt = json.dumps(r.get('result', r))[:300]
     print(dest, len(raw), '->', txt)

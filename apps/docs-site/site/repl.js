@@ -1,12 +1,12 @@
 // The REPL: Tungsten's self-hosted interpreter, compiled to wasm32-wasi.
 // "edge" posts to ./run (worker.js runs the wasm on Cloudflare); "browser" runs the same wasm in a Web Worker here.
-import { hl, esc } from './hl.js?v=6'
+import { hl, esc } from './hl.js?v=7'
 
 const MARK = '\u0001', VAL = '\u0002'
 const PRESETS = {
   'hello, filament': `# Pseudocode that runs. ⌘↵ to run, or type in the console →\n+ Filament\n  -> new(@metal, @kelvin)\n\n  -> glow\n    if @kelvin > 2500\n      "[@metal] glows white at [@kelvin] K"\n    else\n      "[@metal] is barely orange"\n\n<< Filament.new("tungsten", 3422).glow\n<< Filament.new("iron", 1200).glow\n`,
   'operators & classes': `+ Vec\n  ro :x, :y\n\n  -> new(@x, @y)\n\n  -> +(other)\n    Vec.new(@x + other.x, @y + other.y)\n  -> to_s\n    "⟨[@x], [@y]⟩"\n\na = Vec.new(1, 2)\nb = Vec.new(3, 4)\n<< (a + b).to_s\n`,
-  'exact numbers': `# Integers promote to bignums; literals stay exact.\n<< 2 ** 200\n<< 1/3 + 1/6\n<< 0.1 + 0.2 == 0.3\n\n-> fact(n)\n  if n < 2\n    return 1\n  n * fact(n - 1)\n\n<< fact(30)\n`,
+  'exact numbers': `# Exact by default: bignums, rationals, decimal literals.\n<< 2 ** 200\n<< 30.factorial\n<< (1..30).reduce(1, -> (a, b) a * b)\n<< 1/3 + 1/6\n<< 0.1 + 0.2 == 0.3\n`,
   'collections': `squares = (1..10).map -> (n) n * n\n<< squares\n<< squares.select(-> (n) n % 2 == 0)\n<< squares.reduce(0, -> (a, b) a + b)\n\nelements = {"W" => 74, "Fe" => 26, "Au" => 79}\nelements.each -> (sym, z)\n  << "[sym] has atomic number [z]"\n`,
   'units & exact math': `# Quantities carry their units; rationals stay exact.\n<< 5 m + 20 cm\n<< 60 km / 2 h\n<< 1/3 + 1/6\n<< (2/3) ** 2\n<< 17.prime?\n\nz = Complex.new(1, 2)\n<< z * z\n<< "héllo".graphemes.size\n`,
   'traits & ro': `trait Loud\n  -> shout\n    name.upcase + "!"\n\n+ Dog\n  is Loud\n  ro :name\n  rw :tricks\n\n  -> new(@name)\n    @tricks = 0\n\nrex = Dog.new("rex")\nrex.tricks = 3\n<< rex.shout\n<< "[rex.name] knows [rex.tricks] tricks"\n`,

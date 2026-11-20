@@ -40,11 +40,37 @@ PY
 python3 ../tools/push_src.py tungsten $ROOT /tmp/src_files.txt
 ```
 
-Then `app_deploy` (yaks.app MCP tool) marks the release and uploads `worker.js`
-with the `tungsten.wasm` it imports. Bump the `?v=N` on the module URLs in
+`push.py`/`push_src.py` write into whatever draft the token's session opens;
+set `YAKS_DRAFT=<id>` (from the first write's answer) to keep them in one.
+
+Then `app_deploy` marks the release and uploads `worker.js` with the
+`tungsten.wasm` it imports. With ~1,300 files it outlasts the MCP tool's
+timeout: send the same JSON-RPC `tools/call app_deploy` over HTTP (as `push.py`
+does), with `base` = the live version and `draft`.
+
+**Binaries over the upload cap.** `app_files` refuses a request body somewhere
+under 8 MiB, i.e. a file over ~5.6 MB once base64-encoded (`tungsten.wasm` is
+6.6 MB, `tungsten.fs` 7.1 MB as of 93e6ab7f; `-Os`/`-Oz` builds still miss).
+Ship them gzipped and let the live worker inflate them:
+
+1. `gzip -9 -k tungsten.wasm tungsten.fs`, push the two `.gz` files, deploy.
+2. `app_files op: fetch, path: tungsten.wasm, url: https://thecompanygardener.yaks.app/tungsten/unz/tungsten.wasm`
+   (same for `tungsten.fs`): `worker.js` serves `GET ./unz/<file>` as
+   `<file>.gz` inflated. Check the sha256 the fetch reports against the local file.
+3. Delete the `.gz` files in that draft and deploy again. Bump the `?v=N` on the module URLs in
 `index.html`, `app.js` and `repl.js` when shipping JS changes — browsers cache
 ES modules hard. `hl.js` must be imported with the *same* specifier everywhere
 or it loads twice and the class index splits.
+
+## Sections
+
+`core/`'s top-level directories ("areas") are grouped into the sections in
+`SECTIONS` at the top of `app.js` (Foundations, Algebra & number theory,
+Analysis & geometry, Data & science, Graphics & publishing), each area with a
+one-line `AREA_BLURB`. A new `core/` directory still shows up, under "More",
+until it is filed there; `AREA_ALIAS` folds tiny areas into another. The
+sidebar, the Library page and the home page's treemap (squarified,
+section > area > class, sized by method count) all read them.
 
 ## What the extractor understands
 

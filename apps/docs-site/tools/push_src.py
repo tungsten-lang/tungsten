@@ -17,7 +17,7 @@ def flush():
     if not batch: return
     for attempt in range(3):
         try:
-            r = call({'app': app, 'files': batch})
+            r = call({'app': app, 'files': batch, **({'draft': os.environ['YAKS_DRAFT']} if os.environ.get('YAKS_DRAFT') else {})})
             if 'error' in r or r.get('result', {}).get('isError'):
                 raise RuntimeError(json.dumps(r)[:300])
             break

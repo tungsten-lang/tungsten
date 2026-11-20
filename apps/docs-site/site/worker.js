@@ -16,6 +16,17 @@ async function stdlib(env) {
 export default {
   async fetch(req, env) {
     const url = new URL(req.url)
+    // GET ./unz/<file> serves <file>.gz inflated. A binary over the app_files upload cap (the
+    // wasm, the stdlib bundle) is uploaded gzipped, then materialized whole with
+    // `app_files op: fetch` from this route (README, "Regenerate and deploy").
+    const unz = url.pathname.match(/\/unz\/([\w.-]+)$/)
+    if (unz && req.method === 'GET') {
+      const r = await env.FILES.fetch('/' + unz[1] + '.gz')
+      if (!r.ok) return new Response('not found', { status: 404 })
+      const gz = new Uint8Array(await r.arrayBuffer())
+      const raw = gz[0] === 0x1f && gz[1] === 0x8b ? await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer() : gz
+      return new Response(raw, { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' } })
+    }
     if (!/\/run\/?$/.test(url.pathname)) return new Response('not found', { status: 404 })
     if (req.method !== 'POST') return Response.json({ error: 'POST {"code": "<< 1 + 1"}' }, { status: 405 })
     let code

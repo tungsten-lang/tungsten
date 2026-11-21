@@ -194,6 +194,123 @@ import complex
     exact csum.single n i (fun k => complex.mul (complex.of_real c) (complex.mul (complex.conj (f i)) (g k))) hi
   rw [h3, csum.scale_left]
 
+-- ---- sesquilinearity, Complex Cauchy-Schwarz, and 2x2 Gram determinant -------------
+
++ cdot.add_right (n : ℕ) (f g1 g2 : ℕ → ℂ) :
+    cdot n f (fun i => complex.add (g1 i) (g2 i)) = complex.add (cdot n f g1) (cdot n f g2)
+  unfold cdot
+  have h1 : csum n (fun i => complex.mul (complex.conj (f i)) (complex.add (g1 i) (g2 i)))
+      = csum n (fun i => complex.add (complex.mul (complex.conj (f i)) (g1 i)) (complex.mul (complex.conj (f i)) (g2 i)))
+    apply csum.congr; intro i hi
+    exact complex.left_distrib (complex.conj (f i)) (g1 i) (g2 i)
+  rw [h1, csum.add]
+
++ cdot.scale_right (n : ℕ) (c : ℂ) (f g : ℕ → ℂ) :
+    cdot n f (fun i => complex.mul c (g i)) = complex.mul c (cdot n f g)
+  unfold cdot
+  have h1 : csum n (fun i => complex.mul (complex.conj (f i)) (complex.mul c (g i)))
+      = csum n (fun i => complex.mul c (complex.mul (complex.conj (f i)) (g i)))
+    apply csum.congr; intro i hi
+    apply complex.ext <;> simp <;> ring
+  rw [h1, csum.scale_left]
+
++ cdot.scale_left (n : ℕ) (c : ℂ) (f g : ℕ → ℂ) :
+    cdot n (fun i => complex.mul c (f i)) g = complex.mul (complex.conj c) (cdot n f g)
+  unfold cdot
+  have h1 : csum n (fun i => complex.mul (complex.conj (complex.mul c (f i))) (g i))
+      = csum n (fun i => complex.mul (complex.conj c) (complex.mul (complex.conj (f i)) (g i)))
+    apply csum.congr; intro i hi
+    rw [complex.conj_mul, complex.mul_assoc]
+  rw [h1, csum.scale_left]
+
+-- Expansion of ||a*f + b*g||^2 = |a|^2 ||f||^2 + |b|^2 ||g||^2 + 2 Re(conj(a) * b * <f, g>).
++ cdot.linear_comb_norm_sq (n : ℕ) (a b : ℂ) (f g : ℕ → ℂ) :
+    complex.re (cdot n (fun i => complex.add (complex.mul a (f i)) (complex.mul b (g i))) (fun i => complex.add (complex.mul a (f i)) (complex.mul b (g i)))) = complex.norm_sq a * complex.re (cdot n f f) + complex.norm_sq b * complex.re (cdot n g g) + 2 * complex.re (complex.mul (complex.mul (complex.conj a) b) (cdot n f g))
+  have h1 : cdot n (fun i => complex.add (complex.mul a (f i)) (complex.mul b (g i))) (fun i => complex.add (complex.mul a (f i)) (complex.mul b (g i))) = complex.add (complex.add (complex.mul (complex.mul (complex.conj a) a) (cdot n f f)) (complex.mul (complex.mul (complex.conj a) b) (cdot n f g))) (complex.add (complex.mul (complex.mul (complex.conj b) a) (cdot n g f)) (complex.mul (complex.mul (complex.conj b) b) (cdot n g g)))
+    unfold cdot
+    have hpt : csum n (fun i => complex.mul (complex.conj (complex.add (complex.mul a (f i)) (complex.mul b (g i)))) (complex.add (complex.mul a (f i)) (complex.mul b (g i)))) = csum n (fun i => complex.add (complex.add (complex.mul (complex.mul (complex.conj a) a) (complex.mul (complex.conj (f i)) (f i))) (complex.mul (complex.mul (complex.conj a) b) (complex.mul (complex.conj (f i)) (g i)))) (complex.add (complex.mul (complex.mul (complex.conj b) a) (complex.mul (complex.conj (g i)) (f i))) (complex.mul (complex.mul (complex.conj b) b) (complex.mul (complex.conj (g i)) (g i)))))
+      apply csum.congr; intro i hi
+      apply complex.ext <;> simp <;> ring
+    rw [hpt, csum.add, csum.add, csum.add, csum.scale_left, csum.scale_left, csum.scale_left, csum.scale_left]
+  rw [h1]
+  have hconj_cross : complex.mul (complex.mul (complex.conj b) a) (cdot n g f) = complex.conj (complex.mul (complex.mul (complex.conj a) b) (cdot n f g))
+    rw [← cdot.conj_symm n f g]
+    apply complex.ext <;> simp <;> ring
+  rw [hconj_cross]
+  have hfi : complex.im (cdot n f f) = 0 := cdot.self_im n f
+  have hgi : complex.im (cdot n g g) = 0 := cdot.self_im n g
+  unfold complex.norm_sq
+  simp [hfi, hgi]
+  ring
+
+-- Helper: if <f, f> = 0 then f(i) = 0 for all i < n, hence <f, g> = 0.
++ cdot.eq_zero_of_self_zero (n : ℕ) (f g : ℕ → ℂ) (h0 : complex.re (cdot n f f) = 0) :
+    cdot n f g = complex.zero
+  have hsum0 : (∑ i < n, complex.norm_sq (f i)) = 0
+    rw [← cdot.self_re n f]
+    exact h0
+  have hfi0 : ∀ i < n, f i = complex.zero
+    have hrec : ∀ m : ℕ, (∑ i < m, complex.norm_sq (f i)) = 0 → ∀ i < m, f i = complex.zero
+      intro m
+      induction m with hm i hi k ih hm i hi
+      · omega
+      · rw [succ_eq_add_one.nat] at hm hi
+        simp at hm
+        have hsn : 0 ≤ ∑ j < k, complex.norm_sq (f j) :=
+          sum_nonneg.real (fun j => complex.norm_sq (f j)) k (by intro j hj; exact complex.norm_sq_nonneg (f j))
+        have hkn : 0 ≤ complex.norm_sq (f k) := complex.norm_sq_nonneg (f k)
+        by_cases e : i = k
+        · rw [e]
+          have hfk0 : complex.norm_sq (f k) = 0 := by linarith
+          unfold complex.norm_sq at hfk0
+          have hre0 : complex.re (f k) = 0 := by nlinarith
+          have him0 : complex.im (f k) = 0 := by nlinarith
+          apply complex.ext <;> simp
+        · exact ih (by linarith) i (by omega)
+    exact hrec n hsum0
+  unfold cdot
+  have hz : csum n (fun i => complex.mul (complex.conj (f i)) (g i)) = csum n (fun _ => complex.zero)
+    apply csum.congr; intro i hi
+    rw [hfi0 i hi]
+    apply complex.ext <;> simp
+  rw [hz, csum.const]
+  apply complex.ext <;> simp
+
+-- COMPLEX CAUCHY-SCHWARZ INEQUALITY (AXIOM-FREE!):
+--   |<f, g>|^2 <= <f, f> * <g, g>   for all n : ℕ and f, g : ℕ → ℂ.
++ cdot.cauchy_schwarz (n : ℕ) (f g : ℕ → ℂ) :
+    complex.norm_sq (cdot n f g) ≤ complex.re (cdot n f f) * complex.re (cdot n g g)
+  set A := complex.re (cdot n f f) with hA
+  set B := complex.re (cdot n g g) with hB
+  have hAnn : 0 ≤ A := by rw [hA]; exact cdot.self_re_nonneg n f
+  have hBnn : 0 ≤ B := by rw [hB]; exact cdot.self_re_nonneg n g
+  by_cases hA0 : A = 0
+  · rw [hA] at hA0
+    have hfg0 : cdot n f g = complex.zero := cdot.eq_zero_of_self_zero n f g hA0
+    rw [hfg0]
+    unfold complex.norm_sq
+    simp
+    nlinarith
+  · have hApos : 0 < A := by linarith
+    set z := cdot n f g with hz
+    have hnn := cdot.self_re_nonneg n (fun i => complex.add (complex.mul (complex.neg z) (f i)) (complex.mul (complex.of_real A) (g i)))
+    rw [cdot.linear_comb_norm_sq n (complex.neg z) (complex.of_real A) f g] at hnn
+    rw [← hA, ← hB, ← hz] at hnn
+    have hns_neg : complex.norm_sq (complex.neg z) = complex.norm_sq z
+      unfold complex.norm_sq; simp; ring
+    have hns_A : complex.norm_sq (complex.of_real A) = A * A
+      unfold complex.norm_sq; simp
+    have hcross : complex.re (complex.mul (complex.mul (complex.conj (complex.neg z)) (complex.of_real A)) z) = -A * complex.norm_sq z
+      unfold complex.norm_sq; simp; ring
+    rw [hns_neg, hns_A, hcross] at hnn
+    nlinarith
+
+-- 2x2 Gram Determinant Positivity (`remark.pdf` item 4):
+--   det [[<f,f>, <f,g>], [<g,f>, <g,g>]] = <f,f><g,g> - |<f,g>|^2 >= 0.
++ cdot.gram_det2_nonneg (n : ℕ) (f g : ℕ → ℂ) :
+    0 ≤ complex.re (cdot n f f) * complex.re (cdot n g g) - complex.norm_sq (cdot n f g)
+  linarith [cdot.cauchy_schwarz n f g]
+
 -- ---- additive characters e_q(x) = exp(2πi x / q) on Z/qZ ---------------------------
 
 -> e_q (q : ℕ) (x : ℕ) : ℂ :=

@@ -1,0 +1,55 @@
+-- Track 1B spec: HOL typeclasses, recursive instance synthesis, and operator overloading.
+import complex
+
+-- 1. Operator overloading on ℂ (`+`, `-`, `*`, `/`, unary `-`)
++ complex_op_comm (z w : ℂ) : z + w = w + z
+  unfold complex_add
+  simp
+  exact complex.add_comm z w
+
++ complex_op_distrib (a b c : ℂ) : a * (b + c) = a * b + a * c
+  unfold complex_add complex_mul
+  simp
+  exact complex.left_distrib a b c
+
++ complex_op_sub_self (z : ℂ) : z - z = complex.zero
+  unfold complex_sub
+  simp
+  exact complex.sub_self z
+
++ complex_op_div_self (z : ℂ) (hz : z ≠ complex.zero) : z / z = complex.one
+  unfold complex_div
+  simp
+  unfold complex.div
+  exact complex.mul_inv_cancel z hz
+
+-- 2. Polymorphic function with `[Add α]` constraint & automatic dictionary synthesis
+-> double [A : Add α] (x : α) : α := Add.add A x x
+
++ double_complex (z : ℂ) : double z = z + z := by unfold double; auto
+
++ double_nat (n : ℕ) : double n = n + n
+  unfold double nat_add
+  simp
+
+-- 3. Recursive product instance synthesis `Add (ℂ × ℕ)`
++ pair_add_check (p q : ℂ × ℕ) : (p + q).2 = p.2 + q.2
+  unfold prod_add nat_add
+  simp
+
+-- 4. Custom user structure with multi-line fields + custom typeclass instance
+structure GaussInt :=
+  (re : ℤ)
+  (im : ℤ)
+
+instance gauss_add : Add GaussInt :=
+  Add.mk (fun a b => GaussInt.mk (GaussInt.re a + GaussInt.re b) (GaussInt.im a + GaussInt.im b))
+
++ gauss_add_re (a b : GaussInt) : GaussInt.re (a + b) = GaussInt.re a + GaussInt.re b
+  unfold gauss_add
+  simp
+
+#axioms complex_op_comm
+#axioms double_complex
+#axioms pair_add_check
+#axioms gauss_add_re

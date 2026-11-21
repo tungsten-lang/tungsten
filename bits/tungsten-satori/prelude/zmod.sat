@@ -1,0 +1,145 @@
+-- Modular arithmetic on Z/nZ, units, negation involution, and CM-type duality.
+-- All theorems proved unconditionally on Satori's foundational HOL kernel.
+
+import divmod
+
+-> zmod.add (n a b : ℕ) : ℕ := (a + b) % n
+-> zmod.mul (n a b : ℕ) : ℕ := (a * b) % n
+-> zmod.neg (n a : ℕ) : ℕ := if a % n = 0 then 0 else n - a % n
+-> zmod.is_unit (n a : ℕ) : Prop := ∃ b < n, (a * b) % n = 1 % n
+
+-- ---- ring laws on residues ---------------------------------------------------------
+
++ zmod.mod_mod (a n : ℕ) : (a % n) % n = a % n
+  by_cases hn : n = 0
+  · rw [hn]
+    have h1 := div_add_mod.nat a 0
+    have h2 := div_add_mod.nat (a % 0) 0
+    linarith
+  · exact (div_mod_of_lt.nat (a % n) n (mod_lt.nat a n (by omega))).2
+
++ zmod.add_comm (n a b : ℕ) : zmod.add n a b = zmod.add n b a
+  unfold zmod.add
+  have h : a + b = b + a := by ring
+  rw [h]
+
++ zmod.add_assoc (n a b c : ℕ) :
+    zmod.add n (zmod.add n a b) c = zmod.add n a (zmod.add n b c)
+  unfold zmod.add
+  rw [add_mod.nat ((a + b) % n) c n, zmod.mod_mod (a + b) n, ← add_mod.nat (a + b) c n]
+  rw [add_mod.nat a ((b + c) % n) n, zmod.mod_mod (b + c) n, ← add_mod.nat a (b + c) n]
+  have h : a + b + c = a + (b + c) := by ring
+  rw [h]
+
++ zmod.add_zero (n a : ℕ) (ha : a < n) : zmod.add n a 0 = a
+  unfold zmod.add
+  have h1 : a + 0 = a := by ring
+  rw [h1]
+  exact (div_mod_of_lt.nat a n ha).2
+
++ zmod.mul_comm (n a b : ℕ) : zmod.mul n a b = zmod.mul n b a
+  unfold zmod.mul
+  have h : a * b = b * a := by ring
+  rw [h]
+
++ zmod.mul_assoc (n a b c : ℕ) :
+    zmod.mul n (zmod.mul n a b) c = zmod.mul n a (zmod.mul n b c)
+  unfold zmod.mul
+  rw [mul_mod.nat ((a * b) % n) c n, zmod.mod_mod (a * b) n, ← mul_mod.nat (a * b) c n]
+  rw [mul_mod.nat a ((b * c) % n) n, zmod.mod_mod (b * c) n, ← mul_mod.nat a (b * c) n]
+  have h : a * b * c = a * (b * c) := by ring
+  rw [h]
+
++ zmod.mul_one (n a : ℕ) (ha : a < n) : zmod.mul n a 1 = a
+  unfold zmod.mul
+  have h1 : a * 1 = a := by ring
+  rw [h1]
+  exact (div_mod_of_lt.nat a n ha).2
+
++ zmod.left_distrib (n a b c : ℕ) :
+    zmod.mul n a (zmod.add n b c) = zmod.add n (zmod.mul n a b) (zmod.mul n a c)
+  unfold zmod.mul zmod.add
+  rw [mul_mod.nat a ((b + c) % n) n, zmod.mod_mod (b + c) n, ← mul_mod.nat a (b + c) n]
+  rw [add_mod.nat ((a * b) % n) ((a * c) % n) n, zmod.mod_mod (a * b) n, zmod.mod_mod (a * c) n, ← add_mod.nat (a * b) (a * c) n]
+  have h : a * (b + c) = a * b + a * c := by ring
+  rw [h]
+
+-- ---- negation involution on residues a < n -----------------------------------------
+
++ zmod.neg_lt (n a : ℕ) (hn : 0 < n) : zmod.neg n a < n
+  unfold zmod.neg
+  by_cases h0 : a % n = 0
+  · simp [h0]
+  · simp [h0]
+    have hlt : a % n < n := mod_lt.nat a n hn
+    have hpos : 0 < a % n := by omega
+    omega
+
++ zmod.neg_neg (n a : ℕ) (ha : a < n) : zmod.neg n (zmod.neg n a) = a
+  have hn : 0 < n := by omega
+  have hmod : a % n = a := (div_mod_of_lt.nat a n ha).2
+  unfold zmod.neg
+  rw [hmod]
+  by_cases h0 : a = 0
+  · rw [h0]
+    have h0m : 0 % n = 0 := (div_mod_of_lt.nat 0 n hn).2
+    simp [h0m]
+  · simp [h0]
+    have hlt : n - a < n := by omega
+    have hpos : 0 < n - a := by omega
+    have hmod2 : (n - a) % n = n - a := (div_mod_of_lt.nat (n - a) n hlt).2
+    rw [hmod2]
+    have hne : n - a ≠ 0 := by omega
+    simp [hne]
+    omega
+
++ zmod.neg_add_cancel (n a : ℕ) (hn : 0 < n) : zmod.add n a (zmod.neg n a) = 0
+  unfold zmod.add zmod.neg
+  by_cases h0 : a % n = 0
+  · simp [h0]
+  · simp [h0]
+    have hlt : a % n < n := mod_lt.nat a n hn
+    rw [add_mod.nat a (n - a % n) n]
+    have hlt2 : n - a % n < n := by omega
+    rw [(div_mod_of_lt.nat (n - a % n) n hlt2).2]
+    have hsum : a % n + (n - a % n) = n := by omega
+    rw [hsum]
+    have hnn : (0 + n * 1) % n = 0 % n := add_mul_mod.nat 0 1 n
+    have h0n : 0 % n = 0 := (div_mod_of_lt.nat 0 n hn).2
+    have h01 : 0 + n * 1 = n := by ring
+    rw [h01, h0n] at hnn
+    exact hnn
+
++ zmod.neg_one_ne_one (n : ℕ) (hodd : n % 2 = 1) (hge : 3 ≤ n) : zmod.neg n 1 ≠ 1
+  unfold zmod.neg
+  have h1 : 1 % n = 1 := (div_mod_of_lt.nat 1 n (by omega)).2
+  rw [h1]
+  have h10 : (1 : ℕ) ≠ 0 := by decide
+  simp [h10]
+  omega
+
+-- ---- unit group closure ------------------------------------------------------------
+
++ zmod.unit_one (n : ℕ) (hn : 2 ≤ n) : zmod.is_unit n 1
+  unfold zmod.is_unit
+  use 1
+  constructor
+  · omega
+  · have h : 1 * 1 = 1 := by decide
+    rw [h]
+
++ zmod.unit_mul (n a b : ℕ) (hn : 0 < n) (ha : zmod.is_unit n a) (hb : zmod.is_unit n b) :
+    zmod.is_unit n (zmod.mul n a b)
+  unfold zmod.is_unit at ha hb
+  obtain ⟨ia, hia, haeq⟩ := ha
+  obtain ⟨ib, hib, hbeq⟩ := hb
+  unfold zmod.is_unit zmod.mul
+  use (ia * ib) % n
+  constructor
+  · exact mod_lt.nat (ia * ib) n hn
+  · rw [← mul_mod.nat (a * b) (ia * ib) n]
+    have hre : a * b * (ia * ib) = (a * ia) * (b * ib) := by ring
+    rw [hre, mul_mod.nat (a * ia) (b * ib) n, haeq, hbeq]
+    rw [← mul_mod.nat 1 1 n]
+    have h11 : 1 * 1 = 1 := by decide
+    rw [h11]

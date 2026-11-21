@@ -21,6 +21,64 @@
     @aliases = {"True" => "⊤", "False" => "⊥"}
     @fields = {}
     @ctor_names = {}
+    @classes = {}
+    @instances = {}
+    @op_classes = {"+" => ["Add", "Add.add"], "-" => ["Sub", "Sub.sub"], "*" => ["Mul", "Mul.mul"], "/" => ["Div", "Div.div"]}
+    @unop_classes = {"neg" => ["Neg", "Neg.neg"]}
+
+  -> register_class(name, params, fields)
+    @classes[name] = [params, fields]
+
+  -> is_class_ty?(ty)
+    r = resolve(ty)
+    r.tag == :c && @classes.has_key?(r.name)
+
+  -> register_instance(inst_name, class_name, target_ty, dep_tys)
+    if !@instances.has_key?(class_name)
+      @instances[class_name] = []
+    @instances[class_name].push([inst_name, target_ty, dep_tys])
+
+  -> synth_instance(goal_ty, depth = 0)
+    if depth > 8
+      return nil
+    gt = resolve(goal_ty)
+    if gt.tag != :c || !@classes.has_key?(gt.name)
+      return nil
+    # 1. Local instance hypotheses in scope (innermost first)
+    i = @locals.size - 1
+    while i >= 0
+      lv = @locals[i][1]
+      if ty_eq(resolve(lv.ty), gt)
+        return lv
+      i -= 1
+    # 2. Registered global instances (most recently declared first)
+    list = @instances[gt.name]
+    if list == nil
+      return nil
+    j = list.size - 1
+    while j >= 0
+      entry = list[j]
+      inst_name = entry[0]
+      target_ty = entry[1]
+      dep_tys = entry[2]
+      m = {}
+      if ty_match(target_ty, gt, m)
+        ok = true
+        dep_terms = []
+        dep_tys.each -> (dt)
+          d_inst = synth_instance(ty_subst(dt, m), depth + 1)
+          if d_inst == nil
+            ok = false
+          else
+            dep_terms.push(d_inst)
+        if ok
+          res = const_inst(inst_name)
+          dep_terms.each -> (dt_tm)
+            res = app(res, dt_tm)
+          unify(tyof(res), gt)
+          return res
+      j -= 1
+    nil
 
   -> reset
     @subst = {}
@@ -185,6 +243,12 @@
       return ty_rat
     when "ℝ", "real", "Real"
       return ty_real
+    when "ℂ", "Complex"
+      if @pending != nil && @pending == "complex"
+        return ty_con("complex", [])
+      if !@k.types.has_key?("complex")
+        raise "unknown type " + n + " (add `import complex`)"
+      return ty_con("complex", [])
     when "Prop", "bool", "Bool"
       return ty_bool
     when "set", "Set"
@@ -289,10 +353,30 @@
       f = elab(sp[0])
       sp[1].each -> (x)
         ft = resolve(type_of_meta(f))
-        if x.kind == :lam && ft.fun?
-          f = app(f, elab_lam_expected(x.binders, x.kids[0], 0, ft.dom))
+        xv = nil
+        if x.kind == :lam && ft.fun? && !is_class_ty?(ft.dom)
+          xv = elab_lam_expected(x.binders, x.kids[0], 0, ft.dom)
+          f = app(f, xv)
         else
-          f = app(f, elab(x))
+          xv = elab(x)
+          xt = resolve(type_of_meta(xv))
+          # Auto-synthesize leading typeclass dictionary arguments when caller omits them
+          if ft.fun? && is_class_ty?(ft.dom) && !(xt.tag == :c && xt.name == ft.dom.name)
+            # Peek past leading class params to unify the first value param with xt first,
+            # so polymorphic class goals like `Add ?1` become concrete `Add complex`.
+            peek_ty = ft
+            cls_doms = []
+            while peek_ty.fun? && is_class_ty?(peek_ty.dom)
+              cls_doms.push(peek_ty.dom)
+              peek_ty = resolve(peek_ty.cod)
+            if peek_ty.fun?
+              unify(peek_ty.dom, xt)
+            cls_doms.each -> (cd)
+              dict = synth_instance(resolve(cd))
+              if dict == nil
+                raise "could not synthesize typeclass instance for " + ty_show(resolve(cd))
+              f = app(f, dict)
+          f = app(f, xv)
       f
     when :binop
       elab_binop(e.s, e.kids[0], e.kids[1])
@@ -468,6 +552,15 @@
       return ["rat_of_int", "real_of_rat"]
     if f == "nat" && g == "real"
       return ["int_of_nat", "rat_of_int", "real_of_rat"]
+    if g == "complex" && @k.has_const?("complex.of_real")
+      if f == "real"
+        return ["complex.of_real"]
+      if f == "rat"
+        return ["real_of_rat", "complex.of_real"]
+      if f == "int"
+        return ["rat_of_int", "real_of_rat", "complex.of_real"]
+      if f == "nat"
+        return ["int_of_nat", "rat_of_int", "real_of_rat", "complex.of_real"]
     nil
 
   -> elab_unop(op, x)
@@ -478,6 +571,13 @@
       mk_not(p)
     when "neg"
       t = elab(x)
+      tt = resolve(tyof(t))
+      if tt.tag == :c && !["nat", "int", "rat", "real"].include?(tt.name)
+        uop = @unop_classes["neg"]
+        if uop != nil && @classes.has_key?(uop[0])
+          dict = synth_instance(ty_con(uop[0], [tt]))
+          if dict != nil
+            return app(app(const_inst(uop[1]), dict), t)
       if t.tag == :lit
         mark_numeric(t.ty)
       app(const_inst("neg"), t)
@@ -492,6 +592,15 @@
   -> arith(name, l, r)
     a = elab(l)
     b = elab(r)
+    ta = resolve(tyof(a))
+    tb = resolve(tyof(b))
+    t_op = ta.tag == :c ? ta : tb
+    if t_op.tag == :c && !["nat", "int", "rat", "real"].include?(t_op.name)
+      bop = @op_classes[name]
+      if bop != nil && @classes.has_key?(bop[0])
+        dict = synth_instance(ty_con(bop[0], [t_op]))
+        if dict != nil
+          return app(app(app(const_inst(bop[1]), dict), a), b)
     t = app2(name, a, b)
     mark_numeric(tyof(a))
     t

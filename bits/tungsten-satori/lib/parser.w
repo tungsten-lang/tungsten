@@ -100,7 +100,7 @@
       t = peek
       # a binder type must end at the closing bracket; `ℕ × ℕ` parses as a
       # partial expression, so fall back to the type grammar
-      ok = t == nil || (t.kind == :sym && (t.text == ")" || t.text == "}" || t.text == ":=" || t.text == ","))
+      ok = t == nil || (t.kind == :sym && (t.text == ")" || t.text == "}" || t.text == "\]" || t.text == ":=" || t.text == ","))
     rescue err
       ok = false
     if ok
@@ -536,22 +536,43 @@
     i = j
   out
 
-# Parses (x y : τ) {z : σ} binder groups starting at p.pos; stops at other tokens.
+# Parses (x y : τ) {z : σ} [inst : C α] [C α] binder groups starting at p.pos; stops at other tokens.
 -> parse_cmd_binders(p)
   bs = []
-  while p.is?("(") || p.is?("{")
-    close = ")"
-    if p.is?("{")
-      close = "}"
-    p.next_tok
-    names = []
-    while p.peek != nil && p.peek.kind == :id
-      names.push(p.next_tok.text)
-    p.expect(":")
-    ty = p.parse_expr_or_type
-    p.expect(close)
-    names.each -> (nm)
-      bs.push(Binder.new(nm, ty, nil, nil))
+  inst_i = 0
+  while p.is?("(") || p.is?("{") || p.is?("\[")
+    if p.is?("\[")
+      p.next_tok
+      # Check if `[name : Type]` or anonymous `[Type]`
+      has_colon = false
+      t0 = p.peek
+      t1 = p.peek_at(1)
+      if t0 != nil && t0.kind == :id && t1 != nil && t1.kind == :sym && t1.text == ":"
+        has_colon = true
+      if has_colon
+        nm = p.next_tok.text
+        p.expect(":")
+        ty = p.parse_type
+        p.expect("\]")
+        bs.push(Binder.new(nm, ty, :inst, nil))
+      else
+        ty = p.parse_type
+        p.expect("\]")
+        bs.push(Binder.new("_inst" + inst_i.to_s, ty, :inst, nil))
+        inst_i += 1
+    else
+      close = ")"
+      if p.is?("{")
+        close = "}"
+      p.next_tok
+      names = []
+      while p.peek != nil && p.peek.kind == :id
+        names.push(p.next_tok.text)
+      p.expect(":")
+      ty = p.parse_expr_or_type
+      p.expect(close)
+      names.each -> (nm)
+        bs.push(Binder.new(nm, ty, nil, nil))
   bs
 
 -> parse_program(src)
@@ -612,6 +633,12 @@
     c = parse_inductive_cmd(toks, block)
   elsif head.kind == :kw && head.text == "structure"
     c = parse_structure_cmd(toks, block)
+  elsif head.kind == :kw && head.text == "class"
+    c = parse_structure_cmd(toks, block)
+    c.kind = :class
+  elsif head.kind == :kw && head.text == "instance"
+    c = parse_def_cmd(toks, block)
+    c.kind = :instance
   elsif head.kind == :sym && head.text == "#"
     c = Cmd.new(:hash)
     c.name = toks[1].text
@@ -728,7 +755,7 @@
     c.ctors.push([nm, args])
   c
 
-# structure name (α) := (f : τ) (g : σ)   -- one constructor `mk`
+# structure/class name (α) := (f : τ) (g : σ)   -- supports indented field lines too
 -> parse_structure_cmd(toks, block)
   c = Cmd.new(:structure)
   c.name = toks[1].text
@@ -737,7 +764,9 @@
     if toks[i].kind == :id
       c.params.push(toks[i].text)
     i += 1
-  p = EParser.new(toks, i + 1)
+  ftoks = i + 1 < toks.size ? arr_sub(toks, i + 1, toks.size - i - 1) : []
+  flatten_block(block, ftoks)
+  p = EParser.new(ftoks, 0)
   fields = []
   while !p.at_end?
     p.expect("(")

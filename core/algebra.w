@@ -118,6 +118,8 @@ use algebra/point_search
 use algebra/zeta
 use algebra/coleman
 use algebra/galois
+use algebra/dirichlet
+use algebra/unitary_theta
 
 
 # Exact algebraic structures: coefficient fields, polynomial rings, ideals,

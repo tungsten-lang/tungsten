@@ -1,0 +1,207 @@
+-- Complex interval Darboux integration and finite normalized Haar expectation on Z/qZ.
+-- All theorems proved unconditionally on Satori's foundational HOL kernel.
+
+import complex_sum
+import integral_calculus
+
+-- ---- complex interval Darboux integration ------------------------------------------
+
+-> c_has_integral (f : ℝ → ℂ) (a b : ℝ) (I : ℂ) : Prop :=
+  darboux.has_integral (fun x => complex.re (f x)) a b (complex.re I) ∧
+  darboux.has_integral (fun x => complex.im (f x)) a b (complex.im I)
+
++ c_has_integral.unique (f : ℝ → ℂ) (a b : ℝ) (I J : ℂ)
+    (hi : c_has_integral f a b I) (hj : c_has_integral f a b J) : I = J
+  unfold c_has_integral at hi hj
+  apply complex.ext
+  · exact darboux.unique (fun x => complex.re (f x)) a b (complex.re I) (complex.re J) hi.1 hj.1
+  · exact darboux.unique (fun x => complex.im (f x)) a b (complex.im I) (complex.im J) hi.2 hj.2
+
++ c_has_integral.const (a b : ℝ) (c : ℂ) (ab : a ≤ b) :
+    c_has_integral (fun _ => c) a b (complex.smul (b - a) c)
+  unfold c_has_integral
+  constructor
+  · have hr : complex.re (complex.smul (b - a) c) = complex.re c * (b - a) := by simp; ring
+    rw [hr]
+    exact darboux.const a b (complex.re c) ab
+  · have hi : complex.im (complex.smul (b - a) c) = complex.im c * (b - a) := by simp; ring
+    rw [hi]
+    exact darboux.const a b (complex.im c) ab
+
++ c_has_integral.congr (f g : ℝ → ℂ) (a b : ℝ) (I : ℂ)
+    (hf : c_has_integral f a b I) (hfg : ∀ x, a ≤ x → x ≤ b → f x = g x) :
+    c_has_integral g a b I
+  unfold c_has_integral at hf ⊢
+  constructor
+  · apply darboux.congr (fun x => complex.re (f x)) (fun x => complex.re (g x)) a b (complex.re I) hf.1
+    intro x ax xb; rw [hfg x ax xb]
+  · apply darboux.congr (fun x => complex.im (f x)) (fun x => complex.im (g x)) a b (complex.im I) hf.2
+    intro x ax xb; rw [hfg x ax xb]
+
++ c_has_integral.add (f g : ℝ → ℂ) (a b : ℝ) (I J : ℂ)
+    (hf : c_has_integral f a b I) (hg : c_has_integral g a b J) :
+    c_has_integral (fun x => complex.add (f x) (g x)) a b (complex.add I J)
+  unfold c_has_integral at hf hg ⊢
+  constructor
+  · have hsum := darboux.add (fun x => complex.re (f x)) (fun x => complex.re (g x)) a b (complex.re I) (complex.re J) hf.1 hg.1
+    have hval : complex.re (complex.add I J) = complex.re I + complex.re J := by simp
+    rw [hval]
+    apply darboux.congr (fun x => complex.re (f x) + complex.re (g x)) (fun x => complex.re (complex.add (f x) (g x))) a b (complex.re I + complex.re J) hsum
+    intro x ax xb; simp
+  · have hsum := darboux.add (fun x => complex.im (f x)) (fun x => complex.im (g x)) a b (complex.im I) (complex.im J) hf.2 hg.2
+    have hval : complex.im (complex.add I J) = complex.im I + complex.im J := by simp
+    rw [hval]
+    apply darboux.congr (fun x => complex.im (f x) + complex.im (g x)) (fun x => complex.im (complex.add (f x) (g x))) a b (complex.im I + complex.im J) hsum
+    intro x ax xb; simp
+
++ c_has_integral.scale_real (f : ℝ → ℂ) (a b k : ℝ) (I : ℂ)
+    (hf : c_has_integral f a b I) :
+    c_has_integral (fun x => complex.smul k (f x)) a b (complex.smul k I)
+  unfold c_has_integral at hf ⊢
+  constructor
+  · have hs := darboux.scale (fun x => complex.re (f x)) a b (complex.re I) k hf.1
+    have hval : complex.re (complex.smul k I) = k * complex.re I := by simp
+    rw [hval]
+    apply darboux.congr (fun x => k * complex.re (f x)) (fun x => complex.re (complex.smul k (f x))) a b (k * complex.re I) hs
+    intro x ax xb; simp
+  · have hs := darboux.scale (fun x => complex.im (f x)) a b (complex.im I) k hf.2
+    have hval : complex.im (complex.smul k I) = k * complex.im I := by simp
+    rw [hval]
+    apply darboux.congr (fun x => k * complex.im (f x)) (fun x => complex.im (complex.smul k (f x))) a b (k * complex.im I) hs
+    intro x ax xb; simp
+
++ c_has_integral.scale_complex (f : ℝ → ℂ) (a b : ℝ) (c I : ℂ)
+    (hf : c_has_integral f a b I) :
+    c_has_integral (fun x => complex.mul c (f x)) a b (complex.mul c I)
+  unfold c_has_integral at hf ⊢
+  constructor
+  · have h1 := darboux.scale (fun x => complex.re (f x)) a b (complex.re I) (complex.re c) hf.1
+    have h2 := darboux.scale (fun x => complex.im (f x)) a b (complex.im I) (-complex.im c) hf.2
+    have hadd := darboux.add (fun x => complex.re c * complex.re (f x)) (fun x => (-complex.im c) * complex.im (f x)) a b (complex.re c * complex.re I) ((-complex.im c) * complex.im I) h1 h2
+    have hval : complex.re (complex.mul c I) = complex.re c * complex.re I + (-complex.im c) * complex.im I := by simp; ring
+    rw [hval]
+    apply darboux.congr (fun x => complex.re c * complex.re (f x) + (-complex.im c) * complex.im (f x)) (fun x => complex.re (complex.mul c (f x))) a b (complex.re c * complex.re I + (-complex.im c) * complex.im I) hadd
+    intro x ax xb; simp; ring
+  · have h1 := darboux.scale (fun x => complex.im (f x)) a b (complex.im I) (complex.re c) hf.2
+    have h2 := darboux.scale (fun x => complex.re (f x)) a b (complex.re I) (complex.im c) hf.1
+    have hadd := darboux.add (fun x => complex.re c * complex.im (f x)) (fun x => complex.im c * complex.re (f x)) a b (complex.re c * complex.im I) (complex.im c * complex.re I) h1 h2
+    have hval : complex.im (complex.mul c I) = complex.re c * complex.im I + complex.im c * complex.re I := by simp
+    rw [hval]
+    apply darboux.congr (fun x => complex.re c * complex.im (f x) + complex.im c * complex.re (f x)) (fun x => complex.im (complex.mul c (f x))) a b (complex.re c * complex.im I + complex.im c * complex.re I) hadd
+    intro x ax xb; simp
+
++ c_has_integral.conj (f : ℝ → ℂ) (a b : ℝ) (I : ℂ)
+    (hf : c_has_integral f a b I) :
+    c_has_integral (fun x => complex.conj (f x)) a b (complex.conj I)
+  unfold c_has_integral at hf ⊢
+  constructor
+  · have hval : complex.re (complex.conj I) = complex.re I := by simp
+    rw [hval]
+    apply darboux.congr (fun x => complex.re (f x)) (fun x => complex.re (complex.conj (f x))) a b (complex.re I) hf.1
+    intro x ax xb; simp
+  · have hneg := darboux.neg (fun x => complex.im (f x)) a b (complex.im I) hf.2
+    have hval : complex.im (complex.conj I) = -complex.im I := by simp; ring
+    rw [hval]
+    apply darboux.congr (fun x => -complex.im (f x)) (fun x => complex.im (complex.conj (f x))) a b (-complex.im I) hneg
+    intro x ax xb; simp; ring
+
++ c_has_integral.adjacent (f : ℝ → ℂ) (a b c : ℝ) (I J : ℂ)
+    (left : c_has_integral f a b I) (right : c_has_integral f b c J) :
+    c_has_integral f a c (complex.add I J)
+  unfold c_has_integral at left right ⊢
+  constructor
+  · have hr : complex.re (complex.add I J) = complex.re I + complex.re J := by simp
+    rw [hr]
+    exact darboux.adjacent (fun x => complex.re (f x)) a b c (complex.re I) (complex.re J) left.1 right.1
+  · have hi : complex.im (complex.add I J) = complex.im I + complex.im J := by simp
+    rw [hi]
+    exact darboux.adjacent (fun x => complex.im (f x)) a b c (complex.im I) (complex.im J) left.2 right.2
+
+-- ---- finite normalized Haar expectation on Z/qZ ------------------------------------
+
+-> haar_avg (q : ℕ) (f : ℕ → ℂ) : ℂ :=
+  complex.smul (1 / (q : ℝ)) (csum q f)
+
++ haar_avg.congr (q : ℕ) (f g : ℕ → ℂ) (h : ∀ i < q, f i = g i) :
+    haar_avg q f = haar_avg q g
+  unfold haar_avg
+  rw [csum.congr q f g h]
+
++ haar_avg.add (q : ℕ) (f g : ℕ → ℂ) :
+    haar_avg q (fun i => complex.add (f i) (g i)) = complex.add (haar_avg q f) (haar_avg q g)
+  unfold haar_avg
+  rw [csum.add]
+  apply complex.ext <;> simp <;> ring
+
++ haar_avg.scale_left (q : ℕ) (c : ℂ) (f : ℕ → ℂ) :
+    haar_avg q (fun i => complex.mul c (f i)) = complex.mul c (haar_avg q f)
+  unfold haar_avg
+  rw [csum.scale_left]
+  apply complex.ext <;> simp <;> ring
+
++ haar_avg.conj (q : ℕ) (f : ℕ → ℂ) :
+    complex.conj (haar_avg q f) = haar_avg q (fun i => complex.conj (f i))
+  unfold haar_avg
+  rw [← csum.conj]
+  apply complex.ext <;> simp <;> ring
+
++ haar_avg.const (q : ℕ) (c : ℂ) (hq : 0 < q) :
+    haar_avg q (fun _ => c) = c
+  unfold haar_avg
+  rw [csum.const]
+  have hqpos : (0 : ℝ) < (q : ℝ) := by
+    have h1 : q = (q - 1) + 1 := by omega
+    rw [h1]
+    simp
+    linarith [cast_nonneg.real (q - 1)]
+  have hqne : (q : ℝ) ≠ 0 := by linarith
+  have hinv : (1 / (q : ℝ)) * (q : ℝ) = 1 := by
+    have hm := mul_div_cancel.real 1 (q : ℝ) hqne
+    linarith
+  apply complex.ext
+  · simp
+    linear_combination (complex.re c) * hinv
+  · simp
+    linear_combination (complex.im c) * hinv
+
++ haar_avg.swap (n m : ℕ) (f : ℕ → ℕ → ℂ) :
+    haar_avg n (fun i => haar_avg m (fun j => f i j))
+      = haar_avg m (fun j => haar_avg n (fun i => f i j))
+  unfold haar_avg
+  have hL : csum n (fun i => complex.smul (1 / (m : ℝ)) (csum m (fun j => f i j)))
+      = complex.smul (1 / (m : ℝ)) (csum n (fun i => csum m (fun j => f i j))) := by
+    have hs : csum n (fun i => complex.smul (1 / (m : ℝ)) (csum m (fun j => f i j)))
+        = csum n (fun i => complex.mul (complex.of_real (1 / (m : ℝ))) (csum m (fun j => f i j))) := by
+      apply csum.congr; intro i hi; apply complex.ext <;> simp <;> ring
+    rw [hs, csum.scale_left]
+    apply complex.ext <;> simp <;> ring
+  have hR : csum m (fun j => complex.smul (1 / (n : ℝ)) (csum n (fun i => f i j)))
+      = complex.smul (1 / (n : ℝ)) (csum m (fun j => csum n (fun i => f i j))) := by
+    have hs : csum m (fun j => complex.smul (1 / (n : ℝ)) (csum n (fun i => f i j)))
+        = csum m (fun j => complex.mul (complex.of_real (1 / (n : ℝ))) (csum n (fun i => f i j))) := by
+      apply csum.congr; intro j hj; apply complex.ext <;> simp <;> ring
+    rw [hs, csum.scale_left]
+    apply complex.ext <;> simp <;> ring
+  rw [hL, hR, csum.swap]
+  apply complex.ext <;> simp <;> ring
+
++ haar_avg.e_q_one (q a : ℕ) (hq : 0 < q) (h1 : e_q q a = complex.one) :
+    haar_avg q (fun h => e_q q (h * a)) = complex.one
+  unfold haar_avg
+  rw [e_q.sum_eq_q_of_one q a h1]
+  have hqpos : (0 : ℝ) < (q : ℝ) := by
+    have h1 : q = (q - 1) + 1 := by omega
+    rw [h1]
+    simp
+    linarith [cast_nonneg.real (q - 1)]
+  have hqne : (q : ℝ) ≠ 0 := by linarith
+  have hinv : (1 / (q : ℝ)) * (q : ℝ) = 1 := by
+    have hm := mul_div_cancel.real 1 (q : ℝ) hqne
+    linarith
+  apply complex.ext <;> simp
+
++ haar_avg.e_q_zero (q a : ℕ) (hne : e_q q a ≠ complex.one) (hper : e_q q (q * a) = complex.one) :
+    haar_avg q (fun h => e_q q (h * a)) = complex.zero
+  unfold haar_avg
+  rw [e_q.sum_eq_zero_of_ne_one q a hne hper]
+  apply complex.ext <;> simp <;> ring

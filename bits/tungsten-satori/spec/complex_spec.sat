@@ -1,0 +1,23 @@
+-- Track 1A spec: first-class complex numbers ℂ and coercions in Satori.
+import complex
+
++ coerce_nat_complex (n : ℕ) : complex.im (n : ℂ) = 0
+  simp
+
++ coerce_real_complex (r : ℝ) : complex.re (r : ℂ) = r
+  simp
+
++ euler_unit_circle (t : ℝ) : complex.norm_sq (complex.exp (complex.mk 0 t)) = 1 :=
+  complex.norm_sq_exp_i t
+
++ field_inverse_check (z : ℂ) (hz : z ≠ complex.zero) :
+    complex.mul (complex.inv z) z = complex.one :=
+  complex.inv_mul_cancel z hz
+
++ exp_homomorphism (z w : ℂ) :
+    complex.exp (complex.add z w) = complex.mul (complex.exp z) (complex.exp w) :=
+  complex.exp_add z w
+
+#axioms complex.mul_inv_cancel
+#axioms complex.exp_add
+#axioms complex.exp_ne_zero

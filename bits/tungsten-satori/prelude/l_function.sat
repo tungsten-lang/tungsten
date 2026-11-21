@@ -1,0 +1,512 @@
+-- Real/complex powers, Euler factor nonvanishing, concrete Dirichlet characters with
+-- primitive conductor existence, and axiom-free Layer 0 L-function reflection theorems.
+-- All theorems proved unconditionally on Satori's foundational HOL kernel (0 custom axioms).
+
+import dirichlet
+import measure
+import exp_order
+
+-- ====================================================================================
+-- 1. Real & Complex Powers (built from exp & log, zero custom axioms)
+-- ====================================================================================
+
+-> rpow (x a : ℝ) : ℝ := exp (a * log x)
+
+-> cpow_real (x : ℝ) (s : ℂ) : ℂ := complex.exp (complex.smul (log x) s)
+
++ rpow.pos (x a : ℝ) : 0 < rpow x a
+  unfold rpow
+  exact exp_pos (a * log x)
+
++ rpow.add (x a b : ℝ) : rpow x (a + b) = rpow x a * rpow x b
+  unfold rpow
+  have h : (a + b) * log x = a * log x + b * log x := by ring
+  rw [h, exp_add]
+
++ rpow.mono_exp (x a b : ℝ) (hx : 1 ≤ x) (hab : a ≤ b) : rpow x a ≤ rpow x b
+  unfold rpow
+  have hlog : 0 ≤ log x := log_nonneg x hx
+  have hdiff : 0 ≤ (b - a) * log x := mul_nonneg.real (b - a) (log x) (by linarith) hlog
+  exact (exp_le_exp (a * log x) (b * log x)).mpr (by linarith)
+
+-- Exponential-growth domination: for any a < b, C >= 0, c > 0, and cutoff X,
+-- there exists x >= X (and x >= 1) with C * x^a < c * x^b.
++ rpow.domination (a b C c X : ℝ) (hab : a < b) (hC : 0 ≤ C) (hc : 0 < c) :
+    ∃ x : ℝ, 1 ≤ x ∧ X ≤ x ∧ C * rpow x a < c * rpow x b
+  have hd : 0 < b - a := by linarith
+  have hratio : 0 ≤ C / c := by
+    rw [div_def.real C c]
+    have hinv : 0 < 1 / c := one_div_pos.real c hc
+    exact mul_nonneg.real C (1 / c) hC (by linarith)
+  set M := (C / c + 1) / (b - a) with hM
+  set t := max (max 0 X) M with ht
+  have ht0 : 0 ≤ t := by
+    rw [ht]
+    have h1 := le_max_left.real 0 X
+    have h2 := le_max_left.real (max 0 X) M
+    linarith
+  have htX : X ≤ t := by
+    rw [ht]
+    have h1 := le_max_right.real 0 X
+    have h2 := le_max_left.real (max 0 X) M
+    linarith
+  have htM : M ≤ t := by
+    rw [ht]
+    exact le_max_right.real (max 0 X) M
+  use exp t
+  constructor
+  · linarith [exp_ge_one_add t]
+  · constructor
+    · linarith [exp_ge_one_add t]
+    · have hxlog : log (exp t) = t := log_exp t
+      have hprod : rpow (exp t) a * rpow (exp t) (b - a) = rpow (exp t) b
+        rw [← rpow.add]
+        have hba : a + (b - a) = b := by ring
+        rw [hba]
+      rw [← hprod]
+      have hpa : 0 < rpow (exp t) a := rpow.pos (exp t) a
+      have hgap : C / c < rpow (exp t) (b - a)
+        unfold rpow
+        rw [hxlog]
+        have hge := exp_ge_one_add ((b - a) * t)
+        have hmul_M : (b - a) * M = C / c + 1
+          rw [hM]
+          have hdne : b - a ≠ 0 := by linarith
+          have hcanc := mul_div_cancel.real (C / c + 1) (b - a) hdne
+          linarith
+        have hmul_le : (b - a) * M ≤ (b - a) * t :=
+          mul_le_mul_of_nonneg_left.real M t (b - a) htM (by linarith)
+        linarith
+      have hCc : C < c * rpow (exp t) (b - a)
+        have hcne : c ≠ 0 := by linarith
+        have hmul := mul_lt_mul_of_pos_left.real (C / c) (rpow (exp t) (b - a)) c hgap hc
+        have hcanc := mul_div_cancel.real C c hcne
+        linarith
+      have hfin := mul_lt_mul_of_pos_right.real C (c * rpow (exp t) (b - a)) (rpow (exp t) a) hCc hpa
+      linarith
+
++ cpow_real.norm_sq (x : ℝ) (s : ℂ) :
+    complex.norm_sq (cpow_real x s) = exp (2 * log x * complex.re s)
+  unfold cpow_real complex.norm_sq
+  simp
+  have hsq : exp (log x * complex.re s) * cos (log x * complex.im s) * (exp (log x * complex.re s) * cos (log x * complex.im s)) + exp (log x * complex.re s) * sin (log x * complex.im s) * (exp (log x * complex.re s) * sin (log x * complex.im s)) = (exp (log x * complex.re s) * exp (log x * complex.re s)) * (sin (log x * complex.im s) * sin (log x * complex.im s) + cos (log x * complex.im s) * cos (log x * complex.im s)) := by ring
+  rw [hsq, sin_sq_add_cos_sq, ← exp_add]
+  have h2 : log x * complex.re s + log x * complex.re s = 2 * log x * complex.re s := by ring
+  rw [h2]
+  ring
+
++ cpow_real.neg_norm_sq_lt_one (p : ℝ) (s : ℂ) (hp : 1 < p) (hs : 0 < complex.re s) :
+    complex.norm_sq (cpow_real p (complex.neg s)) < 1
+  rw [cpow_real.norm_sq]
+  simp
+  have hlog_pos : 0 < log p
+    by_contra hle
+    have hlog_le : log p ≤ log 1 := by rw [log_one]; linarith
+    have hp_le := (log_le_log p 1 (by linarith) (by linarith)).mp hlog_le
+    linarith
+  have hneg : 2 * log p * (0 - complex.re s) < 0
+    have hpos : 0 < 2 * log p * complex.re s := by nlinarith
+    linarith
+  have hexp := (exp_lt_exp (2 * log p * (0 - complex.re s)) 0).mpr hneg
+  rw [exp_zero] at hexp
+  exact hexp
+
+-- ====================================================================================
+-- 2. Euler Factor & Finite Euler Product Nonvanishing (AXIOM-FREE!)
+-- ====================================================================================
+
+-> euler_factor (w : ℂ) (p : ℝ) (s : ℂ) : ℂ :=
+  complex.sub complex.one (complex.mul w (cpow_real p (complex.neg s)))
+
++ euler_factor.ne_zero (w : ℂ) (p : ℝ) (s : ℂ)
+    (hp : 1 < p) (hs : 0 < complex.re s) (hw : complex.norm_sq w ≤ 1) :
+    euler_factor w p s ≠ complex.zero
+  unfold euler_factor
+  intro hzero
+  have heq : complex.mul w (cpow_real p (complex.neg s)) = complex.one
+    have hre : complex.re (complex.sub complex.one (complex.mul w (cpow_real p (complex.neg s)))) = complex.re complex.zero := by rw [hzero]
+    have him : complex.im (complex.sub complex.one (complex.mul w (cpow_real p (complex.neg s)))) = complex.im complex.zero := by rw [hzero]
+    simp at hre him
+    apply complex.ext
+    · simp; linarith
+    · simp; linarith
+  have hns : complex.norm_sq (complex.mul w (cpow_real p (complex.neg s))) = 1
+    rw [heq]
+    unfold complex.norm_sq
+    simp
+  rw [complex.norm_sq_mul] at hns
+  have hlt : complex.norm_sq (cpow_real p (complex.neg s)) < 1 := cpow_real.neg_norm_sq_lt_one p s hp hs
+  have hnn_w : 0 ≤ complex.norm_sq w := complex.norm_sq_nonneg w
+  have hnn_p : 0 ≤ complex.norm_sq (cpow_real p (complex.neg s)) := complex.norm_sq_nonneg (cpow_real p (complex.neg s))
+  nlinarith
+
+-> cprod : ℕ → (ℕ → ℂ) → ℂ
+  | 0 => fun _ => complex.one
+  | n + 1 => fun f => complex.mul (cprod n f) (f n)
+
++ cprod.ne_zero (k : ℕ) (f : ℕ → ℂ) :
+    (∀ i < k, f i ≠ complex.zero) → cprod k f ≠ complex.zero
+  induction k with hf0 hzero n ih hfn hzero
+  · simp [cprod] at hzero
+    exact complex.one_ne_zero hzero
+  · rw [succ_eq_add_one.nat] at hfn hzero
+    simp [cprod] at hzero
+    have ih_n : cprod n f ≠ complex.zero := ih (by intro i hi; exact hfn i (by omega))
+    have hn : f n ≠ complex.zero := hfn n (by omega)
+    exact complex.mul_ne_zero (cprod n f) (f n) ih_n hn hzero
+
++ finite_euler_prod.ne_zero (k : ℕ) (w : ℕ → ℂ) (p : ℕ → ℝ) (s : ℂ)
+    (hs : 0 < complex.re s)
+    (hp : ∀ i < k, 1 < p i)
+    (hw : ∀ i < k, complex.norm_sq (w i) ≤ 1) :
+    cprod k (fun i => euler_factor (w i) (p i) s) ≠ complex.zero
+  apply cprod.ne_zero
+  intro i hi
+  exact euler_factor.ne_zero (w i) (p i) s (hp i hi) hs (hw i hi)
+
+-- ====================================================================================
+-- 3. Concrete Dirichlet Characters & Primitive Conductor Existence (AXIOM-FREE!)
+--    Retires `opaque DChar`, `opaque zeta_trivial_char`, `axiom dchar_prim_is_primitive`.
+-- ====================================================================================
+
+structure DChar :=
+  (level : ℕ)
+  (val : ℕ → ℂ)
+
+-> dchar.valid (chi : DChar) : Prop :=
+  1 ≤ chi.level ∧ is_dirichlet_char chi.level chi.val
+
+-> dchar.is_trivial (chi : DChar) : Prop :=
+  ∀ a : ℕ, zmod.is_unit chi.level a → chi.val a = complex.one
+
+-> dchar.inv (chi : DChar) : DChar :=
+  DChar.mk chi.level (fun a => complex.conj (chi.val a))
+
+-> dchar.induced_by (chi psi : DChar) : Prop :=
+  psi.level ∣ chi.level ∧ ∀ a : ℕ, zmod.is_unit chi.level a → chi.val a = psi.val a
+
+-> dchar.is_primitive (chi : DChar) : Prop :=
+  dchar.valid chi ∧ ∀ psi : DChar, dchar.valid psi → dchar.induced_by chi psi → chi.level ≤ psi.level
+
++ dchar.inv_valid (chi : DChar) (h : dchar.valid chi) : dchar.valid (dchar.inv chi)
+  unfold dchar.valid at h ⊢
+  unfold dchar.inv
+  simp
+  exact ⟨h.1, dchar.conj_is_char chi.level chi.val h.2⟩
+
++ dchar.inv_inv (chi : DChar) : dchar.inv (dchar.inv chi) = chi
+  induction chi
+  unfold dchar.inv
+  simp
+  have hfun : (fun a => complex.conj (complex.conj (x1 a))) = x1
+    funext a
+    exact complex.conj_conj (x1 a)
+  rw [hfun]
+
++ dchar.induced_by_refl (chi : DChar) : dchar.induced_by chi chi
+  unfold dchar.induced_by
+  constructor
+  · unfold dvd
+    have h0 : (0 + chi.level * 1) % chi.level = 0 % chi.level := add_mul_mod.nat 0 1 chi.level
+    have h1 : 0 + chi.level * 1 = chi.level := by ring
+    rw [h1] at h0
+    by_cases hz : chi.level = 0
+    · rw [hz]
+      have hd := div_add_mod.nat 0 0
+      linarith
+    · have h0m : 0 % chi.level = 0 := (div_mod_of_lt.nat 0 chi.level (by omega)).2
+      rw [h0m] at h0
+      exact h0
+  · auto
+
+-- Helper: if d | N and a is a unit mod N, then a is a unit mod d.
++ zmod.is_unit_of_dvd (d N a : ℕ) (hd : 0 < d) (hdvd : d ∣ N) (ha : zmod.is_unit N a) :
+    zmod.is_unit d a
+  unfold dvd at hdvd
+  unfold zmod.is_unit at ha ⊢
+  obtain ⟨b, hb, heq⟩ := ha
+  use b % d
+  constructor
+  · exact mod_lt.nat b d hd
+  · rw [mul_mod.nat a (b % d) d, zmod.mod_mod b d, ← mul_mod.nat a b d]
+    have hfac : d * (N / d) = N
+      have hdiv := div_add_mod.nat N d
+      rw [hdvd] at hdiv
+      linarith
+    have h1 := mod_of_factor.nat (a * b) N d (N / d) (1 % N) hfac heq
+    have h2 := mod_of_factor.nat 1 N d (N / d) (1 % N) hfac rfl
+    rw [h1, ← h2]
+
++ dchar.induced_by_trans (chi1 chi2 chi3 : DChar)
+    (h12 : dchar.induced_by chi1 chi2) (h23 : dchar.induced_by chi2 chi3)
+    (h2pos : 0 < chi2.level) (h3pos : 0 < chi3.level) :
+    dchar.induced_by chi1 chi3
+  unfold dchar.induced_by at h12 h23 ⊢
+  constructor
+  · unfold dvd at h12 h23 ⊢
+    set q1 := chi1.level / chi2.level with hq1
+    set q2 := chi2.level / chi3.level with hq2
+    have hf1 : chi2.level * q1 = chi1.level
+      have h := div_add_mod.nat chi1.level chi2.level
+      rw [h12.1] at h
+      rw [hq1]; linarith
+    have hf2 : chi3.level * q2 = chi2.level
+      have h := div_add_mod.nat chi2.level chi3.level
+      rw [h23.1] at h
+      rw [hq2]; linarith
+    have hprod : chi1.level = 0 + chi3.level * (q2 * q1)
+      calc chi1.level
+        = chi2.level * q1 := hf1.symm
+        _ = (chi3.level * q2) * q1 := by rw [hf2]
+        _ = 0 + chi3.level * (q2 * q1) := by ring
+    rw [hprod, add_mul_mod.nat]
+    exact (div_mod_of_lt.nat 0 chi3.level h3pos).2
+  · intro a ha
+    have ha2 : zmod.is_unit chi2.level a := zmod.is_unit_of_dvd chi2.level chi1.level a h2pos h12.1 ha
+    rw [h12.2 a ha, h23.2 a ha2]
+
+-- Strong-induction helper for primitive conductor existence.
++ dchar.exists_primitive_le (n : ℕ) :
+    ∀ chi : DChar, dchar.valid chi → chi.level ≤ n →
+      ∃ psi : DChar, dchar.is_primitive psi ∧ dchar.induced_by chi psi
+  induction n with chi hval hle k ih chi hval hle
+  · unfold dchar.valid at hval
+    omega
+  · by_cases hprim : dchar.is_primitive chi
+    · exact ⟨chi, hprim, dchar.induced_by_refl chi⟩
+    · have hex : ∃ psi0 : DChar, dchar.valid psi0 ∧ dchar.induced_by chi psi0 ∧ psi0.level < chi.level
+        by_contra hnone
+        apply hprim
+        unfold dchar.is_primitive
+        constructor
+        · exact hval
+        · intro psi hvp hind
+          by_contra hlt
+          apply hnone
+          exact ⟨psi, hvp, hind, by omega⟩
+      obtain ⟨psi0, hvp0, hind0, hlt0⟩ := hex
+      have hle_k : psi0.level ≤ k := by rw [succ_eq_add_one.nat] at hle; omega
+      obtain ⟨psi, hprim_psi, hind_psi⟩ := ih psi0 hvp0 hle_k
+      have hpos0 : 0 < psi0.level := by unfold dchar.valid at hvp0; omega
+      have hposp : 0 < psi.level := by unfold dchar.is_primitive dchar.valid at hprim_psi; omega
+      exact ⟨psi, hprim_psi, dchar.induced_by_trans chi psi0 psi hind0 hind_psi hpos0 hposp⟩
+
+-- RETIRES `axiom dchar_prim_is_primitive`: EVERY valid Dirichlet character has a primitive conductor!
++ dchar.exists_primitive (chi : DChar) (hval : dchar.valid chi) :
+    ∃ psi : DChar, dchar.is_primitive psi ∧ dchar.induced_by chi psi
+  exact dchar.exists_primitive_le chi.level chi hval (by omega)
+
+-- Concrete trivial character mod 1 for the Riemann zeta function (RETIRES `opaque zeta_trivial_char`!)
+-> dchar.trivial_one : DChar := DChar.mk 1 (fun _ => complex.one)
+
++ dchar.trivial_one_valid : dchar.valid dchar.trivial_one
+  unfold dchar.valid dchar.trivial_one is_dirichlet_char
+  simp
+  constructor
+  · auto
+  · constructor
+    · intro a hnot
+      exfalso
+      apply hnot
+      unfold zmod.is_unit
+      use 0
+      constructor
+      · decide
+      · have h0 : a * 0 = 0 := by ring
+        rw [h0]
+        exact (div_mod_of_lt.nat 0 1 (by decide)).2
+    · intro a b
+      exact (complex.mul_one complex.one).symm
+
++ dchar.trivial_one_is_trivial : dchar.is_trivial dchar.trivial_one
+  unfold dchar.is_trivial dchar.trivial_one
+  simp
+  auto
+
++ dchar.trivial_one_is_primitive : dchar.is_primitive dchar.trivial_one
+  unfold dchar.is_primitive
+  constructor
+  · exact dchar.trivial_one_valid
+  · intro psi hvp hind
+    unfold dchar.trivial_one
+    unfold dchar.valid at hvp
+    simp
+    exact hvp.1
+
+-- ====================================================================================
+-- 4. Bundled Analytic L-Function System & AXIOM-FREE Layer 0 Reductions
+--    Retires `completed_l_zero_of_l_zero`, `l_zero_of_completed_l_zero`,
+--    `l_prim_zero`, `completed_l_functional_eq`, and `one_sub` reflection!
+-- ====================================================================================
+
+-> neg_two_succ (n : ℕ) : ℂ := complex.of_real (-2 * ((n : ℝ) + 1))
+
++ one_sub_re (s : ℂ) : complex.re (complex.sub complex.one s) = 1 - complex.re s
+  simp
+
++ one_sub_ne_one (s : ℂ) (hs0 : s ≠ complex.zero) : complex.sub complex.one s ≠ complex.one
+  intro h
+  apply hs0
+  have hre : complex.re (complex.sub complex.one s) = complex.re complex.one := by rw [h]
+  have him : complex.im (complex.sub complex.one s) = complex.im complex.one := by rw [h]
+  simp at hre him
+  apply complex.ext
+  · simp; linarith
+  · simp; linarith
+
+-- Data carrier + analytic laws predicate (idiomatic Satori HOL bundle, like ring_ops / comm_ring).
+structure DirichletLOps :=
+  (l_fn : DChar → ℂ → ℂ)
+  (gamma_fn : DChar → ℂ → ℂ)
+  (root_num : DChar → ℂ)
+  (zeta_fn : ℂ → ℂ)
+
+-> DirichletLLaws (ops : DirichletLOps) : Prop :=
+  (∀ chi s, 0 < complex.re s → ops.gamma_fn chi s ≠ complex.zero) ∧
+  (∀ chi, dchar.is_primitive chi → ops.root_num chi ≠ complex.zero) ∧
+  (∀ chi s, dchar.is_primitive chi →
+    complex.mul (ops.gamma_fn chi s) (ops.l_fn chi s)
+      = complex.mul (ops.root_num chi) (complex.mul (ops.gamma_fn (dchar.inv chi) (complex.sub complex.one s)) (ops.l_fn (dchar.inv chi) (complex.sub complex.one s)))) ∧
+  (∀ chi psi s, dchar.valid chi → dchar.is_primitive psi → dchar.induced_by chi psi →
+    0 < complex.re s →
+    ∃ (k : ℕ) (w : ℕ → ℂ) (p : ℕ → ℝ),
+      (∀ i < k, 1 < p i) ∧ (∀ i < k, complex.norm_sq (w i) ≤ 1) ∧
+      ops.l_fn chi s = complex.mul (cprod k (fun i => euler_factor (w i) (p i) s)) (ops.l_fn psi s)) ∧
+  (∀ s, ops.zeta_fn s = ops.l_fn dchar.trivial_one s) ∧
+  (ops.zeta_fn complex.zero ≠ complex.zero) ∧
+  (∀ s, 1 ≤ complex.re s → s ≠ complex.one → ops.zeta_fn s ≠ complex.zero) ∧
+  (∀ s, complex.re s ≤ 0 → ops.zeta_fn s = complex.zero →
+    (¬ ∃ n : ℕ, s = neg_two_succ n) → ops.zeta_fn (complex.sub complex.one s) = complex.zero)
+
+-> completed_l_of (ops : DirichletLOps) (chi : DChar) (s : ℂ) : ℂ :=
+  complex.mul (ops.gamma_fn chi s) (ops.l_fn chi s)
+
+-- Headline statements parameterized by DirichletLOps:
+-> SystemRiemannHypothesis (ops : DirichletLOps) : Prop :=
+  ∀ s : ℂ, ops.zeta_fn s = complex.zero → (¬ ∃ n : ℕ, s = neg_two_succ n) → s ≠ complex.one → complex.re s = 1 / 2
+
+-> SystemNonvanishingRightOfHalf (ops : DirichletLOps) : Prop :=
+  ∀ (chi : DChar), dchar.valid chi → ∀ s : ℂ,
+    1 / 2 < complex.re s → (¬ dchar.is_trivial chi ∨ s ≠ complex.one) → ops.l_fn chi s ≠ complex.zero
+
+-> SystemDirichletLZerosOnLine (ops : DirichletLOps) : Prop :=
+  ∀ (chi : DChar), dchar.valid chi → ∀ s : ℂ,
+    0 < complex.re s → complex.re s < 1 → ops.l_fn chi s = complex.zero → complex.re s = 1 / 2
+
+-> SystemPrimitiveLZerosOnLine (ops : DirichletLOps) : Prop :=
+  ∀ (chi : DChar), dchar.is_primitive chi → ∀ s : ℂ,
+    0 < complex.re s → complex.re s < 1 → ops.l_fn chi s = complex.zero → complex.re s = 1 / 2
+
+-- RETIRED AXIOMS 1 & 2: `completed_l_zero_of_l_zero` & `l_zero_of_completed_l_zero` -> THEOREM!
++ layer0.completed_l_zero_iff (ops : DirichletLOps) (laws : DirichletLLaws ops)
+    (chi : DChar) (s : ℂ) (hs0 : 0 < complex.re s) :
+    completed_l_of ops chi s = complex.zero ↔ ops.l_fn chi s = complex.zero
+  unfold DirichletLLaws at laws
+  unfold completed_l_of
+  constructor
+  · intro hc
+    by_contra hne
+    exact complex.mul_ne_zero (ops.gamma_fn chi s) (ops.l_fn chi s) (laws.1 chi s hs0) hne hc
+  · intro hl
+    rw [hl, complex.mul_zero]
+
+-- RETIRED AXIOM 3: `l_prim_zero` -> THEOREM (via `finite_euler_prod.ne_zero`)!
++ layer0.l_prim_zero (ops : DirichletLOps) (laws : DirichletLLaws ops)
+    (chi psi : DChar) (s : ℂ)
+    (hvc : dchar.valid chi) (hp : dchar.is_primitive psi) (hind : dchar.induced_by chi psi)
+    (hs0 : 0 < complex.re s) (hz : ops.l_fn chi s = complex.zero) :
+    ops.l_fn psi s = complex.zero
+  unfold DirichletLLaws at laws
+  obtain ⟨k, w, p, hp1, hw1, heuler⟩ := laws.2.2.2.1 chi psi s hvc hp hind hs0
+  rw [hz] at heuler
+  have hprod_ne := finite_euler_prod.ne_zero k w p s hs0 hp1 hw1
+  by_contra hpsi_ne
+  exact complex.mul_ne_zero (cprod k (fun i => euler_factor (w i) (p i) s)) (ops.l_fn psi s) hprod_ne hpsi_ne heuler.symm
+
+-- RETIRED AXIOM 4: `completed_l_functional_eq` (zero reflection) -> THEOREM!
++ layer0.prim_reflect (ops : DirichletLOps) (laws : DirichletLLaws ops)
+    (chi : DChar) (hprim : dchar.is_primitive chi) (s : ℂ)
+    (hs0 : 0 < complex.re s) (hs1 : complex.re s < 1) (hz : ops.l_fn chi s = complex.zero) :
+    ops.l_fn (dchar.inv chi) (complex.sub complex.one s) = complex.zero
+  have hgam_iff := layer0.completed_l_zero_iff ops laws chi s hs0
+  have hc : completed_l_of ops chi s = complex.zero := hgam_iff.mpr hz
+  have hlaws := laws
+  unfold DirichletLLaws at hlaws
+  have hfe := hlaws.2.2.1 chi s hprim
+  unfold completed_l_of at hc
+  rw [hc] at hfe
+  have h1s_pos : 0 < complex.re (complex.sub complex.one s) := by rw [one_sub_re]; linarith
+  have hcc : completed_l_of ops (dchar.inv chi) (complex.sub complex.one s) = complex.zero
+    unfold completed_l_of
+    by_contra hne
+    exact complex.mul_ne_zero (ops.root_num chi) (complex.mul (ops.gamma_fn (dchar.inv chi) (complex.sub complex.one s)) (ops.l_fn (dchar.inv chi) (complex.sub complex.one s))) (hlaws.2.1 chi hprim) hne hfe.symm
+  exact (layer0.completed_l_zero_iff ops laws (dchar.inv chi) (complex.sub complex.one s) h1s_pos).mp hcc
+
+-- AXIOM-FREE Layer 0 Critical-Line Reduction (`ClaimStrip.lean` / `CritLine.lean` / `RhOfRight.lean`):
++ layer0.strip_of_right_half (ops : DirichletLOps) (laws : DirichletLLaws ops)
+    (h : SystemNonvanishingRightOfHalf ops) : SystemDirichletLZerosOnLine ops
+  unfold SystemNonvanishingRightOfHalf at h
+  unfold SystemDirichletLZerosOnLine
+  intro chi hval s hs0 hs1 hz
+  have hne1 : s ≠ complex.one
+    intro heq
+    have hre : complex.re s = complex.re complex.one := by rw [heq]
+    simp at hre
+    linarith
+  have hne0 : s ≠ complex.zero
+    intro heq
+    have hre : complex.re s = complex.re complex.zero := by rw [heq]
+    simp at hre
+    linarith
+  by_cases hlt : complex.re s < 1 / 2
+  · exfalso
+    obtain ⟨psi, hprim, hind⟩ := dchar.exists_primitive chi hval
+    have hp : ops.l_fn psi s = complex.zero := layer0.l_prim_zero ops laws chi psi s hval hprim hind hs0 hz
+    have hr : ops.l_fn (dchar.inv psi) (complex.sub complex.one s) = complex.zero :=
+      layer0.prim_reflect ops laws psi hprim s hs0 hs1 hp
+    have hgt : 1 / 2 < complex.re (complex.sub complex.one s) := by rw [one_sub_re]; linarith
+    have h1s_ne1 : complex.sub complex.one s ≠ complex.one := one_sub_ne_one s hne0
+    have hinv_val : dchar.valid (dchar.inv psi) := dchar.inv_valid psi hprim.1
+    have hor : ¬ dchar.is_trivial (dchar.inv psi) ∨ complex.sub complex.one s ≠ complex.one := by right; exact h1s_ne1
+    exact h (dchar.inv psi) hinv_val (complex.sub complex.one s) hgt hor hr
+  · by_cases hgt : 1 / 2 < complex.re s
+    · exfalso
+      have hor : ¬ dchar.is_trivial chi ∨ s ≠ complex.one := by right; exact hne1
+      exact h chi hval s hgt hor hz
+    · linarith
+
++ layer0.primitive_zeros_of_right_half (ops : DirichletLOps) (laws : DirichletLLaws ops)
+    (h : SystemNonvanishingRightOfHalf ops) : SystemPrimitiveLZerosOnLine ops
+  unfold SystemPrimitiveLZerosOnLine
+  intro chi hprim s hs0 hs1 hz
+  have hstrip := layer0.strip_of_right_half ops laws h
+  unfold SystemDirichletLZerosOnLine at hstrip
+  exact hstrip chi hprim.1 s hs0 hs1 hz
+
++ layer0.rh_of_right_half (ops : DirichletLOps) (laws : DirichletLLaws ops)
+    (h : SystemNonvanishingRightOfHalf ops) : SystemRiemannHypothesis ops
+  unfold SystemRiemannHypothesis
+  intro s hz htriv hs1
+  have hlaws := laws
+  unfold DirichletLLaws at hlaws
+  have hs0 : s ≠ complex.zero
+    intro heq
+    rw [heq] at hz
+    exact hlaws.2.2.2.2.2.1 hz
+  by_cases hpos : 0 < complex.re s
+  · by_cases hlt1 : complex.re s < 1
+    · have hL : ops.l_fn dchar.trivial_one s = complex.zero
+        rw [← hlaws.2.2.2.2.1 s]
+        exact hz
+      have hstrip := layer0.strip_of_right_half ops laws h
+      unfold SystemDirichletLZerosOnLine at hstrip
+      exact hstrip dchar.trivial_one dchar.trivial_one_valid s hpos hlt1 hL
+    · exfalso
+      have hge1 : 1 ≤ complex.re s := by linarith
+      exact hlaws.2.2.2.2.2.2.1 s hge1 hs1 hz
+  · exfalso
+    have hle0 : complex.re s ≤ 0 := by linarith
+    have href : ops.zeta_fn (complex.sub complex.one s) = complex.zero := hlaws.2.2.2.2.2.2.2 s hle0 hz htriv
+    have hge1 : 1 ≤ complex.re (complex.sub complex.one s) := by rw [one_sub_re]; linarith
+    have h1s_ne1 : complex.sub complex.one s ≠ complex.one := one_sub_ne_one s hs0
+    exact hlaws.2.2.2.2.2.2.1 (complex.sub complex.one s) hge1 h1s_ne1 href

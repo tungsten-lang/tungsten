@@ -1,0 +1,74 @@
+-- Algebraic typeclasses in Satori HOL (elaborated to dictionary passing,
+-- zero kernel axioms added).
+--
+-- Operators `+`, `-`, `*`, `/`, and unary `-` automatically dispatch through
+-- `Add`, `Sub`, `Mul`, `Div`, and `Neg` on any non-builtin type with an instance.
+
+import real
+
+class Zero α := (zero : α)
+class One  α := (one  : α)
+class Add  α := (add  : α → α → α)
+class Sub  α := (sub  : α → α → α)
+class Neg  α := (neg  : α → α)
+class Mul  α := (mul  : α → α → α)
+class Div  α := (div  : α → α → α)
+
+class Ring α :=
+  (zero : α)
+  (one  : α)
+  (add  : α → α → α)
+  (neg  : α → α)
+  (mul  : α → α → α)
+
+class Field α :=
+  (zero : α)
+  (one  : α)
+  (add  : α → α → α)
+  (neg  : α → α)
+  (mul  : α → α → α)
+  (inv  : α → α)
+
+class Normed α :=
+  (norm : α → ℝ)
+
+-- ---- built-in numeric instances ----------------------------------------------------
+
+instance nat_zero : Zero ℕ := Zero.mk 0
+instance nat_one  : One  ℕ := One.mk  1
+instance nat_add  : Add  ℕ := Add.mk  (fun x y => x + y)
+instance nat_mul  : Mul  ℕ := Mul.mk  (fun x y => x * y)
+
+instance int_zero : Zero ℤ := Zero.mk 0
+instance int_one  : One  ℤ := One.mk  1
+instance int_add  : Add  ℤ := Add.mk  (fun x y => x + y)
+instance int_sub  : Sub  ℤ := Sub.mk  (fun x y => x - y)
+instance int_neg  : Neg  ℤ := Neg.mk  (fun x => 0 - x)
+instance int_mul  : Mul  ℤ := Mul.mk  (fun x y => x * y)
+instance int_ring : Ring ℤ := Ring.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+
+instance rat_zero  : Zero  ℚ := Zero.mk  0
+instance rat_one   : One   ℚ := One.mk   1
+instance rat_add   : Add   ℚ := Add.mk   (fun x y => x + y)
+instance rat_sub   : Sub   ℚ := Sub.mk   (fun x y => x - y)
+instance rat_neg   : Neg   ℚ := Neg.mk   (fun x => 0 - x)
+instance rat_mul   : Mul   ℚ := Mul.mk   (fun x y => x * y)
+instance rat_div   : Div   ℚ := Div.mk   (fun x y => x / y)
+instance rat_ring  : Ring  ℚ := Ring.mk  0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+instance rat_field : Field ℚ := Field.mk 0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y) (fun x => 1 / x)
+
+instance real_zero   : Zero   ℝ := Zero.mk   0
+instance real_one    : One    ℝ := One.mk    1
+instance real_add    : Add    ℝ := Add.mk    (fun x y => x + y)
+instance real_sub    : Sub    ℝ := Sub.mk    (fun x y => x - y)
+instance real_neg    : Neg    ℝ := Neg.mk    (fun x => 0 - x)
+instance real_mul    : Mul    ℝ := Mul.mk    (fun x y => x * y)
+instance real_div    : Div    ℝ := Div.mk    (fun x y => x / y)
+instance real_ring   : Ring   ℝ := Ring.mk   0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y)
+instance real_field  : Field  ℝ := Field.mk  0 1 (fun x y => x + y) (fun x => 0 - x) (fun x y => x * y) (fun x => 1 / x)
+instance real_normed : Normed ℝ := Normed.mk (fun x => abs x)
+
+-- ---- polymorphic product instance (tests recursive dictionary synthesis) -----------
+
+instance prod_add [A : Add α] [B : Add β] : Add (α × β) :=
+  Add.mk (fun (p q : α × β) => (Add.add A p.1 q.1, Add.add B p.2 q.2))

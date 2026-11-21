@@ -1,0 +1,213 @@
+-- Complex matrices, Hermitian forms, and arbitrary-rank unitary groups U(H) in Satori HOL.
+-- Zero added axioms: proves (AB)^* = B^* A^*, associativity, identity, group closure of U(H),
+-- and Hermitian inner-product invariance for every dimension n : ℕ.
+
+import complex_sum
+
+-> cmat.mul (n : ℕ) (A B : ℕ → ℕ → ℂ) (i j : ℕ) : ℂ :=
+  csum n (fun k => complex.mul (A i k) (B k j))
+
+-> cmat.id (i j : ℕ) : ℂ := if i = j then complex.one else complex.zero
+
+-> cmat.adj (A : ℕ → ℕ → ℂ) (i j : ℕ) : ℂ := complex.conj (A j i)
+
+-> cmat.is_hermitian (n : ℕ) (H : ℕ → ℕ → ℂ) : Prop :=
+  ∀ i < n, ∀ j < n, H i j = complex.conj (H j i)
+
+-> cmat.is_unitary (n : ℕ) (H U : ℕ → ℕ → ℂ) : Prop :=
+  ∀ i < n, ∀ j < n, cmat.mul n (cmat.mul n (cmat.adj U) H) U i j = H i j
+
+-> cmat.apply (n : ℕ) (A : ℕ → ℕ → ℂ) (v : ℕ → ℂ) (i : ℕ) : ℂ :=
+  csum n (fun j => complex.mul (A i j) (v j))
+
+-- Hermitian pairing <u, H v> = sum_{i,j < n} conj(u_i) * H_{ij} * v_j
+-> cmat.pairing (n : ℕ) (H : ℕ → ℕ → ℂ) (u v : ℕ → ℂ) : ℂ :=
+  cdot n u (cmat.apply n H v)
+
+-- ---- matrix algebra laws -----------------------------------------------------------
+
++ cmat.adj_adj (A : ℕ → ℕ → ℂ) (i j : ℕ) : cmat.adj (cmat.adj A) i j = A i j
+  unfold cmat.adj
+  exact complex.conj_conj (A i j)
+
++ cmat.adj_mul (n : ℕ) (A B : ℕ → ℕ → ℂ) (i j : ℕ) :
+    cmat.adj (cmat.mul n A B) i j = cmat.mul n (cmat.adj B) (cmat.adj A) i j
+  unfold cmat.adj cmat.mul
+  rw [csum.conj]
+  apply csum.congr
+  intro k hk
+  rw [complex.conj_mul, complex.mul_comm]
+
++ cmat.mul_assoc (n : ℕ) (A B C : ℕ → ℕ → ℂ) (i j : ℕ) :
+    cmat.mul n (cmat.mul n A B) C i j = cmat.mul n A (cmat.mul n B C) i j
+  unfold cmat.mul
+  have h1 : csum n (fun k => complex.mul (csum n (fun r => complex.mul (A i r) (B r k))) (C k j))
+      = csum n (fun k => csum n (fun r => complex.mul (complex.mul (A i r) (B r k)) (C k j))) := by
+    apply csum.congr; intro k hk; rw [← csum.scale_right]
+  have h2 : csum n (fun r => complex.mul (A i r) (csum n (fun k => complex.mul (B r k) (C k j))))
+      = csum n (fun r => csum n (fun k => complex.mul (A i r) (complex.mul (B r k) (C k j)))) := by
+    apply csum.congr; intro r hr; rw [← csum.scale_left]
+  rw [h1, h2, csum.swap]
+  apply csum.congr; intro r hr
+  apply csum.congr; intro k hk
+  exact complex.mul_assoc (A i r) (B r k) (C k j)
+
++ cmat.mul_congr_left (n : ℕ) (A A' B : ℕ → ℕ → ℂ) (i j : ℕ)
+    (h : ∀ k < n, A i k = A' i k) : cmat.mul n A B i j = cmat.mul n A' B i j
+  unfold cmat.mul
+  apply csum.congr
+  intro k hk
+  rw [h k hk]
+
++ cmat.mul_congr_right (n : ℕ) (A B B' : ℕ → ℕ → ℂ) (i j : ℕ)
+    (h : ∀ k < n, B k j = B' k j) : cmat.mul n A B i j = cmat.mul n A B' i j
+  unfold cmat.mul
+  apply csum.congr
+  intro k hk
+  rw [h k hk]
+
++ cmat.mul_id_right (n : ℕ) (A : ℕ → ℕ → ℂ) (i j : ℕ) (hj : j < n) :
+    cmat.mul n A cmat.id i j = A i j
+  unfold cmat.mul cmat.id
+  have h1 : csum n (fun k => complex.mul (A i k) (if k = j then complex.one else complex.zero))
+      = csum n (fun k => if k = j then A i k else complex.zero) := by
+    apply csum.congr; intro k hk
+    by_cases e : k = j
+    · rw [e]; simp; apply complex.ext <;> simp <;> ring
+    · simp [e]; apply complex.ext <;> simp <;> ring
+  rw [h1]
+  exact csum.single n j (fun k => A i k) hj
+
++ cmat.mul_id_left (n : ℕ) (A : ℕ → ℕ → ℂ) (i j : ℕ) (hi : i < n) :
+    cmat.mul n cmat.id A i j = A i j
+  unfold cmat.mul cmat.id
+  have h1 : csum n (fun k => complex.mul (if i = k then complex.one else complex.zero) (A k j))
+      = csum n (fun k => if k = i then A k j else complex.zero) := by
+    apply csum.congr; intro k hk
+    by_cases e : k = i
+    · rw [e]; simp; apply complex.ext <;> simp <;> ring
+    · have es : i ≠ k := by omega
+      simp [e, es]; apply complex.ext <;> simp <;> ring
+  rw [h1]
+  exact csum.single n i (fun k => A k j) hi
+
++ cmat.adj_id (i j : ℕ) : cmat.adj cmat.id i j = cmat.id i j
+  unfold cmat.adj cmat.id
+  by_cases e : i = j
+  · rw [e]; simp; apply complex.ext <;> simp
+  · have es : j ≠ i := by omega
+    simp [e, es]; apply complex.ext <;> simp
+
++ cmat.id_hermitian (n : ℕ) : cmat.is_hermitian n cmat.id
+  unfold cmat.is_hermitian cmat.id
+  intro i hi j hj
+  by_cases e : i = j
+  · rw [e]; simp; apply complex.ext <;> simp
+  · have es : j ≠ i := by omega
+    simp [e, es]; apply complex.ext <;> simp
+
+-- ---- unitary group U(H) laws (all ranks n : ℕ) -------------------------------------
+
++ unitary.id_mem (n : ℕ) (H : ℕ → ℕ → ℂ) : cmat.is_unitary n H cmat.id
+  unfold cmat.is_unitary
+  intro i hi j hj
+  have h0 : cmat.mul n (cmat.adj cmat.id) H i j = cmat.mul n cmat.id H i j := by
+    apply cmat.mul_congr_left
+    intro k hk
+    exact cmat.adj_id i k
+  have h1 : cmat.mul n (cmat.adj cmat.id) H i j = H i j := by
+    rw [h0]
+    exact cmat.mul_id_left n H i j hi
+  have h2 : cmat.mul n (cmat.mul n (cmat.adj cmat.id) H) cmat.id i j = cmat.mul n (cmat.adj cmat.id) H i j :=
+    cmat.mul_id_right n (cmat.mul n (cmat.adj cmat.id) H) i j hj
+  rw [h2, h1]
+
++ unitary.mul_mem (n : ℕ) (H U V : ℕ → ℕ → ℂ)
+    (hU : cmat.is_unitary n H U) (hV : cmat.is_unitary n H V) :
+    cmat.is_unitary n H (cmat.mul n U V)
+  unfold cmat.is_unitary at hU hV
+  unfold cmat.is_unitary
+  intro i hi j hj
+  -- (U V)^* H (U V) = V^* (U^* H U) V = V^* H V = H
+  have step1 : cmat.mul n (cmat.mul n (cmat.adj (cmat.mul n U V)) H) (cmat.mul n U V) i j
+      = cmat.mul n (cmat.mul n (cmat.mul n (cmat.adj V) (cmat.adj U)) H) (cmat.mul n U V) i j := by
+    apply cmat.mul_congr_left
+    intro k hk
+    apply cmat.mul_congr_left
+    intro r hr
+    exact cmat.adj_mul n U V i r
+  rw [step1]
+  rw [← cmat.mul_assoc n (cmat.mul n (cmat.mul n (cmat.adj V) (cmat.adj U)) H) U V i j]
+  have step3 : cmat.mul n (cmat.mul n (cmat.mul n (cmat.mul n (cmat.adj V) (cmat.adj U)) H) U) V i j
+      = cmat.mul n (cmat.mul n (cmat.adj V) (cmat.mul n (cmat.mul n (cmat.adj U) H) U)) V i j := by
+    apply cmat.mul_congr_left
+    intro k hk
+    have hb : cmat.mul n (cmat.mul n (cmat.mul n (cmat.adj V) (cmat.adj U)) H) U i k
+        = cmat.mul n (cmat.mul n (cmat.adj V) (cmat.mul n (cmat.adj U) H)) U i k := by
+      apply cmat.mul_congr_left; intro r hr; exact cmat.mul_assoc n (cmat.adj V) (cmat.adj U) H i r
+    rw [hb, cmat.mul_assoc n (cmat.adj V) (cmat.mul n (cmat.adj U) H) U i k]
+  rw [step3]
+  have step4 : cmat.mul n (cmat.mul n (cmat.adj V) (cmat.mul n (cmat.mul n (cmat.adj U) H) U)) V i j
+      = cmat.mul n (cmat.mul n (cmat.adj V) H) V i j := by
+    apply cmat.mul_congr_left
+    intro k hk
+    apply cmat.mul_congr_right
+    intro r hr
+    exact hU r hr k hk
+  rw [step4]
+  exact hV i hi j hj
+
+-- Unitary transformations preserve the Hermitian pairing <U u, H (U v)> = <u, H v>!
++ unitary.preserves_pairing (n : ℕ) (H U : ℕ → ℕ → ℂ) (u v : ℕ → ℂ)
+    (hU : cmat.is_unitary n H U) :
+    cmat.pairing n H (cmat.apply n U u) (cmat.apply n U v) = cmat.pairing n H u v
+  unfold cmat.pairing cdot cmat.apply
+  -- Expand LHS = sum_i sum_j sum_a sum_b conj(u_a) * conj(U_{ia}) * H_{ij} * U_{jb} * v_b
+  have hL : csum n (fun i => complex.mul (complex.conj (csum n (fun a => complex.mul (U i a) (u a))))
+        (csum n (fun j => complex.mul (H i j) (csum n (fun b => complex.mul (U j b) (v b))))))
+      = csum n (fun a => complex.mul (complex.conj (u a))
+        (csum n (fun b => complex.mul (cmat.mul n (cmat.mul n (cmat.adj U) H) U a b) (v b)))) := by
+    have e1 : csum n (fun i => complex.mul (complex.conj (csum n (fun a => complex.mul (U i a) (u a))))
+          (csum n (fun j => complex.mul (H i j) (csum n (fun b => complex.mul (U j b) (v b))))))
+        = csum n (fun i => csum n (fun a => complex.mul (complex.conj (u a))
+          (complex.mul (cmat.adj U a i) (csum n (fun j => complex.mul (H i j) (csum n (fun b => complex.mul (U j b) (v b)))))))) := by
+      apply csum.congr; intro i hi
+      rw [csum.conj, ← csum.scale_right]
+      apply csum.congr; intro a ha
+      rw [complex.conj_mul]
+      unfold cmat.adj
+      rw [complex.mul_comm (complex.conj (U i a)) (complex.conj (u a)), complex.mul_assoc]
+    rw [e1, csum.swap]
+    apply csum.congr; intro a ha
+    rw [csum.scale_left]
+    have e2 : csum n (fun i => complex.mul (cmat.adj U a i) (csum n (fun j => complex.mul (H i j) (csum n (fun b => complex.mul (U j b) (v b))))))
+        = csum n (fun b => complex.mul (cmat.mul n (cmat.mul n (cmat.adj U) H) U a b) (v b)) := by
+      have f1 : csum n (fun i => complex.mul (cmat.adj U a i) (csum n (fun j => complex.mul (H i j) (csum n (fun b => complex.mul (U j b) (v b))))))
+          = csum n (fun i => csum n (fun j => complex.mul (complex.mul (cmat.adj U a i) (H i j)) (csum n (fun b => complex.mul (U j b) (v b))))) := by
+        apply csum.congr; intro i hi
+        rw [← csum.scale_left]
+        apply csum.congr; intro j hj
+        rw [complex.mul_assoc]
+      rw [f1, csum.swap]
+      have f2 : csum n (fun j => csum n (fun i => complex.mul (complex.mul (cmat.adj U a i) (H i j)) (csum n (fun b => complex.mul (U j b) (v b)))))
+          = csum n (fun j => csum n (fun b => complex.mul (complex.mul (cmat.mul n (cmat.adj U) H a j) (U j b)) (v b))) := by
+        apply csum.congr; intro j hj
+        rw [csum.scale_right]
+        unfold cmat.mul
+        rw [← csum.scale_left]
+        apply csum.congr; intro b hb
+        rw [complex.mul_assoc]
+      rw [f2, csum.swap]
+      apply csum.congr; intro b hb
+      rw [csum.scale_right]
+      unfold cmat.mul
+      auto
+    rw [e2]
+  rw [hL]
+  apply csum.congr; intro a ha
+  have hinner : csum n (fun b => complex.mul (cmat.mul n (cmat.mul n (cmat.adj U) H) U a b) (v b))
+      = csum n (fun b => complex.mul (H a b) (v b)) := by
+    apply csum.congr; intro b hb
+    unfold cmat.is_unitary at hU
+    rw [hU a ha b hb]
+  rw [hinner]

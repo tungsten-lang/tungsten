@@ -1,0 +1,288 @@
+-- Complex finite sums, complex finite L^2 inner product & Parseval identity,
+-- and additive characters e_q(x) = exp(2πi x / q) on Z/qZ.
+-- Zero added axioms beyond `real` + `complex`.
+
+import arith
+import complex
+
+-- ---- complex finite sums -----------------------------------------------------------
+
+-> csum (n : ℕ) (f : ℕ → ℂ) : ℂ :=
+  complex.mk (∑ i < n, complex.re (f i)) (∑ i < n, complex.im (f i))
+
+@[simp] + csum.re (n : ℕ) (f : ℕ → ℂ) : complex.re (csum n f) = ∑ i < n, complex.re (f i) := by unfold csum; simp
+@[simp] + csum.im (n : ℕ) (f : ℕ → ℂ) : complex.im (csum n f) = ∑ i < n, complex.im (f i) := by unfold csum; simp
+
++ csum.zero (f : ℕ → ℂ) : csum 0 f = complex.zero
+  apply complex.ext <;> simp
+
++ csum.succ (n : ℕ) (f : ℕ → ℂ) : csum (n + 1) f = complex.add (csum n f) (f n)
+  apply complex.ext <;> simp
+
++ csum.succ_zero (n : ℕ) (f : ℕ → ℂ) :
+    csum (n + 1) f = complex.add (f 0) (csum n (fun i => f (i + 1)))
+  apply complex.ext
+  · rw [csum.re, complex.add_re, csum.re, sum_range_succ'.real]; ring
+  · rw [csum.im, complex.add_im, csum.im, sum_range_succ'.real]; ring
+
++ csum.congr (n : ℕ) (f g : ℕ → ℂ) (h : ∀ i < n, f i = g i) : csum n f = csum n g
+  apply complex.ext
+  · simp; apply sum_below.congr; intro i hi; rw [h i hi]
+  · simp; apply sum_below.congr; intro i hi; rw [h i hi]
+
++ csum.add (n : ℕ) (f g : ℕ → ℂ) :
+    csum n (fun i => complex.add (f i) (g i)) = complex.add (csum n f) (csum n g)
+  apply complex.ext
+  · simp; rw [sum_add.real]
+  · simp; rw [sum_add.real]
+
++ csum.const (n : ℕ) (c : ℂ) : csum n (fun _ => c) = complex.smul (n : ℝ) c
+  apply complex.ext
+  · simp; rw [sum_const.real]
+  · simp; rw [sum_const.real]
+
++ csum.scale_left (n : ℕ) (c : ℂ) (f : ℕ → ℂ) :
+    csum n (fun i => complex.mul c (f i)) = complex.mul c (csum n f)
+  apply complex.ext
+  · simp; rw [sum_sub.real, sum_const_mul.real, sum_const_mul.real]
+  · simp; rw [sum_add.real, sum_const_mul.real, sum_const_mul.real]
+
++ csum.scale_right (n : ℕ) (c : ℂ) (f : ℕ → ℂ) :
+    csum n (fun i => complex.mul (f i) c) = complex.mul (csum n f) c
+  have h1 : csum n (fun i => complex.mul (f i) c) = csum n (fun i => complex.mul c (f i)) := by
+    apply csum.congr; intro i hi; exact complex.mul_comm (f i) c
+  rw [h1, csum.scale_left, complex.mul_comm]
+
++ csum.conj (n : ℕ) (f : ℕ → ℂ) :
+    complex.conj (csum n f) = csum n (fun i => complex.conj (f i))
+  apply complex.ext
+  · simp
+  · simp
+    have h1 : (∑ i < n, (0 - complex.im (f i))) = ∑ i < n, ((0 - 1 : ℝ) * complex.im (f i)) := by
+      apply sum_below.congr; intro i hi; ring
+    rw [h1, sum_const_mul.real]
+    ring
+
++ csum.swap (n m : ℕ) (f : ℕ → ℕ → ℂ) :
+    csum n (fun i => csum m (fun j => f i j)) = csum m (fun j => csum n (fun i => f i j))
+  induction n with k ih
+  · rw [csum.zero]
+    have h0 : csum m (fun j => csum 0 (fun i => f i j)) = csum m (fun _ => complex.zero) := by
+      apply csum.congr; intro j hj; exact csum.zero (fun i => f i j)
+    rw [h0, csum.const]
+    apply complex.ext <;> simp <;> ring
+  · rw [succ_eq_add_one.nat, csum.succ, ih]
+    have h1 : csum m (fun j => csum (k + 1) (fun i => f i j))
+        = csum m (fun j => complex.add (csum k (fun i => f i j)) (f k j)) := by
+      apply csum.congr; intro j hj; exact csum.succ k (fun i => f i j)
+    rw [h1, csum.add]
+
++ csum.single (n k : ℕ) (f : ℕ → ℂ) (hk : k < n) :
+    csum n (fun i => if i = k then f i else complex.zero) = f k
+  apply complex.ext
+  · simp
+    have h1 : (∑ i < n, complex.re (if i = k then f i else complex.zero)) = ∑ i < n, (complex.re (f i) * (if i = k then 1 else 0)) := by
+      apply sum_below.congr; intro i hi
+      by_cases e : i = k
+      · simp [e]
+      · simp [e]
+    rw [h1]
+    exact sum_below.single.real (fun i => complex.re (f i)) n k hk
+  · simp
+    have h1 : (∑ i < n, complex.im (if i = k then f i else complex.zero)) = ∑ i < n, (complex.im (f i) * (if i = k then 1 else 0)) := by
+      apply sum_below.congr; intro i hi
+      by_cases e : i = k
+      · simp [e]
+      · simp [e]
+    rw [h1]
+    exact sum_below.single.real (fun i => complex.im (f i)) n k hk
+
+-- ---- complex finite L^2 inner product, adjoint, and Parseval -----------------------
+
+-> cdot (n : ℕ) (f g : ℕ → ℂ) : ℂ :=
+  csum n (fun i => complex.mul (complex.conj (f i)) (g i))
+
+-> ctransform (n : ℕ) (K : ℕ → ℕ → ℂ) (f : ℕ → ℂ) (j : ℕ) : ℂ :=
+  csum n (fun i => complex.mul (f i) (K i j))
+
+-> cdot.orthogonal (n m : ℕ) (K : ℕ → ℕ → ℂ) (c : ℝ) : Prop :=
+  ∀ i < n, ∀ k < n, cdot m (K i) (K k) = (if i = k then complex.of_real c else complex.zero)
+
++ cdot.conj_symm (n : ℕ) (f g : ℕ → ℂ) : complex.conj (cdot n f g) = cdot n g f
+  unfold cdot
+  rw [csum.conj]
+  apply csum.congr
+  intro i hi
+  rw [complex.conj_mul, complex.conj_conj, complex.mul_comm]
+
++ cdot.self_re (n : ℕ) (f : ℕ → ℂ) : complex.re (cdot n f f) = ∑ i < n, complex.norm_sq (f i)
+  unfold cdot
+  simp
+  apply sum_below.congr
+  intro i hi
+  unfold complex.norm_sq
+  ring
+
++ cdot.self_im (n : ℕ) (f : ℕ → ℂ) : complex.im (cdot n f f) = 0
+  unfold cdot
+  simp
+  have h0 : (∑ i < n, (complex.re (f i) * complex.im (f i) + (0 - complex.im (f i)) * complex.re (f i))) = ∑ i < n, (0 : ℝ) := by
+    apply sum_below.congr; intro i hi; ring
+  rw [h0, sum_const.real]
+  ring
+
++ cdot.self_re_nonneg (n : ℕ) (f : ℕ → ℂ) : 0 ≤ complex.re (cdot n f f)
+  rw [cdot.self_re]
+  apply sum_nonneg.real
+  intro i hi
+  exact complex.norm_sq_nonneg (f i)
+
++ cdot.adjoint (n m : ℕ) (K : ℕ → ℕ → ℂ) (f g : ℕ → ℂ) :
+    cdot m g (ctransform n K f) = cdot n (fun i => csum m (fun j => complex.mul (g j) (complex.conj (K i j)))) f
+  unfold cdot ctransform
+  have h1 : csum m (fun j => complex.mul (complex.conj (g j)) (csum n (fun i => complex.mul (f i) (K i j))))
+      = csum m (fun j => csum n (fun i => complex.mul (complex.conj (g j)) (complex.mul (f i) (K i j)))) := by
+    apply csum.congr; intro j hj; rw [← csum.scale_left]
+  rw [h1, csum.swap]
+  apply csum.congr
+  intro i hi
+  rw [csum.conj, ← csum.scale_right]
+  apply csum.congr
+  intro j hj
+  rw [complex.conj_mul, complex.conj_conj]
+  rw [complex.mul_assoc, complex.mul_comm (K i j) (f i), ← complex.mul_assoc]
+
++ cdot.parseval (n m : ℕ) (K : ℕ → ℕ → ℂ) (c : ℝ) (f g : ℕ → ℂ)
+    (orth : cdot.orthogonal n m K c) :
+    cdot m (ctransform n K f) (ctransform n K g) = complex.mul (complex.of_real c) (cdot n f g)
+  unfold cdot ctransform
+  have h1 : csum m (fun j => complex.mul (complex.conj (csum n (fun i => complex.mul (f i) (K i j)))) (csum n (fun k => complex.mul (g k) (K k j))))
+      = csum m (fun j => csum n (fun i => csum n (fun k => complex.mul (complex.mul (complex.conj (f i)) (g k)) (complex.mul (complex.conj (K i j)) (K k j))))) := by
+    apply csum.congr; intro j hj
+    rw [csum.conj, ← csum.scale_right]
+    apply csum.congr; intro i hi
+    rw [complex.conj_mul, ← csum.scale_left]
+    apply csum.congr; intro k hk
+    apply complex.ext <;> simp <;> ring
+  rw [h1, csum.swap]
+  have h2 : csum n (fun i => csum m (fun j => csum n (fun k => complex.mul (complex.mul (complex.conj (f i)) (g k)) (complex.mul (complex.conj (K i j)) (K k j)))))
+      = csum n (fun i => csum n (fun k => complex.mul (complex.mul (complex.conj (f i)) (g k)) (cdot m (K i) (K k)))) := by
+    apply csum.congr; intro i hi
+    rw [csum.swap]
+    apply csum.congr; intro k hk
+    unfold cdot
+    rw [← csum.scale_left]
+  rw [h2]
+  have h3 : csum n (fun i => csum n (fun k => complex.mul (complex.mul (complex.conj (f i)) (g k)) (cdot m (K i) (K k))))
+      = csum n (fun i => complex.mul (complex.of_real c) (complex.mul (complex.conj (f i)) (g i))) := by
+    apply csum.congr; intro i hi
+    have hinner : csum n (fun k => complex.mul (complex.mul (complex.conj (f i)) (g k)) (cdot m (K i) (K k)))
+        = csum n (fun k => if k = i then complex.mul (complex.of_real c) (complex.mul (complex.conj (f i)) (g k)) else complex.zero) := by
+      apply csum.congr; intro k hk
+      unfold cdot.orthogonal at orth
+      have ho := orth i hi k hk
+      rw [ho]
+      by_cases e : k = i
+      · rw [e]
+        have hif : ∀ (a b : ℂ), (if i = i then a else b) = a := by intro a b; simp
+        rw [hif (complex.of_real c) complex.zero, hif (complex.mul (complex.of_real c) (complex.mul (complex.conj (f i)) (g i))) complex.zero]
+        exact complex.mul_comm (complex.mul (complex.conj (f i)) (g i)) (complex.of_real c)
+      · have es : i ≠ k := by omega
+        simp [e, es]
+        apply complex.ext <;> simp <;> ring
+    rw [hinner]
+    exact csum.single n i (fun k => complex.mul (complex.of_real c) (complex.mul (complex.conj (f i)) (g k))) hi
+  rw [h3, csum.scale_left]
+
+-- ---- additive characters e_q(x) = exp(2πi x / q) on Z/qZ ---------------------------
+
+-> e_q (q : ℕ) (x : ℕ) : ℂ :=
+  complex.exp (complex.mk 0 (2 * pi * (x : ℝ) / (q : ℝ)))
+
++ e_q.zero (q : ℕ) : e_q q 0 = complex.one
+  unfold e_q
+  have h0 : 2 * pi * (0 : ℝ) / (q : ℝ) = 0 := by
+    rw [div_def.real (2 * pi * 0) (q : ℝ)]
+    ring
+  rw [h0]
+  exact complex.exp_zero
+
++ e_q.norm_sq (q x : ℕ) : complex.norm_sq (e_q q x) = 1
+  unfold e_q
+  exact complex.norm_sq_exp_i (2 * pi * (x : ℝ) / (q : ℝ))
+
++ e_q.add (q x y : ℕ) : e_q q (x + y) = complex.mul (e_q q x) (e_q q y)
+  unfold e_q
+  rw [← complex.exp_add]
+  have harg : complex.mk 0 (2 * pi * ((x + y : ℕ) : ℝ) / (q : ℝ))
+      = complex.add (complex.mk 0 (2 * pi * (x : ℝ) / (q : ℝ))) (complex.mk 0 (2 * pi * (y : ℝ) / (q : ℝ))) := by
+    apply complex.ext
+    · simp
+    · simp
+      rw [div_def.real (2 * pi * ((x : ℝ) + (y : ℝ))) (q : ℝ),
+          div_def.real (2 * pi * (x : ℝ)) (q : ℝ),
+          div_def.real (2 * pi * (y : ℝ)) (q : ℝ)]
+      ring
+  rw [harg]
+
++ e_q.mul_succ (q a h : ℕ) : e_q q ((h + 1) * a) = complex.mul (e_q q (h * a)) (e_q q a)
+  have h1 : (h + 1) * a = h * a + a := by ring
+  rw [h1]
+  exact e_q.add q (h * a) a
+
+-- Geometric series identity for any complex ratio r: (r - 1) * sum_{h < q} r^h = r^q - 1
+-> cpow_nat (z : ℂ) : ℕ → ℂ
+  | 0 => complex.one
+  | n + 1 => complex.mul (cpow_nat z n) z
+
++ e_q.eq_cpow (q a h : ℕ) : e_q q (h * a) = cpow_nat (e_q q a) h
+  induction h with n ih
+  · simp [cpow_nat]
+    exact e_q.zero q
+  · rw [succ_eq_add_one.nat, e_q.mul_succ, ih]
+    simp [cpow_nat]
+
++ csum.geom_series (q : ℕ) (r : ℂ) :
+    complex.mul (complex.sub r complex.one) (csum q (fun h => cpow_nat r h))
+      = complex.sub (cpow_nat r q) complex.one
+  induction q with n ih
+  · rw [csum.zero, complex.mul_zero]
+    simp [cpow_nat]
+    rw [complex.sub_self]
+  · rw [succ_eq_add_one.nat, csum.succ, complex.left_distrib, ih]
+    simp [cpow_nat]
+    apply complex.ext <;> simp <;> ring
+
++ cpow_nat.one (h : ℕ) : cpow_nat complex.one h = complex.one
+  induction h with k ih
+  · simp [cpow_nat]
+  · rw [succ_eq_add_one.nat]; simp [cpow_nat]; rw [ih, complex.mul_one]
+
+-- Character orthogonality when r = e_q(a): if e_q(a) = 1 then sum = q, else if e_q(q*a) = 1 then sum = 0.
++ e_q.sum_eq_q_of_one (q a : ℕ) (h1 : e_q q a = complex.one) :
+    csum q (fun h => e_q q (h * a)) = complex.of_real (q : ℝ)
+  have hcon : csum q (fun h => e_q q (h * a)) = csum q (fun _ => complex.one) := by
+    apply csum.congr; intro h hh
+    rw [e_q.eq_cpow, h1]
+    exact cpow_nat.one h
+  rw [hcon, csum.const]
+  apply complex.ext <;> simp
+
++ e_q.sum_eq_zero_of_ne_one (q a : ℕ) (hne : e_q q a ≠ complex.one) (hper : e_q q (q * a) = complex.one) :
+    csum q (fun h => e_q q (h * a)) = complex.zero
+  have hcon : csum q (fun h => e_q q (h * a)) = csum q (fun h => cpow_nat (e_q q a) h) := by
+    apply csum.congr; intro h hh; exact e_q.eq_cpow q a h
+  rw [hcon]
+  have hgeom := csum.geom_series q (e_q q a)
+  rw [← e_q.eq_cpow q a q, hper, complex.sub_self] at hgeom
+  have hne0 : complex.sub (e_q q a) complex.one ≠ complex.zero := by
+    intro h0
+    apply hne
+    have hre : complex.re (complex.sub (e_q q a) complex.one) = complex.re complex.zero := by rw [h0]
+    have him : complex.im (complex.sub (e_q q a) complex.one) = complex.im complex.zero := by rw [h0]
+    simp at hre him
+    apply complex.ext
+    · simp; linarith
+    · simp; linarith
+  by_contra hsum_ne
+  exact complex.mul_ne_zero (complex.sub (e_q q a) complex.one) (csum q (fun h => cpow_nat (e_q q a) h)) hne0 hsum_ne hgeom

@@ -46,6 +46,7 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
   << "ENVIRONMENT"
   << "    SATORI_ROOT       Tungsten checkout (prelude + SAT solver); default: cwd"
   << "    SATORI_SOLVER     external SAT solver emitting LRAT (default: wassat)"
+  << "    SATORI_CACHE_DIR  .satc/split/LRAT cache directory (default: ~/.tungsten/cache/satori)"
   << "    SATORI_NO_CACHE   set to 1 to bypass .satc verified module cache"
 
 -> satori_digits?(s)
@@ -231,7 +232,7 @@ SATORI_SPLIT_PROTOCOL = "⋯ satori split protocol 7"
   if secs == nil || secs == ""
     secs = "3600"
   nc_flag = no_cache ? "--no-cache" : ""
-  cache = root + "/bits/tungsten-satori/.satori-cache"
+  cache = satori_cache_dir() + "/split"
   File.mkdir_p(cache)
   dir = ccall("__w_mkdtemp_in", cache, "split")
   if dir == nil

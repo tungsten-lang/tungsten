@@ -18,7 +18,7 @@
   ro :indent, :toks, :line
   -> new(@indent, @toks, @line)
 
-SAT_KEYWORDS_LIST = ["opaque", "def", "theorem", "lemma", "example", "axiom", "inductive", "structure", "import",
+SAT_KEYWORDS_LIST = ["opaque", "def", "theorem", "lemma", "example", "axiom", "inductive", "structure", "class", "import",
    "fun", "λ", "if", "then", "else", "by", "have", "show", "calc", "let", "in",
    "instance", "notation", "variable", "open", "section", "end", "where", "at", "using", "with", "from", "match"]
 

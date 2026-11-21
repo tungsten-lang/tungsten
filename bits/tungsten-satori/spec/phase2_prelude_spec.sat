@@ -1,0 +1,52 @@
+-- End-to-end verification of Phase 2 math prelude:
+-- zmod, complex_sum, matrix, dirichlet, measure (zero custom axioms).
+
+import zmod
+import complex_sum
+import matrix
+import dirichlet
+import measure
+
+-- 1. zmod: negation involution on odd modulus l = 5
++ spec_zmod_neg5 : zmod.neg 5 1 = 4 ∧ zmod.neg 5 4 = 1
+  unfold zmod.neg
+  decide
+
+-- 2. complex_sum: Parseval + e_q geometric series
++ spec_parseval_check (n m : ℕ) (K : ℕ → ℕ → ℂ) (c : ℝ) (f : ℕ → ℂ)
+    (orth : cdot.orthogonal n m K c) :
+    cdot m (ctransform n K f) (ctransform n K f) = complex.mul (complex.of_real c) (cdot n f f)
+  exact cdot.parseval n m K c f f orth
+
+-- 3. matrix: identity preserves Hermitian pairing on any rank n
++ spec_unitary_id_pairing (n : ℕ) (H : ℕ → ℕ → ℂ) (u v : ℕ → ℂ) :
+    cmat.pairing n H (cmat.apply n cmat.id u) (cmat.apply n cmat.id v) = cmat.pairing n H u v
+  exact unitary.preserves_pairing n H cmat.id u v (unitary.id_mem n H)
+
+-- 4. dirichlet: principal character mod 5 is a Dirichlet character & odd l=5 CM splitting
++ spec_principal_mod5 : is_dirichlet_char 5 (dchar.principal 5)
+  exact dchar.principal_is_char 5 (by decide)
+
++ spec_cm_splits_mod5 (Phi : ℕ → Prop) (hcm : cm_type_zmod 5 Phi) :
+    Phi 1 ↔ ¬ Phi (zmod.neg 5 1)
+  exact (cm_type_zmod.one_splits 5 Phi (by decide) (by decide) hcm).2
+
+-- 5. measure: complex integral of constant + finite Haar expectation on Z/qZ
++ spec_c_integral_const (c : ℂ) :
+    c_has_integral (fun _ => c) 0 1 c
+  have h := c_has_integral.const 0 1 c (by linarith)
+  have h1 : complex.smul ((1 : ℝ) - 0) c = c
+    apply complex.ext
+    · simp
+    · simp
+  rw [h1] at h
+  exact h
+
++ spec_haar_const (c : ℂ) : haar_avg 5 (fun _ => c) = c
+  exact haar_avg.const 5 c (by decide)
+
+#axioms spec_parseval_check
+#axioms spec_unitary_id_pairing
+#axioms spec_principal_mod5
+#axioms spec_c_integral_const
+#axioms spec_haar_const

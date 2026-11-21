@@ -9,12 +9,21 @@ SATC_LIB_FILES = [
   "polynomial.w", "tactics.w", "pattern.w", "session.w", "satori.w"
 ]
 
+-> satori_cache_dir
+  env = Env.get("SATORI_CACHE_DIR")
+  if env != nil && env != ""
+    return env
+  home = Env.get("HOME")
+  if home == nil || home == ""
+    return "/tmp/.tungsten/cache/satori"
+  home + "/.tungsten/cache/satori"
+
 -> satc_toolchain_sig(root)
   cached = SATC_TOOLCHAIN_CACHE[root]
   if cached != nil
     return cached
   sb = StringBuffer()
-  sb.append("satc-v1")
+  sb.append("satc-v2")
   lib_dir = root + "/bits/tungsten-satori/lib/"
   SATC_LIB_FILES.each -> (fname)
     p = lib_dir + fname
@@ -323,6 +332,41 @@ SATC_LIB_FILES = [
       @op_sb.append(satc_esc(f))
     @op_sb.append("\n")
 
+  -> add_class(cname, params, fields)
+    @op_sb.append("O_CLASS\t")
+    @op_sb.append(satc_esc(cname))
+    @op_sb.append("\t")
+    @op_sb.append(params.size.to_s)
+    params.each -> (p)
+      @op_sb.append("\t")
+      @op_sb.append(satc_esc(p))
+    @op_sb.append("\t")
+    @op_sb.append(fields.size.to_s)
+    fields.each -> (f)
+      @op_sb.append("\t")
+      @op_sb.append(satc_esc(f))
+    @op_sb.append("\n")
+
+  -> add_instance(inst_name, class_name, target_ty, dep_tys)
+    tid = enc_ty(target_ty)
+    dids = Array.new(dep_tys.size)
+    i = 0
+    while i < dep_tys.size
+      dids[i] = enc_ty(dep_tys[i])
+      i += 1
+    @op_sb.append("O_INST\t")
+    @op_sb.append(satc_esc(inst_name))
+    @op_sb.append("\t")
+    @op_sb.append(satc_esc(class_name))
+    @op_sb.append("\t")
+    @op_sb.append(tid.to_s)
+    @op_sb.append("\t")
+    @op_sb.append(dids.size.to_s)
+    dids.each -> (did)
+      @op_sb.append("\t")
+      @op_sb.append(did.to_s)
+    @op_sb.append("\n")
+
   -> add_def(name, rhs)
     ri = enc_tm(rhs)
     @op_sb.append("O_DEF\t")
@@ -412,7 +456,7 @@ SATC_LIB_FILES = [
 
   -> serialize(mod_sig)
     out = StringBuffer()
-    out.append("SATC1\t")
+    out.append("SATC2\t")
     out.append(mod_sig)
     out.append("\t")
     out.append(@ty_next.to_s)
@@ -513,7 +557,10 @@ SATC_LIB_FILES = [
     @root + "/bits/tungsten-wassat/bin/wassat"
 
   -> cache_dir
-    @root + "/bits/tungsten-satori/.satori-cache"
+    satori_cache_dir()
+
+  -> satc_mod_dir
+    cache_dir + "/mod"
 
   -> prelude_dir
     @root + "/bits/tungsten-satori/prelude"
@@ -739,7 +786,7 @@ SATC_LIB_FILES = [
       src_sig = Digest.sha256(src)
       mode_tag = (@prelude_mode ? "P" : "U") + (@quiet ? "Q" : "V")
       ckey = Digest.sha256(satc_toolchain_sig(@root) + ":" + mode_tag + ":" + found + ":" + src_sig)
-      satc_path = cache_dir + "/mod-" + ckey + ".satc"
+      satc_path = satc_mod_dir + "/mod-" + ckey + ".satc"
       if File.exist?(satc_path)
         old_dir = @current_dir
         @current_dir = path_dirname(found)
@@ -769,9 +816,9 @@ SATC_LIB_FILES = [
         msig = Digest.sha256(src_sig + ":" + rec.imp_sig_chain)
         @mod_sigs[name] = msig
         begin
-          cdir = cache_dir
-          if !File.exist?(cdir)
-            File.mkdir_p(cdir)
+          mdir = satc_mod_dir
+          if !File.exist?(mdir)
+            File.mkdir_p(mdir)
           File.atomic_write(satc_path, rec.serialize(msig))
         rescue _e
           0
@@ -790,7 +837,7 @@ SATC_LIB_FILES = [
   -> satc_try_load(mod_name, satc_path)
     text = File.read(satc_path)
     n = text.size
-    if n < 12 || !text.starts_with?("SATC1\t") || !text.ends_with?("\nEND\n")
+    if n < 12 || !text.starts_with?("SATC2\t") || !text.ends_with?("\nEND\n")
       return false
     flds = []
     pos = 0
@@ -950,6 +997,32 @@ SATC_LIB_FILES = [
               flist[j] = flds[4 + j]
               j += 1
             @elab.register_fields(snm, cnm, flist)
+          elsif tag == "O_CLASS"
+            cnm = flds[1]
+            np = flds[2].to_i
+            plist = Array.new(np)
+            j = 0
+            while j < np
+              plist[j] = flds[3 + j]
+              j += 1
+            nf = flds[3 + np].to_i
+            flist = Array.new(nf)
+            j = 0
+            while j < nf
+              flist[j] = flds[4 + np + j]
+              j += 1
+            @elab.register_class(cnm, plist, flist)
+          elsif tag == "O_INST"
+            inm = flds[1]
+            cnm = flds[2]
+            tty = tys[flds[3].to_i]
+            nd = flds[4].to_i
+            dtys = Array.new(nd)
+            j = 0
+            while j < nd
+              dtys[j] = tys[flds[5 + j].to_i]
+              j += 1
+            @elab.register_instance(inm, cnm, tty, dtys)
           elsif tag == "O_SAY"
             say(flds[1])
           elsif tag == "O_STATS"
@@ -1017,6 +1090,10 @@ SATC_LIB_FILES = [
       exec_inductive(c)
     when :structure
       exec_structure(c)
+    when :class
+      exec_class(c)
+    when :instance
+      exec_instance(c)
     when :def
       exec_def(c)
     when :axiom
@@ -1104,6 +1181,30 @@ SATC_LIB_FILES = [
     @elab.register_fields(c.name, ct[0], fields)
     if @rec != nil
       @rec.add_fields(c.name, ct[0], fields)
+
+  -> exec_class(c)
+    exec_structure(c)
+    ct = c.ctors[0]
+    fields = []
+    ct[1].each -> (f)
+      fields.push(f[0])
+    @elab.register_class(c.name, c.params, fields)
+    if @rec != nil
+      @rec.add_class(c.name, c.params, fields)
+
+  -> exec_instance(c)
+    exec_def(c)
+    ty = @k.const_type(c.name)
+    dep_tys = []
+    cur = ty
+    while cur.fun? && @elab.is_class_ty?(cur.dom)
+      dep_tys.push(cur.dom)
+      cur = cur.cod
+    if !@elab.is_class_ty?(cur)
+      raise "instance " + c.name + " must return a declared typeclass, got " + ty_show(cur)
+    @elab.register_instance(c.name, cur.name, cur, dep_tys)
+    if @rec != nil
+      @rec.add_instance(c.name, cur.name, cur, dep_tys)
 
   # ⊢ lhs = rhs when both sides evaluate to the same normal form.
   -> eq_by_compute(lhs, rhs)

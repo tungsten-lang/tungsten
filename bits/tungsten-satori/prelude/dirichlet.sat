@@ -1,0 +1,220 @@
+-- Dirichlet characters mod N, CM-type duality on Z/lZ, and Alpöge character-box sums.
+-- All theorems proved unconditionally on Satori's foundational HOL kernel.
+
+import zmod
+import complex_sum
+
+-- ---- unit-group equivalence lemmas on Z/NZ -----------------------------------------
+
++ zmod.is_unit_mod (N a : ℕ) : zmod.is_unit N (a % N) ↔ zmod.is_unit N a
+  unfold zmod.is_unit
+  constructor
+  · intro h
+    obtain ⟨b, hb, heq⟩ := h
+    use b
+    constructor
+    · exact hb
+    · rw [mul_mod.nat a b N, ← zmod.mod_mod a N, ← mul_mod.nat (a % N) b N]
+      exact heq
+  · intro h
+    obtain ⟨b, hb, heq⟩ := h
+    use b
+    constructor
+    · exact hb
+    · rw [mul_mod.nat (a % N) b N, zmod.mod_mod a N, ← mul_mod.nat a b N]
+      exact heq
+
++ zmod.is_unit_add_modulus (N a : ℕ) : zmod.is_unit N (a + N) ↔ zmod.is_unit N a
+  have hmod : (a + N) % N = a % N := by
+    have h1 : a + N = a + N * 1 := by ring
+    rw [h1]
+    exact add_mul_mod.nat a 1 N
+  constructor
+  · intro h
+    have h1 := (zmod.is_unit_mod N (a + N)).mpr h
+    rw [hmod] at h1
+    exact (zmod.is_unit_mod N a).mp h1
+  · intro h
+    have h1 := (zmod.is_unit_mod N a).mpr h
+    rw [← hmod] at h1
+    exact (zmod.is_unit_mod N (a + N)).mp h1
+
++ zmod.is_unit_mul_iff (N a b : ℕ) (hN : 0 < N) :
+    zmod.is_unit N (a * b) ↔ zmod.is_unit N a ∧ zmod.is_unit N b
+  constructor
+  · intro hab
+    unfold zmod.is_unit at hab
+    obtain ⟨c, hc, heq⟩ := hab
+    constructor
+    · unfold zmod.is_unit
+      use (b * c) % N
+      constructor
+      · exact mod_lt.nat (b * c) N hN
+      · rw [mul_mod.nat a ((b * c) % N) N, zmod.mod_mod (b * c) N, ← mul_mod.nat a (b * c) N]
+        have ha : a * (b * c) = a * b * c := by ring
+        rw [ha]
+        exact heq
+    · unfold zmod.is_unit
+      use (a * c) % N
+      constructor
+      · exact mod_lt.nat (a * c) N hN
+      · rw [mul_mod.nat b ((a * c) % N) N, zmod.mod_mod (a * c) N, ← mul_mod.nat b (a * c) N]
+        have hb : b * (a * c) = a * b * c := by ring
+        rw [hb]
+        exact heq
+  · intro h
+    obtain ⟨ha, hb⟩ := h
+    have hm := zmod.unit_mul N a b hN ha hb
+    unfold zmod.mul at hm
+    exact (zmod.is_unit_mod N (a * b)).mp hm
+
+-- ---- Dirichlet characters mod N ----------------------------------------------------
+
+-> is_dirichlet_char (N : ℕ) (chi : ℕ → ℂ) : Prop :=
+  (∀ a : ℕ, chi (a + N) = chi a) ∧
+  chi 1 = complex.one ∧
+  (∀ a : ℕ, ¬ zmod.is_unit N a → chi a = complex.zero) ∧
+  (∀ a b : ℕ, chi (a * b) = complex.mul (chi a) (chi b))
+
+-> dchar.principal (N : ℕ) (a : ℕ) : ℂ :=
+  if zmod.is_unit N a then complex.one else complex.zero
+
++ dchar.principal_is_char (N : ℕ) (hN : 2 ≤ N) : is_dirichlet_char N (dchar.principal N)
+  unfold is_dirichlet_char dchar.principal
+  constructor
+  · intro a
+    by_cases hu : zmod.is_unit N a
+    · have hu2 : zmod.is_unit N (a + N) := (zmod.is_unit_add_modulus N a).mpr hu
+      simp [hu, hu2]
+    · have hu2 : ¬ zmod.is_unit N (a + N) := by
+        intro h; exact hu ((zmod.is_unit_add_modulus N a).mp h)
+      simp [hu, hu2]
+  · constructor
+    · have h1 : zmod.is_unit N 1 := zmod.unit_one N hN
+      simp [h1]
+      apply complex.ext <;> simp
+    · constructor
+      · intro a ha
+        simp [ha]
+        apply complex.ext <;> simp
+      · intro a b
+        have hpos : 0 < N := by omega
+        by_cases ha : zmod.is_unit N a
+        · by_cases hb : zmod.is_unit N b
+          · have hab : zmod.is_unit N (a * b) := (zmod.is_unit_mul_iff N a b hpos).mpr ⟨ha, hb⟩
+            simp [ha, hb, hab]
+            apply complex.ext <;> simp
+          · have hab : ¬ zmod.is_unit N (a * b) := by
+              intro h; exact hb ((zmod.is_unit_mul_iff N a b hpos).mp h).2
+            simp [ha, hb, hab]
+            apply complex.ext <;> simp
+        · have hab : ¬ zmod.is_unit N (a * b) := by
+            intro h; exact ha ((zmod.is_unit_mul_iff N a b hpos).mp h).1
+          by_cases hb : zmod.is_unit N b
+          · simp [ha, hb, hab]
+            apply complex.ext <;> simp
+          · simp [ha, hb, hab]
+            apply complex.ext <;> simp
+
++ dchar.conj_is_char (N : ℕ) (chi : ℕ → ℂ) (h : is_dirichlet_char N chi) :
+    is_dirichlet_char N (fun a => complex.conj (chi a))
+  unfold is_dirichlet_char at h ⊢
+  obtain ⟨hper, h1, h0, hmul⟩ := h
+  constructor
+  · intro a; rw [hper a]
+  · constructor
+    · rw [h1]; apply complex.ext <;> simp
+    · constructor
+      · intro a ha; rw [h0 a ha]; apply complex.ext <;> simp
+      · intro a b; rw [hmul a b, complex.conj_mul]
+
++ dchar.mul_is_char (N : ℕ) (chi1 chi2 : ℕ → ℂ)
+    (h1 : is_dirichlet_char N chi1) (h2 : is_dirichlet_char N chi2) :
+    is_dirichlet_char N (fun a => complex.mul (chi1 a) (chi2 a))
+  unfold is_dirichlet_char at h1 h2 ⊢
+  obtain ⟨p1, o1, z1, m1⟩ := h1
+  obtain ⟨p2, o2, z2, m2⟩ := h2
+  constructor
+  · intro a; rw [p1 a, p2 a]
+  · constructor
+    · rw [o1, o2]; apply complex.ext <;> simp
+    · constructor
+      · intro a ha; rw [z1 a ha]; exact complex.zero_mul (chi2 a)
+      · intro a b
+        rw [m1 a b, m2 a b]
+        apply complex.ext <;> simp <;> ring
+
++ dchar.periodic_mul (N : ℕ) (chi : ℕ → ℂ) (h : is_dirichlet_char N chi) (a k : ℕ) :
+    chi (a + N * k) = chi a
+  unfold is_dirichlet_char at h
+  obtain ⟨hper, _, _, _⟩ := h
+  induction k with j ih
+  · have h0 : a + N * 0 = a := by ring
+    rw [h0]
+  · rw [succ_eq_add_one.nat]
+    have hs : a + N * (j + 1) = (a + N * j) + N := by ring
+    rw [hs, hper (a + N * j), ih]
+
+-- ---- CM-type duality on non-zero residues of Z/lZ (odd l >= 3) ---------------------
+
+-> cm_type_zmod (l : ℕ) (Phi : ℕ → Prop) : Prop :=
+  ∀ a < l, a ≠ 0 → (Phi a ↔ ¬ Phi (zmod.neg l a))
+
++ cm_type_zmod.partition (l : ℕ) (Phi : ℕ → Prop) (hcm : cm_type_zmod l Phi)
+    (a : ℕ) (ha : a < l) (hne : a ≠ 0) :
+    (Phi a ∨ Phi (zmod.neg l a)) ∧ ¬ (Phi a ∧ Phi (zmod.neg l a))
+  unfold cm_type_zmod at hcm
+  have hiff := hcm a ha hne
+  constructor
+  · by_cases h : Phi a
+    · left; exact h
+    · right
+      by_contra hneg
+      exact h (hiff.mpr hneg)
+  · intro both
+    exact (hiff.mp both.1) both.2
+
++ cm_type_zmod.dual_is_cm (l : ℕ) (Phi : ℕ → Prop) (hcm : cm_type_zmod l Phi) :
+    cm_type_zmod l (fun a => Phi (zmod.neg l a))
+  unfold cm_type_zmod at hcm ⊢
+  intro a ha hne
+  rw [zmod.neg_neg l a ha]
+  have hiff := hcm a ha hne
+  constructor
+  · intro hna ha0; exact (hiff.mp ha0) hna
+  · intro hna
+    by_contra hneg
+    exact hna (hiff.mpr hneg)
+
++ cm_type_zmod.one_splits (l : ℕ) (Phi : ℕ → Prop) (hodd : l % 2 = 1) (hge : 3 ≤ l)
+    (hcm : cm_type_zmod l Phi) :
+    zmod.neg l 1 ≠ 1 ∧ (Phi 1 ↔ ¬ Phi (zmod.neg l 1))
+  unfold cm_type_zmod at hcm
+  constructor
+  · exact zmod.neg_one_ne_one l hodd hge
+  · exact hcm 1 (by omega) (by decide)
+
+-- ---- Alpöge Formalism/Statement.lean weighted character sums & forced-sum ----------
+
+-> dchar.weighted_sum (N : ℕ) (w : ℕ → ℝ) (chi : ℕ → ℂ) : ℂ :=
+  csum N (fun n => complex.smul (w n) (chi n))
+
+-> dchar.error_G (N : ℕ) (w : ℕ → ℝ) (chi : ℕ → ℂ) (main_term : ℂ) : ℂ :=
+  complex.sub (dchar.weighted_sum N w chi) main_term
+
++ dchar.weighted_sum_add (N : ℕ) (w : ℕ → ℝ) (chi1 chi2 : ℕ → ℂ) :
+    dchar.weighted_sum N w (fun n => complex.add (chi1 n) (chi2 n))
+      = complex.add (dchar.weighted_sum N w chi1) (dchar.weighted_sum N w chi2)
+  unfold dchar.weighted_sum
+  have h1 : csum N (fun n => complex.smul (w n) (complex.add (chi1 n) (chi2 n)))
+      = csum N (fun n => complex.add (complex.smul (w n) (chi1 n)) (complex.smul (w n) (chi2 n))) := by
+    apply csum.congr; intro n hn
+    apply complex.ext <;> simp <;> ring
+  rw [h1, csum.add]
+
++ dchar.forced_sum_id (N : ℕ) (w : ℕ → ℝ) (chi1 chi2 : ℕ → ℂ) (M1 M2 : ℂ) :
+    complex.add (dchar.error_G N w chi1 M1) (dchar.error_G N w chi2 M2)
+      = dchar.error_G N w (fun n => complex.add (chi1 n) (chi2 n)) (complex.add M1 M2)
+  unfold dchar.error_G
+  rw [dchar.weighted_sum_add]
+  apply complex.ext <;> simp <;> ring

@@ -1,0 +1,332 @@
+-- First-class complex numbers ℂ in Satori HOL.
+-- Constructed directly from ℝ with zero added axioms: field laws, conjugation,
+-- squared norm, modulus (via `sqrt`), and complex exponential (via `exp`, `cos`, `sin`).
+
+import real
+import algebra
+
+structure complex := (re : ℝ) (im : ℝ)
+
+-- ---- constructors & basic operations -----------------------------------------------
+
+-> complex.zero : ℂ := complex.mk 0 0
+-> complex.one  : ℂ := complex.mk 1 0
+-> complex.I    : ℂ := complex.mk 0 1
+-> complex.of_real (r : ℝ) : ℂ := complex.mk r 0
+
+-> complex.neg (z : ℂ) : ℂ := complex.mk (0 - complex.re z) (0 - complex.im z)
+-> complex.conj (z : ℂ) : ℂ := complex.mk (complex.re z) (0 - complex.im z)
+-> complex.add (z w : ℂ) : ℂ := complex.mk (complex.re z + complex.re w) (complex.im z + complex.im w)
+-> complex.sub (z w : ℂ) : ℂ := complex.mk (complex.re z - complex.re w) (complex.im z - complex.im w)
+-> complex.mul (z w : ℂ) : ℂ :=
+  complex.mk (complex.re z * complex.re w - complex.im z * complex.im w)
+             (complex.re z * complex.im w + complex.im z * complex.re w)
+-> complex.smul (r : ℝ) (z : ℂ) : ℂ := complex.mk (r * complex.re z) (r * complex.im z)
+-> complex.norm_sq (z : ℂ) : ℝ := complex.re z * complex.re z + complex.im z * complex.im z
+-> complex.inv (z : ℂ) : ℂ :=
+  complex.mk (complex.re z / complex.norm_sq z) ((0 - complex.im z) / complex.norm_sq z)
+-> complex.div (z w : ℂ) : ℂ := complex.mul z (complex.inv w)
+-> complex.abs (z : ℂ) : ℝ := sqrt (complex.norm_sq z)
+-> complex.exp (z : ℂ) : ℂ :=
+  complex.mk (exp (complex.re z) * cos (complex.im z))
+             (exp (complex.re z) * sin (complex.im z))
+
+-- ---- structural extensionality & projection simp lemmas ----------------------------
+
++ complex.eta (z : ℂ) : complex.mk (complex.re z) (complex.im z) = z
+  induction z
+  simp
+
++ complex.ext (z w : ℂ) (hr : complex.re z = complex.re w) (hi : complex.im z = complex.im w) : z = w
+  rw [← complex.eta z, ← complex.eta w, hr, hi]
+
+@[simp] + complex.zero_re : complex.re complex.zero = 0 := by unfold complex.zero; simp
+@[simp] + complex.zero_im : complex.im complex.zero = 0 := by unfold complex.zero; simp
+@[simp] + complex.one_re  : complex.re complex.one  = 1 := by unfold complex.one; simp
+@[simp] + complex.one_im  : complex.im complex.one  = 0 := by unfold complex.one; simp
+@[simp] + complex.I_re    : complex.re complex.I    = 0 := by unfold complex.I; simp
+@[simp] + complex.I_im    : complex.im complex.I    = 1 := by unfold complex.I; simp
+@[simp] + complex.of_real_re (r : ℝ) : complex.re (complex.of_real r) = r := by unfold complex.of_real; simp
+@[simp] + complex.of_real_im (r : ℝ) : complex.im (complex.of_real r) = 0 := by unfold complex.of_real; simp
+
+@[simp] + complex.neg_re  (z : ℂ) : complex.re (complex.neg z)  = 0 - complex.re z := by unfold complex.neg; simp
+@[simp] + complex.neg_im  (z : ℂ) : complex.im (complex.neg z)  = 0 - complex.im z := by unfold complex.neg; simp
+@[simp] + complex.conj_re (z : ℂ) : complex.re (complex.conj z) = complex.re z := by unfold complex.conj; simp
+@[simp] + complex.conj_im (z : ℂ) : complex.im (complex.conj z) = 0 - complex.im z := by unfold complex.conj; simp
+@[simp] + complex.add_re  (z w : ℂ) : complex.re (complex.add z w) = complex.re z + complex.re w := by unfold complex.add; simp
+@[simp] + complex.add_im  (z w : ℂ) : complex.im (complex.add z w) = complex.im z + complex.im w := by unfold complex.add; simp
+@[simp] + complex.sub_re  (z w : ℂ) : complex.re (complex.sub z w) = complex.re z - complex.re w := by unfold complex.sub; simp
+@[simp] + complex.sub_im  (z w : ℂ) : complex.im (complex.sub z w) = complex.im z - complex.im w := by unfold complex.sub; simp
+@[simp] + complex.mul_re  (z w : ℂ) : complex.re (complex.mul z w) = complex.re z * complex.re w - complex.im z * complex.im w := by unfold complex.mul; simp
+@[simp] + complex.mul_im  (z w : ℂ) : complex.im (complex.mul z w) = complex.re z * complex.im w + complex.im z * complex.re w := by unfold complex.mul; simp
+@[simp] + complex.smul_re (r : ℝ) (z : ℂ) : complex.re (complex.smul r z) = r * complex.re z := by unfold complex.smul; simp
+@[simp] + complex.smul_im (r : ℝ) (z : ℂ) : complex.im (complex.smul r z) = r * complex.im z := by unfold complex.smul; simp
+@[simp] + complex.exp_re  (z : ℂ) : complex.re (complex.exp z) = exp (complex.re z) * cos (complex.im z) := by unfold complex.exp; simp
+@[simp] + complex.exp_im  (z : ℂ) : complex.im (complex.exp z) = exp (complex.re z) * sin (complex.im z) := by unfold complex.exp; simp
+
+-- ---- real embedding & imaginary unit -----------------------------------------------
+
++ complex.of_real_zero : complex.of_real 0 = complex.zero
+  apply complex.ext <;> simp
+
++ complex.of_real_one : complex.of_real 1 = complex.one
+  apply complex.ext <;> simp
+
++ complex.of_real_add (a b : ℝ) : complex.of_real (a + b) = complex.add (complex.of_real a) (complex.of_real b)
+  apply complex.ext <;> simp
+
++ complex.of_real_mul (a b : ℝ) : complex.of_real (a * b) = complex.mul (complex.of_real a) (complex.of_real b)
+  apply complex.ext
+  · simp; ring
+  · simp
+
++ complex.of_real_neg (a : ℝ) : complex.of_real (0 - a) = complex.neg (complex.of_real a)
+  apply complex.ext <;> simp
+
++ complex.of_real_inj (a b : ℝ) (h : complex.of_real a = complex.of_real b) : a = b
+  have hr : complex.re (complex.of_real a) = complex.re (complex.of_real b) := by rw [h]
+  simp at hr
+  exact hr
+
++ complex.I_mul_I : complex.mul complex.I complex.I = complex.neg complex.one
+  apply complex.ext <;> simp
+
+-- ---- commutative ring laws ---------------------------------------------------------
+
++ complex.add_comm (z w : ℂ) : complex.add z w = complex.add w z
+  apply complex.ext <;> simp <;> ring
+
++ complex.add_assoc (a b c : ℂ) : complex.add (complex.add a b) c = complex.add a (complex.add b c)
+  apply complex.ext <;> simp <;> ring
+
++ complex.add_zero (z : ℂ) : complex.add z complex.zero = z
+  apply complex.ext <;> simp <;> ring
+
++ complex.zero_add (z : ℂ) : complex.add complex.zero z = z
+  apply complex.ext <;> simp <;> ring
+
++ complex.add_neg (z : ℂ) : complex.add z (complex.neg z) = complex.zero
+  apply complex.ext <;> simp <;> ring
+
++ complex.sub_eq_add_neg (z w : ℂ) : complex.sub z w = complex.add z (complex.neg w)
+  apply complex.ext <;> simp <;> ring
+
++ complex.sub_self (z : ℂ) : complex.sub z z = complex.zero
+  apply complex.ext <;> simp <;> ring
+
++ complex.mul_comm (z w : ℂ) : complex.mul z w = complex.mul w z
+  apply complex.ext <;> simp <;> ring
+
++ complex.mul_assoc (a b c : ℂ) : complex.mul (complex.mul a b) c = complex.mul a (complex.mul b c)
+  apply complex.ext <;> simp <;> ring
+
++ complex.mul_one (z : ℂ) : complex.mul z complex.one = z
+  apply complex.ext <;> simp <;> ring
+
++ complex.one_mul (z : ℂ) : complex.mul complex.one z = z
+  apply complex.ext <;> simp <;> ring
+
++ complex.mul_zero (z : ℂ) : complex.mul z complex.zero = complex.zero
+  apply complex.ext <;> simp <;> ring
+
++ complex.zero_mul (z : ℂ) : complex.mul complex.zero z = complex.zero
+  apply complex.ext <;> simp <;> ring
+
++ complex.left_distrib (a b c : ℂ) : complex.mul a (complex.add b c) = complex.add (complex.mul a b) (complex.mul a c)
+  apply complex.ext <;> simp <;> ring
+
++ complex.right_distrib (a b c : ℂ) : complex.mul (complex.add a b) c = complex.add (complex.mul a c) (complex.mul b c)
+  apply complex.ext <;> simp <;> ring
+
++ complex.one_ne_zero : complex.one ≠ complex.zero
+  intro h
+  have hr : complex.re complex.one = complex.re complex.zero := by rw [h]
+  simp at hr
+
+-- ---- conjugation -------------------------------------------------------------------
+
++ complex.conj_conj (z : ℂ) : complex.conj (complex.conj z) = z
+  apply complex.ext <;> simp <;> ring
+
++ complex.conj_add (z w : ℂ) : complex.conj (complex.add z w) = complex.add (complex.conj z) (complex.conj w)
+  apply complex.ext <;> simp <;> ring
+
++ complex.conj_sub (z w : ℂ) : complex.conj (complex.sub z w) = complex.sub (complex.conj z) (complex.conj w)
+  apply complex.ext <;> simp <;> ring
+
++ complex.conj_mul (z w : ℂ) : complex.conj (complex.mul z w) = complex.mul (complex.conj z) (complex.conj w)
+  apply complex.ext <;> simp <;> ring
+
++ complex.conj_of_real (r : ℝ) : complex.conj (complex.of_real r) = complex.of_real r
+  apply complex.ext <;> simp <;> ring
+
++ complex.mul_conj (z : ℂ) : complex.mul z (complex.conj z) = complex.of_real (complex.norm_sq z)
+  apply complex.ext
+  · unfold complex.norm_sq; simp; ring
+  · simp; ring
+
+-- ---- norm_sq, field inverse, integral domain, abs ----------------------------------
+
++ complex.real_sq_nonneg (x : ℝ) : 0 ≤ x * x
+  by_cases h : 0 ≤ x
+  · exact mul_nonneg.real x x h h
+  · have hlt : x < 0 := by linarith
+    have hnx : 0 ≤ 0 - x := by linarith
+    have hsq : 0 ≤ (0 - x) * (0 - x) := mul_nonneg.real (0 - x) (0 - x) hnx hnx
+    have heq : (0 - x) * (0 - x) = x * x := by ring
+    rw [heq] at hsq
+    exact hsq
+
++ complex.norm_sq_nonneg (z : ℂ) : 0 ≤ complex.norm_sq z
+  unfold complex.norm_sq
+  have h1 : 0 ≤ complex.re z * complex.re z := complex.real_sq_nonneg (complex.re z)
+  have h2 : 0 ≤ complex.im z * complex.im z := complex.real_sq_nonneg (complex.im z)
+  linarith
+
++ complex.norm_sq_eq_zero (z : ℂ) : complex.norm_sq z = 0 ↔ z = complex.zero
+  constructor
+  · intro h
+    unfold complex.norm_sq at h
+    have h1 : 0 ≤ complex.re z * complex.re z := complex.real_sq_nonneg (complex.re z)
+    have h2 : 0 ≤ complex.im z * complex.im z := complex.real_sq_nonneg (complex.im z)
+    have hr0 : complex.re z = 0 := by
+      by_contra hne
+      have hpos : 0 < complex.re z * complex.re z := by
+        by_cases hp : 0 < complex.re z
+        · exact mul_pos.real (complex.re z) (complex.re z) hp hp
+        · have hn : 0 < 0 - complex.re z := by linarith
+          have hp2 : 0 < (0 - complex.re z) * (0 - complex.re z) := mul_pos.real (0 - complex.re z) (0 - complex.re z) hn hn
+          have heq : (0 - complex.re z) * (0 - complex.re z) = complex.re z * complex.re z := by ring
+          rw [heq] at hp2
+          exact hp2
+      linarith
+    have hi0 : complex.im z = 0 := by
+      by_contra hne
+      have hpos : 0 < complex.im z * complex.im z := by
+        by_cases hp : 0 < complex.im z
+        · exact mul_pos.real (complex.im z) (complex.im z) hp hp
+        · have hn : 0 < 0 - complex.im z := by linarith
+          have hp2 : 0 < (0 - complex.im z) * (0 - complex.im z) := mul_pos.real (0 - complex.im z) (0 - complex.im z) hn hn
+          have heq : (0 - complex.im z) * (0 - complex.im z) = complex.im z * complex.im z := by ring
+          rw [heq] at hp2
+          exact hp2
+      linarith
+    apply complex.ext <;> simp
+  · intro hz
+    rw [hz]
+    unfold complex.norm_sq
+    simp
+
++ complex.norm_sq_pos (z : ℂ) (hz : z ≠ complex.zero) : 0 < complex.norm_sq z
+  have hge : 0 ≤ complex.norm_sq z := complex.norm_sq_nonneg z
+  have hne : complex.norm_sq z ≠ 0 := by
+    intro h0
+    exact hz ((complex.norm_sq_eq_zero z).mp h0)
+  linarith
+
++ complex.norm_sq_conj (z : ℂ) : complex.norm_sq (complex.conj z) = complex.norm_sq z
+  unfold complex.norm_sq
+  simp
+  ring
+
++ complex.norm_sq_mul (z w : ℂ) : complex.norm_sq (complex.mul z w) = complex.norm_sq z * complex.norm_sq w
+  unfold complex.norm_sq
+  simp
+  ring
+
++ complex.mul_inv_cancel (z : ℂ) (hz : z ≠ complex.zero) : complex.mul z (complex.inv z) = complex.one
+  have hn : complex.norm_sq z ≠ 0 := by
+    intro h0
+    exact hz ((complex.norm_sq_eq_zero z).mp h0)
+  have hinv : complex.norm_sq z * (1 / complex.norm_sq z) = 1 := mul_inv_cancel.real (complex.norm_sq z) hn
+  have hd1 : complex.re z / complex.norm_sq z = complex.re z * (1 / complex.norm_sq z) := div_def.real (complex.re z) (complex.norm_sq z)
+  have hd2 : (0 - complex.im z) / complex.norm_sq z = (0 - complex.im z) * (1 / complex.norm_sq z) := div_def.real (0 - complex.im z) (complex.norm_sq z)
+  apply complex.ext
+  · unfold complex.inv
+    simp
+    rw [hd1, hd2]
+    have hns : complex.re z * complex.re z + complex.im z * complex.im z = complex.norm_sq z := by unfold complex.norm_sq; auto
+    calc complex.re z * (complex.re z * (1 / complex.norm_sq z)) - complex.im z * ((0 - complex.im z) * (1 / complex.norm_sq z))
+      = (complex.re z * complex.re z + complex.im z * complex.im z) * (1 / complex.norm_sq z) := by ring
+      _ = complex.norm_sq z * (1 / complex.norm_sq z) := by rw [hns]
+      _ = 1 := hinv
+  · unfold complex.inv
+    simp
+    rw [hd1, hd2]
+    ring
+
++ complex.inv_mul_cancel (z : ℂ) (hz : z ≠ complex.zero) : complex.mul (complex.inv z) z = complex.one
+  rw [complex.mul_comm]
+  exact complex.mul_inv_cancel z hz
+
++ complex.mul_ne_zero (z w : ℂ) (hz : z ≠ complex.zero) (hw : w ≠ complex.zero) : complex.mul z w ≠ complex.zero
+  intro h0
+  have hn0 : complex.norm_sq (complex.mul z w) = 0 := (complex.norm_sq_eq_zero (complex.mul z w)).mpr h0
+  rw [complex.norm_sq_mul] at hn0
+  have hpz : 0 < complex.norm_sq z := complex.norm_sq_pos z hz
+  have hpw : 0 < complex.norm_sq w := complex.norm_sq_pos w hw
+  have hpm : 0 < complex.norm_sq z * complex.norm_sq w := mul_pos.real (complex.norm_sq z) (complex.norm_sq w) hpz hpw
+  linarith
+
++ complex.abs_nonneg (z : ℂ) : 0 ≤ complex.abs z
+  unfold complex.abs
+  exact sqrt_nonneg (complex.norm_sq z)
+
++ complex.abs_sq (z : ℂ) : complex.abs z * complex.abs z = complex.norm_sq z
+  unfold complex.abs
+  exact (sqrt_spec (complex.norm_sq z) (complex.norm_sq_nonneg z)).2
+
++ complex.abs_conj (z : ℂ) : complex.abs (complex.conj z) = complex.abs z
+  unfold complex.abs
+  rw [complex.norm_sq_conj]
+
+-- ---- complex exponential -----------------------------------------------------------
+
++ complex.exp_zero : complex.exp complex.zero = complex.one
+  apply complex.ext
+  · simp; rw [exp_zero, cos_zero]; ring
+  · simp; rw [exp_zero, sin_zero]; ring
+
++ complex.exp_add (z w : ℂ) : complex.exp (complex.add z w) = complex.mul (complex.exp z) (complex.exp w)
+  apply complex.ext
+  · simp
+    rw [exp_add, cos_add]
+    ring
+  · simp
+    rw [exp_add, sin_add]
+    ring
+
++ complex.norm_sq_exp (z : ℂ) : complex.norm_sq (complex.exp z) = exp (complex.re z) * exp (complex.re z)
+  unfold complex.norm_sq
+  simp
+  have hsc : sin (complex.im z) * sin (complex.im z) + cos (complex.im z) * cos (complex.im z) = 1 := sin_sq_add_cos_sq (complex.im z)
+  have h1 : (exp (complex.re z) * cos (complex.im z)) * (exp (complex.re z) * cos (complex.im z)) + (exp (complex.re z) * sin (complex.im z)) * (exp (complex.re z) * sin (complex.im z)) = exp (complex.re z) * exp (complex.re z) * (sin (complex.im z) * sin (complex.im z) + cos (complex.im z) * cos (complex.im z)) := by ring
+  rw [h1, hsc]
+  ring
+
++ complex.norm_sq_exp_i (t : ℝ) : complex.norm_sq (complex.exp (complex.mk 0 t)) = 1
+  rw [complex.norm_sq_exp]
+  simp
+  rw [exp_zero]
+  ring
+
++ complex.exp_ne_zero (z : ℂ) : complex.exp z ≠ complex.zero
+  intro h0
+  have hn0 : complex.norm_sq (complex.exp z) = 0 := (complex.norm_sq_eq_zero (complex.exp z)).mpr h0
+  rw [complex.norm_sq_exp] at hn0
+  have he : 0 < exp (complex.re z) := exp_pos (complex.re z)
+  have hsq : 0 < exp (complex.re z) * exp (complex.re z) := mul_pos.real (exp (complex.re z)) (exp (complex.re z)) he he
+  linarith
+
+-- ---- algebraic typeclass instances for ℂ -------------------------------------------
+
+instance complex_zero   : Zero   ℂ := Zero.mk   complex.zero
+instance complex_one    : One    ℂ := One.mk    complex.one
+instance complex_add    : Add    ℂ := Add.mk    complex.add
+instance complex_sub    : Sub    ℂ := Sub.mk    complex.sub
+instance complex_neg    : Neg    ℂ := Neg.mk    complex.neg
+instance complex_mul    : Mul    ℂ := Mul.mk    complex.mul
+instance complex_div    : Div    ℂ := Div.mk    complex.div
+instance complex_ring   : Ring   ℂ := Ring.mk   complex.zero complex.one complex.add complex.neg complex.mul
+instance complex_field  : Field  ℂ := Field.mk  complex.zero complex.one complex.add complex.neg complex.mul complex.inv
+instance complex_normed : Normed ℂ := Normed.mk complex.abs

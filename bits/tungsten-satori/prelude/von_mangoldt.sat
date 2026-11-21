@@ -1,0 +1,653 @@
+-- Constructive smallest prime factor, von Mangoldt function Lambda(n), Chebyshev psi(N),
+-- and Chebyshev's fundamental identity: sum_{d | n} Lambda(d) = log n.
+-- ALL theorems proved unconditionally on Satori's foundational HOL kernel (0 custom axioms).
+
+import l_function
+
+-- ====================================================================================
+-- 1. Real Logarithm Multiplication & Power Laws (from exp_add, log_exp, exp_log)
+-- ====================================================================================
+
++ log_mul.real (a b : ℝ) (ha : 0 < a) (hb : 0 < b) :
+    log (a * b) = log a + log b
+  have h1 : exp (log a + log b) = a * b
+    rw [exp_add, exp_log a ha, exp_log b hb]
+  have h2 := log_exp (log a + log b)
+  rw [h1] at h2
+  exact h2
+
++ pow_pos_nat (p k : ℕ) (hp : 0 < p) : 0 < p ^ k
+  induction k with n ih
+  · rw [pow_zero.nat]; decide
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    exact mul_pos.nat (p ^ n) p ih hp
+
++ log_pow.nat (p a : ℕ) (hp : 1 ≤ p) : log ((p ^ a : ℕ) : ℝ) = (a : ℝ) * log (p : ℝ)
+  have hp_pos : (0 : ℝ) < (p : ℝ)
+    have h1 : p = (p - 1) + 1 := by omega
+    rw [h1]; simp; linarith [cast_nonneg.real (p - 1)]
+  induction a with j ih
+  · rw [pow_zero.nat]; simp [log_one]
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    simp
+    have hpj_pos : (0 : ℝ) < ((p ^ j : ℕ) : ℝ)
+      have hpos := pow_pos_nat p j (by omega)
+      have h1 : p ^ j = (p ^ j - 1) + 1 := by omega
+      rw [h1]; simp; linarith [cast_nonneg.real (p ^ j - 1)]
+    rw [log_mul.real ((p ^ j : ℕ) : ℝ) (p : ℝ) hpj_pos hp_pos, ih]
+    ring
+
+-- ====================================================================================
+-- 2. Constructive Smallest Prime Factor `min_fac` & Prime-Power Stripping
+-- ====================================================================================
+
+-> find_div (n : ℕ) : ℕ → ℕ → ℕ
+  | 0 => fun _ => n
+  | fuel + 1 => fun d => if n % d = 0 then d else find_div n fuel (d + 1)
+
+-> min_fac (n : ℕ) : ℕ :=
+  if n ≤ 1 then 1 else find_div n n 2
+
++ find_div.spec (n fuel : ℕ) :
+    ∀ d : ℕ, 2 ≤ d → d ≤ n → n ≤ d + fuel →
+      (∀ k : ℕ, 2 ≤ k → k < d → ¬ (n % k = 0)) →
+      2 ≤ find_div n fuel d ∧ find_div n fuel d ≤ n ∧
+      n % find_div n fuel d = 0 ∧
+      (∀ k : ℕ, 2 ≤ k → k < find_div n fuel d → ¬ (n % k = 0))
+  induction fuel with d hd2 hdn hle hno f ih d hd2 hdn hle hno
+  · simp [find_div]
+    have hdn_eq : d = n := by omega
+    rw [← hdn_eq] at hno ⊢
+    have hmod_self : d % d = 0
+      have h0 := add_mul_mod.nat 0 1 d
+      have h1 : 0 + d * 1 = d := by ring
+      have h0d : 0 % d = 0 := (div_mod_of_lt.nat 0 d (by omega)).2
+      rw [h1, h0d] at h0
+      exact h0
+    exact ⟨hd2, hmod_self, hno⟩
+  · rw [succ_eq_add_one.nat] at hle ⊢
+    simp [find_div]
+    by_cases hdiv : n % d = 0
+    · simp [hdiv]
+      exact ⟨hd2, hdn, hno⟩
+    · simp [hdiv]
+      have hd1_le_n : d + 1 ≤ n
+        by_contra hgt
+        have hdn_eq : d = n := by omega
+        apply hdiv
+        rw [hdn_eq]
+        have h0 := add_mul_mod.nat 0 1 n
+        have h1 : 0 + n * 1 = n := by ring
+        have h0n : 0 % n = 0 := (div_mod_of_lt.nat 0 n (by omega)).2
+        rw [h1, h0n] at h0
+        exact h0
+      have hno1 : ∀ k : ℕ, 2 ≤ k → k < d + 1 → ¬ (n % k = 0)
+        intro k hk2 hkd
+        by_cases ek : k = d
+        · rw [ek]; exact hdiv
+        · exact hno k hk2 (by omega)
+      exact ih (d + 1) (by omega) hd1_le_n (by omega) hno1
+
++ min_fac.spec (n : ℕ) (hn : 2 ≤ n) :
+    2 ≤ min_fac n ∧ min_fac n ≤ n ∧ n % min_fac n = 0 ∧
+    (∀ k : ℕ, 2 ≤ k → k < min_fac n → ¬ (n % k = 0))
+  unfold min_fac
+  have hnot1 : ¬ (n ≤ 1) := by omega
+  simp [hnot1]
+  exact find_div.spec n n 2 (by decide) hn (by omega) (by intro k hk2 hklt; omega)
+
++ min_fac.prime (n : ℕ) (hn : 2 ≤ n) : prime (min_fac n)
+  have hs := min_fac.spec n hn
+  unfold prime
+  constructor
+  · exact hs.1
+  · intro d hdlt hd2 hdm
+    apply hs.2.2.2 d hd2 hdlt
+    -- d | min_fac n and min_fac n | n => d | n!
+    have h1 := div_add_mod.nat n (min_fac n)
+    rw [hs.2.2.1] at h1
+    have h2 := div_add_mod.nat (min_fac n) d
+    rw [hdm] at h2
+    set q1 := n / min_fac n
+    set q2 := min_fac n / d
+    have hne : n = 0 + d * (q2 * q1)
+      have hn1 : n = min_fac n * q1 := by linarith
+      have hm2 : min_fac n = d * q2 := by linarith
+      rw [hn1, hm2]; ring
+    rw [hne, add_mul_mod.nat]
+    exact (div_mod_of_lt.nat 0 d (by omega)).2
+
++ min_fac.of_prime (p : ℕ) (hp : prime p) : min_fac p = p
+  unfold prime at hp
+  have hs := min_fac.spec p hp.1
+  by_contra hne
+  have hlt : min_fac p < p := by omega
+  exact hp.2 (min_fac p) hlt hs.1 hs.2.2.1
+
++ min_fac.of_prime_pow (p k : ℕ) (hp : prime p) (hk : 1 ≤ k) : min_fac (p ^ k) = p
+  have hp2 : 2 ≤ p := hp.1
+  have hpk2 : 2 ≤ p ^ k
+    have hk1 : k = (k - 1) + 1 := by omega
+    rw [hk1, pow_succ.nat]
+    have hpos := pow_pos_nat p (k - 1) (by omega)
+    nlinarith
+  have hs := min_fac.spec (p ^ k) hpk2
+  have hm_prime : prime (min_fac (p ^ k)) := min_fac.prime (p ^ k) hpk2
+  have hm_dvd_p : min_fac (p ^ k) ∣ p :=
+    prime_dvd_of_dvd_pow.nat (min_fac (p ^ k)) p k hm_prime hs.2.2.1
+  unfold dvd at hm_dvd_p
+  have hm_le_p : min_fac (p ^ k) ≤ p := le_of_mod_zero.nat p (min_fac (p ^ k)) (by omega) hm_dvd_p
+  by_contra hne
+  have hlt : min_fac (p ^ k) < p := by omega
+  exact hp.2 (min_fac (p ^ k)) hlt hs.1 hm_dvd_p
+
+-- Repeatedly divide n by p up to `fuel` times while p | n.
+-> strip_p (p : ℕ) : ℕ → ℕ → ℕ
+  | 0 => fun n => n
+  | fuel + 1 => fun n => if n % p = 0 then strip_p p fuel (n / p) else n
+
++ strip_p.of_not_dvd (p fuel n : ℕ) (h : ¬ (n % p = 0)) : strip_p p fuel n = n
+  induction fuel with f ih
+  · simp [strip_p]
+  · rw [succ_eq_add_one.nat]; simp [strip_p, h]
+
++ strip_p.of_prime_pow (p k : ℕ) (hp : 2 ≤ p) :
+    ∀ fuel : ℕ, k ≤ fuel → strip_p p fuel (p ^ k) = 1
+  induction k with f hfk k ih f hfk
+  · rw [pow_zero.nat]
+    have h1 : ¬ (1 % p = 0)
+      have hm := (div_mod_of_lt.nat 1 p (by omega)).2
+      omega
+    exact strip_p.of_not_dvd p f 1 h1
+  · rw [succ_eq_add_one.nat] at hfk ⊢
+    have hf1 : f = (f - 1) + 1 := by omega
+    rw [hf1]; simp [strip_p]
+    rw [pow_succ.nat]
+    have hmod : (p ^ k * p) % p = 0
+      have h0 := add_mul_mod.nat 0 (p ^ k) p
+      have h1 : 0 + p * p ^ k = p ^ k * p := by ring
+      have h0p : 0 % p = 0 := (div_mod_of_lt.nat 0 p (by omega)).2
+      rw [h1, h0p] at h0
+      exact h0
+    have hdiv : (p ^ k * p) / p = p ^ k
+      have hu := div_mod_unique.nat (p ^ k * p) p (p ^ k) 0 (by ring) (by omega)
+      exact hu.1.symm
+    simp [hmod, hdiv]
+    exact ih (f - 1) (by omega)
+
+-- Characterization of strip_p: if strip_p p fuel n = 1 (with p >= 2), then n = p^k for some k!
++ strip_p.eq_one_imp_pow (p fuel : ℕ) (hp : 2 ≤ p) :
+    ∀ n : ℕ, strip_p p fuel n = 1 → ∃ k : ℕ, n = p ^ k
+  induction fuel with n h f ih n h
+  · simp [strip_p] at h
+    exact ⟨0, by rw [pow_zero.nat]; exact h⟩
+  · rw [succ_eq_add_one.nat] at h
+    simp [strip_p] at h
+    by_cases hmod : n % p = 0
+    · simp [hmod] at h
+      obtain ⟨k, hk⟩ := ih (n / p) h
+      use k + 1
+      have hdiv := div_add_mod.nat n p
+      rw [hmod, hk] at hdiv
+      rw [pow_succ.nat]
+      linarith
+    · simp [hmod] at h
+      exact ⟨0, by rw [pow_zero.nat]; exact h⟩
+
+-- ====================================================================================
+-- 3. Concrete Von Mangoldt Function Lambda(n) & Prime-Power Evaluation
+-- ====================================================================================
+
+-> is_prime_power (n : ℕ) : Prop :=
+  2 ≤ n ∧ strip_p (min_fac n) n n = 1
+
+-> von_mangoldt (n : ℕ) : ℝ :=
+  if is_prime_power n then log (min_fac n : ℝ) else 0
+
++ nat_le_pow (p k : ℕ) (hp : 2 ≤ p) : k ≤ p ^ k
+  induction k with j ih
+  · rw [pow_zero.nat]; omega
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    have hpos := pow_pos_nat p j (by omega)
+    nlinarith
+
++ is_prime_power.iff (n : ℕ) :
+    is_prime_power n ↔ ∃ p k : ℕ, prime p ∧ 1 ≤ k ∧ n = p ^ k
+  constructor
+  · intro h
+    unfold is_prime_power at h
+    have hp : prime (min_fac n) := min_fac.prime n h.1
+    obtain ⟨k, hk⟩ := strip_p.eq_one_imp_pow (min_fac n) n hp.1 n h.2
+    have hk1 : 1 ≤ k
+      by_contra h0
+      have kz : k = 0 := by omega
+      rw [kz, pow_zero.nat] at hk
+      omega
+    exact ⟨min_fac n, k, hp, hk1, hk⟩
+  · intro h
+    obtain ⟨p, k, hp, hk1, hneq⟩ := h
+    unfold is_prime_power
+    have hp2 : 2 ≤ p := hp.1
+    have hpk2 : 2 ≤ p ^ k
+      have h1 : k = (k - 1) + 1 := by omega
+      rw [h1, pow_succ.nat]
+      have hpos := pow_pos_nat p (k - 1) (by omega)
+      nlinarith
+    have hk_le : k ≤ p ^ k := nat_le_pow p k hp2
+    rw [hneq]
+    constructor
+    · exact hpk2
+    · rw [min_fac.of_prime_pow p k hp hk1]
+      exact strip_p.of_prime_pow p k hp.1 (p ^ k) hk_le
+
++ von_mangoldt.zero : von_mangoldt 0 = 0
+  unfold von_mangoldt is_prime_power
+  have h : ¬ (2 ≤ 0 ∧ strip_p (min_fac 0) 0 0 = 1) := by omega
+  simp [h]
+
++ von_mangoldt.one : von_mangoldt 1 = 0
+  unfold von_mangoldt is_prime_power
+  have h : ¬ (2 ≤ 1 ∧ strip_p (min_fac 1) 1 1 = 1) := by omega
+  simp [h]
+
++ von_mangoldt.nonneg (n : ℕ) : 0 ≤ von_mangoldt n
+  unfold von_mangoldt
+  by_cases h : is_prime_power n
+  · simp [h]
+    unfold is_prime_power at h
+    have hp : prime (min_fac n) := min_fac.prime n h.1
+    have h1 : (1 : ℝ) ≤ (min_fac n : ℝ)
+      have hm2 : 2 ≤ min_fac n := hp.1
+      have hnat : min_fac n = 1 + (min_fac n - 1) := by omega
+      rw [hnat]; simp; linarith [cast_nonneg.real (min_fac n - 1)]
+    exact log_nonneg (min_fac n : ℝ) h1
+  · simp [h]
+
++ von_mangoldt.of_prime_pow (p k : ℕ) (hp : prime p) (hk : 1 ≤ k) :
+    von_mangoldt (p ^ k) = log (p : ℝ)
+  unfold von_mangoldt
+  have hpp : is_prime_power (p ^ k) := (is_prime_power.iff (p ^ k)).mpr ⟨p, k, hp, hk, rfl⟩
+  simp [hpp, min_fac.of_prime_pow p k hp hk]
+
++ von_mangoldt.of_prime (p : ℕ) (hp : prime p) : von_mangoldt p = log (p : ℝ)
+  have h1 : p ^ (0 + 1) = p := by rw [pow_succ.nat, pow_zero.nat]; ring
+  have hv := von_mangoldt.of_prime_pow p (0 + 1) hp (by decide)
+  rw [h1] at hv
+  exact hv
+
+-- ====================================================================================
+-- 4. Chebyshev's Fundamental Identity: sum_{d | n} Lambda(d) = log n  (AXIOM-FREE!)
+-- ====================================================================================
+
+-- Helper: if prime q | p^a * m and q != p, then q | m; hence if q^k | p^a * m then q^k | m.
++ prime_pow_dvd_of_mul_prime_pow (p q : ℕ) (hp : prime p) (hq : prime q) (hne : q ≠ p) (a : ℕ) :
+    ∀ m k : ℕ, (q ^ k) ∣ (p ^ a * m) → (q ^ k) ∣ m
+  have hp2 : 2 ≤ p := hp.1
+  have hq2 : 2 ≤ q := hq.1
+  induction a with m k hdvd j ih m k hdvd
+  · rw [pow_zero.nat] at hdvd
+    have h1 : 1 * m = m := by ring
+    rw [h1] at hdvd
+    exact hdvd
+  · rw [succ_eq_add_one.nat, pow_succ.nat] at hdvd
+    -- Show q^k | p * (p^j * m) => q^k | p^j * m (induction on k!)
+    have hstrip1 : ∀ r : ℕ, ∀ t : ℕ, (q ^ r) ∣ (p * t) → (q ^ r) ∣ t
+      intro r
+      induction r with t hd u ihu t hd
+      · rw [pow_zero.nat]; unfold dvd; have h1 := mod_lt.nat t 1 (by decide); omega
+      · rw [succ_eq_add_one.nat, pow_succ.nat] at hd ⊢
+        -- q | q^u * q | p * t => q | t (since q != p)
+        have hq_dvd_pt : q ∣ (p * t)
+          unfold dvd at hd ⊢
+          have hdiv := div_add_mod.nat (p * t) (q ^ u * q)
+          rw [hd] at hdiv
+          set w := (p * t) / (q ^ u * q)
+          have heq : p * t = 0 + q * (q ^ u * w)
+            have h1 : p * t = q ^ u * q * w := by linarith
+            rw [h1]; ring
+          rw [heq, add_mul_mod.nat]
+          exact (div_mod_of_lt.nat 0 q (by omega)).2
+        have hq_dvd_t : q ∣ t
+          obtain hqp | hqt := prime_dvd_mul.nat q p t hq hq_dvd_pt
+          · exfalso
+            have hle : q ≤ p := le_of_dvd.nat p q (by omega) hqp
+            have hlt : q < p := by omega
+            unfold dvd at hqp
+            exact hp.2 q hlt hq.1 hqp
+          · exact hqt
+        unfold dvd at hq_dvd_t
+        have ht_div := div_add_mod.nat t q
+        rw [hq_dvd_t] at ht_div
+        set t' := t / q
+        have ht_eq : t = q * t' := by linarith
+        have hqu_dvd : (q ^ u) ∣ (p * t')
+          unfold dvd at hd ⊢
+          have hdiv := div_add_mod.nat (p * t) (q ^ u * q)
+          rw [hd] at hdiv
+          set w := (p * t) / (q ^ u * q)
+          have hmul_eq : q * (p * t') = q * (q ^ u * w)
+            have h1 : p * t = q ^ u * q * w := by linarith
+            rw [ht_eq] at h1
+            linarith
+          have hpt' : p * t' = 0 + q ^ u * w
+            have hqpos : 0 < q := by omega
+            have hcancel : p * t' = q ^ u * w := by nlinarith
+            linarith
+          rw [hpt', add_mul_mod.nat]
+          exact (div_mod_of_lt.nat 0 (q ^ u) (pow_pos_nat q u (by omega))).2
+        have hqu_t' := ihu t' hqu_dvd
+        unfold dvd at hqu_t' ⊢
+        have hdiv' := div_add_mod.nat t' (q ^ u)
+        rw [hqu_t'] at hdiv'
+        set s := t' / (q ^ u)
+        have hteq2 : t = 0 + (q ^ u * q) * s
+          have h1 : t' = q ^ u * s := by linarith
+          rw [ht_eq, h1]; ring
+        rw [hteq2, add_mul_mod.nat]
+        exact (div_mod_of_lt.nat 0 (q ^ u * q) (mul_pos.nat (q ^ u) q (pow_pos_nat q u (by omega)) (by omega))).2
+    have hre : p ^ j * p * m = p * (p ^ j * m) := by ring
+    rw [hre] at hdvd
+    exact ih m k (hstrip1 k (p ^ j * m) hdvd)
+
+-- Helper: if p^k | p^a * m and ¬ (p | m), then k <= a.
++ prime_pow_le_of_dvd_mul (p : ℕ) (hp : prime p) (m : ℕ) (hnd : ¬ (p ∣ m)) (a : ℕ) :
+    ∀ k : ℕ, (p ^ k) ∣ (p ^ a * m) → k ≤ a
+  have hp2 : 2 ≤ p := hp.1
+  induction a with k hdvd j ih k hdvd
+  · rw [pow_zero.nat] at hdvd
+    have h1 : 1 * m = m := by ring
+    rw [h1] at hdvd
+    by_contra hgt
+    have hk1 : k = (k - 1) + 1 := by omega
+    rw [hk1, pow_succ.nat] at hdvd
+    apply hnd
+    unfold dvd at hdvd ⊢
+    have hdiv := div_add_mod.nat m (p ^ (k - 1) * p)
+    rw [hdvd] at hdiv
+    set w := m / (p ^ (k - 1) * p)
+    have hmeq : m = 0 + p * (p ^ (k - 1) * w)
+      have h1m : m = p ^ (k - 1) * p * w := by linarith
+      rw [h1m]; ring
+    rw [hmeq, add_mul_mod.nat]
+    exact (div_mod_of_lt.nat 0 p (by omega)).2
+  · by_cases kz : k = 0
+    · omega
+    · have hk1 : k = (k - 1) + 1 := by omega
+      rw [hk1, pow_succ.nat, succ_eq_add_one.nat, pow_succ.nat] at hdvd
+      have hdvd' : (p ^ (k - 1)) ∣ (p ^ j * m)
+        unfold dvd at hdvd ⊢
+        have hdiv := div_add_mod.nat (p ^ j * p * m) (p ^ (k - 1) * p)
+        rw [hdvd] at hdiv
+        set w := (p ^ j * p * m) / (p ^ (k - 1) * p)
+        have hcancel : p ^ j * m = 0 + p ^ (k - 1) * w
+          have hppos : 0 < p := by omega
+          have h1 : p * (p ^ j * m) = p * (p ^ (k - 1) * w) := by linarith
+          have h2 : p ^ j * m = p ^ (k - 1) * w := by nlinarith
+          linarith
+        rw [hcancel, add_mul_mod.nat]
+        exact (div_mod_of_lt.nat 0 (p ^ (k - 1)) (pow_pos_nat p (k - 1) (by omega))).2
+      have hle := ih (k - 1) hdvd'
+      rw [succ_eq_add_one.nat]; omega
+
+-- Helper: extending a sum past n with 0 terms leaves it unchanged.
++ sum_below_extend_zero (f : ℕ → ℝ) (A B : ℕ) (hAB : A ≤ B)
+    (hz : ∀ d : ℕ, A ≤ d → d < B → f d = 0) :
+    (∑ d < B, f d) = ∑ d < A, f d
+  have hdiff : B = A + (B - A) := by omega
+  rw [hdiff]
+  set gap := B - A
+  have hgap : ∀ g : ℕ, (∀ d : ℕ, A ≤ d → d < A + g → f d = 0) → (∑ d < A + g, f d) = ∑ d < A, f d
+    intro g
+    induction g with h0 k ih hk
+    · have ha0 : A + 0 = A := by ring
+      rw [ha0]
+    · rw [succ_eq_add_one.nat] at hk ⊢
+      have hsum : A + (k + 1) = (A + k) + 1 := by ring
+      rw [hsum]
+      simp
+      rw [ih (by intro d hd1 hd2; exact hk d hd1 (by omega)), hk (A + k) (by omega) (by omega)]
+      ring
+  exact hgap gap (by intro d hd1 hd2; exact hz d hd1 (by omega))
+
+-- Helper: multiplying by one more factor of prime p adds EXACTLY `log p` to the divisor sum!
++ von_mangoldt.sum_div_step (p a m : ℕ) (hp : prime p) (hm : 1 ≤ m) (hnd : ¬ (p ∣ m)) :
+    (∑ d < p ^ (a + 1) * m + 1, if d ∣ (p ^ (a + 1) * m) then von_mangoldt d else 0)
+      = (∑ d < p ^ a * m + 1, if d ∣ (p ^ a * m) then von_mangoldt d else 0) + log (p : ℝ)
+  have hp2 : 2 ≤ p := hp.1
+  set N1 := p ^ (a + 1) * m with hN1
+  set N0 := p ^ a * m with hN0
+  have hN0_pos : 0 < N0
+    rw [hN0]
+    exact mul_pos.nat (p ^ a) m (pow_pos_nat p a (by omega)) (by omega)
+  have hN1_eq : N1 = p * N0
+    rw [hN1, hN0, pow_succ.nat]; ring
+  have hN0_le_N1 : N0 ≤ N1
+    have hp2 : 2 ≤ p := hp.1
+    rw [hN1_eq]; nlinarith
+  have hpa1_le_N1 : p ^ (a + 1) ≤ N1
+    rw [hN1]; nlinarith [pow_pos_nat p (a + 1) (by omega)]
+  -- Extend the N0 sum up to N1 + 1 (since no d > N0 divides N0 > 0!):
+  have hext : (∑ d < N1 + 1, if d ∣ N0 then von_mangoldt d else 0) = ∑ d < N0 + 1, if d ∣ N0 then von_mangoldt d else 0
+    apply sum_below_extend_zero (fun d => if d ∣ N0 then von_mangoldt d else 0) (N0 + 1) (N1 + 1) (by omega)
+    intro d hd1 hd2
+    have hnot : ¬ (d ∣ N0)
+      intro hdvd
+      have hle := le_of_dvd.nat N0 d hN0_pos hdvd
+      omega
+    simp [hnot]
+  rw [← hext]
+  -- Pointwise comparison on d < N1 + 1:
+  --   (if d | N1 then Lambda d else 0) = (if d | N0 then Lambda d else 0) + (if d = p^(a+1) then log p else 0)
+  have hpt : (∑ d < N1 + 1, if d ∣ N1 then von_mangoldt d else 0) = (∑ d < N1 + 1, ((if d ∣ N0 then von_mangoldt d else 0) + (log (p : ℝ)) * (if d = p ^ (a + 1) then 1 else 0)))
+    apply sum_below.congr
+    intro d hd
+    by_cases heq_p : d = p ^ (a + 1)
+    · rw [heq_p]
+      have hd1 : (p ^ (a + 1)) ∣ N1
+        rw [hN1]; unfold dvd
+        have h0 := add_mul_mod.nat 0 m (p ^ (a + 1))
+        have h1 : 0 + p ^ (a + 1) * m = p ^ (a + 1) * m := by ring
+        have h0p : 0 % p ^ (a + 1) = 0 := (div_mod_of_lt.nat 0 (p ^ (a + 1)) (pow_pos_nat p (a + 1) (by omega))).2
+        rw [h1, h0p] at h0; exact h0
+      have hnd0 : ¬ ((p ^ (a + 1)) ∣ N0)
+        intro hdvd0
+        rw [hN0] at hdvd0
+        have hle := prime_pow_le_of_dvd_mul p hp m hnd a (a + 1) hdvd0
+        omega
+      have hv := von_mangoldt.of_prime_pow p (a + 1) hp (by omega)
+      simp [hd1, hnd0, hv]
+    · simp [heq_p]
+      by_cases hpp : is_prime_power d
+      · obtain ⟨q, k, hq, hk1, hdq⟩ := (is_prime_power.iff d).mp hpp
+        by_cases hqp : q = p
+        · -- d = p^k with d != p^(a+1): d | N1 <-> k <= a + 1 <-> k <= a <-> d | N0!
+          rw [hqp] at hdq
+          by_cases hd1 : d ∣ N1
+          · rw [hdq, hN1] at hd1
+            have hkle : k ≤ a + 1 := prime_pow_le_of_dvd_mul p hp m hnd (a + 1) k hd1
+            have hkne : k ≠ a + 1
+              intro hek; apply heq_p; rw [hdq, hek]
+            have hkle0 : k ≤ a := by omega
+            have hd0 : d ∣ N0
+              rw [hdq, hN0]
+              have hgap : a = k + (a - k) := by omega
+              have hmul : p ^ a * m = 0 + p ^ k * (p ^ (a - k) * m)
+                have hsp : p ^ k * p ^ (a - k) = p ^ a
+                  rw [← pow_add.nat]
+                  have hg : k + (a - k) = a := by omega
+                  rw [hg]
+                rw [← hsp]; ring
+              unfold dvd
+              rw [hmul, add_mul_mod.nat]
+              exact (div_mod_of_lt.nat 0 (p ^ k) (pow_pos_nat p k (by omega))).2
+            have hd1' : d ∣ N1 := by rw [hdq, hN1]; exact hd1
+            simp [hd1', hd0]
+          · have hnd0 : ¬ (d ∣ N0)
+              intro hd0; apply hd1
+              rw [hN1_eq]
+              unfold dvd at hd0 ⊢
+              have hdiv := div_add_mod.nat N0 d
+              rw [hd0] at hdiv
+              set w := N0 / d
+              have h1 : p * N0 = 0 + d * (p * w)
+                have hn0 : N0 = d * w := by linarith
+                rw [hn0]; ring
+              rw [h1, add_mul_mod.nat]
+              have hdpos : 0 < d := by have h2 := hpp.1; omega
+              exact (div_mod_of_lt.nat 0 d hdpos).2
+            simp [hd1, hnd0]
+        · -- q != p: d = q^k | N1 <-> d | m <-> d | N0!
+          by_cases hd1 : d ∣ N1
+          · have hdm : d ∣ m
+              rw [hdq]
+              rw [hdq, hN1] at hd1
+              exact prime_pow_dvd_of_mul_prime_pow p q hp hq hqp (a + 1) m k hd1
+            have hd0 : d ∣ N0
+              rw [hN0]; unfold dvd at hdm ⊢
+              have hdiv := div_add_mod.nat m d
+              rw [hdm] at hdiv
+              set w := m / d
+              have h1 : p ^ a * m = 0 + d * (p ^ a * w)
+                have hm0 : m = d * w := by linarith
+                rw [hm0]; ring
+              rw [h1, add_mul_mod.nat]
+              have hdpos : 0 < d := by have h2 := hpp.1; omega
+              exact (div_mod_of_lt.nat 0 d hdpos).2
+            simp [hd1, hd0]
+          · have hnd0 : ¬ (d ∣ N0)
+              intro hd0; apply hd1
+              rw [hN1_eq]
+              unfold dvd at hd0 ⊢
+              have hdiv := div_add_mod.nat N0 d
+              rw [hd0] at hdiv
+              set w := N0 / d
+              have h1 : p * N0 = 0 + d * (p * w)
+                have hn0 : N0 = d * w := by linarith
+                rw [hn0]; ring
+              rw [h1, add_mul_mod.nat]
+              have hdpos : 0 < d := by have h2 := hpp.1; omega
+              exact (div_mod_of_lt.nat 0 d hdpos).2
+            simp [hd1, hnd0]
+      · -- Not a prime power: von_mangoldt d = 0 on both sides!
+        have hv0 : von_mangoldt d = 0 := by unfold von_mangoldt; simp [hpp]
+        rw [hv0]
+        by_cases hd1 : d ∣ N1
+        · by_cases hd0 : d ∣ N0
+          · simp [hd1, hd0]
+          · simp [hd1, hd0]
+        · by_cases hd0 : d ∣ N0
+          · simp [hd1, hd0]
+          · simp [hd1, hd0]
+  rw [hpt, sum_add.real, sum_below.single.real (fun _ => log (p : ℝ)) (N1 + 1) (p ^ (a + 1)) (by omega)]
+
+-- Strong induction helper for extracting p^a * m with ¬(p | m):
++ extract_prime_pow_le (p M : ℕ) (hp : prime p) :
+    ∀ n : ℕ, 1 ≤ n → n ≤ M → ∃ a m : ℕ, n = p ^ a * m ∧ 1 ≤ m ∧ ¬ (p ∣ m)
+  induction M with n hn1 hnle k ih n hn1 hnle
+  · omega
+  · by_cases hdiv : p ∣ n
+    · unfold dvd at hdiv
+      have hdiv_eq := div_add_mod.nat n p
+      rw [hdiv] at hdiv_eq
+      set q := n / p
+      have hq1 : 1 ≤ q
+        by_contra hq0
+        have qz : q = 0 := by omega
+        rw [qz] at hdiv_eq; omega
+      have hq_lt : q < n
+        have hp2 : 2 ≤ p := hp.1
+        nlinarith
+      have hq_le : q ≤ k := by rw [succ_eq_add_one.nat] at hnle; omega
+      obtain ⟨a, m, hqeq, hm1, hnd⟩ := ih q hq1 hq_le
+      have hprod : n = p ^ (a + 1) * m
+        rw [pow_succ.nat]
+        have hn_pq : n = p * q := by linarith
+        rw [hn_pq, hqeq]; ring
+      exact ⟨a + 1, m, hprod, hm1, hnd⟩
+    · exact ⟨0, n, by rw [pow_zero.nat]; ring, hn1, hdiv⟩
+
+-- Induction on a: sum_{d | p^a * m} Lambda(d) = sum_{d | m} Lambda(d) + a * log p!
++ von_mangoldt.sum_div_prime_pow_mul (p a m : ℕ) (hp : prime p) (hm : 1 ≤ m) (hnd : ¬ (p ∣ m)) :
+    (∑ d < p ^ a * m + 1, if d ∣ (p ^ a * m) then von_mangoldt d else 0)
+      = (∑ d < m + 1, if d ∣ m then von_mangoldt d else 0) + (a : ℝ) * log (p : ℝ)
+  induction a with k ih
+  · rw [pow_zero.nat]
+    have h1 : 1 * m = m := by ring
+    rw [h1]; simp
+  · rw [succ_eq_add_one.nat, von_mangoldt.sum_div_step p k m hp hm hnd, ih]
+    simp; ring
+
+-- CHEBYSHEV'S FUNDAMENTAL IDENTITY (100% AXIOM-FREE!):
+-- For EVERY n >= 1:   sum_{d | n} Lambda(d) = log(n).
++ von_mangoldt.sum_divisors_eq_log_le (M : ℕ) :
+    ∀ n : ℕ, 1 ≤ n → n ≤ M →
+      (∑ d < n + 1, if d ∣ n then von_mangoldt d else 0) = log (n : ℝ)
+  induction M with n hn1 hnle k ih n hn1 hnle
+  · omega
+  · by_cases hn_one : n = 1
+    · rw [hn_one]
+      have hcon : (∑ d < 1 + 1, if d ∣ 1 then von_mangoldt d else 0) = ∑ d < 1 + 1, (0 : ℝ)
+        apply sum_below.congr; intro d hd
+        by_cases d0 : d = 0
+        · rw [d0, von_mangoldt.zero]; by_cases hdiv : 0 ∣ 1
+          · simp [hdiv]
+          · simp [hdiv]
+        · have d1 : d = 1 := by omega
+          rw [d1, von_mangoldt.one]; by_cases hdiv : 1 ∣ 1
+          · simp [hdiv]
+          · simp [hdiv]
+      rw [hcon, sum_const.real]
+      simp [log_one]
+    · have hn2 : 2 ≤ n := by omega
+      set p := min_fac n with hp_def
+      have hp : prime p := by rw [hp_def]; exact min_fac.prime n hn2
+      have hsp := min_fac.spec n hn2
+      have hpdvd : p ∣ n
+        rw [hp_def]; unfold dvd; exact hsp.2.2.1
+      obtain ⟨a, m, hneq, hm1, hnd⟩ := extract_prime_pow_le p n hp n hn1 (by omega)
+      have ha1 : 1 ≤ a
+        by_contra ha0
+        have az : a = 0 := by omega
+        rw [az, pow_zero.nat] at hneq
+        have hm_eq : n = m := by linarith
+        rw [← hm_eq] at hnd
+        exact hnd hpdvd
+      have hm_lt : m < n
+        have hpa2 : 2 ≤ p ^ a
+          have ha_s : a = (a - 1) + 1 := by omega
+          rw [ha_s, pow_succ.nat]
+          have hp2 : 2 ≤ p := hp.1
+          nlinarith [pow_pos_nat p (a - 1) (by omega)]
+        rw [hneq]; nlinarith
+      have hm_le : m ≤ k := by rw [succ_eq_add_one.nat] at hnle; omega
+      have ihm := ih m hm1 hm_le
+      rw [hneq, von_mangoldt.sum_div_prime_pow_mul p a m hp hm1 hnd, ihm]
+      -- Show log m + a * log p = log (p^a * m):
+      have hm_pos : (0 : ℝ) < (m : ℝ)
+        have h1 : m = (m - 1) + 1 := by omega
+        rw [h1]; simp; linarith [cast_nonneg.real (m - 1)]
+      have hp_pos : (0 : ℝ) < (p : ℝ)
+        have hp2 : 2 ≤ p := hp.1
+        have h1 : p = (p - 1) + 1 := by omega
+        rw [h1]; simp; linarith [cast_nonneg.real (p - 1)]
+      have hpa_pos : (0 : ℝ) < ((p ^ a : ℕ) : ℝ)
+        have hpos := pow_pos_nat p a (by omega)
+        have h1 : p ^ a = (p ^ a - 1) + 1 := by omega
+        rw [h1]; simp; linarith [cast_nonneg.real (p ^ a - 1)]
+      have hlog_pa : log ((p ^ a : ℕ) : ℝ) = (a : ℝ) * log (p : ℝ) := log_pow.nat p a (by have hp2 := hp.1; omega)
+      have hcast_mul : ((p ^ a * m : ℕ) : ℝ) = ((p ^ a : ℕ) : ℝ) * (m : ℝ) := by simp
+      rw [hcast_mul, log_mul.real ((p ^ a : ℕ) : ℝ) (m : ℝ) hpa_pos hm_pos, hlog_pa]
+      ring
+
++ von_mangoldt.sum_divisors_eq_log (n : ℕ) (hn : 1 ≤ n) :
+    (∑ d < n + 1, if d ∣ n then von_mangoldt d else 0) = log (n : ℝ)
+  exact von_mangoldt.sum_divisors_eq_log_le n n hn (by omega)
+
+-- Chebyshev psi function: psi(N) = sum_{n <= N} Lambda(n).
+-> chebyshev_psi (N : ℕ) : ℝ := ∑ n < N + 1, von_mangoldt n
+
++ chebyshev_psi.nonneg (N : ℕ) : 0 ≤ chebyshev_psi N
+  unfold chebyshev_psi
+  apply sum_nonneg.real
+  intro n hn
+  exact von_mangoldt.nonneg n

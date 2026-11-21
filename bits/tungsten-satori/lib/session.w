@@ -68,10 +68,11 @@ SATC_LIB_FILES = [
 
 -> satc_unesc(s)
   n = s.size
+  bytes = ccall("w_string_bytes_view", s) ## u8[]
   has_bs = false
   i = 0
   while i < n
-    if s.byte_at(i) == 92
+    if bytes[i] == 92
       has_bs = true
       break
     i += 1
@@ -80,9 +81,9 @@ SATC_LIB_FILES = [
   sb = StringBuffer()
   i = 0
   while i < n
-    b = s.byte_at(i)
+    b = bytes[i]
     if b == 92 && i + 1 < n
-      nb = s.byte_at(i + 1)
+      nb = bytes[i + 1]
       if nb == 110
         sb.append("\n")
       elsif nb == 116
@@ -97,17 +98,28 @@ SATC_LIB_FILES = [
       i += 1
   sb.to_s
 
--> satc_read_fields(text, s, e, out)
+-> satc_read_fields_bytes(text, bytes, s, e, out)
   out.clear
   tok_s = s
+  has_bs = false
   i = s
   while i < e
-    if text.byte_at(i) == 9
-      out.push(satc_unesc(text.slice(tok_s, i - tok_s)))
+    b = bytes[i]
+    if b == 9
+      piece = text.slice(tok_s, i - tok_s)
+      out.push(has_bs ? satc_unesc(piece) : piece)
       tok_s = i + 1
+      has_bs = false
+    elsif b == 92
+      has_bs = true
     i += 1
-  out.push(satc_unesc(text.slice(tok_s, e - tok_s)))
+  piece = text.slice(tok_s, e - tok_s)
+  out.push(has_bs ? satc_unesc(piece) : piece)
   out
+
+-> satc_read_fields(text, s, e, out)
+  bytes = ccall("w_string_bytes_view", text) ## u8[]
+  satc_read_fields_bytes(text, bytes, s, e, out)
 
 -> count_lines_fast(src)
   n = src.size
@@ -839,13 +851,14 @@ SATC_LIB_FILES = [
     n = text.size
     if n < 12 || !text.starts_with?("SATC2\t") || !text.ends_with?("\nEND\n")
       return false
+    bytes = ccall("w_string_bytes_view", text) ## u8[]
     flds = []
     pos = 0
-    # Parse header: SATC1 \t mod_sig \t n_tys \t n_tms
+    # Parse header: SATC2 \t mod_sig \t n_tys \t n_tms
     hend = 0
-    while hend < n && text.byte_at(hend) != 10
+    while hend < n && bytes[hend] != 10
       hend += 1
-    satc_read_fields(text, 0, hend, flds)
+    satc_read_fields_bytes(text, bytes, 0, hend, flds)
     if flds.size < 4
       return false
     mod_sig = flds[1]
@@ -859,10 +872,10 @@ SATC_LIB_FILES = [
     begin
       while pos < n
         lend = pos
-        while lend < n && text.byte_at(lend) != 10
+        while lend < n && bytes[lend] != 10
           lend += 1
         if lend > pos
-          satc_read_fields(text, pos, lend, flds)
+          satc_read_fields_bytes(text, bytes, pos, lend, flds)
           tag = flds[0]
           if tag == "IMP"
             imp_nm = flds[1]

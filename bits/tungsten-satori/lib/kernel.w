@@ -31,43 +31,88 @@
     s + "⊢ " + tm_show(@concl)
 
 -> hyps_union(a, b)
-  if b.size == 0
+  nb = b.size
+  if nb == 0
     return a
-  if a.size == 0
+  na = a.size
+  if na == 0
     return b
+  if a == b
+    return a
+  if nb == 1 && hyps_has?(a, b[0])
+    return a
   out = []
-  a.each -> (t)
-    out.push(t)
-  b.each -> (t)
+  i = 0
+  while i < na
+    out.push(a[i])
+    i += 1
+  i = 0
+  while i < nb
+    t = b[i]
     if !hyps_has?(out, t)
       out.push(t)
+    i += 1
   out
 
 -> hyps_has?(hs, t)
-  hs.each -> (u)
-    if tm_eq(u, t)
+  n = hs.size
+  i = 0
+  while i < n
+    if tm_eq(hs[i], t)
       return true
+    i += 1
   false
 
 -> hyps_remove(hs, t)
   out = []
-  hs.each -> (u)
+  n = hs.size
+  i = 0
+  while i < n
+    u = hs[i]
     if !tm_eq(u, t)
       out.push(u)
+    i += 1
   out
 
 -> tags_union(a, b)
-  if b.size == 0
+  nb = b.size
+  if nb == 0
     return a
-  if a.size == 0
+  na = a.size
+  if na == 0
     return b
+  if na == 1 && nb == 1 && a[0] == b[0]
+    return a
+  if na == 2 && nb == 1 && (a[0] == b[0] || a[1] == b[0])
+    return a
+  if nb == 2 && na == 1 && (b[0] == a[0] || b[1] == a[0])
+    return b
+  if na == 2 && nb == 2 && a[0] == b[0] && a[1] == b[1]
+    return a
+  # Both inputs are sorted; merge in linear time without allocating + sorting.
   out = []
-  a.each -> (x)
-    out.push(x)
-  b.each -> (x)
-    if !out.include?(x)
-      out.push(x)
-  out.sort
+  ia = 0
+  ib = 0
+  while ia < na && ib < nb
+    xa = a[ia]
+    xb = b[ib]
+    if xa == xb
+      out.push(xa)
+      ia += 1
+      ib += 1
+    elsif xa < xb
+      out.push(xa)
+      ia += 1
+    else
+      out.push(xb)
+      ib += 1
+  while ia < na
+    out.push(a[ia])
+    ia += 1
+  while ib < nb
+    out.push(b[ib])
+    ib += 1
+  out
 
 + KInductive
   ro :name, :params, :ctors, :rec_name, :rec_pos, :is_enum
@@ -184,7 +229,7 @@
     mk_app_raw(mk_const_raw(name, ty_fun(ty_fun(v.ty, TY_BOOL_SINGLETON), TY_BOOL_SINGLETON)), lam)
 
   -> dest_eq(t)
-    dest_binop(t, "=")
+    dest_binop_op(t, OP_EQ)
 
   -> need_bool(t, who)
     if !ty_eq(type_of(t), ty_bool)
@@ -296,7 +341,7 @@
     thm(hyps_remove(th.hyps, p), bin("⇒", p, th.concl), th.tags)
 
   -> mp(th1, th2)
-    pq = dest_binop(th1.concl, "⇒")
+    pq = dest_binop_op(th1.concl, OP_IMP)
     if pq == nil
       raise "mp: not an implication: " + tm_show(th1.concl)
     if !tm_eq(pq[0], th2.concl)
@@ -312,7 +357,7 @@
     thm(th.hyps, quant("∀", v, th.concl), th.tags)
 
   -> spec(t, th)
-    q = dest_unop(th.concl, "∀")
+    q = dest_unop_op(th.concl, OP_ALL)
     if q == nil || q.tag != :lam
       raise "spec: not a universal: " + tm_show(th.concl)
     if !ty_eq(q.ty, type_of(t))
@@ -321,7 +366,7 @@
 
   # goal: ∃-term `ex` (∃ applied to λ); witness t; th ⊢ body[t]
   -> exists_intro(ex, t, th)
-    q = dest_unop(ex, "∃")
+    q = dest_unop_op(ex, OP_EX)
     if q == nil || q.tag != :lam
       raise "exists_intro: not an existential"
     if !ty_eq(q.ty, type_of(t))
@@ -332,7 +377,7 @@
 
   # th_ex ⊢ ∃x. P x ; th has hypothesis P v ; v fresh.
   -> choose(v, th_ex, th)
-    q = dest_unop(th_ex.concl, "∃")
+    q = dest_unop_op(th_ex.concl, OP_EX)
     if q == nil || q.tag != :lam
       raise "choose: not an existential"
     if v.tag != :var || !ty_eq(v.ty, q.ty)
@@ -353,13 +398,13 @@
     thm(hyps_union(th1.hyps, th2.hyps), bin("∧", th1.concl, th2.concl), tags_union(th1.tags, th2.tags))
 
   -> conj1(th)
-    pq = dest_binop(th.concl, "∧")
+    pq = dest_binop_op(th.concl, OP_AND)
     if pq == nil
       raise "conj1: not a conjunction"
     thm(th.hyps, pq[0], th.tags)
 
   -> conj2(th)
-    pq = dest_binop(th.concl, "∧")
+    pq = dest_binop_op(th.concl, OP_AND)
     if pq == nil
       raise "conj2: not a conjunction"
     thm(th.hyps, pq[1], th.tags)
@@ -373,7 +418,7 @@
     thm(th.hyps, bin("∨", p, th.concl), th.tags)
 
   -> disj_cases(th, th1, th2)
-    pq = dest_binop(th.concl, "∨")
+    pq = dest_binop_op(th.concl, OP_OR)
     if pq == nil
       raise "disj_cases: not a disjunction"
     if !tm_eq(th1.concl, th2.concl)
@@ -388,7 +433,7 @@
     thm(hyps_remove(th.hyps, p), neg_tm(p), th.tags)
 
   -> not_elim(th1, th2)
-    p = dest_unop(th1.concl, "¬")
+    p = dest_unop_op(th1.concl, OP_NOT)
     if p == nil
       raise "not_elim: not a negation"
     if !tm_eq(p, th2.concl)
@@ -647,8 +692,8 @@
           strict_used = true
         pa = ring_norm(cmp[1], kind, ctx)
         pb = ring_norm(cmp[2], kind, ctx)
-        diff = poly_add(pb, poly_scale(pa, Q_NEG_ONE))
-        total = poly_add(total, poly_scale(diff, q))
+        poly_add_scaled!(total, pb, q)
+        poly_add_scaled!(total, pa, q_neg(q))
         hs = hyps_union(hs, th.hyps)
         tags = tags_union(tags, th.tags)
       i += 1

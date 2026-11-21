@@ -321,14 +321,32 @@
 -> simplex_pivot(t, rhs, basis, in_basis, rc, r, j, ncol)
   row_r = t[r]
   p = row_r[j]
+  nz_k = []
+  nz_v = []
   if !(p[0] == 1 && p[1] == 1)
+    inv_p = q_div(Q_ONE, p)
     k = 0
     while k < ncol
-      if row_r[k][0] != 0
-        row_r[k] = q_div(row_r[k], p)
+      rk = row_r[k]
+      if rk[0] != 0
+        nv = q_mul(rk, inv_p)
+        row_r[k] = nv
+        nz_k.push(k)
+        nz_v.push(nv)
       k += 1
     if rhs[r][0] != 0
-      rhs[r] = q_div(rhs[r], p)
+      rhs[r] = q_mul(rhs[r], inv_p)
+  else
+    k = 0
+    while k < ncol
+      rk = row_r[k]
+      if rk[0] != 0
+        nz_k.push(k)
+        nz_v.push(rk)
+      k += 1
+  nnz = nz_k.size
+  rhs_r = rhs[r]
+  rhs_r_nz = rhs_r[0] != 0
   m = t.size
   i = 0
   while i < m
@@ -336,24 +354,22 @@
       row_i = t[i]
       f = row_i[j]
       if f[0] != 0
-        k = 0
-        while k < ncol
-          rk = row_r[k]
-          if rk[0] != 0
-            row_i[k] = q_sub(row_i[k], q_mul(f, rk))
-          k += 1
-        if rhs[r][0] != 0
-          rhs[i] = q_sub(rhs[i], q_mul(f, rhs[r]))
+        idx = 0
+        while idx < nnz
+          col = nz_k[idx]
+          row_i[col] = q_sub(row_i[col], q_mul(f, nz_v[idx]))
+          idx += 1
+        if rhs_r_nz
+          rhs[i] = q_sub(rhs[i], q_mul(f, rhs_r))
     i += 1
   if rc != nil
     rcj = rc[j]
     if rcj[0] != 0
-      k = 0
-      while k < ncol
-        rk = row_r[k]
-        if rk[0] != 0
-          rc[k] = q_sub(rc[k], q_mul(rcj, rk))
-        k += 1
+      idx = 0
+      while idx < nnz
+        col = nz_k[idx]
+        rc[col] = q_sub(rc[col], q_mul(rcj, nz_v[idx]))
+        idx += 1
       rc[j] = Q_ZERO
   old_b = basis[r]
   in_basis[old_b] = false

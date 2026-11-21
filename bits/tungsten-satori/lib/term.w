@@ -369,79 +369,57 @@ TERM_BETA_REDEX = 64
 TERM_ETA_CANDIDATE = 128
 TERM_FINITE_SUM = 256
 
-+ KTm
-  ro :tag, :name, :ty, :a, :b, :idx, :val, :h, :cl, :mx, :tv, :op, :vkey, :search_ops
+# Packed bitfield layout in KTm#@bits (fits KTm into 8 ivar slots total):
+#   bit  0     : cl (closed w.r.t. free vars)
+#   bit  1     : tv (mentions type variables)
+#   bits 2..6  : op (5-bit built-in constant opcode 0..31)
+#   bits 7..15 : search_ops (9-bit presence flags)
+#   bits 16+   : mx (max loose de Bruijn index + 1)
+TM_BIT_CL = 1
+TM_BIT_TV = 2
+TM_SOPS_SHIFT = 7
+TM_SOPS_MASK = 65408          # 511 << 7
+TM_BIT_SQ_PROD = 512          # TERM_SQUARE_PRODUCT << 7
+TM_BIT_LAMBDA = 1024          # TERM_LAMBDA << 7
+TM_BIT_WIDEN = 2048           # TERM_WIDEN << 7
+TM_BIT_BETA = 8192            # TERM_BETA_REDEX << 7
+TM_BIT_ETA = 16384            # TERM_ETA_CANDIDATE << 7
 
-  # tag :var(name, ty)  :const(name, ty)  :app(a = fn, b = arg)
-  #     :lam(name = hint, ty = binder type, b = body)  :bnd(idx, ty)
-  #     :lit(val, ty)   val is an Int for nat/int, [num, den] for rat/real
-  -> new(@tag, @name, @ty, @a, @b, @idx, @val)
-    @cl = true
-    @mx = 0
-    @tv = false
-    @op = OP_NONE
-    @search_ops = 0
-    @vkey = nil
-    case @tag
-    when :var
-      @cl = false
-      @tv = @ty.has_var
-      @vkey = @name + "#" + @ty.id.to_s
-      @h = (str_hash(@name) * 31 + @ty.h + 1) % HASH_MOD
-    when :const
-      @tv = @ty.has_var
-      @op = const_opcode(@name)
-      if @name == "min" || @name == "max"
-        @search_ops = TERM_MINMAX
-      elsif @name == "sum_below" || @name == "sum_list"
-        @search_ops = TERM_FINITE_SUM
-      elsif @op == OP_DIV || @op == OP_MOD
-        @search_ops = TERM_DIVMOD
-      elsif @op == OP_POW
-        @search_ops = TERM_POWER
-      elsif @op >= OP_INT_OF_NAT && @op <= OP_REAL_OF_RAT
-        @search_ops = TERM_WIDEN
-      @h = (str_hash(@name) * 37 + @ty.h + 2) % HASH_MOD
-    when :app
-      @cl = @a.cl && @b.cl
-      @search_ops = @a.search_ops | @b.search_ops
-      if @a.tag == :lam
-        @search_ops = @search_ops | TERM_BETA_REDEX
-      # Equal factors have equal hashes. The conversion checks both terms.
-      if @a.tag == :app && @a.a.op == OP_MUL && @a.b.h == @b.h
-        @search_ops = @search_ops | TERM_SQUARE_PRODUCT
-      @tv = @a.tv || @b.tv
-      @mx = @a.mx
-      if @b.mx > @mx
-        @mx = @b.mx
-      if @a.tag != :lam && @a.ty != nil && @a.ty.fun?
-        @ty = @a.ty.cod
-      @h = (@a.h * 41 + @b.h * 7 + 3) % HASH_MOD
-    when :lam
-      @cl = @b.cl
-      @search_ops = @b.search_ops | TERM_LAMBDA
-      # eta_contract checks that the binder is absent from the function.
-      if @b.tag == :app && @b.b.tag == :bnd && @b.b.idx == 0
-        @search_ops = @search_ops | TERM_ETA_CANDIDATE
-      @tv = @ty.has_var || @b.tv
-      if @b.mx > 1
-        @mx = @b.mx - 1
-      @h = (@ty.h * 43 + @b.h * 11 + 4) % HASH_MOD
-    when :bnd
-      @tv = @ty.has_var
-      @mx = @idx + 1
-      @h = (@idx * 47 + @ty.h * 59 + 5) % HASH_MOD
-    else
-      @tv = @ty.has_var
-      lh = 0
-      if type(@val) == "Array"
-        lh = ((@val[0] % HASH_MOD) * 97 + (@val[1] % HASH_MOD) + HASH_MOD * 2) % HASH_MOD
-      else
-        lh = ((@val % HASH_MOD) + HASH_MOD) % HASH_MOD
-      @h = (lh * 53 + @ty.h + 6) % HASH_MOD
++ KTm
+  ro :tag, :bits, :h, :ty, :a, :b, :name, :val
+
+  # 8-slot compact layout:
+  #   :var   -> name, ty, b = vkey
+  #   :const -> name, ty
+  #   :app   -> a = fn, b = arg, ty = cached codomain (when known)
+  #   :lam   -> name = hint, ty = binder type, b = body
+  #   :bnd   -> ty, val = de Bruijn index
+  #   :lit   -> ty, val = Int or [num, den]
+  -> new(@tag, @bits, @h, @ty, @a, @b, @name, @val)
+
+  -> cl
+    (@bits & 1) != 0
+
+  -> tv
+    (@bits & 2) != 0
+
+  -> op
+    (@bits >> 2) & 31
+
+  -> search_ops
+    (@bits >> 7) & 511
+
+  -> mx
+    @bits >> 16
+
+  -> idx
+    @val
+
+  -> vkey
+    @b
 
   -> has_widening_cast?
-    (@search_ops & TERM_WIDEN) != 0
+    (@bits & TM_BIT_WIDEN) != 0
 
   -> to_s
     tm_show(self)
@@ -456,13 +434,18 @@ TERM_FINITE_SUM = 256
 # Each slot holds one candidate. A hash collision evicts it; only an exact
 # match of all constructor arguments (including binder hints) can reuse it.
 VAR_TM_SLOTS = Array.new(16384)
+VAR_TM_MASK = 16383
 
 -> mk_var(n, ty)
-  slot = (str_hash(n) + ty.id * 31) & (VAR_TM_SLOTS.size - 1)
+  nh = str_hash(n)
+  slot = (nh + ty.id * 31) & VAR_TM_MASK
+  h = (nh * 31 + ty.h + 1) % HASH_MOD
   t = VAR_TM_SLOTS[slot]
-  if t != nil && t.name == n && t.ty == ty
+  if t != nil && t.h == h && t.name == n && t.ty == ty
     return t
-  t = KTm.new(:var, n, ty, nil, nil, 0, nil)
+  bits = ty.has_var ? TM_BIT_TV : 0
+  vkey = n + "#" + ty.id.to_s
+  t = KTm.new(:var, bits, h, ty, nil, vkey, n, nil)
   VAR_TM_SLOTS[slot] = t
   t
 
@@ -477,7 +460,21 @@ CONST_TM_CACHE = {}
   else
     by_ty = {}
     CONST_TM_CACHE[n] = by_ty
-  c = KTm.new(:const, n, ty, nil, nil, 0, nil)
+  op = const_opcode(n)
+  sops = 0
+  if n == "min" || n == "max"
+    sops = TERM_MINMAX
+  elsif n == "sum_below" || n == "sum_list"
+    sops = TERM_FINITE_SUM
+  elsif op == OP_DIV || op == OP_MOD
+    sops = TERM_DIVMOD
+  elsif op == OP_POW
+    sops = TERM_POWER
+  elsif op >= OP_INT_OF_NAT && op <= OP_REAL_OF_RAT
+    sops = TERM_WIDEN
+  bits = TM_BIT_CL | (ty.has_var ? TM_BIT_TV : 0) | (op << 2) | (sops << TM_SOPS_SHIFT)
+  h = (str_hash(n) * 37 + ty.h + 2) % HASH_MOD
+  c = KTm.new(:const, bits, h, ty, nil, nil, n, nil)
   if by_ty.size < 256
     by_ty[ty.id] = c
   c
@@ -490,14 +487,28 @@ BND_CACHE = {}
     c = BND_CACHE[k]
     if c != nil
       return c
-    c = KTm.new(:bnd, nil, ty, nil, nil, i, nil)
+    bits = TM_BIT_CL | (ty.has_var ? TM_BIT_TV : 0) | ((i + 1) << 16)
+    h = (i * 47 + ty.h * 59 + 5) % HASH_MOD
+    c = KTm.new(:bnd, bits, h, ty, nil, nil, nil, i)
     if BND_CACHE.size < 16384
       BND_CACHE[k] = c
     return c
-  KTm.new(:bnd, nil, ty, nil, nil, i, nil)
+  bits = TM_BIT_CL | (ty.has_var ? TM_BIT_TV : 0) | ((i + 1) << 16)
+  h = (i * 47 + ty.h * 59 + 5) % HASH_MOD
+  KTm.new(:bnd, bits, h, ty, nil, nil, nil, i)
 
 # Small ℕ/ℤ/ℚ/ℝ integer literals are shared across the session.
 LIT_CACHE = {}
+
+-> make_lit_tm(v, ty)
+  lh = 0
+  if type(v) == "Array"
+    lh = ((v[0] % HASH_MOD) * 97 + (v[1] % HASH_MOD) + HASH_MOD * 2) % HASH_MOD
+  else
+    lh = ((v % HASH_MOD) + HASH_MOD) % HASH_MOD
+  bits = TM_BIT_CL | (ty.has_var ? TM_BIT_TV : 0)
+  h = (lh * 53 + ty.h + 6) % HASH_MOD
+  KTm.new(:lit, bits, h, ty, nil, nil, nil, v)
 
 -> mk_lit(v, ty)
   if ty.tag == :c
@@ -507,7 +518,7 @@ LIT_CACHE = {}
         c = LIT_CACHE[key]
         if c != nil
           return c
-        c = KTm.new(:lit, nil, ty, nil, nil, 0, v)
+        c = make_lit_tm(v, ty)
         LIT_CACHE[key] = c
         return c
       if ty == TY_INT_SINGLETON
@@ -515,7 +526,7 @@ LIT_CACHE = {}
         c = LIT_CACHE[key]
         if c != nil
           return c
-        c = KTm.new(:lit, nil, ty, nil, nil, 0, v)
+        c = make_lit_tm(v, ty)
         LIT_CACHE[key] = c
         return c
     elsif type(v) == "Array" && v[1] == 1 && v[0].is_a?(Integer) && v[0] > -2048 && v[0] < 65536
@@ -524,7 +535,7 @@ LIT_CACHE = {}
         c = LIT_CACHE[key]
         if c != nil
           return c
-        c = KTm.new(:lit, nil, ty, nil, nil, 0, v)
+        c = make_lit_tm(v, ty)
         LIT_CACHE[key] = c
         return c
       if ty == TY_REAL_SINGLETON
@@ -532,33 +543,71 @@ LIT_CACHE = {}
         c = LIT_CACHE[key]
         if c != nil
           return c
-        c = KTm.new(:lit, nil, ty, nil, nil, 0, v)
+        c = make_lit_tm(v, ty)
         LIT_CACHE[key] = c
         return c
-  KTm.new(:lit, nil, ty, nil, nil, 0, v)
+  make_lit_tm(v, ty)
 
 -> mk_nat(n)
   mk_lit(n, TY_NAT_SINGLETON)
 
 APP_TM_SLOTS = Array.new(65536)
+APP_TM_MASK = 65535
 
 -> mk_app_raw(f, x)
-  slot = (f.h * 41 + x.h * 7) & (APP_TM_SLOTS.size - 1)
+  fh = f.h
+  xh = x.h
+  raw_h = fh * 41 + xh * 7
+  slot = raw_h & APP_TM_MASK
+  h = (raw_h + 3) % HASH_MOD
   t = APP_TM_SLOTS[slot]
-  if t != nil && t.a == f && t.b == x
+  if t != nil && t.h == h && t.a == f && t.b == x
     return t
-  t = KTm.new(:app, nil, nil, f, x, 0, nil)
+  fb = f.bits
+  xb = x.bits
+  ftag = f.tag
+  cl_tv_sops = (fb & xb & TM_BIT_CL) | ((fb | xb) & (TM_BIT_TV | TM_SOPS_MASK))
+  ty = nil
+  if ftag == :lam
+    cl_tv_sops = cl_tv_sops | TM_BIT_BETA
+  else
+    if ftag == :app && ((f.a.bits >> 2) & 31) == OP_MUL && f.b.h == xh
+      cl_tv_sops = cl_tv_sops | TM_BIT_SQ_PROD
+    fty = f.ty
+    if fty != nil && fty.fun?
+      ty = fty.cod
+  fmx = fb >> 16
+  xmx = xb >> 16
+  mx = fmx > xmx ? fmx : xmx
+  bits = cl_tv_sops | (mx << 16)
+  t = KTm.new(:app, bits, h, ty, f, x, nil, nil)
   APP_TM_SLOTS[slot] = t
   t
 
 LAM_TM_SLOTS = Array.new(8192)
+LAM_TM_MASK = 8191
 
 -> mk_lam_raw(hint, ty, body)
-  slot = (ty.h * 43 + body.h * 11) & (LAM_TM_SLOTS.size - 1)
+  tyh = ty.h
+  bh = body.h
+  raw_h = tyh * 43 + bh * 11
+  slot = raw_h & LAM_TM_MASK
+  h = (raw_h + 4) % HASH_MOD
   t = LAM_TM_SLOTS[slot]
-  if t != nil && t.b == body && t.ty == ty && t.name == hint
+  if t != nil && t.h == h && t.b == body && t.ty == ty && t.name == hint
     return t
-  t = KTm.new(:lam, hint, ty, nil, body, 0, nil)
+  bb = body.bits
+  cl_tv_sops = (bb & (TM_BIT_CL | TM_BIT_TV | TM_SOPS_MASK)) | TM_BIT_LAMBDA
+  if ty.has_var
+    cl_tv_sops = cl_tv_sops | TM_BIT_TV
+  if body.tag == :app
+    b_arg = body.b
+    if b_arg.tag == :bnd && b_arg.val == 0
+      cl_tv_sops = cl_tv_sops | TM_BIT_ETA
+  bmx = bb >> 16
+  mx = bmx > 1 ? bmx - 1 : 0
+  bits = cl_tv_sops | (mx << 16)
+  t = KTm.new(:lam, bits, h, ty, nil, body, hint, nil)
   LAM_TM_SLOTS[slot] = t
   t
 
@@ -654,49 +703,53 @@ LAM_TM_SLOTS = Array.new(8192)
 
 # Replace free variable v (name + type) by bound index `depth` throughout t.
 -> tm_abstract(t, v, depth)
-  if t.cl
+  if (t.bits & 1) != 0
     return t
-  case t.tag
-  when :var
+  tag = t.tag
+  if tag == :app
+    ta = t.a
+    tb = t.b
+    a = tm_abstract(ta, v, depth)
+    b = tm_abstract(tb, v, depth)
+    if a.h == ta.h && b.h == tb.h && a == ta && b == tb
+      return t
+    return mk_app_raw(a, b)
+  if tag == :var
     if t.name == v.name && ty_eq(t.ty, v.ty)
       return mk_bnd(depth, t.ty)
-    t
-  when :app
-    a = tm_abstract(t.a, v, depth)
-    b = tm_abstract(t.b, v, depth)
-    if a == t.a && b == t.b
+    return t
+  if tag == :lam
+    tb = t.b
+    b = tm_abstract(tb, v, depth + 1)
+    if b.h == tb.h && b == tb
       return t
-    mk_app_raw(a, b)
-  when :lam
-    b = tm_abstract(t.b, v, depth + 1)
-    if b == t.b
-      return t
-    mk_lam_raw(t.name, t.ty, b)
-  else
-    t
+    return mk_lam_raw(t.name, t.ty, b)
+  t
 
 # Replace bound index `depth` by the (locally closed) term u.
 -> tm_instantiate(t, u, depth)
-  if t.mx <= depth
+  if (t.bits >> 16) <= depth
     return t
-  case t.tag
-  when :bnd
-    if t.idx == depth
+  tag = t.tag
+  if tag == :app
+    ta = t.a
+    tb = t.b
+    a = tm_instantiate(ta, u, depth)
+    b = tm_instantiate(tb, u, depth)
+    if a.h == ta.h && b.h == tb.h && a == ta && b == tb
+      return t
+    return mk_app_raw(a, b)
+  if tag == :bnd
+    if t.val == depth
       return u
-    t
-  when :app
-    a = tm_instantiate(t.a, u, depth)
-    b = tm_instantiate(t.b, u, depth)
-    if a == t.a && b == t.b
+    return t
+  if tag == :lam
+    tb = t.b
+    b = tm_instantiate(tb, u, depth + 1)
+    if b.h == tb.h && b == tb
       return t
-    mk_app_raw(a, b)
-  when :lam
-    b = tm_instantiate(t.b, u, depth + 1)
-    if b == t.b
-      return t
-    mk_lam_raw(t.name, t.ty, b)
-  else
-    t
+    return mk_lam_raw(t.name, t.ty, b)
+  t
 
 -> mk_lam(v, body)
   if v.tag != :var
@@ -940,16 +993,36 @@ LAM_TM_SLOTS = Array.new(8192)
 
 # For a binary operator application `op l r`, return [l, r] or nil.
 -> dest_binop(t, name)
-  if t.tag == :app && t.a.tag == :app && t.a.a.tag == :const && t.a.a.name == name
-    [t.a.b, t.b]
-  else
-    nil
+  if t.tag == :app
+    ta = t.a
+    if ta.tag == :app
+      taa = ta.a
+      if taa.tag == :const && taa.name == name
+        return [ta.b, t.b]
+  nil
+
+-> dest_binop_op(t, op)
+  if t.tag == :app
+    ta = t.a
+    if ta.tag == :app
+      taa = ta.a
+      if taa.tag == :const && ((taa.bits >> 2) & 31) == op
+        return [ta.b, t.b]
+  nil
 
 -> dest_unop(t, name)
-  if t.tag == :app && t.a.tag == :const && t.a.name == name
-    t.b
-  else
-    nil
+  if t.tag == :app
+    ta = t.a
+    if ta.tag == :const && ta.name == name
+      return t.b
+  nil
+
+-> dest_unop_op(t, op)
+  if t.tag == :app
+    ta = t.a
+    if ta.tag == :const && ((ta.bits >> 2) & 31) == op
+      return t.b
+  nil
 
 -> lam_count_bound(t, depth)
   t.mx > depth
@@ -1008,44 +1081,76 @@ Q_NEG_ONE = [-1, 1]
   [n, d]
 
 -> q_add(x, y)
-  if y[0] == 0
+  yn = y[0]
+  if yn == 0
     return x
-  if x[0] == 0
+  xn = x[0]
+  if xn == 0
     return y
-  if x[1] == 1 && y[1] == 1
-    s = zadd(x[0], y[0])
+  xd = x[1]
+  yd = y[1]
+  if xd == 1 && yd == 1
+    s = zadd(xn, yn)
     if s == 0
       return Q_ZERO
+    if s == 1
+      return Q_ONE
+    if s == -1
+      return Q_NEG_ONE
     return [s, 1]
-  if x[1] == y[1]
-    return q_make(zadd(x[0], y[0]), x[1])
-  q_make(zadd(zmul(x[0], y[1]), zmul(y[0], x[1])), zmul(x[1], y[1]))
+  if xd == yd
+    return q_make(zadd(xn, yn), xd)
+  q_make(zadd(zmul(xn, yd), zmul(yn, xd)), zmul(xd, yd))
 
 -> q_sub(x, y)
-  if y[0] == 0
+  yn = y[0]
+  if yn == 0
     return x
-  if x[0] == 0
-    return [zsub(0, y[0]), y[1]]
-  if x[1] == 1 && y[1] == 1
-    s = zsub(x[0], y[0])
+  xn = x[0]
+  if xn == 0
+    return [zsub(0, yn), y[1]]
+  xd = x[1]
+  yd = y[1]
+  if xd == 1 && yd == 1
+    s = zsub(xn, yn)
     if s == 0
       return Q_ZERO
+    if s == 1
+      return Q_ONE
+    if s == -1
+      return Q_NEG_ONE
     return [s, 1]
-  if x[1] == y[1]
-    return q_make(zsub(x[0], y[0]), x[1])
-  q_make(zsub(zmul(x[0], y[1]), zmul(y[0], x[1])), zmul(x[1], y[1]))
+  if xd == yd
+    return q_make(zsub(xn, yn), xd)
+  q_make(zsub(zmul(xn, yd), zmul(yn, xd)), zmul(xd, yd))
 
 -> q_mul(x, y)
-  if x[0] == 0 || y[0] == 0
+  xn = x[0]
+  if xn == 0
     return Q_ZERO
-  if x[1] == 1 && y[1] == 1
-    return [zmul(x[0], y[0]), 1]
-  g1 = int_gcd(x[0], y[1])
-  g2 = int_gcd(y[0], x[1])
-  n1 = g1 > 1 ? x[0] / g1 : x[0]
-  d2 = g1 > 1 ? y[1] / g1 : y[1]
-  n2 = g2 > 1 ? y[0] / g2 : y[0]
-  d1 = g2 > 1 ? x[1] / g2 : x[1]
+  yn = y[0]
+  if yn == 0
+    return Q_ZERO
+  xd = x[1]
+  yd = y[1]
+  if xd == 1
+    if xn == 1
+      return y
+    if xn == -1
+      return [zsub(0, yn), yd]
+  if yd == 1
+    if yn == 1
+      return x
+    if yn == -1
+      return [zsub(0, xn), xd]
+  if xd == 1 && yd == 1
+    return [zmul(xn, yn), 1]
+  g1 = (yd == 1 || xn == 1 || xn == -1) ? 1 : int_gcd(xn, yd)
+  g2 = (xd == 1 || yn == 1 || yn == -1) ? 1 : int_gcd(yn, xd)
+  n1 = g1 > 1 ? xn / g1 : xn
+  d2 = g1 > 1 ? yd / g1 : yd
+  n2 = g2 > 1 ? yn / g2 : yn
+  d1 = g2 > 1 ? xd / g2 : xd
   n = zmul(n1, n2)
   d = zmul(d1, d2)
   if d == 1

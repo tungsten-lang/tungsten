@@ -175,6 +175,24 @@
       out[k] = v
   out
 
+-> poly_add_scaled!(acc, p, q)
+  if q[0] == 0 || p.size == 0
+    return acc
+  q_is_one = q[0] == 1 && q[1] == 1
+  q_is_neg1 = q[0] == -1 && q[1] == 1
+  p.each -> (k, v)
+    sv = q_is_one ? v : (q_is_neg1 ? q_neg(v) : q_mul(v, q))
+    prev = acc[k]
+    if prev != nil
+      s = q_add(prev, sv)
+      if s[0] == 0
+        acc.delete(k)
+      else
+        acc[k] = s
+    else
+      acc[k] = sv
+  acc
+
 -> poly_scale(p, q)
   out = {}
   if q[0] == 0 || p.size == 0

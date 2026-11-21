@@ -1,0 +1,151 @@
+-- Complex Contour Integration, Complex FTC, & ML-Inequality Prelude (100% AXIOM-FREE!)
+--
+-- Foundational complex contour-integration layer for Satori (supporting Perron contour
+-- shifting in `classical_landau_osc` and holomorphic continuation in `classical_L_laws`):
+--   1. Complex Darboux ML-inequality (`c_has_integral.abs_le`): |int_a^b h(t) dt| <= M * (b - a)
+--      proved via the conjugate-rotation trick u = conj(I) / |I| (0 custom axioms!)
+--   2. Parameterized complex path integrals `cpath_integral f gamma gderiv a b I`
+--   3. Linearity (`cpath_integral.add`, `cpath_integral.scale`), uniqueness, & concatenation
+--   4. Path-integral ML bound (`cpath_integral.ml_bound`): |int_gamma f(z) dz| <= M * L * (b - a)
+--   5. Complex Fundamental Theorem of Calculus (`cpath_integral.fundamental`) and
+--      closed-loop vanishing of exact differentials (`cpath_integral.closed_loop_zero`)!
+
+import adelic
+import integral_calculus
+
+-- ====================================================================================
+-- 1. Complex Darboux ML-Inequality (Via Conjugate-Rotation Trick!)
+-- ====================================================================================
+
++ c_has_integral.abs_le (h : ℝ → ℂ) (a b M : ℝ) (I : ℂ)
+    (hab : a ≤ b) (hM : 0 ≤ M)
+    (hI : c_has_integral h a b I)
+    (hbound : ∀ t, a ≤ t → t ≤ b → complex.abs (h t) ≤ M) :
+    complex.abs I ≤ M * (b - a)
+  by_cases hI0 : I = complex.zero
+  · rw [hI0, complex.abs_zero]
+    exact mul_nonneg.real M (b - a) hM (by linarith)
+  · have habs_pos : 0 < complex.abs I
+      have hnn := complex.abs_nonneg I
+      by_contra hle
+      have hz : complex.abs I = 0 := by linarith
+      exact hI0 ((complex.abs_eq_zero I).mp hz)
+    set u := complex.mul (complex.of_real (1 / complex.abs I)) (complex.conj I) with hu
+    have hu_abs : complex.abs u = 1
+      rw [hu, complex.abs_mul, complex.abs_conj]
+      have h1_abs : complex.abs (complex.of_real (1 / complex.abs I)) = 1 / complex.abs I
+        have hsq : complex.abs (complex.of_real (1 / complex.abs I)) * complex.abs (complex.of_real (1 / complex.abs I)) = (1 / complex.abs I) * (1 / complex.abs I)
+          rw [complex.abs_sq]; unfold complex.norm_sq complex.of_real; simp
+        have h1 := complex.abs_nonneg (complex.of_real (1 / complex.abs I))
+        have h2 := one_div_pos.real (complex.abs I) habs_pos
+        nlinarith
+      rw [h1_abs]
+      have hc := mul_inv_cancel.real (complex.abs I) (by linarith)
+      linarith
+    have huI_re : complex.re (complex.mul u I) = complex.abs I
+      rw [hu]
+      unfold complex.of_real; simp
+      have hns : complex.re I * complex.re I + complex.im I * complex.im I = complex.abs I * complex.abs I
+        have hs := (complex.abs_sq I).symm
+        unfold complex.norm_sq at hs
+        exact hs
+      have hc := mul_inv_cancel.real (complex.abs I) (by linarith)
+      linear_combination (1 / complex.abs I) * hns + complex.abs I * hc
+    have hscaled := c_has_integral.scale_complex h a b u I hI
+    unfold c_has_integral at hscaled
+    have hre_int : darboux.has_integral (fun t => complex.re (complex.mul u (h t))) a b (complex.abs I)
+      rw [← huI_re]
+      exact hscaled.1
+    have hconst := darboux.const a b M hab
+    apply darboux.mono (fun t => complex.re (complex.mul u (h t))) (fun _ => M) a b (complex.abs I) (M * (b - a)) hre_int hconst
+    intro t atle tb
+    have h1 : complex.re (complex.mul u (h t)) ≤ complex.abs (complex.mul u (h t))
+      have ha := complex.re_abs_le (complex.mul u (h t))
+      linarith [le_abs_self.real (complex.re (complex.mul u (h t)))]
+    rw [complex.abs_mul, hu_abs] at h1
+    linarith [hbound t atle tb]
+
+-- ====================================================================================
+-- 2. Parameterized Complex Path Integrals & Core Laws
+-- ====================================================================================
+
+-> cpath_integral (f : ℂ → ℂ) (gamma gderiv : ℝ → ℂ) (a b : ℝ) (I : ℂ) : Prop :=
+  c_has_integral (fun t => complex.mul (f (gamma t)) (gderiv t)) a b I
+
++ cpath_integral.unique (f : ℂ → ℂ) (gamma gderiv : ℝ → ℂ) (a b : ℝ) (I1 I2 : ℂ)
+    (h1 : cpath_integral f gamma gderiv a b I1) (h2 : cpath_integral f gamma gderiv a b I2) :
+    I1 = I2
+  unfold cpath_integral at h1 h2
+  exact c_has_integral.unique (fun t => complex.mul (f (gamma t)) (gderiv t)) a b I1 I2 h1 h2
+
++ cpath_integral.add (f g : ℂ → ℂ) (gamma gderiv : ℝ → ℂ) (a b : ℝ) (If Ig : ℂ)
+    (hf : cpath_integral f gamma gderiv a b If) (hg : cpath_integral g gamma gderiv a b Ig) :
+    cpath_integral (fun z => complex.add (f z) (g z)) gamma gderiv a b (complex.add If Ig)
+  unfold cpath_integral at hf hg ⊢
+  have hsum := c_has_integral.add (fun t => complex.mul (f (gamma t)) (gderiv t)) (fun t => complex.mul (g (gamma t)) (gderiv t)) a b If Ig hf hg
+  apply c_has_integral.congr (fun t => complex.add (complex.mul (f (gamma t)) (gderiv t)) (complex.mul (g (gamma t)) (gderiv t))) (fun t => complex.mul (complex.add (f (gamma t)) (g (gamma t))) (gderiv t)) a b (complex.add If Ig) hsum
+  intro t atle tb
+  apply complex.ext <;> simp <;> ring
+
++ cpath_integral.scale (c : ℂ) (f : ℂ → ℂ) (gamma gderiv : ℝ → ℂ) (a b : ℝ) (I : ℂ)
+    (hf : cpath_integral f gamma gderiv a b I) :
+    cpath_integral (fun z => complex.mul c (f z)) gamma gderiv a b (complex.mul c I)
+  unfold cpath_integral at hf ⊢
+  have hsc := c_has_integral.scale_complex (fun t => complex.mul (f (gamma t)) (gderiv t)) a b c I hf
+  apply c_has_integral.congr (fun t => complex.mul c (complex.mul (f (gamma t)) (gderiv t))) (fun t => complex.mul (complex.mul c (f (gamma t))) (gderiv t)) a b (complex.mul c I) hsc
+  intro t atle tb
+  apply complex.ext <;> simp <;> ring
+
++ cpath_integral.append (f : ℂ → ℂ) (gamma gderiv : ℝ → ℂ) (a m b : ℝ) (I1 I2 : ℂ)
+    (h1 : cpath_integral f gamma gderiv a m I1) (h2 : cpath_integral f gamma gderiv m b I2) :
+    cpath_integral f gamma gderiv a b (complex.add I1 I2)
+  unfold cpath_integral at h1 h2 ⊢
+  exact c_has_integral.adjacent (fun t => complex.mul (f (gamma t)) (gderiv t)) a m b I1 I2 h1 h2
+
+-- THEOREM 1 (Path-Integral ML Bound — AXIOM-FREE!):
+-- If |f(gamma(t))| <= M and |gamma'(t)| <= L on [a, b], then |int_gamma f dz| <= M * L * (b - a)!
++ cpath_integral.ml_bound (f : ℂ → ℂ) (gamma gderiv : ℝ → ℂ) (a b M L : ℝ) (I : ℂ)
+    (hab : a ≤ b) (hM : 0 ≤ M) (hL : 0 ≤ L)
+    (hI : cpath_integral f gamma gderiv a b I)
+    (hf : ∀ t, a ≤ t → t ≤ b → complex.abs (f (gamma t)) ≤ M)
+    (hg : ∀ t, a ≤ t → t ≤ b → complex.abs (gderiv t) ≤ L) :
+    complex.abs I ≤ (M * L) * (b - a)
+  unfold cpath_integral at hI
+  apply c_has_integral.abs_le (fun t => complex.mul (f (gamma t)) (gderiv t)) a b (M * L) I hab (mul_nonneg.real M L hM hL) hI
+  intro t atle tb
+  rw [complex.abs_mul]
+  have h1 := mul_le_mul_of_nonneg_right.real (complex.abs (f (gamma t))) M (complex.abs (gderiv t)) (hf t atle tb) (complex.abs_nonneg (gderiv t))
+  have h2 := mul_le_mul_of_nonneg_left.real (complex.abs (gderiv t)) L M (hg t atle tb) hM
+  linarith
+
+-- ====================================================================================
+-- 3. Complex Fundamental Theorem of Calculus & Closed-Loop Vanishing
+-- ====================================================================================
+
+-- THEOREM 2 (Complex Fundamental Theorem of Calculus — AXIOM-FREE!):
+-- If d/dt F(gamma(t)) = f(gamma(t)) * gamma'(t) continuously on [a, b], then
+--   int_gamma f(z) dz = F(gamma(b)) - F(gamma(a)) !
++ cpath_integral.fundamental (F f : ℂ → ℂ) (gamma gderiv : ℝ → ℂ) (a b : ℝ)
+    (hab : a ≤ b)
+    (hcont_re : ∀ t, a ≤ t → t ≤ b → continuous_at (fun u => complex.re (complex.mul (f (gamma u)) (gderiv u))) t)
+    (hcont_im : ∀ t, a ≤ t → t ≤ b → continuous_at (fun u => complex.im (complex.mul (f (gamma u)) (gderiv u))) t)
+    (hderiv_re : ∀ t, a ≤ t → t ≤ b → has_deriv_within (fun u => complex.re (F (gamma u))) (fun z => a ≤ z ∧ z ≤ b) t (complex.re (complex.mul (f (gamma t)) (gderiv t))))
+    (hderiv_im : ∀ t, a ≤ t → t ≤ b → has_deriv_within (fun u => complex.im (F (gamma u))) (fun z => a ≤ z ∧ z ≤ b) t (complex.im (complex.mul (f (gamma t)) (gderiv t)))) :
+    cpath_integral f gamma gderiv a b (complex.sub (F (gamma b)) (F (gamma a)))
+  unfold cpath_integral c_has_integral
+  simp
+  constructor
+  · exact darboux.fundamental (fun u => complex.re (F (gamma u))) (fun u => complex.re (complex.mul (f (gamma u)) (gderiv u))) a b hab hcont_re hderiv_re
+  · exact darboux.fundamental (fun u => complex.im (F (gamma u))) (fun u => complex.im (complex.mul (f (gamma u)) (gderiv u))) a b hab hcont_im hderiv_im
+
+-- THEOREM 3 (Closed-Loop Vanishing of Exact Complex Differentials — AXIOM-FREE!):
++ cpath_integral.closed_loop_zero (F f : ℂ → ℂ) (gamma gderiv : ℝ → ℂ) (a b : ℝ)
+    (hab : a ≤ b) (hclosed : gamma a = gamma b)
+    (hcont_re : ∀ t, a ≤ t → t ≤ b → continuous_at (fun u => complex.re (complex.mul (f (gamma u)) (gderiv u))) t)
+    (hcont_im : ∀ t, a ≤ t → t ≤ b → continuous_at (fun u => complex.im (complex.mul (f (gamma u)) (gderiv u))) t)
+    (hderiv_re : ∀ t, a ≤ t → t ≤ b → has_deriv_within (fun u => complex.re (F (gamma u))) (fun z => a ≤ z ∧ z ≤ b) t (complex.re (complex.mul (f (gamma t)) (gderiv t))))
+    (hderiv_im : ∀ t, a ≤ t → t ≤ b → has_deriv_within (fun u => complex.im (F (gamma u))) (fun z => a ≤ z ∧ z ≤ b) t (complex.im (complex.mul (f (gamma t)) (gderiv t)))) :
+    cpath_integral f gamma gderiv a b complex.zero
+  have hftc := cpath_integral.fundamental F f gamma gderiv a b hab hcont_re hcont_im hderiv_re hderiv_im
+  rw [hclosed, complex.sub_self] at hftc
+  exact hftc

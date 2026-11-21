@@ -55183,6 +55183,496 @@ static inline __attribute__((always_inline)) WValue w_dimacs_scan(
 #undef AT_BREAK
 #undef P_ERR
 }
+/* Narrow-buffer single-threaded strict DIMACS scanner (int32_t output arrays). */
+static inline WValue w_dimacs_scan_i32(
+        const char *tx, size_t tlen, int32_t *lits, int32_t *offs,
+        int32_t *lens, int64_t *hdr, int64_t lcap, int64_t ccap) {
+    int64_t nvars = 0, declared = 0, ncl = 0, nlits = 0, cur_off = 0, cur_len = 0;
+    int have_header = 0, done = 0, line_started = 0;
+    int64_t lineno = 1;
+    size_t i = 0;
+    const uint8_t *cls = w_dimacs_cls;
+    hdr[0] = hdr[1] = hdr[2] = hdr[3] = hdr[4] = hdr[5] = 0;
+#define P32_ERR(code) { hdr[4] = (code); hdr[5] = lineno; return W_NIL; }
+#define AT32_BREAK(pos) ((pos) >= tlen || (cls[(unsigned char)tx[pos]] & DC_BREAK))
+    while (i < tlen && !done) {
+        unsigned char c = (unsigned char)tx[i];
+        uint8_t k = cls[c];
+        if (k & DC_SPACE) { i++; continue; }
+        if (k & DC_NL) { i++; lineno++; line_started = 0; continue; }
+
+        if (!line_started) {
+            if (c == '%') { done = 1; break; }
+            if (c == 'c' && AT32_BREAK(i + 1)) {
+                while (i < tlen && tx[i] != '\n') i++;
+                continue;
+            }
+            if (c == 'p' && AT32_BREAK(i + 1)) {
+                if (have_header) P32_ERR(1);
+                i++;
+                int had_space = 0;
+                while (i < tlen && (cls[(unsigned char)tx[i]] & DC_SPACE)) { had_space = 1; i++; }
+                if (!had_space) P32_ERR(2);
+                if (i + 3 > tlen || tx[i] != 'c' || tx[i+1] != 'n' || tx[i+2] != 'f') P32_ERR(2);
+                i += 3;
+                if (i >= tlen || !(cls[(unsigned char)tx[i]] & DC_SPACE)) P32_ERR(2);
+                int64_t vals[2];
+                for (int vi = 0; vi < 2; vi++) {
+                    had_space = 0;
+                    while (i < tlen && (cls[(unsigned char)tx[i]] & DC_SPACE)) { had_space = 1; i++; }
+                    if (!had_space) P32_ERR(2);
+                    if (i >= tlen || !(cls[(unsigned char)tx[i]] & DC_DIGIT)) P32_ERR(2);
+                    int64_t v = 0;
+                    while (i < tlen && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
+                        int digit = tx[i] - '0';
+                        v = v * 10 + digit;
+                        if (v > 2000000000LL) P32_ERR(2);
+                        i++;
+                    }
+                    vals[vi] = v;
+                }
+                while (i < tlen && (cls[(unsigned char)tx[i]] & DC_SPACE)) i++;
+                if (i < tlen && tx[i] != '\n') P32_ERR(2);
+                nvars = vals[0]; declared = vals[1]; have_header = 1;
+                if (declared + 2 > ccap || declared > 2147483645LL) P32_ERR(7);
+                continue;
+            }
+            if (!have_header) P32_ERR(1);
+            if (c == 'x' && AT32_BREAK(i + 1)) P32_ERR(8);
+        }
+        if (!have_header) P32_ERR(1);
+        line_started = 1;
+
+        int neg = 0, signed_tok = 0;
+        if (c == '-' || c == '+') { neg = (c == '-'); signed_tok = 1; i++; }
+        size_t digit_start = i;
+        int64_t v = 0;
+        if (tlen - i >= 8) {
+            for (unsigned j = 0; j < 8; j++) {
+                unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+                if (digit > 9) goto end_digits_32;
+                v = v * 10 + digit;
+                i++;
+            }
+        }
+        while (i < tlen) {
+            unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+            if (digit > 9) break;
+            v = v * 10 + digit;
+            if (v > 2000000000LL) P32_ERR(4);
+            i++;
+        }
+    end_digits_32:
+        if (i == digit_start) P32_ERR(3);
+        if (!AT32_BREAK(i)) P32_ERR(3);
+
+        if (v == 0) {
+            if (i - digit_start != 1 || signed_tok) P32_ERR(3);
+            if (ncl >= declared) P32_ERR(6);
+            offs[ncl] = (int32_t)cur_off;
+            lens[ncl] = (int32_t)cur_len;
+            ncl++; cur_off = nlits; cur_len = 0;
+        } else {
+            if (v > nvars) P32_ERR(4);
+            if (nlits + 1 > lcap || nlits >= 2147483647LL) P32_ERR(7);
+            lits[nlits] = (int32_t)(neg ? -v : v);
+            nlits++;
+            cur_len++;
+        }
+        if (i < tlen) {
+            if (tx[i] == '\n') { lineno++; line_started = 0; }
+            i++;
+        }
+    }
+    if (!have_header) P32_ERR(1);
+    if (cur_len != 0) P32_ERR(5);
+    if (ncl != declared) P32_ERR(6);
+    hdr[0] = nvars; hdr[1] = declared; hdr[2] = ncl; hdr[3] = nlits;
+    return W_NIL;
+#undef AT32_BREAK
+#undef P32_ERR
+}
+
+#if !defined(__wasm__)
+#define W_DIMACS_MAX_THREADS 8
+#define W_DIMACS_PAR_MIN_BYTES (16ULL << 20)
+
+typedef struct {
+    const char *tx;
+    size_t start;
+    size_t end;
+    int64_t nvars;
+    int64_t ncl;
+    int64_t nlits;
+    int64_t base_cl;
+    int64_t base_lit;
+    int abort;
+    int bits;
+    void *lits;
+    void *offs;
+    void *lens;
+} WDimacsChunkArg;
+
+static int w_dimacs_thread_count(size_t body_bytes) {
+    const char *seq = getenv("WASSAT_SEQUENTIAL");
+    if (seq && seq[0] == '1' && seq[1] == '\0') return 1;
+    if (body_bytes < W_DIMACS_PAR_MIN_BYTES) return 1;
+    long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+    int k = ncpu > 1 ? (int)ncpu : 1;
+    if (k > W_DIMACS_MAX_THREADS) k = W_DIMACS_MAX_THREADS;
+    size_t max_by_size = body_bytes / (4ULL << 20);
+    if ((size_t)k > max_by_size) k = (int)max_by_size;
+    return k < 2 ? 1 : k;
+}
+
+/* Locate the clause body right after a newline-terminated `p cnf` header.
+ * Any non-standard prefix returns 0 so the strict serial scanner handles it. */
+static int w_dimacs_find_body(const char *tx, size_t tlen, size_t *out_body,
+                              int64_t *out_nvars, int64_t *out_declared) {
+    const uint8_t *cls = w_dimacs_cls;
+    size_t limit = tlen < (1ULL << 20) ? tlen : (1ULL << 20);
+    size_t i = 0;
+    int line_started = 0;
+    while (i < limit) {
+        unsigned char c = (unsigned char)tx[i];
+        uint8_t k = cls[c];
+        if (k & DC_SPACE) { i++; continue; }
+        if (k & DC_NL) { i++; line_started = 0; continue; }
+        if (!line_started) {
+            if (c == 'c' && (i + 1 >= tlen || (cls[(unsigned char)tx[i + 1]] & DC_BREAK))) {
+                while (i < limit && tx[i] != '\n') i++;
+                continue;
+            }
+            if (c == 'p' && i + 1 < limit && (cls[(unsigned char)tx[i + 1]] & DC_SPACE)) {
+                i++;
+                while (i < limit && (cls[(unsigned char)tx[i]] & DC_SPACE)) i++;
+                if (i + 4 > limit || tx[i] != 'c' || tx[i+1] != 'n' || tx[i+2] != 'f') return 0;
+                i += 3;
+                if (!(cls[(unsigned char)tx[i]] & DC_SPACE)) return 0;
+                int64_t vals[2];
+                for (int vi = 0; vi < 2; vi++) {
+                    int had_sp = 0;
+                    while (i < limit && (cls[(unsigned char)tx[i]] & DC_SPACE)) { had_sp = 1; i++; }
+                    if (!had_sp || i >= limit || !(cls[(unsigned char)tx[i]] & DC_DIGIT)) return 0;
+                    int64_t v = 0;
+                    while (i < limit && (cls[(unsigned char)tx[i]] & DC_DIGIT)) {
+                        v = v * 10 + (tx[i] - '0');
+                        if (v > 2000000000LL) return 0;
+                        i++;
+                    }
+                    vals[vi] = v;
+                }
+                while (i < limit && (cls[(unsigned char)tx[i]] & DC_SPACE)) i++;
+                if (i >= limit || tx[i] != '\n') return 0;
+                if (vals[1] <= 0) return 0;
+                *out_body = i + 1;
+                *out_nvars = vals[0];
+                *out_declared = vals[1];
+                return 1;
+            }
+        }
+        return 0;
+    }
+    return 0;
+}
+
+/* Advance a nominal split position to the end of a clause-terminating line
+ * (`... 0\n`) so even multi-line clauses rarely cross a chunk boundary. */
+static size_t w_dimacs_align_split(const char *tx, size_t body_start, size_t tlen, size_t pos) {
+    const uint8_t *cls = w_dimacs_cls;
+    size_t scan_lim = pos + 65536 < tlen ? pos + 65536 : tlen;
+    size_t first_nl = 0;
+    size_t p = pos;
+    while (p < scan_lim) {
+        if (tx[p] == '\n') {
+            if (first_nl == 0) first_nl = p + 1;
+            size_t ls = p;
+            while (ls > body_start && tx[ls - 1] != '\n') ls--;
+            size_t s = ls;
+            while (s < p && (cls[(unsigned char)tx[s]] & DC_SPACE)) s++;
+            if (s < p && tx[s] != 'c' && tx[s] != '%' && tx[s] != 'p') {
+                size_t e = p;
+                while (e > s && (cls[(unsigned char)tx[e - 1]] & DC_SPACE)) e--;
+                if (e > s && tx[e - 1] == '0' && (e - 1 == s || (cls[(unsigned char)tx[e - 2]] & DC_SPACE))) {
+                    return p + 1;
+                }
+            }
+        }
+        p++;
+    }
+    if (first_nl != 0) return first_nl;
+    while (p < tlen && tx[p] != '\n') p++;
+    return p < tlen ? p + 1 : tlen;
+}
+
+static void *w_dimacs_count_chunk_worker(void *raw) {
+    WDimacsChunkArg *arg = (WDimacsChunkArg *)raw;
+    const char *tx = arg->tx;
+    size_t i = arg->start;
+    size_t end = arg->end;
+    int64_t nvars = arg->nvars;
+    int64_t ncl = 0, nlits = 0, cur_len = 0;
+    int line_started = 0;
+    const uint8_t *cls = w_dimacs_cls;
+#define CHUNK_BREAK(pos) ((pos) >= end || (cls[(unsigned char)tx[pos]] & DC_BREAK))
+    while (i < end) {
+        unsigned char c = (unsigned char)tx[i];
+        uint8_t k = cls[c];
+        if (k & DC_SPACE) { i++; continue; }
+        if (k & DC_NL) { i++; line_started = 0; continue; }
+        if (!line_started) {
+            if (c == '%') { arg->abort = 1; return NULL; }
+            if (c == 'c' && CHUNK_BREAK(i + 1)) {
+                while (i < end && tx[i] != '\n') i++;
+                continue;
+            }
+            if ((c == 'p' || c == 'x') && CHUNK_BREAK(i + 1)) {
+                arg->abort = 1;
+                return NULL;
+            }
+        }
+        line_started = 1;
+        int signed_tok = 0;
+        if (c == '-' || c == '+') { signed_tok = 1; i++; }
+        size_t digit_start = i;
+        int64_t v = 0;
+        if (end - i >= 8) {
+            for (unsigned j = 0; j < 8; j++) {
+                unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+                if (digit > 9) goto chunk_end_digits;
+                v = v * 10 + digit;
+                i++;
+            }
+        }
+        while (i < end) {
+            unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+            if (digit > 9) break;
+            v = v * 10 + digit;
+            if (v > 2000000000LL) { arg->abort = 1; return NULL; }
+            i++;
+        }
+    chunk_end_digits:
+        if (i == digit_start || !CHUNK_BREAK(i)) { arg->abort = 1; return NULL; }
+        if (v == 0) {
+            if (i - digit_start != 1 || signed_tok) { arg->abort = 1; return NULL; }
+            ncl++;
+            cur_len = 0;
+        } else {
+            if (v > nvars) { arg->abort = 1; return NULL; }
+            nlits++;
+            cur_len++;
+        }
+        if (i < end) {
+            if (tx[i] == '\n') line_started = 0;
+            i++;
+        }
+    }
+#undef CHUNK_BREAK
+    if (cur_len != 0) { arg->abort = 1; return NULL; }
+    arg->ncl = ncl;
+    arg->nlits = nlits;
+    return NULL;
+}
+
+static void *w_dimacs_fill_chunk_worker(void *raw) {
+    WDimacsChunkArg *arg = (WDimacsChunkArg *)raw;
+    const char *tx = arg->tx;
+    size_t i = arg->start;
+    size_t end = arg->end;
+    int64_t ncl = arg->base_cl;
+    int64_t nlits = arg->base_lit;
+    int64_t cur_off = nlits;
+    int64_t cur_len = 0;
+    int line_started = 0;
+    const uint8_t *cls = w_dimacs_cls;
+    if (arg->bits == 32) {
+        int32_t *lits = (int32_t *)arg->lits;
+        int32_t *offs = (int32_t *)arg->offs;
+        int32_t *lens = (int32_t *)arg->lens;
+        while (i < end) {
+            unsigned char c = (unsigned char)tx[i];
+            uint8_t k = cls[c];
+            if (k & DC_SPACE) { i++; continue; }
+            if (k & DC_NL) { i++; line_started = 0; continue; }
+            if (!line_started && c == 'c') {
+                while (i < end && tx[i] != '\n') i++;
+                continue;
+            }
+            line_started = 1;
+            int neg = 0;
+            if (c == '-' || c == '+') { neg = (c == '-'); i++; }
+            int64_t v = 0;
+            if (end - i >= 8) {
+                for (unsigned j = 0; j < 8; j++) {
+                    unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+                    if (digit > 9) goto fill32_done;
+                    v = v * 10 + digit;
+                    i++;
+                }
+            }
+            while (i < end) {
+                unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+                if (digit > 9) break;
+                v = v * 10 + digit;
+                i++;
+            }
+        fill32_done:
+            if (v == 0) {
+                offs[ncl] = (int32_t)cur_off;
+                lens[ncl] = (int32_t)cur_len;
+                ncl++;
+                cur_off = nlits;
+                cur_len = 0;
+            } else {
+                lits[nlits] = (int32_t)(neg ? -v : v);
+                nlits++;
+                cur_len++;
+            }
+            if (i < end) {
+                if (tx[i] == '\n') line_started = 0;
+                i++;
+            }
+        }
+    } else {
+        int64_t *lits = (int64_t *)arg->lits;
+        int64_t *offs = (int64_t *)arg->offs;
+        int64_t *lens = (int64_t *)arg->lens;
+        while (i < end) {
+            unsigned char c = (unsigned char)tx[i];
+            uint8_t k = cls[c];
+            if (k & DC_SPACE) { i++; continue; }
+            if (k & DC_NL) { i++; line_started = 0; continue; }
+            if (!line_started && c == 'c') {
+                while (i < end && tx[i] != '\n') i++;
+                continue;
+            }
+            line_started = 1;
+            int neg = 0;
+            if (c == '-' || c == '+') { neg = (c == '-'); i++; }
+            int64_t v = 0;
+            if (end - i >= 8) {
+                for (unsigned j = 0; j < 8; j++) {
+                    unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+                    if (digit > 9) goto fill64_done;
+                    v = v * 10 + digit;
+                    i++;
+                }
+            }
+            while (i < end) {
+                unsigned digit = (unsigned)((unsigned char)tx[i] - '0');
+                if (digit > 9) break;
+                v = v * 10 + digit;
+                i++;
+            }
+        fill64_done:
+            if (v == 0) {
+                offs[ncl] = cur_off;
+                lens[ncl] = cur_len;
+                ncl++;
+                cur_off = nlits;
+                cur_len = 0;
+            } else {
+                lits[nlits] = neg ? -v : v;
+                nlits++;
+                cur_len++;
+            }
+            if (i < end) {
+                if (tx[i] == '\n') line_started = 0;
+                i++;
+            }
+        }
+    }
+    return NULL;
+}
+
+static int w_dimacs_build_parallel_plan(const char *tx, size_t tlen,
+                                        WDimacsChunkArg *args, int *out_nchunks,
+                                        int64_t *out_nvars, int64_t *out_declared,
+                                        int64_t *out_nlits) {
+    size_t body_start = 0;
+    int64_t nvars = 0, declared = 0;
+    if (!w_dimacs_find_body(tx, tlen, &body_start, &nvars, &declared)) return 0;
+    size_t body_bytes = tlen - body_start;
+    int want_k = w_dimacs_thread_count(body_bytes);
+    if (want_k < 2) return 0;
+    size_t bounds[W_DIMACS_MAX_THREADS + 1];
+    bounds[0] = body_start;
+    int nchunks = 0;
+    for (int k = 1; k < want_k; k++) {
+        size_t nom = body_start + (body_bytes * (size_t)k) / (size_t)want_k;
+        size_t aligned = w_dimacs_align_split(tx, body_start, tlen, nom);
+        if (aligned > bounds[nchunks] && aligned < tlen) {
+            nchunks++;
+            bounds[nchunks] = aligned;
+        }
+    }
+    nchunks++;
+    bounds[nchunks] = tlen;
+    if (nchunks < 2) return 0;
+
+    pthread_t tids[W_DIMACS_MAX_THREADS];
+    int spawned[W_DIMACS_MAX_THREADS];
+    for (int k = 0; k < nchunks; k++) {
+        memset(&args[k], 0, sizeof(args[k]));
+        args[k].tx = tx;
+        args[k].start = bounds[k];
+        args[k].end = bounds[k + 1];
+        args[k].nvars = nvars;
+        spawned[k] = 0;
+    }
+    for (int k = 1; k < nchunks; k++) {
+        if (pthread_create(&tids[k], NULL, w_dimacs_count_chunk_worker, &args[k]) == 0) {
+            spawned[k] = 1;
+        } else {
+            w_dimacs_count_chunk_worker(&args[k]);
+        }
+    }
+    w_dimacs_count_chunk_worker(&args[0]);
+    for (int k = 1; k < nchunks; k++) {
+        if (spawned[k]) pthread_join(tids[k], NULL);
+    }
+
+    int64_t total_ncl = 0, total_nlits = 0;
+    for (int k = 0; k < nchunks; k++) {
+        if (args[k].abort) return 0;
+        args[k].base_cl = total_ncl;
+        args[k].base_lit = total_nlits;
+        total_ncl += args[k].ncl;
+        total_nlits += args[k].nlits;
+    }
+    if (total_ncl != declared) return 0;
+    *out_nchunks = nchunks;
+    *out_nvars = nvars;
+    *out_declared = declared;
+    *out_nlits = total_nlits;
+    return 1;
+}
+
+static void w_dimacs_exec_fill(WDimacsChunkArg *args, int nchunks, int bits,
+                               void *lits, void *offs, void *lens) {
+    pthread_t tids[W_DIMACS_MAX_THREADS];
+    int spawned[W_DIMACS_MAX_THREADS];
+    for (int k = 0; k < nchunks; k++) {
+        args[k].bits = bits;
+        args[k].lits = lits;
+        args[k].offs = offs;
+        args[k].lens = lens;
+        spawned[k] = 0;
+    }
+    for (int k = 1; k < nchunks; k++) {
+        if (pthread_create(&tids[k], NULL, w_dimacs_fill_chunk_worker, &args[k]) == 0) {
+            spawned[k] = 1;
+        } else {
+            w_dimacs_fill_chunk_worker(&args[k]);
+        }
+    }
+    w_dimacs_fill_chunk_worker(&args[0]);
+    for (int k = 1; k < nchunks; k++) {
+        if (spawned[k]) pthread_join(tids[k], NULL);
+    }
+}
+#endif
+
 /* The scanner accepts a String or an open read-only Mmap. Passing nil for
  * all three output buffers performs the same strict validation/count pass
  * without materializing the formula. This sizes large mapped inputs exactly. */
@@ -55202,8 +55692,21 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
     WArray *ha = w_as_array(w_check_array_ebits(hdr_val, 64, 0, w_string("CNF")));
     if (ha->size < 6) w_raise(w_string("DIMACS: header buffer is too small"));
     int64_t *hdr = (int64_t *)ha->slots + ha->start;
-    if (lits_val == W_NIL && offs_val == W_NIL && lens_val == W_NIL)
+    if (lits_val == W_NIL && offs_val == W_NIL && lens_val == W_NIL) {
+#if !defined(__wasm__)
+        if (tlen >= W_DIMACS_PAR_MIN_BYTES) {
+            WDimacsChunkArg args[W_DIMACS_MAX_THREADS];
+            int nchunks = 0;
+            int64_t nvars = 0, declared = 0, nlits = 0;
+            if (w_dimacs_build_parallel_plan(tx, tlen, args, &nchunks, &nvars, &declared, &nlits)) {
+                hdr[0] = nvars; hdr[1] = declared; hdr[2] = declared; hdr[3] = nlits;
+                hdr[4] = 0; hdr[5] = 0;
+                return W_NIL;
+            }
+        }
+#endif
         return w_dimacs_scan(tx, tlen, NULL, NULL, NULL, hdr, INT64_MAX, INT64_MAX, 1);
+    }
     if (!w_is_array(lits_val) || !w_is_array(offs_val) || !w_is_array(lens_val))
         w_raise(w_string("DIMACS: supply three i64 output arrays or three nil buffers"));
     WArray *la = w_as_array(w_check_array_ebits(lits_val, 64, 0, w_string("CNF")));
@@ -55213,7 +55716,182 @@ WValue __w_parse_dimacs(WValue text_val, WValue lits_val, WValue offs_val,
     int64_t *offs = (int64_t *)oa->slots + oa->start;
     int64_t *lens = (int64_t *)na->slots + na->start;
     int64_t ccap = oa->size < na->size ? oa->size : na->size;
+#if !defined(__wasm__)
+    if (tlen >= W_DIMACS_PAR_MIN_BYTES) {
+        WDimacsChunkArg args[W_DIMACS_MAX_THREADS];
+        int nchunks = 0;
+        int64_t nvars = 0, declared = 0, nlits = 0;
+        if (w_dimacs_build_parallel_plan(tx, tlen, args, &nchunks, &nvars, &declared, &nlits) &&
+            declared + 2 <= ccap && nlits <= (int64_t)la->size) {
+            w_dimacs_exec_fill(args, nchunks, 64, lits, offs, lens);
+            hdr[0] = nvars; hdr[1] = declared; hdr[2] = declared; hdr[3] = nlits;
+            hdr[4] = 0; hdr[5] = 0;
+            return W_NIL;
+        }
+    }
+#endif
     return w_dimacs_scan(tx, tlen, lits, offs, lens, hdr, la->size, ccap, 0);
+}
+
+WValue __w_parse_dimacs_i32(WValue text_val, WValue lits_val, WValue offs_val,
+                            WValue lens_val, WValue hdr_val) {
+    char inline_buf[6];
+    const char *tx; size_t tlen;
+    WMmap *mapping = as_mmap(text_val);
+    if (mapping) {
+        if (mapping->closed) w_raise(w_string("DIMACS: mmap is closed"));
+        tx = (const char *)mapping->data;
+        tlen = (size_t)mapping->size;
+    } else {
+        w_str_data(text_val, inline_buf, &tx, &tlen);
+    }
+    if (!w_is_array(hdr_val)) w_raise(w_string("DIMACS: header must be an i64 array"));
+    WArray *ha = w_as_array(w_check_array_ebits(hdr_val, 64, 0, w_string("CNF")));
+    if (ha->size < 6) w_raise(w_string("DIMACS: header buffer is too small"));
+    int64_t *hdr = (int64_t *)ha->slots + ha->start;
+    if (!w_is_array(lits_val) || !w_is_array(offs_val) || !w_is_array(lens_val))
+        w_raise(w_string("DIMACS: supply three i32 output arrays"));
+    WArray *la = w_as_array(w_check_array_ebits(lits_val, 32, 0, w_string("CNF")));
+    WArray *oa = w_as_array(w_check_array_ebits(offs_val, 32, 0, w_string("CNF")));
+    WArray *na = w_as_array(w_check_array_ebits(lens_val, 32, 0, w_string("CNF")));
+    int32_t *lits = (int32_t *)la->slots + la->start;
+    int32_t *offs = (int32_t *)oa->slots + oa->start;
+    int32_t *lens = (int32_t *)na->slots + na->start;
+    int64_t ccap = oa->size < na->size ? oa->size : na->size;
+#if !defined(__wasm__)
+    if (tlen >= W_DIMACS_PAR_MIN_BYTES) {
+        WDimacsChunkArg args[W_DIMACS_MAX_THREADS];
+        int nchunks = 0;
+        int64_t nvars = 0, declared = 0, nlits = 0;
+        if (w_dimacs_build_parallel_plan(tx, tlen, args, &nchunks, &nvars, &declared, &nlits) &&
+            declared + 2 <= ccap && declared <= 2147483645LL &&
+            nlits <= (int64_t)la->size && nlits <= 2147483647LL) {
+            w_dimacs_exec_fill(args, nchunks, 32, lits, offs, lens);
+            hdr[0] = nvars; hdr[1] = declared; hdr[2] = declared; hdr[3] = nlits;
+            hdr[4] = 0; hdr[5] = 0;
+            return W_NIL;
+        }
+    }
+#endif
+    return w_dimacs_scan_i32(tx, tlen, lits, offs, lens, hdr, la->size, ccap);
+}
+
+/* Two-step zero-over-allocation parallel parse for large mapped files:
+ * Step 1 (`__w_dimacs_plan`) validates and counts in parallel, saving chunk
+ * slices into `plan` (`i64[64]`) so Step 2 (`__w_dimacs_fill_plan`) fills
+ * exact-sized `i32[]` or `i64[]` output arrays without rescanning Pass 1. */
+WValue __w_dimacs_plan(WValue text_val, WValue hdr_val, WValue plan_val) {
+    char inline_buf[6];
+    const char *tx; size_t tlen;
+    WMmap *mapping = as_mmap(text_val);
+    if (mapping) {
+        if (mapping->closed) w_raise(w_string("DIMACS: mmap is closed"));
+        tx = (const char *)mapping->data;
+        tlen = (size_t)mapping->size;
+    } else {
+        w_str_data(text_val, inline_buf, &tx, &tlen);
+    }
+    if (!w_is_array(hdr_val) || !w_is_array(plan_val))
+        w_raise(w_string("DIMACS: header and plan must be i64 arrays"));
+    WArray *ha = w_as_array(w_check_array_ebits(hdr_val, 64, 0, w_string("CNF")));
+    WArray *pa = w_as_array(w_check_array_ebits(plan_val, 64, 0, w_string("CNF")));
+    if (ha->size < 6 || pa->size < 48) w_raise(w_string("DIMACS: plan buffer is too small"));
+    int64_t *hdr = (int64_t *)ha->slots + ha->start;
+    int64_t *plan = (int64_t *)pa->slots + pa->start;
+    plan[0] = 0;
+#if !defined(__wasm__)
+    if (tlen >= W_DIMACS_PAR_MIN_BYTES) {
+        WDimacsChunkArg args[W_DIMACS_MAX_THREADS];
+        int nchunks = 0;
+        int64_t nvars = 0, declared = 0, nlits = 0;
+        if (w_dimacs_build_parallel_plan(tx, tlen, args, &nchunks, &nvars, &declared, &nlits)) {
+            hdr[0] = nvars; hdr[1] = declared; hdr[2] = declared; hdr[3] = nlits;
+            hdr[4] = 0; hdr[5] = 0;
+            plan[0] = nchunks;
+            plan[1] = nvars;
+            plan[2] = declared;
+            plan[3] = nlits;
+            plan[4] = (int64_t)tlen;
+            for (int k = 0; k < nchunks; k++) {
+                plan[8 + 4 * k + 0] = (int64_t)args[k].start;
+                plan[8 + 4 * k + 1] = (int64_t)args[k].end;
+                plan[8 + 4 * k + 2] = args[k].base_cl;
+                plan[8 + 4 * k + 3] = args[k].base_lit;
+            }
+            return w_int(1);
+        }
+    }
+#endif
+    w_dimacs_scan(tx, tlen, NULL, NULL, NULL, hdr, INT64_MAX, INT64_MAX, 1);
+    return w_int(0);
+}
+
+WValue __w_dimacs_fill_plan(WValue text_val, WValue lits_val, WValue offs_val,
+                            WValue lens_val, WValue hdr_val, WValue plan_val,
+                            WValue bits_val) {
+    char inline_buf[6];
+    const char *tx; size_t tlen;
+    WMmap *mapping = as_mmap(text_val);
+    if (mapping) {
+        if (mapping->closed) w_raise(w_string("DIMACS: mmap is closed"));
+        tx = (const char *)mapping->data;
+        tlen = (size_t)mapping->size;
+    } else {
+        w_str_data(text_val, inline_buf, &tx, &tlen);
+    }
+    int bits = (int)w_as_int(bits_val);
+    if (bits != 32 && bits != 64) w_raise(w_string("DIMACS: invalid element width"));
+    WArray *ha = w_as_array(w_check_array_ebits(hdr_val, 64, 0, w_string("CNF")));
+    WArray *pa = w_as_array(w_check_array_ebits(plan_val, 64, 0, w_string("CNF")));
+    if (ha->size < 6 || pa->size < 48) w_raise(w_string("DIMACS: plan buffer is too small"));
+    int64_t *hdr = (int64_t *)ha->slots + ha->start;
+    int64_t *plan = (int64_t *)pa->slots + pa->start;
+    WArray *la = w_as_array(w_check_array_ebits(lits_val, bits, 0, w_string("CNF")));
+    WArray *oa = w_as_array(w_check_array_ebits(offs_val, bits, 0, w_string("CNF")));
+    WArray *na = w_as_array(w_check_array_ebits(lens_val, bits, 0, w_string("CNF")));
+    int64_t ccap = oa->size < na->size ? oa->size : na->size;
+#if !defined(__wasm__)
+    int nchunks = (int)plan[0];
+    if (nchunks >= 2 && nchunks <= W_DIMACS_MAX_THREADS && (size_t)plan[4] == tlen &&
+        plan[2] + 2 <= ccap && plan[3] <= (int64_t)la->size &&
+        (bits == 64 || (plan[2] <= 2147483645LL && plan[3] <= 2147483647LL))) {
+        WDimacsChunkArg args[W_DIMACS_MAX_THREADS];
+        for (int k = 0; k < nchunks; k++) {
+            memset(&args[k], 0, sizeof(args[k]));
+            args[k].tx = tx;
+            args[k].start = (size_t)plan[8 + 4 * k + 0];
+            args[k].end = (size_t)plan[8 + 4 * k + 1];
+            args[k].base_cl = plan[8 + 4 * k + 2];
+            args[k].base_lit = plan[8 + 4 * k + 3];
+        }
+        if (bits == 32) {
+            w_dimacs_exec_fill(args, nchunks, 32,
+                               (int32_t *)la->slots + la->start,
+                               (int32_t *)oa->slots + oa->start,
+                               (int32_t *)na->slots + na->start);
+        } else {
+            w_dimacs_exec_fill(args, nchunks, 64,
+                               (int64_t *)la->slots + la->start,
+                               (int64_t *)oa->slots + oa->start,
+                               (int64_t *)na->slots + na->start);
+        }
+        hdr[0] = plan[1]; hdr[1] = plan[2]; hdr[2] = plan[2]; hdr[3] = plan[3];
+        hdr[4] = 0; hdr[5] = 0;
+        return W_NIL;
+    }
+#endif
+    if (bits == 32) {
+        return w_dimacs_scan_i32(tx, tlen,
+                                 (int32_t *)la->slots + la->start,
+                                 (int32_t *)oa->slots + oa->start,
+                                 (int32_t *)na->slots + na->start,
+                                 hdr, la->size, ccap);
+    }
+    return w_dimacs_scan(tx, tlen,
+                         (int64_t *)la->slots + la->start,
+                         (int64_t *)oa->slots + oa->start,
+                         (int64_t *)na->slots + na->start,
+                         hdr, la->size, ccap, 0);
 }
 
 WValue __w_file_id(WValue path_val) {

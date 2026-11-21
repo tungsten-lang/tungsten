@@ -925,7 +925,7 @@ WASSAT_XS32_MAX_WORKERS = 10
 # Returning nil is the normal generic-formula path.
 -> wassat_xs32_circuit_plan(nv, formula)
   return nil unless formula.has_key?("nvars") && formula["nvars"] == nv
-  return nil if nv < 128 || nv > 10000
+  return nil if nv < 128 || nv > 10000 || formula["flat_lits_bits"] == 32
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
@@ -1351,12 +1351,12 @@ WASSAT_XOR_GRACE_NEAR_ROWS = 16
     )
     return 0 if hit == 1 || wassat_stop_requested?(stop)
   # Flat mirrors, not boxed clauses: this arm runs in a worker thread.
+  ncl = formula["flat_ncl"]
+  # Grouping hashes every clause; bound the work since this is a side arm.
+  return 0 if ncl > 100000 || ncl < 4 || formula["flat_lits_bits"] == 32
   fla = formula["flat_lits"] ## i64[]
   fcs = formula["flat_offs"] ## i64[]
   fcl = formula["flat_lens"] ## i64[]
-  ncl = formula["flat_ncl"]
-  # Grouping hashes every clause; bound the work since this is a side arm.
-  return 0 if ncl > 100000 || ncl < 4
   pre_st = i64[4]
   if wassat_xor_precheck(fla, fcs, fcl, ncl, pre_st) == 0
     if metrics != nil
@@ -1862,8 +1862,9 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
   # arm (slot threads+2, always reserved so indices never move), allocated
   # once: `res` is addressed by arm index and must not move after an arm has
   # a pointer into it.
+  raw_flat_64 = formula == nil || formula["flat_lits_bits"] != 32
   circuit_plan = initial_circuit_plan
-  if circuit_plan == nil && env("WASSAT_SMALL_CIRCUIT") != "0"
+  if circuit_plan == nil && raw_flat_64 && env("WASSAT_SMALL_CIRCUIT") != "0"
     circuit_plan = wassat_small_circuit_plan(formula)
     if circuit_plan == nil && art["config"].max_clause_size <= 3 && env("WASSAT_DEPENDENCY_CIRCUIT") != "0" && formula["dependency_circuit_done"] != true
       dep_bytes = 192 * (nv + formula["flat_ncl"] + 1)
@@ -1885,7 +1886,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
   keychart_plan = nil
   keychart_workers = threads + pre_workers + sls_worker + (circuit_plan == nil ? 0 : 1)
   keychart_workers += 1 if cover_plan != nil
-  keychart_allowed = env("WASSAT_KEYCHART") != "0" && art["raw"] == true
+  keychart_allowed = env("WASSAT_KEYCHART") != "0" && art["raw"] == true && raw_flat_64
   keychart_allowed = false if env("WASSAT_ARMS") != nil && env("WASSAT_KEYCHART") != "1"
   keychart_allowed = false if wassat_race_round1_conflicts != 0
   keychart_allowed = false if System.cpu_count <= keychart_workers || System.physical_memory_bytes <= 0
@@ -1900,7 +1901,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
   domain_workers += 1 if circuit_plan != nil
   domain_workers += 1 if keychart_plan != nil
   domain_workers += 1 if cover_plan != nil
-  if art["raw"] == true
+  if art["raw"] == true && raw_flat_64
     domain_plan = wassat_domain_plan(formula, domain_workers,
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1),
       sls_arenas, preprocess_arenas)
@@ -1932,7 +1933,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
   perm_plan = nil
   perm_extra = pre_sls_extra
   perm_extra -= wassat_pre_sls_extra_bytes(formula) unless pre_sls_allowed
-  if art["raw"] == true
+  if art["raw"] == true && raw_flat_64
     perm_plan = wassat_perm_plan(formula,
       pre_sls_workers + (pre_sls_allowed ? 1 : 0),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1),
@@ -1946,14 +1947,14 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
   # Complementary arithmetic scopes use an additional bounded exact search.
   # Admit it last so established arms and their arena reservations are intact.
   nae_plan = nil
-  if art["raw"] == true && cycle_plan == nil
+  if art["raw"] == true && raw_flat_64 && cycle_plan == nil
     nae_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     nae_plan = wassat_nae_plan(formula,
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, nae_extra)
   capacity_plan = nil
-  if art["raw"] == true && cycle_plan == nil
+  if art["raw"] == true && raw_flat_64 && cycle_plan == nil
     capacity_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     capacity_extra += nae_plan["scratch"] if nae_plan != nil
     capacity_plan = wassat_capacity_plan(formula,
@@ -1962,7 +1963,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, capacity_extra)
   # Reuse an otherwise empty circuit slot, after all established lanes are
   # admitted. Recognition and search run concurrently with the solving arms.
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     selector_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     selector_extra += nae_plan["scratch"] if nae_plan != nil
     selector_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -1970,7 +1971,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, selector_extra)
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     byte_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     byte_extra += nae_plan["scratch"] if nae_plan != nil
     byte_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -1978,7 +1979,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, byte_extra, scout_lucky_arenas)
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     resource_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     resource_extra += nae_plan["scratch"] if nae_plan != nil
     resource_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -1986,7 +1987,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, resource_extra)
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     design_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     design_extra += nae_plan["scratch"] if nae_plan != nil
     design_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -1994,7 +1995,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, design_extra)
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     counter_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     counter_extra += nae_plan["scratch"] if nae_plan != nil
     counter_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -2002,7 +2003,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1),
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, counter_extra)
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     roster_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     roster_extra += nae_plan["scratch"] if nae_plan != nil
     roster_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -2012,7 +2013,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, roster_extra)
   # Wider AND/XOR recovery uses an empty circuit slot or follows its existing
   # recognizer after a miss. Preserve its priority and resident scratch.
-  if art["raw"] == true && cycle_plan == nil && art["config"].max_clause_size > 3 && art["config"].max_clause_size <= 7 && env("WASSAT_SMALL_CIRCUIT") != "0" && env("WASSAT_WIDE_CIRCUIT") != "0"
+  if art["raw"] == true && raw_flat_64 && cycle_plan == nil && art["config"].max_clause_size > 3 && art["config"].max_clause_size <= 7 && env("WASSAT_SMALL_CIRCUIT") != "0" && env("WASSAT_WIDE_CIRCUIT") != "0"
     wide_allowed = env("WASSAT_ARMS") == nil || env("WASSAT_WIDE_CIRCUIT") == "1"
     wide_allowed = false if wassat_race_round1_conflicts != 0
     wide_workers = pre_sls_workers + (pre_sls_allowed ? 1 : 0) + (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1)
@@ -2038,7 +2039,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
           circuit_plan["wide_fallback"] = wide_plan
   # Common-net construction uses only a still-empty optional slot. All of
   # its clause decoding and search happen after the solving arms are ready.
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     net_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     net_extra += nae_plan["scratch"] if nae_plan != nil
     net_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -2048,7 +2049,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, net_extra)
   # Comparator search occupies only a still-empty optional slot. Decode,
   # packed simulation and model completion run beside the preserved arms.
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     sorting_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     sorting_extra += nae_plan["scratch"] if nae_plan != nil
     sorting_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -2058,7 +2059,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, sorting_extra)
   # Sparse domain search is admitted after existing arms and specialists.
   # Its full recognition and all allocations happen inside the worker.
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     sparse_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     sparse_extra += nae_plan["scratch"] if nae_plan != nil
     sparse_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -2068,7 +2069,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, sparse_extra)
   # Complete rectangle-coloring certificates use only a still-empty slot.
   # The constant-size header gate does no structural work on the coordinator.
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     rectangle_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     rectangle_extra += nae_plan["scratch"] if nae_plan != nil
     rectangle_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -2077,7 +2078,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, rectangle_extra)
   # Affine primary constraints are decoded only in the unused worker slot.
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     affine_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     affine_extra += nae_plan["scratch"] if nae_plan != nil
     affine_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -2086,7 +2087,7 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
       cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1),
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, affine_extra)
   # A checked treewidth lower bound uses only the still-empty worker slot.
-  if circuit_plan == nil && art["raw"] == true && cycle_plan == nil
+  if circuit_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil
     tree_extra = perm_extra + (perm_plan == nil ? 0 : perm_plan["scratch"])
     tree_extra += nae_plan["scratch"] if nae_plan != nil
     tree_extra += capacity_plan["scratch"] if capacity_plan != nil
@@ -2097,25 +2098,25 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
   # A separate bounded worker preserves every established arm. Account for
   # circuit plans admitted after the original memory/worker snapshot above.
   naked_plan = nil
-  if art["raw"] == true && cycle_plan == nil
-    naked_extra = perm_extra
-    naked_extra += perm_plan["scratch"] if perm_plan != nil
-    naked_extra += nae_plan["scratch"] if nae_plan != nil
-    naked_extra += capacity_plan["scratch"] if capacity_plan != nil
-    if circuit_plan != nil && naked_early_circuit == nil
-      naked_extra += circuit_plan["scratch"] == nil ? 192 * (nv + formula["flat_ncl"] + 1) : circuit_plan["scratch"]
-    naked_workers = threads + pre_workers + sls_worker + (circuit_plan == nil ? 0 : 1)
-    naked_workers += (keychart_plan == nil ? 0 : 1) + (cover_plan == nil ? 0 : 1) + (domain_plan == nil ? 0 : 1)
-    naked_workers += (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1) + (pre_sls_allowed ? 1 : 0)
-    naked_cdcl = cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1)
-    naked_cdcl += 1 if circuit_plan != nil && circuit_plan["box_net"] == true
+  naked_workers = threads + pre_workers + sls_worker + (circuit_plan == nil ? 0 : 1)
+  naked_workers += (keychart_plan == nil ? 0 : 1) + (cover_plan == nil ? 0 : 1) + (domain_plan == nil ? 0 : 1)
+  naked_workers += (perm_plan == nil ? 0 : 1) + (nae_plan == nil ? 0 : 1) + (capacity_plan == nil ? 0 : 1) + (pre_sls_allowed ? 1 : 0)
+  naked_cdcl = cdcl_arenas + (repair_allowed ? 1 : 0) + (keychart_plan == nil ? 0 : 1) + (perm_plan == nil ? 0 : 1)
+  naked_cdcl += 1 if circuit_plan != nil && circuit_plan["box_net"] == true
+  naked_extra = perm_extra
+  naked_extra += perm_plan["scratch"] if perm_plan != nil
+  naked_extra += nae_plan["scratch"] if nae_plan != nil
+  naked_extra += capacity_plan["scratch"] if capacity_plan != nil
+  if circuit_plan != nil && naked_early_circuit == nil
+    naked_extra += circuit_plan["scratch"] == nil ? 192 * (nv + formula["flat_ncl"] + 1) : circuit_plan["scratch"]
+  if art["raw"] == true && raw_flat_64 && cycle_plan == nil
     naked_plan = wassat_naked_plan(formula, naked_workers, naked_cdcl,
       sls_arenas + (pre_sls_allowed ? 1 : 0), preprocess_arenas, naked_extra)
   # Additive comparison-cone worker. It is boxed and therefore joins at EVERY
   # round barrier; its checkpoint resumes without replacing any existing arm
   # or disabling adaptive allocation. Reserve its proof/simulation footprint.
   cone_plan = initial_cone_plan
-  if cone_plan == nil && art["raw"] == true && cycle_plan == nil && !wassat_sequential? && wassat_cone_enabled?
+  if cone_plan == nil && art["raw"] == true && raw_flat_64 && cycle_plan == nil && !wassat_sequential? && wassat_cone_enabled?
     cone_allowed = env("WASSAT_ARMS") == nil || env("WASSAT_CIRCUIT_CONES") == "1"
     if cone_allowed && threads + pre_workers > 0 && wassat_cone_candidate(formula)
       cone_workers = naked_workers + (naked_plan == nil ? 0 : 1)
@@ -2216,9 +2217,17 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
           arm_simp[a] = 2 if cfgs[b + 4] == 2 || (cfgs[b + 4] == 0 && forced_simp)
       elsif matrix_threads == 1 && is_raw && forced_simp
         arm_simp[a] = 2
+      if defer_simplify && !wassat_sequential? && is_raw && !forced_simp && art["fncl"] >= 1000000
+        if arm_simp[a] == 1 && n_simp1 >= 1
+          arm_simp[a] = 0
+          cfgs[a * WASSAT_CFG_STRIDE + 4] = 0 if matrix_threads > 1
+        elsif arm_simp[a] == 2 && n_simp2 >= 1
+          arm_simp[a] = 0
+          cfgs[a * WASSAT_CFG_STRIDE + 4] = 0 if matrix_threads > 1
       n_simp1 += 1 if arm_simp[a] == 1
       n_simp2 += 1 if arm_simp[a] == 2
     a += 1
+  sync_simp_leaders = !(defer_simplify && !wassat_sequential?)
   dedup_subst = false
   dedup_cong = false
   if n_fresh == 1
@@ -2227,8 +2236,8 @@ WASSAT_SCOUT_PROP_PER_CLAUSE = 2
     # Single flat intake scan: build one plain prototype first, then clone
     # Kissat-schedule and simplified prototypes from its already-built tables.
     proto_plain = Wassat.from_flat(nv, art, 0)
-    dedup_subst = is_raw && n_simp1 >= 2
-    dedup_cong = is_raw && n_simp2 >= 2
+    dedup_subst = is_raw && sync_simp_leaders && n_simp1 >= 2
+    dedup_cong = is_raw && sync_simp_leaders && n_simp2 >= 2
     proto_subst = dedup_subst ? Wassat.from_flat_clone(nv, art, proto_plain, false) : nil
     proto_cong = dedup_cong ? Wassat.from_flat_clone(nv, art, proto_plain, false) : nil
     last_unsimp_plain = -1
@@ -2560,13 +2569,13 @@ WASSAT_TEL_STRIDE = 8
   pf = pre_formula
   pf = pre.flat if pf == nil && pre != nil
   pf = race["formula"] if pf == nil
-  race["pre"].push({ "pre": pre, "pre_box": pre == nil ? [] : [pre], "heavy": heavy, "label": label, "out": [], "formula": pf, "light_budget": 0, "heavy_budget": 0, "stage_ms": 0, "force_full": false })
+  race["pre"].push({ "pre": pre, "pre_box": pre == nil ? [] : [pre], "heavy": heavy, "label": label, "out": [], "formula": pf, "light_budget": 0, "heavy_budget": 0, "stage_ms": 0, "force_full": false, "shared_state": nil, "shared_box": nil, "shared_role": 0 })
   0
 
--> wassat_race_add_pre_deferred(race, pre_formula, heavy, label, light_budget, heavy_budget, stage_ms = 0, force_full = false)
+-> wassat_race_add_pre_deferred(race, pre_formula, heavy, label, light_budget, heavy_budget, stage_ms = 0, force_full = false, shared_state = nil, shared_box = nil, shared_role = 0)
   raise "race capacity exceeded" if race["threads"] + race["pre"].size >= race["cap"]
   pf = pre_formula == nil ? race["formula"] : pre_formula
-  race["pre"].push({ "pre": nil, "pre_box": [], "heavy": heavy, "label": label, "out": [], "formula": pf, "light_budget": light_budget, "heavy_budget": heavy_budget, "stage_ms": stage_ms, "force_full": force_full })
+  race["pre"].push({ "pre": nil, "pre_box": [], "heavy": heavy, "label": label, "out": [], "formula": pf, "light_budget": light_budget, "heavy_budget": heavy_budget, "stage_ms": stage_ms, "force_full": force_full, "shared_state": shared_state, "shared_box": shared_box, "shared_role": shared_role })
   0
 
 -> wassat_pre_arm_body_spec(spec, formula, nv, res, base, heavy, stop, out, budget,
@@ -2575,18 +2584,44 @@ WASSAT_TEL_STRIDE = 8
                             tick_slice = 0)
   pbox = spec["pre_box"]
   pp = pbox.empty? ? spec["pre"] : pbox[0]
+  shared_role = spec["shared_role"]
+  shared_state = spec["shared_state"]
+  shared_box = spec["shared_box"]
+  skip_light = false
   if pp == nil && round == 0
-    pp = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, formula)
-    pp.set_budget(spec["light_budget"]) if spec["light_budget"] > 0
-    stage_ms = spec["stage_ms"]
-    pp.set_deadline_ms(stage_ms) if stage_ms != nil && stage_ms > 0
-    if heavy && spec["heavy_budget"] > 0
-      pp.set_heavy_budget(spec["heavy_budget"], stage_ms == nil ? 0 : stage_ms)
-    pp.force_full_pipeline if spec["force_full"] == true
-    pbox.push(pp)
+    if shared_role == 2 && shared_state != nil
+      st = ccall("__w_arr_load_acq", shared_state, 0)
+      while st == 0 && !wassat_stop_requested?(stop)
+        z = ccall("__w_sleep_ms", 1)
+        st = ccall("__w_arr_load_acq", shared_state, 0)
+      st = ccall("__w_arr_load_acq", shared_state, 0)
+      if st == 1
+        pp = shared_box[0]
+        shared_box[0] = nil
+        if wassat_stop_requested?(stop)
+          pp.release_arenas if pp != nil
+          return 0
+        stage_ms = spec["stage_ms"]
+        if spec["heavy_budget"] > 0
+          pp.set_heavy_budget(spec["heavy_budget"], stage_ms == nil ? 0 : stage_ms)
+        pbox.push(pp)
+        skip_light = true
+      elsif st < 0 || wassat_stop_requested?(stop)
+        return 0
+    if pp == nil
+      pp = WassatPreprocess.new(formula["nvars"], [], WASSAT_PROOF_NONE, formula)
+      pp.set_budget(spec["light_budget"]) if spec["light_budget"] > 0
+      stage_ms = spec["stage_ms"]
+      pp.set_deadline_ms(stage_ms) if stage_ms != nil && stage_ms > 0
+      if heavy && spec["heavy_budget"] > 0
+        pp.set_heavy_budget(spec["heavy_budget"], stage_ms == nil ? 0 : stage_ms)
+      pp.force_full_pipeline if spec["force_full"] == true
+      pbox.push(pp)
   wassat_pre_arm_body(pp, formula, nv, res, base, heavy, stop, out, budget,
                       tel, tbase, round, budget_state, budget_limit, budget_slot,
-                      pre_sls_allowed, tick_slice)
+                      pre_sls_allowed, tick_slice, skip_light,
+                      shared_role == 1 ? shared_state : nil,
+                      shared_role == 1 ? shared_box : nil)
 
 # A preprocessing arm: ONE thread that renders the formula and then solves
 # what it rendered. This is the whole point of the design — preprocessing is
@@ -2616,7 +2651,8 @@ WASSAT_TEL_STRIDE = 8
 -> wassat_pre_arm_body(pre, formula, nv, res, base, heavy, stop, out, budget,
                        tel, tbase, round, budget_state = nil,
                        budget_limit = 0, budget_slot = 0, pre_sls_allowed = false,
-                       tick_slice = 0)
+                       tick_slice = 0, skip_light = false,
+                       shared_state = nil, shared_box = nil)
   t0 = ccall("__w_clock_ms")
   pnv = formula["nvars"]
   if round > 0
@@ -2632,24 +2668,36 @@ WASSAT_TEL_STRIDE = 8
     tel[tbase + 7] = tel[tbase + 7] + (ccall("__w_clock_ms") - t0)
     return 0
   pre.set_stop_cell(stop)
-  # A sequential turn carries a conflict slice that bounds nothing; it is a
-  # continuous race in every sense this rewrite cares about.
-  rewrite_counter = !heavy && (budget == 0 || tick_slice > 0) && budget_limit == 0 && env("WASSAT_COUNTER_REWRITE") != "0"
-  rewrite_counter = false if env("WASSAT_ARMS") != nil && env("WASSAT_COUNTER_REWRITE") != "1"
-  rendered = pre.run_light_flat(formula, rewrite_counter)
-  if rendered == nil
-    pre.release_arenas
-    return 0
-  if heavy && rendered["status"] == 0
+  rendered = nil
+  if skip_light
     rendered = pre.run_heavy
     if rendered == nil
       pre.release_arenas
       return 0
+  else
+    # A sequential turn carries a conflict slice that bounds nothing; it is a
+    # continuous race in every sense this rewrite cares about.
+    rewrite_counter = !heavy && (budget == 0 || tick_slice > 0) && budget_limit == 0 && env("WASSAT_COUNTER_REWRITE") != "0"
+    rewrite_counter = false if env("WASSAT_ARMS") != nil && env("WASSAT_COUNTER_REWRITE") != "1"
+    rendered = pre.run_light_flat(formula, rewrite_counter)
+    if rendered == nil
+      z = ccall("__w_arr_store_rel", shared_state, 0, -1) if shared_state != nil
+      pre.release_arenas
+      return 0
+    if shared_state != nil && pre.counter_base > 0
+      z = ccall("__w_arr_store_rel", shared_state, 0, 2)
+      shared_state = nil
+    if heavy && rendered["status"] == 0
+      rendered = pre.run_heavy
+      if rendered == nil
+        pre.release_arenas
+        return 0
   pnv = rendered["nvars"]
   rendered["stats"]["solver_nvars"] = pnv
   # A projected walker must consume the same variable space as its rendering.
   pre_sls_allowed = false if pnv != formula["nvars"]
   if wassat_stop_requested?(stop)
+    z = ccall("__w_arr_store_rel", shared_state, 0, -1) if shared_state != nil
     pre.release_arenas
     return 0
   out.push(rendered["stack"])
@@ -2657,6 +2705,7 @@ WASSAT_TEL_STRIDE = 8
   # A refutation during preprocessing is a real answer: report it the way an
   # arm reports one, so the coordinator needs no second channel for it.
   if rendered["status"] != 0
+    z = ccall("__w_arr_store_rel", shared_state, 0, -1) if shared_state != nil
     pre.release_arenas
     res[base] = 0 - 1
     won = wassat_stop_publish(stop, 0 - 1)
@@ -2680,14 +2729,22 @@ WASSAT_TEL_STRIDE = 8
   projected_handle = nil
   projected_result = nil
   projected_meta = nil
-  if pre_sls_allowed && !heavy && budget == 0 && !wassat_stop_requested?(stop)
-    if wassat_pre_sls_projected?(pnv, rendered["stats"]["vars_substituted"], rendered["status"])
-      projected_result = i64[pnv + 1]
-      projected_meta = i64[12]
-      out.push(projected_meta)
-      projected_meta[11] = wassat_pre_sls_extra_bytes(formula) + wassat_sls_arena_bytes(formula)
-      projected_handle = Thread.new -> wassat_pre_sls_body(formula, rendered, stop, projected_result, projected_meta)
-  pre.release_arenas if projected_handle == nil
+  want_projected = pre_sls_allowed && !heavy && budget == 0 && !wassat_stop_requested?(stop) && wassat_pre_sls_projected?(pnv, rendered["stats"]["vars_substituted"], rendered["status"])
+  if shared_state != nil
+    if want_projected
+      z = ccall("__w_arr_store_rel", shared_state, 0, 2)
+    else
+      shared_box[0] = pre
+      z = ccall("__w_arr_store_rel", shared_state, 0, 1)
+      pre = nil
+      rendered = nil
+  if want_projected
+    projected_result = i64[pnv + 1]
+    projected_meta = i64[12]
+    out.push(projected_meta)
+    projected_meta[11] = wassat_pre_sls_extra_bytes(formula) + wassat_sls_arena_bytes(formula)
+    projected_handle = Thread.new -> wassat_pre_sls_body(formula, rendered, stop, projected_result, projected_meta)
+  pre.release_arenas if projected_handle == nil && pre != nil
   s.set_tick_stop(tick_slice) if tick_slice > 0
   s.solve_shared_budget(res, base, budget)
   wassat_pre_arm_copy_telemetry(res, base, pnv, nv)

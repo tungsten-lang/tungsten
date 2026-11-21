@@ -103,7 +103,7 @@ WASSAT_SLS_WEIGHT_CAP_MULT = 200
       sfcl = parsed ? flat["flat_lens"] : flat["fcl"]
       sncl = parsed ? flat["flat_ncl"] : flat["fncl"]
       wassat_sls_check_clause_count(sncl)
-      fla_32 = flat.has_key?("fla_bits") && flat["fla_bits"] == 32
+      fla_32 = (flat.has_key?("fla_bits") && flat["fla_bits"] == 32) || (flat.has_key?("flat_lits_bits") && flat["flat_lits_bits"] == 32)
       stamp = i32[2 * nv + 4]
       scell = stop == nil ? @private_stop : stop
       pm = i64[6]

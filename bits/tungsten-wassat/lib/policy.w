@@ -51,10 +51,43 @@ use cnf
   out[5] = empty
   out
 
+-> wassat_shape_counts_new_32(lens, ncl) (i32[] i64) i64[]
+  total = 0 ## i64
+  longest = 0 ## i64
+  units = 0 ## i64
+  binary = 0 ## i64
+  ternary = 0 ## i64
+  empty = 0 ## i64
+  i = 0 ## i64
+  while i < ncl
+    n = lens[i] ## i64
+    total += n
+    longest = n if n > longest
+    units += n == 1 ? 1 : 0
+    binary += n == 2 ? 1 : 0
+    ternary += n == 3 ? 1 : 0
+    empty += n == 0 ? 1 : 0
+    i += 1
+  out = i64[8]
+  out[0] = total
+  out[1] = longest
+  out[2] = units
+  out[3] = binary
+  out[4] = ternary
+  out[5] = empty
+  out
+
 # Called only when the shape pass counted an empty clause. Return its
 # one-based original clause id for a one-step hinted refutation.
 -> wassat_first_empty_clause(lens, ncl) (i64[] i64) i64
   i = 0
+  while i < ncl
+    return i + 1 if lens[i] == 0
+    i += 1
+  0
+
+-> wassat_first_empty_clause_32(lens, ncl) (i32[] i64) i64
+  i = 0 ## i64
   while i < ncl
     return i + 1 if lens[i] == 0
     i += 1
@@ -669,9 +702,9 @@ WASSAT_SLS_REPAIR_MAX_CONFLICTS = 256 * ((1 << WASSAT_SLS_REPAIR_ROUNDS) - 1)
   # Shape counters straight from the parser's flat length array, for the
   # raw path that never materializes boxed clauses (see
   # wassat_raw_artifact). Same numbers the boxed constructor computes.
-  -> .from_lens(nvars, lens, ncl)
+  -> .from_lens(nvars, lens, ncl, lens_bits = 64)
     c = WassatConfig.new(nvars, [])
-    counts = wassat_shape_counts_new(lens, ncl)
+    counts = lens_bits == 32 ? wassat_shape_counts_new_32(lens, ncl) : wassat_shape_counts_new(lens, ncl)
     c.adopt_counts(ncl, counts)
     c
 

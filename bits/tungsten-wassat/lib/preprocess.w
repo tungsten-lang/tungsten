@@ -113,7 +113,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   # only `intake` (the certificate path) genuinely needs boxed clauses, and it
   # materializes them on demand.
   # The flat formula this preprocessor's buffers were sized for (or nil).
-  ro :flat
+  ro :flat, :counter_base
 
   -> new(@nvars, @input_clauses, @proof_mode, flat_in)
     # Only a formula that actually carries the parser's flat mirrors counts as
@@ -130,7 +130,8 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     elsif flat["config"] != nil && flat["config"].nvars == @nvars && flat["config"].nclauses == flat["flat_ncl"]
       @config = flat["config"]
     else
-      @config = WassatConfig.from_lens(@nvars, flat["flat_lens"], flat["flat_ncl"])
+      lbits = flat.has_key?("flat_lits_bits") && flat["flat_lits_bits"] == 32 ? 32 : 64
+      @config = WassatConfig.from_lens(@nvars, flat["flat_lens"], flat["flat_ncl"], lbits)
     @passign = i8[nv + 1]        # root assignment: 0 / 1 / -1
     @preason = i32[nv + 1]       # root reason clause index, -1 = none
     @tpos = i32[nv + 1]          # trail position, for hint ordering
@@ -343,13 +344,20 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   -> intake_flat(parse)
     @fqhead = 0
     ncl = parse["flat_ncl"]
-    lits = parse["flat_lits"] ## i64[]
-    offs = parse["flat_offs"] ## i64[]
-    lens = parse["flat_lens"] ## i64[]
     pm = i64[8]
     pm[0] = ncl
-    wassat_pre_intake(lits, offs, lens, @fla, @fcs, @fcl, @falive, @ftaut,
-                      @fsig, @fpgid, @oh, @on, @ov, @ocount, pm)
+    if parse.has_key?("flat_lits_bits") && parse["flat_lits_bits"] == 32
+      lits32 = parse["flat_lits"] ## i32[]
+      offs32 = parse["flat_offs"] ## i32[]
+      lens32 = parse["flat_lens"] ## i32[]
+      wassat_pre_intake_32(lits32, offs32, lens32, @fla, @fcs, @fcl, @falive, @ftaut,
+                           @fsig, @fpgid, @oh, @on, @ov, @ocount, pm)
+    else
+      lits = parse["flat_lits"] ## i64[]
+      offs = parse["flat_offs"] ## i64[]
+      lens = parse["flat_lens"] ## i64[]
+      wassat_pre_intake(lits, offs, lens, @fla, @fcs, @fcl, @falive, @ftaut,
+                        @fsig, @fpgid, @oh, @on, @ov, @ocount, pm)
     wassat_pre_fill_i8(@sub_dirty, ncl, 1)
     @ncl = ncl
     @fasize = pm[1]
@@ -392,7 +400,7 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
     # Reuse this arm's original capacity, but shrink its logical variable
     # range: branching on discarded auxiliary coordinates changes the search.
     # The entry is pushed first so its model lift runs after all later passes.
-    if rewrite_counter && @proof_mode == WASSAT_PROOF_NONE && @ncl == 0 && !@has_frozen
+    if rewrite_counter && @proof_mode == WASSAT_PROOF_NONE && @ncl == 0 && !@has_frozen && (!parse.has_key?("flat_lits_bits") || parse["flat_lits_bits"] != 32)
       counter = wassat_counter_rewrite(parse, @stop_cell, @deadline_ms)
       if counter != nil
         parse = counter["formula"]
@@ -3877,6 +3885,47 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
   pm[2] = osize
   0
 
+-> wassat_pre_intake_32(slits, soffs, slens, fla, fcs, fcl, falive, ftaut, fsig, fpgid, och, ocn, ocv, ocount, pm) (i32[] i32[] i32[] i32[] i32[] i32[] i8[] i8[] i64[] i64[] i32[] i32[] i32[] i32[] i64[])
+  ncl = pm[0]
+  has_pgid = fpgid.size > 0
+  asize = 0
+  osize = 0
+  k = 0
+  while k < ncl
+    o = soffs[k] ## i64
+    n = slens[k] ## i64
+    fcs[k] = asize
+    fcl[k] = n
+    falive[k] = 1
+    fpgid[k] = k + 1 if has_pgid
+    sig = 0 ## i64
+    t = 0
+    j = 0
+    while j < n
+      l = slits[o + j] ## i64
+      fla[asize + j] = l
+      av = l < 0 ? 0 - l : l
+      sig = sig | ((1 ## i64) << (av & 63))
+      m = 0
+      while m < j
+        if fla[asize + m] == 0 - l
+          t = 1
+        m = m + 1
+      li = l > 0 ? av << 1 : (av << 1) + 1
+      ocn[osize] = och[li]
+      ocv[osize] = k
+      och[li] = osize
+      ocount[li] = ocount[li] + 1
+      osize = osize + 1
+      j = j + 1
+    ftaut[k] = t
+    fsig[k] = sig
+    asize = asize + n
+    k = k + 1
+  pm[1] = asize
+  pm[2] = osize
+  0
+
 # Array concatenation helper: `+` on arrays is not defined in Tungsten.
 -> wassat_concat_arrays(a, b)
   out = []
@@ -3900,22 +3949,24 @@ WASSAT_PRE_AND2_MAX_CLAUSES = 2000000
 # watch scheme carries them at no cost.
 -> wassat_raw_artifact(parse, nvars, cfg = nil)
   ncl = parse["flat_ncl"]
+  lbits = parse.has_key?("flat_lits_bits") && parse["flat_lits_bits"] == 32 ? 32 : 64
   c = cfg == nil ? parse["config"] : cfg
-  c = WassatConfig.from_lens(nvars, parse["flat_lens"], ncl) if c == nil || c.nvars != nvars || c.nclauses != ncl
+  c = WassatConfig.from_lens(nvars, parse["flat_lens"], ncl, lbits) if c == nil || c.nvars != nvars || c.nclauses != ncl
   # No side tables at all: every clause is alive and proof ids are
   # sequential, so the loader synthesizes both from the index ("fsynth").
   # Materializing them cost three ncl-sized allocations plus their fills —
   # 7.8MB and ~5ms on bmc-ibm-10 — for data that is either constant or,
   # in the case of proof ids, never read on this path.
   empty = i64[0]
+  empty_side = lbits == 32 ? i8[0] : empty
   { "nvars": nvars, "clauses": [], "gids": [], "raw": true,
     "config": c,
     "next_gid": ncl + 1, "status": 0,
     "stack": [], "gone": nvars >= 50000000 ? i8[1] : i8[nvars + 2],
     "gone_bits": 8,
     "fla": parse["flat_lits"], "fcs": parse["flat_offs"],
-    "fcl": parse["flat_lens"], "falive": empty,
-    "ftaut": empty, "fpgid": empty, "fncl": ncl, "fsynth": true,
+    "fcl": parse["flat_lens"], "fla_bits": lbits, "falive": empty_side,
+    "ftaut": empty_side, "fpgid": empty, "fncl": ncl, "fsynth": true,
     "formula_ref": parse,
     "wrat": [], "drat": [],
     "stats": { "probes": 0, "probes_failed": 0,

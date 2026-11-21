@@ -308,10 +308,51 @@
   raise "implausible variable count [hdr[0]] in header" if hdr[0] > 200000000
   0
 
+-> wassat_parse_cnf_mapped_planned(mapping)
+  started = wassat_prof_clock
+  hdr = i64[8]
+  plan = i64[64]
+  parallel_ok = ccall("__w_dimacs_plan", mapping, hdr, plan)
+  wassat_parse_cnf_check_header(hdr)
+  z = wassat_prof("parse.count bytes=[mapping.size] literals=[hdr[3]] clauses=[hdr[2]] parallel=[parallel_ok]", started) if started != 0
+  nvars = hdr[0]
+  ncl = hdr[2]
+  nlits = hdr[3]
+  cap_l = nlits + 1
+  cap_c = ncl + 2
+  use_32 = (ncl >= 8000000 || nlits >= 32000000) && (nvars > 200000 || ncl >= 20000000) && nlits <= 2147483600 && ncl <= 2147483600 && env("WASSAT_FLAT_64") != "1"
+  fill_started = wassat_prof_clock
+  if use_32
+    lits32 = i32[cap_l]
+    offs32 = i32[cap_c]
+    lens32 = i32[cap_c]
+    z = ccall("__w_dimacs_fill_plan", mapping, lits32, offs32, lens32, hdr, plan, 32)
+    z = ccall("w_value_free_w", plan)
+    if env("WASSAT_PROFILE") == "1"
+      z = wassat_prof("parse.native", fill_started)
+      z = wassat_prof_note("parse.native literals=[hdr[3]] clauses=[hdr[2]] literal_capacity=[cap_l] clause_capacity=[cap_c] bits=32 parallel=[parallel_ok] error=[hdr[4]]")
+    wassat_parse_cnf_check_header(hdr)
+    return { "nvars": nvars, "clauses": [], "boxed": false,
+             "flat_lits": lits32, "flat_offs": offs32, "flat_lens": lens32,
+             "flat_ncl": ncl, "flat_nlits": nlits, "flat_lits_bits": 32 }
+  lits64 = i64[cap_l]
+  offs64 = i64[cap_c]
+  lens64 = i64[cap_c]
+  z = ccall("__w_dimacs_fill_plan", mapping, lits64, offs64, lens64, hdr, plan, 64)
+  z = ccall("w_value_free_w", plan)
+  if env("WASSAT_PROFILE") == "1"
+    z = wassat_prof("parse.native", fill_started)
+    z = wassat_prof_note("parse.native literals=[hdr[3]] clauses=[hdr[2]] literal_capacity=[cap_l] clause_capacity=[cap_c] bits=64 parallel=[parallel_ok] error=[hdr[4]]")
+  wassat_parse_cnf_check_header(hdr)
+  { "nvars": nvars, "clauses": [], "boxed": false,
+    "flat_lits": lits64, "flat_offs": offs64, "flat_lens": lens64,
+    "flat_ncl": ncl, "flat_nlits": nlits }
+
 # Large files cannot be represented by String. The caller owns the mapping
 # through both strict scans. The count pass bounds allocation by actual syntax
 # rather than the file's byte length.
 -> wassat_parse_cnf_mapped(mapping)
+  return wassat_parse_cnf_mapped_planned(mapping) if mapping.size >= 16777216 && env("TUNGSTEN_WASSAT_PARSE_STUB") != "1"
   started = wassat_prof_clock
   hdr = i64[8]
   z = ccall("__w_parse_dimacs", mapping, nil, nil, nil, hdr)
@@ -322,6 +363,7 @@
   wassat_parse_cnf_native_buffers(mapping, cap_l, cap_c, cap_l)
 
 -> wassat_parse_cnf_mapped_fast(mapping, prefix)
+  return wassat_parse_cnf_mapped_planned(mapping) if mapping.size >= 16777216 && env("TUNGSTEN_WASSAT_PARSE_STUB") != "1"
   return wassat_parse_cnf_mapped(mapping) if mapping.size > 2147483647 || prefix == nil
   caps = i64[3]
   wassat_estimate_cnf_caps(mapping.size, prefix, caps)
@@ -699,6 +741,7 @@
   1
 
 -> wassat_apply_pair_gadget_quotient(formula)
+  return 0 if formula.has_key?("flat_lits_bits") && formula["flat_lits_bits"] == 32
   nv = formula["nvars"]
   ncl = formula["flat_ncl"]
   return 0 if nv < 8 || (nv & 1) != 0 || ncl < 8 || ncl > 600000

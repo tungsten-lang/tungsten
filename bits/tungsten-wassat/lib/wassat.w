@@ -495,18 +495,20 @@ use cover_split
   cnf_text = ""
   cnf_prefix = nil
   tprof = wassat_prof("cli.parse", tprof)
+  flat32_raw = formula.has_key?("flat_lits_bits") && formula["flat_lits_bits"] == 32
+  flat_lens_bits = flat32_raw ? 32 : 64
   parity_source = nil
-  if proof_mode == WASSAT_PROOF_NONE
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE
     parity_source = wassat_matching_parity_source(formula)
   pair_quotient = 0
-  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PAIR_GADGET") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PAIR_GADGET") != "0"
     pair_quotient = wassat_apply_pair_gadget_quotient(formula)
   # Cache the one full clause-shape pass immediately. Exact structural lanes
   # use it for constant-time admission gates, and ordinary routing reuses the
   # same object below instead of rescanning every unrelated formula.
   config_started = wassat_prof_clock()
   config = WassatConfig.from_lens(
-    formula["nvars"], formula["flat_lens"], formula["flat_ncl"]
+    formula["nvars"], formula["flat_lens"], formula["flat_ncl"], flat_lens_bits
   )
   formula["config"] = config
   if config_started != 0
@@ -520,7 +522,7 @@ use cover_split
   rescue e
     wassat_discard_output(wrat_out, wrat_final)
     raise e
-  if pair_quotient == 0 && wrat_final == nil && env("WASSAT_RECONFIGURATION") != "0"
+  if !flat32_raw && pair_quotient == 0 && wrat_final == nil && env("WASSAT_RECONFIGURATION") != "0"
     certificate = wassat_jump_cut(formula, drat_final != nil)
     if certificate != nil
       if drat_final != nil && drat_final != "-"
@@ -531,7 +533,7 @@ use cover_split
       wassat_status(quiet, "c conflicts: 0, decisions: 0")
       print(certificate) if drat_final == "-"
       exit(20)
-  if pair_quotient == 0 && options["conflicts"] == 0 && wrat_final == nil && drat_final != "-" && env("WASSAT_GATE_MITER") != "0"
+  if !flat32_raw && pair_quotient == 0 && options["conflicts"] == 0 && wrat_final == nil && drat_final != "-" && env("WASSAT_GATE_MITER") != "0"
     certificate = wassat_om_refute(formula, drat_out != nil)
     if certificate != nil
       if drat_out != nil
@@ -561,7 +563,7 @@ use cover_split
   # Proof modes cite the original empty clause and keep normal atomic output
   # publication and stdout/stderr separation.
   if config.empty_clause_count > 0
-    empty_id = wassat_first_empty_clause(formula["flat_lens"], formula["flat_ncl"])
+    empty_id = flat32_raw ? wassat_first_empty_clause_32(formula["flat_lens"], formula["flat_ncl"]) : wassat_first_empty_clause(formula["flat_lens"], formula["flat_ncl"])
     raise "internal error: empty-clause count has no witness" if empty_id == 0
     wtext = ""
     unless wrat_final == nil
@@ -582,7 +584,7 @@ use cover_split
     print("0\n") if drat_final == "-"
     exit(20)
 
-  if pair_quotient == 0 && config.max_clause_size >= 17 && (options["conflicts"] == 0 || budget_used < options["conflicts"])
+  if !flat32_raw && pair_quotient == 0 && config.max_clause_size >= 17 && (options["conflicts"] == 0 || budget_used < options["conflicts"])
     summle_cap = wassat_stage_conflict_cap(options["conflicts"], budget_used, WASSAT_SUMMLE_CONFLICT_CAP)
     summle = wassat_summle_solve(formula, summle_cap)
     if summle != nil
@@ -599,7 +601,7 @@ use cover_split
 
   # Paired bit circuits can prove matching inputs one bit at a time.
   # The sweep emits plain RUP. Hinted proof requests use the normal solver.
-  if wrat_final == nil && config.max_clause_size == 3 && wassat_paired_prefix?(formula)
+  if !flat32_raw && wrat_final == nil && config.max_clause_size == 3 && wassat_paired_prefix?(formula)
     certificate = wassat_paired_refutation(formula, drat_final != nil, clock_ms() + WASSAT_PAIRED_CIRCUIT_MS)
     tprof = wassat_prof("cli.paired_circuit", tprof)
     if certificate != nil
@@ -616,6 +618,7 @@ use cover_split
   # Rotation invariance makes the flip count a multiple of twice the bit
   # width. This arithmetic certificate is fast-only until it emits DRAT.
   if (
+    !flat32_raw &&
     proof_mode == WASSAT_PROOF_NONE &&
     wassat_gray_track_bits(formula["nvars"], config.max_clause_size) > 0 &&
     env("WASSAT_GRAY_TRACK") != "0"
@@ -629,7 +632,7 @@ use cover_split
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(20)
 
-  if proof_mode == WASSAT_PROOF_NONE && config.use_signed_hall && formula["nvars"] <= WASSAT_HALL_MAX_VARS && formula["flat_ncl"] <= WASSAT_HALL_MAX_CLAUSES
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && config.use_signed_hall && formula["nvars"] <= WASSAT_HALL_MAX_VARS && formula["flat_ncl"] <= WASSAT_HALL_MAX_CLAUSES
     hall = wassat_signed_hall(formula, false, clock_ms() + WASSAT_HALL_MS)
     tprof = wassat_prof("cli.signed_hall", tprof)
     if hall != nil
@@ -641,6 +644,7 @@ use cover_split
   # Exact-one row incidence is an edge graph. A checked bipartite component
   # with unequal sides cannot be covered once by its selected edge variables.
   if (
+    !flat32_raw &&
     proof_mode == WASSAT_PROOF_NONE && config.max_clause_size <= 32 &&
     formula["nvars"] <= 4096 && formula["flat_ncl"] <= 50000 &&
     env("WASSAT_MATCHING_BALANCE") != "0"
@@ -658,6 +662,7 @@ use cover_split
   # Recover shared nonlinear Boolean pairs from exact small truth tables,
   # solve the resulting linear system, and publish only a checked CNF model.
   if (
+    !flat32_raw &&
     config.max_clause_size >= 4 && config.max_clause_size <= 6 &&
     formula["nvars"] <= 1024 && formula["flat_ncl"] <= 32768 &&
     env("WASSAT_PAIR_AFFINE") != "0"
@@ -678,7 +683,7 @@ use cover_split
 
   # Bounded input-derived partition search. All arithmetic is a model-finding
   # heuristic; full original-CNF replay is required before returning SAT.
-  if wassat_partition_primary(formula) != 0 && env("WASSAT_PARTITION_CIRCUIT") != "0"
+  if !flat32_raw && wassat_partition_primary(formula) != 0 && env("WASSAT_PARTITION_CIRCUIT") != "0"
     partition = wassat_partition_model(formula, i64[2], clock_ms() + 50)
     tprof = wassat_prof("cli.partition_circuit", tprof)
     if partition != nil
@@ -698,7 +703,7 @@ use cover_split
   # inverse from the group law, replay every AND/parity auxiliary, and publish
   # only after checking all original clauses. Its exact header gate is nearly
   # free on every other task, so keep it ahead of broader structural scans.
-  if env("WASSAT_HANTZSCHE_WENDT") != "0"
+  if !flat32_raw && env("WASSAT_HANTZSCHE_WENDT") != "0"
     hw = wassat_hantzsche_wendt_solve(formula)
     tprof = wassat_prof("cli.hantzsche_wendt", tprof)
     if hw["status"] == 1
@@ -715,6 +720,7 @@ use cover_split
   # Recover either a position/square matrix or a signed successor matrix.
   # Construct a tour on its graph and complete the original Boolean model.
   if (
+    !flat32_raw &&
     env("WASSAT_KNIGHT_TOUR") != "0" &&
     (wassat_knight_side(config.max_clause_size) != 0 ||
       (wassat_knight_side(config.max_clause_size - 1) != 0 &&
@@ -745,7 +751,7 @@ use cover_split
   # repeated Tseitin transition circuit. Recover its Manhattan-optimal path,
   # condition an ordinary Wassat query on the 64 action bits, and publish only
   # the complete model after replaying every original clause.
-  if env("WASSAT_SLIDING_PUZZLE") != "0" && (options["conflicts"] == 0 || budget_used < options["conflicts"])
+  if !flat32_raw && env("WASSAT_SLIDING_PUZZLE") != "0" && (options["conflicts"] == 0 || budget_used < options["conflicts"])
     puzzle_cap = wassat_stage_conflict_cap(
       options["conflicts"], budget_used, WASSAT_PUZZLE_COMPLETION_CONFLICTS
     )
@@ -766,7 +772,7 @@ use cover_split
   # transition table over six types, one call bit per node, and short sequence
   # labels. Search the induced Hamiltonian cycle, condition ordinary Wassat on
   # its call/type choices, and publish only a replay-verified complete model.
-  if env("WASSAT_STEDMAN") != "0" && (options["conflicts"] == 0 || budget_used < options["conflicts"])
+  if !flat32_raw && env("WASSAT_STEDMAN") != "0" && (options["conflicts"] == 0 || budget_used < options["conflicts"])
     stedman_cap = wassat_stage_conflict_cap(
       options["conflicts"], budget_used, WASSAT_STEDMAN_COMPLETION_CONFLICTS
     )
@@ -790,7 +796,7 @@ use cover_split
   # square/subtract circuit.  Run this verified model-only route before the
   # bounded local-core search: SAT models need no proof artifact, and a proof
   # invocation should not pay for an unrelated UNSAT search first.
-  if env("WASSAT_FERMAT") != "0"
+  if !flat32_raw && env("WASSAT_FERMAT") != "0"
     fermat_model = wassat_fermat_model(formula)
     unless fermat_model.empty?
       unless wassat_model_satisfies?(formula, fermat_model)
@@ -806,7 +812,7 @@ use cover_split
   # domain, complete the circuit under those operands, and publish only after
   # replaying the full original CNF. Keep this before local-core for the same
   # proof-mode reason as the Fermat model route above.
-  if env("WASSAT_SUM3") != "0" && (options["conflicts"] == 0 || budget_used < options["conflicts"])
+  if !flat32_raw && env("WASSAT_SUM3") != "0" && (options["conflicts"] == 0 || budget_used < options["conflicts"])
     sum3_cap = wassat_stage_conflict_cap(
       options["conflicts"], budget_used, WASSAT_SUM3_CONFLICT_CAP
     )
@@ -828,7 +834,7 @@ use cover_split
   # registry (specialists.w). Every lane here publishes a SAT model only
   # after replaying the complete original CNF, and names itself in
   # result["lane"] so the win is attributed correctly below.
-  if env("WASSAT_WINDMILL_DUMP") != nil
+  if !flat32_raw && env("WASSAT_WINDMILL_DUMP") != nil
     wassat_discard_output(wrat_out, wrat_final)
     wassat_discard_output(drat_out, drat_final)
     wm_lay = wassat_windmill_recognize(formula)
@@ -837,7 +843,7 @@ use cover_split
     else
       print(wassat_windmill_layout_text(wm_lay))
     exit(0)
-  if env("WASSAT_MDP") != "0"
+  if !flat32_raw && env("WASSAT_MDP") != "0"
     if options["conflicts"] == 0 || budget_used < options["conflicts"]
       mdp_cap = wassat_stage_conflict_cap(
         options["conflicts"], budget_used, WASSAT_MDP_CONFLICT_CAP
@@ -908,7 +914,7 @@ use cover_split
   # Exact-one triples plus complete forbidden-tuple blocks are a ternary
   # affine system. Strict recognition makes Gaussian elimination exact; the
   # SAT branch is still checked against the original Boolean formula.
-  if env("WASSAT_TERNARY_AFFINE") != "0"
+  if !flat32_raw && env("WASSAT_TERNARY_AFFINE") != "0"
     affine = wassat_ternary_affine_solve(formula)
     if affine["status"] == 1
       unless wassat_model_satisfies?(formula, affine["model"])
@@ -930,7 +936,7 @@ use cover_split
   # complete in-block at-most-one sets force one true variable per block,
   # and the bounded native DFS decides the finite-domain problem directly.
   # SAT models are verified below; trusted UNSAT is fast-only.
-  if env("WASSAT_BLOCK_CSP") != "0"
+  if !flat32_raw && env("WASSAT_BLOCK_CSP") != "0"
     bcsp = wassat_block_csp_solve(formula)
     tprof = wassat_prof("cli.block_csp", tprof)
     pattern_lane = nil
@@ -974,7 +980,7 @@ use cover_split
       exit(20)
   # A recursively derived clique bound can refute a completely verified
   # two-color graph before spending time in bounded coloring search.
-  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_RAMSEY_BOUND") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && env("WASSAT_RAMSEY_BOUND") != "0"
     bound_ms = WASSAT_RAMSEY_BOUND_MS
     # The complete clique check reads every literal. Allow time proportional
     # to that work on the supported graph sizes.
@@ -1006,7 +1012,7 @@ use cover_split
   # Ramsey): scopes are verified against the family's mathematical shape
   # and decided by exhaustive bounded search over the extracted scopes.
   # No extremal constant is consulted. SAT is verified; UNSAT is fast-only.
-  if env("WASSAT_ARITHMETIC_COLORING") != "0"
+  if !flat32_raw && env("WASSAT_ARITHMETIC_COLORING") != "0"
     # This lane precedes the solving arms. Include recognition and search
     # in its wall budget; exhaustion returns unknown and falls through.
     arith = wassat_arith_coloring_solve(formula, WASSAT_ARITH_NODE_CAP, clock_ms() + WASSAT_ARITH_DEADLINE_MS)
@@ -1044,29 +1050,46 @@ use cover_split
       wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: 0")
       exit(20)
   if formula["flat_ncl"] >= 1500000 && env("WASSAT_LUCKY") != "0"
-    # The shared output guard below verifies this candidate exactly once.
-    flat_lucky = wassat_flat_lucky_candidate(formula)
-    tprof = wassat_prof("cli.flat_lucky", tprof)
-    lucky_ok = false
-    if flat_lucky.size > 0
-      lucky_ok = wassat_model_satisfies?(formula, flat_lucky)
-      tprof = wassat_prof("cli.flat_lucky_verify", tprof)
-      # A rejected candidate falls through just as the verified helper did.
-      z = ccall("w_value_free_w", flat_lucky) unless lucky_ok
-    if lucky_ok
-      wassat_discard_output(wrat_out, wrat_final)
-      wassat_discard_output(drat_out, drat_final)
-      wassat_print_sat_model(flat_lucky, quiet)
-      wassat_status(quiet, "c mode: [wassat_mode_of(options)] (lucky phases)")
-      wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: [formula["nvars"]]")
-      exit(10)
+    if flat32_raw
+      lucky_lasg = wassat_flat_lucky32_run_lasg(formula, false)
+      tprof = wassat_prof("cli.flat_lucky", tprof)
+      lucky32_ok = false
+      if lucky_lasg.size > 0
+        lucky32_ok = wassat_verify_flat32_lasg(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], lucky_lasg, formula["flat_ncl"]) == 1
+        tprof = wassat_prof("cli.flat_lucky_verify", tprof)
+        z = ccall("w_value_free_w", lucky_lasg) unless lucky32_ok
+      if lucky32_ok
+        wassat_discard_output(wrat_out, wrat_final)
+        wassat_discard_output(drat_out, drat_final)
+        wassat_print_sat_model_sign(lucky_lasg, formula["nvars"], 2, quiet)
+        z = ccall("w_value_free_w", lucky_lasg)
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (lucky phases)")
+        wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: [formula["nvars"]]")
+        exit(10)
+    else
+      # The shared output guard below verifies this candidate exactly once.
+      flat_lucky = wassat_flat_lucky_candidate(formula)
+      tprof = wassat_prof("cli.flat_lucky", tprof)
+      lucky_ok = false
+      if flat_lucky.size > 0
+        lucky_ok = wassat_model_satisfies?(formula, flat_lucky)
+        tprof = wassat_prof("cli.flat_lucky_verify", tprof)
+        # A rejected candidate falls through just as the verified helper did.
+        z = ccall("w_value_free_w", flat_lucky) unless lucky_ok
+      if lucky_ok
+        wassat_discard_output(wrat_out, wrat_final)
+        wassat_discard_output(drat_out, drat_final)
+        wassat_print_sat_model(flat_lucky, quiet)
+        wassat_status(quiet, "c mode: [wassat_mode_of(options)] (lucky phases)")
+        wassat_status(quiet, "c conflicts: [budget_used], decisions: 0, props: [formula["nvars"]]")
+        exit(10)
   # Large generated instances can contain a compact contradiction among a
   # bounded star of ORIGINAL clauses.  Search that star in complete isolation:
   # SAT/UNKNOWN says nothing about the parent and only consumes budget, while
   # UNSAT lifts monotonically because every axiom is literally a full-formula
   # clause.  Original one-based clause ids and fresh ids above the full input
   # count make the same derivation independently checkable as WRAT/LRAT.
-  if env("WASSAT_LOCAL_CORE") != "0" && (options["conflicts"] == 0 || budget_used < options["conflicts"])
+  if !flat32_raw && env("WASSAT_LOCAL_CORE") != "0" && (options["conflicts"] == 0 || budget_used < options["conflicts"])
     local_cap = wassat_stage_conflict_cap(
       options["conflicts"], budget_used, WASSAT_LOCAL_CORE_CONFLICT_CAP
     )
@@ -1105,7 +1128,7 @@ use cover_split
   # in both modes.  In proof mode they discard the reserved empty proof sinks;
   # an unsuccessful recognition simply falls through to proof-producing CDCL.
   # Internal A/B hooks remain opt-outs, never required configuration.
-  if env("WASSAT_MULTIPLIER") != "0"
+  if !flat32_raw && env("WASSAT_MULTIPLIER") != "0"
     multiplier_model = wassat_multiplier_model(formula)
     multiplier_model = wassat_klieber_circuit_model(formula) if multiplier_model.empty?
     multiplier_model = wassat_sha1_preimage_model(formula) if multiplier_model.empty?
@@ -1144,7 +1167,7 @@ use cover_split
       << "c conflicts: [budget_used], decisions: 0, props: 0"
       exit(20)
   # A cheap checked graph obstruction precedes broader CSP recognition.
-  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COLORING") != "0" && wassat_mycielski_unsat?(formula)
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COLORING") != "0" && wassat_mycielski_unsat?(formula)
     << "s UNSATISFIABLE"
     << "c mode: fast (checked Mycielski coloring obstruction)"
     << "c conflicts: [budget_used], decisions: 0, props: 0"
@@ -1152,7 +1175,7 @@ use cover_split
   # Bounded synchronizing-automaton encodings expose both transition maps in
   # their clause incidence.  Recover a Černý word directly, expand it to every
   # image/selector variable, and accept only a full original-CNF model.
-  if env("WASSAT_AUTOMATA_SYNC") != "0"
+  if !flat32_raw && env("WASSAT_AUTOMATA_SYNC") != "0"
     automata_model = wassat_automata_sync_model(formula)
     unless automata_model.empty?
       unless wassat_model_satisfies?(formula, automata_model)
@@ -1167,7 +1190,7 @@ use cover_split
   # relations form an exact finite-domain CSP.  The bounded native engine is
   # enabled automatically. SAT models are verified against the original CNF;
   # trusted UNSAT is fast-only until this route emits a proof.
-  if env("WASSAT_LATIN_CSP") != "0"
+  if !flat32_raw && env("WASSAT_LATIN_CSP") != "0"
     latin = wassat_latin_csp_solve(formula)
     tprof = wassat_prof("cli.latin_csp", tprof)
     if latin["status"] == 1
@@ -1189,7 +1212,7 @@ use cover_split
   # Compact edge-matching instances expose two exact placement partitions and
   # direct one-hot edge colors. Decode their conditioned orientation relations
   # and search the verified square-grid CSP before generic Boolean search.
-  if env("WASSAT_EDGE_MATCHING") != "0"
+  if !flat32_raw && env("WASSAT_EDGE_MATCHING") != "0"
     edge_match = wassat_edge_matching_solve(formula)
     tprof = wassat_prof("cli.edge_matching", tprof)
     if edge_match["status"] == 1
@@ -1205,7 +1228,7 @@ use cover_split
   # A complete sequential at-most counter plus a checked graph bound can carry a
   # direct vertex-cover contradiction. This trusted certificate is exact but
   # has no emitted RUP derivation yet, so proof modes fall through to CDCL.
-  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_AIS") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && env("WASSAT_AIS") != "0"
     ais = wassat_ais_unsat(formula)
     tprof = wassat_prof("cli.ais", tprof)
     wassat_prof_note("ais status=[ais["status"]] vertices=[ais["graph_vars"]] lower=[ais["lower_bound"]] upper=[ais["upper_bound"]] triangles=[ais["triangles"]] max_incidence=[ais["triangle_degree"]] pair_visits=[ais["triangle_work"]] stop=[ais["triangle_stop"]]") if tprof != 0
@@ -1220,7 +1243,7 @@ use cover_split
       exit(20)
   # An early bounded reconfiguration probe; misses fall through to all
   # ordinary preprocessors and the later cooperative scout.
-  if proof_mode == WASSAT_PROOF_NONE && options["conflicts"] == 0 && env("WASSAT_EARLY_RECONF") != "0" && !wassat_sequential?
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && options["conflicts"] == 0 && env("WASSAT_EARLY_RECONF") != "0" && !wassat_sequential?
     front_nv = formula["nvars"]
     front_nc = formula["flat_ncl"]
     front_shape = wassat_reconf_prefix(formula["flat_lits"], formula["flat_offs"], formula["flat_lens"], front_nv, front_nc)
@@ -1260,7 +1283,7 @@ use cover_split
         exit(20)
   # Parity-sum certificate (parity_sum.w): a connected set of the input's own
   # parity equations whose sum is 0 = 1. One pass over the clauses.
-  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PARITY_SUM") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && env("WASSAT_PARITY_SUM") != "0"
     parity_prof = wassat_prof_clock
     parity_sum = wassat_parity_sum_unsat(formula, clock_ms() + 2000)
     tprof = wassat_prof("cli.parity_sum", parity_prof)
@@ -1276,7 +1299,7 @@ use cover_split
       exit(20)
   # Demand against room (threshold_cover.w): a root asserted by a unit clause
   # implies more true variables than the at-most-one clauses allow.
-  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_THRESHOLD_COVER") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && env("WASSAT_THRESHOLD_COVER") != "0"
     tc_prof = wassat_prof_clock
     threshold_cover = wassat_threshold_cover_unsat(formula, clock_ms() + 3000)
     tprof = wassat_prof("cli.threshold_cover", tc_prof)
@@ -1304,7 +1327,7 @@ use cover_split
   orig_nvars = formula["nvars"]
   quad_shift = 0
   orig_formula = formula
-  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COLORING") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COLORING") != "0"
     color_prof = wassat_prof_clock
     clique_size = wassat_coloring_clique_unsat(formula)
     tprof = wassat_prof("cli.coloring_clique", color_prof)
@@ -1357,7 +1380,7 @@ use cover_split
   # Exact conflict-constrained covering is a narrow, automatically recognized
   # family.  The deterministic node cap makes an unsuccessful attempt bounded;
   # zero means either a shape miss or cap exhaustion and falls through.
-  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COVERING") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && env("WASSAT_COVERING") != "0"
     if wassat_try_strip_af_resolvents(formula)
       config = WassatConfig.from_lens(
         formula["nvars"], formula["flat_lens"], formula["flat_ncl"]
@@ -1378,7 +1401,7 @@ use cover_split
   # Dense covering formulas are refuted by cases, one CDCL per case, instead
   # of by a portfolio of whole-formula searches (cover_split.w). An unbounded
   # lane: a finite --conflicts budget keeps the ordinary accounted pipeline.
-  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && options["conflicts"] == 0 && env("WASSAT_COVER_SPLIT") != "0" && !wassat_sequential?
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && options["conflicts"] == 0 && env("WASSAT_COVER_SPLIT") != "0" && !wassat_sequential?
     split = wassat_cover_split_solve(formula)
     tprof = wassat_prof("cli.cover_split", tprof)
     if tprof != 0 && split["admitted"]
@@ -1398,7 +1421,7 @@ use cover_split
   # only locally unique components; an exact conditioned SCC refutation can
   # then decide the whole formula while multi-model and capped branches fall
   # through safely.
-  if proof_mode == WASSAT_PROOF_NONE && env("WASSAT_DIRECTED_KERNEL") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && env("WASSAT_DIRECTED_KERNEL") != "0"
     directed = wassat_directed_kernel_solve(formula)
     if directed["status"] != 0
       if directed["status"] == 1
@@ -1418,7 +1441,7 @@ use cover_split
   # proof modes keep their original-CNF derivation contract. Preparation has
   # a wall budget, and a miss leaves the ordinary solving route unchanged.
   ramsey_lex = nil
-  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && env("WASSAT_RAMSEY_LEX") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && env("WASSAT_RAMSEY_LEX") != "0"
     ramsey_lex = wassat_ramsey_lex_lift(formula, clock_ms() + WASSAT_RAMSEY_LEX_MS)
     if ramsey_lex != nil
       formula = ramsey_lex["formula"]
@@ -1434,7 +1457,7 @@ use cover_split
   # different, much smaller problem: solve THAT with one bounded CDCL run. A verdict is published from here (a model is cut back to
   # the input's variables and replayed against the input clauses); a miss
   # leaves every later stage reading the input as written.
-  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && ramsey_lex == nil && env("WASSAT_BVA") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && ramsey_lex == nil && env("WASSAT_BVA") != "0"
     # The dump switch (benchmarks/bva_test.py) also keeps every reduction,
     # however small, so the test reaches the lane on formulas it can enumerate.
     bva_dump = env("WASSAT_BVA_DUMP") == "1"
@@ -1485,7 +1508,7 @@ use cover_split
   # routing policy keep reading the input as written, since they match exact
   # shapes. Models are still replayed against the original clauses.
   cdcl_formula = formula
-  if proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && ramsey_lex == nil && env("WASSAT_GATE_CLOSURE") != "0"
+  if !flat32_raw && proof_mode == WASSAT_PROOF_NONE && quad_shift == 0 && ramsey_lex == nil && env("WASSAT_GATE_CLOSURE") != "0"
     # First choice: closure and rewriting to a fixpoint, which hands the
     # search a formula over the representatives only (plus the units and
     # equivalences that give every merged variable its value). A closure that
@@ -1634,7 +1657,7 @@ use cover_split
         scout_sls_base = scout_span
         scout_xor_base = 2 * scout_span
         scout_path_width = config.max_clause_size
-        scout_path_enabled = env("WASSAT_PATH_COVER") != "0" && wassat_path_cover_candidate?(scout_nv, formula["flat_ncl"], scout_path_width)
+        scout_path_enabled = !flat32_raw && env("WASSAT_PATH_COVER") != "0" && wassat_path_cover_candidate?(scout_nv, formula["flat_ncl"], scout_path_width)
         scout_path_out = nil
         scout_path_out = i64[12] if scout_path_enabled
         scout_out = []
@@ -1658,7 +1681,7 @@ use cover_split
         # The established width-four route remains in the post-scout race.
         cover_workers = 2 + (scout_lucky ? 1 : 0) + (scout_path_enabled ? 1 : 0)
         cover_workers += 1 if wassat_sls_arm_memory_allowed?(formula)
-        scout_cover_plan = wassat_resolution_cover_plan(formula, cover_workers, true)
+        scout_cover_plan = flat32_raw ? nil : wassat_resolution_cover_plan(formula, cover_workers, true)
         scout_cover_res = nil
         scout_cover_h = nil
         if scout_cover_plan != nil
@@ -1669,7 +1692,7 @@ use cover_split
         # clauses and private scratch. A miss has no grace period: cancellation
         # below ends it with the scout. Proof modes never enter this branch.
         parity_workers = cover_workers + (scout_cover_plan == nil ? 0 : 1)
-        scout_parity = wassat_matching_parity_plan(parity_source, parity_workers)
+        scout_parity = flat32_raw ? nil : wassat_matching_parity_plan(parity_source, parity_workers)
         scout_parity_h = nil
         if scout_parity != nil
           scout_parity_h = wassat_matching_parity_start(parity_source, scout_parity, scout_stop)
@@ -1679,7 +1702,7 @@ use cover_split
         scout_reconf_plan = nil
         scout_reconf_res = nil
         scout_reconf_h = nil
-        if scout_cover_plan == nil && scout_parity == nil
+        if !flat32_raw && scout_cover_plan == nil && scout_parity == nil
           reconf_cdcl = scout_lucky ? 2 : 1
           reconf_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
           scout_reconf_plan = wassat_reconf_plan(formula, parity_workers, reconf_cdcl, reconf_sls)
@@ -1697,7 +1720,7 @@ use cover_split
         dep_workers += 1 if scout_reconf_plan != nil
         # The automatic lane targets short-clause gate encodings. The shape
         # count is already available, so wider CNFs pay no planning cost.
-        if config.max_clause_size <= 3 && env("WASSAT_SMALL_CIRCUIT") != "0" && env("WASSAT_DEPENDENCY_CIRCUIT") != "0" && System.cpu_count > dep_workers
+        if !flat32_raw && config.max_clause_size <= 3 && env("WASSAT_SMALL_CIRCUIT") != "0" && env("WASSAT_DEPENDENCY_CIRCUIT") != "0" && System.cpu_count > dep_workers
           dep_extra = 192 * (scout_nv + formula["flat_ncl"] + 1)
           if wassat_race_memory_fits?(formula, scout_lucky ? 2 : 1, 1, resident_pre_arenas, dep_extra)
             scout_dep_plan = wassat_dependency_circuit_plan(formula)
@@ -1712,7 +1735,7 @@ use cover_split
         scout_capacity_plan = nil
         scout_capacity_res = nil
         scout_capacity_h = nil
-        if options["conflicts"] == 0 && env("WASSAT_CAPACITY_SCOUT") != "0"
+        if !flat32_raw && options["conflicts"] == 0 && env("WASSAT_CAPACITY_SCOUT") != "0"
           capacity_workers = dep_workers + (scout_dep_plan == nil ? 0 : 1)
           capacity_extra = 0
           capacity_extra += 53 * (scout_nv + 1) + 68157440 if scout_cover_plan != nil
@@ -1733,7 +1756,7 @@ use cover_split
         scout_lut = nil
         scout_lut_res = nil
         scout_lut_h = nil
-        if options["conflicts"] == 0 && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil
+        if !flat32_raw && options["conflicts"] == 0 && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil
           lut_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
           lut_cdcl = scout_lucky ? 2 : 1
           lut_cdcl += 1 if lut_sls > 0 && wassat_sls_repair_eligible?(formula)
@@ -1745,7 +1768,7 @@ use cover_split
         scout_quota = nil
         scout_quota_res = nil
         scout_quota_h = nil
-        if options["conflicts"] == 0 && !scout_lucky && !wassat_sls_arm_memory_allowed?(formula) && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil
+        if !flat32_raw && options["conflicts"] == 0 && !scout_lucky && !wassat_sls_arm_memory_allowed?(formula) && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil
           scout_quota = wassat_quota_plan(formula)
         if scout_quota != nil
           scout_quota_res = i64[scout_nv + 8]
@@ -1757,7 +1780,7 @@ use cover_split
         scout_counter_plan = nil
         scout_counter_res = nil
         scout_counter_h = nil
-        if options["conflicts"] == 0 && raw_probe && env("WASSAT_COUNTER_COVER_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_lut == nil && scout_quota == nil
+        if !flat32_raw && options["conflicts"] == 0 && raw_probe && env("WASSAT_COUNTER_COVER_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_lut == nil && scout_quota == nil
           counter_workers = cover_workers + (scout_capacity_plan == nil ? 0 : 1)
           counter_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
           counter_cdcl = scout_lucky ? 2 : 1
@@ -1776,7 +1799,7 @@ use cover_split
         scout_cycle_plan = nil
         scout_cycle_res = nil
         scout_cycle_h = nil
-        if options["conflicts"] == 0 && raw_probe && env("WASSAT_CYCLIC_SCOUT") != "0" && !scout_lucky && !wassat_sls_arm_memory_allowed?(formula) && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil
+        if !flat32_raw && options["conflicts"] == 0 && raw_probe && env("WASSAT_CYCLIC_SCOUT") != "0" && !scout_lucky && !wassat_sls_arm_memory_allowed?(formula) && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil
           scout_cycle_plan = wassat_cycle_plan(formula, 1, 0, true)
         if scout_cycle_plan != nil
           scout_cycle_res = i64[scout_nv + 8]
@@ -1785,7 +1808,7 @@ use cover_split
         scout_naked_plan = nil
         scout_naked_res = nil
         scout_naked_h = nil
-        if options["conflicts"] == 0 && raw_probe && env("WASSAT_NAKED_SUDOKU_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil && scout_cycle_plan == nil
+        if !flat32_raw && options["conflicts"] == 0 && raw_probe && env("WASSAT_NAKED_SUDOKU_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil && scout_cycle_plan == nil
           naked_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
           naked_cdcl = scout_lucky ? 2 : 1
           naked_cdcl += 1 if naked_sls > 0 && wassat_sls_repair_eligible?(formula)
@@ -1797,7 +1820,7 @@ use cover_split
         scout_affine_plan = nil
         scout_affine_res = nil
         scout_affine_h = nil
-        if options["conflicts"] == 0 && raw_probe && env("WASSAT_AFFINE_CIRCUIT_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil && scout_cycle_plan == nil && scout_naked_plan == nil
+        if !flat32_raw && options["conflicts"] == 0 && raw_probe && env("WASSAT_AFFINE_CIRCUIT_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil && scout_cycle_plan == nil && scout_naked_plan == nil
           affine_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
           affine_cdcl = scout_lucky ? 2 : 1
           affine_cdcl += 1 if affine_sls > 0 && wassat_sls_repair_eligible?(formula)
@@ -1809,7 +1832,7 @@ use cover_split
         scout_tree_plan = nil
         scout_tree_res = nil
         scout_tree_h = nil
-        if options["conflicts"] == 0 && raw_probe && env("WASSAT_TREEWIDTH_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil && scout_cycle_plan == nil && scout_naked_plan == nil && scout_affine_plan == nil
+        if !flat32_raw && options["conflicts"] == 0 && raw_probe && env("WASSAT_TREEWIDTH_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil && scout_cycle_plan == nil && scout_naked_plan == nil && scout_affine_plan == nil
           tree_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
           tree_cdcl = scout_lucky ? 2 : 1
           tree_cdcl += 1 if tree_sls > 0 && wassat_sls_repair_eligible?(formula)
@@ -1876,18 +1899,20 @@ use cover_split
         scout_xor_deadline = 0
         if scout_circuit == nil
           scout_xor_deadline = ccall("__w_clock_ms") + WASSAT_XOR_ARM_MAX_MS
-        scout_xor_h = Thread.new -> wassat_xor_arm_body(
-          scout_nv, formula, scout_res, scout_xor_base, scout_stop, nil,
-          scout_circuit, scout_xor_deadline
-        )
-        scout_xor_h = wassat_seq_turn(scout_xor_h, scout_stop, 0) if seq
+        scout_xor_h = nil
+        if scout_circuit != nil || (!flat32_raw && formula["flat_ncl"] <= 100000)
+          scout_xor_h = Thread.new -> wassat_xor_arm_body(
+            scout_nv, formula, scout_res, scout_xor_base, scout_stop, nil,
+            scout_circuit, scout_xor_deadline
+          )
+          scout_xor_h = wassat_seq_turn(scout_xor_h, scout_stop, 0) if seq
         z = lucky_h.join if lucky_h != nil
         z = scout_h.join if scout_h != nil
         # Exact-shape xorshift rows get one bounded full-domain preimage pass.
         # The measured family completes this in less time than generic search,
         # and a no-hit scan remains model-only/non-decisive. Other formulas
         # retain the old immediate cancellation below.
-        z = scout_xor_h.join unless scout_circuit == nil
+        z = scout_xor_h.join if scout_circuit != nil && scout_xor_h != nil
         # The walker is bounded by THE SCOUT'S LIFETIME, not by a flip budget.
         # Raising the cell here is what makes this arm free: it walks for
         # exactly as long as the scout was going to take anyway, so a miss
@@ -1906,7 +1931,7 @@ use cover_split
         # each derived row is implied by a uniquely owned binary subclause.
         # Let only that shape finish against its absolute 100ms arm deadline.
         # Ordinary formulas leave the hint at zero and pay no grace wait.
-        if scout_circuit == nil && scout_span > 16 && wassat_xor_grace_requested?(scout_res, scout_xor_base, scout_nv)
+        if scout_circuit == nil && scout_xor_h != nil && scout_span > 16 && wassat_xor_grace_requested?(scout_res, scout_xor_base, scout_nv)
           z = scout_xor_h.join
         reconf_cancel_ms = 0
         reconf_cancel_ms = ccall("__w_clock_ms") if scout_reconf_h != nil
@@ -1939,7 +1964,7 @@ use cover_split
           z = scout_dep_h.join
           formula["dependency_circuit_done"] = scout_dep_plan["meta"][9] != 1
         z = scout_sls_h.join if scout_sls_h != nil
-        z = scout_xor_h.join if scout_circuit == nil
+        z = scout_xor_h.join if scout_circuit == nil && scout_xor_h != nil
         z = scout_path_h.join if scout_path_h != nil
         if scout_cover_h != nil
           z = scout_cover_h.join
@@ -2335,12 +2360,13 @@ use cover_split
         # below reuses it directly).
         scout_cdcl_arenas = scout_solver == nil ? 0 : 1
         continuation = (scout_solver != nil && config.continue_scout?) ? scout_solver : nil
+        effective_pre_arenas = (pre_arms > 1 && quad_shift == 0 && !wassat_sequential?) ? 1 : pre_arms
         if continuation == nil && scout_solver != nil
           will_race_without_scout = arms > 1 || pre_arms > 0
           if !will_race_without_scout && sls_flips > 0
             will_race_without_scout = wassat_race_memory_fits?(
               formula, arms + pre_arms, scout_sls_arenas + 1,
-              pre_arms + resident_pre_arenas
+              effective_pre_arenas + resident_pre_arenas
             )
           if will_race_without_scout
             scout_solver.release_arenas
@@ -2353,7 +2379,7 @@ use cover_split
         race_cdcl_arenas = arms + pre_arms + scout_cdcl_arenas
         unless wassat_race_memory_fits?(
           formula, race_cdcl_arenas, scout_sls_arenas + 1,
-          pre_arms + resident_pre_arenas
+          effective_pre_arenas + resident_pre_arenas
         )
           sls_flips = 0
         if tprof != 0
@@ -2375,18 +2401,18 @@ use cover_split
         race = nil
         cover_workers = arms + pre_arms + (sls_flips > 0 ? 1 : 0)
         cover_workers += 1 if continuation != nil
-        cover_plan = wassat_resolution_cover_plan(formula, cover_workers)
+        cover_plan = flat32_raw ? nil : wassat_resolution_cover_plan(formula, cover_workers)
         cycle_plan = nil
-        if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && options["conflicts"] == 0
+        if !flat32_raw && arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && options["conflicts"] == 0
           cycle_plan = wassat_cycle_plan(formula, scout_cdcl_arenas, scout_sls_arenas)
         solo_circuit_plan = nil
-        if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && options["conflicts"] == 0
+        if !flat32_raw && arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && options["conflicts"] == 0
           roster_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
           solo_circuit_plan = wassat_roster_plan(formula, 1, roster_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
-        if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && solo_circuit_plan == nil && options["conflicts"] == 0
+        if !flat32_raw && arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && solo_circuit_plan == nil && options["conflicts"] == 0
           affine_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
           solo_circuit_plan = wassat_affine_circuit_plan(formula, 1, affine_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
-        if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && solo_circuit_plan == nil && options["conflicts"] == 0
+        if !flat32_raw && arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && solo_circuit_plan == nil && options["conflicts"] == 0
           tree_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
           solo_circuit_plan = wassat_treewidth_plan(formula, 1, tree_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
         if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil || cycle_plan != nil || solo_circuit_plan != nil
@@ -2404,23 +2430,34 @@ use cover_split
                                    scout_sls_arenas, resident_pre_arenas, cover_plan, cycle_plan, solo_circuit_plan,
                                    0)
           wassat_race_add_sls(race, sls_flips, 7, walk_art) if sls_flips > 0
+          shared_pre_state = nil
+          shared_pre_box = nil
           if pre_arms > 0
             # Each preprocessing arm constructs its own WassatPreprocess inside
             # its worker thread on round 0 from immutable flat arrays, taking
             # pre_arena zero-fills off the coordinator's critical path and
-            # stamping its wall deadline when the arm actually starts.
+            # stamping its wall deadline when the arm actually starts. When both
+            # light and heavy run on the same formula in parallel, light hands
+            # its completed rendering state directly to heavy so intake, probing,
+            # and substitution run once.
             pre_stage_ms = wassat_pre_stage_ms
             pre_stage_ms = 0 if wassat_sequential?
             light_ticks = wassat_pre_light_ticks
+            share_light = pre_arms > 1 && quad_shift == 0 && !wassat_sequential?
+            if share_light
+              shared_pre_state = i64[2]
+              shared_pre_box = [nil]
             wassat_race_add_pre_deferred(
               race, cdcl_formula, false, "light", light_ticks, 0,
-              pre_stage_ms, true
+              pre_stage_ms, true, shared_pre_state, shared_pre_box,
+              share_light ? 1 : 0
             )
             if pre_arms > 1
               pheavy_f = quad_shift > 0 ? orig_formula : cdcl_formula
               wassat_race_add_pre_deferred(
                 race, pheavy_f, true, "heavy", light_ticks,
-                wassat_pre_heavy_ticks, pre_stage_ms, true
+                wassat_pre_heavy_ticks, pre_stage_ms, true,
+                shared_pre_state, shared_pre_box, share_light ? 2 : 0
               )
         # Every CDCL arm shares one lock-free ticket pool containing what
         # remains of the aggregate budget. The last ticket publishes
@@ -2431,6 +2468,9 @@ use cover_split
         rr = nil
         if race != nil
           rr = wassat_race_run(race, race_budget)
+          if shared_pre_box != nil && shared_pre_box[0] != nil
+            shared_pre_box[0].release_arenas
+            shared_pre_box[0] = nil
           tprof = wassat_prof("cli.raw_race", tprof)
         if rr != nil && rr["status"] != 0
           budget_used += rr["conflicts"]
@@ -2514,8 +2554,8 @@ use cover_split
   else
     pre = WassatPreprocess.new(formula["nvars"], [], proof_mode, formula)
     pre.enable_dual_emission if proof_mode == WASSAT_PROOF_WRAT && drat_final != nil
+    pre.enable_flat_proof_output if proof_mode == WASSAT_PROOF_DRAT || proof_mode == WASSAT_PROOF_WRAT
     if proof_mode == WASSAT_PROOF_DRAT
-      pre.enable_flat_proof_output
       pre.set_deadline_ms(wassat_pre_stage_ms)
       if formula["flat_ncl"] > 100000 || formula["flat_nlits"] > 400000
         pre.set_budget(wassat_pre_light_ticks)
@@ -2603,6 +2643,7 @@ use cover_split
         s.set_stop_cell(nil)
         s.set_shared_conflict_budget(nil, 0, 0)
       else
+        art["single_consumer"] = true if art["raw"] == true && orig_formula == formula && probe_p == nil
         s = Wassat.from_flat(formula["nvars"], art, 0)
       wassat_free_art_flat(pre, art) unless art["raw"] == true
       pre = nil
@@ -2613,15 +2654,18 @@ use cover_split
       s.simplify_raw if config.force_simplify? && s != scout_solver
       tprof = wassat_prof("cli.from_flat", tprof)
     elsif proof_mode == WASSAT_PROOF_DRAT
+      want_drat_simplify = art["raw"] == true && (config.force_simplify? || (options["conflicts"] == 0 && formula["flat_ncl"] <= 2000000))
+      can_consume_drat = art["raw"] == true && !want_drat_simplify && orig_formula == formula && probe_p == nil && (flat32_raw || wassat_sequential? || !wassat_cone_enabled? || !wassat_cone_candidate(formula))
+      art["single_consumer"] = true if can_consume_drat
       s = Wassat.from_flat(formula["nvars"], art, 0, proof_mode)
       wassat_free_art_flat(pre, art) unless art["raw"] == true
       pre = nil
       tprof = wassat_prof("cli.from_flat", tprof)
     else
-      s = Wassat.new(formula["nvars"], art["clauses"], proof_mode, 0)
-      s.seed_proof_ids(art["gids"], art["next_gid"])
+      s = Wassat.from_flat(formula["nvars"], art, 0, proof_mode)
       wassat_free_art_flat(pre, art) unless art["raw"] == true
       pre = nil
+      tprof = wassat_prof("cli.from_flat", tprof)
 
     # File destinations stream during search so certificate memory stays flat;
     # `-` destinations render from the in-memory arrays after the fact. When
@@ -2650,12 +2694,17 @@ use cover_split
     s.wrat_header_written unless wrat_stream == nil
 
     solve_cap = final_budget
+    if proof_mode == WASSAT_PROOF_DRAT && art["raw"] == true && art["arena_consumed"] != true && (config.force_simplify? || (solve_cap == 0 && formula["flat_ncl"] <= 2000000))
+      s.simplify_raw_mode(1)
     # solve_budget takes additional work, including when resuming the scout.
     # final_budget already excludes its completed conflicts.
-    if proof_mode == WASSAT_PROOF_DRAT && !wassat_sequential? && wassat_cone_enabled?
+    if proof_mode == WASSAT_PROOF_DRAT && !flat32_raw && !wassat_sequential? && wassat_cone_enabled?
       cone_joint = wassat_cone_parallel_solve(s, formula, solve_cap)
     if cone_joint == nil
-      result = s.solve_budget(solve_cap)
+      drat_par = nil
+      if proof_mode == WASSAT_PROOF_DRAT && solve_cap == 0
+        drat_par = wassat_drat_parallel_solve(s, art, formula, orig_formula)
+      result = drat_par != nil ? drat_par : s.solve_budget(solve_cap)
     else
       result = cone_joint["result"]
     result["conflicts"] -= scout_conflicts if s == scout_solver && result["conflicts"] >= scout_conflicts
@@ -2705,7 +2754,7 @@ use cover_split
   # solver or reconstruction bug and must surface as a hard error here,
   # never as a wrong `v` line a harness might trust.
   if result["status"] == 1
-    result["model"] = wassat_reconstruct_model(art["stack"], result["model"], formula["nvars"])
+    result["model"] = wassat_reconstruct_model(art["stack"], result["model"], formula["nvars"]) unless result["raw_model"] == true
     tprof = wassat_prof("cli.reconstruct", tprof)
     result["model"] = wassat_project_quad_model(result["model"], quad_shift, orig_nvars) if quad_shift > 0
     result["model"] = result["model"].slice(0, orig_nvars) if ramsey_lex != nil
@@ -2861,6 +2910,109 @@ use cover_split
     wassat_sls_gpu_solve(formula, walkers, flips, seed, noise, metal_path)
   else
     wassat_sls_solve(formula, flips, seed)
+
+-> wassat_drat_master_body(s, stop, out)
+  r = s.solve_budget(0)
+  if r["status"] != 0
+    won = wassat_stop_publish(stop, r["status"])
+  out.push(r)
+  0
+
+-> wassat_drat_parallel_solve(s, art, formula, orig_formula)
+  return nil unless s.ok && !wassat_sequential? && env("WASSAT_DRAT_RACE") != "0"
+  cpus = System.cpu_count
+  return nil if cpus < 2
+  nv = formula["nvars"]
+  ncl = formula["flat_ncl"]
+  return nil if nv <= 0 || ncl >= 4000000 || art["arena_consumed"] == true
+  sls_flips = 0
+  sls_art = nil
+  if orig_formula == formula && wassat_sls_arm_memory_allowed?(formula) && wassat_race_memory_fits?(formula, 1, 1, 0)
+    sls_flips = wassat_sls_arm_flips
+    sls_art = art["raw"] == true ? art : wassat_raw_artifact(formula, nv)
+  sls_count = sls_flips > 0 ? 1 : 0
+  max_helpers = cpus - 1 - sls_count
+  max_helpers = 2 if max_helpers > 2
+  max_helpers = 0 if max_helpers < 0
+  n_helpers = 0
+  while n_helpers < max_helpers
+    break unless wassat_race_memory_fits?(formula, 1 + n_helpers + 1, sls_count, 0)
+    n_helpers += 1
+  return nil if n_helpers == 0 && sls_count == 0
+
+  drat_stop = i64[4]
+  unit_cap = 262144
+  unit_ring = i64[16 + 3 * unit_cap]
+  ring_cap = 4096
+  ring_maxlen = 6
+  ring = i64[16 + (3 + ring_maxlen) * ring_cap]
+  s.prepare_drat_rup_import
+  s.enable_sharing(ring, ring_cap, ring_maxlen, 0, true)
+  s.enable_unit_sharing(unit_ring, unit_cap)
+  s.set_stop_cell(drat_stop)
+
+  h0 = nil
+  h1 = nil
+  if n_helpers >= 1
+    h0 = Wassat.from_flat_clone(nv, art, s, false)
+    h0.enable_chrono
+    h0.enable_shrink
+    h0.set_positive_phases
+    h0.enable_sharing(ring, ring_cap, ring_maxlen, 1, true)
+    h0.enable_unit_sharing(unit_ring, unit_cap)
+    h0.set_stop_cell(drat_stop)
+    h0.enable_fixed_caps
+  if n_helpers >= 2
+    h1 = Wassat.from_flat_clone(nv, art, s, true)
+    h1.enable_chrono
+    h1.reseed_phases(1001)
+    h1.enable_focused_only
+    h1.enable_sharing(ring, ring_cap, ring_maxlen, 2, true)
+    h1.enable_unit_sharing(unit_ring, unit_cap)
+    h1.set_stop_cell(drat_stop)
+    h1.enable_fixed_caps
+
+  span = nv + 8
+  total_slots = n_helpers + sls_count
+  slab = i64[total_slots * span]
+  master_out = []
+  t_master = Thread.new -> wassat_drat_master_body(s, drat_stop, master_out)
+  t_h0 = nil
+  t_h1 = nil
+  t_sls = nil
+  t_h0 = Thread.new -> h0.solve_case(slab, 0) if h0 != nil
+  t_h1 = Thread.new -> h1.solve_case(slab, span) if h1 != nil
+  if sls_count > 0
+    sls_base = n_helpers * span
+    t_sls = Thread.new -> wassat_sls_arm_body(nv, formula, sls_art, slab, sls_base, drat_stop, sls_flips, 7, false, 0, nil, 0, 0)
+
+  z = t_master.join
+  z = wassat_stop_cancel(drat_stop)
+  z = t_h0.join if t_h0 != nil
+  z = t_h1.join if t_h1 != nil
+  z = t_sls.join if t_sls != nil
+  h0.release_arenas if h0 != nil
+  h1.release_arenas if h1 != nil
+  s.set_stop_cell(nil)
+
+  mr = master_out[0]
+  return mr if mr["status"] != 0
+  slot = 0
+  while slot < total_slots
+    sbase = slot * span
+    if slab[sbase] == 1
+      m = i64[nv]
+      v = 1
+      while v <= nv
+        m[v - 1] = slab[sbase + v] == 1 ? v : 0 - v
+        v += 1
+      mr["status"] = 1
+      mr["model"] = m
+      mr["complete"] = true
+      mr["raw_model"] = slot >= n_helpers && art["raw"] != true
+      return mr
+    slot += 1
+  mr
 
 # Dispatch recognized command-line arguments. The executable entry point calls
 # this explicitly; importing `use wassat` is side-effect free.

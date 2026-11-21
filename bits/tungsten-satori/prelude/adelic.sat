@@ -1,0 +1,301 @@
+-- Multi-Prime Adelic Divisibility & Product Formula Prelude (100% AXIOM-FREE!)
+--
+-- Extends `padic.sat` from a single prime p to arbitrary finite sets of pairwise-distinct
+-- primes p_0, ..., p_{k-1}:
+--   1. Natural & real finite products `nat_prod`, `real_prod`
+--   2. Coprime prime-power cancellation (`prime_pow_dvd_prod_cancel`)
+--   3. Multi-prime divisibility product (`coprime_pow_dvd_of_distinct_primes`):
+--        (forall i < k, p_i^(e_i) | n) -> (prod_{i < k} p_i^(e_i)) | n
+--   4. Multi-prime Adelic Product Formula lower bound (`adelic.product_formula_ge_one`):
+--        1 <= n * prod_{i < k} |n|_{p_i}   for every n >= 1 !
+--   5. Multi-prime adelic vanishing (`adelic.vanish_of_product_lt_one`) and
+--      height-vs-multi-prime-divisibility obstruction (`adelic.multi_prime_integrality_gap`)!
+
+import padic
+
+-- ====================================================================================
+-- 1. Finite Products on N and R, and Full Primes
+-- ====================================================================================
+
+-> is_prime_full (p : ℕ) : Prop :=
+  is_prime_nat p ∧ ∀ d : ℕ, d ∣ p → d = 1 ∨ d = p
+
+-> nat_prod : ℕ → (ℕ → ℕ) → ℕ
+  | 0, _ => 1
+  | k + 1, f => nat_prod k f * f k
+
+-> real_prod : ℕ → (ℕ → ℝ) → ℝ
+  | 0, _ => 1
+  | k + 1, f => real_prod k f * f k
+
++ nat_prod.zero (f : ℕ → ℕ) : nat_prod 0 f = 1 := by rfl
++ nat_prod.succ (k : ℕ) (f : ℕ → ℕ) : nat_prod (k + 1) f = nat_prod k f * f k := by rfl
++ real_prod.zero (f : ℕ → ℝ) : real_prod 0 f = 1 := by rfl
++ real_prod.succ (k : ℕ) (f : ℕ → ℝ) : real_prod (k + 1) f = real_prod k f * f k := by rfl
+
++ nat_prod.pos (k : ℕ) (f : ℕ → ℕ) : (∀ i < k, 0 < f i) → 0 < nat_prod k f
+  induction k with h0 n ih hf
+  · rw [nat_prod.zero]; decide
+  · rw [succ_eq_add_one.nat] at hf ⊢
+    rw [nat_prod.succ]
+    exact mul_pos.nat (nat_prod n f) (f n) (ih (by intro i hi; exact hf i (by omega))) (hf n (by omega))
+
++ real_prod.pos (k : ℕ) (f : ℕ → ℝ) : (∀ i < k, 0 < f i) → 0 < real_prod k f
+  induction k with h0 n ih hf
+  · rw [real_prod.zero]; decide
+  · rw [succ_eq_add_one.nat] at hf ⊢
+    rw [real_prod.succ]
+    exact mul_pos.real (real_prod n f) (f n) (ih (by intro i hi; exact hf i (by omega))) (hf n (by omega))
+
++ real_prod.mul (k : ℕ) (f g : ℕ → ℝ) : real_prod k (fun i => f i * g i) = real_prod k f * real_prod k g
+  induction k with n ih
+  · rw [real_prod.zero, real_prod.zero, real_prod.zero]; ring
+  · rw [succ_eq_add_one.nat, real_prod.succ, real_prod.succ, real_prod.succ, ih]; ring
+
++ real_prod.le_of_le (k : ℕ) (f g : ℕ → ℝ) :
+    (∀ i < k, 0 ≤ f i) → (∀ i < k, f i ≤ g i) → real_prod k f ≤ real_prod k g
+  induction k with h0 hle0 n ih hf hle
+  · rw [real_prod.zero, real_prod.zero]; linarith
+  · rw [succ_eq_add_one.nat] at hf hle ⊢
+    rw [real_prod.succ, real_prod.succ]
+    have hprev := ih (by intro i hi; exact hf i (by omega)) (by intro i hi; exact hle i (by omega))
+    have hfp : 0 ≤ real_prod n f
+      have hnn : ∀ m : ℕ, (∀ i < m, 0 ≤ f i) → 0 ≤ real_prod m f
+        intro m
+        induction m with _ l ihl hfm
+        · rw [real_prod.zero]; decide
+        · rw [succ_eq_add_one.nat] at hfm ⊢
+          rw [real_prod.succ]
+          exact mul_nonneg.real (real_prod l f) (f l) (ihl (by intro i hi; exact hfm i (by omega))) (hfm l (by omega))
+      exact hnn n (by intro i hi; exact hf i (by omega))
+    have hfn := hf n (by omega)
+    have hgn : 0 ≤ g n := by linarith [hle n (by omega)]
+    have h1 := mul_le_mul_of_nonneg_left.real (f n) (g n) (real_prod n f) (hle n (by omega)) hfp
+    have h2 := mul_le_mul_of_nonneg_right.real (real_prod n f) (real_prod n g) (g n) hprev hgn
+    linarith
+
++ real_prod.cast_nat_prod (k : ℕ) (f : ℕ → ℕ) : ((nat_prod k f : ℕ) : ℝ) = real_prod k (fun i => ((f i : ℕ) : ℝ))
+  induction k with n ih
+  · rw [nat_prod.zero, real_prod.zero]; simp
+  · rw [succ_eq_add_one.nat, nat_prod.succ, real_prod.succ, cast_mul.real, ih]
+
++ real_prod.ones (k : ℕ) : real_prod k (fun _ => (1 : ℝ)) = 1
+  induction k with n ih
+  · rw [real_prod.zero]
+  · rw [succ_eq_add_one.nat, real_prod.succ, ih]; ring
+
+-- ====================================================================================
+-- 2. Coprime Prime-Power Divisibility & Multi-Prime Product Theorem
+-- ====================================================================================
+
++ prime_not_dvd_distinct_prime (p q : ℕ) (hp : is_prime_full p) (hq : is_prime_full q) (hne : p ≠ q) : ¬ (p ∣ q)
+  intro hd
+  have hcases := hq.2 p hd
+  obtain h1 | heq := hcases
+  · have hp1 := hp.1
+    have hp2 : 2 ≤ p := hp1.1
+    omega
+  · exact hne heq
+
++ prime_not_dvd_pow (p q e : ℕ) (hp : is_prime_nat p) (hnd : ¬ (p ∣ q)) : ¬ (p ∣ q ^ e)
+  induction e with hd j ih hd
+  · rw [pow_zero.nat] at hd
+    have h2 := hp.1
+    obtain ⟨m, hm⟩ := (dvd.iff_exists p 1 (by omega)).mp hd
+    by_cases hm0 : m = 0
+    · rw [hm0] at hm; omega
+    · have hm1 : 1 ≤ m := by omega
+      nlinarith
+  · rw [succ_eq_add_one.nat, pow_succ.nat] at hd
+    obtain h1 | h2 := hp.2 (q ^ j) q hd
+    · exact ih h1
+    · exact hnd h2
+
++ prime_pow_dvd_prod_cancel (p M e : ℕ) (hp : is_prime_nat p) (hnd : ¬ (p ∣ M)) :
+    ∀ n : ℕ, p ^ e ∣ (M * n) → p ^ e ∣ n
+  induction e with n hd j ih n hd
+  · rw [pow_zero.nat]; exact dvd.one_left n
+  · rw [succ_eq_add_one.nat] at hd ⊢
+    have hp2 : 2 ≤ p := hp.1
+    have hpj_pos : 0 < p ^ j := pow_pos.nat p j (by omega)
+    have hp1_pos : 0 < p ^ (j + 1) := pow_pos.nat p (j + 1) (by omega)
+    have hd_p : p ∣ (M * n)
+      have hpp : p ∣ p ^ (j + 1)
+        exact (dvd.iff_exists p (p ^ (j + 1)) (by omega)).mpr ⟨p ^ j, by rw [pow_succ.nat]; ring⟩
+      exact dvd.trans_nat p (p ^ (j + 1)) (M * n) (by omega) hp1_pos hpp hd
+    have hpn : p ∣ n
+      obtain hm | hn := hp.2 M n hd_p
+      · exfalso; exact hnd hm
+      · exact hn
+    obtain ⟨n', hn'⟩ := (dvd.iff_exists p n (by omega)).mp hpn
+    have hd' : p ^ j ∣ (M * n')
+      have heq1 : M * n = p * (M * n') := by rw [hn']; ring
+      have heq2 : p ^ (j + 1) = p * p ^ j := by rw [pow_succ.nat]; ring
+      rw [heq2, heq1] at hd
+      exact (mul_dvd_mul_left_iff p (p ^ j) (M * n') (by omega) hpj_pos).mp hd
+    have hjn' := ih n' hd'
+    have heq2 : p ^ (j + 1) = p * p ^ j := by rw [pow_succ.nat]; ring
+    rw [heq2, hn']
+    exact (mul_dvd_mul_left_iff p (p ^ j) n' (by omega) hpj_pos).mpr hjn'
+
+-- Helper: if p is distinct from primes q_0, ..., q_{k-1}, then p does not divide prod_{i<k} q_i^(e_i).
++ prime_not_dvd_nat_prod_pows (p k : ℕ) (q e : ℕ → ℕ) (hp : is_prime_full p) :
+    (∀ i < k, is_prime_full (q i) ∧ p ≠ q i) → ¬ (p ∣ nat_prod k (fun i => (q i) ^ (e i)))
+  induction k with h0 hd m ih hq hd
+  · rw [nat_prod.zero] at hd
+    have hp1 := hp.1
+    have h2 : 2 ≤ p := hp1.1
+    obtain ⟨r, hr⟩ := (dvd.iff_exists p 1 (by omega)).mp hd
+    by_cases hr0 : r = 0
+    · rw [hr0] at hr; omega
+    · have hr1 : 1 ≤ r := by omega
+      nlinarith
+  · rw [succ_eq_add_one.nat] at hq hd
+    rw [nat_prod.succ] at hd
+    have hp1 := hp.1
+    obtain hleft | hright := hp1.2 (nat_prod m (fun i => (q i) ^ (e i))) ((q m) ^ (e m)) hd
+    · exact ih (by intro i hi; exact hq i (by omega)) hleft
+    · have hqm := hq m (by omega)
+      have hnd_qm := prime_not_dvd_distinct_prime p (q m) hp hqm.1 hqm.2
+      exact prime_not_dvd_pow p (q m) (e m) hp1 hnd_qm hright
+
+-- THEOREM 1 (Multi-Prime Coprime Divisibility Product — AXIOM-FREE!):
+-- If p_0, ..., p_{k-1} are pairwise-distinct primes and p_i^(e_i) | n for all i < k,
+-- then (prod_{i < k} p_i^(e_i)) | n !
++ coprime_pow_dvd_of_distinct_primes (k n : ℕ) (p e : ℕ → ℕ) :
+    (∀ i < k, is_prime_full (p i)) →
+    (∀ i j, i < k → j < k → i ≠ j → p i ≠ p j) →
+    (∀ i < k, (p i) ^ (e i) ∣ n) →
+    nat_prod k (fun i => (p i) ^ (e i)) ∣ n
+  induction k with hp0 hdist0 hd0 m ih hp hdist hd
+  · rw [nat_prod.zero]; exact dvd.one_left n
+  · rw [succ_eq_add_one.nat] at hp hdist hd ⊢
+    rw [nat_prod.succ]
+    have hprev := ih (by intro i hi; exact hp i (by omega)) (by intro i j hi hj hne; exact hdist i j (by omega) (by omega) hne) (by intro i hi; exact hd i (by omega))
+    have hM_pos : 0 < nat_prod m (fun i => (p i) ^ (e i))
+      apply nat_prod.pos m (fun i => (p i) ^ (e i))
+      intro i hi
+      have hpi := hp i (by omega)
+      have hpi1 := hpi.1
+      have hpi2 : 2 ≤ p i := hpi1.1
+      exact pow_pos.nat (p i) (e i) (by omega)
+    obtain ⟨r, hr⟩ := (dvd.iff_exists (nat_prod m (fun i => (p i) ^ (e i))) n hM_pos).mp hprev
+    have hpm_full := hp m (by omega)
+    have hpm_nat := hpm_full.1
+    have hpm_nd : ¬ (p m ∣ nat_prod m (fun i => (p i) ^ (e i)))
+      apply prime_not_dvd_nat_prod_pows (p m) m p e hpm_full
+      intro i hi
+      exact ⟨hp i (by omega), hdist m i (by omega) (by omega) (by omega)⟩
+    have hdm : (p m) ^ (e m) ∣ (nat_prod m (fun i => (p i) ^ (e i)) * r)
+      rw [← hr]; exact hd m (by omega)
+    have hpm_r := prime_pow_dvd_prod_cancel (p m) (nat_prod m (fun i => (p i) ^ (e i))) (e m) hpm_nat hpm_nd r hdm
+    have hpm_pos : 0 < (p m) ^ (e m)
+      have h2 : 2 ≤ p m := hpm_nat.1
+      exact pow_pos.nat (p m) (e m) (by omega)
+    rw [hr]
+    exact (mul_dvd_mul_left_iff (nat_prod m (fun i => (p i) ^ (e i))) ((p m) ^ (e m)) r hM_pos hpm_pos).mpr hpm_r
+
+-- ====================================================================================
+-- 3. Multi-Prime Adelic Product Formula & Height-vs-Divisibility Gap
+-- ====================================================================================
+
+-- THEOREM 2 (Multi-Prime Adelic Product Formula Lower Bound — AXIOM-FREE!):
+-- For any k pairwise-distinct primes p_0, ..., p_{k-1} and any positive integer n >= 1:
+--   1 <= n * prod_{i < k} |n|_{p_i} !
++ adelic.product_formula_ge_one (k n : ℕ) (p : ℕ → ℕ)
+    (hn : 0 < n)
+    (hp : ∀ i < k, is_prime_full (p i))
+    (hdist : ∀ i j, i < k → j < k → i ≠ j → p i ≠ p j) :
+    1 ≤ (n : ℝ) * real_prod k (fun i => padic.abs (p i) n)
+  have hdvd : nat_prod k (fun i => (p i) ^ (vp (p i) n)) ∣ n
+    apply coprime_pow_dvd_of_distinct_primes k n p (fun i => vp (p i) n) hp hdist
+    intro i hi
+    have hpi := hp i hi
+    have hpi1 := hpi.1
+    exact vp.pow_dvd (p i) n hpi1.1 hn
+  have hM_pos : 0 < nat_prod k (fun i => (p i) ^ (vp (p i) n))
+    apply nat_prod.pos k (fun i => (p i) ^ (vp (p i) n))
+    intro i hi
+    have hpi := hp i hi
+    have hpi1 := hpi.1
+    have h2 : 2 ≤ p i := hpi1.1
+    exact pow_pos.nat (p i) (vp (p i) n) (by omega)
+  obtain ⟨q, hq⟩ := (dvd.iff_exists (nat_prod k (fun i => (p i) ^ (vp (p i) n))) n hM_pos).mp hdvd
+  have hq_pos : 0 < q
+    by_contra h0
+    have hqz : q = 0 := by omega
+    rw [hqz] at hq; omega
+  have hle_nat : nat_prod k (fun i => (p i) ^ (vp (p i) n)) ≤ n := by nlinarith
+  have hle_real : ((nat_prod k (fun i => (p i) ^ (vp (p i) n)) : ℕ) : ℝ) ≤ (n : ℝ) := (cast_le.real (nat_prod k (fun i => (p i) ^ (vp (p i) n))) n).mpr hle_nat
+  rw [real_prod.cast_nat_prod] at hle_real
+  have hprod_pos : 0 < real_prod k (fun i => padic.abs (p i) n)
+    apply real_prod.pos k (fun i => padic.abs (p i) n)
+    intro i hi; exact padic.abs_pos (p i) n hn
+  have hinv : real_prod k (fun i => (((p i) ^ (vp (p i) n) : ℕ) : ℝ)) * real_prod k (fun i => padic.abs (p i) n) = 1
+    rw [← real_prod.mul]
+    have hcon : ∀ m : ℕ, (∀ i < m, (((p i) ^ (vp (p i) n) : ℕ) : ℝ) * padic.abs (p i) n = 1) → real_prod m (fun i => (((p i) ^ (vp (p i) n) : ℕ) : ℝ) * padic.abs (p i) n) = 1
+      intro m
+      induction m with _ l ihl h1
+      · rw [real_prod.zero]
+      · rw [succ_eq_add_one.nat] at h1 ⊢
+        rw [real_prod.succ, ihl (by intro i hi; exact h1 i (by omega)), h1 l (by omega)]; ring
+    apply hcon k
+    intro i hi
+    have hpi := hp i hi
+    have hpi1 := hpi.1
+    have hpi2 : 2 ≤ p i := hpi1.1
+    rw [← rpow_nat_eq_pow_cast (p i) (vp (p i) n) (by omega), padic.abs_pos_val (p i) n (by omega)]
+    rw [← rpow.add]
+    have h0 : ((vp (p i) n : ℕ) : ℝ) + -((vp (p i) n : ℕ) : ℝ) = 0 := by ring
+    rw [h0]; unfold rpow; simp; exact exp_zero
+  have hmul := mul_le_mul_of_nonneg_right.real (real_prod k (fun i => (((p i) ^ (vp (p i) n) : ℕ) : ℝ))) (n : ℝ) (real_prod k (fun i => padic.abs (p i) n)) hle_real (by linarith)
+  linarith
+
+-- THEOREM 3 (Multi-Prime Adelic Vanishing — AXIOM-FREE!):
++ adelic.vanish_of_product_lt_one (k n : ℕ) (p : ℕ → ℕ)
+    (hp : ∀ i < k, is_prime_full (p i))
+    (hdist : ∀ i j, i < k → j < k → i ≠ j → p i ≠ p j)
+    (hlt : (n : ℝ) * real_prod k (fun i => padic.abs (p i) n) < 1) :
+    n = 0
+  by_contra hnz
+  have hge := adelic.product_formula_ge_one k n p (by omega) hp hdist
+  linarith
+
+-- THEOREM 4 (Multi-Prime Height-vs-Divisibility Integrality Gap — AXIOM-FREE!):
+-- If p_i^(v_i) | n for k distinct primes and n < prod_{i<k} p_i^(v_i), then n = 0!
++ adelic.multi_prime_integrality_gap (k n : ℕ) (p v : ℕ → ℕ)
+    (hp : ∀ i < k, is_prime_full (p i))
+    (hdist : ∀ i j, i < k → j < k → i ≠ j → p i ≠ p j)
+    (hdvd : ∀ i < k, (p i) ^ (v i) ∣ n)
+    (hheight : (n : ℝ) < real_prod k (fun i => rpow ((p i : ℕ) : ℝ) ((v i : ℕ) : ℝ))) :
+    n = 0
+  by_contra hnz
+  have hn_pos : 0 < n := by omega
+  have hnorm_le : real_prod k (fun i => padic.abs (p i) n) ≤ real_prod k (fun i => rpow ((p i : ℕ) : ℝ) (-((v i : ℕ) : ℝ)))
+    apply real_prod.le_of_le k (fun i => padic.abs (p i) n) (fun i => rpow ((p i : ℕ) : ℝ) (-((v i : ℕ) : ℝ)))
+    · intro i hi; exact padic.abs_nonneg (p i) n
+    · intro i hi
+      have hpi := hp i hi
+      have hpi1 := hpi.1
+      have hpi2 : 2 ≤ p i := hpi1.1
+      have hvp : v i ≤ vp (p i) n := (vp.le_iff_pow_dvd (p i) n (v i) hpi2 hn_pos).mpr (hdvd i hi)
+      have hcast : ((v i : ℕ) : ℝ) ≤ ((vp (p i) n : ℕ) : ℝ) := (cast_le.real (v i) (vp (p i) n)).mpr hvp
+      have hp1 : (1 : ℝ) ≤ ((p i : ℕ) : ℝ) := (cast_le.real 1 (p i)).mpr (by omega)
+      rw [padic.abs_pos_val (p i) n hnz]
+      exact rpow_le_of_exp_le ((p i : ℕ) : ℝ) (-((vp (p i) n : ℕ) : ℝ)) (-((v i : ℕ) : ℝ)) hp1 (by linarith)
+  have hinv_pos : 0 < real_prod k (fun i => rpow ((p i : ℕ) : ℝ) (-((v i : ℕ) : ℝ)))
+    apply real_prod.pos k (fun i => rpow ((p i : ℕ) : ℝ) (-((v i : ℕ) : ℝ)))
+    intro i hi; exact rpow.pos ((p i : ℕ) : ℝ) (-((v i : ℕ) : ℝ))
+  have hinv : real_prod k (fun i => rpow ((p i : ℕ) : ℝ) ((v i : ℕ) : ℝ)) * real_prod k (fun i => rpow ((p i : ℕ) : ℝ) (-((v i : ℕ) : ℝ))) = 1
+    rw [← real_prod.mul]
+    have hcon : ∀ m : ℕ, real_prod m (fun i => rpow ((p i : ℕ) : ℝ) ((v i : ℕ) : ℝ) * rpow ((p i : ℕ) : ℝ) (-((v i : ℕ) : ℝ))) = 1
+      intro m
+      induction m with l ihl
+      · rw [real_prod.zero]
+      · rw [succ_eq_add_one.nat, real_prod.succ, ihl, ← rpow.add]
+        have h0 : ((v l : ℕ) : ℝ) + -((v l : ℕ) : ℝ) = 0 := by ring
+        rw [h0]; unfold rpow; simp; exact exp_zero
+    exact hcon k
+  have h1 := mul_le_mul_of_nonneg_left.real (real_prod k (fun i => padic.abs (p i) n)) (real_prod k (fun i => rpow ((p i : ℕ) : ℝ) (-((v i : ℕ) : ℝ)))) (n : ℝ) hnorm_le (cast_nonneg.real n)
+  have h2 := mul_lt_mul_of_pos_right.real (n : ℝ) (real_prod k (fun i => rpow ((p i : ℕ) : ℝ) ((v i : ℕ) : ℝ))) (real_prod k (fun i => rpow ((p i : ℕ) : ℝ) (-((v i : ℕ) : ℝ)))) hheight hinv_pos
+  exact hnz (adelic.vanish_of_product_lt_one k n p hp hdist (by linarith))

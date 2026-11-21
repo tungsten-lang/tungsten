@@ -665,9 +665,12 @@ use lowering/definitions
         li += 1
       processed_classes[cname] = {ivar_offsets: ivar_offsets, offset: offset}
 
-      # Propagate the merged layout to the canonical class_node so later
-      # lowering stages (which look up ivar offsets via known_classes) see
-      # the same picture regardless of which class_def is canonical.
+      # Propagate the merged layout to BOTH the canonical class_node AND this
+      # class_def node (expr), so every reopen shares the full ivar_offsets
+      # map and indexed ivar access (:ivar_get_idx / :ivar_set_idx) never
+      # falls back to string-hashed w_ivar_{get,set}_wv on reopened classes.
+      ast_ivar_offsets_set(expr, ivar_offsets)
+      ast_ivar_count_set(expr, offset)
       canonical = known_classes[cname]
       if canonical != nil
         ast_ivar_offsets_set(canonical, ivar_offsets)

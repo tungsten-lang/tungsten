@@ -45120,6 +45120,18 @@ WValue w_eq(WValue a, WValue b) {
     if (w_is_nil(a) || w_is_nil(b) || w_is_bool(a) || w_is_bool(b))
         return W_FALSE;
 
+    /* Fast path for WObject class instances: bit equality (a == b) was already
+     * handled above. Plain objects without a user-defined `==` override only
+     * equal themselves (identity semantics), so skip the numeric/string/container
+     * cascade and the per-call w_method_lookup("==") completely. */
+    if (w_is_instance(a)) {
+        WObject *obj = (WObject *)w_as_ptr(a);
+        WClass *klass = g_class_table[obj->class_id];
+        if (!klass->has_custom_eq)
+            return W_FALSE;
+        return w_method_call_fast(a, w_string("=="), &b, 1);
+    }
+
     /* Chars are canonical by bit pattern (one WValue per codepoint+metadata);
      * a != b above means different chars. Short-circuits the type chain. */
     if (w_is_char(a))
@@ -45297,40 +45309,7 @@ WValue w_eq(WValue a, WValue b) {
         return w_bool(decimal_compare(w_decimal(ga, sa), w_decimal(gb, sb)) == 0);
     }
 
-    /* User-defined `==`: if `a` is a class instance whose class OVERRIDES `==`
-     * (resolves to something other than the Object#== default), dispatch to it —
-     * same operator-overload pattern as w_add routing `+` to a.+(b). The
-     * override guard (m != objm) is essential: dispatching the Object#== default
-     * would re-enter this w_eq and loop. Plain objects keep identity semantics
-     * (the bit-equality fast path at the top already handled a == a). */
-    if (w_is_instance(a)) {
-        WObject *obj = (WObject *)w_as_ptr(a);
-        WClass *klass = g_class_table[obj->class_id];
-        WValue eqname = w_string("==");
-        WMethod *m = w_method_lookup(klass, eqname);
-        if (m) {
-            /* Compare against the *global* Object#== default (cached once), not
-             * the receiver's own root — a class without an explicit superclass is
-             * its own root, so root-based comparison would misjudge its own == as
-             * the default. Dispatch only when the resolved == is an override. */
-            static WMethod *object_eq = NULL;
-            static int object_eq_init = 0;
-            if (!object_eq_init) {
-                object_eq_init = 1;
-                for (int ci = 0; ci < W_MAX_CLASSES; ci++) {
-                    WClass *c = g_class_table[ci];
-                    if (c && c->name && strcmp(c->name, "Object") == 0) {
-                        object_eq = w_method_lookup(c, eqname);
-                        break;
-                    }
-                }
-            }
-            if (m != object_eq)
-                return w_method_call_fast(a, eqname, &b, 1);
-        }
-    }
-
-    /* Different types or different values */
+    /* Different types or different values (WObject instances handled above). */
     return W_FALSE;
 }
 
@@ -50851,9 +50830,10 @@ WValue w_class_new(const char *name, WValue superclass) {
     klass->static_method_count = 0;
     klass->static_method_capacity = 8;
     klass->static_methods = calloc(1, sizeof(WMethod) * klass->static_method_capacity);
-    /* Inherit ivar layout from superclass */
+    /* Inherit ivar layout and custom == flag from superclass */
     if (klass->superclass) {
         WClass *super = klass->superclass;
+        klass->has_custom_eq = super->has_custom_eq;
         klass->ivar_capacity = super->ivar_count > 0 ? super->ivar_count : 4;
         klass->ivar_count = super->ivar_count;
         klass->ivar_names = calloc(1, sizeof(WValue) * klass->ivar_capacity);
@@ -50953,6 +50933,23 @@ void w_class_add_method_wv(WValue klass_val, WValue name, void *fn_ptr, int arit
     w_class_add_method_range_wv(klass_val, name, fn_ptr, arity, arity);
 }
 
+static void w_class_mark_custom_eq_if_needed(WClass *klass, WValue name) {
+    if (klass->name && strcmp(klass->name, "Object") == 0) return;
+    const char *ms = as_str(name);
+    if (!ms || ms[0] != '=' || ms[1] != '=' || ms[2] != '\0') return;
+    klass->has_custom_eq = 1;
+    for (uint32_t ci = 0; ci < g_next_class_id; ci++) {
+        WClass *sub = g_class_table[ci];
+        if (!sub || sub->has_custom_eq) continue;
+        for (WClass *cur = sub->superclass; cur != NULL; cur = cur->superclass) {
+            if (cur == klass) {
+                sub->has_custom_eq = 1;
+                break;
+            }
+        }
+    }
+}
+
 void w_class_add_method_range_wv(WValue klass_val, WValue name, void *fn_ptr,
                                  int arity, int min_arity) {
     WClass *klass = as_class(klass_val);
@@ -50962,6 +50959,7 @@ void w_class_add_method_range_wv(WValue klass_val, WValue name, void *fn_ptr,
     m->arity = arity;
     m->min_arity = min_arity;
     m->splat_index_plus_one = 0;
+    w_class_mark_custom_eq_if_needed(klass, name);
     if (klass->class_id < W_MAX_CLASSES && g_class_is_node_kind[klass->class_id])
         g_any_node_kind_has_methods = 1;
     w_method_table_mutation_end();
@@ -50976,6 +50974,7 @@ void w_class_add_method_splat_wv(WValue klass_val, WValue name, void *fn_ptr,
     m->arity = arity;
     m->min_arity = min_arity;
     m->splat_index_plus_one = splat_index + 1;
+    w_class_mark_custom_eq_if_needed(klass, name);
     if (klass->class_id < W_MAX_CLASSES && g_class_is_node_kind[klass->class_id])
         g_any_node_kind_has_methods = 1;
     w_method_table_mutation_end();

@@ -1233,6 +1233,7 @@ typedef struct WClass {
     const char *name;
     struct WClass *superclass;
     uint16_t class_id;
+    uint8_t has_custom_eq;      /* 1 if this class or a non-Object ancestor defines == */
     WMethod *methods;
     int method_count;
     int method_capacity;

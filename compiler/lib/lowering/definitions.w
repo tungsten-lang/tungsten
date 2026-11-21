@@ -1660,7 +1660,8 @@
       mod[:generic_class_templates] = {}
     mod[:generic_class_templates][class_name] = node
     return nil
-  mod[:known_classes][class_name] = node
+  if mod[:known_classes][class_name] == nil
+    mod[:known_classes][class_name] = node
   if ctx[:verbose]
     << ""
     <- "  + " + class_name + " "

@@ -1,0 +1,370 @@
+-- Constructive p-adic Valuation & Ultrametric Absolute Value Prelude (100% AXIOM-FREE!)
+--
+-- Foundational non-archimedean / p-adic algebra for Satori (supporting Pillar 1 Galois
+-- local-global, weak Vandiver, inert-CM valuations, and adelic height-vs-divisibility bounds):
+--   1. Constructive p-adic valuation `vp p n` via bounded descent `vp_go`
+--   2. Exact specification `p^(vp p n) | n ∧ ¬(p^(vp p n + 1) | n)` & uniqueness
+--   3. Characterization `k <= vp p n <-> p^k | n`
+--   4. Ultrametric inequality `min (vp p a) (vp p b) <= vp p (a + b)`
+--   5. Prime multiplicativity `vp p (a * b) = vp p a + vp p b` and `vp p (a^k) = k * vp p a`
+--   6. Real-valued p-adic norm `padic.abs p n = p^(-vp p n)` with ultrametric strong triangle
+--      inequality `|a + b|_p <= max(|a|_p, |b|_p)`, multiplicativity `|a*b|_p = |a|_p |b|_p`,
+--      and the archimedean-times-p-adic product lower bound `1 <= n * |n|_p` (for n >= 1)!
+
+import complex_analysis
+
+-- ====================================================================================
+-- 1. Divisibility & Prime Helpers on N
+-- ====================================================================================
+
+-> is_prime_nat (p : ℕ) : Prop :=
+  2 ≤ p ∧ ∀ a b : ℕ, p ∣ (a * b) → p ∣ a ∨ p ∣ b
+
++ dvd.iff_exists (d n : ℕ) (hd : 0 < d) : d ∣ n ↔ ∃ q : ℕ, n = d * q
+  unfold dvd
+  constructor
+  · intro h
+    use n / d
+    have hdiv := div_add_mod.nat n d
+    rw [h] at hdiv
+    linarith
+  · intro h
+    obtain ⟨q, hq⟩ := h
+    rw [hq]
+    have h0 : (0 + d * q) % d = 0 % d := add_mul_mod.nat 0 q d
+    have h1 : 0 + d * q = d * q := by ring
+    rw [h1] at h0
+    rw [h0]
+    exact (div_mod_of_lt.nat 0 d hd).2
+
++ dvd.one_left (n : ℕ) : 1 ∣ n
+  exact (dvd.iff_exists 1 n (by decide)).mpr ⟨n, by ring⟩
+
++ dvd.trans_nat (a b c : ℕ) (ha : 0 < a) (hb : 0 < b) (hab : a ∣ b) (hbc : b ∣ c) : a ∣ c
+  obtain ⟨q1, hq1⟩ := (dvd.iff_exists a b ha).mp hab
+  obtain ⟨q2, hq2⟩ := (dvd.iff_exists b c hb).mp hbc
+  exact (dvd.iff_exists a c ha).mpr ⟨q1 * q2, by rw [hq2, hq1]; ring⟩
+
++ dvd.add_nat (d a b : ℕ) (hd : 0 < d) (ha : d ∣ a) (hb : d ∣ b) : d ∣ (a + b)
+  obtain ⟨q1, hq1⟩ := (dvd.iff_exists d a hd).mp ha
+  obtain ⟨q2, hq2⟩ := (dvd.iff_exists d b hd).mp hb
+  exact (dvd.iff_exists d (a + b) hd).mpr ⟨q1 + q2, by rw [hq1, hq2]; ring⟩
+
++ pow_pos.nat (p k : ℕ) (hp : 0 < p) : 0 < p ^ k
+  induction k with j ih
+  · rw [pow_zero.nat]; decide
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    exact mul_pos.nat (p ^ j) p ih hp
+
++ pow_dvd_pow_of_le (p a b : ℕ) (hp : 0 < p) (hab : a ≤ b) : p ^ a ∣ p ^ b
+  have hba : b = a + (b - a) := by omega
+  rw [hba, pow_add.nat]
+  exact (dvd.iff_exists (p ^ a) (p ^ a * p ^ (b - a)) (pow_pos.nat p a hp)).mpr ⟨p ^ (b - a), rfl⟩
+
++ mul_dvd_mul_left_iff (c a b : ℕ) (hc : 0 < c) (ha : 0 < a) : (c * a) ∣ (c * b) ↔ a ∣ b
+  have hca : 0 < c * a := mul_pos.nat c a hc ha
+  constructor
+  · intro h
+    obtain ⟨q, hq⟩ := (dvd.iff_exists (c * a) (c * b) hca).mp h
+    have hq' : c * b = c * (a * q) := by linarith
+    have hcancel : b = a * q := by nlinarith
+    exact (dvd.iff_exists a b ha).mpr ⟨q, hcancel⟩
+  · intro h
+    obtain ⟨q, hq⟩ := (dvd.iff_exists a b ha).mp h
+    exact (dvd.iff_exists (c * a) (c * b) hca).mpr ⟨q, by rw [hq]; ring⟩
+
+-- ====================================================================================
+-- 2. Constructive p-adic Valuation `vp p n`
+-- ====================================================================================
+
+-> vp_go : ℕ → ℕ → ℕ → ℕ
+  | 0, _, _ => 0
+  | fuel + 1, p, n => if n % p = 0 then 1 + vp_go fuel p (n / p) else 0
+
++ vp_go.succ_eq (f p n : ℕ) : vp_go (f + 1) p n = if n % p = 0 then 1 + vp_go f p (n / p) else 0 := by rfl
+
+-> vp (p n : ℕ) : ℕ := vp_go n p n
+
++ vp_go.spec (fuel p : ℕ) (hp : 2 ≤ p) :
+    ∀ n : ℕ, 0 < n → n ≤ fuel → p ^ (vp_go fuel p n) ∣ n ∧ ¬ (p ^ (vp_go fuel p n + 1) ∣ n)
+  induction fuel with n hn hle f ih n hn hle
+  · omega
+  · rw [succ_eq_add_one.nat] at hle ⊢
+    by_cases hd : n % p = 0
+    · have hstep : vp_go (f + 1) p n = 1 + vp_go f p (n / p)
+        rw [vp_go.succ_eq]
+        have hif : ∀ a b : ℕ, (if n % p = 0 then a else b) = a := by intro a b; simp [hd]
+        exact hif (1 + vp_go f p (n / p)) 0
+      rw [hstep]
+      have hdiv := div_add_mod.nat n p
+      rw [hd] at hdiv
+      have hnq : n = p * (n / p) := by linarith
+      have hq_pos : 0 < n / p := by nlinarith
+      have hq_lt : n / p < n := by nlinarith
+      have hq_le : n / p ≤ f := by omega
+      have hih := ih (n / p) hq_pos hq_le
+      set k := vp_go f p (n / p) with hk
+      have hpk_pos : 0 < p ^ k := pow_pos.nat p k (by omega)
+      have hpk1_pos : 0 < p ^ (k + 1) := pow_pos.nat p (k + 1) (by omega)
+      have hpow1 : p ^ (1 + k) = p * p ^ k
+        have he : 1 + k = k + 1 := by ring
+        rw [he, pow_succ.nat]; ring
+      have hpow2 : p ^ (1 + k + 1) = p * p ^ (k + 1)
+        have he : 1 + k + 1 = (k + 1) + 1 := by ring
+        rw [he, pow_succ.nat]; ring
+      constructor
+      · rw [hpow1, hnq]
+        exact (mul_dvd_mul_left_iff p (p ^ k) (n / p) (by omega) hpk_pos).mpr hih.1
+      · intro hbad
+        rw [hpow2, hnq] at hbad
+        exact hih.2 ((mul_dvd_mul_left_iff p (p ^ (k + 1)) (n / p) (by omega) hpk1_pos).mp hbad)
+    · have hstep : vp_go (f + 1) p n = 0
+        rw [vp_go.succ_eq]
+        have hif : ∀ a b : ℕ, (if n % p = 0 then a else b) = b := by intro a b; simp [hd]
+        exact hif (1 + vp_go f p (n / p)) 0
+      rw [hstep]
+      constructor
+      · rw [pow_zero.nat]; exact dvd.one_left n
+      · have h1 : p ^ (0 + 1) = p := by rw [pow_succ.nat, pow_zero.nat]; ring
+        rw [h1]; unfold dvd; exact hd
+
++ vp.spec (p n : ℕ) (hp : 2 ≤ p) (hn : 0 < n) : p ^ (vp p n) ∣ n ∧ ¬ (p ^ (vp p n + 1) ∣ n)
+  unfold vp
+  exact vp_go.spec n p hp n hn (by omega)
+
++ vp.pow_dvd (p n : ℕ) (hp : 2 ≤ p) (hn : 0 < n) : p ^ (vp p n) ∣ n
+  exact (vp.spec p n hp hn).1
+
++ vp.not_pow_succ_dvd (p n : ℕ) (hp : 2 ≤ p) (hn : 0 < n) : ¬ (p ^ (vp p n + 1) ∣ n)
+  exact (vp.spec p n hp hn).2
+
++ vp.unique (p n k : ℕ) (hp : 2 ≤ p) (hn : 0 < n) (hd : p ^ k ∣ n) (hnd : ¬ (p ^ (k + 1) ∣ n)) : vp p n = k
+  have hsp := vp.spec p n hp hn
+  by_contra hne
+  by_cases hlt : k < vp p n
+  · have hle : k + 1 ≤ vp p n := by omega
+    have hdiv := dvd.trans_nat (p ^ (k + 1)) (p ^ (vp p n)) n (pow_pos.nat p (k + 1) (by omega)) (pow_pos.nat p (vp p n) (by omega)) (pow_dvd_pow_of_le p (k + 1) (vp p n) (by omega) hle) hsp.1
+    exact hnd hdiv
+  · have hle : vp p n + 1 ≤ k := by omega
+    have hdiv := dvd.trans_nat (p ^ (vp p n + 1)) (p ^ k) n (pow_pos.nat p (vp p n + 1) (by omega)) (pow_pos.nat p k (by omega)) (pow_dvd_pow_of_le p (vp p n + 1) k (by omega) hle) hd
+    exact hsp.2 hdiv
+
++ vp.le_iff_pow_dvd (p n k : ℕ) (hp : 2 ≤ p) (hn : 0 < n) : k ≤ vp p n ↔ p ^ k ∣ n
+  have hsp := vp.spec p n hp hn
+  constructor
+  · intro hle
+    exact dvd.trans_nat (p ^ k) (p ^ (vp p n)) n (pow_pos.nat p k (by omega)) (pow_pos.nat p (vp p n) (by omega)) (pow_dvd_pow_of_le p k (vp p n) (by omega) hle) hsp.1
+  · intro hd
+    by_contra hgt
+    have hle : vp p n + 1 ≤ k := by omega
+    have hdiv := dvd.trans_nat (p ^ (vp p n + 1)) (p ^ k) n (pow_pos.nat p (vp p n + 1) (by omega)) (pow_pos.nat p k (by omega)) (pow_dvd_pow_of_le p (vp p n + 1) k (by omega) hle) hd
+    exact hsp.2 hdiv
+
++ vp.eq_zero_of_not_dvd (p n : ℕ) (hp : 2 ≤ p) (hn : 0 < n) (hnd : ¬ (p ∣ n)) : vp p n = 0
+  apply vp.unique p n 0 hp hn
+  · rw [pow_zero.nat]; exact dvd.one_left n
+  · have h1 : p ^ (0 + 1) = p := by rw [pow_succ.nat, pow_zero.nat]; ring
+    rw [h1]; exact hnd
+
++ vp.mul_p (p n : ℕ) (hp : 2 ≤ p) (hn : 0 < n) : vp p (p * n) = vp p n + 1
+  have hsp := vp.spec p n hp hn
+  have hpn : 0 < p * n := mul_pos.nat p n (by omega) hn
+  apply vp.unique p (p * n) (vp p n + 1) hp hpn
+  · have h1 : p ^ (vp p n + 1) = p * p ^ (vp p n) := by rw [pow_succ.nat]; ring
+    rw [h1]
+    exact (mul_dvd_mul_left_iff p (p ^ (vp p n)) n (by omega) (pow_pos.nat p (vp p n) (by omega))).mpr hsp.1
+  · intro hbad
+    have h2 : p ^ (vp p n + 1 + 1) = p * p ^ (vp p n + 1) := by rw [pow_succ.nat]; ring
+    rw [h2] at hbad
+    exact hsp.2 ((mul_dvd_mul_left_iff p (p ^ (vp p n + 1)) n (by omega) (pow_pos.nat p (vp p n + 1) (by omega))).mp hbad)
+
+-- Ultrametric valuation inequality on N: min(v_p(a), v_p(b)) <= v_p(a + b)!
++ vp.min_le_add (p a b : ℕ) (hp : 2 ≤ p) (ha : 0 < a) (hb : 0 < b) : min (vp p a) (vp p b) ≤ vp p (a + b)
+  have hda : p ^ (min (vp p a) (vp p b)) ∣ a := (vp.le_iff_pow_dvd p a (min (vp p a) (vp p b)) hp ha).mp (min_le_left.nat (vp p a) (vp p b))
+  have hdb : p ^ (min (vp p a) (vp p b)) ∣ b := (vp.le_iff_pow_dvd p b (min (vp p a) (vp p b)) hp hb).mp (min_le_right.nat (vp p a) (vp p b))
+  exact (vp.le_iff_pow_dvd p (a + b) (min (vp p a) (vp p b)) hp (by omega)).mpr (dvd.add_nat (p ^ (min (vp p a) (vp p b))) a b (pow_pos.nat p (min (vp p a) (vp p b)) (by omega)) hda hdb)
+
+-- Prime multiplicativity: v_p(a * b) = v_p(a) + v_p(b) for every prime p and a, b > 0!
++ vp.mul (p a b : ℕ) (hprime : is_prime_nat p) (ha : 0 < a) (hb : 0 < b) : vp p (a * b) = vp p a + vp p b
+  unfold is_prime_nat at hprime
+  have hp := hprime.1
+  have hspa := vp.spec p a hp ha
+  have hspb := vp.spec p b hp hb
+  obtain ⟨qa, hqa⟩ := (dvd.iff_exists (p ^ (vp p a)) a (pow_pos.nat p (vp p a) (by omega))).mp hspa.1
+  obtain ⟨qb, hqb⟩ := (dvd.iff_exists (p ^ (vp p b)) b (pow_pos.nat p (vp p b) (by omega))).mp hspb.1
+  have hnd_a : ¬ (p ∣ qa)
+    intro hd
+    obtain ⟨r, hr⟩ := (dvd.iff_exists p qa (by omega)).mp hd
+    have hdiv : p ^ (vp p a + 1) ∣ a
+      have ha_eq : a = p ^ (vp p a + 1) * r
+        calc a
+          = p ^ (vp p a) * qa := hqa
+          _ = p ^ (vp p a) * (p * r) := by rw [hr]
+          _ = (p ^ (vp p a) * p) * r := by ring
+          _ = p ^ (vp p a + 1) * r := by rw [pow_succ.nat]
+      exact (dvd.iff_exists (p ^ (vp p a + 1)) a (pow_pos.nat p (vp p a + 1) (by omega))).mpr ⟨r, ha_eq⟩
+    exact hspa.2 hdiv
+  have hnd_b : ¬ (p ∣ qb)
+    intro hd
+    obtain ⟨r, hr⟩ := (dvd.iff_exists p qb (by omega)).mp hd
+    have hdiv : p ^ (vp p b + 1) ∣ b
+      have hb_eq : b = p ^ (vp p b + 1) * r
+        calc b
+          = p ^ (vp p b) * qb := hqb
+          _ = p ^ (vp p b) * (p * r) := by rw [hr]
+          _ = (p ^ (vp p b) * p) * r := by ring
+          _ = p ^ (vp p b + 1) * r := by rw [pow_succ.nat]
+      exact (dvd.iff_exists (p ^ (vp p b + 1)) b (pow_pos.nat p (vp p b + 1) (by omega))).mpr ⟨r, hb_eq⟩
+    exact hspb.2 hdiv
+  have hnd_ab : ¬ (p ∣ (qa * qb))
+    intro hd
+    obtain ha_d | hb_d := hprime.2 qa qb hd
+    · exact hnd_a ha_d
+    · exact hnd_b hb_d
+  have hab_pos : 0 < a * b := mul_pos.nat a b ha hb
+  have hfac : a * b = p ^ (vp p a + vp p b) * (qa * qb)
+    have hmul1 : a * b = (p ^ (vp p a) * qa) * (p ^ (vp p b) * qb)
+      have hm1 : a * b = (p ^ (vp p a) * qa) * b := by linear_combination b * hqa
+      have hm2 : (p ^ (vp p a) * qa) * b = (p ^ (vp p a) * qa) * (p ^ (vp p b) * qb) := by linear_combination (p ^ (vp p a) * qa) * hqb
+      linarith
+    rw [hmul1, pow_add.nat]; ring
+  apply vp.unique p (a * b) (vp p a + vp p b) hp hab_pos
+  · exact (dvd.iff_exists (p ^ (vp p a + vp p b)) (a * b) (pow_pos.nat p (vp p a + vp p b) (by omega))).mpr ⟨qa * qb, hfac⟩
+  · intro hbad
+    rw [hfac, pow_succ.nat] at hbad
+    have hpow_eq : p ^ (vp p a + vp p b) * p ∣ p ^ (vp p a + vp p b) * (qa * qb) := hbad
+    have hq_div := (mul_dvd_mul_left_iff (p ^ (vp p a + vp p b)) p (qa * qb) (pow_pos.nat p (vp p a + vp p b) (by omega)) (by omega)).mp hpow_eq
+    exact hnd_ab hq_div
+
++ vp.pow (p a k : ℕ) (hprime : is_prime_nat p) (ha : 0 < a) : vp p (a ^ k) = k * vp p a
+  have hp : 2 ≤ p := hprime.1
+  induction k with j ih
+  · rw [pow_zero.nat]
+    have h1 : vp p 1 = 0
+      apply vp.eq_zero_of_not_dvd p 1 hp (by decide)
+      intro hd
+      obtain ⟨q, hq⟩ := (dvd.iff_exists p 1 (by omega)).mp hd
+      by_cases hq0 : q = 0
+      · rw [hq0] at hq; omega
+      · have hq1 : 1 ≤ q := by omega
+        nlinarith
+    rw [h1]; ring
+  · rw [succ_eq_add_one.nat, pow_succ.nat]
+    rw [vp.mul p (a ^ j) a hprime (pow_pos.nat a j ha) ha, ih]
+    ring
+
+-- ====================================================================================
+-- 3. Real-Valued p-adic Norm |n|_p = p^(-v_p(n)) & Adelic Product Formula Lower Bound
+-- ====================================================================================
+
+-> padic.abs (p n : ℕ) : ℝ :=
+  if n = 0 then 0 else rpow (p : ℝ) (-((vp p n : ℕ) : ℝ))
+
++ padic.abs_zero (p : ℕ) : padic.abs p 0 = 0
+  unfold padic.abs; simp
+
++ padic.abs_pos_val (p n : ℕ) (hn : n ≠ 0) : padic.abs p n = rpow (p : ℝ) (-((vp p n : ℕ) : ℝ))
+  unfold padic.abs
+  have hif : ∀ a b : ℝ, (if n = 0 then a else b) = b := by intro a b; simp [hn]
+  exact hif 0 (rpow (p : ℝ) (-((vp p n : ℕ) : ℝ)))
+
++ padic.abs_nonneg (p n : ℕ) : 0 ≤ padic.abs p n
+  by_cases h0 : n = 0
+  · rw [h0, padic.abs_zero]; decide
+  · rw [padic.abs_pos_val p n h0]
+    linarith [rpow.pos (p : ℝ) (-((vp p n : ℕ) : ℝ))]
+
++ padic.abs_pos (p n : ℕ) (hn : 0 < n) : 0 < padic.abs p n
+  rw [padic.abs_pos_val p n (by omega)]
+  exact rpow.pos (p : ℝ) (-((vp p n : ℕ) : ℝ))
+
++ rpow_le_of_exp_le (b x y : ℝ) (hb : 1 ≤ b) (hxy : x ≤ y) : rpow b x ≤ rpow b y
+  unfold rpow
+  have hlog : 0 ≤ log b
+    have h0 := (log_le_log 1 b (by decide) (by linarith)).mpr hb
+    have hl1 : log 1 = 0 := by rw [← exp_zero, log_exp]
+    linarith
+  exact (exp_le_exp (x * log b) (y * log b)).mpr (mul_le_mul_of_nonneg_right.real x y (log b) hxy hlog)
+
+-- THEOREM 1 (Ultrametric Strong Triangle Inequality: |a + b|_p <= max(|a|_p, |b|_p)!):
++ padic.abs_add_le_max (p a b : ℕ) (hp : 2 ≤ p) : padic.abs p (a + b) ≤ max (padic.abs p a) (padic.abs p b)
+  by_cases ha0 : a = 0
+  · rw [ha0]; simp
+    exact le_max_right.real (padic.abs p 0) (padic.abs p b)
+  · by_cases hb0 : b = 0
+    · rw [hb0]; simp
+      exact le_max_left.real (padic.abs p a) (padic.abs p 0)
+    · have ha : 0 < a := by omega
+      have hb : 0 < b := by omega
+      have hab : a + b ≠ 0 := by omega
+      rw [padic.abs_pos_val p (a + b) hab, padic.abs_pos_val p a ha0, padic.abs_pos_val p b hb0]
+      have hmin := vp.min_le_add p a b hp ha hb
+      have hp1 : (1 : ℝ) ≤ (p : ℝ) := (cast_le.real 1 p).mpr (by omega)
+      by_cases hcmp : vp p a ≤ vp p b
+      · have hle : vp p a ≤ vp p (a + b)
+          have hm : min (vp p a) (vp p b) = vp p a := min_eq_left.nat (vp p a) (vp p b) hcmp
+          omega
+        have hcast : ((vp p a : ℕ) : ℝ) ≤ ((vp p (a + b) : ℕ) : ℝ) := (cast_le.real (vp p a) (vp p (a + b))).mpr hle
+        have hr := rpow_le_of_exp_le (p : ℝ) (-((vp p (a + b) : ℕ) : ℝ)) (-((vp p a : ℕ) : ℝ)) hp1 (by linarith)
+        linarith [le_max_left.real (rpow (p : ℝ) (-((vp p a : ℕ) : ℝ))) (rpow (p : ℝ) (-((vp p b : ℕ) : ℝ)))]
+      · have hle : vp p b ≤ vp p (a + b)
+          have hm : min (vp p a) (vp p b) = vp p b := min_eq_right.nat (vp p a) (vp p b) (by omega)
+          omega
+        have hcast : ((vp p b : ℕ) : ℝ) ≤ ((vp p (a + b) : ℕ) : ℝ) := (cast_le.real (vp p b) (vp p (a + b))).mpr hle
+        have hr := rpow_le_of_exp_le (p : ℝ) (-((vp p (a + b) : ℕ) : ℝ)) (-((vp p b : ℕ) : ℝ)) hp1 (by linarith)
+        linarith [le_max_right.real (rpow (p : ℝ) (-((vp p a : ℕ) : ℝ))) (rpow (p : ℝ) (-((vp p b : ℕ) : ℝ)))]
+
+-- THEOREM 2 (Multiplicativity of the p-adic Norm: |a * b|_p = |a|_p * |b|_p!):
++ padic.abs_mul (p a b : ℕ) (hprime : is_prime_nat p) : padic.abs p (a * b) = padic.abs p a * padic.abs p b
+  by_cases ha0 : a = 0
+  · rw [ha0]; simp; rw [padic.abs_zero]; ring
+  · by_cases hb0 : b = 0
+    · rw [hb0]; simp; rw [padic.abs_zero]; ring
+    · have ha : 0 < a := by omega
+      have hb : 0 < b := by omega
+      have hab : a * b ≠ 0 := by
+        have hp := mul_pos.nat a b ha hb
+        omega
+      rw [padic.abs_pos_val p (a * b) hab, padic.abs_pos_val p a ha0, padic.abs_pos_val p b hb0]
+      rw [vp.mul p a b hprime ha hb, cast_add.real (vp p a) (vp p b)]
+      rw [← rpow.add]
+      have he : -((vp p a : ℕ) : ℝ) + -((vp p b : ℕ) : ℝ) = -(((vp p a : ℕ) : ℝ) + ((vp p b : ℕ) : ℝ)) := by ring
+      rw [he]
+
+-- Helper: cast of p^k equals rpow p k.
++ rpow_nat_eq_pow_cast (p k : ℕ) (hp : 0 < p) : rpow (p : ℝ) ((k : ℕ) : ℝ) = ((p ^ k : ℕ) : ℝ)
+  induction k with j ih
+  · rw [pow_zero.nat]; unfold rpow; simp; exact exp_zero
+  · rw [succ_eq_add_one.nat, cast_add.real j 1, pow_succ.nat, cast_mul.real]
+    rw [rpow.add, ih]
+    have hp1 : rpow (p : ℝ) ((1 : ℕ) : ℝ) = (p : ℝ)
+      unfold rpow; simp
+      have hpos : (0 : ℝ) < (p : ℝ) := (cast_pos.real p).mpr hp
+      exact exp_log (p : ℝ) hpos
+    rw [hp1]
+
+-- THEOREM 3 (Archimedean x p-adic Product Formula Lower Bound: 1 <= n * |n|_p for n >= 1!):
++ padic.arch_mul_padic_ge_one (p n : ℕ) (hp : 2 ≤ p) (hn : 0 < n) : 1 ≤ (n : ℝ) * padic.abs p n
+  rw [padic.abs_pos_val p n (by omega)]
+  have hdvd := vp.pow_dvd p n hp hn
+  obtain ⟨q, hq⟩ := (dvd.iff_exists (p ^ (vp p n)) n (pow_pos.nat p (vp p n) (by omega))).mp hdvd
+  have hq_pos : 0 < q
+    by_contra h0
+    have hqz : q = 0 := by omega
+    rw [hqz] at hq
+    omega
+  have hle_nat : p ^ (vp p n) ≤ n := by nlinarith
+  have hle_real : ((p ^ (vp p n) : ℕ) : ℝ) ≤ (n : ℝ) := (cast_le.real (p ^ (vp p n)) n).mpr hle_nat
+  rw [← rpow_nat_eq_pow_cast p (vp p n) (by omega)] at hle_real
+  have hinv : rpow (p : ℝ) ((vp p n : ℕ) : ℝ) * rpow (p : ℝ) (-((vp p n : ℕ) : ℝ)) = 1
+    rw [← rpow.add]
+    have h0 : ((vp p n : ℕ) : ℝ) + -((vp p n : ℕ) : ℝ) = 0 := by ring
+    rw [h0]; unfold rpow; simp; exact exp_zero
+  have hmul := mul_le_mul_of_nonneg_right.real (rpow (p : ℝ) ((vp p n : ℕ) : ℝ)) (n : ℝ) (rpow (p : ℝ) (-((vp p n : ℕ) : ℝ))) hle_real (by linarith [rpow.pos (p : ℝ) (-((vp p n : ℕ) : ℝ))])
+  linarith
+
+-- THEOREM 4 (Adelic Integrality Obstruction: n * |n|_p < 1 => n = 0!):
++ padic.vanish_of_arch_mul_lt_one (p n : ℕ) (hp : 2 ≤ p) (hlt : (n : ℝ) * padic.abs p n < 1) : n = 0
+  by_contra hnz
+  have hge := padic.arch_mul_padic_ge_one p n hp (by omega)
+  linarith

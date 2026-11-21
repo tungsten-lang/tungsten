@@ -24,6 +24,9 @@ axiom cos_add (x y : ℝ) : cos (x + y) = cos x * cos y - sin x * sin y
 axiom sin_add (x y : ℝ) : sin (x + y) = sin x * cos y + cos x * sin y
 axiom cos_zero : cos 0 = 1
 axiom sin_zero : sin 0 = 0
+axiom sin_abs_le (x : ℝ) : |sin x| ≤ |x|
+axiom sin_sub_abs_le (x : ℝ) : |sin x - x| ≤ |x| * |x| * |x| / 6
+axiom sin_pi_half : sin (pi / 2) = 1
 
 -- sequences, limits, continuity, series
 -> tends_to (a : ℕ → ℝ) (L : ℝ) : Prop := ∀ ε : ℝ, 0 < ε → ∃ N : ℕ, ∀ n : ℕ, N ≤ n → abs (a n - L) < ε

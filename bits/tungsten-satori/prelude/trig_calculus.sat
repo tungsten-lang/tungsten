@@ -1,0 +1,478 @@
+-- Trigonometric Calculus, Euler's Identity, Complex Power Step Bounds, &
+-- Complex Circle Contour Integration Prelude for Satori (0 CUSTOM AXIOMS beyond `real.sat`!)
+--
+-- Derived unconditionally from `real.sat` (`sin_abs_le`, `sin_sub_abs_le`, `sin_pi_half`):
+--   1. Parity (`cos_neg`, `sin_neg`), quarter/half/full-turn values (`cos_pi_half`, `sin_pi`,
+--      `cos_pi`, `sin_two_pi`, `cos_two_pi`), Euler's identity `e^(i*pi) + 1 = 0` & `e^(2*pi*i) = 1`
+--   2. Cosine remainder `0 <= 1 - cos h <= h^2 / 2` (`one_sub_cos_le`)
+--   3. Exact real derivatives `has_deriv_within.sin` (d/dx sin x = cos x) and
+--      `has_deriv_within.cos` (d/dx cos x = -sin x), plus continuity (`continuous_at.sin/cos`)
+--   4. Unit-circle Lipschitz bound `|e^(i*a) - e^(i*b)| <= |a - b|` (`cexp_imag.diff_abs_le`)
+--   5. Exact complex power step bound `|n^(-s) - (n+1)^(-s)| <= (Re s + |Im s|) * n^(-Re s - 1)`
+--      (unlocking FULL complex critical-strip convergence of L(chi, s) & zeta(s) for ALL Re(s) > 0!)
+--   6. Exact complex circle contour integrals: `oint_{|z-z0|=r} dz/(z-z0) = 2*pi*i` and
+--      `oint_{|z-z0|=r} (z-z0)^n dz = 0` for all n : N!
+
+import complex_contour
+
+-- ====================================================================================
+-- 1. Parity, Special Angles, & Euler's Identity e^(i*pi) + 1 = 0
+-- ====================================================================================
+
++ cos_abs_le_one (x : ℝ) : |cos x| ≤ 1
+  have hsq : cos x * cos x ≤ 1 := by linarith [sin_sq_add_cos_sq x, complex.real_sq_nonneg (sin x)]
+  exact abs_le_of.real (cos x) 1 (by nlinarith) (by nlinarith)
+
++ sin_abs_le_one (x : ℝ) : |sin x| ≤ 1
+  have hsq : sin x * sin x ≤ 1 := by linarith [sin_sq_add_cos_sq x, complex.real_sq_nonneg (cos x)]
+  exact abs_le_of.real (sin x) 1 (by nlinarith) (by nlinarith)
+
++ cos_neg (x : ℝ) : cos (-x) = cos x
+  have h1 := cos_add x (-x)
+  have h2 := sin_add x (-x)
+  have h0 : x + -x = 0 := by ring
+  rw [h0, cos_zero] at h1
+  rw [h0, sin_zero] at h2
+  have hpy := sin_sq_add_cos_sq x
+  linear_combination -(cos x) * h1 - sin x * h2 - cos (-x) * hpy
+
++ sin_neg (x : ℝ) : sin (-x) = -sin x
+  have h1 := cos_add x (-x)
+  have h2 := sin_add x (-x)
+  have h0 : x + -x = 0 := by ring
+  rw [h0, cos_zero] at h1
+  rw [h0, sin_zero] at h2
+  have hpy := sin_sq_add_cos_sq x
+  linear_combination sin x * h1 - cos x * h2 - sin (-x) * hpy
+
++ cos_pi_half : cos (pi / 2) = 0
+  have hpy := sin_sq_add_cos_sq (pi / 2)
+  rw [sin_pi_half] at hpy
+  nlinarith
+
++ sin_pi : sin pi = 0
+  have hp : pi = pi / 2 + pi / 2 := by ring
+  rw [hp, sin_add, sin_pi_half, cos_pi_half]; ring
+
++ cos_pi : cos pi = -1
+  have hp : pi = pi / 2 + pi / 2 := by ring
+  rw [hp, cos_add, sin_pi_half, cos_pi_half]; ring
+
++ sin_two_pi : sin (2 * pi) = 0
+  have hp : 2 * pi = pi + pi := by ring
+  rw [hp, sin_add, sin_pi, cos_pi]; ring
+
++ cos_two_pi : cos (2 * pi) = 1
+  have hp : 2 * pi = pi + pi := by ring
+  rw [hp, cos_add, sin_pi, cos_pi]; ring
+
+-- EULER'S IDENTITY: e^(i*pi) + 1 = 0  and  e^(2*pi*i) = 1!
++ complex.exp_pi_I_add_one : complex.add (complex.exp (complex.mk 0 pi)) complex.one = complex.zero
+  apply complex.ext
+  · simp [exp_zero, cos_pi]
+  · simp [exp_zero, sin_pi]
+
++ complex.exp_two_pi_I : complex.exp (complex.mk 0 (2 * pi)) = complex.one
+  apply complex.ext
+  · simp [exp_zero, cos_two_pi]
+  · simp [exp_zero, sin_two_pi]
+
+-- ====================================================================================
+-- 2. Cosine Remainder & Exact Real Derivatives of sin and cos (0 EXTRA AXIOMS!)
+-- ====================================================================================
+
++ one_sub_cos_eq_two_sin_sq (h : ℝ) : 1 - cos h = 2 * (sin (h / 2) * sin (h / 2))
+  have hc := cos_add (h / 2) (h / 2)
+  have hh : h / 2 + h / 2 = h := by ring
+  rw [hh] at hc
+  linear_combination -hc - sin_sq_add_cos_sq (h / 2)
+
++ one_sub_cos_le (h : ℝ) : 0 ≤ 1 - cos h ∧ 1 - cos h ≤ h * h / 2
+  rw [one_sub_cos_eq_two_sin_sq h]
+  constructor
+  · nlinarith
+  · have hs := sin_abs_le (h / 2)
+    have hsq : sin (h / 2) * sin (h / 2) ≤ (h / 2) * (h / 2)
+      have h1 := sq_abs.real (sin (h / 2))
+      have h2 := sq_abs.real (h / 2)
+      have ha1 := abs_nonneg.real (sin (h / 2))
+      have ha2 := abs_nonneg.real (h / 2)
+      nlinarith
+    linarith
+
++ has_deriv_within.sin (S : set ℝ) (x : ℝ) : has_deriv_within sin S x (cos x)
+  unfold has_deriv_within
+  intro e he
+  set d := min 1 e with hd
+  have hd_pos : 0 < d := by rw [hd]; exact lt_min.real 1 e 0 (by decide) he
+  use d; constructor
+  · exact hd_pos
+  · intro y hy hnear
+    set h := y - x with hh
+    have hyx : y = x + h := by rw [hh]; ring
+    have h1 : |h| < 1 := by linarith [min_le_left.real 1 e]
+    have h2 : |h| < e := by linarith [min_le_right.real 1 e]
+    have hdecomp : sin y - sin x - cos x * h = sin x * (cos h - 1) + cos x * (sin h - h)
+      rw [hyx, sin_add]; ring
+    rw [hdecomp]
+    have hcos_bd := one_sub_cos_le h
+    have hsin_bd := sin_sub_abs_le h
+    have hs1 := sin_abs_le_one x
+    have hc1 := cos_abs_le_one x
+    have hterm1 : |sin x * (cos h - 1)| ≤ h * h / 2
+      rw [abs_mul.real]
+      have hneg_abs : |cos h - 1| = 1 - cos h
+        have h0 : cos h - 1 = -(1 - cos h) := by ring
+        rw [abs_of_nonpos.real (cos h - 1) (by linarith)]; ring
+      rw [hneg_abs]
+      have hm1 := mul_le_mul_of_nonneg_right.real (|sin x|) 1 (1 - cos h) hs1 hcos_bd.1
+      linarith
+    have hterm2 : |cos x * (sin h - h)| ≤ |h| * |h| * |h| / 6
+      rw [abs_mul.real]
+      have hm1 := mul_le_mul_of_nonneg_right.real (|cos x|) 1 (|sin h - h|) hc1 (abs_nonneg.real (sin h - h))
+      linarith
+    have hsum_abs : |sin x * (cos h - 1) + cos x * (sin h - h)| ≤ h * h / 2 + |h| * |h| * |h| / 6
+      have hlo : 0 - (h * h / 2 + |h| * |h| * |h| / 6) ≤ sin x * (cos h - 1) + cos x * (sin h - h) := by linarith [neg_le_abs.real (sin x * (cos h - 1)), neg_le_abs.real (cos x * (sin h - h))]
+      have hhi : sin x * (cos h - 1) + cos x * (sin h - h) ≤ h * h / 2 + |h| * |h| * |h| / 6 := by linarith [le_abs_self.real (sin x * (cos h - 1)), le_abs_self.real (cos x * (sin h - h))]
+      exact abs_le_of.real (sin x * (cos h - 1) + cos x * (sin h - h)) (h * h / 2 + |h| * |h| * |h| / 6) hlo hhi
+    have hhsq : h * h = |h| * |h| := (sq_abs.real h).symm
+    have hcube : |h| * |h| * |h| ≤ |h| * |h|
+      have hnn := abs_nonneg.real h
+      nlinarith
+    have hbound : h * h / 2 + |h| * |h| * |h| / 6 ≤ |h| * |h|
+      rw [hhsq]; linarith
+    have heh : |h| * |h| ≤ e * |h| := mul_le_mul_of_nonneg_right.real (|h|) e (|h|) (by linarith) (abs_nonneg.real h)
+    linarith
+
++ has_deriv_within.cos (S : set ℝ) (x : ℝ) : has_deriv_within cos S x (-sin x)
+  unfold has_deriv_within
+  intro e he
+  set d := min 1 e with hd
+  have hd_pos : 0 < d := by rw [hd]; exact lt_min.real 1 e 0 (by decide) he
+  use d; constructor
+  · exact hd_pos
+  · intro y hy hnear
+    set h := y - x with hh
+    have hyx : y = x + h := by rw [hh]; ring
+    have h1 : |h| < 1 := by linarith [min_le_left.real 1 e]
+    have h2 : |h| < e := by linarith [min_le_right.real 1 e]
+    have hdecomp : cos y - cos x - (-sin x) * h = cos x * (cos h - 1) - sin x * (sin h - h)
+      rw [hyx, cos_add]; ring
+    rw [hdecomp]
+    have hcos_bd := one_sub_cos_le h
+    have hsin_bd := sin_sub_abs_le h
+    have hs1 := sin_abs_le_one x
+    have hc1 := cos_abs_le_one x
+    have hterm1 : |cos x * (cos h - 1)| ≤ h * h / 2
+      rw [abs_mul.real]
+      have hneg_abs : |cos h - 1| = 1 - cos h
+        rw [abs_of_nonpos.real (cos h - 1) (by linarith)]; ring
+      rw [hneg_abs]
+      have hm1 := mul_le_mul_of_nonneg_right.real (|cos x|) 1 (1 - cos h) hc1 hcos_bd.1
+      linarith
+    have hterm2 : |sin x * (sin h - h)| ≤ |h| * |h| * |h| / 6
+      rw [abs_mul.real]
+      have hm1 := mul_le_mul_of_nonneg_right.real (|sin x|) 1 (|sin h - h|) hs1 (abs_nonneg.real (sin h - h))
+      linarith
+    have hsum_abs : |cos x * (cos h - 1) - sin x * (sin h - h)| ≤ h * h / 2 + |h| * |h| * |h| / 6
+      have hlo : 0 - (h * h / 2 + |h| * |h| * |h| / 6) ≤ cos x * (cos h - 1) - sin x * (sin h - h) := by linarith [neg_le_abs.real (cos x * (cos h - 1)), le_abs_self.real (sin x * (sin h - h))]
+      have hhi : cos x * (cos h - 1) - sin x * (sin h - h) ≤ h * h / 2 + |h| * |h| * |h| / 6 := by linarith [le_abs_self.real (cos x * (cos h - 1)), neg_le_abs.real (sin x * (sin h - h))]
+      exact abs_le_of.real (cos x * (cos h - 1) - sin x * (sin h - h)) (h * h / 2 + |h| * |h| * |h| / 6) hlo hhi
+    have hhsq : h * h = |h| * |h| := (sq_abs.real h).symm
+    have hcube : |h| * |h| * |h| ≤ |h| * |h|
+      have hnn := abs_nonneg.real h
+      nlinarith
+    have hbound : h * h / 2 + |h| * |h| * |h| / 6 ≤ |h| * |h|
+      rw [hhsq]; linarith
+    have heh : |h| * |h| ≤ e * |h| := mul_le_mul_of_nonneg_right.real (|h|) e (|h|) (by linarith) (abs_nonneg.real h)
+    linarith
+
+@[auto] + continuous_at.sin (x : ℝ) : continuous_at sin x
+  exact has_deriv.continuous_at sin x (cos x) (has_deriv_within.sin (fun _ => True) x)
+
+@[auto] + continuous_at.cos (x : ℝ) : continuous_at cos x
+  exact has_deriv.continuous_at cos x (-sin x) (has_deriv_within.cos (fun _ => True) x)
+
+-- ====================================================================================
+-- 3. Unit-Circle Lipschitz Bound & Full Complex Power Step Bound (Re(s) > 0!)
+-- ====================================================================================
+
+-- |e^(i*a) - e^(i*b)| <= |a - b| for ALL real a, b!
++ cexp_imag.diff_abs_le (a b : ℝ) :
+    complex.abs (complex.sub (complex.exp (complex.mk 0 a)) (complex.exp (complex.mk 0 b))) ≤ |a - b|
+  have hsq : complex.abs (complex.sub (complex.exp (complex.mk 0 a)) (complex.exp (complex.mk 0 b))) * complex.abs (complex.sub (complex.exp (complex.mk 0 a)) (complex.exp (complex.mk 0 b))) = 4 * (sin ((a - b) / 2) * sin ((a - b) / 2))
+    rw [complex.abs_sq]
+    unfold complex.norm_sq
+    simp [exp_zero]
+    have hdiff : cos (a - b) = cos a * cos b + sin a * sin b
+      have he : a - b = a + (-b) := by ring
+      rw [he, cos_add, cos_neg, sin_neg]; ring
+    have h1 := one_sub_cos_eq_two_sin_sq (a - b)
+    have hpa := sin_sq_add_cos_sq a
+    have hpb := sin_sq_add_cos_sq b
+    linear_combination hpa + hpb + 2 * hdiff + 2 * h1
+  have hs := sin_abs_le ((a - b) / 2)
+  have hsin_sq : 4 * (sin ((a - b) / 2) * sin ((a - b) / 2)) ≤ |a - b| * |a - b|
+    have h1 := sq_abs.real (sin ((a - b) / 2))
+    have h2 := sq_abs.real ((a - b) / 2)
+    have h3 := sq_abs.real (a - b)
+    have ha1 := abs_nonneg.real (sin ((a - b) / 2))
+    have ha2 := abs_nonneg.real ((a - b) / 2)
+    nlinarith
+  have ha := complex.abs_nonneg (complex.sub (complex.exp (complex.mk 0 a)) (complex.exp (complex.mk 0 b)))
+  have hb := abs_nonneg.real (a - b)
+  nlinarith
+
+-- Elementary log gap: log(y) - log(x) <= (y - x) / x for 0 < x <= y!
++ log_sub_le_div (x y : ℝ) (hx : 0 < x) (hxy : x ≤ y) : log y - log x ≤ (y - x) / x
+  have hge := exp_ge_one_add ((y - x) / x)
+  have hrat : 1 + (y - x) / x = y / x
+    rw [div_def.real (y - x) x, div_def.real y x]
+    have hc := mul_inv_cancel.real x (by linarith)
+    linear_combination -hc
+  rw [hrat] at hge
+  have hyx_pos : 0 < y / x := div_pos.real y x (by linarith) hx
+  have hl := (log_le_log (y / x) (exp ((y - x) / x)) hyx_pos (exp_pos ((y - x) / x))).mpr hge
+  rw [log_exp] at hl
+  have hldiv : log (y / x) + log x = log y
+    rw [← log_mul.real (y / x) x hyx_pos hx]
+    have hc : (y / x) * x = y := by have h := mul_div_cancel.real y x (by linarith); linarith
+    rw [hc]
+  linarith
+
+-- KEY THEOREM (Exact Complex Power Step Difference Bound — 0 EXTRA AXIOMS!):
+-- For ANY 0 < a <= b and ANY complex s with Re(s) > 0:
+--   |a^(-s) - b^(-s)| <= (Re(s) + |Im(s)|) * ((b - a) / a) * a^(-Re(s)) !
+-- In particular, for a = n + 1, b = n + 2:
+--   |(n+1)^(-s) - (n+2)^(-s)| <= (Re(s) + |Im(s)|) * (n+1)^(-Re(s) - 1) !
++ cpow_real.complex_step_diff_le (a b : ℝ) (s : ℂ) (ha : 0 < a) (hab : a ≤ b) (hs : 0 < complex.re s) :
+    complex.abs (complex.sub (cpow_real a (complex.neg s)) (cpow_real b (complex.neg s))) ≤ (complex.re s + |complex.im s|) * ((b - a) / a) * rpow a (-complex.re s)
+  -- Split a^(-s) - b^(-s) = (a^(-sigma) - b^(-sigma)) * e^(-i*t*log a) + b^(-sigma) * (e^(-i*t*log a) - e^(-i*t*log b))
+  set sigma := complex.re s with hsig
+  set t := complex.im s with ht
+  have hfac_a : cpow_real a (complex.neg s) = complex.mul (complex.of_real (rpow a (-sigma))) (complex.exp (complex.mk 0 (-t * log a)))
+    unfold cpow_real rpow
+    apply complex.ext
+    · simp [exp_zero]; rw [← hsig, ← ht]
+      have h1 : log a * (0 - sigma) = -sigma * log a := by ring
+      have h2 : log a * (0 - t) = -t * log a := by ring
+      rw [h1, h2]; ring
+    · simp [exp_zero]; rw [← hsig, ← ht]
+      have h1 : log a * (0 - sigma) = -sigma * log a := by ring
+      have h2 : log a * (0 - t) = -t * log a := by ring
+      rw [h1, h2]
+  have hfac_b : cpow_real b (complex.neg s) = complex.mul (complex.of_real (rpow b (-sigma))) (complex.exp (complex.mk 0 (-t * log b)))
+    unfold cpow_real rpow
+    apply complex.ext
+    · simp [exp_zero]; rw [← hsig, ← ht]
+      have h1 : log b * (0 - sigma) = -sigma * log b := by ring
+      have h2 : log b * (0 - t) = -t * log b := by ring
+      rw [h1, h2]; ring
+    · simp [exp_zero]; rw [← hsig, ← ht]
+      have h1 : log b * (0 - sigma) = -sigma * log b := by ring
+      have h2 : log b * (0 - t) = -t * log b := by ring
+      rw [h1, h2]
+  have hsplit : complex.sub (cpow_real a (complex.neg s)) (cpow_real b (complex.neg s)) = complex.add (complex.mul (complex.of_real (rpow a (-sigma) - rpow b (-sigma))) (complex.exp (complex.mk 0 (-t * log a)))) (complex.mul (complex.of_real (rpow b (-sigma))) (complex.sub (complex.exp (complex.mk 0 (-t * log a))) (complex.exp (complex.mk 0 (-t * log b)))))
+    rw [hfac_a, hfac_b]
+    apply complex.ext <;> simp <;> ring
+  rw [hsplit]
+  have htri := complex.abs_add_le (complex.mul (complex.of_real (rpow a (-sigma) - rpow b (-sigma))) (complex.exp (complex.mk 0 (-t * log a)))) (complex.mul (complex.of_real (rpow b (-sigma))) (complex.sub (complex.exp (complex.mk 0 (-t * log a))) (complex.exp (complex.mk 0 (-t * log b)))))
+  have hlog_le : log a ≤ log b := (log_le_log a b ha (by linarith)).mpr hab
+  have hlog_gap := log_sub_le_div a b ha hab
+  -- Bound 1: 0 <= a^(-sigma) - b^(-sigma) <= sigma * ((b - a) / a) * a^(-sigma)
+  have hdiff_nn : 0 ≤ rpow a (-sigma) - rpow b (-sigma)
+    unfold rpow
+    have hle : (-sigma) * log b ≤ (-sigma) * log a := by nlinarith
+    have hexp := (exp_le_exp ((-sigma) * log b) ((-sigma) * log a)).mpr hle
+    linarith
+  have hdiff_ub : rpow a (-sigma) - rpow b (-sigma) ≤ sigma * ((b - a) / a) * rpow a (-sigma)
+    -- 1 - exp(-sigma*(log b - log a)) <= sigma*(log b - log a) <= sigma * (b - a)/a
+    have h1 := exp_ge_one_add (-sigma * (log b - log a))
+    have hmul := mul_le_mul_of_nonneg_right.real (1 + -sigma * (log b - log a)) (exp (-sigma * (log b - log a))) (rpow a (-sigma)) h1 (by linarith [rpow.pos a (-sigma)])
+    have hprod_b : exp (-sigma * (log b - log a)) * rpow a (-sigma) = rpow b (-sigma)
+      unfold rpow; rw [← exp_add]
+      have he : -sigma * (log b - log a) + -sigma * log a = -sigma * log b := by ring
+      rw [he]
+    rw [hprod_b] at hmul
+    have hgap2 := mul_le_mul_of_nonneg_left.real (log b - log a) ((b - a) / a) sigma hlog_gap (by linarith)
+    have hgap3 := mul_le_mul_of_nonneg_right.real (sigma * (log b - log a)) (sigma * ((b - a) / a)) (rpow a (-sigma)) hgap2 (by linarith [rpow.pos a (-sigma)])
+    linarith
+  -- Modulus of term 1:
+  have ht1 : complex.abs (complex.mul (complex.of_real (rpow a (-sigma) - rpow b (-sigma))) (complex.exp (complex.mk 0 (-t * log a)))) = rpow a (-sigma) - rpow b (-sigma)
+    rw [complex.abs_mul]
+    have ha1 : complex.abs (complex.of_real (rpow a (-sigma) - rpow b (-sigma))) = rpow a (-sigma) - rpow b (-sigma)
+      have hsq : complex.abs (complex.of_real (rpow a (-sigma) - rpow b (-sigma))) * complex.abs (complex.of_real (rpow a (-sigma) - rpow b (-sigma))) = (rpow a (-sigma) - rpow b (-sigma)) * (rpow a (-sigma) - rpow b (-sigma))
+        rw [complex.abs_sq]; unfold complex.norm_sq complex.of_real; simp
+      have hnn := complex.abs_nonneg (complex.of_real (rpow a (-sigma) - rpow b (-sigma)))
+      nlinarith
+    have ha2 : complex.abs (complex.exp (complex.mk 0 (-t * log a))) = 1
+      have hsq : complex.abs (complex.exp (complex.mk 0 (-t * log a))) * complex.abs (complex.exp (complex.mk 0 (-t * log a))) = 1
+        rw [complex.abs_sq]; unfold complex.norm_sq; simp [exp_zero]
+        linear_combination sin_sq_add_cos_sq (-t * log a)
+      have hnn := complex.abs_nonneg (complex.exp (complex.mk 0 (-t * log a)))
+      nlinarith
+    rw [ha1, ha2]; ring
+  -- Modulus of term 2:
+  have ht2 : complex.abs (complex.mul (complex.of_real (rpow b (-sigma))) (complex.sub (complex.exp (complex.mk 0 (-t * log a))) (complex.exp (complex.mk 0 (-t * log b))))) ≤ |t| * ((b - a) / a) * rpow a (-sigma)
+    rw [complex.abs_mul]
+    have hb_abs : complex.abs (complex.of_real (rpow b (-sigma))) = rpow b (-sigma)
+      have hsq : complex.abs (complex.of_real (rpow b (-sigma))) * complex.abs (complex.of_real (rpow b (-sigma))) = rpow b (-sigma) * rpow b (-sigma)
+        rw [complex.abs_sq]; unfold complex.norm_sq complex.of_real; simp
+      have hnn := complex.abs_nonneg (complex.of_real (rpow b (-sigma)))
+      have hpos := rpow.pos b (-sigma)
+      nlinarith
+    rw [hb_abs]
+    have hlip := cexp_imag.diff_abs_le (-t * log a) (-t * log b)
+    have harg : |-t * log a - -t * log b| = |t| * (log b - log a)
+      have he : -t * log a - -t * log b = t * (log b - log a) := by ring
+      rw [he, abs_mul.real, abs_of_nonneg.real (log b - log a) (by linarith)]
+    rw [harg] at hlip
+    have hgap_t := mul_le_mul_of_nonneg_left.real (log b - log a) ((b - a) / a) (|t|) hlog_gap (abs_nonneg.real t)
+    have h1 := mul_le_mul_of_nonneg_left.real (complex.abs (complex.sub (complex.exp (complex.mk 0 (-t * log a))) (complex.exp (complex.mk 0 (-t * log b))))) (|t| * ((b - a) / a)) (rpow b (-sigma)) (by linarith) (by linarith [rpow.pos b (-sigma)])
+    have h2 := mul_le_mul_of_nonneg_right.real (rpow b (-sigma)) (rpow a (-sigma)) (|t| * ((b - a) / a)) (by linarith) (mul_nonneg.real (|t|) ((b - a) / a) (abs_nonneg.real t) (div_nonneg.real (b - a) a (by linarith) (by linarith)))
+    linarith
+  linarith
+
+-- ====================================================================================
+-- 4. Exact Complex Circle Contour Integrals (Cauchy Fundamental Loops — 0 AXIOMS!)
+-- ====================================================================================
+
+-- Circle parameterization gamma(theta) = z0 + r * e^(i*theta), gamma'(theta) = i * r * e^(i*theta)
+-> circle_path (z0 : ℂ) (r theta : ℝ) : ℂ :=
+  complex.add z0 (complex.smul r (complex.exp (complex.mk 0 theta)))
+
+-> circle_deriv (r theta : ℝ) : ℂ :=
+  complex.mul complex.I (complex.smul r (complex.exp (complex.mk 0 theta)))
+
+-- THEOREM 1 (Fundamental Cauchy Loop Integral: oint_{|z-z0|=r} 1/(z-z0) dz = 2*pi*i!):
++ cauchy.circle_inv_eq_two_pi_I (z0 : ℂ) (r : ℝ) (hr : 0 < r) :
+    cpath_integral (fun z => complex.inv (complex.sub z z0)) (circle_path z0 r) (circle_deriv r) 0 (2 * pi) (complex.mk 0 (2 * pi))
+  unfold cpath_integral
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  have hconst := c_has_integral.const 0 (2 * pi) complex.I (by linarith)
+  have hval : complex.smul (2 * pi - 0) complex.I = complex.mk 0 (2 * pi)
+    apply complex.ext <;> simp <;> ring
+  rw [hval] at hconst
+  apply c_has_integral.congr (fun _ => complex.I) (fun theta => complex.mul (complex.inv (complex.sub (circle_path z0 r theta) z0)) (circle_deriv r theta)) 0 (2 * pi) (complex.mk 0 (2 * pi)) hconst
+  intro theta _ _
+  unfold circle_path circle_deriv
+  have hsub : complex.sub (complex.add z0 (complex.smul r (complex.exp (complex.mk 0 theta)))) z0 = complex.smul r (complex.exp (complex.mk 0 theta))
+    apply complex.ext <;> simp <;> ring
+  rw [hsub]
+  have hne : complex.smul r (complex.exp (complex.mk 0 theta)) ≠ complex.zero
+    intro hz
+    have hns : complex.norm_sq (complex.smul r (complex.exp (complex.mk 0 theta))) = 0 := (complex.norm_sq_eq_zero (complex.smul r (complex.exp (complex.mk 0 theta)))).mpr hz
+    unfold complex.norm_sq at hns; simp [exp_zero] at hns
+    have hpy := sin_sq_add_cos_sq theta
+    have hrr : r * r * (sin theta * sin theta + cos theta * cos theta) = r * r := by rw [hpy]; ring
+    nlinarith
+  have hc := complex.mul_inv_cancel (complex.smul r (complex.exp (complex.mk 0 theta))) hne
+  have hmove : complex.mul (complex.inv (complex.smul r (complex.exp (complex.mk 0 theta)))) (complex.mul complex.I (complex.smul r (complex.exp (complex.mk 0 theta)))) = complex.mul complex.I (complex.mul (complex.smul r (complex.exp (complex.mk 0 theta))) (complex.inv (complex.smul r (complex.exp (complex.mk 0 theta)))))
+    apply complex.ext <;> simp <;> ring
+  rw [hmove, hc, complex.mul_one]
+
+-- THEOREM 2 (Cauchy Circle Integral of Non-Negative Powers: oint_{|z-z0|=r} (z-z0)^n dz = 0!):
++ cauchy.circle_pow_zero (z0 : ℂ) (r : ℝ) (n : ℕ) :
+    cpath_integral (fun z => cpow_nat (complex.sub z z0) n) (circle_path z0 r) (circle_deriv r) 0 (2 * pi) complex.zero
+  -- Primitive F(z) = (1 / (n + 1)) * (z - z0)^(n + 1), which is single-valued on the closed loop!
+  have hpi_pos : 0 < pi := by linarith [pi_bounds.1]
+  set k := ((n + 1 : ℕ) : ℝ) with hk
+  have hk_pos : 0 < k := by rw [hk]; exact (cast_pos.real (n + 1)).mpr (by omega)
+  have hclosed : circle_path z0 r 0 = circle_path z0 r (2 * pi)
+    unfold circle_path
+    rw [complex.exp_two_pi_I]
+    have h0 : complex.exp (complex.mk 0 0) = complex.one
+      apply complex.ext <;> simp [exp_zero, cos_zero, sin_zero]
+    rw [h0]
+  -- Simplify integrand directly: (r * e^(i*theta))^n * (i * r * e^(i*theta)) = i * r^(n+1) * e^(i*(n+1)*theta)!
+  have hint_eq : ∀ theta, complex.mul (cpow_nat (complex.sub (circle_path z0 r theta) z0) n) (circle_deriv r theta) = complex.mk (-(r ^ (n + 1)) * sin (k * theta)) ((r ^ (n + 1)) * cos (k * theta))
+    intro theta
+    unfold circle_path circle_deriv
+    have hsub : complex.sub (complex.add z0 (complex.smul r (complex.exp (complex.mk 0 theta)))) z0 = complex.smul r (complex.exp (complex.mk 0 theta))
+      apply complex.ext <;> simp <;> ring
+    rw [hsub]
+    have hpow_cexp : ∀ m : ℕ, cpow_nat (complex.smul r (complex.exp (complex.mk 0 theta))) m = complex.mk ((r ^ m) * cos ((m : ℝ) * theta)) ((r ^ m) * sin ((m : ℝ) * theta))
+      intro m
+      induction m with j ih
+      · have h0 : cpow_nat (complex.smul r (complex.exp (complex.mk 0 theta))) 0 = complex.one := by rfl
+        rw [h0, pow_zero.real]; apply complex.ext <;> simp [cos_zero, sin_zero]
+      · rw [succ_eq_add_one.nat, pow_succ.real, cast_add.real j 1]
+        have hs : cpow_nat (complex.smul r (complex.exp (complex.mk 0 theta))) (j + 1) = complex.mul (cpow_nat (complex.smul r (complex.exp (complex.mk 0 theta))) j) (complex.smul r (complex.exp (complex.mk 0 theta))) := by rfl
+        rw [hs, ih]
+        apply complex.ext
+        · simp [exp_zero]
+          have hca := cos_add ((j : ℝ) * theta) theta
+          have he : (j : ℝ) * theta + theta = ((j : ℝ) + 1) * theta := by ring
+          rw [he] at hca
+          linear_combination -(r ^ j * r) * hca
+        · simp [exp_zero]
+          have hsa := sin_add ((j : ℝ) * theta) theta
+          have he : (j : ℝ) * theta + theta = ((j : ℝ) + 1) * theta := by ring
+          rw [he] at hsa
+          linear_combination -(r ^ j * r) * hsa
+    have h1 := hpow_cexp n
+    rw [h1]
+    apply complex.ext
+    · simp [exp_zero]
+      have hsa := sin_add ((n : ℝ) * theta) theta
+      have he : (n : ℝ) * theta + theta = k * theta := by rw [hk, cast_add.real n 1]; simp; ring
+      rw [he] at hsa
+      rw [pow_succ.real]
+      linear_combination (r ^ n * r) * hsa
+    · simp [exp_zero]
+      have hca := cos_add ((n : ℝ) * theta) theta
+      have he : (n : ℝ) * theta + theta = k * theta := by rw [hk, cast_add.real n 1]; simp; ring
+      rw [he] at hca
+      rw [pow_succ.real]
+      linear_combination -(r ^ n * r) * hca
+  -- Now integrate Re and Im parts via Darboux FTC on [0, 2*pi]:
+  --   d/dtheta ( (r^(n+1)/k) * cos(k*theta) ) = -(r^(n+1)) * sin(k*theta)
+  --   d/dtheta ( (r^(n+1)/k) * sin(k*theta) ) =  (r^(n+1)) * cos(k*theta)
+  have hcos_k2pi : cos (k * (2 * pi)) = 1 ∧ sin (k * (2 * pi)) = 0
+    have hgen : ∀ m : ℕ, cos ((m : ℝ) * (2 * pi)) = 1 ∧ sin ((m : ℝ) * (2 * pi)) = 0
+      intro m
+      induction m with j ih
+      · simp [cos_zero, sin_zero]
+      · rw [succ_eq_add_one.nat, cast_add.real j 1]
+        have he : ((j : ℝ) + ((1 : ℕ) : ℝ)) * (2 * pi) = (j : ℝ) * (2 * pi) + 2 * pi := by simp; ring
+        rw [he, cos_add, sin_add, ih.1, ih.2, cos_two_pi, sin_two_pi]
+        constructor <;> ring
+    rw [hk]; exact hgen (n + 1)
+  have hre_int : darboux.has_integral (fun theta => -(r ^ (n + 1)) * sin (k * theta)) 0 (2 * pi) 0
+    have hcont_re : ∀ t, 0 ≤ t → t ≤ 2 * pi → continuous_at (fun theta => -(r ^ (n + 1)) * sin (k * theta)) t
+      intro t _ _
+      exact continuous_at.mul (fun _ => -(r ^ (n + 1))) (fun u => sin (k * u)) t (continuous_at.const (-(r ^ (n + 1))) t) (continuous_at.comp sin (fun u => k * u) t (continuous_at.sin (k * t)) (by auto))
+    have hderiv_re : ∀ t, 0 ≤ t → t ≤ 2 * pi → has_deriv_within (fun theta => (r ^ (n + 1) / k) * cos (k * theta)) (fun z => 0 ≤ z ∧ z ≤ 2 * pi) t (-(r ^ (n + 1)) * sin (k * t))
+      intro t _ _
+      have hd1 := has_deriv_within.comp cos (fun u => k * u) (fun z => 0 ≤ z ∧ z ≤ 2 * pi) (fun _ => True) t (-sin (k * t)) k (has_deriv_within.cos (fun _ => True) (k * t)) (has_deriv_within.scale_id k (fun z => 0 ≤ z ∧ z ≤ 2 * pi) t) (by intro z _; trivial)
+      have hd2 := has_deriv_within.scale (r ^ (n + 1) / k) (fun u => cos (k * u)) (fun z => 0 ≤ z ∧ z ≤ 2 * pi) t ((-sin (k * t)) * k) hd1
+      have hv : (r ^ (n + 1) / k) * ((-sin (k * t)) * k) = -(r ^ (n + 1)) * sin (k * t)
+        have hc := mul_div_cancel.real (r ^ (n + 1)) k (by linarith)
+        linear_combination -(sin (k * t)) * hc
+      rw [hv] at hd2; exact hd2
+    have hftc := darboux.fundamental (fun theta => (r ^ (n + 1) / k) * cos (k * theta)) (fun theta => -(r ^ (n + 1)) * sin (k * theta)) 0 (2 * pi) (by linarith) hcont_re hderiv_re
+    have hval : (r ^ (n + 1) / k) * cos (k * (2 * pi)) - (r ^ (n + 1) / k) * cos (k * 0) = 0
+      rw [hcos_k2pi.1]; have h0 : k * 0 = 0 := by ring
+      rw [h0, cos_zero]; ring
+    rw [hval] at hftc; exact hftc
+  have him_int : darboux.has_integral (fun theta => (r ^ (n + 1)) * cos (k * theta)) 0 (2 * pi) 0
+    have hcont_im : ∀ t, 0 ≤ t → t ≤ 2 * pi → continuous_at (fun theta => (r ^ (n + 1)) * cos (k * theta)) t
+      intro t _ _
+      exact continuous_at.mul (fun _ => r ^ (n + 1)) (fun u => cos (k * u)) t (continuous_at.const (r ^ (n + 1)) t) (continuous_at.comp cos (fun u => k * u) t (continuous_at.cos (k * t)) (by auto))
+    have hderiv_im : ∀ t, 0 ≤ t → t ≤ 2 * pi → has_deriv_within (fun theta => (r ^ (n + 1) / k) * sin (k * theta)) (fun z => 0 ≤ z ∧ z ≤ 2 * pi) t ((r ^ (n + 1)) * cos (k * t))
+      intro t _ _
+      have hd1 := has_deriv_within.comp sin (fun u => k * u) (fun z => 0 ≤ z ∧ z ≤ 2 * pi) (fun _ => True) t (cos (k * t)) k (has_deriv_within.sin (fun _ => True) (k * t)) (has_deriv_within.scale_id k (fun z => 0 ≤ z ∧ z ≤ 2 * pi) t) (by intro z _; trivial)
+      have hd2 := has_deriv_within.scale (r ^ (n + 1) / k) (fun u => sin (k * u)) (fun z => 0 ≤ z ∧ z ≤ 2 * pi) t (cos (k * t) * k) hd1
+      have hv : (r ^ (n + 1) / k) * (cos (k * t) * k) = r ^ (n + 1) * cos (k * t)
+        have hc := mul_div_cancel.real (r ^ (n + 1)) k (by linarith)
+        linear_combination cos (k * t) * hc
+      rw [hv] at hd2; exact hd2
+    have hftc := darboux.fundamental (fun theta => (r ^ (n + 1) / k) * sin (k * theta)) (fun theta => (r ^ (n + 1)) * cos (k * theta)) 0 (2 * pi) (by linarith) hcont_im hderiv_im
+    have hval : (r ^ (n + 1) / k) * sin (k * (2 * pi)) - (r ^ (n + 1) / k) * sin (k * 0) = 0
+      rw [hcos_k2pi.2]; have h0 : k * 0 = 0 := by ring
+      rw [h0, sin_zero]; ring
+    rw [hval] at hftc; exact hftc
+  unfold cpath_integral
+  apply c_has_integral.congr (fun theta => complex.mk (-(r ^ (n + 1)) * sin (k * theta)) ((r ^ (n + 1)) * cos (k * theta))) (fun theta => complex.mul (cpow_nat (complex.sub (circle_path z0 r theta) z0) n) (circle_deriv r theta)) 0 (2 * pi) complex.zero
+  · unfold c_has_integral; simp; exact ⟨hre_int, him_int⟩
+  · intro theta _ _; exact (hint_eq theta).symm

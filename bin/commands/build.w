@@ -3303,7 +3303,7 @@ bit_file_sha_memo = {}
   "built"
 
 # ── macOS .app targets: `app "Name", executable: "exe", id: "org.example.name", icon: "res/icon.png",
-#    documents: "ext1 ext2", version: "0.1"` in a Bitfile (2026-11-04) ─────────
+#    documents: "ext1 ext2", version: "0.1", photos_usage: "why it adds to Photos"` in a Bitfile (2026-11-04) ─────────
 -> bit_apps(bit_root)
   apps = []
   manifest = read_file(bit_root + "/Bitfile")
@@ -3366,6 +3366,8 @@ bit_file_sha_memo = {}
     b << "  <key>" + keys[i] + "</key><string>" + plist_escape(vals[i]) + "</string>\n"
     i = i + 1
   b << "  <key>NSHighResolutionCapable</key><true/>\n"
+  if app[:photos] != nil && app[:photos] != ""
+    b << "  <key>NSPhotoLibraryAddUsageDescription</key><string>" + plist_escape(app[:photos]) + "</string>\n"
   if embedded
     b << "</dict>\n</plist>\n"
     return b.to_s

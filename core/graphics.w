@@ -318,6 +318,28 @@ GFX_MENU_HELP     = -3   # Help > <App> Help
 -> gfx_prompt_answer(window, button, text, item)
   ccall("w_gfx_prompt_answer", window, button, text, item)
 
+# A native context menu at (x, y) content points, as a right-click shows:
+# `items` an Array of titles ("-" a separator, a leading "!" shows the item
+# disabled). Returns the chosen item's index in `items`, or -1 when
+# dismissed (and on a hidden window with no scripted answer).
+#   i = gfx_context_menu(win, e[:x], e[:y], ["Open Link", "-", "!Copy"])
+-> gfx_context_menu(window, x, y, items)
+  ccall("w_gfx_context_menu", window, x, y, items)
+
+# The next context menu returns `index` without showing.
+-> gfx_context_menu_answer(window, index)
+  ccall("w_gfx_context_menu_answer", window, index)
+
+# Add an image or video file to the Photos library, in the background; asks
+# for add-only access the first time (an app needs photos_usage: in its
+# Bitfile app line). Returns a ticket for gfx_photos_status: nil while
+# pending, true when added, else an error message.
+-> gfx_photos_add(path)
+  ccall("w_gfx_photos_add", path)
+
+-> gfx_photos_status(ticket)
+  ccall("w_gfx_photos_status", ticket)
+
 # Build a real input event and hand it to the view's handlers, as if the
 # user did it: GFX_EV_MOUSE_* (a = button, b = clicks), GFX_EV_KEY_DOWN/UP
 # (a = keyCode, text = its characters; Command shortcuts reach the menu bar),

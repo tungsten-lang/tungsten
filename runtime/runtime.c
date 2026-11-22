@@ -77739,6 +77739,22 @@ W_BRIDGE_STUB WValue w_gfx_choose(WValue window, WValue message, WValue info, WV
     (void)window; (void)message; (void)info; (void)items; (void)buttons;
     return w_gfx_unavailable();
 }
+W_BRIDGE_STUB WValue w_gfx_context_menu(WValue window, WValue x, WValue y, WValue items) {
+    (void)window; (void)x; (void)y; (void)items;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_context_menu_answer(WValue window, WValue index) {
+    (void)window; (void)index;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_photos_add(WValue path) {
+    (void)path;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_photos_status(WValue ticket) {
+    (void)ticket;
+    return w_gfx_unavailable();
+}
 W_BRIDGE_STUB WValue w_gfx_prompt_answer(WValue window, WValue button, WValue text, WValue item) {
     (void)window; (void)button; (void)text; (void)item;
     return w_gfx_unavailable();

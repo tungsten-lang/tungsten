@@ -62,6 +62,8 @@
 #import <CoreGraphics/CoreGraphics.h>
 #include <stdio.h>
 #include <string.h>
+#include <dlfcn.h>
+#include <objc/message.h>
 #include "runtime.h"
 #include "wvalue.h"
 
@@ -412,6 +414,8 @@ typedef struct WGfxWindow {
     int     prompt_item;
     char   *prompt_text;
     NSArray *form_values; /* owned immutable strings: safe across runtime GC */
+    bool    menu_scripted;    /* the next context menu's scripted answer (w_gfx_context_menu_answer) */
+    int     menu_answer;
     int     form_button;
     /* GPU layer/quad compositor state */
     void   *pso_tile;         /* id<MTLRenderPipelineState> programmable tile blend */
@@ -1691,6 +1695,129 @@ WValue w_gfx_prompt_answer(WValue window_v, WValue button_v, WValue text_v, WVal
         gw->prompt_text[len] = 0;
     }
     return W_NIL;
+}
+
+/* ---- context menus (modal) ----
+ * w_gfx_context_menu(window, x, y, items): a native pop-up menu at (x, y)
+ * content points (top-left origin), as a right-click shows. items is an
+ * Array of titles: "-" is a separator, a leading "!" shows the item
+ * disabled. Returns the chosen item's index in items, or -1 when dismissed
+ * (and on a hidden window with no scripted answer).
+ * w_gfx_context_menu_answer(window, index): the next menu returns `index`
+ * without showing (specs, scripted runs). */
+@interface TungstenMenuPick : NSObject
+@property (nonatomic) NSInteger picked;
+- (void)pick:(id)sender;
+@end
+@implementation TungstenMenuPick
+- (void)pick:(id)sender { self.picked = [(NSMenuItem *)sender tag]; }
+@end
+
+WValue w_gfx_context_menu(WValue window_v, WValue x_v, WValue y_v, WValue items_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.context_menu");
+    gfx_require_main_thread("gfx.context_menu");
+    if (gw->menu_scripted) {
+        gw->menu_scripted = false;
+        return w_int(gw->menu_answer);
+    }
+    if (gw->flags & GFX_HIDDEN) return w_int(-1);
+    NSInteger picked = -1;
+    @autoreleasepool {
+        TungstenMenuPick *target = [[[TungstenMenuPick alloc] init] autorelease];
+        target.picked = -1;
+        NSMenu *m = [[[NSMenu alloc] initWithTitle:@""] autorelease];
+        [m setAutoenablesItems:NO];
+        int64_t n = gfx_int(w_array_size(items_v));
+        for (int64_t i = 0; i < n; i++) {
+            NSString *t = gfx_string_or(w_array_get(items_v, w_int(i)), @"");
+            if ([t isEqualToString:@"-"]) { [m addItem:[NSMenuItem separatorItem]]; continue; }
+            BOOL enabled = YES;
+            if ([t hasPrefix:@"!"]) { enabled = NO; t = [t substringFromIndex:1]; }
+            NSMenuItem *it = [[[NSMenuItem alloc] initWithTitle:t action:@selector(pick:) keyEquivalent:@""] autorelease];
+            [it setTarget:target];
+            [it setTag:(NSInteger)i];
+            [it setEnabled:enabled];
+            [m addItem:it];
+        }
+        NSView *v = (NSView *)gw->view;
+        double x = gfx_num(x_v, "gfx.context_menu"), y = gfx_num(y_v, "gfx.context_menu");
+        NSPoint p = NSMakePoint(x, [v isFlipped] ? y : [v bounds].size.height - y);
+        [m popUpMenuPositioningItem:nil atLocation:p inView:v];
+        picked = target.picked;
+    }
+    return w_int((int64_t)picked);
+}
+
+WValue w_gfx_context_menu_answer(WValue window_v, WValue index_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.context_menu_answer");
+    gw->menu_scripted = true;
+    gw->menu_answer = (int)gfx_int(index_v);
+    return W_NIL;
+}
+
+/* ---- Photos ----
+ * w_gfx_photos_add(path): add an image or video file to the Photos library
+ * (asking for add-only access the first time; the app's Info.plist needs
+ * NSPhotoLibraryAddUsageDescription — a Bitfile app's photos_usage:).
+ * Returns a ticket at once; the import runs in the background.
+ * w_gfx_photos_status(ticket): nil while pending, true when added, or an
+ * error message. PhotoKit is loaded on first use, so programs that never
+ * call this don't link it. */
+static NSMutableDictionary *gfx_photo_results = nil;
+static int64_t gfx_photo_next = 1;
+
+static void gfx_photo_done(int64_t ticket, id result) {
+    @synchronized ([NSProcessInfo processInfo]) {
+        [gfx_photo_results setObject:result forKey:@(ticket)];
+    }
+}
+
+WValue w_gfx_photos_add(WValue path_v) {
+    int64_t ticket;
+    NSString *path = [[gfx_string_or(path_v, @"") copy] autorelease];
+    @synchronized ([NSProcessInfo processInfo]) {
+        if (!gfx_photo_results) gfx_photo_results = [[NSMutableDictionary alloc] init];
+        ticket = gfx_photo_next++;
+    }
+    dlopen("/System/Library/Frameworks/Photos.framework/Photos", RTLD_LAZY);
+    id lib = (id)NSClassFromString(@"PHPhotoLibrary");
+    id req = (id)NSClassFromString(@"PHAssetChangeRequest");
+    if (!lib || !req) {
+        gfx_photo_done(ticket, @"Photos isn't available");
+        return w_int(ticket);
+    }
+    [path retain];
+    NSString *ext = [[path pathExtension] lowercaseString];
+    BOOL video = [@[@"mov", @"mp4", @"m4v", @"webm"] containsObject:ext];
+    void (^handler)(NSInteger) = ^(NSInteger status) {
+        /* PHAuthorizationStatusAuthorized = 3, Limited = 4 */
+        if (status != 3 && status != 4) {
+            gfx_photo_done(ticket, @"Not allowed to add to Photos (System Settings > Privacy & Security > Photos)");
+            [path release];
+            return;
+        }
+        NSError *err = nil;
+        NSURL *url = [NSURL fileURLWithPath:path];
+        BOOL ok = [[lib performSelector:@selector(sharedPhotoLibrary)] performChangesAndWait:^{
+            if (video) [req performSelector:@selector(creationRequestForAssetFromVideoAtFileURL:) withObject:url];
+            else [req performSelector:@selector(creationRequestForAssetFromImageAtFileURL:) withObject:url];
+        } error:&err];
+        gfx_photo_done(ticket, ok ? (id)@YES : (id)(err ? [err localizedDescription] : @"Photos refused the file"));
+        [path release];
+    };
+    /* PHAccessLevelAddOnly = 1 */
+    ((void (*)(id, SEL, NSInteger, id))objc_msgSend)(lib, @selector(requestAuthorizationForAccessLevel:handler:), 1, handler);
+    return w_int(ticket);
+}
+
+WValue w_gfx_photos_status(WValue ticket_v) {
+    id r = nil;
+    @synchronized ([NSProcessInfo processInfo]) {
+        r = [[[gfx_photo_results objectForKey:@(gfx_int(ticket_v))] retain] autorelease];
+    }
+    if (!r) return W_NIL;
+    if ([r isKindOfClass:[NSNumber class]]) return W_TRUE;
+    return w_string([(NSString *)r UTF8String]);
 }
 
 /* ---- synthesized input (specs, scripted UI runs) ----

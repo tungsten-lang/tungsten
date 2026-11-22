@@ -103,6 +103,26 @@ WValue w_zstd_compress_llvm_escaped(WValue escaped_val) {
     return result;
 }
 
+/* Zstd.compress (core/zstd.w): bytes (a String) → one zstd frame (ByteArray) with the
+ * content size recorded, at level 1..22 (clamped; 3 is zstd's default); nil on failure. */
+WValue w_zstd_compress(WValue data_val, WValue level_val) {
+    char small[6];
+    const char *src;
+    size_t src_len;
+    w_str_data(data_val, small, &src, &src_len);
+    int level = (int)w_as_int(level_val);
+    if (level < 1) level = 1;
+    if (level > ZSTD_maxCLevel()) level = ZSTD_maxCLevel();
+    size_t cap = ZSTD_compressBound(src_len);
+    uint8_t *out = malloc(cap == 0 ? 1 : cap);
+    if (!out) return W_NIL;
+    size_t n = ZSTD_compress(out, cap, src, src_len, level);
+    if (ZSTD_isError(n)) { free(out); return W_NIL; }
+    WValue res = w_bytes_from_data(out, (int64_t)n);
+    free(out);
+    return res;
+}
+
 /* Zstd.decompress (core/zstd.w): a whole zstd stream (a String of bytes) (one or more frames, content size
  * known or not) → ByteArray; nil when the input is not valid zstd. Used for HTTP
  * Content-Encoding: zstd. Windows are capped at 2^27 bytes (128 MiB, RFC 8878's

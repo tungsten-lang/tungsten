@@ -1039,6 +1039,8 @@
     call_site_out = emit_call_site_table(mod, precollected_sites, emit_blockaddress_sites)
     llvm_used_out = emit_stacktrace_llvm_used(call_site_out.index("@__w_ic_site_sparse") != nil, !emit_blockaddress_sites)
 
+  alias_lines = profile_symbol_alias_lines(mod, rendered_fn_texts)
+
   attr_groups_out = emit_function_attr_groups(attr_groups)
   tbaa_out = tbaa_metadata_defs()
   novec_out = novec_loop_md_defs()
@@ -1065,7 +1067,8 @@
       novec_out: novec_out,
       ewscope_out: ewscope_out,
       ascope_out: ascope_out,
-      tail_md_str: attr_groups_out + tbaa_out + novec_out + ewscope_out + ascope_out
+      tail_md_str: attr_groups_out + tbaa_out + novec_out + ewscope_out + ascope_out,
+      alias_lines: alias_lines
     }
 
   final_out = StringBuffer(header.size() + decls_out.size() + globals_str.size() + strings_out.size() + fn_str.size() + fn_meta_out.size() + call_site_out.size() + llvm_used_out.size() + attr_groups_out.size() + tbaa_out.size() + novec_out.size() + ewscope_out.size() + ascope_out.size() + 64)
@@ -1074,6 +1077,11 @@
   final_out << globals_str
   final_out << strings_out
   final_out << fn_str
+  ali = 0
+  while ali < alias_lines.size()
+    if alias_lines[ali] != nil
+      final_out << alias_lines[ali]
+    ali += 1
   final_out << fn_meta_out
   final_out << call_site_out
   final_out << llvm_used_out
@@ -1261,6 +1269,46 @@
             lit = llvm_wvalue_literal(wval)
             return {arr: wire_sequence_get(args, 0), idx: idx_str.to_i(), val: lit, temp: wire_get(next_inst, :temp), step: 2}
   nil
+
+# Readable profiler symbols. Function symbols are content hashes (__wy_…),
+# which `sample`, Instruments and other symbolicators print verbatim. Give each
+# hashed function a hidden alias named after its source (`w:jpeg_huff`,
+# `w:Codepoint#upcase`; a repeated name gets the hash appended): the linker keeps
+# it as a local symbol at the same address, and profilers show it. The hashed
+# name stays the definition, so caching and the sidemap are unchanged.
+# TUNGSTEN_SYMBOL_ALIASES=0 turns it off; wasm and Windows targets skip it.
+# Answers one alias line (or nil) per mod[:functions] entry, so a sharded
+# build can place each alias in the module that defines its function.
+-> profile_symbol_alias_lines(mod, rendered_fn_texts)
+  fns = mod[:functions]
+  lines = Array.new(fns.size())
+  if env("TUNGSTEN_SYMBOL_ALIASES") == "0"
+    return lines
+  triple = mod[:llvm_triple]
+  if triple != nil && (triple.index("wasm") != nil || triple.index("windows") != nil)
+    return lines
+  used = {}
+  i = 0
+  while i < fns.size()
+    f = fns[i]
+    nm = f[:name]
+    txt = rendered_fn_texts == nil || i >= rendered_fn_texts.size() ? nil : rendered_fn_texts[i]
+    defined_here = txt != nil && txt.index("define ") != nil && txt.index("@" + f[:name] + "(") != nil
+    if defined_here && nm != nil && nm.starts_with?("__wy_") && f[:embedded_asm] == nil && f[:blocks] != nil && f[:blocks].size() > 0
+      display = fn_meta_display_name(f)
+      if display == nil || display == "" || display.starts_with?("__wy_")
+        display = nil
+      if display != nil
+        # The `w:` prefix keeps a source name such as `read` from defining a
+        # C symbol the runtime links against.
+        alias_name = "w:" + display
+        if used[alias_name] == true
+          alias_name = alias_name + " [" + nm.slice(5, nm.size() - 5) + "]"
+        if used[alias_name] != true
+          used[alias_name] = true
+          lines[i] = "@\"" + escape_llvm_string(alias_name) + "\" = hidden alias i8, ptr @" + nm + "\n"
+    i += 1
+  lines
 
 # The attribute text a function renders with: in a debug-frame build (base
 # text carries the noinline suffix) a small leaf drops it. Shared with the

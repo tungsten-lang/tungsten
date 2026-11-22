@@ -270,7 +270,14 @@ module Tungsten
         return node
       end
 
-      exp = parse_assignment
+      # `*init, last = v`: a multiple assignment opening with a splat.
+      first_splat = allow_multi_assign && @token.type?(:"*")
+      if first_splat
+        next_token_skip_whitespace
+        exp = Splat.new(parse_ternary)
+      else
+        exp = parse_assignment
+      end
       unless exp.location_row
         if (child = first_child_with_location(exp))
           exp.copy_location_from(child)
@@ -279,40 +286,11 @@ module Tungsten
         end
       end
 
-      # Multi-assignment: a, b = expr  /  a, *rest, b = expr (only at statement level)
-      if allow_multi_assign && exp.is_a?(Var) && @token.type?(:",")
-        targets = [exp]
-        while @token.type?(:",")
-          next_token_skip_whitespace
-          if @token.type?(:"*")
-            next_token_skip_whitespace
-            target = parse_ternary
-            target = Var.new(target.name) if target.is_a?(Call) && !target.obj && (target.args.nil? || target.args.empty?) && target.block.nil?
-            target = Splat.new(target)
-          else
-            target = parse_ternary
-            target = Var.new(target.name) if target.is_a?(Call) && !target.obj && (target.args.nil? || target.args.empty?) && target.block.nil?
-          end
-          targets << target
-        end
-
-        skip_space
-        if @token.type?(:"=")
-          next_token_skip_whitespace
-          value = parse_assignment_value
-          targets.each do |t|
-            t = t.exp if t.is_a?(Splat)
-            push_var(t) if t.is_a?(Var)
-          end
-          loc_file = exp.location_file || start_file
-          loc_row = exp.location_row || start_row
-          loc_col = exp.location_col || start_col
-          exp = Assign.new(ArrayLiteral.new(targets), value)
-          exp.set_location(loc_file, loc_row, loc_col)
-          return exp
-        else
-          error "expected '=' after multi-assignment targets"
-        end
+      # Multiple assignment (statement level): `a, b = b, a`, `a, b = f()`,
+      # `(a, b), c = v`, `a, *rest = v`, `@x, h[k], obj.attr = …`.
+      if allow_multi_assign && (first_splat || (multi_assign_target?(exp) &&
+                                               (@token.type?(:",") || (exp.is_a?(Tuple) && @token.type?(:"=")))))
+        return parse_multi_assign(exp, start_file, start_row, start_col)
       end
 
       # Swap: `a <> b` — desugars to the same destructuring assign the
@@ -348,6 +326,85 @@ module Tungsten
 
       exp = parse_expression_suffix(exp, start_row)
       exp
+    end
+
+    # Assign(ArrayLiteral(targets), value). Targets are locals, ivars, cvars,
+    # globals, setter templates (`obj.attr` / `h[k]` become a call whose last
+    # argument is the hidden MULTI_ASSIGN_VALUE local, see
+    # Interpreter#destructure_assign), Splat, or a nested ArrayLiteral. A
+    # comma-separated right side becomes an ArrayLiteral.
+    def parse_multi_assign(first, start_file, start_row, start_col)
+      targets = [ to_multi_assign_target(first) ]
+      while @token.type?(:",")
+        next_token_skip_whitespace
+        if @token.type?(:"*")
+          next_token_skip_whitespace
+          targets << Splat.new(to_multi_assign_target(parse_ternary))
+        else
+          targets << to_multi_assign_target(parse_ternary)
+        end
+      end
+      error "a multiple assignment has at most one splat target" if targets.count { |t| t.is_a?(Splat) } > 1
+      skip_space
+      error "expected '=' after multi-assignment targets" unless @token.type?(:"=")
+
+      next_token_skip_whitespace
+      value = parse_assignment_value
+      if @token.type?(:",")
+        values = [ value ]
+        while @token.type?(:",")
+          next_token_skip_whitespace
+          values << parse_assignment_value
+        end
+        value = ArrayLiteral.new(values)
+      end
+      targets.each { |t| push_multi_assign_vars(t) }
+      exp = Assign.new(ArrayLiteral.new(targets), value)
+      exp.set_location(first.location_file || start_file, first.location_row || start_row,
+                       first.location_col || start_col)
+      exp
+    end
+
+    MULTI_ASSIGN_VALUE = "__multi_assign_value"
+
+    def multi_assign_target?(node)
+      case node
+      when Var, InstanceVar, ClassVar, GlobalVar, Tuple, Splat then true
+      when Call then node.obj ? (node.name == "[]" || (node.args.empty? && node.block.nil?)) : (node.args.nil? || node.args.empty?) && node.block.nil?
+      else false
+      end
+    end
+
+    def to_multi_assign_target(node)
+      case node
+      when Var, InstanceVar, ClassVar, GlobalVar
+        node
+      when Splat
+        Splat.new(to_multi_assign_target(node.exp))
+      when Tuple
+        ArrayLiteral.new(node.elements.map { |e| to_multi_assign_target(e) })
+      when Call
+        error "invalid multiple assignment target" unless multi_assign_target?(node)
+        return Var.new(node.name) unless node.obj
+
+        hidden = Var.new(MULTI_ASSIGN_VALUE)
+        if node.name == "[]"
+          Call.new(node.obj, "[]=", node.args + [ hidden ])
+        else
+          Call.new(node.obj, "#{node.name}=", [ hidden ])
+        end
+      else
+        error "invalid multiple assignment target"
+      end
+    end
+
+    def push_multi_assign_vars(target)
+      case target
+      when Splat then push_multi_assign_vars(target.exp)
+      when ArrayLiteral then target.list.each { |t| push_multi_assign_vars(t) }
+      when Call then push_var_name(MULTI_ASSIGN_VALUE)
+      else push_var(target)
+      end
     end
 
     def parse_expression_suffix(exp, start_row = @token.row)
@@ -3069,14 +3126,14 @@ module Tungsten
     def parse_grouped_expression
       next_token_skip_whitespace
 
-      first = parse_expression
+      first = parse_grouped_element
       skip_whitespace
 
       if @token.type?(:",")
         elements = [first]
         while @token.type?(:",")
           next_token_skip_whitespace
-          elements << parse_expression
+          elements << parse_grouped_element
         end
         consume :")"
         skip_space
@@ -3086,6 +3143,15 @@ module Tungsten
         skip_space
         first
       end
+    end
+
+    # A tuple element; `*x` is only meaningful as a nested multiple
+    # assignment target, `(a, *rest), b = v`.
+    def parse_grouped_element
+      return parse_expression unless @token.type?(:"*")
+
+      next_token_skip_whitespace
+      Splat.new(parse_ternary)
     end
 
     def parse_var_or_call

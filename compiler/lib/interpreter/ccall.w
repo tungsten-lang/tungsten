@@ -8,6 +8,8 @@
   # left its own dispatch stacks and signal record in the ivars (see
   # spawn_goroutine). Before the first `go` this is a plain forward.
   -> dispatch_interpreted_ccall(args)
+    if @sandboxed && args.size() > 0
+      sandbox_check_ccall("" + args[0])
     if !@goroutines_active
       return dispatch_interpreted_ccall_inner(args)
     saved = goroutine_context()
@@ -694,6 +696,10 @@
       return ccall("w_dns_lookup", args[1], args[2])
     when "w_dns_available"
       return ccall("w_dns_available")
+    when "w_socket_connect_timeout"
+      if args.size() != 4
+        raise "w_socket_connect_timeout expects a host, port and timeout"
+      return ccall("w_socket_connect_timeout", args[1], args[2], args[3])
     when "w_zstd_decompress"
       if args.size() != 2
         raise "w_zstd_decompress expects data"
@@ -986,6 +992,8 @@
   -> dispatch_interpreted_ccall_nobox(args)
     if args.size() == 0
       raise "ccall_nobox requires a runtime function name"
+    if @sandboxed
+      raise_typed("SecurityError", "sandbox: ccall_nobox is not available")
     cname = "" + args[0]
     case cname
     when "w_slab_is_frozen"

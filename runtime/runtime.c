@@ -755,6 +755,23 @@ static void *w_memwatch_main(void *arg) {
     return NULL;
 }
 
+/* Process.memory_footprint → physical footprint in bytes (compressed pages
+ * included); Process.memory_limit = bytes (0 = none) changes the ceiling the
+ * watch enforces, so a program can set its own default without the env var. */
+WValue w_memwatch_get_footprint(void) {
+    return w_int((int64_t)w_memwatch_footprint());
+}
+
+WValue w_memwatch_set_limit(WValue bytes) {
+    int64_t n = w_is_int(bytes) ? w_as_int(bytes) : 0;
+    g_memwatch_limit = n > 0 ? (uint64_t)n : 0;
+    return W_NIL;
+}
+
+WValue w_memwatch_get_limit(void) {
+    return w_int((int64_t)g_memwatch_limit);
+}
+
 __attribute__((constructor))
 static void w_memwatch_start(void) {
     uint64_t limit = W_MEMWATCH_DEFAULT_LIMIT;
@@ -779,6 +796,10 @@ static void w_memwatch_start(void) {
     pthread_create(&t, &attr, w_memwatch_main, NULL);
     pthread_attr_destroy(&attr);
 }
+#else
+WValue w_memwatch_get_footprint(void) { return w_int(0); }
+WValue w_memwatch_set_limit(WValue bytes) { (void)bytes; return W_NIL; }
+WValue w_memwatch_get_limit(void) { return w_int(0); }
 #endif /* __APPLE__ || __linux__ */
 
 #if BN_BIGINT_ARENA_ACTIVE
@@ -34580,6 +34601,31 @@ typedef struct {
 static WLangCacheSlot g_lang_cache[LANG_CACHE_SLOTS];
 static int g_lang_cache_used = 0;
 
+#include "tungsten_lexflags.inc"
+
+/* A program that embeds the lexer can run where no languages/ directory
+ * exists (no checkout, no TUNGSTEN_ROOT): rebuild Tungsten's own tables from
+ * the run-length copy in tungsten_lexflags.inc and cache them like a load. */
+static const uint8_t *w_embedded_lang_flags(const char *lang, int bits, size_t expected_size) {
+    if (strcmp(lang, "tungsten") != 0 || (bits != 64 && bits != 32)) return NULL;
+    uint8_t *flags = (uint8_t *)calloc(expected_size, 1);
+    if (!flags) return NULL;
+    const uint32_t (*runs)[3] = bits == 64 ? w_tungsten_lex64_runs : w_tungsten_lex32_runs;
+    size_t n = bits == 64 ? W_TUNGSTEN_LEX64_RUNS_N : W_TUNGSTEN_LEX32_RUNS_N;
+    for (size_t i = 0; i < n; i++) {
+        size_t start = runs[i][0], len = runs[i][1];
+        if (start + len > expected_size) continue;
+        memset(flags + start, (int)runs[i][2], len);
+    }
+    int slot = g_lang_cache_used++;
+    strncpy(g_lang_cache[slot].lang, lang, sizeof(g_lang_cache[slot].lang) - 1);
+    g_lang_cache[slot].lang[sizeof(g_lang_cache[slot].lang) - 1] = '\0';
+    g_lang_cache[slot].bits = bits;
+    g_lang_cache[slot].flags = flags;
+    g_lang_cache[slot].flags_size = expected_size;
+    return flags;
+}
+
 /* Look up cached flags or load them from disk. Returns NULL on error
  * (file missing or wrong size); caller falls back to default flags.
  * Aborts if the cache fills up. */
@@ -34648,7 +34694,7 @@ static const uint8_t *w_load_lang_flags(const char *lang, int bits) {
             f = fopen(cp_path, "rb");
         }
     }
-    if (!f) return NULL;
+    if (!f) return w_embedded_lang_flags(lang, bits, expected_size);
 
     fseek(f, 0, SEEK_END);
     long actual_size = ftell(f);
@@ -51321,9 +51367,29 @@ typedef struct WBlockReturnFrame {
     int cleanup_depth;
     WValue value;
     int active;
+    /* Bumped on every reuse; the low 16 bits ride in the closure's frame
+     * handle (w_block_return_bits) so a block that outlives its function is
+     * told apart from the frame's next owner. */
+    uint32_t gen;
 } WBlockReturnFrame;
 
 static __thread WBlockReturnFrame *w_block_return_stack = NULL;
+
+/* Frames are recycled through a per-thread free list (linked by prev) and
+ * never returned to malloc: a stale handle held by an escaped block may still
+ * be dereferenced by w_block_return_signal, which must then find a frame (not
+ * freed memory) whose generation no longer matches. Every function with a
+ * non-local block return pushes one frame per call, so without recycling each
+ * call leaked one frame (a jmp_buf, ~250 bytes). */
+static __thread WBlockReturnFrame *w_block_return_pool = NULL;
+
+#define W_BLOCK_RETURN_PTR_MASK 0x0000FFFFFFFFFFFFull
+
+static void w_block_return_recycle(WBlockReturnFrame *frame) {
+    frame->active = 0;
+    frame->prev = w_block_return_pool;
+    w_block_return_pool = frame;
+}
 
 /* ---- Recycle cleanup stack ---- */
 #define CLEANUP_STACK_MAX 512
@@ -51439,8 +51505,11 @@ void w_raise(WValue msg) {
         WExceptionFrame *saved = w_block_return_stack->exception_stack;
         while (saved && saved != w_exception_stack) saved = saved->prev;
         if (!saved) break;
-        w_block_return_deactivate(w_block_return_stack);
-        w_block_return_stack = w_block_return_stack->prev;
+        WBlockReturnFrame *gone = w_block_return_stack;
+        w_block_return_deactivate(gone);
+        w_block_return_stack = gone->prev;
+        /* its function is abandoned: it never reaches w_block_return_pop */
+        w_block_return_recycle(gone);
     }
 
     /* Unwind recycle cleanup stack down to the frame's saved depth.
@@ -51453,7 +51522,14 @@ void w_raise(WValue msg) {
 }
 
 void *w_block_return_push(void) {
-    WBlockReturnFrame *frame = calloc(1, sizeof(WBlockReturnFrame));
+    WBlockReturnFrame *frame = w_block_return_pool;
+    if (frame != NULL) {
+        w_block_return_pool = frame->prev;
+    } else {
+        frame = calloc(1, sizeof(WBlockReturnFrame));
+    }
+    frame->gen++;
+    if ((frame->gen & 0xFFFF) == 0) frame->gen++;
     frame->prev = w_block_return_stack;
     frame->exception_stack = w_exception_stack;
     if (frame->exception_stack) frame->exception_stack->block_refs++;
@@ -51483,11 +51559,25 @@ void w_block_return_pop(void *buf_ptr) {
     w_block_return_deactivate(frame);
     if (w_block_return_stack == frame) {
         w_block_return_stack = frame->prev;
+        w_block_return_recycle(frame);
         return;
     }
     WBlockReturnFrame *prev = w_block_return_stack;
     while (prev && prev->prev != frame) prev = prev->prev;
-    if (prev) prev->prev = frame->prev;
+    if (prev) {
+        prev->prev = frame->prev;
+        w_block_return_recycle(frame);
+    }
+    /* not on the stack: already abandoned (and recycled) by a raise/signal */
+}
+
+/* The handle a block captures to return from this frame's function: the
+ * frame address with its generation in the top 16 bits. */
+uint64_t w_block_return_bits(void *buf_ptr) {
+    if (!buf_ptr) return 0;
+    WBlockReturnFrame *frame = (WBlockReturnFrame *)buf_ptr;
+    return ((uint64_t)(uintptr_t)buf_ptr & W_BLOCK_RETURN_PTR_MASK) |
+           ((uint64_t)(frame->gen & 0xFFFF) << 48);
 }
 
 WValue w_block_return_value(void *buf_ptr) {
@@ -51501,14 +51591,26 @@ void w_block_return_signal(uint64_t buf_bits, WValue value) {
         w_raise(w_string("unexpected return from block"));
     }
 
-    WBlockReturnFrame *target = (WBlockReturnFrame *)(uintptr_t)buf_bits;
-    if (!target->active) {
+    /* Handles from w_block_return_bits carry the frame's generation; a bare
+     * address (tag 0, code from an older compiler) is checked by `active`
+     * alone. */
+    uint64_t tag = buf_bits >> 48;
+    WBlockReturnFrame *target = (WBlockReturnFrame *)(uintptr_t)(buf_bits & W_BLOCK_RETURN_PTR_MASK);
+    if (!target->active || (tag != 0 && tag != (uint64_t)(target->gen & 0xFFFF))) {
         w_raise(w_string("cannot return from block after enclosing function has exited"));
+    }
+    {
+        WBlockReturnFrame *f = w_block_return_stack;
+        while (f && f != target) f = f->prev;
+        if (!f) w_raise(w_string("block return target is no longer active"));
     }
 
     while (w_block_return_stack && w_block_return_stack != target) {
-        w_block_return_deactivate(w_block_return_stack);
-        w_block_return_stack = w_block_return_stack->prev;
+        WBlockReturnFrame *gone = w_block_return_stack;
+        w_block_return_deactivate(gone);
+        w_block_return_stack = gone->prev;
+        /* an intervening function abandoned by this return */
+        w_block_return_recycle(gone);
     }
     if (w_block_return_stack != target) {
         w_raise(w_string("block return target is no longer active"));
@@ -51575,6 +51677,29 @@ WValue w_destructure_index(WValue v, int64_t i) {
         return W_NIL;
     }
     return i == 0 ? v : W_NIL;
+}
+
+/* Multiple assignment with a splat target, `a, *rest, z = v`: the splat at
+ * target index `start` gathers what the `after` trailing targets leave (an
+ * empty Array when nothing is left). A non-Array value is a one-element
+ * list, as in w_destructure_index. */
+static int64_t w_destructure_rest_end(int64_t size, int64_t start, int64_t after) {
+    int64_t end = size - after;
+    return end < start ? start : end;
+}
+
+WValue w_destructure_rest(WValue v, int64_t start, int64_t after) {
+    int64_t size = w_is_array(v) ? w_as_array(v)->size : 1;
+    int64_t end = w_destructure_rest_end(size, start, after);
+    WValue out = w_array_new(65, end - start);
+    for (int64_t i = start; i < end; i++) w_array_push(out, w_destructure_index(v, i));
+    return out;
+}
+
+/* The `j`th trailing target after the splat. */
+WValue w_destructure_suffix(WValue v, int64_t start, int64_t after, int64_t j) {
+    int64_t size = w_is_array(v) ? w_as_array(v)->size : 1;
+    return w_destructure_index(v, w_destructure_rest_end(size, start, after) + j);
 }
 
 static WValue call_closure_1(WClosure *cl, WValue arg) {
@@ -54959,6 +55084,17 @@ int64_t __w_deadline_ticks_after_seconds(int64_t seconds) {
     return __w_clock_ticks_raw() + seconds * (int64_t)ticks_per_second;
 #else
     return __w_clock_ticks_raw() + seconds * 1000000000LL;
+#endif
+}
+
+int64_t __w_deadline_ticks_after_ms(int64_t ms) {
+#ifdef __APPLE__
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    uint64_t ticks_per_ms = (1000000ULL * (uint64_t)tb.denom) / (uint64_t)tb.numer;
+    return __w_clock_ticks_raw() + ms * (int64_t)ticks_per_ms;
+#else
+    return __w_clock_ticks_raw() + ms * 1000000LL;
 #endif
 }
 
@@ -74780,9 +74916,22 @@ static int w_socket_tcp_connect_fd_impl(const char *host, int port, int64_t dead
     }
 
     if (ret < 0) {
-        /* EINPROGRESS — park on write-ready */
-        if (!w_socket_park_until(fd, W_EVENT_WRITE, deadline_ticks)) {
+        /* EINPROGRESS — park on write-ready. Outside a goroutine the park is a
+         * poll(2) of at most 100 ms when there is no deadline, so keep waiting:
+         * without this a native Thread (or the main thread) failed every connect
+         * slower than 100 ms and got back a Socket with fd -1. No deadline means
+         * the kernel's own connect timeout decides. */
+        int ready = 0;
+        for (;;) {
+            if (w_socket_park_until(fd, W_EVENT_WRITE, deadline_ticks)) { ready = 1; break; }
+            if (deadline_ticks > 0 || w_deadline_expired(deadline_ticks)) break;
+            int so_err = 0;
+            socklen_t so_len = sizeof(so_err);
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_err, &so_len) == 0 && so_err != 0) { ready = 1; break; }
+        }
+        if (!ready) {
             close(fd);
+            if (raise_errors) w_raise(w_string("socket: connect timed out"));
             return -1;
         }
 
@@ -74802,6 +74951,7 @@ static int w_socket_tcp_connect_fd_impl(const char *host, int port, int64_t dead
 
 WValue w_socket_tcp_connect(const char *host, int port) {
     int fd = w_socket_tcp_connect_fd_impl(host, port, 0, 1);
+    if (fd < 0) w_raise(w_string("socket: connect failed"));
     WSocket *s = calloc(1, sizeof(WSocket));
     s->type = W_TYPE_SOCKET;
     s->fd = fd;
@@ -74813,6 +74963,22 @@ WValue w_socket_tcp_connect(const char *host, int port) {
 
 WValue w_socket_connect_raw(WValue host, int64_t port) {
     return w_socket_tcp_connect(as_str(host), (int)port);
+}
+
+/* Socket.connect(host, port, timeout_ms): raises "socket: connect timed out" when the
+ * handshake has not completed within timeout_ms (> 0). */
+WValue w_socket_connect_timeout(WValue host, WValue port, WValue timeout_ms) {
+    int64_t ms = w_is_int(timeout_ms) ? w_as_int(timeout_ms) : 0;
+    int64_t deadline = ms > 0 ? __w_deadline_ticks_after_ms(ms) : 0;
+    int fd = w_socket_tcp_connect_fd_impl(as_str(host), (int)w_as_int(port), deadline, 1);
+    if (fd < 0) w_raise(w_string("socket: connect failed"));
+    WSocket *s = calloc(1, sizeof(WSocket));
+    s->type = W_TYPE_SOCKET;
+    s->fd = fd;
+    s->listening = 0;
+    s->closed = 0;
+    s->ssl = NULL;
+    return w_box_ptr(s, W_SUBTAG_SOCKET);
 }
 
 int64_t w_socket_connect_fd(WValue host, int64_t port) {
@@ -77853,6 +78019,22 @@ W_BRIDGE_STUB WValue w_gfx_tex_free(WValue window, WValue tex_id) {
 }
 W_BRIDGE_STUB WValue w_gfx_present_layers(WValue window, WValue bg, WValue cmds, WValue n_cmds, WValue wait_flag) {
     (void)window; (void)bg; (void)cmds; (void)n_cmds; (void)wait_flag;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_tex_new_yuv(WValue window, WValue width, WValue height, WValue cw, WValue ch, WValue sixteen) {
+    (void)window; (void)width; (void)height; (void)cw; (void)ch; (void)sixteen;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_tex_upload_yuv(WValue window, WValue tex_id, WValue planes, WValue params) {
+    (void)window; (void)tex_id; (void)planes; (void)params;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_capture_next(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_capture_take(WValue window) {
+    (void)window;
     return w_gfx_unavailable();
 }
 /* end windowed graphics bridge stubs (weak) */

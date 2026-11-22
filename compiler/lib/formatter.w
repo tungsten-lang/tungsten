@@ -19,9 +19,9 @@ use parser
     if parser_tok_off(token) >= offset
       break
     kind = parser_tok_type(token)
-    if kind in (T_LPAREN T_LBRACKET T_LBRACE)
+    if kind in (TOK_LPAREN TOK_LBRACKET TOK_LBRACE)
       depth += 1
-    elsif kind in (T_RPAREN T_RBRACKET T_RBRACE)
+    elsif kind in (TOK_RPAREN TOK_RBRACKET TOK_RBRACE)
       depth -= 1
     i += 1
   depth
@@ -85,7 +85,7 @@ use parser
     # Packed token lengths wrap at 4096. A hash inside a long string-like
     # token would otherwise look uncovered and be mistaken for a comment.
     # Conservatively keep that rare source on the lossless path.
-    if next_off - off >= 4096 && kind in (T_STRING T_STRING_INTERP T_REGEX T_REGEX_CAPTURE T_BYTE_ARRAY T_BYTE_ARRAY_INTERP T_WORD_ARRAY T_SYMBOL_ARRAY T_TYPE_HINT)
+    if next_off - off >= 4096 && kind in (TOK_STRING TOK_STRING_INTERP TOK_REGEX TOK_REGEX_CAPTURE TOK_BYTE_ARRAY TOK_BYTE_ARRAY_INTERP TOK_WORD_ARRAY TOK_SYMBOL_ARRAY TOK_TYPE_HINT)
       return nil
     j = 0
     while j < size
@@ -110,13 +110,13 @@ use parser
       i += 2
       next
     token_kind = covered[i]
-    if token_kind != nil && token_kind != T_TYPE_HINT
+    if token_kind != nil && token_kind != TOK_TYPE_HINT
       i += 1
       next
     # A trailing comment is part of the packed TYPE_HINT token even though
     # Parser later strips it. Replacing it with a statement would sever the
     # pending hint from its definition, so retain the lossless fallback.
-    if token_kind == T_TYPE_HINT
+    if token_kind == TOK_TYPE_HINT
       return nil
     if formatter_group_depth_at(tokens, token_count, i) > 0
       return nil
@@ -698,7 +698,11 @@ use parser
       value += " ## " + node.type_hint.to_s()
     prefix + formatter_expr(node.target, depth) + " = " + value
   when :multi_assign
-    prefix + formatter_join_nodes(node.targets, ", ", depth) + " = " + formatter_expr(node.value, depth)
+    value = node.value
+    rhs = formatter_expr(value, depth)
+    if value != nil && is_ast_node?(value) && ast_kind(value) == :array
+      rhs = formatter_join_nodes(value.elements, ", ", depth)
+    prefix + formatter_multi_assign_targets(node, depth) + " = " + rhs
   when :compound_assign
     prefix + formatter_expr(node.target, depth) + " " + formatter_operator(node.op) + "= " + formatter_expr(node.value, depth)
   when :puts
@@ -794,3 +798,22 @@ use parser
   ast = parser.parse()
   formatted = formatter_sequence(ast.expressions, 0).rtrim() + "\n"
   formatter_restore_comments(formatted, masked[:comments])
+
+# `a, *rest, (b, c)`: the target list of a multiple assignment.
+-> formatter_multi_assign_targets(node, depth)
+  targets = node.targets
+  splat = ast_get(node, :splat_index)
+  parts = []
+  i = 0
+  while i < targets.size()
+    t = targets[i]
+    text = ""
+    if is_ast_node?(t) && ast_kind(t) == :multi_assign
+      text = "(" + formatter_multi_assign_targets(t, depth) + ")"
+    else
+      text = formatter_expr(t, depth)
+    if splat != nil && i == splat
+      text = "*" + text
+    parts.push(text)
+    i += 1
+  parts.join(", ")

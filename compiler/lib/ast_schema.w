@@ -164,7 +164,7 @@ KIND_FILE               = 139 ## i64
 KIND_MAP                = 140 ## i64
 KIND_CALC               = 141 ## i64
 
-# PascalCase identifier (T_NAME). Parser emits this instead of Var
+# PascalCase identifier (TOK_NAME). Parser emits this instead of Var
 # so the interpreter and lowering route through class-resolution
 # (autoload-aware) rather than the variable lookup eval_var uses.
 KIND_CLASS_REF          = 142 ## i64

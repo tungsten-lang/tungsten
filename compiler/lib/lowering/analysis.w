@@ -412,7 +412,7 @@
 
   when :multi_assign
     free_scan_node(node.value, bound, records)
-    targets = node.targets
+    targets = multi_assign_leaf_targets(node)
     if targets != nil
       n_targets = targets.size()
       i = 0
@@ -1827,7 +1827,7 @@
     count_local_assignments(node.elements, counts)
     return nil
   if kind == :multi_assign
-    targets = node.targets
+    targets = multi_assign_leaf_targets(node)
     if targets != nil
       n_targets = targets.size()
       i = 0

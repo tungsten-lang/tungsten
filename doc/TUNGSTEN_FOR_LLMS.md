@@ -18,6 +18,13 @@ Two ways to run code (see **Engines** at the bottom):
 name = "Tungsten"
 x = 42
 
+# Multiple assignment: right side first, so this swaps; also
+# `head, *rest = list`, `(a, b), c = v`, `@x, h[k] = 1, 2`
+x, y = y, x
+
+# `go`, `fn`, `on` are keywords only in `go -> …`, `fn name(…)` and an
+# `on TARGET` guard; elsewhere they are ordinary names (`on = true`)
+
 # String interpolation uses [ ]  (but a [ right after ESC is literal,
 # so ANSI sequences like "\e[K" are safe; \[ escapes explicitly)
 << "hello [name], [x * 2]"

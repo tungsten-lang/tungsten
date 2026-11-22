@@ -23,6 +23,20 @@ INTERPRETER_I64_MAX = 9223372036854775807
           value = coerce_machine_int(value, slot_mt)
       env.set(name, value)
       return value
+    assign_target_value(target, value, env)
+
+  # Store `value` into an assignment target (everything an Assign or a
+  # multiple assignment can write: locals, globals, ivars, cvars, view
+  # fields, setters and `[]=`).
+  -> assign_target_value(target, value, env)
+    if ast_kind(target) == :var
+      name = ast_get(target, :name)
+      if @machine_hints_seen
+        slot_mt = machine_hint_type(env.slot_hint(name))
+        if slot_mt != nil
+          value = coerce_machine_int(value, slot_mt)
+      env.set(name, value)
+      return value
 
     if ast_kind(target) == :gvar
       # A matching `$field` inside a runtime-backed class method is a native
@@ -59,17 +73,55 @@ INTERPRETER_I64_MAX = 9223372036854775807
 
     raise "Invalid assignment target"
 
-  # `a, b = [1, 2]` / `<int>: a, b, c` — destructure the value list into the
-  # targets. The parser supplies the value as an Array node, so evaluating it
-  # yields a list to index per target.
+  # Multiple assignment: `a, b = b, a`, `a, b = f()`, `(a, b), c = v`,
+  # `a, *rest = v`. The whole right side is evaluated before any target is
+  # written; the value of the expression is the right side.
   -> eval_multi_assign(node, env)
     value = evaluate(ast_get(node, :value), env)
-    targets = ast_get(node, :targets)
-    i = 0
-    while i < targets.size()
-      env.set(ast_get(targets[i], :name), value[i])
-      i += 1
+    destructure_into(node, value, env)
     value
+
+  # Bind a value across a target list: an Array spreads over the targets
+  # (missing values are nil), anything else is a one-element list. The
+  # `:splat_index` target takes an Array of what the others leave; a nested
+  # target list destructures its value again.
+  -> destructure_into(pattern, value, env)
+    targets = ast_get(pattern, :targets)
+    items = type(value) == "Array" ? value : [value]
+    n = targets.size()
+    splat = ast_get(pattern, :splat_index)
+    if splat == nil
+      i = 0
+      while i < n
+        bind_destructure_target(targets[i], i < items.size() ? items[i] : nil, env)
+        i += 1
+      return nil
+    after = n - splat - 1
+    rest_end = items.size() - after
+    if rest_end < splat
+      rest_end = splat
+    i = 0
+    while i < splat
+      bind_destructure_target(targets[i], i < items.size() ? items[i] : nil, env)
+      i += 1
+    rest = []
+    k = splat
+    while k < rest_end
+      rest.push(items[k])
+      k += 1
+    bind_destructure_target(targets[splat], rest, env)
+    j = 0
+    while j < after
+      idx = rest_end + j
+      bind_destructure_target(targets[splat + 1 + j], idx < items.size() ? items[idx] : nil, env)
+      j += 1
+    nil
+
+  -> bind_destructure_target(target, value, env)
+    if ast_kind(target) == :multi_assign
+      destructure_into(target, value, env)
+    else
+      assign_target_value(target, value, env)
 
   -> eval_call_assign(call_node, value, env)
     recv_node = ast_get(call_node, :receiver)
@@ -1002,6 +1054,7 @@ INTERPRETER_I64_MAX = 9223372036854775807
   -> eval_while(node, env)
     result = nil
     while truthy?(evaluate(ast_get(node, :condition), env))
+      sandbox_tick() if @sandboxed
       begin
         result = evaluate_body(ast_get(node, :body), env)
       rescue err
@@ -1213,6 +1266,9 @@ INTERPRETER_I64_MAX = 9223372036854775807
       # core/file.w) and so register its block-taking methods: decide the
       # block route only now.
       passthrough = block != nil && interpreter_method_takes_no_block?(method_name)
+      # A host object's method takes the trailing block as its last argument.
+      if passthrough && @host_classes.size() > 0 && host_class?(type(recv))
+        passthrough = false
       call_block = passthrough ? nil : block
       # The parser transfers `Mat2<f64>.identity`'s type arguments from the
       # class-ref receiver onto the call node. Keep them scoped to this class
@@ -1235,6 +1291,11 @@ INTERPRETER_I64_MAX = 9223372036854775807
         return dispatch_method(result, "each", [], block, env)
       return result
 
+    # A native lambda bound as a global (a host-defined function) takes the
+    # trailing block as its last argument too.
+    if passthrough && native_global_callable?(method_name, env)
+      passthrough = false
+      call_block = block
     result = dispatch_bare_call(method_name, args, call_block, env)
     if passthrough
       return dispatch_method(result, "each", [], block, env)
@@ -1524,6 +1585,9 @@ INTERPRETER_I64_MAX = 9223372036854775807
         v = @env.get(name)
       if type(v) == "Array" && v.size() == 2 && is_ast_node?(v[1]) && ast_kind(v[1]) == :block
         return call_block(v, args)
+      # A native lambda the host defined or returned (interpreter/sandbox.w).
+      if native_callable?(v) && (args.size() > 0 || block != nil)
+        return call_closure(v, block == nil ? args : args + [host_callable(block)])
       # A local that holds no closure, reached through a zero-argument call:
       # the parser always reads a bare `ro` / `rw` as a call (so the accessor
       # marker after a constructor parses), and `x()` cannot be told from `x`.

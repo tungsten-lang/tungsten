@@ -1311,6 +1311,8 @@ void *w_closure_cell_new(void);
 WValue w_closure_new(void *fn, WValue *captures, int count);
 WValue w_closure_new_a(void *fn, WValue *captures, int count, int arity);
 WValue w_destructure_index(WValue v, int64_t i);
+WValue w_destructure_rest(WValue v, int64_t start, int64_t after);
+WValue w_destructure_suffix(WValue v, int64_t start, int64_t after, int64_t j);
 WValue w_closure_call_0(WValue closure_val);
 WValue w_closure_call_1(WValue closure_val, WValue arg);
 WValue w_closure_call_2(WValue closure_val, WValue arg1, WValue arg2);
@@ -1377,6 +1379,7 @@ void w_cleanup_pop(void);
 void *w_block_return_push(void);
 void w_block_return_pop(void *buf_ptr);
 WValue w_block_return_value(void *buf_ptr);
+uint64_t w_block_return_bits(void *buf_ptr);
 void w_block_return_signal(uint64_t buf_bits, WValue value);
 
 /* ---- Method dispatch ---- */
@@ -2459,6 +2462,7 @@ WValue __w_sleep_ms(int64_t milliseconds);
 WValue __w_clock(void);
 int64_t __w_clock_ticks_raw(void);
 int64_t __w_deadline_ticks_after_seconds(int64_t seconds);
+int64_t __w_deadline_ticks_after_ms(int64_t ms);
 int64_t __w_clock_ns_raw(void);
 WValue __w_elapsed_seconds_since_ns(int64_t start_ns);
 WValue __w_elapsed_seconds_since_ticks(int64_t start_ticks);

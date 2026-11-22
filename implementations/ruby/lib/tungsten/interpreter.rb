@@ -233,7 +233,7 @@ module Tungsten
       π τ ϕ φ ℯ ℇ ∞ ℎ ℏ c G g₀ Nₐ kB e₀ R ε₀ μ₀ µ₀ σ α mₑ mₚ a₀ Eₕ Ry 𝐹
     ].freeze
     TUNGSTEN_KEYWORDS = %w[
-      begin break case else elsif ensure exit extern false fn if in is loop module nil next on parallel
+      begin break case else elsif ensure exit extern false if in is loop module nil next parallel
       raise recase rescue return self super then trait true unless until use when while with yield
     ].to_h { |word| [ word, true ] }.freeze
     TUNGSTEN_TYPE_NAME_WORDS = %w[
@@ -1598,33 +1598,51 @@ module Tungsten
       target = node.name
 
       if target.is_a?(Tungsten::AST::ArrayLiteral)
-        values = value.is_a?(::Array) ? value : [value]
-        splat_index = target.list.index { |t| t.is_a?(Tungsten::AST::Splat) }
-
-        if splat_index
-          targets = target.list
-          remaining = values.dup
-          post_count = targets.size - splat_index - 1
-
-          targets.each_with_index do |t, i|
-            if i < splat_index
-              assign_target(t, remaining.shift, node)
-            elsif i == splat_index
-              assign_target(t.exp, remaining.shift([remaining.size - post_count, 0].max), node)
-            else
-              assign_target(t, remaining.shift, node)
-            end
-          end
-        else
-          target.list.each_with_index do |t, i|
-            assign_target(t, values[i], node)
-          end
-        end
+        destructure_assign(target, value, node)
       else
         assign_target(target, value, node)
       end
 
       value
+    end
+
+    # Multiple assignment: spread `value` over the targets of `pattern` (an
+    # ArrayLiteral). An Array spreads (missing values are nil), anything else
+    # is a one-element list; a Splat target takes an Array of what the others
+    # leave, and a nested ArrayLiteral destructures again.
+    def destructure_assign(pattern, value, node)
+      values = value.is_a?(::Array) ? value : [ value ]
+      targets = pattern.list
+      splat_index = targets.index { |t| t.is_a?(Tungsten::AST::Splat) }
+      unless splat_index
+        targets.each_with_index { |t, i| bind_multi_assign_target(t, values[i], node) }
+        return
+      end
+
+      after = targets.size - splat_index - 1
+      rest_end = [ values.size - after, splat_index ].max
+      targets.each_with_index do |t, i|
+        if i < splat_index
+          bind_multi_assign_target(t, values[i], node)
+        elsif i == splat_index
+          bind_multi_assign_target(t.exp, values[splat_index...rest_end] || [], node)
+        else
+          bind_multi_assign_target(t, values[rest_end + i - splat_index - 1], node)
+        end
+      end
+    end
+
+    # A Call target is a setter template whose last argument reads the
+    # hidden local the parser names (Parser::MULTI_ASSIGN_VALUE).
+    def bind_multi_assign_target(target, value, node)
+      if target.is_a?(Tungsten::AST::ArrayLiteral)
+        destructure_assign(target, value, node)
+      elsif target.is_a?(Tungsten::AST::Call)
+        @env.set(Tungsten::Parser::MULTI_ASSIGN_VALUE, value)
+        target.eval_in(self)
+      else
+        assign_target(target, value, node)
+      end
     end
 
     def fold_hint_text?(text)
@@ -5863,7 +5881,7 @@ module Tungsten
         emit_self_hosted_lexer_token(ivars, :AND, raw, off)
       elsif raw == "or"
         emit_self_hosted_lexer_token(ivars, :OR, raw, off)
-      elsif TUNGSTEN_KEYWORDS[raw] || (raw == "go" && self_hosted_go_keyword_at?(ivars, off + 2))
+      elsif TUNGSTEN_KEYWORDS[raw] || self_hosted_contextual_keyword_at?(ivars, raw, off)
         emit_self_hosted_lexer_token(ivars, :KEYWORD, raw, off)
       elsif TUNGSTEN_TYPE_NAME_WORDS[raw]
         emit_self_hosted_lexer_token(ivars, :TYPE, raw, off)
@@ -5872,20 +5890,25 @@ module Tungsten
       end
     end
 
-    # Mirrors go_keyword_at? in languages/tungsten/lexers/regex_helpers.w:
-    # `go` is a keyword only where it starts a spawn (`go -> body`), not
-    # after `.`/`&.`; elsewhere it is an identifier.
-    def self_hosted_go_keyword_at?(ivars, after)
+    # Mirrors contextual_keyword_at? in
+    # languages/tungsten/lexers/regex_helpers.w: `go`, `fn` and `on` are
+    # keywords only where their grammar applies (see ContextualKeywords in
+    # lexer.rb for `fn`/`on`); `go` only before `->`. None after `.`/`&.`.
+    def self_hosted_contextual_keyword_at?(ivars, raw, off)
+      return false unless raw == "go" || raw == "fn" || raw == "on"
+
       last_type = ivars["@last_token_type"]
       return false if last_type == :DOT || last_type == :SAFE_NAV
 
-      chars = ivars["@chars"]
-      count = ivars["@char_count"]
-      pos = after
-      while pos < count && (chars[pos] == " " || chars[pos] == "\t")
-        pos += 1
+      source = ivars["@source"]
+      start = source[0, off].bytesize
+      finish = start + 2
+      if raw == "go"
+        pos = ContextualKeywords.skip_blanks(source, finish)
+        return source.byteslice(pos, 2) == "->"
       end
-      pos + 1 < count && chars[pos] == "-" && chars[pos + 1] == ">"
+      statement_start = last_type.nil? || %i[NEWLINE INDENT DEDENT SEMICOLON].include?(last_type)
+      ContextualKeywords.keyword_at?(raw, source, start, finish, statement_start)
     end
 
     def materialize_self_hosted_lexer_op(ivars, raw, off)

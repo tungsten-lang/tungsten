@@ -10,6 +10,7 @@
 # with reference white at 203 nits, then re-encoded as sRGB.
 
 use core/codec/image
+use core/codec/image/heif_gpu
 
 -> hc_u16(a, o)
   (a[o] << 8) | a[o + 1]
@@ -628,27 +629,22 @@ HEIF_UPSAMPLE = [-1]
     k[8] = ~1.0
   elsif mc == 8
     k[8] = ~2.0
+  cm = HEIF_COLOR_MANAGE[0] ? hc_colour_plan(cp, tc, icc) : nil
+  um = hc_upsample_mode(pic, dw == nil ? w : dw, dh == nil ? h : dh)
+  if cm == nil && (k[8] == ~0.0 || k[8] == ~3.0) && n >= codec_gpu_min(HEIF_GPU_MIN) && codec_gpu_enabled?()
+    # common path on the GPU (core/codec/image/heif_gpu), bit-exact
+    bm = Bitmap.new(w, h, metal_array(8, n * 4))
+    return bm if heif_gpu_convert(pic, hc_int_coeffs(k, ~255.0, pic.mono), um, bm.rgba)
   cb = i32[1]
   cr = i32[1]
   if !pic.mono
     cb = i32[n]
     cr = i32[n]
-    um = hc_upsample_mode(pic, dw == nil ? w : dw, dh == nil ? h : dh)
     hc_upsample(pic.planes[1], pic.cw, pic.ch, cb, w, h, pic.ssx, pic.ssy, um, pic.tile_w, pic.tile_h)
     hc_upsample(pic.planes[2], pic.cw, pic.ch, cr, w, h, pic.ssx, pic.ssy, um, pic.tile_w, pic.tile_h)
   bm = Bitmap.new(w, h)
-  cm = HEIF_COLOR_MANAGE[0] ? hc_colour_plan(cp, tc, icc) : nil
   if cm == nil && (k[8] == ~0.0 || k[8] == ~3.0)
-    ik = i64[8]
-    sc = ~1048576.0 * ~255.0
-    ik[0] = (k[1] * sc + ~0.5).to_i
-    ik[1] = (k[3] * k[4] * sc / ~16.0 + ~0.5).to_i
-    ik[2] = (k[3] * k[5] * sc / ~16.0 + ~0.5).to_i
-    ik[3] = (k[3] * k[6] * sc / ~16.0 + ~0.5).to_i
-    ik[4] = (k[3] * k[7] * sc / ~16.0 + ~0.5).to_i
-    ik[5] = k[0].to_i
-    ik[6] = k[2].to_i * 16
-    ik[7] = pic.mono ? 1 : 0
+    ik = hc_int_coeffs(k, ~255.0, pic.mono)
     hc_convert_int(pic.planes[0], cb, cr, n, ik, bm.rgba)
   elsif cm == nil
     hc_convert8(pic.planes[0], cb, cr, n, k, bm.rgba)
@@ -667,6 +663,20 @@ HEIF_UPSAMPLE = [-1]
   else
     hc_convert_cm(pic.planes[0], cb, cr, n, k, cm[0], cm[1], cm[2], cm[3], bm.rgba)
   bm
+
+# hc_convert_int's fixed-point (2^20) coefficients for output scale omax.
+-> hc_int_coeffs(k, omax, mono)
+  ik = i64[8]
+  sc = ~1048576.0 * omax
+  ik[0] = (k[1] * sc + ~0.5).to_i
+  ik[1] = (k[3] * k[4] * sc / ~16.0 + ~0.5).to_i
+  ik[2] = (k[3] * k[5] * sc / ~16.0 + ~0.5).to_i
+  ik[3] = (k[3] * k[6] * sc / ~16.0 + ~0.5).to_i
+  ik[4] = (k[3] * k[7] * sc / ~16.0 + ~0.5).to_i
+  ik[5] = k[0].to_i
+  ik[6] = k[2].to_i * 16
+  ik[7] = mono ? 1 : 0
+  ik
 
 # nil when the picture is (close enough to) sRGB already; otherwise
 # [linearise lut f64[4097], 3x3 to linear sRGB f64[9], [peak, hdr] f64[2], encode lut u8[16384]].

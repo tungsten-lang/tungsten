@@ -94,6 +94,10 @@ use builtin_arity
   nil
 
 -> dispatch_builtin(interp, name, recv, args, block)
+  if interp.sandboxed?()
+    stub = interp.sandbox_builtin(name)
+    if stub != nil
+      return stub[0]
   # A lambda passed as the last positional argument to a block-taking
   # builtin IS the block — `arr.reject(-> (s) s.empty?)` and the trailing
   # form `arr.reject -> (s) s.empty?` are the same call in the compiled
@@ -109,12 +113,12 @@ use builtin_arity
   case name
   # -- I/O --
   when "puts"
-    args.each -> << interp.w_to_s(arg)
+    args.each -> interp.output_line(interp.w_to_s(arg))
     nil
 
   when "print"
     args.each -> (a)
-      <- interp.w_to_s(a)
+      interp.output_text(interp.w_to_s(a))
     nil
 
   when "read_file"

@@ -1089,7 +1089,8 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     emit_wire_alloca_i64(new_fn, new_fn[:result_slot])
     emit_wire_call_direct_ptr(new_fn, [], "w_block_return_push", block_return_buf)
     block_return_bits = next_temp(new_fn)
-    emit_wire_ptr_to_i64(new_fn, block_return_bits, block_return_buf)
+    # frame address + generation tag (stale-block detection with recycled frames)
+    emit_wire_call_direct_i64_ptr1(new_fn, block_return_buf, "w_block_return_bits", block_return_bits)
     child_ctx[:block_return_frame] = block_return_bits
     sj = next_temp(new_fn)
     emit_wire_setjmp(new_fn, block_return_buf, sj)
@@ -2465,7 +2466,8 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     emit_wire_alloca_i64(new_fn, new_fn[:result_slot])
     emit_wire_call_direct_ptr(new_fn, [], "w_block_return_push", block_return_buf)
     block_return_bits = next_temp(new_fn)
-    emit_wire_ptr_to_i64(new_fn, block_return_bits, block_return_buf)
+    # frame address + generation tag (stale-block detection with recycled frames)
+    emit_wire_call_direct_i64_ptr1(new_fn, block_return_buf, "w_block_return_bits", block_return_bits)
     child_ctx[:block_return_frame] = block_return_bits
     sj = next_temp(new_fn)
     emit_wire_setjmp(new_fn, block_return_buf, sj)

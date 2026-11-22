@@ -97,6 +97,8 @@ int w_cg_canvas_buffer(int64_t handle, WCGBufferInfo *out);
     X(w_cg_image_load, 1)         \
     X(w_cg_image_from_canvas, 1)  \
     X(w_cg_image_from_rgba, 3)    \
+    X(w_cg_image_load_data, 1)    \
+    X(w_cg_image_from_premultiplied, 4) \
     X(w_cg_image_info, 2)         \
     X(w_cg_image_draw, 14)        \
     X(w_cg_image_bytes, 1)        \

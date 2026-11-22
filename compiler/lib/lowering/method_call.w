@@ -714,9 +714,7 @@
   false
 
 -> fresh_iteration_name(ctx, stem)
-  id = ctx[:mod][:next_block]
-  ctx[:mod][:next_block] = id + 1
-  stem + id.to_s()
+  stem + lowering_next_block_id(ctx, 1).to_s()
 
 # The block's explicit parameter names, or nil when the shape is unsupported
 # (implicit params, `&` params, a count other than `want`).
@@ -1232,8 +1230,7 @@
           param_name = param
         if param_name != nil && !param_name.starts_with?("&")
           # Allocate a unique iteration index variable
-          idx_id = ctx[:mod][:next_block]
-          ctx[:mod][:next_block] = idx_id + 1
+          idx_id = lowering_next_block_id(ctx, 1)
           idx_name = "__each_idx_" + idx_id.to_s()
           # v = recv[idx_name]
           subscript_call = Tungsten:AST:Call.new(recv_node, "[]", [Tungsten:AST:Var.new(idx_name)], nil)

@@ -1521,8 +1521,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
 # that: with a block, dispatch it per stepped value (like .each); without
 # one, return the materialized array.
 -> lower_range_step(ctx, range_node, step_node, block_node = nil)
-  uid = ctx[:mod][:next_block]
-  ctx[:mod][:next_block] = uid + 1
+  uid = lowering_next_block_id(ctx, 1)
   arr_name = "__step_arr_" + uid.to_s()
   i_name = "__step_i_" + uid.to_s()
   lim_name = "__step_lim_" + uid.to_s()
@@ -2432,8 +2431,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rhs = lower_expression(ctx, node.right)
       lhs_reg = ensure_i64_value(wfn, lhs)
       rhs_reg = ensure_i64_value(wfn, rhs)
-      block_id = ctx[:mod][:next_block]
-      ctx[:mod][:next_block] = block_id + 4
+      block_id = lowering_next_block_id(ctx, 4)
       temp = next_temp(wfn)
       # `Math.trap -> ...`: on i48 overflow, branch to llvm.trap (abort) in
       # the guarded emitter instead of the BigInt-promoting runtime call.

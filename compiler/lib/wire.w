@@ -236,6 +236,7 @@ use wire_constructors
     # first use so loop-local literals replace decimal parsing with a copy.
     next_bigint_literal: 0,
     next_block:       0,
+    next_core_block:  0,
     next_ic:          0,
     next_call_site:   0,
     next_fuse_site:   0,

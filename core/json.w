@@ -122,7 +122,7 @@
       i = 0
       while i < smode
         b = (sv >> (4 + 8 * i)) & 0xFF
-        if b == 34 || b == 92 || b == 10 || b == 13 || b == 9
+        if b == 34 || b == 92 || b < 32
           has_escape = true
           break
         i += 1
@@ -144,7 +144,7 @@
       i += 4
     while i < n
       b = raw_load_u8(ptr, i)
-      if b == 34 || b == 92 || b == 10 || b == 13 || b == 9
+      if b == 34 || b == 92 || b < 32
         has_escape = true
         break
       i += 1
@@ -153,6 +153,18 @@
     out = StringBuffer(n + 8)
     encode_string_into(s, out)
     out.to_s
+
+  # RFC 8259 requires every U+0000..U+001F to be escaped; `\"`, `\\`, `\n`
+  # and `\r` are handled inline by the callers.
+  -> .control_escape(b)
+    if b == 9
+      return "\\t"
+    if b == 8
+      return "\\b"
+    if b == 12
+      return "\\f"
+    hex = "0123456789abcdef"
+    "\\u00" + hex.slice(b >> 4, 1) + hex.slice(b & 15, 1)
 
   -> .encode_string_into(s_in, buf_in)
     s = s_in ## String
@@ -167,7 +179,7 @@
       i = 0
       while i < smode
         b = (sv >> (4 + 8 * i)) & 0xFF
-        if b == 34 || b == 92 || b == 10 || b == 13 || b == 9
+        if b == 34 || b == 92 || b < 32
           has_esc = true
           break
         i += 1
@@ -181,7 +193,7 @@
       i = 0
       while i < smode
         b = (sv >> (4 + 8 * i)) & 0xFF
-        if b == 34 || b == 92 || b == 10 || b == 13 || b == 9
+        if b == 34 || b == 92 || b < 32
           if i > run_start
             buf << s.slice(run_start, i - run_start)
           if b == 34
@@ -193,7 +205,7 @@
           elsif b == 13
             buf << "\\r"
           else
-            buf << "\\t"
+            buf << control_escape(b)
           i += 1
           run_start = i
         else
@@ -218,7 +230,7 @@
         break
     while i < n
       b = raw_load_u8(ptr, i)
-      if b == 34 || b == 92 || b == 10 || b == 13 || b == 9
+      if b == 34 || b == 92 || b < 32
         if i > run_start
           buf << s.slice(run_start, i - run_start)
         if b == 34
@@ -230,7 +242,7 @@
         elsif b == 13
           buf << "\\r"
         else
-          buf << "\\t"
+          buf << control_escape(b)
         i += 1
         run_start = i
       else
@@ -360,6 +372,20 @@
           out << "\""
         elsif esc == 47
           out << "/"
+        elsif esc == 98
+          out << 8.chr
+        elsif esc == 102
+          out << 12.chr
+        elsif esc == 117
+          cp = hex4(view, p + 1, n)
+          p += 4
+          # A UTF-16 surrogate pair spells one supplementary code point.
+          if cp >= 0xD800 && cp <= 0xDBFF && p + 6 < n && view[p + 1] == 92 && view[p + 2] == 117
+            lo = hex4(view, p + 3, n)
+            if lo >= 0xDC00 && lo <= 0xDFFF
+              cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
+              p += 6
+          out << cp.chr
         else
           out << s.slice(p, 1)
         p += 1
@@ -367,6 +393,29 @@
       else
         p += 1
     raise "JSON.parse: unterminated string"
+
+  # The four hex digits of a `\uXXXX` escape starting at view[at].
+  -> .hex4(view_in, at_in, n_in)
+    view = view_in ## u8[]
+    at = at_in ## i64
+    if at + 4 > n_in
+      raise "JSON.parse: truncated \\u escape"
+    v = 0 ## i64
+    i = 0
+    while i < 4
+      c = view[at + i]
+      d = -1
+      if c >= 48 && c <= 57
+        d = c - 48
+      elsif c >= 97 && c <= 102
+        d = c - 87
+      elsif c >= 65 && c <= 70
+        d = c - 55
+      if d < 0
+        raise "JSON.parse: bad \\u escape"
+      v = v * 16 + d
+      i += 1
+    v
 
   # Always consumes at least one digit, so a caller's element loop cannot
   # spin on a byte that is not a number at all.

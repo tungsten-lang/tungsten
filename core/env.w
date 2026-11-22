@@ -63,3 +63,8 @@
 + EnvFetchMissing
 
 ENV_FETCH_MISSING = EnvFetchMissing.new
+
+# Ruby-style spelling of the facade: `ENV["HOME"]`, `ENV.fetch(...)`. A
+# class (not a top-level alias) so the autoloader finds it from any scope,
+# including inside methods.
++ ENV < Env

@@ -69896,6 +69896,7 @@ WValue w_array_reuse_or_new(WValue *slot, int64_t element_bits, int64_t cap) {
 }
 
 static int w_array_has_views(WValue parent);
+static void w_array_detach_view(WValue arr);
 
 WValue w_array_push(WValue arr, WValue val) {
     if (__builtin_expect(w_is_array(arr), 1)) {
@@ -69912,7 +69913,9 @@ WValue w_array_push(WValue arr, WValue val) {
     }
     WArray *a = w_as_array(arr);
     if ((a->flags & W_FLAG_OWNED) == 0) {
-        w_raise(w_string("typed array push: cannot grow a borrowed view"));
+        if ((a->flags & W_FLAG_VIEW) == 0)
+            w_raise(w_string("typed array push: cannot grow a borrowed view"));
+        w_array_detach_view(arr);
     }
     int64_t bits = array_storage_bits(a->ebits);
     if (a->start + a->size >= a->cap) {
@@ -70866,6 +70869,47 @@ void w_register_view(WValue parent, WValue view) {
     n->count++;
 }
 
+static void w_view_unregister(WValue view) {
+    if (!g_any_views_registered) return;
+    for (int b = 0; b < W_VIEW_BUCKETS; b++) {
+        for (WViewNode *n = w_view_table[b]; n; n = n->next) {
+            for (int32_t i = 0; i < n->count; i++) {
+                if (n->entries[i].view == view) {
+                    n->entries[i] = n->entries[n->count - 1];
+                    n->count--;
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/* Growing a borrowed view (`a.slice(0, n)` then `push`) detaches it: its
+ * elements move into fresh owned storage, so the push cannot write past the
+ * window into the parent's (or a string's) bytes. Writes through the view
+ * stop aliasing the parent from this point on. */
+static void w_array_detach_view(WValue arr) {
+    WArray *a = w_as_array(arr);
+    WArray old = *a;
+    int64_t cap = a->size < 4 ? 8 : (int64_t)a->size * 2;
+    if (cap > INT32_MAX) cap = INT32_MAX;
+    uint8_t *data = calloc(1, (size_t)array_byte_size(a->ebits, cap));
+    if (!data) die("typed array allocation failed");
+    w_allocprof(W_ALLOCPROF_GROW, array_byte_size(a->ebits, cap));
+    w_view_unregister(arr);
+    a->slots = (WValue *)data;
+    a->start = 0;
+    a->cap = (int32_t)cap;
+    if (array_storage_bits(a->ebits) >= 8) {
+        memcpy(data, (uint8_t *)old.slots + array_byte_size(old.ebits, old.start),
+               (size_t)array_byte_size(old.ebits, old.size));
+    } else {
+        for (int64_t j = 0; j < old.size; j++)
+            array_write(a, j, array_read(&old, old.start + j));
+    }
+    a->flags = (uint8_t)((a->flags & ~(W_FLAG_VIEW | W_FLAG_INLINE | W_FLAG_PAGE_ALIGNED)) | W_FLAG_OWNED);
+}
+
 /* Walk every view registered against `parent`, rewriting their `slots`
  * to point into the new buffer at the same byte-offset. Recurses so
  * sub-views (views of views) are updated through the intermediate's
@@ -71113,7 +71157,9 @@ WValue w_array_unshift(WValue arr, WValue val) {
     // add int-vs-float branching and byte-sized storage math.
     WArray *a = w_as_array(arr);
     if ((a->flags & W_FLAG_OWNED) == 0) {
-        w_raise(w_string("typed array unshift: cannot grow a borrowed view"));
+        if ((a->flags & W_FLAG_VIEW) == 0)
+            w_raise(w_string("typed array unshift: cannot grow a borrowed view"));
+        w_array_detach_view(arr);
     }
     int64_t bits = array_storage_bits(a->ebits);
     // Case 1: O(1) — slot exists before start.

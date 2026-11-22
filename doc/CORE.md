@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(841 total), grouped by area, with its declaration, a one-line
+(845 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -51,8 +51,10 @@ summary from the source header, and a link to the source.
 | `Digest` | `+ Digest` | — | [`core/digest.w`](../core/digest.w) |
 | `Dir` | `+ Dir` | — | [`core/dir.w`](../core/dir.w) |
 | `Directory` | `+ Directory < Dir` | — | [`core/dir.w`](../core/dir.w) |
+| `Dns` | `+ Dns` | Dns — the operating system's resolver. | [`core/dns.w`](../core/dns.w) |
 | `Duration` | `+ Duration` | Duration — time span (tag 0xFFFF). Two-component representation: | [`core/duration.w`](../core/duration.w) |
 | `Env` | `+ Env` | Env — the current process environment. | [`core/env.w`](../core/env.w) |
+| `ENV` | `+ ENV < Env` | Ruby-style spelling of the facade: `ENV["HOME"]`, `ENV.fetch(...)`. A | [`core/env.w`](../core/env.w) |
 | `File` | `+ File` | File — whole-file I/O, metadata, paths, and filesystem operations. | [`core/file.w`](../core/file.w) |
 | `FileStat` | `+ FileStat` | FileStat — portable POSIX file metadata with nanosecond timestamps. | [`core/file.w`](../core/file.w) |
 | `FileHandle` | `+ FileHandle` | FileHandle — an open file from File.open, read and written incrementally | [`core/file.w`](../core/file.w) |
@@ -784,6 +786,7 @@ summary from the source header, and a link to the source.
 | `WeilCubic` | — | — | [`core/algebra.w`](../core/algebra.w) |
 | `Exception` | `+ Exception` | Exception — the root of everything `raise` can carry. Treat it as | [`core/errors/exception.w`](../core/errors/exception.w) |
 | `Error` | `+ Error < Exception` | Error — the base class of every rescuable error. | [`core/errors/error.w`](../core/errors/error.w) |
+| `StandardError` | `+ StandardError < Error` | StandardError — Ruby's name for the ordinary rescuable error, kept so code | [`core/errors/standard_error.w`](../core/errors/standard_error.w) |
 | `ArgumentError` | `+ ArgumentError < Error` | ArgumentError — raised when an argument's value is unacceptable, | [`core/errors/argument_error.w`](../core/errors/argument_error.w) |
 | `RangeError` | `+ RangeError < Error` | RangeError — raised when a value falls outside the range an | [`core/errors/range_error.w`](../core/errors/range_error.w) |
 | `TypeError` | `+ TypeError < Error` | TypeError — raised when a value of the wrong type reaches an | [`core/errors/type_error.w`](../core/errors/type_error.w) |
@@ -809,6 +812,7 @@ summary from the source header, and a link to the source.
 | `AssertionError` | `+ AssertionError < Error` | AssertionError — a spec expectation or assertion failed. | [`core/errors/assertion_error.w`](../core/errors/assertion_error.w) |
 | `SystemExit` | `+ SystemExit < Exception` | SystemExit — the program is exiting; not caught by a rescue of Error. | [`core/errors/system_exit.w`](../core/errors/system_exit.w) |
 | `Interrupt` | `+ Interrupt < Exception` | Interrupt — the process received an interrupt signal; not caught by a rescue of Error. | [`core/errors/interrupt.w`](../core/errors/interrupt.w) |
+| `Zstd` | `+ Zstd` | Zstd — Zstandard (RFC 8878) decompression through the runtime's libzstd. | [`core/zstd.w`](../core/zstd.w) |
 
 ## Numeric tower
 

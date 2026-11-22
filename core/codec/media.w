@@ -122,11 +122,11 @@ ACODECS = {}
 # ---- system decoders (core/codec/system registers them) ----
 # One maker per kind for the operating system's decoders. The registry uses
 # ours unless the codec id is in the system preference list
-# (Codec.prefer_system / TUNGSTEN_CODEC_SYSTEM, see core/codec/system); a
+# (Codec.prefer_system / SYSTEM_CODECS, see core/codec/system); a
 # preferred system decoder that fails to open falls back to ours, and a codec
 # only the system has goes to the system.
 SYS_MAKERS = [nil, nil]       # [video maker, audio maker]
-SYS_PREFER = [nil]            # nil: read TUNGSTEN_CODEC_SYSTEM on first use
+SYS_PREFER = [nil]            # nil: read SYSTEM_CODECS on first use
 
 
 -> vcodec_system_register(make)
@@ -146,21 +146,17 @@ SYS_DEFAULTS = [[]]
   SYS_DEFAULTS[0] = list
 
 # Codec ids and image names the system decoders handle (see core/codec/system):
-# the default table, or TUNGSTEN_CODEC_SYSTEM / BLADE_CODEC: "own" / "0" none,
-# "system" / "all" / "1" every format the system has, "patent" the table, or
-# a comma-separated list.
+# the default table, overridden by SYSTEM_CODECS: "0" ours for everything,
+# "1" the system wherever it has a decoder, or a comma-separated list.
 -> codec_system_list
   if SYS_PREFER[0] == nil
-    v = env("TUNGSTEN_CODEC_SYSTEM")
-    v = env("BLADE_CODEC") if v == nil || v == ""
+    v = env("SYSTEM_CODECS")
     l = SYS_DEFAULTS[0] + []
-    if v == "own" || v == "0"
+    if v == "0"
       l = []
-    elsif v == "system" || v == "all" || v == "1"
+    elsif v == "1"
       l = SYS_DEFAULTS[0] + ["usac", "mp3 ", "alac", "flac", "opus", "jpeg", "webp", "jp2", "png", "gif", "tiff", "bmp"]
-    elsif v == "patent" || v == nil || v == ""
-      l = SYS_DEFAULTS[0] + []
-    else
+    elsif v != nil && v != ""
       l = []
       v.split(",").each ->(id)
         l.push(codec_id4(id.strip))

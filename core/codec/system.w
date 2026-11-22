@@ -17,10 +17,9 @@
 #           144 ms for a 4K WebP; animated WebP / AVIF stay ours)
 #   ours:   Opus, Vorbis, FLAC, MP3, ALAC, PCM, VP8, Theora; PNG, GIF and
 #           the other image formats
-# Overrides for testing either path: TUNGSTEN_CODEC_SYSTEM (or BLADE_CODEC):
-# "own"/"0" = ours for everything, "system"/"all"/"1" = system wherever it
-# exists, "patent" = the default table, or a list of codec ids / image names
-# ("avc1,mp4a,heic"); Codec.prefer_system(ids) at run time.
+# Override: SYSTEM_CODECS=0 = ours for everything, =1 = the system wherever it
+# has a decoder, or a list of codec ids / image names ("avc1,mp4a,heic");
+# unset = the table above. Codec.prefer_system(ids) at run time.
 #
 # Fallback: when the system decoder cannot open a stream (unsupported
 # profile, no hardware AV1) or fails before producing its first frame /

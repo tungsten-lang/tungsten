@@ -1262,6 +1262,40 @@
             return {arr: wire_sequence_get(args, 0), idx: idx_str.to_i(), val: lit, temp: wire_get(next_inst, :temp), step: 2}
   nil
 
+# The attribute text a function renders with: in a debug-frame build (base
+# text carries the noinline suffix) a small leaf drops it. Shared with the
+# parallel prepass so attribute-group ids are interned in the same order.
+-> debug_frame_leaf_attr_text(f, base_attr_text)
+  suffix = " noinline \"disable-tail-calls\"=\"true\""
+  if f[:noinline] == true || !base_attr_text.ends_with?(suffix) || !small_leaf_function?(f)
+    return base_attr_text
+  base_attr_text.slice(0, base_attr_text.size() - suffix.size())
+
+# A small straight-line or lightly branching body that calls nothing but the
+# always-inline machine helpers.
+-> small_leaf_function?(f)
+  ok = f[:name] != "main" && f[:is_toplevel] != true && f[:blocks] != nil && f[:blocks].size() <= 12 && f[:embedded_ll] == nil
+  count = 0
+  bi = 0
+  while ok && bi < f[:blocks].size()
+    instrs = f[:blocks][bi][:instructions]
+    ii = 0
+    while ok && ii < instrs.size()
+      inst = instrs[ii]
+      op = wire_kind(inst)
+      count += 1
+      if count > 80
+        ok = false
+      elsif op in (:call_method_i64 :call_indirect_i64 :closure_new :call_direct_void :call_direct_ptr :call_direct_i128 :call_direct_i64_ptr1 :call_direct_void_ptr1)
+        ok = false
+      elsif op == :call_direct_i64
+        nm = wire_get(inst, :name)
+        if nm == nil || !(nm.starts_with?("__w_ta_bounds_check") || nm.starts_with?("__w_bit_") || nm in ("__w_cast_i64_fast" "__w_to_i64_fast" "__w_int_fast" "__w_num_to_f64_fast"))
+          ok = false
+      ii += 1
+    bi += 1
+  ok
+
 -> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true, windows_target = false, preserve_debug_frames = false, emit_blockaddress_sites = true)
   if f[:embedded_ll] != nil
     return emit_embedded_ll_function(f)
@@ -1276,6 +1310,10 @@
   if attr_groups != nil
     function_attr_group_id(attr_groups, base_attr_text)
   attr_text = base_attr_text
+  # Debug-frame builds keep every frame (noinline), except tiny leaf bodies
+  # such as a clip or a 6-tap filter helper: inlining those is worth more
+  # than their frame, which the caller's frame stands in for.
+  attr_text = debug_frame_leaf_attr_text(f, attr_text)
   # `Tungsten.noinline!` bodies get their own attribute group.
   if f[:noinline] == true
     attr_text = attr_text + " noinline"

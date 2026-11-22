@@ -332,6 +332,58 @@ rescue e
   msg = e.to_s
 check("missing file raises", msg != nil && msg.index("cannot read") != nil)
 
+# ---- images from RGBA pixels ----
+px = ByteArray.new(3 * 2 * 4)
+# row 0: opaque red, half-transparent green (straight alpha), transparent
+px[0] = 255
+px[3] = 255
+px[5] = 255
+px[7] = 128
+# row 1: opaque blue, opaque white, opaque black
+px[14] = 255
+px[15] = 255
+px[16] = 255
+px[17] = 255
+px[18] = 255
+px[19] = 255
+px[23] = 255
+before = Canvas.stats[:images]
+rimg = Canvas.image_from_rgba(px, 3, 2)
+check("image_from_rgba size", rimg.width == 3 && rimg.height == 2)
+check("image_from_rgba is registered", Canvas.stats[:images] == before + 1)
+check("image_from_rgba is sRGB", rimg.space == "srgb")
+rb = rimg.bytes
+check("image_from_rgba round trips opaque pixels", rb[0] == 255 && rb[1] == 0 && rb[3] == 255 && rb[14] == 255 && rb[16] == 255 && rb[19] == 255 && rb[20] == 0 && rb[23] == 255)
+check("image_from_rgba keeps straight alpha", rb[7] == 128 && near(rb[5], 255, 1) && rb[11] == 0)
+px[0] = 0
+check("image_from_rgba copies the pixels", rimg.bytes[0] == 255)
+rd = Canvas.new(6, 4)
+rd.image(rimg, 0, 0, 6, 4, fit: :fill, quality: :none)
+check("image_from_rgba draws upright", rd.pixel(0, 0) == [255, 0, 0, 255] && rd.pixel(0, 3) == [0, 0, 255, 255] && rd.pixel(5, 3) == [0, 0, 0, 255])
+check("image_from_rgba transparent pixel", rd.pixel(5, 0)[3] == 0)
+check("image_from_rgba blends straight alpha", near(rd.pixel(2, 0)[3], 128, 1))
+rd.close
+rimg.release
+check("image_from_rgba release", Canvas.stats[:images] == before)
+msg = nil
+begin
+  Canvas.image_from_rgba(ByteArray.new(8), 3, 2)
+rescue e
+  msg = e.to_s
+check("image_from_rgba short buffer raises", msg != nil && msg.index("need 24") != nil)
+msg = nil
+begin
+  Canvas.image_from_rgba(ByteArray.new(8), 0, 2)
+rescue e
+  msg = e.to_s
+check("image_from_rgba bad size raises", msg != nil && msg.index("bad size") != nil)
+big = ByteArray.new(256 * 256 * 4)
+i = 0
+while i < 200
+  Canvas.image_from_rgba(big, 256, 256).release
+  i += 1
+check("image_from_rgba 200 create/release cycles leave no image behind", Canvas.stats[:images] == before)
+
 # ---- text ----
 tx = Canvas.new(300, 100)
 w2 = tx.text_width("ab", size: 40)

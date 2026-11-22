@@ -165,6 +165,35 @@ check("empty input", Gzip.decompress(u8[0]).size == 0)
 check("empty String", Gzip.decompress("").size == 0)
 check("an empty member", Gzip.decompress(u8_from([0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0])).size == 0)
 
+# ---- raw DEFLATE and zlib framing ------------------------------------------------
+-> zlib_outcome(bytes, check_adler)
+  code = :ok
+  begin
+    Gzip.inflate_zlib(bytes, 0, 0, check_adler)
+  rescue e: GzipError
+    code = e.code
+  code
+
+zl = fixture("sample.zlib")
+check("inflate_zlib (Python zlib.compress level 9)", same_bytes(Gzip.inflate_zlib(zl), sample))
+check("inflate_zlib with a size hint", same_bytes(Gzip.inflate_zlib(zl, 0, 64000), sample))
+check("inflate_zlib with a too-small size hint grows", same_bytes(Gzip.inflate_zlib(zl, 0, 10), sample))
+check("inflate_zlib at an offset", same_bytes(Gzip.inflate_zlib(concat(u8_from([1, 2, 3]), zl), 3), sample))
+check("inflate_zlib of a String", same_bytes(Gzip.inflate_zlib(read_file(__DIR__ + "/../fixtures/gzip/sample.zlib")), sample))
+check("inflate (raw DEFLATE)", same_bytes(Gzip.inflate(fixture("sample.deflate")), sample))
+check("inflate of a gzip member's body at offset 10", same_bytes(Gzip.inflate(fixture("sample.l6.gz"), 10), sample))
+check("inflate ignores bytes after the stream", same_bytes(Gzip.inflate(concat(fixture("sample.deflate"), u8_from([9, 9, 9]))), sample))
+check("inflate of a fixed-Huffman empty block", Gzip.inflate(u8_from([3, 0])).size == 0)
+check("bad Adler-32", zlib_outcome(with_byte(zl, zl.size - 1, zl[zl.size - 1] ^ 1), true) == :adler)
+check("bad Adler-32 ignored with check: false", zlib_outcome(with_byte(zl, zl.size - 1, zl[zl.size - 1] ^ 1), false) == :ok)
+check("missing trailer", zlib_outcome(head(zl, zl.size - 4), true) == :truncated)
+check("missing trailer tolerated with check: false", same_bytes(Gzip.inflate_zlib(head(zl, zl.size - 4), 0, 0, false), sample))
+check("bad zlib header check bits", zlib_outcome(with_byte(zl, 1, zl[1] ^ 1), true) == :not_zlib)
+check("zlib method other than deflate", zlib_outcome(u8_from([0x79, 0x9C, 3, 0]), true) == :not_zlib)
+check("zlib preset dictionary refused", zlib_outcome(u8_from([0x78, 0xBB, 0, 0, 0, 0, 3, 0]), true) == :not_zlib)
+check("truncated zlib stream", zlib_outcome(head(zl, 100), false) == :truncated)
+check("empty input to inflate_zlib", zlib_outcome(u8[0], true) == :truncated)
+
 # ---- members -------------------------------------------------------------------
 multi = fixture("multi.gz")
 first_only = head(multi, 33)

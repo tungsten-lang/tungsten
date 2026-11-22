@@ -20,6 +20,9 @@ core/gzip.w, so the spec checks the inflater against an independent encoder:
   tensor.book.gz.b64      it as Python's gzip.compress(mtime=0) + encodebytes
                           (76 columns), tensor.line.gz.b64: b64encode + newline
   manifest.tsv            gzip file, expected output file (- means zeros)
+  sample.zlib             sample.txt as a zlib stream (zlib.compress, level 9),
+                          for Gzip.inflate_zlib
+  sample.deflate          sample.txt as raw DEFLATE (level 6), for Gzip.inflate
 
 Run from the repository root: python3 spec/fixtures/gzip/make_fixtures.py
 (a global `*.gz` gitignore needs `git add -f spec/fixtures/gzip/*.gz`).  The
@@ -65,6 +68,11 @@ def member(data, deflated=None, flags=0, header_extra=b"", mtime=0, xfl=0, os_by
     if flags & 2:
         body += struct.pack("<H", zlib.crc32(body) & 0xFFFF)
     return body + deflated + struct.pack("<II", zlib.crc32(data) & 0xFFFFFFFF, len(data) & 0xFFFFFFFF)
+
+
+def write_zlib_fixtures(sample):
+    write("sample.zlib", zlib.compress(sample, 9))
+    write("sample.deflate", raw_deflate(sample, 6))
 
 
 def main():
@@ -118,6 +126,8 @@ def main():
     packed = gzip.compress(tensor, 9, mtime=0)
     write("tensor.book.gz.b64", base64.encodebytes(packed))
     write("tensor.line.gz.b64", base64.b64encode(packed) + b"\n")
+
+    write_zlib_fixtures(sample)
 
     with open(path("manifest.tsv"), "w") as f:
         for gz, raw in manifest:

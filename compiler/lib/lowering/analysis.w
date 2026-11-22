@@ -34,7 +34,9 @@
   while i < n_keys
     name = keys[i]
     loop_vt = var_types[name]
-    if (loop_vt == :int || is_machine_int_type(loop_vt) || loop_vt == :raw_int || loop_vt == :raw_i64) && assigned_vars[name] == nil
+    # 128-bit vars live in i128 slots; the unboxed path reads and writes
+    # 64-bit raw slots, so they stay on the ordinary typed path.
+    if (loop_vt == :int || is_machine_int64_type(loop_vt) || loop_vt == :raw_int || loop_vt == :raw_i64) && assigned_vars[name] == nil
       result.push(name)
     i += 1
   result
@@ -74,7 +76,15 @@
         # unboxing would feed a double to ensure_raw_int and die with
         # "expected int, got numeric". Route those to assigned_vars so
         # the unbox filter below skips them.
-        if int_shaped_node?(node.value, var_types)
+        # A `## T`-hinted plain assignment stays on the ordinary assign
+        # path, which lowers its RHS in the hinted machine type. The unboxed
+        # path lowered it generically and nanunboxed the result: `hi = hi +
+        # addcarry(a, b) ## u64` on a var first assigned before the loop
+        # boxed both operands, promoted the sum to a BigInt, and stored its
+        # pointer bits as the u64 value.
+        if t == :assign && node.type_hint != nil
+          assigned_vars[ntarget_name] = true
+        elsif int_shaped_node?(node.value, var_types)
           compound_vars[ntarget_name] = true
         else
           assigned_vars[ntarget_name] = true

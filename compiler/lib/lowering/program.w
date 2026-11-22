@@ -228,6 +228,8 @@
     mod[:top_level_float_literals] = {}
   if mod[:top_level_int_literals] == nil
     mod[:top_level_int_literals] = {}
+  if mod[:top_level_wide_int_literals] == nil
+    mod[:top_level_wide_int_literals] = {}
 
   # First pass: count top-level :assign targets per name. A var assigned
   # exactly once at module scope is eligible for `constant` emission.
@@ -317,6 +319,13 @@
               iv = lit.value
               if type(iv) == "Int" && iv < 140737488355328 && iv > 0 - 140737488355328
                 mod[:top_level_int_literals][name] = iv
+              elsif type(iv) in ("Int" "BigInt") && iv <= 9223372036854775807 && iv >= 0 - 9223372036854775807
+                # Past the inline range a bare read would allocate a BigInt
+                # box per use, so only arithmetic subtrees fold it
+                # (literal_const_node). `(r ## i64) & M51` with M51 = 2^51 - 1
+                # otherwise boxed the raw operand into a fresh BigInt for a
+                # generic `&` on every call (~3 KB per curve25519 fe_mul).
+                mod[:top_level_wide_int_literals][name] = iv
     i += 1
 
 # Constant-expression evaluator for `constant`-eligible top-level `## i64`

@@ -230,6 +230,9 @@
     raw_slot = ctx[:unboxed_vars][name]
     raw = next_temp(wfn)
     emit_wire_load_i64(wfn, raw_slot, raw)
+    # A u64 var keeps its unsigned reading (comparisons, boxing past 2^63).
+    if is_u64_type(ctx[:var_types][name])
+      return typed_value(:raw_u64, raw)
     return typed_value(:raw_i64, raw)
 
 

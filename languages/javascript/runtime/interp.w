@@ -2968,8 +2968,10 @@ JS_TRACE_MISS = [false]
 -> js_super_call_l(frame, args, env)
   f = frame[FS_FUNC]
   parent = f.get_prototype_of
+  av = args.call(env)
+  # IsConstructor is checked after ArgumentListEvaluation (§13.3.7.1 steps 3-5)
   js_throw_type("Super constructor " + js_to_display(parent) + " of anonymous class is not a constructor") if !(parent.is_a?(JsObject) && js_is_constructor?(parent))
-  js_super_call_with(frame, f, parent, args.call(env))
+  js_super_call_with(frame, f, parent, av)
 
 -> js_super_call_with(frame, f, parent, args)
   obj = js_construct(parent, args, frame[FS_NT])

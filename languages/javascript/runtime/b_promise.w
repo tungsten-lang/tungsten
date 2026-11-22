@@ -272,36 +272,44 @@ JS_UNHANDLED = JsTlsList.new
 
 # ---- combinators ----
 
+# Promise.all / allSettled / any / race (§27.2.4): the iterable is stepped one value at a
+# time; when resolve or then throws, the iterator is closed and the promise rejected.
+# (Collecting it first would never finish on an endless iterator.)
 -> js_promise_combinator(c, iterable, mode)
   cap = js_new_capability_from(c)
   dd = JS_DEPTH[0]
+  rec = nil
+  stepping = false
   begin
     resolve_fn = js_getv(c, "resolve")
     js_throw_type("Promise resolve is not a function") if !(resolve_fn.is_a?(JsObject) && resolve_fn.callable?)
-    items = js_to_list(iterable)
-    js_combinator_run(c, cap, resolve_fn, items, mode)
+    rec = js_get_iterator(iterable)
+    r = JS_REALM[0]
+    values = []
+    remaining = [1]
+    i = 0
+    while true
+      stepping = true
+      x = js_iter_step(rec)
+      stepping = false
+      break if x == JS_ITER_DONE
+      values.push(nil)
+      remaining[0] += 1
+      p = js_call(resolve_fn, c, [x])
+      js_combinator_attach(c, cap, p, i, values, remaining, mode)
+      i += 1
+    remaining[0] -= 1
+    if remaining[0] == 0 && mode != :race
+      if mode == :any
+        js_call(cap.reject, nil, [js_aggregate_error_ctor([r.new_array(values), "All promises were rejected"], nil)])
+      else
+        js_call(cap.resolve, nil, [r.new_array(values)])
   rescue e
     JS_DEPTH[0] = dd
+    # an error from the iterator itself leaves it alone; any other error closes it
+    js_iter_close_quiet(rec) if rec != nil && !stepping && !rec.done
     js_call(cap.reject, nil, [js_error_value(e)])
   cap.promise
-
--> js_combinator_run(c, cap, resolve_fn, items, mode)
-  r = JS_REALM[0]
-  n = items.size
-  values = Array.new(n, nil)
-  remaining = [n]
-  if n == 0
-    if mode == :any
-      js_call(cap.reject, nil, [js_aggregate_error_ctor([r.new_array([]), "All promises were rejected"], nil)])
-    elsif mode != :race
-      js_call(cap.resolve, nil, [r.new_array([])])
-    return nil
-  i = 0
-  while i < n
-    p = js_call(resolve_fn, c, [items[i]])
-    js_combinator_attach(c, cap, p, i, values, remaining, mode)
-    i += 1
-  nil
 
 -> js_combinator_attach(c, cap, p, i, values, remaining, mode)
   r = JS_REALM[0]

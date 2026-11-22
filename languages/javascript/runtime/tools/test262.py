@@ -26,8 +26,10 @@ while i < len(tests):
     try:
         p = subprocess.run([runner, root, lst], capture_output=True, text=True, timeout=max(30, len(batch) // 2), errors="replace")
         out = p.stdout
+        why = "memory-limit" if "memory limit exceeded" in (p.stderr or "") else "crash-or-timeout"
     except subprocess.TimeoutExpired as e:
         out = (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        why = "timeout"
     done = 0
     for line in out.splitlines():
         parts = line.split(" ", 2)
@@ -38,7 +40,7 @@ while i < len(tests):
     if done < len(batch):
         # the test after the last reported one crashed or hung
         bad = batch[done]
-        results[bad] = "FAIL " + bad + " crash-or-timeout"
+        results[bad] = "FAIL " + bad + " " + why
         i += done + 1
     else:
         i += len(batch)

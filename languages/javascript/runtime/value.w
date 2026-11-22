@@ -643,6 +643,14 @@ ARRAY_GAP = 65536
     return nil if @slen == nil || @slen >= ARRAY_GAP || !@extensible || @len_ro
     idx = []
     plain = true
+    # accessor elements keep the array in sparse mode
+    if @getters != nil
+      @getters.keys.each ->(pk)
+        plain = false if pk.is_a?(String) && js_array_index?(pk)
+    if @setters != nil
+      @setters.keys.each ->(pk)
+        plain = false if pk.is_a?(String) && js_array_index?(pk)
+    return nil if !plain
     @props.keys.each ->(pk)
       if pk.is_a?(String) && js_array_index?(pk)
         idx.push(pk)
@@ -711,13 +719,19 @@ ARRAY_GAP = 65536
     len = n.to_i
     raise JsThrow.new(js_range_error("Invalid array length")) if len < 0 || n != len + ~0.0 || len > 4294967295
     if @slen != nil
-      # ArraySetLength stops above the highest non-configurable element (§10.4.2.4)
-      @props.keys.each ->(pk)
+      # ArraySetLength stops above the highest non-configurable element (§10.4.2.4);
+      # elements may be data (props) or accessors (getters/setters)
+      keys = @props.keys
+      keys = keys + @getters.keys if @getters != nil
+      keys = keys + @setters.keys if @setters != nil
+      keys.each ->(pk)
         if pk.is_a?(String) && js_array_index?(pk) && pk.to_i >= len && @attrs != nil && @attrs[pk] != nil && (@attrs[pk] & ATTR_C) == 0
           len = pk.to_i + 1 if pk.to_i + 1 > len
-      @props.keys.each ->(pk)
+      keys.each ->(pk)
         if pk.is_a?(String) && js_array_index?(pk) && pk.to_i >= len
           @props.delete(pk)
+          @getters.delete(pk) if @getters != nil
+          @setters.delete(pk) if @setters != nil
           @attrs.delete(pk) if @attrs != nil
       @slen = len
       densify()

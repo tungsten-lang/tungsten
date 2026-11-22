@@ -442,10 +442,11 @@
   lo = 0
   hi = n - 1
   while lo < hi
-    lv = js_el(o, lo)
-    hv = js_el(o, hi)
+    # HasProperty then Get, lower before upper (§23.1.3.26): a getter may change the array
     le = js_has_el?(o, lo)
+    lv = le ? js_el(o, lo) : nil
     he = js_has_el?(o, hi)
+    hv = he ? js_el(o, hi) : nil
     if he
       js_put_el_set(o, lo, hv)
     else

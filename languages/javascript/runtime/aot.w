@@ -25,7 +25,12 @@
 # function): [0..4] addresses of w_closure_call_0..4, [8 ...] the helper closures (JS_AOT_H),
 # then the function's constants (strings, null, cells).
 
-JS_AOT_VERSION = "jsaot-1"
+# Bump whenever compiled code would no longer fit the interpreter: frame/scope layout, the
+# helper table, the ABI. Units are shared by every build that uses this name. (With the
+# jsaot-1 cache, after the block-function / parameter-scope changes of 2026-11-22, YouTube's
+# main script died at startup with "ReferenceError: U is not defined" in
+# `function(N,G=""){var U=…;U.debugName=G;…}`; with an empty cache or BLADE_JS_AOT=0 it ran.)
+JS_AOT_VERSION = "jsaot-2"
 JS_AOT_ON = [Env.get("BLADE_JS_AOT", "1") != "0"]
 JS_AOT_DEBUG = [Env.get("BLADE_JS_AOT_DEBUG", "") == "1"]
 # BLADE_JS_AOT_SYNC=1: build as soon as a function is hot and wait (tests).

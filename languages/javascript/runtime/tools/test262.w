@@ -113,6 +113,9 @@ HARNESS = {}
   full = sb.to_s
   host = T262Host.new
   r = js_new_realm(host)
+  # per-test time limit: busy scripts stop with RangeError after 10 s
+  JS_TASK_MS[0] = 10000
+  js_task_begin()
   JS_UNHANDLED.clear
   out = []
   t262_install_host(r, out)
@@ -148,6 +151,9 @@ HARNESS = {}
     return "FAIL " + rel + " " + done[0]
   "PASS " + rel
 
+# A test must not take the machine down: the runtime's memory watch exits the runner past
+# 4 GB (the driver records the test as a crash and continues with the next one).
+Process.memory_limit = (4294967296 ## int)
 root = ARGV[0]
 list = File.read(ARGV[1]).split("\n")
 list.each ->(rel)
@@ -158,4 +164,6 @@ list.each ->(rel)
     rescue e
       res = "FAIL " + rel + " runner " + e.message.to_s
     << res
+    # flushed per test, so a runner killed by the memory watch loses nothing reported
+    ccall("w_flush")
     ccall("w_flush")

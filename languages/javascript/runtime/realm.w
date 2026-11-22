@@ -272,9 +272,11 @@ JS_ITER_DONE = JsIterDone.new
   -> perf_now
     clock_ms() + ~0.0
 
-# Debugging aid (BLADE_JS_TRACE=native): log every native function (builtin or host API)
-# called by script that has no URL (eval / new Function code, e.g. an obfuscated VM): the
-# caller's column, the function, its receiver and arguments, and the result (stderr).
+# Debugging aid (BLADE_JS_TRACE=native): log every native function (builtin or host API) a
+# script calls: the caller's column, the function, its receiver and arguments, and the
+# result (stderr). Which script: BLADE_JS_TRACE_URL=<part of its URL>; without it, script
+# that has no URL (new Function code, or what a URL-less script evals: how YouTube's
+# BotGuard VM arrives, and how its read of a null <iframe>.contentWindow was found).
 # The builtins a bytecode loop calls per step are left out; BLADE_JS_TRACE=native-all logs
 # those too. Receivers and arguments are shown without reading any property.
 JS_TRACE_NATIVE = [Env.get("BLADE_JS_TRACE", "") == "native" ? :quiet : (Env.get("BLADE_JS_TRACE", "") == "native-all" ? :all : nil)]
@@ -298,16 +300,20 @@ JS_TRACE_NATIVE_SKIP = {"charCodeAt" => true, "push" => true, "pop" => true, "fr
   return fun if JS_TRACE_NATIVE[0] == :quiet && JS_TRACE_NATIVE_SKIP[name.to_s] == true
   ->(this, args, nt) js_trace_native_call(name, fun, [this, args, nt])
 
-# Is the running script one without a URL? (Checked before anything is formatted: the line
-# and column of a caller in a large script cost a pass over its source.)
--> js_trace_urlless?
+JS_TRACE_NATIVE_URL = [Env.get("BLADE_JS_TRACE_URL", "")]
+
+# Is the running script the one being traced? (Checked before anything is formatted: the
+# line and column of a caller in a large script cost a pass over its source.)
+-> js_trace_native_from?
   k = JS_DEPTH[0]
   u = JS_TOP[1]
   u = JS_STACK[k].url if k > 0 && k < 1000 && JS_STACK[k] != nil
-  u == nil || u == ""
+  f = JS_TRACE_NATIVE_URL[0]
+  return u == nil || u == "" if f.size == 0
+  u != nil && u.index(f) != nil
 
 -> js_trace_native_call(name, fun, c)
-  return fun.call(c[0], c[1], c[2]) if JS_TRACE_NATIVE_BUSY[0] || !js_trace_urlless?()
+  return fun.call(c[0], c[1], c[2]) if JS_TRACE_NATIVE_BUSY[0] || !js_trace_native_from?()
   loc = js_top_location()
   JS_TRACE_NATIVE_BUSY[0] = true
   head = "\[js native] @" + loc[2].to_s + " " + js_trace_show(c[0]) + " . " + name.to_s + "(" + c[1].map(->(a) js_trace_show(a)).join(", ") + ")"

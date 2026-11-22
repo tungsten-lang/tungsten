@@ -4467,7 +4467,7 @@ def stage0_real_interpreter_compat(body)
   body = insert_before_private(body, <<~RUBY)
     def stage0_compiler_keyword?(word = "")
       case word
-      when "begin", "break", "case", "else", "elsif", "ensure", "exit", "extern", "false", "fn", "go", "if",
+      when "begin", "break", "case", "else", "elsif", "ensure", "exit", "extern", "false", "fn", "if",
            "in", "lib", "loop", "module", "nil", "next", "on", "parallel", "raise", "rescue", "return",
            "self", "super", "then", "trait", "true", "unless", "until", "use", "when", "while", "with", "yield"
         true
@@ -4847,6 +4847,23 @@ def stage0_real_interpreter_compat(body)
       out.to_s()
     end
 
+    # `go` is a contextual keyword (go_keyword_at? in
+    # languages/tungsten/lexers/regex_helpers.w): reserved only where it
+    # starts a spawn, `go -> body`, never after `.`/`&.`.
+    def stage0_go_keyword_at?(source_text, row, col, prev_type)
+      return false if prev_type == "DOT" || prev_type == "SAFE_NAV"
+      lines = source_text.split("\n")
+      idx = row.to_i - 1
+      return false if idx < 0 || idx >= lines.length
+      line = lines[idx].to_s
+      pos = col.to_i - 1 + 2
+      pos = 0 if pos < 0
+      while pos < line.length && (line.slice(pos, 1) == " " || line.slice(pos, 1) == "\t")
+        pos += 1
+      end
+      line.slice(pos, 2) == "->"
+    end
+
     def stage0_tokenize_source_for_compiler(source, file)
       source_text = source.to_s
       lexer = CodepointLexer.new(source_text)
@@ -4857,6 +4874,9 @@ def stage0_real_interpreter_compat(body)
       loop do
         tok = lexer.next_token
         mapped = stage0_compiler_token_type(tok, prev_type)
+        if mapped == "ID" && tok.value.to_s == "go" && stage0_go_keyword_at?(source_text, tok.row, tok.col, prev_type)
+          mapped = "KEYWORD"
+        end
         value = stage0_compiler_token_value(tok, mapped)
         if mapped == "@"
           name_tok = lexer.next_token

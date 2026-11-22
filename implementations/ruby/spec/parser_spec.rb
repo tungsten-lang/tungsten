@@ -255,6 +255,26 @@ module Tungsten::AST
       expect(defn.body.first.name).to eq("push")
     end
 
+    # `go` is a keyword only in the spawn form `go -> body`; elsewhere it is
+    # an identifier on every engine.
+    it_parses "go = 1", Assign.new("go".var, 1.int)
+    it_parses "go + 1", BinaryOp.new("go".var, :+, 1.int)
+
+    it "parses go as a method name, call, and hash key" do
+      defn = described_class.parse("-> go(x)\n  x").list[0]
+      expect(defn).to be_a(Def)
+      expect(defn.name).to eq("go")
+      expect(defn.args.map(&:name)).to eq([ "x" ])
+
+      call = described_class.parse("obj.go").list[0]
+      expect(call).to be_a(Call)
+      expect(call.name).to eq("go")
+
+      hash = described_class.parse("{go: 1}").list[0]
+      expect(hash).to be_a(HashLiteral)
+      expect(hash.entries.map(&:first)).to eq([ StringLiteral.new("go") ])
+    end
+
     it "parses type words as method names" do
       result = described_class.parse("-> string(name) = name")
       defn = result.list[0]

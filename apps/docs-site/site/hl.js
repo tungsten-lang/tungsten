@@ -6,6 +6,9 @@ export const setClassIndex = (m) => { classes = m }
 const KW = new Set('if elsif else unless while until for in return raise use is with trait fn case when recase loop break next yield self nil true false and or not rescue ensure begin do then auto ro rw alias super ccall ccall_nobox runtime field readonly data'.split(' '))
 const TOK = /(##\s*[\w\[\]<>, ]+?(?=\s*(?:#|$)))|(#.*$)|("(?:\\.|[^"\\])*"?)|('(?:[^'\n])*')|(:[a-zA-Z_]\w*[?!]?)|(\b0x[\da-fA-F_]+\b|\b\d[\d_]*(?:\.\d[\d_]*)?(?:e[+-]?\d+)?(?:[a-zA-Zµ]+\d*)*)|(@\d+|@[a-zA-Z_]\w*|\$[a-zA-Z_]\w*)|(->|<<|=>|\*\*|\.\.\.?|[+\-*\/%=<>!&|^~]+)|([A-Z]\w*)|([a-z_]\w*[?!]?)/g
 
+// `go` is a keyword only where it starts a spawn (`go -> body`), never after `.`.
+const isGoSpawn = (src, start, end) => src.slice(start, end) === 'go' && src[start - 1] !== '.' && /^[ \t]*->/.test(src.slice(end))
+
 export function hl(code) {
   return String(code).split('\n').map(line).join('\n')
 }
@@ -25,7 +28,7 @@ function line(src) {
     else if (m[8]) out += `<span class="${t === '->' || t === '<<' ? 'k' : 'op'}">${esc(t)}</span>`
     else if (m[9]) out += classes.has(t) ? `<a class="ty" href="#/c/${encodeURIComponent(t)}">${esc(t)}</a>` : `<span class="ty">${esc(t)}</span>`
     else if (prev === '->' || prev === 'fn') out += `<span class="df">${esc(t)}</span>`
-    else out += KW.has(t) ? `<span class="k">${esc(t)}</span>` : esc(t)
+    else out += KW.has(t) || isGoSpawn(src, m.index, TOK.lastIndex) ? `<span class="k">${esc(t)}</span>` : esc(t)
     if (!/^\s*$/.test(t)) prev = t
     if (m.index === TOK.lastIndex) TOK.lastIndex++
   }

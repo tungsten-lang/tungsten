@@ -297,6 +297,27 @@ GOOD_7 = [1, 5]          # digits are fine in SCREAMING_SNAKE
 
 ---
 
+## `go` is contextual; `on` and `fn` are reserved
+
+`go` is a keyword only where it starts a spawn: `go -> body` (or
+`go ->` with an indented body), as a statement or an expression like
+`task = go -> work()`. Anywhere else it is an ordinary identifier, so a
+local, parameter, method, attribute or hash key can be named `go`:
+
+```tungsten
+go = 3                   # a local
+-> go(x) = x * 2         # a function
+<< pump.go               # a method call (`.go ->` is a call with a block)
+h = {go: 1}              # a hash key
+go -> << go(go)          # a spawn whose body uses both
+```
+
+`on` (platform guards, `on macos`) and `fn` (`fn name(...)`) are still
+reserved everywhere: `on = 1`, `-> pause(on)` and `fn = ->(x) x` are parse
+errors. Pick another name (`enabled`, `callback`).
+
+---
+
 ## Quick recovery checklist
 
 | Symptom | Likely cause | Try |

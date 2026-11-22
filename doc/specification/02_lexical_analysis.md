@@ -219,6 +219,8 @@ They must be spelled exactly as written here:
     __METHOD__
     __MODULE__
 
+`go` is a _contextual keyword_: it is a keyword only where it starts a spawn, that is, where it is followed by `->` (after optional spaces or tabs) and does not follow `.` or `&.`. Everywhere else it is an ordinary identifier, so `go = 1`, `-> go(x)`, `obj.go` and `{go: 1}` are all valid.
+
 The following tokens are reserved for future expansion of the Tungsten language:
 
     abort abstract alias align always args asm assert assigns async atomic await

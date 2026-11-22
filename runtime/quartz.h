@@ -112,6 +112,7 @@ int w_cg_canvas_buffer(int64_t handle, WCGBufferInfo *out);
     X(w_cg_encode, 4)             \
     X(w_cg_write_pixels, 7)       \
     X(w_cg_register_font, 1)      \
+    X(w_cg_register_font_data, 1) \
     X(w_cg_segments, 5)           \
     X(w_cg_glyphs, 7)
 

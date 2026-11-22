@@ -3303,7 +3303,8 @@ bit_file_sha_memo = {}
   "built"
 
 # ── macOS .app targets: `app "Name", executable: "exe", id: "org.example.name", icon: "res/icon.png",
-#    documents: "ext1 ext2", version: "0.1", photos_usage: "why it adds to Photos"` in a Bitfile (2026-11-04) ─────────
+#    documents: "ext1 ext2", version: "0.1", photos_usage: "why it adds to Photos", resources: "res/fonts res/x.dat"`
+#    in a Bitfile (2026-11-04; resources: 2026-11-21) ─────────
 -> bit_apps(bit_root)
   apps = []
   manifest = read_file(bit_root + "/Bitfile")
@@ -3331,6 +3332,15 @@ bit_file_sha_memo = {}
       docs = bit_option_value(line, "documents")
       if docs == nil
         docs = ""
+      # package-relative files or directories copied into Contents/Resources/<basename>
+      res = bit_option_value(line, "resources")
+      resources = []
+      if res != nil
+        res.split(" ").each ->(r)
+          if r.strip != ""
+            if !bit_relative_path?(r.strip)
+              die("App resources must be package-relative paths in " + bit_root + "/Bitfile")
+            resources.push(r.strip)
       version = bit_option_value(line, "version")
       if version == nil || version == ""
         version = "0.1"
@@ -3341,7 +3351,7 @@ bit_file_sha_memo = {}
         build = capture("date +%Y%m%d.%H%M").strip
       if !bit_relative_path?(exe) || (icon != "" && !bit_relative_path?(icon))
         die("App executable and icon must be package-relative paths in " + bit_root + "/Bitfile")
-      apps.push({name: name, exe: exe, id: id, icon: icon, documents: docs, version: version, build: build, explicit_build: explicit_build})
+      apps.push({name: name, exe: exe, id: id, icon: icon, documents: docs, version: version, build: build, explicit_build: explicit_build, resources: resources})
   apps
 
 -> plist_escape(s)
@@ -3432,7 +3442,7 @@ bit_file_sha_memo = {}
   path
 
 # bin/<Name>.app: Contents/MacOS/<exe> (the built executable), Contents/Info.plist, Contents/Resources/<Name>.icns (from a
-# PNG with sips + iconutil), signed ad hoc. The app links the system frameworks it uses (AppKit, Metal, QuartzCore, …), which
+# PNG with sips + iconutil), Contents/Resources/<basename> for each `resources:` path (mirrored with rsync), signed ad hoc. The app links the system frameworks it uses (AppKit, Metal, QuartzCore, …), which
 # need no copying; nothing else is embedded.
 -> bundle_app(bit_root, app)
   if !IS_DARWIN
@@ -3475,6 +3485,19 @@ bit_file_sha_memo = {}
       eputs(RED + "app " + app[:name] + ": could not make the icon from " + app[:icon] + RESET)
       return false
     has_icon = true
+  rs = app[:resources]
+  ri = 0
+  while rs != nil && ri < rs.size
+    src = bit_root + "/" + rs[ri]
+    dst = contents + "/Resources/" + basename_of(rs[ri])
+    if !system("test -e " + shq(src))
+      eputs(RED + "app " + app[:name] + ": no resource " + rs[ri] + RESET)
+      return false
+    copied = system("test -d " + shq(src)) ? sh_ok("rsync -a --delete " + shq(src + "/") + " " + shq(dst + "/")) : atomic_copy(src, dst)
+    if !copied
+      eputs(RED + "app " + app[:name] + ": could not copy resource " + rs[ri] + RESET)
+      return false
+    ri = ri + 1
   atomic_write(app_info_plist(app, has_icon), contents + "/Info.plist")
   atomic_write("APPL????", contents + "/PkgInfo")
   if !codesign_ok(bundle)

@@ -270,6 +270,13 @@ auto :MyType, "my_type"
 
 Forgetting this looks like a mysterious missing constant.
 
+The table also means every name in it is taken. There is one class
+namespace, so `+ Curve` in your program, with `auto :Curve, "algebra"` in
+the table, reopens core's `Curve` rather than defining a new class: core's
+definition loads first and your body adds to it or overrides its methods, on
+every engine (the same rule as `+ Int` or `+ String`). If you mean a class
+of your own, give it a name the table does not list (`doc/CORE.md`).
+
 ---
 
 ## PascalCase is not a variable name

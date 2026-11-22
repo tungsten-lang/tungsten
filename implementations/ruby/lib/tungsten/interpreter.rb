@@ -1801,7 +1801,7 @@ module Tungsten
       # new methods/accessors/traits into it. First-declaration wins for
       # superclass; last-registered method wins on name collision
       # (handled by define_method's hash-keyed storage).
-      existing = @classes[node.name]
+      existing = @classes[node.name] || autoload_core_for_reopen(node.name)
       if existing
         w_class = existing
       else
@@ -3730,6 +3730,31 @@ module Tungsten
       resolved = @classes[name] || @modules[name]
       failed_for_root[key] = true unless resolved
       resolved
+    end
+
+    # `+ Name` naming a core autoload entry reopens the core class, as the
+    # compiled loader does (compiler/lib/loader.w collect_autoload_refs): the
+    # core definition loads first and the user's body layers on top of it.
+    # Defining a fresh class instead would let a later lazy autoload of the
+    # core file reopen the user's class with core's body, so core methods
+    # would override the user's. Only manifest entries count (not the
+    # downcased-filename fallback), and a core file that is already loaded,
+    # including the one being evaluated, is left alone. Like the compiled
+    # loader's tolerant autoload, a core file that fails to load leaves the
+    # user's declaration as a new class.
+    def autoload_core_for_reopen(name)
+      key = name.to_s
+      base_dir = @current_file ? File.dirname(@current_file) : Dir.pwd
+      root = find_core_root(base_dir)
+      return nil unless root
+
+      relative = core_autoload_table(root)[key]
+      return nil unless relative
+      return nil if @loaded_files.key?(File.join(root, "core", "#{relative}.w"))
+
+      try_autoload_core(key)
+    rescue Tungsten::Error
+      nil
     end
 
     def core_autoload_table(root)

@@ -12,10 +12,10 @@ static const TcWordKind KEYWORDS[] = {
   {"begin", TC_K_KEYWORD}, {"break", TC_K_KEYWORD}, {"case", TC_K_KEYWORD},
   {"else", TC_K_KEYWORD}, {"elsif", TC_K_KEYWORD}, {"ensure", TC_K_KEYWORD},
   {"exit", TC_K_KEYWORD}, {"extern", TC_K_KEYWORD}, {"false", TC_K_KEYWORD},
-  {"fn", TC_K_KEYWORD}, {"if", TC_K_KEYWORD},
+  {"if", TC_K_KEYWORD},
   {"in", TC_K_KEYWORD}, {"is", TC_K_KEYWORD}, {"loop", TC_K_KEYWORD},
   {"module", TC_K_KEYWORD}, {"nil", TC_K_KEYWORD}, {"next", TC_K_KEYWORD},
-  {"on", TC_K_KEYWORD}, {"parallel", TC_K_KEYWORD}, {"raise", TC_K_KEYWORD},
+  {"parallel", TC_K_KEYWORD}, {"raise", TC_K_KEYWORD},
   {"rescue", TC_K_KEYWORD}, {"return", TC_K_KEYWORD}, {"self", TC_K_KEYWORD},
   {"super", TC_K_KEYWORD}, {"then", TC_K_KEYWORD}, {"trait", TC_K_KEYWORD},
   {"true", TC_K_KEYWORD}, {"unless", TC_K_KEYWORD}, {"until", TC_K_KEYWORD},
@@ -111,22 +111,79 @@ static int is_value_keyword(const TcSource *source, WValue token, TcKind kind) {
          token_text_is(source, token, "false");
 }
 
-/* `go` is a contextual keyword (languages/tungsten/lexers/regex_helpers.w
- * go_keyword_at?): it is reserved only where it starts a spawn, `go -> body`,
- * so it must not follow `.`/`&.` and must be followed by `->` after optional
- * spaces or tabs. Everywhere else it is an ordinary identifier. */
-static int go_keyword_at(const TcSource *source, WValue token, TcKind last_kind) {
+/* Contextual keywords, mirroring contextual_keyword_at? in
+ * languages/tungsten/lexers/regex_helpers.w: `go`, `fn` and `on` are keywords
+ * only where their grammar applies and identifiers everywhere else.
+ *   go  `go -> body`: `->` follows after optional blanks.
+ *   fn  `fn name(...)`: blanks and then a name follow.
+ *   on  `on TARGET (with CAP)*` + indented body: opens a statement, a target
+ *       (a name after blanks, `(` or `!`) follows, the rest of the line is
+ *       target syntax or a comment, and the next code line is indented
+ *       deeper and does not start with `.`.
+ * None is a keyword after `.` or `&.`. Source offsets here are bytes; every
+ * character the rules inspect is ASCII. */
+static size_t skip_blanks_at(const TcSource *source, size_t pos) {
+  while (pos < source->byte_len && (source->bytes[pos] == ' ' || source->bytes[pos] == '\t')) pos++;
+  return pos;
+}
+
+static int name_start_byte(unsigned char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+
+static int on_keyword_at(const TcSource *source, size_t start, size_t after, TcKind last_kind) {
+  if (!(last_kind == TC_K_UNKNOWN || last_kind == TC_K_NEWLINE || last_kind == TC_K_INDENT ||
+        last_kind == TC_K_DEDENT || last_kind == TC_K_SEMICOLON)) return 0;
+  const unsigned char *b = source->bytes;
+  size_t n = source->byte_len;
+  size_t p = skip_blanks_at(source, after);
+  if (p >= n) return 0;
+  if (!(b[p] == '(' || b[p] == '!' || (p > after && name_start_byte(b[p])))) return 0;
+  while (p < n && b[p] != '\n') {
+    unsigned char c = b[p];
+    if (c == '#') {
+      while (p < n && b[p] != '\n') p++;
+      break;
+    }
+    if (!(name_start_byte(c) || (c >= '0' && c <= '9') || c == ' ' || c == '\t' || c == '(' || c == ')' ||
+          c == '!' || c == '&' || c == '|')) return 0;
+    p++;
+  }
+  size_t line = start;
+  while (line > 0 && b[line - 1] != '\n') line--;
+  size_t indent = skip_blanks_at(source, line) - line;
+  size_t q = p + 1;
+  while (q < n) {
+    size_t r = skip_blanks_at(source, q);
+    if (r >= n) return 0;
+    if (b[r] == '\n' || b[r] == '#') {
+      while (r < n && b[r] != '\n') r++;
+      q = r + 1;
+      continue;
+    }
+    return r - q > indent && b[r] != '.';
+  }
+  return 0;
+}
+
+static int contextual_keyword_at(const TcSource *source, WValue token, TcKind last_kind) {
   if (last_kind == TC_K_DOT || last_kind == TC_K_SAFE_NAV) return 0;
   uint32_t off = tc_token_offset(token);
   uint32_t len = tc_token_length(token);
-  size_t pos = source->byte_offsets[off + len];
-  while (pos < source->byte_len && (source->bytes[pos] == ' ' || source->bytes[pos] == '\t')) pos++;
-  return pos + 1 < source->byte_len && source->bytes[pos] == '-' && source->bytes[pos + 1] == '>';
+  size_t start = source->byte_offsets[off];
+  size_t after = source->byte_offsets[off + len];
+  size_t p = skip_blanks_at(source, after);
+  if (token_text_is(source, token, "go"))
+    return p + 1 < source->byte_len && source->bytes[p] == '-' && source->bytes[p + 1] == '>';
+  if (token_text_is(source, token, "fn"))
+    return p > after && p < source->byte_len && name_start_byte(source->bytes[p]);
+  return on_keyword_at(source, start, after, last_kind);
 }
 
 static TcKind classify_id(const TcSource *source, WValue token, TcKind last_kind) {
   if (token_text_starts_with(source, token, "$")) return TC_K_GLOBAL;
-  if (token_text_is(source, token, "go")) return go_keyword_at(source, token, last_kind) ? TC_K_KEYWORD : TC_K_ID;
+  if (token_text_is(source, token, "go") || token_text_is(source, token, "fn") || token_text_is(source, token, "on"))
+    return contextual_keyword_at(source, token, last_kind) ? TC_K_KEYWORD : TC_K_ID;
 
   for (size_t i = 0; i < sizeof(KEYWORDS) / sizeof(KEYWORDS[0]); i++) {
     if (token_text_equals_raw(source, token, KEYWORDS[i].text)) return KEYWORDS[i].kind;

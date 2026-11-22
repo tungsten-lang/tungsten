@@ -97,7 +97,7 @@
         advance()
         index = parse_expression()
         expect_type(TOK_RBRACKET)
-        if @current_type == TOK_ASSIGN
+        if @current_type == TOK_ASSIGN && !@in_multi_assign_target
           advance()
           value = parse_assign_value()
           # `a[i] = v ## i64` ascribes the stored value, as `x = v ## i64`

@@ -1650,6 +1650,28 @@ in Tungsten:AST
   -> .new(targets, value)
     slab_alloc_init(KIND_MULTI_ASSIGN, SC_2, targets, value)
 
+# The leaf targets a multiple assignment writes, in order: a nested target
+# list (a MultiAssign with a nil value, `(a, b), c = …`) is flattened, and
+# the splat target (`:splat_index`) is an ordinary leaf here.
+-> multi_assign_leaf_targets(node)
+  out = []
+  collect_multi_assign_leaf_targets(node, out)
+  out
+
+-> collect_multi_assign_leaf_targets(node, out)
+  targets = ast_get(node, :targets)
+  if targets == nil
+    return nil
+  i = 0
+  while i < targets.size()
+    t = targets[i]
+    if t != nil && is_ast_node?(t) && ast_kind(t) == :multi_assign
+      collect_multi_assign_leaf_targets(t, out)
+    elsif t != nil
+      out.push(t)
+    i += 1
+  nil
+
 # -- Operators --
 
 + BinaryOp < Node [slab]

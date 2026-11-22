@@ -199,7 +199,7 @@ They must be spelled exactly as written here:
     case ccall continue
     data defer
     else elsif ensure exit
-    false field fn
+    false field
     if in is
     loop
     module
@@ -219,7 +219,11 @@ They must be spelled exactly as written here:
     __METHOD__
     __MODULE__
 
-`go` is a _contextual keyword_: it is a keyword only where it starts a spawn, that is, where it is followed by `->` (after optional spaces or tabs) and does not follow `.` or `&.`. Everywhere else it is an ordinary identifier, so `go = 1`, `-> go(x)`, `obj.go` and `{go: 1}` are all valid.
+`go`, `fn` and `on` are _contextual keywords_: each is a keyword only where its grammar applies, and an ordinary identifier everywhere else, so `go = 1`, `-> fn(x)`, `-> pause(on)`, `obj.on`, `ro :fn` and `{go: 1, on: 2}` are all valid. None of them is a keyword after `.` or `&.`. Otherwise:
+
+* `go` is a keyword when `->` follows (after optional spaces or tabs): `go -> body`.
+* `fn` is a keyword when one or more spaces or tabs and then a name follow: `fn name(...)`, `@gpu fn name(...)`.
+* `on` is a keyword when it begins a statement, a target follows (a name after spaces or tabs, or `(` or `!`), the rest of the line holds only target syntax (names, digits, `(`, `)`, `!`, `&&`, `||`, `with`, a comment), and the next line with code on it is indented deeper than the `on` line and does not begin with `.`: `on macos && arm64` followed by an indented body.
 
 The following tokens are reserved for future expansion of the Tungsten language:
 
@@ -234,7 +238,7 @@ The following tokens are reserved for future expansion of the Tungsten language:
     lambda lazy let library ln load local
     macro map match me mixin mod mut mutable
     namespace new none noop nothrow null
-    object of off on operator out override
+    object of off operator out override
     package packed parallel parse part perform pragma privately proc property ptr pub pure
     quietly
     raises range record ref repeat require reraise restrict resume rethrow rm

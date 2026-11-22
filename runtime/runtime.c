@@ -51652,6 +51652,29 @@ WValue w_destructure_index(WValue v, int64_t i) {
     return i == 0 ? v : W_NIL;
 }
 
+/* Multiple assignment with a splat target, `a, *rest, z = v`: the splat at
+ * target index `start` gathers what the `after` trailing targets leave (an
+ * empty Array when nothing is left). A non-Array value is a one-element
+ * list, as in w_destructure_index. */
+static int64_t w_destructure_rest_end(int64_t size, int64_t start, int64_t after) {
+    int64_t end = size - after;
+    return end < start ? start : end;
+}
+
+WValue w_destructure_rest(WValue v, int64_t start, int64_t after) {
+    int64_t size = w_is_array(v) ? w_as_array(v)->size : 1;
+    int64_t end = w_destructure_rest_end(size, start, after);
+    WValue out = w_array_new(65, end - start);
+    for (int64_t i = start; i < end; i++) w_array_push(out, w_destructure_index(v, i));
+    return out;
+}
+
+/* The `j`th trailing target after the splat. */
+WValue w_destructure_suffix(WValue v, int64_t start, int64_t after, int64_t j) {
+    int64_t size = w_is_array(v) ? w_as_array(v)->size : 1;
+    return w_destructure_index(v, w_destructure_rest_end(size, start, after) + j);
+}
+
 static WValue call_closure_1(WClosure *cl, WValue arg) {
     typedef WValue (*fn_t)(WValue *, WValue);
     return ((fn_t)cl->fn_ptr)(cl->captures, arg);

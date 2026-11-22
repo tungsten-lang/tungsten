@@ -779,7 +779,7 @@ use regex_base
           scan_use_path()
         else
           emit(:KEYWORD, word)
-      elsif word == "go" && go_keyword_at?(@chars, @pos, @char_count, @last_token_type)
+      elsif contextual_keyword_word?(word) && contextual_keyword_at?(word, @chars, @pos, @char_count, @last_token_type)
         emit(:KEYWORD, word)
       elsif is_type_name?(word)
         emit(:TYPE, word)

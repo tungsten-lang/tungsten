@@ -222,7 +222,7 @@
     return total
   if k == :multi_assign
     total = 0
-    targets = ast_get(node, :targets)
+    targets = multi_assign_leaf_targets(node)
     if targets != nil
       ti = 0
       while ti < targets.size()

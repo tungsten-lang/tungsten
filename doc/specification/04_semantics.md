@@ -133,9 +133,35 @@ evaluates _expression_, binds the result to the local name `x` in the current sc
 
 stores into the named field of `self`. Reading `@field` loads that field. Accessing an undefined field is implementation-defined (typically `nil` or an error); a conforming implementation **must** document the choice.
 
-### 4.4.3 Compound and multi-assignment
+### 4.4.3 Compound and multiple assignment
 
-Compound assignment `x += y` evaluates as updating `x` with the result of the corresponding binary operator. Multi-assignment binds multiple targets from an aggregate on the right-hand side when the grammar form is used.
+Compound assignment `x += y` evaluates as updating `x` with the result of the corresponding binary operator.
+
+Multiple assignment binds several targets at once:
+
+    a, b = b, a               # swap
+    q, r = divmod(n, d)       # from an Array a call returns
+    x, y = 1, 2
+    (a, b), c = [[1, 2], 3]   # nested target list
+    head, *rest = list        # rest: Array of the remaining elements
+    *init, last = list
+    @x, h[k], obj.y = 1, 2, 3 # any assignable target
+
+The right-hand side is evaluated completely before any target is written, so
+`a, b = b, a` exchanges the values. A comma-separated right-hand side is an
+Array of its expressions. The value is then spread over the targets from left
+to right: an Array supplies one element per target, and missing elements are
+`nil`; any other value is treated as a one-element Array (`a, b = 5` binds
+`a = 5`, `b = nil`). The `*` target, at most one per list, receives an Array
+of the elements the targets before and after it leave (possibly empty). A
+nested `( … )` target spreads its element again. The value of a multiple
+assignment is its right-hand side.
+
+`a <> b` is shorthand for `a, b = b, a`.
+
+A swap or parallel assignment of machine-typed locals compiles to plain
+register moves; no Array is built when the right-hand side is a literal list
+with one expression per target.
 
 ### 4.4.4 Attribute writes
 

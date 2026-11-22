@@ -2503,6 +2503,28 @@ static int ast_to_value(TcAstValue ast, TcValue *out, TcError *err) {
   return 1;
 }
 
+/* Multiple assignment spread (TC_OP_DESTRUCTURE): an Array (runtime or AST)
+ * spreads, anything else is a one-element list. */
+static int64_t destructure_size(TcValue src) {
+  if (tc_kind(src) == TC_VAL_ARRAY) return tc_as_array(src) ? (int64_t)tc_as_array(src)->size : 0;
+  if (tc_kind(src) == TC_VAL_AST && tc_as_ast_ptr(&src)->kind == TC_AST_ARRAY)
+    return tc_as_ast_ptr(&src)->as.array ? (int64_t)tc_as_ast_ptr(&src)->as.array->count : 0;
+  return 1;
+}
+
+static int destructure_elem(TcValue src, int64_t i, TcValue *out, TcError *err) {
+  *out = tc_box_nil();
+  if (i < 0 || i >= destructure_size(src)) return 1;
+  if (tc_kind(src) == TC_VAL_ARRAY) {
+    *out = tc_as_array(src)->slots[i];
+    return 1;
+  }
+  if (tc_kind(src) == TC_VAL_AST && tc_as_ast_ptr(&src)->kind == TC_AST_ARRAY)
+    return ast_to_value(tc_as_ast_ptr(&src)->as.array->items[i], out, err);
+  *out = src;
+  return 1;
+}
+
 // AST → runtime conversion cache. Keys are TcAstHash * / TcAstArray *
 // — the underlying aggregate pointers, which live in the AST arena and
 // stay stable across the many TcAstValue struct copies that tc_box_ast
@@ -3295,6 +3317,7 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
     [TC_OP_IS_MACHINE_INT64_TYPE] = &&L_IS_MACHINE_INT64_TYPE,
     [TC_OP_STRING_FIRST_BYTE]     = &&L_STRING_FIRST_BYTE,
     [TC_OP_WIRE_TEMP_OPERANDS]    = &&L_WIRE_TEMP_OPERANDS,
+    [TC_OP_DESTRUCTURE]           = &&L_DESTRUCTURE,
   };
 
   size_t op_ip = 0;
@@ -4528,6 +4551,37 @@ int tc_vm_run_args_status(const TcChunk *chunk, int argc, char **argv, TcValue *
 #include "vm_call_body.inc"
 #undef DISCARD_NOP_BYTES
 #undef CNEXT
+      }
+      L_DESTRUCTURE: {
+        uint32_t a = read_u32(&vm);
+        uint32_t b = read_u32(&vm);
+        TcValue src = pop(&vm);
+        uint32_t mode = b >> 28;
+        int64_t after = (int64_t)(b & 0x0FFFFFFFu);
+        int64_t size = destructure_size(src);
+        TcValue out = tc_box_nil();
+        if (mode == 1) {
+          int64_t start = (int64_t)a;
+          int64_t stop = size - after < start ? start : size - after;
+          TcRuntimeArray *rest = runtime_array_new((size_t)(stop - start), err);
+          if (!rest) goto cleanup_fail;
+          for (int64_t i = start; i < stop; i++) {
+            if (!destructure_elem(src, i, &rest->slots[i - start], err)) {
+              runtime_array_free(rest);
+              goto cleanup_fail;
+            }
+          }
+          out = tc_box_array(rest);
+        } else {
+          int64_t idx = (int64_t)a;
+          if (mode == 2) {
+            int64_t start = (int64_t)(a & 0xFFFFu);
+            idx = (size - after < start ? start : size - after) + (int64_t)(a >> 16);
+          }
+          if (!destructure_elem(src, idx, &out, err)) goto cleanup_fail;
+        }
+        if (!push(&vm, out, err)) goto cleanup_fail;
+        NEXT();
       }
       L_ARRAY: {
         uint32_t count = read_u32(&vm);

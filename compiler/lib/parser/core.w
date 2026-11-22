@@ -25,6 +25,9 @@
     # parameter default is parsed (parse_param_default): there the comma
     # separates parameters.
     @no_multi_assign = false
+    # @in_multi_assign_target keeps a multiple assignment's last target
+    # (`a, h[k] = …`) from reading the `=` as its own `h[k] = …`.
+    @in_multi_assign_target = false
     # Token position immediately following a method/fn signature, so a
     # trailing `ro` / `rw` (`-> new(@x) ro`) lowers to a zero-arg accessor
     # call without turning later `ro` / `rw` tokens on the line (`v | ro`)
@@ -1142,6 +1145,13 @@
     expr
 
   -> parse_assignment
+    # A multiple assignment may open with a splat (`*init, last = a`) or a
+    # nested target list (`(a, b), c = v`); neither starts an expression
+    # that could itself be assigned, so try the pattern first.
+    if (@current_type == TOK_STAR || @current_type == TOK_LPAREN) && !@no_multi_assign
+      multi = try_parse_multi_assign(nil)
+      if multi != nil
+        return multi
     # A target spelled like a type name (`u1 = [...]`) binds it as a local;
     # read the first token before parse_ternary consumes it.
     type_spelled = @current_type == TOK_TYPE
@@ -1315,33 +1325,12 @@
       elements = [Tungsten:AST:Var.new(rname), Tungsten:AST:Var.new(lname)]
       return Tungsten:AST:MultiAssign.new(targets, Tungsten:AST:Array.new(elements))
 
-    # Multi-assignment: a, b = expr
-    # Use backtracking: restore position if we don't find '=' after the targets
-    # Only attempt if left is a valid assignment target type
+    # Multiple assignment: `a, b = expr` / `a, b = b, a` (see
+    # try_parse_multi_assign).
     if t == TOK_COMMA && valid_assign_target?(left) && !@no_multi_assign
-      saved_pos = @pos
-      targets = [to_assign_target(left)]
-      found_assign = false
-      while @current_type == TOK_COMMA
-        advance()
-        # Multi-assign targets are always simple identifiers — advance a single token
-        if @current_type == TOK_ID
-          targets.push(Tungsten:AST:Var.new(advance_value()))
-        elsif @current_type == TOK_IVAR
-          targets.push(Tungsten:AST:Ivar.new(advance_value()))
-        elsif @current_type == TOK_CVAR
-          targets.push(Tungsten:AST:Cvar.new(advance_value()))
-        else
-          break
-        if @current_type == TOK_ASSIGN
-          found_assign = true
-          break
-      if found_assign
-        advance()
-        value = parse_assign_value()
-        return Tungsten:AST:MultiAssign.new(targets, value)
-      @pos = saved_pos
-      sync_current()
+      multi = try_parse_multi_assign(to_assign_target(left))
+      if multi != nil
+        return multi
 
     # Typed-target assignment: `x ## i64 = 0`. The lexer ends the hint at
     # `=`, so the shape arrives as target, TYPE_HINT("i64"), ASSIGN, value.
@@ -1363,6 +1352,107 @@
       return Tungsten:AST:Assign.new(target, value, hint)
 
     left
+
+  # Multiple assignment `t1, t2, … = v1, v2, …` or `t1, t2, … = expr`.
+  # A target is anything assignable (`x`, `@x`, `obj.attr`, `h[k]`), a
+  # nested parenthesized list `(a, b)`, or `*t` (at most one per list),
+  # which gathers the values the other targets leave into an Array. The
+  # result is a MultiAssign whose targets are leaves or nested MultiAssign
+  # nodes with a nil value; a splat target's index is the `:splat_index`
+  # sidecar. A comma-separated right side becomes an Array node.
+  #
+  # Parsed speculatively from `first` (the already-parsed first target, or
+  # nil when the list opens with `*` or `(`): when the tokens do not form a
+  # target list followed by `=`, the position is restored and nil returned
+  # so the caller reads them as an ordinary expression.
+  -> try_parse_multi_assign(first)
+    saved_pos = @pos
+    saved_target_flag = @in_multi_assign_target
+    pattern = nil
+    begin
+      pattern = parse_multi_assign_targets(first)
+    rescue err
+      pattern = nil
+      @in_multi_assign_target = saved_target_flag
+    if pattern == nil || @current_type != TOK_ASSIGN || !multi_assign_pattern?(pattern)
+      @pos = saved_pos
+      sync_current()
+      return nil
+    advance()
+    value = parse_assign_value()
+    if @current_type == TOK_COMMA
+      values = [value]
+      while @current_type == TOK_COMMA
+        advance()
+        values.push(parse_assign_value())
+      value = Tungsten:AST:Array.new(values)
+    node = Tungsten:AST:MultiAssign.new(pattern.targets, value)
+    splat = ast_get(pattern, :splat_index)
+    if splat != nil
+      ast_set(node, :splat_index, splat)
+    node
+
+  # A single plain target (`a = v`) is an ordinary Assign; a pattern needs
+  # two targets, a splat, or a nested list.
+  -> multi_assign_pattern?(pattern)
+    targets = pattern.targets
+    targets.size() > 1 || ast_get(pattern, :splat_index) != nil || (targets.size() == 1 && ast_kind(targets[0]) == :multi_assign)
+
+  # A comma-separated target list; nil when a target is not assignable or
+  # the list has two splats.
+  -> parse_multi_assign_targets(first)
+    targets = []
+    splat = nil
+    if first != nil
+      targets.push(first)
+    else
+      shape = parse_multi_assign_target_into(targets)
+      if shape == nil
+        return nil
+      if shape == :splat
+        splat = 0
+    while @current_type == TOK_COMMA
+      advance()
+      shape = parse_multi_assign_target_into(targets)
+      if shape == nil || (shape == :splat && splat != nil)
+        return nil
+      if shape == :splat
+        splat = targets.size() - 1
+    node = Tungsten:AST:MultiAssign.new(targets, nil)
+    if splat != nil
+      ast_set(node, :splat_index, splat)
+    node
+
+  -> parse_multi_assign_target_into(targets)
+    if @current_type == TOK_STAR
+      advance()
+      leaf = parse_multi_assign_leaf()
+      if leaf == nil
+        return nil
+      targets.push(leaf)
+      return :splat
+    if @current_type == TOK_LPAREN
+      advance()
+      inner = parse_multi_assign_targets(nil)
+      if inner == nil || @current_type != TOK_RPAREN
+        return nil
+      advance()
+      targets.push(inner)
+      return :nested
+    leaf = parse_multi_assign_leaf()
+    if leaf == nil
+      return nil
+    targets.push(leaf)
+    :leaf
+
+  -> parse_multi_assign_leaf
+    prev = @in_multi_assign_target
+    @in_multi_assign_target = true
+    expr = parse_ternary()
+    @in_multi_assign_target = prev
+    if !valid_assign_target?(expr)
+      return nil
+    to_assign_target(expr)
 
   # Right-hand side of an assignment. Postfix `rescue` binds TIGHTER than
   # `=` here (Ruby's `lhs = arg rescue arg`), so `x = e rescue f` parses

@@ -704,6 +704,10 @@
       if args.size() != 2
         raise "w_zstd_decompress expects data"
       return ccall("w_zstd_decompress", args[1])
+    when "w_zstd_compress"
+      if args.size() != 3
+        raise "w_zstd_compress expects data and a level"
+      return ccall("w_zstd_compress", args[1], args[2])
 
     # UDPSocket (core/udp_socket.w). w_udp_recv/_from park on the event loop
     # like any blocking ccall; dispatch_interpreted_ccall restores this

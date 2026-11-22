@@ -1619,7 +1619,7 @@ emitter_last_artifact_state = {
     feat[:compiler_image_runtime_profile] = true
   elsif sym == "w_jit_load_object"
     feat[:dynamic_exports_needed] = true
-  elsif sym == "w_slab_init_static_zstd" || sym == "w_zstd_compress_llvm_escaped" || sym == "w_zstd_decompress"
+  elsif sym == "w_slab_init_static_zstd" || sym == "w_zstd_compress_llvm_escaped" || sym == "w_zstd_decompress" || sym == "w_zstd_compress"
     feat[:needs_zstd] = true
   if sym.starts_with?("w_metal_") || sym.starts_with?("w_gfx_") || sym.starts_with?("w_hid_") || sym.starts_with?("w_fused_gpu_run") || sym.starts_with?("w_gpu_")
     feat[:bridges_needed] = true
@@ -1680,7 +1680,7 @@ emitter_last_artifact_state = {
       feat[:compiler_image_runtime_profile] = true
     if embedded_ir_str.index("@w_jit_load_object(") != nil
       feat[:dynamic_exports_needed] = true
-    if embedded_ir_str.index("@w_slab_init_static_zstd(") != nil || embedded_ir_str.index("@w_zstd_compress_llvm_escaped(") != nil || embedded_ir_str.index("@w_zstd_decompress(") != nil
+    if embedded_ir_str.index("@w_slab_init_static_zstd(") != nil || embedded_ir_str.index("@w_zstd_compress_llvm_escaped(") != nil || embedded_ir_str.index("@w_zstd_decompress(") != nil || embedded_ir_str.index("@w_zstd_compress(") != nil
       feat[:needs_zstd] = true
     if embedded_ir_str.index("@w_metal_") != nil || embedded_ir_str.index("@w_gfx_") != nil || embedded_ir_str.index("@w_hid_") != nil || embedded_ir_str.index("@w_fused_gpu_run") != nil || embedded_ir_str.index("@w_gpu_") != nil
       feat[:bridges_needed] = true

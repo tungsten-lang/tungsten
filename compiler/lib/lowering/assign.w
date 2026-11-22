@@ -1138,6 +1138,23 @@
         emit_store_global_unless_const(wfn, ctx, name, boxed)
       return typed_value(:raw_f64, raw_val)
 
+    # An f32 value (an f32[] element, an `## f32` expression) gets a raw float
+    # slot the same way: var_types says :f32, so reads take raw float bits.
+    if (inferred == :f32 || inferred == :raw_f32) && ctx[:bindings][name] == nil && wfn[:var_slots][name] == nil
+      raw_val = ensure_raw_f32(wfn, val)
+      ctx[:var_types][name] = :f32
+      ctx[:bindings][name] = nil
+      ptr = ensure_var_slot(wfn, name, "float")
+      emit_wire_dynamic_2(wfn, :store_float, :ptr, ptr, :value, raw_val)
+      if wfn[:name] == "main"
+        ctx[:mod][:top_level_vars][name] = true
+        ctx[:mod][:top_level_var_types][name] = nil
+        if ctx[:mod][:top_level_static_types] != nil
+          ctx[:mod][:top_level_static_types][name] = :f32
+        boxed = ensure_i64_value(wfn, typed_value(:raw_f32, raw_val))
+        emit_store_global_unless_const(wfn, ctx, name, boxed)
+      return typed_value(:raw_f32, raw_val)
+
   val_reg = ensure_i64_value(wfn, val)
   if release_old != nil
     # Inline tag guard: inline ints (the seed, demoted values) skip the
@@ -1200,6 +1217,18 @@
   # If variable already has a var slot (was materialized), store to it
   ptr = wfn[:var_slots][name]
   if ptr != nil
+    # A float slot (the local is a machine f32/f64 elsewhere in the function,
+    # e.g. `l = src[i]` from an f32[] then `l = l * (~0.5 ## f32)`) takes the
+    # raw float, never the boxed WValue bits.
+    sty = wfn[:var_slot_types][name]
+    if sty == "float" || sty == "double"
+      fraw = sty == "float" ? ensure_raw_f32(wfn, val) : ensure_raw_f64(wfn, val)
+      emit_wire_dynamic_2(wfn, sty == "float" ? :store_float : :store_double, :ptr, ptr, :value, fraw)
+      if wfn[:name] == "main"
+        ctx[:mod][:top_level_vars][name] = true
+        ctx[:mod][:top_level_var_types][name] = nil
+        emit_store_global_unless_const(wfn, ctx, name, val_reg)
+      return typed_value(sty == "float" ? :raw_f32 : :raw_f64, fraw)
     emit_wire_store_i64(wfn, ptr, val_reg)
     # Top-level assignments also store to globals for cross-function access
     if wfn[:name] == "main"

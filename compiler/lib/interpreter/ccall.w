@@ -694,6 +694,10 @@
       return ccall("w_dns_lookup", args[1], args[2])
     when "w_dns_available"
       return ccall("w_dns_available")
+    when "w_socket_connect_timeout"
+      if args.size() != 4
+        raise "w_socket_connect_timeout expects a host, port and timeout"
+      return ccall("w_socket_connect_timeout", args[1], args[2], args[3])
     when "w_zstd_decompress"
       if args.size() != 2
         raise "w_zstd_decompress expects data"

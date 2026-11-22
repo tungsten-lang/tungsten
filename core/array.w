@@ -24,6 +24,7 @@
 #   arr.pop           Remove and return last element (nil if empty)
 #   arr.shift         Remove and return first element (nil if empty)
 #   arr.unshift(val)  Prepend val, return self
+#   arr.insert(i, v)  Insert v before index i, return self
 #
 # -- Query --
 #
@@ -221,6 +222,30 @@
       i += 1
     pop
     removed
+
+  # Insert val before index idx, shifting the tail up by one, and return
+  # self — Ruby's Array#insert for one value. A negative idx counts from the
+  # end and inserts after that element (insert(-1, v) appends); an idx past
+  # the end pads with nil first; a negative idx before the start raises
+  # IndexError. The shift writes through `[]=` like delete_at, and the growth
+  # rides on `push`.
+  -> insert(idx, val)
+    n = $size ## i64
+    i = idx ## i64
+    if i < 0
+      i = n + i + 1
+      if i < 0
+        raise IndexError.new("index [idx] too small for array; minimum: -[n + 1]")
+    while n < i
+      push(nil)
+      n += 1
+    push(val)
+    j = n
+    while j > i
+      self[j] = self[j - 1]
+      j -= 1
+    self[i] = val
+    self
 
   # Value-copy of a sub-range (the copying counterpart to the zero-copy
   # `slice` view), ported from the former C IC handler with its exact

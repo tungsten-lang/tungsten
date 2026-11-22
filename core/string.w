@@ -563,7 +563,10 @@
         ba_i += ba_mode
       if ba_i < 0 || ba_i >= ba_mode
         return nil
-      return (ba_v >> (4 + 8 * ba_i)) & 0xFF
+      # a typed shift count: mixing the raw bits with the boxed index boxed
+      # ba_v itself (a BigInt per call)
+      ba_sh = (4 + 8 * ba_i) ## i64
+      return (ba_v >> ba_sh) & 0xFF
     ba_n = ccall_nobox("w_string_byte_length", self) ## i64
     if ba_i < 0
       ba_i += ba_n

@@ -602,6 +602,7 @@
   out << declare_fn("w_block_return_push", "ptr", "")
   out << declare_fn("w_block_return_pop", "void", "ptr")
   out << declare_fn("w_block_return_value", wv, "ptr")
+  out << declare_fn("w_block_return_bits", "i64", "ptr")
   out << declare_fn_noreturn("w_block_return_signal", "void", i64_wv)
   out << declare_fn_attrs("setjmp", "i32", "ptr", "nounwind returns_twice")
   out << declare_fn_attrs("_setjmp", "i32", "ptr", "nounwind returns_twice")

@@ -1375,6 +1375,7 @@ void w_cleanup_pop(void);
 void *w_block_return_push(void);
 void w_block_return_pop(void *buf_ptr);
 WValue w_block_return_value(void *buf_ptr);
+uint64_t w_block_return_bits(void *buf_ptr);
 void w_block_return_signal(uint64_t buf_bits, WValue value);
 
 /* ---- Method dispatch ---- */

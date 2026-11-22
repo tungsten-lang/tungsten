@@ -51294,9 +51294,29 @@ typedef struct WBlockReturnFrame {
     int cleanup_depth;
     WValue value;
     int active;
+    /* Bumped on every reuse; the low 16 bits ride in the closure's frame
+     * handle (w_block_return_bits) so a block that outlives its function is
+     * told apart from the frame's next owner. */
+    uint32_t gen;
 } WBlockReturnFrame;
 
 static __thread WBlockReturnFrame *w_block_return_stack = NULL;
+
+/* Frames are recycled through a per-thread free list (linked by prev) and
+ * never returned to malloc: a stale handle held by an escaped block may still
+ * be dereferenced by w_block_return_signal, which must then find a frame (not
+ * freed memory) whose generation no longer matches. Every function with a
+ * non-local block return pushes one frame per call, so without recycling each
+ * call leaked one frame (a jmp_buf, ~250 bytes). */
+static __thread WBlockReturnFrame *w_block_return_pool = NULL;
+
+#define W_BLOCK_RETURN_PTR_MASK 0x0000FFFFFFFFFFFFull
+
+static void w_block_return_recycle(WBlockReturnFrame *frame) {
+    frame->active = 0;
+    frame->prev = w_block_return_pool;
+    w_block_return_pool = frame;
+}
 
 /* ---- Recycle cleanup stack ---- */
 #define CLEANUP_STACK_MAX 512
@@ -51412,8 +51432,11 @@ void w_raise(WValue msg) {
         WExceptionFrame *saved = w_block_return_stack->exception_stack;
         while (saved && saved != w_exception_stack) saved = saved->prev;
         if (!saved) break;
-        w_block_return_deactivate(w_block_return_stack);
-        w_block_return_stack = w_block_return_stack->prev;
+        WBlockReturnFrame *gone = w_block_return_stack;
+        w_block_return_deactivate(gone);
+        w_block_return_stack = gone->prev;
+        /* its function is abandoned: it never reaches w_block_return_pop */
+        w_block_return_recycle(gone);
     }
 
     /* Unwind recycle cleanup stack down to the frame's saved depth.
@@ -51426,7 +51449,14 @@ void w_raise(WValue msg) {
 }
 
 void *w_block_return_push(void) {
-    WBlockReturnFrame *frame = calloc(1, sizeof(WBlockReturnFrame));
+    WBlockReturnFrame *frame = w_block_return_pool;
+    if (frame != NULL) {
+        w_block_return_pool = frame->prev;
+    } else {
+        frame = calloc(1, sizeof(WBlockReturnFrame));
+    }
+    frame->gen++;
+    if ((frame->gen & 0xFFFF) == 0) frame->gen++;
     frame->prev = w_block_return_stack;
     frame->exception_stack = w_exception_stack;
     if (frame->exception_stack) frame->exception_stack->block_refs++;
@@ -51456,11 +51486,25 @@ void w_block_return_pop(void *buf_ptr) {
     w_block_return_deactivate(frame);
     if (w_block_return_stack == frame) {
         w_block_return_stack = frame->prev;
+        w_block_return_recycle(frame);
         return;
     }
     WBlockReturnFrame *prev = w_block_return_stack;
     while (prev && prev->prev != frame) prev = prev->prev;
-    if (prev) prev->prev = frame->prev;
+    if (prev) {
+        prev->prev = frame->prev;
+        w_block_return_recycle(frame);
+    }
+    /* not on the stack: already abandoned (and recycled) by a raise/signal */
+}
+
+/* The handle a block captures to return from this frame's function: the
+ * frame address with its generation in the top 16 bits. */
+uint64_t w_block_return_bits(void *buf_ptr) {
+    if (!buf_ptr) return 0;
+    WBlockReturnFrame *frame = (WBlockReturnFrame *)buf_ptr;
+    return ((uint64_t)(uintptr_t)buf_ptr & W_BLOCK_RETURN_PTR_MASK) |
+           ((uint64_t)(frame->gen & 0xFFFF) << 48);
 }
 
 WValue w_block_return_value(void *buf_ptr) {
@@ -51474,14 +51518,26 @@ void w_block_return_signal(uint64_t buf_bits, WValue value) {
         w_raise(w_string("unexpected return from block"));
     }
 
-    WBlockReturnFrame *target = (WBlockReturnFrame *)(uintptr_t)buf_bits;
-    if (!target->active) {
+    /* Handles from w_block_return_bits carry the frame's generation; a bare
+     * address (tag 0, code from an older compiler) is checked by `active`
+     * alone. */
+    uint64_t tag = buf_bits >> 48;
+    WBlockReturnFrame *target = (WBlockReturnFrame *)(uintptr_t)(buf_bits & W_BLOCK_RETURN_PTR_MASK);
+    if (!target->active || (tag != 0 && tag != (uint64_t)(target->gen & 0xFFFF))) {
         w_raise(w_string("cannot return from block after enclosing function has exited"));
+    }
+    {
+        WBlockReturnFrame *f = w_block_return_stack;
+        while (f && f != target) f = f->prev;
+        if (!f) w_raise(w_string("block return target is no longer active"));
     }
 
     while (w_block_return_stack && w_block_return_stack != target) {
-        w_block_return_deactivate(w_block_return_stack);
-        w_block_return_stack = w_block_return_stack->prev;
+        WBlockReturnFrame *gone = w_block_return_stack;
+        w_block_return_deactivate(gone);
+        w_block_return_stack = gone->prev;
+        /* an intervening function abandoned by this return */
+        w_block_return_recycle(gone);
     }
     if (w_block_return_stack != target) {
         w_raise(w_string("block return target is no longer active"));

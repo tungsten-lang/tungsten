@@ -497,7 +497,9 @@
   # the dispatch helper segfaults (caught by network_native_spec, whose
   # binary compiles core/ipv6.w's `$bytes[0] ## i64` sites).
   if ast_kind(node) == :call && node.name == "\[]" && node.args != nil && node.args.size() == 1 && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :var && type in (:i64 :u64)
-    recv_t = infer_type(node.receiver, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    # receiver_static_type also sees a module-level typed array (`TAB =
+    # i32[256]` read inside a typed fn), which then takes the inline path.
+    recv_t = receiver_static_type(ctx, node.receiver)
     # Small/big-array receivers have their own inline element ops
     # (small_array_get_inline / big_array_get_inline) — fall through to the
     # inline path below rather than the boxed w_index_raw_i64 CALL, so element

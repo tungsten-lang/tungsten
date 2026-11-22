@@ -1628,6 +1628,13 @@
   recv_type = nil
   if recv_node != nil && ast_kind(recv_node) == :var
     recv_type = ctx[:var_types][recv_node.name]
+    # A module-level typed array read inside a fn or method (`TAB[i]`) has
+    # its single static type recorded at top level; take the inline path.
+    once = ctx[:mod][:top_level_assign_once]
+    if recv_type == nil && ctx[:func][:name] != "main" && once != nil && once[recv_node.name] == true
+      top_t = receiver_static_type(ctx, recv_node)
+      if is_typed_array_type?(top_t)
+        recv_type = top_t
   elsif recv_node != nil && ast_kind(recv_node) == :parg
     recv_type = ctx[:var_types]["__arg" + recv_node.index.to_s()]
   elsif recv_node != nil && ast_kind(recv_node) == :self_ref

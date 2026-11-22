@@ -528,6 +528,7 @@
       record_ivar_param_types(method_ast, cname, ivar_types, ivar_conflicts)
       walk_ivar_assigns(method_ast.body, cname, ivar_types, ivar_conflicts, mod)
     ki += 1
+  propagate_accessor_ivar_types(mod, ivar_types, ivar_conflicts, skip_core_methods)
   # Conflicted ivars get nil-marked so the dispatch lookup bails cleanly.
   conflict_keys = ivar_conflicts.keys()
   ck = 0
@@ -780,6 +781,100 @@
             ivar_types[cname][iname] = itype
     pi += 1
 
+# `@b = h.arr`, where `arr` is a field accessor (`ro`/`rw :arr`) that only one
+# class in the program defines and whose ivar has a typed-array type, gives
+# @b that type too. Any method of that name on another class (Core included)
+# leaves the receiver ambiguous, so the ivar stays untyped. Fills only ivars
+# the first pass left untyped and unconflicted.
+-> propagate_accessor_ivar_types(mod, ivar_types, ivar_conflicts, skip_core_methods)
+  owners = {}
+  ast_keys = mod[:class_method_asts].keys()
+  ki = 0
+  while ki < ast_keys.size()
+    key = ast_keys[ki]
+    dot_idx = key.index(".")
+    if dot_idx != nil
+      cname = key.slice(0, dot_idx)
+      mname = key.slice(dot_idx + 1, key.size() - dot_idx - 1)
+      slash = mname.index("/")
+      if slash != nil
+        mname = mname.slice(0, slash)
+      note_accessor_owner(owners, mname, cname)
+    ki += 1
+  ckeys = mod[:known_classes].keys()
+  ci = 0
+  while ci < ckeys.size()
+    cn = ckeys[ci]
+    cnode = mod[:known_classes][cn]
+    if cnode != nil && is_ast_node?(cnode) && ast_kind(cnode) == :class_def && cnode.body != nil
+      bi = 0
+      while bi < cnode.body.size()
+        st = cnode.body[bi]
+        if is_ast_node?(st) && ast_kind(st) == :call && st.receiver == nil && (st.name == "ro" || st.name == "rw") && st.args != nil
+          ai = 0
+          while ai < st.args.size()
+            arg = st.args[ai]
+            if is_ast_node?(arg) && ast_kind(arg) == :symbol
+              note_accessor_owner(owners, arg.value.to_s(), cn)
+              # A typed-array field read through the accessor
+              owners["@field:" + arg.value.to_s()] = cn
+            ai += 1
+        bi += 1
+    ci += 1
+  ki = 0
+  while ki < ast_keys.size()
+    key = ast_keys[ki]
+    dot_idx = key.index(".")
+    cname = key.slice(0, dot_idx)
+    method_ast = mod[:class_method_asts][key]
+    if ivar_types[cname] != nil && !(skip_core_methods && definition_from_core?(method_ast))
+      walk_accessor_ivar_assigns(method_ast.body, cname, ivar_types, ivar_conflicts, owners)
+    ki += 1
+  nil
+
+-> note_accessor_owner(owners, mname, cname)
+  prev = owners[mname]
+  if prev == nil
+    owners[mname] = cname
+  elsif prev != cname
+    owners[mname] = :ambiguous
+  nil
+
+-> walk_accessor_ivar_assigns(node, cname, ivar_types, ivar_conflicts, owners)
+  if node == nil
+    return nil
+  if is_ast_node?(node)
+    if ast_kind(node) == :assign && node.target != nil && ast_kind(node.target) == :ivar && node.type_hint == nil
+      iname = node.target.name
+      v = node.value
+      if ivar_types[cname][iname] == nil && ivar_conflicts[cname][iname] != true && v != nil && is_ast_node?(v) && ast_kind(v) == :call && v.receiver != nil && v.block == nil && (v.args == nil || v.args.size() == 0)
+        owner = owners[v.name]
+        if owner != nil && owner != :ambiguous && owners["@field:" + v.name] == owner && ivar_types[owner] != nil
+          ft = ivar_types[owner]["@" + v.name]
+          if ft != nil && is_typed_array_type?(ft) && ivar_conflicts[owner]["@" + v.name] != true
+            ivar_types[cname][iname] = ft
+    children = ast_children(node)
+    ci = 0
+    while ci < children.size()
+      walk_accessor_ivar_assigns(children[ci], cname, ivar_types, ivar_conflicts, owners)
+      ci += 1
+  elsif type(node) == "Array"
+    ai = 0
+    while ai < node.size()
+      walk_accessor_ivar_assigns(node[ai], cname, ivar_types, ivar_conflicts, owners)
+      ai += 1
+  nil
+
+# `@buf = h.data ## i32[]` states the ivar's type: element reads in the
+# class's methods take the inline typed-array path, as a hinted local does.
+-> ivar_assign_hint_type(hint)
+  if hint == nil
+    return nil
+  etype = array_hint_element_type(hint)
+  if etype != nil
+    return typed_array_etype_to_sym(etype)
+  nil
+
 -> walk_ivar_assigns(node, cname, ivar_types, ivar_conflicts, mod)
   if node == nil
     return nil
@@ -787,7 +882,9 @@
   if is_ast_node?(node)
     if ast_kind(node) == :assign && node.target != nil && ast_kind(node.target) == :ivar
       iname = node.target.name
-      itype = infer_type(node.value, {}, mod[:fn_return_types], lowering_infer_maps)
+      itype = ivar_assign_hint_type(node.type_hint)
+      if itype == nil
+        itype = infer_type(node.value, {}, mod[:fn_return_types], lowering_infer_maps)
       if itype != nil
         existing = ivar_types[cname][iname]
         if existing != nil && existing != itype

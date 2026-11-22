@@ -1220,9 +1220,16 @@
     slot_type = "i64"
     if is_raw_int_storage_type(child_var_types[pname])
       slot_type = machine_slot_type(child_var_types[pname])
+    elsif captured_float_param?(child_var_types[pname])
+      # A typed f64/f32 param the body reassigns: its slot holds the raw
+      # float (reads and writes of a float-typed variable are load/store
+      # double), so the boxed entry value is converted once here.
+      slot_type = float_slot_type(child_var_types[pname])
     ptr = ensure_var_slot(new_fn, pname, slot_type)
     # Use binding if one exists (e.g. from default-param override), otherwise use %param
-    if child_ctx[:bindings][pname] != nil
+    if captured_float_param?(child_var_types[pname]) && !is_raw_int_storage_type(child_var_types[pname])
+      store_captured_float_param(child_ctx, new_fn, pname, ptr, child_var_types[pname])
+    elsif child_ctx[:bindings][pname] != nil
       if is_raw_int_storage_type(child_var_types[pname])
         raw = ensure_raw_machine_int(new_fn, typed_value(:raw_i64, child_ctx[:bindings][pname]), child_var_types[pname], child_var_types[pname])
         emit_wire_dynamic_2(new_fn, machine_store_op(child_var_types[pname]), :ptr, ptr, :value, raw)

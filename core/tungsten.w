@@ -837,6 +837,7 @@
   # Core error and exception hierarchy (core/errors/)
   auto :Exception,           "errors/exception"
   auto :Error,               "errors/error"
+  auto :StandardError,       "errors/standard_error"
   auto :ArgumentError,       "errors/argument_error"
   auto :RangeError,          "errors/range_error"
   auto :TypeError,           "errors/type_error"

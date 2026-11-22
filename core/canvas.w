@@ -44,7 +44,9 @@
 # Video frames: keep one canvas, call clear (and reset) per frame, read pixels
 # with bytes / pixel / data_pointer, or write_png. Images are decoded once and
 # cached by path (Canvas.load_image), so a still drawn on 10,000 frames costs
-# one decode. There are no finalizers: close a canvas you are done with.
+# one decode. Pixels decoded elsewhere become an image with
+# Canvas.image_from_rgba(bytes, w, h). There are no finalizers: close a
+# canvas you are done with.
 
 + Canvas
   ro :width, :height, :scale, :space, :handle
@@ -88,6 +90,19 @@
   -> .load_image(path)
     h = ccall("w_cg_image_load", path)
     CanvasImage.new(h, ccall("w_cg_image_info", h, "width"), ccall("w_cg_image_info", h, "height"), path)
+
+  # An image from straight (unpremultiplied) 8-bit sRGB RGBA pixels: a
+  # ByteArray of w * h * 4 bytes, row-major, no padding (or a data pointer
+  # Integer). The pixels are copied, so `rgba` may be reused at once. For
+  # images decoded in Tungsten: nothing is written to disk and ImageIO is not
+  # involved. Release the image when done (it is not cached by path).
+  #
+  #   px = ByteArray.new(2 * 2 * 4)        # transparent 2x2
+  #   img = Canvas.image_from_rgba(px, 2, 2)
+  #   c.image(img, 0, 0, 64, 64)
+  -> .image_from_rgba(rgba, w, h)
+    h2 = ccall("w_cg_image_from_rgba", rgba, w, h)
+    CanvasImage.new(h2, w, h, nil)
 
   # Release every cached image; returns how many were released.
   -> .purge_images

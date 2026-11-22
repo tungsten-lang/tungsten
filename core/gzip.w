@@ -24,6 +24,18 @@ use core/crypto/crc32
 #                                zlib's, but any inflater accepts it, and on
 #                                the whole it is as small as zlib's at the same
 #                                level.
+#   Gzip.inflate(data, offset = 0, size_hint = 0)
+#                                raw DEFLATE stream starting at data[offset]
+#                                -> ByteArray (bytes after the stream are
+#                                ignored).  size_hint, when known, sizes the
+#                                output buffer up front.
+#   Gzip.inflate_zlib(data, offset = 0, size_hint = 0, check = true)
+#                                zlib stream (RFC 1950: 2-byte header, raw
+#                                DEFLATE, Adler-32) -> ByteArray, as PNG IDAT
+#                                and WOFF tables carry.  check: false skips
+#                                the Adler-32 comparison (and tolerates a
+#                                missing trailer), as browsers do for PNG.
+#                                A preset dictionary is an error.
 #   Gzip.encode_b64(data, level = 6, width = 76)
 #                                gzip, then Base64 text in lines of `width`
 #                                characters (a multiple of 4), each ended by a
@@ -46,6 +58,7 @@ use core/crypto/crc32
 #   :crc :size                                     trailer check failed
 #   :too_large                                     output above 2 GiB
 #   :base64                                        invalid Base64 text
+#   :not_zlib :adler                               zlib header, Adler-32
 # A wrong argument type or level raises ArgumentError.  Nothing is returned
 # for corrupt data, and no partial result.
 #
@@ -122,6 +135,38 @@ use core/crypto/crc32
     exact = Gzip.__sub(out, 0, used)
     Gzip.__release(out)
     exact
+
+  # Raw DEFLATE at data[offset] -> ByteArray.
+  -> .inflate(data, offset = 0, size_hint = 0)
+    src = Gzip.__bytes(data, "inflate") ## u8[]
+    out = Gzip.__inflate_at(src, offset, size_hint)
+    Gzip.__release_view(src, data)
+    out
+
+  # zlib stream at data[offset] -> ByteArray.
+  -> .inflate_zlib(data, offset = 0, size_hint = 0, check = true)
+    src = Gzip.__bytes(data, "inflate_zlib") ## u8[]
+    n = src.size ## i64
+    if offset < 0 || offset + 2 > n
+      Gzip.__fail(:truncated, "gzip: truncated zlib header")
+    cmf = src[offset] ## i64
+    flg = src[offset + 1] ## i64
+    if (cmf & 15) != 8 || (cmf >> 4) > 7 || ((cmf << 8) | flg) % 31 != 0
+      Gzip.__fail(:not_zlib, "gzip: not a zlib stream")
+    if (flg & 32) != 0
+      Gzip.__fail(:not_zlib, "gzip: zlib preset dictionaries are not supported")
+    st = i64[8]
+    out = Gzip.__inflate_st(src, offset + 2, size_hint, st)
+    pos = st[0] ## i64
+    Gzip.__release(st)
+    if check
+      if pos + 4 > n
+        Gzip.__fail(:truncated, "gzip: truncated zlib trailer")
+      want = (src[pos] << 24) | (src[pos + 1] << 16) | (src[pos + 2] << 8) | src[pos + 3]
+      if want != Gzip.__adler(out)
+        Gzip.__fail(:adler, "gzip: adler-32 check failed")
+    Gzip.__release_view(src, data)
+    out
 
   # decompress, with the result as a String.
   -> .decompress_text(data)
@@ -241,6 +286,56 @@ use core/crypto/crc32
   # ---------------------------------------------------------------------------
   # Plumbing
   # ---------------------------------------------------------------------------
+
+  # Inflate the raw DEFLATE stream at src[off] into an exact-size ByteArray.
+  -> .__inflate_at(src, off, hint) (u8[] i64 i64) u8[]
+    st = i64[8]
+    out = Gzip.__inflate_st(src, off, hint, st)
+    Gzip.__release(st)
+    out
+
+  # The same, leaving st[0] at the first byte after the stream.
+  -> .__inflate_st(src, off, hint, st) (u8[] i64 i64 i64[]) u8[]
+    n = src.size ## i64
+    if off < 0 || off > n
+      Gzip.__fail(:truncated, "gzip: offset outside the data")
+    cap = hint ## i64
+    if cap <= 0
+      cap = (n - off) * 4
+    if cap > 268435456
+      cap = 268435456
+    if cap < 64
+      cap = 64
+    out = u8[cap]
+    st[0] = off
+    st[4] = 0
+    st[5] = 0
+    st[6] = cap
+    out = Gzip.__inflate(src, out, st)
+    used = st[4] ## i64
+    if used == out.size
+      return out
+    exact = Gzip.__sub(out, 0, used)
+    Gzip.__release(out)
+    exact
+
+  # Adler-32 of all of `a` (RFC 1950).
+  -> .__adler(a) (u8[]) i64
+    s1 = 1 ## i64
+    s2 = 0 ## i64
+    n = a.size ## i64
+    i = 0 ## i64
+    while i < n
+      stop = i + 5552 ## i64
+      if stop > n
+        stop = n
+      while i < stop
+        s1 += a[i]
+        s2 += s1
+        i += 1
+      s1 = s1 % 65521
+      s2 = s2 % 65521
+    (s2 << 16) | s1
 
   # Bytes of a String (borrowed view) or a ByteArray (returned unchanged).
   -> .__bytes(data, who)

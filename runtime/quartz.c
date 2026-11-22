@@ -2247,6 +2247,65 @@ WValue w_cg_image_from_canvas(WValue hv) {
     return cg_img_register(im);
 }
 
+static void cg_free_pixels(void *info, const void *data, size_t size) {
+    (void)info; (void)size;
+    free((void *)data);
+}
+
+/* w_cg_image_from_rgba(buf, w, h) -> handle: an image from straight
+ * (unpremultiplied) 8-bit RGBA pixels in sRGB, row-major with no padding (a
+ * ByteArray of w * h * 4, or a data-pointer Integer to as many bytes). The
+ * pixels are copied (premultiplied, the layout every other image uses), so
+ * the buffer may be reused or freed at once. For decoders written in
+ * Tungsten: nothing touches the disk and ImageIO is not involved. */
+WValue w_cg_image_from_rgba(WValue bufv, WValue wv, WValue hv) {
+    double dw = cg_num(wv, "width"), dh = cg_num(hv, "height");
+    if (!(dw >= 1 && dh >= 1 && dw <= 1048576 && dh <= 1048576) || dw * dh > 4.0e9 / 4)
+        cg_raise("Canvas.image_from_rgba: bad size %gx%g", dw, dh);
+    size_t w = (size_t)dw, h = (size_t)dh, n = w * h * 4;
+    const uint8_t *src = NULL;
+    if (w_is_int(bufv)) {
+        src = (const uint8_t *)(uintptr_t)w_as_int(bufv);
+        if (!src) cg_raise("Canvas.image_from_rgba: null data pointer");
+    } else if (w_is_array(bufv)) {
+        WArray *a = w_as_array(bufv);
+        if (a->ebits != 8) cg_raise("Canvas.image_from_rgba: pixels must be a ByteArray (u8[])");
+        if ((size_t)a->size < n)
+            cg_raise("Canvas.image_from_rgba: buffer has %lld bytes, need %zu", (long long)a->size, n);
+        src = (const uint8_t *)a->slots + (size_t)a->start;
+    } else {
+        cg_raise("Canvas.image_from_rgba: pixels must be a ByteArray or data pointer Integer");
+    }
+    uint8_t *px = malloc(n);
+    if (!px) cg_raise("Canvas.image_from_rgba: out of memory");
+    for (size_t i = 0; i < n; i += 4) {
+        unsigned a = src[i + 3];
+        if (a == 255) {
+            px[i] = src[i]; px[i + 1] = src[i + 1]; px[i + 2] = src[i + 2]; px[i + 3] = 255;
+        } else {
+            /* round(c * a / 255) */
+            unsigned t;
+            t = src[i] * a + 128;     px[i]     = (uint8_t)((t + (t >> 8)) >> 8);
+            t = src[i + 1] * a + 128; px[i + 1] = (uint8_t)((t + (t >> 8)) >> 8);
+            t = src[i + 2] * a + 128; px[i + 2] = (uint8_t)((t + (t >> 8)) >> 8);
+            px[i + 3] = (uint8_t)a;
+        }
+    }
+    CGDataProviderRef prov = CGDataProviderCreateWithData(NULL, px, n, cg_free_pixels);
+    if (!prov) { free(px); cg_raise("Canvas.image_from_rgba: CGDataProviderCreateWithData failed"); }
+    CGImageRef img = CGImageCreate(w, h, 8, 32, w * 4, cg_srgb(),
+                                   (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big,
+                                   prov, NULL, false, kCGRenderingIntentDefault);
+    CGDataProviderRelease(prov);
+    if (!img) cg_raise("Canvas.image_from_rgba: CGImageCreate failed");
+    CGImg *im = calloc(1, sizeof *im);
+    im->image = img;
+    im->w = w;
+    im->h = h;
+    im->bytes = n;
+    return cg_img_register(im);
+}
+
 WValue w_cg_image_info(WValue imv, WValue keyv) {
     CGImg *im = cg_image(imv, "image_info");
     char key[32];

@@ -2,7 +2,8 @@
 # non-:SP token before tc is one of + - * / % ** == != < > <= >= && || & ^.
 # Such a line cannot end a statement, so its newline is whitespace and the
 # next line's indentation is not block structure (as inside brackets).
-# Not continuing: | (block params), -> (definitions), << (print), = and ,.
+# Not continuing: | (block params), -> (definitions), << (print), = and ,,
+# and an unspaced > (it closes a type-argument list: `+ Poly<K>`).
 ## i64[]: lc, tokens
 ## i64: tc, cp_mask
 -> tungsten_fast64_continues(lc, tokens, tc, cp_mask)
@@ -18,6 +19,14 @@
   n = (tok >> 26) & 0xFFF
   c1 = (lc[off] >> 18) & cp_mask
   if n == 1
+    # An unspaced `>` closes a type-argument list (`+ Poly<K>`,
+    # `Map<K, V>`), not a comparison: only a spaced `a >` continues.
+    if c1 == 62
+      if off == 0
+        return 0
+      c0 = (lc[off - 1] >> 18) & cp_mask
+      if c0 != 32 && c0 != 9
+        return 0
     if c1 in (43 45 42 47 37 60 62 38 94)
       return 1
     return 0

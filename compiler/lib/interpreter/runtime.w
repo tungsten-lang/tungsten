@@ -186,12 +186,24 @@
           inner = parse_source(source)
           execute_program(inner)
         rescue err
-          nil
+          # A core file (or one it `use`s) that does not lex, parse or load
+          # is a broken toolchain: report it, as the compiled loader's
+          # autoload does, instead of leaving the class a method-less stub
+          # that fails far from the cause. Errors raised while evaluating
+          # the file stay tolerated (interpreter-only gaps such as ccalls).
+          if interpreter_core_load_error?(err)
+            raise err
         @current_file = prev_file
     if !@classes.has_key?(name)
       @classes[name] = {rt: :class, name: name, methods: {}, method_overloads: {}, parent: nil}
     @autoloaded_classes[name] = true
     true
+
+  -> interpreter_core_load_error?(err)
+    if type(err) != "Hash" || err[:rt] != :compile_error || err[:code] == nil
+      return false
+    code = err[:code].to_s()
+    code.starts_with?("E_PARSE") || code.starts_with?("E_LEX") || code.starts_with?("E_LOAD")
 
   -> run(source, file_path = nil)
     if file_path != nil

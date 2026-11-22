@@ -1328,7 +1328,22 @@
     if comment_pos != nil
       text = text.slice(0, comment_pos)
     text = text.strip()
-    space = text.index(" ")
+    # The type name ends at the first space outside brackets: a sized hint
+    # `## T[m * n]` is one type, not `T[m` followed by `* n]`.
+    space = nil
+    depth = 0
+    ci = 0
+    while ci < text.size()
+      # bytes: [ ( < open, ] ) > close, 32 is a space
+      b = text.byte_at(ci)
+      if b == 91 || b == 40 || b == 60
+        depth += 1
+      elsif (b == 93 || b == 41 || b == 62) && depth > 0
+        depth -= 1
+      elsif b == 32 && depth == 0
+        space = ci
+        break
+      ci += 1
     if space == nil
       return nil
     type_name = text.slice(0, space)

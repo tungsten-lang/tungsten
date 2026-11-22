@@ -83,7 +83,7 @@ use regex_base
         # A trailing binary operator continues the line (as the packed
         # lexer, compiler/lib/lexer/fast64.w): no NEWLINE, and the next
         # line's indentation is not block structure.
-        if [:PLUS, :MINUS, :STAR, :SLASH, :PERCENT, :POW, :EQ, :NEQ, :LT, :GT, :LTE, :GTE, :AND, :OR, :AMPERSAND, :CARET].include?(@last_token_type)
+        if [:PLUS, :MINUS, :STAR, :SLASH, :PERCENT, :POW, :EQ, :NEQ, :LT, :GT, :LTE, :GTE, :AND, :OR, :AMPERSAND, :CARET].include?(@last_token_type) && !(@last_token_type == :GT && @gt_unspaced)
           @cont_line = true
         else
           emit(:NEWLINE, nil)
@@ -566,6 +566,9 @@ use regex_base
       return nil
 
     if ch == ">"
+      # An unspaced `>` closes a type-argument list (`+ Poly<K>`); it does
+      # not continue the line the way a trailing comparison does.
+      @gt_unspaced = @pos == 0 || (@chars[@pos - 1] != " " && @chars[@pos - 1] != "\t")
       @pos += 1
       emit(:GT, ">")
       return nil

@@ -162,6 +162,8 @@ module Tungsten
         @line_start = false
         @last_significant_token_type = tt
       end
+      @gt_unspaced = @prev_token_type != :SP if tt == :>
+      @prev_token_type = tt
       @token
     end
 
@@ -989,8 +991,11 @@ module Tungsten
     # Kept in lockstep with Lexer#continues_line? (same operator list).
     CONTINUATION_OPS = %i[+ - * / % ** == != < > <= >= && || & ^].freeze
 
+    # An unspaced `>` closes a type-argument list (`+ Poly<K>`), so it does not
+    # continue the line; only a spaced trailing `a >` does.
     def continues_line?
-      @bracket_depth.zero? && CONTINUATION_OPS.include?(@last_significant_token_type)
+      @bracket_depth.zero? && CONTINUATION_OPS.include?(@last_significant_token_type) &&
+        !(@last_significant_token_type == :> && @gt_unspaced)
     end
 
     # after a continued newline: consume the next line's indentation (as the open-bracket case of handle_indentation)

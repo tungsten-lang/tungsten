@@ -673,6 +673,20 @@ module Tungsten::AST
       expect(result.obj).to eq("items".var)
     end
 
+    # An unspaced trailing `>` closes a type-argument list; only a spaced one
+    # continues the line (regression: `+ Poly<K>` swallowed its class body).
+    it "keeps the body of a generic class header ending in >" do
+      result = described_class.parse("+ Box<T>\n  -> new(@x)\n  -> get\n    @x\n")
+      expect(result.first).to be_a(ClassDef)
+      expect(result.first.body.list.length).to eq(2)
+    end
+
+    it "still continues a line ending in a spaced >" do
+      result = described_class.parse("a = 1 >\n  0\nb = 2\n")
+      expect(result.list.length).to eq(2)
+      expect(result.first.value).to be_a(BinaryOp)
+    end
+
     it "parses leading-dot receiver shorthand" do
       result = described_class.parse(".commands[:help]").first
       expect(result).to be_a(Call)

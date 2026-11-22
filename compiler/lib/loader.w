@@ -712,9 +712,6 @@ loader_toolchain_state = {split_checked: false}
     walked = 0
     defined = {}
     defined_walked = 0
-    # Core paths whose tolerant load failed: other names registered to the
-    # same file skip it instead of re-parsing it once per name.
-    failed_paths = {}
     while iteration < 64
       while defined_walked < expressions.size()
         de = expressions[defined_walked]
@@ -737,41 +734,14 @@ loader_toolchain_state = {split_checked: false}
         if @autoload_loaded[name] != true
           @autoload_loaded[name] = true
           path = registry[name]
-          # Tolerant load: if the autoloaded file has a parse error or other
-          # compile-time failure, swallow it and skip this name. Several core
-          # `.w` files (notably core/object.w with `-> !~/1` and `-> ARGF`
-          # stubs the lexer doesn't yet accept) are still scaffolds — they
-          # only matter once their methods are actually used. A user program
-          # that *needs* them will fail at lowering time with a clear "no
-          # such class" or "no such trait" error rather than crashing the
-          # loader for every other compilation. `core/tungsten.w`'s registry
-          # remains the source of truth for what *can* be autoloaded; this
-          # block decides what *currently can be* loaded.
-          loaded = nil
-          use_depth = @use_stack.size
-          loaded_depth = @loaded_files.size
-          if failed_paths[path] != true
-            begin
-              loaded = load_program_ast("core/" + path, base_resolved)
-            rescue err
-              if @verbose && env("DEBUG_LOADS") == "1"
-                << "  autoload skip " + name + " (parse error in core/" + path + ")"
-              loaded = nil
-              failed_paths[path] = true
-              # The failed load unwound past its own pops: drop the files it
-              # left mid-splice, or a later `use` of one of them would be
-              # reported as a cycle instead of the silent dedup it is.
-              while @use_stack.size > use_depth
-                @use_stack.pop
-              # A failed load contributes no expressions, so it must not
-              # claim any file either. Its `use` walk may already have
-              # spliced dependencies (core/algebra.w reaches core/integer.w
-              # before failing in a later worker); left marked loaded, a
-              # later autoload of one of them deduplicates to an empty
-              # program and its class is never defined, while lowering
-              # still emits references to it (`@class.Integer`).
-              while @loaded_files.size > loaded_depth
-                @loaded_files.pop
+          # A core file the manifest names must load. A failure here (a
+          # parse error, a missing file, a contract violation) is a broken
+          # toolchain, so it is reported where it happened instead of being
+          # skipped: a skipped load left the program without the class it
+          # named, which surfaced far away as invalid IR (`@class.Integer`
+          # undefined) or as a class silently missing its core methods,
+          # and hid a lexer regression that broke every algebra class.
+          loaded = load_program_ast("core/" + path, base_resolved)
           if loaded != nil
             block_start = expressions.size()
             li = 0

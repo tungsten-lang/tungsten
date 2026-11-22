@@ -76,8 +76,18 @@ module Tungsten
     # the type name rather than dropping it (E_PARSE_TYPE_HINT_OPERATOR).
     def validate_type_hint_tail!(hint)
       text = hint.to_s.split("#", 2).first.to_s.strip
-      type_name, rest = text.split(" ", 2)
-      rest = rest.to_s.strip
+      # The type name ends at the first space outside brackets: `## T[m * n]`
+      # is one sized type, not `T[m` followed by `* n]`.
+      depth = 0
+      split_at = text.each_char.with_index.find do |ch, _|
+        depth += 1 if "[(<".include?(ch)
+        depth -= 1 if "])>".include?(ch) && depth.positive?
+        ch == " " && depth.zero?
+      end&.last
+      return unless split_at
+
+      type_name = text[0...split_at]
+      rest = text[split_at..].strip
       return if rest.empty? || !"+-*/%&|^<>=~!".include?(rest[0])
 
       error("'#{rest}' after '## #{type_name}' is part of the type hint, not an operation; " \

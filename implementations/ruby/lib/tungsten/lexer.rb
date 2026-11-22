@@ -101,8 +101,11 @@ module Tungsten
     # compiler lexer (compiler/lib/lexer/fast64.w tungsten_fast64_continues).
     CONTINUATION_OPS = %i[+ - * / % ** == != < > <= >= && || & ^].freeze
 
+    # An unspaced `>` closes a type-argument list (`+ Poly<K>`), so it does not
+    # continue the line; only a spaced trailing `a >` does.
     def continues_line?
-      @bracket_depth.zero? && CONTINUATION_OPS.include?(@last_significant_token_type)
+      @bracket_depth.zero? && CONTINUATION_OPS.include?(@last_significant_token_type) &&
+        !(@last_significant_token_type == :> && @gt_unspaced)
     end
 
     def handle_indentation
@@ -307,6 +310,8 @@ module Tungsten
 
       @line_start = false unless %i[INDENT DEDENT NL SP SHEBANG].include?(@token.type)
       @last_significant_token_type = @token.type unless %i[INDENT DEDENT NL SP SHEBANG].include?(@token.type)
+      @gt_unspaced = @prev_token_type != :SP if @token.type == :>
+      @prev_token_type = @token.type
 
       @token
     end

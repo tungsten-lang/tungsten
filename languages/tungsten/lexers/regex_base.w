@@ -18,6 +18,7 @@ use known_units
     @at_line_start = true
     @paren_depth = 0
     @cont_line = false
+    @gt_unspaced = false
     @regex_capture_scope = false
 
   -> push_token(tok)

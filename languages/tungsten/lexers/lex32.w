@@ -20,6 +20,14 @@
   n = (tok >> 28) & 0xFFF
   c1 = (lc[off] >> 11) & cp_mask
   if n == 1
+    # An unspaced `>` closes a type-argument list (`+ Poly<K>`,
+    # `Map<K, V>`), not a comparison: only a spaced `a >` continues.
+    if c1 == 62
+      if off == 0
+        return 0
+      c0 = (lc[off - 1] >> 11) & cp_mask
+      if c0 != 32 && c0 != 9
+        return 0
     if c1 in (43 45 42 47 37 60 62 38 94)
       return 1
     return 0

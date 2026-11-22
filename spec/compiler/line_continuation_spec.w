@@ -3,6 +3,10 @@
 # wtoken32.w, and the Ruby Lexer/CodepointLexer) treat its newline as
 # whitespace and the next line's indentation as not block structure.
 # Continuing operators: + - * / % ** == != < > <= >= && || & ^.
+# An unspaced `>` closes a type-argument list (`+ Poly<K>`) and does not
+# continue: before that rule, every generic class header ending in `>`
+# swallowed its body (core/algebra/polynomial.w's `+ Poly<K>` stopped
+# parsing, and with it every algebra class).
 
 -> check(name, got, want)
   if got != want
@@ -53,5 +57,21 @@ e = 7 -
   2
 f = e - 1
 check("the statement after a continuation", f, 4)
+
++ Crate<T>
+  with T in (i64 f64)
+
+  -> new(@item)
+
+  ro :item
+
+check("generic class header ending in > keeps its body", Crate<i64>.new(4).item, 4)
+
++ Pair<K, V>
+  -> new(@key, @value)
+  -> describe
+    "[@key]=[@value]"
+
+check("multi-parameter generic header", Pair<i64, i64>.new(1, 2).describe, "1=2")
 
 << "PASS line continuation"

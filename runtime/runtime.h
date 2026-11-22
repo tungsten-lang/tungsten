@@ -2458,6 +2458,7 @@ WValue __w_sleep_ms(int64_t milliseconds);
 WValue __w_clock(void);
 int64_t __w_clock_ticks_raw(void);
 int64_t __w_deadline_ticks_after_seconds(int64_t seconds);
+int64_t __w_deadline_ticks_after_ms(int64_t ms);
 int64_t __w_clock_ns_raw(void);
 WValue __w_elapsed_seconds_since_ns(int64_t start_ns);
 WValue __w_elapsed_seconds_since_ticks(int64_t start_ticks);

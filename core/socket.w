@@ -7,6 +7,10 @@
   -> .listen(host, port, backlog = 128)
   -> .connect(host, port)
 
+  # connect with a deadline: raises "socket: connect timed out" after timeout_ms.
+  -> .connect_timeout(host, port, timeout_ms)
+    ccall("w_socket_connect_timeout", host, port, timeout_ms)
+
   -> accept
   -> read(size = 4096)
   -> read_exact(size)

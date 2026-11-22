@@ -715,6 +715,8 @@
   # -- Use --
 
   -> eval_use(node)
+    if @sandboxed
+      raise_typed("SecurityError", "sandbox: use " + ast_get(node, :path).to_s() + " is not available")
     base_dir = ""
     if @current_file != nil
       # Get directory of current file
@@ -1167,12 +1169,12 @@
 
   -> eval_puts(node, env)
     ast_get(node, :value).each -> (v)
-      << w_to_s(evaluate(v, env))
+      output_line(w_to_s(evaluate(v, env)))
     nil
 
   -> eval_print(node, env)
     value = evaluate(ast_get(node, :value), env)
-    <- w_to_s(value)
+    output_text(w_to_s(value))
     nil
 
   # -- Hash literal --

@@ -47,6 +47,7 @@ sources << tungsten_file("runtime/w_class.rb")
 sources << tungsten_file("runtime/w_method.rb")
 sources << tungsten_file("runtime/raw_w_value.rb")
 
+sources << tungsten_file("contextual_keywords.rb")
 sources << tungsten_file("codepoint_lexer.rb")
 sources << tungsten_file("parser.rb")
 sources << tungsten_file("environment.rb")
@@ -4467,8 +4468,8 @@ def stage0_real_interpreter_compat(body)
   body = insert_before_private(body, <<~RUBY)
     def stage0_compiler_keyword?(word = "")
       case word
-      when "begin", "break", "case", "else", "elsif", "ensure", "exit", "extern", "false", "fn", "if",
-           "in", "lib", "loop", "module", "nil", "next", "on", "parallel", "raise", "rescue", "return",
+      when "begin", "break", "case", "else", "elsif", "ensure", "exit", "extern", "false", "if",
+           "in", "lib", "loop", "module", "nil", "next", "parallel", "raise", "rescue", "return",
            "self", "super", "then", "trait", "true", "unless", "until", "use", "when", "while", "with", "yield"
         true
       else
@@ -4847,9 +4848,10 @@ def stage0_real_interpreter_compat(body)
       out.to_s()
     end
 
-    # `go` is a contextual keyword (go_keyword_at? in
-    # languages/tungsten/lexers/regex_helpers.w): reserved only where it
-    # starts a spawn, `go -> body`, never after `.`/`&.`.
+    # `go`, `fn` and `on` are contextual keywords (contextual_keyword_at? in
+    # languages/tungsten/lexers/regex_helpers.w). The CodepointLexer already
+    # decides `fn`/`on` (Tungsten::ContextualKeywords); it has no spawn, so
+    # `go` is decided here: a keyword only before `->`, never after `.`/`&.`.
     def stage0_go_keyword_at?(source_text, row, col, prev_type)
       return false if prev_type == "DOT" || prev_type == "SAFE_NAV"
       lines = source_text.split("\n")

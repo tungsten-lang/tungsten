@@ -1258,28 +1258,98 @@
 
   typed_value(:i64, val_reg)
 
--> lower_multi_assign(ctx, node)
+# Multiple assignment (parser: try_parse_multi_assign). The whole right side
+# is evaluated before any target is written, so `a, b = b, a` swaps. The
+# value of the expression is the right side.
+-> lower_multi_assign(ctx, node, want_value = true)
   wfn = ctx[:func]
-  # Evaluate RHS (should produce an array)
-  val = lower_expression(ctx, node.value)
-  val_reg = ensure_i64_value(wfn, val)
+  if multi_assign_parallel_literal?(node)
+    return lower_parallel_multi_assign(ctx, node, want_value)
+  val_tv = lower_expression(ctx, node.value)
+  val_reg = ensure_i64_value(wfn, val_tv)
+  lower_destructure_into(ctx, node, val_reg)
+  typed_value(:i64, val_reg)
+
+# `a, b = x, y` (and `a <> b`): a literal list with one value per target
+# and no splat target. Each value goes into a hidden local first, then each
+# target takes its local, so no Array is built and typed values stay raw
+# (a swap of machine-typed locals is plain register moves).
+-> multi_assign_parallel_literal?(node)
+  value = node.value
+  if value == nil || !is_ast_node?(value) || ast_kind(value) != :array || ast_get(node, :splat_index) != nil
+    return false
+  value.elements.size() == node.targets.size()
+
+-> next_multi_assign_temp(ctx)
+  n = ctx[:mod][:next_multi_assign]
+  if n == nil
+    n = 0
+  ctx[:mod][:next_multi_assign] = n + 1
+  "__multi_assign_" + n.to_s()
+
+-> lower_parallel_multi_assign(ctx, node, want_value)
   targets = node.targets
+  elements = node.value.elements
+  base = next_multi_assign_temp(ctx)
+  temps = []
+  i = 0
+  while i < elements.size()
+    tname = base + "_" + i.to_s()
+    temps.push(Tungsten:AST:Var.new(tname))
+    # A machine-typed value keeps its type in the hidden local, so the
+    # target's store needs no box/unbox round trip.
+    elem_type = infer_type(elements[i], ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    if elem_type != nil && (is_machine_int_type(elem_type) || is_machine_float_type(elem_type))
+      ctx[:var_types][tname] = elem_type
+    ctx[:assign_stmt_position] = true
+    lower_assign_expr(ctx, Tungsten:AST:Assign.new(Tungsten:AST:Var.new(tname), elements[i]))
+    i += 1
   i = 0
   while i < targets.size()
     target = targets[i]
-    name = target.name
-    range_binding_invalidate(ctx, name)
-    # Get element i from the array
-    idx_tv = lower_int(ctx, Tungsten:AST:Int.new(i))
-    idx_reg = ensure_i64_value(wfn, idx_tv)
-    elem_temp = next_temp(wfn)
-    emit_wire_call_direct_i64(wfn, nil, [val_reg, idx_reg], nil, nil, "w_array_get", nil, nil, elem_temp)
-    # Store to variable
-    ensure_var_slot(wfn, name)
-    slot = wfn[:var_slots][name]
-    emit_wire_store_i64(wfn, slot, elem_temp)
+    if ast_kind(target) == :multi_assign
+      nested = Tungsten:AST:MultiAssign.new(target.targets, temps[i])
+      splat = ast_get(target, :splat_index)
+      if splat != nil
+        ast_set(nested, :splat_index, splat)
+      lower_multi_assign(ctx, nested, false)
+    else
+      ctx[:assign_stmt_position] = true
+      lower_assign_expr(ctx, Tungsten:AST:Assign.new(target, temps[i]))
     i += 1
-  typed_value(:i64, val_reg)
+  if want_value
+    return lower_expression(ctx, Tungsten:AST:Array.new(temps))
+  typed_value(:i64, w_nil.to_s())
+
+# Spread the boxed value in `val_reg` over a target list, like
+# w_destructure_index: an Array spreads (missing values are nil), anything
+# else is a one-element list; the `:splat_index` target gathers the rest.
+-> lower_destructure_into(ctx, pattern, val_reg)
+  wfn = ctx[:func]
+  targets = pattern.targets
+  n = targets.size()
+  splat = ast_get(pattern, :splat_index)
+  after = splat == nil ? 0 : n - splat - 1
+  i = 0
+  while i < n
+    elem = next_temp(wfn)
+    if splat == nil || i < splat
+      emit_wire_call_direct_i64(wfn, nil, [val_reg, i.to_s()], nil, nil, "w_destructure_index", nil, nil, elem)
+    elsif i == splat
+      emit_wire_call_direct_i64(wfn, nil, [val_reg, splat.to_s(), after.to_s()], nil, nil, "w_destructure_rest", nil, nil, elem)
+    else
+      emit_wire_call_direct_i64(wfn, nil, [val_reg, splat.to_s(), after.to_s(), (i - splat - 1).to_s()], nil, nil, "w_destructure_suffix", nil, nil, elem)
+    target = targets[i]
+    if ast_kind(target) == :multi_assign
+      lower_destructure_into(ctx, target, elem)
+    else
+      tname = next_multi_assign_temp(ctx)
+      ctx[:bindings][tname] = elem
+      ctx[:assign_stmt_position] = true
+      lower_assign_expr(ctx, Tungsten:AST:Assign.new(target, Tungsten:AST:Var.new(tname)))
+      ctx[:bindings][tname] = nil
+    i += 1
+  nil
 
 -> lower_safe_nav(ctx, node)
   wfn = ctx[:func]

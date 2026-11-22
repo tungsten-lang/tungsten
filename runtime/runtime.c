@@ -34574,6 +34574,31 @@ typedef struct {
 static WLangCacheSlot g_lang_cache[LANG_CACHE_SLOTS];
 static int g_lang_cache_used = 0;
 
+#include "tungsten_lexflags.inc"
+
+/* A program that embeds the lexer can run where no languages/ directory
+ * exists (no checkout, no TUNGSTEN_ROOT): rebuild Tungsten's own tables from
+ * the run-length copy in tungsten_lexflags.inc and cache them like a load. */
+static const uint8_t *w_embedded_lang_flags(const char *lang, int bits, size_t expected_size) {
+    if (strcmp(lang, "tungsten") != 0 || (bits != 64 && bits != 32)) return NULL;
+    uint8_t *flags = (uint8_t *)calloc(expected_size, 1);
+    if (!flags) return NULL;
+    const uint32_t (*runs)[3] = bits == 64 ? w_tungsten_lex64_runs : w_tungsten_lex32_runs;
+    size_t n = bits == 64 ? W_TUNGSTEN_LEX64_RUNS_N : W_TUNGSTEN_LEX32_RUNS_N;
+    for (size_t i = 0; i < n; i++) {
+        size_t start = runs[i][0], len = runs[i][1];
+        if (start + len > expected_size) continue;
+        memset(flags + start, (int)runs[i][2], len);
+    }
+    int slot = g_lang_cache_used++;
+    strncpy(g_lang_cache[slot].lang, lang, sizeof(g_lang_cache[slot].lang) - 1);
+    g_lang_cache[slot].lang[sizeof(g_lang_cache[slot].lang) - 1] = '\0';
+    g_lang_cache[slot].bits = bits;
+    g_lang_cache[slot].flags = flags;
+    g_lang_cache[slot].flags_size = expected_size;
+    return flags;
+}
+
 /* Look up cached flags or load them from disk. Returns NULL on error
  * (file missing or wrong size); caller falls back to default flags.
  * Aborts if the cache fills up. */
@@ -34642,7 +34667,7 @@ static const uint8_t *w_load_lang_flags(const char *lang, int bits) {
             f = fopen(cp_path, "rb");
         }
     }
-    if (!f) return NULL;
+    if (!f) return w_embedded_lang_flags(lang, bits, expected_size);
 
     fseek(f, 0, SEEK_END);
     long actual_size = ftell(f);
@@ -51625,6 +51650,29 @@ WValue w_destructure_index(WValue v, int64_t i) {
         return W_NIL;
     }
     return i == 0 ? v : W_NIL;
+}
+
+/* Multiple assignment with a splat target, `a, *rest, z = v`: the splat at
+ * target index `start` gathers what the `after` trailing targets leave (an
+ * empty Array when nothing is left). A non-Array value is a one-element
+ * list, as in w_destructure_index. */
+static int64_t w_destructure_rest_end(int64_t size, int64_t start, int64_t after) {
+    int64_t end = size - after;
+    return end < start ? start : end;
+}
+
+WValue w_destructure_rest(WValue v, int64_t start, int64_t after) {
+    int64_t size = w_is_array(v) ? w_as_array(v)->size : 1;
+    int64_t end = w_destructure_rest_end(size, start, after);
+    WValue out = w_array_new(65, end - start);
+    for (int64_t i = start; i < end; i++) w_array_push(out, w_destructure_index(v, i));
+    return out;
+}
+
+/* The `j`th trailing target after the splat. */
+WValue w_destructure_suffix(WValue v, int64_t start, int64_t after, int64_t j) {
+    int64_t size = w_is_array(v) ? w_as_array(v)->size : 1;
+    return w_destructure_index(v, w_destructure_rest_end(size, start, after) + j);
 }
 
 static WValue call_closure_1(WClosure *cl, WValue arg) {

@@ -420,6 +420,124 @@ static int compile_assign(TcAstValue node, TcChunk *chunk, TcError *err) {
          tc_emit_op_u32(chunk, TC_OP_STORE_LOCAL, (uint32_t)slot, err);
 }
 
+/* Multiple assignment (parse_ast.c parse_multi_assign_ast): evaluate the
+ * whole right side, keep it in a hidden local, then store each element into
+ * its target. The expression's value is the right side. */
+static int multi_assign_counter = 0;
+
+static int multi_assign_hidden_local(TcChunk *chunk, TcError *err) {
+  char name[48];
+  int len = snprintf(name, sizeof name, "__multi_assign_%d", multi_assign_counter++);
+  return tc_chunk_local(chunk, name, (size_t)len, err);
+}
+
+static int compile_store_from_local(TcAstValue target, int elem_slot, TcChunk *chunk, TcError *err) {
+  TcAstValue *name = ast_get(target, "name");
+  if (ast_node_is(target, "call")) {
+    TcAstValue *recv = ast_get(target, "receiver");
+    TcAstValue *args = ast_get(target, "args");
+    if (!recv || recv->kind == TC_AST_NIL || !name || name->kind != TC_AST_STRING || !args || args->kind != TC_AST_ARRAY) {
+      tc_error_set(err, "unsupported multiple assignment target");
+      return 0;
+    }
+    size_t argc = args->as.array->count;
+    int index = name->as.string.len == 2 && memcmp(name->as.string.bytes, "[]", 2) == 0;
+    if (!index && argc != 0) {
+      tc_error_set(err, "unsupported multiple assignment target");
+      return 0;
+    }
+    if (!compile_expr(*recv, chunk, err)) return 0;
+    for (size_t i = 0; i < argc; i++)
+      if (!compile_expr(args->as.array->items[i], chunk, err)) return 0;
+    if (!tc_emit_op_u32(chunk, TC_OP_LOAD_LOCAL, (uint32_t)elem_slot, err)) return 0;
+    char setter[256];
+    size_t setter_len = index ? 3 : name->as.string.len + 1;
+    if (setter_len >= sizeof setter) {
+      tc_error_set(err, "setter name too long");
+      return 0;
+    }
+    if (index) {
+      memcpy(setter, "[]=", 3);
+    } else {
+      memcpy(setter, name->as.string.bytes, name->as.string.len);
+      setter[name->as.string.len] = '=';
+    }
+    setter[setter_len] = '\0';
+    return emit_call_op(chunk, setter, setter_len, argc + 1, 1, err) && tc_emit_op(chunk, TC_OP_POP, err);
+  }
+  if (!name || name->kind != TC_AST_STRING) {
+    tc_error_set(err, "unsupported multiple assignment target");
+    return 0;
+  }
+  if (!tc_emit_op_u32(chunk, TC_OP_LOAD_LOCAL, (uint32_t)elem_slot, err)) return 0;
+  if (ast_node_is(target, "ivar") || ast_node_is(target, "cvar")) {
+    const char *bytes = name->as.string.bytes;
+    size_t len = name->as.string.len;
+    int is_ivar = ast_node_is(target, "ivar");
+    if (is_ivar && len > 0 && bytes[0] == '@') { bytes++; len--; }
+    int cid = emit_symbol_const(chunk, bytes, len, err);
+    if (cid < 0) return 0;
+    return tc_emit_op_u32(chunk, is_ivar ? TC_OP_IVAR_SET : TC_OP_CVAR_SET, (uint32_t)cid, err) &&
+           tc_emit_op(chunk, TC_OP_POP, err);
+  }
+  if (!ast_node_is(target, "var") && !ast_node_is(target, "gvar")) {
+    tc_error_set(err, "unsupported multiple assignment target");
+    return 0;
+  }
+  int slot = tc_chunk_local(chunk, name->as.string.bytes, name->as.string.len, err);
+  if (slot < 0) return 0;
+  return tc_emit_op_u32(chunk, TC_OP_STORE_LOCAL, (uint32_t)slot, err) && tc_emit_op(chunk, TC_OP_POP, err);
+}
+
+static int compile_destructure(TcAstValue pattern, int src_slot, TcChunk *chunk, TcError *err) {
+  TcAstValue *targets = ast_get(pattern, "targets");
+  TcAstValue *splat_v = ast_get(pattern, "splat_index");
+  if (!targets || targets->kind != TC_AST_ARRAY) {
+    tc_error_set(err, "multiple assignment missing targets");
+    return 0;
+  }
+  size_t n = targets->as.array->count;
+  int64_t splat = (splat_v && splat_v->kind == TC_AST_INT) ? splat_v->as.integer : -1;
+  uint32_t after = splat >= 0 ? (uint32_t)((int64_t)n - splat - 1) : 0;
+  for (size_t i = 0; i < n; i++) {
+    uint32_t a = (uint32_t)i;
+    uint32_t b = 0;
+    if (splat >= 0 && (int64_t)i == splat) {
+      a = (uint32_t)splat;
+      b = (1u << 28) | after;
+    } else if (splat >= 0 && (int64_t)i > splat) {
+      a = (uint32_t)splat | ((uint32_t)((int64_t)i - splat - 1) << 16);
+      b = (2u << 28) | after;
+    }
+    int elem_slot = multi_assign_hidden_local(chunk, err);
+    if (elem_slot < 0) return 0;
+    if (!tc_emit_op_u32(chunk, TC_OP_LOAD_LOCAL, (uint32_t)src_slot, err) ||
+        !tc_emit_op_u32(chunk, TC_OP_DESTRUCTURE, a, err) || !tc_emit_u32(chunk, b, err) ||
+        !tc_emit_op_u32(chunk, TC_OP_STORE_LOCAL, (uint32_t)elem_slot, err) ||
+        !tc_emit_op(chunk, TC_OP_POP, err)) {
+      return 0;
+    }
+    TcAstValue target = targets->as.array->items[i];
+    int ok = ast_node_is(target, "multi_assign") ? compile_destructure(target, elem_slot, chunk, err)
+                                                 : compile_store_from_local(target, elem_slot, chunk, err);
+    if (!ok) return 0;
+  }
+  return 1;
+}
+
+static int compile_multi_assign(TcAstValue node, TcChunk *chunk, TcError *err) {
+  TcAstValue *value = ast_get(node, "value");
+  if (!value) {
+    tc_error_set(err, "multiple assignment missing value");
+    return 0;
+  }
+  int slot = multi_assign_hidden_local(chunk, err);
+  if (slot < 0) return 0;
+  return compile_expr(*value, chunk, err) &&
+         tc_emit_op_u32(chunk, TC_OP_STORE_LOCAL, (uint32_t)slot, err) &&
+         compile_destructure(node, slot, chunk, err);
+}
+
 static int compile_puts(TcAstValue node, TcChunk *chunk, TcError *err) {
   TcAstValue *value = ast_get(node, "value");
   if (value && value->kind == TC_AST_ARRAY) {
@@ -1740,6 +1858,7 @@ static int compile_expr(TcAstValue node, TcChunk *chunk, TcError *err) {
   if (ast_node_is(node, "parg")) return compile_parg(node, chunk, err);
   if (ast_node_is(node, "binary_op")) return compile_binary(node, chunk, err);
   if (ast_node_is(node, "assign")) return compile_assign(node, chunk, err);
+  if (ast_node_is(node, "multi_assign")) return compile_multi_assign(node, chunk, err);
   if (ast_node_is(node, "compound_assign")) return compile_compound_assign(node, chunk, err);
   if (ast_node_is(node, "if")) return compile_if(node, chunk, err);
   if (ast_node_is(node, "while")) return compile_while(node, chunk, err);

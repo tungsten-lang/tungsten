@@ -28,6 +28,20 @@ RSpec.shared_examples "a Tungsten lexer" do
     end
   end
 
+  it "lexes fn and on as keywords only in their own forms" do
+    word_type = lambda do |source, word|
+      described_class.new(source).tokens.find { |token| token.value.to_s == word }&.type
+    end
+    [ "fn twice(x)\n  x", "@gpu fn k(a)\n  a" ].each { |src| expect(word_type.call(src, "fn")).to eq(:KEYWORD), src }
+    [ "fn = 1", "-> f(fn)", "obj.fn y", "{fn: 1}" ].each { |src| expect(word_type.call(src, "fn")).to eq(:ID), src }
+    [ "on macos\n  1", "on (linux || macos) && !windows with metal\n  1", "x = 1\non !windows\n  1" ].each do |src|
+      expect(word_type.call(src, "on")).to eq(:KEYWORD), src
+    end
+    [ "on = 1", "-> pause(on)", "obj.on", "on macos", "on macos\n  .foo", "on x = 1\n  1", "{on: 1}" ].each do |src|
+      expect(word_type.call(src, "on")).to eq(:ID), src
+    end
+  end
+
   it "keeps underscores inside PascalCase class names" do
     root = File.expand_path("../../..", __dir__)
     source = File.read(File.join(root, "compiler/test/fixtures/frontend_fuzz_f42fa00c5ae29356.w"))

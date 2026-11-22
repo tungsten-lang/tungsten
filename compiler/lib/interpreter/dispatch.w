@@ -1,6 +1,14 @@
 + Interpreter
 
   -> dispatch_method(recv, name, args, block, env)
+    # Native receivers: instances of classes the host exposed, and native
+    # lambdas the host handed over (interpreter/sandbox.w).
+    if @host_classes.size() > 0 && type(recv) != "Hash"
+      hd = host_dispatch(recv, name, args, block)
+      if hd != nil
+        return hd[0]
+    if name == "call" && native_callable?(recv)
+      return call_closure(recv, block == nil ? args : args + [host_callable(block)])
     # A closure value (an [env, block-node] pair) responds to `.call(args)` by
     # invoking the block. Mirrors the compiled method-dispatch-on-closure path
     # (runtime.c w_closure_call_N) and the bare-call closure dispatch in
@@ -1157,6 +1165,16 @@
     out
 
   -> call_w_method(recv, method, args, block, env)
+    if @sandboxed
+      sandbox_enter_call()
+      begin
+        result = call_w_method_inner(recv, method, args, block, env)
+      ensure
+        sandbox_leave_call()
+      return result
+    call_w_method_inner(recv, method, args, block, env)
+
+  -> call_w_method_inner(recv, method, args, block, env)
     # Barrier scope: a method/function body is lexically isolated from the
     # top-level (and caller) locals. Without the barrier, a callee that
     # assigns a name also bound at top level (e.g. a loop variable `n`)
@@ -1449,6 +1467,7 @@
       @idle_block_frames.push(frame)
 
   -> call_block0(block_data)
+    sandbox_tick() if @sandboxed
     if type(block_data) == "Array"
       blk_env = block_data[0]
       blk_node = block_data[1]
@@ -1487,6 +1506,7 @@
   # parameter and destructuring rules without allocating an `[arg]` Array.
   # Range passes a reusable Environment only after the escape check above.
   -> call_block1(block_data, arg, reuse_env = nil)
+    sandbox_tick() if @sandboxed
     if type(block_data) == "Array"
       blk_env = block_data[0]
       blk_node = block_data[1]
@@ -1543,6 +1563,7 @@
     nil
 
   -> call_block(block_data, args)
+    sandbox_tick() if @sandboxed
     if type(block_data) == "Array"
       blk_env = block_data[0]
       blk_node = block_data[1]

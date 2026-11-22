@@ -811,7 +811,7 @@
 
   # Map a token symbol (`:KEYWORD`, `:LPAREN`, …) to its T_X integer id
   # from core/token.w. Used by emit_at to refine the packed token's
-  # type bits — the SIMD layer only knows broad categories (T_ID=1
+  # type bits — the SIMD layer only knows broad categories (TOK_ID=1
   # covers KEYWORD/TYPE/AND/OR/GLOBAL), so without this step packed.type
   # gives the broad category not the materialized refinement.
   -> type_sym_to_id(sym)

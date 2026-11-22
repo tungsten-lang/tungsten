@@ -152,6 +152,56 @@ half. On, it asserts each operation is blocked or stubbed and counted. Both
 halves matter: a gate that broke normal execution would be just as wrong as one
 that failed to block.
 
+## Embedded interpreter
+
+`Sandbox.enable` latches the whole process, so a host that runs untrusted
+Tungsten *inside itself* — a browser running page scripts, an editor running
+plugins — cannot use it without gating its own IO too. The tree-walking
+interpreter has a sandbox of its own for that case. A host links it through its
+toolchain's core root:
+
+```
+use core/../compiler/lib/embed
+
+interp = Interpreter.new([])
+interp.sandbox!                        # gate this interpreter only
+interp.set_time_limit(50)              # ms per entry from the host
+interp.on_output(->(s) console(s))     # where << / puts / print go
+interp.expose_host_class("Element")    # native objects scripts may call
+interp.define_global("document", doc)
+interp.run_sandboxed(source, "page.w")
+interp.call_closure(f, [arg])          # a closure the script handed back
+interp.call_function("name", [args])   # a top-level `-> name` it defined
+```
+
+In sandbox mode:
+
+- source-level `ccall` refuses entry points that reach files, processes,
+  sockets, DNS, the environment, raw memory views, threads and channels
+  (`SANDBOX_DENIED_CCALL_PREFIXES`); `ccall_nobox` is refused outright
+- the file, process and cache builtins (`read_file`, `system`, `capture`,
+  `file_*`, `exit`, `gets`, …) raise `SecurityError`; `argv` answers `[]` and
+  `env` answers nil
+- `use` raises (core autoload still reads the toolchain's own `core/`, whose
+  ccalls pass through the same gate)
+- only instances of exposed host classes can be called into, by ordinary method
+  calls (never `send`); interpreted closures passed to host methods arrive as
+  native lambdas, and a trailing block becomes the last argument
+- a wall-clock budget is checked on loop iterations, calls and block calls; once
+  it trips, every later check raises again, so a script cannot `rescue` its way
+  past it; deep recursion stops at a call-depth limit instead of overflowing the
+  host's stack
+
+It does not bound memory or the cost of one native call. An embedded program
+needs no toolchain checkout at run time: the lexer falls back to an embedded copy
+of `data/unit_names.txt` (`languages/tungsten/lexers/known_units_data.w`) and the
+runtime to an embedded copy of `languages/tungsten/tungsten.lex64/.lex32`
+(`runtime/tungsten_lexflags.inc`); both are generated (`scripts/gen_units.rb`,
+`scripts/gen_lexflags_inc.py`). The lexer's token constants are `TOK_*` (they
+were `T_*`), so they no longer collide with a host's own `T_*` globals.
+
+`spec/compiler/embed_sandbox_spec.w` covers it.
+
 ## See also
 
 - `core/sandbox.w` — the class, and the authoritative op list

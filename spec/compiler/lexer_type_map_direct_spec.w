@@ -100,7 +100,7 @@ while i < syms.size()
   check("segment c " + sym.to_s(), lexer.type_sym_to_id_c(sym), want_c)
   i += 1
 
-# T_UNKNOWN=0 and the broad SIMD-only T_OP=11 intentionally have no refined
+# TOK_UNKNOWN=0 and the broad SIMD-only TOK_OP=11 intentionally have no refined
 # symbol mapping. Any unrecognized symbol follows the same zero path.
 check("unknown sentinel", lexer.type_sym_to_id(:UNKNOWN), 0)
 check("broad op", lexer.type_sym_to_id(:OP), 0)

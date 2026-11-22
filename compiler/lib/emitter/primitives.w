@@ -584,6 +584,8 @@
   out << declare_fn("w_closure_new", wv, ptr_ptr_i32)
   out << declare_fn("w_closure_new_a", wv, "ptr, ptr, i32, i32")
   out << declare_fn("w_destructure_index", wv, join_arg_types2(wv, "i64"))
+  out << declare_fn("w_destructure_rest", wv, join_arg_types3(wv, "i64", "i64"))
+  out << declare_fn("w_destructure_suffix", wv, join_arg_types4(wv, "i64", "i64", "i64"))
   out << declare_fn("w_closure_cell_new", "ptr", "")
   out << declare_fn("w_closure_call_0", wv, wv)
   out << declare_fn("w_closure_call_1", wv, wv2)

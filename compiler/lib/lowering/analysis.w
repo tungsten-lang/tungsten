@@ -630,6 +630,10 @@
     if declared_types != nil && nargs_list != nil && nargs_list.size() > 0 && mod[:known_calls] != nil && mod[:raw_callable_fns] != nil && !pi_args_have_kwargs?(nargs_list)
       arg_types = inferred_arg_types(nargs_list, declared_types, mod[:fn_return_types], lowering_infer_maps)
       typed_key = typed_call_signature_key(node_name, arg_types)
+      if typed_key != node_name && mod[:known_calls][typed_key] == nil
+        wkey = widened_typed_key(mod[:known_calls], node_name, arg_types, "__widen_call_index")
+        if wkey != nil
+          typed_key = wkey
       if typed_key == node_name || mod[:known_calls][typed_key] == nil
         # lower_call's fallback: an argument of unknown type binds the call
         # to the name's only typed overload of this arity.
@@ -773,6 +777,11 @@
           rv = node.right.value
           if lv >= 0 && lv <= 140737488355327 && rv >= 0 && rv <= 46 && lv <= (140737488355327 >> rv)
             return true
+          return false
+        # `1 << n` in typed code: a machine-int amount makes it a machine
+        # shift (infer_type's LSHIFT arm), so the local stays raw.
+        if mod != nil && mod[:promote_typed_context] == true && node.left.format != :dec_big
+          return int_shaped_node?(node.right, declared_types, mod)
         return false
       if node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 46)
         return false

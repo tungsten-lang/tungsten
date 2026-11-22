@@ -431,6 +431,10 @@
 # is conservative (clearly-int exprs only), so this only marks definitely-int locals.
 # With fn_return_types, a local bound to a typed-signature call whose declared or
 # inferred return is a 64-bit machine int counts too (see typed_call_machine_int_type).
+# The raw-ABI prepass only runs for typed definitions, so shift trees over
+# machine-int leaves count as int-shaped there, as in the promotion walk.
+TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
+
 -> enrich_int_locals(body, base, fn_return_types = nil)
   m = {}
   ks = base.keys()
@@ -455,9 +459,14 @@
   args = node.args
   if args == nil || args.size() == 0
     return nil
-  typed_key = typed_call_signature_key(node.name, inferred_arg_types(args, var_types, fn_return_types, lowering_infer_maps))
+  arg_types = inferred_arg_types(args, var_types, fn_return_types, lowering_infer_maps)
+  typed_key = typed_call_signature_key(node.name, arg_types)
   if typed_key == node.name
     return nil
+  if fn_return_types[typed_key] == nil
+    wkey = widened_typed_key(fn_return_types, node.name, arg_types, "__widen_rt_index")
+    if wkey != nil
+      typed_key = wkey
   rt = normalize_type_symbol(fn_return_types[typed_key])
   if is_machine_int64_type(rt)
     return rt
@@ -484,7 +493,7 @@
           # and the callee to fall back to the boxed ABI.
           if hint_type != nil && is_raw_int_storage_type(hint_type)
             m[name] = hint_type
-          elsif int_shaped_node?(n.value, m)
+          elsif int_shaped_node?(n.value, m, TYPED_INT_SHAPE_CTX)
             m[name] = :i64
           else
             call_rt = typed_call_machine_int_type(n.value, m, fn_return_types)

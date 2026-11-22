@@ -2268,6 +2268,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # wrapped i64 view of a literal agrees exactly with the self-hosted
   # BigInt view, so the fold decision cannot diverge between stages.
   shl_literal_base = op == :LSHIFT && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int
+  # A machine-typed amount (`1 << n`, n an i64 param) opts into the wrapping
+  # machine shift, as infer_type's LSHIFT arm types it.
+  if shl_literal_base && node.left.format != :dec_big && !(node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int) && rt != :int && (is_machine_int64_type(rt) || is_small_int_type(rt) || rt in (:raw_int :raw_i64 :raw_u64))
+    shl_literal_base = false
   if op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)
     shl_literal_base = true
   if node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
@@ -2578,11 +2582,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # representable (|n| ≤ 2^47 covers every inline literal) — the
   # exactness-gated adaptation rule. A non-literal int operand falls to
   # the runtime call and stays strict (Floats equal only Float VALUES).
-  if (lt == :float && is_integer_like_type(rt)) || (is_integer_like_type(lt) && rt == :float)
+  lt_flt = lt == :float || lt == :f64
+  rt_flt = rt == :float || rt == :f64
+  if (lt_flt && is_integer_like_type(rt)) || (is_integer_like_type(lt) && rt_flt)
     float_op = lowering_float_op_map[op]
     fcmp_pred = lowering_fcmp_op_map[op]
     if op in (:EQ :NEQ)
-      eq_lit_node = lt == :float ? node.right : node.left
+      eq_lit_node = lt_flt ? node.right : node.left
       eq_lit_ok = eq_lit_node != nil && is_ast_node?(eq_lit_node) && ast_kind(eq_lit_node) == :int
       if eq_lit_ok
         eq_lit_v = eq_lit_node.value
@@ -2595,14 +2601,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rhs = lower_expression(ctx, node.right)
 
       # Unbox each operand according to its type
-      if lt == :float
+      if lt_flt
         lhs_f = ensure_raw_f64(wfn, lhs)
       else
         lhs_raw = ensure_raw_machine_int(wfn, lhs, lt, lt)
         lhs_f = next_temp(wfn)
         emit_wire_dynamic_2(wfn, machine_int_to_f64_op(lt), :temp, lhs_f, :value, lhs_raw)
 
-      if rt == :float
+      if rt_flt
         rhs_f = ensure_raw_f64(wfn, rhs)
       else
         rhs_raw = ensure_raw_machine_int(wfn, rhs, rt, rt)

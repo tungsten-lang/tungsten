@@ -1221,6 +1221,8 @@
     typed_target = ctx[:mod][:known_calls][typed_key]
     if typed_target == nil
       default_key = typed_default_call_key(ctx[:mod], name, arg_types)
+      if default_key == nil
+        default_key = typed_widening_call_key(ctx[:mod], name, arg_types)
       if default_key != nil
         typed_key = default_key
         typed_target = ctx[:mod][:known_calls][typed_key]

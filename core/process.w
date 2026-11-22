@@ -36,6 +36,20 @@
   -> .exec(argv)
     ccall("__w_proc_exec", argv)
 
+  # This process's physical memory footprint in bytes (compressed pages
+  # included, unlike RSS); 0 where the platform can't tell.
+  -> .memory_footprint
+    ccall("w_memwatch_get_footprint")
+
+  # The ceiling the runtime's memory watch enforces (bytes; 0 = none). Past
+  # it the process exits with status 137 rather than exhausting the machine.
+  # TUNGSTEN_MEMORY_LIMIT sets it at startup; a program can change it here.
+  -> .memory_limit
+    ccall("w_memwatch_get_limit")
+
+  -> .memory_limit=(bytes)
+    ccall("w_memwatch_set_limit", bytes)
+
   ro :pid
 
   # Non-blocking: nil while running, else the exit code (256+signal when

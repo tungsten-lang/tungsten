@@ -755,6 +755,23 @@ static void *w_memwatch_main(void *arg) {
     return NULL;
 }
 
+/* Process.memory_footprint → physical footprint in bytes (compressed pages
+ * included); Process.memory_limit = bytes (0 = none) changes the ceiling the
+ * watch enforces, so a program can set its own default without the env var. */
+WValue w_memwatch_get_footprint(void) {
+    return w_int((int64_t)w_memwatch_footprint());
+}
+
+WValue w_memwatch_set_limit(WValue bytes) {
+    int64_t n = w_is_int(bytes) ? w_as_int(bytes) : 0;
+    g_memwatch_limit = n > 0 ? (uint64_t)n : 0;
+    return W_NIL;
+}
+
+WValue w_memwatch_get_limit(void) {
+    return w_int((int64_t)g_memwatch_limit);
+}
+
 __attribute__((constructor))
 static void w_memwatch_start(void) {
     uint64_t limit = W_MEMWATCH_DEFAULT_LIMIT;
@@ -779,6 +796,10 @@ static void w_memwatch_start(void) {
     pthread_create(&t, &attr, w_memwatch_main, NULL);
     pthread_attr_destroy(&attr);
 }
+#else
+WValue w_memwatch_get_footprint(void) { return w_int(0); }
+WValue w_memwatch_set_limit(WValue bytes) { (void)bytes; return W_NIL; }
+WValue w_memwatch_get_limit(void) { return w_int(0); }
 #endif /* __APPLE__ || __linux__ */
 
 #if BN_BIGINT_ARENA_ACTIVE

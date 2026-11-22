@@ -22,6 +22,8 @@
 # tone-mapped down) and applies orientation (EXIF, irot/imir) before returning.
 # ==== end of core header ====
 
+use core/codec/cicp
+
 + ImageError < StandardError
 
 + Bitmap
@@ -31,11 +33,15 @@
   #         rgba holding the first frame.
   # loop_count: 0 = forever, n = play n times; nil for stills.
   rw :width, :height, :rgba, :frames, :loop_count
+  # space: the colour space of rgba — "srgb", or the decoders' output space
+  # (icc_set_target) when an embedded profile / CICP tag was converted into it
+  rw :space
 
   -> new(@width, @height, @rgba = nil)
     @rgba = ByteArray.new(@width * @height * 4) if @rgba == nil
     @frames = nil
     @loop_count = nil
+    @space = "srgb"
 
   -> animated?
     @frames != nil && @frames.size > 1
@@ -60,7 +66,14 @@ IMG_DECODERS = []
   i = 0
   while i < IMG_DECODERS.size
     d = IMG_DECODERS[i]
-    return d[2].call(bytes) if d[1].call(bytes)
+    if d[1].call(bytes)
+      ICC_CONVERTED[0] = 0
+      bm = d[2].call(bytes)
+      if bm != nil && ICC_CONVERTED[0] > 0 && bm.is_a?(Bitmap)
+        bm.space = ICC_TARGET[0]
+        if bm.frames != nil
+          bm.frames.each ->(f) f[0].space = ICC_TARGET[0]
+      return bm
     i += 1
   raise ImageError.new("unrecognised image format")
 

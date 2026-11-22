@@ -78108,6 +78108,22 @@ W_BRIDGE_STUB WValue w_gfx_capture_take(WValue window) {
     (void)window;
     return w_gfx_unavailable();
 }
+W_BRIDGE_STUB WValue w_gfx_set_color_space(WValue window, WValue name) {
+    (void)window; (void)name;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_display_gamut(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_display_headroom(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_tex_set_space(WValue window, WValue tex_id, WValue name) {
+    (void)window; (void)tex_id; (void)name;
+    return w_gfx_unavailable();
+}
 /* end windowed graphics bridge stubs (weak) */
 
 /* Credentials bridge stubs (weak): runtime/credentials.m (companion gate

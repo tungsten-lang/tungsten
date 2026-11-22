@@ -105,8 +105,10 @@
   #   px = ByteArray.new(2 * 2 * 4)        # transparent 2x2
   #   img = Canvas.image_from_rgba(px, 2, 2)
   #   c.image(img, 0, 0, 64, 64)
-  -> .image_from_rgba(rgba, w, h)
-    h2 = ccall("w_cg_image_from_rgba", rgba, w, h)
+  # space: the pixels' colour space when not sRGB ("display_p3" …, as for
+  # Canvas.new; a decoder's Bitmap#space), matched into a managed canvas.
+  -> .image_from_rgba(rgba, w, h, space = nil)
+    h2 = (space == nil || space == "srgb") ? ccall("w_cg_image_from_rgba", rgba, w, h) : ccall("w_cg_image_from_rgba_space", rgba, w, h, space)
     CanvasImage.new(h2, w, h, nil)
 
   # Decode an encoded image from memory with the system's decoders (ImageIO,

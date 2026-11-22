@@ -1264,6 +1264,437 @@ static int cg_parse_rgb_fn(const char *s, double out[4]) {
     return 1;
 }
 
+/* ---- CSS Color 4/5: hsl(), hwb(), lab(), lch(), oklab(), oklch(), color(),
+ * color-mix(). Every colour is resolved to gamma-encoded *extended* sRGB
+ * (components may fall outside 0..1 for wide-gamut colours: display-p3,
+ * rec2020, lab/oklch beyond sRGB). A colour-managed canvas keeps them (an
+ * extended-sRGB CGColor matched into its space, e.g. Display P3); other
+ * canvases clip. */
+
+static double cg_srgb_lin(double v) {
+    double a = fabs(v);
+    double l = a <= 0.04045 ? a / 12.92 : pow((a + 0.055) / 1.055, 2.4);
+    return v < 0 ? -l : l;
+}
+
+static double cg_srgb_enc(double l) {
+    double a = fabs(l);
+    double v = a <= 0.0031308 ? a * 12.92 : 1.055 * pow(a, 1.0 / 2.4) - 0.055;
+    return l < 0 ? -v : v;
+}
+
+static void cg_m3(const double m[9], const double in[3], double out[3]) {
+    double a = in[0], b = in[1], c = in[2];
+    out[0] = m[0] * a + m[1] * b + m[2] * c;
+    out[1] = m[3] * a + m[4] * b + m[5] * c;
+    out[2] = m[6] * a + m[7] * b + m[8] * c;
+}
+
+/* CSS Color 4 §18 sample code matrices (D65 unless noted). */
+static const double CG_LSRGB_XYZ[9] = {0.41239079926595934, 0.357584339383878, 0.1804807884018343,
+    0.21263900587151027, 0.715168678767756, 0.07219231536073371,
+    0.01933081871559182, 0.11919477979462598, 0.9505321522496607};
+static const double CG_XYZ_LSRGB[9] = {3.2409699419045226, -1.537383177570094, -0.4986107602930034,
+    -0.9692436362808796, 1.8759675015077202, 0.04155505740717559,
+    0.05563007969699366, -0.20397695888897652, 1.0569715142428786};
+static const double CG_P3_XYZ[9] = {0.4865709486482162, 0.26566769316909306, 0.1982172852343625,
+    0.2289745640697488, 0.6917385218365064, 0.079286914093745,
+    0.0, 0.04511338185890264, 1.043944368900976};
+static const double CG_2020_XYZ[9] = {0.6369580483012914, 0.14461690358620832, 0.1688809751641721,
+    0.2627002120112671, 0.6779980715188708, 0.05930171646986196,
+    0.0, 0.028072693049087428, 1.060985057710791};
+static const double CG_A98_XYZ[9] = {0.5766690429101305, 0.1855582379065463, 0.1882286462349947,
+    0.29734497525053605, 0.6273635662554661, 0.0752914584939978,
+    0.02703136138641234, 0.07068885253582723, 0.9913375368376388};
+static const double CG_PROPHOTO_XYZ50[9] = {0.7977666449006423, 0.13518129740053308, 0.0313477341283922,
+    0.2880748288194013, 0.711835234241873, 0.00008993693872564,
+    0.0, 0.0, 0.8251046025104602};
+static const double CG_D50_D65[9] = {0.955473421488075, -0.02309845494876471, 0.06325924320057072,
+    -0.0283697093338637, 1.0099953980813041, 0.021041441191917323,
+    0.012314014864481998, -0.020507649298898964, 1.330365926242124};
+static const double CG_D65_D50[9] = {1.0479297925449969, 0.022946870601609652, -0.05019226628920524,
+    0.02962780877005599, 0.9904344267538799, -0.017073799063418826,
+    -0.009243040646204504, 0.015055191490298152, 0.7518742814281371};
+static const double CG_LMS_XYZ[9] = {1.2268798758459243, -0.5578149944602171, 0.2813910456659647,
+    -0.0405757452148008, 1.1122868032803170, -0.0717110580655164,
+    -0.0763729366746601, -0.4214933324022432, 1.5869240198367816};
+static const double CG_XYZ_LMS[9] = {0.8190224379967030, 0.3619062600528904, -0.1288737815209879,
+    0.0329836539323885, 0.9292868615863434, 0.0361446663506424,
+    0.0481771893596242, 0.2642395317527308, 0.6335478284694309};
+static const double CG_OKLAB_LMS[9] = {1.0, 0.3963377773761749, 0.2158037573099136,
+    1.0, -0.1055613458156586, -0.0638541728258133,
+    1.0, -0.0894841775298119, -1.2914855480194092};
+static const double CG_LMS_OKLAB[9] = {0.2104542683093140, 0.7936177747023054, -0.0040720430116193,
+    1.9779985324311684, -2.4285922420485799, 0.4505937096174110,
+    0.0259040424655478, 0.7827717124575296, -0.8086757549230774};
+
+/* The CSS colour spaces, as interpolation/conversion targets. */
+enum { CS_SRGB, CS_SRGB_LIN, CS_P3, CS_A98, CS_PROPHOTO, CS_2020, CS_XYZ65, CS_XYZ50, CS_LAB, CS_LCH,
+       CS_OKLAB, CS_OKLCH, CS_HSL, CS_HWB, CS_NONE };
+
+static int cg_css_space(const char *s, size_t n) {
+    static const struct { const char *n; int cs; } t[] = {
+        {"srgb", CS_SRGB}, {"srgb-linear", CS_SRGB_LIN}, {"display-p3", CS_P3}, {"a98-rgb", CS_A98},
+        {"prophoto-rgb", CS_PROPHOTO}, {"rec2020", CS_2020}, {"xyz", CS_XYZ65}, {"xyz-d65", CS_XYZ65},
+        {"xyz-d50", CS_XYZ50}, {"lab", CS_LAB}, {"lch", CS_LCH}, {"oklab", CS_OKLAB}, {"oklch", CS_OKLCH},
+        {"hsl", CS_HSL}, {"hwb", CS_HWB}};
+    for (size_t i = 0; i < sizeof t / sizeof t[0]; i++)
+        if (strlen(t[i].n) == n && strncasecmp(s, t[i].n, n) == 0) return t[i].cs;
+    return CS_NONE;
+}
+
+static double cg_gamma_rgb(int cs, double v, int enc) {
+    double a = fabs(v), r;
+    if (cs == CS_A98) r = enc ? pow(a, 256.0 / 563.0) : pow(a, 563.0 / 256.0);
+    else if (cs == CS_PROPHOTO) {
+        if (enc) r = a >= 1.0 / 512.0 ? pow(a, 1.0 / 1.8) : a * 16.0;
+        else r = a <= 16.0 / 512.0 ? a / 16.0 : pow(a, 1.8);
+    } else if (cs == CS_2020) {
+        const double al = 1.09929682680944, be = 0.018053968510807;
+        if (enc) r = a > be ? al * pow(a, 0.45) - (al - 1.0) : 4.5 * a;
+        else r = a < be * 4.5 ? a / 4.5 : pow((a + al - 1.0) / al, 1.0 / 0.45);
+    } else r = enc ? fabs(cg_srgb_enc(a)) : fabs(cg_srgb_lin(a));
+    return v < 0 ? -r : r;
+}
+
+static void cg_hsl_rgb(double h, double s, double l, double out[3]) {
+    h = fmod(h, 360.0); if (h < 0) h += 360.0;
+    s /= 100.0; l /= 100.0;
+    for (int i = 0; i < 3; i++) {
+        double n = i == 0 ? 0 : (i == 1 ? 8 : 4);
+        double k = fmod(n + h / 30.0, 12.0);
+        double a = s * fmin(l, 1.0 - l);
+        out[i] = l - a * fmax(-1.0, fmin(fmin(k - 3.0, 9.0 - k), 1.0));
+    }
+}
+
+static void cg_rgb_hsl(const double c[3], double out[3]) {
+    double mx = fmax(c[0], fmax(c[1], c[2])), mn = fmin(c[0], fmin(c[1], c[2]));
+    double h = NAN, s = 0, l = (mn + mx) / 2, d = mx - mn;
+    if (d != 0) {
+        s = (l == 0 || l == 1) ? 0 : (mx - l) / fmin(l, 1 - l);
+        if (mx == c[0]) h = (c[1] - c[2]) / d + (c[1] < c[2] ? 6 : 0);
+        else if (mx == c[1]) h = (c[2] - c[0]) / d + 2;
+        else h = (c[0] - c[1]) / d + 4;
+        h *= 60;
+    }
+    out[0] = isnan(h) ? 0 : h; out[1] = s * 100; out[2] = l * 100;
+}
+
+/* coords in space cs → XYZ D65 */
+static void cg_to_xyz(int cs, const double c[3], double xyz[3]) {
+    double t[3], u[3];
+    switch (cs) {
+    case CS_HSL: cg_hsl_rgb(c[0], c[1], c[2], t); for (int i = 0; i < 3; i++) t[i] = cg_srgb_lin(t[i]); cg_m3(CG_LSRGB_XYZ, t, xyz); return;
+    case CS_HWB: {
+        double w = c[1] / 100.0, b = c[2] / 100.0;
+        if (w + b >= 1) { double g = w / (w + b); t[0] = t[1] = t[2] = g; }
+        else { cg_hsl_rgb(c[0], 100, 50, t); for (int i = 0; i < 3; i++) t[i] = t[i] * (1 - w - b) + w; }
+        for (int i = 0; i < 3; i++) t[i] = cg_srgb_lin(t[i]);
+        cg_m3(CG_LSRGB_XYZ, t, xyz); return;
+    }
+    case CS_SRGB: for (int i = 0; i < 3; i++) t[i] = cg_srgb_lin(c[i]); cg_m3(CG_LSRGB_XYZ, t, xyz); return;
+    case CS_SRGB_LIN: cg_m3(CG_LSRGB_XYZ, c, xyz); return;
+    case CS_P3: for (int i = 0; i < 3; i++) t[i] = cg_srgb_lin(c[i]); cg_m3(CG_P3_XYZ, t, xyz); return;
+    case CS_A98: for (int i = 0; i < 3; i++) t[i] = cg_gamma_rgb(CS_A98, c[i], 0); cg_m3(CG_A98_XYZ, t, xyz); return;
+    case CS_2020: for (int i = 0; i < 3; i++) t[i] = cg_gamma_rgb(CS_2020, c[i], 0); cg_m3(CG_2020_XYZ, t, xyz); return;
+    case CS_PROPHOTO: for (int i = 0; i < 3; i++) t[i] = cg_gamma_rgb(CS_PROPHOTO, c[i], 0); cg_m3(CG_PROPHOTO_XYZ50, t, u); cg_m3(CG_D50_D65, u, xyz); return;
+    case CS_XYZ65: memcpy(xyz, c, 3 * sizeof(double)); return;
+    case CS_XYZ50: cg_m3(CG_D50_D65, c, xyz); return;
+    case CS_LCH: case CS_LAB: {
+        double L = c[0], a = c[1], b = c[2];
+        if (cs == CS_LCH) { double h = c[2] * M_PI / 180.0; a = c[1] * cos(h); b = c[1] * sin(h); }
+        const double k = 24389.0 / 27.0, e = 216.0 / 24389.0;
+        double f1 = (L + 16) / 116, f0 = a / 500 + f1, f2 = f1 - b / 200;
+        u[0] = (pow(f0, 3) > e ? pow(f0, 3) : (116 * f0 - 16) / k) * 0.3457 / 0.3585;
+        u[1] = L > k * e ? pow((L + 16) / 116, 3) : L / k;
+        u[2] = (pow(f2, 3) > e ? pow(f2, 3) : (116 * f2 - 16) / k) * (1.0 - 0.3457 - 0.3585) / 0.3585;
+        cg_m3(CG_D50_D65, u, xyz); return;
+    }
+    case CS_OKLCH: case CS_OKLAB: {
+        double v[3] = {c[0], c[1], c[2]};
+        if (cs == CS_OKLCH) { double h = c[2] * M_PI / 180.0; v[1] = c[1] * cos(h); v[2] = c[1] * sin(h); }
+        cg_m3(CG_OKLAB_LMS, v, t);
+        for (int i = 0; i < 3; i++) t[i] = t[i] * t[i] * t[i];
+        cg_m3(CG_LMS_XYZ, t, xyz); return;
+    }
+    default: memset(xyz, 0, 3 * sizeof(double));
+    }
+}
+
+/* XYZ D65 → coords in space cs */
+static void cg_from_xyz(int cs, const double xyz[3], double c[3]) {
+    double t[3], u[3];
+    switch (cs) {
+    case CS_SRGB: case CS_HSL: case CS_HWB:
+        cg_m3(CG_XYZ_LSRGB, xyz, t);
+        for (int i = 0; i < 3; i++) c[i] = cg_srgb_enc(t[i]);
+        if (cs == CS_HSL) { memcpy(t, c, sizeof t); cg_rgb_hsl(t, c); }
+        else if (cs == CS_HWB) {
+            memcpy(t, c, sizeof t); cg_rgb_hsl(t, u);
+            double w = fmin(t[0], fmin(t[1], t[2])), b = 1 - fmax(t[0], fmax(t[1], t[2]));
+            c[0] = u[0]; c[1] = w * 100; c[2] = b * 100;
+        }
+        return;
+    case CS_SRGB_LIN: cg_m3(CG_XYZ_LSRGB, xyz, c); return;
+    case CS_XYZ65: memcpy(c, xyz, 3 * sizeof(double)); return;
+    case CS_XYZ50: cg_m3(CG_D65_D50, xyz, c); return;
+    case CS_LAB: case CS_LCH: {
+        cg_m3(CG_D65_D50, xyz, u);
+        const double k = 24389.0 / 27.0, e = 216.0 / 24389.0;
+        double w[3] = {0.3457 / 0.3585, 1.0, (1.0 - 0.3457 - 0.3585) / 0.3585};
+        double f[3];
+        for (int i = 0; i < 3; i++) { double x = u[i] / w[i]; f[i] = x > e ? cbrt(x) : (k * x + 16) / 116; }
+        c[0] = 116 * f[1] - 16; c[1] = 500 * (f[0] - f[1]); c[2] = 200 * (f[1] - f[2]);
+        if (cs == CS_LCH) {
+            double a = c[1], b = c[2];
+            c[1] = sqrt(a * a + b * b);
+            double h = atan2(b, a) * 180.0 / M_PI; c[2] = h < 0 ? h + 360 : h;
+        }
+        return;
+    }
+    case CS_OKLAB: case CS_OKLCH: {
+        cg_m3(CG_XYZ_LMS, xyz, t);
+        for (int i = 0; i < 3; i++) t[i] = cbrt(t[i]);
+        cg_m3(CG_LMS_OKLAB, t, c);
+        if (cs == CS_OKLCH) {
+            double a = c[1], b = c[2];
+            c[1] = sqrt(a * a + b * b);
+            double h = atan2(b, a) * 180.0 / M_PI; c[2] = h < 0 ? h + 360 : h;
+        }
+        return;
+    }
+    default: {
+        /* rgb spaces other than sRGB: invert their matrix numerically */
+        const double *m = cs == CS_P3 ? CG_P3_XYZ : (cs == CS_2020 ? CG_2020_XYZ : (cs == CS_A98 ? CG_A98_XYZ : CG_PROPHOTO_XYZ50));
+        double src[3];
+        if (cs == CS_PROPHOTO) cg_m3(CG_D65_D50, xyz, src); else memcpy(src, xyz, sizeof src);
+        double det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+        double inv[9] = {(m[4] * m[8] - m[5] * m[7]) / det, (m[2] * m[7] - m[1] * m[8]) / det, (m[1] * m[5] - m[2] * m[4]) / det,
+                         (m[5] * m[6] - m[3] * m[8]) / det, (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
+                         (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det, (m[0] * m[4] - m[1] * m[3]) / det};
+        cg_m3(inv, src, t);
+        for (int i = 0; i < 3; i++) c[i] = cs == CS_P3 ? cg_srgb_enc(t[i]) : cg_gamma_rgb(cs, t[i], 1);
+        return;
+    }
+    }
+}
+
+/* One numeric component: number, percentage (scaled by pct_full), angle units,
+ * or "none" (0, *none set). Returns the position after it, NULL on garbage. */
+static const char *cg_css_num(const char *p, double pct_full, double *out, int *pct, int *none) {
+    while (*p == ' ' || *p == '\t' || *p == ',') p++;
+    if (strncasecmp(p, "none", 4) == 0) { *out = 0; if (none) *none = 1; return p + 4; }
+    char *end;
+    double x = strtod(p, &end);
+    if (end == p) return NULL;
+    p = end;
+    if (pct) *pct = 0;
+    if (*p == '%') { x = x * pct_full / 100.0; p++; if (pct) *pct = 1; }
+    else if (strncasecmp(p, "deg", 3) == 0) p += 3;
+    else if (strncasecmp(p, "grad", 4) == 0) { x = x * 0.9; p += 4; }
+    else if (strncasecmp(p, "rad", 3) == 0) { x = x * 180.0 / M_PI; p += 3; }
+    else if (strncasecmp(p, "turn", 4) == 0) { x = x * 360.0; p += 4; }
+    *out = x;
+    return p;
+}
+
+static int cg_css_color_str(const char *s, size_t n, double out[4], int depth);
+
+/* Parse "fn(c0 c1 c2 [/ a])" components after the '(' at p. */
+static int cg_css_components(const char *p, const double full[3], double c[3], double *alpha) {
+    for (int i = 0; i < 3; i++) {
+        p = cg_css_num(p, full[i], &c[i], NULL, NULL);
+        if (!p) return 0;
+    }
+    while (*p == ' ' || *p == '\t' || *p == ',') p++;
+    *alpha = 1.0;
+    if (*p == '/') p++;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p && *p != ')') {
+        p = cg_css_num(p, 1.0, alpha, NULL, NULL);
+        if (!p) return 0;
+    }
+    return 1;
+}
+
+/* Colour → coords in cs (and alpha), via XYZ. */
+static int cg_css_color_in(const char *s, size_t n, int cs, double c[3], double *alpha, int depth) {
+    double rgba[4];
+    if (!cg_css_color_str(s, n, rgba, depth)) return 0;
+    double lin[3] = {cg_srgb_lin(rgba[0]), cg_srgb_lin(rgba[1]), cg_srgb_lin(rgba[2])}, xyz[3];
+    cg_m3(CG_LSRGB_XYZ, lin, xyz);
+    cg_from_xyz(cs, xyz, c);
+    *alpha = rgba[3];
+    return 1;
+}
+
+static void cg_xyz_out(const double xyz[3], double alpha, double out[4]) {
+    double lin[3];
+    cg_m3(CG_XYZ_LSRGB, xyz, lin);
+    for (int i = 0; i < 3; i++) out[i] = cg_srgb_enc(lin[i]);
+    out[3] = alpha < 0 ? 0 : (alpha > 1 ? 1 : alpha);
+}
+
+/* color-mix(in <space> [<hue> hue], <c1> [p1], <c2> [p2]) */
+static int cg_css_mix(const char *p, const char *end, double out[4], int depth) {
+    while (p < end && *p == ' ') p++;
+    if (strncasecmp(p, "in ", 3) != 0) return 0;
+    p += 3;
+    while (*p == ' ') p++;
+    const char *sp = p;
+    while (p < end && *p != ' ' && *p != ',') p++;
+    int cs = cg_css_space(sp, (size_t)(p - sp));
+    if (cs == CS_NONE) return 0;
+    int hue_mode = 0; /* 0 shorter 1 longer 2 increasing 3 decreasing */
+    const char *comma = memchr(p, ',', (size_t)(end - p));
+    if (!comma) return 0;
+    if (strstr(p, "longer") && strstr(p, "longer") < comma) hue_mode = 1;
+    else if (strstr(p, "increasing") && strstr(p, "increasing") < comma) hue_mode = 2;
+    else if (strstr(p, "decreasing") && strstr(p, "decreasing") < comma) hue_mode = 3;
+    p = comma + 1;
+    /* split the two colour arguments at the top-level comma */
+    const char *a0 = p, *a1 = NULL;
+    int d = 0;
+    for (const char *q = p; q < end; q++) {
+        if (*q == '(') d++;
+        else if (*q == ')') d--;
+        else if (*q == ',' && d == 0) { a1 = q + 1; break; }
+    }
+    if (!a1) return 0;
+    const char *e0 = a1 - 1, *e1 = end;
+    double pc[2] = {-1, -1};
+    const char *as[2] = {a0, a1}, *es[2] = {e0, e1};
+    double c[2][3], al[2];
+    for (int k = 0; k < 2; k++) {
+        const char *b = as[k], *e = es[k];
+        while (b < e && *b == ' ') b++;
+        while (e > b && e[-1] == ' ') e--;
+        /* a trailing or leading percentage */
+        if (e > b && e[-1] == '%') {
+            const char *q = e - 1;
+            while (q > b && (isdigit((unsigned char)q[-1]) || q[-1] == '.')) q--;
+            if (q > b && q[-1] == ' ') { pc[k] = strtod(q, NULL) / 100.0; e = q - 1; while (e > b && e[-1] == ' ') e--; }
+        } else if (isdigit((unsigned char)*b) || *b == '.') {
+            char *pe;
+            double x = strtod(b, &pe);
+            if (*pe == '%') { pc[k] = x / 100.0; b = pe + 1; while (b < e && *b == ' ') b++; }
+        }
+        if (!cg_css_color_in(b, (size_t)(e - b), cs, c[k], &al[k], depth + 1)) return 0;
+    }
+    if (pc[0] < 0 && pc[1] < 0) { pc[0] = pc[1] = 0.5; }
+    else if (pc[0] < 0) pc[0] = 1 - pc[1];
+    else if (pc[1] < 0) pc[1] = 1 - pc[0];
+    double sum = pc[0] + pc[1];
+    if (sum <= 0) return 0;
+    double amul = sum < 1 ? sum : 1;
+    double t = pc[1] / sum;
+    /* premultiplied interpolation; hue for polar spaces */
+    int hue = (cs == CS_LCH || cs == CS_OKLCH) ? 2 : ((cs == CS_HSL || cs == CS_HWB) ? 0 : -1);
+    if (hue >= 0) {
+        double h0 = c[0][hue], h1 = c[1][hue], dh = h1 - h0;
+        if (hue_mode == 0) { if (dh > 180) h0 += 360; else if (dh < -180) h1 += 360; }
+        else if (hue_mode == 1) { if (dh > 0 && dh < 180) h0 += 360; else if (dh > -180 && dh <= 0) h1 += 360; }
+        else if (hue_mode == 2) { if (h1 < h0) h1 += 360; }
+        else { if (h0 < h1) h0 += 360; }
+        c[0][hue] = h0; c[1][hue] = h1;
+    }
+    double a = al[0] * (1 - t) + al[1] * t, m[3];
+    for (int i = 0; i < 3; i++) {
+        if (i == hue) m[i] = c[0][i] * (1 - t) + c[1][i] * t;
+        else m[i] = a > 0 ? (c[0][i] * al[0] * (1 - t) + c[1][i] * al[1] * t) / a : 0;
+    }
+    double xyz[3];
+    cg_to_xyz(cs, m, xyz);
+    cg_xyz_out(xyz, a * amul, out);
+    return 1;
+}
+
+static int cg_css_color_str(const char *s, size_t n, double out[4], int depth) {
+    if (depth > 8 || n == 0 || n > 1023) return 0;
+    char buf[1024];
+    memcpy(buf, s, n);
+    buf[n] = 0;
+    char *b = buf;
+    while (*b == ' ') b++;
+    size_t len = strlen(b);
+    while (len && b[len - 1] == ' ') b[--len] = 0;
+    const char *lp = strchr(b, '(');
+    if (!lp) {
+        /* a plain colour: hex / named / transparent through the main parser */
+        if (cg_eq(b, "transparent")) { out[0] = out[1] = out[2] = out[3] = 0; return 1; }
+        if (b[0] == '#') {
+            size_t nd = len - 1;
+            int d[8];
+            if (nd != 3 && nd != 4 && nd != 6 && nd != 8) return 0;
+            for (size_t i = 0; i < nd; i++) { d[i] = hexval(b[1 + i]); if (d[i] < 0) return 0; }
+            if (nd <= 4) { for (int i = 0; i < 3; i++) out[i] = d[i] * 17 / 255.0; out[3] = nd == 4 ? d[3] * 17 / 255.0 : 1.0; }
+            else { for (int i = 0; i < 3; i++) out[i] = (d[2 * i] * 16 + d[2 * i + 1]) / 255.0; out[3] = nd == 8 ? (d[6] * 16 + d[7]) / 255.0 : 1.0; }
+            return 1;
+        }
+        for (size_t i = 0; i < sizeof g_named_colors / sizeof g_named_colors[0]; i++) {
+            if (cg_eq(b, g_named_colors[i].name)) {
+                uint32_t x = g_named_colors[i].rgb;
+                out[0] = ((x >> 16) & 0xFF) / 255.0; out[1] = ((x >> 8) & 0xFF) / 255.0; out[2] = (x & 0xFF) / 255.0; out[3] = 1.0;
+                return 1;
+            }
+        }
+        return 0;
+    }
+    size_t fl = (size_t)(lp - b);
+    const char *end = b + len;
+    if (end > lp && end[-1] == ')') end--;
+    double c[3], a, xyz[3];
+    if ((fl == 3 || fl == 4) && strncasecmp(b, "rgb", 3) == 0) {
+        if (!cg_parse_rgb_fn(b, out)) return 0;
+        return 1;
+    }
+    if (fl == 9 && strncasecmp(b, "color-mix", 9) == 0) return cg_css_mix(lp + 1, end, out, depth);
+    if (fl == 5 && strncasecmp(b, "color", 5) == 0) {
+        const char *p = lp + 1;
+        while (*p == ' ') p++;
+        const char *sp = p;
+        while (*p && *p != ' ' && *p != ')') p++;
+        int cs = cg_css_space(sp, (size_t)(p - sp));
+        if (cs == CS_NONE || cs == CS_LAB || cs == CS_LCH || cs == CS_OKLAB || cs == CS_OKLCH || cs == CS_HSL || cs == CS_HWB) return 0;
+        const double full[3] = {1, 1, 1};
+        if (!cg_css_components(p, full, c, &a)) return 0;
+        cg_to_xyz(cs, c, xyz);
+        cg_xyz_out(xyz, a, out);
+        return 1;
+    }
+    int cs = CS_NONE;
+    double full[3] = {1, 1, 1};
+    if ((fl == 3 || fl == 4) && strncasecmp(b, "hsl", 3) == 0) { cs = CS_HSL; full[0] = 360; full[1] = 100; full[2] = 100; }
+    else if (fl == 3 && strncasecmp(b, "hwb", 3) == 0) { cs = CS_HWB; full[0] = 360; full[1] = 100; full[2] = 100; }
+    else if (fl == 3 && strncasecmp(b, "lab", 3) == 0) { cs = CS_LAB; full[0] = 100; full[1] = 125; full[2] = 125; }
+    else if (fl == 3 && strncasecmp(b, "lch", 3) == 0) { cs = CS_LCH; full[0] = 100; full[1] = 150; full[2] = 360; }
+    else if (fl == 5 && strncasecmp(b, "oklab", 5) == 0) { cs = CS_OKLAB; full[0] = 1; full[1] = 0.4; full[2] = 0.4; }
+    else if (fl == 5 && strncasecmp(b, "oklch", 5) == 0) { cs = CS_OKLCH; full[0] = 1; full[1] = 0.4; full[2] = 360; }
+    if (cs == CS_NONE) return 0;
+    if (!cg_css_components(lp + 1, full, c, &a)) return 0;
+    if (cs == CS_HSL || cs == CS_HWB) {
+        /* legacy hsl(): no wide gamut, straight to sRGB */
+        double rgb[3];
+        if (cs == CS_HSL) cg_hsl_rgb(c[0], c[1], c[2], rgb);
+        else { cg_to_xyz(CS_HWB, c, xyz); cg_xyz_out(xyz, a, out); return 1; }
+        out[0] = rgb[0]; out[1] = rgb[1]; out[2] = rgb[2];
+        out[3] = a < 0 ? 0 : (a > 1 ? 1 : a);
+        return 1;
+    }
+    if ((cs == CS_LCH || cs == CS_OKLCH) && c[1] < 0) c[1] = 0;
+    cg_to_xyz(cs, c, xyz);
+    cg_xyz_out(xyz, a, out);
+    return 1;
+}
+
+/* Is the function name one of the CSS Color 4/5 forms handled above? */
+static int cg_css4_fn(const char *s) {
+    return strncasecmp(s, "hsl", 3) == 0 || strncasecmp(s, "hwb(", 4) == 0 || strncasecmp(s, "lab(", 4) == 0 ||
+           strncasecmp(s, "lch(", 4) == 0 || strncasecmp(s, "oklab(", 6) == 0 || strncasecmp(s, "oklch(", 6) == 0 ||
+           strncasecmp(s, "color(", 6) == 0 || strncasecmp(s, "color-mix(", 10) == 0;
+}
+
 /* Parse a paint colour. Returns 1 with RGBA (0..1) in out, 0 for "none"
  * (nil, false, "none", "transparent"); raises on garbage. */
 static int cg_color(WValue v, double out[4], const char *what) {
@@ -1298,7 +1729,7 @@ static int cg_color(WValue v, double out[4], const char *what) {
         out[3] = n == 4 ? cg_num(cg_array_at(v, 3), "alpha") : 1.0;
         return 1;
     }
-    char buf[64];
+    char buf[1024];
     if (!cg_str(v, buf, sizeof buf)) cg_raise("Canvas: %s must be a colour (\"#rrggbb\", a Color, 0xRRGGBB or [r, g, b])", what);
     char *s = buf;
     while (*s == ' ') s++;
@@ -1326,6 +1757,10 @@ static int cg_color(WValue v, double out[4], const char *what) {
         if (cg_parse_rgb_fn(s, out)) return 1;
         cg_raise("Canvas: bad %s colour \"%s\"", what, s);
     }
+    if (cg_css4_fn(s)) {
+        if (cg_css_color_str(s, len, out, 0)) return 1;
+        cg_raise("Canvas: bad %s colour \"%s\"", what, s);
+    }
     for (size_t i = 0; i < sizeof g_named_colors / sizeof g_named_colors[0]; i++) {
         if (cg_eq(s, g_named_colors[i].name)) {
             uint32_t x = g_named_colors[i].rgb;
@@ -1339,6 +1774,20 @@ static int cg_color(WValue v, double out[4], const char *what) {
     cg_raise("Canvas: unknown %s colour \"%s\"", what, s);
 }
 
+static CGColorSpaceRef g_ext_srgb;
+static pthread_once_t g_ext_srgb_once = PTHREAD_ONCE_INIT;
+static void cg_ext_srgb_init(void) { g_ext_srgb = CGColorSpaceCreateWithName(kCGColorSpaceExtendedSRGB); }
+static CGColorSpaceRef cg_ext_srgb(void) {
+    pthread_once(&g_ext_srgb_once, cg_ext_srgb_init);
+    return g_ext_srgb;
+}
+
+/* Outside 0..1 (by more than rounding): a wide-gamut colour from CSS Color 4. */
+static int cg_wide(const double rgba[4]) {
+    for (int i = 0; i < 3; i++) if (rgba[i] < -0.0005 || rgba[i] > 1.0005) return 1;
+    return 0;
+}
+
 static void cg_set_fill(CGCanvas *c, const double rgba[4]) {
     CGStateEntry *st = cg_state(c);
     if (st->has_fill_cache &&
@@ -1347,7 +1796,14 @@ static void cg_set_fill(CGCanvas *c, const double rgba[4]) {
         return;
     }
     const CGFloat comps[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
-    CGContextSetFillColor(c->ctx, comps);
+    if (c->manage && cg_wide(rgba)) {
+        /* a wide-gamut CSS colour: extended sRGB, matched into the canvas space */
+        CGColorRef col = CGColorCreate(cg_ext_srgb(), comps);
+        CGContextSetFillColorWithColor(c->ctx, col);
+        CGColorRelease(col);
+    } else {
+        CGContextSetFillColor(c->ctx, comps);
+    }
     memcpy(st->fill, rgba, sizeof st->fill);
     st->has_fill_cache = 1;
 }
@@ -1360,7 +1816,13 @@ static void cg_set_stroke(CGCanvas *c, const double rgba[4]) {
         return;
     }
     const CGFloat comps[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
-    CGContextSetStrokeColor(c->ctx, comps);
+    if (c->manage && cg_wide(rgba)) {
+        CGColorRef col = CGColorCreate(cg_ext_srgb(), comps);
+        CGContextSetStrokeColorWithColor(c->ctx, col);
+        CGColorRelease(col);
+    } else {
+        CGContextSetStrokeColor(c->ctx, comps);
+    }
     memcpy(st->stroke, rgba, sizeof st->stroke);
     st->has_stroke_cache = 1;
 }
@@ -2443,6 +2905,8 @@ static void cg_free_pixels(void *info, const void *data, size_t size) {
  * the buffer may be reused or freed at once. For decoders written in
  * Tungsten: nothing touches the disk and ImageIO is not involved. */
 static WValue cg_image_adopt_rgba(uint8_t *px, size_t w, size_t h, int opaque);
+static WValue cg_image_adopt_rgba_cs(uint8_t *px, size_t w, size_t h, int opaque, CGColorSpaceRef cs);
+static WValue cg_image_from_rgba_cs(WValue bufv, WValue wv, WValue hv, CGColorSpaceRef cs);
 
 /* w_cg_image_from_premultiplied(buf, w, h, opaque) -> handle: like
  * image_from_rgba for pixels a decoder already premultiplied (RGBA8, the
@@ -2471,6 +2935,10 @@ WValue w_cg_image_from_premultiplied(WValue bufv, WValue wv, WValue hv, WValue o
 }
 
 WValue w_cg_image_from_rgba(WValue bufv, WValue wv, WValue hv) {
+    return cg_image_from_rgba_cs(bufv, wv, hv, NULL);
+}
+
+static WValue cg_image_from_rgba_cs(WValue bufv, WValue wv, WValue hv, CGColorSpaceRef cs) {
     double dw = cg_num(wv, "width"), dh = cg_num(hv, "height");
     if (!(dw >= 1 && dh >= 1 && dw <= 1048576 && dh <= 1048576) || dw * dh > 4.0e9 / 4)
         cg_raise("Canvas.image_from_rgba: bad size %gx%g", dw, dh);
@@ -2510,15 +2978,37 @@ WValue w_cg_image_from_rgba(WValue bufv, WValue wv, WValue hv) {
             px[i + 3] = (uint8_t)a;
         }
     }
-    return cg_image_adopt_rgba(px, w, h, opaque);
+    return cg_image_adopt_rgba_cs(px, w, h, opaque, cs);
+}
+
+/* w_cg_image_from_rgba_space(buf, w, h, space): image_from_rgba for pixels in
+ * another colour space ("display_p3", "rec2020", … — the Canvas.new names),
+ * e.g. a decoder's wide-gamut output (core/codec: Bitmap#space). A colour-
+ * managed canvas matches them into its own space as it draws. */
+WValue w_cg_image_from_rgba_space(WValue bufv, WValue wv, WValue hv, WValue spacev) {
+    char nm[32] = "srgb";
+    if (spacev != W_NIL) cg_str(spacev, nm, sizeof nm);
+    int si = cg_space_index(nm);
+    if (si < 0) cg_raise("Canvas.image_from_rgba: unknown colour space \"%s\"", nm);
+    if (si == 0) return w_cg_image_from_rgba(bufv, wv, hv);
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(*g_spaces[si].cg);
+    if (!cs) cg_raise("Canvas.image_from_rgba: colour space \"%s\" is not available", nm);
+    /* the image retains cs; drop ours (leaked only if the call raises) */
+    WValue out = cg_image_from_rgba_cs(bufv, wv, hv, cs);
+    CGColorSpaceRelease(cs);
+    return out;
 }
 
 /* An image over px (w * h RGBA8 premultiplied, malloc'd: the image frees it). */
 static WValue cg_image_adopt_rgba(uint8_t *px, size_t w, size_t h, int opaque) {
+    return cg_image_adopt_rgba_cs(px, w, h, opaque, NULL);
+}
+
+static WValue cg_image_adopt_rgba_cs(uint8_t *px, size_t w, size_t h, int opaque, CGColorSpaceRef cs) {
     size_t n = w * h * 4;
     CGDataProviderRef prov = CGDataProviderCreateWithData(NULL, px, n, cg_free_pixels);
     if (!prov) { free(px); cg_raise("Canvas.image_from_rgba: CGDataProviderCreateWithData failed"); }
-    CGImageRef img = CGImageCreate(w, h, 8, 32, w * 4, cg_srgb(),
+    CGImageRef img = CGImageCreate(w, h, 8, 32, w * 4, cs ? cs : cg_srgb(),
                                    (CGBitmapInfo)(opaque ? kCGImageAlphaNoneSkipLast : kCGImageAlphaPremultipliedLast) | kCGBitmapByteOrder32Big,
                                    prov, NULL, false, kCGRenderingIntentDefault);
     CGDataProviderRelease(prov);

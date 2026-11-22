@@ -438,6 +438,11 @@ typedef struct WGfxWindow {
     float    tex_yuv[GFX_MAX_TEX][24];
     uint8_t  tex_planar[GFX_MAX_TEX];
     uint8_t  tex_fmt[GFX_MAX_TEX];
+    /* colour management: the layer's colour space (0 sRGB, 1 Display P3) and
+     * each RGBA texture's (0 sRGB: converted by the shader when the layer is
+     * P3; 1 Display P3: drawn as is) */
+    int      out_space;
+    uint8_t  tex_space[GFX_MAX_TEX];
     void    *sampler_lin;      /* id<MTLSamplerState> bilinear clamp (video planes) */
     bool     capture_next;     /* w_gfx_capture_next: copy the next present_layers frame back */
     void    *capture_buf;      /* id<MTLBuffer> the captured frame (drawable pixel format) */
@@ -685,6 +690,14 @@ static WValue gfx_open(WValue device_v, WValue title_v, int w, int h, int flags,
         layer.device = (id<MTLDevice>)captured->device;
         layer.pixelFormat = (flags & GFX_BGRA) ? MTLPixelFormatBGRA8Unorm : MTLPixelFormatRGBA8Unorm;
         layer.framebufferOnly = NO;     /* allow blit-into-drawable */
+        /* the pixels are sRGB unless gfx_set_color_space says otherwise: tag
+         * them, so the window server matches them to the display (a nil
+         * colorspace sends sRGB code values to a P3 panel unconverted) */
+        {
+            CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+            layer.colorspace = cs;
+            CGColorSpaceRelease(cs);
+        }
         layer.drawableSize = CGSizeMake(captured->width, captured->height);
         layer.opaque = YES;
         /* Keep the last presented pixels at their native scale while AppKit
@@ -997,6 +1010,7 @@ WValue w_gfx_close(WValue window_v) {
         if (gw->tex_cb[i]) { [(id<MTLTexture>)gw->tex_cb[i] release]; gw->tex_cb[i] = NULL; }
         if (gw->tex_cr[i]) { [(id<MTLTexture>)gw->tex_cr[i] release]; gw->tex_cr[i] = NULL; }
         gw->tex_planar[i] = 0;
+        gw->tex_space[i] = 0;
     }
     [win setDelegate:nil];
     [win orderOut:nil];
@@ -2183,6 +2197,19 @@ static NSString * const kGfxLayerMSL =
      "    }\n"
      "    return rgb;\n"
      "}\n"
+     "static inline float3 gfx_srgb_to_p3(float3 c) {\n"
+     "    float3 l = float3(gfx_eotf(13.0f, c.r), gfx_eotf(13.0f, c.g), gfx_eotf(13.0f, c.b));\n"
+     "    float3 o = float3(dot(float3(0.8224621f, 0.1775380f, 0.0f), l),\n"
+     "                      dot(float3(0.0331941f, 0.9668058f, 0.0f), l),\n"
+     "                      dot(float3(0.0170827f, 0.0723974f, 0.9105199f), l));\n"
+     "    return float3(gfx_srgb_oetf(o.r), gfx_srgb_oetf(o.g), gfx_srgb_oetf(o.b));\n"
+     "}\n"
+     "static inline float4 gfx_tex_p3(float4 s, bool premul) {\n"
+     "    if (s.a <= 0.0f) return s;\n"
+     "    float3 c = premul ? s.rgb / s.a : s.rgb;\n"
+     "    c = gfx_srgb_to_p3(c);\n"
+     "    return float4(premul ? c * s.a : c, s.a);\n"
+     "}\n"
      "struct VSOut {\n"
      "    float4 pos [[position]];\n"
      "    float2 uv;\n"
@@ -2216,10 +2243,13 @@ static NSString * const kGfxLayerMSL =
      "        float3 rgb = gfx_yuv_rgb(in.uv, tex, tex_u, tex_v, lin, yuv);\n"
      "        return float4(mix(dst.rgb, rgb, in.col.a), 1.0f);\n"
      "    } else if (mode == 0) {\n"
-     "        float4 s = tex.sample(smp, in.uv) * in.col.a;\n"
+     "        float4 s = tex.sample(smp, in.uv);\n"
+     "        if (in.aux.x > 0.5f) s = gfx_tex_p3(s, true);\n"
+     "        s *= in.col.a;\n"
      "        return float4(s.rgb + dst.rgb * (1.0f - s.a), 1.0f);\n"
      "    } else if (mode == 1) {\n"
      "        float4 s = tex.sample(smp, in.uv);\n"
+     "        if (in.aux.x > 0.5f) s = gfx_tex_p3(s, false);\n"
      "        float a = s.a * in.col.a;\n"
      "        return float4(s.rgb * a + dst.rgb * (1.0f - a), 1.0f);\n"
      "    } else if (mode == 2) {\n"
@@ -2245,9 +2275,12 @@ static NSString * const kGfxLayerMSL =
      "        float3 rgb = gfx_yuv_rgb(in.uv, tex, tex_u, tex_v, lin, yuv);\n"
      "        return float4(rgb * in.col.a, in.col.a);\n"
      "    } else if (mode == 0) {\n"
-     "        return tex.sample(smp, in.uv) * in.col.a;\n"
+     "        float4 s = tex.sample(smp, in.uv);\n"
+     "        if (in.aux.x > 0.5f) s = gfx_tex_p3(s, true);\n"
+     "        return s * in.col.a;\n"
      "    } else if (mode == 1) {\n"
      "        float4 s = tex.sample(smp, in.uv);\n"
+     "        if (in.aux.x > 0.5f) s = gfx_tex_p3(s, false);\n"
      "        float a = s.a * in.col.a;\n"
      "        return float4(s.rgb * a, a);\n"
      "    } else if (mode == 4) {\n"
@@ -2368,6 +2401,7 @@ WValue w_gfx_tex_new(WValue window_v, WValue width_v, WValue height_v, WValue bg
         gw->tex[slot] = (void *)t;
         gw->tex_used_seq[slot] = 0;
         gw->tex_bgra[slot] = (uint8_t)bgra;
+        gw->tex_space[slot] = 0;
     }
     return w_int(slot + 1);
 }
@@ -2437,7 +2471,74 @@ WValue w_gfx_tex_free(WValue window_v, WValue tex_id_v) {
         if (gw->tex_cb[slot]) { [(id<MTLTexture>)gw->tex_cb[slot] release]; gw->tex_cb[slot] = NULL; }
         if (gw->tex_cr[slot]) { [(id<MTLTexture>)gw->tex_cr[slot] release]; gw->tex_cr[slot] = NULL; }
         gw->tex_planar[slot] = 0;
+        gw->tex_space[slot] = 0;
     }
+    return w_bool(1);
+}
+
+/* ---- colour management ----
+ * w_gfx_set_color_space(window, "srgb" | "display_p3") tags the layer. In a
+ * Display P3 window the compositor converts what is sRGB into P3 as it draws:
+ * RGBA textures not marked P3 (w_gfx_tex_set_space), colour quads, the
+ * background, and video (its CICP matrix retargeted to P3 primaries; untagged
+ * video is taken as BT.709/sRGB). Returns the space now in effect. */
+static const double GFX_SRGB_P3[9] = {0.8224621, 0.1775380, 0.0000000,
+                                      0.0331941, 0.9668058, 0.0000000,
+                                      0.0170827, 0.0723974, 0.9105199};
+
+static double gfx_srgb_lin(double v) { return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4); }
+static double gfx_srgb_enc(double l) {
+    if (l <= 0) return 0;
+    if (l >= 1) return 1;
+    return l <= 0.0031308 ? l * 12.92 : 1.055 * pow(l, 1.0 / 2.4) - 0.055;
+}
+
+/* An sRGB colour (0..1, gamma-encoded) in Display P3, in place. */
+static void gfx_rgb_to_p3(float *c) {
+    double l[3] = {gfx_srgb_lin(c[0]), gfx_srgb_lin(c[1]), gfx_srgb_lin(c[2])};
+    for (int i = 0; i < 3; i++)
+        c[i] = (float)gfx_srgb_enc(GFX_SRGB_P3[i * 3] * l[0] + GFX_SRGB_P3[i * 3 + 1] * l[1] + GFX_SRGB_P3[i * 3 + 2] * l[2]);
+}
+
+WValue w_gfx_set_color_space(WValue window_v, WValue name_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.set_color_space");
+    gfx_require_main_thread("gfx.set_color_space");
+    NSString *nm = gfx_string_or(name_v, @"srgb");
+    int p3 = [nm isEqualToString:@"display_p3"] || [nm isEqualToString:@"p3"];
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(p3 ? kCGColorSpaceDisplayP3 : kCGColorSpaceSRGB);
+    ((CAMetalLayer *)gw->layer).colorspace = cs;
+    CGColorSpaceRelease(cs);
+    gw->out_space = p3;
+    return w_string(p3 ? "display_p3" : "srgb");
+}
+
+/* The gamut of the screen the window is on: "p3" when it can show Display P3,
+ * else "srgb". */
+WValue w_gfx_display_gamut(WValue window_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.display_gamut");
+    NSScreen *sc = [(NSWindow *)gw->window screen];
+    if (!sc) sc = [NSScreen mainScreen];
+    return w_string(sc && [sc canRepresentDisplayGamut:NSDisplayGamutP3] ? "p3" : "srgb");
+}
+
+/* EDR headroom of the window's screen: 1.0 for SDR, >1 when it can show HDR
+ * highlights (maximumPotentialExtendedDynamicRangeColorComponentValue). */
+WValue w_gfx_display_headroom(WValue window_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.display_headroom");
+    NSScreen *sc = [(NSWindow *)gw->window screen];
+    if (!sc) sc = [NSScreen mainScreen];
+    double v = sc ? (double)[sc maximumPotentialExtendedDynamicRangeColorComponentValue] : 1.0;
+    return w_float(v);
+}
+
+/* w_gfx_tex_set_space(window, id, "srgb" | "display_p3"): the colour space of
+ * an RGBA texture's pixels (default sRGB). */
+WValue w_gfx_tex_set_space(WValue window_v, WValue tex_id_v, WValue name_v) {
+    WGfxWindow *gw = gfx_window_arg(window_v, "gfx.tex_set_space");
+    int slot = (int)gfx_int(tex_id_v) - 1;
+    if (slot < 0 || slot >= GFX_MAX_TEX || !gw->tex[slot]) return w_bool(0);
+    NSString *nm = gfx_string_or(name_v, @"srgb");
+    gw->tex_space[slot] = ([nm isEqualToString:@"display_p3"] || [nm isEqualToString:@"p3"]) ? 1 : 0;
     return w_bool(1);
 }
 
@@ -2728,6 +2829,7 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
                     q.col[1] = ((u >> 8)  & 0xFF) / 255.0f;
                     q.col[2] = (u & 0xFF)         / 255.0f;
                     q.col[3] = a;
+                    if (gw->out_space) gfx_rgb_to_p3(q.col);
                     q.aux[0] = q.aux[1] = q.aux[2] = 0.0f;
                     q.aux[3] = 4.0f;
                 } else {
@@ -2736,6 +2838,8 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
                     q.col[3] = a;
                     q.aux[0] = q.aux[1] = q.aux[2] = 0.0f;
                     q.aux[3] = gw->tex_planar[slot] ? 5.0f : ((kind == 4) ? 1.0f : 0.0f);
+                    /* an sRGB texture in a P3 window: the shader converts it */
+                    if (gw->out_space && !gw->tex_planar[slot] && !gw->tex_space[slot]) q.aux[0] = 1.0f;
                 }
             } else {
                 q.uv[0] = 0.0f; q.uv[1] = 0.0f; q.uv[2] = 1.0f; q.uv[3] = 1.0f;
@@ -2745,11 +2849,13 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
                 q.col[1] = ((u >> 8)  & 0xFF) / 255.0f;
                 q.col[2] = (u & 0xFF)         / 255.0f;
                 q.col[3] = ua / 255.0f;
+                if (gw->out_space) gfx_rgb_to_p3(q.col);
                 if (kind == 2 && gw->pso_tile) {
                     uint32_t pu = (uint32_t)(int64_t)c[14];
                     q.aux[0] = ((pu >> 16) & 0xFF) / 255.0f;
                     q.aux[1] = ((pu >> 8)  & 0xFF) / 255.0f;
                     q.aux[2] = (pu & 0xFF)         / 255.0f;
+                    if (gw->out_space) gfx_rgb_to_p3(q.aux);
                     q.aux[3] = 3.0f;
                 } else {
                     q.aux[0] = q.aux[1] = q.aux[2] = 0.0f;
@@ -2767,6 +2873,11 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
         double bgr = ((bg >> 16) & 0xFF) / 255.0;
         double bgg = ((bg >> 8)  & 0xFF) / 255.0;
         double bgb = (bg & 0xFF)         / 255.0;
+        if (gw->out_space) {
+            float bc[3] = {(float)bgr, (float)bgg, (float)bgb};
+            gfx_rgb_to_p3(bc);
+            bgr = bc[0]; bgg = bc[1]; bgb = bc[2];
+        }
 
         MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
         rp.colorAttachments[0].texture = drawable.texture;
@@ -2815,7 +2926,26 @@ WValue w_gfx_present_layers(WValue window_v, WValue bg_v, WValue cmds_v, WValue 
                 if (ts >= 0 && gw->tex_planar[ts]) {
                     [enc setFragmentTexture:(id<MTLTexture>)gw->tex_cb[ts] atIndex:1];
                     [enc setFragmentTexture:(id<MTLTexture>)gw->tex_cr[ts] atIndex:2];
-                    [enc setFragmentBytes:gw->tex_yuv[ts] length:sizeof gw->tex_yuv[ts] atIndex:0];
+                    if (gw->out_space) {
+                        /* P3 window: retarget the conversion to P3 primaries (untagged
+                         * video as BT.709 with the sRGB-ish curve it was drawn with) */
+                        float py[24];
+                        memcpy(py, gw->tex_yuv[ts], sizeof py);
+                        if (py[9] == 0.0f) {
+                            py[9] = 13.0f;
+                            for (int r = 0; r < 3; r++)
+                                for (int k = 0; k < 3; k++) py[12 + r * 4 + k] = (r == k) ? 1.0f : 0.0f;
+                        }
+                        float m[9];
+                        for (int r = 0; r < 3; r++)
+                            for (int k = 0; k < 3; k++)
+                                m[r * 3 + k] = (float)(GFX_SRGB_P3[r * 3] * py[12 + k] + GFX_SRGB_P3[r * 3 + 1] * py[16 + k] + GFX_SRGB_P3[r * 3 + 2] * py[20 + k]);
+                        for (int r = 0; r < 3; r++)
+                            for (int k = 0; k < 3; k++) py[12 + r * 4 + k] = m[r * 3 + k];
+                        [enc setFragmentBytes:py length:sizeof py atIndex:0];
+                    } else {
+                        [enc setFragmentBytes:gw->tex_yuv[ts] length:sizeof gw->tex_yuv[ts] atIndex:0];
+                    }
                 }
             }
             if (sc.x != cur_sc.x || sc.y != cur_sc.y || sc.width != cur_sc.width || sc.height != cur_sc.height) {

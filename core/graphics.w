@@ -107,6 +107,26 @@ GFX_LAYER_TEX_STRAIGHT = 4   # unpremultiplied RGBA/BGRA texture quad
 -> gfx_tex_upload_yuv(window, tex_id, planes, params)
   ccall("w_gfx_tex_upload_yuv", window, tex_id, planes, params)
 
+# Colour management. The window's layer is tagged sRGB by default (the window
+# server matches it to the display). gfx_set_color_space(window, "display_p3")
+# switches it to Display P3: then textures not marked P3 (gfx_tex_set_space),
+# colour quads, the background and video are converted from sRGB / their CICP
+# primaries into P3 by the compositor, and P3 textures (canvases created with
+# space: "display_p3", manage: true) keep their wide-gamut colours.
+# gfx_display_gamut(window) → "p3" | "srgb"; gfx_display_headroom(window) →
+# the screen's EDR headroom (1.0 = SDR).
+-> gfx_set_color_space(window, name)
+  ccall("w_gfx_set_color_space", window, name)
+
+-> gfx_display_gamut(window)
+  ccall("w_gfx_display_gamut", window)
+
+-> gfx_display_headroom(window)
+  ccall("w_gfx_display_headroom", window)
+
+-> gfx_tex_set_space(window, tex_id, name)
+  ccall("w_gfx_tex_set_space", window, tex_id, name)
+
 -> gfx_present_layers(window, bg_u32, cmds, n_cmds, wait_done = false)
   ccall("w_gfx_present_layers", window, bg_u32, cmds, n_cmds, wait_done)
 

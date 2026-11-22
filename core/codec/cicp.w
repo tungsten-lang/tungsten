@@ -27,6 +27,26 @@ CICP_PRIMS = {1 => [0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290],
   12 => [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290],
   22 => [0.630, 0.340, 0.295, 0.605, 0.155, 0.077, 0.3127, 0.3290]}
 
+# The image decoders' output space: "srgb" (default) or "display_p3". Tagged
+# pixels (ICC profiles, CICP) are converted into it; img_decode labels the
+# Bitmap (bm.space) when that happened, and untagged pixels stay sRGB. Display
+# P3 keeps the colours of P3 / Adobe RGB / Rec.2020 images that a wide-gamut
+# display can show instead of clipping them to sRGB.
+ICC_TARGET = ["srgb"]
+ICC_CONVERTED = [0]
+
+-> icc_set_target(name)
+  ICC_TARGET[0] = (name == "display_p3" || name == "p3") ? "display_p3" : "srgb"
+  ICC_TARGET[0]
+
+-> icc_target
+  ICC_TARGET[0]
+
+# A conversion into a non-sRGB target happened (img_decode labels the bitmap).
+-> icc_note_converted
+  ICC_CONVERTED[0] = ICC_CONVERTED[0] + 1 if ICC_TARGET[0] != "srgb"
+  nil
+
 -> cicp_known_transfer?(t)
   t == 1 || t == 2 || t == 6 || t == 14 || t == 15 || t == 4 || t == 5 || t == 8 || t == 13 || t == 16 || t == 18
 
@@ -34,7 +54,7 @@ CICP_PRIMS = {1 => [0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290],
   p = primaries == 2 ? 1 : primaries
   tr = transfer == 2 ? 13 : transfer
   return nil if !CICP_PRIMS.has_key?(p) || !cicp_known_transfer?(tr)
-  return nil if p == 1 && tr == 13
+  return nil if p == 1 && tr == 13 && icc_target() == "srgb"
   CicpTransform.new(p, tr)
 
 # Row-major 3x3 helpers on f64[9].
@@ -161,7 +181,8 @@ CICP_PRIMS = {1 => [0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290],
   -> new(@primaries, @transfer)
     c = CICP_PRIMS[@primaries]
     to_xyz = cicp_rgb_to_xyz(c)
-    srgb = cicp_inv(cicp_rgb_to_xyz(CICP_PRIMS[1]))
+    # into the decoders' output space (core/codec/image/icc: sRGB or Display P3, CICP 12)
+    srgb = cicp_inv(cicp_rgb_to_xyz(CICP_PRIMS[icc_target() == "display_p3" ? 12 : 1]))
     ad = cicp_adapt(c[6].to_f, c[7].to_f)
     @matrix = cicp_mul(srgb, cicp_mul(ad, to_xyz))
     @hdr = @transfer == 16 || @transfer == 18
@@ -182,6 +203,7 @@ CICP_PRIMS = {1 => [0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290],
     [cicp_srgb_oetf(out[0]), cicp_srgb_oetf(out[1]), cicp_srgb_oetf(out[2])]
 
   -> apply(rgba, npix)
+    icc_note_converted()
     cicp_apply_px(rgba, npix, @lin, @matrix, @hdr ? 1 : 0, @enc)
 
 # Linear (r, g, b) in the source primaries → linear sRGB in out[0..2].

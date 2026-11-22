@@ -33,6 +33,7 @@
 # (out-of-gamut colours clip, as with a relative-colorimetric intent).
 
 use core/codec/image
+use core/codec/cicp
 
 + IccProfile
   rw :gray, :mat, :lut_r, :lut_g, :lut_b, :name, :lut, :cmyk
@@ -76,6 +77,16 @@ use core/codec/image
 ICC_SRGB_D50 = [~0.4360747, ~0.3850649, ~0.1430804, ~0.2225045, ~0.7168786, ~0.0606169, ~0.0139322, ~0.0971045, ~0.7141733]
 
 ICC_STATE = [nil]
+
+# The decoders' output space lives in core/codec/cicp (icc_set_target,
+# icc_target, icc_note_converted). Display P3 colorants, D50-adapted (Apple's
+# Display P3 profile):
+ICC_P3_D50 = [~0.5151215, ~0.2919769, ~0.1571045, ~0.2411957, ~0.6922455, ~0.0665741, ~-0.0010529, ~0.0418854, ~0.7840729]
+ICC_INV_FOR = [nil]
+
+-> icc_target_d50
+  ICC_TARGET[0] == "display_p3" ? ICC_P3_D50 : ICC_SRGB_D50
+
 
 -> icc_s15(a, o)
   v = img_be32(a, o)
@@ -278,7 +289,7 @@ ICC_STATE = [nil]
     src[3 + c] = icc_s15(a, t[0] + 12)
     src[6 + c] = icc_s15(a, t[0] + 16)
     c += 1
-  inv = icc_inv3(ICC_SRGB_D50)
+  inv = icc_inv3(icc_target_d50())
   return nil if inv == nil
   m = f64[9]
   r = 0
@@ -335,6 +346,7 @@ ICC_STATE = [nil]
 
 -> icc_apply(p, rgba, npix)
   return nil if p == nil || p.cmyk
+  icc_note_converted()
   if p.lut != nil
     l = p.lut
     icc_lut_px(rgba, 4, rgba, npix, l.intab, l.grid, l.clut, l.post1, l.mat, l.post2, l.flags, icc_srgb_inv(), icc_enc_lut())
@@ -573,14 +585,18 @@ ICC_STATE = [nil]
   nil
 
 -> icc_apply_cmyk(p, ink, out, npix)
+  icc_note_converted()
   l = p.lut
   icc_lut_px(ink, 4, out, npix, l.intab, l.grid, l.clut, l.post1, l.mat, l.post2, l.flags, icc_srgb_inv(), icc_enc_lut())
   nil
 
 # Inverse of the sRGB D50 colorant matrix, as f64[9].
 -> icc_srgb_inv
+  if ICC_STATE.size >= 2 && ICC_INV_FOR[0] != icc_target()
+    ICC_STATE.pop
   if ICC_STATE.size < 2
-    inv = icc_inv3(ICC_SRGB_D50)
+    ICC_INV_FOR[0] = icc_target()
+    inv = icc_inv3(icc_target_d50())
     m = f64[9]
     k = 0
     while k < 9

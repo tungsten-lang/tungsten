@@ -12,7 +12,7 @@ static const TcWordKind KEYWORDS[] = {
   {"begin", TC_K_KEYWORD}, {"break", TC_K_KEYWORD}, {"case", TC_K_KEYWORD},
   {"else", TC_K_KEYWORD}, {"elsif", TC_K_KEYWORD}, {"ensure", TC_K_KEYWORD},
   {"exit", TC_K_KEYWORD}, {"extern", TC_K_KEYWORD}, {"false", TC_K_KEYWORD},
-  {"fn", TC_K_KEYWORD}, {"go", TC_K_KEYWORD}, {"if", TC_K_KEYWORD},
+  {"fn", TC_K_KEYWORD}, {"if", TC_K_KEYWORD},
   {"in", TC_K_KEYWORD}, {"is", TC_K_KEYWORD}, {"loop", TC_K_KEYWORD},
   {"module", TC_K_KEYWORD}, {"nil", TC_K_KEYWORD}, {"next", TC_K_KEYWORD},
   {"on", TC_K_KEYWORD}, {"parallel", TC_K_KEYWORD}, {"raise", TC_K_KEYWORD},
@@ -111,8 +111,22 @@ static int is_value_keyword(const TcSource *source, WValue token, TcKind kind) {
          token_text_is(source, token, "false");
 }
 
-static TcKind classify_id(const TcSource *source, WValue token) {
+/* `go` is a contextual keyword (languages/tungsten/lexers/regex_helpers.w
+ * go_keyword_at?): it is reserved only where it starts a spawn, `go -> body`,
+ * so it must not follow `.`/`&.` and must be followed by `->` after optional
+ * spaces or tabs. Everywhere else it is an ordinary identifier. */
+static int go_keyword_at(const TcSource *source, WValue token, TcKind last_kind) {
+  if (last_kind == TC_K_DOT || last_kind == TC_K_SAFE_NAV) return 0;
+  uint32_t off = tc_token_offset(token);
+  uint32_t len = tc_token_length(token);
+  size_t pos = source->byte_offsets[off + len];
+  while (pos < source->byte_len && (source->bytes[pos] == ' ' || source->bytes[pos] == '\t')) pos++;
+  return pos + 1 < source->byte_len && source->bytes[pos] == '-' && source->bytes[pos + 1] == '>';
+}
+
+static TcKind classify_id(const TcSource *source, WValue token, TcKind last_kind) {
   if (token_text_starts_with(source, token, "$")) return TC_K_GLOBAL;
+  if (token_text_is(source, token, "go")) return go_keyword_at(source, token, last_kind) ? TC_K_KEYWORD : TC_K_ID;
 
   for (size_t i = 0; i < sizeof(KEYWORDS) / sizeof(KEYWORDS[0]); i++) {
     if (token_text_equals_raw(source, token, KEYWORDS[i].text)) return KEYWORDS[i].kind;
@@ -217,7 +231,7 @@ static TcKind classify_op(const TcSource *source, WValue token, TcKind last_kind
 
 static TcKind classify_one(const TcSource *source, WValue token, TcKind last_kind, WValue last_token) {
   switch (tc_token_type(token)) {
-    case TC_T_ID: return classify_id(source, token);
+    case TC_T_ID: return classify_id(source, token, last_kind);
     case TC_T_NAME: return TC_K_NAME;
     case TC_T_INT: return TC_K_INT;
     case TC_T_WVALUE: return TC_K_WVALUE;

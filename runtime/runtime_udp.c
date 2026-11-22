@@ -278,3 +278,210 @@ WValue w_udp_close(WValue fd_val) {
     if (fd >= 0) close((int)fd);
     return W_NIL;
 }
+
+/* ---- the system resolver (core/dns.w: Dns.lookup) ----
+ *
+ * w_dns_lookup(host, timeout_ms) answers [v4 addresses, v6 addresses, ttl seconds]
+ * (addresses as strings), [[], [], ttl] for a name with no address, or nil when the
+ * resolver could not be asked (no answer in time, daemon unavailable). It blocks the
+ * calling thread, so callers resolve from worker threads.
+ *
+ * macOS: DNS-SD (DNSServiceGetAddrInfo) over ONE connection to mDNSResponder kept open
+ * for the life of the process (kDNSServiceFlagsShareConnection), so every lookup takes
+ * the system's path — /etc/hosts, VPN and split-DNS scoped resolvers, search domains —
+ * and reports record TTLs. Concurrent lookups from several threads share the connection:
+ * whichever thread is waiting reads replies for all of them (under dns_m) and wakes the
+ * others. Elsewhere: getaddrinfo (TTL unknown: 0). wasm: unavailable. */
+
+#if defined(__APPLE__)
+#include <dns_sd.h>
+#include <poll.h>
+#include <pthread.h>
+#include <time.h>
+
+typedef struct WDnsQuery {
+    char v4[16][INET_ADDRSTRLEN];
+    char v6[16][INET6_ADDRSTRLEN];
+    int n4, n6;
+    int done4, done6;     /* family answered (address or no such record) */
+    int failed;           /* error other than "no such record" */
+    uint32_t ttl;
+    int64_t t_first4;     /* ms when the first A answer arrived */
+} WDnsQuery;
+
+static pthread_mutex_t w_dns_m = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t w_dns_cv = PTHREAD_COND_INITIALIZER;
+static DNSServiceRef w_dns_conn = NULL;
+static int w_dns_reading = 0;
+static uint64_t w_dns_generation = 0;   /* bumps when the shared connection is replaced */
+
+static int64_t w_dns_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void DNSSD_API w_dns_reply(DNSServiceRef ref, DNSServiceFlags flags, uint32_t ifindex,
+                                  DNSServiceErrorType err, const char *hostname,
+                                  const struct sockaddr *addr, uint32_t ttl, void *ctx) {
+    (void)ref; (void)flags; (void)ifindex; (void)hostname;
+    WDnsQuery *q = (WDnsQuery *)ctx;
+    int fam = addr ? addr->sa_family : 0;
+    if (err == kDNSServiceErr_NoError && addr) {
+        if (fam == AF_INET) {
+            if (q->n4 < 16 && (flags & kDNSServiceFlagsAdd)) {
+                inet_ntop(AF_INET, &((const struct sockaddr_in *)addr)->sin_addr, q->v4[q->n4], INET_ADDRSTRLEN);
+                q->n4++;
+            }
+            if (!q->done4) q->t_first4 = w_dns_now_ms();
+            q->done4 = 1;
+        } else if (fam == AF_INET6) {
+            if (q->n6 < 16 && (flags & kDNSServiceFlagsAdd)) {
+                inet_ntop(AF_INET6, &((const struct sockaddr_in6 *)addr)->sin6_addr, q->v6[q->n6], INET6_ADDRSTRLEN);
+                q->n6++;
+            }
+            q->done6 = 1;
+        }
+        if (ttl > 0 && (q->ttl == 0 || ttl < q->ttl)) q->ttl = ttl;
+    } else if (err == kDNSServiceErr_NoSuchRecord) {
+        if (fam == AF_INET6) q->done6 = 1;
+        else q->done4 = 1;
+    } else {
+        q->failed = 1;
+    }
+}
+
+static int w_dns_query_done(WDnsQuery *q) {
+    if (q->failed) return 1;
+    if (q->done4 && q->done6) return 1;
+    /* an IPv4 answer and no AAAA yet: give the AAAA 30 ms, then go with what we have */
+    if (q->done4 && q->n4 > 0 && w_dns_now_ms() - q->t_first4 > 30) return 1;
+    return 0;
+}
+
+WValue w_dns_lookup(WValue host_val, WValue timeout_val) {
+    const char *host = w_rt_as_str(host_val);
+    int64_t timeout = w_is_int(timeout_val) ? w_as_int(timeout_val) : 5000;
+    WDnsQuery *q = calloc(1, sizeof(WDnsQuery));
+    if (!q) return W_NIL;
+    int64_t deadline = w_dns_now_ms() + timeout;
+    pthread_mutex_lock(&w_dns_m);
+    if (!w_dns_conn && DNSServiceCreateConnection(&w_dns_conn) != kDNSServiceErr_NoError) {
+        w_dns_conn = NULL;
+        pthread_mutex_unlock(&w_dns_m);
+        free(q);
+        return W_NIL;
+    }
+    uint64_t gen = w_dns_generation;
+    DNSServiceRef sub = w_dns_conn;
+    DNSServiceErrorType err = DNSServiceGetAddrInfo(&sub,
+        kDNSServiceFlagsShareConnection | kDNSServiceFlagsReturnIntermediates | kDNSServiceFlagsTimeout,
+        0, kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6, host, w_dns_reply, q);
+    if (err != kDNSServiceErr_NoError) {
+        if (err == kDNSServiceErr_ServiceNotRunning || err == kDNSServiceErr_Invalid) {
+            DNSServiceRefDeallocate(w_dns_conn);
+            w_dns_conn = NULL;
+            w_dns_generation++;
+        }
+        pthread_mutex_unlock(&w_dns_m);
+        free(q);
+        return W_NIL;
+    }
+    int timed_out = 0;
+    while (!w_dns_query_done(q)) {
+        if (gen != w_dns_generation) { q->failed = 1; sub = NULL; break; }
+        int64_t left = deadline - w_dns_now_ms();
+        if (left <= 0) { timed_out = 1; break; }
+        if (!w_dns_reading) {
+            /* read replies for everyone; others wait on the condition */
+            w_dns_reading = 1;
+            int fd = DNSServiceRefSockFD(w_dns_conn);
+            pthread_mutex_unlock(&w_dns_m);
+            struct pollfd pfd = { fd, POLLIN, 0 };
+            int ready = poll(&pfd, 1, left < 20 ? (int)left : 20);
+            pthread_mutex_lock(&w_dns_m);
+            if (ready > 0 && w_dns_conn) {
+                if (DNSServiceProcessResult(w_dns_conn) != kDNSServiceErr_NoError) {
+                    /* the daemon went away: every query on the old connection fails */
+                    DNSServiceRefDeallocate(w_dns_conn);
+                    w_dns_conn = NULL;
+                    w_dns_generation++;
+                }
+            }
+            w_dns_reading = 0;
+            pthread_cond_broadcast(&w_dns_cv);
+        } else {
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_nsec += 20 * 1000000L;
+            if (ts.tv_nsec >= 1000000000L) { ts.tv_sec += 1; ts.tv_nsec -= 1000000000L; }
+            pthread_cond_timedwait(&w_dns_cv, &w_dns_m, &ts);
+        }
+    }
+    if (sub && gen == w_dns_generation) DNSServiceRefDeallocate(sub);
+    pthread_mutex_unlock(&w_dns_m);
+    if (timed_out && q->n4 == 0 && q->n6 == 0) { free(q); return W_NIL; }
+    if (q->failed && q->n4 == 0 && q->n6 == 0) { free(q); return W_NIL; }
+    WValue v4 = w_array_new(65, q->n4 > 0 ? q->n4 : 1);
+    for (int i = 0; i < q->n4; i++) v4 = w_array_push(v4, w_string(q->v4[i]));
+    WValue v6 = w_array_new(65, q->n6 > 0 ? q->n6 : 1);
+    for (int i = 0; i < q->n6; i++) v6 = w_array_push(v6, w_string(q->v6[i]));
+    WValue out = w_array_new(65, 3);
+    out = w_array_push(out, v4);
+    out = w_array_push(out, v6);
+    out = w_array_push(out, w_box_int((int64_t)q->ttl));
+    free(q);
+    return out;
+}
+
+WValue w_dns_available(void) { return W_TRUE; }
+
+#elif !defined(__wasi__)
+
+WValue w_dns_lookup(WValue host_val, WValue timeout_val) {
+    (void)timeout_val;
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    int err = getaddrinfo(w_rt_as_str(host_val), NULL, &hints, &res);
+    if (err == EAI_NONAME
+#ifdef EAI_NODATA
+        || err == EAI_NODATA
+#endif
+        ) {
+        WValue out = w_array_new(65, 3);
+        out = w_array_push(out, w_array_new(65, 1));
+        out = w_array_push(out, w_array_new(65, 1));
+        out = w_array_push(out, w_box_int(0));
+        return out;
+    }
+    if (err != 0) return W_NIL;
+    WValue v4 = w_array_new(65, 4);
+    WValue v6 = w_array_new(65, 4);
+    char buf[INET6_ADDRSTRLEN];
+    for (struct addrinfo *a = res; a; a = a->ai_next) {
+        if (a->ai_family == AF_INET) {
+            inet_ntop(AF_INET, &((struct sockaddr_in *)a->ai_addr)->sin_addr, buf, sizeof buf);
+            v4 = w_array_push(v4, w_string(buf));
+        } else if (a->ai_family == AF_INET6) {
+            inet_ntop(AF_INET6, &((struct sockaddr_in6 *)a->ai_addr)->sin6_addr, buf, sizeof buf);
+            v6 = w_array_push(v6, w_string(buf));
+        }
+    }
+    freeaddrinfo(res);
+    WValue out = w_array_new(65, 3);
+    out = w_array_push(out, v4);
+    out = w_array_push(out, v6);
+    out = w_array_push(out, w_box_int(0));
+    return out;
+}
+
+WValue w_dns_available(void) { return W_TRUE; }
+
+#else
+
+WValue w_dns_lookup(WValue host_val, WValue timeout_val) { (void)host_val; (void)timeout_val; return W_NIL; }
+WValue w_dns_available(void) { return W_FALSE; }
+
+#endif

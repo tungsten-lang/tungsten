@@ -233,7 +233,7 @@ module Tungsten
       π τ ϕ φ ℯ ℇ ∞ ℎ ℏ c G g₀ Nₐ kB e₀ R ε₀ μ₀ µ₀ σ α mₑ mₚ a₀ Eₕ Ry 𝐹
     ].freeze
     TUNGSTEN_KEYWORDS = %w[
-      begin break case else elsif ensure exit extern false fn go if in is loop module nil next on parallel
+      begin break case else elsif ensure exit extern false fn if in is loop module nil next on parallel
       raise recase rescue return self super then trait true unless until use when while with yield
     ].to_h { |word| [ word, true ] }.freeze
     TUNGSTEN_TYPE_NAME_WORDS = %w[
@@ -5861,13 +5861,29 @@ module Tungsten
         emit_self_hosted_lexer_token(ivars, :AND, raw, off)
       elsif raw == "or"
         emit_self_hosted_lexer_token(ivars, :OR, raw, off)
-      elsif TUNGSTEN_KEYWORDS[raw]
+      elsif TUNGSTEN_KEYWORDS[raw] || (raw == "go" && self_hosted_go_keyword_at?(ivars, off + 2))
         emit_self_hosted_lexer_token(ivars, :KEYWORD, raw, off)
       elsif TUNGSTEN_TYPE_NAME_WORDS[raw]
         emit_self_hosted_lexer_token(ivars, :TYPE, raw, off)
       else
         emit_self_hosted_lexer_token(ivars, :ID, raw, off)
       end
+    end
+
+    # Mirrors go_keyword_at? in languages/tungsten/lexers/regex_helpers.w:
+    # `go` is a keyword only where it starts a spawn (`go -> body`), not
+    # after `.`/`&.`; elsewhere it is an identifier.
+    def self_hosted_go_keyword_at?(ivars, after)
+      last_type = ivars["@last_token_type"]
+      return false if last_type == :DOT || last_type == :SAFE_NAV
+
+      chars = ivars["@chars"]
+      count = ivars["@char_count"]
+      pos = after
+      while pos < count && (chars[pos] == " " || chars[pos] == "\t")
+        pos += 1
+      end
+      pos + 1 < count && chars[pos] == "-" && chars[pos + 1] == ">"
     end
 
     def materialize_self_hosted_lexer_op(ivars, raw, off)

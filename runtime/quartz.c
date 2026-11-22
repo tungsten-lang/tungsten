@@ -1718,6 +1718,43 @@ static CFStringRef cg_generic_family(const char *name) {
     return NULL;
 }
 
+/* A variable font with a 'wght' axis, set to the CSS weight (clamped to the
+ * axis range); any other font is returned as is. Takes ownership of font.
+ * Without this a variable face resolved by PostScript name (a web font's
+ * default instance) draws every weight at its default, and a face matched by
+ * family snaps to the nearest named instance. */
+static CTFontRef cg_font_weighted(CTFontRef font, double weight, double size) {
+    if (!font) return NULL;
+    CFArrayRef axes = CTFontCopyVariationAxes(font);
+    if (!axes) return font;
+    const uint32_t wght = ('w' << 24) | ('g' << 16) | ('h' << 8) | 't';
+    CTFontRef out = font;
+    for (CFIndex i = 0; i < CFArrayGetCount(axes); i++) {
+        CFDictionaryRef ax = CFArrayGetValueAtIndex(axes, i);
+        CFNumberRef idn = CFDictionaryGetValue(ax, kCTFontVariationAxisIdentifierKey);
+        int64_t id = 0;
+        if (!idn || !CFNumberGetValue(idn, kCFNumberSInt64Type, &id) || (uint32_t)id != wght) continue;
+        double lo = cg_dict_num(ax, kCTFontVariationAxisMinimumValueKey);
+        double hi = cg_dict_num(ax, kCTFontVariationAxisMaximumValueKey);
+        double v = weight < lo ? lo : (weight > hi ? hi : weight);
+        CFNumberRef key = CFNumberCreate(NULL, kCFNumberSInt64Type, &id);
+        CFNumberRef val = CFNumberCreate(NULL, kCFNumberDoubleType, &v);
+        const void *vk[] = {key};
+        const void *vv[] = {val};
+        CFDictionaryRef var = CFDictionaryCreate(NULL, vk, vv, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        const void *ak[] = {kCTFontVariationAttribute};
+        const void *av[] = {var};
+        CFDictionaryRef attrs = CFDictionaryCreate(NULL, ak, av, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CTFontDescriptorRef d = CTFontDescriptorCreateWithAttributes(attrs);
+        CTFontRef f = CTFontCreateCopyWithAttributes(font, size, NULL, d);
+        CFRelease(d); CFRelease(attrs); CFRelease(var); CFRelease(val); CFRelease(key);
+        if (f) { CFRelease(font); out = f; }
+        break;
+    }
+    CFRelease(axes);
+    return out;
+}
+
 /* Resolve one family name (or PostScript name) to a sized font. */
 static CTFontRef cg_font_one(const char *name, double weight, int italic, double size) {
     if (cg_eq(name, "system-ui") || cg_eq(name, "-apple-system") || cg_eq(name, "ui-sans-serif")) {
@@ -1760,7 +1797,21 @@ static CTFontRef cg_font_one(const char *name, double weight, int italic, double
         }
     }
     CFRelease(cfname);
-    return font;
+    return cg_font_weighted(font, weight, size);
+}
+
+/* The next name in a CSS font-family list at p (quotes and spaces trimmed) into
+ * name ("" when empty or too long); returns where the following name starts. */
+static const char *cg_next_family(const char *p, const char *end, char *name, size_t cap) {
+    const char *q = memchr(p, ',', (size_t)(end - p));
+    if (!q) q = end;
+    const char *a = p, *b = q;
+    while (a < b && (*a == ' ' || *a == '"' || *a == '\'')) a++;
+    while (b > a && (b[-1] == ' ' || b[-1] == '"' || b[-1] == '\'')) b--;
+    size_t n = (size_t)(b - a);
+    name[0] = 0;
+    if (n > 0 && n < cap) { memcpy(name, a, n); name[n] = 0; }
+    return q < end ? q + 1 : end;
 }
 
 /* families: a CSS font-family list ("Helvetica Neue, Helvetica, Arial,
@@ -1784,19 +1835,43 @@ static CTFontRef cg_font_lookup(const char *families, size_t flen, double weight
     CTFontRef font = NULL;
     const char *p = families, *end = families + flen;
     while (p < end && !font) {
-        const char *q = memchr(p, ',', (size_t)(end - p));
-        if (!q) q = end;
         char name[256];
-        const char *a = p, *b = q;
-        while (a < b && (*a == ' ' || *a == '"' || *a == '\'')) a++;
-        while (b > a && (b[-1] == ' ' || b[-1] == '"' || b[-1] == '\'')) b--;
-        size_t n = (size_t)(b - a);
-        if (n > 0 && n < sizeof name) {
-            memcpy(name, a, n);
-            name[n] = 0;
-            font = cg_font_one(name, weight, italic, size);
+        p = cg_next_family(p, end, name, sizeof name);
+        if (name[0]) font = cg_font_one(name, weight, italic, size);
+    }
+    /* CSS falls back per character through the rest of the list: hand the
+     * remaining families to CoreText as the font's cascade list (CoreText
+     * tries them, in order, for characters the font lacks, before the system
+     * cascade). */
+    if (font && p < end) {
+        CFMutableArrayRef cascade = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+        CFStringRef first = CTFontCopyPostScriptName(font);
+        while (p < end && CFArrayGetCount(cascade) < 8) {
+            char name[256];
+            p = cg_next_family(p, end, name, sizeof name);
+            if (!name[0] || cg_eq(name, "system-ui") || cg_eq(name, "-apple-system") || cg_eq(name, "ui-sans-serif")) continue;
+            CTFontRef f = cg_font_one(name, weight, italic, size);
+            if (!f) continue;
+            CFStringRef ps = CTFontCopyPostScriptName(f);
+            int dup = ps && first && CFStringCompare(ps, first, 0) == kCFCompareEqualTo;
+            if (ps) CFRelease(ps);
+            if (!dup) {
+                CTFontDescriptorRef d = CTFontCopyFontDescriptor(f);
+                if (d) { CFArrayAppendValue(cascade, d); CFRelease(d); }
+            }
+            CFRelease(f);
         }
-        p = q + 1;
+        if (first) CFRelease(first);
+        if (CFArrayGetCount(cascade) > 0) {
+            const void *ak[] = {kCTFontCascadeListAttribute};
+            const void *av[] = {cascade};
+            CFDictionaryRef attrs = CFDictionaryCreate(NULL, ak, av, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            CTFontDescriptorRef d = CTFontDescriptorCreateWithAttributes(attrs);
+            CTFontRef f = CTFontCreateCopyWithAttributes(font, size, NULL, d);
+            CFRelease(d); CFRelease(attrs);
+            if (f) { CFRelease(font); font = f; }
+        }
+        CFRelease(cascade);
     }
     if (!font) font = cg_font_one("Helvetica", weight, italic, size);
     if (!font) font = CTFontCreateWithName(CFSTR("Helvetica"), size, NULL);
@@ -3451,6 +3526,63 @@ typedef struct CGRegFont {
 } CGRegFont;
 
 static CGRegFont *g_reg_fonts;
+
+/* w_cg_register_font_data(bytes): register an sfnt (TrueType/OpenType bytes in a
+ * ByteArray or String) for the current process without a file; returns its
+ * PostScript name, or nil when CoreText rejects it. CoreText copies the bytes.
+ * Registering the same PostScript name again is accepted and returns it. */
+WValue w_cg_register_font_data(WValue datav) {
+    const uint8_t *ptr = NULL;
+    size_t n = 0;
+    char sso[6];
+    if (w_is_array(datav)) {
+        WArray *a = w_as_array(datav);
+        if (a->ebits != 8) cg_raise("Canvas.register_font_data: data must be a ByteArray (u8[]) or String");
+        ptr = (const uint8_t *)a->slots + (size_t)a->start;
+        n = (size_t)a->size;
+    } else {
+        const char *sp = NULL;
+        if (!cg_str_view(datav, sso, &sp, &n)) cg_raise("Canvas.register_font_data: data must be a ByteArray (u8[]) or String");
+        ptr = (const uint8_t *)sp;
+    }
+    if (n < 12) return W_NIL;
+    CFDataRef data = CFDataCreate(NULL, ptr, (CFIndex)n);
+    if (!data) return W_NIL;
+    CGDataProviderRef prov = CGDataProviderCreateWithCFData(data);
+    CFRelease(data);
+    if (!prov) return W_NIL;
+    CGFontRef cgf = CGFontCreateWithDataProvider(prov);
+    CGDataProviderRelease(prov);
+    if (!cgf) return W_NIL;
+    CFStringRef ps = CGFontCopyPostScriptName(cgf);
+    CFErrorRef err = NULL;
+    /* Deprecated in macOS 15 in favour of descriptor registration, which has no
+     * in-memory equivalent that registers synchronously; it still works. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    bool ok = CTFontManagerRegisterGraphicsFont(cgf, &err);
+#pragma clang diagnostic pop
+    if (!ok && err) {
+        CFIndex code = CFErrorGetCode(err);
+        if (code == kCTFontManagerErrorAlreadyRegistered || code == kCTFontManagerErrorDuplicatedName) ok = true;
+    }
+    if (err) CFRelease(err);
+    CGFontRelease(cgf);
+    WValue out = W_NIL;
+    if (ok && ps) {
+        pthread_mutex_lock(&g_font_lock);
+        for (int i = 0; i < CG_FONT_BUCKETS; i++) {
+            CGFontEntry *e = g_fonts[i];
+            while (e) { CGFontEntry *nx = e->next; CFRelease(e->font); free(e->key); free(e); e = nx; }
+            g_fonts[i] = NULL;
+        }
+        g_font_count = 0;
+        pthread_mutex_unlock(&g_font_lock);
+        out = cg_wstring_from_cf(ps);
+    }
+    if (ps) CFRelease(ps);
+    return out;
+}
 
 /* w_cg_register_font(path): process-scoped CTFontManager registration with
  * path deduplication so custom score/UI fonts (e.g. Bravura.otf) resolve by

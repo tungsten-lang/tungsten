@@ -35,6 +35,7 @@
   auto :Digest,       "digest"
   auto :Dir,          "dir"
   auto :Directory,    "dir"
+  auto :Dns,          "dns"
   auto :Duration,     "duration"
   auto :Env,          "env"
   auto :File,         "file"
@@ -863,6 +864,7 @@
   auto :AssertionError,      "errors/assertion_error"
   auto :SystemExit,          "errors/system_exit"
   auto :Interrupt,           "errors/interrupt"
+  auto :Zstd,         "zstd"
 
   -> .root
     Path(__project_root)

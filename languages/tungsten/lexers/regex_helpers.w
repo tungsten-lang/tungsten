@@ -46,7 +46,7 @@
     return false
   case n
   when 2
-    word == "if" || word == "in" || word == "fn" || word == "is" || word == "on" || word == "go"
+    word == "if" || word == "in" || word == "fn" || word == "is" || word == "on"
   when 3
     word == "nil" || word == "use"
   when 4
@@ -59,6 +59,21 @@
     word == "parallel"
   else
     false
+
+# `go` is a contextual keyword: it is reserved only where it starts a spawn,
+# `go -> body`. Everywhere else (a local, parameter, method name, hash key,
+# or the method in `obj.go`) it is an ordinary identifier, so is_keyword?
+# leaves it out and each lexer asks go_keyword_at? at a `go` word. `chars`
+# is the source as one-codepoint strings, `after` the index just past the
+# word, and `last_type` the previous token's type: the spawn form is `go`
+# not after `.`/`&.`, followed by `->` after optional spaces or tabs.
+-> go_keyword_at?(chars, after, char_count, last_type)
+  if last_type == :DOT || last_type == :SAFE_NAV
+    return false
+  p = after
+  while p < char_count && (chars[p] == " " || chars[p] == "\t")
+    p += 1
+  p + 1 < char_count && chars[p] == "-" && chars[p + 1] == ">"
 
 -> is_type_name?(word)
   n = word.size()

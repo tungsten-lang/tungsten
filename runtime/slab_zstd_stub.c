@@ -30,3 +30,9 @@ WValue w_zstd_compress_llvm_escaped(WValue escaped_val) {
     (void)escaped_val;
     slab_zstd_unavailable();
 }
+
+/* Without libzstd there is no Zstd.decompress: nil (not zstd we can read). */
+WValue w_zstd_decompress(WValue data_val) {
+    (void)data_val;
+    return W_NIL;
+}

@@ -76789,6 +76789,21 @@ enum {
     W_CHAN_RESULT_RECEIVED = 1
 };
 
+/* A native thread (no goroutine) waiting on a channel: yield for the first rounds, then
+ * sleep with exponential backoff (10us doubling to 1ms). A fixed 10us sleep kept every
+ * idle waiter at ~100k wakeups/s — a worker pool parked on a channel burned whole cores. */
+static void w_chan_idle_sleep(int s) {
+    if (s < 16) {
+        sched_yield();
+        return;
+    }
+    int k = s - 16;
+    long us = k >= 7 ? 1000 : (10L << k);
+    if (us > 1000) us = 1000;
+    struct timespec ts = {0, us * 1000L};
+    nanosleep(&ts, NULL);
+}
+
 /* Keep TLS lookup inside a fresh call: inlining into a retry loop lets the C
  * compiler retain the old worker's TLS address across a migrating yield. */
 static __attribute__((noinline)) void w_chan_pause_spin(int *spin) {
@@ -76799,12 +76814,7 @@ static __attribute__((noinline)) void w_chan_pause_spin(int *spin) {
         if (spin) *spin = 0;
     } else {
         int s = spin ? (*spin)++ : 16;
-        if (s < 16) {
-            sched_yield();
-        } else {
-            struct timespec ts = {0, 10000};  /* 10us */
-            nanosleep(&ts, NULL);
-        }
+        w_chan_idle_sleep(s);
     }
 }
 
@@ -76822,7 +76832,7 @@ static __attribute__((noinline)) void w_chan_sender_pause_spin(WChan *ch, uint64
         return;
     }
     for (int k = 0; k < 4096; k++) {
-        if (*(volatile int *)&ch->closed) {
+        if (*(volatile uint8_t *)&ch->closed) {
             if (spin) *spin = 0;
             return;
         }
@@ -76849,12 +76859,7 @@ static __attribute__((noinline)) void w_chan_sender_pause_spin(WChan *ch, uint64
 #endif
     }
     int s = spin ? (*spin)++ : 16;
-    if (s < 16) {
-        sched_yield();
-    } else {
-        struct timespec ts = {0, 10000};
-        nanosleep(&ts, NULL);
-    }
+    w_chan_idle_sleep(s);
 }
 
 static void w_chan_receiver_wait_cleanup(void *arg) {
@@ -76873,8 +76878,9 @@ static __attribute__((noinline)) void w_chan_receiver_wait_core(WChan *ch, int *
         if (spin) *spin = 0;
         return;
     }
-    for (int k = 0; k < 4096; k++) {
-        if (*(volatile int64_t *)&ch->count > 0 || *(volatile int *)&ch->closed) {
+    int spins = (spin && *spin >= 16) ? 0 : 4096;
+    for (int k = 0; k < spins; k++) {
+        if (*(volatile int64_t *)&ch->count > 0 || *(volatile uint8_t *)&ch->closed) {
             if (spin) *spin = 0;
             return;
         }
@@ -76885,12 +76891,7 @@ static __attribute__((noinline)) void w_chan_receiver_wait_core(WChan *ch, int *
 #endif
     }
     int s = spin ? (*spin)++ : 16;
-    if (s < 16) {
-        sched_yield();
-    } else {
-        struct timespec ts = {0, 10000};
-        nanosleep(&ts, NULL);
-    }
+    w_chan_idle_sleep(s);
 }
 
 /* Advertise an unbuffered receiver only for one cancellable scheduler pause.

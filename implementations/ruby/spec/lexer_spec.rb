@@ -21,6 +21,13 @@ RSpec.shared_examples "a Tungsten lexer" do
     ])
   end
 
+  it "lexes go as an identifier outside a spawn" do
+    [ "go = 1", "-> go(x)", "obj.go", "{go: 1}", "go + 1" ].each do |source|
+      go = described_class.new(source).tokens.find { |token| token.value.to_s == "go" }
+      expect(go.type).to eq(:ID), source
+    end
+  end
+
   it "keeps underscores inside PascalCase class names" do
     root = File.expand_path("../../..", __dir__)
     source = File.read(File.join(root, "compiler/test/fixtures/frontend_fuzz_f42fa00c5ae29356.w"))

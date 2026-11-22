@@ -102,3 +102,46 @@ WValue w_zstd_compress_llvm_escaped(WValue escaped_val) {
     free(escaped_out);
     return result;
 }
+
+/* Zstd.decompress (core/zstd.w): a whole zstd stream (a String of bytes) (one or more frames, content size
+ * known or not) → ByteArray; nil when the input is not valid zstd. Used for HTTP
+ * Content-Encoding: zstd. Windows are capped at 2^27 bytes (128 MiB, RFC 8878's
+ * recommendation for HTTP is 8 MiB; zstd's default limit is 2^27). */
+WValue w_zstd_decompress(WValue data_val) {
+    char small[6];
+    const char *src;
+    size_t src_len;
+    w_str_data(data_val, small, &src, &src_len);
+    ZSTD_DStream *ds = ZSTD_createDStream();
+    if (!ds) return W_NIL;
+    ZSTD_DCtx_setParameter(ds, ZSTD_d_windowLogMax, 27);
+    size_t cap = src_len * 4 + 65536;
+    uint8_t *out = malloc(cap);
+    if (!out) { ZSTD_freeDStream(ds); return W_NIL; }
+    size_t used = 0;
+    ZSTD_inBuffer in = { src, src_len, 0 };
+    size_t ret = 1;
+    while (in.pos < in.size || ret != 0) {
+        if (cap - used < 65536) {
+            size_t ncap = cap * 2;
+            uint8_t *n = realloc(out, ncap);
+            if (!n) { free(out); ZSTD_freeDStream(ds); return W_NIL; }
+            out = n;
+            cap = ncap;
+        }
+        ZSTD_outBuffer ob = { out + used, cap - used, 0 };
+        size_t before = in.pos;
+        ret = ZSTD_decompressStream(ds, &ob, &in);
+        if (ZSTD_isError(ret)) { free(out); ZSTD_freeDStream(ds); return W_NIL; }
+        used += ob.pos;
+        if (ob.pos == 0 && in.pos == before && ret != 0) {
+            /* truncated input: no progress possible */
+            if (in.pos >= in.size) { free(out); ZSTD_freeDStream(ds); return W_NIL; }
+        }
+        if (in.pos >= in.size && ret == 0) break;
+    }
+    ZSTD_freeDStream(ds);
+    WValue res = w_bytes_from_data(out, (int64_t)used);
+    free(out);
+    return res;
+}

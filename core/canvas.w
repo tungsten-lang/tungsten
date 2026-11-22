@@ -78,6 +78,11 @@
   -> .register_font(path)
     ccall("w_cg_register_font", path)
 
+  # Register a font from memory (sfnt bytes: a ByteArray or String) for the
+  # current process; returns its PostScript name, or nil if CoreText rejects it.
+  -> .register_font_data(data)
+    ccall("w_cg_register_font_data", data)
+
   # Write a raw 8-bit RGBA or BGRA pixel buffer (ByteArray or data_pointer Int)
   # directly to disk via ImageIO without allocating a Canvas. Passing quality
   # in 0...0.5 writes PNG with IMAGEIO_PNG_NO_FILTERS.

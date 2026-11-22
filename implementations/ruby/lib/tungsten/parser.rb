@@ -1553,6 +1553,12 @@ module Tungsten
       loc_col = @token.col
       next_token_skip_space
       value = parse_assignment_no_control
+      # Two-argument form `raise ExceptionClass, "message"` builds the
+      # instance (`ExceptionClass.new("message")`), as the compiler's parser does.
+      if @token.type?(:",")
+        next_token_skip_whitespace
+        value = Call.new(value, "new", [parse_assignment_no_control])
+      end
       node = Raise.new(value)
       node.set_location(loc_file, loc_row, loc_col)
       node

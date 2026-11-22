@@ -1006,6 +1006,11 @@ RSpec.describe Tungsten::Interpreter do
     expect(run(code)).to eq([ "ZeroDivisionError", "division by zero" ])
   end
 
+  it "raises an exception subclass with the two-argument form" do
+    code = "+ XErr < StandardError\nbegin\n  raise XErr, \"boom\"\nrescue err: XErr\n  err.message"
+    expect(run(code)).to eq("boom")
+  end
+
   it "handles begin/rescue without variable" do
     code = "begin\n  raise \"oops\"\nrescue\n  42"
     expect(run(code)).to eq(42)

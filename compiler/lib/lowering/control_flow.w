@@ -89,6 +89,11 @@
     cond_bool = next_temp(wfn)
     emit_wire_truthy_inline(wfn, cond_bool, cond_reg)
 
+  # A binding created by the condition (`if (m = f(x)) > 0`) must be spilled
+  # before the branch, or a terminating then-arm drops it and the other paths
+  # read the slot uninitialized (see lower_if_expr).
+  materialize_bindings(ctx)
+
   then_label = next_label(wfn, "if.then")
   else_label = next_label(wfn, "if.else")
   end_label = next_label(wfn, "if.end")
@@ -149,6 +154,7 @@
       else
         next_else = end_label
 
+      materialize_bindings(ctx)
       emit_wire_cond_br(wfn, eb, next_else, nil, ethen_label)
 
       start_block(wfn, ethen_label)
@@ -236,6 +242,15 @@
     cond_bool = next_temp(wfn)
     emit_wire_truthy_inline(wfn, cond_bool, cond_reg)
 
+  # Spill live bindings before the branch. Each arm ends with
+  # materialize_bindings, which resets ctx[:bindings]; a binding still live
+  # here (a local assigned from a call just before a tail ternary, or inside
+  # the condition) would otherwise be stored only on the first arm's path and
+  # read uninitialized on the others. Most callers spill before lowering the
+  # condition; this also covers the typed-return tail path and assignments
+  # inside the condition.
+  materialize_bindings(ctx)
+
   then_label = next_label(wfn, "ie.then")
   else_label = next_label(wfn, "ie.else")
   end_label = next_label(wfn, "ie.end")
@@ -287,6 +302,7 @@
       else
         next_else = end_label
 
+      materialize_bindings(ctx)
       emit_wire_cond_br(wfn, eb, next_else, nil, ethen_label)
       if next_else == end_label
         end_reachable = true

@@ -1565,8 +1565,8 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
     elsif sub == 8
       di = r.vu32()
       mi = r.vu32()
-      check_data(di)
       at = addr_type(mi)
+      check_data(di)
       n = pop_slot(I32)
       s = pop_slot(I32)
       d = pop_slot(at)

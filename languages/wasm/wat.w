@@ -1132,7 +1132,7 @@
       out.vu32(s.size)
       out.buf(s)
     section(out, 9, elems, n_elems) if n_elems > 0
-    if n_datas > 0
+    if n_datas > 0 || w_uses_data_ops?(codes)
       dc = WBuf.new
       dc.vu32(n_datas)
       out.b(12)
@@ -2081,3 +2081,13 @@
   m = WatNode.new(0, nil, 0)
   m.items = [WatNode.new(1, "module", 0)] + nodes
   WatEncoder.new(m).encode
+
+# Does encoded code use memory.init / data.drop (0xfc 8 / 0xfc 9)? (approximate byte scan:
+# a data count section is harmless when it is not needed)
+-> w_uses_data_ops?(codes)
+  a = codes.a
+  i = 0
+  while i + 1 < a.size
+    return true if a[i] == 0xfc && (a[i + 1] == 8 || a[i + 1] == 9)
+    i += 1
+  false

@@ -62,6 +62,7 @@
 -> wat_parse(src)
   b = src.bytes
   n = b.size
+  wat_check_source(src)
   stack = [WatNode.new(0, nil, 0)]
   stack[0].items = []
   i = 0
@@ -121,7 +122,7 @@
             else
               i += 1
         else
-          wat_fail("illegal character") if d < 0x20 && d != 0x09 && d != 0x0a && d != 0x0d
+          wat_fail("illegal character") if (d < 0x20 && d != 0x09 && d != 0x0a && d != 0x0d) || d == 0x7f
           i += 1
     elsif c == 0x28
       l = WatNode.new(0, nil, i)
@@ -207,6 +208,12 @@
       stack[stack.size - 1].items.push(WatNode.new(1, txt, st))
   wat_fail("unclosed (") if stack.size != 1
   stack[0].items
+
+# The source must be UTF-8 (strings carry raw bytes only through escapes).
+-> wat_check_source(src)
+  ba = ccall("w_string_bytes_view", src) ## u8[]
+  wat_fail("malformed UTF-8 encoding") if !w_utf8_valid?(ba, 0, ba.size)
+  nil
 
 -> w_push_utf8(out, cp)
   if cp < 0x80

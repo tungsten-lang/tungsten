@@ -13,7 +13,7 @@
 # tab: table 0's function ids (0 = null); sx: store function info, 4 words per id:
 #     [entry pc, instance id, canonical type, module function index].
 
--> wexec(code, stk, ostk, mem, glob, gref, tab, sx, cstk, st) (i64[] i64[] Array u8[] i64[] Array i64[] i64[] i64[] i64[]) i64
+-> wexec(code, stk, ostk, mem, glob, gref, tab, sx, cstk, st, jt, ctx) (i64[] i64[] Array u8[] i64[] Array i64[] i64[] i64[] i64[] i64[] i64[]) i64
   pc = st[0]
   fp = st[1]
   csp = st[2]
@@ -1147,6 +1147,22 @@
         pc = code[pc + 2]
       else
         pc += 3
+    when OP_JIT
+      r = wj_call(jt[code[pc + 1]], ctx, stk, fp)
+      if r != 0
+        st[4] = r
+        st[0] = pc
+        st[1] = fp
+        st[2] = csp
+        return 1
+      csp -= 2
+      pc = cstk[csp]
+      fp = cstk[csp + 1]
+      if pc < 0
+        st[0] = pc
+        st[1] = fp
+        st[2] = csp
+        return 0
     when OP_VOP
       wvop(stk, fp, code[pc + 1], code[pc + 2], code[pc + 3], code[pc + 4], code[pc + 5], code)
       pc += 6

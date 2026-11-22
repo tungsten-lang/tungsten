@@ -7,6 +7,9 @@
 
 use ../wasm
 
+WAST_JIT = [Env["WASM_JIT_WAIT"] != nil]
+W_JIT_ON[0] = WAST_JIT[0]
+
 + WastRunner
   rw :pass, :fail, :skip, :fails, :verbose
 
@@ -117,6 +120,7 @@ use ../wasm
       @defs[r[1]] = m if r[1] != nil
       return nil
     inst = wasm_instantiate(m, resolver())
+    wasm_jit_wait(m) if WAST_JIT[0]
     @current = inst
     @modules[r[1]] = inst if r[1] != nil
     inst

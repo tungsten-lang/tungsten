@@ -188,7 +188,7 @@ W_UID = [0]
       @nums = i64[(@wide ? @len * 2 : @len) + 1]
 
 + WInstance
-  rw :id, :mod, :funcs, :tables, :mems, :globals, :glob, :gref, :gimports, :tags, :elems, :datas, :exports, :export_list, :dropped_data
+  rw :id, :mod, :funcs, :tables, :mems, :globals, :glob, :gref, :gimports, :tags, :elems, :datas, :exports, :export_list, :dropped_data, :jctx, :jclo
 
   -> new(@id, @mod)
     @funcs = []
@@ -202,6 +202,7 @@ W_UID = [0]
     @export_list = []
     @gimports = {}
     @dropped_data = []
+    @jctx = i64[8]
 
   -> export(name)
     @exports[name]
@@ -394,13 +395,34 @@ W_TRAP_MSGS = ["", "unreachable", "integer divide by zero", "integer overflow", 
       st[7] = W_CSTACK
       t0 = inst.tables.size > 0 ? inst.tables[0] : nil
       st[9] = (t0 == nil || t0.fids == nil) ? 0 : t0.size
-      r = wexec(m.code, ex.stk, ex.ostk, mem == nil ? W_NOMEM : mem.data, inst.glob, inst.gref, (t0 == nil || t0.fids == nil) ? W_NOTAB : t0.fids, store.sx, cstk, st)
+      jt = W_NOTAB
+      ctx = inst.jctx
+      if m.jit != nil
+        w_jit_poll(m) if m.jit.ptrs == nil
+        if m.jit.ptrs != nil
+          jt = m.jit.ptrs
+          ctx[0] = wk_addr8(mem == nil ? W_NOMEM : mem.data)
+          ctx[1] = mem == nil ? 0 : mem.size
+          ctx[2] = wk_addr64(inst.glob)
+          ctx[3] = 0
+          w_jit_ctx_init(inst, ex)
+      r = wexec(m.code, ex.stk, ex.ostk, mem == nil ? W_NOMEM : mem.data, inst.glob, inst.gref, (t0 == nil || t0.fids == nil) ? W_NOTAB : t0.fids, store.sx, cstk, st, jt, ctx)
       pc = st[0]
       fp = st[1]
       csp = st[2]
       if r == 0
         break
+      elsif r == 1 && st[4] == 200
+        e = W_JIT_EXC[0]
+        W_JIT_EXC[0] = nil
+        raise e if !e.is_a?(WasmException)
+        ex.csp = csp
+        res = w_unwind(ex, inst, e.exn, pc, fp, csp)
+        pc = res[0]
+        fp = res[1]
+        csp = res[2]
       elsif r == 1
+        raise WasmExhaustion.new("call stack exhausted") if st[4] == 9
         w_trap_code(st[4])
       elsif r == 6
         raise WasmExhaustion.new("call stack exhausted")
@@ -929,6 +951,7 @@ W_NOTAB = i64[1]
       wk_memcpy2(mem.data, off, m.bytes, d.start, d.size) if d.size > 0
       inst.dropped_data[di] = true
     di += 1
+  w_jit_start(m)
   if m.start != nil
     wasm_call(inst.funcs[m.start], [])
   inst

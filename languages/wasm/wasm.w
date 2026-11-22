@@ -18,5 +18,6 @@ use validate
 use interp
 use simd_exec
 use runtime
+use jit
 use gc
 use atomic

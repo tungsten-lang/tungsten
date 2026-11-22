@@ -19,9 +19,14 @@
 BUILTIN_ATTRS = ATTR_W + ATTR_C
 
 + JsRealm
-  rw :global, :intrinsics, :jobs, :host, :symbol_registry, :template_cache
+  rw :global, :intrinsics, :jobs, :host, :symbol_registry, :template_cache, :glex, :array_proto, :array_proto_indexed, :modules, :join_guard
 
   -> new
+    @glex = {}
+    @array_proto = nil
+    @array_proto_indexed = false
+    @modules = {}
+    @join_guard = []
     @intrinsics = {}
     @jobs = []
     @host = nil
@@ -35,7 +40,28 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
     JS_REALM[0] = self
     # every builtin file registers an installer; they run in registration order
     JS_INSTALLERS.each ->(inst) inst.call(self)
+    @array_proto = @intrinsics["Array.prototype"]
     @global.define("globalThis", @global, BUILTIN_ATTRS)
+
+  # The cell for a script-scope let/const/class (shared by all scripts in the realm).
+  -> glex_cell(name, is_const)
+    c = @glex[name]
+    if c == nil
+      c = JsCell.new(name, JS_TDZ, is_const)
+      @glex[name] = c
+    c
+
+  # Is iteration of plain arrays still the built-in one (no user override)?
+  -> array_iter_pristine?
+    ap = @array_proto
+    v = @intrinsics["%ArrayProto_values%"]
+    return false if ap.props[SYM_ITERATOR] != v
+    aip = @intrinsics["%ArrayIteratorPrototype%"]
+    aip.props["next"] == @intrinsics["%ArrayIteratorProto_next%"]
+
+  -> string_iter_pristine?
+    sp = @intrinsics["String.prototype"]
+    sp.props[SYM_ITERATOR] == @intrinsics["%StringProto_iterator%"] && @intrinsics["%StringIteratorPrototype%"].props["next"] == @intrinsics["%StringIteratorProto_next%"]
 
   -> intrinsic(name)
     v = @intrinsics[name]
@@ -64,7 +90,7 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
     JsObject.new(object_proto(), "Object")
 
   -> new_array(elems = [])
-    JsArray.new(intrinsic("Array.prototype"), elems)
+    JsArray.new(@array_proto, elems)
 
   # ToObject for primitives: Number/String/Boolean/Symbol/BigInt wrappers.
   -> wrap_primitive(v)
@@ -81,12 +107,12 @@ BUILTIN_ATTRS = ATTR_W + ATTR_C
     JsFunction.new(function_proto(), fun, name, arity, ctor)
 
   -> method(obj, name, arity, fun)
-    f = native(name.is_a?(JsSymbol) ? "[" + name.description + "]" : name, arity, fun)
+    f = native(name.is_a?(JsSymbol) ? "\[" + name.description + "]" : name, arity, fun)
     obj.define(name, f, BUILTIN_ATTRS)
     f
 
   -> getter(obj, name, fun, setter = nil)
-    g = native("get " + (name.is_a?(JsSymbol) ? "[" + name.description + "]" : name), 0, fun)
+    g = native("get " + (name.is_a?(JsSymbol) ? "\[" + name.description + "]" : name), 0, fun)
     s = setter == nil ? nil : native("set " + name.to_s, 1, setter)
     obj.define_accessor(name, g, s, ATTR_C)
     g
@@ -226,7 +252,7 @@ JS_ITER_DONE = JsIterDone.new
 + JsHost
   # Print for console.log/info/warn/error/debug.
   -> console(level, text)
-    << "[js " + level + "] " + text
+    << "\[js " + level + "] " + text
 
   # setTimeout/setInterval: schedule f after ms; returns an id.
   -> set_timer(f, ms, repeat)

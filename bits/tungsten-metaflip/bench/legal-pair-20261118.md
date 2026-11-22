@@ -25,3 +25,5 @@ Run from the MetaFlip package directory.
 bench/metabench run --experiment pairs-20261118 --algo metaflip/V0,metaflip/legal-pair \
   --tasks 2x3x4,2x4x4,3x3x3,3x3x4,3x3x5,2x3x5 --n 12 --jobs 6
 ```
+
+To verify the [archived run logs and certificates](legal-pair-20261118/) and reproduce the comparison, run `ruby bench/legal-pair-20261118/audit.rb` from the MetaFlip package directory.

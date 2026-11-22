@@ -56,7 +56,7 @@ expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c runtime_udp.c ak
 expect "metal.m graphics.m hid_bridge.m" darwin companion:bridges
 expect "" linux companion:bridges
 expect "openblas_bridge.c" linux companion:blas
-expect "media/media.c media/media_avf.m" darwin companion:media
+expect "media/media.c media/media_avf.m media/media_sysdec.m" darwin companion:media
 expect "credentials.m" darwin companion:credentials
 expect "" linux companion:credentials
 [ "$(sh "$SOURCES" -f darwin companion:blas)" = "$(printf 'blas_bridge.c\t-fno-finite-math-only')" ] ||

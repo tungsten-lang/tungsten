@@ -56,6 +56,7 @@ use hevc_filter
     @cf = i32[HF_SIZE]
     @dpb = []
     @px = nil
+    @sao_src = nil
     @nslots = 0
     @slot_size = 0
     @active_sps = nil
@@ -499,7 +500,12 @@ use hevc_filter
     if st[HS_DBK_ANY] != 0
       hv_deblock(st, @mp, @tb, @px)
     if st[HS_SAO_ANY] != 0 && st[HS_SAO_EN] != 0
-      src = u16[@slot_size]
+      # SAO reads the deblocked picture: one copy, in a buffer kept across
+      # pictures (allocating it per picture leaked a picture's worth each time)
+      if @sao_src == nil || @sao_src.size != @slot_size
+        ccall("w_value_free_w", @sao_src) if @sao_src != nil
+        @sao_src = u16[@slot_size]
+      src = @sao_src
       hv_copy_u16(@px, st[HS_PY], src, 0, @slot_size)
       hv_sao_apply(st, @mp, @px, src)
     @pic.w = @pic_sps[:width]
@@ -511,6 +517,15 @@ use hevc_filter
     nil
 
   # C.5.2: output pictures while more are waiting than the reorder depth allows.
+  # (a plain loop: `waiting.any?(->(p) p.latency >= maxlat)` crashed --release
+  # builds, the closure's environment arriving null under TUNGSTEN_FREE)
+  -> hv_any_late(waiting, maxlat)
+    i = 0
+    while i < waiting.size
+      return true if waiting[i].latency >= maxlat
+      i += 1
+    false
+
   -> bump(sps)
     reorder = sps[:max_reorder].last
     maxdec = sps[:max_dec].last
@@ -523,7 +538,7 @@ use hevc_filter
         best = waiting[0]
         waiting.each ->(p) best = p if p.poc < best.poc
         emit(best)
-      elsif maxlat > 0 && waiting.any?(->(p) p.latency >= maxlat)
+      elsif maxlat > 0 && hv_any_late(waiting, maxlat)
         best = waiting[0]
         waiting.each ->(p) best = p if p.poc < best.poc
         emit(best)
@@ -807,11 +822,15 @@ use hevc_filter
   bd = sps[:bd_y]
   planes = []
   strides = []
+  # the cropped planes were allocated for this frame alone: an 8-bit frame
+  # gets byte copies (the u16 originals are released here) and the consumer
+  # owns whatever the frame holds (VideoFrame#owned)
   e[:planes].each ->(p)
     if bd == 8
       b = ByteArray.new(p.size)
       hv_u16_to_u8(p, b, p.size)
       planes.push(b)
+      ccall("w_value_free_w", p)
     else
       planes.push(p)
   w = e[:w]
@@ -822,6 +841,7 @@ use hevc_filter
     strides.push((w + (1 << ssx) - 1) >> ssx)
     strides.push((w + (1 << ssx) - 1) >> ssx)
   f = VideoFrame.new(w, h, planes, strides, chroma, bd, e[:pts])
+  f.owned = true
   f.duration = e[:dur] if e[:dur] != nil
   c = hv_cicp(sps)
   if c != nil

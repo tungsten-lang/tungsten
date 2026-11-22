@@ -191,7 +191,7 @@ static void *m_handle_peek(WValue h, int kind) {
 void *w_media_handle_get(WValue h, int kind, const char *what) {
     void *p = m_handle_peek(h, kind);
     if (!p) {
-        static const char *names[] = {"?", "encoder", "segment", "mux", "scaler", "decoder", "transcode", "audio player", "MIDI output", "MIDI input", "live sampler", "audio stream"};
+        static const char *names[] = {"?", "encoder", "segment", "mux", "scaler", "decoder", "transcode", "audio player", "MIDI output", "MIDI input", "live sampler", "audio stream", "system video decoder", "system audio decoder"};
         const char *k = kind > 0 && kind < W_MEDIA_KIND_COUNT ? names[kind] : "?";
         w_media_raise("media: %s: the %s is closed or the handle is unknown", what, k);
     }

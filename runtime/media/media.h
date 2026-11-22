@@ -13,6 +13,8 @@
  *                stubs for every entry point below (both lists).
  *   media_avf.m  Objective-C (manual retain/release, like metal.m):
  *                AVAssetWriter mux and AVAssetReader probes. Apple only.
+ *   media_sysdec.m  VideoToolbox / AudioConverter decoders over core/codec's
+ *                compressed samples (core/codec/system). Apple only.
  *
  * Linking: the compiler links media.c (every target) and media_avf.m (macOS)
  * only when a program's LLVM IR references a `@w_media_` symbol
@@ -130,7 +132,23 @@
     X(w_media_live_pcm_write, 5)       \
     X(w_media_studio_op, 4)
 
-#define W_MEDIA_CCALLS(X) W_MEDIA_C_CCALLS(X) W_MEDIA_AVF_CCALLS(X)
+/* Implemented in media_sysdec.m (Apple only): VideoToolbox / AudioToolbox
+ * decoders fed core/codec's compressed samples (core/codec/system). */
+#define W_MEDIA_SYS_CCALLS(X)          \
+    X(w_media_sys_rusage, 0)           \
+    X(w_media_vtdec_new, 3)            \
+    X(w_media_vtdec_decode, 4)         \
+    X(w_media_vtdec_take, 3)           \
+    X(w_media_vtdec_info, 2)           \
+    X(w_media_vtdec_reset, 1)          \
+    X(w_media_vtdec_close, 1)          \
+    X(w_media_atdec_new, 3)            \
+    X(w_media_atdec_decode, 3)         \
+    X(w_media_atdec_info, 2)           \
+    X(w_media_atdec_reset, 1)          \
+    X(w_media_atdec_close, 1)
+
+#define W_MEDIA_CCALLS(X) W_MEDIA_C_CCALLS(X) W_MEDIA_AVF_CCALLS(X) W_MEDIA_SYS_CCALLS(X)
 
 #define W_MEDIA_PARAMS_0 void
 #define W_MEDIA_PARAMS_1 WValue
@@ -161,7 +179,8 @@ W_MEDIA_CCALLS(W_MEDIA_PROTOTYPE)
 /* Handle kinds in the shared registry. */
 enum { W_MEDIA_KIND_ENCODER = 1, W_MEDIA_KIND_SEGMENT = 2, W_MEDIA_KIND_MUX = 3, W_MEDIA_KIND_SCALER = 4,
        W_MEDIA_KIND_DECODER = 5, W_MEDIA_KIND_TRANSCODE = 6, W_MEDIA_KIND_PLAYER = 7,
-       W_MEDIA_KIND_MIDIOUT = 8, W_MEDIA_KIND_MIDIIN = 9, W_MEDIA_KIND_LIVE = 10, W_MEDIA_KIND_PCM = 11, W_MEDIA_KIND_COUNT = 12 };
+       W_MEDIA_KIND_MIDIOUT = 8, W_MEDIA_KIND_MIDIIN = 9, W_MEDIA_KIND_LIVE = 10, W_MEDIA_KIND_PCM = 11,
+       W_MEDIA_KIND_SYSVIDEO = 12, W_MEDIA_KIND_SYSAUDIO = 13, W_MEDIA_KIND_COUNT = 14 };
 
 /* One compressed sample of a segment, in decode order. pts/dts are frame
  * indices relative to the segment's first frame (dts == pts without

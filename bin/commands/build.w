@@ -1734,7 +1734,7 @@ if bootstrap_compiler_clang_opt == ""
     name = basename_of(bit_root)
     if name.starts_with?("tungsten-")
       name = name.slice(9, name.size - 9)
-    entries.push({name: name, source: "lib/" + name + ".w", profile: "", native: false, opt_level: "", cflags: "", debug: false})
+    entries.push({name: name, source: "lib/" + name + ".w", profile: "", native: false, opt_level: "", cflags: "", debug: false, implied: true})
   entries
 
 -> bit_relative_path?(path)
@@ -3643,7 +3643,12 @@ else
         entry_clang_opt = bit_cflags_opt(entry_clang_opt, rec[:cflags], rec[:opt_level], env_or_empty("TUNGSTEN_BITS_CLANG_OPT"), RELEASE_MODE, DEBUG_REQUESTED)
         if !regular_file?(entry)
           bits_skipped = bits_skipped + 1
-          bits_failed = bits_failed + 1
+          # A Bitfile without `executable` lines implies lib/<name>.w; a bit
+          # that has neither is a library (tungsten-robolab), not a failed
+          # build. A declared executable whose source is missing still fails.
+          if rec[:implied] != true
+            bits_failed = bits_failed + 1
+            << "    " + RED + "missing" + RESET + " " + project_relative_path(entry)
         else
           plist_text = bit_app_info_plist(bit_path, rec[:name])
           key = bit_static_key(bit_path, entry, rec[:name], BIT_RUNTIME_KEY, BIT_LINK_FLAGS, BIT_LINK_LIBS, entry_clang_opt, entry_flags, plist_text)
@@ -3757,5 +3762,7 @@ else
   bits_summary = skip_bits ? "skipped" : bits_built.to_s + " built"
   if bits_skipped > 0
     bits_summary = bits_summary + ", " + bits_skipped.to_s + " skipped"
+  if bits_failed > 0
+    bits_summary = bits_summary + ", " + bits_failed.to_s + " failed"
   << BOLD + "==> Done" + RESET + " " + DIM + "(compiler " + ms(t2 - t0) + ", runtime " + ms(t4 - t3) + ", bits: " + bits_summary + " " + ms(t6 - t5) + ")" + RESET
 << ""

@@ -768,6 +768,11 @@
       recv = node.receiver
       if ast_kind(recv) == :var && is_typed_array_type?(declared_types[recv.name])
         return int_shaped_node?(node.args[0], declared_types, mod)
+    # `n = a.size` on a typed array is a raw machine int (infer_type's size
+    # rule), so a manual `while i < n` loop compares raw instead of boxing n.
+    if name in ("size" "length") && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :var && (node.args == nil || node.args.size() == 0) && node.block == nil
+      if is_typed_array_type?(declared_types[node.receiver.name])
+        return true
   when :binary_op
     op = node.op
     if op == :LSHIFT

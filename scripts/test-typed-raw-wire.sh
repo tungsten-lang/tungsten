@@ -12,7 +12,7 @@ tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 "$TUNGSTEN" --wire "$ROOT/spec/fixtures/typed/raw_probe.w" >"$tmp" 2>&1
 fail=0
-for fn in fa fc gc hc band mixf elemf elemf2 loopshl early clip useclip wid tern2 flt gtab iteach itzip itmap; do
+for fn in fa fc gc hc band mixf elemf elemf2 loopshl early clip useclip wid tern2 flt gtab iteach itzip itmap manual_n; do
   body=$(awk -v f="$fn" '$1 == "function" && index($2, "__w_" f "__") == 1 {on=1; next} on && /^$/ {on=0} on {print}' "$tmp")
   if [[ -z "$body" ]]; then
     echo "typed-raw: no WIRE for $fn" >&2; fail=1; continue

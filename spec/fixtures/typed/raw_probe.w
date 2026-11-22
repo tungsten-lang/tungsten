@@ -50,6 +50,14 @@
 -> flt(a) (f64[]) f64
   t = a[0] * 2
   t + a[1]
+-> manual_n(a) (i32[]) i64
+  s = 0 ## i64
+  i = 0 ## i64
+  n = a.size
+  while i < n
+    s += a[i]
+    i += 1
+  s
 GTAB = i32[256]
 -> gtab(n) (i64) i64
   s = 0 ## i64
@@ -75,5 +83,5 @@ a = i32[4]
 u = u8[4]
 w = u16[4]
 fa_ = f64[4]
-<< fa(3) + fc(3) + gc(3) + hc(3, a) + band(5, 6) + loopshl(3, 10) + early(u, 3) + useclip(a, 4) + wid(a) + tern2(w, 1) + gtab(4) + iteach(a) + itzip(a, a) + itmap(a)
+<< fa(3) + fc(3) + gc(3) + hc(3, a) + band(5, 6) + loopshl(3, 10) + early(u, 3) + useclip(a, 4) + wid(a) + tern2(w, 1) + gtab(4) + iteach(a) + itzip(a, a) + itmap(a) + manual_n(a)
 << mixf(~0.5, 3) + elemf(a, 1, ~0.5) + elemf2(u, 1) + flt(fa_)

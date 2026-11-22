@@ -11,7 +11,8 @@
     return false
   if ll_code_has(text, "@w_slab_init_static_zstd(")
     return true
-  ll_code_has(text, "@w_zstd_compress_llvm_escaped(")
+  return true if ll_code_has(text, "@w_zstd_compress_llvm_escaped(")
+  ll_code_has(text, "@w_zstd_decompress(")
 
 -> ll_needs_zstd_path(ll_path)
   ll_needs_zstd_text(read_file(ll_path))

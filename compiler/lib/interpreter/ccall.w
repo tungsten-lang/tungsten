@@ -687,6 +687,18 @@
     when "w_ip_in_cidr"
       return ccall("w_ip_in_cidr", args[1], args[2])
 
+    # Dns (core/dns.w): blocks the calling thread until the system resolver answers.
+    when "w_dns_lookup"
+      if args.size() != 3
+        raise "w_dns_lookup expects a host and a timeout"
+      return ccall("w_dns_lookup", args[1], args[2])
+    when "w_dns_available"
+      return ccall("w_dns_available")
+    when "w_zstd_decompress"
+      if args.size() != 2
+        raise "w_zstd_decompress expects data"
+      return ccall("w_zstd_decompress", args[1])
+
     # UDPSocket (core/udp_socket.w). w_udp_recv/_from park on the event loop
     # like any blocking ccall; dispatch_interpreted_ccall restores this
     # goroutine's context when it resumes.

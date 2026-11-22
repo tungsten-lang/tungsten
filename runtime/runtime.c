@@ -77825,6 +77825,8 @@ W_RT_INTERNAL void w_rt_set_coop_event_loop(WEventLoop *el) { g_coop_event_loop 
 W_RT_INTERNAL void w_rt_set_scheduler_persistent(int val) { g_scheduler_persistent = val; }
 W_RT_INTERNAL void w_rt_socket_park_uring(void) { w_socket_park_uring(); }
 W_RT_INTERNAL int w_rt_fd_set_nonblocking(int fd) { return w_fd_set_nonblocking(fd); }
+W_RT_INTERNAL int64_t w_rt_deadline_ticks_after_ms(int64_t ms) { return w_deadline_ticks_after_ms(ms); }
+W_RT_INTERNAL WValue w_rt_socket_read_string(WString *ws, size_t bytes) { return w_socket_read_string(ws, bytes); }
 
 #if defined(__INCLUDE_LEVEL__) && __INCLUDE_LEVEL__ > 0
 #ifndef W_RUNTIME_UNITY_INCLUDE
@@ -77833,4 +77835,5 @@ W_RT_INTERNAL int w_rt_fd_set_nonblocking(int fd) { return w_fd_set_nonblocking(
 #include "runtime_crypto.c"
 #include "runtime_gmp.c"
 #include "runtime_http.c"
+#include "runtime_udp.c"
 #endif

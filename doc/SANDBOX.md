@@ -40,7 +40,7 @@ a probe it could have handled.
 
 | Response | Operations |
 | --- | --- |
-| **block** (raises) | `read_file`, `write_file`, `append_file`, `append_file_to`, `read_dir`, `mmap`, `rename`, `unlink`, `mkdir_p`, `mkdtemp`, `temp_file_for`, `fsync_path`, `fsync_parent`, `system`, `capture`, `proc_spawn`, `proc_wait`, `proc_kill`, `setenv`, `socket_connect`, `socket_listen`, `socket_accept`, `serve_http`, `http3_serve`, and the 14 `w_sci_*` scientific-format readers/writers |
+| **block** (raises) | `read_file`, `write_file`, `append_file`, `append_file_to`, `read_dir`, `mmap`, `rename`, `unlink`, `mkdir_p`, `mkdtemp`, `temp_file_for`, `fsync_path`, `fsync_parent`, `system`, `capture`, `proc_spawn`, `proc_wait`, `proc_kill`, `setenv`, `socket_connect`, `socket_listen`, `socket_accept`, `udp_socket`, `serve_http`, `http3_serve`, and the 14 `w_sci_*` scientific-format readers/writers |
 | **stub** (benign value) | `env` → nil, `file_exists` → false, `file_directory` → false, `file_size` → nil, `file_mtime_ns` → nil, `file_id` → nil, `proc_alive` → false |
 
 **Never gated:** stdout and stderr, stdin, clocks, threads, memory, and all pure

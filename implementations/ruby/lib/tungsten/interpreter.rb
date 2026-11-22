@@ -2,6 +2,7 @@
 
 require "bigdecimal"
 require_relative "runtime/compiler_intrinsics"
+require_relative "runtime/udp_sockets"
 
 module Tungsten
   # Control-flow signals use throw/catch instead of raise/rescue for performance.
@@ -85,6 +86,7 @@ module Tungsten
 
   class Interpreter < Visitor
     include Runtime::CompilerIntrinsics
+    include Runtime::UdpSockets
 
     W_NIL           = 0x0000_0000_0000_0000
     W_FALSE         = 0x0000_0000_0000_0001
@@ -6138,6 +6140,9 @@ module Tungsten
         args[1].to_bytes(args[2])
       when "w_bigint_from_bytes"
         Integer.from_bytes(args[1], args[2])
+      # UDPSocket (core/udp_socket.w): the handle is a Ruby UDPSocket here.
+      when *UDP_CCALLS
+        dispatch_udp_ccall(cname, args, node)
       # FileHandle (core/file.w): the handle is a Ruby IO here.
       when "__w_file_handle_open"
         begin

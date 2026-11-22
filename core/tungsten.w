@@ -403,6 +403,7 @@
   auto :TLS,          "tls"
   auto :Token,        "token"
   auto :Tuple,        "tuple"
+  auto :UDPSocket,    "udp_socket"
   auto :UUID,         "uuid"
   auto :Value,        "value"
   auto :URL,          "url"

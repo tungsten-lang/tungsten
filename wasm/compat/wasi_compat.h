@@ -63,6 +63,14 @@ typedef struct {
 } Dl_info;
 int dladdr(const void *addr, Dl_info *info);
 
+/* ---- socket calls wasip1 does not declare (inert stubs in wasi_stubs.c) */
+int socket(int domain, int type, int protocol);
+int bind(int fd, const struct sockaddr *addr, socklen_t len);
+int connect(int fd, const struct sockaddr *addr, socklen_t len);
+int getsockname(int fd, struct sockaddr *addr, socklen_t *len);
+ssize_t sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *to, socklen_t len);
+ssize_t recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr *from, socklen_t *len);
+
 /* ---- socket options wasi-libc does not name --------------------------- */
 #ifndef SO_REUSEADDR
 #define SO_REUSEADDR 2

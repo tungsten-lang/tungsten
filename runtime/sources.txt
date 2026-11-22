@@ -38,6 +38,7 @@ runtime.c            program,compiler,tests,wasm                 any
 runtime_crypto.c     program,compiler,tests,wasm                 any
 runtime_gmp.c        program,compiler,tests,wasm                 any
 runtime_http.c       program,compiler,tests,wasm                 any
+runtime_udp.c        program,compiler,tests,wasm                 any
 terminal_input.c     program,compiler,tests                      any
 aks.c                program,compiler,tests,wasm                 any
 

@@ -1580,6 +1580,17 @@ void   w_socket_park(int fd, int events);
 int    w_socket_park_until(int fd, int events, int64_t deadline_ticks);
 int64_t w_socket_read_deadline_ticks(WSocket *s);
 
+/* ---- UDP sockets (runtime_udp.c, core/udp_socket.w) ---- */
+WValue w_udp_open(WValue family);
+WValue w_udp_bind(WValue fd, WValue host, WValue port);
+WValue w_udp_connect(WValue fd, WValue host, WValue port);
+WValue w_udp_send(WValue fd, WValue data);
+WValue w_udp_send_to(WValue fd, WValue data, WValue host, WValue port);
+WValue w_udp_recv(WValue fd, WValue max, WValue timeout_ms, WValue as_bytes);
+WValue w_udp_recv_from(WValue fd, WValue max, WValue timeout_ms, WValue as_bytes);
+WValue w_udp_local_port(WValue fd);
+WValue w_udp_close(WValue fd);
+
 /* ---- Goroutines ---- */
 
 #include <ucontext.h>

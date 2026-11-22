@@ -687,6 +687,46 @@
     when "w_ip_in_cidr"
       return ccall("w_ip_in_cidr", args[1], args[2])
 
+    # UDPSocket (core/udp_socket.w). w_udp_recv/_from park on the event loop
+    # like any blocking ccall; dispatch_interpreted_ccall restores this
+    # goroutine's context when it resumes.
+    when "w_udp_open"
+      if args.size() != 2
+        raise "w_udp_open expects a family"
+      return ccall("w_udp_open", args[1])
+    when "w_udp_bind"
+      if args.size() != 4
+        raise "w_udp_bind expects a handle, host and port"
+      return ccall("w_udp_bind", args[1], args[2], args[3])
+    when "w_udp_connect"
+      if args.size() != 4
+        raise "w_udp_connect expects a handle, host and port"
+      return ccall("w_udp_connect", args[1], args[2], args[3])
+    when "w_udp_send"
+      if args.size() != 3
+        raise "w_udp_send expects a handle and data"
+      return ccall("w_udp_send", args[1], args[2])
+    when "w_udp_send_to"
+      if args.size() != 5
+        raise "w_udp_send_to expects a handle, data, host and port"
+      return ccall("w_udp_send_to", args[1], args[2], args[3], args[4])
+    when "w_udp_recv"
+      if args.size() != 5
+        raise "w_udp_recv expects a handle, size, timeout and bytes flag"
+      return ccall("w_udp_recv", args[1], args[2], args[3], args[4])
+    when "w_udp_recv_from"
+      if args.size() != 5
+        raise "w_udp_recv_from expects a handle, size, timeout and bytes flag"
+      return ccall("w_udp_recv_from", args[1], args[2], args[3], args[4])
+    when "w_udp_local_port"
+      if args.size() != 2
+        raise "w_udp_local_port expects a handle"
+      return ccall("w_udp_local_port", args[1])
+    when "w_udp_close"
+      if args.size() != 2
+        raise "w_udp_close expects a handle"
+      return ccall("w_udp_close", args[1])
+
     when "w_mac_parse"
       return ccall("w_mac_parse", args[1])
 

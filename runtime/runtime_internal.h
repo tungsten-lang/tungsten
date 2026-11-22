@@ -103,6 +103,8 @@ W_RT_INTERNAL void w_rt_set_coop_event_loop(WEventLoop *el);
 W_RT_INTERNAL void w_rt_set_scheduler_persistent(int val);
 W_RT_INTERNAL void w_rt_socket_park_uring(void);
 W_RT_INTERNAL int w_rt_fd_set_nonblocking(int fd);
+W_RT_INTERNAL int64_t w_rt_deadline_ticks_after_ms(int64_t ms);
+W_RT_INTERNAL WValue w_rt_socket_read_string(WString *ws, size_t bytes);
 void w_goroutine_count_set_enabled(int enabled);
 
 #endif /* TUNGSTEN_RUNTIME_INTERNAL_H */

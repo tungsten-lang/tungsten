@@ -45,14 +45,14 @@ expect() {
   got="$(sel "$@")"
   [ "$got" = "$want" ] || fail "sources.sh $*: expected '$want', got '$got'"
 }
-expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_kqueue.c tls_stub.c" darwin program event tls-stub
-expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_epoll.c tls.c slab_zstd.c" linux program event tls zstd
-expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_iouring.c tls_stub.c" linux program event-iouring tls-stub
-expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_kqueue.c tls_stub.c slab_zstd.c ssmr_witness.c lexchar_tables.c unicode_tables.c metal.m hid_bridge.m blas_bridge.c" \
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c runtime_udp.c terminal_input.c aks.c event_kqueue.c tls_stub.c" darwin program event tls-stub
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c runtime_udp.c terminal_input.c aks.c event_epoll.c tls.c slab_zstd.c" linux program event tls zstd
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c runtime_udp.c terminal_input.c aks.c event_iouring.c tls_stub.c" linux program event-iouring tls-stub
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c runtime_udp.c terminal_input.c aks.c event_kqueue.c tls_stub.c slab_zstd.c ssmr_witness.c lexchar_tables.c unicode_tables.c metal.m hid_bridge.m blas_bridge.c" \
   darwin compiler event tls-stub zstd
-expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c terminal_input.c aks.c event_epoll.c tls_stub.c slab_zstd_stub.c http2.c ssmr_witness.c lexchar_tables.c unicode_tables.c" \
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c runtime_udp.c terminal_input.c aks.c event_epoll.c tls_stub.c slab_zstd_stub.c http2.c ssmr_witness.c lexchar_tables.c unicode_tables.c" \
   linux compiler event tls-stub zstd-stub http2
-expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c aks.c tls_stub.c slab_zstd_stub.c ssmr_witness.c lexchar_tables.c unicode_tables.c tensor_bridge.c" wasm wasm
+expect "runtime.c runtime_crypto.c runtime_gmp.c runtime_http.c runtime_udp.c aks.c tls_stub.c slab_zstd_stub.c ssmr_witness.c lexchar_tables.c unicode_tables.c tensor_bridge.c" wasm wasm
 expect "metal.m graphics.m hid_bridge.m" darwin companion:bridges
 expect "" linux companion:bridges
 expect "openblas_bridge.c" linux companion:blas

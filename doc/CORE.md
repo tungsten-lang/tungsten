@@ -7,7 +7,7 @@
 The standard library is lazily autoloaded from the `auto :Name, "path"` table
 in [`core/tungsten.w`](../core/tungsten.w): a class is invisible until it is
 registered there. This reference lists every registered class and trait
-(840 total), grouped by area, with its declaration, a one-line
+(841 total), grouped by area, with its declaration, a one-line
 summary from the source header, and a link to the source.
 
 
@@ -414,6 +414,7 @@ summary from the source header, and a link to the source.
 | `TLS` | `+ TLS` | TLS — verified client and configured-server transport facade. | [`core/tls.w`](../core/tls.w) |
 | `Token` | `+ Token` | — | [`core/token.w`](../core/token.w) |
 | `Tuple` | `+ Tuple` | Tuple — a heterogeneous, fixed, dynamically-indexable value grouping. | [`core/tuple.w`](../core/tuple.w) |
+| `UDPSocket` | `+ UDPSocket` | UDPSocket — nonblocking UDP datagram sockets integrated with Tungsten's | [`core/udp_socket.w`](../core/udp_socket.w) |
 | `UUID` | `+ UUID` | — | [`core/uuid.w`](../core/uuid.w) |
 | `Value` | `+ Value` | Value — raw WValue bit-level inspection and scene rendering. | [`core/value.w`](../core/value.w) |
 | `URL` | `+ URL` | URL — strict absolute-URL parsing and canonical reconstruction. | [`core/url.w`](../core/url.w) |

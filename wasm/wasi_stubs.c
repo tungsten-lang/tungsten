@@ -98,6 +98,23 @@ int getnameinfo(const struct sockaddr *sa, socklen_t salen, char *host, socklen_
     return EAI_FAIL;
 }
 
+/* ---- 3b. sockets ---------------------------------------------------
+ * wasip1 has no socket creation. wasi-libc declares and defines the calls on
+ * an already-open descriptor (send, recv, setsockopt, ...); these are the ones
+ * it leaves out that the UDP runtime (runtime_udp.c, live in the interpreter
+ * image through core/udp_socket.w) references. socket() failing first means
+ * the rest are never reached. */
+int socket(int domain, int type, int protocol) { (void)domain; (void)type; (void)protocol; return w_wasi_nosys(); }
+int bind(int fd, const struct sockaddr *addr, socklen_t len) { (void)fd; (void)addr; (void)len; return w_wasi_nosys(); }
+int connect(int fd, const struct sockaddr *addr, socklen_t len) { (void)fd; (void)addr; (void)len; return w_wasi_nosys(); }
+int getsockname(int fd, struct sockaddr *addr, socklen_t *len) { (void)fd; (void)addr; (void)len; return w_wasi_nosys(); }
+ssize_t sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *to, socklen_t len) {
+    (void)fd; (void)buf; (void)n; (void)flags; (void)to; (void)len; return w_wasi_nosys();
+}
+ssize_t recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr *from, socklen_t *len) {
+    (void)fd; (void)buf; (void)n; (void)flags; (void)from; (void)len; return w_wasi_nosys();
+}
+
 /* ---- 4. dladdr ------------------------------------------------------ */
 int dladdr(const void *addr, Dl_info *info) { (void)addr; (void)info; return 0; }
 

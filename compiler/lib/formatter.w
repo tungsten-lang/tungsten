@@ -19,9 +19,9 @@ use parser
     if parser_tok_off(token) >= offset
       break
     kind = parser_tok_type(token)
-    if kind in (T_LPAREN T_LBRACKET T_LBRACE)
+    if kind in (TOK_LPAREN TOK_LBRACKET TOK_LBRACE)
       depth += 1
-    elsif kind in (T_RPAREN T_RBRACKET T_RBRACE)
+    elsif kind in (TOK_RPAREN TOK_RBRACKET TOK_RBRACE)
       depth -= 1
     i += 1
   depth
@@ -85,7 +85,7 @@ use parser
     # Packed token lengths wrap at 4096. A hash inside a long string-like
     # token would otherwise look uncovered and be mistaken for a comment.
     # Conservatively keep that rare source on the lossless path.
-    if next_off - off >= 4096 && kind in (T_STRING T_STRING_INTERP T_REGEX T_REGEX_CAPTURE T_BYTE_ARRAY T_BYTE_ARRAY_INTERP T_WORD_ARRAY T_SYMBOL_ARRAY T_TYPE_HINT)
+    if next_off - off >= 4096 && kind in (TOK_STRING TOK_STRING_INTERP TOK_REGEX TOK_REGEX_CAPTURE TOK_BYTE_ARRAY TOK_BYTE_ARRAY_INTERP TOK_WORD_ARRAY TOK_SYMBOL_ARRAY TOK_TYPE_HINT)
       return nil
     j = 0
     while j < size
@@ -110,13 +110,13 @@ use parser
       i += 2
       next
     token_kind = covered[i]
-    if token_kind != nil && token_kind != T_TYPE_HINT
+    if token_kind != nil && token_kind != TOK_TYPE_HINT
       i += 1
       next
     # A trailing comment is part of the packed TYPE_HINT token even though
     # Parser later strips it. Replacing it with a statement would sever the
     # pending hint from its definition, so retain the lossless fallback.
-    if token_kind == T_TYPE_HINT
+    if token_kind == TOK_TYPE_HINT
       return nil
     if formatter_group_depth_at(tokens, token_count, i) > 0
       return nil

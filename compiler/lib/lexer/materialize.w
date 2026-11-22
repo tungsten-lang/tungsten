@@ -796,7 +796,7 @@
       elsif raw == "$+"
         emit_id(46, :REGEX_CAPTURE, "1000003")
       elsif raw == "-@"
-        # Unary-minus method-name marker (`-> -@`). Emitted as T_ID so
+        # Unary-minus method-name marker (`-> -@`). Emitted as TOK_ID so
         # expect_method_name treats it as a normal identifier.
         emit_id(1, :ID, raw)
       elsif raw == "+@"

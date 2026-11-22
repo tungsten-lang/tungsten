@@ -8,6 +8,8 @@
   # left its own dispatch stacks and signal record in the ivars (see
   # spawn_goroutine). Before the first `go` this is a plain forward.
   -> dispatch_interpreted_ccall(args)
+    if @sandboxed && args.size() > 0
+      sandbox_check_ccall("" + args[0])
     if !@goroutines_active
       return dispatch_interpreted_ccall_inner(args)
     saved = goroutine_context()
@@ -986,6 +988,8 @@
   -> dispatch_interpreted_ccall_nobox(args)
     if args.size() == 0
       raise "ccall_nobox requires a runtime function name"
+    if @sandboxed
+      raise_typed("SecurityError", "sandbox: ccall_nobox is not available")
     cname = "" + args[0]
     case cname
     when "w_slab_is_frozen"

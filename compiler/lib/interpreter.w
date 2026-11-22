@@ -12,3 +12,4 @@ use interpreter/ccall
 use interpreter/expressions
 use interpreter/dispatch
 use interpreter/definitions
+use interpreter/sandbox

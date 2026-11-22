@@ -1567,7 +1567,7 @@ in Tungsten:AST
     ccall_nobox("w_ast_intern_node", KIND_VAR, name)
 
 # PascalCase identifier — a class/const reference, distinct from Var
-# (a variable). The parser emits this for T_NAME tokens so downstream
+# (a variable). The parser emits this for TOK_NAME tokens so downstream
 # (lowering, interpreter, autoload pass) routes through class-resolution
 # instead of variable lookup. Same slab shape as Var.
 #

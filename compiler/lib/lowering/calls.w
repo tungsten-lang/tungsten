@@ -940,6 +940,30 @@
     emit_wire_cttz_i64(wfn, t, a_raw)
     return typed_value(:raw_i64, t)
 
+  # clz(x) / clz32(x): leading zero bits of the 64-bit / low 32-bit word
+  # (64 / 32 for zero); ctz(x) / ctz32(x): trailing zero bits; popcount32(x):
+  # set bits of the low 32-bit word. One instruction each (llvm.ctlz/cttz/
+  # ctpop through the BitOps helpers), raw i64 result.
+  if name in ("clz" "clz32" "ctz" "ctz32" "popcount32") && args.size() == 1 && node.block == nil
+    helper = "__w_bit_ctlz_u64"
+    width = :u64
+    if name == "clz32"
+      helper = "__w_bit_ctlz_u32"
+      width = :u32
+    elsif name == "ctz"
+      helper = "__w_bit_cttz_u64"
+    elsif name == "ctz32"
+      helper = "__w_bit_cttz_u32"
+      width = :u32
+    elsif name == "popcount32"
+      helper = "__w_bit_ctpop_u32"
+      width = :u32
+    if width == :u32
+      arg = Tungsten:AST:TypeAscription.new(Tungsten:AST:BinaryOp.new(args[0], :AMPERSAND, Tungsten:AST:Int.new(4294967295)), "u32")
+    else
+      arg = Tungsten:AST:TypeAscription.new(args[0], "u64")
+    return lower_call(ctx, Tungsten:AST:Call.new(nil, "ccall_nobox", [Tungsten:AST:String.new(helper), arg], nil))
+
   # array_load_u64(u8arr, byte_off) → the unaligned little-endian i64 word at
   # byte_off of a u8[] payload; array_store_u64(u8arr, byte_off, v) stores
   # one. Eight bytes per access instead of eight subscripts — the sieve

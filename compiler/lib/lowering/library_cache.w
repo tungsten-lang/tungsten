@@ -360,7 +360,7 @@ incremental_library_cache_state = {
     if mod == nil || ast_get(value, :receiver) != nil || ast_get(value, :block) != nil || ast_get(value, :reuse_safe) == true || ast_get(value, :recycle_safe) == true
       return false
     cname = ast_get(value, :name)
-    if cname == nil || cname in ("ccall" "ccall_nobox" "ccall_rawargs" "eval" "constant_alias" "wymix" "StringBuffer" "slab_offset_for_id" "raw_load_u8" "raw_store_u8" "raw_load_u32" "raw_load_u64" "l1d_cache_bytes" "l2_cache_bytes" "cpus_per_l2" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch" "slab_alloc_init")
+    if cname == nil || cname in ("ccall" "ccall_nobox" "ccall_rawargs" "eval" "constant_alias" "wymix" "StringBuffer" "slab_offset_for_id" "raw_load_u8" "raw_store_u8" "raw_load_u32" "raw_load_u64" "l1d_cache_bytes" "l2_cache_bytes" "cpus_per_l2" "popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "array_store_u64" "prefetch" "slab_alloc_init")
       return false
     if mod[:known_calls][cname] == nil || mod[:known_fn_overloads][cname] == true || mod[:known_fn_splat_info][cname] != nil || mod[:raw_callable_fns][cname] != nil
       return false

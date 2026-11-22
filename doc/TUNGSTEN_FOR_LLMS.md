@@ -279,7 +279,8 @@ tightly than `∪`. Set operations produce new sets.
 - **Int**: `42`, `0xFF`, `0b1010` — the default exact, auto-promoting
   implementation; values report `Int` inline and `BigInt` on the heap
   (`n.popcount` / `n.bit_count` count the 1 bits of the magnitude, exact for
-  BigInt; `popcount(x)` is the raw-machine-word intrinsic)
+  BigInt; `popcount(x)` is the raw-machine-word intrinsic, with `clz(x)`,
+  `ctz(x)` and the 32-bit `clz32`/`ctz32`/`popcount32`)
 - **String**: `"hello"`, with `[expr]` interpolation
 - **Bool**: `true`, `false`
 - **Nil**: `nil`

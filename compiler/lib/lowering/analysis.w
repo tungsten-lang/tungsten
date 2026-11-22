@@ -143,7 +143,7 @@
     # exemption here, so operands inside an escape position (e.g. `return
     # wvalue_from_bits(tag | x)`) are not force-boxed. wvalue_bits is NOT
     # exempt: its argument is a boxed WValue read.
-    if node.receiver == nil && node.name in ("ccall_nobox" "ccall_rawargs" "wvalue_from_bits" "raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch" "mulhi" "addcarry" "subborrow")
+    if node.receiver == nil && node.name in ("ccall_nobox" "ccall_rawargs" "wvalue_from_bits" "raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "array_store_u64" "prefetch" "mulhi" "addcarry" "subborrow")
       return nil
     mark_subtree_escape(node.receiver, records)
     mark_subtree_escape(node.args, records)
@@ -753,7 +753,7 @@
       return true
     # popcount/cttz/array_load_u64/array_store_u64/prefetch return raw i64
     # (calls.w); a local bound to one stays in a raw slot.
-    if name in ("popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
+    if name in ("popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
       return true
     # mulhi(a,b) returns a raw u64 (high half of a 64x64 product). Mark it
     # int-shaped so a loop-reassigned local `phi = mulhi(...)` stays unboxed and
@@ -1062,7 +1062,7 @@
     # used as the pointer or index does NOT escape. Without this, a parser's
     # `data`/`pos` locals un-promoted to boxed, then ensure_raw_machine_int
     # ran w_to_i64 on a raw pointer and died ("expected int, got object").
-    is_raw_load = name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
+    is_raw_load = name in ("raw_load_u8" "raw_load_u32" "raw_load_u64" "raw_store_u8" "popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "array_store_u64" "prefetch") && node.receiver == nil
     args_are_values = is_index_call || is_raw_ccall || is_raw_load || ((name == "mulhi" || name == "addcarry" || name == "subborrow") && node.receiver == nil && node.args != nil && node.args.size() == 2)
     # Receiver of any method call needs WValue at the dispatch boundary,
     # except for 0-arg integer predicates/conversions that lower directly on

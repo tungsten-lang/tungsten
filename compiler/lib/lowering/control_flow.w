@@ -734,7 +734,7 @@
     nm = node.name
     args = node.args
     if recv == nil
-      if !(nm in ("ast_kind" "ast_get" "is_ast_node?" "type" "typeof" "ccall_nobox" "raw_load_u8" "raw_load_u32" "raw_load_u64" "popcount" "cttz" "array_load_u64" "wvalue_bits" "wvalue_from_bits" "min" "max" "abs" "sqrt"))
+      if !(nm in ("ast_kind" "ast_get" "is_ast_node?" "type" "typeof" "ccall_nobox" "raw_load_u8" "raw_load_u32" "raw_load_u64" "popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "wvalue_bits" "wvalue_from_bits" "min" "max" "abs" "sqrt"))
         st[:self_mutated] = true
       pure_arg_call = nm in ("ast_kind" "is_ast_node?" "type" "typeof" "wvalue_bits" "min" "max" "abs" "sqrt")
       licm_scan_expr_list(args, st, var_types, !pure_arg_call)

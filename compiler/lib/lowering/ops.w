@@ -2272,7 +2272,7 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   shl_literal_base = op == :LSHIFT && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int
   # A machine-typed amount (`1 << n`, n an i64 param) opts into the wrapping
   # machine shift, as infer_type's LSHIFT arm types it.
-  if shl_literal_base && node.left.format != :dec_big && !(node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int) && rt != :int && (is_machine_int64_type(rt) || is_small_int_type(rt) || rt in (:raw_int :raw_i64 :raw_u64))
+  if shl_literal_base && lowering_infer_maps[:typed_def] == true && node.left.format != :dec_big && !(node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int) && rt != :int && (is_machine_int64_type(rt) || is_small_int_type(rt) || rt in (:raw_int :raw_i64 :raw_u64))
     shl_literal_base = false
   if op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)
     shl_literal_base = true

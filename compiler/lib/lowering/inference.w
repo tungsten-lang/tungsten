@@ -405,11 +405,13 @@
         if lv >= 0 && lv <= 140737488355327 && rv >= 0 && rv <= 46 && lv <= (140737488355327 >> rv)
           return :i64
         return nil
-      # A machine-typed shift amount (`1 << n` with n an i64 parameter or
-      # an i32[] element) is machine context: the shift runs at 64 bits and
-      # wraps, like `one << n` with `one = 1 ## i64`. Only an amount of no
-      # machine type (boxed :int, unknown) keeps the promoting BigInt result.
-      if lt == :i64 && rt != :int && infer_maps[:boxed_mode] != true && (is_machine_int64_type(rt) || is_small_int_type(rt) || rt in (:raw_int :raw_i64 :raw_u64))
+      # Inside a typed definition (declared parameter types), a
+      # machine-typed shift amount (`1 << n` with n an i64 parameter or an
+      # i32[] element) is machine context: the shift runs at 64 bits and
+      # wraps, like `one << n` with `one = 1 ## i64`. Elsewhere, and for an
+      # amount of no machine type, the result keeps promoting to BigInt
+      # (`1 << (64 * i - 1)` at top level).
+      if infer_maps[:typed_def] == true && lt == :i64 && rt != :int && infer_maps[:boxed_mode] != true && (is_machine_int64_type(rt) || is_small_int_type(rt) || rt in (:raw_int :raw_i64 :raw_u64))
         return :i64
       return nil
     if node.op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)

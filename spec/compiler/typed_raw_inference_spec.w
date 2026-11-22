@@ -1,5 +1,6 @@
 # Typed code infers raw machine types where the old inference boxed:
-# - `1 << n` with a machine-int amount is a machine shift (wrapping i64);
+# - `1 << n` with a machine-int amount is a machine shift (wrapping i64)
+#   inside a typed definition; elsewhere it still promotes to BigInt;
 # - a ternary over a narrow typed-array element and a literal is a raw i64;
 # - f64 (or a typed-array element) times an integer is raw f64 arithmetic;
 # - a narrow element (i32/u16/u8) passed to an i64 or f64 parameter widens.
@@ -87,6 +88,9 @@ check("i32 elem times f64", elem_scale(a, 2, ~0.5), ~3.5)
 check("f64 elem times int", flt(f), ~3.25)
 check("widened i32 arg", clip_sum(a, 4), 517)
 check("widened u8 to f64", widen_f(u), ~4.5)
+# Outside typed definitions a literal-based shift keeps promoting.
+sh = 1
+check("top-level shift promotes", (1 << (60 + sh * 10)).to_s, "1180591620717411303424")
 
 if $failures > 0
   exit(1)

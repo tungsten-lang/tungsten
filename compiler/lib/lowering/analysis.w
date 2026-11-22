@@ -780,7 +780,7 @@
           return false
         # `1 << n` in typed code: a machine-int amount makes it a machine
         # shift (infer_type's LSHIFT arm), so the local stays raw.
-        if mod != nil && mod[:promote_typed_context] == true && node.left.format != :dec_big
+        if mod != nil && mod[:promote_typed_context] == true && lowering_infer_maps[:typed_def] == true && node.left.format != :dec_big
           return int_shaped_node?(node.right, declared_types, mod)
         return false
       if node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 46)

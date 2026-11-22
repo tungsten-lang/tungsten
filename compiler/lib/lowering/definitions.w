@@ -940,7 +940,10 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
           rt = normalize_type_symbol(node.return_type)
         else
           rt = infer_fn_return_type(node, lowering_infer_maps)
+        saved_prepass_typed_def = lowering_infer_maps[:typed_def]
+        lowering_infer_maps[:typed_def] = node.param_types != nil
         flags = definition_raw_abi_flags(node, true, mod[:fn_return_types], rt, child_var_types)
+        lowering_infer_maps[:typed_def] = saved_prepass_typed_def
         if mod[:raw_abi_flags_memo] == nil
           mod[:raw_abi_flags_memo] = {}
         mod[:raw_abi_flags_memo][node] = [rt, flags]
@@ -1057,6 +1060,10 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     new_fn[:exit_label] = next_label(new_fn, "blockret.exit")
 
   # Create child context
+  # Typed definitions (declared parameter types) opt into machine semantics
+  # for literal-based shifts (`1 << n`, infer_type's LSHIFT arm).
+  saved_typed_def = lowering_infer_maps[:typed_def]
+  lowering_infer_maps[:typed_def] = node.param_types != nil
   child_var_types = {}
   child_ctx = {
     mod: mod,
@@ -1358,6 +1365,7 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     emit_wire_load_i64(new_fn, new_fn[:result_slot], final_reg)
     emit_wire_ret_i64(new_fn, 0, final_reg)
 
+  lowering_infer_maps[:typed_def] = saved_typed_def
   finalize_function(new_fn)
   nil
 
@@ -2351,6 +2359,8 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     new_fn[:exit_label] = next_label(new_fn, "blockret.exit")
 
   # Child context with class_name set
+  saved_typed_def = lowering_infer_maps[:typed_def]
+  lowering_infer_maps[:typed_def] = node.param_types != nil
   child_var_types = {}
   # Seed __self type for specialized variants. Drives downstream
   # dispatch (e.g. self[i] → :typed_array_get_inline at the variant's ebits).
@@ -2615,6 +2625,7 @@ TYPED_INT_SHAPE_CTX = {promote_typed_context: true}
     emit_wire_load_i64(new_fn, new_fn[:result_slot], final_reg)
     emit_wire_ret_i64(new_fn, 0, final_reg)
 
+  lowering_infer_maps[:typed_def] = saved_typed_def
   finalize_function(new_fn)
   if raw_abi && wrapper_fn_name != nil && wrapper_fn_name != fn_name
     lower_static_method_boxed_wrapper(ctx, class_name, node, fn_name, wrapper_fn_name, child_var_types)

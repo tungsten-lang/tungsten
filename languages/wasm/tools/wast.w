@@ -198,8 +198,8 @@ use ../wasm
     if h == "ref.null"
       return v == nil
     if h == "ref.extern" || h == "ref.host"
+      return v != nil if !c.more?
       return false if !v.is_a?(WExtern)
-      return true if !c.more?
       return v.v == c.next_node().text.to_i
     if h == "ref.func"
       return v.is_a?(WFunc)

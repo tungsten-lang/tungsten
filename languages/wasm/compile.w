@@ -1956,6 +1956,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
         w_invalid("type mismatch: br_on_cast label") if !wt_sub?(t2, lt[lt.size - 1])
         push_alias(t2, a)
         check_label_values(lt)
+        retype_top(lt)
         pop(nil)
         push_alias(diff, a)
         jt = 1
@@ -1963,6 +1964,7 @@ CMP_SWAP = [0, 1, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12]
         w_invalid("type mismatch: br_on_cast_fail label") if !wt_sub?(diff, lt[lt.size - 1])
         push_alias(diff, a)
         check_label_values(lt)
+        retype_top(lt)
         pop(nil)
         push_alias(t2, a)
         jt = 0

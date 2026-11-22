@@ -81,10 +81,14 @@
 -> w_ult_eq?(a, b)
   a <= b
 
+W_UID = [0]
+
 + WMemory
-  rw :data, :size, :max, :shared, :is64, :page_log2, :on_grow, :buffer, :lock
+  rw :data, :size, :max, :shared, :is64, :page_log2, :on_grow, :buffer, :lock, :uid
 
   -> new(pages, @max, @shared, @is64, @page_log2)
+    W_UID[0] += 1
+    @uid = W_UID[0]
     @size = pages << @page_log2
     @on_grow = nil
     @buffer = nil

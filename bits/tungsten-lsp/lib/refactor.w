@@ -22,7 +22,7 @@
     while i < count
       packed = packed_tokens[i]
       kind = parser_tok_type(packed)
-      if !(kind in (T_SP T_NEWLINE T_INDENT T_DEDENT T_EOF))
+      if !(kind in (TOK_SP TOK_NEWLINE TOK_INDENT TOK_DEDENT TOK_EOF))
         off = parser_tok_off(packed)
         length = parser_tok_len(packed)
         rows.push({kind: kind, value: values[i], off: off, length: length,
@@ -50,7 +50,7 @@
     kind = parser_tok_type(packed)
     off = parser_tok_off(packed)
     length = parser_tok_len(packed)
-    if !(kind in (T_SP T_NEWLINE T_INDENT T_DEDENT T_EOF))
+    if !(kind in (TOK_SP TOK_NEWLINE TOK_INDENT TOK_DEDENT TOK_EOF))
       rows.push({kind: kind, value: lexer.values[i], off: off, length: length,
         line: lexer.line_at[off] - 1, col: columns[off], end_col: columns[off + length]})
     i += 1
@@ -94,7 +94,7 @@
   ti = 0
   while ti < tokens.size()
     token = tokens[ti]
-    if token[:kind] == T_ID && token[:line] == line && token[:col] <= col && col < token[:end_col]
+    if token[:kind] == TOK_ID && token[:line] == line && token[:col] <= col && col < token[:end_col]
       selected = token
     ti += 1
   if selected == nil
@@ -102,7 +102,7 @@
   old_name = selected[:value]
   if new_name != nil
     proposed = refactor_tokens(new_name)
-    if proposed.size() != 1 || proposed[0][:kind] != T_ID || proposed[0][:value] != new_name || new_name == ""
+    if proposed.size() != 1 || proposed[0][:kind] != TOK_ID || proposed[0][:value] != new_name || new_name == ""
       return {error: "The new name must be one valid Tungsten identifier"}
   defs = []
   collect_defs(ast, defs)
@@ -147,14 +147,14 @@
           while ti < tokens.size()
             token = tokens[ti]
             if token[:line] >= start_line && token[:line] < end_line
-              if token[:line] == start_line && token[:kind] == T_LPAREN
+              if token[:line] == start_line && token[:kind] == TOK_LPAREN
                 signature_open = true
-              if token[:kind] == T_TYPE_HINT && token[:value] != nil && token[:value].to_s().include?(old_name)
+              if token[:kind] == TOK_TYPE_HINT && token[:value] != nil && token[:value].to_s().include?(old_name)
                 facts[:safe] = false
-              if token[:kind] == T_STRING_INTERP || (token[:kind] == T_STRING && token[:value] != nil && token[:value].to_s().include?("\["))
+              if token[:kind] == TOK_STRING_INTERP || (token[:kind] == TOK_STRING && token[:value] != nil && token[:value].to_s().include?("\["))
                 facts[:safe] = false
-              if token[:kind] == T_ID && token[:value] == old_name && (token[:line] > start_line || signature_open)
-                if previous == nil || !(previous[:kind] in (T_DOT T_COLON))
+              if token[:kind] == TOK_ID && token[:value] == old_name && (token[:line] > start_line || signature_open)
+                if previous == nil || !(previous[:kind] in (TOK_DOT TOK_COLON))
                   edits.push({"range": refactor_range(token[:line], token[:col], token[:end_col]), "newText": new_name})
               previous = token
             ti += 1

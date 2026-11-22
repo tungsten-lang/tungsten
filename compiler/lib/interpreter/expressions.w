@@ -999,6 +999,7 @@ INTERPRETER_I64_MAX = 9223372036854775807
   -> eval_while(node, env)
     result = nil
     while truthy?(evaluate(ast_get(node, :condition), env))
+      sandbox_tick() if @sandboxed
       begin
         result = evaluate_body(ast_get(node, :body), env)
       rescue err
@@ -1210,6 +1211,9 @@ INTERPRETER_I64_MAX = 9223372036854775807
       # core/file.w) and so register its block-taking methods: decide the
       # block route only now.
       passthrough = block != nil && interpreter_method_takes_no_block?(method_name)
+      # A host object's method takes the trailing block as its last argument.
+      if passthrough && @host_classes.size() > 0 && host_class?(type(recv))
+        passthrough = false
       call_block = passthrough ? nil : block
       # The parser transfers `Mat2<f64>.identity`'s type arguments from the
       # class-ref receiver onto the call node. Keep them scoped to this class
@@ -1232,6 +1236,11 @@ INTERPRETER_I64_MAX = 9223372036854775807
         return dispatch_method(result, "each", [], block, env)
       return result
 
+    # A native lambda bound as a global (a host-defined function) takes the
+    # trailing block as its last argument too.
+    if passthrough && native_global_callable?(method_name, env)
+      passthrough = false
+      call_block = block
     result = dispatch_bare_call(method_name, args, call_block, env)
     if passthrough
       return dispatch_method(result, "each", [], block, env)
@@ -1499,6 +1508,9 @@ INTERPRETER_I64_MAX = 9223372036854775807
         v = @env.get(name)
       if type(v) == "Array" && v.size() == 2 && is_ast_node?(v[1]) && ast_kind(v[1]) == :block
         return call_block(v, args)
+      # A native lambda the host defined or returned (interpreter/sandbox.w).
+      if native_callable?(v) && (args.size() > 0 || block != nil)
+        return call_closure(v, block == nil ? args : args + [host_callable(block)])
       # A local that holds no closure, reached through a zero-argument call:
       # the parser always reads a bare `ro` / `rw` as a call (so the accessor
       # marker after a constructor parses), and `x()` cannot be told from `x`.

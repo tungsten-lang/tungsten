@@ -10,7 +10,9 @@
  *
  * Video:
  *   w_media_vtdec_new(codec, config, [width, height, bits, async, full_range]) -> handle
- *       codec "avc1"/"avc3" (config = avcC) or "hvc1"/"hev1" (config = hvcC)
+ *       codec "avc1"/"avc3" (config = avcC), "hvc1"/"hev1" (hvcC), "av01" (av1C)
+ *       or "vp09" (vpcC payload incl. version/flags); AV1 / VP9 only where
+ *       VideoToolbox has a hardware decoder for them
  *   w_media_vtdec_decode(h, sample, pts_us, dts_us) -> frames waiting
  *       sample: a ByteArray / u8[] holding one access unit (length-prefixed NALs)
  *       VideoToolbox outputs frames in decode order; take reorders them.
@@ -184,27 +186,37 @@ WValue w_media_vtdec_new(WValue codecv, WValue cfgv, WValue optv) {
         const uint8_t *cfg = s_bytes(cfgv, &n, "vtdec_new config");
         int hevc = !strcmp(codec, "hvc1") || !strcmp(codec, "hev1");
         int avc = !strcmp(codec, "avc1") || !strcmp(codec, "avc3");
-        if (!hevc && !avc) w_media_raise("vtdec_new: unsupported codec '%s' (avc1, avc3, hvc1, hev1)", codec);
-        if (!cfg || n < 7) w_media_raise("vtdec_new: missing %s record", hevc ? "hvcC" : "avcC");
+        int av1 = !strcmp(codec, "av01");
+        int vp9 = !strcmp(codec, "vp09");
+        if (!hevc && !avc && !av1 && !vp9) w_media_raise("vtdec_new: unsupported codec '%s' (avc1, avc3, hvc1, hev1, av01, vp09)", codec);
+        CMVideoCodecType ctype = hevc ? kCMVideoCodecType_HEVC : avc ? kCMVideoCodecType_H264 : av1 ? kCMVideoCodecType_AV1 : kCMVideoCodecType_VP9;
+        CFStringRef atom = hevc ? CFSTR("hvcC") : avc ? CFSTR("avcC") : av1 ? CFSTR("av1C") : CFSTR("vpcC");
+        /* VP9 is a supplemental decoder on macOS (registered on demand); AV1
+         * and VP9 decode only where the machine has them (no software path) */
+        if (vp9) {
+            if (@available(macOS 11.0, *)) VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9);
+        }
+        if ((av1 || vp9) && !VTIsHardwareDecodeSupported(ctype)) w_media_raise("vtdec_new: no %s decoder on this machine", codec);
+        if (!cfg || n < 4 || ((avc || hevc) && n < 7)) w_media_raise("vtdec_new: missing %s record", hevc ? "hvcC" : avc ? "avcC" : av1 ? "av1C" : "vpcC");
         int32_t w = (int32_t)w_media_num(s_arr(optv, 0), 0, "width"), h = (int32_t)w_media_num(s_arr(optv, 1), 0, "height");
         int bits = (int)w_media_num(s_arr(optv, 2), 8, "bits");
         int async = (int)w_media_num(s_arr(optv, 3), 1, "async");
         int full = (int)w_media_num(s_arr(optv, 4), 0, "full_range");
         if (w <= 0 || h <= 0) {
             WMediaVui v;
-            if (w_media_vui_parse(cfg, n, hevc, &v) == 0 && v.ok) { w = v.width; h = v.height; }
+            if ((avc || hevc) && w_media_vui_parse(cfg, n, hevc, &v) == 0 && v.ok) { w = v.width; h = v.height; }
         }
         if (w <= 0 || h <= 0) w_media_raise("vtdec_new: unknown picture size");
 
         CFDataRef rec = CFDataCreate(NULL, cfg, (CFIndex)n);
-        const void *ak[] = { hevc ? CFSTR("hvcC") : CFSTR("avcC") };
+        const void *ak[] = { atom };
         const void *av[] = { rec };
         CFDictionaryRef atoms = CFDictionaryCreate(NULL, ak, av, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
         const void *ek[] = { kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms };
         const void *ev[] = { atoms };
         CFDictionaryRef ext = CFDictionaryCreate(NULL, ek, ev, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
         CMVideoFormatDescriptionRef fmt = NULL;
-        OSStatus st = CMVideoFormatDescriptionCreate(NULL, hevc ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264, w, h, ext, &fmt);
+        OSStatus st = CMVideoFormatDescriptionCreate(NULL, ctype, w, h, ext, &fmt);
         CFRelease(ext); CFRelease(atoms); CFRelease(rec);
         if (st != noErr) w_media_raise("vtdec_new: CMVideoFormatDescriptionCreate failed (OSStatus %d)", (int)st);
 

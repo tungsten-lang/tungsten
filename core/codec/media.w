@@ -128,8 +128,6 @@ ACODECS = {}
 SYS_MAKERS = [nil, nil]       # [video maker, audio maker]
 SYS_PREFER = [nil]            # nil: read TUNGSTEN_CODEC_SYSTEM on first use
 
-# The codec ids "patent" selects: the formats with patent pools behind them.
-SYS_PATENT_CODECS = ["avc1", "avc3", "hvc1", "hev1", "mp4a", "ac-3", "ec-3"]
 
 -> vcodec_system_register(make)
   SYS_MAKERS[0] = make
@@ -138,30 +136,59 @@ SYS_PATENT_CODECS = ["avc1", "avc3", "hvc1", "hev1", "mp4a", "ac-3", "ec-3"]
   SYS_MAKERS[1] = make
 
 -> codec_id4(id)
-  id.size == 3 ? id + " " : id
+  return id + " " if id == "mp3" || id == "pcm"
+  id
 
+# The system decoder's default formats (core/codec/system registers its table).
+SYS_DEFAULTS = [[]]
+
+-> codec_system_defaults(list)
+  SYS_DEFAULTS[0] = list
+
+# Codec ids and image names the system decoders handle (see core/codec/system):
+# the default table, or TUNGSTEN_CODEC_SYSTEM / BLADE_CODEC: "own" / "0" none,
+# "system" / "all" / "1" every format the system has, "patent" the table, or
+# a comma-separated list.
 -> codec_system_list
   if SYS_PREFER[0] == nil
     v = env("TUNGSTEN_CODEC_SYSTEM")
-    l = []
-    if v == "patent" || v == "1"
-      l = SYS_PATENT_CODECS + []
-    elsif v == "all"
-      l = SYS_PATENT_CODECS + ["usac", "mp3 "]
-    elsif v != nil && v != "" && v != "0"
+    v = env("BLADE_CODEC") if v == nil || v == ""
+    l = SYS_DEFAULTS[0] + []
+    if v == "own" || v == "0"
+      l = []
+    elsif v == "system" || v == "all" || v == "1"
+      l = SYS_DEFAULTS[0] + ["usac", "mp3 ", "alac", "flac", "opus", "jpeg", "webp", "jp2", "png", "gif", "tiff", "bmp"]
+    elsif v == "patent" || v == nil || v == ""
+      l = SYS_DEFAULTS[0] + []
+    else
+      l = []
       v.split(",").each ->(id)
-        l.push(codec_id4(id))
+        l.push(codec_id4(id.strip))
     SYS_PREFER[0] = l
   SYS_PREFER[0]
 
-# (each maker is called from its own function: one closure call per method)
 -> codec_new_with(table, kind, cfg)
   ours = table.has_key?(cfg.codec)
   if SYS_MAKERS[kind] != nil && (!ours || codec_system_list().include?(cfg.codec))
     d = codec_try_system(kind, cfg, !ours)
-    return d if d != nil
+    if d != nil
+      codec_log(kind, cfg, d)
+      return d
   raise MediaError.new("unsupported " + (kind == 0 ? "video" : "audio") + " codec " + cfg.codec) if !ours
-  codec_call_maker(table[cfg.codec], cfg)
+  d = codec_call_maker(table[cfg.codec], cfg)
+  codec_log(kind, cfg, d)
+  d
+
+# TUNGSTEN_CODEC_LOG=1: one line per decoder created, saying which one runs.
+CODEC_LOG = [nil]
+
+-> codec_log(kind, cfg, d)
+  CODEC_LOG[0] = env("TUNGSTEN_CODEC_LOG") == "1" if CODEC_LOG[0] == nil
+  return nil if !CODEC_LOG[0]
+  who = d.class.to_s
+  who = (d.backend == "system" ? "system" : "own (system decoder failed)") + (kind == 0 && d.backend == "system" ? (d.hw? ? " (hardware)" : " (software)") : "") if who == "SysFallback"
+  << "codec: " + (kind == 0 ? "video " : "audio ") + cfg.codec + " -> " + who
+  nil
 
 # the system decoder, or nil when it cannot open (raises when it is the only one)
 -> codec_try_system(kind, cfg, only)

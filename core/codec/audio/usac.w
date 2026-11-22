@@ -590,7 +590,7 @@ USAC_POW43 = usac_build_pow43()
 # ---- the decoder ----
 
 + UsacDec
-  ro :sample_rate, :channels, :frame, :out_frame, :errors, :config
+  ro :sample_rate, :channels, :frame, :out_frame, :errors, :config, :asc_bits
   rw :drc_payloads
 
   -> new(cfg)
@@ -601,6 +601,7 @@ USAC_POW43 = usac_build_pow43()
     @errors = 0
     @drc_payloads = []
     parse_asc(asc)
+    @asc_bits = @st[0]
     usac_dsp_prepare(@frame)
     setup
 

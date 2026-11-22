@@ -5,6 +5,7 @@ use core/codec/media
 use pcm
 use opus
 use aac
+use latm
 use mp3
 use flac
 use alac

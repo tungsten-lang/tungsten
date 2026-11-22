@@ -169,6 +169,7 @@ while fi0 < files.size
     r = nil
     k = 0
     while k < reps
+      Codec.prefer_system([]) if !sys
       dec = sys ? SysAudioDec.new(t.cfg) : Codec.audio(t.cfg)
       r = ut_decode(dec, ts[1])
       k += 1

@@ -177,6 +177,7 @@ use core/canvas
       h = img.height
       img.release
     else
+      Codec.prefer_system([])
       bm = Image.decode(bytes)
       w = bm.width
       h = bm.height
@@ -434,6 +435,7 @@ use core/canvas
 
 -> sb_cmpimage(path)
   bytes = File.read_bytes(path)
+  Codec.prefer_system([])
   bm = Image.decode(bytes)
   img = Canvas.load_image_data(bytes)
   px = img.bytes

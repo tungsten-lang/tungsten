@@ -66,6 +66,7 @@ int w_cg_canvas_buffer(int64_t handle, WCGBufferInfo *out);
     X(w_cg_ctm, 1)                \
     X(w_cg_set_alpha, 2)          \
     X(w_cg_set_blend, 2)          \
+    X(w_cg_set_shadow, 5)         \
     X(w_cg_set_quality, 2)        \
     X(w_cg_set_antialias, 2)      \
     X(w_cg_path_begin, 1)         \

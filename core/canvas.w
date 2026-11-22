@@ -220,6 +220,12 @@
   # color_burn, soft_light, hard_light, difference, exclusion, hue,
   # saturation, color, luminosity, plus the Porter-Duff modes (copy,
   # source_in, destination_out, xor, plus_lighter, …).
+  # A drop shadow under what is drawn next, until restore: offset (dx, dy) in
+  # user units (not transformed, as HTML canvas), blur as canvas shadowBlur,
+  # colour as a fill. shadow(nil) or a transparent colour turns it off.
+  -> shadow(color, dx = 0, dy = 0, blur = 0)
+    ccall("w_cg_set_shadow", @handle, dx, dy, blur, color)
+
   -> blend=(mode)
     ccall("w_cg_set_blend", @handle, mode)
 

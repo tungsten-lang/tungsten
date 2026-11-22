@@ -399,6 +399,7 @@
   auto :System,       "system"
   auto :Table,        "table"
   auto :Thread,       "thread"
+  auto :ThreadLocal,  "thread_local"
   auto :Time,         "time"
   auto :Timer,        "timer"
   auto :TLS,          "tls"

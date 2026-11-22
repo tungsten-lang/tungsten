@@ -542,7 +542,7 @@ F_CL_YES = 2097152
     rhs = cx(n.b, sc)
     b = cs(n.d, ls, nil)
     b = js_nop_stmt(b)
-    lex = ls.lex
+    lex = ls == sc ? [] : ls.lex
     size_of = ls
     ->(env) js_run_for_in(rhs.call(env), target, b, labels, owner, size_of, lex, env)
 
@@ -551,7 +551,7 @@ F_CL_YES = 2097152
     rhs = cx(n.b, sc)
     b = cs(n.d, ls, nil)
     b = js_nop_stmt(b)
-    lex = ls.lex
+    lex = ls == sc ? [] : ls.lex
     size_of = ls
     if n.has?(F_AWAIT)
       gs = fun_scope(sc)
@@ -633,7 +633,8 @@ F_CL_YES = 2097152
     tests = n.list.map(->(c) c.a == nil ? nil : cx(c.a, ss))
     bodies = n.list.map(->(c) compile_list(c.list, ss))
     enter = compile_hoist(fns, ss)
-    lex = ss.lex
+    # only the switch's own scope starts in TDZ (ss is the enclosing scope when it declares nothing)
+    lex = needs ? ss.lex : []
     size_of = ss
     ->(env) js_run_switch(d.call(env), tests, bodies, labels, owner, size_of, lex, enter, env)
 
@@ -2781,7 +2782,7 @@ JS_TRACE_CATCH = [false]
 # Debugging aid (BLADE_JS_TRACE=1): print every exception a script's own catch swallows.
 -> js_trace_catch(v)
   m = v.is_a?(JsObject) ? js_inspect(v, 2, []) : js_to_display(v)
-  ccall("w_eputs", "\[js caught] " + m.slice(0, 300))
+  ccall("w_eputs", "\[js caught] " + m.slice(0, 1500))
   nil
 
 # A statement lambda that does nothing, for an omitted body.

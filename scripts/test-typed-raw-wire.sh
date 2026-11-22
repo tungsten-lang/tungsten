@@ -12,7 +12,7 @@ tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 "$TUNGSTEN" --wire "$ROOT/spec/fixtures/typed/raw_probe.w" >"$tmp" 2>&1
 fail=0
-for fn in fa fc gc hc band mixf elemf elemf2 loopshl early clip useclip wid tern2 flt gtab; do
+for fn in fa fc gc hc band mixf elemf elemf2 loopshl early clip useclip wid tern2 flt gtab iteach itzip itmap; do
   body=$(awk -v f="$fn" '$1 == "function" && index($2, "__w_" f "__") == 1 {on=1; next} on && /^$/ {on=0} on {print}' "$tmp")
   if [[ -z "$body" ]]; then
     echo "typed-raw: no WIRE for $fn" >&2; fail=1; continue
@@ -20,6 +20,13 @@ for fn in fa fc gc hc band mixf elemf elemf2 loopshl early clip useclip wid tern
   bad=$(printf '%s\n' "$body" | grep -E '@(__w_(add|sub|mul|shl|shr|band|bor|bxor|int|div|mod|gte|gt|lt|lte)_fast|w_bigint_[a-z_]*mut|w_(add|sub|mul)\b|w_index_raw_i64)' || true)
   if [[ "$fn" != mixf && "$fn" != elemf && "$fn" != elemf2 && "$fn" != flt ]]; then
     bad="$bad$(printf '%s\n' "$body" | grep -E '@__w_to_i64_fast' || true)"
+  fi
+  # Typed-array iterators: raw index loops, no closure, no bounds check.
+  # (itzip keeps the generic zip as its unequal-size fallback.)
+  if [[ "$fn" == it* ]]; then
+    pat='closure_new|call_method_i64|@__w_ta_bounds_check'
+    [[ "$fn" == itzip ]] && pat='@__w_ta_bounds_check'
+    bad="$bad$(printf '%s\n' "$body" | grep -E "$pat" || true)"
   fi
   if [[ -n "$bad" ]]; then
     echo "typed-raw: $fn boxes:" >&2; printf '%s\n' "$bad" >&2; fail=1

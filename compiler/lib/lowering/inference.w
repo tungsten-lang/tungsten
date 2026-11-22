@@ -303,6 +303,14 @@
       return :int
     if is_array_type?(recv_t) && node.name == "size"
       return :i64
+    # `a.reduce(0 ## i64) -> ...` keeps its accumulator at the ascribed type
+    # (lower_typed_array_iterator); map! answers the receiver.
+    if is_typed_array_type?(recv_t) && node.name == "reduce" && node.block != nil && node.args != nil && node.args.size() == 1 && is_ast_node?(node.args[0]) && ast_kind(node.args[0]) == :type_ascription
+      rh = normalize_type_symbol(node.args[0].type_hint)
+      if is_machine_int64_type(rh) || rh == :f64
+        return rh
+    if is_typed_array_type?(recv_t) && node.name == "map!" && node.block != nil
+      return recv_t
     if is_typed_array_type?(recv_t) && node.name in ("min" "max" "sum")
       if recv_t in (:typed_array_f64 :typed_array_f32 :typed_array_bf16 :typed_array_f16)
         return :float

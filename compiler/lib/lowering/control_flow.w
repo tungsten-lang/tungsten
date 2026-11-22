@@ -1294,24 +1294,33 @@
     from_type = infer_type(collection.from, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     to_type = infer_type(collection.to, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
 
+    # A bound that is already a raw signed machine int (`0...a.size`) is used
+    # as is: boxing it and unboxing the payload costs a call per loop and
+    # reads BigInt pointer bits past 2^47.
     start_tv = lower_expression(ctx, collection.from)
-    start_reg = ensure_i64_value(wfn, start_tv)
-    start_raw = next_temp(wfn)
-    if from_type != nil && !is_integer_like_type(from_type)
-      emit_wire_call_direct_i64(wfn, nil, [start_reg], nil, nil, "w_range_bound_i64", nil, nil, start_raw)
+    if start_tv[:type] in (:raw_int :raw_i64)
+      start_raw = start_tv[:value]
     else
-      emit_wire_nanunbox_int(wfn, start_reg, start_raw, start_raw + ".shl")
+      start_reg = ensure_i64_value(wfn, start_tv)
+      start_raw = next_temp(wfn)
+      if from_type != nil && !is_integer_like_type(from_type)
+        emit_wire_call_direct_i64(wfn, nil, [start_reg], nil, nil, "w_range_bound_i64", nil, nil, start_raw)
+      else
+        emit_wire_nanunbox_int(wfn, start_reg, start_raw, start_raw + ".shl")
 
     unbounded = collection.to == nil
     end_raw = nil
     if !unbounded
       end_tv = lower_expression(ctx, collection.to)
-      end_reg = ensure_i64_value(wfn, end_tv)
-      end_raw = next_temp(wfn)
-      if to_type != nil && !is_integer_like_type(to_type)
-        emit_wire_call_direct_i64(wfn, nil, [end_reg], nil, nil, "w_range_bound_i64", nil, nil, end_raw)
+      if end_tv[:type] in (:raw_int :raw_i64)
+        end_raw = end_tv[:value]
       else
-        emit_wire_nanunbox_int(wfn, end_reg, end_raw, end_raw + ".shl")
+        end_reg = ensure_i64_value(wfn, end_tv)
+        end_raw = next_temp(wfn)
+        if to_type != nil && !is_integer_like_type(to_type)
+          emit_wire_call_direct_i64(wfn, nil, [end_reg], nil, nil, "w_range_bound_i64", nil, nil, end_raw)
+        else
+          emit_wire_nanunbox_int(wfn, end_reg, end_raw, end_raw + ".shl")
 
     cmp_op = "sle"
     if collection.exclusive == true

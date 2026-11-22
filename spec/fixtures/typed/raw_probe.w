@@ -58,9 +58,22 @@ GTAB = i32[256]
     s += GTAB[i & 255]
     i += 1
   s
+-> iteach(a) (i32[]) i64
+  s = 0 ## i64
+  a.each_with_index -> (v, i)
+    s += v * i
+  s
+-> itzip(a, b) (i32[] i32[]) i64
+  s = 0 ## i64
+  a.zip(b).each -> (x, y)
+    s += x * y
+  s
+-> itmap(a) (i32[]) i64
+  a.map! -> (v) (v * 3) & 1023
+  a.reduce(0 ## i64) -> (acc, v) acc + v
 a = i32[4]
 u = u8[4]
 w = u16[4]
 fa_ = f64[4]
-<< fa(3) + fc(3) + gc(3) + hc(3, a) + band(5, 6) + loopshl(3, 10) + early(u, 3) + useclip(a, 4) + wid(a) + tern2(w, 1) + gtab(4)
+<< fa(3) + fc(3) + gc(3) + hc(3, a) + band(5, 6) + loopshl(3, 10) + early(u, 3) + useclip(a, 4) + wid(a) + tern2(w, 1) + gtab(4) + iteach(a) + itzip(a, a) + itmap(a)
 << mixf(~0.5, 3) + elemf(a, 1, ~0.5) + elemf2(u, 1) + flt(fa_)

@@ -42,6 +42,14 @@
   v = v / (2.0 ## f32)
   v
 
+# a method's typed float parameter (lower_method_def has its own prologue)
++ FloatBox
+  -> new(@k)
+  -> scaled(v) (f64) f64
+    v = v * ~3.0
+    v
+
+check("method parameter", FloatBox.new(1).scaled(~2.0), ~6.0)
 check("clamp negative", clamp0(~-1.5), ~0.0)
 check("clamp positive untouched", clamp0(~2.25), ~2.25)
 check("early return branch", eotf(1, ~0.75), ~1.5)

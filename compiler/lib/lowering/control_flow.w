@@ -2415,6 +2415,16 @@
   rescue_label = next_label(wfn, "rescue")
   end_label = next_label(wfn, "begin.end")
 
+  # The landing pads (rescue, rescue.fail) and begin.end are reached from
+  # blocks the try and rescue bodies do not dominate, so a binding made in
+  # one arm must not reach them. Materializing at a non-terminated arm's end
+  # leaves only bindings that dominate everything; an arm that ends in
+  # return/raise/break leaves its bindings unflushed, and the next block's
+  # materialize_bindings would store that arm's register where it does not
+  # dominate (`Instruction does not dominate all uses`). Each of those
+  # blocks starts from the bindings valid here instead.
+  entry_bindings = lv_bindings_copy(ctx[:bindings])
+
   emit_wire_cond_br(wfn, cmp, rescue_label, nil, try_label)
 
   # Try block. The frame is live for exactly the try body's lowering:
@@ -2455,6 +2465,7 @@
 
   # Rescue block
   start_block(wfn, rescue_label)
+  ctx[:bindings] = lv_bindings_copy(entry_bindings)
   rescue_sid = next_scope_id(wfn)
   err = next_temp(wfn)
   emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_exception_error", nil, nil, err)
@@ -2526,6 +2537,7 @@
     # could free a value the normal path still owns; leaking is the safe
     # side.
     start_block(wfn, rescue_fail_label)
+    ctx[:bindings] = lv_bindings_copy(entry_bindings)
     guard_err = next_temp(wfn)
     emit_wire_call_direct_i64(wfn, nil, [], nil, nil, "w_exception_error", nil, nil, guard_err)
     emit_wire_call_direct_void(wfn, [], "w_exception_pop")
@@ -2536,6 +2548,7 @@
       emit_wire_unreachable(wfn)
 
   start_block(wfn, end_label)
+  ctx[:bindings] = entry_bindings
   if result_ptr != nil
     result = next_temp(wfn)
     emit_wire_load_i64(wfn, result_ptr, result)

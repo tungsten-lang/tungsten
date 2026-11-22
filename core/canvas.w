@@ -109,6 +109,13 @@
     h2 = ccall("w_cg_image_from_rgba", rgba, w, h)
     CanvasImage.new(h2, w, h, nil)
 
+  # Decode an encoded image from memory with the system's decoders (ImageIO,
+  # hardware-accelerated for JPEG/HEIC where available), orientation applied.
+  # Not cached; release the CanvasImage when done.
+  -> .load_image_data(bytes)
+    h = ccall("w_cg_image_load_data", bytes)
+    CanvasImage.new(h, ccall("w_cg_image_info", h, "width"), ccall("w_cg_image_info", h, "height"), nil)
+
   # Release every cached image; returns how many were released.
   -> .purge_images
     ccall("w_cg_image_purge")

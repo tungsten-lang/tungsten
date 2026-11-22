@@ -2308,6 +2308,78 @@ WValue w_cg_image_load(WValue pathv) {
     return cg_img_register(im);
 }
 
+/* w_cg_image_load_data(bytes) -> handle: decode an encoded image (JPEG, HEIC,
+ * AVIF, JPEG XL, JPEG 2000, WebP, PNG, TIFF, … — anything ImageIO reads) from
+ * memory, with its EXIF/HEIF orientation applied (the thumbnail API at full
+ * size, which also uses the hardware decoders where the system has them).
+ * Not cached: the caller owns the handle. bytes: a ByteArray (u8[]) or String. */
+WValue w_cg_image_load_data(WValue bufv) {
+    const uint8_t *src = NULL;
+    size_t n = 0;
+    char sbuf[6];
+    if (w_is_array(bufv)) {
+        WArray *a = w_as_array(bufv);
+        if (a->ebits != 8) cg_raise("Canvas.load_image_data: bytes must be a ByteArray (u8[]) or String");
+        src = (const uint8_t *)a->slots + (size_t)a->start;
+        n = (size_t)a->size;
+    } else if (w_is_string(bufv)) {
+        const char *s = NULL; size_t len = 0;
+        w_str_data(bufv, sbuf, &s, &len);
+        src = (const uint8_t *)s; n = len;
+    } else {
+        cg_raise("Canvas.load_image_data: bytes must be a ByteArray (u8[]) or String");
+    }
+    if (n == 0) cg_raise("Canvas.load_image_data: empty data");
+    CFDataRef data = CFDataCreate(NULL, src, (CFIndex)n);
+    CGImageSourceRef isrc = data ? CGImageSourceCreateWithData(data, NULL) : NULL;
+    if (data) CFRelease(data);
+    if (!isrc) cg_raise("Canvas.load_image_data: unrecognised image data");
+    /* the full-size pixel dimensions, for a thumbnail that is the whole image */
+    int64_t maxdim = 0;
+    CFDictionaryRef props = CGImageSourceCopyPropertiesAtIndex(isrc, 0, NULL);
+    if (props) {
+        CFNumberRef pw = CFDictionaryGetValue(props, kCGImagePropertyPixelWidth);
+        CFNumberRef ph = CFDictionaryGetValue(props, kCGImagePropertyPixelHeight);
+        int64_t w = 0, h = 0;
+        if (pw) CFNumberGetValue(pw, kCFNumberSInt64Type, &w);
+        if (ph) CFNumberGetValue(ph, kCFNumberSInt64Type, &h);
+        maxdim = w > h ? w : h;
+        CFRelease(props);
+    }
+    CGImageRef raw = NULL;
+    if (maxdim > 0) {
+        CFNumberRef md = CFNumberCreate(NULL, kCFNumberSInt64Type, &maxdim);
+        const void *keys[] = { kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
+                               kCGImageSourceThumbnailMaxPixelSize, kCGImageSourceShouldCacheImmediately };
+        const void *vals[] = { kCFBooleanTrue, kCFBooleanTrue, md, kCFBooleanTrue };
+        CFDictionaryRef opts = CFDictionaryCreate(NULL, keys, vals, 4, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        raw = CGImageSourceCreateThumbnailAtIndex(isrc, 0, opts);
+        CFRelease(opts);
+        CFRelease(md);
+    }
+    if (!raw) raw = CGImageSourceCreateImageAtIndex(isrc, 0, NULL);
+    CFRelease(isrc);
+    if (!raw) cg_raise("Canvas.load_image_data: cannot decode the image");
+    CGColorSpaceRef cs = CGImageGetColorSpace(raw);
+    CGColorSpaceRef target = (cs && CGColorSpaceGetModel(cs) == kCGColorSpaceModelRGB) ? CGColorSpaceRetain(cs)
+                                                                                      : CGColorSpaceRetain(cg_srgb());
+    size_t sbpc = CGImageGetBitsPerComponent(raw);
+    int fl = (CGImageGetBitmapInfo(raw) & kCGBitmapFloatComponents) != 0;
+    int bpc = fl ? 32 : (sbpc > 8 ? 16 : 8);
+    size_t bytes = 0;
+    CGImageRef img = cg_render_bitmap(raw, target, bpc, fl, &bytes);
+    if (!img && bpc != 8) img = cg_render_bitmap(raw, target, 8, 0, &bytes);
+    CGColorSpaceRelease(target);
+    CGImageRelease(raw);
+    if (!img) cg_raise("Canvas.load_image_data: cannot convert to an RGBA bitmap");
+    CGImg *im = calloc(1, sizeof *im);
+    im->image = img;
+    im->w = CGImageGetWidth(img);
+    im->h = CGImageGetHeight(img);
+    im->bytes = bytes;
+    return cg_img_register(im);
+}
+
 /* w_cg_image_from_canvas(h) -> handle: a snapshot of the canvas pixels, to
  * draw onto other canvases (pre-rendered backgrounds, layers). */
 WValue w_cg_image_from_canvas(WValue hv) {

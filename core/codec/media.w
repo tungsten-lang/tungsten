@@ -77,10 +77,18 @@
 # for 8-bit, u16[] for bit_depth 9-16 (core/codec/video/yuv reads both); strides in
 # samples. chroma: "420", "422", "444", "400". Colour description follows
 # CICP (ISO/IEC 23091-2): primaries, transfer, matrix, full_range.
+#
+# Lifetime: a frame's planes stay valid until the decoder's next decode /
+# flush / reset call (decoders may hand out their own reference pictures and
+# release them later; Tungsten has no collector, so decoders free pictures
+# they drop explicitly). owned: true when the planes were allocated for this
+# frame alone, so the consumer may release them (ccall "w_value_free_w")
+# once it has converted the frame.
 + VideoFrame
-  rw :width, :height, :planes, :strides, :chroma, :bit_depth, :pts, :duration, :primaries, :transfer, :matrix, :full_range, :crop
+  rw :width, :height, :planes, :strides, :chroma, :bit_depth, :pts, :duration, :primaries, :transfer, :matrix, :full_range, :crop, :owned
 
   -> new(@width, @height, @planes, @strides, @chroma, @bit_depth, @pts)
+    @owned = false
     @duration = ~0.0
     @primaries = 1
     @transfer = 1

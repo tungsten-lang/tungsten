@@ -150,6 +150,8 @@
       cap = cap * 2 while cap < @len + n
       nd = ByteArray.new(cap)
       dm_copy(nd, 0, @data, 0, @len)
+      # no collector: the outgrown buffer is released here
+      ccall("w_value_free_w", @data)
       @data = nd
     dm_copy(@data, @len, bytes, 0, n)
     @len += n

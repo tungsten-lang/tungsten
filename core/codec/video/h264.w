@@ -212,7 +212,42 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
 
   # ------------------------------------------------------------ decoder API
 
+  # Pictures that left the DPB in the previous call: their planes were (maybe)
+  # handed out as frames the caller has converted by now, so release them.
+  -> bury_dead
+    if @grave != nil
+      @grave.each ->(q)
+        ccall("w_value_free_w", q.y) if q.y != nil
+        ccall("w_value_free_w", q.cb) if q.cb != nil && q.cb != q.y
+        ccall("w_value_free_w", q.cr) if q.cr != nil && q.cr != q.cb
+        ccall("w_value_free_w", q.mv) if q.mv != nil
+        ccall("w_value_free_w", q.refi) if q.refi != nil
+        ccall("w_value_free_w", q.rid) if q.rid != nil
+        q.y = nil
+        q.cb = nil
+        q.cr = nil
+        q.mv = nil
+        q.refi = nil
+        q.rid = nil
+    @grave = []
+    nil
+
+  # Drop pictures from the DPB (mode 0: all; 1: keep references; 2: keep
+  # references and pictures waiting for output), queueing the dropped ones for
+  # release on the next call. The new list is built here and stored in @dpb.
+  -> prune_dpb(mode)
+    @grave = [] if @grave == nil
+    nd = []
+    @dpb.each ->(q)
+      if (mode == 1 && q.ref != 0) || (mode == 2 && (q.ref != 0 || q.waiting == 1))
+        nd.push(q)
+      elsif !@grave.include?(q)
+        @grave.push(q)
+    @dpb = nd
+    nil
+
   -> decode(sample)
+    bury_dead()
     d = sample.data
     if d.is_a?(String)
       d = ccall("w_string_bytes_view", d) ## u8[]
@@ -229,14 +264,16 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
     take_output
 
   -> flush
+    bury_dead()
     finish_picture
     while bump_one
       0
     take_output
 
   -> reset
+    bury_dead()
     finish_picture
-    @dpb = []
+    prune_dpb(0)
     @out = []
     @cur = nil
     @prev_ref_frame_num = 0
@@ -293,7 +330,7 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
       # new geometry: output everything decoded so far
       while bump_one
         0
-      @dpb = []
+      prune_dpb(0)
     @seq_sps = sps
     @mbw = sps.mbw
     @mbh = sps.mbh
@@ -533,9 +570,9 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
       @dpb.each ->(q)
         lastr = q if q.ref != 0 && (lastr == nil || q.serial > lastr.serial)
       if lastr != nil
-        p.y = lastr.y.slice(0, lastr.y.size)
-        p.cb = lastr.cb.slice(0, lastr.cb.size) if @cfmt != 0
-        p.cr = lastr.cr.slice(0, lastr.cr.size) if @cfmt != 0
+        p.y = lastr.y.copy(0, lastr.y.size)
+        p.cb = lastr.cb.copy(0, lastr.cb.size) if @cfmt != 0
+        p.cr = lastr.cr.copy(0, lastr.cr.size) if @cfmt != 0
       sliding_window(gfn, sps)
       p.ref = 1
       @dpb.push(p)
@@ -572,7 +609,7 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
       else
         while bump_one
           0
-      @dpb = @dpb.select ->(q) q.ref != 0
+      prune_dpb(1)
     # POC state for the next picture
     if @cur_ref_idc != 0
       @prev_mmco5 = mmco5
@@ -591,14 +628,14 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
       @prev_mmco5 = mmco5
     @prev_frame_num = sl.frame_num if sps.poc_type == 0
     # store
-    @dpb = @dpb.select ->(q) q.ref != 0 || q.waiting == 1
+    prune_dpb(2)
     pic.waiting = 1
     while @dpb.size >= @dpb_size && bump_one
-      @dpb = @dpb.select ->(q) q.ref != 0 || q.waiting == 1
+      prune_dpb(2)
     @dpb.push(pic)
     while waiting_count > @num_reorder && bump_one
       0
-    @dpb = @dpb.select ->(q) q.ref != 0 || q.waiting == 1
+    prune_dpb(2)
     0
 
   -> waiting_count
@@ -657,6 +694,7 @@ H264_LEVEL_DPB = [[9, 396], [10, 396], [11, 900], [12, 2376], [13, 2376], [20, 2
       cs = (w + 1) / 2
       chroma = "420"
     f = VideoFrame.new(w, h, planes, [ls, cs, cs], chroma, 8, p.pts)
+    f.owned = (cl != 0 || ct != 0) && @cfmt != 0
     f.duration = p.dur
     if sps.vui_colour == 1
       f.primaries = sps.primaries

@@ -81,7 +81,7 @@ ICC_STATE = [nil]
 # The decoders' output space lives in core/codec/cicp (icc_set_target,
 # icc_target, icc_note_converted). Display P3 colorants, D50-adapted (Apple's
 # Display P3 profile):
-ICC_P3_D50 = [~0.5151215, ~0.2919769, ~0.1571045, ~0.2411957, ~0.6922455, ~0.0665741, ~-0.0010529, ~0.0418854, ~0.7840729]
+ICC_P3_D50 = [~0.5151215, ~0.2919769, ~0.1571045, ~0.2411957, ~0.6922455, ~0.0665741, ~0.0 - ~0.0010529, ~0.0418854, ~0.7840729]
 ICC_INV_FOR = [nil]
 
 -> icc_target_d50

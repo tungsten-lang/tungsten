@@ -246,8 +246,21 @@ use wire_constructors
     custom_units:    {},
     # IDs 256..4095 are generated from the Ruby reference unit registry.
     # User-defined/unknown units live above that range and are heap-boxed.
-    next_custom_unit_id: 4096
-  }, 128)
+    next_custom_unit_id: 4096,
+    # Literal-constant maps (collect_top_level_static_types) and the
+    # ownership pass's fresh-result summaries (ownership.w), declared here so
+    # they do not draw on the spare slots below.
+    top_level_int_literals: nil,
+    top_level_wide_int_literals: nil,
+    top_level_float_literals: nil,
+    fresh_heap_fns: nil,
+    fresh_heap_kinds: nil,
+    fresh_heap_classes: nil
+    # Spare slots for fields first set later in the pipeline. Over 130 such
+    # fields exist (many only on some paths), and a program that reaches more
+    # of them than there are spares dies in w_wire_field_store ("instruction
+    # exhausted spare field slots"); the crypto and wassat bits did at 128.
+  }, 256)
 
 -> next_call_site_id(mod)
   id = mod[:next_call_site]

@@ -23,6 +23,20 @@ INTERPRETER_I64_MAX = 9223372036854775807
           value = coerce_machine_int(value, slot_mt)
       env.set(name, value)
       return value
+    assign_target_value(target, value, env)
+
+  # Store `value` into an assignment target (everything an Assign or a
+  # multiple assignment can write: locals, globals, ivars, cvars, view
+  # fields, setters and `[]=`).
+  -> assign_target_value(target, value, env)
+    if ast_kind(target) == :var
+      name = ast_get(target, :name)
+      if @machine_hints_seen
+        slot_mt = machine_hint_type(env.slot_hint(name))
+        if slot_mt != nil
+          value = coerce_machine_int(value, slot_mt)
+      env.set(name, value)
+      return value
 
     if ast_kind(target) == :gvar
       # A matching `$field` inside a runtime-backed class method is a native
@@ -59,17 +73,55 @@ INTERPRETER_I64_MAX = 9223372036854775807
 
     raise "Invalid assignment target"
 
-  # `a, b = [1, 2]` / `<int>: a, b, c` — destructure the value list into the
-  # targets. The parser supplies the value as an Array node, so evaluating it
-  # yields a list to index per target.
+  # Multiple assignment: `a, b = b, a`, `a, b = f()`, `(a, b), c = v`,
+  # `a, *rest = v`. The whole right side is evaluated before any target is
+  # written; the value of the expression is the right side.
   -> eval_multi_assign(node, env)
     value = evaluate(ast_get(node, :value), env)
-    targets = ast_get(node, :targets)
-    i = 0
-    while i < targets.size()
-      env.set(ast_get(targets[i], :name), value[i])
-      i += 1
+    destructure_into(node, value, env)
     value
+
+  # Bind a value across a target list: an Array spreads over the targets
+  # (missing values are nil), anything else is a one-element list. The
+  # `:splat_index` target takes an Array of what the others leave; a nested
+  # target list destructures its value again.
+  -> destructure_into(pattern, value, env)
+    targets = ast_get(pattern, :targets)
+    items = type(value) == "Array" ? value : [value]
+    n = targets.size()
+    splat = ast_get(pattern, :splat_index)
+    if splat == nil
+      i = 0
+      while i < n
+        bind_destructure_target(targets[i], i < items.size() ? items[i] : nil, env)
+        i += 1
+      return nil
+    after = n - splat - 1
+    rest_end = items.size() - after
+    if rest_end < splat
+      rest_end = splat
+    i = 0
+    while i < splat
+      bind_destructure_target(targets[i], i < items.size() ? items[i] : nil, env)
+      i += 1
+    rest = []
+    k = splat
+    while k < rest_end
+      rest.push(items[k])
+      k += 1
+    bind_destructure_target(targets[splat], rest, env)
+    j = 0
+    while j < after
+      idx = rest_end + j
+      bind_destructure_target(targets[splat + 1 + j], idx < items.size() ? items[idx] : nil, env)
+      j += 1
+    nil
+
+  -> bind_destructure_target(target, value, env)
+    if ast_kind(target) == :multi_assign
+      destructure_into(target, value, env)
+    else
+      assign_target_value(target, value, env)
 
   -> eval_call_assign(call_node, value, env)
     recv_node = ast_get(call_node, :receiver)

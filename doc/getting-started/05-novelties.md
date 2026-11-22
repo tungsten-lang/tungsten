@@ -111,7 +111,8 @@ a <> b
 << b                         # => 1
 ```
 
-Desugars to a multi-assign of `[b, a]` — no temporary in source.
+Shorthand for `a, b = b, a` (multiple assignment, see
+[02 — Syntax](02-syntax.md#multiple-assignment)) — no temporary in source.
 
 ---
 

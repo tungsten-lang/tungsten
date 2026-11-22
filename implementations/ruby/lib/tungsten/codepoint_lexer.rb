@@ -1762,7 +1762,7 @@ module Tungsten
         end
       end
 
-      if (keyword = keyword_at(start, finish))
+      if (keyword = keyword_at(start, finish)) && keyword_in_context?(keyword, start, finish)
         set_token(:KEYWORD, keyword, @row, start_col)
         return true
       end
@@ -1773,6 +1773,15 @@ module Tungsten
       end
 
       false
+    end
+
+    def keyword_in_context?(keyword, start, finish)
+      word = keyword.to_s
+      return true unless ContextualKeywords.contextual?(word)
+      return false if %i[. &.].include?(@last_significant_token_type)
+
+      statement_start = @line_start || @last_significant_token_type == :";"
+      ContextualKeywords.keyword_at?(word, @source, start, finish, statement_start)
     end
 
     def keyword_at(start, finish)

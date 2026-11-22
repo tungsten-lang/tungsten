@@ -1309,6 +1309,8 @@ void *w_closure_cell_new(void);
 WValue w_closure_new(void *fn, WValue *captures, int count);
 WValue w_closure_new_a(void *fn, WValue *captures, int count, int arity);
 WValue w_destructure_index(WValue v, int64_t i);
+WValue w_destructure_rest(WValue v, int64_t start, int64_t after);
+WValue w_destructure_suffix(WValue v, int64_t start, int64_t after, int64_t j);
 WValue w_closure_call_0(WValue closure_val);
 WValue w_closure_call_1(WValue closure_val, WValue arg);
 WValue w_closure_call_2(WValue closure_val, WValue arg1, WValue arg2);

@@ -93,13 +93,18 @@ test: $(BIN)
 		diff -u tests/array_unshift.expected -
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/go_identifier.w | \
 		diff -u tests/go_identifier.expected -
-	@for src in 'go -> 1' 'x = go -> 1' 'go	-> 1'; do \
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/contextual_keywords.w | \
+		diff -u tests/contextual_keywords.expected -
+	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/multi_assign.w | \
+		diff -u tests/multi_assign.expected -
+	@for src in 'go -> 1' 'x = go -> 1' 'go	-> 1' 'fn f(x)' '@gpu fn k(a)'; do \
 		TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --syntax-tokens-only -e "$$src" | \
-			grep -E '^ +[0-9]+ KEYWORD +.*text="go"' >/dev/null || { echo "go spawn not lexed as KEYWORD: $$src" >&2; exit 1; }; \
+			grep -E '^ +[0-9]+ KEYWORD +.*text="(go|fn|on)"' >/dev/null || { echo "keyword form not lexed as KEYWORD: $$src" >&2; exit 1; }; \
 	done
-	@for src in 'go = 1' 'x.go -> 1' 'x&.go' '{go: 1}' '-> go(x)'; do \
+	@for src in 'go = 1' 'x.go -> 1' 'x&.go' '{go: 1}' '-> go(x)' 'fn = 1' 'x.fn y' '-> f(fn)' \
+		'on = 1' '-> pause(on)' 'x.on' 'on macos'; do \
 		TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) --syntax-tokens-only -e "$$src" | \
-			grep -E '^ +[0-9]+ ID +.*text="go"' >/dev/null || { echo "go not lexed as ID: $$src" >&2; exit 1; }; \
+			grep -E '^ +[0-9]+ ID +.*text="(go|fn|on)"' >/dev/null || { echo "word not lexed as ID: $$src" >&2; exit 1; }; \
 	done
 	TUNGSTEN_LEX64_TABLE=../../languages/tungsten/tungsten.lex64 $(BIN) tests/positional_arity.w | \
 		diff -u tests/positional_arity.expected -

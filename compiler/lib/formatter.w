@@ -698,7 +698,11 @@ use parser
       value += " ## " + node.type_hint.to_s()
     prefix + formatter_expr(node.target, depth) + " = " + value
   when :multi_assign
-    prefix + formatter_join_nodes(node.targets, ", ", depth) + " = " + formatter_expr(node.value, depth)
+    value = node.value
+    rhs = formatter_expr(value, depth)
+    if value != nil && is_ast_node?(value) && ast_kind(value) == :array
+      rhs = formatter_join_nodes(value.elements, ", ", depth)
+    prefix + formatter_multi_assign_targets(node, depth) + " = " + rhs
   when :compound_assign
     prefix + formatter_expr(node.target, depth) + " " + formatter_operator(node.op) + "= " + formatter_expr(node.value, depth)
   when :puts
@@ -794,3 +798,22 @@ use parser
   ast = parser.parse()
   formatted = formatter_sequence(ast.expressions, 0).rtrim() + "\n"
   formatter_restore_comments(formatted, masked[:comments])
+
+# `a, *rest, (b, c)`: the target list of a multiple assignment.
+-> formatter_multi_assign_targets(node, depth)
+  targets = node.targets
+  splat = ast_get(node, :splat_index)
+  parts = []
+  i = 0
+  while i < targets.size()
+    t = targets[i]
+    text = ""
+    if is_ast_node?(t) && ast_kind(t) == :multi_assign
+      text = "(" + formatter_multi_assign_targets(t, depth) + ")"
+    else
+      text = formatter_expr(t, depth)
+    if splat != nil && i == splat
+      text = "*" + text
+    parts.push(text)
+    i += 1
+  parts.join(", ")

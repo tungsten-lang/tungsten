@@ -1011,6 +1011,14 @@ RSpec.describe Tungsten::Interpreter do
     expect(run(code)).to eq("boom")
   end
 
+  it "rejects an operator after a trailing type hint" do
+    expect { run("n = 3\na = (2 * n) ## f64 - ~0.5") }.to raise_error(Tungsten::Error, /part of the type hint/)
+  end
+
+  it "converts a boolean through a machine-int hint" do
+    expect(run("x = (3 > 2) ## i64\nx + 1")).to eq(2)
+  end
+
   it "handles begin/rescue without variable" do
     code = "begin\n  raise \"oops\"\nrescue\n  42"
     expect(run(code)).to eq(42)

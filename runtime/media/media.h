@@ -95,6 +95,14 @@
     X(w_media_audio_volume, 2)         \
     X(w_media_audio_info, 1)           \
     X(w_media_audio_close, 1)          \
+    X(w_media_pcm_open, 2)             \
+    X(w_media_pcm_write, 4)            \
+    X(w_media_pcm_time, 1)             \
+    X(w_media_pcm_pause, 2)            \
+    X(w_media_pcm_flush, 1)            \
+    X(w_media_pcm_volume, 2)           \
+    X(w_media_pcm_info, 1)             \
+    X(w_media_pcm_close, 1)            \
     X(w_media_midi_destinations, 0)    \
     X(w_media_midi_sources, 0)         \
     X(w_media_midi_out_open, 2)        \
@@ -153,7 +161,7 @@ W_MEDIA_CCALLS(W_MEDIA_PROTOTYPE)
 /* Handle kinds in the shared registry. */
 enum { W_MEDIA_KIND_ENCODER = 1, W_MEDIA_KIND_SEGMENT = 2, W_MEDIA_KIND_MUX = 3, W_MEDIA_KIND_SCALER = 4,
        W_MEDIA_KIND_DECODER = 5, W_MEDIA_KIND_TRANSCODE = 6, W_MEDIA_KIND_PLAYER = 7,
-       W_MEDIA_KIND_MIDIOUT = 8, W_MEDIA_KIND_MIDIIN = 9, W_MEDIA_KIND_LIVE = 10, W_MEDIA_KIND_COUNT = 11 };
+       W_MEDIA_KIND_MIDIOUT = 8, W_MEDIA_KIND_MIDIIN = 9, W_MEDIA_KIND_LIVE = 10, W_MEDIA_KIND_PCM = 11, W_MEDIA_KIND_COUNT = 12 };
 
 /* One compressed sample of a segment, in decode order. pts/dts are frame
  * indices relative to the segment's first frame (dts == pts without

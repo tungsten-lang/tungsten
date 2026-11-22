@@ -10350,3 +10350,322 @@ WValue w_media_studio_op(WValue opv, WValue a1, WValue a2, WValue a3) {
 }
 
 #pragma clang fp contract(fast)
+
+/* ---- PCM output stream: plays float PCM the program pushes (core/audio_stream.w) ----
+ *
+ * Output only: an AVAudioSourceNode pulls interleaved float frames from a
+ * single-producer / single-consumer ring the program fills with
+ * w_media_pcm_write. Nothing here decodes. The clock (w_media_pcm_time) is the
+ * position of the frame being heard: the ring read position at the last render
+ * callback, advanced by the host clock since that buffer's output time, minus
+ * the output's presentation latency, clamped to what was actually rendered, so
+ * it stops on an underrun and freezes on pause. Flushed frames do not count:
+ * the position restarts at 0 after a flush. Without an output device (engine
+ * start fails) a null sink thread consumes frames in real time, so the clock
+ * still runs (headless use). */
+
+#define PCM_CAP_SECONDS 4
+
+typedef struct APcm {
+    AVAudioEngine     *engine;
+    AVAudioSourceNode *node;
+    int                ch;
+    double             rate;
+    float             *ring;        /* cap * ch floats */
+    int64_t            cap;         /* frames */
+    _Atomic int64_t    wpos, rpos;  /* monotonic frame counters */
+    _Atomic int64_t    flush_to;    /* producer's flush target (consumer applies) */
+    _Atomic int64_t    base;        /* frame counter of position 0 (the last flush) */
+    _Atomic uint32_t   seq;         /* seqlock over the cb_* snapshot */
+    int64_t            cb_rpos, pv_rpos;   /* the last render callback, and the one before */
+    int64_t            cb_take, pv_take;
+    double             cb_host, pv_host;
+    _Atomic int        paused;
+    _Atomic int64_t    underruns;
+    _Atomic int64_t    rendered;    /* frames of real data rendered */
+    _Atomic float      volume;
+    double             latency;     /* seconds */
+    double             frozen;      /* position while paused */
+    double             last;        /* last position returned (monotonic) */
+    int                nosink;      /* null sink: no device */
+    _Atomic int        stop;
+    pthread_t          sink_thread;
+} APcm;
+
+static double pcm_now(void) { return (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9; }
+
+static double pcm_host_s(uint64_t ht) {
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    return (double)ht * (double)tb.numer / (double)tb.denom / 1e9;
+}
+
+/* Pull n frames for output into non-interleaved buffers (outs[c], or NULL). */
+static void pcm_render(APcm *P, float **outs, int nout, int64_t n, double host) {
+    int64_t ft = atomic_load_explicit(&P->flush_to, memory_order_acquire);
+    int64_t r = atomic_load_explicit(&P->rpos, memory_order_relaxed);
+    if (ft > r) r = ft;
+    int64_t w = atomic_load_explicit(&P->wpos, memory_order_acquire);
+    int64_t avail = w - r;
+    if (avail < 0) avail = 0;
+    int64_t take = avail < n ? avail : n;
+    float g = atomic_load_explicit(&P->volume, memory_order_relaxed);
+    int ch = P->ch;
+    for (int c = 0; c < nout; c++) {
+        float *o = outs[c];
+        if (!o) continue;
+        int sc = c < ch ? c : ch - 1;
+        for (int64_t i = 0; i < take; i++) o[i] = P->ring[((r + i) % P->cap) * ch + sc] * g;
+        for (int64_t i = take; i < n; i++) o[i] = 0.0f;
+    }
+    if (take < n && take > 0) atomic_fetch_add_explicit(&P->underruns, 1, memory_order_relaxed);
+    uint32_t s = atomic_load_explicit(&P->seq, memory_order_relaxed);
+    atomic_store_explicit(&P->seq, s + 1, memory_order_release);
+    P->pv_rpos = P->cb_rpos; P->pv_take = P->cb_take; P->pv_host = P->cb_host;
+    P->cb_rpos = r;
+    P->cb_take = take;
+    P->cb_host = host;
+    atomic_store_explicit(&P->seq, s + 2, memory_order_release);
+    atomic_store_explicit(&P->rpos, r + take, memory_order_release);
+    atomic_fetch_add_explicit(&P->rendered, take, memory_order_relaxed);
+}
+
+static void *pcm_null_sink(void *arg) {
+    APcm *P = arg;
+    const int64_t blk = 512;
+    double t = pcm_now();
+    while (!atomic_load(&P->stop)) {
+        if (!atomic_load(&P->paused)) pcm_render(P, NULL, 0, blk, t);
+        t += (double)blk / P->rate;
+        double d = t - pcm_now();
+        if (d > 0) usleep((useconds_t)(d * 1e6));
+        else if (d < -0.5) t = pcm_now();
+    }
+    return NULL;
+}
+
+static APcm *pcm_get(WValue h, const char *what) {
+    return (APcm *)w_media_handle_get(h, W_MEDIA_KIND_PCM, what);
+}
+
+/* open(rate, channels) -> handle */
+WValue w_media_pcm_open(WValue ratev, WValue chv) {
+    double rate = a_num(ratev);
+    int ch = (int)a_num(chv);
+    if (rate < 1000 || rate > 768000) w_media_raise("audio_stream_open: sample rate %g out of range", rate);
+    if (ch < 1 || ch > 16) w_media_raise("audio_stream_open: %d channels out of range (1-16)", ch);
+    APcm *P = calloc(1, sizeof *P);
+    P->ch = ch;
+    P->rate = rate;
+    P->cap = (int64_t)(rate * PCM_CAP_SECONDS);
+    P->ring = calloc((size_t)(P->cap * ch), sizeof(float));
+    atomic_store(&P->volume, 1.0f);
+    @autoreleasepool {
+        P->engine = [[AVAudioEngine alloc] init];
+        AVAudioFormat *fmt = [[[AVAudioFormat alloc] initStandardFormatWithSampleRate:rate channels:(AVAudioChannelCount)ch] autorelease];
+        APcm *Pp = P;
+        if (fmt) {
+            P->node = [[AVAudioSourceNode alloc] initWithFormat:fmt renderBlock:^OSStatus(BOOL *silence, const AudioTimeStamp *ts, AVAudioFrameCount n, AudioBufferList *abl) {
+                float *outs[16];
+                int no = (int)abl->mNumberBuffers;
+                if (no > 16) no = 16;
+                for (int i = 0; i < no; i++) outs[i] = (float *)abl->mBuffers[i].mData;
+                double hs = (ts && (ts->mFlags & kAudioTimeStampHostTimeValid)) ? pcm_host_s(ts->mHostTime) : pcm_now();
+                pcm_render(Pp, outs, no, (int64_t)n, hs);
+                return noErr;
+            }];
+        }
+        int ok = 0;
+        if (P->node) {
+            [P->engine attachNode:P->node];
+            [P->engine connect:P->node to:P->engine.mainMixerNode format:fmt];
+            [P->engine prepare];
+            NSError *err = nil;
+            ok = [P->engine startAndReturnError:&err];
+            if (ok) {
+                AVAudioOutputNode *on = P->engine.outputNode;
+                double lat = on.presentationLatency;
+                if (lat < 0 || lat > 1) lat = 0;
+                P->latency = lat;
+            }
+        }
+        if (!ok) {
+            P->nosink = 1;
+            if (P->node) { [P->engine detachNode:P->node]; [P->node release]; P->node = nil; }
+            [P->engine release];
+            P->engine = nil;
+            pthread_create(&P->sink_thread, NULL, pcm_null_sink, P);
+        }
+    }
+    return w_int(w_media_handle_new(P, W_MEDIA_KIND_PCM));
+}
+
+/* write(h, samples, first_frame, frames) -> frames accepted (never blocks).
+ * samples: interleaved f32[] (or a ByteArray of little-endian float32). */
+WValue w_media_pcm_write(WValue h, WValue arr, WValue firstv, WValue nv) {
+    APcm *P = pcm_get(h, "audio_stream_write");
+    if (!w_is_array(arr)) w_media_raise("audio_stream_write: samples must be an f32[] or ByteArray");
+    WArray *a = w_as_array(arr);
+    const float *src;
+    int64_t total;
+    if (a->ebits == -32) { src = (const float *)a->slots + a->start; total = a->size / P->ch; }
+    else if (a->ebits == 8) { src = (const float *)((const uint8_t *)a->slots + a->start); total = a->size / 4 / P->ch; }
+    else { w_media_raise("audio_stream_write: samples must be an f32[] or ByteArray"); return W_NIL; }
+    int64_t first = (int64_t)a_num(firstv);
+    int64_t n = (int64_t)a_num(nv);
+    if (first < 0) first = 0;
+    if (first > total) first = total;
+    if (n < 0 || first + n > total) n = total - first;
+    int64_t w = atomic_load_explicit(&P->wpos, memory_order_relaxed);
+    int64_t r = atomic_load_explicit(&P->rpos, memory_order_acquire);
+    int64_t ft = atomic_load_explicit(&P->flush_to, memory_order_relaxed);
+    if (ft > r) r = ft;
+    int64_t space = P->cap - (w - r);
+    if (n > space) n = space;
+    int ch = P->ch;
+    for (int64_t i = 0; i < n; i++) {
+        int64_t slot = ((w + i) % P->cap) * ch;
+        memcpy(&P->ring[slot], src + (first + i) * ch, (size_t)ch * sizeof(float));
+    }
+    atomic_store_explicit(&P->wpos, w + n, memory_order_release);
+    return w_int(n);
+}
+
+static double pcm_position(APcm *P) {
+    int64_t cr, ct, pr, pt; double chost, phost; uint32_t s0, s1;
+    do {
+        s0 = atomic_load_explicit(&P->seq, memory_order_acquire);
+        cr = P->cb_rpos; ct = P->cb_take; chost = P->cb_host;
+        pr = P->pv_rpos; pt = P->pv_take; phost = P->pv_host;
+        s1 = atomic_load_explicit(&P->seq, memory_order_acquire);
+    } while (s0 != s1 || (s0 & 1));
+    double heard;
+    double now = pcm_now() - P->latency;
+    if (chost == 0) heard = 0;
+    else if (now >= chost || phost == 0) {
+        /* the last buffer is playing (or played out) */
+        double adv = (now - chost) * P->rate;
+        if (adv < 0) adv = 0;
+        if (adv > (double)ct) adv = (double)ct;
+        heard = (double)cr + adv;
+    } else {
+        /* the last buffer is still ahead of the speaker: the one before is playing */
+        double adv = (now - phost) * P->rate;
+        if (adv < 0) adv = 0;
+        if (adv > (double)pt) adv = (double)pt;
+        heard = (double)pr + adv;
+    }
+    int64_t base = atomic_load_explicit(&P->base, memory_order_relaxed);
+    double pos = (heard - (double)base) / P->rate;
+    if (pos < 0) pos = 0;
+    return pos;
+}
+
+/* time(h) -> seconds of real audio heard since open / the last flush */
+WValue w_media_pcm_time(WValue h) {
+    APcm *P = pcm_get(h, "audio_stream_time");
+    if (atomic_load(&P->paused)) return w_float(P->frozen);
+    double p = pcm_position(P);
+    if (p < P->last) p = P->last;
+    P->last = p;
+    return w_float(p);
+}
+
+/* pause(h, on) */
+WValue w_media_pcm_pause(WValue h, WValue onv) {
+    APcm *P = pcm_get(h, "audio_stream_pause");
+    int on = w_truthy(onv) ? 1 : 0;
+    if (on == atomic_load(&P->paused)) return W_TRUE;
+    if (on) {
+        double p = pcm_position(P);
+        if (p < P->last) p = P->last;
+        P->frozen = p;
+        P->last = p;
+        atomic_store(&P->paused, 1);
+        if (P->engine) [P->engine pause];
+        /* the frames the device had not played yet are played again on resume */
+        int64_t base = atomic_load(&P->base);
+        int64_t at = base + (int64_t)(p * P->rate);
+        int64_t r = atomic_load(&P->rpos);
+        if (at < r && at >= atomic_load(&P->flush_to)) {
+            atomic_store(&P->rpos, at);
+            uint32_t s = atomic_load(&P->seq);
+            atomic_store(&P->seq, s + 1);
+            P->cb_rpos = at; P->cb_take = 0; P->pv_host = 0;
+            atomic_store(&P->seq, s + 2);
+        }
+    } else {
+        atomic_store(&P->paused, 0);
+        if (P->engine) {
+            NSError *err = nil;
+            [P->engine startAndReturnError:&err];
+        }
+    }
+    return W_TRUE;
+}
+
+/* flush(h): drop every queued frame; the position restarts at 0. */
+WValue w_media_pcm_flush(WValue h) {
+    APcm *P = pcm_get(h, "audio_stream_flush");
+    int64_t w = atomic_load(&P->wpos);
+    atomic_store_explicit(&P->flush_to, w, memory_order_release);
+    atomic_store(&P->base, w);
+    P->last = 0;
+    P->frozen = 0;
+    if (P->engine && atomic_load(&P->paused)) {
+        /* no render callback runs while paused: apply the flush now */
+        atomic_store(&P->rpos, w);
+    }
+    uint32_t s = atomic_load(&P->seq);
+    atomic_store(&P->seq, s + 1);
+    P->cb_rpos = w; P->cb_take = 0; P->cb_host = pcm_now(); P->pv_host = 0;
+    atomic_store(&P->seq, s + 2);
+    return W_TRUE;
+}
+
+/* volume(h, v): linear gain 0 … 1 */
+WValue w_media_pcm_volume(WValue h, WValue vv) {
+    APcm *P = pcm_get(h, "audio_stream_volume");
+    double v = a_num(vv);
+    if (v < 0) v = 0;
+    if (v > 1) v = 1;
+    atomic_store(&P->volume, (float)v);
+    return W_TRUE;
+}
+
+/* info(h) -> [queued frames, underruns, rate, channels, latency s, has device 0/1, rendered frames] */
+WValue w_media_pcm_info(WValue h) {
+    APcm *P = pcm_get(h, "audio_stream_info");
+    int64_t w = atomic_load(&P->wpos), r = atomic_load(&P->rpos), ft = atomic_load(&P->flush_to);
+    if (ft > r) r = ft;
+    WValue a = w_array_new_empty();
+    a = w_array_push(a, w_int(w - r));
+    a = w_array_push(a, w_int(atomic_load(&P->underruns)));
+    a = w_array_push(a, w_float(P->rate));
+    a = w_array_push(a, w_int(P->ch));
+    a = w_array_push(a, w_float(P->latency));
+    a = w_array_push(a, w_int(P->nosink ? 0 : 1));
+    a = w_array_push(a, w_int(atomic_load(&P->rendered)));
+    return a;
+}
+
+WValue w_media_pcm_close(WValue h) {
+    if (!w_is_int(h)) return W_NIL;
+    APcm *P = (APcm *)m_avf_peek(h, W_MEDIA_KIND_PCM);
+    if (!P) return W_NIL;
+    w_media_handle_drop(h, W_MEDIA_KIND_PCM);
+    @autoreleasepool {
+        if (P->engine) {
+            [P->engine stop];
+            if (P->node) { [P->engine detachNode:P->node]; [P->node release]; }
+            [P->engine release];
+        }
+    }
+    if (P->nosink) {
+        atomic_store(&P->stop, 1);
+        pthread_join(P->sink_thread, NULL);
+    }
+    free(P->ring);
+    free(P);
+    return W_NIL;
+}

@@ -547,6 +547,7 @@ typedef struct {
 /* ---- Boxing constructors (runtime functions) ---- */
 WValue w_int(int64_t v);
 int64_t w_to_i64(WValue v);
+int64_t w_cast_i64(WValue v);
 int64_t w_numeric_to_i64(WValue v);
 int64_t w_range_bound_i64(WValue v);
 WValue w_range_bound_i64_w(WValue v);

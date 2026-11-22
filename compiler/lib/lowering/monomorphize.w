@@ -331,8 +331,14 @@
 
 # Every reference to var_name in the scope must be either its single defining
 # assignment or the receiver of a frozen-safe call ([], []=, size, length).
--> typed_array_var_stack_safe?(scope_body, var_name)
+-> typed_array_var_stack_safe?(scope_body, var_name, top_level = false)
   st = {ok: true, assigns: 0, any_recv_call: false}
+  # A top-level local is a global that functions and methods read too (`TA =
+  # i32[8]` read as `TA ## i32[]` inside a typed fn). Those readers see the
+  # typed-array layout, not the SmallArray one, so any mention inside a nested
+  # definition is an escape.
+  if top_level
+    st[:see_defs] = true
   walk_escape_uses(scope_body, var_name, st)
   st[:ok] && st[:assigns] == 1
 
@@ -383,6 +389,20 @@
     return nil
   # A nested definition opens its own scope and cannot see this frame's locals.
   if k == :method_def || k == :fn_def
+    if st[:see_defs] != true
+      return nil
+    saved_in_def = st[:in_block]
+    st[:in_block] = true
+    dkid = kind_id_table[k]
+    dkeys = dkid == nil ? nil : slab_keys_table[dkid]
+    if dkeys == nil
+      st[:ok] = false
+      return nil
+    dj = 0
+    while dj < dkeys.size()
+      walk_escape_uses(ast_get(node, dkeys[dj]), var_name, st)
+      dj += 1
+    st[:in_block] = saved_in_def
     return nil
   if k == :assign
     tgt = node.target
@@ -439,7 +459,7 @@
   nil
 
 # Entry: process a scope's statement list, then recurse into nested fn bodies.
--> mark_stackable_typed_arrays(scope_body, skip_core = false, skip_paths = nil)
+-> mark_stackable_typed_arrays(scope_body, skip_core = false, skip_paths = nil, top_level = true)
   if scope_body == nil
     return nil
   if type(scope_body) != "Array"
@@ -450,12 +470,12 @@
   ci = 0
   while ci < cands.size()
     c = cands[ci]
-    if typed_array_var_stack_safe?(scope_body, c[:var])
+    if typed_array_var_stack_safe?(scope_body, c[:var], top_level)
       c[:node].stack_safe = true
     ci += 1
   si = 0
   while si < nested_scopes.size()
-    mark_stackable_typed_arrays(nested_scopes[si], false, nil)
+    mark_stackable_typed_arrays(nested_scopes[si], false, nil, false)
     si += 1
   nil
 

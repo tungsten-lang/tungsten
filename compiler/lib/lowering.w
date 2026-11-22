@@ -1312,6 +1312,18 @@ use lowering/definitions
         if wire_get(inst, :value) != nil
           out << " "
           out << wire_get(inst, :value).to_s()
+        if wire_get(inst, :ptr) != nil
+          out << " ptr="
+          out << wire_get(inst, :ptr).to_s()
+        if wire_get(inst, :left) != nil
+          out << " l="
+          out << wire_get(inst, :left).to_s()
+        if wire_get(inst, :right) != nil
+          out << " r="
+          out << wire_get(inst, :right).to_s()
+        if wire_get(inst, :args) != nil
+          out << " args="
+          out << wire_get(inst, :args).to_s()
         if wire_get(inst, :label) != nil
           out << " %"
           out << wire_get(inst, :label)

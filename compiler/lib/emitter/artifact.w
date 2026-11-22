@@ -952,6 +952,10 @@
     if decls_out.index("@w_to_i64(") == nil
       decls_out = decls_out + "declare i64 @w_to_i64(i64) nounwind\n"
     decls_out = decls_out + to_i64_fast_helper_ir() + "\n"
+  if ccall_needed.has_key?("__w_cast_i64_fast")
+    if decls_out.index("@w_cast_i64(") == nil
+      decls_out = decls_out + "declare i64 @w_cast_i64(i64) nounwind\n"
+    decls_out = decls_out + to_i64_fast_helper_ir("__w_cast_i64_fast", "w_cast_i64") + "\n"
   if ccall_needed.has_key?("__w_num_to_f64_fast")
     if decls_out.index("@w_num_to_f64(") == nil
       decls_out = decls_out + "declare double @w_num_to_f64(i64) nounwind memory(read)\n"

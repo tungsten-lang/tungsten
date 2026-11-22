@@ -22815,6 +22815,23 @@ int64_t w_to_i64(WValue v) {
     return as_int(v);
 }
 
+/* Explicit `## i64` (and narrower) conversion of a dynamically typed value:
+ * integers keep their low 64 bits like w_to_i64, a Float truncates toward
+ * zero as `.to_i` does (saturating at the i64 range, NaN -> 0), and a
+ * boolean is 1 / 0. Anything else is the same type error as w_to_i64. */
+int64_t w_cast_i64(WValue v) {
+    if (w_is_integer_any(v)) return integer_low_i64(v);
+    if (w_is_double(v)) {
+        double d = w_as_double(v);
+        if (d != d) return 0;
+        if (d >= 9223372036854775807.0) return INT64_MAX;
+        if (d <= -9223372036854775808.0) return INT64_MIN;
+        return (int64_t)d;
+    }
+    if (w_is_bool(v)) return w_is_true(v) ? 1 : 0;
+    return as_int(v);
+}
+
 WValue w_u64(uint64_t v) {
     return bigint_from_u64(v);
 }

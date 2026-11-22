@@ -517,7 +517,22 @@
       return t
   tv = lower_expression(ctx, node)
   inferred = infer_type(node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
-  ensure_raw_machine_int(ctx[:func], tv, type, inferred)
+  wfn = ctx[:func]
+  # A comparison converts to 1 / 0.
+  if tv[:type] == :i1
+    selected = next_temp(wfn)
+    emit_wire_select_i64(wfn, tv[:value], "0", selected, "1")
+    return cast_raw_machine_int(wfn, selected, :i64, type)
+  # A boxed value of no statically known integer type is converted, not
+  # merely unboxed: a Float (a local assigned from mixed arithmetic) truncates
+  # toward zero and a boolean becomes 1 / 0, as the interpreter does. Values
+  # that are integers at run time cost the same type test as the plain unbox.
+  if tv[:type] == :i64 && !is_machine_int128_type(type) && raw_machine_source_type(tv, inferred) == nil && !(inferred in (:string :array :hash :nil))
+    boxed = ensure_i64_value(wfn, tv)
+    converted = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [boxed], nil, nil, "__w_cast_i64_fast", nil, nil, converted)
+    return cast_raw_machine_int(wfn, converted, :i64, type)
+  ensure_raw_machine_int(wfn, tv, type, inferred)
 
 -> is_safe_inline_int_op(op, left_node, right_node)
   # Only safe for +0 or *0/*1 — even +1/-1 can overflow at i48 boundary

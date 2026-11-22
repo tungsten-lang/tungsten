@@ -1665,6 +1665,8 @@ module Tungsten
       return value.to_f if %w[f32 f64].include?(text) && value.is_a?(Numeric)
       # A machine-int hint converts a Float's value, truncating toward zero.
       value = value.truncate if value.is_a?(Float) && MACHINE_INT_HINTS.include?(text)
+      # A boolean converts to 1 / 0, as compiled code zero-extends a comparison.
+      return value ? 1 : 0 if (value == true || value == false) && MACHINE_INT_HINTS.include?(text)
       return value unless value.is_a?(Integer)
 
       case text

@@ -232,6 +232,7 @@
   # Core value constructors
   out << declare_fn("w_int", wv, "i64")
   out << declare_fn("w_to_i64", "i64", wv)
+  out << declare_fn("w_cast_i64", "i64", wv)
   out << declare_fn("w_u64", wv, "i64")
   out << declare_fn("w_to_u64", "i64", wv)
   out << declare_fn("w_index_raw_i64", "i64", wv2)
@@ -1631,9 +1632,9 @@
   out << "}\n"
   out.to_s()
 
--> to_i64_fast_helper_ir()
+-> to_i64_fast_helper_ir(helper_name = "__w_to_i64_fast", slow_fn = "w_to_i64")
   out = StringBuffer(480)
-  out << "define private i64 @__w_to_i64_fast(i64 %v) alwaysinline nounwind {\n"
+  out << "define private i64 @" + helper_name + "(i64 %v) alwaysinline nounwind {\n"
   out << "entry:\n"
   out << "  %hi = lshr i64 %v, 48\n"
   out << "  %isi = icmp eq i64 %hi, 65530\n"
@@ -1643,7 +1644,7 @@
   out << "  %p = ashr i64 %s, 16\n"
   out << "  ret i64 %p\n"
   out << "slow:\n"
-  out << "  %sv = call i64 @w_to_i64(i64 %v)\n"
+  out << "  %sv = call i64 @" + slow_fn + "(i64 %v)\n"
   out << "  ret i64 %sv\n"
   out << "}\n"
   out.to_s()

@@ -707,6 +707,9 @@ INTERPRETER_I64_MAX = 9223372036854775807
     if value_type == "Float" && hint in ("u64" "i64" "u128" "i128" "u32" "i32" "u16" "i16" "u8" "i8")
       value = value.to_i()
       value_type = type(value)
+    # A boolean converts to 1 / 0, as compiled code zero-extends a comparison.
+    if value_type == "Boolean" && hint in ("u64" "i64" "u128" "i128" "u32" "i32" "u16" "i16" "u8" "i8")
+      return value ? 1 : 0
     if !(value_type in ("Int" "BigInt"))
       return value
     if hint == "u64"

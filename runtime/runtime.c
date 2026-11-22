@@ -77862,6 +77862,28 @@ W_BRIDGE_STUB WValue w_gfx_capture_take(WValue window) {
 }
 /* end windowed graphics bridge stubs (weak) */
 
+/* Credentials bridge stubs (weak): runtime/credentials.m (companion gate
+ * `credentials`, linked when the IR references @w_cred_) overrides these on
+ * macOS; elsewhere every call raises. */
+static WValue w_cred_unavailable(void) {
+    w_raise(w_string("Credentials: passkeys and the Keychain need macOS"));
+    return W_NIL;
+}
+W_BRIDGE_STUB WValue w_cred_status(void) { return w_cred_unavailable(); }
+W_BRIDGE_STUB WValue w_cred_webauthn_begin(WValue json) { (void)json; return w_cred_unavailable(); }
+W_BRIDGE_STUB WValue w_cred_list_passkeys(WValue rp) { (void)rp; return w_cred_unavailable(); }
+W_BRIDGE_STUB WValue w_cred_poll(WValue ticket) { (void)ticket; return w_cred_unavailable(); }
+W_BRIDGE_STUB WValue w_cred_cancel(WValue ticket) { (void)ticket; return w_cred_unavailable(); }
+W_BRIDGE_STUB WValue w_cred_kc_find(WValue server) { (void)server; return w_cred_unavailable(); }
+W_BRIDGE_STUB WValue w_cred_kc_password(WValue server, WValue account) { (void)server; (void)account; return w_cred_unavailable(); }
+W_BRIDGE_STUB WValue w_cred_kc_save(WValue server, WValue account, WValue password, WValue label, WValue protocol) {
+    (void)server; (void)account; (void)password; (void)label; (void)protocol;
+    return w_cred_unavailable();
+}
+W_BRIDGE_STUB WValue w_cred_kc_delete(WValue server, WValue account) { (void)server; (void)account; return w_cred_unavailable(); }
+W_BRIDGE_STUB WValue w_cred_strong_password(void) { return w_cred_unavailable(); }
+/* end credentials bridge stubs */
+
 /* ---- Internal cross-TU bridge (runtime_internal.h) ---- */
 W_RT_INTERNAL void w_rt_die(const char *msg) { die(msg); }
 W_RT_INTERNAL void w_rt_dief(const char *fmt, ...) {

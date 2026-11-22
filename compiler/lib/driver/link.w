@@ -292,6 +292,7 @@
     sparse_needed = precomputed_lf[:sparse_needed] == true
     quartz_needed = precomputed_lf[:quartz_needed] == true
     media_needed = precomputed_lf[:media_needed] == true
+    credentials_needed = precomputed_lf[:credentials_needed] == true
     sci_io_needed = precomputed_lf[:sci_io_needed] == true
     wtensor_needed = precomputed_lf[:wtensor_needed] == true
     cuda_needed = precomputed_lf[:cuda_needed] == true
@@ -308,6 +309,7 @@
     sparse_needed = ll_needs_sparse(ll_probe_text)
     quartz_needed = ll_needs_quartz(ll_probe_text)
     media_needed = ll_needs_media(ll_probe_text)
+    credentials_needed = ll_needs_credentials(ll_probe_text)
     sci_io_needed = ll_needs_sci_io(ll_probe_text)
     wtensor_needed = ll_needs_wtensor(ll_probe_text)
     cuda_needed = ll_needs_cuda(ll_probe_text)
@@ -508,6 +510,8 @@
     companion_gates.push("quartz")
   if media_needed
     companion_gates.push("media")
+  if credentials_needed
+    companion_gates.push("credentials")
   if sci_io_needed
     companion_gates.push("sci_io")
   if wtensor_needed
@@ -621,6 +625,8 @@
       clang_cmd << " -framework Accelerate"
     if quartz_needed
       clang_cmd << " -framework CoreGraphics -framework CoreText -framework ImageIO -framework CoreFoundation"
+    if credentials_needed
+      clang_cmd << " -framework Foundation -framework Security -framework CoreFoundation"
     if media_needed
       clang_cmd << " -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework AVFoundation -framework AudioToolbox -framework Foundation -framework CoreFoundation"
     if mlx_needed

@@ -126,6 +126,13 @@
 -> ll_needs_media(text)
   ll_code_has(text, "@w_media_")
 
+# The AuthenticationServices/Keychain bridge behind core/credentials.w
+# (runtime/credentials.m): passkeys and saved passwords. Its own gate; the
+# bridge dlopens AuthenticationServices on first use and links only
+# Foundation and Security.
+-> ll_needs_credentials(text)
+  ll_code_has(text, "@w_cred_")
+
 -> ll_needs_sci_io(text)
   ll_code_has(text, "@w_sci_")
 

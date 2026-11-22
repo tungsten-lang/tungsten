@@ -129,4 +129,24 @@ if [[ "$("$TMP/src/a.wc")" != "9" || "$("$TMP/src/b.wc")" != "8" ]]; then
   exit 1
 fi
 
+# A Core class variable touched only inside Core method bodies is registered
+# while those bodies are lowered, which a hit skips. The persistent hit must
+# still define its global (it once failed with an undefined @cvar.Base64.*).
+mkdir -p "$TMP/cvar"
+cp compiler/test/fixtures/core_cache_method_cvar.w "$TMP/cvar/cvar.w"
+for run in cold warm; do
+  TUNGSTEN_CACHE_DIR="$TMP/cvar-cache" \
+    "$TUNGSTEN" compile "$TMP/cvar/cvar.w" --out "$TMP/cvar/$run" -v \
+    >"$TMP/cvar/$run.log" 2>&1 || { cat "$TMP/cvar/$run.log" >&2; echo "FAIL: $run Core-cvar compile failed" >&2; exit 1; }
+  if [[ "$("$TMP/cvar/$run")" != "64" ]]; then
+    echo "FAIL: $run Core-cvar executable returned unexpected output" >&2
+    exit 1
+  fi
+done
+if ! grep -E 'core cache: hit .+\(.*disk\)' "$TMP/cvar/warm.log" >/dev/null; then
+  echo "FAIL: the Core-cvar recompile did not hit the persistent Core cache" >&2
+  cat "$TMP/cvar/warm.log" >&2
+  exit 1
+fi
+
 echo "incremental Core cache contract: ok"

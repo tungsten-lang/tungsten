@@ -33,7 +33,7 @@ incremental_core_cache_state = {
 -> incremental_core_cache_entry_valid?(entry, key)
   if type(entry) != "Hash" || entry[:key] != key || type(entry[:core_abi_hash]) != "String"
     return false
-  if type(entry[:functions]) != "Array" || type(entry[:strings]) != "Array" || type(entry[:name_map]) != "Hash" || type(entry[:fn_hashes]) != "Hash" || type(entry[:counter_prefix]) != "Hash"
+  if type(entry[:functions]) != "Array" || type(entry[:strings]) != "Array" || type(entry[:name_map]) != "Hash" || type(entry[:fn_hashes]) != "Hash" || type(entry[:counter_prefix]) != "Hash" || type(entry[:core_cvar_globals]) != "Array"
     return false
   i = 0
   while i < entry[:strings].size()
@@ -384,6 +384,13 @@ incremental_core_cache_state = {
   mod[:incremental_core_fn_hashes] = entry[:fn_hashes]
   mod[:core_stored_globals] = entry[:core_stored_globals]
   mod[:core_loaded_globals] = entry[:core_loaded_globals]
+  # A hit skips lowering Core method bodies, and lowering is what registers
+  # each class variable's global. Restore the ones the cached functions use.
+  cvars = entry[:core_cvar_globals]
+  i = 0
+  while i < cvars.size()
+    mod[:cvar_globals][cvars[i]] = true
+    i += 1
   mod[:incremental_core_cache_status] = :hit
   mod[:incremental_core_cache_hit] = true
   incremental_core_cache_state[:hits] = incremental_core_cache_state[:hits] + 1
@@ -704,6 +711,7 @@ incremental_core_cache_state = {
   core_fn_hashes = {}
   core_stored_set = {}
   core_loaded_set = {}
+  core_cvar_set = {}
   i = 0
   while i < mod[:functions].size()
     func = mod[:functions][i]
@@ -730,6 +738,8 @@ incremental_core_cache_state = {
             core_stored_set[wire_get(binstrs[ii], :name)] = true
           elsif gk == :load_global
             core_loaded_set[wire_get(binstrs[ii], :name)] = true
+          elsif gk == :load_cvar || gk == :store_cvar
+            core_cvar_set[wire_get(binstrs[ii], :cvar_key)] = true
           ii += 1
         bi += 1
       func[:incremental_core_candidate] = nil
@@ -753,6 +763,7 @@ incremental_core_cache_state = {
     core_ic_sites: mod[:core_ic_sites_snapshot],
     core_stored_globals: core_stored_set.keys(),
     core_loaded_globals: core_loaded_set.keys(),
+    core_cvar_globals: core_cvar_set.keys(),
     functions: functions,
     strings: strings,
     name_map: final_name_map,

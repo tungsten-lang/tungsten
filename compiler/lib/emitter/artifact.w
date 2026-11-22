@@ -254,10 +254,12 @@
   # when the class is namespace-qualified (e.g. `Tungsten:Carbide:
   # Application`), the colons would land in the LLVM identifier
   # name, which is illegal. Mangle `:` → `__` to match the class-
-  # global mangling above.
+  # global mangling above. Sorted: a lowered-Core cache hit registers
+  # Core's keys up front instead of in lowering order, and both must emit
+  # the same module.
   cvg = mod[:cvar_globals]
   if cvg != nil
-    cvg_keys = cvg.keys()
+    cvg_keys = cvg.keys().sort()
     ci = 0
     while ci < cvg_keys.size()
       globals_out << "@cvar."

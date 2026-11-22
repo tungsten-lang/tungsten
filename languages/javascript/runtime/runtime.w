@@ -92,8 +92,10 @@ JS_STACK = JsTlsCell.new(1000, nil)
 JS_POS = JsTlsCell.new(1001, -1)
 # The running top-level script: [src, url].
 JS_TOP = JsTlsCell.new(2, "")
-# Interpreted frames allowed (main stack and 16 MB goroutine stacks both hold this many).
-JS_MAX_DEPTH = [6000]
+# Interpreted frames allowed. Goroutine stacks are 4 MB (they are touched, not just reserved,
+# so a larger hint multiplies the memory of every suspended generator/async function);
+# 4 MB holds about 2500 frames.
+JS_MAX_DEPTH = [2500]
 JS_LAST_ENV = JsTlsCell.new(1, nil)
 
 # ---- frames ----
@@ -624,7 +626,7 @@ JS_CORO_TOTAL = JsTlsCell.new(1, 0)
 -> js_coro_spawn(c)
   if !JS_GOROUTINE_INIT[0]
     JS_GOROUTINE_INIT[0] = true
-    n = (16777216 ## int)
+    n = (4194304 ## int)
     ccall("w_goroutine_stack_size_hint", n)
   JS_CORO_LIVE[0] += 1
   JS_CORO_TOTAL[0] += 1

@@ -694,6 +694,33 @@ WValue w_cg_set_alpha(WValue hv, WValue av) {
     return W_NIL;
 }
 
+/* w_cg_set_shadow(h, dx, dy, blur, colour): a drop shadow under everything
+ * drawn after it (until restore), as HTML canvas shadowOffsetX/Y, shadowBlur
+ * and shadowColor. The offset is in user units but, like the canvas API's, is
+ * not transformed by the CTM; blur is the canvas shadowBlur (about twice the
+ * Gaussian sigma). A nil or fully transparent colour turns shadows off. */
+static int cg_color(WValue v, double out[4], const char *what);
+
+WValue w_cg_set_shadow(WValue hv, WValue dxv, WValue dyv, WValue blurv, WValue colorv) {
+    CGCanvas *c = cg_canvas(hv, "shadow");
+    double rgba[4] = {0, 0, 0, 0};
+    if (!cg_color(colorv, rgba, "shadow") || rgba[3] <= 0) {
+        CGContextSetShadowWithColor(c->ctx, CGSizeMake(0, 0), 0, NULL);
+        return W_NIL;
+    }
+    double sc = c->base.a != 0 ? fabs(c->base.a) : 1.0;
+    double dx = cg_num_or(dxv, 0, "dx") * sc;
+    double dy = cg_num_or(dyv, 0, "dy") * sc;
+    double blur = cg_num_or(blurv, 0, "blur") * sc;
+    if (blur < 0) blur = 0;
+    const CGFloat comps[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
+    CGColorRef col = CGColorCreate(c->color_space, comps);
+    /* base space is y-up: a canvas offset down the page is negative height */
+    CGContextSetShadowWithColor(c->ctx, CGSizeMake(dx, -dy), blur, col);
+    CGColorRelease(col);
+    return W_NIL;
+}
+
 typedef struct { const char *name; CGBlendMode mode; } CGBlendName;
 static const CGBlendName g_blends[] = {
     {"normal", kCGBlendModeNormal},          {"source_over", kCGBlendModeNormal},

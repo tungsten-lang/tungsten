@@ -75800,9 +75800,50 @@ typedef struct WGoroutineUnwind {
     WBlockReturnFrame *block_return_stack;
     WCleanupEntry *cleanup_stack;
     int cleanup_top;
+    WValue *ctx_locals;      /* context locals, shared with the spawning context */
 } WGoroutineUnwind;
 
-#define W_GOROUTINE_UNWIND_RESERVE 32  /* >= sizeof(WGoroutineUnwind), multiple of 16 */
+/* ---- Context locals (core ThreadLocal) ----
+ * A small array of WValues per execution context: each OS thread (main, a
+ * Thread.new thread) gets its own, and a goroutine shares the array of the
+ * context that spawned it, swapped in and out with its unwind state. So a
+ * value set on a thread is seen by every goroutine that thread spawns, even
+ * when an M:P worker runs it on another OS thread. Slots are numbered by
+ * ThreadLocal.new (w_ctx_local_alloc) and start nil in every new thread. */
+#define W_CTX_LOCALS_MAX 256
+static __thread WValue *g_ctx_locals = NULL;
+static _Atomic int64_t g_ctx_locals_next = 0;
+
+static WValue *w_ctx_locals(void) {
+    if (__builtin_expect(g_ctx_locals != NULL, 1)) return g_ctx_locals;
+    WValue *a = malloc(sizeof(WValue) * W_CTX_LOCALS_MAX);
+    for (int i = 0; i < W_CTX_LOCALS_MAX; i++) a[i] = W_NIL;
+    g_ctx_locals = a;
+    return a;
+}
+
+/* Reserve n consecutive slots; returns the first index. */
+WValue w_ctx_local_alloc(WValue n) {
+    int64_t k = w_is_int(n) ? w_as_int(n) : 1;
+    if (k < 1) k = 1;
+    int64_t base = atomic_fetch_add(&g_ctx_locals_next, k);
+    if (base + k > W_CTX_LOCALS_MAX) w_raise(w_string("ThreadLocal: out of context-local slots"));
+    return w_int(base);
+}
+
+WValue w_ctx_local_get(WValue i) {
+    int64_t k = w_as_int(i);
+    if ((uint64_t)k >= W_CTX_LOCALS_MAX) return W_NIL;
+    return w_ctx_locals()[k];
+}
+
+WValue w_ctx_local_set(WValue i, WValue v) {
+    int64_t k = w_as_int(i);
+    if ((uint64_t)k < W_CTX_LOCALS_MAX) w_ctx_locals()[k] = v;
+    return v;
+}
+
+#define W_GOROUTINE_UNWIND_RESERVE 48  /* >= sizeof(WGoroutineUnwind), multiple of 16 */
 _Static_assert(sizeof(WGoroutineUnwind) <= W_GOROUTINE_UNWIND_RESERVE, "goroutine unwind slot too small");
 
 static inline WGoroutineUnwind *g_unwind_slot(WGoroutine *g) {
@@ -75814,6 +75855,7 @@ typedef struct WUnwindSave {
     WBlockReturnFrame *block_return_stack;
     WCleanupEntry *cleanup_stack;
     int cleanup_top;
+    WValue *ctx_locals;
 } WUnwindSave;
 
 static inline void g_unwind_enter(WGoroutine *g, WUnwindSave *save) {
@@ -75826,6 +75868,8 @@ static inline void g_unwind_enter(WGoroutine *g, WUnwindSave *save) {
     w_block_return_stack = u->block_return_stack;
     g_cleanup_stack = u->cleanup_stack;
     g_cleanup_top = u->cleanup_top;
+    save->ctx_locals = g_ctx_locals;
+    g_ctx_locals = u->ctx_locals;
 }
 
 static inline void g_unwind_leave(WGoroutine *g, const WUnwindSave *save) {
@@ -75838,6 +75882,8 @@ static inline void g_unwind_leave(WGoroutine *g, const WUnwindSave *save) {
     w_block_return_stack = save->block_return_stack;
     g_cleanup_stack = save->cleanup_stack;
     g_cleanup_top = save->cleanup_top;
+    u->ctx_locals = g_ctx_locals;
+    g_ctx_locals = save->ctx_locals;
 }
 
 typedef struct {
@@ -76397,6 +76443,7 @@ WValue w_goroutine_spawn(WValue closure) {
         u->exception_stack = NULL;
         u->block_return_stack = NULL;
         u->cleanup_top = 0;
+        u->ctx_locals = w_ctx_locals();
     } else {
         /* Allocate fresh goroutine */
         void *stack = g_arena_alloc_stack();
@@ -76420,6 +76467,7 @@ WValue w_goroutine_spawn(WValue closure) {
         /* Empty unwind state (a stack from the freelist may carry stale
          * words; its previous cleanup stack was freed with its struct) */
         memset(g_unwind_slot(g), 0, sizeof(WGoroutineUnwind));
+        g_unwind_slot(g)->ctx_locals = w_ctx_locals();
     }
 
     /* (Re)initialize context — stack is reused, entry point reset. The
@@ -77954,6 +78002,13 @@ W_BRIDGE_STUB WValue w_gfx_menu_clear(WValue window, WValue menu) {
 W_BRIDGE_STUB WValue w_gfx_menu_set(WValue window, WValue id, WValue enabled,
                                      WValue checked) {
     (void)window; (void)id; (void)enabled; (void)checked;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_clipboard_text(void) {
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_clipboard_set_text(WValue text) {
+    (void)text;
     return w_gfx_unavailable();
 }
 W_BRIDGE_STUB WValue w_gfx_open_panel(WValue window, WValue title, WValue types,

@@ -1490,6 +1490,10 @@ WValue w_thread_join_release(WValue thread);
 WValue w_thread_join_timeout(WValue thread, int64_t ms);
 WValue w_thread_sleep_ms(int64_t ms);
 WValue w_thread_alive(WValue thread);
+/* Context locals: per-thread slots shared with the goroutines a thread spawns (core ThreadLocal). */
+WValue w_ctx_local_alloc(WValue n);
+WValue w_ctx_local_get(WValue i);
+WValue w_ctx_local_set(WValue i, WValue v);
 WValue w_thread_kill(WValue thread);
 
 /* ---- Signal handling ---- */

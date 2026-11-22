@@ -626,6 +626,9 @@
   out << declare_fn("w_thread_join_timeout", wv, wv2)
   out << declare_fn("w_thread_alive", wv, wv)
   out << declare_fn("w_thread_kill", wv, wv)
+  out << declare_fn("w_ctx_local_alloc", wv, wv)
+  out << declare_fn("w_ctx_local_get", wv, wv)
+  out << declare_fn("w_ctx_local_set", wv, wv2)
 
   # Channels
   out << declare_fn("w_mutex_new", wv, "")

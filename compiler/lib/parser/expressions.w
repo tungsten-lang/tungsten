@@ -7,15 +7,15 @@
     expr = parse_primary()
     # Parentheses explicitly delimit a receiver, including a call result.
     # Bare method chains still keep bang-method syntax (list.first!).
-    if !@sp_before && @current_type in (T_BANG T_PRIMORIAL)
-      product_receiver = primary_type == T_LPAREN || (primary_type in (T_INT T_ID T_IVAR T_CVAR T_GLOBAL T_PARG T_CONSTANT) && ast_kind(expr) in (:int :var :ivar :cvar :gvar :parg) && !(ast_kind(expr) == :var && expr.name.ends_with?("!")))
+    if !@sp_before && @current_type in (TOK_BANG TOK_PRIMORIAL)
+      product_receiver = primary_type == TOK_LPAREN || (primary_type in (TOK_INT TOK_ID TOK_IVAR TOK_CVAR TOK_GLOBAL TOK_PARG TOK_CONSTANT) && ast_kind(expr) in (:int :var :ivar :cvar :gvar :parg) && !(ast_kind(expr) == :var && expr.name.ends_with?("!")))
       if product_receiver
         # Compare with the final consumed token, so a multiline group may
         # carry a suffix directly on its closing parenthesis.
         previous = @packed_tokens[@pos - 1]
         if current_offset() == parser_tok_off(previous) + parser_tok_len(previous)
           op_loc = make_loc_here()
-          name = @current_type == T_BANG ? "factorial" : "primorial"
+          name = @current_type == TOK_BANG ? "factorial" : "primorial"
           advance()
           expr = Tungsten:AST:Call.new(expr, name, [], nil, op_loc, make_end_loc())
     parse_postfix_from(expr)
@@ -28,12 +28,12 @@
     saw_map = false
     while cont
       t = @current_type
-      if t == T_DOT && !@sp_before
+      if t == TOK_DOT && !@sp_before
         advance()
         name_tok = @current_packed
         # `x.&(y)` — the lexer fuses `&(` into one BLOCK_CALL token; the
         # name is `&` with the arg list's LPAREN already consumed.
-        dot_name_fused = @current_type == T_BLOCK_CALL
+        dot_name_fused = @current_type == TOK_BLOCK_CALL
         if dot_name_fused
           advance()
           name = "&"
@@ -43,26 +43,26 @@
           # separate bang, unlike lowercase `sort!` whose bang stays in the ID
           # token. Accept the same method-name suffix for class-level contract
           # spellings such as Tungsten.LOCK_THE_DOORS!.
-          if @current_type == T_BANG && !@sp_before
+          if @current_type == TOK_BANG && !@sp_before
             advance()
             name = name + "!"
         name_loc = make_loc_for(name_tok)
         next_t = @current_type
-        if !dot_name_fused && next_t == T_LPAREN
+        if !dot_name_fused && next_t == TOK_LPAREN
           advance()
-          if @current_type == T_RPAREN
+          if @current_type == TOK_RPAREN
             advance()
             args = []
           else
             args = parse_arg_list(:RPAREN)
-            expect_type(T_RPAREN)
+            expect_type(TOK_RPAREN)
           block = nil
           nt = @current_type
-          if nt == T_LBRACE
+          if nt == TOK_LBRACE
             block = parse_block()
-          elsif nt == T_ARROW
+          elsif nt == TOK_ARROW
             block = parse_lambda()
-        elsif !dot_name_fused && next_t != T_LBRACE && next_t != T_ARROW && (@no_bare_args || !bare_arg_start?() || current_line() != tok_line(name_tok))
+        elsif !dot_name_fused && next_t != TOK_LBRACE && next_t != TOK_ARROW && (@no_bare_args || !bare_arg_start?() || current_line() != tok_line(name_tok))
           args = []
           block = nil
         else
@@ -87,7 +87,7 @@
           if receiver.type_args != nil
             expr.type_args = receiver.type_args
             receiver.type_args = nil
-      elsif t == T_LBRACKET && !@sp_before && !is_block_node?(expr) && current_line() == expr_end_line_for(expr)
+      elsif t == TOK_LBRACKET && !@sp_before && !is_block_node?(expr) && current_line() == expr_end_line_for(expr)
         # Indexing is a TIGHT postfix: `xs[i]` on the same line. A `[` on a
         # later line after a call-with-block used to be misparsed as
         # `xs.each(...)[n, n]` → "Expected RBRACKET, got COMMA" for a bare
@@ -96,8 +96,8 @@
         lbr_loc = make_loc_here()
         advance()
         index = parse_expression()
-        expect_type(T_RBRACKET)
-        if @current_type == T_ASSIGN
+        expect_type(TOK_RBRACKET)
+        if @current_type == TOK_ASSIGN && !@in_multi_assign_target
           advance()
           value = parse_assign_value()
           # `a[i] = v ## i64` ascribes the stored value, as `x = v ## i64`
@@ -107,7 +107,7 @@
           expr = Tungsten:AST:Call.new(expr, "\[]=", [index, value], nil, lbr_loc, make_end_loc())
         else
           expr = Tungsten:AST:Call.new(expr, "\[]", [index], nil, lbr_loc, make_end_loc())
-      elsif t == T_SAFE_NAV
+      elsif t == TOK_SAFE_NAV
         advance()
         name_line = current_line()
         name_col = current_col()
@@ -119,20 +119,20 @@
         if args == nil
           args = []
         expr = Tungsten:AST:SafeNav.new(expr, name, args, block, name_loc, make_end_loc())
-      elsif t == T_MAP
+      elsif t == TOK_MAP
         map_loc = make_loc_here()
         advance()
         stage_name = expect_method_name_value()
         stage_args = []
-        if @current_type == T_LPAREN
+        if @current_type == TOK_LPAREN
           advance()
           stage_args = parse_arg_list(:RPAREN)
-          expect_type(T_RPAREN)
+          expect_type(TOK_RPAREN)
         expr = build_pipeline_stage(expr, stage_name, stage_args)
         expr.loc = map_loc
         expr.loc_end = make_end_loc()
         saw_map = true
-      elsif t == T_SYMBOL && (saw_map || ast_kind(expr) in (:range :array))
+      elsif t == TOK_SYMBOL && (saw_map || ast_kind(expr) in (:range :array))
         # Trailing `:reduce`. Normally requires a preceding `/map` stage
         # to disambiguate `expr:sym` from other colon uses — but a bare
         # `(1..n):sum` / `[1,2,3]:sum` (range/array source, no map) is
@@ -145,10 +145,10 @@
         expr.loc = sym_loc
         expr.loc_end = make_end_loc()
         saw_map = false
-      elsif t == T_GLOBAL && !@sp_before
+      elsif t == TOK_GLOBAL && !@sp_before
         # `expr$field` — postfix view-decl field access on an explicit
         # receiver (no space before the `$`, mirroring the tight `.method`
-        # rule above). The lexer emits `$field` as a T_GLOBAL whose value
+        # rule above). The lexer emits `$field` as a TOK_GLOBAL whose value
         # includes the leading `$`; strip it for the field name. A bare
         # `$field` (no left-hand receiver) is unaffected — it never enters
         # this loop and still parses as a GVar / __self view-field read.
@@ -405,7 +405,7 @@
     nil
 
   # Build an Int AST node from an integer value via its decimal text — the
-  # same construction T_INT uses (a bare Int.new(n) stores a value that
+  # same construction TOK_INT uses (a bare Int.new(n) stores a value that
   # ast_get(:value) reads back wrong downstream).
   -> sigma_int(n)
     s = "" + n.to_s()
@@ -458,56 +458,56 @@
     t = @current_type
 
     # Identifier (variable or call)
-    if t == T_ID
+    if t == TOK_ID
       return parse_var_or_call()
 
     # Integer
-    if t == T_INT
+    if t == TOK_INT
       raw = advance_value()
       if raw.size() == 1
         return Tungsten:AST:Int.new(raw.to_i(), nil, raw)
       return Tungsten:AST:Int.new(parse_int_value(raw), int_literal_format(raw), raw)
 
     # Instance variable
-    if t == T_IVAR
+    if t == TOK_IVAR
       return Tungsten:AST:Ivar.new(advance_value())
 
     # String
-    if t == T_STRING
+    if t == TOK_STRING
       return Tungsten:AST:String.new(advance_value())
 
     # Symbol
-    if t == T_SYMBOL
+    if t == TOK_SYMBOL
       return Tungsten:AST:Symbol.new(advance_value())
 
     # Keywords
-    if t == T_KEYWORD
+    if t == TOK_KEYWORD
       return parse_keyword()
 
     # Class name or constant (may be constructor call or namespace path).
-    # T_NAME (PascalCase: Integer, Hash) — would emit ClassRef once the
+    # TOK_NAME (PascalCase: Integer, Hash) — would emit ClassRef once the
     # compiled-parser divergence is fixed.
-    # T_CONSTANT (SCREAMING_SNAKE: SC_2, KIND_VAR) — assignable Var.
-    if t == T_NAME || t == T_CONSTANT
-      is_class_ref = t == T_NAME
+    # TOK_CONSTANT (SCREAMING_SNAKE: SC_2, KIND_VAR) — assignable Var.
+    if t == TOK_NAME || t == TOK_CONSTANT
+      is_class_ref = t == TOK_NAME
       tok_packed = @current_packed
       name = advance_value()
       # SCREAMING_SNAKE names have a separate bang token. Preserve the same
       # variable spelling as n! before bare-argument parsing can take ! as not.
-      if !is_class_ref && @current_type == T_BANG && !@sp_before && current_line() == tok_line(tok_packed)
+      if !is_class_ref && @current_type == TOK_BANG && !@sp_before && current_line() == tok_line(tok_packed)
         advance()
         return Tungsten:AST:Var.new(name + "!")
       # Handle namespace paths: Name:Sub:Sub (tokenized as NAME SYMBOL*)
-      while @current_type == T_SYMBOL
+      while @current_type == TOK_SYMBOL
         name = name + ":" + advance_value()
       # Generic instantiation: `Foo<T>.method(args)` or `Foo<T, U>.new(...)`.
       # Only valid on PascalCase names (class refs). Same lookahead as
       # parse_class_def — only commits when shape is `<` IDENT (`>`|`,`).
       inst_type_args = nil
-      if is_class_ref && @current_type == T_LT && !@sp_before
+      if is_class_ref && @current_type == TOK_LT && !@sp_before
         inst_type_args = parse_type_args_if_present()
       next_t = @current_type
-      if next_t != T_LPAREN && (@no_bare_args || !bare_arg_start?() || current_line() != tok_line(tok_packed))
+      if next_t != TOK_LPAREN && (@no_bare_args || !bare_arg_start?() || current_line() != tok_line(tok_packed))
         if is_class_ref
           result = Tungsten:AST:ClassRef.new(name)
           if inst_type_args != nil
@@ -537,12 +537,12 @@
       return Tungsten:AST:Var.new(name)
 
     # Parenthesized expression
-    if t == T_LPAREN
+    if t == TOK_LPAREN
       advance()
       skip_newlines()
       expr = parse_expression()
       skip_newlines()
-      expect_type(T_RPAREN)
+      expect_type(TOK_RPAREN)
       # Explicit grouping makes a statement-shaped value an expression receiver.
       # Ternaries share If's AST shape; without this wrapper the addition and
       # indexing guards mistake `(flag ? a : b)` for a block ending a statement.
@@ -550,48 +550,48 @@
       return expr
 
     # Array literal
-    if t == T_LBRACKET
+    if t == TOK_LBRACKET
       return parse_array_literal()
 
     # Hash literal
-    if t == T_LBRACE
+    if t == TOK_LBRACE
       return parse_hash_literal()
 
     # Arrow -> lambda (no name) or method definition.
     # `-> ## fold` is a zero-arg fold block, not a method def.
-    if t == T_ARROW
+    if t == TOK_ARROW
       pt = peek_type()
-      if pt == T_LPAREN
+      if pt == TOK_LPAREN
         return parse_lambda()
-      if pt == T_TYPE_HINT && fold_hint_text?(peek_value())
+      if pt == TOK_TYPE_HINT && fold_hint_text?(peek_value())
         return parse_lambda()
       return parse_method_def()
 
     # Typed array: i128[1000] / bare type name. A local or parameter
     # spelled like the type (`u1 = [~0.0, ~1.0]`) is a variable instead:
     # the Var below lets the postfix loop parse `u1[1]` as an index.
-    if t == T_TYPE
-      if peek_type() == T_LBRACKET && !bound_type_name?(current_value())
+    if t == TOK_TYPE
+      if peek_type() == TOK_LBRACKET && !bound_type_name?(current_value())
         type_name = advance_value()
-        expect_type(T_LBRACKET)
+        expect_type(TOK_LBRACKET)
         size = parse_expression()
-        expect_type(T_RBRACKET)
+        expect_type(TOK_RBRACKET)
         return Tungsten:AST:TypedArray.new(type_name, size)
       return Tungsten:AST:Var.new(advance_value())
 
     # String interpolation
-    if t == T_STRING_INTERP
+    if t == TOK_STRING_INTERP
       return parse_string_interp()
 
     # << puts — one or more comma-separated values, each printed on its own
     # line (`<< t1, t2, t3`). Always a list, length 1 for `<< x`.
-    if t == T_PUTS_OP
+    if t == TOK_PUTS_OP
       advance()
       # Parse each printed value without consuming suffix modifiers. In
       # `<< i /= 2 while i > 0`, the `while` applies to the whole print
       # statement, not to the RHS of the compound assignment.
       values = [parse_assignment()]
-      while @current_type == T_COMMA
+      while @current_type == TOK_COMMA
         advance()
         values.push(parse_assignment())
       return Tungsten:AST:Puts.new(values)
@@ -603,27 +603,27 @@
       return Tungsten:AST:Print.new(value)
 
     # <! raise shorthand
-    if t == T_RAISE_OP
+    if t == TOK_RAISE_OP
       advance()
       value = parse_assignment()
       return Tungsten:AST:Raise.new(value)
 
     # Float (~3.14)
-    if t == T_FLOAT
+    if t == TOK_FLOAT
       return Tungsten:AST:Float.new(advance_value())
 
     # Decimal (3.14)
-    if t == T_DECIMAL
+    if t == TOK_DECIMAL
       return Tungsten:AST:Decimal.new(advance_value())
 
     # Char literal `:-X` — raw ASCII integer (0-127). Lowers to a
     # compile-time int constant, so comparisons against extracted
     # codepoints work without char/int coercion.
-    if t == T_CHAR
+    if t == TOK_CHAR
       return Tungsten:AST:Char.new(advance_value())
 
     # Leading-dot receiver shorthand: .name(args) means self.name(args).
-    if t == T_DOT
+    if t == TOK_DOT
       dot_loc = make_loc_here()
       advance()
       name_line = current_line()
@@ -638,50 +638,50 @@
       return call
 
     # &(args) — invoke the implicit block
-    if t == T_BLOCK_CALL
+    if t == TOK_BLOCK_CALL
       return parse_block_call()
 
     # Global variable
-    if t == T_GLOBAL
+    if t == TOK_GLOBAL
       return Tungsten:AST:GVar.new(advance_value())
 
     # Class variable
-    if t == T_CVAR
+    if t == TOK_CVAR
       return Tungsten:AST:Cvar.new(advance_value())
 
     # Positional argument (@1, @2)
-    if t == T_PARG
+    if t == TOK_PARG
       return Tungsten:AST:Parg.new(advance_value().to_i())
 
     # Regex
-    if t == T_REGEX
+    if t == TOK_REGEX
       val = advance_value()
       return Tungsten:AST:Regex.new(val[0], val[1])
 
     # Regex capture ($1, $2)
-    if t == T_REGEX_CAPTURE
+    if t == TOK_REGEX_CAPTURE
       return Tungsten:AST:RegexCapture.new(advance_value().to_i())
 
     # Word array (%w[foo bar baz])
-    if t == T_WORD_ARRAY
+    if t == TOK_WORD_ARRAY
       return Tungsten:AST:WordArray.new(advance_value())
 
     # Symbol array (%i[one two three])
-    if t == T_SYMBOL_ARRAY
+    if t == TOK_SYMBOL_ARRAY
       return Tungsten:AST:SymbolArray.new(advance_value())
 
     # Raw WValue literal: u0x followed by exactly 16 hex digits
-    if t == T_WVALUE
+    if t == TOK_WVALUE
       raw = advance_value()
       return Tungsten:AST:Wvalue.new(parse_wvalue_value(raw), raw)
 
     # Currency literal ($5.25)
-    if t == T_CURRENCY
+    if t == TOK_CURRENCY
       val = advance_value()
       return Tungsten:AST:Currency.new(val[0], val[1], val[2])
 
     # Quantity literal (3kg, 7.65%)
-    if t == T_QUANTITY
+    if t == TOK_QUANTITY
       lit_loc = make_loc_here()
       val = advance_value()
       expr = Tungsten:AST:Quantity.new(val[0], val[1])
@@ -690,7 +690,7 @@
       return expr
 
     # Duration literal (2h30m, 500ms)
-    if t == T_DURATION
+    if t == TOK_DURATION
       lit_loc = make_loc_here()
       expr = Tungsten:AST:Duration.new(advance_value())
       expr.loc = lit_loc
@@ -698,11 +698,11 @@
       return expr
 
     # UUID literal
-    if t == T_UUID
+    if t == TOK_UUID
       return Tungsten:AST:Uuid.new(advance_value())
 
     # Date literal (2026-04-08)
-    if t == T_DATE
+    if t == TOK_DATE
       lit_loc = make_loc_here()
       expr = Tungsten:AST:Date.new(advance_value())
       expr.loc = lit_loc
@@ -710,7 +710,7 @@
       return expr
 
     # DateTime literal (2026-04-08T14:30:00Z)
-    if t == T_DATETIME
+    if t == TOK_DATETIME
       lit_loc = make_loc_here()
       expr = Tungsten:AST:Datetime.new(advance_value())
       expr.loc = lit_loc
@@ -718,7 +718,7 @@
       return expr
 
     # Time literal (14:30:00)
-    if t == T_TIME
+    if t == TOK_TIME
       lit_loc = make_loc_here()
       expr = Tungsten:AST:Time.new(advance_value())
       expr.loc = lit_loc
@@ -726,44 +726,44 @@
       return expr
 
     # Month literal (2026-04)
-    if t == T_MONTH
+    if t == TOK_MONTH
       return Tungsten:AST:Month.new(advance_value())
 
     # IPv4 literal (192.168.1.1)
-    if t == T_IP4
+    if t == TOK_IP4
       return Tungsten:AST:Ip4.new(advance_value())
 
     # CIDR4 literal (10.0.0.0/8)
-    if t == T_CIDR4
+    if t == TOK_CIDR4
       return Tungsten:AST:Cidr4.new(advance_value())
 
     # IPv6 literal (::1, 2001:db8::1)
-    if t == T_IP6
+    if t == TOK_IP6
       return Tungsten:AST:Ip6.new(advance_value())
 
     # CIDR6 literal (2001:db8::/32)
-    if t == T_CIDR6
+    if t == TOK_CIDR6
       return Tungsten:AST:Cidr6.new(advance_value())
 
     # Rational literal (3/4)
-    if t == T_RATIONAL
+    if t == TOK_RATIONAL
       return Tungsten:AST:Rational.new(advance_value())
 
     # Codepoint literal `U+XXXX` — boxed Unicode codepoint. Lowers to
     # the const_char IR op which calls w_box_char to produce a wvalue
     # with the 0xFFFC codepoint tag. Use for full Unicode range and
     # when you need a first-class codepoint value (not just its int).
-    if t == T_CODEPOINT
+    if t == TOK_CODEPOINT
       return Tungsten:AST:Codepoint.new(advance_value())
 
     # Key literal (#[Enter])
-    if t == T_KEY
+    if t == TOK_KEY
       return Tungsten:AST:Key.new(advance_value())
 
     # Decimal array (%d[1.0 2.5 3.75]) — desugars to a plain Array of
     # Decimal literals, so lowering, the interpreter, and `| <unit>`
     # treat it exactly like [1.0, 2.5, 3.75].
-    if t == T_DECIMAL_ARRAY
+    if t == TOK_DECIMAL_ARRAY
       comps = advance_value()
       nodes = []
       ci = 0
@@ -797,43 +797,43 @@
       return Tungsten:AST:Call.new(Tungsten:AST:Array.new(nodes), conv, [])
     # Hypercomplex literal: %h4-f32[1 2 3 4] -> Quaternion<f32>.new([1, 2, 3, 4]).
     # Desugars to a generic constructor call, reusing the whole construction path.
-    if t == T_HYPER_ARRAY
+    if t == TOK_HYPER_ARRAY
       return build_hyper_literal(advance_value())
 
     # MAP operator (/method_name) — consume the following identifier
-    if t == T_MAP
+    if t == TOK_MAP
       advance()
       return Tungsten:AST:MapOp.new(advance_value())
 
     # Lambda arity (->/2, ->/* , ->/&)
-    if t == T_LAMBDA_ARITY
+    if t == TOK_LAMBDA_ARITY
       return Tungsten:AST:LambdaArity.new(advance_value())
 
     # Superscript (²³⁴)
-    if t == T_SUPERSCRIPT
+    if t == TOK_SUPERSCRIPT
       return Tungsten:AST:Superscript.new(advance_value())
 
     # Base-encoded literals (0b32-..., 0b58-..., 0b64-...)
-    if t == T_BASE32
+    if t == TOK_BASE32
       return Tungsten:AST:Encoded.new(advance_value(), "32")
 
-    if t == T_BASE58
+    if t == TOK_BASE58
       return Tungsten:AST:Encoded.new(advance_value(), "58")
 
-    if t == T_BASE64
+    if t == TOK_BASE64
       return Tungsten:AST:Encoded.new(advance_value(), "64")
 
     # Color literal (#FF6B35)
-    if t == T_COLOR
+    if t == TOK_COLOR
       val = advance_value()
       return Tungsten:AST:Color.new(val[0], val[1], val[2], val[3])
 
     # Byte array
-    if t == T_BYTE_ARRAY
+    if t == TOK_BYTE_ARRAY
       return Tungsten:AST:ByteArray.new(advance_value())
 
     # Byte array interpolation
-    if t == T_BYTE_ARRAY_INTERP
+    if t == TOK_BYTE_ARRAY_INTERP
       parts = advance_value().map -> (part)
         if part[0] == :bytes
           Tungsten:AST:ByteArray.new(part[1])
@@ -842,15 +842,15 @@
       return Tungsten:AST:ByteArrayInterp.new(parts)
 
     # Magic constants
-    if t == T_MAGIC_FILE
+    if t == TOK_MAGIC_FILE
       loc = make_loc_here()
       advance()
       return Tungsten:AST:MagicConstant.new("FILE", loc, make_end_loc())
-    if t == T_MAGIC_LINE
+    if t == TOK_MAGIC_LINE
       loc = make_loc_here()
       advance()
       return Tungsten:AST:MagicConstant.new("LINE", loc, make_end_loc())
-    if t == T_MAGIC_DIR
+    if t == TOK_MAGIC_DIR
       loc = make_loc_here()
       advance()
       return Tungsten:AST:MagicConstant.new("DIR", loc, make_end_loc())
@@ -927,10 +927,10 @@
     if val == "super"
       advance()
       args = []
-      if @current_type == T_LPAREN
+      if @current_type == TOK_LPAREN
         advance()
         args = parse_arg_list(:RPAREN)
-        expect_type(T_RPAREN)
+        expect_type(TOK_RPAREN)
       return Tungsten:AST:Super.new(args)
     if val == "until"
       return parse_until()
@@ -953,8 +953,8 @@
       # Falls through to with_loop_start? otherwise.
       if @pending_class_constraints != nil
         t1 = peek_type(1)
-        if t1 == T_NAME || t1 == T_ID || t1 == T_CONSTANT || t1 == T_TYPE
-          if peek_type(2) == T_KEYWORD && peek_value(2) == "in" && peek_type(3) == T_LPAREN
+        if t1 == TOK_NAME || t1 == TOK_ID || t1 == TOK_CONSTANT || t1 == TOK_TYPE
+          if peek_type(2) == TOK_KEYWORD && peek_value(2) == "in" && peek_type(3) == TOK_LPAREN
             return parse_with_constraint()
       if with_loop_start?()
         return parse_with()
@@ -1050,7 +1050,7 @@
     expect_kw("case")
 
     # Condition-only case: case\n  when ...\n
-    if @current_type in (T_NEWLINE T_EOF T_SEMICOLON)
+    if @current_type in (TOK_NEWLINE TOK_EOF TOK_SEMICOLON)
       skip_newlines()
       if at_kw?("when")
         clauses = parse_when_clauses()
@@ -1068,13 +1068,13 @@
       clauses = parse_when_clauses()
       return Tungsten:AST:CaseValue.new(subject, when_clauses_to_case_arms(clauses[0]), clauses[1])
 
-    if @current_type == T_INDENT
+    if @current_type == TOK_INDENT
       advance()
 
       # when clauses inside indented block
       if at_kw?("when")
         clauses = parse_when_clauses()
-        if @current_type == T_DEDENT
+        if @current_type == TOK_DEDENT
           advance()
         return Tungsten:AST:CaseValue.new(subject, when_clauses_to_case_arms(clauses[0]), clauses[1])
 
@@ -1084,16 +1084,16 @@
     parse_case_arrow_value_arms(subject, false)
 
   -> case_arrow_stop?
-    @current_type in (T_DEDENT T_EOF T_RPAREN T_RBRACKET T_RBRACE T_COMMA)
+    @current_type in (TOK_DEDENT TOK_EOF TOK_RPAREN TOK_RBRACKET TOK_RBRACE TOK_COMMA)
 
   -> parse_case_arrow_body
-    if @current_type == T_NEWLINE || @current_type == T_EOF
+    if @current_type == TOK_NEWLINE || @current_type == TOK_EOF
       skip_newlines()
       return parse_body()
     body = [parse_expression()]
-    while @current_type == T_SEMICOLON
+    while @current_type == TOK_SEMICOLON
       advance()
-      if @current_type == T_NEWLINE || @current_type == T_EOF || case_arrow_stop?()
+      if @current_type == TOK_NEWLINE || @current_type == TOK_EOF || case_arrow_stop?()
         break
       body.push(parse_expression())
     skip_newlines()
@@ -1103,7 +1103,7 @@
     whens = []
     else_body = nil
     indented = false
-    if @current_type == T_INDENT
+    if @current_type == TOK_INDENT
       advance()
       indented = true
 
@@ -1116,14 +1116,14 @@
         else_body = parse_case_arrow_body()
         break
       conditions = [parse_expression()]
-      while @current_type == T_COMMA
+      while @current_type == TOK_COMMA
         advance()
         conditions.push(parse_expression())
       expect_type(T_FAT_ARROW)
       body = parse_case_arrow_body()
       whens.push(Tungsten:AST:When.new(conditions, body))
 
-    if indented && @current_type == T_DEDENT
+    if indented && @current_type == TOK_DEDENT
       advance()
     Tungsten:AST:Case.new(whens, else_body)
 
@@ -1144,7 +1144,7 @@
 
       # Pattern (possibly with guard: expr if condition)
       patterns = [parse_expression()]
-      while @current_type == T_COMMA
+      while @current_type == TOK_COMMA
         advance()
         patterns.push(parse_expression())
       guard = nil
@@ -1159,7 +1159,7 @@
         arms.push(Tungsten:AST:CaseArm.new(patterns[pi], guard, body))
         pi += 1
 
-    if already_indented && @current_type == T_DEDENT
+    if already_indented && @current_type == TOK_DEDENT
       advance()
 
     Tungsten:AST:CaseValue.new(subject, arms, else_body)
@@ -1176,7 +1176,7 @@
     while at_kw?("when")
       advance()
       conditions = [parse_expression()]
-      while @current_type == T_COMMA
+      while @current_type == TOK_COMMA
         advance()
         conditions.push(parse_expression())
       body = parse_when_clause_body()
@@ -1192,7 +1192,7 @@
     if at_kw?("then")
       advance()
       return [parse_expression()]
-    if @current_type == T_NEWLINE || @current_type == T_SEMICOLON
+    if @current_type == TOK_NEWLINE || @current_type == TOK_SEMICOLON
       skip_newlines()
       return parse_body()
     [parse_expression()]
@@ -1231,7 +1231,7 @@
 
   -> parse_return
     advance()
-    if @current_type in (T_NEWLINE T_EOF T_DEDENT T_SEMICOLON)
+    if @current_type in (TOK_NEWLINE TOK_EOF TOK_DEDENT TOK_SEMICOLON)
       return Tungsten:AST:ReturnNil.new
     # `## type` annotates the returned VALUE, not the control-transfer node.
     # The general expression wrapper cannot repair this after parse_return:
@@ -1243,13 +1243,14 @@
     Tungsten:AST:Return.new(value)
 
   -> consume_trailing_type_ascription(expr)
-    if @current_type != T_TYPE_HINT
+    if @current_type != TOK_TYPE_HINT
       return expr
     hint = current_value()
     comment_pos = hint.index("#")
     if comment_pos != nil
       hint = hint.slice(0, comment_pos)
     validate_type_hint_spelling(hint)
+    validate_type_hint_tail(hint)
     advance()
     hint = hint.strip()
     # A hint names a value, never `<<` / `<-` (a print's value is nil): bind
@@ -1316,12 +1317,35 @@
     if text == "str" || text.starts_with?("str\[")
       raise compile_error_at(:E_PARSE_INVALID_TYPE_NAME, "unknown type 'str'; Tungsten's text type is 'string'")
 
+  # The hint text runs to the end of its line or group, so in
+  # `(e) ## f64 - ~0.5` the `- ~0.5` is hint text that lowering would ignore.
+  # Reject an operator after the type name instead of dropping it silently.
+  # Only trailing ascriptions are checked: an own-line `## Heading / note`
+  # is a doc comment that the pending-hint collector ignores.
+  -> validate_type_hint_tail(hint)
+    text = hint.to_s()
+    comment_pos = text.index("#")
+    if comment_pos != nil
+      text = text.slice(0, comment_pos)
+    text = text.strip()
+    space = text.index(" ")
+    if space == nil
+      return nil
+    type_name = text.slice(0, space)
+    rest = text.slice(space, text.size() - space).strip()
+    if rest.size() == 0
+      return nil
+    first = rest.slice(0, 1)
+    if first in ("+" "-" "*" "/" "%" "&" "|" "^" "<" ">" "=" "~" "!")
+      raise compile_error_at(:E_PARSE_TYPE_HINT_OPERATOR, "'" + rest + "' after '## " + type_name + "' is part of the type hint, not an operation; parenthesize the cast: '((expr) ## " + type_name + ") " + rest + "'")
+    nil
+
   # `recase` / `recase expr` — re-run the enclosing case. Bare form (nil value)
   # re-evaluates the original subject; the expr form dispatches on expr. Same
   # optional-operand shape as `return`.
   -> parse_recase
     advance()
-    if @current_type in (T_NEWLINE T_EOF T_DEDENT T_SEMICOLON)
+    if @current_type in (TOK_NEWLINE TOK_EOF TOK_DEDENT TOK_SEMICOLON)
       return Tungsten:AST:Recase.new(nil)
     Tungsten:AST:Recase.new(parse_assignment())
 
@@ -1338,7 +1362,7 @@
     # Ruby-style two-arg form: `raise ExceptionClass, "message"`.
     # Construct the exception with the message — `ExceptionClass.new(msg)`
     # — so the single-value Raise node carries a fully-built instance.
-    if @current_type == T_COMMA
+    if @current_type == TOK_COMMA
       advance()
       msg = parse_assignment()
       val = Tungsten:AST:Call.new(val, "new", [msg])
@@ -1347,7 +1371,7 @@
 
   -> parse_exit
     advance()
-    if @current_type in (T_NEWLINE T_EOF T_DEDENT T_SEMICOLON)
+    if @current_type in (TOK_NEWLINE TOK_EOF TOK_DEDENT TOK_SEMICOLON)
       return Tungsten:AST:Call.new(nil, "exit", [Tungsten:AST:Int.new(0)])
     # Assignment level, NOT parse_expression — same reason as parse_raise
     # above. `exit(20) if cond` must attach the modifier to the statement;
@@ -1388,10 +1412,10 @@
       advance()
       clause_var = nil
       clause_class = nil
-      if !(@current_type in (T_NEWLINE T_INDENT T_DEDENT T_EOF))
-        if @current_type == T_ID
-          clause_var = expect_type_value(T_ID)
-          if @current_type == T_COLON
+      if !(@current_type in (TOK_NEWLINE TOK_INDENT TOK_DEDENT TOK_EOF))
+        if @current_type == TOK_ID
+          clause_var = expect_type_value(TOK_ID)
+          if @current_type == TOK_COLON
             advance()
             clause_class = expect_name_or_constant_value()
         else
@@ -1450,11 +1474,11 @@
   -> parse_yield
     advance()
     args = []
-    if !(@current_type in (T_NEWLINE T_EOF T_DEDENT T_SEMICOLON))
-      if @current_type == T_LPAREN
+    if !(@current_type in (TOK_NEWLINE TOK_EOF TOK_DEDENT TOK_SEMICOLON))
+      if @current_type == TOK_LPAREN
         advance()
         args = parse_arg_list(:RPAREN)
-        expect_type(T_RPAREN)
+        expect_type(TOK_RPAREN)
       else
         args = parse_bare_args()
     Tungsten:AST:Yield.new(args)
@@ -1464,13 +1488,13 @@
     advance()  # consume &(
     args = []
     skip_newlines()
-    if @current_type != T_RPAREN
+    if @current_type != TOK_RPAREN
       args.push(parse_expression())
-      while @current_type == T_COMMA
+      while @current_type == TOK_COMMA
         advance()
         skip_newlines()
         args.push(parse_expression())
-    expect_type(T_RPAREN)
+    expect_type(TOK_RPAREN)
     Tungsten:AST:Yield.new(args)
 
   -> parse_with
@@ -1479,11 +1503,11 @@
 
     cont = true
     while cont
-      var = Tungsten:AST:Var.new(expect_type_value(T_ID))
+      var = Tungsten:AST:Var.new(expect_type_value(TOK_ID))
       expect_kw("in")
       collection = parse_message_chain()
       bindings.push([var, collection])
-      if @current_type == T_COMMA
+      if @current_type == TOK_COMMA
         advance()
       else
         cont = false
@@ -1495,10 +1519,10 @@
   -> parse_parallel_with
     expect_kw("parallel")
     expect_kw("with")
-    var = Tungsten:AST:Var.new(expect_type_value(T_ID))
+    var = Tungsten:AST:Var.new(expect_type_value(TOK_ID))
     expect_kw("in")
     collection = parse_message_chain()
-    if @current_type == T_COMMA
+    if @current_type == TOK_COMMA
       raise compile_error_at(:E_PARSE_PARALLEL_WITH_SINGLE_BINDING, "parallel with supports only a single binding")
     skip_newlines()
     body = parse_body()
@@ -1509,36 +1533,36 @@
   #   fn_name(Type) -> Void
   -> parse_extern_lib
     expect_kw("extern")
-    expect_typed(T_ID, "lib")
-    lib_name = expect_type_value(T_STRING)
-    expect_type(T_ARROW)
+    expect_typed(TOK_ID, "lib")
+    lib_name = expect_type_value(TOK_STRING)
+    expect_type(TOK_ARROW)
     skip_newlines()
     declarations = []
-    while @current_type != T_DEDENT && @current_type != T_EOF
-      fn_name = expect_type_value(T_ID)
-      expect_type(T_LPAREN)
+    while @current_type != TOK_DEDENT && @current_type != TOK_EOF
+      fn_name = expect_type_value(TOK_ID)
+      expect_type(TOK_LPAREN)
       param_types = []
-      unless @current_type == T_RPAREN
-        param_types.push(expect_type_value(T_ID))
-        while @current_type == T_COMMA
+      unless @current_type == TOK_RPAREN
+        param_types.push(expect_type_value(TOK_ID))
+        while @current_type == TOK_COMMA
           advance()
-          param_types.push(expect_type_value(T_ID))
-      expect_type(T_RPAREN)
-      expect_type(T_ARROW)
-      return_type = expect_type_value(T_ID)
+          param_types.push(expect_type_value(TOK_ID))
+      expect_type(TOK_RPAREN)
+      expect_type(TOK_ARROW)
+      return_type = expect_type_value(TOK_ID)
       declarations.push(Tungsten:AST:ExternFn.new(fn_name, return_type, param_types))
       skip_newlines()
-    if @current_type == T_DEDENT
+    if @current_type == TOK_DEDENT
       advance()
     Tungsten:AST:ExternLib.new(lib_name, declarations)
 
   # go -> body
   -> parse_go
     expect_kw("go")
-    expect_type(T_ARROW)
+    expect_type(TOK_ARROW)
     skip_newlines()
     body = nil
-    if @current_type == T_INDENT
+    if @current_type == TOK_INDENT
       body = parse_body()
     else
       body = [parse_expression()]
@@ -1548,7 +1572,7 @@
   -> parse_in
     expect_kw("in")
     expect_name_or_constant()
-    while @current_type == T_COLON
+    while @current_type == TOK_COLON
       advance()
       expect_name_or_constant()
     Tungsten:AST:Nil.new

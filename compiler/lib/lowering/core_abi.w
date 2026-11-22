@@ -77,7 +77,7 @@ core_source_root_memo = {}
       if target != nil && is_ast_node?(target) && ast_kind(target) == :var
         names[target.name] = true
     elsif kind == :multi_assign
-      targets = expr.targets
+      targets = multi_assign_leaf_targets(expr)
       if targets != nil
         ti = 0
         while ti < targets.size()

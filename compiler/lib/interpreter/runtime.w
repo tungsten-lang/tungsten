@@ -79,6 +79,17 @@
     # inspection (machine_operand_type), so untyped programs pay nothing for
     # the fixed-width mirror.
     @machine_hints_seen = false
+    # Embedding (interpreter/sandbox.w): off until the host asks.
+    @sandboxed = false
+    @sb_limit_ms = nil
+    @sb_deadline = 0
+    @sb_entry = 0
+    @sb_ticks = 0
+    @sb_tripped = false
+    @sb_depth = 0
+    @sb_max_depth = 400
+    @output = nil
+    @host_classes = {}
     seed_primitive_class_stubs()
 
   -> argv
@@ -857,7 +868,7 @@
 
     raise "Unknown AST node type: [t]"
 
-  # PascalCase class reference. Parser emits :class_ref for T_NAME
+  # PascalCase class reference. Parser emits :class_ref for TOK_NAME
   # tokens, so this is reached without ever entering eval_var. Tries
   # autoload first so referencing `Integer` pulls in core/integer.w,
   # then resolves from @classes.

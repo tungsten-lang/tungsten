@@ -232,6 +232,7 @@
   # Core value constructors
   out << declare_fn("w_int", wv, "i64")
   out << declare_fn("w_to_i64", "i64", wv)
+  out << declare_fn("w_cast_i64", "i64", wv)
   out << declare_fn("w_u64", wv, "i64")
   out << declare_fn("w_to_u64", "i64", wv)
   out << declare_fn("w_index_raw_i64", "i64", wv2)
@@ -584,6 +585,8 @@
   out << declare_fn("w_closure_new", wv, ptr_ptr_i32)
   out << declare_fn("w_closure_new_a", wv, "ptr, ptr, i32, i32")
   out << declare_fn("w_destructure_index", wv, join_arg_types2(wv, "i64"))
+  out << declare_fn("w_destructure_rest", wv, join_arg_types3(wv, "i64", "i64"))
+  out << declare_fn("w_destructure_suffix", wv, join_arg_types4(wv, "i64", "i64", "i64"))
   out << declare_fn("w_closure_cell_new", "ptr", "")
   out << declare_fn("w_closure_call_0", wv, wv)
   out << declare_fn("w_closure_call_1", wv, wv2)
@@ -602,6 +605,7 @@
   out << declare_fn("w_block_return_push", "ptr", "")
   out << declare_fn("w_block_return_pop", "void", "ptr")
   out << declare_fn("w_block_return_value", wv, "ptr")
+  out << declare_fn("w_block_return_bits", "i64", "ptr")
   out << declare_fn_noreturn("w_block_return_signal", "void", i64_wv)
   out << declare_fn_attrs("setjmp", "i32", "ptr", "nounwind returns_twice")
   out << declare_fn_attrs("_setjmp", "i32", "ptr", "nounwind returns_twice")
@@ -1631,9 +1635,9 @@
   out << "}\n"
   out.to_s()
 
--> to_i64_fast_helper_ir()
+-> to_i64_fast_helper_ir(helper_name = "__w_to_i64_fast", slow_fn = "w_to_i64")
   out = StringBuffer(480)
-  out << "define private i64 @__w_to_i64_fast(i64 %v) alwaysinline nounwind {\n"
+  out << "define private i64 @" + helper_name + "(i64 %v) alwaysinline nounwind {\n"
   out << "entry:\n"
   out << "  %hi = lshr i64 %v, 48\n"
   out << "  %isi = icmp eq i64 %hi, 65530\n"
@@ -1643,8 +1647,40 @@
   out << "  %p = ashr i64 %s, 16\n"
   out << "  ret i64 %p\n"
   out << "slow:\n"
-  out << "  %sv = call i64 @w_to_i64(i64 %v)\n"
+  out << "  %sv = call i64 @" + slow_fn + "(i64 %v)\n"
   out << "  ret i64 %sv\n"
+  out << "}\n"
+  out.to_s()
+
+# Bounds check for an inline typed-array element access (lowering emits it
+# ahead of typed_array_{get,set,compound_op}_inline unless bounds checks are
+# off). The index arrives raw (__w_ta_bounds_check) or as a boxed int
+# (__w_ta_bounds_check_boxed); a negative index fails the unsigned compare.
+-> ta_bounds_check_helper_ir(boxed)
+  name = boxed ? "__w_ta_bounds_check_boxed" : "__w_ta_bounds_check"
+  out = StringBuffer(900)
+  out << "define private i64 @" + name + "(i64 %arr, i64 %iv) alwaysinline nounwind {\n"
+  out << "entry:\n"
+  if boxed
+    out << "  %is = shl i64 %iv, 16\n"
+    out << "  %i = ashr i64 %is, 16\n"
+  else
+    out << "  %i = add i64 %iv, 0\n"
+  out << "  %p0 = and i64 %arr, 140737488355312\n"
+  out << "  %p = inttoptr i64 %p0 to ptr\n"
+  out << "  %szp = getelementptr i8, ptr %p, i64 8\n"
+  out << "  %sz32 = load i32, ptr %szp, align 4" + tbaa_header_suffix() + "\n"
+  out << "  %sz = zext i32 %sz32 to i64\n"
+  out << "  %bad = icmp uge i64 %i, %sz\n"
+  out << "  br i1 %bad, label %oob, label %ok, !prof !31412\n"
+  out << "oob:\n"
+  # Not `noreturn` + `unreachable`: the call must not be the caller's last
+  # instruction, or its return address names the next function in the
+  # backtrace instead of the one holding the access.
+  out << "  call void @w_typed_index_error(i64 %i, i64 %sz)\n"
+  out << "  ret i64 0\n"
+  out << "ok:\n"
+  out << "  ret i64 0\n"
   out << "}\n"
   out.to_s()
 

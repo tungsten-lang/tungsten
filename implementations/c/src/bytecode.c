@@ -667,6 +667,7 @@ static size_t opcode_size(uint8_t op) {
     case TC_OP_IVAR_SET:                 // op + u32 name_id
     case TC_OP_CVAR_GET:                 // op + u32 name_id
     case TC_OP_CVAR_SET: return 5;       // op + u32 name_id
+    case TC_OP_DESTRUCTURE: return 9;    // op + u32 a + u32 b
     default: return 1;                   // single-byte ops (ADD/SUB/.../RETURN/POP/NOP/TYPED_ARRAY/CASE_MATCH/...)
   }
 }
@@ -1212,6 +1213,7 @@ static const char *op_name(uint8_t op) {
     case TC_OP_WIRE_IS: return "WIRE_IS";
     case TC_OP_NUMERIC_TO_I64: return "NUMERIC_TO_I64";
     case TC_OP_IN_SYM_TABLE: return "IN_SYM_TABLE";
+    case TC_OP_DESTRUCTURE: return "DESTRUCTURE";
     case TC_OP_WIRE_KIND_SYM: return "WIRE_KIND_SYM";
     case TC_OP_WIRE_SCHEMA_KIND_SYM: return "WIRE_SCHEMA_KIND_SYM";
     case TC_OP_WIRE_KIND_ID: return "WIRE_KIND_ID";

@@ -297,24 +297,32 @@ GOOD_7 = [1, 5]          # digits are fine in SCREAMING_SNAKE
 
 ---
 
-## `go` is contextual; `on` and `fn` are reserved
+## `go`, `fn` and `on` are contextual keywords
 
-`go` is a keyword only where it starts a spawn: `go -> body` (or
-`go ->` with an indented body), as a statement or an expression like
-`task = go -> work()`. Anywhere else it is an ordinary identifier, so a
-local, parameter, method, attribute or hash key can be named `go`:
+Each is a keyword only where its own grammar applies; everywhere else it is
+an ordinary name, so a local, parameter, method, attribute or hash key can
+be called `go`, `fn` or `on`:
 
 ```tungsten
-go = 3                   # a local
--> go(x) = x * 2         # a function
-<< pump.go               # a method call (`.go ->` is a call with a block)
-h = {go: 1}              # a hash key
-go -> << go(go)          # a spawn whose body uses both
+go = 3                       # a local
+-> go(x) = x * 2             # a function
+fn = ->(x) x + 1             # a lambda in a local named fn
+-> pause(on) = on            # a parameter named on
+h = {go: 1, fn: 2, on: 3}    # hash keys
+<< pump.go                   # method calls: never a keyword after `.`
 ```
 
-`on` (platform guards, `on macos`) and `fn` (`fn name(...)`) are still
-reserved everywhere: `on = 1`, `-> pause(on)` and `fn = ->(x) x` are parse
-errors. Pick another name (`enabled`, `callback`).
+The keyword forms are recognized by what follows the word:
+
+| Word | Keyword when | Example |
+| ---- | ------------ | ------- |
+| `go` | `->` follows | `go -> work()` |
+| `fn` | blanks and then a name follow | `fn twice(x)`, `@gpu fn k(a)` |
+| `on` | it starts a statement, a target follows on the same line, and the next code line is an indented body | `on macos && arm64` + indented body |
+
+So `go ->`, `fn name` and `on target` + body always mean the keyword, even if
+a local of that name exists: call such a local with parentheses
+(`go(x)`, `fn.call(x)`). Full rules: specification §2.7.1.
 
 ---
 

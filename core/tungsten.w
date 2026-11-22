@@ -38,6 +38,7 @@
   auto :Dns,          "dns"
   auto :Duration,     "duration"
   auto :Env,          "env"
+  auto :ENV,          "env"
   auto :File,         "file"
   auto :FileStat,     "file"
   auto :FileHandle,   "file"

@@ -117,7 +117,7 @@ namespace :test do
   desc "Run all default non-hardware test suites"
   task all: %i[ruby tungsten remaining]
 
-  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location build_store app_info_plist runtime_sources compiler_image_env host_cc_rule performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess build_self_host] + RELEASE_PACKAGE_TASKS
+  multitask remaining: %i[wvalue parity unit_registry_superset regex_lexer_parity c_vm ccall_contracts cli_contracts typed_raw_wire compiler_images spec_classify compile_profiles fmt generic_constraints http_tls lint repl_contracts bit_install cache_gc cache_location build_store app_info_plist runtime_sources compiler_image_env host_cc_rule performance_ci frontend_fuzz fast_parse_parity linear_wire_postprocess build_self_host] + RELEASE_PACKAGE_TASKS
 
   desc "Verify generated C-call ABI contracts and the WIRE consistency guard"
   task :ccall_contracts do
@@ -138,6 +138,11 @@ namespace :test do
   task :cli_contracts do
     run_command "bash", File.join(ROOT, "scripts/test-cli-contracts.sh")
     run_command "bash", File.join(ROOT, "scripts/test-worktree-compiler-hook.sh")
+  end
+
+  desc "Typed code lowers to raw machine ops (no boxed helpers in spec/fixtures/typed/raw_probe.w)"
+  task :typed_raw_wire do
+    run_command "bash", File.join(ROOT, "scripts/test-typed-raw-wire.sh")
   end
 
   desc "Verify optional REPL/interpreter/GPU compiler image boundaries"
@@ -322,6 +327,7 @@ namespace :test do
     run_command "bash", File.join(ROOT, "scripts/test-gpu-dialects.sh")
     run_command "bash", File.join(ROOT, "scripts/test-native-arm-crypto-features.sh")
     run_command "bash", File.join(ROOT, "scripts/test-raw-static-machine-return-wire.sh")
+    run_command "bash", File.join(ROOT, "scripts/test-multi-assign-swap-wire.sh")
     run_command "bash", File.join(ROOT, "scripts/test-small-array-wide-element-boxing-wire.sh")
     run_command "bash", File.join(ROOT, "scripts/test-small-matrix-wire.sh")
   end

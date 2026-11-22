@@ -148,7 +148,7 @@
     lower_go(ctx, node)
     return nil
   when :multi_assign
-    lower_multi_assign(ctx, node)
+    lower_multi_assign(ctx, node, false)
     return nil
   when :on_guard
     return lower_on_guard(ctx, node)

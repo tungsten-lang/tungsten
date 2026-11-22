@@ -351,12 +351,20 @@ Infix operators **must** be surrounded by whitespace (see _Lexical Analysis_ §2
 
 ### 3.7.1 Assignment
 
-    Assign = LValue "=" Expression .
-    LValue = Identifier
-           | "@" Identifier
-           | CallOrIndex
-           | MultiTarget
-           .
+    Assign      = LValue "=" Expression .
+    LValue      = Identifier
+                | "@" Identifier
+                | CallOrIndex
+                .
+    MultiAssign = TargetList "=" Expression { "," Expression } .
+    TargetList  = Target { "," Target } .
+    Target      = LValue
+                | "*" LValue
+                | "(" TargetList ")"
+                .
+
+A `MultiAssign` needs at least two targets, a splat target or a nested list;
+a list holds at most one `*` target. Its semantics are in _Semantics_ §4.4.3.
 
 Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `<<=`, `>>=`, and similar forms recognized by the implementation) desugars to a binary operation followed by assignment.
 

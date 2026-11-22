@@ -38,6 +38,7 @@
 #                values at 4384 + t*256
 
 use core/codec/image
+use core/codec/image/jpeg_gpu
 
 -> jpeg_sniff?(b)
   b.size >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF
@@ -87,6 +88,7 @@ JPEG_STATE = [nil]
     @orient = 1
     @icc = []
     @coefs = nil
+    @gpu = false
     @hmax = 1
     @vmax = 1
     @mcux = 0
@@ -212,7 +214,9 @@ JPEG_STATE = [nil]
       ci[b + 8] = (chh + 7) / 8
       total += ci[b + 1] * ci[b + 11] * 64
       c += 1
-    @coefs = i32[total]
+    # large 8-bit colour images may finish on the GPU (core/codec/image/jpeg_gpu)
+    @gpu = @ncomp == 3 && @prec == 8 && @w * @h >= codec_gpu_min(JPEG_GPU_MIN) && codec_gpu_enabled?()
+    @coefs = jpeg_gpu_coefs(total, @gpu)
     @frame = true
     nil
 
@@ -344,6 +348,11 @@ JPEG_STATE = [nil]
     w = @w
     h = @h
     ci = @ci
+    if @gpu && jpeg_gpu_eligible?(@ncomp, @prec, colour_mode(), ci, @hmax, @vmax, w, h)
+      bm = Bitmap.new(w, h, metal_array(8, w * h * 4))
+      if jpeg_gpu_run(@coefs, ci, @qt, w, h, @hmax, @vmax, colour_mode(), bm.rgba)
+        apply_icc(bm.rgba, w * h) if @icc.size > 0
+        return img_orient(bm, @orient)
     planes = []
     c = 0
     while c < @ncomp

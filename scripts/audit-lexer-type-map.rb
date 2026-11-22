@@ -65,14 +65,14 @@ fail_audit("expected 133 refined token mappings, found #{candidate_pairs.length}
 fail_audit("duplicate token symbols") unless candidate_pairs.map(&:first).uniq.length == candidate_pairs.length
 fail_audit("duplicate token ids") unless candidate_pairs.map(&:last).uniq.length == candidate_pairs.length
 
-token_pairs = token_source.scan(/^T_([A-Z0-9_]+)\s*=\s*([0-9]+)(?:\s|$)/).map do |name, id|
+token_pairs = token_source.scan(/^TOK_([A-Z0-9_]+)\s*=\s*([0-9]+)(?:\s|$)/).map do |name, id|
   [name, id.to_i]
 end.select { |_name, id| id <= 159 }
 
 unknown = token_pairs.assoc("UNKNOWN")
 op = token_pairs.assoc("OP")
-fail_audit("T_UNKNOWN must remain id 0") unless unknown == ["UNKNOWN", 0]
-fail_audit("T_OP must remain broad-only id 11") unless op == ["OP", 11]
+fail_audit("TOK_UNKNOWN must remain id 0") unless unknown == ["UNKNOWN", 0]
+fail_audit("TOK_OP must remain broad-only id 11") unless op == ["OP", 11]
 refined_constants = token_pairs.reject { |name, _id| name == "UNKNOWN" || name == "OP" }
 unless candidate_pairs == refined_constants
   missing = refined_constants - candidate_pairs

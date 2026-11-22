@@ -256,6 +256,18 @@
     elsif expr != nil && is_ast_node?(expr)
       const_disqualify_nested(expr, assign_count)
     i += 1
+  # Names assigned exactly once at module scope (and never below statement
+  # level): their recorded static type holds for every reader.
+  if mod[:top_level_assign_once] == nil
+    mod[:top_level_assign_once] = {}
+  ack = assign_count.keys()
+  aci = 0
+  while aci < ack.size()
+    if assign_count[ack[aci]] == 1
+      mod[:top_level_assign_once][ack[aci]] = true
+    else
+      mod[:top_level_assign_once][ack[aci]] = nil
+    aci += 1
 
   i = 0
   while i < expressions.size()

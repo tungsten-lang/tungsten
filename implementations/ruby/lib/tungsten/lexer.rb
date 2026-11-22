@@ -1,4 +1,5 @@
 require "strscan"
+require_relative "contextual_keywords"
 
 $debug = false unless defined?($debug)
 
@@ -220,6 +221,14 @@ module Tungsten
         start += 1
       end
       count
+    end
+
+    def keyword_in_context?(text)
+      return true unless ContextualKeywords.contextual?(text)
+      return false if %i[. &.].include?(@last_significant_token_type)
+
+      statement_start = @line_start || @last_significant_token_type == :";"
+      ContextualKeywords.keyword_at?(text, string, pos, pos + text.bytesize, statement_start)
     end
 
     def token(type, value=nil)
@@ -480,7 +489,8 @@ module Tungsten
         token :"&&"
       elsif scan(/\bor\b/)
         token :"||"
-      elsif (text = scan(KEYWORD_REGEX))
+      elsif (text = check(KEYWORD_REGEX)) && keyword_in_context?(text)
+        self.pos += text.bytesize
         token :KEYWORD, text.to_sym
 
         # @todo consider renaming

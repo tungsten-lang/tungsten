@@ -592,6 +592,231 @@
 -> int_element_typed_array?(t)
   t in (:typed_array_u4 :typed_array_i4 :typed_array_u8 :typed_array_i8 :typed_array_u16 :typed_array_i16 :typed_array_u32 :typed_array_i32 :typed_array_u64 :typed_array_i64)
 
+# Non-release builds check every inline typed-array element access against
+# the array's live size and raise IndexError with the index and size; release
+# builds keep the unchecked load/store. Indices the compiler proves in range
+# (typed-array iteration) skip the check.
+-> emit_typed_array_bounds_check(ctx, arr_reg, idx_reg, idx_raw, recv_node = nil, idx_node = nil)
+  if ctx[:mod][:bounds_checks] != true
+    return nil
+  if typed_index_proven?(ctx, recv_node, idx_node)
+    return nil
+  wfn = ctx[:func]
+  t = next_temp(wfn)
+  helper = idx_raw == true ? "__w_ta_bounds_check" : "__w_ta_bounds_check_boxed"
+  emit_wire_call_direct_i64(wfn, nil, [arr_reg, idx_reg], nil, nil, helper, nil, nil, t)
+  nil
+
+# An index the compiler generated for typed-array iteration (`arr.each`,
+# `each_with_index`, `map`, ...) runs over 0...arr.size of an array the loop
+# body cannot resize, so its subscript needs no check.
+-> typed_index_proven?(ctx, recv_node, idx_node)
+  proven = ctx[:proven_indices]
+  if proven == nil || recv_node == nil || idx_node == nil
+    return false
+  if !is_ast_node?(recv_node) || !is_ast_node?(idx_node) || ast_kind(recv_node) != :var || ast_kind(idx_node) != :var
+    return false
+  owners = proven[idx_node.name]
+  owners != nil && owners[recv_node.name] == true
+
+
+# May `body` change the size of the arrays named in `names`? Conservative:
+# any resizing method on any receiver, any assignment to one of the names,
+# or a mention of one other than as the receiver of `[]`, `[]=`, size or
+# length (an argument could reach a resizing callee, a closure could
+# capture it).
+-> iteration_body_may_resize?(node, names)
+  if node == nil
+    return false
+  if !is_ast_node?(node)
+    if type(node) == "Array"
+      i = 0
+      while i < node.size()
+        if iteration_body_may_resize?(node[i], names)
+          return true
+        i += 1
+    return false
+  k = ast_kind(node)
+  if k == :call
+    if node.name in ("push" "pop" "shift" "unshift" "clear" "insert" "concat" "delete" "delete_at" "delete_if" "<<" "<</1" "resize" "truncate" "replace" "slice!" "compact!" "reject!" "select!" "keep_if" "uniq!" "append" "prepend")
+      return true
+    recv = node.receiver
+    if recv != nil && is_ast_node?(recv) && ast_kind(recv) == :var && names[recv.name] == true
+      if !(node.name in ("\[]" "[]" "\[]=" "[]=" "size" "length"))
+        return true
+      return iteration_body_may_resize?(node.args, names) || iteration_body_may_resize?(node.block, names)
+  if k == :var && names[node.name] == true
+    return true
+  if (k == :assign || k == :compound_assign) && node.target != nil && is_ast_node?(node.target) && ast_kind(node.target) == :var && names[node.target.name] == true
+    return true
+  kid = kind_id_table[k]
+  if kid == nil
+    return true
+  keys = slab_keys_table[kid]
+  if keys == nil
+    return true
+  j = 0
+  while j < keys.size()
+    if iteration_body_may_resize?(ast_get(node, keys[j]), names)
+      return true
+    j += 1
+  false
+
+# Lower `(0...recv.size).each -> (idx) body` with idx proven in range for
+# every array in `arrays` (a list of var names) when the body cannot resize
+# them. Returns the lowered range-each value.
+-> lower_typed_index_loop(ctx, recv_node, idx_name, body, arrays)
+  names = {}
+  ai = 0
+  while ai < arrays.size()
+    names[arrays[ai]] = true
+    ai += 1
+  new_block = Tungsten:AST:Block.new([idx_name], body)
+  size_call = Tungsten:AST:Call.new(recv_node, "size", [], nil)
+  range_node = Tungsten:AST:Range.new(Tungsten:AST:Int.new(0), size_call, true)
+  range_each = Tungsten:AST:Call.new(range_node, "each", [], new_block)
+  proven = ctx[:proven_indices]
+  if !iteration_body_may_resize?(body, names) && !body_assigns_name?(body, idx_name)
+    if proven == nil
+      proven = {}
+      ctx[:proven_indices] = proven
+    proven[idx_name] = names
+  result = lower_method_call(ctx, range_each)
+  if proven != nil
+    proven[idx_name] = nil
+  result
+
+-> body_assigns_name?(node, name)
+  if node == nil
+    return false
+  if !is_ast_node?(node)
+    if type(node) == "Array"
+      i = 0
+      while i < node.size()
+        if body_assigns_name?(node[i], name)
+          return true
+        i += 1
+    return false
+  k = ast_kind(node)
+  if (k == :assign || k == :compound_assign) && node.target != nil && is_ast_node?(node.target) && ast_kind(node.target) == :var && node.target.name == name
+    return true
+  kid = kind_id_table[k]
+  if kid == nil
+    return true
+  keys = slab_keys_table[kid]
+  if keys == nil
+    return true
+  j = 0
+  while j < keys.size()
+    if body_assigns_name?(ast_get(node, keys[j]), name)
+      return true
+    j += 1
+  false
+
+-> fresh_iteration_name(ctx, stem)
+  id = ctx[:mod][:next_block]
+  ctx[:mod][:next_block] = id + 1
+  stem + id.to_s()
+
+# The block's explicit parameter names, or nil when the shape is unsupported
+# (implicit params, `&` params, a count other than `want`).
+-> simple_block_param_names(block, want)
+  if block == nil
+    return nil
+  bparams = block.params
+  if bparams == nil || bparams.size() != want
+    return nil
+  out = []
+  i = 0
+  while i < bparams.size()
+    p = bparams[i]
+    pn = nil
+    if is_ast_node?(p) && p.name != nil
+      pn = p.name
+    elsif type(p) == "String"
+      pn = p
+    if pn == nil || pn.starts_with?("&") || pn.starts_with?("*")
+      return nil
+    out.push(pn)
+    i += 1
+  out
+
+-> typed_element_assign(recv_node, recv_type, name, idx_name)
+  subscript_call = Tungsten:AST:Call.new(recv_node, "[]", [Tungsten:AST:Var.new(idx_name)], nil)
+  elem_value_type = typed_array_element_value_type(recv_type)
+  hint = elem_value_type == nil ? nil : elem_value_type.to_s()
+  Tungsten:AST:Assign.new(Tungsten:AST:Var.new(name), subscript_call, hint)
+
+# Typed-array iterators with a literal block lower to raw index loops: no
+# closure, no boxing, bounds-safe by construction (see lower_typed_index_loop).
+# Supported: each_with_index -> (v, i), each_index -> (i), map -> (v) (a plain
+# Array result, as Enumerable#map builds), map! -> (v), reduce(init) ->
+# (acc, v), and a.zip(b).each -> (x, y) over two typed arrays of equal size.
+-> lower_typed_array_iterator(ctx, node, recv_node, recv_type, method_name)
+  block = node.block
+  blk_body = block.body
+  if method_name == "each_with_index"
+    pn = simple_block_param_names(block, 2)
+    if pn == nil || node.args.size() != 0
+      return nil
+    body = [typed_element_assign(recv_node, recv_type, pn[0], pn[1])]
+    bi = 0
+    while bi < blk_body.size()
+      body.push(blk_body[bi])
+      bi += 1
+    lower_typed_index_loop(ctx, recv_node, pn[1], body, [recv_node.name])
+    return lower_expression(ctx, recv_node)
+  if method_name == "each_index"
+    pn = simple_block_param_names(block, 1)
+    if pn == nil || node.args.size() != 0
+      return nil
+    lower_typed_index_loop(ctx, recv_node, pn[0], blk_body, [recv_node.name])
+    return lower_expression(ctx, recv_node)
+  if method_name == "map!" || method_name == "map"
+    pn = simple_block_param_names(block, 1)
+    if pn == nil || node.args.size() != 0 || blk_body.size() == 0
+      return nil
+    idx_name = fresh_iteration_name(ctx, "__map_idx_")
+    dest_node = recv_node
+    if method_name == "map"
+      dest_name = fresh_iteration_name(ctx, "__map_out_")
+      lower_statement(ctx, Tungsten:AST:Assign.new(Tungsten:AST:Var.new(dest_name), Tungsten:AST:Call.new(Tungsten:AST:ClassRef.new("Array"), "new", [Tungsten:AST:Call.new(recv_node, "size", [], nil)], nil), nil))
+      dest_node = Tungsten:AST:Var.new(dest_name)
+    body = [typed_element_assign(recv_node, recv_type, pn[0], idx_name)]
+    bi = 0
+    while bi < blk_body.size() - 1
+      body.push(blk_body[bi])
+      bi += 1
+    store = Tungsten:AST:Call.new(dest_node, "[]=", [Tungsten:AST:Var.new(idx_name), blk_body[blk_body.size() - 1]], nil)
+    body.push(store)
+    arrays = [recv_node.name]
+    if method_name == "map"
+      arrays.push(dest_node.name)
+    lower_typed_index_loop(ctx, recv_node, idx_name, body, arrays)
+    return lower_expression(ctx, dest_node)
+  if method_name == "reduce"
+    pn = simple_block_param_names(block, 2)
+    if pn == nil || node.args.size() != 1 || blk_body.size() == 0
+      return nil
+    acc_name = fresh_iteration_name(ctx, "__reduce_acc_")
+    idx_name = fresh_iteration_name(ctx, "__reduce_idx_")
+    # `reduce(0 ## i64)` (or another machine type) keeps the accumulator raw
+    # at that width; a bare literal keeps Enumerable#reduce's promoting sum.
+    init = node.args[0]
+    acc_hint = nil
+    if is_ast_node?(init) && ast_kind(init) == :type_ascription && (is_machine_int_type(normalize_type_symbol(init.type_hint)) || is_machine_float_type(normalize_type_symbol(init.type_hint)))
+      acc_hint = init.type_hint
+    lower_statement(ctx, Tungsten:AST:Assign.new(Tungsten:AST:Var.new(acc_name), init, acc_hint))
+    body = [Tungsten:AST:Assign.new(Tungsten:AST:Var.new(pn[0]), Tungsten:AST:Var.new(acc_name), acc_hint), typed_element_assign(recv_node, recv_type, pn[1], idx_name)]
+    bi = 0
+    while bi < blk_body.size() - 1
+      body.push(blk_body[bi])
+      bi += 1
+    body.push(Tungsten:AST:Assign.new(Tungsten:AST:Var.new(acc_name), blk_body[blk_body.size() - 1], acc_hint))
+    lower_typed_index_loop(ctx, recv_node, idx_name, body, [recv_node.name])
+    return lower_expression(ctx, Tungsten:AST:Var.new(acc_name))
+  nil
+
 -> lower_method_call(ctx, node)
   wfn = ctx[:func]
   method_name = node.name
@@ -1027,12 +1252,70 @@
           # Use a bare string for the param (not a :param hash) — matches
           # the AST shape the parser produces for explicit block params,
           # which is what range.each / lower_with expect at params[0].
-          new_block = Tungsten:AST:Block.new([idx_name], new_body)
-          # (0...recv.size).each(new_block)
-          size_call = Tungsten:AST:Call.new(recv_node, "size", [], nil)
-          range_node = Tungsten:AST:Range.new(Tungsten:AST:Int.new(0), size_call, true)
-          range_each = Tungsten:AST:Call.new(range_node, "each", [], new_block)
-          return lower_method_call(ctx, range_each)
+          # (0...recv.size).each -> (idx) ..., the subscript proven in range
+          lower_typed_index_loop(ctx, recv_node, idx_name, new_body, [recv_node.name])
+          return typed_value(:i64, w_nil.to_s())
+
+  if recv_node != nil && ast_kind(recv_node) == :var && method_name in ("each_with_index" "each_index" "map" "map!" "reduce") && call_has_ast_block?(node) && !block_spawns_escaping_closure?(node.block)
+    it_type = receiver_static_type(ctx, recv_node)
+    if is_typed_array_type?(it_type)
+      lowered = lower_typed_array_iterator(ctx, node, recv_node, it_type, method_name)
+      if lowered != nil
+        return lowered
+
+  # `a.zip(b).each -> (x, y)` over typed arrays of equal size: an index loop
+  # reading both, no pair arrays. Unequal sizes keep the generic zip.
+  if recv_node != nil && method_name == "each" && ctx[:in_generic_zip] != true && call_has_ast_block?(node) && ast_kind(recv_node) == :call && recv_node.name == "zip" && recv_node.receiver != nil && recv_node.args != nil && recv_node.args.size() == 1 && recv_node.block == nil && !block_spawns_escaping_closure?(node.block)
+    za = recv_node.receiver
+    zb = recv_node.args[0]
+    zpn = simple_block_param_names(node.block, 2)
+    if zpn != nil && is_ast_node?(za) && is_ast_node?(zb) && ast_kind(za) == :var && ast_kind(zb) == :var && za.name != zb.name
+      za_t = receiver_static_type(ctx, za)
+      zb_t = receiver_static_type(ctx, zb)
+      if is_typed_array_type?(za_t) && is_typed_array_type?(zb_t)
+        zidx = fresh_iteration_name(ctx, "__zip_idx_")
+        zbody = [typed_element_assign(za, za_t, zpn[0], zidx), typed_element_assign(zb, zb_t, zpn[1], zidx)]
+        zbi = 0
+        while zbi < node.block.body.size()
+          zbody.push(node.block.body[zbi])
+          zbi += 1
+        loop_call = Tungsten:AST:Call.new(Tungsten:AST:Range.new(Tungsten:AST:Int.new(0), Tungsten:AST:Call.new(za, "size", [], nil), true), "each", [], Tungsten:AST:Block.new([zidx], zbody))
+        same = Tungsten:AST:BinaryOp.new(Tungsten:AST:Call.new(za, "size", [], nil), :EQ, Tungsten:AST:Call.new(zb, "size", [], nil))
+        generic = Tungsten:AST:Call.new(recv_node, "each", [], node.block)
+        materialize_bindings(ctx)
+        zthen = next_label(wfn, "zip.same")
+        zelse = next_label(wfn, "zip.generic")
+        zend = next_label(wfn, "zip.end")
+        zc = lower_expression(ctx, same)
+        if zc[:type] == :i1
+          zcb = zc[:value]
+        else
+          zcb = next_temp(wfn)
+          emit_wire_truthy_inline(wfn, zcb, ensure_i64_value(wfn, zc))
+        emit_wire_cond_br(wfn, zcb, zelse, nil, zthen)
+        start_block(wfn, zthen)
+        zproven = ctx[:proven_indices]
+        znames = {}
+        znames[za.name] = true
+        znames[zb.name] = true
+        if !iteration_body_may_resize?(zbody, znames)
+          if zproven == nil
+            zproven = {}
+            ctx[:proven_indices] = zproven
+          zproven[zidx] = znames
+        lower_method_call(ctx, loop_call)
+        if zproven != nil
+          zproven[zidx] = nil
+        materialize_bindings(ctx)
+        emit_wire_br(wfn, zend, nil, nil)
+        start_block(wfn, zelse)
+        ctx[:in_generic_zip] = true
+        lower_method_call(ctx, generic)
+        ctx[:in_generic_zip] = nil
+        materialize_bindings(ctx)
+        emit_wire_br(wfn, zend, nil, nil)
+        start_block(wfn, zend)
+        return typed_value(:i64, w_nil.to_s())
 
   # Range.each with block → lower as with-loop (scope-stack, no closure allocation).
   # Skipped when the body creates an escaping closure (go / bare lambda /
@@ -1628,6 +1911,13 @@
   recv_type = nil
   if recv_node != nil && ast_kind(recv_node) == :var
     recv_type = ctx[:var_types][recv_node.name]
+    # A module-level typed array read inside a fn or method (`TAB[i]`) has
+    # its single static type recorded at top level; take the inline path.
+    once = ctx[:mod][:top_level_assign_once]
+    if recv_type == nil && ctx[:func][:name] != "main" && once != nil && once[recv_node.name] == true
+      top_t = receiver_static_type(ctx, recv_node)
+      if is_typed_array_type?(top_t)
+        recv_type = top_t
   elsif recv_node != nil && ast_kind(recv_node) == :parg
     recv_type = ctx[:var_types]["__arg" + recv_node.index.to_s()]
   elsif recv_node != nil && ast_kind(recv_node) == :self_ref
@@ -2383,6 +2673,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
+      emit_typed_array_bounds_check(ctx, receiver_reg, idx_reg, idx_raw, recv_node, node.args[0])
       emit_wire_typed_array_get_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp)
       stamp_alias_scope(ctx, wfn, recv_node)
       if recv_type in (:typed_array_f32 :typed_array_f64 :typed_array_bf16 :typed_array_f16)
@@ -2455,6 +2746,7 @@
           scratch.push(next_temp(wfn))
           si += 1
         temp = next_temp(wfn)
+        emit_typed_array_bounds_check(ctx, receiver_reg, idx_reg, idx_raw, recv_node, node.args[0])
         emit_wire_typed_array_compound_op_inline(wfn, receiver_reg, elem_bits, fused_op, idx_reg, idx_raw, scratch, elem_signed, temp, rhs_reg)
         stamp_alias_scope(ctx, wfn, recv_node)
         # The fused emitter returns an unboxed integer, just like an inline
@@ -2514,6 +2806,7 @@
         scratch.push(next_temp(wfn))
         si += 1
       temp = next_temp(wfn)
+      emit_typed_array_bounds_check(ctx, receiver_reg, idx_reg, idx_raw, recv_node, node.args[0])
       emit_wire_typed_array_set_inline(wfn, receiver_reg, elem_bits, idx_reg, idx_raw, scratch, elem_signed, temp, val_reg)
       stamp_alias_scope(ctx, wfn, recv_node)
       return val_expr

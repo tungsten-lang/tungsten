@@ -116,6 +116,14 @@
     h = ccall("w_cg_image_load_data", bytes)
     CanvasImage.new(h, ccall("w_cg_image_info", h, "width"), ccall("w_cg_image_info", h, "height"), nil)
 
+  # Like image_from_rgba for pixels that are already premultiplied RGBA8 (the
+  # canvas's own format, so drawing needs no conversion): one copy, no
+  # per-pixel work. opaque: every alpha is 255 (drawn without blending).
+  # image_from_rgba detects opaque pixels itself.
+  -> .image_from_premultiplied(rgba, w, h, opaque = false)
+    h2 = ccall("w_cg_image_from_premultiplied", rgba, w, h, opaque)
+    CanvasImage.new(h2, w, h, nil)
+
   # Release every cached image; returns how many were released.
   -> .purge_images
     ccall("w_cg_image_purge")

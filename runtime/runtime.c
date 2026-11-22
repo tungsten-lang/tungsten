@@ -22836,6 +22836,33 @@ int64_t w_to_i64(WValue v) {
     return as_int(v);
 }
 
+/* Out-of-range typed-array index on an inline element access compiled with
+ * bounds checks (every build but --release; TUNGSTEN_BOUNDS_CHECKS=0/1
+ * overrides). */
+void w_typed_index_error(int64_t index, int64_t size) {
+    char msg[128];
+    snprintf(msg, sizeof msg, "index %lld out of bounds for typed array of size %lld",
+             (long long)index, (long long)size);
+    w_raise_error_named("IndexError", msg);
+}
+
+/* Explicit `## i64` (and narrower) conversion of a dynamically typed value:
+ * integers keep their low 64 bits like w_to_i64, a Float truncates toward
+ * zero as `.to_i` does (saturating at the i64 range, NaN -> 0), and a
+ * boolean is 1 / 0. Anything else is the same type error as w_to_i64. */
+int64_t w_cast_i64(WValue v) {
+    if (w_is_integer_any(v)) return integer_low_i64(v);
+    if (w_is_double(v)) {
+        double d = w_as_double(v);
+        if (d != d) return 0;
+        if (d >= 9223372036854775807.0) return INT64_MAX;
+        if (d <= -9223372036854775808.0) return INT64_MIN;
+        return (int64_t)d;
+    }
+    if (w_is_bool(v)) return w_is_true(v) ? 1 : 0;
+    return as_int(v);
+}
+
 WValue w_u64(uint64_t v) {
     return bigint_from_u64(v);
 }
@@ -34574,6 +34601,31 @@ typedef struct {
 static WLangCacheSlot g_lang_cache[LANG_CACHE_SLOTS];
 static int g_lang_cache_used = 0;
 
+#include "tungsten_lexflags.inc"
+
+/* A program that embeds the lexer can run where no languages/ directory
+ * exists (no checkout, no TUNGSTEN_ROOT): rebuild Tungsten's own tables from
+ * the run-length copy in tungsten_lexflags.inc and cache them like a load. */
+static const uint8_t *w_embedded_lang_flags(const char *lang, int bits, size_t expected_size) {
+    if (strcmp(lang, "tungsten") != 0 || (bits != 64 && bits != 32)) return NULL;
+    uint8_t *flags = (uint8_t *)calloc(expected_size, 1);
+    if (!flags) return NULL;
+    const uint32_t (*runs)[3] = bits == 64 ? w_tungsten_lex64_runs : w_tungsten_lex32_runs;
+    size_t n = bits == 64 ? W_TUNGSTEN_LEX64_RUNS_N : W_TUNGSTEN_LEX32_RUNS_N;
+    for (size_t i = 0; i < n; i++) {
+        size_t start = runs[i][0], len = runs[i][1];
+        if (start + len > expected_size) continue;
+        memset(flags + start, (int)runs[i][2], len);
+    }
+    int slot = g_lang_cache_used++;
+    strncpy(g_lang_cache[slot].lang, lang, sizeof(g_lang_cache[slot].lang) - 1);
+    g_lang_cache[slot].lang[sizeof(g_lang_cache[slot].lang) - 1] = '\0';
+    g_lang_cache[slot].bits = bits;
+    g_lang_cache[slot].flags = flags;
+    g_lang_cache[slot].flags_size = expected_size;
+    return flags;
+}
+
 /* Look up cached flags or load them from disk. Returns NULL on error
  * (file missing or wrong size); caller falls back to default flags.
  * Aborts if the cache fills up. */
@@ -34642,7 +34694,7 @@ static const uint8_t *w_load_lang_flags(const char *lang, int bits) {
             f = fopen(cp_path, "rb");
         }
     }
-    if (!f) return NULL;
+    if (!f) return w_embedded_lang_flags(lang, bits, expected_size);
 
     fseek(f, 0, SEEK_END);
     long actual_size = ftell(f);
@@ -51315,9 +51367,29 @@ typedef struct WBlockReturnFrame {
     int cleanup_depth;
     WValue value;
     int active;
+    /* Bumped on every reuse; the low 16 bits ride in the closure's frame
+     * handle (w_block_return_bits) so a block that outlives its function is
+     * told apart from the frame's next owner. */
+    uint32_t gen;
 } WBlockReturnFrame;
 
 static __thread WBlockReturnFrame *w_block_return_stack = NULL;
+
+/* Frames are recycled through a per-thread free list (linked by prev) and
+ * never returned to malloc: a stale handle held by an escaped block may still
+ * be dereferenced by w_block_return_signal, which must then find a frame (not
+ * freed memory) whose generation no longer matches. Every function with a
+ * non-local block return pushes one frame per call, so without recycling each
+ * call leaked one frame (a jmp_buf, ~250 bytes). */
+static __thread WBlockReturnFrame *w_block_return_pool = NULL;
+
+#define W_BLOCK_RETURN_PTR_MASK 0x0000FFFFFFFFFFFFull
+
+static void w_block_return_recycle(WBlockReturnFrame *frame) {
+    frame->active = 0;
+    frame->prev = w_block_return_pool;
+    w_block_return_pool = frame;
+}
 
 /* ---- Recycle cleanup stack ---- */
 #define CLEANUP_STACK_MAX 512
@@ -51433,8 +51505,11 @@ void w_raise(WValue msg) {
         WExceptionFrame *saved = w_block_return_stack->exception_stack;
         while (saved && saved != w_exception_stack) saved = saved->prev;
         if (!saved) break;
-        w_block_return_deactivate(w_block_return_stack);
-        w_block_return_stack = w_block_return_stack->prev;
+        WBlockReturnFrame *gone = w_block_return_stack;
+        w_block_return_deactivate(gone);
+        w_block_return_stack = gone->prev;
+        /* its function is abandoned: it never reaches w_block_return_pop */
+        w_block_return_recycle(gone);
     }
 
     /* Unwind recycle cleanup stack down to the frame's saved depth.
@@ -51447,7 +51522,14 @@ void w_raise(WValue msg) {
 }
 
 void *w_block_return_push(void) {
-    WBlockReturnFrame *frame = calloc(1, sizeof(WBlockReturnFrame));
+    WBlockReturnFrame *frame = w_block_return_pool;
+    if (frame != NULL) {
+        w_block_return_pool = frame->prev;
+    } else {
+        frame = calloc(1, sizeof(WBlockReturnFrame));
+    }
+    frame->gen++;
+    if ((frame->gen & 0xFFFF) == 0) frame->gen++;
     frame->prev = w_block_return_stack;
     frame->exception_stack = w_exception_stack;
     if (frame->exception_stack) frame->exception_stack->block_refs++;
@@ -51477,11 +51559,25 @@ void w_block_return_pop(void *buf_ptr) {
     w_block_return_deactivate(frame);
     if (w_block_return_stack == frame) {
         w_block_return_stack = frame->prev;
+        w_block_return_recycle(frame);
         return;
     }
     WBlockReturnFrame *prev = w_block_return_stack;
     while (prev && prev->prev != frame) prev = prev->prev;
-    if (prev) prev->prev = frame->prev;
+    if (prev) {
+        prev->prev = frame->prev;
+        w_block_return_recycle(frame);
+    }
+    /* not on the stack: already abandoned (and recycled) by a raise/signal */
+}
+
+/* The handle a block captures to return from this frame's function: the
+ * frame address with its generation in the top 16 bits. */
+uint64_t w_block_return_bits(void *buf_ptr) {
+    if (!buf_ptr) return 0;
+    WBlockReturnFrame *frame = (WBlockReturnFrame *)buf_ptr;
+    return ((uint64_t)(uintptr_t)buf_ptr & W_BLOCK_RETURN_PTR_MASK) |
+           ((uint64_t)(frame->gen & 0xFFFF) << 48);
 }
 
 WValue w_block_return_value(void *buf_ptr) {
@@ -51495,14 +51591,26 @@ void w_block_return_signal(uint64_t buf_bits, WValue value) {
         w_raise(w_string("unexpected return from block"));
     }
 
-    WBlockReturnFrame *target = (WBlockReturnFrame *)(uintptr_t)buf_bits;
-    if (!target->active) {
+    /* Handles from w_block_return_bits carry the frame's generation; a bare
+     * address (tag 0, code from an older compiler) is checked by `active`
+     * alone. */
+    uint64_t tag = buf_bits >> 48;
+    WBlockReturnFrame *target = (WBlockReturnFrame *)(uintptr_t)(buf_bits & W_BLOCK_RETURN_PTR_MASK);
+    if (!target->active || (tag != 0 && tag != (uint64_t)(target->gen & 0xFFFF))) {
         w_raise(w_string("cannot return from block after enclosing function has exited"));
+    }
+    {
+        WBlockReturnFrame *f = w_block_return_stack;
+        while (f && f != target) f = f->prev;
+        if (!f) w_raise(w_string("block return target is no longer active"));
     }
 
     while (w_block_return_stack && w_block_return_stack != target) {
-        w_block_return_deactivate(w_block_return_stack);
-        w_block_return_stack = w_block_return_stack->prev;
+        WBlockReturnFrame *gone = w_block_return_stack;
+        w_block_return_deactivate(gone);
+        w_block_return_stack = gone->prev;
+        /* an intervening function abandoned by this return */
+        w_block_return_recycle(gone);
     }
     if (w_block_return_stack != target) {
         w_raise(w_string("block return target is no longer active"));
@@ -51569,6 +51677,29 @@ WValue w_destructure_index(WValue v, int64_t i) {
         return W_NIL;
     }
     return i == 0 ? v : W_NIL;
+}
+
+/* Multiple assignment with a splat target, `a, *rest, z = v`: the splat at
+ * target index `start` gathers what the `after` trailing targets leave (an
+ * empty Array when nothing is left). A non-Array value is a one-element
+ * list, as in w_destructure_index. */
+static int64_t w_destructure_rest_end(int64_t size, int64_t start, int64_t after) {
+    int64_t end = size - after;
+    return end < start ? start : end;
+}
+
+WValue w_destructure_rest(WValue v, int64_t start, int64_t after) {
+    int64_t size = w_is_array(v) ? w_as_array(v)->size : 1;
+    int64_t end = w_destructure_rest_end(size, start, after);
+    WValue out = w_array_new(65, end - start);
+    for (int64_t i = start; i < end; i++) w_array_push(out, w_destructure_index(v, i));
+    return out;
+}
+
+/* The `j`th trailing target after the splat. */
+WValue w_destructure_suffix(WValue v, int64_t start, int64_t after, int64_t j) {
+    int64_t size = w_is_array(v) ? w_as_array(v)->size : 1;
+    return w_destructure_index(v, w_destructure_rest_end(size, start, after) + j);
 }
 
 static WValue call_closure_1(WClosure *cl, WValue arg) {
@@ -69911,6 +70042,7 @@ WValue w_array_reuse_or_new(WValue *slot, int64_t element_bits, int64_t cap) {
 }
 
 static int w_array_has_views(WValue parent);
+static void w_array_detach_view(WValue arr);
 
 WValue w_array_push(WValue arr, WValue val) {
     if (__builtin_expect(w_is_array(arr), 1)) {
@@ -69927,7 +70059,9 @@ WValue w_array_push(WValue arr, WValue val) {
     }
     WArray *a = w_as_array(arr);
     if ((a->flags & W_FLAG_OWNED) == 0) {
-        w_raise(w_string("typed array push: cannot grow a borrowed view"));
+        if ((a->flags & W_FLAG_VIEW) == 0)
+            w_raise(w_string("typed array push: cannot grow a borrowed view"));
+        w_array_detach_view(arr);
     }
     int64_t bits = array_storage_bits(a->ebits);
     if (a->start + a->size >= a->cap) {
@@ -70881,6 +71015,47 @@ void w_register_view(WValue parent, WValue view) {
     n->count++;
 }
 
+static void w_view_unregister(WValue view) {
+    if (!g_any_views_registered) return;
+    for (int b = 0; b < W_VIEW_BUCKETS; b++) {
+        for (WViewNode *n = w_view_table[b]; n; n = n->next) {
+            for (int32_t i = 0; i < n->count; i++) {
+                if (n->entries[i].view == view) {
+                    n->entries[i] = n->entries[n->count - 1];
+                    n->count--;
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/* Growing a borrowed view (`a.slice(0, n)` then `push`) detaches it: its
+ * elements move into fresh owned storage, so the push cannot write past the
+ * window into the parent's (or a string's) bytes. Writes through the view
+ * stop aliasing the parent from this point on. */
+static void w_array_detach_view(WValue arr) {
+    WArray *a = w_as_array(arr);
+    WArray old = *a;
+    int64_t cap = a->size < 4 ? 8 : (int64_t)a->size * 2;
+    if (cap > INT32_MAX) cap = INT32_MAX;
+    uint8_t *data = calloc(1, (size_t)array_byte_size(a->ebits, cap));
+    if (!data) die("typed array allocation failed");
+    w_allocprof(W_ALLOCPROF_GROW, array_byte_size(a->ebits, cap));
+    w_view_unregister(arr);
+    a->slots = (WValue *)data;
+    a->start = 0;
+    a->cap = (int32_t)cap;
+    if (array_storage_bits(a->ebits) >= 8) {
+        memcpy(data, (uint8_t *)old.slots + array_byte_size(old.ebits, old.start),
+               (size_t)array_byte_size(old.ebits, old.size));
+    } else {
+        for (int64_t j = 0; j < old.size; j++)
+            array_write(a, j, array_read(&old, old.start + j));
+    }
+    a->flags = (uint8_t)((a->flags & ~(W_FLAG_VIEW | W_FLAG_INLINE | W_FLAG_PAGE_ALIGNED)) | W_FLAG_OWNED);
+}
+
 /* Walk every view registered against `parent`, rewriting their `slots`
  * to point into the new buffer at the same byte-offset. Recurses so
  * sub-views (views of views) are updated through the intermediate's
@@ -71128,7 +71303,9 @@ WValue w_array_unshift(WValue arr, WValue val) {
     // add int-vs-float branching and byte-sized storage math.
     WArray *a = w_as_array(arr);
     if ((a->flags & W_FLAG_OWNED) == 0) {
-        w_raise(w_string("typed array unshift: cannot grow a borrowed view"));
+        if ((a->flags & W_FLAG_VIEW) == 0)
+            w_raise(w_string("typed array unshift: cannot grow a borrowed view"));
+        w_array_detach_view(arr);
     }
     int64_t bits = array_storage_bits(a->ebits);
     // Case 1: O(1) — slot exists before start.

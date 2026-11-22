@@ -2794,6 +2794,116 @@ static TcAstValue parse_io_ast(TcAstParser *p, size_t start, size_t end, TcError
   return node;
 }
 
+/* Multiple assignment, mirroring Parser#try_parse_multi_assign: a
+ * {node: multi_assign, targets, value, splat_index} hash. A target is a
+ * local, ivar, cvar, global, `obj.attr`, `h[k]`, `*target` (at most one per
+ * list; its index is splat_index) or a parenthesized nested list (a
+ * multi_assign with a nil value). A comma-separated right side is an array
+ * node. ast_compile.c compile_multi_assign spreads the value. */
+static int matching_rparen_ast(TcAstParser *p, size_t lparen, size_t end, size_t *out) {
+  int depth = 0;
+  for (size_t i = lparen; i < end; i++) {
+    TcKind k = p->tokens->items[i].kind;
+    if (k == TC_K_LPAREN) depth++;
+    else if (k == TC_K_RPAREN && --depth == 0) {
+      *out = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int span_is_multi_target_ast(TcAstParser *p, size_t start, size_t end) {
+  size_t pos = 0;
+  if (start >= end) return 0;
+  if (top_level_token_ast(p, start, end, TC_K_COMMA, &pos, 0)) return 1;
+  if (p->tokens->items[start].kind == TC_K_STAR) return 1;
+  size_t close = 0;
+  return p->tokens->items[start].kind == TC_K_LPAREN && matching_rparen_ast(p, start, end, &close) &&
+         close == end - 1 && top_level_token_ast(p, start + 1, close, TC_K_COMMA, &pos, 0);
+}
+
+static TcAstValue parse_multi_targets_ast(TcAstParser *p, size_t start, size_t end, TcError *err) {
+  TcAstValue node = node_hash(p, "multi_assign", start, err);
+  TcAstValue targets = tc_ast_array_new(err);
+  if (node.kind != TC_AST_HASH || targets.kind != TC_AST_ARRAY) return tc_ast_nil();
+  long splat = -1;
+  size_t index = 0;
+  size_t piece = start;
+  while (piece < end) {
+    size_t piece_end = end;
+    size_t comma = 0;
+    if (top_level_token_ast(p, piece, end, TC_K_COMMA, &comma, 0)) piece_end = comma;
+    if (piece >= piece_end) {
+      parse_ast_error(p, err, "empty multiple assignment target");
+      return tc_ast_nil();
+    }
+    TcAstValue target;
+    size_t close = 0;
+    if (p->tokens->items[piece].kind == TC_K_STAR) {
+      if (splat >= 0) {
+        parse_ast_error(p, err, "a multiple assignment has at most one splat target");
+        return tc_ast_nil();
+      }
+      splat = (long)index;
+      target = parse_expr_span_ast(p, piece + 1, piece_end, err);
+    } else if (p->tokens->items[piece].kind == TC_K_LPAREN && matching_rparen_ast(p, piece, piece_end, &close) &&
+               close == piece_end - 1) {
+      target = parse_multi_targets_ast(p, piece + 1, close, err);
+    } else {
+      target = parse_expr_span_ast(p, piece, piece_end, err);
+    }
+    if (target.kind == TC_AST_NIL) return tc_ast_nil();
+    /* A bare name may parse as a receiverless zero-arg call. */
+    TcAstValue *recv = hash_value_ast(target, "receiver");
+    TcAstValue *args = hash_value_ast(target, "args");
+    TcAstValue *name = hash_value_ast(target, "name");
+    if (ast_node_is(target, "call") && (!recv || recv->kind == TC_AST_NIL) && args && args->kind == TC_AST_ARRAY &&
+        args->as.array->count == 0 && name && name->kind == TC_AST_STRING) {
+      TcAstValue var = node_hash(p, "var", piece, err);
+      if (!tc_ast_hash_set(var, "name", tc_ast_string_copy(name->as.string.bytes, name->as.string.len, err), err))
+        return tc_ast_nil();
+      tc_ast_free(target);
+      target = var;
+    }
+    if (!tc_ast_array_push(targets, target, err)) return tc_ast_nil();
+    index++;
+    piece = piece_end + 1;
+  }
+  if (!tc_ast_hash_set(node, "targets", targets, err) ||
+      !tc_ast_hash_set(node, "value", tc_ast_nil(), err) ||
+      !tc_ast_hash_set(node, "splat_index", splat >= 0 ? tc_ast_int(splat) : tc_ast_nil(), err)) {
+    return tc_ast_nil();
+  }
+  return node;
+}
+
+static TcAstValue parse_multi_assign_ast(TcAstParser *p, size_t start, size_t assign_pos, size_t end, TcError *err) {
+  TcAstValue node = parse_multi_targets_ast(p, start, assign_pos, err);
+  if (node.kind == TC_AST_NIL) return node;
+  TcAstValue value;
+  size_t comma = 0;
+  if (top_level_token_ast(p, assign_pos + 1, end, TC_K_COMMA, &comma, 0)) {
+    TcAstValue elements = tc_ast_array_new(err);
+    size_t piece = assign_pos + 1;
+    while (piece < end) {
+      size_t piece_end = end;
+      if (top_level_token_ast(p, piece, end, TC_K_COMMA, &comma, 0)) piece_end = comma;
+      TcAstValue element = parse_expr_span_ast(p, piece, piece_end, err);
+      if (element.kind == TC_AST_NIL && err->message) return tc_ast_nil();
+      if (!tc_ast_array_push(elements, element, err)) return tc_ast_nil();
+      piece = piece_end + 1;
+    }
+    value = node_hash(p, "array", assign_pos + 1, err);
+    if (!tc_ast_hash_set(value, "elements", elements, err)) return tc_ast_nil();
+  } else {
+    value = parse_expr_span_ast(p, assign_pos + 1, end, err);
+    if (value.kind == TC_AST_NIL && err->message) return tc_ast_nil();
+  }
+  if (!tc_ast_hash_set(node, "value", value, err)) return tc_ast_nil();
+  return node;
+}
+
 static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, TcError *err) {
   trim_expr_span_ast(p, &start, &end);
   if (start >= end) return tc_ast_nil();
@@ -2906,6 +3016,10 @@ static TcAstValue parse_expr_span_ast(TcAstParser *p, size_t start, size_t end, 
   if (compound.kind != TC_AST_NIL) return compound;
 
   size_t assign_pos = 0;
+  if (top_level_token_ast(p, start, end, TC_K_ASSIGN, &assign_pos, 0) && assign_pos > start &&
+      span_is_multi_target_ast(p, start, assign_pos)) {
+    return parse_multi_assign_ast(p, start, assign_pos, end, err);
+  }
   if (top_level_token_ast(p, start, end, TC_K_ASSIGN, &assign_pos, 1) && assign_pos > start) {
     /* Type-hint text cleanup shared with the ascription path below —
      * parser.w cuts the hint at a trailing comment (`## i64  # note`)

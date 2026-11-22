@@ -46,7 +46,7 @@
     return false
   case n
   when 2
-    word == "if" || word == "in" || word == "fn" || word == "is" || word == "on"
+    word == "if" || word == "in" || word == "is"
   when 3
     word == "nil" || word == "use"
   when 4
@@ -60,20 +60,90 @@
   else
     false
 
-# `go` is a contextual keyword: it is reserved only where it starts a spawn,
-# `go -> body`. Everywhere else (a local, parameter, method name, hash key,
-# or the method in `obj.go`) it is an ordinary identifier, so is_keyword?
-# leaves it out and each lexer asks go_keyword_at? at a `go` word. `chars`
-# is the source as one-codepoint strings, `after` the index just past the
-# word, and `last_type` the previous token's type: the spawn form is `go`
-# not after `.`/`&.`, followed by `->` after optional spaces or tabs.
--> go_keyword_at?(chars, after, char_count, last_type)
+# Contextual keywords. `go`, `fn` and `on` are keywords only where their
+# grammar applies, and ordinary identifiers everywhere else (locals,
+# parameters, method and attribute names, hash keys, `obj.go`), so
+# is_keyword? leaves them out and each lexer asks contextual_keyword_at? at
+# one of these words. `chars` is the source as one-codepoint strings,
+# `after` the index just past the word, and `last_type` the previous
+# token's type (nil at the start of the file).
+#
+#   go  starts a spawn, `go -> body`: `->` follows after optional blanks.
+#   fn  starts a definition, `fn name(...)` / `@gpu fn name`: blanks and
+#       then a name follow.
+#   on  starts a platform guard, `on TARGET (with CAP)*` and an indented
+#       body: it opens a statement, a target (a name after blanks, `(` or
+#       `!`) follows, the rest of the line holds only target syntax (names,
+#       `( ) ! && ||`, `with`, a comment), and the next non-blank line is
+#       indented deeper and does not continue a call chain with `.`.
+#
+# None of them is a keyword after `.` or `&.` (a method call).
+-> contextual_keyword_at?(word, chars, after, char_count, last_type)
   if last_type == :DOT || last_type == :SAFE_NAV
     return false
-  p = after
+  if word == "go"
+    return go_keyword_at?(chars, after, char_count)
+  if word == "fn"
+    return fn_keyword_at?(chars, after, char_count)
+  if word == "on"
+    return on_keyword_at?(chars, after, char_count, last_type)
+  false
+
+-> contextual_keyword_word?(word)
+  word == "go" || word == "fn" || word == "on"
+
+-> skip_blanks_at(chars, p, char_count)
   while p < char_count && (chars[p] == " " || chars[p] == "\t")
     p += 1
+  p
+
+-> name_start_char?(c)
+  (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_"
+
+-> go_keyword_at?(chars, after, char_count)
+  p = skip_blanks_at(chars, after, char_count)
   p + 1 < char_count && chars[p] == "-" && chars[p + 1] == ">"
+
+-> fn_keyword_at?(chars, after, char_count)
+  p = skip_blanks_at(chars, after, char_count)
+  p > after && p < char_count && name_start_char?(chars[p])
+
+-> on_keyword_at?(chars, after, char_count, last_type)
+  if !(last_type == nil || last_type == :NEWLINE || last_type == :INDENT || last_type == :DEDENT || last_type == :SEMICOLON)
+    return false
+  p = skip_blanks_at(chars, after, char_count)
+  if p >= char_count
+    return false
+  c = chars[p]
+  if !(c == "(" || c == "!" || (p > after && name_start_char?(c)))
+    return false
+  while p < char_count && chars[p] != "\n"
+    c = chars[p]
+    if c == "#"
+      while p < char_count && chars[p] != "\n"
+        p += 1
+      break
+    if !(name_start_char?(c) || (c >= "0" && c <= "9") || c == " " || c == "\t" || c == "(" || c == ")" || c == "!" || c == "&" || c == "|")
+      return false
+    p += 1
+  # Indentation of the `on` line.
+  line = after - 2
+  while line > 0 && chars[line - 1] != "\n"
+    line -= 1
+  indent = skip_blanks_at(chars, line, char_count) - line
+  # The next line with code on it must be the indented body.
+  q = p + 1
+  while q < char_count
+    r = skip_blanks_at(chars, q, char_count)
+    if r >= char_count
+      return false
+    if chars[r] == "\n" || chars[r] == "#"
+      while r < char_count && chars[r] != "\n"
+        r += 1
+      q = r + 1
+    else
+      return r - q > indent && chars[r] != "."
+  false
 
 -> is_type_name?(word)
   n = word.size()

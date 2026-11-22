@@ -275,6 +275,39 @@ module Tungsten::AST
       expect(hash.entries.map(&:first)).to eq([ StringLiteral.new("go") ])
     end
 
+    it "parses fn and on as names outside their keyword forms" do
+      expect(described_class.parse("fn = 1").list[0]).to eq(Assign.new("fn".var, 1.int))
+      expect(described_class.parse("on = 1").list[0]).to eq(Assign.new("on".var, 1.int))
+      defn = described_class.parse("-> pause(on)\n  on").list[0]
+      expect(defn.args.map(&:name)).to eq([ "on" ])
+    end
+
+    describe "multiple assignment" do
+      def multi(source)
+        node = described_class.parse(source).list[0]
+        expect(node).to be_a(Assign)
+        expect(node.name).to be_a(ArrayLiteral)
+        node
+      end
+
+      it "parses a swap with a comma-separated right side" do
+        node = multi("a, b = b, a")
+        expect(node.name).to eq(ArrayLiteral.new([ "a".var, "b".var ]))
+        expect(node.value).to eq(ArrayLiteral.new([ "b".var, "a".var ]))
+      end
+
+      it "parses splat, nested and non-local targets" do
+        expect(multi("*init, last = xs").name.list[0]).to be_a(Splat)
+        expect(multi("a, *rest = xs").name.list[1]).to be_a(Splat)
+        nested = multi("(a, b), c = xs").name.list[0]
+        expect(nested).to eq(ArrayLiteral.new([ "a".var, "b".var ]))
+        targets = multi("@x, h[k], obj.y = 1, 2, 3").name.list
+        expect(targets[0]).to be_a(InstanceVar)
+        expect(targets[1].name).to eq("[]=")
+        expect(targets[2].name).to eq("y=")
+      end
+    end
+
     it "parses type words as method names" do
       result = described_class.parse("-> string(name) = name")
       defn = result.list[0]

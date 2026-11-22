@@ -3,11 +3,20 @@ export const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&am
 let classes = new Map()
 export const setClassIndex = (m) => { classes = m }
 
-const KW = new Set('if elsif else unless while until for in return raise use is with trait fn case when recase loop break next yield self nil true false and or not rescue ensure begin do then auto ro rw alias super ccall ccall_nobox runtime field readonly data'.split(' '))
+const KW = new Set('if elsif else unless while until for in return raise use is with trait case when recase loop break next yield self nil true false and or not rescue ensure begin do then auto ro rw alias super ccall ccall_nobox runtime field readonly data'.split(' '))
 const TOK = /(##\s*[\w\[\]<>, ]+?(?=\s*(?:#|$)))|(#.*$)|("(?:\\.|[^"\\])*"?)|('(?:[^'\n])*')|(:[a-zA-Z_]\w*[?!]?)|(\b0x[\da-fA-F_]+\b|\b\d[\d_]*(?:\.\d[\d_]*)?(?:e[+-]?\d+)?(?:[a-zA-Zµ]+\d*)*)|(@\d+|@[a-zA-Z_]\w*|\$[a-zA-Z_]\w*)|(->|<<|=>|\*\*|\.\.\.?|[+\-*\/%=<>!&|^~]+)|([A-Z]\w*)|([a-z_]\w*[?!]?)/g
 
-// `go` is a keyword only where it starts a spawn (`go -> body`), never after `.`.
-const isGoSpawn = (src, start, end) => src.slice(start, end) === 'go' && src[start - 1] !== '.' && /^[ \t]*->/.test(src.slice(end))
+// Contextual keywords (languages/tungsten/lexers/regex_helpers.w), never after `.`:
+// `go ->` spawns, `fn name` defines, and `on TARGET` opens a platform guard at the
+// start of a line (the per-line highlighter cannot see the indented body).
+const isContextualKeyword = (src, start, end) => {
+  const word = src.slice(start, end), rest = src.slice(end)
+  if (src[start - 1] === '.') return false
+  if (word === 'go') return /^[ \t]*->/.test(rest)
+  if (word === 'fn') return /^[ \t]+[A-Za-z_]/.test(rest)
+  if (word === 'on') return /^\s*$/.test(src.slice(0, start)) && /^(?:[ \t]+[A-Za-z_]|[ \t]*[(!])[\w \t()!&|]*(?:#.*)?$/.test(rest)
+  return false
+}
 
 export function hl(code) {
   return String(code).split('\n').map(line).join('\n')
@@ -27,8 +36,8 @@ function line(src) {
     else if (m[7]) out += `<span class="iv">${esc(t)}</span>`
     else if (m[8]) out += `<span class="${t === '->' || t === '<<' ? 'k' : 'op'}">${esc(t)}</span>`
     else if (m[9]) out += classes.has(t) ? `<a class="ty" href="#/c/${encodeURIComponent(t)}">${esc(t)}</a>` : `<span class="ty">${esc(t)}</span>`
-    else if (prev === '->' || prev === 'fn') out += `<span class="df">${esc(t)}</span>`
-    else out += KW.has(t) || isGoSpawn(src, m.index, TOK.lastIndex) ? `<span class="k">${esc(t)}</span>` : esc(t)
+    else if (prev === '->' || (prev === 'fn' && isContextualKeyword(src, src.lastIndexOf('fn', m.index), src.lastIndexOf('fn', m.index) + 2))) out += `<span class="df">${esc(t)}</span>`
+    else out += KW.has(t) || isContextualKeyword(src, m.index, TOK.lastIndex) ? `<span class="k">${esc(t)}</span>` : esc(t)
     if (!/^\s*$/.test(t)) prev = t
     if (m.index === TOK.lastIndex) TOK.lastIndex++
   }

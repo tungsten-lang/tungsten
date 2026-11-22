@@ -8,7 +8,7 @@
 #   Mat3 * Mat3   → */1(Mat3)    matrix·matrix
 #
 # Before this landed, `(Vec3)`-style param types never parsed (a class name
-# lexes as T_NAME, not T_TYPE), so the second overload silently clobbered the
+# lexes as TOK_NAME, not TOK_TYPE), so the second overload silently clobbered the
 # first. The lowering synthesizes a per-class dispatcher that branches on
 # `@1.is_a?("Type")`; the hierarchy-base overload (Number) is the else, and a
 # group with no base (Mat3's Vec3/Mat3) falls to `super`.

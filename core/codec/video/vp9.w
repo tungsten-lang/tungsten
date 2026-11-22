@@ -299,6 +299,7 @@ VC_UVMODE = 324
   # ------------------------------------------------------------ public API
 
   -> decode(sample)
+    bury_dead()
     d = sample.data
     if d.is_a?(String)
       d = ccall("w_string_bytes_view", d) ## u8[]
@@ -344,8 +345,10 @@ VC_UVMODE = 324
     []
 
   -> reset
+    bury_dead()
     @refs = [nil, nil, nil, nil, nil, nil, nil, nil]
     @last = nil
+    track_live()
     @have_prev_mv = 0
     @have_ref_seg = 0
 
@@ -750,8 +753,41 @@ VC_UVMODE = 324
       @refs[k] = f if ((@refresh >> k) & 1) == 1
       k += 1
     @last = f
+    track_live()
     emit(f) if @invisible == 0
     0
+
+  # Frames no longer referenced (not in a reference slot, not the last frame)
+  # are queued and released at the next call (Tungsten has no collector; their
+  # planes may have been handed out as this call's output frame).
+  -> track_live
+    live = []
+    k = 0
+    while k < 8
+      r = @refs[k]
+      live.push(r) if r != nil && !live.include?(r)
+      k += 1
+    live.push(@last) if @last != nil && !live.include?(@last)
+    @grave = [] if @grave == nil
+    if @live != nil
+      @live.each ->(q)
+        @grave.push(q) if !live.include?(q) && !@grave.include?(q)
+    @live = live
+    nil
+
+  -> bury_dead
+    if @grave != nil
+      @grave.each ->(q)
+        ccall("w_value_free_w", q.y) if q.y != nil
+        ccall("w_value_free_w", q.u) if q.u != nil
+        ccall("w_value_free_w", q.v) if q.v != nil
+        ccall("w_value_free_w", q.mv) if q.mv != nil
+        q.y = nil
+        q.u = nil
+        q.v = nil
+        q.mv = nil
+    @grave = []
+    nil
 
   -> read_color
     cs = gb_bits(3)

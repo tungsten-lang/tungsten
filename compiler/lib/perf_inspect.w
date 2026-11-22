@@ -310,7 +310,7 @@ use parser
         if rname != nil
           mutated_recvs[rname] = true
   elsif k == :multi_assign
-    targets = node.targets
+    targets = multi_assign_leaf_targets(node)
     if targets != nil
       ti = 0
       while ti < targets.size()

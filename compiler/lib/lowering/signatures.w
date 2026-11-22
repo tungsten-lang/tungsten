@@ -158,6 +158,115 @@
     i += 1
   found
 
+# Implicit widening at a typed call site: a narrow machine int (an i32[] or
+# u16[] element) passed to an `i64` parameter, or any machine int / f32 passed
+# to an `f64` parameter, converts losslessly. Answer the unique full-arity
+# typed signature that every argument matches exactly or by widening; nil when
+# none or several do (an exact match is resolved before this is consulted).
+-> typed_widening_call_key(mod, name, arg_types)
+  known = mod[:known_fn_defs]
+  if known == nil || known.size() == 0
+    return nil
+  by_name = mod[:known_fn_defs_by_name]
+  if by_name == nil || mod[:known_fn_defs_by_name_count] != known.size()
+    by_name = rebuild_known_fn_defs_by_name(mod)
+  bucket = by_name[name]
+  if bucket == nil
+    return nil
+  found = nil
+  i = 0
+  while i < bucket.size()
+    entry = bucket[i]
+    definition = entry[1]
+    if definition.param_types != nil && definition.params.size() == arg_types.size()
+      matches = true
+      widened = false
+      j = 0
+      while j < arg_types.size() && matches
+        expected = canonical_signature_type(definition.param_types[j])
+        got = arg_types[j] == nil ? nil : canonical_signature_type(arg_types[j])
+        if got != expected
+          if widening_arg_type?(got, expected)
+            widened = true
+          else
+            matches = false
+        j += 1
+      if matches && widened
+        return nil if found != nil && found != entry[0]
+        found = entry[0]
+    i += 1
+  found
+
+# The same widening rule over a table keyed by typed-call key (`name|i64,f64`):
+# fn_return_types or known_calls. Inference and the raw-ABI prepass resolve a
+# widened call to the overload lower_call will bind. A per-table index by name
+# keeps the lookup off the full key list.
+-> widened_typed_key(table, name, arg_types, index_tag)
+  if table == nil || arg_types == nil || arg_types.size() == 0
+    return nil
+  maps = lowering_infer_maps
+  if maps == nil
+    return nil
+  size_tag = index_tag + "_size"
+  idx = maps[index_tag]
+  if idx == nil || maps[size_tag] != table.size()
+    idx = {}
+    keys = table.keys()
+    ki = 0
+    while ki < keys.size()
+      k = keys[ki]
+      if type(k) == "String"
+        bar = k.index("|")
+        if bar != nil && bar > 0
+          kn = k.slice(0, bar)
+          bucket = idx[kn]
+          if bucket == nil
+            bucket = []
+            idx[kn] = bucket
+          bucket.push(k)
+      ki += 1
+    maps[index_tag] = idx
+    maps[size_tag] = table.size()
+  cands = idx[name]
+  if cands == nil
+    return nil
+  got_syms = []
+  gi = 0
+  while gi < arg_types.size()
+    got_syms.push(arg_types[gi] == nil ? nil : canonical_signature_type(arg_types[gi]))
+    gi += 1
+  found = nil
+  ci = 0
+  while ci < cands.size()
+    k = cands[ci]
+    sig = k.slice(name.size() + 1, k.size() - name.size() - 1).split(",")
+    if sig.size() == arg_types.size()
+      ok = true
+      widened = false
+      j = 0
+      while j < sig.size() && ok
+        g = got_syms[j]
+        if g == nil || g.to_s() != sig[j]
+          if widening_arg_type?(g, sig[j].to_sym())
+            widened = true
+          else
+            ok = false
+        j += 1
+      if ok && widened
+        return nil if found != nil && found != k
+        found = k
+    ci += 1
+  found
+
+-> widening_arg_type?(got, expected)
+  if got == nil
+    return false
+  if expected == :i64
+    return got in (:i8 :i16 :i32 :u8 :u16 :u32)
+  if expected == :f64
+    return got in (:i8 :i16 :i32 :u8 :u16 :u32 :i64 :f32 :float)
+  false
+
 -> mangle_type_signature(types)
   out = StringBuffer(types.size() * 16)
   i = 0

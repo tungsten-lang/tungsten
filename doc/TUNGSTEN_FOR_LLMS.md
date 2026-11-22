@@ -18,6 +18,13 @@ Two ways to run code (see **Engines** at the bottom):
 name = "Tungsten"
 x = 42
 
+# Multiple assignment: right side first, so this swaps; also
+# `head, *rest = list`, `(a, b), c = v`, `@x, h[k] = 1, 2`
+x, y = y, x
+
+# `go`, `fn`, `on` are keywords only in `go -> …`, `fn name(…)` and an
+# `on TARGET` guard; elsewhere they are ordinary names (`on = true`)
+
 # String interpolation uses [ ]  (but a [ right after ESC is literal,
 # so ANSI sequences like "\e[K" are safe; \[ escapes explicitly)
 << "hello [name], [x * 2]"
@@ -279,7 +286,8 @@ tightly than `∪`. Set operations produce new sets.
 - **Int**: `42`, `0xFF`, `0b1010` — the default exact, auto-promoting
   implementation; values report `Int` inline and `BigInt` on the heap
   (`n.popcount` / `n.bit_count` count the 1 bits of the magnitude, exact for
-  BigInt; `popcount(x)` is the raw-machine-word intrinsic)
+  BigInt; `popcount(x)` is the raw-machine-word intrinsic, with `clz(x)`,
+  `ctz(x)` and the 32-bit `clz32`/`ctz32`/`popcount32`)
 - **String**: `"hello"`, with `[expr]` interpolation
 - **Bool**: `true`, `false`
 - **Nil**: `nil`

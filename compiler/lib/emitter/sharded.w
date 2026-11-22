@@ -446,6 +446,21 @@
 
     refs = {}
     shard_collect_at_refs(body_str, refs)
+    # Profiler aliases (profile_symbol_alias_lines) live beside their
+    # function's definition; added after the ref scan, which would otherwise
+    # declare the alias names.
+    alias_lines = shard_plan[:alias_lines]
+    if alias_lines != nil
+      alias_buf = nil
+      ai2 = 0
+      while ai2 < nfns
+        if owner_shard[ai2] == s && ai2 < alias_lines.size() && alias_lines[ai2] != nil
+          if alias_buf == nil
+            alias_buf = StringBuffer(4096)
+          alias_buf << alias_lines[ai2]
+        ai2 += 1
+      if alias_buf != nil
+        body_str = body_str + alias_buf.to_s()
     if s == 0
       shard_collect_at_refs(seams_str, refs)
       shard_collect_at_refs(fn_meta_out, refs)

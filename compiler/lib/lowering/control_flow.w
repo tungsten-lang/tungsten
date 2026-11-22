@@ -89,6 +89,11 @@
     cond_bool = next_temp(wfn)
     emit_wire_truthy_inline(wfn, cond_bool, cond_reg)
 
+  # A binding created by the condition (`if (m = f(x)) > 0`) must be spilled
+  # before the branch, or a terminating then-arm drops it and the other paths
+  # read the slot uninitialized (see lower_if_expr).
+  materialize_bindings(ctx)
+
   then_label = next_label(wfn, "if.then")
   else_label = next_label(wfn, "if.else")
   end_label = next_label(wfn, "if.end")
@@ -149,6 +154,7 @@
       else
         next_else = end_label
 
+      materialize_bindings(ctx)
       emit_wire_cond_br(wfn, eb, next_else, nil, ethen_label)
 
       start_block(wfn, ethen_label)
@@ -236,6 +242,15 @@
     cond_bool = next_temp(wfn)
     emit_wire_truthy_inline(wfn, cond_bool, cond_reg)
 
+  # Spill live bindings before the branch. Each arm ends with
+  # materialize_bindings, which resets ctx[:bindings]; a binding still live
+  # here (a local assigned from a call just before a tail ternary, or inside
+  # the condition) would otherwise be stored only on the first arm's path and
+  # read uninitialized on the others. Most callers spill before lowering the
+  # condition; this also covers the typed-return tail path and assignments
+  # inside the condition.
+  materialize_bindings(ctx)
+
   then_label = next_label(wfn, "ie.then")
   else_label = next_label(wfn, "ie.else")
   end_label = next_label(wfn, "ie.end")
@@ -287,6 +302,7 @@
       else
         next_else = end_label
 
+      materialize_bindings(ctx)
       emit_wire_cond_br(wfn, eb, next_else, nil, ethen_label)
       if next_else == end_label
         end_reachable = true
@@ -718,7 +734,7 @@
     nm = node.name
     args = node.args
     if recv == nil
-      if !(nm in ("ast_kind" "ast_get" "is_ast_node?" "type" "typeof" "ccall_nobox" "raw_load_u8" "raw_load_u32" "raw_load_u64" "popcount" "cttz" "array_load_u64" "wvalue_bits" "wvalue_from_bits" "min" "max" "abs" "sqrt"))
+      if !(nm in ("ast_kind" "ast_get" "is_ast_node?" "type" "typeof" "ccall_nobox" "raw_load_u8" "raw_load_u32" "raw_load_u64" "popcount" "cttz" "clz" "clz32" "ctz" "ctz32" "popcount32" "array_load_u64" "wvalue_bits" "wvalue_from_bits" "min" "max" "abs" "sqrt"))
         st[:self_mutated] = true
       pure_arg_call = nm in ("ast_kind" "is_ast_node?" "type" "typeof" "wvalue_bits" "min" "max" "abs" "sqrt")
       licm_scan_expr_list(args, st, var_types, !pure_arg_call)
@@ -1278,24 +1294,33 @@
     from_type = infer_type(collection.from, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
     to_type = infer_type(collection.to, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
 
+    # A bound that is already a raw signed machine int (`0...a.size`) is used
+    # as is: boxing it and unboxing the payload costs a call per loop and
+    # reads BigInt pointer bits past 2^47.
     start_tv = lower_expression(ctx, collection.from)
-    start_reg = ensure_i64_value(wfn, start_tv)
-    start_raw = next_temp(wfn)
-    if from_type != nil && !is_integer_like_type(from_type)
-      emit_wire_call_direct_i64(wfn, nil, [start_reg], nil, nil, "w_range_bound_i64", nil, nil, start_raw)
+    if start_tv[:type] in (:raw_int :raw_i64)
+      start_raw = start_tv[:value]
     else
-      emit_wire_nanunbox_int(wfn, start_reg, start_raw, start_raw + ".shl")
+      start_reg = ensure_i64_value(wfn, start_tv)
+      start_raw = next_temp(wfn)
+      if from_type != nil && !is_integer_like_type(from_type)
+        emit_wire_call_direct_i64(wfn, nil, [start_reg], nil, nil, "w_range_bound_i64", nil, nil, start_raw)
+      else
+        emit_wire_nanunbox_int(wfn, start_reg, start_raw, start_raw + ".shl")
 
     unbounded = collection.to == nil
     end_raw = nil
     if !unbounded
       end_tv = lower_expression(ctx, collection.to)
-      end_reg = ensure_i64_value(wfn, end_tv)
-      end_raw = next_temp(wfn)
-      if to_type != nil && !is_integer_like_type(to_type)
-        emit_wire_call_direct_i64(wfn, nil, [end_reg], nil, nil, "w_range_bound_i64", nil, nil, end_raw)
+      if end_tv[:type] in (:raw_int :raw_i64)
+        end_raw = end_tv[:value]
       else
-        emit_wire_nanunbox_int(wfn, end_reg, end_raw, end_raw + ".shl")
+        end_reg = ensure_i64_value(wfn, end_tv)
+        end_raw = next_temp(wfn)
+        if to_type != nil && !is_integer_like_type(to_type)
+          emit_wire_call_direct_i64(wfn, nil, [end_reg], nil, nil, "w_range_bound_i64", nil, nil, end_raw)
+        else
+          emit_wire_nanunbox_int(wfn, end_reg, end_raw, end_raw + ".shl")
 
     cmp_op = "sle"
     if collection.exclusive == true

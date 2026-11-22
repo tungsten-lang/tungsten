@@ -497,7 +497,9 @@
   # the dispatch helper segfaults (caught by network_native_spec, whose
   # binary compiles core/ipv6.w's `$bytes[0] ## i64` sites).
   if ast_kind(node) == :call && node.name == "\[]" && node.args != nil && node.args.size() == 1 && node.receiver != nil && is_ast_node?(node.receiver) && ast_kind(node.receiver) == :var && type in (:i64 :u64)
-    recv_t = infer_type(node.receiver, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
+    # receiver_static_type also sees a module-level typed array (`TAB =
+    # i32[256]` read inside a typed fn), which then takes the inline path.
+    recv_t = receiver_static_type(ctx, node.receiver)
     # Small/big-array receivers have their own inline element ops
     # (small_array_get_inline / big_array_get_inline) — fall through to the
     # inline path below rather than the boxed w_index_raw_i64 CALL, so element
@@ -517,7 +519,22 @@
       return t
   tv = lower_expression(ctx, node)
   inferred = infer_type(node, ctx[:var_types], ctx[:mod][:fn_return_types], lowering_infer_maps)
-  ensure_raw_machine_int(ctx[:func], tv, type, inferred)
+  wfn = ctx[:func]
+  # A comparison converts to 1 / 0.
+  if tv[:type] == :i1
+    selected = next_temp(wfn)
+    emit_wire_select_i64(wfn, tv[:value], "0", selected, "1")
+    return cast_raw_machine_int(wfn, selected, :i64, type)
+  # A boxed value of no statically known integer type is converted, not
+  # merely unboxed: a Float (a local assigned from mixed arithmetic) truncates
+  # toward zero and a boolean becomes 1 / 0, as the interpreter does. Values
+  # that are integers at run time cost the same type test as the plain unbox.
+  if tv[:type] == :i64 && !is_machine_int128_type(type) && raw_machine_source_type(tv, inferred) == nil && !(inferred in (:string :array :hash :nil))
+    boxed = ensure_i64_value(wfn, tv)
+    converted = next_temp(wfn)
+    emit_wire_call_direct_i64(wfn, nil, [boxed], nil, nil, "__w_cast_i64_fast", nil, nil, converted)
+    return cast_raw_machine_int(wfn, converted, :i64, type)
+  ensure_raw_machine_int(wfn, tv, type, inferred)
 
 -> is_safe_inline_int_op(op, left_node, right_node)
   # Only safe for +0 or *0/*1 — even +1/-1 can overflow at i48 boundary
@@ -2253,6 +2270,10 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # wrapped i64 view of a literal agrees exactly with the self-hosted
   # BigInt view, so the fold decision cannot diverge between stages.
   shl_literal_base = op == :LSHIFT && node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int
+  # A machine-typed amount (`1 << n`, n an i64 param) opts into the wrapping
+  # machine shift, as infer_type's LSHIFT arm types it.
+  if shl_literal_base && lowering_infer_maps[:typed_def] == true && node.left.format != :dec_big && !(node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int) && rt != :int && (is_machine_int64_type(rt) || is_small_int_type(rt) || rt in (:raw_int :raw_i64 :raw_u64))
+    shl_literal_base = false
   if op == :LSHIFT && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int && (node.right.value < 0 || node.right.value > 62)
     shl_literal_base = true
   if node.left != nil && is_ast_node?(node.left) && ast_kind(node.left) == :int && node.right != nil && is_ast_node?(node.right) && ast_kind(node.right) == :int
@@ -2563,11 +2584,13 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
   # representable (|n| ≤ 2^47 covers every inline literal) — the
   # exactness-gated adaptation rule. A non-literal int operand falls to
   # the runtime call and stays strict (Floats equal only Float VALUES).
-  if (lt == :float && is_integer_like_type(rt)) || (is_integer_like_type(lt) && rt == :float)
+  lt_flt = lt == :float || lt == :f64
+  rt_flt = rt == :float || rt == :f64
+  if (lt_flt && is_integer_like_type(rt)) || (is_integer_like_type(lt) && rt_flt)
     float_op = lowering_float_op_map[op]
     fcmp_pred = lowering_fcmp_op_map[op]
     if op in (:EQ :NEQ)
-      eq_lit_node = lt == :float ? node.right : node.left
+      eq_lit_node = lt_flt ? node.right : node.left
       eq_lit_ok = eq_lit_node != nil && is_ast_node?(eq_lit_node) && ast_kind(eq_lit_node) == :int
       if eq_lit_ok
         eq_lit_v = eq_lit_node.value
@@ -2580,14 +2603,14 @@ lowering_infer_maps = build_infer_maps(lowering_int_op_map, lowering_cmp_op_map,
       rhs = lower_expression(ctx, node.right)
 
       # Unbox each operand according to its type
-      if lt == :float
+      if lt_flt
         lhs_f = ensure_raw_f64(wfn, lhs)
       else
         lhs_raw = ensure_raw_machine_int(wfn, lhs, lt, lt)
         lhs_f = next_temp(wfn)
         emit_wire_dynamic_2(wfn, machine_int_to_f64_op(lt), :temp, lhs_f, :value, lhs_raw)
 
-      if rt == :float
+      if rt_flt
         rhs_f = ensure_raw_f64(wfn, rhs)
       else
         rhs_raw = ensure_raw_machine_int(wfn, rhs, rt, rt)

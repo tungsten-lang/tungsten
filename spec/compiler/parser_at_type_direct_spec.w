@@ -56,24 +56,24 @@ zero = ParserAtTypeProbe.new(0)
 check("zero token type", zero.at_type?(0), true)
 check("zero token nonzero type", zero.at_type?(1), false)
 
-predicates = ParserAtTypeProbe.new(packed_type(T_MINUS, 9, 2, true))
+predicates = ParserAtTypeProbe.new(packed_type(TOK_MINUS, 9, 2, true))
 check("minus predicate", predicates.minus_token?(), true)
 check("minus is not star", predicates.star_token?(), false)
-predicates.set_packed(packed_type(T_STAR, 10, 1, true))
+predicates.set_packed(packed_type(TOK_STAR, 10, 1, true))
 check("star predicate", predicates.star_token?(), true)
 check("star is not minus", predicates.minus_token?(), false)
-predicates.set_packed(packed_type(T_NAME, 11, 4, true))
+predicates.set_packed(packed_type(TOK_NAME, 11, 4, true))
 check("name-or-constant name", predicates.at_name_or_constant?(), true)
-predicates.set_packed(packed_type(T_CONSTANT, 12, 5, true))
+predicates.set_packed(packed_type(TOK_CONSTANT, 12, 5, true))
 check("name-or-constant constant", predicates.at_name_or_constant?(), true)
-predicates.set_packed(packed_type(T_ID, 13, 2, true))
+predicates.set_packed(packed_type(TOK_ID, 13, 2, true))
 check("name-or-constant rejection", predicates.at_name_or_constant?(), false)
 
 # The compatibility method remains an ordinary virtual method. The parser's
 # internal direct calls deliberately rely on Parser being final-in-practice;
 # this check guards only the public dispatch behavior promised by the wrapper.
-override = ParserAtTypeOverrideProbe.new(packed_type(T_MINUS, 0, 1, true))
+override = ParserAtTypeOverrideProbe.new(packed_type(TOK_MINUS, 0, 1, true))
 check("public override true", override.at_type?(999), true)
-check("public override false", override.at_type?(T_MINUS), false)
+check("public override false", override.at_type?(TOK_MINUS), false)
 
 << "PASS parser at_type direct-helper semantics"

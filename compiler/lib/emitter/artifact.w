@@ -952,6 +952,17 @@
     if decls_out.index("@w_to_i64(") == nil
       decls_out = decls_out + "declare i64 @w_to_i64(i64) nounwind\n"
     decls_out = decls_out + to_i64_fast_helper_ir() + "\n"
+  if ccall_needed.has_key?("__w_ta_bounds_check") || ccall_needed.has_key?("__w_ta_bounds_check_boxed")
+    if decls_out.index("@w_typed_index_error(") == nil
+      decls_out = decls_out + "declare void @w_typed_index_error(i64, i64) cold nounwind\n"
+    if ccall_needed.has_key?("__w_ta_bounds_check")
+      decls_out = decls_out + ta_bounds_check_helper_ir(false) + "\n"
+    if ccall_needed.has_key?("__w_ta_bounds_check_boxed")
+      decls_out = decls_out + ta_bounds_check_helper_ir(true) + "\n"
+  if ccall_needed.has_key?("__w_cast_i64_fast")
+    if decls_out.index("@w_cast_i64(") == nil
+      decls_out = decls_out + "declare i64 @w_cast_i64(i64) nounwind\n"
+    decls_out = decls_out + to_i64_fast_helper_ir("__w_cast_i64_fast", "w_cast_i64") + "\n"
   if ccall_needed.has_key?("__w_num_to_f64_fast")
     if decls_out.index("@w_num_to_f64(") == nil
       decls_out = decls_out + "declare double @w_num_to_f64(i64) nounwind memory(read)\n"
@@ -1028,6 +1039,8 @@
     call_site_out = emit_call_site_table(mod, precollected_sites, emit_blockaddress_sites)
     llvm_used_out = emit_stacktrace_llvm_used(call_site_out.index("@__w_ic_site_sparse") != nil, !emit_blockaddress_sites)
 
+  alias_lines = profile_symbol_alias_lines(mod, rendered_fn_texts)
+
   attr_groups_out = emit_function_attr_groups(attr_groups)
   tbaa_out = tbaa_metadata_defs()
   novec_out = novec_loop_md_defs()
@@ -1054,7 +1067,8 @@
       novec_out: novec_out,
       ewscope_out: ewscope_out,
       ascope_out: ascope_out,
-      tail_md_str: attr_groups_out + tbaa_out + novec_out + ewscope_out + ascope_out
+      tail_md_str: attr_groups_out + tbaa_out + novec_out + ewscope_out + ascope_out,
+      alias_lines: alias_lines
     }
 
   final_out = StringBuffer(header.size() + decls_out.size() + globals_str.size() + strings_out.size() + fn_str.size() + fn_meta_out.size() + call_site_out.size() + llvm_used_out.size() + attr_groups_out.size() + tbaa_out.size() + novec_out.size() + ewscope_out.size() + ascope_out.size() + 64)
@@ -1063,6 +1077,11 @@
   final_out << globals_str
   final_out << strings_out
   final_out << fn_str
+  ali = 0
+  while ali < alias_lines.size()
+    if alias_lines[ali] != nil
+      final_out << alias_lines[ali]
+    ali += 1
   final_out << fn_meta_out
   final_out << call_site_out
   final_out << llvm_used_out
@@ -1251,6 +1270,80 @@
             return {arr: wire_sequence_get(args, 0), idx: idx_str.to_i(), val: lit, temp: wire_get(next_inst, :temp), step: 2}
   nil
 
+# Readable profiler symbols. Function symbols are content hashes (__wy_…),
+# which `sample`, Instruments and other symbolicators print verbatim. Give each
+# hashed function a hidden alias named after its source (`w:jpeg_huff`,
+# `w:Codepoint#upcase`; a repeated name gets the hash appended): the linker keeps
+# it as a local symbol at the same address, and profilers show it. The hashed
+# name stays the definition, so caching and the sidemap are unchanged.
+# TUNGSTEN_SYMBOL_ALIASES=0 turns it off; wasm and Windows targets skip it.
+# Answers one alias line (or nil) per mod[:functions] entry, so a sharded
+# build can place each alias in the module that defines its function.
+-> profile_symbol_alias_lines(mod, rendered_fn_texts)
+  fns = mod[:functions]
+  lines = Array.new(fns.size())
+  if env("TUNGSTEN_SYMBOL_ALIASES") == "0"
+    return lines
+  triple = mod[:llvm_triple]
+  if triple != nil && (triple.index("wasm") != nil || triple.index("windows") != nil)
+    return lines
+  used = {}
+  i = 0
+  while i < fns.size()
+    f = fns[i]
+    nm = f[:name]
+    txt = rendered_fn_texts == nil || i >= rendered_fn_texts.size() ? nil : rendered_fn_texts[i]
+    defined_here = txt != nil && txt.index("define ") != nil && txt.index("@" + f[:name] + "(") != nil
+    if defined_here && nm != nil && nm.starts_with?("__wy_") && f[:embedded_asm] == nil && f[:blocks] != nil && f[:blocks].size() > 0
+      display = fn_meta_display_name(f)
+      if display == nil || display == "" || display.starts_with?("__wy_")
+        display = nil
+      if display != nil
+        # The `w:` prefix keeps a source name such as `read` from defining a
+        # C symbol the runtime links against.
+        alias_name = "w:" + display
+        if used[alias_name] == true
+          alias_name = alias_name + " [" + nm.slice(5, nm.size() - 5) + "]"
+        if used[alias_name] != true
+          used[alias_name] = true
+          lines[i] = "@\"" + escape_llvm_string(alias_name) + "\" = hidden alias i8, ptr @" + nm + "\n"
+    i += 1
+  lines
+
+# The attribute text a function renders with: in a debug-frame build (base
+# text carries the noinline suffix) a small leaf drops it. Shared with the
+# parallel prepass so attribute-group ids are interned in the same order.
+-> debug_frame_leaf_attr_text(f, base_attr_text)
+  suffix = " noinline \"disable-tail-calls\"=\"true\""
+  if f[:noinline] == true || !base_attr_text.ends_with?(suffix) || !small_leaf_function?(f)
+    return base_attr_text
+  base_attr_text.slice(0, base_attr_text.size() - suffix.size())
+
+# A small straight-line or lightly branching body that calls nothing but the
+# always-inline machine helpers.
+-> small_leaf_function?(f)
+  ok = f[:name] != "main" && f[:is_toplevel] != true && f[:blocks] != nil && f[:blocks].size() <= 12 && f[:embedded_ll] == nil
+  count = 0
+  bi = 0
+  while ok && bi < f[:blocks].size()
+    instrs = f[:blocks][bi][:instructions]
+    ii = 0
+    while ok && ii < instrs.size()
+      inst = instrs[ii]
+      op = wire_kind(inst)
+      count += 1
+      if count > 80
+        ok = false
+      elsif op in (:call_method_i64 :call_indirect_i64 :closure_new :call_direct_void :call_direct_ptr :call_direct_i128 :call_direct_i64_ptr1 :call_direct_void_ptr1)
+        ok = false
+      elsif op == :call_direct_i64
+        nm = wire_get(inst, :name)
+        if nm == nil || !(nm.starts_with?("__w_ta_bounds_check") || nm.starts_with?("__w_bit_") || nm in ("__w_cast_i64_fast" "__w_to_i64_fast" "__w_int_fast" "__w_num_to_f64_fast"))
+          ok = false
+      ii += 1
+    bi += 1
+  ok
+
 -> emit_function(f, string_wvs, slab_info, used_ptr_ids, frame_pointers = false, host_fn_attrs = "", attr_groups = nil, arm64_target = true, windows_target = false, preserve_debug_frames = false, emit_blockaddress_sites = true)
   if f[:embedded_ll] != nil
     return emit_embedded_ll_function(f)
@@ -1265,6 +1358,10 @@
   if attr_groups != nil
     function_attr_group_id(attr_groups, base_attr_text)
   attr_text = base_attr_text
+  # Debug-frame builds keep every frame (noinline), except tiny leaf bodies
+  # such as a clip or a 6-tap filter helper: inlining those is worth more
+  # than their frame, which the caller's frame stands in for.
+  attr_text = debug_frame_leaf_attr_text(f, attr_text)
   # `Tungsten.noinline!` bodies get their own attribute group.
   if f[:noinline] == true
     attr_text = attr_text + " noinline"

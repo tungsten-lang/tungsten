@@ -28,6 +28,24 @@ nothing = nil
 bin/tungsten doc/examples/01-basics/variables.w
 ```
 
+### Multiple assignment
+
+Several names bind at once. The right side is evaluated first, so a swap
+needs no temporary:
+
+```tungsten
+a, b = 1, 2
+a, b = b, a                  # a = 2, b = 1
+q, r = [17 / 5, 17 % 5]      # spread an Array (a call's result works too)
+head, *rest = [1, 2, 3]      # head = 1, rest = [2, 3]
+*init, last = [1, 2, 3]      # init = [1, 2], last = 3
+(x, y), z = [[1, 2], 3]      # nested
+@lo, @hi = @hi, @lo          # ivars, `obj.attr` and `h[k]` work as targets
+```
+
+Missing values are `nil`; a non-Array right side is one value
+(`a, b = 5` gives `b = nil`).
+
 ### Built-in values you'll use constantly
 
 | Kind | Examples | Notes |

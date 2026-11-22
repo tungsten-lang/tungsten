@@ -35,6 +35,14 @@ In particular, `str` is not an alias: Tungsten's text type is `string`.
 This diagnostic concerns source type names; the compiler's internal `:str`
 interpolation marker is unrelated.
 
+## E_PARSE_TYPE_HINT_OPERATOR
+
+A `## T` type hint runs to the end of its line or group, so an operator after
+the type name is hint text, not an operation: `(e) ## f64 - ~0.5` would read
+the hint as `f64 - ~0.5` and drop the subtraction.
+
+**Fix:** Give the cast its own parentheses: `((e) ## f64) - ~0.5`.
+
 ## E_PARSE_COMPOSITION_OPERAND
 
 Function composition (`f ∘ g`) builds a unary closure that calls `f(g(x))`. An

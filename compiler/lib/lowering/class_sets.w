@@ -741,7 +741,7 @@
     return class_set_unknown()
   if kind == :multi_assign
     class_set_eval_expr(ctx, node.value, env)
-    targets = node.targets
+    targets = multi_assign_leaf_targets(node)
     if targets != nil
       i = 0
       while i < targets.size()

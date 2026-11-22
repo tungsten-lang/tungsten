@@ -85,4 +85,36 @@ selected = Channel.select([select_left, select_right], 100)
 select_sender.join()
 check("channel.select.delayed", selected != nil && selected.index() == 1 && selected.value() == 23)
 
+# A native thread blocked in a timed or plain receive sleeps on the channel and is
+# woken by the send (not by a polling tick): the value arrives promptly, and a
+# close wakes a sleeping receiver too.
+wake = Channel.new(1)
+woke_at = Channel.new(1)
+waiter = Thread.new ->
+  r = wake.receive_result(2000)
+  woke_at.send([clock(), r.received?() ? r.value() : nil])
+sleep(~0.05)
+sent_at = clock()
+wake.send(5)
+w = woke_at.receive()
+waiter.join()
+check("channel.receive_timeout.thread_wakes_on_send", w[1] == 5 && w[0] - sent_at < ~0.02)
+
+plain = Channel.new(1)
+plain_out = Channel.new(1)
+plain_waiter = Thread.new -> plain_out.send(plain.receive())
+sleep(~0.05)
+plain.send(6)
+check("channel.receive.thread_wakes_on_send", plain_out.receive() == 6)
+plain_waiter.join()
+
+shut = Channel.new(1)
+shut_out = Channel.new(1)
+shut_waiter = Thread.new -> shut_out.send(shut.receive_result(5000).closed?())
+sleep(~0.05)
+shut_t = clock()
+shut.close()
+check("channel.receive_timeout.thread_wakes_on_close", shut_out.receive() && clock() - shut_t < ~0.5)
+shut_waiter.join()
+
 << "channel_timeout_thread_spec: all checks passed"

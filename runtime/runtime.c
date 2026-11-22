@@ -76967,6 +76967,47 @@ static inline void w_chan_unlock(WChan *ch) {
     if (__builtin_expect(g_slab_needs_lock, 0)) pthread_mutex_unlock(&ch->lock);
 }
 
+/* Call with the lock held after a value arrives or the channel closes: wake any
+ * native receiver sleeping in w_chan_native_sleep. */
+static inline void w_chan_wake_locked(WChan *ch) {
+    if (__builtin_expect(ch->sleepers > 0, 0)) pthread_cond_broadcast(&ch->ready);
+}
+
+/* A native (non-goroutine) receiver found the channel empty: sleep on the
+ * condition variable until a sender or close wakes it, or until deadline_ns
+ * (monotonic; INT64_MAX = none) — capped so a scheduler-less process still
+ * drives cooperative goroutines at the old 1 ms cadence. Returns 0 when it
+ * cannot sleep here (single-threaded, or running on a goroutine), so the
+ * caller falls back to the yield/spin path. */
+static int w_chan_native_sleep(WChan *ch, int64_t deadline_ns) {
+    if (!g_slab_needs_lock || g_current) return 0;
+    int64_t cap_ns = g_mp_scheduler_active ? 100000000LL : 1000000LL;  /* 100 ms / 1 ms */
+    int64_t wait_ns = cap_ns;
+    if (deadline_ns != INT64_MAX) {
+        int64_t left = deadline_ns - __w_clock_ns_raw();
+        if (left <= 0) return 1;
+        if (left < wait_ns) wait_ns = left;
+    }
+    pthread_mutex_lock(&ch->lock);
+    if (ch->count == 0 && !ch->closed) {
+        ch->sleepers++;
+        struct timespec ts = { (time_t)(wait_ns / 1000000000LL), (long)(wait_ns % 1000000000LL) };
+#ifdef __APPLE__
+        pthread_cond_timedwait_relative_np(&ch->ready, &ch->lock, &ts);
+#else
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME, &now);
+        ts.tv_sec += now.tv_sec;
+        ts.tv_nsec += now.tv_nsec;
+        if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+        pthread_cond_timedwait(&ch->ready, &ch->lock, &ts);
+#endif
+        ch->sleepers--;
+    }
+    pthread_mutex_unlock(&ch->lock);
+    return 1;
+}
+
 static WValue w_chan_allocate(int64_t cap, int unbounded) {
     WChan *ch = calloc(1, sizeof(WChan));
     if (!ch) {
@@ -76982,9 +77023,12 @@ static WValue w_chan_allocate(int64_t cap, int unbounded) {
     ch->send_waitq = NULL;
     ch->recv_waitq = NULL;
     pthread_mutex_init(&ch->lock, NULL);
+    pthread_cond_init(&ch->ready, NULL);
+    ch->sleepers = 0;
     size_t slots = cap > 0 ? (size_t)cap : 1;
     ch->buffer = calloc(slots, sizeof(WValue));
     if (!ch->buffer) {
+        pthread_cond_destroy(&ch->ready);
         pthread_mutex_destroy(&ch->lock);
         free(ch);
         w_raise(w_string("Channel buffer allocation failed"));
@@ -77234,6 +77278,7 @@ static int w_chan_try_send_status(WValue channel, WValue val) {
         int64_t next = ch->tail + 1;
         ch->tail = (next == ch->cap) ? 0 : next;
         ch->count++;
+        w_chan_wake_locked(ch);
         w_chan_unlock(ch);
         return W_CHAN_RESULT_RECEIVED;
     }
@@ -77245,6 +77290,7 @@ static int w_chan_try_send_status(WValue channel, WValue val) {
         }
         ch->buffer[0] = val;
         ch->count = 1;
+        w_chan_wake_locked(ch);
         ch->handoff_seq++;
         ch->handoff_committed = 1;
         w_chan_unlock(ch);
@@ -77259,6 +77305,7 @@ static int w_chan_try_send_status(WValue channel, WValue val) {
     int64_t next = ch->tail + 1;
     ch->tail = (next == ch->cap) ? 0 : next;
     ch->count++;
+    w_chan_wake_locked(ch);
     w_chan_unlock(ch);
     return W_CHAN_RESULT_RECEIVED;
 }
@@ -77302,6 +77349,7 @@ WValue w_chan_send(WValue channel, WValue val) {
         int64_t next = ch->tail + 1;
         ch->tail = (next == ch->cap) ? 0 : next;
         ch->count++;
+        w_chan_wake_locked(ch);
         w_chan_unlock(ch);
         return W_NIL;
     }
@@ -77315,6 +77363,7 @@ WValue w_chan_send(WValue channel, WValue val) {
         int64_t next = ch->tail + 1;
         ch->tail = (next == ch->cap) ? 0 : next;
         ch->count++;
+        w_chan_wake_locked(ch);
         w_chan_unlock(ch);
         return W_NIL;
     }
@@ -77330,6 +77379,7 @@ WValue w_chan_send(WValue channel, WValue val) {
             if (ch->count == 0) {
                 ch->buffer[0] = val;
                 ch->count = 1;
+                w_chan_wake_locked(ch);
                 ch->handoff_committed = 0;
                 ticket = ++ch->handoff_seq;
                 w_chan_unlock(ch);
@@ -77371,6 +77421,7 @@ WValue w_chan_send(WValue channel, WValue val) {
             int64_t next = ch->tail + 1;
             ch->tail = (next == ch->cap) ? 0 : next;
             ch->count++;
+            w_chan_wake_locked(ch);
             w_chan_unlock(ch);
             return W_NIL;
         }
@@ -77397,6 +77448,7 @@ static WValue w_chan_recv_value(WValue channel, int *received) {
             return W_NIL;
         }
         w_chan_unlock(ch);
+        if (ch->cap != 0 && spin > 0 && w_chan_native_sleep(ch, INT64_MAX)) continue;
         w_chan_receiver_pause_spin(ch, &spin);
     }
 }
@@ -77446,6 +77498,7 @@ WValue w_chan_recv_timeout_result(WValue channel, WValue milliseconds) {
             return w_chan_status_result(W_NIL, W_CHAN_RESULT_UNAVAILABLE);
         }
         w_chan_unlock(ch);
+        if (ch->cap != 0 && spin > 0 && w_chan_native_sleep(ch, deadline)) continue;
         w_chan_receiver_pause_spin(ch, &spin);
     }
 }
@@ -77455,6 +77508,7 @@ WValue w_chan_close(WValue channel) {
     w_chan_lock(ch);
     ch->closed = 1;
     if (ch->cap == 0 && !ch->handoff_committed) ch->count = 0;
+    w_chan_wake_locked(ch);
     w_chan_unlock(ch);
     return W_NIL;
 }

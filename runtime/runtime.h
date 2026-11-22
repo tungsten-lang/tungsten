@@ -1758,6 +1758,8 @@ typedef struct WChan {
     WChanWaiter *send_waitq;
     WChanWaiter *recv_waitq;
     pthread_mutex_t lock;
+    pthread_cond_t ready;      /* native receivers sleep here instead of polling */
+    int64_t sleepers;          /* native receivers currently in pthread_cond_*wait */
 } WChan;
 
 typedef struct WMutex {

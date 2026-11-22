@@ -1330,6 +1330,17 @@ use lut_congruence
         if scout_tree_plan != nil
           scout_tree_res = i64[scout_nv + 8]
           scout_tree_h = Thread.new -> wassat_treewidth_arm(formula, scout_tree_plan, scout_stop, scout_tree_res, 0, scout_nv)
+        scout_chain_plan = nil
+        scout_chain_res = nil
+        scout_chain_h = nil
+        if options["conflicts"] == 0 && raw_probe && env("WASSAT_FORMULA_CHAIN_SCOUT") != "0" && !scout_path_enabled && scout_circuit == nil && scout_cover_plan == nil && scout_parity == nil && scout_reconf_plan == nil && scout_dep_plan == nil && scout_capacity_plan == nil && scout_lut == nil && scout_quota == nil && scout_counter_plan == nil && scout_cycle_plan == nil && scout_naked_plan == nil && scout_affine_plan == nil && scout_tree_plan == nil
+          chain_sls = wassat_sls_arm_memory_allowed?(formula) ? 1 : 0
+          chain_cdcl = scout_lucky ? 2 : 1
+          chain_cdcl += 1 if chain_sls > 0 && wassat_sls_repair_eligible?(formula)
+          scout_chain_plan = wassat_chain_plan(formula, cover_workers, chain_cdcl, chain_sls, resident_pre_arenas, 0)
+        if scout_chain_plan != nil
+          scout_chain_res = i64[scout_nv + 8]
+          scout_chain_h = Thread.new -> wassat_chain_arm(formula, scout_chain_plan, scout_stop, scout_chain_res, 0, scout_nv)
         # Local search races the SCOUT, not just the raw arms behind it. The
         # scout is bounded by conflicts rather than wall clock on a raw kernel,
         # and on the dense low-variable formulas local search is best at, those
@@ -1421,8 +1432,12 @@ use lut_congruence
         cycle_cancel_ms = scout_cycle_h == nil ? 0 : clock_ms()
         affine_cancel_ms = scout_affine_h == nil ? 0 : clock_ms()
         naked_cancel_ms = scout_naked_h == nil ? 0 : clock_ms()
+        chain_cancel_ms = scout_chain_h == nil ? 0 : clock_ms()
         tree_cancel_ms = scout_tree_h == nil ? 0 : clock_ms()
         z = wassat_stop_cancel(scout_stop)
+        if scout_chain_h != nil
+          z = scout_chain_h.join
+          wassat_chain_finish_scout(formula, scout_chain_plan)
         if scout_tree_h != nil
           z = scout_tree_h.join
           wassat_treewidth_finish_scout(formula, scout_tree_plan)
@@ -1464,6 +1479,10 @@ use lut_congruence
           wassat_treewidth_profile(scout_tree_plan["meta"], "scout.treewidth")
           tree_tail = scout_tree_res[0] == -1 ? clock_ms() - scout_tree_res[scout_nv + 5] : 0
           wassat_prof_note("scout.treewidth answer_to_join_ms=[tree_tail] stop_to_join_ms=[clock_ms() - tree_cancel_ms]")
+        if scout_chain_h != nil && env("WASSAT_PROFILE") == "1"
+          wassat_chain_profile(scout_chain_plan["meta"], "scout.formula_chain")
+          chain_tail = scout_chain_res[0] == -1 ? clock_ms() - scout_chain_res[scout_nv + 5] : 0
+          wassat_prof_note("scout.formula_chain answer_to_join_ms=[chain_tail] stop_to_join_ms=[clock_ms() - chain_cancel_ms]")
         if scout_affine_h != nil && env("WASSAT_PROFILE") == "1"
           wassat_affine_circuit_profile(scout_affine_plan["meta"], "scout.affine_circuit")
           affine_tail = scout_affine_res[0] == 1 ? clock_ms() - scout_affine_res[scout_nv + 5] : 0
@@ -1515,6 +1534,15 @@ use lut_congruence
           << "c mode: fast (clause-checked treewidth minor scout)"
           << "c conflicts: [budget_used], decisions: [tree_scout["decisions"]], props: [tree_scout["props"]]"
           << "c stats restarts=[tree_scout["restarts"]] reduces=[tree_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
+          exit(20)
+        if scout_chain_res != nil && scout_chain_res[0] == -1
+          chain_scout = scout_out[0]
+          budget_used += chain_scout["conflicts"] if scout_budget == nil
+          scout_out[1].profile_counters("cli.scout")
+          << "s UNSATISFIABLE"
+          << "c mode: fast (clause-checked monotone formula chain scout)"
+          << "c conflicts: [budget_used], decisions: [chain_scout["decisions"]], props: [chain_scout["props"]]"
+          << "c stats restarts=[chain_scout["restarts"]] reduces=[chain_scout["reduces"]] " + wassat_pre_stats_text(art["stats"], ccall("__w_clock_ms") - t0)
           exit(20)
         if scout_naked_res != nil && scout_naked_res[0] == -1
           naked_scout = scout_out[0]
@@ -1877,6 +1905,9 @@ use lut_congruence
         if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && solo_circuit_plan == nil && options["conflicts"] == 0
           tree_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
           solo_circuit_plan = wassat_treewidth_plan(formula, 1, tree_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
+        if arms == 1 && pre_arms == 0 && sls_flips == 0 && cover_plan == nil && cycle_plan == nil && solo_circuit_plan == nil && options["conflicts"] == 0
+          chain_cdcl = scout_cdcl_arenas > 0 ? scout_cdcl_arenas : 1
+          solo_circuit_plan = wassat_chain_plan(formula, 1, chain_cdcl, scout_sls_arenas, resident_pre_arenas, 0)
         if arms > 1 || pre_arms > 0 || sls_flips > 0 || cover_plan != nil || cycle_plan != nil || solo_circuit_plan != nil
           continuation = config.continue_scout? ? scout_solver : nil
           matrix_arms = arms
@@ -1948,6 +1979,7 @@ use lut_congruence
           arm_tag = "exact arithmetic-count arm" if rr["nae_won"] == true
           arm_tag = "verified capacity-clique arm" if rr["capacity_won"] == true
           arm_tag = "clause-checked treewidth minor" if rr["treewidth_won"] == true
+          arm_tag = "clause-checked monotone formula chain" if rr["formula_chain_won"] == true
           arm_tag = "verified affine-circuit model" if rr["affine_circuit_won"] == true
           arm_tag = "clause-checked naked-single progress" if rr["naked_sudoku_won"] == true
           arm_tag = "keychart repair arm" if rr["keychart_won"] == true

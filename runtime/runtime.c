@@ -77844,6 +77844,22 @@ W_BRIDGE_STUB WValue w_gfx_present_layers(WValue window, WValue bg, WValue cmds,
     (void)window; (void)bg; (void)cmds; (void)n_cmds; (void)wait_flag;
     return w_gfx_unavailable();
 }
+W_BRIDGE_STUB WValue w_gfx_tex_new_yuv(WValue window, WValue width, WValue height, WValue cw, WValue ch, WValue sixteen) {
+    (void)window; (void)width; (void)height; (void)cw; (void)ch; (void)sixteen;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_tex_upload_yuv(WValue window, WValue tex_id, WValue planes, WValue params) {
+    (void)window; (void)tex_id; (void)planes; (void)params;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_capture_next(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
+W_BRIDGE_STUB WValue w_gfx_capture_take(WValue window) {
+    (void)window;
+    return w_gfx_unavailable();
+}
 /* end windowed graphics bridge stubs (weak) */
 
 /* ---- Internal cross-TU bridge (runtime_internal.h) ---- */

@@ -18,6 +18,7 @@
 
 W_JIT_ON = [true]
 W_JIT_DEPTH = 5000
+W_JIT_MAX_WORDS = 2000000
 
 + WJit
   rw :thread, :path, :funcs, :done, :ptrs, :failed, :ms
@@ -860,6 +861,9 @@ W_INT_MASK = 281474976710655
 # Start compiling module m in the background (once).
 -> w_jit_start(m)
   return nil if !W_JIT_ON[0] || m.jit != nil || Env["WASM_NOJIT"] != nil
+  # whole-module compilation only for modules up to a size clang handles quickly; very
+  # large modules (ffmpeg.wasm is 22M code words) need hotness-driven selection (TODO)
+  return nil if m.code.size > W_JIT_MAX_WORDS
   j = WJit.new
   m.jit = j
   cc = w_jit_cc()
